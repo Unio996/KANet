@@ -1,4 +1,6 @@
-# provenance · claim-shape 深度采样（(d) §5① 部署硬前置 · (27) v0.4 入库版 · Codex 6fd55a53 三 MUST-FIX + 5d23a4be 时间戳 MUST-FIX 落法）
+# provenance · claim-shape 深度采样（(d) §5① 部署硬前置 · (27) v0.5 入库版 · Codex 6fd55a53 三 MUST-FIX + 5d23a4be 时间戳 MUST-FIX 落法）
+
+> **v0.5（NWT residual：`settled_at` 多写者）**：`SENDER_TS_POLICY` 源 × 写点 × 格式 × tz——`refund_attempted_at`{SQLite 文本(UTC) / 整数 epoch / ISO 带 tz}、`refund_dispatched_at` 与 `settled_at`{只 ISO 带 tz，写点 toISOString：`bshard-auto-settler.mjs:983`、`bshard-settle-daemon.mjs:885/:697`}；不认的格式（尤其裸 ISO 无 tz）⇒ inconclusive 不猜时区。(27) 实际读的 `settled_at` = `metadata.zk_settle_evidence.settled_at` → 回落 `metadata.settle_evidence.settled_at`（本机 DB 146/270 行，全 ISO Z）；`kanet-broker.js`/`trading.js` 的 `settled_at` 写的是别的表，不读。向量 35/35（含真值 `'2026-06-30T06:49:47.469Z'`）。`schema_version = claim-depth/5`。
 
 > **v0.4（Codex 5d23a4be）**：🔴 v0.3 `Date.parse(refund_attempted_at)` 把 SQLite `CURRENT_TIMESTAMP` UTC 文本当本地时（本机 UTC+7 ⇒ −25,200 s，负值会静默混进 `N_claim`）。本版 canonical **`parseTs`**：SQLite 文本 → `Date.UTC`；ISO 带时区按其时区、不带按 UTC；整数 ≥1e12 ms / 1e9..1e12 秒；其它 ⇒ inconclusive。`legAFrom` 只有 finite 且非负才 final-eligible，否则 `state=inconclusive_ts` 单列 surfaced（`legA_inconclusive_ts`）。向量 28 条（含本机 DB 只读抽的真实格式：`'2026-07-09 06:05:28'`、`1783785324`、`'2026-06-01T04:12:37.538Z'`）。`schema_version = claim-depth/4`。
 

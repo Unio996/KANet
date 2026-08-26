@@ -1,4 +1,6 @@
-# §6-3 gate (d) · §5① claim-shape 深度采样器 · 方法稿 v0.4（(d) 残余清单第 1 项 = 部署硬前置 · 入库 + 确定性向量 · 只读 · 同步后跑）
+# §6-3 gate (d) · §5① claim-shape 深度采样器 · 方法稿 v0.5（(d) 残余清单第 1 项 = 部署硬前置 · 入库 + 确定性向量 · 只读 · 同步后跑）
+
+> **v0.5（NWT 事后审 (27) v0.4 residual：`settled_at` 多写者约定不一）**：核 (27) pool-settle 代理**实际读**的 `settled_at`：`metadata.zk_settle_evidence.settled_at`（写点 `bshard-settle-daemon.mjs:697` `new Date().toISOString()`，本机 DB 现 0 行）→ 回落 `metadata.settle_evidence.settled_at`（写点 `bshard-settle-daemon.mjs:885` `toISOString()`，本机 DB **146/270** 行，全 ISO Z）——两写点都是 **toISOString ⇒ 恒带 Z（UTC）**。其它 `settled_at` 写点（`bettor-prediction-settler.js:137` toISOString；`kanet-broker.js:227/260/327` `r.updated_at` 约定未知；`trading.js:1909` 参数）写的是**别的表**，(27) 不读 ⇒ 不在策略内、明列不混。落法：**`SENDER_TS_POLICY` 源 × 写点 × 格式 × tz 表**（§2-bis），`parseTs(v, policy)` 每源只认其已知写点会产生的格式，**metadata 源的裸 ISO（无 tz）⇒ inconclusive，不猜时区**；向量 +7（本机 DB 只读抽真值 `'2026-06-30T06:49:47.469Z'` + 各源的拒收例）= 35/35；`schema_version = claim-depth/5`。
 
 > **v0.4（Codex 5d23a4be 真 bug MUST-FIX）**：🔴 v0.3 的 Leg A 用 `Date.parse(sender_ts)`；而 `pool_bettor_sides.refund_attempted_at` 由生产码写 SQLite `CURRENT_TIMESTAMP`（`pool.js:531` / `bettor-refund-claim-auto.mjs:146`）= `YYYY-MM-DD HH:MM:SS` **UTC 文本**，JS `Date.parse` 把它当**本地时**——本机 UTC+7 ⇒ **偏 −25,200 s（复现值）**，比 Codex 说的 NaN 更糟：**符号错的负数会静默混进 `N_claim`**；同列还实存**整数秒**（`1783785324`），metadata 里是 ISO Z。本版：① canonical `parseTs`——SQLite 文本按 UTC（`Date.UTC`，依据 SQLite `CURRENT_TIMESTAMP` 定义 + 写点全 UTC）/ ISO 带时区按其时区、不带按 UTC / 整数 ≥1e12 毫秒、1e9..1e12 秒（按量级，显式规则）/ 其它量级、null、畸形 ⇒ **inconclusive 不进 n**，每样本记 `submit_fmt`；② `legAFrom` 只有 **finite 且非负** 才 final-eligible，否则 `state=inconclusive_ts` 剔除并 surfaced（`legA_inconclusive_ts{n, reasons}` 单列）；③ 向量加 9 条真实格式（本机 DB 只读抽样：`'2026-07-09 06:05:28'`、`1783785324`、`'2026-06-01T04:12:37.538Z'` + ISO 偏移/裸 ISO/int ms/歧义整数/畸形/null）+ 3 条 Leg A（真实 SQLite 文本 +5 s ⇒ 5.0 / 畸形 ⇒ inconclusive_ts / 负值 ⇒ inconclusive_ts）+ 1 条 summarize 含 inconclusive_ts；28/28。④ 注：**历史 p100 是样本内观测，非未来最坏；最终 T5 界仍要真 harness `submit_ts`**（上链跑手 `recordSubmission.t`）。`schema_version = claim-depth/4`。
 
@@ -30,6 +32,16 @@
 - 到达块由 `getBlocks(lowHash = inclusion)` 前向翻页找首个达标块（≤50 页）；找不到 ⇒ 该样本 `legB.ok=false`，不计入 n。
 - **`S_unalloc` 喂法**：两腿各自 `S_unalloc_rule = max(p100 − p50, 3σ)` 后**取和**——`σ_A + σ_B ≥ √(σ_A² + σ_B²)`，配对样本不可得（同一笔的 A、B 不能都量到）故取和 = 保守过估，不是危险双计；Leg A 轻代理偏短 = 低估向（小），其欠估也归此和。
 - **"蓝确认"口径**：depth 按 DAA 计（DAA 计入 mergeset 蓝+红），不另判该 tx 所在块是否蓝——与 live 结算路的 `checkUtxoLanded` 完全一致，故喂 `N_claim` 时口径同源。
+
+## §2-bis SENDER_TS 源 × 写点 × 格式 × tz 依据（v0.5，`SENDER_TS_POLICY`）
+| 源（(27) 读取键）| 写点（file:line）| 实存格式（本机 DB 只读抽样 2026-08-27）| tz 依据 | `parseTs` 允许 | 不允许 ⇒ inconclusive |
+|---|---|---|---|---|---|
+| `pool_bettor_sides.refund_attempted_at` | `kasia-console/src/api/pool.js:531` `CURRENT_TIMESTAMP`；`kasia-console/src/services/bettor-refund-claim-auto.mjs:146` `CURRENT_TIMESTAMP` | `'2026-07-09 06:05:28'`（SQLite 文本）与 `1783785324`（整数秒，历史写点）| SQLite `CURRENT_TIMESTAMP` 定义为 UTC；整数 epoch 无时区歧义 | SQLite 文本（按 `Date.UTC`）/ 整数 epoch（量级定 ms·秒）/ ISO 带 tz | 裸 ISO（无此写点）|
+| `pool_markets.metadata.refund_dispatched_at` | `kasia-console/src/services/bshard-auto-settler.mjs:983` `new Date().toISOString()` | `'2026-06-01T04:12:37.538Z'` | toISOString 恒带 Z | ISO 带 tz | SQLite 文本 / 整数 / 裸 ISO |
+| `pool_markets.metadata.settle_evidence.settled_at`（回落键）| `kasia-console/src/services/bshard-settle-daemon.mjs:885` `toISOString()` | `'2026-06-30T06:49:47.469Z'`（146/270 行）| 同上 | ISO 带 tz | 同上 |
+| `pool_markets.metadata.zk_settle_evidence.settled_at`（首选键）| `kasia-console/src/services/bshard-settle-daemon.mjs:697` `toISOString()` | DB 现 0 行 | 同上 | ISO 带 tz | 同上 |
+| （不读）其它 `settled_at` | `bettor-prediction-settler.js:137` toISOString / `kanet-broker.js:227,260,327` `r.updated_at`（约定未知）/ `trading.js:1909` 参数 | 别的表 | — | **不在策略内**（(27) 不读；若日后读，先补写点核）| — |
+规则：每源只认其**已知写点**会产生的格式；tz 未知的格式**不猜**（裸 ISO 对 metadata 源 ⇒ inconclusive，进 `legA_inconclusive_ts`）；`live` 模式的 MEMPOOL_SEEN/PROXY_POLL 用本机 `Date.now()`（ms，无 tz 问题），但只作 observational。
 
 ## §3 输出与 fail-closed
 - JSON：`mode / daa / depth / by_kind / proxy_redeem_len_bytes / legB_inclusion_to_depth{n, daa{p50,p90,p100,mean,sd,S_unalloc_rule}, wall_s{…}} / legA_submit_to_inclusion{n, wall_s, daa} / samples[]`；正式写 `docs/provenance/2026-08-27-claim-depth/claim-depth-<UTC>.json` 并打印 sha256。

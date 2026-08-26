@@ -1,4 +1,4 @@
-// (27) v0.4 · §5① claim-shape 深度采样器 — (d) 残余清单第 1 项(部署硬前置)的可执行物, 入库版。只读(DB 经 src/db/client.js 只 SELECT + RPC 只读)。
+// (27) v0.5 · §5① claim-shape 深度采样器 — (d) 残余清单第 1 项(部署硬前置)的可执行物, 入库版。只读(DB 经 src/db/client.js 只 SELECT + RPC 只读)。
 // 跑(正式): cd /d/kanet-tn12/kasia-console && node ../docs/provenance/2026-08-27-claim-depth/claim-depth-sampler.mjs [--mode hist|live] [--limit 200] [--depth 20] [--sleep-ms 20] [--live-minutes 60] [--poll-ms 1000] [--out <dir>] [--dry-run N]
 // 测试(离线, 无节点无 DB): node docs/provenance/2026-08-27-claim-depth/claim-depth-sampler.test.mjs
 //   退出码: 0 OK / 3 SYNC-GATE / 5 INSUFFICIENT_SAMPLES(fail-closed, 不出统计)
@@ -13,7 +13,17 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { execSync } from 'node:child_process';
 
-export const SCHEMA_VERSION = 'claim-depth/4';
+export const SCHEMA_VERSION = 'claim-depth/5';
+// (27) v0.5: SENDER_TS 源 × 写点 × 格式 × tz 依据 —— 每个源只认它【已知写点】会产生的格式; 其它格式(尤其裸 ISO 无 tz)⇒ inconclusive, 不猜时区
+export const SENDER_TS_POLICY = {
+  // pool_bettor_sides.refund_attempted_at: 写点 pool.js:531 / bettor-refund-claim-auto.mjs:146 = SQLite CURRENT_TIMESTAMP(UTC 文本, SQLite 定义); 另实存整数秒(历史写点)
+  refund_attempted_at: { sqliteText: true, intEpoch: true, isoZoned: true, isoNaive: false, writers: ['kasia-console/src/api/pool.js:531 CURRENT_TIMESTAMP', 'kasia-console/src/services/bettor-refund-claim-auto.mjs:146 CURRENT_TIMESTAMP'] },
+  // pool_markets.metadata.refund_dispatched_at: 写点 bshard-auto-settler.mjs:983 new Date().toISOString() ⇒ 恒带 Z
+  refund_dispatched_at: { sqliteText: false, intEpoch: false, isoZoned: true, isoNaive: false, writers: ['kasia-console/src/services/bshard-auto-settler.mjs:983 toISOString'] },
+  // pool_markets.metadata.settle_evidence.settled_at: 写点 bshard-settle-daemon.mjs:885 toISOString(本机 DB 实存 146/270 行, 全 ISO Z); zk_settle_evidence.settled_at: :697 toISOString(DB 现 0 行);
+  // 其它 settled_at 写点(kanet-broker.js:227/260/327 = r.updated_at 约定未知; trading.js:1909 参数; bettor-prediction-settler.js:137 toISOString)写的是【别的表】, (27) 不读 ⇒ 不在本策略内
+  settled_at: { sqliteText: false, intEpoch: false, isoZoned: true, isoNaive: false, writers: ['kasia-console/src/services/bshard-settle-daemon.mjs:885 toISOString (settle_evidence)', 'kasia-console/src/services/bshard-settle-daemon.mjs:697 toISOString (zk_settle_evidence)'] },
+};
 export const MIN_SAMPLES = 30;          // (d) §5① / Codex 残余清单 1
 export const DEFAULT_DEPTH = 20;        // REORG_SAFE_MIN_DEPTH (pool-shard-register.mjs:88)
 export const LEGA_SOURCES = { SENDER_TS: 'SENDER_TS', MEMPOOL_SEEN: 'MEMPOOL_SEEN', PROXY_POLL: 'PROXY_POLL' };
@@ -25,10 +35,11 @@ export const LEGA_SOURCES = { SENDER_TS: 'SENDER_TS', MEMPOOL_SEEN: 'MEMPOOL_SEE
 //   (b) ISO-8601 带 Z 或 ±hh:mm(metadata.refund_dispatched_at 等 = toISOString) 按其时区; 不带时区的 ISO 按 UTC(我们的写点全 UTC);
 //   (c) 整数: >=1e12 ⇒ 毫秒; 1e9 <= x < 1e12 ⇒ 秒×1000(refund_attempted_at 实存 1783785324 这种秒值); 其它量级 ⇒ inconclusive;
 //   (d) null/空/畸形/NaN ⇒ inconclusive。
-export function parseTs(v) {
+export function parseTs(v, policy = { sqliteText: true, intEpoch: true, isoZoned: true, isoNaive: true }) {
   if (v == null || v === '') return { ok: false, reason: 'null/empty' };
   if (typeof v === 'number' || (typeof v === 'string' && /^\d+(\.\d+)?$/.test(v.trim()))) {
     const n = Number(v); if (!Number.isFinite(n)) return { ok: false, reason: 'non-finite number' };
+    if (!policy.intEpoch) return { ok: false, reason: 'int epoch not allowed for this source (no known writer)' };
     if (n >= 1e12) return { ok: true, ms: Math.round(n), fmt: 'int_ms' };
     if (n >= 1e9) return { ok: true, ms: Math.round(n * 1000), fmt: 'int_s' };
     return { ok: false, reason: 'integer magnitude ambiguous (<1e9)' };
@@ -36,11 +47,12 @@ export function parseTs(v) {
   if (typeof v !== 'string') return { ok: false, reason: 'unsupported type ' + typeof v };
   const t = v.trim();
   let m = t.match(/^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})(\.\d+)?$/);
-  if (m) { const ms = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]) + (m[7] ? Math.round(parseFloat(m[7]) * 1000) : 0); return Number.isFinite(ms) ? { ok: true, ms, fmt: 'sqlite_utc_text' } : { ok: false, reason: 'sqlite text invalid date' }; }
+  if (m) { if (!policy.sqliteText) return { ok: false, reason: 'sqlite text not allowed for this source (writer uses toISOString)' }; const ms = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]) + (m[7] ? Math.round(parseFloat(m[7]) * 1000) : 0); return Number.isFinite(ms) ? { ok: true, ms, fmt: 'sqlite_utc_text' } : { ok: false, reason: 'sqlite text invalid date' }; }
   m = t.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(\.\d+)?(Z|[+-]\d{2}:?\d{2})?$/);
   if (m) {
     let ms;
-    if (m[8]) { const norm = t.replace(/([+-]\d{2})(\d{2})$/, '$1:$2'); ms = Date.parse(norm); }
+    if (m[8]) { if (!policy.isoZoned) return { ok: false, reason: 'iso not allowed for this source' }; const norm = t.replace(/([+-]\d{2})(\d{2})$/, '$1:$2'); ms = Date.parse(norm); }
+    else if (!policy.isoNaive) return { ok: false, reason: 'naive ISO (no tz) not allowed for this source: writer is toISOString ⇒ must carry Z/offset; tz unknown ⇒ inconclusive' };
     else ms = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]) + (m[7] ? Math.round(parseFloat(m[7]) * 1000) : 0);
     return Number.isFinite(ms) ? { ok: true, ms, fmt: m[8] ? 'iso_zoned' : 'iso_naive_as_utc' } : { ok: false, reason: 'iso invalid' };
   }
@@ -115,13 +127,13 @@ async function main() {
 
   function loadProxies(limit) {
     // 每类带 SENDER_TS 来源(若有): refund → MIN(refund_attempted_at) 或 metadata.refund_dispatched_at; settle → metadata.zk_settle_evidence.settled_at(提交返回后写, ≈ 提交时刻+RPC 往返)
-    const rows = []; const push = (kind, r, senderTs) => rows.push({ kind, txid: r.txid, sender_ts: senderTs || null, block_hash: r.block_hash || null, block_time: r.block_time || null, redeem_len: r.redeem_len || null });
+    const rows = []; const push = (kind, r, senderTs, senderSrc) => rows.push({ kind, txid: r.txid, sender_ts: senderTs || null, sender_src: senderTs ? senderSrc : null, block_hash: r.block_hash || null, block_time: r.block_time || null, redeem_len: r.redeem_len || null });
     const j = (sql) => db.prepare(sql).all();
-    for (const r of j(`SELECT b.claim_txid txid, l.block_hash, l.block_time, length(b.side_redeem_script_hex)/2 redeem_len FROM pool_bettor_sides b JOIN kaspa_tx_log l ON l.tx_id=b.claim_txid WHERE b.claim_txid IS NOT NULL ORDER BY l.block_time DESC LIMIT ${limit}`)) push('pool_side_claim', r, null);
-    for (const r of j(`SELECT m.settle_txid txid, m.metadata meta, l.block_hash, l.block_time FROM pool_markets m JOIN kaspa_tx_log l ON l.tx_id=m.settle_txid WHERE m.settle_txid IS NOT NULL ORDER BY l.block_time DESC LIMIT ${limit}`)) { let ts = null; try { const md = JSON.parse(r.meta || '{}'); ts = md?.zk_settle_evidence?.settled_at || md?.settle_evidence?.settled_at || null; } catch {} push('pool_settle', r, ts); }
+    for (const r of j(`SELECT b.claim_txid txid, l.block_hash, l.block_time, length(b.side_redeem_script_hex)/2 redeem_len FROM pool_bettor_sides b JOIN kaspa_tx_log l ON l.tx_id=b.claim_txid WHERE b.claim_txid IS NOT NULL ORDER BY l.block_time DESC LIMIT ${limit}`)) push('pool_side_claim', r, null, null);
+    for (const r of j(`SELECT m.settle_txid txid, m.metadata meta, l.block_hash, l.block_time FROM pool_markets m JOIN kaspa_tx_log l ON l.tx_id=m.settle_txid WHERE m.settle_txid IS NOT NULL ORDER BY l.block_time DESC LIMIT ${limit}`)) { let ts = null; try { const md = JSON.parse(r.meta || '{}'); ts = md?.zk_settle_evidence?.settled_at || md?.settle_evidence?.settled_at || null; } catch {} push('pool_settle', r, ts, 'settled_at'); }
     // refund: 提交时刻 = 该市场(logical 或其 shard)下 sides 的 MIN(refund_attempted_at)(R-SHARD-BLIND: bshard sides 按 shard_market_id 存, 两边都查) 或 metadata.refund_dispatched_at
-    for (const r of j(`SELECT m.id mid, m.refund_txid txid, m.metadata meta, l.block_hash, l.block_time, (SELECT MIN(b.refund_attempted_at) FROM pool_bettor_sides b WHERE b.refund_attempted_at IS NOT NULL AND (b.market_id=m.id OR b.market_id IN (SELECT s.shard_market_id FROM market_shards s WHERE s.logical_market_id=m.id))) att FROM pool_markets m JOIN kaspa_tx_log l ON l.tx_id=m.refund_txid WHERE m.refund_txid IS NOT NULL ORDER BY l.block_time DESC LIMIT ${limit}`)) { let ts = r.att || null; if (!ts) { try { ts = JSON.parse(r.meta || '{}')?.refund_dispatched_at || null; } catch {} } push('pool_refund', r, ts); }
-    for (const r of j(`SELECT substr(s.current_leaf_outpoint,1,64) txid, l.block_hash, l.block_time, length(s.shard_redeem_hex)/2 redeem_len FROM market_shards s JOIN kaspa_tx_log l ON l.tx_id=substr(s.current_leaf_outpoint,1,64) WHERE s.current_leaf_outpoint IS NOT NULL ORDER BY l.block_time DESC LIMIT ${limit}`)) push('shard_leaf_continuation', r, null);
+    for (const r of j(`SELECT m.id mid, m.refund_txid txid, m.metadata meta, l.block_hash, l.block_time, (SELECT MIN(b.refund_attempted_at) FROM pool_bettor_sides b WHERE b.refund_attempted_at IS NOT NULL AND (b.market_id=m.id OR b.market_id IN (SELECT s.shard_market_id FROM market_shards s WHERE s.logical_market_id=m.id))) att FROM pool_markets m JOIN kaspa_tx_log l ON l.tx_id=m.refund_txid WHERE m.refund_txid IS NOT NULL ORDER BY l.block_time DESC LIMIT ${limit}`)) { let ts = r.att || null, src = ts ? 'refund_attempted_at' : null; if (!ts) { try { ts = JSON.parse(r.meta || '{}')?.refund_dispatched_at || null; src = ts ? 'refund_dispatched_at' : null; } catch {} } push('pool_refund', r, ts, src); }
+    for (const r of j(`SELECT substr(s.current_leaf_outpoint,1,64) txid, l.block_hash, l.block_time, length(s.shard_redeem_hex)/2 redeem_len FROM market_shards s JOIN kaspa_tx_log l ON l.tx_id=substr(s.current_leaf_outpoint,1,64) WHERE s.current_leaf_outpoint IS NOT NULL ORDER BY l.block_time DESC LIMIT ${limit}`)) push('shard_leaf_continuation', r, null, null);
     const seen = new Set(); return rows.filter(r => r.txid && !seen.has(r.txid) && seen.add(r.txid));
   }
   async function pageForward(rpc, lowHash, maxPages = 50) { const out = []; let low = lowHash; for (let i = 0; i < maxPages; i++) { const r = await rpc.getBlocks({ lowHash: low, includeBlocks: true, includeTransactions: false }); await nap(); const blks = (r.blocks || []).map(b => b.block || b); out.push(...blks); const last = r.blockHashes?.[r.blockHashes.length - 1]; if (!last || last === low || !blks.length) break; low = last; } return out; }
@@ -143,12 +155,12 @@ async function main() {
     const known = new Set(loadProxies(100000).map(r => r.txid)); const pending = new Map(); const mem = new Map(); const t0 = Date.now(); let lastDb = 0;
     while (Date.now() - t0 < LIVE_MIN * 60000) {
       try { const me = await rpc.getMempoolEntries({ includeOrphanPool: false, filterTransactionPool: false }); const s2 = await rpc.getServerInfo(); const now = Date.now(), nowDaa = Number(s2.virtualDaaScore); for (const e of me.mempoolEntries || me.entries || []) { const id = e?.transaction?.verboseData?.transactionId || e?.transaction?.id; if (id && !mem.has(id)) mem.set(id, { ts: now, daa: nowDaa }); } } catch {}
-      if (Date.now() - lastDb > 30000) { lastDb = Date.now(); const s2 = await rpc.getServerInfo(); for (const r of loadProxies(500)) if (!known.has(r.txid)) { known.add(r.txid); const m = mem.get(r.txid); pending.set(r.txid, { ...r, legAInput: r.sender_ts ? (() => { const pt = parseTs(r.sender_ts); return { submitTs: pt.ok ? pt.ms : NaN, submitDaa: null, source: LEGA_SOURCES.SENDER_TS, submitRaw: r.sender_ts, submitFmt: pt.ok ? pt.fmt : ('UNPARSED: ' + pt.reason) }; })() : m ? { submitTs: m.ts, submitDaa: m.daa, source: LEGA_SOURCES.MEMPOOL_SEEN } : { submitTs: Date.now(), submitDaa: Number(s2.virtualDaaScore), source: LEGA_SOURCES.PROXY_POLL } }); }
+      if (Date.now() - lastDb > 30000) { lastDb = Date.now(); const s2 = await rpc.getServerInfo(); for (const r of loadProxies(500)) if (!known.has(r.txid)) { known.add(r.txid); const m = mem.get(r.txid); pending.set(r.txid, { ...r, legAInput: r.sender_ts ? (() => { const pt = parseTs(r.sender_ts, SENDER_TS_POLICY[r.sender_src] || SENDER_TS_POLICY.settled_at); return { submitTs: pt.ok ? pt.ms : NaN, submitDaa: null, source: LEGA_SOURCES.SENDER_TS, submitRaw: r.sender_ts, submitFmt: pt.ok ? pt.fmt : ('UNPARSED: ' + pt.reason) }; })() : m ? { submitTs: m.ts, submitDaa: m.daa, source: LEGA_SOURCES.MEMPOOL_SEEN } : { submitTs: Date.now(), submitDaa: Number(s2.virtualDaaScore), source: LEGA_SOURCES.PROXY_POLL } }); }
         for (const [txid, p] of pending) { const l = db.prepare('SELECT block_hash, block_time FROM kaspa_tx_log WHERE tx_id=? LIMIT 1').get(txid); if (!l) continue; const m = await measure(rpc, { ...p, block_hash: l.block_hash }, p.legAInput); if (m.legB.ok || m.verified.state !== 'verified' || Date.now() - p.legAInput.submitTs > 30 * 60000) { samples.push({ kind: p.kind, txid, block_hash: l.block_hash, block_time: l.block_time, redeem_len: p.redeem_len, ...m }); pending.delete(txid); } } }
       await new Promise(r => setTimeout(r, POLL_MS));
     }
   } else {
-    for (const p of loadProxies(DRY ? DRY : LIMIT)) { if (DRY && samples.length >= DRY) break; if (!p.block_hash) continue; const pt = p.sender_ts != null ? parseTs(p.sender_ts) : null; const m = await measure(rpc, p, pt ? { submitTs: pt.ok ? pt.ms : NaN, submitDaa: null, source: LEGA_SOURCES.SENDER_TS, submitRaw: p.sender_ts, submitFmt: pt.ok ? pt.fmt : ('UNPARSED: ' + pt.reason) } : null); samples.push({ kind: p.kind, txid: p.txid, block_hash: p.block_hash, block_time: p.block_time, redeem_len: p.redeem_len, sender_ts: p.sender_ts, ...m }); }
+    for (const p of loadProxies(DRY ? DRY : LIMIT)) { if (DRY && samples.length >= DRY) break; if (!p.block_hash) continue; const pt = p.sender_ts != null ? parseTs(p.sender_ts, SENDER_TS_POLICY[p.sender_src] || SENDER_TS_POLICY.settled_at) : null; const m = await measure(rpc, p, pt ? { submitTs: pt.ok ? pt.ms : NaN, submitDaa: null, source: LEGA_SOURCES.SENDER_TS, submitRaw: p.sender_ts, submitFmt: pt.ok ? pt.fmt : ('UNPARSED: ' + pt.reason) } : null); samples.push({ kind: p.kind, txid: p.txid, block_hash: p.block_hash, block_time: p.block_time, redeem_len: p.redeem_len, sender_ts: p.sender_ts, sender_src: p.sender_src, ...m }); }
   }
   await rpc.disconnect();
   const sum = summarize(samples, { dry: !!DRY });

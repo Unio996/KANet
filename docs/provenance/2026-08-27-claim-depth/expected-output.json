@@ -257,5 +257,36 @@
    "N": 29,
    "S": 4.08
   }
+ },
+ "T10-settled_at-real": {
+  "ok": true,
+  "ms": 1782802187469,
+  "fmt": "iso_zoned"
+ },
+ "T11-settled_at-naive-rejected": {
+  "ok": false,
+  "reason": "naive ISO (no tz) not allowed for this source: writer is toISOString ⇒ must carry Z/offset; tz unknown ⇒ inconclusive"
+ },
+ "T12-settled_at-sqlite-rejected": {
+  "ok": false,
+  "reason": "sqlite text not allowed for this source (writer uses toISOString)"
+ },
+ "T13-refund_attempted_at-sqlite-ok": {
+  "ok": true,
+  "ms": 1783577128000,
+  "fmt": "sqlite_utc_text"
+ },
+ "T14-refund_attempted_at-naive-rejected": {
+  "ok": false,
+  "reason": "naive ISO (no tz) not allowed for this source: writer is toISOString ⇒ must carry Z/offset; tz unknown ⇒ inconclusive"
+ },
+ "T15-refund_dispatched_at-real": {
+  "ok": true,
+  "ms": 1780287157538,
+  "fmt": "iso_zoned"
+ },
+ "T16-refund_dispatched_at-int-rejected": {
+  "ok": false,
+  "reason": "int epoch not allowed for this source (no known writer)"
  }
 }

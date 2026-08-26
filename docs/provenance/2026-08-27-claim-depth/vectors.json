@@ -1,5 +1,5 @@
 {
-  "note": "(27) v0.3 确定性测试向量(合成)。depth 判据 = daaScore 差 ≥ D(同 kasia-relay/src/lib/p2sh.mjs:1484 checkUtxoLanded; D=20 = pool-shard-register.mjs:88)。反核三态: verified / excluded(块可判且 txid 不在) / inconclusive(缺块·畸形·未载 tx, 单列不静默计)。Leg A 三级来源: SENDER_TS(可入最终界) / MEMPOOL_SEEN / PROXY_POLL(observational, 不入最终界)。 v0.4(Codex 5d23a4be): canonical parseTs——SQLite CURRENT_TIMESTAMP 文本按 UTC(本机 UTC+7, Date.parse 会错 -7 h = v0.3 真 bug) / ISO 带时区按其时区、不带按 UTC / 整数 >=1e12 ms、1e9..1e12 秒 / 其它 => inconclusive; Leg A 须 finite 且非负才 final-eligible, 否则 state=inconclusive_ts 剔除并 surfaced。真实值来自本机 DB(只读, 非敏感): refund_attempted_at = '2026-07-09 06:05:28' 与 1783785324(秒); metadata.refund_dispatched_at = '2026-06-01T04:12:37.538Z'。",
+  "note": "(27) v0.3 确定性测试向量(合成)。depth 判据 = daaScore 差 ≥ D(同 kasia-relay/src/lib/p2sh.mjs:1484 checkUtxoLanded; D=20 = pool-shard-register.mjs:88)。反核三态: verified / excluded(块可判且 txid 不在) / inconclusive(缺块·畸形·未载 tx, 单列不静默计)。Leg A 三级来源: SENDER_TS(可入最终界) / MEMPOOL_SEEN / PROXY_POLL(observational, 不入最终界)。 v0.4(Codex 5d23a4be): canonical parseTs——SQLite CURRENT_TIMESTAMP 文本按 UTC(本机 UTC+7, Date.parse 会错 -7 h = v0.3 真 bug) / ISO 带时区按其时区、不带按 UTC / 整数 >=1e12 ms、1e9..1e12 秒 / 其它 => inconclusive; Leg A 须 finite 且非负才 final-eligible, 否则 state=inconclusive_ts 剔除并 surfaced。真实值来自本机 DB(只读, 非敏感): refund_attempted_at = '2026-07-09 06:05:28' 与 1783785324(秒); metadata.refund_dispatched_at = '2026-06-01T04:12:37.538Z'。 v0.5: SENDER_TS_POLICY 按源限格式——refund_attempted_at{sqlite 文本, 整数 epoch, ISO 带 tz} / refund_dispatched_at·settled_at{只 ISO 带 tz(写点 toISOString)}; 裸 ISO 对 metadata 源 ⇒ inconclusive(不猜 tz)。真实 settled_at 本机 DB 只读抽样: '2026-06-30T06:49:47.469Z'(metadata.settle_evidence.settled_at, 写点 bshard-settle-daemon.mjs:885)。",
   "cases": [
     {
       "id": "V1-verify-ok",
@@ -372,6 +372,55 @@
           }
         }
       ]
+    },
+    {
+      "id": "T10-settled_at-real",
+      "type": "ts",
+      "src": "settled_at",
+      "desc": "真实 metadata.settle_evidence.settled_at(本机 DB, 写点 settle-daemon.mjs:885 toISOString) ⇒ iso_zoned",
+      "value": "2026-06-30T06:49:47.469Z"
+    },
+    {
+      "id": "T11-settled_at-naive-rejected",
+      "type": "ts",
+      "src": "settled_at",
+      "desc": "settled_at 源收到裸 ISO(无 tz, 非已知写点格式) ⇒ inconclusive 不猜时区",
+      "value": "2026-06-30T06:49:47"
+    },
+    {
+      "id": "T12-settled_at-sqlite-rejected",
+      "type": "ts",
+      "src": "settled_at",
+      "desc": "settled_at 源收到 SQLite 文本(非已知写点格式) ⇒ inconclusive",
+      "value": "2026-06-30 06:49:47"
+    },
+    {
+      "id": "T13-refund_attempted_at-sqlite-ok",
+      "type": "ts",
+      "src": "refund_attempted_at",
+      "desc": "refund_attempted_at 源 SQLite 文本 ⇒ 允许(写点 CURRENT_TIMESTAMP=UTC)",
+      "value": "2026-07-09 06:05:28"
+    },
+    {
+      "id": "T14-refund_attempted_at-naive-rejected",
+      "type": "ts",
+      "src": "refund_attempted_at",
+      "desc": "refund_attempted_at 源裸 ISO ⇒ inconclusive(无此写点)",
+      "value": "2026-07-09T06:05:28"
+    },
+    {
+      "id": "T15-refund_dispatched_at-real",
+      "type": "ts",
+      "src": "refund_dispatched_at",
+      "desc": "refund_dispatched_at 真实值(toISOString) ⇒ iso_zoned",
+      "value": "2026-06-01T04:12:37.538Z"
+    },
+    {
+      "id": "T16-refund_dispatched_at-int-rejected",
+      "type": "ts",
+      "src": "refund_dispatched_at",
+      "desc": "refund_dispatched_at 源收到整数 ⇒ inconclusive(无此写点)",
+      "value": 1783785324
     }
   ]
 }
