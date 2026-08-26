@@ -65,19 +65,19 @@ kaspad 22428 `isSynced=false / blockCount=0 / headerCount=0 / daa=0`(pp-chain-he
 | P6 | 没有并发钱路在用同一 relay | `grep -n "\[relay:MiningRelay-tn12-new\]" logs/console.log \| tail -20` 最近无 `TRANSFER`/`sign`/`broadcast` 进行中; MiningRelay 不在任何 settle daemon 的 relay 名单里(`is_service=0, role=null` `[MEASURED]`) | 静默 |
 | P7 | 频道/对等通道可用 | 执行期间 Bettor↔KANet-UI 对等消息在线(核实回执要即时) | ListAgents 互见 |
 | P8 | Owner 已批本次执行 | Bettor 报 Owner 后取得明确 GO(本 runbook 即材料) | 有 GO 记录(频道或 ledger) |
-| **P9(NWT ①)** | **窗口冻结基线** | T0 记 supervisor 状态(`logs/kanet-console-supervisor.log` 尾 + console PID + `netstat :3200` 监听 PID); **写明: T1→T3 之间【禁止人工重启 console】, 且若 console 自愈重启(supervisor 触发), 立即冻结重发决策走链读** | 基线记录在案; supervisor 自愈**挡不住**(它就是重启源)⇒ 唯一防线是 §5 的链读-authoritative |
+| **P9(NWT ①)** | **窗口冻结基线** | T0 跑 `scripts/p9-baseline.ps1`(一键只读)记基线: (a)console (PID, CreationDate) 对(netstat :3200 owner PID + Win32_Process CreationDate) (b)`logs/console-supervisor.log` 尾 (c)netstat :3200/:8000 LISTENING (d)pidfile 陈旧标记。**写明: T1→T3 之间【禁止人工重启 console】; 若 console 自愈重启(supervisor 触发), 立即冻结重发决策走链读** | 🔴 **重启判据(NWT VB-7 收紧)**: (a) (PID, CreationDate) 对任一变(不只 PID——PID 可复用) (b) supervisor 尾出现新 restart 行(非 20 行逐字比) (c) relay/子进程数只看健康、不判重启(来自 console.log 累积, 受轮转/重连影响)。supervisor 自愈挡不住 ⇒ 唯一防线是 §5 链读-authoritative |
 
 ## §5 执行序列(Bettor 执行 · KANet-UI 同步核)
 ```
 T0  Bettor: 记 T0 时刻 + `grep -c TRANSFER logs/console.log`(基线 N0) + P5 再跑一次(目标 0 UTXO)
-    + 🔴 P9 基线(NWT ①): 记 console PID + supervisor log 尾 + netstat :3200 监听 PID(窗口内比对, 变=console 重启了)
+    + 🔴 P9 基线(NWT ①): 跑 `scripts/p9-baseline.ps1` 存基线(console (PID,CreationDate) 对 + supervisor 尾 + netstat LISTENING + pidfile 陈旧标记); 窗口内复跑比对, (PID,CreationDate) 对变 或 supervisor 出新 restart 行 = console 重启了(relay/子进程数不判重启)
 T1  Bettor: 单发一次
     curl -s -m 60 -X POST http://127.0.0.1:3200/api/relay/ce43e1b1-f16b-4e2b-ba22-56cc9bb26762/transfer \
          -H 'content-type: application/json' \
          -d '{"to":"kaspatest:qq0kt3dmgtrxevrdgkl5hjkah4afsm4nn6dkf2a4cef0qucxkj93wlz3g27mq","amount":"1000000"}'
     (curl 自身 -m 60 > console 30s, 确保拿到的是 console 的裁决而不是 curl 自己断)
 T2  🔴🔴 先查【窗口内 console 有没有重启】(NWT ①, 决定日志能不能信):
-    比对 P9 基线: console PID 变 / supervisor log 有新 restart / netstat :3200 监听 PID 变 —— 任一 = console 重启过
+    比对 P9 基线(p9-baseline.ps1 复跑): console (PID,CreationDate) 对变 / supervisor log 有新 restart 行 / netstat :3200 LISTENING owner 变 / pidfile != netstat owner —— 任一 = console 重启过(PID 单独相同不代表没重启, 看 CreationDate)
       ⇒ **logs/console.log 的 TRANSFER 证据【作废】**(孤儿 relay 子的 stdout 随旧 console 断管丢失), 直接跳"链读权威"分支。
     三种回应——【无论哪种, 不发第二次, 除非链读双证没发】:
     (a) 200 {ok:true,txId,fee}        → 记 txId, 进 T3(链读坐实才算数)

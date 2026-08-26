@@ -1,8 +1,10 @@
-=== P9 baseline @ 2026-08-26T21:06:53Z host=DESKTOP-DA9QQ46 ===
+=== P9 baseline @ 2026-08-26T21:10:07Z host=DESKTOP-DA9QQ46 ===
 
 [1] console :3200 LISTENING owner PID
   console PID=27412 Start=26-Aug-26 03:03:18 CommandLineReadable=no(SYSTEM)
   CommandLine=(null=SYSTEM non-elevated unreadable)
+  --- pidfile staleness (restart trace) ---
+  console.pid=5574 != netstat owner=27412 => STALE pidfile = a restart happened since pidfile write (note: bash pid != Windows pid is also possible)
 
 [2] logs/console-supervisor.log tail 20
   [2026-08-25T20:03:16Z] [fail-loud] git status error (not blocking restart): fatal: detected dubious ownership in repository at 'D:/kanet-tn12'
@@ -34,4 +36,4 @@
   console PID=27412 direct children total=35 node.exe children=35
   relay-manager 'Started ... relay' log lines(current console.log)=32
 
-=== end (UTC=2026-08-26T21:06:53Z) ===
+=== end (UTC=2026-08-26T21:10:07Z) ===

@@ -20,6 +20,17 @@ if ($conn) {
   } else { Write-Output ("  console PID={0} (Win32_Process detail unreadable)" -f $cpid) }
 } else { Write-Output "  (:3200 no LISTENING = console down!)" }
 
+Write-Output "  --- pidfile staleness (restart trace) ---"
+$pidfile = Join-Path $root 'logs\pids\console.pid'
+if (Test-Path $pidfile) {
+  $pf = (Get-Content $pidfile -Raw).Trim()
+  if ($conn) {
+    $owner = ($conn | Select-Object -First 1).OwningProcess
+    if ("$pf" -eq "$owner") { Write-Output ("  console.pid={0} == netstat owner={1} (consistent)" -f $pf, $owner) }
+    else { Write-Output ("  console.pid={0} != netstat owner={1} => STALE pidfile = a restart happened since pidfile write (note: bash pid != Windows pid is also possible)" -f $pf, $owner) }
+  }
+} else { Write-Output "  (no console.pid)" }
+
 Write-Output "`n[2] logs/console-supervisor.log tail 20"
 $slog = Join-Path $root 'logs\console-supervisor.log'
 if (Test-Path $slog) { Get-Content $slog -Tail 20 | ForEach-Object { Write-Output ("  {0}" -f $_) } }
