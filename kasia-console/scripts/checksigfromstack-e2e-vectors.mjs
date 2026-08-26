@@ -22,6 +22,18 @@ import { randomBytes, createHash } from 'node:crypto';
 //   不设 ⇒ 默认仍是权威 C, 下方 assertPinnedCompiler 的语义不变。输出与 vectors.json 都打印编译器 sha256。
 const SILVERC = process.env.P1G_SILVERC || 'D:/silverscript/versioned-builds/silverc-zk-8065184.exe';
 const sha256File = (p) => createHash('sha256').update(readFileSync(p)).digest('hex');
+// 🔴 覆盖只能指向【已登记 sha256】的编译器(A = item5 §4 fresh rebuild / C = MANIFEST 权威), 不认任意路径:
+//    否则 "被测编译器" 这个变量就没被钉住, 输出里的 sha 只是事后打印, 不是事前闸。
+const KNOWN_COMPILER_SHA256 = Object.freeze({
+  '7213455b6953cfdb8ce946cacf68bb98fd58e4b63861ca72c4ad1e99e83ee71a': 'A fresh-rebuild (docs/provenance/2026-08-23-j2-item5-rebuild-semantic-equivalence.md §4)',
+  '9de7f2f682bc9e50a4b922e1c811335f1b1cd67c175f2e01df6fa6efc9015fc4': 'C authoritative silverc-zk-8065184.exe (MANIFEST)',
+});
+if (process.env.P1G_SILVERC) {
+  if (!existsSync(SILVERC)) throw new Error(`P1G_SILVERC 指向的文件不存在: ${SILVERC}`);
+  const s = sha256File(SILVERC);
+  if (!KNOWN_COMPILER_SHA256[s]) throw new Error(`🔴 P1G_SILVERC 的 sha256=${s} 不在登记表(只认 A/C 两个已核 sha) — 拒绝用未钉住的编译器生成向量`);
+  console.log(`  P1G_SILVERC 覆盖生效: ${KNOWN_COMPILER_SHA256[s]}`);
+}
 const LEGACY = 'D:/silverscript/target/release/silverc.exe';
 const SIL = 'D:/kanet-tn12/kasia-console/src/lib/CheckSigFromStackProbe.sil';
 const OUT = 'D:/kanet-tn12/scratch/e2e';
