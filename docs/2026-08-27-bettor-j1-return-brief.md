@@ -11,6 +11,8 @@
 - env 单一源已落：`kanet.env:153 LLAMA_CTX_SIZE=262144`（dd1dcd72，含内存闸 `kanet-start.sh:252` / `kanet-start-headless.sh:130` / `scripts/llm-watchdog.mjs`）。
 - `llm-watchdog` **未在跑**（`Get-CimInstance Win32_Process -Filter "Name='node.exe'" | ? CommandLine -like '*llm-watchdog*'` = 空）——你进来后**再查一次**（步骤③硬前置，否则它会用旧参数重拉）。
 - 目标：`llama-server.exe` PID **17428**，StartTime 2026-08-25 10:31:04，私有 commit **30.2 GB**（Get-Process PagedMemorySize64）。SYSTEM 树，非提权会话杀不掉——这就是要你的原因。
+**一键只读验收（KANet-UI VB-3 e7d24a37）**：`powershell -NoProfile -ExecutionPolicy Bypass -File D:/kanet-tn12/scripts/a5-verify.ps1` —— 七项（PID/ctx-size/私有 commit、log kv_cache 行、/props n_ctx、nvidia-smi、空闲 commit、llm-watchdog 是否在跑、:8000）。"前"对照臂已存 `docs/2026-08-27-a5-baseline-before.txt`（PrivateCommit 30.15 GB / kv 17408 MiB / n_ctx 1048576 / VRAM 28488/32607 / free commit 32.6 GB / watchdog 0 / :8000 LISTENING 17428）。**你提权跑一次"前"（能读到 CommandLine 的 --ctx-size）、停后重拉再跑一次"后"**，两份原样贴回。
+⚠ 内存闸边界：现空闲 commit 32.6 GB **< 闸阈 35 GB**（`_MEMGATE_MIN_GB`）——现在若再起一个 llama 会被正确拒掉；停 17428 释放 ~30 GB 后 ≈63 GB 必过。若重拉被 `refuse-start:low-commit` 拒，先看 free commit 数，不要调阈值。
 步骤：
 1. 记 PID+CreationDate：`Get-CimInstance Win32_Process -Filter "Name='llama-server.exe'" | select ProcessId,CreationDate,CommandLine`
 2. 内存闸预检：`(Get-CimInstance Win32_OperatingSystem).FreeVirtualMemory/1MB`（停后会释放 ~30 GB，够）
