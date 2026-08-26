@@ -10028,3 +10028,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **J2 看一眼：GREEN，可推**；一条精度注（下版顺手，不阻塞）：Kaspa coinbase **输出**付的是 mergeset 里各蓝块的矿工（`consensus/src/processes/coinbase.rs:100-134 @7b1e18cc` expected_coinbase_transaction，:113 蓝块奖励付蓝块矿工，:134 红块奖励付本块矿工），本块矿工身份在 **coinbase payload 的 miner_data.script_public_key**（:139，:151-162 serialize_coinbase_payload）⇒ s_max 逐块归属须解析 payload 取本块 miner script，不能拿输出地址；窗口够长两法份额收敛，单矿工网两法皆 1，底线不受影响；§3.5 "getBlock→coinbase tx→output 地址"那句要改并给 payload 解析路径。
 - **意义**：Owner 的 k_max 决定不再是"拍 1000 还是不拍"——在有可归属的独立矿工之前，公式自己输出禁用；Owner 真正要定的只剩 `s_owner` 的加严幅度与 Tier-2 何时从实验-only 转正（前提 = s_max 明显 < 1 且 H_floor_honest ≥ H_adv/(k_baked−1)）。
 - **推送**：a383bba5 + 本块。Codex 275 待回（276 草稿：(23) v0.3 + (21) v0.3 + VB-4 一起装）。新记忆 `reference-an-assumption-parameter-needs-a-mechanical-data-bound-or-it-is-a-dial`。
+
+### (646) 2026-08-27 · (23) 地板规格 v0.4 = a4dd959f（s_max 逐块归属改 coinbase payload）· 已推 · MSG-276 上桥（(23) v0.4 + (21) v0.3 + VB-4）· 派 J2 (24) s_max 提取脚本
+- **v0.4（NWT）**：`s_max` 逐块矿工归属从"coinbase 输出地址"改为 **coinbase payload 的 `miner_data.script_public_key`**——`coinbase.rs:109-118 @7b1e18cc` 输出付 mergeset 各蓝块矿工、:132-134 红块奖励付本块矿工 ⇒ 输出是 mergeset 混合，按输出地址逐块统计 = 错归属；本块矿工身份在 payload（:139 造、:151-165 序列化）。逐字节解析表（LE）：blue_score[0:8] / subsidy[8:16] / spk.version[16:18] / len[18:19] / **script[19:19+L] = 矿工身份**（归属键 = version‖script）/ extra_data[19+L:]。**Bettor 核 :158-164 序列化顺序与偏移表一致。** 保留：输出地址法长窗份额收敛可作旁证；单矿工两法皆 1 ⇒ §6 底线不变；Sybil（一矿工多 spk）同样使 s_max 偏低 ⇒ 须 s_owner 兜。§7 复核路径同步改 payload。
+- **推送**：a4dd959f（队列 0）。**MSG-276 = 桥 668bf760**（(23) v0.4 + (21) v0.3 7074a673 + VB-4 41a8edb1；请 Codex 确认 `s_adv := max(s_owner, s_max)` 为其政策第 2 步的机械实现、单矿工 TN12 正确输出 = Tier-2 禁用/实验-only、法3/min-of-three 无异议；记录 Owner 待决）。Codex 275 仍未回。
+- **派工**：J2 (24) s_max 提取脚本（`scratch/_j2_smax_coinbase.mjs` + 方法稿 + payload 偏移表 + 输出地址法对照列 + SYNC-GATE，同步后跑；入 (17) 清单 ③d）。
+- IBD 83%（03:41），commit 66.9 GB。J1 未再进门。Owner 待决三件不变。
