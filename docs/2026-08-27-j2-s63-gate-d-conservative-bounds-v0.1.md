@@ -1,6 +1,6 @@
-# §6-3 gate (d) · `min_O` / `N_claim` / `N_margin` 具名保守值提案 v0.1（证据层 · 零落码 · 不改 v0.15 正文）
+# §6-3 gate (d) · `min_O` / `N_claim` / `N_margin` 具名保守值提案 v0.2（证据层 · 零落码 · 不改 v0.15 正文）
 
-> **Status**: DRAFT v0.1 · J2 2026-08-27 · Bettor 派工 (14) · 门定义 = Codex MSG-267 `(d) named conservative min_O / N_claim / N_margin + reactive-liveness`（split gate：**参数语义 = 设计层已闭；数值 + 落链证据 = 部署前运营工程**）· NWT (h) v1.1 CF-4 把 `N_claim`/`N_margin` 归本门。
+> **Status**: DRAFT v0.2 · J2 2026-08-27 · Bettor 派工 (14) · 门定义 = Codex MSG-267 `(d) named conservative min_O / N_claim / N_margin + reactive-liveness`（split gate：**参数语义 = 设计层已闭；数值 + 落链证据 = 部署前运营工程**）· NWT (h) v1.1 CF-4 把 `N_claim`/`N_margin` 归本门 · **v0.1 NWT = GREEN-WITH-NOTES（4a486b5b）：`M_observe` 不能砍 = UPHOLD；v0.2 三处收敛修文 = ① 入场闸与 `M_observe` 的错因果删掉、标签改"失能窗"、watchtower 多重单列为架构问题交 Owner/Codex；② `N_claim` 证据基如实标近零（`N_margin` 吸收故不阻塞），§5① 重采限 claim-shape；③ `min_O` 的"费由 O 出"前提**未被 covenant 强制**（claim 支无输入数 require），理据重锚，§7 记二选一。**
 > **一句话**：三个量各给【定义→约束哪条 require→单位域→证据分布与尾部→保守值 + 为什么保守】。**数值全部标 PROVISIONAL**：Codex P4 明说要对着 P3 产出的真实 tx 形状定稿；且节点现仍 IBD（本稿写作时 `virtualDaaScore=0`），所有落链/停滞数据都是**重启前**那台 kaspad 的（8/23 根因：0xc0000409 反复崩），§5 逐条标"须同步后重采"。
 > **不做**：不改 v0.15 正文、不改码、不动任何 ctor/env；本稿只给"具名常量应当是什么、证据是什么、还缺什么"。
 
@@ -76,7 +76,7 @@ Codex 同时钉：本门**不能证绝对抗审查**，最终 claim 保持 **con
 ### E4 · 既有链上/代码常量（不是新拍，只引用）
 | 常量 | 值 | 出处 | 与本门关系 |
 |---|---|---|---|
-| TN12 目标出块 | 10 BPS（`TenBps`） | `/d/rusty-kaspa/consensus/core/src/config/params.rs:727 TESTNET_PARAMS`（`Some(10)` 分支 @:643）| 只做 DAA↔墙钟换算：600 DAA/min，36,000 DAA/h；**不**作为 `N_claim` 的依据（Codex 明禁 target BPS alone）|
+| TN12 目标出块 | 10 BPS（`TenBps` 族） | `git show 7b1e18cc:consensus/core/src/config/params.rs` `:669-696 TESTNET12_PARAMS`（`:680 with_suffix(Testnet, 12)`、`:689-691 TenBps::…`、`:693-694 crescendo/covenants always()`；选择映射 `:530 Some(12) => TESTNET12_PARAMS`）。🔴 v0.1 引的是工作树 `90dbf074` 的 `:727 TESTNET_PARAMS`——**错检出**（工作树无 TESTNET12 块），v0.2 改以 live 二进制 commit 为准（同 (c)-1 坐标稿纪律）| 只做 DAA↔墙钟换算：600 DAA/min，36,000 DAA/h；**不**作为 `N_claim` 的依据（Codex 明禁 target BPS alone）|
 | 实测 reorg 回退 | 2 | ledger (9416)"实测回退=2、裕度=50 ⇒ 25× 余量"；`p2sh.mjs:1474` "20 = 20× 实测 max" | `N_margin` 的 reorg 项 |
 | `REORG_SAFE_MIN_DEPTH` | 20 DAA | `pool-shard-register.mjs:88`（TN12 实测校准）| 深确认门槛：`N_claim` 里"CONFIRM"按此深度算 |
 | `FINALITY_BUFFER` | 60 DAA | `bshard-settle-daemon.mjs:53`（finality depth 50 + 余量）| 同族口径 |
@@ -90,35 +90,42 @@ Codex 同时钉：本门**不能证绝对抗审查**，最终 claim 保持 **con
 
 **保守方向先定**（本门三量风险都不对称）：
 - `N` 太小 ⇒ 反应方**结构性 claim 不了 = 本金损失 = 安全洞**（v0.15 §5 原话"新洞"）；`N` 太大 ⇒ 只是首动方在"反应方不 claim"这一格里**多等一会儿才能 recovery** = 活性成本。⇒ **取尾部 + 余量，宁大勿小**。
-- `min_O` 太小 ⇒ 反应方付不起费 = 同一个洞；太大 ⇒ 首动方多注一点进 O，而 O 支 1 只焊 payout 值、不禁普通找零输出 ⇒ **多出的部分反应方可作找零拿回**，对安全中性。⇒ 同样宁大勿小。
+- `min_O` 太小 ⇒ （在"费只能由 O 出"的前提下）反应方付不起费 = 同一个洞；太大 ⇒ 首动方多注一点进 O，而 O 支 1 只焊 payout 值、不禁普通找零输出 ⇒ **多出的部分反应方可作找零拿回**，对安全中性。⇒ 同样宁大勿小。🔴 **但 v0.2 修：那个前提本身没被 covenant 强制**（见 3-A）。
 
 ### 3-A `min_O`
-- **形状（v0.15 §4-e O 支 1 @L288-292）**：输入 = **O（covenant P2SH）+ O_AUTHORIZED（covenant P2SH 反向焊 co-input）**，输出 = payout（`value == OAUTH_value`，spk 焊死）+ 可选普通找零。**没有第三个手续费输入**——手续费只能出自 O 的值（这正是 `min_O` 存在的理由）。
-- **公式**：`min_O = SF × ( fee_claim_worst + storage_floor )`
+- **形状（v0.15 §4-e O 支 1 @L288-292）**：输入 = **O（covenant P2SH）+ O_AUTHORIZED（covenant P2SH 反向焊 co-input）**，输出 = payout（`value == OAUTH_value`，spk 焊死）+ 可选普通找零。
+- 🔴 **v0.2 修（NWT）：v0.1 写"没有第三个手续费输入——手续费只能出自 O"是【错模型】**。claim 支 @L147 与 O 支 @L288-292 的 require 只有 `OpCovOutputCount==0`（**限输出、不限输入**），**没有任何输入数 require** ⇒ 反应方**可以**再加一个普通 UTXO 作费输入自付费。于是"`min_O` 必须覆盖 claim 费"这条理据**失锚**：它是**便利**（O 自带费、反应方零本钱也能 claim），不是**安全**（付不起费 = 结构性 claim 不了）。超额仍中性不危险，但 §5④ 那句"把 claim 费算进 `min_O`"在当前 covenant 下**不是**必要条件。
+  - 先验原语核（7b1e18cc）：`OpTxInputCount<0xb3>` @`crypto/txscript/src/opcodes/mod.rs:1119` **存在**（`OpCovInputCount` @(c)-1 坐标稿 4.4 只数 covenant 输入、不数全部）⇒ 若要把前提变成机制，`require(OpTxInputCount == 2)` 有原语可用——**是否加 = §7 未决 ①，本稿不拍**。
+- **公式（v0.1 原式，保留作为 §7 ① 选 (a) 时的算法；选 (b) 时只剩 `storage_floor` 项）**：`min_O = SF × ( fee_claim_worst + storage_floor )`
   - `fee_claim_worst`：2 个 covenant 输入的 compute mass 费。既有口径 `_bshardFeeV1(2) = 2 × 1,000,000 = 2,000,000` sompi 覆盖 budget=50 的输入；**§6-3 covenant 比 bshard 脚本重**（introspection + `OpInputCovenantId` + checksig + substr），P3 前无真 mass ⇒ 上界先取 `computeSingleOutputFee` 的 minFee 与 `_bshardFeeV1(2)` 之大者 = 2,000,000，并在 §5 ④ 列"P3 形状出来后用 `kip9-mass.mjs` 现算"。
   - `storage_floor`：O 作为 reveal 那笔的**一个输出**被创建时的 KIP-9 地板。实测族 100,000 sompi；纯公式孤立小输出最坏 2,000,000 sompi。**取最坏 2,000,000**。
   - `SF = 2.5`（显式安全系数：覆盖 P3 形状比 bshard 重 + TN12 无费市场但 mass 规则可能随 KIP 调整）。
-- **提案：`min_O = 2.5 × (2,000,000 + 2,000,000) = 10,000,000 sompi = 0.1 KAS`**。
-  - 与既有常量关系：= 10× `_BSHARD_FEE_PER_INPUT`，= 1/10 `MAX_TX_FEE_SOMPI`，= 100× 实测存储地板。
+- **提案（条件于 §7 ①）**：
+  - 选 **(a)**（加 `OpTxInputCount==2`，费必由 O 出）⇒ `min_O = 2.5 × (2,000,000 + 2,000,000) = 10,000,000 sompi = 0.1 KAS`（= 10× `_BSHARD_FEE_PER_INPUT`，= 1/10 `MAX_TX_FEE_SOMPI`，= 100× 实测存储地板）。
+  - 选 **(b)**（不强制输入数，`min_O` 只锚存储地板）⇒ `min_O = SF × storage_floor = 2.5 × 2,000,000 = 5,000,000 sompi`（≥ 纯公式最坏 2e6 的 2.5×；反应方自备费输入）。
+  - 两者都不低于 KIP-9 最坏地板 2e6；差别只在"反应方零本钱可否 claim"这条便利属性。
 
 ### 3-B `N_claim`
 - **声明的运行包络**（本量只在这个包络下成立，出包络走 §6 fail-closed）：反应方（或代广播的 watchtower）节点满足 (5) 稿 R1–R6 健康（`isSynced=true` 且 UTXO 索引可用）；claim 用 `check_utxo_landed(minDepth = REORG_SAFE_MIN_DEPTH=20)` 判 CONFIRM。
 - **证据**：E2 最长单笔落链 149 s（首见级）；E1 逆境下另一节点可见 ≤ 44 DAA；CONFIRM 再加深度 20。
-- **取法**：`N_claim = 2 × (E2 最坏落链 1,490 DAA) + REORG_SAFE_MIN_DEPTH(20) + FINALITY_BUFFER(60)`，**向上取整到 3,600 DAA（= 6 min @10 BPS）**。
-  - 为什么 2×：E2 只有 1 个尾部观测（149 s），没有分布；单点尾部按 2 倍算是本仓既有做法的下限（reorg 用 20–25×，但 reorg 是链物理量，落链时延是流水线量，2× 已是 8/20 实测的 2.4 倍）。
+- 🔴 **v0.2 如实标（NWT）：`N_claim` 的证据基【近零】**——四条弱点同时成立：(i) 149 s 是**源码注释里的单点**（n=1，无原始时间戳）；(ii) 它测的是**注资 tx（funding-shape：普通 P2PK 输入）**，不是 claim-shape（2 covenant 输入 + 脚本执行）；(iii) **首见级**不是深度级；(iv) E1 的 ≤44 DAA 在**乐观方向**（低产时 DAA 走得慢，跨度天然小）。⇒ 本量现在是"有名字的占位"，**不阻塞门**只因 `N_margin` 的量级（57,600）把它整个吸收；§5① 重采前不得把 3,600 当已证。
+- **取法（占位算法，重采后按同式重算）**：`N_claim = 2 × (E2 最坏落链 1,490 DAA) + REORG_SAFE_MIN_DEPTH(20) + FINALITY_BUFFER(60)`，**向上取整到 3,600 DAA（= 6 min @10 BPS）**。
+  - 为什么 2×：单点尾部按 2 倍是本仓既有做法的下限（reorg 用 20–25×，但 reorg 是链物理量，落链时延是流水线量）。
   - 为什么不按 10 BPS 直算：Codex 明禁；且 E3 显示我们节点大半时间处理速率 < 1 DAA/s，"10 BPS"根本不是我们节点的体验。
-- **提案：`N_claim = 3,600 DAA`**。
+- **提案：`N_claim = 3,600 DAA`（PROVISIONAL，证据基近零，靠 `N_margin` 兜）**。
+- 🔵 watchtower 与本量的关系：§1.5 假设 5 @L135 "任何人可代广播（payout baked 到反应方，改不了向）"——这只影响**谁**提交，不缩短**单个健康提交者**的落链跨度；它真正影响的是 3-C 的 `M_observe`（见该节的架构问题）。
 
 ### 3-C `N_margin`
 三项**各自具名**、相加：
 | 项 | 理由 | 证据 | 值（DAA）|
 |---|---|---|---|
-| `M_observe` 反应方看见 O 的延迟 | 反应方节点 lag（网络 DAA 照走）+ 观察器 tick（settle-daemon/scanner 60 s） | E3 lag **max 85.5 min**、最长近停滞 91 min（二者重叠，取大者 91 min = 54,600 DAA）+ 60 s tick = 600 | **55,200** |
+| `M_observe` **失能窗**（v0.2 改名：兜 "看不见 O" ∪ "submit 被拒（`isSynced=false`）"两种失能，不只是观察延迟） | 反应方节点 lag（网络 DAA 照走，看不见 O）∪ 近停滞（`isSynced=false` ⇒ submit 硬拒，artifact#3 3/3 excluded）+ 观察器 tick（settle-daemon/scanner 60 s） | E3 lag **max 85.5 min**、最长近停滞 91 min（二者重叠，取大者 91 min = 54,600 DAA）+ 60 s tick = 600 | **55,200** |
 | `M_reorg` 深度/重选 | 实测 reorg 回退 2；单采回退最深 346（virtual 重选，非链上 reorg，但仍按它取）| E4 + E3 | **400**（> 346，≥ 200× 实测 reorg 2）|
 | `M_congest` 拥塞/方差 | TN12 无费市场，拥塞 = 出块/传播方差；E1 三点 18–44 DAA 的 2.4× 离散 | E1/E2 | **1,800**（= `N_claim`/2）|
 | **合计** | | | **57,400 → 向上取整 `N_margin = 57,600 DAA`（= 96 min @10 BPS）** |
 
-- **为什么 `M_observe` 是大头且不能砍**：它对应 §1 "危险方向"——网络 DAA 在走、反应方节点没跟上。这是 8/22 实测最常见的病（isSynced 只有 36%）。若嫌大，正确做法不是砍数，是 §6 把"lag > 阈值的节点"挡在 Tier-2 外（包络收紧 ⇒ `M_observe` 才能随之收窄），且必须**先重采**（§5 ②）。
+- **为什么 `M_observe` 是大头且不能砍（NWT UPHOLD）**：它对应 §1 "危险方向"——网络 DAA 在走、反应方节点没跟上。这是 8/22 实测最常见的病（isSynced 只有 36%）。🔴 **v0.2 删掉 v0.1 那句"包络收紧 ⇒ `M_observe` 随之收窄"——错因果**：§6 入场闸只筛**入场那一刻**的 lag，管不住入场后的退化（E3 的 91 min 停滞就是运行中发生的），所以入场闸不能作为砍 `M_observe` 的依据。**单节点包络下唯一合法的降法 = §5② 重采出更小的尾部。**
+- 🔵 **单列架构问题（交 Owner/Codex 定，本稿不拍）：Tier-2 纳不纳 watchtower 多重？** §1.5 假设 5 @L135 已允许"任何人可代广播、payout baked 到反应方、改不了向"。若 claim 可由**任一健康的** watchtower 提交（N 个独立节点），失能窗按 **best-of-N lag** 取而非单节点 max ——这是**唯一能结构性砍 `M_observe` 的路**；代价 = 反应方须把 claim 材料（witness 除私钥外的部分：O/O_AUTHORIZED outpoint、`s`/A 相关公开材料）预交给 watchtower，且 watchtower 集合的独立性本身成为新的部署假设（同 (e) quorum 的口径）。**未定前 `M_observe` 按单节点 max 取。**
 
 ### 3-D 合计与换算
 | | DAA | @10 BPS 墙钟 |
@@ -151,10 +158,10 @@ CFG-UNIT-DOMAIN 判据原文："ctor 参数须带单位标签/单一来源，混
 
 | # | 要重采什么 | 为什么现在的数不够 | 预注册判据 |
 |---|---|---|---|
-| ① | **对抗阈值测试**（Codex bullet 5）：造 O 形状同 P3 的 tx，在 `O_daa + (N_claim+N_margin) − δ` 提交 claim，测其 `blockDaaScore(claim) − blockDaaScore(O)`（`check_utxo_landed` 暴露 `virtualDaaScore − blockDaaScore`，可直接量 DAA 跨度）；对照臂：阈值后提交的 claim 输给 recovery | 本稿**没有任何深确认级（depth≥20）证据**，E1/E2 都是首见级 | ≥ 30 笔，全部 `span ≤ N_claim`；p100 < `N_claim`/2 才算余量成立；任一 > `N_claim` ⇒ 数值作废回本稿 §3-B 重算 |
+| ① | **对抗阈值测试**（Codex bullet 5）：造 O 形状同 P3 的 tx，在 `O_daa + (N_claim+N_margin) − δ` 提交 claim，测其 `blockDaaScore(claim) − blockDaaScore(O)`（`check_utxo_landed` 暴露 `virtualDaaScore − blockDaaScore`，可直接量 DAA 跨度）；对照臂：阈值后提交的 claim 输给 recovery。🔴 **显式限 claim-shape（2 covenant 输入 + 脚本执行 + 深度 20）**，**funding-shape（普通 P2PK 输入）的落链数不计入 `N_claim` 证据** | 本稿**没有任何深确认级（depth≥20）证据**，E1/E2 都是首见级，且 E2 是 funding-shape | ≥ 30 笔，全部 `span ≤ N_claim`；p100 < `N_claim`/2 才算余量成立；任一 > `N_claim` ⇒ 数值作废回本稿 §3-B 重算 |
 | ② | **节点 lag / 近停滞分布**（(5) 稿采样器 `scratch/_j2_dag_watch_postsync.mjs` 120 min 起步，目标 ≥ 24 h）| E3 是反复崩那台的数据；修后尾部可能收窄，也可能不 | `N_margin` 的 `M_observe` 取重采 max lag 与最长近停滞之大者 ×1 + 600；若重采 max lag < 30 min 可提案 `N_margin` 降到 ~20,000，**但只准降不准低于重采尾部** |
 | ③ | **reorg / virtual 重选深度**（Bettor `scratch/_bettor_reorg_depth_sample.mjs` 同法）| 现只有"回退 2"一条与单采 −346 | `M_reorg ≥ 2 × 观测 max`，且 ≥ 400 |
-| ④ | **P3 真实 claim tx 的 compute/storage mass**（`kip9-mass.mjs` 现算）| `min_O` 的费项现在按 bshard 口径估的 | `min_O ≥ 2.5 × (真 mass 费 + 存储地板)`；若真费 > 4,000,000 sompi ⇒ `min_O` 上调，不准下调 SF |
+| ④ | **P3 真实 claim tx 的 compute/storage mass**（`kip9-mass.mjs` 现算）| `min_O` 的费项现在按 bshard 口径估的 | **条件于 §7 ①**：选 (a) ⇒ `min_O ≥ 2.5 × (真 mass 费 + 存储地板)`，真费 > 4e6 则上调不准下调 SF；选 (b) ⇒ 本项只校 `storage_floor`，**claim 费不进 `min_O`**（v0.1 把它算进去是错模型，见 3-A）|
 | ⑤ | **逐笔落链时延**：上链跑手（fc925044）现记提交体但**不记 `landed_at`/`landed_daa`**，建议下一版加这两字段（改码，走报备）| E2 只有一个 149 s 注释数 | 每窗记 `submit_daa`、`landed_daa`、`depth_at_landed` |
 
 顺序：② 与 ③ 可与 (g) 乙腿同期只读采；① ④ 依赖 P3 形状。
@@ -163,16 +170,20 @@ CFG-UNIT-DOMAIN 判据原文："ctor 参数须带单位标签/单一来源，混
 
 ## §6 fail-closed 规则提案（Codex 最后一条：环境违约 ⇒ Tier-2 关，不许静默放宽）
 
-- **入场闸**：进入 §6-3 Tier-2 之前，反应方节点须过 (5) 稿 R1–R6（`isSynced=true`、UTXO 索引可用、lag < `M_observe` 的一半），否则**不入场**（不是"入场后放宽 N"）。
+- **入场闸**：进入 §6-3 Tier-2 之前，反应方节点须过 (5) 稿 R1–R6（`isSynced=true`、UTXO 索引可用、lag < `M_observe` 的一半），否则**不入场**（不是"入场后放宽 N"）。🔴 **它只是入场时的筛子，不是 `M_observe` 的依据**（v0.2 修：入场后的退化它管不住，所以 `M_observe` 不因它缩）。
 - **运行中**：反应方/watchtower 每 tick 记 lag；lag 超 `M_observe` 的一半 ⇒ 告警（此时仍在 N 内，尚可 claim）；超 `M_observe` ⇒ 按已损处理并留证（**不改链上 N**，链上 N 不可改也不该改）。
 - **禁止项**：任何"检测到落链慢就把 N 调大"的自适应逻辑——那就是 Codex 说的 silently widening；N 只在**部署前**按 §5 重采改，改一次一个具名版本。
 
 ---
 
 ## §7 未决（不假装闭合）
-1. 三个数全是 PROVISIONAL：① 缺深确认级落链证据；② 节点尾部是坏节点的数；③ P3 形状未出。**本稿的贡献是把"该量什么、怎么量、取值规则、保守方向"钉死**，不是把数拍死。
-2. `M_observe = 55,200` 若 Owner/Codex 认为活性成本太高，唯一合法的降法是收紧包络（§6 入场闸）+ 重采（§5 ②），不是改数。
-3. `min_O` 多出部分反应方可作找零拿回——这一点依赖"O 支 1 不禁普通输出"（v0.15 §4-e 只 `OpCovOutputCount==0`）；若 P3 收紧输出集，`min_O` 的"过大无害"论证要重看。
-4. 本稿未覆盖 (d) 之外的门；`T_cutoff_LOCKED_R`/`T_giveup` 绝对值属另一门，只在 §4 单位表里对照。
+1. 🔴 **`min_O` 前提二选一（NWT 逮，v0.2 新增，本稿不拍）**：claim 支现无输入数 require ⇒ "费由 O 出"未被强制。
+   - **(a)** 在 O 支 1 / claim 支加 `require(OpTxInputCount == 2)`（先验原语 `OpTxInputCount<0xb3>` @7b1e18cc `opcodes/mod.rs:1119` 存在；silverscript 侧 `tx.inputs.length` @`/d/silverscript/docs/TUTORIAL.md:923`，本仓 `PoolSide.sil`/`OracleStake_v1.sil` 已在用；`OpCovInputCount` 只数 covenant 输入不够用）⇒ 费必由 O 出 ⇒ `min_O` 按 3-A 全式（0.1 KAS）；代价 = 改 v0.15 正文 + (h) 矩阵加一条 mutation-id（"删 `OpTxInputCount==2`"）。
+   - **(b)** 不强制，`min_O` 只锚存储地板（5,000,000 sompi），反应方自备费输入；代价 = 失去"零本钱可 claim"便利、watchtower 代广播须自带费。
+   - 影响面：改 v0.15 正文 = 设计层，须 Codex；本稿只把两条路与各自代价写清。
+2. 三个数全是 PROVISIONAL：① 缺深确认级落链证据（`N_claim` 证据基近零，3-B 已标）；② 节点尾部是坏节点的数；③ P3 形状未出。**本稿的贡献是把"该量什么、怎么量、取值规则、保守方向"钉死**，不是把数拍死。
+3. 🔴 **`M_observe = 55,200` 的唯一结构性降法 = Tier-2 纳入 watchtower 多重（best-of-N 失能窗）——架构问题，交 Owner/Codex 定**（3-C 单列）；单节点包络下只能靠 §5② 重采，**不能靠入场闸**（v0.2 删错因果）。
+4. `min_O` 多出部分反应方可作找零拿回——这一点依赖"O 支 1 不禁普通输出"（v0.15 §4-e 只 `OpCovOutputCount==0`）；若 P3 收紧输出集，`min_O` 的"过大无害"论证要重看。
+5. 本稿未覆盖 (d) 之外的门；`T_cutoff_LOCKED_R`/`T_giveup` 绝对值属另一门，只在 §4 单位表里对照。
 
 **引用锚**（可 grep）：v0.15 `@L135/@L147/@L236/@L250/@L278/@L296/@L320-321/@L351`；NWT (h) v1.1 `@L91 CFG-UNIT-DOMAIN`、`@L107 CF-4`；Codex `RESPONSE-20260822-MSG267-S6-3-PRECODE-GATES-CODEX-REVIEW.md` §(d) 与 P4；`checksigfromstack-e2e-onchain.mjs:175` "实测注资落链 149s"；ledger (9416) "实测回退=2、裕度=50"。
