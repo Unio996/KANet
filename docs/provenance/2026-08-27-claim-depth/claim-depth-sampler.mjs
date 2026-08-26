@@ -1,4 +1,4 @@
-// (27) v0.5 · §5① claim-shape 深度采样器 — (d) 残余清单第 1 项(部署硬前置)的可执行物, 入库版。只读(DB 经 src/db/client.js 只 SELECT + RPC 只读)。
+// (27) v0.6 · §5① claim-shape 深度采样器 — (d) 残余清单第 1 项(部署硬前置)的可执行物, 入库版。只读(DB 经 src/db/client.js 只 SELECT + RPC 只读)。
 // 跑(正式): cd /d/kanet-tn12/kasia-console && node ../docs/provenance/2026-08-27-claim-depth/claim-depth-sampler.mjs [--mode hist|live] [--limit 200] [--depth 20] [--sleep-ms 20] [--live-minutes 60] [--poll-ms 1000] [--out <dir>] [--dry-run N]
 // 测试(离线, 无节点无 DB): node docs/provenance/2026-08-27-claim-depth/claim-depth-sampler.test.mjs
 //   退出码: 0 OK / 3 SYNC-GATE / 5 INSUFFICIENT_SAMPLES(fail-closed, 不出统计)
@@ -13,7 +13,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { execSync } from 'node:child_process';
 
-export const SCHEMA_VERSION = 'claim-depth/5';
+export const SCHEMA_VERSION = 'claim-depth/6';
 // (27) v0.5: SENDER_TS 源 × 写点 × 格式 × tz 依据 —— 每个源只认它【已知写点】会产生的格式; 其它格式(尤其裸 ISO 无 tz)⇒ inconclusive, 不猜时区
 export const SENDER_TS_POLICY = {
   // pool_bettor_sides.refund_attempted_at: 写点 pool.js:531 / bettor-refund-claim-auto.mjs:146 = SQLite CURRENT_TIMESTAMP(UTC 文本, SQLite 定义); 另实存整数秒(历史写点)
@@ -21,7 +21,7 @@ export const SENDER_TS_POLICY = {
   // pool_markets.metadata.refund_dispatched_at: 写点 bshard-auto-settler.mjs:983 new Date().toISOString() ⇒ 恒带 Z
   refund_dispatched_at: { sqliteText: false, intEpoch: false, isoZoned: true, isoNaive: false, writers: ['kasia-console/src/services/bshard-auto-settler.mjs:983 toISOString'] },
   // pool_markets.metadata.settle_evidence.settled_at: 写点 bshard-settle-daemon.mjs:885 toISOString(本机 DB 实存 146/270 行, 全 ISO Z); zk_settle_evidence.settled_at: :697 toISOString(DB 现 0 行);
-  // 其它 settled_at 写点(kanet-broker.js:227/260/327 = r.updated_at 约定未知; trading.js:1909 参数; bettor-prediction-settler.js:137 toISOString)写的是【别的表】, (27) 不读 ⇒ 不在本策略内
+  // 其它 settled_at 出现处, (27) 一律不读 ⇒ 不在本策略内: kasia-console/src/api/kanet-broker.js:227/260/327 = 【非写点】read-side by_market 投影(:174 注释), r.updated_at 来自 SELECT 不落表; kasia-console/src/api/trading.js:1909 = 写 trade_baselines(参数, 别的表); kasia-console/src/services/bettor-prediction-settler.js:137 toISOString(别的表)
   settled_at: { sqliteText: false, intEpoch: false, isoZoned: true, isoNaive: false, writers: ['kasia-console/src/services/bshard-settle-daemon.mjs:885 toISOString (settle_evidence)', 'kasia-console/src/services/bshard-settle-daemon.mjs:697 toISOString (zk_settle_evidence)'] },
 };
 export const MIN_SAMPLES = 30;          // (d) §5① / Codex 残余清单 1
