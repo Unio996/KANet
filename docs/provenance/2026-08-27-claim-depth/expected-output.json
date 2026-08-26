@@ -52,26 +52,36 @@
  },
  "V8-legA-sender": {
   "source": "SENDER_TS",
+  "state": "ok",
   "legA_wall_s": 1,
   "legA_daa": null,
-  "final_eligible": true
+  "final_eligible": true,
+  "submit_fmt": null,
+  "reason": null
  },
  "V9-legA-mempool": {
   "source": "MEMPOOL_SEEN",
+  "state": "ok",
   "legA_wall_s": 1,
   "legA_daa": 10,
-  "final_eligible": false
+  "final_eligible": false,
+  "submit_fmt": null,
+  "reason": null
  },
  "V9b-legA-poll": {
   "source": "PROXY_POLL",
+  "state": "ok",
   "legA_wall_s": 1,
   "legA_daa": 5,
-  "final_eligible": false
+  "final_eligible": false,
+  "submit_fmt": null,
+  "reason": null
  },
  "V10-sum-insufficient": {
   "status": "INSUFFICIENT_SAMPLES",
   "exit": 5,
   "verified_n": 29,
+  "legA_inconclusive_ts_n": 0,
   "legB_n": 29,
   "legB_daa_p100": 21,
   "legB_S": 0,
@@ -99,6 +109,7 @@
   "status": "OK",
   "exit": 0,
   "verified_n": 30,
+  "legA_inconclusive_ts_n": 0,
   "legB_n": 30,
   "legB_daa_p100": 26,
   "legB_S": 6.63,
@@ -128,6 +139,7 @@
   "status": "INSUFFICIENT_SAMPLES",
   "exit": 5,
   "verified_n": 20,
+  "legA_inconclusive_ts_n": 0,
   "legB_n": 20,
   "legB_daa_p100": 20,
   "legB_S": 0,
@@ -149,6 +161,101 @@
   "feed": {
    "N": 20,
    "S": 0
+  }
+ },
+ "T1-sqlite-text-real": {
+  "ok": true,
+  "ms": 1783577128000,
+  "fmt": "sqlite_utc_text"
+ },
+ "T2-int-seconds-real": {
+  "ok": true,
+  "ms": 1783785324000,
+  "fmt": "int_s"
+ },
+ "T3-iso-z-real": {
+  "ok": true,
+  "ms": 1780287157538,
+  "fmt": "iso_zoned"
+ },
+ "T4-iso-offset": {
+  "ok": true,
+  "ms": 1780287157538,
+  "fmt": "iso_zoned"
+ },
+ "T5-iso-naive": {
+  "ok": true,
+  "ms": 1783577128000,
+  "fmt": "iso_naive_as_utc"
+ },
+ "T6-int-ms": {
+  "ok": true,
+  "ms": 1783785324000,
+  "fmt": "int_ms"
+ },
+ "T7-int-ambiguous": {
+  "ok": false,
+  "reason": "integer magnitude ambiguous (<1e9)"
+ },
+ "T8-malformed": {
+  "ok": false,
+  "reason": "malformed: yesterday 3pm"
+ },
+ "T9-null": {
+  "ok": false,
+  "reason": "null/empty"
+ },
+ "V8b-legA-sqlite-real": {
+  "source": "SENDER_TS",
+  "state": "ok",
+  "legA_wall_s": 5,
+  "legA_daa": null,
+  "final_eligible": true,
+  "submit_fmt": "sqlite_utc_text",
+  "reason": null
+ },
+ "V8c-legA-malformed": {
+  "source": "SENDER_TS",
+  "state": "inconclusive_ts",
+  "legA_wall_s": null,
+  "legA_daa": null,
+  "final_eligible": false,
+  "submit_fmt": "UNPARSED: malformed: yesterday 3pm",
+  "reason": "submit ts unparsable/non-finite"
+ },
+ "V8d-legA-negative": {
+  "source": "SENDER_TS",
+  "state": "inconclusive_ts",
+  "legA_wall_s": null,
+  "legA_daa": null,
+  "final_eligible": false,
+  "submit_fmt": "sqlite_utc_text",
+  "reason": "negative leg (inclusion before submit => ts format/timezone wrong)"
+ },
+ "V13-sum-with-inconclusive-ts": {
+  "status": "OK",
+  "exit": 0,
+  "verified_n": 30,
+  "legA_inconclusive_ts_n": 2,
+  "legB_n": 30,
+  "legB_daa_p100": 24,
+  "legB_S": 4.08,
+  "legA_final_n": 2,
+  "legA_obs": {
+   "MEMPOOL_SEEN": 0,
+   "PROXY_POLL": 0
+  },
+  "excluded": {
+   "n": 0,
+   "reasons": {}
+  },
+  "inconclusive": {
+   "n": 0,
+   "reasons": {}
+  },
+  "feed": {
+   "N": 29,
+   "S": 4.08
   }
  }
 }
