@@ -115,6 +115,10 @@
   - ⅱ `LEGACY_REFUND_BATCH=0` 硬停 tick + 只经 admin 端点逐盘触发 —— 简单但把"自动"退化成"手动", 且 claim-auto 那条 5 min cron 也读同一字段, 要一并停。
   - ⅲ 授权写到别的字段名(如 `refund_authorization_pending`), 由第二个动作"提交"成 `refund_authorization` —— 两步写, 但等于再造一个 §10.3 那样"决定与实现之间的缝"。
 - **本机 :3200 一律不写授权**(无钥 ⇒ 只会 churn);授权写在持钥节点的 DB, 且只在 (a) 完成后。
+- **(c) 两条实核补注(2026-08-26, 预答 NWT 复审)** `[SRC grep]`:
+  - **`refund_authorization` 的代码读者共三处, 不是两处**:P1 谓词 `refund-authorization.mjs:91`(allow/deny)、legacy tick 候选 SQL `settler:493`(**选择键, 会花钱**)、backlog 计数 `settler:383-384`(`IS NULL ∨ NOT IN` 只计数不动钱)。批次门 ⅰ 要改的是**前两个**;第三个要同步改成"数【未授权】+【已授权但不在当前批】"两格, 否则授权写上后计数归零, 看起来像"修好了"而 tick 还没放。
+  - 🔴 **live 的 `LEGACY_REFUND_BATCH` 不是默认 1, 是 `kanet.env:118 = 5`** ⇒ 授权一写, 每 tick(5 min)自动签广播 **5 笔**, 候选取 20。v0.1/NWT 说的"默认 1"是代码缺省, 不是运行值 —— 批次门的必要性因此更硬。
+  - `LEGACY_REFUND_RELEASE_BATCH` 全仓零定义(kanet.env / kanet-start.sh / kanet-start-headless.sh / scripts)⇒ 进程读到 `undefined`;两套 start 脚本对 kanet.env 都是全量 passthrough(`kanet-start.sh:97` r551 "export EVERY kanet.env key", headless r472 同源)⇒ **只要它不写进 kanet.env 就在两套下都为空**;门的 fail-closed 判据必须写成 `!env ∨ env.trim()===''` ⇒ 不匹配, 且**禁止在代码里给它缺省值**(缺省值 = 把门焊开)。
 
 ### 7.2 ② 广播前 landed(side_p2sh) 的定位:纵深 + 早筛;硬锁是同输入双花
 - J1 侧 kaspad 若已同步, `getUtxosByAddresses` 见不到已花 side ⇒ landed:false ⇒ 挡 ✅;若 J1 kaspad 自己 stale ⇒ pre-check 假 true ⇒ 放行第二次广播 ⇒ **兜底 = 网络层同输入双花**:PoolSide claim 是单输入 `side_lock_tx:0`、1 in 1 out(在册 `project-stuck-33735` 陷阱 2), 第二次花的是同一个输入 ⇒ 网络拒 ⇒ 落不了。**与 1M 转账不同**(那条 change 造新币, 双花不自保);这里自保。
