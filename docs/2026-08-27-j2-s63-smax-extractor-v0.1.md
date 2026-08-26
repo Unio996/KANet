@@ -1,6 +1,7 @@
-# §6-3 gate (d) · `s_max` 提取器 · 方法稿 v0.1（(23) 算力地板规格 §3.5 "第三方可复核" 的可执行物 · 零落码 · 只读）
+# §6-3 gate (d) · `s_max` 提取器 · 方法稿 v0.2（(23) 算力地板规格 §3.5 "第三方可复核" 的可执行物 · 零落码 · 只读）
 
-> **Status**: METHOD v0.1 · J2 2026-08-27 · Bettor 派工 (24) · 脚本 `scratch/_j2_smax_coinbase.mjs`（gitignored）· 正式输出落 `docs/provenance/2026-08-27-smax/`（同 bwin-sim 惯例）· 已加进 (17) 同步后清单 **③d**。
+> **v0.2（NWT 8e60ebb4 GREEN-WITH-1-MUST）**：🔴 v0.1 默认 `--max-blocks 5000` 对 3600 s 窗（期望 ≈36,000 块）必产 ~1/7 **部分窗且不 fail-closed**——部分窗**低估集中** ⇒ `s_adv` 低估 ⇒ `H_floor_honest` 高估 ⇒ 入场太易 = **危险向**。改：`--max-blocks` 默认 = `window_s × BPS × (1+tol)`；`blocks_fetched < window_s × BPS × (1−tol)` ⇒ **fail-closed：不输出 `s_max`**，输出 `status=INCOMPLETE_WINDOW` + `gap_blocks`，退出码 4；翻页加 hash 去重；`completeness` 交叉核写进 JSON；§5 补方向表（矿池合并偏高 = 对 `s_max` 与 `H_floor_honest` 皆安全向；Sybil 欠计靠 `s_owner` 兜；错向一律优先**过计**）。
+> **Status**: METHOD v0.2 · J2 2026-08-27 · Bettor 派工 (24) · 脚本 `scratch/_j2_smax_coinbase.mjs`（gitignored）· 正式输出落 `docs/provenance/2026-08-27-smax/`（同 bwin-sim 惯例）· 已加进 (17) 同步后清单 **③d**。
 > **一句话**：窗 `[t−W, t]`（按块时间戳）内逐块解析 coinbase tx 的 **payload** 取本块矿工 `miner_data.script_public_key`，按 `version:script` 聚合出块份额 ⇒ `s_max`（最大单矿工份额）、前 N 名、块数、Poisson 噪声；**同时算"coinbase 输出地址法"份额作对照列并明标它不是逐块归属**。
 > **dry-run 实况（2026-08-27，节点 IBD，只读）**：`--dry-run 5` 只拿到 1 块 = `TESTNET12_GENESIS`（hash `300fe020…`），payload 解析 `blueScore=0 / subsidy=1e8 / spk.version=0 / spk.len=1 / script=00 / extra="kaspa-testnetTOCCATA…"`——与 `consensus/core/src/config/genesis.rs:149-165` 的 genesis coinbase_payload 字节逐字段吻合 ⇒ 解析器布局正确；`s_max=1` 是 1 块样本的平凡值，不作证据。
 
@@ -21,7 +22,9 @@
 `MIN_PAYLOAD_LENGTH = 19`（`:18-19`）；反序列化对照 `:191 deserialize_coinbase_payload`。**归属键** = `version:script`（= `ScriptPublicKey` 语义，同 `kasia-relay` 地址派生的 spk）。
 
 ## §3 脚本行为
-- **输入**：`--window-s W`（默认 3600）、`--max-blocks`、`--out`；**SYNC-GATE**（`daa > 80,095,687 ∧ isSynced`，同 (21)）；`--dry-run N` 绕闸只看解析形状、不落盘、输出带 `DRY-RUN` 标。
+- **输入**：`--window-s W`（默认 3600）、`--max-blocks`（**v0.2 默认 = `W × 10 BPS × (1+tol)`**，不再是固定 5000）、`--tol`（默认 0.10）、`--sleep-ms`（RPC 限速）、`--out`；**SYNC-GATE**（`daa > 80,095,687 ∧ isSynced`，同 (21)）；`--dry-run N` 绕闸只看解析形状、不落盘、输出带 `DRY-RUN` 标。
+- 🔴 **窗完整性（v0.2 MUST）**：`expected = W × BPS`；`blocks_fetched < expected × (1−tol)` ⇒ **`status=INCOMPLETE_WINDOW`、`s_max=null`、`gap_blocks`、退出码 4，不落 provenance**。理由：部分窗只看到窗的一段，同一矿工的连续出块段被截断 ⇒ 集中度**低估**（危险向）；宁可不出数。JSON 恒带 `completeness{expected_blocks, fetched, ratio, tol}`。**`expected` 的校核**：网络实际出块率若低于 10 BPS（停滞/低产），`fetched` 会天然低于 expected 而非漏块——须用 (21) 法 2/法 3 的实际出块率重算 expected 后再判，不能只按名义 10 BPS 判"不完整"（两向都有：漏块 = 低估集中 = 危险；低产误判 = 白白 fail-closed = 安全但浪费）。
+- **翻页去重**：`getBlocks` 相邻页首尾重叠，按 `header.hash` `Set` 去重后再计 `blocks_fetched`。
 - **覆盖（承重）**：`s_max` 的严格口径要遍历窗内**全部 DAG 块**（含非选择链块，它们也是该矿工的功）。脚本正式路径 = 先沿 selected-parent 链回溯到窗起点取 `lowHash`，再 `getBlocks(lowHash, includeBlocks, includeTransactions)` **全量前向翻页**，按块时间戳过滤进窗；dry-run 只走选择链回溯（标"漏非选择链块"）。
 - **输出 JSON**：`mode / t / daa / tipHash / window_s / coverage / blocks_fetched / layout / sample_payloads(前 3 块原 payload hex + 解析) / parsed / failed / s_max / top N(miner, blocks, share) / distinct_miners / control_output_addr(s_max_out, top) / poisson(blocks, rel_sd=1/√N)`；正式模式写 `docs/provenance/2026-08-27-smax/smax-<UTC>.json` 并打印 sha256。
 - **Poisson**：份额估计相对标差 ≈ `1/√N`；低产窗 N 小 ⇒ `s_max` 噪声大 ⇒ (23) §3 的 `R_vol` 动态阈同理，窗内 N 随 JSON 落。
@@ -29,9 +32,17 @@
 ## §4 第三方复核路径
 任何人用自己的节点跑同一脚本（或按 §2 偏移表自写）对同一 `[t−W, t]`（以 `tipHash` + 窗为锚）重算，比对 `s_max` 与 `top`；输入全是公开链数据（`getBlocks` / `getBlock` 的 header.timestamp + coinbase tx.payload）。`s_owner` 加严量不在本脚本内（那是 Owner 假设，(23) §3.5）。
 
-## §5 未覆盖 / 陷阱
-- **Sybil**：同一矿工多 script ⇒ `s_max` 偏低（(23) 已标：机械封的是可见集中，隐藏集中靠 `s_owner` 加严）。
-- **矿池**：矿池 payload 的 script 是池地址 ⇒ 池内多矿工合并成一个键（`s_max` 偏高 = 安全方向）。
+## §5 误差方向表（v0.2，NWT：错向一律优先**过计** `s_max`）
+| 误差源 | 对 `s_max` | 对 `s_adv = max(s_owner, s_max)` → `H_floor_honest` | 方向 | 处置 |
+|---|---|---|---|---|
+| 矿池合并（池内多矿工同一 script）| 偏高 | `s_adv` 偏高 ⇒ `H_floor_honest` 偏低 | **安全** | 接受 |
+| Sybil 分址（一矿工多 script）| 偏低 | `s_adv` 偏低 ⇒ `H_floor_honest` 偏高 | **危险** | 机械封不了，靠 `s_owner` 加严（(23) §3.5）|
+| 部分窗（截断连续段）| 偏低 | 同上 | **危险** | v0.2 fail-closed（`INCOMPLETE_WINDOW`）|
+| 漏红块 / 非选择链块 | 略偏高（大矿工的红块比例通常更高）| 安全向 | **安全** | 接受，正式路径用 `getBlocks` 全量 |
+| 网络低产致 `fetched < expected` | 无偏（块本来就少）| 无 | 中性 | 用实际出块率校核 expected，免误 fail-closed |
+**规则**：任何两向不定的误差，处置一律选让 `s_max` **偏高**的那边（过计 = 更早 fail-closed = 安全）。
+
+## §5-bis 未覆盖 / 陷阱
 - **`getBlocks` 翻页**上限与 `MAX_SAFE_WINDOW`/pruning 无关，但窗过大会慢；`--max-blocks` 兜底并在 JSON 里标 `blocks_fetched`，**不足窗时不得当完整窗用**。
 - **IBD 期**：只有 genesis 可取（dry-run 实证），任何 `s_max` 都是假象；正式跑必过 SYNC-GATE。
 - 正式数据待同步（(17) ③d）。
