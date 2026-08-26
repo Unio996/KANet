@@ -3,7 +3,7 @@
 > **Status**: DRAFT v0.1 · KANet-UI 2026-08-26 · Bettor 派工 (F) · **零落码**; 目的 = Owner 一点方向即可直接进 NWT 审。改动对象全是运维/启动脚本(非产品码/非钱路), 但 **push 即生效 = deploy**(lint 域纪律), 故走报备→NWT 审→Owner 批。
 > **依据**: 漂移表 `docs/2026-08-26-kanet-ui-start-script-drift.md`(A/B 逐段 + §4 六处同病) + 探针稿 §0.5 内存闸 `docs/2026-08-26-kanet-ui-kaspad-probe-ibd-vs-dead-design.md`。
 > **证据纪律**: 每条 `[MEASURED]`(实测/日志) / `[READ]`(读码) / `[DESIGN-CHOICE]` / `[TODO·需实测]`。
-> **本稿进度**: **A 完整(最急, 治 8/23 主因)**; B/C 骨架占位, 后续轮补。
+> **本稿进度**: **A + B + C 完整**(A 治 8/23 主因; B 六处改-A-忘-B; C 接位入库)。
 
 ## §A. llama ctx-size 单一源 + 内存闸落点（最急）
 
@@ -92,12 +92,83 @@ fi
 
 ---
 
-## §B. headless 六处「改 A 忘 B」（漂移表 §4）— 骨架，后续轮补
-覆盖漂移表 §4 的 #24/#15(bridge 栈+ws-proxy 杀不重起)、#21(console.log 不归档)、#4(无 KANET_TEST_MODE)、#9(supervisor 增殖+pidfile TOCTOU)、#7(端口释放 :3400 无效)、#22(仅 headless 有 --max-old-space-size)。
-- **核心设计问题(待定, 本轮先记)**: A/B 合单源 —— 建议 **headless 只做 "stop→start" 薄包装, 复用 kanet-start.sh 抽出的段落函数**(env 加载/llama 段/console 启动/日志归档 → `lib/kanet-start-common.sh`), A 保留 UI+bridge 栈, headless 只多 JSON 输出。理由/取舍下一轮展开 + 每处 file:line 修法表 + supervisor 增殖 TOCTOU 修法 + console.log .prev 补 headless。
-- supervisor 增殖: `kanet-start-headless.sh:151-157` 每拉 console 再查 pidfile 起 supervisor, pidfile 存在性检查与 start 之间有 TOCTOU; 修法下一轮。
+## §B. headless 六处「改 A 忘 B」（漂移表 §4）
 
-## §C. 接位目录入库 → docs/handoff/ — 骨架，后续轮补
-- `C:\开发过程\…\开发智能体接位\*.md` + 三份 SOP(coord-status-验签 / 频道-Monitor / 终端自驱-禁菜单) → `docs/handoff/`, 原目录留指路桩(7/12 设计 B §2.2 照抄, H3a/H3c 两条硬化别漏)。
-- `_bettor_launch_agents.ps1` 改读 `docs/handoff/` + already-running 判重 + heartbeat 文件(NWT 机制红队两条 MUST-FIX)。
-- 每处 file:line / 回滚 / 验收下一轮补。
+### B.0 架构决定：抽 `lib/kanet-start-common.sh`（不是"headless 调 kanet-start.sh"）`[DESIGN-CHOICE]`
+两个候选:
+- **(选)抽公共 lib**: 把两脚本逐字相同的四段(env 加载 / 停旧进程 / llama+内存闸 / console 启动 + 日志归档)+ sidecar 拉起, 提成 `lib/kanet-start-common.sh` 的**函数**; A source 它 + 只加 UI/banner/bridge/tail, headless source 它 + 只加 JSON 输出。"两份逐字相同的段"从此**字面上是同一个函数**, 改一处两边都变 = 漂移物理不可能。
+- **(否)headless 调 kanet-start.sh**: 不行 —— kanet-start.sh 是**交互+阻塞**(`:43-49` clear/banner, `:429` `tail -f` 永不返回), headless 需**非阻塞+JSON+spawn-不-等 llama**; source 它会继承 tail 阻塞。反向(kanet-start.sh 调 headless)更糟: A 丢掉自己的交互 tail/UX。
+- ⇒ **A/B 真正不同只在两端**(A=交互 UI+bridge+tail; B=JSON+非阻塞), 中间全同 ⇒ 抽函数是唯一对的粒度。
+
+### B.1 公共 lib 函数清单（新文件 `lib/kanet-start-common.sh`）
+| 函数 | 内容(现出处) | 修掉的漂移 |
+|---|---|---|
+| `kanet_load_env` | env 全量 export + 变量转换 + **export KANET_TEST_MODE**(A:15) + 派生 CONSOLE_PORT(A:118/B:51) | #4(B 补上 KANET_TEST_MODE) |
+| `kanet_stop_old` | 停旧进程, **跳过 console-supervisor.pid + ws-proxy/bridge 各 pidfile**(现 A:62 只跳 supervisor, B:65-72 全杀) | #9(不再杀 sidecar/supervisor) |
+| `kanet_archive_console_log` | `mv console.log console.log.prev` 再截断(A:265-266) | #21(B 补归档) |
+| `kanet_spawn_llama` | llama spawn + **A.6 内存闸** + `--ctx-size "${LLAMA_CTX_SIZE:-262144}"`(§A) | #18 + §A |
+| `kanet_spawn_console` | console spawn + **统一 node flags `--max-old-space-size=4096`**(现只 B:129 有) | #22(两边同 flags) |
+| `kanet_bring_up_sidecars` | ws-proxy(A:162-207) + bridge 栈 cc-bridge/qwen-worker/channel-bridge/owner-bot/test-cron(A:307-386), **各自幂等检查照搬** | #15+#24(headless 自愈后 sidecar 重建) |
+| `kanet_ensure_supervisor` | 幂等起 supervisor, **KANET_SUPERVISED=1 时 no-op**(见 B.2 #9) | #9 递归 |
+- **调用序(两脚本都按此, 由 lib 强制)**: `kanet_load_env` → `kanet_stop_old` → `kanet_archive_console_log` → `kanet_spawn_llama` → `kanet_spawn_console` → `kanet_bring_up_sidecars` → `kanet_ensure_supervisor`。**load_env 在 stop_old 之前** ⇒ 修 #7(端口释放用真 CONSOLE_PORT 非默认 3400)。
+
+### B.2 逐处修法 `file:line` 表
+| 漂移# | 现状(file:line) | 修法 | 判据/理由 |
+|---|---|---|---|
+| #4 KANET_TEST_MODE | 只 A:15 export; headless 无 | 移进 `kanet_load_env` | 两脚本起的 console 行为一致(reset_peer endpoint 注册与否不再看走哪个脚本) |
+| #7 端口释放 :3400 | A:75-84 用 `$CONSOLE_PORT`(此刻=默认 3400, env 未加载) | `kanet_stop_old` 在 `kanet_load_env` 之后跑 | A 的"释放 :3200"真生效(现在放空 :3400) |
+| #9a supervisor 被杀 | B:65-72 无差别杀所有 pidfile(含 supervisor 自己) | `kanet_stop_old` 跳过 console-supervisor.pid(照 A:62) | supervisor 调 headless 时不再自杀 |
+| #9b supervisor 增殖递归 | B:151-157 每拉 console 再起 supervisor | supervisor 调 headless 前 export `KANET_SUPERVISED=1`; `kanet_ensure_supervisor` 见此 flag 直接 no-op | 断"supervisor→headless→再起 supervisor"递归 |
+| #9c pidfile TOCTOU | B:151-152 "pidfile 存在且 kill -0" 与随后 start 非原子 | 用**存活判据+文件锁**(`flock` on pidfile 或 mkdir 锁), 不靠"文件存在"这个会 TOCTOU 的检查 | 两并发拉起不会各起一个 supervisor |
+| #15 ws-proxy 杀不重起 | B 无 ws-proxy 段; #9 循环杀 `kaspa-ws-proxy.pid` | `kanet_bring_up_sidecars` 含 ws-proxy(幂等), 两脚本都调 | headless 自愈后 :17310 重建 |
+| #21 console.log 不归档 | B:122 直接 `> console.log` | `kanet_archive_console_log`(mv→.prev) | headless 自愈保住死前现场(接位 ⓪ 步痛点) |
+| #22 max-old-space | 只 B:129 有 `--max-old-space-size=4096` | `kanet_spawn_console` 统一带此 flag | A/B 起的 console V8 堆一致 |
+| #24 bridge 栈杀不重起 | B 无 bridge 段; #9 循环杀其 pidfile | `kanet_bring_up_sidecars` 含 5 个 bridge(幂等), 两脚本都调 | 自愈后 owner-bot/channel-bridge 等重建(现网正缺) |
+- ⚠ **sidecar 重建的一个真问题(标出, 供 NWT/Bettor 判)**: channel-bridge 的 `consoleUrl` 现 = :3100(漂移表另项 + 五服务清单已记), 起了读错网。**`kanet_bring_up_sidecars` 拉 channel-bridge 前必须先把该 config 改 :3200**(否则自愈会稳定拉起一个读错网的进程)——这条**并入本批**一起改, 别单拉。
+
+### B.3 回滚 + 验收（对照臂）
+- **回滚**: 新增 `lib/kanet-start-common.sh` + 两脚本改为 source 它, 是一个逻辑 commit; git revert 即回两份独立脚本原状。**建议分两步落**: 先加 lib 且两脚本函数体**逐字等价**迁入(NWT diff 证"行为零变更"=纯重构), 绿了再在 lib 里逐条打开 B.2 的修法(每条单独 diff)。避免"重构+改行为"混在一个 diff 里没法审。
+| # | 验收(对照臂) | 构造 | 预期 |
+|---|---|---|---|
+| VB-1 | 纯重构等价 | 迁入 lib 后, 两脚本各跑一次 vs 迁入前 | 起的进程集合/端口/log 逐项相同(证重构零行为变更) |
+| VB-2 | #24 自愈重建(对照臂) | kill console 触发 supervisor→headless 自愈 | 自愈后 :9100/:17310 + owner-bot/channel-bridge **都在**(现在: 都没) |
+| VB-3 | #21 归档 | headless 自愈一次 | `console.log.prev` 是自愈**前**那份(现在: 被截断丢失) |
+| VB-4 | #9 无增殖 | supervisor 触发 headless 10 次 | 全程 supervisor 进程数恒 1, 无第二个 `_run`(现在: 疑 flap) |
+| VB-5 | #7 端口 | A 在 :3200 被占时跑 | 真释放 :3200(现在: 放空 :3400) |
+| VB-6 | #4 parity | headless 起的 console 查 /api/test/reset_peer | 注册(与 A 起的一致) |
+
+## §C. 接位目录入库 → `docs/handoff/`
+
+### C.1 为什么（漂移表同族 + 单点失败）
+接位文件现在**只在** `C:\开发过程\多智能体开发框架\开发智能体接位\`(仓外、非入库、非跨机)。问题: ①仓外产物无法差分/无 diff 审(记忆 feedback-hash-detects-change-but-cannot-support-a-differential); ②跨机(J1 younio)拿不到; ③改了没有版本历史。入库 `docs/handoff/` = 可差分 + 跟仓走 + 接位者 `git` 即得。
+
+### C.2 迁移清单（`ls` 实测）`[MEASURED]`
+源目录现有 .md(11 个): 5 接位(Bettor/J1/J2/NWT/KANet-UI) + 3 SOP(coord-status-验签 / 终端自驱-禁菜单 / 频道-Monitor) + 3 个 new-user-tn(operating-manual / daily-ops / 接位 / 接位与日常运维整合)。
+| 迁移 | 文件 | 去向 |
+|---|---|---|
+| 核心(Bettor 点名) | 5×`*-接位.md` + 3×`*-SOP.md` | `docs/handoff/` |
+| 附带(建议同迁, 同类) | `new-user-tn-*.md`(3-4 个运维手册) | `docs/handoff/` 或 `docs/handoff/new-user-tn/` |
+- **原址处置(H3c 硬化, 7/12 设计 :53/:54)**: 迁移后原目录**只留指路桩, 不留完整废内容** —— **横幅可被 offset 读绕过**(7/12 实证: NWT 接位被贴旧路径整读了旧内容)。桩文件**首行即指路**(扛 offset 读): 如 `→ 本文件已迁入库: D:\kanet-tn12\docs\handoff\<name>.md — 原址不再维护, 勿读此桩下方(若有)。`, 桩下不留旧正文。
+
+### C.3 launcher `_bettor_launch_agents.ps1` 改造 `[READ]`
+现状(读码): `:14 $base = 'C:\开发过程\...\开发智能体接位'`; `:23 $handoff = Join-Path $base "$a-接位.md"`; `:35` 每次盲 `Start-Process` 开新窗口, **无判重、无 heartbeat**。
+| 改# | file:line | 现状 | 改为 |
+|---|---|---|---|
+| C-1 | `:14` | `$base = 'C:\开发过程\...'` | `$base = Join-Path $repo 'docs\handoff'`(读入库路径) |
+| C-2(NWT MUST-FIX 判重) | `:22-38` 循环 | 每次盲开新窗 | 开窗前判 `claude-$a` **已在跑**则跳过 —— 查同名窗口标题 / 或读 heartbeat 文件(C-3)判活; 已活跳过 + 日志记 `skip:already-running`。防双开(同一 agent 两窗 = 两会话抢同一活, 对等消息目标歧义) |
+| C-3(NWT MUST-FIX heartbeat) | 新增 | (无) | 每个被拉起的 agent 周期写 `logs/heartbeat-<agent>.json`(ts+session); launcher 判重(C-2)与 Bettor 监工(ledger 624 三路之一"N 分钟内有无回报")读它。**注意**: heartbeat 写入是 **agent 侧行为**(接位文件加一步 or 会话自写), launcher 只**读**; 若要 agent 自动写需接位文件加约定(= handoff 文档改动, 随 C 一起) |
+- ⚠ **H3a(7/12 设计 :53/:61, 活进程旧副本)**: 已 armed 的长驻 Monitor 进程持有**旧路径/旧 NAMES 内存副本**, 文件搬家不刷新运行中进程。⇒ C 落地时**显式广播"全员按新 `docs/handoff/` 路径重新 arm monitor"一步 + 杀孤儿旧 monitor 进程**(不假设 file move 传播到活进程)。本机三人的频道 Monitor 都要重 arm。
+
+### C.4 回滚 + 验收（对照臂）
+- **回滚**: git mv 的逆操作 + launcher `$base` 改回; 桩文件删除。分两 commit: ①`git mv` 入库 + 留桩(纯移动, NWT 核内容 byte 等价) ②launcher 改路径 + 判重 + heartbeat(逻辑改动单独审)。
+| # | 验收(对照臂) | 构造 | 预期 |
+|---|---|---|---|
+| VC-1 | 内容等价 | `git mv` 后 diff 源vs目标 | byte 等价(纯移动) |
+| VC-2 | 桩扛 offset 读 | `tail -c 200 <原址桩>` 与 `head` | 都只见指路句, 无旧正文 |
+| VC-3 | launcher 读新路径 | `-DryRun` 跑 | handoff 路径 = `docs\handoff\<a>-接位.md`, 存在 |
+| VC-4(判重) | already-running | `claude-KANet-UI` 在跑时再跑 launcher | skip + 日志 `already-running`, 不开第二窗 |
+| VC-5(heartbeat) | 活性可读 | agent 起后 | `logs/heartbeat-<a>.json` ts 在刷新; launcher/监工读得到 |
+| VC-6(H3a) | 无孤儿旧 monitor | 迁移+广播后 | 无进程仍指旧 `C:\开发过程` 路径 arm 的 monitor |
+
+### C.5 依赖顺序
+C 落地前置(7/12 §4 序): 先 `git mv` 入库 + 留桩(H3c) → launcher 改路径 → 判重+heartbeat(NWT 两 MUST-FIX) → **显式广播全员重 arm monitor + 杀孤儿(H3a)**。heartbeat 需 agent 侧接位文件加"自写心跳"一步 = handoff 文档改动, 随本批。
