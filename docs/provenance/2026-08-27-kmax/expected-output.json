@@ -1,0 +1,190 @@
+{
+ "V1-genesis-bits": {
+  "target": "88342268989085881633415516702723778855028339727704627466791306615848960",
+  "target_hex": "0xccccc000000000000000000000000000000000000000000000000000000",
+  "roundtrip_bits": 504155340,
+  "work_per_block": "1310721",
+  "H1_Hs": 13107210,
+  "difficulty_ratio": 655360.625000596
+ },
+ "V2-bits-small-exp": {
+  "target": "1193046",
+  "target_hex": "0x123456",
+  "roundtrip_bits": 51524694,
+  "work_per_block": "97055764975995241950711904064708186562029814974297378091104192884197462",
+  "H1_Hs": 9.705576497599523e+71,
+  "difficulty_ratio": 4.8527923163614894e+70
+ },
+ "V3-bits-exp1": {
+  "target": "18",
+  "target_hex": "0x12",
+  "roundtrip_bits": 17956864,
+  "work_per_block": "6094320486174536601240578158351995150172104456086345475760925474100691033680",
+  "H1_Hs": 6.094320486174536e+76,
+  "difficulty_ratio": 3.216446923258783e+75
+ },
+ "V4-bits-negative-mant": {
+  "target": "0",
+  "target_hex": "0x0",
+  "roundtrip_bits": 0,
+  "work_per_block": "115792089237316195423570985008687907853269984665640564039457584007913129639936",
+  "H1_Hs": 1.157920892373162e+78,
+  "difficulty_ratio": null
+ },
+ "V5-bits-mainnet-like": {
+  "target": "4282479099181601388461766133326127197545018302507722733518848",
+  "target_hex": "0x2aa3d0000000000000000000000000000000000000000000000",
+  "roundtrip_bits": 436382269,
+  "work_per_block": "27038564942312157",
+  "H1_Hs": 270385649423121570,
+  "difficulty_ratio": 13519282471156078
+ },
+ "V6-decide-law1-min": {
+  "H_net": 2000000000,
+  "source": "law1",
+  "ratio": 1.3,
+  "note": null
+ },
+ "V7-decide-law2-min": {
+  "H_net": 1800000000,
+  "source": "law2",
+  "ratio": 2.778,
+  "note": "两法相差 >2×: tip bits 陈或窗内停滞; 决策仍取 min"
+ },
+ "V8-decide-gt2x": {
+  "H_net": 1000000000,
+  "source": "law2",
+  "ratio": 9,
+  "note": "两法相差 >2×: tip bits 陈或窗内停滞; 决策仍取 min"
+ },
+ "V9-decide-law2-missing": {
+  "H_net": 2000000000,
+  "source": "law1_only",
+  "note": "法2 缺(estimate 报错/超限) ⇒ 只用法1, 标"
+ },
+ "V10-window-ok": {
+  "window": 5000,
+  "clamped": false,
+  "note": null
+ },
+ "V11-window-over-max": {
+  "window": 10000,
+  "clamped": true,
+  "note": "window 10001 > MAX_SAFE_WINDOW_SIZE 10000 (unsafe_rpc=false 拒) ⇒ 夹到上限"
+ },
+ "V12-window-under-min": {
+  "window": 1000,
+  "clamped": true,
+  "note": "window < MIN_WINDOW_SIZE 1000 (difficulty.rs:48) ⇒ 夹到 1000"
+ },
+ "V13-implied-k1000-gpu": {
+  "H_adv_implied": 1998000000000,
+  "devices": {
+   "RTX 4090 (GPU)": {
+    "units": 999,
+    "tier": "B"
+   },
+   "RTX 5090 (GPU, 估)": {
+    "units": 499.5,
+    "tier": "C"
+   },
+   "IceRiver KS3M (ASIC)": {
+    "units": 0.333,
+    "tier": "A"
+   },
+   "Bitmain KS5 Pro (ASIC)": {
+    "units": 0.095,
+    "tier": "B"
+   }
+  }
+ },
+ "V14-implied-k10": {
+  "H_adv_implied": 18000000000,
+  "devices": {
+   "RTX 4090 (GPU)": {
+    "units": 9,
+    "tier": "B"
+   },
+   "RTX 5090 (GPU, 估)": {
+    "units": 4.5,
+    "tier": "C"
+   },
+   "IceRiver KS3M (ASIC)": {
+    "units": 0.003,
+    "tier": "A"
+   },
+   "Bitmain KS5 Pro (ASIC)": {
+    "units": 0.001,
+    "tier": "B"
+   }
+  }
+ },
+ "V15-table": [
+  {
+   "k": 10,
+   "H_adv_implied": 18000000000,
+   "devices": {
+    "RTX 4090 (GPU)": {
+     "units": 9,
+     "tier": "B"
+    },
+    "RTX 5090 (GPU, 估)": {
+     "units": 4.5,
+     "tier": "C"
+    },
+    "IceRiver KS3M (ASIC)": {
+     "units": 0.003,
+     "tier": "A"
+    },
+    "Bitmain KS5 Pro (ASIC)": {
+     "units": 0.001,
+     "tier": "B"
+    }
+   }
+  },
+  {
+   "k": 100,
+   "H_adv_implied": 198000000000,
+   "devices": {
+    "RTX 4090 (GPU)": {
+     "units": 99,
+     "tier": "B"
+    },
+    "RTX 5090 (GPU, 估)": {
+     "units": 49.5,
+     "tier": "C"
+    },
+    "IceRiver KS3M (ASIC)": {
+     "units": 0.033,
+     "tier": "A"
+    },
+    "Bitmain KS5 Pro (ASIC)": {
+     "units": 0.009,
+     "tier": "B"
+    }
+   }
+  },
+  {
+   "k": 1000,
+   "H_adv_implied": 1998000000000,
+   "devices": {
+    "RTX 4090 (GPU)": {
+     "units": 999,
+     "tier": "B"
+    },
+    "RTX 5090 (GPU, 估)": {
+     "units": 499.5,
+     "tier": "C"
+    },
+    "IceRiver KS3M (ASIC)": {
+     "units": 0.333,
+     "tier": "A"
+    },
+    "Bitmain KS5 Pro (ASIC)": {
+     "units": 0.095,
+     "tier": "B"
+    }
+   }
+  }
+ ]
+}
