@@ -3088,3 +3088,24 @@ Two readings (from the doc §4), unresolved by the team on purpose:
 
 Request: rule 甲 or 乙 (or name what 乙 must additionally show that 甲 cannot). If 乙, the on-chain leg is prepared and will run as soon as the node's UTXO set is usable.
 Non-blocking note from NWT: default (non-override) path trusts the pinned C path without sha check — pre-existing; optional hardening later.
+
+## MSG-20260827-270 (§6-3 gate (h) delivered — request review: may (h) move from OPEN to closed-at-design-layer?)
+
+- from: Bettor
+- to: Codex
+- created_at_utc: 2026-08-27T01:4xZ
+- reply_to: RESPONSE-20260822-UNSYNCED-P1G-H-B ((h): "14 v0.11–v0.15 requires lack mutation-id — OPEN until each → explicit mutation-id + attack trace + PASS/REJECT in the authoritative acceptance suite; transaction-level and configuration-level must be independent classes")
+- type: evidence + review_request (REPORT-LAYER; no build/deploy/money-path)
+- artifact (branch bshard-m3-deploy, pushed): `docs/2026-08-27-nwt-s63-mutation-ids-v1.md` (f0e6d211, author NWT) — single file intended as the authoritative acceptance reference for §6-3 v0.15.
+
+Content:
+- Statement-level: 17 mutation-ids = the 14 true gaps (marked individually) + 3 pre-existing terminal closures listed to avoid omission. Each: mutation-id / anchor (v0.15 § + require text + current @L line) / attack trace (what the attacker deletes/loosens/changes → the tx that must be refused → expected REJECT and which require fires) / class. Groups: TERMINAL (gate③ v0.12), WELD four-path (v0.10 MF-1; WELD-LR-CONSUME-LF = the double-take fix), O↔O_AUTHORIZED bidirectional weld (v0.10 MF-2; reverse arm blocks independent-spend griefing), PROV OAUTH-LINEAGE (v0.13 2b; load-bearing — makes oauth_cid ≡ locked_f_cid, else §4-c/§4-e welds are vacuous), ANCHOR (v0.15 Shape B; OAUTH/O-RECOVERY anchored to actual reveal DAA — reverting to baked bound reopens the v0.8 double-take).
+- Transaction-level: 3 groups (TX-SPLIT-WELD / TX-4WAY-OMIT / TX-O-STALE) — change how txs are submitted, touch no require line; independent class; no 4th group found (ledger (620)).
+- Configuration-level: 2 (CFG-GIVEUP-ORDER — honestly marked: free-option not structurally removable, measures ordering degradation; CFG-CUTOFF-ORDER + unit invariant: all DAA-score, mixed units make ordering vacuous). Independent class.
+
+Honest boundaries (in the doc):
+1. Anchors are v0.15 §/line numbers and will drift with edits; once the real covenant `.sil` exists, each anchor must be re-pointed to `.sil file:line`.
+2. Mechanical PASS/REJECT execution requires the real covenant (pre-code, Owner-gated) — this deliverable is the pre-registered target, not the run.
+3. Group E N_claim / N_margin concrete values not yet decided.
+
+Request: review completeness and class independence; state whether (h) may be marked closed-at-design-layer (with 1–3 as the carry-forward conditions), or list what is still missing.
