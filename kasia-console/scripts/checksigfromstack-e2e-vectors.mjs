@@ -13,11 +13,15 @@
 //   两者一致才说明 codegen 对; 只跑离线 = 只测了 kaspa-wasm, 那不是本卡的题。
 //
 // 编译坐标(硬断言, 见下 assertPinnedCompiler): versioned-builds/silverc-zk-8065184.exe
-import { existsSync, writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, writeFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, createHash } from 'node:crypto';
 
-const SILVERC = 'D:/silverscript/versioned-builds/silverc-zk-8065184.exe';
+// P1(g) 离线腿(2026-08-27, Codex 8/22 窄 MUST-FIX: 用【重建出的】编译器跑冻结向量):
+//   env P1G_SILVERC 覆盖被测编译器(如 item5 的 A = scratch/_p1g_verify/target/release/silverc.exe);
+//   不设 ⇒ 默认仍是权威 C, 下方 assertPinnedCompiler 的语义不变。输出与 vectors.json 都打印编译器 sha256。
+const SILVERC = process.env.P1G_SILVERC || 'D:/silverscript/versioned-builds/silverc-zk-8065184.exe';
+const sha256File = (p) => createHash('sha256').update(readFileSync(p)).digest('hex');
 const LEGACY = 'D:/silverscript/target/release/silverc.exe';
 const SIL = 'D:/kanet-tn12/kasia-console/src/lib/CheckSigFromStackProbe.sil';
 const OUT = 'D:/kanet-tn12/scratch/e2e';
@@ -150,8 +154,17 @@ writeFileSync(`${OUT}/_ctor.json`, JSON.stringify([ctorArg]));
 
 console.log('\n=== 编译坐标断言(必须在 ctor 生成【之后】跑) ===');
 assertPinnedCompiler();
+// 用被测编译器真编一次 probe, 记录编译器 sha256 与产出 script sha256 —— "哪个二进制产出了这段字节"必须在证据里, 不能只写路径
+const compilerSha = sha256File(SILVERC);
+const probeOut = `${OUT}/probe_${compilerSha.slice(0, 8)}.json`;
+execFileSync(SILVERC, [SIL, '--ctor', `${OUT}/_ctor.json`, '-o', probeOut], { stdio: 'pipe', encoding: 'utf8' });
+const probeJson = JSON.parse(readFileSync(probeOut, 'utf8'));
+const scriptHex = Buffer.from(probeJson.script).toString('hex');
+const scriptSha = createHash('sha256').update(scriptHex).digest('hex');
+console.log(`  编译器 ${SILVERC}\n  compiler sha256=${compilerSha}\n  probe script ${scriptHex.length / 2}B sha256(hex)=${scriptSha} → ${probeOut}`);
 writeFileSync(`${OUT}/vectors.json`, JSON.stringify({
-  compiler: SILVERC, sil: SIL, pkBaked: KEY_A.pkXOnly,
+  compiler: SILVERC, compiler_sha256: compilerSha, probe_script_sha256: scriptSha, probe_script_bytes: scriptHex.length / 2,
+  sil: SIL, pkBaked: KEY_A.pkXOnly,
   note: '🔴 privkey 不入此文件; 上链跑时现签或另传。本文件可公开。',
   vectors: VECTORS.map(({ id, why, sig, digest, expect }) => ({ id, why, sig, digest, expect })),
 }, null, 1));
