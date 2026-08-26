@@ -30,7 +30,7 @@
      --cache-type-k q8_0 --cache-type-v q8_0 \
      --threads 8 --flash-attn on \
      >> /d/kanet-tn12/logs/llama-server.log 2>&1) &
-   echo $! > /d/kanet-tn12/pids/llama-server.pid   # PID_DIR 以 kanet.env / 脚本为准；若目录不同按脚本 $PID_DIR
+   echo $! > /d/kanet-tn12/logs/pids/llama-server.pid   # PID_DIR="$LOG_DIR/pids"（kanet-start-headless.sh:8）
    ```
    （与 live 17428 的 qclaude.bat:64 flag 集相同，仅 `--ctx-size` 1048576→262144；`>>` 追加不截断旧日志，保留旧 kv 行作对照。）
 6. 验（对照臂 A.7 VA-1/VA-6 + A.5 ②）——直接跑 `powershell -NoProfile -ExecutionPolicy Bypass -File D:/kanet-tn12/scripts/a5-verify.ps1` 得"后"臂，并补三项：① 旧 17428 真没了（`Get-Process -Id 17428` 报错）；② **消费端真推理成功**：经 adapter 走一次 Mind/Qwen 调用（不只 /props——证 Mind/Qwen 重连上新实例）；③ 停窗内 console-supervisor 与 llm-watchdog 都没 fire（`logs/kanet-console-supervisor.log` 尾无新重启行、Win32_Process 无 llm-watchdog）。预期：`llama_kv_cache: size = 4352.00 MiB`（旧 17408）、/props `n_ctx=262144`、VRAM ~28.5 GB → ~13-14 GB、新实例私有 commit vs 旧 30.15 GB。
