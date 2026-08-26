@@ -1,5 +1,6 @@
-# §6-3 gate (d) · P3 fee-source 模型 v0.2（结构稿 · 零数 · 零落码 · 不改 v0.15 正文）
+# §6-3 gate (d) · P3 fee-source 模型 v0.3（结构稿 · 零数 · 零落码 · 不改 v0.15 正文）
 
+> **v0.3（Codex eb4db39c：结构层 *PASS*，设计选择 OPEN，推荐 **(b)**）**：§6 加 Codex 推荐原句与 (b) 下 `min_O` 重定义（只围绕 O/存储/价值地板；claim 费储备归 claimant/watchtower 就绪度），与 (d) 稿 v0.8 3-A / §7 2-bis-4 交叉引用；Bettor 措辞对表：§4 标题加回 `@7b1e18cc`、"权衡非证明"、§6 改动记录句加 `[改动记录]` 前缀。终选仍待 Owner。
 > **v0.2（NWT b3f7fe0c GREEN-WITH-NOTES 三须改 + Bettor 两补）**：H2 "二值"限定为**费率地板**——`feerate_key.rs` 是**区块模板选择**（feerate 优先）非驱逐 ⇒ 拥塞时低费 = **时延态存在**，归 bounded-inclusion（§3）；H3 分清"死区 = **效率损 ≤2e6**"（`P_R` 总能零找零走松弛路 claim，**不封锁**）vs "`F > min_O` = **结构死、本金级**"（§5）；H4 watchtower 论据**符号反了**——(a) 下费出自 O ⇒ `WT` 零本钱可提交 = (a) 对 WT 参与是**利**，不是 (b) 的理由；(b) 倾向保留，论据换成"韧性 + 无结构死"，作为真权衡呈 Owner/Codex（§6）。Bettor 两补：v0.15 源坐标 + grep 命令/输出（§4）；rusty-kaspa 坐标作用域声明（§4）。
 > **Status**: DRAFT v0.2 · J2 2026-08-27 · Bettor 派工 (18) · 为 (d) 稿（`docs/2026-08-27-j2-s63-gate-d-conservative-bounds-v0.1.md` v0.5 = 289af371）剩余三件之一 "P3 fee-source" 出**结构**：每条支路费由哪个输入出、输入拓扑是否被 covenant 限、费不足谁先死、费率/拥塞是否已在 `N_margin` 具名项里。**不拍任何数，占位全标 PLACEHOLDER**；不依赖节点/Owner。
 > 坐标纪律：rusty-kaspa 全部 `git show 7b1e18cc:<path>`；v0.15 = `docs/2026-08-21-j1-s6-3-A-covenant-construction-v0.15.md` §行。
@@ -66,7 +67,7 @@
 
 ---
 
-## §4 断言坐标表
+## §4 断言坐标表（@7b1e18cc）
 
 **作用域声明（Bettor 补）**：下表所有 rusty-kaspa 坐标一律取自 **live 二进制 commit `7b1e18cc`**（`cd /d/rusty-kaspa && git show 7b1e18cc:<path>`），不是工作树（HEAD `90dbf074`，两者 `params.rs` 已不同）；文内凡未另注的 rusty-kaspa file:line 均属此作用域。
 
@@ -114,10 +115,11 @@
 | (d) 稿 3-A "过大无害" | 补 §5 死区 | 措辞 | 下版 (d) 顺手 |
 
 **待 Owner 定的只有一件**：(a) `OpTxInputCount==2` 还是 (b) 只锚存储地板。**真权衡（v0.2，NWT H4 纠：v0.1 的 watchtower 论据符号反了）**：
-- **(a) 的利**：费出自 O（`P_F` 预付）⇒ `P_R` **和任何 watchtower 都零本钱可提交**（payout 焊给 `P_R`，WT 本就利他）⇒ **(a) 对 watchtower 多重参与是【利】**——v0.1 写"WT 无法自带费是 (a) 的负担"是反的，删。
+- **(a) 的利**：费出自 O（`P_F` 预付）⇒ `P_R` **和任何 watchtower 都零本钱可提交**（payout 焊给 `P_R`，WT 本就利他）⇒ **(a) 对 watchtower 多重参与是【利】**——[改动记录] v0.1 写"WT 无法自带费是 (a) 的负担"是反的，v0.2 删。
 - **(a) 的害**：§2 那条 (b) 没有的**结构死**（mass 规则变 / 脚本比预估重 ⇒ `P_R` 不能加输入自救）+ §5 死区效率损。
 - **(b) 的利**：**韧性**——`P_R`/WT 永远能加输入自救，**无结构死法**；**(b) 的害**：零本钱 `P_R` 不能 claim、WT 须自带费。
-- 本稿**净倾向仍 (b)**（无结构死 > 便利），**但这是权衡不是证明**，呈 Owner/Codex 决；NWT 提的第三选项 (a')"`OpTxInputCount ≥ 2` 且 O 必在输入"等变体若要评估，另立小稿。
+- 本稿**净倾向仍 (b)**（无结构死 > 便利），**但这是权衡非证明**，呈 Owner/Codex 决；NWT 提的第三选项 (a')"`OpTxInputCount ≥ 2` 且 O 必在输入"等变体若要评估，另立小稿。
+- 🔴 **Codex eb4db39c（v0.3）**：*"Between the two choices, I recommend **(b) allow extra ordinary fee inputs** for the current design direction. It avoids the structural failure where future mass/fee changes make a fixed O-funded claim unspendable, while keeping recipient/value/covenant provenance welded by the existing Shape-B constraints. The tradeoff is explicit: claimant/watchtower must be able to fund fees."* 且 *"If (b) is selected, `min_O` must be redefined only around the O/storage/value-floor function it truly serves; claim fee reserve belongs to claimant/watchtower operating readiness, not to `min_O`."* ⇒ (b) 下：`min_O = SF × storage_floor`（§3-A 于 (d) 稿）；`F_claim_reserve` 从 `min_O` 剥离，改为 **claimant/watchtower 就绪度检查项**（入场前核发起方/WT 可用 UTXO ≥ `F_claim_reserve`，同 §6 fail-closed 族）；`F_reveal_reserve` 不变（仍是 `P_F` 的事）。**终选仍 OPEN 待 Owner**；本稿与 (d) v0.8 3-A / §7 2-bis-4 互引。
 
 ---
 
