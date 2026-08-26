@@ -1,0 +1,23 @@
+=== ADVERSARIAL timestamps (max future-stamp under +132s cap) ===
+k	B_win_adv(plateau)	peak	sim_wall_s
+1.5	6436		6436	20508
+2	9792		9792	20173
+3	14178		14178	19734
+5	19203		19203	19232
+10	25279		25279	18624
+50	36968		36968	17455
+
+If plateau stays bounded (not growing with sim length) => future cap BOUNDS the DAA-pump.
+Compare honest-model B_win(k=10)=23,959 and placeholder 55,200.
+
+=== unboundedness test: same k=10, longer sim ===
+sim_len=2× window, k=10: plateau_excess=25108 DAA (wall 2777s)
+sim_len=4× window, k=10: plateau_excess=25279 DAA (wall 8048s)
+sim_len=8× window, k=10: plateau_excess=25279 DAA (wall 18624s)
+
+=== extreme-k ceiling (does adversarial B_win ever exceed 55,200 placeholder?) ===
+k=10: plateau@8win=25279  @16win=25279  converged=true  under_55200=true
+k=50: plateau@8win=36968  @16win=36968  converged=true  under_55200=true
+k=100: plateau@8win=41236  @16win=41236  converged=true  under_55200=true
+k=1000: plateau@8win=53070  @16win=53070  converged=true  under_55200=true
+k=1000000: plateau@8win=75749  @16win=75749  converged=true  under_55200=false

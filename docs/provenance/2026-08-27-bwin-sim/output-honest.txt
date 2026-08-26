@@ -1,0 +1,25 @@
+=== B_win(k): steady-state regime (§6 gate passed, difficulty responsive) ===
+k	B_win(plateau DAA)	peak_excess	restab_block	sim_wall_s
+1	0		0		41		10576
+1.5	5116		5116		33241		10064
+2	8472		8472		41361		9729
+3	12858		12858		45561		9290
+5	17883		17883		48681		8788
+10	23959		23959		60041		8180
+monotonic in k: true
+
+=== vs crude upper bound (full window 26,440 × (1−1/k)) ===
+k=1	sim=0	crude_UB=0
+k=1.5	sim=5116	crude_UB=8813
+k=2	sim=8472	crude_UB=13220
+k=3	sim=12858	crude_UB=17627
+k=5	sim=17883	crude_UB=21152
+k=10	sim=23959	crude_UB=23796
+
+=== fixed-difficulty regime (§6 MUST disable Tier-2): excess over T_fixed wall-clock ===
+formula: excess_DAA = (k − 1) × 10/s × T_fixed_remaining_seconds  [UNBOUNDED in k]
+k=2, T_fixed=600s -> excess = 6000 DAA (and grows with any longer pin)
+k=5, T_fixed=600s -> excess = 24000 DAA (and grows with any longer pin)
+k=10, T_fixed=600s -> excess = 54000 DAA (and grows with any longer pin)
+
+placeholder in v0.5 doc: B_win = 55,200. sim max (k=10 steady) = 23959
