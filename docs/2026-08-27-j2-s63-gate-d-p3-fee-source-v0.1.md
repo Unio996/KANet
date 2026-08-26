@@ -1,6 +1,7 @@
-# §6-3 gate (d) · P3 fee-source 模型 v0.1（结构稿 · 零数 · 零落码 · 不改 v0.15 正文）
+# §6-3 gate (d) · P3 fee-source 模型 v0.2（结构稿 · 零数 · 零落码 · 不改 v0.15 正文）
 
-> **Status**: DRAFT v0.1 · J2 2026-08-27 · Bettor 派工 (18) · 为 (d) 稿（`docs/2026-08-27-j2-s63-gate-d-conservative-bounds-v0.1.md` v0.5 = 289af371）剩余三件之一 "P3 fee-source" 出**结构**：每条支路费由哪个输入出、输入拓扑是否被 covenant 限、费不足谁先死、费率/拥塞是否已在 `N_margin` 具名项里。**不拍任何数，占位全标 PLACEHOLDER**；不依赖节点/Owner。
+> **v0.2（NWT b3f7fe0c GREEN-WITH-NOTES 三须改 + Bettor 两补）**：H2 "二值"限定为**费率地板**——`feerate_key.rs` 是**区块模板选择**（feerate 优先）非驱逐 ⇒ 拥塞时低费 = **时延态存在**，归 bounded-inclusion（§3）；H3 分清"死区 = **效率损 ≤2e6**"（`P_R` 总能零找零走松弛路 claim，**不封锁**）vs "`F > min_O` = **结构死、本金级**"（§5）；H4 watchtower 论据**符号反了**——(a) 下费出自 O ⇒ `WT` 零本钱可提交 = (a) 对 WT 参与是**利**，不是 (b) 的理由；(b) 倾向保留，论据换成"韧性 + 无结构死"，作为真权衡呈 Owner/Codex（§6）。Bettor 两补：v0.15 源坐标 + grep 命令/输出（§4）；rusty-kaspa 坐标作用域声明（§4）。
+> **Status**: DRAFT v0.2 · J2 2026-08-27 · Bettor 派工 (18) · 为 (d) 稿（`docs/2026-08-27-j2-s63-gate-d-conservative-bounds-v0.1.md` v0.5 = 289af371）剩余三件之一 "P3 fee-source" 出**结构**：每条支路费由哪个输入出、输入拓扑是否被 covenant 限、费不足谁先死、费率/拥塞是否已在 `N_margin` 具名项里。**不拍任何数，占位全标 PLACEHOLDER**；不依赖节点/Owner。
 > 坐标纪律：rusty-kaspa 全部 `git show 7b1e18cc:<path>`；v0.15 = `docs/2026-08-21-j1-s6-3-A-covenant-construction-v0.15.md` §行。
 
 ---
@@ -8,7 +9,7 @@
 ## §0 结论先行（三句）
 1. **费从哪来是"谁的本金被花"决定的，不是 covenant 决定的**：v0.15 十支里**没有一条**限制输入个数（全部只限 `OpCovOutputCount` / 特定 co-input 存在 / 特定输出值），⇒ 任何一笔都可以加普通费输入。唯一"值被焊死、付不了费"的输出是 **claim 的 payout（`== OAUTH_value`）** 与 **reveal 的 O_AUTHORIZED（`== LOCKED_F_value`）**；所以只有 **claim（T5）** 存在"费只能从 O 或额外输入出"的问题——这就是 (d) v0.2 §7 二选一的全部范围。
 2. **费不足先死的是 claim（T5）**：它是十支里唯一同时满足【有 DAA 截止】∧【payout 值焊死不能让费】的支路；recovery/refund/giveup 都无截止且 payout 值不焊死（费从本金里扣即可）。⇒ 费面上的失败方向与 first-mover-with-mining 威胁模型**同向**：claim 落不了 ⇒ recovery 得利。
-3. **费率/拥塞不是时间量**：TN12 无费市场，mempool 只有一个绝对下限（`minimum_relay_transaction_fee`）与 mass 上限；费不够 = **永不落链（二值）**，不是"落得慢"。⇒ 它不该塞进 `N_margin` 任何 DAA 项，(d) 稿 `M_congest` 也**没有**覆盖它。本稿单列 **sompi 域**具名项 `F_claim_reserve`（§3），不许被 DAA 项吸收；**对抗性拥塞（矿工首动方填块）= 审查 = bounded-inclusion 假设之外**，本稿不假装用费解它。
+3. **费率地板不是时间量（v0.2 限定）**：mempool 绝对下限（`minimum_relay_transaction_fee`）之下 = **永不落链（二值）**；**但地板之上**，`feerate_key.rs` 按 feerate 排序做**区块模板选择**（非驱逐）⇒ 拥塞时低费 tx 是**时延态**（等块空间），归 bounded-inclusion。⇒ 二值部分单列 **sompi 域**具名项 `F_claim_reserve`（§3），不许被 DAA 项吸收；时延部分归 (d) 稿 `M_congest`/bounded-inclusion；**对抗性拥塞（矿工首动方填块）= 审查 = bounded-inclusion 假设之外**，本稿不假装用费解它。
 
 ---
 
@@ -52,7 +53,7 @@
 
 ## §3 费率波动 / mempool 拥塞 —— 在不在 `N_margin` 里？
 
-**在不在**：(d) 稿 `N_margin` 三具名项 = `M_observe`（失能窗）/ `M_reorg`（重选退回）/ `M_congest`（**落链时延的方差**，DAA 域）。**费不够导致的"不落链"是二值事件，不是时延方差** ⇒ `M_congest` **没有**覆盖它，也**不该**覆盖它（把二值失败折成时间余量 = 用 DAA 兜 sompi = 错域，同 CFG-UNIT-DOMAIN 族）。
+**在不在**：(d) 稿 `N_margin` 三具名项 = `M_observe`（失能窗）/ `M_reorg`（重选退回）/ `M_congest`（**落链时延的方差**，DAA 域）。🔵 **v0.2 精度（NWT H2）**："二值"只对**地板**成立：低于 `minimum_relay_transaction_fee`（`mining/src/mempool/config.rs:19`，`:129 minimum_feerate()`）= 进不了 mempool = 永不落链；**地板之上**，`mining/src/mempool/model/frontier/feerate_key.rs:60-77 impl Ord`（"Our first priority is the feerate"）只决定**区块模板选择顺序**、不驱逐 ⇒ 拥塞时低费 tx 是**时延态**，这一段属 bounded-inclusion / `M_congest` 的时延方差域。⇒ **地板之下的二值失败** `M_congest` 没有也不该覆盖（折成时间余量 = 用 DAA 兜 sompi = 错域，CFG-UNIT-DOMAIN 族）；**地板之上的时延**归 DAA 域，不进 `F_*`。
 
 **单列具名项（sompi 域，不吸收）**：
 | 项 | 域 | 定义 | 谁承担 | 来源坐标 |
@@ -65,7 +66,18 @@
 
 ---
 
-## §4 断言坐标表（@7b1e18cc）
+## §4 断言坐标表
+
+**作用域声明（Bettor 补）**：下表所有 rusty-kaspa 坐标一律取自 **live 二进制 commit `7b1e18cc`**（`cd /d/rusty-kaspa && git show 7b1e18cc:<path>`），不是工作树（HEAD `90dbf074`，两者 `params.rs` 已不同）；文内凡未另注的 rusty-kaspa file:line 均属此作用域。
+
+**承重点 "v0.15 十支零处输入数 require" 的源与复核（Bettor 补）**：
+- v0.15 = 设计稿伪码，**无对应 `.sil`**（这正是 (b)(h) OPEN 的原因）：`docs/2026-08-21-j1-s6-3-A-covenant-construction-v0.15.md`，最近改动 commit `2b6a61c8`，blob `3d5fcea4b024546fca31cea4d13f303306593ae9`（`git hash-object`）。
+- 命令与输出（2026-08-27 J2 跑）：
+  ```
+  grep -c 'require(' docs/2026-08-21-j1-s6-3-A-covenant-construction-v0.15.md            → 35
+  grep -c 'OpTxInputCount\|tx.inputs.length' docs/2026-08-21-j1-s6-3-A-covenant-construction-v0.15.md → 0
+  ```
+  即 35 处 `require(` 里 0 处引用输入数原语；NWT b3f7fe0c 已独立核到下一层（全部 introspection 按调用方给的索引、零处全输入聚合），承重等价成立。
 
 | 断言 | 坐标 | 原文/要点 |
 |---|---|---|
@@ -74,6 +86,7 @@
 | 计算质量组成 | `consensus/core/src/mass/mod.rs:334-360` | `compute_mass = size × mass_per_tx_byte + Σ(2 + spk.len) × mass_per_script_pub_key_byte + Σ compute_budget(v1)`；`transient = size × TRANSIENT_BYTE_TO_MASS_FACTOR` |
 | mass 单价（TN12 继承 TESTNET_PARAMS）| `consensus/core/src/config/params.rs:639-641`（`mass_per_tx_byte: 1` / `mass_per_script_pub_key_byte: 10` / `mass_per_sig_op: 1000`）；`:645 storage_mass_parameter` | TN12 块 `:687 block_mass_limits { compute: 500_000, storage: 500_000, transient: 1_000_000 }`；`:684 max_signature_script_len: 300_000` |
 | mempool 费下限 | `mining/src/mempool/config.rs:19`、`:129` | `DEFAULT_MINIMUM_RELAY_TRANSACTION_FEE = 1000`；`minimum_feerate()` |
+| 地板之上按 feerate 选模板（非驱逐）| `mining/src/mempool/model/frontier/feerate_key.rs:8 FeerateTransactionKey`、`:34 feerate()`、`:60-77 impl Ord`（"Our first priority is the feerate"）| 拥塞时低费 = 时延态（H2 限定的依据）|
 | 输入数原语（(a) 选项可用）| `crypto/txscript/src/opcodes/mod.rs:1119 OpTxInputCount<0xb3>`；silverscript `tx.inputs.length`（`/d/silverscript/docs/TUTORIAL.md:923`）| 本仓 `PoolSide.sil` 已用 |
 | v0.15 各支无输入数 require | v0.15 @L232-236 / @L242-248 / @L257-266 / @L269 / @L273 / @L288-296 | 逐支只见 `OpInputCovenantId(特定 idx)`、`OpCovOutputCount`、输出 spk/value；**零处** `OpTxInputCount` |
 | 本仓既有费口径（只引用）| `kasia-relay/src/lib/p2sh.mjs:1737 _BSHARD_FEE_PER_INPUT = 1_000_000n`；`kasia-console/src/lib/kip9-mass.mjs:90 computeSingleOutputFee(minFee 2e6, maxFee 1e8)`；`pool.js:55 BETTOR_MIN_STAKE_PHYS_FLOOR = 100_000`（实测）| 供 P3 真形状出来后现算，**不是本稿依据** |
@@ -81,7 +94,7 @@
 ---
 
 ## §5 一处 (d) 稿 3-A 没写到的 T5 细节（影响 (a) 的 `min_O` 形式）
-在 (a) 下，claim 若把 O 的剩余作**找零输出**：T5 变成 |I|=2、|O|=2 ⇒ 松弛公式 `C·(1/payout + 1/change − 1/O − 1/OAUTH)`；**找零太小 ⇒ `C/change` 独自就能超 `storage: 500_000`**（`1e12 / 5e5 = 2e6` sompi 是单个小输出的地板）⇒ tx 无效。⇒ (a) 下 `min_O` 只有两种合法形态：**恰等于费（零找零）** 或 **≥ 费 + 存储地板（有找零）**；"多给一点当找零"在 `[费, 费+2e6)` 区间是**死区**。(d) 稿 3-A 的"多出部分反应方可作找零拿回、过大无害"须补这条：**过大无害成立，"略大"有害**。(b) 下无此问题（找零来自发起者自己的费输入，可任意合并）。PLACEHOLDER：具体死区边界按 P3 真形状用 `mass/mod.rs:430` 现算。
+在 (a) 下，claim 若把 O 的剩余作**找零输出**：T5 变成 |I|=2、|O|=2 ⇒ 松弛公式 `C·(1/payout + 1/change − 1/O − 1/OAUTH)`；**找零太小 ⇒ `C/change` 独自就能超 `storage: 500_000`**（`1e12 / 5e5 = 2e6` sompi 是单个小输出的地板）⇒ tx 无效。⇒ (a) 下 `min_O` 只有两种合法形态：**恰等于费（零找零）** 或 **≥ 费 + 存储地板（有找零）**；"多给一点当找零"在 `[费, 费+2e6)` 区间是**死区**。🔴 **危害级别（v0.2，NWT H3 分清）**：死区**不是 claim 封锁**——`P_R` 永远可以**零找零**（|O|=1 走松弛路 `mass/mod.rs:460-467`，费 = `O.value` 全额，超出部分捐给矿工）⇒ **总能 claim，只损失 ≤2e6 sompi 可回收超额 = 效率损**；与 §2 的"`F_claim_reserve > O.value`（费 > `min_O`）= 结构死、本金级"是**两个级别**，不许混写。(d) 稿 3-A 的"多出部分反应方可作找零拿回、过大无害"须补：**过大无害成立，"略大"= 效率损（非封锁）**。(b) 下无此问题（找零来自发起者自己的费输入，可任意合并）。PLACEHOLDER：具体死区边界按 P3 真形状用 `mass/mod.rs:430` 现算。
 
 ---
 
@@ -100,7 +113,11 @@
 | 威胁模型 | 补一句：矿工首动方的**审查**与**费面**是两条不同的 claim 死法，前者在 bounded-inclusion 之外、后者由 (a)/(b) + `F_claim_reserve` 解 | 措辞 | 下版 (d) 顺手 |
 | (d) 稿 3-A "过大无害" | 补 §5 死区 | 措辞 | 下版 (d) 顺手 |
 
-**待 Owner 定的只有一件**：(a) `OpTxInputCount==2` 还是 (b) 只锚存储地板。本稿的推荐倾向（不是拍板）：**(b)**——它没有结构性死法（§2），代价只是便利；(a) 的唯一好处"零本钱可 claim"在 watchtower 多重方案下反而是负担（`WT` 无法自带费）。
+**待 Owner 定的只有一件**：(a) `OpTxInputCount==2` 还是 (b) 只锚存储地板。**真权衡（v0.2，NWT H4 纠：v0.1 的 watchtower 论据符号反了）**：
+- **(a) 的利**：费出自 O（`P_F` 预付）⇒ `P_R` **和任何 watchtower 都零本钱可提交**（payout 焊给 `P_R`，WT 本就利他）⇒ **(a) 对 watchtower 多重参与是【利】**——v0.1 写"WT 无法自带费是 (a) 的负担"是反的，删。
+- **(a) 的害**：§2 那条 (b) 没有的**结构死**（mass 规则变 / 脚本比预估重 ⇒ `P_R` 不能加输入自救）+ §5 死区效率损。
+- **(b) 的利**：**韧性**——`P_R`/WT 永远能加输入自救，**无结构死法**；**(b) 的害**：零本钱 `P_R` 不能 claim、WT 须自带费。
+- 本稿**净倾向仍 (b)**（无结构死 > 便利），**但这是权衡不是证明**，呈 Owner/Codex 决；NWT 提的第三选项 (a')"`OpTxInputCount ≥ 2` 且 O 必在输入"等变体若要评估，另立小稿。
 
 ---
 
