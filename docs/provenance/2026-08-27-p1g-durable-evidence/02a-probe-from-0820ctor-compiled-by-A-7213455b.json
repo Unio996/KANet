@@ -1,0 +1,164 @@
+{
+  "contract_name": "CheckSigFromStackProbe",
+  "compiler_version": "0.1.0",
+  "script": [
+    120,
+    120,
+    32,
+    221,
+    245,
+    229,
+    242,
+    76,
+    239,
+    149,
+    241,
+    60,
+    160,
+    39,
+    98,
+    232,
+    168,
+    108,
+    195,
+    148,
+    123,
+    41,
+    87,
+    227,
+    66,
+    100,
+    189,
+    61,
+    67,
+    193,
+    223,
+    57,
+    194,
+    82,
+    63,
+    215,
+    105,
+    117,
+    117,
+    81
+  ],
+  "ast": {
+    "pragma": {
+      "name": "silverscript",
+      "value": "^0.1.0",
+      "span": "pragma silverscript ^0.1.0;",
+      "name_span": "silverscript",
+      "value_span": "^0.1.0"
+    },
+    "name": "CheckSigFromStackProbe",
+    "params": [
+      {
+        "type_ref": {
+          "base": "pubkey"
+        },
+        "name": "pkBaked",
+        "span": "pubkey pkBaked",
+        "type_span": "pubkey ",
+        "name_span": "pkBaked"
+      }
+    ],
+    "constants": [],
+    "functions": [
+      {
+        "name": "verify",
+        "params": [
+          {
+            "type_ref": {
+              "base": "datasig"
+            },
+            "name": "s",
+            "span": "datasig s",
+            "type_span": "datasig ",
+            "name_span": "s"
+          },
+          {
+            "type_ref": {
+              "base": "byte",
+              "array_dims": [
+                {
+                  "kind": "fixed",
+                  "value": 32
+                }
+              ]
+            },
+            "name": "digest",
+            "span": "byte[32] digest",
+            "type_span": "byte[32]",
+            "name_span": "digest"
+          }
+        ],
+        "entrypoint": true,
+        "return_types": [],
+        "returns_tuple": false,
+        "body": [
+          {
+            "kind": "require",
+            "data": {
+              "expr": {
+                "kind": "call",
+                "data": {
+                  "name": "checkSigFromStack",
+                  "args": [
+                    {
+                      "kind": "identifier",
+                      "data": "s",
+                      "span": "s"
+                    },
+                    {
+                      "kind": "identifier",
+                      "data": "digest",
+                      "span": "digest"
+                    },
+                    {
+                      "kind": "identifier",
+                      "data": "pkBaked",
+                      "span": "pkBaked"
+                    }
+                  ],
+                  "name_span": "checkSigFromStack"
+                },
+                "span": "checkSigFromStack(s, digest, pkBaked)"
+              },
+              "message": null,
+              "span": "require(checkSigFromStack(s, digest, pkBaked));",
+              "message_span": null
+            }
+          }
+        ],
+        "return_type_spans": [],
+        "span": "entrypoint function verify(datasig s, byte[32] digest) {\n        require(checkSigFromStack(s, digest, pkBaked));\n    }",
+        "name_span": "verify",
+        "body_span": "require(checkSigFromStack(s, digest, pkBaked));"
+      }
+    ],
+    "span": "contract CheckSigFromStackProbe(pubkey pkBaked) {\n    entrypoint function verify(datasig s, byte[32] digest) {\n        require(checkSigFromStack(s, digest, pkBaked));\n    }\n}",
+    "name_span": "CheckSigFromStackProbe"
+  },
+  "abi": [
+    {
+      "name": "verify",
+      "inputs": [
+        {
+          "name": "s",
+          "type_name": "datasig"
+        },
+        {
+          "name": "digest",
+          "type_name": "byte[32]"
+        }
+      ]
+    }
+  ],
+  "without_selector": true,
+  "state_layout": {
+    "start": 0,
+    "len": 0
+  },
+  "debug_info": null
+}

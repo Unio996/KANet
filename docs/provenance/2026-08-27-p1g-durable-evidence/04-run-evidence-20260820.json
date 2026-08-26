@@ -1,0 +1,57 @@
+[
+ {
+  "window": "V1",
+  "expect": "REJECT",
+  "v0Before": "PASS",
+  "result": "REJECT",
+  "reason": "RPC Server (remote error) -> Rejected transaction e098f4b17af51e28f5518b1fe4bcb43eabf45fae364ffe81b3b9d6312aee565d: failed to verify the signature script: not all signatures empty on failed checkmultisig"
+ },
+ {
+  "window": "V2",
+  "expect": "REJECT",
+  "v0Before": "PASS",
+  "result": "REJECT",
+  "reason": "RPC Server (remote error) -> Rejected transaction 6c1aa057ae222e048bb6aa92e9faab1714694555a5f34f5a750bb50f0f2fd28d: failed to verify the signature script: not all signatures empty on failed checkmultisig"
+ },
+ {
+  "window": "V3",
+  "expect": "REJECT",
+  "v0Before": "PASS",
+  "result": "REJECT",
+  "reason": "RPC Server (remote error) -> Rejected transaction 0cb56deb1b87398a23ad9a55c55e683613265ec19b7eed850001f32ef054118e: failed to verify the signature script: not all signatures empty on failed checkmultisig"
+ },
+ {
+  "window": "V4",
+  "expect": "REJECT",
+  "v0Before": "PASS",
+  "result": "REJECT",
+  "reason": "RPC Server (remote error) -> Rejected transaction 6a34068ace99eec8db2eeeba1438db3e01e1c20c7f0a55600b39d5f3d5c40ac0: failed to verify the signature script: script ran, but verification failed"
+ },
+ {
+  "window": "V5a",
+  "expect": "REJECT",
+  "v0Before": "PASS",
+  "result": "REJECT",
+  "reason": "RPC Server (remote error) -> Rejected transaction 31f078771d8a982bf75276b43bedf3ade3e6471d9e055c94aeacdc8a86f8820f: failed to verify the signature script: not all signatures empty on failed checkmultisig"
+ },
+ {
+  "window": "V5b",
+  "expect": "REJECT",
+  "v0Before": "PASS",
+  "result": "REJECT",
+  "reason": "RPC Server (remote error) -> Rejected transaction c817433e472ed850dc1d005a70c4186086327b9bfeceeeff1bad275658a3be94: failed to verify the signature script: not all signatures empty on failed checkmultisig"
+ },
+ {
+  "window": "V5c",
+  "expect": "PASS",
+  "v0Before": "PASS",
+  "result": "PASS",
+  "txid": "e0515f3f87c1c684c2354f8887b15f85b265db3bfac88c9a2fa026455c9ec88a"
+ },
+ {
+  "window": "V0-final",
+  "expect": "PASS",
+  "result": "PASS",
+  "txid": "b5306eddf7ad0750abffdbb1daf3d357c2d91498dcc6d618bf793c5262af62ff"
+ }
+]

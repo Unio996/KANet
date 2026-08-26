@@ -1,0 +1,12 @@
+{
+ "A_script_hex": "787820ddf5e5f24cef95f13ca02762e8a86cc3947b2957e34264bd3d43c1df39c2523fd769757551",
+ "C_script_hex": "787820ddf5e5f24cef95f13ca02762e8a86cc3947b2957e34264bd3d43c1df39c2523fd769757551",
+ "onchain_script_hex": "787820ddf5e5f24cef95f13ca02762e8a86cc3947b2957e34264bd3d43c1df39c2523fd769757551",
+ "bytes": 40,
+ "sha256_A": "21fa272f00ed96d9b37ab5e925d8fb961611131942bca39adea2537d94e0d50f",
+ "sha256_C": "21fa272f00ed96d9b37ab5e925d8fb961611131942bca39adea2537d94e0d50f",
+ "sha256_onchain": "21fa272f00ed96d9b37ab5e925d8fb961611131942bca39adea2537d94e0d50f",
+ "A_eq_C": true,
+ "A_eq_onchain": true,
+ "C_eq_onchain": true
+}

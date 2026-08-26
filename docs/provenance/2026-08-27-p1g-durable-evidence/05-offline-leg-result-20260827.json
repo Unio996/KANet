@@ -1,0 +1,40 @@
+{
+ "at": "2026-08-26T17:27:46.041Z",
+ "A": {
+  "path": "D:/kanet-tn12/scratch/_p1g_verify/target/release/silverc.exe",
+  "sha256": "7213455b6953cfdb8ce946cacf68bb98fd58e4b63861ca72c4ad1e99e83ee71a"
+ },
+ "C": {
+  "path": "D:/silverscript/versioned-builds/silverc-zk-8065184.exe",
+  "sha256": "9de7f2f682bc9e50a4b922e1c811335f1b1cd67c175f2e01df6fa6efc9015fc4"
+ },
+ "leg1_0820_ctor": {
+  "onchain_script_sha256": "21fa272f00ed96d9b37ab5e925d8fb961611131942bca39adea2537d94e0d50f",
+  "onchain_bytes": 40,
+  "A_script_sha256": "21fa272f00ed96d9b37ab5e925d8fb961611131942bca39adea2537d94e0d50f",
+  "C_script_sha256": "21fa272f00ed96d9b37ab5e925d8fb961611131942bca39adea2537d94e0d50f",
+  "A_eq_onchain": true,
+  "C_eq_onchain": true,
+  "A_eq_C": true
+ },
+ "leg2_fresh_ctor": {
+  "vectors_compiler": "D:/kanet-tn12/scratch/_p1g_verify/target/release/silverc.exe",
+  "vectors_compiler_sha256": "7213455b6953cfdb8ce946cacf68bb98fd58e4b63861ca72c4ad1e99e83ee71a",
+  "A_script_sha256": "1f7ecd0827716265cf936349cb060cdbbe942628a3515839e4a4c48744f72b59",
+  "C_script_sha256": "1f7ecd0827716265cf936349cb060cdbbe942628a3515839e4a4c48744f72b59",
+  "A_eq_C": true,
+  "offline_selfcheck_lines": [
+   "✅ V0   期望 PASS   离线得 PASS   — 合法三元组 —— 正路可用(但【不证明闸存在】)",
+   "✅ V1   期望 REJECT 离线得 REJECT — sig 翻一位 ⇒ 证明签名参与了运算",
+   "✅ V2   期望 REJECT 离线得 REJECT — digest 翻一位 ⇒ 证明 digest 参与了运算(最像 stub 那格)",
+   "✅ V3   期望 REJECT 离线得 REJECT — 另一把钥的【格式完全合法】签名 ⇒ 排除\"根本没在比对公钥\"",
+   "✅ V4   期望 REJECT 离线得 REJECT — 全零 sig(长度合法非签名) ⇒ 不接受平凡值",
+   "✅ V5a  期望 REJECT 离线得 REJECT — 交叉配对 (sigA@D1, D2) —— 两半各自合法, 只有配对错",
+   "✅ V5b  期望 REJECT 离线得 REJECT — 交叉配对 (sigA@D2, D1) —— 反向, 排除单向巧合",
+   "✅ V5c  期望 PASS   离线得 PASS   — V5 的阳性对照: (sigA@D2, D2) 必须 PASS, 否则 V5a/V5b 的 REJECT 无归因"
+  ],
+  "inconclusive": 0,
+  "mismatch": 0
+ },
+ "verdict": "OFFLINE-LEG PASS: A 产出 ≡ C 产出 ≡ 8/20 已上链字节; 8 向量离线自验全符合应然; inconclusive=0"
+}
