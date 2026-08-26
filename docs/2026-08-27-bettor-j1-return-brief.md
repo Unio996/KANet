@@ -6,6 +6,8 @@
 ## 0. 别动的东西
 - **不重启 console**（杀协调频道 + 三个本机会话的通信面）；**不动 kaspad**（IBD 进行中，新库，watchdog 归你/Owner 域但现在不需要）；**不推任何未经 NWT 审的 commit**。
 - 🔴 **绝对不许跑 `bash kanet-start-headless.sh` / `kanet-start.sh`**（NWT (20) 33d6ce1e CRITICAL）：headless `:63-72` 会 kill `$PID_DIR/*.pid` 里每个 pid（**含 console.pid**）+ Stop-Process 占 :3200 的进程 = **重启 console**；`HEADLESS_NO_KILL=1` 也别用（跳 kill 但仍试起第二个 console → :3200 冲突）。console-supervisor 监 :3200（不监 :8000）——停 llama **不会**触发它，但 console 一旦被杀它会再跑 headless 放大。⇒ A.5 只允许下面 §1 的**手动 spawn**。
+- 🔴 **也不许跑 `kanet-stop.sh`**（NWT (30)）：`:47-53` 读 console.db 取真实 http_port（:3200）→ `:66 kill_pid "port:$PORT"` 杀 console 端口进程，`:23 taskkill //PID //F //T`（**//T = 杀整棵进程树** = 32 relay 一起没）。它不扫杀 llama，但你根本不需要它——A.5 用 `Stop-Process -Id 17428`。`qclaude.bat` 是主网 llama 启动器，也别跑。
+- 🔴 **`tn12-mining-watchdog-v2.ps1` 与 `KANet-KaspadWatchdog` 并列 gate**：它 `:26` 会以 `kaspad --enable-unsynced-mining` 拉 kaspad = 打断 IBD。**提权后先 `schtasks /query /fo list | findstr /i KANet` 枚举所有 KANet-* 任务，把每个的 Status/Next Run 贴回；同步完成前一个都别启用**（尤其重启 kaspad / console / miner 的）。
 
 - 🔴 **不要启用 `KANet-KaspadWatchdog` 计划任务，直到 `isSynced=true ∧ daa>0`**（KANet-UI VB-8 读码：`rpc-probe.mjs:34-35` daa=0 ⇒ `die('empty-data:daa=0', 3)` → `kaspad-watchdog.ps1:103` 判 Fail → 3 次 → memgate 阈 8 GB 必过 → `:152 Start-Process` 重启 kaspad = 打断 IBD）。现网 dd1dcd72 版无 SYNCING 三态。**它现在没在跑**（watchdog 日志停 08-26 16:39，无进程，(624) 记 Disabled）——你提权后 `schtasks /query /tn KANet-KaspadWatchdog` **只查不启**，把状态贴回。节点 05:11 IBD 重来（对端掉线，非崩溃）现正常推进，别碰。
 
@@ -43,11 +45,13 @@
 ## 2. watchtower 第二故障域两条确认（KANet-UI VB-2 795b495d+656edaa3 待你现场核）
 - ① 你的通信 relay key（`kaspatest:qq0kt3dm…`，relay id 743c0360）**只在 younio 托管**，不在本机 `kasia-console/data/console.db`（本机 32/32 relay key 同一 db 同一 CONSOLE_ENCRYPTION_KEY）。给命令：younio 上 `sqlite3 console.db "select count(*) from relay_nodes where address like 'kaspatest:qq0kt3dm%'"` + 本机同查 = 0。
 - ② younio 是物理独立机（不是与本机共 commit 池的 VM）：`Get-CimInstance Win32_ComputerSystem | select Manufacturer,Model,TotalPhysicalMemory` + `systeminfo | findstr /i "hypervisor"`。
+- 🔴 ①' 只查 live DB 不够（NWT (30)，`feedback-threat-model-must-trace-key-custody`）：(a) **本机 console.db 的备份/导出**也要扫——`Get-ChildItem D:\,C:\KANet -Recurse -Include console.db*,*.db.bak,*.sqlite* -ErrorAction SilentlyContinue` 列出每个，逐个 `sqlite3 <f> "select count(*) from relay_nodes where address like 'kaspatest:qq0kt3dm%'"` = 0；(b) **旧机 `laptop-s6i31sri` 残留**：它是否已退役、有无 console.db 副本（你的 ledger/记忆或亲核）；(c) 🔴 **最要紧：younio 的 `CONSOLE_ENCRYPTION_KEY` 必须 ≠ 本机的**——若同一把 key，"DB 在 younio"不等于独立托管（本机可解 younio DB 副本 = 同故障域）。**加密 key 不同才是真独立，不是 DB 物理分开。** 只报"相同/不同"，**不要把任一 key 值贴进任何消息**。
+- 🟡 ②' 物理独立机判据：`systeminfo | findstr /i hypervisor` **无 hypervisor = 裸机 = 独立物理机**（好）；有 hypervisor = VM，Manufacturer/Model 不足以排除与本机同宿主（需宿主身份）。另标一句：物理分开 ≠ 电力/网络独立（Codex best-of-N 要节点/RPC/电/网都独立），本查只覆盖"物理宿主分开"这一层。
 两条都过 ⇒ 才能对 Owner 声明"真独立第二域 = younio"。
 
 ## 3. §6-3 (a)(c)（你的 SS 域，坐标表已钉）
-- (c) 源码坐标表 `docs/2026-08-27-j2-s63-gate-c-source-pins.md`（48a9d1af，NWT GREEN）：全部 `git show 7b1e18cc:` 坐标；**你要证的一条 = `7b1e18cc == younio live kaspad`**（`grep -a 'v1.1.1' <你的 kaspad 日志> | head -1`）。
-- (a) buildability：v0.15 构造稿 `docs/2026-08-21-j1-s6-3-A-covenant-construction-v0.15.md` 能否被 silverc 编出——注意 OP_PICK 修复**只在本机 `/d/silverscript` 本地分支 `j2-oppick-fix-2026-07-06` (8065184)**，上游没有；你那台若用上游 silverc 则 bug 仍在。
+- (c) 源码坐标表 `docs/2026-08-27-j2-s63-gate-c-source-pins.md`（48a9d1af，NWT GREEN）：全部 `git show 7b1e18cc:` 坐标；**你要证的一条 = `7b1e18cc == younio live kaspad`**——🔴 判据要**精确 commit**，不是版本族：本机日志首行打 `kaspad v1.1.1-toc.1-7b1e18cc`（`grep -a 'kaspad v' <kaspad-stdout.log> | head -1`），你那台也取同一行，**尾部 commit 必须是 `7b1e18cc`**；若你的构建不打 commit，则比二进制 sha256 与本机 `kaspad.exe` 是否相同；只有 `v1.1.1` 而 commit 不同 = 坐标可能偏，标残余不宣称同源。
+- (a) buildability：v0.15 构造稿 `docs/2026-08-21-j1-s6-3-A-covenant-construction-v0.15.md` 能否被 silverc 编出——🔴 **OP_PICK 修复只在本机 `/d/silverscript` 本地分支 `j2-oppick-fix-2026-07-06` (8065184)，未推上游，你在 younio 拿不到**。两条路二选一并明写用了哪条：(i) **在本机（SSH 进来后）用本机 silverc 编**——这是"我们编译的"口径；(ii) 在 younio 用上游 silverc 编——**编译/执行失败可能是已知 OP_PICK codegen bug（`reference-silverc-oppick-offbyone-codegen-bug`）而不是 v0.15 真的 buildability 问题**，别误诊；要证"外面的人能接上"就走 (ii) 并把失败归类。想把修复带到 younio 只能你从本机 `git bundle`/`format-patch` 拷（那也是本机口径，标清）。
 - (d) 一条给你看：`docs/2026-08-27-nwt-s63-bwin-simulation-v0.2.md`（9a4f4127，队列中）——DAA-pump 在 +132 s 未来封下有界、B_win(k) 对数缓增；无界的是"审查"信道（时间戳落后 >660 s ⇒ `txrelay/flow.rs:118-119` 全网 tx relay 停）。J2 反向核中。
 
 ## 4. 之后（不是现在）
