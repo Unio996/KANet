@@ -1,4 +1,6 @@
-# §6-3 gate (d) · `s_max` 提取器 · 方法稿 v0.3（(23) 算力地板规格 §3.5 "第三方可复核" 的可执行物 · 零落码 · 只读）
+# §6-3 gate (d) · `s_visible_max` 提取器 · 方法稿 v0.4（(23) 算力地板规格 §3.5 "第三方可复核" 的可执行物 · 入库 + 确定性向量 · 只读）
+
+> **v0.4（Codex f65c1fbe + Bettor）**：🔴 **语义改名 `s_max → s_visible_max`**：Codex 裁 `s_adv := max(s_owner, s_max)` 作为"无假设对手上界"**REJECTED**——`s_max` 是**可见**集中的**下界**（Sybil/共谋令其偏小），"诚实 ≤ 1−s_max 是无假设硬上界"不成立；(23) 须另有独立论证的 **`s_adv_cap ≥ s_visible_max`**，无可信 cap ⇒ fail-closed。本器只产 `s_visible_max`，不产 `s_adv`。**脚本入库** `docs/provenance/2026-08-27-smax/smax-extractor.mjs`（gitignored 的 scratch 版 SUPERSEDED——Codex 不算 gitignored 脚本为证据），纯函数拆出 + **离线确定性测试**（`smax-extractor.test.mjs` + `vectors.json` 14 条 + `expected-output.json` + `MANIFEST.sha256`）：genesis 实取解析、Sybil 分址把可见份额 0.5→0.3（正是 Codex 那条的实证）、部分窗 ⇒ `INCOMPLETE_WINDOW` exit 4、expected 由 daaScore 差且低产不假触发。下文 v0.1–v0.3 段里的 `s_max` 一律读作 `s_visible_max`。
 
 > **v0.3（NWT 一注落实）**：`completeness.expected` **由窗两端块的链上计数差导出**——首选 `daaScore(tip) − daaScore(start)`（= 跨度内进 DAA 窗的 mergeset 块数，蓝+红，只漏 non-daa 陈块 ⇒ 略偏低 = 宽松向，已标），备选 `blueScore` 差（只蓝块，更低），都取不到 ⇒ 无 expected ⇒ fail-closed；**禁用自身 fetch 计数**（循环自证）；名义 `window_s × 10 BPS` 降为 `nominal_bps_ref` 仅参考 ⇒ 低产网不再被名义 10 BPS 假触发 `INCOMPLETE_WINDOW`。`start` = 沿 selected-parent 链回溯到时间戳出窗的那块（与 `getBlocks` 翻页独立）。
 

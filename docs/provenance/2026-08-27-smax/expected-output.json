@@ -1,0 +1,160 @@
+{
+ "V1-genesis-parse": {
+  "ok": true,
+  "blueScore": "0",
+  "subsidy": "100000000",
+  "spkVersion": 0,
+  "spkLen": 1,
+  "script": "00",
+  "extra": "6b617370612d746573746e6574544f43434154410c03"
+ },
+ "V2-short-payload": {
+  "ok": false,
+  "err": "payload 10B < MIN_PAYLOAD_LENGTH 19"
+ },
+ "V3-truncated-script": {
+  "ok": true,
+  "blueScore": "0",
+  "subsidy": "0",
+  "spkVersion": 0,
+  "spkLen": 0,
+  "script": "",
+  "extra": "05aabb"
+ },
+ "V4-single-miner": {
+  "s_visible_max": 1,
+  "top": [
+   {
+    "miner": "0:20aa",
+    "blocks": 40,
+    "share": 1
+   }
+  ],
+  "distinct_miners": 1,
+  "parsed": 40,
+  "failed": 0,
+  "s_visible_max_out": 1
+ },
+ "V5-multi-identity": {
+  "s_visible_max": 0.5,
+  "top": [
+   {
+    "miner": "0:20aa",
+    "blocks": 50,
+    "share": 0.5
+   },
+   {
+    "miner": "0:20bb",
+    "blocks": 30,
+    "share": 0.3
+   },
+   {
+    "miner": "0:20cc",
+    "blocks": 20,
+    "share": 0.2
+   }
+  ],
+  "distinct_miners": 3,
+  "parsed": 100,
+  "failed": 0,
+  "s_visible_max_out": 0.5
+ },
+ "V6-sybil-split": {
+  "s_visible_max": 0.3,
+  "top": [
+   {
+    "miner": "0:20aa",
+    "blocks": 30,
+    "share": 0.3
+   },
+   {
+    "miner": "0:20bb",
+    "blocks": 30,
+    "share": 0.3
+   },
+   {
+    "miner": "0:20a1",
+    "blocks": 20,
+    "share": 0.2
+   },
+   {
+    "miner": "0:20cc",
+    "blocks": 20,
+    "share": 0.2
+   }
+  ],
+  "distinct_miners": 4,
+  "parsed": 100,
+  "failed": 0,
+  "s_visible_max_out": 0.5
+ },
+ "V7-output-addr-control": {
+  "s_visible_max": 0.5,
+  "top": [
+   {
+    "miner": "0:20aa",
+    "blocks": 50,
+    "share": 0.5
+   },
+   {
+    "miner": "0:20bb",
+    "blocks": 30,
+    "share": 0.3
+   },
+   {
+    "miner": "0:20cc",
+    "blocks": 20,
+    "share": 0.2
+   }
+  ],
+  "distinct_miners": 3,
+  "parsed": 100,
+  "failed": 0,
+  "s_visible_max_out": 1
+ },
+ "V8-completeness-daa": {
+  "expected_blocks": 36000,
+  "expected_source": "daaScore_delta(tip−start)",
+  "ratio": 0.972,
+  "incomplete": false,
+  "gap_blocks": 1000
+ },
+ "V9-completeness-partial": {
+  "expected_blocks": 36000,
+  "expected_source": "daaScore_delta(tip−start)",
+  "ratio": 0.139,
+  "incomplete": true,
+  "gap_blocks": 31000
+ },
+ "V10-completeness-lowbps": {
+  "expected_blocks": 6000,
+  "expected_source": "daaScore_delta(tip−start)",
+  "ratio": 0.983,
+  "incomplete": false,
+  "gap_blocks": 100
+ },
+ "V11-completeness-blue-fallback": {
+  "expected_blocks": 10000,
+  "expected_source": "blueScore_delta(tip−start, 只蓝块)",
+  "ratio": 0.95,
+  "incomplete": false,
+  "gap_blocks": 500
+ },
+ "V12-completeness-none": {
+  "expected_blocks": null,
+  "expected_source": "NONE",
+  "ratio": null,
+  "incomplete": true,
+  "gap_blocks": null
+ },
+ "V13-decide-incomplete": {
+  "status": "INCOMPLETE_WINDOW",
+  "exit": 4,
+  "s_visible_max": null
+ },
+ "V14-decide-ok": {
+  "status": "OK",
+  "exit": 0,
+  "s_visible_max": 0.6
+ }
+}
