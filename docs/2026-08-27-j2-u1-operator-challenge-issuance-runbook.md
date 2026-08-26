@@ -42,7 +42,7 @@
    - `rootXpub` = 该 relay 助记词 → `XPrv(seed).deriveChild(44,true).deriveChild(111111,true).deriveChild(0,true).toXPub().intoString('kpub')`;
    - `identityPubkeyXOnly` = `deriveIdentityPubkey(rootXpub, 0)`(`u1-same-origin.mjs:89`);
    - `signature` = `signMessage({ message: popMessageHashHex(buildPopPayload({rootFingerprint: rootFingerprint(rootXpub), identityIndex:0, relayId, challenge})), privateKey: leaf(0/0) })`(`u1-registration-pop.mjs:46/:61`;与 NWT 行为测试 `u1-wiring-behavior-nwt.test.mjs:52-58` 同构)。
-   - 🔴 **这一步要碰 relay 助记词**(`src/data/settings/relay-nodes.js:78 getRelayMnemonic(id)` = console 进程的 `CONSOLE_ENCRYPTION_KEY` 解密)。**本 runbook 不写这个 helper**——它是第二个脚本(`u1-build-submission.mjs`, 规格: 只在进程内解密 → 派生 → 签 → 输出 submission JSON;**绝不打印助记词/私钥/xprv**;不落盘密钥;跑完进程退出), **审过本 runbook 后再写**, 免得一次审两件碰钥的事。
+   - 🔴 **这一步要碰 relay 助记词**(console 进程的 `CONSOLE_ENCRYPTION_KEY` 解密)。helper 已写: **`kasia-console/scripts/u1-build-submission.mjs`**(commit 41b12a47, NWT 单审): `set -a; . ./kanet.env; set +a; cd kasia-console; node scripts/u1-build-submission.mjs --relay <id> --challenge <hex> --json`(dry-run 只打印六字段;`--commit` 写 `--out`, 默认 `scratch/u1-e2e/submission.json`)。它在进程内 decrypt → wallet.mjs 同路径派生 → 生产 PoP 谓词签 → `verifyRegistrationPop` 离线自证 → 白名单六字段输出;身份钥 == relay 地址钥反核不过即拒;**绝不打印/落盘助记词、私钥、xprv**。⚠ 输出含活 challenge ⇒ 只当场 POST, 不贴不存(首段 bearer 纪律)。
 3. **真 POST**: `curl -s -X POST http://127.0.0.1:3200/api/identity/u1-register -H 'Content-Type: application/json' --data-binary @submission.json` ⇒ 期望 HTTP 200 `{ok:true, …}`。
 4. **验收三臂(缺一不算过)**:
    - (a) `SELECT relay_id, identity_pubkey_xonly, custody FROM u1_identity_registration` = **1 行**, `custody='mnemonic'`, `identity_pubkey_xonly` == relay 地址的 x-only 公钥(`XOnlyPublicKey.fromAddress(relay.address)`);
@@ -74,6 +74,7 @@
 | 边界 1 | 身份 A(已注册)的钥 + `relayId=relay-B` | **REJECT `CONSTRAINT`**, 挑战未消费(回滚) | v196 UNIQUE(N3)⇒ **同一 pubkey 不得二次注册** ⇒ 抢注**不能**靠复用已注册的钥 |
 | 被测(⑦) | **攻击者新钥 X** + `relayId=relay-B` | **PASS**, 落库 `relay_id=relay-B, pubkey=X` | **nonce 与 PoP 都不绑 relay_id 归属 ⇒ relay-B 被 X 抢占** = DECISIONS L159 / (487) 在运行时坐实, 不是推断 |
 ⇒ ⑦ 的精确形状: **需要一把未注册过的新钥 + 任一 custody=mnemonic 的 relay_id + 一条活挑战**;第三个条件就是本 runbook 要守的东西(活 bearer / 5 min TTL / 不部署自动签发口)。
+🔴 **再精确一步(NWT 裁): ⑦ = first-squatter-wins on【未注册】relay_id** —— v196 UNIQUE 挡的是**同钥重复注册**, 挡不住**一把新钥抢先注册一个还没人注册的 relay_id**;**已注册的夺不走**(relay_id 是主键, 二次注册撞 CONSTRAINT);**§10(注册须证 relay 控制权)才关得住**。⇒ 本 E2E 给 J2-tn 注册这一行, 在 Track-A 语境里同时是"占坑"——它让 J2-tn 这个 relay_id 从此不可被别的钥抢注, 但这是副作用不是设计, 不许据此写"抢注已挡"。
 **live 库上一次都没跑**(连 dry-run 都没跑; E2E 第 0 步的 dry-run 由 operator 跑)。
 
 ## §8 与既有裁定的关系 / 边界
