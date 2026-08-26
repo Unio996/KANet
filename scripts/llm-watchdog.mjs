@@ -101,11 +101,15 @@ function spawnProxy() {
 }
 
 async function broadcast(message) {
+  // 🔴 fetch 必带 timeout(NWT (631) follow-up): memgate refuse-path broadcast 恰在 console 降级态跑,
+  //    无 timeout 的 fetch 会无限挂 ⇒ await broadcast 不返回 ⇒ watchdogTick 主循环卡死。复用 probe 的
+  //    PROBE_TIMEOUT_MS(3s), 不另造常量。超时/失败 → 现有 catch 吞掉、打一行、不抛 ⇒ 主循环不受影响。
   try {
     await fetch(`${CONSOLE_URL}/api/chat/send`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ relayId: NWT_RELAY_ID, channel: 'dev-coord', message }),
+      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
     });
   } catch (err) {
     console.error('[watchdog] broadcast failed:', err.message);
