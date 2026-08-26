@@ -17,7 +17,7 @@
 | ③ 期望每块 hash 数 | `work_per_block = 2^256 / (target + 1)` | `consensus/src/processes/difficulty.rs:261-267 calc_work`（注释给出 `~target/(target+1)+1` 等价式）|
 | ④ 现网算力（法 1）| `H_net = work_per_block × BPS`，TN12 `BPS = 10` | `config/params.rs:689-691 TESTNET12_PARAMS TenBps`；`config/bps.rs:49-53 target_time_per_block = 1000/BPS` |
 | ④' 现网算力（法 2，节点自算）| `H_net = Δblue_work / Δt` over window（默认 1000 块）| `consensus/src/processes/difficulty.rs:46-67 internal_estimate_network_hashes_per_second`（`MIN_WINDOW_SIZE = 1000` @:48）；RPC `estimateNetworkHashesPerSecond`（`rpc/service/src/service.rs:954-972`，`window_size ≤ MAX_SAFE_WINDOW_SIZE` 且 ≤ pruning depth）|
-| ⑤ 交叉核 | `difficulty_ratio = MAX_DIFFICULTY_TARGET_AS_F64 / target` 须 ≈ `getBlockDagInfo().difficulty` | `rpc/service/src/converter/consensus.rs:49-56 get_difficulty_ratio`；`config/constants.rs:44 MAX_DIFFICULTY_TARGET_AS_F64 = 5.78960446186581e76`（= 2^255 − 1，`:40`）|
+| ⑤ 交叉核 | `difficulty_ratio = MAX_DIFFICULTY_TARGET_AS_F64 / target` 须 ≈ `getBlockDagInfo().difficulty` | `rpc/service/src/converter/consensus.rs:49-56 get_difficulty_ratio`；`consensus/core/src/config/constants.rs:44 MAX_DIFFICULTY_TARGET_AS_F64 = 5.78960446186581e76`（= 2^255 − 1，`:40`；🔴 全路径——同仓另有无 `config/` 的 `consensus/core/src/constants.rs`，其 `:44` 是注释行）|
 | ⑥ 需注入算力 | `H_need(k) = (k − 1) × H_net`（k 倍是"总/原"，注入量减去原有）| — |
 | ⑦ 折卡 / 租赁 | `cards = H_need / H_card`；`rent = H_need × 单价(H/s·天)` | §3 参考值 |
 
