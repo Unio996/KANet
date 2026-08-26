@@ -16,6 +16,18 @@ KANet = 建在 Kaspa 上的 **"操作系统 + 开放劳动市场"**：任何程�
 | NO TX NO STATE CHANGE — 链上先上链再写 DB | [guide/rules/00-no-tx-no-state.md](guide/rules/00-no-tx-no-state.md) |
 | **真钱 endpoint 不准 "测试"** — 见 [ANTI-PATTERNS.md R-BETTOR-REAL-MONEY-API](ANTI-PATTERNS.md#规则-r-bettor-real-money-api-2026-05-14-owner-雷霆-钦定-真金白银-api-endpoint-不准-测试-每次-call--真链上-tx) | Owner 2026-05-14 雷霆钦定 — Bettor 一天 3 次越界 trigger `$1280` unauthorized 真链上交易, R-BETTOR-REAL-MONEY-API 列 13+ 黑名单 endpoint + 三段铁律 (诊断必 read-only / Mental check 三问 / explicit ack 必含 size) |
 
+## 术语辨析：三个 "tier" 别混（VB-6·2026-08-27·防结算路误判）
+
+三个名字都带 "tier" 但**指三样不同的东西**, 混用会把"关某开关"落错地方(实证盘点 → `docs/2026-08-27-kanet-ui-tier2-switch-inventory-v0.1.md` b2d5dc7d, NWT GREEN)。
+
+| 术语 | 是什么 | 现状 / 开关 |
+|---|---|---|
+| **§6-3 Tier-2 fair-exchange** | reactive-leg / watchtower 代广播 / claim 超时 NOT-BEFORE(C4-FINALITY)的跨/同链公平交换结算 | 🔴 **设计稿 v0.15·未建**: 无实现码、无 covenant(`ls kasia-console/src/lib/*.sil` 无 reactive/adaptor/fair-exchange)、**无运行时开关**。现网"禁用"=**结构性**(没被建), 非"开关=off"。(23)/(21) 地板规格 = 未来 (b) 实现的 **build-time 入场闸**, 非运行时开关。 |
+| **committed ZK 结算** | CloseZkV2 / zkNative 市场 / escape_trigger —— 铁律0.5 committed 架构 | 🟢 **live**: `kanet.env:18-20` `ADMIN_ZK_HANDOFF_V2_ENABLED / ADMIN_ZK_CLOSE_GATE_DEBUGGER_ENABLED / ADMIN_ZK_CLOSE_V2_ENABLED=1`(读 `pool.js:1921/2048/1959`, 缺 `!=='1'`⇒503 **fail-closed**); `zk_native` per-market 默认 false(`pool.js:163`)。🔴 **翻它 = 关现网结算 = Owner 域**, 不是"禁 Tier-2"。 |
+| **`audit_mode='tier2'`** | oracle 审计记录的声誉信号 enum(tier1/tier2/tier3/consensual) | 🔵 **非结算路**: `bettor.js:2316` 明写 "audit_mode 是 oracle tier 维度 **NOT settle path enum**"(J1 #11 gap#2 已 WITHDRAW)。**勿当结算开关**。 |
+
+🔨 **判据**: 说"Tier-2 现网禁用/启用"前先问指哪一个——§6-3 Tier-2(未建)/ committed ZK(启用)/ audit_mode(声誉标)。三者的"开关"在三处不同位置, 落错=改错东西。
+
 ## 功能章节
 
 | 章 | 主题 | 文件 | 行数 |

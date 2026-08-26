@@ -311,3 +311,8 @@
 > 🔴 **护栏(不因加急放松)**: ①probe = **非钱路**(一条微频道 tx, 非结算/注册/移钥), 全程 JSONL 可审; ②SEND 腿 UTXO 拆分 = 钱路, 走 J2/J1 执行 + 内部双审(D-011 不降), Bettor 协调不亲执; ③测试网限定(mainnet 不 grandfather); ④probe 证据须区分 broadcast-fail(SEND 腿)vs confirm-slow(node-health)。
 > 🔴 **排序(承重)**: **SEND 腿拆分先** —— 它是 probe 的前提: trough 期单 UTXO 下连 probe 都广播不出(撞 UTXO-too-small=SEND 腿非 node-health); 拆出多笔 ≥3KAS 后 probe/自然流量才能真在 trough 广播 → 才测得确认。
 > 出处: Owner 终端 2026-08-17「按你意见办!赶紧」· COORD-LEDGER (420)· Codex b6f6d53f/5797f1f3 留的 Owner-policy 门。
+
+> 📌 **状态注记(2026-08-27 · VB-6 · 三 "tier" 术语辨析入权威 · Bettor 记账)**:
+> 🔵 三个带 "tier" 的名字指三样不同东西, 混用会把"关某开关"落错地方。权威辨析表 = `docs/DEVELOPER-GUIDE.md`「术语辨析：三个 "tier" 别混」; 实证盘点(带 file:line + 原始 grep)= `docs/2026-08-27-kanet-ui-tier2-switch-inventory-v0.1.md`(b2d5dc7d, NWT GREEN 8fe85c93)。
+> 🔴 **一句话**: **§6-3 Tier-2 fair-exchange = 设计稿 v0.15·未建**(无码/无 covenant/无开关, 现网禁用是结构性非开关 off); **committed ZK 结算 = live**(kanet.env:18-20 ADMIN_ZK_*=1, 全 fail-closed, 翻它=关现网结算=Owner 域); **audit_mode='tier2' = oracle 声誉信号非结算路**(bettor.js:2316)。说"Tier-2 禁用/启用"前先问指哪一个。
+> 出处: COORD-LEDGER VB-5/VB-6 · NWT GREEN-WITH-1-MUST(8fe85c93, MUST=本注记 + 术语表)。
