@@ -1,4 +1,4 @@
-# provenance · claim-shape 深度采样（(d) §5① 部署硬前置 · (27) v0.6 入库版 · Codex 6fd55a53 三 MUST-FIX + 5d23a4be 时间戳 MUST-FIX 落法）
+# provenance · claim-shape 深度采样（(d) §5① 部署硬前置 · (27) v0.7 入库版 · Codex 6fd55a53 三 MUST-FIX + 5d23a4be 时间戳 MUST-FIX 落法）
 
 > **v0.5（NWT residual：`settled_at` 多写者）**：`SENDER_TS_POLICY` 源 × 写点 × 格式 × tz——`refund_attempted_at`{SQLite 文本(UTC) / 整数 epoch / ISO 带 tz}、`refund_dispatched_at` 与 `settled_at`{只 ISO 带 tz，写点 toISOString：`bshard-auto-settler.mjs:983`、`bshard-settle-daemon.mjs:885/:697`}；不认的格式（尤其裸 ISO 无 tz）⇒ inconclusive 不猜时区。(27) 实际读的 `settled_at` = `metadata.zk_settle_evidence.settled_at` → 回落 `metadata.settle_evidence.settled_at`（本机 DB 146/270 行，全 ISO Z）；`kasia-console/src/api/kanet-broker.js:227/260/327` 是 read-side 投影（非写点，`r.updated_at` 不落表）、`kasia-console/src/api/trading.js:1909` 写 `trade_baselines`——(27) 都不读。向量 35/35（含真值 `'2026-06-30T06:49:47.469Z'`）。`schema_version = claim-depth/6`（v0.6 只改注释/措辞，向量不变）。
 
@@ -23,13 +23,13 @@
 |---|---|
 | `claim-depth-sampler.mjs` | 采样器（纯函数 `verifyInclusion / legBFromBlocks / legAFrom / stats / summarize` + 链读/DB `main`）|
 | `claim-depth-sampler.test.mjs` | 离线确定性测试（读 `vectors.json`，比对 `expected-output.json`，任一不等退出码 1）|
-| `vectors.json` | 15 条：反核 verified / excluded / **inconclusive 三例（未载 tx·缺块·畸形）**；Leg B 平稳 / DAA 跳增 / 低产 / 不达；Leg A **SENDER_TS / MEMPOOL_SEEN / PROXY_POLL** 三级；summarize：29+5 excluded ⇒ exit 5 / 30 含两级 legA + 3 excluded + 2 inconclusive ⇒ OK 且 feed 只加 SENDER_TS / **40 笔 20 inconclusive ⇒ INSUFFICIENT 且 inconclusive 单列** |
+| `vectors.json` | **35 条**（v0.3 15 + v0.4 13 条 `parseTs`/Leg A 真实格式 + v0.5 7 条 `SENDER_TS_POLICY` 按源拒收/真值）：反核 verified / excluded / **inconclusive 三例（未载 tx·缺块·畸形）**；Leg B 平稳 / DAA 跳增 / 低产 / 不达；Leg A **SENDER_TS / MEMPOOL_SEEN / PROXY_POLL** 三级；summarize：29+5 excluded ⇒ exit 5 / 30 含两级 legA + 3 excluded + 2 inconclusive ⇒ OK 且 feed 只加 SENDER_TS / **40 笔 20 inconclusive ⇒ INSUFFICIENT 且 inconclusive 单列** |
 | `expected-output.json` / `MANIFEST.sha256` | 期望输出 / 四文件 sha256 |
 | `claim-depth-<UTC>.json` | 正式输出（同步后；SYNC-GATE 过且 Leg B n ≥ 30 才写；含原始样本行）|
 
 ## 运行
 ```bash
-node docs/provenance/2026-08-27-claim-depth/claim-depth-sampler.test.mjs      # 期望 15/15 PASS
+node docs/provenance/2026-08-27-claim-depth/claim-depth-sampler.test.mjs      # 期望 35/35 PASS
 cd /d/kanet-tn12/kasia-console && node ../docs/provenance/2026-08-27-claim-depth/claim-depth-sampler.mjs --mode hist --limit 50 --sleep-ms 20   # (17) ③e, 错峰同 ③d
 cd /d/kanet-tn12/kasia-console && node ../docs/provenance/2026-08-27-claim-depth/claim-depth-sampler.mjs --mode live --live-minutes 60 --poll-ms 1000
 # 退出码: 0 OK / 3 SYNC-GATE / 5 INSUFFICIENT_SAMPLES(fail-closed)
@@ -41,4 +41,4 @@ cd docs/provenance/2026-08-27-claim-depth && sha256sum -c MANIFEST.sha256
 - 坐标：`kasia-relay/src/lib/p2sh.mjs:1484 checkUtxoLanded`；`kasia-console/src/lib/pool-shard-register.mjs:88 REORG_SAFE_MIN_DEPTH`；`consensus/src/processes/difficulty.rs:33` @7b1e18cc。
 - refund 的 `SENDER_TS` 子查询同时按 `market_id` 与 `market_shards.shard_market_id` 查 sides（R-SHARD-BLIND，bshard sides 按 shard 存）。
 
-历史：v0.1 scratch（SUPERSEDED）；v0.2 `45f05a36` 入库 + 反核；v0.3 本版。
+历史：v0.1 scratch（SUPERSEDED）；v0.2 `45f05a36` 入库 + 反核；v0.3 `3339a81b`；v0.4 `c6af2743`；v0.5 `f6bc2920`；v0.6 `8b2f17dc`；v0.7 本版（只对齐 README 条数文案）。

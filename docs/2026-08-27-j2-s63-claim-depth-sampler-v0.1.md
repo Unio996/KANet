@@ -1,4 +1,4 @@
-# §6-3 gate (d) · §5① claim-shape 深度采样器 · 方法稿 v0.6（(d) 残余清单第 1 项 = 部署硬前置 · 入库 + 确定性向量 · 只读 · 同步后跑）
+# §6-3 gate (d) · §5① claim-shape 深度采样器 · 方法稿 v0.7（v0.7 = README 条数文案对齐 35，仅此 · (d) 残余清单第 1 项 = 部署硬前置 · 入库 + 确定性向量 · 只读 · 同步后跑）
 
 > **v0.5（NWT 事后审 (27) v0.4 residual：`settled_at` 多写者约定不一）**：核 (27) pool-settle 代理**实际读**的 `settled_at`：`metadata.zk_settle_evidence.settled_at`（写点 `bshard-settle-daemon.mjs:697` `new Date().toISOString()`，本机 DB 现 0 行）→ 回落 `metadata.settle_evidence.settled_at`（写点 `bshard-settle-daemon.mjs:885` `toISOString()`，本机 DB **146/270** 行，全 ISO Z）——两写点都是 **toISOString ⇒ 恒带 Z（UTC）**。其它 `settled_at` 出现处（`kasia-console/src/services/bettor-prediction-settler.js:137` toISOString 写别的表；`kasia-console/src/api/kanet-broker.js:227/260/327` **非写点**——read-side `by_market` 投影（`:174` 注释），`r.updated_at` 来自 SELECT 不落表；`kasia-console/src/api/trading.js:1909` 写 `trade_baselines` 别的表）(27) 一律不读 ⇒ 不在策略内、明列不混（v0.6 按 NWT 两笔误改）。落法：**`SENDER_TS_POLICY` 源 × 写点 × 格式 × tz 表**（§2-bis），`parseTs(v, policy)` 每源只认其已知写点会产生的格式，**metadata 源的裸 ISO（无 tz）⇒ inconclusive，不猜时区**；向量 +7（本机 DB 只读抽真值 `'2026-06-30T06:49:47.469Z'` + 各源的拒收例）= 35/35；`schema_version = claim-depth/5`。
 
