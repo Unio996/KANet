@@ -33,6 +33,7 @@
    echo $! > /d/kanet-tn12/logs/pids/llama-server.pid   # PID_DIR="$LOG_DIR/pids"（kanet-start-headless.sh:8）
    ```
    （与 live 17428 的 qclaude.bat:64 flag 集相同，仅 `--ctx-size` 1048576→262144；`>>` 追加不截断旧日志，保留旧 kv 行作对照。）
+   🟡 **`--host` 暴露面（NWT (20) 注 + Bettor 裁）**：`0.0.0.0` = :8000 绑全网卡，含 tailnet（本机有 100.x 通道）。步骤 1 你提权读到 17428 的 `--host` 后：**默认改 `--host 127.0.0.1`**（Mind/Qwen 经本机 adapter 连 127.0.0.1:8000 即可；本机消费者全在本机）；只有你证实存在跨机消费者才保留 `0.0.0.0`，并把证据写回报里。最窄暴露原则（`reference-node-blanket-firewall-allow-binding-is-the-only-gate`）。
 6. 验（对照臂 A.7 VA-1/VA-6 + A.5 ②）——直接跑 `powershell -NoProfile -ExecutionPolicy Bypass -File D:/kanet-tn12/scripts/a5-verify.ps1` 得"后"臂，并补三项：① 旧 17428 真没了（`Get-Process -Id 17428` 报错）；② **消费端真推理成功**：经 adapter 走一次 Mind/Qwen 调用（不只 /props——证 Mind/Qwen 重连上新实例）；③ 停窗内 console-supervisor 与 llm-watchdog 都没 fire（`logs/kanet-console-supervisor.log` 尾无新重启行、Win32_Process 无 llm-watchdog）。预期：`llama_kv_cache: size = 4352.00 MiB`（旧 17408）、/props `n_ctx=262144`、VRAM ~28.5 GB → ~13-14 GB、新实例私有 commit vs 旧 30.15 GB。
    ⚠ 口径：默认值 256k **站的是 VRAM 82.6%→42% + YaRN 原生 256k**，都已坐实；步骤 6 的 commit 读数是**验证不是前置**——即便私有 commit 不降，默认不变（dd1dcd72 已先落码，NWT ④ 认可）。为回答 §A① 那 ~26 GB 无出处，四个 counter 全量：`PagedMemorySize64 / PrivateMemorySize64 / WorkingSet64 / VirtualMemorySize64`。
 7. 回报：上面每条命令 + 原始输出，一条消息。
