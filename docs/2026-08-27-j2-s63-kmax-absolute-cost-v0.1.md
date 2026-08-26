@@ -1,13 +1,16 @@
-# §6-3 gate (d) · `k_max` 绝对成本表 · 方法稿 v0.1（数字栏留空 · 同步后填 · 零落码）
+# §6-3 gate (d) · `k_max` 绝对成本表 · 方法稿 v0.2（设备算力已 WebSearch 填 UNVERIFIED-SOURCED · 现网算力栏等同步 · 零落码）
 
-> **Status**: METHOD v0.1 · J2 2026-08-27 · Bettor 派工 (21) · 用途 = Owner/Codex 具名 `k_max` 的决策输入（MSG-274 问的："`k_max ≲ 1000` 于近零算力测试网可否作过渡假设"——答案取决于 **1000× 在 TN12 到底值几张卡**）。
+> **v0.2（NWT ac680df3 两须改 + Bettor 两补注）**：① 法 1/法 2 一致性判据改为**决策值取 `min(法1, 法2)`**（保守 = 不高估 `H_net` ⇒ 不高估攻击成本）；② "首动方 = 我们自己 + 开放 PoW 网 ⇒ 现网 GPU 级算力即 Tier-2 fail-closed" 从脚注升为 **§1 决策枢轴**，与 (d) v0.8 §6 算力地板政策互引；③ ASIC 厂商标称偏乐观 ⇒ 用作**攻击者**算力即保守方向（高估对手 = 安全方向）；④ §3 设备算力**已用 WebSearch 填**（2026-08-27，标来源与日期，PLACEHOLDER → UNVERIFIED-SOURCED），与 §4 现网算力（等同步）分开。
+> **Status**: METHOD v0.2 · J2 2026-08-27 · Bettor 派工 (21) · 用途 = Owner/Codex 具名 `k_max` 的决策输入（MSG-274 问的："`k_max ≲ 1000` 于近零算力测试网可否作过渡假设"——答案取决于 **1000× 在 TN12 到底值几张卡**）。
 > 脚本 `scratch/_j2_kmax_cost.mjs`（gitignored；**现在不跑，节点 IBD**；自带 SYNC-GATE，`daa ≤ 80,095,687 ∨ !isSynced` ⇒ 退出码 3 不出数）。已加进 (17) 同步后清单为 **③c**（与 ③a/③b 并行只读）。
 > 本稿只有方法与公式；§4 数字栏全空，§3 参考算力全标【未实测·PLACEHOLDER】。
 
 ---
 
-## §1 要回答的问题
-`k` = 注入后 / 注入前的网络算力比（(d) 稿 3-C）。`B_win(k)` 曲线已有（NWT sim v0.2：k=10→25,279 / 100→41,236 / 1000→53,070 DAA），占位 55,200 ⟺ `k_max ≲ 1000`。**但 k 是相对量**：TN12 现网算力 `H_net` 若只有一两张卡的量级，k=1000 的绝对成本可能只是"几百张卡"或"租几 TH/s 一天"——这决定 `k_max ≲ 1000` 是不是一条可信的过渡假设。本稿给 **`(k−1) × H_net` 折成卡数/租赁量级** 的算法。
+## §1 要回答的问题 · 决策枢轴
+`k` = 注入后 / 注入前的网络算力比（(d) 稿 3-C）。`B_win(k)` 曲线已有（NWT sim v0.2：k=10→25,279 / 100→41,236 / 1000→53,070 DAA），占位 55,200 ⟺ `k_max ≲ 1000`。**但 k 是相对量**：TN12 现网算力 `H_net` 若只有一两张卡的量级，k=1000 的绝对成本可能只是"几百张卡"或"一台 ASIC"——这决定 `k_max ≲ 1000` 是不是一条可信的过渡假设。本稿给 **`(k−1) × H_net` 折成卡数/ASIC 台数** 的算法。
+
+🔴 **决策枢轴（v0.2 升为正文，Bettor/NWT）**：TN12 是**开放 PoW 网**，且现网算力基线 = **我们自己的矿机**（首动方 = 我们自己的场景下分母就是我们的卡数）。⇒ **只要 §4 测得的 `H_net` 是 GPU 级（~1e9–1e10 H/s），一台市售 ASIC（§3：6–21 TH/s）就是 k ≈ 1e3–1e4** ⇒ 按 (d) v0.8 §6 算力地板政策，**现网 = 跌破任何可信地板 = Tier-2 fail-closed**，`k_max ≲ 1000` 只可能是 Codex 说的 "experimental weak trust assumption"。本稿其余部分只是把这条枢轴量化成表；**枢轴本身不等同步就能写死**，因为 GPU 级与 ASIC 级差 3–4 个数量级，同步后的数只会落在这个结论的一边（GPU 级 ⇒ 成立）或另一边（我们自己已是 ASIC 级 ⇒ 再算）。
 
 ## §2 公式与坐标（全 `git show 7b1e18cc:<path>`，非工作树）
 | 步 | 公式 | 坐标 @7b1e18cc |
@@ -21,20 +24,22 @@
 | ⑥ 需注入算力 | `H_need(k) = (k − 1) × H_net`（k 倍是"总/原"，注入量减去原有）| — |
 | ⑦ 折卡 / 租赁 | `cards = H_need / H_card`；`rent = H_need × 单价(H/s·天)` | §3 参考值 |
 
-**两法不一致的处理**：法 1 用 tip 的 bits（反映**最近一次难度调整**），法 2 用窗内实际 blue_work 增速（反映**实际产出**，含停滞）。若相差 > 2× ⇒ tip bits 陈（长时间无块难度不变）或窗内停滞，**以法 2 为准并标注**；两者都写进表。
+**两法不一致的处理（v0.2 改）**：法 1 用 tip 的 bits（反映**最近一次难度调整**），法 2 用窗内实际 blue_work 增速（反映**实际产出**，含停滞）。**决策值 = `min(法1, 法2)`**（NWT：保守方向 = 不高估 `H_net` ⇒ 不高估攻击者需注入的绝对算力 ⇒ 不高估攻击成本）；两者都写进表，相差 > 2× 时加注原因（tip bits 陈 / 窗内停滞）。
 
 **IBD 陷阱**：IBD 期 `tip bits` 是历史块的、`estimateNetworkHashesPerSecond` 窗跨越追块期 ⇒ 全是假象；SYNC-GATE 同 `_j2_postibd_chaincheck_20260826/_common.cjs`（`daa > 80,095,687 ∧ isSynced`）。
 
-## §3 参考算力（kHeavyHash）——🔴 全部【未实测】，来源类型具名，数值 PLACEHOLDER
-| 设备 / 渠道 | `H_card`（H/s）| 来源类型 | 状态 |
+## §3 参考算力（kHeavyHash）——UNVERIFIED-SOURCED（WebSearch 2026-08-27，未实测；来源与日期具名）
+| 设备 / 渠道 | `H_card`（H/s）| 来源（2026-08-27 检索）| 状态 |
 |---|---|---|---|
-| RTX 4090（GPU）| PLACEHOLDER（量级 ~1e9 H/s 级）| 社区矿工报告 / 矿池统计页 | 未核（需 WebFetch 或 Owner 给实测）|
-| RTX 5090（GPU）| PLACEHOLDER | 无可信公开数 | 未核 |
-| IceRiver KS0 / KS3M（ASIC）| PLACEHOLDER（量级 ~1e11–1e13 H/s 级）| 厂商标称 | 未核 |
-| Bitmain KS5 Pro（ASIC）| PLACEHOLDER | 厂商标称 | 未核 |
-| 租赁（NiceHash kHeavyHash 等）| PLACEHOLDER（单价 /TH/s·天）| 市场报价 | 未核 |
+| RTX 4090（GPU）| **2.0e9**（WhatToMine 2.00 GH/s @240 W）～ **2.43e9**（cryptoage 2430 MH/s）| [WhatToMine KAS/4090](https://whattomine.com/coins/352-kas-kheavyhash/gpus/79-nvidia-geforce-rtx-4090) · [cryptoage](https://cryptoage.com/en/2950-nvidia-geforce-rtx-4090-hashrate-based-on-ethash,-et%D1%81hash,-kawpow,-autolykos2,-equihash,-octopus,-kaspa-algorithms.html) · [hashrate.no](https://hashrate.no/gpus/4090/KAS/analysis) | UNVERIFIED-SOURCED（矿池/计算器统计，随超频变）|
+| RTX 5090（GPU）| **无 kHeavyHash 公开数**（检索到的只有 PearlHash 376 TH/s 等其它算法）| [Kryptex 5090](https://www.kryptex.com/en/hardware/nvidia-rtx-5090) · [hashrate.no 5090](https://www.hashrate.no/gpus/5090) · [Kaspa wiki hashrate tables](https://wiki.kaspa.org/en/hashrate-tables) | UNVERIFIED-SOURCED（缺数；按 4090 的 1.5–2× 量级估 ~3e9–5e9，**估值，非来源**）|
+| IceRiver KS3M（ASIC）| **6.0e12**（6 TH/s @3400 W）；KS3 **8.0e12**（8 TH/s @3200 W）| [IceRiver 官方 KS3M](https://iceriver.app/products/iceriver-kas-ks3m) · [minerstat KS3M](https://minerstat.com/hardware/iceriver-kas-ks3m) · [Mining Now KS3](https://miningnow.com/asic-miner/iceriver-ks3-8th-s/) | UNVERIFIED-SOURCED（厂商标称）|
+| Bitmain Antminer KS5 Pro（ASIC）| **2.1e13**（21 TH/s ±3% @3150 W ±10%，150 J/T）| [ASIC Miner Value KS5 Pro](https://www.asicminervalue.com/miners/bitmain/antminer-ks5-pro-21th) · [Zeus Mining](https://www.zeusbtc.com/Asic-Miner/Asic-Miner-Details.asp?ID=3435) · [Amazon 商品页](https://www.amazon.com/Antminer-kHeavyHash-Hashrate-Efficiency-Air-Cooling/dp/B0CY3GJDNJ) | UNVERIFIED-SOURCED（厂商标称）|
+| 租赁（NiceHash kHeavyHash）| **不可用**：hashrate.no 标 NH-KHeavyHash "currently disabled and not receiving updates"；检索到的 "$117,874 per TH/s / $0.468 per TH/s·day" 语义不明（疑为硬件价与收益，非租价）| [hashrate.no NH-KHeavyHash](https://www.hashrate.no/coins/NH-KHeavyHash) · [minerstat NH-KHeavyHash](https://minerstat.com/coin/NH-KHeavyHash) · [NiceHash buying guide](https://www.nicehash.com/guide/nicehash-buying-guide) | **UNAVAILABLE**（租赁列在表里改为"二手 ASIC 购置"口径）|
 
-**为什么要两类**：GPU 决定"随手一张卡"的 k；ASIC/租赁决定"想认真攻"的 k——TN12 若 `H_net` 只是 GPU 级，**一台 ASIC 就是 k ≫ 1000**，那 `k_max ≲ 1000` 对"认真攻"不成立，只对"随手攻"成立；表要把这两档分开给 Owner/Codex。
+🔵 **ASIC 标称偏乐观 ⇒ 保守方向**（Bettor 补注）：厂商标称是理想工况上限；本表把它当**攻击者**能拿到的算力 ⇒ 高估对手 = 安全方向，**不需要下修**。反之 GPU 的矿池统计偏实际，用作"随手攻"的下限也合适。
+
+**为什么要两档**：GPU 决定"随手一张卡"的 k；ASIC 决定"想认真攻"的 k。**量级对比（已可算，不等同步）**：KS5 Pro / 4090 ≈ 2.1e13 / 2.0e9 ≈ **1.0e4**；KS3M / 4090 ≈ **3e3**。⇒ 若 `H_net` = 一张 4090 级，**一台 KS3M 就是 k ≈ 3,000、一台 KS5 Pro 就是 k ≈ 10,000**，都在 `k_max ≲ 1000` 之外——这就是 §1 枢轴的数值形态。
 
 ## §4 输出表（同步后由脚本填；现全空）
 | | 值 |
@@ -43,19 +48,23 @@
 | `bits` / `target` / `difficulty`(rpc) / ratio(calc) | — |
 | `H_net` 法 1（bits × 10 BPS）| — H/s |
 | `H_net` 法 2（node estimate, window=1000）| — H/s |
+| **`H_net` 决策值 = min(法1, 法2)** | — H/s |
 
-| k | `H_need = (k−1)·H_net` | 折 GPU（张）| 折 ASIC（台）| 租赁量级（/天）|
+| k | `H_need = (k−1)·H_net(min)` | 折 RTX 4090（张，÷2.0e9）| 折 KS3M（台，÷6.0e12）| 折 KS5 Pro（台，÷2.1e13）|
 |---|---|---|---|---|
-| 10 | — | PLACEHOLDER | PLACEHOLDER | PLACEHOLDER |
-| 100 | — | PLACEHOLDER | PLACEHOLDER | PLACEHOLDER |
-| 1000 | — | PLACEHOLDER | PLACEHOLDER | PLACEHOLDER |
+| 10 | — | — | — | — |
+| 100 | — | — | — | — |
+| 1000 | — | — | — | — |
+
+（租赁列删：NiceHash kHeavyHash 已停，见 §3；"认真攻"的成本口径改为二手 ASIC 购置，价格另核。）
 
 ## §5 读表规则（预注册，防事后解释）
-- **判据**：若 k=1000 的折算 ≤ "一台入门 ASIC" 或 租赁 ≤ 几十美元/天 ⇒ `k_max ≲ 1000` **不可作过渡假设**（攻击成本低于一次 Tier-2 头寸），(d) 稿 §7 1-bis 只能走 "现网不开 Tier-2 / 换网络" 那支；若 k=1000 需数百 GPU 且无 ASIC 可租 ⇒ 可作**有限期**过渡假设，且 `k_max` 取表里 "成本 > 头寸上限" 的最小 k。
+- **判据**：若 k=1000 的折算 ≤ "一台入门 ASIC"（KS3M 6 TH/s）⇒ `k_max ≲ 1000` **不可作过渡假设**（攻击成本低于一次 Tier-2 头寸），(d) 稿 §7 1-bis 只能走 "Tier-2 禁用 / 实验-only"（Codex）；若 k=1000 需数百 GPU **且** `H_net` 本身已是 ASIC 级 ⇒ 可作**有限期**过渡假设，且 `k_max` 取表里 "成本 > 头寸上限" 的最小 k。**按 §3 量级，只要 `H_net` 是 GPU 级，前一支必然命中**（§1 枢轴）。
+- 决策值一律 `min(法1, 法2)`（§2）。
 - 数字一律带采样时刻与两法 `H_net`；参考算力一律带来源；不许用"量级 ~1e9"那类占位填表。
 - 表是**决策输入**，本稿不拍 `k_max`。
 
 ## §6 未覆盖
-- 未算首动方**自身已有算力**的情形（k 的分母若本来就是首动方 = 我们自己，则"注入"= 加卡，成本表同样适用，但基线 = 我们自己的卡数）。
+- 首动方 = 我们自己的情形已升为 §1 枢轴（分母 = 我们的卡数），本节不再重复。
 - 未算 pump 之外的审查成本（out-of-model）。
 - 参考算力全未核；`estimateNetworkHashesPerSecond` 在 `unsafe_rpc=false` 下 window 上限 `MAX_SAFE_WINDOW_SIZE`（值未抄，脚本用 1000，超限会报错并回落只用法 1）。
