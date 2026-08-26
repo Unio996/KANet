@@ -4,7 +4,8 @@
 > 出向 SSH 到 younio(100.85.180.121) 22 端口不通（ping 通、TTL=128），所以只能你进来。本机 sshd Running/Automatic。
 
 ## 0. 别动的东西
-- **不重启 console**（杀协调频道 + 三个本机会话的通信面）；**不动 kaspad**（IBD 进行中，新库，watchdog 归你/Owner 域但现在不需要）；**不推任何未经 NWT 审的 commit**（队列里有 5 条在审）。
+- **不重启 console**（杀协调频道 + 三个本机会话的通信面）；**不动 kaspad**（IBD 进行中，新库，watchdog 归你/Owner 域但现在不需要）；**不推任何未经 NWT 审的 commit**。
+- 🔴 **绝对不许跑 `bash kanet-start-headless.sh` / `kanet-start.sh`**（NWT (20) 33d6ce1e CRITICAL）：headless `:63-72` 会 kill `$PID_DIR/*.pid` 里每个 pid（**含 console.pid**）+ Stop-Process 占 :3200 的进程 = **重启 console**；`HEADLESS_NO_KILL=1` 也别用（跳 kill 但仍试起第二个 console → :3200 冲突）。console-supervisor 监 :3200（不监 :8000）——停 llama **不会**触发它，但 console 一旦被杀它会再跑 headless 放大。⇒ A.5 只允许下面 §1 的**手动 spawn**。
 
 ## 1. A.5 — 停 live llama(17428) 使 256k ctx 生效（Owner 已批；共享推理服务会短暂断）
 依据 `docs/2026-08-26-kanet-ui-start-script-remediation-design.md` §A.5 ②–⑧（NWT 终审 `docs/2026-08-26-NWT-redteam-remediation-final-verdict.md`）。前置已具备（Bettor 实核 02:5x）：
@@ -17,9 +18,23 @@
 1. 记 PID+CreationDate：`Get-CimInstance Win32_Process -Filter "Name='llama-server.exe'" | select ProcessId,CreationDate,CommandLine`
 2. 内存闸预检：`(Get-CimInstance Win32_OperatingSystem).FreeVirtualMemory/1MB`（停后会释放 ~30 GB，够）
 3. 停：`Stop-Process -Id 17428 -Force`（或 `taskkill /PID 17428 /F`）
-4. 确认 :8000 真释放：`netstat -ano | findstr ":8000 "` 无 LISTENING 后才重拉
-5. 重拉：走 start 脚本 llama 段（`bash kanet-start-headless.sh` 的 :8000 守卫走 fallback spawn，带新 ctx + 内存闸）——**只拉 llama 段，不要整套重启 console**；若脚本必整套跑，改为手动按 `kanet-start-headless.sh:106` 附近那条 spawn 命令起 llama（`--ctx-size $LLAMA_CTX_SIZE`）。
-6. 验（对照臂 A.7 VA-1/VA-6 + A.5 ②）：新 `logs/llama-server.log` 出现 `llama_kv_cache: size = 4352.00 MiB`（旧 17408）；`curl -s http://127.0.0.1:8000/props | findstr n_ctx` = 262144；新实例 `PagedMemorySize64`（对比旧 30.2 GB——这是 §A ① "降 ctx 是否降私有 commit" 的**唯一实测**，NWT 定为改默认值硬前置）；`nvidia-smi` VRAM（预期 ~27 GB → ~13-14 GB）。
+4. 确认 :8000 真释放：`netstat -ano | findstr ":8000 "` 无 LISTENING（"无 LISTENING"必要非充分：TIME_WAIT 可能挡 rebind——spawn 若报 bind 失败 = **等 30 s 重试**，别误判崩溃；最终判据是步骤 6 的 /props）。
+5. 重拉 = **手动 spawn ONLY**（🔴 禁 `bash kanet-start-headless.sh`，见 §0）。在 Git Bash（提权会话）逐条跑，命令逐字对 `kanet-start-headless.sh:134-140`，只是 ctx 从 kanet.env 读：
+   ```bash
+   cd /d/kanet-tn12 && set -a && source kanet.env && set +a && echo "ctx=$LLAMA_CTX_SIZE model=$LLAMA_MODEL_PATH"   # 必须打印 ctx=262144 与 Q6_K 路径；空则停
+   powershell -NoProfile -Command "[math]::Floor((Get-CimInstance Win32_OperatingSystem).FreeVirtualMemory/1MB)"   # 手动内存闸：须 ≥ 35（裸 spawn 绕过脚本 :112-131 的闸，所以手动判）；<35 停、报 Bettor、不调阈
+   (cd C:/KANet/tools/llama-server && ./llama-server.exe \
+     --model "$LLAMA_MODEL_PATH" \
+     --host 0.0.0.0 --port 8000 \
+     --n-gpu-layers 99 --ctx-size "$LLAMA_CTX_SIZE" \
+     --cache-type-k q8_0 --cache-type-v q8_0 \
+     --threads 8 --flash-attn on \
+     >> /d/kanet-tn12/logs/llama-server.log 2>&1) &
+   echo $! > /d/kanet-tn12/pids/llama-server.pid   # PID_DIR 以 kanet.env / 脚本为准；若目录不同按脚本 $PID_DIR
+   ```
+   （与 live 17428 的 qclaude.bat:64 flag 集相同，仅 `--ctx-size` 1048576→262144；`>>` 追加不截断旧日志，保留旧 kv 行作对照。）
+6. 验（对照臂 A.7 VA-1/VA-6 + A.5 ②）——直接跑 `powershell -NoProfile -ExecutionPolicy Bypass -File D:/kanet-tn12/scripts/a5-verify.ps1` 得"后"臂，并补三项：① 旧 17428 真没了（`Get-Process -Id 17428` 报错）；② **消费端真推理成功**：经 adapter 走一次 Mind/Qwen 调用（不只 /props——证 Mind/Qwen 重连上新实例）；③ 停窗内 console-supervisor 与 llm-watchdog 都没 fire（`logs/kanet-console-supervisor.log` 尾无新重启行、Win32_Process 无 llm-watchdog）。预期：`llama_kv_cache: size = 4352.00 MiB`（旧 17408）、/props `n_ctx=262144`、VRAM ~28.5 GB → ~13-14 GB、新实例私有 commit vs 旧 30.15 GB。
+   ⚠ 口径：默认值 256k **站的是 VRAM 82.6%→42% + YaRN 原生 256k**，都已坐实；步骤 6 的 commit 读数是**验证不是前置**——即便私有 commit 不降，默认不变（dd1dcd72 已先落码，NWT ④ 认可）。为回答 §A① 那 ~26 GB 无出处，四个 counter 全量：`PagedMemorySize64 / PrivateMemorySize64 / WorkingSet64 / VirtualMemorySize64`。
 7. 回报：上面每条命令 + 原始输出，一条消息。
 
 ## 2. watchtower 第二故障域两条确认（KANet-UI VB-2 795b495d+656edaa3 待你现场核）
