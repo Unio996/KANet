@@ -1,6 +1,7 @@
 # start 脚本 remediation 设计稿 — Owner 待决 ②③ 两批（设计层 · 零落码）
 
 > **Status**: DRAFT **v0.2** · KANet-UI 2026-08-26 · Bettor 派工 (F) · **零落码**; 改动对象全是运维/启动脚本(非产品码/非钱路), **push 即生效 = deploy**, 走报备→NWT 审→Owner 批。
+> **B/C v0.2(应 NWT 红队 `docs/2026-08-26-NWT-redteam-start-script-remediation-BC.md` d9b7c37a, §B/§C PASS-WITH-MUST-FIX)**: ①#9c 删 flock(本机 Git-Bash `command -v flock`=NOT-FOUND 已自核), 改 mkdir 锁 + 锁内写 PID + stale-PID 回收(持锁进程被 SIGKILL 不 rmdir ⇒ 锁永久残留 ⇒ supervisor 永不起=把'多起一个'换成'再也起不来', 正是 8/23 形态)+ EXIT trap。②#9b 不用可继承 env KANET_SUPERVISED(向子树传播, 失效 fail-open: 操作员 shell 残留=1→手动 kanet-start.sh 静默不起监工=亲手复刻 8/23 无报错), 改显式 `--supervised` 参数(作用域一次调用不继承)。③heartbeat 判死绝不唯一触发(自报族两向都失: fresh≠活/stale≠死, 合法静默可达 10-20min), 配进程存活 + 阈值≥15-20min。非阻塞: sidecar 幂等'活'判据看端口 LISTEN 非进程存在。
 > **v0.2(应 NWT 红队 `docs/2026-08-26-NWT-redteam-start-script-remediation.md` 32b47138, §A PASS-WITH-MUST-FIX)**: ①归因半错纠正 — mmap 模型 file-backed **不进私有 commit**(log:138 mmap=true / :142 CPU_Mapped 795.70 MiB), 删"系统 commit 主体=mmap 模型"; 30.2GB 里只 ~2-4GB(CUDA_Host)有出处, ~26GB 无出处(疑 CUDA VMM host backing, 推断); **A.5 低 ctx 重启实测私有 commit 从步骤升为【改默认值硬前置】, 测出前不许写"降 ctx 缩小 OOM 足迹"**。②256k 依据补 conversationHistory cap 实证 + 防回归注。③**第五 ctx 站: llm-watchdog.mjs:49 也硬编 1048576**(无 :8000 守卫, 若在跑会 taskkill 后用 1M 重拉复活双开源)。
 > **依据**: 漂移表 `docs/2026-08-26-kanet-ui-start-script-drift.md`(A/B 逐段 + §4 六处同病) + 探针稿 §0.5 内存闸 `docs/2026-08-26-kanet-ui-kaspad-probe-ibd-vs-dead-design.md`。
 > **证据纪律**: 每条 `[MEASURED]`(实测/日志) / `[READ]`(读码) / `[DESIGN-CHOICE]` / `[TODO·需实测]`。
@@ -117,8 +118,8 @@ fi
 | `kanet_archive_console_log` | `mv console.log console.log.prev` 再截断(A:265-266) | #21(B 补归档) |
 | `kanet_spawn_llama` | llama spawn + **A.6 内存闸** + `--ctx-size "${LLAMA_CTX_SIZE:-262144}"`(§A) | #18 + §A |
 | `kanet_spawn_console` | console spawn + **统一 node flags `--max-old-space-size=4096`**(现只 B:129 有) | #22(两边同 flags) |
-| `kanet_bring_up_sidecars` | ws-proxy(A:162-207) + bridge 栈 cc-bridge/qwen-worker/channel-bridge/owner-bot/test-cron(A:307-386), **各自幂等检查照搬** | #15+#24(headless 自愈后 sidecar 重建) |
-| `kanet_ensure_supervisor` | 幂等起 supervisor, **KANET_SUPERVISED=1 时 no-op**(见 B.2 #9) | #9 递归 |
+| `kanet_bring_up_sidecars` | ws-proxy(A:162-207) + bridge 栈(A:307-386)。🔵 **NWT 非阻塞: 幂等"活"判据看端口 LISTEN(netstat), 不看进程存在** —— wedge 死锁进程仍在但端口不 LISTEN, 看进程会漏重建 | #15+#24(自愈后 sidecar 重建) |
+| `kanet_ensure_supervisor` | 幂等起 supervisor(mkdir 锁+stale 回收, B.2 #9c), **`--supervised` 参数时 no-op**(不用可继承 env, B.2 #9b) | #9 递归+TOCTOU |
 - **调用序(两脚本都按此, 由 lib 强制)**: `kanet_load_env` → `kanet_stop_old` → `kanet_archive_console_log` → `kanet_spawn_llama` → `kanet_spawn_console` → `kanet_bring_up_sidecars` → `kanet_ensure_supervisor`。**load_env 在 stop_old 之前** ⇒ 修 #7(端口释放用真 CONSOLE_PORT 非默认 3400)。
 
 ### B.2 逐处修法 `file:line` 表
@@ -127,8 +128,8 @@ fi
 | #4 KANET_TEST_MODE | 只 A:15 export; headless 无 | 移进 `kanet_load_env` | 两脚本起的 console 行为一致(reset_peer endpoint 注册与否不再看走哪个脚本) |
 | #7 端口释放 :3400 | A:75-84 用 `$CONSOLE_PORT`(此刻=默认 3400, env 未加载) | `kanet_stop_old` 在 `kanet_load_env` 之后跑 | A 的"释放 :3200"真生效(现在放空 :3400) |
 | #9a supervisor 被杀 | B:65-72 无差别杀所有 pidfile(含 supervisor 自己) | `kanet_stop_old` 跳过 console-supervisor.pid(照 A:62) | supervisor 调 headless 时不再自杀 |
-| #9b supervisor 增殖递归 | B:151-157 每拉 console 再起 supervisor | supervisor 调 headless 前 export `KANET_SUPERVISED=1`; `kanet_ensure_supervisor` 见此 flag 直接 no-op | 断"supervisor→headless→再起 supervisor"递归 |
-| #9c pidfile TOCTOU | B:151-152 "pidfile 存在且 kill -0" 与随后 start 非原子 | 用**存活判据+文件锁**(`flock` on pidfile 或 mkdir 锁), 不靠"文件存在"这个会 TOCTOU 的检查 | 两并发拉起不会各起一个 supervisor |
+| #9b supervisor 增殖递归 | B:151-157 每拉 console 再起 supervisor | 🔴 **NWT ②: 不用可继承 env** —— supervisor 调 headless 传 **显式参数 `--supervised`**(作用域仅这次调用、**不继承给子树**); `kanet_ensure_supervisor` 见此参数 no-op。**禁 `export KANET_SUPERVISED=1`**: 可继承 env 会向整个子树传播, 失效方向 fail-open(操作员 shell 残留 `=1` → 手动 `kanet-start.sh` 静默不起监工 = 用 remediation 亲手复刻 8/23 且无报错)。备选: `kanet_ensure_supervisor` 正向核父进程是不是 supervisor(不靠传标记) | 断递归, 且不制造 fail-open 缺口 |
+| #9c pidfile TOCTOU | B:151-152 "pidfile 存在且 kill -0" 与随后 start 非原子 | 🔴 **NWT ①: 删 flock**(本机 Git-Bash `command -v flock`=**NOT-FOUND**, 已自核)。用 **mkdir 锁**(原子)+ **锁目录内写持锁 PID** + **stale 回收**: 取锁失败时读锁内 PID, `kill -0` 判它是不是孤儿(持锁进程被 SIGKILL 不会 rmdir ⇒ 锁目录永久残留 ⇒ supervisor **永不起** = 把"多起一个"换成"再也起不来", **正是 8/23 形态**), 是孤儿则 `rmdir` 重试取锁; 持锁进程加 **EXIT trap** 释放锁。备选: **后验去重**(起手后发现自己非唯一 supervisor 则 loser 主动退) | 两并发不各起一个 supervisor, 且锁不因崩溃永久卡死 |
 | #15 ws-proxy 杀不重起 | B 无 ws-proxy 段; #9 循环杀 `kaspa-ws-proxy.pid` | `kanet_bring_up_sidecars` 含 ws-proxy(幂等), 两脚本都调 | headless 自愈后 :17310 重建 |
 | #21 console.log 不归档 | B:122 直接 `> console.log` | `kanet_archive_console_log`(mv→.prev) | headless 自愈保住死前现场(接位 ⓪ 步痛点) |
 | #22 max-old-space | 只 B:129 有 `--max-old-space-size=4096` | `kanet_spawn_console` 统一带此 flag | A/B 起的 console V8 堆一致 |
@@ -165,7 +166,7 @@ fi
 |---|---|---|---|
 | C-1 | `:14` | `$base = 'C:\开发过程\...'` | `$base = Join-Path $repo 'docs\handoff'`(读入库路径) |
 | C-2(NWT MUST-FIX 判重) | `:22-38` 循环 | 每次盲开新窗 | 开窗前判 `claude-$a` **已在跑**则跳过 —— 查同名窗口标题 / 或读 heartbeat 文件(C-3)判活; 已活跳过 + 日志记 `skip:already-running`。防双开(同一 agent 两窗 = 两会话抢同一活, 对等消息目标歧义) |
-| C-3(NWT MUST-FIX heartbeat) | 新增 | (无) | 每个被拉起的 agent 周期写 `logs/heartbeat-<agent>.json`(ts+session); launcher 判重(C-2)与 Bettor 监工(ledger 624 三路之一"N 分钟内有无回报")读它。**注意**: heartbeat 写入是 **agent 侧行为**(接位文件加一步 or 会话自写), launcher 只**读**; 若要 agent 自动写需接位文件加约定(= handoff 文档改动, 随 C 一起) |
+| C-3(NWT MUST-FIX heartbeat) | 新增 | (无) | agent 周期写 `logs/heartbeat-<agent>.json`(ts+session)。🔴 **NWT ③ 纪律: heartbeat 是自报族, 两向都失** —— **fresh≠活**(wedge 卡死但定时器还跳)、**stale≠死**(Claude 会话深度工作 10-20min 合法静默, NWT 审 E1 时自己就 10+min 没写)。⇒ **① 判重防双开(C-2)可用**(存在即跳, 保守安全); **② 判死触发重启【绝不以 heartbeat 为唯一触发】**, 须配**进程存活检查** + 阈值 **> 最长合法静默(≥15-20min, 宁长勿短)**。heartbeat 写入是 agent 侧(接位文件加自写一步, handoff 文档改动随 C) |
 - ⚠ **H3a(7/12 设计 :53/:61, 活进程旧副本)**: 已 armed 的长驻 Monitor 进程持有**旧路径/旧 NAMES 内存副本**, 文件搬家不刷新运行中进程。⇒ C 落地时**显式广播"全员按新 `docs/handoff/` 路径重新 arm monitor"一步 + 杀孤儿旧 monitor 进程**(不假设 file move 传播到活进程)。本机三人的频道 Monitor 都要重 arm。
 
 ### C.4 回滚 + 验收（对照臂）
