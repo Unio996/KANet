@@ -1,6 +1,6 @@
 # 节点「真健康」判据 — 与 KANet-UI 探针稿同一把尺(含 (622) tips-reconcile 补答)
 
-> **Status**: DRAFT v0.1 · J2 2026-08-26 主笔 · Bettor 派工 (5)(对等消息) · **待 NWT 审, 与 `docs/2026-08-26-kanet-ui-kaspad-probe-ibd-vs-dead-design.md` 一起审**。
+> **Status**: DRAFT v0.2 · J2 2026-08-26 主笔(v0.2 = §9 吸收 NWT F-A/F-B/F-C) · Bettor 派工 (5)(对等消息) · **待 NWT 审, 与 `docs/2026-08-26-kanet-ui-kaspad-probe-ibd-vs-dead-design.md` 一起审**。
 > **性质**: 只读(采样数据 / 日志 / 源码 / 只读 RPC), 零改码。**判据文档, 不是探针实现**;探针实现归 KANet-UI 稿, 本文只负责"尺子刻度从哪来"。
 > **证据标签**: `[MEASURED]` 实测 · `[LOG]` kaspad 日志原文 · `[SRC]` 源码 · `[DESIGN]` 选择。每个阈值带出处, 没出处的数不许进探针。
 
@@ -133,3 +133,37 @@
 - `getMetrics` 各计数器在 B/D 阶段的实际动态未逐阶段采(KANet-UI 只采了 A)。
 - 本文不改探针/watchdog 一行码;不动 kaspad;不给 tips 任何阈值。
 - 阳性对照址若被掏空(它是矿址, 会被转出)R6 会假红——探针须把"对照址空"报成 UNKNOWN 而非 DEAD, 并换址(稿已由 env 给)。
+
+---
+
+## §9 NWT MUST-FIX 回答(v0.2 · 2026-08-26 · 只读源码, 断言带检出坐标)
+
+**检出坐标**:live 二进制 = 日志 `kaspad v1.1.1-toc.1-7b1e18cc`;`/d/rusty-kaspa` HEAD 在 v2.0.0(`90dbf074`), **但 `7b1e18cc` 在树里(分支 tn10/tn12 含)**, 下列 file:line 全部来自 `git show 7b1e18cc:<path>`, 不是 HEAD。
+
+### F-B:utxoindex 重建期, `getUtxosByAddresses` 是门控还是半建态? `[SRC @7b1e18cc]`
+
+**一句结论:有闸, 但闸只盖「剪裁点 UTXO 集导入 → anticone 块体验证完」这一段;今天的 `[]` 来自这段【之前】的 header 阶段, 那时索引与共识一样"空且自洽", RPC 合法地答空集。重建本身对读者是原子的(写锁), 不会读到半建态;但 RPC 读 helper 会把 store 错误静默成空集。⇒ R6 的牙不能靠节点自己, 必须靠外部锚(DAA 下界 + 对照址)。**
+
+| 层 | 位置 | 行为 |
+|---|---|---|
+| RPC 闸 | `rpc/service/src/service.rs:697-703`(`get_utxos_by_addresses_call`) | `!config.utxoindex ⇒ NoUtxoIndex`;`async_is_consensus_in_transitional_ibd_state() ⇒ Err(ConsensusInTransitionalIbdState)`。**是报错, 不是空集**——这段窗口里探针会拿到错误, 是好事 |
+| 闸的定义 | `consensus/src/model/stores/pruning_meta.rs:83-85` | `transitional = !anticone_fully_synced ∥ !pruning_utxoset_stable ∥ !pruning_smt_stable` |
+| 闸何时升起 | `consensus/src/consensus/mod.rs:468 intrusive_pruning_point_store_writes` → `:506-515`:两个 stable 标志置 **false** + `body_missing_anticone` 置非空, **与写入新剪裁点同一 batch**(注释:防中途崩溃) | = 开始导入剪裁点 UTXO 集(§3-C)那一刻 |
+| 闸何时放下 | `mod.rs:1149 import_pruning_point_utxo_set` 完成后 utxoset 标志回 true;`:1504-1506` anticone 块体验证完置空 | = §3-C/D 之交 |
+| **闸不盖的段** | 标志缺省值:`pruning_meta.rs:63-66` anticone 缺省空、`:79-81` smt 缺省 **true**(注释"upgrading nodes had no SMT state");`mod.rs:352 consensus_transitional_flags_upgrade` 把缺省写回 | ⇒ **全新库在 header 阶段(§3-A/B)不是 transitional** ⇒ 闸不拦 |
+| 索引在那段的状态 | `indexes/utxoindex/src/index.rs:37-45 new()`:`!is_synced() ⇒ resync()`;`:115-137 is_synced` = 索引 tips == 共识 virtual parents;`:144-186 resync` = `delete_all` 后按 2048 一批从共识 virtual UTXO 重建 | 全新库共识 virtual UTXO 集为空 ⇒ resync 得到**空索引**, tips 一致 ⇒ `is_synced()=true` ⇒ **"已同步的空索引"** ⇒ 任何地址答 `[]`(今日实测) |
+| 半建态可能吗 | 读:`indexes/utxoindex/src/core/api/mod.rs:73-74` `spawn_blocking(self.inner.read()…)`;重建:`index.rs:213-219 handle_consensus_reset` → `utxoindex.write().resync()` | **写锁包住整个 delete_all+重建** ⇒ 读者在重建期间**阻塞**, 拿到的要么是重建前整体、要么是重建后整体, **没有部分地址有/部分空的中间态**(对读者原子)。`index.rs:141-143` 注释另提"resync 时若共识同时通知 diff 可能 corrupt db"——那是写侧一致性风险, 不是读到半建态 |
+| 🔴 第二个静默点 | `service.rs` helper `get_utxo_set_by_script_public_key`(`:～745-755`):`.await.unwrap_or_default()` | **store 层任何错误 ⇒ 空集, 不报错** ⇒ 与今日同形的第二个"失败像合法答案" |
+| `isUtxoIndexed` | `service.rs:495` `is_utxo_indexed: self.config.utxoindex` | **是配置开关不是建成状态** ⇒ 不能用它交叉判"索引建好没" |
+| `isSynced`(getInfo) | `service.rs:496` `is_sink_recent_and_connected` = `has_peers ∧ sink 时间戳 10min 内`(`rule_engine.rs:117-119,125-135`) | 与 §2 R5 一致, 且含 peer 条件 |
+
+⇒ **R6 的牙**:节点侧只在 transitional 窗口给错误(探针要把 `ConsensusInTransitionalIbdState` 映射成 SYNCING:`utxoindex-pending`, 不是 DEAD);窗口之外"空且自洽"与"真空"节点自己分不出 ⇒ **DAA 下界 + 对照址是唯一判别器**, 两稿共享定义 **ALIVE ⇔ R1∧…∧R5∧R6**(F-A)。
+
+### F-C:对照址 `[]` 分不出"索引没建好"与"被花光"
+
+- **现成的不可花永久 UTXO:没有。** 查过的候选:① `xzztw`(16B 死 spine)在 DB 里已是 `refunded`(spine `dd61ca48…` 可能已被 maker 退款花掉, IBD 期无法链核)⇒ 不能当永久;② 137 个 `pruned_expired_waived` spine(7/30 链核全为原始 lock 输出未花)——**长期未花但可花**(Owner 批准回收即消失);③ Kaspa 没有"OP_RETURN 永久留在 UTXO 集"这种可证不可花输出可用(未找到, 不声称有)。
+- **改法(写进 v0.2, 与 UI 稿同落)**:
+  1. 对照不是一个地址, 是**一组 ≥ 2 个互相独立的长期持币址**(env 列表):矿址 `MiningRelay-tn12-new` + 一个 7/30 已链核未花的 pruned spine(被回收时换下一个);**任一非空即过**。
+  2. **全部为空时的裁定 = UNKNOWN, 永不 DEAD**;并按下面三条交叉定 SYNCING 子态:`getUtxosByAddresses` 报 `ConsensusInTransitionalIbdState` ⇒ `utxoindex-pending`(确定);`virtualDaaScore ≤ 80,095,687` ⇒ `pre-utxoset`(确定, §3-A/B);`daa > 下界 ∧ isSynced=true ∧ 全空` ⇒ `control-set-drained?` **告警交操作员**(对照集可能真被掏空)。
+  3. **不用 `isUtxoIndexed` 交叉**(F-B 表:它是配置开关)。
+- 对照址由 env 给、不烤死在码里(UI 稿 3.2b 原则不变)。
