@@ -83,11 +83,11 @@
 | **DEAD:wrong-network** | 2 | R2 ∧ ¬R3 | |
 | **DEAD:empty-data**(收窄后) | 3 | R3 ∧ **R5=true** ∧ daa ≤ 0 | 同意收窄:同步了却没数据才是"数据坏";`daa=0 ∧ isSynced=false` 是 §3-A 的合法态 |
 | **SYNCING** | 7 | R3 ∧ ¬R5 ∧ (R4 有进度 ∨ 未超 30 min) | 含稿 3.2b 的 `utxoindex-pending`:R5=true 但 ¬R6 **也**停在 7 |
-| **SYNC-STALLED** | 8 | R3 ∧ ¬R5 ∧ R4 零进度 ≥ 30 min | **进度只认 R4 计数器, 不认 lag**(lag 60–85 min 时节点仍在处理, §1) |
+| **SYNC-STALLED** | 8 | R3 ∧ ¬R5 ∧ **共识计数器**(`blockCount`/`headerCount`/`virtualDaaScore`/`nodeHeadersProcessedCount`/`nodeDatabaseHeadersCount`)零进度 ≥ **60 min** | **统一修法(Bettor 2026-08-26 裁, 两稿同落)**:`diskIoWriteBytes` **永不抑制 STALLED**, 只调告警节奏;进度只认共识计数器, **不认 lag**(lag 60–85 min 时节点仍在处理, §1)、不认 diskIo(卡死 IBD 挂 idle peer + compaction 持续写盘可同时满足 diskIo↑∧peer 在, NWT 反例) |
 | **ALIVE** | 0 | R1∧R2∧R3∧R4∧R5∧**R6** | = 钱路可读可写。写路径的闸 `transaction.mjs:150` 用的正是 R5 同一字段;读路径无闸 ⇒ R6 由探针替它守 |
 
 两稿对不上的地方 = 0;本文对稿的**三条补充**(请 NWT 一起判):
-1. **稿 §9-Q1(diskIo 假进度)**:我投**合取** `diskIoWriteBytes↑ ∧ (activePeers ≥ 1 ∨ ibdPeer)`。理由:8/22–23 日志里 `IBD started with peer` 488 次、`timeout expired` 131 次——peer 反复断连时节点仍会写日志/压缩, diskIo 单独会把"无 peer 空转"读成 SYNCING。
+1. **稿 §9-Q1(diskIo 假进度)**:我原投合取 `diskIoWriteBytes↑ ∧ (activePeers ≥ 1 ∨ ibdPeer)`——**NWT 判 PARTIAL**:"卡死 IBD 挂着 idle peer + compaction 持续写盘"能同时满足合取。**采统一修法**:diskIo 永不抑制 STALLED, STALLED 由共识计数器 60 min 零进度硬判, diskIo 只调告警节奏(§4 表已按此改)。⚠ §3-A 阶段共识计数器全 0 不动 ⇒ 全新库 header 下载期**必然在 60 min 后报 STALLED**——这是**已知且可接受的假阳**(STALLED 只告警不拉进程), 探针文案里要写明 `phase=pp-chain-headers` 供操作员一眼判。
 2. **R5 是时间判据**(§2)⇒ 单采 `isSynced=false` **不构成任何判定**;稿 3.2 已用"进度 + 30 min 窗"兜住, 建议在稿里**写明 isSynced 的源码定义**, 防下一个人拿单采 false 当死。
 3. **(622)-② 的 re-break 触发**换成 §6 的两条(`blocks/s` 与 lag), 从 watchdog/sampler 里**删掉 `tips > 4500`** 这条(它在 §1 数据里对健康/近停滞两态读数相同)。
 
@@ -118,7 +118,7 @@
 | 近停滞 | < 1 块/s 持续 30 min | `[MEASURED]` 8/22T16 与 8/23T01 两段 0.6–0.9 块/s, 各持续 ~1h, 自行追回;30 min 与稿 STALL_MS 对齐 |
 | lag 告警 | > 60 min | `[MEASURED]` 8/22–23 max 85.5;健康窗(J1 8/17)lag≈0;60 取两者之间, **只告警不判死**(那两段自愈了) |
 | 阶段 A headers 速率 | ≈ 58k/h | `[MEASURED]` 今日 16:39→20:51 251k(KANet-UI 同读 58k/h) |
-| STALLED 窗 | 30 min 零进度 | `[DESIGN]` 稿 3.2;本文数据不反对(近停滞段内 R4 计数器仍每分钟 +30~+60, 不会触发) |
+| STALLED 窗 | **60 min** 共识计数器零进度(diskIo 不参与) | `[DESIGN]` Bettor 2026-08-26 统一修法(原稿 30 min);本文数据不反对(近停滞段内共识计数器仍每分钟 +30~+60, 不会触发);§3-A 期为已知假阳(见 §4 补充①) |
 
 ---
 
