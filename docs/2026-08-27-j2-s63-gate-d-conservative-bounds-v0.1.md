@@ -119,6 +119,7 @@ Codex 同时钉：本门**不能证绝对抗审查**，最终 claim 保持 **con
 
 ### 3-C `N_margin`（v0.3：联合最坏迹 + 具名未分配余量，D-1/D-2）
 
+**D-1 三选一显式写**：❌ 选项一"证三者互斥、界取 max"——**不成立**，失能/落链/重选顺序发生不互斥；✅ 选项三"联合最坏迹重算总界不重复计"= 本节主体；✅ 选项二"具名未分配余量"= 表中 `S_unalloc`，只吸 `N_claim` **模型误差**（估值偏差），**不吸"没量过"**——"没量过"由 §5① 硬前置解决。
 **联合最坏迹（D-1 选项三：从一条时间线重算，不重复计）**——O 在网络 DAA `D0` 创建后，反应方能输的最坏一条线是**顺序发生**的：
 `[失能：看不见 O 或 submit 被拒] → [观察器下一 tick 才看到] → [提交 claim → 落链到深度 20] → [落链后被 virtual 重选退回 → 重落一次] → [拥塞/方差把上两段拉长]`
 各段**互不重叠**（失能时不可能在落链；重选发生在落链之后）⇒ 总界 = **各段之和**，不是 max；且各段只计一次：`M_congest` 只加在落链段上，不再在失能段里重复算方差。表：
@@ -171,7 +172,7 @@ CFG-UNIT-DOMAIN 判据原文："ctor 参数须带单位标签/单一来源，混
 
 | # | 要重采什么 | 为什么现在的数不够 | 预注册判据 |
 |---|---|---|---|
-| ① | **对抗阈值测试**（Codex bullet 5）：造 O 形状同 P3 的 tx，在 `O_daa + (N_claim+N_margin) − δ` 提交 claim，测其 `blockDaaScore(claim) − blockDaaScore(O)`（`check_utxo_landed` 暴露 `virtualDaaScore − blockDaaScore`，可直接量 DAA 跨度）；对照臂：阈值后提交的 claim 输给 recovery。🔴 **显式限 claim-shape（2 covenant 输入 + 脚本执行 + 深度 20）**，**funding-shape（普通 P2PK 输入）的落链数不计入 `N_claim` 证据** | 本稿**没有任何深确认级（depth≥20）证据**，E1/E2 都是首见级，且 E2 是 funding-shape | ≥ 30 笔，全部 `span ≤ N_claim`；p100 < `N_claim`/2 才算余量成立；任一 > `N_claim` ⇒ 数值作废回本稿 §3-B 重算 |
+| ① | **对抗阈值测试**（Codex bullet 5）：造 O 形状同 P3 的 tx，在 `O_daa + (N_claim+N_margin) − δ` 提交 claim，测其 `blockDaaScore(claim) − blockDaaScore(O)`（`check_utxo_landed` 暴露 `virtualDaaScore − blockDaaScore`，可直接量 DAA 跨度）；对照臂：阈值后提交的 claim 输给 recovery。🔴 **显式限 claim-shape（2 covenant 输入 + 脚本执行 + 深度 20）**，**funding-shape（普通 P2PK 输入）的落链数不计入 `N_claim` 证据** | 本稿**没有任何深确认级（depth≥20）证据**，E1/E2 都是首见级，且 E2 是 funding-shape。🔴 **v0.3 升级为【部署硬前置】（NWT 撤回其"`N_claim` 5.9% 被吸收"一句，Codex D-1 打中的正是它）：`N_claim` n=1 不是"被吸收"而是**更承重**——它是联合最坏迹里唯一没有观测的段，`S_unalloc` 只兜模型误差不兜"没量过"** | ≥ 30 笔 claim-shape（2 covenant 输入、脚本执行、深确认 ≥20），全部 `span ≤ N_claim`；p100 < `N_claim`/2 才算余量成立；任一 > `N_claim` ⇒ 数值作废回本稿 §3-B 重算。**未跑完 = (d) 不得从 PROVISIONAL 升级，Tier-2 不得进真金** |
 | ② | **节点 lag / 近停滞分布 + 参考节点 DAA 推进**（(5) 稿采样器 `scratch/_j2_dag_watch_postsync.mjs` 120 min 起步，目标 ≥ 24 h；🔴 **D-2：每个 lag/停滞区间同时记两列——wall-clock 时长 和 参考节点（非本机，如 J1 观察节点 / 第二 vantage）的网络 DAA 推进**；采样器现只记本机 DAA，需加参考节点一列——改脚本走报备）| E3 是反复崩那台的数据且**没有网络 DAA 列**；`R_cap=20/s` 是假设 | `M_observe` **用参考节点 DAA 推进列直接定**：取所有失能区间 `max(网络 DAA 推进) + tick`；`R_cap` 由 `max(推进/时长)` 校核，实测 > 20/s ⇒ 上调；若重采最长失能 < 30 min 且推进率 ≤ 20/s，可提案 `M_observe` 降，**只准降到不低于重采尾部** |
 | ③ | **reorg / virtual 重选深度**（Bettor `scratch/_bettor_reorg_depth_sample.mjs` 同法）| 现只有"回退 2"一条与单采 −346 | `M_reorg ≥ 2 × 观测 max`，且 ≥ 400 |
 | ④ | **P3 真实 claim tx 的 compute/storage mass**（`kip9-mass.mjs` 现算）| `min_O` 的费项现在按 bshard 口径估的 | **条件于 §7 ①**：选 (a) ⇒ `min_O ≥ 2.5 × (真 mass 费 + 存储地板)`，真费 > 4e6 则上调不准下调 SF；选 (b) ⇒ 本项只校 `storage_floor`，**claim 费不进 `min_O`**（v0.1 把它算进去是错模型，见 3-A）|
@@ -195,7 +196,7 @@ CFG-UNIT-DOMAIN 判据原文："ctor 参数须带单位标签/单一来源，混
    - **(b)** 不强制，`min_O` 只锚存储地板（5,000,000 sompi），反应方自备费输入；代价 = 失去"零本钱可 claim"便利、watchtower 代广播须自带费。
    - 影响面：改 v0.15 正文 = 设计层，须 Codex；本稿只把两条路与各自代价写清。
 2. 三个数全是 PROVISIONAL：① 缺深确认级落链证据（`N_claim` 证据基近零，3-B 已标）；② 节点尾部是坏节点的数；③ P3 形状未出。**本稿的贡献是把"该量什么、怎么量、取值规则、保守方向"钉死**，不是把数拍死。
-3. 🔴 **`M_observe = 110,400` 的唯一结构性降法 = Tier-2 纳入 watchtower 多重（best-of-N 失能窗）——架构问题，交 Owner/Codex 定**（3-C 单列）；单节点包络下只能靠 §5② 重采，**不能靠入场闸**（v0.2 删错因果）。🔴 **Codex 补的两个前提（缺一不许缩窗）**：(i) watchtower 的**节点 / RPC / 故障域真正独立**（不是同一台机、同一 kaspad、同一供电/网络；否则 best-of-N = best-of-1，独立性论证口径同 (e) quorum）；(ii) **payout 不可重定向**（claim 支 `OpTxOutputSpkSubstr(payout_idx)==baked_reactive_payout_spk` ∧ `value==OAUTH_value` 焊死，v0.15 §4-e @L289-290——现稿已满足，但任何放宽都同时废掉 watchtower 方案）。
+3. 🔴 **`M_observe = 110,400` 的唯一结构性降法 = Tier-2 纳入 watchtower 多重（best-of-N 失能窗）——架构问题，交 Owner/Codex 定**（3-C 单列）；单节点包络下只能靠 §5② 重采，**不能靠入场闸**（v0.2 删错因果）。🔴 **Codex 补的两个前提，NWT 收窄为一条**：(ii) **payout 不可重定向**——**已结构满足**（§1.5 假设 5 @L135 "payout baked 到反应方，改不了向"；claim 支 `OpTxOutputSpkSubstr(payout_idx)==baked_reactive_payout_spk` ∧ `value==OAUTH_value` 焊死，v0.15 §4-e @L289-290；任何放宽同时废掉 watchtower 方案）；⇒ **交 Owner/Codex 的架构问题只剩一条：(i) watchtower 的节点 / RPC / 故障域是否真正独立**（不是同一台机、同一 kaspad、同一供电/网络；否则 best-of-N = best-of-1；独立性论证口径同 (e) quorum）。
 4. `min_O` 多出部分反应方可作找零拿回——这一点依赖"O 支 1 不禁普通输出"（v0.15 §4-e 只 `OpCovOutputCount==0`）；若 P3 收紧输出集，`min_O` 的"过大无害"论证要重看。
 5. 本稿未覆盖 (d) 之外的门；`T_cutoff_LOCKED_R`/`T_giveup` 绝对值属另一门，只在 §4 单位表里对照。
 
