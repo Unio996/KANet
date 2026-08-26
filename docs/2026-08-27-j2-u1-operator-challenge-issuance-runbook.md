@@ -1,7 +1,11 @@
 # §6-1 Track-A · operator 手工挑战签发 + 一次真注册 E2E · runbook
 
 > 🔴 **Track-A operator 驱动 · 不部署自动签发口 · 部署闸绑 §10**(COORD-LEDGER (527)(528) 终裁, Codex (529) ACCEPTED-with-scope)。本 runbook 里的"签发"是 operator 在本机手工跑一次脚本, 不是 HTTP 端点、不常驻、不进 cron。
-> **Status**: DRAFT v0.2 · J2 2026-08-27 · Bettor 派工 (8) · 报备层, **写完未跑**(脚本只在临时库自测, 见 §7)· **待 NWT 审** → 由 **KANet-UI(operator)** 执行 E2E
+> **Status**: DRAFT v0.3 · J2 2026-08-27 · Bettor 派工 (8) · NWT 审 v0.2 = PASS, v0.3 = 吸收 NWT 三条硬化 + Bettor 两句 · 报备层, **写完未在 live 跑**(脚本只在临时库自测, 见 §7)· 由 **KANet-UI(operator)** 执行 E2E
+> 🔴 **"operator 手工签发"是【进程约定】不是【强制控制】**(NWT 裁): 跑脚本 = 文件系统能力事件(需 `console.db` 写权限), **不是 operator 身份认证事件**;脚本不认证 operator, 谁有同样 DB 写权限谁都能跑;它的权威 = console-loopback 文件访问, 与 ⑦/§10 同源 ⇒ **不许暗示"脚本签发 = operator 已授权"**。脚本入库 = 可发现: 把"手写 INSERT"变成现成工具, 不跨边界但**降低本地 actor 门槛**, loopback 信任内可接受, **北极星面前须重估**。
+> 🔴 **常驻约束**: `u1-issue-challenge.mjs` **永不**接 HTTP route / cron / daemon;任何把它 wrap 成端点或定时任务的改动 = 自动签发口 = **§10-gated, 须先报备**。谁碰这个脚本先 `grep -rn "u1-issue-challenge" kasia-console/src scripts` 确认零引用(ANTI-PATTERNS 审查清单同句)。
+> 🔴 **活 bearer**: challenge 在 `used_at` 置非空之前是**活 bearer token**——签发输出**不贴频道、不进持久证据**;消费后 inert, 证据里才记它的值。
+> 🔵 连接是读写的(经 `DB_PATH` + `src/db/client.js`, M0a 合规);**dry-run 零写入由代码路径保证**(无 `--commit` 时不含任何 INSERT/DELETE), 不靠 readonly 标志。
 > 🔴 **作用域(Bettor 钉死, 逐字)**: 挑战 = **纯 nonce**;`isStoreBoundTo` 绑的是 **sqlite ∧ table**, **不绑 relay_id / requester**;PoP 只证**控住被注册的那把 pubkey**, **不证有权用那个 relay_id**(`REG_REJECT` 无 `RELAY_NOT_OWNED`)。⇒ **E2E 跑通 = 「注册路 plumbing 在 operator 信任假设下端到端通」, ≠ 「§6-1 注册 LIVE-for-real」;⑦ relay_id 抢注面在本 E2E 里零信息, soundness 待 §10。** 本文任何地方**不得**写"第一条真实注册"这类会被读成 LIVE 的话;本 E2E 产出的证据自带这段作用域。
 > **脚本**: `kasia-console/scripts/u1-issue-challenge.mjs`(⚠ 放在 kasia-console/scripts 而非根 scripts/: 它要 import `src/lib/u1-challenge-store.mjs` 与 `src/lib/u1-registration.mjs` 的生产谓词, 与 `checksigfromstack-e2e-*.mjs` 同位)。默认只读 dry-run, `--commit` 才写。
 
@@ -44,13 +48,14 @@
    - (a) `SELECT relay_id, identity_pubkey_xonly, custody FROM u1_identity_registration` = **1 行**, `custody='mnemonic'`, `identity_pubkey_xonly` == relay 地址的 x-only 公钥(`XOnlyPublicKey.fromAddress(relay.address)`);
    - (b) `SELECT used_at FROM u1_identity_challenge WHERE challenge=?` **非空**(CAS 消费过);
    - (c) **同一 submission 再 POST 一次** ⇒ HTTP 400, `code='CHALLENGE_ALREADY_USED'`(事务内重读 `usedAt` 非空 ⇒ 拒), 且 `u1_identity_registration` 仍 1 行。
-5. **两条负测臂(Bettor 加, 与三臂一起跑, 缺一不算过)** —— 🔴 **顺序: 先跑负测臂, 再跑 §4 步 1-4 的主臂**, 因为脚本是全表级幂等(一次一条活挑战), 且 (b) 会留下一行要回滚的伪注册:
+5. **负测臂(live 上只跑这些, 与三臂一起, 缺一不算过)** —— 🔴 顺序: **先跑 (a), 再跑主臂 1-4**(脚本全表级幂等, 一次一条活挑战):
    - **(a) 过期 nonce ⇒ 拒**: `--commit --ttl-ms 60000`(脚本允许的最小值)签发一条 → **等 ≥ 61 s** → 用它构造 submission 并 POST ⇒ 期望 HTTP 400 `code='CHALLENGE_EXPIRED'`(注册侧事务内重读 `expiresAt <= now`, 与签发写的 `expires_at` 同一判据), `u1_identity_registration` **0 行**。⚠ **不要**用 `UPDATE expires_at` 手改活表造过期(在册禁手插 DB);用最小 TTL + 等待。这条过期挑战会在下一次 `--commit` 时作为孤儿被脚本清掉——那本身也是 ④ 的正向证据, 记下 `orphans_cleaned=1`。
-   - **(b) 同一 nonce 换 relay_id 提交 ⇒ 现状【会过】= ⑦ 缺陷可见**: 再签发一条(10 min)→ 用 **relay A 的钥**构造 submission, 但 `relayId` 填 **relay B**(另一个 custody=mnemonic 的本机 relay, 如 NWT-tn / Bettor-tn 的 id, 别用钱路 relay)→ POST ⇒ **期望值写「现状 PASS(HTTP 200), 落库 `relay_id=B, identity_pubkey_xonly=A 的 pubkey`」**。这不是伪装成 REJECT 的负测, 是把 ⑦(DECISIONS L159 / (487))**在运行时测出来**并留证:"已知边界·被测到"。若它意外 REJECT ⇒ 说明现状与 L159 不符, **停, 先查再继续**(可能有人修了没登记)。**测完立刻按 §6 回滚这一行 + 该挑战**(它是伪注册, 不许留)。
-   - 阴性对照(建议, 不计入): 把 signature 翻一位再 POST ⇒ `POP_FAILED`。
+   - **(b) 翻签 ⇒ `POP_FAILED`**: 主臂步 3 之前, 先把同一 submission 的 `signature` 翻一位 POST 一次 ⇒ HTTP 400 `POP_FAILED`, 且挑战**仍未消费**(`used_at` 为空; PoP 在事务外先拒, 不碰 CAS)——然后再用正确 signature 走主臂步 3。
+   - **(c) 二次同挑战 ⇒ `CHALLENGE_ALREADY_USED`** = 主臂验收 (c), 不重复。
+   - 🔴 **撤回 live 上的"同 nonce 换 relay_id"臂**(NWT 自纠): 它在 live 会真成功、造一个抢注形状的伪注册, 即便回滚也在 live 库留过痕。**这条边界改在临时库证明**(§7 第二组), live E2E 不做。
 
 ## §5 证据留档
-- `scratch/u1-e2e-<date>/`: dry-run JSON、issue JSON、submission.json(**不含密钥**, 六字段皆公开值)、三次 curl 的 HTTP 状态与 body、三条 SELECT 输出、`git log -1`、console PID。
+- `scratch/u1-e2e-<date>/`: dry-run JSON、**issue JSON(只在挑战被消费之后才落盘/入证据——消费前它是活 bearer, 消费后 inert)**、submission.json(**不含密钥**;六字段中 `challenge` 同样只在消费后记)、三次 curl 的 HTTP 状态与 body、三条 SELECT 输出、`git log -1`、console PID。
 - 一份 `docs/2026-08-2x-kanetui-u1-e2e-evidence.md`(operator 写), 逐臂贴原文;J2 复核、NWT 审。
 
 ## §6 回滚
@@ -60,8 +65,16 @@
 - 🔴 回滚后核: 两表行数回到 §2 基线(负测臂做完 = 0/0;主臂留证 = 1/1)。
 - 🔴 回滚是手插 DB(在册禁)的例外形态: **只删本次 E2E 自己写的两行, 且必须在 NWT 看过证据之后**;不许顺手"清一下表"。
 
-## §7 脚本自测(J2 · 临时库 · 真 DDL · 未碰 live 库)
-`scratch/_u1_issue_selftest.db`(relay_nodes 最小列 + v196/v197 逐字 DDL): A dry-run ⇒ `WOULD-ISSUE`, 列出 1 条过期孤儿、不删;B 混合态 relay ⇒ `CUSTODY_AMBIGUOUS` 拒(exit 2);C `--commit` ⇒ `ISSUED` + 孤儿清 1;D 再 `--commit` ⇒ `EXISTING-LIVE-CHALLENGE` 幂等不签。原始输出见本文提交时 Bettor 消息 / 复跑命令在脚本头。**live 库上一次都没跑**(连 dry-run 都没跑——Bettor "写完不跑"; E2E 第 0 步的 dry-run 由 operator 跑)。
+## §7 脚本自测 + 边界证明(J2 · 临时库 · 未碰 live 库)
+**第一组 · 签发脚本四臂**(`scratch/_u1_issue_selftest.db`, relay_nodes 最小列 + v196/v197 逐字 DDL): A dry-run ⇒ `WOULD-ISSUE`, 列出 1 条过期孤儿、表不变;B 混合态 relay ⇒ `CUSTODY_AMBIGUOUS` 拒(exit 2);C `--commit` ⇒ `ISSUED` + 孤儿清 1;D 再 `--commit` ⇒ `EXISTING-LIVE-CHALLENGE` 幂等不签。
+**第二组 · "nonce 不绑 relay_id"边界**(`scratch/_u1_nonce_not_bound_selftest.mjs`, 临时库跑**真迁移** `runMigrations()` + 生产 `registerIdentity`/`createChallengeStore`/`buildPopPayload`, 结果 `scratch/_u1_nonce_not_bound_result_20260827.txt`):
+| 臂 | 提交 | 结果 | 读法 |
+|---|---|---|---|
+| 对照 | 身份 A 的钥 + `relayId=relay-A` | **PASS** | 仪器会绿(否则下面的 PASS 无归因) |
+| 边界 1 | 身份 A(已注册)的钥 + `relayId=relay-B` | **REJECT `CONSTRAINT`**, 挑战未消费(回滚) | v196 UNIQUE(N3)⇒ **同一 pubkey 不得二次注册** ⇒ 抢注**不能**靠复用已注册的钥 |
+| 被测(⑦) | **攻击者新钥 X** + `relayId=relay-B` | **PASS**, 落库 `relay_id=relay-B, pubkey=X` | **nonce 与 PoP 都不绑 relay_id 归属 ⇒ relay-B 被 X 抢占** = DECISIONS L159 / (487) 在运行时坐实, 不是推断 |
+⇒ ⑦ 的精确形状: **需要一把未注册过的新钥 + 任一 custody=mnemonic 的 relay_id + 一条活挑战**;第三个条件就是本 runbook 要守的东西(活 bearer / 5 min TTL / 不部署自动签发口)。
+**live 库上一次都没跑**(连 dry-run 都没跑; E2E 第 0 步的 dry-run 由 operator 跑)。
 
 ## §8 与既有裁定的关系 / 边界
 - (527)(528): 自动签发口不部署、Track-A operator 驱动 —— 本 runbook 就是那个"手工挑战"。(529) MUST-FIX 孤儿活挑战 —— 脚本 ④。
