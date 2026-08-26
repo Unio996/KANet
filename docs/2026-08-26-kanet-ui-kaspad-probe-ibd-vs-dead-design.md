@@ -1,6 +1,7 @@
 # kaspad 探针「IBD 进行中」vs「真死」判据设计 — kaspad-rpc-probe.mjs / kaspad-watchdog.ps1（设计稿 · 零改码）
 
-> **Status**: DRAFT **v0.3** · KANet-UI 2026-08-26 · Bettor 派工 · **v0.1 NWT = PASS-WITH-MUST-FIX**; v0.2 应两必修 + 优先级重排 + llm-watchdog; **v0.3 = 用 J2 源码答案(@rusty-kaspa 7b1e18cc live 二进制)对齐 F-B/F-C**; **仍不落码, NWT 终核读 v0.3**。
+> **Status**: DRAFT **v0.4** · KANet-UI 2026-08-26 · Bettor 派工 · **v0.1 NWT = PASS-WITH-MUST-FIX**; v0.2 应两必修 + 优先级重排 + llm-watchdog; **v0.3 = 用 J2 源码答案(@rusty-kaspa 7b1e18cc live 二进制)对齐 F-B/F-C**; **仍不落码, NWT 终核读 v0.4**。
+> **v0.4 changelog(NWT 终核前, 三处)**: ①KNOWN 残余(§3.2c 新节)— `service.rs:257-275 unwrap_or_default` 是 per-query, 索引健康时某址某次查询遇瞬时 store 错仍返 [], A1/A2/探针都挡不住 ⇒ ALIVE 只证"索引建好"不证"某址这次读得对", 钱路关键读必须二源交叉。②MF-2 范围(§0.5)— 内存闸装**每个重进程 spawn 点**(不只 kaspad-watchdog, 它根本不 spawn llama; 加两份 start 脚本 llama 段 + llm-watchdog)且**每 tick 重查**(IBD 内存会涨, "kaspad 需 ~2GB"锚改掉)。③crash-loop 告警到达性(§0.5)— 加本地红旗文件(探针每 tick 读, 红旗在就不拉)+ 不依赖 console 的通道(owner-bot 直发 TG / Windows 事件日志 Error 级)。
 > **v0.3 changelog(仅两处)**: F-B — R6 由 [MUST-VERIFY] 改「已核: 节点重建对读者原子(write 锁, 无半建态), 但 RPC 闸只盖 UTXO 导入段、header 阶段合法答 []、helper 吞 store 错成空集 ⇒ 节点给不了『索引建成』的牙, R6 承重全在外锚 A1∧A2」; 删 isUtxoIndexed 交叉(= 配置开关非建成状态); 负例交叉改 J2 三态。F-C — 不可花费永久 UTXO 不存在(J2 三候选全否), 对照改「≥2 独立长期持币址, 任一非空即过, 全空=UNKNOWN 永不 DEAD」。
 > **v0.2 changelog**: ①MF-1 加「共识计数器 60min 硬停滞层」(diskWrite 可被 RocksDB compaction 伪造, 不能单独判 SYNCING) + 预注册 V8。②MF-2 §6 crash-loop 刹车从可选升 **REQUIRED** + **内存感知拒拉**(8/23 形态: 进程已 OOM 崩退, "看不到进程就放行"会再拉 30GB 砸缺内存机)。③**优先级重排(NWT 纠正)**: 危害大的 crash-loop/OOM 提到 §0.5(最高优先), 危害小的 IBD 假 DEAD 降为次要。④加 §9 llm-watchdog 双开跟进。⑤§0 一句话按 8/23 真根因(OOM 主因)重写。
 > **域**: 运维/watchdog(KANet-UI 域, J1 在 ledger (624) 明确移交)。改动对象 = `scripts/kaspad-rpc-probe.mjs`(退码/判据) + `scripts/kaspad-watchdog.ps1`(消费退码)。**不碰任何钱路/产品码/console。**
@@ -17,8 +18,16 @@
 `[MEASURED 2026-08-26]` 本机: 物理 RAM **61.6 GB**, commit 上限 **99.6 GB**(页文件补 ~38GB), 当前 commit 已用 **59.2 GB** / 空闲 **40.4 GB**; 单个 llama-server 私有 commit **30.2 GB**。⇒ **再拉一个 llama 需 ~30GB commit; 8/23 那种 console cycling + 多进程时, 空闲 commit 会跌破 30GB, 第二个大进程把 commit 顶穿 = "分页文件太小" = 整机失响。**
 
 **两道硬闸(watchdog 在任何 Start-Process 之前都要过, 缺一不拉)**:
-1. **内存感知拒拉(REQUIRED)**: 拉 kaspad 前查 `Get-CimInstance Win32_OperatingSystem` 的 `FreeVirtualMemory`(= 空闲 commit)。**kaspad 需 ~2GB, 阈值 `KASPAD_MIN_FREE_COMMIT_GB` 默认 8**(留裕量); 空闲 commit < 阈值 ⇒ **拒拉 + 告警 `refuse-start:low-commit:<free>GB`**, 不 Start-Process。→ 对 llama 类大进程(若 watchdog 管)阈值须 ≥ 该进程私有 commit + margin(llama = 35)。**"看不到进程就放行"的旧闸(§3.4)对 8/23 无效**: 进程 OOM 崩退后确实看不到, 但机器仍缺内存, 拉一个 30GB 的新进程正是压垮点。⇒ **内存闸在"进程在就不拉"闸之前, 且独立成立**。
-2. **crash-loop 刹车(REQUIRED, 从 v0.1 §6 可选升级)**: 状态文件记 `starts[]`(每次 Start-Process 时间戳 + 拉起的 PID)。判据: **15 分钟内 Start-Process ≥3 次, 且每次拉起的 PID 在下一 tick 已不存在**(= 拉起即死) ⇒ 进 `CRASH-LOOP` 态: **停止一切 Start-Process + 告警 + 交操作员/提权**, 直到人工清零。这正是 8/23「kaspad 0xc0000409 每次同偏移确定性崩 + watchdog 反复拉」那族——确定性崩就是"拉了也活不过一个 tick", 刹车必须在 N 次后认命, 不能无限拉。
+1. **内存感知拒拉(REQUIRED, v0.4 扩范围)**: 任何 spawn 前查 `Get-CimInstance Win32_OperatingSystem` 的 `FreeVirtualMemory`(= 空闲 commit), 低于阈值 ⇒ **拒拉 + 告警 `refuse-start:low-commit:<free>GB`**。
+   - 🔴 **范围(NWT 硬伤修正): 闸必须装在【每个重进程 spawn 点】, 不只 kaspad-watchdog** — kaspad-watchdog **根本不 spawn llama**, 而 8/23 主凶是 **llama 双开**(见 §9)。承重 spawn 点清单: ①`kaspad-watchdog.ps1`(kaspad) ②`kanet-start.sh:232` + ③`kanet-start-headless.sh:106` 的 llama-server 段 ④`llm-watchdog.mjs:45 spawnLlama`(若保留)。每处 spawn 前都要过同一道内存闸。**本稿域只覆盖 ①④(watchdog 域); ②③是 start 脚本改动 = 走报备→NWT 审→Owner 批**(与漂移表 §4 合并那批同批), 本稿只钉出"必须装"。
+   - 🔴 **每 tick 重查, 不只 launch 时**: IBD 期内存会涨(坏库曾 25GB / 新库 4GB 起步, 且随同步增长), "kaspad 需 ~2GB"这个 v0.2 锚**作废**(它只是空库启动瞬时值)。阈值按"目标进程当前/预期峰值 commit + margin"定, 不按启动瞬时值。
+   - **数值(保留)**: `KASPAD_MIN_FREE_COMMIT_GB` 默认 **8**(kaspad); llama 类默认 **35**(≥ 该进程私有 commit 30 + margin)。
+   - **"看不到进程就放行"的旧闸(§3.4)对 8/23 无效**: 进程 OOM 崩退后确实看不到, 但机器仍缺内存, 拉一个 30GB 新进程正是压垮点。⇒ **内存闸在"进程在就不拉"闸之前, 且独立成立**。
+2. **crash-loop 刹车(REQUIRED)**: 状态文件记 `starts[]`(每次 Start-Process 时间戳 + 拉起的 PID)。判据: **15 分钟内 Start-Process ≥3 次, 且每次拉起的 PID 在下一 tick 已不存在**(= 拉起即死) ⇒ 进 `CRASH-LOOP` 态: **停止一切 Start-Process + 告警**。这正是 8/23「kaspad 0xc0000409 每次同偏移确定性崩 + watchdog 反复拉」那族。
+   - 🔴 **告警到达性(NWT v0.4): "停到人工清零"不能只靠一条会断的通道**。8/23 那条告警若走 dev 频道(:3200 console)= 正断的那条 → "直到人工清零" + 无人值守 = **无限期躺**。三件一起:
+     - **本地红旗文件** `D:\kaspa-tn12-data\kaspad-CRASH-LOOP.flag`(写入时刻 + starts[] 快照): 进 CRASH-LOOP 即写; **探针每 tick 先读它, 红旗在就直接拒拉**(不依赖内存里的 starts[] 跨进程, 一次性探针进程本就无记忆)。人工清零 = 删这个文件。
+     - **不依赖 console 的告警通道(至少一条)**: (a) owner-bot 直发 Telegram(不经 :3200), 或 (b) 写一条 **Windows 事件日志 Error 级**(`eventcreate /L APPLICATION /T ERROR /ID 823 /SO KANet-kaspad-watchdog /D "CRASH-LOOP ..."`), 运维可 `Get-WinEvent` grep。**不把 dev 频道当唯一告警出口**(= 记忆 reference-the-coordination-channel-dies-with-the-chain 同族: 报告通道与故障源同生共死)。
+     - 保留 dev 频道告警作**第三条**(能通时最省事), 但它不是唯一。
 
 **判据(v0.2 立)**: watchdog 的第一要务是**不制造次生 OOM**, 不是"尽快拉活"。宁可一个真死的 kaspad 多躺 10 分钟等操作员, 不可在缺内存的机器上再砸一个大进程把整机带走。原 §0 的三态升级(下文)在此闸之下才谈。
 
@@ -114,6 +123,14 @@ NWT 指出 `diskIoWriteBytes` 可被 **RocksDB 后台 compaction 伪造**——�
 - `[DESIGN-CHOICE]` 对照臂的意义 = 区分"索引空"与"地址空": 没有 A2, utxoindex 未建好的节点会对**所有**地址回空集而不报错, 探针把它当 ALIVE 放行, 下游把"没读到"当"没有"。A2 失败不计入 DEAD(节点没坏, 是还没好), 只压 SYNCING。
 - 退码: R6 不过仍回 **7 SYNCING**(`utxoindex-pending`), 与 watchdog、runbook §4 P1b 同一把尺。
 
+### 3.2c KNOWN 残余: ALIVE 不证"某址这次读得对"(NWT v0.4·per-query 空集) `[已核·CONFIRMED]`
+🔴 **一条 A1/A2/探针都挡不住的残余**: `service.rs:257-275` 的 `.unwrap_or_default()` 是 **per-query** 的 — 即使 utxoindex 健康、A2 对照集非空、探针判 ALIVE, **某个结算址在某一次查询遇到瞬时 store 错误, 那一次仍返 `[]`**, 读成"没钱"。这与"索引没建好"是两码事: 索引全好, 只是这一次读坏了。探针是**节点级/对照址级**的健康证明, 证不了"我关心的这个地址这一次读对了"。
+- **判据(v0.4 立)**: **ALIVE 只证"索引建好", 不证"某址这次读得对"**。
+- **钱路关键读必须二源交叉**(不接受单次单源):
+  - 转账 runbook 的 G1–G4 源余额/UTXO 复读(§4 P1b/P3);
+  - settle / refund 前的余额读。
+  二源 = **二次独立查询(隔开时间, 都非空且一致)** + **kaspa_tx_log 或直连 kaspad 第二 vantage** 交叉。单次返 `[]` 绝不作为"没有"的结论 — 可能正是这次 store 错。
+- **归属**: 探针/watchdog **不**负责消除这条(它是 RPC helper 的 per-query 脆性, 属钱路读取方的纪律); 本节只钉出"ALIVE 的边界"并把二源交叉要求同步进转账 runbook §4。
 ### 3.3 退码总表(在现有 0/1/2/3/4/5/6 上**只加不改**, 老消费者不被改变语义)
 | 码 | 词 | 含义 | watchdog 动作 |
 |---|---|---|---|
