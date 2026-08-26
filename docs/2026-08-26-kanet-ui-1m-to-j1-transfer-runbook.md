@@ -55,6 +55,7 @@ kaspad 22428 `isSynced=false / blockCount=0 / headerCount=0 / daa=0`(pp-chain-he
 | # | 项 | 怎么核 | 通过判据 |
 |---|---|---|---|
 | P1 | 节点已同步 | `node scripts/kaspad-rpc-probe.mjs`(现版本 `ALIVE:` 即 daa>0) **且** `scratch/_kanetui_sync_check.mjs` `isSynced:true` | 两个都 true; 且 `blockCount>0`, `pastMedianTime` 是近 10 分钟内的时间戳(不是 2021 genesis) |
+| **P1b** | **UTXO 集可用**(Bettor E-bis 补, J2 8/26 实测: IBD 期 relay `get_address_utxos` 对已知持币地址回 `{"ok":true,"utxos":[]}` **空集不报错**, `chain_get_current_daa_score` 回 0 ⇒ `isSynced`/`pastMedianTime` 过了**不等于** utxoindex 可用) | ① `send-command {"type":"chain_get_current_daa_score"}` → **daa > 80,095,687**(8/22 实测下界, 只能更大) ② **阳性对照址** = 源址 `kaspatest:qrys4yax…` 跑 §2.2 Q2 `get_address_utxos` → **非空** | 两条都过。任一不过 ⇒ **G1–G4 的全部拓扑读数作废**(空集/0 余额是"索引没好"不是"没钱"), 不许进 P3/§5; 对照臂不通时任何"目标地址 0 UTXO"(P5)也同样不可信 |
 | P2 | console 非 degraded | ① `curl -o /dev/null -w '%{http_code} %{time_total}' http://127.0.0.1:3200/` 302 且 <1s ② `GET /api/relay/ce43e1b1…/rpc-state`(`relay.js:396`, 走 IPC 读 relay 子进程自己的 RPC 态, 5s 快错)→ `ok:true` 且 state 显示已连 ③ `events` 表: `SELECT max(created_at) FROM events WHERE event_type='rpc_health_check_failed'` **必须早于 P1 通过的时刻 ≥10 分钟**(`[MEASURED]` 今日 11:35Z 仍在写, 累计 362,090 条; 同步后这条流应停) ④ `logs/kanet-console-supervisor.log` 最近 10 分钟无 `health fail` | 四项全过 |
 | P3 | 源余额/拓扑复读 | §2.2 Q1/Q2/Q3 | §2.3 G1-G4 全过 |
 | P4 | 目标地址 | `kasia-console` 下 `new (await import('kaspa-wasm')).Address('<J1 addr>')` round-trip == 原串, prefix `kaspatest`(同 (623) 已验方法, **执行当天再验一次**, 防文档被改) | byte-exact |

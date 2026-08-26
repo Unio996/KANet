@@ -84,6 +84,13 @@
 - `[DESIGN-CHOICE]` **不用** `kaspad-stdout.log` 文件增长做探针判据: 它是 watchdog 重定向的产物, 1.3 证明它会被截断/污染, 且 Bettor 的独立采样进程没有它的所有权语义。可作为**人读**的旁证(§7)。
 - 状态文件缺失/损坏 ⇒ 当作第一次采样: 只写不判, 本次回 SYNCING(退码 7, reason `first-sample`)——**fail-open 向 SYNCING 而不是向 DEAD**, 因为误判 DEAD 的代价(拉进程/毁日志)远大于晚一个 tick 判死。
 
+### 3.2b ALIVE 须含「UTXO 集可用」(Bettor E-bis 补, 2026-08-26)
+`[MEASURED·J2 8/26]` IBD 期 relay `get_address_utxos` 对已知持币地址回 `{"ok":true,"utxos":[]}`(空集不报错), `chain_get_current_daa_score` 回 0 ⇒ **headers 下完 / `isSynced` 翻 true 都不等于 utxoindex 可查**。对 KANet 而言"活"的定义是**钱路能读到链上真相**, 所以 ALIVE 判据在 3.1 L4 基础上再加两条(缺一 ⇒ 仍 SYNCING, `phase=utxoindex-pending`):
+- **A1** `virtualDaaScore > 80,095,687`(8/22 实测下界; 环境变量 `KASPAD_PROBE_MIN_DAA` 可抬, 只许抬不许降);
+- **A2** **阳性对照址**非空: `getUtxosByAddresses([KASPAD_PROBE_CONTROL_ADDR])` 返回 ≥1 条(默认对照址 = `MiningRelay-tn12-new` 源址 `kaspatest:qrys4yax468rrm988kyqjtncvstcelgzktml0m3rvdvvktrll0gdxuyu34fru`, 链上长期持币; 对照址由 env 给、不烤死在码里, 换币址时改 env)。
+- `[DESIGN-CHOICE]` 对照臂的意义 = 区分"索引空"与"地址空": 没有 A2, 一个 utxoindex 尚未建好的节点会对**所有**地址回空集而不报错, 探针会把它当 ALIVE 放行, 下游(结算 daemon / 转账前置)就会把"没读到"当"没有"。A2 失败不计入 DEAD(节点没坏, 是还没好), 只压在 SYNCING。
+- 退码不变: A1/A2 不过仍回 **7 SYNCING**(reason 带 `utxoindex-pending`), 供 watchdog 与 runbook §4 P1b 同用一把尺。
+
 ### 3.3 退码总表(在现有 0/1/2/3/4/5/6 上**只加不改**, 老消费者不被改变语义)
 | 码 | 词 | 含义 | watchdog 动作 |
 |---|---|---|---|
