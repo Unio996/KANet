@@ -118,6 +118,20 @@
 - **(c) 两条实核补注(2026-08-26, 预答 NWT 复审)** `[SRC grep]`:
   - **`refund_authorization` 的代码读者共三处, 不是两处**:P1 谓词 `refund-authorization.mjs:91`(allow/deny)、legacy tick 候选 SQL `settler:493`(**选择键, 会花钱**)、backlog 计数 `settler:383-384`(`IS NULL ∨ NOT IN` 只计数不动钱)。批次门 ⅰ 要改的是**前两个**;第三个要同步改成"数【未授权】+【已授权但不在当前批】"两格, 否则授权写上后计数归零, 看起来像"修好了"而 tick 还没放。
   - 🔴 **live 的 `LEGACY_REFUND_BATCH` 不是默认 1, 是 `kanet.env:118 = 5`** ⇒ 授权一写, 每 tick(5 min)自动签广播 **5 笔**, 候选取 20。v0.1/NWT 说的"默认 1"是代码缺省, 不是运行值 —— 批次门的必要性因此更硬。
+  - **附录:`grep -rn refund_authorization kasia-console/src` 全表(2026-08-26, 16 处;逐处 R=读并据此决策 / W=写 / L=只日志或计数 / C=注释)**:
+    | 位置 | 类 | 说明 |
+    |---|---|---|
+    | refund-authorization.mjs:55 | L | 白名单**常量**自检(`[a-z0-9_]` 正则, 生成 SQL-IN 前 throw), 不读 metadata |
+    | refund-authorization.mjs:91 | **R①** | `assertBettorRefundAuthorized` 读 `meta.refund_authorization` → allow/deny |
+    | refund-authorization.mjs:98 / :102 | L | 同一谓词内的两条拒绝文案(无字段 / 不在白名单), **与 :91 是同一入口的三段, 不是三个入口** |
+    | settler:214 / :327 | C | 注释(:214 讲为何不叫 refund_evidence;:327 讲授权后落 cancelled 与扫描同义) |
+    | settler:322 / :323 / :324 | **W** | `authorizeRefundByOwner` 写三元组(`refund_authorization` / `_reference` / `_at`) |
+    | settler:383 / :384 | L | `reportUnauthorizedRefundBacklog` 计数 SQL(`IS NULL ∨ NOT IN`), 只计数不动钱 |
+    | settler:493 | **R②** | `legacyRefundBuilderTick` 候选 SQL(`IN 白名单`)= 自动签广播的选择键 |
+    | settler:2721 / :2724 | L | `dispatchRefund` 拒绝日志 + 返回 reason —— 读的是**入参 `decision.authorization`**(`:2718` 白名单校验), **不是 metadata 字段** |
+    | settler:2740 / :2745 | **W** | `dispatchRefund` 写 `refund_authorization`(+ `_tier`) |
+    ⇒ **读 metadata 字段并据此决策的 = R① + R② 两处;L 计数一处;写两处(W-A dispatchRefund / W-B authorizeRefundByOwner);无第四个决策读者。** 但 R① 有**三个调用点**(claim-auto:75 / pool.js:433 经 `buildBettorRefundClaim`, 而 legacy tick :511 与 HTTP 端点都走 pool.js:433)⇒ 批次门放在 R① 谓词内 + R② SQL 内, 三入口自动全覆盖;R② 是前置筛, R① 是花钱前最后一问。
+    (Bettor 复核时数到 12 处, 少的 4 处 = :327 注释 + :383/:384/:493 三条 SQL —— 它们写成 `'$.refund_authorization'`, 带引号的 json_extract 形式, 按 word 匹配会漏;附录按裸子串 grep, 以 16 处为准。)
   - `LEGACY_REFUND_RELEASE_BATCH` 全仓零定义(kanet.env / kanet-start.sh / kanet-start-headless.sh / scripts)⇒ 进程读到 `undefined`;两套 start 脚本对 kanet.env 都是全量 passthrough(`kanet-start.sh:97` r551 "export EVERY kanet.env key", headless r472 同源)⇒ **只要它不写进 kanet.env 就在两套下都为空**;门的 fail-closed 判据必须写成 `!env ∨ env.trim()===''` ⇒ 不匹配, 且**禁止在代码里给它缺省值**(缺省值 = 把门焊开)。
 
 ### 7.2 ② 广播前 landed(side_p2sh) 的定位:纵深 + 早筛;硬锁是同输入双花
