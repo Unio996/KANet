@@ -1,6 +1,7 @@
-# §6-3 gate (d) · §5① claim-shape 深度采样器 · 方法稿 v0.1（(d) 残余清单第 1 项 = 部署硬前置 · 只读 · 同步后跑）
+# §6-3 gate (d) · §5① claim-shape 深度采样器 · 方法稿 v0.2（(d) 残余清单第 1 项 = 部署硬前置 · 入库 + 确定性向量 · 只读 · 同步后跑）
 
-> **Status**: METHOD v0.1 · J2 2026-08-27 · Bettor 派工 (27) · 脚本 `scratch/_j2_claim_depth_sampler.mjs`（gitignored；`node --check` 过；dry-run 只读实证见 §6）· 正式输出落 `docs/provenance/2026-08-27-claim-depth/`（JSON + sha256）· 已加进 (17) 同步后清单 **③e**（与 ③a–③d 并行只读，错峰规则同 ③d）。
+> **v0.2（NWT GREEN-WITH-NOTES + Bettor）**：🔴 **反核 MUST**：`kaspa_tx_log` 命中的包含块须 `getBlock(includeTransactions)` 确认 `txid ∈ block.transactions` 才用该块 `daaScore` 作 Leg B 起点（tx_log hit 非 canonical 证明，可能陈旧/被 reorg 出；喂 `N_claim` 的安全数验不猜）；反核失败 ⇒ 剔除并计数，不算样本。Leg A 标"轻代理（PoolSide 450 B）低估向，归 `S_unalloc`"；`S_unalloc` 两腿之和 `σ_A + σ_B ≥ √(σ_A²+σ_B²)` = 保守过估（配对样本不可得故取和），非危险双计；坐标精确：`checkUtxoLanded` 函数体 `kasia-relay/src/lib/p2sh.mjs:1484`（`:1474` 是其上注释），`REORG_SAFE_MIN_DEPTH = 20` 在 `kasia-console/src/lib/pool-shard-register.mjs:88`。**脚本入库** `docs/provenance/2026-08-27-claim-depth/claim-depth-sampler.mjs`（纯函数拆出）+ 离线确定性测试（`claim-depth-sampler.test.mjs` + `vectors.json` 12 条 + `expected-output.json` + `MANIFEST.sha256`）：tx_log 命中错块 ⇒ 剔除、n<30 ⇒ 退出码 5、40 笔但 20 反核失败仍 INSUFFICIENT、DAA 跳增与低产两列分开。scratch 版 SUPERSEDED。
+> **Status**: METHOD v0.2 · J2 2026-08-27 · Bettor 派工 (27) · 脚本 `docs/provenance/2026-08-27-claim-depth/claim-depth-sampler.mjs`（`node --check` 过；dry-run 只读实证见 §6）· 正式输出落 `docs/provenance/2026-08-27-claim-depth/`（JSON + sha256）· 已加进 (17) 同步后清单 **③e**（与 ③a–③d 并行只读，错峰规则同 ③d）。
 > **一句话**：对**代理** claim-shape tx（现网 pool covenant 花费）逐笔量两腿——**Leg A** submit→inclusion、**Leg B** inclusion→depth-20 蓝确认——每腿 **DAA 推进与墙钟两列**（Codex D-2 纪律）；≥30 样本才出 p50/p90/p100/σ，否则 `INSUFFICIENT_SAMPLES` fail-closed；统计直接喂 (d) 稿 `N_claim` 与 `S_unalloc = max(p100 − p50, 3σ)`。
 > 🔴 **代理 ≠ 同形**：v0.15 T5（花 `O` + `O_AUTHORIZED`，`checkSigFromStack` + introspection 焊接）现网**不存在**；本稿只近似"一笔 2 输入 covenant 花费从提交到深度 20 要多久"的**确认深度行为**，差异见 §1，结论里必须带这个前缀。
 
@@ -20,8 +21,10 @@
 |---|---|---|---|---|---|
 | **Leg A** submit→inclusion | 提交时刻 | 包含块 | `blockDaaScore(inclusion) − virtualDaaScore(submit)`（**仅 live 模式有**：提交时刻的 DAA 历史无记录）| `block.timestamp − submit_ts` | hist：`refund_attempted_at` 样本（墙钟列）；live：DB 首次出现时刻（30 s 轮询粒度，非 mempool 首见——如实标）|
 | **Leg B** inclusion→depth-D | 包含块 | 首个 `header.daaScore ≥ inclusion.daaScore + D` 的块 | `reach.daaScore − inclusion.daaScore`（≥ D，多出部分 = DAA 跳增）| `reach.timestamp − inclusion.timestamp` | 全部代理 |
-- `D = 20` = `REORG_SAFE_MIN_DEPTH`（`pool-shard-register.mjs:88`），与 `check_utxo_landed` 的 `virtualDaaScore − blockDaaScore ≥ minDepth`（`p2sh.mjs:1474`）同判据。
+- `D = 20` = `REORG_SAFE_MIN_DEPTH`（`kasia-console/src/lib/pool-shard-register.mjs:88`），与 `checkUtxoLanded` 的 `virtualDaaScore − blockDaaScore ≥ minDepth`（函数体 `kasia-relay/src/lib/p2sh.mjs:1484`；`:1474` 是其上方注释"默认 20"）同判据。
+- 🔴 **反核（v0.2）**：包含块先 `getBlock(includeTransactions:true)`，`verifyInclusion(block, txid)` 确认 `txid ∈ block.transactions`（取 `verboseData.transactionId`）；不在 ⇒ `verified.ok=false` 剔除并入 `verified_excluded{n, reasons}`；只有反核过的块的 `daaScore` 才作 Leg B 起点。
 - 到达块由 `getBlocks(lowHash = inclusion)` 前向翻页找首个达标块（≤50 页）；找不到 ⇒ 该样本 `legB.ok=false`，不计入 n。
+- **`S_unalloc` 喂法**：两腿各自 `S_unalloc_rule = max(p100 − p50, 3σ)` 后**取和**——`σ_A + σ_B ≥ √(σ_A² + σ_B²)`，配对样本不可得（同一笔的 A、B 不能都量到）故取和 = 保守过估，不是危险双计；Leg A 轻代理偏短 = 低估向（小），其欠估也归此和。
 - **"蓝确认"口径**：depth 按 DAA 计（DAA 计入 mergeset 蓝+红），不另判该 tx 所在块是否蓝——与 live 结算路的 `checkUtxoLanded` 完全一致，故喂 `N_claim` 时口径同源。
 
 ## §3 输出与 fail-closed

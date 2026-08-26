@@ -1,0 +1,4 @@
+d2b316c3a80adb29fef226a1e2367d17fa67ad9c66edc2e0e0081b8476dd3347 *claim-depth-sampler.mjs
+4bbbc30f30cbd5a18b31912f7edfe32a5222700a717cf1d6d8577ef8d25aaeeb *claim-depth-sampler.test.mjs
+6bfbc8f8339ed904396d6f8a2757990ea4ff76147ba80f21e0fb51fbe84e0f73 *vectors.json
+8a384e88ae0bfbeb807ee03b5e0691e7609b20a792dae5004b9c9858cfe8fcce *expected-output.json

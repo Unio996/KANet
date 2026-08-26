@@ -1,0 +1,17 @@
+{
+  "note": "(27) v0.2 确定性测试向量(合成)。depth 判据 = daaScore 差 ≥ D(同 kasia-relay/src/lib/p2sh.mjs:1484 checkUtxoLanded; D=20 = pool-shard-register.mjs:88)。tx_log 命中块须 getBlock 反核(txid ∈ block.transactions)。",
+  "cases": [
+    { "id": "V1-verify-ok", "type": "verify", "desc": "txid 在块 transactions 里 ⇒ ok", "txid": "aa11", "block": { "transactions": [ { "verboseData": { "transactionId": "cb00" } }, { "verboseData": { "transactionId": "aa11" } } ] } },
+    { "id": "V2-verify-stale", "type": "verify", "desc": "tx_log 命中块不含该 txid(陈旧/被 reorg 出) ⇒ ok=false 剔除", "txid": "aa11", "block": { "transactions": [ { "verboseData": { "transactionId": "cb00" } }, { "verboseData": { "transactionId": "bb22" } } ] } },
+    { "id": "V3-verify-noload", "type": "verify", "desc": "块未带 transactions ⇒ ok=false(不猜)", "txid": "aa11", "block": { "transactions": [] } },
+    { "id": "V4-legB-plain", "type": "legB", "desc": "包含块 daa=100, 后续每块 +1 DAA / 100 ms ⇒ depth 20 在第 20 块, legB_daa=20, wall 2.0 s", "inclusion": { "daaScore": 100, "timestamp": 1000000 }, "n": 40, "rateMs": 100, "depth": 20 },
+    { "id": "V5-legB-jump", "type": "legB", "desc": "第 15 块起 DAA 跳增 +5(并行 mergeset) ⇒ 首个 ≥120 的块 daa=121 ⇒ legB_daa=21(≥20, 多出=跳增)", "inclusion": { "daaScore": 100, "timestamp": 1000000 }, "n": 40, "rateMs": 100, "depth": 20, "jumpAt": 15 },
+    { "id": "V6-legB-slow", "type": "legB", "desc": "低产 10 s/块 ⇒ 同 20 DAA 但 wall 200 s(两列分开量)", "inclusion": { "daaScore": 100, "timestamp": 1000000 }, "n": 40, "rateMs": 10000, "depth": 20 },
+    { "id": "V7-legB-unreached", "type": "legB", "desc": "翻页只到 +10 DAA ⇒ ok=false", "inclusion": { "daaScore": 100, "timestamp": 1000000 }, "n": 10, "rateMs": 100, "depth": 20 },
+    { "id": "V8-legA-hist", "type": "legA", "desc": "hist: 只有提交墙钟 ⇒ wall 列有, DAA 列无", "input": { "submitTs": 999000, "submitDaa": null, "inclusionHeader": { "daaScore": 100, "timestamp": 1000000 } } },
+    { "id": "V9-legA-live", "type": "legA", "desc": "live: 提交时记 DAA ⇒ 两列都有", "input": { "submitTs": 999000, "submitDaa": 90, "inclusionHeader": { "daaScore": 100, "timestamp": 1000000 } } },
+    { "id": "V10-sum-insufficient", "type": "summarize", "desc": "29 verified ok + 5 剔除 ⇒ legB n=29 < 30 ⇒ INSUFFICIENT_SAMPLES exit 5", "samples": [ { "count": 29, "daa": 21, "wall": 2.1 }, { "count": 5, "verified": false } ] },
+    { "id": "V11-sum-ok", "type": "summarize", "desc": "30 ok(daa 20..) + 3 剔除 ⇒ OK exit 0, 剔除计数 3, feed 含 S_unalloc 两腿之和", "samples": [ { "count": 25, "daa": 20, "wall": 2.0 }, { "count": 5, "daa": 26, "wall": 3.0, "legA": { "legA_wall_s": 5.0, "legA_daa": 8 } }, { "count": 3, "verified": false } ] },
+    { "id": "V12-sum-unverified-not-counted", "type": "summarize", "desc": "40 笔但 20 笔反核失败 ⇒ 只 20 有效 ⇒ INSUFFICIENT(反核失败不算样本)", "samples": [ { "count": 20, "daa": 20, "wall": 2.0 }, { "count": 20, "verified": false } ] }
+  ]
+}

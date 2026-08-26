@@ -1,0 +1,111 @@
+{
+ "V1-verify-ok": {
+  "ok": true,
+  "reason": null
+ },
+ "V2-verify-stale": {
+  "ok": false,
+  "reason": "txid not in block.transactions (tx_log stale / reorged)"
+ },
+ "V3-verify-noload": {
+  "ok": false,
+  "reason": "block has no transactions loaded"
+ },
+ "V4-legB-plain": {
+  "ok": true,
+  "inclusion_daa": 100,
+  "inclusion_ts": 1000000,
+  "reach_daa": 120,
+  "reach_ts": 1002000,
+  "legB_daa": 20,
+  "legB_wall_s": 2
+ },
+ "V5-legB-jump": {
+  "ok": true,
+  "inclusion_daa": 100,
+  "inclusion_ts": 1000000,
+  "reach_daa": 121,
+  "reach_ts": 1001600,
+  "legB_daa": 21,
+  "legB_wall_s": 1.6
+ },
+ "V6-legB-slow": {
+  "ok": true,
+  "inclusion_daa": 100,
+  "inclusion_ts": 1000000,
+  "reach_daa": 120,
+  "reach_ts": 1200000,
+  "legB_daa": 20,
+  "legB_wall_s": 200
+ },
+ "V7-legB-unreached": {
+  "ok": false,
+  "err": "depth target not reached within paging"
+ },
+ "V8-legA-hist": {
+  "legA_wall_s": 1,
+  "note": "轻代理(PoolSide 450 B 等)偏短 = 低估向, 归 S_unalloc; hist 的 submit 来自 DB 时刻, live 为 DB 首现(30 s 粒度)"
+ },
+ "V9-legA-live": {
+  "legA_wall_s": 1,
+  "note": "轻代理(PoolSide 450 B 等)偏短 = 低估向, 归 S_unalloc; hist 的 submit 来自 DB 时刻, live 为 DB 首现(30 s 粒度)",
+  "legA_daa": 10
+ },
+ "V10-sum-insufficient": {
+  "status": "INSUFFICIENT_SAMPLES",
+  "exit": 5,
+  "legB_n": 29,
+  "legB_daa_p100": 21,
+  "legB_S": 0,
+  "legA_n": 0,
+  "excluded": {
+   "n": 5,
+   "reasons": {
+    "txid not in block.transactions (tx_log stale / reorged)": 5
+   }
+  },
+  "feed": {
+   "N_claim_lower_bound_daa": 21,
+   "S_unalloc_daa": 0,
+   "note": "S_unalloc = σ_A + σ_B 型两腿之和 ≥ √(σA²+σB²): 配对样本不可得故取和 = 保守过估, 非危险双计; 读数带前缀\"代理 claim-shape 非 T5 同形\""
+  }
+ },
+ "V11-sum-ok": {
+  "status": "OK",
+  "exit": 0,
+  "legB_n": 30,
+  "legB_daa_p100": 26,
+  "legB_S": 6.71,
+  "legA_n": 5,
+  "excluded": {
+   "n": 3,
+   "reasons": {
+    "txid not in block.transactions (tx_log stale / reorged)": 3
+   }
+  },
+  "feed": {
+   "N_claim_lower_bound_daa": 34,
+   "S_unalloc_daa": 6.71,
+   "note": "S_unalloc = σ_A + σ_B 型两腿之和 ≥ √(σA²+σB²): 配对样本不可得故取和 = 保守过估, 非危险双计; 读数带前缀\"代理 claim-shape 非 T5 同形\""
+  }
+ },
+ "V12-sum-unverified-not-counted": {
+  "status": "INSUFFICIENT_SAMPLES",
+  "exit": 5,
+  "legB_n": 20,
+  "legB_daa_p100": 20,
+  "legB_S": 0,
+  "legA_n": 0,
+  "excluded": {
+   "n": 20,
+   "reasons": {
+    "txid not in block.transactions (tx_log stale / reorged)": 20
+   }
+  },
+  "feed": {
+   "N_claim_lower_bound_daa": 20,
+   "S_unalloc_daa": 0,
+   "note": "S_unalloc = σ_A + σ_B 型两腿之和 ≥ √(σA²+σB²): 配对样本不可得故取和 = 保守过估, 非危险双计; 读数带前缀\"代理 claim-shape 非 T5 同形\""
+  }
+ }
+}
