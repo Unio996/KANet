@@ -3,7 +3,7 @@
 > **v0.3（NWT 一注落实）**：`completeness.expected` **由窗两端块的链上计数差导出**——首选 `daaScore(tip) − daaScore(start)`（= 跨度内进 DAA 窗的 mergeset 块数，蓝+红，只漏 non-daa 陈块 ⇒ 略偏低 = 宽松向，已标），备选 `blueScore` 差（只蓝块，更低），都取不到 ⇒ 无 expected ⇒ fail-closed；**禁用自身 fetch 计数**（循环自证）；名义 `window_s × 10 BPS` 降为 `nominal_bps_ref` 仅参考 ⇒ 低产网不再被名义 10 BPS 假触发 `INCOMPLETE_WINDOW`。`start` = 沿 selected-parent 链回溯到时间戳出窗的那块（与 `getBlocks` 翻页独立）。
 
 > **v0.2（NWT 8e60ebb4 GREEN-WITH-1-MUST）**：🔴 v0.1 默认 `--max-blocks 5000` 对 3600 s 窗（期望 ≈36,000 块）必产 ~1/7 **部分窗且不 fail-closed**——部分窗**低估集中** ⇒ `s_adv` 低估 ⇒ `H_floor_honest` 高估 ⇒ 入场太易 = **危险向**。改：`--max-blocks` 默认 = `window_s × BPS × (1+tol)`；`blocks_fetched < window_s × BPS × (1−tol)` ⇒ **fail-closed：不输出 `s_max`**，输出 `status=INCOMPLETE_WINDOW` + `gap_blocks`，退出码 4；翻页加 hash 去重；`completeness` 交叉核写进 JSON；§5 补方向表（矿池合并偏高 = 对 `s_max` 与 `H_floor_honest` 皆安全向；Sybil 欠计靠 `s_owner` 兜；错向一律优先**过计**）。
-> **Status**: METHOD v0.2 · J2 2026-08-27 · Bettor 派工 (24) · 脚本 `scratch/_j2_smax_coinbase.mjs`（gitignored）· 正式输出落 `docs/provenance/2026-08-27-smax/`（同 bwin-sim 惯例）· 已加进 (17) 同步后清单 **③d**。
+> **Status**: METHOD v0.3 · J2 2026-08-27 · Bettor 派工 (24) · 脚本 `scratch/_j2_smax_coinbase.mjs`（gitignored）· 正式输出落 `docs/provenance/2026-08-27-smax/`（同 bwin-sim 惯例）· 已加进 (17) 同步后清单 **③d**。
 > **一句话**：窗 `[t−W, t]`（按块时间戳）内逐块解析 coinbase tx 的 **payload** 取本块矿工 `miner_data.script_public_key`，按 `version:script` 聚合出块份额 ⇒ `s_max`（最大单矿工份额）、前 N 名、块数、Poisson 噪声；**同时算"coinbase 输出地址法"份额作对照列并明标它不是逐块归属**。
 > **dry-run 实况（2026-08-27，节点 IBD，只读）**：`--dry-run 5` 只拿到 1 块 = `TESTNET12_GENESIS`（hash `300fe020…`），payload 解析 `blueScore=0 / subsidy=1e8 / spk.version=0 / spk.len=1 / script=00 / extra="kaspa-testnetTOCCATA…"`——与 `consensus/core/src/config/genesis.rs:149-165` 的 genesis coinbase_payload 字节逐字段吻合 ⇒ 解析器布局正确；`s_max=1` 是 1 块样本的平凡值，不作证据。
 
@@ -42,7 +42,8 @@
 | Sybil 分址（一矿工多 script）| 偏低 | `s_adv` 偏低 ⇒ `H_floor_honest` 偏高 | **危险** | 机械封不了，靠 `s_owner` 加严（(23) §3.5）|
 | 部分窗（截断连续段）| 偏低 | 同上 | **危险** | v0.2 fail-closed（`INCOMPLETE_WINDOW`）|
 | 漏红块 / 非选择链块 | 略偏高（大矿工的红块比例通常更高）| 安全向 | **安全** | 接受，正式路径用 `getBlocks` 全量 |
-| 网络低产致 `fetched < expected` | 无偏（块本来就少）| 无 | 中性 | 用实际出块率校核 expected，免误 fail-closed |
+| 网络低产 | 无偏（块本来就少）| 无 | 中性 | v0.3：expected = 窗两端 daaScore 差（链上），低产时它同步变小，不再误 fail-closed；名义 BPS 仅参考 |
+| expected 用 daaScore 差漏 non-daa 陈块 | expected 略低 ⇒ 更难触发 INCOMPLETE | 宽松向（危险侧但量极小：陈块 = 超出 DAA 窗的迟到块）| **危险(微)** | 已标；备选 blueScore 差更低，不用作默认 |
 **规则**：任何两向不定的误差，处置一律选让 `s_max` **偏高**的那边（过计 = 更早 fail-closed = 安全）。
 
 ## §5-bis 未覆盖 / 陷阱
