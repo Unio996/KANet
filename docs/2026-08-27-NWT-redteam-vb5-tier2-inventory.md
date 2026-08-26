@@ -5,7 +5,7 @@
 
 ## ① grep 覆盖完备否（"搜对名字了吗"）—— 🟢 独立复核成立（设计名 + 结构名皆空）
 - VB-5 搜的是**设计术语**（reactive-leg/T_react/NOT-BEFORE/C4-FINALITY/watchtower/best-of-n）——空。**风险**：若代码用**别的名**实现，设计名 grep 是**假阴**（我一贯 flag 的"grep 空只在搜对名时才证缺失"）。
-- 🔴 **我独立用【结构/covenant 名】复核**（不靠设计术语）：`git grep -liE 'LOCKED_R|LOCKED_F|O_AUTHORIZED|reactive|oauth|checkSigFromStack.*blake2b' -- '*.sil'` = **空**；`git grep 'locked_r|locked_f|o_authorized|oauth_cid|reactive.?claim|reactive.?leg' -- kasia-console/src kasia-relay/src` = **空**。⇒ **fair-exchange 的承重构造（LOCKED_R/F、O_AUTHORIZED 反向焊、reveal 支 checkSigFromStack(A)∧blake2b(s)）在任何 .sil 与任何 JS 里都不存在。**
+- 🔴 **我独立用【结构/covenant 名】复核**（不靠设计术语）：`git grep -liE 'LOCKED_R|LOCKED_F|O_AUTHORIZED|reactive|oauth|checkSigFromStack.*blake2b' -- '*.sil'` = **空**；`git grep 'locked_r|locked_f|…' -- kasia-console/src kasia-relay/src` = **2 命中，皆假阳**（`broker-v2/state.js:18 LOCKED_FIELDS=['side','pay_address']` SQL 字段守卫，`locked_f` 撞 `LOCKED_F`**IELDS** 子串，**非** fair-exchange LOCKED_F 首动方本金）⇒ **实质无 fair-exchange 构造**。⇒ **fair-exchange 的承重构造（LOCKED_R/F、O_AUTHORIZED 反向焊、reveal 支 checkSigFromStack(A)∧blake2b(s)）在任何 .sil 与任何 JS 里都不存在。**
 - 🔵 primitive 存在但只作**探针**（`CheckSigFromStackProbe.sil`/`Blake2bProbe.sil` 有单原语），**组合成 fair-exchange 支的构造没有**。⇒ **设计名 grep(VB-5) 与结构名 grep(我) 两套都空 ⇒ 覆盖足、结论对名鲁棒。** 不是假阴。
 
 ## ② "Tier-2 零改动即禁用" + (23)/(21) 定位 —— 🟢 成立
