@@ -1,6 +1,7 @@
 # kaspad 探针「IBD 进行中」vs「真死」判据设计 — kaspad-rpc-probe.mjs / kaspad-watchdog.ps1（设计稿 · 零改码）
 
-> **Status**: DRAFT **v0.2** · KANet-UI 2026-08-26 · Bettor 派工 · **v0.1 NWT verdict = PASS-WITH-MUST-FIX**, 本版应两条必修 + 优先级重排 + llm-watchdog 跟进; **仍不落码, 回 NWT 复审**。
+> **Status**: DRAFT **v0.3** · KANet-UI 2026-08-26 · Bettor 派工 · **v0.1 NWT = PASS-WITH-MUST-FIX**; v0.2 应两必修 + 优先级重排 + llm-watchdog; **v0.3 = 用 J2 源码答案(@rusty-kaspa 7b1e18cc live 二进制)对齐 F-B/F-C**; **仍不落码, NWT 终核读 v0.3**。
+> **v0.3 changelog(仅两处)**: F-B — R6 由 [MUST-VERIFY] 改「已核: 节点重建对读者原子(write 锁, 无半建态), 但 RPC 闸只盖 UTXO 导入段、header 阶段合法答 []、helper 吞 store 错成空集 ⇒ 节点给不了『索引建成』的牙, R6 承重全在外锚 A1∧A2」; 删 isUtxoIndexed 交叉(= 配置开关非建成状态); 负例交叉改 J2 三态。F-C — 不可花费永久 UTXO 不存在(J2 三候选全否), 对照改「≥2 独立长期持币址, 任一非空即过, 全空=UNKNOWN 永不 DEAD」。
 > **v0.2 changelog**: ①MF-1 加「共识计数器 60min 硬停滞层」(diskWrite 可被 RocksDB compaction 伪造, 不能单独判 SYNCING) + 预注册 V8。②MF-2 §6 crash-loop 刹车从可选升 **REQUIRED** + **内存感知拒拉**(8/23 形态: 进程已 OOM 崩退, "看不到进程就放行"会再拉 30GB 砸缺内存机)。③**优先级重排(NWT 纠正)**: 危害大的 crash-loop/OOM 提到 §0.5(最高优先), 危害小的 IBD 假 DEAD 降为次要。④加 §9 llm-watchdog 双开跟进。⑤§0 一句话按 8/23 真根因(OOM 主因)重写。
 > **域**: 运维/watchdog(KANet-UI 域, J1 在 ledger (624) 明确移交)。改动对象 = `scripts/kaspad-rpc-probe.mjs`(退码/判据) + `scripts/kaspad-watchdog.ps1`(消费退码)。**不碰任何钱路/产品码/console。**
 > **触发**: 8/26 J1 换全新库后 kaspad 22428 IBD 中, 探针稳定回 `DEAD:empty-data:daa=0`; watchdog 按此 3 tick 判 DEAD 反复 Start-Process(第一手实录见 §1)。与 8/23 事故「崩→watchdog 拉起→再崩」同形(不同根因, 同一个 watchdog 缺"别拉"的判断)。
@@ -76,7 +77,7 @@
 | L1 进程 | 我们那台 kaspad 进程在不在、是不是同一个 | `Get-CimInstance Win32_Process -Filter "Name='kaspad.exe'"` 取 (PID, CreationDate)。**不用 CommandLine**(SYSTEM 进程非提权读到 null, 今日 35/35 实证) | 无进程 ⇒ **DEAD:no-process**; 有 ⇒ 记 (PID, CreationDate) 入状态文件, 与上次比: 同 ⇒ 稳定; 变 ⇒ 记 `restarted`(不判死, 但计入 §6 刹车) |
 | L2 RPC 口 | 端口通不通、会不会答 | 现有 `connect()` + `getInfo()`(+超时) | connect 失败 ⇒ **DEAD:connect-fail**(5); 超时 ⇒ **DEAD:timeout**(4); 答了 ⇒ 进 L3 |
 | L3 身份 | 是不是我们那台 TN12 | `getBlockDagInfo().network === 'testnet-12'`(现有) | 不符 ⇒ **DEAD:wrong-network**(2) |
-| L4 同步态 | 同步完没有; 没完的话在不在动 + **R6 utxoindex 可用**(3.2b) | `getInfo().isSynced`/`isUtxoIndexed`; 进度计数器(3.2); R6=A1∧A2 | **ALIVE ⟺ isSynced==true ∧ R6 通过**(见 3.2b 那句话); isSynced==true 但 R6 不过 ⇒ SYNCING(utxoindex-pending); isSynced==false ⇒ 看 3.2 |
+| L4 同步态 | 同步完没有; 没完的话在不在动 + **R6 utxoindex 可读到(外锚)**(3.2b) | `getInfo().isSynced`; 进度计数器(3.2); R6=A1∧A2(**不含 isUtxoIndexed**——它是配置开关非建成状态, F-B) | **ALIVE ⟺ isSynced==true ∧ R6 通过**(见 3.2b 那句话); isSynced==true 但 R6 不过 ⇒ SYNCING(utxoindex-pending); isSynced==false ⇒ 看 3.2 |
 
 ### 3.2 SYNCING vs SYNC-STALLED: 「进度」的定义
 探针**必须持久化上次采样**(一次性进程没有记忆), 状态文件 `D:\kaspa-tn12-data\kaspad-probe-state.json`(路径可 env 覆盖 `KASPAD_PROBE_STATE`), 内容:
@@ -104,12 +105,12 @@ NWT 指出 `diskIoWriteBytes` 可被 **RocksDB 后台 compaction 伪造**——�
 
 `[MEASURED·J2 8/26]` IBD 期 relay `get_address_utxos` 对已知持币地址回 `{"ok":true,"utxos":[]}`(空集不报错), `chain_get_current_daa_score` 回 0 ⇒ **headers 下完 / `isSynced` 翻 true 都不等于 utxoindex 可查**。R6 两条:
 - **A1** `virtualDaaScore > 80,095,687`(8/22 实测下界; env `KASPAD_PROBE_MIN_DAA` 可抬, 只许抬不许降);
-- **A2** **阳性对照址**非空: `getUtxosByAddresses([KASPAD_PROBE_CONTROL_ADDR])` 返回 ≥1 条。
+- **A2** **对照集**任一非空: 对 `KASPAD_PROBE_CONTROL_ADDRS`(≥2 独立长期持币址, 见 F-C)逐个 `getUtxosByAddresses`, **任一 ≥1 条即过**; 全空按 F-C 三态判(不直接 fail)。
 
-🔴 **F-B(NWT, R6 标 MUST-VERIFY·落码前置)**: **A2 非空只证 utxoindex "建了一部分", 不证"建完"**。utxoindex 重建期若存在**半建态**(对照址已建入、某些 pocket 址尚未建入), 则 R6 过 → ALIVE → 钱路对那些 pocket 址读空 = 把"索引没到"当"没有钱"。⇒ **R6 是 `[MUST-VERIFY]`**: 落码前必须去 rusty-kaspa 源码确认「utxoindex 重建对 RPC 查询是否原子/门控」——即"isSynced 翻 true 时 utxoindex 是否保证已全量可查, 还是逐地址异步填充"。**该问题归 J2 查源码**(Bettor 已派); 本稿在拿到答案前 R6 不得落码。若答案是"非原子/逐址填充", A2 单点对照址不足, 须改为"多个分散对照址全非空"或直接以 `nodeDatabaseBlocksCount==networkTipBlocks` 之类的完整性字段判。
-🔴 **F-C(NWT, 对照址 [] 二义性)**: A2 返回 `[]` 分不出"索引没建好"与"矿址被花光"。两条修:
-  1. **对照址用不可花费的永久 UTXO**(优先): 选一个链上确定长期不动、不会被任何流程花掉的地址(coinbase 到成熟且无 spender / 已知冷地址), 由 `KASPAD_PROBE_CONTROL_ADDR` 给; **不用 MiningRelay-tn12-new 源址**(它正是 1M 转账要花的地址, 花掉后 A2 会假 SYNCING)。选址待定, 标 `[TODO·选不可花费址]`。
-  2. **负例交叉核**(兜底): A2 空时, 再读 `getInfo().isUtxoIndexed`(应恒 true, 见 §1.2) **且** `isSynced`——若 `isSynced==true && isUtxoIndexed==true && A2 空`, 则更可能是"矿址被花光"而非"索引没好", 此时不该压 SYNCING(否则永卡); 反之 `isSynced==false` 时 A2 空 = 索引没好 = SYNCING。⇒ **A2 只在 `isSynced==false` 阶段作为 SYNCING 的证据, `isSynced==true` 后改由对照址(不可花费)是否非空判 R6**。
+✅ **F-B(J2 已核 @rusty-kaspa 7b1e18cc = live 二进制, R6 定性冻结)**: 关键结论 = **节点给不了『索引已建成』的牙, R6 的承重全在外锚 A1∧A2**。J2 源码事实: ① utxoindex 重建对**读者原子**(write 锁持有期间读者拿不到半建态) — 所以不存在我 v0.2 担心的"逐地址异步填充"半建态; ② 但 RPC 同步闸(`service.rs:697-703`)**只盖"UTXO 集导入→anticone 验完"这一段**, header 下载阶段索引"空且自洽"是**合法**的、会正常答 `[]`; ③ helper `unwrap_or_default` 会把 store 层错误**吞成空集**(空集 ≠ 一定没有)。⇒ 综合: 节点**不会**在 RPC 上暴露一个可信的"utxoindex 全量可查"布尔, 所以 R6 不能靠节点内部状态, 只能靠**外锚**(A1 daa 下界 ∧ A2 对照集非空)自己判。⇒ **R6 从 `[MUST-VERIFY]` 改为 `[已核·CONFIRMED]`**, 不再是落码阻塞项。
+✅ **F-C(J2 已核, 对照集定义冻结)**: A2 返回 `[]` 分不出"索引没建好"与"地址被花光"。J2 结论: **『不可花费永久 UTXO』不存在**(三候选全否 — xzztw 死 spine / 137 pruned spine / OP_RETURN, 逐个证否)。改用两条:
+  1. **对照集 = ≥2 个独立长期持币址**(`KASPAD_PROBE_CONTROL_ADDRS`, 逗号分隔): 默认 = 矿址 + 一个已链核未花的 pruned spine 址; **任一非空即 A2 过**; **全空 = UNKNOWN(不判 DEAD, 也不放行 ALIVE), 告警交操作员**(见下 F-C 三态)。被回收/花掉时换址(运维维护, 非烤死)。**优先不用 MiningRelay-tn12-new 源址做唯一对照**: 它是 1M 转账要花的地址 — 虽然花掉 1M 后它仍持 10 亿级 KAS 不会空, 用它不会假 SYNCING(此点 J2 纠正了我 v0.2 的过度担心), **但它参与钱路、余额会动**, 用一个不参与钱路的址做基准更稳; 保留它作对照集**成员之一**即可。
+  2. **负例交叉改 J2 三态**(替代 v0.2 的 isUtxoIndexed 交叉 — isUtxoIndexed 是配置开关非建成状态, **删**): A2 全空时按 RPC 真实信号分三态: (i) RPC 报 `ConsensusInTransitionalIbdState` ⇒ `utxoindex-pending`(SYNCING 7); (ii) `daa ≤ 下界` ⇒ `pre-utxoset`(SYNCING 7); (iii) `daa > 下界 ∧ isSynced ∧ 对照集全空` ⇒ `control-set-drained?`(**UNKNOWN, 告警交操作员核对照址是否被花/换址**, 既不 SYNCING 永卡也不 ALIVE 放行钱路读空)。
 - `[DESIGN-CHOICE]` 对照臂的意义 = 区分"索引空"与"地址空": 没有 A2, utxoindex 未建好的节点会对**所有**地址回空集而不报错, 探针把它当 ALIVE 放行, 下游把"没读到"当"没有"。A2 失败不计入 DEAD(节点没坏, 是还没好), 只压 SYNCING。
 - 退码: R6 不过仍回 **7 SYNCING**(`utxoindex-pending`), 与 watchdog、runbook §4 P1b 同一把尺。
 
@@ -193,8 +194,8 @@ NWT 指出 `diskIoWriteBytes` 可被 **RocksDB 后台 compaction 伪造**——�
 - **8/23 真正的第二个 spawner 从 D: 树日志坐实不了**: supervisor 8/23 18–20h 只有一次 headless invoke(19:22Z, **晚于** 19:14 双开窗), 不是它。剩余候选(未坐实): (a) `C:/KANet` 主网树的 start 脚本(独立部署, 同机同 GPU 共用 :8000, ctx=262144)、(b) 手动/会话拉起、(c) 旧实例 OOM 后 Windows 未及时回收 30GB, 与一次重启的新实例瞬时叠加=65GB。**结构性根因 = :8000 有多个潜在 owner(两棵树×两脚本 + llm-watchdog)彼此不协调, 只有 start 脚本有守卫、而那守卫在负载致 curl 超时时 fail-open。** 这反过来又支撑 §0.5: 任何拉大进程的路径都必须内存感知。
 
 ## §10 请 NWT 重点打的地方(v0.2)
-1. **F-B(R6 MUST-VERIFY, 阻塞)**: utxoindex 重建对 RPC 查询是否原子/门控? 归 J2 查 rusty-kaspa 源码; 若"非原子/逐址填充", A2 单点对照址不足(§3.2b 已给两条退路)。**答案未回前 R6 不落码。**
-2. **F-C 对照址选址**: `[TODO·选不可花费址]` 待定 — 需要一个链上确定长期不动、无 spender 的地址做 A2 基准(不用 1M 转账要花的源址)。请 NWT/J2 荐址。
+1. ~~**F-B(R6 MUST-VERIFY)**~~ **已由 J2 源码答复关闭**(见 §3.2b): 节点重建对读者原子(无半建态), 但 RPC 给不了"索引建成"的牙 ⇒ R6 承重全在外锚 A1∧A2, `[已核]`, 非阻塞。
+2. **F-C 对照集**(J2 已核: 不可花费永久 UTXO 不存在) — 改为 **≥2 独立长期持币址**(矿址 + 一个链核未花的 pruned spine), 任一非空即过, 全空=UNKNOWN 告警。**待运维给第二个 pruned spine 址的具体值填 `KASPAD_PROBE_CONTROL_ADDRS`**(矿址已知, 缺第二个)。
 3. **MF-2 阈值**: `KASPAD_MIN_FREE_COMMIT_GB` 默认 8(kaspad)、35(llama 类)是否合理? crash-loop 判据"15min≥3 次且拉起即死"窗口/次数是否够严?
 4. **MF-1 STALL_MS=60min**: 对 UTXO 导入等长时间无共识计数器变化的阶段是否偏短? 那时哪个共识计数器仍应在动未实测。
 5. 退码 3 收窄 + 退码 0 含 R6 = 改存量语义, 须 verdict-before-push——我判是。
