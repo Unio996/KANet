@@ -24,7 +24,8 @@
 ## §3 脚本行为
 - **输入**：`--window-s W`（默认 3600）、`--max-blocks`（**v0.2 默认 = `W × 10 BPS × (1+tol)`**，不再是固定 5000）、`--tol`（默认 0.10）、`--sleep-ms`（RPC 限速）、`--out`；**SYNC-GATE**（`daa > 80,095,687 ∧ isSynced`，同 (21)）；`--dry-run N` 绕闸只看解析形状、不落盘、输出带 `DRY-RUN` 标。
 - 🔴 **窗完整性（v0.2 MUST）**：`expected = W × BPS`；`blocks_fetched < expected × (1−tol)` ⇒ **`status=INCOMPLETE_WINDOW`、`s_max=null`、`gap_blocks`、退出码 4，不落 provenance**。理由：部分窗只看到窗的一段，同一矿工的连续出块段被截断 ⇒ 集中度**低估**（危险向）；宁可不出数。JSON 恒带 `completeness{expected_blocks, fetched, ratio, tol}`。**`expected` 的校核**：网络实际出块率若低于 10 BPS（停滞/低产），`fetched` 会天然低于 expected 而非漏块——须用 (21) 法 2/法 3 的实际出块率重算 expected 后再判，不能只按名义 10 BPS 判"不完整"（两向都有：漏块 = 低估集中 = 危险；低产误判 = 白白 fail-closed = 安全但浪费）。
-- **翻页去重**：`getBlocks` 相邻页首尾重叠，按 `header.hash` `Set` 去重后再计 `blocks_fetched`。
+- **翻页去重（v0.2，NWT）**：v0.1 的 `fetchBlocksRange` 只做相邻去重（`b.hash === out[last].hash`）——DAG 翻页会**非相邻**重返同块 ⇒ 改为**全 `Set` 去重**（`seen.has(hash)`），去重后再计 `blocks_fetched`。
+- **清单用法（(17) ③d）**：命令显式带 `--max-blocks ≥ window_s × BPS × 1.5`（600 s ⇒ ≥9,000；3,600 s ⇒ ≥54,000），不依赖默认值；闸 = 退出码 0 且 `completeness.ratio ≥ 1−tol`，退出码 4 = fail-closed。
 - **覆盖（承重）**：`s_max` 的严格口径要遍历窗内**全部 DAG 块**（含非选择链块，它们也是该矿工的功）。脚本正式路径 = 先沿 selected-parent 链回溯到窗起点取 `lowHash`，再 `getBlocks(lowHash, includeBlocks, includeTransactions)` **全量前向翻页**，按块时间戳过滤进窗；dry-run 只走选择链回溯（标"漏非选择链块"）。
 - **输出 JSON**：`mode / t / daa / tipHash / window_s / coverage / blocks_fetched / layout / sample_payloads(前 3 块原 payload hex + 解析) / parsed / failed / s_max / top N(miner, blocks, share) / distinct_miners / control_output_addr(s_max_out, top) / poisson(blocks, rel_sd=1/√N)`；正式模式写 `docs/provenance/2026-08-27-smax/smax-<UTC>.json` 并打印 sha256。
 - **Poisson**：份额估计相对标差 ≈ `1/√N`；低产窗 N 小 ⇒ `s_max` 噪声大 ⇒ (23) §3 的 `R_vol` 动态阈同理，窗内 N 随 JSON 落。
