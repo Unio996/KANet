@@ -1,56 +1,67 @@
-// (27) v0.2 · §5① claim-shape 深度采样器 — (d) 残余清单第 1 项(部署硬前置)的可执行物, 入库版。只读(DB 经 src/db/client.js 只 SELECT + RPC 只读)。
-// 跑(正式): cd /d/kanet-tn12/kasia-console && node ../docs/provenance/2026-08-27-claim-depth/claim-depth-sampler.mjs [--mode hist|live] [--limit 200] [--depth 20] [--sleep-ms 20] [--live-minutes 60] [--out <dir>] [--dry-run N]
+// (27) v0.3 · §5① claim-shape 深度采样器 — (d) 残余清单第 1 项(部署硬前置)的可执行物, 入库版。只读(DB 经 src/db/client.js 只 SELECT + RPC 只读)。
+// 跑(正式): cd /d/kanet-tn12/kasia-console && node ../docs/provenance/2026-08-27-claim-depth/claim-depth-sampler.mjs [--mode hist|live] [--limit 200] [--depth 20] [--sleep-ms 20] [--live-minutes 60] [--poll-ms 1000] [--out <dir>] [--dry-run N]
 // 测试(离线, 无节点无 DB): node docs/provenance/2026-08-27-claim-depth/claim-depth-sampler.test.mjs
 //   退出码: 0 OK / 3 SYNC-GATE / 5 INSUFFICIENT_SAMPLES(fail-closed, 不出统计)
-// 样本源(代理·非 v0.15 T5 同形, 见方法稿 §1): pool_bettor_sides.claim_txid / pool_markets.settle_txid / pool_markets.refund_txid(+refund_attempted_at) / market_shards 续链
-// 🔴 v0.2 (NWT): kaspa_tx_log 命中的包含块须 getBlock 反核 —— txid ∈ block.transactions 才用该块 daaScore 作 Leg B 起点; tx_log hit 非 canonical 证明(可能陈旧/被 reorg 出); 反核失败 ⇒ 剔除并计数。
-// 两腿两列(Codex D-2): Leg A submit→inclusion(轻代理 PoolSide 450 B, 低估向, 归 S_unalloc); Leg B inclusion→depth-D(纯确认深度物理, 形状无关)。
-//   depth 判据 = virtualDaaScore − blockDaaScore ≥ D, 同 kasia-relay/src/lib/p2sh.mjs:1484 checkUtxoLanded; D=20 = kasia-console/src/lib/pool-shard-register.mjs:88 REORG_SAFE_MIN_DEPTH。
+// Codex 6fd55a53 三 MUST-FIX 的落法:
+//   ① canonical 反核: tx_log 命中块 getBlock 后 txid ∈ block.transactions 才用; 缺块/getBlock 错/畸形/不可判 ⇒ inconclusive(单列, 不静默计); txid 不在块 ⇒ excluded(单列)。两者都不进 n。
+//   ② 入库 + 官方跑可复算: 输出带 schema_version / target_commit(kanet-tn12 HEAD) / rpc(live 二进制 7b1e18cc, url) / cli_args / 原始样本行(samples[] 全量, 可重算分位) / 文件 sha256。
+//   ③ Leg A 起点分级: SENDER_TS(发送方进程自记: refund_attempted_at / metadata.refund_dispatched_at / zk_settle_evidence.settled_at 等) > MEMPOOL_SEEN(live: 本机 mempool 1 s 轮询首见, 近似非真提交) > PROXY_POLL(DB 30 s 轮询首见, 明标不入最终界)。
+//      feed.legA_final 只用 SENDER_TS; MEMPOOL_SEEN/PROXY_POLL 单列为 observational。最终 T5 界须用 harness 发出时绑定 txid 的 submit_ts(上链跑手 recordSubmission 已带 t)。
+// Leg B inclusion→depth-D: 纯确认深度物理; depth = virtualDaaScore − blockDaaScore ≥ D, 同 kasia-relay/src/lib/p2sh.mjs:1484 checkUtxoLanded; D=20 = kasia-console/src/lib/pool-shard-register.mjs:88。
 import { createRequire } from 'node:module';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { fileURLToPath } from 'node:url';
+import { execSync } from 'node:child_process';
 
+export const SCHEMA_VERSION = 'claim-depth/3';
 export const MIN_SAMPLES = 30;          // (d) §5① / Codex 残余清单 1
 export const DEFAULT_DEPTH = 20;        // REORG_SAFE_MIN_DEPTH (pool-shard-register.mjs:88)
+export const LEGA_SOURCES = { SENDER_TS: 'SENDER_TS', MEMPOOL_SEEN: 'MEMPOOL_SEEN', PROXY_POLL: 'PROXY_POLL' };
 
 // —— 纯函数(可离线测) ——
-export function txIdsOf(block) {
-  return (block?.transactions || []).map(t => t?.verboseData?.transactionId || t?.transactionId || t?.id).filter(Boolean);
-}
+export function txIdsOf(block) { return (block?.transactions || []).map(t => t?.verboseData?.transactionId || t?.transactionId || t?.id).filter(Boolean); }
 export function verifyInclusion(block, txid) {
-  // tx_log 命中块须反核: txid 真在该块的 transactions 里
-  const ids = txIdsOf(block); const ok = ids.includes(txid);
-  return { ok, reason: ok ? null : (ids.length ? 'txid not in block.transactions (tx_log stale / reorged)' : 'block has no transactions loaded') };
+  // 三态: verified(在块内) / excluded(块可判且 txid 不在 = tx_log 陈旧/被 reorg 出) / inconclusive(缺块·畸形·未载 tx = 不可判, 不静默计)
+  if (!block || !block.header) return { state: 'inconclusive', reason: 'block missing / malformed' };
+  if (!Array.isArray(block.transactions) || !block.transactions.length) return { state: 'inconclusive', reason: 'block has no transactions loaded' };
+  const ids = txIdsOf(block);
+  if (!ids.length) return { state: 'inconclusive', reason: 'transactions lack ids (malformed RPC shape)' };
+  return ids.includes(txid) ? { state: 'verified', reason: null } : { state: 'excluded', reason: 'txid not in canonical block.transactions (tx_log stale / reorged)' };
 }
 export function legBFromBlocks(inclusionHeader, laterBlocks, depth) {
-  // laterBlocks: 从包含块起前向翻页得到的块(含或不含包含块本身); 取首个 daaScore ≥ inc+depth 的块
   const incDaa = Number(inclusionHeader.daaScore), incTs = Number(inclusionHeader.timestamp), target = incDaa + depth;
   const hit = laterBlocks.map(b => b.header || b).filter(h => Number(h.daaScore) >= target).sort((a, b) => Number(a.daaScore) - Number(b.daaScore))[0];
   if (!hit) return { ok: false, err: 'depth target not reached within paging' };
   return { ok: true, inclusion_daa: incDaa, inclusion_ts: incTs, reach_daa: Number(hit.daaScore), reach_ts: Number(hit.timestamp), legB_daa: Number(hit.daaScore) - incDaa, legB_wall_s: +((Number(hit.timestamp) - incTs) / 1000).toFixed(1) };
 }
-export function legAFrom({ submitTs, submitDaa, inclusionHeader }) {
-  if (!submitTs) return null;
-  const out = { legA_wall_s: +((Number(inclusionHeader.timestamp) - submitTs) / 1000).toFixed(1), note: '轻代理(PoolSide 450 B 等)偏短 = 低估向, 归 S_unalloc; hist 的 submit 来自 DB 时刻, live 为 DB 首现(30 s 粒度)' };
+export function legAFrom({ submitTs, submitDaa, source, inclusionHeader }) {
+  if (!submitTs || !source) return null;
+  const out = { source, legA_wall_s: +((Number(inclusionHeader.timestamp) - submitTs) / 1000).toFixed(1), final_eligible: source === LEGA_SOURCES.SENDER_TS };
   if (Number.isFinite(submitDaa)) out.legA_daa = Number(inclusionHeader.daaScore) - submitDaa;
+  out.note = source === LEGA_SOURCES.SENDER_TS ? '发送方进程自记时刻, 可入最终界(轻代理偏短=低估向, 归 S_unalloc)' : source === LEGA_SOURCES.MEMPOOL_SEEN ? '本机 mempool 轮询首见(≈1 s 粒度), 偏晚=低估向, observational 不入最终界' : 'DB 30 s 轮询首见, 偏晚显著, PROXY_POLL 不入最终界';
   return out;
 }
 export const stats = (xs) => { if (!xs.length) return null; const s = [...xs].sort((a, b) => a - b); const q = p => s[Math.min(s.length - 1, Math.floor(p * s.length))]; const mean = s.reduce((a, b) => a + b, 0) / s.length; const sd = Math.sqrt(s.reduce((a, b) => a + (b - mean) ** 2, 0) / s.length); return { n: s.length, p50: q(0.5), p90: q(0.9), p100: s[s.length - 1], mean: +mean.toFixed(2), sd: +sd.toFixed(2), S_unalloc_rule: +Math.max(s[s.length - 1] - q(0.5), 3 * sd).toFixed(2) }; };
 
 export function summarize(samples, { minSamples = MIN_SAMPLES, dry = false } = {}) {
-  // samples: [{ kind, txid, verified:{ok,reason}, legA|null, legB:{ok,...} }]
-  const excluded = samples.filter(s => !s.verified?.ok);
-  const okB = samples.filter(s => s.verified?.ok && s.legB?.ok);
-  const okA = samples.filter(s => s.verified?.ok && s.legA);
-  const legB = { n: okB.length, daa: stats(okB.map(s => s.legB.legB_daa)), wall_s: stats(okB.map(s => s.legB.legB_wall_s)), note: '纯确认深度物理, 形状无关 ⇒ 代理对 N_claim 大头有效' };
-  const legA = { n: okA.length, wall_s: stats(okA.map(s => s.legA.legA_wall_s)), daa: stats(okA.map(s => s.legA.legA_daa).filter(Number.isFinite)), note: '轻代理低估向(小), 归 S_unalloc; DAA 列只有 live 有' };
-  const sA = legA.daa?.S_unalloc_rule ?? 0, sB = legB.daa?.S_unalloc_rule ?? 0;
-  const S_unalloc_sum = +(sA + sB).toFixed(2);
+  // samples: [{ kind, txid, verified:{state,reason}, legA|null, legB:{ok,...} }]
+  const byState = (st) => samples.filter(s => s.verified?.state === st);
+  const excluded = byState('excluded'), inconclusive = byState('inconclusive');
+  const reasons = (arr) => Object.fromEntries([...new Set(arr.map(s => s.verified?.reason || '?'))].map(r => [r, arr.filter(s => (s.verified?.reason || '?') === r).length]));
+  const okB = samples.filter(s => s.verified?.state === 'verified' && s.legB?.ok);
+  const legAAll = samples.filter(s => s.verified?.state === 'verified' && s.legA);
+  const legAFinal = legAAll.filter(s => s.legA.final_eligible);
+  const legAObs = legAAll.filter(s => !s.legA.final_eligible);
+  const legB = { n: okB.length, daa: stats(okB.map(s => s.legB.legB_daa)), wall_s: stats(okB.map(s => s.legB.legB_wall_s)), note: '纯确认深度物理, 形状无关 ⇒ 代理对 N_claim 大头有效; p100 = 样本内经验下界, 非未来最坏上界' };
+  const legA_final = { n: legAFinal.length, sources: { SENDER_TS: legAFinal.length }, wall_s: stats(legAFinal.map(s => s.legA.legA_wall_s)), daa: stats(legAFinal.map(s => s.legA.legA_daa).filter(Number.isFinite)), note: '只含 SENDER_TS(发送方进程自记), 可入最终界; 轻代理低估向归 S_unalloc' };
+  const legA_observational = { n: legAObs.length, sources: Object.fromEntries(Object.values(LEGA_SOURCES).filter(k => k !== 'SENDER_TS').map(k => [k, legAObs.filter(s => s.legA.source === k).length])), wall_s: stats(legAObs.map(s => s.legA.legA_wall_s)), daa: stats(legAObs.map(s => s.legA.legA_daa).filter(Number.isFinite)), note: 'MEMPOOL_SEEN / PROXY_POLL: 起点偏晚 = 低估向, 不入最终 T5 界(Codex 6fd55a53 MUST-FIX 3)' };
+  const sA = legA_final.daa?.S_unalloc_rule ?? 0, sB = legB.daa?.S_unalloc_rule ?? 0;
   const insufficient = !dry && okB.length < minSamples;
-  return { verified_excluded: { n: excluded.length, reasons: Object.fromEntries([...new Set(excluded.map(s => s.verified?.reason || 'unverified'))].map(r => [r, excluded.filter(s => (s.verified?.reason || 'unverified') === r).length])) },
-    legB_inclusion_to_depth: legB, legA_submit_to_inclusion: legA,
-    feed: { N_claim_lower_bound_daa: (legB.daa?.p100 ?? 0) + (legA.daa?.p100 ?? 0), S_unalloc_daa: S_unalloc_sum, note: 'S_unalloc = σ_A + σ_B 型两腿之和 ≥ √(σA²+σB²): 配对样本不可得故取和 = 保守过估, 非危险双计; 读数带前缀"代理 claim-shape 非 T5 同形"' },
+  return { verified_n: samples.filter(s => s.verified?.state === 'verified').length,
+    excluded: { n: excluded.length, reasons: reasons(excluded) }, inconclusive: { n: inconclusive.length, reasons: reasons(inconclusive), note: '不可判(缺块/getBlock 错/畸形/未载 tx) 单列 surfaced, 不静默计, 不进 n' },
+    legB_inclusion_to_depth: legB, legA_final, legA_observational,
+    feed: { N_claim_envelope_daa: (legB.daa?.p100 ?? 0) + (legA_final.daa?.p100 ?? 0), S_unalloc_daa: +(sA + sB).toFixed(2),
+      note: 'N_claim = 实测运行包络(此数) + 具名 S_unalloc(此数, σA+σB 型两腿之和 = 保守过估, 与 reorg/观测/拥塞具名裕度不重复计); 读数带前缀"代理 claim-shape 非 T5 同形"; Leg A 仅 SENDER_TS 进包络' },
     ...(insufficient ? { status: 'INSUFFICIENT_SAMPLES', exit: 5, action: `fail-closed: legB n=${okB.length} < ${minSamples}, 不出统计喂 N_claim/S_unalloc` } : { status: dry ? 'DRY-RUN' : 'OK', exit: 0 }) };
 }
 
@@ -60,62 +71,60 @@ async function main() {
   const { RpcClient, Encoding } = require('kaspa-wasm');
   const argv = process.argv.slice(2);
   const arg = (k, d) => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : d; };
-  const MODE = arg('--mode', 'hist'), LIMIT = Number(arg('--limit', 200)), DEPTH = Number(arg('--depth', DEFAULT_DEPTH)), SLEEP_MS = Number(arg('--sleep-ms', 20)), LIVE_MIN = Number(arg('--live-minutes', 60));
+  const MODE = arg('--mode', 'hist'), LIMIT = Number(arg('--limit', 200)), DEPTH = Number(arg('--depth', DEFAULT_DEPTH)), SLEEP_MS = Number(arg('--sleep-ms', 20)), LIVE_MIN = Number(arg('--live-minutes', 60)), POLL_MS = Number(arg('--poll-ms', 1000));
   const OUT = arg('--out', 'D:/kanet-tn12/docs/provenance/2026-08-27-claim-depth');
   const DRY = argv.includes('--dry-run') ? Number(arg('--dry-run', 5)) : 0;
-  const DAA_FLOOR = 80095687, DB_PATH = 'D:/kanet-tn12/kasia-console/data/console.db';
-  // DB 走 console 的 src/db/client.js 通道(M0a 门: 不裸 import sqlite; DB_PATH 环境变量选库), 本脚本只做 SELECT
-  process.env.DB_PATH = process.env.DB_PATH || DB_PATH;
-  const { sqlite: dbConn } = await import('file:///D:/kanet-tn12/kasia-console/src/db/client.js');
+  const DAA_FLOOR = 80095687, DB_PATH = 'D:/kanet-tn12/kasia-console/data/console.db', RPC_URL = 'ws://127.0.0.1:17210';
+  process.env.DB_PATH = process.env.DB_PATH || DB_PATH;             // DB 走 console 的 src/db/client.js 通道(M0a 门), 本脚本零写
+  const { sqlite: db } = await import('file:///D:/kanet-tn12/kasia-console/src/db/client.js');
   const nap = () => SLEEP_MS > 0 ? new Promise(r => setTimeout(r, SLEEP_MS)) : Promise.resolve();
+  const targetCommit = (() => { try { return execSync('git rev-parse HEAD', { cwd: 'D:/kanet-tn12' }).toString().trim(); } catch { return null; } })();
 
-  function loadProxies(db, limit) {
-    const rows = []; const push = (kind, r) => rows.push({ kind, txid: r.txid, submit_at: r.submit_at || null, block_hash: r.block_hash || null, block_time: r.block_time || null, redeem_len: r.redeem_len || null });
+  function loadProxies(limit) {
+    // 每类带 SENDER_TS 来源(若有): refund → MIN(refund_attempted_at) 或 metadata.refund_dispatched_at; settle → metadata.zk_settle_evidence.settled_at(提交返回后写, ≈ 提交时刻+RPC 往返)
+    const rows = []; const push = (kind, r, senderTs) => rows.push({ kind, txid: r.txid, sender_ts: senderTs || null, block_hash: r.block_hash || null, block_time: r.block_time || null, redeem_len: r.redeem_len || null });
     const j = (sql) => db.prepare(sql).all();
-    for (const r of j(`SELECT b.claim_txid txid, NULL submit_at, l.block_hash, l.block_time, length(b.side_redeem_script_hex)/2 redeem_len FROM pool_bettor_sides b JOIN kaspa_tx_log l ON l.tx_id=b.claim_txid WHERE b.claim_txid IS NOT NULL ORDER BY l.block_time DESC LIMIT ${limit}`)) push('pool_side_claim', r);
-    for (const r of j(`SELECT m.settle_txid txid, NULL submit_at, l.block_hash, l.block_time, NULL redeem_len FROM pool_markets m JOIN kaspa_tx_log l ON l.tx_id=m.settle_txid WHERE m.settle_txid IS NOT NULL ORDER BY l.block_time DESC LIMIT ${limit}`)) push('pool_settle', r);
-    for (const r of j(`SELECT m.refund_txid txid, (SELECT MIN(b.refund_attempted_at) FROM pool_bettor_sides b WHERE b.market_id=m.id AND b.refund_attempted_at IS NOT NULL) submit_at, l.block_hash, l.block_time, NULL redeem_len FROM pool_markets m JOIN kaspa_tx_log l ON l.tx_id=m.refund_txid WHERE m.refund_txid IS NOT NULL ORDER BY l.block_time DESC LIMIT ${limit}`)) push('pool_refund', r);
-    for (const r of j(`SELECT substr(s.current_leaf_outpoint,1,64) txid, NULL submit_at, l.block_hash, l.block_time, length(s.shard_redeem_hex)/2 redeem_len FROM market_shards s JOIN kaspa_tx_log l ON l.tx_id=substr(s.current_leaf_outpoint,1,64) WHERE s.current_leaf_outpoint IS NOT NULL ORDER BY l.block_time DESC LIMIT ${limit}`)) push('shard_leaf_continuation', r);
+    for (const r of j(`SELECT b.claim_txid txid, l.block_hash, l.block_time, length(b.side_redeem_script_hex)/2 redeem_len FROM pool_bettor_sides b JOIN kaspa_tx_log l ON l.tx_id=b.claim_txid WHERE b.claim_txid IS NOT NULL ORDER BY l.block_time DESC LIMIT ${limit}`)) push('pool_side_claim', r, null);
+    for (const r of j(`SELECT m.settle_txid txid, m.metadata meta, l.block_hash, l.block_time FROM pool_markets m JOIN kaspa_tx_log l ON l.tx_id=m.settle_txid WHERE m.settle_txid IS NOT NULL ORDER BY l.block_time DESC LIMIT ${limit}`)) { let ts = null; try { const md = JSON.parse(r.meta || '{}'); ts = md?.zk_settle_evidence?.settled_at || md?.settle_evidence?.settled_at || null; } catch {} push('pool_settle', r, ts); }
+    // refund: 提交时刻 = 该市场(logical 或其 shard)下 sides 的 MIN(refund_attempted_at)(R-SHARD-BLIND: bshard sides 按 shard_market_id 存, 两边都查) 或 metadata.refund_dispatched_at
+    for (const r of j(`SELECT m.id mid, m.refund_txid txid, m.metadata meta, l.block_hash, l.block_time, (SELECT MIN(b.refund_attempted_at) FROM pool_bettor_sides b WHERE b.refund_attempted_at IS NOT NULL AND (b.market_id=m.id OR b.market_id IN (SELECT s.shard_market_id FROM market_shards s WHERE s.logical_market_id=m.id))) att FROM pool_markets m JOIN kaspa_tx_log l ON l.tx_id=m.refund_txid WHERE m.refund_txid IS NOT NULL ORDER BY l.block_time DESC LIMIT ${limit}`)) { let ts = r.att || null; if (!ts) { try { ts = JSON.parse(r.meta || '{}')?.refund_dispatched_at || null; } catch {} } push('pool_refund', r, ts); }
+    for (const r of j(`SELECT substr(s.current_leaf_outpoint,1,64) txid, l.block_hash, l.block_time, length(s.shard_redeem_hex)/2 redeem_len FROM market_shards s JOIN kaspa_tx_log l ON l.tx_id=substr(s.current_leaf_outpoint,1,64) WHERE s.current_leaf_outpoint IS NOT NULL ORDER BY l.block_time DESC LIMIT ${limit}`)) push('shard_leaf_continuation', r, null);
     const seen = new Set(); return rows.filter(r => r.txid && !seen.has(r.txid) && seen.add(r.txid));
   }
-  async function pageForward(rpc, lowHash, maxPages = 50) {
-    const out = []; let low = lowHash;
-    for (let i = 0; i < maxPages; i++) { const r = await rpc.getBlocks({ lowHash: low, includeBlocks: true, includeTransactions: false }); await nap(); const blks = (r.blocks || []).map(b => b.block || b); out.push(...blks); const last = r.blockHashes?.[r.blockHashes.length - 1]; if (!last || last === low || !blks.length) break; low = last; }
-    return out;
-  }
-  async function measure(rpc, p, submitTs, submitDaa) {
-    const blk = (await rpc.getBlock({ hash: p.block_hash, includeTransactions: true })).block; await nap();
+  async function pageForward(rpc, lowHash, maxPages = 50) { const out = []; let low = lowHash; for (let i = 0; i < maxPages; i++) { const r = await rpc.getBlocks({ lowHash: low, includeBlocks: true, includeTransactions: false }); await nap(); const blks = (r.blocks || []).map(b => b.block || b); out.push(...blks); const last = r.blockHashes?.[r.blockHashes.length - 1]; if (!last || last === low || !blks.length) break; low = last; } return out; }
+  async function measure(rpc, p, legAInput) {
+    let blk; try { blk = (await rpc.getBlock({ hash: p.block_hash, includeTransactions: true })).block; await nap(); } catch (e) { return { verified: { state: 'inconclusive', reason: 'getBlock error: ' + String(e.message || e).slice(0, 80) }, legA: null, legB: { ok: false, err: 'inconclusive' } }; }
     const verified = verifyInclusion(blk, p.txid);
-    if (!verified.ok) return { verified, legA: null, legB: { ok: false, err: 'unverified inclusion' } };
+    if (verified.state !== 'verified') return { verified, legA: null, legB: { ok: false, err: verified.state } };
     const later = await pageForward(rpc, p.block_hash);
-    return { verified, legA: legAFrom({ submitTs, submitDaa, inclusionHeader: blk.header }), legB: legBFromBlocks(blk.header, later, DEPTH), inclusion_block: { hash: blk.header.hash, daaScore: Number(blk.header.daaScore), timestamp: Number(blk.header.timestamp) } };
+    return { verified, legA: legAInput ? legAFrom({ ...legAInput, inclusionHeader: blk.header }) : null, legB: legBFromBlocks(blk.header, later, DEPTH), inclusion_block: { hash: blk.header.hash, daaScore: Number(blk.header.daaScore), timestamp: Number(blk.header.timestamp) } };
   }
 
-  const rpc = new RpcClient({ url: 'ws://127.0.0.1:17210', encoding: Encoding.Borsh, networkId: 'testnet-12' });
+  const rpc = new RpcClient({ url: RPC_URL, encoding: Encoding.Borsh, networkId: 'testnet-12' });
   await rpc.connect({ timeoutDuration: 8000 });
   const si = await rpc.getServerInfo(); const daa = Number(si.virtualDaaScore);
   if (!(si.isSynced && daa > DAA_FLOOR) && !DRY) { console.error(`⛔ SYNC-GATE: isSynced=${si.isSynced} daa=${daa} (floor ${DAA_FLOOR}) ⇒ 不出数`); await rpc.disconnect(); process.exit(3); }
-  const db = dbConn; // client.js 打开的连接(读写句柄, 本脚本零写)
   const samples = [];
   if (MODE === 'live' && !DRY) {
-    const known = new Set(loadProxies(db, 100000).map(r => r.txid)); const pending = new Map(); const t0 = Date.now();
+    // live: (a) 本机 mempool 每 POLL_MS 轮询, 新 txid 首见 = MEMPOOL_SEEN(记 ts + virtualDaaScore); (b) DB 30 s 轮询作 PROXY_POLL 兜底; 进 kaspa_tx_log 后反核 + 量两腿
+    const known = new Set(loadProxies(100000).map(r => r.txid)); const pending = new Map(); const mem = new Map(); const t0 = Date.now(); let lastDb = 0;
     while (Date.now() - t0 < LIVE_MIN * 60000) {
-      const s2 = await rpc.getServerInfo(); const nowDaa = Number(s2.virtualDaaScore), nowTs = Date.now();
-      for (const r of loadProxies(db, 500)) if (!known.has(r.txid)) { known.add(r.txid); pending.set(r.txid, { ...r, submit_ts: nowTs, submit_daa: nowDaa }); }
-      for (const [txid, p] of pending) { const l = db.prepare('SELECT block_hash, block_time FROM kaspa_tx_log WHERE tx_id=? LIMIT 1').get(txid); if (!l) continue; const m = await measure(rpc, { ...p, block_hash: l.block_hash }, p.submit_ts, p.submit_daa); if (m.legB.ok || !m.verified.ok || Date.now() - p.submit_ts > 30 * 60000) { samples.push({ ...p, block_hash: l.block_hash, ...m }); pending.delete(txid); } }
-      await new Promise(r => setTimeout(r, 30000));
+      try { const me = await rpc.getMempoolEntries({ includeOrphanPool: false, filterTransactionPool: false }); const s2 = await rpc.getServerInfo(); const now = Date.now(), nowDaa = Number(s2.virtualDaaScore); for (const e of me.mempoolEntries || me.entries || []) { const id = e?.transaction?.verboseData?.transactionId || e?.transaction?.id; if (id && !mem.has(id)) mem.set(id, { ts: now, daa: nowDaa }); } } catch {}
+      if (Date.now() - lastDb > 30000) { lastDb = Date.now(); const s2 = await rpc.getServerInfo(); for (const r of loadProxies(500)) if (!known.has(r.txid)) { known.add(r.txid); const m = mem.get(r.txid); pending.set(r.txid, { ...r, legAInput: r.sender_ts ? { submitTs: Date.parse(r.sender_ts), submitDaa: null, source: LEGA_SOURCES.SENDER_TS } : m ? { submitTs: m.ts, submitDaa: m.daa, source: LEGA_SOURCES.MEMPOOL_SEEN } : { submitTs: Date.now(), submitDaa: Number(s2.virtualDaaScore), source: LEGA_SOURCES.PROXY_POLL } }); }
+        for (const [txid, p] of pending) { const l = db.prepare('SELECT block_hash, block_time FROM kaspa_tx_log WHERE tx_id=? LIMIT 1').get(txid); if (!l) continue; const m = await measure(rpc, { ...p, block_hash: l.block_hash }, p.legAInput); if (m.legB.ok || m.verified.state !== 'verified' || Date.now() - p.legAInput.submitTs > 30 * 60000) { samples.push({ kind: p.kind, txid, block_hash: l.block_hash, block_time: l.block_time, redeem_len: p.redeem_len, ...m }); pending.delete(txid); } } }
+      await new Promise(r => setTimeout(r, POLL_MS));
     }
   } else {
-    for (const p of loadProxies(db, DRY ? DRY : LIMIT)) { if (DRY && samples.length >= DRY) break; if (!p.block_hash) continue; let m; try { m = await measure(rpc, p, p.submit_at ? Date.parse(p.submit_at) : null, null); } catch (e) { m = { verified: { ok: false, reason: 'getBlock error: ' + String(e.message || e) }, legA: null, legB: { ok: false, err: String(e.message || e) } }; } samples.push({ ...p, ...m }); }
+    for (const p of loadProxies(DRY ? DRY : LIMIT)) { if (DRY && samples.length >= DRY) break; if (!p.block_hash) continue; const m = await measure(rpc, p, p.sender_ts ? { submitTs: Date.parse(p.sender_ts), submitDaa: null, source: LEGA_SOURCES.SENDER_TS } : null); samples.push({ kind: p.kind, txid: p.txid, block_hash: p.block_hash, block_time: p.block_time, redeem_len: p.redeem_len, sender_ts: p.sender_ts, ...m }); }
   }
-  db.close(); await rpc.disconnect();
+  await rpc.disconnect();
   const sum = summarize(samples, { dry: !!DRY });
-  const out = { mode: DRY ? 'DRY-RUN(绕过 SYNC-GATE, 只看形状, 不作证据)' : `FORMAL-${MODE}`, t: new Date().toISOString(), daa, depth: DEPTH, min_samples: MIN_SAMPLES,
-    proxy_note: '代理样本 = 现网 pool covenant 花费(PoolSide claim / settle / refund / ShardLeaf 续链), 非 v0.15 T5 同形; Leg B 纯确认深度物理形状无关; Leg A 轻代理低估向',
-    by_kind: Object.fromEntries([...new Set(samples.map(s => s.kind))].map(k => [k, samples.filter(s => s.kind === k).length])), ...sum, samples: samples.slice(0, DRY ? DRY : 5000) };
-  const json = JSON.stringify(out, null, 1);
+  const out = { schema_version: SCHEMA_VERSION, mode: DRY ? 'DRY-RUN(绕过 SYNC-GATE, 只看形状, 不作证据)' : `FORMAL-${MODE}`, t: new Date().toISOString(), target_commit: targetCommit, rpc: { url: RPC_URL, network: 'testnet-12', live_binary_commit: '7b1e18cc', semantics: 'getBlock(includeTransactions) canonical 反核; getBlocks(lowHash) 前向翻页找 depth; getMempoolEntries 首见(live)' }, cli_args: argv, daa, depth: DEPTH, min_samples: MIN_SAMPLES,
+    proxy_note: '代理样本 = 现网 pool covenant 花费(PoolSide claim / settle / refund / ShardLeaf 续链), 非 v0.15 T5 同形; Leg B 纯确认深度物理形状无关; Leg A 仅 SENDER_TS 进包络',
+    by_kind: Object.fromEntries([...new Set(samples.map(s => s.kind))].map(k => [k, samples.filter(s => s.kind === k).length])), ...sum, samples };
+  const json = JSON.stringify(out, null, 1); const sha = createHash('sha256').update(json).digest('hex');
   if (sum.exit === 5) { console.error(`⛔ INSUFFICIENT_SAMPLES: legB n=${sum.legB_inclusion_to_depth.n} < ${MIN_SAMPLES}`); console.log(json); process.exit(5); }
-  if (!DRY) { mkdirSync(OUT, { recursive: true }); const f = `${OUT}/claim-depth-${out.t.replace(/[:.]/g, '-')}.json`; writeFileSync(f, json); console.log(`wrote ${f} sha256=${createHash('sha256').update(json).digest('hex')}`); }
-  console.log(DRY ? json : JSON.stringify({ ...out, samples: `(${samples.length} in file)` }, null, 1));
+  if (!DRY) { mkdirSync(OUT, { recursive: true }); const f = `${OUT}/claim-depth-${out.t.replace(/[:.]/g, '-')}.json`; writeFileSync(f, json); console.log(`wrote ${f} sha256=${sha}`); }
+  console.log(DRY ? json : JSON.stringify({ ...out, samples: `(${samples.length} raw rows in file)`, file_sha256: sha }, null, 1));
 }
 if (process.argv[1] && process.argv[1].replace(/\\/g, '/').endsWith('claim-depth-sampler.mjs')) main().catch(e => { console.error('ERR', e.message || e); process.exit(1); });

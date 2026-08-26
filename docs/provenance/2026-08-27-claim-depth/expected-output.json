@@ -1,15 +1,23 @@
 {
  "V1-verify-ok": {
-  "ok": true,
+  "state": "verified",
   "reason": null
  },
- "V2-verify-stale": {
-  "ok": false,
-  "reason": "txid not in block.transactions (tx_log stale / reorged)"
+ "V2-verify-excluded": {
+  "state": "excluded",
+  "reason": "txid not in canonical block.transactions (tx_log stale / reorged)"
  },
- "V3-verify-noload": {
-  "ok": false,
+ "V3-verify-inconclusive-noload": {
+  "state": "inconclusive",
   "reason": "block has no transactions loaded"
+ },
+ "V3b-verify-inconclusive-missing": {
+  "state": "inconclusive",
+  "reason": "block missing / malformed"
+ },
+ "V3c-verify-inconclusive-malformed": {
+  "state": "inconclusive",
+  "reason": "transactions lack ids (malformed RPC shape)"
  },
  "V4-legB-plain": {
   "ok": true,
@@ -42,70 +50,105 @@
   "ok": false,
   "err": "depth target not reached within paging"
  },
- "V8-legA-hist": {
+ "V8-legA-sender": {
+  "source": "SENDER_TS",
   "legA_wall_s": 1,
-  "note": "轻代理(PoolSide 450 B 等)偏短 = 低估向, 归 S_unalloc; hist 的 submit 来自 DB 时刻, live 为 DB 首现(30 s 粒度)"
+  "legA_daa": null,
+  "final_eligible": true
  },
- "V9-legA-live": {
+ "V9-legA-mempool": {
+  "source": "MEMPOOL_SEEN",
   "legA_wall_s": 1,
-  "note": "轻代理(PoolSide 450 B 等)偏短 = 低估向, 归 S_unalloc; hist 的 submit 来自 DB 时刻, live 为 DB 首现(30 s 粒度)",
-  "legA_daa": 10
+  "legA_daa": 10,
+  "final_eligible": false
+ },
+ "V9b-legA-poll": {
+  "source": "PROXY_POLL",
+  "legA_wall_s": 1,
+  "legA_daa": 5,
+  "final_eligible": false
  },
  "V10-sum-insufficient": {
   "status": "INSUFFICIENT_SAMPLES",
   "exit": 5,
+  "verified_n": 29,
   "legB_n": 29,
   "legB_daa_p100": 21,
   "legB_S": 0,
-  "legA_n": 0,
+  "legA_final_n": 0,
+  "legA_obs": {
+   "MEMPOOL_SEEN": 0,
+   "PROXY_POLL": 0
+  },
   "excluded": {
    "n": 5,
    "reasons": {
-    "txid not in block.transactions (tx_log stale / reorged)": 5
+    "txid not in canonical block.transactions (tx_log stale / reorged)": 5
    }
   },
+  "inconclusive": {
+   "n": 0,
+   "reasons": {}
+  },
   "feed": {
-   "N_claim_lower_bound_daa": 21,
-   "S_unalloc_daa": 0,
-   "note": "S_unalloc = σ_A + σ_B 型两腿之和 ≥ √(σA²+σB²): 配对样本不可得故取和 = 保守过估, 非危险双计; 读数带前缀\"代理 claim-shape 非 T5 同形\""
+   "N": 21,
+   "S": 0
   }
  },
- "V11-sum-ok": {
+ "V11-sum-ok-legA-split": {
   "status": "OK",
   "exit": 0,
+  "verified_n": 30,
   "legB_n": 30,
   "legB_daa_p100": 26,
-  "legB_S": 6.71,
-  "legA_n": 5,
+  "legB_S": 6.63,
+  "legA_final_n": 5,
+  "legA_obs": {
+   "MEMPOOL_SEEN": 5,
+   "PROXY_POLL": 0
+  },
   "excluded": {
    "n": 3,
    "reasons": {
-    "txid not in block.transactions (tx_log stale / reorged)": 3
+    "txid not in canonical block.transactions (tx_log stale / reorged)": 3
+   }
+  },
+  "inconclusive": {
+   "n": 2,
+   "reasons": {
+    "block missing / malformed": 2
    }
   },
   "feed": {
-   "N_claim_lower_bound_daa": 34,
-   "S_unalloc_daa": 6.71,
-   "note": "S_unalloc = σ_A + σ_B 型两腿之和 ≥ √(σA²+σB²): 配对样本不可得故取和 = 保守过估, 非危险双计; 读数带前缀\"代理 claim-shape 非 T5 同形\""
+   "N": 34,
+   "S": 6.63
   }
  },
- "V12-sum-unverified-not-counted": {
+ "V12-sum-inconclusive-not-counted": {
   "status": "INSUFFICIENT_SAMPLES",
   "exit": 5,
+  "verified_n": 20,
   "legB_n": 20,
   "legB_daa_p100": 20,
   "legB_S": 0,
-  "legA_n": 0,
+  "legA_final_n": 0,
+  "legA_obs": {
+   "MEMPOOL_SEEN": 0,
+   "PROXY_POLL": 0
+  },
   "excluded": {
+   "n": 0,
+   "reasons": {}
+  },
+  "inconclusive": {
    "n": 20,
    "reasons": {
-    "txid not in block.transactions (tx_log stale / reorged)": 20
+    "block missing / malformed": 20
    }
   },
   "feed": {
-   "N_claim_lower_bound_daa": 20,
-   "S_unalloc_daa": 0,
-   "note": "S_unalloc = σ_A + σ_B 型两腿之和 ≥ √(σA²+σB²): 配对样本不可得故取和 = 保守过估, 非危险双计; 读数带前缀\"代理 claim-shape 非 T5 同形\""
+   "N": 20,
+   "S": 0
   }
  }
 }
