@@ -147,6 +147,17 @@ fi
 | VB-5 | #7 端口 | A 在 :3200 被占时跑 | 真释放 :3200(现在: 放空 :3400) |
 | VB-6 | #4 parity | headless 起的 console 查 /api/test/reset_peer | 注册(与 A 起的一致) |
 
+### B.4 VB-1 实施发现（2026-08-27·裁 (A)·覆盖面缩小 + 原因）
+🔴 **VB-1 原设想"抽 7 函数零变更"内部矛盾**: 7 函数里至少 6 个对应【当前就漂移】的段, 抽成单一共享函数 = 隐性统一 = 把 VB-2+ 的修法(#4/#7/#9/#21/#22/#15/#24)混进"零变更"步, NWT 证不了、也违两步落地初衷。⇒ Bettor 裁 **(A)**: VB-1 只抽**今日已证 behavior-identical** 的子集, 每候选 prove-then-extract; 漂移段各留原脚本, VB-2+ "抽+修"同 commit 配对照臂。
+**prove-then-extract 结果(证明: `docs/2026-08-27-kanet-ui-vb1-loadenv-equivalence-proof.md`)**:
+| 候选 | 判 | 依据 |
+|---|---|---|
+| **load_env** | ✅ **抽**(唯一过) | 27-key vs 3-key case 但**净 env 态+shell 变量逐字等价**(全量 export 透传, case 差异是重命名/冗余); lib-call env|sort == 两脚本 inline |
+| archive_log(#21) / spawn_console(#22) / KANET_TEST_MODE(#4) / stop_old(#9a) / llama spawn 外壳 / sidecars(#15#24) / ensure_supervisor(#9b#9c) | ✗ 漂移·留 VB-2+ | 逐字不同(实证表见证明文档 §4) |
+⇒ **VB-1 = 新增 `lib/kanet-start-common.sh`(仅 `kanet_load_env`)+ 证明; 活 kanet-start.sh/headless 不动**(lib dead-until-wired)。接线(两脚本 source+调用)= NWT 确认等价后**单独一步**, 在能当场复验 supervisor 自愈的窗口做(共享树=live 树)。
+🔵 **`$@` 作用域雷预注册**(第一已知差异点): VB-2+ 抽 spawn_llama 时, 函数内 `$@`≠脚本参数 ⇒ `--memgate-force` 会到不了闸(静默 fail-open)。修法=显式 `kanet_spawn_llama "$@"`; 对照臂=抽后 `bash kanet-start.sh --memgate-force` 断言日志出 `memgate:forced`。VB-1 不触发(load_env 不用 `$@`)。
+🔨 **方法论坑记录**(证明文档 §3): 初版 `env -i bash` 清了 PATH ⇒ 两 harness 没跑输出都空 ⇒ diff 假报 IDENTICAL(空==空绿灯无信息)。修=`env -i PATH="$PATH"` + 比对前验两文件 `[ -s ]` 非空。
+
 ## §C. 接位目录入库 → `docs/handoff/`
 
 ### C.1 为什么（漂移表同族 + 单点失败）
