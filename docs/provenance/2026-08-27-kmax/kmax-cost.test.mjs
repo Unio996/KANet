@@ -1,8 +1,8 @@
-// (21) v0.4 · 离线确定性测试跑手(无节点)。跑: node docs/provenance/2026-08-27-kmax/kmax-cost.test.mjs
+// (21) v0.5 · 离线确定性测试跑手(无节点)。跑: node docs/provenance/2026-08-27-kmax/kmax-cost.test.mjs
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { targetFromBits, compactTargetBits, workPerBlock, hNetFromBits, difficultyRatio, decideHNet, clampWindow, hAdvImplied, foldToDevices, costTable } from './kmax-cost.mjs';
+import { targetFromBits, compactTargetBits, workPerBlock, hNetFromBits, difficultyRatio, decideHNet, clampWindow, hAdvImplied, foldToDevices, costTable, law3FromBlocks } from './kmax-cost.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const vectors = JSON.parse(readFileSync(join(HERE, 'vectors.json'), 'utf8'));
@@ -17,6 +17,7 @@ for (const v of vectors.cases) {
   else if (v.type === 'window') got = clampWindow(v.window);
   else if (v.type === 'implied') got = { H_adv_implied: hAdvImplied(v.k, v.H_floor), devices: foldToDevices(hAdvImplied(v.k, v.H_floor)) };
   else if (v.type === 'table') got = costTable(v.H_net, v.ks);
+  else if (v.type === 'law3') { const mk = (n, from, step) => Array.from({ length: n }, (_, i) => ({ header: { hash: 'b' + from + i, timestamp: from + i * step } })); const blocks = [...mk(v.inWindow, v.tipTs - v.windowS * 1000 + 1, Math.floor(v.windowS * 1000 / v.inWindow)), ...mk(v.outWindow, v.tipTs - v.windowS * 1000 - 100000, 10)]; got = law3FromBlocks(blocks, v.tipTs, v.windowS, targetFromBits(v.bits)); }
   results[v.id] = got;
 }
 if (WRITE) { console.log(JSON.stringify(results, null, 1)); process.exit(0); }

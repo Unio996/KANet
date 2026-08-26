@@ -39,29 +39,6 @@
   "H1_Hs": 270385649423121570,
   "difficulty_ratio": 13519282471156078
  },
- "V6-decide-law1-min": {
-  "H_net": 2000000000,
-  "source": "law1",
-  "ratio": 1.3,
-  "note": null
- },
- "V7-decide-law2-min": {
-  "H_net": 1800000000,
-  "source": "law2",
-  "ratio": 2.778,
-  "note": "两法相差 >2×: tip bits 陈或窗内停滞; 决策仍取 min"
- },
- "V8-decide-gt2x": {
-  "H_net": 1000000000,
-  "source": "law2",
-  "ratio": 9,
-  "note": "两法相差 >2×: tip bits 陈或窗内停滞; 决策仍取 min"
- },
- "V9-decide-law2-missing": {
-  "H_net": 2000000000,
-  "source": "law1_only",
-  "note": "法2 缺(estimate 报错/超限) ⇒ 只用法1, 标"
- },
  "V10-window-ok": {
   "window": 5000,
   "clamped": false,
@@ -85,8 +62,9 @@
     "tier": "B"
    },
    "RTX 5090 (GPU, 估)": {
-    "units": 499.5,
-    "tier": "C"
+    "units": null,
+    "tier": "C",
+    "note": "C 档估值只列不折(非 kHeavyHash 专属实测)"
    },
    "IceRiver KS3M (ASIC)": {
     "units": 0.333,
@@ -106,8 +84,9 @@
     "tier": "B"
    },
    "RTX 5090 (GPU, 估)": {
-    "units": 4.5,
-    "tier": "C"
+    "units": null,
+    "tier": "C",
+    "note": "C 档估值只列不折(非 kHeavyHash 专属实测)"
    },
    "IceRiver KS3M (ASIC)": {
     "units": 0.003,
@@ -129,8 +108,9 @@
      "tier": "B"
     },
     "RTX 5090 (GPU, 估)": {
-     "units": 4.5,
-     "tier": "C"
+     "units": null,
+     "tier": "C",
+     "note": "C 档估值只列不折(非 kHeavyHash 专属实测)"
     },
     "IceRiver KS3M (ASIC)": {
      "units": 0.003,
@@ -151,8 +131,9 @@
      "tier": "B"
     },
     "RTX 5090 (GPU, 估)": {
-     "units": 49.5,
-     "tier": "C"
+     "units": null,
+     "tier": "C",
+     "note": "C 档估值只列不折(非 kHeavyHash 专属实测)"
     },
     "IceRiver KS3M (ASIC)": {
      "units": 0.033,
@@ -173,8 +154,9 @@
      "tier": "B"
     },
     "RTX 5090 (GPU, 估)": {
-     "units": 499.5,
-     "tier": "C"
+     "units": null,
+     "tier": "C",
+     "note": "C 档估值只列不折(非 kHeavyHash 专属实测)"
     },
     "IceRiver KS3M (ASIC)": {
      "units": 0.333,
@@ -186,5 +168,99 @@
     }
    }
   }
- ]
+ ],
+ "V6-decide-law1-min": {
+  "H_net": 2000000000,
+  "source": "law1",
+  "available": [
+   "law1",
+   "law2"
+  ],
+  "ratio": 1.3,
+  "gate_input": "OK",
+  "note": null
+ },
+ "V7-decide-law2-min": {
+  "H_net": 1800000000,
+  "source": "law2",
+  "available": [
+   "law1",
+   "law2"
+  ],
+  "ratio": 2.778,
+  "gate_input": "FAIL_CLOSED",
+  "note": "可用法相差 >2×(tip bits 陈/窗内停滞/戳塞): 成本表内仍取 min 作参考, 但喂 (23) 入场闸 = 环境违约(测量不可靠) ⇒ fail-closed 不入场, 非取 min 硬用"
+ },
+ "V8-decide-gt2x-failclosed": {
+  "H_net": 1000000000,
+  "source": "law2",
+  "available": [
+   "law1",
+   "law2"
+  ],
+  "ratio": 9,
+  "gate_input": "FAIL_CLOSED",
+  "note": "可用法相差 >2×(tip bits 陈/窗内停滞/戳塞): 成本表内仍取 min 作参考, 但喂 (23) 入场闸 = 环境违约(测量不可靠) ⇒ fail-closed 不入场, 非取 min 硬用"
+ },
+ "V9-decide-law1-only-provisional": {
+  "H_net": 2000000000,
+  "source": "law1_only",
+  "available": [
+   "law1"
+  ],
+  "ratio": null,
+  "gate_input": "PROVISIONAL_OVERESTIMATE",
+  "note": "只有法1(陈难度): 算力跌后过估 H_net ⇒ 攻击成本看着更贵/地板入场太易 = 危险向; 不许作 (23) firm 输入"
+ },
+ "V16-decide-law3-min": {
+  "H_net": 1200000000,
+  "source": "law3",
+  "available": [
+   "law1",
+   "law2",
+   "law3"
+  ],
+  "ratio": 1.667,
+  "gate_input": "OK",
+  "note": null
+ },
+ "V17-decide-law3-only-with-law1": {
+  "H_net": 1500000000,
+  "source": "law3",
+  "available": [
+   "law1",
+   "law3"
+  ],
+  "ratio": 1.333,
+  "gate_input": "OK",
+  "note": null
+ },
+ "V18-law3-count": {
+  "H3": 13107210,
+  "blocks_in_window": 6000,
+  "window_s": 600,
+  "stamp_bias_bound": 0.22
+ },
+ "V19-fold-C-excluded": {
+  "H_adv_implied": 1998000000000,
+  "devices": {
+   "RTX 4090 (GPU)": {
+    "units": 999,
+    "tier": "B"
+   },
+   "RTX 5090 (GPU, 估)": {
+    "units": null,
+    "tier": "C",
+    "note": "C 档估值只列不折(非 kHeavyHash 专属实测)"
+   },
+   "IceRiver KS3M (ASIC)": {
+    "units": 0.333,
+    "tier": "A"
+   },
+   "Bitmain KS5 Pro (ASIC)": {
+    "units": 0.095,
+    "tier": "B"
+   }
+  }
+ }
 }
