@@ -7,6 +7,8 @@
 - **不重启 console**（杀协调频道 + 三个本机会话的通信面）；**不动 kaspad**（IBD 进行中，新库，watchdog 归你/Owner 域但现在不需要）；**不推任何未经 NWT 审的 commit**。
 - 🔴 **绝对不许跑 `bash kanet-start-headless.sh` / `kanet-start.sh`**（NWT (20) 33d6ce1e CRITICAL）：headless `:63-72` 会 kill `$PID_DIR/*.pid` 里每个 pid（**含 console.pid**）+ Stop-Process 占 :3200 的进程 = **重启 console**；`HEADLESS_NO_KILL=1` 也别用（跳 kill 但仍试起第二个 console → :3200 冲突）。console-supervisor 监 :3200（不监 :8000）——停 llama **不会**触发它，但 console 一旦被杀它会再跑 headless 放大。⇒ A.5 只允许下面 §1 的**手动 spawn**。
 
+- 🔴 **不要启用 `KANet-KaspadWatchdog` 计划任务，直到 `isSynced=true ∧ daa>0`**（KANet-UI VB-8 读码：`rpc-probe.mjs:34-35` daa=0 ⇒ `die('empty-data:daa=0', 3)` → `kaspad-watchdog.ps1:103` 判 Fail → 3 次 → memgate 阈 8 GB 必过 → `:152 Start-Process` 重启 kaspad = 打断 IBD）。现网 dd1dcd72 版无 SYNCING 三态。**它现在没在跑**（watchdog 日志停 08-26 16:39，无进程，(624) 记 Disabled）——你提权后 `schtasks /query /tn KANet-KaspadWatchdog` **只查不启**，把状态贴回。节点 05:11 IBD 重来（对端掉线，非崩溃）现正常推进，别碰。
+
 ## 1. A.5 — 停 live llama(17428) 使 256k ctx 生效（Owner 已批；共享推理服务会短暂断）
 依据 `docs/2026-08-26-kanet-ui-start-script-remediation-design.md` §A.5 ②–⑧（NWT 终审 `docs/2026-08-26-NWT-redteam-remediation-final-verdict.md`）。前置已具备（Bettor 实核 02:5x）：
 - env 单一源已落：`kanet.env:153 LLAMA_CTX_SIZE=262144`（dd1dcd72，含内存闸 `kanet-start.sh:252` / `kanet-start-headless.sh:130` / `scripts/llm-watchdog.mjs`）。
