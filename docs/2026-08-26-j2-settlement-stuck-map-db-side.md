@@ -78,7 +78,7 @@
 | 子系统 | 最近 tick 原文 | 读法 |
 |---|---|---|
 | pool-settler | `106 verifying markets, consensus=0 refund=0 … bshardSkipped=103` | 106 = verifying 93 + collecting_sigs 2 + refunding 16 − 未到期;103 走 bshard 分支被跳(设计移交,`pool-market-settler.js:627`) |
-| bshard-settle-daemon | `[pre-gate] 11 market(s) gated (unreachable=7 + repeat-offender=4)`,**最后一行 09:22:52Z,此后 4h 无 tick** | 11 = (616) 层③原样;09:22Z 后静默疑与 IBD `daa=0` 有关,**未证** |
+| bshard-settle-daemon | `[pre-gate] 11 market(s) gated (unreachable=7 + repeat-offender=4)`,最后一行 09:22:52Z | 11 = (616) 层③原样。🔴 **更正(同日 14:0xZ,Bettor 派工 (4) 实核)**:初稿写「此后 4h 无 tick」是**错的**——tick 每分钟都在跑(`[diag:tick-duration] settleDaemonTick ms≈90` 不断),停的只是 `[pre-gate]` 那一行。原因 = `bshard-settle-daemon.mjs:600` `deadline_daa + FINALITY_BUFFER <= currentDaa`,而 `currentDaa`(`:157` → relay `chain_get_current_daa_score`)在 IBD 期实测返回 **`daa_score: 0`** ⇒ 0 行 ripe → `:964` 静默早退;`:637` 的 pre-gate 行只在有盘被 gate 时才打。 |
 | bettor-refund-claim-auto | `95 unclaimed, dispatched=0 … unauthorized=95` | = §2 那 95 笔,P1 闸拒因「无 refund_authorization」(8/22 已报两头堵死) |
 | prediction-settler | `3 expired, settled=0 pending=0 errored=3` | 非 pool 线,`no oracle votes received yet` |
 
