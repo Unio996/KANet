@@ -1,6 +1,6 @@
 # 节点「真健康」判据 — 与 KANet-UI 探针稿同一把尺(含 (622) tips-reconcile 补答)
 
-> **Status**: DRAFT v0.2 · J2 2026-08-26 主笔(v0.2 = §9 吸收 NWT F-A/F-B/F-C) · Bettor 派工 (5)(对等消息) · **待 NWT 审, 与 `docs/2026-08-26-kanet-ui-kaspad-probe-ibd-vs-dead-design.md` 一起审**。
+> **Status**: DRAFT v0.3 · J2 2026-08-26 主笔(v0.2 = §9 吸收 NWT F-A/F-B/F-C; v0.3 = §10 KNOWN 残余 per-query unwrap_or_default + 二源交叉纪律) · Bettor 派工 (5)(对等消息) · **待 NWT 审, 与 `docs/2026-08-26-kanet-ui-kaspad-probe-ibd-vs-dead-design.md` 一起审**。
 > **性质**: 只读(采样数据 / 日志 / 源码 / 只读 RPC), 零改码。**判据文档, 不是探针实现**;探针实现归 KANet-UI 稿, 本文只负责"尺子刻度从哪来"。
 > **证据标签**: `[MEASURED]` 实测 · `[LOG]` kaspad 日志原文 · `[SRC]` 源码 · `[DESIGN]` 选择。每个阈值带出处, 没出处的数不许进探针。
 
@@ -167,3 +167,19 @@
   2. **全部为空时的裁定 = UNKNOWN, 永不 DEAD**;并按下面三条交叉定 SYNCING 子态:`getUtxosByAddresses` 报 `ConsensusInTransitionalIbdState` ⇒ `utxoindex-pending`(确定);`virtualDaaScore ≤ 80,095,687` ⇒ `pre-utxoset`(确定, §3-A/B);`daa > 下界 ∧ isSynced=true ∧ 全空` ⇒ `control-set-drained?` **告警交操作员**(对照集可能真被掏空)。
   3. **不用 `isUtxoIndexed` 交叉**(F-B 表:它是配置开关)。
 - 对照址由 env 给、不烤死在码里(UI 稿 3.2b 原则不变)。
+
+---
+
+## §10 v0.3 · NWT 终核采纳后的精确说法 + KNOWN 残余(2026-08-26)
+
+**R6 的牙没有消失, 是换了位置**(NWT 精确措辞, 采纳):F-B 证明重建对读者原子 ⇒ **A2 对照址非空 ⇒ 整个索引 live ⇒ 各址读得对**——A2 有牙且充分;A1(DAA 下界)只挡 §3-A 的 `daa=0` header 期, 是弱的那一半。⇒ 两稿共享:**ALIVE ⇔ R1∧…∧R5∧R6, 其中 R6 的承重是 A2, A1 是前置粗筛。**
+
+🔴 **KNOWN 残余(探针 / A1 / A2 都挡不住)** `[SRC @7b1e18cc rpc/service/src/service.rs get_utxo_set_by_script_public_key / get_balance_by_script_public_key: `.await.unwrap_or_default()`]`:
+它是 **per-query** 的——索引 live 时, **某一个地址的某一次查询**遇瞬时 store 错仍返 `[]`。对照址那次查询非空只证明"索引 live", 证明不了"你这次查的那个地址那一次没撞错"。
+⇒ **纪律(写进脚本包与任何钱路关键读)**:
+1. **空集必须二源交叉**才能写成 `n=0`:二次查询(间隔 ≥ 数百 ms)+ 第三源(本机 `kaspa_tx_log` 该址是否曾收款, 或直连 kaspad 另一连接)。
+2. **只查到一次的空 = `SINGLE_SOURCE`, 不是 absent**;二次查询非空 = `retry-recovered`(把第一次记成"疑似瞬时错", 不丢)。
+3. 结果里每个 `n=0` 旁标 `source: double-empty` 与 `txlog_ever_received`, 读的人一眼能判"两次都空、且本机从没见它收过款"与"两次都空、但本机见过它收款(⇒ 真被花光 或 索引仍有问题, 交人判)"。
+4. 非空结果不需要二源(空集才是会说谎的那个方向:`unwrap_or_default` 只会把错误变成空, 不会凭空造 UTXO)。
+
+**已落实**:`scratch/_j2_postibd_chaincheck_20260826/_common.cjs` `utxos()`(二次查询 + `kaspa_tx_log` 第三源, 状态 `single-nonempty / retry-recovered / double-empty / SINGLE_SOURCE`);对照集第二址 = pruned 盘 `cn5xn` 的 spine `kaspatest:pzrhg8y8…swe79q`(100 KAS 原始 lock 输出, 7/30 链核未花批, spine 独占、0 逻辑键注、不在任何 refund/claim 候选), 与 KANet-UI 探针 `KASPAD_PROBE_CONTROL_ADDRS` 同址同尺。
