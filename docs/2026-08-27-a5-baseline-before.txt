@@ -1,0 +1,25 @@
+=== A.5 verify @ 2026-08-26T20:03:21Z host=DESKTOP-DA9QQ46 ===
+
+[1] llama-server.exe process
+  PID=17428 Start=25-Aug-26 10:31:04 ctx-size=(CommandLine unreadable, maybe SYSTEM non-elevated) PagedMem=0GB PrivateCommit=30.15GB
+  CommandLine=(null=SYSTEM non-elevated)
+
+[2] logs/llama-server.log latest KV cache line
+  llama_kv_cache: size = 17408.00 MiB (1048576 cells,   8 layers,  4/1 seqs), K (q8_0): 8704.00 MiB, V (q8_0): 8704.00 MiB
+
+[3] /props n_ctx (curl :8000)
+  n_ctx=1048576 model=Qwythos-9B-Claude-Mythos-5-1M-Q6_K.gguf
+
+[4] nvidia-smi VRAM
+  used,total = 28488 MiB, 32607 MiB
+
+[5] OS free commit
+  FreeVirtualMemory(free commit)=32.7GB  Used=67GB  Limit=99.6GB
+
+[6] llm-watchdog running? (expect none)
+  llm-watchdog count=0 (not running, OK)
+
+[7] netstat :8000 LISTENING
+  TCP    0.0.0.0:8000           0.0.0.0:0              LISTENING       17428
+
+=== end ===
