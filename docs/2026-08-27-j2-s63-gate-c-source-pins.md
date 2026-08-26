@@ -17,7 +17,7 @@
 [continuation] 输出 binding 的 covenant_id == authorizing_input 的 UtxoEntry.covenant_id ⇒ 记入 input_ctxs / shared_ctxs
                                                                              ← txscript covenants.rs:124-136
 [脚本可见]  OpInputCovenantId 0xcf / OpOutputCovenantId 0xd5 / OpCovOutputCount 0xd2 / OpCovInputCount 0xd0 / OpAuthOutputCount 0xcb …
-                                                                             ← txscript opcodes/mod.rs:1436-1631
+                                                                             ← txscript opcodes/mod.rs:1436-1644（含 OpCheckSigFromStack 0xd7 @1633）
 [激活]      covenants_activation: TN12 = ForkActivation::always()            ← core config/params.rs:669-696
 [进入校验]  check_covenant_info → check_scripts(covenants_ctx, flags)        ← consensus tx_validation_in_utxo_context.rs:58-62,165-183
 [签名承诺]  sighash 把 output.covenant(authorizing_input + covenant_id) 写进摘要  ← core hashing/sighash.rs:233-235
