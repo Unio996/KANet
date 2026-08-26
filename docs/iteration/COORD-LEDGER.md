@@ -9849,3 +9849,13 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **setup 完成**: ① 地址 kaspa-wasm parse ✓(kaspatest/round-trip 一致/非 typo)② 源 = MiningRelay-tn12-new(relay_id `ce43e1b1-f16b-4e2b-ba22-56cc9bb26762`, 链上 **11 亿 KAS** 含 10.8 亿单 UTXO, 充足)③ 记 `docs/governance/j1-address-2026-08-23.md`。
 - 🔴 **未执行, 原因 = console 劣化(channel 断)**: 1M 转账经 `sendCommandAsync(relay,{type:'transfer'})`=console→relay。degraded console 的**超时-迟到执行**险对 1M 致命(retry 则双发 2M)。**不赌, 待 console 恢复后单发+链上验+双锚记。**
 - 🎯 **请 @J1(在线, 刚做完节点)restart console**: 双收益——① 解 Owner 的 1M J1 转账 ② 恢复 channel(团队协调现全靠 git)。console=SYSTEM 需你提权。恢复后 Bettor 执行转账(单发, 不 retry-on-timeout, 链上验 J1 地址收到才算, 双锚回填)。
+
+### (624) 2026-08-26 · 8/23 整机崩溃根因 + J1 SSH 修复现状 + 频道静默 4 天 + Owner 钦定 Bettor 自动起人/监工
+- **根因(Bettor 三方交叉核: System/Application 事件日志 + CrashDumps + kaspad 自身日志)**: 8/23 19:52→23:13 `D:\rusty-kaspa\target\release\kaspad.exe` 崩 15+ 次, **异常码 0xc0000409 + 崩溃偏移每次完全相同**(确定性故障, 非随机 OOM); 每次崩后被 `KANet-KaspadWatchdog` 计划任务重新拉起再踩同一坑。22:25 起多个无关服务启动失败, 报"分页文件太小"= commit charge 撑顶(Owner 说的"内存崩溃"); 23:17 后整机失响; **无蓝屏/无 MEMORY.DMP**; 8/24 02:19 `shutdown.exe` 强制重启(reason 0x800000ff)。放大器: `kanet-start.sh` llama-server `--ctx-size 1048576`(1M 上下文, 66GB 机器上最大单一内存占用)。
+- **J1 修复(走 SSH 直连本机, 8/26)**: kaspad 换全新库(PID 22428, IBD 中); 坏库留证 `D:\kaspa-tn12-data\kaspa-testnet-12.corrupt-20260826`(57GB); Console :3200 PID 27412(8/26 03:03 起); `KANet-KaspadWatchdog` 计划任务已注册(SYSTEM, 暂 Disabled, 同步完再启用); 待打僵尸增殖补丁 `8b465e78`(在 J1 侧分支, 本机 git 无此对象); watchdog 探针 `daa=0` 误判(IBD 期 `kaspad-rpc-probe` 读 `DEAD:empty-data:daa=0`)待报 KANet-UI/J2。**本机非提权会话看不到该计划任务**(System32\Tasks 读不了), 以 J1 提权会话查到的为准。
+- **频道**: `dev-coord-testnet` 最后一条 **08-22T22:10Z(J2)**, 之后静默至今 = 全队实际离线 4 天。各人最后发言: J2 22:10 / Bettor 22:00 / NWT 22:00 / KANet-UI 19:14。
+- 🔴 **(623) 1M KAS→J1 新地址: 仍未执行**(console.db 全表扫 `qq0kt3dm` 零命中)。阻塞链: console 劣化 → 8/23 整机崩 → 现节点 IBD 未完(daa=0)。且 **J1 新址在频道零发言**, "第一条消息自证身份"尚未发生。
+- **Owner 8/26 钦定(终端直令 Bettor)**: ① 本会话 = Bettor(会话名 `kanet-tn12-08`); ② **Bettor 负责自动拉起 J2/NWT/KANet-UI 会话、监控、死/卡即重启、派工验收全程自驱; Owner 只在重大事项或主动介入时参与**。边界: supervisor 是 Bettor 协调工具(同 `_bettor_send.cjs` 族), 产品代码仍零 write; supervisor 的派工/重启决策留日志, NWT 按班审(Bettor 裁定须被审, 不因自动化豁免)。
+- 🔵 **新能力(实测)**: 本机 Claude 会话间有对等消息通道(`ListAgents`/`SendMessage`, 会话一启动即可见)。⇒ 本机三人指挥走对等消息(不占 900B 频道/不受链停影响), 频道退回: J1 跨机 + 留存记录。J1 在 younio 机, 对等消息不可达, 仍走频道/git。
+- **接位文件核对(Bettor 8/26 全读 5+2)**: relay 身份全对; 引用脚本 12/12 存在; 陈: Bettor 域表 + Monitor-SOP:97 的 J1 `:3300` → 实为 younio `:3400`(J1 文件已更, 其余未跟); "数 claude.exe 判在线" → 改用 `ListAgents`; J2(e)"console ~4h50m 死"是否仍复发未核(J2 上线自核)。本条同步补进四份接位文件。
+- **下一步**: 起 J2/NWT/KANet-UI(seed 含本条现状); 点名回执; 等节点 IBD 完成后执行 (623) 1M 转账(单发, 不 retry-on-timeout, 链上验后回填 `docs/governance/j1-address-2026-08-23.md` + chain_events)。
