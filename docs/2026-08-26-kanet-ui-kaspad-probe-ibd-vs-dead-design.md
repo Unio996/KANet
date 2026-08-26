@@ -1,13 +1,25 @@
 # kaspad 探针「IBD 进行中」vs「真死」判据设计 — kaspad-rpc-probe.mjs / kaspad-watchdog.ps1（设计稿 · 零改码）
 
-> **Status**: DRAFT v0.1 · KANet-UI 2026-08-26 主笔 · Bettor 派工(对等消息 20:2x) · **待 NWT 审, 过了才落码**。
+> **Status**: DRAFT **v0.2** · KANet-UI 2026-08-26 · Bettor 派工 · **v0.1 NWT verdict = PASS-WITH-MUST-FIX**, 本版应两条必修 + 优先级重排 + llm-watchdog 跟进; **仍不落码, 回 NWT 复审**。
+> **v0.2 changelog**: ①MF-1 加「共识计数器 60min 硬停滞层」(diskWrite 可被 RocksDB compaction 伪造, 不能单独判 SYNCING) + 预注册 V8。②MF-2 §6 crash-loop 刹车从可选升 **REQUIRED** + **内存感知拒拉**(8/23 形态: 进程已 OOM 崩退, "看不到进程就放行"会再拉 30GB 砸缺内存机)。③**优先级重排(NWT 纠正)**: 危害大的 crash-loop/OOM 提到 §0.5(最高优先), 危害小的 IBD 假 DEAD 降为次要。④加 §9 llm-watchdog 双开跟进。⑤§0 一句话按 8/23 真根因(OOM 主因)重写。
 > **域**: 运维/watchdog(KANet-UI 域, J1 在 ledger (624) 明确移交)。改动对象 = `scripts/kaspad-rpc-probe.mjs`(退码/判据) + `scripts/kaspad-watchdog.ps1`(消费退码)。**不碰任何钱路/产品码/console。**
 > **触发**: 8/26 J1 换全新库后 kaspad 22428 IBD 中, 探针稳定回 `DEAD:empty-data:daa=0`; watchdog 按此 3 tick 判 DEAD 反复 Start-Process(第一手实录见 §1)。与 8/23 事故「崩→watchdog 拉起→再崩」同形(不同根因, 同一个 watchdog 缺"别拉"的判断)。
 > **证据纪律**: 每条判据标 `[MEASURED·今日实测]` / `[READ·读码]` / `[INFERRED]` / `[DESIGN-CHOICE]`。实测全部为只读 RPC/日志/进程枚举, 命令与原始输出在 §7。
 
-## §0 一句话
+## §0 一句话（v0.2 重写）
 
-**现探针把「节点未同步」塌进了「数据空=死」**: 判据 `virtualDaaScore > 0` 在 IBD 的 header 下载阶段恒为 0(实测), watchdog 于是把一个正在健康同步的节点当尸体反复拉新进程。**修法 = 探针从二态(ALIVE/DEAD)升三态(ALIVE / SYNCING / DEAD), 且 SYNCING 由「进程稳定 + RPC 应答 + 跨采样有进度」三层证据判定; watchdog 对 SYNCING 永不 Start-Process。**
+**watchdog 最危险的失效不是"漏拉死节点", 是"在缺内存的机器上又拉一个大进程"**——8/23 整机崩的真根因是 OOM(18:39 commit 撑顶, 主体是 llama-server ~30GB; kaspad 首崩晚 73 分钟、是 OOM abort 的**症状**不是原因, NWT 推翻旧判、Bettor 在 ledger (625) 收回)。所以本设计**两个层级、优先级分明**:
+- **§0.5 最高优先(危害大)**: 任何"拉起 kaspad"的动作都必须**内存感知 + crash-loop 刹车**——commit 余量不足时**拒拉**, 反复拉起活不过 M 秒时**停手告警**。这直接防 8/23 那类"崩→拉→再崩→撑顶"放大器。
+- **§2+ 次要(危害小)**: 现探针把「节点未同步」塌进「数据空=死」(`virtualDaaScore>0` 在 IBD header 阶段恒为 0), watchdog 把健康同步的节点当尸体反复拉。修法 = 二态升三态(ALIVE / SYNCING / DEAD)。**这个假 DEAD 之所以危害小, 是因为"只启不杀"下每次误拉都撞 DB LOCK 秒死**——除非机器同时缺内存, 那就退化成 §0.5 的 OOM 放大器。⇒ §0.5 是 §2 的安全网。
+
+## §0.5 最高优先: OOM / crash-loop 防护（MF-2, NWT 升 REQUIRED）
+`[MEASURED 2026-08-26]` 本机: 物理 RAM **61.6 GB**, commit 上限 **99.6 GB**(页文件补 ~38GB), 当前 commit 已用 **59.2 GB** / 空闲 **40.4 GB**; 单个 llama-server 私有 commit **30.2 GB**。⇒ **再拉一个 llama 需 ~30GB commit; 8/23 那种 console cycling + 多进程时, 空闲 commit 会跌破 30GB, 第二个大进程把 commit 顶穿 = "分页文件太小" = 整机失响。**
+
+**两道硬闸(watchdog 在任何 Start-Process 之前都要过, 缺一不拉)**:
+1. **内存感知拒拉(REQUIRED)**: 拉 kaspad 前查 `Get-CimInstance Win32_OperatingSystem` 的 `FreeVirtualMemory`(= 空闲 commit)。**kaspad 需 ~2GB, 阈值 `KASPAD_MIN_FREE_COMMIT_GB` 默认 8**(留裕量); 空闲 commit < 阈值 ⇒ **拒拉 + 告警 `refuse-start:low-commit:<free>GB`**, 不 Start-Process。→ 对 llama 类大进程(若 watchdog 管)阈值须 ≥ 该进程私有 commit + margin(llama = 35)。**"看不到进程就放行"的旧闸(§3.4)对 8/23 无效**: 进程 OOM 崩退后确实看不到, 但机器仍缺内存, 拉一个 30GB 的新进程正是压垮点。⇒ **内存闸在"进程在就不拉"闸之前, 且独立成立**。
+2. **crash-loop 刹车(REQUIRED, 从 v0.1 §6 可选升级)**: 状态文件记 `starts[]`(每次 Start-Process 时间戳 + 拉起的 PID)。判据: **15 分钟内 Start-Process ≥3 次, 且每次拉起的 PID 在下一 tick 已不存在**(= 拉起即死) ⇒ 进 `CRASH-LOOP` 态: **停止一切 Start-Process + 告警 + 交操作员/提权**, 直到人工清零。这正是 8/23「kaspad 0xc0000409 每次同偏移确定性崩 + watchdog 反复拉」那族——确定性崩就是"拉了也活不过一个 tick", 刹车必须在 N 次后认命, 不能无限拉。
+
+**判据(v0.2 立)**: watchdog 的第一要务是**不制造次生 OOM**, 不是"尽快拉活"。宁可一个真死的 kaspad 多躺 10 分钟等操作员, 不可在缺内存的机器上再砸一个大进程把整机带走。原 §0 的三态升级(下文)在此闸之下才谈。
 
 ## §1 现象与第一手证据 `[MEASURED]`
 
@@ -64,7 +76,7 @@
 | L1 进程 | 我们那台 kaspad 进程在不在、是不是同一个 | `Get-CimInstance Win32_Process -Filter "Name='kaspad.exe'"` 取 (PID, CreationDate)。**不用 CommandLine**(SYSTEM 进程非提权读到 null, 今日 35/35 实证) | 无进程 ⇒ **DEAD:no-process**; 有 ⇒ 记 (PID, CreationDate) 入状态文件, 与上次比: 同 ⇒ 稳定; 变 ⇒ 记 `restarted`(不判死, 但计入 §6 刹车) |
 | L2 RPC 口 | 端口通不通、会不会答 | 现有 `connect()` + `getInfo()`(+超时) | connect 失败 ⇒ **DEAD:connect-fail**(5); 超时 ⇒ **DEAD:timeout**(4); 答了 ⇒ 进 L3 |
 | L3 身份 | 是不是我们那台 TN12 | `getBlockDagInfo().network === 'testnet-12'`(现有) | 不符 ⇒ **DEAD:wrong-network**(2) |
-| L4 同步态 | 同步完没有; 没完的话在不在动 | `getInfo().isSynced`; 进度计数器(3.2) | isSynced=true 且 daa>0 ⇒ **ALIVE**; isSynced=false ⇒ 看 3.2 |
+| L4 同步态 | 同步完没有; 没完的话在不在动 + **R6 utxoindex 可用**(3.2b) | `getInfo().isSynced`/`isUtxoIndexed`; 进度计数器(3.2); R6=A1∧A2 | **ALIVE ⟺ isSynced==true ∧ R6 通过**(见 3.2b 那句话); isSynced==true 但 R6 不过 ⇒ SYNCING(utxoindex-pending); isSynced==false ⇒ 看 3.2 |
 
 ### 3.2 SYNCING vs SYNC-STALLED: 「进度」的定义
 探针**必须持久化上次采样**(一次性进程没有记忆), 状态文件 `D:\kaspa-tn12-data\kaspad-probe-state.json`(路径可 env 覆盖 `KASPAD_PROBE_STATE`), 内容:
@@ -74,27 +86,37 @@
   "hdrProcessed": 0, "dbHeaders": 0, "diskWrite": 3155473835, "diskRead": 9400287517,
   "ibdPeer": true, "activePeers": 1, "lastProgressTs": <epoch ms> }
 ```
-**进度 = 下列任一计数器相对状态文件严格增大**(全部是单调计数, 任一动即算动, 覆盖 IBD 全部阶段):
-`headerCount` · `blockCount` · `virtualDaaScore` · `nodeHeadersProcessedCount` · `nodeDatabaseHeadersCount` · `nodeDatabaseBlocksCount` · **`diskIoWriteBytes`**(今日阶段唯一会动的 RPC 计数)。
-
-- **有进度** ⇒ `lastProgressTs = now` ⇒ verdict **SYNCING**(退码 **7**), stdout `SYNCING:phase=<推断阶段> daa=… hdr=… ibdPeer=… since=<lastProgress 距今秒>`。
-- **无进度且 `now - lastProgressTs > STALL_MS`**(默认 **30 min**, env `KASPAD_PROBE_STALL_MS`) ⇒ **SYNC-STALLED**(退码 **8**)。
-- **无进度但未超 STALL_MS** ⇒ 仍 SYNCING(计数器粒度粗, 一两个 tick 不动是正常)。
-- `[DESIGN-CHOICE]` diskIoWriteBytes 作为兜底进度信号的理由: 它是节点自报的累计写字节, 任何阶段的持久化都会推它; 代价是"节点在写垃圾也算进度"——所以它只兜底 SYNCING, 不参与 ALIVE 判定(ALIVE 仍要求 isSynced && daa>0)。
+🔴 **MF-1(NWT 必修 + F-D 跨稿统一): 进度分两层, `diskIoWriteBytes` 永不抑制 STALLED。**
+NWT 指出 `diskIoWriteBytes` 可被 **RocksDB 后台 compaction 伪造**——一个共识已卡死(不再处理任何块)的节点, 其 RocksDB 仍可能因 compaction 持续写盘 ⇒ 若把 diskWrite 当进度, 卡死 IBD 会**永报 SYNCING、永不 STALLED**。修法 = 两层分离:
+- **L-共识(硬判据, 唯一决定 STALLED)**: `headerCount` · `blockCount` · `virtualDaaScore` · `pruningPointHash` · `nodeHeadersProcessedCount` · `nodeDatabaseHeadersCount` · `nodeDatabaseBlocksCount`。**任一相对状态文件严格增大 = 有共识进度** ⇒ `lastConsensusProgressTs = now`。
+- **L-io(仅调告警节奏, 不参与 STALLED 判定)**: `diskIoWriteBytes`。它动 ⇒ 说明进程没完全僵死(还在写盘), 可把 SYNC-STALLED 的**告警从 error 降为 warn**(区分"卡但进程活"vs"卡且盘也不动"); 但**不重置** `lastConsensusProgressTs`, 不阻止 STALLED。
+- **判定**:
+  - **L-共识有进度** ⇒ verdict **SYNCING**(退码 **7**), stdout `SYNCING:phase=<推断阶段> daa=… hdr=… ibdPeer=… since=<lastConsensusProgress 距今秒>`。
+  - **L-共识 `now - lastConsensusProgressTs > STALL_MS`**(默认 **60 min**, env `KASPAD_PROBE_STALL_MS`; NWT 定 60min) ⇒ **SYNC-STALLED**(退码 **8**), 告警级别 = diskWrite 也停→error / diskWrite 仍动→warn。
+  - **L-共识无进度但未超 STALL_MS** ⇒ 仍 SYNCING(计数器粒度粗, 一两个 tick 不动正常)。
+- `[DESIGN-CHOICE]` 为什么 diskWrite 从"兜底进度"降为"仅告警节奏"(v0.1→v0.2): v0.1 拿它当进度信号是错的——它恰恰在"共识卡死但 RocksDB 还在 compaction"这个最需要报 STALLED 的场景下**制造假 SYNCING**。共识计数器才是"节点真在往前走"的唯一硬证。
 - `[DESIGN-CHOICE]` **不用** `kaspad-stdout.log` 文件增长做探针判据: 它是 watchdog 重定向的产物, 1.3 证明它会被截断/污染, 且 Bettor 的独立采样进程没有它的所有权语义。可作为**人读**的旁证(§7)。
 - 状态文件缺失/损坏 ⇒ 当作第一次采样: 只写不判, 本次回 SYNCING(退码 7, reason `first-sample`)——**fail-open 向 SYNCING 而不是向 DEAD**, 因为误判 DEAD 的代价(拉进程/毁日志)远大于晚一个 tick 判死。
 
-### 3.2b ALIVE 须含「UTXO 集可用」(Bettor E-bis 补, 2026-08-26)
-`[MEASURED·J2 8/26]` IBD 期 relay `get_address_utxos` 对已知持币地址回 `{"ok":true,"utxos":[]}`(空集不报错), `chain_get_current_daa_score` 回 0 ⇒ **headers 下完 / `isSynced` 翻 true 都不等于 utxoindex 可查**。对 KANet 而言"活"的定义是**钱路能读到链上真相**, 所以 ALIVE 判据在 3.1 L4 基础上再加两条(缺一 ⇒ 仍 SYNCING, `phase=utxoindex-pending`):
-- **A1** `virtualDaaScore > 80,095,687`(8/22 实测下界; 环境变量 `KASPAD_PROBE_MIN_DAA` 可抬, 只许抬不许降);
-- **A2** **阳性对照址**非空: `getUtxosByAddresses([KASPAD_PROBE_CONTROL_ADDR])` 返回 ≥1 条(默认对照址 = `MiningRelay-tn12-new` 源址 `kaspatest:qrys4yax468rrm988kyqjtncvstcelgzktml0m3rvdvvktrll0gdxuyu34fru`, 链上长期持币; 对照址由 env 给、不烤死在码里, 换币址时改 env)。
-- `[DESIGN-CHOICE]` 对照臂的意义 = 区分"索引空"与"地址空": 没有 A2, 一个 utxoindex 尚未建好的节点会对**所有**地址回空集而不报错, 探针会把它当 ALIVE 放行, 下游(结算 daemon / 转账前置)就会把"没读到"当"没有"。A2 失败不计入 DEAD(节点没坏, 是还没好), 只压在 SYNCING。
-- 退码不变: A1/A2 不过仍回 **7 SYNCING**(reason 带 `utxoindex-pending`), 供 watchdog 与 runbook §4 P1b 同用一把尺。
+### 3.2b ALIVE 的完整定义 = R6「UTXO 集可用」(Bettor E-bis + NWT F-A/F-B/F-C, 2026-08-26)
+🔴 **F-A(NWT headline, 已改退码定义, 不只加段落)**: ALIVE(退码 0)的定义**直接含 R6**——`isSynced && virtualDaaScore>0` **还不够**, 必须 utxoindex 真能读到。§3.2b 与 §3.3 退码 0 **用同一句话**(下方即那句话, §3.3 表格引用它, 不另写):
+> **ALIVE(0) ⟺ network==testnet-12 且 isSynced==true 且 R6 通过**; R6 = 「utxoindex 可用」= A1 ∧ A2(下)。R6 不过 ⇒ **SYNCING(7, `phase=utxoindex-pending`)**, 绝不 ALIVE。
+
+`[MEASURED·J2 8/26]` IBD 期 relay `get_address_utxos` 对已知持币地址回 `{"ok":true,"utxos":[]}`(空集不报错), `chain_get_current_daa_score` 回 0 ⇒ **headers 下完 / `isSynced` 翻 true 都不等于 utxoindex 可查**。R6 两条:
+- **A1** `virtualDaaScore > 80,095,687`(8/22 实测下界; env `KASPAD_PROBE_MIN_DAA` 可抬, 只许抬不许降);
+- **A2** **阳性对照址**非空: `getUtxosByAddresses([KASPAD_PROBE_CONTROL_ADDR])` 返回 ≥1 条。
+
+🔴 **F-B(NWT, R6 标 MUST-VERIFY·落码前置)**: **A2 非空只证 utxoindex "建了一部分", 不证"建完"**。utxoindex 重建期若存在**半建态**(对照址已建入、某些 pocket 址尚未建入), 则 R6 过 → ALIVE → 钱路对那些 pocket 址读空 = 把"索引没到"当"没有钱"。⇒ **R6 是 `[MUST-VERIFY]`**: 落码前必须去 rusty-kaspa 源码确认「utxoindex 重建对 RPC 查询是否原子/门控」——即"isSynced 翻 true 时 utxoindex 是否保证已全量可查, 还是逐地址异步填充"。**该问题归 J2 查源码**(Bettor 已派); 本稿在拿到答案前 R6 不得落码。若答案是"非原子/逐址填充", A2 单点对照址不足, 须改为"多个分散对照址全非空"或直接以 `nodeDatabaseBlocksCount==networkTipBlocks` 之类的完整性字段判。
+🔴 **F-C(NWT, 对照址 [] 二义性)**: A2 返回 `[]` 分不出"索引没建好"与"矿址被花光"。两条修:
+  1. **对照址用不可花费的永久 UTXO**(优先): 选一个链上确定长期不动、不会被任何流程花掉的地址(coinbase 到成熟且无 spender / 已知冷地址), 由 `KASPAD_PROBE_CONTROL_ADDR` 给; **不用 MiningRelay-tn12-new 源址**(它正是 1M 转账要花的地址, 花掉后 A2 会假 SYNCING)。选址待定, 标 `[TODO·选不可花费址]`。
+  2. **负例交叉核**(兜底): A2 空时, 再读 `getInfo().isUtxoIndexed`(应恒 true, 见 §1.2) **且** `isSynced`——若 `isSynced==true && isUtxoIndexed==true && A2 空`, 则更可能是"矿址被花光"而非"索引没好", 此时不该压 SYNCING(否则永卡); 反之 `isSynced==false` 时 A2 空 = 索引没好 = SYNCING。⇒ **A2 只在 `isSynced==false` 阶段作为 SYNCING 的证据, `isSynced==true` 后改由对照址(不可花费)是否非空判 R6**。
+- `[DESIGN-CHOICE]` 对照臂的意义 = 区分"索引空"与"地址空": 没有 A2, utxoindex 未建好的节点会对**所有**地址回空集而不报错, 探针把它当 ALIVE 放行, 下游把"没读到"当"没有"。A2 失败不计入 DEAD(节点没坏, 是还没好), 只压 SYNCING。
+- 退码: R6 不过仍回 **7 SYNCING**(`utxoindex-pending`), 与 watchdog、runbook §4 P1b 同一把尺。
 
 ### 3.3 退码总表(在现有 0/1/2/3/4/5/6 上**只加不改**, 老消费者不被改变语义)
 | 码 | 词 | 含义 | watchdog 动作 |
 |---|---|---|---|
-| 0 | ALIVE | isSynced && daa>0 && network 对 | failCount=0 |
+| 0 | ALIVE | **= 3.2b 那句话**: network==testnet-12 ∧ isSynced==true ∧ R6(A1 daa>下界 ∧ A2 对照址非空)。**不是** isSynced&&daa>0——那漏了 utxoindex 可用 | failCount=0 |
 | 2 | DEAD:wrong-network | 连上但不是 TN12 | Fail(计数) |
 | 3 | DEAD:empty-data | **收窄**: 答了、isSynced=**true**、但 daa 不是正数(真"数据坏") | Fail(计数) |
 | 4 | DEAD:timeout | RPC 超时 | Fail(计数) |
@@ -109,7 +131,11 @@
 
 ### 3.4 watchdog 消费端最小改动(spec, 不落码)
 - `Probe-Tn12Node` 返回增加 `Verdict='Syncing'`(code 7) / `'Stalled'`(code 8); `:103` 映射表加两行; 主循环: Syncing ⇒ `$failCount=0` + `Log "kaspad SYNCING ..."`(每 tick 一行太吵 ⇒ 每 10 tick 或 verdict 变化时记一次); Stalled ⇒ `Log WARN` + 不计数 + 不拉。
-- **Start-Process 前加一道硬闸(与退码无关的兜底)**: `if (Get-CimInstance Win32_Process -Filter "Name='kaspad.exe'") { Log "refuse start: kaspad.exe already present (PID …), probe verdict=… -- not starting"; continue }`。理由: 今天四次误拉全部撞 LOCK 秒死, 这道闸零成本挡掉整族, **即使探针判错也不再毁日志**。`[DESIGN-CHOICE]` 它牺牲的场景 = "进程在但完全僵死(RPC 永不答)"——那种情况 只启不杀 本来也拉不起来(LOCK), 真解只能是提权 kill(J1/Owner), watchdog 该做的是**告警**不是硬拉。
+- **Start-Process 前的闸序(v0.2·MF-2 顺序修正)**: 三道闸**依次**过, 任一不过就不拉——
+  1. 🔴 **内存闸(§ 0.5 闸1, 最先)**: `FreeVirtualMemory < KASPAD_MIN_FREE_COMMIT_GB` ⇒ `refuse-start:low-commit`, 不拉。**必须排在进程闸前**——8/23 形态是进程已 OOM 崩退(进程闸看不到它=放行), 但机器仍缺内存, 这时拉一个新进程正是压垮点。内存闸独立于"进程在不在"成立。
+  2. **crash-loop 闸(§ 0.5 闸2)**: 处于 CRASH-LOOP 态 ⇒ 不拉 + 告警。
+  3. **进程闸**: `if (Get-CimInstance Win32_Process -Filter "Name='kaspad.exe'") { continue }`(kaspad.exe 在就不拉)。今天四次误拉全撞 LOCK 秒死, 这道闸零成本挡掉整族。`[DESIGN-CHOICE]` 它单独牺牲的场景 = "进程在但完全僵死(RPC 永不答)"——只启不杀本来也拉不起来(LOCK), 真解是提权 kill(J1/Owner), watchdog 该**告警**不硬拉。
+  🔴 **v0.1 只有第 3 道闸, NWT 指出它对 8/23 无效(进程崩退后看不到→放行→再拉 30GB)。v0.2 把内存闸放到最前是本次 MF-2 的核心。**
 - 日志重定向: 新进程的 stdout/stderr 路径改为带 PID/时间戳(`kaspad-stdout.<yyyyMMdd-HHmmss>-<pid>.log`), 不再复用同一路径 ⇒ 根治 1.3 截断。旧路径可留 symlink/最新副本给现有读者(J2 sampler 等读 `kaspad-stdout.log` 的脚本需列清单: `grep -rl "kaspad-stdout.log" scripts/ scratch/` 落码前做)。
 
 ## §4 IBD 阶段推断(给 SYNCING 的 `phase=` 字段, 纯展示、不参与判定) `[INFERRED]`
@@ -118,7 +144,7 @@
 | headerCount=0 && blockCount=0 && sink==pruningPointHash | `pp-chain-headers`(今日所在) |
 | nodeHeadersProcessedCount>0 && blockCount==0 | `headers-processing` |
 | blockCount>0 && daa 增长 && !isSynced | `bodies/utxo` |
-| isSynced && daa>0 | (ALIVE) |
+| isSynced ∧ daa>0 ∧ R6 通过 | (ALIVE) —— isSynced∧daa>0 但 R6 未过 = utxoindex-pending, 仍 SYNCING |
 只做展示是因为 rusty-kaspa 的 IBD 内部阶段没有 RPC 字段直接暴露(`getSyncStatus` 只回 bool), 推断表若错只影响文案不影响 verdict。
 
 ## §5 采样节奏与阈值 `[DESIGN-CHOICE]`
@@ -127,7 +153,7 @@
 - 状态文件由 SYSTEM(watchdog)写、ADMIN(Bettor)也写 ⇒ 落码时验一次 ACL(SYSTEM 建的文件 ADMIN 能否覆写); 不能则各用各的路径(env 覆盖), 判据不受影响。
 
 ## §6 附带建议(可分开审, 不阻塞本稿)
-- **拉起刹车**: 状态文件记 `starts[]`(时间戳); 若 15 min 内 Start-Process ≥3 次且每次拉起的 PID 在下一 tick 已不存在 ⇒ 进 `CRASH-LOOP` 态: 停拉 + 告警。这是 8/23 那族(真崩→拉→再崩→commit charge 撑顶)的直接缓解, 与 IBD 误判是不同根因、同一缺口。
+- 🔴 **拉起刹车(原列为可选)已升 REQUIRED 并移至 § 0.5 闸2**(NWT 纠正: 这是危害最大的一条, 不是附带)。§ 0.5 是本稿最高优先层, 不再放这里。
 - `kanet-start.sh` llama-server `--ctx-size 1048576` 是 (624) 点名的内存放大器, 不在本稿域, 只记一句提醒。
 
 ## §7 验证方法与测试计划(落码前预注册, 供 NWT 审判据)
@@ -141,21 +167,34 @@
 |---|---|---|---|
 | V0 对照臂 | 当前 IBD 节点(22428) | 直接跑新探针两次, 间隔 ≥60s | 第 1 次 `SYNCING first-sample`(7), 第 2 次 `SYNCING`(7, diskWrite 增); **绝不**出 3 |
 | V1 | 真 DEAD: 无进程 | 用 `KASPAD_PROBE_URL=ws://127.0.0.1:1` 指向空端口 **且** 探针进程枚举 mock 为空(单测层)——**不停活节点** | 9 或 5 |
-| V2 | isSynced=true 且 daa>0 | 等 IBD 完成后跑 / 或 J1 :3400 已同步节点 | ALIVE(0) |
+| V2 | ALIVE 完整态 | isSynced=true ∧ daa>0 ∧ R6 通过(对照址非空) — 等 IBD 完成 / J1 :3400 已同步节点 | ALIVE(0) |
+| V2-rev(F-A 反例臂) | isSynced=true ∧ daa>0 但 **utxos=[]**(utxoindex 未建好) | 单测/半建态节点: R6 的 A2 空 | **SYNCING(7, utxoindex-pending)**, **绝不 ALIVE(0)** — 这正是今天钱路读空的态 |
 | V3 | STALLED | 单测: 喂状态文件 `lastProgressTs = now-31min` 且所有计数器相同 | 8 |
 | V4 | 收窄后的 3 | 单测: isSynced=true, daa=0 | 3 |
 | V5 | 状态文件损坏 | 写入非 JSON | 7 `first-sample`, 且文件被重建 |
 | V6 | watchdog 硬闸 | 单测 PS: mock 探针回 5 但 kaspad.exe 存在 | 日志 `refuse start`, 无 Start-Process |
-| V7 | 变异臂 | 把 3.2 进度集合去掉 diskIoWriteBytes 后对今日节点跑 | 30 min 后必报 STALLED ⇒ 证明 diskWrite 兜底是承重的, 不是装饰 |
+| V7 | 变异臂(diskIo 不再兜底) | 单测: 共识计数器全冻 60min + `diskIoWriteBytes` **持续增**(模拟 RocksDB compaction) | **必报 SYNC-STALLED(8)** — 证明 diskIo 抑制不了 STALLED(MF-1); 若出 SYNCING = 回归 |
+| V8(MF-1, NWT 点名) | 共识冻 + diskWrite 涨 → 必 STALLED | `hdr/blk/daa/pp` 60min 零增长, diskWrite 涨 | 8, 告警级=warn(diskWrite 仍动) |
+| V-mem(MF-2 内存闸) | 缺内存拒拉 | 单测 PS: mock `FreeVirtualMemory` < 阈值 且探针回 9(no-process) | **日志 `refuse-start:low-commit`, 无 Start-Process** |
+| V-loop(MF-2 刹车) | crash-loop 停手 | 单测 PS: 喂 `starts[]` = 15min 内 3 次且每次 PID 次 tick 即失 | 进 CRASH-LOOP, **停止 Start-Process + 告警** |
 单测层用 `scripts/j1-watchdog-*.test.sh` 同族形态(已有 mutants/test 约定), 不新造框架。
 
 ## §8 边界 / 不做
 - 不改 `--enable-unsynced-mining` 等 kaspad 参数; 不动 `KANet-KaspadWatchdog` 计划任务注册(提权, J1 域); 不做"自动 kill 僵死进程"(提权 + 铁律: 探针判错即杀活节点, 不可接受)。
 - 不用 `kaspad-stdout.log` 做机器判据(§3.2 理由)。
 - 本稿不解决 IBD 本身慢(58k headers/h)或 peer 每 10s reset 的问题——只记录, 归节点运维另议。
+- **仍不做"自动 kill 僵死进程"**(提权 + 铁律)。但 v0.2 **新增**了"内存不足时拒拉"(§0.5)——这是"少做一个危险动作", 不是"多做一个动作", 与不 kill 的保守取向一致。
 
-## §9 请 NWT 重点打的地方
-1. 3.2 「任一单调计数器增大即进度」会不会被某种**假进度**骗过(例如 diskIoWriteBytes 因日志/压缩后台任务持续增长而永不 STALLED)? 若会, 兜底信号是否应改成 `diskIoWriteBytes 增 && (activePeers≥1 或 ibdPeer)` 的合取?
-2. STALL_MS=30min 对 UTXO 导入等**长时间无计数器变化**的阶段是否偏短(那时 diskWrite 应仍在动, 但未实测)。
-3. 3.4 硬闸「进程在就不拉」是否把某个真需要拉的场景挡死了(我列了一个, 请补)。
-4. 退码 3 收窄是否算"改存量语义"须走 verdict-before-push——我判是。
+## §9 跟进: llm-watchdog 与 8/23 双开 llama(NWT 指派, 只读) `[MEASURED 2026-08-26]`
+**问题**: NWT 报 8/23 19:14–19:16 llama-server 一度双开(≈65GB), 第二个谁 spawn 未坐实; 疑 `scripts/llm-watchdog.mjs` 的 `spawnLlama` 无端口守卫。
+**结论: llm-watchdog 不是 8/23 双开的原因, 但它是潜伏隐患。**
+- **它当时没在跑, 且本机无任何自动启动路径**: ① 现在没跑(进程枚举空); ② `logs/*.log` 无 `[watchdog] starting` / `llama-server spawned` / `[watchdog]` broadcast 任何一行(它一启动就打这些); ③ 无计划任务引用(schtasks 全量扫过, 只有 OS 任务); ④ 三个 launcher(kanet-start.sh / kanet-start-headless.sh / `scripts/kanet-boot-sequence.ps1`)都**不**起它——boot-sequence 只起 kaspad-watchdog + tn12-mining-watchdog; ⑤ 唯一引用它的是 test-framework(读源码做 anti-pattern 静态检查, 不运行它)。⇒ **它是一段"存在但没接线"的代码。**
+- **但它确实是隐患(若被起)**: `spawnLlama`(llm-watchdog.mjs:45-56)**无 :8000 端口守卫**(两支 start 脚本起 llama 前都先 `netstat`/`curl` 判"已在跑就复用", 它没有), 且硬编码 `--ctx-size 1048576`。probe 用 3s 超时(:24)——OOM/重载压力下一次瞬时 fetch 超时就会误判 down → spawn 第二个 llama(加载 30GB 后才在 bind 上失败, 但那 30GB 的瞬时加载已经发生)。它的默认还全指向主网树(`KANET_ROOT=C:/kanet`, `CONSOLE_URL=:3100`)。⇒ **建议: 不要起它; 若将来要复用, 先补 :8000 守卫(照 start 脚本)+ 内存闸(同 §0.5)+ 改默认。**
+- **8/23 真正的第二个 spawner 从 D: 树日志坐实不了**: supervisor 8/23 18–20h 只有一次 headless invoke(19:22Z, **晚于** 19:14 双开窗), 不是它。剩余候选(未坐实): (a) `C:/KANet` 主网树的 start 脚本(独立部署, 同机同 GPU 共用 :8000, ctx=262144)、(b) 手动/会话拉起、(c) 旧实例 OOM 后 Windows 未及时回收 30GB, 与一次重启的新实例瞬时叠加=65GB。**结构性根因 = :8000 有多个潜在 owner(两棵树×两脚本 + llm-watchdog)彼此不协调, 只有 start 脚本有守卫、而那守卫在负载致 curl 超时时 fail-open。** 这反过来又支撑 §0.5: 任何拉大进程的路径都必须内存感知。
+
+## §10 请 NWT 重点打的地方(v0.2)
+1. **F-B(R6 MUST-VERIFY, 阻塞)**: utxoindex 重建对 RPC 查询是否原子/门控? 归 J2 查 rusty-kaspa 源码; 若"非原子/逐址填充", A2 单点对照址不足(§3.2b 已给两条退路)。**答案未回前 R6 不落码。**
+2. **F-C 对照址选址**: `[TODO·选不可花费址]` 待定 — 需要一个链上确定长期不动、无 spender 的地址做 A2 基准(不用 1M 转账要花的源址)。请 NWT/J2 荐址。
+3. **MF-2 阈值**: `KASPAD_MIN_FREE_COMMIT_GB` 默认 8(kaspad)、35(llama 类)是否合理? crash-loop 判据"15min≥3 次且拉起即死"窗口/次数是否够严?
+4. **MF-1 STALL_MS=60min**: 对 UTXO 导入等长时间无共识计数器变化的阶段是否偏短? 那时哪个共识计数器仍应在动未实测。
+5. 退码 3 收窄 + 退码 0 含 R6 = 改存量语义, 须 verdict-before-push——我判是。
