@@ -9,8 +9,9 @@
 // 🔴 捕获拒绝原文：不是只记 ok/fail，记 kaspad 原话，用来分辨"被脚本拒"与"被节点/费用/同步拒"。
 //
 // 编译坐标：versioned-builds/silverc-zk-8065184.exe（默认路径是 legacy 副本，编不出本内建）。
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 
 const NET = 'testnet-12';
 const CONSOLE = 'http://127.0.0.1:3200';
@@ -28,11 +29,33 @@ const { RpcClient, Encoding, Address, Transaction, TransactionOutput, ScriptBuil
 const V0_ONLY = process.argv.includes('--v0-only');
 const log = (m) => console.log(`[csfs-e2e ${new Date().toISOString().slice(11, 19)}] ${m}`);
 
+// ── 2026-08-27 (Bettor (13) · Codex MSG-269/270 唯一 OPEN = REJECT 提交体没落盘) ──────────────────────
+//   每笔 submit 【之前】把能重构该 tx 的最小集合(serializeToSafeJSON: inputs/outputs/fee/lockTime/witness 全量)+ 目标 script
+//   字节 hex/sha + 期望 + 实际(txid 或 kaspad 拒因原文)写成一条记录: scratch/e2e/<run>/submissions/<seq>-<vector>.json,
+//   run-evidence.json 里引用文件路径 + sha256。判据 / 向量 / 编译器路径【一行不动】, 只加落盘。
+//   --dry-run: 不连 RPC、不注资、不广播; 用合成 UTXO 只为构造 tx 并证明记录形状完整。
+//   --probe <json>: 用已编好的产物(如 docs/provenance/…/02a-probe-…-A.json)代替本地编译 —— 编译器常量那行不动, 只是跳过它。
+const DRY_RUN = process.argv.includes('--dry-run');
+const argAfter = (k) => { const i = process.argv.indexOf(k); return i >= 0 ? process.argv[i + 1] : null; };
+const PROBE_OVERRIDE = argAfter('--probe');
+const RUN_ID = `${DRY_RUN ? 'dry' : 'run'}-${new Date().toISOString().replace(/[:.]/g, '-')}`;
+const RUN_DIR = `${OUT}/${RUN_ID}`;
+mkdirSync(`${RUN_DIR}/submissions`, { recursive: true });
+const sha256 = (s) => createHash('sha256').update(s).digest('hex');
+let submitSeq = 0;
+// 记录: submit 前写(actual=null), submit 后原地补 actual; 返回 {file, sha} 供 evidence 引用(sha 以【终版】文件为准)
+function recordSubmission(rec) {
+  const file = `${RUN_DIR}/submissions/${String(++submitSeq).padStart(2, '0')}-${rec.vector}.json`;
+  const write = () => { const body = JSON.stringify(rec, null, 1); writeFileSync(file, body); return { file, sha256: sha256(body) }; };
+  write();
+  return { file, finalize(actual) { rec.actual = actual; rec.finalized_at = new Date().toISOString(); return write(); } };
+}
+
 // relay：用 J2-tn（发送/注资），与今晚其它探针同源
 const relays = JSON.parse(execFileSync(process.execPath, ['-e', `
 const D=require('D:/kanet-tn12/kasia-console/node_modules/better-sqlite3');
 const db=new D('D:/kanet-tn12/kasia-console/data/console.db',{readonly:true});
-console.log(JSON.stringify(db.prepare("SELECT id,name FROM relay_nodes WHERE name='J2-tn'").get()));
+console.log(JSON.stringify(db.prepare("SELECT id,name,address FROM relay_nodes WHERE name='J2-tn'").get()));
 `], { encoding: 'utf8' }));
 const RELAY = relays.id;
 const rc = async (c, ms = 60000) => (await (await fetch(`${CONSOLE}/api/relay/${RELAY}/send-command`,
@@ -41,18 +64,21 @@ const rc = async (c, ms = 60000) => (await (await fetch(`${CONSOLE}/api/relay/${
 const V = JSON.parse(readFileSync(`${OUT}/vectors.json`, 'utf8'));
 log(`向量 ${V.vectors.length} 格 · pkBaked ${V.pkBaked.slice(0, 16)}… · 编译器 ${SILVERC.split('/').pop()}`);
 
-// 编译（坐标写死；ctor = vectors.json 里那把 pk）
-execFileSync(SILVERC, [SIL, '--ctor', `${OUT}/_ctor.json`, '-o', `${OUT}/onchain_probe.json`], { stdio: 'pipe' });
-const artifact = JSON.parse(readFileSync(`${OUT}/onchain_probe.json`, 'utf8'));
+// 编译（坐标写死；ctor = vectors.json 里那把 pk）—— --probe 给了就跳过本地编译, 用指定产物(编译器常量不动)
+if (!PROBE_OVERRIDE) execFileSync(SILVERC, [SIL, '--ctor', `${OUT}/_ctor.json`, '-o', `${OUT}/onchain_probe.json`], { stdio: 'pipe' });
+const artifactPath = PROBE_OVERRIDE || `${OUT}/onchain_probe.json`;
+const artifact = JSON.parse(readFileSync(artifactPath, 'utf8'));
 const redeem = Buffer.from(artifact.script);
-log(`redeem ${redeem.length}B`);
+const redeemHex = redeem.toString('hex');
+const redeemSha = sha256(redeemHex);
+log(`redeem ${redeem.length}B sha256(hex)=${redeemSha.slice(0, 16)}… 来源=${PROBE_OVERRIDE ? '--probe ' + PROBE_OVERRIDE : 'local compile'}${DRY_RUN ? ' · DRY-RUN(不连 RPC/不注资/不广播)' : ''} · run=${RUN_ID}`);
 
 const p2shSpk = ScriptBuilder.fromScript(redeem).createPayToScriptHashScript();
 const p2shAddr = addressFromScriptPublicKey(p2shSpk, NET).toString();
 log(`P2SH ${p2shAddr}`);
 
-const rpc = new RpcClient({ url: RPCURL, encoding: Encoding.Borsh, networkId: NET });
-await rpc.connect();
+const rpc = DRY_RUN ? null : new RpcClient({ url: RPCURL, encoding: Encoding.Borsh, networkId: NET });
+if (!DRY_RUN) await rpc.connect();
 
 const pushData = (buf) => {
   const n = buf.length; let p;
@@ -62,7 +88,7 @@ const pushData = (buf) => {
   return Buffer.concat([p, buf]).toString('hex');
 };
 
-const toAddr = (await rc({ type: 'get_pubkey' })).address;
+const toAddr = DRY_RUN ? relays.address : (await rc({ type: 'get_pubkey' })).address;   // dry-run 不打 relay 命令, 用库里记的 J2-tn 地址
 const toSpk = payToAddressScript(new Address(toAddr));
 
 // 跑一格：注资 → 用该向量的 witness 花费 → 记 submit 结果与【原文】
@@ -76,9 +102,18 @@ const opKey = (o) => o.transactionId + ":" + o.index;
 
 async function runVector(v, requireLanded = false) {
   let utxo = null;
-  const pre = (await rpc.getUtxosByAddresses([p2shAddr])).entries
+  if (DRY_RUN) {
+    // 合成 UTXO: 只为构造/序列化 tx, 证明记录形状完整; 值域与真跑同量级(2 KAS)
+    const fakeTx = sha256(`dry:${RUN_ID}:${submitSeq}:${v.id}`);
+    const amount = kaspaToSompi('2');
+    // wasm Transaction 要 IUtxoEntry 顶层字段(amount/scriptPublicKey/blockDaaScore/isCoinbase); live 路径读 utxo.entry.amount ⇒ 两种形状都给
+    utxo = { outpoint: { transactionId: fakeTx, index: 0 }, amount, scriptPublicKey: p2shSpk, blockDaaScore: 0n, isCoinbase: false, entry: { amount } };
+  }
+  const pre = DRY_RUN ? [] : (await rpc.getUtxosByAddresses([p2shAddr])).entries
     .filter((e) => !usedOutpoints.has(opKey(e.outpoint)));
-  if (pre.length) {
+  if (DRY_RUN) {
+    // 已有合成 UTXO, 不注资
+  } else if (pre.length) {
     utxo = pre[0];
     log(`  复用已有 UTXO ${utxo.outpoint.transactionId.slice(0, 12)}… (剩 ${pre.length - 1} 可用) — 零等待`);
   } else {
@@ -118,9 +153,23 @@ async function runVector(v, requireLanded = false) {
   // witness 顺序 = 合约入参序 (datasig s, byte[32] digest)，**按文档签名预注册，不按"调到过为止"**
   const ss = pushData(Buffer.from(v.sig, 'hex')) + pushData(Buffer.from(v.digest, 'hex')) + pushData(redeem);
   tx.inputs[0].signatureScript = ss;
+  // 🔴 submit 【之前】落提交体: 被拒的 tx 从此有原文可复核(Codex MSG-269/270 那格), 不再只剩拒因里的 txid
+  const rec = recordSubmission({
+    run: RUN_ID, seq: submitSeq + 1, vector: v.id, expect: v.expect, why: v.why, mode: DRY_RUN ? 'DRY-RUN' : 'LIVE',
+    target_script: { bytes: redeem.length, hex: redeemHex, sha256_of_hex: redeemSha, source: PROBE_OVERRIDE || 'local compile', p2sh_address: p2shAddr },
+    witness: { sig: v.sig, digest: v.digest, redeem_sha256_of_hex: redeemSha, signatureScript_hex: ss },
+    fee_sompi: String(fee), lock_time: String(0n), input_outpoint: { transactionId: utxo.outpoint.transactionId, index: utxo.outpoint.index }, input_amount_sompi: String(utxo.entry.amount), output_address: toAddr,
+    tx_safe_json: JSON.parse(tx.serializeToSafeJSON()),   // bigint→string, 可 Transaction.deserializeFromSafeJSON 重构
+    submitted_at: new Date().toISOString(), actual: null,
+  });
+  if (DRY_RUN) {
+    const f = rec.finalize({ result: 'DRY-RUN', note: '未广播(--dry-run); 记录形状与 LIVE 相同, 仅 actual 不同' });
+    return { id: v.id, result: 'DRY-RUN', submission_file: f.file, submission_sha256: f.sha256 };
+  }
   try {
     const r = await rpc.submitTransaction({ transaction: tx, allowOrphan: false });
-    if (!requireLanded) return { id: v.id, result: 'PASS', txid: r.transactionId };
+    const f = rec.finalize({ result: 'PASS', txid: r.transactionId });
+    if (!requireLanded) return { id: v.id, result: 'PASS', txid: r.transactionId, submission_file: f.file, submission_sha256: f.sha256 };
     // 🔵 边界: submit 被收 = 节点跑过脚本且返回 true(mempool 即做脚本校验) = 本卡要证的那件事;
     //   【落链】另证矿工/共识也收了 —— Bettor 条件② 要的是这一层, 故 V0 预检才等它。
     // 等待窗与注资同量级: 实测注资落链 149s, 而这里原本只等 60s ⇒ 会把已 PASS 的格误判成未落链。
@@ -129,9 +178,12 @@ async function runVector(v, requireLanded = false) {
       if ((await rc({ type: 'check_utxo_landed', txid: r.transactionId, address: toAddr })).landed) { landed = true; break; }
       await new Promise((s) => setTimeout(s, 2000));
     }
-    return { id: v.id, result: 'PASS', txid: r.transactionId, landed };
+    const f2 = rec.finalize({ result: 'PASS', txid: r.transactionId, landed });
+    return { id: v.id, result: 'PASS', txid: r.transactionId, landed, submission_file: f2.file, submission_sha256: f2.sha256 };
   } catch (e) {
-    return { id: v.id, result: 'REJECT', reason: String(e?.message || e).slice(0, 400) };
+    const reason = String(e?.message || e).slice(0, 400);
+    const f = rec.finalize({ result: 'REJECT', reason });
+    return { id: v.id, result: 'REJECT', reason, submission_file: f.file, submission_sha256: f.sha256 };
   }
 }
 
@@ -158,7 +210,7 @@ for (const v of V.vectors) {
   if (v.id === 'V0') continue;
   const before = await runVector(V0);
   const target = await runVector(v);
-  results.push({ window: v.id, v0Before: before.result, target, expect: v.expect });
+  results.push({ window: v.id, v0Before: before.result, target, expect: v.expect, v0BeforeFile: before.submission_file, v0BeforeSha: before.submission_sha256 });
   log(`窗 ${v.id}: V0=${before.result} | ${v.id}=${target.result} (期望 ${v.expect})` +
     (target.reason ? `
     拒因原文: ${target.reason}` : ''));
@@ -166,6 +218,15 @@ for (const v of V.vectors) {
 const v0Final = await runVector(V0);
 log(`收尾 V0 = ${v0Final.result} (期望 PASS)`);
 
+// --dry-run: 没有可判读的链上结果, 只证【记录形状】—— 落盘证据后退出, 不进八格判读(判据代码一行不动)
+if (DRY_RUN) {
+  const ev = { run: RUN_ID, mode: 'DRY-RUN', target_script_sha256_of_hex: redeemSha, target_script_bytes: redeem.length, probe_source: PROBE_OVERRIDE || 'local compile', p2sh_address: p2shAddr,
+    windows: [...results.map((r) => ({ window: r.window, expect: r.expect, v0Before: r.v0Before, result: r.target.result, submission_file: r.target.submission_file, submission_sha256: r.target.submission_sha256, v0Before_submission_file: r.v0BeforeFile, v0Before_submission_sha256: r.v0BeforeSha })),
+      { window: 'V0-final', expect: 'PASS', result: v0Final.result, submission_file: v0Final.submission_file, submission_sha256: v0Final.submission_sha256 }] };
+  writeFileSync(`${RUN_DIR}/run-evidence.json`, JSON.stringify(ev, null, 1));
+  console.log(`\nDRY-RUN 完成: ${submitSeq} 条提交体记录 → ${RUN_DIR}/submissions/ ; run-evidence.json 引用每条文件 sha256。未广播、未注资、未连 RPC。`);
+  process.exit(0);
+}
 console.log('\n========== 八格判读 ==========');
 let pass = 0; let fail = 0; let inconclusive = 0;
 const judge = (n, ok, detail) => { if (ok === null) { inconclusive++; console.log(`[????] ${n} — ${detail}`); } else if (ok) { pass++; console.log(`[PASS] ${n}`); } else { fail++; console.log(`[FAIL] ${n} — ${detail}`); } };
@@ -181,11 +242,14 @@ for (const r of results) {
 }
 // 🔴 落盘证据: 上一轮 8/8 拿不到拒因原文, 正因为它只存在于进程内存里、日志又被截断。
 //   ⇒ 拒因原文必须落盘, 否则"判据③"事后【无法复核也无法补测】。
-for (const r of results) evidence.push({ window: r.window, expect: r.expect, v0Before: r.v0Before, result: r.target.result, txid: r.target.txid, reason: r.target.reason, why: r.target.why });
-evidence.push({ window: 'V0-final', expect: 'PASS', result: v0Final.result, txid: v0Final.txid, reason: v0Final.reason });
-writeFileSync(OUT + "/run-evidence.json", JSON.stringify(evidence, null, 1));
+for (const r of results) evidence.push({ window: r.window, expect: r.expect, v0Before: r.v0Before, result: r.target.result, txid: r.target.txid, reason: r.target.reason, why: r.target.why,
+  submission_file: r.target.submission_file, submission_sha256: r.target.submission_sha256, v0Before_submission_file: r.v0BeforeFile, v0Before_submission_sha256: r.v0BeforeSha });
+evidence.push({ window: 'V0-final', expect: 'PASS', result: v0Final.result, txid: v0Final.txid, reason: v0Final.reason, submission_file: v0Final.submission_file, submission_sha256: v0Final.submission_sha256 });
+const evidenceDoc = { run: RUN_ID, mode: DRY_RUN ? 'DRY-RUN' : 'LIVE', target_script_sha256_of_hex: redeemSha, target_script_bytes: redeem.length, probe_source: PROBE_OVERRIDE || 'local compile', p2sh_address: p2shAddr, windows: evidence };
+writeFileSync(`${RUN_DIR}/run-evidence.json`, JSON.stringify(evidenceDoc, null, 1));
+if (!DRY_RUN) writeFileSync(OUT + "/run-evidence.json", JSON.stringify(evidence, null, 1));   // 旧位置保留给 LIVE(向后兼容读者); dry-run 不覆盖 8/20 那份
 console.log("");
-console.log("证据已落盘: " + OUT + "/run-evidence.json (拒因原文不再随进程消失)");
+console.log(`证据已落盘: ${RUN_DIR}/run-evidence.json + submissions/*.json(每笔提交体原文 + sha256 引用)${DRY_RUN ? '' : ' ; 旧位置 ' + OUT + '/run-evidence.json 同步'}`);
 console.log(`\n${fail === 0 && inconclusive === 0 ? '✅' : '🔴'} ${pass} PASS / ${fail} FAIL / ${inconclusive} 不可归因`);
 if (fail > 0) console.log('🔴🔴 有篡改格仍 PASS 或合法格被拒 ⇒ 按判据 STOP，立即报 Bettor，勿用于 §6-3。');
 await rpc.disconnect();
