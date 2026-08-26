@@ -1,4 +1,6 @@
-# §6-3 gate (d) · `s_max` 提取器 · 方法稿 v0.2（(23) 算力地板规格 §3.5 "第三方可复核" 的可执行物 · 零落码 · 只读）
+# §6-3 gate (d) · `s_max` 提取器 · 方法稿 v0.3（(23) 算力地板规格 §3.5 "第三方可复核" 的可执行物 · 零落码 · 只读）
+
+> **v0.3（NWT 一注落实）**：`completeness.expected` **由窗两端块的链上计数差导出**——首选 `daaScore(tip) − daaScore(start)`（= 跨度内进 DAA 窗的 mergeset 块数，蓝+红，只漏 non-daa 陈块 ⇒ 略偏低 = 宽松向，已标），备选 `blueScore` 差（只蓝块，更低），都取不到 ⇒ 无 expected ⇒ fail-closed；**禁用自身 fetch 计数**（循环自证）；名义 `window_s × 10 BPS` 降为 `nominal_bps_ref` 仅参考 ⇒ 低产网不再被名义 10 BPS 假触发 `INCOMPLETE_WINDOW`。`start` = 沿 selected-parent 链回溯到时间戳出窗的那块（与 `getBlocks` 翻页独立）。
 
 > **v0.2（NWT 8e60ebb4 GREEN-WITH-1-MUST）**：🔴 v0.1 默认 `--max-blocks 5000` 对 3600 s 窗（期望 ≈36,000 块）必产 ~1/7 **部分窗且不 fail-closed**——部分窗**低估集中** ⇒ `s_adv` 低估 ⇒ `H_floor_honest` 高估 ⇒ 入场太易 = **危险向**。改：`--max-blocks` 默认 = `window_s × BPS × (1+tol)`；`blocks_fetched < window_s × BPS × (1−tol)` ⇒ **fail-closed：不输出 `s_max`**，输出 `status=INCOMPLETE_WINDOW` + `gap_blocks`，退出码 4；翻页加 hash 去重；`completeness` 交叉核写进 JSON；§5 补方向表（矿池合并偏高 = 对 `s_max` 与 `H_floor_honest` 皆安全向；Sybil 欠计靠 `s_owner` 兜；错向一律优先**过计**）。
 > **Status**: METHOD v0.2 · J2 2026-08-27 · Bettor 派工 (24) · 脚本 `scratch/_j2_smax_coinbase.mjs`（gitignored）· 正式输出落 `docs/provenance/2026-08-27-smax/`（同 bwin-sim 惯例）· 已加进 (17) 同步后清单 **③d**。
@@ -23,9 +25,9 @@
 
 ## §3 脚本行为
 - **输入**：`--window-s W`（默认 3600）、`--max-blocks`（**v0.2 默认 = `W × 10 BPS × (1+tol)`**，不再是固定 5000）、`--tol`（默认 0.10）、`--sleep-ms`（RPC 限速）、`--out`；**SYNC-GATE**（`daa > 80,095,687 ∧ isSynced`，同 (21)）；`--dry-run N` 绕闸只看解析形状、不落盘、输出带 `DRY-RUN` 标。
-- 🔴 **窗完整性（v0.2 MUST）**：`expected = W × BPS`；`blocks_fetched < expected × (1−tol)` ⇒ **`status=INCOMPLETE_WINDOW`、`s_max=null`、`gap_blocks`、退出码 4，不落 provenance**。理由：部分窗只看到窗的一段，同一矿工的连续出块段被截断 ⇒ 集中度**低估**（危险向）；宁可不出数。JSON 恒带 `completeness{expected_blocks, fetched, ratio, tol}`。**`expected` 的校核**：网络实际出块率若低于 10 BPS（停滞/低产），`fetched` 会天然低于 expected 而非漏块——须用 (21) 法 2/法 3 的实际出块率重算 expected 后再判，不能只按名义 10 BPS 判"不完整"（两向都有：漏块 = 低估集中 = 危险；低产误判 = 白白 fail-closed = 安全但浪费）。
+- 🔴 **窗完整性（v0.2 MUST，v0.3 改 expected 来源）**：`expected` = **窗两端块的链上计数差**：首选 `daaScore(tip) − daaScore(start)`（`start` = selected-parent 回溯到时间戳出窗的那块；daaScore 差 = 该跨度内计入 DAA 的 mergeset 块数，蓝+红，只漏 non-daa 陈块 ⇒ expected 略低 = 宽松向，已在 JSON 标），备选 `blueScore` 差（只蓝块，更低），两者皆无 ⇒ `expected=null` ⇒ fail-closed。**禁用自身 `blocks_fetched` 反推 expected**（循环自证）。`blocks_fetched < expected × (1−tol)` ⇒ **`status=INCOMPLETE_WINDOW`、`s_max=null`、`gap_blocks`、退出码 4，不落 provenance**。理由：部分窗只看到窗的一段，同一矿工的连续出块段被截断 ⇒ 集中度**低估**（危险向）；宁可不出数。JSON 恒带 `completeness{expected_blocks, expected_source, daa_delta, blue_delta, nominal_bps_ref, fetched, ratio, tol, start_block, start_ts}`。名义 `W × 10 BPS` 只作 `nominal_bps_ref` 参考——低产/停滞网的 daaScore 差本来就小，**不再被名义值假触发**；`fetched` 明显 > `expected`（红块多）属正常，不算错。
 - **翻页去重（v0.2，NWT）**：v0.1 的 `fetchBlocksRange` 只做相邻去重（`b.hash === out[last].hash`）——DAG 翻页会**非相邻**重返同块 ⇒ 改为**全 `Set` 去重**（`seen.has(hash)`），去重后再计 `blocks_fetched`。
-- **清单用法（(17) ③d）**：命令显式带 `--max-blocks ≥ window_s × BPS × 1.5`（600 s ⇒ ≥9,000；3,600 s ⇒ ≥54,000），不依赖默认值；闸 = 退出码 0 且 `completeness.ratio ≥ 1−tol`，退出码 4 = fail-closed。
+- **清单用法（(17) ③d）**：命令显式带 `--max-blocks ≥ window_s × BPS × 1.5`（600 s ⇒ ≥9,000；3,600 s ⇒ ≥54,000），不依赖默认值；闸 = 退出码 0 且 `completeness.ratio ≥ 1−tol`（ratio 分母 = 链上 daaScore 差，非名义 BPS），退出码 4 = fail-closed。
 - **覆盖（承重）**：`s_max` 的严格口径要遍历窗内**全部 DAG 块**（含非选择链块，它们也是该矿工的功）。脚本正式路径 = 先沿 selected-parent 链回溯到窗起点取 `lowHash`，再 `getBlocks(lowHash, includeBlocks, includeTransactions)` **全量前向翻页**，按块时间戳过滤进窗；dry-run 只走选择链回溯（标"漏非选择链块"）。
 - **输出 JSON**：`mode / t / daa / tipHash / window_s / coverage / blocks_fetched / layout / sample_payloads(前 3 块原 payload hex + 解析) / parsed / failed / s_max / top N(miner, blocks, share) / distinct_miners / control_output_addr(s_max_out, top) / poisson(blocks, rel_sd=1/√N)`；正式模式写 `docs/provenance/2026-08-27-smax/smax-<UTC>.json` 并打印 sha256。
 - **Poisson**：份额估计相对标差 ≈ `1/√N`；低产窗 N 小 ⇒ `s_max` 噪声大 ⇒ (23) §3 的 `R_vol` 动态阈同理，窗内 N 随 JSON 落。
