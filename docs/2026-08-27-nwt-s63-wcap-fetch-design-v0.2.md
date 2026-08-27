@@ -3,7 +3,7 @@
 > 作者 NWT · 2026-08-27 · 派工 Bettor · SUPERSEDES v0.1（`3f7ef2c5` + fix-up `448469b2`）· **Codex `1c7188e2`（MSG-283）直审本取数设计**："direction is sound, but **not part of D-STAT-3 design closure evidence yet**"——**D-STAT-3 数学项已 CLOSED（设计层）；取数/重建【实现】OPEN，须真 RPC 路证四闸**。这四闸是 **implementation / data-provenance 闸，非重开数学项**。
 > **Codex 明写：本轮不授权任何 build / 落码 / 部署 / 签名广播 / DB 变更 / 结算退款 / key movement / 生产钱路。** 本稿纯设计层（验收清单，落码另轮）。
 > v0.1 的 ①getBlocks 语义 / ②锚点在线判定（含完整性不变量 fix-up）/ ③缓存 / ④失败 / ⑤接口 **逐字保留**（见 448469b2）；本版新增 §四闸实测验收清单 + t0/t1 与 (21) 接口绑定。
-> 🔴 **节点约束（NWT 2026-08-27 · J1 r2）**：**四闸真跑 + (23) v0.15 (B) `bitsCalc==收块bits` 全精确窗证据只用本机 da9 单节点**——younio **5 天未同步完**（根因 = S0 Modern Standby，Kernel-Power 506/507 关屏即睡，`PlatformAoAcOverride=0` 待重启，J1 实核）⇒ **younio 同步完成前不作第二链读 vantage**。本取数设计的重建/证书全在**单节点**上成立（不需第二 vantage）；(23) 的 `M_reorg`/`W_dis` 若要参考节点第二 vantage，须等 younio 同步后（另计）。
+> 🔴 **节点约束（NWT 2026-08-27 · J1 r2）**：**四闸真跑 + (23) v0.15 (B) `bitsCalc==收块bits` 全精确窗证据只用本机 da9 单节点**——younio **5 天未同步完**（根因 = S0 Modern Standby，Kernel-Power 506/507 关屏即睡，`PlatformAoAcOverride=0` 待重启，J1 实核）⇒ **younio 同步完成前不作第二链读 vantage**。本取数设计的重建/证书全在**单节点**上成立（不需第二 vantage）。🔴 **两类主张分开命名（Codex `f7bc9057` 口径）**：**(甲) 单节点精确重建 + 共识镜像 `bitsCalc==收块bits` = 确定性算法正确性证据**（单节点即足，本设计闭在此）；**(乙) 多 vantage 分歧 / reorg 观察（`M_reorg`/`W_dis` 依赖）= 网络观察，须真同步的独立第二节点**（younio 同步后在其上重跑，OPEN，另计）。**绝不写 "two-vantage verified"**；物理/托管故障域证据（younio 裸机 + kaspad 同二进制）有用但 ≠ 网络观察闭合。
 
 ## 四闸实测验收清单（Codex 283 §4；每条：怎么测 / 证据形态 / 通过判据 / 失败⇒INEXACT）
 
