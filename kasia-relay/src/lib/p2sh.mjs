@@ -11,6 +11,7 @@ import { execSync } from 'child_process';
 import { writeFileSync, readFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import * as kaspa from 'kaspa-wasm';
+import { estimateMassUpperBound } from './tx-mass-ub.mjs';   // 红线 7 本地上界兜底(wasm mass panic 时; observe 阶段只 warn)
 
 const {
   RpcClient, Encoding, Address,
@@ -39,6 +40,14 @@ const TMP_DIR = process.env.KANET_ROOT ? join(process.env.KANET_ROOT, 'tmp') : '
 // → mempool floor 442_000 sompi → mempool reject 'transaction is not standard'. Pre-submit
 // 拦下来比等 mempool reject 干净 — 立刻报 mass mismatch 不浪费 RPC roundtrip + log noise.
 const MIN_SOMPI_PER_MASS = 100n;  // Kaspa post-Toccata transient mass mempool floor 实测 qlfpv 442000/4420
+// ── 红线 7 修法 · 阶段 1 observe(J2 2026-08-28 · Bettor 批-带条件 · NWT 审 · Owner 批后维护窗 relay 重启才生效) ──
+// 🔴 实核: vendored kaspa-wasm 的 Params::from(NetworkId) 缺 TN12 分支(panic 原文 params.rs:644 "Testnet suffix 12 is not supported")
+//    ⇒ calculateTransactionMass 在 'testnet-12' 下任何 tx 形都 panic ⇒ 下面 catch 自 ≥8-01 起 100% 走 skipped(日志 minFee 成功 0 / skipped 177,415)
+//    ⇒ 红线 7 从未生效。修: wasm panic 时改用本地按 7b1e18cc 公式的上界(tx-mass-ub.mjs, 上界证明表见其文件头);
+//    🔴 observe 阶段【只 warn 不 throw】(绝不把 live covenant 全堵): 打一行结构化日志供 7 天对照; enforce(fee<minFee ⇒ throw)另报备另批。
+//    wasm 成功时仍用 wasm(行为不变); 本地估算自身 throw(形状边界)时照旧 skipped 并记 reason(不引入新的 fail-open 面之外的东西)。
+try { if (typeof kaspa.initConsolePanicHook === 'function') kaspa.initConsolePanicHook(); } catch {}   // wasm panic 带原文进日志(纯日志, 零行为)
+const MASS_FLOOR_MODE = 'observe';   // 'observe' | 'enforce'(enforce 须另报备 + Owner 批)
 function _assertTxInvariants(matchedUtxos, signedTx, siteLabel = 'unknown', networkId = null) {
   try {
     const sumIn = matchedUtxos.reduce((acc, u) => acc + BigInt(u.amount), 0n);
@@ -55,9 +64,22 @@ function _assertTxInvariants(matchedUtxos, signedTx, siteLabel = 'unknown', netw
     if (networkId && typeof kaspa.calculateTransactionMass === 'function') {
       let mass;
       try { mass = kaspa.calculateTransactionMass(networkId, signedTx); } catch (massErr) {
-        // mass calc 不可用 → log warn 不 fail (= 让 mempool 拦截作 fallback).
-        console.warn(`[${siteLabel} invariant] mass calc skipped: ${massErr.message}`);
-        console.log(`[${siteLabel} invariant] Σin=${sumIn} Σout=${sumOut} fee=${fee}, ${signedTx.outputs.length} outputs all >= dust (mass-check skipped)`);
+        // wasm mass calc 不可用(TN12 下恒 panic, 见上) → 本地上界兜底(observe: 只 warn 不 throw)
+        let ub = null, ubErr = null;
+        try { ub = estimateMassUpperBound(signedTx, matchedUtxos); } catch (e) { ubErr = e?.message || String(e); }
+        if (!ub) {
+          console.warn(`[${siteLabel} invariant] mass calc skipped: ${massErr.message}; local-ub unavailable: ${ubErr}`);
+          console.log(`[${siteLabel} invariant] Σin=${sumIn} Σout=${sumOut} fee=${fee}, ${signedTx.outputs.length} outputs all >= dust (mass-check skipped)`);
+          return;
+        }
+        const minFee = ub.mass * MIN_SOMPI_PER_MASS;
+        const wouldReject = fee < minFee;
+        // 结构化一行(Bettor 条件④): 7 天 observe 对照用; 不改任何行为
+        console.warn(`[mass-floor:${MASS_FLOOR_MODE}] site=${siteLabel} compute=${ub.compute} storage=${ub.storage} transient=${ub.transient} mass_ub=${ub.mass} minFee=${minFee} actualFee=${fee} would_reject=${wouldReject} wasm=panic(${String(massErr.message).slice(0, 40)}) source=${ub.source_commit}`);
+        if (MASS_FLOOR_MODE === 'enforce' && wouldReject) {
+          throw new Error(`fee ${fee} < mempool floor ${minFee} (mass_ub=${ub.mass} × ${MIN_SOMPI_PER_MASS} sompi/mass, local 7b1e18cc estimator) — SS contract fee 焊死太低或 scriptSig 太大`);
+        }
+        console.log(`[${siteLabel} invariant] Σin=${sumIn} Σout=${sumOut} fee=${fee} (mass_ub=${ub.mass} minFee=${minFee} ${wouldReject ? '⚠ would-reject(observe)' : '✓'}), ${signedTx.outputs.length} outputs all >= dust`);
         return;
       }
       const minFee = BigInt(mass) * MIN_SOMPI_PER_MASS;
@@ -72,6 +94,9 @@ function _assertTxInvariants(matchedUtxos, signedTx, siteLabel = 'unknown', netw
     throw new Error(`pre-submit invariant assert (${siteLabel}): ${e.message}`);
   }
 }
+
+// 🔵 export 仅为可测性(同 :1607 _serializeRootStateHex 先例: 为测试加 export 可接受, 行为不变); 生产调用方不 import 它。
+export const __testOnlyAssertTxInvariants = _assertTxInvariants;
 
 function _encodePushDataHex(bytes) {
   const buf = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes);
