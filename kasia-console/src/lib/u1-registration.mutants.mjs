@@ -89,6 +89,21 @@ const MUTANTS = [
     (s) => s.replace('  if (!isStoreBoundTo(challengeStore, sqlite, expectedTable)) {', '  if (false) {')],
   ['前置重读拆掉(并发重放闸)⇒ 另一连接已用掉也照样注册',
     (s) => s.replace('    if (!before || before.usedAt) {', '    if (false) {')],
+  // ── §10 C3 (D-013 §1): 七格, 由 u1-registration.test.mjs 的 S10-0/R7/N4/N5/N11/E1/N9/T1/U1 臂咬 ──
+  ['🔴 §10 缺 s10 不再单独拒(退到验证器 MALFORMED ⇒ 拒因从 RELAY_NOT_OWNED 变 S10_INVALID; N4 臂断言拒因)',
+    (s) => s.replace('  if (s.s10 === undefined || s.s10 === null) {', '  if (false) {')],
+  ['🔴 §10 预筛整闸拆掉(信封不过/绑定不成也继续走 ⇒ relay_id 抢注面原样回来)',
+    (s) => s.replace('  if (!s10pre.ok) return { ok: false, code: s10pre.code, reason: s10pre.reason };', '  if (false) return null;')],
+  ['🔴 §10 L5 绑定拆掉: 地址钥 ≠ payload 钥也放行(验签公钥仍取 payload ⇒ 任何人自签即可抢 relay-B)',
+    (s) => s.replace('  if (d.pubkey !== verified.relayPubkeyXOnly) {', '  if (false) {')],
+  ['🔴 §10 localNetwork 回落到 payload network(MUST-FIX A 原病: 跨网重放)',
+    (s) => s.replace('  const v = await verifyS10Envelope(s.s10, { localNetwork });', '  const v = await verifyS10Envelope(s.s10, { localNetwork: s.s10?.network });')],
+  ['§10 epoch===challenge 拆掉(一份 S10 可配任意挑战重放)',
+    (s) => s.replace("  if (String(verified.epoch) !== String(s.challenge ?? '')) {", '  if (false) {')],
+  ['🔴 §10 事务内重做绑定拆掉(预筛后换地址照写 ⇒ T1)',
+    (s) => s.replace('    if (!s10tx.ok) {', '    if (false) {')],
+  ['🔴 §10 身份表 INSERT 拆掉(A2 行落了而跨节点身份表空 ⇒ 同钥二次注册不再撞 PK ⇒ U1/S10-0)',
+    (s) => s.replace('      .run(s10pre.relayPubkeyXOnly, s10pre.network, s10pre.operation, s10pre.epoch, String(s.s10.signature).trim());', '      ;')],
 ];
 
 // 🔴 **结构上测不到的三格 —— 不是漏测, 是 (354) 之后它们【进不去】了; 明列出来, 不删也不算进 MISSED**

@@ -4,8 +4,18 @@ import { parseLang, getT, isRtl, LANG_NAMES } from '../i18n/index.js';
 import { sqlite } from '../db/client.js';
 import { registerIdentity } from '../lib/u1-registration.mjs';
 import { createChallengeStore, CANONICAL_CHALLENGE_TABLE } from '../lib/u1-challenge-store.mjs';
+import { S10_ENVELOPE_KEYS } from '../lib/u1-s10-identity.mjs';
 
 const TRUST_LEVELS = ['owner', 'recommended', 'normal', 'blocked'];
+
+// §10 C3: `s10` 子信封只取 7 个白名单键、逐键显式(与 u1-s10-identity.mjs 同源, 不展开、不收外层 network);
+//         非对象 ⇒ undefined(模块层 fail-closed 拒 RELAY_NOT_OWNED)。多余键在这里被丢 ⇒ 结构上不存在"第二个 network"。
+function pickS10(x) {
+  if (!x || typeof x !== 'object' || Array.isArray(x)) return undefined;
+  const out = {};
+  for (const k of S10_ENVELOPE_KEYS) if (Object.prototype.hasOwnProperty.call(x, k)) out[k] = x[k];
+  return out;
+}
 
 export async function registerIdentityRoutes(fastify) {
 
@@ -269,6 +279,7 @@ export async function registerIdentityRoutes(fastify) {
       identityPubkeyXOnly: b.identityPubkeyXOnly,
       challenge: b.challenge,
       signature: b.signature,
+      s10: pickS10(b.s10),   // §10 C3: 7 键子白名单(见 pickS10); 缺 ⇒ 模块拒 RELAY_NOT_OWNED
     };
 
     // 🔴 fail-closed 传导: 迁移未跑(表不存在)时工厂必抛 ⇒ 这里**必须**回明确失败,

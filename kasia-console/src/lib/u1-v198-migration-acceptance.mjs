@@ -55,12 +55,12 @@ t('④-6 🔴 无 local_relay_id 列; 无任何 relay_id/ecdsa 回退索引(只�
   // ⚠ 表名 u1_relay_identity 自身含子串 "relay_id"(…relay_id|entity) ⇒ 须按【整词】匹配, 否则本臂对着表名假红
   const ddl = liveSql(); A(!/\brelay_id\b|ecdsa/i.test(ddl), 'DDL 里出现 relay_id/ecdsa 整词');
 });
-t('④-7 今日零写入方: 仓内 src/ 无 INSERT INTO u1_relay_identity(写入方 = C3 起 registerIdentity 事务内)', () => {
+t('④-7 写入方唯一: 仓内 src/ 只有 u1-registration.mjs 一处 INSERT INTO u1_relay_identity(C3 起, registerIdentity 事务内)', () => {
   const root = new URL('../', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
   const hits = [];
   const walk = (d) => { for (const e of readdirSync(d)) { const p = join(d, e); const s = statSync(p); if (s.isDirectory()) { if (e !== 'node_modules') walk(p); } else if (/\.(m?js|cjs)$/.test(e) && !/u1-v198-migration-acceptance/.test(e)) { if (/INSERT\s+INTO\s+u1_relay_identity/i.test(readFileSync(p, 'utf8'))) hits.push(p); } } };
   walk(root);
-  A(hits.length === 0, `已有写入方: ${hits.join(',')}(C3 落地后本臂改为"只有 u1-registration.mjs")`);
+  A(hits.length === 1 && /u1-registration\.mjs$/.test(hits[0]), `写入方应恰为 u1-registration.mjs, 实际: ${hits.join(',') || '(无)'}`);
 });
 console.log(`\n④ 验收: ${pass} PASS / ${fail} FAIL   (临时库 ${dbPath})`);
 process.exit(fail ? 1 : 0);

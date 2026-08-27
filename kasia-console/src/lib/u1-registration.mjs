@@ -91,9 +91,31 @@
 //     能让 `prepare/get/run` 返回任意东西 —— 但那已等于**控制了整个进程内的 DB 层**, 与"喂一个字段"不是同一量级,
 //     且 `createChallengeStore` 要求表真实存在、store 必须绑到**同一个** handle, 伪造成本是"整套仿真"而非"塞一个值"。
 //     **这条本模块收不回来, 所以写明而不是宣称已解决。**
+import { Address, XOnlyPublicKey } from 'kaspa-wasm';
 import { rootFingerprint, verifyRegistrationBinding } from './u1-same-origin.mjs';
 import { verifyRegistrationPop } from './u1-registration-pop.mjs';
 import { isStoreBoundTo, readBoundChallenge, consumeBoundChallenge, CANONICAL_CHALLENGE_TABLE } from './u1-challenge-store.mjs';
+import { verifyS10Envelope } from './u1-s10-identity.mjs';
+
+// ── §10 跨节点 pubkey 身份 v1 (C3, 2026-08-27 J2; D-013 §1 "§10 GO"; 设计 docs/2026-08-19-s10-pubkey-identity-design.md@847bcf22) ──
+//
+//   🔴 **fail-closed 默认**: 自本片起, 注册 submission **必须**携带 `s10` 信封(见 u1-s10-identity.mjs), 缺 ⇒ 拒 RELAY_NOT_OWNED。
+//      不设"没有 s10 就按旧路走"的过渡开关 —— 那正是 §1 的 first-squatter 面(relay_id 抢注)原样保留。
+//   🔴 **验签公钥只取 payload(`s10.relayPubkeyXOnly`), DB 读只做【绑定】**(L5):
+//      `relay_nodes[relayId].address` 活算 `XOnlyPublicKey.fromAddress(new Address(address))` 必须 === payload 钥,
+//      否则 RELAY_NOT_OWNED。⇒ "抢 relay-B" 必须签得出 B 地址那把钥 —— 远程抢注关掉; 同机 loopback 抢注不宣称关掉(设计 ⑦)。
+//      🔵 relay_id→pubkey **不落列、不查 ecdsa_pubkey_xonly / 任何 legacy 列**(NWT 裁 P5): 列不存在 = 结构上无法被当权威读。
+//   🔴 **本地网络权威**: `localNetwork` 由本模块从本地配置(`KASPA_NETWORK`)取, 生产签名里**没有**这个参数名(同 (366)/(368) 纪律);
+//      信封 network ≠ 本地 ⇒ S10_INVALID(NETWORK_MISMATCH), **绝不回落到 payload**(MUST-FIX A)。
+//   · `s10.epoch` 必须 === `submission.challenge`(同一份一次性挑战承载两个签名; v198 `epoch UNIQUE` 再兜一层)。
+//   · **S10 预筛放在 ②-b PoP【之前】**(切片计划写"之后", 此处有意调整, 理由两条, 审时请看):
+//     ① T1 臂(预筛后、事务前换 relay_nodes.address)复用 PoP 的 verifyMessageFn 钩子窗口 —— 钩子在 PoP 内, 预筛须在它之前才构成"预筛后";
+//     ② cas 并发用例的屏障也挂在 PoP 钩子上、按到达次数放行 —— S10 若也走那个钩子会把到达数翻倍。
+//     ⇒ S10 验签**恒走 kaspa-wasm 真验签, 不接 verifyMessageFn**(少一个注入面, (368) 判据), 排在 PoP 之前。
+//   · 事务内(A2 INSERT、挑战重读、过期重检之后, 消费之前 —— 位置理由见 runTx ④): **重做绑定**(写锁内重读 relay_nodes.address)
+//     + 重查 epoch===challenge + INSERT u1_relay_identity; PK/epoch 冲突 ⇒ 现有 catch 归 CONSTRAINT ⇒ 整笔回滚(含 A2 行), 挑战不消费。
+//     ⚠ 事务内**不重验签名**: better-sqlite3 事务同步, 不能 await(同 :54 PoP 的边界); 签名在事务外已验, 事务内重做的是【会变的那部分】(DB 地址)。
+//   · 不含 rotate/revoke/迁移(D-013 §1); 成功返回加 `relayPubkeyXOnly`。
 
 export const REG_REJECT = Object.freeze({
   RELAY_UNKNOWN: 'RELAY_UNKNOWN',
@@ -109,7 +131,43 @@ export const REG_REJECT = Object.freeze({
   CHALLENGE_ALREADY_USED: 'CHALLENGE_ALREADY_USED',         // 事务内前置重读发现已被并发用掉 ⇒ 拒(防并发重放)
   CHALLENGE_STORE_UNBOUND: 'CHALLENGE_STORE_UNBOUND',       // store 不是本进程用【同一 sqlite handle】造的 ⇒ 拒(事务域不同=原子性不成立)
   CHALLENGE_EXPIRED: 'CHALLENGE_EXPIRED',                   // (359) 事务内重读发现已过期 ⇒ 拒(签发/过期 authority 归 store)
+  // ── §10 C3: 两个白名单式新值(不复用旧码, 便于 handler/日志分辨) ──
+  RELAY_NOT_OWNED: 'RELAY_NOT_OWNED',                       // 缺 s10 / relay_nodes.address 不可解析 / 地址钥 ≠ s10.relayPubkeyXOnly ⇒ 拒(远程抢注面)
+  S10_INVALID: 'S10_INVALID',                               // s10 信封不过验证器(含 NETWORK_MISMATCH/签名/形状/白名单) / epoch ≠ challenge ⇒ 拒
 });
+
+/** §10 L5 绑定: relay_nodes.address 活算 x-only(不落列, 不读 legacy 列)。任何解析失败 ⇒ ok:false(fail-closed, kaspa-wasm 对坏地址 throw 'unreachable'). */
+export function relayPubkeyFromAddress(sqlite, relayId) {
+  const row = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(relayId);
+  if (!row || typeof row.address !== 'string' || row.address.trim() === '') return { ok: false, reason: `relay_nodes[${relayId}].address 缺失` };
+  try { return { ok: true, pubkey: XOnlyPublicKey.fromAddress(new Address(row.address.trim())).toString() }; }
+  catch (e) { return { ok: false, reason: `relay_nodes[${relayId}].address 不可解析为 Kaspa 地址: ${e?.message || e}` }; }
+}
+
+// 绑定 + epoch 两项【同步】检查: 事务外预筛与事务内重做共用同一段(重做的是会变的 DB 那部分)。
+function checkS10Binding(sqlite, s, verified) {
+  if (String(verified.epoch) !== String(s.challenge ?? '')) {
+    return { ok: false, code: REG_REJECT.S10_INVALID, reason: `s10.epoch 必须等于本次 challenge(epoch=${verified.epoch})` };
+  }
+  const d = relayPubkeyFromAddress(sqlite, s.relayId);
+  if (!d.ok) return { ok: false, code: REG_REJECT.RELAY_NOT_OWNED, reason: d.reason };
+  if (d.pubkey !== verified.relayPubkeyXOnly) {
+    return { ok: false, code: REG_REJECT.RELAY_NOT_OWNED, reason: `s10.relayPubkeyXOnly 不是 relay_nodes[${s.relayId}].address 的钥(地址钥=${d.pubkey})` };
+  }
+  return { ok: true };
+}
+
+async function screenS10(sqlite, s, localNetwork) {
+  if (s.s10 === undefined || s.s10 === null) {
+    return { ok: false, code: REG_REJECT.RELAY_NOT_OWNED, reason: 'submission.s10 缺失: §10 v1 起注册必须携带 relay 地址钥签出的 S10 声明(fail-closed, 无旧路过渡)' };
+  }
+  // 🔴 恒走真验签(不接 verifyMessageFn); 验签公钥来自 payload; localNetwork 来自本地配置(缺/不等 ⇒ 验证器拒, 不回落 payload)
+  const v = await verifyS10Envelope(s.s10, { localNetwork });
+  if (!v.ok) return { ok: false, code: REG_REJECT.S10_INVALID, reason: `${v.code}: ${v.reason}` };
+  const b = checkS10Binding(sqlite, s, v);
+  if (!b.ok) return b;
+  return { ok: true, relayPubkeyXOnly: v.relayPubkeyXOnly, network: v.network, operation: v.operation, epoch: v.epoch };
+}
 
 // 事务内用的内部错误标记: better-sqlite3 事务靠抛异常回滚, 抛出后在外层按 code 分流。
 class _RegTxError extends Error {
@@ -165,12 +223,15 @@ export async function registerIdentity(args = {}) {
  * @param {object} args    同 registerIdentity
  * @param {function} clock 返回 ms 的时钟; 被调用两次(PoP 前 / 事务内)
  */
-export async function __testOnlyRegisterIdentityWithInjections(args, { clock, verifyMessageFn, expectedTable } = {}) {
-  return _registerIdentityImpl(args, { clock: clock || (() => Date.now()), verifyMessageFn, expectedTable: expectedTable || CANONICAL_CHALLENGE_TABLE });
+export async function __testOnlyRegisterIdentityWithInjections(args, { clock, verifyMessageFn, expectedTable, localNetwork } = {}) {
+  return _registerIdentityImpl(args, { clock: clock || (() => Date.now()), verifyMessageFn, expectedTable: expectedTable || CANONICAL_CHALLENGE_TABLE, localNetwork });
 }
 
-async function _registerIdentityImpl({ sqlite, submission, challengeStore } = {}, { clock, verifyMessageFn, expectedTable } = {}) {
+async function _registerIdentityImpl({ sqlite, submission, challengeStore } = {}, { clock, verifyMessageFn, expectedTable, localNetwork } = {}) {
   const s = submission || {};
+  // §10: 本地网络权威。生产入口的 options 字面量里【没有】localNetwork ⇒ 恒取本地配置; 只有 __testOnly 入口能注入(含 null = 模拟未配置)。
+  //      ⚠ `!== undefined` 而不是 `??`: 测试注入 null 必须原样到达验证器(拒), 不能被 ?? 换成 env 值。
+  const s10LocalNetwork = localNetwork !== undefined ? localNetwork : process.env.KASPA_NETWORK;
 
   // ① N4-bis —— 注意: **完全不看 s.custody**
   // 🔴 (②/TOCTOU) 这一次是【便宜预筛, 不承重】: 作用是在验签这种贵活之前先拒掉明显不成立的,
@@ -210,6 +271,11 @@ async function _registerIdentityImpl({ sqlite, submission, challengeStore } = {}
   //    ⇒ 这里【不比对、不兜底】, 直接以 store 为唯一来源: 调用方连递的机会都没有(参数已删)。
   // 🔴 (374)+(376): 不取能力对象, 只调**动作** —— 每次调用各自先验绑定, 且只回数据。
   const storeRecord = readBoundChallenge(challengeStore, sqlite, expectedTable, s.challenge);
+
+  // ②-e §10 S10 预筛(在 PoP 之前; 位置理由见文件头 §10 段): 缺 ⇒ RELAY_NOT_OWNED; 信封不过 ⇒ S10_INVALID; 地址钥 ≠ payload 钥 ⇒ RELAY_NOT_OWNED。
+  //    这一次同 custodyPre: 【便宜预筛, 不承重】—— 绑定用的 relay_nodes.address 在事务内写锁下重读一次(见 runTx ④)。
+  const s10pre = await screenS10(sqlite, s, s10LocalNetwork);
+  if (!s10pre.ok) return { ok: false, code: s10pre.code, reason: s10pre.reason };
 
   // ②-b N8 PoP —— 用 store 取出来的 record 验(含 usedAt / expiresAt 两项)
   const pop = await verifyRegistrationPop({ submission: s, challengeRecord: storeRecord, now: clock(), verifyMessageFn });
@@ -270,6 +336,18 @@ async function _registerIdentityImpl({ sqlite, submission, challengeStore } = {}
         `事务内重读: 挑战已过期或 expiresAt 不可读 ⇒ 拒, 整笔回滚(expiresAt=${before.expiresAt}, now=${nowMs})`);
     }
 
+    // ④ §10 事务内: **重做绑定**(写锁内重读 relay_nodes.address —— 预筛到这里之间它可被改, 同 custody2 的 TOCTOU 理由)
+    //    + 重查 epoch===challenge, 然后 INSERT u1_relay_identity。PK/epoch 冲突 ⇒ 外层 catch 归 CONSTRAINT ⇒ 整笔回滚(含上面那条 A2 INSERT), 挑战不消费。
+    //    ⚠ 顺序【有意偏离切片计划】: 计划写"A2 INSERT 后、挑战重读前", 实测那样会让 cas 用例 A2/C1(同挑战·不同身份并发)的第二路
+    //      先撞 v198 `epoch UNIQUE`(CONSTRAINT)而到不了挑战重读(:253 CHALLENGE_ALREADY_USED) ⇒ CAS 三判据被改 —— 而计划同时要求三判据不变。
+    //      ⇒ 放到挑战重读 + 过期重检【之后】、消费之前: CAS 判据原样, 且"陈挑战 + 钥已注册"的双重失败也报更准的 CHALLENGE_ALREADY_USED(顺带闭掉计划 §3 (a))。
+    const s10tx = checkS10Binding(sqlite, s, s10pre);
+    if (!s10tx.ok) {
+      throw new _RegTxError(s10tx.code, `事务内重做 S10 绑定: ${s10tx.reason} (预筛曾判 ok ⇒ 两次之间 relay_nodes.address 被改) ⇒ 拒, 整笔回滚`);
+    }
+    sqlite.prepare(`INSERT INTO u1_relay_identity (relay_pubkey_xonly, network, operation, epoch, signature) VALUES (?, ?, ?, ?, ?)`)
+      .run(s10pre.relayPubkeyXOnly, s10pre.network, s10pre.operation, s10pre.epoch, String(s.s10.signature).trim());
+
     // 消费: 抛错即回滚(连同上面那条 INSERT)
     try { consumeBoundChallenge(challengeStore, sqlite, expectedTable, s.challenge); }
     catch (e) { throw new _RegTxError(REG_REJECT.CHALLENGE_CONSUME_FAILED, `挑战消费失败, 整笔回滚: ${e?.message || e}`); }
@@ -300,5 +378,5 @@ async function _registerIdentityImpl({ sqlite, submission, challengeStore } = {}
     return { ok: false, code: REG_REJECT.CONSTRAINT, reason: `落库被约束拒: ${e?.message || e}` };
   }
 
-  return { ok: true, rootFingerprint: fp, custody: custodyWritten, verifiedWith: pop.verifiedWith };
+  return { ok: true, rootFingerprint: fp, custody: custodyWritten, verifiedWith: pop.verifiedWith, relayPubkeyXOnly: s10pre.relayPubkeyXOnly };
 }

@@ -21,6 +21,7 @@ import { fileURLToPath } from 'node:url';
 const WORKER = process.argv.includes('--worker');
 const dir = WORKER ? process.env.U1_CAS_DIR : mkdtempSync(join(tmpdir(), 'u1-cas-'));
 process.env.DB_PATH = join(dir, 'cas.db');
+process.env.KASPA_NETWORK = 'testnet-12';   // §10 C3: 生产入口从本地配置取 localNetwork(kanet.env 同值); worker 子进程继承
 
 const { runMigrations } = await import('../db/migrate.js');
 const { sqlite, dbPath } = await import('../db/client.js');
@@ -31,6 +32,7 @@ const { deriveIdentityPubkey, rootFingerprint } = await import('./u1-same-origin
 const { buildPopPayload, popMessageHashHex } = await import('./u1-registration-pop.mjs');
 const { REG_REJECT, __testOnlyRegisterIdentityWithInjections } = await import('./u1-registration.mjs');
 const { createChallengeStore, CANONICAL_CHALLENGE_TABLE } = await import('./u1-challenge-store.mjs');
+const { S10_DOMAIN, S10_VERSION, s10SignedMessage } = await import('./u1-s10-identity.mjs');
 const T = CANONICAL_CHALLENGE_TABLE;
 const realVerify = (a) => verifyMessage(a);
 
@@ -53,7 +55,11 @@ const regRows = () => sqlite.prepare('SELECT COUNT(*) n FROM u1_identity_registr
 function submissionFor(relayId, id, challenge) {
   const payload = buildPopPayload({ rootFingerprint: rootFingerprint(id.rootXpub), identityIndex: 0, relayId, challenge });
   const signature = signMessage({ message: popMessageHashHex(payload), privateKey: id.privHex });
-  return { relayId, rootXpub: id.rootXpub, identityIndex: 0, identityPubkeyXOnly: id.pubkey, challenge, signature };
+  // §10 C3: relay 地址绑到本身份叶钥 + 同钥签 S10(epoch=challenge)。S10 验签恒走真验签、不经 verifyMessageFn ⇒ 屏障到达计数不变; 各臂判据不改。
+  sqlite.prepare('UPDATE relay_nodes SET address = ? WHERE id = ?').run(new PrivateKey(id.privHex).toPublicKey().toAddress('testnet-12').toString(), relayId);
+  const f = { domain: S10_DOMAIN, version: S10_VERSION, network: 'testnet-12', relayPubkeyXOnly: id.pubkey, operation: 'register', epoch: challenge };
+  const s10 = { ...f, signature: signMessage({ message: s10SignedMessage(f), privateKey: id.privHex }) };
+  return { relayId, rootXpub: id.rootXpub, identityIndex: 0, identityPubkeyXOnly: id.pubkey, challenge, signature, s10 };
 }
 const reg = (submission, inj = {}) => __testOnlyRegisterIdentityWithInjections(
   { sqlite, submission, challengeStore: createChallengeStore(sqlite, T) },

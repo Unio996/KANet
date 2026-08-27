@@ -13,6 +13,7 @@ import { randomUUID } from 'node:crypto';
 import assert from 'node:assert';
 const dir = mkdtempSync(join(tmpdir(), 'u1-beh-'));
 process.env.DB_PATH = join(dir, 'probe.db');
+process.env.KASPA_NETWORK = 'testnet-12';   // §10 C3: 生产入口从本地配置取 localNetwork(kanet.env 同值)
 const { runMigrations } = await import('../db/migrate.js');
 const { sqlite, dbPath } = await import('../db/client.js');
 assert.ok(dbPath.startsWith(dir), `安全闸: 必须临时库, 实际 ${dbPath}`);
@@ -21,6 +22,7 @@ runMigrations();
 const { Mnemonic, XPrv, PrivateKey, signMessage } = await import('kaspa-wasm');
 const { deriveIdentityPubkey, rootFingerprint } = await import('./u1-same-origin.mjs');
 const { buildPopPayload, popMessageHashHex } = await import('./u1-registration-pop.mjs');
+const { S10_DOMAIN, S10_VERSION, s10SignedMessage } = await import('./u1-s10-identity.mjs');
 const { registerIdentityRoutes } = await import('../api/identities.js');
 
 let pass = 0, fail = 0;
@@ -66,7 +68,12 @@ function baseline(relayId, ident, challenge) {
   //    它会在没有任何判别力的情况下变绿(同族: 预期答案本就一致时读数相同零信息)。
   const payload = buildPopPayload({ rootFingerprint: rootFingerprint(ident.rootXpub), identityIndex: 0, relayId, challenge });
   const signature = signMessage({ message: popMessageHashHex(payload), privateKey: new PrivateKey(ident.privHex) });
-  return { relayId, rootXpub: ident.rootXpub, identityIndex: 0, identityPubkeyXOnly: ident.pubkey, challenge, signature };
+  // §10 C3: relay 地址绑到本身份叶钥 + 同钥签 S10(epoch=challenge); 各格期望不改
+  const priv = new PrivateKey(ident.privHex);
+  sqlite.prepare('UPDATE relay_nodes SET address = ? WHERE id = ?').run(priv.toPublicKey().toAddress('testnet-12').toString(), relayId);
+  const f = { domain: S10_DOMAIN, version: S10_VERSION, network: 'testnet-12', relayPubkeyXOnly: ident.pubkey, operation: 'register', epoch: challenge };
+  const s10 = { ...f, signature: signMessage({ message: s10SignedMessage(f), privateKey: priv }) };
+  return { relayId, rootXpub: ident.rootXpub, identityIndex: 0, identityPubkeyXOnly: ident.pubkey, challenge, signature, s10 };
 }
 
 // 🔴🔴 每次调用都用【全新的 relay + 身份 + 挑战】—— 不得共用。

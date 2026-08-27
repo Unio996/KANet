@@ -6,10 +6,12 @@ import assert from 'node:assert';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, randomBytes } from 'node:crypto';
 
 const dir = mkdtempSync(join(tmpdir(), 'u1-reg-'));
 process.env.DB_PATH = join(dir, 'probe.db');
+// §10 C3: 生产入口从本地配置取 localNetwork(kanet.env KASPA_NETWORK=testnet-12); 离线用例显式钉同值, "未配置"那一格走 __testOnly 注入 null 单测。
+process.env.KASPA_NETWORK = 'testnet-12';
 
 const { runMigrations } = await import('../db/migrate.js');
 const { sqlite, dbPath } = await import('../db/client.js');
@@ -25,6 +27,7 @@ const { deriveIdentityPubkey, rootFingerprint } = await import('./u1-same-origin
 const { buildPopPayload, popMessageHashHex } = await import('./u1-registration-pop.mjs');
 const { registerIdentity, deriveCustody, REG_REJECT, __testOnlyRegisterIdentityWithInjections } = await import('./u1-registration.mjs');
 const { createChallengeStore, CANONICAL_CHALLENGE_TABLE, isStoreBoundTo } = await import('./u1-challenge-store.mjs');
+const { S10_DOMAIN, S10_VERSION, s10SignedMessage } = await import('./u1-s10-identity.mjs');
 
 let pass = 0; let fail = 0;
 const t = async (name, fn) => {
@@ -33,13 +36,21 @@ const t = async (name, fn) => {
 };
 
 // ── 夹具: 造 relay_nodes 行(不同托管形态) + 一份身份 ─────────────────────────
-function insRelay({ mnemonic = null, privkey = null }) {
+// §10 C3: 每个 relay 行有自己的【地址钥】(与身份叶钥独立, 同协议形); relay_nodes.address = 该钥的 testnet-12 地址(真地址, 非占位串——
+//         fromAddress 对占位串 throw), s10 默认由它签。⚠ relay_nodes.address 有 UNIQUE ⇒ 两行不能同地址(夹具第一版靠 UPDATE 绑身份钥, N3 当场撞 UNIQUE)。
+const RELAY_KEY = new Map();   // relayId → { privHex, pubkey, address }
+function makeRelayKey(network = 'testnet-12') {
+  const priv = new PrivateKey(randomBytes(32).toString('hex'));
+  return { privHex: priv.toString(), pubkey: priv.toPublicKey().toXOnlyPublicKey().toString(), address: priv.toPublicKey().toAddress(network).toString() };
+}
+function insRelay({ mnemonic = null, privkey = null, relayKey = makeRelayKey() }) {
   const id = randomUUID();
   // ⚠ `created_at` 是真 schema 里的 NOT NULL —— 第一版夹具漏了它, 七格当场红。
   //   这正是「离线用例必须跑真 migration」的价值: 抄一份简化 DDL 的话, 这里会绿, 而线上会炸。
   sqlite.prepare(`INSERT INTO relay_nodes (id, name, mnemonic_encrypted, privkey_encrypted, address, network, created_at, updated_at)
                   VALUES (?, ?, ?, ?, ?, 'testnet-12', datetime('now'), datetime('now'))`)
-    .run(id, 'r-' + id.slice(0, 6), mnemonic, privkey, 'kaspatest:q' + id.slice(0, 20));
+    .run(id, 'r-' + id.slice(0, 6), mnemonic, privkey, relayKey.address);
+  RELAY_KEY.set(id, relayKey);
   return id;
 }
 function makeIdentity() {
@@ -76,10 +87,17 @@ function chStore() {
 }
 // 成功路径的标准接线: 消费与重读都走上面那张真表
 const wire = (st) => ({ challengeStore: st.typed });
-function submissionFor(relayId, id, challenge, extra = {}) {
+// ── §10 C3 夹具: s10 默认由该 relay 行的地址钥签(RELAY_KEY); 攻击臂显式换 signer ──
+//    🔴 既有各格【期望不改】: submissionFor 默认附上合法 s10 ⇒ 旧路径观察量不变(切片计划 C3 审点"三份夹具全补")。
+const addrOf = (k) => new PrivateKey(k.privHex).toPublicKey().toAddress('testnet-12').toString();
+function s10For(signer, challenge, over = {}) {
+  const f = { domain: S10_DOMAIN, version: S10_VERSION, network: 'testnet-12', relayPubkeyXOnly: signer.pubkey, operation: 'register', epoch: challenge, ...over };
+  return { ...f, signature: signMessage({ message: s10SignedMessage(f), privateKey: new PrivateKey(signer.privHex) }) };
+}
+function submissionFor(relayId, id, challenge, extra = {}, { s10Signer = RELAY_KEY.get(relayId) } = {}) {
   const payload = buildPopPayload({ rootFingerprint: rootFingerprint(id.rootXpub), identityIndex: 0, relayId, challenge });
   const signature = signMessage({ message: popMessageHashHex(payload), privateKey: new PrivateKey(id.privHex) });
-  return { relayId, rootXpub: id.rootXpub, identityIndex: 0, identityPubkeyXOnly: id.pubkey, challenge, signature, ...extra };
+  return { relayId, rootXpub: id.rootXpub, identityIndex: 0, identityPubkeyXOnly: id.pubkey, challenge, signature, s10: s10For(s10Signer, challenge), ...extra };
 }
 
 // ── 前置: 合法路径先能过 ─────────────────────────────────────────────────────
@@ -698,6 +716,124 @@ await t('①-10c′ DB CHECK 兜底是【可达】的: custody 非 mnemonic 的�
     .run(relayId, rootFingerprint(id.rootXpub), id.rootXpub, 0, id.pubkey, 'mnemonic');
   assert.strictEqual(sqlite.prepare('SELECT COUNT(*) c FROM u1_identity_registration').get().c, before + 1,
     '阳性对照没写进去 ⇒ 上面那一抛可能不是 CHECK 干的');
+});
+
+// ════════ §10 C3 臂 (D-013 §1; 切片计划 16ecff6d C3 列: R7/N4/N5/N11/E1/T1/U1/N12-反向 + N9 本地网络权威) ════════
+const idRows = (pk) => sqlite.prepare('SELECT COUNT(*) n FROM u1_relay_identity WHERE relay_pubkey_xonly = ?').get(pk).n;
+const a2Rows = (relayId) => sqlite.prepare('SELECT COUNT(*) n FROM u1_identity_registration WHERE relay_id = ?').get(relayId).n;
+const reg = (submission, st) => registerIdentity({ sqlite, submission, ...wire(st) });
+const assertNothingWritten = (relayId, pk, st, ch) => {
+  assert.strictEqual(a2Rows(relayId), 0, 'A2 表不得有行');
+  assert.strictEqual(idRows(pk), 0, 'u1_relay_identity 不得有行');
+  assert.strictEqual(st.read(ch)?.usedAt ?? null, null, '挑战不得被消费');
+};
+
+await t('S10-0 · 正向: relay-B 地址钥签 S10 ⇒ ok, u1_relay_identity 恰 1 行 = fromAddress(B.address), epoch=challenge, 返回 relayPubkeyXOnly', async () => {
+  const B = insRelay({ mnemonic: 'enc-s10-pos' }); const idB = makeIdentity(); const ch = 'ch-s10-pos'; const KB = RELAY_KEY.get(B);
+  const st = chStore(); st.issue(ch);
+  const r = await reg(submissionFor(B, idB, ch), st);
+  assert.strictEqual(r.ok, true, `${r.code}: ${r.reason}`);
+  assert.strictEqual(r.relayPubkeyXOnly, KB.pubkey); assert.notStrictEqual(KB.pubkey, idB.pubkey, '夹具: relay 地址钥与身份叶钥应是两把钥');
+  const row = sqlite.prepare('SELECT * FROM u1_relay_identity WHERE relay_pubkey_xonly = ?').get(KB.pubkey);
+  assert.ok(row, '身份表无行'); assert.strictEqual(row.epoch, ch); assert.strictEqual(row.network, 'testnet-12'); assert.strictEqual(row.operation, 'register');
+  const { XOnlyPublicKey, Address } = await import('kaspa-wasm');
+  const addr = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(B).address;
+  assert.strictEqual(XOnlyPublicKey.fromAddress(new Address(addr)).toString(), row.relay_pubkey_xonly, '行 = 活算 fromAddress(B.address)');
+  assert.ok(st.read(ch)?.usedAt, '挑战应被消费');
+});
+
+await t('R7 ⑦ 红臂 · 攻击者新钥 X + relayId=relay-B + 活挑战, PoP 与 s10 都由 X 合法签 ⇒ RELAY_NOT_OWNED, 零写入, 挑战未消费(对照: B 自钥 ⇒ ok)', async () => {
+  const B = insRelay({ mnemonic: 'enc-s10-r7' }); const idB = makeIdentity(); const idX = makeIdentity(); const KB = RELAY_KEY.get(B);
+  const ch = 'ch-s10-r7'; const st = chStore(); st.issue(ch);
+  const r = await reg(submissionFor(B, idX, ch, {}, { s10Signer: idX }), st);   // X 的 PoP 合法, X 自签的 S10 合法, 但 X ≠ B 地址钥
+  assert.strictEqual(r.ok, false, 'v1 前 scratch 自测这条是 PASS(抢注成立); §10 后必须拒');
+  assert.strictEqual(r.code, REG_REJECT.RELAY_NOT_OWNED, `实际 ${r.code}: ${r.reason}`);
+  assertNothingWritten(B, idX.pubkey, st, ch);
+  const r2 = await reg(submissionFor(B, idB, ch), st);   // 对照: 同一活挑战, B 地址钥签
+  assert.strictEqual(r2.ok, true, `对照臂应过: ${r2.code} ${r2.reason}`); assert.strictEqual(idRows(KB.pubkey), 1);
+});
+
+await t('N4 · 无 s10 ⇒ RELAY_NOT_OWNED(fail-closed 默认, 无旧路), 零写入', async () => {
+  const B = insRelay({ mnemonic: 'enc-s10-n4' }); const idB = makeIdentity(); const ch = 'ch-s10-n4'; const st = chStore(); st.issue(ch);
+  const sub = submissionFor(B, idB, ch); delete sub.s10;
+  const r = await reg(sub, st);
+  assert.strictEqual(r.code, REG_REJECT.RELAY_NOT_OWNED, `实际 ${r.code}: ${r.reason}`); assert.match(r.reason, /s10 缺失/);
+  assertNothingWritten(B, RELAY_KEY.get(B).pubkey, st, ch);
+  const r2 = await reg({ ...submissionFor(B, idB, ch), s10: 'not-an-object' }, st);   // 形状错 ⇒ 验证器 MALFORMED ⇒ S10_INVALID
+  assert.strictEqual(r2.code, REG_REJECT.S10_INVALID, `实际 ${r2.code}: ${r2.reason}`); assert.match(r2.reason, /MALFORMED/);
+});
+
+await t('N5 · s10.relayPubkeyXOnly 声称 B 但由 X 签 ⇒ S10_INVALID(SIGNATURE_INVALID; 验签公钥取 payload 不取 DB)', async () => {
+  const B = insRelay({ mnemonic: 'enc-s10-n5' }); const idB = makeIdentity(); const idX = makeIdentity(); const ch = 'ch-s10-n5'; const st = chStore(); st.issue(ch);
+  const KB = RELAY_KEY.get(B);
+  const sub = submissionFor(B, idB, ch, { s10: s10For(idX, ch, { relayPubkeyXOnly: KB.pubkey }) });
+  const r = await reg(sub, st);
+  assert.strictEqual(r.code, REG_REJECT.S10_INVALID, `实际 ${r.code}: ${r.reason}`); assert.match(r.reason, /SIGNATURE_INVALID/);
+  assertNothingWritten(B, KB.pubkey, st, ch);
+});
+
+await t('N11 · legacy 中毒: relay_nodes.ecdsa_pubkey_xonly 填成 X 的钥, X 来抢 ⇒ 仍 RELAY_NOT_OWNED(权威只在地址活算, legacy 列不读)', async () => {
+  const B = insRelay({ mnemonic: 'enc-s10-n11' }); const idX = makeIdentity();
+  sqlite.prepare('UPDATE relay_nodes SET ecdsa_pubkey_xonly = ? WHERE id = ?').run(idX.pubkey, B);
+  const ch = 'ch-s10-n11'; const st = chStore(); st.issue(ch);
+  const r = await reg(submissionFor(B, idX, ch, {}, { s10Signer: idX }), st);
+  assert.strictEqual(r.code, REG_REJECT.RELAY_NOT_OWNED, `实际 ${r.code}: ${r.reason}`);
+  assertNothingWritten(B, idX.pubkey, st, ch);
+});
+
+await t('E1 · s10.epoch ≠ challenge(合法签名) ⇒ S10_INVALID, 零写入', async () => {
+  const B = insRelay({ mnemonic: 'enc-s10-e1' }); const idB = makeIdentity(); const ch = 'ch-s10-e1'; const st = chStore(); st.issue(ch); const KB = RELAY_KEY.get(B);
+  const r = await reg(submissionFor(B, idB, ch, { s10: s10For(KB, 'ch-s10-e1-other') }), st);
+  assert.strictEqual(r.code, REG_REJECT.S10_INVALID, `实际 ${r.code}: ${r.reason}`); assert.match(r.reason, /epoch/);
+  assertNothingWritten(B, KB.pubkey, st, ch);
+});
+
+await t('N9 · 本地网络权威: s10 合法签 network=mainnet 送 testnet-12 节点 ⇒ S10_INVALID(NETWORK_MISMATCH); 本地未配置(注入 null) ⇒ 同拒, 不回落 payload', async () => {
+  const B = insRelay({ mnemonic: 'enc-s10-n9' }); const idB = makeIdentity(); const ch = 'ch-s10-n9'; const st = chStore(); st.issue(ch); const KB = RELAY_KEY.get(B);
+  const r = await reg(submissionFor(B, idB, ch, { s10: s10For(KB, ch, { network: 'mainnet' }) }), st);
+  assert.strictEqual(r.code, REG_REJECT.S10_INVALID, `实际 ${r.code}: ${r.reason}`); assert.match(r.reason, /NETWORK_MISMATCH/);
+  const r2 = await __testOnlyRegisterIdentityWithInjections({ sqlite, submission: submissionFor(B, idB, ch), ...wire(st) }, { localNetwork: null });
+  assert.strictEqual(r2.code, REG_REJECT.S10_INVALID, `未配置本地网络竟 ${r2.code}: ${r2.reason}`); assert.match(r2.reason, /NETWORK_MISMATCH/);
+  assertNothingWritten(B, KB.pubkey, st, ch);
+});
+
+await t('N12-反向 · 合法 S10 签名当 A2 PoP 的 signature 提交 ⇒ POP_FAILED(两域消息空间不相交; NWT C3 审时闸)', async () => {
+  const B = insRelay({ mnemonic: 'enc-s10-n12' }); const idB = makeIdentity(); const ch = 'ch-s10-n12'; const st = chStore(); st.issue(ch);
+  const sub = submissionFor(B, idB, ch);   // s10 由 relay 钥签(合法, 预筛过) —— 只把 A2 位换成【身份叶钥对 S10 域消息】的合法签名
+  const { signature: _drop, ...s10Fields } = sub.s10;
+  sub.signature = signMessage({ message: s10SignedMessage(s10Fields), privateKey: new PrivateKey(idB.privHex) });   // S10 消息(KANET-U1-IDENTITY-v1|…)当 A2 PoP 签名
+  const r = await reg(sub, st);
+  assert.strictEqual(r.code, REG_REJECT.POP_FAILED, `实际 ${r.code}: ${r.reason}`); assert.match(r.reason, /SIGNATURE_INVALID/);
+  assert.strictEqual(a2Rows(B), 0); assert.strictEqual(st.read(ch)?.usedAt ?? null, null);
+});
+
+await t('T1 · 预筛后事务前换 relay_nodes.address(PoP verifyMessageFn 钩子窗口) ⇒ 事务内重做绑定拒 RELAY_NOT_OWNED, 整笔回滚(A2 0 行/身份表 0 行/挑战未消费); 阴性对照: 同钩子不换地址 ⇒ ok', async () => {
+  const B = insRelay({ mnemonic: 'enc-s10-t1' }); const idB = makeIdentity(); const idX = makeIdentity(); const ch = 'ch-s10-t1'; const st = chStore(); st.issue(ch); const KB = RELAY_KEY.get(B);
+  let fired = 0;
+  const swapHook = async (a) => { fired++; sqlite.prepare('UPDATE relay_nodes SET address = ? WHERE id = ?').run(addrOf(idX), B); return realVerifyMessage(a); };
+  const r = await __testOnlyRegisterIdentityWithInjections({ sqlite, submission: submissionFor(B, idB, ch), ...wire(st) }, { verifyMessageFn: swapHook });
+  assert.strictEqual(fired, 1, '钩子应恰被 PoP 调一次(S10 验签不走注入钩子)');
+  assert.strictEqual(r.code, REG_REJECT.RELAY_NOT_OWNED, `实际 ${r.code}: ${r.reason}`); assert.match(r.reason, /事务内重做/);
+  assertNothingWritten(B, KB.pubkey, st, ch);
+  sqlite.prepare('UPDATE relay_nodes SET address = ? WHERE id = ?').run(KB.address, B);   // 复位地址
+  const passHook = async (a) => realVerifyMessage(a);
+  const r2 = await __testOnlyRegisterIdentityWithInjections({ sqlite, submission: submissionFor(B, idB, ch), ...wire(st) }, { verifyMessageFn: passHook });
+  assert.strictEqual(r2.ok, true, `阴性对照应过: ${r2.code} ${r2.reason}`);
+});
+
+await t('U1 · 同 relay 钥 K 二次注册(不同 A2 根、不同挑战) ⇒ 第二次 CONSTRAINT(v198 PK)整笔回滚: A2 行 0, 身份表仍 1 行, 挑战未消费', async () => {
+  // ⚠ 经入口到达 v198 PK 须先穿过 relay_nodes.address UNIQUE 与 A2 relay_id PK: 第二行用同钥的【mainnet 前缀地址】(字符串不同、x-only 相同)。
+  //    这是为到达 v198 PK 的构造, 不是真实部署形(testnet 行挂 mainnet 地址); v198 PK 的直测在 ④-2。
+  const K = makeRelayKey('testnet-12'); const Kmain = { ...K, address: new PrivateKey(K.privHex).toPublicKey().toAddress('mainnet').toString() };
+  const r1 = insRelay({ mnemonic: 'enc-s10-u1-a', relayKey: K }); const r2 = insRelay({ mnemonic: 'enc-s10-u1-b', relayKey: Kmain });
+  const id1 = makeIdentity(); const id2 = makeIdentity();
+  const c1 = 'ch-s10-u1-a'; const c2 = 'ch-s10-u1-b'; const st = chStore(); st.issue(c1); st.issue(c2);
+  const a = await reg(submissionFor(r1, id1, c1), st);
+  assert.strictEqual(a.ok, true, `${a.code}: ${a.reason}`); assert.strictEqual(a.relayPubkeyXOnly, K.pubkey);
+  const b = await reg(submissionFor(r2, id2, c2), st);
+  assert.strictEqual(b.code, REG_REJECT.CONSTRAINT, `实际 ${b.code}: ${b.reason}`); assert.match(b.reason, /u1_relay_identity/);
+  assert.strictEqual(a2Rows(r2), 0, '第二次的 A2 行必须随整笔回滚'); assert.strictEqual(idRows(K.pubkey), 1);
+  assert.strictEqual(st.read(c2)?.usedAt ?? null, null, '第二次挑战不得被消费');
 });
 
 sqlite.close();

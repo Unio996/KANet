@@ -15,6 +15,7 @@ import { randomUUID } from 'node:crypto';
 
 const dir = mkdtempSync(join(tmpdir(), 'nwt-behav-'));
 process.env.DB_PATH = join(dir, 'probe.db');
+process.env.KASPA_NETWORK = 'testnet-12';   // §10 C3: 生产入口从本地配置取 localNetwork(kanet.env 同值)
 const { runMigrations } = await import('../db/migrate.js');
 const { sqlite, dbPath } = await import('../db/client.js');
 assert.ok(dbPath.startsWith(dir), '安全闸: 必须临时库, 实际 ' + dbPath);
@@ -23,6 +24,7 @@ runMigrations();
 const { Mnemonic, XPrv, PrivateKey, signMessage } = await import('kaspa-wasm');
 const { deriveIdentityPubkey, rootFingerprint } = await import('./u1-same-origin.mjs');
 const { buildPopPayload, popMessageHashHex } = await import('./u1-registration-pop.mjs');
+const { S10_DOMAIN, S10_VERSION, s10SignedMessage } = await import('./u1-s10-identity.mjs');
 
 const Fastify = (await import('fastify')).default;
 const { registerIdentityRoutes } = await import('../api/identities.js');
@@ -55,7 +57,11 @@ async function buildSubmission({ relayId, id, challenge }) {
   const hashHex = popMessageHashHex(payload);
   const priv = new PrivateKey(id.privHex);
   const signature = signMessage({ message: hashHex, privateKey: priv.toString() });
-  return { relayId, rootXpub: id.rootXpub, identityIndex: 0, identityPubkeyXOnly: id.pubkey, challenge, signature };
+  // §10 C3: relay 地址绑到本身份叶钥 + 同钥签 S10(epoch=challenge); 各格期望不改
+  sqlite.prepare('UPDATE relay_nodes SET address = ? WHERE id = ?').run(priv.toPublicKey().toAddress('testnet-12').toString(), relayId);
+  const f = { domain: S10_DOMAIN, version: S10_VERSION, network: 'testnet-12', relayPubkeyXOnly: id.pubkey, operation: 'register', epoch: challenge };
+  const s10 = { ...f, signature: signMessage({ message: s10SignedMessage(f), privateKey: priv.toString() }) };
+  return { relayId, rootXpub: id.rootXpub, identityIndex: 0, identityPubkeyXOnly: id.pubkey, challenge, signature, s10 };
 }
 
 let pass = 0, fail = 0;
