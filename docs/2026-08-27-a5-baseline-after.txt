@@ -1,0 +1,48 @@
+=== A.5 verify @ 2026-08-27T12:01:21Z host=DESKTOP-DA9QQ46 ===
+
+[1] llama-server.exe process
+  PID=4976 Start=27-Aug-26 18:58:47 ctx-size=(CommandLine unreadable, maybe SYSTEM non-elevated) PagedMem=0GB PrivateCommit=13.58GB
+  CommandLine=(null=SYSTEM non-elevated)
+
+[2] logs/llama-server.log latest KV cache line
+  llama_kv_cache: size = 4352.00 MiB (262144 cells,   8 layers,  4/1 seqs), K (q8_0): 2176.00 MiB, V (q8_0): 2176.00 MiB
+
+[3] /props n_ctx (curl :8000)
+  n_ctx=262144 model=Qwythos-9B-Claude-Mythos-5-1M-Q6_K.gguf
+
+[4] nvidia-smi VRAM
+  used,total = 13117 MiB, 32607 MiB
+
+[5] OS free commit
+  FreeVirtualMemory(free commit)=44.2GB  Used=55.4GB  Limit=99.6GB
+
+[6] llm-watchdog running? (expect none)
+  llm-watchdog count=0 (not running, OK)
+
+[7] netstat :8000 LISTENING
+  TCP    127.0.0.1:8000         0.0.0.0:0              LISTENING       4976
+
+=== end ===
+
+=== [8] 生效 llama 参数 (从 logs/llama-server.log 新 PID 4976 启动块取; CommandLine 读不到=SYSTEM 非提权) ===
+  --ctx-size    : 262144  (n_ctx=262144, /props + KV 262144 cells 三处印证; before=1048576)
+  --host        : 127.0.0.1  ("server is listening on http://127.0.0.1:8000")
+                  🔴 改善: before(17428) 监听 0.0.0.0:8000(全网卡=暴露面), after(4976) 收窄到 127.0.0.1(仅本机)
+  --cache-type-k: q8_0  (KV: K (q8_0) 2176.00 MiB)
+  --cache-type-v: q8_0  (KV: V (q8_0) 2176.00 MiB)
+  threads       : n_threads=8 (n_threads_batch=8) / 24 逻辑核
+  flash_attn    : enabled
+  n_batch/n_ubatch : 2048 / 512
+  :8000 监听址  : 127.0.0.1:8000 (netstat PID 4976) — 非 0.0.0.0
+
+=== 对照 before (docs/2026-08-27-a5-baseline-before.txt) 关键变化 ===
+  n_ctx        1048576 -> 262144        (256k, A.5 cutover 生效)
+  PrivateCommit 30.15GB -> 13.58GB
+  VRAM         28488MiB -> 13117MiB
+  kv cache     17408MiB -> 4352MiB (262144 cells)
+  free commit  32.7GB  -> 44.1GB        (used 67GB -> 55.5GB; 合 r4 硬闸 <=80 & >=20)
+  :8000 host   0.0.0.0 -> 127.0.0.1      (暴露面收窄)
+  llm-watchdog 0       -> 0             (未跑, 无 memgate 干扰)
+
+注: 新 llama PID 4976 起于 18:58:47 (J1 重拉, A.5); pidfile 缺(非标准 launcher). 谁停 17428 未查(Bettor 免)。
+本文件 [READ/MEASURED] 只读实测, 未 commit (等 Bettor)。

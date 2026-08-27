@@ -36,6 +36,22 @@ Device 0: RTX 5090, VRAM 32606 MiB
   - ⇒ **降 ctx 降 VRAM 是真价值且已坐实**(82.6%→~42%, 线性); 但 **"降 ctx 缩小 8/23 那个系统 commit 足迹" = 未证**。**A.5 低 ctx 单实例重启实测私有 commit = 改默认值的硬前置(见 A.5)**; 测出前**本稿不许**声称降 ctx 缩小了 OOM 足迹。
   - 🔴 **这反而强化: 8/23 OOM 真防线 = 探针稿 §0.5 内存闸**(它按实测 FreeVirtualMemory 拒拉, 不依赖"降 ctx 是否降 commit"这个未证命题)。降 ctx = GPU 余量 + 纵深防御, **不是** OOM 主刀。
 
+### A.2-after A.5 已执行实测（`docs/2026-08-27-a5-baseline-after.txt`, live PID 4976, n_ctx **262144**）`[MEASURED 2026-08-27]`
+J1 于 18:58:47 重拉 llama 到 256k(pid 17428→4976)。a5-verify after 对照 before(`docs/2026-08-27-a5-baseline-before.txt`):
+| 项 | before(17428, 1M) | after(4976, 256k) | 变化 |
+|---|---|---|---|
+| n_ctx | 1,048,576 | 262,144 | 256k 生效 |
+| KV cache (q8_0) | 17,408 MiB | **4,352 MiB (262144 cells)** | ↓13.0 GiB |
+| PrivateCommit | 30.15 GB | **13.58 GB** | **↓16.57 GB** |
+| VRAM used | 28,488 MiB | 13,117 MiB | 82.6%→~40% |
+| free commit | 32.7 GB (used 67) | 44.1 GB (used 55.5) | 合 r4 硬闸 ≤80∧≥20 |
+| :8000 host | 0.0.0.0 | **127.0.0.1** | 暴露面收窄(旧全网卡→仅本机) |
+| llm-watchdog | 0 | 0 | 未跑, 无 memgate 干扰 |
+- ✅ **KV 4,352 MiB 恰中 A.2 表对 262144 的预测(4,352 MiB)** ⇒ 线性 KV 模型坐实。
+- 🔵 **A.2 那条"未证"悬案现有实测了**: 降 ctx 1M→256k, **私有 commit 实降 ~16.6 GB**(30.15→13.58) ⇒ **降 ctx 确实缩小了私有 commit 足迹**(A.5 硬前置已满足, 不再是"未证")。原~26GB"无逐字出处"部分随 ctx 大幅缩小, 佐证其确与 ctx/KV 相关(CUDA VMM host backing 推断得到支持, 但仍非逐字坐实)。
+- 🔴 **不改结论**: OOM 主防线仍是探针稿 §0.5 内存闸(按实测 FreeVirtualMemory 拒拉); 降 ctx = GPU 余量 + 私有 commit ↓16.6GB 的纵深, 不替代内存闸。
+- 📌 J1 重拉用手动(pidfile 缺=非标准 launcher)。谁停 17428 未查(4689 进程退出审计默认关, Bettor 免查)。after 文件未 commit(等 Bettor 批一并推)。
+
 ### A.3 默认值依据（不拍脑袋）`[MEASURED + READ]`
 四条独立证据, 结论 = **256k 足够且有原生余量, 1M 是纯浪费**:
 1. **架构(硬证据)**: 日志 `n_ctx_orig_yarn = 262144` + `freq_scale = 0.25` ⇒ 模型**原生训练 context = 262,144(256k)**, 1M 是 **4x YaRN 外推**(freq_base 1e7, scale 0.25)。外推段质量降、且付 4x KV。**256k = 拿满原生高质量 context 而不付外推税。**
