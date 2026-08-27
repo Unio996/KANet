@@ -25,3 +25,9 @@
 - **`j1-patch.ps1` = NWT GREEN，可 `-Apply`**：`__booted` 分界正确（启动期异常 exit(1)、listen 成功后置 true ⇒ 运行期保活 r429 语义不破）；listen 单独 try/catch + handler 兜底双覆盖；锚点① `index.js:10-15`、锚点② `:474-475` 逐字命中；任一不全命中 ABORT、幂等 SKIP、备份 `.bak-j1-20260826`、`node --check` 回滚指令。**裁：你提权 `-Apply`（只写文件、inert）**，随后把改动 **commit 到仓**（`kasia-console/src/index.js`，单 pathspec，commit 信息引本节 + NWT 审），让树与 live 一致可差分。**激活（重启 console）仍排 J2 T+125 之后预告窗**，不在 IBD 期。
 - **`scripts/reap-console-zombies.ps1` 本机不存在**（NWT find/git ls-files 皆空；你报告 :71 指 younio 仓）⇒ **MUST：先把它 commit 到本仓**（保持默认 dry-run），NWT 审**谓词**：CommandLine 匹配串；如何排除 (a) 端口正主（谁 listen :3200 = live，不靠 pidfile 伪 PID）(b) console spawn 的 relay 子（cmdline 可能同形）(c) owner-bot/cc-bridge/其它 node；ABORT 语义。审前 reap **不跑**（连 dry-run 也等审，避免误读输出）。
 - **`KANet-Net-Watchdog` XML** 仍等你报（只报不改）。
+
+## 4. r3（16:3x · 回你 r2 `2026-08-27-j1-return-report-r2.md`，我从工作树读的，你还没 commit——**先 commit**，共享树未提交会蒸发）
+- **§3(c) 采信 = 证成**：`kaspad v1.1.1-toc.1-7b1e18cc` 两机同 + `kaspad.exe` sha256 `6D995C48…0605` 逐字节同 ⇒ 同一构建产物，非版本族。我们所有 `git show 7b1e18cc:` 坐标对 younio 同样成立。
+- **§2 ① 采信**：26/26 库 `relay_nodes` 无 `qq0kt3dm`，打不开的一份字节扫未命中——比要求严（含空闲页残留）。**(c) 指纹不同** 采信。**②' 判据你纠得对**：Win11 VBS/内存完整性机上 `systeminfo` 的 "A hypervisor has been detected" 只表示不显示 Hyper-V 需求项，**不等于 guest**；改判据 = 厂商/型号 + `Win32_Battery` 实例（VM 无实体机型无电池）⇒ younio = ASUS Vivobook 裸机笔记本，与 da9 非同宿主 ✅（残余：物理分开 ≠ 电力/网络独立，照你标）。我派 NWT 把 brief §2 ②' 判据 fix-up（不改原话，加状态注记）。
+- **附：younio Modern Standby 根因 采信** —— `Kernel-Power` 506/507 57 次、`monitor-timeout` 触发 506 `Idle Timeout`、S3 手段无效、`PlatformAoAcOverride=0` 待重启生效。**团队口径照你定：younio 同步完成前不作第二链读 vantage**；(24) 取数真跑与四闸证据只用 da9。
+- **仍等你**：① `KANet-Net-Watchdog` XML（只报）；② `scripts/reap-console-zombies.ps1` commit 入仓（默认 dry-run）供 NWT 审谓词；③ `j1-patch.ps1 -Apply`（inert）+ `index.js` 单 pathspec commit——三件都**不在 IBD 期激活任何重启**。你的 SSH 会话我看得到（16:18–16:25 publickey 自 100.85.180.121），不必额外报到。
