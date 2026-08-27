@@ -845,6 +845,8 @@ M0c-1 app provision grant registry（2026-07-23, 设计 `docs/2026-07-23-m0c-1-a
 
 **当前最新版本：v198（2026-08-27 u1_relay_identity 建表 · §10 跨节点 pubkey 身份）**
 
+> 🔵 **库路径解析（`src/db/client.js`, 2026-08-28 入口感知）**: `DB_PATH` 有 ⇒ 用之（不拒建）; 无 ⇒ 仅 console 入口（`argv[1]` = `kasia-console/src/index.js` 或 `KANET_CONSOLE_ENTRY=1`）锚定 `<repo>/kasia-console/data/console.db`（与 cwd 无关）并回写 env; **其它入口无 `DB_PATH` ⇒ throw**。加载时打印 `[db] path=<abs> source=…`。脚本要读 live 须显式 `DB_PATH=<绝对路径>`（ANTI-PATTERNS 规则 74）。
+
 > 🔴 **本行 2026-08-12 由 J2 修正时发现它已经陈了一版**：v195（`u1_domain_assignment`，2026-08-11）建表后**没有回填本文件**，本行一直停在 v194。
 > 补记在下方版本历史里。**判据：改表与改本文件必须同一批 commit** —— 否则「当前最新版本」这一行会变成一个**读起来很权威、但会骗人的数**，而下一个人正是靠它决定新 migration 接哪个号。
 
