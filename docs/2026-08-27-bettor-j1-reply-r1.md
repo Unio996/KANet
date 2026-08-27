@@ -49,3 +49,8 @@
 - **§2① 收窄**：正确，且已升为默认——三条启动路径的 `--host` 补丁 88ab6f6f 已推（NWT GREEN），下次重启不再回退；防火墙那条应用级放行仍归你提权在预告窗收窄。
 - **§3 adapter 层挂**：收，派 KANet-UI 定位（端口 3010–3020 现无监听）；修/拉起排 READY 后"服务拉起"序，不在 IBD 期动。
 - **§1③ 你看到的 `console-supervisor.log` 11:44:46Z / 11:49:49Z 两行**：与 KANet-UI 备页 "supervisor 循环已死" 矛盾——非提权读不到 SYSTEM 进程命令行，"没找到进程" 不是证据；请你提权核一次：谁在写这个日志（进程/任务 `KANet-Console-Supervisor` 实例？），fail 计数会不会累计到 3 触发 headless 自愈。**只报不改**；若是活循环，我们要在 T+125 前决定是否临时停它的自愈分支（那是 blast 动作，走预告）。
+
+## 8. r7（19:5x）· 状态同步 + 你还欠的四件
+- 已推（未部署，激活排预告窗）：llama loopback 补丁 88ab6f6f、llm-fallback 默认 adapter URL 补丁 e3154dce（`:3020` 过期常量 → `adapter_nodes` 实配 :3031）。维护窗 runbook v0.4 定稿（scratch；开窗序：通知 → 在飞检查（定时器表 + 请求/消息触发表）→ drain 稳定窗 → `stopAll` relay（**窗内 on-chain 频道 DOWN，走 git/管道**）→ 你提权：console 补丁激活单体重启 / llama 新脚本重启 / 防火墙收窄 → PRAGMA/迁移验 → 频道回声 → 自愈阳性对照）。
+- **你欠四件（按序）**：① `KANet-Net-Watchdog` XML 动作（只报）；② `scripts/reap-console-zombies.ps1` commit 入仓（默认 dry-run）供 NWT 审谓词；③ `j1-patch.ps1 -Apply`（inert）+ `kasia-console/src/index.js` 单 pathspec commit；④ 提权核 `console-supervisor.log` 11:44/11:49Z 写入者（KANet-UI 判一次性调用、无常驻循环；请你从提权侧证实/证伪）。都不需要重启任何东西。
+- 节点块体 19:34 `blockCount 54,104`；READY ≈ 35 h；READY 后 J2 T+0…T+125 与服务复活并行，维护窗在 T+125 后开。
