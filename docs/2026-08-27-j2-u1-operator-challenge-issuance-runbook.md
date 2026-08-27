@@ -1,7 +1,7 @@
 # §6-1 Track-A · operator 手工挑战签发 + 一次真注册 E2E · runbook
 
 > 🔴 **Track-A operator 驱动 · 不部署自动签发口 · 部署闸绑 §10**(COORD-LEDGER (527)(528) 终裁, Codex (529) ACCEPTED-with-scope)。本 runbook 里的"签发"是 operator 在本机手工跑一次脚本, 不是 HTTP 端点、不常驻、不进 cron。
-> **Status**: DRAFT v0.4 · J2 2026-08-27 · Bettor 派工 (8) · NWT 审 v0.2 = PASS, v0.3 = 吸收 NWT 三条硬化 + Bettor 两句, **v0.4 = §10 C4**(D-013 §1 "§10 GO": submission 第七字段 `s10`, 验收加身份表臂, ⑦ 红臂进 live 负测)· 报备层, **写完未在 live 跑**(脚本只在临时库自测, 见 §7)· 由 **KANet-UI(operator)** 执行 E2E
+> **Status**: DRAFT v0.5 · J2 2026-08-28 · Bettor 派工 (8) · NWT 审 v0.2 = PASS, v0.3 = 吸收 NWT 三条硬化 + Bettor 两句, v0.4 = §10 C4(submission 第七字段 `s10`, 验收加身份表臂, ⑦ 红臂进 live 负测), **v0.5 = C6: §4-bis 收 Codex MSG-285(bridge 5bf01a28)GREEN-at-live 八臂**· 报备层, **写完未在 live 跑**(脚本只在临时库自测, 见 §7)· 由 **KANet-UI(operator)** 执行 E2E
 > 🔴 **v0.4 前提**: 本 runbook 的 §10 各臂要求 **C3(`d03f7365`)+ v198 已在 live 进程/库**(D-005 独立迁移 Owner 拍);部署前跑主臂步 3 会因 live handler 不认 `s10` 而在 PoP 层拒成别的码——那是"未部署"信号, 不是 runbook 坏。
 > 🔴 **"operator 手工签发"是【进程约定】不是【强制控制】**(NWT 裁): 跑脚本 = 文件系统能力事件(需 `console.db` 写权限), **不是 operator 身份认证事件**;脚本不认证 operator, 谁有同样 DB 写权限谁都能跑;它的权威 = console-loopback 文件访问, 与 ⑦/§10 同源 ⇒ **不许暗示"脚本签发 = operator 已授权"**。脚本入库 = 可发现: 把"手写 INSERT"变成现成工具, 不跨边界但**降低本地 actor 门槛**, loopback 信任内可接受, **北极星面前须重估**。
 > 🔴 **常驻约束**: `u1-issue-challenge.mjs` **永不**接 HTTP route / cron / daemon;任何把它 wrap 成端点或定时任务的改动 = 自动签发口 = **§10-gated, 须先报备**。谁碰这个脚本先 `grep -rn "u1-issue-challenge" kasia-console/src scripts` 确认零引用(ANTI-PATTERNS 审查清单同句)。
@@ -57,6 +57,24 @@
    - **(c) 二次同挑战 ⇒ `CHALLENGE_ALREADY_USED`** = 主臂验收 (c), 不重复。
    - **(d · v0.4 §10 ⑦ 红臂, live 可跑、零写入)**: 主臂步 3 之前, 把同一 submission **去掉 `s10`** POST 一次 ⇒ HTTP 400 `code='RELAY_NOT_OWNED'`, 挑战**仍未消费**、`u1_relay_identity` 行数不变(预筛在 PoP 之前, 到不了 CAS)。**不在 live 上跑"攻击者钥签 s10 抢 relay-B"**(同 v0.3 撤回那条的理由: 它若成功就在 live 留痕)——那条边界在临时库证明(`u1-registration.test.mjs` R7 臂)。框架层同款 case: `test-framework/cases/identity/u1_s10_register_negative_no_s10.test.mjs` / `…_bad_s10.test.mjs`(后部署验收)。
    - 🔴 **撤回 live 上的"同 nonce 换 relay_id"臂**(NWT 自纠): 它在 live 会真成功、造一个抢注形状的伪注册, 即便回滚也在 live 库留过痕。**这条边界改在临时库证明**(§7 第二组), live E2E 不做。
+
+## §4-bis GREEN-at-live 八臂(v0.5 · Codex MSG-285 回 `5bf01a28` §5 逐条, 措辞照其原文; 全部 Owner-controlled, 不碰资金路)
+
+> 前提: D-005 迁移 + console 重启已由 Owner 拍并执行(v197/v198 在 live 库)。**Codex 原话: "GREEN-at-live: OPEN pending D-005 + the post-migration arms"; 本节任一臂缺 = 仍 code-layer GREEN, 不升 live。** 每臂证据形同 §5(HTTP 状态+body / SELECT 原文 / `git log -1` / db 绝对路径)。与 §4 主臂/负测臂重合的, 同一次跑即可, 逐臂对号。
+
+| # | 臂(Codex 原文语义) | 怎么跑 | 判据 |
+|---|---|---|---|
+| L1 | migration/schema acceptance against the actual live DB(v198 存在 + 约束) | `DB_PATH=<live 绝对路径>` 只读: `SELECT sql FROM sqlite_master WHERE name='u1_relay_identity'`; 不在 live 库跑 ④ 探针(它会 INSERT) | DDL 含 `relay_pubkey_xonly TEXT PRIMARY KEY CHECK(...)`、`network ... CHECK (network IN ('testnet-12', 'mainnet'))`、`operation ... CHECK (operation = 'register')`、`epoch ... UNIQUE`; `PRAGMA index_list` 只有 pk/u |
+| L2 | positive S10 registration on an Owner-controlled relay(A2 行 + `u1_relay_identity` 行 + 挑战消费) | = §4 主臂 1-3 + 验收 (a)(a′)(b) | 三者齐; 身份行 = 活算 `fromAddress(relay.address)` |
+| L3 | replay of the same submission → reject, no additional identity rows | = §4 验收 (c) | `CHALLENGE_ALREADY_USED`, 两表各仍 1 行 |
+| L4 | missing-S10 HTTP negative → `RELAY_NOT_OWNED`, no A2/S10 row, challenge not consumed | = §4 负测 (d)(去掉 `s10` 的同 submission, **主臂步 3 之前**) | 400 `RELAY_NOT_OWNED`; `used_at` 空; 两表零新行 |
+| L5 | controlled R7: claim relay B with another **controlled** key X → reject; then B's correct key → pass | Owner 控的第二把钥 X(另一台 Owner relay 的地址钥, 或 builder 对 X 的 relay 行生成); 用 X 的 PoP+S10 对 B 的 relayId POST ⇒ 拒; 再用 B 自钥(builder)⇒ 过 | 先 `RELAY_NOT_OWNED` 零写入未消费; 后 200 + 三者齐。⚠ v0.3 撤回的是"攻击者"形; Codex 明写 **controlled** ⇒ 两把钥都 Owner 控, 成功路只写 B 自己的行, 允许 |
+| L6 | cross-network negative against the live local network authority | 同 submission 的 `s10` 换成 `network:'mainnet'` 重签(builder 加 `KASPA_NETWORK=mainnet` 只为生成; **端点侧不改配置**) | 400 `S10_INVALID`(reason 含 `NETWORK_MISMATCH`), 零写入未消费 |
+| L7 | legacy-poisoning negative: `ecdsa_pubkey_xonly` cannot substitute for the address-derived key | 🔴 **不在 live 改 `relay_nodes.ecdsa_pubkey_xonly`**(在册禁手插活表); 改为: 读 live 该列现值(可能非空)并证明 L5 的拒/过**与该列无关**——SELECT 该列 + 对照 `fromAddress(address)`, 若两者不等而 L5 仍按地址钥判, 即为证; 若相等则本臂降级为"临时库 N11 臂 + live 该列零参与代码 grep(`u1-registration.mjs` 无 `ecdsa_pubkey_xonly`)" 并如实标注 | 结论必须写明是哪一种证据 |
+| L8 | DB-identity positive control: the e2e observes the intended live DB, not a cwd-created stray DB | e2e 脚本起步三道库身份断言(C4 fix-up `198012ae`)+ 输出 `db = <绝对路径>` | 路径 = `…/kasia-console/data/console.db` 且 `relay_nodes` 非空(ANTI-PATTERNS 规则 74) |
+
+- 🔴 **顺序**: L8 → L1 → L4(负, 主臂前) → L6(负) → L2(正) → L3(重放) → L5(受控 R7) → L7(读数/对照)。负测在正向之前(闸在不在先看清)。
+- 🔴 **回滚**(§6): L2/L5 各留 1 行 A2 + 1 行身份 + 1 条挑战; 三方复核后按 §6 三行 SQL 删。
 
 ## §5 证据留档
 - `scratch/u1-e2e-<date>/`: dry-run JSON、**issue JSON(只在挑战被消费之后才落盘/入证据——消费前它是活 bearer, 消费后 inert)**、submission.json(**不含密钥**;六字段中 `challenge` 同样只在消费后记)、三次 curl 的 HTTP 状态与 body、三条 SELECT 输出、`git log -1`、console PID。

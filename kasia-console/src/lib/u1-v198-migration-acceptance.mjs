@@ -8,6 +8,7 @@ const dir = mkdtempSync(join(tmpdir(), 'v198-accept-'));
 process.env.DB_PATH = join(dir, 'probe.db');
 const { runMigrations } = await import('../db/migrate.js');
 const { sqlite, dbPath } = await import('../db/client.js');
+const { S10_NETWORKS } = await import('./u1-s10-identity.mjs');   // ④-8: 表枚举须与验证器枚举同集
 assert.ok(dbPath.startsWith(dir), `安全闸: 必须临时库, 实际 ${dbPath}`);
 runMigrations();
 
@@ -61,6 +62,22 @@ t('④-7 写入方唯一: 仓内 src/ 只有 u1-registration.mjs 一处 INSERT I
   const walk = (d) => { for (const e of readdirSync(d)) { const p = join(d, e); const s = statSync(p); if (s.isDirectory()) { if (e !== 'node_modules') walk(p); } else if (/\.(m?js|cjs)$/.test(e) && !/u1-v198-migration-acceptance/.test(e)) { if (/INSERT\s+INTO\s+u1_relay_identity/i.test(readFileSync(p, 'utf8'))) hits.push(p); } } };
   walk(root);
   A(hits.length === 1 && /u1-registration\.mjs$/.test(hits[0]), `写入方应恰为 u1-registration.mjs, 实际: ${hits.join(',') || '(无)'}`);
+});
+// ④-8 定位: 防御纵深 —— app 层 C3 已按 localNetwork 拒(screenS10), 此 CHECK 挡【绕过 app 的直接 INSERT】, 与 operation CHECK 同族。
+// 🔴 相等断言的两个源必须独立: 源 A = sqlite_master 里【真实 CREATE TABLE sql】解出的 CHECK 值集; 源 B = import 的验证器常量 S10_NETWORKS。
+//    禁止用同一字面量构造 expected 再自比(自证测不出漂移); 末尾阳性对照证明比对器本身有判别力。
+t('④-8 (Codex MSG-285 SHOULD-FIX) network 表级闭枚举: devnet / testnet-11 / 空串 直接 INSERT ⇒ SQLITE_CONSTRAINT; testnet-12 / mainnet 过; 且 DDL(sqlite_master)枚举集 === 验证器 S10_NETWORKS(两独立源机械比对)', () => {
+  const insNet = (net, ep, pk) => sqlite.prepare(`INSERT INTO ${T} (relay_pubkey_xonly, network, operation, epoch, signature) VALUES (?,?,?,?,?)`).run(pk, net, 'register', ep, 'sig');
+  for (const [net, ep, pk] of [['devnet', 'n1', '0'.repeat(63) + '4'], ['testnet-11', 'n2', '0'.repeat(63) + '5'], ['', 'n3', '0'.repeat(63) + '6']]) {
+    A(rejects(() => insNet(net, ep, pk), /CHECK/i), `network=${JSON.stringify(net)} 竟通过`);
+  }
+  insNet('testnet-12', 'n4', '0'.repeat(63) + '7'); insNet('mainnet', 'n5', '0'.repeat(63) + '8');
+  const m = /network\s+TEXT\s+NOT NULL\s+CHECK\s*\(\s*network\s+IN\s*\(([^)]*)\)\s*\)/i.exec(liveSql());
+  A(m, 'DDL 里没有 network IN (...) CHECK');
+  const ddlSet = m[1].split(',').map(s => s.trim().replace(/^'|'$/g, '')).sort();
+  assert.deepStrictEqual(ddlSet, [...S10_NETWORKS].sort(), `表枚举 ${ddlSet} ≠ 验证器枚举 ${[...S10_NETWORKS]}`);
+  // 阳性对照: 比对器本身有判别力 —— 人为多一个元素必须不等
+  assert.notDeepStrictEqual([...ddlSet, 'devnet'].sort(), [...S10_NETWORKS].sort());
 });
 console.log(`\n④ 验收: ${pass} PASS / ${fail} FAIL   (临时库 ${dbPath})`);
 process.exit(fail ? 1 : 0);

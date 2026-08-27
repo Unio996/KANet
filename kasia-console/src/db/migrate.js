@@ -5744,6 +5744,14 @@ export function runMigrations() {
   //     写法用 `NOT (col GLOB '*[^0-9a-f]*')`(全串 hex, 同 :2452 idiom), **不是** `GLOB '[0-9a-f]*'`(只约束首字符)
   //     也**不是** `[!...]`(SQLite GLOB 把它当字面集, :2439 那处即此错形)。
   //   · `operation` CHECK = 'register': v1 硬白名单(P9)在表层再钉一次; rotate/revoke 是 v2 的事(设计 §7 OPEN), 到时 bump 语义。
+  //   · `network` CHECK IN ('testnet-12','mainnet') = 表级闭枚举, 与 u1-s10-identity.mjs S10_NETWORKS 同集(④-8 机械比对两处不漂)。
+  //     🔵 **Codex MSG-285 SHOULD-FIX(bridge 5bf01a28, C6 就地改)**: 今天唯一写入方先过验证器, 但 operation/pubkey 已在表层钉死而 network 只是写入方不变量
+  //     ⇒ 防御纵深: app 层 C3 已按 localNetwork 拒(u1-registration.mjs screenS10), 此 CHECK 挡【绕过 app 的直接 INSERT】造出协议域外(如 'devnet')的权威行, 与 operation CHECK 同族。
+  //     **就地改 v198 DDL 文本而不另开 v199 —— 三条论证(Bettor/NWT 审时闸)**:
+  //       (a) live 库从未跑过 v198(Bettor 2026-08-27 直读 live 无 u1_relay_identity) ⇒ 本块对 live 等价于首次建表, 新 CHECK 必生效;
+  //       (b) `CREATE TABLE IF NOT EXISTS` 对【已跑过旧 v198 的 dev/test 库】不补 CHECK(旧表静默留着) —— 它们 disposable、可重造, 不追补, 也不是权威;
+  //       (c) 验收 u1-v198-migration-acceptance.mjs 每次 mkdtempSync 全新库 ⇒ 必走新 CHECK(④-8 直接 INSERT 'devnet' 必 SQLITE_CONSTRAINT)。
+  //     另: SQLite 不能 `ALTER TABLE … ADD CHECK`(须整表重建) ⇒ 对 never-deployed 迁移就地改是务实选择; 一旦 v198 在任何权威库跑过, 再改约束必须走新版本号。
   //   · `epoch` UNIQUE: 同一 challenge 只能承载一次 S10 注册(与 u1_identity_challenge 的一次性消费同义, 结构再兜一层)。
   //   · `signature` 留证(审计), 不作查找键。
   //   🔵 **对 live 的即时影响 = 零**: additive + IF NOT EXISTS + 今日无写入方(写入方 = C3 起 registerIdentity 事务内);
@@ -5753,14 +5761,14 @@ export function runMigrations() {
       CREATE TABLE IF NOT EXISTS u1_relay_identity (
         relay_pubkey_xonly TEXT PRIMARY KEY
           CHECK (length(relay_pubkey_xonly) = 64 AND NOT (relay_pubkey_xonly GLOB '*[^0-9a-f]*')),
-        network            TEXT NOT NULL,
+        network            TEXT NOT NULL CHECK (network IN ('testnet-12', 'mainnet')),
         operation          TEXT NOT NULL CHECK (operation = 'register'),
         epoch              TEXT NOT NULL UNIQUE,
         signature          TEXT NOT NULL,
         registered_at      TEXT NOT NULL DEFAULT (datetime('now'))
       )
     `);
-    console.log('[migrate] v198: u1_relay_identity 建表完成 (§10 跨节点 pubkey 身份, register-only; PK=relay_pubkey_xonly 小写64hex CHECK; 无 local_relay_id 列/无 relay_id 回退索引(活算 fromAddress); epoch UNIQUE; 今日无写入方, C3 起).');
+    console.log('[migrate] v198: u1_relay_identity 建表完成 (§10 跨节点 pubkey 身份, register-only; PK=relay_pubkey_xonly 小写64hex CHECK; network 闭枚举 CHECK; 无 local_relay_id 列/无 relay_id 回退索引(活算 fromAddress); epoch UNIQUE; 写入方 = u1-registration.mjs 事务内).');
   }
   console.log('[migrate] DB migrations complete.');
 }
