@@ -16,7 +16,7 @@ const CONSOLE_ENTRY = resolve(REPO, 'kasia-console', 'src', 'index.js');
 const dir = mkdtempSync(join(tmpdir(), 'client-path-'));
 const tmpDb = join(dir, 'v3', 'probe.db');
 process.env.DB_PATH = tmpDb;
-const { resolveDbPath, exportDbPathToEnv, DB_PATH_REFUSE_MSG, dbPath } = await import(pathToFileURL(CLIENT).href);
+const { resolveDbPath, exportDbPathToEnv, DB_PATH_REFUSE_MSG, dbPath, sqlite } = await import(pathToFileURL(CLIENT).href);
 
 let pass = 0, fail = 0;
 const t = (n, f) => { try { f(); pass++; console.log('[PASS] ' + n); } catch (e) { fail++; console.log('[FAIL] ' + n + ' :: ' + e.message); } };
@@ -71,6 +71,9 @@ t('V6 console 入口默认解析后回写 env(子进程继承); DB_PATH 已有�
   assert.throws(() => resolveDbPath({}, pathToFileURL(CLIENT).href, resolve(REPO, 'kasia-console', 'src', 'index.js.bak')), /refusing to default to live/);
   assert.throws(() => resolveDbPath({}, pathToFileURL(CLIENT).href, undefined), /refusing to default to live/);
 });
-rmSync(dir, { recursive: true, force: true });
+// 🔴 汇总与退出码在清理【之前】定; 清理失败只 warn(Bettor 抓: 本进程 better-sqlite3 句柄未关 ⇒ Windows rmSync EPERM ⇒ 汇总没打、exit=1 假红)
 console.log(`\n${fail === 0 ? '✅' : '🔴'} client default-path: ${pass} PASS / ${fail} FAIL`);
-process.exit(fail ? 1 : 0);
+process.exitCode = fail ? 1 : 0;
+try { sqlite.close(); } catch {}
+try { rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
+catch (e) { console.warn(`⚠ 临时目录清理失败(不改判定): ${dir} — ${e?.message || e}`); }
