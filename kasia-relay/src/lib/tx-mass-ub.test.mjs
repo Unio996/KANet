@@ -84,6 +84,26 @@ await t('V9b hook 不改 submit 语义: 返回值原样; getMempoolEntry 抛错 
   const r = await rpc.submitTransaction({}); assert.strictEqual(r.transactionId, 'ff'.repeat(32));
   void fakeRpc;
 });
+// ── NWT MUST(泄漏): submit 抛错后 Map 不增; cap 逐出最旧 ──
+const { __testOnlyMassObserveSize } = await import('./p2sh.mjs');
+await t('V10a submit 抛错(网络/mempool 拒) ⇒ Map 条目被 finally 清, size 不增', async () => {
+  const big = '4ce0' + 'ab'.repeat(224);
+  const s0 = __testOnlyMassObserveSize();
+  for (let i = 0; i < 5; i++) {
+    const { tx, utxos } = mk({ version: 1, budget: 70, sigop: 0, sig: big, inVals: [100_000_000n + BigInt(i), 50_000_000n, 30_000_000n], outVals: [150_000_000n, 27_000_000n] });
+    capture(() => __testOnlyAssertTxInvariants(utxos, tx, 'V10a', 'testnet-12'));
+    assert.strictEqual(__testOnlyMassObserveSize(), s0 + 1, '记录应先进 Map');
+    const rpc = __testOnlyWrapRpcForMassObserve({ submitTransaction: async () => { throw new Error('mempool reject'); }, getMempoolEntry: async () => ({}) });
+    await assert.rejects(() => rpc.submitTransaction({ transaction: tx }), /mempool reject/);
+    assert.strictEqual(__testOnlyMassObserveSize(), s0, `第 ${i} 次失败后 Map 泄漏: ${__testOnlyMassObserveSize()} ≠ ${s0}`);
+  }
+});
+await t('V10b cap: 连续 300 条不 submit 的记录 ⇒ Map 上限 256, 逐出最旧且 evicted 计数', async () => {
+  const big = '4ce0' + 'ab'.repeat(224); const ev0 = _massObserveStats.evicted;
+  // ⚠ txid 只取决于 outpoint/输出/脚本, 不取决于 utxo amount ⇒ 首版只变 inVals 得到 300 个【同一 txid】(Map 恒 1 条, evicted=0 假绿形); 改为每条变输出值
+  for (let i = 0; i < 300; i++) { const { tx, utxos } = mk({ version: 1, budget: 70, sigop: 0, sig: big, inVals: [200_000_000n, 50_000_000n, 30_000_000n], outVals: [150_000_000n + BigInt(i), 27_000_000n] }); capture(() => __testOnlyAssertTxInvariants(utxos, tx, 'V10b', 'testnet-12')); }
+  assert.ok(__testOnlyMassObserveSize() <= 256, `size ${__testOnlyMassObserveSize()} > 256`); assert.ok(_massObserveStats.evicted - ev0 >= 44, `evicted ${_massObserveStats.evicted - ev0}`);
+});
 await t('常量表 = 7b1e18cc 值且冻结', () => { assert.ok(Object.isFrozen(MASS_CONSTS)); assert.strictEqual(MASS_CONSTS.storage_mass_parameter, 1_000_000_000_000n); assert.strictEqual(MASS_CONSTS.grams_per_compute_budget_unit, 100n); assert.strictEqual(MASS_CONSTS.grams_per_sigop, 1000n); assert.strictEqual(MASS_CONSTS.transient_factor, 4n); });
 console.log(`\n${fail === 0 ? '✅' : '🔴'} tx-mass-ub: ${pass} PASS / ${fail} FAIL`);
 process.exit(fail ? 1 : 0);
