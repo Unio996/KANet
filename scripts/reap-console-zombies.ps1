@@ -9,6 +9,10 @@
 #       ∧ cmdline 可读且含全路径 'kasia-console/src/index.js' ∧ cmdline 不含 kaspad/relay/adapter
 #       ∧ 父进程已不存在(孤儿)。任一不满足 => UNKNOWN 或 EXCLUDED。
 #
+# 🔴 运行注(交接 J1): pre-Apply dry-run 必须与 -Apply 【同提权级】——SYSTEM 僵尸的 cmdline
+#   非提权读不到 => UNKNOWN; 提权读得到 => CANDIDATE。非提权 dry-run 作提权 -Apply 的预览会【少算】
+#   (漏掉那些 cmdline 读不到才没进 candidate 的真僵尸)。⇒ J1 提权跑 dry-run 得证据, 同权 -Apply。
+#
 # 判据依据(承重闸②实核, KANet-UI 2026-08-27): 非提权 Get-NetTCPConnection -State Listen 能读到
 #   SYSTEM 进程 27412 的 OwningProcess(3200/3210) => 零监听信号可靠, live console 显示有监听=被排除。
 #
@@ -17,6 +21,8 @@
 param([switch]$Apply)
 
 $ErrorActionPreference = 'Stop'
+# MUST-FIX(NWT): -Apply 入口提权检查(任何枚举之前) —— 非提权 -Apply 拒绝, 防误以为杀成了实则权限不足静默失败
+if ($Apply -and -not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole('Administrator')) { throw 'reap -Apply refused: not elevated (run as Administrator)' }
 $INDEX_JS_PATH = 'kasia-console/src/index.js'   # 闸①: 全路径, 非裸 index.js (兜底 reparent 出子树的 relay/adapter 子)
 $INDEX_JS_ALT  = 'kasia-console\src\index.js'    # 反斜杠形
 $EXCLUDE_RE    = 'kaspad|relay|adapter'          # 绝不触
