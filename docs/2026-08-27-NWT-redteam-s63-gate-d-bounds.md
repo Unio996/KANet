@@ -31,6 +31,7 @@ J2 主张：M_observe 是活性成本大头，**不能砍数，只能收紧包�
 - **anchored claim 支（@L147 react）+ O 支 1（@L288-292）的 require 集**：`checkSigFromStack(A) ∧ blake2b ∧ OpInputCovenantId(O)==cid`（+ 反向焊 oauth + payout spk/value 焊 + `OpCovOutputCount==0`）。**`OpCovOutputCount` 限的是 covenant 输出，不是输入；没有任何 `OpTxInputCount`/输入数 require。** ⇒ **反应方可加一个普通(非 covenant)手续费输入自付费**，O 的值只需兜 O 自己那笔输出的**存储地板**，**不需**兜 2-covenant-input claim 的费。
 - **原语存在但没被调**：v0.15 能力表(L371) 有 `OpCovInputCount`/`OpCovInputIdx`——但 (a) 它数 covenant 输入不数全部输入（`OpCovInputCount==2` 仍放行普通费输入）；(b) claim 支根本没调它。要真禁普通费输入还需一个全-输入-数 require（`OpTxInputCount==2` 之类，其存在性我**未确认**，属 silverscript DECL 待查）。
 - **方向**：min_O 超额 = 反应方作找零拿回（J2 §3 自证"过大无害"）⇒ **不危险**。但理据错使数**失锚**：若费自反应方输入出，min_O 真实下限 = **O 存储地板 ~2e6 sompi**，而非 SF×(费2e6+储2e6)=1e7 的 5×膨胀。§5 ④"P3 真 mass ⇒ min_O≥2.5×(真费+储)"**承袭了错模型**（把 claim 费算进 min_O）。
+  > 🔵 **状态注记（2026-08-28 · NWT）**：此处"真 mass"是**模型量**，非 relay 实算量——**红线 7（relay mass-aware fee floor）自 ≥8-01 因 wasm mass-calc trap（缺 TN12 参数）静默关闭，只 mempool 兜底（`p2sh.mjs:57-60`）；见 `docs/2026-08-28-nwt-s63-redline7-mass-fee-silent-disable-v5.1.md`**。任何"relay 强制 fee≥mass×100"的读法在 enforce 段落地前不成立。
 - **⇒ 裁决（非阻塞，须记）**：min_O 落码前**二选一钉死**——(a) covenant **显式加输入-数强制**（`OpTxInputCount==2` 或等价，先验原语存在），则"O 是唯一费源"成立、现公式对；(b) **接受反应方自付费**，则 min_O 重锚为**存储地板 only**（~2e6），§5 ④ 改为"min_O≥SF×存储地板，claim 费不计入"。**现稿 1e7 因超额中性可暂用，但理据须选一条修**。
 
 ## 4 · CFG-UNIT-DOMAIN 一致性（§4）—— 🟢 与我 (h) 判据一致，无攻
