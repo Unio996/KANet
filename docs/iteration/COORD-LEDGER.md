@@ -10317,3 +10317,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - 节点：18:54 `blockCount 17,573`、`daa 77,770,366`（~17 块/s）；commit 72.1/99.6、空闲物理 40.7 GB。J1 SSH 持续在线（11:56Z）未提交。Owner 待决四件不变。
 - 🔴 **llama-server 17428 于 18:56 被外部停**（`llama-server.log` 末行仍 "all slots are idle" 无关机行、无 pid 文件、:8000 无监听；sshd 18:56:26/29/32 三次 J1 publickey 登录同时 ⇒ 疑 J1 提前做 A.5——Bettor r1 裁的是 HOLD 到 READY）；commit 72.1 → 41.8 GB。Bettor r4 URGENT（`docs/2026-08-27-bettor-j1-reply-r1.md` §5）：先不重拉等 READY；必须拉则硬闸 commit ≤80 GB ∧ free ≥20 GB（a5-verify 前后贴数）；非你停请报；commit 一行回。主线被未审 c95acecd 压住 ⇒ plumbing 推到侧分支 `coord/j1-urgent` = 349e0e32；NWT GREEN 后主线版 31690927 随 c95acecd 推出。llama 重现守望 + KANet-UI 只读查谁停/after-stop 基线。
 - **推送**：c95acecd / 31690927（hash 模式 2）+ 本块。
+
+### (689) 2026-08-27 · A.5 完成（J1 提前执行·降配·闸内）· Bettor HOLD 前提更正
+- **时间线**：18:56:26/29/32 J1 publickey 三次登录 → 17428 llama-server 停（无关机行、无 pid、:8000 空；Security 4689 未开无法归因，旁证 = J1 A.5）→ **18:58:47 新 llama pid 4976 起**（手动 launcher，pidfile 缺）→ :8000 服务中。
+- **KANet-UI a5-verify 对账（11:59Z）**：before(17428) `n_ctx 1,048,576` / PrivateCommit 30.15 GB / VRAM 28,488 MiB / KV 17,408 MiB → after(4976) **`n_ctx 262,144`**（= `kanet.env LLAMA_CTX_SIZE`，/props + 日志四 slot + KV 262,144 cells 三处印证）/ 13.58 GB / 13,117 MiB / 4,352 MiB；起后 commit 55.5/99.6、free 44.1 GB；llm-watchdog 0。**合 r4 硬闸（≤80 ∧ ≥20）**。after 读数进 remediation §A.2；`a5-baseline-after.txt` 待落。
+- **Bettor 更正**：r1 §1-2 裁 "A.5 HOLD 到 READY" 的前提"重拉 256k 会加内存"**写反**——before 是 1M ctx，A.5 是**降配减 ~17 GB**，反而降低 IBD 期内存风险。裁定结果（接受）不变；记账错在前提非 J1 时机；已写进 `docs/2026-08-27-bettor-j1-reply-r1.md` r4 更正（0671bd52）。memory：`feedback-read-the-before-baseline-before-ruling-hold-on-a-resource-change`。
+- r4 URGENT 主线版 31690927 + 侧分支 `coord/j1-urgent` 349e0e32 均在；J1 尚未 git 回话（是否读 r1/r2 待其说）。节点块体 18:57 `blockCount 20,345`。Owner 待决四件不变。
