@@ -37,5 +37,24 @@
 - J2 选 **B（本地按 `git show 7b1e18cc` 公式算 `mass_ub = max(compute,storage,transient)`，宁高勿低）**，两段 observe→enforce。**NWT 审中**（GO/条件另发）。
 - 修 = **钱路** ⇒ Owner 批 + 维护窗 relay 重启（可并进 §10 D-005 那次窗）。
 - **enforce 前红线 7 保持"静默关"现状记录有效**——本页不撤，直到 enforce 段落地且 NWT 复核 `minFee=… ✓` 真出现。
+- **observe 阶段 = 全 GREEN**（NWT 审）：本地上界 `estimateMassUpperBound`（条件② 我独立 oracle 对拍 H1-H5 5/5，见 `docs/provenance/2026-08-28-redline7-mass/`）+ `getMempoolEntry` 权威对照（`ub_ok`/`inconclusive` 三态，inconclusive 不算过）+ Map 泄漏修（finally-delete + cap-256）+ run-all fail-open 修（缺参第一臂前 exit 2）。侧分支 `coord/redline7-observe`，**等 Owner 批 → 主分支 + 维护窗 relay 重启部署**。
+
+### §5-bis 🔴 enforce 报备审尺（Bettor 派·enforce 前置硬阈值）
+observe→enforce 只翻 `MASS_FLOOR_MODE` 常量；但 **enforce 报备前，7 天 observe 数据须全部满足**（任一不满足 ⇒ 先修再报 enforce）：
+| 阈值 | 要求 | 不满足含义 |
+|---|---|---|
+| `ub_ok` | **100%**（每条采样 `local_mass_ub ≥ authoritative required mass`）| 上界不成立 ⇒ enforce 会误拒合法 tx |
+| `inconclusive` | **0**（`getMempoolEntry.mass` 全取到）| 取不到权威 mass ⇒ 无对照证据（vendored `IMempoolEntry` 无 mass 字段则须改别的权威口再报）|
+| `evicted` | **0**（Map cap-256 未逐出过）| 逐出 = 有 submit 未对照 = 采样有洞 |
+| estimator-throw（`local-ub unavailable`）| **0**（估算器无边界 throw）| v1 缺 budget / spk>100B ⇒ 回 skipped fail-open，边界须先修 |
+- **采样形覆盖表（每形 ≥1 条 `ub_ok=true`）**：`genesis`（unlockBshardGenesisMintPayout）/ `consolidate`（unlockBshardConsolidate）/ `claim`（unlockBshardPayoutClaim）/ `close`（unlockBshardCloseAttest）/ `spine`（unlockPoolSpineP2SH）/ `side`（unlockPoolSpineRefundMakerUnjoined）/ `escape`（unlockP2SH_SingleEntry）——任一形 7 天内零采样 ⇒ 覆盖不足、enforce 对该形无证据 ⇒ 延或补造样。
+- enforce 报备到 NWT 时：附 7 天上表数据 + 覆盖表 + `observe→enforce` 仅翻常量的 diff；对 Codex 五条（durable 镜像 / 对抗向量 / 权威对照 / 全采样 ub_ok 零静默 / 单独授权）。
+
+## 6. 附：本轮另一 silent-defect — v83 backfill DELETE GLOB 错形（migrate.js:2439）
+> 与红线 7 同族（"看起来在守、实则失效"），一并记账于权威处（源码注释是副本，通则要求权威处有记录）。
+- **机制（8/28 更正）**：`:2439` 原 `txid GLOB '*[!a-fA-F0-9]*'` —— SQLite GLOB **无 `!` 否定**，`[!a-fA-F0-9]` 是**字面集** `{'!',a-f,A-F,0-9}` ⇒ **对含任一 hex 字符的 txid（含合法 64-hex 审计行）都判真** ⇒ v83 的 `length≠64 OR <此>` 会删**所有** `broker_%` chain_events，不只 placeholder。程序确认 `valid-hex 被错形删 = true`。
+- **🔴 NWT 认 miss**：我 8/27 评估说"`length≠64` 兜住 placeholder、弱 GLOB 冗余无害"——**推理错**（弱 GLOB 对 valid hex 也真、不冗余）；8/28 Bettor 升级、我认。
+- **🔵 旁证决定性 ⇒ 4/29 无真审计行丢失**：`broker_fee_landed`（真 `broker_%` 审计事件型）2026-06-28 `d1f68dd1` 才引入 = v83（**2026-04-29 10:44** `33cda390`）后**两月** ⇒ 4/29 时 `broker_%` 只有 **1129 placeholder** ⇒ 错形 DELETE **恰删预期目标**、**无真审计行丢失（机制错、结果对）**；当时删数不可复核（日志轮转、无 4/29 前备份）。
+- **现态**：`:2433` 幂等守（`if !has_v83_trigger` 不重跑）+ 持久 trigger `:2452` 用**正形 `[^]`** ⇒ ongoing 正确；`:2439` 已 **`c22af559`** 修（对齐 :2452 + 源码抽取回归 `migrate-v83-glob.test.mjs` 4/4，NWT 复审 GREEN），**只对 fresh-DB v83 replay 有意义**。非钱路（`chain_events` = 审计真相源非放钱闸）。
 
 **一句给 Owner**：`bshard/pool` 结算的 mass-aware fee 地板（红线 7）**因 vendored wasm 缺 TN12 参数分支、自 ≥8-01 从未生效**，只靠 mempool 兜底；**至今无卡单/拒绝（运气）**；J2 修法（本地算 mass 上界）在审，修需你批 + 维护窗 relay 重启（可并 §10 那次）。**无 build/deploy 授权发生。**
