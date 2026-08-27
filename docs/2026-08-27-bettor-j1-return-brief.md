@@ -11,6 +11,11 @@
 
 - 🔴 **不要启用 `KANet-KaspadWatchdog` 计划任务，直到 `isSynced=true ∧ daa>0`**（KANet-UI VB-8 读码：`rpc-probe.mjs:34-35` daa=0 ⇒ `die('empty-data:daa=0', 3)` → `kaspad-watchdog.ps1:103` 判 Fail → 3 次 → memgate 阈 8 GB 必过 → `:152 Start-Process` 重启 kaspad = 打断 IBD）。现网 dd1dcd72 版无 SYNCING 三态。**它现在没在跑**（watchdog 日志停 08-26 16:39，无进程，(624) 记 Disabled）——你提权后 `schtasks /query /tn KANet-KaspadWatchdog` **只查不启**，把状态贴回。节点 05:11 IBD 重来（对端掉线，非崩溃）现正常推进，别碰。
 
+- 🔴 **状态注记（NWT 2026-08-27 实核 · 不改上方原话 · 出处见命令）**：上方 §0 就 `tn12-mining-watchdog-v2.ps1` 写"同步完成前一个都别启用"——**但它早已在跑**（不是"待启用"）：`Get-CimInstance Win32_Process -Filter "ProcessId=22376"` = `powershell -NoProfile -ExecutionPolicy Bypass -File D:\kaspa-tn12-mining\tn12-mining-watchdog-v2.ps1`，CreationDate **08-25 10:32:32**、**仍活**；`D:\kaspa-tn12-mining\_watchdog.log` 末行 **2026-08-26 15:52:26** `ALERT: PULSE HALTED and still braked (tips=4148). Miner stays stopped … needs an operator.`，此后**无新行** ⇒ **仍 braked、矿停**（`_bridge_tn12.log` TOTAL **0.00 MH/s**，mtime 08-25 10:33）。
+  - ⇒ **J1 进门第一眼**：核 PID 22376 **仍在 / 仍 braked**（`Get-Process -Id 22376` + `tail _watchdog.log`）。
+  - ⇒ **同步后 tips 收敛，它可能自动解刹起矿**——**是否让它起、还是先按 §1 A.5 / §2 顺序手动，由 J1 现场判 + 记 ledger，我们不预设**（未做 A.5 停 llama 前先起矿会与节点/推理竞争资源，非最优；但这是 J1 域的现场判断）。
+  - `KANet-KaspadWatchdog`（重启型）= **无进程**（NWT 核 —— 注意 `Win32_Process` 按 CommandLine 枚举会**自匹配查询 shell 自身** = 假阳，memory `reference-process-enumeration-includes-the-enumerating-shell`；真在跑的只有 22376，"KANet" 那条命中的是我的查询 shell）；`_watchdog.log`/`_bridge` 在 `D:\kaspa-tn12-mining\`，KANet-KaspadWatchdog 日志位置本机未定位（上方 08-26 16:39 为 (624) 记录）——任务态**非提权读不到**，J1 提权后 `schtasks /query /fo list | findstr /i KANet` 补核 Status/Next Run。
+
 ## 1. A.5 — 停 live llama(17428) 使 256k ctx 生效（Owner 已批；共享推理服务会短暂断）
 依据 `docs/2026-08-26-kanet-ui-start-script-remediation-design.md` §A.5 ②–⑧（NWT 终审 `docs/2026-08-26-NWT-redteam-remediation-final-verdict.md`）。前置已具备（Bettor 实核 02:5x）：
 - env 单一源已落：`kanet.env:153 LLAMA_CTX_SIZE=262144`（dd1dcd72，含内存闸 `kanet-start.sh:252` / `kanet-start-headless.sh:130` / `scripts/llm-watchdog.mjs`）。
