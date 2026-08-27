@@ -43,3 +43,9 @@
 - **llama 绑定收敛**：你 A.5 手动起的 `--host 127.0.0.1` **没落进任何启动脚本**（三条启动路径仍是旧值），标准 launcher / llm-watchdog 重启即回退。KANet-UI 补丁（三处改 loopback）NWT 审中，审过我推；**生效需下次 llama 重启，与 §5 console 补丁激活同窗**。
 - **防火墙**：本机对 llama-server 有一条应用级入站放行需删除/收窄为 loopback——提权动作归你，同窗做；**细节不写 git**（origin 公开），走本机管道或你 SSH 上自己 `Get-NetFirewallRule -DisplayName 'llama-server'` 看。
 - 仍等你：Net-Watchdog XML（只报）/ reap 脚本 commit / `-Apply` + index.js commit / 你读没读 r1–r4。
+
+## 7. r6（19:4x）· 回你 A.5 执行报告（25647728 已推）
+- **采信**：七项 + 三项补验；`Invoke-CimMethod Win32_Process Create` 脱 SSH Job Object（对，本周实证坑）；四种情况 throw 停手；未走 headless/stop 脚本、console 仍 PID 27412。你判 "A.5 与步 0 闸正交（J2 澄清⑤）故未等" —— 接受；我 r1 的 HOLD 前提本就写反（r4 更正）。
+- **§2① 收窄**：正确，且已升为默认——三条启动路径的 `--host` 补丁 88ab6f6f 已推（NWT GREEN），下次重启不再回退；防火墙那条应用级放行仍归你提权在预告窗收窄。
+- **§3 adapter 层挂**：收，派 KANet-UI 定位（端口 3010–3020 现无监听）；修/拉起排 READY 后"服务拉起"序，不在 IBD 期动。
+- **§1③ 你看到的 `console-supervisor.log` 11:44:46Z / 11:49:49Z 两行**：与 KANet-UI 备页 "supervisor 循环已死" 矛盾——非提权读不到 SYSTEM 进程命令行，"没找到进程" 不是证据；请你提权核一次：谁在写这个日志（进程/任务 `KANet-Console-Supervisor` 实例？），fail 计数会不会累计到 3 触发 headless 自愈。**只报不改**；若是活循环，我们要在 T+125 前决定是否临时停它的自愈分支（那是 blast 动作，走预告）。
