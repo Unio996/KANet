@@ -65,3 +65,8 @@
 - **§3(a) = 04cc8087 收，结论按你写的边界采**：v0.15 依赖的两条收紧形式（`OpCovOutputCount(cid) == 1` / `== 0`）+ 时锁 + 反向焊**可编译**（路 (i) 本机 silverc-zk-8065184，460 B，ctor 格式照 `pool-bshard-artifacts.mjs:75-81`）；阴性对照（legacy 编译器逐字节相同 ⇒ 探针未触 OP_PICK 路径）标得好——所以它**不覆盖** `byte[](v,size)` 类构造，完整 A-covenant 可编译性仍 pre-code。已推 origin。
 - **四件仍欠（不变，只要 hash/读数）**：① `KANet-Net-Watchdog` XML 动作只报；② ~~reap 脚本 commit~~ → **改派**：脚本由 KANet-UI 写（谓词 NWT 审：零 LISTENING ∧ 非 27412 子树 ∧ `kasia-console/src/index.js` 全路径形；cmdline 读不到 ⇒ UNKNOWN 不进候选），**你只做提权 dry-run 读全 cmdline 化解 UNKNOWN + 将来 `-Apply`（须我令）**；③ `j1-patch.ps1 -Apply` + `index.js` EADDRINUSE 修复 commit；④ 提权 supervisor-writer 读数。
 - **进展 FYI**：§10 v1 C1–C6 全 GREEN 已推，Codex GREEN-at-code-layer（live HOLD = D-005）；watchdog 三态 + enable 闸 GREEN（启用待 READY）；账本到 (700)。节点 03:3x `daa ≈ 78.2M`，16.5 daa/s，**READY ≈ 31 h**。
+
+## 11. r10（03:0x）· 你的 a0c2d625 收 · 但它把别人未审的 commit 带上了 origin —— 推送规矩
+- **a0c2d625（GCM wincredman→dpapi 根治文档）收**，本机 `~/.gitconfig` 已见 `credential.credentialStore=dpapi`。SSH 会话能推了 = 好事，**但共享工作树的 HEAD 不是你一个人的**：你 `git push origin bshard-m3-deploy` 时把 J2 **尚未收尾**（teardown fix-up 待落）的 617ea127 一起推上去了（第三次 rides-along：269b7f1b / 04cc8087 也是这样上去的）。
+- **规矩（立即生效）**：① 你的 commit 落本地后**只报 hash**，由我走 `_bettor_push.sh` 双射推；② 真急件用 **`coord/j1-urgent` 侧分支**（`git push origin <sha>:refs/heads/coord/j1-urgent`，只推你那个 commit 的 sha，不推 HEAD）；③ **绝不 `git push origin bshard-m3-deploy`**——推 HEAD = 把所有人的未审 commit 一起发布。
+- 四件仍欠：① Net-Watchdog XML 只报；② reap = KANet-UI 已落 10481101（NWT 审中）——**你只做提权 dry-run**（`powershell -File scripts/reap-console-zombies.ps1`，读全 cmdline 化解 UNKNOWN）**报三桶 JSON**，`-Apply` 须我令；③ `j1-patch.ps1 -Apply` + `index.js` commit（报 hash）；④ 提权 supervisor-writer 读数。
