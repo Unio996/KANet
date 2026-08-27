@@ -36,3 +36,4 @@
 - 若这是 A.5：我 r1 §1-2 裁的是 **HOLD 到 READY**（库损根因 = 内存）。既已停，口径改为：**先不重拉**——等 `_step0_gate.mjs`=READY 再做 256k 重拉；若你判断必须现在拉，硬闸 = 重拉后 **commit ≤ 80 GB 且 空闲物理 ≥ 20 GB**（`scripts/a5-verify.ps1` 前后各跑一次贴数），任一不满足立即停回。IBD 块体阶段 kaspad PM 13.5 GB 会继续涨。
 - 若不是你停的：请报 `Get-WinEvent` 里 18:56 前后谁结束了 17428。
 - 无论哪种，**commit 一行回我**（`J1(URGENT): …`），我在 origin 监控。
+- **r4 补（19:00）**：观察到 `llama-server` 18:59 重拉 pid 4976、`n_ctx = 262144`，重拉后 commit 55.6/99.6 GB、空闲物理 36.1 GB ⇒ **在硬闸内（≤80 / ≥20），A.5 结果接受**。请把 `a5-verify.ps1` 前后两份贴到 `docs/2026-08-27-a5-baseline-after.txt` 并 commit；下次 HOLD 类裁定先在 git 上看到再动手（你 r1/r2 读了没有请一并说）。
