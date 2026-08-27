@@ -141,6 +141,40 @@ function Get-Verdict($code) {
   else                     { return 'Unknown' }  # code 6/-1/其它探针自身坏; 7/8/9 绝不落这里
 }
 
+# v0.4 enable-gate (NWT GO): 自/外重启判别 + 刹车-keep 决策抽纯函数 (VA-5/8/8b/8c/8d 单测真函数, 非内联)
+# 承重(NWT 必钉): cd-null 分支【必须】排在 (PID,CD) 元组比较之前显式 return 'fail-closed'(brake KEPT) --
+#   否则 AND 因 null 侧假 => mine=false => fall through external => 清刹车 = fail-open 反向。
+#   null-CD = "证据缺失 => 默认 self", 不是 "不匹配"。
+# 输入: $curPid/$curCd(CIM 枚举, 可 null) / $st(状态对象或 null) / $stateReadOk(bool)
+# 输出: @{ failCountReset; brakeReset; category='self'|'external'|'fail-closed'|'none' }
+function Get-RestartDecision($curPid, $curCd, $st, $stateReadOk) {
+  # 无证据: 状态读失败 => 不动任何计数, 刹车 KEPT (读失败=无证据, 非实例变; 同 (1) 原则)
+  if (-not $stateReadOk -or $null -eq $st) {
+    return @{ failCountReset = $false; brakeReset = $false; category = 'fail-closed' }
+  }
+  # 无当前进程 或 无 lastSeen 基线 => 无从判别实例变 => none
+  if ($null -eq $curPid -or $null -eq $st.lastSeenPid) {
+    return @{ failCountReset = $false; brakeReset = $false; category = 'none' }
+  }
+  # 实例是否变 (pid 或 cd 相对 lastSeen)
+  $changed = ($curPid -ne $st.lastSeenPid) -or ("$curCd" -ne "$($st.lastSeenCreated)")
+  if (-not $changed) {
+    return @{ failCountReset = $false; brakeReset = $false; category = 'none' }
+  }
+  # === NWT 必钉: cd-null fail-closed 分支【在 (PID,CD) 元组比较之前】 ===
+  # spawn 时 cd 取不到(lastSpawnCreationDate=null) + 同 pid => 证据缺失默认 self => 不动计数, brake KEPT (VA-8c)
+  if ($null -eq $st.lastSpawnCreationDate -and $curPid -eq $st.lastSpawnPid) {
+    return @{ failCountReset = $false; brakeReset = $false; category = 'fail-closed' }
+  }
+  # (PID,CD) 元组精确匹配 => 自重启 (清 failCount, brake KEPT)
+  $mine = ($curPid -eq $st.lastSpawnPid -and "$curCd" -eq "$($st.lastSpawnCreationDate)")
+  if ($mine) {
+    return @{ failCountReset = $true; brakeReset = $false; category = 'self' }
+  }
+  # 否则外部重启 (清 failCount + 刹车归零)
+  return @{ failCountReset = $true; brakeReset = $true; category = 'external' }
+}
+
 function Probe-Tn12Node {
   try {
     $out = & node $probeScript '--timeout-ms=8000' 2>&1
@@ -162,16 +196,14 @@ while ($true) {
     try { $cur = Get-CimInstance Win32_Process -Filter "Name='kaspad.exe'" -ErrorAction Stop | Select-Object -First 1 } catch { $cur = $null }
     $st = Load-WatchdogState
     if ($null -eq $st) { $stateReadFailStreak++ } else { $stateReadFailStreak = 0 }
-    if ($cur -and $st -and $st.lastSeenPid -and ($cur.ProcessId -ne $st.lastSeenPid -or "$($cur.CreationDate)" -ne "$($st.lastSeenCreated)")) {
-      # kaspad 换实例 -- 自重启 vs 外部 (元组精确匹配, 无 slack; v0.3)
-      $mine = ($cur.ProcessId -eq $st.lastSpawnPid -and "$($cur.CreationDate)" -eq "$($st.lastSpawnCreationDate)")
-      if ($mine) {
-        $failCount = 0    # 自重启: 清 failCount, 不清 restartAttempts (已计在刹车; 清了=自清=无限拉)
-        Log "kaspad restarted by SELF (pid=$($cur.ProcessId) matches lastSpawn) -> failCount=0, brake KEPT"
-      } else {
-        $failCount = 0; $script:restartAttempts = @()   # 外部重启(别人/J1): 清 failCount 且刹车归零
-        Log "kaspad restarted EXTERNALLY (pid=$($cur.ProcessId) not my spawn) -> failCount=0, brake reset"
-      }
+    # === §3c 自/外重启判别 (纯函数 Get-RestartDecision; 见 VA-5/8/8b/8c/8d) ===
+    $curPid = if ($cur) { $cur.ProcessId } else { $null }
+    $curCd  = if ($cur) { "$($cur.CreationDate)" } else { $null }
+    $dec = Get-RestartDecision $curPid $curCd $st ($null -ne $st)
+    if ($dec.failCountReset) { $failCount = 0 }
+    if ($dec.brakeReset)     { $script:restartAttempts = @() }
+    if ($dec.category -ne 'none') {
+      Log "kaspad restart-decision: $($dec.category) (failCountReset=$($dec.failCountReset) brakeReset=$($dec.brakeReset)) pid=$curPid"
     }
     # fail-closed: 判别读不到(state 缺)=当自重启, 不清刹车(上面 mine 分支默认走不到=不清). 更新 lastSeen.
     $newSt = @{
@@ -187,10 +219,10 @@ while ($true) {
     }
 
     $r = Probe-Tn12Node
-    # DEAD 两路[或]: L1 no-process 覆盖 (probe 自坏成 Unknown 时, 真无进程仍判死; probe 自坏但有进程=不覆盖=Unknown 不重启, 合规则 72)
-    if ($null -eq $cur -and $r.Verdict -ne 'Dead') {
-      Log "kaspad L1 no-process (Get-CimInstance empty) overrides verdict $($r.Verdict) -> Dead"
-      $r.Verdict = 'Dead'; $r.Code = 9
+    # NWT: CIM $cur=null 自身【永不】升 Dead; verdict 一律按 probe 退码 (code9=>Dead / code6=>Unknown 冻结 / code0=>Alive).
+    # CIM-null 且 probe 非 code9 => WMI/CIM 分歧告警 (RPC 应答=进程在, CIM 是坏的那个), 不强制 Unknown/Dead.
+    if ($null -eq $cur -and $r.Code -ne 9) {
+      Log "WMI/CIM divergence: Get-CimInstance kaspad.exe empty but probe code=$($r.Code) (not 9) -- RPC-side says node present, CIM likely broken; verdict follows probe ($($r.Verdict)), NO forced Dead"
     }
 
     if ($r.Verdict -eq 'Alive') {
@@ -232,8 +264,12 @@ while ($true) {
             Archive-IfExists $stdoutLog
             Archive-IfExists $stderrLog
             $proc = Start-Process -FilePath $kaspadExe -ArgumentList $kaspadArgs -WorkingDirectory (Split-Path $kaspadExe) -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog -WindowStyle Hidden -PassThru
+            # spawn 后取 cd: CIM 重试 x3 / 间隔 1s (WMI 瞬时坏韧性); 三次仍无 => cd=null => 判别走 fail-closed (VA-8c)
             $spawnedCd = $null
-            try { $spawnedCd = "$((Get-CimInstance Win32_Process -Filter "ProcessId=$($proc.Id)").CreationDate)" } catch {}
+            foreach ($try in 1,2,3) {
+              try { $c2 = Get-CimInstance Win32_Process -Filter "ProcessId=$($proc.Id)" -ErrorAction Stop; if ($c2 -and $c2.CreationDate) { $spawnedCd = "$($c2.CreationDate)"; break } } catch {}
+              if ($try -lt 3) { Start-Sleep -Seconds 1 }
+            }
             $script:restartAttempts += @{ ts = (Get-Date); pid = $proc.Id }   # 记入刹车 (MUST3)
             Save-WatchdogState @{ lastSpawnPid = $proc.Id; lastSpawnCreationDate = $spawnedCd; lastSeenPid = $proc.Id; lastSeenCreated = $spawnedCd } | Out-Null
             Log "Start-Process dispatched, new PID=$($proc.Id) cd=$spawnedCd (brake now $($script:restartAttempts.Count)/$MAX_RESTARTS)"
