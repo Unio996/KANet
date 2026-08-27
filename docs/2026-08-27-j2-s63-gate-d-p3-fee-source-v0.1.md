@@ -91,6 +91,7 @@
 | 输入数原语（(a) 选项可用）| `crypto/txscript/src/opcodes/mod.rs:1119 OpTxInputCount<0xb3>`；silverscript `tx.inputs.length`（`/d/silverscript/docs/TUTORIAL.md:923`）| 本仓 `PoolSide.sil` 已用 |
 | v0.15 各支无输入数 require | v0.15 @L232-236 / @L242-248 / @L257-266 / @L269 / @L273 / @L288-296 | 逐支只见 `OpInputCovenantId(特定 idx)`、`OpCovOutputCount`、输出 spk/value；**零处** `OpTxInputCount` |
 | 本仓既有费口径（只引用）| `kasia-relay/src/lib/p2sh.mjs:1737 _BSHARD_FEE_PER_INPUT = 1_000_000n`；`kasia-console/src/lib/kip9-mass.mjs:90 computeSingleOutputFee(minFee 2e6, maxFee 1e8)`；`pool.js:55 BETTOR_MIN_STAKE_PHYS_FLOOR = 100_000`（实测）| 供 P3 真形状出来后现算，**不是本稿依据** |
+| 📌 **状态注记（2026-08-28 · J2/NWT 实核 · 不改上行原话）** | **红线 7（`_assertTxInvariants` 的 mass-aware fee floor，`p2sh.mjs:55-66`）relay 层自 ≥ 8-01 起因 wasm mass-calc trap 静默关闭**：vendored `shared/vendor/kaspa-wasm` 构建的 `Params::from(NetworkId)` **缺 TN12 分支**（panic 原文 `params.rs:644 "Testnet suffix 12 is not supported"`），任何 tx 形任何 mass 入口皆 panic，`:57-60` try/catch 只 warn 即 return ⇒ 日志 `minFee=` 成功 0 次 / `mass calc skipped` 177,415 次 ⇒ **只剩 mempool 兜底**；无实证损失是运气非机制 | 本表凡引 `_BSHARD_FEE_PER_INPUT` 作"覆盖 compute-mass 地板"的口径，其**relay 侧闸并不在岗**；修法（本地按 `7b1e18cc` 公式算上界 + observe/enforce 两段）报备中 |
 
 ---
 

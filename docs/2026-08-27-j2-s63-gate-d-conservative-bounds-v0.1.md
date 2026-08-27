@@ -107,6 +107,7 @@ Codex 同时钉：本门**不能证绝对抗审查**，最终 claim 保持 **con
 | `REORG_SAFE_MIN_DEPTH` | 20 DAA | `pool-shard-register.mjs:88`（TN12 实测校准）| 深确认门槛：`N_claim` 里"CONFIRM"按此深度算 |
 | `FINALITY_BUFFER` | 60 DAA | `bshard-settle-daemon.mjs:53`（finality depth 50 + 余量）| 同族口径 |
 | `_BSHARD_FEE_PER_INPUT` | 1,000,000 sompi/输入（0.01 KAS，覆盖 budget=50 compute-mass 地板） | `kasia-relay/src/lib/p2sh.mjs:1737` | `min_O` 费项基数 |
+| 📌 状态注记（2026-08-28 · 不改上行原话） | **红线 7 relay 层自 ≥ 8-01 因 wasm mass-calc trap（vendored 构建缺 TN12 参数分支，`params.rs:644`）静默关闭，只 mempool 兜底**（`p2sh.mjs:57-60` catch 只 warn 即 return；日志成功 0 / skipped 177,415） | `p2sh.mjs:55-66` | 上行"覆盖 compute-mass 地板"是**费常量**层面成立、**relay 闸**层面不在岗；修法报备中 |
 | `computeSingleOutputFee` minFee/maxFee | 2,000,000 / 100,000,000 sompi | `kip9-mass.mjs:90`；`MAX_TX_FEE_SOMPI=1e8` @:33 | `min_O` 费项上界 |
 | KIP-9 单输出存储地板（实测） | 100,000 sompi（0.001 KAS，J2 r108 实测） | `pool.js:55 BETTOR_MIN_STAKE_PHYS_FLOOR` | `min_O` 存储项；纯公式最坏 `C/v ≤ cap ⇒ v ≥ 1e12/5e5 = 2,000,000` sompi（孤立小输出）|
 
@@ -125,6 +126,7 @@ Codex 同时钉：本门**不能证绝对抗审查**，最终 claim 保持 **con
 - 🔵 **v0.8 交叉引用 fee-source v0.3 §6**：Codex eb4db39c 推荐 **(b)**（允许额外普通费输入——避免"日后 mass/费规则变化把 O 出资的 claim 卡死"这条结构死；recipient/value/covenant provenance 仍由 Shape-B 焊死；代价明示 = claimant/watchtower 须能出费）。**(b) 下 `min_O` 只围绕它真正承担的 O/存储/价值地板功能重定义，claim 费储备归 claimant/watchtower 运营就绪度，不进 `min_O`**（Codex 原句 *"claim fee reserve belongs to claimant/watchtower operating readiness, not to `min_O`"*）。设计选择仍 OPEN 待 Owner。
 - **公式（v0.1 原式，保留作为 §7 ① 选 (a) 时的算法；选 (b) 时只剩 `storage_floor` 项）**：`min_O = SF × ( fee_claim_worst + storage_floor )`
   - `fee_claim_worst`：2 个 covenant 输入的 compute mass 费。既有口径 `_bshardFeeV1(2) = 2 × 1,000,000 = 2,000,000` sompi 覆盖 budget=50 的输入；**§6-3 covenant 比 bshard 脚本重**（introspection + `OpInputCovenantId` + checksig + substr），P3 前无真 mass ⇒ 上界先取 `computeSingleOutputFee` 的 minFee 与 `_bshardFeeV1(2)` 之大者 = 2,000,000，并在 §5 ④ 列"P3 形状出来后用 `kip9-mass.mjs` 现算"。
+    - 📌 状态注记（2026-08-28）：上条引的 `_bshardFeeV1(2)` 是 relay **费常量**；relay 侧"fee ≥ mass×100"的**红线 7 闸**自 ≥ 8-01 因 wasm mass-calc trap（vendored 构建缺 TN12 参数分支）静默关闭，只 mempool 兜底（`p2sh.mjs:57-60`）——本项"覆盖"的判定不能引它作证，修法报备中。
   - `storage_floor`：O 作为 reveal 那笔的**一个输出**被创建时的 KIP-9 地板。实测族 100,000 sompi；纯公式孤立小输出最坏 2,000,000 sompi。**取最坏 2,000,000**。
   - `SF = 2.5`（显式安全系数：覆盖 P3 形状比 bshard 重 + TN12 无费市场但 mass 规则可能随 KIP 调整）。
 - **提案（条件于 §7 ①）**：
