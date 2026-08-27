@@ -1,4 +1,5 @@
 // J2 2026-07-25 — G5 v2 real_chain smoke: M0c-1 Path B pilot custodial_transfer 真链落地证明。
+// 🔴 STANDALONE real-chain gate script — run with node only; NEVER import (import executes top-level broadcast / real spend). reframe: NWT 2026-08-28.
 //
 // v2 全面重写（Codex RESPONSE-20260725-MSG131, origin/coord/codex-bridge, verdict=
 // BLOCKED_DO_NOT_RUN_G5·6 P0+3 P1 全修）——v1（commit d725000c）被判"结构性缺口, 非小补丁能过"。

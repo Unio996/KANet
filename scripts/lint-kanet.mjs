@@ -1699,6 +1699,60 @@ function checkR_WATCHDOG_PROBE_SELFFAULT_RESTART() {
 
 checkR_WATCHDOG_PROBE_SELFFAULT_RESTART(); // R-WATCHDOG-PROBE-SELFFAULT-RESTART [WARN-first] (2026-08-27 配规则72; 置于常量声明之后避 TDZ)
 
+// ── R-REALCHAIN-SKIP-BATCH (2026-08-28 NWT, 配 test-runner 发现盲区设计 v0.2 + Bettor 裁): ──
+// 真链/真钱用例进无人值守 --all = 靠"有人恰好读了头"拦下(运气非机制)。仅扫 test-framework/cases/** 的 .mjs, 非注释行判据:
+//   BLOCK: case-object(有 export default) 声明 real_chain/real_money:true 但缺 skip_in_batch:true。
+//   WARN-case: case-object 撞花钱原语 ∧ 无声明 ∧ 无隔离(startArmedRelay/死口/loopback/stub)。
+//   WARN-standalone: 非 case-object(无 export default) 撞原语 ∧ 无隔离 ∧ 缺 STANDALONE marker(import 自执行脚本=发现即执行真广播, reframe)。
+// 静态分不清真-vs-mock ⇒ BLOCK 键在【作者声明】(零误报); HTTP 触发的真链(g5 custodial_transfer)测不到 ⇒ 靠 marker 作者纪律。转义: `lint-allow-realchain-skip-batch: <理由>`。
+const _RC_DECL = /\breal_(?:chain|money)\s*:\s*true\b/;
+const _RC_SKIP = /\bskip_in_batch\s*:\s*true\b/;
+const _RC_PRIM = /\bsendKaspa\b|\bbroadcastTransaction\b|type\s*:\s*['"]transfer['"]/;
+const _RC_ISO  = /startArmedRelay|127\.0\.0\.1:1\b|\bloopback\b|\bstub\b/i;
+const _RC_DEFAULT = /\bexport\s+default\b/;
+const _RC_MARK = /STANDALONE real-chain gate script/;
+function _rcNonComment(content) {
+  return content.split('\n').filter(l => { const t = l.trimStart(); return !(t.startsWith('//') || t.startsWith('*') || t.startsWith('/*')); }).join('\n');
+}
+function _rcCollect(dir, out, opts) {
+  let names; try { names = fs.readdirSync(dir); } catch { return; }
+  for (const name of names) {
+    const full = path.join(dir, name);
+    let st; try { st = fs.statSync(full); } catch { continue; }
+    if (st.isDirectory()) {
+      if (['node_modules', '.git', '.claude', 'dist', 'build', 'out', 'logs', '.cache'].includes(name)) continue;
+      if (name === 'scratch') continue;
+      if (opts.excludeVectors && name === 'lint-vectors') continue;
+      _rcCollect(full, out, opts);
+    } else if (st.isFile() && /\.mjs$/i.test(name) && !/\.mutants\./i.test(name)) out.push(full);
+  }
+}
+function _rcScanFile(fp) {
+  let content; try { content = read(fp); } catch { return; }
+  if (content.includes('lint-allow-realchain-skip-batch')) return;
+  const code = _rcNonComment(content);
+  const hasDefault = _RC_DEFAULT.test(code), hasMarker = _RC_MARK.test(content);
+  const hasDecl = _RC_DECL.test(code), hasSkip = _RC_SKIP.test(code);
+  const hasPrim = _RC_PRIM.test(code), hasIso = _RC_ISO.test(code);
+  if (hasDefault && hasDecl && !hasSkip) {
+    violate('R-REALCHAIN-SKIP-BATCH', `真链用例声明 real_chain/real_money 但缺 skip_in_batch:true —— 真钱用例会进无人值守 --all。加 skip_in_batch:true(仅 --adversarial/--case 显式跑)。`, fp, 1);
+  }
+  if (hasDefault && hasPrim && !hasDecl && !hasIso) {
+    warn('R-REALCHAIN-SKIP-BATCH', `case 撞花钱原语(sendKaspa/broadcastTransaction/type:transfer)但无 real_chain 声明、无隔离标记 —— 真碰链请声明 real_chain:true+skip_in_batch:true; 已隔离(mock)可加 // lint-allow-realchain-skip-batch: <理由>。`, fp, 1);
+  }
+  if (!hasDefault && hasPrim && !hasIso && !hasMarker) {
+    warn('R-REALCHAIN-SKIP-BATCH', `standalone 脚本(无 export default)撞花钱原语但缺 STANDALONE marker —— import 自执行脚本=发现即执行真广播(reframe)。头部加 "// STANDALONE real-chain gate script — run with node only; NEVER import"; 已隔离加 lint-allow 注释。`, fp, 1);
+  }
+}
+function checkR_REALCHAIN_SKIP_BATCH() {
+  const files = [];
+  _rcCollect(path.join(ROOT, 'kasia-console', 'test-framework', 'cases'), files, { excludeVectors: true });
+  const testDir = process.env.LINT_REALCHAIN_TEST_DIR;
+  if (testDir) _rcCollect(path.resolve(testDir), files, { excludeVectors: false });
+  for (const fp of files) _rcScanFile(fp);
+}
+checkR_REALCHAIN_SKIP_BATCH(); // R-REALCHAIN-SKIP-BATCH (2026-08-28; 常量声明后避 TDZ)
+
 // ── 报告 ──
 // warnings first (non-blocking — WARN rules are migration checklists, not hard blockers)
 if (warnings.length > 0) {

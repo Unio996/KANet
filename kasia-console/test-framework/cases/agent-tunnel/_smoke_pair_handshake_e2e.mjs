@@ -1,4 +1,5 @@
 // Chunk 4 E2E smoke: real chain pair_invite + pair_ack → pair-ingestor → agent_pairs row
+// 🔴 STANDALONE real-chain gate script — run with node only; NEVER import (import executes top-level broadcast / real spend). reframe: NWT 2026-08-28.
 //
 // Setup:
 //   - A = KANet-UI-tn relay (= sender of pair_invite)
