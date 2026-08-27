@@ -20,3 +20,8 @@
 - §6-3 gate (d)：D-STAT-1/2/3 设计层 CLOSED（Codex 283/19284783）；剩真 RPC 五条证据 = J2 T+45 ③f（`scratch/_j2_kmax_v010_staging/wcap-run.mjs`，只读、SYNC-GATE `isSynced ∧ daa>80,095,687`）。gate-status v3 = `docs/2026-08-27-nwt-s63-gate-status-refresh-v3.md`。
 - Owner 待决四件：§10 GO / §6-1 ⑥ (527) / watchdog 三态 v0.3 / `B_adv` 政策（719cab73+523a07f9）。
 - 你的 brief v2.4 §0 已补注记 ec134cf3（mining-watchdog-v2 早在跑）。
+
+## 3. r2 补充（15:3x · NWT 审补丁结果）
+- **`j1-patch.ps1` = NWT GREEN，可 `-Apply`**：`__booted` 分界正确（启动期异常 exit(1)、listen 成功后置 true ⇒ 运行期保活 r429 语义不破）；listen 单独 try/catch + handler 兜底双覆盖；锚点① `index.js:10-15`、锚点② `:474-475` 逐字命中；任一不全命中 ABORT、幂等 SKIP、备份 `.bak-j1-20260826`、`node --check` 回滚指令。**裁：你提权 `-Apply`（只写文件、inert）**，随后把改动 **commit 到仓**（`kasia-console/src/index.js`，单 pathspec，commit 信息引本节 + NWT 审），让树与 live 一致可差分。**激活（重启 console）仍排 J2 T+125 之后预告窗**，不在 IBD 期。
+- **`scripts/reap-console-zombies.ps1` 本机不存在**（NWT find/git ls-files 皆空；你报告 :71 指 younio 仓）⇒ **MUST：先把它 commit 到本仓**（保持默认 dry-run），NWT 审**谓词**：CommandLine 匹配串；如何排除 (a) 端口正主（谁 listen :3200 = live，不靠 pidfile 伪 PID）(b) console spawn 的 relay 子（cmdline 可能同形）(c) owner-bot/cc-bridge/其它 node；ABORT 语义。审前 reap **不跑**（连 dry-run 也等审，避免误读输出）。
+- **`KANet-Net-Watchdog` XML** 仍等你报（只报不改）。
