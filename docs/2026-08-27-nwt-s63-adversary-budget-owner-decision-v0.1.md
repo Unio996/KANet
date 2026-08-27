@@ -28,10 +28,11 @@
 
 ## ⑤ 与三决的关系 + 复核触发
 - 这是 **Owner 第四件待决**，但**可与 watchdog v0.3 批一起回**（都非紧急、非同步依赖）。
-- 🔴 **复核触发条件（建议钉死）**：**(a)** 网络出现**第二个独立矿工**（`s_visible_max` 掉出 ≈1）；**或 (b)** `s_visible_max < X`（X 待 Owner 定，如 0.9）；**或 (c)** Tier-2 进入真 build（fair-exchange covenant 落码前）——**任一触发 ⇒ 用实测基线重议 `B_adv`**。触发前 fail-closed 缺省持续。
+- 🔴 **复核触发条件（机械、无 Owner 旋钮 — J2 fix-up）**：**(a)** **(24) `s_visible_max` 提取器在采样窗内看到【第二个】coinbase 归属地址产 ≥ `k` 块**（`k` 写死 = 100，防单块噪声）= 现网不再单矿工——**提取器直接报、无 Owner 参数**；**或 (b)** Tier-2 进入真 build（fair-exchange covenant 落码前）——**任一触发 ⇒ 用实测基线重议 `B_adv`**。触发前 fail-closed 缺省持续。
+  > 🔴 **自纠（J2 逮）**：v0.1 原 (b) "`s_visible_max < X`（X 待 Owner 定，如 0.9）" = **把旋钮塞回 Owner**（正是本稿要避的 `reference-an-assumption-parameter-needs-a-mechanical-data-bound-or-it-is-a-dial` 病），且与"第二矿工出现"是**同一事件**（第二矿工出块 ⟺ `s_visible_max` 掉出 1）⇒ **删之**，改上面机械形（`k=100` 写死，非 Owner 参数）。
 
 ## ⑥ 引用锚
 Codex：`RESPONSE-…MSG280/281/283`（bridge `d7fefb58`/`95d7f354`/`1c7188e2`）；`MSG273-274 eb4db39c` / `MSG275-276 f65c1fbe`（k_max 弱假设警告）。本仓：(23) v0.13 `9040b8ec` / v0.15 `2f632c91`（`B_adv` 语义 + 单一预算 + 守卫 + s_adv_cap 两路）；(21) v0.7 `ce708127`（`H_adv_implied` 非安全下界）；(24) s_visible_max 提取器 `docs/provenance/2026-08-27-smax/`；门现状 v3（Tier-2 结构性禁用）。memory `reference-a-bound-on-an-adversary-controlled-quantity-cannot-be-measured-on-a-benign-network` / `reference-an-assumption-parameter-needs-a-mechanical-data-bound-or-it-is-a-dial`。
 
 ## 一句给 Owner（Bettor 精炼用）
-**`B_adv`（对手预算，(d) 入场闸唯一非同步待决）现在不必拍数：现网单矿工已 fail-closed（安全）、近空网拍硬数=弱假设有害；建议只定"单一预算语义 + 不拆 + 复核触发（第二矿工/`s_visible_max`掉/Tier-2 build）"，硬值等实测基线再拍；可与 watchdog v0.3 一批回。**
+**`B_adv`（对手预算，(d) 入场闸唯一非同步待决）现在不必拍数：现网单矿工已 fail-closed（安全）、近空网拍硬数=弱假设有害；建议只定"单一预算语义 + 不拆 + 复核触发（(24) 提取器见第二 coinbase 地址≥100 块 / Tier-2 build，机械无旋钮）"，硬值等实测基线再拍；可与 watchdog v0.3 一批回。**
