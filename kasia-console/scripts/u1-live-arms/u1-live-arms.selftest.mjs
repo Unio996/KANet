@@ -98,6 +98,23 @@ await t('L5 --execute 受控 R7: X 抢 C ⇒ RELAY_NOT_OWNED 零写入; C 自钥
 await t('L7 legacy 对照: PASS, 代码零引用, evidence_kind=degraded(临时库 legacy 列为空)', async () => { const { o } = await run('L7', ['--relay', S1.B]); assert.strictEqual(o.verdict, 'PASS', JSON.stringify(o.evidence)); assert.strictEqual(o.evidence.evidence_kind, 'degraded'); assert.strictEqual(o.evidence.code_refs_to_ecdsa_col_in_u1_registration, 0); });
 await t('L7 strong 档: relay 的 ecdsa_pubkey_xonly 填成他钥(临时库) ⇒ evidence_kind=strong 且仍 PASS', async () => { sqlite.prepare('UPDATE relay_nodes SET ecdsa_pubkey_xonly = ? WHERE id = ?').run(S1.KX.pubkey, S1.B); const { o } = await run('L7', ['--relay', S1.B]); assert.strictEqual(o.evidence.evidence_kind, 'strong'); assert.strictEqual(o.verdict, 'PASS'); });
 
+// ── Codex 438e46e9 MUST-FIX(fail-open): 逐个省略必需参数 ⇒ exit≠0 且零执行零写; 期望映射严格 ──
+await t('run-all 缺参 fail-closed: 五个必需参数逐个省略 ⇒ exit 2、verdict FAIL/MISSING_INPUT、results 空、零写入', async () => {
+  const full = ['--submission', S1.subB, '--submission-mainnet', S1.subM, '--submission-x', S1.subX, '--submission-c', S1.subC, '--relay', S1.B];
+  for (let i = 0; i < full.length; i += 2) {
+    const args = full.filter((_, j) => j !== i && j !== i + 1); const c0 = counts();
+    const { o, status } = await run('run-all', args);
+    assert.strictEqual(status, 2, `省略 ${full[i]} 时 exit=${status}`); assert.strictEqual(o.verdict, 'FAIL'); assert.strictEqual(o.reason, 'MISSING_INPUT'); assert.deepStrictEqual(o.results, []);
+    assert.deepStrictEqual(counts(), c0);
+  }
+  const { status: s2 } = await run('run-all', [...full.slice(0, 1), join(dir, 'nope.json'), ...full.slice(2)]); assert.strictEqual(s2, 2, '文件不存在也须拒');
+});
+await t('run-all 严格映射: 子进程输出被替换成非预期 verdict(伪造 arm 名不匹配) ⇒ PARSE_FAIL ⇒ exit 1', async () => {
+  // 用 --out-dir 指向一个不可写路径不会造 verdict 差异; 这里用 --console-url 指向死端口让 L6 真 FAIL, 证明"非预期 verdict ⇒ 停 + exit 1"
+  const { o, status } = await run('run-all', ['--submission', S1.subB, '--submission-mainnet', S1.subM, '--submission-x', S1.subX, '--submission-c', S1.subC, '--relay', S1.B]);
+  assert.strictEqual(status, 1, '同夹具重跑(挑战已用) ⇒ 必停'); assert.ok(o.stopped_at); assert.strictEqual(o.verdict, 'FAIL');
+});
+
 const S2 = fixtureSet('s2');
 await t('run-all --execute(全新夹具 s2): 八臂全 PASS, 顺序 L8→L1→L4→L6→L2→L3→L5→L7', async () => {
   const { o, status } = await run('run-all', ['--submission', S2.subB, '--submission-mainnet', S2.subM, '--submission-x', S2.subX, '--submission-c', S2.subC, '--relay', S2.B, '--execute']);
