@@ -1,5 +1,5 @@
 {
-  "note": "§10 C1 确定性向量 (2026-08-27 J2)。G1 期望值【直接读】artifacts/2026-08-19-s10-golden-vectors-v1.json(J1 第二实现已逐字节对拍), 不由被测 canonicalBytes 现生成(自证); canonical 正确性 GREEN 标 provisional-until-J1(落地后请 J1 复算 signed_message)。签名非锚(kaspa-wasm signMessage aux-rand 非确定): 负例用 test-only priv=1 钥现签, 只断言 verify 布尔与拒因/层。层: L1=assertCanonicalPubkey, L2=domain/version/network/operation, L3=verifyMessage。拒因/层按实测 scratch/_j2_s10_wasm_probe.mjs(memory reference-kaspa-wasm-xonly-pubkey-accepts-uppercase-verifymessage-false-vs-throw)。",
+  "note": "§10 C1 确定性向量 (2026-08-27 J2)。G1 期望值【直接读】artifacts/2026-08-19-s10-golden-vectors-v1.json, 不由被测 canonicalBytes 现生成(自证); 该 golden 的 generator = J1 从 spec 独立实现(COORD-LEDGER (547)) ⇒ 真独立 oracle, canonical GREEN 满(NWT C1 审 2026-08-27; 原 provisional-until-J1 作废)。签名非锚(kaspa-wasm signMessage aux-rand 非确定): 负例用 test-only priv=1 钥现签, 只断言 verify 布尔与拒因/层。层: L1=assertCanonicalPubkey, L2=domain/version/network/operation, L3=verifyMessage。拒因/层按实测 scratch/_j2_s10_wasm_probe.mjs(memory reference-kaspa-wasm-xonly-pubkey-accepts-uppercase-verifymessage-false-vs-throw)。",
   "golden_file": "artifacts/2026-08-19-s10-golden-vectors-v1.json",
   "test_key_priv_hex": "0000000000000000000000000000000000000000000000000000000000000001",
   "cases": [

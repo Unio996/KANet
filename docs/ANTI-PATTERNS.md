@@ -3112,3 +3112,13 @@ WHERE id IN (...) AND protocol_status IN ('verifying', 'pending_bettors')
 - 🔨 **lint 规则思路(R-WATCHDOG-PROBE-SELFFAULT-RESTART, WARN)**: 扫 `*watchdog*.ps1` / watchdog 消费码, 若"探针自坏"退码(6/-1/load-fail/dep-missing 语义)出现在**触发 Start-Process / restart 的判定分支**(而非 no-op/Unknown 分支)⇒ warn "探针自坏退码被当成节点死会空拉/连锁, 应 fail-safe 不重启"。同 warn-first 落码, NWT diff GREEN 才升 ERROR。
 - 🔨 **配套(部署层)**: junction/symlink 依赖是**环境脆性**——非管理员建的挂载点在 Win11 会被 Redirection Guard 静默拦。承重依赖(probe 的 kaspa-wasm)别靠非提权 junction; 真包目录 or 提权建的挂载点。memory `reference-win11-redirection-guard-blocks-nonadmin-junctions`(J1 写)。
 - 同族: 规则 70(「从未执行」≠「没留痕」——探针 die 也是一次"执行"了却没做出节点判断)、`reference-isolate-rpcclient-failure-from-node-failure`(RpcClient 坏 vs 节点坏)、绿灯无信息族(探针坏 = 读数无信息, 不是"节点死"的信息)。
+
+## 规则 73 —— 跨节点身份的权威读只按 `relay_pubkey_xonly`（`u1_relay_identity` 主键），**不按 relay_id / `relay_nodes.ecdsa_pubkey_xonly` / 任何 legacy 列回退**（2026-08-27 · §10 C3/C5 · D-013 §1 · NWT 裁 P5）
+
+- **实录**: §10 之前注册链无"请求方密钥 ↔ relay_id"绑定（DECISIONS §6-1 relay_id 抢注面, COORD-LEDGER (484)-(487)）: relay_id 是一个**谁先占谁得**的字符串, 抢 relay-B 只要先 POST。§10 v1 把主键换成 **canonical x-only pubkey**——抢 pubkey X 必须签得出 X 的私钥, first-squatter 对它天然失效。而这个收益**只在"读的时候也只认 pubkey"时成立**。
+- 🔴 **判据（承重）**: 身份权威 = `u1_relay_identity.relay_pubkey_xonly`（v198, 小写 64-hex CHECK 与验证器 L1 同口径）。relay_id → pubkey 的本地便利映射一律**活算** `XOnlyPublicKey.fromAddress(new Address(relay_nodes.address))`（`feedback.js:18` 先例, `u1-registration.mjs relayPubkeyFromAddress`），**不落列、不读 `ecdsa_pubkey_xonly`**。理由不是洁癖: **列不存在 = 结构上无法被当权威读**; DATABASE.md 一句"非权威"只是约定, 谁为 UI/路由方便加回 `local_relay_id` 或按 `ecdsa_pubkey_xonly` 建索引, 就把"relay_id 变身份"的滑回面重新接上（N11 臂: 把 `ecdsa_pubkey_xonly` 填成攻击者钥, 注册仍须拒）。
+- 🔴 **验签公钥与绑定分清**: 验签公钥**只取 payload**（`s10.relayPubkeyXOnly`）; DB 读**只做绑定**（地址活算 === payload 钥, 否则 `RELAY_NOT_OWNED`）。反过来写（用 DB 里的钥去验签）= V15 原病: 攻击者自签一个合法签名就被读成"控制成立"。
+- 🔴 **本地网络权威**: `localNetwork` 来自本地配置（`KASPA_NETWORK`）, 生产签名里没有这个参数名; 信封 network ≠ 本地 ⇒ 拒, **绝不回落到 payload**（MUST-FIX A）。mutants 里"回落 payload"那格必须 detect。
+- 🔵 **作用域诚实**: v1 关的是**跨节点/远程**抢注（远程签不出本机 relay-B 地址钥）; **同机 loopback 抢注仍在**（同 (528)）, 不宣称关掉; rotate/revoke 是 v2（表层 `operation CHECK = 'register'` 再钉一次）。
+- 🔨 **审查清单**: ① `grep -n "local_relay_id\|ecdsa_pubkey_xonly" kasia-console/src/lib/u1-*.mjs kasia-console/src/db/migrate.js` 在 §10 域应零命中（v198 注释里的"不读"字样除外）; ② `PRAGMA index_list(u1_relay_identity)` 只有 pk/u 自动索引（④-6）; ③ 写入方唯一 = `u1-registration.mjs` 事务内（④-7）。
+- 同族: 规则 69（改路径必改观察量——本轮四份夹具同批补 `s10`）、`reference-a-security-property-must-come-from-the-only-path-not-the-recommended-one`（权威须是唯一路径）、`reference-kanet-cross-node-identity-is-pubkey-in-protocol-not-local-relay-id`。

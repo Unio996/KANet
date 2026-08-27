@@ -1,7 +1,7 @@
 // §10 C1 · S10 信封验证器离线确定性测试 (2026-08-27 J2)。跑: node kasia-console/src/lib/u1-s10-identity.test.mjs
 // 🔴 零 DB、零 IPC、零节点: 只用 kaspa-wasm 签/验 + golden vectors。向量 u1-s10-identity.vectors.json; 任一红 ⇒ 退出码 1。
-// 🔴 G1 期望值【直接读】artifacts/2026-08-19-s10-golden-vectors-v1.json(J1 第二实现已对拍), 不由被测 canonicalBytes 现生成 ——
-//    canonical 正确性的 GREEN = provisional-until-J1(落地后请 J1 用其实现复算 signed_message)。
+// 🔴 G1 期望值【直接读】artifacts/2026-08-19-s10-golden-vectors-v1.json, 不由被测 canonicalBytes 现生成(自证无信息) ——
+//    该 golden 的 generator = J1 从 spec 独立实现(COORD-LEDGER (547)) ⇒ 本文件对拍的是真独立 oracle, canonical GREEN 满(NWT C1 审 2026-08-27; 原"provisional-until-J1"作废)。
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
