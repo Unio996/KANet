@@ -80,7 +80,7 @@ async function spawnLlama() {
   if (!(await memGateOk())) return null;
   const proc = spawn(LLAMA_EXE, [
     '--model', LLAMA_MODEL,
-    '--host', '0.0.0.0', '--port', '8000',
+    '--host', '127.0.0.1', '--port', '8000',
     '--n-gpu-layers', '99', '--ctx-size', ctx,
     '--cache-type-k', 'q8_0', '--cache-type-v', 'q8_0',
     '--threads', '8', '--flash-attn', 'on',

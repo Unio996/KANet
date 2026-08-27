@@ -133,7 +133,7 @@ elif [ -f "$LLAMA_SERVER" ] && [ -f "$LLAMA_MODEL" ]; then
     > "$LLAMA_LOG"
     (cd "$LLAMA_DIR" && ./llama-server.exe \
       --model "$LLAMA_MODEL" \
-      --host 0.0.0.0 --port $LLAMA_PORT \
+      --host 127.0.0.1 --port $LLAMA_PORT \
       --n-gpu-layers 99 --ctx-size "$LLAMA_CTX_SIZE" \
       --cache-type-k q8_0 --cache-type-v q8_0 \
       --threads 8 --flash-attn on \
