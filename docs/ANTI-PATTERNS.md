@@ -3122,3 +3122,11 @@ WHERE id IN (...) AND protocol_status IN ('verifying', 'pending_bettors')
 - 🔵 **作用域诚实**: v1 关的是**跨节点/远程**抢注（远程签不出本机 relay-B 地址钥）; **同机 loopback 抢注仍在**（同 (528)）, 不宣称关掉; rotate/revoke 是 v2（表层 `operation CHECK = 'register'` 再钉一次）。
 - 🔨 **审查清单**: ① `grep -n "local_relay_id\|ecdsa_pubkey_xonly" kasia-console/src/lib/u1-*.mjs kasia-console/src/db/migrate.js` 在 §10 域应零命中（v198 注释里的"不读"字样除外）; ② `PRAGMA index_list(u1_relay_identity)` 只有 pk/u 自动索引（④-6）; ③ 写入方唯一 = `u1-registration.mjs` 事务内（④-7）。
 - 同族: 规则 69（改路径必改观察量——本轮四份夹具同批补 `s10`）、`reference-a-security-property-must-come-from-the-only-path-not-the-recommended-one`（权威须是唯一路径）、`reference-kanet-cross-node-identity-is-pubkey-in-protocol-not-local-relay-id`。
+
+## 规则 74 —— 「cwd 相对的默认库路径」+「打开不存在的路径会静默建空库」= 你读的不是你以为的库，而且**不报错**（2026-08-27 · J2 误报"live 无 v197" · Bettor (698) 直读纠正）
+
+- **实录**: `kasia-console/src/db/client.js:10` = `resolve(process.env.DB_PATH || './data/console.db')` ——**随 `process.cwd()` 漂**。J2 从仓根 `D:/kanet-tn12` 跑 `node kasia-console/scripts/u1-registration-e2e.mjs`（dry-run）, client.js 解析到 `D:/kanet-tn12/data/console.db`（一个 8-18 的杂库, 有 `u1_identity_registration` 无 v197 表; `-shm` mtime 就是那次 dry-run）, 脚本在 `SELECT COUNT(*) FROM u1_identity_challenge` 撞 `no such table`, J2 据此报"live console.db 既无 v198 也无 v197"。**真相**（Bettor 直读 live `kasia-console/data/console.db`）: v197 在（2 行）, 只缺 v198。"零写入 live"倒是成立——因为根本没碰 live。
+- 🔴 **两个机制叠加才致命**: ① 默认路径**相对 cwd** 而不是相对模块（`import.meta.url`）; ② `better-sqlite3` `new Database(path)` 对**不存在的路径静默建一个空库**（不是 ENOENT）。单独一条都只是不方便; 叠加起来 = 读错库**且**没有任何报错, 你拿到的是一套"看起来很权威"的空读数。同族: `reference-lint-m0a-reads-index-not-worktree`（读的对象不是你以为的对象）、`feedback-bash-cwd-drift-delayed-live-restart-2026-07-14`（cwd 漂）、`feedback-verify-target-path-is-live-before-operate`（操作前确认目标是 live）。
+- 🔴 **判据**: 任何"对 live 库的读数"在报出去之前, 必须带**打开的绝对路径**（`dbPath`）, 且脚本自己先证"这是 live 库"——**库身份断言**（表存在 ∧ 关键表非空）, 不是"能打开"。能打开一个空库不证明任何事。
+- 🔨 **修法（脚本侧, e2e 已落 C4 fix-up）**: ① `DB_PATH` 未设时要求 `process.cwd()` 以 `kasia-console` 结尾, 否则 die 并打印解析后的绝对路径; ② 打开后断言 `relay_nodes` 与 `u1_identity_challenge` 存在且 `relay_nodes` 非空, 否则 die "这不是 live 库"; ③ dry-run 输出带 `db=<绝对路径>`。**不动 `client.js`**（生产共享模块, 改默认路径语义 = 另开议题走 NWT）。
+- 🔨 **判据（报告侧）**: "库里没有 X"这类否定性读数, 先问**读的是哪个文件**——否定性结论对"读错对象"最没有抵抗力（读错了也是"没有"）。阳性对照: 同一连接先读一个**必存在**的表/行, 读不到 ⇒ 是库不对, 不是 X 不在。

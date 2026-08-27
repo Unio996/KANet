@@ -25,6 +25,7 @@
 //   node kasia-console/scripts/u1-registration-e2e.mjs                      # dry-run, 只看计划
 //   node kasia-console/scripts/u1-registration-e2e.mjs --relay=tester-3 --execute
 import { randomBytes } from 'node:crypto';
+import { resolve } from 'node:path';
 
 const ARGS = process.argv.slice(2);
 const has = (f) => ARGS.includes(f);
@@ -48,7 +49,20 @@ const relayCmd = async (id, cmd, timeoutMs = 30000) => {
   return r.json();
 };
 
-const { sqlite } = await import('../src/db/client.js');
+// 🔴 库身份断言(C4 fix-up · Bettor (698) · fail-closed): `src/db/client.js:10` 的默认路径 `./data/console.db` **随 cwd 漂**, 且 better-sqlite3
+//    对不存在的路径会**静默建一个空库** ⇒ 从仓根跑本脚本会读/建 `D:/kanet-tn12/data/console.db`(杂库)而不是 live 库, 报数全错且不报错
+//    (J2 2026-08-27 实栽: 据此误报"live 无 v197"; 真相是 live 有 v197、只缺 v198)。三道: ① DB_PATH 未设时 cwd 必须是 kasia-console;
+//    ② 打开后 relay_nodes / u1_identity_challenge 必须存在且 relay_nodes 非空; ③ 输出带 db 绝对路径。不动 client.js(生产共享模块, 另议)。
+if (!process.env.DB_PATH && !/kasia-console[\\/]?$/.test(process.cwd())) {
+  logSafe(`🔴 DB_PATH 未设且 cwd 不是 kasia-console(实际 ${process.cwd()}) ⇒ client.js 会解析到 ${resolve('./data/console.db')} 而非 live 库 —— 停`);
+  process.exit(1);
+}
+const { sqlite, dbPath } = await import('../src/db/client.js');
+const hasTable = (t) => !!sqlite.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name = ?").get(t);
+if (!hasTable('relay_nodes') || !hasTable('u1_identity_challenge') || sqlite.prepare('SELECT COUNT(*) c FROM relay_nodes').get().c === 0) {
+  logSafe(`🔴 ${dbPath} 不像 live 库(缺 relay_nodes / u1_identity_challenge, 或 relay_nodes 为空) —— 停(别信一个可能是刚被静默建出来的空库)`);
+  process.exit(1);
+}
 const { rootFingerprint, deriveIdentityPubkey } = await import('../src/lib/u1-same-origin.mjs');
 const { buildPopPayload, popMessageHashHex } = await import('../src/lib/u1-registration-pop.mjs');
 // §10 C4: 注册自 C3 起要求 s10 信封(缺 ⇒ RELAY_NOT_OWNED); relay 用 ecdsa_sign(任意字符串消息, relay.mjs:638-652)签 S10 消息, 与 PoP 同一把钥
@@ -88,6 +102,7 @@ const check = (n, ok, detail = '') => { if (ok) { pass++; logSafe('[PASS]', n); 
 
 if (!EXECUTE) {
   logSafe('\n🔵 dry-run(未传 --execute) —— 下面只是【将要做什么】, 本次零写入:');
+  logSafe('  db =', dbPath);
   logSafe('  E1 阴性臂将打这些 relay(应各自返 CUSTODY_NOT_MNEMONIC, 零写入):',
     NEGATIVES.map((r) => r.name).join(', ') || '(无)');
   logSafe('  E2 阳性臂 relay =', RELAY_NAME || '🔴 未指定(必须 --relay=<name>, 无默认值)');
