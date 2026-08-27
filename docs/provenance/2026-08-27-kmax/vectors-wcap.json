@@ -1,5 +1,5 @@
 {
-  "note": "(21) v0.9 · wcap-window 确定性向量。小窗参数 SMALL = {windowSize 5, sampleRate 2, minWindow 2, mergesetLimit 4 ⇒ evict_max 3, targetTimeMs 1000, mergeDepth 6}(生产默认 TN12 661/40/150/248/100ms/36000)。合成 DAG 由 test 内生成器按【同一规则】回填 bits(assignBits)。验收映射: (A) 重建+证书 / (B) bitsCalc==收块 bits / (C) 断言+自喂剔除+负向量 / (D) 有界穷举对抗模型 N_SMALL=12(非生产) / (E) 贪心 smoke(非验收)。BigInt 一律字符串。",
+  "note": "(21) v0.9 · wcap-window 确定性向量。小窗参数 SMALL = {windowSize 5, sampleRate 2, minWindow 2, mergesetLimit 4 ⇒ evict_max 3, targetTimeMs 1000, mergeDepth 6}(生产默认 TN12 661/40/150/248/100ms/36000)。合成 DAG 由 test 内生成器按【同一规则】回填 bits(assignBits)。验收映射: (A) 重建+证书 / (B) bitsCalc==收块 bits / (C) 断言+自喂剔除+负向量 / (D) 有界穷举对抗模型 N_SMALL=12(非生产) / (E) 贪心 smoke(非验收)。BigInt 一律字符串。 v0.9.1 (Codex 1eff6fe1): 预采样层 mergeset 序 = 共识 descending SortableBlock(blue_work 然后 hash 字节序, Hash=[u8;32] 派生 Ord ≡ 小写等长 hex 码元序); W11 独立 oracle 平局向量: 固定 64 位 hex, 手算期望 —— 镜像正/反输入同结果 = oracle; 去掉 hash 打破 ⇒ 结果随输入顺序变且 ≠ oracle。",
   "small": {
     "windowSize": 5,
     "sampleRate": 2,
@@ -213,6 +213,54 @@
       },
       "anchor": "b31",
       "compareFull": true
+    },
+    {
+      "id": "W11-oracle-equal-bluework-tiebreak",
+      "type": "oracle-tiebreak",
+      "desc": "v0.9.1 独立 oracle(Codex 1eff6fe1): 4 个 mergeset 成员两两等 blue_work(A=B=0x10, C=D=0x0f), 固定 64 位 hex; sampleRate 2, daa(SP)=1 ⇒ 采降序第 2、第 4 个; 共识序 [B,A,D,C] ⇒ 手算采 [A,C]; 镜像正/反输入皆 [A,C]、堆同; 去 hash 打破 ⇒ 结果依赖输入顺序且 ≠ oracle",
+      "params": {
+        "windowSize": 5,
+        "sampleRate": 2,
+        "minWindow": 2,
+        "mergesetLimit": 8,
+        "targetTimeMs": 1000,
+        "mergeDepth": 6,
+        "genesisBits": 520159231
+      },
+      "daaSp": 1,
+      "bits": 520159231,
+      "bsC": 100,
+      "sp": {
+        "hash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "blueWork": "0x20",
+        "blueScore": 99
+      },
+      "others": [
+        {
+          "hash": "00aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "blueWork": "0x10",
+          "blueScore": 98
+        },
+        {
+          "hash": "00bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "blueWork": "0x10",
+          "blueScore": 98
+        },
+        {
+          "hash": "0100000000000000000000000000000000000000000000000000000000000000",
+          "blueWork": "0x0f",
+          "blueScore": 98
+        },
+        {
+          "hash": "0111111111111111111111111111111111111111111111111111111111111111",
+          "blueWork": "0x0f",
+          "blueScore": 98
+        }
+      ],
+      "expectedSampled": [
+        "00aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "0100000000000000000000000000000000000000000000000000000000000000"
+      ]
     }
   ]
 }

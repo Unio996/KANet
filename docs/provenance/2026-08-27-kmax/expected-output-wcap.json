@@ -282,5 +282,36 @@
   "equals_full": true,
   "first_exact": "b43",
   "top_exact": true
+ },
+ "W11-oracle-equal-bluework-tiebreak": {
+  "oracle_expected_sampled": [
+   "00aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "0100000000000000000000000000000000000000000000000000000000000000"
+  ],
+  "mirror_sampled_fwd": [
+   "00aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "0100000000000000000000000000000000000000000000000000000000000000"
+  ],
+  "mirror_sampled_rev": [
+   "00aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "0100000000000000000000000000000000000000000000000000000000000000"
+  ],
+  "mirror_matches_oracle": true,
+  "heap_fwd_eq_rev": true,
+  "heap_members": [
+   "00aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "0100000000000000000000000000000000000000000000000000000000000000",
+   "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+  ],
+  "no_tiebreak_fwd": [
+   "00bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+   "0111111111111111111111111111111111111111111111111111111111111111"
+  ],
+  "no_tiebreak_rev": [
+   "00aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "0100000000000000000000000000000000000000000000000000000000000000"
+  ],
+  "no_tiebreak_order_dependent": true,
+  "no_tiebreak_differs_from_oracle": true
  }
 }

@@ -1,4 +1,4 @@
-// (21) v0.9 · w_cap_window 层1 重建器(durable) —— (23) v0.15 2f632c91 §3.5(b) 支配定理 L1–L5 + 精确证书 + 验收 (A)–(E)。只读、纯函数; 镜像 7b1e18cc:
+// (21) v0.9.1 · w_cap_window 层1 重建器(durable; v0.9.1 = 预采样层 mergeset 序对齐共识 SortableBlock 含 hash 打破) —— (23) v0.15 2f632c91 §3.5(b) 支配定理 L1–L5 + 精确证书 + 验收 (A)–(E)。只读、纯函数; 镜像 7b1e18cc:
 //   window(B) = window(SP) ∪ sampled({SP} ∪ mergeset(B))      consensus/src/processes/window.rs:138-235 build_block_window / :265-282 try_init_from_cache(继承样本【不再重过阈值】)
 //   采样: once(SP) 再按蓝功降序遍历 mergeset(去 SP); blue_score < lowest_daa_blue_score(B) ⇒ NonDaa 不计 index; 否则 index++, (daa(SP)+index) % sample_rate == 0 ⇒ 样本   window.rs:299-322
 //   lowest_daa_blue_score(B) = max(bs(B), full) − full【蓝分域, 原生】, full = window_size × sample_rate = 26,440    difficulty.rs:185-197
@@ -21,8 +21,12 @@ export function fromRpcBlock(b) {   // wRPC(kaspa-wasm) camelCase → 扁平; he
   return { hash: h.hash, daaScore: Number(h.daaScore), blueScore: Number(v.blueScore ?? h.blueScore), blueWork: bw({ blueWork: h.blueWork }), timestamp: Number(h.timestamp), bits: Number(h.bits), parents, selectedParentHash: v.selectedParentHash ?? null, mergeSetBluesHashes: v.mergeSetBluesHashes || [], mergeSetRedsHashes: v.mergeSetRedsHashes || [] };
 }
 
-// 序 = SortableBlock Ord (ghostdag/ordering.rs:38-42): blue_work 然后 hash; 数组升序, items[0] = 最小
-const cmpSortable = (a, b) => { const x = bw(a), y = bw(b); if (x !== y) return x < y ? -1 : 1; return a.hash < b.hash ? -1 : a.hash > b.hash ? 1 : 0; };
+// 序 = SortableBlock Ord (ghostdag/ordering.rs:38-42): blue_work.cmp().then_with(hash.cmp()); Hash = [u8;32] 派生 Ord (crypto/hashes/src/lib.rs:38-46) = 字节字典序
+//   ⇒ JS 用【等长小写 hex】字符串的码元比较(非 locale): 小写 hex 字典序 ≡ 字节字典序(每字节两位 hex, '0'-'9' < 'a'-'f' 与数值序一致); 输入统一 lowercase; 长度不等(合成向量短名)也按码元序, 与共识无交集只求确定性
+//   v0.9.1 (Codex 1eff6fe1 MUST-FIX): 同一比较器同时用于【堆淘汰层】与【childWindow 预采样层】——两层各自独立对齐共识, 等 blue_work 不得回落到输入顺序
+const hashKey = (h) => String(h).toLowerCase();
+const cmpSortable = (a, b) => { const x = bw(a), y = bw(b); if (x !== y) return x < y ? -1 : 1; const ha = hashKey(a.hash), hb = hashKey(b.hash); return ha < hb ? -1 : ha > hb ? 1 : 0; };
+export const consensusMergesetOrder = (blocks) => blocks.slice().sort((x, y) => cmpSortable(y, x));   // descending SortableBlock(= ghostdag.rs:139-147 descending_mergeset_without_selected_parent 的序)
 class Heap { constructor(bound, items = []) { this.bound = bound; this.items = items.slice(); } size() { return this.items.length; } full() { return this.items.length === this.bound; } minBw() { return this.items.length ? bw(this.items[0]) : null; }
   tryPush(b) { if (this.items.length < this.bound) { this._ins(b); return true; } if (cmpSortable(b, this.items[0]) <= 0) return false; this.items.shift(); this._ins(b); return true; }   // window.rs:458-468: 满且新块 > 最小才 pop 最小
   _ins(b) { let i = 0; while (i < this.items.length && cmpSortable(this.items[i], b) < 0) i++; this.items.splice(i, 0, b); }
@@ -43,7 +47,7 @@ export const isTrueGenesis = (b) => (!b.parents || b.parents.length === 0) && b.
 // 对给定 (window(SP) 堆, SP, mergeset 成员, bs(C)) 生成 window(C)  —— window.rs:299-322 原生采样
 export function childWindow(spHeap, sp, mergesetOthers, bsC, P) {
   const heap = spHeap.clone(); const threshold = Math.max(bsC, P.full) - P.full; let index = 0; let admitted = 0, nonDaa = 0;
-  const ordered = [sp, ...mergesetOthers.slice().sort((x, y) => (bw(y) > bw(x) ? 1 : bw(y) < bw(x) ? -1 : 0))];
+  const ordered = [sp, ...consensusMergesetOrder(mergesetOthers)];   // v0.9.1: 降序 SortableBlock 含 hash 字节序打破(旧版等 blue_work 回落输入顺序 = Codex 1eff6fe1 MUST-FIX)
   for (const x of ordered) { if (x.blueScore < threshold) { nonDaa++; continue; } index++; if ((sp.daaScore + index) % P.sampleRate === 0) { heap.tryPush(x); admitted++; } }
   return { heap, admitted, nonDaa, threshold };
 }

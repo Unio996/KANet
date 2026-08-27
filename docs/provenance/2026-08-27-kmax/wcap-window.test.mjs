@@ -3,7 +3,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { wCapWindow, rebuildWindows, paramsFrom, calcWork, childWindow, makeHeap, enumerateBounded, N_SMALL } from './wcap-window.mjs';
+import { wCapWindow, rebuildWindows, paramsFrom, calcWork, childWindow, makeHeap, enumerateBounded, N_SMALL, consensusMergesetOrder } from './wcap-window.mjs';
 import { targetFromBits, compactTargetBits } from './kmax-cost.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -53,6 +53,16 @@ for (const v of vectors.cases) {
       const PT = paramsFrom({}); const others = Array.from({ length: 247 }, (_, i) => ({ hash: 'm' + i, daaScore: 32, blueScore: 100000, blueWork: 10n ** 20n - BigInt(i + 1), timestamp: i, bits: 504155340, parents: [] }));
       const admitted = v.daaSp.map(d => childWindow(makeHeap(661), { hash: 'sp', daaScore: d, blueScore: 100000, blueWork: 10n ** 20n, timestamp: 0, bits: 504155340, parents: [] }, others, 100001, PT).admitted);
       results[v.id] = { admitted, evictMax: PT.evictMax, ok: JSON.stringify(admitted) === JSON.stringify(v.expectAdmitted) && PT.evictMax === 7 };
+    } else if (v.type === 'oracle-tiebreak') {   // v0.9.1 独立 oracle: 固定 hex 常量, 期望手算(不经生成器/镜像)
+      const PT = paramsFrom(v.params); const mk = (hash, bwHex, bs) => ({ hash, daaScore: v.daaSp, blueScore: bs, blueWork: BigInt(bwHex), timestamp: 0, bits: v.bits, parents: [] });
+      const sp = mk(v.sp.hash, v.sp.blueWork, v.sp.blueScore); const others = v.others.map(o => mk(o.hash, o.blueWork, o.blueScore));
+      const pick = (list, cmpVariant) => { // cmpVariant: 'consensus' | 'no-tiebreak'(等 blue_work 回落输入顺序 = 旧 bug)
+        const ordered = cmpVariant === 'consensus' ? consensusMergesetOrder(list) : list.slice().sort((x, y) => (y.blueWork > x.blueWork ? 1 : y.blueWork < x.blueWork ? -1 : 0));
+        let index = 1; const sampled = []; for (const x of ordered) { index++; if ((sp.daaScore + index) % PT.sampleRate === 0) sampled.push(x.hash); } return sampled; };   // index 从 SP=1 起, 这里 SP 自身不采(由 daaSp 设计保证)
+      const fwd = pick(others, 'consensus'), rev = pick(others.slice().reverse(), 'consensus');
+      const bugFwd = pick(others, 'no-tiebreak'), bugRev = pick(others.slice().reverse(), 'no-tiebreak');
+      const heapFwd = childWindow(makeHeap(PT.windowSize), sp, others, v.bsC, PT).heap.items.map(x => x.hash).sort(), heapRev = childWindow(makeHeap(PT.windowSize), sp, others.slice().reverse(), v.bsC, PT).heap.items.map(x => x.hash).sort();
+      results[v.id] = { oracle_expected_sampled: v.expectedSampled, mirror_sampled_fwd: fwd, mirror_sampled_rev: rev, mirror_matches_oracle: JSON.stringify(fwd) === JSON.stringify(v.expectedSampled) && JSON.stringify(rev) === JSON.stringify(v.expectedSampled), heap_fwd_eq_rev: JSON.stringify(heapFwd) === JSON.stringify(heapRev), heap_members: heapFwd, no_tiebreak_fwd: bugFwd, no_tiebreak_rev: bugRev, no_tiebreak_order_dependent: JSON.stringify(bugFwd) !== JSON.stringify(bugRev), no_tiebreak_differs_from_oracle: JSON.stringify(bugFwd) !== JSON.stringify(v.expectedSampled) || JSON.stringify(bugRev) !== JSON.stringify(v.expectedSampled) };
     } else if (v.type === 'nsmall') {
       const blocks = genChain(v.gen, P); const { windows } = rebuildWindows(blocks, P); const sp = blocks.find(b => b.hash === 'b30');
       let t1 = null, t2 = null; try { enumerateBounded(sp, blocks, windows, P, { maxSubset: v.maxSubset }); } catch (e) { t1 = String(e.message).slice(0, 24); } try { wCapWindow(blocks, params, { verifyCandidates: true, maxSubset: N_SMALL + 1 }); } catch (e) { t2 = String(e.message).slice(0, 22); }
