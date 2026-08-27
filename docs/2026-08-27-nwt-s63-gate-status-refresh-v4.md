@@ -9,8 +9,8 @@
 
 | 决 | Owner 裁 | 现状 / 下一步 | 权威锚 |
 |---|---|---|---|
-| **§10 跨节点 pubkey 身份 v1** | 🟢 **GO（开工）** | 范围铁律：只 `operation=register`；rotate/revoke/迁移不含；不部署对外、不动 §0 墙（D-012）；不改 A2 六字段。流程：J2 落码（pathspec 不推）→ **每 commit NWT diff 审** → Bettor 推 → Codex 桥审 → 上线=D-005 独立迁移 Owner 另拍。**J2 出一页切片计划中**；NWT 已核 v0.2(70761d33) 全吸收 v0.1 PASS-WITH-NOTES(e128a735)，**1 残余（C5 审词旧措辞）待 J2 切片前修**。 | 设计 847bcf22 / 计划 v0.2 70761d33 |
-| **`B_adv` 对手预算** | 🟢 **只定语义、不钉硬数** | 语义 = 单一预算 `H_hidden_ub=H_adv_add=B_adv`（拆须论证+守卫）·不具名 ⇒ Tier-2 fail-closed（= 现网安全现状）·机械复核触发（(24) 见第二 coinbase 地址≥100 块 / Tier-2 真 build）·硬值等实测基线。已写入 (23)§8 OWNER-FREEZE 注 + (d)§8 镜像。**无后续动作**（fail-closed 缺省对现网正确）。 | D-013 §2 / (23) v0.15 / 决策稿 719cab73 |
+| **§10 跨节点 pubkey 身份 v1** | 🟢 **GO（开工）** | 范围铁律：只 `operation=register`；rotate/revoke/迁移不含；不部署对外、不动 §0 墙（D-012）；不改 A2 六字段。流程：J2 落码（pathspec 不推）→ **每 commit NWT diff 审** → Bettor 推 → Codex 桥审 → 上线=D-005 独立迁移 Owner 另拍。**切片计划 v0.1 已落**（802cd915 + fix-up 469656a7）；NWT 已核 v0.2/v0.3 全吸收 v0.1 PASS-WITH-NOTES(e128a735)（C5 残余 v0.3=bd01ac89 已修、C2 CHECK MUST 已吸收），**J2 起 C1，NWT 逐 commit diff 审**。 | 设计 847bcf22 / 计划 v0.2 70761d33 |
+| **`B_adv` 对手预算** | 🟢 **只定语义、不钉硬数** | 语义 = 单一预算 `H_hidden_ub=H_adv_add=B_adv`（拆须论证+守卫）·不具名 ⇒ Tier-2 fail-closed（= 现网安全现状）·机械复核触发（(24) 见第二 coinbase 地址≥100 块 / Tier-2 真 build）·硬值等实测基线。已写入 (23)§8 OWNER-FREEZE 注；(d) **§6 step 2 (b)** 自 v0.11 已含（`B_adv` 单一预算 MUST-A + 守卫 + 不具名 fail-closed），机械复核触发是政策、权威在 D-013/(23) ⇒ **(d) 不需镜像**。**无后续动作**（fail-closed 缺省对现网正确）。 | D-013 §2 / (23) v0.15 / 决策稿 719cab73 |
 | **watchdog SYNCING 三态** | 🟢 **v0.3 批** | 三态（ALIVE/SYNCING/DEAD）替 "daa=0 判死"；刹车 N=5/T=5min/冷却30min **不得被恢复动作自身 reset**；(PID,CreationDate) 判自重启；退出码 7/8/9；VA-1…9。**启用条件不变**：本机 READY(`isSynced ∧ daa>80,095,687`)+VA 全过+NWT diff GREEN；**IBD 期只落码不启用**（`KANet-KaspadWatchdog` 保持 Disabled）。KANet-UI 落码 pending → NWT diff 审。 | D-013 §3 / 计划 48d025f6 |
 
 🔴 **仍待 Owner 一件（原四决第四件，D-013 未含）**：**§6-1 ⑥ 生产签发口 Track + 是否推翻 (527)**——Track-A(手工) 已 E2E GREEN 够 / Track-B(端点) 需 §10 抢注先解 + 推翻 (527)。（§10 GO 已解"抢注"前提之半，但推翻 (527) 仍是独立 Owner 裁。）
