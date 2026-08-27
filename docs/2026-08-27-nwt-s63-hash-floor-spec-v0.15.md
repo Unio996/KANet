@@ -5,6 +5,7 @@
 > **Codex 明写：本轮不授权任何 build / 落码 / 部署 / 签名广播 / DB 变更 / 结算退款 / key movement / 生产钱路。** gate (d) 仍 OPEN。
 > **FIX-UP（2026-08-27 · J2 COORD-FIX · 同文件不 amend 2f632c91）**：F4 坐标 `ghostdag/ordering.rs:46-48` → **`:38-42`**（我原指到了排序辅助 `sort_blocks`；`impl Ord for SortableBlock` 实在 :38-42，:40 = `blue_work.cmp().then_with(hash.cmp())`，NWT 复核）。语义不变。
 > **FIX-UP 2（2026-08-27 · Codex 主动审逮 · 同文件不 amend）**：F2 原只写"节拍按 DAA-index"、**未钉遍历序** —— 补"mergeset 按降序 `SortableBlock`（blue_work then hash）遍历（`descending_mergeset_without_selected_parent` `ghostdag.rs:139-163`）"。**这是我 (c) 审 (21) v0.9 时漏的同族洞的 spec 面**：Codex 逮出 `wcap-window.mjs childWindow()` 预采样 `sort` 只比 blue_work（等值保留输入序）≠ 共识 SortableBlock ⇒ 等 work 兄弟块采样归属可变 ⇒ 非精确。**预采样层与堆层须各自对齐**（堆 `cmpSortable` 已对齐、预采样未）。落码 fix 在 (21) v0.9.1（J2）。
+> 🔵 **OWNER-FREEZE（2026-08-27 · D-013 §2 · 同文件不 amend）**：本 §8 引用的 **`B_adv` 单一预算语义 = Owner 冻结**（`docs/DECISIONS.md` D-013 §2 权威，Owner 原话"B_adv 只定语义不钉数"）。冻结内容**不在此复述**（防漂移，通则）——权威读 D-013 §2：语义 = 保护窗内缺席于窗均值可见估计的全部对手容量之上界·单位算力·**单一预算** `H_hidden_ub=H_adv_add=B_adv`（拆开须 Owner 论证 + 守卫 `H_hidden_ub≥H_adv_add`）·不具名 ⇒ 两路皆不出 cap ⇒ Tier-2 fail-closed·机械复核触发（(24) `s_visible_max` 见第二 coinbase 地址 ≥100 块 / Tier-2 真 build）·**硬值不钉、等实测基线**。⇒ 本规格的 `B_adv` 项自此**不是待定、是 Owner 冻结语义**；硬闸"无 `B_adv` ⇒ 回 (a)"照旧（不具名的 fail-closed 是安全缺省，非缺陷）。决策对象稿 `docs/2026-08-27-nwt-s63-adversary-budget-owner-decision-v0.1.md`（719cab73/523a07f9）= 冻结前的建议输入，Owner 已按其 (Y1)(Y2)(Y3) 姿态裁。
 
 ## §3.5(b) 新增「支配定理」小节（替代穷举，承重）
 
