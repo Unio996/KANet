@@ -450,5 +450,11 @@
   "reason": null,
   "fallback": null,
   "note": "w_cap_window 由参数注入((23) v0.13 层1 重建器待 Codex 281); 单位 = 每块 work(与 calc_work 同), H_vis_ub = work/s"
+ },
+ "D1-selfcheck-fault-twice": {
+  "first_throws": true,
+  "second_throws": true,
+  "both_throw": true,
+  "good_impl_still_ok": true
  }
 }

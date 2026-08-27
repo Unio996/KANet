@@ -19,6 +19,7 @@ for (const v of vectors.cases) {
   else if (v.type === 'table') got = costTable(v.H_net, v.ks);
   else if (v.type === 'lambda') got = bracketCheck(v.n);
   else if (v.type === 'selfcheck') { const r = selfCheck(); got = { ok: r.ok, sweep_0_200_bracket_failures: r.sweep_0_200_bracket_failures, rows_ok: r.rows.map(x => [x.n, x.ok]) }; }
+  else if (v.type === 'selfcheck-fault') { const bad = (n, a) => lambdaUb(n, a) * v.factor; const tryOnce = () => { try { selfCheck({ implFn: bad }); return false; } catch (e) { return String(e.message).startsWith('DSTAT_SELFCHECK_FAIL'); } }; const first = tryOnce(), second = tryOnce(); let goodStill; try { goodStill = selfCheck().ok; } catch { goodStill = false; } got = { first_throws: first, second_throws: second, both_throw: first && second, good_impl_still_ok: goodStill }; }
   else if (v.type === 'nmin') got = { delta: v.delta, N_min: nMin(v.delta) };
   else if (v.type === 'hvis') { try { got = hVisUb(v.input); } catch (e) { got = { thrown: String(e.message).slice(0, 40) }; } }
   else if (v.type === 'law3') { const mk = (n, from, step) => Array.from({ length: n }, (_, i) => ({ header: { hash: 'b' + from + i, timestamp: from + i * step } })); const blocks = [...mk(v.inWindow, v.tipTs - v.windowS * 1000 + 1, Math.floor(v.windowS * 1000 / v.inWindow)), ...mk(v.outWindow, v.tipTs - v.windowS * 1000 - 100000, 10)]; got = law3FromBlocks(blocks, v.tipTs, v.windowS, targetFromBits(v.bits)); }

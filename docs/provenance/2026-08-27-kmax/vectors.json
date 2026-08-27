@@ -1,5 +1,5 @@
 {
-  "note": "(21) v0.4 确定性向量。bits→target 镜像 7b1e18cc math/src/lib.rs:64-80(from_compact_target_bits: mant=bits&0xFFFFFF, expt=8×((bits>>24)−3), mant>0x7FFFFF ⇒ 0); 反向 :83-97; work=2^256/(target+1)(difficulty.rs:261-267); H1=work×10 BPS; difficulty_ratio=5.78960446186581e76/target(converter/consensus.rs:49-56, constants.rs:44)。genesis bits = TESTNET12_GENESIS.bits 504155340 (genesis.rs:158)。 v0.5: 法3 瞬时估(墙钟窗按块时间戳计数×work, W≫132 s); decideHNet=min(可用法), 只法1 ⇒ PROVISIONAL_OVERESTIMATE, 相差>2× ⇒ gate_input=FAIL_CLOSED; C 档估值只列不折。 v0.8 (Codex 280 D-STAT-1/2 CLOSED): lambda = Garwood 上括号 + 夹逼(高斯下轨 ≤ impl ≤ Chernoff 上轨) + 精确对照(Codex 独立复算 6 值, 容差 1e-5); selfcheck = 六向量 + n=0..200 夹逼全扫; nmin = δ 反解 5%/3%/2% ⇒ 3974/10867/24259; hvis = 硬闸 W<3600 ∨ n<4000 ∨ 无 w_cap ⇒ null 回 (a-total)。",
+  "note": "(21) v0.4 确定性向量。bits→target 镜像 7b1e18cc math/src/lib.rs:64-80(from_compact_target_bits: mant=bits&0xFFFFFF, expt=8×((bits>>24)−3), mant>0x7FFFFF ⇒ 0); 反向 :83-97; work=2^256/(target+1)(difficulty.rs:261-267); H1=work×10 BPS; difficulty_ratio=5.78960446186581e76/target(converter/consensus.rs:49-56, constants.rs:44)。genesis bits = TESTNET12_GENESIS.bits 504155340 (genesis.rs:158)。 v0.5: 法3 瞬时估(墙钟窗按块时间戳计数×work, W≫132 s); decideHNet=min(可用法), 只法1 ⇒ PROVISIONAL_OVERESTIMATE, 相差>2× ⇒ gate_input=FAIL_CLOSED; C 档估值只列不折。 v0.8 (Codex 280 D-STAT-1/2 CLOSED): lambda = Garwood 上括号 + 夹逼(高斯下轨 ≤ impl ≤ Chernoff 上轨) + 精确对照(Codex 独立复算 6 值, 容差 1e-5); selfcheck = 六向量 + n=0..200 夹逼全扫; nmin = δ 反解 5%/3%/2% ⇒ 3974/10867/24259; hvis = 硬闸 W<3600 ∨ n<4000 ∨ 无 w_cap ⇒ null 回 (a-total)。 v0.8 fix-up(NWT): selfCheck 失败不缓存, selfcheck-fault 向量连调两次都 throw。",
   "cases": [
     {
       "id": "V1-genesis-bits",
@@ -272,6 +272,12 @@
         "t0Ms": 1000,
         "t1Ms": 3601000
       }
+    },
+    {
+      "id": "D1-selfcheck-fault-twice",
+      "type": "selfcheck-fault",
+      "desc": "注入坏实现(λ×0.9 欠界): selfCheck 连调两次都须 throw(失败不缓存, 否则第二次静默通过 = fail-open); 之后真实现仍 ok",
+      "factor": 0.9
     }
   ]
 }

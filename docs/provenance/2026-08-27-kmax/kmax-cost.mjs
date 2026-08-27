@@ -101,20 +101,22 @@ export function lambdaUb(n, alpha = ALPHA, iters = 100) {
 }
 export const lambdaUbChernoff = (n, alpha = ALPHA) => { const L = Math.log(1 / alpha); return (Math.sqrt(L / 2) + Math.sqrt(L / 2 + n)) ** 2; };
 export const lambdaUbGaussRail = (n) => n + GAUSS_Z * Math.sqrt(n);   // 仅下轨, 非闸值
-export function bracketCheck(n, alpha = ALPHA) {
-  const impl = lambdaUb(n, alpha), lo = lambdaUbGaussRail(n), hi = lambdaUbChernoff(n, alpha);
+export function bracketCheck(n, alpha = ALPHA, implFn = lambdaUb) {   // implFn 只供测试注入坏实现(v0.8 fix-up), 生产路径恒为 lambdaUb
+  const impl = implFn(n, alpha), lo = lambdaUbGaussRail(n), hi = lambdaUbChernoff(n, alpha);
   const ref = GARWOOD_EXACT_REF[n]; const refOk = ref == null ? null : Math.abs(impl - ref) <= GARWOOD_REF_TOL && impl >= ref - 1e-6;
   return { n, impl: +impl.toFixed(6), gauss_rail: +lo.toFixed(6), chernoff_rail: +hi.toFixed(6), bracket_ok: lo <= impl && impl <= hi, ref, ref_ok: refOk, ok: (lo <= impl && impl <= hi) && refOk !== false };
 }
-let _selfCheck = null;
-export function selfCheck() {
-  if (_selfCheck) return _selfCheck;
-  const rows = Object.keys(GARWOOD_EXACT_REF).map(Number).map(n => bracketCheck(n));
-  const sweep = []; for (let n = 0; n <= 200; n++) { const r = bracketCheck(n); if (!r.bracket_ok) sweep.push(n); }
+let _selfCheck = null;   // 只缓存【成功】结果; 失败永不缓存 ⇒ 每次调用都重跑、都 throw(NWT v0.8 审: 缓存失败 = fail-closed 机制自身 fail-open)
+export function selfCheck({ implFn = lambdaUb } = {}) {
+  const injected = implFn !== lambdaUb;                 // 测试注入坏实现时永不读/写缓存
+  if (!injected && _selfCheck) return _selfCheck;
+  const rows = Object.keys(GARWOOD_EXACT_REF).map(Number).map(n => bracketCheck(n, ALPHA, implFn));
+  const sweep = []; for (let n = 0; n <= 200; n++) { const r = bracketCheck(n, ALPHA, implFn); if (!r.bracket_ok) sweep.push(n); }
   const ok = rows.every(r => r.ok) && sweep.length === 0;
-  _selfCheck = { ok, rows, sweep_0_200_bracket_failures: sweep };
-  if (!ok) throw new Error('DSTAT_SELFCHECK_FAIL ' + JSON.stringify(_selfCheck));
-  return _selfCheck;
+  const result = { ok, rows, sweep_0_200_bracket_failures: sweep };
+  if (!ok) throw new Error('DSTAT_SELFCHECK_FAIL ' + JSON.stringify({ ok, failed_rows: rows.filter(r => !r.ok).map(r => r.n), sweep_failures: sweep.length }));
+  if (!injected) _selfCheck = result;
+  return result;
 }
 export function nMin(delta = DELTA_MAX, alpha = ALPHA) {           // 最小整数 n: λ_ub(n)/n − 1 ≤ δ
   let lo = 1, hi = 200000; if (!(lambdaUb(hi, alpha) / hi - 1 <= delta)) throw new Error('nMin: δ too small for search bound 2e5');
