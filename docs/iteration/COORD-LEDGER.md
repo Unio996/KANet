@@ -10323,3 +10323,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **KANet-UI a5-verify 对账（11:59Z）**：before(17428) `n_ctx 1,048,576` / PrivateCommit 30.15 GB / VRAM 28,488 MiB / KV 17,408 MiB → after(4976) **`n_ctx 262,144`**（= `kanet.env LLAMA_CTX_SIZE`，/props + 日志四 slot + KV 262,144 cells 三处印证）/ 13.58 GB / 13,117 MiB / 4,352 MiB；起后 commit 55.5/99.6、free 44.1 GB；llm-watchdog 0。**合 r4 硬闸（≤80 ∧ ≥20）**。after 读数进 remediation §A.2；`a5-baseline-after.txt` 待落。
 - **Bettor 更正**：r1 §1-2 裁 "A.5 HOLD 到 READY" 的前提"重拉 256k 会加内存"**写反**——before 是 1M ctx，A.5 是**降配减 ~17 GB**，反而降低 IBD 期内存风险。裁定结果（接受）不变；记账错在前提非 J1 时机；已写进 `docs/2026-08-27-bettor-j1-reply-r1.md` r4 更正（0671bd52）。memory：`feedback-read-the-before-baseline-before-ruling-hold-on-a-resource-change`。
 - r4 URGENT 主线版 31690927 + 侧分支 `coord/j1-urgent` 349e0e32 均在；J1 尚未 git 回话（是否读 r1/r2 待其说）。节点块体 18:57 `blockCount 20,345`。Owner 待决四件不变。
+
+### (690) 2026-08-27 · A.5 收尾入库：after 基线 + remediation §A.2-after 实测 · 暴露面收窄 0.0.0.0→127.0.0.1
+- **KANet-UI = e31265eb**（单 pathspec，Bettor 抽核后批）：`docs/2026-08-27-a5-baseline-after.txt`（a5-verify after 快照 + [8] 生效参数从日志取：ctx 262144 / host 127.0.0.1 / cache-k,v q8_0 / threads 8 / flash_attn on / n_batch 2048；CommandLine 读不到 = SYSTEM）；`docs/2026-08-26-kanet-ui-start-script-remediation-design.md` §A.2 新增 **A.2-after** 实测块（+16 行）。
+- **§A.2 悬案实测坐实**："降 ctx 缩小系统 commit 足迹 = 未证" → 私有 commit **30.15 → 13.58 GB（↓16.57 GB）**，A.5 硬前置满足；~26 GB "无出处"部分随 ctx 大幅缩小 = 佐证其与 ctx/KV 相关（CUDA VMM host backing 推断得支持，仍非逐字坐实）；KV 4,352 MiB **恰中 A.2 表对 262144 的预测** ⇒ 线性模型坐实。**结论不改**：OOM 主防线仍是 §0.5 内存闸，降 ctx 是纵深不替代。
+- 🔴 **附带暴露面发现**：before(17428) 监听 **0.0.0.0:8000（全网卡）**，after(4976) 收窄到 **127.0.0.1**（netstat 印证；与 J1 单 §1 A.5 "`--host 127.0.0.1` 默认，0.0.0.0 仅在跨机消费者证明后"一致）。记 Bettor 账：before 那份暴露自何时起、有无跨机消费者依赖，待 J1/KANet-UI 回溯（`reference-node-blanket-firewall-allow-binding-is-the-only-gate` 族）。
+- 推送：e31265eb + 本块。节点块体阶段继续；J1 未 git 回话；Owner 待决四件不变。
