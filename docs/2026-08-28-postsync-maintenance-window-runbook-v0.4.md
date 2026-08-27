@@ -154,6 +154,14 @@ KANet-KaspadWatchdog 任务保持 **Disabled**; 启用前置(全满足才 Enable
 5. Bettor 令。
 以上齐 ⇒ J1 提权 Enable 任务; 启用后首轮观察 watchdog 对 daa=0 IBD 判 SYNCING 不重启(即已修的 8/23 型误判)。
 
+## §red-line-7-observe(relay 重启后检查 · 条件: Owner 已批红线 7 observe 并随本窗部署)
+> NWT 判定: observe 段随 relay 重启部署(J2 6ed90a7a, coord/redline7-observe), 盯法放本 runbook 不进 first-hour。**仅当 Owner 已批 observe 且本窗部署了它**才执行本节; 未批 ⇒ 跳过。
+1. **阳性对照**: relay 重启后日志出现 `[mass-floor:observe]` 与 `[mass-floor:observe:auth]` 行——**至少一笔 covenant 提交打出一行**。**零行 = observe 没生效 ⇒ 回报 Bettor**(部署没接上)。
+2. **首读计数**: `totals=ok/viol/inc` + `evicted` + `local-ub unavailable`(estimator throw) 计数。
+3. 🔴 **`inconclusive`(inc) = 100% ⇒ 立即报 Bettor**: vendored `IMempoolEntry` 可能无 mass 字段, 权威口须改, **不算通过**(observe 全程无法判 = 形同没装)。
+4. **之后运行小时摘要加一行**: `[mass-floor:observe] would_reject=true 计数 / local-ub unavailable 计数 / totals ok/viol/inc`——7 天对照, enforce 前置。
+（未部署 observe 时本节不产生摘要行; enforce 是 observe 7 天对照后另议, 不在本窗。）
+
 🔴 **本页 scratch 不 commit**(等 Bettor 批口径)。敏感细节走管道/本地 memory。
 v0.4 变更(对 v0.3·NWT 三眼·定稿): **1.** stopAll 含 comm relay 743c0360 ⇒ 窗内(③–⑥)dev-coord 频道 DOWN, 顶部横幅 + ① 通知 + ⑦ 恢复点全写明, 协调走 pipe SendMessage+git。**2.** check_utxo_landed minDepth 20=REORG_SAFE_MIN_DEPTH 确认够。**3.** drain 判据改**稳定窗三条**(announce-freeze ∧ 连续 60s 无新 broadcast_tx/broadcasting ∧ 现存全 landed)替单次快照(补 mid-transfer 未写 broadcast_tx 洞); 注明 **stopAll 本身 fail-closed 硬闸**(停后新 money 请求 sendCommandAsync 报错不花钱)⇒ 只需盖停前在飞小段; 时序 drain+quiesce→stopAll→③。
 v0.3 变更(对 v0.2·NWT 二眼): ①§检查② 加第二表(请求/消息触发花钱: bettor.js/chat.js/broker-v2/exchange-machine, 标触发源+冻结) ②新步 **②-bis quiesce money ingress + drain**(现成 flag 盘点=无 live 挡法; 无新码两法: (a)stopRelay+防火墙 推荐, (b)KANET_MAINTENANCE=新码对本窗无用标明; drain 靠 pending_actions/chain_events/check_utxo_landed) ③① 通知加"窗内不触发预测/交易/提现/faucet"。
