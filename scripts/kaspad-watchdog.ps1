@@ -75,6 +75,41 @@ $probeScript = Join-Path $PSScriptRoot 'kaspad-rpc-probe.mjs'
 $FAIL_THRESHOLD = 3   # N 次连续失败才判 DEAD(防一次瞬时抖动/RPC 忙就拉一个竞争进程)
 $failCount = 0
 
+# === v0.4 三态 + crash-loop 刹车 (D-013 §3, KANet-UI 落码; 未启用=任务保持 Disabled) ===
+# 刹车常量照 scripts/kanet-console-supervisor.sh:30-32 (RESTART_WINDOW_SEC=300 / MAX=5 / COOLDOWN=1800), env 可覆盖
+$MAX_RESTARTS       = if ($env:KASPAD_WATCHDOG_MAX_RESTARTS)       { [int]$env:KASPAD_WATCHDOG_MAX_RESTARTS }       else { 5 }
+$RESTART_WINDOW_SEC = if ($env:KASPAD_WATCHDOG_RESTART_WINDOW_SEC) { [int]$env:KASPAD_WATCHDOG_RESTART_WINDOW_SEC } else { 300 }
+$COOLDOWN_SEC       = if ($env:KASPAD_WATCHDOG_COOLDOWN_SEC)       { [int]$env:KASPAD_WATCHDOG_COOLDOWN_SEC }       else { 1800 }
+$stateFile = if ($env:KASPAD_WATCHDOG_STATE) { $env:KASPAD_WATCHDOG_STATE } else { "D:\kaspa-tn12-data\kaspad-watchdog-state.json" }
+$restartAttempts = @()      # 独立于 failCount 的刹车计数 (MUST3): [ @{ ts=[datetime]; pid=[int] } ]
+$cooldownUntil = $null      # crash-loop 触发后的冷却截止
+$stateReadFailStreak = 0    # 连续状态读失败 (C: >=3 LOUD)
+
+# state 文件读写 (JSON). ASCII-only log strings.
+function Load-WatchdogState {
+  try { if (Test-Path $stateFile) { return (Get-Content $stateFile -Raw -Encoding UTF8 | ConvertFrom-Json) } } catch {}
+  return $null
+}
+function Save-WatchdogState($obj) {
+  try { $obj | ConvertTo-Json -Compress | Out-File $stateFile -Encoding UTF8; return $true } catch { return $false }
+}
+function Prune-RestartAttempts {
+  $cut = (Get-Date).AddSeconds(-1 * $RESTART_WINDOW_SEC)
+  $script:restartAttempts = @($script:restartAttempts | Where-Object { $_.ts -gt $cut })
+}
+function In-Cooldown {
+  return ($null -ne $script:cooldownUntil -and (Get-Date) -lt $script:cooldownUntil)
+}
+function Try-BroadcastChannel($msg) {
+  # crash-loop LOUD alert: 频道(console chat send)可用则发, 不可用吞掉不阻塞. relay id 从 env(可选).
+  try {
+    if ($env:KASPAD_WATCHDOG_ALERT_RELAY) {
+      $body = @{ relayId = $env:KASPAD_WATCHDOG_ALERT_RELAY; channel = 'dev-coord'; message = $msg } | ConvertTo-Json -Compress
+      Invoke-RestMethod -Uri 'http://127.0.0.1:3200/api/chat/send' -Method Post -Body $body -ContentType 'application/json' -TimeoutSec 3 | Out-Null
+    }
+  } catch {}
+}
+
 # 返回 @{Alive=$bool; Verdict=$str; Code=$int; Reason=$str}。helper 自带硬超时(TIMEOUT_MS*2)
 # ⇒ & node 必在 ~17s 内返回, 不挂。
 # 退码分开(Bettor 08:56 要求·别塌成一个"失败"): 0=ALIVE / 2=身份不符 / 3=数据空 / 4=超时 / 5=连不上 / 6=依赖缺失 / 1=其它。
@@ -95,79 +130,126 @@ $failCount = 0
 #                    -1, 和这次坐实的原生崩溃退码)。UNKNOWN 不计入、也不清零 $failCount——我们对
 #                    节点状态没有任何新证据, 计数器该停在原地, 既不该被一次探针自己的崩溃拉去重启,
 #                    也不该让它悄悄清空一个已经在累积的真实劣化信号。
+# v0.4 MUST4: verdict 映射抽成顶层函数 (Probe-Tn12Node + VA harness 共用同一真函数, 非镜像)
+function Get-Verdict($code) {
+  if     ($code -eq 0)     { return 'Alive' }    # HEALTHY: isSynced=true 且 daa>0
+  elseif ($code -eq 7)     { return 'Syncing' }  # IBD 中: failCount=0, 不重启
+  elseif ($code -eq 8)     { return 'Stalled' }  # 卡: 只告警, 不重启
+  elseif ($code -eq 9)     { return 'Dead' }     # no-process(probe 侧): 真死候选
+  elseif ($code -in 2,4,5) { return 'Fail' }     # 身份不符/超时/连不上: 真问题, 重启候选
+  elseif ($code -eq 3)     { return 'Fail' }     # 收窄: isSynced 真但 daa 坏 = 非-daa 数据空(罕见)
+  else                     { return 'Unknown' }  # code 6/-1/其它探针自身坏; 7/8/9 绝不落这里
+}
+
 function Probe-Tn12Node {
   try {
     $out = & node $probeScript '--timeout-ms=8000' 2>&1
     $code = $LASTEXITCODE
     $reason = "$($out | Select-Object -Last 1)"
-    $verdict = if ($code -eq 0) { 'Alive' } elseif ($code -in 2,3,4,5) { 'Fail' } else { 'Unknown' }
+    $verdict = Get-Verdict $code
     return @{ Alive = ($verdict -eq 'Alive'); Verdict = $verdict; Code = $code; Reason = $reason }
   } catch {
     return @{ Alive = $false; Verdict = 'Unknown'; Code = -1; Reason = "probe-invoke-error: $($_.Exception.Message)" }
   }
 }
 
+if (-not $env:KASPAD_WATCHDOG_NOLOOP) {  # NOLOOP=1 让 VA harness dot-source 只取函数不进循环
 Log "kaspad watchdog started (RPC-liveness judge via kaspad-rpc-probe.mjs, --enable-unsynced-mining + log redirection non-optional, log-archive-on-restart, only-start-never-kill, try/catch loop)"
-
 while ($true) {
   try {
+    # === §3c: L1 进程闸 + 自/外重启判别 (进 verdict 前) ===
+    $cur = $null
+    try { $cur = Get-CimInstance Win32_Process -Filter "Name='kaspad.exe'" -ErrorAction Stop | Select-Object -First 1 } catch { $cur = $null }
+    $st = Load-WatchdogState
+    if ($null -eq $st) { $stateReadFailStreak++ } else { $stateReadFailStreak = 0 }
+    if ($cur -and $st -and $st.lastSeenPid -and ($cur.ProcessId -ne $st.lastSeenPid -or "$($cur.CreationDate)" -ne "$($st.lastSeenCreated)")) {
+      # kaspad 换实例 -- 自重启 vs 外部 (元组精确匹配, 无 slack; v0.3)
+      $mine = ($cur.ProcessId -eq $st.lastSpawnPid -and "$($cur.CreationDate)" -eq "$($st.lastSpawnCreationDate)")
+      if ($mine) {
+        $failCount = 0    # 自重启: 清 failCount, 不清 restartAttempts (已计在刹车; 清了=自清=无限拉)
+        Log "kaspad restarted by SELF (pid=$($cur.ProcessId) matches lastSpawn) -> failCount=0, brake KEPT"
+      } else {
+        $failCount = 0; $script:restartAttempts = @()   # 外部重启(别人/J1): 清 failCount 且刹车归零
+        Log "kaspad restarted EXTERNALLY (pid=$($cur.ProcessId) not my spawn) -> failCount=0, brake reset"
+      }
+    }
+    # fail-closed: 判别读不到(state 缺)=当自重启, 不清刹车(上面 mine 分支默认走不到=不清). 更新 lastSeen.
+    $newSt = @{
+      lastSpawnPid = $(if ($st) { $st.lastSpawnPid } else { $null })
+      lastSpawnCreationDate = $(if ($st) { $st.lastSpawnCreationDate } else { $null })
+      lastSeenPid = $(if ($cur) { $cur.ProcessId } else { $null })
+      lastSeenCreated = $(if ($cur) { "$($cur.CreationDate)" } else { $null })
+    }
+    Save-WatchdogState $newSt | Out-Null
+    if ($stateReadFailStreak -ge 3) {
+      $m = "!!!!! kaspad-watchdog STATE UNREADABLE ${stateReadFailStreak}x !!!!! brake has no memory -> chain-restart risk, OPERATOR: inspect/rm $stateFile"
+      Log $m; Write-Warning $m; Try-BroadcastChannel $m
+    }
+
     $r = Probe-Tn12Node
+    # DEAD 两路[或]: L1 no-process 覆盖 (probe 自坏成 Unknown 时, 真无进程仍判死; probe 自坏但有进程=不覆盖=Unknown 不重启, 合规则 72)
+    if ($null -eq $cur -and $r.Verdict -ne 'Dead') {
+      Log "kaspad L1 no-process (Get-CimInstance empty) overrides verdict $($r.Verdict) -> Dead"
+      $r.Verdict = 'Dead'; $r.Code = 9
+    }
+
     if ($r.Verdict -eq 'Alive') {
       $failCount = 0
+    } elseif ($r.Verdict -eq 'Syncing') {
+      $failCount = 0
+      Log "kaspad SYNCING (IBD, isSynced=false, NO restart, failCount=0) code=$($r.Code): $($r.Reason)"
+    } elseif ($r.Verdict -eq 'Stalled') {
+      Log "kaspad SYNC-STALLED (>STALL_MS no progress, ALERT ONLY, NO restart) code=$($r.Code): $($r.Reason)"
     } elseif ($r.Verdict -eq 'Unknown') {
-      # UNKNOWN != bad(照抄 tn12-mining-watchdog-v2.ps1 同款判据): 探针自己崩了/环境依赖缺失,
-      # 对节点状态没有任何证据 ⇒ $failCount 原地不动(既不累加走向误拉, 也不清零抹掉已积累的真实信号)。
-      # 🔴 本行故意全 ASCII, 不用中文破折号(踩过·2026-08-10 KANet-UI 自查坐实): 本文件既有全部
-      # Log 双引号字符串一律纯 ASCII, 中文说明只放 # 注释里——这不是巧合的风格统一, 是防坑: 本文件
-      # 无 BOM 的 UTF-8, 若读取环境把它当系统默认代码页解, 双引号字符串里的多字节字符可能被拆成
-      # 单字节误读成引号本身, 提前把字符串截断(本次实测: 中文破折号"—"的 UTF-8 三字节序列里
-      # 有一字节在 cp1252 下解码成引号, 用 [System.Management.Automation.Language.Parser]::ParseFile
-      # 复现过一次, 报错精确落在这一行)。# 注释不受影响(不管怎么误读都只是行尾前的哑文本), 只有
-      # 双引号字符串会被截断——今后本文件新增 Log 字符串, 中文一律留在同行紧邻的 # 注释, 字符串
-      # 本体只用 ASCII。
-      Log "kaspad probe UNKNOWN (probe itself failed, no signal about node -- not counted, failCount stays $failCount) code=$($r.Code): $($r.Reason)"
+      # UNKNOWN != bad: 探针自身坏(code 6/-1), 对节点无证据 => failCount 不动(既不累加也不清零)
+      Log "kaspad probe UNKNOWN (probe itself failed, no signal, failCount stays $failCount) code=$($r.Code): $($r.Reason)"
     } else {
+      # Dead / Fail
       $failCount++
-      Log "kaspad probe FAIL ($failCount/$FAIL_THRESHOLD) code=$($r.Code): $($r.Reason)"
+      Log "kaspad probe FAIL/DEAD ($failCount/$FAIL_THRESHOLD) code=$($r.Code): $($r.Reason)"
       if ($failCount -ge $FAIL_THRESHOLD) {
-        # ── memory gate (probe design 0.5 / MF-2 / fail-closed, Bettor 2026-08-26) ──
-        # commit read fail (4x backoff 0/2/5/10s) or below threshold => skip Start-Process THIS tick;
-        # failCount kept (NOT reset) so next tick re-reads => "refuse now does not give up permanently".
-        # NO force entry on this auto path: a script param would live for the whole watchdog process
-        # lifetime (= inheritable-env trap); force exists only on manual one-shot start scripts.
-        # Log strings are pure ASCII on purpose (this file is no-BOM UTF-8; Chinese only in # comments).
-        $minGb = if ($env:KASPAD_MIN_FREE_COMMIT_GB) { [int]$env:KASPAD_MIN_FREE_COMMIT_GB } else { 8 }
-        $freeGb = $null
-        foreach ($w in @(0,2,5,10)) {
-          if ($w -gt 0) { Start-Sleep -Seconds $w }
-          try { $freeGb = [math]::Floor((Get-CimInstance Win32_OperatingSystem).FreeVirtualMemory / 1MB) } catch { $freeGb = $null }
-          if ($null -ne $freeGb) { break }
-        }
-        if ($null -eq $freeGb) {
-          Log "kaspad refuse-start:commit-unknown free=? (FreeVirtualMemory 4x/backoff read failed, fail-closed: skip Start-Process this tick, failCount kept for re-read next tick)"
-        } elseif ($freeGb -lt $minGb) {
-          Log "kaspad refuse-start:low-commit free=${freeGb}GB < ${minGb}GB (memory gate: skip Start-Process, prevent OOM re-spawn; failCount kept, re-read next tick)"
+        # === MUST3 crash-loop 刹车 (独立于 failCount, 在 memgate 之前) ===
+        Prune-RestartAttempts
+        if ($script:restartAttempts.Count -ge $MAX_RESTARTS -or (In-Cooldown)) {
+          if (-not (In-Cooldown)) { $script:cooldownUntil = (Get-Date).AddSeconds($COOLDOWN_SEC) }
+          $marker = "!!!!! kaspad CRASH-LOOP DETECTED !!!!! restarts >= $MAX_RESTARTS in ${RESTART_WINDOW_SEC}s (or cooldown) -> STALLED-escalate, NO Start-Process, OPERATOR ACTION NEEDED"
+          Log $marker; Write-Warning $marker; Try-BroadcastChannel $marker
         } else {
-          # 🔴 只启不杀: 只 Start-Process, 永不 kill/Stop-Process。即使误判, 最坏是拉一个撞数据目录锁秒死的进程, 不伤 live。
-          Log "kaspad DEAD (>=$FAIL_THRESHOLD consecutive probe fails) -> memgate ok free=${freeGb}GB, archiving prior stdout/stderr logs (if any) + starting canonical (--enable-unsynced-mining)"
-          Archive-IfExists $stdoutLog
-          Archive-IfExists $stderrLog
-          $proc = Start-Process -FilePath $kaspadExe -ArgumentList $kaspadArgs -WorkingDirectory (Split-Path $kaspadExe) `
-            -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog -WindowStyle Hidden -PassThru
-          Log "Start-Process dispatched, new PID=$($proc.Id) (OS process launched; RPC readiness confirmed by post-start probe below)"
-          # 🔴 必改四: 拉起后【再探一次】确认真起来了(带超时·helper 自带)。不确认=假设, 而假设正是这一步要防的。
-          Start-Sleep -Seconds 8
-          $c = Probe-Tn12Node
-          if ($c.Alive) { Log "post-start probe OK: $($c.Reason)" }
-          else { Log "post-start probe still not-alive code=$($c.Code): $($c.Reason) (likely still starting / IBD; re-evaluate next tick)" }
-          $failCount = 0   # 动作已采取, 计数归零, 下一 tick 重新评估(不连锁重拉)
+          # === memgate (v0.4 §0.5, 不动): 4x backoff 读 free commit, fail-closed skip ===
+          $minGb = if ($env:KASPAD_MIN_FREE_COMMIT_GB) { [int]$env:KASPAD_MIN_FREE_COMMIT_GB } else { 8 }
+          $freeGb = $null
+          foreach ($w in @(0,2,5,10)) {
+            if ($w -gt 0) { Start-Sleep -Seconds $w }
+            try { $freeGb = [math]::Floor((Get-CimInstance Win32_OperatingSystem).FreeVirtualMemory / 1MB) } catch { $freeGb = $null }
+            if ($null -ne $freeGb) { break }
+          }
+          if ($null -eq $freeGb) {
+            Log "kaspad refuse-start:commit-unknown free=? (FreeVirtualMemory read failed, fail-closed skip, failCount kept)"
+          } elseif ($freeGb -lt $minGb) {
+            Log "kaspad refuse-start:low-commit free=${freeGb}GB < ${minGb}GB (memory gate skip, failCount kept)"
+          } else {
+            Log "kaspad DEAD (>=$FAIL_THRESHOLD fails) -> memgate ok free=${freeGb}GB, brake ok ($($script:restartAttempts.Count)/$MAX_RESTARTS), archiving logs + starting canonical (--enable-unsynced-mining)"
+            Archive-IfExists $stdoutLog
+            Archive-IfExists $stderrLog
+            $proc = Start-Process -FilePath $kaspadExe -ArgumentList $kaspadArgs -WorkingDirectory (Split-Path $kaspadExe) -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog -WindowStyle Hidden -PassThru
+            $spawnedCd = $null
+            try { $spawnedCd = "$((Get-CimInstance Win32_Process -Filter "ProcessId=$($proc.Id)").CreationDate)" } catch {}
+            $script:restartAttempts += @{ ts = (Get-Date); pid = $proc.Id }   # 记入刹车 (MUST3)
+            Save-WatchdogState @{ lastSpawnPid = $proc.Id; lastSpawnCreationDate = $spawnedCd; lastSeenPid = $proc.Id; lastSeenCreated = $spawnedCd } | Out-Null
+            Log "Start-Process dispatched, new PID=$($proc.Id) cd=$spawnedCd (brake now $($script:restartAttempts.Count)/$MAX_RESTARTS)"
+            Start-Sleep -Seconds 8
+            $c = Probe-Tn12Node
+            if ($c.Verdict -eq 'Alive' -or $c.Verdict -eq 'Syncing') { Log "post-start probe OK/SYNCING: $($c.Reason)" }
+            else { Log "post-start probe still not-alive code=$($c.Code): $($c.Reason) (likely still starting / IBD)" }
+            $failCount = 0
+          }
         }
       }
     }
   } catch {
-    # MUST-FIX②(NWT红队): 循环体任何异常(权限/瞬时故障)绝不能让watchdog自己静默退出——
-    # 那正是它本来要防的"进程死了没人拉"同款脆弱性。记日志, 继续循环。
+    # MUST-FIX2: 循环体任何异常绝不能让 watchdog 静默退出(那正是它要防的). 记日志继续.
     Log "WATCHDOG LOOP ERROR (caught, continuing): $($_.Exception.Message)"
   }
   Start-Sleep -Seconds 60
+}
 }
