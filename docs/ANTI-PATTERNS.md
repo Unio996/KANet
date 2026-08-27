@@ -3102,3 +3102,12 @@ WHERE id IN (...) AND protocol_status IN ('verifying', 'pending_bettors')
 - 🔴 **判据**：任何把这类脚本 wrap 成 HTTP route / cron / daemon 的改动 = 自动签发口 = **§10-gated，须先报备**。审查谁碰它，第一步 `grep -rn "u1-issue-challenge" kasia-console/src scripts`，必须零引用。
 - 🔴 **措辞**："operator 手工"是**进程约定**不是**强制控制**——跑脚本 = 文件系统能力事件（需 `console.db` 写权限），不是 operator 身份认证事件；不许写成"脚本签发 = operator 已授权"。
 - 同族：规则 58（黑名单枚举天生不完备）——这里守的是"唯一出口"（脚本本身不接任何自动触发），不是枚举谁不许调它。
+
+## 规则 72 —— 探针失效会伪装成"被探测对象故障"：`DEAD:*-load-fail` / 依赖缺失类退码是【探测器自己坏】，watchdog 必须 fail-safe 不重启（2026-08-27 · J1 归队 · kaspa-wasm junction 被 Win11 Redirection Guard 拦）
+
+- **实录(8/25 重启串根因)**: `kaspad-rpc-probe.mjs` 靠 junction `kasia-relay/node_modules/kaspa-wasm` → 真实包目录。**Win11 Redirection Guard 拦了非管理员建的挂载点**(判 untrusted mount point, 穿不过)⇒ `require(kaspa-wasm/kaspa.js)` 抛 → probe `die('kaspa-wasm-load-fail', 6)`。旧 watchdog 分类把这类"探针自己坏"当节点死 ⇒ **恒判死 → 每 60s 空拉 → 8/25 重启串**。**节点一直好, 死的是探针**。J1 提权重建两处 junction 后 probe 复活(现返 IBD 期正常码 `DEAD:empty-data:daa=0`, 非 load-fail)。
+- 🔴 **判据(承重)**: **探测器自身故障 ≠ 被测对象故障**。`*-load-fail` / 依赖缺失 / 探针自身崩(exit code 表示"探针没做出关于节点的判断")这一类, watchdog **必须 fail-safe: 不计入死亡判据、不触发重启**(重启治不了探针坏, 只会空拉/连锁)。只有"探针成功探测到节点问题"(连不上/超时/身份不符/数据空)才是节点侧信号。
+- 🔵 现 `kaspad-watchdog.ps1:103` 已对: code=6(依赖缺失)→`Unknown`, `failCount` 不动不拉(`:117-119`)。**规则钉的是"别把探针自坏退码塞进 Fail/restart 分类"**——这类退码要有独立、可辨识的语义, 且 watchdog 消费端显式归 no-restart。
+- 🔨 **lint 规则思路(R-WATCHDOG-PROBE-SELFFAULT-RESTART, WARN)**: 扫 `*watchdog*.ps1` / watchdog 消费码, 若"探针自坏"退码(6/-1/load-fail/dep-missing 语义)出现在**触发 Start-Process / restart 的判定分支**(而非 no-op/Unknown 分支)⇒ warn "探针自坏退码被当成节点死会空拉/连锁, 应 fail-safe 不重启"。同 warn-first 落码, NWT diff GREEN 才升 ERROR。
+- 🔨 **配套(部署层)**: junction/symlink 依赖是**环境脆性**——非管理员建的挂载点在 Win11 会被 Redirection Guard 静默拦。承重依赖(probe 的 kaspa-wasm)别靠非提权 junction; 真包目录 or 提权建的挂载点。memory `reference-win11-redirection-guard-blocks-nonadmin-junctions`(J1 写)。
+- 同族: 规则 70(「从未执行」≠「没留痕」——探针 die 也是一次"执行"了却没做出节点判断)、`reference-isolate-rpcclient-failure-from-node-failure`(RpcClient 坏 vs 节点坏)、绿灯无信息族(探针坏 = 读数无信息, 不是"节点死"的信息)。
