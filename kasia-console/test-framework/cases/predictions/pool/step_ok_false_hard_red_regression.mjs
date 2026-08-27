@@ -25,7 +25,7 @@ import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CONSOLE_ROOT = path.resolve(HERE, '../../../../');           // → kasia-console
-const FIXTURE = 'test-framework/cases/predictions/pool/fixture_step_ok_false_no_expect.mjs';
+const FIXTURE = 'test-framework/cases/predictions/pool/_fixture_step_ok_false_no_expect.mjs';   // _ 前缀: Option A glob 第三守卫(跳 _ 前缀), 消费者 --case 显式点名不受影响
 
 let failures = 0;
 const check = (name, cond, detail) => {

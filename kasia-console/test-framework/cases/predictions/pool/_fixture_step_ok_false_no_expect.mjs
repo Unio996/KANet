@@ -1,8 +1,11 @@
 // ⚠ 这不是用例, 是【故意坏掉的 fixture】—— 给 step_ok_false_hard_red_regression.mjs 当被测材料。
 //
-// 🔴 文件名刻意【不是】 *.test.mjs: runner 的 --all/--domain 只收 *.test.mjs
+// 🔴 文件名刻意【不是】 *.test.mjs + 【`_` 前缀】: runner 的 --all/--domain 只收 *.test.mjs
 //    ⇒ 它永远不会进批量跑(否则它会把套件永久染红, 因为它【就该红】)。
 //    只能被 `--case=<本文件路径>` 显式点名 —— 那正是 regression 要做的事。
+//    🔵 `_` 前缀(2026-08-28 NWT · 案 A 第三守卫): 本文件【有 export default】, 若将来 glob 放宽到
+//       cases/**/*.mjs, "只收 export default" 守卫挡不住它(它 export 了) ⇒ 会被当 case 跑而永久染红。
+//       `_` 前缀让"跳 _ 前缀"守卫结构性排除它。消费者 step_ok_false_hard_red_regression 用 --case 显式点名, 不受影响。
 //
 // 它测的洞: 一个 handler 返回 {ok:false} 的步骤, 若【不带 expect】, 从前会显示 ✓ 且用例判 PASS。
 //           翻硬红之后它必须让用例 FAIL。
