@@ -48,4 +48,4 @@
 
 **一句给 Owner**：**(d) 的统计承重（算力地板/H_vis_ub）走完 Codex 六轮、D-STAT-1/2/3 三条设计层 CLOSED**；但 **scope 须记牢：只闭"精确公开状态下的每到达 work 上界构造"，不消对手容量边界**；w_cap **取数实现**与 gate (d) 的**非 D-STAT 项**（claim-shape/同步运行/对手 cap 策略/具名常量）**仍 OPEN**。三件待 Owner 决不变。**全程零 build/deploy/money-path 授权。**
 
-**引用锚**：Codex `RESPONSE-…MSG279/280/281/282/283`（bridge `b4df8328`/`d7fefb58`/`95d7f354`/`713232be`/`1c7188e2`）；D-STAT 证据 (23) v0.12–v0.15 / (21) v0.8 / (24) v0.1–v0.2 / (d) v0.14–v0.16；v2 表 `1a0980f8`。
+**引用锚**：Codex `RESPONSE-…MSG279/280/281/282/283`（bridge `b4df8328`/`d7fefb58`/`95d7f354`/`713232be`/`1c7188e2`）；D-STAT 证据 (23) v0.12–v0.15 / (21) v0.9 `a93f9c5e` / (24) v0.1–v0.2 / (d) v0.17 `9ac6cc09`；v2 表 `1a0980f8`。

@@ -13,10 +13,10 @@
 - **失败 ⇒ INEXACT**：未翻到 sink / 任一 SP 覆盖不全 / 两跑不同集 ⇒ `WINDOW_INEXACT`，回 (a-total)。
 
 ### 闸2 — sink-anticone 加入不留【未返回 mergeset 闭包洞】
-- **怎么测**：`high==sink` 时 handler 附 `filtered_sink_anticone`（`service.rs:459`）；对每 anticone tip，核其 `mergeSetBlues/Reds` 引用是否全在返回集内（递归至闭包）。
-- **证据形态**：anticone tips 列表 + 每 tip 的 mergeset 成员命中/缺失表 + 闭包缺失计数。
-- **通过判据**：所有 anticone tips 的 mergeset 闭包 ⊆ 返回集（`missing=0`）。
-- **失败 ⇒ INEXACT**：任一 mergeset 引用未返回块 ⇒ `missing>0` ⇒ `WINDOW_INEXACT`。
+- **怎么测**：`high==sink` 时 handler 附 `filtered_sink_anticone`（`service.rs:459`）；对每 `SP∈S` 建 `window(SP)`，核其 `certificate.missing`（重建时 mergeset 引用未在已取集且**非合法缺席**者计数）。
+- **证据形态**：每 `SP∈S` 的 `window(SP).certificate.missing`；未返回引用表**仅作诊断**（不直接判洞）。
+- **通过判据（J2 fix-up 修正）**：**`S` 内每个 `window(SP)` 的 `certificate.missing == 0`**（= 该窗所需成员全在）。🔴 **合法缺席豁免**：引用落 `past(R)`（在锚 R 之下）或锚 R 自身 mergeset 的未返回块**不算洞**——它们 `blue_work ≤ bw(R) < heapMin`（F9），进不了任何 `window(SP)`（同 (24) v0.1 ② 完整性不变量：只需 `antipast(R)∩past(sink)` 全取，past(R) 本就不取）。故"anticone tip 的 mergeset 闭包 ⊆ 返回集"是**过严**误判（J2 F7 撞：s3 的 SP `b3∈past(R)` 列诊断但 `window(SP).missing=0`），**改以 per-window `missing==0` 为判据**。
+- **失败 ⇒ INEXACT**：某 `SP∈S` 的 `window(SP).certificate.missing > 0`（真洞：`antipast(R)∩past(sink)` 内应取未取）⇒ `WINDOW_INEXACT`。
 
 ### 闸3 — 缺失/剪裁/IBD 成员必成 INEXACT，【绝不成更小重建窗】
 - **怎么测**：注入或遇到 (i) 成员缺失（mergeset 引用节点亦无的 hash）、(ii) 剪裁点越锚、(iii) IBD 期（`isSynced=false`）；核重建器输出。
