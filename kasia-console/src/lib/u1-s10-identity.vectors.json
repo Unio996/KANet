@@ -1,0 +1,33 @@
+{
+  "note": "§10 C1 确定性向量 (2026-08-27 J2)。G1 期望值【直接读】artifacts/2026-08-19-s10-golden-vectors-v1.json(J1 第二实现已逐字节对拍), 不由被测 canonicalBytes 现生成(自证); canonical 正确性 GREEN 标 provisional-until-J1(落地后请 J1 复算 signed_message)。签名非锚(kaspa-wasm signMessage aux-rand 非确定): 负例用 test-only priv=1 钥现签, 只断言 verify 布尔与拒因/层。层: L1=assertCanonicalPubkey, L2=domain/version/network/operation, L3=verifyMessage。拒因/层按实测 scratch/_j2_s10_wasm_probe.mjs(memory reference-kaspa-wasm-xonly-pubkey-accepts-uppercase-verifymessage-false-vs-throw)。",
+  "golden_file": "artifacts/2026-08-19-s10-golden-vectors-v1.json",
+  "test_key_priv_hex": "0000000000000000000000000000000000000000000000000000000000000001",
+  "cases": [
+    { "id": "G1-golden-3-vectors", "type": "golden", "desc": "三向量 canonical_bytes_hex / canonical_sha256 / signed_message 逐字节等 + example_signature verifyS10Envelope ok(localNetwork=向量 network)" },
+    { "id": "P1-sign-fresh-register", "type": "positive", "desc": "priv=1 现签 register/testnet-12/epoch 'c1-epoch-001' ⇒ ok, 返回 relayPubkeyXOnly/epoch/signedMessage", "network": "testnet-12", "epoch": "c1-epoch-001" },
+    { "id": "N1-network-changed-after-sign", "type": "mutate", "desc": "合法签名, 验证侧把 network 换成 mainnet 重建(localNetwork 同步改 mainnet 以只测签名层) ⇒ SIGNATURE_INVALID(L3)", "mutate": { "network": "mainnet" }, "localNetwork": "mainnet", "expect": "SIGNATURE_INVALID", "layer": "L3" },
+    { "id": "N2a-domain-changed", "type": "mutate", "desc": "改 domain ⇒ DOMAIN_VERSION_MISMATCH(L2, 签名未验)", "mutate": { "domain": "KANET-U1-IDENTITX" }, "expect": "DOMAIN_VERSION_MISMATCH", "layer": "L2" },
+    { "id": "N2b-version-changed", "type": "mutate", "desc": "改 version='2' ⇒ DOMAIN_VERSION_MISMATCH(L2; 老/新版本签名不跨版本认)", "mutate": { "version": "2" }, "expect": "DOMAIN_VERSION_MISMATCH", "layer": "L2" },
+    { "id": "N3-pubkey-swapped", "type": "mutate", "desc": "签名不变, relayPubkeyXOnly 换成 priv=2 的钥 ⇒ SIGNATURE_INVALID(L3 直验)", "mutate": { "relayPubkeyXOnly": "$PRIV2_XONLY" }, "expect": "SIGNATURE_INVALID", "layer": "L3" },
+    { "id": "N8a-pubkey-uppercase", "type": "mutate", "desc": "大写 64-hex: kaspa-wasm 会归一不 throw ⇒ 唯一防线 = L1 小写正则 ⇒ PUBKEY_NOT_CANONICAL(L1)", "mutate": { "relayPubkeyXOnly": "$UPPER" }, "expect": "PUBKEY_NOT_CANONICAL", "layer": "L1-regex" },
+    { "id": "N8b-pubkey-63hex", "type": "mutate", "desc": "63 位 ⇒ L1 正则拒(原语亦 throw)", "mutate": { "relayPubkeyXOnly": "$SHORT63" }, "expect": "PUBKEY_NOT_CANONICAL", "layer": "L1-regex" },
+    { "id": "N8c-pubkey-0x-prefix", "type": "mutate", "desc": "0x 前缀 ⇒ L1 正则拒", "mutate": { "relayPubkeyXOnly": "$WITH0X" }, "expect": "PUBKEY_NOT_CANONICAL", "layer": "L1-regex" },
+    { "id": "N8d-pubkey-off-curve-ffff", "type": "mutate", "desc": "ff…ff(≥p, 非曲线点)过正则但 kaspa-wasm throw 'malformed public key' ⇒ PUBKEY_NOT_CANONICAL(L1-parse)", "mutate": { "relayPubkeyXOnly": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff" }, "expect": "PUBKEY_NOT_CANONICAL", "layer": "L1-parse" },
+    { "id": "N8e-pubkey-nonhex", "type": "mutate", "desc": "含非 hex 字符 ⇒ L1 正则拒", "mutate": { "relayPubkeyXOnly": "$NONHEX" }, "expect": "PUBKEY_NOT_CANONICAL", "layer": "L1-regex" },
+    { "id": "N9-cross-network-replay", "type": "mutate", "desc": "🔴 MUST-FIX A: 合法 testnet-12 声明【原样不改】送给 localNetwork=mainnet 的验证方 ⇒ NETWORK_MISMATCH(L2, 不用 payload network 重建)", "mutate": {}, "localNetwork": "mainnet", "expect": "NETWORK_MISMATCH", "layer": "L2" },
+    { "id": "N9b-local-network-missing", "type": "mutate", "desc": "验证方未注入 localNetwork ⇒ NETWORK_MISMATCH(绝不回落到 payload)", "mutate": {}, "localNetwork": null, "expect": "NETWORK_MISMATCH", "layer": "L2" },
+    { "id": "N9c-local-network-not-enum", "type": "mutate", "desc": "本地配置 'devnet' 不在闭枚举 ⇒ NETWORK_MISMATCH", "mutate": {}, "localNetwork": "devnet", "expect": "NETWORK_MISMATCH", "layer": "L2" },
+    { "id": "N10a-operation-rotate-signed", "type": "resign", "desc": "🔴 P9: 用 priv=1 对 operation='rotate' 合法签名 ⇒ OPERATION_NOT_ALLOWED(L2, 签名合法也拒)", "fields": { "operation": "rotate" }, "expect": "OPERATION_NOT_ALLOWED", "layer": "L2" },
+    { "id": "N10b-operation-unknown-signed", "type": "resign", "desc": "operation='revoke' 合法签名 ⇒ OPERATION_NOT_ALLOWED", "fields": { "operation": "revoke" }, "expect": "OPERATION_NOT_ALLOWED", "layer": "L2" },
+    { "id": "N12-a2-pop-material-as-s10", "type": "a2pop", "desc": "🔴 MUST-FIX C/§6-12: 用 priv=1 对 A2 PoP 形消息(64-hex blake2b 串)的签名塞进 S10 信封 ⇒ SIGNATURE_INVALID(两域消息空间不相交)", "expect": "SIGNATURE_INVALID", "layer": "L3" },
+    { "id": "N13-outer-network-structurally-absent", "type": "shape", "desc": "信封含白名单外键(如外层 network2/anything) ⇒ MALFORMED(结构上不存在第二个 network)", "extraKeys": { "networkOuter": "mainnet" }, "expect": "MALFORMED", "layer": "shape" },
+    { "id": "S1-garbage-sig-128", "type": "mutate", "desc": "128 位十六进制垃圾签名 ⇒ verifyMessage 返 false ⇒ SIGNATURE_INVALID", "mutate": { "signature": "$GARBAGE128" }, "expect": "SIGNATURE_INVALID", "layer": "L3-false" },
+    { "id": "S2-short-sig-throws", "type": "mutate", "desc": "短签名 'abcd' ⇒ verifyMessage【throw】'Invalid input length' ⇒ SIGNATURE_INVALID(异常同拒, 不 500)", "mutate": { "signature": "abcd" }, "expect": "SIGNATURE_INVALID", "layer": "L3-throw" },
+    { "id": "S3-epoch-changed-after-sign", "type": "mutate", "desc": "签后改 epoch ⇒ canonical 变 ⇒ SIGNATURE_INVALID", "mutate": { "epoch": "c1-epoch-002" }, "expect": "SIGNATURE_INVALID", "layer": "L3" },
+    { "id": "M1-missing-signature", "type": "shape", "desc": "缺 signature ⇒ MALFORMED", "deleteKeys": ["signature"], "expect": "MALFORMED", "layer": "shape" },
+    { "id": "M2-empty-epoch", "type": "mutate", "desc": "epoch='' ⇒ MALFORMED(非空字符串)", "mutate": { "epoch": "" }, "expect": "MALFORMED", "layer": "shape" },
+    { "id": "M3-not-object", "type": "shape", "desc": "s10 不是对象(字符串) ⇒ MALFORMED", "raw": "not-an-object", "expect": "MALFORMED", "layer": "shape" },
+    { "id": "X1-prefix-derived", "type": "prefix", "desc": "s10Prefix() === 'KANET-U1-IDENTITY-v1|' 且 s10Prefix('KANET-U1-IDENTITY','2') === '…-v2|'(派生非字面量)" },
+    { "id": "X2-network-inner-outer-same-source", "type": "prefix", "desc": "signedMessage 的外层 network 字段与 canonical 内 network 同源: 两处都来自 env.network(已 === localNetwork)" }
+  ]
+}
