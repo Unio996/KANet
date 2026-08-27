@@ -1622,6 +1622,83 @@ function checkHooksPathArmed() {
   }
 }
 
+// ── R-WATCHDOG-PROBE-SELFFAULT-RESTART [WARN-first] (2026-08-27, 配 ANTI-PATTERNS 规则 72; Bettor 派): ──
+// 探针"自坏"退出码/原因码(kaspa-wasm load-fail / probe code 6=依赖缺失 / 探针自崩)被映射到 Fail/重启分支
+// = 把"探针坏了"误判成"节点死了"→无谓 restart(8/25 J1 junction 事故根因)。探针自坏必须 → Unknown/不计数
+// (见 kaspad-watchdog.ps1:82-93 verdict 映射 + ANTI-PATTERNS 规则 72)。WARN 非阻塞(migration checklist 性质)。
+// 判据(仅 *watchdog* 的 .ps1/.mjs/.sh 内, 非注释行):
+//   B) SET_LUMP: 把 6 追加进探针真-Fail 集 2,3,4,5(→2,3,4,5,6)= 自坏码进 Fail→restart 路径, 直接告警;
+//   A) 条件路由: 自坏码/原因 token(code -eq/==/=== 6 / -in ...6 / load-fail / dep-missing / probe self-fault)
+//      且前后小窗口(仅非注释行)内有 restart 动作(Restart-*/Stop-Process/taskkill/Start-Process/[re]spawn()).
+// 转义: 同文件含 `lint-allow-watchdog-selffault-restart: <理由>` 整体豁免(已核实的合法映射)。
+// 跳过: node_modules/.git/.claude/dist/build/out/logs、/scratch/、*.test.*、*.mutants.*、lint-vectors(正常跑跳过;
+//   测试走 LINT_WATCHDOG_TEST_DIR env 显式纳入)。默认 walk 只扫 .js/.mjs 四目录 ⇒ 本规则自带 walk。
+const _WD_SET_LUMP   = /\b2\s*,\s*3\s*,\s*4\s*,\s*5\s*,\s*6\b/;
+const _WD_CODE6_COND = /(?:-eq|===?)\s*6\b|-in\b[^#\n]*\b6\b/;
+const _WD_REASON     = /\bload-fail\b|\bdep[-_]?missing\b|\bprobe-invoke-error\b/i; // 具体 reason code(非散文, 散文会命中 benign 日志; log 行守卫兜底)
+const _WD_RESTART    = /Restart-\w+|Stop-Process\b|taskkill\b|Start-Process\b|\b(?:re)?spawn\w*\s*\(/i;
+function _wdIsComment(fp, line) {
+  const t = line.trimStart();
+  if (/\.(ps1|sh)$/i.test(fp)) return t.startsWith('#');
+  return t.startsWith('//') || t.startsWith('*') || t.startsWith('/*');
+}
+function _wdCollect(dir, out, opts) {
+  let names;
+  try { names = fs.readdirSync(dir); } catch { return; }
+  for (const name of names) {
+    const full = path.join(dir, name);
+    let st; try { st = fs.statSync(full); } catch { continue; }
+    if (st.isDirectory()) {
+      if (['node_modules', '.git', '.claude', 'dist', 'build', 'out', 'logs', '.cache'].includes(name)) continue;
+      if (name === 'scratch') continue;
+      if (opts.excludeVectors && name === 'lint-vectors') continue;
+      _wdCollect(full, out, opts);
+    } else if (st.isFile()) {
+      if (!/watchdog/i.test(name)) continue;
+      if (!/\.(ps1|mjs|sh)$/i.test(name)) continue;
+      if (/\.test\.|\.mutants\./i.test(name)) continue;
+      out.push(full);
+    }
+  }
+}
+function _wdScanFile(fp) {
+  let content; try { content = read(fp); } catch { return; }
+  if (content.includes('lint-allow-watchdog-selffault-restart')) return;  // 整文件豁免(已核实合法映射)
+  const lines = content.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (_wdIsComment(fp, line)) continue;
+    if (/(?:Log|console.(?:log|error|warn|info)|echo|Write-(?:Host|Output|Verbose|Warning|Error)|printf?|print)/i.test(line)) continue; // 日志/输出行=消息非路由(benign "probe itself failed" 日志不算触发)
+    const winLines = [];
+    for (let j = Math.max(0, i - 1); j <= Math.min(lines.length - 1, i + 7); j++) {
+      if (!_wdIsComment(fp, lines[j])) winLines.push(lines[j]);
+    }
+    const win = winLines.join('\n');
+    if (_WD_SET_LUMP.test(line)) {
+      warn('R-WATCHDOG-PROBE-SELFFAULT-RESTART',
+        `探针自坏码 6 被追加进真-Fail 码集(2,3,4,5,6)——code 6=依赖缺失/kaspa-wasm load-fail=【探针自己坏】, 塞进 Fail 集会让它走 Verdict=Fail→重启路径, 正是 8/25 J1 junction 事故(探针坏被误判成节点死→无谓 restart)。code 6 应留在 Unknown/不计数分支(见 kaspad-watchdog.ps1:82-93 + ANTI-PATTERNS 规则 72)。合法映射请加 // lint-allow-watchdog-selffault-restart: <理由>。`,
+        fp, i + 1);
+      continue;
+    }
+    const selfFault = _WD_CODE6_COND.test(line) || _WD_REASON.test(line);
+    if (selfFault && _WD_RESTART.test(win)) {
+      warn('R-WATCHDOG-PROBE-SELFFAULT-RESTART',
+        `探针自坏信号(code 6 / load-fail / dep-missing / 探针自崩)路由到重启或 kill 动作(Restart-*/Stop-Process/taskkill/Start-Process/spawn)——把"探针坏了"当成"节点死了"→无谓 restart(8/25 J1 junction 事故根因, ANTI-PATTERNS 规则 72)。探针自坏应 → Unknown/不计数(见 kaspad-watchdog.ps1:82-93)。合法映射请加 // lint-allow-watchdog-selffault-restart: <理由>。`,
+        fp, i + 1);
+    }
+  }
+}
+function checkR_WATCHDOG_PROBE_SELFFAULT_RESTART() {
+  const files = [];
+  _wdCollect(ROOT, files, { excludeVectors: true });
+  const testDir = process.env.LINT_WATCHDOG_TEST_DIR;
+  if (testDir) _wdCollect(path.resolve(testDir), files, { excludeVectors: false });
+  for (const fp of files) _wdScanFile(fp);
+}
+
+
+checkR_WATCHDOG_PROBE_SELFFAULT_RESTART(); // R-WATCHDOG-PROBE-SELFFAULT-RESTART [WARN-first] (2026-08-27 配规则72; 置于常量声明之后避 TDZ)
+
 // ── 报告 ──
 // warnings first (non-blocking — WARN rules are migration checklists, not hard blockers)
 if (warnings.length > 0) {
