@@ -3,6 +3,7 @@
 > **Status**: DESIGN v0.13 · NWT 2026-08-27 · SUPERSEDES v0.12（`0e123323` + fix-up `07fd6306`）· Codex `d7fefb58`（MSG-280）：D-STAT-1/2 CLOSED、B_adv 窗均值 PASS-dir、**D-STAT-3 OPEN**。**本版闭合 D-STAT-3**：承重量 `w_cap_window` = **层 1「对手在已收块上可造的任一合法窗」的最紧不等式形（μ=0、无裕度假设、Codex form-1 精确）**（J2 推导 `scratch/_j2_wcap_window_inequality_form.md`，**NWT 逐核 @7b1e18cc 全成立**）。
 > **NWT 红队闭环**：我 v0.12 的 `n_ub×观测w_max` 被 Codex 拒（观测 max 是随机量）；我进而逮出 J2 首版层 3 `μ=1%` **欠界**（`mergeset_size_limit=248 / sample_rate=40 ⇒ 单块最多滚 7 采样，非 1`）；⇒ 弃 μ，改层 1 精确不等式。**μ=0**。
 > **Codex 明写：本轮不授权任何 build / 落码 / 部署 / 签名广播 / DB 变更 / 结算退款 / key movement / 生产钱路。** gate (d) 仍 OPEN（数值待同步后实测；本版闭的是设计层构造）。
+> **FIX-UP（2026-08-27 · J2 重建器 V3 首跑逮 · 同文件不 amend 9040b8ec）**：⑤ 机械健全性断言核块 B 时 `A_SP` 须剔除 B 自身（`A_SP∖{B}`），否则 B 自喂 `T_lb` ⇒ 断言恒真 = 空闸（同 selfCheck 缓存失败族）；界仍成立（`B∉window(B)`）；生产 `w_cap_window` 保留全 `A_SP`（反事实子可 merge B）。加规格要求"断言须有可失败性 = 负向量真失败"。
 
 ## §3.5(b) 改点1（D-STAT-3 闭合）——`H_vis_ub = λ_ub(n) · w_cap_window / (t1−t0)`
 
@@ -33,6 +34,8 @@
 
 ### 🔴 机械健全性断言（规格要求 ⑤）
 每个**已收**块 B 必满足 `calc_work(bits_B) ≤ w_child_ub(SP_B)`（B 就是 SP_B 的一个合法子块）——**实现必跑此断言**，任一不过 ⇒ 实现错 ⇒ **fail-closed**。
+- 🔴 **断言算 `w_child_ub(SP_B)` 时 `A_SP` 必须剔除 B 自身（用 `A_SP ∖ {B}`）**（fix-up · J2 V3 首跑逮）：否则 `bs(B) ≥ bs(SP_B)+1 ⇒ B∈A_SP ⇒ T_lb ≤ target(B)`，B **自己喂饱**自己的界 ⇒ `w_child_ub(SP_B) ≥ work(B)` 恒真 ⇒ **断言永不失败 = 貌似有闸实则空**（同 selfCheck 缓存失败一族：看着 fail-closed、实则不 fail）。**界仍成立**：`B ∉ window(B)`（块不在自身过去）⇒ `window(B) ⊆ A_SP∖{B}` 仍是超集 ⇒ `avg_target(window(B)) ≥ min_{window(B)} ≥ min_{A_SP∖{B}} = T_lb`，断言用的是**更紧**界、B 仍须过。（注：**生产 `w_cap_window` 保留全 `A_SP`**——反事实子 C 可 merge B ⇒ B 可进 C 窗，界须含 B；剔除只用于**断言**这一具体块的可失败性。）
+- 🔴 **规格要求：断言须有【可失败性】** —— 落码必带**负向量**（把某已收块难度人为改高，如 ×8）**真触发** `fail-closed`；负向量不失败 ⇒ 断言实现错 ⇒ 本身 fail-closed。（J2 V3 的 b55×8 未剔除 B 时不报 = 反例。）
 
 ## §3.5(b) 改点3（硬闸）
 自持路 (b) 出 cap 全部硬前置（任一不满足 ⇒ 回 (a-total) / fail-closed）：
