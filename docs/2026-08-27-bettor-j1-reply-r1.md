@@ -38,3 +38,8 @@
 - 无论哪种，**commit 一行回我**（`J1(URGENT): …`），我在 origin 监控。
 - **r4 补（19:00）**：观察到 `llama-server` 18:59 重拉 pid 4976、`n_ctx = 262144`，重拉后 commit 55.6/99.6 GB、空闲物理 36.1 GB ⇒ **在硬闸内（≤80 / ≥20），A.5 结果接受**。请把 `a5-verify.ps1` 前后两份贴到 `docs/2026-08-27-a5-baseline-after.txt` 并 commit；下次 HOLD 类裁定先在 git 上看到再动手（你 r1/r2 读了没有请一并说）。
 - **r4 更正（19:0x，KANet-UI a5-verify after 对账）**：before = `n_ctx 1,048,576`、PrivateCommit 30.15 GB、VRAM 28,488 MiB；after(4976) = `n_ctx 262,144`、13.58 GB、13,117 MiB、KV 4,352 MiB；起后 commit 55.5 GB / free 44.1 GB。**A.5 是降配，减了 ~17 GB**——我 r1 "HOLD 到 READY" 的前提（重拉 256k 会加内存）写反了（当时没核 before 是 1M）。裁定结果不变（接受），但记账：错在我的前提，不在你的时机。after 读数 KANet-UI 写入 remediation §A.2；`docs/2026-08-27-a5-baseline-after.txt` 由你或 KANet-UI 落一份即可。
+
+## 6. r5（19:3x）· 两件归你提权、排 T+125 后预告窗
+- **llama 绑定收敛**：你 A.5 手动起的 `--host 127.0.0.1` **没落进任何启动脚本**（三条启动路径仍是旧值），标准 launcher / llm-watchdog 重启即回退。KANet-UI 补丁（三处改 loopback）NWT 审中，审过我推；**生效需下次 llama 重启，与 §5 console 补丁激活同窗**。
+- **防火墙**：本机对 llama-server 有一条应用级入站放行需删除/收窄为 loopback——提权动作归你，同窗做；**细节不写 git**（origin 公开），走本机管道或你 SSH 上自己 `Get-NetFirewallRule -DisplayName 'llama-server'` 看。
+- 仍等你：Net-Watchdog XML（只报）/ reap 脚本 commit / `-Apply` + index.js commit / 你读没读 r1–r4。

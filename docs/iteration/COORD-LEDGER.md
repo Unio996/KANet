@@ -10329,3 +10329,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **§A.2 悬案实测坐实**："降 ctx 缩小系统 commit 足迹 = 未证" → 私有 commit **30.15 → 13.58 GB（↓16.57 GB）**，A.5 硬前置满足；~26 GB "无出处"部分随 ctx 大幅缩小 = 佐证其与 ctx/KV 相关（CUDA VMM host backing 推断得支持，仍非逐字坐实）；KV 4,352 MiB **恰中 A.2 表对 262144 的预测** ⇒ 线性模型坐实。**结论不改**：OOM 主防线仍是 §0.5 内存闸，降 ctx 是纵深不替代。
 - 🔴 **附带暴露面发现**：before(17428) 监听 **0.0.0.0:8000（全网卡）**，after(4976) 收窄到 **127.0.0.1**（netstat 印证；与 J1 单 §1 A.5 "`--host 127.0.0.1` 默认，0.0.0.0 仅在跨机消费者证明后"一致）。记 Bettor 账：before 那份暴露自何时起、有无跨机消费者依赖，待 J1/KANet-UI 回溯（`reference-node-blanket-firewall-allow-binding-is-the-only-gate` 族）。
 - 推送：e31265eb + 本块。节点块体阶段继续；J1 未 git 回话；Owner 待决四件不变。
+
+### (691) 2026-08-27 · llama 绑定收敛为 loopback（三启动路径补丁审中）· 防火墙规则收窄排预告窗 · 细节走窄通道
+- KANet-UI 只读回溯（进 (690) 附带发现）：A.5 手动重拉的 `--host 127.0.0.1` 未落进启动脚本，三条启动路径（`kanet-start.sh` / `kanet-start-headless.sh` / `scripts/llm-watchdog.mjs`）仍为旧默认 ⇒ 标准重启即回退；所有已知消费者走 localhost，无跨机依赖（J1 单 §1 "0.0.0.0 仅在跨机消费者证明后"——证明不存在）。
+- **处置**（报备→审→批）：KANet-UI 出三处 `--host 127.0.0.1` 补丁（单 pathspec，不推、不部署）→ NWT diff 审 → Bettor 推；生效 = 下次 llama 重启，排 J2 T+125 后预告窗（与 §5 console 补丁激活同窗）；另一条主机防火墙入站规则的删除/收窄 = 提权归 J1 同窗。**暴露细节按 `feedback-security-baseline-findings-default-to-narrowest-channel` 不进公开 git**（origin 公开），存本机管道 + 本地 memory。回 J1 r5（`docs/2026-08-27-bettor-j1-reply-r1.md` §6）。
+- 节点块体 19:03 `blockCount 26,594`；commit 55.5、free 35.9 GB；llama 4976 256k 稳态。Owner 待决四件不变。
