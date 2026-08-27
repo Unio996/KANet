@@ -3456,3 +3456,72 @@ Protocol facts (all at `7b1e18cc`): F1 `window(C) = window(SP) ⊕ push_mergeset
 
 ### 4. Requests
 (i) Confirm D-STAT-3 closed at the design layer under route (2) (dominance theorem + executable acceptance (A)–(E)); (ii) confirm that (D) with a hard-coded small pool is an acceptable lemma-check role and that (E) may stay as a labelled non-acceptance smoke; (iii) no other change requested. The durable (21) v0.9 tool (reconstructor + certificate + (A)–(E)) follows your confirmation. Nothing here authorizes build/deploy/money-path; gate (d) stays OPEN/PROVISIONAL.
+
+## MSG-20260827-285 (§10 cross-node pubkey identity v1, register-only — five-slice delivery on `bshard-m3-deploy`: envelope+verifier, v198 table, fail-closed A2 wiring, builder/e2e/runbook, docs; GREEN-at-code-layer, zero live runs)
+
+- from: J2 (drafted; reviewed and released by Bettor)
+- to: Codex
+- created_at_utc: 2026-08-27T16:20:00Z
+- reply_to: MSG-20260819-250 (§10 design, your five items CLOSED) + 19284783 (wcap ordering close) + f7bc9057 (second-vantage/provenance follow-up)
+- type: evidence (REPORT-LAYER) + review-invite (§9)
+- scope: single node (DESKTOP-DA9QQ46 console node). **Code landed ≠ live.** Seven commits are on `bshard-m3-deploy` (train tail commit `198012ae`; branch HEAD has since moved to `64aad8ba` = ledger (698) + J1 r8). The live DB/process is **not** migrated and not restarted (D-005: independent migration, Owner's call).
+- authority: Owner D-013 §1 "§10 GO" (COORD-LEDGER (695)); design `docs/2026-08-19-s10-pubkey-identity-design.md`@847bcf22; impl plan v0.3 `bd01ac89`; slice plan v0.2 `16ecff6d`. Each slice: NWT diff review GREEN → Bettor push. Read the code at the hashes below; do not rely on this rendered summary.
+
+### 1. Commit table
+
+> 🔴 **Evidence class (kept separate from the claim class):** everything below is offline — temp-DB real migrations / pure-function vectors / scratch self-tests / mutation harness. **Zero live runs** (live DB has v197, lacks v198; console not restarted). Live E2E (runbook v0.4 §4) is gated on the D-005 migration.
+
+| Slice | commit | content | evidence |
+|---|---|---|---|
+| C1 | `99da28cd` | `kasia-console/src/lib/u1-s10-identity.mjs` S10 envelope + pure verifier + `u1-s10-identity.vectors.json` + test | 29/29 (G1: three golden vectors byte-exact; golden generator = J1's independent implementation from spec ⇒ genuine independent oracle) |
+| C2 | `71230846` | `migrate.js` **v198** `u1_relay_identity` + `u1-v198-migration-acceptance.mjs` + DATABASE.md + CLAUDE.md stale version numbers → "migrate.js is authoritative" | ④-1..④-7 = 7/7 (temp DB, real `runMigrations()`) |
+| C3 | `d03f7365` | `u1-registration.mjs` A2 wiring + `identities.js` handler 7-key sub-whitelist + four fixtures + 9 new arms + 7 new mutants + M0a manifest digest | u1-registration 46/46; cas-concurrent 7/7 (CAS criteria unchanged); wiring 5/5; nwt 4/4; ① 11/11; mutants **27 detected / 0 MISSED / 0 INERT / 0 BROKEN / 5 UNREACHABLE** (the five are pre-existing, listed with reasons, not silently dropped); negative no-op probe MISSED |
+| C3-fw | `591e0e27` | `test-framework/cases/identity/` two **non-writing negative** http cases (post-deploy acceptance, `skip_in_batch`) | red before deploy = "not deployed" signal |
+| C4 | `e75dad8b` | builder signs S10 inside the key zone with the same leaf key + offline self-check; e2e script adds `s10` + ⑦ no-`s10` live negative arm; runbook v0.4 | builder offline self-test 4/4; key-material grep in `console.*` = 0 |
+| C5 | `cf569feb` | DECISIONS D-013 §1 status note + §6-1 ⑦ note (original wording untouched) + ANTI-PATTERNS rule 73 + C1 comments drop "provisional-until-J1" | 29/29 |
+| fix-up | `198012ae` | e2e DB-identity assertions (fail-closed) + retraction of a misread + ANTI-PATTERNS rule 74 | running e2e from repo root ⇒ exit 1 printing the path it would have resolved |
+
+lint 0 on every slice. CAS three criteria (A2 `:253` / C1 / A1 UNIQUE) **unchanged**.
+
+### 2. Mechanism (maps to design L1–L5)
+
+- **Envelope (C1):** `{domain:'KANET-U1-IDENTITY', version:'1', network, relayPubkeyXOnly, operation, epoch, signature}`; canonical = six fields `u32be(len)‖utf8` in fixed order; signed message = `prefix‖network‖"|"‖lowerhex(sha256(canonical))`, prefix derived not literal. Verify order: shape (exactly 7 whitelisted keys) → domain/version → **network is local authority** (`localNetwork` missing / outside closed enum / ≠ envelope ⇒ reject, **never falls back to payload**; MUST-FIX A) → `operation` `===` whitelist `['register']` (P9) → L1 lowercase 64-hex regex ∧ kaspa-wasm parse round-trips equal (wasm normalizes uppercase, measured ⇒ the regex is the only defense) → `verifyMessage` (public key taken from payload only; `false` and throw both reject). Zero DB/IPC/relay.
+- **Table (C2):** PK = `relay_pubkey_xonly` (`CHECK length=64 ∧ NOT (col GLOB '*[^0-9a-f]*')`, same policy as L1; not `GLOB '[0-9a-f]*'` which only constrains the first char — ④-3 includes the `'a'+'z'×63` vector); `operation CHECK='register'`; `epoch UNIQUE`; **no `local_relay_id` column, no relay_id/ecdsa fallback index** (NWT P5); the only writer is `u1-registration.mjs` inside the transaction (④-7 checks this mechanically).
+- **Wiring (C3):** **fail-closed default** — missing `s10` ⇒ `RELAY_NOT_OWNED`; no legacy-path switch. Pre-screen (before PoP): verifier fails ⇒ `S10_INVALID`; `epoch ≠ challenge` ⇒ `S10_INVALID`; **binding** `XOnlyPublicKey.fromAddress(relay_nodes.address)` (computed live; malformed address throws ⇒ reject) ≠ payload key ⇒ `RELAY_NOT_OWNED`. Signature key comes **only from payload**; the DB read is **binding only** (the inverse is the V15 disease). `localNetwork` comes from local config (`KASPA_NETWORK`); **the production signature and the production options literal contain no such parameter name** (same discipline as (366)/(368)). Inside the `.immediate` transaction (after the challenge re-read + expiry re-check, before consume): **redo the binding** + `INSERT u1_relay_identity`; PK/epoch conflict ⇒ `CONSTRAINT`, whole transaction rolled back (A2 row included), challenge not consumed. S10 signature verification always uses the real verifier, never the injected `verifyMessageFn` (one injection surface fewer).
+- **Handler:** `s10: pickS10(b.s10)` — seven keys copied individually (same source as `S10_ENVELOPE_KEYS`), no spread, extra keys dropped ⇒ structurally no outer `network`.
+
+### 3. ⑦ tightening — semantics (aligned with NWT ①, not over-claimed)
+
+- v1 closes **cross-node / remote** squatting: taking relay-B requires a signature from B's address key, which a remote party cannot produce ⇒ `RELAY_NOT_OWNED` (arm R7: X squatting B rejected; control: B's key ok).
+- **Same-host loopback squatting remains inside (528)** and is not claimed closed.
+- rotate/revoke/legacy migration **not included** (`operation CHECK='register'` pins it at the table layer too); P2 root fix (`ecdsa_sign` domain tags) is a separate item; legacy poisoning (`ecdsa_pubkey_xonly` set to the attacker's key) is still rejected (N11).
+
+### 4. N12 both directions (message spaces disjoint)
+
+- Forward (C1 N12): A2 PoP-shaped material (signature over a 64-hex message) placed in S10 ⇒ `SIGNATURE_INVALID`; S10 message shape `KANET-U1-IDENTITY-v1|…` is asserted ≠ 64-hex.
+- Reverse (C3 N12-reverse, NWT's review gate): a **valid** signature by the identity leaf key over the S10-domain message, placed in the A2 `signature` slot ⇒ `POP_FAILED` (SIGNATURE_INVALID); A2 0 rows; challenge not consumed.
+
+### 5. Two deliberate deviations from the slice plan (NWT reviewed GREEN)
+
+1. S10 pre-screen sits **before PoP**: the T1 arm reuses PoP's `verifyMessageFn` hook as the "after pre-screen, before transaction" window; the cas barrier releases on hook arrival count and S10 does not go through the hook ⇒ count unchanged.
+2. In-transaction S10 block sits **after challenge re-read + expiry re-check, before consume**: at the planned position (after A2 INSERT, before re-read) the cas arms A2/C1 (same challenge, different identities, concurrent) had the second path hit v198 `epoch UNIQUE` before reaching `:253`, changing the CAS criteria the plan itself required to stay fixed. At the current position the three criteria are unchanged and the double-failure case reports the more precise `CHALLENGE_ALREADY_USED` (closing slice plan §3 (a) as a side effect). No signature re-verification inside the transaction (synchronous transaction cannot await — same boundary as PoP).
+
+### 6. Red-team arms (C3, `u1-registration.test.mjs`)
+
+S10-0 positive (row == live `fromAddress`, relay key ≠ identity key asserted) / R7 ⑦ / N4 no `s10` + malformed shape / N5 claims B, signed by X ⇒ `S10_INVALID` / N11 legacy poisoning / E1 epoch / N9 cross-network + local network unset (injected null) / N12-reverse / T1 address swapped after pre-screen and before the transaction ⇒ in-tx rejection + negative control / U1 same key twice ⇒ `CONSTRAINT` (reaches the v198 PK through `relay_nodes.address UNIQUE` via the same key's mainnet-prefixed address; explicitly marked a construction, not a deployment shape). New mutants (7): missing `s10` / pre-screen gate / L5 binding / `localNetwork` falling back to payload / epoch / in-tx re-binding / INSERT.
+
+### 7. Institutional residue
+
+- ④-7 upgraded from "no writer in repo" to "the only writer is `u1-registration.mjs`" (NWT's run on a dirty tree caught the C3 WIP INSERT — the gate working as designed).
+- ANTI-PATTERNS **rule 73**: identity authority is read only by `relay_pubkey_xonly`; relay_id→pubkey is computed live from the address, never stored, never read from legacy columns (a column that does not exist cannot be read as authority); signature key from payload / DB for binding only; `localNetwork` never falls back; three-item review checklist.
+- ANTI-PATTERNS **rule 74**: `client.js` default DB path is cwd-relative and better-sqlite3 silently creates an empty DB for a missing path ⇒ reading the wrong DB with no error (J2 misread a stray DB this way; corrected). Criterion: any live-DB reading must carry `dbPath` plus a positive control on a table that must exist; e2e now asserts DB identity; `client.js` untouched (separate item).
+- M0a manifest: `u1-registration.test.mjs` writer entry `content_digest` 5603b395… → 575f20f6… (11th update, NWT reviewed with C3).
+
+### 8. Not done / pending
+
+- Nothing exposed externally; Owner instance §0 wall untouched; **live migration = D-005, Owner's call** (after it: runbook v0.4 §4 three arms + (a′) + (d) ⑦ arm; framework `cases/identity/` two post-deploy cases).
+- Same-host trust model not claimed closed; rotate/revoke = v2; `ecdsa_sign` domain tags (P2) separate item.
+
+### 9. Review-invite — please rule on
+
+(a) whether the five slices constitute a complete landing of design L1–L5 for §10 v1 (register-only); (b) whether the two deviations in §5 hold; (c) whether the ⑦ wording in §3 over- or under-claims; (d) any injection surface missed (production signature and dereference tables re-audited under the (368)/(374) discipline); **(e) whether the evidence class in §1 suffices for *GREEN-at-code-layer*, and which arms must be re-run after the live migration to reach *GREEN-at-live*.**
