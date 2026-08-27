@@ -19,6 +19,9 @@
 //   5 = 连不上   (connect-fail:连接被拒/RPC 不在)
 //   6 = 依赖缺失 (kaspa-wasm 加载失败:探测器自身坏,不是节点坏)
 //   1 = 其它异常
+//   7 = SYNCING  (IBD 中: isSynced=false 且有进度信号 = 不该重启)
+//   8 = STALLED  (SYNCING 但 >STALL_MS 零进度: 只告警不重启, 交操作员)
+//   9 = DEAD:no-process (连不上 且 无 kaspad.exe 进程 = 真死候选; v0.4 三态 §3b)
 // stdout 打印一行 ALIVE:... / DEAD:<reason>,reason 亦带类型,供 PS 端 parse。
 // 用法: node scripts/kaspad-rpc-probe.mjs [--timeout-ms=8000]
 
@@ -36,6 +39,20 @@ const TIMEOUT_MS = (() => {
   const v = a ? parseInt(a.split('=')[1], 10) : NaN;
   return Number.isFinite(v) && v > 0 ? v : 8000;
 })();
+
+const STATE_FILE = process.env.KASPAD_PROBE_STATE || 'D:\kaspa-tn12-data\kaspad-probe-state.json';
+const STALL_MS = (() => { const v = process.env.KASPAD_PROBE_STALL_MS ? parseInt(process.env.KASPAD_PROBE_STALL_MS, 10) : NaN; return Number.isFinite(v) && v > 0 ? v : 60 * 60 * 1000; })(); // 默认 60min (v0.4 MF-1)
+
+function readState() { try { return JSON.parse(require('fs').readFileSync(STATE_FILE, 'utf8')); } catch { return null; } }
+function writeState(o) { try { require('fs').writeFileSync(STATE_FILE, JSON.stringify(o)); } catch {} }
+function kaspadProcessExists() {
+  // win32 进程枚举供 code 9(no-process)。非 win32 或查失败 => null(未知, 不误判死)
+  try {
+    if (process.platform !== 'win32') return null;
+    const out = require('child_process').execSync('tasklist /FI "IMAGENAME eq kaspad.exe" /NH', { timeout: 5000, encoding: 'utf8' });
+    return /kaspad\.exe/i.test(out);
+  } catch { return null; }
+}
 
 function withTimeout(p, ms, label) {
   return Promise.race([
@@ -74,6 +91,9 @@ function die(reason, code) {
     } catch (ce) {
       const m = ce && ce.message ? ce.message : String(ce);
       if (m.startsWith('timeout:')) die(`timeout:connect:${m}`, 4);
+      // code 9 (DEAD:no-process): 连不上 且 无 kaspad.exe 进程 = 真死候选 (v0.4 §3b 第二路)
+      const exists = kaspadProcessExists();
+      if (exists === false) die(`no-process:connect-fail:${m}`, 9);
       die(`connect-fail:${m}`, 5);
     }
 
@@ -85,10 +105,37 @@ function die(reason, code) {
     }
     // 必改一:数据真回来。virtualDaaScore 必须是合理正数(BigInt 或 number)。
     const daa = typeof dag.virtualDaaScore === 'bigint' ? dag.virtualDaaScore : BigInt(dag.virtualDaaScore || 0);
-    if (!(daa > 0n)) {
+    // v0.4 三态: 增采 isSynced + isIbdPeer (在 getBlockDagInfo 后, 只加不改现有身份/超时判据)
+    const info = await withTimeout(rpc.getInfo(), TIMEOUT_MS, 'getInfo');
+    let ibdPeer = false;
+    try {
+      const peers = await withTimeout(rpc.getConnectedPeerInfo(), TIMEOUT_MS, 'peers');
+      ibdPeer = (peers.peerInfo || peers.infos || peers.peers || []).some((p) => p.is_ibd_peer || p.isIbdPeer);
+    } catch {}
+    const isSynced = info.isSynced === true;
+    if (isSynced && !(daa > 0n)) {
+      // 收窄: isSynced 真但 daa 非正数 = 真数据空(罕见); daa=0 的 IBD 走下面 code 7 不再是 3
       die(`empty-data:daa=${dag.virtualDaaScore}`, 3);
     }
+    if (!isSynced) {
+      // isSynced=false = IBD 中 => SYNCING(7) / STALLED(8), 绝不 DEAD (规则 72 与 VB-9 两根因: daa=0 是 SYNCING 非死)
+      const hc = BigInt(dag.headerCount || 0), bc = BigInt(dag.blockCount || 0);
+      const prev = readState();
+      const progressing = ibdPeer || !prev ||
+        hc > BigInt(prev.headerCount || 0) || bc > BigInt(prev.blockCount || 0) || daa > BigInt(prev.daa || 0);
+      const now = Date.now();
+      const lastProgressTs = (progressing || !prev) ? now : (prev.lastProgressTs || now);
+      writeState({ headerCount: hc.toString(), blockCount: bc.toString(), daa: daa.toString(), lastProgressTs });
+      if (!progressing && prev && (now - lastProgressTs) > STALL_MS) {
+        die(`SYNC-STALLED:hdr=${hc} blk=${bc} daa=${daa} stalledMs=${now - lastProgressTs}`, 8);
+      }
+      process.stdout.write(`SYNCING:isSynced=false hdr=${hc} blk=${bc} daa=${daa} ibdPeer=${ibdPeer} progressing=${progressing}\n`);
+      clearTimeout(hardKill);
+      await rpc.disconnect().catch(() => {});
+      process.exit(7);
+    }
 
+    // ALIVE(0) = HEALTHY: isSynced=true 且 daa>0
     process.stdout.write(`ALIVE:network=${dag.network} daa=${daa.toString()}\n`);
     clearTimeout(hardKill);
     await rpc.disconnect().catch(() => {});
