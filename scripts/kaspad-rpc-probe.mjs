@@ -40,8 +40,8 @@ const TIMEOUT_MS = (() => {
   return Number.isFinite(v) && v > 0 ? v : 8000;
 })();
 
-const STATE_FILE = process.env.KASPAD_PROBE_STATE || 'D:\kaspa-tn12-data\kaspad-probe-state.json';
-const STALL_MS = (() => { const v = process.env.KASPAD_PROBE_STALL_MS ? parseInt(process.env.KASPAD_PROBE_STALL_MS, 10) : NaN; return Number.isFinite(v) && v > 0 ? v : 60 * 60 * 1000; })(); // 默认 60min (v0.4 MF-1)
+const STATE_FILE = process.env.KASPAD_PROBE_STATE || 'D:/kaspa-tn12-data/kaspad-probe-state.json';
+const STALL_MS = (() => { const v = process.env.KASPAD_PROBE_STALL_MS ? parseInt(process.env.KASPAD_PROBE_STALL_MS, 10) : NaN; return Number.isFinite(v) && v > 0 ? v : 120 * 60 * 1000; })(); // 默认 120min (NWT: 缺块体遍历实测静默 58min 贴边 60min, 抬 120 留裕; progressing 含 ibdPeer 使 IBD 期 code8 近不可达=只告警, 真卡死但 peer 连着会漏告警=良性)
 
 function readState() { try { return JSON.parse(require('fs').readFileSync(STATE_FILE, 'utf8')); } catch { return null; } }
 function writeState(o) { try { require('fs').writeFileSync(STATE_FILE, JSON.stringify(o)); } catch {} }
@@ -53,6 +53,9 @@ function kaspadProcessExists() {
     return /kaspad\.exe/i.test(out);
   } catch { return null; }
 }
+
+// 测试钩子(防回归向量用, NWT): 打印解析后的 STATE_FILE 默认路径并退出, 不连接节点
+if (process.argv.includes('--print-state-path')) { process.stdout.write(STATE_FILE + '\n'); process.exit(0); }
 
 function withTimeout(p, ms, label) {
   return Promise.race([
