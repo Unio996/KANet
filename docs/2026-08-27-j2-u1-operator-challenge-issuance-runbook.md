@@ -1,12 +1,14 @@
 # §6-1 Track-A · operator 手工挑战签发 + 一次真注册 E2E · runbook
 
 > 🔴 **Track-A operator 驱动 · 不部署自动签发口 · 部署闸绑 §10**(COORD-LEDGER (527)(528) 终裁, Codex (529) ACCEPTED-with-scope)。本 runbook 里的"签发"是 operator 在本机手工跑一次脚本, 不是 HTTP 端点、不常驻、不进 cron。
-> **Status**: DRAFT v0.3 · J2 2026-08-27 · Bettor 派工 (8) · NWT 审 v0.2 = PASS, v0.3 = 吸收 NWT 三条硬化 + Bettor 两句 · 报备层, **写完未在 live 跑**(脚本只在临时库自测, 见 §7)· 由 **KANet-UI(operator)** 执行 E2E
+> **Status**: DRAFT v0.4 · J2 2026-08-27 · Bettor 派工 (8) · NWT 审 v0.2 = PASS, v0.3 = 吸收 NWT 三条硬化 + Bettor 两句, **v0.4 = §10 C4**(D-013 §1 "§10 GO": submission 第七字段 `s10`, 验收加身份表臂, ⑦ 红臂进 live 负测)· 报备层, **写完未在 live 跑**(脚本只在临时库自测, 见 §7)· 由 **KANet-UI(operator)** 执行 E2E
+> 🔴 **v0.4 前提**: 本 runbook 的 §10 各臂要求 **C3(`d03f7365`)+ v198 已在 live 进程/库**(D-005 独立迁移 Owner 拍);部署前跑主臂步 3 会因 live handler 不认 `s10` 而在 PoP 层拒成别的码——那是"未部署"信号, 不是 runbook 坏。
 > 🔴 **"operator 手工签发"是【进程约定】不是【强制控制】**(NWT 裁): 跑脚本 = 文件系统能力事件(需 `console.db` 写权限), **不是 operator 身份认证事件**;脚本不认证 operator, 谁有同样 DB 写权限谁都能跑;它的权威 = console-loopback 文件访问, 与 ⑦/§10 同源 ⇒ **不许暗示"脚本签发 = operator 已授权"**。脚本入库 = 可发现: 把"手写 INSERT"变成现成工具, 不跨边界但**降低本地 actor 门槛**, loopback 信任内可接受, **北极星面前须重估**。
 > 🔴 **常驻约束**: `u1-issue-challenge.mjs` **永不**接 HTTP route / cron / daemon;任何把它 wrap 成端点或定时任务的改动 = 自动签发口 = **§10-gated, 须先报备**。谁碰这个脚本先 `grep -rn "u1-issue-challenge" kasia-console/src scripts` 确认零引用(ANTI-PATTERNS 审查清单同句)。
 > 🔴 **活 bearer**: challenge 在 `used_at` 置非空之前是**活 bearer token**——签发输出**不贴频道、不进持久证据**;消费后 inert, 证据里才记它的值。
 > 🔵 连接是读写的(经 `DB_PATH` + `src/db/client.js`, M0a 合规);**dry-run 零写入由代码路径保证**(无 `--commit` 时不含任何 INSERT/DELETE), 不靠 readonly 标志。
 > 🔴 **作用域(Bettor 钉死, 逐字)**: 挑战 = **纯 nonce**;`isStoreBoundTo` 绑的是 **sqlite ∧ table**, **不绑 relay_id / requester**;PoP 只证**控住被注册的那把 pubkey**, **不证有权用那个 relay_id**(`REG_REJECT` 无 `RELAY_NOT_OWNED`)。⇒ **E2E 跑通 = 「注册路 plumbing 在 operator 信任假设下端到端通」, ≠ 「§6-1 注册 LIVE-for-real」;⑦ relay_id 抢注面在本 E2E 里零信息, soundness 待 §10。** 本文任何地方**不得**写"第一条真实注册"这类会被读成 LIVE 的话;本 E2E 产出的证据自带这段作用域。
+> 📌 **状态注记(v0.4 · 2026-08-27 · 不改上方 Bettor 原话)**: 上方"`REG_REJECT` 无 `RELAY_NOT_OWNED`"与"⑦ 零信息"描述的是 **§10 之前**的状态。C3(`d03f7365`, 待 NWT 审/未推/未部署)起 `REG_REJECT` **有** `RELAY_NOT_OWNED`/`S10_INVALID`, 注册要求 relay 地址钥签的 `s10` 信封, ⑦ 的**跨节点/远程**抢注面关掉;**同机 loopback 抢注仍不宣称关掉**(D-013 §1 / 设计 ⑦)。部署与否以 `docs/DECISIONS.md` 为准。
 > **脚本**: `kasia-console/scripts/u1-issue-challenge.mjs`(⚠ 放在 kasia-console/scripts 而非根 scripts/: 它要 import `src/lib/u1-challenge-store.mjs` 与 `src/lib/u1-registration.mjs` 的生产谓词, 与 `checksigfromstack-e2e-*.mjs` 同位)。默认只读 dry-run, `--commit` 才写。
 
 ## §1 这一步证明什么、不证明什么
@@ -38,7 +40,7 @@
 ## §4 E2E 三臂(预注册, 事后不加项)
 0. **dry-run 先行**: `node scripts/u1-issue-challenge.mjs --relay <id>` ⇒ 期望 `WOULD-ISSUE`, `baseline_rows` 前两张 = 0, `orphans` = []。截图/留 JSON。
 1. **签发 1 条**: 同命令 `--commit --json` ⇒ `ISSUED`, 记 `challenge`、`expires_at`。核 `SELECT COUNT(*) FROM u1_identity_challenge` = 1。
-2. **构造 submission**(六字段 `relayId / rootXpub / identityIndex=0 / identityPubkeyXOnly / challenge / signature`):
+2. **构造 submission**(v0.4: **七字段** = 六字段 `relayId / rootXpub / identityIndex=0 / identityPubkeyXOnly / challenge / signature` + **`s10`** 子信封 `{domain:'KANET-U1-IDENTITY', version:'1', network:=KASPA_NETWORK, relayPubkeyXOnly:=fromAddress(relay.address), operation:'register', epoch:=challenge, signature}`——由**同一把叶钥**签 `s10SignedMessage(...)`; helper 已在密钥区内一并签并用生产 `verifyS10Envelope` 离线自证(`offline_s10_selfcheck: PASS`), **缺 `KASPA_NETWORK` 不签直接拒**):
    - `rootXpub` = 该 relay 助记词 → `XPrv(seed).deriveChild(44,true).deriveChild(111111,true).deriveChild(0,true).toXPub().intoString('kpub')`;
    - `identityPubkeyXOnly` = `deriveIdentityPubkey(rootXpub, 0)`(`u1-same-origin.mjs:89`);
    - `signature` = `signMessage({ message: popMessageHashHex(buildPopPayload({rootFingerprint: rootFingerprint(rootXpub), identityIndex:0, relayId, challenge})), privateKey: leaf(0/0) })`(`u1-registration-pop.mjs:46/:61`;与 NWT 行为测试 `u1-wiring-behavior-nwt.test.mjs:52-58` 同构)。
@@ -46,12 +48,14 @@
 3. **真 POST**: `curl -s -X POST http://127.0.0.1:3200/api/identity/u1-register -H 'Content-Type: application/json' --data-binary @submission.json` ⇒ 期望 HTTP 200 `{ok:true, …}`。
 4. **验收三臂(缺一不算过)**:
    - (a) `SELECT relay_id, identity_pubkey_xonly, custody FROM u1_identity_registration` = **1 行**, `custody='mnemonic'`, `identity_pubkey_xonly` == relay 地址的 x-only 公钥(`XOnlyPublicKey.fromAddress(relay.address)`);
+   - **(a′ · v0.4 §10)** `SELECT relay_pubkey_xonly, network, epoch, operation FROM u1_relay_identity` = **1 行**, `relay_pubkey_xonly` == **活算** `XOnlyPublicKey.fromAddress(relay.address)`(不是读 `ecdsa_pubkey_xonly` 列——那列不是权威), `epoch` == 本次 challenge, `network` == `KASPA_NETWORK`, `operation='register'`; 且 POST 回包含 `relayPubkeyXOnly` 同值;
    - (b) `SELECT used_at FROM u1_identity_challenge WHERE challenge=?` **非空**(CAS 消费过);
-   - (c) **同一 submission 再 POST 一次** ⇒ HTTP 400, `code='CHALLENGE_ALREADY_USED'`(事务内重读 `usedAt` 非空 ⇒ 拒), 且 `u1_identity_registration` 仍 1 行。
+   - (c) **同一 submission 再 POST 一次** ⇒ HTTP 400, `code='CHALLENGE_ALREADY_USED'`(事务内重读 `usedAt` 非空 ⇒ 拒), 且 `u1_identity_registration` 仍 1 行、`u1_relay_identity` 仍 1 行(v0.4)。
 5. **负测臂(live 上只跑这些, 与三臂一起, 缺一不算过)** —— 🔴 顺序: **先跑 (a), 再跑主臂 1-4**(脚本全表级幂等, 一次一条活挑战):
    - **(a) 过期 nonce ⇒ 拒**: `--commit --ttl-ms 60000`(脚本允许的最小值)签发一条 → **等 ≥ 61 s** → 用它构造 submission 并 POST ⇒ 期望 HTTP 400 `code='CHALLENGE_EXPIRED'`(注册侧事务内重读 `expiresAt <= now`, 与签发写的 `expires_at` 同一判据), `u1_identity_registration` **0 行**。⚠ **不要**用 `UPDATE expires_at` 手改活表造过期(在册禁手插 DB);用最小 TTL + 等待。这条过期挑战会在下一次 `--commit` 时作为孤儿被脚本清掉——那本身也是 ④ 的正向证据, 记下 `orphans_cleaned=1`。
    - **(b) 翻签 ⇒ `POP_FAILED`**: 主臂步 3 之前, 先把同一 submission 的 `signature` 翻一位 POST 一次 ⇒ HTTP 400 `POP_FAILED`, 且挑战**仍未消费**(`used_at` 为空; PoP 在事务外先拒, 不碰 CAS)——然后再用正确 signature 走主臂步 3。
    - **(c) 二次同挑战 ⇒ `CHALLENGE_ALREADY_USED`** = 主臂验收 (c), 不重复。
+   - **(d · v0.4 §10 ⑦ 红臂, live 可跑、零写入)**: 主臂步 3 之前, 把同一 submission **去掉 `s10`** POST 一次 ⇒ HTTP 400 `code='RELAY_NOT_OWNED'`, 挑战**仍未消费**、`u1_relay_identity` 行数不变(预筛在 PoP 之前, 到不了 CAS)。**不在 live 上跑"攻击者钥签 s10 抢 relay-B"**(同 v0.3 撤回那条的理由: 它若成功就在 live 留痕)——那条边界在临时库证明(`u1-registration.test.mjs` R7 臂)。框架层同款 case: `test-framework/cases/identity/u1_s10_register_negative_no_s10.test.mjs` / `…_bad_s10.test.mjs`(后部署验收)。
    - 🔴 **撤回 live 上的"同 nonce 换 relay_id"臂**(NWT 自纠): 它在 live 会真成功、造一个抢注形状的伪注册, 即便回滚也在 live 库留过痕。**这条边界改在临时库证明**(§7 第二组), live E2E 不做。
 
 ## §5 证据留档
@@ -59,7 +63,7 @@
 - 一份 `docs/2026-08-2x-kanetui-u1-e2e-evidence.md`(operator 写), 逐臂贴原文;J2 复核、NWT 审。
 
 ## §6 回滚
-- 操作: `DELETE FROM u1_identity_registration WHERE relay_id=?;` + `DELETE FROM u1_identity_challenge WHERE challenge=?;`(两行, 事务内)。
+- 操作: `DELETE FROM u1_identity_registration WHERE relay_id=?;` + `DELETE FROM u1_relay_identity WHERE relay_pubkey_xonly=?;`(v0.4 §10, 值 = 活算 fromAddress(relay.address)) + `DELETE FROM u1_identity_challenge WHERE challenge=?;`(三行, 事务内)。
 - **为什么可回滚**: 跑前基线两表 **0 行**(§2 核过)⇒ 本次 E2E 产生的就是这一行注册 + 一条挑战, 删掉即回到基线;注册路径**不广播、不动钱、不写别的表**(`u1-registration.mjs` 只 INSERT `u1_identity_registration` + UPDATE 挑战 `used_at`);无 chain_events、无 relay 状态变化。
 - **什么时候不回滚**: 主臂三条全过 ⇒ **留着**(它是 plumbing 运行证据, 作用域见首段);回滚用于 ① 负测臂 (b) 的伪注册行(**必回滚**)② "中途失败留下半截"(例如 POST 200 但 (c) 不拒 ⇒ CAS 失守, 先留证再回滚)。
 - 🔴 回滚后核: 两表行数回到 §2 基线(负测臂做完 = 0/0;主臂留证 = 1/1)。

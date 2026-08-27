@@ -51,14 +51,20 @@ const relayCmd = async (id, cmd, timeoutMs = 30000) => {
 const { sqlite } = await import('../src/db/client.js');
 const { rootFingerprint, deriveIdentityPubkey } = await import('../src/lib/u1-same-origin.mjs');
 const { buildPopPayload, popMessageHashHex } = await import('../src/lib/u1-registration-pop.mjs');
+// §10 C4: 注册自 C3 起要求 s10 信封(缺 ⇒ RELAY_NOT_OWNED); relay 用 ecdsa_sign(任意字符串消息, relay.mjs:638-652)签 S10 消息, 与 PoP 同一把钥
+const { S10_DOMAIN, S10_VERSION, S10_NETWORKS, s10SignedMessage } = await import('../src/lib/u1-s10-identity.mjs');
+const NETWORK = String(process.env.KASPA_NETWORK || '').trim();
 
 const countReg = () => sqlite.prepare('SELECT COUNT(*) c FROM u1_identity_registration').get().c;
+// ⚠ v198 表在 live 库可能还没迁(D-005 独立迁移 Owner 拍): 表不存在 ⇒ 返回 null 而非抛(dry-run 要能打印"未迁移"), --execute 下 null = 拒跑
+const countIdent = () => { try { return sqlite.prepare('SELECT COUNT(*) c FROM u1_relay_identity').get().c; } catch (e) { if (/no such table/i.test(String(e?.message))) return null; throw e; } };
 const relayRow = (name) => sqlite.prepare('SELECT id, name, address, mnemonic_encrypted, privkey_encrypted FROM relay_nodes WHERE name = ?').get(name);
 const ne = (v) => typeof v === 'string' && v.trim() !== '';
 
 // ── 基线(每一格都要有"之前"才能归因) ───────────────────────────────────────
 const BASE = {
   registrations: countReg(),
+  identities: countIdent(),
   challenges: sqlite.prepare('SELECT COUNT(*) c FROM u1_identity_challenge').get().c,
   executing: sqlite.prepare("SELECT COUNT(*) c FROM execution_states WHERE status='executing'").get().c,
 };
@@ -90,13 +96,17 @@ if (!EXECUTE) {
     logSafe('    存在?', !!row, '| custody=mnemonic?', row ? (ne(row.mnemonic_encrypted) && !ne(row.privkey_encrypted)) : 'n/a',
       '| 在拒名单?', DENY.some((re) => re.test(RELAY_NAME)));
   }
-  logSafe('  🔴 执行时会做的【live 写入】共两处: ① INSERT 一行 u1_identity_challenge ② 注册成功后 u1_identity_registration +1 行');
-  logSafe('  🔴 且第 ② 处受 relay_id PK / root_fingerprint UNIQUE 约束 —— 需 operator 复核后按打印的回滚 SQL 清理。');
+  logSafe('  🔴 执行时会做的【live 写入】共三处: ① INSERT 一行 u1_identity_challenge ② 注册成功后 u1_identity_registration +1 行 ③ (§10) u1_relay_identity +1 行(同一事务)');
+  logSafe('  🔴 且第 ②③ 处受 relay_id PK / root_fingerprint UNIQUE / relay_pubkey_xonly PK 约束 —— 需 operator 复核后按打印的回滚 SQL 清理。');
+  logSafe('  §10: KASPA_NETWORK =', NETWORK || '🔴 未设(执行时会拒: 注册端点本地网络权威同源)');
+  logSafe('  §10: u1_relay_identity(v198) 在本库 =', BASE.identities === null ? '🔴 表不存在(v198 未迁移 ⇒ 执行时会拒; D-005 独立迁移 Owner 拍)' : `存在, ${BASE.identities} 行`);
   process.exit(0);
 }
 
 // ── 以下仅在 --execute 下运行 ────────────────────────────────────────────
 if (!RELAY_NAME) { logSafe('🔴 必须 --relay=<name>(无默认值, 防手滑)'); process.exit(1); }
+if (!S10_NETWORKS.includes(NETWORK)) { logSafe('🔴 KASPA_NETWORK 缺失或不在 S10 闭枚举(与注册端点同源) —— set -a; . ./kanet.env'); process.exit(1); }
+if (BASE.identities === null) { logSafe('🔴 u1_relay_identity 不存在: v198 未在本库迁移 ⇒ 注册端点会 CONSTRAINT/500, 不跑(D-005 独立迁移 Owner 拍)'); process.exit(1); }
 if (DENY.some((re) => re.test(RELAY_NAME))) { logSafe(`🔴 ${RELAY_NAME} 在运营型拒名单里 —— 落库不可逆, 不占它的槽`); process.exit(1); }
 const target = relayRow(RELAY_NAME);
 if (!target) { logSafe('🔴 relay 不存在:', RELAY_NAME); process.exit(1); }
@@ -150,13 +160,33 @@ const payload = buildPopPayload({ rootFingerprint: fp, identityIndex: 0, relayId
 const sig = await relayCmd(target.id, { type: 'ecdsa_sign', message: popMessageHashHex(payload) });
 if (!sig?.signature) { logSafe('🔴 relay 签名失败:', JSON.stringify(sig)); process.exit(1); }
 
+// §10 S10: relay 地址钥(= 上面 E2-0 证过的同一把钥)签 S10 信封, epoch := challenge, network := 本地配置
+const { XOnlyPublicKey, Address } = await import('kaspa-wasm');
+const addrKey = XOnlyPublicKey.fromAddress(new Address(target.address)).toString();
+const s10f = { domain: S10_DOMAIN, version: S10_VERSION, network: NETWORK, relayPubkeyXOnly: addrKey, operation: 'register', epoch: challenge };
+const s10sig = await relayCmd(target.id, { type: 'ecdsa_sign', message: s10SignedMessage(s10f) });
+if (!s10sig?.signature) { logSafe('🔴 relay S10 签名失败:', JSON.stringify(s10sig)); process.exit(1); }
+const s10 = { ...s10f, signature: s10sig.signature };
+
+// §10 ⑦ 红臂(live 负测, 零写入): 同一份合法 submission【去掉 s10】⇒ 400 RELAY_NOT_OWNED, 挑战不消费(预筛在 PoP 前, 到不了 CAS)
+const r1 = await post({ relayId: target.id, rootXpub, identityIndex: 0, identityPubkeyXOnly, challenge, signature: sig.signature });
+check('E2-S10 ⑦ 无 s10 ⇒ 400 RELAY_NOT_OWNED', r1.code === 400 && r1.payload?.code === 'RELAY_NOT_OWNED', JSON.stringify(r1.payload));
+check('E2-S10 ⑦ 后挑战仍未消费', sqlite.prepare('SELECT used_at FROM u1_identity_challenge WHERE challenge = ?').get(challenge)?.used_at == null);
+check('E2-S10 ⑦ 后身份表行数不变', countIdent() === BASE.identities, `${BASE.identities} → ${countIdent()}`);
+
 const r2 = await post({ relayId: target.id, rootXpub, identityIndex: 0,
-  identityPubkeyXOnly, challenge, signature: sig.signature });
+  identityPubkeyXOnly, challenge, signature: sig.signature, s10 });
 check('E2 阳性 ⇒ ok:true', r2.code === 200 && r2.payload?.ok === true, JSON.stringify(r2.payload));
 check('E2 registration 行数 +1', countReg() === BASE.registrations + 1, `${BASE.registrations} → ${countReg()}`);
 const row = sqlite.prepare('SELECT custody, root_fingerprint FROM u1_identity_registration WHERE relay_id = ?').get(target.id);
 check('E2 custody 是服务端派生值 mnemonic', row?.custody === 'mnemonic', String(row?.custody));
 check('E2 root_fingerprint = 服务端对 rootXpub 重算值', row?.root_fingerprint === fp, `${row?.root_fingerprint} vs ${fp}`);
+// §10 验收 (a′): 身份表 +1 行, 且 = 活算 fromAddress(relay.address), epoch = challenge, 返回值同
+check('E2-S10 u1_relay_identity 行数 +1', countIdent() === BASE.identities + 1, `${BASE.identities} → ${countIdent()}`);
+const idRow = sqlite.prepare('SELECT network, operation, epoch FROM u1_relay_identity WHERE relay_pubkey_xonly = ?').get(addrKey);
+check('E2-S10 身份行 = fromAddress(relay.address), epoch = challenge, network 同源, operation=register',
+  !!idRow && idRow.epoch === challenge && idRow.network === NETWORK && idRow.operation === 'register', JSON.stringify(idRow));
+check('E2-S10 返回 relayPubkeyXOnly = 地址钥', r2.payload?.relayPubkeyXOnly === addrKey, String(r2.payload?.relayPubkeyXOnly));
 
 // E3 挑战真被消费
 const chRow = sqlite.prepare('SELECT used_at FROM u1_identity_challenge WHERE challenge = ?').get(challenge);
@@ -164,9 +194,10 @@ check('E3 挑战 used_at 非 NULL(真被消费, 不是空消费)', chRow?.used_a
 
 // E4 重放必拒
 const r3 = await post({ relayId: target.id, rootXpub, identityIndex: 0,
-  identityPubkeyXOnly, challenge, signature: sig.signature });
+  identityPubkeyXOnly, challenge, signature: sig.signature, s10 });
 check('E4 同一挑战重放必拒', r3.payload?.ok === false, JSON.stringify(r3.payload));
 check('E4 重放后行数仍为 +1(没写第二行)', countReg() === BASE.registrations + 1, String(countReg()));
+check('E4 重放后身份表仍为 +1', countIdent() === BASE.identities + 1, String(countIdent()));
 
 // E5 零附带写入
 check('E5 execution_states 未被附带改动',
@@ -175,5 +206,6 @@ check('E5 execution_states 未被附带改动',
 logSafe(`\n${fail === 0 ? '✅' : '🔴'} E2E: ${pass} PASS / ${fail} FAIL`);
 logSafe('\n🔴 约束3 回滚 SQL(三方复核【之后】由 operator 执行, 本脚本不自动跑 —— 证据要留给复核):');
 logSafe(`  DELETE FROM u1_identity_registration WHERE relay_id = '${target.id}';`);
+logSafe(`  DELETE FROM u1_relay_identity        WHERE relay_pubkey_xonly = '${addrKey}';`);
 logSafe(`  DELETE FROM u1_identity_challenge   WHERE challenge = '${challenge}';`);
 if (fail > 0) process.exitCode = 1;

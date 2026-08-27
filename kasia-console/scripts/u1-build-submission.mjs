@@ -10,6 +10,10 @@
 //   ③ PoP 不自造签名字节: payload = buildPopPayload(生产), hash = popMessageHashHex(生产), 签 = kaspa-wasm signMessage(与 NWT 行为测试同构);
 //      输出前用生产 verifyRegistrationPop 离线自证一次(喂一条未用未过期的临时 record, 只在内存), 不过即拒绝输出。
 //   ④ 输出六字段皆非密钥: relayId / rootXpub(账户层 xpub, 公开) / identityIndex / identityPubkeyXOnly / challenge / signature。
+//   ⑥ §10 C4 (D-013): 第七字段 `s10` = 同一把叶钥(② 已反核 == relay 地址钥)在密钥区内再签的 S10 信封
+//      { domain, version, network(=KASPA_NETWORK 本地配置, 缺/不在闭枚举 ⇒ 不签直接拒), relayPubkeyXOnly(=地址钥), operation:'register', epoch:=challenge, signature }
+//      —— 消息 = s10SignedMessage(生产), 签 = kaspa-wasm signMessage(与 C1 向量同构); 输出前用生产 verifyS10Envelope 离线自证 + 断言 relayPubkeyXOnly === fromAddress(relay.address)。
+//      s10 子键再白名单 7 个(S10_ENVELOPE_KEYS), 非白名单键进不了输出。注册端点自 C3 起缺 s10 即拒 RELAY_NOT_OWNED(fail-closed)。
 // 🔴 challenge 在消费前是活 bearer(runbook 首段): 本脚本输出含它 ⇒ 输出只给 operator 当场 POST 用, 不贴频道、不进证据(消费后再记)。
 // 🔴 dry-run 与 --commit 只差一件事: 是否把六字段写进 --out 文件(默认 scratch/u1-e2e/submission.json)。两者都会真解密真签(用真钥)。
 // 🔴 handle 经 DB_PATH + src/db/client.js(M0a 合规, 无裸 sqlite import); decrypt 经 src/services/crypto.js(读进程的 CONSOLE_ENCRYPTION_KEY, 与 console 同一把)。
@@ -32,12 +36,15 @@ const OUT = arg('--out', 'D:/kanet-tn12/scratch/u1-e2e/submission.json');
 const die = (m, code = 2) => { console.error(`🔴 ${m}`); process.exit(code); };
 
 // ① 输出白名单: 除这些键, 任何东西都不会被打印/写文件
-const SUBMISSION_KEYS = ['relayId', 'rootXpub', 'identityIndex', 'identityPubkeyXOnly', 'challenge', 'signature'];
-const META_KEYS = ['mode', 'relay_name', 'relay_address', 'address_key_matches_identity', 'offline_pop_selfcheck', 'out'];
+const SUBMISSION_KEYS = ['relayId', 'rootXpub', 'identityIndex', 'identityPubkeyXOnly', 'challenge', 'signature', 's10'];   // §10 C4: +s10(否则 emit 静默丢键)
+const META_KEYS = ['mode', 'relay_name', 'relay_address', 'address_key_matches_identity', 'offline_pop_selfcheck', 'offline_s10_selfcheck', 'out'];
+// §10 C4: s10 子键白名单(与 u1-s10-identity.mjs S10_ENVELOPE_KEYS 同源, 下面 import 后再校验一次两者相等)
+const S10_KEYS = ['domain', 'version', 'network', 'relayPubkeyXOnly', 'operation', 'epoch', 'signature'];
+const pickS10 = (x) => { if (!x || typeof x !== 'object') return undefined; const o = {}; for (const k of S10_KEYS) if (k in x) o[k] = x[k]; return o; };
 const emit = (o) => {
   const safe = {};
-  for (const k of [...META_KEYS, ...SUBMISSION_KEYS]) if (k in o) safe[k] = o[k];
-  console.log(JSON_OUT ? JSON.stringify(safe) : Object.entries(safe).map(([k, v]) => `  ${k}: ${v}`).join('\n'));
+  for (const k of [...META_KEYS, ...SUBMISSION_KEYS]) if (k in o) safe[k] = k === 's10' ? pickS10(o[k]) : o[k];
+  console.log(JSON_OUT ? JSON.stringify(safe) : Object.entries(safe).map(([k, v]) => `  ${k}: ${typeof v === 'object' && v !== null ? JSON.stringify(v) : v}`).join('\n'));
   return safe;
 };
 
@@ -60,7 +67,12 @@ const { decrypt } = await import('../src/services/crypto.js');
 const { deriveCustody } = await import('../src/lib/u1-registration.mjs');
 const { rootFingerprint, deriveIdentityPubkey } = await import('../src/lib/u1-same-origin.mjs');
 const { buildPopPayload, popMessageHashHex, verifyRegistrationPop } = await import('../src/lib/u1-registration-pop.mjs');
+const { S10_DOMAIN, S10_VERSION, S10_NETWORKS, S10_ENVELOPE_KEYS, s10SignedMessage, verifyS10Envelope } = await import('../src/lib/u1-s10-identity.mjs');
 const kaspa = await import('kaspa-wasm');
+// §10 C4: network 本地权威 —— 与注册端点同一来源(KASPA_NETWORK); 缺/不在闭枚举 ⇒ 端点必拒 NETWORK_MISMATCH ⇒ 不签
+const NETWORK = String(process.env.KASPA_NETWORK || '').trim();
+if (!S10_NETWORKS.includes(NETWORK)) die(`KASPA_NETWORK 缺失或不在 S10 闭枚举 ${JSON.stringify([...S10_NETWORKS])}: 实际 ${JSON.stringify(NETWORK)} (set -a; . ./kanet.env)`);
+if (JSON.stringify([...S10_ENVELOPE_KEYS]) !== JSON.stringify(S10_KEYS)) die('S10_KEYS 白名单与 u1-s10-identity.mjs S10_ENVELOPE_KEYS 不一致 — 两处必须同形, 停');
 
 // relay 前置: 与注册端点同一谓词(混合态 / privkey-only / 不存在 ⇒ 注册必拒 ⇒ 不签)
 const custody = deriveCustody(sqlite, RELAY);
@@ -83,9 +95,10 @@ const KZ_TEXT = Object.freeze({
   DERIVE_FAILED: '派生失败(路径 m/44h/111111h/0h/0/0; 原始错误文本不转发)',
   ADDRESS_KEY_MISMATCH: 'identityPubkeyXOnly != relay 地址钥 — 派生路径或 relay 钥不一致, 拒(两者前 12 hex 见 --json 的 address_key_matches_identity=false 时不再打印, 防误贴)',
   SIGN_FAILED: 'PoP 签名失败(原始错误文本不转发)',
+  S10_SIGN_FAILED: 'S10 签名失败(原始错误文本不转发)',
 });
 let phrase = null, mn = null, seed = null, xprv = null, acct = null, leaf = null, priv = null, xpubObj = null;
-let rootXpub = null, identityPubkeyXOnly = null, signature = null, matches = false, addrKey = null;
+let rootXpub = null, identityPubkeyXOnly = null, signature = null, matches = false, addrKey = null, s10 = null;
 // ⑤ wasm 侧释放(NWT MUST-FIX): kaspa-wasm 的 Mnemonic/XPrv/XPub/PrivateKey 都导出 free()(kaspa.d.ts:5807/8022/8062/6177, wasm-bindgen),
 //    仓内此前无先例 —— 这里对持有引用的每个对象在 finally 里调 free(), seed(Uint8Array)fill(0), 促 wasm 线性内存即时释放而不等 GC。
 //    ⚠ 仍不是"零残留": deriveChild 链上的中间 XPrv(44'/111111')没保留引用, 只能等 FinalizationRegistry; JS 字符串(phrase/priv hex)不可变只能清引用。
@@ -119,6 +132,11 @@ try {
     const payload = buildPopPayload({ rootFingerprint: rootFingerprint(rootXpub), identityIndex: 0, relayId: RELAY, challenge: CHALLENGE });
     signature = kaspa.signMessage({ message: popMessageHashHex(payload), privateKey: priv.toString() });
   } catch { throw new KeyZoneError('SIGN_FAILED'); }
+  // ⑥ §10 S10: 同一把叶钥(② 已证 == 地址钥)签 S10 信封, epoch := challenge, network := 本地配置; 消息由生产 s10SignedMessage 构造
+  try {
+    const f = { domain: S10_DOMAIN, version: S10_VERSION, network: NETWORK, relayPubkeyXOnly: addrKey, operation: 'register', epoch: CHALLENGE };
+    s10 = { ...f, signature: kaspa.signMessage({ message: s10SignedMessage(f), privateKey: priv.toString() }) };
+  } catch { throw new KeyZoneError('S10_SIGN_FAILED'); }
 } catch (e) {
   zero();
   if (e instanceof KeyZoneError && KZ_TEXT[e.code]) die(`${KZ_TEXT[e.code]} [code=${e.code}]`);
@@ -126,7 +144,13 @@ try {
 } finally { zero(); }
 // ── 密钥区结束 ───────────────────────────────────────────────────────────────
 
-const submission = { relayId: RELAY, rootXpub, identityIndex: 0, identityPubkeyXOnly: String(identityPubkeyXOnly).toLowerCase(), challenge: CHALLENGE, signature };
+const submission = { relayId: RELAY, rootXpub, identityIndex: 0, identityPubkeyXOnly: String(identityPubkeyXOnly).toLowerCase(), challenge: CHALLENGE, signature, s10: pickS10(s10) };
+// ⑥ §10 离线自证: 生产验证器过(localNetwork = 同一本地配置) ∧ relayPubkeyXOnly === fromAddress(relay.address)(活算, 与端点 L5 同式) ∧ epoch === challenge; 不过即拒绝输出
+let s10self;
+try { s10self = await verifyS10Envelope(submission.s10, { localNetwork: NETWORK }); }
+catch { die('离线 S10 自证抛错 [code=S10_SELFCHECK_THREW](原始错误文本不转发)'); }
+if (!s10self.ok) die(`离线 S10 自证不过 [code=${String(s10self.code || 'UNKNOWN').replace(/[^A-Z_]/g, '')}] — 不输出 submission`);
+if (s10self.relayPubkeyXOnly !== addrKey || s10self.epoch !== CHALLENGE) die('离线 S10 自证: relayPubkeyXOnly ≠ 地址钥 或 epoch ≠ challenge [code=S10_BINDING] — 不输出');
 // ③ 离线自证: 喂一条只在内存里的"未用未过期"record 给生产验证器; 不过即拒绝输出(仪器先自证, 再交给端点)
 //    入参已无密钥, 但异常路径同样只出固定文案 + 验证器自己的 code(code 是枚举名, 非输入回显)。
 let self;
@@ -134,6 +158,6 @@ try { self = await verifyRegistrationPop({ submission, challengeRecord: { challe
 catch { die('离线 PoP 自证抛错 [code=SELFCHECK_THREW](原始错误文本不转发)'); }
 if (!self.ok) die(`离线 PoP 自证不过 [code=${String(self.code || 'UNKNOWN').replace(/[^A-Z_]/g, '')}] — 不输出 submission`);
 
-const meta = { mode: COMMIT ? 'COMMIT(写 --out)' : 'DRY-RUN(不写文件)', relay_name: relay.name, relay_address: relay.address, address_key_matches_identity: matches, offline_pop_selfcheck: 'PASS', out: COMMIT ? resolve(OUT) : '(未写)' };
+const meta = { mode: COMMIT ? 'COMMIT(写 --out)' : 'DRY-RUN(不写文件)', relay_name: relay.name, relay_address: relay.address, address_key_matches_identity: matches, offline_pop_selfcheck: 'PASS', offline_s10_selfcheck: 'PASS', out: COMMIT ? resolve(OUT) : '(未写)' };
 if (COMMIT) { mkdirSync(dirname(resolve(OUT)), { recursive: true }); writeFileSync(resolve(OUT), JSON.stringify(submission, null, 1)); }
 emit({ ...meta, ...submission });
