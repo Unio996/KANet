@@ -52,7 +52,13 @@ const MASS_FLOOR_MODE = 'observe';   // 'observe' | 'enforce'(enforce 须另报�
 //    取不到 ⇒ inconclusive 计数(不算通过)。实现: _assertTxInvariants 把 (txid → 本地上界) 记进模块私有 Map, connectRpc() 返回的 client 的
 //    submitTransaction 被包一层(30 处调用点零改动): 成功 ⇒ 查 Map ⇒ getMempoolEntry ⇒ 对照日志。纯观测, 不改 submit 结果/时序(对照在 submit 返回后异步做)。
 const _massObserve = new Map();                 // txid → { site, ub(BigInt), fee(BigInt), minFee(BigInt) }
-export const _massObserveStats = { checked: 0, ub_ok: 0, ub_violation: 0, inconclusive: 0 };
+const _MASS_OBSERVE_CAP = 256;                  // NWT MUST(泄漏): 兜底上限, 超出逐出最旧(Map 插入序); 主修法是 wrapper try/finally 删
+export const _massObserveStats = { checked: 0, ub_ok: 0, ub_violation: 0, inconclusive: 0, evicted: 0 };
+export const __testOnlyMassObserveSize = () => _massObserve.size;   // 仅可测性
+function _massObserveSet(txid, rec) {
+  _massObserve.set(txid, rec);
+  while (_massObserve.size > _MASS_OBSERVE_CAP) { const oldest = _massObserve.keys().next().value; _massObserve.delete(oldest); _massObserveStats.evicted++; }
+}
 function _authoritativeMassOf(entryResp) {
   const e = entryResp?.entry ?? entryResp;
   const cands = [e?.transaction?.mass, e?.mass, e?.transaction?.storageMass];
@@ -70,16 +76,23 @@ async function _observeAuthoritativeMass(rpc, txid) {
   if (ok) _massObserveStats.ub_ok++; else _massObserveStats.ub_violation++;
   console.warn(`[mass-floor:observe:auth] site=${rec.site} txid=${txid} authoritative_mass=${authoritative} mass_ub=${rec.ub} ub_ok=${ok} minFee_auth=${authoritative * MIN_SOMPI_PER_MASS} actualFee=${rec.fee} totals=ok:${_massObserveStats.ub_ok}/viol:${_massObserveStats.ub_violation}/inc:${_massObserveStats.inconclusive}`);
 }
-/** 包 rpc.submitTransaction: 成功后异步做权威 mass 对照(observe 证据); 失败/异常原样抛, 不改语义。export 仅为可测性。 */
+/** 包 rpc.submitTransaction: 成功后做权威 mass 对照(observe 证据); 失败/异常原样抛, 不改语义。export 仅为可测性。
+ *  🟡 observe 期代价(NWT note1): 对照在 return 前 await ⇒ 每次 submit 多 1 次 getMempoolEntry 往返(保证检查真跑); enforce 期再评估是否改后台。
+ *  🔴 NWT MUST(泄漏): 失败 submit 也要清 Map —— txid 从入参 transaction.id 先取, try/finally 删(成功路径由 _observeAuthoritativeMass 删, 这里再删一次是幂等)。 */
 export function __testOnlyWrapRpcForMassObserve(rpc) { return _wrapRpcForMassObserve(rpc); }
 function _wrapRpcForMassObserve(rpc) {
   if (!rpc || typeof rpc.submitTransaction !== 'function' || rpc.__massObserveWrapped) return rpc;
   const orig = rpc.submitTransaction.bind(rpc);
   rpc.submitTransaction = async (...args) => {
-    const r = await orig(...args);
-    const txid = r?.transactionId;
-    if (txid && _massObserve.has(txid)) { try { await _observeAuthoritativeMass(rpc, txid); } catch (e) { console.warn(`[mass-floor:observe:auth] hook error(ignored): ${e?.message || e}`); } }
-    return r;
+    let preTxid = null; try { const t = args?.[0]?.transaction; preTxid = t?.id != null ? String(t.id) : null; } catch {}
+    try {
+      const r = await orig(...args);
+      const txid = r?.transactionId;
+      if (txid && _massObserve.has(txid)) { try { await _observeAuthoritativeMass(rpc, txid); } catch (e) { console.warn(`[mass-floor:observe:auth] hook error(ignored): ${e?.message || e}`); } }
+      return r;
+    } finally {
+      if (preTxid) _massObserve.delete(preTxid);   // 失败/异常/成功皆清, 不泄漏
+    }
   };
   rpc.__massObserveWrapped = true;
   return rpc;
@@ -110,7 +123,7 @@ function _assertTxInvariants(matchedUtxos, signedTx, siteLabel = 'unknown', netw
         }
         const minFee = ub.mass * MIN_SOMPI_PER_MASS;
         const wouldReject = fee < minFee;
-        try { const txid = String(signedTx.id); if (/^[0-9a-f]{64}$/.test(txid)) _massObserve.set(txid, { site: siteLabel, ub: ub.mass, fee, minFee }); } catch {}   // submit 后权威对照用
+        try { const txid = String(signedTx.id); if (/^[0-9a-f]{64}$/.test(txid)) _massObserveSet(txid, { site: siteLabel, ub: ub.mass, fee, minFee }); } catch {}   // submit 后权威对照用(带 cap)
         // 结构化一行(Bettor 条件④): 7 天 observe 对照用; 不改任何行为
         console.warn(`[mass-floor:${MASS_FLOOR_MODE}] site=${siteLabel} compute=${ub.compute} storage=${ub.storage} transient=${ub.transient} mass_ub=${ub.mass} minFee=${minFee} actualFee=${fee} would_reject=${wouldReject} wasm=panic(${String(massErr.message).slice(0, 40)}) source=${ub.source_commit}`);
         if (MASS_FLOOR_MODE === 'enforce' && wouldReject) {
