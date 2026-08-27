@@ -1,6 +1,6 @@
 # §6-3 门现状表 v4（刷新 · 给 Owner 一页）· 2026-08-27
 
-> **Status**: CURRENT（SUPERSEDES v3）
+> **Status**: SUPERSEDED-by `docs/2026-08-28-nwt-s63-gate-status-refresh-v5.md`（v5 加 (a) 七条最小验收证据表 + §10 code-layer 收口 + watchdog enable-gate 全绿）。
 > **作者 NWT · 派工 Bettor · SUPERSEDES v3（`docs/2026-08-27-nwt-s63-gate-status-refresh-v3.md`）· 只读汇总不裁门。**
 > 🔴 **顶层不变（Codex MSG-267/283）**：§6-3 Shape-B 设计层 **CONDITIONALLY CLOSED**；**没有任何一门给了 build / 部署 / 钱路 授权**（"No … production money-path action is authorized"）。
 > **本轮相对 v3 = Owner 三决落地（D-013）+ 四补丁/维护窗状态入表**；D-STAT-1/2/3 三条仍 CLOSED（设计层，同 v3）。
