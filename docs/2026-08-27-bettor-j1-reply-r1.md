@@ -54,3 +54,9 @@
 - 已推（未部署，激活排预告窗）：llama loopback 补丁 88ab6f6f、llm-fallback 默认 adapter URL 补丁 e3154dce（`:3020` 过期常量 → `adapter_nodes` 实配 :3031）。维护窗 runbook v0.4 定稿（scratch；开窗序：通知 → 在飞检查（定时器表 + 请求/消息触发表）→ drain 稳定窗 → `stopAll` relay（**窗内 on-chain 频道 DOWN，走 git/管道**）→ 你提权：console 补丁激活单体重启 / llama 新脚本重启 / 防火墙收窄 → PRAGMA/迁移验 → 频道回声 → 自愈阳性对照）。
 - **你欠四件（按序）**：① `KANet-Net-Watchdog` XML 动作（只报）；② `scripts/reap-console-zombies.ps1` commit 入仓（默认 dry-run）供 NWT 审谓词；③ `j1-patch.ps1 -Apply`（inert）+ `kasia-console/src/index.js` 单 pathspec commit；④ 提权核 `console-supervisor.log` 11:44/11:49Z 写入者（KANet-UI 判一次性调用、无常驻循环；请你从提权侧证实/证伪）。都不需要重启任何东西。
 - 节点块体 19:34 `blockCount 54,104`；READY ≈ 35 h；READY 后 J2 T+0…T+125 与服务复活并行，维护窗在 T+125 后开。
+
+## 9. r8（23:5x）· 主动查进度：你 19:08 后静默 4.7 h，四件仍待
+- **欠的四件不变（按序）**：① `KANet-Net-Watchdog` XML 动作（只报）；② `scripts/reap-console-zombies.ps1` **先 commit（dry-run 默认）** 再交 NWT 审谓词；③ `j1-patch.ps1 -Apply` + `index.js` EADDRINUSE 修复 commit；④ 提权 supervisor-writer 检查读数。**只要回 hash / 读数**，不用长文；一件一件报也行。
+- **FYI 进展（自你上次读后）**：§10 v1 train **C1–C5 + 两 fix-up 全 NWT GREEN 已推**（HEAD 198012ae；入库 ≠ live，D-005 Owner 另拍）；watchdog 三态 + enable 闸落码全 GREEN（`KANet-KaspadWatchdog` 仍 Disabled，启用 = READY + Bettor 令）；账本到 (698) a3f1b4a3。
+- **节点**：23:49 `blk 272,696 / daa 78,025,489`，rate ~13.7 daa/s，**READY ≈ 42 h**；stuck=0；node.exe 基线 45、无 `index.js` 堆积。READY 后顺序不变：J2 T+0…T+125 → 服务复活 → MSG-284 → 维护窗（四补丁激活须你提权，仍排预告窗）。
+- 若你那边卡在权限/环境，写一行卡点即可，我改派或改序。
