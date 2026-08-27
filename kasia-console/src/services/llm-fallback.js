@@ -1,7 +1,7 @@
 /**
  * LLM Fallback Chain — 3 tiers for resilience.
  *
- *   Tier 1: GLM4.7 via adapter (port 3020)         — primary, cloud reasoning
+ *   Tier 1: agent adapter (per-agent URL; default resolved adapter_nodes->env->:3031)
  *   Tier 2: cc-bridge (port 9100)                  — Claude Code if active
  *   Tier 3: llama-server (port 8000, Qwen3.6-35B)  — local always-available
  *
@@ -9,7 +9,12 @@
  * All three speak OpenAI /v1/chat/completions.
  */
 
-const DEFAULT_ADAPTER_URL = 'http://127.0.0.1:3020'; // Bettor's GLM4.7 fallback for cron without agent
+// tier-1 default adapter URL (cron/无-agent 路径, 未传 adapterUrl 时用)。解析顺序(首次调用时定, 缓存+打日志来源):
+//   ① adapter_nodes 里 is_enabled=1 的 http_port(多条取最近 updated_at) ② env KANET_DEFAULT_ADAPTER_URL ③ 常量 :3031。
+// :3020 = stale since 2026-06-27(adapter_nodes 无此条、无 launcher 起、GLM4.7 从未上线)——保留仅作历史记号, 不再用。
+const STALE_ADAPTER_URL_3020 = 'http://127.0.0.1:3020'; // stale since 2026-06-27, 不再用(见上)
+const FALLBACK_ADAPTER_URL   = 'http://127.0.0.1:3031'; // adapter_nodes 唯一实配(Qwythos-9B, is_enabled=1, ->llama :8000/v1)
+let _resolvedDefaultAdapterUrl = null; // 首次解析后缓存
 const CC_BRIDGE_URL = 'http://127.0.0.1:9100';
 const LLAMA_URL = 'http://127.0.0.1:8000';
 
@@ -32,6 +37,24 @@ async function postJson(url, body, timeout = TIMEOUT_MS) {
   }
 }
 
+async function resolveDefaultAdapterUrl() {
+  if (_resolvedDefaultAdapterUrl) return _resolvedDefaultAdapterUrl;
+  let url = null, src = null;
+  // ① adapter_nodes is_enabled=1 http_port (懒 import + try/catch: 同进程复用已开连接; 独立脚本/DB 不可用则降级, 不引入 load 期依赖或环)
+  try {
+    const { sqlite } = await import('../db/client.js');
+    const row = sqlite.prepare('SELECT http_port FROM adapter_nodes WHERE is_enabled = 1 AND http_port IS NOT NULL ORDER BY updated_at DESC LIMIT 1').get();
+    if (row && row.http_port) { url = `http://127.0.0.1:${row.http_port}`; src = `adapter_nodes(is_enabled=1) http_port=${row.http_port}`; }
+  } catch (e) { /* DB 不可用/独立脚本上下文 -> 降级到 env/常量 */ }
+  // ② env override (kanet.env 可配, 默认不设)
+  if (!url && process.env.KANET_DEFAULT_ADAPTER_URL) { url = process.env.KANET_DEFAULT_ADAPTER_URL; src = 'env KANET_DEFAULT_ADAPTER_URL'; }
+  // ③ 常量兜底 :3031 (:3020 stale)
+  if (!url) { url = FALLBACK_ADAPTER_URL; src = `constant ${FALLBACK_ADAPTER_URL} (:3020 stale since 2026-06-27)`; }
+  _resolvedDefaultAdapterUrl = url;
+  console.log(`[llm-fallback] default adapter URL resolved: ${url} (source: ${src})`);
+  return url;
+}
+
 function extractText(openaiResp) {
   return openaiResp?.choices?.[0]?.message?.content ?? '';
 }
@@ -39,7 +62,7 @@ function extractText(openaiResp) {
 async function tier1_agent_adapter(system, user, adapterUrl) {
   // KANet adapter contract: POST /reply { peer, mindUser, mindSystem, mindTask } → { reply }
   // Agent-specific adapter URL passed in (per scan target Agent).
-  const url = adapterUrl || DEFAULT_ADAPTER_URL;
+  const url = adapterUrl || await resolveDefaultAdapterUrl();
   const r = await postJson(`${url}/reply`, {
     peer: 'bettor-scanner',
     mindUser: user,
@@ -116,7 +139,7 @@ async function tier3_llama(system, user) {
  * @param {object} input
  * @param {string} input.system
  * @param {string} input.user
- * @param {string} [input.adapterUrl] - Agent-specific adapter URL (defaults to Bettor GLM4.7 if omitted)
+ * @param {string} [input.adapterUrl] - Agent-specific adapter URL (defaults to resolved adapter_nodes->env->:3031 if omitted)
  */
 export async function callLLMWithFallback({ system = '', user, adapterUrl }) {
   // Tier 1: Agent's own adapter (whatever LLM that Agent is configured with)
