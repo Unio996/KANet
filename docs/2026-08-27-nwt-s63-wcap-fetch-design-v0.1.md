@@ -1,6 +1,7 @@
 # NWT — `w_cap_window` 重建器取数设计 v0.1（纯设计·不落码·@7b1e18cc）
 
 > 作者 NWT · 2026-08-27 · 派工 Bettor（等 Codex 283 时）· 目标 = 给 (23) v0.15 支配定理的 `window(SP)` 精确重建定**取数管线**（RPC only，输入清单见 `2026-08-27-nwt-wcap-reconstructor-input-feasibility.md`）。坐标 `git show 7b1e18cc:<path>`；不确定处标 **须实测**。**Codex 不授权 build/deploy——本稿纯设计层。**
+> **FIX-UP（2026-08-27 · J2 消费方 GREEN-WITH-NOTES · 同文件不 amend 3f7ef2c5）**：② 补"证书乙依赖取数层完整性不变量（`antipast(R)∩past(sink)` 须全取；不完整 ⇒ 包含关系破 ⇒ `INEXACT` 而非更松仍安全）"；须实测补 sink-anticone tips mergeset 闭包。J2 消费方 staging 13/13、接口对齐（`certificate` 加 `inexact_count`，`t0/t1/provenance` 为驱动层字段）。
 
 ## ① `getBlocks` 前向分页语义
 `getBlocks(lowHash, includeBlocks=true, includeTransactions=false)`（`rpc/service/src/service.rs:426-477`）:
@@ -15,6 +16,7 @@
 证书乙（(23) v0.15）：`window(SP)` 精确 ⟺ 重建堆**满 661** ∧ **堆内最小蓝功 > blue_work(R)** ∧ **R 后 mergeset 成员零缺失**。
 - **为什么 R 要够老**：`26,440` 蓝分只是**准入地板**（`lowest_daa_blue_score`）；窗成员按**蓝功**留最高 661，可比"bs(SP)−26,440"更老（继承不重过滤，(23) v0.14）。`S = {已收 b: bs(b) ≥ bs_top−36,000}`（merge depth）⇒ 最老 SP 在 `bs_top−36,000`，其窗成员可到 `bs_top−36,000−26,440 = bs_top−62,440` 蓝分。
 - 🔴 **在线判定（用 F9，不猜）**：`blue_work` 沿祖先**单调不减**（`ghostdag/protocol.rs:99-104/:161`）⇒ 比 R 更深的**未取块**其 `blue_work ≤ blue_work(R)`。故 **R 够老 ⟺ `blue_work(R) < min_{SP∈S} heapMin(window(SP))`**（heapMin = 该窗第 661 高蓝功）：此时任何未取块蓝功 ≤ blue_work(R) < heapMin ⇒ 进不了任何 window(SP) ⇒ 停。**判据是"堆最小蓝功 > R 蓝功"，不是某个蓝分/DAA 深度数。**
+- 🔴 **fix-up（J2 消费方）· 证书乙依赖【取数层完整性不变量】**：上面"未取块 ∈ past(R) ⇒ 蓝功 ≤ bw(R)"**只有在 `getBlocks` 把 `antipast(R) ∩ past(sink)` 【全取】时才成立**——那时未取块恰 = `past(R)`（皆 ≤ bw(R)，F9）。**若取数不完整**（分页中断 / 剪裁截断 / IBD 期）⇒ anticone(R) 里有未取块**不在 past(R)**、其蓝功**不受 bw(R) 约束** ⇒ 可能落入某 window(SP) 而漏计 ⇒ **包含关系破 ⇒ 证书无效 ⇒ `INEXACT`**（**不是"界更松仍安全"**——是 fail-closed）。⇒ 重建器须显式核"antipast(R)∩past(sink) 全取"（每块 mergeset 引用全在已取集，否则 `missing>0`），不满足即 `INEXACT`、回 (a-total)、不归 B_adv。
 - **三可读量的保守起锚（仅**起点猜测**，证书才是判据）**：header 全给 `blueScore/daaScore/timestamp`。
   - blueScore：起锚 `bs_top − 62,440`（62,440 = 36,000+26,440，见上）——**保守起点**，不足则按在线判定继续深挖。
   - daaScore / timestamp：仅作**旁证/翻页进度**，不作深度判据（daa≠blue，(23) 教训；时间受戳操纵）。
@@ -51,3 +53,4 @@
 - reorg 对 `S`/`bs_top` 边界抖动幅度（接 (23) `M_reorg`）；
 - IBD 期 `WINDOW_INEXACT` 触发率；
 - 起锚 62,440 是否常一次达标（在线判定加深次数分布）。
+- **sink-anticone tips**（`service.rs:459 filtered_sink_anticone`，high==sink 时附加）：其 mergeset 是否引用**未返回**块 ⇒ `missing>0 ⇒ INEXACT`（J2 fix-up 列此为须实测：anticone tips 的 mergeset 闭包是否总在返回集内）。
