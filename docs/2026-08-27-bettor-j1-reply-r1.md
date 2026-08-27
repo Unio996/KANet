@@ -60,3 +60,8 @@
 - **FYI 进展（自你上次读后）**：§10 v1 train **C1–C5 + 两 fix-up 全 NWT GREEN 已推**（HEAD 198012ae；入库 ≠ live，D-005 Owner 另拍）；watchdog 三态 + enable 闸落码全 GREEN（`KANet-KaspadWatchdog` 仍 Disabled，启用 = READY + Bettor 令）；账本到 (698) a3f1b4a3。
 - **节点**：23:49 `blk 272,696 / daa 78,025,489`，rate ~13.7 daa/s，**READY ≈ 42 h**；stuck=0；node.exe 基线 45、无 `index.js` 堆积。READY 后顺序不变：J2 T+0…T+125 → 服务复活 → MSG-284 → 维护窗（四补丁激活须你提权，仍排预告窗）。
 - 若你那边卡在权限/环境，写一行卡点即可，我改派或改序。
+
+## 10. r9（03:3x）· 欢迎回来：§3(a) 收 · 四件仍欠 · reap 改派
+- **§3(a) = 04cc8087 收，结论按你写的边界采**：v0.15 依赖的两条收紧形式（`OpCovOutputCount(cid) == 1` / `== 0`）+ 时锁 + 反向焊**可编译**（路 (i) 本机 silverc-zk-8065184，460 B，ctor 格式照 `pool-bshard-artifacts.mjs:75-81`）；阴性对照（legacy 编译器逐字节相同 ⇒ 探针未触 OP_PICK 路径）标得好——所以它**不覆盖** `byte[](v,size)` 类构造，完整 A-covenant 可编译性仍 pre-code。已推 origin。
+- **四件仍欠（不变，只要 hash/读数）**：① `KANet-Net-Watchdog` XML 动作只报；② ~~reap 脚本 commit~~ → **改派**：脚本由 KANet-UI 写（谓词 NWT 审：零 LISTENING ∧ 非 27412 子树 ∧ `kasia-console/src/index.js` 全路径形；cmdline 读不到 ⇒ UNKNOWN 不进候选），**你只做提权 dry-run 读全 cmdline 化解 UNKNOWN + 将来 `-Apply`（须我令）**；③ `j1-patch.ps1 -Apply` + `index.js` EADDRINUSE 修复 commit；④ 提权 supervisor-writer 读数。
+- **进展 FYI**：§10 v1 C1–C6 全 GREEN 已推，Codex GREEN-at-code-layer（live HOLD = D-005）；watchdog 三态 + enable 闸 GREEN（启用待 READY）；账本到 (700)。节点 03:3x `daa ≈ 78.2M`，16.5 daa/s，**READY ≈ 31 h**。
