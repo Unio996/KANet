@@ -3,7 +3,8 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { wCapWindow, rebuildWindows, paramsFrom, calcWork, childWindow, makeHeap, enumerateBounded, N_SMALL, consensusMergesetOrder } from './wcap-window.mjs';
+import { wCapWindow, rebuildWindows, paramsFrom, calcWork, childWindow, makeHeap, enumerateBounded, N_SMALL, consensusMergesetOrder, setHashPolicy, hashKey, fromRpcBlock } from './wcap-window.mjs';
+setHashPolicy({ allowSynthetic: true });   // 测试/合成向量: 短名 hash 放行(生产默认严格 64 位 hex)
 import { targetFromBits, compactTargetBits } from './kmax-cost.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -63,6 +64,13 @@ for (const v of vectors.cases) {
       const bugFwd = pick(others, 'no-tiebreak'), bugRev = pick(others.slice().reverse(), 'no-tiebreak');
       const heapFwd = childWindow(makeHeap(PT.windowSize), sp, others, v.bsC, PT).heap.items.map(x => x.hash).sort(), heapRev = childWindow(makeHeap(PT.windowSize), sp, others.slice().reverse(), v.bsC, PT).heap.items.map(x => x.hash).sort();
       results[v.id] = { oracle_expected_sampled: v.expectedSampled, mirror_sampled_fwd: fwd, mirror_sampled_rev: rev, mirror_matches_oracle: JSON.stringify(fwd) === JSON.stringify(v.expectedSampled) && JSON.stringify(rev) === JSON.stringify(v.expectedSampled), heap_fwd_eq_rev: JSON.stringify(heapFwd) === JSON.stringify(heapRev), heap_members: heapFwd, no_tiebreak_fwd: bugFwd, no_tiebreak_rev: bugRev, no_tiebreak_order_dependent: JSON.stringify(bugFwd) !== JSON.stringify(bugRev), no_tiebreak_differs_from_oracle: JSON.stringify(bugFwd) !== JSON.stringify(v.expectedSampled) || JSON.stringify(bugRev) !== JSON.stringify(v.expectedSampled) };
+    } else if (v.type === 'hash-policy') {   // v0.9.2: 生产严格模式下非规范 hash ⇒ throw; 大写 64 hex ⇒ 归一等价
+      setHashPolicy({ allowSynthetic: false }); const tryKey = (h) => { try { return { ok: true, key: hashKey(h) }; } catch (e) { return { ok: false, err: String(e.message).slice(0, 19) }; } };
+      const r = { canonical: tryKey(v.canonical), uppercase: tryKey(v.canonical.toUpperCase()), prefixed0x: tryKey('0x' + v.canonical), short63: tryKey(v.canonical.slice(0, 63)), nonhex: tryKey('zz' + v.canonical.slice(2)), synthetic_strict: tryKey('b44') };
+      let cmpThrows = false; try { consensusMergesetOrder([{ hash: v.canonical.toUpperCase(), blueWork: 1n }, { hash: v.canonical, blueWork: 1n }]); } catch { cmpThrows = true; }
+      let rpcThrows = false; try { fromRpcBlock({ header: { hash: '0x' + v.canonical, daaScore: '1', blueWork: '0x10', timestamp: '0', bits: 1, parents: [{ parentHashes: [] }] }, verboseData: { blueScore: '1' } }); } catch { rpcThrows = true; }
+      results[v.id] = { canonical_ok: r.canonical.ok, uppercase_throws: !r.uppercase.ok && r.uppercase.err, prefixed0x_throws: !r.prefixed0x.ok, short63_throws: !r.short63.ok, nonhex_throws: !r.nonhex.ok, synthetic_strict_throws: !r.synthetic_strict.ok, comparator_throws_on_uppercase: cmpThrows, fromRpcBlock_throws_on_0x: rpcThrows };
+      setHashPolicy({ allowSynthetic: true });
     } else if (v.type === 'nsmall') {
       const blocks = genChain(v.gen, P); const { windows } = rebuildWindows(blocks, P); const sp = blocks.find(b => b.hash === 'b30');
       let t1 = null, t2 = null; try { enumerateBounded(sp, blocks, windows, P, { maxSubset: v.maxSubset }); } catch (e) { t1 = String(e.message).slice(0, 24); } try { wCapWindow(blocks, params, { verifyCandidates: true, maxSubset: N_SMALL + 1 }); } catch (e) { t2 = String(e.message).slice(0, 22); }

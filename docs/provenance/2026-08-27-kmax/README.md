@@ -1,4 +1,6 @@
-# provenance · `k_max` 绝对成本表工具（(21) v0.9.1 入库 durable 版）
+# provenance · `k_max` 绝对成本表工具（(21) v0.9.2 入库 durable 版）
+
+> **v0.9.2（NWT 预置① + Bettor：v0.9.1 的 `hashKey` 只 `toLowerCase` 不够——长度/非 hex/大写/`0x` 混入会**静默错序**）**：比较键改**严格形** `/^[0-9a-f]{64}$/`，**不归一**：大写 / `0x` 前缀 / 63 位 / 非 hex ⇒ `throw BAD_HASH_FORM`（fail-closed 非静默）；`fromRpcBlock` 入口对 `hash / parents / selectedParentHash / mergeSet*` 同验；合成向量的短名（如 `b44`）只在测试显式 `setHashPolicy({ allowSynthetic: true })` 下放行（生产默认严格）。**W12 负向量**：规范 64 小写 hex ok；大写 / `0x` / 63 位 / 非 hex / 合成短名（严格模式）⇒ throw；比较器遇大写 throw；`fromRpcBlock` 遇 `0x` throw。既有 14 向量逐位不变；15/15。
 
 > **v0.9.1（Codex 未同步直审 `1eff6fe1`：IMPLEMENTATION HOLD 的唯一 MUST-FIX——`childWindow()` 预采样层 mergeset 序在等 `blue_work` 时回落输入顺序）**：共识 `sampled_mergeset_iterator` 消费 `descending_mergeset_without_selected_parent`（`consensus/src/model/stores/ghostdag.rs:139-160`：blues 逆序 ⊕ reds 逆序按 `SortableBlock` 反向 `merge_join_by`）= **降序 `SortableBlock`**（`blue_work.cmp().then_with(hash.cmp())`，`ghostdag/ordering.rs:38-42`），`Hash = [u8;32]` 派生 `Ord`（`crypto/hashes/src/lib.rs:38-46`）= **字节字典序** ⇒ 等 blue_work 兄弟跨采样 index 边界时 hash 打破决定谁被采 ⇒ 影响堆/`bitsCalc`/`T_lb`/`w_cap`。修：`consensusMergesetOrder()` = 降序 `SortableBlock` 含 hash 打破（JS 用**等长小写 hex 码元序** ≡ 字节字典序，非 locale；输入 lowercase 归一），堆淘汰层与预采样层**各自独立**用同一比较器。**W11 独立 oracle 向量**（不经生成器/镜像：固定 64 位 hex 常量 A<B 等 blue_work 0x10、C<D 等 0x0f，`sampleRate 2, daa(SP)=1` ⇒ 采降序第 2/第 4 ⇒ 共识序 [B,A,D,C] ⇒ 手算采 [A,C]）：镜像正/反输入皆 [A,C] = oracle、堆成员同；**去掉 hash 打破 ⇒ 正序采 [B,D]、反序采 [A,C]（依赖输入顺序）且 ≠ oracle** ⇒ 三条都机械验证。既有 13 向量逐位不变；14/14。
 
@@ -10,10 +12,10 @@
 |---|---|
 | `wcap-window.mjs` | `w_cap_window` 层 1 重建器（纯函数 `fromRpcBlock / topoOrder / childWindow / calculateDifficultyBits / rebuildWindows / wChildUb / enumerateBounded(D) / greedyExtremeSmoke(E) / wCapWindow`）|
 | `wcap-window.test.mjs` | 离线确定性测试（合成 DAG 生成器在测试内；读 `vectors-wcap.json`，比对 `expected-output-wcap.json`，任一不等退出码 1）|
-| `vectors-wcap.json` / `expected-output-wcap.json` | 14 条向量（v0.9.1 加 W11 独立 oracle 平局向量）/ 期望 |
+| `vectors-wcap.json` / `expected-output-wcap.json` | 15 条向量（v0.9.1 W11 独立 oracle 平局；v0.9.2 W12 hash 严格形负向量）/ 期望 |
 
 ```bash
-node docs/provenance/2026-08-27-kmax/wcap-window.test.mjs      # 期望 14/14 PASS ((D)(E) 只在合成小 DAG 上跑; W11 = 共识序独立 oracle)
+node docs/provenance/2026-08-27-kmax/wcap-window.test.mjs      # 期望 15/15 PASS ((D)(E) 只在合成小 DAG 上跑; W11 = 共识序独立 oracle; W12 = hash 严格形)
 ```
 
 > **v0.8（Codex 280 `d7fefb58` D-STAT-1/2 设计层 CLOSED ⇒ 落码，只加不改；`H_total_lb` 三估计器与 `main` 未动）**：`kmax-cost.mjs` 新增纯函数块——**`lambdaUb(n, α=1e−3)`** = Garwood `½χ²_{1−α}(2n+2)` 用泊松 CDF 对数域二分，**返回上括号**（`P(X≤n|hi) ≤ α` ⇒ impl ≥ 精确，零静默欠射，Codex 验收项）；**`lambdaUbChernoff`** = `(√(L/2)+√(L/2+n))²` 可证上轨；`lambdaUbGaussRail` = `n+3.09√n` **只作夹逼下轨、绝不作闸值**（任何 n 都欠覆盖）；**`bracketCheck` / `selfCheck()`** = 精确对照（Codex 独立复算 6 值 n=0/10/30/100/1000/36000 ⇒ 6.907755/24.133971/51.083124/134.924319/1101.626944/36590.189486，容差 1e−5）+ 夹逼断言 `gauss ≤ impl ≤ Chernoff`（n=0..200 全扫）—— 任一不过 ⇒ `throw` ⇒ 非零退出（fail-closed），`hVisUb` 首次调用强制跑；**`nMin(δ)`** 精确整数反解（5%/3%/2% ⇒ 3974/10867/24259）；**`hVisUb({n, wCapWindow, t0Ms, t1Ms})`** = `λ_ub(n)·w_cap_window/(t1−t0)` 带硬闸 `W<3600 s ∨ n<4000 ∨ 无 w_cap ⇒ H_vis_ub=null`（reason 码 W_MIN/N_MIN/NO_W_CAP，回 (a-total)）；**`w_cap_window` 层 1 重建器等 Codex 281 再落，先参数注入，缺则 fail-closed（不许静默用观测 w_max）**。向量 +17（`D1-lambda-*` ×6 / `D1-selfcheck` / `D1-selfcheck-fault-twice` / `D2-nmin-*` ×3 / `D3-hvis-*` ×6）= 36/36。🔴 **fix-up（NWT 审 af2db5da ②）**：首版 `selfCheck` 失败路径先缓存再 throw ⇒ 第二次调用命中缓存不 throw ⇒ `try{hVisUb()}catch{}` 重试即绕过 = fail-closed 机制自身 fail-open（当时 impl 正确故不可达，仍修）。现：**失败永不缓存**（只缓存成功），`bracketCheck/selfCheck` 加测试专用 `implFn` 注入口（注入时不读不写缓存），向量 `D1-selfcheck-fault-twice`：注入 λ×0.9 欠界实现，**连调两次都 throw**，之后真实现仍 ok。`DSTAT_VERSION = dstat/1`；输出 JSON schema 不变（`kmax-cost/5`）。

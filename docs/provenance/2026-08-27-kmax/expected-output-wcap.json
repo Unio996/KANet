@@ -313,5 +313,15 @@
   ],
   "no_tiebreak_order_dependent": true,
   "no_tiebreak_differs_from_oracle": true
+ },
+ "W12-hash-policy-strict": {
+  "canonical_ok": true,
+  "uppercase_throws": "BAD_HASH_FORM: expe",
+  "prefixed0x_throws": true,
+  "short63_throws": true,
+  "nonhex_throws": true,
+  "synthetic_strict_throws": true,
+  "comparator_throws_on_uppercase": true,
+  "fromRpcBlock_throws_on_0x": true
  }
 }

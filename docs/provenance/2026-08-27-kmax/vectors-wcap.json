@@ -1,5 +1,5 @@
 {
-  "note": "(21) v0.9 · wcap-window 确定性向量。小窗参数 SMALL = {windowSize 5, sampleRate 2, minWindow 2, mergesetLimit 4 ⇒ evict_max 3, targetTimeMs 1000, mergeDepth 6}(生产默认 TN12 661/40/150/248/100ms/36000)。合成 DAG 由 test 内生成器按【同一规则】回填 bits(assignBits)。验收映射: (A) 重建+证书 / (B) bitsCalc==收块 bits / (C) 断言+自喂剔除+负向量 / (D) 有界穷举对抗模型 N_SMALL=12(非生产) / (E) 贪心 smoke(非验收)。BigInt 一律字符串。 v0.9.1 (Codex 1eff6fe1): 预采样层 mergeset 序 = 共识 descending SortableBlock(blue_work 然后 hash 字节序, Hash=[u8;32] 派生 Ord ≡ 小写等长 hex 码元序); W11 独立 oracle 平局向量: 固定 64 位 hex, 手算期望 —— 镜像正/反输入同结果 = oracle; 去掉 hash 打破 ⇒ 结果随输入顺序变且 ≠ oracle。",
+  "note": "(21) v0.9 · wcap-window 确定性向量。小窗参数 SMALL = {windowSize 5, sampleRate 2, minWindow 2, mergesetLimit 4 ⇒ evict_max 3, targetTimeMs 1000, mergeDepth 6}(生产默认 TN12 661/40/150/248/100ms/36000)。合成 DAG 由 test 内生成器按【同一规则】回填 bits(assignBits)。验收映射: (A) 重建+证书 / (B) bitsCalc==收块 bits / (C) 断言+自喂剔除+负向量 / (D) 有界穷举对抗模型 N_SMALL=12(非生产) / (E) 贪心 smoke(非验收)。BigInt 一律字符串。 v0.9.1 (Codex 1eff6fe1): 预采样层 mergeset 序 = 共识 descending SortableBlock(blue_work 然后 hash 字节序, Hash=[u8;32] 派生 Ord ≡ 小写等长 hex 码元序); W11 独立 oracle 平局向量: 固定 64 位 hex, 手算期望 —— 镜像正/反输入同结果 = oracle; 去掉 hash 打破 ⇒ 结果随输入顺序变且 ≠ oracle。 v0.9.2 (NWT 预置① + Bettor): hashKey 严格形 /^[0-9a-f]{64}$/ 不归一, 大写/0x/短/非 hex ⇒ throw BAD_HASH_FORM(fail-closed 不静默错序); fromRpcBlock 入口同验; 合成短名只在测试 setHashPolicy({allowSynthetic:true}) 下放行; W12 负向量。",
   "small": {
     "windowSize": 5,
     "sampleRate": 2,
@@ -261,6 +261,12 @@
         "00aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "0100000000000000000000000000000000000000000000000000000000000000"
       ]
+    },
+    {
+      "id": "W12-hash-policy-strict",
+      "type": "hash-policy",
+      "desc": "v0.9.2 负向量: 生产严格形——规范 64 小写 hex ok; 大写 / 0x 前缀 / 63 位 / 非 hex / 合成短名 ⇒ throw BAD_HASH_FORM; 比较器遇大写 throw; fromRpcBlock 遇 0x throw",
+      "canonical": "00aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     }
   ]
 }

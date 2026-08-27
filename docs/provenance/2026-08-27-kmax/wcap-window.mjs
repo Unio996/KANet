@@ -1,4 +1,4 @@
-// (21) v0.9.1 · w_cap_window 层1 重建器(durable; v0.9.1 = 预采样层 mergeset 序对齐共识 SortableBlock 含 hash 打破) —— (23) v0.15 2f632c91 §3.5(b) 支配定理 L1–L5 + 精确证书 + 验收 (A)–(E)。只读、纯函数; 镜像 7b1e18cc:
+// (21) v0.9.2 · w_cap_window 层1 重建器(durable; v0.9.1 = 预采样层 mergeset 序对齐共识 SortableBlock 含 hash 打破; v0.9.2 = 比较键严格 64 位 hex, 非规范 throw) —— (23) v0.15 2f632c91 §3.5(b) 支配定理 L1–L5 + 精确证书 + 验收 (A)–(E)。只读、纯函数; 镜像 7b1e18cc:
 //   window(B) = window(SP) ∪ sampled({SP} ∪ mergeset(B))      consensus/src/processes/window.rs:138-235 build_block_window / :265-282 try_init_from_cache(继承样本【不再重过阈值】)
 //   采样: once(SP) 再按蓝功降序遍历 mergeset(去 SP); blue_score < lowest_daa_blue_score(B) ⇒ NonDaa 不计 index; 否则 index++, (daa(SP)+index) % sample_rate == 0 ⇒ 样本   window.rs:299-322
 //   lowest_daa_blue_score(B) = max(bs(B), full) − full【蓝分域, 原生】, full = window_size × sample_rate = 26,440    difficulty.rs:185-197
@@ -18,13 +18,17 @@ export const calcWork = (bits) => workPerBlock(targetFromBits(bits));
 export function fromRpcBlock(b) {   // wRPC(kaspa-wasm) camelCase → 扁平; header.parents 取 level 0; blueWork hex → BigInt
   const h = b.header, v = b.verboseData || {};
   const parents = (h.parents?.[0]?.parentHashes) || (h.parentsByLevel?.[0]) || [];
-  return { hash: h.hash, daaScore: Number(h.daaScore), blueScore: Number(v.blueScore ?? h.blueScore), blueWork: bw({ blueWork: h.blueWork }), timestamp: Number(h.timestamp), bits: Number(h.bits), parents, selectedParentHash: v.selectedParentHash ?? null, mergeSetBluesHashes: v.mergeSetBluesHashes || [], mergeSetRedsHashes: v.mergeSetRedsHashes || [] };
+  const canon = (x) => x == null ? x : hashKey(x);   // 入口同验+归一(小写); 非规范 ⇒ throw
+  return { hash: canon(h.hash), daaScore: Number(h.daaScore), blueScore: Number(v.blueScore ?? h.blueScore), blueWork: bw({ blueWork: h.blueWork }), timestamp: Number(h.timestamp), bits: Number(h.bits), parents: parents.map(canon), selectedParentHash: canon(v.selectedParentHash ?? null), mergeSetBluesHashes: (v.mergeSetBluesHashes || []).map(canon), mergeSetRedsHashes: (v.mergeSetRedsHashes || []).map(canon) };
 }
 
 // 序 = SortableBlock Ord (ghostdag/ordering.rs:38-42): blue_work.cmp().then_with(hash.cmp()); Hash = [u8;32] 派生 Ord (crypto/hashes/src/lib.rs:38-46) = 字节字典序
 //   ⇒ JS 用【等长小写 hex】字符串的码元比较(非 locale): 小写 hex 字典序 ≡ 字节字典序(每字节两位 hex, '0'-'9' < 'a'-'f' 与数值序一致); 输入统一 lowercase; 长度不等(合成向量短名)也按码元序, 与共识无交集只求确定性
 //   v0.9.1 (Codex 1eff6fe1 MUST-FIX): 同一比较器同时用于【堆淘汰层】与【childWindow 预采样层】——两层各自独立对齐共识, 等 blue_work 不得回落到输入顺序
-const hashKey = (h) => String(h).toLowerCase();
+// v0.9.2 (NWT 预置①): 比较键须是【规范 64 位 hex】—— 长度/非 hex/大写混入若只 toLowerCase 会静默错序 ⇒ 生产严格 throw; 合成向量的短名(如 'b44')只在测试显式 setHashPolicy({allowSynthetic:true}) 下放行
+const HASH_RE = /^[0-9a-f]{64}$/; let HASH_POLICY = { allowSynthetic: false };
+export const setHashPolicy = (p) => { HASH_POLICY = { ...HASH_POLICY, ...p }; };
+export const hashKey = (h) => { const s = String(h); if (HASH_RE.test(s)) return s; if (HASH_POLICY.allowSynthetic) return s; throw new Error('BAD_HASH_FORM: expected exactly 64 lowercase hex chars (no 0x, no uppercase), got ' + JSON.stringify(s).slice(0, 80)); };   // 严格形不归一: 大写/0x/短 ⇒ throw(fail-closed 非静默)
 const cmpSortable = (a, b) => { const x = bw(a), y = bw(b); if (x !== y) return x < y ? -1 : 1; const ha = hashKey(a.hash), hb = hashKey(b.hash); return ha < hb ? -1 : ha > hb ? 1 : 0; };
 export const consensusMergesetOrder = (blocks) => blocks.slice().sort((x, y) => cmpSortable(y, x));   // descending SortableBlock(= ghostdag.rs:139-147 descending_mergeset_without_selected_parent 的序)
 class Heap { constructor(bound, items = []) { this.bound = bound; this.items = items.slice(); } size() { return this.items.length; } full() { return this.items.length === this.bound; } minBw() { return this.items.length ? bw(this.items[0]) : null; }
