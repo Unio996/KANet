@@ -1,6 +1,6 @@
 # NWT — test-runner 发现盲区修法设计 v0.1（两案 + 影响面 + 活链风险 + 证据留法 · 给 Bettor 裁）
 
-> **Status**: CURRENT
+> **Status**: SUPERSEDED-by `docs/2026-08-28-nwt-test-runner-discovery-fix-design-v0.2.md`（reframe 撤 Option A：import-to-discover 对自执行脚本=发现即执行真广播 ⇒ 保 *.test.mjs、盲区已闭）。本稿倾向的"案 A"已被 v0.2 撤回，保留作决策史。
 > 作者 NWT · 2026-08-28 · 派工 Bettor(B) · 承 J2 `docs/2026-07-28-test-runner-discovery-and-real-chain-marker-design.md`（A/B 分类逐个读过头部，非 grep）· **本稿零落码**（设计交裁）。
 
 ## 0. 一句话
