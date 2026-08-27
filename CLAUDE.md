@@ -106,7 +106,7 @@
 
 🔴 **而这一段以前写的是「framework 一键回归…守住，永不退化」——那两句都不成立，2026-07-28 实测更正**：
 - **没有自动回归**：无 CI、无 cron。`--domain`/`--all` 只有**人手敲的时候**才跑。加了 regression case ≠ 从此有人守着。
-- 🔴 **而"手工跑 --domain 就行"也不够**：部分既有用例**连 `--domain` 都扫不到**——runner 只收 `*.test.mjs`，而 `cases/m0c1-gate/` 下 10 个文件无一匹配（含 5 个名字里带 `regression` 的）。见 `docs/2026-07-28-test-runner-discovery-and-real-chain-marker-design.md`。
+- 🔵 **runner 只收 `*.test.mjs` 且有 `export default` 的 case-object（`scripts/test.mjs:147-148` 无 default export ⇒ SKIP）——这是【安全边界】不是缺陷**（措辞按 reframe 更正 2026-08-28）：`cases/m0c1-gate/` 下 10 个 `.mjs` 里 9 个是 `export default`=0 的 **standalone gate 脚本**（顶层自执行、header 写 `node <file>` 跑），"扫不到"对它们**正确**（它们不是 runner case）。🔴 **不可 glob 放宽去"发现"它们**：runner 靠 `import()` 认 case，而 import 自执行脚本 = **发现即执行**（g5 真链 smoke 那次 = 真广播真花钱）。唯一真错位是 1 个 case-object（`fixture_step_ok_false_no_expect` 靠 not-.test.mjs 排除）——已 `_`前缀修（`842c8777`）。真链用例的 `skip_in_batch`/STANDALONE marker 由 lint `R-REALCHAIN-SKIP-BATCH`（`a53b8817`）守。见 `docs/2026-07-28-test-runner-discovery-and-real-chain-marker-design.md` + v0.2。
 - **证据留在** `logs/test-runs/<case>-latest.json`（🟡 覆盖式：只有最后一次，没有历史）。
 - `scripts/check-tests-fresh.mjs` 在每次 commit 时提示这些证据有多旧——它只回答**有没有人在跑**，不回答**跑的结果对不对**。
 
