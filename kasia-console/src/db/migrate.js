@@ -2433,10 +2433,14 @@ export function runMigrations() {
     if (!has_v83_trigger) {
       // (6) Backfill DELETE placeholder chain_events FIRST — 真 trigger ship 前 clean up legacy data
       // 防 trigger fire 真 future INSERT block placeholder, 但**真** historical 1129 placeholder 仍 polluting.
+      // 🔴 GLOB 修正(2026-08-28 J2 · NWT GO · hygiene, 非钱路): 原写 '*[!a-fA-F0-9]*' —— SQLite GLOB 无 '!' 否定, '[!...]' 是【字面集】{'!',a-f,A-F,0-9}
+      //    ⇒ 实效 = "txid 含其中任一字符就删": 合法 64-hex 也命中(反向), 而 'g'×64 / '-'×64 反而漏(better-sqlite3 实测)。正形 = 下面 :2452 触发器同款 '[^...]'。
+      //    历史影响(NWT 旁证决定性): v83 4/29 在 live 跑时 broker_% 只有 1129 个 placeholder(真审计事件 broker_fee_landed 6-28 d1f68dd1 才引入) ⇒ 当时恰好只删了预期目标,
+      //    无真审计行丢失(机制错、结果对); 本块受 :2433 if(!has_v83_trigger) 幂等保护, 已过 v83 的 live 库永不再跑 ⇒ 本修只对 fresh-DB v83 replay 有意义。回归: migrate-v83-glob.test.mjs。
       const delRes = sqlite.prepare(`
         DELETE FROM chain_events
         WHERE event_type LIKE 'broker_%'
-          AND (length(txid) != 64 OR txid GLOB '*[!a-fA-F0-9]*')
+          AND (length(txid) != 64 OR txid GLOB '*[^a-fA-F0-9]*')
       `).run();
       console.log(`[migrate] v83: backfill DELETE ${delRes.changes} placeholder chain_events broker_* rows.`);
 
