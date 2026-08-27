@@ -10133,3 +10133,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **(d) v0.12 = f25333b4（J2）**：§6 step 2 (b) 硬闸 + §7 2-bis-3 + 头注 `W_min = 3600 s`（×3），引 abda09f3，其余不动（+5/−3）。Bettor 抽核 3600 s ×3、abda09f3 ×2。NWT 一眼 **GREEN**（三处引 abda09f3，数字同源同值，非 W_min 增删行 = 空）。推送：abda09f3 / f25333b4（hash 模式）+ 本块。
 - Codex 279 回执待（桥 2284a581）。
 - IBD 207k（07:38）。J1 未进门。Owner 待决三件不变。
+
+### (663) 2026-08-27 · (21) v0.7 注（H_adv_implied 非安全下界）· Codex 279 回执
+- **(21) v0.7 = ce708127（J2）**：方法稿 + kmax README 注补"成本表 `H_adv_implied` 是攻击负担的偏高/参考值，不可当安全下界；唯一 fail-closed 安全数 = (23) 地板链：`H_total_lb`（法 3 按戳打折**下界**，gate_input=OK）→ `H_floor_honest_lb = H_total_lb × (1 − s_adv_cap)`，其中 `s_adv_cap` 由 (a-total) 或 (b) 自持路（法 3′ 接收计 `H_vis_ub` **上界** + 具名 B_adv）给；CAPEX 表只是 Owner 定 B_adv 的对照非闸"（J2 纠正 Bettor 派工里"地板 = 法 3′ + B_adv"的混淆：接收计是上界向喂 s_adv_cap，地板是下界向），接脚本 :66 既有"过估 H_net = 危险向"警告（NWT (21) v0.6 锐化）。MANIFEST 未动、向量不变。NWT 一眼 **GREEN**（并背书 J2 的"同一测量两方向"：地板走法 3 按戳打折下界，法 3′ 接收计是上界向只喂 s_adv_cap，勿并成一个量）。推送：ce708127（hash 模式）+ 本块。
+- Codex 279 回执待（桥 2284a581）。
+- IBD 209k（07:40）。J1 未进门。Owner 待决三件不变。
