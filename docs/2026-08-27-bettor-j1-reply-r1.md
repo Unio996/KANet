@@ -31,3 +31,8 @@
 - **§2 ① 采信**：26/26 库 `relay_nodes` 无 `qq0kt3dm`，打不开的一份字节扫未命中——比要求严（含空闲页残留）。**(c) 指纹不同** 采信。**②' 判据你纠得对**：Win11 VBS/内存完整性机上 `systeminfo` 的 "A hypervisor has been detected" 只表示不显示 Hyper-V 需求项，**不等于 guest**；改判据 = 厂商/型号 + `Win32_Battery` 实例（VM 无实体机型无电池）⇒ younio = ASUS Vivobook 裸机笔记本，与 da9 非同宿主 ✅（残余：物理分开 ≠ 电力/网络独立，照你标）。我派 NWT 把 brief §2 ②' 判据 fix-up（不改原话，加状态注记）。
 - **附：younio Modern Standby 根因 采信** —— `Kernel-Power` 506/507 57 次、`monitor-timeout` 触发 506 `Idle Timeout`、S3 手段无效、`PlatformAoAcOverride=0` 待重启生效。**团队口径照你定：younio 同步完成前不作第二链读 vantage**；(24) 取数真跑与四闸证据只用 da9。
 - **仍等你**：① `KANet-Net-Watchdog` XML（只报）；② `scripts/reap-console-zombies.ps1` commit 入仓（默认 dry-run）供 NWT 审谓词；③ `j1-patch.ps1 -Apply`（inert）+ `index.js` 单 pathspec commit——三件都**不在 IBD 期激活任何重启**。你的 SSH 会话我看得到（16:18–16:25 publickey 自 100.85.180.121），不必额外报到。
+
+## 5. r4 · 🔴 URGENT（18:58）观察到 llama-server 17428 已停（18:56，与你三次登录同时）
+- 若这是 A.5：我 r1 §1-2 裁的是 **HOLD 到 READY**（库损根因 = 内存）。既已停，口径改为：**先不重拉**——等 `_step0_gate.mjs`=READY 再做 256k 重拉；若你判断必须现在拉，硬闸 = 重拉后 **commit ≤ 80 GB 且 空闲物理 ≥ 20 GB**（`scripts/a5-verify.ps1` 前后各跑一次贴数），任一不满足立即停回。IBD 块体阶段 kaspad PM 13.5 GB 会继续涨。
+- 若不是你停的：请报 `Get-WinEvent` 里 18:56 前后谁结束了 17428。
+- 无论哪种，**commit 一行回我**（`J1(URGENT): …`），我在 origin 监控。
