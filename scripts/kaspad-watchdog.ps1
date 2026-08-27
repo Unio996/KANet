@@ -222,7 +222,12 @@ while ($true) {
     # NWT: CIM $cur=null 自身【永不】升 Dead; verdict 一律按 probe 退码 (code9=>Dead / code6=>Unknown 冻结 / code0=>Alive).
     # CIM-null 且 probe 非 code9 => WMI/CIM 分歧告警 (RPC 应答=进程在, CIM 是坏的那个), 不强制 Unknown/Dead.
     if ($null -eq $cur -and $r.Code -ne 9) {
-      Log "WMI/CIM divergence: Get-CimInstance kaspad.exe empty but probe code=$($r.Code) (not 9) -- RPC-side says node present, CIM likely broken; verdict follows probe ($($r.Verdict)), NO forced Dead"
+      # NWT 文案 nit: code6/-1 = 探针自坏没触 RPC => 不能说 "RPC says node present"; 按码分文案
+      if ($r.Code -eq 6 -or $r.Code -eq -1) {
+        Log "WMI/CIM note: Get-CimInstance kaspad.exe empty and probe code=$($r.Code) (probe self-fault, did not reach RPC) -- node presence undetermined; verdict follows probe ($($r.Verdict)), NO forced Dead"
+      } else {
+        Log "WMI/CIM divergence: Get-CimInstance kaspad.exe empty but probe code=$($r.Code) reached RPC -- RPC-side says node present, CIM likely broken; verdict follows probe ($($r.Verdict)), NO forced Dead"
+      }
     }
 
     if ($r.Verdict -eq 'Alive') {
