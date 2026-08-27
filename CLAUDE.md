@@ -134,7 +134,7 @@
 - 确认这张表的用途和当前状态
 - 确认写入方和读取方
 - 确认是否是已删除表（account_relations v46 已删、interaction_records v47 已删）
-- migrate.js 版本号必须接当前最新版本后面（当前最新：v52）
+- migrate.js 版本号必须接当前最新版本后面（🔴 本文的数字会陈，**以 `kasia-console/src/db/migrate.js` 末尾块为准**；自查：`grep -n "// ── v" kasia-console/src/db/migrate.js | tail -1`；2026-08-27 实核 = v198）
 
 DATABASE.md 有改动时（新表/删表/加字段），必须同步更新文档后一起提交。
 
@@ -154,7 +154,7 @@ DATABASE.md 有改动时（新表/删表/加字段），必须同步更新文档
 - `relation_states` 是社交关系唯一真相源
 - `chain_events` 是链上事件唯一真相源
 - 数据库字典 `docs/DATABASE.md` 已建立
-- 当前 migrate.js 最新版本：v55
+- 当前 migrate.js 最新版本：**以 migrate.js 为准**（本行曾停在 v55 而实际已 v197+；2026-08-27 实核 v198；自查命令见上"数据库修改规范"）
 
 ### 4/12 基础修复
 - 提币改 sendCommandAsync — 错误正确回传前端（陷阱 #46）

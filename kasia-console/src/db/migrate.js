@@ -5729,5 +5729,38 @@ export function runMigrations() {
     `);
     console.log('[migrate] v197: u1_identity_challenge 建表完成 (A2 一次性挑战; challenge PK 走 CAS, used_at NULL=未消费, expires_at NOT NULL; 部分索引仅巡检不参与正确性; 今日无写入方).');
   }
+
+  // ── v198 (2026-08-27, J2): u1_relay_identity —— §10 跨节点 pubkey 身份表(register-only) ──────────
+  //
+  //   设计 docs/2026-08-19-s10-pubkey-identity-design.md @847bcf22 L1/L4/§4 · 切片计划 C2 (16ecff6d) · D-013 §1 "§10 GO"。
+  //   🔴 **主键 = canonical relayPubkeyXOnly, 不是 relay_id** (L4): "抢占"只对 pubkey 有意义, 抢 pubkey X 必须签得出 X 的私钥
+  //     ⇒ §1 的 first-squatter 攻击对 pubkey 主键天然失效 —— 这正是 pivot 的核心收益。
+  //   🔴 **没有 `local_relay_id` 列, 也没有任何按 relay_id / relay_nodes.ecdsa_pubkey_xonly 的索引** (NWT 裁, P5):
+  //     身份权威只能活在本表; relay_id→pubkey 的本地便利映射一律【活算】XOnlyPublicKey.fromAddress(relay_nodes.address)
+  //     (feedback.js:18 先例), 不落列 —— **列不存在 = 结构上无法被当权威读**(DATABASE.md 一句"非权威"只是约定不是机制)。
+  //     ⚠ 谁为了 UI/路由便利加回 relay_id 列, 就是把 §10 要否的形状(relay_id 变身份)重新接上; 见 ANTI-PATTERNS(C5)。
+  //   🔴 **CHECK 与 L1 同口径**: 恰 64 位【小写】hex —— kaspa-wasm 接受大写并归一(J1 (541) 实测承重①),
+  //     小写归一是唯一防线, 建键处(本表)与验证器(u1-s10-identity.mjs assertCanonicalPubkey)同一规则。
+  //     写法用 `NOT (col GLOB '*[^0-9a-f]*')`(全串 hex, 同 :2452 idiom), **不是** `GLOB '[0-9a-f]*'`(只约束首字符)
+  //     也**不是** `[!...]`(SQLite GLOB 把它当字面集, :2439 那处即此错形)。
+  //   · `operation` CHECK = 'register': v1 硬白名单(P9)在表层再钉一次; rotate/revoke 是 v2 的事(设计 §7 OPEN), 到时 bump 语义。
+  //   · `epoch` UNIQUE: 同一 challenge 只能承载一次 S10 注册(与 u1_identity_challenge 的一次性消费同义, 结构再兜一层)。
+  //   · `signature` 留证(审计), 不作查找键。
+  //   🔵 **对 live 的即时影响 = 零**: additive + IF NOT EXISTS + 今日无写入方(写入方 = C3 起 registerIdentity 事务内);
+  //     生产库真正跑迁移 = D-005 独立迁移 Owner 另拍; **代码入库 ≠ live**。验收 src/lib/u1-v198-migration-acceptance.mjs ④-1..④-7。
+  {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS u1_relay_identity (
+        relay_pubkey_xonly TEXT PRIMARY KEY
+          CHECK (length(relay_pubkey_xonly) = 64 AND NOT (relay_pubkey_xonly GLOB '*[^0-9a-f]*')),
+        network            TEXT NOT NULL,
+        operation          TEXT NOT NULL CHECK (operation = 'register'),
+        epoch              TEXT NOT NULL UNIQUE,
+        signature          TEXT NOT NULL,
+        registered_at      TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+    console.log('[migrate] v198: u1_relay_identity 建表完成 (§10 跨节点 pubkey 身份, register-only; PK=relay_pubkey_xonly 小写64hex CHECK; 无 local_relay_id 列/无 relay_id 回退索引(活算 fromAddress); epoch UNIQUE; 今日无写入方, C3 起).');
+  }
   console.log('[migrate] DB migrations complete.');
 }
