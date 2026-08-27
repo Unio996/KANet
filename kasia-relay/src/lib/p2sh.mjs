@@ -48,6 +48,42 @@ const MIN_SOMPI_PER_MASS = 100n;  // Kaspa post-Toccata transient mass mempool f
 //    wasm 成功时仍用 wasm(行为不变); 本地估算自身 throw(形状边界)时照旧 skipped 并记 reason(不引入新的 fail-open 面之外的东西)。
 try { if (typeof kaspa.initConsolePanicHook === 'function') kaspa.initConsolePanicHook(); } catch {}   // wasm panic 带原文进日志(纯日志, 零行为)
 const MASS_FLOOR_MODE = 'observe';   // 'observe' | 'enforce'(enforce 须另报备 + Owner 批)
+// ── Codex 438e46e9 observe 补条: submit 成功后读【权威 mass】(节点 getMempoolEntry) 与本地上界对照 ⇒ 日志 authoritative_mass=… ub_ok=…;
+//    取不到 ⇒ inconclusive 计数(不算通过)。实现: _assertTxInvariants 把 (txid → 本地上界) 记进模块私有 Map, connectRpc() 返回的 client 的
+//    submitTransaction 被包一层(30 处调用点零改动): 成功 ⇒ 查 Map ⇒ getMempoolEntry ⇒ 对照日志。纯观测, 不改 submit 结果/时序(对照在 submit 返回后异步做)。
+const _massObserve = new Map();                 // txid → { site, ub(BigInt), fee(BigInt), minFee(BigInt) }
+export const _massObserveStats = { checked: 0, ub_ok: 0, ub_violation: 0, inconclusive: 0 };
+function _authoritativeMassOf(entryResp) {
+  const e = entryResp?.entry ?? entryResp;
+  const cands = [e?.transaction?.mass, e?.mass, e?.transaction?.storageMass];
+  for (const c of cands) { if (c != null && String(c) !== '0' && /^[0-9]+$/.test(String(c))) return BigInt(c); }
+  return null;
+}
+async function _observeAuthoritativeMass(rpc, txid) {
+  const rec = _massObserve.get(txid); if (!rec) return;
+  _massObserve.delete(txid);
+  let authoritative = null, err = null;
+  try { authoritative = _authoritativeMassOf(await rpc.getMempoolEntry({ transactionId: txid, includeOrphanPool: true, filterTransactionPool: false })); } catch (e) { err = e?.message || String(e); }
+  _massObserveStats.checked++;
+  if (authoritative == null) { _massObserveStats.inconclusive++; console.warn(`[mass-floor:observe:auth] site=${rec.site} txid=${txid} authoritative_mass=null ub_ok=inconclusive mass_ub=${rec.ub} reason=${err ?? 'mempool entry has no mass'} inconclusive_total=${_massObserveStats.inconclusive}`); return; }
+  const ok = rec.ub >= authoritative;
+  if (ok) _massObserveStats.ub_ok++; else _massObserveStats.ub_violation++;
+  console.warn(`[mass-floor:observe:auth] site=${rec.site} txid=${txid} authoritative_mass=${authoritative} mass_ub=${rec.ub} ub_ok=${ok} minFee_auth=${authoritative * MIN_SOMPI_PER_MASS} actualFee=${rec.fee} totals=ok:${_massObserveStats.ub_ok}/viol:${_massObserveStats.ub_violation}/inc:${_massObserveStats.inconclusive}`);
+}
+/** 包 rpc.submitTransaction: 成功后异步做权威 mass 对照(observe 证据); 失败/异常原样抛, 不改语义。export 仅为可测性。 */
+export function __testOnlyWrapRpcForMassObserve(rpc) { return _wrapRpcForMassObserve(rpc); }
+function _wrapRpcForMassObserve(rpc) {
+  if (!rpc || typeof rpc.submitTransaction !== 'function' || rpc.__massObserveWrapped) return rpc;
+  const orig = rpc.submitTransaction.bind(rpc);
+  rpc.submitTransaction = async (...args) => {
+    const r = await orig(...args);
+    const txid = r?.transactionId;
+    if (txid && _massObserve.has(txid)) { try { await _observeAuthoritativeMass(rpc, txid); } catch (e) { console.warn(`[mass-floor:observe:auth] hook error(ignored): ${e?.message || e}`); } }
+    return r;
+  };
+  rpc.__massObserveWrapped = true;
+  return rpc;
+}
 function _assertTxInvariants(matchedUtxos, signedTx, siteLabel = 'unknown', networkId = null) {
   try {
     const sumIn = matchedUtxos.reduce((acc, u) => acc + BigInt(u.amount), 0n);
@@ -74,6 +110,7 @@ function _assertTxInvariants(matchedUtxos, signedTx, siteLabel = 'unknown', netw
         }
         const minFee = ub.mass * MIN_SOMPI_PER_MASS;
         const wouldReject = fee < minFee;
+        try { const txid = String(signedTx.id); if (/^[0-9a-f]{64}$/.test(txid)) _massObserve.set(txid, { site: siteLabel, ub: ub.mass, fee, minFee }); } catch {}   // submit 后权威对照用
         // 结构化一行(Bettor 条件④): 7 天 observe 对照用; 不改任何行为
         console.warn(`[mass-floor:${MASS_FLOOR_MODE}] site=${siteLabel} compute=${ub.compute} storage=${ub.storage} transient=${ub.transient} mass_ub=${ub.mass} minFee=${minFee} actualFee=${fee} would_reject=${wouldReject} wasm=panic(${String(massErr.message).slice(0, 40)}) source=${ub.source_commit}`);
         if (MASS_FLOOR_MODE === 'enforce' && wouldReject) {
@@ -124,7 +161,7 @@ async function connectRpc(networkId) {
     const timer = setTimeout(() => reject(new Error('RPC timeout')), 30_000);
     rpc.connect({}).then(() => { clearTimeout(timer); resolve(); }, e => { clearTimeout(timer); reject(e); });
   });
-  return rpc;
+  return _wrapRpcForMassObserve(rpc);   // 红线 7 observe: submit 成功后权威 mass 对照(纯观测)
 }
 
 // ── 1. compileEscrow ──
