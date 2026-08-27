@@ -262,5 +262,193 @@
     "tier": "B"
    }
   }
+ },
+ "D1-lambda-n0": {
+  "n": 0,
+  "impl": 6.907755,
+  "gauss_rail": 0,
+  "chernoff_rail": 13.815511,
+  "bracket_ok": true,
+  "ref": 6.907755,
+  "ref_ok": true,
+  "ok": true
+ },
+ "D1-lambda-n10": {
+  "n": 10,
+  "impl": 24.133971,
+  "gauss_rail": 19.77207,
+  "chernoff_rail": 30.54125,
+  "bracket_ok": true,
+  "ref": 24.133971,
+  "ref_ok": true,
+  "ok": true
+ },
+ "D1-lambda-n30": {
+  "n": 30,
+  "impl": 51.083124,
+  "gauss_rail": 46.925722,
+  "chernoff_rail": 58.406183,
+  "bracket_ok": true,
+  "ref": 51.083124,
+  "ref_ok": true,
+  "ok": true
+ },
+ "D1-lambda-n100": {
+  "n": 100,
+  "impl": 134.924319,
+  "gauss_rail": 130.902,
+  "chernoff_rail": 144.713418,
+  "bracket_ok": true,
+  "ref": 134.924319,
+  "ref_ok": true,
+  "ok": true
+ },
+ "D1-lambda-n1000": {
+  "n": 1000,
+  "impl": 1101.626944,
+  "gauss_rail": 1097.720704,
+  "chernoff_rail": 1124.649964,
+  "bracket_ok": true,
+  "ref": 1101.626944,
+  "ref_ok": true,
+  "ok": true
+ },
+ "D1-lambda-n36000": {
+  "n": 36000,
+  "impl": 36590.189486,
+  "gauss_rail": 36586.324226,
+  "chernoff_rail": 36712.177985,
+  "bracket_ok": true,
+  "ref": 36590.189486,
+  "ref_ok": true,
+  "ok": true
+ },
+ "D1-selfcheck": {
+  "ok": true,
+  "sweep_0_200_bracket_failures": [],
+  "rows_ok": [
+   [
+    0,
+    true
+   ],
+   [
+    10,
+    true
+   ],
+   [
+    30,
+    true
+   ],
+   [
+    100,
+    true
+   ],
+   [
+    1000,
+    true
+   ],
+   [
+    36000,
+    true
+   ]
+  ]
+ },
+ "D2-nmin-5pct": {
+  "delta": 0.05,
+  "N_min": 3974
+ },
+ "D2-nmin-3pct": {
+  "delta": 0.03,
+  "N_min": 10867
+ },
+ "D2-nmin-2pct": {
+  "delta": 0.02,
+  "N_min": 24259
+ },
+ "D3-hvis-ok": {
+  "H_vis_ub": 10163941523942170,
+  "lambda_ub": 36590.189486,
+  "n": 36000,
+  "W_s": 3600,
+  "w_cap_window": 1000000000000000,
+  "gate": {
+   "W_ok": true,
+   "n_ok": true,
+   "w_cap_ok": true
+  },
+  "reason": null,
+  "fallback": null,
+  "note": "w_cap_window 由参数注入((23) v0.13 层1 重建器待 Codex 281); 单位 = 每块 work(与 calc_work 同), H_vis_ub = work/s"
+ },
+ "D3-hvis-wmin": {
+  "H_vis_ub": null,
+  "lambda_ub": null,
+  "n": 36000,
+  "W_s": 600,
+  "w_cap_window": 1000000000000000,
+  "gate": {
+   "W_ok": false,
+   "n_ok": true,
+   "w_cap_ok": true
+  },
+  "reason": "W_MIN",
+  "fallback": "(a-total) min(1, H_adv_cap/H_total_lb)"
+ },
+ "D3-hvis-nmin": {
+  "H_vis_ub": null,
+  "lambda_ub": null,
+  "n": 3999,
+  "W_s": 3600,
+  "w_cap_window": 1000000000000000,
+  "gate": {
+   "W_ok": true,
+   "n_ok": false,
+   "w_cap_ok": true
+  },
+  "reason": "N_MIN",
+  "fallback": "(a-total) min(1, H_adv_cap/H_total_lb)"
+ },
+ "D3-hvis-both": {
+  "H_vis_ub": null,
+  "lambda_ub": null,
+  "n": 100,
+  "W_s": 60,
+  "w_cap_window": 1000000000000000,
+  "gate": {
+   "W_ok": false,
+   "n_ok": false,
+   "w_cap_ok": true
+  },
+  "reason": "W_MIN+N_MIN",
+  "fallback": "(a-total) min(1, H_adv_cap/H_total_lb)"
+ },
+ "D3-hvis-nowcap": {
+  "H_vis_ub": null,
+  "lambda_ub": null,
+  "n": 36000,
+  "W_s": 3600,
+  "w_cap_window": null,
+  "gate": {
+   "W_ok": true,
+   "n_ok": true,
+   "w_cap_ok": false
+  },
+  "reason": "NO_W_CAP",
+  "fallback": "(a-total) min(1, H_adv_cap/H_total_lb)"
+ },
+ "D3-hvis-boundary": {
+  "H_vis_ub": 291619519900171.5,
+  "lambda_ub": 4199.321087,
+  "n": 4000,
+  "W_s": 3600,
+  "w_cap_window": 250000000000000,
+  "gate": {
+   "W_ok": true,
+   "n_ok": true,
+   "w_cap_ok": true
+  },
+  "reason": null,
+  "fallback": null,
+  "note": "w_cap_window 由参数注入((23) v0.13 层1 重建器待 Codex 281); 单位 = 每块 work(与 calc_work 同), H_vis_ub = work/s"
  }
 }

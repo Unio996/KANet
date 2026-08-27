@@ -1,4 +1,4 @@
-// (21) v0.5 · k_max 绝对成本表工具 — 入库 durable 版(同 (24)/(27) 法)。只读 RPC。
+// (21) v0.8 · k_max 绝对成本表工具 — 入库 durable 版(同 (24)/(27) 法)。只读 RPC。v0.8: 加 D-STAT-1/2 纯函数块(lambdaUb Garwood 上括号 / Chernoff 上轨 / 夹逼+精确向量自检 / nMin / hVisUb 硬闸), 只加不改, main 与三估计器路径未动。
 // 跑(正式, 同步后): cd /d/kanet-tn12/kasia-console && node ../docs/provenance/2026-08-27-kmax/kmax-cost.mjs [--window 1000] [--law3-window-s 600] [--sleep-ms 20] [--json] [--out <dir>]
 // 测试(离线, 无节点): node docs/provenance/2026-08-27-kmax/kmax-cost.test.mjs   (向量 vectors.json, 期望 expected-output.json)
 //   退出码: 0 OK / 3 SYNC-GATE / 1 脚本错
@@ -71,6 +71,65 @@ export const clampWindow = (w) => ({ window: Math.min(Math.max(1000, w), MAX_SAF
 export const hAdvImplied = (k, hFloor) => (k - 1) * hFloor;
 export function foldToDevices(hNeed, devices = DEVICES) { return Object.fromEntries(devices.map(d => [d.name, d.fold === false ? { units: null, tier: d.tier, note: 'C 档估值只列不折(非 kHeavyHash 专属实测)' } : { units: +(hNeed / d.hps).toFixed(3), tier: d.tier }])); }
 export function costTable(hNet, ks = KS, devices = DEVICES) { return ks.map(k => ({ k, H_adv_implied: hAdvImplied(k, hNet), devices: foldToDevices(hAdvImplied(k, hNet), devices) })); }
+
+// ===== (21) v0.8 · D-STAT-1/2 (Codex 280 d7fefb58 设计层 CLOSED) · 纯函数, 只加不改 =====
+// 语义: λ_ub(n) = 泊松单侧 1−α 上置信界(Garwood ½χ²_{1−α}(2n+2)); 实现 = 泊松 CDF 对数域二分, 【返回上括号 hi】⇒ impl ≥ 精确(零静默欠射, Codex 验收项)。
+//   可证上轨 Chernoff: (√(L/2)+√(L/2+n))², L=ln(1/α) (泊松下尾 P(X≤λ−t)≤exp(−t²/2λ)); 高斯 n+z√n 只作夹逼【下轨】, 任何 n 都欠覆盖, 绝不作闸值。
+//   nMin(δ) = 最小整数 n 使 λ_ub(n)/n − 1 ≤ δ (D-STAT-2 机械样本闸; δ_max=5% ⇒ 4,000 取整)。
+//   hVisUb = λ_ub(n) · w_cap_window / (t1−t0) 并带硬闸 W<3600 s ∨ n<4000 ∨ 无 w_cap ⇒ H_vis_ub=null(回 (a-total)); w_cap_window 重建器等 Codex 281, 先参数注入。
+//   selfCheck(): 精确对照向量(n=0/10/30/100/1000/36000)+夹逼断言, 任一不过 ⇒ throw ⇒ 调用方非零退出(fail-closed); hVisUb 首次调用强制跑。
+export const DSTAT_VERSION = 'dstat/1';
+export const ALPHA = 1e-3;
+export const W_MIN_S = 3600;       // (23) v0.11 abda09f3 运营最小窗
+export const N_MIN = 4000;         // (23) v0.12 0e123323: Garwood + δ_max=5% ⇒ 3,974 向上取整
+export const DELTA_MAX = 0.05;
+export const GAUSS_Z = 3.0902;     // 单侧 99.9% 正态分位, 只作夹逼下轨
+export const GARWOOD_EXACT_REF = { 0: 6.907755, 10: 24.133971, 30: 51.083124, 100: 134.924319, 1000: 1101.626944, 36000: 36590.189486 }; // Codex 280 独立复算 0.5·chi2.ppf(0.999, 2n+2)
+export const GARWOOD_REF_TOL = 1e-5; // 参考值 6 位小数 ⇒ |impl−ref| ≤ 1e-5; impl ≥ 精确由二分上括号保证
+export function logPoissonCdf(n, lam) {           // log P(X ≤ n | λ), 对数域稳定求和
+  if (!(lam > 0)) return n >= 0 ? 0 : -Infinity;
+  let logp = -lam, logs = logp;
+  for (let k = 1; k <= n; k++) { logp += Math.log(lam / k); const m = Math.max(logs, logp); logs = m + Math.log(Math.exp(logs - m) + Math.exp(logp - m)); }
+  return logs;
+}
+export function lambdaUb(n, alpha = ALPHA, iters = 100) {
+  if (!Number.isInteger(n) || n < 0) throw new Error('lambdaUb: n must be a non-negative integer');
+  const la = Math.log(alpha); let lo = n, hi = n + 20 * Math.sqrt(n + 1) + 50;   // 不变量: cdf(lo) > α (λ 偏小), cdf(hi) ≤ α
+  if (!(logPoissonCdf(n, hi) <= la)) throw new Error('lambdaUb: initial hi bracket too small');
+  for (let i = 0; i < iters; i++) { const mid = (lo + hi) / 2; if (mid <= lo || mid >= hi) break; if (logPoissonCdf(n, mid) > la) lo = mid; else hi = mid; }
+  return hi;                                        // 上括号: 满足 P(X≤n|hi) ≤ α ⇒ hi ≥ 精确 Garwood
+}
+export const lambdaUbChernoff = (n, alpha = ALPHA) => { const L = Math.log(1 / alpha); return (Math.sqrt(L / 2) + Math.sqrt(L / 2 + n)) ** 2; };
+export const lambdaUbGaussRail = (n) => n + GAUSS_Z * Math.sqrt(n);   // 仅下轨, 非闸值
+export function bracketCheck(n, alpha = ALPHA) {
+  const impl = lambdaUb(n, alpha), lo = lambdaUbGaussRail(n), hi = lambdaUbChernoff(n, alpha);
+  const ref = GARWOOD_EXACT_REF[n]; const refOk = ref == null ? null : Math.abs(impl - ref) <= GARWOOD_REF_TOL && impl >= ref - 1e-6;
+  return { n, impl: +impl.toFixed(6), gauss_rail: +lo.toFixed(6), chernoff_rail: +hi.toFixed(6), bracket_ok: lo <= impl && impl <= hi, ref, ref_ok: refOk, ok: (lo <= impl && impl <= hi) && refOk !== false };
+}
+let _selfCheck = null;
+export function selfCheck() {
+  if (_selfCheck) return _selfCheck;
+  const rows = Object.keys(GARWOOD_EXACT_REF).map(Number).map(n => bracketCheck(n));
+  const sweep = []; for (let n = 0; n <= 200; n++) { const r = bracketCheck(n); if (!r.bracket_ok) sweep.push(n); }
+  const ok = rows.every(r => r.ok) && sweep.length === 0;
+  _selfCheck = { ok, rows, sweep_0_200_bracket_failures: sweep };
+  if (!ok) throw new Error('DSTAT_SELFCHECK_FAIL ' + JSON.stringify(_selfCheck));
+  return _selfCheck;
+}
+export function nMin(delta = DELTA_MAX, alpha = ALPHA) {           // 最小整数 n: λ_ub(n)/n − 1 ≤ δ
+  let lo = 1, hi = 200000; if (!(lambdaUb(hi, alpha) / hi - 1 <= delta)) throw new Error('nMin: δ too small for search bound 2e5');
+  while (hi - lo > 1) { const m = (lo + hi) >> 1; if (lambdaUb(m, alpha) / m - 1 <= delta) hi = m; else lo = m; }
+  return hi;
+}
+export function hVisUb({ n, wCapWindow, t0Ms, t1Ms, alpha = ALPHA }) {
+  selfCheck();
+  const W_s = (Number(t1Ms) - Number(t0Ms)) / 1000;
+  const gate = { W_ok: W_s >= W_MIN_S, n_ok: Number.isInteger(n) && n >= N_MIN, w_cap_ok: Number.isFinite(Number(wCapWindow)) && Number(wCapWindow) > 0 };
+  const reasons = [!gate.W_ok && 'W_MIN', !gate.n_ok && 'N_MIN', !gate.w_cap_ok && 'NO_W_CAP'].filter(Boolean);
+  if (reasons.length) return { H_vis_ub: null, lambda_ub: null, n, W_s, w_cap_window: wCapWindow ?? null, gate, reason: reasons.join('+'), fallback: '(a-total) min(1, H_adv_cap/H_total_lb)' };
+  const lam = lambdaUb(n, alpha);
+  return { H_vis_ub: lam * Number(wCapWindow) / W_s, lambda_ub: +lam.toFixed(6), n, W_s, w_cap_window: Number(wCapWindow), gate, reason: null, fallback: null, note: 'w_cap_window 由参数注入((23) v0.13 层1 重建器待 Codex 281); 单位 = 每块 work(与 calc_work 同), H_vis_ub = work/s' };
+}
 
 // —— 链读(只在 main 里用) ——
 async function main() {
