@@ -1,0 +1,12 @@
+[PASS] 2-in/2-out (150M,50M→100M,99M) relaxed ⇒ 0 = 0
+[PASS] |I|=1 single (in 1e8 → out 5e7) relaxed(|I|=1) ⇒ C/5e7 - C/1e8 = 20000-10000=10000 = 10000
+[INFO] 3-in/3-out general 例(等额 in 1e8×3 → out 大额) ⇒ 走 arithmetic 路径(演示取整序) = 0
+
+NWT storage-mass oracle 自测(能手算的): 2 PASS / 0 FAIL
+[PASS] H1 1-in/2-out 200M→100M/99M = 15101
+[PASS] H2 1-in/1-out 200M→100M = 5000
+[PASS] H3 2-in/2-out 150M,50M→100M,99M = 0
+[PASS] H4 3-in/3-out 70M,70M,60M→60M,70M,69M = 443
+[PASS] H5 3-in/2-out 100M,50M,30M→150M,28M = 0
+
+NWT 独立 oracle vs J2 手算 H1-H5: 5 PASS / 0 FAIL
