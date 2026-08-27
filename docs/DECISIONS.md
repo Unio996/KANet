@@ -24,6 +24,12 @@
 
 ## 🔴 当前有效的战略决策 (CURRENT)
 
+### D-013 Owner 三决 (2026-08-27 · Owner 原话「§10 GO，B_adv 只定语义不钉数，watchdog v0.3 批」· Bettor 记账)
+> 出处: COORD-LEDGER (695)。Owner 待决原为四件（gate-status v3 `docs/2026-08-27-nwt-s63-gate-status-refresh-v3.md` §三决 + `B_adv` 决策对象 719cab73/523a07f9）；本条记其中三件，**§6-1 ⑥ 是否放宽 (527) 仍待 Owner**。
+1. **§10 跨节点 pubkey 身份 v1 = GO（开工）**。依据 = 设计 `docs/2026-08-19-s10-pubkey-identity-design.md`@847bcf22（Codex MSG-250 五项 CLOSED，register-only）+ 实施计划 `docs/2026-08-27-j2-s10-impl-plan-v0.1.md` v0.2 = 70761d33（NWT 深审 PASS-WITH-NOTES e128a735）。**范围铁律**：v1 只做 `operation="register"`；rotate/revoke/旧记录迁移不含；不做自动签发口；**不部署对外、不动 Owner 实例 §0 墙（D-012 §0 Track A 七铁律）**；不改 A2 六字段语义（S10 独立信封）。流程：J2 落码（pathspec commit 不推）→ 每 commit NWT diff 审 → Bettor 推 → Codex 桥审 → **上线 = D-005 独立迁移由 Owner 另拍**。
+2. **`B_adv`（对手预算）= 只定语义、不钉硬数**。语义（Codex 280/281/283 口径）：`B_adv` 为保护窗内**缺席于窗均值可见估计**的全部对手容量/工作之上界，单位算力，**单一预算**同喂份额 cap 与 `k_max`（`H_hidden_ub = H_adv_add = B_adv`，拆开须 Owner 论证 + 守卫 `H_hidden_ub ≥ H_adv_add`）；不具名 ⇒ 自持路与 (a-total) 皆不出 cap ⇒ Tier-2 fail-closed（= 现网安全现状）；**复核触发（机械）**：(a) (24) `s_visible_max` 提取器在采样窗内见第二个 coinbase 归属地址 ≥ 100 块；(b) Tier-2 真 build。硬值等实测基线再议。
+3. **watchdog SYNCING 三态落码计划 v0.3（48d025f6）= 批**。按计划：三态（ALIVE/SYNCING/DEAD）替代"daa=0 判死"；刹车 N=5/T=5 min/冷却 30 min（沿 `scripts/kanet-console-supervisor.sh:30-32`）不得被恢复动作自身 reset；(PID,CreationDate) 元组判自重启；显式退出码 7/8/9；VA-1…9 向量。**启用条件不变**：本机节点 READY（`isSynced ∧ daa > 80,095,687`）+ VA 全过 + NWT diff GREEN；IBD 期只落码不启用（`KANet-KaspadWatchdog` 任务保持 Disabled）。
+
 ### D-012 KANet 总纲 reframe — Agent 应用与角色经济;Oracle Skill 抽象立项;Broker 开放入口属 Track B (2026-08-03 · Owner 提出 · 四镜头对抗轮收敛 · **Owner 终裁通过**)
 > 全过程档案: `docs/2026-08-03-d012-kanet-agent-app-reframe-draft.md`(含四镜头原始产出与本条起草史)· COORD-LEDGER (121)(125)(131) · Owner 审查四点修正见 §0/§4/§5。
 
