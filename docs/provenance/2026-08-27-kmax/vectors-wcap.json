@@ -1,0 +1,218 @@
+{
+  "note": "(21) v0.9 · wcap-window 确定性向量。小窗参数 SMALL = {windowSize 5, sampleRate 2, minWindow 2, mergesetLimit 4 ⇒ evict_max 3, targetTimeMs 1000, mergeDepth 6}(生产默认 TN12 661/40/150/248/100ms/36000)。合成 DAG 由 test 内生成器按【同一规则】回填 bits(assignBits)。验收映射: (A) 重建+证书 / (B) bitsCalc==收块 bits / (C) 断言+自喂剔除+负向量 / (D) 有界穷举对抗模型 N_SMALL=12(非生产) / (E) 贪心 smoke(非验收)。BigInt 一律字符串。",
+  "small": {
+    "windowSize": 5,
+    "sampleRate": 2,
+    "minWindow": 2,
+    "mergesetLimit": 4,
+    "targetTimeMs": 1000,
+    "mergeDepth": 6,
+    "genesisBits": 520159231
+  },
+  "cases": [
+    {
+      "id": "W1-steady-ABCDE",
+      "type": "chain",
+      "desc": "(A)(B)(C)(D)(E) 60 块等间隔全史链: 出数; 断言 0; exact 窗 bits 自洽; (D) 候选零失败; (E) smoke 零失败; 证书汇总 kind=GENESIS",
+      "gen": {
+        "n": 60
+      },
+      "options": {
+        "verifyCandidates": true,
+        "smoke": true
+      }
+    },
+    {
+      "id": "W2-squeezed-stamps",
+      "type": "chain",
+      "desc": "挤戳: 最近 8 块戳同值 ⇒ m_lb 变小 ⇒ w_cap 升(对照 W1); (D) 零失败",
+      "gen": {
+        "n": 60,
+        "squeezeFrom": 53
+      },
+      "options": {
+        "verifyCandidates": true
+      }
+    },
+    {
+      "id": "W3-negative-assertion",
+      "type": "chain",
+      "desc": "(C) 负向量必须真失败: b55 bits 改 8× 难度 ⇒ ASSERTION_FAIL, w_cap=null; (B) 同时抓到 mismatch=1(伪造 bits ≠ 规则)",
+      "gen": {
+        "n": 60,
+        "bitsOverride": {
+          "b55": {
+            "div": 8
+          }
+        }
+      }
+    },
+    {
+      "id": "W3b-4x-equal-passes",
+      "type": "chain",
+      "desc": "(C) 4× = 小参数下界的等号情形(K 只剩 2 样本 ⇒ 界 ×4) ⇒ 不失败; (C) 不失败但 (B) mismatch=1 仍 fail-closed(伪造 bits)",
+      "gen": {
+        "n": 60,
+        "bitsOverride": {
+          "b55": {
+            "div": 4
+          }
+        }
+      }
+    },
+    {
+      "id": "W4-red-heavy-daa-bs-divergence",
+      "type": "chain",
+      "desc": "(D) red 密: 每块并 2 个 red 侧块 ⇒ daa/bs ×2.9 分离; 采样 DAA 域、阈值蓝分域各走各的; 断言 0、bits 自洽、候选 217 零失败、smoke 零失败",
+      "gen": {
+        "n": 40,
+        "redPairsFrom": 3,
+        "redPairsTo": 40
+      },
+      "options": {
+        "verifyCandidates": true,
+        "smoke": true
+      }
+    },
+    {
+      "id": "W5-nondaa-exclusion",
+      "type": "chain",
+      "desc": "(D) non-DAA 排除: 深旧侧块 s2(bs=3) 被 b30(阈值 21) 合并 ⇒ 不计 index 不进窗; 未合并深旧块 s3 在候选里 nonDaaSeen>0; 零失败",
+      "gen": {
+        "n": 40,
+        "sides": [
+          {
+            "hash": "s2",
+            "parent": "b2",
+            "at": 30,
+            "red": true,
+            "ts": 2500,
+            "bwDelta": 10
+          },
+          {
+            "hash": "s3",
+            "parent": "b3",
+            "at": 999,
+            "ts": 3500,
+            "bwDelta": 10
+          }
+        ]
+      },
+      "options": {
+        "verifyCandidates": true
+      },
+      "probeWindow": {
+        "block": "b30",
+        "has": "s2"
+      }
+    },
+    {
+      "id": "W6-cert-fail-inexact",
+      "type": "chain",
+      "desc": "(A) 证书不成立: 只留 b51..b60(无 genesis, 堆内最小蓝功 ≤ 根蓝功) ⇒ WINDOW_INEXACT, w_cap=null",
+      "gen": {
+        "n": 60,
+        "cut": {
+          "keepFrom": 51
+        }
+      }
+    },
+    {
+      "id": "W6b-cert-ok-equals-full",
+      "type": "chain",
+      "desc": "(A) 证书乙成立: 留 b31..b60 ⇒ 从 b42 起精确 ⇒ w_cap 逐位等于全史值; 证书汇总 kind=TRUNCATION",
+      "gen": {
+        "n": 60,
+        "cut": {
+          "keepFrom": 31
+        }
+      },
+      "compareFull": true
+    },
+    {
+      "id": "W6c-missing-member-failclosed",
+      "type": "chain",
+      "desc": "(A) 成员缺失: 留 b31..b60 但删被 b45 合并的侧块 s45 ⇒ missing=1 ⇒ 永不精确 ⇒ WINDOW_INEXACT(不静默取过大 T_lb)",
+      "gen": {
+        "n": 60,
+        "sides": [
+          {
+            "hash": "s45",
+            "parent": "b43",
+            "at": 45,
+            "ts": 43500,
+            "bwDelta": 100
+          }
+        ],
+        "cut": {
+          "keepFrom": 31,
+          "drop": [
+            "s45"
+          ]
+        }
+      },
+      "probeMissing": "b45"
+    },
+    {
+      "id": "W7-fixed-difficulty",
+      "type": "chain",
+      "desc": "固定难度支: 3 块链 minWindow=5 ⇒ 目标支不可达 ⇒ w_cap = work(genesis bits); (D) 零失败",
+      "gen": {
+        "n": 3
+      },
+      "params": {
+        "minWindow": 5
+      },
+      "options": {
+        "verifyCandidates": true
+      },
+      "expectGenesisWork": true
+    },
+    {
+      "id": "W8-tn12-max-admission-7",
+      "type": "admission",
+      "desc": "TN12 真参数 661/40/248: daa(SP)=32 ⇒ index 8,48,…,248 命中 7 个采样; daa(SP)=0 ⇒ 6; evict_max=7",
+      "daaSp": [
+        32,
+        0
+      ],
+      "expectAdmitted": [
+        7,
+        6
+      ]
+    },
+    {
+      "id": "W9-nsmall-cap-throws",
+      "type": "nsmall",
+      "desc": "(D) 池(2) > maxSubset(1) ⇒ enumerateBounded throw(不静默截断); maxSubset > N_SMALL=12 ⇒ wCapWindow throw",
+      "gen": {
+        "n": 40,
+        "redPairsFrom": 3,
+        "redPairsTo": 40
+      },
+      "maxSubset": 1
+    },
+    {
+      "id": "W10-anchor-vs-own-root",
+      "type": "chain",
+      "desc": "(A) 取数锚 R: 留 b31..b60 + 侧块 s33(父 b29 未取, 被 b35 合并) ⇒ 两条截断链(根 b31 与 s33); anchor=b31 ⇒ rootBw=min(own, bw(R)); 证书汇总 kind/R/heapMin_min/missing; wCapWindow(Number) 与 w_cap_window(字符串) 同值",
+      "gen": {
+        "n": 60,
+        "sides": [
+          {
+            "hash": "s33",
+            "parent": "b29",
+            "at": 35,
+            "ts": 29500,
+            "bwDelta": 100
+          }
+        ],
+        "cut": {
+          "keepFrom": 31
+        }
+      },
+      "anchor": "b31",
+      "compareFull": true
+    }
+  ]
+}
