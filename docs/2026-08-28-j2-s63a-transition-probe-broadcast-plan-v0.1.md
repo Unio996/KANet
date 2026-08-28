@@ -27,6 +27,7 @@
 
 ## §5 失败回滚与资金回收
 - **`t_recovery`**：ctor 烤 **`now_ms + 30 min`**（ms 单位与 `tx.time` 同；给 §3/§4 足够窗口又不长占资金）；recovery 支在 30 min 后可由测试钥把后继全额收回；claim 支随时可收（`phase==1` 即可）。
+- 🟡 **作用域注（NWT note，v0.1 fix-up）**：**recovery 支本轮仅构造级**——§3 只证"`tx.time ≥ t_recovery` 谓词接受构造出的 tx"（序列化往返 + 不变量），**链上时锁执行未在本轮证**（要等 ≥30 min 再广播 recovery，超 minimal scope）⇒ 留 v2；本轮资金回收走 **claim 支即时**，recovery 只是备用路径。
 - 任一步 FAIL：停；已落链的 genesis/后继由 Owner 用 claim 支（或过时锁后 recovery 支）**一次性收回到测试地址**，再从测试地址转回 Owner；未提交的坏 tx 无资金影响。负向量的独立小额 genesis 同样各自 claim 收回。
 - **不做**：不动 relay wallet、不动任何 market/pool UTXO、不写 console.db、不改 relay 代码。
 
