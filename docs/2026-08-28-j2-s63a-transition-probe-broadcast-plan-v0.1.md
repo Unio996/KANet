@@ -18,6 +18,7 @@
 - **mempool 期回读**（可选旁证）：reveal 提交后、入块前 `getMempoolEntry({transactionId, includeOrphanPool:true, filterTransactionPool:false})` 记 `fee`/`isOrphan`；若 entry 带 mass 一并记（红线 7 observe 同口）。
 - **"后继可按意图消费"判据（v0.2，Codex e6d3d2f8 §4）**：**claim 支必须真广播落链**——从 live 回读到的后继 UTXO（**精确 outpoint** + 回读的 cov_id）构造 `claim(0)`（`phase==1 ∧ OpCovOutputCount(self_cov)==0`，输出全部到测试地址）→ `submitTransaction` → 等 **depth ≥ 20**；这一笔同时就是 §5 的资金回收。**recovery 支只构造级**（`recovery(0)`：`tx.time ≥ t_recovery` 谓词接受构造出的 tx；序列化往返 + `_assertTxInvariants`；**不广播，链上时锁执行明写 out of scope，留 v2**）。
 - v0.2 顺序：genesis 落链 → reveal 落链 → 回读后继 cov_id === 离线值 → **claim 广播落链**（三笔链上事件；criterion 5 = 后继携同 cov_id 且被 claim 支按意图消费）。
+- 🔴 **费口径（NWT note）**：正路三笔与 §4 全部负向量的 fee **一律用 plurality-fixed 估算器**（`tx-mass-ub.mjs` v2，`2f766082`+）的 `mass_ub × 100 sompi` 算，不用 `_bshardFeeV1` 常量——covenant 输入/输出 p=2 的 storage 项会高于 p=1 旧值（genesis 形 45101 vs 15101）；本段本就排在 plurality 修 NWT GREEN + observe 部署之后，依赖钉死。
 - 全部回读打成 JSON：`{genesis:{txid,depth,cov_id_readback}, successor:{txid,depth,address,cov_id_readback,equal:true}, mempool:{...}, claim_tx_json_sha, recovery_tx_json_sha}`。
 
 ## §4 五负向量 · 逐条 submit 取拒绝码
