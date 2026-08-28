@@ -43,11 +43,13 @@ build.mjs                    离线 harness(冻结版)
 offline/evidence.json, offline/{genesis,reveal,N1..N5}.tx.json   离线段(假 outpoint)
 live/genesis.tx.json, live/reveal.tx.json                          真 outpoint 已签 tx JSON
 live/readback.json           §3 回读 JSON(含 cov_id 相等、depth、mempool)
-live/claim.tx.json, live/recovery.tx.json                           §3 只构造不广播的两支
+live/claim.tx.json + live/claim.landed.json                        🔴 必需链上证据(v0.2/Codex c621d34e GA-A): 已签 claim tx + {txid, submit_utc, depth≥20, landed:true, 回读后继 outpoint 被消费}; run-all 若缺 landed/depth 记录 ⇒ FAIL
+live/recovery.tx.json                                              construct-only / out-of-scope(仅证谓词接受构造 tx; 不广播, 链上时锁执行留 v2)
 live/negatives.json          §4 五条拒绝码 + 归类 + inconclusive 标记
 live/run.log                 时间线(UTC)、daa、节点 isSynced 快照
-README.md                    Codex ①–⑦ 逐条对应 + 作用域句
+README.md                    Codex ①–⑦ 逐条对应 + 作用域句; 明分两栏: 【链上证据】genesis/reveal/claim(各 txid+depth) vs 【构造级】recovery(out-of-scope)
 ```
+- MANIFEST.txt 同样两栏标注（`onchain:` / `construct-only:` 前缀），审的人一眼分清哪些是落链证据。
 
 ## §7 前置（缺一不跑）
 1. J1 正式编译产物到并**复现** J2 dry-run 的 `script0/1_sha256`（否则以 J1 为准重跑离线段）；2. NWT 审离线证据 GREEN；3. 节点 READY ∧ (17) T+0…T+125 清单 + ③f 跑完；4. Owner-controlled 测试钥与 2 KAS 就位；5. **Bettor 令**。不与 (17)/③f 抢、不碰生产钱路、不推。
