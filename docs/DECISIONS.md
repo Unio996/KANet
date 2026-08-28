@@ -24,6 +24,13 @@
 
 ## 🔴 当前有效的战略决策 (CURRENT)
 
+### D-014 红线 7 mass-aware fee floor 替代方案·阶段 1 observe = 批 (2026-08-29 · Owner 原话「批，继续盯着，READY 了直接派 J2」· Bettor 记账)
+> 出处: COORD-LEDGER (703)(704) · gate-status v5.1 `docs/2026-08-28-nwt-s63-redline7-mass-fee-silent-disable-v5.1.md`（c3363410 + 783f3c9c + e608314b）· Codex 桥 438e46e9 §3。
+1. **事实**：relay `kasia-relay/src/lib/p2sh.mjs:55-62` 的 mass-aware fee floor（红线 7，`fee ≥ mass×MIN_SOMPI_PER_MASS`）自 ≥2026-08-01（有 boot log 起）**从未生效**——vendored `shared/vendor/kaspa-wasm` 的 `Params::from(NetworkId)` 无 TN12 分支 ⇒ `calculateTransactionMass` 对任何 tx 形任何入口 panic，被 try/catch 只 warn 吞掉（`mass calc skipped` 177,415 次），只剩 kaspad mempool 兜底；关闭期（≥8-01）按日期分桶零 mempool 拒费 = 无实证损失但守卫不在（机制非运气）。
+2. **批：阶段 1 observe**（J2 6ed90a7a + 6a4afeb2 + 9a176c9d + a363d0bd + 4d4ec306 + c7f10205；NWT 三轮 GREEN 含独立 mass oracle 5/5 对拍 `docs/provenance/2026-08-28-redline7-mass/`；Bettor 亲跑 25/25）：`tx-mass-ub.mjs` 按 live 节点 commit 7b1e18cc 公式算 mass 上界（13 行上界证明表），wasm panic 时用之；`MASS_FLOOR_MODE='observe'` **只打结构化日志不拒任何交易**（`[mass-floor:observe]` + `[mass-floor:observe:auth]`，权威对照两源 = `getMempoolEntry.mass` + 拒绝文本解析，`ub_ok/inconclusive/evicted` 计数）；零行为变化。
+3. **部署**：随**维护窗** relay 重启生效（`docs/2026-08-28-postsync-maintenance-window-runbook-v0.4.md` §red-line-7-observe），窗在本机 READY + J2 T+125 证据之后；IBD 期不动任何进程。
+4. **阶段 2 enforce 另报备**：7 天 observe 数据须过 NWT §5-bis 审尺（`ub_ok` 100% / `inconclusive` 0 / `evicted` 0 / estimator-throw 0 + 七形覆盖各 ≥1）+ Codex 五条 ⇒ 再单点报 Owner 批 ⇒ 只翻 `MASS_FLOOR_MODE` 常量。
+
 ### D-013 Owner 三决 (2026-08-27 · Owner 原话「§10 GO，B_adv 只定语义不钉数，watchdog v0.3 批」· Bettor 记账)
 > 出处: COORD-LEDGER (695)。Owner 待决原为四件（gate-status v3 `docs/2026-08-27-nwt-s63-gate-status-refresh-v3.md` §三决 + `B_adv` 决策对象 719cab73/523a07f9）；本条记其中三件，**§6-1 ⑥ 是否放宽 (527) 仍待 Owner**。
 1. **§10 跨节点 pubkey 身份 v1 = GO（开工）**。依据 = 设计 `docs/2026-08-19-s10-pubkey-identity-design.md`@847bcf22（Codex MSG-250 五项 CLOSED，register-only）+ 实施计划 `docs/2026-08-27-j2-s10-impl-plan-v0.1.md` v0.2 = 70761d33（NWT 深审 PASS-WITH-NOTES e128a735）。**范围铁律**：v1 只做 `operation="register"`；rotate/revoke/旧记录迁移不含；不做自动签发口；**不部署对外、不动 Owner 实例 §0 墙（D-012 §0 Track A 七铁律）**；不改 A2 六字段语义（S10 独立信封）。流程：J2 落码（pathspec commit 不推）→ 每 commit NWT diff 审 → Bettor 推 → Codex 桥审 → **上线 = D-005 独立迁移由 Owner 另拍**。
