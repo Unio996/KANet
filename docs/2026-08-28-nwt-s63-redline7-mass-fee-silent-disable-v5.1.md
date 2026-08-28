@@ -16,7 +16,7 @@
 |---|---|---|
 | ① | 100% 命中 / 有无一次算过 mass | 🔴 **0 个 `minFee=… ✓`（:67 成功路径）across ALL logs**；`skipped` 177,415（Bettor 计）。**红线 7 从未一次生效**。 |
 | siteLabels | 涉及哪些路径 | **全部 covenant 提交**：`unlockPoolSpineP2SH` / `unlockPoolSpineRefundMakerUnjoined` / `unlockBshardCloseAttest` / `unlockBshardConsolidate` / `unlockBshardGenesisMintPayout` / **`unlockBshardPayoutClaim`** / `unlockBshardRegister` / `unlockP2SH_SingleEntry`（含 Payout/Consolidate/Refund **钱路**）。首现 ≥ 2026-08-01（最旧留存日志）。 |
-| ② | 后果实证 | 🟢 **logs/broadcast_tx 零 mempool `insufficient fee`/`mass` 拒绝** ⇒ 尚无实证损失。**= 运气**：SS-焊死 fee 碰巧都 ≥ mempool floor（qlfpv 那次是例外、正触发加红线 7）。**守卫 OFF，只剩 mempool 兜底。** |
+| ② | 后果实证（关闭期 ≥8-01）| 🟢 **红线 7 关闭期（≥8-01，有 boot log 起）零 mempool 拒费**——active `console.log` 0 条、含 `is not standard: transaction has N fees which is under the required amount of M for compute mass K` 的日志文件 mtime 全在 **05-27/28 + 06-10**（≥8-01 零）。⇒ 关闭期尚无实证损失（守卫 OFF，只剩 mempool 兜底，SS-焊死 fee 碰巧都 ≥ floor）。🔴 **证据形更正（8-28）**：原写"零 `insufficient fee` 拒绝"是**错 grep 文本形**（真拒绝文本是上面那句、非 "insufficient fee"）⇒ 漏了 **5–6 月 288 条**拒费史（旧 Phase 4a `ext-pred-177` 等低费 tx，与 7/20 结算停摆无关、也不在关闭期窗口）。**正确证据 = 按【日期分桶】≥8-01 零，非"零拒绝"**。（记 memory：日志 grep 判在/不在，须先钉文本形 + 日期窗，再连因果。）|
 | ③ | 同 8/05 rpc-degradation 根 | **同 wasm 构建、根因同族（缺 TN12 参数/trap）**，症状不同（mass calc vs RpcClient）。🟡 **"C 重编 wasm 能否一并修 8/05 rpc-degradation" = OPEN 待核**（并入下面审计条）。 |
 | ④ | 何处称"生效" | ~10 文档引用；承重三份（gate-d fee-source 论证）见 §4。全部加状态注记指向本页。 |
 
