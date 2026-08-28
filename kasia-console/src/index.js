@@ -7,11 +7,31 @@ import { currentKeyFingerprint } from './services/crypto.js';
 // J2-tn r429 (Bettor r467 P0 Console crash 根治): defensive top-level handlers.
 // 防 Console 反复 crash 真因 — uncaught exception / unhandledRejection 自 child relay /
 // adapter spawn / scout RPC / LLM 调用. 保进程活, log 异常 (= supervisor 不再每次拉起).
+// 🔴 J1 2026-08-26 根治(Owner 直令): 上面这层"保进程活"只对【启动完成之后】的运行期成立。
+// 启动期(listen 成功之前)出错必须 fail-fast 退出 —— 否则把"崩溃"变成"永生僵尸":
+//   实测事故(本机 2026-08-15~23): supervisor 判 Console 死 -> headless 拉新实例 -> 端口已被占
+//   -> listen 抛 EADDRINUSE -> 被本 handler 吞掉 -> 进程不退出、拿不到端口, 但照样跑完 DB
+//   migration + 起 cron + spawn relay 子进程 -> 每轮重启多留一个僵尸。8 天累积 298 个实例,
+//   commit 打到 108.5/111.2GB -> kaspad panic("Insufficient system resources") -> 全线停摆,
+//   且共识库被写坏(8/26 只能重新全量同步)。
+//   复现坐实: 端口占用下起第二个 Console, 25s 后仍活着(113MB), stderr 正是 listen EADDRINUSE。
+// 保留 r429 原意(运行期 child relay/adapter/scout/LLM 抛错不该拖垮整个 Console),
+// 只把启动期改成致命 —— 一个绑不上端口的 Console 没有任何存在理由。
+let __booted = false;
+
 process.on('uncaughtException', (err) => {
   console.error('[kanet:uncaught]', err?.stack || err?.message || String(err));
+  if (!__booted) {
+    console.error('[kanet:fatal] 启动期异常 = 致命, 退出(不留僵尸实例)');
+    process.exit(1);
+  }
 });
 process.on('unhandledRejection', (reason) => {
   console.error('[kanet:unhandled-rejection]', reason?.stack || reason?.message || String(reason));
+  if (!__booted) {
+    console.error('[kanet:fatal] 启动期 rejection = 致命, 退出(不留僵尸实例)');
+    process.exit(1);
+  }
 });
 
 // 2026-07-14 J2/NWT 联合诊断(Owner直令#CPU-profile-P0): --cpu-prof CLI flag 依赖进程"自然退出"
@@ -471,7 +491,19 @@ fastify.post('/lang', (request, reply) => {
 
 // Start
 await ensureIngestSecret();
-await fastify.listen({ port: PORT, host: process.env.HOST || '127.0.0.1' });
+// listen 失败必须显式致命(不依赖上面的 handler 兜底 —— 这里给出人看得懂的原因再退)。
+try {
+  await fastify.listen({ port: PORT, host: process.env.HOST || '127.0.0.1' });
+} catch (err) {
+  if (err?.code === 'EADDRINUSE') {
+    console.error(`[kanet:fatal] 端口 ${PORT} 已被占用 —— 已经有一个 Console 在跑。本实例退出, 不做僵尸。`);
+    console.error('[kanet:fatal] 要重启 Console: 先停掉占端口的那个进程(按 CommandLine 找, 别信 pidfile 里的 bash 伪 PID), 再起。');
+  } else {
+    console.error('[kanet:fatal] listen 失败:', err?.stack || err?.message || String(err));
+  }
+  process.exit(1);
+}
+__booted = true;   // 到这里才算启动完成: 之后的异常回到 r429 "保进程活" 语义
 console.log(`[kasia-console] running at http://localhost:${PORT}`);
 
 // #21 health-check isolation (Bettor 2026-07-19 决赛夜, cause-agnostic freeze mitigation):
