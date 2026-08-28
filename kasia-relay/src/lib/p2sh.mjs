@@ -56,6 +56,8 @@ const _MASS_OBSERVE_CAP = 256;                  // NWT MUST(泄漏): 兜底上�
 export const _massObserveStats = { checked: 0, ub_ok: 0, ub_violation: 0, inconclusive: 0, evicted: 0, auth_from_mempool: 0, auth_from_reject: 0 };
 // observe v2(Bettor/Codex): 节点拒费文本自带权威 mass —— live 日志实形 "… is not standard: transaction has 1000003 fees which is under the required amount of 1636200 for compute mass 16362"
 //   ⇒ authoritative_mass=K, minFee_auth=M(M/K = 100 sompi/gram = MIN_SOMPI_PER_MASS 实证); 只覆盖被拒样本(正是 ub_ok 最该核的那类); 来源计数与 getMempoolEntry 分列。
+//   🟡 边界(NWT note): reject 源只捕【compute-mass】拒绝(文本含 "for compute mass"); 节点按 storage / transient mass 拒的文本形不同 ⇒ 不匹配 ⇒ 走 inconclusive
+//      ⇒ 某 storage-主导形的 auth_from_reject 偏低【不得】误读为 violation(它是"没捕到", 不是"没违反"); §5-bis 的 inconclusive=0 阈值会把这类形逼出来, 到时按其真实拒绝文本扩正则。
 const _REJECT_MASS_RE = /under the required amount of (\d+) for compute mass (\d+)/;
 export function parseRejectMass(text) { const m = _REJECT_MASS_RE.exec(String(text ?? '')); return m ? { minFeeAuth: BigInt(m[1]), authoritativeMass: BigInt(m[2]) } : null; }
 function _observeFromReject(txid, errText) {
