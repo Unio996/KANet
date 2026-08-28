@@ -53,7 +53,21 @@ const MASS_FLOOR_MODE = 'observe';   // 'observe' | 'enforce'(enforce 须另报�
 //    submitTransaction 被包一层(30 处调用点零改动): 成功 ⇒ 查 Map ⇒ getMempoolEntry ⇒ 对照日志。纯观测, 不改 submit 结果/时序(对照在 submit 返回后异步做)。
 const _massObserve = new Map();                 // txid → { site, ub(BigInt), fee(BigInt), minFee(BigInt) }
 const _MASS_OBSERVE_CAP = 256;                  // NWT MUST(泄漏): 兜底上限, 超出逐出最旧(Map 插入序); 主修法是 wrapper try/finally 删
-export const _massObserveStats = { checked: 0, ub_ok: 0, ub_violation: 0, inconclusive: 0, evicted: 0 };
+export const _massObserveStats = { checked: 0, ub_ok: 0, ub_violation: 0, inconclusive: 0, evicted: 0, auth_from_mempool: 0, auth_from_reject: 0 };
+// observe v2(Bettor/Codex): 节点拒费文本自带权威 mass —— live 日志实形 "… is not standard: transaction has 1000003 fees which is under the required amount of 1636200 for compute mass 16362"
+//   ⇒ authoritative_mass=K, minFee_auth=M(M/K = 100 sompi/gram = MIN_SOMPI_PER_MASS 实证); 只覆盖被拒样本(正是 ub_ok 最该核的那类); 来源计数与 getMempoolEntry 分列。
+const _REJECT_MASS_RE = /under the required amount of (\d+) for compute mass (\d+)/;
+export function parseRejectMass(text) { const m = _REJECT_MASS_RE.exec(String(text ?? '')); return m ? { minFeeAuth: BigInt(m[1]), authoritativeMass: BigInt(m[2]) } : null; }
+function _observeFromReject(txid, errText) {
+  const rec = _massObserve.get(txid); if (!rec) return;
+  const p = parseRejectMass(errText);
+  _massObserveStats.checked++;
+  if (!p) { _massObserveStats.inconclusive++; console.warn(`[mass-floor:observe:auth] site=${rec.site} txid=${txid} source=reject authoritative_mass=null ub_ok=inconclusive mass_ub=${rec.ub} reason=reject text has no mass: ${String(errText).slice(0, 80)} inconclusive_total=${_massObserveStats.inconclusive}`); return; }
+  _massObserveStats.auth_from_reject++;
+  const ok = rec.ub >= p.authoritativeMass;
+  if (ok) _massObserveStats.ub_ok++; else _massObserveStats.ub_violation++;
+  console.warn(`[mass-floor:observe:auth] site=${rec.site} txid=${txid} source=reject authoritative_mass=${p.authoritativeMass} mass_ub=${rec.ub} ub_ok=${ok} minFee_auth=${p.minFeeAuth} actualFee=${rec.fee} local_minFee=${rec.minFee} local_would_reject=${rec.fee < rec.minFee} totals=ok:${_massObserveStats.ub_ok}/viol:${_massObserveStats.ub_violation}/inc:${_massObserveStats.inconclusive}/src:mempool=${_massObserveStats.auth_from_mempool},reject=${_massObserveStats.auth_from_reject}`);
+}
 export const __testOnlyMassObserveSize = () => _massObserve.size;   // 仅可测性
 function _massObserveSet(txid, rec) {
   _massObserve.set(txid, rec);
@@ -73,8 +87,9 @@ async function _observeAuthoritativeMass(rpc, txid) {
   _massObserveStats.checked++;
   if (authoritative == null) { _massObserveStats.inconclusive++; console.warn(`[mass-floor:observe:auth] site=${rec.site} txid=${txid} authoritative_mass=null ub_ok=inconclusive mass_ub=${rec.ub} reason=${err ?? 'mempool entry has no mass'} inconclusive_total=${_massObserveStats.inconclusive}`); return; }
   const ok = rec.ub >= authoritative;
+  _massObserveStats.auth_from_mempool++;
   if (ok) _massObserveStats.ub_ok++; else _massObserveStats.ub_violation++;
-  console.warn(`[mass-floor:observe:auth] site=${rec.site} txid=${txid} authoritative_mass=${authoritative} mass_ub=${rec.ub} ub_ok=${ok} minFee_auth=${authoritative * MIN_SOMPI_PER_MASS} actualFee=${rec.fee} totals=ok:${_massObserveStats.ub_ok}/viol:${_massObserveStats.ub_violation}/inc:${_massObserveStats.inconclusive}`);
+  console.warn(`[mass-floor:observe:auth] site=${rec.site} txid=${txid} source=mempool authoritative_mass=${authoritative} mass_ub=${rec.ub} ub_ok=${ok} minFee_auth=${authoritative * MIN_SOMPI_PER_MASS} actualFee=${rec.fee} totals=ok:${_massObserveStats.ub_ok}/viol:${_massObserveStats.ub_violation}/inc:${_massObserveStats.inconclusive}/src:mempool=${_massObserveStats.auth_from_mempool},reject=${_massObserveStats.auth_from_reject}`);
 }
 /** 包 rpc.submitTransaction: 成功后做权威 mass 对照(observe 证据); 失败/异常原样抛, 不改语义。export 仅为可测性。
  *  🟡 observe 期代价(NWT note1): 对照在 return 前 await ⇒ 每次 submit 多 1 次 getMempoolEntry 往返(保证检查真跑); enforce 期再评估是否改后台。
@@ -90,6 +105,10 @@ function _wrapRpcForMassObserve(rpc) {
       const txid = r?.transactionId;
       if (txid && _massObserve.has(txid)) { try { await _observeAuthoritativeMass(rpc, txid); } catch (e) { console.warn(`[mass-floor:observe:auth] hook error(ignored): ${e?.message || e}`); } }
       return r;
+    } catch (err) {
+      // observe v2: 拒绝文本自带权威 mass ⇒ 记账(在 finally 删记录之前); 原错误原样重抛, 语义不变
+      if (preTxid) { try { _observeFromReject(preTxid, err?.message || String(err)); } catch (e) { console.warn(`[mass-floor:observe:auth] reject-hook error(ignored): ${e?.message || e}`); } }
+      throw err;
     } finally {
       if (preTxid) _massObserve.delete(preTxid);   // 失败/异常/成功皆清, 不泄漏
     }
