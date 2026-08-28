@@ -53,3 +53,8 @@ J2 的本地 mass 上界估算 `kasia-relay/src/lib/tx-mass-ub.mjs`（红线 7 v
   | H4 p=1 回归 | 443 | 443 | ✓ 老向量仍对 |
 - J2 FIXED 估算器（加 plurality）应 == 本 oracle p>1 值；夹具 `scratch/_j2_mass_ub/plurality-fixtures.json` 的确切形由 NWT 从源独立算五组期望回 J2。
 - 文件：`storage-mass-oracle-plurality.mjs` sha256 `46d599b14767df25d8bcba8ec8a0c76f5ffab2041d39c5315c11eaca68478ad6`；`plurality-crosscheck-output.txt` sha256 `c443b76557c305c7529efa9126c1acc4e27d406c1373bffd67a141570610a189`。复算：`node docs/provenance/2026-08-28-redline7-mass/storage-mass-oracle-plurality.mjs` ⇒ `9 PASS / 0 FAIL`。
+
+## 附2：J2 夹具 G1-G5 独立对拍（NWT 纯从源 vs J2 手算 vs Bettor 手核 = 三方一致）
+- `plurality-fixtures.json`（J2 五组 raw `{side,amount,spk_hex,has_covenant}`）→ `fixture-crosscheck.mjs`（NWT inline pluralityOf+storageMass，不调 J2 helper）⇒ **5/5 全等**：storage 30000/0/0/5404/75404 + per-cell plurality（p_in/p_out）全等；old p=1 = 0/0/0/0/15101（G1/G4/G5 = bug 判别，全低估=不安全方向）。
+- J2 FIXED 估算器（b9a5b7af）P-G1..G5 == 本表 + 强制 p=1 必红对照 + P-input-cov-source（输入 cov 只从 matched entry 非 spk 形推）+ P-prod genesis=45101（与旧 wasm-TN10 + 共识三方一致）；34/34，NWT 复核 GREEN。
+- sha256：`plurality-fixtures.json` `a9f31c7168876a4ec6801b57fcd5aa2203c4c1351efb69b5ff4cae5dcc7377e9`；`fixture-crosscheck.mjs` `5906d3fc93bb4ca067d7f5dc89005c4ae2951c445f0931550a91a566248f1787`；`fixture-crosscheck-output.txt` `77febf297f664a208f701038153e308c8382ac81467e69d8d8e480e0710437e2`。复算：`node docs/provenance/2026-08-28-redline7-mass/fixture-crosscheck.mjs` ⇒ `5 PASS / 0 FAIL`。

@@ -1,0 +1,7 @@
+[PASS] G1-plain-to-covenant-same-value: NWT storage=30000 (J2=30000) | NWT p_in=[1] p_out=[2] (J2 p_in=[1] p_out=[2]) branch=relaxed(ins_pl==1) old_p1=0
+[PASS] G2-covenant-to-plain: NWT storage=0 (J2=0) | NWT p_in=[2] p_out=[1] (J2 p_in=[2] p_out=[1]) branch=relaxed(outs_pl==1) old_p1=0
+[PASS] G3-covenant-to-covenant: NWT storage=0 (J2=0) | NWT p_in=[2] p_out=[2] (J2 p_in=[2] p_out=[2]) branch=relaxed(outs_pl==2 ∧ ins_pl==2) old_p1=0
+[PASS] G4-mixed-2in-2out-general-branch: NWT storage=5404 (J2=5404) | NWT p_in=[1,2] p_out=[1,2] (J2 p_in=[1,2] p_out=[1,2]) branch=general(outs_pl≠1 ∧ ins_pl≠1 ∧ ¬(2,2)) old_p1=0(relaxed 20101−26666)
+[PASS] G5-one-plain-in-two-covenant-outs: NWT storage=75404 (J2=75404) | NWT p_in=[1] p_out=[2,2] (J2 p_in=[1] p_out=[2,2]) branch=relaxed(ins_pl==1) old_p1=15101
+
+NWT 独立(纯从源) vs J2 手算 G1-G5: 5 PASS / 0 FAIL
