@@ -40,3 +40,16 @@ J2 的本地 mass 上界估算 `kasia-relay/src/lib/tx-mass-ub.mjs`（红线 7 v
 
 ## 复算
 `node docs/provenance/2026-08-28-redline7-mass/handcalc-crosscheck.mjs` ⇒ `5 PASS / 0 FAIL`。
+
+## 🔴 附：UTXO plurality 扩展（Codex e6d3d2f8 MUST-FIX + NWT 认 miss）
+- **miss**：上面 H1-H5 向量**全默认 p=1**（`storage-mass-oracle.mjs` 的 math 通用 plurality、对，但向量没喂 p>1）⇒ 我 5/5 对拍验的是 J2 的 **p=1 storage math、双方共享 p=1 假设** ⇒ 没逮到 J2 估算器**硬编 p=1**。而 **covenant UTXO（P2SH 35B + covenant_id 32B ⇒ 130B）plurality = 2**（源 `utxo_plurality` `mass/mod.rs:83-99`，`ceil((63+spk_len+(cov?32:0))/100)`，UTXO_CONST_STORAGE=32+4+8+8+1+2+8=63）⇒ J2 全 p=1 **低估 storage mass = 守卫的不安全方向**。
+- **修**：`storage-mass-oracle-plurality.mjs` 加 `pluralityOf(spkLen,hasCov)`（从源独立算，不调生产 helper）+ p>1 向量。**9/9**（见 `plurality-crosscheck-output.txt`）：
+  | 向量 | NWT oracle | J2 旧 p=1 | 判别 |
+  |---|---|---|---|
+  | **P1 plain(p1)→cov(p2) 同值 100M** | **30000**（=3C/v）| **0** | 🔴 逮 bug（不安全低估）|
+  | P2 cov→cov 异值 200M→100M | 20000 | 5000 | ✓ |
+  | P3 cov→2plain 200M→100M,99M | 101 | 15101 | ✓ |
+  | 两 cov 输出(outs_pl=4)+2plain 入 脱 relaxed | 60000 | 0 | 🔴 又一低估 |
+  | H4 p=1 回归 | 443 | 443 | ✓ 老向量仍对 |
+- J2 FIXED 估算器（加 plurality）应 == 本 oracle p>1 值；夹具 `scratch/_j2_mass_ub/plurality-fixtures.json` 的确切形由 NWT 从源独立算五组期望回 J2。
+- 文件：`storage-mass-oracle-plurality.mjs` sha256 `46d599b14767df25d8bcba8ec8a0c76f5ffab2041d39c5315c11eaca68478ad6`；`plurality-crosscheck-output.txt` sha256 `c443b76557c305c7529efa9126c1acc4e27d406c1373bffd67a141570610a189`。复算：`node docs/provenance/2026-08-28-redline7-mass/storage-mass-oracle-plurality.mjs` ⇒ `9 PASS / 0 FAIL`。

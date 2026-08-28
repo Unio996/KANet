@@ -1,0 +1,11 @@
+[PASS] pluralityOf(P2SH 35, false) = 1 = 1
+[PASS] pluralityOf(covenant 35+32, true) = 2 = 2
+[PASS] pluralityOf(P2PK 33, false) = 1 = 1
+[PASS] P1 plain→cov 同值(100M): 3C/v = 30000
+[PASS] P2 cov→cov 异值(200M→100M) = 20000
+[PASS] P3 cov→2plain(200M→100M,99M) = 101
+[PASS] P4 mixed general(2plain+1cov→1plain 299M) = 0
+[PASS] P4b general 3cov→8×1M = 7880000
+[PASS] H4 3-in/3-out 一般式(p=1 回归) = 443
+
+NWT storage-mass oracle v2(plurality) 自测: 9 PASS / 0 FAIL
