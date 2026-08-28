@@ -112,15 +112,16 @@ await t('V11a parseRejectMass: live 真文本 ⇒ {minFeeAuth 1636200, authorita
   assert.strictEqual(parseRejectMass('failed to verify the signature script: script ran, but verification failed'), null); assert.strictEqual(parseRejectMass(''), null); assert.strictEqual(parseRejectMass(undefined), null);
 });
 await t('V11b submit 抛拒费文本 ⇒ 记 source=reject authoritative_mass=K ub_ok 照算(auth_from_reject +1), 原错误原样重抛, Map 仍清; 抛非拒费文本 ⇒ inconclusive +1', async () => {
-  const big = '4ce0' + 'ab'.repeat(224); const s0 = { ...(_massObserveStats) };
+  const big = '4ce0' + 'ab'.repeat(224); const s0 = { ...(_massObserveStats) }; const size0 = __testOnlyMassObserveSize();   // V10b 故意留了 ≤256 条未 submit 记录 ⇒ 断言用【前后差为零】而非 size===0(首版写错, 3c0474b7 带红入库, 本 fix-up 改)
   const mkCase = (i) => mk({ version: 1, budget: 70, sigop: 0, sig: big, inVals: [100_000_000n, 50_000_000n, 30_000_000n], outVals: [150_000_000n + 1000n * BigInt(i), 27_000_000n] });
-  const runReject = async (i, text) => { const { tx, utxos } = mkCase(i); capture(() => __testOnlyAssertTxInvariants(utxos, tx, 'V11b', 'testnet-12')); const w = []; const ow = console.warn; console.warn = (...a) => w.push(a.join(' ')); const rpc = __testOnlyWrapRpcForMassObserve({ submitTransaction: async () => { throw new Error(text); }, getMempoolEntry: async () => ({}) }); let thrown = null; try { await rpc.submitTransaction({ transaction: tx }); } catch (e) { thrown = e; } finally { console.warn = ow; } return { w, thrown }; };
+  const { __testOnlyMassObserveHas } = await import('./p2sh.mjs');
+  const runReject = async (i, text) => { const { tx, utxos } = mkCase(i); capture(() => __testOnlyAssertTxInvariants(utxos, tx, 'V11b', 'testnet-12')); const txid = String(tx.id); assert.ok(__testOnlyMassObserveHas(txid), '记录应先进 Map'); const w = []; const ow = console.warn; console.warn = (...a) => w.push(a.join(' ')); const rpc = __testOnlyWrapRpcForMassObserve({ submitTransaction: async () => { throw new Error(text); }, getMempoolEntry: async () => ({}) }); let thrown = null; try { await rpc.submitTransaction({ transaction: tx }); } catch (e) { thrown = e; } finally { console.warn = ow; } assert.ok(!__testOnlyMassObserveHas(txid), 'finally 须删自己的记录'); return { w, thrown }; };
   const a = await runReject(1, REAL_REJECT); assert.ok(a.thrown && a.thrown.message === REAL_REJECT, '原错误须原样重抛');
   const la = a.w.find((s) => s.includes('source=reject')); assert.ok(la && la.includes('authoritative_mass=16362') && la.includes('minFee_auth=1636200') && /ub_ok=(true|false)/.test(la), JSON.stringify(a.w));
   const b = await runReject(2, 'failed to verify the signature script: script ran, but verification failed'); assert.ok(b.thrown);
   const lb = b.w.find((s) => s.includes('source=reject')); assert.ok(lb && lb.includes('ub_ok=inconclusive'), JSON.stringify(b.w));
   assert.strictEqual(_massObserveStats.auth_from_reject - s0.auth_from_reject, 1); assert.strictEqual(_massObserveStats.inconclusive - s0.inconclusive, 1);
-  assert.strictEqual(__testOnlyMassObserveSize(), 0, 'Map 须清');
+  assert.ok(__testOnlyMassObserveSize() <= size0, 'size 不得增长(cap 处插入逐出最旧 ⇒ 可能净减, 不可净增)');
 });
 await t('常量表 = 7b1e18cc 值且冻结', () => { assert.ok(Object.isFrozen(MASS_CONSTS)); assert.strictEqual(MASS_CONSTS.storage_mass_parameter, 1_000_000_000_000n); assert.strictEqual(MASS_CONSTS.grams_per_compute_budget_unit, 100n); assert.strictEqual(MASS_CONSTS.grams_per_sigop, 1000n); assert.strictEqual(MASS_CONSTS.transient_factor, 4n); });
 console.log(`\n${fail === 0 ? '✅' : '🔴'} tx-mass-ub: ${pass} PASS / ${fail} FAIL`);
