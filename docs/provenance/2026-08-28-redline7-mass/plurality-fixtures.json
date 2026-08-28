@@ -1,0 +1,27 @@
+{
+  "note": "Codex e6d3d2f8 plurality MUST-FIX · NWT oracle 夹具(原始 cell, 不含任何 J2 helper 派生量)。来源 7b1e18cc consensus/core/src/mass/mod.rs: utxo_plurality :83-99 = ceil((63 + |spk| + (has_covenant ? 32 : 0)) / 100); UtxoCell{plurality, amount} :137-160; calc_storage_mass :430-497: harmonic_outs = Σ C·p²/amount; relaxed 谓词 = outs_pl==1 ∨ (inputs.len()>2 ⇒ false) ∨ ins_pl==1 ∨ (outs_pl==2 ∧ ins_pl==2); relaxed ⇒ max(0, harmonic_outs − Σ C·p²/amount_in); general ⇒ mean_ins = Σamount_in / Σp_in (floor), arithmetic_ins = Σp_in × floor(C / mean_ins), max(0, harmonic_outs − arithmetic_ins)。C = 1e12。spk_hex 为 35B 标准 P2PK(p=1); has_covenant=true 时 p = ceil((63+35+32)/100) = 2。期望值为 J2 手算, NWT 请从源独立算后比对。",
+  "C": "1000000000000",
+  "spk_p2pk_35B": "2079be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798ac",
+  "groups": [
+    { "id": "G1-plain-to-covenant-same-value",
+      "cells": [ { "side": "in", "amount": "100000000", "spk_hex": "P2PK35", "has_covenant": false }, { "side": "out", "amount": "100000000", "spk_hex": "P2PK35", "has_covenant": true } ],
+      "expect": { "p_in": [1], "p_out": [2], "outs_pl": 2, "ins_pl": 1, "branch": "relaxed(ins_pl==1)", "harmonic_outs": "40000", "ins_term": "10000", "storage": "30000", "old_p1_impl": "0" } },
+    { "id": "G2-covenant-to-plain",
+      "cells": [ { "side": "in", "amount": "100000000", "spk_hex": "P2PK35", "has_covenant": true }, { "side": "out", "amount": "100000000", "spk_hex": "P2PK35", "has_covenant": false } ],
+      "expect": { "p_in": [2], "p_out": [1], "outs_pl": 1, "ins_pl": 2, "branch": "relaxed(outs_pl==1)", "harmonic_outs": "10000", "ins_term": "40000", "storage": "0", "old_p1_impl": "0" } },
+    { "id": "G3-covenant-to-covenant",
+      "cells": [ { "side": "in", "amount": "100000000", "spk_hex": "P2PK35", "has_covenant": true }, { "side": "out", "amount": "100000000", "spk_hex": "P2PK35", "has_covenant": true } ],
+      "expect": { "p_in": [2], "p_out": [2], "outs_pl": 2, "ins_pl": 2, "branch": "relaxed(outs_pl==2 ∧ ins_pl==2)", "harmonic_outs": "40000", "ins_term": "40000", "storage": "0", "old_p1_impl": "0" } },
+    { "id": "G4-mixed-2in-2out-general-branch",
+      "cells": [ { "side": "in", "amount": "150000000", "spk_hex": "P2PK35", "has_covenant": false }, { "side": "in", "amount": "50000000", "spk_hex": "P2PK35", "has_covenant": true }, { "side": "out", "amount": "100000000", "spk_hex": "P2PK35", "has_covenant": false }, { "side": "out", "amount": "99000000", "spk_hex": "P2PK35", "has_covenant": true } ],
+      "expect": { "p_in": [1, 2], "p_out": [1, 2], "outs_pl": 3, "ins_pl": 3, "branch": "general(outs_pl≠1 ∧ ins_pl≠1 ∧ ¬(2,2))", "harmonic_outs": "50404", "mean_ins": "66666666", "C_over_mean": "15000", "ins_term": "45000", "storage": "5404", "old_p1_impl": "0(relaxed 20101−26666)" } },
+    { "id": "G5-one-plain-in-two-covenant-outs",
+      "cells": [ { "side": "in", "amount": "200000000", "spk_hex": "P2PK35", "has_covenant": false }, { "side": "out", "amount": "100000000", "spk_hex": "P2PK35", "has_covenant": true }, { "side": "out", "amount": "99000000", "spk_hex": "P2PK35", "has_covenant": true } ],
+      "expect": { "p_in": [1], "p_out": [2, 2], "outs_pl": 4, "ins_pl": 1, "branch": "relaxed(ins_pl==1)", "harmonic_outs": "80404", "ins_term": "5000", "storage": "75404", "old_p1_impl": "15101" } }
+  ],
+  "hand_calc": {
+    "G1": "harm_outs = C·2²/1e8 = 40000; ins = C·1²/1e8 = 10000 ⇒ 30000",
+    "G4": "harm_outs = C·1/1e8 + C·4/9.9e7 = 10000 + 40404 = 50404; mean = 200000000/3 = 66666666; C/mean = 15000; arith = 3×15000 = 45000 ⇒ 5404",
+    "G5": "harm_outs = C·4/1e8 + C·4/9.9e7 = 40000 + 40404 = 80404; ins = C/2e8 = 5000 ⇒ 75404"
+  }
+}
