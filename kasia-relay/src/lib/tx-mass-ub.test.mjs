@@ -3,15 +3,18 @@
 //   ⇒ 期望值 = 按 7b1e18cc mod.rs:430-497 手算(数直接代公式), wasm 值只记录; 第二独立实现由 NWT 从源另写(Bettor 条件②); 链上实证 READY 后 getMempoolEntry。
 import assert from 'node:assert';
 import * as k from 'kaspa-wasm';
-import { estimateMassUpperBound, normalizeTx, MASS_CONSTS } from './tx-mass-ub.mjs';
+import { estimateMassUpperBound, normalizeTx, MASS_CONSTS, utxoPlurality, maxPlurality, storageMass } from './tx-mass-ub.mjs';
+import { readFileSync } from 'node:fs';
 
 const priv = new k.PrivateKey('0'.repeat(63) + '2'); const addr = priv.toPublicKey().toAddress('testnet-12').toString();
 const spk = k.payToAddressScript(new k.Address(addr));
-const utxo = (v, i = 0) => ({ address: new k.Address(addr), outpoint: { transactionId: '11'.repeat(32), index: i }, amount: v, value: v, scriptPublicKey: spk, blockDaaScore: 1n, isCoinbase: false });
-const mk = ({ version = 0, budget = null, sigop = 1, cov = false, sig = '41' + 'ab'.repeat(65), outVals = [100_000_000n, 99_000_000n], inVals = [200_000_000n] }) => {
-  const utxos = inVals.map((v, i) => utxo(v, i));
+// inCov[i]=true ⇒ 该 matched UTXO entry 带 covenantId(生产 _psInputCovId 读法的第一级 entry.covenantId 用不上——RPC entry 顶层 covenantId); outCov[i]=true ⇒ 该输出带 CovenantBinding
+const utxo = (v, i = 0, hasCov = false) => ({ address: new k.Address(addr), outpoint: { transactionId: '11'.repeat(32), index: i }, amount: v, value: v, scriptPublicKey: spk, blockDaaScore: 1n, isCoinbase: false, ...(hasCov ? { covenantId: 'e0'.repeat(32) } : {}) });
+const mk = ({ version = 0, budget = null, sigop = 1, cov = false, sig = '41' + 'ab'.repeat(65), outVals = [100_000_000n, 99_000_000n], inVals = [200_000_000n], inCov = [], outCov = null }) => {
+  const utxos = inVals.map((v, i) => utxo(v, i, !!inCov[i]));
+  const oc = outCov ?? outVals.map((_, i) => cov && i === 0);
   const tx = new k.Transaction({ version, inputs: utxos.map((u, i) => ({ previousOutpoint: { transactionId: '11'.repeat(32), index: i }, signatureScript: sig, sequence: 0n, sigOpCount: sigop, ...(budget != null ? { computeBudget: budget } : {}), utxo: u })),
-    outputs: outVals.map((v, i) => (cov && i === 0) ? new k.TransactionOutput(v, spk, new k.CovenantBinding(0, new k.Hash('e0'.repeat(32)))) : new k.TransactionOutput(v, spk)), lockTime: 0n, gas: 0n, subnetworkId: '0'.repeat(40), payload: '' });
+    outputs: outVals.map((v, i) => oc[i] ? new k.TransactionOutput(v, spk, new k.CovenantBinding(0, new k.Hash('e0'.repeat(32)))) : new k.TransactionOutput(v, spk)), lockTime: 0n, gas: 0n, subnetworkId: '0'.repeat(40), payload: '' });
   return { tx, utxos };
 };
 const wasmTN10 = (tx) => BigInt(k.calculateTransactionMass('testnet-10', tx));
@@ -39,9 +42,41 @@ await t('V6 bshard consolidate 真形(3-in v1 budget=70 两 224B redeem, 2-out):
   const big = '4ce0' + 'ab'.repeat(224); const { tx, utxos } = mk({ version: 1, budget: 70, sigop: 0, sig: big, inVals: [100_000_000n, 50_000_000n, 30_000_000n], outVals: [150_000_000n, 28_000_000n] });
   const e = estimateMassUpperBound(tx, utxos); const minFee = e.mass * 100n; assert.ok(minFee <= 3n * 1_000_000n, `minFee ${minFee} > 3,000,000`); console.log(`   consolidate: mass=${e.mass} compute=${e.compute} storage=${e.storage} transient=${e.transient} minFee=${minFee}`);
 });
-await t('V7 边界 fail-loud: 输入 spk > 100B ⇒ PLURALITY_UNSUPPORTED; 零值输出 ⇒ throw', () => {
-  assert.throws(() => estimateMassUpperBound(normalizeTx({ version: 0, inputs: [{ signatureScript: '', sigOpCount: 0, amount: 1_000_000n, spkLen: 101n }], outputs: [{ value: 1000n, spk: '00' }] })), /PLURALITY_UNSUPPORTED/);
+await t('V7 边界 fail-loud: 输入 spk 10,100B ⇒ p=102 > max_plurality(101) ⇒ PLURALITY_OUT_OF_RANGE; spk 101B ⇒ p=2 正常算; 零值输出 ⇒ throw', () => {
+  assert.strictEqual(maxPlurality(), 101n);
+  assert.throws(() => estimateMassUpperBound(normalizeTx({ version: 0, inputs: [{ signatureScript: '', sigOpCount: 0, amount: 1_000_000n, spkLen: 10_100n }], outputs: [{ value: 1000n, spk: '00' }] })), /PLURALITY_OUT_OF_RANGE/);
+  assert.doesNotThrow(() => estimateMassUpperBound(normalizeTx({ version: 0, inputs: [{ signatureScript: '', sigOpCount: 0, amount: 1_000_000n, spkLen: 101n }], outputs: [{ value: 1000n, spk: '00' }] })));
   assert.throws(() => estimateMassUpperBound(normalizeTx({ version: 0, inputs: [{ signatureScript: '', sigOpCount: 0, amount: 1_000_000n, spkLen: 35n }], outputs: [{ value: 0n, spk: '00' }] })), /零值/);
+});
+// ── P 系(Codex e6d3d2f8 plurality MUST-FIX): 夹具 scratch/_j2_mass_ub/plurality-fixtures.json 五组 + NWT 独立 oracle 已给数的形; 每格带"强制 p=1 ⇒ 旧值"必红对照 ──
+await t('P0 utxoPlurality: 35B P2PK p=1; 同 spk + covenant ⇒ (63+35+32)/100 ⇒ p=2; 37B+cov ⇒ 2; 出处 mod.rs:83-99', () => {
+  assert.strictEqual(utxoPlurality(35n, false), 1n); assert.strictEqual(utxoPlurality(35n, true), 2n); assert.strictEqual(utxoPlurality(37n, true), 2n); assert.strictEqual(utxoPlurality(137n, false), 2n); assert.strictEqual(utxoPlurality(38n, false), 2n);
+});
+const FIX = JSON.parse(readFileSync('D:/kanet-tn12/scratch/_j2_mass_ub/plurality-fixtures.json', 'utf8'));
+const cellsToTx = (cells) => { const ins = cells.filter((c) => c.side === 'in'), outs = cells.filter((c) => c.side === 'out'); return mk({ inVals: ins.map((c) => BigInt(c.amount)), inCov: ins.map((c) => c.has_covenant), outVals: outs.map((c) => BigInt(c.amount)), outCov: outs.map((c) => c.has_covenant), sigop: 0 }); };
+for (const g of FIX.groups) {
+  await t(`P-${g.id}: storage === 手算 ${g.expect.storage} (${g.expect.branch}); 输入 cov 取自 matched entry.covenantId; 强制 p=1 ⇒ 旧值 ${g.expect.old_p1_impl}(必红对照)`, () => {
+    const { tx, utxos } = cellsToTx(g.cells); const e = estimateMassUpperBound(tx, utxos);
+    assert.deepStrictEqual(e.plurality.ins.map(String), g.expect.p_in.map(String)); assert.deepStrictEqual(e.plurality.outs.map(String), g.expect.p_out.map(String));
+    assert.strictEqual(e.storage, BigInt(g.expect.storage));
+    const old = storageMass(normalizeTx(tx, utxos), { __testOnlyForcePlurality1: true }); assert.strictEqual(old, BigInt(String(g.expect.old_p1_impl).replace(/\(.*$/, '')));
+    if (g.expect.storage !== String(g.expect.old_p1_impl).replace(/\(.*$/, '')) assert.notStrictEqual(e.storage, old, '必红对照: p=1 强制值应不同');
+  });
+}
+await t('P-NWT oracle 三形(NWT 从源独立给数): cov→cov 200M→100M = 20000; cov→2plain 200M→(100M,99M) = 101; plain→cov 100M = 30000', () => {
+  const a = mk({ inVals: [200_000_000n], inCov: [true], outVals: [100_000_000n], outCov: [true], sigop: 0 }); assert.strictEqual(estimateMassUpperBound(a.tx, a.utxos).storage, 20000n);
+  const b = mk({ inVals: [200_000_000n], inCov: [true], outVals: [100_000_000n, 99_000_000n], outCov: [false, false], sigop: 0 }); assert.strictEqual(estimateMassUpperBound(b.tx, b.utxos).storage, 101n);
+  const c = mk({ inVals: [100_000_000n], inCov: [false], outVals: [100_000_000n], outCov: [true], sigop: 0 }); assert.strictEqual(estimateMassUpperBound(c.tx, c.utxos).storage, 30000n);
+});
+await t('P-input-cov-source: 输入 covenant 只从 matched entry 取——同一 tx 花费一个"看起来像 covenant"的 P2SH 但 entry 无 covenantId ⇒ p=1; entry 有 ⇒ p=2', () => {
+  const a = mk({ inVals: [100_000_000n], inCov: [false], outVals: [100_000_000n], outCov: [false], sigop: 0 }); assert.deepStrictEqual(estimateMassUpperBound(a.tx, a.utxos).plurality.ins, [1n]);
+  const b = mk({ inVals: [100_000_000n], inCov: [true], outVals: [100_000_000n], outCov: [false], sigop: 0 }); assert.deepStrictEqual(estimateMassUpperBound(b.tx, b.utxos).plurality.ins, [2n]);
+});
+await t('P-prod-shapes: genesis(plain in → cov out + change) 与 consolidate(cov in ×2 + fee in → cov out + change) 的 storage 用 p 算且 ≥ p=1 值', () => {
+  const g = mk({ version: 1, budget: 70, sigop: 0, inVals: [200_000_000n], inCov: [false], outVals: [100_000_000n, 99_000_000n], outCov: [true, false] }); const eg = estimateMassUpperBound(g.tx, g.utxos); const og = storageMass(normalizeTx(g.tx, g.utxos), { __testOnlyForcePlurality1: true });
+  assert.ok(eg.storage >= og, `genesis ${eg.storage} < p1 ${og}`); console.log(`   genesis: storage p=${eg.storage} (p1 ${og}) mass=${eg.mass}`);
+  const big = '4ce0' + 'ab'.repeat(224); const c = mk({ version: 1, budget: 70, sigop: 0, sig: big, inVals: [100_000_000n, 50_000_000n, 30_000_000n], inCov: [true, true, false], outVals: [150_000_000n, 28_000_000n], outCov: [true, false] }); const ec = estimateMassUpperBound(c.tx, c.utxos); const oc = storageMass(normalizeTx(c.tx, c.utxos), { __testOnlyForcePlurality1: true });
+  assert.ok(ec.storage >= oc); console.log(`   consolidate: storage p=${ec.storage} (p1 ${oc}) compute=${ec.compute} mass=${ec.mass} minFee=${ec.mass * 100n}`);
 });
 // V8: 生产 _assertTxInvariants observe 路径(经 __testOnlyAssertTxInvariants): wasm panic ⇒ 本地上界 ⇒ 结构化日志; 低费 would_reject=true 但【不 throw】; 正常费 would_reject=false
 const { __testOnlyAssertTxInvariants } = await import('./p2sh.mjs');
