@@ -4,7 +4,8 @@
 import assert from 'node:assert';
 import * as k from 'kaspa-wasm';
 import { estimateMassUpperBound, normalizeTx, MASS_CONSTS, utxoPlurality, maxPlurality, storageMass } from './tx-mass-ub.mjs';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 const priv = new k.PrivateKey('0'.repeat(63) + '2'); const addr = priv.toPublicKey().toAddress('testnet-12').toString();
 const spk = k.payToAddressScript(new k.Address(addr));
@@ -48,11 +49,17 @@ await t('V7 边界 fail-loud: 输入 spk 10,100B ⇒ p=102 > max_plurality(101) 
   assert.doesNotThrow(() => estimateMassUpperBound(normalizeTx({ version: 0, inputs: [{ signatureScript: '', sigOpCount: 0, amount: 1_000_000n, spkLen: 101n }], outputs: [{ value: 1000n, spk: '00' }] })));
   assert.throws(() => estimateMassUpperBound(normalizeTx({ version: 0, inputs: [{ signatureScript: '', sigOpCount: 0, amount: 1_000_000n, spkLen: 35n }], outputs: [{ value: 0n, spk: '00' }] })), /零值/);
 });
-// ── P 系(Codex e6d3d2f8 plurality MUST-FIX): 夹具 scratch/_j2_mass_ub/plurality-fixtures.json 五组 + NWT 独立 oracle 已给数的形; 每格带"强制 p=1 ⇒ 旧值"必红对照 ──
+// ── P 系(Codex e6d3d2f8 plurality MUST-FIX): 夹具 = 仓内 docs/provenance/2026-08-28-redline7-mass/plurality-fixtures.json(NWT e0f76f99 三方对拍版; Codex c621d34e R7-A: 不再读 gitignored scratch 副本, 相对 import.meta.url 解析, clean checkout 可跑) 五组 + NWT 独立 oracle 已给数的形; 每格带"强制 p=1 ⇒ 旧值"必红对照 ──
 await t('P0 utxoPlurality: 35B P2PK p=1; 同 spk + covenant ⇒ (63+35+32)/100 ⇒ p=2; 37B+cov ⇒ 2; 出处 mod.rs:83-99', () => {
   assert.strictEqual(utxoPlurality(35n, false), 1n); assert.strictEqual(utxoPlurality(35n, true), 2n); assert.strictEqual(utxoPlurality(37n, true), 2n); assert.strictEqual(utxoPlurality(137n, false), 2n); assert.strictEqual(utxoPlurality(38n, false), 2n);
 });
-const FIX = JSON.parse(readFileSync('D:/kanet-tn12/scratch/_j2_mass_ub/plurality-fixtures.json', 'utf8'));
+const FIX_PATH = fileURLToPath(new URL('../../../docs/provenance/2026-08-28-redline7-mass/plurality-fixtures.json', import.meta.url));
+await t('P-src 夹具来源自检(R7-A): 路径由 import.meta.url 相对解析、落在仓内 docs/provenance、不含 scratch 段、文件存在(clean checkout 也在)', () => {
+  assert.ok(/[\\/]docs[\\/]provenance[\\/]2026-08-28-redline7-mass[\\/]plurality-fixtures\.json$/.test(FIX_PATH), FIX_PATH);
+  assert.ok(!/[\\/]scratch[\\/]/.test(FIX_PATH), '夹具路径不得指向 scratch: ' + FIX_PATH);
+  assert.ok(existsSync(FIX_PATH), '仓内夹具不存在: ' + FIX_PATH);
+});
+const FIX = JSON.parse(readFileSync(FIX_PATH, 'utf8'));
 const cellsToTx = (cells) => { const ins = cells.filter((c) => c.side === 'in'), outs = cells.filter((c) => c.side === 'out'); return mk({ inVals: ins.map((c) => BigInt(c.amount)), inCov: ins.map((c) => c.has_covenant), outVals: outs.map((c) => BigInt(c.amount)), outCov: outs.map((c) => c.has_covenant), sigop: 0 }); };
 for (const g of FIX.groups) {
   await t(`P-${g.id}: storage === 手算 ${g.expect.storage} (${g.expect.branch}); 输入 cov 取自 matched entry.covenantId; 强制 p=1 ⇒ 旧值 ${g.expect.old_p1_impl}(必红对照)`, () => {
