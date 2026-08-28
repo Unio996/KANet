@@ -3131,3 +3131,15 @@ WHERE id IN (...) AND protocol_status IN ('verifying', 'pending_bettors')
 - 🔨 **修法（脚本侧, e2e 已落 C4 fix-up）**: ① `DB_PATH` 未设时要求 `process.cwd()` 以 `kasia-console` 结尾, 否则 die 并打印解析后的绝对路径; ② 打开后断言 `relay_nodes` 与 `u1_identity_challenge` 存在且 `relay_nodes` 非空, 否则 die "这不是 live 库"; ③ dry-run 输出带 `db=<绝对路径>`。
 - 🔨 **根治（`client.js` 侧, 2026-08-28 Bettor/NWT 裁·入口感知 throw 形）**: `DB_PATH` 有 ⇒ 用之; 无 ⇒ **仅当入口是 console**（`argv[1]` 以 `kasia-console/src/index.js` 结尾或 `KANET_CONSOLE_ENTRY=1`）锚定 `import.meta.url` 的 `../../data/console.db` 并回写 `process.env.DB_PATH`（子进程继承）; **其它入口无 `DB_PATH` ⇒ throw**（`mkdirSync` 之前, 零建文件）。🔴 **为什么是 throw 不是"无 DB_PATH 即 live"**: 后者会把 15 个历史写脚本（smoke `DELETE`/测试 `INSERT`, 05–06 月, 从仓根裸跑时一直在打杂库）从"打杂库"升成"打 live"; throw 让它们**结构上**打不到 live, 20 个只读脚本以后显式 `DB_PATH=…` 是一次性成本。向量 `src/db/client.default-path.test.mjs` V1–V6。
 - 🔨 **判据（报告侧）**: "库里没有 X"这类否定性读数, 先问**读的是哪个文件**——否定性结论对"读错对象"最没有抵抗力（读错了也是"没有"）。阳性对照: 同一连接先读一个**必存在**的表/行, 读不到 ⇒ 是库不对, 不是 X 不在。
+
+## 规则 75 —— 非提权 `Get-Process` 对 SYSTEM 进程的 `CPU` / `TotalProcessorTime` / `StartTime` 恒回 0 / null：**「0」与「读不到」在这个 API 上不可区分**，据它判"空闲/同进程"是假零（2026-08-28 · J1 与 Bettor 同日各撞一次 · J1 自纠）
+
+- **实录**: kaspad/console/llama 都跑在 SYSTEM（`reference-console-runs-as-system-not-admin`）。J1 用 `(Get-Process kaspad).CPU` 连采两次都是 0.0 ⇒ 判"CPU 空闲 ⇒ 瓶颈是读放大 ⇒ 改 `--ram-scale=3.0` 并重启"——**IBD 期擅自重启事故（COORD-LEDGER (706)）的动机就建在这个假零上**；改用 CIM `KernelModeTime+UserModeTime` 重测实为 787%/128% 单核。同日 Bettor 用 `TotalProcessorTime` 差分得 0% ⇒ 说"重块区本机闲、瓶颈在取块"——CIM 重测 97% 单核（轻块区），"本机闲"撤回（(708)）。
+- 🔴 **判据**: 资源读数**恒 0 / 恒 null 先怀疑测法，再谈空闲**。报告里带 CPU/内存/StartTime 的读数，必须写明**用哪个 API 取的**；审的人把"API 对该进程权限层能不能读"列为核项。同族假零: `Get-Process(...).StartTime` 对 SYSTEM 进程 = null（`scripts/tn12-mining-watchdog-v2.ps1:523` 用它判同进程，catch 回 `$false`——若两者权限层不同即恒"不是同进程"）。
+- 🔨 **正确测法（非提权可读）**:
+  ```powershell
+  function T { (Get-CimInstance Win32_Process -Filter "Name='kaspad.exe'" | % { [double]$_.KernelModeTime + [double]$_.UserModeTime } | Measure-Object -Sum).Sum }
+  $a=T; Start-Sleep 5; $b=T; (($b-$a)/1e7)/5*100    # 单核百分比，多核可 >100
+  ```
+  进程起始时刻用 CIM `CreationDate`；父链用 CIM `ParentProcessId`（规则 72 同族、`reference-wmi-spawned-process-parent-chain-…`）。
+- 同族: 规则 70（「从未执行」≠「没留痕」——这里是「读到 0」≠「是 0」）、规则 72（探针失效伪装成对象故障——这里是测法失效伪装成对象空闲）、memory `reference-get-process-cpu-is-zero-for-system-processes-non-elevated-use-cim-kernel-user-time-delta`。
