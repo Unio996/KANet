@@ -30,6 +30,7 @@
 2. **批：阶段 1 observe**（J2 6ed90a7a + 6a4afeb2 + 9a176c9d + a363d0bd + 4d4ec306 + c7f10205；NWT 三轮 GREEN 含独立 mass oracle 5/5 对拍 `docs/provenance/2026-08-28-redline7-mass/`；Bettor 亲跑 25/25）：`tx-mass-ub.mjs` 按 live 节点 commit 7b1e18cc 公式算 mass 上界（13 行上界证明表），wasm panic 时用之；`MASS_FLOOR_MODE='observe'` **只打结构化日志不拒任何交易**（`[mass-floor:observe]` + `[mass-floor:observe:auth]`，权威对照两源 = `getMempoolEntry.mass` + 拒绝文本解析，`ub_ok/inconclusive/evicted` 计数）；零行为变化。
 3. **部署**：随**维护窗** relay 重启生效（`docs/2026-08-28-postsync-maintenance-window-runbook-v0.4.md` §red-line-7-observe），窗在本机 READY + J2 T+125 证据之后；IBD 期不动任何进程。
    > 📌 状态注记（2026-08-29 05:2x Z · Bettor · 出处 COORD-LEDGER (705)）：Codex 桥 e6d3d2f8 自发跟审判 **本地估算器 storage mass 忽略 UTXO plurality**（covenant UTXO ≈130 B ⇒ p=2；现按 p=1 ⇒ 低估 = 非上界）⇒ **enforce HOLD**；observe 可作诊断但须标 non-authoritative。Bettor 处置：**observe 段部署改为 plurality MUST-FIX（七条）NWT GREEN 之后**（仍在维护窗随 relay 重启），不改本条第 2 点"批"的性质。
+   > 📌 追加（2026-08-29 05:3x Z）：plurality MUST-FIX = J2 **b9a5b7af**（侧分支 2f766082）NWT GREEN（五夹具三方独立一致 30000/0/0/5404/75404 + `max_plurality=101` 保险 + P-prod genesis 45101）；provenance `docs/provenance/2026-08-28-redline7-mass/`（8f84a625 + e0f76f99）⇒ **observe 段部署前置已满足**，仍待维护窗；enforce 审尺 §5-bis 加 p>1 覆盖。
 4. **阶段 2 enforce 另报备**：7 天 observe 数据须过 NWT §5-bis 审尺（`ub_ok` 100% / `inconclusive` 0 / `evicted` 0 / estimator-throw 0 + 七形覆盖各 ≥1）+ Codex 五条 ⇒ 再单点报 Owner 批 ⇒ 只翻 `MASS_FLOOR_MODE` 常量。
 
 ### D-013 Owner 三决 (2026-08-27 · Owner 原话「§10 GO，B_adv 只定语义不钉数，watchdog v0.3 批」· Bettor 记账)
