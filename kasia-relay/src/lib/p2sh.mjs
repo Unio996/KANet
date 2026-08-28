@@ -69,6 +69,7 @@ function _observeFromReject(txid, errText) {
   console.warn(`[mass-floor:observe:auth] site=${rec.site} txid=${txid} source=reject authoritative_mass=${p.authoritativeMass} mass_ub=${rec.ub} ub_ok=${ok} minFee_auth=${p.minFeeAuth} actualFee=${rec.fee} local_minFee=${rec.minFee} local_would_reject=${rec.fee < rec.minFee} totals=ok:${_massObserveStats.ub_ok}/viol:${_massObserveStats.ub_violation}/inc:${_massObserveStats.inconclusive}/src:mempool=${_massObserveStats.auth_from_mempool},reject=${_massObserveStats.auth_from_reject}`);
 }
 export const __testOnlyMassObserveSize = () => _massObserve.size;   // 仅可测性
+export const __testOnlyMassObserveHas = (txid) => _massObserve.has(txid);   // 仅可测性(cap 处插入会逐出最旧 ⇒ 泄漏断言按 txid 而非 size)
 function _massObserveSet(txid, rec) {
   _massObserve.set(txid, rec);
   while (_massObserve.size > _MASS_OBSERVE_CAP) { const oldest = _massObserve.keys().next().value; _massObserve.delete(oldest); _massObserveStats.evicted++; }
