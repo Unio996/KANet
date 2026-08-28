@@ -154,8 +154,9 @@ KANet-KaspadWatchdog 任务保持 **Disabled**; 启用前置(全满足才 Enable
 5. Bettor 令。
 以上齐 ⇒ J1 提权 Enable 任务; 启用后首轮观察 watchdog 对 daa=0 IBD 判 SYNCING 不重启(即已修的 8/23 型误判)。
 
-## §red-line-7-observe(relay 重启后检查 · 条件: Owner 已批红线 7 observe 并随本窗部署)
-> NWT 判定: observe 段随 relay 重启部署(J2 6ed90a7a, coord/redline7-observe), 盯法放本 runbook 不进 first-hour。**仅当 Owner 已批 observe 且本窗部署了它**才执行本节; 未批 ⇒ 跳过。
+## §red-line-7-observe(relay 重启后检查 · 条件: Owner 已批红线 7 observe + plurality MUST-FIX NWT GREEN + 随本窗部署)
+> NWT 判定: observe 段随 relay 重启部署(J2 6ed90a7a, coord/redline7-observe), 盯法放本 runbook 不进 first-hour。**仅当 Owner 已批 observe、plurality MUST-FIX NWT GREEN、且本窗部署了它**才执行本节; 未满足 ⇒ 跳过。
+> 🔴 **plurality MUST-FIX 前置**(Codex 桥 e6d3d2f8 / D-014 注记): 本地估算器漏 UTXO plurality(covenant UTXO p=2 被按 p=1 算 = 低估)——未修就部署 observe 会用错估算器 ⇒ 部署前须 plurality MUST-FIX NWT GREEN(Owner"批"不变, 但部署门加这一条)。
 1. **阳性对照**: relay 重启后日志出现 `[mass-floor:observe]` 与 `[mass-floor:observe:auth]` 行——**至少一笔 covenant 提交打出一行**。**零行 = observe 没生效 ⇒ 回报 Bettor**(部署没接上)。
 2. **首读计数**: `totals=ok/viol/inc` + `evicted` + `local-ub unavailable`(estimator throw) 计数。
 3. 🔴 **`inconclusive`(inc) = 100% ⇒ 立即报 Bettor**: vendored `IMempoolEntry` 可能无 mass 字段, 权威口须改, **不算通过**(observe 全程无法判 = 形同没装)。
