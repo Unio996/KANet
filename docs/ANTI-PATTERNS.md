@@ -3188,3 +3188,15 @@ WHERE id IN (...) AND protocol_status IN ('verifying', 'pending_bettors')
   5. **别顺手加不适用的告警**。同一套里的"剪枝点冻结"判据对**新节点**有意义（追不上剪枝点移动），对**已有 190 万块的同步中节点**没有 —— 剪枝点本就周期性移动，接进去只会制造告警疲劳，把真信号淹掉。
 - 🔧 **机制**: `scripts/j1-younio-tick.ps1`（告警 A 重启频次 / B 剪枝点冻结 / C blockCount 零增量）、`scripts/j1-da9-tick.ps1`（接告警 A，只读探针 `scratch/j1-remote/ibdloop.ps1`）。对照实测坐实变量：同二进制、同 peer、同网络下 da9(61GB) 25.9h 重启 0 / 断连 0 / 重验 0，younio(7.6GB) 148h 重启 67 / 断连 103 / 重验 16064。
 - **同族**: 规则 **60**（观察窗口必须长于故障周期，否则"干净"是假的）—— 本条是它的**指标维度**对偶：窗口够长也没用，如果**测的量本身在故障态下是满的**。规则 **70**（"它从未执行过"与"它没留下痕迹"是两个命题）、规则 **72**（探针失效会伪装成被探测对象故障 ⇒ 探针自身也要留痕）、规则 **75**（"0"与"读不到"在某些 API 上不可区分）。
+
+## 规则 81 —— `git worktree remove` / 任何递归删除**顺着 junction/symlink 进目标**：删 worktree 删掉了 live 主树的 `node_modules`（2026-08-29 · J2 自伤）
+- ❌ **错误**：侧 worktree 为了跑测试，把 `kasia-console/node_modules` 做成 **junction → `D:\kanet-tn12\kasia-console\node_modules`**（live 主树）。分支合完后 `git worktree remove scratch/_wt_tog`，报 `error: failed to delete '…': Invalid argument`，当"Windows 删目录失败"处理，`rm -rf` 收尾。
+- 💥 **后果**：git（2.53.0.windows.2）的 `remove_dir_recursively` **不识别 reparse point**，顺着 junction 进了 live `node_modules`，按目录序删了 **85 个顶层包**（全部 `@*` scope：`@fastify/static|view|formbody`、`@ethersproject/*`、`@noble/*`、`@scure/*`、`@solana/*`… + `abitype`…`bech32`），撞到 `better-sqlite3/build/Release/better_sqlite3.node`（被 live console 占用）EINVAL 才中止。console 在跑（已加载模块在内存）所以**没有任何症状**；但 `import('ethers')` / `import('@solana/web3.js')` 这些**动态** import 立刻 FAIL（`trading.js:123/:167`、`chain-balance.js:20`、`relay.js:558…`），**下次重启必起不来**。
+- 🧠 **为什么会犯**：(1) "报错 = 没删成"的直觉——**递归删除报错 = 删了一部分才停**；(2) junction 在 Windows 上对多数 API"像目录"，`ls -la` 在 Git Bash 里显示成 `->` 符号链接让人以为"跟 symlink 一样安全"（GNU `rm -rf` 确实不跟，但 git 的删已经先跑了）；(3) 目标是 gitignored 的 `node_modules`，`git status` 干净 ⇒ 没有任何闸会亮。
+- 🔨 **怎么做才对**：
+  1. **删含链的 worktree 之前，先把链拆掉**：`Get-ChildItem -Recurse -Force <wt> | ? LinkType` 列出全部 junction/symlink；对每个 `[System.IO.Directory]::Delete($p, $false)`（非递归 ⇒ 只删 reparse point；真目录非空会抛，天然安全）或 `cmd /c rmdir <link>`；**再** `git worktree remove`。
+  2. **任何递归删除报错后，第一件事是对【目标】对账，不是重试删【源】**：`node_modules` 对 `package-lock.json` 顶层项逐个 `existsSync`（本例 278 项缺 85，缺的是**字母序前缀且止于被占用文件** = 递归删除中止的签名）。
+  3. **修复只用加法**：`npm install --prefer-offline --no-audit --no-fund`（按 lock 补缺，不动已有）；**禁 `npm ci`**（先整删 node_modules，撞占用文件失败且伤在跑进程）；**修好前不重启进程**（已加载的还在，重启 = 全丢）。
+  4. **侧 worktree 要跑测试，各自 `npm install --prefer-offline` 独立装**，不要 junction 到 live 树的任何目录（`node_modules` / `data` / `logs` 同理）。
+- 🔧 **自查命令**（一行判有没有链指向 live 树）：`Get-ChildItem D:\kanet-tn12\scratch -Recurse -Force -Depth 3 | ? { $_.LinkType } | % { "$($_.FullName) -> $($_.Target)" }`
+- **同族**：规则 **12**（接位扫描漏步）的"删除侧"对偶；`feedback-verify-target-path-is-live-before-operate`（操作前确认目标是不是 live）—— 本条的教训是**链的目标也是"目标"**。memory：`feedback-git-worktree-remove-traverses-junctions-and-deletes-the-live-node-modules-target`。
