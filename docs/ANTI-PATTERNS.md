@@ -3173,3 +3173,16 @@ WHERE id IN (...) AND protocol_status IN ('verifying', 'pending_bettors')
   - 也合法：两侧同 `datetime()`（`datetime(created_at) < datetime('now', …)`，同样废索引）；`strftime('%Y-%m-%dT%H:%M:%S', 'now', …)` 造 T 形（脆：毫秒/Z 后缀差一位又变字符串比较，不推荐）；参数绑定 JS 侧 `toISOString()`（同形，走索引，但 `-30 minutes` 的算术挪到 JS）。
   - **边界向量必写 29/31 min 两侧**（`broker-hold-monitor.test.mjs` X 系列、`broker-intake-watcher.prefilter.test.mjs` X1/X2）：只写"命中/不命中"各一条抓不到形错。
 - 🔧 **机制**: `scripts/lint-kanet.mjs` `R-SQL-TIME-STRINGCMP`（只扫 staged；`scripts/sql-time-stringcmp-baseline.json` 存量 166 命中/76 文件，只减不增硬 ratchet，无授权通道；改到某文件顺手把它的计数减掉）。同族 memory `reference-sqlite-iso-timestamp-string-compare-trap`、规则 70（假绿灯 = "没显形"≠"没风险"）、`feedback-backtick-in-sql-comment-breaks-template-literal`（同批 `R-JS-SYNTAX` 的由来）。
+
+## 规则 80 —— 「进程活着 / 日志在滚 / CPU 满载」这三个健康信号在**死循环**里**全是绿的**：区分"在前进"与"在原地打转"，必须监测**推倒重来的次数**，而不是**活动量**（2026-08-29 · younio TN12 节点 9 天 IBD 死循环无人发现 · J1 全量日志实核）
+
+- **实录**: younio 的 TN12 节点 2026-08-20 建库，到 08-29 共 **9 天从未完成过一轮 IBD**，期间**无人察觉**。148 小时日志实测：`Starting IBD with headers proof` **67 次**（中位间隔 **22.8 分钟** = 每 23 分钟推倒重来）、`peer connection is closed` 103 次、`timeout expired after 120s` 77 次、`Validating level`（重验剪枝点证明）**16064 次**、而真正摸到块体阶段（`searching missing bodies`）**仅 4 次**。全程 CPU 满载、日志每 10 秒一行、`blockCount` 在涨 —— **当时用的三个健康信号一个都没响**。证据留在文件名里：第一个日志就叫 `kaspad.log.loop-7h`，建库当天就有人在查循环，之后 9 天这条线索没有变成任何告警。
+- 🔴 **判据**: 凡「重试 / 重连 / 重建」型状态机（IBD、reconnect loop、rebuild、resync、catch-up、任何"失败就从头再来"的流程），健康度**不能只看活动量**（CPU / IO / 日志行数 / 计数器增长 / 进程存活）。**因为循环里活动量是满的** —— 它一直在干活，只是每一轮都白干。必须另有一个**周期重启计数**。
+- 🔨 **怎么写才对**:
+  1. **找到该状态机"推倒重来"的日志指纹**，按时间窗计次。IBD 是 `Starting IBD with headers proof`；其它状态机各有各的（重连是 `reconnecting`、重建是 `rebuilding from scratch`）。指纹要选**只在"从头开始"时才打**的那一行，不能选"在进行中"的行。
+  2. **单次不告警，重复才是循环**。单次重启是正常协商；本例阈值取 **6h 内 >= 2 次**。
+  3. **告警文案必须写明"这是发散不是慢"**。本例机制：内存不足 ⇒ 证明校验极慢 ⇒ 校验期 p2p 无响应 ⇒ peer 断连 ⇒ IBD 中止 ⇒ 从头再验 ⇒ **但链在前进、剪枝点在移动** ⇒ 每一轮起点都比上一轮更远。**缺口逐轮变大**。不写清楚，运维看到告警的第一反应是"再等等"，而等待恰恰让它更糟（J1 本人先判成"它在磨，给它时间"，错了）。
+  4. **全清洁也必须留痕**。第一版让探针在无异常时静默，验证时它跑了却没留任何输出 —— **沉默的监控与死掉的监控在输出上完全一样**，而后者给的是虚假安心。每个 tick 必打一行"已判、未触发"。
+  5. **别顺手加不适用的告警**。同一套里的"剪枝点冻结"判据对**新节点**有意义（追不上剪枝点移动），对**已有 190 万块的同步中节点**没有 —— 剪枝点本就周期性移动，接进去只会制造告警疲劳，把真信号淹掉。
+- 🔧 **机制**: `scripts/j1-younio-tick.ps1`（告警 A 重启频次 / B 剪枝点冻结 / C blockCount 零增量）、`scripts/j1-da9-tick.ps1`（接告警 A，只读探针 `scratch/j1-remote/ibdloop.ps1`）。对照实测坐实变量：同二进制、同 peer、同网络下 da9(61GB) 25.9h 重启 0 / 断连 0 / 重验 0，younio(7.6GB) 148h 重启 67 / 断连 103 / 重验 16064。
+- **同族**: 规则 **60**（观察窗口必须长于故障周期，否则"干净"是假的）—— 本条是它的**指标维度**对偶：窗口够长也没用，如果**测的量本身在故障态下是满的**。规则 **70**（"它从未执行过"与"它没留下痕迹"是两个命题）、规则 **72**（探针失效会伪装成被探测对象故障 ⇒ 探针自身也要留痕）、规则 **75**（"0"与"读不到"在某些 API 上不可区分）。
