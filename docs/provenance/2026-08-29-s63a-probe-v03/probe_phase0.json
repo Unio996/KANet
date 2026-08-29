@@ -1,0 +1,1220 @@
+{
+  "contract_name": "S63A_TransitionProbe",
+  "compiler_version": "0.1.0",
+  "script": [
+    107,
+    8,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    8,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    8,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    8,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    108,
+    118,
+    0,
+    156,
+    99,
+    117,
+    83,
+    121,
+    0,
+    156,
+    105,
+    85,
+    121,
+    207,
+    118,
+    210,
+    81,
+    156,
+    105,
+    85,
+    121,
+    213,
+    120,
+    135,
+    105,
+    81,
+    88,
+    205,
+    1,
+    8,
+    124,
+    126,
+    84,
+    121,
+    88,
+    205,
+    1,
+    8,
+    124,
+    126,
+    84,
+    121,
+    88,
+    205,
+    1,
+    8,
+    124,
+    126,
+    84,
+    121,
+    88,
+    205,
+    1,
+    8,
+    124,
+    126,
+    126,
+    126,
+    126,
+    185,
+    118,
+    201,
+    2,
+    17,
+    1,
+    148,
+    118,
+    81,
+    147,
+    188,
+    124,
+    126,
+    185,
+    118,
+    201,
+    118,
+    2,
+    17,
+    1,
+    148,
+    1,
+    37,
+    147,
+    124,
+    188,
+    126,
+    170,
+    2,
+    0,
+    0,
+    1,
+    170,
+    126,
+    1,
+    32,
+    126,
+    124,
+    126,
+    1,
+    135,
+    126,
+    86,
+    121,
+    195,
+    135,
+    105,
+    85,
+    121,
+    194,
+    87,
+    121,
+    190,
+    156,
+    105,
+    0,
+    122,
+    117,
+    117,
+    117,
+    117,
+    117,
+    117,
+    117,
+    81,
+    103,
+    118,
+    81,
+    156,
+    99,
+    117,
+    83,
+    121,
+    81,
+    156,
+    105,
+    84,
+    121,
+    207,
+    210,
+    0,
+    156,
+    105,
+    117,
+    117,
+    117,
+    117,
+    117,
+    81,
+    103,
+    118,
+    82,
+    156,
+    99,
+    117,
+    6,
+    0,
+    14,
+    128,
+    17,
+    160,
+    1,
+    176,
+    83,
+    121,
+    81,
+    156,
+    105,
+    84,
+    121,
+    207,
+    210,
+    0,
+    156,
+    105,
+    117,
+    117,
+    117,
+    117,
+    117,
+    81,
+    103,
+    118,
+    83,
+    156,
+    99,
+    117,
+    84,
+    121,
+    192,
+    1,
+    100,
+    147,
+    118,
+    0,
+    162,
+    105,
+    118,
+    5,
+    0,
+    136,
+    82,
+    106,
+    116,
+    159,
+    105,
+    118,
+    176,
+    84,
+    121,
+    81,
+    156,
+    105,
+    85,
+    121,
+    207,
+    210,
+    0,
+    156,
+    105,
+    0,
+    122,
+    117,
+    117,
+    117,
+    117,
+    117,
+    117,
+    81,
+    103,
+    117,
+    0,
+    105,
+    104,
+    104,
+    104,
+    104
+  ],
+  "ast": {
+    "pragma": {
+      "name": "silverscript",
+      "value": "^0.1.0",
+      "span": "pragma silverscript ^0.1.0;",
+      "name_span": "silverscript",
+      "value_span": "^0.1.0"
+    },
+    "name": "S63A_TransitionProbe",
+    "params": [
+      {
+        "type_ref": {
+          "base": "int"
+        },
+        "name": "t_recovery",
+        "span": "int t_recovery",
+        "type_span": "int ",
+        "name_span": "t_recovery"
+      },
+      {
+        "type_ref": {
+          "base": "int"
+        },
+        "name": "init_phase",
+        "span": "int init_phase",
+        "type_span": "int ",
+        "name_span": "init_phase"
+      },
+      {
+        "type_ref": {
+          "base": "int"
+        },
+        "name": "init_pad1",
+        "span": "int init_pad1",
+        "type_span": "int ",
+        "name_span": "init_pad1"
+      },
+      {
+        "type_ref": {
+          "base": "int"
+        },
+        "name": "init_pad2",
+        "span": "int init_pad2",
+        "type_span": "int ",
+        "name_span": "init_pad2"
+      },
+      {
+        "type_ref": {
+          "base": "int"
+        },
+        "name": "init_pad3",
+        "span": "int init_pad3",
+        "type_span": "int ",
+        "name_span": "init_pad3"
+      },
+      {
+        "type_ref": {
+          "base": "int"
+        },
+        "name": "n_probe",
+        "span": "int n_probe",
+        "type_span": "int ",
+        "name_span": "n_probe"
+      }
+    ],
+    "fields": [
+      {
+        "type_ref": {
+          "base": "int"
+        },
+        "name": "phase",
+        "expr": {
+          "kind": "identifier",
+          "data": "init_phase",
+          "span": "init_phase"
+        },
+        "span": "int phase = init_phase;",
+        "type_span": "int ",
+        "name_span": "phase"
+      },
+      {
+        "type_ref": {
+          "base": "int"
+        },
+        "name": "pad1",
+        "expr": {
+          "kind": "identifier",
+          "data": "init_pad1",
+          "span": "init_pad1"
+        },
+        "span": "int pad1 = init_pad1;",
+        "type_span": "int ",
+        "name_span": "pad1"
+      },
+      {
+        "type_ref": {
+          "base": "int"
+        },
+        "name": "pad2",
+        "expr": {
+          "kind": "identifier",
+          "data": "init_pad2",
+          "span": "init_pad2"
+        },
+        "span": "int pad2 = init_pad2;",
+        "type_span": "int ",
+        "name_span": "pad2"
+      },
+      {
+        "type_ref": {
+          "base": "int"
+        },
+        "name": "pad3",
+        "expr": {
+          "kind": "identifier",
+          "data": "init_pad3",
+          "span": "init_pad3"
+        },
+        "span": "int pad3 = init_pad3;",
+        "type_span": "int ",
+        "name_span": "pad3"
+      }
+    ],
+    "constants": [],
+    "functions": [
+      {
+        "name": "transition",
+        "params": [
+          {
+            "type_ref": {
+              "base": "int"
+            },
+            "name": "selfInIdx",
+            "span": "int selfInIdx",
+            "type_span": "int ",
+            "name_span": "selfInIdx"
+          },
+          {
+            "type_ref": {
+              "base": "int"
+            },
+            "name": "selfOutIdx",
+            "span": "int selfOutIdx",
+            "type_span": "int ",
+            "name_span": "selfOutIdx"
+          }
+        ],
+        "entrypoint": true,
+        "return_types": [],
+        "returns_tuple": false,
+        "body": [
+          {
+            "kind": "require",
+            "data": {
+              "expr": {
+                "kind": "binary",
+                "data": {
+                  "op": "eq",
+                  "left": {
+                    "kind": "identifier",
+                    "data": "phase",
+                    "span": "phase"
+                  },
+                  "right": {
+                    "kind": "int",
+                    "data": 0,
+                    "span": "0"
+                  }
+                },
+                "span": "phase == 0"
+              },
+              "message": null,
+              "span": "require(phase == 0);",
+              "message_span": null
+            }
+          },
+          {
+            "kind": "variable_definition",
+            "data": {
+              "type_ref": {
+                "base": "byte",
+                "array_dims": [
+                  {
+                    "kind": "fixed",
+                    "value": 32
+                  }
+                ]
+              },
+              "modifiers": [],
+              "name": "self_cov",
+              "expr": {
+                "kind": "call",
+                "data": {
+                  "name": "OpInputCovenantId",
+                  "args": [
+                    {
+                      "kind": "identifier",
+                      "data": "selfInIdx",
+                      "span": "selfInIdx"
+                    }
+                  ],
+                  "name_span": "OpInputCovenantId"
+                },
+                "span": "OpInputCovenantId(selfInIdx)"
+              },
+              "span": "byte[32] self_cov = OpInputCovenantId(selfInIdx);",
+              "type_span": "byte[32]",
+              "modifier_spans": [],
+              "name_span": "self_cov"
+            }
+          },
+          {
+            "kind": "require",
+            "data": {
+              "expr": {
+                "kind": "binary",
+                "data": {
+                  "op": "eq",
+                  "left": {
+                    "kind": "call",
+                    "data": {
+                      "name": "OpCovOutputCount",
+                      "args": [
+                        {
+                          "kind": "identifier",
+                          "data": "self_cov",
+                          "span": "self_cov"
+                        }
+                      ],
+                      "name_span": "OpCovOutputCount"
+                    },
+                    "span": "OpCovOutputCount(self_cov)"
+                  },
+                  "right": {
+                    "kind": "int",
+                    "data": 1,
+                    "span": "1"
+                  }
+                },
+                "span": "OpCovOutputCount(self_cov) == 1"
+              },
+              "message": null,
+              "span": "require(OpCovOutputCount(self_cov) == 1);",
+              "message_span": null
+            }
+          },
+          {
+            "kind": "variable_definition",
+            "data": {
+              "type_ref": {
+                "base": "byte",
+                "array_dims": [
+                  {
+                    "kind": "fixed",
+                    "value": 32
+                  }
+                ]
+              },
+              "modifiers": [],
+              "name": "out_cov",
+              "expr": {
+                "kind": "call",
+                "data": {
+                  "name": "OpOutputCovenantId",
+                  "args": [
+                    {
+                      "kind": "identifier",
+                      "data": "selfOutIdx",
+                      "span": "selfOutIdx"
+                    }
+                  ],
+                  "name_span": "OpOutputCovenantId"
+                },
+                "span": "OpOutputCovenantId(selfOutIdx)"
+              },
+              "span": "byte[32] out_cov = OpOutputCovenantId(selfOutIdx);",
+              "type_span": "byte[32]",
+              "modifier_spans": [],
+              "name_span": "out_cov"
+            }
+          },
+          {
+            "kind": "require",
+            "data": {
+              "expr": {
+                "kind": "binary",
+                "data": {
+                  "op": "eq",
+                  "left": {
+                    "kind": "identifier",
+                    "data": "out_cov",
+                    "span": "out_cov"
+                  },
+                  "right": {
+                    "kind": "identifier",
+                    "data": "self_cov",
+                    "span": "self_cov"
+                  }
+                },
+                "span": "out_cov == self_cov"
+              },
+              "message": null,
+              "span": "require(out_cov == self_cov);",
+              "message_span": null
+            }
+          },
+          {
+            "kind": "function_call",
+            "data": {
+              "name": "validateOutputState",
+              "args": [
+                {
+                  "kind": "identifier",
+                  "data": "selfOutIdx",
+                  "span": "selfOutIdx"
+                },
+                {
+                  "kind": "state_object",
+                  "data": [
+                    {
+                      "name": "phase",
+                      "expr": {
+                        "kind": "int",
+                        "data": 1,
+                        "span": "1"
+                      },
+                      "span": "phase: 1",
+                      "name_span": "phase"
+                    },
+                    {
+                      "name": "pad1",
+                      "expr": {
+                        "kind": "identifier",
+                        "data": "pad1",
+                        "span": "pad1"
+                      },
+                      "span": "pad1: pad1",
+                      "name_span": "pad1"
+                    },
+                    {
+                      "name": "pad2",
+                      "expr": {
+                        "kind": "identifier",
+                        "data": "pad2",
+                        "span": "pad2"
+                      },
+                      "span": "pad2: pad2",
+                      "name_span": "pad2"
+                    },
+                    {
+                      "name": "pad3",
+                      "expr": {
+                        "kind": "identifier",
+                        "data": "pad3",
+                        "span": "pad3"
+                      },
+                      "span": "pad3: pad3 ",
+                      "name_span": "pad3"
+                    }
+                  ],
+                  "span": "{ phase: 1, pad1: pad1, pad2: pad2, pad3: pad3 }"
+                }
+              ],
+              "span": "validateOutputState(selfOutIdx, { phase: 1, pad1: pad1, pad2: pad2, pad3: pad3 });",
+              "name_span": "validateOutputState"
+            }
+          },
+          {
+            "kind": "require",
+            "data": {
+              "expr": {
+                "kind": "binary",
+                "data": {
+                  "op": "eq",
+                  "left": {
+                    "kind": "introspection",
+                    "data": {
+                      "kind": "output_value",
+                      "index": {
+                        "kind": "identifier",
+                        "data": "selfOutIdx",
+                        "span": "selfOutIdx"
+                      },
+                      "field_span": ".value"
+                    },
+                    "span": "tx.outputs[selfOutIdx].value"
+                  },
+                  "right": {
+                    "kind": "introspection",
+                    "data": {
+                      "kind": "input_value",
+                      "index": {
+                        "kind": "identifier",
+                        "data": "selfInIdx",
+                        "span": "selfInIdx"
+                      },
+                      "field_span": ".value"
+                    },
+                    "span": "tx.inputs[selfInIdx].value"
+                  }
+                },
+                "span": "tx.outputs[selfOutIdx].value == tx.inputs[selfInIdx].value"
+              },
+              "message": null,
+              "span": "require(tx.outputs[selfOutIdx].value == tx.inputs[selfInIdx].value);",
+              "message_span": null
+            }
+          }
+        ],
+        "return_type_spans": [],
+        "span": "entrypoint function transition(int selfInIdx, int selfOutIdx) {\n        require(phase == 0);                                     // N4-stale: 陈/错 phase 的输入在此拒\n        byte[32] self_cov = OpInputCovenantId(selfInIdx);       // 运行时读自身 cov_id (不烤)\n        require(OpCovOutputCount(self_cov) == 1);                // 唯一续继 (a0 已证 ==1 可编)\n        byte[32] out_cov = OpOutputCovenantId(selfOutIdx);\n        require(out_cov == self_cov);                            // N1/N5: 错 cid / 漏 CovenantBinding ⇒ 在此或共识层拒\n        validateOutputState(selfOutIdx, { phase: 1, pad1: pad1, pad2: pad2, pad3: pad3 });   // N3: 错 continuation 地址/state 在此拒 (编译期 lower 续本 cov_id)\n        require(tx.outputs[selfOutIdx].value == tx.inputs[selfInIdx].value);   // 全额承接, 不 skim\n    }",
+        "name_span": "transition",
+        "body_span": "require(phase == 0);                                     // N4-stale: 陈/错 phase 的输入在此拒\n        byte[32] self_cov = OpInputCovenantId(selfInIdx);       // 运行时读自身 cov_id (不烤)\n        require(OpCovOutputCount(self_cov) == 1);                // 唯一续继 (a0 已证 ==1 可编)\n        byte[32] out_cov = OpOutputCovenantId(selfOutIdx);\n        require(out_cov == self_cov);                            // N1/N5: 错 cid / 漏 CovenantBinding ⇒ 在此或共识层拒\n        validateOutputState(selfOutIdx, { phase: 1, pad1: pad1, pad2: pad2, pad3: pad3 });   // N3: 错 continuation 地址/state 在此拒 (编译期 lower 续本 cov_id)\n        require(tx.outputs[selfOutIdx].value == tx.inputs[selfInIdx].value);"
+      },
+      {
+        "name": "claim",
+        "params": [
+          {
+            "type_ref": {
+              "base": "int"
+            },
+            "name": "selfInIdx",
+            "span": "int selfInIdx",
+            "type_span": "int ",
+            "name_span": "selfInIdx"
+          }
+        ],
+        "entrypoint": true,
+        "return_types": [],
+        "returns_tuple": false,
+        "body": [
+          {
+            "kind": "require",
+            "data": {
+              "expr": {
+                "kind": "binary",
+                "data": {
+                  "op": "eq",
+                  "left": {
+                    "kind": "identifier",
+                    "data": "phase",
+                    "span": "phase"
+                  },
+                  "right": {
+                    "kind": "int",
+                    "data": 1,
+                    "span": "1"
+                  }
+                },
+                "span": "phase == 1"
+              },
+              "message": null,
+              "span": "require(phase == 1);",
+              "message_span": null
+            }
+          },
+          {
+            "kind": "variable_definition",
+            "data": {
+              "type_ref": {
+                "base": "byte",
+                "array_dims": [
+                  {
+                    "kind": "fixed",
+                    "value": 32
+                  }
+                ]
+              },
+              "modifiers": [],
+              "name": "self_cov",
+              "expr": {
+                "kind": "call",
+                "data": {
+                  "name": "OpInputCovenantId",
+                  "args": [
+                    {
+                      "kind": "identifier",
+                      "data": "selfInIdx",
+                      "span": "selfInIdx"
+                    }
+                  ],
+                  "name_span": "OpInputCovenantId"
+                },
+                "span": "OpInputCovenantId(selfInIdx)"
+              },
+              "span": "byte[32] self_cov = OpInputCovenantId(selfInIdx);",
+              "type_span": "byte[32]",
+              "modifier_spans": [],
+              "name_span": "self_cov"
+            }
+          },
+          {
+            "kind": "require",
+            "data": {
+              "expr": {
+                "kind": "binary",
+                "data": {
+                  "op": "eq",
+                  "left": {
+                    "kind": "call",
+                    "data": {
+                      "name": "OpCovOutputCount",
+                      "args": [
+                        {
+                          "kind": "identifier",
+                          "data": "self_cov",
+                          "span": "self_cov"
+                        }
+                      ],
+                      "name_span": "OpCovOutputCount"
+                    },
+                    "span": "OpCovOutputCount(self_cov)"
+                  },
+                  "right": {
+                    "kind": "int",
+                    "data": 0,
+                    "span": "0"
+                  }
+                },
+                "span": "OpCovOutputCount(self_cov) == 0"
+              },
+              "message": null,
+              "span": "require(OpCovOutputCount(self_cov) == 0);",
+              "message_span": null
+            }
+          }
+        ],
+        "return_type_spans": [],
+        "span": "entrypoint function claim(int selfInIdx) {\n        require(phase == 1);\n        byte[32] self_cov = OpInputCovenantId(selfInIdx);\n        require(OpCovOutputCount(self_cov) == 0);                // terminal, 禁续链 (a0 已证 ==0 可编)\n    }",
+        "name_span": "claim",
+        "body_span": "require(phase == 1);\n        byte[32] self_cov = OpInputCovenantId(selfInIdx);\n        require(OpCovOutputCount(self_cov) == 0);"
+      },
+      {
+        "name": "recovery",
+        "params": [
+          {
+            "type_ref": {
+              "base": "int"
+            },
+            "name": "selfInIdx",
+            "span": "int selfInIdx",
+            "type_span": "int ",
+            "name_span": "selfInIdx"
+          }
+        ],
+        "entrypoint": true,
+        "return_types": [],
+        "returns_tuple": false,
+        "body": [
+          {
+            "kind": "time_op",
+            "data": {
+              "tx_var": "tx_time",
+              "expr": {
+                "kind": "identifier",
+                "data": "t_recovery",
+                "span": "t_recovery"
+              },
+              "message": null,
+              "span": "require(tx.time >= t_recovery);",
+              "tx_var_span": "tx.time",
+              "message_span": null
+            }
+          },
+          {
+            "kind": "require",
+            "data": {
+              "expr": {
+                "kind": "binary",
+                "data": {
+                  "op": "eq",
+                  "left": {
+                    "kind": "identifier",
+                    "data": "phase",
+                    "span": "phase"
+                  },
+                  "right": {
+                    "kind": "int",
+                    "data": 1,
+                    "span": "1"
+                  }
+                },
+                "span": "phase == 1"
+              },
+              "message": null,
+              "span": "require(phase == 1);",
+              "message_span": null
+            }
+          },
+          {
+            "kind": "variable_definition",
+            "data": {
+              "type_ref": {
+                "base": "byte",
+                "array_dims": [
+                  {
+                    "kind": "fixed",
+                    "value": 32
+                  }
+                ]
+              },
+              "modifiers": [],
+              "name": "self_cov",
+              "expr": {
+                "kind": "call",
+                "data": {
+                  "name": "OpInputCovenantId",
+                  "args": [
+                    {
+                      "kind": "identifier",
+                      "data": "selfInIdx",
+                      "span": "selfInIdx"
+                    }
+                  ],
+                  "name_span": "OpInputCovenantId"
+                },
+                "span": "OpInputCovenantId(selfInIdx)"
+              },
+              "span": "byte[32] self_cov = OpInputCovenantId(selfInIdx);",
+              "type_span": "byte[32]",
+              "modifier_spans": [],
+              "name_span": "self_cov"
+            }
+          },
+          {
+            "kind": "require",
+            "data": {
+              "expr": {
+                "kind": "binary",
+                "data": {
+                  "op": "eq",
+                  "left": {
+                    "kind": "call",
+                    "data": {
+                      "name": "OpCovOutputCount",
+                      "args": [
+                        {
+                          "kind": "identifier",
+                          "data": "self_cov",
+                          "span": "self_cov"
+                        }
+                      ],
+                      "name_span": "OpCovOutputCount"
+                    },
+                    "span": "OpCovOutputCount(self_cov)"
+                  },
+                  "right": {
+                    "kind": "int",
+                    "data": 0,
+                    "span": "0"
+                  }
+                },
+                "span": "OpCovOutputCount(self_cov) == 0"
+              },
+              "message": null,
+              "span": "require(OpCovOutputCount(self_cov) == 0);",
+              "message_span": null
+            }
+          }
+        ],
+        "return_type_spans": [],
+        "span": "entrypoint function recovery(int selfInIdx) {\n        require(tx.time >= t_recovery);                          // parser 限: tx.time 只能 standalone require\n        require(phase == 1);\n        byte[32] self_cov = OpInputCovenantId(selfInIdx);\n        require(OpCovOutputCount(self_cov) == 0);\n    }",
+        "name_span": "recovery",
+        "body_span": "require(tx.time >= t_recovery);                          // parser 限: tx.time 只能 standalone require\n        require(phase == 1);\n        byte[32] self_cov = OpInputCovenantId(selfInIdx);\n        require(OpCovOutputCount(self_cov) == 0);"
+      },
+      {
+        "name": "recovery_daa",
+        "params": [
+          {
+            "type_ref": {
+              "base": "int"
+            },
+            "name": "selfInIdx",
+            "span": "int selfInIdx",
+            "type_span": "int ",
+            "name_span": "selfInIdx"
+          }
+        ],
+        "entrypoint": true,
+        "return_types": [],
+        "returns_tuple": false,
+        "body": [
+          {
+            "kind": "variable_definition",
+            "data": {
+              "type_ref": {
+                "base": "int"
+              },
+              "modifiers": [],
+              "name": "e",
+              "expr": {
+                "kind": "binary",
+                "data": {
+                  "op": "add",
+                  "left": {
+                    "kind": "call",
+                    "data": {
+                      "name": "OpTxInputDaaScore",
+                      "args": [
+                        {
+                          "kind": "identifier",
+                          "data": "selfInIdx",
+                          "span": "selfInIdx"
+                        }
+                      ],
+                      "name_span": "OpTxInputDaaScore"
+                    },
+                    "span": "OpTxInputDaaScore(selfInIdx)"
+                  },
+                  "right": {
+                    "kind": "identifier",
+                    "data": "n_probe",
+                    "span": "n_probe"
+                  }
+                },
+                "span": "OpTxInputDaaScore(selfInIdx) + n_probe"
+              },
+              "span": "int e = OpTxInputDaaScore(selfInIdx) + n_probe;",
+              "type_span": "int ",
+              "modifier_spans": [],
+              "name_span": "e"
+            }
+          },
+          {
+            "kind": "require",
+            "data": {
+              "expr": {
+                "kind": "binary",
+                "data": {
+                  "op": "ge",
+                  "left": {
+                    "kind": "identifier",
+                    "data": "e",
+                    "span": "e"
+                  },
+                  "right": {
+                    "kind": "int",
+                    "data": 0,
+                    "span": "0"
+                  }
+                },
+                "span": "e >= 0"
+              },
+              "message": null,
+              "span": "require(e >= 0);",
+              "message_span": null
+            }
+          },
+          {
+            "kind": "require",
+            "data": {
+              "expr": {
+                "kind": "binary",
+                "data": {
+                  "op": "lt",
+                  "left": {
+                    "kind": "identifier",
+                    "data": "e",
+                    "span": "e"
+                  },
+                  "right": {
+                    "kind": "int",
+                    "data": 500000000000,
+                    "span": "500000000000"
+                  }
+                },
+                "span": "e < 500000000000"
+              },
+              "message": null,
+              "span": "require(e < 500000000000);",
+              "message_span": null
+            }
+          },
+          {
+            "kind": "time_op",
+            "data": {
+              "tx_var": "tx_time",
+              "expr": {
+                "kind": "identifier",
+                "data": "e",
+                "span": "e"
+              },
+              "message": null,
+              "span": "require(tx.time >= e);",
+              "tx_var_span": "tx.time",
+              "message_span": null
+            }
+          },
+          {
+            "kind": "require",
+            "data": {
+              "expr": {
+                "kind": "binary",
+                "data": {
+                  "op": "eq",
+                  "left": {
+                    "kind": "identifier",
+                    "data": "phase",
+                    "span": "phase"
+                  },
+                  "right": {
+                    "kind": "int",
+                    "data": 1,
+                    "span": "1"
+                  }
+                },
+                "span": "phase == 1"
+              },
+              "message": null,
+              "span": "require(phase == 1);",
+              "message_span": null
+            }
+          },
+          {
+            "kind": "variable_definition",
+            "data": {
+              "type_ref": {
+                "base": "byte",
+                "array_dims": [
+                  {
+                    "kind": "fixed",
+                    "value": 32
+                  }
+                ]
+              },
+              "modifiers": [],
+              "name": "self_cov",
+              "expr": {
+                "kind": "call",
+                "data": {
+                  "name": "OpInputCovenantId",
+                  "args": [
+                    {
+                      "kind": "identifier",
+                      "data": "selfInIdx",
+                      "span": "selfInIdx"
+                    }
+                  ],
+                  "name_span": "OpInputCovenantId"
+                },
+                "span": "OpInputCovenantId(selfInIdx)"
+              },
+              "span": "byte[32] self_cov = OpInputCovenantId(selfInIdx);",
+              "type_span": "byte[32]",
+              "modifier_spans": [],
+              "name_span": "self_cov"
+            }
+          },
+          {
+            "kind": "require",
+            "data": {
+              "expr": {
+                "kind": "binary",
+                "data": {
+                  "op": "eq",
+                  "left": {
+                    "kind": "call",
+                    "data": {
+                      "name": "OpCovOutputCount",
+                      "args": [
+                        {
+                          "kind": "identifier",
+                          "data": "self_cov",
+                          "span": "self_cov"
+                        }
+                      ],
+                      "name_span": "OpCovOutputCount"
+                    },
+                    "span": "OpCovOutputCount(self_cov)"
+                  },
+                  "right": {
+                    "kind": "int",
+                    "data": 0,
+                    "span": "0"
+                  }
+                },
+                "span": "OpCovOutputCount(self_cov) == 0"
+              },
+              "message": null,
+              "span": "require(OpCovOutputCount(self_cov) == 0);",
+              "message_span": null
+            }
+          }
+        ],
+        "return_type_spans": [],
+        "span": "entrypoint function recovery_daa(int selfInIdx) {\n        int e = OpTxInputDaaScore(selfInIdx) + n_probe;         // d + N: 锚在自身输入(被花 UTXO)的创建 DAA\n        require(e >= 0);\n        require(e < 500000000000);                               // LOCK_TIME_THRESHOLD: 守住 DAA 域, 不得漂到时间类\n        require(tx.time >= e);                                   // = CLTV(e): 块 DAA > tx.lockTime >= e\n        require(phase == 1);\n        byte[32] self_cov = OpInputCovenantId(selfInIdx);\n        require(OpCovOutputCount(self_cov) == 0);\n    }",
+        "name_span": "recovery_daa",
+        "body_span": "int e = OpTxInputDaaScore(selfInIdx) + n_probe;         // d + N: 锚在自身输入(被花 UTXO)的创建 DAA\n        require(e >= 0);\n        require(e < 500000000000);                               // LOCK_TIME_THRESHOLD: 守住 DAA 域, 不得漂到时间类\n        require(tx.time >= e);                                   // = CLTV(e): 块 DAA > tx.lockTime >= e\n        require(phase == 1);\n        byte[32] self_cov = OpInputCovenantId(selfInIdx);\n        require(OpCovOutputCount(self_cov) == 0);"
+      }
+    ],
+    "span": "contract S63A_TransitionProbe(\n    int t_recovery,        // recovery 下界 (ms, 与 ShardLeaf deadline*1000 先例同单位; DAA 锚形见 §3 ⑤ 单探)\n    // —— genesis State: 4 int = leaf 族 36B (= p2sh.mjs _LEAF_STATE_LEN, 4×(PUSH8+8)); phase 放第 1 字段, 其余三个固定填充 ——\n    //    🔴 为什么 4 个而不是 1 个: NWT 条件②——后继地址必须由【生产 _continuationAddress】直接算并字节对拍(非重实现),\n    //    而它的长度白名单只收 36/87/96/204; 单字段 9B 不在其中 ⇒ 用 leaf 族 36B, 让生产函数算的就是这个真实转换。\n    int init_phase,        // genesis = 0 (LOCKED_F)\n    int init_pad1, int init_pad2, int init_pad3,  // 固定填充(建议 0), transition 原样透传\n    int n_probe            // v0.3 (D-016 A′): recovery_daa 的相对 DAA 延迟 (探针 100 ≈ 10s@10bps); 放最后 ⇒ ctor 前 5 项不变\n) {\n    int phase = init_phase;   // 0 = LOCKED_F, 1 = O_AUTHORIZED\n    int pad1 = init_pad1; int pad2 = init_pad2; int pad3 = init_pad3;\n\n    // —— entry 0: transition (Codex ②③④: 消费 exact LOCKED_F, 后继同 cov_id, 后继 state 有意图地变) ——\n    entrypoint function transition(int selfInIdx, int selfOutIdx) {\n        require(phase == 0);                                     // N4-stale: 陈/错 phase 的输入在此拒\n        byte[32] self_cov = OpInputCovenantId(selfInIdx);       // 运行时读自身 cov_id (不烤)\n        require(OpCovOutputCount(self_cov) == 1);                // 唯一续继 (a0 已证 ==1 可编)\n        byte[32] out_cov = OpOutputCovenantId(selfOutIdx);\n        require(out_cov == self_cov);                            // N1/N5: 错 cid / 漏 CovenantBinding ⇒ 在此或共识层拒\n        validateOutputState(selfOutIdx, { phase: 1, pad1: pad1, pad2: pad2, pad3: pad3 });   // N3: 错 continuation 地址/state 在此拒 (编译期 lower 续本 cov_id)\n        require(tx.outputs[selfOutIdx].value == tx.inputs[selfInIdx].value);   // 全额承接, 不 skim\n    }\n\n    // —— entry 1: claim (O_AUTHORIZED reactive-claim 的 terminal 形; Codex ⑤ \"能进 reactive-claim 支\") ——\n    entrypoint function claim(int selfInIdx) {\n        require(phase == 1);\n        byte[32] self_cov = OpInputCovenantId(selfInIdx);\n        require(OpCovOutputCount(self_cov) == 0);                // terminal, 禁续链 (a0 已证 ==0 可编)\n    }\n\n    // —— entry 2: recovery (O_AUTHORIZED recovery 的 terminal 形; 下界暂 baked ms) ——\n    entrypoint function recovery(int selfInIdx) {\n        require(tx.time >= t_recovery);                          // parser 限: tx.time 只能 standalone require\n        require(phase == 1);\n        byte[32] self_cov = OpInputCovenantId(selfInIdx);\n        require(OpCovOutputCount(self_cov) == 0);\n    }\n\n    // —— entry 3: recovery_daa (v0.3, D-016 A′): v0.15 的 DAA 域相对锚形, 用 pinned 8065184 表达 ——\n    //    8065184 的 `require(tx.time >= e)` 降成裸 `<e> OP_CHECKLOCKTIMEVERIFY`(compile.rs:2516), 无域标记;\n    //    域由 CLTV 运行时按数值判(7b1e18cc opcodes/mod.rs:1030-1034): e < 5e11 ⇒ DAA 域.\n    //    前两条 require = 上游 #214 `tx.daa` lowering 的 `DUP 0 THRESHOLD WITHIN VERIFY` 域守卫的源内等价.\n    //    构造侧硬前置: tx.lockTime = e (DAA 数, 多输入取 max), 该输入 sequence != MAX (cltv-locktime.mjs).\n    entrypoint function recovery_daa(int selfInIdx) {\n        int e = OpTxInputDaaScore(selfInIdx) + n_probe;         // d + N: 锚在自身输入(被花 UTXO)的创建 DAA\n        require(e >= 0);\n        require(e < 500000000000);                               // LOCK_TIME_THRESHOLD: 守住 DAA 域, 不得漂到时间类\n        require(tx.time >= e);                                   // = CLTV(e): 块 DAA > tx.lockTime >= e\n        require(phase == 1);\n        byte[32] self_cov = OpInputCovenantId(selfInIdx);\n        require(OpCovOutputCount(self_cov) == 0);\n    }\n}",
+    "name_span": "S63A_TransitionProbe"
+  },
+  "abi": [
+    {
+      "name": "transition",
+      "inputs": [
+        {
+          "name": "selfInIdx",
+          "type_name": "int"
+        },
+        {
+          "name": "selfOutIdx",
+          "type_name": "int"
+        }
+      ]
+    },
+    {
+      "name": "claim",
+      "inputs": [
+        {
+          "name": "selfInIdx",
+          "type_name": "int"
+        }
+      ]
+    },
+    {
+      "name": "recovery",
+      "inputs": [
+        {
+          "name": "selfInIdx",
+          "type_name": "int"
+        }
+      ]
+    },
+    {
+      "name": "recovery_daa",
+      "inputs": [
+        {
+          "name": "selfInIdx",
+          "type_name": "int"
+        }
+      ]
+    }
+  ],
+  "without_selector": false,
+  "state_layout": {
+    "start": 1,
+    "len": 36
+  },
+  "debug_info": null
+}

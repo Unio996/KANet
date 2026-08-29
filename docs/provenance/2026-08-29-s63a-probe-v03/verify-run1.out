@@ -1,0 +1,9 @@
+[PASS] phase0 ① 273 B + script sha + file sha = README/J1 值 :: abi=[transition,claim,recovery,recovery_daa]
+[PASS] phase0 ④ 0xc0 恰 1 处 @225
+[PASS] phase0 ② E1 完整相邻序列 @225.. (J1 r20 §3 更正形: 含 push n_probe 与 e>=0 块) :: @225,226,228,229,230,231,232,233,234,240,241,242,243
+[PASS] phase0 ③ CLTV 2 处 @198/@243; #1 操作数 = 1787000000000 (时间域, 无守卫) / #2 = DAA 域 A′ 守卫后 :: #1 push 000e8011a001 (1787000000000)
+[PASS] phase1 ① 273 B + script sha + file sha = README/J1 值 :: abi=[transition,claim,recovery,recovery_daa]
+[PASS] phase1 ④ 0xc0 恰 1 处 @225
+[PASS] phase1 ② E1 完整相邻序列 @225.. (J1 r20 §3 更正形: 含 push n_probe 与 e>=0 块) :: @225,226,228,229,230,231,232,233,234,240,241,242,243
+[PASS] phase1 ③ CLTV 2 处 @198/@243; #1 操作数 = 1787000000000 (时间域, 无守卫) / #2 = DAA 域 A′ 守卫后 :: #1 push 000e8011a001 (1787000000000)
+s63a-probe-v03 provenance: 8 PASS / 0 FAIL

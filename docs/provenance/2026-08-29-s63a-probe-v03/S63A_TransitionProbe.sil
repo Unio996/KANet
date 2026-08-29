@@ -1,0 +1,57 @@
+// S63A_TransitionProbe.sil — gate (a) 精确 Shape-B 续继探针 (J2 草案 v0.1, J1 定稿)。
+// 不是 A-covenant; 只证 LOCKED_F(phase=0) → O_AUTHORIZED(phase=1) 同 cov_id 续继可构造 + 后继可进 claim/recovery。
+pragma silverscript ^0.1.0;
+
+contract S63A_TransitionProbe(
+    int t_recovery,        // recovery 下界 (ms, 与 ShardLeaf deadline*1000 先例同单位; DAA 锚形见 §3 ⑤ 单探)
+    // —— genesis State: 4 int = leaf 族 36B (= p2sh.mjs _LEAF_STATE_LEN, 4×(PUSH8+8)); phase 放第 1 字段, 其余三个固定填充 ——
+    //    🔴 为什么 4 个而不是 1 个: NWT 条件②——后继地址必须由【生产 _continuationAddress】直接算并字节对拍(非重实现),
+    //    而它的长度白名单只收 36/87/96/204; 单字段 9B 不在其中 ⇒ 用 leaf 族 36B, 让生产函数算的就是这个真实转换。
+    int init_phase,        // genesis = 0 (LOCKED_F)
+    int init_pad1, int init_pad2, int init_pad3,  // 固定填充(建议 0), transition 原样透传
+    int n_probe            // v0.3 (D-016 A′): recovery_daa 的相对 DAA 延迟 (探针 100 ≈ 10s@10bps); 放最后 ⇒ ctor 前 5 项不变
+) {
+    int phase = init_phase;   // 0 = LOCKED_F, 1 = O_AUTHORIZED
+    int pad1 = init_pad1; int pad2 = init_pad2; int pad3 = init_pad3;
+
+    // —— entry 0: transition (Codex ②③④: 消费 exact LOCKED_F, 后继同 cov_id, 后继 state 有意图地变) ——
+    entrypoint function transition(int selfInIdx, int selfOutIdx) {
+        require(phase == 0);                                     // N4-stale: 陈/错 phase 的输入在此拒
+        byte[32] self_cov = OpInputCovenantId(selfInIdx);       // 运行时读自身 cov_id (不烤)
+        require(OpCovOutputCount(self_cov) == 1);                // 唯一续继 (a0 已证 ==1 可编)
+        byte[32] out_cov = OpOutputCovenantId(selfOutIdx);
+        require(out_cov == self_cov);                            // N1/N5: 错 cid / 漏 CovenantBinding ⇒ 在此或共识层拒
+        validateOutputState(selfOutIdx, { phase: 1, pad1: pad1, pad2: pad2, pad3: pad3 });   // N3: 错 continuation 地址/state 在此拒 (编译期 lower 续本 cov_id)
+        require(tx.outputs[selfOutIdx].value == tx.inputs[selfInIdx].value);   // 全额承接, 不 skim
+    }
+
+    // —— entry 1: claim (O_AUTHORIZED reactive-claim 的 terminal 形; Codex ⑤ "能进 reactive-claim 支") ——
+    entrypoint function claim(int selfInIdx) {
+        require(phase == 1);
+        byte[32] self_cov = OpInputCovenantId(selfInIdx);
+        require(OpCovOutputCount(self_cov) == 0);                // terminal, 禁续链 (a0 已证 ==0 可编)
+    }
+
+    // —— entry 2: recovery (O_AUTHORIZED recovery 的 terminal 形; 下界暂 baked ms) ——
+    entrypoint function recovery(int selfInIdx) {
+        require(tx.time >= t_recovery);                          // parser 限: tx.time 只能 standalone require
+        require(phase == 1);
+        byte[32] self_cov = OpInputCovenantId(selfInIdx);
+        require(OpCovOutputCount(self_cov) == 0);
+    }
+
+    // —— entry 3: recovery_daa (v0.3, D-016 A′): v0.15 的 DAA 域相对锚形, 用 pinned 8065184 表达 ——
+    //    8065184 的 `require(tx.time >= e)` 降成裸 `<e> OP_CHECKLOCKTIMEVERIFY`(compile.rs:2516), 无域标记;
+    //    域由 CLTV 运行时按数值判(7b1e18cc opcodes/mod.rs:1030-1034): e < 5e11 ⇒ DAA 域.
+    //    前两条 require = 上游 #214 `tx.daa` lowering 的 `DUP 0 THRESHOLD WITHIN VERIFY` 域守卫的源内等价.
+    //    构造侧硬前置: tx.lockTime = e (DAA 数, 多输入取 max), 该输入 sequence != MAX (cltv-locktime.mjs).
+    entrypoint function recovery_daa(int selfInIdx) {
+        int e = OpTxInputDaaScore(selfInIdx) + n_probe;         // d + N: 锚在自身输入(被花 UTXO)的创建 DAA
+        require(e >= 0);
+        require(e < 500000000000);                               // LOCK_TIME_THRESHOLD: 守住 DAA 域, 不得漂到时间类
+        require(tx.time >= e);                                   // = CLTV(e): 块 DAA > tx.lockTime >= e
+        require(phase == 1);
+        byte[32] self_cov = OpInputCovenantId(selfInIdx);
+        require(OpCovOutputCount(self_cov) == 0);
+    }
+}
