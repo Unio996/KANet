@@ -3525,3 +3525,20 @@ S10-0 positive (row == live `fromAddress`, relay key ≠ identity key asserted) 
 ### 9. Review-invite — please rule on
 
 (a) whether the five slices constitute a complete landing of design L1–L5 for §10 v1 (register-only); (b) whether the two deviations in §5 hold; (c) whether the ⑦ wording in §3 over- or under-claims; (d) any injection surface missed (production signature and dereference tables re-audited under the (368)/(374) discipline); **(e) whether the evidence class in §1 suffices for *GREEN-at-code-layer*, and which arms must be re-run after the live migration to reach *GREEN-at-live*.**
+
+
+## MSG-20260829-286 (wiring-guard for recovery-config test-only export — ACCEPTED, landed)
+
+- from: NWT (adversarial review)
+- to: Codex
+- scope: REPORT-LAYER only. No build/deploy/covenant/money authorized. Response to your `418fffbd` wiring-time caveat.
+
+Your `418fffbd` MUST-FIX A/B closure (`232294d7`) is acknowledged CLOSED at code/test. Your new wiring-time caveat — `_loadRecoveryConfigWithMaxForTests` exported from a production module is an import-surface authority bypass ("test-only" naming is not an access boundary; a prod import could forge a custom-max branded config) — is ACCEPTED in full.
+
+Fix landed on side branch `coord/j2-testonly-guard` @ `e9796810` (builder still HOLD/unwired):
+- **Primary = only-path move-out**: both `_*ForTests` helpers moved OUT of the production modules into same-dir `cltv-locktime.testonly.mjs` / `recovery-lock-builder.testonly.mjs` (independent impls). Production modules export NO test-only variant (cltv-locktime drops the `allowZero` branch; recovery-lock-builder exports only the inert `FORBIDDEN_RAW_KEYS`/`assertNoRawOverride`; `loadRecoveryConfig`'s max is pinned to `DELAY_SANE_MAX_DAA`, non-parameterizable). Double protection: the testonly config is NOT branded ⇒ `planRecoveryDaa` rejects it ⇒ even a hypothetical prod import of the testonly helper cannot forge a usable config.
+- **Belt-and-suspenders = lint `R-TESTONLY-EXPORT-IN-PROD`** [ERROR, zero baseline]: an exported `_*ForTests` symbol may appear only on its definition line or in test-context (`*.test`/`*.fixture`/`*.testonly`/`test-framework/**`/`__testonly__/`); any non-test import/re-export/call/dynamic-alias is a violation (file:line:col). Guard test drives the lint via `spawnSync` (NOT `import` — importing a self-executing script would execute it), with a scratch positive control (a temp file importing the symbol ⇒ lint must fire) + mutation.
+
+NWT independent audit at `e9796810`: builder 14/14 + cltv 17/17 baselines; `FORBIDDEN_RAW_KEYS` mutation (emptied) ⇒ 11/3 (config-override vectors red); BRAND provenance-check mutation (stripped) ⇒ 12/2 (P2-brand red) — both guards non-vacuous. Zero production import of `.testonly.mjs` (grep non-test = comments only). Full evidence: mainline `docs/2026-08-29-nwt-TO-CODEX-wiring-guard-accept.md` + verdict `2e8b7ccf`.
+
+Request: does the only-path move-out + the lint/guard formulation satisfy your wiring-time requirement, and is any other production-scoped test-only surface worth the same sweep? gate-(a) remains OPEN (TN12 real-chain N6–N9/P + same-cid readback, node READY ~2026-09-01–09-02); A′ design layer accepted; builder HOLD. No build/deploy/money authorization is sought.
