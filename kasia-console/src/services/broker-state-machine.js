@@ -299,28 +299,71 @@ export async function reconcileStaleOrders(db = defaultDb) {
     LIMIT 10
   `).all(graceCutoff, graceCutoff);
 
-  let staleCount = stale.length, forceFailedCount = 0;
+  let staleCount = stale.length, forceFailedCount = 0, heldCount = 0, unknownCount = 0;
   for (const row of stale) {
-    const escrowed = checkBrokerEscrow(row.user_kasia_address, parseFloat(row.qty), row.created_at, db);
-    if (!escrowed) {
-      const result = transition({
-        orderId: row.id,
-        expectedFromState: 'awaiting_payment',
-        toState: 'failed',
-        opts: {
-          no_escrow: true,
-          reason: 'reconcile_no_escrow',
-          triggeredBy: 'reconcileStaleOrders',
-        },
-        db,
-      });
-      if (result.ok) forceFailedCount++;
-    }
+    // 2026-08-29 (J2 broker-money-path 阶段 2; escrow 稿 49395a8e NWT GREEN): 三态 + 选项 A/B + 退化前置; RPC 先 await 预取
+    const { makeUtxoLookup } = await import('../lib/kaspa-utxo-lookup.mjs');
+    const rpcUtxoLookup = await makeUtxoLookup(row.user_kasia_address);
+    const r = reconcileOneStaleOrder({ db, row, rpcUtxoLookup });
+    if (r.action === 'transition' && r.result?.ok) { if (r.toState === 'failed') forceFailedCount++; else heldCount++; }
+    if (r.action === 'alert_once') unknownCount++;
   }
-  if (staleCount > 0 || forceFailedCount > 0) {
-    console.log(`[broker-reconcile] ${staleCount} stale, ${forceFailedCount} force-failed (grace 1h post-restart)`);
+  if (staleCount > 0 || forceFailedCount > 0 || heldCount > 0 || unknownCount > 0) {
+    console.log(`[broker-reconcile] ${staleCount} stale, ${forceFailedCount} force-failed, ${heldCount} held_for_review, ${unknownCount} unknown(held+alert) (grace 1h post-restart; mode=${RECONCILE_MODE_ACTIVE})`);
   }
-  return { stale: staleCount, forceFailed: forceFailedCount };
+  return { stale: staleCount, forceFailed: forceFailedCount, held: heldCount, unknown: unknownCount };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 2026-08-29 (J2, broker-money-path 阶段 2): reconcile 单单决策 —— 纯函数化以便离线测 (真 schema)。
+//   ⚠ RECONCILE_MODE_ACTIVE: 默认 B (held_for_review, 可逆); "Owner 定 A/B 后钉" —— 部署前必有 Owner 一句 (Bettor 2026-08-29)。
+//   🔴 退化前置 (审点③): 库里 retail_dex_orders.state 的 CHECK 枚举若【未含】held_for_review (v200 重建未落) ⇒ 选项 B 无法落地 ⇒
+//      退化为 alert_once (与 UNKNOWN 同路), 【绝不】静默 fail、也【绝不】退回选项 A 的 failed+no_escrow。
+// ═══════════════════════════════════════════════════════════════════════════
+import { checkBrokerEscrowV2, decideReconcileAction, RECONCILE_MODE, ESCROW } from '../lib/broker-escrow-check.mjs';
+import { indexerCoverage as _indexerCoverageLib } from '../lib/indexer-coverage.mjs';
+export const RECONCILE_MODE_ACTIVE = process.env.BROKER_RECONCILE_MODE === 'failed' ? RECONCILE_MODE.A_FAILED : RECONCILE_MODE.B_HELD;   // Owner 定 A/B 后钉 (env 只作过渡开关)
+
+/** 库的 state CHECK 枚举是否已含某 state (读 sqlite_master 的 DDL 文本; v200 重建后为真) */
+export function orderStateEnumSupports(db, stateName) {
+  try {
+    const row = db.prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'retail_dex_orders'`).get();
+    return !!row?.sql && new RegExp(`'${stateName}'`).test(row.sql);
+  } catch { return false; }
+}
+
+export function _alertReconcileOnce(db, orderId, eventType, reason, evidence = {}) {
+  try {
+    const exists = db.prepare(`SELECT 1 FROM events WHERE event_type = ? AND json_extract(payload_json, '$.order_id') = ? LIMIT 1`).get(eventType, orderId);
+    if (exists) return false;
+    db.prepare(`INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at) VALUES (lower(hex(randomblob(16))), 'system', ?, 'broker-reconcile', 'warn', ?, ?, datetime('now'))`)
+      .run(eventType, `${eventType} order=${String(orderId).slice(0, 12)}`, JSON.stringify({ order_id: orderId, reason: String(reason || '').slice(0, 300), evidence: evidence || {} }, (k, v) => (typeof v === 'bigint' ? String(v) : v)));
+    console.warn(`[broker-reconcile] ${eventType} order=${String(orderId).slice(0, 12)}: ${reason}`);
+    return true;
+  } catch (e) { console.warn(`[broker-reconcile] alert write failed: ${e.message}`); return false; }
+}
+
+/**
+ * 单单决策: 三态 escrow → decideReconcileAction(mode) → 退化前置 → transition。
+ * @returns {{ verdict, action, toState?, result?, reason }}
+ */
+export function reconcileOneStaleOrder({ db = defaultDb, row, rpcUtxoLookup = null, indexerCoverage = null, mode = RECONCILE_MODE_ACTIVE, env = process.env, nowMs = Date.now() }) {
+  const cov = indexerCoverage === null ? ((a) => _indexerCoverageLib(db, a)) : indexerCoverage;
+  const esc = checkBrokerEscrowV2({ db, peerAddr: row.user_kasia_address, qty: parseFloat(row.qty), orderCreatedAt: row.created_at, env, nowMs, rpcUtxoLookup, indexerCoverage: cov });
+  let decision = decideReconcileAction(esc.verdict, mode);
+  if (decision.action === 'transition' && decision.toState === 'held_for_review' && !orderStateEnumSupports(db, 'held_for_review')) {
+    // 退化前置: v200 未落 ⇒ 不 transition、不退回 A; 告警一次
+    decision = { action: 'alert_once', event_type: 'broker_escrow_held_enum_missing', degraded_from: 'held_for_review' };
+  }
+  if (decision.action === 'transition') {
+    const result = transition({ orderId: row.id, expectedFromState: 'awaiting_payment', toState: decision.toState, opts: { ...decision.opts, triggeredBy: 'reconcileStaleOrders', evidence: esc.evidence }, db });
+    return { verdict: esc.verdict, action: 'transition', toState: decision.toState, result, reason: esc.reason };
+  }
+  if (decision.action === 'alert_once') {
+    _alertReconcileOnce(db, row.id, decision.event_type, `${esc.verdict}: ${esc.reason}${decision.degraded_from ? ` (degraded from ${decision.degraded_from})` : ''}`, esc.evidence);
+    return { verdict: esc.verdict, action: 'alert_once', event_type: decision.event_type, reason: esc.reason };
+  }
+  return { verdict: esc.verdict, action: 'none', reason: esc.reason };
 }
 
 // SA-5b cron schedule + module-level cronStarted guard 防 setInterval 重注 (5 Agent 共享 console module)

@@ -399,11 +399,6 @@ export async function advanceToRefunded({ orderId, reason }) {
     return { ok: false, skipReason: 'not_refundable', error: `offer not refundable: status=${offer.protocol_status} taker=${offer.taker?.slice(-8) || 'null'}` };
   }
 
-  // 2. Pre-check: chain-truth dedup via Track A helper (broker-refund-dedup.js)
-  //    不查 chain_events placeholder, 只信 kaspa_tx_log 真链 TX.
-  const { isOfferAlreadyRefunded } = await import('./broker-refund-dedup.js');
-  const dedup = isOfferAlreadyRefunded(offer);
-
   let meta = {};
   try { meta = JSON.parse(offer.metadata || '{}'); } catch {}
   const userKasiaAddr = meta.user_kasia_address || order.user_kasia_address;
@@ -411,25 +406,37 @@ export async function advanceToRefunded({ orderId, reason }) {
   const refundAmount = parseFloat(meta.net_kas || offer.give_amount || 0);
   if (!refundAmount || refundAmount <= 0) return { ok: false, skipReason: 'invalid_amount' };
 
+  // 2. Pre-check (2026-08-29 J2 broker-money-path 阶段 2; 双退款稿 0fadf34b NWT GREEN): 三/四态 dedup
+  //    lib/broker-refund-classify: intent 已记即拦 (chain_events 不 join kaspa_tx_log; broker_refund_intents write-ahead),
+  //    否定断言 NOT_REFUNDED 须 无 intent ∧ RPC 成功无匹配 UTXO ∧ coverage 无洞 (L2 v199 账); 其余 UNKNOWN ⇒ hold + 告警 (不发)。
+  //    RPC 链读先 await 预取 (lib/kaspa-utxo-lookup.mjs), 失败 ⇒ 闭包 throw ⇒ UNKNOWN (方向安全)。
+  const { isOfferAlreadyRefunded } = await import('./broker-refund-dedup.js');
+  const { makeUtxoLookup } = await import('../lib/kaspa-utxo-lookup.mjs');
+  const rpcUtxoLookup = await makeUtxoLookup(userKasiaAddr);
+  const dedup = isOfferAlreadyRefunded(offer, { rpcUtxoLookup, orderId });
+
   if (dedup.alreadyRefunded) {
-    // chain TX 真上链 但 DB drift (process crash / Phase 3 fail / 旧 placeholder pollute).
-    // 直接走 Phase 3 backfill, 不重复 sendKas (broker 真已退过自己的钱了, 见 Owner 87.7 KAS 教训).
-    const realTxId = dedup.priorTxs[0].tx_id;
-    return _backfillRefundedState({ orderId, offerId: offer.id, realTxId, refundAmount, userKasiaAddr, reason: `${reason}_backfill` });
+    if (dedup.state === 'REFUNDED_CONFIRMED' && dedup.priorTxs[0]?.tx_id) {
+      // chain TX 真上链 但 DB drift (process crash / Phase 3 fail / 旧 placeholder pollute).
+      // 直接走 Phase 3 backfill, 不重复 sendKas (broker 真已退过自己的钱了, 见 Owner 87.7 KAS 教训).
+      return _backfillRefundedState({ orderId, offerId: offer.id, realTxId: dedup.priorTxs[0].tx_id, refundAmount, userKasiaAddr, reason: `${reason}_backfill` });
+    }
+    // REFUNDED_INTENT (发过, 未见落链) / INFLIGHT (30 min 内意图无 txid): 【不重发】; 落地核实由 reconciler stuck 路 + 人工
+    _alertRefundOnce(orderId, `refund_${dedup.state.toLowerCase()}`, dedup.reason, dedup.evidence);
+    return { ok: false, skipReason: `refund_${dedup.state.toLowerCase()}_no_resend`, error: `refund already attempted (${dedup.state}: ${dedup.reason}) — not resending`, orderId, userKasiaAddr, refundAmount };
+  }
+  if (dedup.mustHold) {
+    // UNKNOWN: 否定证据不足 (RPC 缺/抛/劣化、coverage 无账/有洞、心跳陈、intent 歧义) ⇒ 不发, 一次性告警, 单留原态
+    _alertRefundOnce(orderId, 'refund_unknown_hold', dedup.reason, dedup.evidence);
+    return { ok: false, skipReason: 'refund_unknown_hold', error: `refund evidence insufficient (${dedup.reason}) — holding, not sending`, orderId, userKasiaAddr, refundAmount };
   }
 
-  // 3. Phase 1 (atomic CAS lock): UPDATE state='refunding'
+  // 3. Phase 1 (atomic CAS lock + write-ahead intent, 同一 transaction): UPDATE state='refunding' + INSERT broker_refund_intents(txid NULL)
   //    refundable states per round 3 共识: awaiting_payment / paid / expired
   //    rowsAffected=0 → another caller already claimed lock, OR state mismatch → race lost
   // lint-allow-state-update: PZ-STATE-T-REFUND-PHASE1 advanceToRefunded 3-phase pattern (Phase 1 CAS lock → 'refunding' intermediate). 'refunding' 不在 v0.1 7 state ALLOWED_TRANSITIONS, phase Z 折叠 3-phase 为 single-step transition (awaiting_payment/paid/expired → refunded direct with refundTxHash).
-  const claim = sqlite.prepare(`
-    UPDATE retail_dex_orders
-    SET state = 'refunding', updated_at = datetime('now')
-    WHERE id = ?
-      AND state IN ('awaiting_payment', 'paid', 'expired')
-      AND refund_tx_hash IS NULL
-  `).run(orderId);
-  if (claim.changes === 0) {
+  const { claimed, intentId } = claimRefundLockWithIntent(sqlite, { orderId, offerId: offer.id, userAddr: userKasiaAddr, amountKas: refundAmount, noOffer: false });
+  if (!claimed) {
     // CAS lost — re-SELECT to distinguish 'no refund needed' vs 'race lost' (J1 #73 Edge 1 catch).
     // 'aligning'/'confirming' state = broker 没收 user payment yet → NO refund needed (broker pool 不 owe user).
     // 'race lost' = 别 caller 真 claim 'refunding' lock OR refund_tx_hash 已 set (Phase 0 应已 catch).
@@ -451,14 +458,18 @@ export async function advanceToRefunded({ orderId, reason }) {
     });
     realTxId = result?.txId;
     if (!realTxId) throw new Error('sendKas resolved without txId');
+    // write-ahead: txId 一到手先写 intent (早于 Phase 3 三表同步) —— 崩在 Phase 2/3 之间也有据
+    recordRefundIntentTxid(sqlite, intentId, realTxId);
   } catch (err) {
-    // Phase 1 rollback: restore order to 'expired' (allow reconciler retry) + log error_reason
+    if (err?.code === 'AMBIGUOUS_BROADCAST') {
+      // 🔴 2026-08-29: 歧义失败 (超时/空回执/无 txId = 可能已广播回执丢) ⇒ 【不】回滚到可重试 'expired'; 订单留 'refunding'、intent 留无 txid
+      //   ⇒ reconciler stuck-refunding 路 (broker-state-reconciler.js:49-86: 查链真相回填或告警) 接手; 绝不进 refund_send_failed 重试路 (那是二次广播)。
+      _alertRefundOnce(orderId, 'refund_ambiguous_broadcast', String(err.message || err).slice(0, 200), { intentId });
+      return { ok: false, ambiguous: true, skipReason: 'refund_ambiguous_broadcast', error: `sendKas ambiguous (may have broadcast): ${err.message || err}`, orderId, userKasiaAddr, refundAmount };
+    }
+    // 明确未广播 (definite_fail) ⇒ Phase 1 rollback: restore order to 'expired' (allow reconciler retry) + 删 intent + log error_reason
     // lint-allow-state-update: PZ-STATE-T-REFUND-ROLLBACK refunding intermediate state rollback path (sendKas failed → 'expired' allow reconciler retry). 'refunding' 不在 v0.1 7 state ALLOWED_TRANSITIONS.
-    sqlite.prepare(`
-      UPDATE retail_dex_orders
-      SET state = 'expired', error_reason = ?, updated_at = datetime('now')
-      WHERE id = ? AND state = 'refunding'
-    `).run(`refund_send_failed: ${String(err.message || err).slice(0, 200)}`, orderId);
+    rollbackRefundLockWithIntent(sqlite, { orderId, intentId, errorReason: `refund_send_failed: ${String(err.message || err).slice(0, 200)}` });
     return { ok: false, error: `sendKas failed: ${err.message || err}`, orderId, userKasiaAddr, refundAmount };
   }
 
@@ -546,23 +557,25 @@ async function _advanceNoOfferRefund({ orderId, order, reason }) {
   if (!refundAmount || refundAmount <= 0) return { ok: false, skipReason: 'invalid_amount' };
 
   // chain-truth dedup (no offer = use order.created_at as time window start)
-  const { findPriorRefundTxs } = await import('./broker-refund-dedup.js');
-  const priorTxs = findPriorRefundTxs(userKasiaAddr, refundAmount, order.created_at);
-  if (priorTxs.length > 0) {
-    return _backfillRefundedState({ orderId, offerId: null, realTxId: priorTxs[0].tx_id, refundAmount, userKasiaAddr, reason: `${reason}_no_offer_backfill` });
+  // 2026-08-29 (J2 阶段 2): no_offer 路同样走三/四态 dedup (原 findPriorRefundTxs 只查 kaspa_tx_log = fail-open, 稿 §0-bis 第④处)
+  const { classifyRefundState, REFUND } = await import('../lib/broker-refund-classify.mjs');
+  const { indexerCoverage } = await import('../lib/indexer-coverage.mjs');
+  const { makeUtxoLookup } = await import('../lib/kaspa-utxo-lookup.mjs');
+  const rpcUtxoLookup = await makeUtxoLookup(userKasiaAddr);
+  const network = String(userKasiaAddr).startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+  const cls = classifyRefundState({ db: sqlite, offerId: null, orderId, userAddr: userKasiaAddr, amountKas: refundAmount, sinceIso: order.created_at, network, rpcUtxoLookup, indexerCoverage: (a) => indexerCoverage(sqlite, a) });
+  if (cls.state === REFUND.REFUNDED_CONFIRMED && (cls.txid || cls.evidence?.chain_event?.txid)) {
+    return _backfillRefundedState({ orderId, offerId: null, realTxId: cls.txid || cls.evidence.chain_event.txid, refundAmount, userKasiaAddr, reason: `${reason}_no_offer_backfill` });
+  }
+  if (cls.state !== REFUND.NOT_REFUNDED) {
+    _alertRefundOnce(orderId, cls.state === REFUND.UNKNOWN ? 'refund_unknown_hold' : `refund_${cls.state.toLowerCase()}`, cls.reason, cls.evidence);
+    return { ok: false, skipReason: cls.state === REFUND.UNKNOWN ? 'refund_unknown_hold' : `refund_${cls.state.toLowerCase()}_no_resend`, error: `no_offer refund not sent (${cls.state}: ${cls.reason})`, orderId, userKasiaAddr, refundAmount };
   }
 
-  // Phase 1 CAS lock — refundable states per round 3 共识: awaiting_payment/paid/expired
+  // Phase 1 CAS lock + write-ahead intent (同一 transaction) — refundable states per round 3 共识: awaiting_payment/paid/expired
   // lint-allow-state-update: PZ-STATE-T-REFUND-PHASE1-NO-OFFER advanceToRefunded no_offer fallback (Phase 1 CAS lock → 'refunding'). 'refunding' 不在 v0.1 7 state ALLOWED_TRANSITIONS, phase Z 折叠.
-  const claim = sqlite.prepare(`
-    UPDATE retail_dex_orders
-    SET state = 'refunding', updated_at = datetime('now')
-    WHERE id = ?
-      AND state IN ('awaiting_payment', 'paid', 'expired')
-      AND refund_tx_hash IS NULL
-      AND exchange_offer_id IS NULL
-  `).run(orderId);
-  if (claim.changes === 0) {
+  const { claimed, intentId } = claimRefundLockWithIntent(sqlite, { orderId, offerId: null, userAddr: userKasiaAddr, amountKas: refundAmount, noOffer: true });
+  if (!claimed) {
     const post = sqlite.prepare(`SELECT state, refund_tx_hash FROM retail_dex_orders WHERE id=?`).get(orderId);
     if (post?.state === 'aligning' || post?.state === 'confirming') {
       return { ok: true, noRefundNeeded: true, skipReason: 'no_refund_needed', orderState: post.state };
@@ -581,7 +594,13 @@ async function _advanceNoOfferRefund({ orderId, order, reason }) {
     });
     realTxId = result?.txId;
     if (!realTxId) throw new Error('sendKas resolved without txId');
+    recordRefundIntentTxid(sqlite, intentId, realTxId);   // write-ahead (早于 Phase 3)
   } catch (err) {
+    if (err?.code === 'AMBIGUOUS_BROADCAST') {
+      // 2026-08-29: 歧义 ⇒ 不回滚 (留 refunding + intent 无 txid), 走 reconciler stuck 路; 绝不重试广播
+      _alertRefundOnce(orderId, 'refund_ambiguous_broadcast', String(err.message || err).slice(0, 200), { intentId, noOffer: true });
+      return { ok: false, ambiguous: true, skipReason: 'refund_ambiguous_broadcast', error: `sendKas ambiguous (no_offer, may have broadcast): ${err.message || err}`, orderId, userKasiaAddr, refundAmount };
+    }
     // T-J2-2026-05-07 r248 T1.3e: wasm 'unreachable' / RuntimeError = invalid bytes addr crash.
     // bogus addr (NWT operator 5/7 早期测试 leak) 真 wasm Address::try_from trap. 真 fail-fast permanent skip
     // 防 reconciler retry forever loop. error_reason='invalid_addr' marker 真 reconciler SQL filter exclude.
@@ -591,11 +610,7 @@ async function _advanceNoOfferRefund({ orderId, order, reason }) {
       ? `refund_skip_invalid_addr_no_send_attempt: ${errMsg.slice(0, 150)}`
       : `refund_send_failed_no_offer: ${errMsg.slice(0, 200)}`;
     // lint-allow-state-update: PZ-STATE-T-REFUND-ROLLBACK-NO-OFFER no_offer rollback path (sendKas failed → 'expired' allow reconciler retry, OR invalid_addr permanent skip).
-    sqlite.prepare(`
-      UPDATE retail_dex_orders
-      SET state = 'expired', error_reason = ?, updated_at = datetime('now')
-      WHERE id = ? AND state = 'refunding'
-    `).run(errorReason, orderId);
+    rollbackRefundLockWithIntent(sqlite, { orderId, intentId, errorReason });
     return {
       ok: false,
       error: `sendKas failed (no_offer): ${errMsg}`,
@@ -904,3 +919,68 @@ export function _testForceExpire(peer) {
 // ── Lint hook for R33 phase 2 strict mode ────────────────────────
 // J1 lint-kanet checkR33 phase 2 真 strict 真 detect handler files import this module.
 // 真 import { getConvoState } from './broker-state-authority.js' 真 grep-able.
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 2026-08-29 (J2, broker-money-path 阶段 2; 双退款稿 0fadf34b/91549d02 NWT GREEN; Bettor GO):
+//   退款 write-ahead intent 账 (broker_refund_intents, migrate v199) 与 Phase-1 CAS 的原子绑定 + 歧义处理 + 一次性告警。
+//   纯 db 函数, 可离线用真 schema 测 (broker-state-authority.refund-lock.test.mjs): crash-between ⇒ both-or-neither。
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Phase 1: CAS 锁 (state → 'refunding') + INSERT intent (txid NULL) —— 同一 better-sqlite3 transaction():
+ *   CAS 没抢到 ⇒ 不插 intent (both-or-neither); 插 intent 抛 ⇒ 整个事务回滚 (CAS 也不生效)。
+ * @returns {{ claimed: boolean, intentId: string|null }}
+ */
+export function claimRefundLockWithIntent(db, { orderId, offerId = null, userAddr, amountKas, noOffer = false }) {
+  if (!orderId || !userAddr || !(Number(amountKas) > 0)) throw new Error('claimRefundLockWithIntent: bad args');
+  const tx = db.transaction(() => {
+    // lint-allow-state-update: PZ-STATE-T-REFUND-PHASE1 (同 advanceToRefunded Phase 1 CAS; 这里只是把 UPDATE 与 intent INSERT 放进同一事务)
+    const claim = db.prepare(`
+      UPDATE retail_dex_orders
+      SET state = 'refunding', updated_at = datetime('now')
+      WHERE id = ?
+        AND state IN ('awaiting_payment', 'paid', 'expired')
+        AND refund_tx_hash IS NULL
+        ${noOffer ? 'AND exchange_offer_id IS NULL' : ''}
+    `).run(orderId);
+    if (claim.changes === 0) return { claimed: false, intentId: null };
+    const intentId = `ri_${orderId.slice(0, 12)}_${Date.now().toString(36)}`;
+    const now = new Date().toISOString();
+    db.prepare(`INSERT INTO broker_refund_intents (id, order_id, offer_id, user_addr, amount_kas, txid, created_at, updated_at) VALUES (?, ?, ?, ?, ?, NULL, ?, ?)`)
+      .run(intentId, orderId, offerId, userAddr, Number(amountKas), now, now);
+    return { claimed: true, intentId };
+  });
+  return tx();
+}
+
+/** Phase 2 resolve: txid 一到手先写 intent (早于 Phase 3 三表同步)。 */
+export function recordRefundIntentTxid(db, intentId, txid) {
+  if (!intentId || !txid) return 0;
+  return db.prepare(`UPDATE broker_refund_intents SET txid = ?, updated_at = datetime('now') WHERE id = ? AND txid IS NULL`).run(String(txid), intentId).changes;
+}
+
+/** 明确未广播的失败 ⇒ 回滚 CAS 到 'expired'(允许 reconciler 重试) + 删 intent —— 同一事务。歧义失败【不走这里】。 */
+export function rollbackRefundLockWithIntent(db, { orderId, intentId, errorReason }) {
+  const tx = db.transaction(() => {
+    // lint-allow-state-update: PZ-STATE-T-REFUND-ROLLBACK (同 advanceToRefunded 回滚; 加 intent 删除进同一事务)
+    db.prepare(`UPDATE retail_dex_orders SET state = 'expired', error_reason = ?, updated_at = datetime('now') WHERE id = ? AND state = 'refunding'`).run(errorReason, orderId);
+    if (intentId) db.prepare(`DELETE FROM broker_refund_intents WHERE id = ? AND txid IS NULL`).run(intentId);
+  });
+  tx();
+}
+
+/** 一次性告警 (按 order_id + event_type 去重) 进 events 表; 失败只 warn, 绝不影响钱路决策。 */
+export function _alertRefundOnce(orderId, eventType, reason, evidence = {}) {
+  try {
+    const exists = sqlite.prepare(`SELECT 1 FROM events WHERE event_type = ? AND json_extract(payload_json, '$.order_id') = ? LIMIT 1`).get(eventType, orderId);
+    if (exists) return false;
+    const payload = JSON.stringify({ order_id: orderId, reason: String(reason || '').slice(0, 300), evidence: evidence || {} }, (k, v) => (typeof v === 'bigint' ? String(v) : v));
+    sqlite.prepare(`INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at) VALUES (lower(hex(randomblob(16))), 'system', ?, 'broker-refund', 'warn', ?, ?, datetime('now'))`)
+      .run(eventType, `${eventType} order=${String(orderId).slice(0, 12)}`, payload);
+    console.warn(`[broker-refund] ${eventType} order=${String(orderId).slice(0, 12)}: ${reason}`);
+    return true;
+  } catch (e) {
+    console.warn(`[broker-refund] alert write failed (${eventType}): ${e.message}`);
+    return false;
+  }
+}

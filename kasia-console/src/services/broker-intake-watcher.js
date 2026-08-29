@@ -496,7 +496,16 @@ export async function _scanExpiredBrokerOffers() {
       -- 让 SQLite 反过来从 chain_events(event_type 索引命中近空)驱动, 对每行去 kaspa_tx_log
       -- 做单点索引查找。live 实测 233,123ms → 1ms, 逐行结果 byte-identical(id 顺序全同,
       -- kaspa_tx_log.tx_id 全库 0 NULL, IN/EXISTS 无 NULL 语义边界差异)。
-      AND EXISTS (SELECT 1 FROM kaspa_tx_log k WHERE k.tx_id = e.txid)
+      -- 🔴 2026-08-29 (J2 broker-money-path 阶段 2, 双退款稿 §0-bis, NWT GREEN): 删掉原 "AND EXISTS (SELECT 1 FROM kaspa_tx_log k WHERE k.tx_id = e.txid)"
+      -- (模板字符串内的 SQL 注释不能含反引号, 见 memory feedback-backtick-in-sql-comment-breaks-template-literal)
+      -- —— 那句让"已记 broker_kas_refunded 但索引漏行"的 offer 不被排除 ⇒ 重新进 advanceToRefunded (fail-open, 87.9 KAS 先例同族)。
+      -- 现: chain_events 有该 offer 的 broker_kas_refunded 即排除 (intent 已记 ≠ 该再发; v83 trigger 保证 txid 是真 64-hex)。
+    )
+    -- 2026-08-29 同上: write-ahead intent 已有 txid, 或 30 min 内的 INFLIGHT intent ⇒ 也排除 (不重发; 落地核实走 advanceToRefunded 的 INTENT 路)
+    AND NOT EXISTS (
+      SELECT 1 FROM broker_refund_intents i
+      WHERE i.offer_id = exchange_offers.id
+        AND (i.txid IS NOT NULL OR i.created_at > datetime('now', '-30 minutes'))
     )
     -- T-J2-2026-05-10 r223 T2.14 (NWT r289 Option A): 防 Z20 与 T2.5c CEX hedge race double-spend.
     -- T2.5c placeCexOrder ok 后立即 INSERT broker_fallback_claim → Z20 SQL skip claimed offer.
