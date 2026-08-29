@@ -1,4 +1,4 @@
-[db] path=C:\Users\ADMIN\AppData\Local\Temp\rdd-hbGOdv\t.db source=DB_PATH
+[db] path=C:\Users\ADMIN\AppData\Local\Temp\rdd-4spKqn\t.db source=DB_PATH
 [migrate] Skills table created with 3 builtin skills.
 [migrate] Skills table upgraded: relay_node_id added, unique(relay_node_id, name).
 [migrate] v6: side_effect_level added to skills.
@@ -273,7 +273,11 @@
 [PASS] V11 chain_events 是别的 offer ⇒ 不算 (offer_id 精确)
 [PASS] V12 kaspa_tx_log 真行(肯定证据)命中 ⇒ REFUNDED_CONFIRMED 带 txid
 [PASS] V13 bad args ⇒ UNKNOWN
+[PASS] X1 exchange 预筛形(offerId, orderId=null): chain_events(offer_id) 命中 ⇒ CONFIRMED(不 join log) — 预筛不再把已退 offer 重新呈现
+[PASS] X2 exchange 预筛形: intent(offer_id) 有 txid, orderId=null ⇒ REFUNDED_INTENT 不重发
+[PASS] X3 no_offer 形(orderId, offerId=null): intent(order_id) 命中 ⇒ 不重发 (state-authority:550 findPriorRefundTxs 同 fail-open 的替代)
+[PASS] X4 两 id 都空 ⇒ 仍能走 S3/S4/coverage 判 (纯地址+金额形), 无 intent/行 ⇒ NOT_REFUNDED 只在 coverage+rpc 齐时
 [PASS] Q1 timeout / empty result / no txId ⇒ ambiguous, retry=false
 [PASS] Q2 明确未广播的拒因 ⇒ definite_fail, retry=true
 [PASS] Q3 未知文本 ⇒ 按 ambiguous 处理(保守)
-refund-dedup v02: 16 PASS / 0 FAIL
+refund-dedup v02: 20 PASS / 0 FAIL
