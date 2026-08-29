@@ -18,6 +18,7 @@
 // ════════════════════════════════════════════════════════════════
 
 import { sqlite } from '../../db/client.js';
+import { randomUUID } from 'node:crypto';   // P11 withdraw_ambiguous 告警 (J2 2026-08-29)
 import { extract } from './parser.js';
 import * as state from './state.js';
 import * as llm from './llm.js';
@@ -179,15 +180,27 @@ export async function handleMessage(peer, msg) {
       `SELECT privkey_encrypted, address FROM agent_wallets WHERE relay_node_id = ? AND chain = ? AND privkey_encrypted IS NOT NULL LIMIT 1`
     ).get(BROKER_RELAY_ID, evmChain);
     if (!brokerWallet?.privkey_encrypted) return `broker ${wChain} 钱包未配置, 联系 Owner. 你的余额仍在.`;
+    // J2 2026-08-29 (race 盘点 P11, 侧分支 coord/broker-money-path-2): 借记【先于】链转账 (write-ahead, 同事务 CAS 重算余额), 转账确定失败才冲正;
+    // 原形: 转账后才 INSERT 负项 ⇒ 转账在飞时余额未变 ⇒ 同 peer 第二条 DM 同样过上面的余额检查 ⇒ 双提。上面的 balance 检查保留作早退, 真闸在 reserveWithdraw 事务内。
+    const { reserveWithdraw, finalizeWithdraw, revertWithdraw } = await import('../../lib/user-ledger-withdraw.mjs');
+    const rsv = reserveWithdraw(sqlite, { peer, asset: wAsset, chain: wChain, amount: wAmount });
+    if (!rsv.ok) return rsv.reason === 'insufficient' ? `余额不足: ${wAsset} 现 ${Number(rsv.balance).toFixed(4)}, 提 ${wAmount} 不够 (可能有一笔提币刚在处理). 回 "余额" 查账.` : `提币参数不对 (${rsv.reason}).`;
     const { transferUsdt } = await import('../evm-transfer.js');
-    const wRes = await transferUsdt(evmChain, brokerWallet.privkey_encrypted, payRow.pay_address, wAmount);
-    if (!wRes?.ok) return `提币失败: ${(wRes?.error || 'unknown').slice(0, 80)}. broker 余额未动, 5min 后可重试 OR 联系 Owner (broker 钱包 inventory 不足真 likely 真因).`;
-    const balanceAfter = parseFloat((balance - wAmount).toFixed(4));
-    const ledgerId = `ledger_withdraw_${peer.slice(-8)}_${Date.now()}`;
-    sqlite.prepare(`
-      INSERT INTO user_ledger (id, user_kasia_address, asset, chain, balance_change, balance_after, reason, ref_order_id, ref_tx_hash, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, datetime('now'))
-    `).run(ledgerId, peer, wAsset, wChain, -wAmount, balanceAfter, `withdraw_user_initiated:broker_direct:${wRes.txHash?.slice(0, 12)}`, wRes.txHash);
+    let wRes;
+    try {
+      wRes = await transferUsdt(evmChain, brokerWallet.privkey_encrypted, payRow.pay_address, wAmount);
+    } catch (e) {
+      // 结果不明 (抛/超时): 不冲正 (fail-closed: 余额先扣着), 告警进 events, 人工核链后按 SOP 冲正或补 tx
+      console.error(`[broker-v2] withdraw AMBIGUOUS peer=${peer.slice(-12)} ledger=${rsv.ledgerId}: ${e.message}`);
+      try { sqlite.prepare(`INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at) VALUES (?, 'system', 'withdraw_ambiguous', 'broker-v2', 'warn', ?, ?, ?)`)
+        .run(randomUUID(), `🔴 提币结果不明 peer=${peer.slice(-12)} ${wAmount} ${wAsset} ${wChain}: 借记保留(ledger ${rsv.ledgerId}), 人工核链`, JSON.stringify({ peer, ledger_id: rsv.ledgerId, amount: wAmount, asset: wAsset, chain: wChain, error: String(e.message).slice(0, 200) }), new Date().toISOString()); } catch {}
+      return `提币已受理但链上结果暂未确认 (${(e.message || '').slice(0, 60)}). 账户已先扣 ${wAmount} ${wAsset}, 我们核实后会补记 tx 或退回, 请勿重复提.`;
+    }
+    if (!wRes?.ok) {
+      revertWithdraw(sqlite, { ledgerId: rsv.ledgerId, error: wRes?.error || 'unknown' });
+      return `提币失败: ${(wRes?.error || 'unknown').slice(0, 80)}. 余额已退回, 5min 后可重试 OR 联系 Owner (broker 钱包 inventory 不足真 likely 真因).`;
+    }
+    finalizeWithdraw(sqlite, { ledgerId: rsv.ledgerId, txHash: wRes.txHash });
     const explorerMap = { 'bnb': 'https://bscscan.com/tx/', 'eth': 'https://etherscan.io/tx/', 'tron': 'https://tronscan.org/#/transaction/' };
     return [
       `✓ 提币成功 (broker direct, 跳 Gate.io)`,
