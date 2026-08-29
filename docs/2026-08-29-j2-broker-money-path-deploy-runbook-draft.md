@@ -11,6 +11,9 @@
 | P4 | v199 一次性索引 `idx_spc_daa_ts` 建在 **263 MB `spc_daa_index`** 上 ⇒ boot 时 `runMigrations()` 会多花秒级（同步，主线程）⇒ **必须在 supervisor boot-grace（300 s）内完成**；离线在 07-23 bak 副本上先计时（`CREATE INDEX` 秒数）填这里：`___ s` | 计时 < 60 s ⇒ 安全；> 120 s ⇒ 改为窗内手工先建索引（`CREATE INDEX IF NOT EXISTS` 幂等，migrate 再跑为 no-op） |
 | P5 | `kanet.env` 已有 `BROKER_RELAY_ID`（`relay_nodes` 取 broker 地址）或新增 `BROKER_KAS_ADDR=<TN12 地址>`；前缀与 `KASPA_NETWORK` 一致 | 否则 escrow 全 UNKNOWN（安全但无用）|
 | P6 | 与节点/supervisor 维护窗**正交**：不与 57fde30f/supervisor v0.1.4/红线 7 同批；可同一天不同窗 | Bettor 排期 |
+| **P7 运营前置 (a)**（NWT 2026-08-29，retail 开放前）| UI/tg-bot 把 `skipReason`（`refund_unknown_hold` / `refund_*_no_resend` / `refund_ambiguous_broadcast` / `held_for_review`）译成用户可读的"退款处理中 / 待复核"——**用户面文案 = Owner 批** | 文案稿 + Owner 一句 |
+| **P8 运营前置 (b)** | held 队列的人工 SOP：谁看（Bettor 指派）、多久内解（建议 24 h）、解法（relay `check_utxo_landed` 核 intent txid → 回填 / 人工放回 `awaiting_payment` / 人工 `no_escrow` 二次确认）| SOP 一页 |
+| **P9 运营前置 (c)** | UNKNOWN 须 rare：hold-monitor 第五个数 = 每小时 `events(refund_unknown_hold + broker_escrow_unknown)` 计数，超阈告警；RPC 健康（`rpc-health`）+ coverage-lag 一并看 | 阶段 3 fix-up 2 落 |
 
 ## §1 步骤
 | # | 步骤 | 执行人 | 只读验证 | 通过判据 |
