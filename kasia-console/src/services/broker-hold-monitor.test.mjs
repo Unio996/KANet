@@ -49,6 +49,16 @@ t('H9 (NWT f) 边界: intent 无 txid 31 min ⇒ stale 计; 29 min ⇒ 不计', 
   const ids = computeHoldMetrics(db, NOW).detail.intent_stale.map((r) => r.id);
   assert.ok(ids.includes('ib31'), '31 min 应计'); assert.ok(!ids.includes('ib29'), '29 min 不应计');
 });
+t('H10 (batch-2 ①) manual_refund_pending: broker_buy_fallback_refunded{manual_refund_pending:true} ⇒ 1 breach; 同 offer 出现 _refund_resolved ⇒ 0; payload 无该标不计', () => {
+  const ins = db.prepare(`INSERT INTO chain_events (id, txid, event_type, payload, observed_by, observed_at) VALUES (?, ?, ?, ?, 'system', ?)`);
+  ins.run('ce_mrp1', 'a'.repeat(64), 'broker_buy_fallback_refunded', JSON.stringify({ offer_id: 'ofb1', manual_refund_pending: true, usdt_amount: 3 }), NOW);
+  ins.run('ce_mrp2', 'b'.repeat(64), 'broker_buy_fallback_refunded', JSON.stringify({ offer_id: 'ofb2', cex_buy_error: 'x' }), NOW);   // 无 manual 标 ⇒ 不计
+  let m = computeHoldMetrics(db, NOW); assert.strictEqual(m.manual_refund_pending, 1); assert.deepStrictEqual(m.manual_refund_pending_detail.map((r) => r.offer_id), ['ofb1']);
+  assert.ok(breaches(m).some((b) => b.metric === 'manual_refund_pending' && b.value === 1));
+  ins.run('ce_mrp3', 'c'.repeat(64), 'broker_buy_fallback_refund_resolved', JSON.stringify({ offer_id: 'ofb1', by: 'manual', tx: '0x' }), NOW);
+  m = computeHoldMetrics(db, NOW); assert.strictEqual(m.manual_refund_pending, 0); assert.ok(!breaches(m).some((b) => b.metric === 'manual_refund_pending'));
+  assert.strictEqual(THRESHOLDS.manual_refund_pending, 1);
+});
 t('H6 alertBreachesOnce: 同 hour bucket 去重; 下一小时再写', () => { const list = [{ metric: 'stuck_refunding', value: 1 }]; assert.strictEqual(alertBreachesOnce(db, list, NOW), 1); assert.strictEqual(alertBreachesOnce(db, list, NOW), 0); assert.strictEqual(alertBreachesOnce(db, list, '2026-08-29T11:00:00.000Z'), 1); assert.strictEqual(db.prepare(`SELECT count(*) AS n FROM events WHERE event_type='broker_hold_stuck_refunding'`).get().n, 2); });
 db.close(); rmSync(dir, { recursive: true, force: true });
 console.log(`hold-monitor: ${pass} PASS / ${fail} FAIL`);
