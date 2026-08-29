@@ -116,3 +116,9 @@ echo "methods.rs=$f"; echo "got =$got"; echo "want=$want"
 
 ### §6.2 `guest_source` 内容锚（Bettor 8/29 非阻塞补，已进 `.json`）
 `methods` tree `4435fbfb…` / `methods/guest` `c310bfa4…` / `guest/src` `0d80e3bc…` / `build.rs` blob `08a8a4eb…` / `methods/Cargo.toml` `8ad4cb9d…` / `host` tree `61ab9150…` / 两 Cargo.lock blob `389ecefa…` `dcfb6c31…`（最后改动 `68822fff`）。跨机 mismatch 先比这些：相等 ⇒ 源没变，是工具链；不等 ⇒ 源变了。
+
+### §6.1-裁定（Bettor 2026-08-29）：**不钉 `rust-toolchain.toml`，保持 `channel = "stable"`**
+- 理由：host 工具链已证对 guest 字节不承重（§6：host 1.96.1 下全新重编逐字节 == 7/12 产物）；钉 `1.96.1` 需装独立 toolchain（系统状态变更），而 live `zk-prove-worker.mjs:70` 直接读 live 树 toml——装不到位就 prove 全挂或自动下载。为一个"可复述"性质去碰 live 前置，不值。
+- 记录处：`TOOLCHAIN.lock.json` `host_toolchain`（已记 1.96.1 + 不承重）。
+- **日后若必须钉**（例：host 升级导致 `build.rs`/risc0-build 行为变、或 §6 对拍开始不等）：顺序固定 = ① 角色 B 令下 `rustup toolchain install <ver>` → ② 副本树 `--build` 对拍 == canonical → ③ 再改 live 树 toml → ④ 再对拍一次。不许跳 ①②直接改 toml。
+- docker 第三步不在本批；younio 跨机 derive（报值、mismatch 即交付、绝不 copy）排 READY 后。
