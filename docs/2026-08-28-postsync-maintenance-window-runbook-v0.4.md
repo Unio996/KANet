@@ -1,4 +1,4 @@
-# T+125 后预告维护窗 runbook v0.5.1(定稿 · 文件名保留 v0.4 免断引用)
+# T+125 后预告维护窗 runbook v0.5.2(定稿 · 文件名保留 v0.4 免断引用)
 
 > **Status**: CURRENT · KANet-UI 2026-08-28 · v0.5 J2 2026-08-29 落 Bettor 裁(J1 预检 `docs/iteration/j1-inbox/2026-08-29T23-10Z-j1-reply-maintenance-window-preflight.md` 两缺口) · D-013 §3 配套 · 从 scratch 转正(Bettor 令)
 
@@ -158,6 +158,20 @@ KANet-KaspadWatchdog 任务保持 **Disabled**; 启用前置(全满足才 Enable
 5. Bettor 令。
 以上齐 ⇒ J1 提权 Enable 任务; 启用后首轮观察 watchdog 对 daa=0 IBD 判 SYNCING 不重启(即已修的 8/23 型误判)。
 
+## §supervisor-v0.1.3(lifetime 风暴保护 + PID-aware boot grace · 与 ③ console 单体重启同一动作 · NWT 最终 GREEN 2026-08-29)
+> 设计 `docs/2026-08-29-j2-supervisor-lifetime-storm-guard-and-boot-grace-design.md`；产物 `docs/provenance/2026-08-29-supervisor-v01/`（`3b10b479`：候选全脚本 + `index.v01.diff` + `selftest.sh` + `MANIFEST.sha256`；NWT 5× exit 0、48/0、sha 全一致）。根因：现役 supervisor 的风暴保护**从 8/23 起从未真正存在**（headless `:65-71` 杀掉调用者 ⇒ `record_restart` 永不达）+ boot 期无心跳被当死重启 = 05:14Z 风暴自激环。批次记 DECISIONS.md D-014 注记。
+1. **前置**：READY ∧ Owner 批（live 进程守护逻辑）∧ 由 **Bettor 令下指派提权执行者**（J1 角色 B 暂停中, 未指派前不动）。
+2. **apply（提权）**：
+   - `cd D:/kanet-tn12/docs/provenance/2026-08-29-supervisor-v01 && sha256sum -c MANIFEST.sha256` **全 OK 才继续**（钉死的是候选**全脚本**）。
+   - 先留回滚件：`cp scripts/kanet-console-supervisor.sh scripts/kanet-console-supervisor.sh.bak-pre-v013-<UTC>` 并 `sha256sum` 记入 run.log。
+   - `cp docs/provenance/2026-08-29-supervisor-v01/kanet-console-supervisor.v01.sh scripts/kanet-console-supervisor.sh`（**用全脚本覆盖；🔴 不 `git apply` 那份 diff**——它是 `diff -u scripts/… scratch/…` 生成、带 scratch 路径前缀）。
+   - `index.js` 27 行 patch（boot-marker + 心跳 `__booted` gate）：`patch kasia-console/src/index.js docs/provenance/2026-08-29-supervisor-v01/index.v01.diff`；**红 = 现役 index.js 已漂（如 57fde30f 之后又有改动）⇒ 停，重生成 diff 报 NWT**，不手改。`node --check kasia-console/src/index.js`。
+3. **闸**：`bash docs/provenance/2026-08-29-supervisor-v01/selftest.sh`；**退出码 = 闸**（汇总行 `48 PASS / 0 FAIL`；`smoke(not gating)` 一栏不影响退出码）。红 ⇒ 还原回滚件, 不进 ③。
+4. **顺序**：与 §检查③ console 单体重启**同一动作**——③ `taskkill //F //T` 杀 console 树后, 旧 supervisor 若仍活(它不在 console 树里)⇒ 手动 `bash scripts/kanet-console-supervisor.sh stop`(或 `taskkill //PID <sup> //T`)；再起新 console(启动器) ⇒ 新 supervisor 由 headless/启动器按 r432 wire 拉起(或手动 `bash scripts/kanet-console-supervisor.sh start`)。**新 supervisor 与新 console 一起起**。
+5. **验收**（只读）：新 `logs/console-supervisor.log` 首行 `supervisor start pid=… boot_grace=300s short_lifetime=300s streak_max=3 state:last_restart=…`（= `load_state` 已跑）；`logs/console-boot.txt` 出现且 `<pid> <ms>` 的 pid = 新 console PID；boot 期日志 `booting: pid=… age=…s/300s — wait` 若干行后 **`boot OK: boot_ms=…`**（这个数决定下轮是否收紧 grace）；`logs/console-supervisor-state.env` 落盘（四 key）。任一缺 ⇒ 报 Bettor, 不算过。
+6. **回滚**：`cp scripts/kanet-console-supervisor.sh.bak-pre-v013-<UTC> scripts/kanet-console-supervisor.sh`（sha 对回）+ `index.js` 用 `.bak-j1-20260826` 还原(或 `patch -R`)，重起 supervisor；`console-boot.txt`/`state.env` 可留(旧脚本不读)。
+🔴 不在本节：修 headless 杀调用者的行为(下一轮评)；05:13 console 首死根因(另查, 见 `docs/2026-08-29-j2-console-eventloop-block-investigation.md`)。
+
 ## §red-line-7-observe(relay 重启后检查 · 条件: Owner 已批红线 7 observe + plurality MUST-FIX NWT GREEN + 随本窗部署)
 > NWT 判定: observe 段随 relay 重启部署(J2 6ed90a7a, coord/redline7-observe), 盯法放本 runbook 不进 first-hour。**仅当 Owner 已批 observe、plurality MUST-FIX NWT GREEN、且本窗部署了它**才执行本节; 未满足 ⇒ 跳过。
 > 🔴 **plurality MUST-FIX 前置**(Codex 桥 e6d3d2f8 / D-014 注记): 本地估算器漏 UTXO plurality(covenant UTXO p=2 被按 p=1 算 = 低估)——未修就部署 observe 会用错估算器 ⇒ 部署前须 plurality MUST-FIX NWT GREEN(Owner"批"不变, 但部署门加这一条)。
@@ -168,6 +182,7 @@ KANet-KaspadWatchdog 任务保持 **Disabled**; 启用前置(全满足才 Enable
 （未部署 observe 时本节不产生摘要行; enforce 是 observe 7 天对照后另议, 不在本窗。）
 
 🔴 ~~本页 scratch 不 commit(等 Bettor 批口径)~~(已转正入 docs `511741fd`, 此句留作历史)。敏感细节走管道/本地 memory。
+v0.5.2(Bettor 令·supervisor v0.1.3 NWT 最终 GREEN·J2 落): 新增 **§supervisor-v0.1.3** 段——前置 READY+Owner 批+Bettor 指派提权执行者; apply = `sha256sum -c MANIFEST.sha256` 后用候选**全脚本**覆盖(不 `git apply` 带 scratch 前缀的 diff)+ `index.js` 27 行 `patch`(红=重生成 diff); 闸 = `selftest.sh` 退出码; 与 ③ 同一动作(新 supervisor 与新 console 一起起, 旧 supervisor 手动停); 验收五项(首行 load_state/boot.txt/booting…boot OK boot_ms/state.env); 回滚 = sha 钉死旧脚本副本 + `.bak-j1-20260826`。
 v0.5.1 fix-up(NWT 裁 v0.5 NOT-GREEN 一条承重 MUST-FIX·J2 落): **1.** §检查③ `taskkill` 加 **`//T`**(杀整棵树; `//F` 无 `//T` = TerminateProcess 不触发 `index.js:886-893 shutdown()`(只绑 SIGTERM/SIGINT, 内含 `stopAllRelays()`) ⇒ relay 子(`relay-manager.js:95` fork 非 detached/无 job-object; `relay.mjs` 零 disconnect/exit 自退; `setInterval(poll,2000)` 独立喂 loop)孤儿存活继续自主 poll 上链)。**2.** 加 **stop 后硬闸验证**: 提权 CIM `CommandLine -match 'relay\.mjs'` 为空 ∧ 父已不存在的 node.exe 数 = 0(双判据; 非提权读 SYSTEM CommandLine 为 null = 假空)才进下一步。**3.** §107/硬闸语义句改为"console 树被 `//T` 杀尽 + 实测 0 个 relay 进程存活", 不再写"随父终止"; 顶部横幅/步骤表 ③/路 3 段/relay 归位同步。**4.** 顺手更正 J1 "stopAll 零调用者": 唯一调用者是 `shutdown()`, 只是 `//F` 绕过它。活证: 05:14Z 起 supervisor 三次 `//F` 式重启, relay 孤儿数 KANet-UI 在数。
 v0.5 变更(对 v0.4·Bettor 裁 J1 预检两缺口·J2 落): **1.** §②-bis「J1 提权 `stopAll()`」改**路 3**——`stopAll()` 零调用者、无只停端点 ⇒ 不单独停 relay; drain 稳定窗三条齐后直接 ③ 重启 console, relay 子随 console 终止, 硬闸语义由"console 停 = 无 relay 可打"覆盖(§107 兜底不变); 顶部横幅/步骤表/§检查② 冻结列/relay 归位同步改。**2.** §检查③ 加**"预期阶段"**: 节点侧 `searching for missing block bodies` 不是卡, 过关只看 `nodeBodiesProcessedCount` 离开 0(J1 da9 基准 8.3 min@7.9 GB, 默认缓存 20–40 min)。**3.** §检查③ 启动器 = `scripts/_launch_console_single.ps1`(J1 写: kanet.env 全量 export + 复刻现役 argv + `Win32_Process.Create`), env 清单 KANet-UI 确认; 补丁段已完成(57fde30f)窗内 SKIP。**4.** ④ commit 闸单位写明 = **全机 commit charge 已用 ≤ 80 GB ∧ 可用 ≥ 20 GB**(非 llama 进程私有 commit)。
 v0.4 变更(对 v0.3·NWT 三眼·定稿): **1.** stopAll 含 comm relay 743c0360 ⇒ 窗内(③–⑥)dev-coord 频道 DOWN, 顶部横幅 + ① 通知 + ⑦ 恢复点全写明, 协调走 pipe SendMessage+git。**2.** check_utxo_landed minDepth 20=REORG_SAFE_MIN_DEPTH 确认够。**3.** drain 判据改**稳定窗三条**(announce-freeze ∧ 连续 60s 无新 broadcast_tx/broadcasting ∧ 现存全 landed)替单次快照(补 mid-transfer 未写 broadcast_tx 洞); 注明 **stopAll 本身 fail-closed 硬闸**(停后新 money 请求 sendCommandAsync 报错不花钱)⇒ 只需盖停前在飞小段; 时序 drain+quiesce→stopAll→③。
