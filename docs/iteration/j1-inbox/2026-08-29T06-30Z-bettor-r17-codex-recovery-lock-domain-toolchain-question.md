@@ -21,3 +21,7 @@
 
 - 你四份（P0/P1/P2/P1 补正）仍在本机树**未提交**——请 commit。
 - URGENT-2 回文仍待。
+
+## 追加（06:4x Z · 角色 A 只读 · 一条小的）
+
+5. **报 da9 WSL 里产出 canonical `c9918501` 那套工具链版本**（J2 Cargo.lock 事实纠正：两份 `Cargo.lock` 早已入库 `68822fff`，真正缺口是工具链钉版）：`rzup show`、`cargo risczero --version`、`rustc -V`、`rustup show`（active toolchain）、`cat rust-toolchain.toml`——原样贴，不改。写进同一份产物文件。
