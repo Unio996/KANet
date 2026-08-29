@@ -63,6 +63,8 @@
 4. **不起** C1 / C2；**不**为 J1 的夹具地址注资；**不**做 R2 那笔"最小真链验证"。
 
 ## §6 不确定 / 未核（诚实边界）
+- 🔴 **主网化边界（J1 P2 逮到、Bettor 亲核 live、D-015 注记；本稿 fix-up 补入 2026-08-29）**：`git show 7b1e18cc:crypto/txscript/src/zk_precompiles/groth16/mod.rs` :19（`risc0/mod.rs` :79 同）标 **"Experimental code; not yet fully audited for mainnet use. TODO(covpp-mainnet)"**；`crypto/txscript/src/lib.rs` :11-13 三限额（`MAX_STACK_SIZE 244 / MAX_SCRIPTS_SIZE 1M / MAX_SCRIPT_ELEMENT_SIZE 1M`）同带 `TODO(covpp-mainnet)`；且 `params.rs` :607 mainnet `covenants_activation: ForkActivation::never()`。⇒ 本稿"已建成、已上链、生产 armed"**全部指 TN12**；主网化前这三条（验证器审计状态、限额可能收紧、激活）必须计入，不是"上游会自动给"。
+- 🔵 J1 P1 回执（2026-08-29）：`imageId_younio = n/a`（younio 无工具链、WASM 拷自 da9 非独立构建）；但补了一条真独立检验——同 imageId、两份不同 journal 的 receipt ⇒ 同 suffix 指纹 / 同 gateTmplHash ⇒ §1 "suffix 只绑 imageId、journalHash 每盘变"**成立**。跨机可复现的根因在 da9 侧（guest `Cargo.lock` 未入库，`zk-close-builder.mjs:28-31`）——另出方案（Bettor 排，低优先）。
 - zk-sdk 移植版对应的上游 commit 与 7b1e18cc 的关系**未逐提交比对**（它 7/6 已在 live 链验过，本稿以链上实证为准，不以源码比对为准）。
 - §6-3 A-covenant 最终是否需要自己的 gate（或只沿用 `zk_handoff → CloseZkV2` 交接）取决于 §6-3 A2-whole 设计，本稿只定"若需，用同形"。
 - `zk-autonomy-ticks.mjs` 内部未逐行读；`.claude/worktrees/*` 下 CloseZkV2/PayoutShardV2 为陈旧副本未比对。
