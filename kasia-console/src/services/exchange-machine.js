@@ -781,6 +781,15 @@ export function processPaymentSubmit({ offer_id, payment_tx, payment_chain }) {
   if (!offer) return { error: 'offer_not_found' };
   if (offer.protocol_status !== 'verifying') return { error: 'invalid_status', current: offer.protocol_status };
   if (!payment_tx) return { error: 'payment_tx_required' };
+  // P7-bis (ii) (Bettor ③ 8/29): 本地 auto-pay 的付款意图标记 PENDING:… 还在 (转账结果不明/失败) ⇒ 不许被对端/HTTP 报的 hash 覆盖 (否则本地转账痕迹丢, reopen-guard 失明);
+  // 只记事件, 人工核链后决定 (本地成功路会先用 _finalizePaymentIntent 把标记换成真 hash, 再到这里 ⇒ 不触发)。
+  if (offer.payment_tx && String(offer.payment_tx).startsWith('PENDING:') && offer.payment_tx !== payment_tx) {
+    try {
+      sqlite.prepare(`INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at) VALUES (?, 'system', 'payment_submit_while_intent_pending', 'exchange-machine', 'warn', ?, ?, ?)`)
+        .run(crypto.randomUUID(), `🔴 offer ${offer_id.slice(0, 8)} 本地付款意图 ${offer.payment_tx} 未决, 收到外部 payment_tx ${String(payment_tx).slice(0, 16)}… — 不覆盖, 人工核`, JSON.stringify({ offer_id, local_intent: offer.payment_tx, submitted_tx: payment_tx, chain: payment_chain }), new Date().toISOString());
+    } catch {}
+    return { error: 'payment_intent_pending', intent: offer.payment_tx };
+  }
 
   // Security: use taker_chain from offer (set at accept time), fallback to body value for backward compat
   const verifyChain = offer.taker_chain || payment_chain;
