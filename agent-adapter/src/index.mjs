@@ -16,6 +16,9 @@ import { resolveListenHost } from "./listen-host.mjs";
 
 const PORT = process.env.ADAPTER_PORT || 3000;
 const HOST = resolveListenHost();   // 默认 127.0.0.1 (adapter 只服务本地 IPC); 显式 ADAPTER_HOST=0.0.0.0 才全接口 — 见 listen-host.mjs
+// 🟡 依赖注记 (NWT 2026-08-29 GREEN-with-caveat): console 连 adapter 用 `localhost`, 本机 Node 24 解析 ::1 优先; 我们只绑 IPv4 127.0.0.1,
+//    靠 Node ≥20 默认开启的 autoSelectFamily (happy-eyeballs) 自动回退到 127.0.0.1 才不断。Node <20 或跑在 `--no-network-family-autoselection`
+//    下会连不上 ⇒ 那时要么 CONSOLE 侧改 127.0.0.1, 要么 ADAPTER_HOST 绑 ::1/双栈 (须批)。
 const MAX_BODY_BYTES = 524288; // 512KB — Mind tasks with skills can be large
 
 function log(...args) {
