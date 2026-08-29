@@ -539,6 +539,12 @@
               </button>
               <span class="text-ink-300 uppercase" x-text="selectedOffer?.taker_chain || ''"></span>
             </div>
+            <!-- Payment intent marker (PENDING:<offer8>:<uuid8>, batch-2): in-flight/unknown transfer — shown raw, no explorer link, no copy -->
+            <div x-show="isPendingPaymentMarker(selectedOffer?.payment_tx)" class="flex items-center gap-2">
+              <span class="text-ink-400 w-16 flex-shrink-0">Payment</span>
+              <span class="text-ink-500 font-mono truncate" x-text="selectedOffer?.payment_tx"></span>
+              <span class="text-ink-300 uppercase" x-text="selectedOffer?.taker_chain || ''"></span>
+            </div>
           </div>
         </div>
 
@@ -1348,10 +1354,14 @@ function exchangeApp() {
       return pc.diffPct > 0 ? 'text-green-600' : (pc.diffPct < -2 ? 'text-red-500' : 'text-amber-500');
     },
 
+    // 付款意图标记 (batch-2 trade-protocol-filter PAYMENT_INTENT_PREFIX = 'PENDING:', 转账前 CAS 写入、finalize 用真 txid 覆盖; 留驻 = 失败/不明): 不是 txid, 不建链接不复制。前缀精确 (与写方常量一致), 同本文件 startsWith('pending_') 习语。
+    isPendingPaymentMarker(v) { return typeof v === 'string' && v.startsWith('PENDING:'); },
+
     getPaymentTx(o) {
       if (!o) return null;
-      if (o.payment_tx) return o.payment_tx;
-      try { const m = JSON.parse(o.verification_meta || '{}'); return m.payment_tx || null; } catch { return null; }
+      let v = o.payment_tx || null;
+      if (!v) { try { const m = JSON.parse(o.verification_meta || '{}'); v = m.payment_tx || null; } catch { return null; } }
+      return this.isPendingPaymentMarker(v) ? null : v;
     },
 
     getExplorerUrl(o) {
