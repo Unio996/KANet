@@ -108,7 +108,10 @@ t('T2 assertRecoveryTxShape 拒 N6/N7/N9/续 covenant/空输出: lockTime E−1 
 });
 // ── Codex 418fffbd wiring-time 要求 (Bettor GO 8/29): _loadRecoveryConfigWithMaxForTests 从生产模块导出, "test-only" 只是命名 ⇒ 机械 import-surface guard ──
 // 走 spawn 跑 scripts/lint-kanet.mjs (不 import 它: 顶层自执行 = import 即执行, 同 runner 那条坑) 的 R-TESTONLY-EXPORT-IN-PROD; 阳性对照证规则真活。
-t('G1 import-surface guard: lint R-TESTONLY-EXPORT-IN-PROD 对 kasia-relay/src/lib 两生产文件 + kasia-console/src/lib 生产 .mjs = 0 命中; 阳性对照 (scratch 临时文件 import _loadRecoveryConfigWithMaxForTests) 必报 1; 跑完删', () => {
+// G-doc (NWT MUST, 与 lint 规则注释同步): 规则三轴 = 符号(定义/引用皆红, 剥字面量与行尾注释) + 路径(prod→任何 test-context 路径字面量: .test./.fixture./.testonly./test-framework//__testonly__/);
+//   known-escape 两族 (regex 盲): (E1) 计算路径 (拼接/变量) 动态 import; (E2) 间接 loader (createRequire 别名 / import.meta.resolve)。fixture-relaunder 已被轴 3 关掉, 不列。
+//   🔴 真安全边界是 BRAND: testonly cfg 无 recovery-lock-builder 私有 WeakSet 品牌 ⇒ planRecoveryDaa 拒 (C5 向量钉); cltv 生产 API 无 allowZero。lint = belt-and-suspenders, escape = 完整性缺口非 authority-bypass。
+t('G1 import-surface guard: spawn lint R-TESTONLY-EXPORT-IN-PROD — 两生产文件 + kasia-console/src/lib 生产 .mjs = 0 命中; 10 条对照 (具名 import 1 / 生产定义 1 / import * as 1 / 动态 import() 1 / export * from 1 / test-context 同样 import+定义 0 / fixture 引 testonly 0 / prod import .fixture 1 / 符号只在字符串+行尾注释 0 / 真定义+真调用 2), 各报行列, 跑完删', () => {
   const { spawnSync } = _cp;
   const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
   const lint = join(ROOT, 'scripts', 'lint-kanet.mjs');
@@ -129,7 +132,12 @@ t('G1 import-surface guard: lint R-TESTONLY-EXPORT-IN-PROD 对 kasia-relay/src/l
     ['star_import.mjs', `import * as x from '${T}';\nexport const c = x;\n`, 1, 'TG-2: 生产 import * as 不带符号名 ⇒ 按路径红'],
     ['dyn_import.mjs', `const m = await import('${T}');\nexport const d = m;\n`, 1, 'TG-2: 生产动态 import() ⇒ 按路径红'],
     ['reexport.mjs', `export * from '${T}';\n`, 1, 'TG-2: 生产 re-export ⇒ 按路径红'],
-    ['green.test.mjs', `import * as x from '${T}';\nexport function _yForTests() { return x; }\n`, 0, 'test-context 同样 import + 定义 ⇒ 绿'],
+    ['green.test.mjs', `import * as x from '${T}';\nimport * as fx from './helper.fixture.mjs';\nexport function _yForTests() { return [x, fx]; }\n`, 0, 'test-context 同样 import(testonly + fixture) + 定义 ⇒ 绿'],
+    // v4 (NWT 轴 3 + ④): 全 test-context 路径 / 白名单互引合法 / 符号轴剥字面量与行尾注释后真引用仍逮
+    ['helper.fixture.mjs', `export * from '${T}';\nexport const clean = 1;\n`, 0, '白名单 .fixture 引 testonly (test-context 互引) ⇒ 绿'],
+    ['prod_fixture_import.mjs', "import { clean } from './helper.fixture.mjs';\nexport const e = clean;\n", 1, '轴 3: 生产 import .fixture (relaunder 入口) ⇒ 红'],
+    ['prod_symbol_in_string.mjs', 'const doc = "_fooForTests"; // _barForTests\nexport const f = doc;\n', 0, '④: 符号只在字符串字面量/行尾注释 ⇒ 绿'],
+    ['prod_real_ref.mjs', 'const _realForTests = () => 1;\nexport const g = _realForTests();\n', 2, '④: 真定义+真调用 ⇒ 2 (两行各 1)'],
   ];
   try {
     for (const [name, body, want, why] of CASES) {
