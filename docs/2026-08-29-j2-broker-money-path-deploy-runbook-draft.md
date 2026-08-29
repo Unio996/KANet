@@ -95,7 +95,7 @@
 
 ---
 # v0.3 增补 · batch-2（`coord/broker-money-path-2`）部署段
-> **Status**: v0.3 · J2 2026-08-29 晚 · Bettor 令 · batch-2 头 **`81282118`**（从 origin `fe6ad45e` 开，**不叠 batch-1**；对 `fe6ad45e` **23 files, +999 / −54**；`3277183a` 之后叠：DEFECT1b 可见性 `9c80babc`、P7-bis 两处 reopen 门 + explorer (B) `042ffdea`、write-ahead 付款意图 `6554b8d9`、SQL 层兜底 `81282118`）· NWT 审中（hedge-call 突变 / explorer 改法最小性 / "其余四入口有上限"复核 / 第七数 vs unknown_1h 两型）· 与 batch-1（头 `66b5d38c`，25 files +1247/−116，含 fix-up 4/5/6）**各自可批可回滚**；同窗部署顺序 batch-1 → batch-2（batch-2 的 ambiguous 事件靠 batch-1 hold-monitor 看见）。
+> **Status**: v0.3 · J2 2026-08-29 晚 · Bettor 令 · batch-2 头 **`8473f1ec`**（从 origin `fe6ad45e` 开，**不叠 batch-1**；对 `fe6ad45e` **23 files, +1019 / −55**；`3277183a` 之后叠：DEFECT1b 可见性 `9c80babc`、P7-bis 两处 reopen 门 + explorer (B) `042ffdea`、write-ahead 付款意图 `6554b8d9`、SQL 层兜底 `81282118`、远端 paid 写谓词 `8473f1ec`）· NWT 审中（hedge-call 突变 / explorer 改法最小性 / "其余四入口有上限"复核 / 第七数 vs unknown_1h 两型）· 与 batch-1（头 `66b5d38c`，25 files +1247/−116，含 fix-up 4/5/6）**各自可批可回滚**；同窗部署顺序 batch-1 → batch-2（batch-2 的 ambiguous 事件靠 batch-1 hold-monitor 看见）。
 
 ## §B2-1 文件表（19）
 | 类 | 文件 | 说明 |
