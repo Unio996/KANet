@@ -92,3 +92,9 @@ echo "methods.rs=$f"; echo "got =$got"; echo "want=$want"
 ### §4.5 边界
 - J2 的 WSL 读数 = da9 本机 root WSL（与 J1 r17 同一台），命令全只读（`ls / cat / grep / rustc -V / stat / sha256sum`），WSL 查完不驻留。
 - §4.2 证据依赖盘上 `target/`（gitignored、可被 `cargo clean` 抹掉）⇒ 这也是 ② 要把它抄进仓的原因。
+
+## §5 边界（Bettor 2026-08-29 裁，接 §4）
+- **三 diff (a)(b)(c) = Bettor GO 待 NWT 一句**；落后先跑 `verify-image-id.sh`（零构建）报 OK，再 `--build`（`nice -n 10` + `CARGO_BUILD_JOBS=4`，几分钟，不碰 live，不 prove）——**相等 / 不等两种结果都记事实进 §3**，不等也不改 canonical（D-001 债的第一手证据）。
+- 7/12 构建产物（`methods.rs` / `payout.bin` / `.rustc_info.json`）已抄进 `docs/provenance/2026-08-29-zk-guest-imageid/`（sha 钉，`verify-payout-id.mjs` 4/4），不再依赖 gitignored `target/`。
+- **docker 路不在本批**（§4.4）：需改 `methods/build.rs`；容器工具链 ≠ 本地 v1.94.1 ⇒ 产出几乎必 ≠ c9918501；它是"将来改 guest 时的可复现路"，何时开 = Owner/D-005 级决定。rzup 安装归 J1 角色 B。
+- J1 r17 §6 #1/#2 被 §4.1 推翻的两条由 Bettor 转 J1（r24）；J1 不需在 younio 做任何事。
