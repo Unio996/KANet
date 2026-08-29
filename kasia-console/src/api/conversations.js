@@ -481,7 +481,15 @@ export async function registerConversationRoutes(fastify) {
         // (rpc-listener catch-up 定时器 :528/:633 + 实时 DM :1110 + 付款 :1184) 互相无 per-peer 串行 ⇒ 同 peer 两条 DM 可并发到本路由 ⇒
         // v2 withdraw 余额检查在两条里都过 (借记原在转账后) ⇒ 双提。锁 = 排队不丢, 等待超 30 s 告警一次 (不设硬超时: 硬超时=把并发放回来)。
         const { withPeerLock } = await import('../lib/peer-serial-lock.mjs');
-        const _serial = (label, fn) => withPeerLock(peer, fn, { warnAfterMs: 30_000, onWait: ({ waitedMs }) => console.warn(`[api/agent/reply] peer-lock wait ${Math.round(waitedMs / 1000)}s peer=${peer.slice(-12)} at=${label} (前一条仍在处理; 排队不丢)`) });
+        // rejectAfterMs (NWT (c) YES): 等锁超 X ⇒ 拒本条(不执行 ⇒ 不双花), 用户面回一句"系统繁忙"; X 默认 180 s > handler 正常最大耗时 (withdraw 120 s 上限 / LLM 60-120 s)。
+        // 🔴 拒回文案 = 用户面 = Owner 域: 逐字复用 tg-bot/i18n.mjs:428 service_busy, 不新造文案。
+        const PEER_LOCK_REJECT_MS = parseInt(process.env.BROKER_PEER_LOCK_REJECT_MS, 10) || 180_000;
+        const PEER_BUSY_REPLY = '⏳ 系统繁忙，请稍后再试。';
+        const _serial = (label, fn) => withPeerLock(peer, fn, {
+          warnAfterMs: 30_000, rejectAfterMs: PEER_LOCK_REJECT_MS,
+          onWait: ({ waitedMs }) => console.warn(`[api/agent/reply] peer-lock wait ${Math.round(waitedMs / 1000)}s peer=${peer.slice(-12)} at=${label} (前一条仍在处理; 排队不丢)`),
+          onReject: ({ waitedMs }) => console.error(`[api/agent/reply] peer-lock REJECT peer=${peer.slice(-12)} at=${label} waited=${Math.round(waitedMs / 1000)}s (前一条疑似挂死; 本条未执行)`),
+        }).catch((e) => { if (e && e.code === 'PEER_LOCK_REJECTED') return PEER_BUSY_REPLY; throw e; });
         const _v3Flag = process.env.BROKER_V3_ENABLED === '1';
         const _v3Peers = (process.env.BROKER_V3_ENABLED_PEERS || '').split(',').map(s => s.trim()).filter(Boolean);
         if (_v3Flag || _v3Peers.includes(peer)) {
