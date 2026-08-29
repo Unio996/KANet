@@ -142,3 +142,21 @@
 2. `conversations.js` 拒回：**逐字复用** `tg-bot/i18n.mjs:428 service_busy`「⏳ 系统繁忙，请稍后再试。」——零新造文案；只在 rejectAfterMs 触发时出现。
 - **operator 面备注（不进 Owner 待批清单；NWT/Bettor 8/29 降级）**：`kasia-console/src/ui/exchange.eta` 是 console 运营面板（KANet-UI 用），不是用户 DM。batch-2 起转账失败/结果不明的 offer 会在 `:1353` 显示裸 `PENDING:<offer8>:<uuid8>`，`:533-537` 与 `:1357-1362 getExplorerUrl` 会据它拼出 `…/PENDING:…` 死链（404，不花钱不误状态）。可选修一行：前缀判 `startsWith('PENDING:')` 时显示三元/不建链接；随后续小批，不阻塞本批。
 - **DEFECT1b（新，NWT 定级）**：`_executeHedge` 门 `SELECT meta FROM exchange_offers`（`trade-protocol-filter.js:2191-2193`）读不存在的列 ⇒ 抛 ⇒ 三处调用全吞 ⇒ **hedge 从未在 live 跑过**（bak `chain_events hedge%` = 0 条印证）。DEFECT1 修传参**不改变**这一点（安全）。要真开对冲 = 改读 `metadata` + 因写方全置 `hedge_enabled:true` 而等于对所有 broker offer 开 CEX 对冲 ⇒ Owner 级决定，独立批。
+
+## §B2-6 附录 · operator 面 `exchange.eta` PENDING 前缀 guard（设计段·**不动码**·Bettor 8/29 令"下批候选只做设计"）
+**事实**：batch-2 起 `payment_tx` 列可能短暂持有意图标记 `'PENDING:<offer8>:<uuid8>'`（写方 `trade-protocol-filter.js:2200 PAYMENT_INTENT_PREFIX = 'PENDING:'`，CAS `WHERE payment_tx IS NULL`；finalize 用真 txid 覆盖；失败/不明 = 标记留驻 fail-closed）。`exchange.eta` 三处读它而不辨：`:1351-1355 getPaymentTx` 原样返回 ⇒ `:533-537` 建 `<a href=explorerTxUrl(...PENDING:…)>` 死链 + Copy 复制标记；`:1357-1362 getExplorerUrl` 同源同病。`:1394` 只读 `verification_meta.payment_tx`（标记不写 meta）⇒ 不改。
+**设计（≤10 行，镜像本文件既有 `startsWith('pending_')` 习语 `:510/:515/:524`，零新文案）**：
+1. `:1351` 前加一行判据 `isPendingPaymentMarker(v) { return typeof v === 'string' && v.startsWith('PENDING:'); }`（大小写精确 = 与写方常量一致）。
+2. `:1353-1354`：`const v = o.payment_tx || meta.payment_tx || null; return this.isPendingPaymentMarker(v) ? null : v;`（一处改 ⇒ `:533` 行自动隐藏、`:1357` 自动回 `'#'`、Copy 无物可复制）。
+3. `:533` 行旁加一同形行：`x-show="isPendingPaymentMarker(selectedOffer?.payment_tx)"`，沿用既有标签 `Payment`，`x-text` 直接显示标记裸串（`font-mono`），**无 `<a>` 无 Copy**——operator 看得见"付款在飞/不明"，点不到死链。
+**向量（把 `getPaymentTx`/`getExplorerUrl`/判据三函数抠到 `scratch/` node 脚本跑 V1–V7；`:533` 行为浏览器手核一次，截图入 `docs/provenance/`）**：
+| # | 输入 | 期望 |
+|---|---|---|
+| V1 | `payment_tx='PENDING:ab12cd34:9f8e7d6c'` | `getPaymentTx`⇒`null`；`:533` 隐藏；pending 行显示裸串；`getExplorerUrl`⇒`'#'` |
+| V2 | `payment_tx='0x' + 64 hex`, `taker_chain='bnb'` | 与改前逐字相同：链接 = `KANet.explorerTxUrl('bnb', tx)`，Copy 复制 tx |
+| V3 | `payment_tx=null`, `verification_meta='{"payment_tx":"0x…"}'` | 与改前相同（走 meta） |
+| V4 | `payment_tx=null`, meta 含 `PENDING:` 串（写方不会写，防御） | `getPaymentTx`⇒`null`；两行皆隐藏（可接受：标记只经列 CAS 写入） |
+| V5 | `payment_tx='pending:x'`（小写）/ `'PENDING'`（无冒号）/ `' PENDING:x'` | **不是**标记 ⇒ 按 txid 处理（与写方精确前缀一致；不做宽松匹配） |
+| V6 | finalize 后 `payment_tx` 由标记变真 txid | = V2（pending 行消失、链接出现） |
+| V7 | `selectedOffer` 为 `undefined`/`{}` | `getPaymentTx({})`⇒`null`，两行皆隐藏，不抛 |
+**范围/闸**：operator 面（NWT/Bettor 8/29 降级：不进 Owner 用户面待批清单，但仍走 报备→GO→侧分支→NWT 审→合）；不改任何服务端；不改 `:1394`；不新增文案；与 batch-2 `8473f1ec` 无 merge 冲突（改动全在 `.eta`）。
