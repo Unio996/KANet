@@ -18,6 +18,7 @@
  */
 
 import { ethers } from 'ethers';
+import { buildExplorerUrl, buildExplorerAddressUrl } from '../lib/explorer-url.mjs';   // kaspa explorer 单源 (R-EXPLORER-URL-BYPASS)
 
 // ── Registry ──────────────────────────────────────────────────────────────
 
@@ -27,9 +28,12 @@ export const CHAIN_META = {
     isEvm: false,
     nativeSymbol: 'KAS',
     rpcPool: [], // Kaspa uses its own RPC resolver in shared/lib/rpc-utils.mjs
+    // R-EXPLORER-URL-BYPASS 收敛 (J2 2026-08-29, 侧分支 coord/j2-chains-explorer, Bettor 裁 (B) 原则): kaspa 的 explorer 走单源 lib/explorer-url.mjs —
+    // mainnet 输出 byte-identical (`https://explorer.kaspa.org/{txs,addresses}/…`), TN12 ⇒ null (公网无 testnet explorer, 原来是死链) 由调用方降级;
+    // 网络按 KASPA_NETWORK 环境变量 (调用时读, 非 import 时), 与 broker-state-authority.js:43 / exchange-machine.js dm_kas_delivered 同一判据。
     explorer: {
-      address: (a) => `https://explorer.kaspa.org/addresses/${a}`,
-      tx: (h) => `https://explorer.kaspa.org/txs/${h}`,
+      address: (a) => buildExplorerAddressUrl(a, process.env.KASPA_NETWORK),
+      tx: (h) => buildExplorerUrl(h, process.env.KASPA_NETWORK),
     },
     stables: {},
   },
