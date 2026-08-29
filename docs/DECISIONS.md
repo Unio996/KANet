@@ -24,6 +24,14 @@
 
 ## 🔴 当前有效的战略决策 (CURRENT)
 
+### D-015 ZK 目标形态 = 已建成的「gate 委托」形·C1（silverc `OpZkPrecompile` builtin）/ C2（`ScriptBuilder` 直造）排期 0·B2 真链小额 ZK 验证不做 (2026-08-29 · Bettor 拍（Owner 授权技术决策枢纽，Owner 可否决）· NWT 设计层 GREEN)
+> 出处: J2 决定稿 `docs/2026-08-29-j2-zk-target-form-decision-draft.md`（8acfe08f）· NWT 裁定 COORD-LEDGER (709) · J1 ZK 六连 `docs/iteration/j1-inbox/2026-08-28T19-35Z…T00-40Z`（输入）· D-001（4ec9ddd1 7/6 落链）。
+1. **事实（NWT 亲核 live 7b1e18cc）**：ZK + covenant 内省叠加**已建成、已上链、生产 armed**——zk-sdk 移植 `ZkScriptBuilder`（`D:/rusty-kaspa-zksdk-isolated`，链下 builder）生成含 `0xa6` 的独立 gate P2SH 输入；silverc 编的 `CloseZkV2.sil:45-51` 用 `require(tx.inputs[1].scriptPubKey == P2SH(blake2b(0x20‖journalHash‖gateSuffix)))` 把 journal 焊进合约 STATE（`attestedWinner`/`betsRootBaked` 皆 STATE，不接受 witness 喂值 ⇒ SECURE）；live 节点 `opcodes/mod.rs:889 OpZkPrecompile<0xa6>`、`params.rs:694 covenants_activation: always()`、两参 `verify_zk :898`（常数 140,000 grams `tags.rs:31`）。
+2. **裁**：§6-3 及后续 ZK 复用同形；**C1 / C2 均非必经、排期 0**（gate 委托形是 superset，不 foreclose A-covenant；若 A2-whole 将来真需 gate 形做不到的东西再 revisit，现在不投机建）；**B2（换自己 vk 打小额真链验证）不做**（`params.rs:694 always()` + 落链已覆盖）；J1 接口稿坐标出自 cfafeb4（比 live 新 47 提交、`verify_zk` 三参 metered ≠ live）须按 7b1e18cc 重标；J1 原生 Groth16 形 ≠ 生产 R0 形，其夹具地址**禁打钱**；红线 7 估算器不改，enforce 阶段加 zk_close 真形向量；产能上限每块 ≤3 Groth16 结算（记）。
+3. **verify-when-built（未证，不当已证）**：transition probe 与 gate 在同一 spend 里做两个内省 + mass/budget 交互——A2-whole 落地时必真核。
+4. **派工**：J1 P1 = younio 用同版 zk-sdk WASM **独立 derive** imageId + gateTmplHash（报得到的值，**mismatch 即交付物**——暴露 guest `Cargo.lock` 未入库的跨机不可复现债 `zk-close-builder.mjs:28-31` = 真 D-001 风险）；P2 = 六连链层部分按 7b1e18cc 重标并入 KB zk-track-c。
+5. 与 D-001/铁律 0.5 一致：ZK committed、rolling 死路不变；本条只定"ZK 走哪一形"，不新开方向。
+
 ### D-014 红线 7 mass-aware fee floor 替代方案·阶段 1 observe = 批 (2026-08-29 · Owner 原话「批，继续盯着，READY 了直接派 J2」· Bettor 记账)
 > 出处: COORD-LEDGER (703)(704) · gate-status v5.1 `docs/2026-08-28-nwt-s63-redline7-mass-fee-silent-disable-v5.1.md`（c3363410 + 783f3c9c + e608314b）· Codex 桥 438e46e9 §3。
 1. **事实**：relay `kasia-relay/src/lib/p2sh.mjs:55-62` 的 mass-aware fee floor（红线 7，`fee ≥ mass×MIN_SOMPI_PER_MASS`）自 ≥2026-08-01（有 boot log 起）**从未生效**——vendored `shared/vendor/kaspa-wasm` 的 `Params::from(NetworkId)` 无 TN12 分支 ⇒ `calculateTransactionMass` 对任何 tx 形任何入口 panic，被 try/catch 只 warn 吞掉（`mass calc skipped` 177,415 次），只剩 kaspad mempool 兜底；关闭期（≥8-01）按日期分桶零 mempool 拒费 = 无实证损失但守卫不在（机制非运气）。
