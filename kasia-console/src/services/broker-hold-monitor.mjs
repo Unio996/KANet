@@ -23,8 +23,9 @@ const STALE_MIN = 30;
 export function computeHoldMetrics(db = sqlite, nowIso = new Date().toISOString()) {
   const q = (sql, ...args) => { try { return db.prepare(sql).all(...args); } catch (e) { return { error: e.message }; } };
   const held = q(`SELECT id, updated_at FROM retail_dex_orders WHERE state = 'held_for_review' ORDER BY updated_at ASC LIMIT 20`);
-  const stuck = q(`SELECT id, updated_at FROM retail_dex_orders WHERE state = 'refunding' AND updated_at < datetime(?, '-${STALE_MIN} minutes') ORDER BY updated_at ASC LIMIT 20`, nowIso);
-  const intents = q(`SELECT id, order_id, offer_id, created_at FROM broker_refund_intents WHERE txid IS NULL AND created_at < datetime(?, '-${STALE_MIN} minutes') ORDER BY created_at ASC LIMIT 20`, nowIso);
+  // 🔴 时间比较一律 julianday(): 存储是 ISO 'T…Z' 形, datetime() 返回空格形, 字符串比较 'T' > ' ' 会全错 (memory reference-sqlite-iso-timestamp-string-compare-trap)
+  const stuck = q(`SELECT id, updated_at FROM retail_dex_orders WHERE state = 'refunding' AND julianday(updated_at) < julianday(?, '-${STALE_MIN} minutes') ORDER BY updated_at ASC LIMIT 20`, nowIso);
+  const intents = q(`SELECT id, order_id, offer_id, created_at FROM broker_refund_intents WHERE txid IS NULL AND julianday(created_at) < julianday(?, '-${STALE_MIN} minutes') ORDER BY created_at ASC LIMIT 20`, nowIso);
   let coverage_lag = null, tip = null, maxEnd = null;
   try {
     tip = db.prepare(`SELECT daa_score FROM spc_tip_heartbeat WHERE id = 1`).get()?.daa_score ?? null;

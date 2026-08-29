@@ -505,7 +505,7 @@ export async function _scanExpiredBrokerOffers() {
     AND NOT EXISTS (
       SELECT 1 FROM broker_refund_intents i
       WHERE i.offer_id = exchange_offers.id
-        AND (i.txid IS NOT NULL OR i.created_at > datetime('now', '-30 minutes'))
+        AND (i.txid IS NOT NULL OR julianday(i.created_at) > julianday('now', '-30 minutes'))   -- julianday: created_at 是 ISO 'T' 形, 不能与 datetime() 空格形做字符串比较
     )
     -- T-J2-2026-05-10 r223 T2.14 (NWT r289 Option A): 防 Z20 与 T2.5c CEX hedge race double-spend.
     -- T2.5c placeCexOrder ok 后立即 INSERT broker_fallback_claim → Z20 SQL skip claimed offer.
