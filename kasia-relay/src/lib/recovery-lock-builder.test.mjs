@@ -141,6 +141,9 @@ t('G1 import-surface guard: spawn lint R-TESTONLY-EXPORT-IN-PROD — 两生产�
     // v5 (Codex 2ce3f1a9 TG-4): ESM 副作用 import 形
     ['prod_side_effect_import.mjs', "import './helper.testonly.mjs';\nexport const h = 1;\n", 1, 'TG-4: 生产副作用 import (无 from) ⇒ 红'],
     ['side_effect.test.mjs', "import './helper.testonly.mjs';\nexport const i = 1;\n", 0, 'TG-4: test-context 同形 ⇒ 绿'],
+    // v6 (NWT 8/29): .mts/.cts 曾被扩展名过滤整体跳过 (latent, repo 0 个)
+    ['p_mts_ext.mts', "import './helper.testonly.mjs';\nexport const j: number = 1;\n", 1, '.mts 生产副作用 import testonly ⇒ 红 (扩展过滤含 .mts/.cts)'],
+    ['p_cts_ctx.test.cts', "const x = require('./helper.testonly.mjs');\nmodule.exports = x;\n", 0, '.test.cts 是 test-context ⇒ 绿'],
   ];
   try {
     for (const [name, body, want, why] of CASES) {

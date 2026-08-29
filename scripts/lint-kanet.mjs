@@ -1874,7 +1874,7 @@ checkR_SQL_TIME_STRINGCMP(); // R-SQL-TIME-STRINGCMP (2026-08-29)
 const TESTONLY_SYM_RE = /\b_[A-Za-z0-9]+ForTests\b/g;
 const TESTONLY_PATH_RE = /(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*|^\s*import\s+)['"`][^'"`]*(?:\.test\.|\.fixture\.|\.testonly\.|(?:^|\/)test-framework\/|__testonly__\/)[^'"`]*['"`]/g;
 export function isTestContextPath(relPosix) {
-  return /\.test\.m?js$/.test(relPosix) || /\.fixture\.m?js$/.test(relPosix) || /\.testonly\.m?js$/.test(relPosix) || /(^|\/)test-framework\//.test(relPosix) || /(^|\/)__testonly__\//.test(relPosix);
+  return /\.test\.(m?js|cjs|mts|cts)$/.test(relPosix) || /\.fixture\.(m?js|cjs|mts|cts)$/.test(relPosix) || /\.testonly\.(m?js|cjs|mts|cts)$/.test(relPosix) || /(^|\/)test-framework\//.test(relPosix) || /(^|\/)__testonly__\//.test(relPosix);   // NWT 8/29: +.cjs/.mts/.cts
 }
 // 符号轴预处理 (v4 ④): 去单行字符串字面量与行尾 // 注释, 让"字符串/注释里提名字"不算引用 (路径轴用原行, 它正需要字面量)
 function stripStringsAndTrailingComment(line) {
@@ -1897,7 +1897,7 @@ function scanTestOnlyExportViolations(content) {
 }
 function checkR_TESTONLY_EXPORT_IN_PROD() {
   for (const abs of targets) {
-    if (!/\.(m?js|cjs)$/.test(abs)) continue;
+    if (!/\.(m?js|cjs|mts|cts)$/.test(abs)) continue;   // NWT 8/29: +.mts/.cts (repo 现 0 个, latent 缺口)
     const rel = path.relative(ROOT, abs).split(path.sep).join('/');
     if (isTestContextPath(rel)) continue;   // (b) 全 test-context 白名单
     let c = ''; try { c = read(abs); } catch { continue; }
