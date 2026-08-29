@@ -54,10 +54,24 @@ function* walk(dir, ext = ['.js', '.mjs']) {
 
 // ── 输入: argv 给的 file 列表, 或全库扫 ──
 const argv = process.argv.slice(2);
-const targets = argv.length > 0
-  ? argv.map(p => path.resolve(p)).filter(exists)
-  : [...walk(path.join(ROOT, 'kasia-console/src')), ...walk(path.join(ROOT, 'agent-mind/src')), ...walk(path.join(ROOT, 'agent-adapter/src')), ...walk(path.join(ROOT, 'scripts')),
-     ...walk(path.join(ROOT, 'kasia-relay/src'), ['.js', '.mjs', '.cjs'])];   // TG-3 (Codex 2ce3f1a9, 2026-08-29): kasia-relay/src 此前从未进默认 walk —— 恰是 builder/cltv/*.testonly.mjs 所在; 无参 lint = 仓级不变量必须盖它
+// 无参默认范围 (v6, Bettor 8/29 裁): 【只扫 git tracked 文件】(git ls-files, 含 `git add -N` 的 intent-to-add) —— 物理 walk 会把 gitignored 的
+// scripts/_send-*.mjs 之类一次性脚本扫进"仓级不变量"(存量 7 条 ERROR 里 4 条是它们); 扩展表 .js/.mjs/.cjs/.mts/.cts 与 R-TESTONLY 规则过滤一致。
+// git 不可用/失败 ⇒ 回退物理 walk (LOUD warn), 不静默缩小范围。
+const DEFAULT_LINT_DIRS = ['kasia-console/src', 'agent-mind/src', 'agent-adapter/src', 'scripts', 'kasia-relay/src'];   // TG-3 (Codex 2ce3f1a9): kasia-relay/src 必须在 (builder/cltv/*.testonly 所在)
+const DEFAULT_LINT_EXT = ['.js', '.mjs', '.cjs', '.mts', '.cts'];
+function trackedTargets() {
+  const out = execFileSync('git', ['ls-files', '-z', '--', ...DEFAULT_LINT_DIRS], { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  return out.split('\0').filter(Boolean).filter((f) => DEFAULT_LINT_EXT.some((e) => f.endsWith(e))).map((f) => path.join(ROOT, f)).filter(exists);
+}
+let targets;
+if (argv.length > 0) targets = argv.map(p => path.resolve(p)).filter(exists);
+else {
+  try { targets = trackedTargets(); console.log(`[lint-kanet] default scope = git tracked (${DEFAULT_LINT_DIRS.join(', ')}; ext ${DEFAULT_LINT_EXT.join('/')})`); }
+  catch (e) {
+    console.warn(`[lint-kanet] 🔴 git ls-files 失败 (${e.message.slice(0, 80)}) — 回退物理 walk (会含 gitignored 文件)`);
+    targets = DEFAULT_LINT_DIRS.flatMap((d) => [...walk(path.join(ROOT, d), DEFAULT_LINT_EXT)]);
+  }
+}
 
 console.log(`[lint-kanet] scanning ${targets.length} files...`);
 

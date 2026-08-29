@@ -160,15 +160,40 @@ t('G2 (Codex 2ce3f1a9 TG-3) 仓级不变量: 无参 lint 默认 walk 必须盖 k
   const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
   const lint = join(ROOT, 'scripts', 'lint-kanet.mjs');
   const tmpDir = join(ROOT, 'kasia-relay', 'src', 'lib', 'zz-tg3-tmp'); mkdirSync(tmpDir, { recursive: true });
-  const leak = join(tmpDir, 'leak.mjs');
+  const leak = join(tmpDir, 'leak.mjs'); const relLeak = 'kasia-relay/src/lib/zz-tg3-tmp/leak.mjs';
   writeFileSync(leak, "import * as x from '../recovery-lock-builder.testonly.mjs';\nexport const leak = x;\n");
   try {
-    const r = spawnSync(process.execPath, [lint], { cwd: ROOT, encoding: 'utf8', timeout: 300000 });   // 🔴 无参 = 默认 walk
+    // v6: 默认范围 = git tracked ⇒ 临时文件先 `git add -N` 进 tracked 集 (untracked ⇒ 0 由 G3 钉)
+    const a = spawnSync('git', ['add', '-N', '--', relLeak], { cwd: ROOT, encoding: 'utf8' }); assert.strictEqual(a.status, 0, 'git add -N 失败: ' + a.stderr);
+    const r = spawnSync(process.execPath, [lint], { cwd: ROOT, encoding: 'utf8', timeout: 300000 });   // 🔴 无参 = 默认范围
     const out = r.stdout + r.stderr;
     const m = out.match(/R-TESTONLY-EXPORT-IN-PROD: (\d+) hit/);
-    assert.ok(m && Number(m[1]) >= 1, '无参 lint 没逮到 relay 子目录的生产 testonly import ⇒ 默认 walk 不盖 kasia-relay/src');
+    assert.ok(m && Number(m[1]) >= 1, '无参 lint 没逮到 relay 子目录的生产 testonly import ⇒ 默认范围不盖 kasia-relay/src');
     assert.ok(/zz-tg3-tmp[\\/]leak\.mjs:1/.test(out), '须报到该文件');
-  } finally { try { unlinkSync(leak); } catch {} try { rmdirSync(tmpDir); } catch {} }
+  } finally { spawnSync('git', ['reset', '-q', '--', relLeak], { cwd: ROOT, encoding: 'utf8' }); try { unlinkSync(leak); } catch {} try { rmdirSync(tmpDir); } catch {} }
+});
+t('G3 (v6, Bettor 8/29) 无参默认范围 = git tracked: 未 tracked 的临时违例文件 ⇒ 无参 lint 0 命中; `git add -N` 后 ⇒ ≥1; 跑完 reset + 删', () => {
+  const { spawnSync } = _cp;
+  const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+  const lint = join(ROOT, 'scripts', 'lint-kanet.mjs');
+  const tmpDir = join(ROOT, 'kasia-relay', 'src', 'lib', 'zz-g3-tmp'); mkdirSync(tmpDir, { recursive: true });
+  const leak = join(tmpDir, 'untracked_leak.mjs'); const relLeak = 'kasia-relay/src/lib/zz-g3-tmp/untracked_leak.mjs';
+  writeFileSync(leak, "import './x.testonly.mjs';\nexport const u = 1;\n");
+  const count = (out) => { const m = String(out).match(/R-TESTONLY-EXPORT-IN-PROD: (\d+) hit/); return m ? Number(m[1]) : 0; };
+  const isTracked = () => spawnSync('git', ['ls-files', '--', relLeak], { cwd: ROOT, encoding: 'utf8' }).stdout.trim() !== '';
+  try {
+    assert.strictEqual(isTracked(), false, '前提: 临时文件未 tracked');
+    const r0 = spawnSync(process.execPath, [lint], { cwd: ROOT, encoding: 'utf8', timeout: 300000 });
+    assert.ok(/default scope = git tracked/.test(r0.stdout + r0.stderr), '无参须走 tracked scope (git 可用)');
+    assert.strictEqual(count(r0.stdout + r0.stderr), 0, 'untracked 违例文件不该进仓级不变量');
+    const a = spawnSync('git', ['add', '-N', '--', relLeak], { cwd: ROOT, encoding: 'utf8' }); assert.strictEqual(a.status, 0, 'git add -N 失败: ' + a.stderr);
+    assert.strictEqual(isTracked(), true);
+    const r1 = spawnSync(process.execPath, [lint], { cwd: ROOT, encoding: 'utf8', timeout: 300000 });
+    assert.ok(count(r1.stdout + r1.stderr) >= 1 && /zz-g3-tmp[\\/]untracked_leak\.mjs:1/.test(r1.stdout + r1.stderr), 'add -N 后须被逮到并报该文件');
+  } finally {
+    spawnSync('git', ['reset', '-q', '--', relLeak], { cwd: ROOT, encoding: 'utf8' });
+    try { unlinkSync(leak); } catch {} try { rmdirSync(tmpDir); } catch {}
+  }
 });
 console.log(`recovery-lock-builder: ${pass} PASS / ${fail} FAIL`);
 process.exit(fail ? 1 : 0);
