@@ -175,8 +175,26 @@
 
 **索引**：idx_kaspa_tx_log_to_address / from_address / block_time
 
-**写入方**：kasia-relay/src/rpc-listener.mjs:indexBlockTxs() → /ingest/kaspa-tx → ingest.js
-**读取方**：cross-chain-verify.mjs _verifyKaspa()（本地优先）
+**写入方**：kasia-relay/src/rpc-listener.mjs:indexBlockTxs() → /ingest/kaspa-tx → ingest.js（🔴 今天 32 个 relay 各自索引 watched 集合 ⇒ 同一 tx 最多 32 次 POST；L2 设计 `docs/2026-08-29-j2-kaspa-tx-log-integrity-and-single-indexer-design.md` 改 kaspa-scout 唯一 indexer，期 3 起）
+**读取方**：🔴 **不止一处——22 处**（2026-08-29 子代理地图，全在 kasia-console/src；按"0 行时怎么办"分四级）：T1 链读回退 `cross-chain-verify.mjs:472-544`（本地优先 RPC 回退）/ `bshard-close-voter.js:203-206` / `trade-protocol-filter.js:1184-1198`；T2 重试等待 `broker-fee-emit.mjs:133-149` / `pool.js:3808` / `pool-shard-settle.mjs:350-377`；T3 fail-closed `bshard-auto-settler.mjs:246-247` / `bshard-close-voter.js:212-215` / `broker-state-authority.js:751-759`；**T4 absence=证据（危险）** `broker-refund-dedup.js:45-52,82`（重复退款）/ `broker-state-machine.js:253-269`（no_escrow）/ `broker-intake-watcher.js:499/:739/:755` / `broker-state-reconciler.js:144-187`。**T4 消费方在把 0 行当否定证据前必须先问 `kaspa_tx_log_coverage`（下）**，未覆盖 = UNKNOWN。
+**陷阱（新增 2026-08-29）**：本表**不完整**是常态而非偶发——watched 集合不含侧 P2SH / 外部用户地址（`pool.js:2451-2455`），relay POST fire-and-forget 无重试（`ingest.mjs:16-45`，backoff 期直接丢），32 路同源同漏。"表里没有" ≠ "链上没有"。
+
+### kaspa_tx_log_coverage（v199，L2 期 1 保守 coverage 账）
+**"某 indexer 在 [start_daa, end_daa] 连续观察过 address" 的账；让 T4 消费方能问"我看到的 0 行是不是真的 0"**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | INTEGER PK | |
+| network | TEXT NOT NULL | testnet-12 / mainnet |
+| address | TEXT NOT NULL | 被观察地址（watched 集合成员）|
+| start_daa / end_daa | INTEGER NOT NULL | 连续观察区间（含）；CHECK end ≥ start |
+| indexer | TEXT NOT NULL | `relay:<relay_node_id>`（期 1 过渡）/ `kaspa-scout`（期 2 起）|
+| updated_at | TEXT NOT NULL | |
+
+**索引**：idx_txlog_cov_addr_end(network, address, end_daa)
+**写入方**：只有 `lib/indexer-coverage.mjs advanceCoverage()`（wiring 阶段 2/3 由 `/ingest/coverage-advance` 调）。🔴 **推进是唯一写法**：indexer 只在该 finality-safe 块全部命中 tx 的 POST 都 2xx 后才推进；掉帖 ⇒ 不推进 ⇒ 洞（不需要 punch）；相邻 ≤ ADJ 延伸同行，否则开新行（跳块可见）；乱序/重复 ⇒ 跳过不回退。
+**读取方**：`lib/indexer-coverage.mjs indexerCoverage({network,address,fromIso,toIso}) → {covered, holes, mode}`；消费方 = `lib/broker-escrow-check.mjs` / `lib/broker-refund-classify.mjs`（注入）。区间并集必须**完全**盖住窗口才 covered；时间→DAA 走 `spc_daa_index`（起点向前、终点向后，保守）。
+**陷阱**：期 1 返回 `mode:'phase1-relay-attested'`——账只对"relay 声称成功"的块成立；完全 sound 要期 3 原子 batch。**coverage-lag**（账落 tip 太远 = 全 UNKNOWN = broker stall）须监控（`broker-hold-monitor` 第四个数）。设计：`docs/2026-08-29-j2-l2-phase1-conservative-coverage-design.md`。
 
 **背景**：Phase 1 S10B 发现 `chain === 'kaspa'` 分支长期是硬编码 `confirmed: true` stub，绕过所有验证。根因是 Kaspa RPC 无 getTransaction，UTXO 查询在 output 被 spent 后立即失效（f8e70ae1 真实受害案例）。v60 migration 建表，Relay hook block-added 事件过滤 watched addresses 写入本表，verifier 改为本地表查询优先、RPC UTXO fallback。返回值带 `source: 'local_indexer' | 'rpc_fallback'` 方便审计。
 
@@ -769,6 +787,23 @@ Dex-Agent 的状态机数据源。每笔 DM 下的订单从 `aligning` 开始，
 - 非托管下 `refunding → refunded` 路径不可达（Broker 不持币），refunding 直接推 failed
 
 ---
+
+### broker_refund_intents（v199，退款 write-ahead 意图账）
+**双退款守卫的 S2 证据：Phase 1 CAS 同事务插（txid NULL），Phase 2 `enqueueVerified` 一 resolve 就写 txid（早于 Phase 3 三表同步）；dedup 见 intent 即拦重发（"intent 已记 ≠ 该再发；重退比等确认坏"）**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | TEXT PK | |
+| order_id / offer_id | TEXT | 至少一个非空（CHECK）；retail 路用 order_id，exchange 路用 offer_id |
+| user_addr | TEXT NOT NULL | 退款目标 |
+| amount_kas | REAL NOT NULL | |
+| txid | TEXT | NULL = INFLIGHT（≤30 min）/ 超窗无 txid = 歧义（可能已广播回执丢）⇒ 不重发、升人工 |
+| created_at / updated_at | TEXT NOT NULL | |
+
+**索引**：idx_refund_intents_order / idx_refund_intents_offer
+**写入方**：`broker-state-authority.js advanceToRefunded` Phase 1（同 `transaction()`）+ Phase 2（wiring 阶段 2；本表 v199 时刻零写入方）
+**读取方**：`lib/broker-refund-classify.mjs classifyRefundState()`（S2）
+**陷阱**：不要把它当"已退"——它是"发过意图"；确认落链走 relay `check_utxo_landed` / `kaspa_tx_log`。先例：87.9 KAS 双退（`39ac2b69`，04-29，exchange 路旧 inline）。设计：`docs/2026-08-29-j2-broker-refund-double-pay-guard-patch-draft.md`。
 
 ### broker_accounts（1 条）
 **券商账户：IBKR/Alpaca 等传统券商接入**

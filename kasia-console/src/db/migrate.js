@@ -5774,5 +5774,60 @@ export function runMigrations() {
     `);
     console.log('[migrate] v198: u1_relay_identity 建表完成 (§10 跨节点 pubkey 身份, register-only; PK=relay_pubkey_xonly 小写64hex CHECK; network 闭枚举 CHECK; 无 local_relay_id 列/无 relay_id 回退索引(活算 fromAddress); epoch UNIQUE; 写入方 = u1-registration.mjs 事务内).');
   }
+
+  // ── v199 (2026-08-29, J2): kaspa_tx_log_coverage + broker_refund_intents + idx_spc_daa_ts —— 纯新增, 零改表 ──────────
+  //
+  //   设计: docs/2026-08-29-j2-kaspa-tx-log-integrity-and-single-indexer-design.md (L2, NWT GREEN) §2.2 +
+  //         docs/2026-08-29-j2-l2-phase1-conservative-coverage-design.md (期 1 保守 coverage, NWT GREEN) +
+  //         docs/2026-08-29-j2-broker-refund-double-pay-guard-patch-draft.md (双退款 P1, NWT GREEN) §2-2/§2-4。
+  //   Bettor 裁: 拆两段 —— 本块 v199 = 纯新增(不破 schema); v200 = retail_dex_orders 整表重建加 held_for_review
+  //   (Owner A/B 定案后、窗内、带回滚件) 【不在本块】。
+  //
+  //   kaspa_tx_log_coverage —— "indexer 在 [start_daa,end_daa] 连续观察过 address" 的账。
+  //     🔴 写法只有一种: 推进 (advanceCoverage, lib/indexer-coverage.mjs) —— indexer 只在该 finality-safe 块全部命中 tx 的
+  //        POST 都 2xx 后才推进; 掉帖/backoff/超时 ⇒ 不推进 ⇒ 账上自然是洞 (不需要 punch 动作)。推进本身也是 POST, 丢了 = 洞。
+  //     🔴 读法: indexerCoverage() 区间并集必须【完全】盖住窗口才 covered; 消费方 (escrow / refund-dedup) 把"kaspa_tx_log 0 行"
+  //        当否定证据前必须先问它 —— 没覆盖 = UNKNOWN, 不得推断"没发生" (L2 G5)。
+  //     · indexer 列: 'relay:<relay_node_id>' (期 1 过渡, 32 relay 各自) | 'kaspa-scout' (期 2 起唯一 indexer)。跨 indexer 取并集。
+  //     · CHECK(end_daa >= start_daa); 乱序/重复到达 (daa <= end_daa) 由 lib 跳过, 账不回退。
+  //   broker_refund_intents —— 退款 write-ahead 意图账 (双退款守卫 S2)。
+  //     🔴 Phase 1 CAS (advanceToRefunded) 同一 transaction() 插 (txid NULL); Phase 2 enqueueVerified 一 resolve 就 UPDATE txid
+  //        (早于 Phase 3 三表同步) ⇒ 崩在 Phase 2/3 之间也有据; dedup 见 intent 即拦重发 (intent 已记 ≠ 该再发; 重退比等确认坏)。
+  //     · order_id / offer_id 二者至少一个非空 (CHECK); user_addr/amount_kas NOT NULL; txid 可空 (INFLIGHT)。
+  //   idx_spc_daa_ts —— spc_daa_index(timestamp_ms): 时间→DAA 换算 (EQP c9 全表扫 263 MB ⇒ SEARCH)。
+  //   🔵 对 live 的即时影响 = 零: additive + IF NOT EXISTS; 今日无写入方 (写入方 = wiring 阶段 2/3 落码后)。
+  //   验收: src/lib/indexer-coverage.test.mjs / src/lib/broker-refund-classify.test.mjs / src/lib/broker-escrow-check.test.mjs (真 schema, temp DB)。
+  {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS kaspa_tx_log_coverage (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        network    TEXT    NOT NULL,
+        address    TEXT    NOT NULL,
+        start_daa  INTEGER NOT NULL,
+        end_daa    INTEGER NOT NULL,
+        indexer    TEXT    NOT NULL,
+        updated_at TEXT    NOT NULL,
+        CHECK (end_daa >= start_daa)
+      );
+      CREATE INDEX IF NOT EXISTS idx_txlog_cov_addr_end ON kaspa_tx_log_coverage(network, address, end_daa);
+
+      CREATE TABLE IF NOT EXISTS broker_refund_intents (
+        id         TEXT PRIMARY KEY,
+        order_id   TEXT,
+        offer_id   TEXT,
+        user_addr  TEXT NOT NULL,
+        amount_kas REAL NOT NULL,
+        txid       TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        CHECK (order_id IS NOT NULL OR offer_id IS NOT NULL)
+      );
+      CREATE INDEX IF NOT EXISTS idx_refund_intents_order ON broker_refund_intents(order_id);
+      CREATE INDEX IF NOT EXISTS idx_refund_intents_offer ON broker_refund_intents(offer_id);
+
+      CREATE INDEX IF NOT EXISTS idx_spc_daa_ts ON spc_daa_index(timestamp_ms);
+    `);
+    console.log('[migrate] v199: kaspa_tx_log_coverage + broker_refund_intents + idx_spc_daa_ts 建表/建索引完成 (纯新增; 写入方待 wiring 阶段 2/3).');
+  }
   console.log('[migrate] DB migrations complete.');
 }
