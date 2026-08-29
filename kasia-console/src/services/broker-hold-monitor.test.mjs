@@ -59,6 +59,15 @@ t('H10 (batch-2 ①) manual_refund_pending: broker_buy_fallback_refunded{manual_
   m = computeHoldMetrics(db, NOW); assert.strictEqual(m.manual_refund_pending, 0); assert.ok(!breaches(m).some((b) => b.metric === 'manual_refund_pending'));
   assert.strictEqual(THRESHOLDS.manual_refund_pending, 1);
 });
+t('H11 (NWT, batch-2 P2 联动) fallback_ambiguous: intent{ambiguous:1} 无 claim/resolved ⇒ 1 breach; 同 offer 出现 claim ⇒ 0; ambiguous 未标的 intent 不计', () => {
+  const ins = db.prepare(`INSERT INTO chain_events (id, txid, event_type, payload, observed_by, observed_at) VALUES (?, ?, ?, ?, 'system', ?)`);
+  ins.run('ce_fa1', 'd'.repeat(64), 'broker_fallback_intent', JSON.stringify({ offer_id: 'ofa1', ambiguous: 1, ambiguous_error: 'ETIMEDOUT' }), NOW);
+  ins.run('ce_fa2', 'e'.repeat(64), 'broker_fallback_intent', JSON.stringify({ offer_id: 'ofa2' }), NOW);   // 正常 intent (未标 ambiguous) 不计
+  let m = computeHoldMetrics(db, NOW); assert.strictEqual(m.fallback_ambiguous, 1); assert.deepStrictEqual(m.fallback_ambiguous_detail.map((r) => r.offer_id), ['ofa1']);
+  assert.ok(breaches(m).some((b) => b.metric === 'fallback_ambiguous' && b.value === 1));
+  ins.run('ce_fa3', 'd'.repeat(64), 'broker_fallback_claim', JSON.stringify({ offer_id: 'ofa1', cex_order_id: 'x' }), NOW);   // 人工核实 CEX 已成交 ⇒ 补 claim
+  m = computeHoldMetrics(db, NOW); assert.strictEqual(m.fallback_ambiguous, 0); assert.strictEqual(THRESHOLDS.fallback_ambiguous, 1);
+});
 t('H6 alertBreachesOnce: 同 hour bucket 去重; 下一小时再写', () => { const list = [{ metric: 'stuck_refunding', value: 1 }]; assert.strictEqual(alertBreachesOnce(db, list, NOW), 1); assert.strictEqual(alertBreachesOnce(db, list, NOW), 0); assert.strictEqual(alertBreachesOnce(db, list, '2026-08-29T11:00:00.000Z'), 1); assert.strictEqual(db.prepare(`SELECT count(*) AS n FROM events WHERE event_type='broker_hold_stuck_refunding'`).get().n, 2); });
 db.close(); rmSync(dir, { recursive: true, force: true });
 console.log(`hold-monitor: ${pass} PASS / ${fail} FAIL`);

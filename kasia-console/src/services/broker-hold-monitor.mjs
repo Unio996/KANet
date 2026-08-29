@@ -18,6 +18,7 @@ export const THRESHOLDS = Object.freeze({
   coverage_lag_daa: 3600,          // ≈ 6 min @ 10 bps; 与 gate (d) N_claim 同量级 (调查稿 §4)
   unknown_1h: 3,                   // 一小时内 ≥3 单判 UNKNOWN = 不 rare (RPC/coverage/配置有系统性问题), 告警
   manual_refund_pending: 1,        // 任何一单 BUY fallback 待人工退款都值得人看 (它是用户的 USDT 卡在 broker 手里)
+  fallback_ambiguous: 1,           // 任何一单 CEX 下单结果不明 (intent.ambiguous 且无 claim/resolved) 都值得人看 (用户 KAS 卡住等人工核 CEX)
 });
 const STALE_MIN = 30;
 
@@ -44,14 +45,22 @@ export function computeHoldMetrics(db = sqlite, nowIso = new Date().toISOString(
     WHERE e.event_type = 'broker_buy_fallback_refunded' AND json_extract(e.payload, '$.manual_refund_pending') = 1
       AND NOT EXISTS (SELECT 1 FROM chain_events r WHERE r.event_type = 'broker_buy_fallback_refund_resolved' AND json_extract(r.payload, '$.offer_id') = json_extract(e.payload, '$.offer_id'))
     ORDER BY e.observed_at ASC LIMIT 20`);
+  // 第七个数 (NWT 8/29, batch-2 P2 联动): T2.5c CEX 下单结果不明后留下的 intent (payload.ambiguous=1) 且同 offer 既无 claim 也无 resolved
+  // ⇒ Z20/fallback 都在 skip 该 offer = 用户 KAS 卡在 broker 手里等人工核 CEX. (事件在 batch-2 侧分支写; 这里只读, 缺表/无行 = 0)
+  const fallbackAmbiguous = q(`SELECT json_extract(i.payload, '$.offer_id') AS offer_id, i.observed_at FROM chain_events i
+    WHERE i.event_type = 'broker_fallback_intent' AND json_extract(i.payload, '$.ambiguous') = 1
+      AND NOT EXISTS (SELECT 1 FROM chain_events c WHERE c.event_type IN ('broker_fallback_claim', 'broker_fallback_resolved') AND json_extract(c.payload, '$.offer_id') = json_extract(i.payload, '$.offer_id'))
+    ORDER BY i.observed_at ASC LIMIT 20`);
   const count = (r) => (Array.isArray(r) ? r.length : null);
   return {
     at: nowIso,
     held: count(held), stuck_refunding: count(stuck), intent_stale: count(intents), coverage_lag_daa: coverage_lag, unknown_1h,
     manual_refund_pending: count(manualPending),
+    fallback_ambiguous: count(fallbackAmbiguous),
+    fallback_ambiguous_detail: Array.isArray(fallbackAmbiguous) ? fallbackAmbiguous : [],
     detail: { held: Array.isArray(held) ? held : [], stuck_refunding: Array.isArray(stuck) ? stuck : [], intent_stale: Array.isArray(intents) ? intents : [], tip_daa: tip, coverage_max_end_daa: maxEnd, unknown_by_type: Array.isArray(unknown) ? unknown : [] },
     manual_refund_pending_detail: Array.isArray(manualPending) ? manualPending : [],
-    errors: [held, stuck, intents, unknown, manualPending].filter((r) => r && r.error).map((r) => r.error),
+    errors: [held, stuck, intents, unknown, manualPending, fallbackAmbiguous].filter((r) => r && r.error).map((r) => r.error),
   };
 }
 
@@ -64,6 +73,7 @@ export function breaches(m, th = THRESHOLDS) {
   if (m.coverage_lag_daa != null && m.coverage_lag_daa >= th.coverage_lag_daa) out.push({ metric: 'coverage_lag_daa', value: m.coverage_lag_daa });
   if ((m.unknown_1h ?? 0) >= th.unknown_1h) out.push({ metric: 'unknown_1h', value: m.unknown_1h });
   if ((m.manual_refund_pending ?? 0) >= th.manual_refund_pending) out.push({ metric: 'manual_refund_pending', value: m.manual_refund_pending });
+  if ((m.fallback_ambiguous ?? 0) >= th.fallback_ambiguous) out.push({ metric: 'fallback_ambiguous', value: m.fallback_ambiguous });
   return out;
 }
 
@@ -90,13 +100,13 @@ export function brokerHoldMonitorTick() {
     const m = computeHoldMetrics(sqlite);
     const br = breaches(m);
     console.log(`[broker-hold-monitor] held=${m.held ?? 'n/a'} stuck_refunding=${m.stuck_refunding ?? 'n/a'} intent_stale=${m.intent_stale ?? 'n/a'} coverage_lag_daa=${m.coverage_lag_daa ?? 'null(no ledger/heartbeat)'} unknown_1h=${m.unknown_1h ?? 'n/a'} breaches=${br.length}${m.errors.length ? ' errors=' + m.errors.join('|') : ''}`);
-    console.log(`[broker-hold-monitor] manual_refund_pending=${m.manual_refund_pending ?? 'n/a'} (第六数: BUY fallback 待人工退款 offer 数)`);
+    console.log(`[broker-hold-monitor] manual_refund_pending=${m.manual_refund_pending ?? 'n/a'} fallback_ambiguous=${m.fallback_ambiguous ?? 'n/a'} (第六/七数: BUY fallback 待人工退款 / CEX 下单结果不明待人工核)`);
     if (br.length) alertBreachesOnce(sqlite, br);
   } catch (e) { console.warn(`[broker-hold-monitor] tick error (read-only, non-fatal): ${e.message}`); }
 }
 export function startBrokerHoldMonitor() {
   if (_timer) return;
-  console.log(`[broker-hold-monitor] start, tick=${HOLD_MONITOR_TICK_MS}ms (read-only; 6 metrics; thresholds ${JSON.stringify(THRESHOLDS)})`);
+  console.log(`[broker-hold-monitor] start, tick=${HOLD_MONITOR_TICK_MS}ms (read-only; 7 metrics; thresholds ${JSON.stringify(THRESHOLDS)})`);
   _timer = setInterval(brokerHoldMonitorTick, HOLD_MONITOR_TICK_MS);
   setTimeout(brokerHoldMonitorTick, 30_000);   // 首行 30 s 后 (部署单 §1 ⑥ 验收锚)
 }
