@@ -6,7 +6,7 @@
 // 机械镜像: scratch/_j2_s63a_transition/build.mjs §3b (探针 v0.3 P 向量 + N6..N9), 见 docs/provenance/2026-08-29-s63a-probe-v03/。
 // 共识事实 (7b1e18cc): opcodes/mod.rs:1030-1038 (域同类 + stack E <= tx.lock_time) / :1055-1056 (sequence==MAX 拒) /
 //   tx_validation_in_header_context.rs:56-88 (DAA 域: lock_time < 块 DAA 才终局 ⇒ 提交须 tip DAA > E, 否则 NotFinalized = N8)。
-import { cltvLockTime, cltvSequence, assertPositiveDelay, CltvError, CLTV_ERR, LOCK_TIME_THRESHOLD, MAX_TX_IN_SEQUENCE_NUM } from './cltv-locktime.mjs';
+import { cltvLockTime, cltvSequence, assertPositiveDelay, DELAY_SANE_MAX_DAA, CltvError, CLTV_ERR, LOCK_TIME_THRESHOLD, MAX_TX_IN_SEQUENCE_NUM } from './cltv-locktime.mjs';
 
 export const RECOVERY_DAA_ENTRY = 3;   // 探针 v0.3 ABI: [transition, claim, recovery, recovery_daa] ⇒ recovery_daa = entry 3 (真合约接线时按其 ABI 重钉, 测试断言防漂)
 
@@ -14,16 +14,32 @@ export const RECOVERY_DAA_ENTRY = 3;   // 探针 v0.3 ABI: [transition, claim, r
 //    模块私有 WeakSet 只认 loadRecoveryConfig 亲手返回的那个对象引用: 外部造不出、{...cfg} spread 拷贝也不在集合里 (Symbol 属性会被 spread 复制, WeakSet 不会 ⇒ 选 WeakSet)。
 const BRAND = new WeakSet();
 
+// 🔴 权威边界 (Codex 2b8ebe2a MUST-FIX A/B, 2026-08-29):
+//   A. 入口身份属编译 ABI/接线, 不是运营可调参数 —— raw 里带 entry (哪怕是另一个合法整数) = 同一份配置能把钱路由到别的 covenant 分支 ⇒ 拒。
+//      entry 只从代码钉的 RECOVERY_DAA_ENTRY 来; 真合约 ABI 替换探针 ABI 时【重钉常量 + 验收证据】, 不暴露 override。
+//   B. 被验证的配置不能抬自己的上限 —— raw.max 进 assertPositiveDelay = 策略失效 (超长延迟可冻本金) ⇒ 拒; 生产只用代码钉的 DELAY_SANE_MAX_DAA。
+//      测试要自定 max 走 _loadRecoveryConfigWithMaxForTests (test-only, 名字自带警告; 同 _cltvLockTimeAllowZeroForTests 形)。
+const FORBIDDEN_RAW_KEYS = Object.freeze(['entry', 'max']);
+export const CLTV_ERR_CONFIG_OVERRIDE = 'CLTV_CONFIG_OVERRIDE_FORBIDDEN';
+
 /** 装载恢复配置 —— 唯一入口, 内部强制 assertPositiveDelay (审点①); 返回前 freeze + BRAND.add (两层)。
- *  @param {object} raw  { n_recovery_delay_daa: bigint|number|string, label? , max? }
+ *  @param {object} raw  { n_recovery_delay_daa: bigint|number|string, label? }   🔴 不收 entry / max (见上)
  *  @returns {Readonly<{ nDelayDaa: bigint, entry: number }>} */
 export function loadRecoveryConfig(raw) {
+  return _loadRecoveryConfigImpl(raw, DELAY_SANE_MAX_DAA, false);
+}
+/** test-only: 自定 sane-max (构造"超 max 被拒"/"自定 max 内放行"向量用)。🔴 生产/恢复路绝不 import 此名。 */
+export function _loadRecoveryConfigWithMaxForTests(raw, max) {
+  return _loadRecoveryConfigImpl(raw, max, true);
+}
+function _loadRecoveryConfigImpl(raw, max, _testOnly) {
   if (!raw || typeof raw !== 'object') throw new CltvError(CLTV_ERR.ARGS_MISSING, 'recovery config 缺失');
+  for (const k of FORBIDDEN_RAW_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(raw, k)) throw new CltvError(CLTV_ERR_CONFIG_OVERRIDE, `recovery config 不得含 '${k}' (${k === 'entry' ? '入口身份由代码/ABI 钉, 非运营参数' : 'sane-max 由策略钉, 配置不能抬自己的上限'}): ${String(raw[k])}`);
+  }
   if (raw.n_recovery_delay_daa === undefined || raw.n_recovery_delay_daa === null) throw new CltvError(CLTV_ERR.ARGS_MISSING, 'n_recovery_delay_daa 缺失 (恢复锁不能靠默认值实例化)');
-  const n = assertPositiveDelay(raw.n_recovery_delay_daa, raw.label || 'n_recovery_delay_daa', raw.max !== undefined ? { max: raw.max } : {});
-  const entry = raw.entry === undefined ? RECOVERY_DAA_ENTRY : raw.entry;
-  if (!Number.isInteger(entry) || entry < 0) throw new CltvError(CLTV_ERR.ARGS_MISSING, `entry 非法: ${String(raw.entry)}`);
-  const cfg = Object.freeze({ nDelayDaa: n, entry });
+  const n = assertPositiveDelay(raw.n_recovery_delay_daa, raw.label || 'n_recovery_delay_daa', { max });
+  const cfg = Object.freeze({ nDelayDaa: n, entry: RECOVERY_DAA_ENTRY });
   BRAND.add(cfg);
   return cfg;
 }

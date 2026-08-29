@@ -2,7 +2,7 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { loadRecoveryConfig, planRecoveryDaa, canSubmitRecovery, assertRecoveryTxShape, RECOVERY_DAA_ENTRY } from './recovery-lock-builder.mjs';
+import { loadRecoveryConfig, _loadRecoveryConfigWithMaxForTests, CLTV_ERR_CONFIG_OVERRIDE, planRecoveryDaa, canSubmitRecovery, assertRecoveryTxShape, RECOVERY_DAA_ENTRY } from './recovery-lock-builder.mjs';
 import { CltvError, CLTV_ERR, DELAY_SANE_MAX_DAA, LOCK_TIME_THRESHOLD, MAX_TX_IN_SEQUENCE_NUM } from './cltv-locktime.mjs';
 let pass = 0, fail = 0;
 const t = (n, f) => { try { f(); pass++; console.log('[PASS] ' + n); } catch (e) { fail++; console.log('[FAIL] ' + n + ' :: ' + e.message); } };
@@ -17,7 +17,8 @@ t('G0 源级: 不含 _cltvLockTimeAllowZeroForTests; loadRecoveryConfig 内调 a
   const code = SRC.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');   // 去掉整行注释后再查调用 (头注释里 "…ForTests(本文件…" 会误中)
   assert.ok(!/\b_cltvLockTimeAllowZeroForTests\b/.test(code), '恢复路代码里出现了 test-only 零延迟入口');
   const body = SRC.slice(SRC.indexOf('export function loadRecoveryConfig'), SRC.indexOf('const toBig'));
-  assert.ok(/assertPositiveDelay\(/.test(body), 'loadRecoveryConfig 没调 assertPositiveDelay');
+  assert.ok(/assertPositiveDelay\(/.test(body), 'loadRecoveryConfig(含其 impl) 没调 assertPositiveDelay');
+  assert.ok(!/raw\.entry/.test(SRC.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n')), '代码里不得读 raw.entry (Codex A)');
 });
 t('C1 loadRecoveryConfig: n=100 ok(bigint, frozen, entry 3); 字符串 "100" ok', () => { const c = loadRecoveryConfig({ n_recovery_delay_daa: 100 }); assert.strictEqual(c.nDelayDaa, 100n); assert.ok(Object.isFrozen(c)); assert.strictEqual(c.entry, RECOVERY_DAA_ENTRY); assert.strictEqual(loadRecoveryConfig({ n_recovery_delay_daa: '100' }).nDelayDaa, 100n); });
 t('C2 loadRecoveryConfig 拒: 0 / −1 / 缺 / null / 1e7(sane-max) / 5e11 / 非整数 / entry 非法', () => {
@@ -29,9 +30,25 @@ t('C2 loadRecoveryConfig 拒: 0 / −1 / 缺 / null / 1e7(sane-max) / 5e11 / 非
   throwsCode(() => loadRecoveryConfig({ n_recovery_delay_daa: DELAY_SANE_MAX_DAA }), CLTV_ERR.DOMAIN_MIXED);
   throwsCode(() => loadRecoveryConfig({ n_recovery_delay_daa: LOCK_TIME_THRESHOLD }), CLTV_ERR.DOMAIN_MIXED);
   throwsCode(() => loadRecoveryConfig({ n_recovery_delay_daa: 1.5 }), CLTV_ERR.ARGS_MISSING);
-  throwsCode(() => loadRecoveryConfig({ n_recovery_delay_daa: 100, entry: -1 }), CLTV_ERR.ARGS_MISSING);
 });
-t('C3 自定义 max=1000: 999 ok / 1000 拒', () => { assert.strictEqual(loadRecoveryConfig({ n_recovery_delay_daa: 999, max: 1000 }).nDelayDaa, 999n); throwsCode(() => loadRecoveryConfig({ n_recovery_delay_daa: 1000, max: 1000 }), CLTV_ERR.DOMAIN_MIXED); });
+t('C3 (Codex A) raw 含 entry ⇒ 拒 CLTV_CONFIG_OVERRIDE_FORBIDDEN, 哪怕是另一个合法整数 2 / 等于默认的 3 / null; 且分支不变: 合法 cfg 的 entry 恒 = RECOVERY_DAA_ENTRY(3)', () => {
+  throwsCode(() => loadRecoveryConfig({ n_recovery_delay_daa: 100, entry: 2 }), CLTV_ERR_CONFIG_OVERRIDE);
+  throwsCode(() => loadRecoveryConfig({ n_recovery_delay_daa: 100, entry: 3 }), CLTV_ERR_CONFIG_OVERRIDE);
+  throwsCode(() => loadRecoveryConfig({ n_recovery_delay_daa: 100, entry: null }), CLTV_ERR_CONFIG_OVERRIDE);
+  const c = loadRecoveryConfig({ n_recovery_delay_daa: 100 }); assert.strictEqual(c.entry, RECOVERY_DAA_ENTRY); assert.strictEqual(planRecoveryDaa(c, { successorDaa: 1n }).sigPushesPrefix[1], 3);
+});
+t('C4 (Codex B) raw 含 max ⇒ 拒 CLTV_CONFIG_OVERRIDE_FORBIDDEN: {n:5e8, max:1e9} 不能放过 (n=5e8 ≥ 1e7); {n:100, max:1e9} 也拒(有 key 即拒); 单独 n=5e8 ⇒ DOMAIN_MIXED', () => {
+  throwsCode(() => loadRecoveryConfig({ n_recovery_delay_daa: 500_000_000, max: 1_000_000_000 }), CLTV_ERR_CONFIG_OVERRIDE);
+  throwsCode(() => loadRecoveryConfig({ n_recovery_delay_daa: 100, max: 1_000_000_000 }), CLTV_ERR_CONFIG_OVERRIDE);
+  throwsCode(() => loadRecoveryConfig({ n_recovery_delay_daa: 500_000_000 }), CLTV_ERR.DOMAIN_MIXED);
+});
+t('C5 test-only _loadRecoveryConfigWithMaxForTests(raw, 1000): 999 ok / 1000 拒; 它同样拒 raw 里的 max/entry; 生产 loadRecoveryConfig 源里不调它', () => {
+  assert.strictEqual(_loadRecoveryConfigWithMaxForTests({ n_recovery_delay_daa: 999 }, 1000).nDelayDaa, 999n);
+  throwsCode(() => _loadRecoveryConfigWithMaxForTests({ n_recovery_delay_daa: 1000 }, 1000), CLTV_ERR.DOMAIN_MIXED);
+  throwsCode(() => _loadRecoveryConfigWithMaxForTests({ n_recovery_delay_daa: 5, max: 9 }, 1000), CLTV_ERR_CONFIG_OVERRIDE);
+  const body = SRC.slice(SRC.indexOf('export function loadRecoveryConfig'), SRC.indexOf('export function _loadRecoveryConfigWithMaxForTests'));
+  assert.ok(/DELAY_SANE_MAX_DAA/.test(body) && !/raw\.max/.test(body), '生产装载口须用代码钉的 DELAY_SANE_MAX_DAA, 不读 raw.max');
+});
 const cfg = loadRecoveryConfig({ n_recovery_delay_daa: 100 });
 t('P1 planRecoveryDaa 镜像探针 P: d=80,000,000, n=100 ⇒ E=lockTime=80,000,100 (<5e11), sequence 0n, sigPushes [0,3], earliest tip = E+1', () => {
   const p = planRecoveryDaa(cfg, { successorDaa: 80_000_000n });
