@@ -12,8 +12,10 @@ import { ask, loadProvider, getProviderName } from "./providers/index.mjs";
 import { getContext, buildPrompt } from "./console.mjs";
 import { extractSkills, executeSkills } from "./skills.mjs";
 import { SYSTEM_PROMPT } from "./system-prompt.mjs";
+import { resolveListenHost } from "./listen-host.mjs";
 
 const PORT = process.env.ADAPTER_PORT || 3000;
+const HOST = resolveListenHost();   // 默认 127.0.0.1 (adapter 只服务本地 IPC); 显式 ADAPTER_HOST=0.0.0.0 才全接口 — 见 listen-host.mjs
 const MAX_BODY_BYTES = 524288; // 512KB — Mind tasks with skills can be large
 
 function log(...args) {
@@ -147,8 +149,8 @@ const server = http.createServer(async (req, res) => {
 
 // Load provider before accepting requests
 loadProvider().then(() => {
-  server.listen(PORT, () => {
-    log(`listening on port ${PORT}`);
+  server.listen(PORT, HOST, () => {
+    log(`listening on ${HOST}:${PORT}`);
     log(`AI provider     → ${getProviderName()}`);
     log(`Console context → ${process.env.CONSOLE_URL || "(disabled — set CONSOLE_URL)"}`);
   });
