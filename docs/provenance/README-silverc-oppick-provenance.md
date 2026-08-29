@@ -48,8 +48,11 @@ SHA-256   c9904eee00bc0f558ae08e0108b6594ce35d2b3f7468831df3a302655c4b8c16
 
 **恢复命令（实测可跑，从任意干净机器）**：
 ```
-git clone /path/to/silverc-oppick-8065184.bundle silverscript-restored
-cd silverscript-restored && git checkout j2-oppick-fix-2026-07-06
+# 必须带 -b: bundle 内只有 refs/heads/j2-oppick-fix-2026-07-06, 没有 HEAD ref。
+# 不带 -b 直接 clone 会得到
+#   warning: remote HEAD refers to nonexistent ref, unable to checkout
+# 且【工作树 0 个文件】(J1 2026-08-28 实测) —— 历史其实完整, 但接手人会误以为产物是坏的。
+git clone -b j2-oppick-fix-2026-07-06 /path/to/silverc-oppick-8065184.bundle silverscript-restored
 ```
 
 **✅ 从【本目录这份最终文件】实测复核（不是从 scratch 那次的结果背书）**：
