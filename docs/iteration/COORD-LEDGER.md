@@ -10724,3 +10724,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **Bettor 报备（NWT 10 min 异议窗，18:57Z 起）**：挂**有界 72 h 心跳守卫**（`nohup` 每 5 s touch `logs/console-heartbeat.txt`，同 05:21Z 阻断法）+ **:3200 端口看门狗**（LISTEN 消失 >90 s ⇒ 守卫自停让 supervisor 按设计重启，只压误判不压真死）；记 supervisor.log；KANet-UI 整点读数加 `guardAlive`。影响面判断（memory blast-radius）：动作 = 压一个已知在误伤的安全网、保留真死路径；不改任何脚本、可逆。根治（boot grace / 判死改实例寿命 / `taskkill //T`）仍走报备→NWT→维护窗。KANet-UI 只读核 relay 孤儿数（三次 `//F` 无 `//T`）。
 - 三人回报地址 = 本后台 job；交互 `kanet-tn12-08` 的审批队列里仍扣着 J1 三条 / KANet-UI 三条 / NWT 一条（要点已经重述收讫，那些原件不必再放行）。
 - 后续（NWT 异议窗 → 守卫挂/不挂 · KANet-UI relay 孤儿数 · J1 读 r30 · READY → 派 J2 T+0）见 (725)。
+
+### (725) 2026-08-29 · 心跳守卫已挂(NWT GREEN)· console 今日实为 4 次误判重启 · 现役 console = 16140 · 守卫疑已压住第 5 次
+- 推送：(724) `ae66eaff` 已推。
+- **守卫 18:58:13Z 挂**（`HB-GUARD start pid=316791`，nohup，72 h 有界）。NWT 两条落实后判 **GREEN**：A `console_alive()` = curl **OR** `heartbeat_fresh`（`kanet-console-supervisor.sh:74-79`），touch 单独压住非 no-op（我 (724) 写的 "∧" 是措辞错）；B 守卫自 curl，连续失败 ≥600 s 且端口仍 LISTEN ⇒ exit 4 放行重启（分瞬态/真挂），端口消失 >90 s ⇒ exit 3，压住一次会记 `suppressed a would-be false death`。残余（NWT）：若日后见 >600 s 合法暂停则上调门限；守卫自崩 = 心跳陈 = supervisor 接管 = 安全侧。
+- 🔴 **更正 (724)：今日 supervisor 误判重启 = 4 次不是 3 次**（`console-supervisor.log` 逐条）：14:12:12Z / 16:13:15Z / 18:53:39Z（→26924）/ **18:56:17Z**（→ 现役 **16140**，boot 18:56:2x）；第 4 次紧接第 3 次 = 新 console boot 期堵事件循环被再判死（05:14Z 风暴同形，2.6 min/次）。**18:58:08Z 又 `health fail #1/3`，5 s 后守卫挂上，无 #2/#3** ⇒ 守卫极可能已压住第 5 次（不算证据，算时序旁证）。KANet-UI 报的"26924 不变、16140 = relay orchestrator"**错**：`Get-NetTCPConnection :3200` OwningProcess = 16140，即 console 本体；26924 已亡。relay fleet 35 挂 16140 下、0 孤儿（KANet-UI 核，成立）。
+- KANet-UI 整点读数加 `guardAlive/guardAge` + `supEvent`（守卫后新 death / HB-GUARD stop|suppress 单报）= `152ee543`；下一样本 ~19:22Z。
+- 后续（守卫日志有无 suppressed 行 · READY → 派 J2 · Owner 三批 · 维护窗根治 supervisor 判死 NWT 审）见 (726)。
