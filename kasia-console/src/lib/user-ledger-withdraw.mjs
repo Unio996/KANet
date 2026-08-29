@@ -20,7 +20,7 @@ export function reserveWithdraw(db, { peer, asset, chain, amount, now = () => ne
       .run(ledgerId, peer, asset, chain || null, -amt, balanceAfter, `withdraw_pending:${ledgerId}`, now());
     return { ok: true, ledgerId, balance, balanceAfter };
   });
-  return tx();
+  return tx.immediate();   // BEGIN IMMEDIATE: 事务起点即拿写锁, WAL 下两并发 reserve 不会各自读到同一旧 SUM 再各自 INSERT (NWT 审点 8/29)
 }
 
 export function finalizeWithdraw(db, { ledgerId, txHash }) {
@@ -46,5 +46,5 @@ export function revertWithdraw(db, { ledgerId, error, now = () => new Date().toI
     db.prepare(`UPDATE user_ledger SET reason = ? WHERE id = ?`).run(`withdraw_failed:${ledgerId}:${String(error || '').slice(0, 60)}`, ledgerId);
     return { ok: true, balanceAfter };
   });
-  return tx();
+  return tx.immediate();   // BEGIN IMMEDIATE: 事务起点即拿写锁, WAL 下两并发 reserve 不会各自读到同一旧 SUM 再各自 INSERT (NWT 审点 8/29)
 }
