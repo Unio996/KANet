@@ -1,6 +1,7 @@
-# console supervisor · lifetime 风暴保护 + PID-aware boot grace · 设计草案 v0.1
+# console supervisor · lifetime 风暴保护 + PID-aware boot grace · 设计草案 v0.1.1
 
-> **Status**: DRAFT v0.1 · J2 2026-08-29 · Bettor 派（今晨 05:14Z supervisor 重启风暴两条设计缺口 (a)(b)）· **不动代码，diff 只是草案不 apply** · NWT 审 → 维护窗落。优先级：低于 READY 派单、高于 C3。
+> **Status**: DRAFT v0.1.1 · J2 2026-08-29 · Bettor 派（今晨 05:14Z supervisor 重启风暴两条设计缺口 (a)(b)）· **不动生产代码；候选脚本 + 机器 diff + offline 验收 38/38 在 `docs/provenance/2026-08-29-supervisor-v01/`（不 apply）** · NWT 审 → 与 57fde30f 同批进维护窗（Owner 批：live 进程守护逻辑）。优先级：低于 READY 派单、高于 C3。
+> v0.1.1（Bettor 裁后）：`BOOT_GRACE_SEC=300` 采；headless 杀调用者本轮不动（状态文件 write-ahead 已中和）；§4 手写 diff 换成**机器 diff**（`diff -u` 自候选脚本生成）；§5 五条验收**已跑**（下）。
 > 对象：`scripts/kanet-console-supervisor.sh`（223 行，r424）+ `kasia-console/src/index.js`（`__booted` :20/:506，心跳 setInterval :519-521）+ 触点 `kanet-start-headless.sh:65-71,158,178-185`。坐标 J2 2026-08-29 亲核。
 
 ## §0 今晨实况（`logs/console-supervisor.log`，UTC，只读）
@@ -37,14 +38,21 @@
 ## §3 数值与判据来源
 | 参数 | 值 | 依据 |
 |---|---|---|
-| `BOOT_GRACE_SEC` | **默认 300**（Bettor 提 180；本稿建议 300，Bettor 定） | §0：现役负载下 boot ≥157 s 且未完成；180 s 只比已观测下界多 23 s，一次慢盘/迁移就再触发自激。boot-marker 落地后 `boot_ms` 有真数据再收紧 |
+| `BOOT_GRACE_SEC` | **默认 300**（Bettor 提 180 → **裁 300**，2026-08-29） | §0：现役负载下 boot ≥157 s 且未完成；180 s 只比已观测下界多 23 s，一次慢盘/迁移就再触发自激。boot-marker 落地后 `boot_ms` 有真数据再收紧 |
 | `SHORT_LIFETIME_SEC` | 300 | Bettor 裁定"lifetime < 5 min" |
 | `SHORT_STREAK_MAX` | 3 | Bettor 裁定"连续 3 个" |
 | `COOL_DOWN_SEC` | 1800（不变） | 原值 |
 | PID 存在性 | `tasklist //FI "PID eq <pid>" //NH` 输出含 `node.exe` | **非提权也能读**（只是进程存在性，不读 CommandLine）——避开今天 `Win32_Process.CommandLine` 对 SYSTEM 进程为 null 的假空坑（runbook v0.5.1 §检查③）。Git-Bash 下 `kill -0` 对 SYSTEM 进程不可靠，不用 |
 | PID 复用 | 接受小概率 | Windows 复用 PID 且恰为 node.exe 的概率低；误判方向 = 多等一个 grace（fail-safe），不是误杀 |
 
-## §4 diff 草案（**不 apply**；行号对当前 HEAD；bash 注意 `set -e` 下 `((x++))` 在 x=0 时返回 1 会退出，一律 `x=$((x+1))`）
+## §4 diff（**不 apply**）
+🔴 **v0.1.1 起以机器 diff 为准**：`docs/provenance/2026-08-29-supervisor-v01/supervisor.v01.diff`（201 行，`diff -u scripts/kanet-console-supervisor.sh <候选>`）与 `index.v01.diff`（27 行）；候选全文 `kanet-console-supervisor.v01.sh`；sha256 在 `MANIFEST.sha256`。下方 4.1/4.2 是 v0.1 的手写草案，**保留作阅读导引，以机器 diff 为准**（两者差异见下"候选相对手写草案的四处收紧"）。
+候选相对手写草案的四处收紧（写候选时发现的）：
+1. 主循环体拆成 `supervisor_tick()`（一次判活+决策），`run_supervisor` 只剩 `load_state` + `while … supervisor_tick; sleep`——为了能 offline 单测；`consecutive_fail`/`was_booting` 由调用方作用域持有。
+2. `load_state` **不 `source` 状态文件**（`source` = 执行任意行），改逐行 `KEY=VALUE` 解析、只认四个 key 且值须 `^[0-9]+$`（验收有脏行向量 `evil=1; rm -rf /` / `short_streak=abc` / 带空格值 全拒）。
+3. 加 `_lib` 子命令（只定义函数不跑主流程），供 `source <脚本> _lib` 测试；不影响 `start|stop|status|_run`。
+4. `restart_console` 一律 `return 0`：成败改由主循环状态机判（BOOTING 等 / ALIVE 记 `boot_ms` / HUNG_BOOT 再判死）——原 `sleep 5; console_alive` 那句在 boot ≥157 s 的现实下恒假，且 headless 若杀掉本进程它根本跑不到。
+bash 注意：`set -e` 下 `((x++))` 在 x=0 时返回 1 会退出，一律 `x=$((x+1))`（候选全文如此）。
 
 ### 4.1 `scripts/kanet-console-supervisor.sh`
 ```diff
@@ -206,6 +214,8 @@
 （4.2 第一段若嫌 `await import` 顶层丑，可复用 :515-517 已 import 的三件搬到文件顶——但那三行在 :515 是"后半段 import"，搬动影响面更大；草案取最小侵入。NWT 定。）
 
 ## §5 验收（维护窗落地前，全 offline）
+✅ **已跑（2026-08-29，`docs/provenance/2026-08-29-supervisor-v01/selftest.sh` → `selftest.out`：38 PASS / 0 FAIL）**。跑法：`bash docs/provenance/2026-08-29-supervisor-v01/selftest.sh`——隔离根 `<dir>/t/`（`BASH_ARGV0` 把候选脚本顶部的 `cd "$(dirname "$0")/.."` 落进 `t`，`KANET_ROOT=t`，不碰 live `logs/`、不碰任何进程；桩 `console_alive`/`pid_alive`/假 headless），`index.v01.js` 由 `patch` 从仓内现役 `index.js` + `index.v01.diff` 重建（index.js 漂了 patch 会红 = 要重生成 diff 的信号）。覆盖：语法 2 / 五态 8（含 age==grace 边界、垃圾 marker）/ tick 决策 9（BOOTING×4 不重启、BOOTING→ALIVE 记 `boot_ms`、DEAD 与 HUNG_BOOT 各 1 tick 即重启、UNKNOWN 退回 3-fail）/ lifetime 9（首次不计、100/100/100 第三次拒且 cool_down 持久化、400 归零、由 `last_boot_ok_ts` 算、cool-down 内 DEAD skip）/ **write-ahead 3（假 headless `kill -9 $PPID` 杀掉调用者后 state.env 与 restarts.log 已各有 1 条；新进程 `load_state` 继承）**/ 脏状态文件 4 / **真 `tasklist` 阳性对照**（本机现役 node.exe pid ⇒ 0）+ 阴性（pid 4000000 ⇒ 1）+ 失败 ⇒ 2。
+两处 harness 自身的坑（记下，防下个人再踩）：source 时 `$0` 是 harness 路径不是 `bash`；`unset -f` 会把被桩的真函数一起删，要先 `declare -f` 存起来。
 1. **bash 语法**：`bash -n scripts/kanet-console-supervisor.sh`；`node --check kasia-console/src/index.js`。
 2. **状态机单测**（scratch，假 `console_alive`/`pid_alive`/marker 文件，`source` 函数体）：ALIVE / BOOTING(age 10 s) / HUNG_BOOT(age 301 s) / DEAD(marker PID 不存在) / UNKNOWN(tasklist 失败 ⇒ 3 次才判) 五态各一向量；`lifetime_guard` 三向量：lifetimes 100/100/100 ⇒ 第三次 cool_down；100/400/100 ⇒ streak 归零不 cool；`last_restart_ts=0` 首次 ⇒ 不计短命。
 3. **write-ahead 实证**：模拟 headless 在 `restart_console` 内 `kill $$`，重启 supervisor 后 `state.env` 里 `last_restart_ts` 已在、`restarts.log` 已多一行——**这条是今晨缺口的直接回归**。
