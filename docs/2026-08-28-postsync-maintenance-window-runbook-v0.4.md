@@ -1,11 +1,11 @@
-# T+125 后预告维护窗 runbook v0.5(定稿 · 文件名保留 v0.4 免断引用)
+# T+125 后预告维护窗 runbook v0.5.1(定稿 · 文件名保留 v0.4 免断引用)
 
 > **Status**: CURRENT · KANet-UI 2026-08-28 · v0.5 J2 2026-08-29 落 Bettor 裁(J1 预检 `docs/iteration/j1-inbox/2026-08-29T23-10Z-j1-reply-maintenance-window-preflight.md` 两缺口) · D-013 §3 配套 · 从 scratch 转正(Bettor 令)
 
 > KANet-UI 2026-08-27 · **计划页, 零执行**。基于备页 `scratch/_postsync_service_resume.md` §4 + Bettor 派 9 步 + NWT 三眼改进。
 > 敏感细节(暴露面/防火墙规则名/nonce)一律写 **"见管道/本地 memory"**。
 >
-> 🔴🔴 **窗内 on-chain dev-coord 频道 DOWN**(NWT 三眼; v0.5 路 3): ③ console 停 ⇒ 全部 relay 子进程**含 comm relay 743c0360** 随之终止 ⇒ **步 ③–⑥ 期间 dev-coord 频道断**。**协调改走 pipe SendMessage(本地 IPC, 不经 relay)+ git**; **别假设窗内频道能用**。⑦ console boot `startAll` 后频道自动恢复。
+> 🔴🔴 **窗内 on-chain dev-coord 频道 DOWN**(NWT 三眼; v0.5.1 路 3): ③ `taskkill //T` 杀尽 console 进程树 ⇒ 全部 relay 子进程**含 comm relay 743c0360** 被杀 ⇒ **步 ③–⑥ 期间 dev-coord 频道断**。**协调改走 pipe SendMessage(本地 IPC, 不经 relay)+ git**; **别假设窗内频道能用**。⑦ console boot `startAll` 后频道自动恢复。
 > **开窗前提(全满足才开)**: ① 节点 READY(daa>80,095,687, step0 gate 绿) ② J2 T+125 证据页落地 ③ **四补丁全 NWT GREEN**(见下 §四补丁) ④ MSG-284 发出。
 > **总原则**: 每步先读数、先通知；SYSTEM 动作(停/重启 console·llama)= J1 提权；KANet-UI 非提权只做只读+通知+验收+备序, 绝不亲执 taskkill SYSTEM 进程。
 
@@ -27,7 +27,7 @@
 | ① | **通知全员开窗(+announce-freeze+频道将断)** | Bettor | 发后 `ListAgents` | 频道+SendMessage(J2/NWT/J1)+Owner 单点已发；**明写"窗内全员不发预测/交易/提现/faucet DM"(=announce-freeze, drain 稳定窗前提)**；**明写"②-bis 起 dev-coord 频道断, 协调走 pipe SendMessage+git 直到 ⑦ 恢复"**；J1 回执必收 | 5 min |
 | ② | **在飞检查(两类: 定时器 + 请求/消息触发)** | KANet-UI(只读) | 见 §检查②(两机械表) | **money-moving 定时器 + 请求/消息花钱路径都无在飞未落链**(按 §② 规则)；只读监控组不阻塞 | 10–15 min |
 | ②-bis | **quiesce money ingress + drain 在飞 handler**(NWT v0.2 改进; **v0.5 路 3: 不单独停 relay**) | KANet-UI(只读 drain 确认)/Bettor(announce-freeze) | 见 §②-bis | **drain 稳定窗三条齐**(announce-freeze + 60 s 静默 + 现存 `broadcast_tx` 全 landed)后**直接进 ③**；relay 由 ③ console 停一并终止 | 5–10 min |
-| ③ | **J1 提权: console 单体重启(补丁段已完成 SKIP; 同时激活 llm-fallback)** | J1(提权) | 见 §检查③ | 旧 console PID 停(relay 子随之终止)、新 PID 由 `scripts/_launch_console_single.ps1` 起、pidfile 真 PID；**"预期阶段"**: 若节点侧出现 `searching for missing block bodies` **不是卡**, 过关只看 `nodeBodiesProcessedCount` 离开 0 | 5–8 min(+节点侧预期阶段 8–40 min, 见 §检查③) |
+| ③ | **J1 提权: console 单体重启(补丁段已完成 SKIP; 同时激活 llm-fallback)** | J1(提权) | 见 §检查③ | 旧 console **进程树** `taskkill //PID <console> //F //T` 杀尽 ⇒ **stop 后硬闸验证: 实测 0 个 relay 进程存活**(提权 CIM 双判据, 见 §检查③)**才起新 PID**(`scripts/_launch_console_single.ps1`)、pidfile 真 PID；**"预期阶段"**: 若节点侧出现 `searching for missing block bodies` **不是卡**, 过关只看 `nodeBodiesProcessedCount` 离开 0 | 5–8 min(+节点侧预期阶段 8–40 min, 见 §检查③) |
 | ④ | **llama 验收(loopback,256k 目标态 8/27 已达; 仅在窗前被重启过才重起)+a5-verify** | J1(起)/KANet-UI(验收) | `node scripts/a5-verify.ps1` | n_ctx=262144 ∧ **监听 127.0.0.1:8000** ∧ commit 硬闸 = **全机 commit charge 已用 ≤ 80 GB ∧ 可用 ≥ 20 GB**(不是 llama 进程私有 commit) | 5 min |
 | ⑤ | **J1 收窄防火墙规则一条** | J1(提权) | `Get-NetFirewallRule`+`Get-NetFirewallPortFilter`(前后对照) | 目标规则已收窄(细节见管道)；:8000 入站不再对网络放行 | 3 min |
 | ⑥ | **PRAGMA/迁移态验** | KANet-UI(只读) | `PRAGMA user_version`(better-sqlite3 readonly; 无 sqlite3 CLI) | user_version=期望最新 migrate 版 ∧ 关键表在 | 3 min |
@@ -92,9 +92,10 @@
 
 ### 无新码挡法(NWT 二选一/组合)
 **(a) v0.5 路 3(Bettor 裁·J1 预检缺口 1): 不单独停 relay, drain 稳定窗三条齐后直接 ③ 重启 console**:
-- 🔴 **原写法"J1 提权 `stopAll()`"不可执行**(J1 实核): `stopAll()` 只在 `services/relay-manager.js:201` **定义**, 全仓**零调用者**; `api/relay.js` 只有 `POST /api/relay/:id/restart`(`stopRelay(id)`→`startRelay(id)` 串联), **无"只停不起"端点**; 加端点=新码, 重启才生效 ⇒ 本窗无用(同 (b) 的判断); 按 PID 逐个 `Stop-Process` relay 子 = 不 drain 直杀, 与"必先 drain"冲突。
-- ⇒ **路 3**: drain 稳定窗三条齐(下节) ⇒ **直接进 ③ 重启 console**; console 停 ⇒ 其全部 relay 子进程随之终止(relay = 唯一链上出口 ⇒ **timer + HTTP + 消息** 三类花钱在链出口全被挡, sendCommandAsync/transfer 无 relay 可打=失败不花钱)。`stopAll` 的硬闸语义由"console 停 = 无 relay 可打"覆盖; §107 兜底不变。
-  - 🔴 仍是 SIGTERM 型直杀 ⇒ **必先 drain(见下)再进 ③**, 否则孤儿化在飞(`reference-console-restart-orphans-inflight-relay-child-log-line-lost`)。
+- 🔴 **原写法"J1 提权 `stopAll()`"不可执行**(J1 实核 + v0.5.1 J2 更正): `stopAll()` 定义在 `services/relay-manager.js:201`, **唯一调用者 = `index.js:886-893 shutdown()`**(`:553` import 为 `stopAllRelays`), 而 `shutdown()` **只绑 `SIGTERM`/`SIGINT`**——J1 "零调用者"漏了这处, 但结论不变: 没有可从外部触发它的入口(`api/relay.js` 只有 `POST /api/relay/:id/restart` 停+起串联, **无"只停不起"端点**; 加端点=新码, 重启才生效 ⇒ 本窗无用, 同 (b) 的判断); 按 PID 逐个 `Stop-Process` relay 子 = 不 drain 直杀, 与"必先 drain"冲突。
+- ⇒ **路 3**: drain 稳定窗三条齐(下节) ⇒ **直接进 ③: `taskkill //PID <console> //F //T` 杀尽 console 进程树**, 然后**实测 0 个 relay 进程存活**(§检查③ 硬闸验证)才起新 console。relay = 唯一链上出口 ⇒ 树被杀尽 = **timer + HTTP + 消息** 三类花钱在链出口全被挡(sendCommandAsync/transfer 无 relay 可打=失败不花钱)。
+  - 🔴🔴 **NWT MUST-FIX(v0.5.1)——"console 停 = relay 随之终止" 在 `//F`(无 `//T`) 下为假**: `//F` = `TerminateProcess`, **不触发** `shutdown()`(它只绑 SIGTERM/SIGINT, 内含 `stopAllRelays()`); relay 子由 `relay-manager.js:95` `fork` 生成, **非 detached、无 job-object**; `relay.mjs` **零** `disconnect`/`exit` 自退处理; `setInterval(poll, 2000)` 独立喂 loop ⇒ **relay 孤儿存活并继续自主 poll → `doAcceptHandshake`/`handleActiveConversation` 自主上链**(小额, 但是维护窗内真广播; 大钱路 IPC 命令型仍无 console 可发)。drain 三条只盖"停前在飞", **盖不住 post-stop 孤儿的新 tick** ⇒ 必须 `//T` + stop 后硬闸验证。**活证**: 2026-08-29 05:14Z 起 supervisor 三次 `//F` 式重启, relay 孤儿数 KANet-UI 在数。
+  - 🔴 仍是直杀 ⇒ **必先 drain(见下)再进 ③**, 否则孤儿化在飞(`reference-console-restart-orphans-inflight-relay-child-log-line-lost`)。
 - 可选 J1 提权临时防火墙: 窗内封 :3210 外部只读网关入站(:3200 已 localhost)。**:3210 是只读口非 money**, 价值低; money 消息走 relay 不走 :3210。暴露面细节见 memory `project-llama-server-exposure-0000-bind-plus-firewall-app-allow-2026-08-27`。
 **(b) app 层 `KANET_MAINTENANCE=1`(= 第五补丁·代码改动)**: 让 money 端点/handler 拒。🔴 **旧 console 不认、只对重启后有效 ⇒ 对本窗无用**(要重启才生效, 而本窗目的就是重启)。仅作**未来窗**手段, 本窗靠 (a)。**标明: 不在本窗四补丁内。**
 
@@ -103,13 +104,13 @@
 - **(a) announce-freeze 已发**(步①: 窗内全员不触发预测/交易/提现/faucet)——掐住新 ingress 源头。
 - **(b) 连续 T=60s 静默**(60s > 单笔 transfer relay 往返上限): 这 60s 内**无新 `broadcast_tx` 行写入 ∧ 无 `pending_actions` 进入 broadcasting 态**。覆盖"mid-transfer 尚未写 broadcast_tx"那一小段——一笔在 await 的 transfer 会在 <60s 内要么写 broadcast_tx(被 (c) 捕获)要么完成。
 - **(c) 现存 broadcast_tx 全落链**: 每条跑 relay `check_utxo_landed`(minDepth=REORG_SAFE_MIN_DEPTH=20)确认 landed ∧ relay 日志末条 broadcast 已 landed。
-- 三者齐 ⇒ **直接进 ③ 重启 console**(v0.5 路 3; relay 子随 console 终止)。任一不满足 = 等(未落链绝不进③, §② 规则)。
+- 三者齐 ⇒ **直接进 ③**(v0.5.1 路 3: `//F //T` 杀尽 console 树 + 实测 0 relay 存活)。任一不满足 = 等(未落链绝不进③, §② 规则)。
 
-🔵 **兜底(NWT 三眼; v0.5 路 3 下同样成立): "console 停 = 无 relay 可打" 本身是硬闸** —— console/relay 停后任何新 money 请求/消息 → `sendCommandAsync` 无 relay 可打 → **报错 fail-closed 不花钱**(NO TX NO STATE CHANGE)。⇒ drain+quiesce **只需盖住"停前那一小段在飞"**, 不需追踪未来。**时序 = drain+quiesce(稳定窗三条) → ③ 重启 console(relay 随之终止)**。
+🔵 **兜底(NWT 三眼; v0.5.1 改写): 硬闸 = "console 树被 `//T` 杀尽 + 实测 0 个 relay 进程存活"**——**不是**"relay 随父终止"(那句在 `//F` 下为假, 见上 MUST-FIX)。满足后任何新 money 请求/消息 → `sendCommandAsync` 无 relay 可打 → **报错 fail-closed 不花钱**(NO TX NO STATE CHANGE)。⇒ drain+quiesce **只需盖住"停前那一小段在飞"**, 不需追踪未来。**时序 = drain+quiesce(稳定窗三条) → ③ `taskkill //F //T` → 0 relay 存活验证 → 起新 console**。
 
 ## §检查③(console 补丁+单体重启) — J1 提权
 - 补丁: `j1-patch.ps1 -Apply`(NWT GREEN, %TEMP%; 改 `kasia-console/src/index.js:10-15`+`:474-475`; 幂等/两锚点全命中否则 ABORT; 备份 `.bak-j1-20260826`; `node --check`)。**已打(J1 预检: commit `57fde30f`, `__booted` 在位, 备份 54,207 B 在位)⇒ 窗内本段 SKIP, 只做重启。**
-- **单体重启(不用 kanet-start 整套)**: 记旧 console PID(`netstat -ano | findstr :3200` owner; J1 预检实况 `PID 27412 owner=SYSTEM`, argv `"C:\Program Files\nodejs\node.exe" --max-old-space-size=4096 D:/kanet-tn12/kasia-console/src/index.js`)→ 通知后 `taskkill //PID <console> //F`(SYSTEM=J1 提权; relay 子随之终止 = ②-bis 路 3 的挡链出口点)→ **启动器 = `scripts/_launch_console_single.ps1`(J1 写; v0.5 Bettor 裁)**: 读 `kanet.env` 全量 export + 复刻现役 argv + `Win32_Process.Create` 脱离会话; **env 清单由 KANet-UI 确认**(漏一个 key = console 起来但行为漂移, 历史 #472 漏 `KASPA_RPC_URL`)。
+- **单体重启(不用 kanet-start 整套)**: 记旧 console PID(`netstat -ano | findstr :3200` owner; J1 预检实况 `PID 27412 owner=SYSTEM`, argv `"C:\Program Files\nodejs\node.exe" --max-old-space-size=4096 D:/kanet-tn12/kasia-console/src/index.js`)→ 通知后 **`taskkill //PID <console> //F //T`**(SYSTEM=J1 提权; **`//T` 必带** = 杀整棵进程树含 relay 子; 无 `//T` 的 `//F` 只杀 console 本体, relay 孤儿继续自主 poll 上链——NWT MUST-FIX v0.5.1)→ 🔴 **stop 后硬闸验证(才准进下一步)**: 提权 `Get-CimInstance Win32_Process | ? { $_.CommandLine -match 'relay\.mjs' }` **必须为空**——🔴 **须提权执行**: 非提权读 SYSTEM 进程的 `CommandLine` 为 `null` ⇒ 匹配不到 = **假空**(读不到≠没有); 双判据同时核: `Get-CimInstance Win32_Process -Filter "Name='node.exe'" | ? { -not (Get-Process -Id $_.ParentProcessId -ErrorAction SilentlyContinue) }` = **父已不存在的 node.exe 数 = 0**。两条都空才算 relay 树杀尽; 任一非空 ⇒ 按 PID 提权 `Stop-Process` 补杀后重核, 不起新 console → **启动器 = `scripts/_launch_console_single.ps1`(J1 写; v0.5 Bettor 裁)**: 读 `kanet.env` 全量 export + 复刻现役 argv + `Win32_Process.Create` 脱离会话; **env 清单由 KANet-UI 确认**(漏一个 key = console 起来但行为漂移, 历史 #472 漏 `KASPA_RPC_URL`)。
   - 🔴 **不要**跑 `kanet-start-headless.sh` 整套(杀 sidecar+重起全栈, 漂移表 #24); 受控 supervisor 的 `restart_console()` 调的就是它 ⇒ 同样不可用(J1 预检)。
   - 🔴 本机根目录**没有** console 的 `_launch_*` 启动器(J1 预检实核: 只有 `_launch_agents.ps1` + 三份 brief)⇒ 上面那个脚本是唯一安全路, 窗前须入仓 + NWT 一眼。
   - 🔴 pidfile 真 PID(`reference-console-restart-stale-pidfile-orphan-trap`)。
@@ -144,7 +145,7 @@
 | 通用 | 频道断/失联 | 走 git；SYSTEM 动作等 J1 提权；不擅扩大动作面 |
 
 ---
-🔴 **relay 归位**: ③ console 停时 relay 子随之终止(v0.5 路 3), console 重启 boot 时 `startAll`(relay-manager r281)**自动拉回 relay** ⇒ money-quiesce 窗 = console 停→console 起好这段; 之后 relay 回、money 路径复活(窗已完)。
+🔴 **relay 归位**: ③ `//T` 杀尽 console 树时 relay 子一并被杀且实测 0 存活(v0.5.1 路 3), console 重启 boot 时 `startAll`(relay-manager r281)**自动拉回 relay** ⇒ money-quiesce 窗 = console 停→console 起好这段; 之后 relay 回、money 路径复活(窗已完)。
 
 ## §watchdog-enable(D-013 §3, 独立于本维护窗; READY 后 J1 域)
 KANet-KaspadWatchdog 任务保持 **Disabled**; 启用前置(全满足才 Enable):
@@ -167,6 +168,7 @@ KANet-KaspadWatchdog 任务保持 **Disabled**; 启用前置(全满足才 Enable
 （未部署 observe 时本节不产生摘要行; enforce 是 observe 7 天对照后另议, 不在本窗。）
 
 🔴 ~~本页 scratch 不 commit(等 Bettor 批口径)~~(已转正入 docs `511741fd`, 此句留作历史)。敏感细节走管道/本地 memory。
+v0.5.1 fix-up(NWT 裁 v0.5 NOT-GREEN 一条承重 MUST-FIX·J2 落): **1.** §检查③ `taskkill` 加 **`//T`**(杀整棵树; `//F` 无 `//T` = TerminateProcess 不触发 `index.js:886-893 shutdown()`(只绑 SIGTERM/SIGINT, 内含 `stopAllRelays()`) ⇒ relay 子(`relay-manager.js:95` fork 非 detached/无 job-object; `relay.mjs` 零 disconnect/exit 自退; `setInterval(poll,2000)` 独立喂 loop)孤儿存活继续自主 poll 上链)。**2.** 加 **stop 后硬闸验证**: 提权 CIM `CommandLine -match 'relay\.mjs'` 为空 ∧ 父已不存在的 node.exe 数 = 0(双判据; 非提权读 SYSTEM CommandLine 为 null = 假空)才进下一步。**3.** §107/硬闸语义句改为"console 树被 `//T` 杀尽 + 实测 0 个 relay 进程存活", 不再写"随父终止"; 顶部横幅/步骤表 ③/路 3 段/relay 归位同步。**4.** 顺手更正 J1 "stopAll 零调用者": 唯一调用者是 `shutdown()`, 只是 `//F` 绕过它。活证: 05:14Z 起 supervisor 三次 `//F` 式重启, relay 孤儿数 KANet-UI 在数。
 v0.5 变更(对 v0.4·Bettor 裁 J1 预检两缺口·J2 落): **1.** §②-bis「J1 提权 `stopAll()`」改**路 3**——`stopAll()` 零调用者、无只停端点 ⇒ 不单独停 relay; drain 稳定窗三条齐后直接 ③ 重启 console, relay 子随 console 终止, 硬闸语义由"console 停 = 无 relay 可打"覆盖(§107 兜底不变); 顶部横幅/步骤表/§检查② 冻结列/relay 归位同步改。**2.** §检查③ 加**"预期阶段"**: 节点侧 `searching for missing block bodies` 不是卡, 过关只看 `nodeBodiesProcessedCount` 离开 0(J1 da9 基准 8.3 min@7.9 GB, 默认缓存 20–40 min)。**3.** §检查③ 启动器 = `scripts/_launch_console_single.ps1`(J1 写: kanet.env 全量 export + 复刻现役 argv + `Win32_Process.Create`), env 清单 KANet-UI 确认; 补丁段已完成(57fde30f)窗内 SKIP。**4.** ④ commit 闸单位写明 = **全机 commit charge 已用 ≤ 80 GB ∧ 可用 ≥ 20 GB**(非 llama 进程私有 commit)。
 v0.4 变更(对 v0.3·NWT 三眼·定稿): **1.** stopAll 含 comm relay 743c0360 ⇒ 窗内(③–⑥)dev-coord 频道 DOWN, 顶部横幅 + ① 通知 + ⑦ 恢复点全写明, 协调走 pipe SendMessage+git。**2.** check_utxo_landed minDepth 20=REORG_SAFE_MIN_DEPTH 确认够。**3.** drain 判据改**稳定窗三条**(announce-freeze ∧ 连续 60s 无新 broadcast_tx/broadcasting ∧ 现存全 landed)替单次快照(补 mid-transfer 未写 broadcast_tx 洞); 注明 **stopAll 本身 fail-closed 硬闸**(停后新 money 请求 sendCommandAsync 报错不花钱)⇒ 只需盖停前在飞小段; 时序 drain+quiesce→stopAll→③。
 v0.3 变更(对 v0.2·NWT 二眼): ①§检查② 加第二表(请求/消息触发花钱: bettor.js/chat.js/broker-v2/exchange-machine, 标触发源+冻结) ②新步 **②-bis quiesce money ingress + drain**(现成 flag 盘点=无 live 挡法; 无新码两法: (a)stopRelay+防火墙 推荐, (b)KANET_MAINTENANCE=新码对本窗无用标明; drain 靠 pending_actions/chain_events/check_utxo_landed) ③① 通知加"窗内不触发预测/交易/提现/faucet"。
