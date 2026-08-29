@@ -3,7 +3,7 @@
 > **Status**: PROPOSAL v0.1 · J2 2026-08-29 · Bettor 令（lint 存量 v7 `be6aff7d` 后续）· 数据全部由本机 `git ls-files` / `git grep` 只读得出（方法见 §4，可复跑）· 触发原因：lint v6 起无参默认范围 = git tracked 文件，`scripts/_*` 这 284 个"临时脚本"因**已入库**而进了仓级不变量（`R-EXPLORER` 存量 4 条里 1 条仍在其中）。
 
 ## §0 结论一句
-**284 个全是 `.mjs`，全在 `scripts/` 顶层；274 个全仓零引用；有"引用"的 10 个里 9 个只被 baseline/报告文件提名、1 个被 `test-framework/lib/runner.mjs` 真引用。** 建议：按 §2 三档处置——真依赖 1 个留（或改名去 `_`）、baseline 提名 8 个随归档同 commit 减 baseline（ratchet 只准降，合法）、其余 275 个 `git rm --cached` + 物理移到 `scratch/_archive_scripts_20260829/`（gitignored，历史仍在 git 里可 `git show`）。
+**284 个全是 `.mjs`，全在 `scripts/` 顶层；274 个全仓零引用；有"引用"的 10 个里 9 个只被 baseline/报告文件提名、1 个被 `test-framework/lib/runner.mjs` 真引用。** 建议：按 §2 三档处置——真依赖 1 个留（或改名去 `_`）、baseline/报告提名 9 个随归档同 commit 减 baseline（ratchet 只准降，合法）、其余 274 个 `git rm --cached` + 物理移到 `scratch/_archive_scripts_20260829/`（gitignored，历史仍在 git 里可 `git show`）。
 
 ## §1 数据
 | 维度 | 值 | 来源 |
