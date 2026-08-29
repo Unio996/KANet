@@ -1020,9 +1020,11 @@ export async function _scanUntakenBuyOffersFallback() {
         const PERMANENT_FAIL_PATTERN = /too small|minimum is|not supported|invalid|insufficient/i;
         const isPermanent = PERMANENT_FAIL_PATTERN.test(sellRes.error || '');
         if (isPermanent) {
-          // T2.10a equivalent: refund user USDT to BSC (broker BSC wallet → user pay_address)
-          // 真 demand 真 user pay_address 真 retail_dex_orders fetch (NOT broker BSC self)
-          const { transferUsdt } = await import('./evm-transfer.js');
+          // T2.10a equivalent: refund user USDT to BSC — 🔴 pay_address 对 buy_kas 是 broker 自己的 BSC 收款地址, 用户地址从未存过 (race 盘点 §7.1),
+          // 这就是下面占位 import 至今没接上的真原因。§7.1 本批: 只捕获入金 sender (broker-bsc-intake-watcher → lib/broker-buy-inflow) 写进 refund_candidate_from,
+          // 仍 manual_refund_pending:true (hold-monitor 第六数告警); 自动退 = 下批 (EOA 判定 + 用户确认 DM, 用户面 Owner 域)。
+          const { findBuyInflowSender } = await import('../lib/broker-buy-inflow.mjs');
+          const inflow = findBuyInflowSender(sqlite, { userKasia, amountUsdt: giveUsdt });
           const userOrder = sqlite.prepare(
             `SELECT user_kasia_address, qty FROM retail_dex_orders WHERE user_kasia_address = ? AND state = 'awaiting_payment' AND side = 'buy_kas' AND order_type = 'broker_as_maker' ORDER BY created_at DESC LIMIT 1`
           ).get(userKasia);
@@ -1032,7 +1034,8 @@ export async function _scanUntakenBuyOffersFallback() {
           recordChainEvent({
             txid: cancelRes.cancel_tx, eventType: 'broker_buy_fallback_refunded',
             fromAddress: null, toAddress: null, observedBy: 'system',
-            payload: { offer_id: r.id, cex_buy_error: sellRes.error, manual_refund_pending: true, user_kasia: userKasia, usdt_amount: giveUsdt },
+            payload: { offer_id: r.id, cex_buy_error: sellRes.error, manual_refund_pending: true, user_kasia: userKasia, usdt_amount: giveUsdt,
+              refund_candidate_from: inflow?.from || null, refund_candidate_tx: inflow?.txHash || null, refund_candidate_chain: inflow?.chain || null },
           });
           await _send(BROKER_RELAY_ID, { type: COMMAND_TYPES.SEND_MESSAGE, target: userKasia,
             message: `订单 ${r.id.slice(0,8)} 30min 无 KANet seeker 接, broker CEX 兜底 BUY 失败 (${(sellRes.error||'').slice(0,60)}). USDT manual refund pending (Owner 联系 broker 走 dispute).`,

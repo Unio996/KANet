@@ -84,6 +84,12 @@ export async function tick() {
     ).get(tx.tx_hash);
     if (dedup) continue;
 
+    // §7.1 (J2 2026-08-29, NWT SOUND / Bettor ②): 【先】把入金 sender (scan 事件自带 from, cross-chain-verify.mjs:151) 记进 markers, 再 publish —— publish 抛也不丢 sender。
+    // 本批只捕获不自动退 (from 可能是合约/交易所热钱包); BUY fallback 永久失败时它进 refund_candidate_from 供人工 SOP / 下批自动退。
+    try {
+      const { recordBuyInflow } = await import('../lib/broker-buy-inflow.mjs');
+      recordBuyInflow(sqlite, { txHash: tx.tx_hash, from: tx.from, amountUsdt: tx.amount, orderId: order.id, userKasia: order.user_kasia_address, chain: 'bnb' });
+    } catch (e) { console.warn(`[broker-bsc-intake] recordBuyInflow fail (non-fatal, sender 丢失 ⇒ 该单只能 manual): ${e.message}`); }
     // trigger _publishBrokerBuyOffer (broker-intake-watcher T2.21)
     try {
       const { _publishBrokerBuyOffer } = await import('./broker-intake-watcher.js');
