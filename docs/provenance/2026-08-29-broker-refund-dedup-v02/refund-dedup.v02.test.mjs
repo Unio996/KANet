@@ -48,6 +48,18 @@ t('X1 exchange 预筛形(offerId, orderId=null): chain_events(offer_id) 命中 �
 t('X2 exchange 预筛形: intent(offer_id) 有 txid, orderId=null ⇒ REFUNDED_INTENT 不重发', () => { db.prepare(`INSERT INTO broker_refund_intents VALUES ('ix2',NULL,'offer-x2',?,87.9,?,?,?)`).run(USER, H('e'), iso(NOW - 300e3), iso(NOW - 290e3)); const r = classifyRefundState({ ...base, offerId: 'offer-x2', orderId: null, rpcUtxoLookup: rpcNone, indexerCoverage: covOk }); assert.strictEqual(r.state, REFUND.REFUNDED_INTENT); });
 t('X3 no_offer 形(orderId, offerId=null): intent(order_id) 命中 ⇒ 不重发 (state-authority:550 findPriorRefundTxs 同 fail-open 的替代)', () => { db.prepare(`INSERT INTO broker_refund_intents VALUES ('ix3','order-x3',NULL,?,87.9,NULL,?,?)`).run(USER, iso(NOW - 60e3), iso(NOW - 60e3)); const r = classifyRefundState({ ...base, offerId: null, orderId: 'order-x3', rpcUtxoLookup: rpcNone, indexerCoverage: covOk }); assert.strictEqual(r.state, REFUND.INFLIGHT); });
 t('X4 两 id 都空 ⇒ 仍能走 S3/S4/coverage 判 (纯地址+金额形), 无 intent/行 ⇒ NOT_REFUNDED 只在 coverage+rpc 齐时', () => { const r = classifyRefundState({ ...base, offerId: null, orderId: null, amountKas: 12.5, rpcUtxoLookup: rpcNone, indexerCoverage: covOk }); assert.strictEqual(r.state, REFUND.NOT_REFUNDED); assert.strictEqual(classifyRefundState({ ...base, offerId: null, orderId: null, amountKas: 12.5, rpcUtxoLookup: rpcNone }).state, REFUND.UNKNOWN); });
+// --- X5 先例复现 (39ac2b69 时间线): 04-28 auto-expiry 退第一次(chain_events 记真 txid) → kaspa_tx_log 没索引到该 tx → 04-29 owner-cancel 二次尝试.
+//     旧逻辑 (broker-refund-dedup.js:78-84 原 SQL 逐字作 oracle) 判"未退" ⇒ 【必须红】; 新逻辑 ⇒ CONFIRMED 拦.
+t('X5 先例复现: auto-expiry 已退(chain_events 有真 txid, log 无行) → owner-cancel 再判: 旧 SQL 判未退(红=双退), 新 classify=REFUNDED_CONFIRMED(拦)', () => {
+  const OWNER = 'kaspatest:qq' + 'o'.repeat(59);   // 独立地址/金额, 避免与 V12 的同人同额行混(那正是代码注释里的 cross-order false positive)
+  db.prepare(`INSERT INTO chain_events (id, txid, event_type, from_address, to_address, payload, observed_by, observed_at) VALUES (lower(hex(randomblob(16))), ?, 'broker_kas_refunded', NULL, ?, ?, 'test', ?)`).run(H('f'), OWNER, JSON.stringify({ offer_id: 'offer-prec', amount: 88 }), iso(NOW - 86400e3));   // 第一次退款(auto-expiry): 真 64-hex txid; kaspa_tx_log 故意不插 (索引漏)
+  const oldSql = db.prepare(`SELECT txid FROM chain_events WHERE event_type = 'broker_kas_refunded' AND payload LIKE '%"offer_id":"' || ? || '"%' AND txid IN (SELECT tx_id FROM kaspa_tx_log) LIMIT 1`).get('offer-prec');
+  assert.strictEqual(oldSql, undefined, '旧 SQL 应判"未退"(这就是双退的根: IN kaspa_tx_log 把已记的退款排除)');
+  const oldFallback = db.prepare(`SELECT tx_id FROM kaspa_tx_log WHERE to_address = ? AND amount BETWEEN ? AND ? AND block_time > ?`).all(OWNER, 87.99, 88.01, 0);
+  assert.strictEqual(oldFallback.length, 0, '旧 fallback 同样空 ⇒ v0.1 alreadyRefunded=false ⇒ 第二次 sendKas');
+  const r = classifyRefundState({ ...base, offerId: 'offer-prec', orderId: null, userAddr: OWNER, amountKas: 88, rpcUtxoLookup: rpcNone, indexerCoverage: covOk });
+  assert.strictEqual(r.state, REFUND.REFUNDED_CONFIRMED); assert.strictEqual(decideRefundAction(r.state).action, 'backfill_refunded');
+});
 // --- 队列层: 歧义失败不得重试 sendKas ---
 t('Q1 timeout / empty result / no txId ⇒ ambiguous, retry=false', () => { for (const m of ['relay timeout after 30000ms', 'no txId from sendCommandAsync (relay returned empty result)', 'socket hang up']) assert.strictEqual(classifyQueueFailure(m).retry, false, m); });
 t('Q2 明确未广播的拒因 ⇒ definite_fail, retry=true', () => { for (const m of ['insufficient funds', 'Rejected transaction x: is not standard', 'invalid address']) assert.strictEqual(classifyQueueFailure(m).retry, true, m); });
