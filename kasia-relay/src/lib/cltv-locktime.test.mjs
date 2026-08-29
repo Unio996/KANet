@@ -1,11 +1,11 @@
 import assert from 'node:assert';
-import { cltvLockTime, cltvSequence, classifyLockReject, CltvError, CLTV_ERR, LOCK_TIME_THRESHOLD, TIME_DOMAIN_UPPER, MAX_TX_IN_SEQUENCE_NUM } from './cltv-locktime.mjs';
+import { cltvLockTime, cltvSequence, assertPositiveDelay, classifyLockReject, CltvError, CLTV_ERR, LOCK_TIME_THRESHOLD, TIME_DOMAIN_UPPER, MAX_TX_IN_SEQUENCE_NUM } from './cltv-locktime.mjs';
 let pass = 0, fail = 0;
 const t = (n, f) => { try { f(); pass++; console.log('[PASS] ' + n); } catch (e) { fail++; console.log('[FAIL] ' + n + ' :: ' + e.message); } };
 const throwsCode = (fn, code) => { try { fn(); } catch (e) { assert.ok(e instanceof CltvError, 'not CltvError'); assert.strictEqual(e.code, code); return; } throw new Error('did not throw'); };
 const T = LOCK_TIME_THRESHOLD;
 
-t('D0 daa 下界 0 ⇒ ok (lock_time=0 在共识是 Finalized=无锁, 但 E=0 作 CLTV 栈值合法; 调用方若 E=0 应知其义)', () => assert.strictEqual(cltvLockTime({ domain: 'daa', bounds: [0n] }), 0n));
+t('D0 daa 下界 0: 默认 REJECT (Codex ④ 零延迟=无锁), allowZero:true 显式才 ok', () => { throwsCode(() => cltvLockTime({ domain: 'daa', bounds: [0n] }), CLTV_ERR.DELAY_NONPOSITIVE); assert.strictEqual(cltvLockTime({ domain: 'daa', bounds: [0n], allowZero: true }), 0n); });
 t('D1 daa 单输入 ⇒ 原值', () => assert.strictEqual(cltvLockTime({ domain: 'daa', bounds: [80_000_100n] }), 80_000_100n));
 t('D2 daa 多输入 ⇒ max', () => assert.strictEqual(cltvLockTime({ domain: 'daa', bounds: [5n, 80_000_100n, 77n] }), 80_000_100n));
 t('D3 daa 边界 5e11-1 ⇒ ok; 5e11 ⇒ DOMAIN_MIXED', () => { assert.strictEqual(cltvLockTime({ domain: 'daa', bounds: [T - 1n] }), T - 1n); throwsCode(() => cltvLockTime({ domain: 'daa', bounds: [T] }), CLTV_ERR.DOMAIN_MIXED); });
@@ -18,6 +18,9 @@ t('A1 空数组 ⇒ BOUNDS_EMPTY (不回落 0n)', () => throwsCode(() => cltvLoc
 t('A2 缺 domain / 错 domain / 缺 opts / bounds 非数组 ⇒ ARGS_MISSING', () => { throwsCode(() => cltvLockTime({ bounds: [1n] }), CLTV_ERR.ARGS_MISSING); throwsCode(() => cltvLockTime({ domain: 'ms', bounds: [1n] }), CLTV_ERR.ARGS_MISSING); throwsCode(() => cltvLockTime(), CLTV_ERR.ARGS_MISSING); throwsCode(() => cltvLockTime({ domain: 'daa', bounds: 5n }), CLTV_ERR.ARGS_MISSING); });
 t('A3 number 安全整数可用; 非安全/非整数 ⇒ ARGS_MISSING', () => { assert.strictEqual(cltvLockTime({ domain: 'daa', bounds: [80000100] }), 80_000_100n); throwsCode(() => cltvLockTime({ domain: 'daa', bounds: [1.5] }), CLTV_ERR.ARGS_MISSING); throwsCode(() => cltvLockTime({ domain: 'daa', bounds: ['7'] }), CLTV_ERR.ARGS_MISSING); });
 t('S1 sequence 默认 0n; MAX ⇒ throw; 负 ⇒ throw', () => { assert.strictEqual(cltvSequence(), 0n); assert.strictEqual(cltvSequence(5), 5n); throwsCode(() => cltvSequence(MAX_TX_IN_SEQUENCE_NUM), CLTV_ERR.ARGS_MISSING); throwsCode(() => cltvSequence(-1n), CLTV_ERR.ARGS_MISSING); });
+t('S2 (Codex ③) sequence 上界闭: MAX−1 PASS / MAX REJECT / MAX+1 REJECT / 2^70 REJECT / 非整数 REJECT', () => { assert.strictEqual(cltvSequence(MAX_TX_IN_SEQUENCE_NUM - 1n), MAX_TX_IN_SEQUENCE_NUM - 1n); throwsCode(() => cltvSequence(MAX_TX_IN_SEQUENCE_NUM), CLTV_ERR.ARGS_MISSING); throwsCode(() => cltvSequence(MAX_TX_IN_SEQUENCE_NUM + 1n), CLTV_ERR.ARGS_MISSING); throwsCode(() => cltvSequence(1n << 70n), CLTV_ERR.ARGS_MISSING); throwsCode(() => cltvSequence('x'), CLTV_ERR.ARGS_MISSING); });
+t('Z1 (Codex ④) daa 域 E=0 默认 REJECT(CLTV_DELAY_NONPOSITIVE); allowZero:true 才放; 多输入含 0 也拒', () => { throwsCode(() => cltvLockTime({ domain: 'daa', bounds: [0n] }), CLTV_ERR.DELAY_NONPOSITIVE); assert.strictEqual(cltvLockTime({ domain: 'daa', bounds: [0n], allowZero: true }), 0n); throwsCode(() => cltvLockTime({ domain: 'daa', bounds: [5n, 0n] }), CLTV_ERR.DELAY_NONPOSITIVE); assert.strictEqual(cltvLockTime({ domain: 'daa', bounds: [1n] }), 1n); });
+t('Z2 (Codex ④) assertPositiveDelay: 100 PASS / 0 REJECT / −1 REJECT / 5e11 REJECT(量级带) / 非整数 REJECT', () => { assert.strictEqual(assertPositiveDelay(100), 100n); throwsCode(() => assertPositiveDelay(0), CLTV_ERR.DELAY_NONPOSITIVE); throwsCode(() => assertPositiveDelay(-1n), CLTV_ERR.DELAY_NONPOSITIVE); throwsCode(() => assertPositiveDelay(T), CLTV_ERR.DOMAIN_MIXED); throwsCode(() => assertPositiveDelay('n'), CLTV_ERR.ARGS_MISSING); });
 t('C1 拒因分类: 三种 CLTV 文本 + NotFinalized ⇒ lock-reject 带共识坐标; 其它 ⇒ inconclusive', () => {
   assert.deepStrictEqual(classifyLockReject('x: mismatched locktime types -- tx locktime 0, stack locktime 5'), { kind: 'lock-reject', reason: 'domain_mismatch', consensus_site: 'opcodes/mod.rs:1034' });
   assert.strictEqual(classifyLockReject('locktime requirement not satisfied -- ...').reason, 'not_yet');
