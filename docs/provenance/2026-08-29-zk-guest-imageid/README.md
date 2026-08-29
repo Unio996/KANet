@@ -21,6 +21,12 @@
 - **今天重建**是否仍 == canonical：归方案稿 §4.3 ③ `verify-image-id.sh --build`（NWT GO 后跑；相等/不等都记事实进方案稿 §3，不等也不改 canonical）。
 - 跨机复现（younio 不装工具链，Bettor 裁）；docker 确定性构建（方案稿 §5 边界，不在本批）。
 
+## 3-bis. 2026-08-29 `--build` #1（副本树全新重编）—— **== canonical，payout.bin 逐字节同 7/12**
+- `rebuild1-build.log`：`nice -n 19` + `CARGO_BUILD_JOBS=2`，139 crates，1 m 04 s（14:48:29→14:49:33+07），guest rustc `1.94.1-dev (06e01cb0d)` / host `1.96.1`，末尾 `IMAGE_ID OK`。
+- `rebuild1-methods.rs`：重编生成的 `PAYOUT_ID`（同 8 词；`PAYOUT_PATH` 指向副本树 `/mnt/d/kanet-tn12/scratch/_j2_zk_guest_build/…`——路径不进 imageId）。
+- 重编 `payout.bin` sha256 `885c6fca4914cd3fce4463d94acd517c517ade492c5de838faf163f43efa26cd`，`cmp` 与本目录 7/12 副本 **逐字节相同**（故不再抄一份）。
+- `rebuild1-blkrate.jsonl`：kaspad 只读 RPC 样本（baseline1/2 → 12.71 bps；build1 → 14.77 bps；abort 阈 −30% 未触发）。
+
 ## 4. 复跑
 ```
 node docs/provenance/2026-08-29-zk-guest-imageid/verify-payout-id.mjs     # 4/4, 任意 cwd
