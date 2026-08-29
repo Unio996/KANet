@@ -1,0 +1,279 @@
+[db] path=C:\Users\ADMIN\AppData\Local\Temp\escrow2-4DOsTY\t.db source=DB_PATH
+[migrate] Skills table created with 3 builtin skills.
+[migrate] Skills table upgraded: relay_node_id added, unique(relay_node_id, name).
+[migrate] v6: side_effect_level added to skills.
+[migrate] v7: introduce skill seeded.
+[migrate] v9: identities extended with discovery fields.
+[migrate] v9: interaction_records table created.
+[migrate] v9: probe_logs table created.
+[migrate] v10: account_relations table created, migrated 0 conversations.
+[migrate] v11: adapter_nodes provider columns added.
+[migrate] v12: broadcast_messages table created.
+[migrate] v12: Agent Card columns added to identities.
+[migrate] v14: Mind config columns on relay_nodes + seeded from files.
+[migrate] v15: trading_config_json column added to relay_nodes.
+[migrate] v16: chain_snapshots table created.
+[migrate] v17: address_balances table created (whale + exchange tracking).
+[migrate] v17b: whale_watchlist table created, seeded 0 agent addresses.
+[migrate] v18: exchange_accounts table created.
+[migrate] v19: trade_executions table created.
+[migrate] v20: trade_log table created.
+[migrate] v21: trade_baselines table created.
+[migrate] v22: mm_orders table created.
+[migrate] v22: mm_quotes table created.
+[migrate] v23: agent_wallets table created, migrated 0 wallets from config_entries.
+[migrate] v24: events.agent_address column added + backfilled.
+[migrate] v25: skills.category column added + backfilled.
+[migrate] v27: mm_orders upgraded — counterparty linking, agent_address, mode, timestamps.
+[migrate] v28: relation_states created, backfilled 0 relations.
+[migrate] v28: chain_events created.
+[migrate] v28: execution_states created.
+[migrate] v29b: fund_locks table created.
+[migrate] v29c: execution_states new columns added.
+[migrate] v29d: 11 trade configs inserted.
+[migrate] v30a: execution_states approval fields added.
+[migrate] v31: relation_states trust_level + is_blocked added, migrated 0 from account_relations.
+[migrate] v32: onboard_market skill registered for 0 agents.
+[migrate] v33: stock_watchlist table created with 2 seed indices.
+[migrate] v34: social_style + social_overrides on relay_nodes.
+[migrate] v35: onboard_broker + onboard_polymarket skills registered for 0 agents.
+[migrate] v35: broker_accounts table created.
+[migrate] v37: agent_connections table created, 0 connections migrated.
+[migrate] v38: exchange_offers table created (protocol-level free market).
+[migrate] v39: exchange_offers state machine columns added.
+[migrate] v40: UNIQUE index on mm_orders.payment_txhash (anti-replay hardening).
+[migrate] v41: kanet_message_index table created (cooperative message index).
+[migrate] v41b: scout_checkpoint table created (scan progress persistence).
+[migrate] v42: kanet_message_index.processed_at column added.
+[migrate] v43: relation_states.their_alias column added.
+[migrate] v44: pending_actions table created.
+[migrate] v45: tx_records.local_address added. Backfilled 0 handshake records.
+[migrate] v46: account_relations dropped.
+[migrate] v47: interaction_records dropped.
+[migrate] v48: relation_states.classification added
+[migrate] v49: kanet_message_index.reply_to added
+[migrate] v50: adapter_nodes.is_enabled added
+[migrate] v51: trade_log.exchange added
+[migrate] v52: relay_nodes.focus added
+[migrate] v53a: exchange_offers.metadata added
+[migrate] v53b: market_seeder_config table created with defaults
+[migrate] v54: exchange_offers taker_chain + taker_payment_address added
+[migrate] v55: exchange_offers delivering_at + payment_tx added
+[migrate] v57: exchange_offers.delivery_tx added
+[migrate] v58: agent_connections.signing_key_enc added (unblocks Aevo credential storage)
+[migrate] v60: kaspa_tx_log table created (embedded TX indexer)
+[migrate] v61: UNIQUE index on exchange_offers.payment_tx (anti-reuse hardening).
+[migrate] v62: pending_exchange_accepts table created (orphan buffer).
+[migrate] v63: channels table created + 7 preset channels + 0 backfilled.
+[migrate] v64: social_spend_log table created (KAS budget tracking).
+[migrate] v65: polymarket_rules table created.
+[migrate] v67: relay_nodes.is_bot_autoreply column added.
+[migrate] v68: retail_dex_orders table created.
+[migrate] v68: relay_nodes.is_dex_broker column added.
+[migrate] v69: retail_dex_orders.agent_pay_addr column added.
+[migrate] v69: retail_dex_orders.mid_price_at_quote column added.
+[migrate] v70: no orphan relation_states to backfill
+[migrate] v71: retail_dex_broker_config table created.
+[migrate] v72: added columns to retail_dex_orders: group_id, broker_fee_kas, net_delivery_kas, expires_user_set
+[migrate] v73: retail_dex_user_memory table created.
+[migrate] v74: retail_dex_buy_publications table created.
+[migrate] v75: polymarket_market_results table created (winner cache).
+[migrate] v78: monitor_rules table created.
+[migrate] v78: monitor_events table created with indexes.
+[migrate] v76: relay_nodes.is_service added; 0 broker → service mode.
+[migrate] v77: idx_offers_open_expires partial index created (expire watcher acceleration).
+[migrate] v79: broker_conversations table created (per-peer broker state, J1 #31 ship).
+[migrate] v83: backfill DELETE 0 placeholder chain_events broker_* rows.
+[migrate] v83: trigger chain_events_txid_format_check created (lenient hex-format, race-safe vs indexer lag).
+[migrate] v83: idx_retail_dex_refund_tx_unique partial UNIQUE INDEX created.
+[migrate] v83: retail_dex_orders recreated with CHECK invariant 2 + FK invariant 4 (0 row copied).
+[migrate] v83: exchange_offers recreated with CHECK invariant 5 protocol_status enum (0 row copied).
+[migrate] v83: 5 invariants enforce complete (atomic state machine schema-level).
+[migrate] v80: broker_conversations.completed_at column added (Phase 2 profile sediment future-proof).
+[migrate] v81: broker_conversations dropped (Owner 抓错药戳穿 — 复用 retail_dex_orders + retail_dex_user_memory + relation_states 现有 pipeline).
+[migrate] v84(a): retail_dex_orders.filled_qty REAL DEFAULT 0 added.
+[migrate] v84(b): retail_dex_orders.settle_grace_until INTEGER added.
+[migrate] v84(c): exchange_offers.price_tolerance REAL DEFAULT 0.01 added.
+[migrate] v84(d): exchange_offers.settle_grace_min INTEGER DEFAULT 5 added.
+[migrate] v84(e): exchange_offers.filled_qty REAL DEFAULT 0 added.
+[migrate] v85: retail_dex_orders.picks_json TEXT added (A1 cross-process retain).
+[migrate] v86: broker_workflow_markers table created (chain_events 表语义分裂修, RCA Owner 真测 fatal bug 1).
+[migrate] v87: relation_states.last_stranger_reject_at TEXT added (matcher P0 stranger cooldown store, γ 钦定).
+[migrate] v88: config_entries seed 3 autoTaker rows (autotake_enabled=true / mode=auto / min_discount_pct=0.5). Layer 1 Match Gap 闭环 fix.
+[migrate] v89: user_ledger 表 + 2 索引 创建 (broker IOU 账本基础设施, Phase 1 T2.4 foundation).
+[migrate] v90: bettor_recommendations 表 + 3 索引 创建 (Phase 3a Bettor scanner output).
+[migrate] v91: bettor_recommendations.relay_node_id 列 + 索引 加好 (per-agent scan attribution).
+[migrate] v92: 战绩追踪列 (outcome/was_correct/brier/pnl_hypothetical) + 索引 加好.
+[migrate] v93: bettor_sim_positions/snapshots 表 + 4 索引创建 + backfill 0 条 sim_positions.
+[migrate] v94: bettor_adjustments 表 + 3 索引 创建 (Phase 3e-1 调仓队列).
+[migrate] v95: relay_nodes.role column 添加.
+[migrate] v97: reputation_summary 表 + 2 索引 创建 (Phase 2 E.1 ABE reputation accumulation).
+[migrate] v97: E.4 backfill — 0 addresses aggregated from 0 settlement chain_events.
+[migrate] v98: bettor_sim_positions.market_description column 添加 (Phase 3e-6 P0.1 reactor delta 模型 LLM 重估 复用 rule).
+[migrate] v99: bettor_market_blacklist 表 + 1 索引创建 (Phase 3f-0 manual_override hotfix).
+[migrate] v100: event_calendar 表 + 2 索引 创建 (Phase 3f-1 Sub #1 Lifecycle SM, Bettor r55 spec).
+[migrate] v100: bettor_recommendations.lifecycle_state column 添加 (Phase 3f-1 Lifecycle SM 状态).
+[migrate] v100: bettor_recommendations.calibrator_confidence column 添加 (Phase 3f-1 LLM Calibrator band).
+[migrate] v102: health_alert_log 表 + 1 索引 创建 (Phase 3g C-1 cooldown 持久化).
+[migrate] v102: health_heartbeats 表 创建 (Phase 3g C-1 heartbeat 通用 schema).
+[migrate] v103: bettor_track_record 表 创建 (Phase 3g C-2 战绩 audit daily snapshot).
+[migrate] v104: bettor_action_decisions 表 + 1 索引 创建 (Phase 3g A decider audit).
+[migrate] v101: bettor_real_config 表 + singleton row 创建 (Phase 3g B-1 6 安全网, enabled=0 default OFF).
+[migrate] v101: bettor_real_positions 表 + 4 索引 创建 (Phase 3g B-1 real-money audit trail, sim 分表独立).
+[migrate] v105: bettor_action_decisions UNIQUE 扩 mode (Phase 3g Sub 9.12 sim+real 同秒同 adj 不撞).
+[migrate] v106: agent_wallets.polymarket_funder_address column 添加 (Phase 3g Sub 9.14 POLY_1271 per-wallet opt-in).
+[migrate] v108: historical_resolutions 表 + 3 索引 创建 (Bettor Pattern-Match corpus, Owner 5/14 13:13 钦定).
+[migrate] v109: bettor_recommendations.fundamental_estimate column 添加.
+[migrate] v109: bettor_recommendations.fundamental_sources column 添加 (JSON array of source URLs).
+[migrate] v109: bettor_recommendations.fundamental_confidence column 添加.
+[migrate] v109: bettor_domain_cache 表 + 1 索引 创建 (Phase B Fundamental Enricher per-domain TTL).
+[migrate] v110: bettor_market_price_history 表 + 1 索引 创建 (Phase B 推荐历史 yes_price time series).
+[migrate] v110: bettor_outcome_log 表 + 2 索引 创建 (Phase B 胜率轨迹 actual outcome + P&L).
+[migrate] v111: bettor_sim_positions 加 closed_by TEXT 列 (auto-valve 关仓原因 manual/auto_valve_a-d).
+[migrate] v116: bettor_recommendations 加 strategy 列 (Phase 2.3 Strategy 多样性 tag).
+[migrate] v115: bettor_wiki_cache 表 创建 (Phase B Sub B5 enricher Wikipedia 24h cache).
+[migrate] v113: bettor_variant_recommendations 表 + 2 索引 创建 (Phase B Variant Expander 3-tier).
+[migrate] v112: position_protect_rules 表 + 2 索引 创建 (Phase B 持仓自动保护 rule store).
+[migrate] v112: position_protect_audit 表 + 2 索引 创建 (Phase B 持仓自动保护 per-tick check log).
+[migrate] v117: position_watch_rules 表 + 2 索引 创建 (Owner 5/17 mode 1+2 watcher).
+[migrate] v117: position_watch_audit 表 + 2 索引 创建 (per-tick check log + alert state).
+[migrate] v118: bettor_recommendations 加 due_diligence_json 列 (LLM JSON schema output).
+[migrate] v118: bettor_recommendations 加 pass_due_diligence 列 (LLM audit pass flag).
+[migrate] v118: bettor_recommendations 加 owner_final_ack_at 列 (fossa-stable Owner ack timestamp).
+[migrate] v118: bettor_live_news_inject 表 + 1 索引 创建 (Owner 手动 feed 实时舆情 + 24h default expiry per J1 add).
+[migrate] v121: exchange_offers 加 outcome_market_source TEXT (r177 prediction outcome).
+[migrate] v121: exchange_offers 加 outcome_condition_id TEXT (r177 prediction outcome).
+[migrate] v121: exchange_offers 加 outcome_token_id TEXT (r177 prediction outcome).
+[migrate] v121: exchange_offers 加 outcome_side TEXT (r177 prediction outcome).
+[migrate] v121: exchange_offers 加 outcome_end_date TEXT (r177 prediction outcome).
+[migrate] v121: exchange_offers 加 outcome_oracle_hook TEXT (r177 prediction outcome).
+[migrate] v121: exchange_offers 加 outcome_max_deviation_pp REAL (r177 prediction outcome).
+[migrate] v121: exchange_offers 加 maker_reputation_snapshot TEXT (r177 prediction outcome).
+[migrate] v121: exchange_offers 加 published_price REAL (r177 prediction outcome).
+[migrate] v121: prediction_maker_whitelist 表 + 1 索引 创建 (r177 maker stake escrow + Owner approval).
+[migrate] v121: prediction_reputation_log 表 + 2 索引 创建 (r177 reputation snapshot 历史).
+[migrate] v123: exchange_offers 加 maker_kaspa_addr TEXT (r177 Phase 2a hotfix PB4).
+[migrate] v123: exchange_offers 加 maker_relay_id TEXT (r177 Phase 2a hotfix PB4 — verifier whitelist lookup).
+[migrate] v124: exchange_offers 加 outcome_oracle_relay_id TEXT (r211 Path D maker 自选 oracle as P2P primitive).
+[migrate] v124: exchange_offers 加 resolution_rule_spec TEXT (= JSON 5 字段 structured oracle resolution spec).
+[migrate] v124: relay_nodes 加 broker_referral_code TEXT (r207 PB-A 统一 broker 角色, 跨 prediction+exchange).
+[migrate] v124: relay_nodes 加 broker_stake_locked_kas REAL (r207 PB-A).
+[migrate] v124: relay_nodes 加 broker_stake_lock_until TEXT (r207 PB-A).
+[migrate] v124: relay_nodes 加 broker_approved_by TEXT (r207 PB-A).
+[migrate] v124: relay_nodes 加 broker_approved_at TEXT (r207 PB-A).
+[migrate] v124: relay_nodes 加 is_oracle INTEGER (r211 v3 oracle 统一角色, 跟 broker 同结构).
+[migrate] v124: relay_nodes 加 oracle_capabilities TEXT (= JSON list, e.g. ["polymarket_uma_mirror","kanet_ai_consensus_v1"]).
+[migrate] v124: relay_nodes 加 oracle_stake_locked_kas REAL (= 错判 slash 工具).
+[migrate] v124: relay_nodes 加 oracle_reputation_score REAL (= 跨 settle 历史).
+[migrate] v130: exchange_offers 加 outcome_oracle_relay_ids TEXT (= JSON array of 5 oracle relay UUIDs, Bettor r224 maker 自选 oracle SET).
+[migrate] v130: exchange_offers 加 revote_round INTEGER (= 当前 revote round, 0=原投, max 2 per J1 #343 PB-1).
+[migrate] v130: exchange_offers 加 escrow_p2sh TEXT (= SS P2SH addr computed from contract + ctor args).
+[migrate] v130: exchange_offers 加 settle_txid TEXT (= 5-of-5 unanimous settle TX chain anchor).
+[migrate] v130: exchange_offers 加 refund_txid TEXT (= deadline 过 maker refund TX chain anchor).
+[migrate] v130: relay_nodes 加 voter_misbehave_count INTEGER (= J1 #343 PB-5 softer DoS shield, auto-pause at 3 dissents).
+[migrate] v130: relay_nodes 加 ecdsa_pubkey_xonly TEXT (= 32 byte hex x-only secp256k1 pubkey, SS oracle ctor param per J1 #343 PB-4).
+[migrate] v131: exchange_offers 加 pending_taker_pubkey TEXT (= E pre-handshake taker x-only pubkey).
+[migrate] v131: exchange_offers 加 pending_handshake_expires_at TEXT (= handshake 过期时间, maker 重新 publish).
+[migrate] v131: exchange_offers 加 taker_stake_locked_kas REAL (= taker 锁 SS P2SH 的 KAS 数).
+[migrate] v131: exchange_offers 加 taker_escrow_lock_tx TEXT (= taker stake 锁 chain TX hash).
+[migrate] v132: exchange_offers CHECK 缺 4 state (pending_taker,handshake_done,open_awaiting_taker_stake,collecting_sigs), rebuild table.
+[migrate] v132: exchange_offers rebuilt (0 rows preserved, 6 indexes recreated, CHECK 加 4 Phase 4a states).
+[migrate] v62: pool_markets + pool_bettor_sides tables created (B2 v0.5 SS contract Sub 2a).
+[migrate] v133: pool_markets 加 oracle_relay_ids TEXT (= JSON array of 3 oracle relay_ids for voter daemon LIKE scan, B2 v0.5 Sub 2c).
+[migrate] v134: pool_markets 加 metadata TEXT (= phase2_tx_obj + winner + silent_oracle_index stash, B2 v0.5 Sub 2d Phase 2a).
+[migrate] v135: pool_markets 加 broker_relay_id TEXT (= broker fee output dest lookup, B2 v0.5 Sub 2d Phase 2a-2 r339 concede).
+[migrate] v136: pool_bettor_sides 加 side_redeem_script_hex TEXT (= settled_via_spine scriptSig assembly, B2 v0.5 Sub 2d Phase 2c step 2c).
+[migrate] v142: pool_bettor_sides 加 refund_attempted_at TIMESTAMP (= area-8 E6 24h cooldown dedupe DB-persistent, B2 v0.5).
+[migrate] v143: oracle_registry table + 3 indexes created (Oracle v0.3 sub 1).
+[migrate] v143: oracle_history table + 3 indexes created (Oracle v0.3 sub 1 / sub 5).
+[migrate] v144: relay_nodes.address UNIQUE partial index added (防 future dup).
+[migrate] v145: broadcast_messages.visibility col added (default internal, Track A 保护).
+[migrate] v145: faucet_grants table created (Tier 1 自动 faucet, IP+wallet rate limit).
+[migrate] v146: predictions_offers_local_cache table created (Oracle v0.3 sub 10.x SPOF recovery).
+[migrate] v147: prediction_dm_session table created (sub 12.x DM menu UX context cache, Bettor r100).
+[migrate] v148: agent_pairs table created (Tier 2.1 pair handshake state, KANet-UI propose).
+[migrate] v148: agent_local_endpoint table created (STUN cache 5min TTL).
+[migrate] v149: agent_groups table created (Tier 2.2 N-way group, join/vote threshold + forming timeout).
+[migrate] v149: group_chat_log table created (Tier 2.2 group internal chat).
+[migrate] v149: chain_events.is_public col added (Tier 1 §2.A J2-1 isolation, default 0=internal).
+[migrate] v150: oracle_history.shadow_flag added.
+[migrate] v150: oracle_history.uma_resolved_outcome added.
+[migrate] v150: oracle_history.shadow_correct added.
+[migrate] v150: oracle_history.domain added.
+[migrate] v150: oracle_history.uma_assertion_id added.
+[migrate] v150: oracle_history.offer_id added.
+[migrate] v150: chain_events.offer_id added (NWT r89 B, replace LIKE scan).
+[migrate] v151: oracle_registry.licensed_domains added.
+[migrate] v151: oracle_registry.frozen added.
+[migrate] v152: oracle_disagreement_queue table + 3 indexes created (UMA herding mitigation, J1 cluster).
+[migrate] v153: condition_id_mapping table + 3 indexes created (Phase 2 oracle 两类市场 J2 r74 Bettor r149).
+[migrate] v154: user_notification_prefs table + 2 indexes created (TG bot S3 Bettor r219 J2 own).
+[migrate] v155: pool_markets 加 category TEXT + idx + backfill 0 现有单 (prediction-menu bot S-B, Bettor r240/Owner r93 J1 own).
+[migrate] v156: pool_bettor_sides UNIQUE(side_lock_tx) partial index created (external-stake TX-reuse guard, Bettor r263 J1 own).
+[migrate] v157: relay_nodes 加 privkey_encrypted + privkey_hint (r281 私钥型 relay 支持, Owner P0).
+[migrate] v158a: pool_markets += protocol_version TEXT (oracle v0.6 ADDITIVE, Bettor r3 J1 own).
+[migrate] v158b: pool_markets += pool_merkle_root TEXT (= ctor-baked depth-8 root for v0.6 SS, Bettor r3 J1 own).
+[migrate] v159 (A): oracle_pool_membership table + 2 indexes (J2.1 v0.6 path A pool source).
+[migrate] v159 (B): pool_snapshots table + 1 index (J2.1 v0.6 path A poolMerkleRoot freeze).
+[migrate] v159 (C): pool_committee table + 1 index (J2.1 v0.6 path A VRF stake-weighted sample).
+[migrate] v160: dropped UNIQUE(market_id, bettor_pk); replaced with non-unique idx — 放开加仓/两边押 (Owner P0 r23).
+[migrate] v161: pool_snapshots 加 pool_stakes_json (F-S3 fix: snapshot stake@create 防 seed-aware grinding).
+[migrate] v162: oracle_stake_enrollments + oracle_pool_chain_view tables created (DoD §2.2 chain-derived pool).
+[migrate] v163: pool_snapshots 加 snapshot_daa (Bettor r449 跨节点不变量持久化).
+[migrate] v165: pool_markets 加 deadline_daa INTEGER (NWT+J1 跨节点 endBlock 确定性 anchor).
+[migrate] v166: oracle_stake_enrollments 加 relay_address TEXT (Bettor 6/5 C1 跨节点 settle DM target).
+[migrate] v166: oracle_pool_membership 加 relay_address TEXT.
+[migrate] v167: broker_recommendations table (DoD 问1 prevet-gate + 排序).
+[migrate] v168: relay_nodes.default_broker_fee_pct (gateway 默认 fee, 只新建市场读).
+[migrate] v169: pool_markets.maker_pk (= maker_relay_pk 单源 == broadcast/sentinel, settle maker payout pk-derive 一修两治 winner+fee).
+[migrate] v170: pool_bettor_sides.side_lock_daa (= canonical accepting-block daa, #27a v2 chain-anchored bettor-exclude determinism).
+[migrate] v171: market_shards table created (rolling-shard registry for unlimited betting — bshard B + self-claim C).
+[migrate] v172: market_shards.current_leaf_outpoint (当前 ShardLeaf 续约 UTXO txid:idx, buildRegisterCommand input).
+[migrate] v172: market_shards.current_leaf_state (JSON count/local_yes/local_no/pool_value, spliceLeafState 重算续约 redeem).
+[migrate] v172: market_shards.shard_redeem_hex (创世 ShardLeaf redeem 基 = canonical-pipeline 编一次存, splice base — register 时 spliceLeafState 纯字节 op 零 silverc 重编, 防 cross-node build drift).
+[migrate] v172: payout_shards table (per-market (A) PayoutShard covenant sink — cov_id provenance + settle redeem).
+[migrate] v173: broker_onboarding table (玩家→轻路 broker 自助 onboarding, 地址制, bot_token 加密, 审批复用 identities.trust).
+[migrate] v174: tg_custodial_wallets table (电报 DM 托管钱包, 助记词 aes-256-gcm 加密 fail-loud, display-once 无明文回取, Owner 钦定).
+[migrate] v175: escrow_states table (Silverscript P2SH escrow — buyer/seller/arbiter 三方合约, lock/execute via relay IPC).
+[migrate] v176: oracle_shadow_ledger table (影子判定台账 — 我们 oracle vs 权威 命中率历史, 纯记录不碰结算, Owner 自我进化 #26).
+[migrate] v177: pool_bettor_sides += pay_amount_sompi INTEGER (task#32 confirm-idempotency fix, NULL for pre-existing rows = falls back to old latest-match behavior).
+[migrate] v178: faucet_grants += fingerprint_hash TEXT + index (G4 lightweight fingerprint throttle, secondary key alongside per-IP).
+[migrate] v179: worldcup_schedule table (#35 世界杯赛程 config, ESPN 占位符解析驱动自动开盘).
+[migrate] v180: zk_prove_jobs table (跨机器ZK proving job-queue, partial unique index做持久化幂等锁).
+[migrate] v181: zk_prove_jobs 补 fee_leaves_json/pool_total_sompi(§4硬门⑤禁bps-fallback, guest需要完整fee_leaves).
+[migrate] v182: pool_bet_preps 建表(#19 根治, betId 服务端持久化防孤儿单).
+[migrate] v183a: spc_daa_index 建表(SPC块DAA→hash索引, MAX_WALK老盘根治).
+[migrate] v183b: spc_daa_index_coverage 建表(索引空洞防线, §2.5).
+[migrate] v184a: pool_markets.fee_rules 列(B线落2 分润规则全文, write-once).
+[migrate] v184b: fee_rules write-once trigger(Bettor 注2, L4 结构性不可变).
+[migrate] v185: endpoint_hit_counters 建表(4个疑似死端点7天观察窗命中计数, 件⑤步骤2).
+[migrate] v186: confirm-by-address 移除决策永久审计记录写入 events 表(件⑥ break-glass 走向A).
+[migrate] v187: spc_tip_heartbeat 建表(单行, relay tip 心跳, spc_daa_index 完整性巡检用).
+[migrate] v188: spc_prune_capture_heartbeat 建表(K-17 剪裁前补齐 worker 独立存活心跳).
+[migrate] v189: payout_shards.covenant_family 列已加(K-18 §3.1).
+[migrate] v190: m0c1_app_grants grant registry 建表 (M0c-1 app provision §2, 写入仅 operator 离线脚本).
+[migrate] v192: pilot_rate_limit_log 建表 (M0c-1 Path B pilot 围栏 §2.4, gateway 限流 keyed by grant_id).
+[migrate] v193: tg_custodial_wallets.access_mode 列已加 (Codex MSG-125 E 项, pilot 钱包 durable 隔离标记, 默认 'normal').
+[migrate] v194: broker_onboarding.status 已移除 (vestigial 恒 pending; 移除后任何 b.status gate 即 SQL 报错而非静默锁死全 broker fork).
+[migrate] v195: u1_domain_assignment 建表完成 (u1 隔离施工的域→relay 映射记录; 纯记录表, 不参与签名判定).
+[migrate] v196: u1_identity_registration 建表完成 (A2 同源判定登记表; N3 锁1/N4 mnemonic 型已落成 UNIQUE+CHECK 结构约束; 今日无写入方).
+[migrate] v197: u1_identity_challenge 建表完成 (A2 一次性挑战; challenge PK 走 CAS, used_at NULL=未消费, expires_at NOT NULL; 部分索引仅巡检不参与正确性; 今日无写入方).
+[migrate] v198: u1_relay_identity 建表完成 (§10 跨节点 pubkey 身份, register-only; PK=relay_pubkey_xonly 小写64hex CHECK; network 闭枚举 CHECK; 无 local_relay_id 列/无 relay_id 回退索引(活算 fromAddress); epoch UNIQUE; 写入方 = u1-registration.mjs 事务内).
+[migrate] DB migrations complete.
+[PASS] V1 生产形(主网地址+TN12) ⇒ UNKNOWN(network_prefix_mismatch), 即使 RPC/coverage 都给
+[PASS] V2 全条件齐: 零行 + RPC 成功 no-match + 心跳新 + coverage 无洞 ⇒ NOT_PAID
+[PASS] V3 RPC 缺(未注入) ⇒ UNKNOWN(rpc_lookup_unavailable) — MUST①
+[PASS] V4 RPC 抛 ⇒ UNKNOWN(rpc_lookup_fail) — MUST①
+[PASS] V5 RPC 劣化(返回非数组) ⇒ UNKNOWN — MUST①
+[PASS] V6 RPC 命中 ⇒ ESCROWED(rpc_utxo_match), 不看 coverage
+[PASS] V7 coverage 账缺(未注入) ⇒ UNKNOWN(coverage_ledger_unavailable) — 过渡形, 依赖 L2 期 1
+[PASS] V8 coverage 有洞 ⇒ UNKNOWN(coverage_holes) — MUST②
+[PASS] V9 coverage 抛 ⇒ UNKNOWN
+[PASS] V10 心跳陈 ⇒ UNKNOWN 即使 coverage 说无洞 (必要非充分, MUST③)
+[PASS] V11 索引入金命中 ⇒ ESCROWED, 不调 RPC
+[PASS] V12 顺序: 配置校验先于一切 (错网 + 有行 + RPC 命中 仍 UNKNOWN)
+[PASS] D1 NOT_PAID + 选项 B(默认) ⇒ held_for_review(可逆, 无 no_escrow)
+[PASS] D2 NOT_PAID + 选项 A ⇒ failed + no_escrow(今天的终态)
+[PASS] D3 UNKNOWN ⇒ alert_once, 不 transition; ESCROWED ⇒ none
+[PASS] D4 未知 mode ⇒ throw(不静默选终态)
+broker-escrow-check v02: 16 PASS / 0 FAIL
