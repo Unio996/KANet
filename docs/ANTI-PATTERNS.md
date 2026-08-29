@@ -3143,3 +3143,16 @@ WHERE id IN (...) AND protocol_status IN ('verifying', 'pending_bettors')
   ```
   进程起始时刻用 CIM `CreationDate`；父链用 CIM `ParentProcessId`（规则 72 同族、`reference-wmi-spawned-process-parent-chain-…`）。
 - 同族: 规则 70（「从未执行」≠「没留痕」——这里是「读到 0」≠「是 0」）、规则 72（探针失效伪装成对象故障——这里是测法失效伪装成对象空闲）、memory `reference-get-process-cpu-is-zero-for-system-processes-non-elevated-use-cim-kernel-user-time-delta`。
+
+## 规则 76 —— 自愈脚本「先动作、后记账」，而动作会杀掉记账者 ⇒ 记账是**永不执行的代码**，风暴保护形同虚设而日志看起来正常（2026-08-29 · console supervisor 三连重启 · J2 实核 · NWT CONFIRMED）
+
+- **实录**: `scripts/kanet-console-supervisor.sh` `restart_console()` :131 先调 `kanet-start-headless.sh`，:135 才 `record_restart()`；而 headless :65-71 遍历 `logs/pids/*.pid` 逐个 kill——**含 supervisor 自己写的 `console-supervisor.pid`（:25/:143）**——再 :178-185 起新 supervisor ⇒ `record_restart` 永远跑不到，`RESTART_MAX_IN_WINDOW` 计数与 `in_cool_down_until` 全在内存随进程死归零 ⇒ **风暴保护自 8/23 起从未存在**（`logs/console-supervisor-restarts.log` 末条 08-23；8/29 05:14/05:17/05:19Z 三次重启零记录，每次 `Console death detected` 后紧跟一条新 `supervisor start pid=`）。结果：boot 期心跳 >10 s 陈旧 ⇒ 2.6 min 一次无限重启（Bettor 以外部 touch 心跳 20 min 阻断，COORD-LEDGER (708)）。
+- 🔴 **判据**: 自愈/自重启/整套拉起脚本里，任何"动作之后"的记账、计数、冷却、告警，只要动作能终止当前进程（kill pids/*、exec、自重启），就当它**不存在**。核法：拿 `restarts.log`/状态文件**最后一条时间**对最近一次自愈动作时间，不一致 = 中招。
+- 🔨 **修法（J2 `docs/2026-08-29-j2-supervisor-lifetime-storm-guard-and-boot-grace-design.md`，NWT GREEN）**: ① **write-ahead**——调动作前先写状态文件（`printf > tmp && mv -f` 原子），新实例启动先读（不 `source`，逐行只认已知 key，防脏文件注入）；② guard 判据按**实例寿命**（连续 3 个 <300 s ⇒ cool-down）而非定窗计数（2.6 min/次永远到不了"5 次/5 min"）；③ 新 PID 给 boot grace（PID 没 = 立即判死；活 + 无心跳 ≤300 s = booting；>300 s = hung boot）。
+- 同族: 规则 72（探针失效伪装成对象故障）、规则 70（"从未执行"≠"没留痕"——这里是"有 start 行"≠"有记账"）、memory `reference-self-heal-script-that-records-after-the-action-never-records-when-the-action-kills-the-recorder`、`reference-supervisor-restart-storm-cadence-below-storm-guard-window-heartbeat-touch-guard`。
+
+## 规则 77 —— kaspa-wasm `isScriptPayToScriptHash(ScriptPublicKey 对象)` 静默返回 false：传错类型不抛错、给**假阴性**；必须传裸脚本 `spk.script`（2026-08-29 · J1 `275b0a9b` §2 · NWT 采）
+
+- **实录**: J1 用生产工具离线造 ZK 门禁 P2SH 后三重验证，`isScriptPayToScriptHash(spk)` 传 `ScriptPublicKey` 对象得 `false`，差点判"造出来的不是 P2SH"；改传 `spk.script`（裸字节）即 `true`。wasm 边界对类型不抛，直接按"不是"处理。
+- 🔴 **判据**: wasm 边界函数的**否定性返回**（false / null / 0）先怀疑传参类型，再信结论——同族 `Get-Process` 假零（规则 75）、`XOnlyPublicKey` 大小写归一（memory `reference-kaspa-wasm-xonly-pubkey-accepts-uppercase-verifymessage-false-vs-throw`）。写验证脚本时对每个 wasm 布尔判定**配一个已知阳性对照**（拿一个确定的 P2SH 先跑一次得 true），否则假阴性与真阴性不可分。
+- 🔨 lint 候选 `R-WASM-P2SH-CHECK-PASS-RAW-SCRIPT`（NWT 命名）：`isScriptPayToScriptHash(` 的实参若是 `ScriptPublicKey` 类型变量 ⇒ 亮灯（静态可查处：直接传 `new ScriptPublicKey(...)`/`.scriptPublicKey` 属性）。
