@@ -130,12 +130,14 @@
 - [ ] boot 日志无 `SyntaxError`/import 错；`[broker-intake] watcher started`；首个 5 min tick 无 `guarded tick err`
 - [ ] **rejectAfterMs 可观测**：构造同 peer 两条 DM（第一条走 LLM 慢路）⇒ 第二条**排队**（`peer-lock wait` 日志 30 s 后出现）而非并行；把 `BROKER_PEER_LOCK_REJECT_MS=5000` 临时缩短 ⇒ 第二条回「⏳ 系统繁忙，请稍后再试。」且 `peer-lock REJECT` 日志；恢复默认
 - [ ] **buy_inflow marker 首笔落库**：一笔真实 BUY 入金后 `SELECT * FROM broker_workflow_markers WHERE event_type='broker_buy_inflow'` 有行，payload.from = 入金 tx 的 from（与 bscscan 对）
-- [ ] **hedge 镜像后零 CEX 活动**：`SELECT count(*) FROM chain_events WHERE event_type LIKE 'hedge%'` 部署前后不变 = 0（§B2-5：门读不到 `meta` 会抛，本来就不会有）；若 NWT/Owner 决定修 DEFECT1b（改读 `metadata`），**那是独立批**：它会让所有 broker offer（写方都置 true）完成时真下 CEX 单
+- [ ] **hedge：`hedge_gate_error` 事件可见 / 仍零 CEX**（batch-2 追加笔落后）：一笔 broker offer 完成后 `events`/`chain_events` 出现 `hedge_gate_error {offer_id, error: no such column: meta}`（= 门抛被记录，不再静默），且 `SELECT count(*) FROM chain_events WHERE event_type LIKE 'hedge%'` 仍 = 0、Gate.io 无新单；追加笔未落前本项 = "仍零 CEX" 一条。真开对冲（改读 `metadata`）= Owner 独立批，不在本单
 - [ ] P2：首个 T2.5c 触发时 `chain_events` 里 `broker_fallback_intent` **先于** `broker_fallback_claim`（observed_at）
 - [ ] P11：一笔真实提币 ⇒ `user_ledger` 先有 `withdraw_pending:` 行再变 `withdraw_user_initiated:…`；余额在转账期间已减
 - [ ] hold-monitor（batch-1）首行含 `manual_refund_pending=` `fallback_ambiguous=`
 
 ## §B2-5 🔴 用户面变更清单（2 处，随批报 Owner）+ DEFECT1b
-1. `exchange-machine.js` `dm_kas_delivered` DM：原 `TX: <txid>\n查看: https://explorer.kaspa.org/txs/<txid>`（TN12 上是死链）→ `formatTxReference(buildExplorerUrl(...))` ⇒ TN12 渲染 **`TX: <txid>`**（mainnet 仍链接）。触发原因：`R-EXPLORER-URL-BYPASS` 规则挡 commit（既有硬编码，无 allow 标记）。
+1. `exchange-machine.js` `dm_kas_delivered` DM：原 `TX: <txid>\n查看: https://explorer.kaspa.org/txs/<txid>`（TN12 上是死链）→ `formatTxReference(buildExplorerUrl(...))`。触发原因：`R-EXPLORER-URL-BYPASS` 规则挡 commit（既有硬编码，无 allow 标记）。**两种渲染样例（Owner 随批复核；`explorer-url.mjs:15-18` `buildExplorerUrl` testnet ⇒ null、mainnet ⇒ URL；`:51-54` `formatTxReference` = url ? url : `TX: <txid>`）**：
+   - **TN12（现 live）**：`✅ 已发出 5 KAS 到你 Kasia 钱包, 1-2 分钟到账.` ↵↵ `TX: 3f9a…c2e1` ↵↵ …（原：`TX: 3f9a…c2e1` ↵ `查看: https://explorer.kaspa.org/txs/3f9a…c2e1` ← 死链）
+   - **mainnet**：`✅ 已发出 5 KAS …` ↵↵ `https://explorer.kaspa.org/txs/3f9a…c2e1` ↵↵ …（🟡 与旧形不同：旧的是 `TX: <txid>` + `查看: <url>` 两行，新的是**只一行 URL、没有 `TX:` 前缀**——`formatTxReference` 的既有语义如此，`broker-state-authority.js:43` 已这样用；若 Owner 要保留 mainnet 两行形，改 `formatTxReference` 是另一处用户面）
 2. `conversations.js` 拒回：**逐字复用** `tg-bot/i18n.mjs:428 service_busy`「⏳ 系统繁忙，请稍后再试。」——零新造文案；只在 rejectAfterMs 触发时出现。
 - **DEFECT1b（新，NWT 定级）**：`_executeHedge` 门 `SELECT meta FROM exchange_offers`（`trade-protocol-filter.js:2191-2193`）读不存在的列 ⇒ 抛 ⇒ 三处调用全吞 ⇒ **hedge 从未在 live 跑过**（bak `chain_events hedge%` = 0 条印证）。DEFECT1 修传参**不改变**这一点（安全）。要真开对冲 = 改读 `metadata` + 因写方全置 `hedge_enabled:true` 而等于对所有 broker offer 开 CEX 对冲 ⇒ Owner 级决定，独立批。
