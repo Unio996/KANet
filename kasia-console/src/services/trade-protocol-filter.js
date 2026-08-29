@@ -1715,7 +1715,7 @@ async function tryNextAccept(orderId) {
 // ── Exchange Protocol (v1.1 自由市场) ────────────────────────
 
 import { randomUUID } from 'crypto';
-import { processAccept as machineAccept, processManualConfirm, processCancel as machineCancel, processPaymentSubmit, transition as exchangeTransition } from './exchange-machine.js';
+import { guardReopenIfSettled, processAccept as machineAccept, processManualConfirm, processCancel as machineCancel, processPaymentSubmit, transition as exchangeTransition } from './exchange-machine.js';
 
 // Exchange protocol v2 message type constants
 const EXCHANGE_MSG = {
@@ -2541,8 +2541,19 @@ async function handleExchangeTimeout(msg) {
   if (!offer) return;
   if (offer.protocol_status !== 'matched') return;
 
+  // P7-bis 门 (race 盘点 §9.3, NWT P1, Bettor GO 2026-08-29): 对端宣告 timeout, 但本地 payment_tx/delivery_tx 已非空 (我方钱已出) ⇒ 不 reopen、不 releaseFunds,
+  // 转 verifying 等迟到的 paid_v1 / 人工; 只记一条带 reopen_blocked 的 exchange_timeout 事件。门与 exchange-machine.checkMatchedTimeout 共用同一函数。
+  const _guard = guardReopenIfSettled(msg.offer_id, 'trade-protocol-filter.handleExchangeTimeout');
+  if (_guard.blocked) {
+    recordChainEvent({ txid: msg._tx || null, eventType: 'exchange_timeout', fromAddress: offer.maker,
+      payload: JSON.stringify({ offer_id: msg.offer_id, taker: msg.taker || offer.taker, reason: msg.reason, reopen_blocked: true, blocked_reason: _guard.reason }) });
+    console.warn(`[exchange] timeout msg for ${msg.offer_id.slice(0,8)} but ${_guard.reason} → NOT reopened (verifying)`);
+    return;
+  }
+
   // Direct SQL UPDATE: matched → open, clear taker fields
   // TIMEZONE FIX: use JS toISOString() for updated_at (Phase 2 P2-01 finding)
+  // P7-bis 顺手: UPDATE 加 AND protocol_status='matched' 谓词 (CAS 化, 不靠上面的 caller 检查——两句之间无 await 但别让正确性依赖这一点)
   const nowIso = new Date().toISOString();
   sqlite.prepare(`
     UPDATE exchange_offers
@@ -2550,7 +2561,7 @@ async function handleExchangeTimeout(msg) {
         taker = NULL, taker_chain = NULL, taker_payment_address = NULL,
         payment_tx = NULL, matched_at = NULL,
         updated_at = ?
-    WHERE id = ?
+    WHERE id = ? AND protocol_status = 'matched'
   `).run(nowIso, msg.offer_id);
 
   releaseFunds(msg.offer_id);

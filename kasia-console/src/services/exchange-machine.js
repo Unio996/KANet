@@ -16,7 +16,7 @@ import { getVerifier } from './exchange-verifiers.js';
 import { recordChainEvent } from './chain-event.js';
 import { executeHedge } from './trade-protocol-filter.js';
 import { releaseFunds, spendFunds } from './fund-lock.js';
-import { buildExplorerUrl, formatTxReference } from '../lib/explorer-url.mjs';   // R-EXPLORER-URL-BYPASS (2026-08-29 顺手: 本文件既有硬编码 mainnet explorer 链接, 改本文件即被 lint 挡)
+import { buildExplorerUrl } from '../lib/explorer-url.mjs';   // R-EXPLORER-URL-BYPASS (2026-08-29 顺手, NWT 取 (B)): dm_kas_delivered 内联 buildExplorerUrl — mainnet 保两行原样 (TX: + 查看:), TN12 只 TX: 去死链; 不碰 formatTxReference (免 broker-state-authority.js:43 连坐)
 import crypto from 'crypto';
 
 // ── Valid Transitions ─────────────────────────────────────────
@@ -682,6 +682,28 @@ export async function timeoutVerifying() {
  * Broadcasts kanet_exchange_timeout_v1 and reopens the offer.
  * Does NOT use transition() — timeout revert is an exceptional flow.
  */
+/**
+ * P7-bis (race 盘点 §9.3/§10.2, NWT P1, Bettor 2026-08-29 GO): matched 超时 reopen 会清 payment_tx ⇒ 若 taker 的 USDT/KAS【已转出】
+ * (_autoPayExchange tpf:2745 / _autoSettleAsset 写 payment_tx) 但 paid_v1 广播失败/迟到 ⇒ reopen 后再 accept ⇒ 同 offer 再付一次。
+ * 门 (两处 reopen 共用: 本文件 checkMatchedTimeout + tpf handleExchangeTimeout): payment_tx OR delivery_tx 任一非空 ⇒ 【不 reopen】,
+ * CAS matched→verifying (VALID_TRANSITIONS 已有边; 语义"付款已提交待核", 迟到的 paid_v1 经 processPaymentSubmit 自然接上, timeoutVerifying 接管),
+ * 不清任何字段, taker 保留, releaseFunds 不调, events 告警一次/offer。返回 {blocked, reason}。
+ */
+export function guardReopenIfSettled(offerId, site = 'unknown', db = sqlite) {
+  const row = db.prepare(`SELECT id, protocol_status, payment_tx, delivery_tx FROM exchange_offers WHERE id = ?`).get(offerId);
+  if (!row) return { blocked: false, reason: 'no_offer' };
+  if (!row.payment_tx && !row.delivery_tx) return { blocked: false, reason: 'unsettled' };
+  const nowIso = new Date().toISOString();
+  const r = db.prepare(`UPDATE exchange_offers SET protocol_status = 'verifying', updated_at = ? WHERE id = ? AND protocol_status = 'matched'`).run(nowIso, offerId);
+  try {
+    const seen = db.prepare(`SELECT 1 FROM events WHERE event_type = 'reopen_blocked_settled' AND json_extract(payload_json, '$.offer_id') = ? LIMIT 1`).get(offerId);
+    if (!seen) db.prepare(`INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at) VALUES (?, 'system', 'reopen_blocked_settled', ?, 'warn', ?, ?, ?)`)
+      .run(crypto.randomUUID(), site, `🔴 offer ${offerId.slice(0, 8)} matched 超时但已有 payment_tx/delivery_tx ⇒ 不 reopen, 转 verifying (P7-bis: 钱已出, 不能再开给别人)`, JSON.stringify({ offer_id: offerId, payment_tx: row.payment_tx, delivery_tx: row.delivery_tx, site, cas_changes: r.changes }), nowIso);
+  } catch {}
+  console.warn(`[exchange-machine] reopen BLOCKED offer=${offerId.slice(0, 8)} site=${site} payment_tx=${row.payment_tx ? 'set' : '-'} delivery_tx=${row.delivery_tx ? 'set' : '-'} → verifying (cas_changes=${r.changes})`);
+  return { blocked: true, reason: row.payment_tx ? 'payment_tx_present' : 'delivery_tx_present', cas_changes: r.changes };
+}
+
 export async function checkMatchedTimeout() {
   const stale = sqlite.prepare(`
     SELECT id, maker, taker, taker_chain FROM exchange_offers
@@ -692,6 +714,8 @@ export async function checkMatchedTimeout() {
 
   for (const offer of stale) {
     console.log(`[exchange-machine] matched timeout: offer ${offer.id.slice(0,8)} (taker ${(offer.taker || '').slice(-8)})`);
+    // P7-bis 门: 放在 timeout_v1 广播【之前】—— 钱已出的 offer 既不 reopen 也不向对端宣告 timeout (否则对端 reopen、本地 verifying 分叉)
+    if (guardReopenIfSettled(offer.id, 'exchange-machine.checkMatchedTimeout').blocked) continue;
 
     // ⑤ NO TX NO STATE CHANGE — Broadcast timeout FIRST, reopen only after TX is on chain.
     const relay = sqlite.prepare('SELECT id FROM relay_nodes WHERE address = ?').get(offer.maker);
@@ -1104,7 +1128,7 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
                   kind: 'dm_kas_delivered',
                   peer: deliveryTarget,
                   payload: {
-                    message: `✅ 已发出 ${deliveringOffer.give_amount} KAS 到你 Kasia 钱包, 1-2 分钟到账.\n\n${formatTxReference(deliveryTxId, buildExplorerUrl(deliveryTxId, process.env.KASPA_NETWORK))}\n\n感谢使用 KANet broker.`,
+                    message: `✅ 已发出 ${deliveringOffer.give_amount} KAS 到你 Kasia 钱包, 1-2 分钟到账.\n\nTX: ${deliveryTxId}${(() => { const _u = buildExplorerUrl(deliveryTxId, process.env.KASPA_NETWORK); return _u ? `\n查看: ${_u}` : ''; })()}\n\n感谢使用 KANet broker.`,
                   },
                 });
               } catch (e) { console.warn(`[exchange] dm_kas_delivered enqueue err: ${e.message}`); }
