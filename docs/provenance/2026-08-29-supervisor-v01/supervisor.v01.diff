@@ -1,0 +1,201 @@
+--- scripts/kanet-console-supervisor.sh	2026-08-04 15:09:23.185054700 +0700
++++ scratch/_j2_supervisor_v01/kanet-console-supervisor.v01.sh	2026-08-29 12:32:44.334628800 +0700
+@@ -30,6 +30,12 @@
+ RESTART_WINDOW_SEC=${KANET_SUPERVISOR_RESTART_WINDOW_SEC:-300}   # 5 min
+ RESTART_MAX_IN_WINDOW=${KANET_SUPERVISOR_RESTART_MAX:-5}
+ COOL_DOWN_SEC=${KANET_SUPERVISOR_COOL_DOWN_SEC:-1800}            # 30 min after burst
++# v0.1 (J2 2026-08-29, Bettor 裁 · docs/2026-08-29-j2-supervisor-lifetime-storm-guard-and-boot-grace-design.md):
++BOOT_GRACE_SEC=${KANET_SUPERVISOR_BOOT_GRACE_SEC:-300}           # (b) PID 活+无心跳 ⇒ 等这么久才算 hung boot (2026-08-29 实测 boot>=157s 被杀非完成; Bettor 裁 300)
++SHORT_LIFETIME_SEC=${KANET_SUPERVISOR_SHORT_LIFETIME_SEC:-300}   # (a) lifetime < 5 min = 短命
++SHORT_STREAK_MAX=${KANET_SUPERVISOR_SHORT_STREAK_MAX:-3}          # (a) 连续 3 个短命 ⇒ cool-down
++STATE_FILE="$KANET_ROOT/logs/console-supervisor-state.env"       # 持久化: headless :65-71 会 kill 本 supervisor, 内存状态活不过一次重启
++BOOT_MARKER="$KANET_ROOT/logs/console-boot.txt"                  # console 启动即写 "<pid> <start_ms>" (index.js 顶部)
+ # r-portconverge (J1 DoD-E E3, 2026-06-12): Console 端口单一源 = kanet.env PORT
+ # (同 kanet-start.sh L105 case PORT) / headless L47 收敛). 原硬编码 3200 是 r473 port 收敛
+ # 漏掉的【第三个脚本】: Console 实绑 kanet.env PORT=3300, 但 supervisor 探 3200 → 永远误判
+@@ -78,6 +84,74 @@
+   heartbeat_fresh
+ }
+ 
++# ── v0.1 持久化状态 (write-ahead: 先写盘再调 headless) ──
++# 2026-08-29 根因: restart_console() 调 headless, headless 遍历 pids/*.pid 连本 supervisor 一起 kill,
++# 之后的 record_restart() 永远跑不到, 计数/cool-down 在内存随之归零 ⇒ 风暴保护从未真正存在过.
++last_restart_ts=0; last_boot_ok_ts=0; short_streak=0; cool_down_until=0
++load_state() {
++  [[ -f "$STATE_FILE" ]] || return 0
++  # 只认 KEY=数字 行, 防脏文件注入
++  local k v
++  while IFS='=' read -r k v; do
++    [[ "$v" =~ ^[0-9]+$ ]] || continue
++    case "$k" in
++      last_restart_ts|last_boot_ok_ts|short_streak|cool_down_until) printf -v "$k" '%s' "$v" ;;
++    esac
++  done < "$STATE_FILE"
++}
++save_state() {
++  mkdir -p "$(dirname "$STATE_FILE")"
++  printf 'last_restart_ts=%s\nlast_boot_ok_ts=%s\nshort_streak=%s\ncool_down_until=%s\n' \
++    "$last_restart_ts" "$last_boot_ok_ts" "$short_streak" "$cool_down_until" > "$STATE_FILE.tmp" && mv -f "$STATE_FILE.tmp" "$STATE_FILE"
++}
++
++# ── v0.1 boot-marker / PID 存在性 ──
++marker_pid=""; marker_start_s=0
++read_marker() {
++  marker_pid=""; marker_start_s=0
++  [[ -f "$BOOT_MARKER" ]] || return 1
++  local marker_ms=""
++  read -r marker_pid marker_ms < "$BOOT_MARKER" || true
++  [[ "$marker_pid" =~ ^[0-9]+$ && "$marker_ms" =~ ^[0-9]+$ ]] || { marker_pid=""; return 1; }
++  marker_start_s=$(( marker_ms / 1000 ))
++  return 0
++}
++# 0 = 活, 1 = 不在, 2 = 查不出 (tasklist 失败 ⇒ 调用方退回旧 3-fail 逻辑, fail-safe).
++# 只查存在性, 不读 CommandLine —— 非提权读 SYSTEM 进程 CommandLine 为 null 是假空 (runbook v0.5.1 §检查③).
++pid_alive() {
++  local out
++  out="$(tasklist //FI "PID eq $1" //NH 2>/dev/null)" || return 2
++  grep -q "node.exe" <<< "$out" && return 0
++  return 1
++}
++# 打印 ALIVE|BOOTING|HUNG_BOOT|DEAD|UNKNOWN
++console_state() {
++  if console_alive; then echo ALIVE; return 0; fi
++  read_marker || { echo DEAD; return 0; }
++  local rc=0
++  pid_alive "$marker_pid" || rc=$?
++  if (( rc == 1 )); then echo DEAD; return 0; fi
++  if (( rc == 2 )); then echo UNKNOWN; return 0; fi
++  local age=$(( $(date +%s) - marker_start_s ))
++  if (( age <= BOOT_GRACE_SEC )); then echo BOOTING; else echo HUNG_BOOT; fi
++  return 0
++}
++
++# ── v0.1 (a) lifetime 风暴 guard: 返回 0 = 准重启, 1 = 拒 (已进 cool-down) ──
++# set -e 注意: 不用 ((x++)) (x=0 时返回 1 会退出), 一律 x=$((x+1)).
++lifetime_guard() {
++  local now=$1 lifetime
++  if (( last_boot_ok_ts > last_restart_ts )); then lifetime=$(( now - last_boot_ok_ts )); else lifetime=$(( now - last_restart_ts )); fi
++  if (( last_restart_ts > 0 && lifetime < SHORT_LIFETIME_SEC )); then short_streak=$(( short_streak + 1 )); else short_streak=0; fi
++  log "lifetime=${lifetime}s short_streak=${short_streak}/${SHORT_STREAK_MAX}"
++  if (( short_streak >= SHORT_STREAK_MAX )); then
++    cool_down_until=$(( now + COOL_DOWN_SEC )); save_state
++    log "LIFETIME STORM: ${short_streak} consecutive lifetimes < ${SHORT_LIFETIME_SEC}s — enter ${COOL_DOWN_SEC}s cool-down"
++    return 1
++  fi
++  return 0
++}
++
+ count_recent_restarts() {
+   local since=$(( $(date +%s) - RESTART_WINDOW_SEC ))
+   if [[ ! -f "$RESTART_HISTORY" ]]; then echo 0; return; fi
+@@ -127,48 +201,68 @@
+ 
+ restart_console() {
+   log "Console death detected — invoking kanet-start-headless.sh"
++  # v0.1 write-ahead: headless 会 kill 本进程 (:65-71), 之后的记账可能永远跑不到 (2026-08-29 三次重启零记录的根因)
++  last_restart_ts=$(date +%s); save_state; record_restart
+   announce_restart
+   bash "$KANET_ROOT/kanet-start-headless.sh" >> "$LOG" 2>&1 || log "kanet-start-headless fail"
+-  sleep 5
+-  if console_alive; then
+-    log "Console restarted OK"
+-    record_restart
+-    return 0
+-  fi
+-  log "Console restart fail (still not alive after 5s)"
+-  return 1
++  # 若本进程还活着 (headless 没杀到), 不再用 5s 判成败 —— 成败由主循环的 boot grace 状态机判
++  return 0
+ }
+ 
+ run_supervisor() {
+   echo $$ > "$PID_FILE"
+-  log "supervisor start pid=$$ check_interval=${CHECK_INTERVAL_SEC}s fail_threshold=${HEALTH_FAIL_THRESHOLD} restart_window=${RESTART_WINDOW_SEC}s max_restarts=${RESTART_MAX_IN_WINDOW} cool_down=${COOL_DOWN_SEC}s"
++  load_state
++  log "supervisor start pid=$$ check_interval=${CHECK_INTERVAL_SEC}s fail_threshold=${HEALTH_FAIL_THRESHOLD} restart_window=${RESTART_WINDOW_SEC}s max_restarts=${RESTART_MAX_IN_WINDOW} cool_down=${COOL_DOWN_SEC}s boot_grace=${BOOT_GRACE_SEC}s short_lifetime=${SHORT_LIFETIME_SEC}s streak_max=${SHORT_STREAK_MAX} state:last_restart=${last_restart_ts} last_boot_ok=${last_boot_ok_ts} streak=${short_streak} cool_down_until=${cool_down_until}"
+   local consecutive_fail=0
+-  local in_cool_down_until=0
++  local was_booting=0
+   while true; do
+-    if console_alive; then
++    supervisor_tick
++    sleep "$CHECK_INTERVAL_SEC"
++  done
++}
++
++# v0.1 一次判活+决策 (拆出来可 offline 测; 依赖调用方作用域的 consecutive_fail / was_booting)
++supervisor_tick() {
++  local st now
++  st="$(console_state)"
++  now=$(date +%s)
++  case "$st" in
++    ALIVE)
+       consecutive_fail=0
+-    else
++      if (( was_booting == 1 )) || (( last_boot_ok_ts < last_restart_ts )); then
++        last_boot_ok_ts=$now; save_state; was_booting=0
++        if read_marker; then log "boot OK: boot_ms=$(( (now - marker_start_s) * 1000 )) pid=${marker_pid}"; else log "boot OK (no marker)"; fi
++      fi ;;
++    BOOTING)
++      was_booting=1; consecutive_fail=0
++      read_marker || true
++      log "booting: pid=${marker_pid} age=$(( now - marker_start_s ))s/${BOOT_GRACE_SEC}s — wait" ;;
++    UNKNOWN)
+       consecutive_fail=$(( consecutive_fail + 1 ))
+-      log "health fail #${consecutive_fail}/${HEALTH_FAIL_THRESHOLD}"
+-      if (( consecutive_fail >= HEALTH_FAIL_THRESHOLD )); then
+-        local now=$(date +%s)
+-        if (( now < in_cool_down_until )); then
+-          local remain=$(( in_cool_down_until - now ))
+-          log "in cool-down period (${remain}s remain), skip restart"
+-        else
+-          local recent=$(count_recent_restarts)
+-          if (( recent >= RESTART_MAX_IN_WINDOW )); then
+-            in_cool_down_until=$(( now + COOL_DOWN_SEC ))
+-            log "RESTART STORM: ${recent} restarts in last ${RESTART_WINDOW_SEC}s — enter ${COOL_DOWN_SEC}s cool-down"
+-          else
+-            restart_console || true
+-          fi
+-          consecutive_fail=0
+-        fi
++      log "health fail #${consecutive_fail}/${HEALTH_FAIL_THRESHOLD} (pid check unavailable)" ;;
++    DEAD|HUNG_BOOT)
++      consecutive_fail=$HEALTH_FAIL_THRESHOLD
++      log "console ${st} — immediate death verdict" ;;
++  esac
++  if (( consecutive_fail >= HEALTH_FAIL_THRESHOLD )); then
++    if (( now < cool_down_until )); then
++      local remain=$(( cool_down_until - now ))
++      log "in cool-down period (${remain}s remain), skip restart"
++    else
++      local recent
++      recent=$(count_recent_restarts)
++      if (( recent >= RESTART_MAX_IN_WINDOW )); then
++        cool_down_until=$(( now + COOL_DOWN_SEC )); save_state
++        log "RESTART STORM: ${recent} restarts in last ${RESTART_WINDOW_SEC}s — enter ${COOL_DOWN_SEC}s cool-down"
++      elif ! lifetime_guard "$now"; then
++        :   # 已进 cool-down, 日志在 guard 里
++      else
++        restart_console || true
+       fi
++      consecutive_fail=0
+     fi
+-    sleep "$CHECK_INTERVAL_SEC"
+-  done
++  fi
++  return 0
+ }
+ 
+ case "${1:-start}" in
+@@ -215,6 +309,11 @@
+       echo "last 5 restarts:"
+       tail -5 "$RESTART_HISTORY"
+     fi
++    if [[ -f "$STATE_FILE" ]]; then echo "state:"; cat "$STATE_FILE"; fi
++    ;;
++  _lib)
++    # v0.1: 只定义函数不跑 (offline 测试 source 用): source <this> _lib
++    return 0 2>/dev/null || exit 0
+     ;;
+   *)
+     echo "usage: $0 {start|stop|status}"

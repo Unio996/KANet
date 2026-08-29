@@ -1,0 +1,27 @@
+--- kasia-console/src/index.js	2026-08-29 00:58:28.626101900 +0700
++++ scratch/_j2_supervisor_v01/index.v01.js	2026-08-29 12:32:52.069933700 +0700
+@@ -18,6 +18,16 @@
+ // 保留 r429 原意(运行期 child relay/adapter/scout/LLM 抛错不该拖垮整个 Console),
+ // 只把启动期改成致命 —— 一个绑不上端口的 Console 没有任何存在理由。
+ let __booted = false;
++// boot-marker (supervisor (b) PID-aware boot grace, J2 2026-08-29, Bettor 裁): 进程一起就写 "<pid> <start_ms>",
++// 让 supervisor 能把 "PID 活+无心跳" (在 boot) 与 "PID 没了" (启动失败 exit(1) / 真崩) 分开. best-effort, 不影响启动.
++try {
++  const { writeFileSync: __bmWrite, mkdirSync: __bmMkdir } = await import('node:fs');
++  const { join: __bmJoin, dirname: __bmDirname } = await import('node:path');
++  const { fileURLToPath: __bmToPath } = await import('node:url');
++  const __bmDir = __bmJoin(__bmDirname(__bmToPath(import.meta.url)), '..', '..', 'logs');
++  __bmMkdir(__bmDir, { recursive: true });
++  __bmWrite(__bmJoin(__bmDir, 'console-boot.txt'), `${process.pid} ${Date.now()}`);
++} catch { /* best-effort */ }
+ 
+ process.on('uncaughtException', (err) => {
+   console.error('[kanet:uncaught]', err?.stack || err?.message || String(err));
+@@ -517,6 +527,7 @@
+ import { fileURLToPath as toFileURL } from 'node:url';
+ const HEARTBEAT_FILE = pathJoin(pathDirname(toFileURL(import.meta.url)), '..', '..', 'logs', 'console-heartbeat.txt');
+ setInterval(() => {
++  if (!__booted) return;   // 结构上本就在 __booted=true 之后; 显式 gate 防未来上移造成 boot 期假活 (supervisor v0.1)
+   try { writeFileSync(HEARTBEAT_FILE, String(Date.now())); } catch { /* best-effort, 不影响主流程 */ }
+ }, 2000);
+ 

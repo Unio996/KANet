@@ -1,0 +1,41 @@
+[info] index.v01.js rebuilt from D:/kanet-tn12/kasia-console/src/index.js + index.v01.diff
+[PASS] bash -n v01.sh
+[PASS] node --check index.v01.js
+[PASS] KANET_ROOT isolated
+[PASS] state ALIVE (curl ok)
+[PASS] state DEAD (no marker)
+[PASS] state BOOTING (pid alive, age 10s)
+[PASS] state HUNG_BOOT (age 301s > 300)
+[PASS] state BOOTING (age 300s == grace, 含边界)
+[PASS] state DEAD (pid gone)
+[PASS] state UNKNOWN (tasklist fail)
+[PASS] state DEAD (garbage marker)
+[PASS] BOOTING x4 ⇒ 不重启
+[PASS] BOOTING ⇒ was_booting=1
+[PASS] BOOTING→ALIVE ⇒ last_boot_ok_ts 记录
+[PASS] boot_ms 日志行
+[PASS] DEAD ⇒ 立即重启 (1 tick, 不等 3 次)
+[PASS] HUNG_BOOT ⇒ 立即重启
+[PASS] UNKNOWN x2 ⇒ 不重启 (退回 3-fail)
+[PASS] UNKNOWN x3 ⇒ 重启 (fail-safe 旧逻辑)
+[PASS] 首次 (last_restart_ts=0) streak=0
+[PASS] lifetime 100 ⇒ streak 1
+[PASS] lifetime 100 ⇒ streak 2
+[PASS] 第 3 个短命 ⇒ guard 拒 (rc=1)
+[PASS] 第 3 个短命 ⇒ cool_down_until = now+1800
+[PASS] cool-down 已持久化到 state.env
+[PASS] lifetime 400 ⇒ streak 归零
+[PASS] lifetime 由 last_boot_ok_ts 算 (50) ⇒ streak 1
+[PASS] cool-down 内 DEAD ⇒ skip restart
+docs/provenance/2026-08-29-supervisor-v01/selftest.sh: line 98: 254001 Killed                  ( last_restart_ts=0; restart_console ) 2> /dev/null
+[PASS] write-ahead: 被杀前 state.env 已写 last_restart_ts
+[PASS] write-ahead: 被杀前 restarts.log 已记 1 行
+[PASS] 新 supervisor load_state 继承 last_restart_ts
+[PASS] load_state 拒非数字值 (short_streak 保持 7)
+[PASS] load_state 拒带空格值 (last_restart_ts 保持 5)
+[PASS] load_state 认数字值
+[PASS] load_state 不 eval 脏行 (evil 行无副作用)
+[PASS] tasklist 阳性对照: 真 node.exe pid=2816 ⇒ 0
+[PASS] tasklist 阴性对照: pid 4000000 ⇒ 1
+[PASS] tasklist 失败 ⇒ 2 (UNKNOWN)
+supervisor-v01 selftest: 38 PASS / 0 FAIL
