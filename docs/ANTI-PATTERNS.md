@@ -3202,3 +3202,18 @@ WHERE id IN (...) AND protocol_status IN ('verifying', 'pending_bettors')
 - 🔧 **机制**：`node scripts/check-worktree-junctions.mjs`（列所有非主树 worktree 内的 reparse point，指向主树的标 `→LIVE`；有链 exit 1）——**删 worktree 前必跑**；2026-08-29 实测：J2 自己的五个侧树拆链后 0 链；**但全仓一扫在别人的 4 个 worktree 里还有 6 条 `→LIVE`**（`kanet-g5-test-wt`×2 / `kanet-j2-fix-wt` / `.claude/worktrees/agent-a24e…`×2 / `kanet-tn12-wt-j131`）——同一颗地雷，谁删谁触发，交 Bettor 裁；阳性对照（在 `_wt_eta` 造一个指向 `scratch/_j2_eta` 的 junction）被列出 exit 1，`Directory.Delete(link,false)` 拆后目标文件数不变。PowerShell 一行版：`Get-ChildItem D:\kanet-tn12\scratch -Recurse -Force -Depth 3 | ? { $_.LinkType } | % { "$($_.FullName) -> $($_.Target)" }`
 - 📎 **附注（Bettor 8/29 广扫）**：**live 树自身内也有设计内 junction**——`kasia-console` / `kasia-relay` / `kaspa-scout` 三处 `node_modules/kaspa-wasm` **→ `D:\kanet-tn12\shared\vendor\kaspa-wasm`**（`check-worktree-junctions.mjs --all` 实核三条 Junction，与 Bettor 广扫一致；根 `node_modules/kaspa-wasm` 不存在——J2 第一稿只手核了前两条、漏了 scout，以脚本为准），侧树 `_wt_bmp2` 同形指向**自己树**的 `shared/vendor`。这类"目标在本树内"的链 `check-worktree-junctions.mjs` 标 `(internal)`、不算错；**但对 live `node_modules` 做 `Remove-Item -Recurse` / `git clean -x` / `npm ci`（整删）同样会穿进 `shared/vendor/kaspa-wasm`**——live 上想重装 node_modules 也只准加法（`npm install`），要整删先拆这两条链。其它 7 条跨树链（J2 5 侧树 5 条 + 别人 4 树 6 条 + NWT 逮到的 `scratch/_j2_reopen_mut` 1 条）2026-08-29 已由 J2/Bettor 各自 `Directory.Delete(link,$false)` 拆尽，live 计数不变（console 227 / relay 7）。
 - **同族**：规则 **12**（接位扫描漏步）的"删除侧"对偶；`feedback-verify-target-path-is-live-before-operate`（操作前确认目标是不是 live）—— 本条的教训是**链的目标也是"目标"**。memory：`feedback-git-worktree-remove-traverses-junctions-and-deletes-the-live-node-modules-target`。
+
+## 规则 82 —— 引用某个时间窗的统计量，必须先核对**关心的事件在不在窗内**；尤其要问「这个事件发生时，样本还在产生吗」——**若事件本身会让样本停止产生，窗口就结构性地排除了它**（2026-08-29 · J1 同日两犯，第二次已向队友发出错误断言 · 自查）
+
+- **实录一（自己抓到）**：算 younio 的「有效工作占比」时，我用日志里 `Processed …` 行的密度做分母，得出 74.8%。但**块体扫描期间 kaspad 根本不发 `Processed` 行** —— 1349 条行只覆盖 14.45 小时里的 3.75 小时。**样本有偏**：按行密度算是「有输出的时段里的占比」，不是「墙钟占比」。改按墙钟重算才对。
+- **实录二（没抓到，发出去了）**：我告诉 Bettor「本次停滞已计入该速率的长窗基线内，不需要调整估计」。实查：块百分点的 33 个样本窗口是 `08-28 16:12 → 08-29 20:44`，而停滞 `08-29 21:18` 才开始 —— **整个落在窗外**。佐证：窗口内 32 个间隔全在 44.9–74.7 分钟（均值 53.5），规律得没有任何停滞痕迹；若停滞在窗内必然出现一个约 180 分钟的异常间隔。**那句断言是错的，2.49 天是下界不是估计值。**
+- 🔴 **判据**：凡引用「过去 N 小时 / 最近 N 个样本」的统计量，落笔前先答三问：
+  1. **窗口的起止时刻是什么？**（不是「大概最近」，是具体两个时间点）
+  2. **我关心的那个事件（停滞 / 故障 / 变更 / 修复）落在窗内还是窗外？**
+  3. **产生样本的机制，在那个事件期间还在工作吗？**
+- ⚠ **第三问最隐蔽，也最容易出错**：块下载百分点**只在下载推进时才产生**，停滞期一条都不产生 ⇒ 停滞时间**永远不可能**进入由它算出的速率。这不是「采样密度不够」，是**结构性排除** —— 加多少样本都补不上。同理：用「有日志行的时段」算占比、用「有交易的区块」算平均、用「成功的请求」算延迟，都属此类。
+- 🔨 **怎么做才对**：
+  1. **报统计量时同时报窗口规模与起止**（如 `基线 33 样本/28.5 h`）—— 让读的人自己能判断支撑。
+  2. **关心的事件在窗外 ⇒ 明确标注**「下界」/「不含 X」，不要让它以估计值的身份流通。本例已把输出改成 `余 2.49 天【下界·不含停滞】`。
+  3. **判样本是否有偏，就问那一句**：「这个事件发生时，样本还在产生吗？」答案是「不在」，则该窗口对该事件天然失明。
+- **同族**：规则 **60**（观察窗口必须长于故障周期，否则"干净"是假的）—— 那条讲窗口要**够长**；本条讲窗口要落在**对的位置**、且样本机制要与被测事件**无关**。**长度对了但位置错了，或长度位置都对但样本机制被事件本身关掉了，一样得出错结论。** 另见规则 **68**（"我找到了 N 处"的可信度取决于用的是枚举方法还是恰好读到的地方）——同属「统计量的可信度取决于它怎么被取出来」。
