@@ -15,6 +15,8 @@
 import { sqlite } from '../db/client.js';
 import { transition } from './exchange-machine.js';
 import { randomUUID } from 'node:crypto';
+import { writeFallbackIntent, resolveFallbackIntent, FALLBACK_INTENT_OR_CLAIM_NOT_EXISTS } from '../lib/broker-fallback-intent.mjs';   // P2 write-ahead (J2 2026-08-29)
+import { createTickGuard } from '../lib/tick-guard.mjs';   // P2 重入闸 (J2 2026-08-29)
 
 const TICK_MS = 60_000;
 const REFUND_TICK_MS = 5 * 60_000;
@@ -501,11 +503,9 @@ export async function _scanExpiredBrokerOffers() {
     -- T-J2-2026-05-10 r223 T2.14 (NWT r289 Option A): 防 Z20 与 T2.5c CEX hedge race double-spend.
     -- T2.5c placeCexOrder ok 后立即 INSERT broker_fallback_claim → Z20 SQL skip claimed offer.
     -- 5/10 实证 race: 102 KAS SELL T2.5c CEX sold + Z20 refund 102 KAS = broker 净亏 ~98 KAS.
-    AND NOT EXISTS (
-      SELECT 1 FROM chain_events ce2
-      WHERE ce2.event_type = 'broker_fallback_claim'
-      AND ce2.payload LIKE '%"offer_id":"' || exchange_offers.id || '"%'
-    )
+    -- J2 2026-08-29 (race 盘点 P2, NWT CONFIRMED): claim 原是 placeCexOrder【成功后】写 ⇒ CEX 在飞窗口 Z20 看不见 ⇒ 改为同时看 write-ahead 的
+    -- broker_fallback_intent (placeCexOrder 之前落, txid=cancel_tx). 片段由 lib/broker-fallback-intent.mjs FALLBACK_INTENT_OR_CLAIM_NOT_EXISTS 提供(单一权威, 测试逐字核).
+    ${FALLBACK_INTENT_OR_CLAIM_NOT_EXISTS}
     AND json_extract(metadata, '$.user_kasia_address') IS NOT NULL
     ORDER BY broadcast_at DESC
     LIMIT 10
@@ -794,6 +794,8 @@ export async function _scanUntakenOffersFallback() {
         WHERE ce.event_type IN ('broker_fallback_fill', 'broker_fallback_cancelled', 'broker_fallback_cancel_failed', 'broker_fallback_pending')
           AND ce.payload LIKE '%"offer_id":"' || exchange_offers.id || '"%'
       )
+      -- J2 2026-08-29 (P2): 自身也不得重入有 intent/claim 的 offer (ambiguous 留下的 intent = 该 offer 进人工 SOP, 不自动再 cancel+再下 CEX 单)
+      ${FALLBACK_INTENT_OR_CLAIM_NOT_EXISTS}
     ORDER BY broadcast_at DESC
     LIMIT 5
   `).all(trader.address);
@@ -830,19 +832,26 @@ export async function _scanUntakenOffersFallback() {
         continue;
       }
       console.log(`[broker-fallback] T2.5c cancel_v1 ok offer=${r.id.slice(0,8)} tx=${String(cancelRes.cancel_tx).slice(0,12)}`);
-      // Step 2: cex-bridge.placeCexOrder sell KAS @ mid
-      const sellRes = await placeCexOrder({ cex: 'gateio', side: 'SELL', qty: giveAmount, price: midPrice });
-      // T-J2-2026-05-10 r223 T2.14 (NWT r289 Option A claim lock):
-      // CEX placeOrder ok 后立即 INSERT broker_fallback_claim → Z20 _scanExpiredBrokerOffers SQL filter
-      // NOT EXISTS broker_fallback_claim → 防 race (Z20 在 T2.5c CEX hedge in-flight 时 fire refund → broker 双倍亏 KAS).
+      // Step 2 (J2 2026-08-29 race 盘点 P2, NWT CONFIRMED): 【先】落 write-ahead intent, 【再】下 CEX 单.
+      // 原形 (12fcc48b): claim 在 placeCexOrder 成功后写 ⇒ `await placeCexOrder` 期间无痕迹, tick 叠跑时 Z20 退款 = afc63057 原形可复发.
+      // intent 未落库 ⇒ writeFallbackIntent throw ⇒ 本 offer 本 tick 不下单 (fail-closed).
+      writeFallbackIntent({ db: sqlite, recordChainEvent, offerId: r.id, cancelTx: cancelRes.cancel_tx, qty: giveAmount, midPrice });
+      let sellRes;
+      try {
+        sellRes = await placeCexOrder({ cex: 'gateio', side: 'SELL', qty: giveAmount, price: midPrice });
+      } catch (cexErr) {
+        // 结果不明 (超时/网络/抛): intent 留 + 告警, Z20 与本扫描都继续 skip 该 offer ⇒ 进人工 SOP; 绝不在不明时退款或重下单
+        resolveFallbackIntent({ db: sqlite, recordChainEvent, offerId: r.id, cancelTx: cancelRes.cancel_tx, outcome: 'ambiguous', error: cexErr.message });
+        console.error(`[broker-fallback] T2.5c placeCexOrder AMBIGUOUS offer=${r.id.slice(0,8)}: ${cexErr.message} — intent 保留, 人工核 CEX`);
+        continue;
+      }
+      // T-J2-2026-05-10 r223 T2.14 (NWT r289 Option A claim lock) — claim 语义不变, 只是现在它前面已经有 intent:
       // 5/10 实证 race: T2.5c CEX sell 102 KAS + Z20 refund 102 KAS chain TX afc63057 → broker 净亏 ~98 KAS.
-      // ref: NWT r288 evidence + r289 Option A PASS.
       if (sellRes.ok) {
-        recordChainEvent({
-          txid: cancelRes.cancel_tx, eventType: 'broker_fallback_claim',
-          fromAddress: null, toAddress: null, observedBy: 'system',
-          payload: { offer_id: r.id, cex_order_id: sellRes.orderId, cancel_tx: cancelRes.cancel_tx, qty: giveAmount, mid_price: midPrice },
-        });
+        resolveFallbackIntent({ db: sqlite, recordChainEvent, offerId: r.id, cancelTx: cancelRes.cancel_tx, outcome: 'claimed', cexOrderId: sellRes.orderId, qty: giveAmount, midPrice });
+      } else {
+        // CEX 明确拒 (有 error, 无 orderId) ⇒ 删无 orderId 的 intent, 放行下面 permanent/transient 原路
+        resolveFallbackIntent({ db: sqlite, recordChainEvent, offerId: r.id, cancelTx: cancelRes.cancel_tx, outcome: 'failed_definitive', error: sellRes.error });
       }
       if (!sellRes.ok) {
         console.warn(`[broker-fallback] T2.5c CEX sell fail offer=${r.id.slice(0,8)}: ${sellRes.error}`);
@@ -1092,7 +1101,22 @@ export function startIntakeWatcher() {
     } catch (e) { console.error('[broker-intake]', e.message); }
   }, TICK_MS);
   if (!_refundInterval) {
-    _refundInterval = setInterval(async () => {
+    // J2 2026-08-29 (race 盘点 P2, NWT CONFIRMED): 本 tick 原无重入闸 —— 一次跑超 5 min (Z20 SQL 修前 233 s / CEX HTTP 挂起 / relay 90 s×N)
+    // 就与下一次叠跑, 叠跑的 Z20 会在上一次的 CEX 在飞窗退款. 闸: 忙则跳过本次(不排队不叠跑) + events 告警一次; 超 30 min 仍在跑再报 stale 一次.
+    const _refundGuard = createTickGuard({
+      name: '_refundInterval', staleMs: 30 * 60_000,
+      onOverrun: ({ ageMs, skipped }) => {
+        console.warn(`[broker-refund] tick OVERRUN: 上一次已跑 ${Math.round(ageMs / 1000)}s 未完, 本次跳过 (skipped=${skipped})`);
+        try { sqlite.prepare(`INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at) VALUES (?, 'system', 'refund_tick_overrun', 'broker-intake-watcher', 'warn', ?, ?, ?)`)
+          .run(randomUUID(), `🟡 _refundInterval 叠跑被闸: 上一次已跑 ${Math.round(ageMs / 1000)}s, 本次跳过`, JSON.stringify({ age_ms: ageMs, skipped }), new Date().toISOString()); } catch {}
+      },
+      onStale: ({ ageMs }) => {
+        console.error(`[broker-refund] tick STALE: 已跑 ${Math.round(ageMs / 1000)}s 未完 (疑似挂死; 不叠跑, 交 supervisor/人)`);
+        try { sqlite.prepare(`INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at) VALUES (?, 'system', 'refund_tick_stale', 'broker-intake-watcher', 'error', ?, ?, ?)`)
+          .run(randomUUID(), `🔴 _refundInterval 上一次已跑 ${Math.round(ageMs / 1000)}s 未完 — 疑似挂死`, JSON.stringify({ age_ms: ageMs }), new Date().toISOString()); } catch {}
+      },
+    });
+    _refundInterval = setInterval(() => _refundGuard.run(async () => {
       // T-J2-2026-07-15 diag(observe-only, NWT verdict 3b87317b GO): 测本 tick 实际触发时刻相对
       // 上一次触发 + REFUND_TICK_MS 的漂移量。若漂移持续接近 0 但 CPU profile 仍显示大 self-time,
       // 排除"排队被采样"假说,指向真同步阻塞;若漂移本身就巨大,说明问题在更上游(事件循环整体
@@ -1129,7 +1153,7 @@ export function startIntakeWatcher() {
         const r = await _scanUntakenBuyOffersFallback();
         if (r && r.handled > 0) console.log(`[broker-buy-fallback] T2.24 tick handled=${r.handled}/${r.scanned}`);
       } catch (e) { console.error('[broker-buy-fallback T2.24]', e.message); }
-    }, REFUND_TICK_MS);
+    }).catch((e) => console.error('[broker-refund] guarded tick err:', e.message)), REFUND_TICK_MS);
   }
   // T-J2-2026-05-10 T2.25 wire: broker-bsc-intake-watcher (Phase 2 β.1 BUY parity prerequisite trigger).
   // 30s tick poll broker BSC inflow → match retail_dex_orders pending → trigger _publishBrokerBuyOffer.
