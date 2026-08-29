@@ -1,6 +1,7 @@
-# broker-money-path 批 · 部署单 v0.2（同维护窗 runbook 风格 · 独立于节点/supervisor 维护窗）
+# broker-money-path 批 · 部署单 v0.3（batch-1 + batch-2 · 同维护窗 runbook 风格 · 独立于节点/supervisor 维护窗）
 
 > **Status**: v0.2 · J2 2026-08-29 · Bettor 令 · 对象 = 侧分支 `coord/broker-money-path` **头 `cbeb0a93`**（阶段 1 `0f62e539` / 阶段 2 `8e186cba` / 阶段 3 `aba0b94c`→fix-up `c1a35749`→`18b0bbfa`→`cbeb0a93`，**全部 NWT GREEN**；对主分支 `75b3aa82` 差分 **34 files, +1212 / −237**）· **不 merge 进 `bshard-m3-deploy` 直到 Owner 批**（主分支检出 = live 树 = boot 加载源，merge 即部署）· 执行人由 Bettor 指派（提权），J2 只读验收。
+> **v0.3 头注（2026-08-29 晚）**：batch-1 侧分支头已从 `cbeb0a93` 前进到 **`66b5d38c`**（叠 fix-up 4 `b10eddd0` 第六数 / 5 `cc5349a4` 第七数 / 6 `66b5d38c` unknown_1h 两型，hold-monitor 11/11）；下文 P1/P2/§5 里的 `cbeb0a93` 读作 `66b5d38c`（Owner 回执须写明审的是 `66b5d38c`）。回滚锚表 §2.1 不变（fix-up 只动 `broker-hold-monitor.*`，那是 A 文件）。batch-2 见文末 v0.3 增补段。
 > v0.1→v0.2 变更：侧分支定头；P4 由"未做"改为实测 355 ms；P4-bis ADJ 措辞按 Bettor 改"由 P4 实测判校准好"；§0 P7–P9 运营前置补齐；§1-③ 回滚锚改为**逐文件 sha 表**（§2.1）；新增 §4 v199/v200 拆分、§5 验收清单（可勾）、§6 本单自身的验证方法。
 
 ## §0 前提（全满足才开）
