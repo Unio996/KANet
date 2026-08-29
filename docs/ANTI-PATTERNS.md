@@ -3156,3 +3156,9 @@ WHERE id IN (...) AND protocol_status IN ('verifying', 'pending_bettors')
 - **实录**: J1 用生产工具离线造 ZK 门禁 P2SH 后三重验证，`isScriptPayToScriptHash(spk)` 传 `ScriptPublicKey` 对象得 `false`，差点判"造出来的不是 P2SH"；改传 `spk.script`（裸字节）即 `true`。wasm 边界对类型不抛，直接按"不是"处理。
 - 🔴 **判据**: wasm 边界函数的**否定性返回**（false / null / 0）先怀疑传参类型，再信结论——同族 `Get-Process` 假零（规则 75）、`XOnlyPublicKey` 大小写归一（memory `reference-kaspa-wasm-xonly-pubkey-accepts-uppercase-verifymessage-false-vs-throw`）。写验证脚本时对每个 wasm 布尔判定**配一个已知阳性对照**（拿一个确定的 P2SH 先跑一次得 true），否则假阴性与真阴性不可分。
 - 🔨 lint 候选 `R-WASM-P2SH-CHECK-PASS-RAW-SCRIPT`（NWT 命名）：`isScriptPayToScriptHash(` 的实参若是 `ScriptPublicKey` 类型变量 ⇒ 亮灯（静态可查处：直接传 `new ScriptPublicKey(...)`/`.scriptPublicKey` 属性）。
+
+## 规则 78 —— 拿 A 版本的规则去评判 B 版本的代码：「某规则是否适用」先确认该规则在目标 commit 上存在（2026-08-29 · 同日三例：J1 ZK 六连按 cfafeb4 评 live 7b1e18cc / J1 r17 §5 拿 b5b0dc8 分域规则评 8065184 / Codex 14c81c1c 把上游 #214 编译期守卫套到 8065184 裸 CLTV 上）
+
+- **实录**: ① J1 ZK 六连的接口坐标出自 silverscript `cfafeb4`（v2.0.1，三参计量式 `verify_zk`），而 live 节点是 `7b1e18cc`（两参常数 140k）⇒ "fee 随 public input 增长"结论错（D-015 注记）。② J1 r17 §5 写"`TxTime >= OpTxInputDaaScore+N` 在 `b5b0dc8` 分域规则下必然恒真 ⇒ 恢复锁形同虚设"——同一份报告前文已写 `8065184` 没有 `tx.daa`、落后 44 提交，转头用新规则评旧代码（J1 自更正 `…T06-50Z-j1-SELFCORRECT-r17-section5-wrong.md`）。③ Codex `14c81c1c` 据上游 `require(tx.daa)`/`require(tx.time)` 分路 lowering 判 v0.15 "混锁域 MUST-FIX"，而 pinned `8065184` 的 `tx.time` 是裸 `OP_CHECKLOCKTIMEVERIFY`、域由 live CLTV 按数值判（`opcodes/mod.rs:1031-1034`）⇒ 在 lowering/共识层不成立（D-016）。三例都是**规则真、代码真、但规则不在那个 commit 上**。
+- 🔴 **判据**: 凡结论形如「按规则 R，代码 C 是 X」，先 `git show <C 的 commit>:<文件>` 确认 R 在**那个** commit 上存在；R 来自另一分支/更新版本/另一仓库 ⇒ 只能说「若迁到 R 所在版本则 X」，不能说「C 是 X」。分叉关系用 `git merge-base` + `git rev-list --count` 钉死（8065184 vs b5b0dc8 = 兄弟分支非线性），别凭"更新"二字推"已含"。
+- 🔨 **配套**: 报告头写明「规则坐标 commit」与「被评代码 commit」两个 sha，不同就必须有一段"适用性"论证；同族 `reference-rusty-kaspa-worktree-is-not-the-live-binary-commit`（坐标必 `git show <commit>`）、规则 68（枚举方法 vs 恰好读到）、D-016。
