@@ -101,3 +101,15 @@
 - **DEFECT2 措辞更正**：见 §1.2 U7（"从未调用"→"本文件占位 import、BUY 永久失败无自动退款路"）；NWT 定级 P2。batch-2 内容（Bettor）：① `broker_buy_fallback_refunded/manual_refund_pending` 进 hold-monitor 第六数——🔴 hold-monitor 只在 batch-1 侧分支，依赖关系待 Bettor 定；② BUY 自动退款 wire 前先定用户 BSC 退款地址来源（`retail_dex_orders.pay_address` vs 入金 tx sender），缺 ⇒ manual + 告警不静默。
 - **DEFECT1 `executeHedge :871`**：NWT CONFIRMED，中级另列（先定该路是否本该 hedge；若不该，修法是删路不是接上）。
 - **P7/P8**：待 Bettor/Owner 定 UI accept 是否对外可达（网关 arming 同题）再定级；设计段（去哪个触发、CAS 位置）见 §2 P7 行"最小修法"，不动码。
+
+## §7 batch-2 设计段（2026-08-29 晚 · 只读调研 · 不动码，NWT/Bettor 一句后落）
+### §7.1 BUY fallback 永久失败的自动退款（DEFECT2 修法）——"退到哪"没有可信来源，先补来源再接线
+- **事实**：`retail_dex_orders.pay_address` 对 `side='buy_kas'` 存的是 **broker 的 BSC 收款地址**（`broker-buy-handler.js:1298` 注释 `pay_chain='bnb' pay_address=broker_BSC_0xaD12544E`；`broker-bsc-intake-watcher.js:62` 按 `pay_address = broker` 匹配入金），**不是用户地址**；`evm_pay_address` 只在 `asset==='KAS'` 时填（`:1098/:1111`）；`bsc-incoming-watcher.js` / `broker-bsc-intake-watcher.js` **不记录入金 tx 的 sender**（grep `from_address|sender|.from` 0 命中）；`:1019-1021` 原注释自己也写了 "`refund_address column (NOT exist)`"。⇒ 今天把 `transferUsdt` 接上**没有地址可退**——这是它至今占位的真原因，不是忘了。
+- **谁可信**：① 入金 tx 的 `from`（用户真付款的 EVM 地址，链上事实）> ② 用户 DM 自报地址（可被打错/被钓）> ③ `pay_address`（❌ 是 broker 自己）。合约钱包/交易所转出的 `from` 退回去可能进黑洞（交易所热钱包不认领）——所以 ① 也要**用户确认一次**（DM "退到 0x…?"）再发，或只对 EOA 自动。
+- **设计**：(1) 入金侧记 sender：`bsc-incoming-watcher` 扫到 inflow 时把 `tx.from` 写进 `broker_workflow_markers`（`event_type='broker_buy_inflow'`, `src_event_id=tx_hash`, payload `{from, amount, order_id}`）——不加列、不动 migrate；(2) BUY fallback 永久失败：查该 order 的 inflow marker 取 `from`；**有** ⇒ `transferUsdt(chain, brokerWallet, from, giveUsdt)`，前后各一条 chain_events（`broker_buy_fallback_refund_intent` 先写 / `_refunded` 带 txHash 后写，同 P2 形）；**无** ⇒ 维持 `manual_refund_pending:true` + **hold-monitor 第六数告警**（batch-1 fix-up）；(3) 退款走同一 write-ahead 纪律：intent 先落、歧义不重发、确定失败才标 failed。
+- **不进本批的**：EOA/合约判定（`eth_getCode`）、用户确认 DM 流（用户面文案 = Owner 批）。先做 (1)(2) 里"有 sender 才退、EOA 判定缺 ⇒ 仍 manual"的保守版。
+
+### §7.2 DEFECT1 `executeHedge(finalOffer)`（`exchange-machine.js:871`）——该路本该 hedge，但从没跑通
+- 加于 `1ea63f83`（2026-04-11 "BUY kaspa_tx 路径 verified→completed 直通"）：maker（本地 agent）收到 KAS、付 USDT 后**触发对冲**——与 `:1140-1144` 那条（同函数另一分支，传参正确 `executeHedge(finalOffer.id, localAgent.name, hedgeSide, hedgeQty)`）意图一致。⇒ **该路本该 hedge**；`.slice` 抛被 `.catch` 吞 ⇒ 4 个半月静默未对冲（有 `hedge_enabled` 的 offer 才有敞口）。
+- **安全边界**：`_executeHedge` 第一道就是 `offer.meta.hedge_enabled !== true ⇒ skip`（`trade-protocol-filter.js:2200`），且有 `chain_events hedge%` 幂等 + 熔断。修传参后，对没开 `hedge_enabled` 的 offer行为不变（仍 skip），对开了的才真下 CEX 单。
+- **修法**：镜像 `:1140-1144`——`const makerGaveKas = finalOffer.give_asset === 'KAS'; const hedgeSide = makerGaveKas ? 'BUY' : 'SELL'; const hedgeQty = makerGaveKas ? parseFloat(finalOffer.give_amount) : parseFloat(finalOffer.want_amount); if (hedgeQty > 0) executeHedge(finalOffer.id, localAgent.name, hedgeSide, hedgeQty)`。向量：源级断言两处调用签名一致 + 单测传对象必 throw（钉住旧形）。**定级归 NWT**（中级：未对冲敞口，非双花）；进 batch-2 或单独小批由 Bettor 定——它会让一条沉睡 4 个半月的花钱路醒来，须 Owner 知道。
