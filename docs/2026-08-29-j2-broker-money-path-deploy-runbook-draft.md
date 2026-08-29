@@ -91,3 +91,50 @@
 - 测试（侧分支 worktree 内跑）：`node kasia-console/src/lib/indexer-coverage.test.mjs`(18) / `broker-refund-classify.test.mjs`(21) / `broker-escrow-check.test.mjs`(16)；`node kasia-console/src/services/broker-hold-monitor.test.mjs`(9)；`node kasia-console/src/services/broker-intake-watcher.prefilter.test.mjs`(5)；refund-lock 10 / reconcile 7
 - P4/P4-bis 数字来源：`scratch/_j2_eventloop_db_audit/`（07-23 bak 副本，只读；复跑同目录脚本）
 - ADJ：`grep -n COVERAGE_ADJ_DAA kasia-console/src/api/ingest.js`（侧分支）
+
+---
+# v0.3 增补 · batch-2（`coord/broker-money-path-2`）部署段
+> **Status**: v0.3 · J2 2026-08-29 晚 · Bettor 令 · batch-2 头 **`3277183a`**（从 origin `fe6ad45e` 开，**不叠 batch-1**；对 `fe6ad45e` **19 files, +628 / −37**）· NWT 审中（hedge-call 突变 / explorer 改法最小性 / "其余四入口有上限"复核 / 第七数 vs unknown_1h 两型）· 与 batch-1（头 `66b5d38c`，25 files +1247/−116，含 fix-up 4/5/6）**各自可批可回滚**；同窗部署顺序 batch-1 → batch-2（batch-2 的 ambiguous 事件靠 batch-1 hold-monitor 看见）。
+
+## §B2-1 文件表（19）
+| 类 | 文件 | 说明 |
+|---|---|---|
+| **M**（5，回滚锚 = `fe6ad45e` 版 sha256[:16]）| `kasia-console/src/services/broker-intake-watcher.js` `e43488dfd86ff39e` | P2 intent write-ahead + Z20/fallback 片段 + tick-guard 接线；§7.1 `refund_candidate_from` |
+| | `kasia-console/src/services/broker-v2/router.js` `28bbffb59daebb4a` | P11 借记先行 + 120 s 上限 + ambiguous 告警 |
+| | `kasia-console/src/api/conversations.js` `f422fc0ed96906d0` | per-peer 锁接五入口 + rejectAfterMs 拒回 |
+| | `kasia-console/src/services/exchange-machine.js` `d835b53b40baa45f` | DEFECT1 `executeHedge` 传参镜像 + 顺手 explorer 链接改 `formatTxReference` |
+| | `kasia-console/src/services/broker-bsc-intake-watcher.js` `7bcedf2a6ccf6faa` | §7.1 入金 sender 先记 marker 再 publish |
+| **A**（14）| `lib/{broker-fallback-intent,tick-guard,peer-serial-lock,user-ledger-withdraw,with-timeout,broker-buy-inflow}.mjs` + 各 `.test.mjs`（tick-guard/peer-serial-lock/user-ledger-withdraw/with-timeout/broker-buy-inflow）+ `services/broker-intake-watcher.fallback-intent.test.mjs` + `services/broker-v2/router.withdraw.test.mjs` + `services/exchange-machine.hedge-call.test.mjs` | 纯新增，revert 即删 |
+- **无 migrate**（batch-2 不加表不加列：intent/claim/inflow 都走 `chain_events` / `broker_workflow_markers` 既有表）。
+
+## §B2-2 env（三项 + 一门）
+| 项 | 默认 | 说明 |
+|---|---|---|
+| `BROKER_WITHDRAW_TIMEOUT_MS` | `120000` | v2 withdraw `transferUsdt` 本地上限；超时 = 结果不明 ⇒ 不冲正 + `events withdraw_ambiguous`（底层 ethers 默认 300 s 仍在跑）|
+| `BROKER_PEER_LOCK_REJECT_MS` | `180000` | 同 peer 等锁超此值 ⇒ 拒本条（不执行），回「⏳ 系统繁忙，请稍后再试。」；`0` = 不拒只告警。须 > handler 最大耗时（120 s + LLM）|
+| `COVERAGE_ADJ_DAA` | `20`（batch-1）| 不变 |
+| **`hedge_enabled` 门现值** | 🔴 **见 §B2-5**：门读的是 `exchange_offers.meta`，而该列**不存在**（07-23 bak `PRAGMA table_info` 无 `meta`，migrate.js 无 `ADD COLUMN meta`；写方 broker-intake `:355` / broker-v3 `:178/:189` 写的是 `metadata.hedge_enabled:true`）⇒ 门的 `SELECT meta` **抛 SqliteError** ⇒ 三处调用全部被 `.catch` 吞 ⇒ **hedge 在 live 从未跑过、修 DEFECT1 后仍不会跑** | 不需要 env；这是 DEFECT1b，Owner 决定要不要真开 |
+
+## §B2-3 回滚
+| 信号 | 回滚 |
+|---|---|
+| 任一 M 文件锚不一致（merge 前 `git show HEAD:<path> \| sha256sum`）| 不 merge；重 rebase + NWT 再审 |
+| console 起不来 | `git revert -m 1 <merge-sha>` → 单体重启；14 个 A 文件随 revert 删，无表/列需清 |
+| `refund_tick_overrun` 持续（每 tick 都跳）| 不回滚：说明 tick 真的 >5 min，查哪段慢（tick 各段日志）；回滚只会让它回到叠跑 |
+| `withdraw_ambiguous` / `broker_fallback_ambiguous` 出现 | 不回滚：fail-closed 生效；人工核链/CEX 按 SOP 解（P8）|
+| 拒回「系统繁忙」频发 | 先看 `peer-lock REJECT` 日志的 waited 秒数：若 <180 s 前一条正常慢 ⇒ 调大 `BROKER_PEER_LOCK_REJECT_MS`；若前一条真挂 ⇒ 看它挂在哪个外部调用 |
+
+## §B2-4 验收（执行人勾，J2 只读复核）
+- [ ] 锚 5/5 一致；`git diff --stat HEAD~1` = 19 files
+- [ ] boot 日志无 `SyntaxError`/import 错；`[broker-intake] watcher started`；首个 5 min tick 无 `guarded tick err`
+- [ ] **rejectAfterMs 可观测**：构造同 peer 两条 DM（第一条走 LLM 慢路）⇒ 第二条**排队**（`peer-lock wait` 日志 30 s 后出现）而非并行；把 `BROKER_PEER_LOCK_REJECT_MS=5000` 临时缩短 ⇒ 第二条回「⏳ 系统繁忙，请稍后再试。」且 `peer-lock REJECT` 日志；恢复默认
+- [ ] **buy_inflow marker 首笔落库**：一笔真实 BUY 入金后 `SELECT * FROM broker_workflow_markers WHERE event_type='broker_buy_inflow'` 有行，payload.from = 入金 tx 的 from（与 bscscan 对）
+- [ ] **hedge 镜像后零 CEX 活动**：`SELECT count(*) FROM chain_events WHERE event_type LIKE 'hedge%'` 部署前后不变 = 0（§B2-5：门读不到 `meta` 会抛，本来就不会有）；若 NWT/Owner 决定修 DEFECT1b（改读 `metadata`），**那是独立批**：它会让所有 broker offer（写方都置 true）完成时真下 CEX 单
+- [ ] P2：首个 T2.5c 触发时 `chain_events` 里 `broker_fallback_intent` **先于** `broker_fallback_claim`（observed_at）
+- [ ] P11：一笔真实提币 ⇒ `user_ledger` 先有 `withdraw_pending:` 行再变 `withdraw_user_initiated:…`；余额在转账期间已减
+- [ ] hold-monitor（batch-1）首行含 `manual_refund_pending=` `fallback_ambiguous=`
+
+## §B2-5 🔴 用户面变更清单（2 处，随批报 Owner）+ DEFECT1b
+1. `exchange-machine.js` `dm_kas_delivered` DM：原 `TX: <txid>\n查看: https://explorer.kaspa.org/txs/<txid>`（TN12 上是死链）→ `formatTxReference(buildExplorerUrl(...))` ⇒ TN12 渲染 **`TX: <txid>`**（mainnet 仍链接）。触发原因：`R-EXPLORER-URL-BYPASS` 规则挡 commit（既有硬编码，无 allow 标记）。
+2. `conversations.js` 拒回：**逐字复用** `tg-bot/i18n.mjs:428 service_busy`「⏳ 系统繁忙，请稍后再试。」——零新造文案；只在 rejectAfterMs 触发时出现。
+- **DEFECT1b（新，NWT 定级）**：`_executeHedge` 门 `SELECT meta FROM exchange_offers`（`trade-protocol-filter.js:2191-2193`）读不存在的列 ⇒ 抛 ⇒ 三处调用全吞 ⇒ **hedge 从未在 live 跑过**（bak `chain_events hedge%` = 0 条印证）。DEFECT1 修传参**不改变**这一点（安全）。要真开对冲 = 改读 `metadata` + 因写方全置 `hedge_enabled:true` 而等于对所有 broker offer 开 CEX 对冲 ⇒ Owner 级决定，独立批。
