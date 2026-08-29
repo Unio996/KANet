@@ -52,6 +52,8 @@ CONSOLE_PORT=${CONSOLE_PORT:-${ENV_PORT:-3200}}
 log() {
   echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] $*" >> "$LOG"
 }
+# v0.1.4: 唯一的墙钟入口 (offline selftest 桩它 ⇒ 边界向量确定性; 生产 = date +%s). 日志行时间戳不经它.
+now_s() { date +%s; }
 
 # #21 health-check isolation (Bettor 2026-07-19 决赛夜, cause-agnostic freeze mitigation):
 # 纯 curl 判活的问题——如果 console event loop 真被同步阻塞, curl 也会跟着卡到 max-time 超时,
@@ -70,11 +72,14 @@ log() {
 # 心跳 OR 简单方案(已知 trade-off 已评估影响有限、可接受, 不为了修一个平台上打不开的锁
 # 加复杂度)。
 HEARTBEAT_FILE="$KANET_ROOT/logs/console-heartbeat.txt"
+# v0.1.4 (Bettor 裁): 心跳陈阈 10 → 20s, 常量可配. 稳态实测 8–10.5s 同步阻塞段与 10s 同量级 ⇒ 10s 阈会把一次阻塞当"陈";
+# soft-fail(见 supervisor_tick HUNG_BOOT 分支)为主、阈为辅; 代价 = 真死检测最多慢 10s.
+HEARTBEAT_STALE_SEC=${KANET_SUPERVISOR_HEARTBEAT_STALE_SEC:-20}
 heartbeat_fresh() {
   [[ -f "$HEARTBEAT_FILE" ]] || return 1
   local hb_age
-  hb_age=$(( $(date +%s) - $(stat -c %Y "$HEARTBEAT_FILE" 2>/dev/null || stat -f %m "$HEARTBEAT_FILE" 2>/dev/null || echo 0) ))
-  (( hb_age >= 0 && hb_age <= 10 ))
+  hb_age=$(( $(now_s) - $(stat -c %Y "$HEARTBEAT_FILE" 2>/dev/null || stat -f %m "$HEARTBEAT_FILE" 2>/dev/null || echo 0) ))
+  (( hb_age >= 0 && hb_age <= HEARTBEAT_STALE_SEC ))
 }
 
 console_alive() {
@@ -151,7 +156,7 @@ console_state() {
   pid_alive "$marker_pid" "$marker_start_ms" || rc=$?
   if (( rc == 1 )); then echo DEAD; return 0; fi
   if (( rc == 2 )); then echo UNKNOWN; return 0; fi
-  local age=$(( $(date +%s) - marker_start_s ))
+  local age=$(( $(now_s) - marker_start_s ))
   if (( age <= BOOT_GRACE_SEC )); then echo BOOTING; else echo HUNG_BOOT; fi
   return 0
 }
@@ -172,14 +177,14 @@ lifetime_guard() {
 }
 
 count_recent_restarts() {
-  local since=$(( $(date +%s) - RESTART_WINDOW_SEC ))
+  local since=$(( $(now_s) - RESTART_WINDOW_SEC ))
   if [[ ! -f "$RESTART_HISTORY" ]]; then echo 0; return; fi
   awk -v since="$since" '$1 >= since' "$RESTART_HISTORY" | wc -l
 }
 
 record_restart() {
   mkdir -p "$(dirname "$RESTART_HISTORY")"
-  echo "$(date +%s) $(date -u '+%Y-%m-%dT%H:%M:%SZ') restart" >> "$RESTART_HISTORY"
+  echo "$(now_s) $(date -u '+%Y-%m-%dT%H:%M:%SZ') restart" >> "$RESTART_HISTORY"
 }
 
 announce_restart() {
@@ -221,7 +226,7 @@ announce_restart() {
 restart_console() {
   log "Console death detected — invoking kanet-start-headless.sh"
   # v0.1 write-ahead: headless 会 kill 本进程 (:65-71), 之后的记账可能永远跑不到 (2026-08-29 三次重启零记录的根因)
-  last_restart_ts=$(date +%s); save_state; record_restart
+  last_restart_ts=$(now_s); save_state; record_restart
   announce_restart
   bash "$KANET_ROOT/kanet-start-headless.sh" >> "$LOG" 2>&1 || log "kanet-start-headless fail"
   # 若本进程还活着 (headless 没杀到), 不再用 5s 判成败 —— 成败由主循环的 boot grace 状态机判
@@ -231,7 +236,7 @@ restart_console() {
 run_supervisor() {
   echo $$ > "$PID_FILE"
   load_state
-  log "supervisor start pid=$$ check_interval=${CHECK_INTERVAL_SEC}s fail_threshold=${HEALTH_FAIL_THRESHOLD} restart_window=${RESTART_WINDOW_SEC}s max_restarts=${RESTART_MAX_IN_WINDOW} cool_down=${COOL_DOWN_SEC}s boot_grace=${BOOT_GRACE_SEC}s short_lifetime=${SHORT_LIFETIME_SEC}s streak_max=${SHORT_STREAK_MAX} state:last_restart=${last_restart_ts} last_boot_ok=${last_boot_ok_ts} streak=${short_streak} cool_down_until=${cool_down_until}"
+  log "supervisor start pid=$$ check_interval=${CHECK_INTERVAL_SEC}s fail_threshold=${HEALTH_FAIL_THRESHOLD} restart_window=${RESTART_WINDOW_SEC}s max_restarts=${RESTART_MAX_IN_WINDOW} cool_down=${COOL_DOWN_SEC}s boot_grace=${BOOT_GRACE_SEC}s short_lifetime=${SHORT_LIFETIME_SEC}s streak_max=${SHORT_STREAK_MAX} heartbeat_stale=${HEARTBEAT_STALE_SEC}s state:last_restart=${last_restart_ts} last_boot_ok=${last_boot_ok_ts} streak=${short_streak} cool_down_until=${cool_down_until}"
   local consecutive_fail=0
   local was_booting=0
   while true; do
@@ -244,7 +249,7 @@ run_supervisor() {
 supervisor_tick() {
   local st now
   st="$(console_state)"
-  now=$(date +%s)
+  now=$(now_s)
   case "$st" in
     ALIVE)
       consecutive_fail=0
@@ -259,9 +264,20 @@ supervisor_tick() {
     UNKNOWN)
       consecutive_fail=$(( consecutive_fail + 1 ))
       log "health fail #${consecutive_fail}/${HEALTH_FAIL_THRESHOLD} (pid check unavailable)" ;;
-    DEAD|HUNG_BOOT)
+    HUNG_BOOT)
+      # v0.1.4 (NWT 对抗审 MUST-FIX): age > grace 只说明"boot 于很久以前", 不说明"卡在 boot".
+      # 长命 console 的一次瞬时阻塞(实测稳态 8–10.5s 段每 20–30s 一次)+curl 失败 也会落到这里 ⇒ 若重启后曾 ALIVE, 只算软 fail(须 3 连);
+      # 只有"自上次重启从未 ALIVE"才是真 hung boot ⇒ 立即判死.
+      if (( last_boot_ok_ts > last_restart_ts )); then
+        consecutive_fail=$(( consecutive_fail + 1 ))
+        log "unresponsive but was-ALIVE soft-fail #${consecutive_fail}/${HEALTH_FAIL_THRESHOLD}"
+      else
+        consecutive_fail=$HEALTH_FAIL_THRESHOLD
+        log "HUNG_BOOT (never alive since restart) — immediate death"
+      fi ;;
+    DEAD)
       consecutive_fail=$HEALTH_FAIL_THRESHOLD
-      log "console ${st} — immediate death verdict" ;;
+      log "DEAD — immediate death" ;;
   esac
   if (( consecutive_fail >= HEALTH_FAIL_THRESHOLD )); then
     if (( now < cool_down_until )); then

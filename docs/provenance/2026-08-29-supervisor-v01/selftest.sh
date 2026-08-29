@@ -34,8 +34,9 @@ console_alive() { (( STUB_ALIVE == 1 )); }
 pid_alive() { return "$STUB_PID_RC"; }
 RESTARTS=0
 restart_console_real=$(declare -f restart_console)
-restart_console() { RESTARTS=$((RESTARTS+1)); last_restart_ts=$(date +%s); save_state; record_restart; return 0; }
-marker() { echo "$1 $(( ($(date +%s) - $2) * 1000 ))" > "$BOOT_MARKER"; }   # pid, age_s
+restart_console() { RESTARTS=$((RESTARTS+1)); last_restart_ts=$(now_s); save_state; record_restart; return 0; }
+FIXED_NOW=$(date +%s); now_s() { echo "$FIXED_NOW"; }   # v0.1.4: 桩掉墙钟 ⇒ age/lifetime/心跳 边界向量确定性 (跨秒不再翻)
+marker() { echo "$1 $(( (FIXED_NOW - $2) * 1000 ))" > "$BOOT_MARKER"; }   # pid, age_s (相对桩时间)
 
 # ── 3. 五态 ──
 STUB_ALIVE=1; expect "state ALIVE (curl ok)" "$(console_state)" "ALIVE"
@@ -58,15 +59,38 @@ expect "BOOTING→ALIVE ⇒ last_boot_ok_ts 记录" "$(( last_boot_ok_ts > 0 ))"
 grep -q "boot OK: boot_ms=" "$LOG" && ok "boot_ms 日志行" || bad "boot_ms 日志行" "missing"
 STUB_ALIVE=0; STUB_PID_RC=1; supervisor_tick
 expect "DEAD ⇒ 立即重启 (1 tick, 不等 3 次)" "$RESTARTS" "1"
-STUB_ALIVE=0; marker 4242 400; STUB_PID_RC=0; RESTARTS=0; last_restart_ts=0; last_boot_ok_ts=0; short_streak=0
+STUB_ALIVE=0; marker 4242 400; STUB_PID_RC=0; RESTARTS=0; last_restart_ts=0; last_boot_ok_ts=0; short_streak=0; consecutive_fail=0
 supervisor_tick
-expect "HUNG_BOOT ⇒ 立即重启" "$RESTARTS" "1"
+expect "HUNG_BOOT never-alive (last_boot_ok_ts=0) ⇒ 立即重启" "$RESTARTS" "1"
+grep -q "HUNG_BOOT (never alive since restart)" "$LOG" && ok "never-alive 日志行" || bad "never-alive 日志行" "missing"
+# v0.1.4 (NWT 对抗审 MUST-FIX): 长命 console(boot 于很久前, 重启后曾 ALIVE)一次瞬时阻塞 ⇒ 心跳陈 + curl 失败 + PID 活 + age>grace ⇒ 只算软 fail, 须 3 连
+now0=$FIXED_NOW; STUB_ALIVE=0; marker 4242 86400; STUB_PID_RC=0; RESTARTS=0; consecutive_fail=0; short_streak=0
+last_restart_ts=$((now0-90000)); last_boot_ok_ts=$((now0-89000))   # 重启后曾 ALIVE
+supervisor_tick; expect "was-ALIVE + 瞬时阻塞 ⇒ soft-fail #1, 不重启" "$RESTARTS" "0"
+expect "was-ALIVE soft-fail 计数 = 1" "$consecutive_fail" "1"
+supervisor_tick; expect "was-ALIVE 第 2 tick 仍不重启" "$RESTARTS" "0"
+STUB_ALIVE=1; supervisor_tick; expect "阻塞过去 ALIVE ⇒ 归零, 仍不重启" "$RESTARTS" "0"
+expect "ALIVE ⇒ consecutive_fail 归零" "$consecutive_fail" "0"
+STUB_ALIVE=0; supervisor_tick; supervisor_tick; expect "再两次仍不到 3 连 ⇒ 不重启" "$RESTARTS" "0"
+supervisor_tick; expect "was-ALIVE 3 连 ⇒ 才重启" "$RESTARTS" "1"
+grep -q "unresponsive but was-ALIVE soft-fail #3/3" "$LOG" && ok "soft-fail 日志行 #3/3" || bad "soft-fail 日志行" "missing"
+# 反向量: 重启后从未 ALIVE (last_boot_ok_ts < last_restart_ts) 且 age>grace ⇒ 立即
+STUB_ALIVE=0; marker 4242 400; RESTARTS=0; consecutive_fail=0; last_restart_ts=$((now0-500)); last_boot_ok_ts=$((now0-90000))
+supervisor_tick; expect "never-alive-since-restart (boot_ok < restart) ⇒ 1 tick 立即重启" "$RESTARTS" "1"
+# v0.1.4 心跳陈阈 20s (注入阈值测边界; 用 touch -d 设 mtime, 不等真时间)
+hb_at() { touch -d "@$(( FIXED_NOW - $1 ))" "$HEARTBEAT_FILE"; }   # mtime 相对桩时间; 直接测 heartbeat_fresh (console_alive 仍是桩, 不需恢复)
+expect "HEARTBEAT_STALE_SEC 默认 20" "$HEARTBEAT_STALE_SEC" "20"
+hb_at 15; heartbeat_fresh && ok "心跳 15s 前 ⇒ fresh (20s 阈)" || bad "心跳 15s fresh" "stale"
+hb_at 21; heartbeat_fresh && bad "心跳 21s 前 ⇒ 应 stale" "fresh" || ok "心跳 21s 前 ⇒ stale (20s 阈)"
+hb_at 20; heartbeat_fresh && ok "心跳 20s 前 ⇒ fresh (含边界 <=)" || bad "心跳 20s 边界" "stale"
+HEARTBEAT_STALE_SEC=10; hb_at 15; heartbeat_fresh && bad "注入阈 10: 15s ⇒ 应 stale" "fresh" || ok "注入阈 10: 心跳 15s ⇒ stale (旧阈会误判)"
+HEARTBEAT_STALE_SEC=20; rm -f "$HEARTBEAT_FILE"; heartbeat_fresh && bad "无心跳文件 ⇒ 应 stale" "fresh" || ok "无心跳文件 ⇒ stale"
 STUB_ALIVE=0; marker 4242 10; STUB_PID_RC=2; RESTARTS=0; consecutive_fail=0; last_restart_ts=0; short_streak=0
 supervisor_tick; supervisor_tick; expect "UNKNOWN x2 ⇒ 不重启 (退回 3-fail)" "$RESTARTS" "0"
 supervisor_tick; expect "UNKNOWN x3 ⇒ 重启 (fail-safe 旧逻辑)" "$RESTARTS" "1"
 
 # ── 5. lifetime guard (直接喂状态; 首次 last_restart_ts=0 不计) ──
-now=$(date +%s)
+now=$FIXED_NOW
 last_restart_ts=0; last_boot_ok_ts=0; short_streak=0; cool_down_until=0
 lifetime_guard "$now"; expect "首次 (last_restart_ts=0) streak=0" "$short_streak" "0"
 last_restart_ts=$((now-100)); last_boot_ok_ts=0; short_streak=0

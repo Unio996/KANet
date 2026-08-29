@@ -14,7 +14,23 @@
 [PASS] BOOTING→ALIVE ⇒ last_boot_ok_ts 记录
 [PASS] boot_ms 日志行
 [PASS] DEAD ⇒ 立即重启 (1 tick, 不等 3 次)
-[PASS] HUNG_BOOT ⇒ 立即重启
+[PASS] HUNG_BOOT never-alive (last_boot_ok_ts=0) ⇒ 立即重启
+[PASS] never-alive 日志行
+[PASS] was-ALIVE + 瞬时阻塞 ⇒ soft-fail #1, 不重启
+[PASS] was-ALIVE soft-fail 计数 = 1
+[PASS] was-ALIVE 第 2 tick 仍不重启
+[PASS] 阻塞过去 ALIVE ⇒ 归零, 仍不重启
+[PASS] ALIVE ⇒ consecutive_fail 归零
+[PASS] 再两次仍不到 3 连 ⇒ 不重启
+[PASS] was-ALIVE 3 连 ⇒ 才重启
+[PASS] soft-fail 日志行 #3/3
+[PASS] never-alive-since-restart (boot_ok < restart) ⇒ 1 tick 立即重启
+[PASS] HEARTBEAT_STALE_SEC 默认 20
+[PASS] 心跳 15s 前 ⇒ fresh (20s 阈)
+[PASS] 心跳 21s 前 ⇒ stale (20s 阈)
+[PASS] 心跳 20s 前 ⇒ fresh (含边界 <=)
+[PASS] 注入阈 10: 心跳 15s ⇒ stale (旧阈会误判)
+[PASS] 无心跳文件 ⇒ stale
 [PASS] UNKNOWN x2 ⇒ 不重启 (退回 3-fail)
 [PASS] UNKNOWN x3 ⇒ 重启 (fail-safe 旧逻辑)
 [PASS] 首次 (last_restart_ts=0) streak=0
@@ -26,7 +42,7 @@
 [PASS] lifetime 400 ⇒ streak 归零
 [PASS] lifetime 由 last_boot_ok_ts 算 (50) ⇒ streak 1
 [PASS] cool-down 内 DEAD ⇒ skip restart
-docs/provenance/2026-08-29-supervisor-v01/selftest.sh: line 98: 260011 Killed                  ( last_restart_ts=0; restart_console ) 2> /dev/null
+docs/provenance/2026-08-29-supervisor-v01/selftest.sh: line 122: 267716 Killed                  ( last_restart_ts=0; restart_console ) 2> /dev/null
 [PASS] write-ahead: 被杀前 state.env 已写 last_restart_ts
 [PASS] write-ahead: 被杀前 restarts.log 已记 1 行
 [PASS] 新 supervisor load_state 继承 last_restart_ts
@@ -34,8 +50,8 @@ docs/provenance/2026-08-29-supervisor-v01/selftest.sh: line 98: 260011 Killed   
 [PASS] load_state 拒带空格值 (last_restart_ts 保持 5)
 [PASS] load_state 认数字值
 [PASS] load_state 不 eval 脏行 (evil 行无副作用)
-[PASS] 受控 node 子进程已起: pid=18388
-[PASS] tasklist 阳性对照: 自起 node.exe pid=18388 ⇒ 0
+[PASS] 受控 node 子进程已起: pid=25680
+[PASS] tasklist 阳性对照: 自起 node.exe pid=25680 ⇒ 0
 [PASS] tasklist 阴性对照: pid 4000000 ⇒ 1
 [PASS] mock: cms − marker = +2001ms ⇒ 1 gone (PID 复用)
 [PASS] mock: cms − marker = +1999ms ⇒ 0 不 flag (skew 内)
@@ -46,6 +62,6 @@ docs/provenance/2026-08-29-supervisor-v01/selftest.sh: line 98: 260011 Killed   
 [PASS] mock: CreationDate 非数字 ⇒ 0 放行
 [PASS] 五态: 复用 PID 的 marker ⇒ DEAD
 [PASS] 复用判定有日志行
-[SMOKE] proc_creation_ms real powershell: ok (pid=18388 creation_ms=1787982318757)
+[SMOKE] proc_creation_ms real powershell: ok (pid=25680 creation_ms=1787983258777)
 [PASS] tasklist 失败 ⇒ 2 (UNKNOWN)
-supervisor-v01 selftest: 48 PASS / 0 FAIL | smoke(not gating): ok (pid=18388 creation_ms=1787982318757)
+supervisor-v01 selftest: 64 PASS / 0 FAIL | smoke(not gating): ok (pid=25680 creation_ms=1787983258777)
