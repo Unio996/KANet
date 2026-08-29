@@ -98,3 +98,21 @@ echo "methods.rs=$f"; echo "got =$got"; echo "want=$want"
 - 7/12 构建产物（`methods.rs` / `payout.bin` / `.rustc_info.json`）已抄进 `docs/provenance/2026-08-29-zk-guest-imageid/`（sha 钉，`verify-payout-id.mjs` 4/4），不再依赖 gitignored `target/`。
 - **docker 路不在本批**（§4.4）：需改 `methods/build.rs`；容器工具链 ≠ 本地 v1.94.1 ⇒ 产出几乎必 ≠ c9918501；它是"将来改 guest 时的可复现路"，何时开 = Owner/D-005 级决定。rzup 安装归 J1 角色 B。
 - J1 r17 §6 #1/#2 被 §4.1 推翻的两条由 Bettor 转 J1（r24）；J1 不需在 younio 做任何事。
+
+## §6 第二步执行结果（2026-08-29 · 事实记录，Bettor 裁"相等/不等都记"）
+| 项 | 结果 |
+|---|---|
+| (b)(c) + 陈注释 | `e030a7b5`（NWT GREEN 已推）|
+| 零构建 verify（live 树 7/12 `target/`）| **`IMAGE_ID OK`**（`scratch/_j2_zk_verify_zero_build.out`）|
+| **`--build` #1**（副本树 `scratch/_j2_zk_guest_build/`，无 `target/`，`nice -n 19` + `CARGO_BUILD_JOBS=2`，不 prove）| 14:48:29 → 14:49:33+07（**1 m 04 s**，139 crates 全新编译）；guest rustc `1.94.1-dev (06e01cb0d)`，host `1.96.1 (31fca3adb)`；`payout.bin` 366,748 B sha `885c6fca4914cd3fce4463d94acd517c517ade492c5de838faf163f43efa26cd`，**与 7/12 那份 `cmp` 逐字节相同**；`PAYOUT_ID` ⇒ **`c9918501…` == canonical**。日志/样本/产物副本：`docs/provenance/2026-08-29-zk-guest-imageid/rebuild1-*` |
+| blkRate（只读 RPC `getBlockDagInfo` blockCount 差分）| 基线 **12.71 bps**（28 s 窗，起建前）；建中样本 **14.77 bps**（147 s 窗）⇒ 无下降，未触发 abort（阈 −30%）；headers 不动（5,508,717，IBD 块段）|
+| ⇒ 结论 | **"今天在干净树重编 == canonical"成立**（D-001 债的第一手证据，正向）。可复现性由 **guest 工具链 v1.94.1 + Cargo.lock + risc0-build 3.0.5 + 源** 决定，与 host `stable` 无关（host 已是 1.96.1 而 7/12 时未必是——产物仍逐字节同）。|
+
+### §6.1 🔴 (a) `rust-toolchain.toml` 钉 `channel = "1.96.1"` —— **未落，发现前置阻塞**
+- WSL 只读：`rustup 1.29.0`，`rustup toolchain list` = **只有 `stable-x86_64-unknown-linux-gnu` 与 `risc0`**，没有名为 `1.96.1` 的独立 toolchain；`RUSTUP_AUTO_INSTALL` 未设。
+- `channel = "1.96.1"` 让 rustup 找 **`1.96.1-x86_64-unknown-linux-gnu`** 这个独立安装，不是 `stable` 的别名 ⇒ 下一次任何 `cargo` 调用（**包括 live `zk-prove-worker.mjs:70` 的 `cargo run --release`**）要么报 `toolchain '1.96.1' is not installed`（prove 全挂），要么自动下载安装 ~100+ MB（rustup 版本依赖的行为，我不猜）——两者都是 **live 侧效应**，且 toml 在 live 树里、被 live worker 直接读。
+- ⇒ (a) 的**前置**是 `rustup toolchain install 1.96.1`（系统状态变更，归 J1 角色 B / Bettor 令），装好后先在副本树 `--build` 对拍，再改 live 树 toml。**它不承重**（§6 已证不钉也复现），只是"可复述"；不值得冒 prove 挂的风险抢着落。
+- 等价且零风险的替代：在 `TOOLCHAIN.lock.json` 记 host `1.96.1`（已记），toml 保持 `stable`——README/lock 里写明"host 不承重"。Bettor 定选哪条。
+
+### §6.2 `guest_source` 内容锚（Bettor 8/29 非阻塞补，已进 `.json`）
+`methods` tree `4435fbfb…` / `methods/guest` `c310bfa4…` / `guest/src` `0d80e3bc…` / `build.rs` blob `08a8a4eb…` / `methods/Cargo.toml` `8ad4cb9d…` / `host` tree `61ab9150…` / 两 Cargo.lock blob `389ecefa…` `dcfb6c31…`（最后改动 `68822fff`）。跨机 mismatch 先比这些：相等 ⇒ 源没变，是工具链；不等 ⇒ 源变了。
