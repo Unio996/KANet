@@ -1,6 +1,9 @@
-# `checkBrokerEscrow` 修法 patch 草案 v0.1 —— 三态 + positive/coverage 证据 + 网络前缀校验 · **batch: broker-money-path, NOT maintenance-window**
+# `checkBrokerEscrow` 修法 patch 草案 v0.2 —— 三态 + RPC 必需 + L2 coverage 账 + 选项 B `held_for_review` · **batch: broker-money-path, NOT maintenance-window**
 
-> **Status**: DRAFT v0.1 · J2 2026-08-29 · 源：定级页 `c6d0729b` §②（NWT 定 P2 潜伏 → retail 真用户开放前 P1；零历史真影响——Bettor 亲核 live：`no_escrow:true` 共 4 条全 `test-order-mrj*` 7/13）· 流程：报备 → NWT → **Owner 批（钱路）** · 闸 = gating retail broker 对真用户开放 · **不动代码**；候选 + 真 schema 离线向量在 `docs/provenance/2026-08-29-broker-escrow-v01/`。
+> **v0.2（NWT GREEN-with-MUST 收窄，2026-08-29）**：① `NOT_PAID` 须 **coverage-attested-absence AND `rpcUtxoLookup` 成功且 no-match**（RPC 缺/抛/劣化 ⇒ UNKNOWN）；② coverage 判据改消费 **L2 `indexerCoverage()` holes 账**（`70208425` §2.2 v199），删除 v0.1 的 `relay created_at ≤ order` heuristic（它 capture 不了 relay 重启 gap / watched 集变更 / eventloop 丢 POST）；**依赖 L2 期 1 先落**，过渡形 = 无账一律 UNKNOWN；③ `spc_tip_heartbeat` 保留为必要非充分；④ 🔴 **深层（Bettor 上 Owner）**：Kaspa 无地址历史索引，RPC UTXO 读也只是 current-UTXO（收款后扫走 = 无 UTXO 但付过）⇒ **任何 absence-based `no_escrow` 根本可错** ⇒ **选项 B**：`no_escrow` 从"永久免退款终态"改为可逆 **`held_for_review`**（保用户退款路 + loud 审计 + 人工复核）；reconciler 只进它不进 `failed`。**Owner 定 A/B 后落**（候选 `decideReconcileAction(verdict, mode)` 两种都实现，默认 B）。候选 v0.2 + 向量 16/16 在 `docs/provenance/2026-08-29-broker-escrow-v01/`（v02 文件）。
+> **选项 B 状态机改动草案**（`broker-state-machine.js`）：`STATES` 加 `held_for_review`（非终态）；`TRANSITIONS`：`awaiting_payment → held_for_review`（reconciler，`reason:'reconcile_no_escrow_review'`）、`held_for_review → {paid, refunded, failed(须 refundTxHash 或人工 no_escrow 显式二次确认), awaiting_payment(人工放回)}`；`TX_REQUIRED[held_for_review] = null`（不需 tx）；审计 marker 照 `state_<to>` 惯例；UI/tg-bot 对 `held_for_review` 显示"待人工复核"。`no_escrow` 保留只给**人工**路径（Owner/operator 明确操作），reconciler 不再产生它。
+>
+> **Status**: DRAFT v0.2（v0.1 正文保留在下，以 v0.2 头为准） · J2 2026-08-29 · 源：定级页 `c6d0729b` §②（NWT 定 P2 潜伏 → retail 真用户开放前 P1；零历史真影响——Bettor 亲核 live：`no_escrow:true` 共 4 条全 `test-order-mrj*` 7/13）· 流程：报备 → NWT → **Owner 批（钱路）** · 闸 = gating retail broker 对真用户开放 · **不动代码**；候选 + 真 schema 离线向量在 `docs/provenance/2026-08-29-broker-escrow-v01/`。
 
 ## §0 NWT 三原则（全部机械化在候选里）
 1. **免退款终态 `no_escrow` 须 positive 证据**，不得从 `kaspa_tx_log` 0 行的 absence 推（它有已知 ingest 缺口）。
