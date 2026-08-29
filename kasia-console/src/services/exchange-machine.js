@@ -772,6 +772,13 @@ export async function checkMatchedTimeout() {
 // (handleExchangePaid transitions to verifying first, then calls this).
 // The old /api/exchange/submit-payment REST endpoint is deprecated.
 
+function _alertPaymentSubmitWhileIntent(offer_id, localIntent, submittedTx, chain, layer) {
+  try {
+    sqlite.prepare(`INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at) VALUES (?, 'system', 'payment_submit_while_intent_pending', 'exchange-machine', 'warn', ?, ?, ?)`)
+      .run(crypto.randomUUID(), `🔴 offer ${String(offer_id).slice(0, 8)} 本地付款意图 ${localIntent} 未决, 收到外部 payment_tx ${String(submittedTx).slice(0, 16)}… — 不覆盖 (${layer}), 人工核`, JSON.stringify({ offer_id, local_intent: localIntent, submitted_tx: submittedTx, chain, layer }), new Date().toISOString());
+  } catch {}
+}
+
 /**
  * Taker submits a payment TX hash for on-chain verification.
  * Writes to verification_meta, kicks off async verification.
@@ -784,10 +791,7 @@ export function processPaymentSubmit({ offer_id, payment_tx, payment_chain }) {
   // P7-bis (ii) (Bettor ③ 8/29): 本地 auto-pay 的付款意图标记 PENDING:… 还在 (转账结果不明/失败) ⇒ 不许被对端/HTTP 报的 hash 覆盖 (否则本地转账痕迹丢, reopen-guard 失明);
   // 只记事件, 人工核链后决定 (本地成功路会先用 _finalizePaymentIntent 把标记换成真 hash, 再到这里 ⇒ 不触发)。
   if (offer.payment_tx && String(offer.payment_tx).startsWith('PENDING:') && offer.payment_tx !== payment_tx) {
-    try {
-      sqlite.prepare(`INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at) VALUES (?, 'system', 'payment_submit_while_intent_pending', 'exchange-machine', 'warn', ?, ?, ?)`)
-        .run(crypto.randomUUID(), `🔴 offer ${offer_id.slice(0, 8)} 本地付款意图 ${offer.payment_tx} 未决, 收到外部 payment_tx ${String(payment_tx).slice(0, 16)}… — 不覆盖, 人工核`, JSON.stringify({ offer_id, local_intent: offer.payment_tx, submitted_tx: payment_tx, chain: payment_chain }), new Date().toISOString());
-    } catch {}
+    _alertPaymentSubmitWhileIntent(offer_id, offer.payment_tx, payment_tx, payment_chain, 'app-layer');
     return { error: 'payment_intent_pending', intent: offer.payment_tx };
   }
 
@@ -811,10 +815,16 @@ export function processPaymentSubmit({ offer_id, payment_tx, payment_chain }) {
   meta.submitted_at = now;
 
   // 同时写入 payment_tx 列 (UNIQUE index 会在并发 reuse 时抛 constraint 错误)
+  // P7-bis (ii) SQL 层兜底 (NWT (1), 唯一路原则): 谓词排除本地 PENDING 标记 —— 上面的应用层判只是早退, 正确性不靠它; changes=0 ⇒ 同一事件 + payment_intent_pending
   try {
-    sqlite.prepare(
-      'UPDATE exchange_offers SET verification_meta = ?, payment_tx = ?, updated_at = ? WHERE id = ?'
+    const _r = sqlite.prepare(
+      "UPDATE exchange_offers SET verification_meta = ?, payment_tx = ?, updated_at = ? WHERE id = ? AND (payment_tx IS NULL OR payment_tx NOT LIKE 'PENDING:%')"
     ).run(JSON.stringify(meta), payment_tx, now, offer_id);
+    if (_r.changes === 0) {
+      const cur = sqlite.prepare('SELECT payment_tx FROM exchange_offers WHERE id = ?').get(offer_id)?.payment_tx || null;
+      _alertPaymentSubmitWhileIntent(offer_id, cur, payment_tx, payment_chain, 'sql-predicate');
+      return { error: 'payment_intent_pending', intent: cur };
+    }
   } catch (dbErr) {
     console.log(`[exchange] processPaymentSubmit DB UNIQUE conflict: ${dbErr.message}`);
     return { error: 'payment_tx_reused_concurrent', db_error: dbErr.message };

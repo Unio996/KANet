@@ -63,6 +63,18 @@ await t('X-e (Bettor ③) processPaymentSubmit 遇本地 PENDING 标记 ⇒ 不�
   assert.strictEqual(r?.error, 'payment_intent_pending'); assert.strictEqual(ptx('pi_sub').payment_tx, m);
   assert.strictEqual(db.prepare(`SELECT count(*) AS n FROM events WHERE event_type = 'payment_submit_while_intent_pending'`).get().n, 1);
 });
+await t('X-e2 (NWT (1) SQL 层兜底) 绕过应用层直接跑源里逐字抽出的 UPDATE: 列为 PENDING ⇒ changes=0 列不动; 列 NULL ⇒ changes=1; 列为真 hash ⇒ changes=1(允许覆盖同值/对端值)', () => {
+  const EMS = readFileSync(join(here, 'exchange-machine.js'), 'utf8');
+  const m = EMS.match(/"(UPDATE exchange_offers SET verification_meta = \?, payment_tx = \?, updated_at = \? WHERE id = \? AND \(payment_tx IS NULL OR payment_tx NOT LIKE 'PENDING:%'\))"/);
+  assert.ok(m, '源里须有带谓词的 UPDATE (逐字)');
+  const stmt = db.prepare(m[1]);
+  const cur = ptx('pi_sub').payment_tx; assert.ok(cur.startsWith('PENDING:'));
+  assert.strictEqual(stmt.run('{}', TX('f'), new Date().toISOString(), 'pi_sub').changes, 0); assert.strictEqual(ptx('pi_sub').payment_tx, cur);
+  mkOffer('pi_null', { protocol_status: 'verifying' }); assert.strictEqual(stmt.run('{}', TX('1'), new Date().toISOString(), 'pi_null').changes, 1);
+  mkOffer('pi_hash', { protocol_status: 'verifying', payment_tx: TX('2') }); assert.strictEqual(stmt.run('{}', TX('2'), new Date().toISOString(), 'pi_hash').changes, 1);
+  // 应用层被绕过 (直接 processPaymentSubmit 但先把应用层判的前提破坏不可行) ⇒ 至少核: 源级 changes===0 分支存在且返回 payment_intent_pending
+  assert.ok(/if \(_r\.changes === 0\) \{[\s\S]*?return \{ error: 'payment_intent_pending'/.test(EMS), 'changes=0 分支缺');
+});
 db.close(); rmSync(dir, { recursive: true, force: true });
 console.log(`payment-intent: ${pass} PASS / ${fail} FAIL`);
 process.exit(fail ? 1 : 0);

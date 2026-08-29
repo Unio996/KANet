@@ -2193,6 +2193,10 @@ async function _fetchHedgePrice(exchange, side) {
 //   · _verifyAndComplete `:797` 用参数 payment_tx (真 hash), 不读列。 · reopen-guard (exchange-machine.guardReopenIfSettled) 读列非空 ⇒ 标记 = 已 settled (这正是要的 fail-closed)。
 //   · UNIQUE idx_exchange_offers_payment_tx_unique (v61) — 标记含 uuid 全局唯一。 · UI exchange.eta:1353 直接显示列值 ⇒ 失败留下的标记会显示 "PENDING:…" (operator 面, 可辨识, 非用户 DM)。
 //   · broker-buy-completion-watcher:112 只读 completed offer 的列 ⇒ 到 completed 时已是真 hash。 · tpf:2400 对端 paid 写入 (远端 maker) 列为 NULL 时才到, 不涉本机标记。
+//   · exchange-machine.processPaymentSubmit: 应用层早退 + SQL 谓词 `AND (payment_tx IS NULL OR payment_tx NOT LIKE 'PENDING:%')` 双层, 标记不被外部/HTTP 报的 hash 覆盖 (NWT (1) 唯一路)。
+//   · 🟡 UI kasia-console/src/ui/exchange.eta: `:533-537` 详情面板 `explorerTxUrl(chain, getPaymentTx())` 与 `:1357-1362 getExplorerUrl()` 都用列值拼 explorer 链接 ⇒ 失败/不明留下的标记会渲染
+//     `…/PENDING:…` 死链 (operator 面, 404, 不花钱不误状态); `:1353` 直接显示裸串。修一行 startsWith('PENDING:') = 用户面 = Owner 域, 本批不改 (部署单用户面第 3 处)。
+//   · cross-chain-verify.mjs / exchange-verifiers.js 不读该列 (grep `.payment_tx` 0); hold-monitor 不读 exchange_offers.payment_tx; tg-bot 无 payment_tx→URL。
 export const PAYMENT_INTENT_PREFIX = 'PENDING:';
 export function _reservePaymentIntent(db, offerId) {
   const marker = `${PAYMENT_INTENT_PREFIX}${String(offerId).slice(0, 8)}:${randomUUID().slice(0, 8)}`;
