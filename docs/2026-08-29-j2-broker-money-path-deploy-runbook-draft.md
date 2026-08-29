@@ -134,10 +134,9 @@
 - [ ] P2：首个 T2.5c 触发时 `chain_events` 里 `broker_fallback_intent` **先于** `broker_fallback_claim`（observed_at）
 - [ ] P11：一笔真实提币 ⇒ `user_ledger` 先有 `withdraw_pending:` 行再变 `withdraw_user_initiated:…`；余额在转账期间已减
 - [ ] hold-monitor（batch-1）首行含 `manual_refund_pending=` `fallback_ambiguous=`
+- [ ] **P7-bis reopen 门**：造/等一笔 `matched` 超时且 `payment_tx` 非空的 offer ⇒ 状态变 `verifying`（不是 `open`）、`payment_tx`/`taker` 仍在、`fund_locks` 仍 `locked`、`events` 有 `reopen_blocked_settled`；无 `payment_tx` 的照旧 reopen（现行为不变）；对端 `timeout_v1` 同门（`chain_events exchange_timeout` 带 `reopen_blocked:true`）
 
 ## §B2-5 🔴 用户面变更清单（2 处，随批报 Owner）+ DEFECT1b
-1. `exchange-machine.js` `dm_kas_delivered` DM：原 `TX: <txid>\n查看: https://explorer.kaspa.org/txs/<txid>`（TN12 上是死链）→ `formatTxReference(buildExplorerUrl(...))`。触发原因：`R-EXPLORER-URL-BYPASS` 规则挡 commit（既有硬编码，无 allow 标记）。**两种渲染样例（Owner 随批复核；`explorer-url.mjs:15-18` `buildExplorerUrl` testnet ⇒ null、mainnet ⇒ URL；`:51-54` `formatTxReference` = url ? url : `TX: <txid>`）**：
-   - **TN12（现 live）**：`✅ 已发出 5 KAS 到你 Kasia 钱包, 1-2 分钟到账.` ↵↵ `TX: 3f9a…c2e1` ↵↵ …（原：`TX: 3f9a…c2e1` ↵ `查看: https://explorer.kaspa.org/txs/3f9a…c2e1` ← 死链）
-   - **mainnet**：`✅ 已发出 5 KAS …` ↵↵ `https://explorer.kaspa.org/txs/3f9a…c2e1` ↵↵ …（🟡 与旧形不同：旧的是 `TX: <txid>` + `查看: <url>` 两行，新的是**只一行 URL、没有 `TX:` 前缀**——`formatTxReference` 的既有语义如此，`broker-state-authority.js:43` 已这样用；若 Owner 要保留 mainnet 两行形，改 `formatTxReference` 是另一处用户面）
+1. `exchange-machine.js` `dm_kas_delivered` DM（NWT 取 **(B)**，batch-2 头已改）：内联 `buildExplorerUrl`；**mainnet 两行原样不变**（`TX: <txid>` + `查看: <url>`）；**TN12 只剩 `TX: <txid>`**（去掉死链 `查看: https://explorer.kaspa.org/txs/<txid>`）。不碰 `formatTxReference`（免 `broker-state-authority.js:43` 连坐）⇒ **用户面 delta 只剩 TN12 一处**。触发原因：`R-EXPLORER-URL-BYPASS` 规则挡 commit（既有硬编码，无 allow 标记）。
 2. `conversations.js` 拒回：**逐字复用** `tg-bot/i18n.mjs:428 service_busy`「⏳ 系统繁忙，请稍后再试。」——零新造文案；只在 rejectAfterMs 触发时出现。
 - **DEFECT1b（新，NWT 定级）**：`_executeHedge` 门 `SELECT meta FROM exchange_offers`（`trade-protocol-filter.js:2191-2193`）读不存在的列 ⇒ 抛 ⇒ 三处调用全吞 ⇒ **hedge 从未在 live 跑过**（bak `chain_events hedge%` = 0 条印证）。DEFECT1 修传参**不改变**这一点（安全）。要真开对冲 = 改读 `metadata` + 因写方全置 `hedge_enabled:true` 而等于对所有 broker offer 开 CEX 对冲 ⇒ Owner 级决定，独立批。
