@@ -138,6 +138,9 @@ t('G1 import-surface guard: spawn lint R-TESTONLY-EXPORT-IN-PROD — 两生产�
     ['prod_fixture_import.mjs', "import { clean } from './helper.fixture.mjs';\nexport const e = clean;\n", 1, '轴 3: 生产 import .fixture (relaunder 入口) ⇒ 红'],
     ['prod_symbol_in_string.mjs', 'const doc = "_fooForTests"; // _barForTests\nexport const f = doc;\n', 0, '④: 符号只在字符串字面量/行尾注释 ⇒ 绿'],
     ['prod_real_ref.mjs', 'const _realForTests = () => 1;\nexport const g = _realForTests();\n', 2, '④: 真定义+真调用 ⇒ 2 (两行各 1)'],
+    // v5 (Codex 2ce3f1a9 TG-4): ESM 副作用 import 形
+    ['prod_side_effect_import.mjs', "import './helper.testonly.mjs';\nexport const h = 1;\n", 1, 'TG-4: 生产副作用 import (无 from) ⇒ 红'],
+    ['side_effect.test.mjs', "import './helper.testonly.mjs';\nexport const i = 1;\n", 0, 'TG-4: test-context 同形 ⇒ 绿'],
   ];
   try {
     for (const [name, body, want, why] of CASES) {
@@ -148,6 +151,21 @@ t('G1 import-surface guard: spawn lint R-TESTONLY-EXPORT-IN-PROD — 两生产�
       if (want > 0) assert.ok(new RegExp(name.replace('.', '\\.') + ':1:\\d+').test(r1.stdout + r1.stderr), `${name} 须报 文件:行:列`);
     }
   } finally { for (const [name] of CASES) { try { unlinkSync(join(posDir, name)); } catch {} } try { rmdirSync(posDir); } catch {} }
+});
+t('G2 (Codex 2ce3f1a9 TG-3) 仓级不变量: 无参 lint 默认 walk 必须盖 kasia-relay/src — 在未列的 relay 子目录临时建生产文件 import testonly ⇒ 无参跑 lint 逮到 (R-TESTONLY ≥1 且报该文件); 跑完删', () => {
+  const { spawnSync } = _cp;
+  const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+  const lint = join(ROOT, 'scripts', 'lint-kanet.mjs');
+  const tmpDir = join(ROOT, 'kasia-relay', 'src', 'lib', 'zz-tg3-tmp'); mkdirSync(tmpDir, { recursive: true });
+  const leak = join(tmpDir, 'leak.mjs');
+  writeFileSync(leak, "import * as x from '../recovery-lock-builder.testonly.mjs';\nexport const leak = x;\n");
+  try {
+    const r = spawnSync(process.execPath, [lint], { cwd: ROOT, encoding: 'utf8', timeout: 300000 });   // 🔴 无参 = 默认 walk
+    const out = r.stdout + r.stderr;
+    const m = out.match(/R-TESTONLY-EXPORT-IN-PROD: (\d+) hit/);
+    assert.ok(m && Number(m[1]) >= 1, '无参 lint 没逮到 relay 子目录的生产 testonly import ⇒ 默认 walk 不盖 kasia-relay/src');
+    assert.ok(/zz-tg3-tmp[\\/]leak\.mjs:1/.test(out), '须报到该文件');
+  } finally { try { unlinkSync(leak); } catch {} try { rmdirSync(tmpDir); } catch {} }
 });
 console.log(`recovery-lock-builder: ${pass} PASS / ${fail} FAIL`);
 process.exit(fail ? 1 : 0);

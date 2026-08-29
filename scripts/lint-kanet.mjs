@@ -56,7 +56,8 @@ function* walk(dir, ext = ['.js', '.mjs']) {
 const argv = process.argv.slice(2);
 const targets = argv.length > 0
   ? argv.map(p => path.resolve(p)).filter(exists)
-  : [...walk(path.join(ROOT, 'kasia-console/src')), ...walk(path.join(ROOT, 'agent-mind/src')), ...walk(path.join(ROOT, 'agent-adapter/src')), ...walk(path.join(ROOT, 'scripts'))];
+  : [...walk(path.join(ROOT, 'kasia-console/src')), ...walk(path.join(ROOT, 'agent-mind/src')), ...walk(path.join(ROOT, 'agent-adapter/src')), ...walk(path.join(ROOT, 'scripts')),
+     ...walk(path.join(ROOT, 'kasia-relay/src'), ['.js', '.mjs', '.cjs'])];   // TG-3 (Codex 2ce3f1a9, 2026-08-29): kasia-relay/src 此前从未进默认 walk —— 恰是 builder/cltv/*.testonly.mjs 所在; 无参 lint = 仓级不变量必须盖它
 
 console.log(`[lint-kanet] scanning ${targets.length} files...`);
 
@@ -1858,7 +1859,7 @@ checkR_SQL_TIME_STRINGCMP(); // R-SQL-TIME-STRINGCMP (2026-08-29)
 //     轴 1 符号: 生产上下文里 `_[A-Za-z0-9]+ForTests` 【定义或引用一律 ERROR】(定义只准在 test-context; 不豁免 export function/const 定义行)。
 //            扫前去掉字符串字面量 ('…' "…" `…` 单行) 与行尾 `//` 注释 (v4, NWT ④): 字符串/注释里提名字不算引用 (known-false-positive 修法, 见下)。
 //     轴 2/3 路径: 生产上下文任何 static import / re-export(`export … from`) / `require(` / 动态 `import(` 的【字面量】目标含任一 test-context 标记
-//            (`.test.` / `.fixture.` / `.testonly.` / `test-framework/` / `__testonly__/`) ⇒ ERROR, 不看符号/别名 (import * as / await import() / export * from 都逮)。
+//            (`.test.` / `.fixture.` / `.testonly.` / `test-framework/` / `__testonly__/`) ⇒ ERROR, 不看符号/别名 (import * as / await import() / export * from / TG-4 副作用形 `import './x.testonly.mjs';` 都逮)。
 //            轴 3 (全 test-context 路径) 干净关掉 "fixture-relaunder": 白名单 .fixture.mjs 用干净名 re-export testonly 符号、生产再 import 干净名 —— 生产 import .fixture 本身就红。
 //   test-context 白名单 (NWT 8/29): *.test.mjs|js / *.fixture.mjs|js / *.testonly.mjs|js / test-framework/** / __testonly__/ (注: __testonly__ 目录名撞 .gitignore 的 _* 规则, 实际用同目录 *.testonly.mjs)。
 //   🔴 known-escape (regex 逮不到的蓄意规避; NWT MUST 写明, 不静默) —— 两族:
@@ -1871,7 +1872,7 @@ checkR_SQL_TIME_STRINGCMP(); // R-SQL-TIME-STRINGCMP (2026-08-29)
 //   known-false-positive: 符号轴对多行模板字符串/块注释中段的名字仍会报 (只去单行字面量与整行/行尾注释); 真需要时用 `lint-allow` 行标不是本规则的机制 —— 改写成不含 `_xxxForTests` 字面即可 (生产代码本来就不该提它)。
 //   判据: 去整行注释 (// | * | /*) 后逐行扫; 报 文件:行:列。只扫 targets (staged/传入)。guard test (recovery-lock-builder.test.mjs) 用 spawn 跑本脚本 + 9 条阳性/阴性对照 + 两轴突变。
 const TESTONLY_SYM_RE = /\b_[A-Za-z0-9]+ForTests\b/g;
-const TESTONLY_PATH_RE = /(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*)['"`][^'"`]*(?:\.test\.|\.fixture\.|\.testonly\.|(?:^|\/)test-framework\/|__testonly__\/)[^'"`]*['"`]/g;
+const TESTONLY_PATH_RE = /(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*|^\s*import\s+)['"`][^'"`]*(?:\.test\.|\.fixture\.|\.testonly\.|(?:^|\/)test-framework\/|__testonly__\/)[^'"`]*['"`]/g;
 export function isTestContextPath(relPosix) {
   return /\.test\.m?js$/.test(relPosix) || /\.fixture\.m?js$/.test(relPosix) || /\.testonly\.m?js$/.test(relPosix) || /(^|\/)test-framework\//.test(relPosix) || /(^|\/)__testonly__\//.test(relPosix);
 }
