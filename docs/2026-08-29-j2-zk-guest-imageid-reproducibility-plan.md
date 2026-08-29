@@ -1,6 +1,6 @@
-# ZK guest `imageId` 跨机可复现 · 方案 v0.1（不重建 guest · 不动 live · younio 不装工具链）
+# ZK guest `imageId` 跨机可复现 · 方案 v0.2（不重建 guest · 不动 live · younio 不装工具链）
 
-> **Status**: DRAFT v0.1 · J2 2026-08-29 · Bettor 排（低优先，READY 前）· 起因：J1 P1 回执 `imageId_younio = n/a`，根因在 da9 侧 · NWT 审后报备执行。
+> **Status**: v0.2 = **第二步报备稿** · J2 2026-08-29 · Bettor 排（低优先，READY 前）· 起因：J1 P1 回执 `imageId_younio = n/a`，根因在 da9 侧 · v0.2 新增 §4（输入齐 + 两条纠正 + 盘上零构建复现证据 + 第二步三个 diff 的逐字内容）· **§4.3 的 diff 未落，等 NWT 一句**。
 
 ## §0 先纠一个事实：Cargo.lock 早已入库
 - `zk-payout-guest/Cargo.lock` + `zk-payout-guest/methods/guest/Cargo.lock` **自 `68822fff`（2026-07-07）起 tracked**（`git ls-files` 可见）；`zk-payout-guest/.gitignore` 里有 Bettor 当时裁定的注释："故意提交…这两份 lock 是 J1 机器产出 c9918501 的那份…别在其他机器上重新 cargo update"。
@@ -31,3 +31,64 @@
 - 步骤 2 改 `rust-toolchain.toml`/`methods/Cargo.toml` 会让下一次 `cargo build` 重编 guest；**若 docker 路径产出的 image_id ≠ c9918501**（很可能——canonical 是非 docker 宿主机产物），**不得**改 `ZK_GATE.imageId`：那是"新 covenant"（`zk-close-builder.mjs:42` 注释 "改 guest=改此=新 covenant"），归 D-005/Owner。本稿目标只是"让**现有** canonical 可复现、且今后任何改动可复现"；若证明现有 canonical 在任何配方下都不可复现，那是一条**必须写进 D-015 的事实**，不是本稿要修的。
 - 步骤 1 需要 J1 角色 B 的 WSL 只读命令（提权暂停中 ⇒ 等 Bettor 解禁或改由 KANet-UI 非提权跑 `wsl.exe`）。
 - 不碰 `D:/rusty-kaspa-zksdk-isolated`（那是 zk-sdk 的 WASM，与 guest image_id 无关；P1 已证 gateTmplHash 只绑 imageId）。
+
+## §4 第二步报备稿（2026-08-29 · 输入 = J1 r17 `…T07-50Z-j1-canonical-imageid-toolchain-recipe.md` + J2 da9 WSL 只读读数）
+
+### §4.0 输入齐（两方实测，全只读）
+| 项 | 值 | 谁测 |
+|---|---|---|
+| host `rustc -V` / `cargo -V` | `1.96.1 (31fca3adb 2026-06-26)` / `1.96.1 (356927216)`；`rustup` active = `stable-x86_64-unknown-linux-gnu`（channel 别名）| J1 r17 |
+| `rzup` | 未安装 | J1 r17 |
+| `cargo-risczero` / `r0vm` | `3.0.5` / `3.0.5`（`/root/.cargo/bin/`）| J1 r17；J2 复核 |
+| **guest 工具链（J1 未报，J2 补）** | `~/.rustup/toolchains/risc0 → /root/.risc0/toolchains/v1.94.1-rust-x86_64-unknown-linux-gnu`（symlink 建于 2026-07-07 12:19）；`rustc +risc0 -V` = **`1.94.1-dev (06e01cb0d 2026-04-09)`**；`cargo +risc0 -V` = `1.94.1-dev (29ea6fb6a)`；含 `riscv32im-risc0-zkvm-elf` target | J2 WSL 只读 |
+| `risc0-build` 源（registry）| `~/.cargo/registry/src/index.crates.io-…/risc0-build-3.0.5/`：docker 接口 = `GuestOptions.use_docker: Option<DockerOptions>`（`config.rs:100`）经 `embed_methods_with_options`；env 只认 `RISC0_BUILD_DEBUG / RISC0_BUILD_LOCKED / RISC0_DOCKER_CONTAINER_TAG / RISC0_GUEST_LOGFILE / RISC0_RUST_SRC / RISC0_SKIP_BUILD`（**无 `RISC0_USE_DOCKER`**）；镜像 `risczero/risc0-guest-builder:{tag}`（`docker.rs:147`）| J2 WSL 只读 |
+| docker | WSL 内可见 `/mnt/c/Program Files/Docker/Docker/resources/bin/docker`（Docker Desktop）| J2 |
+| Cargo.lock 两份 | 入库 `68822fff`（§0）| 三方 |
+
+### §4.1 两条纠正（对 §1 表与 J1 r17 §6）
+1. **「RISC-V guest 工具链无处钉」不成立**：rzup 没装，但 guest 工具链**在**（`~/.risc0/toolchains/v1.94.1-…`，由旧版 `cargo risczero install` 放的），且它的身份可复述 = `rustc 1.94.1-dev (06e01cb0d)`。它才是 guest ELF 的编译器（risc0-build 以 `cargo +risc0 build --target riscv32im-risc0-zkvm-elf` 编 guest）。§1 #1 改为"**已钉在盘上、未记进仓**"。
+2. **host `channel = "stable"` 浮动对 guest ELF 不承重**：host rustc 只编 host 二进制与 `build.rs`（`build.rs` 只调 `embed_methods()`）；guest 字节由 risc0 工具链 + Cargo.lock + risc0-build 3.0.5 + 源码决定。钉 `channel` 便宜且该做（让 host 侧可复述），但**主锚是 §4.0 第 4 行**，不是它。J1 r17 §6 #1 的"上游发版即漂移 ⇒ imageId 可能变"对 host 不成立、对 guest 工具链才成立——而 guest 工具链是本地固定目录，不随 `rustup update` 动。
+
+### §4.2 🟢 盘上已有零构建的同机复现证据（J2 2026-08-29 只读，不 build 不 prove）
+- `zk-payout-guest/target/release/build/methods-306cf5e318a2f6e7/out/methods.rs`（mtime **2026-07-12 03:17**，WSL 在 `/mnt/d/kanet-tn12/zk-payout-guest` 构建；`zk-prove-worker.mjs:70` 就是这样 `wsl.exe … cd <GUEST_HOST_DIR> && cargo run --release`）：
+  `PAYOUT_ID = [25530825, 2934967257, 144177066, 2173437718, 141306088, 953105449, 3399976846, 818815920]` → 每词 LE 拼 32 B = **`c9918501d90bf0aeaaf7970816078c81e8286c08293ccf388e87a7cab023ce30` = canonical（8/8 词）**。
+- guest ELF `target/riscv-guest/methods/payout/riscv32im-risc0-zkvm-elf/release/payout.bin`：366,748 B，sha256 `885c6fca4914cd3fce4463d94acd517c…`；同目录 `.rustc_info.json`：`release: 1.94.1-dev`、`commit-hash: 06e01cb0d0077cdbda6b930b2f23c2f05c8a2421` ⇒ 与 §4.0 第 4 行同一工具链。
+- ⇒ **"同机重建 == canonical" 在 2026-07-12 那次构建成立**（比 `68822fff` 晚 5 天，是锁入库后的构建）。它证的是"当时"，不是"今天重建"——今天重建归 §4.3 ③ 的 `--build` 模式。
+
+### §4.3 第二步 = 三个 diff（逐字；**未落**，NWT 一句后我落；均不动 live、不改 `ZK_GATE.imageId`）
+① `zk-payout-guest/rust-toolchain.toml`（一行）：
+```diff
+-channel = "stable"
++channel = "1.96.1"   # 2026-08-29 钉版(J1 r17 实测); host 侧; guest ELF 由 ~/.risc0/toolchains/v1.94.1 编, 见 TOOLCHAIN.lock.md
+```
+② 新文件 `zk-payout-guest/TOOLCHAIN.lock.md`（人读）+ `TOOLCHAIN.lock.json`（机读，`verify-image-id.sh` 读）：
+```json
+{ "canonical_image_id": "c9918501d90bf0aeaaf7970816078c81e8286c08293ccf388e87a7cab023ce30",
+  "guest_elf_sha256_prefix": "885c6fca4914cd3fce4463d94acd517c", "guest_elf_bytes": 366748,
+  "guest_toolchain": { "rustup_name": "risc0", "path": "/root/.risc0/toolchains/v1.94.1-rust-x86_64-unknown-linux-gnu", "rustc": "1.94.1-dev (06e01cb0d 2026-04-09)", "commit": "06e01cb0d0077cdbda6b930b2f23c2f05c8a2421" },
+  "host_toolchain": { "rustc": "1.96.1 (31fca3adb 2026-06-26)", "channel_pinned": "1.96.1" },
+  "risc0": { "risc0-build": "3.0.5", "risc0-zkvm": "3.0.5", "risc0-zkvm-platform": "2.2.2", "cargo-risczero": "3.0.5", "r0vm": "3.0.5" },
+  "cargo_lock_commit": "68822fff", "canonical_build": { "machine": "da9 WSL Ubuntu-24.04", "date": "2026-07-12T03:17+07:00" },
+  "recorded_by": "J1 r17 + J2 WSL readonly 2026-08-29" }
+```
+③ 新文件 `zk-payout-guest/scripts/verify-image-id.sh`（**不 prove**；两模式）：
+```bash
+#!/usr/bin/env bash
+# 用法: verify-image-id.sh [--build]   默认只读现有 target/ 里的 methods.rs (零构建); --build 先 cargo build --release -p methods (重编 guest, 分钟级)
+set -euo pipefail; cd "$(dirname "$0")/.."
+[ "${1:-}" = "--build" ] && cargo build --release -p methods
+f=$(ls -t target/release/build/methods-*/out/methods.rs | head -1)
+words=$(grep -oP 'PAYOUT_ID: \[u32; 8\] = \[\K[^\]]+' "$f")
+got=$(python3 -c "import struct,sys; w=[int(x) for x in '$words'.split(',')]; print(struct.pack('<8I',*w).hex())")
+want=$(grep -oP '"canonical_image_id": "\K[0-9a-f]{64}' TOOLCHAIN.lock.json)
+echo "methods.rs=$f"; echo "got =$got"; echo "want=$want"
+[ "$got" = "$want" ] && echo "IMAGE_ID OK" || { echo "IMAGE_ID MISMATCH"; exit 1; }
+```
+　第一次跑：da9 WSL `bash zk-payout-guest/scripts/verify-image-id.sh`（零构建，预期 OK = §4.2 机械化）；第二次 `--build`（同机今日重建 == canonical 才算"第二步自证"完成；**不等 ⇒ 不改任何 imageId，记事实进本稿 §3**）。
+- 附带：§0 说的 `zk-close-builder.mjs:28-31` 陈注释，同批删四行换一句指向本稿（产品代码注释，零行为）。
+
+### §4.4 第三步（docker 确定性）不在本批：risc0-build 3.0.5 **没有** env 开关，要改 `methods/build.rs` 为 `embed_methods_with_options` + `DockerOptionsBuilder`（`config.rs:77-100` 示例），tag 由 `RISC0_DOCKER_CONTAINER_TAG` 定；容器内工具链 ≠ 本地 v1.94.1 ⇒ docker 产出的 imageId **几乎必然 ≠ c9918501** ⇒ 这是"未来改 guest 时的可复现路"，不是"复现现有 canonical 的路"；§3 风险条照旧（不改 `ZK_GATE.imageId`，归 D-005/Owner）。rzup 安装归 J1 角色 B 令下。
+
+### §4.5 边界
+- J2 的 WSL 读数 = da9 本机 root WSL（与 J1 r17 同一台），命令全只读（`ls / cat / grep / rustc -V / stat / sha256sum`），WSL 查完不驻留。
+- §4.2 证据依赖盘上 `target/`（gitignored、可被 `cargo clean` 抹掉）⇒ 这也是 ② 要把它抄进仓的原因。
