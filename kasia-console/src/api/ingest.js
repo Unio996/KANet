@@ -109,6 +109,27 @@ export async function registerIngestRoutes(fastify) {
     }
   });
 
+  // ── POST /ingest/coverage-advance — indexer 声明"该 finality-safe 块的全部命中 tx 已 2xx" ⇒ 推进 kaspa_tx_log_coverage ──
+  // (2026-08-29 J2, L2 期 1 保守 coverage, 设计 fd146fe2 + DATABASE.md kaspa_tx_log_coverage 段; migrate v199)
+  // 推进是账的唯一写法; 相邻 ≤ ADJ 延伸, 否则开新行 (洞可见); 乱序/重复 ⇒ skipped 不回退。
+  // Body: { daaScore, addresses[], indexer, network }
+  const COVERAGE_ADJ_DAA = Number(process.env.COVERAGE_ADJ_DAA) || 20;   // 待离线实测 spc_daa_index 单块跨度 P99 后调 (fd146fe2 R3); 小值只多洞不 over-claim
+  fastify.post('/ingest/coverage-advance', async (request, reply) => {
+    const { daaScore, addresses, indexer, network } = request.body || {};
+    if (!Number.isInteger(daaScore) || daaScore < 0 || !Array.isArray(addresses) || !addresses.length || !indexer || !network) {
+      return reply.code(400).send({ error: 'daaScore (int), addresses[] (non-empty), indexer, network required' });
+    }
+    if (addresses.length > 5000 || addresses.some((a) => typeof a !== 'string' || a.length > 120)) return reply.code(400).send({ error: 'addresses malformed' });
+    try {
+      const { sqlite } = await import('../db/client.js');
+      const { advanceCoverage } = await import('../lib/indexer-coverage.mjs');
+      const r = advanceCoverage(sqlite, { network: String(network), addresses, daa: daaScore, indexer: String(indexer).slice(0, 80), adj: COVERAGE_ADJ_DAA });
+      return reply.code(201).send({ ok: true, ...r });
+    } catch (err) {
+      return reply.code(500).send({ error: err.message });
+    }
+  });
+
   // ── POST /ingest/spc-tip-heartbeat — Relay reports its locally-observed tip daaScore ──
   // Console 完整性巡检据此判断 spc_daa_index 写入器是否停更(§2.2 note①, 9ez2u 同族根因防线)，
   // 不直连 kaspad RPC(Relay 唯一链上出口, docs/KANet-Positioning.md)。

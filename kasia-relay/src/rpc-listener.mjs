@@ -19,7 +19,7 @@ import { acceptHandshake, sendKaspa, sendMessage } from './chain.mjs';
 import { getAIReply } from './ai.mjs';
 import { routeMessage } from './router.mjs';
 import { loadSeen, saveSeen } from './state.mjs';
-import { ingestMessage, ingestReply, ingestTx, ingestHandshake, ingestKaspaTx, ingestSpcDaaBlock, ingestSpcTipHeartbeat } from './ingest.mjs';
+import { ingestMessage, ingestReply, ingestTx, ingestHandshake, ingestKaspaTx, ingestSpcDaaBlock, ingestSpcTipHeartbeat, ingestCoverageAdvance } from './ingest.mjs';
 
 const { RpcClient, Encoding } = kaspa;
 const Resolver = kaspa.Resolver || null;  // npm ^0.13.0 removed Resolver
@@ -309,7 +309,37 @@ function _trackBlockForChainReader(block) {
   if (isChainBlock) _pendingFinalityQueue.push({ hash, daaScore: daa, timestamp_ms });
   for (const finalized of drainFinalitySafeBlocks(_pendingFinalityQueue, _maxSeenDaaScore, SPC_INDEX_FINALITY_DEPTH)) {
     ingestSpcDaaBlock({ daaScore: finalized.daaScore, blockHash: finalized.hash, timestampMs: finalized.timestamp_ms });
+    // 2026-08-29 (J2, L2 期 1 保守 coverage): 同一 finality 点推进 coverage —— 只在该块全部 kaspa-tx POST 都 ok 后 (见 advanceCoverageForBlock)
+    advanceCoverageForBlock(finalized.hash, finalized.daaScore).catch((e) => log(`coverage-advance error (non-fatal): ${e?.message || e}`));
   }
+}
+
+// ── 2026-08-29 (J2, L2 期 1 保守 coverage; 设计 fd146fe2 §0 R1/R2 + §2) ──
+// 每块的 kaspa-tx ingest promise 集 (blockAdded 时收集) + 当时的 watched 集快照; 到 finality 时:
+//   allSettled 全 ok (无 skipped/失败) ⇒ ingestCoverageAdvance(daa, 快照地址) ; 否则不推进 = 账上留洞 (不需要 punch)。
+//   无命中 tx 的块 (promise 集为空) 也推进 —— "这块我看了, 没有你的 tx" 同样是覆盖。
+//   快照用【索引那一刻】的 watched 集 (不是 finality 时的), 因为覆盖断言的是"当时在看谁"。
+const _blockIngest = new Map();           // blockHash → { promises: Promise[], addresses: string[] }
+const BLOCK_INGEST_MAX = 5000;             // 5000 块 ≈ 8 min @10bps, 远大于 finality 50 深; 超了丢最老 (= 那些块不推进 = 洞, 方向安全)
+function _rememberBlockIngest(blockHash, promise) {
+  if (!blockHash) return;
+  let rec = _blockIngest.get(blockHash);
+  if (!rec) { rec = { promises: [], addresses: Array.from(_watchedAddresses) }; _blockIngest.set(blockHash, rec); if (_blockIngest.size > BLOCK_INGEST_MAX) _blockIngest.delete(_blockIngest.keys().next().value); }
+  if (promise) rec.promises.push(promise);
+}
+/** 纯判定 (导出供单测): allSettled 结果全部 fulfilled 且 value.ok===true 才算全成功 */
+export function allIngestOk(results) {
+  return results.every((r) => r.status === 'fulfilled' && r.value && r.value.ok === true);
+}
+async function advanceCoverageForBlock(blockHash, daaScore) {
+  const rec = _blockIngest.get(blockHash);
+  _blockIngest.delete(blockHash);
+  const addresses = rec ? rec.addresses : Array.from(_watchedAddresses);
+  if (!addresses.length) return { advanced: false, reason: 'no_watched' };
+  const results = rec ? await Promise.allSettled(rec.promises) : [];
+  if (!allIngestOk(results)) return { advanced: false, reason: 'ingest_not_all_ok', failed: results.filter((r) => !(r.status === 'fulfilled' && r.value?.ok)).length };
+  const r = await ingestCoverageAdvance({ daaScore, addresses });
+  return { advanced: !!r?.ok, reason: r?.ok ? 'ok' : (r?.reason || r?.error || 'post_failed') };
 }
 
 // Pure function (exported for unit test — NWT MUST-FIX #o0056j regression coverage): pops every
@@ -477,7 +507,8 @@ function indexBlockTxs(block) {
     const amountKas = matchedAmountSompi / 1e8;
 
     // Fire and forget — ingest.mjs handles backoff on Console failures
-    ingestKaspaTx({
+    // 2026-08-29: 记住本块每条 POST 的 promise (coverage 推进的前置: 全 ok 才推进)
+    _rememberBlockIngest(blockHash, ingestKaspaTx({
       txId,
       blockHash,
       blockTime,
@@ -485,7 +516,7 @@ function indexBlockTxs(block) {
       toAddress: matchedRecipient,
       amount: amountKas,
       outputs: outputSummary,
-    });
+    }));
 
     // Mark indexed so we don't re-report
     _indexedTxs.add(txId);

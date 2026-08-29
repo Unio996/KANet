@@ -751,6 +751,13 @@ startFaucetHealthCron();
 import { startSettleFailedAlertCron } from './lib/settle-failed-alert.mjs';
 startSettleFailedAlertCron();
 
+// 2026-08-29 (J2, broker-money-path 阶段 3): broker hold 队列监控 —— 只读 60 min tick, 四个数 (held / stuck_refunding / intent_stale / coverage_lag),
+// 同 settle-failed-alert 模式 (只读+告警, 不动任何钱路状态); BROKER_HOLD_MONITOR_ENABLED=0 可关。tick 函数具名 ⇒ L0 tick-registry 装了就自动计时。
+if (process.env.BROKER_HOLD_MONITOR_ENABLED !== '0') {
+  const { startBrokerHoldMonitor } = await import('./services/broker-hold-monitor.mjs');
+  startBrokerHoldMonitor();
+}
+
 // 查漏补缺(2026-07-04晚, J2撞见C盘0字节可用·curl全炸): disk full会静默拖垮全系统,之前没有任何
 // 监控(全靠J2手动碰见)。跟faucet-health/settle-failed-alert同款模式: 只读监控+告警,不做任何自动
 // 清理(删文件风险高,交operator判断哪些安全删)。

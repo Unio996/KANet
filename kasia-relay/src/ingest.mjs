@@ -13,22 +13,29 @@ const BACKOFF_THRESHOLD = 5;     // consecutive failures before backing off
 const BACKOFF_BASE_MS   = 10000; // 10s initial backoff
 const BACKOFF_MAX_MS    = 60000; // 60s max backoff
 
+// 2026-08-29 (J2, broker-money-path 阶段 3; L2 期 1 保守 coverage 设计 fd146fe2 §2-1, NWT GREEN):
+//   post() 改为【返回 promise】—— 之前不返回, 调用方根本不知成败 = coverage over-claim 的机械根源。
+//   语义不变: 仍 fire-and-forget 友好 (promise 【永不 reject】, 失败 resolve {ok:false}), 既有调用方忽略返回值零影响;
+//   需要成败的调用方 (rpc-listener 的 coverage 推进) await 它。backoff 期跳过 ⇒ {ok:false, skipped:true}。
+//   非 2xx 也算失败 (之前 .then 不看状态码 ⇒ 4xx/5xx 被当成功 ⇒ 也是 over-claim 源)。
 function post(path, body) {
-  if (!CONSOLE_URL || !INGEST_SECRET) return;
+  if (!CONSOLE_URL || !INGEST_SECRET) return Promise.resolve({ ok: false, skipped: true, reason: 'ingest_disabled' });
 
   const now = Date.now();
-  if (_failCount >= BACKOFF_THRESHOLD && now < _backoffUntil) return; // skip silently
+  if (_failCount >= BACKOFF_THRESHOLD && now < _backoffUntil) return Promise.resolve({ ok: false, skipped: true, reason: 'backoff' }); // skip silently
 
-  fetch(`${CONSOLE_URL}${path}`, {
+  return fetch(`${CONSOLE_URL}${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-ingest-secret": INGEST_SECRET },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(3000),
-  }).then(() => {
+  }).then((res) => {
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     if (_failCount > 0) {
       console.log(new Date().toISOString(), "[ingest] Console recovered");
       _failCount = 0;
     }
+    return { ok: true, status: res.status };
   }).catch(e => {
     _failCount++;
     if (_failCount === BACKOFF_THRESHOLD) {
@@ -41,6 +48,7 @@ function post(path, body) {
     } else {
       console.warn(new Date().toISOString(), "[ingest] warn:", e.message);
     }
+    return { ok: false, error: String(e?.message || e) };   // 永不 reject (fire-and-forget 调用方安全); coverage 推进据 ok=false 不推进
   });
 }
 
@@ -120,7 +128,7 @@ export function ingestTx({ traceId, txid, direction = "outbound", amount = null,
  * Phase 1 stress test S10B drove this — RPC UTXO verification is fragile after spend.
  */
 export function ingestKaspaTx({ txId, blockHash, blockTime, fromAddress, toAddress, amount, outputs }) {
-  post("/ingest/kaspa-tx", {
+  return post("/ingest/kaspa-tx", {
     txId,
     blockHash: blockHash || null,
     blockTime: blockTime || null,
@@ -143,6 +151,20 @@ export function ingestSpcDaaBlock({ daaScore, blockHash, timestampMs }) {
     daaScore,
     blockHash,
     timestampMs,
+    network: RELAY_NETWORK,
+  });
+}
+
+/**
+ * 2026-08-29 (J2, L2 期 1 保守 coverage, 设计 fd146fe2 §2): 推进 kaspa_tx_log_coverage 账。
+ * 🔴 调用方 (rpc-listener) 只在【该 finality-safe 块全部命中 tx 的 ingestKaspaTx 都 ok】后才调 —— 推进是唯一写法, 掉帖 = 不推进 = 洞。
+ * 本 POST 自身失败也 = 洞 (方向安全)。indexer 标识 = 'relay:<RELAY_NODE_ID>' (relay-manager 下发), 缺则 'relay:unknown'。
+ */
+export function ingestCoverageAdvance({ daaScore, addresses }) {
+  return post("/ingest/coverage-advance", {
+    daaScore,
+    addresses,
+    indexer: `relay:${process.env.RELAY_NODE_ID || "unknown"}`,
     network: RELAY_NETWORK,
   });
 }
