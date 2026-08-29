@@ -186,9 +186,12 @@ export async function handleMessage(peer, msg) {
     const rsv = reserveWithdraw(sqlite, { peer, asset: wAsset, chain: wChain, amount: wAmount });
     if (!rsv.ok) return rsv.reason === 'insufficient' ? `余额不足: ${wAsset} 现 ${Number(rsv.balance).toFixed(4)}, 提 ${wAmount} 不够 (可能有一笔提币刚在处理). 回 "余额" 查账.` : `提币参数不对 (${rsv.reason}).`;
     const { transferUsdt } = await import('../evm-transfer.js');
+    const { withTimeout } = await import('../../lib/with-timeout.mjs');
+    // NWT verify-flag (c) 8/29: evm-transfer 的链调用只靠库默认超时 (ethers v6 300 s / tronweb 未知) ⇒ 本地上限 120 s; 超时 = 结果不明 (底层不取消) ⇒ 走下面 catch 的 fail-closed 路
+    const WITHDRAW_TIMEOUT_MS = parseInt(process.env.BROKER_WITHDRAW_TIMEOUT_MS, 10) || 120_000;
     let wRes;
     try {
-      wRes = await transferUsdt(evmChain, brokerWallet.privkey_encrypted, payRow.pay_address, wAmount);
+      wRes = await withTimeout(transferUsdt(evmChain, brokerWallet.privkey_encrypted, payRow.pay_address, wAmount), WITHDRAW_TIMEOUT_MS, 'transferUsdt');
     } catch (e) {
       // 结果不明 (抛/超时): 不冲正 (fail-closed: 余额先扣着), 告警进 events, 人工核链后按 SOP 冲正或补 tx
       console.error(`[broker-v2] withdraw AMBIGUOUS peer=${peer.slice(-12)} ledger=${rsv.ledgerId}: ${e.message}`);

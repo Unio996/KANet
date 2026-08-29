@@ -11,7 +11,7 @@ let pass = 0, fail = 0;
 const t = (n, f) => { try { f(); pass++; console.log('[PASS] ' + n); } catch (e) { fail++; console.log('[FAIL] ' + n + ' :: ' + e.message); } };
 const W = ROUTER.slice(ROUTER.indexOf('const withdrawMatch = msg.match(WITHDRAW_REQUEST_REGEX)'), ROUTER.indexOf('const explorerMap = '));
 t('R1 顺序: reserveWithdraw( 在 transferUsdt( 之前; finalizeWithdraw( 在其后; 旧形 "转账后 INSERT INTO user_ledger" 不再存在', () => {
-  const iR = W.indexOf('reserveWithdraw(sqlite'), iT = W.indexOf('await transferUsdt('), iF = W.indexOf('finalizeWithdraw(sqlite');
+  const iR = W.indexOf('reserveWithdraw(sqlite'), iT = W.indexOf('transferUsdt(evmChain'), iF = W.indexOf('finalizeWithdraw(sqlite');
   assert.ok(iR > 0 && iT > iR && iF > iT, `reserve@${iR} transfer@${iT} finalize@${iF}`);
   assert.ok(!/INSERT INTO user_ledger[\s\S]*withdraw_user_initiated/.test(W), '残留转账后直接 INSERT 借记');
 });
@@ -20,8 +20,13 @@ t('R2 三态: 转账确定失败 ⇒ revertWithdraw; 抛/超时 ⇒ 不 revert +
   const amb = W.slice(W.indexOf('} catch (e) {'), W.indexOf('if (!wRes?.ok)'));
   assert.ok(!/revertWithdraw/.test(amb) && /withdraw_ambiguous/.test(amb) && /请勿重复提/.test(amb), 'ambiguous 分支形不对');
 });
+t('R4 (NWT (c)) transferUsdt 经 withTimeout(…, WITHDRAW_TIMEOUT_MS, "transferUsdt"), 超时落进 ambiguous catch (不冲正)', () => {
+  assert.ok(/withTimeout\(transferUsdt\(/.test(W), 'transferUsdt 未裹 withTimeout');
+  assert.ok(/WITHDRAW_TIMEOUT_MS = parseInt\(process\.env\.BROKER_WITHDRAW_TIMEOUT_MS, 10\) \|\| 120_000/.test(W));
+  const iW = W.indexOf('withTimeout(transferUsdt('); const iCatch = W.indexOf('} catch (e) {'); assert.ok(iW > 0 && iCatch > iW, '超时抛须落在 ambiguous catch');
+});
 t('R3 reserve 拒 insufficient 时不转账 (return 在 transferUsdt 之前)', () => {
-  const iRet = W.indexOf("if (!rsv.ok) return"); const iT = W.indexOf('await transferUsdt('); assert.ok(iRet > 0 && iRet < iT);
+  const iRet = W.indexOf("if (!rsv.ok) return"); const iT = W.indexOf('transferUsdt(evmChain'); assert.ok(iRet > 0 && iRet < iT);
 });
 t('C1 conversations.js: withPeerLock 引入, 五个 broker 入口 (v3/v2/buy/sell/llm) 都经 _serial(', () => {
   assert.ok(/import\('\.\.\/lib\/peer-serial-lock\.mjs'\)/.test(CONV));
