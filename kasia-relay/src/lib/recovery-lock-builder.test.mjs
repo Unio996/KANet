@@ -2,7 +2,10 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { loadRecoveryConfig, _loadRecoveryConfigWithMaxForTests, CLTV_ERR_CONFIG_OVERRIDE, planRecoveryDaa, canSubmitRecovery, assertRecoveryTxShape, RECOVERY_DAA_ENTRY } from './recovery-lock-builder.mjs';
+import { loadRecoveryConfig, CLTV_ERR_CONFIG_OVERRIDE, planRecoveryDaa, canSubmitRecovery, assertRecoveryTxShape, RECOVERY_DAA_ENTRY } from './recovery-lock-builder.mjs';
+import { _loadRecoveryConfigWithMaxForTests } from './recovery-lock-builder.testonly.mjs';   // test-only 变体已搬出生产模块 (NWT 8/29 only-path)
+import * as _cp from 'node:child_process';
+import { existsSync, readdirSync, mkdirSync, writeFileSync, unlinkSync, rmdirSync } from 'node:fs';
 import { CltvError, CLTV_ERR, DELAY_SANE_MAX_DAA, LOCK_TIME_THRESHOLD, MAX_TX_IN_SEQUENCE_NUM } from './cltv-locktime.mjs';
 let pass = 0, fail = 0;
 const t = (n, f) => { try { f(); pass++; console.log('[PASS] ' + n); } catch (e) { fail++; console.log('[FAIL] ' + n + ' :: ' + e.message); } };
@@ -19,6 +22,12 @@ t('G0 源级: 不含 _cltvLockTimeAllowZeroForTests; loadRecoveryConfig 内调 a
   const body = SRC.slice(SRC.indexOf('export function loadRecoveryConfig'), SRC.indexOf('const toBig'));
   assert.ok(/assertPositiveDelay\(/.test(body), 'loadRecoveryConfig(含其 impl) 没调 assertPositiveDelay');
   assert.ok(!/raw\.entry/.test(SRC.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n')), '代码里不得读 raw.entry (Codex A)');
+  // Codex 418fffbd + NWT 8/29 only-path: 两个生产模块去整行注释后不得含任何 *ForTests 符号 (定义也不许 —— surface 直接不存在)
+  const noComments = (s) => s.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+  const CLTV_SRC = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'cltv-locktime.mjs'), 'utf8');
+  assert.ok(!/ForTests/.test(noComments(SRC)), 'recovery-lock-builder.mjs 生产代码含 ForTests 符号');
+  assert.ok(!/ForTests/.test(noComments(CLTV_SRC)), 'cltv-locktime.mjs 生产代码含 ForTests 符号');
+  assert.ok(!/allowZero/.test(noComments(CLTV_SRC)), 'cltv-locktime.mjs 不得残留 allowZero 分支');
 });
 t('C1 loadRecoveryConfig: n=100 ok(bigint, frozen, entry 3); 字符串 "100" ok', () => { const c = loadRecoveryConfig({ n_recovery_delay_daa: 100 }); assert.strictEqual(c.nDelayDaa, 100n); assert.ok(Object.isFrozen(c)); assert.strictEqual(c.entry, RECOVERY_DAA_ENTRY); assert.strictEqual(loadRecoveryConfig({ n_recovery_delay_daa: '100' }).nDelayDaa, 100n); });
 t('C2 loadRecoveryConfig 拒: 0 / −1 / 缺 / null / 1e7(sane-max) / 5e11 / 非整数 / entry 非法', () => {
@@ -46,8 +55,10 @@ t('C5 test-only _loadRecoveryConfigWithMaxForTests(raw, 1000): 999 ok / 1000 拒
   assert.strictEqual(_loadRecoveryConfigWithMaxForTests({ n_recovery_delay_daa: 999 }, 1000).nDelayDaa, 999n);
   throwsCode(() => _loadRecoveryConfigWithMaxForTests({ n_recovery_delay_daa: 1000 }, 1000), CLTV_ERR.DOMAIN_MIXED);
   throwsCode(() => _loadRecoveryConfigWithMaxForTests({ n_recovery_delay_daa: 5, max: 9 }, 1000), CLTV_ERR_CONFIG_OVERRIDE);
-  const body = SRC.slice(SRC.indexOf('export function loadRecoveryConfig'), SRC.indexOf('export function _loadRecoveryConfigWithMaxForTests'));
+  const body = SRC.slice(SRC.indexOf('export function loadRecoveryConfig'), SRC.indexOf('const toBig'));
   assert.ok(/DELAY_SANE_MAX_DAA/.test(body) && !/raw\.max/.test(body), '生产装载口须用代码钉的 DELAY_SANE_MAX_DAA, 不读 raw.max');
+  assert.strictEqual(_loadRecoveryConfigWithMaxForTests({ n_recovery_delay_daa: 999 }, 1000)._unbranded_testonly, true, 'testonly 变体不带 BRAND');
+  throwsCode(() => planRecoveryDaa(_loadRecoveryConfigWithMaxForTests({ n_recovery_delay_daa: 999 }, 1000), { successorDaa: 1n }), CLTV_ERR.ARGS_MISSING);   // only-path: 自定 max 的 cfg 在生产路不可用
 });
 const cfg = loadRecoveryConfig({ n_recovery_delay_daa: 100 });
 t('P1 planRecoveryDaa 镜像探针 P: d=80,000,000, n=100 ⇒ E=lockTime=80,000,100 (<5e11), sequence 0n, sigPushes [0,3], earliest tip = E+1', () => {
@@ -90,6 +101,30 @@ t('T2 assertRecoveryTxShape 拒 N6/N7/N9/续 covenant/空输出: lockTime E−1 
   throwsCode(() => assertRecoveryTxShape(plan, { ...good, outputs: [{ value: 1n, covenant: { id: 'x' } }] }), CLTV_ERR.ARGS_MISSING);
   throwsCode(() => assertRecoveryTxShape(plan, { ...good, outputs: [] }), CLTV_ERR.ARGS_MISSING);
   throwsCode(() => assertRecoveryTxShape(plan, { ...good, inputs: [] }), CLTV_ERR.ARGS_MISSING);
+});
+// ── Codex 418fffbd wiring-time 要求 (Bettor GO 8/29): _loadRecoveryConfigWithMaxForTests 从生产模块导出, "test-only" 只是命名 ⇒ 机械 import-surface guard ──
+// 走 spawn 跑 scripts/lint-kanet.mjs (不 import 它: 顶层自执行 = import 即执行, 同 runner 那条坑) 的 R-TESTONLY-EXPORT-IN-PROD; 阳性对照证规则真活。
+t('G1 import-surface guard: lint R-TESTONLY-EXPORT-IN-PROD 对 kasia-relay/src/lib 两生产文件 + kasia-console/src/lib 生产 .mjs = 0 命中; 阳性对照 (scratch 临时文件 import _loadRecoveryConfigWithMaxForTests) 必报 1; 跑完删', () => {
+  const { spawnSync } = _cp;
+  const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+  const lint = join(ROOT, 'scripts', 'lint-kanet.mjs');
+  assert.ok(existsSync(lint), 'scripts/lint-kanet.mjs 不在');
+  const prodFiles = [join(ROOT, 'kasia-relay', 'src', 'lib', 'cltv-locktime.mjs'), join(ROOT, 'kasia-relay', 'src', 'lib', 'recovery-lock-builder.mjs')];
+  const consoleLib = join(ROOT, 'kasia-console', 'src', 'lib');
+  if (existsSync(consoleLib)) for (const f of readdirSync(consoleLib)) if (/\.(m?js)$/.test(f) && !/\.test\.m?js$/.test(f)) prodFiles.push(join(consoleLib, f));
+  const hits = (out) => { const m = String(out).match(/R-TESTONLY-EXPORT-IN-PROD: (\d+) hit/); return m ? Number(m[1]) : 0; };
+  const r0 = spawnSync(process.execPath, [lint, ...prodFiles], { cwd: ROOT, encoding: 'utf8', timeout: 120000 });
+  assert.ok(/\[lint-kanet\]/.test(r0.stdout + r0.stderr), 'lint 没跑起来: ' + (r0.stderr || '').slice(0, 200));
+  assert.strictEqual(hits(r0.stdout + r0.stderr), 0, `生产文件里出现 test-only 引用: ${(r0.stdout || '').split('\n').filter((l) => /ForTests/.test(l)).join(' | ').slice(0, 300)}`);
+  // 阳性对照 (证规则真活, 非 vacuous): scratch 临时生产形文件 import test-only 导出 ⇒ 必报 1
+  const posDir = join(ROOT, 'scratch', '_j2_testonly_guard_pos'); mkdirSync(posDir, { recursive: true });
+  const posFile = join(posDir, 'positive_control.mjs');
+  writeFileSync(posFile, "import { _loadRecoveryConfigWithMaxForTests } from '../../kasia-relay/src/lib/recovery-lock-builder.mjs';\nexport const cfg = 1;\n");   // 单行引用 ⇒ 恰 1 命中
+  try {
+    const r1 = spawnSync(process.execPath, [lint, posFile], { cwd: ROOT, encoding: 'utf8', timeout: 120000 });
+    assert.strictEqual(hits(r1.stdout + r1.stderr), 1, '阳性对照未被报 = 规则死/未接线');
+    assert.ok(/positive_control\.mjs:1:\d+/.test(r1.stdout + r1.stderr), '须报 文件:行:列');
+  } finally { try { unlinkSync(posFile); } catch {} try { rmdirSync(posDir); } catch {} }
 });
 console.log(`recovery-lock-builder: ${pass} PASS / ${fail} FAIL`);
 process.exit(fail ? 1 : 0);

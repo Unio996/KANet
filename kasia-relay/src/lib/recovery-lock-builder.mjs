@@ -18,27 +18,23 @@ const BRAND = new WeakSet();
 //   A. 入口身份属编译 ABI/接线, 不是运营可调参数 —— raw 里带 entry (哪怕是另一个合法整数) = 同一份配置能把钱路由到别的 covenant 分支 ⇒ 拒。
 //      entry 只从代码钉的 RECOVERY_DAA_ENTRY 来; 真合约 ABI 替换探针 ABI 时【重钉常量 + 验收证据】, 不暴露 override。
 //   B. 被验证的配置不能抬自己的上限 —— raw.max 进 assertPositiveDelay = 策略失效 (超长延迟可冻本金) ⇒ 拒; 生产只用代码钉的 DELAY_SANE_MAX_DAA。
-//      测试要自定 max 走 _loadRecoveryConfigWithMaxForTests (test-only, 名字自带警告; 同 _cltvLockTimeAllowZeroForTests 形)。
-const FORBIDDEN_RAW_KEYS = Object.freeze(['entry', 'max']);
+//      测试要自定 max ⇒ 走 recovery-lock-builder.testonly.mjs (同目录 *.testonly.mjs; __testonly__/ 撞 .gitignore _* 规则) (独立实现、不带 BRAND; Codex 418fffbd + NWT 8/29 only-path: 本生产模块【不导出任何 test-only 变体】, surface 直接不存在)。
+export const FORBIDDEN_RAW_KEYS = Object.freeze(['entry', 'max']);   // 导出 = inert 常量 (testonly 模块复用同一份禁用键表)
 export const CLTV_ERR_CONFIG_OVERRIDE = 'CLTV_CONFIG_OVERRIDE_FORBIDDEN';
-
-/** 装载恢复配置 —— 唯一入口, 内部强制 assertPositiveDelay (审点①); 返回前 freeze + BRAND.add (两层)。
- *  @param {object} raw  { n_recovery_delay_daa: bigint|number|string, label? }   🔴 不收 entry / max (见上)
- *  @returns {Readonly<{ nDelayDaa: bigint, entry: number }>} */
-export function loadRecoveryConfig(raw) {
-  return _loadRecoveryConfigImpl(raw, DELAY_SANE_MAX_DAA, false);
-}
-/** test-only: 自定 sane-max (构造"超 max 被拒"/"自定 max 内放行"向量用)。🔴 生产/恢复路绝不 import 此名。 */
-export function _loadRecoveryConfigWithMaxForTests(raw, max) {
-  return _loadRecoveryConfigImpl(raw, max, true);
-}
-function _loadRecoveryConfigImpl(raw, max, _testOnly) {
-  if (!raw || typeof raw !== 'object') throw new CltvError(CLTV_ERR.ARGS_MISSING, 'recovery config 缺失');
+export function assertNoRawOverride(raw) {   // 纯校验 (inert): raw 含 entry/max ⇒ throw; 无副作用无 BRAND
   for (const k of FORBIDDEN_RAW_KEYS) {
     if (Object.prototype.hasOwnProperty.call(raw, k)) throw new CltvError(CLTV_ERR_CONFIG_OVERRIDE, `recovery config 不得含 '${k}' (${k === 'entry' ? '入口身份由代码/ABI 钉, 非运营参数' : 'sane-max 由策略钉, 配置不能抬自己的上限'}): ${String(raw[k])}`);
   }
+}
+
+/** 装载恢复配置 —— 唯一入口, 内部强制 assertPositiveDelay (审点①, max = 代码钉的 DELAY_SANE_MAX_DAA, 不可参数化); 返回前 freeze + BRAND.add (两层)。
+ *  @param {object} raw  { n_recovery_delay_daa: bigint|number|string, label? }   🔴 不收 entry / max (见上)
+ *  @returns {Readonly<{ nDelayDaa: bigint, entry: number }>} */
+export function loadRecoveryConfig(raw) {
+  if (!raw || typeof raw !== 'object') throw new CltvError(CLTV_ERR.ARGS_MISSING, 'recovery config 缺失');
+  assertNoRawOverride(raw);
   if (raw.n_recovery_delay_daa === undefined || raw.n_recovery_delay_daa === null) throw new CltvError(CLTV_ERR.ARGS_MISSING, 'n_recovery_delay_daa 缺失 (恢复锁不能靠默认值实例化)');
-  const n = assertPositiveDelay(raw.n_recovery_delay_daa, raw.label || 'n_recovery_delay_daa', { max });
+  const n = assertPositiveDelay(raw.n_recovery_delay_daa, raw.label || 'n_recovery_delay_daa', { max: DELAY_SANE_MAX_DAA });
   const cfg = Object.freeze({ nDelayDaa: n, entry: RECOVERY_DAA_ENTRY });
   BRAND.add(cfg);
   return cfg;

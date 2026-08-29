@@ -29,17 +29,11 @@ const toBig = (v, i) => {
  * @param {Array<bigint|number>} bounds  各被锁输入的 E_i (脚本会 push 的值)
  * 规则: daa ⇒ 每个 0 <= E_i < 5e11; time ⇒ 每个 5e11 <= E_i < 2^63; 返回 max(E_i) (多输入 over-delay 保守方向)
  * 🔴 Codex 9eab914a ④ (funds-safety): daa 域 E=0 数学合法但 lock_time=0 = 共识【已终局/无锁】 ⇒ 恢复锁绝不能静默实例化零延迟
- *    ⇒ 一律拒 E==0 (CLTV_DELAY_NONPOSITIVE)。生产 API 【没有】allowZero 开关 (NWT 2026-08-29: 防误用);
- *    测试若需 E=0 形用 _cltvLockTimeAllowZeroForTests (test-only 导出, 名字自带警告)。恢复配置侧另用 assertPositiveDelay(n)。
+ *    ⇒ 一律拒 E==0 (CLTV_DELAY_NONPOSITIVE)。生产 API 【没有】allowZero 开关 (NWT 2026-08-29: 防误用)。
+ *    🔴 本模块【不导出任何 test-only 变体】(Codex 418fffbd + NWT 8/29 only-path): "无锁"对照向量用 cltv-locktime.testonly.mjs (同目录 *.testonly.mjs; __testonly__/ 目录名撞 .gitignore 的 _* 规则) (独立实现, 生产 surface 不存在)。
+ *    恢复配置侧另用 assertPositiveDelay(n)。
  */
 export function cltvLockTime(opts) {
-  return _cltvLockTimeImpl(opts, false);
-}
-/** test-only: 允许 daa 域 E=0 (构造"无锁"对照向量用)。🔴 生产/恢复路绝不 import 此名。 */
-export function _cltvLockTimeAllowZeroForTests(opts) {
-  return _cltvLockTimeImpl(opts, true);
-}
-function _cltvLockTimeImpl(opts, allowZero) {
   if (!opts || typeof opts !== 'object') throw new CltvError(CLTV_ERR.ARGS_MISSING, 'opts 缺失');
   const { domain, bounds } = opts;
   if (domain !== 'daa' && domain !== 'time') throw new CltvError(CLTV_ERR.ARGS_MISSING, `domain 须为 'daa'|'time', 实 ${String(domain)}`);
@@ -50,7 +44,7 @@ function _cltvLockTimeImpl(opts, allowZero) {
     const e = toBig(v, i);
     if (domain === 'daa') {
       if (!(e >= 0n && e < LOCK_TIME_THRESHOLD)) throw new CltvError(CLTV_ERR.DOMAIN_MIXED, `daa 域要求 0 <= E < ${LOCK_TIME_THRESHOLD}, bounds[${i}]=${e}`);
-      if (e === 0n && !allowZero) throw new CltvError(CLTV_ERR.DELAY_NONPOSITIVE, `daa 域 E=0 = lock_time 0 = 共识无锁; 恢复锁不得零延迟 (bounds[${i}])`);
+      if (e === 0n) throw new CltvError(CLTV_ERR.DELAY_NONPOSITIVE, `daa 域 E=0 = lock_time 0 = 共识无锁; 恢复锁不得零延迟 (bounds[${i}])`);
     } else if (!(e >= LOCK_TIME_THRESHOLD && e < TIME_DOMAIN_UPPER)) {
       throw new CltvError(CLTV_ERR.DOMAIN_MIXED, `time 域要求 ${LOCK_TIME_THRESHOLD} <= E < 2^63, bounds[${i}]=${e}`);
     }
