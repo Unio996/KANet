@@ -22,7 +22,9 @@ t('C1 拒因分类: 三种 CLTV 文本 + NotFinalized ⇒ lock-reject 带共识�
   assert.deepStrictEqual(classifyLockReject('x: mismatched locktime types -- tx locktime 0, stack locktime 5'), { kind: 'lock-reject', reason: 'domain_mismatch', consensus_site: 'opcodes/mod.rs:1034' });
   assert.strictEqual(classifyLockReject('locktime requirement not satisfied -- ...').reason, 'not_yet');
   assert.strictEqual(classifyLockReject('transaction input is finalized').reason, 'sequence_max');
-  assert.strictEqual(classifyLockReject('Rejected transaction abc: input #0 is not finalized').reason, 'not_finalized');
+  assert.strictEqual(classifyLockReject('Rejected transaction abc: transaction input #0 is not finalized').reason, 'not_finalized');   // 逐字 = errors/tx.rs:33 Display
+  assert.strictEqual(classifyLockReject('transaction input #3 is not finalized').consensus_site.startsWith('consensus/core/src/errors/tx.rs:33'), true);
+  assert.strictEqual(classifyLockReject('input #0 is not finalized').kind, 'inconclusive');   // 非逐字形不认 (防把别的 "finalized" 文本误归)
   assert.strictEqual(classifyLockReject('transaction has 1000 fees which is under the required amount').kind, 'inconclusive');
   assert.strictEqual(classifyLockReject('').kind, 'inconclusive');
 });

@@ -56,12 +56,20 @@ export function cltvSequence(seq = 0n) {
   return s;
 }
 
-/** 分类: 节点拒因文本 → 'construct-error'(我们的锁构造错) | 'lock-reject'(锁按预期拒, 用作负向量证据) | 'inconclusive' */
+/** 分类: 节点拒因文本 → 'lock-reject'(锁按预期拒, 用作负向量证据) | 'inconclusive'。
+ *  逐字文本来源 (git show 7b1e18cc:<path>, NWT 2026-08-29 复核):
+ *   - crypto/txscript/src/opcodes/mod.rs:1034  "mismatched locktime types -- tx locktime {}, stack locktime {}"
+ *   - crypto/txscript/src/opcodes/mod.rs:1038  "locktime requirement not satisfied -- locktime is greater than the transaction locktime: {} > {}"
+ *       ⚠ 同一文本也出现在 :1097 (OpCheckSequenceVerify/CSV 路径); 探针与 §6-3 恢复锁是【纯 CLTV】(无 CSV), 故本分类无歧义;
+ *         若将来同一脚本含 CSV, 须先按 opcode 上下文再分类.
+ *   - crypto/txscript/src/opcodes/mod.rs:1056  "transaction input is finalized"
+ *   - consensus/core/src/errors/tx.rs:33       #[error("transaction input #{0} is not finalized")]  ⇒ Display 逐字形 "transaction input #0 is not finalized"
+ */
 export function classifyLockReject(errText) {
   const s = String(errText || '');
   if (/mismatched locktime types/.test(s)) return { kind: 'lock-reject', reason: 'domain_mismatch', consensus_site: 'opcodes/mod.rs:1034' };
   if (/locktime requirement not satisfied/.test(s)) return { kind: 'lock-reject', reason: 'not_yet', consensus_site: 'opcodes/mod.rs:1038' };
   if (/transaction input is finalized/.test(s)) return { kind: 'lock-reject', reason: 'sequence_max', consensus_site: 'opcodes/mod.rs:1056' };
-  if (/not finalized/i.test(s)) return { kind: 'lock-reject', reason: 'not_finalized', consensus_site: 'tx_validation_in_header_context.rs:86' };
+  if (/transaction input #\d+ is not finalized/.test(s)) return { kind: 'lock-reject', reason: 'not_finalized', consensus_site: 'consensus/core/src/errors/tx.rs:33 (check_tx_is_finalized @ tx_validation_in_header_context.rs:86)' };
   return { kind: 'inconclusive', reason: 'other', consensus_site: null };
 }
