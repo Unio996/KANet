@@ -3188,6 +3188,7 @@ WHERE id IN (...) AND protocol_status IN ('verifying', 'pending_bettors')
   5. **别顺手加不适用的告警**。同一套里的"剪枝点冻结"判据对**新节点**有意义（追不上剪枝点移动），对**已有 190 万块的同步中节点**没有 —— 剪枝点本就周期性移动，接进去只会制造告警疲劳，把真信号淹掉。
 - 🔧 **机制**: `scripts/j1-younio-tick.ps1`（告警 A 重启频次 / B 剪枝点冻结 / C blockCount 零增量）、`scripts/j1-da9-tick.ps1`（接告警 A，只读探针 `scratch/j1-remote/ibdloop.ps1`）。对照实测坐实变量：同二进制、同 peer、同网络下 da9(61GB) 25.9h 重启 0 / 断连 0 / 重验 0，younio(7.6GB) 148h 重启 67 / 断连 103 / 重验 16064。
 - **同族**: 规则 **60**（观察窗口必须长于故障周期，否则"干净"是假的）—— 本条是它的**指标维度**对偶：窗口够长也没用，如果**测的量本身在故障态下是满的**。规则 **70**（"它从未执行过"与"它没留下痕迹"是两个命题）、规则 **72**（探针失效会伪装成被探测对象故障 ⇒ 探针自身也要留痕）、规则 **75**（"0"与"读不到"在某些 API 上不可区分）。
+- 📎 **附注（对偶·存量巡检，J1 2026-08-29 19:45Z 自报 · Bettor r32 记）**：本条讲**怎么设计不会瞎的监控**，没讲**怎么发现已经瞎掉的存量监控**——J1 立本条当天，younio 上就有他自己 8/22 留下的 `channel-monitor.mjs`（PID 10640）**空转 7 天**：进程活 ✓ / 11 MB ✓ / 无报错 ✓，而 `ssh -L 3201` 隧道早断、`monitor-lastseen-younio.json` 七天零更新、`curl 127.0.0.1:3201` 拒连。**存量巡检 = 枚举"我起过的所有长期进程"，逐个问它【最后一次产出真实数据】是什么时候**（端口/隧道仍在？状态文件 mtime？实测读一次？），不是问它活不活。同日反向同病：Bettor 把活着的 Monitor 误判为死（`TaskList` 不列 Monitor）——两边都没走到"最后一次真实产出"这一步。见 `docs/iteration/j1-inbox/2026-08-29T19-45Z-*`。
 
 ## 规则 81 —— `git worktree remove` / 任何递归删除**顺着 junction/symlink 进目标**：删 worktree 删掉了 live 主树的 `node_modules`（2026-08-29 · J2 自伤）
 - ❌ **错误**：侧 worktree 为了跑测试，把 `kasia-console/node_modules` 做成 **junction → `D:\kanet-tn12\kasia-console\node_modules`**（live 主树）。分支合完后 `git worktree remove scratch/_wt_tog`，报 `error: failed to delete '…': Invalid argument`，当"Windows 删目录失败"处理，`rm -rf` 收尾。
