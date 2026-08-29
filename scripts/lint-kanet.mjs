@@ -1753,6 +1753,105 @@ function checkR_REALCHAIN_SKIP_BATCH() {
 }
 checkR_REALCHAIN_SKIP_BATCH(); // R-REALCHAIN-SKIP-BATCH (2026-08-28; 常量声明后避 TDZ)
 
+
+// ── R-JS-SYNTAX (2026-08-29 J2; Bettor 待办 "R-TEMPLATE-BACKTICK-SQL-COMMENT" 的通用形) ──
+// 根因案例: 模板字符串内的 SQL 注释放了反引号 ⇒ 字面量截断 ⇒ 整文件语法错 (memory feedback-backtick-in-sql-comment-breaks-template-literal),
+//   lint 各规则都按正则/文本扫, 没有一条会发现"这个文件根本解析不了" ⇒ 语法错能 commit (8e186cba 前 node --check 才抓到)。
+//   通用解 = 对每个目标 .js/.mjs/.cjs 跑 `node --check` (只解析不执行, 零副作用, ~100 ms/文件)。任何 SyntaxError ⇒ BLOCK。
+//   注: 读的是工作树文件 (与 node --check 语义一致); staged 与工作树不同步时以工作树为准 (同其它文本规则)。
+//   范围 (Bettor GO 条件①): 只跑本次 targets (staged / 传入文件), 不全仓。.cjs 与含 top-level await 的 .mjs 都 parse-only 通过 (自测 scratch/_j2_lint_syntax/t/)。
+//   输出 (条件③): 从 node 的 stderr 抽 `文件:行` + 源码行 + `^` 列 ⇒ 报 文件:行:列 (node --check 自身不给列, 列从 caret 位置算)。
+function _parseNodeCheckError(stderr) {
+  const lines = String(stderr || '').split(/\r?\n/);
+  let line = null, col = null;
+  const i = lines.findIndex((l) => /:\d+\s*$/.test(l) && !/^\s+at /.test(l));
+  if (i >= 0) {
+    line = Number(lines[i].match(/:(\d+)\s*$/)[1]);
+    const caret = lines[i + 2] || '';
+    if (/\^/.test(caret)) col = caret.indexOf('^') + 1;
+  }
+  const msg = (lines.find((l) => /^\w*Error\b/.test(l)) || lines.filter(Boolean).slice(-1)[0] || '').slice(0, 200);
+  return { line, col, msg };
+}
+function checkR_JS_SYNTAX() {
+  for (const fp of targets) {
+    if (!/\.(m?js|cjs)$/.test(fp)) continue;
+    try {
+      execFileSync(process.execPath, ['--check', fp], { stdio: 'pipe', timeout: 15000 });
+    } catch (e) {
+      const { line, col, msg } = _parseNodeCheckError(e.stderr || e.message);
+      violate('R-JS-SYNTAX', `node --check 失败 @ ${path.relative(ROOT, fp).split(path.sep).join('/')}:${line ?? '?'}:${col ?? '?'} — ${msg} (文件解析不了, 其它任何规则都扫不到它)`, fp, line ?? undefined);
+    }
+  }
+}
+checkR_JS_SYNTAX(); // R-JS-SYNTAX (2026-08-29)
+
+// ── R-SQL-TIME-STRINGCMP [ERROR] (2026-08-29 J2; NWT 提议, Bettor GO 同批): ISO 时间列与 datetime()/date()/空格形 strftime 的裸比较 ──
+//   病: 列存 ISO 'YYYY-MM-DDTHH:MM:SSZ'(T 形), datetime('now', ...) 返回 'YYYY-MM-DD HH:MM:SS'(空格形); 字符串比较时 'T' (0x54) > ' ' (0x20)
+//       ⇒ 同日期前缀下"存值 > 任何 datetime() 值"恒成立, 30-min/60-min 窗口全错。合法语法错逻辑, node --check 看不见; 两周内咬两次
+//       (aba0b94c hold-monitor + intake 预筛, 修在 c1a35749; memory reference-sqlite-iso-timestamp-string-compare-trap)。
+//   合法写法: 两侧 julianday() (对 T 形/空格形都能 parse, 是唯一对两种存值都对的形) / 两侧同 datetime() / strftime('%Y-%m-%dT%H:%M:%S') 同形 / 参数绑定 JS 侧 toISOString。
+//   判据: 只看【列裸露在比较符一侧、另一侧是 datetime(/date(/空格形 strftime(】; 列名形 `<别名.>xxx_at|xxx_ts`。
+//   🔴 静态看不出某列到底存的哪种形(DEFAULT (datetime('now')) 的表存空格形, 那样比较其实对) ⇒ 规则不判"错", 判"形不安全": 新写一律 julianday()。
+//   baseline: scripts/sql-time-stringcmp-baseline.json (git ls-files 全 tracked .js/.mjs/.cjs 逐文件计数, 只减不增, 同 R-LEGACY-ORIGIN-SHRINK ratchet);
+//     生成/刷新: node scripts/lint-kanet.mjs --dump-sql-time-baseline > scripts/sql-time-stringcmp-baseline.json (刷新只准降; 升=ERROR)。
+//   范围: 只扫本次 targets (staged/传入), 不全仓。自测向量: scratch/_j2_lint_syntax/t/sqlbad.mjs (c1a35749 修前 3 段 ⇒ 3 命中) / sqlok.mjs (修后形 ⇒ 0)。
+const SQL_TIME_COL = String.raw`(?:\w+\.)?\w+_(?:at|ts)\b`;
+const SQL_TIME_RHS = String.raw`(?:datetime|date)\s*\(|strftime\s*\(\s*'[^']*%d %H`;
+const SQL_TIME_CMP_RES = [
+  new RegExp(String.raw`\b${SQL_TIME_COL}\s*(?:<=|>=|<>|<|>)\s*(?:${SQL_TIME_RHS})`, 'g'),                 // col < datetime(
+  new RegExp(String.raw`\b${SQL_TIME_COL}\s+BETWEEN\s+(?:${SQL_TIME_RHS})`, 'gi'),                          // col BETWEEN datetime(
+  new RegExp(String.raw`(?:datetime|date)\s*\((?:[^()]|\([^()]*\))*\)\s*(?:<=|>=|<>|<|>)\s*\b${SQL_TIME_COL}`, 'g'),   // datetime(...) < col
+];
+function countSqlTimeStringCmp(content) {
+  const hits = [];
+  content.split('\n').forEach((line, i) => {
+    if (/^\s*(?:\/\/|\*|\/\*)/.test(line)) return;   // 注释行不计 (规则说明自身含示例)
+    for (const re of SQL_TIME_CMP_RES) { re.lastIndex = 0; let m; while ((m = re.exec(line))) hits.push({ line: i + 1, col: m.index + 1, text: m[0] }); }
+  });
+  return hits;
+}
+function checkR_SQL_TIME_STRINGCMP() {
+  const RULE = 'R-SQL-TIME-STRINGCMP';
+  const BASELINE_PATH = 'scripts/sql-time-stringcmp-baseline.json';
+  const rel = (abs) => path.relative(ROOT, abs).split(path.sep).join('/');
+  if (argv.includes('--dump-sql-time-baseline')) {
+    const files = {};
+    let total = 0;
+    const tracked = execFileSync('git', ['ls-files', '--', '*.js', '*.mjs', '*.cjs'], { cwd: ROOT, encoding: 'utf8' }).split(/\r?\n/).filter(Boolean);
+    for (const fp of tracked) {
+      let c = ''; try { c = read(file(fp)); } catch { continue; }
+      const n = countSqlTimeStringCmp(c).length;
+      if (n > 0) { files[fp] = n; total += n; }
+    }
+    process.stdout.write(JSON.stringify({ _doc: 'R-SQL-TIME-STRINGCMP baseline: ISO 时间列 vs datetime()/date()/空格形 strftime 裸比较的存量计数(git ls-files tracked .js/.mjs/.cjs), 只减不增。新写一律 julianday() 两侧。刷新: node scripts/lint-kanet.mjs --dump-sql-time-baseline; 升=lint ERROR(硬 ratchet, 无授权通道)。', total, files }, null, 1) + '\n');
+    process.exit(0);
+  }
+  let baseline = null;
+  try { baseline = JSON.parse(read(file(BASELINE_PATH)).replace(/^﻿/, '')); } catch { baseline = null; }
+  const allowed = (fp) => (baseline && baseline.files && typeof baseline.files[fp] === 'number') ? baseline.files[fp] : 0;
+  // 硬 ratchet: baseline 自身对比 HEAD 只准降
+  if (baseline && baseline.files) {
+    try {
+      const head = JSON.parse(execFileSync('git', ['show', 'HEAD:' + BASELINE_PATH], { cwd: ROOT, encoding: 'utf8' }).replace(/^﻿/, ''));
+      for (const [fp, n] of Object.entries(baseline.files)) if (n > (head.files?.[fp] ?? 0)) violate(RULE, `baseline ${fp} 计数被调升(HEAD ${head.files?.[fp] ?? 0} → ${n}) — baseline 只准 shrink; 新写用 julianday() 两侧, 不抬额度。`, file(BASELINE_PATH), 0);
+    } catch { /* baseline 尚未入 HEAD = 首 commit, 跳过 */ }
+  }
+  for (const abs of targets) {
+    if (!/\.(m?js|cjs)$/.test(abs)) continue;
+    let c = ''; try { c = read(abs); } catch { continue; }
+    const hits = countSqlTimeStringCmp(c);
+    if (hits.length === 0) continue;
+    const fp = rel(abs), cap = allowed(fp);
+    if (hits.length > cap) {
+      for (const h of hits) violate(RULE, `ISO 时间列与 datetime()/空格形 裸字符串比较 @ ${fp}:${h.line}:${h.col} \`${h.text}\` — 存值 T 形 vs 空格形 ⇒ 比较恒错(30/60-min 窗口全失效, c1a35749 同病); 写 julianday(col) OP julianday(...) 两侧。文件命中 ${hits.length} > baseline ${cap}。`, abs, h.line);
+    } else if (hits.length < cap) {
+      warn(RULE, `${fp} 命中 ${hits.length} < baseline ${cap} — 同 commit 把 ${BASELINE_PATH} 对应计数减到 ${hits.length}(债账实时)。`, abs, 0);
+    }
+  }
+}
+checkR_SQL_TIME_STRINGCMP(); // R-SQL-TIME-STRINGCMP (2026-08-29)
+
 // ── 报告 ──
 // warnings first (non-blocking — WARN rules are migration checklists, not hard blockers)
 if (warnings.length > 0) {
