@@ -6,7 +6,7 @@
 ## §0 结论（四行）
 1. **Codex 的指控在【源码语义层】成立，在【lowering/共识层】不成立**：pinned `silverc-zk-8065184` 把 `require(tx.time >= E)` 降成 **`<E> OP_CHECKLOCKTIMEVERIFY`，不加任何域标记**（`compile.rs:2516`，`TimeVar::TxTime`）；锁域由 **CLTV 在运行时按数值大小判**（`7b1e18cc opcodes/mod.rs:1031-1032`）：`E < 5e11 ∧ tx.lock_time < 5e11` ⇒ DAA 域，否则须同 `≥` ⇒ 时间域，**混则拒**（`mismatched locktime types`）。`E = OpTxInputDaaScore(x)+N ≈ 8e7 ≪ 5e11` ⇒ v0.15 那条锁**运行时就是 DAA 域绝对 CLTV 锁**。J1 P0 ⑤ "DAA 锚形表达不出来"是把**编译器变量名**当成了**锁域**——错在同一处。
 2. **上游 #214 做的事**（`b5b0dc8`，2026-08-19）：`tx.daa` ⇒ `<E> DUP 0 THRESHOLD WITHIN VERIFY CLTV`；`tx.time` ⇒ `<E> DUP THRESHOLD GTE VERIFY CLTV` + `temporal` 类型（`compile/statement.rs:364-390`）。**差别只是脚本内多了一段域守卫**（防 E 落错量级），CLTV 本体与语义一模一样。
-3. **推荐 = A′（留 8065184，源内手写域守卫，与上游 `tx.daa` lowering 语义等价）**：`require(E >= 0 && E < 500000000000); require(tx.time >= E);`。不换编译器（A 的真实代价是 45 提交的 API 漂移：`byte[](x,n)` 两参形已不存在、template hash 改 blake3、dispatch tag 改签名 ⇒ 全部 `.sil` 重写 + 地址/模板哈希全变）；不需要 B 的参照输入（DAA 锁已可表达，B 只会更弱）；C 是整套时序证明重推（且时间域比 DAA 域弱：PMT 可被矿工在窗内挪）。
+3. **推荐 = A′（留 8065184，源内手写域守卫，与上游 `tx.daa` lowering 是 same fail-closed domain predicate / same CLTV semantics——**不是** byte-for-byte 同 lowering；措辞按 Codex `9eab914a` ② 更正，2026-08-29）**：`require(E >= 0 && E < 500000000000); require(tx.time >= E);`。不换编译器（A 的真实代价是 45 提交的 API 漂移：`byte[](x,n)` 两参形已不存在、template hash 改 blake3、dispatch tag 改签名 ⇒ 全部 `.sil` 重写 + 地址/模板哈希全变）；不需要 B 的参照输入（DAA 锁已可表达，B 只会更弱）；C 是整套时序证明重推（且时间域比 DAA 域弱：PMT 可被矿工在窗内挪）。
 4. **v0.15 最小修法** = 改 L40/L250/L275/L278/L296/L313/L321/L370 八处的**措辞**（把 `TxTime` 这个变量名换成"DAA 域绝对 CLTV 锁"的精确描述）+ 加**两条新硬前置**（源内域守卫 + `tx.lock_time`/`sequence` 构造约束）+ 三条链上负向量。证明步"O 于 d 创建 ⟹ 本金 d+N 前不能回"**在冻结谓词下成立**——但要用 §3 的四个共识条件写，不能只写"CLTV"。
 
 ## §1 机械证据（逐条可 grep）
@@ -33,7 +33,8 @@
 1. **脚本**（E2）：`R.lock_time` 与 `E` 同为 DAA 类（`< 5e11`）∧ `E ≤ R.lock_time` ∧ `R.inputs[X].sequence ≠ MAX`；A′ 的守卫另保证 `0 ≤ E < 5e11`（防 `d+N` 溢出到时间类——`d < 5e11` 恒成立，N 有 `CFG-UNIT-DOMAIN` 带检查，守卫是双保险）。
 2. **共识终局**（E4）：`R.lock_time < DAA(含 R 的块)`（严格小于）或全部输入 `sequence == MAX`；后者被 1 排除 ⇒ **`DAA(块) > R.lock_time ≥ E = d + N`**。
 ⇒ **任何包含 R 的块 DAA > d + N**。⇒ "O 于 d 创建 ⟹ 被保护本金在 DAA ≤ d+N 的任何块里不能回首动方"——这就是 v0.15 L38/L275 那句，**由 1+2 机械保证**，不依赖 reveal 上界。反应方独占窗 = `[d, d+N]`（闭区间，比 v0.15 写的 `[d, d+N)` 多一个 DAA——保守方向，写进文本）。
-🔴 两条**新硬前置**（v0.15 没写，A′ 落码必须有）：(a) recovery tx 构造侧 **`lock_time = E`（DAA 数），不是 0**（现 `p2sh.mjs` 各 builder 一律 `lockTime: 0n` ⇒ `LockTimeType::Finalized` ⇒ CLTV 因 `stack_lock_time(E) > tx.lock_time(0)` 在 :1038 拒——**不是漏洞，是构造侧要改**）；(b) 该输入 `sequence ≠ u64::MAX`（现 builder `sequence: 0n` ✓）。
+🔴 **Codex `9eab914a`（2026-08-29）回执**：refute 接受；A′ 设计层 SOUND；Shape-B 恢复 CONDITIONALLY CLOSED；gate (a) 仍 OPEN 待 N6/N7/N8/P + same-cid readback。helper 两条 MUST-FIX 已落 `cltv-locktime.mjs`：③ `cltvSequence` 上界闭 `0 ≤ s < MAX`（原不拒 `> MAX`，越界可能被隐式截断）；④ **恢复延迟须 > 0**——`cltvLockTime` daa 域 `E=0` 默认拒（`CLTV_DELAY_NONPOSITIVE`，`lock_time=0` = 共识无锁），配置侧 `assertPositiveDelay(n_recovery_delay_daa)`；§6-3 builder/ctor 装载处必调。
+🔴 三条**新硬前置**（v0.15 没写，A′ 落码必须有）：(0) `n_recovery_delay_daa > 0`（上）；(a) recovery tx 构造侧 **`lock_time = E`（DAA 数），不是 0**（现 `p2sh.mjs` 各 builder 一律 `lockTime: 0n` ⇒ `LockTimeType::Finalized` ⇒ CLTV 因 `stack_lock_time(E) > tx.lock_time(0)` 在 :1038 拒——**不是漏洞，是构造侧要改**）；(b) 该输入 `sequence ≠ u64::MAX`（现 builder `sequence: 0n` ✓）。
 🔵 **多输入 recovery（NWT 审点 ③，2026-08-29）**：一笔 tx 只有一个 `lock_time`，但每个被锁输入各自执行一次 CLTV、各自要求 `E_i ≤ lock_time`（:1037-1038 逐输入）⇒ 构造侧取 **`lock_time = max_i E_i`**；共识再要 `DAA(块) > lock_time` ⇒ 对每个 X_i 都有 `DAA > d_i + N`。取 max 只会**过延迟**（保守方向），不会让任一输入提前；不取 max ⇒ 某输入 CLTV 拒 = fail-closed。同 tx 若混入**非锁**输入（如 fee 输入）无约束。（D-016 裁 A′ 已记。）
 
 ## §4 v0.15 最小修法（文本，J1/NWT 落；不改结构、不改数值）
