@@ -1,9 +1,22 @@
-# §6-3 A：fair-exchange 结算 covenant 完整构造（v0.15 · 报备层 · 零生产码）
+# §6-3 A：fair-exchange 结算 covenant 完整构造（v0.16 · 报备层 · 零生产码）
 
-> **Status**: CURRENT（v0.15：normative-body 全 sweep 到 Shape-B 实际支集·完备 grep 零命中验证过·非 claim）
+> **Status**: CURRENT（v0.16：恢复锁锁域按 D-016 落 A′ 守卫 + 两条构造侧硬前置 + `max(E_i)`；normative-body 全 sweep 到 Shape-B 实际支集·完备 grep 零命中验证过·非 claim）
 > **作者** J1 · **日期** 2026-08-21 · **派工** Bettor checklist ①④⑤ + Codex v0.12（e281a2ca）两 MUST-FIX
 
 > 🔴🔴 **§0.x 全部为【历史变更记录·NON-NORMATIVE】**（Codex v0.12 MUST-FIX 2 要求显式标）：以下所有 §0.x 描述**演化过程**，早期条目（§0.5-§0.10 等）的 Shape-A 文字（`current_daa < X` / `花 O ⟺ 领 LOCKED_F` / `latest O creation <= T_cutoff` / equality-anchor 等）**均已被后版取代、不作规范**。**当前规范正文 = §1 起**（§1.5 假设 / §2 三步 / §2.5 拓扑 / §2.6 焊接点 / §4 covenant 清单 / §6 负测）。读规范只读 §1+；§0.x 只为审计演化史。
+
+## §0.18 v0.16 变更（D-016：恢复锁锁域 = A′ 源域守卫 + 两条构造侧硬前置）
+
+> 依据：D-016（`DECISIONS.md`）· J2 `docs/2026-08-29-j2-s63-recovery-lock-domain-repair-options.md` §4 · NWT GREEN（COORD-LEDGER (710)）· 回 Codex `14c81c1c`。派工 Bettor r19。
+
+- **撤回我 P0 ⑤ 的判断**（"DAA 锚形表达不出来 / 不可同单位比较"）：**错在把变量名当锁域**。`8065184` 的 `tx.time` 直降裸 `OP_CHECKLOCKTIMEVERIFY`（`compile.rs:2515-2516`），**无域标记**；域由数值判（live `7b1e18cc opcodes/mod.rs:1031-1038`；共识 `tx_validation_in_header_context.rs:56-88`）。`E = OpTxInputDaaScore(X)+N ≈ 8e7 ≪ 5e11` ⇒ 运行时**就是 DAA 域绝对 CLTV**。
+- **不换编译器**（A′）：迁上游需吃 `d25bd34..db9e1ba` 45 提交 API 漂移，其中 `byte[](x,n)` 两参已不存在 ⇒ `CloseZkV2.sil:45` 编不过、template hash 改 blake3 ⇒ **会打碎 D-015 的 ZK 形**。
+- **A′ 源域守卫**：各 recovery 支改 `int E = OpTxInputDaaScore(·) + n_recovery_delay_daa; require(E >= 0); require(E < 500000000000); require(tx.time >= E);` ≡ 上游 `tx.daa` lowering 的 `OP_WITHIN [0,5e11)` 逐字等价（§4-c/§4-d/§4-e/§5）。
+- **新增 §4-g 构造侧硬前置**（v0.15 此前没写，D-016 判为真 MUST-FIX）：`lock_time = E`（多输入 `max(E_i)`）+ 被锁输入 `sequence ≠ MAX`。
+- **新增 §6.4 恢复锁负向量** N6/N7/N8/P，入 gate (a) 广播段（READY 后）。
+- **Shape-B 状态措辞**（采 NWT 版；**不**采 Codex 那句「因域混而重开」的措辞 —— 域混判断在本 commit 的 lowering 与共识层不成立）：**recovery lock 在 `8065184` 可表达（magnitude-determined CLTV）；真 MUST-FIX = 构造侧 `lock_time=E` + `sequence≠MAX` + A′ 源域守卫；gate (a) 仍 OPEN，待 READY 后 N6/N7/N8/P 真链向量。**
+
+---
 
 ## §0.17 v0.15 变更（normative-body 全 sweep·完备 grep 零命中验证）
 v0.14 claim"全完成"但三方(J2 grep+NWT 深读+Codex v0.14)逐条抓出残留 Shape-A 死分支/死论证(§4-f F1/F2 表·§4-e latest-O-creation 死论证·§6.2b F2/T_refund_LOCKED_F 负测·§4-d giveup 无效 free-option claim·units 段·§2/§2.6 多处)。= 我第 N 次 partial-sweep 却 claim 完整。
@@ -37,7 +50,7 @@ Codex 复审 v0.8：**下界-only pivot 方向 PASS**（反向焊/P-SAFE-1/唯�
 - 🔴 **MUST-FIX 1（T_cutoff_LOCKED_R 不再是最晚 reveal 界，我认自引连锁）**：v0.8 删 reveal `< T_cutoff_LOCKED_R` 上界后，`T >= T_cutoff_LOCKED_R` 只让 refund **可用**、reveal 支**仍有效** ⇒ 首动方**晚 reveal**（cutoff 后若 LOCKED_R 没被 refund 落链，广播晚 reveal 抢赢 once-spend、消费 LOCKED_R+C、**cutoff 后**造真 O）。而 `T_refund_LOCKED_F` 从 `T_cutoff_LOCKED_R+N` 静态导 ⇒ 离**实际** O 创建可能不足 N ⇒ 抢 refund LOCKED_F ⇒ **双拿**。**Shape A v0.4 ordering 整个依赖"T_cutoff_LOCKED_R=最晚 reveal 界"，而那依赖已删的不可 enforce 上界 ⇒ 塌**。🔴 **我 §4-f 漏此**（推理"latest O creation <= T_cutoff_LOCKED_R"前提随上界删除静默失效），grep 也漏 = [[feedback-samples-sharing-a-hidden-precondition-cannot-support-a-necessity-claim]] 又一实例（删上界这动作使一条被依赖前提静默失效）。
 - 🎯 **修法 = Shape B 现【必需】**（我早前推 A 是 buildability 发现之前、现 A 塌）：reveal 消费 LOCKED_R+C 造 O 的**同一笔 tx 把 LOCKED_F 转 `O_AUTHORIZED` 后继**，其 recovery 下界 = `OpTxInputDaaScore(O_AUTHORIZED) + N_claim + N_margin`（= reveal DAA = **实际** O 创建坐标，consensus-visible，**无上界依赖**）⇒ 机制保证 `O 于 d 创建 ⟹ 被保护本金在 d+N 前不能回首动方`，不假设 reveal 在任何不可 enforce 上界前。
 - 🔴 **MUST-FIX 2（liveness→confirm）**：阈值后 claim 支与 recovery 支都 valid 到一笔落链 ⇒ once-spend 只保唯一、不保**谁赢**。§1.5 假设 5 改：得利方 claim 须在对方 recovery 下界**开之前 LAND/CONFIRM**（bounded-inclusion/抗审查假设，N_claim+N_margin 表征），**非"广播"**（mempool 里未确认仍可能输给变 valid 的 recovery）。watchtower 须**确认**非只广播。
-- 🔴 **MUST-FIX 3（真原语，去 phantom）**：normative 里 `current_daa >= X` 是 phantom（语言不暴露 current_daa）⇒ 冻**真 SilverScript 原语**：下界用 `TxTime`（→ `OpCheckLockTimeVerify`/CLTV）语义，相对锚用 `OpTxInputDaaScore(输入)`（读被花输入的历史 DAA）。承重 spec 不留 pseudo-var。
+- 🔴 **MUST-FIX 3（真原语，去 phantom）**：normative 里 `current_daa >= X` 是 phantom（语言不暴露 current_daa）⇒ 冻**真 SilverScript 原语**：下界用 **DAA 域绝对 CLTV 锁**：源形 `require(tx.time >= E)`（`8065184` 的 `tx.time` 直降为**裸 `OP_CHECKLOCKTIMEVERIFY`**，`compile.rs:2515-2516`，**变量名不定域**；域由 `E` 的**数值**决定 —— `E < LOCK_TIME_THRESHOLD = 5e11` ⇒ DAA 类，见 D-016），相对锚用 `OpTxInputDaaScore(输入)`（读被花输入的历史 DAA）。承重 spec 不留 pseudo-var。
 
 ## §0.11 v0.8 变更（`current_daa < X` 上界全不可 enforce ⇒ 竞争支路系统性重构 + 逐对重证）
 
@@ -162,9 +175,9 @@ refund: LOCKED_R P-SAFE-1（cutoff 前只 validated-reveal 消费/后退反应�
 |---|---|---|---|---|
 | `LOCKED_R` | P-SAFE-1 | **反应方**本金 | transfer（首动方揭 s 领，四路焊 §4-d）/ terminal-refund | refund `TxTime >= T_cutoff_LOCKED_R` 退反应方 |
 | `LOCKED_F` | P-SAFE-1 | **首动方**本金 | **transition→O_AUTHORIZED**（reveal 强制，§4-d Fa）/ **giveup**（§4-d Fb） | giveup `TxTime >= T_giveup_LOCKED_F`（baked `>= T_cutoff_LOCKED_R`）退首动方 |
-| `O_AUTHORIZED` | LOCKED_F 的 reveal-后继 | = 首动方本金（反应方凭 O 领） | reactive-claim（§4-c，O 作 co-input）/ recovery | recovery `TxTime >= OpTxInputDaaScore(O_AUTHORIZED)+N`（**实际 reveal DAA**）退首动方 |
+| `O_AUTHORIZED` | LOCKED_F 的 reveal-后继 | = 首动方本金（反应方凭 O 领） | reactive-claim（§4-c，O 作 co-input）/ recovery | recovery **CLTV(DAA)**：`E = OpTxInputDaaScore(O_AUTHORIZED)+n_recovery_delay_daa; require(tx.time >= E)`（**实际 reveal DAA**；构造侧须 `lock_time = E`）退首动方 |
 | `C` | cov_id capability | 无（dust 种子） | reveal 消费造 O（§4-b）/ terminal-refund | refund cutoff 后（无续链） |
-| `O` | C 的续继 | 反应方领 `O_AUTHORIZED` 的凭证 | reactive-spend（§4-e 支1，作 §4-c co-input）/ recovery | recovery `TxTime >= OpTxInputDaaScore(O)+N` 退首动方（无续链） |
+| `O` | C 的续继 | 反应方领 `O_AUTHORIZED` 的凭证 | reactive-spend（§4-e 支1，作 §4-c co-input）/ recovery | recovery **CLTV(DAA)**：`E = OpTxInputDaaScore(O)+n_recovery_delay_daa; require(tx.time >= E)`（构造侧须 `lock_time = E`）退首动方（无续链） |
 
 🔴 **焊接点（Shape B，v0.14 sweep 到 O_AUTHORIZED）**：
 1. **领 `LOCKED_R` ⟺ 四路原子**（§4-d transfer 支自身 force）：首动方揭 s 领反应方本金的同笔 tx 必须消费 C 造 O **且**消费 exact LOCKED_F 造 exact O_AUTHORIZED（续 `locked_f_cid`）。省略任一路则领不了 LOCKED_R。
@@ -247,7 +260,7 @@ require(tx.outputs[O_out_idx].value >= min_O);      // §5
   require(tx.outputs[payout_idx].value == OAUTH_value);                         // value 焊死
   require(OpCovOutputCount(oauth_cid) == 0);          // 🔴 v0.12 闸③(NWT/J2 逮): 本支 terminal, 禁产 O_AUTHORIZED 续链
   ```
-- **recovery 支（首动方超时收回，🔵 解 Codex v0.8 塌）**：`require(TxTime >= OpTxInputDaaScore(O_AUTHORIZED) + N_claim + N_margin)`——**锚在 O_AUTHORIZED 自己的创建 DAA（= 实际 reveal DAA），非 baked cutoff**。⇒ 无论 reveal 早晚，反应方总有从实际 O 创建起的 N_claim+N_margin 窗，**去掉了对"reveal 在上界前"的依赖**。`OpCovOutputCount == 0`。
+- **recovery 支（首动方超时收回，🔵 解 Codex v0.8 塌）**：**A′ 源域守卫形（D-016 裁）**：`int E = OpTxInputDaaScore(O_AUTHORIZED) + n_recovery_delay_daa; require(E >= 0); require(E < 500000000000); require(tx.time >= E);` —— 标 **CLTV(DAA)**；**构造侧须 `lock_time = E`**（多输入时 `max(E_i)`，见 §4-g）。两条 `require` ≡ 上游 `tx.daa` lowering 的 `OP_WITHIN [0,5e11)` 逐字等价。——**锚在 O_AUTHORIZED 自己的创建 DAA（= 实际 reveal DAA），非 baked cutoff**。⇒ 无论 reveal 早晚，反应方总有从实际 O 创建起的 N_claim+N_margin 窗，**去掉了对"reveal 在上界前"的依赖**。`OpCovOutputCount == 0`。
 🔴 **v0.9 无上界（真原语）**：reactive-claim 支无 `TxTime <` 上界（不可 enforce）；独占性来自 recovery 支的 `TxTime >= ...` 下界（CLTV 可 enforce）。no-theft 逐对重证见 §4-f。
 🔵 **`OpInputCovenantId(idx)` 读非 active 输入 = 已证**（ShardLeaf.sil:99）——O 作 co-input 按索引点准，可建。
 
@@ -272,10 +285,10 @@ require(tx.outputs[O_out_idx].value >= min_O);      // §5
   - **transition 支（reveal 强制，四路原子的一路）**：reveal 那笔 tx（消费 LOCKED_R+C 造 O）**同笔必须把 LOCKED_F 转 `O_AUTHORIZED` 后继**。🔴 **v0.13 provenance（MUST-FIX 2b）**：O_AUTHORIZED **续 LOCKED_F 的 cov_id lineage**——`require(OpInputCovenantId(locked_f_idx) == locked_f_cid ∧ OpOutputCovenantId(oauth_out_idx) == locked_f_cid)`（CovenantBinding 续链，同 ShardLeaf/bshard 续链）。⇒ **`oauth_cid ≡ locked_f_cid`（同一 lineage 身份、跨转移稳定）**，而 `locked_f_cid` 是 LOCKED_F session-time genesis-mint 时的 cov_id、**reveal 前双方已 bake**（解 Codex "reveal 前 O_AUTHORIZED 不存在、怎么 bake oauth_cid"）。⇒ 全文 `oauth_cid` 即 `locked_f_cid`（§4-c/§4-e 的引用据此可 enforce）。⇒ **O_AUTHORIZED 与 O 同笔创建，DAA 相同（= 实际 reveal DAA）**。
   - **giveup-refund 支（首动方放弃，reveal 未发生）**：`require(TxTime >= T_giveup_LOCKED_F)`（baked 下界，CLTV）+ 🔴 **`require(OpCovOutputCount(locked_f_cid) == 0)`（v0.12 闸③，NWT/J2 逮我漏）**——本支 terminal 退首动方明文，禁产 LOCKED_F 续链。与 transition 互斥（once-spend）：reveal 发生则 LOCKED_F 已转移、giveup 无 UTXO；反之首动方 giveup 拿回、但也没 claim LOCKED_R（无 reveal）⇒ 反应方 refund LOCKED_R，对称无 theft。
     🔴 **giveup 排序 + free-option 诚实（v0.15 修，Codex v0.12 MUST-FIX 1）**：baked `T_giveup_LOCKED_F >= T_cutoff_LOCKED_R`（giveup 不早于 LOCKED_R-refund 开）**降低但【不消除】** free-option——**下界排序 close 不了 reveal 窗**（reveal 无上界，阈值后 LOCKED_R 未被 refund 则 reveal 仍 valid，首动方仍有 race-dependent 选择 reveal-vs-giveup）。残留 free-option **由 reactive 及时 refund LOCKED_R（reactive-liveness §1.5 假设 5）bound**，非结构消除。非盗窃（giveup 花掉 LOCKED_F 后 reveal 不可构造）。⇒ 诚实标为 liveness-bounded，matrix Fb 格已改标（J2 4d08fdb4）。
-  - 🔵 **关键（解 Codex v0.8 塌）**：`O_AUTHORIZED` 的 recovery 下界 = `TxTime >= OpTxInputDaaScore(O_AUTHORIZED) + N_claim + N_margin`（= 实际 reveal DAA + N，见 §4-c）。**无论 reveal 早晚**，被保护本金在实际 O 创建 + N 前不能回首动方 ⇒ 不依赖"reveal 在 T_cutoff_LOCKED_R 前"这条不可 enforce 上界。
+  - 🔵 **关键（解 Codex v0.8 塌）**：`O_AUTHORIZED` 的 recovery 下界 = **DAA 域绝对 CLTV**：`E = OpTxInputDaaScore(O_AUTHORIZED) + n_recovery_delay_daa`，`require(tx.time >= E)`（= 实际 reveal DAA + N，见 §4-c）。**共识层依据**：`R` 入块 ⇒ `DAA(块) > R.lock_time >= E = d + N`（`7b1e18cc opcodes/mod.rs:1031-1038` CLTV 按数值判域 + `tx_validation_in_header_context.rs:56-88` `get_lock_time_type` / `check_tx_is_finalized`）⇒ 独占窗 `[d, d+N]`（闭区间，比原文多 1 DAA，保守方向）。**无论 reveal 早晚**，被保护本金在实际 O 创建 + N 前不能回首动方 ⇒ 不依赖"reveal 在 T_cutoff_LOCKED_R 前"这条不可 enforce 上界。
 
 🔴 **cutoff 排序不变量（焊接生效前提）**：`T_cutoff_LOCKED_R <= C_terminal_refund_cutoff`（否则同笔走 C 的 terminal-refund 不造 O 绕过 v0.3 焊接）。
-🔴 **单位显式标注（NWT 钉）**：`T_cutoff_LOCKED_R` / `C_terminal_refund_cutoff` / `T_giveup_LOCKED_F` / `OpTxInputDaaScore(·)+N`（各 recovery 锚）全部**同为 DAA-score（`< 5e11`）**，与 v1.3 总裁同单位。baked 常量间的排序（如 `T_giveup_LOCKED_F >= T_cutoff_LOCKED_R`）落码时 ctor 参数须显式同单位来源，混单位 ⇒ 比较 vacuous（floor-direction footgun 族）。
+🔴 **单位显式标注（NWT 钉）**：`T_cutoff_LOCKED_R` / `C_terminal_refund_cutoff` / `T_giveup_LOCKED_F` / `OpTxInputDaaScore(·)+N`（各 recovery 锚）全部**同为 DAA-score（`< 5e11`）**，与 v1.3 总裁同单位。🔴 **`tx.time` 不是量、是 CLTV 语句**；量是 `E`。`E` 落 DAA 类由 **A′ 源域守卫**（`require(E >= 0); require(E < 500000000000);`）与 `CFG-UNIT-DOMAIN` 带检查**双保**。baked 常量间的排序（如 `T_giveup_LOCKED_F >= T_cutoff_LOCKED_R`）落码时 ctor 参数须显式同单位来源，混单位 ⇒ 比较 vacuous（floor-direction footgun 族）。
 - **O 的 O-recovery 回收**（付回首动方）：见 §4-e 的 O 支 2。
 - **C 的 terminal-refund**：`OpCovOutputCount == 0`（闸③）。
 
@@ -293,7 +306,7 @@ require(tx.outputs[O_out_idx].value >= min_O);      // §5
   require(OpCovOutputCount(cid) == 0);                               // 🔴 v0.12 闸③: 本支 terminal, 禁产 O 续链
   ```
   ⇒ **花 O ⟹ 必同笔领 O_AUTHORIZED 给反应方**。s/A 公开也没用：独立花 O（不带 O_AUTHORIZED co-input）**过不了本支** ⇒ 外人毁不了 capability。🔴 **v0.10 修（MUST-FIX 2）**：Shape B 下 LOCKED_F 已被 reveal 消费成 O_AUTHORIZED、其 UTXO 不存在 ⇒ 反向焊必须引 `oauth_cid`（O_AUTHORIZED 身份），非已消失的 `locked_f_cid`。与 §4-c（反应方花 O_AUTHORIZED）一致。
-- **O 支 2（回收：首动方超时收回）**：`require(TxTime >= OpTxInputDaaScore(O) + N_claim + N_margin)`（与 O_AUTHORIZED-recovery 同锚 reveal DAA，互斥），付首动方，`OpCovOutputCount == 0`（terminal）。
+- **O 支 2（回收：首动方超时收回）**：**A′ 源域守卫形**：`int E = OpTxInputDaaScore(O) + n_recovery_delay_daa; require(E >= 0); require(E < 500000000000); require(tx.time >= E);` —— 标 **CLTV(DAA)**，构造侧须 `lock_time = E`（与 O_AUTHORIZED-recovery 同锚 reveal DAA，互斥），付首动方，`OpCovOutputCount == 0`（terminal）。
 
 🔵 **双向互焊闭合（v0.10 全 O_AUTHORIZED）**：§4-c（领 O_AUTHORIZED ⟹ O co-input）+ §4-e 支 1（花 O ⟹ 领 O_AUTHORIZED）= **O 与 O_AUTHORIZED 窗内只能一起花**。O 支集 = 恰 2 支；O_AUTHORIZED 支集 = 恰 2 支（claim/recovery）。
 🔴 **Shape B 无需 baked ordering（v0.15 sweep，取代已推翻的 Shape-A 论证）**：Shape A 曾靠 baked 不等式（依赖"O 创建早于 reveal-窗上界"、被 Codex v0.8 推翻）。**Shape B 不再需要**：O_AUTHORIZED-recovery 与 O-recovery 都锚 `OpTxInputDaaScore(·)+N`（= **实际 reveal DAA**），机制保证反应方总有从实际 O 创建起的 N 窗，**无论 reveal 早晚、无 baked cutoff 依赖**（详 §4-f 双拿防）。
@@ -314,11 +327,27 @@ require(tx.outputs[O_out_idx].value >= min_O);      // §5
 
 ---
 
+## §4-g 构造侧硬前置（v0.16 新增·承重·D-016 判为真 MUST-FIX）
+
+> v0.15 只写了源码侧 `require`，**没写构造侧**。缺这两条 ⇒ 恢复锁在链上不成立或失效。二者皆非"建议"，是**硬前置**。
+
+### (a) `lock_time = E`（DAA 数，非 0）—— 缺则 recovery 路**不可构造**
+
+CLTV 语义要求 `tx.lock_time >= 栈上 E` 且**两者同域**（`7b1e18cc opcodes/mod.rs:1031-1038`）。
+- 现状：`kasia-relay/src/lib/p2sh.mjs` 各 builder **一律 `lockTime: 0n`** ⇒ `E > 0` 时 CLTV **必拒** ⇒ **recovery 路当前不可构造**（J2 报备改 builder 参数）。
+- **多输入时 `lock_time = max(E_i)`**：每个被锁输入各自的 CLTV 都检查 `tx.lock_time >= 其 E_i`，取 max 才能同时满足全部。对较早输入是**保守 over-delay**（多等，不会少等）——安全方向。
+
+### (b) 被锁输入 `sequence ≠ MAX` —— 缺则 DAA 延迟**静默失效**
+
+`check_tx_is_finalized`（`tx_validation_in_header_context.rs:83-88`）在 `sequence == MAX` 时**绕过终局判定** ⇒ 锁形同虚设。这是经典 CLTV 陷阱。
+- 现状：现有构造为 `0` ✓（已满足），但 v0.15 未写成前置 ⇒ 后人改 builder 时可能无意破坏。**本版写成硬前置。**
+
+---
 ## §5 min_O / O-recovery锚 / spk∧value 双 require
 
 - **spk∧value 必须一起 require**（reveal-claim 支）：只查 spk 不查 value，首动方可造 dust/0 值形似 O，反应方花它付不起费 = 等价没造（malform 绕过，J2 §2-b）。
 - **min_O 口径**：≥ 反应腿 claim 最坏手续费 + KIP-9 存储质量地板。**复用既有常量**（`_BSHARD_FEE_PER_INPUT = 1_000_000n` 等），不新造。🟡 具体数值未拍（§7）。
-- **O-recovery 相对锚（MUST-FIX 3）**：回收支 `require(TxTime >= OpTxInputDaaScore(O) + N_claim + N_margin)`——锚在 **O 自己 input 的 DAA**（本地祖先事实），`N_claim`（反应方 claim 落链最坏 DAA 跨度）+ `N_margin` 是**相对时长**，不是绝对 deadline。理由：O-lineage 采纳初衷=不靠外部/模糊 finality 钟；绝对窗会重新引入无锚绝对时间。太早（N 太小）⇒ 首动方抢回 O ⇒ 反应方结构性 claim 不了 = 新洞，故 N 须保守上界（§7）。
+- **O-recovery 相对锚（MUST-FIX 3）**：回收支 **A′ 源域守卫形**：`int E = OpTxInputDaaScore(O) + n_recovery_delay_daa; require(E >= 0); require(E < 500000000000); require(tx.time >= E);`（**CLTV(DAA)**，构造侧 `lock_time = E`）——锚在 **O 自己 input 的 DAA**（本地祖先事实），`N_claim`（反应方 claim 落链最坏 DAA 跨度）+ `N_margin` 是**相对时长**，不是绝对 deadline。理由：O-lineage 采纳初衷=不靠外部/模糊 finality 钟；绝对窗会重新引入无锚绝对时间。太早（N 太小）⇒ 首动方抢回 O ⇒ 反应方结构性 claim 不了 = 新洞，故 N 须保守上界（§7）。
 
 ---
 
@@ -346,6 +375,19 @@ require(tx.outputs[O_out_idx].value >= min_O);      // §5
 
 ---
 
+### §6.4 恢复锁负向量（v0.16 新增·入 gate (a) 广播段·READY 后跑）
+
+| 向量 | 构造 | 预期 | 依据坐标 |
+|---|---|---|---|
+| **N6** | `lock_time = E − 1` | **脚本层拒** `UnsatisfiedLockTime` | `7b1e18cc opcodes/mod.rs:1037-1038` |
+| **N7** | `lock_time = 5e11 + t`（时间类） | **拒** `mismatched locktime types` | 同上 `:1034` |
+| **N8** | `lock_time = E`，但提交时 tip DAA ≤ E | **共识未终局拒** | `tx_validation_in_header_context.rs:71+` |
+| **P** | `lock_time = E` 且 tip DAA > E | **落地** | 同上 |
+
+> N6/N7 验脚本层域判与下界；N8/P 验共识终局。四条同时通过才算恢复锁**真链可用**；在此之前 gate (a) 保持 OPEN。
+> 配套：探针 v0.3 增 `recovery_daa` 入口。
+
+---
 ## §7 明列未决（不假装闭合）
 
 1. **运营取值三项（min_O / N_claim / N_margin）无权威值，我不拍数字** —— `min_O`（§5，≥反应腿 claim 最坏费+KIP-9 地板）、`N_claim`（反应方 claim 落链最坏 DAA 跨度）、`N_margin`（O-recovery 相对锚安全余量，§4-d）。同链可保守上界（本链费市场/DAA 产出率可读，比 §6-3 B 跨链版好定），仍须落**具名保守常量**（复用既有 `_BSHARD_FEE_PER_INPUT` 等），不硬编经验值。
@@ -367,7 +409,7 @@ require(tx.outputs[O_out_idx].value >= min_O);      // §5
 | per-branch 续链管控 | `validateOutputState` | `PoolSpine_v08_chunk.sil:93/226` | ✅ 已证 |
 | O 形状 | `OpTxOutputSpkSubstr` / `.value` | `compile.rs:3572` + CloseZkV2:125-126 | ✅ 已证 |
 | hashlock | `blake2b` | 既有 covenant 普遍用 | ✅ 已证 |
-| 时锁下界 | `tx.time >= X`（DAA） | `ShardLeaf.sil:96`、30 处 lower-bound | ✅ 已证 |
+| 时锁下界 | `tx.time >= X` = **裸 CLTV**；`X` 为 DAA 数时是 **DAA 域锁** | `ShardLeaf.sil:96` 那 30 处的 `X` 是 **ms**（`deadline*1000`）⇒ **时间域锁，与本构造的 DAA 域锁不是同一条** | ✅ 原语可建；本构造的 DAA 域用法待 gate (a) 真链向量 N6/N7/N8/P |
 | 多 covenant-input 一笔 tx（LOCKED+C 原子焊接） | `OpCovInputCount`/`OpCovInputIdx` + `OpInputCovenantId(C_idx)` | compile.rs:3577-78 + `ShardLeaf:99` 读非 active input cov_id | ✅ 已证（Q① 裁可建） |
 | adaptor 揭示签 | `checkSigFromStack(A)` | canonical `8065184`（#132） | 🟡 待 canonical 树 e2e |
 
