@@ -141,3 +141,24 @@
 ### §9.4 对 P0 的影响
 - **P7/P8 退出 P0**（同一 accept 不双触发）；**P7-bis 进候选**（retail 用户会不会经 UI accept = Bettor/Owner 网关 arming 同题：broker retail 路走 action-queue，`is_dex_broker=1` ⇒ E 路本就跳 auto-pay；只有本地非 broker agent 用 UI/API 接单才有这条路）。
 - 本节全部只读；坐标 `exchange-machine.js:276/297-299/734`、`api/exchange.js:489-552`、`chat.js:399/418`、`tpf:75/1796/2021-2022/2054-2056/2075-2077/2745` 逐字 grep 可核。
+
+## §10 v0.5 草案 · 两条候选补丁的向量清单（候命：NWT 一句才落码；本节只定"落什么、怎么证"）
+### §10.1 `hedge_gate_error` 可见性补丁（DEFECT1b 第一级；不开对冲、不花钱）
+- **改点**：`trade-protocol-filter.js:2191-2193` 门的 `SELECT meta …` 裹 try/catch：抛 ⇒ `recordChainEvent`? ❌（chain_events v83 trigger 要 64-hex txid，offer_id 不是）⇒ 用 **`events`** 表：`INSERT INTO events (event_scope='system', event_type='hedge_gate_error', source='trade-protocol-filter', level='error', summary, payload_json={offer_id, error, site})` + `console.error`，然后 **`return`（仍 skip）**；`site` = 调用方标签（三处传入或 `new Error().stack` 首行）。**不改 SELECT 的列名**（那是第二级 Owner 批）。
+- **向量（`tpf.hedge-gate.test.mjs`，真 schema）**：
+  1. 列不存在（现 schema）：调 `executeHedge('offer-x', 'agent', 'SELL', 1)` ⇒ **不抛**、返回 undefined；`events` 出现 1 条 `hedge_gate_error` 且 `payload.error` 含 `no such column: meta`；`placeOrder`/`placeCexOrder` **未被调用**（mock 计数 0）。
+  2. 同 offer 重复调用 ⇒ `events` 同 hour bucket **只一条**（去重，防日志风暴；沿用 hold-monitor `alertBreachesOnce` 的 bucket 形）。
+  3. 假造 `meta` 列的临时表（`ALTER TABLE ADD COLUMN meta` 在测试库）+ `meta='{"hedge_enabled":false}'` ⇒ 无事件、skip（原路不变）；`meta='{"hedge_enabled":true}'` ⇒ 走到幂等探针（`chain_events hedge%`）——**mock `placeOrder` 断言被调 1 次** = 正向对照（规则 78 族：门必须真放行一次）。
+  4. 源级：三处调用方签名与 `_executeHedge(offerId, agentName, side, qty` 一致（复用 hedge-call D2）；`hedge_gate_error` 进 hold-monitor `unknown_1h` 列表？—— **不进**（它不是"钱结果不明"，是"路不通"；单独第八数或只靠 events 告警，NWT 定）。
+  5. 突变：去掉 try/catch ⇒ 向量 1 必红（抛出）。
+### §10.2 P7-bis "有 `payment_tx` 不 reopen"（若定 P0）
+- **改点**：`exchange-machine.js:684 checkMatchedTimeout` 里 `:730-737` 的 reopen UPDATE 前加分支：`if (offer.payment_tx) { transition(offer.id, 'disputed', {reason:'matched_timeout_with_payment_tx'}); events 告警 'reopen_blocked_payment_present' {offer_id, payment_tx}; continue; }`（`matched → disputed` 在 `VALID_TRANSITIONS` 里吗？`:30` `matched: ['verifying','awaiting_manual_confirm','awaiting_oracle','refunded']` —— **没有 disputed** ⇒ 要么加边 `matched→disputed`（状态机改动，NWT 审），要么转 `verifying`（语义：付款已提交待核，`paid_v1` 迟到时能自然接上 `processPaymentSubmit`）—— **倾向 `verifying`**：不加边、不清 `payment_tx`、`taker` 保留，`timeoutVerifying`（`verifying_started_at+30min`）接管；告警一条。写理由进补丁。
+- **不清的字段**（Bettor 亲读 `:730-737`）：`delivery_tx` 本就不清；`WHERE protocol_status='matched'` ⇒ 已 `verifying`（paid 落了）不受影响 ⇒ 风险窗严格 = "USDT 出了但 paid 没落"。
+- **向量（`exchange-machine.reopen-guard.test.mjs`，真 schema）**：
+  1. matched + `payment_tx IS NULL` + 超时 ⇒ 照旧 reopen（`open`，taker/payment_tx 清空，`releaseFunds` 调 1 次）——现行为不变。
+  2. matched + `payment_tx='0xabc'` + 超时 ⇒ **不 reopen**：status=`verifying`（或裁定态），`payment_tx` 仍 `0xabc`，`taker` 仍在，`releaseFunds` **未调**，`events` 有 `reopen_blocked_payment_present`。
+  3. 同 offer 第二次 tick ⇒ 不重复告警（bucket 去重）、状态不变。
+  4. 已 `verifying` 的 offer 不在 `stale` 集合（`WHERE protocol_status='matched'` 逐字断言）。
+  5. 突变：去掉 `if (offer.payment_tx)` 分支 ⇒ 向量 2 必红（被 reopen、payment_tx 变 NULL）。
+  6. 源级：`_autoPayExchange` 写 `payment_tx`（`tpf:2745`）与本分支读同一列（防日后改名漂移）。
+- **不做**：`_autoPayExchange` 开头预检（P7-res）留作防御深度，另议。
