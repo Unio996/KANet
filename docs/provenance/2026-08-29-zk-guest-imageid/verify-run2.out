@@ -1,0 +1,5 @@
+[PASS] ① methods.rs PAYOUT_ID 8 词 LE == canonical :: 25530825,2934967257,144177066,2173437718,141306088,953105449,3399976846,818815920
+[PASS] ② payout.bin 366748 B, sha256 885c6fca4914cd3fce4463d94acd517c… :: 885c6fca4914cd3fce4463d94acd517c517ade492c5de838faf163f43efa26cd
+[PASS] ③ guest.rustc_info.json = 1.94.1-dev / 06e01cb0d
+[PASS] ④ canonical == 仓内 receipt summary / ZK_GATE.imageId (存在则核) :: receipt✓ zk-close-builder✓
+zk-guest-imageid provenance: 4 PASS / 0 FAIL
