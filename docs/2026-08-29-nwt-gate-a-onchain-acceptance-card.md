@@ -6,7 +6,8 @@
 
 ## 0. 前置（全真才跑）
 - 节点 READY：**两信号一致**——J2 `_step0_gate.mjs` verdict=READY（sync_ok ∧ daa_ok ∧ ibd_ok，贴全 JSON）**∧** KANet-UI D 行（`getBlockDagInfo` 派生）同判 READY；不一致 ⇒ 停查（句柄/daa 陈）。gate (a) 继承只读第一小时的 READY 判定（不自行单信号判）。
-- 探针 UTXO：一个尘埃级 `SUCC_UTXO`（recovery_daa redeem），金额 = 矿工费floor + 象征输出；**mass/fee 走 relay fee-floor 路径**（kaspa-wasm 对 v1 covenant `calculateTransactionMass` panic，见 memory `reference-kaspa-wasm-covenant-binding-moved…`）。
+- 探针 UTXO：`SUCC_UTXO`（recovery_daa redeem）**SEED = 1 KAS/链**（🔴 **尘埃不可行**：covenant storage mass ∝ C·p²/v，v 太小 ⇒ mass ≈ 4e12/SEED 爆表；SEED 须 ≥1 KAS 把 storage mass 压到可付）。SEED **临锁**在 covenant、由 P（recovery）取回（减 fee）⇒ 净烧 = 各落链向量 fee（N6–N9 被拒不付）。
+- 🔴 **广播 fee 必由 `estimateMassUpperBound` × `MIN_SOMPI_PER_MASS`(100 sompi/mass) × 1.5 buffer 算，绝不用 harness 固定 `FEE=0.01 KAS/input`**。NWT 核 `tx-mass-ub.mjs`：= **7b1e18cc 逐项镜像**（`source_commit` + 每项 `git show 7b1e18cc:` 出处）、covenant 输入/输出 **`plurality p=2`**（`ceil((63+|spk|+32)/100)`；v2 已修 Codex `e6d3d2f8` 的 p=1 低估 = memory `feedback-kip9-storage-mass-plurality-is-not-one-covenant-utxo-is-p2`）；我实跑 `mass-bound.mjs` 得 `p_out=2,1 / p_in=2`、SEED=1 KAS 地板 G1≈0.040/R1≈0.040/P≈0.0078 KAS **>> harness 0.04 总 ⇒ 用 harness fee 必 mempool 拒**。红线 7（fee ≥ mass×100）**只 warn、wasm 对 v1-covenant `calculateTransactionMass` panic 时靠 `tx-mass-ub.mjs` 本地兜底、不 fail-open**（memory `reference-kaspa-wasm-covenant-binding-moved…`）。预算（Bettor→Owner）：净烧 ≤~1.06 KAS + covenant 临锁 ≤8 KAS ⇒ 预授权 ≤10 KAS。
 - Bettor 排期 + stop-rule 6（err 激增/节点重启 ⇒ 停手）。
 - 每向量 tx **字节已离线定**（N8 与 P 逐字节相同、差在提交时机；N6 只差 lockTime、N7 差 lockTime 量级、N9 只差 sequence）⇒ 广播段只做"提交 + 读拒因/落链"，不重构造。
 
