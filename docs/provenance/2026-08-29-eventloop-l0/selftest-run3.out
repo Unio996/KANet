@@ -1,0 +1,21 @@
+[db] path=D:\kanet-tn12\docs\provenance\2026-08-29-eventloop-l0\selftest-tmp-26972.db source=DB_PATH
+[tick-registry] installed (ring=256, warn>=500ms)
+[PASS] T1 匿名 interval 回调被自动包装, 名字含 selftest.mjs:行号, syncMs≈120
+[PASS] T2 具名回调按 fn.name 记录
+[PASS] T3 async tick 只量同步前缀 (≈80ms, 不含 await 后的 150ms)
+[sqlite-timing] installed (warn>=200ms)
+[diag:sql-sync] ms=238 method=get sql="WITH RECURSIVE c(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM c WHERE n < 3000000) " at=2026-08-29T06:11:38.536Z
+[PASS] T4 返回值不变 (count=3000000)
+[PASS] T5 慢语句被记录为 sql:get:<sql前缀> 且 ms≥200
+[PASS] T6 快语句不记录 (阈值以下)
+[PASS] T7 prepare 只包一次 (幂等 installSqliteTiming)
+[PASS] T8 culpritsBetween 捞到 blocker, 格式 [blocker:NNN]
+[PASS] T9 窗外记录不被捞 (窗在 blocker 之前)
+[PASS] T10 混合: sql 记录带 kind 前缀
+[PASS] T11 instrumentTick: 回调 throw 仍记录且异常透传
+[PASS] T12 instrumentTick: this 与参数原样传播
+[PASS] T13 instrumentTick: 返回值原样 (promise 就是同一个 promise)
+[PASS] T14 setInterval 非函数参数原样透传给原生 (原生抛 ERR_INVALID_ARG_TYPE, 包装后抛同一个错 = 行为一致)
+[PASS] T15 clearInterval 对包装后的句柄有效 (计数不再增长)
+[PASS] T16 TICK_REGISTRY_OFF=1 时 installTickRegistry 不 patch (幂等已装则 no-op)
+eventloop-l0 selftest: 16 PASS / 0 FAIL
