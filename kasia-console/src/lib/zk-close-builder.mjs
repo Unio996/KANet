@@ -26,9 +26,9 @@ import { computeBetsRoot } from './pool-payout-root.mjs';
 // J1机器也不等于J2机器今天的真实编译产物——canonical 值 = c9918501...(J1机器自 2026-07-06 晚首次真实 groth16
 // proof 起持续沿用, 今天 3o6cs 真实 receipt 同款, 见 zk-payout-guest/proofs/3o6cs-attest-0a358fa0/3o6cs_receipt.summary.json)。
 // J2 机器今天独立编译同一份 guest 源码(sha256 逐字节相同)却产出不同 image_id(04be05f2...)——根因非源码差异,是
-// RISC0 image_id 对编译产物(含全部依赖树)敏感,而 Cargo.lock 被 .gitignore 排除 → 跨机 cargo resolve 未锁定依赖
-// 版本 → 编译产物不可复现。Phase2 补课项(挂账): 提交 J1 机器产出的 Cargo.lock(root+methods/guest 两份,канonical
-// 出证机那份, 不是 J2 的), 换 docker 固定镜像 build 达成真正可复现构建。
+// RISC0 image_id 对编译产物(含全部依赖树)敏感。(2026-08-29 J2 更正陈注释: Cargo.lock 两份自 68822fff(2026-07-07)起已入库,
+// 上一版此处写的"被 .gitignore 排除/挂账"早已不成立而没删, 8/29 带偏三人; 配方与自证见 zk-payout-guest/TOOLCHAIN.lock.md +
+// scripts/verify-image-id.sh, 方案稿 docs/2026-08-29-j2-zk-guest-imageid-reproducibility-plan.md; docker 路不在本批。)
 // 🔴 修复(2026-07-08, Bettor 门②诊断 #cbjvjq): 7/7 imageId 335cae6c→c9918501 那次裁定(#afw8pg)只改了
 // imageId, gateTmplHash 没跟着同步更新——半更新残留旧 imageId(335cae6c)配对的锚值, pxvml genesis 因此
 // 烤进一个跟当前 guest binary 不匹配的 gateTmplHash, zk_close 的 require(blake2b(prefix‖suffix)==gateTmplHash)

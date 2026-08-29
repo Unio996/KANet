@@ -1,0 +1,13 @@
+{
+  "_doc": "canonical guest imageId 的工具链配方(机读; 人读见 TOOLCHAIN.lock.md)。scripts/verify-image-id.sh 读 canonical_image_id 比对。🔴 canonical 绝不能改(烤进每个 live pool genesis 的 ZK_GATE.imageId/gateTmplHash; 改=新 covenant=D-005/Owner)。",
+  "canonical_image_id": "c9918501d90bf0aeaaf7970816078c81e8286c08293ccf388e87a7cab023ce30",
+  "guest_program": { "file": "target/riscv-guest/methods/payout/riscv32im-risc0-zkvm-elf/release/payout.bin", "format": "risc0-binfmt (magic R0BF, 非裸 ELF)", "bytes": 366748, "sha256_prefix": "885c6fca4914cd3fce4463d94acd517c" },
+  "guest_toolchain": { "rustup_name": "risc0", "path": "/root/.risc0/toolchains/v1.94.1-rust-x86_64-unknown-linux-gnu", "rustc": "1.94.1-dev (06e01cb0d 2026-04-09)", "cargo": "1.94.1-dev (29ea6fb6a 2026-03-24)", "commit": "06e01cb0d0077cdbda6b930b2f23c2f05c8a2421", "target": "riscv32im-risc0-zkvm-elf", "installed": "2026-07-07T12:19+07:00", "installer": "cargo risczero install (旧式; rzup 未装)" },
+  "host_toolchain": { "rustc": "1.96.1 (31fca3adb 2026-06-26)", "cargo": "1.96.1 (356927216 2026-06-26)", "rustup_channel_at_record": "stable", "note": "host 只编 host 二进制与 build.rs, 对 guest 字节不承重; 钉版(rust-toolchain.toml channel=1.96.1)按方案稿 §5 顺序在 --build == canonical 之后才落" },
+  "risc0": { "risc0-build": "3.0.5", "risc0-zkvm": "3.0.5", "risc0-zkvm-platform": "2.2.2", "risc0-binfmt": "3.0.4", "risc0-circuit-rv32im": "4.0.4", "cargo-risczero": "3.0.5", "r0vm": "3.0.5" },
+  "cargo_lock": { "root": "zk-payout-guest/Cargo.lock", "guest": "zk-payout-guest/methods/guest/Cargo.lock", "commit": "68822fff", "date": "2026-07-07" },
+  "canonical_build": { "machine": "da9 WSL Ubuntu-24.04 (root)", "tree": "/mnt/d/kanet-tn12/zk-payout-guest", "methods_rs_mtime": "2026-07-12T03:17:19+07:00", "provenance": "docs/provenance/2026-08-29-zk-guest-imageid/" },
+  "docker": { "status": "not used", "note": "risc0-build 3.0.5 无 RISC0_USE_DOCKER env; 需 build.rs embed_methods_with_options+DockerOptions; 容器工具链≠v1.94.1 ⇒ 产出几乎必≠canonical; 不在本批(方案稿 §4.4/§5)" },
+  "recorded_by": "J1 r17 (host/rzup/cargo-risczero/r0vm) + J2 da9 WSL 只读 (guest toolchain/risc0-build src/7-12 产物) 2026-08-29",
+  "plan_doc": "docs/2026-08-29-j2-zk-guest-imageid-reproducibility-plan.md"
+}
