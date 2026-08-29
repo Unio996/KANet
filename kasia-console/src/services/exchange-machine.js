@@ -16,6 +16,7 @@ import { getVerifier } from './exchange-verifiers.js';
 import { recordChainEvent } from './chain-event.js';
 import { executeHedge } from './trade-protocol-filter.js';
 import { releaseFunds, spendFunds } from './fund-lock.js';
+import { buildExplorerUrl, formatTxReference } from '../lib/explorer-url.mjs';   // R-EXPLORER-URL-BYPASS (2026-08-29 顺手: 本文件既有硬编码 mainnet explorer 链接, 改本文件即被 lint 挡)
 import crypto from 'crypto';
 
 // ── Valid Transitions ─────────────────────────────────────────
@@ -864,11 +865,19 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
         }));
         console.log(`[exchange] offer ${offer_id.slice(0,8)} BUY kaspa_tx verified → completed (KAS received, no delivery needed)`);
         // Trigger hedge
+        // J2 2026-08-29 (race 盘点 DEFECT1, NWT CONFIRMED, Bettor ④): 1ea63f83 (4/11) 起这里传的是整行 `executeHedge(finalOffer)`, 而签名是
+        // `_executeHedge(offerId, agentName, side, qty)` (trade-protocol-filter.js:2186) ⇒ `offerId.slice` 抛 ⇒ 被 .catch 吞 ⇒ 该路 hedge 4 个半月静默未跑。
+        // 修 = 镜像本函数 :1140-1144 的正确调法; `hedge_enabled` 门不动 (未开 flag 的 offer 行为不变, tpf:2200 第一道即 skip)。
         const finalOffer = sqlite.prepare('SELECT * FROM exchange_offers WHERE id = ?').get(offer_id);
         if (finalOffer?.protocol_status === 'completed' && finalOffer.maker) {
           const localAgent = sqlite.prepare('SELECT id, name FROM relay_nodes WHERE address = ?').get(finalOffer.maker);
           if (localAgent) {
-            executeHedge(finalOffer).catch(err => console.error(`[exchange-hedge] error: ${err.message}`));
+            const makerGaveKas = finalOffer.give_asset === 'KAS';
+            const hedgeSide = makerGaveKas ? 'BUY' : 'SELL';
+            const hedgeQty = makerGaveKas ? parseFloat(finalOffer.give_amount) : parseFloat(finalOffer.want_amount);
+            if (hedgeQty > 0) {
+              executeHedge(finalOffer.id, localAgent.name, hedgeSide, hedgeQty).catch(err => console.error(`[exchange-hedge] error: ${err.message}`));
+            }
           }
         }
         return;
@@ -1095,7 +1104,7 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
                   kind: 'dm_kas_delivered',
                   peer: deliveryTarget,
                   payload: {
-                    message: `✅ 已发出 ${deliveringOffer.give_amount} KAS 到你 Kasia 钱包, 1-2 分钟到账.\n\nTX: ${deliveryTxId}\n查看: https://explorer.kaspa.org/txs/${deliveryTxId}\n\n感谢使用 KANet broker.`,
+                    message: `✅ 已发出 ${deliveringOffer.give_amount} KAS 到你 Kasia 钱包, 1-2 分钟到账.\n\n${formatTxReference(deliveryTxId, buildExplorerUrl(deliveryTxId, process.env.KASPA_NETWORK))}\n\n感谢使用 KANet broker.`,
                   },
                 });
               } catch (e) { console.warn(`[exchange] dm_kas_delivered enqueue err: ${e.message}`); }
