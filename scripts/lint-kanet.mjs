@@ -1852,37 +1852,45 @@ function checkR_SQL_TIME_STRINGCMP() {
 }
 checkR_SQL_TIME_STRINGCMP(); // R-SQL-TIME-STRINGCMP (2026-08-29)
 
-// ── R-TESTONLY-EXPORT-IN-PROD [ERROR] (2026-08-29 J2; Codex 418fffbd wiring-time 要求 + Bettor GO, 零 baseline: 全仓预查非 test 引用 0) ──
-//   病: `_xxxForTests` (如 recovery-lock-builder.mjs `_loadRecoveryConfigWithMaxForTests`, cltv-locktime.mjs `_cltvLockTimeAllowZeroForTests`) 从【生产模块】导出,
-//       "test-only" 只是命名不是访问边界 —— 任何生产文件 import/调用它 = 绕过 assertPositiveDelay/零延迟拒 等资金安全闸 (D-016/Codex 9eab914a ④)。
-//   判据: 去整行注释 (// | * | /*) 后, `_[A-Za-z0-9]+ForTests` 只准出现在 (a) 定义行 `export (async )?(function|const|let) _xxxForTests` (非 test 的 .js/.mjs/.cjs)
-//         与 (b) *.test.mjs / *.test.js 文件; 其余一律违例 (import / re-export / 调用 / 动态 import() 字符串 / 赋值别名)。
-//   范围: 只扫 targets (staged/传入); 只报 文件:行:列。guard test (recovery-lock-builder.test.mjs) 用 spawn 跑本脚本断言 0 命中 + 阳性对照文件必报 1。
+// ── R-TESTONLY-EXPORT-IN-PROD [ERROR] (2026-08-29 J2; Codex 418fffbd/5725b96e wiring-time 要求 + NWT/Bettor GO, 零 baseline: 全仓预查非 test 引用 0) ──
+//   病: `_xxxForTests` 从【生产模块】导出时 "test-only" 只是命名不是访问边界 —— 任何生产文件 import/调用它 = 绕过 assertPositiveDelay/零延迟拒 等资金安全闸 (D-016/Codex 9eab914a ④)。
+//   两轴 (Codex 5725b96e TG-1/TG-2):
+//     轴 1 符号: 生产上下文里 `_[A-Za-z0-9]+ForTests` 【定义或引用一律 ERROR】(定义只准在 test-context; 不再豁免 export function/const 定义行 —— 否则将来任何生产文件重新定义 test-only 导出会被"故意放过")。
+//     轴 2 路径: 生产上下文里任何 static import / re-export(`export … from`) / `require(` / 动态 `import(` 的目标匹配 `*.testonly.*` 或 `__testonly__/` ⇒ ERROR, 不看符号/别名
+//              (`import * as x from './….testonly.mjs'` / `await import('…testonly.mjs')` 都逮)。
+//   test-context 白名单 (NWT 8/29): *.test.mjs|js / *.fixture.mjs|js / *.testonly.mjs|js / test-framework/** / __testonly__/ (注: __testonly__ 目录名撞 .gitignore 的 _* 规则, 实际用同目录 *.testonly.mjs)。
+//   判据: 去整行注释 (// | * | /*) 后逐行扫; 报 文件:行:列。只扫 targets (staged/传入)。guard test (recovery-lock-builder.test.mjs) 用 spawn 跑本脚本 + 5 条阳性/阴性对照。
 const TESTONLY_SYM_RE = /\b_[A-Za-z0-9]+ForTests\b/g;
-const TESTONLY_DEF_RE = /^\s*export\s+(?:async\s+)?(?:function|const|let)\s+_[A-Za-z0-9]+ForTests\b/;
+const TESTONLY_PATH_RE = /(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*)['"`][^'"`]*(?:\.testonly\.[a-z]+|__testonly__\/)[^'"`]*['"`]/g;
+export function isTestContextPath(relPosix) {
+  return /\.test\.m?js$/.test(relPosix) || /\.fixture\.m?js$/.test(relPosix) || /\.testonly\.m?js$/.test(relPosix) || /(^|\/)test-framework\//.test(relPosix) || /(^|\/)__testonly__\//.test(relPosix);
+}
 function scanTestOnlyExportViolations(content) {
   const out = [];
   content.split('\n').forEach((line, i) => {
     if (/^\s*(?:\/\/|\*|\/\*)/.test(line)) return;   // 整行注释不计 (规则说明/禁用提示会提名字)
-    if (TESTONLY_DEF_RE.test(line)) return;             // 定义行 = 唯一合法出现
     TESTONLY_SYM_RE.lastIndex = 0; let m;
-    while ((m = TESTONLY_SYM_RE.exec(line))) out.push({ line: i + 1, col: m.index + 1, sym: m[0] });
+    while ((m = TESTONLY_SYM_RE.exec(line))) out.push({ line: i + 1, col: m.index + 1, axis: 'symbol', what: m[0] });
+    TESTONLY_PATH_RE.lastIndex = 0;
+    while ((m = TESTONLY_PATH_RE.exec(line))) out.push({ line: i + 1, col: m.index + 1, axis: 'path', what: m[0].slice(0, 80) });
   });
   return out;
 }
 function checkR_TESTONLY_EXPORT_IN_PROD() {
   for (const abs of targets) {
     if (!/\.(m?js|cjs)$/.test(abs)) continue;
-    const relp = path.relative(ROOT, abs).split(path.sep).join('/');
-    if (/\.test\.m?js$/.test(abs) || /\.fixture\.m?js$/.test(abs) || /\.testonly\.m?js$/.test(abs) || /(^|\/)test-framework\//.test(relp) || /(^|\/)__testonly__\//.test(relp)) continue;   // (b) 全 test-context 白名单 (NWT 8/29): *.test / *.fixture / *.testonly / test-framework/** / __testonly__/ (注: __testonly__ 目录名撞 .gitignore 的 _* 规则, 实际用同目录 *.testonly.mjs)
-    let c = ''; try { c = read(abs); } catch { continue; }
     const rel = path.relative(ROOT, abs).split(path.sep).join('/');
+    if (isTestContextPath(rel)) continue;   // (b) 全 test-context 白名单
+    let c = ''; try { c = read(abs); } catch { continue; }
     for (const h of scanTestOnlyExportViolations(c)) {
-      violate('R-TESTONLY-EXPORT-IN-PROD', `生产文件引用 test-only 导出 \`${h.sym}\` @ ${rel}:${h.line}:${h.col} — "ForTests" 是命名不是访问边界: 生产路 import/调用它 = 绕过资金安全闸 (assertPositiveDelay / 零延迟拒)。只准 *.test.mjs 用; 生产要同能力 ⇒ 走正式 API 或改设计。`, abs, h.line);
+      const why = h.axis === 'symbol'
+        ? `生产上下文出现 test-only 符号 \`${h.what}\` (定义或引用皆违例; 定义只准在 *.testonly.mjs / *.test.mjs)`
+        : `生产上下文 import/require/re-export 了 test-only 模块 (${h.what}) — 不看符号名, 按模块路径判`;
+      violate('R-TESTONLY-EXPORT-IN-PROD', `${why} @ ${rel}:${h.line}:${h.col} — "ForTests"/"testonly" 是命名不是访问边界: 生产路拿到它 = 绕过资金安全闸 (assertPositiveDelay / 零延迟拒 / BRAND)。`, abs, h.line);
     }
   }
 }
-checkR_TESTONLY_EXPORT_IN_PROD(); // R-TESTONLY-EXPORT-IN-PROD (2026-08-29)
+checkR_TESTONLY_EXPORT_IN_PROD(); // R-TESTONLY-EXPORT-IN-PROD (2026-08-29, v2: TG-1 定义也违例 + TG-2 按路径)
 
 // ── 报告 ──
 // warnings first (non-blocking — WARN rules are migration checklists, not hard blockers)

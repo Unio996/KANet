@@ -22,12 +22,16 @@ t('G0 源级: 不含 _cltvLockTimeAllowZeroForTests; loadRecoveryConfig 内调 a
   const body = SRC.slice(SRC.indexOf('export function loadRecoveryConfig'), SRC.indexOf('const toBig'));
   assert.ok(/assertPositiveDelay\(/.test(body), 'loadRecoveryConfig(含其 impl) 没调 assertPositiveDelay');
   assert.ok(!/raw\.entry/.test(SRC.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n')), '代码里不得读 raw.entry (Codex A)');
-  // Codex 418fffbd + NWT 8/29 only-path: 两个生产模块去整行注释后不得含任何 *ForTests 符号 (定义也不许 —— surface 直接不存在)
+  // Codex 418fffbd/5725b96e + NWT 8/29 only-path (TG-1 全仓): 【全部生产上下文文件】去整行注释后不得含任何 *ForTests 符号 (定义也不许) 或 import *.testonly / __testonly__ 路径
   const noComments = (s) => s.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
   const CLTV_SRC = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'cltv-locktime.mjs'), 'utf8');
-  assert.ok(!/ForTests/.test(noComments(SRC)), 'recovery-lock-builder.mjs 生产代码含 ForTests 符号');
-  assert.ok(!/ForTests/.test(noComments(CLTV_SRC)), 'cltv-locktime.mjs 生产代码含 ForTests 符号');
   assert.ok(!/allowZero/.test(noComments(CLTV_SRC)), 'cltv-locktime.mjs 不得残留 allowZero 分支');
+  const ROOT0 = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+  const isTestCtx = (rel) => /\.test\.m?js$/.test(rel) || /\.fixture\.m?js$/.test(rel) || /\.testonly\.m?js$/.test(rel) || /(^|\/)test-framework\//.test(rel) || /(^|\/)__testonly__\//.test(rel);
+  const bad = [];
+  const walk = (dir) => { for (const e of readdirSync(dir, { withFileTypes: true })) { if (e.name === 'node_modules' || e.name.startsWith('.')) continue; const p = join(dir, e.name); if (e.isDirectory()) walk(p); else if (/\.(m?js|cjs)$/.test(e.name)) { const rel = p.slice(ROOT0.length + 1).split('\\').join('/'); if (isTestCtx(rel)) continue; const code = noComments(readFileSync(p, 'utf8')); if (/\b_[A-Za-z0-9]+ForTests\b/.test(code) || /(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*)['"`][^'"`]*(?:\.testonly\.[a-z]+|__testonly__\/)/.test(code)) bad.push(rel); } } };
+  for (const d of ['kasia-relay/src', 'kasia-console/src']) if (existsSync(join(ROOT0, d))) walk(join(ROOT0, d));
+  assert.deepStrictEqual(bad, [], '生产上下文出现 test-only 符号/模块路径');
 });
 t('C1 loadRecoveryConfig: n=100 ok(bigint, frozen, entry 3); 字符串 "100" ok', () => { const c = loadRecoveryConfig({ n_recovery_delay_daa: 100 }); assert.strictEqual(c.nDelayDaa, 100n); assert.ok(Object.isFrozen(c)); assert.strictEqual(c.entry, RECOVERY_DAA_ENTRY); assert.strictEqual(loadRecoveryConfig({ n_recovery_delay_daa: '100' }).nDelayDaa, 100n); });
 t('C2 loadRecoveryConfig 拒: 0 / −1 / 缺 / null / 1e7(sane-max) / 5e11 / 非整数 / entry 非法', () => {
@@ -116,15 +120,26 @@ t('G1 import-surface guard: lint R-TESTONLY-EXPORT-IN-PROD 对 kasia-relay/src/l
   const r0 = spawnSync(process.execPath, [lint, ...prodFiles], { cwd: ROOT, encoding: 'utf8', timeout: 120000 });
   assert.ok(/\[lint-kanet\]/.test(r0.stdout + r0.stderr), 'lint 没跑起来: ' + (r0.stderr || '').slice(0, 200));
   assert.strictEqual(hits(r0.stdout + r0.stderr), 0, `生产文件里出现 test-only 引用: ${(r0.stdout || '').split('\n').filter((l) => /ForTests/.test(l)).join(' | ').slice(0, 300)}`);
-  // 阳性对照 (证规则真活, 非 vacuous): scratch 临时生产形文件 import test-only 导出 ⇒ 必报 1
+  // 阳性/阴性对照 (证规则真活, 非 vacuous; Codex 5725b96e TG-1/TG-2 至少 4 条): scratch 临时文件, 跑完删
   const posDir = join(ROOT, 'scratch', '_j2_testonly_guard_pos'); mkdirSync(posDir, { recursive: true });
-  const posFile = join(posDir, 'positive_control.mjs');
-  writeFileSync(posFile, "import { _loadRecoveryConfigWithMaxForTests } from '../../kasia-relay/src/lib/recovery-lock-builder.mjs';\nexport const cfg = 1;\n");   // 单行引用 ⇒ 恰 1 命中
+  const T = '../../kasia-relay/src/lib/recovery-lock-builder.testonly.mjs';
+  const CASES = [
+    ['named_import.mjs', "import { _loadRecoveryConfigWithMaxForTests } from '../../kasia-relay/src/lib/recovery-lock-builder.mjs';\nexport const a = 1;\n", 1, '旧对照: 生产具名 import 符号'],
+    ['prod_def.mjs', "export function _xForTests() { return 1; }\nexport const b = 2;\n", 1, 'TG-1: 生产文件重新定义 test-only 导出 ⇒ 红'],
+    ['star_import.mjs', `import * as x from '${T}';\nexport const c = x;\n`, 1, 'TG-2: 生产 import * as 不带符号名 ⇒ 按路径红'],
+    ['dyn_import.mjs', `const m = await import('${T}');\nexport const d = m;\n`, 1, 'TG-2: 生产动态 import() ⇒ 按路径红'],
+    ['reexport.mjs', `export * from '${T}';\n`, 1, 'TG-2: 生产 re-export ⇒ 按路径红'],
+    ['green.test.mjs', `import * as x from '${T}';\nexport function _yForTests() { return x; }\n`, 0, 'test-context 同样 import + 定义 ⇒ 绿'],
+  ];
   try {
-    const r1 = spawnSync(process.execPath, [lint, posFile], { cwd: ROOT, encoding: 'utf8', timeout: 120000 });
-    assert.strictEqual(hits(r1.stdout + r1.stderr), 1, '阳性对照未被报 = 规则死/未接线');
-    assert.ok(/positive_control\.mjs:1:\d+/.test(r1.stdout + r1.stderr), '须报 文件:行:列');
-  } finally { try { unlinkSync(posFile); } catch {} try { rmdirSync(posDir); } catch {} }
+    for (const [name, body, want, why] of CASES) {
+      const f = join(posDir, name); writeFileSync(f, body);
+      const r1 = spawnSync(process.execPath, [lint, f], { cwd: ROOT, encoding: 'utf8', timeout: 120000 });
+      const got = hits(r1.stdout + r1.stderr);
+      assert.strictEqual(got, want, `${why}: 期望 ${want} 命中, 实 ${got}`);
+      if (want > 0) assert.ok(new RegExp(name.replace('.', '\\.') + ':1:\\d+').test(r1.stdout + r1.stderr), `${name} 须报 文件:行:列`);
+    }
+  } finally { for (const [name] of CASES) { try { unlinkSync(join(posDir, name)); } catch {} } try { rmdirSync(posDir); } catch {} }
 });
 console.log(`recovery-lock-builder: ${pass} PASS / ${fail} FAIL`);
 process.exit(fail ? 1 : 0);
