@@ -2,7 +2,10 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { loadRecoveryConfig, _loadRecoveryConfigWithMaxForTests, CLTV_ERR_CONFIG_OVERRIDE, planRecoveryDaa, canSubmitRecovery, assertRecoveryTxShape, RECOVERY_DAA_ENTRY } from './recovery-lock-builder.mjs';
+import { loadRecoveryConfig, CLTV_ERR_CONFIG_OVERRIDE, planRecoveryDaa, canSubmitRecovery, assertRecoveryTxShape, RECOVERY_DAA_ENTRY } from './recovery-lock-builder.mjs';
+import { _loadRecoveryConfigWithMaxForTests } from './recovery-lock-builder.testonly.mjs';   // test-only 变体已搬出生产模块 (NWT 8/29 only-path)
+import * as _cp from 'node:child_process';
+import { existsSync, readdirSync, mkdirSync, writeFileSync, unlinkSync, rmdirSync } from 'node:fs';
 import { CltvError, CLTV_ERR, DELAY_SANE_MAX_DAA, LOCK_TIME_THRESHOLD, MAX_TX_IN_SEQUENCE_NUM } from './cltv-locktime.mjs';
 let pass = 0, fail = 0;
 const t = (n, f) => { try { f(); pass++; console.log('[PASS] ' + n); } catch (e) { fail++; console.log('[FAIL] ' + n + ' :: ' + e.message); } };
@@ -19,6 +22,16 @@ t('G0 源级: 不含 _cltvLockTimeAllowZeroForTests; loadRecoveryConfig 内调 a
   const body = SRC.slice(SRC.indexOf('export function loadRecoveryConfig'), SRC.indexOf('const toBig'));
   assert.ok(/assertPositiveDelay\(/.test(body), 'loadRecoveryConfig(含其 impl) 没调 assertPositiveDelay');
   assert.ok(!/raw\.entry/.test(SRC.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n')), '代码里不得读 raw.entry (Codex A)');
+  // Codex 418fffbd/5725b96e + NWT 8/29 only-path (TG-1 全仓): 【全部生产上下文文件】去整行注释后不得含任何 *ForTests 符号 (定义也不许) 或 import *.testonly / __testonly__ 路径
+  const noComments = (s) => s.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+  const CLTV_SRC = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'cltv-locktime.mjs'), 'utf8');
+  assert.ok(!/allowZero/.test(noComments(CLTV_SRC)), 'cltv-locktime.mjs 不得残留 allowZero 分支');
+  const ROOT0 = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+  const isTestCtx = (rel) => /\.test\.m?js$/.test(rel) || /\.fixture\.m?js$/.test(rel) || /\.testonly\.m?js$/.test(rel) || /(^|\/)test-framework\//.test(rel) || /(^|\/)__testonly__\//.test(rel);
+  const bad = [];
+  const walk = (dir) => { for (const e of readdirSync(dir, { withFileTypes: true })) { if (e.name === 'node_modules' || e.name.startsWith('.')) continue; const p = join(dir, e.name); if (e.isDirectory()) walk(p); else if (/\.(m?js|cjs)$/.test(e.name)) { const rel = p.slice(ROOT0.length + 1).split('\\').join('/'); if (isTestCtx(rel)) continue; const code = noComments(readFileSync(p, 'utf8')); if (/\b_[A-Za-z0-9]+ForTests\b/.test(code) || /(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*)['"`][^'"`]*(?:\.testonly\.[a-z]+|__testonly__\/)/.test(code)) bad.push(rel); } } };
+  for (const d of ['kasia-relay/src', 'kasia-console/src']) if (existsSync(join(ROOT0, d))) walk(join(ROOT0, d));
+  assert.deepStrictEqual(bad, [], '生产上下文出现 test-only 符号/模块路径');
 });
 t('C1 loadRecoveryConfig: n=100 ok(bigint, frozen, entry 3); 字符串 "100" ok', () => { const c = loadRecoveryConfig({ n_recovery_delay_daa: 100 }); assert.strictEqual(c.nDelayDaa, 100n); assert.ok(Object.isFrozen(c)); assert.strictEqual(c.entry, RECOVERY_DAA_ENTRY); assert.strictEqual(loadRecoveryConfig({ n_recovery_delay_daa: '100' }).nDelayDaa, 100n); });
 t('C2 loadRecoveryConfig 拒: 0 / −1 / 缺 / null / 1e7(sane-max) / 5e11 / 非整数 / entry 非法', () => {
@@ -46,8 +59,10 @@ t('C5 test-only _loadRecoveryConfigWithMaxForTests(raw, 1000): 999 ok / 1000 拒
   assert.strictEqual(_loadRecoveryConfigWithMaxForTests({ n_recovery_delay_daa: 999 }, 1000).nDelayDaa, 999n);
   throwsCode(() => _loadRecoveryConfigWithMaxForTests({ n_recovery_delay_daa: 1000 }, 1000), CLTV_ERR.DOMAIN_MIXED);
   throwsCode(() => _loadRecoveryConfigWithMaxForTests({ n_recovery_delay_daa: 5, max: 9 }, 1000), CLTV_ERR_CONFIG_OVERRIDE);
-  const body = SRC.slice(SRC.indexOf('export function loadRecoveryConfig'), SRC.indexOf('export function _loadRecoveryConfigWithMaxForTests'));
+  const body = SRC.slice(SRC.indexOf('export function loadRecoveryConfig'), SRC.indexOf('const toBig'));
   assert.ok(/DELAY_SANE_MAX_DAA/.test(body) && !/raw\.max/.test(body), '生产装载口须用代码钉的 DELAY_SANE_MAX_DAA, 不读 raw.max');
+  assert.strictEqual(_loadRecoveryConfigWithMaxForTests({ n_recovery_delay_daa: 999 }, 1000)._unbranded_testonly, true, 'testonly 变体不带 BRAND');
+  throwsCode(() => planRecoveryDaa(_loadRecoveryConfigWithMaxForTests({ n_recovery_delay_daa: 999 }, 1000), { successorDaa: 1n }), CLTV_ERR.ARGS_MISSING);   // only-path: 自定 max 的 cfg 在生产路不可用
 });
 const cfg = loadRecoveryConfig({ n_recovery_delay_daa: 100 });
 t('P1 planRecoveryDaa 镜像探针 P: d=80,000,000, n=100 ⇒ E=lockTime=80,000,100 (<5e11), sequence 0n, sigPushes [0,3], earliest tip = E+1', () => {
@@ -90,6 +105,95 @@ t('T2 assertRecoveryTxShape 拒 N6/N7/N9/续 covenant/空输出: lockTime E−1 
   throwsCode(() => assertRecoveryTxShape(plan, { ...good, outputs: [{ value: 1n, covenant: { id: 'x' } }] }), CLTV_ERR.ARGS_MISSING);
   throwsCode(() => assertRecoveryTxShape(plan, { ...good, outputs: [] }), CLTV_ERR.ARGS_MISSING);
   throwsCode(() => assertRecoveryTxShape(plan, { ...good, inputs: [] }), CLTV_ERR.ARGS_MISSING);
+});
+// ── Codex 418fffbd wiring-time 要求 (Bettor GO 8/29): _loadRecoveryConfigWithMaxForTests 从生产模块导出, "test-only" 只是命名 ⇒ 机械 import-surface guard ──
+// 走 spawn 跑 scripts/lint-kanet.mjs (不 import 它: 顶层自执行 = import 即执行, 同 runner 那条坑) 的 R-TESTONLY-EXPORT-IN-PROD; 阳性对照证规则真活。
+// G-doc (NWT MUST, 与 lint 规则注释同步): 规则三轴 = 符号(定义/引用皆红, 剥字面量与行尾注释) + 路径(prod→任何 test-context 路径字面量: .test./.fixture./.testonly./test-framework//__testonly__/);
+//   known-escape 两族 (regex 盲): (E1) 计算路径 (拼接/变量) 动态 import; (E2) 间接 loader (createRequire 别名 / import.meta.resolve)。fixture-relaunder 已被轴 3 关掉, 不列。
+//   🔴 真安全边界是 BRAND: testonly cfg 无 recovery-lock-builder 私有 WeakSet 品牌 ⇒ planRecoveryDaa 拒 (C5 向量钉); cltv 生产 API 无 allowZero。lint = belt-and-suspenders, escape = 完整性缺口非 authority-bypass。
+t('G1 import-surface guard: spawn lint R-TESTONLY-EXPORT-IN-PROD — 两生产文件 + kasia-console/src/lib 生产 .mjs = 0 命中; 10 条对照 (具名 import 1 / 生产定义 1 / import * as 1 / 动态 import() 1 / export * from 1 / test-context 同样 import+定义 0 / fixture 引 testonly 0 / prod import .fixture 1 / 符号只在字符串+行尾注释 0 / 真定义+真调用 2), 各报行列, 跑完删', () => {
+  const { spawnSync } = _cp;
+  const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+  const lint = join(ROOT, 'scripts', 'lint-kanet.mjs');
+  assert.ok(existsSync(lint), 'scripts/lint-kanet.mjs 不在');
+  const prodFiles = [join(ROOT, 'kasia-relay', 'src', 'lib', 'cltv-locktime.mjs'), join(ROOT, 'kasia-relay', 'src', 'lib', 'recovery-lock-builder.mjs')];
+  const consoleLib = join(ROOT, 'kasia-console', 'src', 'lib');
+  if (existsSync(consoleLib)) for (const f of readdirSync(consoleLib)) if (/\.(m?js)$/.test(f) && !/\.test\.m?js$/.test(f)) prodFiles.push(join(consoleLib, f));
+  const hits = (out) => { const m = String(out).match(/R-TESTONLY-EXPORT-IN-PROD: (\d+) hit/); return m ? Number(m[1]) : 0; };
+  const r0 = spawnSync(process.execPath, [lint, ...prodFiles], { cwd: ROOT, encoding: 'utf8', timeout: 120000 });
+  assert.ok(/\[lint-kanet\]/.test(r0.stdout + r0.stderr), 'lint 没跑起来: ' + (r0.stderr || '').slice(0, 200));
+  assert.strictEqual(hits(r0.stdout + r0.stderr), 0, `生产文件里出现 test-only 引用: ${(r0.stdout || '').split('\n').filter((l) => /ForTests/.test(l)).join(' | ').slice(0, 300)}`);
+  // 阳性/阴性对照 (证规则真活, 非 vacuous; Codex 5725b96e TG-1/TG-2 至少 4 条): scratch 临时文件, 跑完删
+  const posDir = join(ROOT, 'scratch', '_j2_testonly_guard_pos'); mkdirSync(posDir, { recursive: true });
+  const T = '../../kasia-relay/src/lib/recovery-lock-builder.testonly.mjs';
+  const CASES = [
+    ['named_import.mjs', "import { _loadRecoveryConfigWithMaxForTests } from '../../kasia-relay/src/lib/recovery-lock-builder.mjs';\nexport const a = 1;\n", 1, '旧对照: 生产具名 import 符号'],
+    ['prod_def.mjs', "export function _xForTests() { return 1; }\nexport const b = 2;\n", 1, 'TG-1: 生产文件重新定义 test-only 导出 ⇒ 红'],
+    ['star_import.mjs', `import * as x from '${T}';\nexport const c = x;\n`, 1, 'TG-2: 生产 import * as 不带符号名 ⇒ 按路径红'],
+    ['dyn_import.mjs', `const m = await import('${T}');\nexport const d = m;\n`, 1, 'TG-2: 生产动态 import() ⇒ 按路径红'],
+    ['reexport.mjs', `export * from '${T}';\n`, 1, 'TG-2: 生产 re-export ⇒ 按路径红'],
+    ['green.test.mjs', `import * as x from '${T}';\nimport * as fx from './helper.fixture.mjs';\nexport function _yForTests() { return [x, fx]; }\n`, 0, 'test-context 同样 import(testonly + fixture) + 定义 ⇒ 绿'],
+    // v4 (NWT 轴 3 + ④): 全 test-context 路径 / 白名单互引合法 / 符号轴剥字面量与行尾注释后真引用仍逮
+    ['helper.fixture.mjs', `export * from '${T}';\nexport const clean = 1;\n`, 0, '白名单 .fixture 引 testonly (test-context 互引) ⇒ 绿'],
+    ['prod_fixture_import.mjs', "import { clean } from './helper.fixture.mjs';\nexport const e = clean;\n", 1, '轴 3: 生产 import .fixture (relaunder 入口) ⇒ 红'],
+    ['prod_symbol_in_string.mjs', 'const doc = "_fooForTests"; // _barForTests\nexport const f = doc;\n', 0, '④: 符号只在字符串字面量/行尾注释 ⇒ 绿'],
+    ['prod_real_ref.mjs', 'const _realForTests = () => 1;\nexport const g = _realForTests();\n', 2, '④: 真定义+真调用 ⇒ 2 (两行各 1)'],
+    // v5 (Codex 2ce3f1a9 TG-4): ESM 副作用 import 形
+    ['prod_side_effect_import.mjs', "import './helper.testonly.mjs';\nexport const h = 1;\n", 1, 'TG-4: 生产副作用 import (无 from) ⇒ 红'],
+    ['side_effect.test.mjs', "import './helper.testonly.mjs';\nexport const i = 1;\n", 0, 'TG-4: test-context 同形 ⇒ 绿'],
+    // v6 (NWT 8/29): .mts/.cts 曾被扩展名过滤整体跳过 (latent, repo 0 个)
+    ['p_mts_ext.mts', "import './helper.testonly.mjs';\nexport const j: number = 1;\n", 1, '.mts 生产副作用 import testonly ⇒ 红 (扩展过滤含 .mts/.cts)'],
+    ['p_cts_ctx.test.cts', "const x = require('./helper.testonly.mjs');\nmodule.exports = x;\n", 0, '.test.cts 是 test-context ⇒ 绿'],
+  ];
+  try {
+    for (const [name, body, want, why] of CASES) {
+      const f = join(posDir, name); writeFileSync(f, body);
+      const r1 = spawnSync(process.execPath, [lint, f], { cwd: ROOT, encoding: 'utf8', timeout: 120000 });
+      const got = hits(r1.stdout + r1.stderr);
+      assert.strictEqual(got, want, `${why}: 期望 ${want} 命中, 实 ${got}`);
+      if (want > 0) assert.ok(new RegExp(name.replace('.', '\\.') + ':1:\\d+').test(r1.stdout + r1.stderr), `${name} 须报 文件:行:列`);
+    }
+  } finally { for (const [name] of CASES) { try { unlinkSync(join(posDir, name)); } catch {} } try { rmdirSync(posDir); } catch {} }
+});
+t('G2 (Codex 2ce3f1a9 TG-3) 仓级不变量: 无参 lint 默认 walk 必须盖 kasia-relay/src — 在未列的 relay 子目录临时建生产文件 import testonly ⇒ 无参跑 lint 逮到 (R-TESTONLY ≥1 且报该文件); 跑完删', () => {
+  const { spawnSync } = _cp;
+  const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+  const lint = join(ROOT, 'scripts', 'lint-kanet.mjs');
+  const tmpDir = join(ROOT, 'kasia-relay', 'src', 'lib', 'zz-tg3-tmp'); mkdirSync(tmpDir, { recursive: true });
+  const leak = join(tmpDir, 'leak.mjs'); const relLeak = 'kasia-relay/src/lib/zz-tg3-tmp/leak.mjs';
+  writeFileSync(leak, "import * as x from '../recovery-lock-builder.testonly.mjs';\nexport const leak = x;\n");
+  try {
+    // v6: 默认范围 = git tracked ⇒ 临时文件先 `git add -N` 进 tracked 集 (untracked ⇒ 0 由 G3 钉)
+    const a = spawnSync('git', ['add', '-N', '--', relLeak], { cwd: ROOT, encoding: 'utf8' }); assert.strictEqual(a.status, 0, 'git add -N 失败: ' + a.stderr);
+    const r = spawnSync(process.execPath, [lint], { cwd: ROOT, encoding: 'utf8', timeout: 300000 });   // 🔴 无参 = 默认范围
+    const out = r.stdout + r.stderr;
+    const m = out.match(/R-TESTONLY-EXPORT-IN-PROD: (\d+) hit/);
+    assert.ok(m && Number(m[1]) >= 1, '无参 lint 没逮到 relay 子目录的生产 testonly import ⇒ 默认范围不盖 kasia-relay/src');
+    assert.ok(/zz-tg3-tmp[\\/]leak\.mjs:1/.test(out), '须报到该文件');
+  } finally { spawnSync('git', ['reset', '-q', '--', relLeak], { cwd: ROOT, encoding: 'utf8' }); try { unlinkSync(leak); } catch {} try { rmdirSync(tmpDir); } catch {} }
+});
+t('G3 (v6, Bettor 8/29) 无参默认范围 = git tracked: 未 tracked 的临时违例文件 ⇒ 无参 lint 0 命中; `git add -N` 后 ⇒ ≥1; 跑完 reset + 删', () => {
+  const { spawnSync } = _cp;
+  const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+  const lint = join(ROOT, 'scripts', 'lint-kanet.mjs');
+  const tmpDir = join(ROOT, 'kasia-relay', 'src', 'lib', 'zz-g3-tmp'); mkdirSync(tmpDir, { recursive: true });
+  const leak = join(tmpDir, 'untracked_leak.mjs'); const relLeak = 'kasia-relay/src/lib/zz-g3-tmp/untracked_leak.mjs';
+  writeFileSync(leak, "import './x.testonly.mjs';\nexport const u = 1;\n");
+  const count = (out) => { const m = String(out).match(/R-TESTONLY-EXPORT-IN-PROD: (\d+) hit/); return m ? Number(m[1]) : 0; };
+  const isTracked = () => spawnSync('git', ['ls-files', '--', relLeak], { cwd: ROOT, encoding: 'utf8' }).stdout.trim() !== '';
+  try {
+    assert.strictEqual(isTracked(), false, '前提: 临时文件未 tracked');
+    const r0 = spawnSync(process.execPath, [lint], { cwd: ROOT, encoding: 'utf8', timeout: 300000 });
+    assert.ok(/default scope = git tracked/.test(r0.stdout + r0.stderr), '无参须走 tracked scope (git 可用)');
+    assert.strictEqual(count(r0.stdout + r0.stderr), 0, 'untracked 违例文件不该进仓级不变量');
+    const a = spawnSync('git', ['add', '-N', '--', relLeak], { cwd: ROOT, encoding: 'utf8' }); assert.strictEqual(a.status, 0, 'git add -N 失败: ' + a.stderr);
+    assert.strictEqual(isTracked(), true);
+    const r1 = spawnSync(process.execPath, [lint], { cwd: ROOT, encoding: 'utf8', timeout: 300000 });
+    assert.ok(count(r1.stdout + r1.stderr) >= 1 && /zz-g3-tmp[\\/]untracked_leak\.mjs:1/.test(r1.stdout + r1.stderr), 'add -N 后须被逮到并报该文件');
+  } finally {
+    spawnSync('git', ['reset', '-q', '--', relLeak], { cwd: ROOT, encoding: 'utf8' });
+    try { unlinkSync(leak); } catch {} try { rmdirSync(tmpDir); } catch {}
+  }
 });
 console.log(`recovery-lock-builder: ${pass} PASS / ${fail} FAIL`);
 process.exit(fail ? 1 : 0);

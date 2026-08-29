@@ -54,9 +54,24 @@ function* walk(dir, ext = ['.js', '.mjs']) {
 
 // ── 输入: argv 给的 file 列表, 或全库扫 ──
 const argv = process.argv.slice(2);
-const targets = argv.length > 0
-  ? argv.map(p => path.resolve(p)).filter(exists)
-  : [...walk(path.join(ROOT, 'kasia-console/src')), ...walk(path.join(ROOT, 'agent-mind/src')), ...walk(path.join(ROOT, 'agent-adapter/src')), ...walk(path.join(ROOT, 'scripts'))];
+// 无参默认范围 (v6, Bettor 8/29 裁): 【只扫 git tracked 文件】(git ls-files, 含 `git add -N` 的 intent-to-add) —— 物理 walk 会把 gitignored 的
+// scripts/_send-*.mjs 之类一次性脚本扫进"仓级不变量"(存量 7 条 ERROR 里 4 条是它们); 扩展表 .js/.mjs/.cjs/.mts/.cts 与 R-TESTONLY 规则过滤一致。
+// git 不可用/失败 ⇒ 回退物理 walk (LOUD warn), 不静默缩小范围。
+const DEFAULT_LINT_DIRS = ['kasia-console/src', 'agent-mind/src', 'agent-adapter/src', 'scripts', 'kasia-relay/src'];   // TG-3 (Codex 2ce3f1a9): kasia-relay/src 必须在 (builder/cltv/*.testonly 所在)
+const DEFAULT_LINT_EXT = ['.js', '.mjs', '.cjs', '.mts', '.cts'];
+function trackedTargets() {
+  const out = execFileSync('git', ['ls-files', '-z', '--', ...DEFAULT_LINT_DIRS], { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  return out.split('\0').filter(Boolean).filter((f) => DEFAULT_LINT_EXT.some((e) => f.endsWith(e))).map((f) => path.join(ROOT, f)).filter(exists);
+}
+let targets;
+if (argv.length > 0) targets = argv.map(p => path.resolve(p)).filter(exists);
+else {
+  try { targets = trackedTargets(); console.log(`[lint-kanet] default scope = git tracked (${DEFAULT_LINT_DIRS.join(', ')}; ext ${DEFAULT_LINT_EXT.join('/')})`); }
+  catch (e) {
+    console.warn(`[lint-kanet] 🔴 git ls-files 失败 (${e.message.slice(0, 80)}) — 回退物理 walk (会含 gitignored 文件)`);
+    targets = DEFAULT_LINT_DIRS.flatMap((d) => [...walk(path.join(ROOT, d), DEFAULT_LINT_EXT)]);
+  }
+}
 
 console.log(`[lint-kanet] scanning ${targets.length} files...`);
 
@@ -1851,6 +1866,64 @@ function checkR_SQL_TIME_STRINGCMP() {
   }
 }
 checkR_SQL_TIME_STRINGCMP(); // R-SQL-TIME-STRINGCMP (2026-08-29)
+
+// ── R-TESTONLY-EXPORT-IN-PROD [ERROR] (2026-08-29 J2; Codex 418fffbd/5725b96e wiring-time 要求 + NWT/Bettor GO, 零 baseline: 全仓预查非 test 引用 0) ──
+//   病: `_xxxForTests` 从【生产模块】导出时 "test-only" 只是命名不是访问边界 —— 任何生产文件 import/调用它 = 绕过 assertPositiveDelay/零延迟拒 等资金安全闸 (D-016/Codex 9eab914a ④)。
+//   三轴 (Codex 5725b96e TG-1/TG-2 + NWT 8/29 轴 3):
+//     轴 1 符号: 生产上下文里 `_[A-Za-z0-9]+ForTests` 【定义或引用一律 ERROR】(定义只准在 test-context; 不豁免 export function/const 定义行)。
+//            扫前去掉字符串字面量 ('…' "…" `…` 单行) 与行尾 `//` 注释 (v4, NWT ④): 字符串/注释里提名字不算引用 (known-false-positive 修法, 见下)。
+//     轴 2/3 路径: 生产上下文任何 static import / re-export(`export … from`) / `require(` / 动态 `import(` 的【字面量】目标含任一 test-context 标记
+//            (`.test.` / `.fixture.` / `.testonly.` / `test-framework/` / `__testonly__/`) ⇒ ERROR, 不看符号/别名 (import * as / await import() / export * from / TG-4 副作用形 `import './x.testonly.mjs';` 都逮)。
+//            轴 3 (全 test-context 路径) 干净关掉 "fixture-relaunder": 白名单 .fixture.mjs 用干净名 re-export testonly 符号、生产再 import 干净名 —— 生产 import .fixture 本身就红。
+//   test-context 白名单 (NWT 8/29): *.test.mjs|js / *.fixture.mjs|js / *.testonly.mjs|js / test-framework/** / __testonly__/ (注: __testonly__ 目录名撞 .gitignore 的 _* 规则, 实际用同目录 *.testonly.mjs)。
+//   🔴 known-escape (regex 逮不到的蓄意规避; NWT MUST 写明, 不静默) —— 两族:
+//     (E1) 计算路径族: 拼接 `import('./x' + '.testonly.mjs')` / 变量 `const p = '…testonly.mjs'; import(p)` (路径轴只认【字面量】目标);
+//     (E2) 间接 loader 族: `createRequire(...)` 返回的别名函数 / `import.meta.resolve` 再加载 (路径轴只认 require(/import(/from 三种字面形)。
+//     fixture-relaunder (白名单 .fixture.mjs 用干净名 re-export testonly 符号、生产 import 干净名) 【已被轴 3 关掉】: 生产 import .fixture 本身就红, 不再列为 escape。
+//     轴 3 只管 prod→test-context; test-context 之间互引 (.test/.fixture/.testonly/test-framework 互相 import) 两端都在白名单 ⇒ 合法不报。
+//     ⇒ 这些是【lint 完整性缺口】不是 authority-bypass: 真安全边界是 BRAND —— testonly 变体造出的 cfg 不带 recovery-lock-builder 的私有 WeakSet 品牌,
+//        planRecoveryDaa 直接拒 (ARGS_MISSING), cltv 生产 API 也没有 allowZero 开关; lint 只是 belt-and-suspenders (让规避在 review 前就显形)。
+//   known-false-positive: 符号轴对多行模板字符串/块注释中段的名字仍会报 (只去单行字面量与整行/行尾注释); 真需要时用 `lint-allow` 行标不是本规则的机制 —— 改写成不含 `_xxxForTests` 字面即可 (生产代码本来就不该提它)。
+//   判据: 去整行注释 (// | * | /*) 后逐行扫; 报 文件:行:列。只扫 targets (staged/传入)。guard test (recovery-lock-builder.test.mjs) 用 spawn 跑本脚本 + 9 条阳性/阴性对照 + 两轴突变。
+const TESTONLY_SYM_RE = /\b_[A-Za-z0-9]+ForTests\b/g;
+const TESTONLY_PATH_RE = /(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*|^\s*import\s+)['"`][^'"`]*(?:\.test\.|\.fixture\.|\.testonly\.|(?:^|\/)test-framework\/|__testonly__\/)[^'"`]*['"`]/g;
+export function isTestContextPath(relPosix) {
+  return /\.test\.(m?js|cjs|mts|cts)$/.test(relPosix) || /\.fixture\.(m?js|cjs|mts|cts)$/.test(relPosix) || /\.testonly\.(m?js|cjs|mts|cts)$/.test(relPosix) || /(^|\/)test-framework\//.test(relPosix) || /(^|\/)__testonly__\//.test(relPosix);   // NWT 8/29: +.cjs/.mts/.cts
+}
+// 符号轴预处理 (v4 ④): 去单行字符串字面量与行尾 // 注释, 让"字符串/注释里提名字"不算引用 (路径轴用原行, 它正需要字面量)
+function stripStringsAndTrailingComment(line) {
+  return line
+    .replace(/'(?:[^'\\n]|\.)*'/g, "''").replace(/"(?:[^"\\n]|\.)*"/g, '""').replace(/`(?:[^`\\n]|\.)*`/g, '``')
+    .replace(/\/\/.*$/, '');
+}
+function scanTestOnlyExportViolations(content) {
+  const out = [];
+  content.split('\n').forEach((line, i) => {
+    if (/^\s*(?:\/\/|\*|\/\*)/.test(line)) return;   // 整行注释不计 (规则说明/禁用提示会提名字)
+    let m;
+    TESTONLY_PATH_RE.lastIndex = 0;
+    while ((m = TESTONLY_PATH_RE.exec(line))) out.push({ line: i + 1, col: m.index + 1, axis: 'path', what: m[0].slice(0, 80) });
+    const code = stripStringsAndTrailingComment(line);
+    TESTONLY_SYM_RE.lastIndex = 0;
+    while ((m = TESTONLY_SYM_RE.exec(code))) out.push({ line: i + 1, col: m.index + 1, axis: 'symbol', what: m[0] });
+  });
+  return out;
+}
+function checkR_TESTONLY_EXPORT_IN_PROD() {
+  for (const abs of targets) {
+    if (!/\.(m?js|cjs|mts|cts)$/.test(abs)) continue;   // NWT 8/29: +.mts/.cts (repo 现 0 个, latent 缺口)
+    const rel = path.relative(ROOT, abs).split(path.sep).join('/');
+    if (isTestContextPath(rel)) continue;   // (b) 全 test-context 白名单
+    let c = ''; try { c = read(abs); } catch { continue; }
+    for (const h of scanTestOnlyExportViolations(c)) {
+      const why = h.axis === 'symbol'
+        ? `生产上下文出现 test-only 符号 \`${h.what}\` (定义或引用皆违例; 定义只准在 *.testonly.mjs / *.test.mjs)`
+        : `生产上下文 import/require/re-export 了 test-context 模块 (${h.what}) — 不看符号名, 按模块路径判 (.test./.fixture./.testonly./test-framework//__testonly__/)`;
+      violate('R-TESTONLY-EXPORT-IN-PROD', `@ ${rel}:${h.line}:${h.col} — ${why}; "ForTests"/"testonly" 是命名不是访问边界: 生产路拿到它 = 绕过资金安全闸 (assertPositiveDelay / 零延迟拒 / BRAND)。`, abs, h.line);   // 坐标放最前: 报告器会截断长消息
+    }
+  }
+}
+checkR_TESTONLY_EXPORT_IN_PROD(); // R-TESTONLY-EXPORT-IN-PROD (2026-08-29, v4: 轴1 定义也违例 + 轴2/3 全 test-context 路径 + 符号轴去字符串/行尾注释)
 
 // ── 报告 ──
 // warnings first (non-blocking — WARN rules are migration checklists, not hard blockers)

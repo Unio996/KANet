@@ -1,5 +1,6 @@
 import assert from 'node:assert';
-import { cltvLockTime, _cltvLockTimeAllowZeroForTests, cltvSequence, assertPositiveDelay, DELAY_SANE_MAX_DAA, classifyLockReject, CltvError, CLTV_ERR, LOCK_TIME_THRESHOLD, TIME_DOMAIN_UPPER, MAX_TX_IN_SEQUENCE_NUM } from './cltv-locktime.mjs';
+import { cltvLockTime, cltvSequence, assertPositiveDelay, DELAY_SANE_MAX_DAA, classifyLockReject, CltvError, CLTV_ERR, LOCK_TIME_THRESHOLD, TIME_DOMAIN_UPPER, MAX_TX_IN_SEQUENCE_NUM } from './cltv-locktime.mjs';
+import { _cltvLockTimeAllowZeroForTests } from './cltv-locktime.testonly.mjs';   // test-only 变体已搬出生产模块 (NWT 8/29 only-path)
 let pass = 0, fail = 0;
 const t = (n, f) => { try { f(); pass++; console.log('[PASS] ' + n); } catch (e) { fail++; console.log('[FAIL] ' + n + ' :: ' + e.message); } };
 const throwsCode = (fn, code) => { try { fn(); } catch (e) { assert.ok(e instanceof CltvError, 'not CltvError'); assert.strictEqual(e.code, code); return; } throw new Error('did not throw'); };
