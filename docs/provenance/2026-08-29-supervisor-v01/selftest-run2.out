@@ -1,4 +1,3 @@
-[info] index.v01.js rebuilt from D:/kanet-tn12/kasia-console/src/index.js + index.v01.diff
 [PASS] bash -n v01.sh
 [PASS] node --check index.v01.js
 [PASS] KANET_ROOT isolated
@@ -27,7 +26,7 @@
 [PASS] lifetime 400 ⇒ streak 归零
 [PASS] lifetime 由 last_boot_ok_ts 算 (50) ⇒ streak 1
 [PASS] cool-down 内 DEAD ⇒ skip restart
-docs/provenance/2026-08-29-supervisor-v01/selftest.sh: line 98: 259241 Killed                  ( last_restart_ts=0; restart_console ) 2> /dev/null
+docs/provenance/2026-08-29-supervisor-v01/selftest.sh: line 98: 259432 Killed                  ( last_restart_ts=0; restart_console ) 2> /dev/null
 [PASS] write-ahead: 被杀前 state.env 已写 last_restart_ts
 [PASS] write-ahead: 被杀前 restarts.log 已记 1 行
 [PASS] 新 supervisor load_state 继承 last_restart_ts
@@ -35,8 +34,8 @@ docs/provenance/2026-08-29-supervisor-v01/selftest.sh: line 98: 259241 Killed   
 [PASS] load_state 拒带空格值 (last_restart_ts 保持 5)
 [PASS] load_state 认数字值
 [PASS] load_state 不 eval 脏行 (evil 行无副作用)
-[PASS] 受控 node 子进程已起: pid=7120
-[PASS] tasklist 阳性对照: 自起 node.exe pid=7120 ⇒ 0
+[PASS] 受控 node 子进程已起: pid=6528
+[PASS] tasklist 阳性对照: 自起 node.exe pid=6528 ⇒ 0
 [PASS] tasklist 阴性对照: pid 4000000 ⇒ 1
 [PASS] mock: cms − marker = +2001ms ⇒ 1 gone (PID 复用)
 [PASS] mock: cms − marker = +1999ms ⇒ 0 不 flag (skew 内)
@@ -47,6 +46,6 @@ docs/provenance/2026-08-29-supervisor-v01/selftest.sh: line 98: 259241 Killed   
 [PASS] mock: CreationDate 非数字 ⇒ 0 放行
 [PASS] 五态: 复用 PID 的 marker ⇒ DEAD
 [PASS] 复用判定有日志行
-[SMOKE] proc_creation_ms real powershell: ok (pid=7120 creation_ms=1787982305042)
+[SMOKE] proc_creation_ms real powershell: ok (pid=6528 creation_ms=1787982308450)
 [PASS] tasklist 失败 ⇒ 2 (UNKNOWN)
-supervisor-v01 selftest: 48 PASS / 0 FAIL | smoke(not gating): ok (pid=7120 creation_ms=1787982305042)
+supervisor-v01 selftest: 48 PASS / 0 FAIL | smoke(not gating): ok (pid=6528 creation_ms=1787982308450)

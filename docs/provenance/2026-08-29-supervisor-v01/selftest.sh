@@ -110,34 +110,55 @@ expect "load_state 认数字值" "$cool_down_until" "999999999999"
 
 # ── 7. 真 tasklist 阳性/阴性对照 (存在性, 非提权) ──
 eval "$pid_alive_real"   # 恢复真 pid_alive (tasklist)
-NODE_PID="$(powershell -NoProfile -Command '(Get-Process node -ErrorAction SilentlyContinue | Select-Object -First 1).Id' 2>/dev/null | tr -d '[:space:]')"
+# v0.1.3 去时序化 (Bettor 亲跑一次 46/47 后复跑 47/47 ⇒ 疑 flaky): 不再从 Get-Process 挑别人的 node 进程 (可能是瞬时进程,
+# 在 Get-Process 与 tasklist/CIM 之间退出), 而是 harness 自己 spawn 一个受控 node 子进程, pid 由它自己写文件; 所有 skew 边界
+# 用 CreationDate 注入的固定时间戳, 不用真 now; powershell 耗时不进任何判定.
+NODE_PIDFILE="$T/node.pid"; rm -f "$NODE_PIDFILE"
+node -e "require('fs').writeFileSync(process.argv[1], String(process.pid)); setTimeout(()=>{}, 120000)" "$NODE_PIDFILE" &
+NODE_BG=$!
+for _ in $(seq 1 50); do [[ -s "$NODE_PIDFILE" ]] && break; sleep 0.1; done
+NODE_PID="$(tr -d '[:space:]' < "$NODE_PIDFILE" 2>/dev/null || true)"
 if [[ "$NODE_PID" =~ ^[0-9]+$ ]]; then
-  rc=0; pid_alive "$NODE_PID" || rc=$?; expect "tasklist 阳性对照: 真 node.exe pid=$NODE_PID ⇒ 0" "$rc" "0"
+  ok "受控 node 子进程已起: pid=$NODE_PID"
+  rc=0; pid_alive "$NODE_PID" || rc=$?; expect "tasklist 阳性对照: 自起 node.exe pid=$NODE_PID ⇒ 0" "$rc" "0"
 else
-  bad "tasklist 阳性对照" "no node.exe found to test against"
+  bad "受控 node 子进程" "pid file not written"
 fi
 rc=0; pid_alive 4000000 || rc=$?; expect "tasklist 阴性对照: pid 4000000 ⇒ 1" "$rc" "1"
-# ── 8. v0.1.2 PID 复用 (CreationDate vs marker) ──
-if [[ "$NODE_PID" =~ ^[0-9]+$ ]]; then
-  CMS="$(proc_creation_ms "$NODE_PID")"
-  [[ "$CMS" =~ ^[0-9]+$ ]] && ok "CreationDate 非提权可读: pid=$NODE_PID creation_ms=$CMS" || bad "CreationDate 可读" "got '$CMS'"
-  NOW_MS=$(( $(date +%s) * 1000 ))
-  [[ "$CMS" =~ ^[0-9]+$ ]] && (( CMS <= NOW_MS )) && ok "creation_ms ≤ now" || bad "creation_ms ≤ now" "$CMS > $NOW_MS"
-  rc=0; pid_alive "$NODE_PID" "$NOW_MS" || rc=$?; expect "真进程 + marker=now (创建早于 marker) ⇒ 0 活" "$rc" "0"
-  rc=0; pid_alive "$NODE_PID" "$(( CMS - 60000 ))" || rc=$?; expect "真进程 + marker 早于创建 60s (= PID 复用形) ⇒ 1 不在" "$rc" "1"
-  rc=0; pid_alive "$NODE_PID" "$(( CMS - 1000 ))" || rc=$?; expect "marker 早于创建 1s (< 2s skew) ⇒ 0 放行" "$rc" "0"
-fi
+# ── 8. v0.1.3 PID 复用 (CreationDate vs marker) —— 纯 mock 注入 (NWT 分诊: 生产判定 cms > marker_ms+2000 两值皆固定属性,
+#      无 wall-clock 量; 测试也不得引入 wall-clock/真 powershell ⇒ tasklist 与 proc_creation_ms 都打桩, 纯比较) ──
+tasklist_real=$(declare -f tasklist 2>/dev/null || true)
 proc_creation_ms_real=$(declare -f proc_creation_ms)
+MOCK_CMS=1700000000000
+tasklist() { echo "node.exe  4242 Console 1 10,000 K"; }
+proc_creation_ms() { echo "$MOCK_CMS"; }
+rc=0; pid_alive 4242 "$(( MOCK_CMS - 2001 ))" || rc=$?; expect "mock: cms − marker = +2001ms ⇒ 1 gone (PID 复用)" "$rc" "1"
+rc=0; pid_alive 4242 "$(( MOCK_CMS - 1999 ))" || rc=$?; expect "mock: cms − marker = +1999ms ⇒ 0 不 flag (skew 内)" "$rc" "0"
+rc=0; pid_alive 4242 "$(( MOCK_CMS + 5000 ))" || rc=$?; expect "mock: cms − marker = −5000ms ⇒ 0 不 flag (真 console 形: 创建早于 marker)" "$rc" "0"
+rc=0; pid_alive 4242 "$(( MOCK_CMS - 2000 ))" || rc=$?; expect "mock: cms − marker = +2000ms (== skew, 不 >) ⇒ 0 不 flag" "$rc" "0"
+rc=0; pid_alive 4242 || rc=$?; expect "mock: 不给 marker_ms ⇒ 0 (只查存在)" "$rc" "0"
 proc_creation_ms() { echo ""; }
-rc=0; pid_alive "$NODE_PID" 1 || rc=$?; expect "CreationDate 读不到 ⇒ 放行 0 (fail-safe)" "$rc" "0"
-eval "$proc_creation_ms_real"
-# 五态机经 marker 走复用路径: marker pid=真 node, start_ms=creation−60s ⇒ DEAD
-STUB_ALIVE=0; echo "$NODE_PID $(( CMS - 60000 ))" > "$BOOT_MARKER"; expect "五态: 复用 PID 的 marker ⇒ DEAD" "$(console_state)" "DEAD"
-echo "$NODE_PID $NOW_MS" > "$BOOT_MARKER"; expect "五态: 真进程 marker=now ⇒ BOOTING" "$(console_state)" "BOOTING"
+rc=0; pid_alive 4242 1 || rc=$?; expect "mock: CreationDate 读不到 ⇒ 0 放行 (fail-safe)" "$rc" "0"
+proc_creation_ms() { echo "not-a-number"; }
+rc=0; pid_alive 4242 1 || rc=$?; expect "mock: CreationDate 非数字 ⇒ 0 放行" "$rc" "0"
+proc_creation_ms() { echo "$MOCK_CMS"; }
+# 五态机经 marker 走复用路径 (marker start 相对 grace 的 age 用 now 算是生产语义, 但这里只测 DEAD 分支——它在 age 之前就返回)
+STUB_ALIVE=0; echo "4242 $(( MOCK_CMS - 60000 ))" > "$BOOT_MARKER"; expect "五态: 复用 PID 的 marker ⇒ DEAD" "$(console_state)" "DEAD"
 grep -q "PID reused, treat as gone" "$LOG" && ok "复用判定有日志行" || bad "复用日志行" "missing"
+# 恢复真函数
+eval "$proc_creation_ms_real"; if [[ -n "$tasklist_real" ]]; then eval "$tasklist_real"; else unset -f tasklist; fi
+
+# ── 9. 环境 smoke (真 powershell; 不进闸, 汇总单列): proc_creation_ms 对自起 node 子进程本机返正整数 ──
+SMOKE="skipped"
+if [[ "$NODE_PID" =~ ^[0-9]+$ ]]; then
+  CMS="$(proc_creation_ms "$NODE_PID" || true)"
+  if [[ "$CMS" =~ ^[0-9]+$ && "$CMS" -gt 0 ]]; then SMOKE="ok (pid=$NODE_PID creation_ms=$CMS)"; else SMOKE="FAIL (got '$CMS')"; fi
+fi
+echo "[SMOKE] proc_creation_ms real powershell: $SMOKE"
+kill "$NODE_BG" 2>/dev/null || true; wait "$NODE_BG" 2>/dev/null || true
 tasklist() { return 1; }
 rc=0; pid_alive 1 || rc=$?; expect "tasklist 失败 ⇒ 2 (UNKNOWN)" "$rc" "2"
 
 set +e
-echo "supervisor-v01 selftest: $PASS PASS / $FAIL FAIL"
+echo "supervisor-v01 selftest: $PASS PASS / $FAIL FAIL | smoke(not gating): $SMOKE"
 (( FAIL == 0 ))
