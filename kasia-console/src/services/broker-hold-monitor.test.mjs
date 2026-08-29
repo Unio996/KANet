@@ -33,6 +33,12 @@ t('H4 coverage_lag: 心跳 tip=5000, 账 max end=1000 ⇒ lag=4000 ≥ 3600 brea
   m = computeHoldMetrics(db, NOW); assert.strictEqual(m.coverage_lag_daa, 100); assert.ok(!breaches(m).some((b) => b.metric === 'coverage_lag_daa'));
 });
 t('H5 held_for_review 单(枚举未扩时无法插; 用 breaches 纯函数验阈值语义)', () => { assert.deepStrictEqual(breaches({ held: 1, stuck_refunding: 0, intent_stale: 0, coverage_lag_daa: null }), [{ metric: 'held', value: 1 }]); assert.strictEqual(THRESHOLDS.coverage_lag_daa, 3600); });
+t('H7 unknown_1h: 60 min 内 refund_unknown_hold/broker_escrow_unknown 事件合计; ≥3 breach; 61 min 前不算', () => {
+  const ins = db.prepare(`INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at) VALUES (lower(hex(randomblob(16))), 'system', ?, 't', 'warn', '', '{}', ?)`);
+  ins.run('refund_unknown_hold', '2026-08-29T09:30:00.000Z'); ins.run('broker_escrow_unknown', '2026-08-29T09:45:00.000Z'); ins.run('refund_unknown_hold', '2026-08-29T08:58:00.000Z');
+  let m = computeHoldMetrics(db, NOW); assert.strictEqual(m.unknown_1h, 2); assert.ok(!breaches(m).some((b) => b.metric === 'unknown_1h'));
+  ins.run('refund_unknown_hold', '2026-08-29T09:59:00.000Z'); m = computeHoldMetrics(db, NOW); assert.strictEqual(m.unknown_1h, 3); assert.ok(breaches(m).some((b) => b.metric === 'unknown_1h' && b.value === 3));
+});
 t('H6 alertBreachesOnce: 同 hour bucket 去重; 下一小时再写', () => { const list = [{ metric: 'stuck_refunding', value: 1 }]; assert.strictEqual(alertBreachesOnce(db, list, NOW), 1); assert.strictEqual(alertBreachesOnce(db, list, NOW), 0); assert.strictEqual(alertBreachesOnce(db, list, '2026-08-29T11:00:00.000Z'), 1); assert.strictEqual(db.prepare(`SELECT count(*) AS n FROM events WHERE event_type='broker_hold_stuck_refunding'`).get().n, 2); });
 db.close(); rmSync(dir, { recursive: true, force: true });
 console.log(`hold-monitor: ${pass} PASS / ${fail} FAIL`);

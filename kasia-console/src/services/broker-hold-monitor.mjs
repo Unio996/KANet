@@ -16,6 +16,7 @@ export const THRESHOLDS = Object.freeze({
   stuck_refunding: 1,
   intent_stale: 1,
   coverage_lag_daa: 3600,          // ≈ 6 min @ 10 bps; 与 gate (d) N_claim 同量级 (调查稿 §4)
+  unknown_1h: 3,                   // 一小时内 ≥3 单判 UNKNOWN = 不 rare (RPC/coverage/配置有系统性问题), 告警
 });
 const STALE_MIN = 30;
 
@@ -32,12 +33,15 @@ export function computeHoldMetrics(db = sqlite, nowIso = new Date().toISOString(
     maxEnd = db.prepare(`SELECT MAX(end_daa) AS m FROM kaspa_tx_log_coverage`).get()?.m ?? null;
     if (tip != null && maxEnd != null) coverage_lag = Number(tip) - Number(maxEnd);
   } catch { /* 表缺 ⇒ null */ }
+  // 第五个数 (NWT 运营前置 (c): UNKNOWN 须 rare): 最近 60 min 内 refund/escrow 判 UNKNOWN 的告警条数 (events 表, 各去重后一单一条)
+  const unknown = q(`SELECT event_type, count(*) AS n FROM events WHERE event_type IN ('refund_unknown_hold','broker_escrow_unknown') AND julianday(created_at) > julianday(?, '-60 minutes') GROUP BY event_type`, nowIso);
+  const unknown_1h = Array.isArray(unknown) ? unknown.reduce((a, r) => a + Number(r.n || 0), 0) : null;
   const count = (r) => (Array.isArray(r) ? r.length : null);
   return {
     at: nowIso,
-    held: count(held), stuck_refunding: count(stuck), intent_stale: count(intents), coverage_lag_daa: coverage_lag,
-    detail: { held: Array.isArray(held) ? held : [], stuck_refunding: Array.isArray(stuck) ? stuck : [], intent_stale: Array.isArray(intents) ? intents : [], tip_daa: tip, coverage_max_end_daa: maxEnd },
-    errors: [held, stuck, intents].filter((r) => r && r.error).map((r) => r.error),
+    held: count(held), stuck_refunding: count(stuck), intent_stale: count(intents), coverage_lag_daa: coverage_lag, unknown_1h,
+    detail: { held: Array.isArray(held) ? held : [], stuck_refunding: Array.isArray(stuck) ? stuck : [], intent_stale: Array.isArray(intents) ? intents : [], tip_daa: tip, coverage_max_end_daa: maxEnd, unknown_by_type: Array.isArray(unknown) ? unknown : [] },
+    errors: [held, stuck, intents, unknown].filter((r) => r && r.error).map((r) => r.error),
   };
 }
 
@@ -48,6 +52,7 @@ export function breaches(m, th = THRESHOLDS) {
   if ((m.stuck_refunding ?? 0) >= th.stuck_refunding) out.push({ metric: 'stuck_refunding', value: m.stuck_refunding });
   if ((m.intent_stale ?? 0) >= th.intent_stale) out.push({ metric: 'intent_stale', value: m.intent_stale });
   if (m.coverage_lag_daa != null && m.coverage_lag_daa >= th.coverage_lag_daa) out.push({ metric: 'coverage_lag_daa', value: m.coverage_lag_daa });
+  if ((m.unknown_1h ?? 0) >= th.unknown_1h) out.push({ metric: 'unknown_1h', value: m.unknown_1h });
   return out;
 }
 
@@ -73,7 +78,7 @@ export function brokerHoldMonitorTick() {
   try {
     const m = computeHoldMetrics(sqlite);
     const br = breaches(m);
-    console.log(`[broker-hold-monitor] held=${m.held ?? 'n/a'} stuck_refunding=${m.stuck_refunding ?? 'n/a'} intent_stale=${m.intent_stale ?? 'n/a'} coverage_lag_daa=${m.coverage_lag_daa ?? 'null(no ledger/heartbeat)'} breaches=${br.length}${m.errors.length ? ' errors=' + m.errors.join('|') : ''}`);
+    console.log(`[broker-hold-monitor] held=${m.held ?? 'n/a'} stuck_refunding=${m.stuck_refunding ?? 'n/a'} intent_stale=${m.intent_stale ?? 'n/a'} coverage_lag_daa=${m.coverage_lag_daa ?? 'null(no ledger/heartbeat)'} unknown_1h=${m.unknown_1h ?? 'n/a'} breaches=${br.length}${m.errors.length ? ' errors=' + m.errors.join('|') : ''}`);
     if (br.length) alertBreachesOnce(sqlite, br);
   } catch (e) { console.warn(`[broker-hold-monitor] tick error (read-only, non-fatal): ${e.message}`); }
 }
