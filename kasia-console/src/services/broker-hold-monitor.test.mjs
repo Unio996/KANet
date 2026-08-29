@@ -39,6 +39,16 @@ t('H7 unknown_1h: 60 min 内 refund_unknown_hold/broker_escrow_unknown 事件合
   let m = computeHoldMetrics(db, NOW); assert.strictEqual(m.unknown_1h, 2); assert.ok(!breaches(m).some((b) => b.metric === 'unknown_1h'));
   ins.run('refund_unknown_hold', '2026-08-29T09:59:00.000Z'); m = computeHoldMetrics(db, NOW); assert.strictEqual(m.unknown_1h, 3); assert.ok(breaches(m).some((b) => b.metric === 'unknown_1h' && b.value === 3));
 });
+t('H8 (NWT f) 边界: refunding 31 min ⇒ stuck 计; 29 min ⇒ 不计 (julianday, ISO T 形存值)', () => {
+  mkOrder('b31', 'refunding', '2026-08-29T09:29:00.000Z'); mkOrder('b29', 'refunding', '2026-08-29T09:31:00.000Z');
+  const ids = computeHoldMetrics(db, NOW).detail.stuck_refunding.map((r) => r.id);
+  assert.ok(ids.includes('b31'), '31 min 应计'); assert.ok(!ids.includes('b29'), '29 min 不应计');
+});
+t('H9 (NWT f) 边界: intent 无 txid 31 min ⇒ stale 计; 29 min ⇒ 不计', () => {
+  db.prepare(`INSERT INTO broker_refund_intents (id, order_id, offer_id, user_addr, amount_kas, txid, created_at, updated_at) VALUES ('ib31','ob31',NULL,'a',1,NULL,'2026-08-29T09:29:00.000Z','2026-08-29T09:29:00.000Z'), ('ib29','ob29',NULL,'a',1,NULL,'2026-08-29T09:31:00.000Z','2026-08-29T09:31:00.000Z')`).run();
+  const ids = computeHoldMetrics(db, NOW).detail.intent_stale.map((r) => r.id);
+  assert.ok(ids.includes('ib31'), '31 min 应计'); assert.ok(!ids.includes('ib29'), '29 min 不应计');
+});
 t('H6 alertBreachesOnce: 同 hour bucket 去重; 下一小时再写', () => { const list = [{ metric: 'stuck_refunding', value: 1 }]; assert.strictEqual(alertBreachesOnce(db, list, NOW), 1); assert.strictEqual(alertBreachesOnce(db, list, NOW), 0); assert.strictEqual(alertBreachesOnce(db, list, '2026-08-29T11:00:00.000Z'), 1); assert.strictEqual(db.prepare(`SELECT count(*) AS n FROM events WHERE event_type='broker_hold_stuck_refunding'`).get().n, 2); });
 db.close(); rmSync(dir, { recursive: true, force: true });
 console.log(`hold-monitor: ${pass} PASS / ${fail} FAIL`);
