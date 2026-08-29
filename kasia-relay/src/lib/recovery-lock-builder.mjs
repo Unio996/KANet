@@ -10,7 +10,11 @@ import { cltvLockTime, cltvSequence, assertPositiveDelay, CltvError, CLTV_ERR, L
 
 export const RECOVERY_DAA_ENTRY = 3;   // 探针 v0.3 ABI: [transition, claim, recovery, recovery_daa] ⇒ recovery_daa = entry 3 (真合约接线时按其 ABI 重钉, 测试断言防漂)
 
-/** 装载恢复配置 —— 唯一入口, 内部强制 assertPositiveDelay (审点①)。
+// 🔴 出处品牌 (NWT 8/29 fix-up ①): "frozen" 是状态不是出处 —— 手造 Object.freeze({nDelayDaa:0n,…}) 能绕过 assertPositiveDelay。
+//    模块私有 WeakSet 只认 loadRecoveryConfig 亲手返回的那个对象引用: 外部造不出、{...cfg} spread 拷贝也不在集合里 (Symbol 属性会被 spread 复制, WeakSet 不会 ⇒ 选 WeakSet)。
+const BRAND = new WeakSet();
+
+/** 装载恢复配置 —— 唯一入口, 内部强制 assertPositiveDelay (审点①); 返回前 freeze + BRAND.add (两层)。
  *  @param {object} raw  { n_recovery_delay_daa: bigint|number|string, label? , max? }
  *  @returns {Readonly<{ nDelayDaa: bigint, entry: number }>} */
 export function loadRecoveryConfig(raw) {
@@ -19,17 +23,22 @@ export function loadRecoveryConfig(raw) {
   const n = assertPositiveDelay(raw.n_recovery_delay_daa, raw.label || 'n_recovery_delay_daa', raw.max !== undefined ? { max: raw.max } : {});
   const entry = raw.entry === undefined ? RECOVERY_DAA_ENTRY : raw.entry;
   if (!Number.isInteger(entry) || entry < 0) throw new CltvError(CLTV_ERR.ARGS_MISSING, `entry 非法: ${String(raw.entry)}`);
-  return Object.freeze({ nDelayDaa: n, entry });
+  const cfg = Object.freeze({ nDelayDaa: n, entry });
+  BRAND.add(cfg);
+  return cfg;
 }
 
 const toBig = (v, what) => { try { const b = typeof v === 'bigint' ? v : BigInt(v); return b; } catch { throw new CltvError(CLTV_ERR.ARGS_MISSING, `${what} 非整数: ${String(v)}`); } };
 
 /** 规划一笔 recovery_daa 花费: E = successorDaa + n; lockTime/sequence 经 cltv helper 核域; 不构造 wasm 对象。
- *  @param {{ nDelayDaa: bigint, entry: number }} cfg  loadRecoveryConfig 的返回 (别处造的对象一律拒: 必须带 frozen 标记)
+ *  @param {{ nDelayDaa: bigint, entry: number }} cfg  loadRecoveryConfig 亲手返回的对象 (BRAND WeakSet 认引用: 手造/frozen 手造/spread 拷贝一律拒)
  *  @param {{ successorDaa: bigint|number, selfInputIndex?: number, sequence?: bigint }} p  successorDaa = 被花 UTXO(phase=1 后继)落块 DAA, 由链回读给, 不许估
- *  @returns {{ E: bigint, lockTime: bigint, sequence: bigint, entry: number, selfInputIndex: number, sigPushes: [number, number], earliestSubmitTipDaa: bigint }} */
+ *  @returns {{ E: bigint, lockTime: bigint, sequence: bigint, entry: number, selfInputIndex: number, sigPushesPrefix: [number, number], earliestSubmitTipDaa: bigint }}
+ *  sigPushesPrefix = witness 的前两项。完整 witness 布局 (探针 v0.3 build.mjs recoveryDaaSig, 接线时机械照抄):
+ *    pushInt(selfInIdx) + pushInt(entry=3) + pushData(redeem1)   ← 第三项 redeem 脚本字节属接线那步 (builder 不持有 redeem, 只吐数) */
 export function planRecoveryDaa(cfg, p) {
-  if (!cfg || !Object.isFrozen(cfg) || typeof cfg.nDelayDaa !== 'bigint') throw new CltvError(CLTV_ERR.ARGS_MISSING, 'cfg 须来自 loadRecoveryConfig (frozen, nDelayDaa bigint)');
+  if (!cfg || !BRAND.has(cfg)) throw new CltvError(CLTV_ERR.ARGS_MISSING, 'cfg 须是 loadRecoveryConfig 亲手返回的对象 (出处品牌; frozen/spread 拷贝/手造都不算)');
+  if (!Object.isFrozen(cfg) || typeof cfg.nDelayDaa !== 'bigint') throw new CltvError(CLTV_ERR.ARGS_MISSING, 'cfg 形状坏 (frozen, nDelayDaa bigint)');   // 品牌之后的第二层, 防模块内部日后改坏
   if (!p || p.successorDaa === undefined || p.successorDaa === null) throw new CltvError(CLTV_ERR.ARGS_MISSING, 'successorDaa 缺失: 须链回读的后继落块 DAA');
   const d = toBig(p.successorDaa, 'successorDaa');
   if (d < 0n || d >= LOCK_TIME_THRESHOLD) throw new CltvError(CLTV_ERR.DOMAIN_MIXED, `successorDaa 不在 DAA 域 [0, 5e11): ${d}`);
@@ -38,7 +47,7 @@ export function planRecoveryDaa(cfg, p) {
   const sequence = cltvSequence(p.sequence === undefined ? 0n : p.sequence);
   const selfInputIndex = p.selfInputIndex === undefined ? 0 : p.selfInputIndex;
   if (!Number.isInteger(selfInputIndex) || selfInputIndex < 0) throw new CltvError(CLTV_ERR.ARGS_MISSING, `selfInputIndex 非法: ${String(p.selfInputIndex)}`);
-  return Object.freeze({ E, lockTime, sequence, entry: cfg.entry, selfInputIndex, sigPushes: [selfInputIndex, cfg.entry], earliestSubmitTipDaa: E + 1n });
+  return Object.freeze({ E, lockTime, sequence, entry: cfg.entry, selfInputIndex, sigPushesPrefix: [selfInputIndex, cfg.entry], earliestSubmitTipDaa: E + 1n });
 }
 
 /** 提交时机 (N8 教训: lock_time 必须 < 块 DAA 才终局): 只有 tipDaa > E 才准广播; 相等仍拒。 */

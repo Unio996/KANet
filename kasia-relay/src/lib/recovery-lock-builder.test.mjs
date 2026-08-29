@@ -36,7 +36,7 @@ const cfg = loadRecoveryConfig({ n_recovery_delay_daa: 100 });
 t('P1 planRecoveryDaa 镜像探针 P: d=80,000,000, n=100 ⇒ E=lockTime=80,000,100 (<5e11), sequence 0n, sigPushes [0,3], earliest tip = E+1', () => {
   const p = planRecoveryDaa(cfg, { successorDaa: 80_000_000n });
   assert.strictEqual(p.E, 80_000_100n); assert.strictEqual(p.lockTime, 80_000_100n); assert.strictEqual(p.sequence, 0n);
-  assert.deepStrictEqual(p.sigPushes, [0, 3]); assert.strictEqual(p.earliestSubmitTipDaa, 80_000_101n); assert.ok(Object.isFrozen(p));
+  assert.deepStrictEqual(p.sigPushesPrefix, [0, 3]); assert.strictEqual(p.earliestSubmitTipDaa, 80_000_101n); assert.ok(Object.isFrozen(p)); assert.ok(!('sigPushes' in p), '旧字段名不得残留');
 });
 t('P2 planRecoveryDaa 拒: 手造 cfg(非 frozen) / cfg.nDelayDaa 非 bigint / successorDaa 缺 / 负 / ≥5e11 / 非整数 / sequence MAX / selfInputIndex 非法', () => {
   throwsCode(() => planRecoveryDaa({ nDelayDaa: 100n, entry: 3 }, { successorDaa: 1n }), CLTV_ERR.ARGS_MISSING);
@@ -47,6 +47,15 @@ t('P2 planRecoveryDaa 拒: 手造 cfg(非 frozen) / cfg.nDelayDaa 非 bigint / s
   throwsCode(() => planRecoveryDaa(cfg, { successorDaa: 'x' }), CLTV_ERR.ARGS_MISSING);
   throwsCode(() => planRecoveryDaa(cfg, { successorDaa: 1n, sequence: MAX_TX_IN_SEQUENCE_NUM }), CLTV_ERR.ARGS_MISSING);
   throwsCode(() => planRecoveryDaa(cfg, { successorDaa: 1n, selfInputIndex: -1 }), CLTV_ERR.ARGS_MISSING);
+});
+t('P2-brand (NWT fix-up ①) 出处品牌: (a) 手造 frozen {nDelayDaa:0n, entry:3} ⇒ 拒 (绕过 assertPositiveDelay 的零延迟); (b) {...realCfg} spread 拷贝 ⇒ 拒 (WeakSet 认引用, Symbol 标记会被 spread 带走); (c) 真 cfg 本身 ⇒ 过', () => {
+  const forged = Object.freeze({ nDelayDaa: 0n, entry: 3 });
+  assert.ok(Object.isFrozen(forged) && typeof forged.nDelayDaa === 'bigint', '向量前提: 形状与真 cfg 一样, 只差出处');
+  throwsCode(() => planRecoveryDaa(forged, { successorDaa: 1n }), CLTV_ERR.ARGS_MISSING);
+  const copy = Object.freeze({ ...cfg });
+  assert.deepStrictEqual(copy, { nDelayDaa: 100n, entry: 3 }, '向量前提: spread 拷贝内容完全相同');
+  throwsCode(() => planRecoveryDaa(copy, { successorDaa: 1n }), CLTV_ERR.ARGS_MISSING);
+  assert.strictEqual(planRecoveryDaa(cfg, { successorDaa: 1n }).E, 101n);
 });
 t('P3 域边界: d = 5e11−101, n=100 ⇒ E = 5e11−1 ok; d = 5e11−100 ⇒ E = 5e11 ⇒ DOMAIN_MIXED (溢出到时间域, 不静默)', () => {
   assert.strictEqual(planRecoveryDaa(cfg, { successorDaa: LOCK_TIME_THRESHOLD - 101n }).E, LOCK_TIME_THRESHOLD - 1n);
