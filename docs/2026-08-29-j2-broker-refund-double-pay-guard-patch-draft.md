@@ -12,6 +12,16 @@
    🔵 **历史核查回执（Bettor live 只读，2026-08-29）**：`refund_send_failed`/`refunding` 0 行、`refund_tx_hash` 非空 0、`broker_kas_refunded` 按 offer 重复 0 ⇒ **retail 退款路从未在本库执行过 ⇒ 潜伏零影响**（与 escrow 同：retail 开放前修）。§3 查询若涉 `chain_events` 时间列用 **`observed_at`**（表无 `created_at`）。
 4. **修法四条**（候选全实现、向量 16/16）：(A) dedup PRIMARY 改 **"intent 已记即拦"**——`chain_events broker_kas_refunded(offer_id/order_id)` 存在即 `REFUNDED_CONFIRMED`，**不 require `kaspa_tx_log`**；(B) **write-ahead intent 账** `broker_refund_intents`（Phase 1 CAS 同事务插，`enqueueVerified` 一 resolve 就 UPDATE txid，早于 Phase 3）⇒ 崩在 Phase 2/3 之间也有据；(C) **队列层歧义失败不重试** tx-producing kind（`classifyQueueFailure`：timeout/empty/no-txId ⇒ ambiguous ⇒ 停 + 标 + 告警；只有明确"未广播"的拒因才重试）；(D) 否定断言 `NOT_REFUNDED` 须 **无任何 intent ∧ RPC 成功且用户地址无匹配 UTXO ∧ L2 coverage 无洞**，否则 `UNKNOWN ⇒ 不发 + 告警`（同 escrow v0.2 原则；`:48` "0 行 ∧ 未覆盖 ⇒ 拒退" NWT 已认）。
 
+## §0-bis 覆盖面（NWT 纠正 2026-08-29：87.9 KAS 发生在 **exchange 路**，不是 retail `advanceToRefunded` 路）
+| 调用方 | 坐标 | 今天怎么发钱 | dedup 在哪 | 状态落点 |
+|---|---|---|---|---|
+| **exchange 路** `handleCancelAndRefund(peerAddr)`（用户 DM 取消） | `broker-cancel-refund.js:123-238` | **不再 inline**：`:156-158` "替原 inline sendKas + markOrderRefunded（双重退款 root cause）→ call advanceToRefunded"，`:211 advanceToRefunded({orderId, reason:'user_cancel'})`；先 `:165` cancel offer 上链（best-effort）+ `:179-182` post-cancel 抢接检测 | `:86 isOfferAlreadyRefunded(o)` 在 `findRefundableOffers` 里只是**预筛**（决定呈现/尝试哪些 offer；helper 抛 ⇒ `:91-93` 拒退 fail-closed）；真闸在 `advanceToRefunded` | `exchange_offers.protocol_status`：cancel 上链后 Scout 写 `cancelled`；`advanceToRefunded` Phase 3 写 `refunded`（`:166`） |
+| exchange 路 · unlinked draft | `:100-148`（T2.12） | `advanceToRefunded({orderId: draft.id, reason:'user_cancel_unlinked_draft'})` ⇒ `_advanceToRefundedNoOffer`（`broker-state-authority.js:540-`） | `:550 findPriorRefundTxs`（**同 fail-open**：只查 `kaspa_tx_log`） | `retail_dex_orders` CAS（`:556-`） |
+| exchange 路 · BUY（give_asset=USDT/USDC） | `:186-190` | **不进** `advanceToRefunded`（broker 不持 stable） | — | — |
+| **retail 路** `reconcileStaleOrders` / `_scanExpiredBrokerOffers` / reconciler 重试 | §0 已述 | `advanceToRefunded` | `:405 isOfferAlreadyRefunded`（Pre-check）| 同上 |
+⇒ **两路在 `advanceToRefunded` 汇合**；先例 `39ac2b69`（04-29）那次是**被 Track B 替换掉的旧 inline 路**（`:156` 注）——今天 exchange 路的真险 = §0 的 L-A/L-B 同一条（队列歧义重试 + 回滚可重试 + 唯一闸 fail-open），外加 **`:86` 预筛 fail-open 会把"已退但 log 无行"的 offer 重新呈现给用户/重新尝试**（进 `advanceToRefunded` 后被 offer 终态闸挡，除非 drift）。**wiring 三处都接 `classifyRefundState`**：`:86` 预筛（`alreadyRefunded = state ∈ {CONFIRMED, INTENT, INFLIGHT}`，`UNKNOWN ⇒ 不呈现 + 告警`）、`advanceToRefunded :405`、`_advanceToRefundedNoOffer :550`；**队列层同一 `enqueueVerified`**（`broker-action-queue.js`，两路共用）⇒ ambiguous 不重试同样适用。**顺序：exchange 先**（流过血那条；且它是用户 DM 实时触发，比 15 min cron 更常被按）。向量 X1–X4 = 预筛形（offer-only）/ no_offer 形（order-only）/ 双空形。
+🔵 **exchange 路历史读数（Bettor live 只读，2026-08-29）**：`chain_events broker_kas_refunded` 共 **4 条**，全在 2026-07-14 03:47 – 07-17 08:15（与 7/17 `bso_` 测试批同期），按 offer 无重复 ⇒ exchange 路近期无真退款，**风险活（`:86` 今天仍在调、gap 在）但未复发**。`exchange_offers` 的状态列是 **`protocol_status`**（无 `state` 列；本稿全部按此）。
+
 ## §1 状态机（候选 `refund-dedup.v02.mjs`）
 | state | 判据 | `decideRefundAction` |
 |---|---|---|
