@@ -36,7 +36,8 @@ export function computeHoldMetrics(db = sqlite, nowIso = new Date().toISOString(
     if (tip != null && maxEnd != null) coverage_lag = Number(tip) - Number(maxEnd);
   } catch { /* 表缺 ⇒ null */ }
   // 第五个数 (NWT 运营前置 (c): UNKNOWN 须 rare): 最近 60 min 内 refund/escrow 判 UNKNOWN 的告警条数 (events 表, 各去重后一单一条)
-  const unknown = q(`SELECT event_type, count(*) AS n FROM events WHERE event_type IN ('refund_unknown_hold','broker_escrow_unknown') AND julianday(created_at) > julianday(?, '-60 minutes') GROUP BY event_type`, nowIso);
+  // fix-up 6 (Bettor 8/29 ①, batch-2 联动): + broker_fallback_ambiguous (T2.5c CEX 下单结果不明) + withdraw_ambiguous (v2 提币链转账结果不明) —— 都是"结果不明进人工"的同族
+  const unknown = q(`SELECT event_type, count(*) AS n FROM events WHERE event_type IN ('refund_unknown_hold','broker_escrow_unknown','broker_fallback_ambiguous','withdraw_ambiguous') AND julianday(created_at) > julianday(?, '-60 minutes') GROUP BY event_type`, nowIso);
   const unknown_1h = Array.isArray(unknown) ? unknown.reduce((a, r) => a + Number(r.n || 0), 0) : null;
   // 第六个数 (batch-2 ①, Bettor 2026-08-29; race 盘点 DEFECT2 NWT P2): BUY fallback 永久失败后"待人工退款"的 offer 数 —— 唯一痕迹是
   // chain_events broker_buy_fallback_refunded{manual_refund_pending:true} (broker-intake-watcher.js:1023-1027), operator 侧此前无聚合无告警;

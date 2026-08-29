@@ -38,6 +38,9 @@ t('H7 unknown_1h: 60 min 内 refund_unknown_hold/broker_escrow_unknown 事件合
   ins.run('refund_unknown_hold', '2026-08-29T09:30:00.000Z'); ins.run('broker_escrow_unknown', '2026-08-29T09:45:00.000Z'); ins.run('refund_unknown_hold', '2026-08-29T08:58:00.000Z');
   let m = computeHoldMetrics(db, NOW); assert.strictEqual(m.unknown_1h, 2); assert.ok(!breaches(m).some((b) => b.metric === 'unknown_1h'));
   ins.run('refund_unknown_hold', '2026-08-29T09:59:00.000Z'); m = computeHoldMetrics(db, NOW); assert.strictEqual(m.unknown_1h, 3); assert.ok(breaches(m).some((b) => b.metric === 'unknown_1h' && b.value === 3));
+  // fix-up 6 (Bettor ①): broker_fallback_ambiguous / withdraw_ambiguous 同族计入; 无关类型不计
+  ins.run('broker_fallback_ambiguous', '2026-08-29T09:50:00.000Z'); ins.run('withdraw_ambiguous', '2026-08-29T09:51:00.000Z'); ins.run('some_other_event', '2026-08-29T09:52:00.000Z');
+  m = computeHoldMetrics(db, NOW); assert.strictEqual(m.unknown_1h, 5); assert.deepStrictEqual(m.detail.unknown_by_type.map((r) => r.event_type).sort(), ['broker_escrow_unknown', 'broker_fallback_ambiguous', 'refund_unknown_hold', 'withdraw_ambiguous']);
 });
 t('H8 (NWT f) 边界: refunding 31 min ⇒ stuck 计; 29 min ⇒ 不计 (julianday, ISO T 形存值)', () => {
   mkOrder('b31', 'refunding', '2026-08-29T09:29:00.000Z'); mkOrder('b29', 'refunding', '2026-08-29T09:31:00.000Z');
