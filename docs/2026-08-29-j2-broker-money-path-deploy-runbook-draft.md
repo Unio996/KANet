@@ -8,7 +8,8 @@
 | P1 | 侧分支各阶段 NWT GREEN（真码）+ Bettor 汇总 | `origin/coord/broker-money-path` 头 = 审过的 sha |
 | P2 | **Owner 批 broker-money-path 批**（钱路） | Bettor 单点上报回执 |
 | P3 | **Owner 定 A/B**（`held_for_review` 可逆态 vs `failed+no_escrow`）| 定 B ⇒ v200 重建进本批或下批；定 A ⇒ `BROKER_RECONCILE_MODE=failed` 写进 kanet.env，且 `RECONCILE_MODE_ACTIVE` 常量旁注钉死。**未定 ⇒ 默认 B 且枚举缺 ⇒ 退化 alert_once（不 transition）**——可部署，但 reconcile 对 NOT_PAID 单只告警不动 |
-| P4 | v199 一次性索引 `idx_spc_daa_ts` 建在 **263 MB `spc_daa_index`** 上 ⇒ boot 时 `runMigrations()` 会多花秒级（同步，主线程）⇒ **必须在 supervisor boot-grace（300 s）内完成**；离线在 07-23 bak 副本上先计时（`CREATE INDEX` 秒数）填这里：`___ s` | 计时 < 60 s ⇒ 安全；> 120 s ⇒ 改为窗内手工先建索引（`CREATE INDEX IF NOT EXISTS` 幂等，migrate 再跑为 no-op） |
+| P4 | v199 一次性索引 `idx_spc_daa_ts` 建在 **263 MB `spc_daa_index`** 上 ⇒ boot 时 `runMigrations()` 会多花时间（同步，主线程）⇒ 须在 supervisor boot-grace（300 s）内完成。**离线实测（2026-08-29，07-23 bak 副本 1.66 M 行，事务内建后 ROLLBACK 只取时长）：355 ms** ⇒ live（行数约 ×1.5）估 < 1 s，远在 grace 内 | ✅ 安全；不需窗内手工预建 |
+| P4-bis | `COVERAGE_ADJ_DAA`（`api/ingest.js` 默认 20）：**离线实测链块相邻 DAA 间距**（`spc_daa_index` LAG 差分，n=1,600,524）：p50/p90/p99 = **2**，p999 = **7**，max 885,354；>20 的 346 处全是真洞（relay 停机/追块）⇒ ADJ=20 ≥ p999 三倍余量，不会把正常相邻当洞，也不会把真洞当相邻 | ✅ 默认值成立（fd146fe2 R3 "P99 定"已核） |
 | P5 | `kanet.env` 已有 `BROKER_RELAY_ID`（`relay_nodes` 取 broker 地址）或新增 `BROKER_KAS_ADDR=<TN12 地址>`；前缀与 `KASPA_NETWORK` 一致 | 否则 escrow 全 UNKNOWN（安全但无用）|
 | P6 | 与节点/supervisor 维护窗**正交**：不与 57fde30f/supervisor v0.1.4/红线 7 同批；可同一天不同窗 | Bettor 排期 |
 | **P7 运营前置 (a)**（NWT 2026-08-29，retail 开放前）| UI/tg-bot 把 `skipReason`（`refund_unknown_hold` / `refund_*_no_resend` / `refund_ambiguous_broadcast` / `held_for_review`）译成用户可读的"退款处理中 / 待复核"——**用户面文案 = Owner 批** | 文案稿 + Owner 一句 |
