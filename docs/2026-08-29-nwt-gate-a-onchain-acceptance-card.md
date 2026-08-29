@@ -1,11 +1,11 @@
 # gate (a) 真链验收判据卡 — N6–N9 / P + Codex 三项（A′ recovery-lock）
 
-> NWT · 2026-08-29 · 预写（节点 READY 前）· 用法：**READY T+0 后 J2 照跑、NWT 按本卡逐格判**。只读 RPC + 尘埃级探针金额；不花实钱语义（TN12）。
+> NWT · 2026-08-29 · 预写（节点 READY 前）· 用法：**独立广播轮（非只读第一小时）照跑、NWT 逐格判**。🔴 **广播段（非只读 RPC）**：relay 签名广播 dust 注资 + N6–N9/P 提交 + P 落链 ⇒ **须 dust-spend Owner GO**、与只读第一小时**分窗**（序 = 只读第一小时 → 本卡广播轮 → 维护窗 broker 批；见 `docs/2026-08-29-nwt-t0-dispatch-reconcile.md`）。角色：**构造** J2（离线已定）/ **广播** 提权 operator（relay 签名，J2 只读不能广播）/ **逐格判** NWT。尘埃级金额、TN12 无结算钱语义。
 > **对象** = D-016 A′ `recovery_daa` 入口在 TN12 上的**链上行为**（探针 v0.3 已离线证字节，见 `docs/provenance/2026-08-29-s63a-probe-v03/` README §4：✅ 证 源→字节确定性 + A′ 三 require 形 + 两 CLTV 分域；❌ **没证链上接受/拒绝** = 本卡）。
 > **判据来源**：向量定义 = `build.harness.v03.mjs` `NEG_LOCK`（N6/N7/N8/N9）+ `recoveryDaa`（P）；拒因分类 = `kasia-relay/src/lib/cltv-locktime.mjs:90 classifyLockReject`（四正则，锚 `7b1e18cc` 共识坐标）。
 
 ## 0. 前置（全真才跑）
-- 节点 READY：`_step0_gate.mjs` verdict=READY（sync_ok ∧ daa_ok ∧ ibd_ok）——贴全 JSON。
+- 节点 READY：**两信号一致**——J2 `_step0_gate.mjs` verdict=READY（sync_ok ∧ daa_ok ∧ ibd_ok，贴全 JSON）**∧** KANet-UI D 行（`getBlockDagInfo` 派生）同判 READY；不一致 ⇒ 停查（句柄/daa 陈）。gate (a) 继承只读第一小时的 READY 判定（不自行单信号判）。
 - 探针 UTXO：一个尘埃级 `SUCC_UTXO`（recovery_daa redeem），金额 = 矿工费floor + 象征输出；**mass/fee 走 relay fee-floor 路径**（kaspa-wasm 对 v1 covenant `calculateTransactionMass` panic，见 memory `reference-kaspa-wasm-covenant-binding-moved…`）。
 - Bettor 排期 + stop-rule 6（err 激增/节点重启 ⇒ 停手）。
 - 每向量 tx **字节已离线定**（N8 与 P 逐字节相同、差在提交时机；N6 只差 lockTime、N7 差 lockTime 量级、N9 只差 sequence）⇒ 广播段只做"提交 + 读拒因/落链"，不重构造。
@@ -28,6 +28,7 @@
 - 判法：拒因文本**先过 `classifyLockReject`**——返回 `{kind:'lock-reject', reason:…}` 且 reason == 该向量期望 ⇒ **PASS**；返回非 lock-reject（或 null）⇒ **INCONCLUSIVE**（记原始 err 文本 + 重投计数，修 fee/mass/standard 后重来）。
 - **只有两种情形是真 FAIL**：① 应拒向量（N6–N9）被**接受/落链** = 锁破（安全性 FAIL）；② P 被拒且拒因 == 某 CLTV 形 = 锁过严（活性 FAIL）。其余一律 INCONCLUSIVE 或 PASS。
 - ⇒ "节点没接住" 与 "锁没接住" 不混：前者重投，后者才是 gate 结论。
+- **重投上限（NWT 定）**：每向量 **≤3 次**，每次**必先修**噪声因（fee/mass/standard/orphan）再投、**非盲投**；3 次仍 INCONCLUSIVE ⇒ **停、报 Bettor**（记原始 err + 计数），不烧窗（stop-rule 6）。间隔 = 修好即投、无固定 sleep。
 
 ## 3. Codex 三项（successor / depth / provenance 边界）
 | 项 | 测 | **PASS** | **FAIL** | INCONCLUSIVE |
