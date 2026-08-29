@@ -5,6 +5,11 @@
 > 🔴 **顶层不变**：§6-3 Shape-B 设计层 CONDITIONALLY CLOSED；**没有任何一门给 build/部署/钱路 授权**。
 > **本轮相对 v4 = (a) buildability 走出第一步（Codex 119ec787：a0 原语 PASS / gate (a) OPEN + 7 条最小验收）+ 7 条证据表入表**；§10 v1 code-layer 全 GREEN 收口（Codex c8b7896a）；watchdog v0.4 enable-gate 全绿。
 
+> 🆕 **D-016 状态注记（2026-08-29 · recovery lock 锁域）**：Codex `14c81c1c` 判 v0.15 recovery 谓词 `TxTime >= OpTxInputDaaScore(input)+N` **混锁域 ⇒ 不可表达 / 设计层 REOPENED**。**NWT 独立四坐标核 = 在 lowering+共识层 refute**（收敛 J2 `cfedc5c6`，Bettor 裁 A′ / D-016）：
+> - Codex 域混判断 **在源码名/上游 #214 层成立、在 pinned 8065184 lowering + live 共识层不成立** ⇒ **recovery lock 在 8065184 【可表达】、非"REOPENED 于域混"**。事实坐标：`8065184 compile.rs:2515-2516`（`TxTime → raw OpCheckLockTimeVerify`，无域标记）；`7b1e18cc opcodes/mod.rs:1031-1032`（CLTV 按数值同域判）`/:1034`（混域拒 `mismatched locktime types`）`/:1037-1038`（`stack>lock_time` 拒 `requirement not satisfied`）；`tx_validation_in_header_context.rs:56-68`（`<5e11 ⇒ DaaScore`）`/:71+`（`tx.lock_time < block_daa ⇒ finalized`）`/:83-88`（`sequence==MAX` 绕过终局）。⇒ `E = OpTxInputDaaScore+N < 5e11` 是 DAA 量级 ⇒ magnitude-determined CLTV 逼 `lock_time`(DaaScore)`≥E`、共识只在 `block DAA > E` 终局 = **真 DAA 延迟**。
+> - **真 MUST-FIX（构造侧，Codex 那条掩盖了它们）**：① recovery tx 须 `lock_time = E`（DAA 数）**非 0**（现 `p2sh.mjs` 全 `lockTime:0n` ⇒ CLTV 因 `E>0` 拒 ⇒ recovery UNBUILDABLE）/ 多输入 `lock_time = max(E_i)`；② 被锁输入 `sequence ≠ MAX`；③ 源域守卫 A′ `require(E>=0); require(E<5e11); require(tx.time>=E)`（≡ 上游 `tx.daa` lowering `WITHIN[0,5e11)`）。均 builder 侧代码（另报备）。
+> - **Shape-B 设计层维持 CONDITIONALLY CLOSED**（topology PASS，Codex 同意），**不因域混 REOPEN**；**gate-(a) 仍 OPEN**：源读立机制+可建性，Codex "mechanically evidenced" bar 待 **READY 后 N6（`lock_time=E-1`→UnsatisfiedLockTime）/N7（`5e11+t`→mismatched types）/N8（tip≤E→未终局）+ before/after 边界真链 land**。
+
 ## 🆕 §6-3 (a) buildability — Codex 119ec787 七条最小验收【证据清单表】
 
 > **对象** = J2 transition probe harness（新 `.sil` `S63A_TransitionProbe(cid, t_recovery)`，1 字节 phase state 三支 transition/claim/recovery；harness 造 genesis + reveal + dry-run，**不广播、不碰 p2sh.mjs、不用 relay 钥、隔离生产钱路**）。**a0（原语可编译）= PASS**（J1 04cc8087：四支全编 460B / `OpCovOutputCount==1` 与 `==0` 两收紧形编译器接受 / 阴性对照 legacy 产物逐字节相同 = 未触 OP_PICK 路径，边界已标）。
