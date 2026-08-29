@@ -38,7 +38,7 @@
 | U4 | `broker-v2/router.js:183` `handleMessage` withdraw 分支 | USDT broker→user `pay_address` | `user_kasia_address` + `user_ledger` | **DM ingress** `api/conversations.js:507` | 余额 `if (balance < wAmount)` @159；`user_ledger` **借记 INSERT @187-190 在链转账之后**；`conversations.js:495-530` **无 per-peer 锁** |
 | U5 | `market-seeder.js:119` `refundWorkerTick` | USDT seeder→taker 超时退 | pub.id | seeder tick | 选 `WHERE state='published' AND expires_at < datetime('now')` @85-87；先 `UPDATE … state='refunding'` @96（write-ahead ✓，但无 `AND state='published'` CAS）|
 | U6 | `api/trading.js:2563` `pay_usdt`（mm）；`api/relay.js:1093/1103/1126/1136/~1068/~974` 钱包裸发 | USDT/SOL/TRX/ERC20 | mm_orders / 无 | HTTP | mm：`transition(id,'paying',{force:true})` @2559 先写 ✓；relay 裸发无键（operator 面）|
-| U7 | `broker-intake-watcher.js:1016` | `transferUsdt` **import 了从未调用**；BUY 永久失败只写 `manual_refund_pending:true` @1026 | — | — | **DEFECT**：BUY fallback 永久失败无退款路 |
+| U7 | `broker-intake-watcher.js:1016` | **BUY fallback 永久失败无自动退款路（占位 import）**：`grep -n transferUsdt kasia-console/src/services/broker-intake-watcher.js` @ `fe6ad45e` ⇒ **唯一命中 `:1016` 的 `const { transferUsdt } = await import('./evm-transfer.js')`**，本文件无调用；分支只 `recordChainEvent broker_buy_fallback_refunded {manual_refund_pending:true}` @1023-1027 + DM 用户 @1028。（v0.1 写"从未调用"是文件范围省略——`exchange-machine.js:226` maker auto-pay 确实调 `transferUsdt`，NWT 纠正，8/29）| offer | 5 min timer（`:1129`，已接线；`:939` 头注释"dormant 未 wired"是陈的）| **DEFECT（NWT 定级 P2 非 P0）**：缺一条出口 = held-pending-manual 可人工回收，不是多一条出口；retail BUY 上线前硬前置 |
 | U8 | `broker-swap.js:60` ← `broker-inventory-watcher.js:60` | USDT→USDC swap（broker 自有）| — | `start()` **无人调用（未接线）** | `_ticking` 重入闸 @46 |
 
 ### §1.3 CEX 单 / 对冲
@@ -94,3 +94,10 @@
 - "重叠"判的是**逻辑可达**（两条路径、无共同 write-ahead 痕迹、存在 await 窗），不是概率；概率取决于 tick 超时/回声延迟/RPC 时长——三者都在本机发生过（233 s SQL、console 劣化、relay 90 s 超时）。
 - 未评：operator 面裸发端点（K15/U6 relay、C4）；bshard/ZK 结算路（另有 D-013/§6-3 体系）。
 - 扫描代理初表中我**未逐条重核**的行（K1 队列细节、U6、C4、K15）标为"列出不评"，坐标仍来自 grep，但守卫描述以代理转述为准——NWT 审时可抽核。
+
+## §6 v0.2 增补（2026-08-29 晚 · 机械链复核 + patch 指针）
+- **P2 → patch `9e61aeb6`**（侧分支 `coord/broker-money-path-2`）：`lib/broker-fallback-intent.mjs` write-ahead intent（回读核实未落库即 throw）+ 三态 + Z20/fallback 单一权威片段 `FALLBACK_INTENT_OR_CLAIM_NOT_EXISTS`；`lib/tick-guard.mjs` 接 `_refundInterval`（忙则跳过 + `refund_tick_overrun`/`refund_tick_stale` 告警）。向量 5/5 + 6/6（X0/X1/X4 红于 `12fcc48b` 形）。
+- **P11 机械链（亲核，升 CONFIRMED-static→CONFIRMED-mechanism）**：relay live 是 rpc 模式；`kasia-relay/src/rpc-listener.mjs` `replyToMessage` 三处——catch-up 定时器 `:528 setInterval(catchUpHistory)`→`:633`（`catchUpHistory` 无重入闸）、实时 DM `:1110`、付款 `:1184`；实时路挂 `:768 _rpc.addEventListener('block-added', async …)`——**每块一个 async 回调、无队列** ⇒ 两块内的两条同 peer DM 并发到 `/api/agent/reply`；console 侧无 per-peer 串行。（indexer 模式 `relay.mjs` `poll` 有 `polling` 闸 `:294-296`，但那不是 live 模式。）**→ patch `e68a0983`**：`lib/user-ledger-withdraw.mjs`（同事务 CAS 借记先行 / finalize / 冲正只追加）+ `lib/peer-serial-lock.mjs` 接 `conversations.js` 五入口；向量 5/5 + 4/4 + 4/4。
+- **DEFECT2 措辞更正**：见 §1.2 U7（"从未调用"→"本文件占位 import、BUY 永久失败无自动退款路"）；NWT 定级 P2。batch-2 内容（Bettor）：① `broker_buy_fallback_refunded/manual_refund_pending` 进 hold-monitor 第六数——🔴 hold-monitor 只在 batch-1 侧分支，依赖关系待 Bettor 定；② BUY 自动退款 wire 前先定用户 BSC 退款地址来源（`retail_dex_orders.pay_address` vs 入金 tx sender），缺 ⇒ manual + 告警不静默。
+- **DEFECT1 `executeHedge :871`**：NWT CONFIRMED，中级另列（先定该路是否本该 hedge；若不该，修法是删路不是接上）。
+- **P7/P8**：待 Bettor/Owner 定 UI accept 是否对外可达（网关 arming 同题）再定级；设计段（去哪个触发、CAS 位置）见 §2 P7 行"最小修法"，不动码。
