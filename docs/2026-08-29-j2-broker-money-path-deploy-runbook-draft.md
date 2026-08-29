@@ -95,17 +95,18 @@
 
 ---
 # v0.3 增补 · batch-2（`coord/broker-money-path-2`）部署段
-> **Status**: v0.3 · J2 2026-08-29 晚 · Bettor 令 · batch-2 头 **`3277183a`**（从 origin `fe6ad45e` 开，**不叠 batch-1**；对 `fe6ad45e` **19 files, +628 / −37**）· NWT 审中（hedge-call 突变 / explorer 改法最小性 / "其余四入口有上限"复核 / 第七数 vs unknown_1h 两型）· 与 batch-1（头 `66b5d38c`，25 files +1247/−116，含 fix-up 4/5/6）**各自可批可回滚**；同窗部署顺序 batch-1 → batch-2（batch-2 的 ambiguous 事件靠 batch-1 hold-monitor 看见）。
+> **Status**: v0.3 · J2 2026-08-29 晚 · Bettor 令 · batch-2 头 **`81282118`**（从 origin `fe6ad45e` 开，**不叠 batch-1**；对 `fe6ad45e` **23 files, +999 / −54**；`3277183a` 之后叠：DEFECT1b 可见性 `9c80babc`、P7-bis 两处 reopen 门 + explorer (B) `042ffdea`、write-ahead 付款意图 `6554b8d9`、SQL 层兜底 `81282118`）· NWT 审中（hedge-call 突变 / explorer 改法最小性 / "其余四入口有上限"复核 / 第七数 vs unknown_1h 两型）· 与 batch-1（头 `66b5d38c`，25 files +1247/−116，含 fix-up 4/5/6）**各自可批可回滚**；同窗部署顺序 batch-1 → batch-2（batch-2 的 ambiguous 事件靠 batch-1 hold-monitor 看见）。
 
 ## §B2-1 文件表（19）
 | 类 | 文件 | 说明 |
 |---|---|---|
-| **M**（5，回滚锚 = `fe6ad45e` 版 sha256[:16]）| `kasia-console/src/services/broker-intake-watcher.js` `e43488dfd86ff39e` | P2 intent write-ahead + Z20/fallback 片段 + tick-guard 接线；§7.1 `refund_candidate_from` |
+| **M**（6，回滚锚 = `fe6ad45e` 版 sha256[:16]）| `kasia-console/src/services/broker-intake-watcher.js` `e43488dfd86ff39e` | P2 intent write-ahead + Z20/fallback 片段 + tick-guard 接线；§7.1 `refund_candidate_from` |
 | | `kasia-console/src/services/broker-v2/router.js` `28bbffb59daebb4a` | P11 借记先行 + 120 s 上限 + ambiguous 告警 |
 | | `kasia-console/src/api/conversations.js` `f422fc0ed96906d0` | per-peer 锁接五入口 + rejectAfterMs 拒回 |
 | | `kasia-console/src/services/exchange-machine.js` `d835b53b40baa45f` | DEFECT1 `executeHedge` 传参镜像 + 顺手 explorer 链接改 `formatTxReference` |
 | | `kasia-console/src/services/broker-bsc-intake-watcher.js` `7bcedf2a6ccf6faa` | §7.1 入金 sender 先记 marker 再 publish |
-| **A**（14）| `lib/{broker-fallback-intent,tick-guard,peer-serial-lock,user-ledger-withdraw,with-timeout,broker-buy-inflow}.mjs` + 各 `.test.mjs`（tick-guard/peer-serial-lock/user-ledger-withdraw/with-timeout/broker-buy-inflow）+ `services/broker-intake-watcher.fallback-intent.test.mjs` + `services/broker-v2/router.withdraw.test.mjs` + `services/exchange-machine.hedge-call.test.mjs` | 纯新增，revert 即删 |
+| | `kasia-console/src/services/trade-protocol-filter.js` `15d853d7796fd0a6` | DEFECT1b 可见性(hedge 门窄 catch) + P7-bis tpf timeout 门 + write-ahead 付款意图两路 + 读方审计注释 |
+| **A**（17）| `lib/{broker-fallback-intent,tick-guard,peer-serial-lock,user-ledger-withdraw,with-timeout,broker-buy-inflow}.mjs` + 各 `.test.mjs`（tick-guard/peer-serial-lock/user-ledger-withdraw/with-timeout/broker-buy-inflow）+ `services/` 下 `broker-intake-watcher.fallback-intent` / `broker-v2/router.withdraw` / `exchange-machine.hedge-call` / `exchange-machine.reopen-guard` / `trade-protocol-filter.hedge-gate` / `trade-protocol-filter.payment-intent` 六个 `.test.mjs` | 纯新增，revert 即删 |
 - **无 migrate**（batch-2 不加表不加列：intent/claim/inflow 都走 `chain_events` / `broker_workflow_markers` 既有表）。
 
 ## §B2-2 env（三项 + 一门）
@@ -126,7 +127,7 @@
 | 拒回「系统繁忙」频发 | 先看 `peer-lock REJECT` 日志的 waited 秒数：若 <180 s 前一条正常慢 ⇒ 调大 `BROKER_PEER_LOCK_REJECT_MS`；若前一条真挂 ⇒ 看它挂在哪个外部调用 |
 
 ## §B2-4 验收（执行人勾，J2 只读复核）
-- [ ] 锚 5/5 一致；`git diff --stat HEAD~1` = 19 files
+- [ ] 锚 **6/6** 一致；`git diff --stat HEAD~1` = **23 files（6 M + 17 A）**
 - [ ] boot 日志无 `SyntaxError`/import 错；`[broker-intake] watcher started`；首个 5 min tick 无 `guarded tick err`
 - [ ] **rejectAfterMs 可观测**：构造同 peer 两条 DM（第一条走 LLM 慢路）⇒ 第二条**排队**（`peer-lock wait` 日志 30 s 后出现）而非并行；把 `BROKER_PEER_LOCK_REJECT_MS=5000` 临时缩短 ⇒ 第二条回「⏳ 系统繁忙，请稍后再试。」且 `peer-lock REJECT` 日志；恢复默认
 - [ ] **buy_inflow marker 首笔落库**：一笔真实 BUY 入金后 `SELECT * FROM broker_workflow_markers WHERE event_type='broker_buy_inflow'` 有行，payload.from = 入金 tx 的 from（与 bscscan 对）
