@@ -1715,7 +1715,7 @@ async function tryNextAccept(orderId) {
 // ── Exchange Protocol (v1.1 自由市场) ────────────────────────
 
 import { randomUUID } from 'crypto';
-import { guardReopenIfSettled, processAccept as machineAccept, processManualConfirm, processCancel as machineCancel, processPaymentSubmit, transition as exchangeTransition } from './exchange-machine.js';
+import { guardReopenIfSettled, _alertPaymentSubmitWhileIntent, processAccept as machineAccept, processManualConfirm, processCancel as machineCancel, processPaymentSubmit, transition as exchangeTransition } from './exchange-machine.js';
 
 // Exchange protocol v2 message type constants
 const EXCHANGE_MSG = {
@@ -2458,8 +2458,16 @@ async function handleExchangePaid(msg) {
   }
 
   // Write payment_tx (UNIQUE index 作为 fail-safe; 若并发插入冲突此处会抛, try 捕获降级)
+  // P7-bis (ii) 最后一笔 (NWT/Bettor 8/29): 谓词 AND payment_tx IS NULL —— 现原子性靠"读→Gate1→写 之间无 await"这个脆弱不变量, 日后插一个 await 就静默复活 clobber
+  // (把本地 PENDING 意图/真 hash 覆盖成对端值); 谓词让守随写走 (refactor-proof)。changes=0 ⇒ 记一次事件, 不抛, 不推进。
   try {
-    sqlite.prepare('UPDATE exchange_offers SET payment_tx = ? WHERE id = ?').run(msg.payment_tx, msg.offer_id);
+    const _w = sqlite.prepare('UPDATE exchange_offers SET payment_tx = ? WHERE id = ? AND payment_tx IS NULL').run(msg.payment_tx, msg.offer_id);
+    if (_w.changes === 0) {
+      const cur = sqlite.prepare('SELECT payment_tx FROM exchange_offers WHERE id = ?').get(msg.offer_id)?.payment_tx || null;
+      _alertPaymentSubmitWhileIntent(msg.offer_id, cur, msg.payment_tx, msg.payment_chain || null, 'tpf-remote-paid');
+      console.warn(`[exchange] paid: offer ${msg.offer_id.slice(0,8)} payment_tx already ${String(cur).slice(0,16)} — remote ${String(msg.payment_tx).slice(0,16)} NOT written (predicate)`);
+      return;
+    }
   } catch (dbErr) {
     // UNIQUE constraint violation — 并发 reuse 从 DB 层被拦
     console.log(`[exchange] paid: DB UNIQUE conflict on payment_tx ${msg.payment_tx.slice(0,16)} for offer ${msg.offer_id.slice(0,8)}: ${dbErr.message}`);

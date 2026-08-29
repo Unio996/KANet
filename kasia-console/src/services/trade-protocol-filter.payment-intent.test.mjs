@@ -75,6 +75,17 @@ await t('X-e2 (NWT (1) SQL 层兜底) 绕过应用层直接跑源里逐字抽出
   // 应用层被绕过 (直接 processPaymentSubmit 但先把应用层判的前提破坏不可行) ⇒ 至少核: 源级 changes===0 分支存在且返回 payment_intent_pending
   assert.ok(/if \(_r\.changes === 0\) \{[\s\S]*?return \{ error: 'payment_intent_pending'/.test(EMS), 'changes=0 分支缺');
 });
+await t('X-f (最后一笔) tpf handleExchangePaid 远端 paid 写谓词 AND payment_tx IS NULL (逐字抽出直接跑): 列 PENDING ⇒ 0 列不动; 真 hash ⇒ 0 列不动; NULL ⇒ 1; 源级 changes=0 分支调 _alertPaymentSubmitWhileIntent(…, \'tpf-remote-paid\') 且 return', () => {
+  const m = SRC.match(/'(UPDATE exchange_offers SET payment_tx = \? WHERE id = \? AND payment_tx IS NULL)'\)\.run\(msg\.payment_tx, msg\.offer_id\)/);
+  assert.ok(m, 'tpf 远端 paid 写须带 IS NULL 谓词 (逐字)');
+  const stmt = db.prepare(m[1]);
+  const pend = ptx('pi_2').payment_tx; assert.ok(pend.startsWith('PENDING:'));
+  assert.strictEqual(stmt.run(TX('7'), 'pi_2').changes, 0); assert.strictEqual(ptx('pi_2').payment_tx, pend);
+  assert.strictEqual(stmt.run(TX('8'), 'pi_1').changes, 0); assert.strictEqual(ptx('pi_1').payment_tx, TX('a'));
+  mkOffer('pi_remote_null'); assert.strictEqual(stmt.run(TX('8'), 'pi_remote_null').changes, 1); assert.strictEqual(ptx('pi_remote_null').payment_tx, TX('8'));
+  const hp = SRC.slice(SRC.indexOf('async function handleExchangePaid('), SRC.indexOf('async function handleExchangePaid(') + 4000);
+  assert.ok(/if \(_w\.changes === 0\) \{[\s\S]*?_alertPaymentSubmitWhileIntent\(msg\.offer_id, cur, msg\.payment_tx, [^)]*'tpf-remote-paid'\);[\s\S]*?return;/.test(hp), 'changes=0 分支须记事件并 return');
+});
 db.close(); rmSync(dir, { recursive: true, force: true });
 console.log(`payment-intent: ${pass} PASS / ${fail} FAIL`);
 process.exit(fail ? 1 : 0);

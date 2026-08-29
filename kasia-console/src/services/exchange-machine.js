@@ -772,7 +772,7 @@ export async function checkMatchedTimeout() {
 // (handleExchangePaid transitions to verifying first, then calls this).
 // The old /api/exchange/submit-payment REST endpoint is deprecated.
 
-function _alertPaymentSubmitWhileIntent(offer_id, localIntent, submittedTx, chain, layer) {
+export function _alertPaymentSubmitWhileIntent(offer_id, localIntent, submittedTx, chain, layer) {   // 导出: tpf handleExchangePaid 远端 paid 路复用 (layer='tpf-remote-paid')
   try {
     sqlite.prepare(`INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at) VALUES (?, 'system', 'payment_submit_while_intent_pending', 'exchange-machine', 'warn', ?, ?, ?)`)
       .run(crypto.randomUUID(), `🔴 offer ${String(offer_id).slice(0, 8)} 本地付款意图 ${localIntent} 未决, 收到外部 payment_tx ${String(submittedTx).slice(0, 16)}… — 不覆盖 (${layer}), 人工核`, JSON.stringify({ offer_id, local_intent: localIntent, submitted_tx: submittedTx, chain, layer }), new Date().toISOString());
