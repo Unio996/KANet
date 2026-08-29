@@ -34,6 +34,7 @@
 **C2 的定位**：J1 用生产 kaspa-wasm `ScriptBuilder` 离线造出的**原生 Groth16 tag 形**（`inputs[rev]…, count, proof, vk, 0x20, 0xa6`，430B redeem / 296B sig，地址 `kaspatest:ppnsz9…`）证明的是"我们的工具能发 0xa6"——**这件 zk-sdk 移植在 7/6 已用另一形（R0 通用 vk + 脚本内算 public input）证过并上链**。J1 的形要配**自家 Groth16 电路**（circom/arkworks）才有意义，而我们的 prover 是 RISC0 guest ⇒ 换形 = 换整条 prover 栈 = **不在任何决策里**。🔴 J1 那个地址用的是**上游公开夹具 vk，绝不能打钱**（J1 自己已标）。
 
 **⇒ ① 答**：必须叠加；叠加已存在于生产（gate 委托 + 内省绑定）；**C1 非必经，C2 不先走，两条排期 0**。§6-3（A-covenant / `LOCKED_F→O_AUTHORIZED`）若需 ZK，**复用同一形**：covenant 内 `require(tx.inputs[k].scriptPubKey == P2SH(blake2b(prefix‖journalHash‖suffixBaked)))`，gate 仍由 zk-sdk 生成；transition probe（`S63A_TransitionProbe.sil`）与此正交——它只证同 cov_id 续继缝，与 gate 绑定可以叠在同一入口里而不互相依赖。
+> 🟡 **verify-when-built（NWT GREEN 附注，2026-08-29）**：上句"可叠同一入口"**未测**——本仓没有任何一个 spend 同时做 cov_id 续继内省（`OpInputCovenantId`/`OpCovOutputCount`/`validateOutputState`）**和** gate journal 内省（`tx.inputs[k].scriptPubKey == P2SH(...)`）的实体（CloseZkV2 零 cov_id 内省；transition probe 零 gate 内省）。A2-whole 落地时**必真核**：双内省同 spend 可编译可通过 + mass/computeBudget 交互（gate 输入 budget=1500 与 covenant 输入 budget=70 各自独立、`estimate_script_units_upper_bound` 对两输入分别估）。在那之前它是**设计假设**，不是结论。
 
 ## §3 回 ②：若将来真做 C1，三件待定的建议（排期 0，只留判据）
 | 待定 | 建议 | 依据 |
