@@ -117,6 +117,24 @@ else
   bad "tasklist 阳性对照" "no node.exe found to test against"
 fi
 rc=0; pid_alive 4000000 || rc=$?; expect "tasklist 阴性对照: pid 4000000 ⇒ 1" "$rc" "1"
+# ── 8. v0.1.2 PID 复用 (CreationDate vs marker) ──
+if [[ "$NODE_PID" =~ ^[0-9]+$ ]]; then
+  CMS="$(proc_creation_ms "$NODE_PID")"
+  [[ "$CMS" =~ ^[0-9]+$ ]] && ok "CreationDate 非提权可读: pid=$NODE_PID creation_ms=$CMS" || bad "CreationDate 可读" "got '$CMS'"
+  NOW_MS=$(( $(date +%s) * 1000 ))
+  [[ "$CMS" =~ ^[0-9]+$ ]] && (( CMS <= NOW_MS )) && ok "creation_ms ≤ now" || bad "creation_ms ≤ now" "$CMS > $NOW_MS"
+  rc=0; pid_alive "$NODE_PID" "$NOW_MS" || rc=$?; expect "真进程 + marker=now (创建早于 marker) ⇒ 0 活" "$rc" "0"
+  rc=0; pid_alive "$NODE_PID" "$(( CMS - 60000 ))" || rc=$?; expect "真进程 + marker 早于创建 60s (= PID 复用形) ⇒ 1 不在" "$rc" "1"
+  rc=0; pid_alive "$NODE_PID" "$(( CMS - 1000 ))" || rc=$?; expect "marker 早于创建 1s (< 2s skew) ⇒ 0 放行" "$rc" "0"
+fi
+proc_creation_ms_real=$(declare -f proc_creation_ms)
+proc_creation_ms() { echo ""; }
+rc=0; pid_alive "$NODE_PID" 1 || rc=$?; expect "CreationDate 读不到 ⇒ 放行 0 (fail-safe)" "$rc" "0"
+eval "$proc_creation_ms_real"
+# 五态机经 marker 走复用路径: marker pid=真 node, start_ms=creation−60s ⇒ DEAD
+STUB_ALIVE=0; echo "$NODE_PID $(( CMS - 60000 ))" > "$BOOT_MARKER"; expect "五态: 复用 PID 的 marker ⇒ DEAD" "$(console_state)" "DEAD"
+echo "$NODE_PID $NOW_MS" > "$BOOT_MARKER"; expect "五态: 真进程 marker=now ⇒ BOOTING" "$(console_state)" "BOOTING"
+grep -q "PID reused, treat as gone" "$LOG" && ok "复用判定有日志行" || bad "复用日志行" "missing"
 tasklist() { return 1; }
 rc=0; pid_alive 1 || rc=$?; expect "tasklist 失败 ⇒ 2 (UNKNOWN)" "$rc" "2"
 

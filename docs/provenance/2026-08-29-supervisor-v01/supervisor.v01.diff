@@ -1,5 +1,5 @@
 --- scripts/kanet-console-supervisor.sh	2026-08-04 15:09:23.185054700 +0700
-+++ scratch/_j2_supervisor_v01/kanet-console-supervisor.v01.sh	2026-08-29 12:32:44.334628800 +0700
++++ scratch/_j2_supervisor_v01/kanet-console-supervisor.v01.sh	2026-08-29 12:39:25.817122200 +0700
 @@ -30,6 +30,12 @@
  RESTART_WINDOW_SEC=${KANET_SUPERVISOR_RESTART_WINDOW_SEC:-300}   # 5 min
  RESTART_MAX_IN_WINDOW=${KANET_SUPERVISOR_RESTART_MAX:-5}
@@ -13,7 +13,7 @@
  # r-portconverge (J1 DoD-E E3, 2026-06-12): Console 端口单一源 = kanet.env PORT
  # (同 kanet-start.sh L105 case PORT) / headless L47 收敛). 原硬编码 3200 是 r473 port 收敛
  # 漏掉的【第三个脚本】: Console 实绑 kanet.env PORT=3300, 但 supervisor 探 3200 → 永远误判
-@@ -78,6 +84,74 @@
+@@ -78,6 +84,93 @@
    heartbeat_fresh
  }
  
@@ -40,29 +40,48 @@
 +
 +# ── v0.1 boot-marker / PID 存在性 ──
 +marker_pid=""; marker_start_s=0
++marker_start_ms=0
 +read_marker() {
-+  marker_pid=""; marker_start_s=0
++  marker_pid=""; marker_start_s=0; marker_start_ms=0
 +  [[ -f "$BOOT_MARKER" ]] || return 1
 +  local marker_ms=""
 +  read -r marker_pid marker_ms < "$BOOT_MARKER" || true
 +  [[ "$marker_pid" =~ ^[0-9]+$ && "$marker_ms" =~ ^[0-9]+$ ]] || { marker_pid=""; return 1; }
++  marker_start_ms=$marker_ms
 +  marker_start_s=$(( marker_ms / 1000 ))
 +  return 0
 +}
++# 进程创建时刻 (epoch ms) —— v0.1.2 防 PID 复用. CIM CreationDate 对 SYSTEM 进程非提权可读 (NWT 实测; ≠ CommandLine).
++# 读不到 ⇒ 输出空 (调用方放行 = fail-safe: 最坏多等 ≤ grace).
++proc_creation_ms() {
++  powershell -NoProfile -NonInteractive -Command \
++    "\$p = Get-CimInstance Win32_Process -Filter 'ProcessId=$1' -ErrorAction SilentlyContinue; if (\$p -and \$p.CreationDate) { [DateTimeOffset]::new(\$p.CreationDate).ToUnixTimeMilliseconds() }" 2>/dev/null | tr -d '[:space:]'
++}
++# pid_alive <pid> [marker_ms]
 +# 0 = 活, 1 = 不在, 2 = 查不出 (tasklist 失败 ⇒ 调用方退回旧 3-fail 逻辑, fail-safe).
 +# 只查存在性, 不读 CommandLine —— 非提权读 SYSTEM 进程 CommandLine 为 null 是假空 (runbook v0.5.1 §检查③).
++# v0.1.2: 给了 marker_ms 时再核 CreationDate ≤ marker_ms + 2s —— 复用的 PID 创建时刻必晚于旧进程死亡 ≥ marker 写入时刻 ⇒ 判 1 (不在).
++# marker 由 index.js 顶部写, 但 ESM 静态 import 先于顶部代码执行 ⇒ marker_ms 可能晚于创建数秒, 所以只核 "创建不晚于 marker", 不核相等.
++PID_REUSE_SKEW_MS=${KANET_SUPERVISOR_PID_REUSE_SKEW_MS:-2000}
 +pid_alive() {
 +  local out
 +  out="$(tasklist //FI "PID eq $1" //NH 2>/dev/null)" || return 2
-+  grep -q "node.exe" <<< "$out" && return 0
-+  return 1
++  grep -q "node.exe" <<< "$out" || return 1
++  if [[ -n "${2:-}" && "$2" =~ ^[0-9]+$ ]]; then
++    local cms; cms="$(proc_creation_ms "$1")"
++    if [[ "$cms" =~ ^[0-9]+$ ]] && (( cms > $2 + PID_REUSE_SKEW_MS )); then
++      log "pid $1 exists but CreationDate(${cms}) > marker(${2})+${PID_REUSE_SKEW_MS}ms — PID reused, treat as gone"
++      return 1
++    fi
++  fi
++  return 0
 +}
 +# 打印 ALIVE|BOOTING|HUNG_BOOT|DEAD|UNKNOWN
 +console_state() {
 +  if console_alive; then echo ALIVE; return 0; fi
 +  read_marker || { echo DEAD; return 0; }
 +  local rc=0
-+  pid_alive "$marker_pid" || rc=$?
++  pid_alive "$marker_pid" "$marker_start_ms" || rc=$?
 +  if (( rc == 1 )); then echo DEAD; return 0; fi
 +  if (( rc == 2 )); then echo UNKNOWN; return 0; fi
 +  local age=$(( $(date +%s) - marker_start_s ))
@@ -88,7 +107,7 @@
  count_recent_restarts() {
    local since=$(( $(date +%s) - RESTART_WINDOW_SEC ))
    if [[ ! -f "$RESTART_HISTORY" ]]; then echo 0; return; fi
-@@ -127,48 +201,68 @@
+@@ -127,48 +220,68 @@
  
  restart_console() {
    log "Console death detected — invoking kanet-start-headless.sh"
@@ -187,7 +206,7 @@
  }
  
  case "${1:-start}" in
-@@ -215,6 +309,11 @@
+@@ -215,6 +328,11 @@
        echo "last 5 restarts:"
        tail -5 "$RESTART_HISTORY"
      fi
