@@ -42,6 +42,7 @@ function walk(root, dir, depth, found, nmExtra) {
       continue;                          // 不进链
     }
     if (!st.isDirectory() || SKIP_DIRS.has(e.name)) continue;
+    if (OTHER_ROOTS.has(p.toLowerCase())) continue;   // 别的 worktree 嵌在本树下 (如主树 scratch/_wt_*): 归它自己那轮扫, 不重复计
     if (nmExtra > 0) { if (nmExtra > 1 || e.name.startsWith('@')) walk(root, p, depth + 1, found, nmExtra - 1); continue; }   // node_modules 内: 只再进 @scope 一层
     walk(root, p, depth + 1, found, e.name === 'node_modules' ? NM_MAX_EXTRA : 0);
   }
@@ -51,6 +52,7 @@ const under = (t, base) => { const a = t.toLowerCase(), b = base.toLowerCase(); 
 const wts = worktrees();
 const main = wts[0];
 const targets = SCAN_MAIN ? wts : wts.slice(1);
+const OTHER_ROOTS = new Set(wts.map((w) => w.toLowerCase()));
 const found = [];
 for (const wt of targets) walk(wt, wt, 0, found, 0);
 
