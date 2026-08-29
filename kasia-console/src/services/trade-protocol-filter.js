@@ -2183,14 +2183,45 @@ async function _fetchHedgePrice(exchange, side) {
  * Execute a hedge order on the best available CEX.
  * If preferredCex specified, try that first; otherwise use default account.
  */
+// DEFECT1b 可见性 helper (导出供向量; 生产只在 _executeHedge 门用)
+export function _isMissingColumnError(e) {
+  return !!e && /no such column/i.test(String(e.message || e));
+}
+export function _recordHedgeGateError(offerId, e) {
+  const id = String(offerId || '');
+  try {
+    const seen = sqlite.prepare(`SELECT 1 FROM chain_events WHERE txid = ? AND event_type = 'hedge_gate_error' LIMIT 1`).get(id);
+    if (seen) return { recorded: false, throttled: true };   // 一次/offer (UNIQUE(txid,event_type) 兜底)
+    recordChainEvent({ txid: id, eventType: 'hedge_gate_error', fromAddress: null, toAddress: null, observedBy: 'system',
+      payload: { offer_id: id, error: String(e?.message || e).slice(0, 200), site: 'trade-protocol-filter._executeHedge gate SELECT meta' } });
+    try {
+      sqlite.prepare(`INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at) VALUES (?, 'system', 'hedge_gate_error', 'trade-protocol-filter', 'error', ?, ?, ?)`)
+        .run(randomUUID(), `🔴 hedge 门 SQL 抛 (offer=${id.slice(0, 8)}): ${String(e?.message || e).slice(0, 80)} — 对冲 skip (DEFECT1b: 列名不动, 真开=Owner 独立批)`, JSON.stringify({ offer_id: id, error: String(e?.message || e).slice(0, 200) }), new Date().toISOString());
+    } catch {}
+    console.error(`[exchange-hedge] gate SQL error offer=${id.slice(0, 8)}: ${e?.message || e} — recorded hedge_gate_error, skip (DEFECT1b)`);
+    return { recorded: true };
+  } catch (e2) { console.error(`[exchange-hedge] record hedge_gate_error failed: ${e2.message}`); return { recorded: false, error: e2.message }; }
+}
+
 async function _executeHedge(offerId, agentName, side, qty, preferredCex = null) {
   // T-22-05 Step G — Opt-in hedge gate（安全门控）
   // 默认不对冲。只有 offer.meta.hedge_enabled === true 才触发对冲。
   // 防止 retail-proxy / bounty / auction 等 non-hedgeable offer 类型误触发 CEX 反向下单。
   // 3 个调用点（api/exchange.js / exchange-machine.js x2）全部自动受保护。
-  const _hedgeGateOffer = sqlite.prepare(
-    "SELECT meta FROM exchange_offers WHERE id = ? LIMIT 1"
-  ).get(offerId);
+  // 🔴 DEFECT1b (race 盘点 §8, NWT P2, Bettor 8/29 GO 可见性补丁): exchange_offers 没有 `meta` 列 (只有 metadata; 写方写 metadata.hedge_enabled) ⇒
+  //   下面这句自 a92556f7 (4/22) 起每次抛 SqliteError, 三处调用的 .catch 吞掉 ⇒ 对冲从未在 live 跑过且无人看见。
+  //   本补丁【只加可见性】: 只裹 "no such column" 这一种错 ⇒ 记 hedge_gate_error chain_event (txid=offer_id; 非 broker_* 不受 v83 64-hex trigger; UNIQUE(txid,event_type) = 一次/offer)
+  //   + events 告警 ⇒ 仍 return skip 不开对冲。🔴 红线: 不动 "SELECT meta" 列名——改成 metadata 就会真读到 hedge_enabled:true ⇒ 全部 broker offer 开 CEX 对冲 = Owner 独立批。
+  let _hedgeGateOffer;
+  try {
+    _hedgeGateOffer = sqlite.prepare(
+      "SELECT meta FROM exchange_offers WHERE id = ? LIMIT 1"
+    ).get(offerId);
+  } catch (e) {
+    if (!_isMissingColumnError(e)) throw e;   // 别的错 (busy/IO/…) 照原路抛给调用方 .catch, 不被本补丁吞
+    _recordHedgeGateError(offerId, e);
+    return;
+  }
   if (!_hedgeGateOffer) {
     console.log(`[exchange-hedge] offer ${offerId.slice(0, 8)} not found — skip`);
     return;
