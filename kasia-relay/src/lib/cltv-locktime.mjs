@@ -29,11 +29,19 @@ const toBig = (v, i) => {
  * @param {Array<bigint|number>} bounds  各被锁输入的 E_i (脚本会 push 的值)
  * 规则: daa ⇒ 每个 0 <= E_i < 5e11; time ⇒ 每个 5e11 <= E_i < 2^63; 返回 max(E_i) (多输入 over-delay 保守方向)
  * 🔴 Codex 9eab914a ④ (funds-safety): daa 域 E=0 数学合法但 lock_time=0 = 共识【已终局/无锁】 ⇒ 恢复锁绝不能静默实例化零延迟
- *    ⇒ 默认拒 E==0 (CLTV_DELAY_NONPOSITIVE); 只有显式 allowZero:true 才放 (仅测试/非恢复用途)。恢复配置侧另用 assertPositiveDelay(n)。
+ *    ⇒ 一律拒 E==0 (CLTV_DELAY_NONPOSITIVE)。生产 API 【没有】allowZero 开关 (NWT 2026-08-29: 防误用);
+ *    测试若需 E=0 形用 _cltvLockTimeAllowZeroForTests (test-only 导出, 名字自带警告)。恢复配置侧另用 assertPositiveDelay(n)。
  */
 export function cltvLockTime(opts) {
+  return _cltvLockTimeImpl(opts, false);
+}
+/** test-only: 允许 daa 域 E=0 (构造"无锁"对照向量用)。🔴 生产/恢复路绝不 import 此名。 */
+export function _cltvLockTimeAllowZeroForTests(opts) {
+  return _cltvLockTimeImpl(opts, true);
+}
+function _cltvLockTimeImpl(opts, allowZero) {
   if (!opts || typeof opts !== 'object') throw new CltvError(CLTV_ERR.ARGS_MISSING, 'opts 缺失');
-  const { domain, bounds, allowZero = false } = opts;
+  const { domain, bounds } = opts;
   if (domain !== 'daa' && domain !== 'time') throw new CltvError(CLTV_ERR.ARGS_MISSING, `domain 须为 'daa'|'time', 实 ${String(domain)}`);
   if (!Array.isArray(bounds)) throw new CltvError(CLTV_ERR.ARGS_MISSING, 'bounds 须为数组');
   if (bounds.length === 0) throw new CltvError(CLTV_ERR.BOUNDS_EMPTY, 'bounds 为空: 没有被锁输入就不该调本函数 (lockTime=0n 是"无锁", 不是"锁到 0")');
@@ -61,12 +69,18 @@ export function cltvSequence(seq = 0n) {
   return s;
 }
 
-/** 恢复配置侧: 相对延迟 n_recovery_delay_daa 须 > 0 (Codex 9eab914a ④). 供 §6-3 builder/ctor 装载处调用; 抛 CLTV_DELAY_NONPOSITIVE。 */
-export function assertPositiveDelay(nDaa, label = 'n_recovery_delay_daa') {
+/** 恢复配置侧: 相对延迟 n_recovery_delay_daa 须 > 0 (Codex 9eab914a ④). 供 §6-3 builder/ctor 装载处【强制】调用; 抛 CLTV_DELAY_NONPOSITIVE。
+ *  sane-max (NWT 2026-08-29 建议, 采): 默认 max = 1e7 DAA (≈11.6 天 @10 bps) = gate (d) CFG-UNIT-DOMAIN 相对量级带上界
+ *  (docs/2026-08-27-j2-s63-gate-d-conservative-bounds-v0.1.md §4 L200: 相对量 [1e3, 1e7), ≥1e7 = 拿错尺)。
+ *  只钉 max 不钉 min=1e3: 探针/测试用 N=100 合法; 生产 ctor 装载处再按 CFG-UNIT-DOMAIN 带检查 [1e3,1e7) (两道各管各的)。
+ *  5e11 (LOCK_TIME_THRESHOLD) 只逮 gross typo (把绝对 DAA 当相对), 1e7 逮 "多打一个 0" 这种 config typo。 */
+export const DELAY_SANE_MAX_DAA = 10_000_000n;
+export function assertPositiveDelay(nDaa, label = 'n_recovery_delay_daa', { max = DELAY_SANE_MAX_DAA } = {}) {
   let n;
   try { n = typeof nDaa === 'bigint' ? nDaa : BigInt(nDaa); } catch { throw new CltvError(CLTV_ERR.ARGS_MISSING, `${label} 非整数: ${String(nDaa)}`); }
   if (n <= 0n) throw new CltvError(CLTV_ERR.DELAY_NONPOSITIVE, `${label} 须 > 0 (零/负延迟 = 恢复锁不存在): ${n}`);
-  if (n >= LOCK_TIME_THRESHOLD) throw new CltvError(CLTV_ERR.DOMAIN_MIXED, `${label} 不在 DAA 相对量级带: ${n}`);
+  const m = typeof max === 'bigint' ? max : BigInt(max);
+  if (n >= m) throw new CltvError(CLTV_ERR.DOMAIN_MIXED, `${label} 超 sane-max ${m} (config typo? 相对 DAA 量级带上界; 5e11 才是域阈): ${n}`);
   return n;
 }
 
