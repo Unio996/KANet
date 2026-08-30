@@ -52,3 +52,50 @@ rc1 **不带 OP_PICK off-by-one**（行为验证，§1）⇒ 迁移**不需要**
 
 ## 6. 待 NWT 判
 1. 并存方式：`sil-v1/` 目录 vs `*_v1.sil` 后缀。2. 批 B ① 的 `deadlineMs` 由谁烤（发布路径 `prediction-escrow-ss.mjs` / `pool-bshard-artifacts.mjs` 各自算一次 vs 公共 helper）。3. `OracleStake_v1.sil:46` 域错误是否单列紧急（已部署质押 UTXO 的锁是否真有效——按 magnitude：`lockUntilDaa` ≈ 8e7 < 5e11 ⇒ 链上当 DAA 锁解释，语义碰巧对；rc1 只是把它写明）。
+
+## 附录 A · 批 B 逐处表（43 处 `tx.time`，机械生成 2026-08-30，明日人工复核语义列）
+
+| # | 文件:行 | 现状 | 新写法（方案 B） | 形 |
+|---|---|---|---|---|
+| 1 | `_j2_closezk_repro4.sil:72` | `require(tx.time >= (attestedAtSeconds + 21600) * 1000);          // ⚠ 21600 占位, 见�` | witness 改 ms `temporal`; `+ 6 hours` | ① *1000 |
+| 2 | `docs/provenance/2026-08-29-s63a-probe-v03/S63A_TransitionProbe.sil:37` | `require(tx.time >= t_recovery);                          // parser 限  tx.time 只能 sta` | ctor `temporal t_recovery` | ③ 已 ms |
+| 3 | `docs/provenance/2026-08-29-s63a-probe-v03/S63A_TransitionProbe.sil:44` | `//    8065184 的 `require(tx.time >= e)` 降成裸 `<e> OP_CHECKLOCKTIMEVERIFY`(compile.r` | 随正文 | 注释 |
+| 4 | `docs/provenance/2026-08-29-s63a-probe-v03/S63A_TransitionProbe.sil:52` | `require(tx.time >= e);                                   // = CLTV(e)  块 DAA > tx.lockTi` | `require(tx.daa >= e)`（e = daaScore + n_probe, int） | ④ DAA 域(A′) |
+| 5 | `kasia-console/src/lib/CloseZkV2.sil:67` | `require(tx.time >= attestedAtMs + 21600000);                     // ESCAPE_GRACE_MS=216000` | witness 字段 `temporal attestedAtMs`; `+ 6 hours` | ③ 已 ms |
+| 6 | `kasia-console/src/lib/OracleStake_v1.sil:14` | `// 锁时语义 (silverc tx.time = tx.lockTime literal) ` | 随正文 | 注释 |
+| 7 | `kasia-console/src/lib/OracleStake_v1.sil:46` | `require(tx.time >= lockUntilDaa);` | `require(tx.daa >= lockUntilDaa)`（int, DAA 域） | ④ 域错误 |
+| 8 | `kasia-console/src/lib/PayoutShardV2.sil:86` | `int      new_attestedAtMs,        // 新增, witness供(self-read tx.time 经实测证实�` | — | 注释/其它 |
+| 9 | `kasia-console/src/lib/PoolRoot.sil:56` | `require(tx.time >= deadline * 1000);               // post-deadline` | ctor `temporal deadlineMs`; `require(tx.time >= deadlineMs)` | ① *1000 |
+| 10 | `kasia-console/src/lib/PoolRoot.sil:144` | `require(tx.time >= (deadline + 7200) * 1000);      // deadline+grace 超时才可取消 (�` | ctor `temporal deadlineMs`; `require(tx.time >= deadlineMs + 7200 seconds)`（7200 seconds = 2 hours） | ② grace |
+| 11 | `kasia-console/src/lib/PoolShard_fold.sil:130` | `require(tx.time >= deadline * 1000);               // post-deadline` | ctor `temporal deadlineMs`; `require(tx.time >= deadlineMs)` | ① *1000 |
+| 12 | `kasia-console/src/lib/PoolShard_fold.sil:216` | `require(tx.time >= (deadline + 7200) * 1000);      // deadline+grace 超时才可取消 (�` | ctor `temporal deadlineMs`; `require(tx.time >= deadlineMs + 7200 seconds)`（7200 seconds = 2 hours） | ② grace |
+| 13 | `kasia-console/src/lib/PoolSide.sil:128` | `require(tx.time >= deadline * 1000);` | ctor `temporal deadlineMs`; `require(tx.time >= deadlineMs)` | ① *1000 |
+| 14 | `kasia-console/src/lib/PoolSide_v06.sil:263` | `require(tx.time >= (deadline + 7200) * 1000);` | ctor `temporal deadlineMs`; `require(tx.time >= deadlineMs + 7200 seconds)`（7200 seconds = 2 hours） | ② grace |
+| 15 | `kasia-console/src/lib/PoolSide_v07.sil:276` | `require(tx.time >= (deadline + 7200) * 1000);` | ctor `temporal deadlineMs`; `require(tx.time >= deadlineMs + 7200 seconds)`（7200 seconds = 2 hours） | ② grace |
+| 16 | `kasia-console/src/lib/PoolSide_v0_7_1.sil:93` | `require(tx.time >= (deadline + 7200) * 1000);  // grace 7200s 防 front-run` | ctor `temporal deadlineMs`; `require(tx.time >= deadlineMs + 7200 seconds)`（7200 seconds = 2 hours） | ② grace |
+| 17 | `kasia-console/src/lib/PoolSpine.sil:97` | `require(tx.time >= deadline * 1000);` | ctor `temporal deadlineMs`; `require(tx.time >= deadlineMs)` | ① *1000 |
+| 18 | `kasia-console/src/lib/PoolSpine.sil:130` | `require(tx.time >= deadline * 1000);  // bug 10d fix Path A` | ctor `temporal deadlineMs`; `require(tx.time >= deadlineMs)` | ① *1000 |
+| 19 | `kasia-console/src/lib/PoolSpine.sil:145` | `require(tx.time >= deadline * 1000);  // bug 10d fix Path A` | ctor `temporal deadlineMs`; `require(tx.time >= deadlineMs)` | ① *1000 |
+| 20 | `kasia-console/src/lib/PoolSpine.sil:175` | `require(tx.time >= (deadline + 300) * 1000);` | ctor `temporal deadlineMs`; `require(tx.time >= deadlineMs + 300 seconds)`（7200 seconds = 2 hours） | ② grace |
+| 21 | `kasia-console/src/lib/PoolSpine_i_proto.sil:390` | `require(tx.time >= (deadline + 7200) * 1000);  // grace 修 (bug 10d Path A ms 模式)` | ctor `temporal deadlineMs`; `require(tx.time >= deadlineMs + 7200 seconds)`（7200 seconds = 2 hours） | ② grace |
+| 22 | `kasia-console/src/lib/PoolSpine_v06.sil:274` | `// SS never verified "no bettor joined"; check was only `tx.time>=deadline*1000`.` | 随正文 | 注释 |
+| 23 | `kasia-console/src/lib/PoolSpine_v06.sil:279` | `require(tx.time >= (deadline + 7200) * 1000);  // grace 修, bug 10d Path A ms 模式` | ctor `temporal deadlineMs`; `require(tx.time >= deadlineMs + 7200 seconds)`（7200 seconds = 2 hours） | ② grace |
+| 24 | `kasia-console/src/lib/PoolSpine_v07.sil:383` | `require(tx.time >= (deadline + 7200) * 1000);  // grace 修 (bug 10d Path A ms 模式)` | ctor `temporal deadlineMs`; `require(tx.time >= deadlineMs + 7200 seconds)`（7200 seconds = 2 hours） | ② grace |
+| 25 | `kasia-console/src/lib/PoolSpine_v08_agg.sil:298` | `// FRONT-RUN FIX (Bettor r388/r389)  REFUND_GRACE_SEC = 7200 (2h) >= 委员结算 SLA; tx.` | 随正文 | 注释 |
+| 26 | `kasia-console/src/lib/PoolSpine_v08_agg.sil:302` | `require(tx.time >= (deadline + 7200) * 1000);  // grace 修 (bug 10d Path A ms 模式)` | ctor `temporal deadlineMs`; `require(tx.time >= deadlineMs + 7200 seconds)`（7200 seconds = 2 hours） | ② grace |
+| 27 | `kasia-console/src/lib/PoolSpine_v08_chunk.sil:316` | `require(tx.time >= (deadline + 7200) * 1000);  // grace 修 (bug 10d Path A ms 模式)` | ctor `temporal deadlineMs`; `require(tx.time >= deadlineMs + 7200 seconds)`（7200 seconds = 2 hours） | ② grace |
+| 28 | `kasia-console/src/lib/PoolSpine_v08_shard.sil:46` | `require(tx.time >= deadline * 1000);           // post-close-only(deadline 过)` | ctor `temporal deadlineMs`; `require(tx.time >= deadlineMs)` | ① *1000 |
+| 29 | `kasia-console/src/lib/PoolSpine_v0_7_1.sil:238` | `require(tx.time >= (deadline + 7200) * 1000);  // grace 7200s 防 front-run vuln` | ctor `temporal deadlineMs`; `require(tx.time >= deadlineMs + 7200 seconds)`（7200 seconds = 2 hours） | ② grace |
+| 30 | `kasia-console/src/lib/PredictionEscrowConsensualMid.sil:73` | `require(tx.time >= deadline * 1000);` | ctor `temporal deadlineMs`; `require(tx.time >= deadlineMs)` | ① *1000 |
+| 31 | `kasia-console/src/lib/PredictionEscrowUnanimous5.sil:146` | `require(tx.time >= deadline * 1000);  // bug 10d fix Path A` | ctor `temporal deadlineMs`; `require(tx.time >= deadlineMs)` | ① *1000 |
+| 32 | `kasia-console/src/lib/PredictionEscrowUnanimous5.sil:167` | `require(tx.time >= deadline * 1000);  // bug 10d fix Path A` | ctor `temporal deadlineMs`; `require(tx.time >= deadlineMs)` | ① *1000 |
+| 33 | `kasia-console/src/lib/PredictionPoolUnanimous3.sil:105` | `require(tx.time >= deadline * 1000);  // bug 10d fix Path A — Kaspa LOCK_TIME_THRESHOLD ` | ctor `temporal deadlineMs`; `require(tx.time >= deadlineMs)` | ① *1000 |
+| 34 | `kasia-console/src/lib/PredictionPoolUnanimous3.sil:158` | `require(tx.time >= deadline * 1000);  // bug 10d fix Path A` | ctor `temporal deadlineMs`; `require(tx.time >= deadlineMs)` | ① *1000 |
+| 35 | `kasia-console/src/lib/PredictionPoolUnanimous3.sil:184` | `require(tx.time >= deadline * 1000);  // bug 10d fix Path A` | ctor `temporal deadlineMs`; `require(tx.time >= deadlineMs)` | ① *1000 |
+| 36 | `kasia-console/src/lib/RootClose.sil:72` | `require(tx.time >= deadline_ms);                   // post-deadline (deadline_ms 已 ms)` | ctor `temporal deadline_ms`; 常量 7200000 ⇒ `2 hours` | ③ 已 ms |
+| 37 | `kasia-console/src/lib/RootClose.sil:96` | `require(tx.time >= deadline_ms + 7200000);         // deadline+grace(2h) 超时才可取�` | ctor `temporal deadline_ms`; 常量 7200000 ⇒ `2 hours` | ③ 已 ms |
+| 38 | `kasia-console/src/lib/ShardLeaf.sil:29` | `int      deadline,            // ★件1(J1)  partial-shard sweep deadline (Unix ts, ctor-` | — | 注释/其它 |
+| 39 | `kasia-console/src/lib/ShardLeaf.sil:91` | `//   ⚠ tx.time 单位=【毫秒】(链上 LANDED refund precedent p2sh.mjs L7/SS L275 �` | 随正文 | 注释 |
+| 40 | `kasia-console/src/lib/ShardLeaf.sil:93` | `//   ⚠ da9fc22 parser 限 tx.time 只能 standalone require(不能进 || 复合)→拆�` | 随正文 | 注释 |
+| 41 | `kasia-console/src/lib/ShardLeaf.sil:94` | `//   sealed  不进 if→随时 LAND / partial  进 if→premature(tx.time < deadline*1000` | 随正文 | 注释 |
+| 42 | `kasia-console/src/lib/ShardLeaf.sil:96` | `require(tx.time >= deadline * 1000);` | ctor `temporal deadlineMs`; `require(tx.time >= deadlineMs)` | ① *1000 |
