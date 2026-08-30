@@ -38,16 +38,22 @@ rc1 **不带 OP_PICK off-by-one**（行为验证，§1）⇒ 迁移**不需要**
 ## 3. (c) pragma / 版本并存 / 目录
 - rc1 仍自报 `0.1.0` ⇒ 现有 `pragma silverscript ^0.1.0` 在 rc1 下**通过**；正式 `1.0.0` 后 `^0.1.0`（= `>=0.1.0 <0.2.0`）**不匹配** ⇒ 报 `compiler version 1.0.0 does not satisfy pragma ^0.1.0`；且 `c61e7d5 #190`：pragma 若覆盖未来主版本（如 `>=0.1.0`）直接拒。⇒ 策略：**迁移后的文件写 `pragma silverscript ^1.0.0`**（rc1 期间临时用 `>=0.1.0, <2.0.0`？——被 #190 拒；rc1 期只能 `^0.1.0`，正式版切 `^1.0.0`，即"pragma 跟编译器换一次"，写进批 A 的收尾步）。
 - 并存：**允许双版本并存到正式版 + 批 D 完成**——旧文件（已部署 P2SH 的合约源）原样留 `^0.1.0` + pinned 编译器（复现/取证用）；新文件用 `*_v1.sil` 后缀或同名新目录 `kasia-console/src/lib/sil-v1/`（倾向后者：路径即版本，lint 可按目录选编译器）。
+- 🔴 **并存的硬边界（NWT ③）**：旧 P2SH 上是**真人钱、rolling live 公测不停**（CLAUDE.md 铁律 0.5「只维持 live 公测过渡·零追加投入」）⇒ **绝不重部署 live escrow / 绝不把旧盘迁到新地址**；迁移期 redeem / settle / refund / claim 路径**必须认两套**（按 `pool_markets.metadata` / `exchange_offers.metadata.redeem_script_hex` 里烤的旧字节码 + pinned 编译器复现 vs 新盘 `sil-v1/` + rc1），判据 = 存的 redeem 哈希 == 地址（8/30 保密件同法），不按"当前编译器"猜。
 - `versioned-builds/`：加 `silverc-v1rc1-c7d17a1.exe` + `cli-debugger-v1rc1-c7d17a1.exe` + MANIFEST 行（sha256）；`SILVERC_V1_PATH` env；`prediction-escrow-ss.mjs:32 SILVERC` / `pool-bshard-artifacts.mjs` 按目录选。
 
 ## 4. (d) 分批
 - **批 A 机械（零语义）**：`entrypoint function→entry`（104/42）、`byte[34]→byte[36]`（106/24）、`byte[](x, n)→x as byte[N]`（42/13）、`checkSigFromStack→checkMsgSig`（2/1）、ctor JSON 新形 + 产物新形（工具链：`prediction-escrow-ss.mjs:142` 断言 `contract_name`、`:37 artifact.script`、`state_layout` 全失效 ⇒ 读 `contracts.<Name>.compiled.bytecode` / `state_span` / `entries.<e>.dispatch_tag`）。验收 = §5。
 - **批 B `tx.time` 方案 B**（43 处/24 文件，逐处表明日补全；形只有 4 种）：① `tx.time >= deadline * 1000`（31 处）⇒ ctor `temporal deadlineMs`（发布时 `*1000` 在链下一次算好、烤进 ctor）+ `require(tx.time >= deadlineMs)`；② `tx.time >= (deadline + 7200) * 1000`（grace，12 处）⇒ `require(tx.time >= deadlineMs + 2 hours)`；③ 已是 ms 的（`RootClose.sil:72/96 deadline_ms`、`CloseZkV2.sil:67 attestedAtMs + 21600000`）⇒ ctor/字段改 `temporal` 类型 + `+ 6 hours`；④ 🔴 **域错误** `OracleStake_v1.sil:46 require(tx.time >= lockUntilDaa)`（DAA 值喂给 time 域，rc1 直接 type mismatch）⇒ `require(tx.daa >= lockUntilDaa)`（int）——这是 rc1 **帮我们抓出的真 bug**（8/30 `reference-kaspa-cltv-is-magnitude-determined…` 同族）。`S63A_TransitionProbe.sil:52`（A′ DAA 相对锚 `e = daaScore + n_probe`）⇒ `tx.daa >= e`。
-- **批 C UB 审计**（`UNDEFINED-BEHAVIOUR.md` 7 节）：struct 11 文件 14 处（`items.length` 只取一个 leaf 的语义 → `FoldNode/PoolLeaf/PoolShard_fold` 的 `prev_states.length` for 循环 4 处）、for 循环 11 处（unroll 上限 63/8/16）、整数溢出（`mask = mask * 2` ×5 处、`spendable * oracleFeePct`）、除零（`/ totalStake`、`/ div`）、`int→byte[N]` 尺寸（`as byte[8]` 后全为显式）。每处写"UB 若被编译器删检查 ⇒ 后果"与加显式 `require` 的位置。
-- **批 D 部署**：新 P2SH = 全部合约（§2）；旧盘（已注资 P2SH）**不迁移**——用 pinned 编译器与旧源复现、按旧 exit 路径结算/退款（同 8/30 Unanimous5 结论）；新盘自 v1 起；§6-3 ZK 轨（A′ DAA 锚、`tx.daa`）在 rc1 下是**一等语法**（`tx.daa` 域检查 `static_check.rs:807-818`），比 0.1.0 的"温感 TxTime 造 DAA 锁"干净——设计影响：D-016 A′ 改写为 `tx.daa >= e`，探针 v0.4 在 v1 上重编 + 重做 E1 字节证。
+- **批 C UB / 潜伏 bug 审计**（NWT ④：范围 = **rc1 拒而 0.1.0 接受的全部** = 旧合约里的潜伏 bug，迁移是修不是纯 port，每处写**真实影响**）：(i) 两参 `byte[](x, n)` ×42——0.1.0 下它就是 OP_PICK off-by-one 的触发形（8065184 修的正是这条），已部署字节码里每一处都要回答"当时用的是 legacy 还是 fixed 编译器、栈位对不对"（`docs/provenance/README-silverc-oppick-provenance.md` 已核过的沿用，未核的补）；(ii) `OracleStake_v1.sil:46` 域错误（真实影响：`lockUntilDaa≈8e7 < 5e11` ⇒ 链上按 DAA 锁解释，语义碰巧对，但任何人把它当"时间锁"读就错；已部署质押 UTXO 不动）；(iii) `UNDEFINED-BEHAVIOUR.md` 7 节逐条：struct 11 文件 14 处（`items.length` 只取一个 leaf → `FoldNode/PoolLeaf/PoolShard_fold` 的 `prev_states.length` for 循环 4 处）、for 循环 11 处（unroll 上限 63/8/16）、整数溢出（`mask = mask * 2` ×5、`spendable * oracleFeePct`）、除零（`/ totalStake`、`/ div`）、`int→byte[N]` 尺寸。每处写"UB 若被编译器删检查 ⇒ 后果（返回 true 花掉 / 假拒）"与加显式 `require` 的位置；**已部署盘**只记账不改（同批 D 旧盘不迁）。
+- **批 D 部署**：新 P2SH = 全部合约（§2）；旧盘（已注资 P2SH）**不迁移**——用 pinned 编译器与旧源复现、按旧 exit 路径结算/退款（同 8/30 Unanimous5 结论）；新盘自 v1 起。
+- 🔴 **§6-3 编译器绑定（NWT ②，与 D-016 注记一致）**：§6-3 / gate (a) / A′ 探针 **继续用 pinned `silverc-zk-8065184`**，已部署与待广播的探针字节码不受本计划影响；**42 合约迁 rc1 不顺手拖走 §6-3**。§6-3 迁 rc1 = **另一独立决策**（Owner/Bettor 另批）：届时 A′ 改 `tx.daa >= e`（rc1 一等语法，`static_check.rs:807-818`）、探针在 rc1 重编、E1 字节证与 gate-(a) 卡**全部重做**，不复用本计划的验收。
+- **优先级（NWT ⑤）**：live 公测不停 > 节点 READY / gate (a) > 42 合约迁移；迁移各批**不撞 READY 窗**（T+0…T+125 只读段与 gate (a) 广播轮期间不落码不广播），rc1→正式版（≈9/6）之间只做批 A/B/C 的离线编译与向量，批 D 真链在正式版 + READY 后。
 
 ## 5. (e) 每批验收
-- **不能按字节比对**（§2 codegen 变）。验收 = ① rc1 编译 exit 0 + 错误清单为空；② **归一化 opcode 序列比对**：剥离 rc1 序言（dispatch `DUP <push4> EQUAL IF`）/ 越界检查（`SIZE <n> LESSTHAN VERIFY`）/ alt-stack 后，业务段 op 序列与 pinned 修复版一致（工具 = `scratchpad/v1mig/cmpops.mjs` 直方图 + 序列，入库到 `scripts/`）；③ **行为向量**：每合约每 entry 用 rc1 `cli-debugger --run`（正向 + 每条 require 一个反向）；④ 批 D 真链：TN12 注资尘埃 + 每 exit 路广播（同 gate (a) 卡）。
+- **不能按字节比对**（§2 codegen 变）。验收层级（NWT ①）：
+  - **主证据 = 行为向量**：每合约 × 每 entry × **每条 `require` 一正一反**（反向 = 只破坏该 require 的输入，其它全合法；缺一条 require 的反向 = 一条未验路径，清单按 grep `require(` 机械生成、人工核"能否单独破坏"），用 rc1 `cli-debugger --run`（`--test-file` 批跑）；同一向量集对 pinned 修复版用旧 debugger（`scratch/j1-oppick-verify/debugger`）跑一遍 ⇒ **两版通过/拒绝集逐条相等**才算"语义不变"。
+  - **辅证 = 归一化 opcode 序列比对**（`scratchpad/v1mig/cmpops.mjs` → 入库 `scripts/sil-opcode-normalize.mjs`）：剥离规则**逐条红队证语义中性**——(r1) dispatch 序言 `DUP <push4 tag> EQUAL IF … ELSE RETURN`：只选 entry，不触任何 require（红队：tag 碰撞/错 tag ⇒ RETURN 拒，不会放行别的 entry）；(r2) 越界检查 `SIZE <n> LESSTHAN VERIFY`：只加"拒绝"不加"通过"（红队：对合法输入必真，向量集里每条正向必须过它）；(r3) alt-stack `0x6b/0x6c` 位置：等价重排（红队：正向向量的 locals 与旧版逐字相同，如 §1 witness `enc/enc_a`）；(r4) `ROT/OVER` 替代 `DUP/OP_2`：等价栈操作（红队：同 r3）。剥离后业务段 op 序列与 pinned 修复版一致 = 辅证成立；不一致 ⇒ 逐处解释或红。
+  - **终证 = 批 D 真链**：TN12 注资尘埃 + 每 exit 路广播（同 gate (a) 卡，INCONCLUSIVE ≤3），只在正式版 + READY 后。
 - worktree 独立 `npm install`；编译器只用 `versioned-builds/silverc-v1rc1-*.exe`（禁 `target/release` 漂移，同 2026-07-08 事故硬化）。
 
 ## 6. 待 NWT 判
@@ -57,18 +63,18 @@ rc1 **不带 OP_PICK off-by-one**（行为验证，§1）⇒ 迁移**不需要**
 
 | # | 文件:行 | 现状 | 新写法（方案 B） | 形 |
 |---|---|---|---|---|
-| 1 | `_j2_closezk_repro4.sil:72` | `require(tx.time >= (attestedAtSeconds + 21600) * 1000);          // ⚠ 21600 占位, 见�` | witness 改 ms `temporal`; `+ 6 hours` | ① *1000 |
+| 1 | `_j2_closezk_repro4.sil:72` | `require(tx.time >= (attestedAtSeconds + 21600) * 1000);          // ⚠ 21600 占位, 见�` | witness 改 ms `temporal`; `+ 6 hours` | ① *1000 |
 | 2 | `docs/provenance/2026-08-29-s63a-probe-v03/S63A_TransitionProbe.sil:37` | `require(tx.time >= t_recovery);                          // parser 限  tx.time 只能 sta` | ctor `temporal t_recovery` | ③ 已 ms |
 | 3 | `docs/provenance/2026-08-29-s63a-probe-v03/S63A_TransitionProbe.sil:44` | `//    8065184 的 `require(tx.time >= e)` 降成裸 `<e> OP_CHECKLOCKTIMEVERIFY`(compile.r` | 随正文 | 注释 |
 | 4 | `docs/provenance/2026-08-29-s63a-probe-v03/S63A_TransitionProbe.sil:52` | `require(tx.time >= e);                                   // = CLTV(e)  块 DAA > tx.lockTi` | `require(tx.daa >= e)`（e = daaScore + n_probe, int） | ④ DAA 域(A′) |
 | 5 | `kasia-console/src/lib/CloseZkV2.sil:67` | `require(tx.time >= attestedAtMs + 21600000);                     // ESCAPE_GRACE_MS=216000` | witness 字段 `temporal attestedAtMs`; `+ 6 hours` | ③ 已 ms |
 | 6 | `kasia-console/src/lib/OracleStake_v1.sil:14` | `// 锁时语义 (silverc tx.time = tx.lockTime literal) ` | 随正文 | 注释 |
 | 7 | `kasia-console/src/lib/OracleStake_v1.sil:46` | `require(tx.time >= lockUntilDaa);` | `require(tx.daa >= lockUntilDaa)`（int, DAA 域） | ④ 域错误 |
-| 8 | `kasia-console/src/lib/PayoutShardV2.sil:86` | `int      new_attestedAtMs,        // 新增, witness供(self-read tx.time 经实测证实�` | — | 注释/其它 |
+| 8 | `kasia-console/src/lib/PayoutShardV2.sil:86` | `int      new_attestedAtMs,        // 新增, witness供(self-read tx.time 经实测证实�` | — | 注释/其它 |
 | 9 | `kasia-console/src/lib/PoolRoot.sil:56` | `require(tx.time >= deadline * 1000);               // post-deadline` | ctor `temporal deadlineMs`; `require(tx.time >= deadlineMs)` | ① *1000 |
-| 10 | `kasia-console/src/lib/PoolRoot.sil:144` | `require(tx.time >= (deadline + 7200) * 1000);      // deadline+grace 超时才可取消 (�` | ctor `temporal deadlineMs`; `require(tx.time >= deadlineMs + 7200 seconds)`（7200 seconds = 2 hours） | ② grace |
+| 10 | `kasia-console/src/lib/PoolRoot.sil:144` | `require(tx.time >= (deadline + 7200) * 1000);      // deadline+grace 超时才可取消 (�` | ctor `temporal deadlineMs`; `require(tx.time >= deadlineMs + 7200 seconds)`（7200 seconds = 2 hours） | ② grace |
 | 11 | `kasia-console/src/lib/PoolShard_fold.sil:130` | `require(tx.time >= deadline * 1000);               // post-deadline` | ctor `temporal deadlineMs`; `require(tx.time >= deadlineMs)` | ① *1000 |
-| 12 | `kasia-console/src/lib/PoolShard_fold.sil:216` | `require(tx.time >= (deadline + 7200) * 1000);      // deadline+grace 超时才可取消 (�` | ctor `temporal deadlineMs`; `require(tx.time >= deadlineMs + 7200 seconds)`（7200 seconds = 2 hours） | ② grace |
+| 12 | `kasia-console/src/lib/PoolShard_fold.sil:216` | `require(tx.time >= (deadline + 7200) * 1000);      // deadline+grace 超时才可取消 (�` | ctor `temporal deadlineMs`; `require(tx.time >= deadlineMs + 7200 seconds)`（7200 seconds = 2 hours） | ② grace |
 | 13 | `kasia-console/src/lib/PoolSide.sil:128` | `require(tx.time >= deadline * 1000);` | ctor `temporal deadlineMs`; `require(tx.time >= deadlineMs)` | ① *1000 |
 | 14 | `kasia-console/src/lib/PoolSide_v06.sil:263` | `require(tx.time >= (deadline + 7200) * 1000);` | ctor `temporal deadlineMs`; `require(tx.time >= deadlineMs + 7200 seconds)`（7200 seconds = 2 hours） | ② grace |
 | 15 | `kasia-console/src/lib/PoolSide_v07.sil:276` | `require(tx.time >= (deadline + 7200) * 1000);` | ctor `temporal deadlineMs`; `require(tx.time >= deadlineMs + 7200 seconds)`（7200 seconds = 2 hours） | ② grace |
@@ -93,9 +99,9 @@ rc1 **不带 OP_PICK off-by-one**（行为验证，§1）⇒ 迁移**不需要**
 | 34 | `kasia-console/src/lib/PredictionPoolUnanimous3.sil:158` | `require(tx.time >= deadline * 1000);  // bug 10d fix Path A` | ctor `temporal deadlineMs`; `require(tx.time >= deadlineMs)` | ① *1000 |
 | 35 | `kasia-console/src/lib/PredictionPoolUnanimous3.sil:184` | `require(tx.time >= deadline * 1000);  // bug 10d fix Path A` | ctor `temporal deadlineMs`; `require(tx.time >= deadlineMs)` | ① *1000 |
 | 36 | `kasia-console/src/lib/RootClose.sil:72` | `require(tx.time >= deadline_ms);                   // post-deadline (deadline_ms 已 ms)` | ctor `temporal deadline_ms`; 常量 7200000 ⇒ `2 hours` | ③ 已 ms |
-| 37 | `kasia-console/src/lib/RootClose.sil:96` | `require(tx.time >= deadline_ms + 7200000);         // deadline+grace(2h) 超时才可取�` | ctor `temporal deadline_ms`; 常量 7200000 ⇒ `2 hours` | ③ 已 ms |
+| 37 | `kasia-console/src/lib/RootClose.sil:96` | `require(tx.time >= deadline_ms + 7200000);         // deadline+grace(2h) 超时才可取�` | ctor `temporal deadline_ms`; 常量 7200000 ⇒ `2 hours` | ③ 已 ms |
 | 38 | `kasia-console/src/lib/ShardLeaf.sil:29` | `int      deadline,            // ★件1(J1)  partial-shard sweep deadline (Unix ts, ctor-` | — | 注释/其它 |
-| 39 | `kasia-console/src/lib/ShardLeaf.sil:91` | `//   ⚠ tx.time 单位=【毫秒】(链上 LANDED refund precedent p2sh.mjs L7/SS L275 �` | 随正文 | 注释 |
-| 40 | `kasia-console/src/lib/ShardLeaf.sil:93` | `//   ⚠ da9fc22 parser 限 tx.time 只能 standalone require(不能进 || 复合)→拆�` | 随正文 | 注释 |
+| 39 | `kasia-console/src/lib/ShardLeaf.sil:91` | `//   ⚠ tx.time 单位=【毫秒】(链上 LANDED refund precedent p2sh.mjs L7/SS L275 �` | 随正文 | 注释 |
+| 40 | `kasia-console/src/lib/ShardLeaf.sil:93` | `//   ⚠ da9fc22 parser 限 tx.time 只能 standalone require(不能进 || 复合)→拆�` | 随正文 | 注释 |
 | 41 | `kasia-console/src/lib/ShardLeaf.sil:94` | `//   sealed  不进 if→随时 LAND / partial  进 if→premature(tx.time < deadline*1000` | 随正文 | 注释 |
 | 42 | `kasia-console/src/lib/ShardLeaf.sil:96` | `require(tx.time >= deadline * 1000);` | ctor `temporal deadlineMs`; `require(tx.time >= deadlineMs)` | ① *1000 |
