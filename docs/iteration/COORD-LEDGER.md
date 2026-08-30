@@ -10793,3 +10793,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - 后续（J2 A/B 判读 · KANet-UI 08:4x 汇总 · READY）见 (734)。
 
 - **补记（J1 07:47Z）**：16140 由 **J1 代执行**（Owner 终端当面授权），07:41:08Z `taskkill /PID 16140 /T /F` exit 0、36 行 SUCCESS（主进程 + 35 子）；只 kill 未起，supervisor 自走 headless（无 race）。(733) "或崩、日志不分"一句作废。
+
+### (734) 2026-08-30 · A/B 早读：门有效（0.034 GB/h vs 对照 0.39–0.55）· GAP-1/2 补丁设计 v0.1 + 落码 bc194b3c 双 GREEN · 合并/激活待 Owner（不急）
+- 推送：(733)+补记 `fa51f5cb`、J2 设计 `2b84d8cb`、侧分支 `bc194b3c` 已推（未合并），队列 0。
+- **A/B（处理臂 27852，IBD 门 `c64cd0c1` 生效）**：T+8 4.1→4.3 MB；T+10 0.002 GB/h；**T+22（08:05:42Z）4.1→15.6 MB = 0.034 GB/h**，其中 07:46–07:48 一次 +11 MB boot 期抬升，之后 15.5→15.6 持平；`skip: node not synced` 每 tick、`tick: scanned=` 0 行 ⇒ **ongoing 泄漏 ≈ 0，载体归因（preprune-capture-worker）基本坐实**；对照臂 16140 跑到顶毒化 = 泄漏真、无界、4 GiB 顶实证。T+30/60/90/120 由 J2 收尾入诊断 v0.2（核 +11 MB 不复发）。
+- **GAP-1/2 补丁**：设计 `docs/2026-08-30-j2-supervisor-restart-request-and-poison-liveness-design-v0.1.md`（`2b84d8cb`）NWT GREEN + §7 三答（常数单源 4000/600 s/1 MB `scripts/console-poison-thresholds.env`；限流 1/h 保留，失败恢复走 supervisor 自身死判；毒化命中仍 3 次确认 P1≈90 s / P2≈11.5 min）。落码 `coord/j2-supervisor-restart-request` **`bc194b3c`**（只在 `scratch/_wt_sup`，live 树两脚本未动）：`kanet-console-supervisor.sh` +161/−9（`handle_restart_request()` 请求文件 `requester|nonce|utc|reason` tr 白名单、先 `.done-<utc>-<nonce>` 再 restart、重放/限流/风暴 ⇒ `.ignored`；`console_alive = poison_p1 ∨ poison_p2 ⇒ 死`：P1 签名族 7 串 + 排除式 + boot 行钉 `[db] path=` 只扫新行 + latch；P2 awk 浮点正则 `≥CAP ∧ 10 min delta<1`、PARSEFAIL LOUD、取满/起点截断旗标；lib 模式供离线向量）+ `kanet-start-headless.sh` +16/−3（`taskkill //PID //T //F` 每 pid + CIM 复核子空 LOUD；原 `:74-80 Stop-Process -Force` 无树杀实核）+ 新 `.env`。测试 26/26（Bettor 亲跑 ALL PASS 含 K1 真进程杀树；NWT 亲跑 27）+ 三突变各红（去排除式 ⇒ P1c；整数正则 ⇒ P2b/P2d；去 `//T` ⇒ K1）。**NWT impl GREEN**；非阻塞补：`reason` 缺 `moneysurface=`/`guard=` 指针时 LOUD 留痕（J2 补 R8 后出最终头）。请求文件 = step-3-only 是写方纪律（脚本无法验花钱面）。
+- 🔴 **待 Owner**：合并 live 树 + 激活。激活 = **一次提权重启 supervisor**（bootstrap 死结：console 重启不换 supervisor 码，现役 364255 旧码）。门有效 ⇒ 不急，并入下次计划维护窗；门若失效 ⇒ 下次毒化前紧急激活。
+- 后续（J2 R8 最终头 · A/B T+30/60/90/120 → 诊断 v0.2 · KANet-UI 08:4x · READY）见 (735)。
