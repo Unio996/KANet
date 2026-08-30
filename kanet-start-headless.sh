@@ -73,10 +73,24 @@ if [ "${HEADLESS_NO_KILL:-0}" != "1" ]; then
 
   for port in $CONSOLE_PORT; do
     PIDS=$(powershell -Command "
-      (Get-NetTCPConnection -LocalPort $port -ErrorAction SilentlyContinue).OwningProcess | Sort-Object -Unique
+      ((Get-NetTCPConnection -LocalPort $port -ErrorAction SilentlyContinue).OwningProcess | Sort-Object -Unique) -join ','
     " 2>/dev/null | tr -d '\r\n ' || true)
     if [ -n "$PIDS" ]; then
+      # 杀树(2026-08-30 J2, 设计稿 §2.3, NWT ③): 上面的 pidfile SIGTERM 是优雅路(console shutdown()→stopAllRelays());
+      # 若 console 卡在毒化态(8/30 04:27Z 形: 主循环活、链读层坏、relay 子等 IPC 超时)不走 shutdown, 旧的
+      # Stop-Process 只杀父 ⇒ 35 个 relay 子孤儿(8/23 前老病, kanet-stop.sh:23 早已用 //T)。改: 先 taskkill //T //F
+      # 杀整棵树, 再 Stop-Process 兜底, 最后 CIM 复核子进程为空, 非空 LOUD 不静默。
+      for p in ${PIDS//,/ }; do
+        taskkill //PID "$p" //T //F >/dev/null 2>&1 || true
+      done
       powershell -Command "Stop-Process -Id $PIDS -Force -ErrorAction SilentlyContinue" 2>/dev/null || true
+      sleep 2
+      for p in ${PIDS//,/ }; do
+        orphans=$(powershell -Command "(Get-CimInstance Win32_Process -Filter \"ParentProcessId=$p\" -ErrorAction SilentlyContinue | Measure-Object).Count" 2>/dev/null | tr -d '\r\n ' || echo '?')
+        if [ "$orphans" != "0" ]; then
+          echo "[headless] LOUD: pid $p still has ${orphans} child process(es) after tree kill — orphan relay children likely, check Get-CimInstance Win32_Process -Filter ParentProcessId=$p"
+        fi
+      done
     fi
   done
   sleep 1

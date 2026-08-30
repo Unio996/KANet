@@ -19,8 +19,14 @@
 
 set -euo pipefail
 
-cd "$(dirname "$0")/.."
-KANET_ROOT="$(pwd)"
+# lib 模式(2026-08-30 J2, 只供离线向量测试 source 本文件取函数): KANET_SUPERVISOR_LIB_ONLY=1 时不 cd、
+# 不进末尾 case(见文件尾 guard), KANET_ROOT 由调用方给(指向临时目录); 生产路径(无该 env)与此前逐字相同。
+if [[ "${KANET_SUPERVISOR_LIB_ONLY:-0}" == "1" ]]; then
+  KANET_ROOT="${KANET_ROOT:?KANET_ROOT required in lib mode}"
+else
+  cd "$(dirname "$0")/.."
+  KANET_ROOT="$(pwd)"
+fi
 LOG="$KANET_ROOT/logs/console-supervisor.log"
 PID_FILE="$KANET_ROOT/logs/pids/console-supervisor.pid"
 RESTART_HISTORY="$KANET_ROOT/logs/console-supervisor-restarts.log"
@@ -71,11 +77,149 @@ heartbeat_fresh() {
   (( hb_age >= 0 && hb_age <= 10 ))
 }
 
-console_alive() {
+http_or_heartbeat_alive() {
   if curl -sf --max-time 5 "http://127.0.0.1:${CONSOLE_PORT}/" > /dev/null 2>&1; then
     return 0
   fi
   heartbeat_fresh
+}
+
+# ── GAP-1 毒化判活 (2026-08-30 J2 · docs/2026-08-30-j2-supervisor-restart-request-and-poison-liveness-design-v0.1.md §3 · NWT GREEN) ──
+# 8/30 04:27Z 实录: console 撞 wasm 4 GiB 顶后进程活/HTTP 200/心跳 0–1 s, 链读层全坏, 本 supervisor 3.2 h 不判死。
+# P1 = console.log 本实例 boot 行之后出现 wasm 毒化签名族(排除 settle-daemon 业务行 `unreachable=` 与 relay 转发行);
+# P2 = 最新 heap-sample wasmBytes >= WASM_CAPPED_MB 且 WASM_FROZEN_WINDOW_SEC 内变化 < WASM_FROZEN_DELTA_MB(grow 失败后冻结)。
+# 任一命中 ⇒ console_alive 返 1 ⇒ 走既有 3 次确认 + 风暴保护(NWT §7③: 不做即刻)。
+# J1 05:56Z 三坑: ① wasmBytes 是 `3373.1MB` 浮点+后缀, 正则 `([0-9.]+)MB` 且解析失败 ≠ 安全(LOUD);
+# ② 取样上限 N / 实取 M 都打出来, M>=N 打旗标, 冻结起点若为窗口第一条 ⇒ 起点被截; ③ "不变"只读行内 at=/wasmBytes=, 禁 mtime/size。
+CONSOLE_LOG="$KANET_ROOT/logs/console.log"
+THRESHOLDS_FILE="$KANET_ROOT/scripts/console-poison-thresholds.env"   # 单源(NWT §7①): 与 KANet-UI 盯守同一份数字
+read_threshold() {  # read_threshold KEY DEFAULT — 只 grep 数字 key, 不 source; 非数字 ⇒ 默认值 + LOUD
+  local key="$1" def="$2" v=""
+  [[ -f "$THRESHOLDS_FILE" ]] && v="$(grep -E "^${key}=" "$THRESHOLDS_FILE" 2>/dev/null | tail -1 | cut -d= -f2 | tr -d '[:space:]\r' || true)"
+  if [[ "$v" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then echo "$v"; else log "[poison] threshold $key unreadable ('${v}') in $THRESHOLDS_FILE — using default $def"; echo "$def"; fi
+}
+WASM_CAPPED_MB="$(read_threshold WASM_CAPPED_MB 4000)"
+WASM_FROZEN_WINDOW_SEC="$(read_threshold WASM_FROZEN_WINDOW_SEC 600)"
+WASM_FROZEN_DELTA_MB="$(read_threshold WASM_FROZEN_DELTA_MB 1)"
+POISON_SIG_RE='unreachable executed|RuntimeError|memory\.grow|RangeError.*(wasm|WebAssembly)|wasm panic|memory access out of bounds|could not allocate'   # 用 grep -i 匹配(V8 打 "WebAssembly.Memory.grow()")
+POISON_EXCLUDE_RE='unreachable=|^\[relay:'
+POISON_SAMPLE_N=15            # heap-sample 每 ≈60 s 一行; 窗口 600 s 需 ≥11 条, 15 留余量
+POISON_EVIDENCE=""            # 命中时由 poison_p1/p2 写入(不走 $(..) 子壳, 否则状态丢)
+_poison_boot_line=0           # 本实例 boot 行(console.log 最后一个 `[db] path=`)
+_poison_last_line=0           # 已扫到的行号: 只数新行(NWT (a)), 命中后 latch 到本实例换代
+_poison_p1_latched=""
+
+poison_p1() {
+  [[ -f "$CONSOLE_LOG" ]] || return 1
+  local boot total
+  boot="$(grep -a -n '^\[db\] path=' "$CONSOLE_LOG" 2>/dev/null | tail -1 | cut -d: -f1 || true)"; boot="${boot:-1}"
+  total="$(wc -l < "$CONSOLE_LOG" 2>/dev/null || echo 0)"
+  if (( boot != _poison_boot_line )) || (( total < _poison_last_line )); then   # 新实例 / 日志被截断 ⇒ 重置
+    _poison_boot_line=$boot; _poison_last_line=$(( boot - 1 )); _poison_p1_latched=""
+  fi
+  if [[ -n "$_poison_p1_latched" ]]; then POISON_EVIDENCE="$_poison_p1_latched"; return 0; fi
+  local start=$(( _poison_last_line + 1 )); (( start < boot )) && start=$boot
+  local hit=""
+  if (( total >= start )); then
+    hit="$(sed -n "${start},${total}p" "$CONSOLE_LOG" | grep -a -i -E "$POISON_SIG_RE" | grep -a -v -E "$POISON_EXCLUDE_RE" | head -1 || true)"
+  fi
+  _poison_last_line=$total
+  if [[ -n "$hit" ]]; then
+    _poison_p1_latched="P1 line>${start} ${hit:0:120}"; POISON_EVIDENCE="$_poison_p1_latched"; return 0
+  fi
+  return 1
+}
+
+poison_p2() {
+  [[ -f "$CONSOLE_LOG" ]] || return 1
+  local out
+  out="$(grep -a 'diag:heap-sample' "$CONSOLE_LOG" 2>/dev/null | tail -n "$POISON_SAMPLE_N" | awk -v N="$POISON_SAMPLE_N" -v CAP="$WASM_CAPPED_MB" -v WIN="$WASM_FROZEN_WINDOW_SEC" -v DELTA="$WASM_FROZEN_DELTA_MB" '
+    function iso2epoch(s,   y,mo,d,h,mi,se) { y=substr(s,1,4); mo=substr(s,6,2); d=substr(s,9,2); h=substr(s,12,2); mi=substr(s,15,2); se=substr(s,18,2); return mktime(y" "mo" "d" "h" "mi" "se) }
+    {
+      if (match($0,/at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}/) == 0) next
+      t=iso2epoch(substr($0,RSTART+3,19))
+      if (match($0,/wasmBytes=[0-9]+(\.[0-9]+)?MB/) == 0) { bad++; next }      # 坑①: 浮点+后缀; 不匹配=解析失败, 不是 0
+      w=substr($0,RSTART+10,RLENGTH-12)+0
+      n++; T[n]=t; W[n]=w
+    }
+    END {
+      if (bad>0) { printf "PARSEFAIL bad=%d\n", bad; exit }
+      if (n==0) { print "NOSAMPLE"; exit }
+      last=W[n]; tl=T[n]; ref=-1
+      for (i=n-1;i>=1;i--) if (T[i] <= tl-WIN) { ref=i; break }
+      flag=(n>=N)?" cap-reached(N="N")":""
+      if (ref<0) { printf "INSUFFICIENT samples=%d/%d span=%ds wasm=%.1f%s\n", n, N, tl-T[1], last, flag; exit }
+      d=W[n]-W[ref]; if (d<0) d=-d
+      if (last>=CAP && d<DELTA) {
+        # 坑②: 冻结起点 = 连续 >=CAP 段的首样本; 若它就是窗口第一条 ⇒ 起点被截(真实更久), 打旗不静默
+        o=n; while (o>1 && W[o-1]>=CAP) o--
+        origin=(o==1)?" origin-truncated":""
+        printf "POISONED wasm=%.1fMB frozen_for>=%ds delta=%.2fMB samples=%d/%d%s%s\n", last, tl-T[o], d, n, N, flag, origin; exit }
+      printf "OK wasm=%.1fMB delta=%.2fMB/%ds samples=%d/%d%s\n", last, d, tl-T[ref], n, N, flag
+    }' 2>/dev/null || true)"
+  case "$out" in
+    POISONED*) POISON_EVIDENCE="P2 ${out#POISONED }"; return 0 ;;
+    PARSEFAIL*) log "[poison] P2 heap-sample parse failure ($out) — NOT treated as safe; fix regex/instrument"; return 1 ;;
+    *) return 1 ;;
+  esac
+}
+
+console_alive() {
+  if poison_p1; then log "POISON: $POISON_EVIDENCE"; return 1; fi
+  if poison_p2; then log "POISON: $POISON_EVIDENCE"; return 1; fi
+  http_or_heartbeat_alive
+}
+
+# ── GAP-2 请求重启入口 (设计稿 §2 · NWT: step-3-only / cooldown 内只 1 次 / nonce 防重放 / 先 rename 再 restart) ──
+# 非提权会话只写 logs/console-restart-request 一行 `requester|nonce|utc|reason`(先写 .tmp 再 mv 原子);
+# 文件语义 = "step-1/2(花钱面 CLEAN + 停守卫)已由请求方核过, 执行 step-3 kill" —— 本脚本不核 ①②, 也不能被借来跳序。
+# 文件内容只读字段、不 source、不 eval、不拼进命令; 伪造后果上界 = 一次 headless 重启(有界、可审计)。
+RESTART_REQUEST="$KANET_ROOT/logs/console-restart-request"
+RESTART_REQUEST_MIN_GAP_SEC=${KANET_SUPERVISOR_REQUEST_MIN_GAP_SEC:-3600}   # cooldown 内只处理 1 个请求(NWT ①, §7②)
+IN_COOL_DOWN_UNTIL=0   # 风暴保护 cool-down 截止(原 run_supervisor 局部变量, 请求路径也要看它, 故提全局)
+
+record_request() {
+  mkdir -p "$(dirname "$RESTART_HISTORY")"
+  echo "$(date +%s) $(date -u '+%Y-%m-%dT%H:%M:%SZ') request" >> "$RESTART_HISTORY"
+}
+last_request_epoch() {
+  [[ -f "$RESTART_HISTORY" ]] || { echo 0; return; }
+  awk '$3=="request"{e=$1} END{print e+0}' "$RESTART_HISTORY"
+}
+_request_park() {  # _request_park <suffix> — 请求文件改名(先于任何动作: write-ahead)
+  mv -f "$RESTART_REQUEST" "$RESTART_REQUEST.$1" 2>/dev/null || rm -f "$RESTART_REQUEST"
+}
+
+handle_restart_request() {  # 返 0 = 本 tick 执行了一次请求重启
+  [[ -f "$RESTART_REQUEST" ]] || return 1
+  local line requester nonce when reason utc safe_nonce now last recent
+  line="$(head -c 512 "$RESTART_REQUEST" 2>/dev/null | head -1 | tr -d '\r' || true)"
+  IFS='|' read -r requester nonce when reason <<< "$line"
+  requester="$(printf '%s' "${requester:-?}" | tr -cd 'A-Za-z0-9_.-' | cut -c1-32)"
+  safe_nonce="$(printf '%s' "${nonce:-none}" | tr -cd 'A-Za-z0-9_-' | cut -c1-32)"; safe_nonce="${safe_nonce:-none}"
+  when="$(printf '%s' "${when:-?}" | tr -cd 'A-Za-z0-9:TZ.-' | cut -c1-32)"
+  reason="$(printf '%s' "${reason:-?}" | tr -d '\n' | cut -c1-200)"
+  utc="$(date -u +%Y%m%dT%H%M%SZ)"
+  now=$(date +%s)
+  if compgen -G "$RESTART_REQUEST.done-*-$safe_nonce" > /dev/null; then
+    log "restart-request IGNORED (replay nonce=$safe_nonce) requester=$requester"; _request_park "ignored-$utc-$safe_nonce"; return 1
+  fi
+  last=$(last_request_epoch)
+  if (( now - last < RESTART_REQUEST_MIN_GAP_SEC )); then
+    log "restart-request IGNORED (rate-limit: 1 per ${RESTART_REQUEST_MIN_GAP_SEC}s, last=$(( now - last ))s ago) requester=$requester nonce=$safe_nonce"; _request_park "ignored-$utc-$safe_nonce"; return 1
+  fi
+  if (( now < IN_COOL_DOWN_UNTIL )); then
+    log "restart-request IGNORED (storm cool-down, $(( IN_COOL_DOWN_UNTIL - now ))s remain) requester=$requester nonce=$safe_nonce"; _request_park "ignored-$utc-$safe_nonce"; return 1
+  fi
+  recent=$(count_recent_restarts)
+  if (( recent >= RESTART_MAX_IN_WINDOW )); then
+    log "restart-request IGNORED (${recent} restarts in last ${RESTART_WINDOW_SEC}s) requester=$requester nonce=$safe_nonce"; _request_park "ignored-$utc-$safe_nonce"; return 1
+  fi
+  log "restart-request ACCEPTED requester=$requester nonce=$safe_nonce requested_at=$when reason=$reason"
+  _request_park "done-$utc-$safe_nonce"       # 先 rename(write-ahead), 再动作: 动作若带走本进程, 下次 tick 不重复触发
+  record_request
+  restart_console || true
+  return 0
 }
 
 count_recent_restarts() {
@@ -142,23 +286,25 @@ restart_console() {
 run_supervisor() {
   echo $$ > "$PID_FILE"
   log "supervisor start pid=$$ check_interval=${CHECK_INTERVAL_SEC}s fail_threshold=${HEALTH_FAIL_THRESHOLD} restart_window=${RESTART_WINDOW_SEC}s max_restarts=${RESTART_MAX_IN_WINDOW} cool_down=${COOL_DOWN_SEC}s"
+  log "poison-liveness armed: cap=${WASM_CAPPED_MB}MB window=${WASM_FROZEN_WINDOW_SEC}s delta<${WASM_FROZEN_DELTA_MB}MB; restart-request file=${RESTART_REQUEST} min_gap=${RESTART_REQUEST_MIN_GAP_SEC}s"
   local consecutive_fail=0
-  local in_cool_down_until=0
   while true; do
-    if console_alive; then
+    if handle_restart_request; then          # GAP-2: 请求重启优先于判活(请求方已做 step-1/2)
+      consecutive_fail=0
+    elif console_alive; then
       consecutive_fail=0
     else
       consecutive_fail=$(( consecutive_fail + 1 ))
       log "health fail #${consecutive_fail}/${HEALTH_FAIL_THRESHOLD}"
       if (( consecutive_fail >= HEALTH_FAIL_THRESHOLD )); then
         local now=$(date +%s)
-        if (( now < in_cool_down_until )); then
-          local remain=$(( in_cool_down_until - now ))
+        if (( now < IN_COOL_DOWN_UNTIL )); then
+          local remain=$(( IN_COOL_DOWN_UNTIL - now ))
           log "in cool-down period (${remain}s remain), skip restart"
         else
           local recent=$(count_recent_restarts)
           if (( recent >= RESTART_MAX_IN_WINDOW )); then
-            in_cool_down_until=$(( now + COOL_DOWN_SEC ))
+            IN_COOL_DOWN_UNTIL=$(( now + COOL_DOWN_SEC ))
             log "RESTART STORM: ${recent} restarts in last ${RESTART_WINDOW_SEC}s — enter ${COOL_DOWN_SEC}s cool-down"
           else
             restart_console || true
@@ -170,6 +316,9 @@ run_supervisor() {
     sleep "$CHECK_INTERVAL_SEC"
   done
 }
+
+# lib 模式: 只定义函数, 不进 case(离线向量测试 source 本文件; 见文件头)
+if [[ "${KANET_SUPERVISOR_LIB_ONLY:-0}" == "1" ]]; then return 0 2>/dev/null || exit 0; fi
 
 case "${1:-start}" in
   start)
