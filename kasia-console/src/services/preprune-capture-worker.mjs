@@ -129,6 +129,19 @@ export async function _readNodeSynced({ rpcFactory } = {}) {
   }
 }
 
+// 缓存版门(2026-08-30 J2, 门下沉到 captureSideLockDaa 用, docs/2026-08-30-j2-console-ibd-memory-growth-diagnosis.md §9.3②):
+// 叶子函数每 side 调一次(kr5l4 一 tick 589 次), 门若每次 new RpcClient 就变成自己要治的泄漏(kaspa-wasm RpcClient
+// 构造器级 ~11–18 KB/实例不回收) ⇒ 判定缓存 TTL 30 s, 一 tick 内至多建 1 个客户端。同一份 _readNodeSynced, 不复制第二份判定。
+let _syncedCache = { ts: 0, gate: null };
+export async function isNodeSyncedCached({ ttlMs = 30_000, readFn = _readNodeSynced, now = Date.now } = {}) {
+  const t = now();
+  if (_syncedCache.gate && (t - _syncedCache.ts) < ttlMs) return { ..._syncedCache.gate, cached: true };
+  const gate = await readFn();
+  _syncedCache = { ts: t, gate };
+  return { ...gate, cached: false };
+}
+export function _resetNodeSyncedCache() { _syncedCache = { ts: 0, gate: null }; }
+
 // deps 只供 regression case 注入(preprune-capture-worker-ibd-gate.test.mjs); 生产路径 setInterval(_tick) 不传参 ⇒ 全默认。
 export async function _tick(deps = {}) {
   if (_running) return { skipped: 'reentrant' };
