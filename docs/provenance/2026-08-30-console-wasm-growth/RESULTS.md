@@ -72,3 +72,24 @@ iter 1: +0.4 (heap 310) | iter 2..8: +0.0/+0.1/+0.0/+0.0/+0.0/+0.1/+0.0 (heap 11
 - `[rpc-health] local node TCP ok but data check failed: timeout` × 3（L2623/2625/2627）。
 
 复核：`cd docs/provenance/2026-08-30-console-wasm-growth && sha256sum -c MANIFEST.sha256`；重跑任一脚本需本机 kaspad `:17210`（只读）。
+
+## 11. v0.2 残余源实验（门生效实例 27852，08:1x–08:2xZ）
+- `conn_sampler.txt`：nohup 每 ~5 s 采主进程(27852)→:17210 ESTABLISHED 与全机 TIME_WAIT；propose 爆发 08:22:36–39 期间 est 1→2→1、tw 0（无建连爆发）。
+- `wasm_connburst.mjs`（100 次 new RpcClient→connect→disconnect）：`N=100 ok=100 fail=0 elapsed=141ms wasm 3.9->5.6 MB (+1.75, 17.9 KB/client)`；gc 后第二轮 `+1.50 MB`。
+- `wasm_rpcclient_free.mjs`（每臂 100 个 × 3 轮，轮间 gc）：`A no-free connect+disconnect: +1.75 +1.50 +1.50` / `B free(): +1.50 +1.56 +1.56` / `C 只构造不 connect: +1.25 +1.13` / `D 构造+free: +1.00 +1.13`（MB）⇒ RpcClient 构造器级泄漏 ~11–18 KB/实例，disconnect/free/GC 皆不回收。
+- `wasm_bigscript.mjs`（ScriptBuilder P2SH 大脚本 + 碎片化探针）：2 KB–1 MB 脚本 5 次后 gc 再 5 次均 +0.0（可复用）；交错持有 2000 个小对象后大块再 +3.0、gc 后 +0.0。
+- 门后台阶（heap-sample/lag 行，秒级）：07:54:05–07:55:07 +10.9 / 08:08:17–08:09:05 +10.0 / 08:22:35–08:22:45 +10.2 MB；events 表 propose 爆发 07:54:53–57 / 08:08:41–44 / 08:22:36–39。
+
+## 12. `rpc_concurrency.mjs`（单例设计依据，08:3xZ）
+```
+A concurrent x50 on one client: ok=50 fail=0 7ms wasm=4.1
+B response order for 20 parallel getBlockDagInfo: 0,1,...,19 (1ms)
+C call after disconnect: RPC Server (remote error) -> WebSocket -> WebSocket is not connected
+C reconnect same instance then call: ok; isConnected=true
+D props: isConnected=true url=ws://127.0.0.1:17210
+```
+
+## 13. `wasm_shared_vs_percall.mjs`（批 1 验收依据，08:5xZ）
+```
+N=1000 mixed calls | per-call new RpcClient: wasm +17.44 MB (17.9 KB/call) 1482 ms | shared one instance: wasm +0.19 MB (0.19 KB/call) 649 ms
+```

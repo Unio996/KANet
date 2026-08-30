@@ -1,6 +1,7 @@
 # J2 · console 主进程 IBD 期内存增长 只读诊断（2026-08-30）
 
-> **Status**: DRAFT v0.1 · 给 NWT 审 · 未 commit · Bettor 派工 2026-08-29 23:47Z（只读、不改码、不重启、不碰 watchdog/supervisor）
+> **Status**: CURRENT v0.2（v0.1 NWT GREEN；v0.2 = §9 A/B T+8…T+120 全表 + 残余源根因 + 修法落码指针，2026-08-30 09:44Z 定稿）· Bettor 派工 2026-08-29 23:47Z（只读、不改码、不重启、不碰 watchdog/supervisor）
+> **v0.2 一句话**：A/B 坐实 preprune worker 是主载体（门后斜率 0.39–0.55 → ~0.05 GB/h）；残余 ~10 MB/14 min = zk judge-propose tick 经 `buildProposeCloseRequestV2:265 → recaptureSideLockDaaForMarket → captureSideLockDaa` 每 tick `new RpcClient` ×602；**根因 = kaspa-wasm 1.1.0 `RpcClient` 构造器级泄漏 ~11–18 KB/实例（disconnect/free/GC 皆不回收，隔离三臂实测）**，全仓 ≥20 处 per-call `new RpcClient` 都在慢慢漏；§4.2 当年"RpcClient 生命周期阴性"是量级误判，已在 §9.2 改判。
 > **对象**: `:3200` console 主进程 pid **16140**（2026-08-29 18:56Z 由 supervisor 拉起）· 方法 = `docs/kanet-investigation-methodology.md` 第 0–6 层
 > **一句话**: 涨的**不是 JS 堆、不是 relay 子进程、不是 RPC 连接数**，是 **kaspa-wasm 线性内存**（`__wasm.memory.buffer.byteLength`）——单调、阶跃式（每 6–31 min 一个 15–45 MB 台阶）、0.39→0.46 GB/h；该内存 **硬顶 4 GiB**（wasm32、模块未声明 max）且**只增不减**；撞顶 = `memory.grow` 失败 = Rust panic `unreachable` = 实例毒化（8/05 劣化签名）。**READY（~91 h）前必须有序重启，且不止一次**：以 **wasmBytes 阈值**驱动（≥3.2 GB 起动），按现斜率首次 ≈ **02:40Z 8/30**，之后每 ≈6–7 h 一次。
 > **台阶的载体（时序指认，机制未闭合）**：`preprune-capture-worker`（`index.js:861` 无条件启动、无开关）每 tick 对 177 个 `side_lock_daa IS NULL` 的盘各做一次主进程内 **最多 10,000 次 `getBlock({includeTransactions:true})` 反向 walk**（`trade-protocol-filter.js:1219-1233`），一 tick ≈ 9–12 min、≈1.77M 次 RPC、IBD 期 `recaptured=0` 结构性必败；**22 个台阶全部落在该 tick 结束行之后 0–3.4 min**（§4.5）。它是主进程里唯一量级够大的 wasm 流量（其余周期路径合计 <1k 次/tick）。**但**同形在隔离进程逐字复现 8 轮（含压堆 388 MB + `--max-old-space-size=4096`）仅 +0.4 MB 持平 ⇒ 增长是它与 console 内其它状态的相互作用，只读手段到此为止；闭合机制需 in-situ 差分埋点或一次 A/B（§8）。
@@ -116,6 +117,36 @@ worker：`kasia-console/src/services/preprune-capture-worker.mjs`（`TICK_MS=60 
 3. `rpc-health.js checkLocal` 超时路径补 `disconnect()`（一行，§5.2）。
 4. `preprune-capture-worker` / zk judge-propose 两处加"覆盖外或 IBD 期直接 skip"的 pre-gate（设计项，走审；同时解决 relay 侧每 12 min 6 次 250k walk）。
 5. 独立进程未跑完的一形：`serializeToSafeJSON` 需 `utxo` 条目的 tx（脚本待补），预期仍为 KB 级。
+
+## 9. v0.2 · A/B 结果 + 残余源（2026-08-30 07:43Z 起，IBD 门 `c64cd0c1` 装载于 console 27852）
+
+### 9.1 A/B（处理臂 = 门生效实例；对照臂 = 16140，0.39–0.55 GB/h）
+| 时点 | wasmBytes | 斜率（自 boot） | `skip: node not synced` | `tick: scanned=` |
+|---|---|---|---|---|
+| T+8 (07:51Z) | 4.3 MB | 0.002 GB/h | 9（每 tick） | 0 |
+| T+22 (08:05Z) | 15.6 MB | 0.034 GB/h | 23 | 0 |
+| T+30 (08:11Z) | 25.8 MB | 0.051 GB/h | 29 | 0 |
+| T+45 (08:26Z) | 36.4 MB | 0.048 GB/h | 43 | 0 |
+| T+60 (08:42Z) | 46.8 MB | 0.045 GB/h | 59 | 0 |
+| T+90 (09:14Z) | 67.9 MB | **0.042 GB/h** | 91 | 0 |
+| T+120 (09:44Z) | 88.8 MB | **0.042 GB/h** | 121 | 0 |
+
+台阶（heap-sample 秒级）：07:54 +10.9 / 08:08 +10.0 / 08:22 +10.2 / 08:36 +10.1 / 08:50 +10.2 / 09:04 +10.1 / 09:18 +10.1 / 09:32 +10.1 —— 恒 ~10 MB、恒 ~14 min、每次落在 zk judge-propose 尾部的 5 个 propose 事件窗内（§9.2）。**A/B 定案**：处理臂 0.042 GB/h vs 对照臂 0.39–0.55 ⇒ 门砍 ~89–92%，preprune worker = 主载体坐实；残余 = §9.2 根因（每 tick 602 个 RpcClient），已由 `coord/j2-capture-sidelock-ibd-gate`（e12e8ac4）+ `coord/j2-rpc-shared-batch1`（ca4a852d）落码待合并。
+
+判读：门砍掉 ~88–91%（0.39–0.55 → ~0.05 GB/h）⇒ **preprune worker 是主载体（坐实）**；残余不是零底噪，而是**离散台阶 ~10 MB / ~14 min**（07:54:05–55:07 +10.9、08:08:17–09:05 +10.0、08:22:35–22:45 +10.2）+ 底噪 ~0.04 MB/min。按残余斜率门控实例 ~80 h 到 4 GiB，与 READY 基准同量级 ⇒ READY 前仍需一次有序重启（NWT 口径）。
+
+### 9.2 残余源（只读，同法：时序富集 + 隔离复现）
+- **时序**：三次台阶都恰包住 zk judge-propose tick 尾的 5 个 `zkJudgeProposeTick_propose` 事件（`events` 表 07:54:53–57 / 08:08:41–44 / 08:22:36–39，tick ≈14 min）；窗内非常驻共现仅 ethers `JsonRpcProvider failed to detect network` ×2（UMA judge，同 tick 尾）。nohup 连接采样器（每 5 s）：爆发期主进程 → :17210 只 +1 ESTABLISHED、TIME_WAIT 0 ⇒ 不是 walk。
+- **路径**：`bshard-close-transport.mjs:265 buildProposeCloseRequestV2 → recaptureSideLockDaaForMarket(每 shard) → captureSideLockDaa`（`trade-protocol-filter.js:1189 new RpcClient` 每个 NULL side 一个）。**IBD 门只盖 preprune worker，不盖此调用方。** 候选 `45-kr5l4` 589 NULL sides（22 shards）+ `9jaty` 4 + `j34vb` 8 + `9ez2u` 1 = **602 次 `new RpcClient` / tick**。它在 ≤2 s 内跑完：本地 connect 1.4 ms/次（隔离 100 次 141 ms）；索引锚点（`spc_daa_index` @deadline_daa，数月前）已剪裁 ⇒ `getBlock` 立刻抛 ⇒ `rpc-fail` ⇒ 永远 `recaptured=0`，每 tick 重来。
+- 🔴 **根因（隔离实测，`wasm_rpcclient_free.mjs`）**：kaspa-wasm 1.1.0 **`new RpcClient()` 每实例永久占 wasm 线性内存 ~11–18 KB**——100 个 connect+disconnect 三轮 +1.75/+1.50/+1.50 MB（gc 后不复用）；**加 `.free()`** +1.50/+1.56/+1.56；**只构造不 connect** +1.25/+1.13；构造+free +1.00/+1.13 ⇒ 构造器级泄漏，disconnect / free / GC 皆不回收。602 × ~17 KB ≈ 10.3 MB = 台阶。
+- **回头改判 §4.2**：当时"RpcClient 生命周期 15 次 +0.3 MB = 阴性"是量级误判（20 KB/个在 15 个上只 0.3 MB，且未做 gc 后复用臂）。老实例 15–45 MB 台阶 = preprune worker 每 tick 对上千 NULL side 各建一个 RpcClient（不是 walk 本身）；底噪 = 每分钟建客户端的 faucet-health / rpc-health 等。**全仓 ≥20 处 `new RpcClient` 全是"每调一次新建一个"。**
+- **不成立的候选**：coherence gate（`payout_redeem_hex` 8282 B，每盘一次 P2SH，≈0）；ScriptBuilder/Address 对象（gc 后复用 +0）；connect/walk 本身（阴性）。
+
+### 9.3 修法方向（不动手，另报备）
+1. 通用：per-call `new RpcClient` → 进程内共享单例（同 `bshard-settle-daemon.mjs:74 _rpc` 惯例，出错才重建），覆盖 `captureSideLockDaa` / `faucet-utxo-health` / `rpc-health.checkLocal` / `tg-wallet` / `pool.js` / `oracle-pool*` / `trade-protocol-filter` 等。
+2. 立竿见影：`recaptureSideLockDaaForMarket`（或 `captureSideLockDaa`）同吃 IBD 门；"锚点块已剪裁 ⇒ 结构性不可达"写 `side_lock_daa_unrecoverable` 免每 tick 重来（同 preprune worker `_hasBeenMarkedUnrecoverable` 判据）。
+3. 上游：kaspa-wasm RpcClient 构造器泄漏 —— 核更新版本是否已修 / 提 issue（附 `wasm_rpcclient_free.mjs` 复现）。
+4. 观测：per-tick `[diag:wasm-delta]` 仍值得装（§8②）以守回归。
 
 ## 附：证据文件
 - `logs/console.log`（当前进程，重启即截断）：`[diag:heap-sample]` 178 行、`[diag:eventloop-lag]` 1.6k 行、`[utxo-fetch-probe]` 746 行。

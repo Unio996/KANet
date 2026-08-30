@@ -67,7 +67,8 @@ export function sharedRpcStats() { return [..._pool.values()].map(e => ({ key, c
 - 突变对照（每站点一条）：把 `getSharedRpc` 换回 `new RpcClient` ⇒ 构造计数断言红。
 
 ## 6. 风险与不做的
-- **共享连接的故障域**：一条连接坏 ⇒ 所有站点同时报 not-connected ⇒ 由模块统一重连（同实例），比现在"每站点各自 new + 各自漏"更可观测；风险 = 重连期间并发调用全部失败一轮（≤5 s），调用方本就有各自超时/重试语义。
+- **共享连接的故障域**（NWT/Bettor 终审口径）：一条连接坏 ⇒ 所有站点同时报 not-connected ⇒ 由模块统一重连（同实例，`connect()` 5 s 超时，一轮）。**批 1 十站点全是 cron / 探针 / 只读展示**（60 s–5 min 节拍或 HTTP 展示），丢一轮 = 下个 tick 补、页面一次 null/503，可容忍；**批 2 钱路站点每个都要核自己的 timeout/retry 能吸收这 ≤5 s 重连窗**（例：`oracle-pool-renewal` 到账轮询 10 s 间隔 ×N 次 → 吸收；`pool.js` 下注核验单次 → 失败即拒单，需确认拒单可重试而非误判"无 UTXO"），逐站点写进批 2 迁移表再落码。比现在"每站点各自 new + 各自漏 + 各自超时路径漏 disconnect"更可观测（`sharedRpcStats()` 一处看全）。
+- **批 1 实测**（`docs/provenance/2026-08-30-console-wasm-growth/wasm_shared_vs_percall.mjs`）：1000 次混合调用 per-call `new RpcClient` **+17.44 MB**（17.9 KB/次）vs 共享单实例 **+0.19 MB**（0.19 KB/次），耗时 1482 → 649 ms。落码 = `coord/j2-rpc-shared-batch1`（base `e12e8ac4`）。
 - **不做**：连接池/多实例轮转（没有并发瓶颈：50 路并发 7 ms）；per-call `free()`（实测无效）；等上游修（v2.0.1 未修，且换 kaspa-wasm 版本 = 全仓回归）。
 - **wasm 毒化仍需换进程**：单例消灭的是"慢涨到顶"，不是"trap 毒化"；GAP-1 判死保留。
 
