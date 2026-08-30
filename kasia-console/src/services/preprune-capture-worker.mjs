@@ -92,10 +92,65 @@ function _markUnrecoverableIfBeyondFloor(logicalMarket, stillNullCount) {
   );
 }
 
-export async function _tick() {
+// ── IBD 门(2026-08-30, J2, Bettor 批 · docs/2026-08-30-j2-console-ibd-memory-growth-diagnosis.md §4.5/§8①) ──
+// 为什么: IBD 期本 worker 结构性必败(177 盘 × ≤10k getBlock 反向 walk/tick ≈ 1.77M 次主进程内 RPC, 9–12 min
+// 一 tick, recaptured 恒 0; 22/22 个 kaspa-wasm 线性内存台阶紧随其 tick 边界; 该内存 4 GiB 硬顶只增不减),
+// 且 IBD 期链读本就不可信(memory reference-ibd-period-chain-reads-return-empty-not-error)。
+// 门 = 权威源 `getServerInfo().isSynced === true` 才跑(同 scratch/_step0_gate.mjs:80/84 与 KANet-UI D 行;
+// 🔴 不用 getBlockDagInfo().isSynced —— 实测 undefined ⇒ 永 false)。读不到(null/非 boolean/异常/无 RPC URL)
+// ⇒ **skip, fail-closed**(IBD 期宁可不跑)。不加 env 开关(避免多一个会被遗忘的配置): READY 后自动恢复, 零行为差异。
+// 形状镜像 bshard-settle-daemon.mjs:553 pre-gate(先判再跑, 一行日志说明为什么没跑) + faucet-utxo-health.mjs:49-58
+// 的 RpcClient 生命周期(race 超时 + finally disconnect, 不留连接)。
+// skip 时仍写 heartbeat(scanned=0): preprune-capture-monitor.mjs:12 STALE_THRESHOLD=3 min 判的是"挂死", 故意不跑≠挂死。
+const _withTimeout = (p, ms, tag) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(`${tag} timeout ${ms}ms`)), ms))]);
+const GATE_RPC_TIMEOUT_MS = 4000;
+
+export async function _readNodeSynced({ rpcFactory } = {}) {
+  let rpc = null;
+  try {
+    if (rpcFactory) {
+      rpc = await rpcFactory();
+    } else {
+      const { getWorkingRpc } = await import('./rpc-health.js');
+      const { url } = await getWorkingRpc();
+      if (!url) return { synced: false, isSynced: null, reason: 'no-rpc-url' };
+      const { RpcClient, Encoding } = await import('kaspa-wasm');
+      rpc = new RpcClient({ url, encoding: Encoding.Borsh, networkId: process.env.KASPA_NETWORK || 'testnet-12' });
+    }
+    await _withTimeout(rpc.connect({}), GATE_RPC_TIMEOUT_MS, 'connect');
+    const info = await _withTimeout(rpc.getServerInfo(), GATE_RPC_TIMEOUT_MS, 'getServerInfo');
+    const v = info?.isSynced;
+    if (v === true) return { synced: true, isSynced: true, reason: 'ok' };
+    return { synced: false, isSynced: typeof v === 'boolean' ? v : null, reason: typeof v === 'boolean' ? 'not-synced' : `isSynced-unreadable(${v === undefined ? 'undefined' : String(v)})` };
+  } catch (e) {
+    return { synced: false, isSynced: null, reason: `rpc-fail: ${e.message}` };
+  } finally {
+    try { await rpc?.disconnect?.(); } catch { /* 门只读, 断连失败不影响判定(已 fail-closed) */ }
+  }
+}
+
+// deps 只供 regression case 注入(preprune-capture-worker-ibd-gate.test.mjs); 生产路径 setInterval(_tick) 不传参 ⇒ 全默认。
+export async function _tick(deps = {}) {
   if (_running) return { skipped: 'reentrant' };
   _running = true;
   try {
+    const gate = await (deps.readNodeSynced || _readNodeSynced)();
+    if (gate.synced !== true) {
+      console.log(`[preprune-capture-worker] skip: node not synced (isSynced=${gate.isSynced}${gate.reason && gate.reason !== 'not-synced' ? `, ${gate.reason}` : ''})`);
+      try { (deps.writeHeartbeat || _writeHeartbeat)(0, 0); } catch (e) { console.warn(`[preprune-capture-worker] heartbeat write fail on skip (non-fatal): ${e.message}`); }
+      return { skipped: 'node-not-synced', isSynced: gate.isSynced, reason: gate.reason };
+    }
+    return await (deps.runBody || _tickBody)();
+  } catch (e) {
+    console.warn(`[preprune-capture-worker] tick error (non-fatal): ${e.message}`);
+    return { error: e.message };
+  } finally {
+    _running = false;
+  }
+}
+
+async function _tickBody() {
+  {
     const { recaptureSideLockDaaForMarket } = await import('./pool-market-settler-v06.mjs');
     const nullMarketIds = sqlite.prepare(`SELECT DISTINCT market_id FROM pool_bettor_sides WHERE side_lock_daa IS NULL`).all().map(r => r.market_id);
 
@@ -119,15 +174,10 @@ export async function _tick() {
     _writeHeartbeat(scanned, recaptured);
     if (scanned > 0) console.log(`[preprune-capture-worker] tick: scanned=${scanned} market(s) w/ NULL side_lock_daa, recaptured=${recaptured}`);
     return { scanned, recaptured };
-  } catch (e) {
-    console.warn(`[preprune-capture-worker] tick error (non-fatal): ${e.message}`);
-    return { error: e.message };
-  } finally {
-    _running = false;
   }
 }
 
-export { _hasBeenMarkedUnrecoverable, _markUnrecoverableIfBeyondFloor, _coverageFloor, _resolveLogicalMarket };
+export { _hasBeenMarkedUnrecoverable, _markUnrecoverableIfBeyondFloor, _coverageFloor, _resolveLogicalMarket, _writeHeartbeat };
 
 export function startPrepruneCaptureWorker() {
   if (_interval) return;
