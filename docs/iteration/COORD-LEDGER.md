@@ -10834,3 +10834,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **J1 12:15Z**：Owner 原话「节点只在远端跑。这里先把节点全部停了。把内存释放出来。」——younio 本机 kaspad + KANet 栈全部停机（J1 令下执行）；顺带存量巡检发现两个 bridge（`channel-bridge`/`cc-bridge`）**端口写错空转 7.9 天**（规则 80 附注形态第 N 例），停之无妨碍。`ram-check.ps1` 与基线不受影响，明天装内存后照跑。
 - **前提更新**：① younio 第二 vantage（`M_reorg`/`W_dis` two-vantage 数据源）**暂无**，相关证据项继续 OPEN；② younio 所有 daa 闸/READY 估计作废（本就作废）；③ J1 常驻职责 C 暂停，A/B 不变；④ da9 READY 判定不受影响（两信号都在 da9）。
 - 后续（Owner 拍维护窗 · READY）见 (740)。
+
+### (740) 2026-08-30 · da9 IBD 慢的根因（J1 13:17Z）：196 ms RTT × 串行请求，本地无可调项；唯一杠杆 = 同步节点靠近对端
+- 推送：(739) `12f139b0`、J1 `e43eac42` 已推。
+- **J1 完整定位（Owner 追问"太慢了，查！修！"）**：RTT 196 ms（ping ×8，195–199 极稳）到对端 `136.243.93.17`（Hetzner 德国，da9 在 UTC+7 跨洲）；kaspad IBD 块下载是"请求—等待—收—再请求"串行，在途 ≈1.8 KB ≈ 3 块/往返 ⇒ 5 往返/s × 3 = **15 块/s = 实测块速**；本地 CPU/磁盘/内存/带宽四项全闲（带宽用 0.05%）；peers 数与速度无关（自证否）；已在唯一健康对端上不能换；`kaspad --help` 无 IBD 流水线深度开关（`--ram-scale=3.0` 已设、`--async-threads` 24、rocksdb 项皆缓存向）⇒ **加内存/换盘/加 CPU 一点用都没有**；不存在"本该更快却慢了"的缺陷。**唯一杠杆 = 缩短 RTT**：同步节点放到对端同区域（EU VPS 同步后搬库，RTT 1–10 ms 理论快 20–200×）。不动基础设施 ⇒ 余 **2.45 天【下界·不含停滞·轮次法 26 样本/19.8 h】**，READY 基准 9/2–9/3 不变。
+- Bettor：这是 Owner 决策项（花钱/基础设施），不派工；若 Owner 选 EU VPS，J1 出搬库 runbook（剪裁/归档语义见 memory `reference-tn12-pruning-wall-and-archival-semantics`）。
+- 后续（Owner 拍：维护窗 · 是否 EU VPS · READY）见 (741)。
