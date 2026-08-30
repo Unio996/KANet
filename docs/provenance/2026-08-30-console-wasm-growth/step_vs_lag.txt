@@ -1,0 +1,165 @@
+19:10:24 dWasm=  10.8 lagN= 15 lagSum=106323 
+19:12:53 dWasm=   0.8 lagN= 23 lagSum= 87120 
+19:15:37 dWasm=   1.2 lagN= 26 lagSum= 99186 
+19:20:12 dWasm=   4.0 lagN= 33 lagSum=144359 
+19:22:19 dWasm=  13.0 lagN= 15 lagSum= 62818 
+19:23:55 dWasm=   1.4 lagN=  7 lagSum= 30653 
+19:25:22 dWasm=   2.2 lagN=  5 lagSum= 23899 
+19:32:25 dWasm=  45.4 lagN= 70 lagSum=289292 STEP
+19:33:45 dWasm=  11.9 lagN=  5 lagSum= 17630 
+19:35:14 dWasm=   1.9 lagN=  8 lagSum= 24204 
+19:36:31 dWasm=   2.7 lagN=  5 lagSum= 15986 
+19:40:01 dWasm=   4.4 lagN= 24 lagSum= 81299 
+19:43:48 dWasm=  13.0 lagN= 29 lagSum= 98106 
+19:45:59 dWasm=  45.5 lagN= 14 lagSum= 65160 STEP
+19:47:22 dWasm=   1.1 lagN=  6 lagSum= 20426 
+19:49:03 dWasm=   2.2 lagN= 10 lagSum= 38725 
+19:50:50 dWasm=   2.4 lagN= 10 lagSum= 41414 
+19:52:10 dWasm=   3.1 lagN=  6 lagSum= 16527 
+19:55:05 dWasm=   4.3 lagN= 14 lagSum= 46718 
+19:56:08 dWasm=  19.7 lagN=  1 lagSum=  1051 
+19:57:30 dWasm=  37.3 lagN=  4 lagSum= 17709 STEP
+19:58:42 dWasm=   1.5 lagN=  2 lagSum=  8444 
+20:00:09 dWasm=   2.8 lagN=  7 lagSum= 22792 
+20:01:42 dWasm=   2.0 lagN=  8 lagSum= 27160 
+20:03:19 dWasm=   3.2 lagN=  7 lagSum= 31891 
+20:04:41 dWasm=   1.6 lagN=  6 lagSum= 21576 
+20:06:26 dWasm=  16.5 lagN= 12 lagSum= 42468 
+20:08:57 dWasm=  38.2 lagN= 24 lagSum= 80324 STEP
+20:10:43 dWasm=   3.1 lagN=  8 lagSum= 40955 
+20:12:16 dWasm=   1.2 lagN= 10 lagSum= 29652 
+20:13:55 dWasm=   3.6 lagN=  9 lagSum= 33714 
+20:15:31 dWasm=   3.2 lagN= 11 lagSum= 33388 
+20:16:41 dWasm=   1.9 lagN=  3 lagSum=  6702 
+20:17:44 dWasm=  12.9 lagN=  2 lagSum=  2240 
+20:19:02 dWasm=  35.6 lagN=  4 lagSum= 15639 STEP
+20:20:13 dWasm=   1.2 lagN=  4 lagSum=  8881 
+20:21:37 dWasm=  12.4 lagN=  5 lagSum= 19477 
+20:23:14 dWasm=   2.5 lagN= 10 lagSum= 32667 
+20:24:39 dWasm=   3.3 lagN=  8 lagSum= 22414 
+20:25:55 dWasm=   1.3 lagN=  3 lagSum= 12293 
+20:27:14 dWasm=  12.7 lagN=  4 lagSum= 15367 
+20:29:41 dWasm=  33.5 lagN= 27 lagSum= 80833 STEP
+20:31:32 dWasm=   3.1 lagN= 10 lagSum= 48051 
+20:32:55 dWasm=  11.6 lagN=  8 lagSum= 21189 
+20:35:55 dWasm=   6.1 lagN= 18 lagSum= 50895 
+20:37:09 dWasm=   1.9 lagN=  3 lagSum=  9765 
+20:38:44 dWasm=   2.2 lagN= 10 lagSum= 29914 
+20:41:01 dWasm=  10.0 lagN= 21 lagSum= 70366 
+20:43:48 dWasm=  37.6 lagN= 12 lagSum= 39067 STEP
+20:45:01 dWasm=  12.5 lagN=  3 lagSum= 10716 
+20:46:10 dWasm=   3.0 lagN=  2 lagSum=  4854 
+20:47:15 dWasm=   3.5 lagN=  1 lagSum=  3107 
+20:48:36 dWasm=   1.5 lagN=  7 lagSum= 17755 
+20:50:16 dWasm=  28.3 lagN=  9 lagSum= 31985 STEP
+20:52:26 dWasm=  18.9 lagN= 18 lagSum= 63988 
+20:55:16 dWasm=   3.7 lagN= 14 lagSum= 41675 
+20:56:35 dWasm=  13.4 lagN=  6 lagSum= 17081 
+20:57:56 dWasm=   3.4 lagN=  5 lagSum= 17255 
+20:59:14 dWasm=   1.1 lagN=  4 lagSum= 14016 
+21:00:25 dWasm=  11.3 lagN=  2 lagSum=  8057 
+21:01:44 dWasm=  36.0 lagN=  3 lagSum= 14446 STEP
+21:03:01 dWasm=   1.1 lagN=  6 lagSum= 16610 
+21:04:20 dWasm=   2.6 lagN=  6 lagSum= 17919 
+21:05:42 dWasm=   3.0 lagN=  6 lagSum= 18635 
+21:07:03 dWasm=   3.7 lagN=  4 lagSum= 18598 
+21:08:20 dWasm=  12.5 lagN=  6 lagSum= 15209 
+21:13:14 dWasm=  46.4 lagN= 49 lagSum=165926 STEP
+21:14:28 dWasm=   1.1 lagN=  4 lagSum= 11941 
+21:15:51 dWasm=   3.3 lagN=  7 lagSum= 20371 
+21:18:55 dWasm=   5.7 lagN= 17 lagSum= 52195 
+21:20:23 dWasm=  12.1 lagN=  8 lagSum= 23354 
+21:21:51 dWasm=  46.4 lagN=  6 lagSum= 24909 STEP
+21:23:06 dWasm=   1.3 lagN=  5 lagSum= 12919 
+21:24:24 dWasm=   3.2 lagN=  7 lagSum= 16374 
+21:25:43 dWasm=   2.3 lagN=  7 lagSum= 18340 
+21:27:22 dWasm=   3.6 lagN= 12 lagSum= 35588 
+21:28:42 dWasm=   1.2 lagN=  6 lagSum= 15300 
+21:29:54 dWasm=  11.9 lagN=  4 lagSum= 10219 
+21:34:01 dWasm=  36.7 lagN= 33 lagSum=117001 STEP
+21:35:23 dWasm=  12.4 lagN=  5 lagSum= 18233 
+21:36:31 dWasm=   3.0 lagN=  2 lagSum=  6834 
+21:37:49 dWasm=   3.9 lagN=  7 lagSum= 16861 
+21:38:56 dWasm=   1.8 lagN=  2 lagSum=  5638 
+21:40:03 dWasm=  11.3 lagN=  2 lagSum=  4626 
+21:42:06 dWasm=  33.3 lagN= 19 lagSum= 58624 STEP
+21:44:03 dWasm=   3.1 lagN= 11 lagSum= 53791 
+21:45:27 dWasm=   2.0 lagN=  6 lagSum= 20592 
+21:46:45 dWasm=   2.9 lagN=  6 lagSum= 16433 
+21:48:25 dWasm=  13.8 lagN= 11 lagSum= 33383 
+21:49:43 dWasm=   1.5 lagN=  4 lagSum= 13789 
+21:51:27 dWasm=  12.5 lagN= 13 lagSum= 39300 
+21:55:53 dWasm=  35.6 lagN= 41 lagSum=137912 STEP
+21:57:12 dWasm=   1.7 lagN=  5 lagSum= 15447 
+21:58:51 dWasm=   3.7 lagN= 11 lagSum= 33775 
+22:00:07 dWasm=  14.1 lagN=  5 lagSum= 13551 
+22:01:10 dWasm=   1.9 lagN=  0 lagSum=     0 
+22:02:16 dWasm=  45.3 lagN=  1 lagSum=  3350 STEP
+22:03:55 dWasm=   3.2 lagN=  8 lagSum= 34648 
+22:06:46 dWasm=   4.8 lagN= 16 lagSum= 45356 
+22:09:51 dWasm=   5.3 lagN= 20 lagSum= 56124 
+22:10:57 dWasm=  18.3 lagN=  1 lagSum=  3375 
+22:12:15 dWasm=  40.6 lagN=  2 lagSum= 13367 STEP
+22:13:26 dWasm=   2.3 lagN=  3 lagSum=  8453 
+22:16:03 dWasm=   7.0 lagN= 12 lagSum= 32908 
+22:17:24 dWasm=   1.7 lagN=  6 lagSum= 17987 
+22:19:55 dWasm=  20.6 lagN= 30 lagSum= 83459 STEP
+22:24:28 dWasm=  37.9 lagN= 44 lagSum=141883 STEP
+22:25:41 dWasm=   2.3 lagN=  5 lagSum=  9934 
+22:28:21 dWasm=   6.7 lagN= 12 lagSum= 33936 
+22:29:25 dWasm=  11.5 lagN=  1 lagSum=  1141 
+22:30:35 dWasm=  35.0 lagN=  3 lagSum=  8598 STEP
+22:32:05 dWasm=   3.1 lagN=  6 lagSum= 26351 
+22:33:33 dWasm=   2.5 lagN=  8 lagSum= 25422 
+22:35:07 dWasm=   2.6 lagN=  9 lagSum= 28236 
+22:36:22 dWasm=   4.2 lagN=  4 lagSum= 12003 
+22:37:41 dWasm=  12.1 lagN=  5 lagSum= 16251 
+22:42:57 dWasm=  48.0 lagN= 37 lagSum=121216 STEP
+22:44:28 dWasm=   3.1 lagN=  9 lagSum= 26434 
+22:45:43 dWasm=   2.4 lagN=  4 lagSum= 12065 
+22:46:51 dWasm=   3.7 lagN=  2 lagSum=  6345 
+22:48:03 dWasm=  12.7 lagN=  3 lagSum=  8665 
+22:50:03 dWasm=  43.3 lagN= 17 lagSum= 50128 STEP
+22:51:53 dWasm=   3.1 lagN= 11 lagSum= 45403 
+22:53:27 dWasm=   2.1 lagN= 10 lagSum= 31133 
+22:54:52 dWasm=   2.8 lagN=  7 lagSum= 21148 
+22:55:59 dWasm=   4.6 lagN=  2 lagSum=  6457 
+22:57:02 dWasm=   2.5 lagN=  1 lagSum=  1845 
+22:59:51 dWasm=  47.4 lagN= 10 lagSum= 43007 STEP
+23:00:54 dWasm=  14.3 lagN=  1 lagSum=  1065 
+23:02:00 dWasm=   4.0 lagN=  1 lagSum=  3474 
+23:03:01 dWasm=   2.1 lagN=  0 lagSum=     0 
+23:05:25 dWasm=  48.7 lagN=  4 lagSum= 17433 STEP
+23:06:43 dWasm=   2.7 lagN=  6 lagSum= 15319 
+23:08:13 dWasm=   2.8 lagN=  9 lagSum= 25905 
+23:09:47 dWasm=   3.5 lagN= 10 lagSum= 30166 
+23:11:09 dWasm=   2.6 lagN=  7 lagSum= 19477 
+23:13:23 dWasm=  30.4 lagN= 23 lagSum= 67485 STEP
+23:15:30 dWasm=  26.3 lagN= 15 lagSum= 61311 STEP
+23:16:32 dWasm=   2.7 lagN=  0 lagSum=     0 
+23:17:34 dWasm=   3.3 lagN=  0 lagSum=     0 
+23:18:39 dWasm=   3.8 lagN=  1 lagSum=  1875 
+23:19:44 dWasm=  13.2 lagN=  2 lagSum=  2770 
+23:21:15 dWasm=  35.9 lagN=  7 lagSum= 26752 STEP
+23:22:30 dWasm=   1.6 lagN=  5 lagSum= 13996 
+23:24:03 dWasm=   3.5 lagN= 10 lagSum= 27571 
+23:25:43 dWasm=   3.0 lagN= 10 lagSum= 36730 
+23:26:48 dWasm=  13.2 lagN=  2 lagSum=  4848 
+23:27:50 dWasm=  11.7 lagN=  0 lagSum=     0 
+23:29:10 dWasm=  36.0 lagN=  4 lagSum= 16106 STEP
+23:30:48 dWasm=   1.5 lagN=  5 lagSum= 36119 
+23:32:14 dWasm=   3.7 lagN=  7 lagSum= 22807 
+23:33:50 dWasm=   3.7 lagN= 13 lagSum= 34220 
+23:35:18 dWasm=   1.6 lagN=  8 lagSum= 23113 
+23:36:45 dWasm=  44.1 lagN=  7 lagSum= 21911 STEP
+23:38:32 dWasm=   4.9 lagN=  9 lagSum= 41043 
+23:39:57 dWasm=  12.6 lagN=  8 lagSum= 21472 
+23:41:17 dWasm=   3.2 lagN=  6 lagSum= 17824 
+23:42:41 dWasm=   3.4 lagN=  7 lagSum= 19412 
+23:44:02 dWasm=   2.6 lagN=  7 lagSum= 18936 
+23:45:28 dWasm=  46.6 lagN=  3 lagSum= 19808 STEP
+23:46:38 dWasm=   1.4 lagN=  2 lagSum=  6782 
+23:47:58 dWasm=   3.7 lagN=  7 lagSum= 19248 
+23:50:53 dWasm=  16.0 lagN= 18 lagSum= 47541 
+23:52:44 dWasm=  11.9 lagN= 13 lagSum= 43698 
+23:56:06 dWasm=  36.1 lagN= 23 lagSum= 72349 STEP
