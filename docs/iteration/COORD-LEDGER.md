@@ -10791,3 +10791,5 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **守卫重挂 07:44:45Z**（pid 364337，72 h 有界、curl≥600 s / 端口 >90 s 自停）+ 专用存活文件 `logs/hb_guard-alive.txt`（KANet-UI `618c26e1` 起 guardAlive 读它，真 Y）；`consoleHbAge/Stalls` 读心跳内容不变。
 - 监视：`:3200` owner 变化持久监视（基线 27852）；READY/wasm 盯守照旧（WARN 3000 / ACT 3200 / CRIT 3800 / CAPPED 4000）。下次重启若需，路径仍只有 Owner 提权（结构缺口见 (732)）。
 - 后续（J2 A/B 判读 · KANet-UI 08:4x 汇总 · READY）见 (734)。
+
+- **补记（J1 07:47Z）**：16140 由 **J1 代执行**（Owner 终端当面授权），07:41:08Z `taskkill /PID 16140 /T /F` exit 0、36 行 SUCCESS（主进程 + 35 子）；只 kill 未起，supervisor 自走 headless（无 race）。(733) "或崩、日志不分"一句作废。
