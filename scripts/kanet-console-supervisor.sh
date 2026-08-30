@@ -215,6 +215,10 @@ handle_restart_request() {  # 返 0 = 本 tick 执行了一次请求重启
   if (( recent >= RESTART_MAX_IN_WINDOW )); then
     log "restart-request IGNORED (${recent} restarts in last ${RESTART_WINDOW_SEC}s) requester=$requester nonce=$safe_nonce"; _request_park "ignored-$utc-$safe_nonce"; return 1
   fi
+  # step-1/2 证据指针只留痕不拦(NWT 终审补): reason 里应有 moneysurface=… 与 guard=…; 缺 ⇒ LOUD 一行, 仍执行(文件语义 = 请求方对 ①② 负责)
+  if [[ "$reason" != *moneysurface=* || "$reason" != *guard=* ]]; then
+    log "[supervisor] LOUD: restart-request without step-1/2 attestation (reason lacks moneysurface=/guard=) requester=$requester nonce=$safe_nonce reason=$reason"
+  fi
   log "restart-request ACCEPTED requester=$requester nonce=$safe_nonce requested_at=$when reason=$reason"
   _request_park "done-$utc-$safe_nonce"       # 先 rename(write-ahead), 再动作: 动作若带走本进程, 下次 tick 不重复触发
   record_request
