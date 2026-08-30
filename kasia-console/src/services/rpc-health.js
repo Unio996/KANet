@@ -63,20 +63,19 @@ async function checkLocal() {
   if (!await tcpPing('127.0.0.1', LOCAL_PORT, 2000)) return false;
 
   // TCP 通了，验证数据完整性
+  // 共享客户端(2026-08-30 J2 批 1, ../lib/kaspa-rpc-shared.mjs): 原每次 new RpcClient 且超时路径漏 disconnect(8/29 实例 3 条泄漏 ESTABLISHED,
+  // 诊断 v0.2 §5.2) —— 现取共享实例(内部 5 s 连接超时), 不 disconnect; 超时/断连交 noteSharedRpcError 分类后同实例重连。
+  let rpc = null;
   try {
-    const kaspa = await import('kaspa-wasm');
-    const { RpcClient, Encoding } = kaspa;
-    const rpc = new RpcClient({ url: LOCAL_RPC, encoding: Encoding.Borsh, networkId: LOCAL_NETWORK });
-    await Promise.race([
-      rpc.connect({}),
-      new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 3000)),
-    ]);
-
-    const info = await Promise.race([
-      rpc.getBlockDagInfo(),
-      new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 3000)),
-    ]);
-    await rpc.disconnect();
+    const { getSharedRpc, noteSharedRpcError } = await import('../lib/kaspa-rpc-shared.mjs');
+    rpc = await getSharedRpc({ url: LOCAL_RPC, networkId: LOCAL_NETWORK });
+    let info;
+    try {
+      info = await Promise.race([
+        rpc.getBlockDagInfo(),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 3000)),
+      ]);
+    } catch (e) { await noteSharedRpcError(rpc, e); throw e; }
 
     const blockCount = Number(info?.blockCount || 0);
     const headerCount = Number(info?.headerCount || 0);

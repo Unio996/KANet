@@ -37,16 +37,18 @@ const CUSTODIAL_RELAY_ID = () => process.env.CUSTODIAL_RELAY_ID || null;
 async function balanceKasForAddress(address) {
   const { url: rpcUrl } = await getWorkingRpc();
   if (!rpcUrl) return null;
-  const kaspa = await import('kaspa-wasm');
-  const { RpcClient, Encoding, Address } = kaspa;
-  const rpc = new RpcClient({ url: rpcUrl, encoding: Encoding.Borsh, networkId: NETWORK });
+  // 共享客户端(2026-08-30 J2 批 1, ../lib/kaspa-rpc-shared.mjs): 原每次余额查询 new RpcClient+disconnect = 构造器级泄漏 ~17 KB/次。
+  let rpc = null;
   try {
-    await Promise.race([rpc.connect({}), new Promise((_, rej) => setTimeout(() => rej(new Error('RPC connect timeout')), 3000))]);
-    const { entries } = await rpc.getUtxosByAddresses([new Address(address)]);
-    const sompi = (entries || []).reduce((s, e) => s + BigInt(e.amount ?? e.utxoEntry?.amount ?? 0), 0n);
-    return Number(sompi) / 1e8;
+    const { Address } = await import('kaspa-wasm');
+    const { getSharedRpc, noteSharedRpcError } = await import('../lib/kaspa-rpc-shared.mjs');
+    rpc = await getSharedRpc({ url: rpcUrl, networkId: NETWORK });
+    try {
+      const { entries } = await rpc.getUtxosByAddresses([new Address(address)]);
+      const sompi = (entries || []).reduce((s, e) => s + BigInt(e.amount ?? e.utxoEntry?.amount ?? 0), 0n);
+      return Number(sompi) / 1e8;
+    } catch (e) { await noteSharedRpcError(rpc, e); return null; }
   } catch { return null; }
-  finally { try { await rpc.disconnect(); } catch {} }
 }
 
 export async function registerTgWalletRoutes(fastify) {

@@ -106,26 +106,28 @@ const _withTimeout = (p, ms, tag) => Promise.race([p, new Promise((_, rej) => se
 const GATE_RPC_TIMEOUT_MS = 4000;
 
 export async function _readNodeSynced({ rpcFactory } = {}) {
-  let rpc = null;
+  let rpc = null, owned = false;
   try {
     if (rpcFactory) {
-      rpc = await rpcFactory();
+      rpc = await rpcFactory(); owned = true;   // 测试注入: 自建自断
+      await _withTimeout(rpc.connect({}), GATE_RPC_TIMEOUT_MS, 'connect');
     } else {
+      // 共享客户端(2026-08-30 J2 批 1, ../lib/kaspa-rpc-shared.mjs): 门自己原本每 60 s new RpcClient = 它要治的泄漏; 现取共享实例, 不 disconnect。
       const { getWorkingRpc } = await import('./rpc-health.js');
       const { url } = await getWorkingRpc();
       if (!url) return { synced: false, isSynced: null, reason: 'no-rpc-url' };
-      const { RpcClient, Encoding } = await import('kaspa-wasm');
-      rpc = new RpcClient({ url, encoding: Encoding.Borsh, networkId: process.env.KASPA_NETWORK || 'testnet-12' });
+      const { getSharedRpc } = await import('../lib/kaspa-rpc-shared.mjs');
+      rpc = await getSharedRpc({ url, networkId: process.env.KASPA_NETWORK || 'testnet-12' });
     }
-    await _withTimeout(rpc.connect({}), GATE_RPC_TIMEOUT_MS, 'connect');
     const info = await _withTimeout(rpc.getServerInfo(), GATE_RPC_TIMEOUT_MS, 'getServerInfo');
     const v = info?.isSynced;
     if (v === true) return { synced: true, isSynced: true, reason: 'ok' };
     return { synced: false, isSynced: typeof v === 'boolean' ? v : null, reason: typeof v === 'boolean' ? 'not-synced' : `isSynced-unreadable(${v === undefined ? 'undefined' : String(v)})` };
   } catch (e) {
+    if (rpc && !owned) { try { const { noteSharedRpcError } = await import('../lib/kaspa-rpc-shared.mjs'); await noteSharedRpcError(rpc, e); } catch {} }
     return { synced: false, isSynced: null, reason: `rpc-fail: ${e.message}` };
   } finally {
-    try { await rpc?.disconnect?.(); } catch { /* 门只读, 断连失败不影响判定(已 fail-closed) */ }
+    if (owned) { try { await rpc?.disconnect?.(); } catch { /* 门只读, 断连失败不影响判定(已 fail-closed) */ } }
   }
 }
 

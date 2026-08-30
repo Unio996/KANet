@@ -495,14 +495,10 @@ export async function registerChainDataRoutes(fastify) {
       const { url: rpcUrl } = await getWorkingRpc();
       if (!rpcUrl) return reply.code(503).send({ error: 'No RPC node available' });
 
-      const kaspa = await import('kaspa-wasm');
-      const { RpcClient, Encoding } = kaspa;
+      // 共享客户端(2026-08-30 J2 批 1, ../lib/kaspa-rpc-shared.mjs): 原每次 HTTP 查询 new RpcClient+disconnect = 构造器级泄漏 ~17 KB/次。
       const networkId = process.env.KASPA_NETWORK || 'mainnet';
-      const rpc = new RpcClient({ url: rpcUrl, encoding: Encoding.Borsh, networkId });
-      await Promise.race([
-        rpc.connect({}),
-        new Promise((_, rej) => setTimeout(() => rej(new Error('RPC connect timeout')), 5000)),
-      ]);
+      const { getSharedRpc, noteSharedRpcError } = await import('../lib/kaspa-rpc-shared.mjs');
+      const rpc = await getSharedRpc({ url: rpcUrl, networkId });
 
       // Query mempool first, then try block acceptance
       let tx = null;
@@ -512,9 +508,7 @@ export async function registerChainDataRoutes(fastify) {
           new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 5000)),
         ]);
         tx = entry?.transaction;
-      } catch {}
-
-      await rpc.disconnect();
+      } catch (e) { await noteSharedRpcError(rpc, e); }
 
       // Also check local DB for context
       const localEvent = sqlite.prepare(

@@ -10,16 +10,15 @@ const STARTUP_GRACE_MS = 60 * 1000;
 let timer = null;
 let running = false;
 
+// 共享客户端(2026-08-30 J2 批 1, ../lib/kaspa-rpc-shared.mjs): 原每 5 min tick 两次 new RpcClient+disconnect = 构造器级泄漏 ~17 KB/次;
+// 现两处都取同一共享实例, 不 disconnect; 断连类错误交 noteSharedRpcError 分类(同实例下次重连)。
 async function _getCurrentDaa(rpcUrl, networkId) {
-  const { RpcClient, Encoding } = await import('kaspa-wasm');
-  const rpc = new RpcClient({ url: rpcUrl, encoding: Encoding.Borsh, networkId });
-  await rpc.connect();
+  const { getSharedRpc, noteSharedRpcError } = await import('../lib/kaspa-rpc-shared.mjs');
+  const rpc = await getSharedRpc({ url: rpcUrl, networkId });
   try {
     const dag = await rpc.getBlockDagInfo();
     return Number(dag.virtualDaaScore);
-  } finally {
-    try { await rpc.disconnect(); } catch {}
-  }
+  } catch (e) { await noteSharedRpcError(rpc, e); throw e; }
 }
 
 export async function oraclePoolScannerTick() {
@@ -36,16 +35,13 @@ export async function oraclePoolScannerTick() {
       return { ok: false, error: 'currentDaa not finite' };
     }
 
-    const { RpcClient, Encoding } = await import('kaspa-wasm');
-    const rpc = new RpcClient({ url: rpcUrl, encoding: Encoding.Borsh, networkId });
-    await rpc.connect();
+    const { getSharedRpc, noteSharedRpcError } = await import('../lib/kaspa-rpc-shared.mjs');
+    const rpc = await getSharedRpc({ url: rpcUrl, networkId });
     try {
       const result = await scanAndDerivePool({ rpc, networkId, currentDaa });
       console.log(`[oracle-pool-scanner-cron] tick: snapshotDaa=${result.snapshotDaa} poolSize=${result.poolSize} merkleRoot=${result.merkleRoot.slice(0,12)} (scanned=${result.scanned}/valid=${result.valid}/rejected=${result.rejected}${result.fromCache ? ' cached' : ''})`);
       return { ok: true, ...result };
-    } finally {
-      try { await rpc.disconnect(); } catch {}
-    }
+    } catch (e) { await noteSharedRpcError(rpc, e); throw e; }
   } catch (e) {
     console.error(`[oracle-pool-scanner-cron] tick fail: ${e.message}`);
     return { ok: false, error: e.message };
