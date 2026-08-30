@@ -3,7 +3,7 @@
 // Bettor r211 v3 oracle 设计:
 //   - Path D: maker 自选 oracle as P2P primitive (= oracle 是 first-class KANet user role)
 //   - 5 J1tn-* (testnet Phase 3a) all is_oracle=1, oracle_capabilities=["kanet_ai_consensus_v1"]
-//   - 3-of-5 multi-sig SS escrow (= PredictionEscrowMulti.sil, .109 compile/deploy)
+//   - escrow = PredictionEscrowUnanimous5.sil 5-of-5 unanimous (prediction-escrow-ss.mjs:33 SIL_SOURCE / :142 contract_name 硬断言); 早期设想的 3-of-5 PredictionEscrowMulti 从未实现(silverc 无 checkMultiSig, 源文件已移除 2026-08-30)
 //
 // J1 #318 PB consensus:
 //   - PB-B: kanet_oracle_vote_v1 JSON schema + evidence_hash (= sha256 of fetched evidence)

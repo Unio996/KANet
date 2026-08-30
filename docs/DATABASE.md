@@ -285,7 +285,7 @@
 
 **写入方**：relay API（用户配置）、bettor-prediction-voter.js (v124 oracle 字段)
 **读取方**：mind-manager.js、health API、几乎所有 Agent 操作、bettor.js publish (v124 is_oracle + isRelayAlive)、bettor-prediction-voter.js cron tick
-**v124 r211 v3 oracle 字段意义**：Path D 设计 = maker 在 publish 时自选 oracle relay_id（必满足 `is_oracle=1` + `isRelayAlive()` PB-A 实现）。Phase 3a MVP 5 J1tn-* (Alice/Bob/Carol/Dave/Eve) 全 `is_oracle=1` + `oracle_capabilities=["kanet_ai_consensus_v1"]`，3-of-5 multi-sig quorum 走 `PredictionEscrowMulti.sil`。
+**v124 r211 v3 oracle 字段意义**：Path D 设计 = maker 在 publish 时自选 oracle relay_id（必满足 `is_oracle=1` + `isRelayAlive()` PB-A 实现）。Phase 3a MVP 5 J1tn-* (Alice/Bob/Carol/Dave/Eve) 全 `is_oracle=1` + `oracle_capabilities=["kanet_ai_consensus_v1"]`，Phase 3a 设想的 3-of-5 multi-sig 从未实现（silverc 无 `checkMultiSig`，`PredictionEscrowMulti.sil` 已于 2026-08-30 移除），实际托管 = `PredictionEscrowUnanimous5.sil` 5-of-5 unanimous，见 `prediction-escrow-ss.mjs:33/:142`。
 
 ---
 
