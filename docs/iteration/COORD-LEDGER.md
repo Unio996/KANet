@@ -10783,3 +10783,11 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **纠错两条**：KANet-UI "supervisor 04:2x 判死 4 次空转"= `grep "T04:"` 未钉日期匹配 6/13、8/6、8/10 历史行，已撤回（memory：日志 grep 须钉日期窗）；J1 "撞顶让 supervisor 判死"= 撞顶≠判死，已纠。
 - 🔴 **结构缺口（backlog，报备→NWT→维护窗）**：① 团队没有任何自动化会话能对 SYSTEM console 做有序重启——supervisor 只会"判死后重启"且判活只看 HTTP，对 wasm 毒化盲；需要一个 **SYSTEM 侧的"请求重启"入口**（如 supervisor 轮询一个 restart-request 文件 / 计划任务 `Run` 权限下放）+ 判活加"wasm 毒化签名/链读探针"；② 根治 = J2 IBD 门 `c64cd0c1` 已在 live 树（这次重启即 A/B 处理臂）+ 台阶源修复；③ guardAlive 改读守卫专用文件 `logs/hb_guard-alive.txt`（KANet-UI `618c26e1`，守卫脚本已加）。
 - 后续（Owner 提权 kill → supervisor headless → verify → 重挂守卫 → A/B 读数给 J2/NWT · READY）见 (733)。
+
+### (733) 2026-08-30 · console 重启完成 07:43Z（16140 → 27852）· IBD 门生效 = A/B 处理臂开跑 · verify 六项全绿 · 守卫重挂
+- 推送：(732) `6e1f3059`、J1 `a259f807` 已推。
+- **触发**：07:41:16Z `:3200` 消失（16140 被杀——Owner 提权 kill 或崩，日志不分）→ supervisor `07:41:35 fail#1 / 07:42:08 #2 / 07:42:40 #3 → Console death detected → headless` → 新 console **27852**（07:43:19Z，supervisor pid 364255）。僵持总计 02:24→07:41Z ≈ 5.3 h（其中撞顶毒化 04:27→07:41Z ≈ 3.2 h，IBD 期无花钱面损失）。
+- **verify（Bettor `orderly_restart.sh verify` + KANet-UI 07:45Z）**：owner 27852 ≠ 16140 ✓；fleet **35** ✓；`[rpc] listening` 32 行 ✓；**wasmBytes 4.1 MB（从 4096 归零）**、consoleRSS 0.49 GB（从 4.83）✓；劣化签名 0 ✓；花钱面 re-clean CLEAN ✓；8/30 death 仅 07:42:40Z 一条（本次预期，钉日期）✓。**IBD 门 `c64cd0c1` 生效**：`[preprune-capture-worker] cron start` 后每 tick `skip: node not synced (isSynced=false)`，无 `tick: scanned=` 行 ⇒ **A/B 处理臂自 07:43Z 起**；对照臂 = 上一实例 0.39–0.55 GB/h。J2 T+30/60/90/120 min 出斜率判读 → 诊断 v0.2。
+- **守卫重挂 07:44:45Z**（pid 364337，72 h 有界、curl≥600 s / 端口 >90 s 自停）+ 专用存活文件 `logs/hb_guard-alive.txt`（KANet-UI `618c26e1` 起 guardAlive 读它，真 Y）；`consoleHbAge/Stalls` 读心跳内容不变。
+- 监视：`:3200` owner 变化持久监视（基线 27852）；READY/wasm 盯守照旧（WARN 3000 / ACT 3200 / CRIT 3800 / CAPPED 4000）。下次重启若需，路径仍只有 Owner 提权（结构缺口见 (732)）。
+- 后续（J2 A/B 判读 · KANet-UI 08:4x 汇总 · READY）见 (734)。
