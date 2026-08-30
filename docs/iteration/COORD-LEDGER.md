@@ -10828,3 +10828,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **A/B 定案**：处理臂 27852 T+8/10/22/30/45/60/90/120 = 4.1→88.8 MB / 117.8 min，斜率 0.045/0.051/0.045/0.048/0.045/0.042/0.042 GB/h；**8 次台阶全为 +10.0–10.9 MB / ~14 min，全部落 zk judge-propose 尾**；`skip: node not synced` 121（每 tick）、`scanned=` 0。对照臂 16140 0.39–0.55 GB/h 跑到顶毒化。⇒ **门砍 ~89–92%，preprune worker = 主载体坐实；残余 = judge-propose 每 tick 602 个 RpcClient 构造器级泄漏**；`e12e8ac4`（叶子门）+ `ca4a852d`（共享单例批 1）合并后残余预期 → 底噪 ≤0.01 GB/h（1000 次对照 +0.19 MB）。
 - 状态：三补丁 GREEN 候 Owner 维护窗（见 (737)）；worktree `_wt_csg`/`_wt_rs1`/`_wt_sup` 留到合并后清；批 2 钱路 13 站点候 Owner 设计层批；J2 候命。
 - 后续（Owner 拍窗 → 维护序 · READY）见 (739)。
+
+### (739) 2026-08-30 · Owner 令 younio 节点与 KANet 栈全停（节点只在 da9 跑）· 前提更新
+- 推送：(738) `1ec3b197` 已推。
+- **J1 12:15Z**：Owner 原话「节点只在远端跑。这里先把节点全部停了。把内存释放出来。」——younio 本机 kaspad + KANet 栈全部停机（J1 令下执行）；顺带存量巡检发现两个 bridge（`channel-bridge`/`cc-bridge`）**端口写错空转 7.9 天**（规则 80 附注形态第 N 例），停之无妨碍。`ram-check.ps1` 与基线不受影响，明天装内存后照跑。
+- **前提更新**：① younio 第二 vantage（`M_reorg`/`W_dis` two-vantage 数据源）**暂无**，相关证据项继续 OPEN；② younio 所有 daa 闸/READY 估计作废（本就作废）；③ J1 常驻职责 C 暂停，A/B 不变；④ da9 READY 判定不受影响（两信号都在 da9）。
+- 后续（Owner 拍维护窗 · READY）见 (740)。
