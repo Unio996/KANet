@@ -1,3 +1,23 @@
+> # ⛔ SUPERSEDED — 本文档的 `tx.time` 单位结论是**错的**，勿照抄
+>
+> **作废范围**：**仅限 `tx.time` 时间单位这一条不变量**（出现在 **L8 / L704 / L734 / L973 / L1115**，五处已逐一贴状态注记）。
+> 本文档其余 12-area 决议**仍然有效，不作废、不评价**；全文**原话一律不改、不删行**。
+>
+> **错在哪**：本文档断言 `tx.time` = **秒**，依据是 silverscript `TUTORIAL.md` 的字面记载，并据此**否决**了 5/23 提出的 ms patch（Q15）、把它记成 "false-alarm"，还把"**不要盲打 ms patch**"写成铁律。
+>
+> **真相**：`tx.time` = **毫秒**。上游 `TUTORIAL.md` 当时记错了单位。
+>
+> **推翻依据（三份均已入库，可自查）**：
+> - `b98e0112`（2026-06-21）—— 用链上落链先例做 chain-probe 实测推翻文档。该 commit 原话：*"I was wrong to lock 'final' on the seconds-direct claim — trusted the docs (seconds) over chain reality (ms). probe-not-model, again."*
+> - `docs/2026-06-06-legacy-orphan-refund-systemic-fix-DECISION.md:38` —— `require(tx.time >= deadline * 1000); // ms 语义`
+> - `docs/2026-06-29-register-v07-prep-confirm-design.md:112` —— "`tx.time` 是【毫秒】单位铁律"
+>
+> **现行正确写法**：`deadline` 烤**秒**，合约侧 `require(tx.time >= deadline * 1000)` 转 ms 比对。漏掉 `* 1000` ⇒ `ms >= 秒` **恒为真**，时间锁形同虚设。全仓 ~40 处 `tx.time` gate 均已统一 `* 1000`；例外只有 DAA-score 模式（`LOCK_TIME_THRESHOLD = 5e11`，`< 5e11` 走 DAA score / `>= 5e11` 走 ms-epoch CLTV，见 `docs/2026-08-20-j2-finality-depth-vs-wallclock-conversion-draft.md`）。
+>
+> **教训修订（比单位本身更重要）**：本文档 L734 把教训记成"**权威 source > 自查推理**"。**这条是反的** —— 正是"信官方文档 > 信链上实测"导致 5/23 的正确判断被否，代价约四周。正确的教训是 **probe-not-model：链上实测 > 官方文档 / 权威 source**。
+>
+> *（横幅 2026-08-30 由 J1 补、Bettor r36 批。照 CLAUDE.md 通则：动不得的正文不改原话，紧贴其下补状态注记。）*
+
 # Pool Prediction Market 规则 v0.5 (完整版 — 2026-05-23 v4)
 
 **状态**: 🎉 **12 area dialogue 真完整收敛** — Area 1-12 全 nail (= ~90 决议 + 60+ outstanding mainnet calibration framework + 11 patches shipped: Q11/Q12/Q13/Q14 area-1 enforce + Ship #1 doomed + F3 50 bettor + W3 余数 pending + E6/E7 pending + refund_disagreement SS pending)
@@ -6,6 +26,9 @@
 **Critical learnings (5/23)**:
 - Kaspa **有 RBF** opt-in (= rusty-kaspa PR #499), 但 sighash binding 真等价防护 (= Area 8 E5 framing update)
 - silverscript `tx.time` = **SECONDS** (= silverscript TUTORIAL.md verbatim 证, silverc 内部 normalize Kaspa block ms → SS sec, Bitcoin convention). cycle 1-4 真不是 luck, unit 一直正确. 盲打改 ms 真会 100% 破所有 refund paths — J1 反向风险 catch.
+  > 📌 **状态注记（2026-08-30 · J1 · 出处 `b98e0112` + `docs/2026-06-06-legacy-orphan-refund-systemic-fix-DECISION.md:38` + `docs/2026-06-29-register-v07-prep-confirm-design.md:112`）**：**上面这条已作废，原话不改。**
+  > `tx.time` = **毫秒**，不是秒；`TUTORIAL.md` 当时记错了单位。因此"盲打改 ms 真会 100% 破所有 refund paths"**方向是反的** —— 不乘 `* 1000` 才会让 `ms >= 秒` 恒为真、时间锁失效。
+  > 末尾"J1 反向风险 catch"所指的那次否决**是错的（前任 J1 的判断）**，以链上实测为准。详见文档顶部横幅。
 
 ---
 
@@ -703,6 +726,10 @@ v0.5 简单 (= 全局 12h 接受 crypto 浪费 + 政治可能不够), area 12 ha
 ## 关键 unit 不变量 (= 5/23 J1 Q15 false-alarm sediment)
 **silverscript `tx.time` = SECONDS** (= silverc 内部 normalize Kaspa block ms → SS sec, Bitcoin convention). Console `deadline = Math.floor(outcomeEndMs / 1000)` = sec. 全 SS `tx.time >= deadline` 比较真 sec/sec unit-match. **不要盲打 ms patch** — fix wrong 100% break refund paths.
 
+> 📌 **状态注记（2026-08-30 · J1 · 出处同顶部横幅）**：**上面这条已作废，原话不改。**
+> `tx.time` = **毫秒**。`Console deadline` 烤秒这半句仍对，但正因两侧单位不同，合约侧必须写 `require(tx.time >= deadline * 1000)`——"全 SS `tx.time >= deadline` 比较真 sec/sec unit-match"的前提不成立。
+> "**不要盲打 ms patch**"这条铁律**已被 `b98e0112`（2026-06-21）链上实测推翻**；全仓 ~40 处 gate 现已统一 `* 1000`。
+
 ---
 
 # Area 8 — Edge Cases (= 收敛 9 决议)
@@ -732,6 +759,11 @@ pool.js bettor/register 5 LOC + 10/10 test. master 37e3656c. NaN/Infinity/empty/
 > **Settle/refund TX outputs 被 oracle sig 通过 sighash 绑定. Kaspa 有 opt-in RBF, 但 replacement 真需 new sigs 重定向 output. RBF 仅改 sig-unbound fields (= 主要 minerFee), 不破协议 fund 流向.**
 
 **5/23 Q15 false-alarm sediment**: Bettor 真 propose Q15 patch Console deadline → ms 错. silverscript TUTORIAL.md verbatim 证 `tx.time` = SECONDS. cycle 1-4 真不是 luck. J1 #510 反向风险 catch 防 100% break refund paths. 真 lesson: **reviewer "fix wrong 怎么破" + 权威 source > 自查推理**.
+
+> 📌 **状态注记（2026-08-30 · J1 · 出处同顶部横幅）**：**上面整段已作废，原话不改。**
+> ① **Q15 不是 false-alarm** —— Bettor 5/23 提的那个 ms patch **是对的**，被本文档误否，代价约四周；"J1 #510 反向风险 catch"是错判（前任 J1）。
+> ② **这里记的 lesson 方向是反的**：写的是"权威 source > 自查推理"，而真正的教训是 **probe-not-model：链上实测 > 官方文档 / 权威 source**。正是"信 `TUTORIAL.md` > 信链上"造成了这次误否。
+> ③ 推翻它的 `b98e0112`（2026-06-21）commit 原话：*"I was wrong to lock 'final' on the seconds-direct claim — trusted the docs (seconds) over chain reality (ms). probe-not-model, again."*
 
 ## E6 — pool_bettor_sides 加 refund_attempted_at column (= DB-persistent)
 跨 Console restart + multi-instance race-safe. 跟 doomed-skip metadata stash + disagreement_detected_at stash 同 pattern. **migration v142 pending** (= 注意 J2 真 ship v141).
@@ -971,6 +1003,8 @@ bettor 在线时正常路径 + bettor 失联 long-tail safety net.
 - ✅ KIP-9 storage mass cap: mainnet = testnet (= 100K per-tx, 500K per-block)
 - ✅ RBF: 真有 opt-in (= rusty-kaspa PR #499)
 - ✅ Block timestamp precision: ms (= u64 Unix epoch), SS `tx.time` silverc normalize 到 sec
+  > 📌 **状态注记（2026-08-30 · J1 · 出处同顶部横幅）**：**后半句已作废，原话不改。**
+  > 前半句对（block timestamp = ms, u64 Unix epoch）；**后半句"silverc normalize 到 sec"是错的** —— `tx.time` 进到合约里仍是**毫秒**，没有做过秒归一化。
 - ⚠ testnet-12 → mainnet compat: KIP-10/14 mainnet live, KIP-16/17/20/21 TN12 only (= Toccata activation ~6/4-6/20)
 
 **剩 1 item Owner action**: 真 v0.5 SS contracts 依赖 KIP-16/17/20/21? 若依赖 → mainnet ship 必等 Toccata. 真 audit J1 SS contracts opcode usage.
@@ -1113,6 +1147,8 @@ mainnet day-1 ship 后**不是 done**:
 - **Area 12 钦定**: M1-M10 mainnet (= 全 12 area row table / trigger 拆 day-1 vs hardening / Phase 5 design queue / Kaspa external query queue / ship-block checklist / no migration / governance multisig chain_event ack / v0.5/v1.0/Phase 5 naming / KAS-USD oracle / area-1 invariant recurring audit)
 - **forfeit_1 maker 25% share area 10 outstanding** (= J1 #494 catch, 同 +EV pattern 缩小版)
 - **🚨 5/23 Kaspa research findings**: RBF 真存在 (= sighash binding 等价防护) + Q15 false-alarm (= silverscript tx.time SECONDS, J1 反向风险 catch 防 100% break)
+  > 📌 **状态注记（2026-08-30 · J1 · 出处同顶部横幅）**：**"Q15 false-alarm"这一判定已作废，原话不改。**
+  > `tx.time` = **毫秒**，Q15 的 ms patch 是对的；"J1 反向风险 catch"是错判（前任 J1）。**前半句 RBF 的结论不受影响，仍有效。**
 
 ---
 
