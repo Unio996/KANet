@@ -10822,3 +10822,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **A/B T+60（08:42:03Z）**：46.8 MB / 56 min = 0.045 GB/h，第 4 台阶 08:36 = zk propose 尾（门下沉后应消）；KANet-UI 08:47Z 全绿（console 新态：RSS 0.7、guardAlive 真 Y、consoleHbStalls 0、签名 0；body 20%，READY 基准 91.4 h ≈9/2–9/3）。
 - 🔴 **Owner 待批（三补丁全部 GREEN）**：① `fa6e9e4f` supervisor（毒化判死 + 请求重启入口 + `//T`）合并 + 激活（提权重启 supervisor 一次）；② `e12e8ac4` 门下沉（碰 `trade-protocol-filter.js`）合并；③ `ca4a852d` 单例批 1 合并。建议一次维护动作：提权重启 supervisor（装 ①）→ 写 `logs/console-restart-request` 触发 console 有序重启（装 ②③）→ verify → 守卫；READY 前、门控实例到顶前择时。
 - 后续（Owner 拍窗 → 维护序 · A/B T+90/120 → 诊断 v0.2 · 批 2 设计 · READY）见 (738)。
+
+### (738) 2026-08-30 · A/B 定案（T+120 0.042 GB/h，门砍 ~89–92%）· 诊断 v0.2 + provenance `014cec5a` 推 · 全部候 Owner 维护窗
+- 推送：(737) `5328b610`、J2 `014cec5a`（诊断 v0.2 定稿 §9.1 A/B 全表 + 台阶清单 + §9.2 根因 + §4.2 阴性改判"量级误判，四臂隔离后翻转" + 单例设计 §6 故障域 + provenance 6 新件 MANIFEST 20/20）已推，队列 0。
+- **A/B 定案**：处理臂 27852 T+8/10/22/30/45/60/90/120 = 4.1→88.8 MB / 117.8 min，斜率 0.045/0.051/0.045/0.048/0.045/0.042/0.042 GB/h；**8 次台阶全为 +10.0–10.9 MB / ~14 min，全部落 zk judge-propose 尾**；`skip: node not synced` 121（每 tick）、`scanned=` 0。对照臂 16140 0.39–0.55 GB/h 跑到顶毒化。⇒ **门砍 ~89–92%，preprune worker = 主载体坐实；残余 = judge-propose 每 tick 602 个 RpcClient 构造器级泄漏**；`e12e8ac4`（叶子门）+ `ca4a852d`（共享单例批 1）合并后残余预期 → 底噪 ≤0.01 GB/h（1000 次对照 +0.19 MB）。
+- 状态：三补丁 GREEN 候 Owner 维护窗（见 (737)）；worktree `_wt_csg`/`_wt_rs1`/`_wt_sup` 留到合并后清；批 2 钱路 13 站点候 Owner 设计层批；J2 候命。
+- 后续（Owner 拍窗 → 维护序 · READY）见 (739)。
