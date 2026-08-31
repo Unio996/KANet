@@ -1180,13 +1180,72 @@ const BETTOR_MIN_STAKE_POLICY_SOMPI = 100_000_000n;
 // F-S1 anti-reorg 场景(不同时间点查询收敛到同一 hash),不新拍数字——本文件不静态 import 那个模块
 // (它反过来动态 import 本文件,避免制造循环依赖的静态方向),本地声明同值。
 const CAPTURE_FINALITY_DEPTH = 50;
-export async function captureSideLockDaa({ side_p2sh, side_lock_tx, stake_amount, network, approxDaaHint }) {
+// ── IBD 门 + 结构性不可达免重来(2026-08-30 J2, Bettor 批·NWT 红队 ①-④, docs/2026-08-30-j2-console-ibd-memory-growth-diagnosis.md §9) ──
+// 为什么在这一层: 本函数是所有 recapture 调用方的叶子(preprune worker / bshard-close-transport:265 / settle-daemon:803 /
+// pool-market-settler:1019 / 本文件 bet 注册), 而它每调一次 `new RpcClient`——kaspa-wasm 1.1.0 构造器级泄漏 ~11–18 KB/实例
+// (disconnect/free/GC 皆不回收, 隔离四臂实测)。IBD 期 zk judge-propose 一 tick 对 kr5l4 建 589 个 = wasm +10 MB/14 min。
+// ① 门: `getServerInfo().isSynced===true`(复用 preprune-capture-worker.mjs isNodeSyncedCached, TTL 30 s, 不复制判定)才建客户端;
+//    否则返回 {daa:null, reason:'node-not-synced(...)', skipped:'node-not-synced'} —— 调用方本就按 daa===null 处理, 零新增分支。
+// ② 结构性不可达(锚点块已剪裁: getBlock 抛 `cannot find header` 且 锚点 daa < 节点剪裁点 daa)只记本进程内存 Set(不动 schema),
+//    后续同锚点/同 side 直接跳过不建客户端; 暂态(锚点 daa ≥ 剪裁点 / 连接错 / 超时)绝不标。
+const _captureUnreachableAnchors = new Map();   // anchorHash -> { daa, pruningDaa, at }
+const _captureUnreachableTx = new Set();        // side_lock_tx
+let _captureGateSkip = { n: 0, lastLogAt: 0, lastReason: '' };
+let _pruningCache = { ts: 0, daa: null };
+const _defaultIsNodeSynced = async () => (await import('./preprune-capture-worker.mjs')).isNodeSyncedCached();
+function _indexAnchor(approxDaaHint) {
+  if (approxDaaHint == null || !Number.isFinite(Number(approxDaaHint))) return null;
+  try {
+    const cov = sqlite.prepare('SELECT block_hash, daa_score FROM spc_daa_index WHERE daa_score >= ? ORDER BY daa_score ASC LIMIT 1').get(Number(approxDaaHint));
+    const covRange = sqlite.prepare('SELECT 1 FROM spc_daa_index_coverage WHERE start_daa <= ? AND end_daa >= ? LIMIT 1').get(Number(approxDaaHint), Number(approxDaaHint));
+    if (cov?.block_hash && covRange) return { hash: cov.block_hash, daa: Number(cov.daa_score) };
+  } catch { /* spc_daa_index tables may not exist pre-v183 DBs */ }
+  return null;
+}
+function _noteGateSkip(gate) {
+  _captureGateSkip.n++; _captureGateSkip.lastReason = gate?.reason || '?';
+  const now = Date.now();
+  if (now - _captureGateSkip.lastLogAt >= 60_000) {   // 节流: 一 tick 可到 589 次, 每 60 s 一行汇总
+    console.log(`[trade-filter:capture] skip: node not synced (isSynced=${gate?.isSynced}, ${_captureGateSkip.lastReason}) — ${_captureGateSkip.n} capture(s) skipped since last note, 0 RpcClient built`);
+    _captureGateSkip = { n: 0, lastLogAt: now, lastReason: _captureGateSkip.lastReason };
+  }
+}
+export function _captureUnreachableState() { return { anchors: new Map(_captureUnreachableAnchors), txs: new Set(_captureUnreachableTx) }; }
+export function _resetCaptureUnreachable() { _captureUnreachableAnchors.clear(); _captureUnreachableTx.clear(); _pruningCache = { ts: 0, daa: null }; _captureGateSkip = { n: 0, lastLogAt: 0, lastReason: '' }; }
+
+export async function captureSideLockDaa({ side_p2sh, side_lock_tx, stake_amount, network, approxDaaHint }, deps = {}) {
+  const { isNodeSynced = _defaultIsNodeSynced, RpcClientCtor = null, pruningDaaFn = null, rpcUrl: rpcUrlOverride = null } = deps;   // deps 只供离线 regression case 注入; 生产调用方不传 ⇒ 全默认
+  if (side_lock_tx && _captureUnreachableTx.has(side_lock_tx)) return { daa: null, reason: 'anchor-pruned(cached)', skipped: 'anchor-pruned' };
+  const gate = await isNodeSynced();
+  if (gate?.synced !== true) { _noteGateSkip(gate); return { daa: null, reason: `node-not-synced(${gate?.reason ?? '?'})`, skipped: 'node-not-synced' }; }
   const row = sqlite.prepare('SELECT block_hash FROM kaspa_tx_log WHERE tx_id = ?').get(side_lock_tx);
-  const { getWorkingRpc } = await import('./rpc-health.js');
-  const { url: rpcUrl } = await getWorkingRpc();
+  const anchor = row?.block_hash ? null : _indexAnchor(approxDaaHint);
+  if (anchor && _captureUnreachableAnchors.has(anchor.hash)) {
+    if (side_lock_tx) _captureUnreachableTx.add(side_lock_tx);
+    return { daa: null, reason: 'anchor-pruned(cached)', skipped: 'anchor-pruned' };
+  }
+  let rpcUrl = rpcUrlOverride;
+  if (!rpcUrl) {
+    const { getWorkingRpc } = await import('./rpc-health.js');
+    ({ url: rpcUrl } = await getWorkingRpc());
+  }
   if (!rpcUrl) return { daa: null, reason: 'no-rpc' };
   const { RpcClient, Encoding } = await import('kaspa-wasm');
-  const rpc = new RpcClient({ url: rpcUrl, encoding: Encoding.Borsh, networkId: network });
+  const Ctor = RpcClientCtor || RpcClient;
+  const rpc = new Ctor({ url: rpcUrl, encoding: Encoding.Borsh, networkId: network });
+  // 剪裁点 daa(判"结构性": 锚点 < 剪裁点 ⇒ 永远拿不到; 否则暂态), 每进程缓存 60 s——这一次读用的是同一个 rpc, 不另建客户端。
+  const pruningDaa = async () => {
+    if (pruningDaaFn) return pruningDaaFn();
+    if (_pruningCache.daa != null && Date.now() - _pruningCache.ts < 60_000) return _pruningCache.daa;
+    try {
+      const info = await rpc.getBlockDagInfo();
+      const pp = info?.pruningPointHash; if (!pp) return null;
+      const b = await rpc.getBlock({ hash: pp, includeTransactions: false });
+      const d = Number((b?.block || b)?.header?.daaScore); if (!Number.isFinite(d)) return null;
+      _pruningCache = { ts: Date.now(), daa: d }; return d;
+    } catch { return null; }
+  };
+  let scanReason = 'no-block-hash';
 
   // 🔴 fix (2026-07-12, 第六件大考 a4343 撞出, #gry4yj.2·ESCALATIONS 已挂账缺口): kaspa_tx_log 是本地
   // indexer, 有已知完整性缺口(reference-kaspa-tx-log-indexer-completeness-gap——同族问题今晚已在
@@ -1224,7 +1283,27 @@ export async function captureSideLockDaa({ side_p2sh, side_lock_tx, stake_amount
     let cursor = await _resolveStartCursor();
     if (!cursor) return null;
     for (let i = 0; i < MAX_STEPS; i++) {
-      const blkResp = await rpc.getBlock({ hash: cursor, includeTransactions: true });
+      let blkResp;
+      try {
+        blkResp = await rpc.getBlock({ hash: cursor, includeTransactions: true });
+      } catch (e) {
+        // 锚点第一步就 `cannot find header`: 结构性(锚点 daa < 剪裁点) ⇒ 记内存 Set 免每 tick 重来; 否则暂态, 不标。
+        if (i === 0 && anchor && cursor === anchor.hash && /cannot find header/i.test(String(e?.message || e))) {
+          const pd = await pruningDaa();
+          if (pd != null && anchor.daa < pd) {
+            if (!_captureUnreachableAnchors.has(anchor.hash)) {
+              console.warn(`[trade-filter:capture] anchor ${anchor.hash.slice(0, 12)} (daa ${anchor.daa}) is below pruning point (daa ${pd}) — structurally unreachable, marking in-memory (this process) so later sides of the same market skip without building RpcClient`);
+            }
+            _captureUnreachableAnchors.set(anchor.hash, { daa: anchor.daa, pruningDaa: pd, at: Date.now() });
+            if (side_lock_tx) _captureUnreachableTx.add(side_lock_tx);
+            scanReason = 'anchor-pruned';
+            return null;
+          }
+          scanReason = 'anchor-not-found-transient';
+          return null;
+        }
+        throw e;
+      }
       const blk = blkResp?.block || blkResp;
       const txs = blk?.transactions || [];
       const hit = txs.find(t => (t?.verboseData?.transactionId || t?.id) === side_lock_tx);
@@ -1247,7 +1326,7 @@ export async function captureSideLockDaa({ side_p2sh, side_lock_tx, stake_amount
       blk = await _scanBackwardForTx();
       // reason 字符串保持 'no-block-hash'(向后兼容既有调用方/测试的精确匹配, 语义仍是"无法解出
       // block hash"——只是现在多了一条 fallback 路径没找到, 不是历史那种"根本没试第二条路")。
-      if (!blk) { try { await rpc.disconnect(); } catch {} return { daa: null, reason: 'no-block-hash' }; }
+      if (!blk) { try { await rpc.disconnect(); } catch {} return { daa: null, reason: scanReason, ...(scanReason === 'anchor-pruned' ? { skipped: 'anchor-pruned' } : {}) }; }
     }
     // 🔴 finality 门数据源(fetch while still connected — rpc.disconnect() fires in `finally`
     // below, before daa is even computed): current tip, compared against the resolved block's
