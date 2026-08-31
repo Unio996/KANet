@@ -1230,9 +1230,17 @@ export async function captureSideLockDaa({ side_p2sh, side_lock_tx, stake_amount
     ({ url: rpcUrl } = await getWorkingRpc());
   }
   if (!rpcUrl) return { daa: null, reason: 'no-rpc' };
-  const { RpcClient, Encoding } = await import('kaspa-wasm');
-  const Ctor = RpcClientCtor || RpcClient;
-  const rpc = new Ctor({ url: rpcUrl, encoding: Encoding.Borsh, networkId: network });
+  // 共享客户端(2026-08-30 J2 批 1, ../lib/kaspa-rpc-shared.mjs): 原每 side new RpcClient(kr5l4 一 tick 602 个 = +10 MB wasm, 构造器级泄漏)——
+  // 现取共享实例, 不 connect/不 disconnect(owned=false); 测试注入 RpcClientCtor 时保留自建自断(owned=true)。
+  let rpc, owned = false;
+  if (RpcClientCtor) {
+    const { Encoding } = await import('kaspa-wasm');
+    rpc = new RpcClientCtor({ url: rpcUrl, encoding: Encoding.Borsh, networkId: network }); owned = true;
+  } else {
+    const { getSharedRpc } = await import('../lib/kaspa-rpc-shared.mjs');
+    rpc = await getSharedRpc({ url: rpcUrl, networkId: network });
+  }
+  const _release = async () => { if (owned) { try { await rpc.disconnect(); } catch {} } };
   // 剪裁点 daa(判"结构性": 锚点 < 剪裁点 ⇒ 永远拿不到; 否则暂态), 每进程缓存 60 s——这一次读用的是同一个 rpc, 不另建客户端。
   const pruningDaa = async () => {
     if (pruningDaaFn) return pruningDaaFn();
@@ -1318,7 +1326,7 @@ export async function captureSideLockDaa({ side_p2sh, side_lock_tx, stake_amount
   let blk;
   let tipDaaScore = null;
   try {
-    await Promise.race([rpc.connect({}), new Promise((_, rej) => setTimeout(() => rej(new Error('RPC connect timeout')), 4000))]);
+    if (owned) await Promise.race([rpc.connect({}), new Promise((_, rej) => setTimeout(() => rej(new Error('RPC connect timeout')), 4000))]);
     if (row?.block_hash) {
       const blkResp = await rpc.getBlock({ hash: row.block_hash, includeTransactions: false });
       blk = blkResp?.block || blkResp;
@@ -1326,18 +1334,18 @@ export async function captureSideLockDaa({ side_p2sh, side_lock_tx, stake_amount
       blk = await _scanBackwardForTx();
       // reason 字符串保持 'no-block-hash'(向后兼容既有调用方/测试的精确匹配, 语义仍是"无法解出
       // block hash"——只是现在多了一条 fallback 路径没找到, 不是历史那种"根本没试第二条路")。
-      if (!blk) { try { await rpc.disconnect(); } catch {} return { daa: null, reason: scanReason, ...(scanReason === 'anchor-pruned' ? { skipped: 'anchor-pruned' } : {}) }; }
+      if (!blk) { await _release(); return { daa: null, reason: scanReason, ...(scanReason === 'anchor-pruned' ? { skipped: 'anchor-pruned' } : {}) }; }
     }
-    // 🔴 finality 门数据源(fetch while still connected — rpc.disconnect() fires in `finally`
-    // below, before daa is even computed): current tip, compared against the resolved block's
-    // daaScore after the connection closes.
+    // 🔴 finality 门数据源(fetch while still connected — 自建客户端时 `finally` 里断连, 共享客户端不断): current tip,
+    // compared against the resolved block's daaScore after the connection closes.
     const tipInfo = await rpc.getBlockDagInfo();
     tipDaaScore = Number(BigInt(tipInfo.virtualDaaScore));
   } catch (e) {
-    try { await rpc.disconnect(); } catch {}
+    if (!owned) { try { const { noteSharedRpcError } = await import('../lib/kaspa-rpc-shared.mjs'); await noteSharedRpcError(rpc, e); } catch {} }
+    await _release();
     return { daa: null, reason: `rpc-fail: ${e.message}` };
   } finally {
-    try { await rpc.disconnect(); } catch {}
+    await _release();
   }
   let daa = null;
   try {

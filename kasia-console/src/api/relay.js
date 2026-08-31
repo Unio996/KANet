@@ -360,18 +360,14 @@ export async function registerRelayRoutes(fastify) {
     const { url: rpcUrl } = await getWorkingRpc();
     if (rpcUrl) {
       try {
-        const kaspa = await import('kaspa-wasm');
-        const { RpcClient, Encoding, Address } = kaspa;
-        const rpc = new RpcClient({ url: rpcUrl, encoding: Encoding.Borsh, networkId: relay.network || 'mainnet' });
-        await Promise.race([
-          rpc.connect({}),
-          new Promise((_, rej) => setTimeout(() => rej(new Error('RPC connect timeout')), 3000)),
-        ]);
+        // 共享客户端(2026-08-30 J2 批 1, ../lib/kaspa-rpc-shared.mjs, key 按 relay.network): 原每次余额查询 new RpcClient+disconnect = 构造器级泄漏 ~17 KB/次。
+        const { Address } = await import('kaspa-wasm');
+        const { getSharedRpc } = await import('../lib/kaspa-rpc-shared.mjs');
+        const rpc = await getSharedRpc({ url: rpcUrl, networkId: relay.network || 'mainnet' });
         // plural (not singular getBalanceByAddress — throws "invalid type: floating point,
         // expected a string" on this vendored kaspa-wasm build) + direct node-side sum, not
         // per-UTXO fetch — stays fast on massive-UTXO addresses (mining/faucet, millions of coinbase UTXOs).
         const { entries } = await rpc.getBalancesByAddresses([new Address(relay.address)]);
-        await rpc.disconnect();
         const kas = Number(entries?.[0]?.balance || 0n) / 1e8;
         return reply.send({ balance: Math.round(kas * 1000) / 1000 });
       } catch {}
@@ -651,15 +647,11 @@ export async function registerRelayRoutes(fastify) {
     const { url: rpcUrl } = await getWorkingRpc();
     if (rpcUrl) {
       try {
-        const kaspa = await import('kaspa-wasm');
-        const { RpcClient, Encoding, Address } = kaspa;
-        const rpc = new RpcClient({ url: rpcUrl, encoding: Encoding.Borsh, networkId: relay.network || 'mainnet' });
-        await Promise.race([
-          rpc.connect({}),
-          new Promise((_, rej) => setTimeout(() => rej(new Error('RPC connect timeout')), 3000)),
-        ]);
+        // 共享客户端(2026-08-30 J2 批 1, 同上一处)。
+        const { Address } = await import('kaspa-wasm');
+        const { getSharedRpc } = await import('../lib/kaspa-rpc-shared.mjs');
+        const rpc = await getSharedRpc({ url: rpcUrl, networkId: relay.network || 'mainnet' });
         const { entries } = await rpc.getBalancesByAddresses([new Address(relay.address)]);
-        await rpc.disconnect();
         return Math.round(Number(entries?.[0]?.balance || 0n) / 1e8 * 1000) / 1000;
       } catch {}
     }

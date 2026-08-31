@@ -44,17 +44,18 @@ async function _readFaucetUtxoState(relayId) {
   if (!row?.address) throw new Error(`relay ${relayId.slice(0, 8)} not found or no address`);
   const { url: rpcUrl } = await getWorkingRpc();
   if (!rpcUrl) throw new Error('no working RPC endpoint');
-  const kaspa = await import('kaspa-wasm');
-  const { RpcClient, Encoding, Address } = kaspa;
-  const rpc = new RpcClient({ url: rpcUrl, encoding: Encoding.Borsh, networkId: NETWORK });
+  // 共享客户端(2026-08-30 J2 批 1, lib/kaspa-rpc-shared.mjs): 原每 60 s new RpcClient+disconnect = kaspa-wasm 构造器级泄漏 ~17 KB/次;
+  // 现取共享实例, 不 disconnect; 断连类错误交 noteSharedRpcError 分类(同实例下次重连)。
+  const { Address } = await import('kaspa-wasm');
+  const { getSharedRpc, noteSharedRpcError } = await import('./kaspa-rpc-shared.mjs');
+  const rpc = await getSharedRpc({ url: rpcUrl, networkId: NETWORK });
   try {
-    await Promise.race([rpc.connect({}), new Promise((_, rej) => setTimeout(() => rej(new Error('RPC connect timeout')), 5000))]);
     const { entries } = await rpc.getUtxosByAddresses([new Address(row.address)]);
     const utxoCount = (entries || []).length;
     const sompi = (entries || []).reduce((s, e) => s + BigInt(e.amount ?? e.utxoEntry?.amount ?? 0), 0n);
     const balanceKas = Number(sompi) / 1e8;
     return { utxoCount, balanceKas, address: row.address };
-  } finally { try { await rpc.disconnect(); } catch {} }
+  } catch (e) { await noteSharedRpcError(rpc, e); throw e; }
 }
 
 function _checkThresholds(relayId, state) {
