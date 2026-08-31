@@ -59,11 +59,16 @@ rc1 **不带 OP_PICK off-by-one**（行为验证，§1）⇒ 迁移**不需要**
 ## 6. 待 NWT 判
 1. 并存方式：`sil-v1/` 目录 vs `*_v1.sil` 后缀。2. 批 B ① 的 `deadlineMs` 由谁烤（发布路径 `prediction-escrow-ss.mjs` / `pool-bshard-artifacts.mjs` 各自算一次 vs 公共 helper）。3. `OracleStake_v1.sil:46` 域错误是否单列紧急（已部署质押 UTXO 的锁是否真有效——按 magnitude：`lockUntilDaa` ≈ 8e7 < 5e11 ⇒ 链上当 DAA 锁解释，语义碰巧对；rc1 只是把它写明）。
 
-## 附录 A · 批 B 逐处表（43 处 `tx.time`，机械生成 2026-08-30，明日人工复核语义列）
+## 附录 A · 批 B 逐处表（43 处 `tx.time`，机械生成 2026-08-30，**人工复核完成 2026-09-01**）
+
+人工复核结论（逐行读原文 ±1 行上下文，`git grep -n -C1 "tx\.time" -- '*.sil'`）：
+- **43 行 = 可执行 require 30 + 注释/声明 13**；30 处可执行全部归四形，无第五形。
+- 复核改判 3 行：#1 改 **② grace**（`(attestedAtSeconds+21600)*1000` 是秒基+宽限再 *1000，非纯 ①；且该文件 `_j2_closezk_repro4.sil` 是根目录 repro 残件 → **退役候选，不迁**）；#20 生成尾注错（`300 seconds` 的括注误写 `7200 seconds = 2 hours`，正确 = **5 min**，下表已改）；#2/#4（S63A 探针）**不在本计划**——§4「§6-3 编译器绑定」：探针随 pinned `silverc-zk-8065184`，迁 rc1 属 §6-3 独立决策。
+- 语义红线（全部 ①② 共享）：`deadline` 烤的是**秒** Unix ts（ShardLeaf:91 链上 LANDED precedent 实证 tx.time=ms），temporal 化后 ctor 值改喂 **ms**（`deadlineMs = deadline*1000` 由发布路径算，§6-2 待 NWT 判谁烤）——**烤错单位 = vacuous 恒真/恒假**，批 B 每合约的反向向量必须含「deadline 未到 ⇒ 拒」一条来抓它。
 
 | # | 文件:行 | 现状 | 新写法（方案 B） | 形 |
 |---|---|---|---|---|
-| 1 | `_j2_closezk_repro4.sil:72` | `require(tx.time >= (attestedAtSeconds + 21600) * 1000);          // ⚠ 21600 占位, 见�` | witness 改 ms `temporal`; `+ 6 hours` | ① *1000 |
+| 1 | `_j2_closezk_repro4.sil:72` | `require(tx.time >= (attestedAtSeconds + 21600) * 1000);          // ⚠ 21600 占位, 见�` | **退役候选（根目录 repro 残件，正本 = CloseZkV2.sil #5），不迁** | ② grace(复核改判) |
 | 2 | `docs/provenance/2026-08-29-s63a-probe-v03/S63A_TransitionProbe.sil:37` | `require(tx.time >= t_recovery);                          // parser 限  tx.time 只能 sta` | ctor `temporal t_recovery` | ③ 已 ms |
 | 3 | `docs/provenance/2026-08-29-s63a-probe-v03/S63A_TransitionProbe.sil:44` | `//    8065184 的 `require(tx.time >= e)` 降成裸 `<e> OP_CHECKLOCKTIMEVERIFY`(compile.r` | 随正文 | 注释 |
 | 4 | `docs/provenance/2026-08-29-s63a-probe-v03/S63A_TransitionProbe.sil:52` | `require(tx.time >= e);                                   // = CLTV(e)  块 DAA > tx.lockTi` | `require(tx.daa >= e)`（e = daaScore + n_probe, int） | ④ DAA 域(A′) |
@@ -82,7 +87,7 @@ rc1 **不带 OP_PICK off-by-one**（行为验证，§1）⇒ 迁移**不需要**
 | 17 | `kasia-console/src/lib/PoolSpine.sil:97` | `require(tx.time >= deadline * 1000);` | ctor `temporal deadlineMs`; `require(tx.time >= deadlineMs)` | ① *1000 |
 | 18 | `kasia-console/src/lib/PoolSpine.sil:130` | `require(tx.time >= deadline * 1000);  // bug 10d fix Path A` | ctor `temporal deadlineMs`; `require(tx.time >= deadlineMs)` | ① *1000 |
 | 19 | `kasia-console/src/lib/PoolSpine.sil:145` | `require(tx.time >= deadline * 1000);  // bug 10d fix Path A` | ctor `temporal deadlineMs`; `require(tx.time >= deadlineMs)` | ① *1000 |
-| 20 | `kasia-console/src/lib/PoolSpine.sil:175` | `require(tx.time >= (deadline + 300) * 1000);` | ctor `temporal deadlineMs`; `require(tx.time >= deadlineMs + 300 seconds)`（7200 seconds = 2 hours） | ② grace |
+| 20 | `kasia-console/src/lib/PoolSpine.sil:175` | `require(tx.time >= (deadline + 300) * 1000);` | ctor `temporal deadlineMs`; `require(tx.time >= deadlineMs + 300 seconds)`（300 s = 5 min，**非** 2h——生成稿此括注错，复核改） | ② grace |
 | 21 | `kasia-console/src/lib/PoolSpine_i_proto.sil:390` | `require(tx.time >= (deadline + 7200) * 1000);  // grace 修 (bug 10d Path A ms 模式)` | ctor `temporal deadlineMs`; `require(tx.time >= deadlineMs + 7200 seconds)`（7200 seconds = 2 hours） | ② grace |
 | 22 | `kasia-console/src/lib/PoolSpine_v06.sil:274` | `// SS never verified "no bettor joined"; check was only `tx.time>=deadline*1000`.` | 随正文 | 注释 |
 | 23 | `kasia-console/src/lib/PoolSpine_v06.sil:279` | `require(tx.time >= (deadline + 7200) * 1000);  // grace 修, bug 10d Path A ms 模式` | ctor `temporal deadlineMs`; `require(tx.time >= deadlineMs + 7200 seconds)`（7200 seconds = 2 hours） | ② grace |
@@ -104,4 +109,27 @@ rc1 **不带 OP_PICK off-by-one**（行为验证，§1）⇒ 迁移**不需要**
 | 39 | `kasia-console/src/lib/ShardLeaf.sil:91` | `//   ⚠ tx.time 单位=【毫秒】(链上 LANDED refund precedent p2sh.mjs L7/SS L275 �` | 随正文 | 注释 |
 | 40 | `kasia-console/src/lib/ShardLeaf.sil:93` | `//   ⚠ da9fc22 parser 限 tx.time 只能 standalone require(不能进 || 复合)→拆�` | 随正文 | 注释 |
 | 41 | `kasia-console/src/lib/ShardLeaf.sil:94` | `//   sealed  不进 if→随时 LAND / partial  进 if→premature(tx.time < deadline*1000` | 随正文 | 注释 |
-| 42 | `kasia-console/src/lib/ShardLeaf.sil:96` | `require(tx.time >= deadline * 1000);` | ctor `temporal deadlineMs`; `require(tx.time >= deadlineMs)` | ① *1000 |
+| 42 | `kasia-console/src/lib/ShardLeaf.sil:96` | `require(tx.time >= deadline * 1000);` | ctor `temporal deadlineMs`; `require(tx.time >= deadlineMs)`（在 `if (count != seal_count)` 内——rc1 须实测 temporal require 允不允许进 if 块，0.1.0 的「只能 standalone」限已由 da9fc22 记录，rc1 未验 ⇒ 批 B 首个试编对象） | ① *1000 |
+
+## 附录 B · 主证据向量预算（机械盘点 2026-09-01，`git grep -c`）
+
+- 规模：**42 合约 / 104 entry / 1337 条 `require`** ⇒ 主证据上界 = **2×1337 ≈ 2674 向量**（每 require 一正一反）+ 每 entry 至少 1 条全合法正向。机械生成（按 entry 切段列 require 清单），人工只核「该 require 能否被单独破坏」（复合条件如 `a==0||a==1` 反向取域外值）。
+- 分层（按 §4 优先级，live 不停 > READY > 迁移）：
+  - **T1 已部署/在钱**（旧盘不迁但要当 pinned 对照臂）：`PoolSide_v06/v07/v0_7_1`（137 卡盘）、`PredictionEscrowUnanimous5`（16 escrow 全 Unanimous5，8/30 实核）、`OracleStake_v1`（已注资质押）——**向量双跑（rc1 + pinned）全覆盖，先做**。
+  - **T2 committed 目标件**：`CloseZkV2`、`PayoutShard/V2`、`PoolSpine_v08_*`、`RootClose/RootClaim/RefundClaim`、`ShardLeaf*`、`FoldNode*`、`PoolLeaf*`、`PoolRoot`、`PoolShard_fold`、`WinningsPool_v1`——全覆盖，次做。
+  - **T3 探针/残件**：`RootStub_probe*`（p27/53/80/106 合计 270 require 全是機械展开）、`Blake2bProbe`、`CheckSigFromStackProbe`、`ProbeC_selfonly`、`PoolSpine_i_proto`、`_j2_closezk_repro4`（退役候选）——**逐个判「迁 or 退役」，退役的不出向量**；`S63A_TransitionProbe` 不在本计划（§6-3 绑定）。
+- require 最重 5 件：`RootStub_probe_p106`(107)、`PayoutShard`(91)、`RootStub_probe_p80`(81)、`PayoutShardV2`(70)、`PoolSpine_v07/i_proto`(63)——T3 探针占两席，退役即省 ~270 向量。
+
+## 附录 C · 批 C 逐处基表（rc1 拒而 0.1.0 收 = 潜伏 bug；机械盘点 2026-09-01，语义与真实影响逐处待批 C 执行时填）
+
+**C-1 两参 `byte[](int, N)` ×42 处**（`git grep -nE 'byte\[\]\([^)]+,[^)]+\)'`；rc1 全拒 ⇒ `x as byte[N]`）——分布：`CloseZkV2` 3 / `_j2_closezk_repro4` 2 / `FoldNode` 2 / `PayoutShard` 2 / `PayoutShardV2` 7 / `PoolLeaf` 2 / `PoolRoot` 1 / `PoolShard_fold` 3 / `PoolSpine_i_proto` 2(+4 注释) / `PoolSpine_v07` 2(+4 注释) / `PoolSpine_v08_chunk` 1 / `PoolSpine_v0_7_1` 3(+2 注释) / `RootClaim` 1 / `CloseZkV2` 另 1 注释（合计可执行 31 + 注释 11 = 42 行命中）。
+- 🔴 **每处都是 commit/merkle 前像的序列化**（`blake2b(byte[](pk) + byte[](amount,8))` 族）⇒ 迁移的承重验收 = **`x as byte[N]` 与 `byte[](x,N)` 字节逐位相等**（LE sign-magnitude，`serialize_i64`，PoolSpine_v07:334 已 source-verified）——先用 `Blake2bProbe` 迁移版跑 **digest 相等向量**（同输入旧/新两版 debugger 出同 digest），不等 = 全库 commit 断裂，批 B/C 全停上报。
+- 🔴 **OP_PICK 触发形出处列**：0.1.0 下两参 cast 正是 off-by-one 触发形——每个**已部署**字节码须回答「当时 legacy 还是 fixed 编译器编的」，沿用 `docs/provenance/README-silverc-oppick-provenance.md` 已核项，未核的补（旧盘不迁但要按旧 exit 结算，栈位错的盘要单列）。
+
+**C-2 域错误**：`OracleStake_v1.sil:46`（附录 A #7，§6-3 判是否单列紧急）。
+
+**C-3 UB 7 节逐处**（行号机械盘点）：
+- for 循环 16 处（unroll 上限）：`mask=mask*2` 位掩码族 8（`CloseZkV2:104,169`、`PayoutShard:195,359`、`PayoutShardV2:311`、`RootClaim:88`、`_j2_closezk_repro4:114`）＋ 折叠族 `prev_states.length`（`FoldNode:60`、`PoolLeaf:99`、`PoolShard_fold:95`）＋ merkle/segment（`PoolRoot:108`、`PoolShard_fold:180`、`PoolSpine_v08_chunk:183,249`、`RootClaim:73`、`Blake2bProbe:24`）。UB 点 = 循环变量越 unroll 界；rc1 若把界检查显式化/移除 ⇒ 每处写「删检查后果」。
+- 整数溢出：`mask*2` @ bit_in≤63（2^63 溢出 i64——bound 63 是编译期 unroll 非运行时钳，须核 rc1 对 `bit_in=63` 的行为）；费率乘法 7 处（`PredictionEscrowConsensualMid:47`、`PredictionEscrowUnanimous5:70,72,73,124,152`）`spendable*pct` 上界 = spendable≤2.1e15 sompi × 10000 < 2^63 ✓（记账即可）。
+- 除零：`/ totalStake`（`PredictionEscrowUnanimous5:152`，totalStake=maker+taker>0 由注资保证——但须写「若 0 注资路径可达 ⇒ 后果」）；`/ div` merkle 族（`_j2_closezk_repro4:100-109` 退役候选）；`/ 10000` 常量安全。
+- struct `.length` 14 处与 `int→byte[N]` 尺寸：随 C-1/for 循环行号覆盖，rc1 `x as byte[N]` 全显式 ⇒ 迁移后消失，记账为「rc1 修掉的类」。
