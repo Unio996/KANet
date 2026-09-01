@@ -10917,3 +10917,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - 🔴 **二选一（都需 Owner 提权，09-02 08:16Z 前）**：**A** = 撞顶前一次人工提权重启 console（`taskkill /PID <:3200 owner> /T /F` → supervisor headless；门+单例已落盘即装载）；**B** = 部署 `scratch/_wt_sup` 那版 poison-liveness supervisor（= 维护窗的 supervisor 补丁 `fa6e9e4f`，需一次提权重启 supervisor bootstrap）。**A 治本轮、B 治本轮+永久自动化**（推荐 B = 把维护窗一次做全）。Owner 正是维护窗阻塞点（~15h）；若 Owner 持续不可用则只剩事后人工。
 - J1 自纠：曾据"ACT 会自动回收"撤掉 `wasm>3600` 前哨（"永不触发"），该前提为假 ⇒ 已恢复 + 补"wasm≥4000 且近 3h 速率<5 MB/h = grow 失败/毒化"判据。
 - 后续（🔴 Owner 提权 A 或 B，09-02 08:16Z 前 · 我盯守 ACT/CRIT/CAPPED 只告警不动作 · READY 停止右滑验证 23:02Z）见 (750)。
+
+### (750) 2026-09-01 · 结算 24h 失败重试环归属 = red-line-7 族（非 K-18，已知件，单列 backlog）· 关键 Owner 动作仍待：09-02 07:19Z 夜间撞顶前一次提权
+- 推送：(749) `d2bef6d4`、J1 各件（毒化判据修 0682fcbb、代价面 e44f0f40）已推。
+- **结算侧 24h 无进展失败重试环（J1 量 → J2 归属）**：提交成功 0 / 被拒 ~720/h（132 txid 循环），拒因 = `[relay:maker-1] site=unlockPoolSpineRefundMakerUnjoined`（pool-settler **refunding** 路，ext-pool-v07 maker-unjoined 退款）`mass_ub=9484 minFee=948400 actualFee=656700 would_reject=true wasm=panic(unreachable) source=7b1e18cc`。**= 8/29 已记 red-line-7 族**（kaspa-wasm `calculateTransactionMass` 对 covenant tx panic ⇒ authoritative mass 拿不到 ⇒ fee 走低费回退，红线 7 observe/warn-only 不拦 ⇒ 每轮照发、mempool 照拒、永续重试；fee "算错"实为"panic 后没算"）。**非 K-18/stale payout_ps_addr 那批**（那是 coherence gate p2sh 不符）。修法公式已有：`fee = estimateMassUpperBound × MIN_SOMPI_PER_MASS × 1.5`（NWT gate-(a) card §0，`62c2228d`）。**单列 backlog**（与 K-18 结算恢复线分开）：① refunding 路用 mass_ub 上界定价替回退费；② 红线 7 转 fail-closed = 产品钱路改动须 Owner 批。IBD 期无新钱入场不急，维护窗不带。memory：`reference-kaspa-wasm-covenant-binding-moved-into-transaction-and-mass-calc-panics-on-v1-covenant-tx` + relay 红线 7 那条。
+- **backlog 汇总（IBD 期不动，READY/维护窗后按序）**：① 批 2 钱路单例迁移；② post-READY judge-propose 重验；③ refunding 路 mass_ub 定价 + 红线 7 fail-closed（本条）；④ K-18/stale payout_ps_addr 结算恢复线（既有）；⑤ EU VPS（IBD RTT 杠杆）；⑥ v1-rc1 迁移批 A–D + cmpops。
+- 🔴 **关键 Owner 动作（不变，最急）**：09-02 07:19Z（夜间）撞顶前一次提权——A `taskkill /PID <:3200 owner> /T /F`（人工重启，装已落盘的门+单例）或 B `Stop-ScheduledTask` 开维护窗（我接后续，装 poison-liveness 使以后自动检测毒化）。**无自动兜底；不干预则夜间卡死毒化，全绿盲区，J1 能 10 分内报但仍需人 kill。** 推荐 B。
+- 后续（Owner 提权 A/B · console 撞顶前状态 · READY 停右滑验证 23:02Z）见 (751)。
