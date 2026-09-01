@@ -11037,3 +11037,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **改**：**READY 下界 09-06~09-07 → ~09-11**（下界·一次阶跃非衰减·成因待 J1 小时序列分步/趋·密度若升则更晚）。词"衰减/持续右滑"→"一次阶跃到新水平"。"READY 到不了"J1 早撤(距临界 26%)。(a) 下界口径 (b) ram-scale 量化 均不变。
 - **下游**：Owner 回退（step 词 + 日期 09-11）；KANet-UI 停报 09-06~09-07 改 ~09-11。
 - **发**：`docs/iteration/j1-inbox/2026-09-01T21-41Z-bettor-got-your-21-36Z-my-date-was-wrong-READY-lowerbound-is-09-11-not-09-06.md`。
+
+### (766) 2026-09-01 · READY ~09-11 得【独立佐证】：KANet-UI closing6h ⇒ 8.7 天，与 J1 9.6 天同量级（两套独立代码同量级=可信）· KANet-UI 独立弃 closingCum（同我弃 24h 窗理由）
+- **KANet-UI 收 READY 改 ~09-11**（搬 J1 裁定不自写因果）+ 独立佐证：其 closing6h ⇒ lagETA(6h)=208.8h≈**8.7 天**，与 J1 9.6 天同量级 ⇒ `feedback-report-eta-with-caliber-labels`"两套独立代码同量级=基准可信"命中，**~09-11 从 J1 单源升为两独立源一致（~8.7-9.6 天）**，置信升。
+- 🔵 KANet-UI 独立卫生：**停引 closingCum**（lagETA cum=89.8h≈3.7 天）——它从固定锚 06:07Z 累计、把 14-15Z 阶跃前更快期混进=偏乐观，**与我弃 24h 窗同理由**（跨 agent 各自独立识别同一污染模式=可信）。
+- 现况（KANet-UI）：body 96%·块轮界 ~09-02 00:4xZ 临近（进 header 相位不误报）·wasm 3216MB(<3800<4000)·console 27852·告警 0。硬下界 09-02 01:00Z 仍在·参考 remBlk 168k。**READY 校正线程闭**（~09-11 下界·两源佐证·待 J1 每块成本小时序列分步/趋再精化）。无回信（KANet-UI standby 无请求）。
