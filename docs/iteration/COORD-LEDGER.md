@@ -10977,3 +10977,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - 🔵 **J1 拆账纪律（记下作正面样板）**：1h 收敛谷底 8.0→32.2，J1 **17:24Z 预先**算出"若节点毫无变化、光两次 lag 倒退滚出 1h 窗 ⇒ 17:54Z 应 ~20.6"，实测 32.2 ⇒ **窗口假象 ~12.6 + 真实改善 ~11.6，各半**。预测写在前=此刻能拆账，否则"8.0→32.2"整个被当利好。同族 `feedback-do-not-refute-a-trend-claim-with-a-single-instantaneous-reading` 的正向应用。
 - **不变**：READY 不早于 09-06~09-07 且可能右移（本尖峰已偿还≠后续链段无新尖峰）；唯一未测=08-29 12:37 后链段（节点未走到）；判据不变 denCritStreak 连 3 点 ≥100% 才重算四档。
 - **console 交叉核**：J1 WARN-at-17:34:42Z 与我 ready_watch WASM_WARN-at-17:35:51Z 一致(~70s·同 heap-sample 流)；wasm 3021·撞顶 09-02 07:42Z~08:53Z·人工期限 06:42Z·~10h 到守卫线仍不临近·guard 待 Owner。抓样 83 行 GOLD 0 平段 0（静默相位约缺口清零 5.5h 后到）。
+
+### (758) 2026-09-01 · J1 阶段模型修正：块轮**header 用完就结束(第1轮停 33%)非 100%**⇒百分比对轮界零预测力·唯一量=header 缺口 · 轮界前 3-peer-reset 是 blocker③ 候选误杀窗⇒今晚抓样升双职
+- **J1 22-55Z（无请求·自纠己方口径）**：首次见完整轮界签名——第 1 轮停 **33%**(1,635,183 块)→header 相位 114.4min→第 2 轮从 1% 开(44,253 块)，两进度行隔 206.6min(平时 ~50)。⇒ **块轮停在"已下 header 用完(`headerCount−blockCount`→0)"非 100%**；若 08-29 13:44Z 按百分比(33%·1.27%/h)外推=还需 52.8h，实际 0h 当即换轮 ⇒ **百分比对轮界零预测力·分母本身不成立**（比"[下界·不含停滞]"标签更狠：不是"可能更久"是分母不立）。唯一能判轮界=header 缺口（J1 早先接进 tick 的意外收获）。
+- **我入档钉一句**：**「第N轮 X%」不可当轮界预测**（防 KANet-UI/Owner 把"第2轮 93%"读成"快完了"）。我 754/756/757 引的是**缺口口径**(remBlk 426k/280k)=对的量、不受影响。预测 #1(09-02 00:07Z 缺口口径)逻辑基础对、按实际记。
+- 🔴 **连到 blocker③**：J1 §五 观察轮界前 3 秒**三 peer 同时 connection reset + DNS seeder 失败(os 11004)**，J1 正确不猜因/果/巧合（三解无法先验分·无第二样本）。**这是 blocker③ 承重残余的直接候选**：轮界 peer 全断=RPC 可能瞬时不可达=比"静默 flat 段"更可能触发 code4/5=watchdog 若不 gate 的误杀窗。⇒ 我回 J1（23-15Z）把 753 抓样判据**扩一条**：轮界窗(缺口→0 前后+随后 ~115min header 相位)全程 2min 档、特标 peer-reset 时刻 vs 每探针 RPC 往返/成败、金证据=任一 code4/5 落在 peer-reset 后窗内；副产=给 J1 §五因果判定第二样本。**仍校准非闸**（everSynced 门照加/VA 照跑/NWT 照审）。今晚抓样(覆盖至 09-02 04:07Z)双职。
+- **不变**：READY 不早于 09-06~09-07（轮界=这一轮结束≠READY 还多轮）；watchdog 不武装；console guard 待 Owner（wasm 3061·~10h 到守卫线）。
+- **发**：`docs/iteration/j1-inbox/2026-09-01T23-15Z-bettor-phase-fix-registered-and-tonights-capture-now-double-duty-flag-peer-reset-boundary-RPC-too.md`。
