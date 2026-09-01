@@ -11006,3 +11006,11 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - 🔴 **提权现实问题先答**：J1 17-05Z 实测 younio IsInRole(Admin)=False 建 /RU SYSTEM=Access denied。部署在 **da9(console 所在机 D:\kanet-tn12)**：J1 若在 da9 有提权(修 Bettor endpoint SSH 路)直接跑；若 da9 同样 denied ⇒ **停步1 回我 ⇒ 我单点上报 Owner 亲手在 da9 提权跑步1**。禁非-/RU SYSTEM 变通(绕过唯一没验的 SYSTEM 上下文)。
 - **不急**：真 UTC 20:15Z wasm 3185@66 ⇒ 守卫线 3800 ~9h 出(~05:39Z)·撞顶 ~14h(~10:09Z)⇒ 充裕时间把步3 SYSTEM-context 验证做干净、别图快跳 /Run 首跑。
 - **J1 回我每关一行**(建成/denied · /Run 已发 · 首跑 log 原文+Last Result · 上线)。我据步3干净向 Owner 报"守卫已上线"。**发**：`docs/iteration/j1-inbox/2026-09-02T00-25Z-bettor-OWNER-AUTHORIZED-wasm-guard-GO-deploy-per-final-runbook.md`。
+
+### (762) 2026-09-01 · ✅ **wasm-guard 上线·独立行为确认**（21:18:01Z 自动巡检 noop 无人触发）· 顶层待办闭环 · 已报 Owner
+- **J1 01-15Z DONE·五关全过**：关1 da9 whoami=desktop-da9qq46\admin IsInRole=True（有提权·未撞 younio denied）·关2 scp scratch/j1-wasm-guard.ps1 SHA256 DA6B1B52…一致·关3 /SC MINUTE /MO 10 /RU SYSTEM /RL HIGHEST /ED 03/09/2026·关4 schtasks /Run（SYSTEM 上下文非手动）·关5 log "21:08:01Z noop wasm 3236.6<3800"+LastResult=0+RunAs=SYSTEM+自限文件未产生。SYSTEM 上下文缺口（17:05Z §三 Global\互斥/Get-NetTCPConnection/Add-Content）由 noop 写出坐实关闭。
+- 🔑 **我独立复核（不靠 J1 回报）**：脚本 SHA256 DA6B1B52…EF9+BOM 逐字节一致✓·首跑 noop✓·**决定性行为铁证=21:18:01Z 日志【自己】新增第二行 noop(3246.8<3800)·我没 /Run·按 10 分钟排程自动跑=任务武装且在跑**（比枚举硬：证"会自己再跑"非"登记在册"）。
+- ⚠️ **操作事实（团队记）**：我这会话**非提权 IsInRole=False** ⇒ `Get-ScheduledTask KANet-WasmGuard` 从我侧 NOT FOUND=`/RL HIGHEST /RU SYSTEM` 任务非提权枚举不到=**枚举假阴非任务不在**（21:18 自动跑证伪）。⇒ 验 SYSTEM 守卫**非提权侧用行为(日志按点自增)不用枚举**；提权侧 Query 是权威登记，两边互补。同族 `feedback-verify-live-db-migration-state-not-just-deployed-commit`/`feedback-committed-not-deployed`。
+- **现状**：守卫 10 分钟巡检·阈值 3800·wasm ~3247(距线 ~550MB/~8h·真 UTC ~05:39Z 到线)·/ED 03/09 前在岗。到线杀+重启 console（预期抖动·自校新实例·没起=LOUD）；重启后新 console 从 patched tree 起=顺带上 singleton 补丁降泄漏（预期未验）。撤销 `schtasks /Delete /TN KANet-WasmGuard /F`。
+- 🔵 J1 自纠样板（/ED saga 3 试）："有明确报错先照它原文做再推断"（09/03/2026 被 dd/mm 解析成 3月9日过去→03/09/2026 SUCCESS=报错括号里明说的格式）。
+- **发**：`docs/iteration/j1-inbox/2026-09-02T01-35Z-bettor-CONFIRMED-live-via-autorun-behavioral-test-nonelevated-cannot-enumerate.md`。**已向 Owner 报上线（独立行为确认）**。顶层待办（console 夜间毒化兜底）**闭环**。
