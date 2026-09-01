@@ -10924,3 +10924,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **backlog 汇总（IBD 期不动，READY/维护窗后按序）**：① 批 2 钱路单例迁移；② post-READY judge-propose 重验；③ refunding 路 mass_ub 定价 + 红线 7 fail-closed（本条）；④ K-18/stale payout_ps_addr 结算恢复线（既有）；⑤ EU VPS（IBD RTT 杠杆）；⑥ v1-rc1 迁移批 A–D + cmpops。
 - 🔴 **关键 Owner 动作（不变，最急）**：09-02 07:19Z（夜间）撞顶前一次提权——A `taskkill /PID <:3200 owner> /T /F`（人工重启，装已落盘的门+单例）或 B `Stop-ScheduledTask` 开维护窗（我接后续，装 poison-liveness 使以后自动检测毒化）。**无自动兜底；不干预则夜间卡死毒化，全绿盲区，J1 能 10 分内报但仍需人 kill。** 推荐 B。
 - 后续（Owner 提权 A/B · console 撞顶前状态 · READY 停右滑验证 23:02Z）见 (751)。
+
+### (751) 2026-09-01 · 选项 C wasm-guard 双轮 NWT GREEN（防夜间毒化, /MO 10 /ED 09/03）· 撞顶是带宽最早 09-02 06:05Z（手动路径期限, 非 07:19Z）· 全部就绪等 Owner 一句授权
+- 推送：(750) `fcd3bc32`、guard 各件（全码 a450123d、终版 89445544、GREEN b76369eb）、J1 带宽更正已推。
+- **ACT"自动回收"更正后的兜底方案 = 选项 C（J1 提, Bettor 批, NWT 双轮 GREEN）**：SYSTEM 计划任务 `KANet-WasmGuard`，`/SC MINUTE /MO 10 /RU SYSTEM /ST 21:00 /ED 09/03/2026`，wasm≥3800（撞顶 4096 前=**防毒化非救毒化**）时 `taskkill /T` 杀 console → supervisor headless 重起装已落盘门 `98ededc8`+单例 `2e88eb52` ⇒ 泄漏归零、任务自然 inert（一次性旧漏码→已修 console 过渡）。**绕开一切死结**：不经 agent/工具闸、不需交互批准、不需 Owner 夜间醒着。J1 younio 真进程树 10 项判别性测试（V1 空 kill CIM 复核报未过=证非恒真、V2 真杀+替身证比新旧 PID、/T 杀到孙 17064、三因三 LOUD、鬼值上下界 LOUD、abandoned-mutex 接管、killed-but-no-restart LOUD 不自限）。NWT 逐行核字节 + 测试设计判别性 = GREEN（scope 诚实：执行结果 J1 自报, 上线真验=§四首跑强制 noop）；三条硬化全落地（/MO 10·杀后 CIM 复核子空·三因 LOUD+验 0<wasm<10000 TryParse 非抛）；KillAction 后门保留（null 默认 deployed==tested 生产不可达）。脚本 `scratch/j1-wasm-guard.ps1`（da9 未创建任何东西）。
+- **J1 撞顶带宽更正（自纠点估）**：撞顶是带宽非点（六轮点估极差 65 分掩盖真带宽 ~2h）；近端五口径离散 11%（剔滞后 12h/zk90 与压在 07:03Z burst 上的端点差 6h）：**守卫线 3800 最早 09-02 02:34Z、撞顶 4096 最早 09-02 06:05Z（手动路径实际期限, 早于 07:19Z 1.2h, 夜间）**。⇒ **更 favor 选项 C**（条件触发、越 3800 即动、不需精确估计/不需人醒着）；只手动路径受此期限。
+- 🔴 **Owner 决策（唯一 gate，脚本侧 100% 就绪）**：一句"授权建 wasm-guard" → J1 `schtasks /create /MO 10 /RU SYSTEM /ED 09/03`（推荐，夜间自动兜底）；或 Owner 自己 B（`Stop-ScheduledTask` 维护窗）/ A（`taskkill /PID <:3200 owner> /T /F`，最早 06:05Z 前）。Bettor 不代批、J1 不自建、NWT 只审代码安全。撞顶前 ~14h（到最早 06:05Z）。
+- 后续（Owner 授权 A/B/C · guard 首跑 noop · READY 漂移应停验证 · 三补丁装载）见 (752)。
