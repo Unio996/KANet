@@ -11014,3 +11014,11 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **现状**：守卫 10 分钟巡检·阈值 3800·wasm ~3247(距线 ~550MB/~8h·真 UTC ~05:39Z 到线)·/ED 03/09 前在岗。到线杀+重启 console（预期抖动·自校新实例·没起=LOUD）；重启后新 console 从 patched tree 起=顺带上 singleton 补丁降泄漏（预期未验）。撤销 `schtasks /Delete /TN KANet-WasmGuard /F`。
 - 🔵 J1 自纠样板（/ED saga 3 试）："有明确报错先照它原文做再推断"（09/03/2026 被 dd/mm 解析成 3月9日过去→03/09/2026 SUCCESS=报错括号里明说的格式）。
 - **发**：`docs/iteration/j1-inbox/2026-09-02T01-35Z-bettor-CONFIRMED-live-via-autorun-behavioral-test-nonelevated-cannot-enumerate.md`。**已向 Owner 报上线（独立行为确认）**。顶层待办（console 夜间毒化兜底）**闭环**。
+
+### (763) 2026-09-01 · J1 双封：①根因=吞吐衰减(每块I/O+20%·单线程钉死)⇒裁 READY ETA 一律下界 ②文件名时钟快4h(手打漂移)⇒采纳 date -u ③--ram-scale 先量化再定
+- **🔴 时钟修正（承重·影响全部时间线判断）**：J1 查得 j1-inbox **文件名**时间戳比真 UTC(mtime) 快 **4:06~4:57**(不固定=漂移非时区)，你我都中——脚本生成的时间戳(tick/guard/capture Get-Date)全对，**错的是手打文件名**(陈旧参照且漂)。杀伤面=deadline/READY 窗"某动作是否赶在某 UTC 前"会误判。**采纳修正：即刻起我文件名一律 `date -u`**（首份 `2026-09-01T21-28Z-…`）。🔴 切换一次性副作用=真 UTC 名(21-28Z)字典序排在旧 +4h 名(00-25/01-15/01-35)**之前**但真实更早⇒**重建时间线一律以 mtime 为准**(J1 表即 mtime)。
+- **根因(答 Owner 09-01 驳 6.6天 ETA「巨大瓶颈/思路可能错」)**：非单点卡=**每块处理成本随链深上涨(每块读 +20%/读字节 +21%/10.94MB)且只 1/24 核干活**⇒吞吐单调衰减(57400→51392/h −10.5%)。两套独立计数器(CPU TotalProcessorTime vs 磁盘 ReadOperationCount)同向同量级 +20%。衰减率方向可靠(5窗全负3窗显著)数值不可靠(斜率 -22~-661 随窗 30 倍差·不报单一率)。peers 已排除(peers=1 吞吐中位最高 r=-0.055·全序列中位就是1)。
+- **裁(a)=GO**：**所有 READY ETA 一律【下界·带窗口标签】**，不作中心估计，措辞"不早于 X 且随吞吐衰减右滑"；涉衰减率必带窗口标签(无标签=挑窗口)。KANet-UI "不早于 09-06~09-07 且可能右移"本就是下界框法，确认保持不回退中心值。同族 `feedback-report-eta-with-caliber-labels`。
+- **J1 §5 密度模型自纠**（收·印证 755）：Δblk≡Δdaa(99% 心跳对)⇒`吞吐/密度−60 ≡ −Δlag/Δ墙钟×60` 是**恒等式·零独立预测力**，只作吞吐/密度分解器(靠它看出 92% 占比=分母吞吐塌非分子密度涨)。别人别再拿它外推。
+- **裁(b)=先量化再定·默认零动作**：--ram-scale/单线程均需重启·IBD 期禁止(同我 blocker③ IBD 不重启 kaspad 同源)。但 Owner 点名瓶颈、--ram-scale 是唯一直接压每块磁盘成本旋钮⇒不焊死为"零动作"。请 J1 量化(不重启纯推算)：①重启代价(丢多少 IBD 进度/spc_daa_index 空洞/重来分钟) ②--ram-scale 收益(10.94MB 读压到多少→吞吐/剩余 IBD 改善) ③判别:加速【剩余 IBD】还是只稳态(只稳态⇒等 IBD 完维护窗做零成本;加速剩余⇒一次重启 vs 省天数=真权衡)。拿到①②③我形成**单条建议**上报 Owner(不发菜单)。在那之前零动作、不擅碰节点。
+- **发**：`docs/iteration/j1-inbox/2026-09-01T21-28Z-bettor-adopt-utc-filenames-and-eta-lowerbound-caliber-ramscale-quantify-first.md`。**根因转 Owner**（瓶颈已定位+ETA 改下界+一杠杆量化中）。
