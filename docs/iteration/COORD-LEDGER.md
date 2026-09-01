@@ -10909,3 +10909,11 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - 🔴 **READY 口径 re-baseline（J1 12:3x Z，采纳）**：J1 回看自己 571 条 lag 采样——ETA 3 天右滑 **120h**（08-29 最早 09-02 14:52Z → 现 09-07 20:27Z，单调，24h 收敛率 88→34 分/h，密度升致，非仪器错）。近 12h 稳（滑 3.3h）但 **24h 仍发散（滑 66h）、72h 严重发散（滑 120h）**。⇒ **团队 READY 口径改**：不再单日/点估，按"**中估 ~09-06（密度法）～09-07+（lag-24h 法，仍右移），不早于 09-06，且日期本身可能继续右滑**"用；硬下界 09-02 01:00Z 不变（那条不依赖收敛率）。附硬量（零外推）：`headerCount − blockCount = 647,362` = 本轮块体剩余下界（~11.3h 清空），跨轮缺口趋势 = 120h 右移的可观测对应物（J1 已接仪器盯）。
 - **维护窗**：仍卡 Owner 提权第 1 步 `Stop-ScheduledTask` ~15h；门+单例已落盘，ACT 今晚 **09-01 20:25Z** 自动触发装载；READY 右滑 ⇒ 维护窗时间更充裕（不改急迫度：console 仍会先于 READY 到 ACT）。
 - 后续（Owner 提权 / ACT 今晚触发 · verify · READY 按新口径 · Owner EU VPS + 迁移优先级）见 (749)。
+
+### (749) 2026-09-01 · 🔴 更正承重错误：ACT"自动回收"不存在——console 无任何 wasm 触发的自动重启，撞顶后 supervisor 盲、会卡死在毒化态直到人工提权 kill（J1 CRITICAL 查证，Bettor 认错）
+- 推送：(748) `2a1ac396`、J1 各件（含定谳 36365a79/d9c6cd21、漂移 f6f234d1）已推。
+- 🔴 **Bettor 承重错误更正**（J1 13:1x Z 在 live 树查证，Bettor 亲核确认）：我 (748)/d9c6cd21 及多次报 Owner 说的"**ACT 3200 今晚自动触发有序重启/自动回收兜底、最坏回收 2.6h、不需人值守**"——**全错**。查证：① 我的 `ready_watch.sh` L26/L39 ACT 只是告警级别 `tag=WASM_ACT_RESTART_DUE`（唤醒我），**零重启动作**；② live supervisor（PID 35740，`kanet-console-supervisor.sh` 08-04 版）**0 条 wasm/poison 逻辑**，只有 curl 3×fail→重启；`console-poison-thresholds.env`/带 `WASM_CAPPED_MB` 的 poison-liveness 版**只在 `scratch/_wt_sup` 未部署**；③ 撞顶后 curl 仍 HTTP 200 ⇒ supervisor 永不判死（08-30 实证：毒化 3h14m 零 health fail，唯一恢复 = Owner 07:41:08Z 手动 taskkill）。**⇒ 全仓无任何代码因 wasm 重启进程；无自动回收。** 硬上界 1212 MB/h 仍成立（速率界，与兜底无关）；但"回收 2.6h"作废——不 kill 就永远不回收。
+- **真实后果**：不干预则 console 按 75.3 MB/h 于 **~09-02 08:16Z 撞顶毒化**，然后 HTTP 200 卡在毒化态（功能中断、supervisor 盲）**直到人工提权 kill**（重演 08-30 的 3h14m outage）。
+- 🔴 **二选一（都需 Owner 提权，09-02 08:16Z 前）**：**A** = 撞顶前一次人工提权重启 console（`taskkill /PID <:3200 owner> /T /F` → supervisor headless；门+单例已落盘即装载）；**B** = 部署 `scratch/_wt_sup` 那版 poison-liveness supervisor（= 维护窗的 supervisor 补丁 `fa6e9e4f`，需一次提权重启 supervisor bootstrap）。**A 治本轮、B 治本轮+永久自动化**（推荐 B = 把维护窗一次做全）。Owner 正是维护窗阻塞点（~15h）；若 Owner 持续不可用则只剩事后人工。
+- J1 自纠：曾据"ACT 会自动回收"撤掉 `wasm>3600` 前哨（"永不触发"），该前提为假 ⇒ 已恢复 + 补"wasm≥4000 且近 3h 速率<5 MB/h = grow 失败/毒化"判据。
+- 后续（🔴 Owner 提权 A 或 B，09-02 08:16Z 前 · 我盯守 ACT/CRIT/CAPPED 只告警不动作 · READY 停止右滑验证 23:02Z）见 (750)。
