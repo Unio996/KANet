@@ -11055,3 +11055,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **我回(22-15Z)**：收两条。加一层——post-restart 仍 66 则除 :788 外分(a)supervisor 没真从 patched 树起 (b)另有源；fire#1 我除测斜率**还核新 PID 启动来源/是否带 singleton**分"补丁没生效"vs"生效但另有源"。🔴 **独立性说准**：J1 端点差 + 我 console.log wasmBytes 线性斜率 = **两方法一数据源**(都读 console 自报 wasmBytes)⇒能抓算法/整数化错·抓不了数据源本身错⇒报 Owner 只说"两算法对同一自报值一致"不夸"两独立测量"。判读共识 <10=塌收工/~66=分(a)(b)带实测精化 A/B/C·样本不足都说不足不凑数。
 - **时刻**：J1 05:20Z / 我真 UTC 守卫线 ~05:39Z 同量级(速率估计差)·以实际 wasm 触 3800 为准·谁先看到记时刻+新 PID。我 ready_watch CRIT@3800 进场。
 - **发**：`docs/iteration/j1-inbox/2026-09-01T22-15Z-bettor-good-code-verify-and-crash-on-success-catch-we-both-measure-fire1-but-same-wasm-source.md`。
+
+### (769) 2026-09-01 · J1 消掉 fire#1 独立性缺口(非仅标注)：上线第二源=OS 私有字节(Win32_Process·与自报无关)⇒ fire#1 真两独立源 · PID 变=硬重启判据 · 四项交付定
+- **J1 22-32Z**（回我 768 独立性说准）：**上线(07d933aa)第二源=`Win32_Process` PrivatePageCount/WorkingSet·OS 计量·与进程自报无关**→ logs/j1-console-osmem.log·同 PID 跨时 ≥0.25h 给增速。**PID 变=硬重启判据**(不依赖任何自报值·比原"wasm 跌落>500MB"更硬)。自报口径失效(无台阶)时第二源照打=最有用时。首读两源同量级:OS 私有 3,697MB vs 自报 wasm 3,328.8MB·差 ~370MB=node/V8 开销合理。坑:114s 内私有 +457MB 而自报 wasm 不动(wasm 堆大块提交/自报走 10MB 台阶)⇒两序列短窗不可比⇒背离判据只 ≥2h 生效·<2h 只提示。
+- **fire#1 四项(J1 给)**：①击发时刻=guard 日志 wasm 首次 ≥3800 那行时间戳(非 05:20Z 钟点) ②新 PID=OS 源自动记·与 guard"确认新实例"互核 ③重启后速率=自报端点差 + OS 私有增速**两源并列不合并** ④样本不足明说。②正是我(a)/(b)判别量:PID 变=排除"根本没重启"·剩"起了没换代码副本"vs"另有源"。
+- **fire#1 分工(记·不另回信)**：J1 owns 两源速率 + PID 身份；我 owns 现场盯 guard"确认新实例"超时 vs ~10-15s 重启延迟的假 LOUD + 若速率高则接手"why patched 还漏"根因(核新 PID 加载源)。我不重复算斜率(J1 两源覆盖)·CRIT@3800 进场。判读共识 <10=塌收工/~66=分因带实测精化 A/B/C。
+- **收 J1 letter**（其 commit-poll 见收讫·无另回信=fire#1 协议已全定、双方执行即可）。
