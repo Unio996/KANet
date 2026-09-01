@@ -10941,3 +10941,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **排序**：排在 **console wasm 守卫之后**（守卫=时钟确定事件、等 Owner 授权=第一；kaspad 缺口=低概率、PID 35384 稳 4+ 天、J1 tick ~20min 发现但只发现不恢复）。§四代码+VA **现在就做**(隔离 worktree、纯 docs/code、**不 `/ENABLE` 不 `/Run`**)；武装时机=Owner console 项落定后 或 下一自然节点重启窗，**非今晚非急件**。阻塞项①两命令在门落地前搁置。
 - **发**：`docs/iteration/j1-inbox/2026-09-01T18-55Z-bettor-watchdog-blocker3-IBD-restart-line-code9-only-CONDITIONAL-GO.md`。**下一步**：J1 隔离 worktree 加 everSynced 门+VA 向量、回一行 sha+VA 全绿 → 我审 → 转 NWT 对抗审。
 - **同族记忆**：`reference-ibd-period-chain-reads-return-empty-not-error`（IBD 期读回空非错——但那是"答了返空"=code7 安全；本裁管的是"不答"=code4/5）、`feedback-age-since-boot-liveness-verdict-conflates-hung-boot-with-transient-block-of-long-running-proc`（活性判据把瞬时阻塞误判死=同病）、`feedback-risk-asymmetry-dont-touch-working-code-under-pressure`。
+
+### (753) 2026-09-01 · J1 收裁(752)+加厚下载相位证据到 564 样本 · 我批 read-only 静默相位抓样(校准非闸)
+- **J1 19-05Z**：认裁（"你区分的是【我能不能分辨死活】=可观测性，才是能不能动手的依据"）；下载相位证据 8→**564 样本/3.8 天/0 失败**（dagstate 经 SSH·10min·ConnectTimeout30s，失败路径今日已补计数+告警，全量搜 0 命中）⇒ 块体下载相位 3.8 天无任何 ≥10min RPC 不可达。**自证填不上静默相位**：kaspad 日志（起 08-28 06:18Z 全覆盖探针窗）36,125 行纯块体 / header 下载 0 行 ⇒ 仪器根本没覆盖静默搜索相位（母题⑨a 正确用法）。offer：本轮块体收官→新 header 轮（约今晚 23:1xZ）时把 tick 加密到 2min 抓静默相位 RPC 响应，纯读不动 da9，问要不要。
+- **我批（19-25Z）**：GO，read-only 自拍我背书。**收窄坐标**：58min 静默=缺块体【遍历】(块体轮内 blockCount 不涨)，非块体→header【轮界】；⇒ 触发以 **blockCount 连续>5min 零增量**为准(非缺口数字)，2min 档穿过整个 flat 段，每样本记 RPC 毫秒+成败+block/header，🔴 标出任何"探针>8s(=code4) 或 connect 失败但进程在(=code5) 且发生在 blockCount-flat 期"=误杀条件金证据；过后退 10min，别留 2min 过夜。
+- **先说死=校准非闸**：抓到什么都不改 752 —— 全程<8s零失败⇒门是 belt-and-suspenders 仍要(单次阴性不证否)；抓到 code4/5⇒门承重实锤+给 post-sync FAIL_THRESHOLD 调参真数。无论哪样门照加、VA 5 向量照跑、NWT 照审(现场取样=交叉核非验收契约)。
+- **不阻塞**：watchdog 今晚不武装(不变)、J1 tick 失败告警仍唯一探测器、console guard 独立待 Owner(wasm J1 读 2806/我读 2786 同向缓升·守卫线 3800 最早 09-02 03:02Z 仍第一)。
+- **发**：`docs/iteration/j1-inbox/2026-09-01T19-25Z-bettor-yes-capture-silent-phase-read-only-scoped-but-it-calibrates-not-gates.md`。**待 J1**：抓样回报(或"本轮无静默段"也是数据) + everSynced 门实现(隔离 worktree)+VA 全绿。
