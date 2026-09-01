@@ -10902,3 +10902,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **verify 判据(J2 建议, 采纳)**：重启后 6h wasm 斜率 <5 MB/h 且无 10MB 步阶 = 补丁生效；偶发 burst 单独记不算失败。
 - 🔴 **Owner 现状**：ACT 今晚 18:56-20:00Z 自动触发一次 console 重启(装门+单例, 泄漏即止)——那一刻仍需一次能杀 SYSTEM console 的提权(同现在)；毒化线 09-02 05-08Z。**建议 Owner 在 ACT 前跑 `Stop-ScheduledTask` 把维护窗一次做全(含 supervisor 补丁), 最省事**；否则 ACT 时再单点提权杀 console 一次。
 - 后续（Owner 提权 → 维护序 / 或 ACT 今晚触发 · verify · J1 盯守 · READY 中估 09-06）见 (748)。
+
+### (748) 2026-09-01 · console 泄漏线闭合(硬上界 1212 MB/h·补丁确认覆盖·errored=11 解释) · 🔴 READY 口径 re-baseline：3 天右滑 120h ⇒ 改"不早于 09-07 且仍可能右移"非点估 · 维护窗仍卡 Owner 提权 ~15h
+- 推送：(747) `6ccfba4b`、J1/J2 泄漏对账各件（含定谳 36365a79 / D=30s d9c6cd21 / READY 告警 f2b9d68e）已推。
+- **console 泄漏线闭合**：J1 端点差法证实复利加速 → J2 定谳 = **纯频率**（judge-propose tick 4→8/h，not-synced ⇒ tick 耗时缩 ⇒ 转更勤，步↔tick 1:1、步长恒 10.1 MB）；J1 三计数器"全平"是伪反证（结构性看不见 judge-propose，MB/utxoFetch 伪比率），J1 自认三处错、采纳"比率分母须真是驱动量"（规则 82 同族）。**风险量化**：D=30s 硬编码（`bshard-settle-daemon.mjs:1116` 零覆盖）⇒ 泄漏速率**硬上界 1212 MB/h、非无界**（最坏回收 2.6h）。**errored=11/51h** = IBD 预期（walk exhausted / cannot find header，门转 skip）+ 已知 stale `payout_ps_addr`（K-18 挡，20 天停摆那件，非新缺陷）。**补丁确认覆盖**（全走 captureSideLockDaa 叶子，gate skip 不随频率涨，纯频率 ⇒ 单例批 1 彻底解）。backlog 2：批 2 钱路单例、post-READY judge-propose 重验（READY 后 not-synced 族消失、walk 跑到底、propose 转钱路 ⇒ 今泄漏模型不可外推过 READY，J1/J2 确认）。
+- 🔴 **READY 口径 re-baseline（J1 12:3x Z，采纳）**：J1 回看自己 571 条 lag 采样——ETA 3 天右滑 **120h**（08-29 最早 09-02 14:52Z → 现 09-07 20:27Z，单调，24h 收敛率 88→34 分/h，密度升致，非仪器错）。近 12h 稳（滑 3.3h）但 **24h 仍发散（滑 66h）、72h 严重发散（滑 120h）**。⇒ **团队 READY 口径改**：不再单日/点估，按"**中估 ~09-06（密度法）～09-07+（lag-24h 法，仍右移），不早于 09-06，且日期本身可能继续右滑**"用；硬下界 09-02 01:00Z 不变（那条不依赖收敛率）。附硬量（零外推）：`headerCount − blockCount = 647,362` = 本轮块体剩余下界（~11.3h 清空），跨轮缺口趋势 = 120h 右移的可观测对应物（J1 已接仪器盯）。
+- **维护窗**：仍卡 Owner 提权第 1 步 `Stop-ScheduledTask` ~15h；门+单例已落盘，ACT 今晚 **09-01 20:25Z** 自动触发装载；READY 右滑 ⇒ 维护窗时间更充裕（不改急迫度：console 仍会先于 READY 到 ACT）。
+- 后续（Owner 提权 / ACT 今晚触发 · verify · READY 按新口径 · Owner EU VPS + 迁移优先级）见 (749)。
