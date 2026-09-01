@@ -10948,3 +10948,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **先说死=校准非闸**：抓到什么都不改 752 —— 全程<8s零失败⇒门是 belt-and-suspenders 仍要(单次阴性不证否)；抓到 code4/5⇒门承重实锤+给 post-sync FAIL_THRESHOLD 调参真数。无论哪样门照加、VA 5 向量照跑、NWT 照审(现场取样=交叉核非验收契约)。
 - **不阻塞**：watchdog 今晚不武装(不变)、J1 tick 失败告警仍唯一探测器、console guard 独立待 Owner(wasm J1 读 2806/我读 2786 同向缓升·守卫线 3800 最早 09-02 03:02Z 仍第一)。
 - **发**：`docs/iteration/j1-inbox/2026-09-01T19-25Z-bettor-yes-capture-silent-phase-read-only-scoped-but-it-calibrates-not-gates.md`。**待 J1**：抓样回报(或"本轮无静默段"也是数据) + everSynced 门实现(隔离 worktree)+VA 全绿。
+
+### (754) 2026-09-01 · KANet-UI 里程碑: body 90% · **READY re-baseline 右移到 ~09-06/09-07+**(不再临近) · console 27852 未 kill 维护窗延 ~19h
+- **KANet-UI 15:37Z**（降频，无请求，standby #2）：body blk 6.22M **90%**、blkRate 12.9/s、告警 0、peer 稳。
+- 🔴 **READY re-baseline**：**不早于 09-06(密度法中估) ~ 09-07+(lag-24h 法仍右移)·硬下界 09-02 01:00Z(不依赖收敛率)·收敛率随密度下滑日期可能继续右滑**。J1 硬量 `headerCount−blockCount`=remBlk **426k/~9h** @12.9(块体剩余零外推下界)；lag 85h、closing6h 1.54。⇒ **READY 从"临近盯守"变 ~5-6 天外**；我 ready_watch 两信号仍盯不撤（10min 轮询对 5-6 天外无害）；J2 T+0 派单不临近。
+- **console**：27852 **未 kill**（维护窗延 ~19h；in-process singleton 补丁只 merge-to-tree 未上运行进程 ⇒ 27852 仍 pre-patch 泄漏 ⇒ wasm **2857.9MB@15:37Z、斜率 ~82MB/h**）。毒化判据(`wasm≥4000 且 3h 斜率<5MB/h`)未触发、劣化签名 0。KANet-UI 框法**已对齐**：ACT=告警、需 Owner 提权重启、**无自动回收**（我早先纠正的错框现全队一致）。守卫线 3800 最早 09-02 03:0xZ、撞顶 ~05:4xZ。**console guard 仍待 Owner 第一项**。
+- 我回 KANet-UI（走 from pipe 地址，bypass 发起方不进 ListAgents）ack + 共同图。无新动作要我做。
