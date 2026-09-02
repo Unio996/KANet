@@ -11143,3 +11143,11 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - 🔑 **fire#1 = singleton 补丁装上运行进程的交付载体**（767 承重点）——旧 27852 有 IBD 门无 singleton(漏)、新 34368 两补丁都上。**post-restart 速率 = "4 次塌"判据**：起后台 b71gv2g8l 等新样本测 ~35min 斜率（<10=补丁生效泄漏根治=4 次塌收工/~42=没塌查另有源非 :788）。测完回 J1+记。
 - **报 Owner**：守卫首次真触发·全自动挡住毒化·console 已重起健康·(我 762 承诺"真触发我记录并盯新实例是否起来"=已办)。
 - **发**：`docs/iteration/j1-inbox/2026-09-02T06-32Z-bettor-FIRE1-CLEAN-SUCCESS-guard-fired-at-3801-killed-tree-new-PID-34368-healthy-rate-measuring.md`。KANet-UI 两侧互核新实例(其也核 wasm 归零/门 e12e8ac4/guardAlive)。
+
+### (781) 2026-09-02 · fire#1 三方互核：KANet-UI 5/6 concur + 1 背离(hb_guard 未随 fire#1 重起→我已修 PID 768805)· J1 OS 第二源确认四项 + 树杀救 35 孤儿 · 节点相位后恢复良好
+- **KANet-UI 独立互核 5/6 concur**：owner 34368✅/wasm 4MB 归零✅/curl 302+phase body+consoleHbAge 2s 事件循环健康✅/门 e12e8ac4✅(preprune skip node not synced 在刷)/单例 ca4a852d✅(**源码核** chain-data.js:500-501+relay.js:365·日志无痕=代码构造非日志行)/poison 劣化 0✅。🟡 mass-floor panic 12 条=已知 calculateTransactionMass v1-covenant panic(memory reference-kaspa-wasm-covenant-binding-moved·pre-existing/caught/非 poison·新旧同有)=非 fire#1 劣化。
+- 🔴 **1 背离(KANet-UI catch·我修)**：**hb_guard 未随 fire#1 重起**——它端口门控(只 :3200 LISTENING 时 touch)·fire#1 杀 console→:3200 断→06:29:32Z 按设计 exit("letting supervisor restart")但不自恢复→新 console 34368 缺该层。hb_guard-alive.txt 末 touch 06:28Z stale。**我 nohup 重起(新 PID 768805·alive-file 2s 复刷)**。⇒ guardAlive 回 Y。(注:新 console 自写 console-heartbeat 2s=supervisor 正常护着·hb_guard 是额外层。)
+- **J1 OS 第二源确认四项(06-35Z·按 22-15Z 口径)**：①击发 06:28:03Z(wasm 首≥3800=3801.4)②新 PID 34368 起 06:29:46Z·OS 源自动打"🔺PID 已变"硬判据·与 guard"确认新实例"互核一致 ③重启后速率**尚不可用**(台阶 0/端点差 0·wasm 4.0/OS 提交 737MB vs 重启前 4208)④样本不足明说·~20-30min 两源并列。**树杀救 35 孤儿**(若 Stop-Process 单杀=35 子孤儿占内存/端口新实例起不来·NWT taskkill /T 修实证)。J1 仪器修兑现(无台阶除零修=此刻"样本不足"非除零串·>500MB 跌落检测截窗·PID 硬判据)。
+- 🔴 **rate 读数 caveat(J1 01:2xZ 事前·我登记)**：新实例 tick 可能天然更快(自限反馈)⇒有残余泄漏则速率偏高·**别误读"跑得快"为"补丁没生效"**·J1 给 tick 频率(预测#6)拆。我 b71gv2g8l 结果按此读(<10 清塌/~42 没塌/中间需 tick 频率拆)。
+- **节点相位后恢复良好**：lag 1h 收敛回 23.9 分/h(9.1 天口径)·新密度 594/吞吐 56204/临界 63%·第3轮块下载 2%·本轮余 2.13 天[下界]。
+- **发**：commit J1 `2026-09-02T06-35Z-j1-FIRE1-four-items...`。post-restart 速率两源 ~20-30min·我+J1 合看后报"4 次塌"判据。
