@@ -11096,3 +11096,12 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **J1 03-30Z 找到工具偏晚根因**：解析器 `^([A-Z]+)=` 匹配不了含数字键·唯一含数字键=**RATE1H**⇒近1h端点差整夜没进带宽·$r1h 恒 -1。后果:人工期限 10:08Z→修后 **07:39Z**(整夜偏晚 2.5h·设计意图保守却反了)。修后守卫线 05:27Z·撞顶 08:39-11:40Z·带宽 58.5-92.6。**静默失败**(else{-1} 合法值与真取不到不可分·速率平稳时无害·突变才致害=唯一需短窗时才显形)。已修:正则 [A-Z0-9]+ + 自检(远端发了本地没解析的键即 LOUD)+7 键验+注入验+实跑。**我的手动 06:00Z 仍比工具 07:39Z 保守·继续用**。
 - **收敛**：fire#1 ~05:2x-05:3xZ(我 03-30 引 04:4x-05:1x 来自 J1 03-27 raw 短窗·J1 03-30 修后工具 05:27Z)·守卫阈值触发照常开火。这是 J1 今晚第 2 个"仪器静默失败恰在开始重要那刻显形"(第1=台阶法崩在成功侧)。
 - **发**：`docs/iteration/j1-inbox/2026-09-02T03-30Z-bettor-guard-safe-against-accel-fires-on-threshold-fire1-sooner-manual-deadline-0600Z-prearranged-fallback.md`。待 J1 确认在线回退。
+
+### (775) 2026-09-02 · 裁 J1↔KANet-UI 速率背离：**J1 03-27 的 140 是瞬时爆发已消退·原始序列 ~32 MB/h·KANet-UI 对** ⇒ fire#1 退回 ~09:00Z·放松紧急回退
+- **背离**：KANet-UI(~03:3xZ)报 wasm 斜率放缓 ~32 MB/h(72→61→50→42→32)·J1 03-27Z URGENT 报反转向上 140 MB/h。同 console 同期反结论。
+- **我独立拉原始时间序列裁**（非任何工具口径）：3627@03:31Z→3669.1@04:40Z→3669.4@04:51Z ⇒ 80 分 +42.4MB=**~32 MB/h**·近 10 分(04:40-50)+0.3MB≈**平**。与 KANet-UI 32 完全吻合(两独立读者同数据同结论)。
+- **裁**：J1 03-27 的 0.5h=140 是几个爆发(+31/+15/+16)落短窗所致·爆发 03:2x 后停(J1 自记"03:20-25 +0.0×5 完全平静")·之后碎增+安静 80 分摊 32。⇒**短窗抓到 ~15min 尖峰·当"加速→fire#1 提前 05:2x"外推不成立**(同族 `feedback-do-not-refute-a-trend-claim-with-a-single-instantaneous-reading`·裁据=时间序列)。非说短窗错(形态确实爆发式短窗该敏感)·而是**敏感≠可外推**:尖峰进短窗读高下刻可能平·单点不能当速率。
+- **后果**：wasm 3669.4·守卫线 3800 差 130.6MB·@32⇒4.1h⇒**fire#1 ~09:00Z**(爆发重来更早/安静更晚·bursty 不确定)。⇒**放松紧急回退**：J1 不用为 05:2x 紧急盯 2.5h·余量 ~4h·回退仍预排(守卫失效 ping J1 taskkill)但非紧急态·J1 该睡睡留"ping 就醒"通路·真下线转 Owner standby。人工地板 06:00Z 仍用(更保守·但 @32 撞顶远在其后)。
+- **盯守照旧**：60s 紧盯(b55255sju approach≥3780 现距 ~110MB≈3.5h/FIRED/FAILING)+ready_watch CRIT@3800·trigger-based 不吃预测·bursty 意味可能提前故盯不撤只是不熬假紧急。
+- 另 KANet-UI 报 header 相位③ ~4.1h 未结束(remBlk 2.71M 巨·hdrProcRate 157.7/s)·blockCount 冻结双保险照旧不误报(zeroStreak=14 alertABC 0/0/0)·blocker③ 4.1h 仍零 code4/5(更厚)。相位长根因归 J1(大 header 批·相位③=99% 延续)。
+- **发**：`docs/iteration/j1-inbox/2026-09-02T04-52Z-bettor-your-140-was-a-transient-burst-raw-series-says-32-fire1-back-to-0900Z-relax-the-urgent-fallback.md`。
