@@ -11136,3 +11136,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - 🔑 **教训**：**crossing 由【绝对值】定·不由基线外推定**。干净底层仍 42·但爆发叠加让绝对值跑在基线前⇒fire#1 提前到 ~06:4xZ(基线 42⇒48min·爆发更早)非 04-59 说的 07:5xZ。不改速率裁(仍 42 收敛过)·只是时刻按绝对值提前。
 - **动作**：①更新 J1 回退待命窗 07:3x→**~06:2xZ**(守卫仍主路·回退只在 FAILING 触发·但 fire#1 提前故待命提前·J1 下线则转 Owner standby)。②ack KANet-UI(好 flag·我 60s 盯已覆盖不靠其算时刻)。③我 60s 盯活(approach≥3780 现距 14MB≈20min·FIRED 掉>150·FAILING≥3980)·fire#1 到记时刻+新 PID+两源速率+形态(768/769/773/778)+核新实例起没起。
 - **发**：`docs/iteration/j1-inbox/2026-09-02T05-54Z-bettor-fire1-imminent-wasm-3766-34MB-from-3800-be-ping-ready-from-0620Z-not-0730Z.md`。守卫阈值触发·安全不受时刻影响。
+
+### (780) 2026-09-02 · ✅ **fire#1 干净成功**：守卫 06:28:03Z 在 wasm 3801.4 触发·taskkill /T 灭 27852 树(36 子全 SUCCESS 无残留)·06:30:01Z 新实例 :3200 PID 34368·新 console 健康·回退没用上 · post-restart 速率测量中
+- **实录（我独立核守卫日志 logs/j1-wasm-guard.log）**：06:08 noop 3780.8·06:18 noop 3791.1·**06:28:03Z 🔴触发 wasm 3801.4≥3800 目标 PID 27852**·taskkill /PID 27852 /T /F exit=0（36 子进程+主全 SUCCESS）·06:28:06 ✔树杀复核 27852 消失无残留·**06:30:01 ✅确认新实例 :3200 PID 34368**。守卫（J1 15-55Z NWT GREEN 那份）每关按设计走：阈值触发/taskkill /T 灭整树/CIM 复核无残留/确认新实例·**无假 LOUD**（kill 06:28→新实例 06:30 = 2min 内在超时内）。
+- **新 console 34368 健康（我核）**：curl :3200=200·心跳 1s·settle-daemon+relay 在写(settle 06:31:12 tick)·**加载 patched 树**(getSharedRpc 在=带 singleton)·console.log 已轮转(新 103KB fresh·故旧 60s 盯读不到 heap-sample 在等新文件首条)。⇒ **kill→supervisor→patched 重起链按 22-03Z(767) 预测走通**·回退(ping J1 taskkill)没用上·守卫全自动。
+- 🔑 **fire#1 = singleton 补丁装上运行进程的交付载体**（767 承重点）——旧 27852 有 IBD 门无 singleton(漏)、新 34368 两补丁都上。**post-restart 速率 = "4 次塌"判据**：起后台 b71gv2g8l 等新样本测 ~35min 斜率（<10=补丁生效泄漏根治=4 次塌收工/~42=没塌查另有源非 :788）。测完回 J1+记。
+- **报 Owner**：守卫首次真触发·全自动挡住毒化·console 已重起健康·(我 762 承诺"真触发我记录并盯新实例是否起来"=已办)。
+- **发**：`docs/iteration/j1-inbox/2026-09-02T06-32Z-bettor-FIRE1-CLEAN-SUCCESS-guard-fired-at-3801-killed-tree-new-PID-34368-healthy-rate-measuring.md`。KANet-UI 两侧互核新实例(其也核 wasm 归零/门 e12e8ac4/guardAlive)。
