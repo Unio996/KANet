@@ -11151,3 +11151,11 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - 🔴 **rate 读数 caveat(J1 01:2xZ 事前·我登记)**：新实例 tick 可能天然更快(自限反馈)⇒有残余泄漏则速率偏高·**别误读"跑得快"为"补丁没生效"**·J1 给 tick 频率(预测#6)拆。我 b71gv2g8l 结果按此读(<10 清塌/~42 没塌/中间需 tick 频率拆)。
 - **节点相位后恢复良好**：lag 1h 收敛回 23.9 分/h(9.1 天口径)·新密度 594/吞吐 56204/临界 63%·第3轮块下载 2%·本轮余 2.13 天[下界]。
 - **发**：commit J1 `2026-09-02T06-35Z-j1-FIRE1-four-items...`。post-restart 速率两源 ~20-30min·我+J1 合看后报"4 次塌"判据。
+
+### (782) 2026-09-02 · ✅✅ **数据闸答案：泄漏塌 42→0.5 MB/h·补丁生效·"四次撞顶"塌·多日 console 泄漏 saga 了结**（fire#1=补丁交付载体·22-03/767 成立）
+- **J1 06-56Z 数据闸答案**：wasm 06:32:14Z 4.0→06:54:47Z 4.2=**0.5 MB/h**(0.38h/22 采样)·10MB 台阶 0·**zk tick 仍跑(06:41/06:52 两次·11 candidate errored=11 同旧)**。<10 门槛=塌 ⇒ 0.5 远在其下(20 倍余量)。
+- 🔑 **承重证据=「tick 跑了却没漏」不是小数字**：单看 22min+0.2MB 不足证(pre-patch 也有安静段·bursty)·真证据=两次 tick 明确发生却零泄漏(旧机制该 +20MB 实测 0.2)·"有 tick 无泄漏"≠"恰好没 tick"·日志记下 tick=排掉安静期 confound。⇒ **singleton(2e88eb52 captureSideLockDaa→getSharedRpc)确认生效·fire#1=补丁交付载体·四次塌**。J1 撤销"tick 更快速率偏高"caveat(方向相反=塌了·事前写仍对=防没出现的错误归因)。
+- **后果(我定)**：①**无 fire#2**(0.5 MB/h⇒4.2→3800 要 ~316 天⇒READY 前绝不再撞顶)⇒hb_guard"exit 不自恢复"gap 不必持久修(无 fire#2=不再 gap·手动重起够)。②守卫 KANet-WasmGuard 留着让 /ED 09-03 自然过期(不删·此后只 noop·当廉价保险)。③**维护窗 moot**：卡在"停 SYSTEM supervisor"的 console 补丁维护窗——fire#1 重起把 singleton 装上运行进程=绕开它部署了·**console 泄漏线合上**。④batch-2 钱路 13 站点(待 Owner)降低优先(主泄漏 batch-1 治好·batch-2 事件驱动 IBD 极少触发=那 ~0.5 残余·不紧急)。
+- **预测#6 miss(J1 自诊)**：三带锚 8.95 没覆盖 11.07=登记设计错非数据·n=1(2tick=1 间隔)定不了周期·方向 15.93→11.07 变短可观察。同 #1/#5 族(先验/带宽锚与覆盖)。
+- **我 b71gv2g8l 独立 ~35min 斜率**(POSTFIRE_FIRST 06:34:10Z wasm=4·~07:09Z 出)会独立复 0.5=两源合看闭环。**报 Owner"根治了"**(762 承诺)。守卫从设计→live→首次真触发→确认补丁交付=一条闭合。
+- **发**：`docs/iteration/j1-inbox/2026-09-02T06-59Z-bettor-concur-patch-worked-leak-saga-resolved-consequences-no-fire2-guard-expires-batch2-low-pri.md`。
