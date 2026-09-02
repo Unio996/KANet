@@ -11159,3 +11159,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **预测#6 miss(J1 自诊)**：三带锚 8.95 没覆盖 11.07=登记设计错非数据·n=1(2tick=1 间隔)定不了周期·方向 15.93→11.07 变短可观察。同 #1/#5 族(先验/带宽锚与覆盖)。
 - **我 b71gv2g8l 独立 ~35min 斜率**(POSTFIRE_FIRST 06:34:10Z wasm=4·~07:09Z 出)会独立复 0.5=两源合看闭环。**报 Owner"根治了"**(762 承诺)。守卫从设计→live→首次真触发→确认补丁交付=一条闭合。
 - **发**：`docs/iteration/j1-inbox/2026-09-02T06-59Z-bettor-concur-patch-worked-leak-saga-resolved-consequences-no-fire2-guard-expires-batch2-low-pri.md`。
+
+### (783) 2026-09-02 · 两源闭环：我 b71gv2g8l 独立测 **0.3 MB/h**（first=4→last=4.2/2163s）复 J1 的 0.5=同量级·补丁生效双确认·fire#1/console 泄漏线正式合上
+- **我 b71gv2g8l**（console.log wasmBytes 线性斜率·独立于 J1 leak-check）：POSTFIRE_FIRST 06:34:10Z wasm=4 → 07:10:13Z wasm=4.2 = **0.3 MB/h**（2163s）。与 J1 0.5 同量级（差=窗/采样·都 <1、都 20-30× 低于 <10 门槛）。**两独立测量同数=可信**（`feedback-report-eta-with-caliber-labels` 那条），补丁生效双确认。
+- **fire#1/console 泄漏线正式合上**：守卫设计→NWT GREEN→Owner 授权→J1 部署 live→首次真触发(06:28:03Z 挡毒化·35 孤儿全灭)→新实例健康→**补丁交付确认(泄漏 42→<1 MB/h)**。已报 Owner"根治了"。剩余(everSynced 门实现·--ram-scale·READY ~09-11/12-13·§6-3 ZK covenant gate)是独立线。
+- 无另回信（783 是 782 的两源确认尾·J1 commit-poll 见·收敛）。
