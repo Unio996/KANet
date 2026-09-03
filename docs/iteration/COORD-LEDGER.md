@@ -11194,3 +11194,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **来源与核**：KANet-UI 20:45Z 发旧 Bettor 地址（老会话路由转我）；**我亲手核 kaspad-stdout.log**：`03:26:33.483+07:00 IBD with peer 136.243.93.17:16311 completed with error: peer connection is closed` → `03:27:11.093 IBD started with peer 136.243.93.17:16311`（同 peer·38s）。gate 20:48Z：headerCount 9,761,134（19:57Z 9,582,224）·blockCount 8,746,723 未倒退·peers 4·NOT_READY；kaspad 03:48 `IBD: Processed 176697 block headers (11%)`；D 行 20:45Z phase=header hdrPct=9%·D 0/1/0/0·guardAlive=Y；console 34368·wasm 4.8MB 未变。**节点事件非 console**，与 Owner 待定的 console 会话重启无关。
 - **频率（同日志全史）**：`completed with error` 08-28×2（pruning point 不识别）、08-29×2（21:09/21:16 本地·connection closed）、09-04×1（本次）；每次自恢复。ready_watch 无 CHANGE 属预期（其键 v1/d/srv/kd/stale/wlvl 均未变）。
 - **裁**：无动作（IBD 期只认 code9·752 裁；不碰节点）。**READY 影响**：这是 784 下界之外的**未计划额外 header 相位**（模型单段净成本 ~14.2h）⇒ 09-09 下界大概率后移·**量化归 J1 相位模型·我不外推日期**。已写 j1-inbox `…-bettor-kaspad-IBD-peer-reconnect-…md`。Owner 不另 ping（无动作·数仍波动·784 框内）。
+
+### (788) 2026-09-03 · 连通性实况与兜底：KANet-UI ACK 四点（经旧会话中转）· [2fef14]→KANet-UI 单向通、反向不通（bypass 会话地址书未刷新·其重启前）⇒ 立本机文件收件箱 `scratch/_bettor_inbox/`（60s 盯守）· 旧 Bettor 会话退出中转
+- **KANet-UI ACK（其自报·经 [e325ed] 中转·未直核）**：①认 [2fef14] 为新权威 Bettor ②认可 IBD 告警裁无动作+787+相位成本交 J1 ③loop/降报频不变、hb_guard 归我 ④其 handoff 坐标已指向 [2fef14]。
+- **连通性（实测）**：我→KANet-UI 用全形 `uds:\.\pipe\LOCAL\cc-msg-7c160bc1…` 送达 ✅；裸 `cc-msg-…` 与会话名均 "not reachable"；KANet-UI→我两次 "No agent reachable"（bypass 会话不进 ListAgents·其地址书在重启前不刷新）。
+- **兜底（session 无关）**：`scratch/_bettor_inbox/`（README 在内·gitignored）+ `scratch/_handoff_monitors/bettor_inbox_watch.sh` Monitor 60s（armed 20:53:21Z）；KANet-UI 重启后直连。同时 j1-inbox 盯守落 durable `j1_inbox_watch.sh`。seed 已补 4/5 两步。
+- 🔴 **我栽一次（已记 memory）**：Monitor 起的 bash 在 Windows 父进程天生 DEAD，我按"父链断=孤儿"误杀了自己刚武装的 j1_inbox_watch（Monitor 流随即 ended）·已重武装·`reference-monitor-tool-script-has-dead-parent-on-windows-parent-chain-cannot-identify-orphans`。
