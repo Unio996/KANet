@@ -11171,3 +11171,14 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **J1 自纠一个内部不一致**：21-36Z 说 09-11 但**没计相位成本**·加同套相位模型才是 09-15·02-46Z 也是·**先前两次日期口径内部就不一致(一次含相位一次不含)·这次统一**。三口径全用同相位模型:21.5⇒09-15·22.0⇒09-15·34.9⇒09-09。
 - **口径**：34.9 两独立支撑(相位前 24h+相位后 2.5h)非单窗·2 段是推算非实测(每轮减 lag 1791 分外推·各轮规模不同会变)·仍【下界】(不含新停滞/密度突变/第三段相位)·**不给点估·09-09 中心值·合理区间 09-08~09-11**。
 - **propagate**：改 KANet-UI「预计 09-09 前后达标(下界·含 2 段 header 相位成本)」非 09-11~13。**Owner 不另 ping**(在"下界将精化"框内·且是更早=好方向·数仍波动·firmer/问时再консол·我最近给他的是 fire#1 根治好消息+READY 09-11~13 括注)。
+
+### (785) 2026-09-03 · 🔁 **接位/重启 HANDOFF**（Owner 提议全体重启+再对齐·此会话已跑很久）——现状快照 + 重启后再武装步骤 + 待办
+- **现状快照（真 UTC 2026-09-03 19:44Z）**：节点仍 IBD（S1 verdict=NOT_READY·D 行 0/1/0/0·srvSynced=false·lag ~69h 稳收敛）·**READY ~09-09（下界·区间 09-08~09-11·两窗收敛 34.9+相位模型·见 784）**·console PID 34368 健康·**wasm 4.8MB（fire#1 后泄漏根治·稳）**·KANet-WasmGuard /ED 09-03 到期（不再需要·泄漏已治）。
+- **标准任务（Owner 09-02 重申）**：盯 **BOTH_READY 两信号**（`scratch/_step0_gate.mjs` verdict=READY **且** KANet-UI D 行 READY=1）⇒ **派 J2** T+0 只读第一小时（草稿现成：`scratch/_bettor_msg284/t0-dispatch-draft.md`·填 `__T0__`）。
+- 🔴 **重启后必做（承重·否则 J2 派单触发器丢）**：
+  1. **重武装 READY 盯守**：ready_watch 是 session-bound Monitor·重启即死。新会话 Monitor 跑 `scratch/_handoff_monitors/ready_watch.sh`（已从 job tmp 备到 scratch·job tmp 会清）——它盯 BOTH_READY、emit 后自动 exit 供派单。
+  2. **核 hb_guard**：nohup 应存活（保 console 心跳过 IBD 相位瞬时）；死则 `nohup bash scratch/_handoff_monitors/hb_guard.sh >> logs/bettor-supervisor.log 2>&1 &`。
+  3. **重武装 j1-inbox 盯守**（J1 是 file-channel 回合制·`docs/iteration/j1-inbox/`）。
+  4. 读本 ledger 尾 + `CLAUDE.md` + memory index 对齐。
+- **待办（独立线·均非紧急）**：①everSynced 门实现+5 VA 向量（J1·blocker③·场证据已完整 771/778）②`--ram-scale` IBD 吞吐杠杆量化（J1·量重启代价 vs 收益）③§6-3 ZK covenant gate（J2 主攻）④batch-2 钱路 13 站点（待 Owner·低优先·主泄漏已治）。
+- **团队**：本机 4（Bettor/J2/NWT/KANet-UI）+远端 J1（SSH/git·j1-inbox）。文件名时间戳一律 `date -u`（783/784 教训·手打漂 4h）。速率/ETA 用两独立吻合窗非单窗（775/776/784）。
