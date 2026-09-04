@@ -33,3 +33,8 @@ J2 正式页与 preview 的差异；kaspa_tx_log 全史行数；未解释 gap �
 J2 正式页 `scratch/_j2_m10v2_window1_page_2026-09-04T21-58Z.md`（窗 20:55:58Z→21:56:00Z，PID 15196 无重启）：lag ≥4 s 78 次 Σ1551 s = 窗长 43%；施害者形 17（broker-intake 12）；60 次只有"非起点"。与 §2 两尺一致。
 **同起点解析规则**（补 §2 的判据）：phases 起点与 gap 起点 ≤0.5 s 的命中，找同起点（±100 ms）的 `.sync` 站，其 sync ms ≥ gap−1 s ⇒ 该站为施害者。结果：21 个 settle/pool 命中 → **15 个解析为 broker-intake.tick、0 个为 settle/pool**、6 个未解析（pool 4 次无同起点同步站且 gap 34/45 s = 入口埋点外类；settle 2 次 broker-intake 只盖部分）。旁证：settle 与 broker-intake 两个 60 s 定时器每分钟同毫秒起（:50.2），settle 恒排在 broker-intake 块后 ⇒ 修 broker-intake 后 settle pre 应同步缩。
 ≥60 s 五次里四次为 ZK 自治 tick 起后 0.5–1.0 s 才堵 ⇒ v3 段级范围确认（五站 + settle pre 内部）。
+
+### 7. M10 v3 规格与 v3-A 补丁审（2026-09-04T22:23Z）
+- 规格 `scratch/_j2_m10v3_spec_2026-09-04T22-33Z.md` 预审 GREEN-conditional（六条件：`at=` 必须仍是时间戳、caller 改 `src=`；Proxy 以原 Statement 为 receiver 且链方法返回 this 时回 Proxy；rows 语义；安装位置；四个补充测试向量；B 的 JSON.parse 包整段循环）。nit：`bshard-close-voter.js:456-458` 的 LIKE 可走 `idx_chain_events_from/type`，不是全表 LIKE。
+- v3-A 补丁 `scratch/_j2_m10v3A_patch_2026-09-04T22-20Z.diff`（sha `2595108e…88f1`，3 文件 +233：client.js +2、`src/db/slow-sql-observe.mjs` 新、其测试）**GREEN**：六条件全落，镜像树测试 11/11（首跑 9/11 两处根因记录诚实）。helper 独立文件裁接受（安装点唯一即可）。备注：`sql=` 前 80 字可能含插值 ID（observe-only 接受）；live 树 smoke 不开活库文件；apply 前 live 树再 `git apply --check`。
+- 后续：Bettor 批 apply → 单独一笔不推 → 随 console 自然重启承载 → 首个 ≥1h body 窗出页，`sql.*` 行自动进 ④ 判据。
