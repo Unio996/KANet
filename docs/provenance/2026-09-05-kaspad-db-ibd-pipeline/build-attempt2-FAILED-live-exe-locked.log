@@ -1,0 +1,349 @@
+BUILD SCRIPT start 2026-09-04T22:00:19Z rustc=rustc 1.96.1 (31fca3adb 2026-06-26) cargo=cargo 1.96.1 (356927216 2026-06-26)
+=== [db] head=4d0a9e30215031ae5a980c1c72f01c2eea13ac81 branch=j2-db-ibd-pipeline dirty=0
+=== [db] cargo fetch start 2026-09-04T22:00:19Z
+=== [db] fetch rc=0 2026-09-04T22:00:20Z
+=== [db] build start 2026-09-04T22:00:20Z
+   Compiling kaspa-utils v1.1.1-toc.1 (D:\rusty-kaspa-da\utils)
+   Compiling kaspa-hashes v1.1.1-toc.1 (D:\rusty-kaspa-da\crypto\hashes)
+   Compiling kaspa-math v1.1.1-toc.1 (D:\rusty-kaspa-da\math)
+   Compiling kaspa-smt v1.1.1-toc.1 (D:\rusty-kaspa-da\crypto\smt)
+   Compiling kaspa-merkle v1.1.1-toc.1 (D:\rusty-kaspa-da\crypto\merkle)
+   Compiling kaspa-txscript-errors v1.1.1-toc.1 (D:\rusty-kaspa-da\crypto\txscript\errors)
+   Compiling kaspa-database v1.1.1-toc.1 (D:\rusty-kaspa-da\database)
+   Compiling kaspa-muhash v1.1.1-toc.1 (D:\rusty-kaspa-da\crypto\muhash)
+   Compiling kaspa-seq-commit v1.1.1-toc.1 (D:\rusty-kaspa-da\consensus\seq-commit)
+   Compiling kaspa-consensus-core v1.1.1-toc.1 (D:\rusty-kaspa-da\consensus\core)
+   Compiling kaspa-txscript v1.1.1-toc.1 (D:\rusty-kaspa-da\crypto\txscript)
+   Compiling kaspa-mining-errors v1.1.1-toc.1 (D:\rusty-kaspa-da\mining\errors)
+   Compiling kaspa-addressmanager v1.1.1-toc.1 (D:\rusty-kaspa-da\components\addressmanager)
+   Compiling kaspa-smt-store v1.1.1-toc.1 (D:\rusty-kaspa-da\consensus\smt-store)
+   Compiling kaspa-p2p-lib v1.1.1-toc.1 (D:\rusty-kaspa-da\protocol\p2p)
+   Compiling kaspa-connectionmanager v1.1.1-toc.1 (D:\rusty-kaspa-da\components\connectionmanager)
+   Compiling kaspa-notify v1.1.1-toc.1 (D:\rusty-kaspa-da\notify)
+   Compiling kaspa-consensus-client v1.1.1-toc.1 (D:\rusty-kaspa-da\consensus\client)
+   Compiling kaspa-consensus-notify v1.1.1-toc.1 (D:\rusty-kaspa-da\consensus\notify)
+   Compiling kaspa-consensusmanager v1.1.1-toc.1 (D:\rusty-kaspa-da\components\consensusmanager)
+   Compiling kaspa-index-core v1.1.1-toc.1 (D:\rusty-kaspa-da\indexes\core)
+   Compiling kaspa-consensus-wasm v1.1.1-toc.1 (D:\rusty-kaspa-da\consensus\wasm)
+   Compiling kaspa-p2p-mining v1.1.1-toc.1 (D:\rusty-kaspa-da\protocol\mining)
+   Compiling kaspa-rpc-core v1.1.1-toc.1 (D:\rusty-kaspa-da\rpc\core)
+   Compiling kaspa-utxoindex v1.1.1-toc.1 (D:\rusty-kaspa-da\indexes\utxoindex)
+   Compiling kaspa-mining v1.1.1-toc.1 (D:\rusty-kaspa-da\mining)
+   Compiling kaspa-pow v1.1.1-toc.1 (D:\rusty-kaspa-da\consensus\pow)
+   Compiling kaspa-consensus v1.1.1-toc.1 (D:\rusty-kaspa-da\consensus)
+   Compiling kaspa-index-processor v1.1.1-toc.1 (D:\rusty-kaspa-da\indexes\processor)
+   Compiling kaspa-p2p-flows v1.1.1-toc.1 (D:\rusty-kaspa-da\protocol\flows)
+   Compiling kaspa-grpc-core v1.1.1-toc.1 (D:\rusty-kaspa-da\rpc\grpc\core)
+   Compiling kaspa-rpc-service v1.1.1-toc.1 (D:\rusty-kaspa-da\rpc\service)
+   Compiling kaspa-grpc-client v1.1.1-toc.1 (D:\rusty-kaspa-da\rpc\grpc\client)
+   Compiling kaspa-grpc-server v1.1.1-toc.1 (D:\rusty-kaspa-da\rpc\grpc\server)
+   Compiling kaspa-wrpc-server v1.1.1-toc.1 (D:\rusty-kaspa-da\rpc\wrpc\server)
+   Compiling kaspad v1.1.1-toc.1 (D:\rusty-kaspa-da\kaspad)
+error: failed to remove file `D:/rusty-kaspa-da/target\release\kaspad.exe`
+
+Caused by:
+  拒绝访问。 (os error 5)
+=== [db] build rc=101 end 2026-09-04T22:01:46Z
+=== [db] cargo test -p kaspa-p2p-flows start 2026-09-04T22:01:46Z
+   Compiling value-bag v1.9.0
+   Compiling futures-core v0.3.31
+   Compiling byteorder v1.5.0
+   Compiling windows-sys v0.52.0
+   Compiling subtle v2.6.1
+   Compiling typenum v1.17.0
+   Compiling generic-array v0.14.7
+   Compiling futures-io v0.3.31
+   Compiling smallvec v1.13.2
+   Compiling num-traits v0.2.19
+   Compiling wasm-bindgen-macro-support v0.2.100
+   Compiling const-oid v0.9.6
+   Compiling zerocopy v0.7.35
+   Compiling either v1.13.0
+   Compiling allocator-api2 v0.2.21
+   Compiling log v0.4.22
+   Compiling futures-channel v0.3.31
+   Compiling wasm-bindgen v0.2.100
+   Compiling futures-task v0.3.31
+   Compiling getrandom v0.3.4
+   Compiling equivalent v1.0.1
+   Compiling hashbrown v0.17.0
+   Compiling ppv-lite86 v0.2.20
+   Compiling tracing v0.1.44
+   Compiling itoa v1.0.11
+   Compiling fnv v1.0.7
+   Compiling futures-util v0.3.31
+   Compiling wasm-bindgen-macro v0.2.100
+   Compiling rand_core v0.9.3
+   Compiling mio v1.0.2
+   Compiling socket2 v0.5.7
+   Compiling cpufeatures v0.2.17
+   Compiling crypto-common v0.1.6
+   Compiling block-buffer v0.10.4
+   Compiling windows-link v0.2.1
+   Compiling digest v0.10.7
+   Compiling windows-sys v0.61.2
+   Compiling thiserror v2.0.18
+   Compiling async-channel v2.3.1
+   Compiling rand_chacha v0.3.1
+   Compiling scopeguard v1.2.0
+   Compiling sha2 v0.10.8
+   Compiling lock_api v0.4.12
+   Compiling zeroize v1.8.1
+   Compiling indexmap v2.14.0
+   Compiling rand v0.8.6
+   Compiling tokio v1.42.1
+   Compiling parking_lot_core v0.9.10
+   Compiling rand_chacha v0.9.0
+   Compiling parking_lot v0.12.3
+   Compiling winapi v0.3.9
+   Compiling kaspa-utils v1.1.1-toc.1 (D:\rusty-kaspa-da\utils)
+   Compiling rand v0.9.4
+   Compiling futures-lite v2.3.0
+   Compiling bytemuck v1.24.0
+   Compiling js-sys v0.3.77
+   Compiling errno v0.3.9
+   Compiling itertools v0.13.0
+   Compiling blake3 v1.8.3
+   Compiling arrayvec v0.7.6
+   Compiling ipnet v2.11.0
+   Compiling uuid v1.18.1
+   Compiling arrayref v0.3.9
+   Compiling rustix v0.38.37
+   Compiling ahash v0.8.11
+   Compiling piper v0.2.4
+   Compiling polling v3.7.3
+   Compiling itertools v0.14.0
+   Compiling crossbeam-epoch v0.9.18
+   Compiling kaspa-hashes v1.1.1-toc.1 (D:\rusty-kaspa-da\crypto\hashes)
+   Compiling constant_time_eq v0.3.1
+   Compiling constant_time_eq v0.4.2
+   Compiling atty v0.2.14
+   Compiling console v0.15.8
+   Compiling hexplay v0.3.0
+   Compiling futures-executor v0.3.31
+   Compiling async-io v2.3.4
+   Compiling blake2b_simd v1.0.2
+   Compiling futures v0.3.31
+   Compiling crossbeam-deque v0.8.5
+   Compiling zerocopy v0.8.42
+   Compiling blocking v1.6.1
+   Compiling async-executor v1.13.1
+   Compiling windows-sys v0.48.0
+   Compiling chrono v0.4.38
+   Compiling http v1.1.0
+   Compiling ryu v1.0.23
+   Compiling sha2-const-stable v0.1.0
+   Compiling workflow-log v0.18.0
+   Compiling zerofrom v0.1.7
+   Compiling web-sys v0.3.77
+   Compiling async-global-executor v2.4.1
+   Compiling rayon-core v1.12.1
+   Compiling async-channel v1.9.0
+   Compiling dirs-sys v0.4.1
+   Compiling kv-log-macro v1.0.7
+   Compiling stable_deref_trait v1.2.0
+   Compiling libm v0.2.16
+   Compiling adler2 v2.0.0
+   Compiling yoke v0.8.1
+   Compiling miniz_oxide v0.8.0
+   Compiling anyhow v1.0.97
+   Compiling rayon v1.10.0
+   Compiling dirs v5.0.1
+   Compiling async-std v1.13.0
+   Compiling serde-wasm-bindgen v0.6.5
+   Compiling num-integer v0.1.46
+   Compiling crc32fast v1.4.2
+   Compiling foldhash v0.2.0
+   Compiling bs58 v0.5.1
+   Compiling hashbrown v0.16.1
+   Compiling num-bigint v0.4.6
+   Compiling flate2 v1.0.34
+   Compiling http-body v1.0.1
+   Compiling wasm-bindgen-futures v0.4.50
+   Compiling safe_arch v1.0.0
+   Compiling destructure_traitobject v0.2.0
+   Compiling unsafe-any-ors v1.0.0
+   Compiling ark-std v0.6.0
+   Compiling ark-serialize v0.6.0
+   Compiling malachite-base v0.9.1
+   Compiling wide v1.3.0
+   Compiling zerovec v0.11.5
+   Compiling zmij v1.0.21
+   Compiling derive_more v2.1.1
+   Compiling kaspa-smt v1.1.1-toc.1 (D:\rusty-kaspa-da\crypto\smt)
+   Compiling tokio-util v0.7.12
+   Compiling ordered-float v2.10.1
+   Compiling unsafe-libyaml v0.2.11
+   Compiling workflow-wasm-macros v0.18.0
+   Compiling tower-service v0.3.3
+   Compiling ark-ff v0.6.0
+   Compiling serde_json v1.0.149
+   Compiling workflow-panic-hook v0.18.0
+   Compiling serde-value v0.7.0
+   Compiling secp256k1-sys v0.10.1
+   Compiling typemap-ors v1.0.0
+   Compiling thread-id v5.1.0
+   Compiling mock_instant v0.6.0
+   Compiling humantime v2.1.0
+   Compiling serde_yaml v0.9.34+deprecated
+   Compiling unicode-segmentation v1.12.0
+   Compiling arc-swap v1.7.1
+   Compiling log-mdc v0.1.0
+   Compiling num_cpus v1.16.0
+   Compiling secp256k1 v0.29.1
+   Compiling kaspa-merkle v1.1.1-toc.1 (D:\rusty-kaspa-da\crypto\merkle)
+   Compiling ctrlc v3.4.5
+   Compiling tinystr v0.8.2
+   Compiling http-body-util v0.1.2
+   Compiling kaspa-txscript-errors v1.1.1-toc.1 (D:\rusty-kaspa-da\crypto\txscript\errors)
+   Compiling workflow-serializer v0.18.0
+   Compiling log4rs v1.4.0
+   Compiling nu-ansi-term v0.50.3
+   Compiling blake2 v0.10.6
+   Compiling sharded-slab v0.1.7
+   Compiling tracing-log v0.2.0
+   Compiling thread_local v1.1.9
+   Compiling writeable v0.6.3
+   Compiling percent-encoding v2.3.1
+   Compiling litemap v0.8.2
+   Compiling try-lock v0.2.5
+   Compiling num_enum v0.7.5
+   Compiling tracing-subscriber v0.3.22
+   Compiling want v0.3.1
+   Compiling icu_locale_core v2.1.1
+   Compiling httparse v1.9.5
+   Compiling h2 v0.4.6
+   Compiling potential_utf v0.1.4
+   Compiling zerotrie v0.2.3
+   Compiling foldhash v0.1.5
+   Compiling httpdate v1.0.3
+   Compiling tower-layer v0.3.3
+   Compiling prettyplease v0.2.22
+   Compiling risc0-zkvm-platform v2.2.1
+   Compiling icu_collections v2.1.1
+   Compiling socket2 v0.6.3
+   Compiling kaspa-core v1.1.1-toc.1 (D:\rusty-kaspa-da\core)
+   Compiling icu_provider v2.1.1
+   Compiling risc0-core v3.0.0
+   Compiling rustls-pki-types v1.14.1
+   Compiling hex-literal v0.4.1
+   Compiling hex v0.4.3
+   Compiling bindgen v0.72.1
+   Compiling sync_wrapper v1.0.2
+   Compiling malachite-nz v0.9.1
+   Compiling keccak v0.1.6
+   Compiling risc0-zkp v3.0.3
+   Compiling workflow-core v0.18.0
+   Compiling merlin v3.0.0
+   Compiling icu_normalizer_data v2.1.1
+   Compiling icu_properties_data v2.1.2
+   Compiling cobs v0.3.0
+   Compiling rustls v0.23.39
+   Compiling untrusted v0.9.0
+   Compiling base64 v0.22.1
+   Compiling rustls-webpki v0.103.13
+   Compiling ruint v1.17.2
+   Compiling postcard v1.1.3
+   Compiling icu_properties v2.1.2
+   Compiling icu_normalizer v2.1.1
+   Compiling tower v0.5.3
+   Compiling semver v1.0.28
+   Compiling hyper v1.9.0
+   Compiling mime v0.3.17
+   Compiling elf v0.7.4
+   Compiling prost-build v0.14.3
+   Compiling axum-core v0.5.6
+   Compiling idna_adapter v1.2.1
+   Compiling risc0-circuit-recursion v4.0.3
+   Compiling risc0-binfmt v3.0.3
+   Compiling workflow-wasm v0.18.0
+   Compiling hyper-util v0.1.20
+   Compiling tonic-build v0.14.5
+   Compiling matchit v0.8.4
+   Compiling rand_core v0.10.1
+   Compiling utf8_iter v1.0.4
+   Compiling idna v1.1.0
+   Compiling axum v0.8.9
+   Compiling tonic-prost-build v0.14.5
+   Compiling pin-project v1.1.6
+   Compiling libz-sys v1.1.20
+   Compiling bzip2-sys v0.1.11+1.0.8
+   Compiling zstd-sys v2.0.13+zstd.1.5.6
+   Compiling hyper-timeout v0.5.1
+   Compiling lz4-sys v1.11.1+lz4-1.10.0
+   Compiling kaspa-addresses v1.1.1-toc.1 (D:\rusty-kaspa-da\crypto\addresses)
+   Compiling webpki-roots v1.0.7
+   Compiling ark-poly v0.6.0
+   Compiling form_urlencoded v1.2.1
+   Compiling tokio-stream v0.1.16
+   Compiling cpufeatures v0.3.0
+   Compiling chacha20 v0.10.0
+   Compiling kaspa-p2p-lib v1.1.1-toc.1 (D:\rusty-kaspa-da\protocol\p2p)
+   Compiling url v2.5.4
+   Compiling getrandom v0.4.2
+   Compiling tower-http v0.5.2
+   Compiling prost v0.14.3
+   Compiling duration-string v0.4.0
+   Compiling xml-rs v0.8.22
+   Compiling librocksdb-sys v0.17.3+10.4.2
+   Compiling tokio-rustls v0.26.4
+   Compiling attohttpc v0.30.1
+   Compiling kaspa-utils-tower v1.1.1-toc.1 (D:\rusty-kaspa-da\utils\tower)
+   Compiling rand v0.10.1
+   Compiling seqlock v0.2.0
+   Compiling xmltree v0.10.3
+   Compiling tempfile v3.13.0
+   Compiling ark-relations v0.6.0
+   Compiling ark-ec v0.6.0
+   Compiling bincode v1.3.3
+   Compiling igd-next v0.17.0
+   Compiling local-ip-address v0.6.3
+   Compiling aho-corasick v1.1.3
+   Compiling tonic v0.14.5
+   Compiling regex-syntax v0.8.5
+   Compiling ark-snark v0.6.0
+   Compiling sweep-bptree v0.4.1
+   Compiling kaspa-seq-commit v1.1.1-toc.1 (D:\rusty-kaspa-da\consensus\seq-commit)
+   Compiling ark-crypto-primitives v0.6.0
+   Compiling ark-groth16 v0.6.0
+   Compiling ark-bn254 v0.6.0
+   Compiling tonic-prost v0.14.5
+   Compiling regex-automata v0.4.8
+   Compiling kaspa-math v1.1.1-toc.1 (D:\rusty-kaspa-da\math)
+   Compiling kaspa-muhash v1.1.1-toc.1 (D:\rusty-kaspa-da\crypto\muhash)
+   Compiling kaspa-consensus-core v1.1.1-toc.1 (D:\rusty-kaspa-da\consensus\core)
+   Compiling regex v1.11.0
+   Compiling kaspa-txscript v1.1.1-toc.1 (D:\rusty-kaspa-da\crypto\txscript)
+   Compiling kaspa-mining-errors v1.1.1-toc.1 (D:\rusty-kaspa-da\mining\errors)
+   Compiling kaspa-notify v1.1.1-toc.1 (D:\rusty-kaspa-da\notify)
+   Compiling kaspa-consensus-notify v1.1.1-toc.1 (D:\rusty-kaspa-da\consensus\notify)
+   Compiling kaspa-consensusmanager v1.1.1-toc.1 (D:\rusty-kaspa-da\components\consensusmanager)
+   Compiling kaspa-mining v1.1.1-toc.1 (D:\rusty-kaspa-da\mining)
+   Compiling kaspa-p2p-mining v1.1.1-toc.1 (D:\rusty-kaspa-da\protocol\mining)
+   Compiling rocksdb v0.24.0
+   Compiling kaspa-database v1.1.1-toc.1 (D:\rusty-kaspa-da\database)
+   Compiling kaspa-addressmanager v1.1.1-toc.1 (D:\rusty-kaspa-da\components\addressmanager)
+   Compiling kaspa-connectionmanager v1.1.1-toc.1 (D:\rusty-kaspa-da\components\connectionmanager)
+   Compiling kaspa-p2p-flows v1.1.1-toc.1 (D:\rusty-kaspa-da\protocol\flows)
+    Finished `release` profile [optimized] target(s) in 1m 33s
+     Running unittests src\lib.rs (target\release\deps\kaspa_p2p_flows-9c657c88f3a3b786.exe)
+
+running 7 tests
+test flowcontext::process_queue::tests::test_process_queue ... ok
+test user_agent_rule::tests::supports_version_rule_colon_form_and_comparison_ops ... ok
+test v7::txrelay::flow::tests::test_check_tx_throttling ... ok
+test flowcontext::orphans::tests::test_orphan_pool_basics ... ok
+test user_agent_rule::tests::rejects_when_allow_rules_exist_and_none_match ... ok
+test user_agent_rule::tests::regex_rules_match_the_whole_user_agent ... ok
+test user_agent_rule::tests::reject_rules_veto_allowed_user_agents ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests kaspa_p2p_flows
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+=== [db] test rc=0 end 2026-09-04T22:03:20Z
+BUILD SCRIPT end 2026-09-04T22:03:20Z
