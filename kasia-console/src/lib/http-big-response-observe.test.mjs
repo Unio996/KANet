@@ -67,7 +67,7 @@ await t('V6 grep 形: Buffer payload >1MB 一行且匹配正则; 直接调钩子
   assert.equal(await hook(req, { statusCode: 200 }, p), p);
   assert.equal(await hook(null, null, 'str'), 'str');   // request/reply 缺失也原样返回
 });
-await t('V7 step 行形: 其它 7 个 site 的模板串与 grep 契约一致', () => {
+await t('V7 step 行形: 其它 8 个 site 的模板串与 grep 契约一致', () => {
   const at = new Date().toISOString();
   const lines = [
     `[diag:step] settle.selectRipeMarkets.all ms=12 rows=109 at=${at}`,
@@ -77,8 +77,9 @@ await t('V7 step 行形: 其它 7 个 site 的模板串与 grep 契约一致', (
     `[diag:step] zk.handoffAutonomousTick ms=3 at=${at}`,
     `[diag:step] zk.judgeProposeAutonomousTick ms=3 at=${at}`,
     `[diag:step] pair.scanAndIngestPairs ms=568 since_id=0 max_id=fffea2dc-b44 hits=2 at=${at}`,
+    `[diag:step] http.discovery.activity ms=1200 profiles_ms=900 handshakes_ms=250 stats_ms=50 limit=200 profiles=200 handshakes=1234 at=${at}`,   // 第 9 站 (Bettor 14:3xZ 裁进, H5)
   ];
-  const re = /^\[diag:step\] (settle\.selectRipeMarkets\.all|pool\.selectMarkets\.all|zk\.closeTickV2|zk\.claimAutonomousTick|zk\.handoffAutonomousTick|zk\.judgeProposeAutonomousTick|pair\.scanAndIngestPairs) ms=\d+( \S+=\S+)* at=\S+$/;
+  const re = /^\[diag:step\] (settle\.selectRipeMarkets\.all|pool\.selectMarkets\.all|zk\.closeTickV2|zk\.claimAutonomousTick|zk\.handoffAutonomousTick|zk\.judgeProposeAutonomousTick|pair\.scanAndIngestPairs|http\.discovery\.activity) ms=\d+( \S+=\S+)* at=\S+$/;
   for (const l of lines) assert.match(l, re);
 });
 await t('V8 (NWT C3) 路由先注册、钩子后安装 ⇒ big 行仍打出、响应不变', async () => {

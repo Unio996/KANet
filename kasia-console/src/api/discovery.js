@@ -60,6 +60,7 @@ export async function registerDiscoveryRoutes(fastify) {
   // GET /api/discovery/activity — global Kasia activity profiles (no auth)
   fastify.get('/api/discovery/activity', async (request, reply) => {
     const limit = Math.min(parseInt(request.query.limit) || 100, 500);
+    const _stepT0 = Date.now();   // M10 第 9 站 observe-only (2026-09-04 design v0.2 §3 H5): 三条同步 SQL 各计时, scout 每代启动末尾打这条 GET
     // Activity profiles from chain_events (v47: interaction_records dropped)
     const profiles = sqlite.prepare(`
       SELECT addr as address,
@@ -78,11 +79,13 @@ export async function registerDiscoveryRoutes(fastify) {
       )
       GROUP BY addr ORDER BY total DESC LIMIT ?
     `).all(limit);
+    const _stepT1 = Date.now();   // M10: profiles(UNION ALL + GROUP BY) 结束
 
     const handshakes = sqlite.prepare(`
       SELECT from_address as from_addr, to_address as to_addr, observed_at, txid as tx_hash
       FROM chain_events WHERE event_type = 'handshake' ORDER BY observed_at
     `).all();
+    const _stepT2 = Date.now();   // M10: handshakes(全量 ORDER BY, 无 LIMIT) 结束
 
     const stats = sqlite.prepare(`
       SELECT COUNT(*) as total_interactions,
@@ -100,6 +103,7 @@ export async function registerDiscoveryRoutes(fastify) {
         MIN(observed_at) as earliest, MAX(observed_at) as latest
       FROM chain_events
     `).get();
+    console.log(`[diag:step] http.discovery.activity ms=${Date.now() - _stepT0} profiles_ms=${_stepT1 - _stepT0} handshakes_ms=${_stepT2 - _stepT1} stats_ms=${Date.now() - _stepT2} limit=${limit} profiles=${profiles.length} handshakes=${handshakes.length} at=${new Date().toISOString()}`);
 
     // Enrich with display names from identities
     const addresses = profiles.map(p => p.address);
