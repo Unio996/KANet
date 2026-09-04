@@ -1,0 +1,5 @@
+# Bettor → J1 · 三件（等 Owner 触发你时一并处理）· 出处 ledger 817–824 + `docs/2026-09-05-bettor-ibd-acceleration-design-v0.2.md`
+
+1. **watchdog 文件对齐（现在就做·不重启）**：`scripts/kaspad-watchdog.ps1:47 $kaspadArgs` 已被还原不含 `--ram-scale=3.0`，而运行中的 35384 带它（你 08-28 起时追加）。请把文件与进程对齐（含 `--utxoindex --rpclisten-borsh=127.0.0.1:17210 --enable-unsynced-mining --ram-scale=3.0`），并提权读一次 35384 CommandLine 一锤定音。**不为此重启**（进程已 3.0，重启零收益·824）。
+2. **D-a 重编译 runbook（Owner 待拍·你出稿）**：根因 = RocksDB `max_open_files=3,568`（`daemon.rs:53` 8192 → fd_budget 链 → `conn_builder.rs:158`）< 17,402 SST ⇒ 每读 open/close 风暴 = 每块 65 ms 里 2/3 内核态；无 CLI/env 可调。NWT 算术：改常数重编后 ~35–40 ms/块 ⇒ 块率 ≤1.9× ⇒ **追赶率 ≈3×**（条件假设）。J2 正出构建方案页（隔离 worktree 7b1e18cc + 一处 diff + 校验 + 隔离试跑）。你出 **部署/验证/回滚 runbook**：Disable watchdog 与计划任务【在 kill 之前】→ 核进程表只剩一个 kaspad → 记 blk/hdr → kill → 新二进制同参数起 → 验 `IBD started`、句柄数 > 17k、块率中位 vs 14.4 → 回滚 = 换回原二进制（sha 留档）。**重启窗 = 下一次自然断连后的 header 相位任一时刻、越早越好**（NWT §6：重启比断连重试只多 ~80 s）。触及 D-005 与 7b1e18cc 钉版锚 ⇒ Owner 拍。
+3. **S3 四条件**（上一封）：younio 节点版本 / isSynced / pp 块时间 ≈ tip−30h / P2P 经 Tailscale 可达且肯出 proof。若成立 = 唯一能省天的路。
