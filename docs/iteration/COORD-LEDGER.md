@@ -11200,3 +11200,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **连通性（实测）**：我→KANet-UI 用全形 `uds:\.\pipe\LOCAL\cc-msg-7c160bc1…` 送达 ✅；裸 `cc-msg-…` 与会话名均 "not reachable"；KANet-UI→我两次 "No agent reachable"（bypass 会话不进 ListAgents·其地址书在重启前不刷新）。
 - **兜底（session 无关）**：`scratch/_bettor_inbox/`（README 在内·gitignored）+ `scratch/_handoff_monitors/bettor_inbox_watch.sh` Monitor 60s（armed 20:53:21Z）；KANet-UI 重启后直连。同时 j1-inbox 盯守落 durable `j1_inbox_watch.sh`。seed 已补 4/5 两步。
 - 🔴 **我栽一次（已记 memory）**：Monitor 起的 bash 在 Windows 父进程天生 DEAD，我按"父链断=孤儿"误杀了自己刚武装的 j1_inbox_watch（Monitor 流随即 ended）·已重武装·`reference-monitor-tool-script-has-dead-parent-on-windows-parent-chain-cannot-identify-orphans`。
+
+### (789) 2026-09-04 · 787 的 IBD peer 重连事件闭环：header 再同步 ~3.5h（20:27Z→00:11Z 回 body）· 块未倒退 8,746,723→8,781,868 · lag 68h→70h · console 34368/wasm 4.9 全程未变 · 额外相位实测量交 J1
+- **KANet-UI 00:12Z 文件通道报（其观测）**：hdrPct 9→21→33→44→56→68→80→92→100% 稳升无回退·00:11Z phase=body·新块轮 kaspadPct 1%（remBlk 2.4M）·stuck=0·exit-3 告警自然停·alertABC=0/0/0·ibdRestart6h=1（~02:26Z 出窗）。
+- **我亲手核（00:12:52Z）**：D 行 `2026-09-04T00:11:25Z blk=8781868 lag=70h phase=body kaspadPct=1% hdrPct=100% guardAlive=Y`；console :3200 PID 34368；heap-sample 00:11:56Z wasmBytes=4.9MB；hb_guard alive 文件 00:12:50Z 触摸（768805 活）。与 KANet-UI 一致。
+- **给 J1 的实测量（相位模型输入·我不外推日期）**：本次未计划 header 相位时长 **~3.73h**（20:27:11Z→00:11Z）·期间 lag +2h（68→70）·块零推进·与 778 的 5.35h 段相比更短（同 peer 重议·header 已缓存部分？归 J1 判）。784 的 ~09-09 下界外多这一段。
+- 无动作·无 Owner ping（自恢复·784 框内）。
