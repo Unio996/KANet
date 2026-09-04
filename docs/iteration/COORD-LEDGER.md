@@ -11399,3 +11399,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **裁**：C 死（除非 younio 条件成立·已问 J1）；J1 "走 C 不赌 A2" 建立在 08-28 新库误读上（inbox 已更正）；一次重启包 = ram-scale 3.0 恢复 + 亲和重设 + 停 Scanner（同窗）；**重启前先 Disable watchdog 与计划任务并核进程表只剩一个 kaspad**（08-26 16:32/16:35/16:38 三次 `conn_builder.rs:167 meta/LOCK being used by another process` = 第二启动器实证）。D: free 767 GB / used 698 GB（总 1.47 TB）。
 - **亲和实验**：Owner 17:2xZ 设 `0x000FFF` + High（回显 4095 High）；窗 B 起；即时读 Privileged 58.2 / User 44.7（窗 A 64%）·busy LP 10/14/18（14/18 属 CCD1·待窗 B 判）。
 - **ETA 口径**：D 行 lagETA(6h) 191 h ≈ 8 天 vs J1 收敛 35 min/h ≈ 4.5 天 ⇒ **09-09~09-13 区间·非下界**；亲和若有效再收。
+
+### (820) 2026-09-05 · **亲和实验 A-B：无效**（B 0x000FFF+High：13.83 blk/s vs A 14.43·cpu/块 71.3 vs 67.9 ms·kernel/块 33.1 vs 43.2（−23%）·user/块 38.2 vs 24.7（+55%）·kernel 占比 47% vs 64%）⇒ V-Cache 让系统调用路径变快但低主频让用户态变慢，净 −4%（±10% 内）· 窗 C 还原待 Owner · 每块 CPU 线在钉版二进制上接近用尽
+- **窗**（`scratch/_bettor_cpu_per_block_window.ps1`·CIM UserModeTime+KernelModeTime 差分 ÷ `Processed N blocks` 计数·剔 0 块桶·各 601s）：A 17:03:57Z 8,680 块/61 桶/中位 117；B 17:17:42Z 8,316 块/60 桶/中位 104。判据（NWT）：中位块率 ±10% 且 cpu/块不变 = 无效 ⇒ **无效**；分项签名与预测一致（kernel 降、ops 不变）但被 user 升抵消。
+- **裁**：还原（窗 C 10 min 确认基线）；0x000555 臂不做；电源方案臂问 NWT 一句；之后 GO 停 Scanner（KANet-UI 方案已批）。剩余杠杆：ram-scale 3.0 一次重启（先 Disable watchdog/任务）；J1 younio 节点作 proof syncer（C 复活条件·待 J1）；重编译抬 fd/表缓存（Owner 拍·D-005）。
+- **KANet-UI 里程碑**：17:21Z kaspadPct 40%·blk 9,721,378·lag 62h·console 25156·wasm 4.3MB。
