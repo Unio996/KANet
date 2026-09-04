@@ -11,6 +11,7 @@ import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { tmpdir } from 'os';
 import { blake2b } from '@noble/hashes/blake2b';
+import { procStep } from './diag-step.mjs';   // M10 v2 observe-only (2026-09-05): 同步子进程站计时, 纯透传
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -81,10 +82,11 @@ export async function compileAndComputeP2SH(silPath, ctorJson, contractName, net
     writeFileSync(ctorPath, ctorJsonStr);
     let stdout;
     try {
-      stdout = execFileSync(SILVERC, [silPath, '--ctor', ctorPath, '-c'], {
+      // M10 v2 observe-only: procStep 只计时打一行 [diag:step] proc.silverc.compile.pool-p2sh, 异常对象原样透传(下方 catch 照读 e.stderr)
+      stdout = procStep('proc.silverc.compile.pool-p2sh', 'silverc', () => execFileSync(SILVERC, [silPath, '--ctor', ctorPath, '-c'], {
         stdio: 'pipe',
         timeout: 30_000,
-      });
+      }));
     } catch (e) {
       const stderr = e.stderr?.toString() || '';
       throw new Error(`silverc compile ${contractName} fail: ${e.message}${stderr ? ` | stderr: ${stderr.slice(0, 300)}` : ''}`);

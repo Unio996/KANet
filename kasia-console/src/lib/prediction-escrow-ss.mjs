@@ -24,6 +24,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { tmpdir } from 'os';
+import { procStep } from './diag-step.mjs';   // M10 v2 observe-only (2026-09-05): 同步子进程站计时, 纯透传
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -130,10 +131,11 @@ export async function computeEscrowP2SH(args) {
     writeFileSync(ctorPath, ctorJsonStr);
     let stdout;
     try {
-      stdout = execFileSync(SILVERC, [SIL_SOURCE, '--ctor', ctorPath, '-c'], {
+      // M10 v2 observe-only: procStep 只计时打一行 [diag:step] proc.silverc.compile.prediction-escrow, 异常对象原样透传(下方 catch 照读 e.stderr)
+      stdout = procStep('proc.silverc.compile.prediction-escrow', 'silverc', () => execFileSync(SILVERC, [SIL_SOURCE, '--ctor', ctorPath, '-c'], {
         stdio: 'pipe',
         timeout: 30_000,
-      });
+      }));
     } catch (e) {
       const stderr = e.stderr?.toString() || '';
       throw new Error(`silverc compile fail: ${e.message}${stderr ? ` | stderr: ${stderr.slice(0, 300)}` : ''}`);
@@ -170,7 +172,7 @@ export function getEscrowToolchainSummary() {
   const sourceHash = createHash('sha256').update(silSource).digest('hex').slice(0, 16);
   let silvercVersion = null;
   try {
-    silvercVersion = execFileSync(SILVERC, ['--help'], { stdio: 'pipe', timeout: 5000 }).toString().split('\n')[0].trim();
+    silvercVersion = procStep('proc.silverc.help', 'silverc', () => execFileSync(SILVERC, ['--help'], { stdio: 'pipe', timeout: 5000 })).toString().split('\n')[0].trim();   // M10 v2 observe-only
   } catch {}
   return {
     silverc_path: SILVERC,

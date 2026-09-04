@@ -9,6 +9,7 @@ import { listAdapterNodes, getAdapterNode, getAdapterToken, getAdapterProviderKe
 import { getConfig } from '../data/settings/configs.js';
 import { sqlite } from '../db/client.js';
 import { ensureConnection } from './connection-manager.js';
+import { procStep } from '../lib/diag-step.mjs';   // M10 v2 observe-only (2026-09-05): 同步子进程站计时, 纯透传
 
 const KANET_ROOT = process.env.KANET_ROOT || 'D:/Anthropic';
 const ADAPTER_DIR = resolve(process.env.ADAPTER_DIR || `${KANET_ROOT}/agent-adapter`);
@@ -131,10 +132,11 @@ export async function startAdapter(adapterId, userIntent = false) {
 async function killByPort(port) {
   try {
     const { execSync } = await import('child_process');
-    const out = execSync(`netstat -ano | findstr ":${port}" | findstr "LISTEN"`, { encoding: 'utf-8' });
+    // M10 v2 observe-only: 两处同步子进程各打一行 [diag:step] proc.netstat.killByPort / proc.taskkill.killByPort, 异常原样透传到外层 catch
+    const out = procStep('proc.netstat.killByPort', 'netstat|findstr', () => execSync(`netstat -ano | findstr ":${port}" | findstr "LISTEN"`, { encoding: 'utf-8' }));
     const pid = out.trim().split(/\s+/).pop();
     if (pid && /^\d+$/.test(pid)) {
-      execSync(`taskkill /PID ${pid} /F`, { stdio: 'ignore' });
+      procStep('proc.taskkill.killByPort', 'taskkill', () => execSync(`taskkill /PID ${pid} /F`, { stdio: 'ignore' }));
       log(`killed external process on port ${port} (PID ${pid})`);
       return true;
     }
@@ -165,7 +167,7 @@ export async function stopAdapter(adapterId, userIntent = false) {
     // On Windows, SIGTERM may not work — use taskkill as primary
     try {
       const { execSync } = await import('child_process');
-      execSync(`taskkill /PID ${pid} /F`, { stdio: 'ignore' });
+      procStep('proc.taskkill.stopAdapter', 'taskkill', () => execSync(`taskkill /PID ${pid} /F`, { stdio: 'ignore' }));   // M10 v2 observe-only
     } catch {
       instance.child.kill('SIGTERM');
     }

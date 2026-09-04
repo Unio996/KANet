@@ -15,6 +15,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { rebuildZkCloseGateWitness } from './zk-close-dispatch.mjs';
 import { parseCloseZkV2State, buildClaimWitness, buildClaimCommand } from './closezk-v2-claim-builder.mjs';
+import { procStep } from './diag-step.mjs';   // M10 v2 observe-only (2026-09-05): 同步子进程站计时, 纯透传
 
 const CLI_DEBUGGER = process.env.SILVERSCRIPT_CLI_DEBUGGER_PATH || 'D:/silverscript/target/release/cli-debugger.exe';
 const CLOSEZK_V2_SIL = join(new URL('.', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'), 'CloseZkV2.sil');
@@ -116,7 +117,8 @@ export function runCliDebugger(testCaseJson, silPath = CLOSEZK_V2_SIL) {
   mkdirSync(SCRATCH_DIR, { recursive: true });
   const testFilePath = join(SCRATCH_DIR, `rehearsal-${randomUUID().slice(0, 8)}.test.json`);
   writeFileSync(testFilePath, JSON.stringify(testCaseJson, null, 2));
-  const r = spawnSync(CLI_DEBUGGER, [silPath, '--test-file', testFilePath, '--run-all'], { encoding: 'utf8' });
+  // M10 v2 observe-only: 计时打一行 [diag:step] proc.cli-debugger.rehearsal(spawnSync 不抛, r 原样返回; 注: 此调用无 timeout, 只记录不改)
+  const r = procStep('proc.cli-debugger.rehearsal', 'cli-debugger', () => spawnSync(CLI_DEBUGGER, [silPath, '--test-file', testFilePath, '--run-all'], { encoding: 'utf8' }));
   const stdout = r.stdout || '', stderr = r.stderr || '';
   // 🔴 修复(2026-07-09, J2, 正式场市场5实撞两次): 原判定 `!/FAIL|❌|red/i.test(stdout)` 是大小写不敏感
   // 子串匹配——cli-debugger 汇总行"N tests: N passed, 0 failed"里的"failed"照样命中 /FAIL/i(fail 是 failed

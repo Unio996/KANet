@@ -23,6 +23,7 @@ import { createHash, randomUUID } from 'node:crypto';
 // 这份逻辑——事件循环被占时这个自我 HTTP 往返永远等不到自己处理, 造成自锁死循环(夜间实测 285 次
 // 事件循环冻结/94 次 >30s/最长 316s)。改为直接 import 同一份核心逻辑, 进程内调用零网络往返。
 import { buildBettorRefundClaim } from '../api/pool.js';
+import { logStep } from '../lib/diag-step.mjs';   // M10 v2 observe-only (2026-09-05): tick 分步(pre/dw/select/post)打点
 
 // 修法B(纵深, 同上设计稿): 永久失败的 side(如 bettor relay 压根不在本节点)每 tick 重试是纯浪费。
 // 进程内 Map 熔断(照抄 bshard-settle-daemon.mjs 的 _pregateAudited 同款 in-process 模式, Bettor 裁定
@@ -547,6 +548,9 @@ export async function poolSettlerTick() {
   if (running) { return { skipped: true }; }
   running = true;
   const _tickDiagStart = Date.now();   // 诊断埋点(2026-07-13, Bettor #iynqdt·observe-only), 查完即删
+  // M10 v2 observe-only (2026-09-05, Bettor ②): tick 分段墙钟 pre(legacyRefundBuilderTick, 含 await) / dw(deadline-watcher 同步 SELECT+UPDATE)
+  //   / select(主选盘 SELECT, 已有 [diag:step] pool.selectMarkets.all) / post(市场循环 + broker-fee-emit + backlog 计数)。
+  let _phPre = null, _phDw = null, _phSel = null, _postT0 = null, _rowsN = null;
   try {
     // J2-tn r391 #28: legacy-refund-builder before main tick. 解冻 ver=null/v0.5 卡单.
     // 独立 path 不碰 committee 路 (= Bettor ③ 关1 护栏达标).
@@ -567,6 +571,8 @@ export async function poolSettlerTick() {
     // Scope: ONLY v0.6/v0.7 committee markets — this settler's dispatchPhase2 is committee logic.
     // null/v0.5-version pending_bettors markets (legacy/other type) must NOT be force-advanced here
     // (would mis-route through committee settle). They are a separate concern (flagged, not touched).
+    _phPre = Date.now() - _tickDiagStart;   // M10 v2
+    const _dwT0 = Date.now();
     const nowSec = Math.floor(Date.now() / 1000);
     const dueMarkets = sqlite.prepare(`
       SELECT id FROM pool_markets
@@ -583,6 +589,7 @@ export async function poolSettlerTick() {
 
     // J2-tn r388 (#24 settler 饥饿根治 — Bettor 02:18 钦定 自治闭环地基):
     // ORDER BY updated_at DESC = 活跃市场优先 (= 新近活动 process 在前, stale markets 不阻塞 demo).
+    _phDw = Date.now() - _dwT0;   // M10 v2
     const _stepT0 = Date.now();   // M10 observe-only (2026-09-04 design v0.2 §3 H1): 量主选盘 SELECT(含 prepare)本身
     const markets = sqlite.prepare(`
       SELECT id, maker_relay_id, maker_pk, spine_p2sh, spine_lock_tx, oracle1_pk, oracle2_pk, oracle3_pk,
@@ -596,6 +603,7 @@ export async function poolSettlerTick() {
       ORDER BY updated_at DESC
     `).all(Math.floor(Date.now() / 1000));
     console.log(`[diag:step] pool.selectMarkets.all ms=${Date.now() - _stepT0} rows=${markets.length} at=${new Date().toISOString()}`);
+    _phSel = Date.now() - _stepT0; _postT0 = Date.now(); _rowsN = markets.length;   // M10 v2
     if (!markets.length) return { ok: true, processed: 0 };
 
     // J2-tn r388 #24 time-box: settler tick max duration 30s. Stale 死单 retry chain 若爆 30s,
@@ -1484,6 +1492,7 @@ export async function poolSettlerTick() {
     return { ok: true, processed: markets.length, consensus, refund, pending, doomed, errored, bshardSkipped, commingledRefund, brokerFeeEmit };
   } finally {
     console.log(`[diag:tick-duration] poolSettlerTick ms=${Date.now() - _tickDiagStart}`);
+    logStep('pool.tick.phases', Date.now() - _tickDiagStart, { pre: _phPre, dw: _phDw, select: _phSel, post: _postT0 != null ? Date.now() - _postT0 : null, rows: _rowsN, t0: new Date(_tickDiagStart).toISOString() });   // M10 v2 observe-only(null = 该段前已抛出)
     running = false;
   }
 }

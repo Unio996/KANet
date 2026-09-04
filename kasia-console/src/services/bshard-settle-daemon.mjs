@@ -34,6 +34,7 @@ import { buildZkHandoffRequestV2, buildProposeCloseRequestV2 } from '../lib/bsha
 import { randomUUID } from 'crypto';
 import { createRequire } from 'node:module';
 import { persistPayoutShardState } from '../lib/payout-shard-persist.mjs';
+import { logStep } from '../lib/diag-step.mjs';   // M10 v2 observe-only (2026-09-05): tick 分步(pre/select/pregate/post)打点
 const _require = createRequire(import.meta.url);
 // 同 zk-prove-worker.mjs 完全一致的 isolated zk-sdk WASM 路径(D-005 隔离铁律: ZK 工具链绝不碰 live kaspa-wasm,
 // 独立 clone 出的 zk-sdk 构建)——gate witness 重建需要跟铸 gate 时同一份 ZkScriptBuilder API。
@@ -607,6 +608,7 @@ function selectRipeMarkets(currentDaa, pmt, limit) {
     ORDER BY (CASE WHEN outcome_market_source = 'kanet_v07' THEN 0 ELSE 1 END) ASC, deadline_daa ASC
   `).all(FINALITY_BUFFER, currentDaa);
   console.log(`[diag:step] settle.selectRipeMarkets.all ms=${Date.now() - _stepT0} rows=${rows.length} at=${new Date().toISOString()}`);
+  const _pgT0 = Date.now();   // M10 v2 observe-only: 第二步 = pre-gate 循环(JSON.parse(metadata) / unreachablePreGate / getMarketBets / COUNT 皆同步)
   const ripe = [];
   const _floor = _coverageFloor();   // 每 tick 查一次(Bettor 注1: 循环内每行纯算术零 DB 写)
   let _gated = 0, _gatedUnreachable = 0, _gatedRepeatOffender = 0;
@@ -637,6 +639,7 @@ function selectRipeMarkets(currentDaa, pmt, limit) {
     } catch (e) { log(`ripe-scan skip ${m.id.slice(-8)}: ${e.message}`); }
   }
   if (_gated > 0) log(`[pre-gate] ${_gated} market(s) gated this tick (unreachable=${_gatedUnreachable}[deadline<floor ${_floor} OR walk-exhausted, gap>${PREGATE_MAX_WALK}] + repeat-offender=${_gatedRepeatOffender}[连续${REPEAT_OFFENDER_THRESHOLD}次同签名TRANSIENT耗尽], 零walk/consolidate零slot, 挂账待人工另案)`);
+  logStep('settle.selectRipeMarkets.pregate', Date.now() - _pgT0, { rows: rows.length, ripe: ripe.length, gated: _gated });   // M10 v2 observe-only
   return ripe;
 }
 
@@ -935,6 +938,10 @@ export async function settleDaemonTick() {
   if (_running) { log('prev tick still running·skip'); return; }
   _running = true;
   const _tickDiagStart = Date.now();   // 诊断埋点(2026-07-13, Bettor #iynqdt·observe-only), 查完即删
+  // M10 v2 observe-only (2026-09-05, Bettor ②): tick 三段墙钟 pre(自环 await: kaspa/buildPkMap/DAA/dagInfo/zkCloseTick) /
+  //   select(selectRipeMarkets 同步整段 = SELECT + pre-gate 循环, 两子步各自有 [diag:step] 行) / post(settleOneMarket 循环)。
+  //   行 [diag:step] settle.tick.phases 带 at=ISO(ms 精度), 供 readout 按"阻塞起点 vs tick 起点"判施害者/受害者(NWT ④)。
+  let _phPre = null, _phSel = null, _postT0 = null, _ripeN = null;
   try {
     _k = await kaspa(); await buildPkMap();
     const currentDaa = await chainReader.getCurrentDaaScore();
@@ -962,7 +969,10 @@ export async function settleDaemonTick() {
       catch (e) { log(`zkCloseTick error(不影响 committee-sig 路径): ${e.message}`); _writeZkCloseTickErrorEvent(e.message); }
     }
 
+    _phPre = Date.now() - _tickDiagStart;   // M10 v2
+    const _selT0 = Date.now();
     const ripe = selectRipeMarkets(currentDaa, pmt, MAX_PER_TICK);
+    _phSel = Date.now() - _selT0; _postT0 = Date.now(); _ripeN = ripe.length;   // M10 v2
     if (ripe.length === 0) return;
     log(`tick: ${ripe.length} ripe market(s) (MAX_PER_TICK=${MAX_PER_TICK})`);
     for (const { market, betCount, multiShard } of ripe) {
@@ -1007,6 +1017,7 @@ export async function settleDaemonTick() {
   } catch (e) { log(`tick error: ${e.message}`); }
   finally {
     log(`[diag:tick-duration] settleDaemonTick ms=${Date.now() - _tickDiagStart}`);
+    logStep('settle.tick.phases', Date.now() - _tickDiagStart, { pre: _phPre, select: _phSel, post: _postT0 != null ? Date.now() - _postT0 : null, ripe: _ripeN, t0: new Date(_tickDiagStart).toISOString() });   // M10 v2 observe-only(pre 为 null = 在 pre 段抛出)
     _running = false;
   }
 }

@@ -21,6 +21,7 @@ import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { blake2b } from '@noble/hashes/blake2b';
 import { extractTemplateArtifact } from './pool-template-artifact.mjs';
+import { procStep } from './diag-step.mjs';   // M10 v2 observe-only (2026-09-05): 同步子进程站计时, 纯透传
 
 // 🔴 事故修复(2026-07-07，Bettor/NWT 裁定): 这个模块级默认被 bshard-settle-daemon.mjs/bshard-auto-settler.mjs
 // 多处隐式依赖(调 compilePayoutShardRedeem 不传 silverc 参数 → 落到这个默认) — 今晚 KANet-UI 重启把
@@ -56,7 +57,8 @@ export function compileSil(silPath, ctorArr, silvercPath = SILVERC) {
   const ctorPath = join(dir, 'ctor.json'), outPath = join(dir, 'out.json');
   writeFileSync(ctorPath, ctorJsonStr);
   try {
-    execFileSync(silvercPath, [silPath, '--ctor', ctorPath, '-o', outPath], { stdio: 'pipe', timeout: 30_000 });
+    // M10 v2 observe-only: procStep 只计时打一行 [diag:step] proc.silverc.compile.bshard-artifacts, 异常对象原样透传(下方 catch 照读 e.stderr/e.code)
+    procStep('proc.silverc.compile.bshard-artifacts', 'silverc', () => execFileSync(silvercPath, [silPath, '--ctor', ctorPath, '-o', outPath], { stdio: 'pipe', timeout: 30_000 }));
   } catch (e) {
     // 观测性 fix(2026-07-08 backlog 调查发现): e.stderr 是空 Buffer(spawn 失败/子进程无输出崩溃等场景)
     // 时仍是 truthy 对象(Buffer 非空字符串才是空)——旧写法 `e.stderr ? ... : e.message` 会选中空 stderr,

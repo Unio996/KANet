@@ -13,6 +13,7 @@ import { fork, execSync } from 'child_process';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { getConfig } from '../data/settings/configs.js';
+import { procStep } from '../lib/diag-step.mjs';   // M10 v2 observe-only (2026-09-05): 同步子进程站计时, 纯透传
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const KANET_ROOT = process.env.KANET_ROOT || join(__dirname, '..', '..', '..');
@@ -34,10 +35,11 @@ let _rapidCrashes = 0;
  *  pgrep/pkill so the single-poller guarantee holds on Linux/Mac too. */
 function killStrayBots() {
   try {
-    execSync(
+    // M10 v2 observe-only: 计时打一行 [diag:step] proc.powershell.killStrayBots(同步 8s 超时的 CIM 枚举, 启动/重启 bot 时各跑一次)
+    procStep('proc.powershell.killStrayBots', 'powershell', () => execSync(
       `powershell -NoProfile -Command "@(Get-CimInstance Win32_Process -Filter \\"Name='node.exe'\\" -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -match '_launch_tg_bot|tg-bot.bot\\.mjs' }) | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"`,
       { timeout: 8000, stdio: 'ignore' }
-    );
+    ));
   } catch { /* best-effort */ }
 }
 
