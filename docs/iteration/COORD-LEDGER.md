@@ -11336,3 +11336,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **P1-A 机制更正（NWT fix-up 2·577400b7）**：`paid` 回放路不成立（filter `:2451` payment_tx 守卫）；exchange 自动双发真路径 = **同 tick 超时重试**（与 P1-B (a) 同形·attempt ×3·30s 默认超时）；人工路 = 60 min 回退后操作员「Send KAS」端点零检查再发。I1 模板按 I2 v0.2 四手段 + I2-6 + 端点过闸。
 - 🔴 **我违规一次**：对 NWT 发"I2 v0.2 已推"时推送闸已拒（队列 2≠1：NWT fix-up 2 同队），我在看到闸输出前写了断言（`feedback-run-my-own-check-before-writing-its-result…` 同族·"推送/写账命令与已推消息绝不同轮并行"）；已更正并双射推 a0922234+577400b7。
 - **待**：NWT v0.2 复核 → 与 Phase 1 同一次精炼报 Owner；Owner Phase 1 + M5 结果；下次自然重启（M10）。
+
+### (809) 2026-09-04 · I2 v0.3（f70b35f3）落 NWT GREEN-conditional 两承重条件（**relay 存储层即钱路**）：C1 写前记录三态 `inflight → submitted`（现 `relay.mjs:502-505` 广播先持久化后 = 崩溃即 never = 二次付·禁）· C2 专用不淘汰原子存储（`state.mjs:17-27` seen 文件整写覆盖/无 fsync/`slice(-MAX_SEEN)` 淘汰 = 键丢 = 双付·禁复用）· V13–V15 · 待 NWT GREEN-final → 与 Phase 1 合并一次报 Owner
+- **C1**：relay 收 transfer 先持久化 `{state:'inflight', ts, relay_id}` → `sendKaspa` 后改 `{state:'submitted', txId}`；`transfer_status` 三态 `never|inflight|submitted`；**inflight ⇒ console HOLD**；relay 重启对 inflight 键先自查 RPC/`kaspa_tx_log`（定 txId ⇒ submitted；确证未广播 ⇒ 才 never；否则留 inflight 等人）。V13：`sendKaspa` 返回后、持久化前杀 relay ⇒ 重启 inflight ⇒ HOLD；突变"inflight ⇒ never"必红。
+- **C2**：追加写或 tmp+rename+fsync；不淘汰（只在 console 回执 completed 后由 console 命令删）。V14：写中途杀 relay 键仍在；MAX_SEEN 量级后最早 key 仍查得到。
+- **非阻塞三条**：V2 改 relay 权威（链读只回填）；attempt.relay_id ≠ 当前 escrowRelay ⇒ HOLD（换 relay 假阴性·V15）；迁移期 I2-6 只增选 `delivering ∧ attempt`，pre-I2 无 attempt 的 delivering 行现为 0（806）⇒ 落码前再核。
+- **合并批示稿（待 GREEN-final 即发 Owner）**：Phase 1（M8 用户面 / M2 钱路 / M-scout 运维 / M6 relay·部署闸 M10 ≥1h 出数窗·随自然重启）+ I2（console settler + relay 命令面·READY 前随自然重启）。两组各自 NWT diff 审、可单独回滚。
