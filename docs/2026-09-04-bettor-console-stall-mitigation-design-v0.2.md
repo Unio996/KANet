@@ -1,4 +1,4 @@
-# console 事件循环停顿 · 修法设计 v0.3
+# console 事件循环停顿 · 修法设计 v0.3.1
 
 > **Status**: DRAFT-v0.3（v0.2 NWT GREEN-conditional 条件已全部落入 · 待 NWT 复核一眼 → 精炼后 Owner 批 Phase 1 → 派实现）· 不作施工依据
 > 作者 Bettor（架构师帽）· 2026-09-04 · 输入 = COORD-LEDGER (794)–(799) + J2 六层 L1–L5（`scratch/_j2_console_stall_sixlayer_L1-3/L4/L5_*.md`）+ NWT 三轮审。v0.1 骨架与结构红队增补见 `scratch/_bettor_console_stall_mitigation_design_v0.1_2026-09-04T14-1xZ.md`。
@@ -36,8 +36,8 @@
 | **M10** | observe-only `[diag:step]` 埋点：ZK×4、pair-ingestor（+since_id）、settle `selectRipeMarkets().all()`、pool-settler 主选盘 SQL；fastify onSend >1MB 响应记录（**仓内首个全局响应路钩子**：try/catch 全包、只读 payload 长度、流式 payload 跳过） | 日志行 + 一个全局钩子；零**预期**行为变化 | NWT GREEN → Bettor | 下次自然重启（**先于 Phase 1 至少一个 ≥1h 出数窗**） |
 | **M8** | pair-ingestor 游标改 `WHERE rowid > ? ORDER BY rowid`（表非 WITHOUT ROWID；无 schema 变更）；`_lastIngestId` 是否持久化由实现稿定（默认不持久化：重启首扫全表，INSERT OR IGNORE 幂等=只是成本） | 一处 SQL + 游标变量 | **Owner**（broker/用户面：修正确性 bug） | 下次自然重启 |
 | **M9** | claim-auto chain_events LIKE EXISTS 改索引可命中形（实现稿在副本 cp 件上 EXPLAIN + 计时） | 一处 SQL（±索引） | **Owner**（refund claim 钱路） | 维护窗 |
-| **M2** | IBD 期 tick 短路：settle-daemon / pool-settler 顶部**每 tick 直读一次**（无缓存·超时 ≤2s）console 自己 RpcClient `getServerInfo().isSynced`（同 `preprune-capture-worker.mjs:112-130` 信号源，**极性相反、不复用其函数**）；**只在本 tick 新鲜读到 `isSynced===false` 时跳**；超时/失败/unknown ⇒ 照常扫；打一行 `skip: node not synced`；位置在 tick 顶部 ⇒ **同时跳过 :959 `zkCloseTick`**（IBD 期同样正确）；成本 2 RPC/min | 两 tick 各一处前置 | **Owner**（钱路模块） | **M10 出数窗之后的**下次自然重启 |
-| **M-scout** | scanner watchdog（`scanner.js:270-292`）读 checkpoint 前加 synced 门：**极性与 M2 同——只在本 tick 新鲜读到 `isSynced===false` 才抑制判死；unknown/超时 ⇒ 现行为（照判）**（否则 RPC 永久故障 = watchdog 永久失效）；60s 节流一行 `[scanner:watchdog] skip: node not synced` | watchdog 判据一处 | NWT GREEN → Bettor（运维·KANet-UI 出稿·观测页 `docs/2026-09-04-kanetui-scanner-watchdog-ibd-observation-and-synced-gate-candidate.md`） | 下次自然重启 |
+| **M2** | IBD 期 tick 短路：settle-daemon / pool-settler 顶部每 tick 调 **`isNodeSyncedCached`（`preprune-capture-worker.mjs:138`·三态 `{synced,isSynced,reason}`·TTL 30s = "新鲜"定义·NWT 收回"不复用"）**，**分支只看 `gate.isSynced === false` ⇒ 跳**（不用 `synced !== true`，那会把 rpc-fail 折进去）；超时/失败/unknown ⇒ 照常扫（**门 = 从既有行为切出"已确认 IBD"的例外；确认不到 ⇒ 回到既有行为**）；打一行 `skip: node not synced`；位置在 tick 顶部 ⇒ **同时跳过 :959 `zkCloseTick`**（IBD 期同样正确）；成本 2 RPC/min | 两 tick 各一处前置 | **Owner**（钱路模块） | **M10 出数窗之后的**下次自然重启 |
+| **M-scout** | scanner watchdog（`scanner.js:270-292`）读 checkpoint 前调同一 `isNodeSyncedCached`（TTL 30s < 45s 巡检）：**同一条规则的第二次应用——只在 `gate.isSynced === false` 才抑制判死；unknown/超时/rpc-fail ⇒ 既有行为（照判）**（否则 console 共享 RpcClient 中毒而节点正常时 scout 真假活、watchdog 永久失效 = 门打开它要治的缺口）。事实更正（NWT 实读 `last_block_time=2026-09-01T23:32Z`·`updated_at` 2s 前）：**scout 每代都跑通 history-fetch 并进入 rpc-scanner 索引 IBD 块，然后被当假活杀掉** = "每 2m15s 杀一次正在干活的 scout"，非"从未进入实时订阅"；60s 节流一行 `[scanner:watchdog] skip: node not synced` | watchdog 判据一处 | NWT GREEN → Bettor（运维·KANet-UI 出稿·观测页 `docs/2026-09-04-kanetui-scanner-watchdog-ibd-observation-and-synced-gate-candidate.md`） | 下次自然重启 |
 | **M6** | relay catch-up 确定性错相（序号 × 60/32 s 固定偏移；最坏延迟不变）——**必做**（F8 算术：不做则每分钟固定 ≥1s 阻塞，p99<1s 不可达） | relay 一常量→函数 | NWT → Bettor | Phase 1/2 随 relay 重启 |
 | **M0** | settle tick 自环（relayPost 打自己 :3200）改进程内调用 —— **记债**，本轮不做 | — | — | — |
 | **M5** | Defender 路径排除（data/、logs/、kaspad 数据目录；**不排除 node.exe 进程**）—— 待 H4 | 运维·提权 | Owner 一句 / J1 角色 B | 即时 |
@@ -52,7 +52,7 @@
 ## 5. 验收（每条各自·两段不重叠窗：IBD 期一窗 + READY 后一窗）
 - 指标：`settleDaemonTick ms` p50/p99、`eventloop-lag ≥5s` 次/小时、:3200 拒连次/小时、D: reads/s。
 - M8 负向量：构造 UUID 字典序小于游标的新消息 ⇒ 必被扫到（现码必丢）；重启后首扫结果与前一致。**假设声明**：`broadcast_messages` 仓内无任何 DELETE（NWT grep = 0）⇒ rowid 单调成立；将来加 DELETE 须改 `created_at+id` 游标。
-- M2 负向量：RPC 超时 ⇒ 照常扫；unknown ⇒ 照常扫；synced=true ⇒ 照常扫；**非空洞**：fresh false ⇒ 跳 **且** `sqlite.prepare` 未被调用（突变：反转跳过条件必红）。
+- M2 负向量：RPC 超时/rpc-fail（`isSynced` 非 false）⇒ 照常扫；unknown ⇒ 照常扫；synced=true ⇒ 照常扫；TTL 语义：30s 内命中即新鲜、超 TTL 由 reader 自身重读；**非空洞**：fresh false ⇒ 跳 **且** `sqlite.prepare` 未被调用（突变：反转跳过条件必红）。
 - M-scout 负向量：注入 not-synced ⇒ stop/start 未调用；突变去门必红；RPC 失败 ⇒ 照判（现行为）。
 - M10：零预期行为变化（diff 只增日志行 + 一个受保护钩子）；负向量：钩子内 throw ⇒ 响应不变；每条 step 行可 grep。
 - 掉电/幂等审：本稿 **不动持久性**（M3 作废）⇒ 原 "(b) 类 *_txid 写者幂等清单" 与本稿无因果、不阻塞（NWT 同意）；**但它是既有隐患（NORMAL 掉电本就丢尾事务）⇒ 单独立项归 J2**（列表 → NWT 审幂等 → Owner 拍），不随本稿消失。
