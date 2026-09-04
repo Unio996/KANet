@@ -11451,3 +11451,5 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 ### (830) 2026-09-05 · ✅ **Owner 批 D-a 进入构建**（原话「我肯定批准 D-a 进入构建」·18:5xZ）⇒ J2 GO 隔离构建（补丁 exe + C2 对照 exe·独立 clone/target·不动活 exe·试跑只证配置·provenance）→ NWT 核产物 → 切换另批 · KANet-UI 8496 互核 5/6（门 e12e8ac4 未到首 tick）· 起后 +95 s 首个 ≥10 s lag（18:43:04Z 32.8 s）· M10 首个 ≥1h 窗 J2 定 19:46Z 出页（全程 header 相位·切段·不当基线）· J2 自报三份文件名手打本地时间当 UTC（差 7 h·783/784 同病·页头勘误·ledger 按真实 UTC）
 - **Owner 另两件待办的执行文本已给**：亲和还原（管理员 PowerShell 一行）与触发 J1 的准确文字（指向 inbox 三封：09-04T17-19Z 更正+younio 四条件 / 18-25Z watchdog 对齐+D-a runbook / 16-42Z Owner 直令）。
 - **KANet-UI 降报频**：只在 owner PID 变 / supervisor cool-down / kaspad 相位回 body 时报；每次 PID 变附"起后 2 min 内首个 ≥10 s lag 时刻"。
+
+### (831) 2026-09-05 · 亲和已还原（Owner 管理员 PowerShell 回显 `16777215 Normal`·19:0xZ）· 窗 C 因 kaspad 仍 header 相位不测·B′（0x000555+Normal+自动闸）等块体相位恢复 · D-a 构建 18:57:47Z 起（J2·`-da` 分支 003875b0 = 补丁 d8565ef6…·`-ctl` 干净 7b1e18cc·独立 target·`-j 12`·日志 `scratch/_j2_da_build_2026-09-04T18-57Z.log`）· 触发 J1 的文字已交 Owner
