@@ -1,6 +1,6 @@
 # D-b · IBD 块体请求流水线（深度 2）设计 v0.1
 
-Bettor `kanet-tn12-1c [4a17db]` · 2026-09-05T21:58Z · 状态：**设计稿·待 NWT 红队·未派建·未部署**
+Bettor `kanet-tn12-1c [4a17db]` · 2026-09-05T21:58Z · 状态：**v0.1.1 设计稿·待 NWT 红队·未派建·未部署**（v0.1.1 = 吸收 NWT 预审 5(a)(b) 措辞与判据）
 权威进度：`docs/iteration/COORD-LEDGER.md` (855)(856)。前置：D-a（fd 预算 + 共享块缓存·1b3046fb·live 27032）。
 
 ## 0. 一句话
@@ -30,7 +30,7 @@ try_join_all(prev); report_completion
 实现上把 `queue_block_processing_chunk_body_only` 拆成 `send_body_request(chunk)`（只 enqueue 请求）与 `receive_body_chunk(chunk)`（只 dequeue+处理）；`queue_block_processing_chunk_full_block`（v7 路径）**不动**（v7 对端 = `RequestIbdBlocks` 无 request_id，本设计不覆盖，v7 保持原逻辑）。深度固定 2（在飞请求 ≤ 2）；不做自适应。
 
 ## 3. 安全性论证（每条都要 NWT 逐条判）
-1. **顺序**：对端逐请求顺序服务、单一 TCP/h2 流、我方 `incoming_route` 按到达序出队 ⇒ chunk_{i+1} 的 BlockBody 只会在 chunk_i 全部之后到达。`dequeue_with_timeout!` 不按 request_id 匹配（只取下一条），所以**顺序是唯一依赖**——对端若有并发服务（非 v8 代码），会乱序 ⇒ `expected_hash` 不匹配 ⇒ 现有代码路径 `ProtocolError` 断连（fail-closed，不会误收）。
+1. **顺序**：对端逐请求顺序服务、单一 TCP/h2 流、我方 `incoming_route` 按到达序出队 ⇒ chunk_{i+1} 的 BlockBody 只会在 chunk_i 全部之后到达。**依赖点措辞（NWT 5a）**：响应是带 request_id 的（`make_response!(…, request_id)`），但**客户端不看它**——`dequeue_with_timeout!` = 纯 `recv()`（`p2p/src/common.rs:184-192`），route 只按 payload 类型分发；所以顺序安全**完全依赖对端 `HandleBlockBodyRequests` 单循环顺序服务**，这是唯一依赖——对端若有并发服务（非 v8 代码），会乱序 ⇒ `expected_hash` 不匹配 ⇒ 现有代码路径 `ProtocolError` 断连（fail-closed，不会误收）。
 2. **超时**：单条 `dequeue_with_timeout` 120 s；流水线下 chunk_{i+1} 首条最坏等待 = 对端服务 chunk_i（~6 s）+ 自身延迟（~6 s）≪ 120 s。
 3. **内存**：在飞最多 2×99 个 BlockBody（~1.2 MB）+ 对端最多多缓冲一批；可忽略。
 4. **对端负载**：对端每单位时间多服务一倍请求 **只在对端延迟是固定型时发生**；若对端是吞吐型，流水线只是把等待挪到对端队列，块率不变、对端不多做功。无 DoS 面（同一 peer、同一批大小、同一总量）。
@@ -39,6 +39,7 @@ try_join_all(prev); report_completion
 7. **Ban 风险**：对端对 `RequestBlockBodies` 无速率/并发检查（v8 handler 只 loop dequeue）；2 个在飞请求与 2 个独立 syncer 各发 1 个在对端视角等价。
 
 ## 4. 判据（部署后 30 min 内可裁·全部现有只读仪器）
+- **首要判别（NWT 5b·分"对端空闲等待"与"对端逐请求串行忙时"）**：p2p 100 ms 时间线上，第 2 个请求（在第 1 团到货前已发）对应的团，其**首字节是否紧接第 1 团末字节**（间隔 ≤ 1 s ⇒ 延迟可重叠 ⇒ 流水线有效），还是**再等 4–6 s**（⇒ 逐请求串行固定成本 ⇒ 无效，立即回滚 D-a exe，不留）。
 - **主判据**：`scratch/_bettor_p2p_bytes_timeline.mjs` 100 ms 时间线——请求尖峰（tx≈3.4 KB）之间的间隔与到货团间隔。**GO 保留**：团间隔中位 ≤ 4.5 s（现 ~6.7 s）且 `Processed N blocks/10s` 30 桶均值 ≥ 20 blk/s（现 12–14）；**回滚**：均值 < 12 blk/s 持续 20 min，或任何 `expected block/header mismatch` / `ProtocolError` 断连。
 - **对照口径**：只与切换前后同为"干净 body 相位"（无压实簇、无剪裁遍历、无断连）的 10 min 窗比；A 基线 14.43 / D-a 两窗 13.63、12.92（856）。
 - **副作用监视**：断连率（基率 0.43/天·切换后已 7 次）、kaspad WS/句柄（D-a 后 20–22 GB / 16.3k）、console 停顿（M10 v2 行）。
