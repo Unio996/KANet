@@ -1,6 +1,6 @@
 # I2 · prediction settler 赢家 payout 幂等 · 设计 v0.3
 
-> **Status**: v0.3 · **NWT GREEN-conditional（v0.2 a0922234·C1/C2 已落入本版）** · 待 NWT GREEN-final 一眼 → 精炼后 Owner 批 · 钱路 · **目标：READY（~09-09）前落地·随自然重启生效**）· 不作施工依据
+> **Status**: CURRENT · v0.3 · **NWT GREEN-final（2026-09-04·ledger 810）** · **待 Owner 批（与 Phase 1 合并一次）** · 落码分两 commit（relay 存储层 / console settler）各自 NWT diff 审 · 落码前 J2 复核 `delivering ∧ 无 payout_attempt` 行 COUNT=0 · 钱路 · **目标：READY（~09-09）前落地·随自然重启生效**）· 不作施工依据
 > 作者 Bettor · 2026-09-04 · 输入：NWT 幂等审 `docs/2026-09-04-NWT-redteam-txid-writer-idempotency-audit.md`（e0aa8e63+458e5869）· J2 代码事实 `scratch/_j2_i2_prediction_payout_code_facts_2026-09-04T15-00Z.md` · ledger (805)(806)。
 
 ## 0. 事实（J2 file:line 亲核）
