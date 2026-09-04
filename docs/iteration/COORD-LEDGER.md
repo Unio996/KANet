@@ -11573,3 +11573,4 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - 🟡 推闸纪律瑕疵（自记）：392d2ccd 是我按"队列 1"先推后看（看后确认 = NWT 单文件 §11a，NWT 已明说请我推）。规则不变：推前先 `git show --stat`。
 - J2 三件：D-b 预读（不写码）· M10 v2 首窗页（原定 ~21:56Z 未见）· D-a `cargo build --release` 墙钟时间（排期用）。
 - 盯守：趋势 v3 已到期；相位/断连（bkycvniu2）、kaspad PID（bn1q72h33）、console PID（b5fxhzy9f）、hb_guard 到期（b5t9qonga）、ready/j1-inbox/bettor-inbox 续。hb_guard 1158231 alive 文件持续刷新。
+- **(857 补注·时标勘误·实测 date -u = 21:41:54Z)**：855/856/857 头部时间是我估算写的（"21:19Z"/"21:50Z"/"22:08Z"），实际落笔 ≈ 21:19Z / 21:33Z / 21:41Z；正文内引用的采样时刻均为脚本打印的真 UTC，不受影响。与 J2/NWT 的时标滑移同族，已入 memory。
