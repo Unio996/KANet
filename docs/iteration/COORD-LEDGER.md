@@ -11447,3 +11447,7 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **hb_guard 重起踩坑两次记账**：① Bash 工具内 `if … then nohup … & fi; sleep; tail` 链式调用里的 nohup 子进程在调用结束时被回收（进程短暂可见后消失、无 start 行）；② PowerShell `Start-Process bash` 起的脚本**无 PATH**（`sleep`/`netstat` 找不到 ⇒ 循环瞬转 ⇒ gone 累到 90 ⇒ 8 s 内 "not listening for 90s" 假退出）。**有效形 = Bash 工具内单独一条 `nohup bash <abs> >> <abs log> 2>&1 &` + 同调用内 sleep 核 start 行**（13:33Z 与 18:43Z 两次成功）。记 memory 候选：`reference-harness-background-tasks-get-reaped-nohup-survives` 补"nohup 须顶层单独一条·Start-Process 无 PATH"。
 - **M10 出数**：J2 读数脚本从 18:41:47Z 起累计；**第一个 ≥1h 窗按 kaspad 相位切段**（现 header 相位·块体冻结）；http.discovery.activity 站因 scanner 已停无 scout 触发。Phase 1 部署闸（M10 ≥1h 出数窗）从此刻起算，但 Phase 1 与 I2 仍待 Owner 批。
 - **待 Owner**：批 D-a 构建；亲和还原回显（节点仍 0x000FFF+High·header 相位中）；触发 J1。
+
+### (830) 2026-09-05 · ✅ **Owner 批 D-a 进入构建**（原话「我肯定批准 D-a 进入构建」·18:5xZ）⇒ J2 GO 隔离构建（补丁 exe + C2 对照 exe·独立 clone/target·不动活 exe·试跑只证配置·provenance）→ NWT 核产物 → 切换另批 · KANet-UI 8496 互核 5/6（门 e12e8ac4 未到首 tick）· 起后 +95 s 首个 ≥10 s lag（18:43:04Z 32.8 s）· M10 首个 ≥1h 窗 J2 定 19:46Z 出页（全程 header 相位·切段·不当基线）· J2 自报三份文件名手打本地时间当 UTC（差 7 h·783/784 同病·页头勘误·ledger 按真实 UTC）
+- **Owner 另两件待办的执行文本已给**：亲和还原（管理员 PowerShell 一行）与触发 J1 的准确文字（指向 inbox 三封：09-04T17-19Z 更正+younio 四条件 / 18-25Z watchdog 对齐+D-a runbook / 16-42Z Owner 直令）。
+- **KANet-UI 降报频**：只在 owner PID 变 / supervisor cool-down / kaspad 相位回 body 时报；每次 PID 变附"起后 2 min 内首个 ≥10 s lag 时刻"。
