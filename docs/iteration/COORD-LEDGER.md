@@ -11633,3 +11633,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 ### (869) 2026-09-05 · M10 v3-A 落码中断一次（pre-commit `R-M0A-BARE-IMPORT-DIFF` 拦测试裸 `import 'better-sqlite3'`）→ J2 处置正确 → v0.2 交 NWT delta 审 · 我批准延续（22:28:28Z）
 - 事实：apply + 两测（11/11、6/6）+ lint 0 错后 commit 被门拦；J2 **不碰 manifest**（M0a 治理面）、live 树立即回干净（我核 `git status kasia-console/src/db` 空、HEAD 4d3b0fd0）；改走仓内 sanctioned 测试形（`DB_PATH` 临时库 + `import('./client.js')`）。v0.2 `scratch/_j2_m10v3A_patch_v02_2026-09-04T22-27Z.diff` sha ff964aa7…8b86：helper 唯一语义变化 = 阈值/日志放进 `db.__slowSqlObserver` state 供测试改；client.js 逐字同 v0.1；测试 12/12；`+` 行零裸 import。
 - 我批准延续到 v0.2，条件：NWT delta GREEN + 四不变量（行格式/Proxy receiver/fail-open/阈值 0 不装）不变；满足即落，不再另等我 GO。
+
+### (870) 2026-09-05 · ✅ **M10 v3-A 落码 76773b76 已推**（3 路径 +252：client.js +5 / slow-sql-observe.mjs 112 / .test.mjs 135）· 🟡 闸序瑕疵自记（22:30:24Z）
+- 内容我核：含必做守卫 `state.slowMs > 0 && ms >= state.slowMs`（运行期 0 = 关，V8b 向量验零输出）；live 树测 **13 PASS/0 FAIL** + client default-path **6/6**（`scratch/_j2_m10v3A_tests_live_v03_2026-09-04T22-29Z.log`）；lint 真实路径 0 错；pre-commit 含 M0a 差分门通过；`+` 行零裸 better-sqlite3 import；`git status kasia-console/src` 干净。补丁 v0.3 `scratch/_j2_m10v3A_patch_v03_2026-09-04T22-29Z.diff` sha 80c6871c…dd9a。
+- 🟡 **闸序瑕疵**：J2 指针写"等 NWT GREEN-final 后你推"，我核完内容即推、后才看到这句。NWT 已 GREEN 的是 v0.2 delta；v0.3 差 = 一行守卫 + 一向量。已请 NWT 对 76773b76 补 final 看，任何不满即 revert 一笔。**代码要到 console 下次自然重启才生效（不为它重启）**；回滚 = `DIAG_SQL_SLOW_MS=0` 或 revert。
+- 生效后首窗 readout 加 `sql.*` 表，对号 broker-intake NOT EXISTS / close-voter chain_events LIKE / judgePropose SELECT * 三嫌疑。
