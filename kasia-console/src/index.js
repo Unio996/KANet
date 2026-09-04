@@ -188,6 +188,11 @@ const ENCODING_ERR_BODY = {
   hint: 'docs/broker-test-guide.md',
 };
 
+// M10 observe-only (2026-09-04, design v0.2 §3 H3): 记 >1MB 响应(路由/字节/耗时), 判 30s 出站脉冲归属.
+// 钩子内全 try/catch、只读 payload 长度、stream 跳过、永远原样返回 payload; 生效随下次自然重启.
+const { installBigResponseObserve } = await import('./lib/http-big-response-observe.mjs');
+installBigResponseObserve(fastify);
+
 fastify.addHook('preHandler', async (request, reply) => {
   if (request.method !== 'POST') return;
   const url = request.url;

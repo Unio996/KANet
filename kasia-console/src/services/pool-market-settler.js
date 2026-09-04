@@ -583,6 +583,7 @@ export async function poolSettlerTick() {
 
     // J2-tn r388 (#24 settler 饥饿根治 — Bettor 02:18 钦定 自治闭环地基):
     // ORDER BY updated_at DESC = 活跃市场优先 (= 新近活动 process 在前, stale markets 不阻塞 demo).
+    const _stepT0 = Date.now();   // M10 observe-only (2026-09-04 design v0.2 §3 H1): 量主选盘 SELECT(含 prepare)本身
     const markets = sqlite.prepare(`
       SELECT id, maker_relay_id, maker_pk, spine_p2sh, spine_lock_tx, oracle1_pk, oracle2_pk, oracle3_pk,
              oracle_relay_ids, deadline, protocol_status, sides_merkle_root, broker_pk, broker_fee_pct, broker_relay_id,
@@ -594,6 +595,7 @@ export async function poolSettlerTick() {
         AND deadline <= ?
       ORDER BY updated_at DESC
     `).all(Math.floor(Date.now() / 1000));
+    console.log(`[diag:step] pool.selectMarkets.all ms=${Date.now() - _stepT0} rows=${markets.length} at=${new Date().toISOString()}`);
     if (!markets.length) return { ok: true, processed: 0 };
 
     // J2-tn r388 #24 time-box: settler tick max duration 30s. Stale 死单 retry chain 若爆 30s,

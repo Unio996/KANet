@@ -134,7 +134,9 @@ export function startPeriodicIngest({ interval_ms = 30_000 } = {}) {
   }
   _periodicTimer = setInterval(() => {
     try {
+      const _t0 = Date.now(); const _since = _lastIngestId;   // M10 observe-only (design v0.2 §3 H2): 打 since_id 当前值, hits = 命中数(非扫描行数)
       const r = scanAndIngestPairs({ since_id: _lastIngestId });
+      console.log(`[diag:step] pair.scanAndIngestPairs ms=${Date.now() - _t0} since_id=${String(_since).slice(0, 12)} max_id=${String(r.max_id).slice(0, 12)} hits=${r.invites_processed + r.acks_processed} at=${new Date().toISOString()}`);
       if (r.pairs_created > 0) {
         console.log(`[pair-ingestor] tick: ${r.invites_processed}i + ${r.acks_processed}a → ${r.pairs_created} new pairs (cursor ${_lastIngestId} → ${r.max_id})`);
       }

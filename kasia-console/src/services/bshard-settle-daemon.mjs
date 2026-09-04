@@ -593,6 +593,7 @@ function selectRipeMarkets(currentDaa, pmt, limit) {
   // 该行返回 NULL 那么温和)，会让 selectRipeMarkets() 整体报错、结算 tick 彻底停摆——比不排除
   // zk_native 市场这个原洞严重得多。改用 json_valid() 先短路判断，非法 JSON 视为"未标记"(不排除，
   // 走原逻辑，行为不变)，只有合法 JSON 且 zk_native 字段确实是 true 时才排除。
+  const _stepT0 = Date.now();   // M10 observe-only (2026-09-04 design v0.2 §3 H1): 量这条 SELECT(含 prepare)本身, 行首 [diag:step] 可 grep
   const rows = sqlite.prepare(`
     SELECT * FROM pool_markets
     WHERE protocol_version = 'v0.7'
@@ -605,6 +606,7 @@ function selectRipeMarkets(currentDaa, pmt, limit) {
       AND (json_valid(resolution_rule_spec) = 0 OR json_extract(resolution_rule_spec, '$.zk_native') IS NOT 1)
     ORDER BY (CASE WHEN outcome_market_source = 'kanet_v07' THEN 0 ELSE 1 END) ASC, deadline_daa ASC
   `).all(FINALITY_BUFFER, currentDaa);
+  console.log(`[diag:step] settle.selectRipeMarkets.all ms=${Date.now() - _stepT0} rows=${rows.length} at=${new Date().toISOString()}`);
   const ripe = [];
   const _floor = _coverageFloor();   // 每 tick 查一次(Bettor 注1: 循环内每行纯算术零 DB 写)
   let _gated = 0, _gatedUnreachable = 0, _gatedRepeatOffender = 0;
@@ -1071,7 +1073,7 @@ export function startZkCloseTickV2Cron() {
   if (_zkCloseV2Timer) return;
   if (!ZK_SETTLER_RELAY_ID) { log('zkCloseTickV2 NOT starting — BSHARD_SETTLER_RELAY_ID unset'); return; }
   log(`zkCloseTickV2 starting·tick=${ZK_CLOSE_TICK_V2_MS}ms`);
-  _zkCloseV2Timer = setInterval(() => { zkCloseTickV2(_zkCloseTickV2Ctx()).catch(e => log(`zkCloseTickV2 uncaught: ${e.message}`)); }, ZK_CLOSE_TICK_V2_MS);
+  _zkCloseV2Timer = setInterval(() => { const _t0 = Date.now(); zkCloseTickV2(_zkCloseTickV2Ctx()).catch(e => log(`zkCloseTickV2 uncaught: ${e.message}`)).finally(() => { try { console.log(`[diag:step] zk.closeTickV2 ms=${Date.now() - _t0} at=${new Date().toISOString()}`); } catch {} }); }, ZK_CLOSE_TICK_V2_MS);   // M10 observe-only: 计时挂在原 catch 之后, finally 体零抛出面
 }
 export function stopZkCloseTickV2Cron() { if (_zkCloseV2Timer) { clearInterval(_zkCloseV2Timer); _zkCloseV2Timer = null; } }
 
@@ -1081,7 +1083,7 @@ export function startClaimAutonomousTickCron() {
   if (_claimTickTimer) return;
   if (!ZK_SETTLER_RELAY_ID) { log('claimAutonomousTick NOT starting — BSHARD_SETTLER_RELAY_ID unset'); return; }
   log(`claimAutonomousTick starting·tick=${ZK_CLAIM_TICK_MS}ms`);
-  _claimTickTimer = setInterval(() => { claimAutonomousTick(_claimAutonomousCtx()).catch(e => log(`claimAutonomousTick uncaught: ${e.message}`)); }, ZK_CLAIM_TICK_MS);
+  _claimTickTimer = setInterval(() => { const _t0 = Date.now(); claimAutonomousTick(_claimAutonomousCtx()).catch(e => log(`claimAutonomousTick uncaught: ${e.message}`)).finally(() => { try { console.log(`[diag:step] zk.claimAutonomousTick ms=${Date.now() - _t0} at=${new Date().toISOString()}`); } catch {} }); }, ZK_CLAIM_TICK_MS);   // M10 observe-only
 }
 export function stopClaimAutonomousTickCron() { if (_claimTickTimer) { clearInterval(_claimTickTimer); _claimTickTimer = null; } }
 
@@ -1105,7 +1107,7 @@ export function startZkHandoffAutonomousTickCron() {
   if (_zkHandoffTickTimer) return;
   if (!ZK_SETTLER_RELAY_ID) { log('zkHandoffAutonomousTick NOT starting — BSHARD_SETTLER_RELAY_ID unset'); return; }
   log(`zkHandoffAutonomousTick starting·tick=${ZK_HANDOFF_TICK_MS}ms`);
-  _zkHandoffTickTimer = setInterval(() => { zkHandoffAutonomousTick(_zkHandoffTickCtx()).catch(e => log(`zkHandoffAutonomousTick uncaught: ${e.message}`)); }, ZK_HANDOFF_TICK_MS);
+  _zkHandoffTickTimer = setInterval(() => { const _t0 = Date.now(); zkHandoffAutonomousTick(_zkHandoffTickCtx()).catch(e => log(`zkHandoffAutonomousTick uncaught: ${e.message}`)).finally(() => { try { console.log(`[diag:step] zk.handoffAutonomousTick ms=${Date.now() - _t0} at=${new Date().toISOString()}`); } catch {} }); }, ZK_HANDOFF_TICK_MS);   // M10 observe-only
 }
 export function stopZkHandoffAutonomousTickCron() { if (_zkHandoffTickTimer) { clearInterval(_zkHandoffTickTimer); _zkHandoffTickTimer = null; } }
 
@@ -1132,7 +1134,7 @@ export function startZkJudgeProposeAutonomousTickCron() {
   if (_zkJudgeProposeTickTimer) return;
   if (!ZK_SETTLER_RELAY_ID) { log('zkJudgeProposeAutonomousTick NOT starting — BSHARD_SETTLER_RELAY_ID unset'); return; }
   log(`zkJudgeProposeAutonomousTick starting·tick=${ZK_JUDGE_PROPOSE_TICK_MS}ms`);
-  _zkJudgeProposeTickTimer = setInterval(() => { zkJudgeProposeAutonomousTick(_zkJudgeProposeTickCtx()).catch(e => log(`zkJudgeProposeAutonomousTick uncaught: ${e.message}`)); }, ZK_JUDGE_PROPOSE_TICK_MS);
+  _zkJudgeProposeTickTimer = setInterval(() => { const _t0 = Date.now(); zkJudgeProposeAutonomousTick(_zkJudgeProposeTickCtx()).catch(e => log(`zkJudgeProposeAutonomousTick uncaught: ${e.message}`)).finally(() => { try { console.log(`[diag:step] zk.judgeProposeAutonomousTick ms=${Date.now() - _t0} at=${new Date().toISOString()}`); } catch {} }); }, ZK_JUDGE_PROPOSE_TICK_MS);   // M10 observe-only
 }
 export function stopZkJudgeProposeAutonomousTickCron() { if (_zkJudgeProposeTickTimer) { clearInterval(_zkJudgeProposeTickTimer); _zkJudgeProposeTickTimer = null; } }
 
