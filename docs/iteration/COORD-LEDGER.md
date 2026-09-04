@@ -11619,3 +11619,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - 六条硬条件（给 J2）：fail-open（诊断路径任何错吞掉）· 只拦三法其余透传不改语义 · 只记 SQL 文本不记参数、栈只在慢时取一层 · 阈值 env 可调 0=关 · 离线 :memory: 六向量（含 pluck 链式、transaction 内、异常透出、阈 0 零输出）红绿都贴 · 单独一笔只动一处 + 测试。流程：镜像 diff → NWT 单独审 → 我批 apply → 随 console 自然重启承载。
 - 嫌疑 SQL（LIKE 全表、SELECT *）**只记不修**，A 首窗出数字后进 Owner 批的修法清单（与 broker-intake 复合索引、M8 并列）。
 - **(866 补·22:18:45Z)** NWT 预审 M10 v3 GREEN-conditional；必改一条：A 行 **`at=` 保持时间戳**（v2 全部行与两份 readout 的解析约定），caller 改 **`src=`**——我 866 派单里写的 `at=<caller>` 已向 J2 更正；另：Proxy 以原 Statement 为 this 调 C++ 方法、链方法返回 this 时回 Proxy。A 覆盖 2616 个 prepare 站（NWT 计）。
+
+### (867) 2026-09-05 · M10 v3-A 实现稿到（J2 `scratch/_j2_m10v3A_patch_2026-09-04T22-20Z.diff` sha 2595108e…·3 文件 +233）· 我亲读 + 独立跑测 · helper 独立文件批 · 等 NWT GREEN 后批 apply（22:23:15Z）
+- 亲读：`db/client.js` 只 +1 import +1 调用（pragma 之后、drizzle 之前 ⇒ drizzle 同 prepare 一并覆盖）；helper `db/slow-sql-observe.mjs`：`timed` 以原 Statement 为 this 调 C++ 方法、finally 内记账且整段 try/catch 吞错（fail-open）、只拦 all/get/run、链方法返回 this 时换回 Proxy、非函数属性透传、只记 SQL 头 80 不记参数、栈只在 ≥阈值时取一层、`DIAG_SQL_SLOW_MS` 0/非数 ⇒ 不装、幂等。**六硬条件 + NWT C1–C5 逐条落**（`at=` 时间戳、`src=` caller 已改）。
+- **helper 放独立文件（非内联）我批**：离线测试 import client.js 会打开活库；helper 零 import 才能 `:memory:` 测。单笔 pathspec 3 路径。
+- **我独立跑**（抽到 `scratch/_bettor_v3a/`、import 改 file:// 绝对路径）：**10 PASS / 1 FAIL**——唯一 FAIL = V2 的 `src=` 正则要求路径含 `src/db/`，我的副本在 kasia-console/ 之外故未截短；该行其余字段（rows=3、SQL 头、无 SECRET-ADDR、at=ISO）正确 ⇒ **搬迁伪影非缺陷**。J2 在原位跑 11/11。
+- 流程：NWT 审（活库热路径入口，单独审）→ 我批 apply → 随 console 自然重启承载。
