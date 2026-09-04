@@ -10,7 +10,7 @@
 | ① | 13:19Z 拉起决策（supervisor 日志三行 + launcher 两处改动） | **PASS-with-push-back** | 决策本身（Owner 令、非钱路、可逆、绑定可重建）过；**可审计性**四处缺（日志无 PID/seed sha；盘上 dry-run 产物是修前的坏版；默认上级 ref 硬编码会随 Bettor 重启陈；seed 裸日期无口径标签） |
 | ② | (791) 采纳 Codex 33bf86ad「~09-09 非下界」 | **PASS（口径）· push-back（数）** | 标签改对了，**数没重算**：784 的推导（09-02）之后发生了 789 的计划外 header 相位（3.73h·lag+2h），无人折进去；~09-09 今天仍成立是**两个误差相抵**（收敛比 34.9 快 ↔ 789 罚时），不是推导结果 |
 | ③ | (791) J2 身份 HOLD 至握手 ∧ ListAgents 可见 | **PASS（裁定）· push-back（判据措辞 + 账本记录）** | 写出来的判据（自报块号 + ListAgents 可见）**本机任何会话都能满足**，绑定不到「Bettor 拉起的那一个」；Bettor 实际做的（launcher→窗口→claude.exe 进程祖先链 + PID）才是真判据，但 (792) 一个 PID/ref/session-id 都没记 |
-| ④ | gate (a) 卡 + T+0 对拍卡预热 | **坐标全部复核通过 · 1 条 READY 前必修** | T+0 稿 T+5/T+15 引用的 `v0.9.2 kmax-cost` / `wcap-run.mjs` **不在 tracked 树**（tracked 只有 v0.8；v0.9/v0.10 + wcap-run 只在 gitignored `scratch/_j2_kmax_v0{9,10}_staging/`）⇒ 派单前须落 provenance 或稿里明标非 durable |
+| ④ | gate (a) 卡 + T+0 对拍卡预热 | **坐标全部复核通过 · 1 条 READY 前必修** | T+0 稿 T+15 依赖的 `wcap-run.mjs`（及 `wcap-fetch.mjs`）**不在 tracked 树**，只在 gitignored `scratch/_j2_kmax_v010_staging/`；`kmax-cost.mjs` tracked = v0.9.2（头注释陈写 v0.8·我首版误报已更正）、v0.10 同样只在 staging ⇒ 派单前须落 provenance（J2 报备已到·我审中）|
 
 ---
 
@@ -96,13 +96,13 @@
 | 探针 script sha `31d506a9…` / `e6e9c073…` | README §1 行 11/12 在 | ✅ |
 | (24) claim-depth 采样器 | tracked `docs/provenance/2026-08-27-claim-depth/` | ✅ |
 | (23) `s_visible_max` 提取器 | tracked `docs/provenance/2026-08-27-smax/smax-extractor.mjs` | ✅ |
-| (21) `kmax-cost.mjs`「v0.9.2 durable」 | **tracked 版 = v0.8**（`384684fd` 08-27）；v0.9 / v0.10 只在 gitignored `scratch/_j2_kmax_v09_staging/`、`_v010_staging/` | 🔴 稿与树不符 |
+| (21) `kmax-cost.mjs`「v0.9.2 durable」 | tracked 版 **= v0.9.2**（`4703bcc0`·sha `083e058a`）——**头注释仍写 v0.8 是陈的**（我首版据头注释误报「tracked = v0.8」，13:5xZ 按 git log + sha 更正）；v0.10 只在 gitignored `scratch/_j2_kmax_v010_staging/` | 🟡 头注释陈；v0.10 非 durable |
 | `wcap-run.mjs`（T+15 3600s 窗） | **只在 `scratch/_j2_kmax_v010_staging/wcap-run.mjs`**（08-27·未跟踪） | 🔴 非 durable |
 | `mass-bound.mjs`（卡 §0 fee 地板数出处） | 只在 `scratch/_j2_gate_a/`（未跟踪） | 🟡 卡引了未钉 sha 的脚本 |
 | `_step0_gate.mjs` | `scratch/_step0_gate.mjs`（08-28）在 | ✅（scratch 但 Bettor/KANet-UI 都在用·两信号之一） |
 | D-016 状态 | gate (a) OPEN；builder HOLD/未接线；MUST-FIX（sequence 上界、零延迟、config entry/max、TG-1~4）全 CLOSED at code layer；gate (a) 路径用 sequence 0 | ✅ 卡假设未失效 |
 
-- **READY 前必修（P1·派 J2·NWT 审）**：T+0 稿 T+5/T+15 两步依赖的工具要么落 `docs/provenance/` 带 MANIFEST（v0.10 staging 目录里 `MANIFEST-v010.draft.sha256` 已是草稿），要么稿里改成「v0.8 tracked + v0.10 staging（非 durable·路径 `scratch/…`·sha 钉）」。现在是稿写 durable、树里没有——J2 新会话按稿找工具会找到 v0.8，跑不出 v0.10 的 fetch-evidence。这正是 seed 派 J2 的「确认 v0.9.2 工具就位」那条，我先把答案钉在这。
+- **READY 前必修（P1·派 J2·NWT 审）**：T+0 稿 T+15 步依赖的 `wcap-run.mjs`/`wcap-fetch.mjs` 与 v0.10 `kmax-cost.mjs` 要么落 `docs/provenance/` 带 MANIFEST（staging 里 `MANIFEST-v010.draft.sha256` 已是草稿），要么稿里改成「v0.9.2 tracked + v0.10 staging（非 durable·路径 `scratch/…`·sha 钉）」。现在是稿写 durable、树里没有——J2 新会话按稿找工具只能找到 v0.9.2，跑不出 v0.10 的 fetch-evidence。（更正：本条首版写「tracked 只有 v0.8」，错——头注释陈；tracked 实为 v0.9.2 `4703bcc0`。）这正是 seed 派 J2 的「确认 v0.9.2 工具就位」那条，我先把答案钉在这。
 - **我自己卡的修正（P3）**：§0 引「我实跑 `mass-bound.mjs`」应补 sha256 + 路径；READY 后 fee 地板须**重跑**（当时 SEED=1 KAS 的 G1≈0.040/R1≈0.040/P≈0.0078 是 08-29 数）。
 - 三段序（只读第一小时 → gate (a) 广播轮须 Owner dust GO → 维护窗）与 seed §1 一致，无冲突。
 
