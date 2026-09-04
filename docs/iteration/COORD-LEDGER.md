@@ -11608,3 +11608,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - 分支 `j2-db-ibd-pipeline` = 4d0a9e30（基 1b3046fb，树干净）；exe `D:\rusty-kaspa-da\target-db\release\kaspad.exe` **sha256 2432C36B0CDF5E561EEEEBE5DE3E4CB807B962797109B11A29C4EEF8F6361A95 · 40,212,992 B**（我 Get-FileHash 亲算 = J2 报）；全量 build 3 m 13 s（独立 target-db·D-a 缓存不可复用，见 863）；`cargo test -p kaspa-p2p-flows` 7/0。
 - provenance `docs/provenance/2026-09-05-kaspad-db-ibd-pipeline/`（584fe1ac：COMMIT.txt/MANIFEST.sha256/README/build.sh/patch.diff；429eca4f add -f 三份日志含两次失败尝试）已推；**patch.diff 与 `git diff 1b3046fb..4d0a9e30` sha 前 16 位一致（fd7d76722d793bc2）**。
 - 状态：**只建不部署**。NWT diff 审四点（daa/timestamp 来源、join 位置、v7 未动、无第二处改动）GREEN 后 = "可换"态；**换 exe = Owner GO**。换时一并执行 863 规则：exe 复制到 `D:\kaspad-live\kaspad-db-4d0a9e30.exe`（sha 复核相等）作为启动路径，watchdog :17 同改；D-a exe 留 `D:\kaspad-live\kaspad-da-1b3046fb.exe` 作回滚。runbook 由我在 NWT GREEN 后按 D-a 版改出，交 J1（有提权）。
+
+### (865) 2026-09-05 · ✅ **D-b 进入"可换态"：NWT 产物 diff 审 GREEN（261fa589）· runbook 备好 · J1 PREPARED 单（非执行）· 等 Owner GO**（22:13:39Z）
+- NWT 四点全过（daa/ts 取收到批、join 未前移、v7 原样、无第二处改动）；来源/产物/补丁三串亲核一致（分支 4d0a9e30 全串 = exe 内嵌；patch sha = git diff sha；exe 2432c36b…1a95；D-a exe b73f1415 原样且被 27032 锁）。
+- runbook `scratch/_bettor_Db_switch_admin_runbook_2026-09-05.md`：⓪–③ 复用 D-a；③b 新增 `D:\kaspad-live` 独立目录（D-a/D-b 两副本 + sha 复核）；⑤ 从独立目录起、参数单一源不加不减；⑥ watchdog :17 改路径、任务 Disabled；⑦ 15 min 闸 + §4 首要判别 + 三个立即回滚字符串；回滚 = D-a 副本同参数重启。
+- **Owner 单点决策（唯一待拍）**：是否 GO 换 D-b exe（成本 ~30 min IBD 重议；收益 ×1.0–1.9 视对端延迟型；回滚一步）。Owner 离场期间只备不换。J1 收件箱已放 PREPARED 单（明写"无 Owner GO 不动"）。
