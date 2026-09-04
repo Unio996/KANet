@@ -14,6 +14,7 @@
 // Phase 3 swap-suggester trigger = outcome_log ≥ 30 + Owner explicit (KI-PHASE-3-SWAP-SUGGESTER-TRIGGER).
 
 import { sqlite } from '../db/client.js';
+import { wrapTick } from '../lib/diag-step.mjs';   // M10 v2 observe-only (2026-09-05): setInterval 回调计时(纯透传, 同步段/总墙钟 ≥50ms 才打)
 import { randomUUID } from 'node:crypto';
 
 const TICK_INTERVAL_MS = 60 * 1000;  // 1 min cron (per r139 §4)
@@ -48,9 +49,7 @@ export function startPositionProtectorCron() {
     console.error('[position-protector] startup catchup query err:', e.message);
   }
   setTimeout(() => tick().catch(e => console.error('[position-protector] initial tick fail:', e.message)), 30_000);
-  timer = setInterval(() => {
-    tick().catch(e => console.error('[position-protector] tick fail:', e.message));
-  }, TICK_INTERVAL_MS);
+  timer = setInterval(wrapTick('position-protector.tick', () => tick().catch(e => console.error('[position-protector] tick fail:', e.message))), TICK_INTERVAL_MS);   // M10 v2 observe-only: wrapTick 只计时, 回调体不变
 }
 
 export function stopPositionProtectorCron() {

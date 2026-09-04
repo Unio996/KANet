@@ -24,6 +24,7 @@
 //   - 仅 polymarket_uma_mirror capability (= kanet_ai_consensus_v1 占位, 后续 LLM 真接入)
 
 import { sqlite } from '../db/client.js';
+import { wrapTick } from '../lib/diag-step.mjs';   // M10 v2 observe-only (2026-09-05): setInterval 回调计时(纯透传, 同步段/总墙钟 ≥50ms 才打)
 import { createHash, randomUUID } from 'node:crypto';
 import { sendCommandAsync } from './relay-manager.js';
 import { buildDeriveVotePrompt } from './derivevote-prompt.mjs';
@@ -68,9 +69,7 @@ export function startPredictionVoterCron() {
   setTimeout(() => {
     voterTick().catch(e => console.error('[prediction-voter] startup tick:', e.message));
   }, STARTUP_GRACE_MS);
-  timer = setInterval(() => {
-    voterTick().catch(e => console.error('[prediction-voter] tick:', e.message));
-  }, TICK_INTERVAL_MS);
+  timer = setInterval(wrapTick('prediction-voter.tick', () => voterTick().catch(e => console.error('[prediction-voter] tick:', e.message))), TICK_INTERVAL_MS);   // M10 v2 observe-only: wrapTick 只计时, 回调体不变
 }
 
 export function stopPredictionVoterCron() {

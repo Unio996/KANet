@@ -8,6 +8,7 @@
  */
 
 import { sqlite } from '../db/client.js';
+import { wrapTick } from '../lib/diag-step.mjs';   // M10 v2 observe-only (2026-09-05): setInterval 回调计时(纯透传, 同步段/总墙钟 ≥50ms 才打)
 import { getMarketWinner } from './polymarket.js';
 
 const RESOLVER_INTERVAL_MS = 60 * 60 * 1000; // 1h
@@ -130,9 +131,7 @@ export function isResolverRunning() { return _running; }
 
 export function startResolverCron() {
   if (_timer) return;
-  _timer = setInterval(() => {
-    resolveExpired().catch(err => console.log(`[bettor-resolver] cron error: ${err.message}`));
-  }, RESOLVER_INTERVAL_MS);
+  _timer = setInterval(wrapTick('bettor-resolver.resolve', () => resolveExpired().catch(err => console.log(`[bettor-resolver] cron error: ${err.message}`))), RESOLVER_INTERVAL_MS);   // M10 v2 observe-only: wrapTick 只计时, 回调体不变
   // J1 #104 Q2 fix: boot tick 提前到 15s (在 tracker 45s + reactor 75s 之前)
   // 这样 reactor 评估时已 resolved 的 sim_position 已 close, 不会被错读为 -100% pnl
   setTimeout(() => {

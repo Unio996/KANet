@@ -10,6 +10,7 @@
  *   POST /api/discovery/interaction
  */
 import { spawn } from 'child_process';
+import { wrapTick } from '../lib/diag-step.mjs';   // M10 v2 observe-only (2026-09-05): setInterval 回调计时(纯透传, 同步段/总墙钟 ≥50ms 才打)
 import { resolve } from 'path';
 import { sqlite } from '../db/client.js';
 import { getConfig, setConfig } from '../data/settings/configs.js';
@@ -269,7 +270,7 @@ export async function autoStartIfEnabled() {
  */
 export function startScannerWatchdog() {
   if (_watchdogTimer) return;
-  _watchdogTimer = setInterval(async () => {
+  _watchdogTimer = setInterval(wrapTick('scanner.watchdog', async () => {
     try {
       const enabled = await getConfig('scanner_enabled');
       if (!enabled || enabled === 'false') return; // operator disabled — nothing to guard
@@ -289,7 +290,7 @@ export function startScannerWatchdog() {
     } catch (e) {
       console.error(`[scanner:watchdog] tick error: ${e.message}`);
     }
-  }, WATCHDOG_INTERVAL_MS);
+  }), WATCHDOG_INTERVAL_MS);   // M10 v2 observe-only: wrapTick 只计时, 回调体不变
   if (_watchdogTimer.unref) _watchdogTimer.unref();
   console.log(`[scanner:watchdog] started — liveness via scout_checkpoint freshness (check ${WATCHDOG_INTERVAL_MS / 1000}s, stall ${SCAN_STALL_MS / 1000}s)`);
 }

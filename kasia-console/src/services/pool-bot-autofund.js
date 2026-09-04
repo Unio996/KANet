@@ -7,6 +7,7 @@
 // 只靠 threshold+amount 两个数控节奏, 源头(mining reserve)余额够大不会枯竭.
 
 import { sqlite } from '../db/client.js';
+import { wrapTick } from '../lib/diag-step.mjs';   // M10 v2 observe-only (2026-09-05): setInterval 回调计时(纯透传, 同步段/总墙钟 ≥50ms 才打)
 
 const TICK_INTERVAL_MS = Number(process.env.BOT_AUTOFUND_TICK_MS) || 180_000; // 3min
 const REFILL_THRESHOLD_KAS = Number(process.env.BOT_AUTOFUND_THRESHOLD_KAS) || 500;
@@ -93,7 +94,7 @@ export function startBotAutofundCron() {
     return;
   }
   console.log(`[bot-autofund] started — tick=${TICK_INTERVAL_MS}ms threshold=${REFILL_THRESHOLD_KAS} amount=${REFILL_AMOUNT_KAS} source=${SOURCE_RELAY_ID.slice(0, 8)} monitoring=${_monitoredRelayNames().join(',')}`);
-  timer = setInterval(() => { botAutofundTick().catch((e) => console.error('[bot-autofund] tick:', e.message)); }, TICK_INTERVAL_MS);
+  timer = setInterval(wrapTick('bot-autofund.tick', () => botAutofundTick().catch((e) => console.error('[bot-autofund] tick:', e.message))), TICK_INTERVAL_MS);   // M10 v2 observe-only: wrapTick 只计时, 回调体不变
 }
 
 export function stopBotAutofundCron() {

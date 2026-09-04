@@ -8,6 +8,7 @@
  * Phase 3: OAuth + refresh will be added here.
  */
 import { sqlite } from '../db/client.js';
+import { wrapTick } from '../lib/diag-step.mjs';   // M10 v2 observe-only (2026-09-05): setInterval 回调计时(纯透传, 同步段/总墙钟 ≥50ms 才打)
 import { encrypt, decrypt, makeTokenHint } from './crypto.js';
 import { nowIso } from '../lib/time.js';
 import { randomUUID } from 'crypto';
@@ -290,7 +291,7 @@ let _refreshTimer = null;
  */
 export function startRefreshWorker() {
   if (_refreshTimer) return;
-  _refreshTimer = setInterval(_checkAndRefresh, REFRESH_CHECK_INTERVAL);
+  _refreshTimer = setInterval(wrapTick('connection-manager.refresh', _checkAndRefresh), REFRESH_CHECK_INTERVAL);
   // Run once immediately after a short delay
   setTimeout(_checkAndRefresh, 5000);
   console.log('[connection-manager] Refresh worker started (60s interval)');

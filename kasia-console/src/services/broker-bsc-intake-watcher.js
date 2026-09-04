@@ -14,6 +14,7 @@
 // 不破 existing bsc-incoming-watcher (maker payment verify scope 不同).
 
 import { sqlite } from '../db/client.js';
+import { wrapTick } from '../lib/diag-step.mjs';   // M10 v2 observe-only (2026-09-05): setInterval 回调计时(纯透传, 同步段/总墙钟 ≥50ms 才打)
 
 const TICK_MS = 30 * 1000;
 // Bettor #j5romh r766 身份迁移补全, env 缺失 fail-loud 拒启(死值兜底=定时雷, 见 kanet.env)。
@@ -30,7 +31,7 @@ let _matches = 0;
 
 export function start() {
   if (_intakeInterval) return { ok: false, reason: 'already_started' };
-  _intakeInterval = setInterval(() => { tick().catch(e => console.warn(`[broker-bsc-intake] tick err: ${e.message}`)); }, TICK_MS);
+  _intakeInterval = setInterval(wrapTick('broker-bsc-intake.tick', () => tick().catch(e => console.warn(`[broker-bsc-intake] tick err: ${e.message}`))), TICK_MS);   // M10 v2 observe-only: wrapTick 只计时, 回调体不变
   console.log(`[broker-bsc-intake] started, tick=${TICK_MS / 1000}s — broker BSC USDT inflow → BUY flow trigger`);
   return { ok: true };
 }

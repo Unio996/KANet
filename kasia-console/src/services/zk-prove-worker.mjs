@@ -18,6 +18,7 @@
 // kill switch 默认 OFF(照搬 BSHARD_CLOSE_SUBMIT_V2_ENABLED 等今晚同款模式)。
 
 import { spawn } from 'node:child_process';
+import { wrapTick } from '../lib/diag-step.mjs';   // M10 v2 observe-only (2026-09-05): setInterval 回调计时(纯透传, 同步段/总墙钟 ≥50ms 才打)
 import { writeFileSync, readFileSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -120,7 +121,7 @@ export function startZkProveWorkerCron() {
   if (timer) return;
   if (!ENABLED) { console.log('[zk-prove-worker] cron NOT started — ZK_PROVE_WORKER_ENABLED!=1 (真实 RISC0 proving + 真 KAS 注资, 默认不自动跑)'); return; }
   setTimeout(() => { zkProveWorkerTick().catch((e) => console.error('[zk-prove-worker] startup tick:', e.message)); }, 5_000);
-  timer = setInterval(() => { zkProveWorkerTick().catch((e) => console.error('[zk-prove-worker] tick:', e.message)); }, TICK_MS);
+  timer = setInterval(wrapTick('zk-prove-worker.tick', () => zkProveWorkerTick().catch((e) => console.error('[zk-prove-worker] tick:', e.message))), TICK_MS);   // M10 v2 observe-only: wrapTick 只计时, 回调体不变
   console.log(`[zk-prove-worker] cron started (${TICK_MS / 1000}s tick) — ZK_PROVE_WORKER_ENABLED=1`);
 }
 export function stopZkProveWorkerCron() { if (timer) { clearInterval(timer); timer = null; } }

@@ -12,6 +12,7 @@
 // 第一版 reconciler 只 detect + alert, 不 self-heal. J2 advanceToRefunded ship 后真**真**真 wire backfill.
 
 import { sqlite } from '../db/client.js';
+import { wrapTick } from '../lib/diag-step.mjs';   // M10 v2 observe-only (2026-09-05): setInterval 回调计时(纯透传, 同步段/总墙钟 ≥50ms 才打)
 import { randomUUID } from 'node:crypto';
 import { advanceToRefunded } from './broker-state-authority.js';
 
@@ -253,7 +254,7 @@ export function startStateReconciler() {
   _started = true;
   console.log(`[state-reconciler] start, tick=${TICK_MS}ms`);
   tick();
-  _interval = setInterval(tick, TICK_MS);
+  _interval = setInterval(wrapTick('broker-state-reconciler.tick', tick), TICK_MS);
 }
 
 export function stopStateReconciler() {

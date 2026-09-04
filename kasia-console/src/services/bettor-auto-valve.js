@@ -10,6 +10,7 @@
 // Phase B Sub B5/B6 strategy 多样性 (task #22) standby — 不在此 service scope.
 
 import { sqlite } from '../db/client.js';
+import { wrapTick } from '../lib/diag-step.mjs';   // M10 v2 observe-only (2026-09-05): setInterval 回调计时(纯透传, 同步段/总墙钟 ≥50ms 才打)
 import { randomUUID } from 'node:crypto';
 
 const TICK_INTERVAL_MS = 60 * 60 * 1000;  // 1h cron
@@ -26,9 +27,7 @@ export function startAutoValveCron() {
   console.log('[auto-valve] started (1h cron, 4 valves: A redeem / B sim resolved / C -30%pnl 12h / D 90d zombie)');
   // First tick after 60s grace (let other crons settle on Console startup)
   setTimeout(() => evaluateAll().catch(e => console.error('[auto-valve] initial tick fail:', e.message)), 60_000);
-  timer = setInterval(() => {
-    evaluateAll().catch(e => console.error('[auto-valve] tick fail:', e.message));
-  }, TICK_INTERVAL_MS);
+  timer = setInterval(wrapTick('auto-valve.tick', () => evaluateAll().catch(e => console.error('[auto-valve] tick fail:', e.message))), TICK_INTERVAL_MS);   // M10 v2 observe-only: wrapTick 只计时, 回调体不变
 }
 
 export function stopAutoValveCron() {

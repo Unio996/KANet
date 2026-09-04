@@ -18,6 +18,7 @@
 // stake escrow + fund_lock prediction 分类 + chain TX 真转), 跟 detect 解耦.
 
 import { sqlite } from '../db/client.js';
+import { wrapTick } from '../lib/diag-step.mjs';   // M10 v2 observe-only (2026-09-05): setInterval 回调计时(纯透传, 同步段/总墙钟 ≥50ms 才打)
 import { randomUUID, createHash } from 'node:crypto';
 import { verifyPredictionOutcome } from './bettor-prediction-verifier.js';
 import { transition } from './exchange-machine.js';
@@ -36,9 +37,7 @@ export function startPredictionSettlerCron() {
   setTimeout(() => {
     settlePredictionOutcomes().catch(e => console.error('[prediction-settler] startup catch-up:', e.message));
   }, STARTUP_GRACE_MS);
-  timer = setInterval(() => {
-    settlePredictionOutcomes().catch(e => console.error('[prediction-settler] tick:', e.message));
-  }, TICK_INTERVAL_MS);
+  timer = setInterval(wrapTick('prediction-settler.tick', () => settlePredictionOutcomes().catch(e => console.error('[prediction-settler] tick:', e.message))), TICK_INTERVAL_MS);   // M10 v2 observe-only: wrapTick 只计时, 回调体不变
 }
 
 export function stopPredictionSettlerCron() {

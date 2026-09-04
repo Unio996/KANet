@@ -7,6 +7,7 @@
 // records events, triggers actions.
 
 import { randomUUID } from 'crypto';
+import { wrapTick } from '../lib/diag-step.mjs';   // M10 v2 observe-only (2026-09-05): setInterval 回调计时(纯透传, 同步段/总墙钟 ≥50ms 才打)
 import { sqlite } from '../db/client.js';
 import { loadRules, ensureDefaults } from './monitor-rules.js';
 import { matchRules, getEffectiveAlertLevel, dedupByCooldown } from './monitor-engine.js';
@@ -258,7 +259,7 @@ function startMonitor() {
   // First tick after startup
   tick();
 
-  _pollInterval = setInterval(tick, pollMs);
+  _pollInterval = setInterval(wrapTick('monitor-service.poll', tick), pollMs);
 }
 
 function stopMonitor() {

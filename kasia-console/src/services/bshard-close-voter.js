@@ -17,6 +17,7 @@
 // 分工: J2 = 本 daemon 骨架 + transport + sig 收集 + (a)(b); J1 = enforceCloseAttest + verifyFrozenEvidence (lib).
 
 import { blake2b } from '@noble/hashes/blake2b';
+import { wrapTick } from '../lib/diag-step.mjs';   // M10 v2 observe-only (2026-09-05): setInterval 回调计时(纯透传, 同步段/总墙钟 ≥50ms 才打)
 import { sqlite } from '../db/client.js';
 import { sendCommandAsync } from './relay-manager.js';
 import { join, dirname } from 'node:path';
@@ -265,7 +266,7 @@ export function startBshardCloseVoterCron() {
     return;
   }
   setTimeout(() => { bshardCloseVoterTick().catch(e => console.error('[bshard-close-voter] startup tick:', e.message)); }, 5_000);
-  timer = setInterval(() => { bshardCloseVoterTick().catch(e => console.error('[bshard-close-voter] tick:', e.message)); }, TICK_MS);
+  timer = setInterval(wrapTick('bshard-close-voter.tick', () => bshardCloseVoterTick().catch(e => console.error('[bshard-close-voter] tick:', e.message))), TICK_MS);   // M10 v2 observe-only: wrapTick 只计时, 回调体不变
   console.log(`[bshard-close-voter] cron started (${TICK_MS / 1000}s tick) — BSHARD_CLOSE_VOTER_ENABLED=1 (受控 live e2e 模式)`);
 }
 export function stopBshardCloseVoterCron() { if (timer) { clearInterval(timer); timer = null; } }
@@ -547,7 +548,7 @@ export function startBshardCloseVoterV2Cron() {
     return;
   }
   setTimeout(() => { bshardCloseVoterV2Tick().catch(e => console.error('[bshard-close-voter-v2] startup tick:', e.message)); }, 5_000);
-  voterV2Timer = setInterval(() => { bshardCloseVoterV2Tick().catch(e => console.error('[bshard-close-voter-v2] tick:', e.message)); }, TICK_MS);
+  voterV2Timer = setInterval(wrapTick('bshard-close-voter.v2Tick', () => bshardCloseVoterV2Tick().catch(e => console.error('[bshard-close-voter-v2] tick:', e.message))), TICK_MS);   // M10 v2 observe-only: wrapTick 只计时, 回调体不变
   console.log(`[bshard-close-voter-v2] cron started (${TICK_MS / 1000}s tick) — BSHARD_CLOSE_VOTER_V2_ENABLED=1 (受控 live e2e 模式)`);
 }
 export function stopBshardCloseVoterV2Cron() { if (voterV2Timer) { clearInterval(voterV2Timer); voterV2Timer = null; } }
@@ -643,7 +644,7 @@ export function startBshardCloseSubmitV2Cron() {
     return;
   }
   setTimeout(() => { bshardCloseSubmitV2Tick().catch(e => console.error('[bshard-close-submit-v2] startup tick:', e.message)); }, 5_000);
-  submitTimer = setInterval(() => { bshardCloseSubmitV2Tick().catch(e => console.error('[bshard-close-submit-v2] tick:', e.message)); }, SUBMIT_TICK_MS);
+  submitTimer = setInterval(wrapTick('bshard-close-voter.submitV2Tick', () => bshardCloseSubmitV2Tick().catch(e => console.error('[bshard-close-submit-v2] tick:', e.message))), SUBMIT_TICK_MS);   // M10 v2 observe-only: wrapTick 只计时, 回调体不变
   console.log(`[bshard-close-submit-v2] cron started (${SUBMIT_TICK_MS / 1000}s tick) — BSHARD_CLOSE_SUBMIT_V2_ENABLED=1 (受控 live e2e 模式)`);
 }
 export function stopBshardCloseSubmitV2Cron() { if (submitTimer) { clearInterval(submitTimer); submitTimer = null; } }

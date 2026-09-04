@@ -22,6 +22,7 @@
  */
 
 import { randomUUID } from 'crypto';
+import { wrapTick } from '../lib/diag-step.mjs';   // M10 v2 observe-only (2026-09-05): setInterval 回调计时(纯透传, 同步段/总墙钟 ≥50ms 才打)
 import { sqlite } from '../db/client.js';
 import { callLLMWithFallback } from './llm-fallback.js';
 import { getActiveConfidenceThreshold, getAdapterUrlForAgent } from './bettor-scanner.js';
@@ -265,9 +266,7 @@ export function isReactorRunning() { return _running; }
 
 export function startReactorCron() {
   if (_timer) return;
-  _timer = setInterval(() => {
-    evaluatePositions().catch(err => console.log(`[bettor-reactor] cron error: ${err.message}`));
-  }, REACTOR_INTERVAL_MS);
+  _timer = setInterval(wrapTick('bettor-reactor.evaluate', () => evaluatePositions().catch(err => console.log(`[bettor-reactor] cron error: ${err.message}`))), REACTOR_INTERVAL_MS);   // M10 v2 observe-only: wrapTick 只计时, 回调体不变
   // Boot tick 75s (after resolver 15s + tracker 45s)
   setTimeout(() => {
     evaluatePositions().catch(err => console.log(`[bettor-reactor] boot tick error: ${err.message}`));

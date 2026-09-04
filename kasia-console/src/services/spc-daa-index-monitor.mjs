@@ -9,6 +9,7 @@
 // 链上出口, docs/KANet-Positioning.md) —— "当前 tip" 只能读 relay 上报的心跳表，不能自己查链。
 
 import { sqlite } from '../db/client.js';
+import { wrapTick } from '../lib/diag-step.mjs';   // M10 v2 observe-only (2026-09-05): setInterval 回调计时(纯透传, 同步段/总墙钟 ≥50ms 才打)
 import { randomUUID } from 'node:crypto';
 
 const TICK_MS = 5 * 60 * 1000; // 5min，同 broker-intake-watcher 等既有 cron 量级
@@ -55,7 +56,7 @@ function _tick() {
 export function startSpcDaaIndexStaleCheck() {
   if (_interval) return;
   console.log(`[spc-daa-index-monitor] cron start, tick=${TICK_MS}ms`);
-  _interval = setInterval(_tick, TICK_MS);
+  _interval = setInterval(wrapTick('spc-daa-index-monitor.tick', _tick), TICK_MS);
   setTimeout(_tick, 5000); // startup pass，同既有 cron 惯例
 }
 export function stopSpcDaaIndexStaleCheck() { if (_interval) { clearInterval(_interval); _interval = null; } }

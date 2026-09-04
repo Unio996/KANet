@@ -28,6 +28,7 @@
 //   POOL_SEED_MIN_VOL24H=0        minimum gamma volume24hr to mirror (quality gate)
 
 import { sqlite } from '../db/client.js';
+import { wrapTick } from '../lib/diag-step.mjs';   // M10 v2 observe-only (2026-09-05): setInterval 回调计时(纯透传, 同步段/总墙钟 ≥50ms 才打)
 import { categorizeMarket } from '../lib/market-category.js';
 
 const PORT = parseInt(process.env.PORT || '3100');
@@ -48,7 +49,7 @@ export function startPoolMarketSeeder() {
   }
   const intervalMs = (parseInt(process.env.POOL_SEED_INTERVAL_MIN, 10) || 10) * 60_000;
   setTimeout(() => tick().catch(e => console.error('[pool-seeder] initial tick error:', e.message)), 8000);
-  _timer = setInterval(() => tick().catch(e => console.error('[pool-seeder] tick error:', e.message)), intervalMs);
+  _timer = setInterval(wrapTick('pool-seeder.tick', () => tick().catch(e => console.error('[pool-seeder] tick error:', e.message))), intervalMs);   // M10 v2 observe-only: wrapTick 只计时, 回调体不变
   console.log(`[pool-seeder] started — maker=${maker.slice(0, 8)} target=${process.env.POOL_SEED_TARGET || 5} interval=${intervalMs / 60000}min`);
 }
 

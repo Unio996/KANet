@@ -18,6 +18,7 @@
 //   4. 复用 auto-bet 同一套 register-v07 prep→transfer→confirm 三步(shard-aware, 非重造)
 
 import { randomBytes } from 'node:crypto';
+import { wrapTick } from '../lib/diag-step.mjs';   // M10 v2 observe-only (2026-09-05): setInterval 回调计时(纯透传, 同步段/总墙钟 ≥50ms 才打)
 import { sqlite } from '../db/client.js';
 import { isRelayAlive } from './relay-manager.js';
 
@@ -170,7 +171,7 @@ export async function houseAgentTick() {
 export function startHouseAgentCron() {
   if (timer) return;
   console.log(`[house-agent] started — tick=${TICK_INTERVAL_MS}ms stake=${STAKE_KAS} relay=${RELAY_NAME} (#42 击败Agent 玩法: 判断+真押世界杯盘)`);
-  timer = setInterval(() => { houseAgentTick().catch((e) => console.error('[house-agent] tick:', e.message)); }, TICK_INTERVAL_MS);
+  timer = setInterval(wrapTick('house-agent.tick', () => houseAgentTick().catch((e) => console.error('[house-agent] tick:', e.message))), TICK_INTERVAL_MS);   // M10 v2 observe-only: wrapTick 只计时, 回调体不变
 }
 
 export function stopHouseAgentCron() {

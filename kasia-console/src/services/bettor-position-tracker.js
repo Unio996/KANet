@@ -12,6 +12,7 @@
  */
 
 import { randomUUID } from 'crypto';
+import { wrapTick } from '../lib/diag-step.mjs';   // M10 v2 observe-only (2026-09-05): setInterval 回调计时(纯透传, 同步段/总墙钟 ≥50ms 才打)
 import { sqlite } from '../db/client.js';
 import { fetchPredictionData } from './market-data.js';
 import { evaluatePosition, writeAdjustment } from './bettor-reactor.js';
@@ -184,9 +185,7 @@ export function isTrackerRunning() { return _running; }
 
 export function startTrackerCron() {
   if (_timer) return;
-  _timer = setInterval(() => {
-    snapshotOpenPositions().catch(err => console.log(`[bettor-tracker] cron error: ${err.message}`));
-  }, SNAPSHOT_INTERVAL_MS);
+  _timer = setInterval(wrapTick('bettor-tracker.snapshot', () => snapshotOpenPositions().catch(err => console.log(`[bettor-tracker] cron error: ${err.message}`))), SNAPSHOT_INTERVAL_MS);   // M10 v2 observe-only: wrapTick 只计时, 回调体不变
   // Boot tick at 45s (after Console settles, after resolver boot tick at 30s)
   setTimeout(() => {
     snapshotOpenPositions().catch(err => console.log(`[bettor-tracker] boot tick error: ${err.message}`));
@@ -195,9 +194,7 @@ export function startTrackerCron() {
 
   // Phase 3e-6 P2: urgent cron 15min tick for positions ending <24h (binary 价格加速期)
   if (_urgentTimer) return;
-  _urgentTimer = setInterval(() => {
-    snapshotOpenPositions({ urgentOnly: true }).catch(err => console.log(`[bettor-tracker] urgent cron error: ${err.message}`));
-  }, URGENT_INTERVAL_MS);
+  _urgentTimer = setInterval(wrapTick('bettor-tracker.urgent', () => snapshotOpenPositions({ urgentOnly: true }).catch(err => console.log(`[bettor-tracker] urgent cron error: ${err.message}`))), URGENT_INTERVAL_MS);   // M10 v2 observe-only: wrapTick 只计时, 回调体不变
   console.log(`[bettor-tracker] urgent cron registered: every ${URGENT_INTERVAL_MS / 60000}min (positions <${URGENT_WINDOW_HOURS}h to expiry)`);
 }
 

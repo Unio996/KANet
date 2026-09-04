@@ -18,6 +18,7 @@
 // Output: ranked candidates 表 → /predictions UI surface + (future) DM trigger.
 
 import { randomUUID } from 'node:crypto';
+import { wrapTick } from '../lib/diag-step.mjs';   // M10 v2 observe-only (2026-09-05): setInterval 回调计时(纯透传, 同步段/总墙钟 ≥50ms 才打)
 import https from 'node:https';
 import { sqlite } from '../db/client.js';
 import { detectDomain } from './bettor-domain-detector.js';
@@ -666,9 +667,7 @@ export function startScavengerCron() {
   } catch (e) {
     console.log(`[scavenger] startup catchup query err: ${e.message}`);
   }
-  _cronTimer = setInterval(() => {
-    runScavengerScan('cron').catch(err => console.log(`[scavenger] cron err: ${err.message}`));
-  }, CRON_INTERVAL_MS);
+  _cronTimer = setInterval(wrapTick('scavenger.cron', () => runScavengerScan('cron').catch(err => console.log(`[scavenger] cron err: ${err.message}`))), CRON_INTERVAL_MS);   // M10 v2 observe-only: wrapTick 只计时, 回调体不变
   console.log(`[scavenger] cron registered: every ${CRON_INTERVAL_MS / 3600000}h`);
 }
 

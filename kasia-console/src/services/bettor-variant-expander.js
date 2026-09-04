@@ -11,6 +11,7 @@
 // 每档 top 1 (避免 paralysis).
 
 import { sqlite } from '../db/client.js';
+import { wrapTick } from '../lib/diag-step.mjs';   // M10 v2 observe-only (2026-09-05): setInterval 回调计时(纯透传, 同步段/总墙钟 ≥50ms 才打)
 import { randomUUID } from 'node:crypto';
 
 const TICK_INTERVAL_MS = 30 * 60 * 1000;  // 30 min cron (independent scan)
@@ -49,9 +50,7 @@ export function startVariantExpanderCron() {
     console.error('[variant-expander] startup catchup query err:', e.message);
   }
   setTimeout(() => tick().catch(e => console.error('[variant-expander] initial tick fail:', e.message)), 90_000);
-  timer = setInterval(() => {
-    tick().catch(e => console.error('[variant-expander] tick fail:', e.message));
-  }, TICK_INTERVAL_MS);
+  timer = setInterval(wrapTick('variant-expander.tick', () => tick().catch(e => console.error('[variant-expander] tick fail:', e.message))), TICK_INTERVAL_MS);   // M10 v2 observe-only: wrapTick 只计时, 回调体不变
 }
 
 export function stopVariantExpanderCron() {

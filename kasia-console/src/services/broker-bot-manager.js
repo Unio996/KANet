@@ -16,6 +16,7 @@
 //     children we track. Launcher name (_launch_broker_bot.mjs) deliberately does NOT match the global
 //     manager's killStrayBots pattern (_launch_tg_bot|tg-bot.bot.mjs), so global Stop won't nuke us.
 import { fork } from 'child_process';
+import { wrapTick } from '../lib/diag-step.mjs';   // M10 v2 observe-only (2026-09-05): setInterval 回调计时(纯透传, 同步段/总墙钟 ≥50ms 才打)
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { sqlite } from '../db/client.js';
@@ -189,6 +190,6 @@ let _timer = null;
 export function startBrokerBotManager() {
   const first = reconcileBrokerBots();
   console.log('[broker-bot-mgr] boot reconcile: ' + JSON.stringify(first));
-  if (!_timer) _timer = setInterval(() => { try { reconcileBrokerBots(); } catch {} }, 60000);
+  if (!_timer) _timer = setInterval(wrapTick('broker-bot-manager.reconcile', () => { try { reconcileBrokerBots(); } catch {} }), 60000);   // M10 v2 observe-only: wrapTick 只计时, 回调体不变
   return first;
 }

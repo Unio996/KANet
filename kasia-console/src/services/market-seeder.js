@@ -8,6 +8,7 @@
  */
 
 import { sqlite } from '../db/client.js';
+import { wrapTick } from '../lib/diag-step.mjs';   // M10 v2 observe-only (2026-09-05): setInterval 回调计时(纯透传, 同步段/总墙钟 ≥50ms 才打)
 import { recordChainEvent } from './chain-event.js';
 
 let _timer = null;
@@ -20,7 +21,7 @@ const PORT = parseInt(process.env.PORT || '3200');
 export function startMarketSeeder() {
   // Initial tick after a short delay (let routes register first)
   setTimeout(() => tick().catch(err => console.error('[seeder] initial tick error:', err.message)), 5000);
-  _timer = setInterval(() => tick().catch(err => console.error('[seeder] tick error:', err.message)), TICK_INTERVAL_MS);
+  _timer = setInterval(wrapTick('seeder.tick', () => tick().catch(err => console.error('[seeder] tick error:', err.message))), TICK_INTERVAL_MS);   // M10 v2 observe-only: wrapTick 只计时, 回调体不变
   console.log('[seeder] Market seeder started (5min interval)');
 }
 
@@ -35,11 +36,11 @@ let _refundWorkerTimer = null;
 
 export function startSeederDepositWatcher() {
   // 每 30s tick: check awaiting_deposit → deposited → published
-  _depositWatcherTimer = setInterval(async () => {
+  _depositWatcherTimer = setInterval(wrapTick('seeder.depositWatcher', async () => {
     try { await depositWatcherTick(); } catch (err) {
       console.error('[seeder] deposit watcher tick error:', err.message);
     }
-  }, 30000);
+  }), 30000);   // M10 v2 observe-only: wrapTick 只计时, 回调体不变
   console.log('[seeder] seeder deposit watcher started (30s interval)');
 }
 
@@ -68,11 +69,11 @@ async function _getTransferUsdt() {
 }
 
 export function startSeederRefundWorker() {
-  _refundWorkerTimer = setInterval(async () => {
+  _refundWorkerTimer = setInterval(wrapTick('seeder.refundWorker', async () => {
     try { await refundWorkerTick(); } catch (err) {
       console.error('[seeder] refund worker tick error:', err.message);
     }
-  }, 30000);
+  }), 30000);   // M10 v2 observe-only: wrapTick 只计时, 回调体不变
   console.log('[seeder] seeder refund worker started (30s interval)');
 }
 

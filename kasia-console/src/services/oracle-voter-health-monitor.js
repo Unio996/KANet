@@ -22,6 +22,7 @@
 // address, with NO pool_oracle_vote chain_event from that address, and not consensual-skipped.
 
 import { sqlite } from '../db/client.js';
+import { wrapTick } from '../lib/diag-step.mjs';   // M10 v2 observe-only (2026-09-05): setInterval 回调计时(纯透传, 同步段/总墙钟 ≥50ms 才打)
 import { randomUUID } from 'node:crypto';
 
 const TICK_INTERVAL_MS = Number(process.env.ORACLE_VOTER_HEALTH_TICK_MS) || 120_000;   // 2min (= ~2 voter ticks)
@@ -132,7 +133,7 @@ export function startOracleVoterHealthMonitorCron() {
   if (timer) return;
   console.log(`[oracle-voter-health] started — tick=${TICK_INTERVAL_MS}ms grace=${STARTUP_GRACE_MS}ms stale=${Math.round(STALE_THRESHOLD_MS/60000)}min`);
   setTimeout(() => { oracleVoterHealthTick().catch(e => console.error('[oracle-voter-health] startup tick:', e.message)); }, STARTUP_GRACE_MS);
-  timer = setInterval(() => { oracleVoterHealthTick().catch(e => console.error('[oracle-voter-health] tick:', e.message)); }, TICK_INTERVAL_MS);
+  timer = setInterval(wrapTick('oracle-voter-health.tick', () => oracleVoterHealthTick().catch(e => console.error('[oracle-voter-health] tick:', e.message))), TICK_INTERVAL_MS);   // M10 v2 observe-only: wrapTick 只计时, 回调体不变
 }
 
 export function stopOracleVoterHealthMonitorCron() {

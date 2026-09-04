@@ -20,6 +20,7 @@
 // 与结算时 lazy-recapture(pool-market-settler.js:765)/consolidateAndBuildPsState(bshard-settle-
 // daemon.mjs)三条写路径共享同一张表同一个 WHERE 子句——先写者赢, 后写者 WHERE 落空 no-op, 不冲突。
 import { sqlite } from '../db/client.js';
+import { wrapTick } from '../lib/diag-step.mjs';   // M10 v2 observe-only (2026-09-05): setInterval 回调计时(纯透传, 同步段/总墙钟 ≥50ms 才打)
 import { randomUUID } from 'node:crypto';
 
 const TICK_MS = 60 * 1000; // 镜像 spc_daa_index 巡检节拍(已验证过的量级)
@@ -197,7 +198,7 @@ export { _hasBeenMarkedUnrecoverable, _markUnrecoverableIfBeyondFloor, _coverage
 export function startPrepruneCaptureWorker() {
   if (_interval) return;
   console.log(`[preprune-capture-worker] cron start, tick=${TICK_MS}ms (K-17)`);
-  _interval = setInterval(_tick, TICK_MS);
+  _interval = setInterval(wrapTick('preprune-capture-worker.tick', _tick), TICK_MS);
   setTimeout(_tick, 5000); // startup pass, 同既有 cron 惯例
 }
 export function stopPrepruneCaptureWorker() { if (_interval) { clearInterval(_interval); _interval = null; } }

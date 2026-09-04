@@ -13,6 +13,7 @@
 // 挂在 Console 启动 (index.js) setInterval, 不新建表只新增 event_type='broker_intake_processed' 作处理标记.
 
 import { sqlite } from '../db/client.js';
+import { wrapTick } from '../lib/diag-step.mjs';   // M10 v2 observe-only (2026-09-05): setInterval 回调计时(纯透传, 同步段/总墙钟 ≥50ms 才打)
 import { transition } from './exchange-machine.js';
 import { randomUUID } from 'node:crypto';
 
@@ -1082,7 +1083,7 @@ export async function _scanUntakenBuyOffersFallback() {
 
 export function startIntakeWatcher() {
   if (_intakeInterval) return;
-  _intakeInterval = setInterval(async () => {
+  _intakeInterval = setInterval(wrapTick('broker-intake.tick', async () => {
     try {
       const r = await intakeTick();
       if (r && r.scanned !== undefined) {
@@ -1090,9 +1091,9 @@ export function startIntakeWatcher() {
         console.log(`[broker-intake] tick handled=${r.handled||0}/${r.scanned||0}`);
       }
     } catch (e) { console.error('[broker-intake]', e.message); }
-  }, TICK_MS);
+  }), TICK_MS);   // M10 v2 observe-only: wrapTick 只计时, 回调体不变
   if (!_refundInterval) {
-    _refundInterval = setInterval(async () => {
+    _refundInterval = setInterval(wrapTick('broker-intake.refundTick', async () => {
       // T-J2-2026-07-15 diag(observe-only, NWT verdict 3b87317b GO): 测本 tick 实际触发时刻相对
       // 上一次触发 + REFUND_TICK_MS 的漂移量。若漂移持续接近 0 但 CPU profile 仍显示大 self-time,
       // 排除"排队被采样"假说,指向真同步阻塞;若漂移本身就巨大,说明问题在更上游(事件循环整体
@@ -1129,7 +1130,7 @@ export function startIntakeWatcher() {
         const r = await _scanUntakenBuyOffersFallback();
         if (r && r.handled > 0) console.log(`[broker-buy-fallback] T2.24 tick handled=${r.handled}/${r.scanned}`);
       } catch (e) { console.error('[broker-buy-fallback T2.24]', e.message); }
-    }, REFUND_TICK_MS);
+    }), REFUND_TICK_MS);   // M10 v2 observe-only: wrapTick 只计时, 回调体不变
   }
   // T-J2-2026-05-10 T2.25 wire: broker-bsc-intake-watcher (Phase 2 β.1 BUY parity prerequisite trigger).
   // 30s tick poll broker BSC inflow → match retail_dex_orders pending → trigger _publishBrokerBuyOffer.

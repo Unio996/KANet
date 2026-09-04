@@ -9,6 +9,7 @@
 // label transition. Audit log every tick.
 
 import { sqlite } from '../db/client.js';
+import { wrapTick } from '../lib/diag-step.mjs';   // M10 v2 observe-only (2026-09-05): setInterval 回调计时(纯透传, 同步段/总墙钟 ≥50ms 才打)
 import { randomUUID } from 'node:crypto';
 
 const TICK_INTERVAL_MS = 30 * 60 * 1000;  // 30 min
@@ -35,9 +36,7 @@ export function startPositionWatcherCron() {
   } catch (e) {
     console.error('[position-watcher] startup query err:', e.message);
   }
-  timer = setInterval(() => {
-    tick().catch(e => console.error('[position-watcher] tick fail:', e.message));
-  }, TICK_INTERVAL_MS);
+  timer = setInterval(wrapTick('position-watcher.tick', () => tick().catch(e => console.error('[position-watcher] tick fail:', e.message))), TICK_INTERVAL_MS);   // M10 v2 observe-only: wrapTick 只计时, 回调体不变
 }
 
 export function stopPositionWatcherCron() {

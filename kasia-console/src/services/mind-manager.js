@@ -15,6 +15,7 @@
  */
 
 import { sqlite } from '../db/client.js';
+import { wrapTick } from '../lib/diag-step.mjs';   // M10 v2 observe-only (2026-09-05): setInterval 回调计时(纯透传, 同步段/总墙钟 ≥50ms 才打)
 import { randomUUID } from 'crypto';
 import { gateTradeAction } from './trade-action.js';
 import { computeAllHealth } from './agent-health.js';
@@ -803,7 +804,7 @@ export function startScheduler() {
     //   小随机抖动写法), 让31个agent确定性错峰25s一个——因为周期相同, 错峰关系此后永久保持, 不再有
     //   聚簇风险(不是"减少概率", 是结构性消除)。
     setTimeout(() => {
-      setInterval(async () => {
+      setInterval(wrapTick('mind-manager.proactive', async () => {
         if (!_proactiveEnabled) return;
         if (_healthPaused[name]) { console.log(`[proactive] ${name} paused — health red`); return; }
         const mind = minds[name];
@@ -821,7 +822,7 @@ export function startScheduler() {
         } finally {
           _proactiveRunning.delete(name);
         }
-      }, proactiveMs);
+      }), proactiveMs);   // M10 v2 observe-only: wrapTick 只计时, 回调体不变
     }, 30_000 + staggerMs + Math.random() * 10_000);
 
     // First proactive on startup (after 2min settle time)
@@ -849,7 +850,7 @@ export function startScheduler() {
     // 🔴 同款第三源根治(见上方 proactive loop 注释): DB 实测全部 31 个 relay 的 evolution_interval_hours
     //   清一色 24h, 这里此前也只有纯随机抖动(60-120s window)没接 staggerMs, 同样会永久聚簇。补上。
     setTimeout(() => {
-      setInterval(async () => {
+      setInterval(wrapTick('mind-manager.reflection', async () => {
         if (!_reflectionEnabled) return;
         const mind = minds[name];
         if (!mind?.runReflection) return;
@@ -860,7 +861,7 @@ export function startScheduler() {
         } catch (err) {
           console.log(`[mind-manager] ${r.name} reflection error: ${err.message}`);
         }
-      }, reflectMs);
+      }), reflectMs);   // M10 v2 observe-only: wrapTick 只计时, 回调体不变
     }, 60_000 + staggerMs + Math.random() * 10_000);
 
     // Immediate reflection if overdue (agent never reflected or interval elapsed)
@@ -994,7 +995,7 @@ export function startScheduler() {
   // 首次检查：启动后 3 分钟，之后每 30 分钟
   setTimeout(() => {
     _runHealthCheck();
-    setInterval(_runHealthCheck, HEALTH_CHECK_INTERVAL);
+    setInterval(wrapTick('mind-manager.healthCheck', _runHealthCheck), HEALTH_CHECK_INTERVAL);
   }, 180_000 + Math.random() * 30_000);
 
   console.log(`[mind-manager] Scheduler started for ${relays.length} agents`);
@@ -1003,7 +1004,7 @@ export function startScheduler() {
   const PRICE_CHECK_INTERVAL = 60_000;
   const ALERT_COOLDOWN = 10 * 60_000;
 
-  setInterval(async () => {
+  setInterval(wrapTick('mind-manager.priceMonitor', async () => {
     if (!_priceAlertEnabled) return;
     try {
       const res = await fetch('https://api.mexc.com/api/v3/ticker/price?symbol=KASUSDT', { signal: AbortSignal.timeout(5000) });
@@ -1047,12 +1048,12 @@ export function startScheduler() {
         }
       }
     } catch {}
-  }, PRICE_CHECK_INTERVAL);
+  }), PRICE_CHECK_INTERVAL);   // M10 v2 observe-only: wrapTick 只计时, 回调体不变
 
   console.log(`[mind-manager] Price monitor active: ±${_priceThresholdPct}%`);
 
   // ── Order Timeout Monitor ──
-  setInterval(async () => {
+  setInterval(wrapTick('mind-manager.orderTimeout', async () => {
     try {
       const { expireTimedOut, transition } = await import('../services/order-machine.js');
       expireTimedOut();
@@ -1162,7 +1163,7 @@ export function startScheduler() {
         }
       }
     } catch {}
-  }, 60_000); // check every minute
+  }), 60_000); // check every minute · M10 v2 observe-only: wrapTick 只计时, 回调体不变
 }
 
 /**

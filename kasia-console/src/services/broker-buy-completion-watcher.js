@@ -4,6 +4,7 @@
 // 单 file 双路径不新建 (永不新建先迭代). 标记: broker_buy_dm_sent vs broker_sell_dm_sent.
 
 import { sqlite } from '../db/client.js';
+import { wrapTick } from '../lib/diag-step.mjs';   // M10 v2 observe-only (2026-09-05): setInterval 回调计时(纯透传, 同步段/总墙钟 ≥50ms 才打)
 
 const TICK_MS = 60_000;
 // Bettor #j5romh r766 身份迁移补全, env 缺失 fail-loud 拒启(死值兜底=定时雷, 见 kanet.env)。
@@ -156,14 +157,14 @@ export async function completionTick() {
 
 export function startCompletionWatcher() {
   if (_tickInterval) return;
-  _tickInterval = setInterval(async () => {
+  _tickInterval = setInterval(wrapTick('broker-buy-completion.tick', async () => {
     try {
       const r = await completionTick();
       if (r && r.scanned !== undefined) {
         console.log(`[broker-buy-completion] tick handled=${r.handled||0}/${r.scanned||0}`);
       }
     } catch (e) { console.error('[broker-buy-completion]', e.message); }
-  }, TICK_MS);
+  }), TICK_MS);   // M10 v2 observe-only: wrapTick 只计时, 回调体不变
   console.log(`[broker-buy-completion] watcher started for Trader-B tick=${TICK_MS}ms`);
 }
 

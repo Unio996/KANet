@@ -13,6 +13,7 @@
 //
 // 沿 broker-buy-completion-watcher / market-seeder 等常驻 worker 范式.
 
+import { wrapTick } from '../lib/diag-step.mjs';   // M10 v2 observe-only (2026-09-05): setInterval 回调计时(纯透传, 同步段/总墙钟 ≥50ms 才打)
 const TICK_MS = 30 * 1000;
 // T-J1-2026-04-27 v1.1 (Owner 23:14 钦定 'kanet 钱包真 10 chain × multi-stable, 方向真明确'):
 // 真 source from cross-chain-verify.EVM_RPC (7 EVM chain 已 register: bnb/eth/polygon/
@@ -40,7 +41,7 @@ export function start() {
   _loadSupportedChains().then(() => {
     console.log(`[bsc-watcher] supported chains loaded from cross-chain-verify: ${SUPPORTED_CHAINS.join(',')}`);
   });
-  _interval = setInterval(() => { tick().catch(e => console.warn(`[bsc-watcher] tick err: ${e.message}`)); }, TICK_MS);
+  _interval = setInterval(wrapTick('bsc-watcher.tick', () => tick().catch(e => console.warn(`[bsc-watcher] tick err: ${e.message}`))), TICK_MS);   // M10 v2 observe-only: wrapTick 只计时, 回调体不变
   console.log(`[bsc-watcher] started, tick=${TICK_MS / 1000}s, supported=${SUPPORTED_CHAINS.join(',')}`);
   return { ok: true };
 }

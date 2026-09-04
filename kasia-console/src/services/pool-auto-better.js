@@ -18,6 +18,7 @@
 //   - per-cycle / per-relay 上限 PER_TICK 防资金过快烧
 
 import { randomBytes } from 'node:crypto';
+import { wrapTick } from '../lib/diag-step.mjs';   // M10 v2 observe-only (2026-09-05): setInterval 回调计时(纯透传, 同步段/总墙钟 ≥50ms 才打)
 import { sqlite } from '../db/client.js';
 import { isRelayAlive, sendCommandAsync } from './relay-manager.js';
 import { getSidesByLogicalMarket } from '../lib/pool-bettor-sides-query.mjs';
@@ -276,9 +277,7 @@ export function startAutoBetterCron() {
   setTimeout(() => {
     autoBetterTick().catch(e => console.error('[auto-bet] startup tick:', e.message));
   }, 60_000);
-  timer = setInterval(() => {
-    autoBetterTick().catch(e => console.error('[auto-bet] tick:', e.message));
-  }, TICK_INTERVAL_MS);
+  timer = setInterval(wrapTick('auto-bet.tick', () => autoBetterTick().catch(e => console.error('[auto-bet] tick:', e.message))), TICK_INTERVAL_MS);   // M10 v2 observe-only: wrapTick 只计时, 回调体不变
 }
 
 export function stopAutoBetterCron() {

@@ -23,6 +23,7 @@
 // API surface (caller-facing) 不变 — broker-llm-agent + broker-buy/sell-handler 透明.
 
 import { sqlite } from '../db/client.js';
+import { wrapTick } from '../lib/diag-step.mjs';   // M10 v2 observe-only (2026-09-05): setInterval 回调计时(纯透传, 同步段/总墙钟 ≥50ms 才打)
 import { transition } from './broker-state-machine.js';  // SA-4 真 transition migrate (_sweepStaleAligning aligning→expired)
 import { buildExplorerUrl, formatTxReference } from '../lib/explorer-url.mjs';
 // T-J2-2026-05-11 Phase 2 A.4 (NWT #18 ABE audit): exchange-machine transition alias (区分 retail_dex_orders state machine 同名 transition)
@@ -805,7 +806,7 @@ let _sweepTimer = null;
 
 export function startStaleAligningSweep() {
   if (_sweepTimer) return;
-  _sweepTimer = setInterval(_sweepStaleAligning, SWEEP_TICK_MS);
+  _sweepTimer = setInterval(wrapTick('broker-state-authority.sweep', _sweepStaleAligning), SWEEP_TICK_MS);
   // Run once immediately on startup (catch up post-restart accumulated stale drafts)
   _sweepStaleAligning();
   console.log(`[broker-state-authority] stale-aligning sweep started, tick=${SWEEP_TICK_MS}ms`);

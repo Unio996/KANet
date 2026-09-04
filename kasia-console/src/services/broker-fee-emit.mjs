@@ -18,6 +18,7 @@
 // 单一权威, 这里只保留 emit 侧独有的东西(候选筛选/幂等标记/DM 事件写入)。
 
 import { getIndexedTxOutputs } from '../lib/broker-fee-chain.mjs';
+import { wrapTick } from '../lib/diag-step.mjs';   // M10 v2 observe-only (2026-09-05): setInterval 回调计时(纯透传, 同步段/总墙钟 ≥50ms 才打)
 import { sqlite } from '../db/client.js';
 // B线深化件1(2026-07-12, 设计 docs/2026-07-12-broker-fee-emit-package-live-switch-design.md v1.2,
 // Owner"broker自动分发独立功能深化"直令+双审GO): live 切换到 package(notify层)——补落3自己点名的 gap
@@ -54,7 +55,7 @@ async function _tick() {
 export function startBrokerFeeEmitCron() {
   if (_interval) return;
   console.log(`[broker-fee-emit] cron start, tick=${TICK_MS}ms`);
-  _interval = setInterval(_tick, TICK_MS);
+  _interval = setInterval(wrapTick('broker-fee-emit.tick', _tick), TICK_MS);
   setTimeout(_tick, 5000);   // startup pass (同 broker-buy-completion-watcher 等既有 cron 惯例, 不等第一个 tick 周期)
 }
 export function stopBrokerFeeEmitCron() { if (_interval) { clearInterval(_interval); _interval = null; } }

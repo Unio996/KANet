@@ -13,6 +13,7 @@
  */
 
 import { randomUUID } from 'crypto';
+import { wrapTick } from '../lib/diag-step.mjs';   // M10 v2 observe-only (2026-09-05): setInterval 回调计时(纯透传, 同步段/总墙钟 ≥50ms 才打)
 import { sqlite } from '../db/client.js';
 import { fetchPredictionData } from './market-data.js';
 import { callLLMWithFallback } from './llm-fallback.js';
@@ -616,9 +617,7 @@ let _cronTimer = null;
 
 export function startCron() {
   if (_cronTimer) return;
-  _cronTimer = setInterval(() => {
-    runScan('cron').catch(err => console.log(`[bettor-scanner] cron tick error: ${err.message}`));
-  }, CRON_INTERVAL_MS);
+  _cronTimer = setInterval(wrapTick('bettor-scanner.cron', () => runScan('cron').catch(err => console.log(`[bettor-scanner] cron tick error: ${err.message}`))), CRON_INTERVAL_MS);   // M10 v2 observe-only: wrapTick 只计时, 回调体不变
   console.log(`[bettor-scanner] cron registered: every ${CRON_INTERVAL_MS / 3600000}h`);
 }
 

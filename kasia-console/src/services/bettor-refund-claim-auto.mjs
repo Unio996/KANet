@@ -9,6 +9,7 @@
 // claim_txid 防重复领.
 
 import { sqlite } from '../db/client.js';
+import { wrapTick } from '../lib/diag-step.mjs';   // M10 v2 observe-only (2026-09-05): setInterval 回调计时(纯透传, 同步段/总墙钟 ≥50ms 才打)
 import { sendCommandAsync } from './relay-manager.js';
 // P1 授权闸: 与 pool.js 共用【同一个函数本体】, 不是各写一遍谓词
 import { assertBettorRefundAuthorized } from '../lib/refund-authorization.mjs';
@@ -168,9 +169,7 @@ export function startBettorRefundClaimAutoCron() {
   setTimeout(() => {
     claimAutoDispatcherTick().catch(e => console.error('[claim-auto] startup tick:', e.message));
   }, STARTUP_GRACE_MS);
-  timer = setInterval(() => {
-    claimAutoDispatcherTick().catch(e => console.error('[claim-auto] tick:', e.message));
-  }, TICK_INTERVAL_MS);
+  timer = setInterval(wrapTick('refund-claim-auto.tick', () => claimAutoDispatcherTick().catch(e => console.error('[claim-auto] tick:', e.message))), TICK_INTERVAL_MS);   // M10 v2 observe-only: wrapTick 只计时, 回调体不变
 }
 
 export function stopBettorRefundClaimAutoCron() {

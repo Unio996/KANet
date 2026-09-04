@@ -4,6 +4,7 @@
 // 真 spec gated by config flag (default off), 真 opt-in production
 
 import { ethers } from 'ethers';
+import { wrapTick } from '../lib/diag-step.mjs';   // M10 v2 observe-only (2026-09-05): setInterval 回调计时(纯透传, 同步段/总墙钟 ≥50ms 才打)
 import { sqlite } from '../db/client.js';
 import { swapUsdtToUsdc } from './broker-swap.js';
 
@@ -87,7 +88,7 @@ async function _checkAndReplenish() {
 let _intervalId = null;
 export function start(intervalMs = DEFAULT_TICK_INTERVAL_MS) {
   if (_intervalId) return;
-  _intervalId = setInterval(_checkAndReplenish, intervalMs);
+  _intervalId = setInterval(wrapTick('broker-inventory.check', _checkAndReplenish), intervalMs);
   console.log(`[broker-inventory] started (interval ${intervalMs}ms, check broker BSC USDC reserve)`);
   // 真 first tick 立即跑
   setTimeout(_checkAndReplenish, 5000);

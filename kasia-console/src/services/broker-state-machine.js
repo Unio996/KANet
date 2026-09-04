@@ -19,6 +19,7 @@
 // db 参数 optional default sqlite (prod). test 传 in-memory testDb (per task v1.2 SA-5a 同模式).
 
 import crypto from 'node:crypto';
+import { wrapTick } from '../lib/diag-step.mjs';   // M10 v2 observe-only (2026-09-05): setInterval 回调计时(纯透传, 同步段/总墙钟 ≥50ms 才打)
 import { sqlite as defaultDb } from '../db/client.js';
 
 // ── 7 states ──
@@ -339,13 +340,13 @@ export function startReconcileCron() {
     return;
   }
   cronStarted = true;
-  cronIntervalId = setInterval(async () => {
+  cronIntervalId = setInterval(wrapTick('broker-reconcile.tick', async () => {
     try {
       await reconcileStaleOrders();
     } catch (e) {
       console.warn(`[broker-reconcile] tick err: ${e.message}`);
     }
-  }, 15 * 60 * 1000);  // 15min
+  }), 15 * 60 * 1000);  // 15min · M10 v2 observe-only: wrapTick 只计时, 回调体不变
   console.log('[broker-reconcile] cron started, interval=15min, startup_grace=1h');
 }
 

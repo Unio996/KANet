@@ -12,6 +12,7 @@
 // {metric:'winner', op:'==', operand:队伍}, 差别只在文案措辞, 不影响本 cron 的判定逻辑。
 
 import { sqlite } from '../db/client.js';
+import { wrapTick } from '../lib/diag-step.mjs';   // M10 v2 observe-only (2026-09-05): setInterval 回调计时(纯透传, 同步段/总墙钟 ≥50ms 才打)
 
 const MAKER_RELAY_ID = process.env.WORLDCUP_MAKER_RELAY_ID || '15593e10-fe63-4806-a7b5-cae062699de8'; // broker-1, #41/R16 已验证 maker
 // #35 demo broker 挂靠(Bettor 决策1 GO, 2026-07-04): Owner 自己的 broker 地址(地址制外部 broker,
@@ -149,6 +150,6 @@ let _timer = null;
 export function startWorldcupScheduleCron() {
   if (_timer) return;
   console.log(`[worldcup-schedule] starting·tick=${TICK_MS}ms·maker=${MAKER_RELAY_ID.slice(0, 8)}`);
-  _timer = setInterval(() => { worldcupScheduleTick().catch((e) => console.log(`[worldcup-schedule] tick uncaught: ${e.message}`)); }, TICK_MS);
+  _timer = setInterval(wrapTick('worldcup-schedule.tick', () => worldcupScheduleTick().catch((e) => console.log(`[worldcup-schedule] tick uncaught: ${e.message}`))), TICK_MS);   // M10 v2 observe-only: wrapTick 只计时, 回调体不变
   worldcupScheduleTick().catch((e) => console.log(`[worldcup-schedule] startup tick: ${e.message}`)); // immediate first tick
 }

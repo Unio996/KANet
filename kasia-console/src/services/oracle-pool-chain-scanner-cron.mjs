@@ -3,6 +3,7 @@
 // 不依赖 API endpoint 触发, 服务启动后自动跑.
 
 import { scanAndDerivePool } from './oracle-pool-chain-scanner.mjs';
+import { wrapTick } from '../lib/diag-step.mjs';   // M10 v2 observe-only (2026-09-05): setInterval 回调计时(纯透传, 同步段/总墙钟 ≥50ms 才打)
 
 const TICK_INTERVAL_MS = 5 * 60 * 1000;
 const STARTUP_GRACE_MS = 60 * 1000;
@@ -56,9 +57,7 @@ export function startOraclePoolScannerCron() {
   setTimeout(() => {
     oraclePoolScannerTick().catch(e => console.error('[oracle-pool-scanner-cron] startup tick:', e.message));
   }, STARTUP_GRACE_MS);
-  timer = setInterval(() => {
-    oraclePoolScannerTick().catch(e => console.error('[oracle-pool-scanner-cron] tick:', e.message));
-  }, TICK_INTERVAL_MS);
+  timer = setInterval(wrapTick('oracle-pool-scanner.tick', () => oraclePoolScannerTick().catch(e => console.error('[oracle-pool-scanner-cron] tick:', e.message))), TICK_INTERVAL_MS);   // M10 v2 observe-only: wrapTick 只计时, 回调体不变
 }
 
 export function stopOraclePoolScannerCron() {

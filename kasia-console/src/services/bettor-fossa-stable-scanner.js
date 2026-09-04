@@ -7,6 +7,7 @@
 // Cron 1h tick. NO auto-fire. Owner final ack gate enforced at /api/bettor/recommendation/:id/accept.
 
 import { sqlite } from '../db/client.js';
+import { wrapTick } from '../lib/diag-step.mjs';   // M10 v2 observe-only (2026-09-05): setInterval 回调计时(纯透传, 同步段/总墙钟 ≥50ms 才打)
 import { randomUUID } from 'node:crypto';
 import { classifyStrategy } from './bettor-scavenger.js';
 
@@ -39,9 +40,7 @@ export function startFossaStableScannerCron() {
   } catch (e) {
     console.error('[fossa-stable-scanner] startup query err:', e.message);
   }
-  timer = setInterval(() => {
-    runFossaStableScan().catch(e => console.error('[fossa-stable-scanner] tick fail:', e.message));
-  }, TICK_INTERVAL_MS);
+  timer = setInterval(wrapTick('fossa-stable-scanner.tick', () => runFossaStableScan().catch(e => console.error('[fossa-stable-scanner] tick fail:', e.message))), TICK_INTERVAL_MS);   // M10 v2 observe-only: wrapTick 只计时, 回调体不变
 }
 
 export function stopFossaStableScannerCron() {

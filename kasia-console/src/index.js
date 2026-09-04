@@ -1,4 +1,5 @@
 import Fastify from 'fastify';
+import { wrapTick } from './lib/diag-step.mjs';   // M10 v2 observe-only (2026-09-05): setInterval 回调计时(纯透传, 同步段/总墙钟 ≥50ms 才打)
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { randomBytes } from 'crypto';
@@ -271,11 +272,11 @@ import { expireStale, timeoutVerifying, checkMatchedTimeout, checkStaleDisputes,
 // 真 .catch pattern 跟 checkMatchedTimeout 同款 (NOT throw 阻 cron tick).
 try { expireStale(); checkStaleDisputes(); cleanupStaleOrphanAccepts(); } catch (err) { console.error('[exchange] startup expire:', err.message); }
 timeoutVerifying().catch(err => console.error('[exchange] startup timeoutVerifying:', err.message));
-setInterval(() => {
+setInterval(wrapTick('exchange.expireTick', () => {
   try { expireStale(); checkStaleDisputes(); cleanupStaleOrphanAccepts(); } catch (err) { console.error('[exchange] expire error:', err.message); }
   timeoutVerifying().catch(err => console.error('[exchange] timeoutVerifying error:', err.message));
   checkMatchedTimeout().catch(err => console.error('[exchange] matched timeout error:', err.message));
-}, 30 * 1000);
+}), 30 * 1000);   // M10 v2 observe-only: wrapTick 只计时, 回调体不变
 
 // Anti-spam API endpoints
 import { checkOutboundAllowed, getActivityLog, getActivityByPeer, getOutboundStats, detectStopRequest, getMergedContacts } from './services/anti-spam.js';
@@ -521,9 +522,9 @@ import { writeFileSync } from 'node:fs';
 import { join as pathJoin, dirname as pathDirname } from 'node:path';
 import { fileURLToPath as toFileURL } from 'node:url';
 const HEARTBEAT_FILE = pathJoin(pathDirname(toFileURL(import.meta.url)), '..', '..', 'logs', 'console-heartbeat.txt');
-setInterval(() => {
+setInterval(wrapTick('console.heartbeatFile', () => {
   try { writeFileSync(HEARTBEAT_FILE, String(Date.now())); } catch { /* best-effort, 不影响主流程 */ }
-}, 2000);
+}), 2000);   // M10 v2 observe-only: wrapTick 只计时, 回调体不变
 
 // zk-prove-server: 独立 Fastify 实例(不共用主 fastify/不共用 HOST 绑定), 只服务跨机器 ZK proving
 // job-queue 的 3 个 endpoint (Tailscale-scoped)。见 docs/2026-07-06-zk-close-tick-production-wiring-design.md。
