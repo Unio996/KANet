@@ -11404,3 +11404,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **窗**（`scratch/_bettor_cpu_per_block_window.ps1`·CIM UserModeTime+KernelModeTime 差分 ÷ `Processed N blocks` 计数·剔 0 块桶·各 601s）：A 17:03:57Z 8,680 块/61 桶/中位 117；B 17:17:42Z 8,316 块/60 桶/中位 104。判据（NWT）：中位块率 ±10% 且 cpu/块不变 = 无效 ⇒ **无效**；分项签名与预测一致（kernel 降、ops 不变）但被 user 升抵消。
 - **裁**：还原（窗 C 10 min 确认基线）；0x000555 臂不做；电源方案臂问 NWT 一句；之后 GO 停 Scanner（KANet-UI 方案已批）。剩余杠杆：ram-scale 3.0 一次重启（先 Disable watchdog/任务）；J1 younio 节点作 proof syncer（C 复活条件·待 J1）；重编译抬 fd/表缓存（Owner 拍·D-005）。
 - **KANet-UI 里程碑**：17:21Z kaspadPct 40%·blk 9,721,378·lag 62h·console 25156·wasm 4.3MB。
+
+### (821) 2026-09-05 · 🔴 **syncer 第 6 次断连 17:43:07Z（136.243.93.17 `peer connection is closed`）→ 17:43:30Z 同 peer 重启 IBD → 17:43:47Z `syncing ahead from current pruning point 621138c1…` → header 相位从 1%（块轮才 40%·973,368）** · 发生在亲和 0x000FFF+High 生效后 ~25 min（不能归因·也不能排除：High + 12 LP 打包饿死网络线程 = 有机制候选）⇒ **保守处置：请 Owner 立即还原 0xFFFFFF+Normal**；B′ 推迟到块体相位恢复 · 820 措辞改口（NWT）："两效应相抵·B 混了两个变量"而非"无效" · 趁 header 相位 GO 停 Scanner
+- **NWT 读 A-B（采）**：内核态每块 −23% = V-cache 对系统调用路径的预测坐实（本线唯一量到的真实减量）；用户态 +55% 用两 CCD 主频差（~4%）解释不了，更像 139 线程挤 12 LP 的 SMT 同核抢占或 High 改了调度；B 同时改亲和与优先级 ⇒ 分不开。再一臂即裁：**B′ = 0x000555 + Normal 10 min**：user 回 ~25 ms 且 kernel 仍 ~33 ⇒ cpu/块 ≈58 ms（−15%）阳性；仍 +55% ⇒ CCD 本身 ⇒ 线终结。电源方案臂低预期，只在 B′ 阴性时收尾。窗 C 仍要做。
+- **断连 #6**：块率 2 min 档 17:43Z 16.5 → 17:45Z **0.0**，headers 14,959/2 min；DNS seeder kas.pa/kasia.fyi 持续失败；其它 3 台 reset 照旧。相位成本按 789/778 经验 1.5–5h。KANet-UI D 行将见 blk 冻结 + hdrPct 涨 = 相位切换非卡死。
+- **停 Scanner**：GO（KANet-UI 方案已批·1 次 POST 热生效·记停前 checkpoint/blockCount 交 J2 备回填·READY 前不恢复）。
+- **待 Owner**：还原亲和；J1 younio 四条件；重编译决策不急。
