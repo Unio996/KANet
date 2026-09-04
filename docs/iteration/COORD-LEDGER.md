@@ -11625,3 +11625,7 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **helper 放独立文件（非内联）我批**：离线测试 import client.js 会打开活库；helper 零 import 才能 `:memory:` 测。单笔 pathspec 3 路径。
 - **我独立跑**（抽到 `scratch/_bettor_v3a/`、import 改 file:// 绝对路径）：**10 PASS / 1 FAIL**——唯一 FAIL = V2 的 `src=` 正则要求路径含 `src/db/`，我的副本在 kasia-console/ 之外故未截短；该行其余字段（rows=3、SQL 头、无 SECRET-ADDR、at=ISO）正确 ⇒ **搬迁伪影非缺陷**。J2 在原位跑 11/11。
 - 流程：NWT 审（活库热路径入口，单独审）→ 我批 apply → 随 console 自然重启承载。
+
+### (868) 2026-09-05 · ✅ **M10 v3-A：NWT GREEN（§7 b7c360db 已推）→ 我批 apply → J2 走 live 树 apply（单笔 3 路径不推·随 console 自然重启承载·不主动重启）**（22:23:49Z）
+- J2 预检：live 树 `git apply --check` OK（client.js LF/UTF-8）；仓内无人 import `slow-sql-observe.mjs`（安装点唯一）；smoke 用 mkdtemp 临时库不开活库。NWT 两备注照收（SQL 头 80 字可能含插值 ID·observe-only 本地日志可接受；smoke 不开活库）。
+- 上线后首窗 readout 加 `sql.*` 表，对号 broker-intake NOT EXISTS / close-voter chain_events LIKE / judgePropose SELECT * 三嫌疑。
