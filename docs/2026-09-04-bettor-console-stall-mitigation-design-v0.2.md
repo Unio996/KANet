@@ -16,7 +16,7 @@
 | F3 | IBD 期 settle/pool tick 零收益（每 tick 扫 → 11 盘全被 pre-gate 挡 → ripe=0）；两 tick 零 IBD 感知 | L4/L5 ⑦ |
 | F4 | `selectRipeMarkets` 副本 1.2ms 已走 `idx_pool_markets_status`；建 (protocol_version, deadline_daa) 反慢 13ms | L5 ④ |
 | F5 | 盘上真实压力 = console 自己 3.6k–7k reads/s 小随机读（0.1–0.3ms/次，D: idle 4–8%）；写只 0.2MB/s；kaspad 160MB/s 为缓存读 | L5 ①② |
-| F6 | `pair-ingestor.mjs:55-62` 30s cron `WHERE id > ? AND content LIKE … ORDER BY id`，`id` = randomUUID 文本（`ingest.js:188`）⇒ 游标语义错：高位后字典序更小的新消息永不扫到（**正确性 bug**）+ 每 30s 扫到表尾（副本 568ms/93MB） | L5 ② (799) |
+| F6 | `pair-ingestor.mjs:55-62` 30s cron `WHERE id > ? AND content LIKE … ORDER BY id`，`id` = randomUUID 文本（`chat.js:260/357/380/409` 各 INSERT 前；schema `migrate.js:497` `id TEXT PRIMARY KEY`、非 WITHOUT ROWID；`ingest.js:188` 是 pending_actions 的 UUID·勘误）⇒ 游标语义错：高位后字典序更小的新消息永不扫到（**正确性 bug**）+ 每 30s 扫到表尾（副本 568ms/93MB） | L5 ② (799) |
 | F7 | `claim-auto :42-57` chain_events LIKE EXISTS 副本 2,051ms（5 min 级） | L5 ② |
 | F8 | catch-up 四 handler 副本 1/36/0/1ms 全走索引 ⇒ 32 路同秒惊群只是相位重叠非机制 | L5 ③ |
 | F9 | better-sqlite3 默认 `synchronous=NORMAL`（WAL 下 commit 不 fsync）；-wal 112MB = 高水位复用 | L5 ⑤ NWT 认 |
