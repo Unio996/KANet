@@ -123,3 +123,29 @@
 
 ## 4. 与 Owner 口径相关的一句
 "换近端 peer 提速"的真实杠杆是 **IBD 模式（PruningCatchUp 跳块体）**而不是 RTT；现在唯一肯当 syncer 的那台正是把我们锁在慢模式里的那台。判 A 值不值，第一步不是测 RTT，是回答 A2。
+
+## 11. 切换后两窗 + Bettor 三分支裁定的红队复核（NWT · 2026-09-04T21:24Z · 只审不改）
+
+**输入**：Bettor 裁 D-a 落 ②（peer-bound：保 P2、不降 P1、撤 B′），依据 = ③ "21:07–21:08Z 逐秒 20 s：14 s CPU=0 / reads=0，每 4–5 s 一次 30–48% 脉冲" + ④ 源码（syncer 逐块 async_get_block；我方 IBD_BATCH_SIZE=99、req_{i+1} 在 join(jobs_{i-1}) 后发）+ W2 "cpu_ms/块 19.9（A 67.9 → −71%）"。
+
+**我方复核读数（kaspad 27032，全部亲手采，Z 由 date -u）**：
+| 项 | 值 | 仪器 |
+|---|---|---|
+| 窗 1 20:54:18–21:04:18Z | 13.63 blk/s（61 桶、median 99、零桶 0）；reads 8.4k / 11.5k；IO Other 6.4k–11.3k；压实 1 簇 17（21:02:03–05Z，2.5 s 完） | log 10 s 桶 + Get-Counter 60 s |
+| 窗 2 21:04:33–21:14:33Z | 12.92 blk/s（60 桶、median 109、零桶 0）；reads 10.3k；IO Other 13.6k；压实 1 簇 16（21:12:29–31Z） | 同上 |
+| 逐秒 40 s 21:17:43–21:18:22Z | % Processor Time 每秒 83–135，**无零秒**；IO Read 每秒 11.9k–15.5k，无零秒；NIC rx 成团 95/380/260/91/193/390+201 KB 各 1 s、间隔 ~6 s | Get-Counter SampleInterval 1 |
+| 权威 CPU 30 s 21:19:21–51Z | 0.793 核 = kernel 0.431 + user 0.362 ⇒ ~61 cpu_ms/块、kernel ~33 ms/块（A 窗 67.9/43.2 ⇒ −10% / −23%） | Get-Process TotalProcessorTime 差分 |
+| 线程级 21:23:11/16Z | 137 线程合计 71% / 87%；最忙线程 11% / 23%；**无热线程** | CIM PerfFormattedData_PerfProc_Thread（Thread 计数器混样本、Get-Process 线程时间 SYSTEM 假零，均不可用） |
+| 句柄 / SST | HandleCount 16,314（切换前 4,144）；consensus-006 17,923 sst、utxoindex 181、meta 1 | Get-Process / 目录计数 |
+| 内存 | WS 22.22 → 20.94 → 20.12 GB；free 8.7–9.7 GB；commit 67–68 GB | Get-Process / CIM OS |
+
+**裁定**：
+1. **③ 不能复现**：同一进程、10 min 后，本机每一秒都在 0.8–1.35 核、每秒 12k+ 读；到货成团的形状与 Bettor 一致，但成团之间本机满载不空闲。④ 的推理链"空档三者皆 0 ⇒ 排除我方"断在第一步。② 目前无我方数据支撑 ⇒ **建议三分支 HOLD，先对仪器**。
+2. **W2 的 19.9 cpu_ms/块 与我三次独立采样（0.85 / 1.02 / 0.79 核）差 3–4 倍**，已请 Bettor 交脚本 CPU 取法与两点原值；怀疑方向 = Get-Process 对 SYSTEM 进程的假零/陈值，或 CPU 差分与块数窗不对齐（未核）。
+3. **Bettor 问的本地零 CPU 等待点在源码上不存在**：`try_join_all(prev_jobs)` 等 virtual_state_task；能零 CPU 挂住它的只有锁；pruning_lock 是 `utils/src/sync/rwlock.rs` RfRwLock，注释原话 "Readers-first… additional readers will always be able to acquire the lock as well even if a writer is already in the queue"；body/header/virtual processor 全走 `blocking_read` ⇒ 剪枝的 pending writer 挡不住读者。副产物：这正是剪枝在 IBD 期一步不动的机制（flow.rs:112 起整段持 session 读锁；`pruning completed` 全史 0 命中，见 memory `reference-kaspad-pruning-traversal-is-starved-by-ibd-and-only-advances-in-ibd-gaps`）。
+4. **fd 补丁（P1 部分）生效的直接证据**：句柄 4,144 → 16,314，表缓存真把 SST 常开；utxoindex/meta 远低于各自上限，open/close 风暴没有回来。**但 IO Other 仍 11–13k/s、IO Read 12–15k/s ≈ 每块 ~1000 次读 syscall（切换前 ~1580/块）**——8 GB 块缓存（P2 部分）没有把读 syscall 吃掉。**P2 待解释观测，不下结论。**
+5. **与全部读数相容的形状（标"推论"）**：每块一条串行读路径——~1000 次 pread/块 × ~33 µs（页缓存命中量级）≈ 内核 33 ms/块；线程各忙一段、合起来 0.8 核、无热线程、无零秒、物理读只 600/s、切换前后块率几乎不变（fd 风暴只让每次读更贵，次数没少多少）。若成立，杠杆在"每块 1000 次读"（哪类读 / 哪个 CF / 为何绕过 block cache——fill_cache=false 迭代器？utxoindex/meta 另一套 cache？），不在换 peer，也不在亲和（只动时延不动次数）。**未派工不开挖，只列题。**
+6. 三分支 ③（reads ≥5k ∧ 两窗块率 < 基线）**不触发**：两窗 reads 都 ≥5k，但均值 13.63 / 12.92 都高于 D1 11.2；Bettor 更正基线口径为 A 窗 14.43 ⇒ 两窗均低于 14.43（−5.5% / −10.5%）⇒ **按更正口径 ③ 的两个条件都满足**——这一点与 Bettor 的 ② 结论相冲，须由仪器对齐后再裁；我不替裁。
+7. 未核：Bettor 的 RTT/slow-start 推算、同步 syncer 侧读库负载。
+
+**判据记账**：两模型（对端出货 5 s+1 s 传输 vs 本机 7.6 s/99 块处理）在**到货间隔上不可分**，唯一能分的量是"空档里本机是否为 0"——两方各测一次结果相反 ⇒ 先对仪器再裁，不用第二个推理去压第一个读数。
