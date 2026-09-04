@@ -69,5 +69,22 @@
 - **CCD 映射实测（NWT 自跑，非提权，自己的 node 进程）**：48 MB 随机指针追踪，钉 `0x000FFF` = **21–23 ns/跳**，钉 `0xFFF000` = **73–76 ns/跳**，正反序各一次 ⇒ **LP 0-11 = V-cache CCD**；随机访问 L3 敏感度 3.5×。脚本：scratchpad `l3chase.js`（12M×uint32 打乱、3000 万跳）。
 - 实验判据（给 Bettor）：A-B-A 三窗各 ≥10 min；主指标 cpu 秒/块 + Privileged%（签名 = ops/s 不变而每调用变快），副指标中位块率；SMT 同核抢占用第二臂 `0x000555` 判；亲和不持久（重启即回）；电源方案臂单独做。
 
+## 5. 09-05 00:xxZ 追加：路 C 的真实成本——本机就有一次全新 IBD 的完整日志，它把 C 判死
+> 出处：`/d/kaspa-tn12-data/kaspa-testnet-12/logs/rusty-kaspa.log`（现库自己的日志，起于 **2026-08-26 16:29:25**；⇒ 现库是 08-26 建的全新库，08-28 06:18Z 那次只是重启，811/812 拿 08-28 当"新库起 IBD"算成本是错的）。以下时间全本地 +07:00。
+| 相位 | 起止 | 时长 | 备注 |
+|---|---|---|---|
+| headers proof 尝试 #1（86.48.24.208） | 16:29:40 → 16:31:10 | 1.5 min | `peer connection is closed` 失败 |
+| headers proof（136.243.93.17） | 16:31:23 → 16:31:30 | 7 s | 唯一成功的 syncer；它给的剪裁点 **56db…（块时间 2026-08-17 20:26 = 9 天前）** |
+| "pruning point chain segment" 头下载 289,156 个 | 16:32 → 21:23:52 | **4 h 52 min** | ~1,000/min = RTT 串行；= J1 在 younio 记的"4.7 h pruning scan" |
+| 第二次 kaspad 实例撞 LOCK | 16:32:35 / 16:35:44 / 16:38:52 | ×3 | `conn_builder.rs:167 … meta/LOCK: being used by another process` ⇒ 有第二个启动器（watchdog/任务）在重启窗口里连试三次——**任何重启窗前必须先停 watchdog 与计划任务** |
+| headers 相位 4.8 M（从 08-17 剪裁点起） | 21:27 → 次日 04:21（90%） | 6 h 54 min | 04:21 syncer 断连 ⇒ **整段作废** |
+| 断连后重来：chain segment 再下 | 04:23 → 09:00 | **4 h 37 min** | 同一 4.7 h 再赔一次 |
+| headers 相位再来 | 09:00 → 16:51（100%） | 7 h 51 min | |
+| UTXO 集下载 | 17:02 → ~17:05 | ~3 min | 2.4 M UTXO，快 |
+| 块体（从 08-17 剪裁点起 ~9 天） | 08-27 17:xx → 至今 | **8+ 天** | 就是现在这场 IBD |
+- **结论**：这台机器上"全新 IBD"= **24 h 的 proof/chain-segment/headers（含一次断连重来）+ 从 9 天前剪裁点起的块体**，因为**唯一肯给 headers proof 的 136.243.93.17 的剪裁点陈了 9 天**（正常应 tip − 30 h；它多半是懒剪裁/归档形；其它三台在 proof 阶段就 `peer connection is closed`）。⇒ **路 C 在当前 peer 集上 = 把这 8 天重跑一遍，且从零起** ⇒ **判死**，除非先拿到一台 **已验证 pp ≈ tip − 30 h 且肯为我们出 headers proof** 的节点（现无）。
+- 这同时是**本场 IBD 为何这么长的结构性根因**：不是"我们慢"，是"我们从 9 天前的剪裁点开始同步"。我们自己的剪裁点已随同步前移（08-29 05:02 `Verifying the new pruning point UTXO commitment`，现 pp = 621138c1…，09-04 03:30 的 1% 行块时间 09-02 07:13）。
+- (b) 磁盘：D: free 767 GB / used 698 GB（总 1.47 TB，非 2 TB）；`kaspa-testnet-12.corrupt-20260826` 另占 58 GB；C 若跑新库会再长到 ~115 GB，空间够，但 C 本身已否。
+
 ## 4. 与 Owner 口径相关的一句
 "换近端 peer 提速"的真实杠杆是 **IBD 模式（PruningCatchUp 跳块体）**而不是 RTT；现在唯一肯当 syncer 的那台正是把我们锁在慢模式里的那台。判 A 值不值，第一步不是测 RTT，是回答 A2。
