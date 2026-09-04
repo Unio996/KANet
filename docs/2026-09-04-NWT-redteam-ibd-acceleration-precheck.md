@@ -59,7 +59,8 @@
 - **杠杆（按代价排）**：
   1. **M5 排除 kaspad 数据目录**：零重启；打在 30k 次/s 的 open 路径上，预期收益比"每读扫描"模型大得多——仍以两窗实测为准。
   2. **减少 SST 数量**：`--rocksdb-preset=hdd`（`rocksdb_preset.rs:94-95`：SST 目标 256 MB、各层同尺寸）会让 115 GB 收敛到 ~450 个文件 ≪ 3,568 ⇒ 表缓存全命中、open 风暴消失。**但**：只对新压实生效（存量 6.6 MB 小文件要等压实或手动 compact，115 GB 全压实 = 小时级 I/O）；`level_compaction_dynamic_level_bytes(true)`（:97）对既有库可能触发一次大重整；预设名叫 hdd 但 SST 尺寸那一条与介质无关，其余（写缓冲 256 MB、L0 一文件即压实、4 MB 预读）要逐条评估对 NVMe 的副作用。需重启。
-  3. **`--rocksdb-cache-size=<MB>`**（`daemon.rs:240-243`，直接设块缓存，不动其它 ram-scale 倍率）：块缓存现 = 256 MB × ram-scale（漂移后 1.0 ⇒ **256 MB 对 115 GB 库**）——这解释了为什么几乎每次读都是系统调用。抬块缓存减的是 Read 次数，不减 open 次数；与 2 互补。需重启。
+  3. ~~`--rocksdb-cache-size=<MB>` 抬块缓存~~ **撤回（17:4xZ · J2 抓回、我核 `daemon.rs:238-256`）**：`configure_rocksdb` 只在 `matches!(preset, Hdd)` 时才算 `cache_budget`，`apply_default`（`rocksdb_preset.rs:60/66-73`）根本不收它 ⇒ **默认预设下 `--rocksdb-cache-size` 与 ram-scale 的块缓存倍率都是死开关**，块缓存 = RocksDB 库默认（小，具体值随 librocksdb 10.4 版本定，我未核数）。"256 MB × ram-scale"那句是我把 hdd 分支读成了通用分支，错。ram-scale 仍真实作用于**共识层 LRU 缓存**（`storage.rs:84-85`），那是应用层对象缓存，减 DB get 次数，不是块缓存。
+  3′. **`--rocksdb-preset=hdd` 整包不宜作加速包**（J2 判、我核）：除 SST 256 MB 外还带 bottommost **ZSTD level 22**（`rocksdb_preset.rs` :39-48，极慢压缩，在 CPU 钉死的节点上是压实毒药）、bloom 18 bits、256 KB 块、dynamic-level 重整；J2 另报后台写限速 12 MB/s（我在 :76-170 grep 未见 `rate_limiter`，行号待 J2 指）。⇒ 减 SST 数这条在**钉版二进制**上没有干净的运行时开关。
   4. **抬 fd 预算**：Windows CRT 8192 是硬顶（`setmaxstdio` 上限），且 8192 是二进制里的常数 ⇒ 改它 = 重编译 = 换二进制（D-005 / 7b1e18cc 钉版）⇒ **不在本轮**。
 - **顺序修正**：先 1（零重启、两窗），若 IO Other 与内核态同降 ⇒ 假设坐实；再把 2+3+ram-scale 3.0 恢复 + A2 预判合成**一次**重启。
 
