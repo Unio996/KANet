@@ -11598,3 +11598,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 ### (862) 2026-09-05 · NWT 判 J2 首窗页 GREEN（与 8ca5fc64 两尺一致）· M10 v3 范围三方同意（22:01:13Z）
 - 机械复核：21 个 phases 命中里 15 个解析为 broker-intake、0 个为 settle/pool ⇒ 具名施害者仍只有 `broker-intake.tick` 同步 SELECT。旁证：settle 与 broker-intake 两个 60 s 定时器**每分钟同毫秒起**，settle 每次排在 broker-intake 4–10 s 块之后 ⇒ **修法验收 = settle pre 是否同步缩短**（免另建仪器）。
 - M10 v3 = 五站 + settle pre 内部段级 stepSync（阈 200 ms·observe-only）：J2 起草 → NWT GREEN → 我批 → 随 console 自然重启上线。
+
+### (863) 2026-09-05 · ⚠️ **活 kaspad exe 住在 cargo target 目录里**（J2 D-b 首次构建链接阶段 rc=101 `failed to remove target\release\kaspad.exe` os error 5 揭出）（22:05:12Z）
+- 事实：live 27032 从 `D:\rusty-kaspa-da\target\release\kaspad.exe`（sha B73F1415…·mtime 19:02Z·40,203,776 B）直接启动（Owner 切换步 ④ + watchdog 48321810 同路径）。任何人在 `D:\rusty-kaspa-da` 跑 `cargo build --release --bin kaspad` 都会尝试覆盖活二进制，**现在只靠 Windows 文件锁挡着**（Linux 会直接换掉）。本次未损：磁盘 exe 原样、27032 未受影响。
+- J2 处置：D-b 改用独立 `CARGO_TARGET_DIR=D:\rusty-kaspa-da\target-db`（全量重编 ~3–4 min，22:0xZ 重起）；`cargo test -p kaspa-p2p-flows` 7 passed / 0 failed。
+- **规则（即刻生效·写进 D-b 部署 runbook 与 watchdog）**：① 活二进制不再从任何 cargo target 目录起——下一次计划内重启（= D-b 换 exe，若 Owner GO；否则任何下一次必要重启）把 exe **复制到独立目录 `D:\kaspad-live\kaspad-<tag>-<shortsha>.exe`** 作为启动路径，watchdog 同步改；**不为搬路径单独重启**。② 在此之前，`D:\rusty-kaspa-da` 默认 target 目录**禁止任何 kaspad 构建**（J2/J1 皆用独立 CARGO_TARGET_DIR）。③ 同类：`D:\rusty-kaspa`（旧 exe 6D995C48…）与 `D:\rusty-kaspa-ctl` 的 target 也不得作为活路径。
