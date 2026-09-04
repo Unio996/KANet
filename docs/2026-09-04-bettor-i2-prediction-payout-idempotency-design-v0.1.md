@@ -1,6 +1,6 @@
-# I2 · prediction settler 赢家 payout 幂等 · 设计 v0.1
+# I2 · prediction settler 赢家 payout 幂等 · 设计 v0.2
 
-> **Status**: DRAFT（架构师稿 → NWT 红队 → 精炼后 Owner 批 · 钱路 · **目标：READY（~09-09）前落地·随自然重启生效**）· 不作施工依据
+> **Status**: DRAFT-v0.2（v0.1 NWT 红队 R1–R6 全部落入 · 待 NWT 复核 → 精炼后 Owner 批 · 钱路 · **目标：READY（~09-09）前落地·随自然重启生效**）· 不作施工依据
 > 作者 Bettor · 2026-09-04 · 输入：NWT 幂等审 `docs/2026-09-04-NWT-redteam-txid-writer-idempotency-audit.md`（e0aa8e63+458e5869）· J2 代码事实 `scratch/_j2_i2_prediction_payout_code_facts_2026-09-04T15-00Z.md` · ledger (805)(806)。
 
 ## 0. 事实（J2 file:line 亲核）
@@ -15,13 +15,15 @@
 **双付真路径两条**：(a) 同 tick 超时重试（不需掉电·E3）；(b) 掉电丢 NORMAL commit（E4）。**活性 bug 一条**：(c) 60 min 回退把 prediction delivering 打回 verified（E4·且回退后若 payout 已落链 = 卡死；若 payout 未落 = 重选 = 又是 (b) 形）。
 
 ## 1. 原则
-**任何钱包 transfer 前必须先对账，对账键 = 本地 `payout_tx` ∨ 链上可辨认的（收款地址, 金额, market_id payload, 时间窗）。** 超时 ≠ 失败：超时后禁止盲重试，只允许对账后决定。
+**任何钱包 transfer 前必须先对账；对账的权威源 = relay 侧幂等键登记（I2-5），链读只作回填。** 三态纪律：**命中 ⇒ 回填不付；证明未发 ⇒ 付；查不到/不确定 ⇒ HOLD 不付**（"未命中"永远不等于"未发"）。超时 ≠ 失败：禁止盲重试。无 payload 的链上匹配只能触发 HOLD，不能自认。
 
-## 2. 手段（同一 PR 的四个 hunk，各自负向量）
-- **I2-1 payload 幂等键**：payout transfer 带 `payload = "kanet:pred:<market_id>"`（`commands.mjs` 透传 `payload` → relay `sendKaspa({to,amount,payload})`；底层已支持）。链上从此可辨认。不改金额/收款。
-- **I2-2 先对账后付**（payout 入口顶部、每次 attempt 前）：① `metadata.payout_tx` 非空 ⇒ 跳过 transfer 直接 completed；② 查 `kaspa_tx_log`（relay ingestTx 落的本机锚）∧ RPC：`to=winner ∧ amount=exact ∧ (payload==key ∨ ts ≥ attempt_ts − skew)` ⇒ 命中则回填 `payout_tx`、不付；③ 未命中才 transfer。
-- **I2-3 超时不重试、write-ahead attempt**：transfer 前把 `metadata.payout_attempt = {ts, n, key}` 与 delivering 标记**同一条 UPDATE** 写入，并包 `PRAGMA synchronous=FULL; UPDATE; PRAGMA synchronous=NORMAL`（E5·只此一笔）；`sendCommandAsync` 超时 ⇒ **不进 attempt 2**，本 tick 结束，留 delivering + attempt；下一 tick 由 I2-2 对账决定（迟到 txId 已被 relay ingestTx 落 `kaspa_tx_log` ⇒ 命中 ⇒ 回填 completed）。3 次重试改为"3 个 tick 内对账三次仍未命中且无 attempt 在飞 ⇒ 才允许第二次 transfer"。
-- **I2-4 回退闸**：`exchange-machine.js:647-658` timeoutVerifying 对 delivering 行加两条前置：`give_asset` 为 prediction 类 ⇒ 不回退（留给 settler 对账）；任何 delivering 且 `metadata.payout_tx ∨ payout_attempt` 非空 ⇒ 不回退（改为打 `[exchange] delivering has payout evidence, skip revert` 一行）。
+## 2. 手段（同一 PR，各自负向量；I2-5 为承重）
+- **I2-5 relay 幂等键（承重·R4）**：`transfer` 命令带 `idempotency_key`（= payload key）；relay 持久化 `key → {txId, submitted_at}`（复用其 seen 文件持久化机制），**同 key 再来直接回原 txId 不再广播**；新增只读命令 `transfer_status(key)` ⇒ `never | submitted:{txId,submitted_at}`。console 付前先问它；不依赖链读新鲜度、不依赖 mempool 状态，IBD 期也成立。
+- **I2-1 payload 幂等键**：payout transfer 带 `payload = "kanet:pred:<market_id>:payout"`（R6 加 phase 后缀防同市场第二类转账撞键）（`commands.mjs` 透传 `payload` → relay `sendKaspa({to,amount,payload})`；底层已支持）。链上从此可辨认。不改金额/收款。
+- **I2-2 先对账后付（三态·R2/R3）**：① `metadata.payout_tx` 非空 ⇒ completed；② 问 relay `transfer_status(key)`：`submitted` ⇒ 回填 txId 不付；`never` ⇒ **证明未发 ⇒ 付**；relay 不可达/超时 ⇒ **HOLD**；③ 链读只作回填与交叉核：`kaspa_tx_log`/RPC 按 payload==key 命中 ⇒ 回填；**无 payload 的 (to, amount, 窗) 匹配 = HOLD 触发器不是自认**（候选 ≥2、或候选 txid 已被任何其它 offer 的 `payout_tx` 占用 ⇒ HOLD；跨 offer 唯一性用 `json_extract` 全表查·改列加 UNIQUE 属 schema 变更另报 Owner）；时间窗下界 = attempt.ts − 本机时钟偏差、**上界开放**（sendKaspa 不可取消可迟到分钟级）；索引新鲜度断言：`kaspa_tx_log` 最新 block_time < attempt.ts + 确认余量 ⇒ 视为"查不到" ⇒ HOLD。
+- **I2-3 超时不重试、write-ahead attempt**：transfer 前把 `metadata.payout_attempt = {ts, n, key}` 与 delivering 标记**同一条 UPDATE** 写入，并包 `PRAGMA synchronous=FULL; UPDATE; PRAGMA synchronous=NORMAL`（E5·只此一笔）；`sendCommandAsync` 超时 ⇒ **不进 attempt 2**，本 tick 结束，留 delivering + attempt。**第二次 transfer 的唯一许可 = relay `transfer_status(key) == never`**（R4：mempool 未落 ⇒ relay 仍是 submitted ⇒ 不二次付；"3 tick 后允许"作废）。
+- **I2-6 选择器出口（R1·承重）**：settler 选择器 `:61-73` 对 prediction 类**增选 `delivering ∧ metadata.payout_attempt 非空` 的行，只进 I2-2 对账分支**（命中 ⇒ completed；never ⇒ 付；HOLD ⇒ 打一行 `[settler] payout HOLD key=… reason=…` 留 delivering）。没有它，"不回退"= 永久卡死换掉"回退"= 永不获付。
+- **I2-4 回退闸**：`exchange-machine.js:647-658` timeoutVerifying 对 delivering 行加两条前置：`give_asset` 为 prediction 类 ⇒ 不回退（出口 = I2-6）；任何 delivering 且 `metadata.payout_tx ∨ payout_attempt` 非空 ⇒ 不回退（打 `[exchange] delivering has payout evidence, skip revert`）。R5：exchange 行无 attempt 照旧回退；I1 落地后 exchange 行带 attempt ⇒ I1 稿必带同一条 I2-6 形出口，**且操作员端点 `api/trading.js:2454-2468`「Send KAS」（verified 强推 delivering 再发·零检查）须过同一对账闸**。
 
 ## 3. 负向量（缺一不落码）
 - V1 超时迟到落链：mock relay 30s 超时后 ingestTx 落 `kaspa_tx_log` ⇒ 下 tick 对账命中 ⇒ **transfer 恰 1 次**、completed 回填正确 txid。
@@ -30,9 +32,15 @@
 - V4 payload 透传：链上 tx payload == key（真链向量 READY 后补·IBD 期离线 builder 字节断言）。
 - V5 非空洞：I2-2 ① 命中时 `sendCommandAsync` 未被调用（突变反转必红）。
 - V6 FULL 包裹：三条语句顺序与恢复 NORMAL（突变去掉恢复 ⇒ 红）。
+- V7 碰撞 HOLD：两 offer 同赢家同金额同窗 ⇒ 后者 HOLD 不自认、不付。
+- V8 查不到≠未命中：`kaspa_tx_log` 陈/RPC 空/relay 不可达 ⇒ HOLD；突变"unknown ⇒ 付"必红。
+- V9 mempool 未落：relay 报 submitted 无落链 ⇒ 不二次 transfer。
+- V10 选择器出口：增选 delivering+attempt 行进对账；突变去掉 ⇒ 行永不再访问必红。
+- V11 payout_tx 跨 offer 唯一：认领已被占用的 txid ⇒ HOLD。
+- V12 relay 幂等：同 key 两次 `transfer` ⇒ 一次广播、两次同 txId；relay 重启后 key 仍在（持久化）。
 
 ## 4. 审批与部署
-钱路 ⇒ **Owner 批**（本稿精炼后与 Phase 1 同一次报）。落码 J2 → NWT diff 审 → 我推 → **随下次自然重启生效（READY 前）**；不主动重启。DATABASE.md 补 `metadata.payout_attempt` 字段说明。
+钱路（console settler + **relay 命令面 I2-5**）⇒ **Owner 批**（本稿精炼后与 Phase 1 同一次报）。落码 J2（console）+ relay 侧同为 J2/KANet-UI 报备 → NWT diff 审 → 我推 → **随下次自然重启生效（READY 前）**；不主动重启。DATABASE.md 补 `metadata.payout_attempt` 字段说明。
 
 ## 5. 不在本稿
 I1（exchange auto-deliver 同形·载体待 READY 后入站）沿用同四手段模板另稿；I3 统一对账 helper；I4 23 处 catch 处置。
