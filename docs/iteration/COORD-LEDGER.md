@@ -11381,3 +11381,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **实验记录**：基线 14.4 blk/s（16:46Z 10 min）·档 14.8 / 14.8 / 14.0（16:48–16:55Z）；排除 16:56Z；排除后 60s 12 样本如上；块率后续档待记。排除项保留（无害·标准加固）。
 - **推论**：Defender 假设（H4/M5）作为停顿/慢速成因 **证伪**；kaspad 内核态 = NTFS 文件 open/close/read IRP 路径本身（表缓存 3,568 < 17,402 SST）。
 - **下一步**：J2 三件查码（fd 链复核 / preset=hdd 对既有库 / cache-size 与 commit）→ 加速设计 v0.2 → NWT 小时级审 → Owner GO → 一次重启（J1 角色 B 或 Owner 提权）。**仍需 Owner 触发 J1**（younio 节点态 + 每块 I/O + peer IbdType 判据）。
+
+### (817) 2026-09-05 · **钉版二进制上的运行时解用尽（J2 `scratch/_j2_kaspad_rocksdb_options_7b1e18cc_2026-09-04T15-30Z.md` + NWT）**：max_open_files 3,568 无 CLI（fd 8192 是 `daemon.rs:53` 自设常数经 CRT setmaxstdio·可挪扣项全压只 +~500）· 块缓存 `--rocksdb-cache-size`/ram-scale 倍率**只在 hdd 预设生效**（默认预设 = 库默认 ~32MB·死开关）· hdd 预设整包否（12MB/s 后台写限速·256KB 块·bottommost ZSTD-22·dynamic-level 重整）· 无运行时 env ⇒ **真解 = 改 `max_open_files`/块缓存常数重编译 = 换二进制 = D-005 + 7b1e18cc 钉版（影响 ZK/covenant 坐标）= Owner 拍** · **新零重启杠杆：CPU 亲和到 3D V-Cache CCD**
+- **一次重启参数包只剩**：ram-scale 3.0 恢复（作用在共识 LRU `storage.rs:84-100` ≈1GB×scale·减 DB get）+ A2 IbdType 预判的 peer 选择（CatchUp 一次性省 ~1 天）+ A 落 Sync 则路 C。每块 CPU 成本（open/close+read 系统调用）在 7b1e18cc 上无运行时解。
+- **机器事实（我亲核）**：AMD Ryzen 9 **9900X3D** 12C/24T·4.4GHz·L3 总 128MB（= CCD0 96MB 3D V-Cache + CCD1 32MB）·电源计划"平衡"·`% Processor Performance` 121；5×1s 采样 kaspad 热线程落 **逻辑核 14/15/16/18/19 = CCD1（频率核）**；kaspad priority/affinity 非提权读不到。
+- **杠杆 L4（零重启·可逆·不碰二进制/DB）**：进程亲和到 CCD0（mask `0x000FFF`）+ 优先级 High；实验 10 min 档块率 vs 基线 14.4，无效即 `0xFFFFFF` 还原。NWT 5 min 红队中。需 Owner 管理员跑（SYSTEM 进程）。
+- **块率档（排除后）**：16:57Z 13.2 / 16:59Z 14.8（utxoValidated 36–39/10s）⇒ Defender 零效果确认（816）。
