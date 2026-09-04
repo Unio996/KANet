@@ -16,6 +16,7 @@ import * as schema from './schema.js';
 import { mkdirSync } from 'fs';
 import { dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
+import { installSlowSqlObserver } from './slow-sql-observe.mjs';   // M10 v3-A observe-only (零 import 的 helper)
 
 export const DB_PATH_REFUSE_MSG = '[db] DB_PATH not set and this is not the console entry — refusing to default to live; run with DB_PATH=<abs path>';
 
@@ -44,6 +45,10 @@ mkdirSync(dirname(dbPath), { recursive: true });
 const sqlite = new Database(dbPath);
 sqlite.pragma('journal_mode = WAL');
 sqlite.pragma('foreign_keys = ON');
+// M10 v3-A observe-only (2026-09-05, Bettor 批·NWT C1-C5): 驱动边界记慢 SQL —— 只包这一个实例的 prepare(), 只拦 .all/.get/.run,
+// ≥ DIAG_SQL_SLOW_MS(默认 200; 0 = 不装) 才打 `[diag:step] sql.<op> ms= rows= sql="<截80>" src=<caller> at=<ISO>`; 返回值/异常/this 原样;
+// 放在 drizzle(sqlite) 之前 ⇒ drizzle 也经同一 prepare 一并覆盖。细节与测试: ./slow-sql-observe.mjs / .test.mjs
+installSlowSqlObserver(sqlite);
 
 export const db = drizzle(sqlite, { schema });
 export { sqlite, dbPath };
