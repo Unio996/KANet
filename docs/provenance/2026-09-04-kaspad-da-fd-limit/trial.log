@@ -1,0 +1,114 @@
+TRIAL start 2026-09-04T19:06:49Z
+[T3] start 2026-09-04T19:06:49Z exe=/d/rusty-kaspa-da/target/release/kaspad.exe sha=b73f14157ba5e332 version=kaspad 1.1.1-toc.1
+[T3] cmd: /d/rusty-kaspa-da/target/release/kaspad.exe --appdir=D:\kaspa-da-trial-T3 --testnet --netsuffix=12 --utxoindex --ram-scale=3.0 --rpclisten=127.0.0.1:16310 --rpclisten-borsh=127.0.0.1:17310 --listen=0.0.0.0:16411 --loglevel=info --rocksdb-cache-size=2048
+[T3] exit rc=1 (expect 1)
+[T3] stdout head:
+--rocksdb-cache-size=2048 MB is below the minimum 4096 MB for the default preset: cache_index_and_filter_blocks needs >= 2x the index total, a smaller cache is worse than not enabling it. Pass >= 4096 MB or omit the flag (library defaults, same as 7b1e18cc).
+[T3] LOG files under appdir (expect none): 0
+[T3] end 2026-09-04T19:07:05Z
+[T1] start 2026-09-04T19:07:05Z exe=/d/rusty-kaspa-da/target/release/kaspad.exe sha=b73f14157ba5e332 version=kaspad 1.1.1-toc.1
+[T1] cmd: /d/rusty-kaspa-da/target/release/kaspad.exe --appdir=D:\kaspa-da-trial-T1 --testnet --netsuffix=12 --utxoindex --ram-scale=3.0 --rpclisten=127.0.0.1:16310 --rpclisten-borsh=127.0.0.1:17310 --listen=0.0.0.0:16411 --loglevel=info 
+[T1] after 180s alive=yes handles=
+--- /d/kaspa-da-trial-T1/kaspa-testnet-12/datadir/consensus/consensus-001/LOG
+2026/09/05-02:07:05.639412 8348                          Options.max_open_files: 29372
+  cache_index_and_filter_blocks: 0
+  pin_l0_filter_and_index_blocks_in_cache: 0
+    capacity : 33554432
+Block cache LRUCache@000001FE5D612AE0#35532 capacity: 32.00 MB seed: 1632757080 usage: 0.0
+--- /d/kaspa-da-trial-T1/kaspa-testnet-12/datadir/consensus/consensus-003/LOG
+2026/09/05-02:09:05.459094 3244                          Options.max_open_files: 29372
+  cache_index_and_filter_blocks: 0
+  pin_l0_filter_and_index_blocks_in_cache: 0
+    capacity : 33554432
+Block cache LRUCache@000001FE5FE43410#35532 capacity: 32.00 MB seed: 1632757080 usage: 0.0
+--- /d/kaspa-da-trial-T1/kaspa-testnet-12/datadir/meta/LOG
+2026/09/05-02:07:05.628336 8348                          Options.max_open_files: 20
+  cache_index_and_filter_blocks: 0
+  pin_l0_filter_and_index_blocks_in_cache: 0
+    capacity : 33554432
+Block cache LRUCache@000001FE5D611160#35532 capacity: 32.00 MB seed: 1632757080 usage: 0.0
+--- /d/kaspa-da-trial-T1/kaspa-testnet-12/datadir/utxoindex/LOG
+2026/09/05-02:07:05.661446 8348                          Options.max_open_files: 6527
+  cache_index_and_filter_blocks: 0
+  pin_l0_filter_and_index_blocks_in_cache: 0
+    capacity : 33554432
+Block cache LRUCache@000001FE5D6129D0#35532 capacity: 32.00 MB seed: 1632757080 usage: 0.0
+--- stdout head/tail:
+2026-09-05 02:07:05.625+07:00 [INFO ] kaspad v1.1.1-toc.1-1b3046fb
+2026-09-05 02:07:05.626+07:00 [INFO ] Application directory: D:\kaspa-da-trial-T1
+2026-09-05 02:07:05.626+07:00 [INFO ] Data directory: D:\kaspa-da-trial-T1\kaspa-testnet-12\datadir
+2026-09-05 02:09:59.238+07:00 [INFO ] P2P, network error: connection reset from peer 152.53.236.224:16311
+2026-09-05 02:09:59.648+07:00 [INFO ] P2P, network error: connection reset from peer 86.48.24.208:16311
+2026-09-05 02:10:00.073+07:00 [INFO ] P2P, network error: connection reset from peer 70.178.95.86:16311
+[T1] stopped 2026-09-04T19:10:09Z
+[T4] start 2026-09-04T19:10:09Z exe=/d/rusty-kaspa-ctl/target/release/kaspad.exe sha=460afe1290dd3a6c version=kaspad 1.1.1-toc.1
+[T4] cmd: /d/rusty-kaspa-ctl/target/release/kaspad.exe --appdir=D:\kaspa-da-trial-T4 --testnet --netsuffix=12 --utxoindex --ram-scale=3.0 --rpclisten=127.0.0.1:16310 --rpclisten-borsh=127.0.0.1:17310 --listen=0.0.0.0:16411 --loglevel=info 
+[T4] after 180s alive=yes handles=
+--- /d/kaspa-da-trial-T4/kaspa-testnet-12/datadir/consensus/consensus-001/LOG
+2026/09/05-02:10:09.992070 80a8                          Options.max_open_files: 3568
+  cache_index_and_filter_blocks: 0
+  pin_l0_filter_and_index_blocks_in_cache: 0
+    capacity : 33554432
+Block cache LRUCache@00000259CE702200#34620 capacity: 32.00 MB seed: 1632757080 usage: 0.0
+--- /d/kaspa-da-trial-T4/kaspa-testnet-12/datadir/consensus/consensus-002/LOG
+2026/09/05-02:10:24.261915 71ac                          Options.max_open_files: 3568
+  cache_index_and_filter_blocks: 0
+  pin_l0_filter_and_index_blocks_in_cache: 0
+    capacity : 33554432
+Block cache LRUCache@00000259D084F890#34620 capacity: 32.00 MB seed: 1632757080 usage: 0.0
+--- /d/kaspa-da-trial-T4/kaspa-testnet-12/datadir/meta/LOG
+2026/09/05-02:10:09.981365 80a8                          Options.max_open_files: 20
+  cache_index_and_filter_blocks: 0
+  pin_l0_filter_and_index_blocks_in_cache: 0
+    capacity : 33554432
+Block cache LRUCache@00000259CE702530#34620 capacity: 32.00 MB seed: 1632757080 usage: 0.0
+--- /d/kaspa-da-trial-T4/kaspa-testnet-12/datadir/utxoindex/LOG
+2026/09/05-02:10:10.012660 80a8                          Options.max_open_files: 792
+  cache_index_and_filter_blocks: 0
+  pin_l0_filter_and_index_blocks_in_cache: 0
+    capacity : 33554432
+Block cache LRUCache@00000259CE7020F0#34620 capacity: 32.00 MB seed: 1632757080 usage: 0.0
+--- stdout head/tail:
+2026-09-05 02:10:09.978+07:00 [INFO ] kaspad v1.1.1-toc.1-7b1e18cc
+2026-09-05 02:10:09.979+07:00 [INFO ] Application directory: D:\kaspa-da-trial-T4
+2026-09-05 02:10:09.979+07:00 [INFO ] Data directory: D:\kaspa-da-trial-T4\kaspa-testnet-12\datadir
+2026-09-05 02:12:54.492+07:00 [INFO ] Retrieved 4 addresses from DNS seeder n-testnet-12.kaspa.ws
+2026-09-05 02:13:03.414+07:00 [INFO ] P2P, network error: connection reset from peer 152.53.236.224:16311
+2026-09-05 02:13:04.204+07:00 [INFO ] P2P, network error: connection reset from peer 70.178.95.86:16311
+[T4] stopped 2026-09-04T19:13:14Z
+[T2] start 2026-09-04T19:13:14Z exe=/d/rusty-kaspa-da/target/release/kaspad.exe sha=b73f14157ba5e332 version=kaspad 1.1.1-toc.1
+[T2] cmd: /d/rusty-kaspa-da/target/release/kaspad.exe --appdir=D:\kaspa-da-trial-T2 --testnet --netsuffix=12 --utxoindex --ram-scale=3.0 --rpclisten=127.0.0.1:16310 --rpclisten-borsh=127.0.0.1:17310 --listen=0.0.0.0:16411 --loglevel=info --rocksdb-cache-size=8192
+[T2] after 600s alive=yes handles=
+--- /d/kaspa-da-trial-T2/kaspa-testnet-12/datadir/consensus/consensus-001/LOG
+2026/09/05-02:13:14.798391 9554                          Options.max_open_files: 29372
+  cache_index_and_filter_blocks: 1
+  pin_l0_filter_and_index_blocks_in_cache: 1
+    capacity : 8589934592
+Block cache LRUCache@00000219E5AF2AB0#11816 capacity: 8.00 GB seed: 1632757080 usage: 0.08
+--- /d/kaspa-da-trial-T2/kaspa-testnet-12/datadir/consensus/consensus-003/LOG
+2026/09/05-02:15:15.414373 89e8                          Options.max_open_files: 29372
+  cache_index_and_filter_blocks: 1
+  pin_l0_filter_and_index_blocks_in_cache: 1
+    capacity : 8589934592
+Block cache LRUCache@00000219E5AF2AB0#11816 capacity: 8.00 GB seed: 1632757080 usage: 0.08
+--- /d/kaspa-da-trial-T2/kaspa-testnet-12/datadir/meta/LOG
+2026/09/05-02:13:14.787530 9554                          Options.max_open_files: 20
+  cache_index_and_filter_blocks: 1
+  pin_l0_filter_and_index_blocks_in_cache: 1
+    capacity : 8589934592
+Block cache LRUCache@00000219E5AF2AB0#11816 capacity: 8.00 GB seed: 1632757080 usage: 0.08
+--- /d/kaspa-da-trial-T2/kaspa-testnet-12/datadir/utxoindex/LOG
+2026/09/05-02:13:14.820232 9554                          Options.max_open_files: 6527
+  cache_index_and_filter_blocks: 1
+  pin_l0_filter_and_index_blocks_in_cache: 1
+    capacity : 8589934592
+Block cache LRUCache@00000219E5AF2AB0#11816 capacity: 8.00 GB seed: 1632757080 usage: 0.08
+--- stdout head/tail:
+2026-09-05 02:13:14.784+07:00 [INFO ] Custom RocksDB cache size (default preset, D-a P2, process-wide shared): 8192 MB
+2026-09-05 02:13:14.785+07:00 [INFO ] kaspad v1.1.1-toc.1-1b3046fb
+2026-09-05 02:13:14.785+07:00 [INFO ] Application directory: D:\kaspa-da-trial-T2
+2026-09-05 02:23:08.340+07:00 [INFO ] P2P, network error: connection reset from peer 152.53.236.224:16311
+2026-09-05 02:23:08.832+07:00 [INFO ] P2P, network error: connection reset from peer 86.48.24.208:16311
+2026-09-05 02:23:09.687+07:00 [INFO ] P2P, network error: connection reset from peer 70.178.95.86:16311
+[T2] stopped 2026-09-04T19:23:18Z
+TRIAL end 2026-09-04T19:23:18Z

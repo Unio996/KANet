@@ -109,5 +109,10 @@
 - v0.2 审 GREEN-conditional：§0 分歧裁 **A（opt-in，无 flag = 7b1e18cc 路径）**——B 的 `256 MB × ram_scale` 分支在 3.0 下只给 768 MB < index ⇒ 比 P1 更糟（J2 抓对，我"放开到 Default"那句撤）；差 **hunk C 下限强制**（Default + flag < 4096 MB ⇒ 拒起打明文，不静默 clamp）。编译期三问（`Cache: Send+Sync` / 两 API 名）本机 registry 源已清（仅 index + 06 月 `librocksdb-sys-*` 构建目录），随 `cargo fetch` 核，错即编译红。
 - 验收不开 stats：`IO Read Ops/s` 22 k → <8 k + kernel ms/块。回滚阈按每 exe 预期 WS：P1 阈 >20 GB、P2 阈 >30 GB 或物理 free <6 GB 或 commit >100 GB；共用句柄 >60 k / `Exceeded upper bound`|`panicked` / 块率中位低于基线；P2 效果闸（15 min 内读系统调用未降 ≥30% ⇒ 记"无效"，不因无效而退）。梯级 P2 → P1 → 原 exe。
 
+## 9. 09-04 19:3xZ：D-a 构建产物与试跑 T1–T4 核过 ⇒ **切换 GREEN**
+- 产物：补丁 exe `b73f1415…21d5534a`（1b3046fb·40,203,776 B）、对照 exe `460afe12…d9b85da0`（7b1e18cc·40,202,240 B）、活 exe `6d995c48…` 未动；各自 clone/target，各自编 librocksdb-sys；da 为 amend 后增量（38 crate）、ctl 495 crate；da exe 内 `7b1e18cc` 字符串 = hunk C 拒起文案。v0.3.1 = 删 `…_with_high_priority` 调用（rust-rocksdb 0.24 未导出、库默认已 true），patch sha `222cdc5c…c873c6ce`。
+- 试跑（provenance `docs/provenance/2026-09-04-kaspad-da-fd-limit/`，MANIFEST 4/4 OK，隔离端口 16411/17310/16310）：T3 2048 ⇒ rc=1 明文 LOG 0；T1 无 flag ⇒ 29372/6527/20、四 LOG 各自 32 MB（原路径）、首行 `-1b3046fb`；T4 对照 ⇒ 3568/792/20、`-7b1e18cc`；T2 8192 ⇒ 四 LOG 同一 `LRUCache@00000219E5AF2AB0` 8.00 GB、两 flag=1、600 s 活 0 panic。
+- 切换裁定：GREEN 后**立即切**不等断连（header 相位 19:16Z 已结束；每等 1 h 损 0.45–0.6 h；等断连期望 ~55 h 且可能无人在场）；不先跑 B′（亲和重启即失、旧 exe 上的读数不可搬）；切后 8 min 扫描不判 → 块体 ≥1 h 窗 = D-a 效果 + 新基线 → B′。参数 = 活命令行原样（含 `--ram-scale=3.0`）+ `--rocksdb-cache-size=8192`；闸见 §7/§8；回滚 = 换回旧 exe。
+
 ## 4. 与 Owner 口径相关的一句
 "换近端 peer 提速"的真实杠杆是 **IBD 模式（PruningCatchUp 跳块体）**而不是 RTT；现在唯一肯当 syncer 的那台正是把我们锁在慢模式里的那台。判 A 值不值，第一步不是测 RTT，是回答 A2。
