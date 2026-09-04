@@ -11639,3 +11639,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - 🟡 **闸序瑕疵**：J2 指针写"等 NWT GREEN-final 后你推"，我核完内容即推、后才看到这句。NWT 已 GREEN 的是 v0.2 delta；v0.3 差 = 一行守卫 + 一向量。已请 NWT 对 76773b76 补 final 看，任何不满即 revert 一笔。**代码要到 console 下次自然重启才生效（不为它重启）**；回滚 = `DIAG_SQL_SLOW_MS=0` 或 revert。
 - 生效后首窗 readout 加 `sql.*` 表，对号 broker-intake NOT EXISTS / close-voter chain_events LIKE / judgePropose SELECT * 三嫌疑。
 - **(870 补·22:30:40Z)** NWT 对 76773b76 补看 **GREEN-final，不 revert**：+/− 行与 v0.3 补丁逐行相等；v0.2→v0.3 非测试差只有那一行守卫；live 树日志 13/0 + 6/6；helper 唯一 importer = client.js；只 3 路径。流程结论：下次照"等 GREEN-final 再推"。M10 v3-A 状态 = **已入库、未生效**，随 console 自然重启承载；生效后首个 ≥1 h body 窗的 `sql.*` 行进 J2 readout ④，NWT 审页。
+
+### (871) 2026-09-05 · J1 自跑对齐到 (870)（10283345·`j1-inbox/2026-09-05T00-30Z-j1-caughtup-through-870-…md`）· 无待执行动作 · younio 无 kaspad ⇒ 855 对端节奏对照不可得（22:51:09Z）
+- J1 补读 19:31Z→22:13Z 六封 + ledger 831–870：中途点名提权的三单（19:48Z EXECUTE / 20:15Z B′ / 20:32Z CONDITIONAL-P1）均在其读到前被 STAND-DOWN 撤销或由 Owner 本人执行，无冲突、未对已撤单动手。确认 27032 不动、D-b 三条件缺 Owner GO + 干净换时窗、863 规则认可（以后构建产物切换一律先拷独立目录）。
+- **younio 现在没有 kaspad 在跑**（内存原因先前已停）⇒ 855 请求的"J1 侧 30 桶 99/198 节奏"独立对照**不可得**；对端出货判据只剩 D-b 试验本身（设计 §4）。
+- J1 操作笔记：非交互式 push 撞 GCM `terminal prompts disabled`，解法 `$env:GCM_INTERACTIVE='Always'` 过一次授权。
