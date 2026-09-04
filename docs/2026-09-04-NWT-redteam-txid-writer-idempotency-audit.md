@@ -2,6 +2,7 @@
 
 > NWT · 2026-09-04 15:0xZ · 输入 = J2 `scratch/_j2_txid_writers_idempotency_inventory_2026-09-04T14-50Z-v0.1.md`（101 处·A 栏 54 / B 栏 43·四启发式标志）· Bettor 立项（设计稿 v0.3 §5 末"独立债"）· 只审不改 · 钱路 ⇒ 任何修法 Owner 批。
 > 读数纪律：全部坐标我亲手 `sed/grep` HEAD 树（含 M10 两 commit 后）；日志 grep 为 `logs/console.log` + `console.log.prev`（08-18~21）。
+> 🔴 勘误（15:1xZ）：§2 首版"chain_events 无 UNIQUE"为误判（`migrate.js:1120` 表级 `UNIQUE(txid, event_type)`），已就地撤回；§1 两个 P1 与 §4 其余结论不受影响。
 
 ## 0. 审尺（比四个标志硬的那把）
 标志答不了"重跑会不会双付"。答得了的是一个问题：**重跑时这笔 tx 的输入从哪来？**
@@ -25,11 +26,11 @@
 | `api/bettor.js:1932` refund `WHERE refund_txid IS NULL` | (i) | 守卫在**广播之后**（:1911 sendCommandAsync 先、:1938 守卫 UPDATE 后）⇒ 它防的是并发双写，不防双广播；靠 (i) 兜 | 不双付 | 过·措辞改"race on write, not on broadcast" |
 | `bettor-refund-claim-auto.mjs:138/:146` | (i) side P2SH | 有 **对账分支**：relay 报 `No UTXOs at side P2SH` ⇒ 写 `claim_txid='utxo_already_spent'`（:136-141） | 自愈 | **过·全仓唯一的对账样板** |
 
-## 2. B 栏（链上观测）一个承重发现：`INSERT OR IGNORE` 在 chain_events 上是**空齿**
-- `chain_events` schema：`id TEXT PRIMARY KEY`（`randomUUID()`），索引 `idx_chain_events_txid/type/from/to/offer` **全部非 UNIQUE**（migrate.js:1111-1125, :4513；grep `UNIQUE.*chain_events` = 0）。
-- `services/chain-event.js:14` helper 用 `INSERT OR IGNORE`，docstring 写「重复 txid+event_type 自动跳过」——**假**：OR IGNORE 只对 PK/UNIQUE 冲突生效，PK 是随机 UUID ⇒ 永不冲突 ⇒ 每次重扫都插新行。
-- ⇒ J2 §D 问的"23 处裸 INSERT 是否该走 helper"答案是：**走了也一样**。修法在 schema：`CREATE UNIQUE INDEX … ON chain_events(txid, event_type[, from_address, to_address])`（先在 cp 副本上数重复行、定去重键，别在活库直接建）。
-- 受影响的读者（重复行即错数）：`/api/discovery/activity` 的 COUNT/GROUP（M10 第 9 站那条）、pool-settler 的 orphan vote re-scan（:1037/:1129，按 chain_events 找票 ⇒ 重复票行）、claim-auto 的 EXISTS（不受影响）。
+## 2. B 栏（链上观测）——🔴 **本节首版错，已撤回（2026-09-04 15:1xZ · J2 反驳成立）**
+- 首版写"chain_events 无 UNIQUE ⇒ helper 的 `INSERT OR IGNORE` 空齿"。**错**：建表原文 `migrate.js:1120` 有表级 `UNIQUE(txid, event_type)`（我首版 `sed` 只截了建表前 6 行、`grep UNIQUE.*chain_events` 只能匹配索引定义行，两处仪器都漏了表级约束）。J2 在 07-23 备份副本（只读）核 `sqlite_master` 同样带该约束且有 `sqlite_autoindex_chain_events_2`，`COUNT(*) = COUNT(DISTINCT txid||event_type) = 232,252`，零重复；后续迁移只 `ADD COLUMN`（:4453/:4506）未重建表。
+- ⇒ 正确结论：`chain-event.js` helper 的 `OR IGNORE` **有效**；B 栏真正的问题变成——**23 处裸 `INSERT` 重跑 = 抛 `UNIQUE constraint failed`**，幂等与否取决于调用方 `catch` 后怎么处置（吞掉 = 幂等；向上抛 = 中断本 tick 后续写）。这是 J2 v0.2 的口径，我认。
+- 我首版列的"受害读者"（activity COUNT、orphan vote re-scan）随之不成立。
+- 判据记账：**"没有 UNIQUE" 这类否定断言，须 `sqlite_master` 原文或建表全文为证，不能靠 grep 索引行**（同族：`feedback-a-sanity-assertion-that-includes-the-checked-item…` 的反面——否定证据要穷尽定义位置）。
 
 ## 3. 日志旁证（只报）
 `console.log` + `console.log.prev`（08-18~21）：`Staying in delivering` 0 次、`delivering timeout 60min → verified` 0 次、`KAS delivery attempt` 0 次 ⇒ **两个日志窗内没发生过**；但 exchange/prediction 路径自 07-20 起结算产出为零（memory `project-settlement-output-zero-since-2026-07-20`），**没发生 ≠ 不会发生**。
@@ -38,8 +39,8 @@
 1. **P1-A（设计级·不需掉电）**：exchange auto-deliver 的 delivering→verified 60 min 回退 + 无 `delivery_tx` 已存在检查 + `paid` 重处理 = 钱包双发路径。修法方向（设计稿另出）：进 delivering 前先查 `delivery_tx`/`events.kas_delivery`/链上（relay 钱包对 deliveryTarget 的近期 outgoing）；回退不得清 KAS-已发事实；delivered 广播失败 ⇒ 只重播广播不重发币。
 2. **P1-B（掉电面）**：prediction payout 的 write-ahead 标记在 NORMAL 下不保掉电。两条修法任选其一：标记写用 `PRAGMA synchronous=FULL` 包一次（同连接运行时可切，只在这一笔前后切）；或 transfer 前查链（同上）。
 3. **P2（活性）**：所有 (i) 类站点缺对账入口——relay 报 `UTXO not found for lock tx` 时应按 claim-auto 样板查花费 tx（kaspa_tx_log / RPC）回填 txid 并推进状态，而不是每 tick 重试或冻结等人。全仓统一一个 helper（"already-spent ⇒ reconcile"），Owner 批后落。
-4. **P2（数据）**：chain_events 无 UNIQUE ⇒ helper 的 OR IGNORE 空齿 ⇒ 重扫必重复；先在副本 cp 件上量重复率再定去重键。
-5. J2 清单本身：方法与标志诚实、A/B 分栏对；**漏了 :174-199 payout（我补）**；`:853` 应移 B 栏；`bettor.js:1932` 措辞改"写并发守卫非广播守卫"。
+4. ~~P2（数据）chain_events 无 UNIQUE~~ **撤回**（见 §2）：表级 `UNIQUE(txid, event_type)` 在，helper 有效；B 栏剩余问题 = 裸 INSERT 重跑抛约束错，逐调用方看 catch 处置（J2 v0.2 已改口径）。
+5. J2 清单本身：方法与标志诚实、A/B 分栏对；**漏了 :174-199 payout（我补）**；`:853` 应移 B 栏；`bettor.js:1932` 措辞改"写并发守卫非广播守卫"；**我 §2 首版误判由 J2 抓回，记在此**。
 
 ## 5. 不做
 不改码；不碰活库；不给 Owner 发菜单——以上由 Bettor 精炼后单点上报。
