@@ -41,3 +41,17 @@
 
 ## 7. 未核
 对端实际部署版本是否与 v8 handler 一字不差（只能从协议版本 9 推断）；对端阻塞池线程数配置。
+
+## 8. 产物 diff 审（NWT · 2026-09-04T22:12Z）：**GREEN（只建不部署·部署=Owner GO）**
+- **来源核**：`D:\rusty-kaspa-da` 分支 `j2-db-ibd-pipeline` = `4d0a9e30215031ae5a980c1c72f01c2eea13ac81`（基 1b3046fb，D-a 保留），工作树干净；`git diff 1b3046fb 4d0a9e30` = 1 文件 `protocol/flows/src/ibd/flow.rs` +53/−3，其 sha256 = `fd7d7672…8067` = provenance `patch.diff` sha（逐字同）；exe 内嵌全串 `4d0a9e30215031ae5a980c1c72f01c2e…` 与 rev-parse 一致。
+- **产物核**：`target-db\release\kaspad.exe` sha256 `2432c36b0cdf5e561eeeebe5de3e4cb807b962797109b11a29c4eef8f6361a95`（40,212,992 B）= J2 报；D-a exe `target\release\kaspad.exe` 原样 `b73f1415…d5534a`（40,203,776 B），watchdog.ps1:17 仍指向它；attempt-2 日志记录该文件被 27032 锁住（= 活 exe 未被触碰的旁证；CIM 读不到 SYSTEM 进程路径）。MANIFEST 7 项 OK（1 行格式告警 = 非校验行，见下）。`cargo test -p kaspa-p2p-flows` 7/0（既有单测，无 IBD 专测——本改动的测试就是部署后 §4 的试验）。
+- **四点逐判**：
+  1. daa_score/timestamp：只在 `receive_body_chunk` 内由**收到的**块赋值，`send_body_request` 不碰 ⇒ 过。
+  2. `try_join_all(prev_jobs)` 位置：在 `receive_body_chunk(current)` 之后（原逻辑 = queue(chunk_i) 后 join(prev)），**未前移**；末批 join + `report_completion` 与原文同 ⇒ 过。
+  3. v7 路径：`if self.body_only_ibd_permitted {…return Ok(())}` 之后原 for 循环原样；`queue_block_processing_chunk_full_block` 未动 ⇒ 过。
+  4. 无第二处改动：diff 只 1 文件；route 容量/batch/深度自适应均未动；C1 以代码注释形式钉在新循环上（198 < 256、"do not raise the depth"）⇒ 过。
+- **循环正确性**：在飞请求恒 ≤2（send(next) 先于 receive(current)）；单 chunk 边界（next=None ⇒ 收、prev=None 跳过 join、break、末 join）成立；`prev.expect` 在循环至少跑一次后安全；错误路径：receive(chunk_i) Err ⇒ 返回 ⇒ 断连，chunk_{i+1} 已发的请求由对端推向已关连接，无害 ⇒ 与 §6 实现注意四条全部一致。
+- **未核**：运行时行为（须部署后按 §4 首要判别裁）；对端实际版本。
+
+## 9. 部署门（不变）
+Owner GO（838 边界）；回滚 = watchdog.ps1:17 指回 D-a exe + 重启；§4 C2 三个回滚字符串照旧。
