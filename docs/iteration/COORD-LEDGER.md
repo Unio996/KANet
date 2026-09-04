@@ -11376,3 +11376,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **杠杆（按代价）**：① **M5 Defender 排除**（零重启·minifilter 在 open 介入·打在 30k open/s 路径上·收益预期远大于"每读扫描"模型·仍两窗实测：IO Other 与内核态同降即坐实）；② **`--rocksdb-preset=hdd`**（`rocksdb_preset.rs:94-95` SST 256MB 各层同尺寸 ⇒ 115GB 收敛到 ~450 文件 ≪ 3,568 ⇒ open 风暴消失）——但只对新压实生效、存量 6.6MB 小文件要等压实/手动 compact（小时级 I/O）、`level_compaction_dynamic_level_bytes(true)`(:97) 对既有库可能触发一次大重整、其余 hdd 项（写缓冲 256MB / L0 一文件即压实 / 4MB 预读）逐条评估 NVMe 副作用，需重启；③ **`--rocksdb-cache-size=<MB>`**（`daemon.rs:240-243`）直接设块缓存（现 256MB×ram-scale·漂移文件 1.0）——抬它减 Read 不减 open，与 ② 互补，需重启；④ fd 预算 8192 = CRT 硬顶且二进制常数 ⇒ 改 = 重编译换二进制（D-005 钉版）⇒ 不在本轮。
 - **顺序**：① 先测 → ②+③+ram-scale 3.0 恢复 + A2 IbdType 预判 **合成一次重启**（相位只赔一次）。J2 查码收窄为三件（复核链、preset=hdd 对既有库影响、cache-size 上限与 commit 估算）。加速设计骨架已升 v0.2-draft（scratch）。
 - **实验状态**：Owner 排除项仍未跑；块率 2 min 档（修正解析后）待首档；此前 14.8 / 14.8。
+
+### (816) 2026-09-04 · **M5 Defender 排除已加（Owner 16:56Z·三路径）⇒ 零重启实验结果：零效果**（kaspad Privileged 65.6% vs 前 64.9%·IO Other 31.7k/s vs 29.8k·IO Read 22.3k·MsMpEng 3.5% vs 5.1）⇒ minifilter 非内核态来源；open/close+read 系统调用本身即成本 · 零重启杠杆用尽 · 剩"一次重启参数包"（cache-size + 减 SST 数 + ram-scale 3.0 + A2 预判）
+- **实验记录**：基线 14.4 blk/s（16:46Z 10 min）·档 14.8 / 14.8 / 14.0（16:48–16:55Z）；排除 16:56Z；排除后 60s 12 样本如上；块率后续档待记。排除项保留（无害·标准加固）。
+- **推论**：Defender 假设（H4/M5）作为停顿/慢速成因 **证伪**；kaspad 内核态 = NTFS 文件 open/close/read IRP 路径本身（表缓存 3,568 < 17,402 SST）。
+- **下一步**：J2 三件查码（fd 链复核 / preset=hdd 对既有库 / cache-size 与 commit）→ 加速设计 v0.2 → NWT 小时级审 → Owner GO → 一次重启（J1 角色 B 或 Owner 提权）。**仍需 Owner 触发 J1**（younio 节点态 + 每块 I/O + peer IbdType 判据）。
