@@ -95,5 +95,10 @@
 - D-a（重编译）上界算术：A 窗 67.9 ms/块 = 内核 43.2 + 用户 24.7；折合每块 ~2,080 次 IO Other + ~1,580 次读。open/close 消失 + 块缓存 ⇒ 内核 ~5–10、用户 ~30 ⇒ 35–40 ms/块 ⇒ **CPU 侧 ≤1.9×（合理 1.4–1.7×）**，追赶率 5 → 15–17 blk/s ≈ **3×**；前提 = 下载流水线不成瓶颈（99/198 批到达快于处理，未测）。状态：假设 A1。
 - 闸脚本正则补：`IbdFlow flow error` / `panicked` / syncer 专属 `connection reset from peer 136\.243\.93\.17` / 连续 3 个 `Processed 0 blocks and 0 headers` / 进程消失；结构：`-Tail`、`try/finally` 还原、还原前核 PID CreationDate。
 
+## 7. 09-05 02:xxZ 追加：D-a（重编译一行常数）审 = GREEN-conditional
+- J2 方案 `scratch/_j2_da_fd_limit_patch_plan_2026-09-05T00-10Z-v0.1.md`：改点 `utils/src/fd_budget.rs:77-78` Windows `limit()` 返回 65536（不改 `daemon.rs:53`，因 CRT `_setmaxstdio` 硬顶 8192、改大即失败回 512）⇒ 预算 65,272 → consensus `max_open_files` 29,372 ≥ 17.6 k SST。消费者：`main.rs:42` / `acquire_guard` / `sysinfo.rs:58`（显示）/ `bridge/inprocess_node.rs:18`（不在本构建）。clone 非 worktree（`build.rs:38` `.git` 须目录）。内存 +1.2–1.9 GB（index 块驻表缓存），本机余量够。
+- 四条件：C1 provenance（源 commit / 补丁 sha / rustc 1.96.1+MSVC+LLVM / librocksdb-sys 0.17.3+10.4.2 / exe sha256 / 未含工作树 bridge/ 未提交改动）+ 旧 exe 原地保留；C2 未打补丁 7b1e18cc 对照重编**必做**；C3 试跑 10 min 只证配置（LOG `Options.max_open_files: 29372`、`--version`、不崩），切换即实验、前 15 min 四条回滚闸（WS > 基线+4 GB / 句柄 > 60 k / `Exceeded upper bound`|`panicked` / 块率中位低于基线 ⇒ 换回旧 exe，代价一段 header 相位）；C4 收益诚实 **≤1.5×**（只消 open/close，块缓存仍 32 MB），第二刀另稿。
+- D-005 口径：共识源码同源、产物字节不同（编译器不同）⇒ 语义等价靠"源码 diff 一处 + Cargo.lock 未动 + RocksDB 格式由源码定"论证；memory `reference-rusty-kaspa-worktree-is-not-the-live-binary-commit` 切换后须补"活二进制 = 7b1e18cc + D-a · rustc 1.96.1"。
+
 ## 4. 与 Owner 口径相关的一句
 "换近端 peer 提速"的真实杠杆是 **IBD 模式（PruningCatchUp 跳块体）**而不是 RTT；现在唯一肯当 syncer 的那台正是把我们锁在慢模式里的那台。判 A 值不值，第一步不是测 RTT，是回答 A2。
