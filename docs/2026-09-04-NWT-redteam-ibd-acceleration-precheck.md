@@ -100,5 +100,11 @@
 - 四条件：C1 provenance（源 commit / 补丁 sha / rustc 1.96.1+MSVC+LLVM / librocksdb-sys 0.17.3+10.4.2 / exe sha256 / 未含工作树 bridge/ 未提交改动）+ 旧 exe 原地保留；C2 未打补丁 7b1e18cc 对照重编**必做**；C3 试跑 10 min 只证配置（LOG `Options.max_open_files: 29372`、`--version`、不崩），切换即实验、前 15 min 四条回滚闸（WS > 基线+4 GB / 句柄 > 60 k / `Exceeded upper bound`|`panicked` / 块率中位低于基线 ⇒ 换回旧 exe，代价一段 header 相位）；C4 收益诚实 **≤1.5×**（只消 open/close，块缓存仍 32 MB），第二刀另稿。
 - D-005 口径：共识源码同源、产物字节不同（编译器不同）⇒ 语义等价靠"源码 diff 一处 + Cargo.lock 未动 + RocksDB 格式由源码定"论证；memory `reference-rusty-kaspa-worktree-is-not-the-live-binary-commit` 切换后须补"活二进制 = 7b1e18cc + D-a · rustc 1.96.1"。
 
+## 8. 09-05 02:xxZ 追加：第二刀（P2 = P1 + 块缓存）的裁定
+- 🔴 **Cache 须进程内唯一**：`conn_builder.rs` build 宏对每个 DB 调 `apply_to_options`；`apply_hdd` :147-149 每次新建 `Cache` ⇒ kaspad ≥4 个 builder（meta ×2 / consensus 主+staging / `daemon.rs:408/463` / utxoindex）会 ×N。正确形 = `OnceLock<Cache>` 共享一个 LRU。
+- 最小 diff：`daemon.rs:238-256` cache_budget 计算放开到 Default（`--rocksdb-cache-size` 对默认预设生效、尺寸走 CLI 不烤常数）+ `apply_default` 加 `BlockBasedOptions`（共享 cache / `cache_index_and_filter_blocks` / `pin_l0` / `high_priority`；block_size 4096 不动）。
+- 尺寸按预算非实测（活 LOG 零 RocksDB statistics，stats 是 ConnBuilder 可选路 :56 未开）：默认 8 GB，下限 4 GB（<2× index 颠簸），上限 12 GB；预期 WS ≈ 5.2 + 9 + 8 + 1 ≈ 24 GB，commit ~87/107。
+- 验收不开 stats：`IO Read Ops/s` 22 k → <8 k + kernel ms/块。回滚阈按每 exe 预期 WS：P1 阈 >20 GB、P2 阈 >30 GB 或物理 free <6 GB 或 commit >100 GB；共用句柄 >60 k / `Exceeded upper bound`|`panicked` / 块率中位低于基线；P2 效果闸（15 min 内读系统调用未降 ≥30% ⇒ 记"无效"，不因无效而退）。梯级 P2 → P1 → 原 exe。
+
 ## 4. 与 Owner 口径相关的一句
 "换近端 peer 提速"的真实杠杆是 **IBD 模式（PruningCatchUp 跳块体）**而不是 RTT；现在唯一肯当 syncer 的那台正是把我们锁在慢模式里的那台。判 A 值不值，第一步不是测 RTT，是回答 A2。
