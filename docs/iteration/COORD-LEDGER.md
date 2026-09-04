@@ -11306,3 +11306,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **SOP**：`频道-Monitor-SOP.md` 轮询 `setInterval(poll,20000)` → **60000** + 注记（每次请求 = console 主线程一次同步 DB 查询；IBD 期全员停到 BOTH_READY；M6 后再评估）。
 - **推送闸实录**：8bba3847 核完到推之间 J2 的 b2962387 落队 ⇒ 闸拒（队列 2≠1）⇒ 等 NWT GREEN-final 后 `push 2 <both>` 双射通过（闸按设计工作）。
 - **待**：Owner Phase 1 批（M8/M2/M-scout/M6）+ Defender 排除项（H4）；下次自然重启后 J2 出 ≥1h 读数页 = Phase 1 部署开关；KANet-UI M-scout 实现稿（Owner 批后派）；H5 由第 9 站判。
+
+### (804) 2026-09-04 · **H4 坐实为环境事实**：Owner 提权读 `Get-MpPreference` ⇒ **ExclusionPath 空、零排除项**（RealTimeProtection=True）· M5 建议（路径排除三目录·可逆·NWT 已表"DB 引擎标准做法无异议·不排除 node.exe"）报 Owner 一句 · J2 幂等清单 v0.1（低优先立项）· :3200 盯守改为只报监听 PID 变
+- **H4**：Defender 实时保护开、**无任何路径/进程排除** ⇒ 13.85GB `console.db` + 112MB `-wal` + `console.log` + kaspad 数据目录全在实时扫描面内。**是否为停顿成因仍未证**（M10 的 SQL 毫秒数含 Defender 开销、不能单独分辨；Defender 对已打开句柄的页读不逐次扫，成因概率偏低），但路径排除是 DB/节点引擎标准加固、可逆。
+- **M5 建议（Owner 提权一句·`Add-MpPreference -ExclusionPath`·回滚 `Remove-MpPreference`）**，三路径我亲核存在：`D:\kanet-tn12\kasia-console\data`、`D:\kanet-tn12\logs`、`D:\kaspa-tn12-data\kaspa-testnet-12`。**只排除路径不排除进程**（NWT）。做与不做都不阻塞 Phase 0/1；做了则 M10 出数窗要标注"Defender 排除后"作为条件。
+- **J2 幂等清单 v0.1（`scratch/_j2_txid_writers_idempotency_inventory_2026-09-04T14-50Z-v0.1.md`·只列不改·NWT 审幂等 → Owner 拍·低优先）**：raw 101 处；A 栏广播后状态写者 54 处/12 表——`WHERE *_txid IS NULL` 闸仅 1 处（`bettor.js:1932`）、upsert 2、附近有落链核 12、广播后写 22 ⇒ **≥14 处"广播后写·无 IS NULL 闸·无落链核"形态候选**（须逐处读·状态机闸脚本看不到）；B 栏链上观测 43 处/6 表——chain_events 35 处里 **23 处裸 INSERT 而 `idx_chain_events_txid` 非 UNIQUE ⇒ 重跑 = 重复行**（公共 helper `chain-event.js:14` 已 OR IGNORE、23 处没走它）。先读清单（钱路 8 处）在页 A 栏末。
+- **盯守**：`:3200` HTTP 抖动盯守 1h 到期不续（抖动已知）；改为**只报监听 PID 变化**（= 下次自然重启 = M10 生效点·当前 25156）。
