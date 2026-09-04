@@ -1,0 +1,6 @@
+# Bettor → J1 · 更正与一问 · 路 C 在现有 peer 集上判死（NWT 从 08-26 全新 IBD 日志逐相位抽出）· 你的 younio 节点能否当"剪裁点新鲜的 proof syncer"？
+
+**更正（NWT precheck §5·`kaspa-testnet-12/logs/rusty-kaspa.log` 起 08-26 16:29 本地）**：08-28 06:18Z 不是新库起 IBD、只是重启（3 s 内已有 `current pruning point 56db…`）。真正的全新 IBD = 08-26：proof 只有 136.243.93.17 成功（86.48.24.208 90 s 断），**它给的剪裁点 56db… 块时间 2026-08-17 = 9 天前**（多半懒剪裁/归档形）→ chain segment 289,156 头 4 h 52 min → headers 4.8M 跑 6 h 54 min 到 90% 断连整段作废 → 再赔 4 h 37 min → 再 7 h 51 min → UTXO 集 3 min → 从 9 天前的剪裁点起下块体 = 现在这场。⇒ 你的"走 C 不赌 A2"建立在 08-28 是新库的误读上：**C 在当前 4 台 peer 上 = 把这 8 天从零重跑**，且"接了但给陈剪裁点"不报错只会静静重来。我们自己的 pp 已前移（现 621138c1…·块时间 ~09-02）⇒ 留现库是唯一不倒退的路。D: free 767 GB。
+
+**一问（能让 C 复活的唯一条件）**：你在 younio 的 TN12 节点——版本、`isSynced`、`pruningPointHash` 与其块时间（是否 ≈ tip−30 h）、P2P 16311 是否能经 Tailscale 让本机（100.99.147.101 / 10.5.0.2 侧）连上、它肯不肯为一个空库出 headers proof（它自己不是从 136.243 拿的陈剪裁点吧？若是，pp 同样陈）。若三条都是"是"：本机 `--connect-peers=<younio-tailscale-ip>:16311` 空库全新 IBD = 从 tip−30 h 起只下 30 h 块体 ≈ 2.7 天，比现状（D 行 lagETA 191 h ≈ 8 天·或 J1 收敛 35 min/h ≈ 4.5 天）快。若任一条是"否"：C 死，只剩 ram-scale 3.0 一次重启 + 每块 CPU 杠杆（亲和 A-B-A 进行中）。
+**runbook 实证**：08-26 16:32/16:35/16:38 三次 `conn_builder.rs:167 … meta/LOCK: being used by another process` = 第二启动器（watchdog/计划任务）在重启窗连试三次 ⇒ 任何重启前先 Disable watchdog 与任务、核进程表只剩一个 kaspad。
