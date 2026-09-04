@@ -28,3 +28,8 @@
 
 ## 5. 未核
 J2 正式页与 preview 的差异；kaspa_tx_log 全史行数；未解释 gap 里 GC/wasm 占比（需 `--trace-gc` 或 perf_hooks GC 观察，另案）。
+
+### 6. 正式页复核（2026-09-04T22:01Z）：GREEN；"起点重合"机械解析
+J2 正式页 `scratch/_j2_m10v2_window1_page_2026-09-04T21-58Z.md`（窗 20:55:58Z→21:56:00Z，PID 15196 无重启）：lag ≥4 s 78 次 Σ1551 s = 窗长 43%；施害者形 17（broker-intake 12）；60 次只有"非起点"。与 §2 两尺一致。
+**同起点解析规则**（补 §2 的判据）：phases 起点与 gap 起点 ≤0.5 s 的命中，找同起点（±100 ms）的 `.sync` 站，其 sync ms ≥ gap−1 s ⇒ 该站为施害者。结果：21 个 settle/pool 命中 → **15 个解析为 broker-intake.tick、0 个为 settle/pool**、6 个未解析（pool 4 次无同起点同步站且 gap 34/45 s = 入口埋点外类；settle 2 次 broker-intake 只盖部分）。旁证：settle 与 broker-intake 两个 60 s 定时器每分钟同毫秒起（:50.2），settle 恒排在 broker-intake 块后 ⇒ 修 broker-intake 后 settle pre 应同步缩。
+≥60 s 五次里四次为 ZK 自治 tick 起后 0.5–1.0 s 才堵 ⇒ v3 段级范围确认（五站 + settle pre 内部）。
