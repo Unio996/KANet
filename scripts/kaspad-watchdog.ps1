@@ -1,4 +1,4 @@
-# TN12 kaspad 节点 watchdog — 开机自启动卡(KANet-UI域, 响应Bettor加急卡#lqp8vg, 2026-07-15)
+﻿# TN12 kaspad 节点 watchdog — 开机自启动卡(KANet-UI域, 响应Bettor加急卡#lqp8vg, 2026-07-15)
 # 仿 D:\kaspa-tn12-mining\tn12-mining-watchdog.ps1 同款模式(只启不杀, 60s tick, 不主动kill任何进程)。
 #
 # 背景: 2026-07-15 两起故障(宿主机重启+kaspad裸死)都因"进程死了没人拉"放大成全线故障。
@@ -14,7 +14,7 @@
 # 用法: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\kaspad-watchdog.ps1
 #   (常驻循环, Ctrl+C 或关窗口停止; 不提供 stop 参数——只启不杀哲学下没有"watchdog杀节点"这回事)
 
-$kaspadExe = "D:\rusty-kaspa\target\release\kaspad.exe"
+$kaspadExe = "D:\rusty-kaspa-da\target\release\kaspad.exe"   # D-a 补丁 exe (sha256 B73F1415...D5534A · Owner 2026-09-04 19:48Z 切换 · P2 flag 见 :47) · 旧 exe D:\rusty-kaspa\target\release\kaspad.exe 原地保留(回滚: 改回本行 + 去掉 :47 末项)
 # 🔴 预置改动 (J1tn 2026-07-28, 节点域 owner 自拍; Bettor 频道明示"你那台你自己拍")
 #   borsh RPC 由 0.0.0.0 改绑回环。由来: kaspad 的 borsh RPC 无鉴权, 而 0.0.0.0 让它绑上
 #   tailnet 接口 —— 已两台互证跨机此刻可达 (J1 rc=52 自打 + KANet-UI 从对面实打 rc=52)。
@@ -44,7 +44,7 @@ $kaspadExe = "D:\rusty-kaspa\target\release\kaspad.exe"
 #
 # ⚠️ 这砍掉一个当前无人使用的能力: 跨节点直连本机 RPC。若日后团队确需, 不要退回通配 ——
 #    改绑本机 tailnet 地址(有范围的口), 并当作一次显式决定记账。
-$kaspadArgs = "--testnet --netsuffix=12 --appdir=D:/kaspa-tn12-data --utxoindex --rpclisten-borsh=127.0.0.1:17210 --enable-unsynced-mining"
+$kaspadArgs = "--testnet --netsuffix=12 --appdir=D:/kaspa-tn12-data --utxoindex --rpclisten-borsh=127.0.0.1:17210 --enable-unsynced-mining --ram-scale=3.0 --rocksdb-cache-size=8192"
 $wlog = "D:\kaspa-tn12-data\kaspad-watchdog.log"
 $stdoutLog = "D:\kaspa-tn12-data\kaspad-stdout.log"
 $stderrLog = "D:\kaspa-tn12-data\kaspad-stderr.log"
