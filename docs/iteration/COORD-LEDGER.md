@@ -11613,3 +11613,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - NWT 四点全过（daa/ts 取收到批、join 未前移、v7 原样、无第二处改动）；来源/产物/补丁三串亲核一致（分支 4d0a9e30 全串 = exe 内嵌；patch sha = git diff sha；exe 2432c36b…1a95；D-a exe b73f1415 原样且被 27032 锁）。
 - runbook `scratch/_bettor_Db_switch_admin_runbook_2026-09-05.md`：⓪–③ 复用 D-a；③b 新增 `D:\kaspad-live` 独立目录（D-a/D-b 两副本 + sha 复核）；⑤ 从独立目录起、参数单一源不加不减；⑥ watchdog :17 改路径、任务 Disabled；⑦ 15 min 闸 + §4 首要判别 + 三个立即回滚字符串；回滚 = D-a 副本同参数重启。
 - **Owner 单点决策（唯一待拍）**：是否 GO 换 D-b exe（成本 ~30 min IBD 重议；收益 ×1.0–1.9 视对端延迟型；回滚一步）。Owner 离场期间只备不换。J1 收件箱已放 PREPARED 单（明写"无 Owner GO 不动"）。
+
+### (866) 2026-09-05 · M10 v3 规格（J2 `scratch/_j2_m10v3_spec_2026-09-04T22-33Z.md`）→ **我批 A 先落、B 暂缓**（22:16:54Z）
+- A = DB 边界一处埋点：`src/db/client.js:44-49` 对 sqlite 实例包 `prepare` → Proxy 拦 `.all/.get/.run`，≥200 ms 打 `[diag:step] sql.<op> ms= rows= sql=<截80> at=<caller>`；一处覆盖仓内 163 个文件的 `sqlite.prepare`。理由：首窗所有具名/嫌疑施害者全是 SQL（broker-intake NOT EXISTS、refund-claim-auto NOT EXISTS、`bshard-close-voter.js:456-458` chain_events payload 全表 LIKE = v2Tick 291 s 头号嫌疑、judgePropose `SELECT * FROM pool_markets`）。B = 非 SQL 同步段（zk witness/JSON.parse 等）等 A 首窗剩余量再裁。
+- 六条硬条件（给 J2）：fail-open（诊断路径任何错吞掉）· 只拦三法其余透传不改语义 · 只记 SQL 文本不记参数、栈只在慢时取一层 · 阈值 env 可调 0=关 · 离线 :memory: 六向量（含 pluck 链式、transaction 内、异常透出、阈 0 零输出）红绿都贴 · 单独一笔只动一处 + 测试。流程：镜像 diff → NWT 单独审 → 我批 apply → 随 console 自然重启承载。
+- 嫌疑 SQL（LIKE 全表、SELECT *）**只记不修**，A 首窗出数字后进 Owner 批的修法清单（与 broker-intake 复合索引、M8 并列）。
