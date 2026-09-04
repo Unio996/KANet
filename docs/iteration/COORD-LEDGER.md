@@ -11566,3 +11566,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - ⑤ **下一杠杆（设计中·未派建）**：**D-b = IBD 请求流水线深度 2**（`ibd/flow.rs:933-946` 提前发第 k+2 批；请求无 request_id、对端 `v7/request_ibd_blocks.rs:33-43` 逐请求顺序服务 ⇒ 响应顺序安全；`DEFAULT_TIMEOUT` 120 s 足够）。若对端延迟是固定每请求 ⇒ 周期 ~6.7 → ~3.5 s ≈ 块率 ×1.9；若是按块读盘 ⇒ 零收益。代价：重编译 + kaspad 重启（~20 min header 重议）。**流程：Bettor 设计 v0.1 → NWT 红队 → J2 隔离构建（不部署）→ 部署 = 节点二进制换代，须 Owner GO**（838 边界）。
 - ⑥ **另案记录（不派）**：32 relay × blockAdded 全块 = 每块串行化 32 次 + 团后轮询 1–2k 请求/s ⇒ console 停顿设计 Phase-1 新候选 **M6'（relay 订阅合并/IBD 期退订）**；不在 IBD 关键路径。
 - 趋势 v3 盯守 60 min 到期自退（21:30Z）；相位/PID/hb_guard/ready/j1/bettor-inbox 盯守续。KANet-UI 21:24Z：恢复后 31 min 均值 13.0 blk/s、近 5 min 12.3、旧 exe 基线 14.2；console 15196 窗 lag≥3 s 53 次/max 154 s、settleDaemonTick 单次 max 323 s（三变量混杂·只记）。
+
+### (857) 2026-09-05 · 📐 **D-b 设计 v0.1.1 出稿（IBD 块体请求流水线深度 2）→ NWT 红队中·J2 预读待命·未派建·部署须 Owner GO**（22:08Z）
+- 文档 `docs/2026-09-05-bettor-ibd-request-pipelining-design-v0.1.md`（8c49a91a + af1f3444 已推）。要点：live 走 v9 body-only 路径（`v9/mod.rs:26`·syncer 注册 protocol version 9）；只改客户端 `sync_missing_block_bodies`（提前一批发 `RequestBlockBodies`）+ `queue_block_processing_chunk_body_only` 拆 send/receive；v7 不动；深度固定 2；不改 `IBD_BATCH_SIZE`。顺序安全唯一依赖 = 对端 `v8/request_block_bodies.rs:30-42` 单循环顺序服务（响应带 request_id 但客户端 `dequeue_with_timeout!` 纯 recv 不看——NWT 5a 措辞）。**首要判别（NWT 5b）**：第 2 团首字节是否紧接第 1 团末字节（≤1 s ⇒ 有效；再等 4–6 s ⇒ 逐请求串行固定成本 ⇒ 无效即回滚 D-a exe）。期望块率 ×1.0–1.9，不承诺。成本 ≈ 30 min（header 重议 ~20 + 缺体扫描 ~8）。
+- NWT §11a（392d2ccd）：撤回 §11 第 5 条"每块 1000 次读串行链"（读平坦与到货团无关、写只在处理秒尖）；接受两态归因（36 条 borsh 连接·P2P 入站 0 出站 1 ⇒ 读负载只能是 RPC）；同意 ②③ 都不落、P1/B′ 撤。
+- 🟡 推闸纪律瑕疵（自记）：392d2ccd 是我按"队列 1"先推后看（看后确认 = NWT 单文件 §11a，NWT 已明说请我推）。规则不变：推前先 `git show --stat`。
+- J2 三件：D-b 预读（不写码）· M10 v2 首窗页（原定 ~21:56Z 未见）· D-a `cargo build --release` 墙钟时间（排期用）。
+- 盯守：趋势 v3 已到期；相位/断连（bkycvniu2）、kaspad PID（bn1q72h33）、console PID（b5fxhzy9f）、hb_guard 到期（b5t9qonga）、ready/j1-inbox/bettor-inbox 续。hb_guard 1158231 alive 文件持续刷新。
