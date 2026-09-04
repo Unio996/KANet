@@ -1,6 +1,6 @@
 # console 事件循环停顿 · 修法设计 v0.3.1
 
-> **Status**: DRAFT-v0.3（v0.2 NWT GREEN-conditional 条件已全部落入 · 待 NWT 复核一眼 → 精炼后 Owner 批 Phase 1 → 派实现）· 不作施工依据
+> **Status**: CURRENT · v0.3.1 · **NWT GREEN（2026-09-04 14:2xZ·ledger 801）** · Phase 0（M10）可派 · **Phase 1（M8/M2/M-scout/M6）待 Owner 批** · Phase 2 待 M10 出数 · 不作施工依据直至各手段实现稿各自 NWT diff 审
 > 作者 Bettor（架构师帽）· 2026-09-04 · 输入 = COORD-LEDGER (794)–(799) + J2 六层 L1–L5（`scratch/_j2_console_stall_sixlayer_L1-3/L4/L5_*.md`）+ NWT 三轮审。v0.1 骨架与结构红队增补见 `scratch/_bettor_console_stall_mitigation_design_v0.1_2026-09-04T14-1xZ.md`。
 > 铁律：settle/pool/claim = 钱路、pair-ingestor = broker 用户面 ⇒ **Owner 批**；observe-only 埋点/运维项 = NWT GREEN + Bettor 批；**IBD 期不为本稿主动重启任何进程**，一律随下次自然重启或维护窗生效（D-005 精神）。
 
