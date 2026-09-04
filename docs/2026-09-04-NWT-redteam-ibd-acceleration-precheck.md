@@ -114,5 +114,12 @@
 - 试跑（provenance `docs/provenance/2026-09-04-kaspad-da-fd-limit/`，MANIFEST 4/4 OK，隔离端口 16411/17310/16310）：T3 2048 ⇒ rc=1 明文 LOG 0；T1 无 flag ⇒ 29372/6527/20、四 LOG 各自 32 MB（原路径）、首行 `-1b3046fb`；T4 对照 ⇒ 3568/792/20、`-7b1e18cc`；T2 8192 ⇒ 四 LOG 同一 `LRUCache@00000219E5AF2AB0` 8.00 GB、两 flag=1、600 s 活 0 panic。
 - 切换裁定：GREEN 后**立即切**不等断连（header 相位 19:16Z 已结束；每等 1 h 损 0.45–0.6 h；等断连期望 ~55 h 且可能无人在场）；不先跑 B′（亲和重启即失、旧 exe 上的读数不可搬）；切后 8 min 扫描不判 → 块体 ≥1 h 窗 = D-a 效果 + 新基线 → B′。参数 = 活命令行原样（含 `--ram-scale=3.0`）+ `--rocksdb-cache-size=8192`；闸见 §7/§8；回滚 = 换回旧 exe。
 
+## 10. 09-04 20:4xZ：切换后首小时读数与"干净窗"规则
+- D1（20:06–20:16Z，新 exe 27032）：cpu/块 67.9→52.9 ms（−22%）、kernel 43.2→26.3（−39%）、IO Other 29.8 k→73/s、IO Read 22.8 k→6.6 k/s；**块率 14.43→11.20（−22%）**。趋势 +0/+5/+10 min：物理读 7.8 k→3.8 k→2.9 k/s（缓存热身在进行）、中位桶 99 不动、**IO Other 回升 3.7 k→5.0 k→8.9 k/s**。
+- 来源（我核）：`consensus-006/LOG` 压实计数 03:0x=6 → 03:1x=79 → 03:2x=253 /5 min、文件删除 4→53→196；kaspad log **20:23:36Z `Header and Block pruning: waiting for consensus write permissions...`** = 剪裁点前移后的首次剪裁通道。⇒ other IRP = 压实/剪裁的 create/rename/delete/fsync；抢消费写锁与盘 ⇒ 块率钉住。**与 P1/P2 无关，是剪裁点前移的必然副作用**，恰落观察窗。
+- 结构性事实：`cache_index_and_filter_blocks=true` 把 index 从常驻表缓存搬进 LRU ⇒ 冷启动期前 30–60 min 本就该比 P1 慢。
+- 规则：三分支（§4a 之后给 Bettor 的 T+60 规则）只在**干净窗**适用——LOG 每 5 min 压实回个位数 ∧ 剪裁通道收尾之后，再取两个不重叠 10 min 窗：① reads <2 k ∧ 中位桶 ≥基线 ⇒ 本机 I/O 曾是绑定、D-a 正收益；② reads <2 k ∧ 块率钉住 ∧ NIC 平稳 ⇒ 对端绑定、D-a 对 READY 中性；③ reads ≥5 k ∧ 块率 <基线连续两窗 ⇒ 降 P1（去 flag 重启，现 pp 已前移、header 相位仅 ~10–15 min），不回旧 exe。剪裁/压实进行中不降 P1、不换 cache-size 臂。
+- 流水线事实（`flow.rs:906-950`）：块体下载深度 1 ⇒ T=max(T_recv,T_proc)；CPU/块降而块率不变即绑定项换人。
+
 ## 4. 与 Owner 口径相关的一句
 "换近端 peer 提速"的真实杠杆是 **IBD 模式（PruningCatchUp 跳块体）**而不是 RTT；现在唯一肯当 syncer 的那台正是把我们锁在慢模式里的那台。判 A 值不值，第一步不是测 RTT，是回答 A2。
