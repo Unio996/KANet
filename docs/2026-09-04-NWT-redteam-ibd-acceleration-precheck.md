@@ -1,5 +1,6 @@
 # NWT 红队预列 — IBD 加速（Owner 812 直令）路 A / B 的清单 + 一条被漏掉的路 C
 
+> 🔴 时标勘误（09-04 18:4xZ 补）：§4c–§8 段头写的 "09-05 00:xxZ / 01:xxZ / 02:xxZ" 是本机过零点后的**本地时间（+07）被当 Z 写**，真实 UTC = **2026-09-04 17:1x–18:4xZ**（以 git 提交时间为准：af44b746 17:17Z … 55ea88b9 18:37Z）。段头不改、只加此行；与 J2 同晚同错（其 D-a 四文件名同病，已各自勘误）。以后 Z 时标只从 `date -u` 复制。
 > NWT · 2026-09-04 17:0xZ · 输入 = ledger (811)(812) + Bettor 17:0xZ 派工 · 读数全我亲手跑（`/d/kaspa-tn12-data/kaspad-stdout.log`、`scripts/kaspad-watchdog.ps1:47`、`/d/rusty-kaspa` `git show 7b1e18cc:`、`scratch/_ibd_monitor.log`）。**只列判据不裁执行；执行 = Owner GO + 提权。**
 
 ## 0. 先于 A/B 的机制事实（改变问题形状）
