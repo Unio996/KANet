@@ -105,6 +105,7 @@
 - 最小 diff：`daemon.rs:238-256` cache_budget 计算放开到 Default（`--rocksdb-cache-size` 对默认预设生效、尺寸走 CLI 不烤常数）+ `apply_default` 加 `BlockBasedOptions`（共享 cache / `cache_index_and_filter_blocks` / `pin_l0` / `high_priority`；block_size 4096 不动）。
 - 尺寸按预算非实测（活 LOG 零 RocksDB statistics，stats 是 ConnBuilder 可选路 :56 未开）：默认 8 GB，下限 4 GB（<2× index 颠簸），上限 12 GB；预期 WS ≈ 5.2 + 9 + 8 + 1 ≈ 24 GB，commit ~87/107。
 - J2 hunk 稿 v0.1（`_j2_da_p2_blockcache_hunk_…`）审：**opt-in 形过**（无 flag ⇒ 7b1e18cc 同路径 ⇒ P1/P2 同一 exe、flag 区分、一份 sha、回退 = 不带 flag 重启）；hunk B 每次 `apply_to_options` 新建 Cache **须改 `OnceLock` 共享**（否则最坏 N × builder 数）；N = 8192 MB；ram-scale 3.0 叠加按 08-28 实测 kaspad WS 14.7 GB 算（非 J2 估 3 GB）⇒ 预期 WS 23–24 GB。
+- v0.2 审 GREEN-conditional：§0 分歧裁 **A（opt-in，无 flag = 7b1e18cc 路径）**——B 的 `256 MB × ram_scale` 分支在 3.0 下只给 768 MB < index ⇒ 比 P1 更糟（J2 抓对，我"放开到 Default"那句撤）；差 **hunk C 下限强制**（Default + flag < 4096 MB ⇒ 拒起打明文，不静默 clamp）。编译期三问（`Cache: Send+Sync` / 两 API 名）本机 registry 源已清（仅 index + 06 月 `librocksdb-sys-*` 构建目录），随 `cargo fetch` 核，错即编译红。
 - 验收不开 stats：`IO Read Ops/s` 22 k → <8 k + kernel ms/块。回滚阈按每 exe 预期 WS：P1 阈 >20 GB、P2 阈 >30 GB 或物理 free <6 GB 或 commit >100 GB；共用句柄 >60 k / `Exceeded upper bound`|`panicked` / 块率中位低于基线；P2 效果闸（15 min 内读系统调用未降 ≥30% ⇒ 记"无效"，不因无效而退）。梯级 P2 → P1 → 原 exe。
 
 ## 4. 与 Owner 口径相关的一句
