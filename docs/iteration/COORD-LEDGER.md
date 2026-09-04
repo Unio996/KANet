@@ -11574,3 +11574,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - J2 三件：D-b 预读（不写码）· M10 v2 首窗页（原定 ~21:56Z 未见）· D-a `cargo build --release` 墙钟时间（排期用）。
 - 盯守：趋势 v3 已到期；相位/断连（bkycvniu2）、kaspad PID（bn1q72h33）、console PID（b5fxhzy9f）、hb_guard 到期（b5t9qonga）、ready/j1-inbox/bettor-inbox 续。hb_guard 1158231 alive 文件持续刷新。
 - **(857 补注·时标勘误·实测 date -u = 21:41:54Z)**：855/856/857 头部时间是我估算写的（"21:19Z"/"21:50Z"/"22:08Z"），实际落笔 ≈ 21:19Z / 21:33Z / 21:41Z；正文内引用的采样时刻均为脚本打印的真 UTC，不受影响。与 J2/NWT 的时标滑移同族，已入 memory。
+
+### (858) 2026-09-05 · ✅ **D-b 设计 v0.1.2 = NWT GREEN-conditional 落地 → 派 J2 隔离构建（不部署）**（21:44:55Z）
+- NWT 红队稿 `docs/2026-09-05-NWT-redteam-db-ibd-request-pipelining-v0.1.md`（931762e0）：C1 硬不变量（我方 IBD route 基线容量 256 `router.rs:297-299`·BlockBody 溢出 = Disconnect `router.rs:82-88` ⇒ 深度 2×99 = 198 < 256 余 58·深度 3 必自断·不扩容量）；3.1 措辞（响应按 response_id 走 routing_map_by_id 落同一 route，客户端仍不匹配单请求）；3.2–3.7 全成立 + 对端 outgoing (1<<17)+256、逐体 spawn_blocking、无 ban 逻辑；3.2 残余 = 吞吐型 >60 s/批 ⇒ 120 s 超时 ⇒ 回滚触发；C2 回滚字符串 `IncomingRouteCapacityReached` / `syncee inconsistency` / expected 不匹配 ⇒ 立即回滚；C3 事前分不出、三候选 (a) 对端 route 排队 (b) 阻塞池饱和 (c) 首体冷读，试验回头判。**J2 预读独立同发现 C1**（提 `subscribe_with_capacity(512)` 保险 → 记备选不采，最小 diff）。我亲核 router.rs 三处坐标一致。
+- 设计 v0.1.2 已落（§3.8/3.9、§4 C2 + 中间态、§6 C3 + J2 四条实现注意 + 排期 ≤5 min）。**流程：J2 建分支 `j2-db-ibd-pipeline`（基于 1b3046fb）→ 产物 sha + provenance → NWT diff 审 → 部署仍须 Owner GO**（838 边界；Owner 离场只备不换）。
+- J2 M10 v2 首窗页 22:0xZ 出（预览：broker-intake.tick 38 次全同步 p50 5.5 s/max 30 s = 窗长 8%；http.slow send-command 50 行 p50 70 s/max 203 s 与 settle pre=323 s 同窗 = relay 风暴形状；154 s 大停顿内 zk.closeTickV2 144 s / bshard-close-voter.v2Tick 157 s 疑施害者非起点）。
