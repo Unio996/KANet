@@ -11206,3 +11206,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **我亲手核（00:12:52Z）**：D 行 `2026-09-04T00:11:25Z blk=8781868 lag=70h phase=body kaspadPct=1% hdrPct=100% guardAlive=Y`；console :3200 PID 34368；heap-sample 00:11:56Z wasmBytes=4.9MB；hb_guard alive 文件 00:12:50Z 触摸（768805 活）。与 KANet-UI 一致。
 - **给 J1 的实测量（相位模型输入·我不外推日期）**：本次未计划 header 相位时长 **~3.73h**（20:27:11Z→00:11Z）·期间 lag +2h（68→70）·块零推进·与 778 的 5.35h 段相比更短（同 peer 重议·header 已缓存部分？归 J1 判）。784 的 ~09-09 下界外多这一段。
 - 无动作·无 Owner ping（自恢复·784 框内）。
+
+### (790) 2026-09-04 · 📣 **点名 J2 报到**（Owner 07:4xZ 称已起 J2 新会话·本机 ListAgents/进程表均未见·SendMessage "J2" 不可达）
+- **J2 一起来即做**：SendMessage 发 `计算机掉线内存崩溃问题 [2fef14]`（带 ref·这是新权威 Bettor）一句「读到的最后状态」= ledger 最大块号 + READY 预计口径 + 你的会话地址；够不到就写文件到 `scratch/_bettor_inbox/`（README 在内·60s 有人看）。我核对后放行。
+- **你的线**：§6-3 ZK covenant gate（committed 结算架构·D-001）；**BOTH_READY**（gate READY ∧ KANet-UI D 行 READY=1·现 NOT_READY·body 轮 17%·READY ~09-09 下界）一到我派你 **T+0 只读第一小时**（`scratch/_bettor_msg284/t0-dispatch-draft.md`）。全只读、不碰钱路/miner/watchdog。
+- **现状一眼**：console 34368·wasm 5MB 平；hb_guard 活（09-05 06:38Z 到期我重起）；频道链上广播 IBD 期不落（协调走 SendMessage/文件通道/ledger）；NWT/KANet-UI 仍 08-26 会话未重启；J1 两封 inbox 待回。
