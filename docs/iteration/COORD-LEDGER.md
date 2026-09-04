@@ -11410,3 +11410,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **断连 #6**：块率 2 min 档 17:43Z 16.5 → 17:45Z **0.0**，headers 14,959/2 min；DNS seeder kas.pa/kasia.fyi 持续失败；其它 3 台 reset 照旧。相位成本按 789/778 经验 1.5–5h。KANet-UI D 行将见 blk 冻结 + hdrPct 涨 = 相位切换非卡死。
 - **停 Scanner**：GO（KANet-UI 方案已批·1 次 POST 热生效·记停前 checkpoint/blockCount 交 J2 备回填·READY 前不恢复）。
 - **待 Owner**：还原亲和；J1 younio 四条件；重编译决策不急。
+
+### (822) 2026-09-05 · **Scanner 已停 17:46:40Z**（KANet-UI·`scratch/_kanetui_scanner_stop_record_2026-09-04T17-46Z.md`·POST `/api/discovery/scanner/stop` → ok·17210 客户端 42→39·console 子进程 36→35·`[scanner] stopped scout` 无 respawn·`scanner_enabled=false` 热生效·**M10 出数窗跨此刻须切段**）· NWT 裁断连 #6 = **"未归因"**（无饥饿签名·25 min 窗巧合 ~1%·n=1）· 还原亲和理由 = 代价不对称 · B′ 等块轮恢复 + 自动闸
+- **停前快照（17:46:32Z）**：scout pid 29744（17:45:59Z 起·本代 33 s）；checkpoint `last_block_time=2026-09-04T17:43:51Z`（= 本代 history-fetcher:77 写的墙钟·非块时间）；dag headerCount 11,205,698 · **blockCount 9,739,000**（= IBD 回放位置·交 J2 备 `SCAN_MODE=backfill`）· virtualDaa 87,956,530；17210 客户端 42（scout 3 · sshd 16096 3 = J1 远端读）。恢复 = POST `/scanner/start`，**READY 前不恢复**（IBD 期恢复即回 2m15s 循环）；console 重启后保持停（autoStart 只读一次配置）；"别点 UI 启动"。观测四项：停前窗 17:16–17:46Z / 停后窗 17:46–18:16Z（18:17Z 自动出）。
+- **NWT 裁断连 #6**：(反) 断连前 3 min `Processed 99/198` 节律正常、无 0 块桶、无超时告警、其它三台按 30 s 节律 reset ⇒ 无网络线程饥饿签名；(正) 历史 4 次/9.3 天 ≈ 0.43/天 ⇒ 25 min 窗巧合 ~1% ⇒ **机制候选成立但无签名·"未归因"**。还原 = 代价不对称（一次断连赔 3.7–5 h header 相位 vs 亲和上限 −15%）。**B′ 不在 header 相位做**（再断连整段重来；cpu/header 是另一种负载搬不到块体相位）；块轮恢复后单变量窗 + **自动闸**（脚本每 10 s 看 `Connection manager: has 0/8` 或 `IBD … completed with error` ⇒ 60 s 内还原亲和）。
+- **待 Owner**：还原亲和回显（尚未收到）；J1 younio 四条件。
