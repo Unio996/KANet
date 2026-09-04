@@ -11629,3 +11629,7 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 ### (868) 2026-09-05 · ✅ **M10 v3-A：NWT GREEN（§7 b7c360db 已推）→ 我批 apply → J2 走 live 树 apply（单笔 3 路径不推·随 console 自然重启承载·不主动重启）**（22:23:49Z）
 - J2 预检：live 树 `git apply --check` OK（client.js LF/UTF-8）；仓内无人 import `slow-sql-observe.mjs`（安装点唯一）；smoke 用 mkdtemp 临时库不开活库。NWT 两备注照收（SQL 头 80 字可能含插值 ID·observe-only 本地日志可接受；smoke 不开活库）。
 - 上线后首窗 readout 加 `sql.*` 表，对号 broker-intake NOT EXISTS / close-voter chain_events LIKE / judgePropose SELECT * 三嫌疑。
+
+### (869) 2026-09-05 · M10 v3-A 落码中断一次（pre-commit `R-M0A-BARE-IMPORT-DIFF` 拦测试裸 `import 'better-sqlite3'`）→ J2 处置正确 → v0.2 交 NWT delta 审 · 我批准延续（22:28:28Z）
+- 事实：apply + 两测（11/11、6/6）+ lint 0 错后 commit 被门拦；J2 **不碰 manifest**（M0a 治理面）、live 树立即回干净（我核 `git status kasia-console/src/db` 空、HEAD 4d3b0fd0）；改走仓内 sanctioned 测试形（`DB_PATH` 临时库 + `import('./client.js')`）。v0.2 `scratch/_j2_m10v3A_patch_v02_2026-09-04T22-27Z.diff` sha ff964aa7…8b86：helper 唯一语义变化 = 阈值/日志放进 `db.__slowSqlObserver` state 供测试改；client.js 逐字同 v0.1；测试 12/12；`+` 行零裸 import。
+- 我批准延续到 v0.2，条件：NWT delta GREEN + 四不变量（行格式/Proxy receiver/fail-open/阈值 0 不装）不变；满足即落，不再另等我 GO。
