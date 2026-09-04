@@ -53,5 +53,15 @@
 - **`--ram-scale` 抬高的风险（源码 + 本机史）**：`storage.rs:84` 与 `daemon.rs:246` 把共识存储 LRU 缓存与 RocksDB 基础缓存按倍数放大，上限 10.0（`daemon.rs:110`）。本机在 3.0 下 kaspad WS 曾 12.5→14.7 GB、**系统 commit 58–60 GB / 总 61.6 GB**（supervisor 日志 08-28）⇒ 当时已贴顶；现在 26.7 GB free 是因为 console wasm 泄漏已治。**抬到 >3.0 = 先赌 commit 不过顶**；过顶 = 换页/内存压缩 = 内核态更高、更慢，且是 08-23 整机崩溃的同一方向。建议：先**恢复漂移丢掉的 3.0**（M7）而不是加码；加码只在 (3) 软缺页被证为主因且 commit 余量 ≥ 2× 增量时考虑；任何 ram-scale 变更都要重启赔相位（3.5–5.35 h），须与 A/C 的重启合并成一次。
 - **顺序建议**：① Page Faults/sec + IO Other Ops 分核（10 min，零动作）→ ② M5 排除 kaspad 数据目录（零重启，两不重叠窗）→ ③ 若仍 CPU 钉死，把 ram-scale 恢复 3.0 与剪裁点跳跃合并为**一次**重启（A2 预判定 A 或 C）。
 
+## 4b. 17:3xZ 追加：Bettor 分核读数（Page Faults 118/s 低 · IO Read 22.8k/s · **IO Other 29.8k/s** · MsMpEng 5%）⇒ 打开/关闭风暴假设 **成立（源码算术 + 句柄数两证）**
+- **算术（全 `git show 7b1e18cc:`）**：Windows `fd_budget::limit()` = CRT `getmaxstdio`，`main.rs:27` 起动时 `setmaxstdio(DESIRED_DAEMON_SOFT_FD_LIMIT = 8*1024)`（`daemon.rs:53`；MSVC CRT 上限恰 8192）⇒ `fd_total_budget = 8192 − rpc_max_clients 128 − inbound_limit 128 − outbound_target 8 = 7,928`（`main.rs:28`，默认值 `args.rs:115-117`）⇒ `--utxoindex` 取 1/10 = 792（`daemon.rs:281-283`）⇒ 剩 7,136 ⇒ consensus factory `with_files_limit(fd_budget / 2)` = **3,568**（`factory.rs:329/367`，active 与 staging 均分）⇒ RocksDB `set_max_open_files(3568)`（`conn_builder.rs:158`）。
+- **本机**：`consensus-006/` **17,402 个 .sst**（`find`）；kaspad 进程句柄总数 **4,144**（CIM，含线程/套接字/事件）⇒ 表缓存最多驻留 ~20% 的 SST ⇒ 其余每次读 = CreateFile + QueryInformation + Cleanup/Close 三四个 IRP，全计入 IO Other，与 29.8k/s ≈ 1.3× Read 吻合；Defender minifilter 在 **open** 时介入（MsMpEng 自身 5% 但过滤成本记在 kaspad 内核态）。
+- **杠杆（按代价排）**：
+  1. **M5 排除 kaspad 数据目录**：零重启；打在 30k 次/s 的 open 路径上，预期收益比"每读扫描"模型大得多——仍以两窗实测为准。
+  2. **减少 SST 数量**：`--rocksdb-preset=hdd`（`rocksdb_preset.rs:94-95`：SST 目标 256 MB、各层同尺寸）会让 115 GB 收敛到 ~450 个文件 ≪ 3,568 ⇒ 表缓存全命中、open 风暴消失。**但**：只对新压实生效（存量 6.6 MB 小文件要等压实或手动 compact，115 GB 全压实 = 小时级 I/O）；`level_compaction_dynamic_level_bytes(true)`（:97）对既有库可能触发一次大重整；预设名叫 hdd 但 SST 尺寸那一条与介质无关，其余（写缓冲 256 MB、L0 一文件即压实、4 MB 预读）要逐条评估对 NVMe 的副作用。需重启。
+  3. **`--rocksdb-cache-size=<MB>`**（`daemon.rs:240-243`，直接设块缓存，不动其它 ram-scale 倍率）：块缓存现 = 256 MB × ram-scale（漂移后 1.0 ⇒ **256 MB 对 115 GB 库**）——这解释了为什么几乎每次读都是系统调用。抬块缓存减的是 Read 次数，不减 open 次数；与 2 互补。需重启。
+  4. **抬 fd 预算**：Windows CRT 8192 是硬顶（`setmaxstdio` 上限），且 8192 是二进制里的常数 ⇒ 改它 = 重编译 = 换二进制（D-005 / 7b1e18cc 钉版）⇒ **不在本轮**。
+- **顺序修正**：先 1（零重启、两窗），若 IO Other 与内核态同降 ⇒ 假设坐实；再把 2+3+ram-scale 3.0 恢复 + A2 预判合成**一次**重启。
+
 ## 4. 与 Owner 口径相关的一句
 "换近端 peer 提速"的真实杠杆是 **IBD 模式（PruningCatchUp 跳块体）**而不是 RTT；现在唯一肯当 syncer 的那台正是把我们锁在慢模式里的那台。判 A 值不值，第一步不是测 RTT，是回答 A2。
