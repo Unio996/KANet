@@ -11342,3 +11342,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **C2**：追加写或 tmp+rename+fsync；不淘汰（只在 console 回执 completed 后由 console 命令删）。V14：写中途杀 relay 键仍在；MAX_SEEN 量级后最早 key 仍查得到。
 - **非阻塞三条**：V2 改 relay 权威（链读只回填）；attempt.relay_id ≠ 当前 escrowRelay ⇒ HOLD（换 relay 假阴性·V15）；迁移期 I2-6 只增选 `delivering ∧ attempt`，pre-I2 无 attempt 的 delivering 行现为 0（806）⇒ 落码前再核。
 - **合并批示稿（待 GREEN-final 即发 Owner）**：Phase 1（M8 用户面 / M2 钱路 / M-scout 运维 / M6 relay·部署闸 M10 ≥1h 出数窗·随自然重启）+ I2（console settler + relay 命令面·READY 前随自然重启）。两组各自 NWT diff 审、可单独回滚。
+
+### (810) 2026-09-04 · ✅ **I2 v0.3 NWT GREEN-final**（9afe614a 状态头 CURRENT）· **合并批示已报 Owner：Phase 1（M8/M2/M-scout/M6）+ I2（console settler + relay 幂等存储）** · 落码规矩：I2 分两 commit（relay 存储层 / console settler）各自 NWT diff 审·落码前 J2 复核 `delivering ∧ 无 payout_attempt` COUNT=0
+- **批示范围（一次）**：Phase 1 四项（部署闸 = M10 ≥1h 出数窗后·随自然重启）；I2 六手段（READY 前·随自然重启·relay 命令面 `transfer` 加 `idempotency_key` + `transfer_status` 只读命令 + 专用存储）。两组各自可单独回滚；IBD 期不主动重启任何进程。
+- **Owner 批后派工**：J2 = M8 / M2 / I2-console 三份实现稿（报备先行）；KANet-UI = M-scout 实现稿；relay 侧 I2-5 实现稿 = J2（settler 域）+ KANet-UI 部署面；M6 = J2（relay 常量→函数）。全部 NWT diff 审 → 我推。
+- **仍待 Owner**：Defender 三条 `Add-MpPreference` 结果（M5·可逆）。
