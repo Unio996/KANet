@@ -11514,3 +11514,7 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **压制 WU/DO 的提权命令**（KANet-UI 备·此刻无必要·记档）：`Stop-Service wuauserv,BITS,DoSvc`；暂停 WU 7 天注册表；`DODownloadMode=0` 关对等上传（本机 DO 已上传 109 MB = 在给别人当种子）。
 - **J2 补的子进程站**：`pool-bshard-artifacts.mjs:59` silverc / `adapter-launcher.js:168` taskkill / `tg-bot-manager.js:37` powershell 8 s；`rehearsal-pre-broadcast-gate.mjs:119` spawnSync 无 timeout 只记。NWT 记账：CRLF 文件补丁只对 worktree 有效；`wrapTick` 返回新 promise ⇒ patch 2 逐站核 promise 身份。
 - **console 快速连死**：与 kaspad 相位无关（已块体）；起后即 122 s 级停顿 ⇒ M10 v2 的子进程站埋点正是为它；supervisor 风暴保护 5/300 s → 冷却 1800 s 若触发 = console 停 30 min（IBD 期无功能损失·只记）。
+
+### (845) 2026-09-05 · ⚠️ **D1 窗（切换后首个 10 min·块体·20:06:20Z 起 601 s）：块率 11.20 blk/s（中位 99/10 s）= 基线 14.43 的 −22%；每块 CPU 52.9 ms（−22%）；kernel 26.3 ms（−39%）；kernel 占比 50%** ⇒ 每块 CPU 确降、吞吐反降 · 同窗混杂：8 GB 缓存冷填（软缺页 715/s·WS 6→18 GB）· console 连死两次 + 第三代卡 boot 2.5 min · header 相位刚结束 · **不下结论**（四闸未命中·不回滚）· 55 min 趋势 `DA_TREND` 判：reads/s 降 & blk/s 升 = 冷缓存读等待；reads/s 降而 blk/s 钉 = 对端绑定 · M10 v2 patch 1 落码 `ea3fc2f8`（12 路径·两测 12/12·未推·等 NWT GREEN-final）· console 31420 20:15:16Z 监听（boot 卡 2.5 min·HTTP 尚未回）· hb_guard 1148958 活
+- 候选：(a) 冷缓存期读等待（IO Read 6.6 k/s 仍落盘）；(b) 对端 136.243.93.17 服务速率变慢（时段/服务多客户端）；(c) 请求节律变化（198 桶变少 = 批到达间隔拉长）。NWT 解读中。
+- patch 2（A 类 52 站 wrapTick）：J2 答 promise 身份不可观测（被包函数只作 setInterval 首参·返回值丢弃）；diff 稍后。
