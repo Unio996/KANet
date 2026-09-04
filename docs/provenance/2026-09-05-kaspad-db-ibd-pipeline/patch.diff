@@ -1,0 +1,81 @@
+diff --git a/protocol/flows/src/ibd/flow.rs b/protocol/flows/src/ibd/flow.rs
+index 6b3a1745..c256e2ef 100644
+--- a/protocol/flows/src/ibd/flow.rs
++++ b/protocol/flows/src/ibd/flow.rs
+@@ -931,6 +931,43 @@ staging selected tip ({}) is too small or negative. Aborting IBD...",
+         let mut progress_reporter = ProgressReporter::new(low_header.daa_score, high_header.daa_score, "blocks");
+ 
+         let mut iter = hashes.chunks(IBD_BATCH_SIZE);
++        if self.body_only_ibd_permitted {
++            // D-b (2026-09-05, docs/2026-09-05-bettor-ibd-request-pipelining-design-v0.1.md v0.1.2): request pipelining, depth fixed at 2.
++            // The RequestBlockBodies for chunk_{i+1} is sent *before* chunk_i's bodies are received, so the peer's per-request
++            // latency overlaps with our receive of the previous chunk. Receive order, header lookup, job joining position,
++            // progress reporting and error paths are unchanged. Depth 2 with IBD_BATCH_SIZE (99) keeps at most 198 in-flight
++            // BlockBody messages, below the incoming route capacity (256, overflow policy = Disconnect): do not raise the depth.
++            // The v7 full-block path (RequestIbdBlocks, no request id) keeps the original non-pipelined loop below.
++            let mut current_chunk = iter.next().expect("hashes was non empty");
++            self.send_body_request(current_chunk).await?;
++            let mut prev: Option<QueueChunkOutput> = None;
++            loop {
++                let next_chunk = iter.next();
++                if let Some(next) = next_chunk {
++                    // Send ahead: chunk_{i+1} is requested while chunk_i is still in flight
++                    self.send_body_request(next).await?;
++                }
++                let current = self.receive_body_chunk(consensus, current_chunk).await?;
++                if let Some(QueueChunkOutput { jobs: prev_jobs, daa_score: prev_daa_score, timestamp: prev_timestamp }) = prev.take() {
++                    let prev_chunk_len = prev_jobs.len();
++                    // Join the previous chunk so that we always concurrently process a chunk and receive another
++                    try_join_all(prev_jobs).await?;
++                    // Log the progress
++                    progress_reporter.report(prev_chunk_len, prev_daa_score, prev_timestamp);
++                }
++                prev = Some(current);
++                match next_chunk {
++                    Some(next) => current_chunk = next,
++                    None => break,
++                }
++            }
++            let QueueChunkOutput { jobs: prev_jobs, .. } = prev.expect("at least one chunk was received");
++            let prev_chunk_len = prev_jobs.len();
++            try_join_all(prev_jobs).await?;
++            progress_reporter.report_completion(prev_chunk_len);
++            return Ok(());
++        }
++
+         let QueueChunkOutput { jobs: mut prev_jobs, daa_score: mut prev_daa_score, timestamp: mut prev_timestamp } =
+             self.queue_block_processing_chunk(consensus, iter.next().expect("hashes was non empty")).await?;
+ 
+@@ -1001,9 +1038,13 @@ staging selected tip ({}) is too small or negative. Aborting IBD...",
+         consensus: &ConsensusProxy,
+         chunk: &[Hash],
+     ) -> Result<QueueChunkOutput, ProtocolError> {
+-        let mut jobs = Vec::with_capacity(chunk.len());
+-        let mut current_daa_score = 0;
+-        let mut current_timestamp = 0;
++        // D-b: kept as the non-pipelined composition of the two halves below (send, then receive).
++        self.send_body_request(chunk).await?;
++        self.receive_body_chunk(consensus, chunk).await
++    }
++
++    /// D-b: send half of `queue_block_processing_chunk_body_only`: only enqueues the RequestBlockBodies request for `chunk`.
++    async fn send_body_request(&mut self, chunk: &[Hash]) -> Result<(), ProtocolError> {
+         self.router
+             .enqueue(make_request!(
+                 Payload::RequestBlockBodies,
+@@ -1011,6 +1052,15 @@ staging selected tip ({}) is too small or negative. Aborting IBD...",
+                 self.incoming_route.id()
+             ))
+             .await?;
++        Ok(())
++    }
++
++    /// D-b: receive half of `queue_block_processing_chunk_body_only`: dequeues the BlockBody messages for `chunk` in order,
++    /// looks up each header locally and queues the block for processing. Loop body unchanged from the original.
++    async fn receive_body_chunk(&mut self, consensus: &ConsensusProxy, chunk: &[Hash]) -> Result<QueueChunkOutput, ProtocolError> {
++        let mut jobs = Vec::with_capacity(chunk.len());
++        let mut current_daa_score = 0;
++        let mut current_timestamp = 0;
+         for &expected_hash in chunk {
+             let msg = dequeue_with_timeout!(self.incoming_route, Payload::BlockBody)?;
+             // TODO (relaxed): make header queries in a batch.

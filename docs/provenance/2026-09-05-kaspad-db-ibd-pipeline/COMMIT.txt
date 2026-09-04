@@ -1,0 +1,4 @@
+4d0a9e30215031ae5a980c1c72f01c2eea13ac81
+J2 <j2@kanet.local>
+Sat Sep 5 04:57:40 2026 +0700
+D-b: IBD block-body request pipelining, depth 2 (send chunk_{i+1} before receiving chunk_i); split queue_block_processing_chunk_body_only into send_body_request + receive_body_chunk; v7 full-block path unchanged; base 1b3046fb (D-a); design docs/2026-09-05-bettor-ibd-request-pipelining-design-v0.1.md v0.1.2; NWT GREEN-conditional; build-only, not deployed
