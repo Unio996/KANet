@@ -104,6 +104,7 @@
 - 🔴 **Cache 须进程内唯一**：`conn_builder.rs` build 宏对每个 DB 调 `apply_to_options`；`apply_hdd` :147-149 每次新建 `Cache` ⇒ kaspad ≥4 个 builder（meta ×2 / consensus 主+staging / `daemon.rs:408/463` / utxoindex）会 ×N。正确形 = `OnceLock<Cache>` 共享一个 LRU。
 - 最小 diff：`daemon.rs:238-256` cache_budget 计算放开到 Default（`--rocksdb-cache-size` 对默认预设生效、尺寸走 CLI 不烤常数）+ `apply_default` 加 `BlockBasedOptions`（共享 cache / `cache_index_and_filter_blocks` / `pin_l0` / `high_priority`；block_size 4096 不动）。
 - 尺寸按预算非实测（活 LOG 零 RocksDB statistics，stats 是 ConnBuilder 可选路 :56 未开）：默认 8 GB，下限 4 GB（<2× index 颠簸），上限 12 GB；预期 WS ≈ 5.2 + 9 + 8 + 1 ≈ 24 GB，commit ~87/107。
+- J2 hunk 稿 v0.1（`_j2_da_p2_blockcache_hunk_…`）审：**opt-in 形过**（无 flag ⇒ 7b1e18cc 同路径 ⇒ P1/P2 同一 exe、flag 区分、一份 sha、回退 = 不带 flag 重启）；hunk B 每次 `apply_to_options` 新建 Cache **须改 `OnceLock` 共享**（否则最坏 N × builder 数）；N = 8192 MB；ram-scale 3.0 叠加按 08-28 实测 kaspad WS 14.7 GB 算（非 J2 估 3 GB）⇒ 预期 WS 23–24 GB。
 - 验收不开 stats：`IO Read Ops/s` 22 k → <8 k + kernel ms/块。回滚阈按每 exe 预期 WS：P1 阈 >20 GB、P2 阈 >30 GB 或物理 free <6 GB 或 commit >100 GB；共用句柄 >60 k / `Exceeded upper bound`|`panicked` / 块率中位低于基线；P2 效果闸（15 min 内读系统调用未降 ≥30% ⇒ 记"无效"，不因无效而退）。梯级 P2 → P1 → 原 exe。
 
 ## 4. 与 Owner 口径相关的一句
