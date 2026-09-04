@@ -148,6 +148,19 @@ fi
 
 # ── kasia-console ────────────────────────────────────────────────────────────
 CONSOLE_LOG="$LOG_DIR/console.log"
+# 截断前归档(2026-09-04 KANet-UI 报备·Bettor 批·NWT GREEN·docs/2026-09-04-kanetui-headless-console-log-rotation-proposal.md):
+# supervisor 自愈重启一律走本脚本, 之前这里直接截断 ⇒ 死前 console.log 无副本(09-04 34368 的 93MB 就这样没了)。
+# 与 kanet-start.sh 的单份 .prev 不同: 带 UTC 后缀 + 只留最近 N 份。清理 glob 限定 prev-*Z, 既有 .prev/.pre-restart* 不碰。
+# 归档失败退化 cp、再失败只 WARN —— 启动路径不能因归档而死(写进机制, 不依赖本脚本没有 set -e)。
+KEEP="${KANET_CONSOLE_LOG_KEEP:-5}"
+case "$KEEP" in ''|*[!0-9]*) KEEP=5;; esac
+if [ -s "$CONSOLE_LOG" ]; then
+  ARCH="$CONSOLE_LOG.prev-$(date -u +%Y%m%dT%H%M%SZ)"
+  if ! mv "$CONSOLE_LOG" "$ARCH" 2>/dev/null; then
+    cp "$CONSOLE_LOG" "$ARCH" 2>/dev/null || echo "[headless] WARN console.log archive failed: $ARCH"
+  fi
+  ls -1 "$CONSOLE_LOG".prev-*Z 2>/dev/null | sort | head -n -"$KEEP" | while read -r old; do rm -f "$old"; done || true
+fi
 > "$CONSOLE_LOG"
 
 KANET_ROOT="$KANET_ROOT" \
