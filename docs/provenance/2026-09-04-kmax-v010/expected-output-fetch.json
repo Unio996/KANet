@@ -1,0 +1,795 @@
+{
+ "F1-steady-full-replay": {
+  "wCapWindow": 262148,
+  "w_cap_window": "262148",
+  "cert_kind": "TRUNCATION",
+  "cert_missing": 0,
+  "reason": null,
+  "anchor": "b44",
+  "attempts": [
+   {
+    "k": 0,
+    "depth": 16,
+    "anchor": "b44",
+    "anchor_bs": 44,
+    "steps": 16,
+    "genesis": false,
+    "pages": 1,
+    "blocks": 17,
+    "complete": true,
+    "closure_missing": 0,
+    "kind": "TRUNCATION",
+    "bwR_lt_heapMin": true
+   }
+  ],
+  "rpc_calls": {
+   "getBlocks": 2,
+   "getBlock": 18,
+   "getBlockDagInfo": 1
+  },
+  "G1": {
+   "pass": true,
+   "eq": true,
+   "n1": 17,
+   "pages1": 1
+  },
+  "G2": {
+   "pass": true,
+   "missing": 0,
+   "refs": []
+  },
+  "G3": {
+   "certificate_kind": "TRUNCATION",
+   "wCapWindow_null_when_inexact": true,
+   "pass": true
+  },
+  "G5": {
+   "pass": true,
+   "exact": 7,
+   "checked": 7,
+   "mismatch": 0,
+   "skipped_inexact": 9,
+   "skipped_no_bits": 1
+  },
+  "G4_span_s": 3,
+  "G4_pass": false,
+  "vantage": "single-node-da9",
+  "retries": 0,
+  "resumed": 0,
+  "transient_fails": 0,
+  "page_notes": [],
+  "hvis": {
+   "H_vis_ub": 2664456.942618392,
+   "reason": null,
+   "same_object_t0": true
+  }
+ },
+ "F2-paged-7-per-page": {
+  "wCapWindow": 262148,
+  "w_cap_window": "262148",
+  "cert_kind": "TRUNCATION",
+  "cert_missing": 0,
+  "reason": null,
+  "anchor": "b44",
+  "attempts": [
+   {
+    "k": 0,
+    "depth": 16,
+    "anchor": "b44",
+    "anchor_bs": 44,
+    "steps": 16,
+    "genesis": false,
+    "pages": 3,
+    "blocks": 17,
+    "complete": true,
+    "closure_missing": 0,
+    "kind": "TRUNCATION",
+    "bwR_lt_heapMin": true
+   }
+  ],
+  "rpc_calls": {
+   "getBlocks": 6,
+   "getBlock": 18,
+   "getBlockDagInfo": 1
+  },
+  "G1": {
+   "pass": true,
+   "eq": true,
+   "n1": 17,
+   "pages1": 3
+  },
+  "G2": {
+   "pass": true,
+   "missing": 0,
+   "refs": []
+  },
+  "G3": {
+   "certificate_kind": "TRUNCATION",
+   "wCapWindow_null_when_inexact": true,
+   "pass": true
+  },
+  "G5": {
+   "pass": true,
+   "exact": 7,
+   "checked": 7,
+   "mismatch": 0,
+   "skipped_inexact": 9,
+   "skipped_no_bits": 1
+  },
+  "G4_span_s": 7,
+  "G4_pass": false,
+  "vantage": "single-node-da9",
+  "retries": 0,
+  "resumed": 0,
+  "transient_fails": 0,
+  "page_notes": [],
+  "same_as_ref": true,
+  "pages_first_attempt": 3
+ },
+ "F3-drop-page-negative": {
+  "wCapWindow": null,
+  "w_cap_window": null,
+  "cert_kind": "INEXACT",
+  "cert_missing": 0,
+  "reason": null,
+  "anchor": "b44",
+  "attempts": [
+   {
+    "k": 0,
+    "depth": 16,
+    "anchor": "b44",
+    "anchor_bs": 44,
+    "steps": 16,
+    "genesis": false,
+    "pages": 3,
+    "blocks": 13,
+    "complete": false,
+    "closure_missing": 0,
+    "kind": "INEXACT",
+    "bwR_lt_heapMin": true
+   }
+  ],
+  "rpc_calls": {
+   "getBlocks": 6,
+   "getBlock": 18,
+   "getBlockDagInfo": 1
+  },
+  "G1": {
+   "pass": false,
+   "eq": false,
+   "n1": 13,
+   "pages1": 3
+  },
+  "G2": {
+   "pass": false,
+   "missing": 0,
+   "refs": []
+  },
+  "G3": {
+   "certificate_kind": "INEXACT",
+   "wCapWindow_null_when_inexact": true,
+   "pass": true
+  },
+  "G5": {
+   "pass": true,
+   "exact": 3,
+   "checked": 3,
+   "mismatch": 0,
+   "skipped_inexact": 9,
+   "skipped_no_bits": 1
+  },
+  "G4_span_s": 7,
+  "G4_pass": false,
+  "vantage": "single-node-da9",
+  "retries": 0,
+  "resumed": 0,
+  "transient_fails": 0,
+  "page_notes": [
+   "3:EMPTY_PAGE"
+  ]
+ },
+ "F4-ibd-sync-gate": {
+  "wCapWindow": null,
+  "w_cap_window": null,
+  "cert_kind": "INEXACT",
+  "cert_missing": null,
+  "reason": "SYNC_GATE",
+  "anchor": null,
+  "attempts": [],
+  "rpc_calls": {
+   "getBlocks": 0,
+   "getBlock": 0,
+   "getBlockDagInfo": 0
+  }
+ },
+ "F5-anchor-deepen": {
+  "wCapWindow": 13056221785238,
+  "w_cap_window": "13056221785238",
+  "cert_kind": "TRUNCATION",
+  "cert_missing": 0,
+  "reason": null,
+  "anchor": "b24",
+  "attempts": [
+   {
+    "k": 0,
+    "depth": 16,
+    "anchor": "b24",
+    "anchor_bs": 24,
+    "steps": 16,
+    "genesis": false,
+    "pages": 1,
+    "blocks": 49,
+    "complete": true,
+    "closure_missing": 2,
+    "kind": "TRUNCATION",
+    "bwR_lt_heapMin": true
+   }
+  ],
+  "rpc_calls": {
+   "getBlocks": 2,
+   "getBlock": 18,
+   "getBlockDagInfo": 1
+  },
+  "G1": {
+   "pass": true,
+   "eq": true,
+   "n1": 49,
+   "pages1": 1
+  },
+  "G2": {
+   "pass": true,
+   "missing": 2,
+   "refs": [
+    {
+     "block": "s25a",
+     "refs": [
+      "b23",
+      "b23"
+     ]
+    },
+    {
+     "block": "s25b",
+     "refs": [
+      "b23",
+      "b23"
+     ]
+    }
+   ]
+  },
+  "G3": {
+   "certificate_kind": "TRUNCATION",
+   "wCapWindow_null_when_inexact": true,
+   "pass": true
+  },
+  "G5": {
+   "pass": true,
+   "exact": 35,
+   "checked": 35,
+   "mismatch": 0,
+   "skipped_inexact": 11,
+   "skipped_no_bits": 3
+  },
+  "G4_span_s": 3,
+  "G4_pass": false,
+  "vantage": "single-node-da9",
+  "retries": 0,
+  "resumed": 0,
+  "transient_fails": 0,
+  "page_notes": []
+ },
+ "F6-anchor-hits-genesis": {
+  "wCapWindow": 524296703,
+  "w_cap_window": "524296703",
+  "cert_kind": "GENESIS",
+  "cert_missing": 0,
+  "reason": null,
+  "anchor": "g",
+  "attempts": [
+   {
+    "k": 0,
+    "depth": 16,
+    "anchor": "g",
+    "anchor_bs": 0,
+    "steps": 10,
+    "genesis": true,
+    "pages": 1,
+    "blocks": 11,
+    "complete": true,
+    "closure_missing": 0,
+    "kind": "GENESIS",
+    "bwR_lt_heapMin": true
+   }
+  ],
+  "rpc_calls": {
+   "getBlocks": 2,
+   "getBlock": 12,
+   "getBlockDagInfo": 1
+  },
+  "G1": {
+   "pass": true,
+   "eq": true,
+   "n1": 11,
+   "pages1": 1
+  },
+  "G2": {
+   "pass": true,
+   "missing": 0,
+   "refs": []
+  },
+  "G3": {
+   "certificate_kind": "GENESIS",
+   "wCapWindow_null_when_inexact": true,
+   "pass": true
+  },
+  "G5": {
+   "pass": true,
+   "exact": 10,
+   "checked": 10,
+   "mismatch": 0,
+   "skipped_inexact": 0,
+   "skipped_no_bits": 1
+  },
+  "G4_span_s": 3,
+  "G4_pass": false,
+  "vantage": "single-node-da9",
+  "retries": 0,
+  "resumed": 0,
+  "transient_fails": 0,
+  "page_notes": []
+ },
+ "F7-sink-anticone-tip": {
+  "wCapWindow": 262148,
+  "w_cap_window": "262148",
+  "cert_kind": "TRUNCATION",
+  "cert_missing": 0,
+  "reason": null,
+  "anchor": "b24",
+  "attempts": [
+   {
+    "k": 0,
+    "depth": 16,
+    "anchor": "b24",
+    "anchor_bs": 24,
+    "steps": 16,
+    "genesis": false,
+    "pages": 1,
+    "blocks": 18,
+    "complete": true,
+    "closure_missing": 1,
+    "kind": "TRUNCATION",
+    "bwR_lt_heapMin": true
+   }
+  ],
+  "rpc_calls": {
+   "getBlocks": 2,
+   "getBlock": 18,
+   "getBlockDagInfo": 1
+  },
+  "G1": {
+   "pass": true,
+   "eq": true,
+   "n1": 18,
+   "pages1": 1
+  },
+  "G2": {
+   "pass": true,
+   "missing": 1,
+   "refs": [
+    {
+     "block": "s3",
+     "refs": [
+      "b3",
+      "b3"
+     ]
+    }
+   ]
+  },
+  "G3": {
+   "certificate_kind": "TRUNCATION",
+   "wCapWindow_null_when_inexact": true,
+   "pass": true
+  },
+  "G5": {
+   "pass": true,
+   "exact": 7,
+   "checked": 7,
+   "mismatch": 0,
+   "skipped_inexact": 9,
+   "skipped_no_bits": 2
+  },
+  "G4_span_s": 3,
+  "G4_pass": false,
+  "vantage": "single-node-da9",
+  "retries": 0,
+  "resumed": 0,
+  "transient_fails": 0,
+  "page_notes": []
+ },
+ "F8-missing-member-inexact": {
+  "wCapWindow": null,
+  "w_cap_window": null,
+  "cert_kind": "INEXACT",
+  "cert_missing": 7,
+  "reason": null,
+  "anchor": "g",
+  "attempts": [
+   {
+    "k": 0,
+    "depth": 16,
+    "anchor": "b44",
+    "anchor_bs": 44,
+    "steps": 16,
+    "genesis": false,
+    "pages": 1,
+    "blocks": 17,
+    "complete": true,
+    "closure_missing": 1,
+    "kind": "INEXACT",
+    "bwR_lt_heapMin": true
+   },
+   {
+    "k": 1,
+    "depth": 32,
+    "anchor": "b29",
+    "anchor_bs": 29,
+    "steps": 31,
+    "genesis": false,
+    "pages": 1,
+    "blocks": 32,
+    "complete": true,
+    "closure_missing": 1,
+    "kind": "INEXACT",
+    "bwR_lt_heapMin": true
+   },
+   {
+    "k": 2,
+    "depth": 64,
+    "anchor": "g",
+    "anchor_bs": 0,
+    "steps": 60,
+    "genesis": true,
+    "pages": 1,
+    "blocks": 61,
+    "complete": true,
+    "closure_missing": 1,
+    "kind": "INEXACT",
+    "bwR_lt_heapMin": true
+   }
+  ],
+  "rpc_calls": {
+   "getBlocks": 6,
+   "getBlock": 111,
+   "getBlockDagInfo": 1
+  },
+  "G1": {
+   "pass": true,
+   "eq": true,
+   "n1": 61,
+   "pages1": 1
+  },
+  "G2": {
+   "pass": false,
+   "missing": 1,
+   "refs": [
+    {
+     "block": "b45",
+     "refs": [
+      "s45"
+     ]
+    }
+   ]
+  },
+  "G3": {
+   "certificate_kind": "INEXACT",
+   "wCapWindow_null_when_inexact": true,
+   "pass": true
+  },
+  "G5": {
+   "pass": true,
+   "exact": 44,
+   "checked": 44,
+   "mismatch": 0,
+   "skipped_inexact": 16,
+   "skipped_no_bits": 1
+  },
+  "G4_span_s": 7,
+  "G4_pass": false,
+  "vantage": "single-node-da9",
+  "retries": 0,
+  "resumed": 0,
+  "transient_fails": 0,
+  "page_notes": []
+ },
+ "A1-arrivals-chain-8": {
+  "n": 8,
+  "sum_work": "524296",
+  "reason": null,
+  "reachable0": 17,
+  "reachable1": 25,
+  "complete": [
+   true,
+   true
+  ],
+  "n_by_stamp_diag": 8,
+  "old_stamp_arrivals": [],
+  "new_head": [
+   "b61",
+   "b62",
+   "b63",
+   "b64",
+   "b65",
+   "b66",
+   "b67",
+   "b68"
+  ],
+  "W_s": 3602,
+  "hvis": null
+ },
+ "A2-arrivals-with-old-stamp-side": {
+  "n": 8,
+  "sum_work": "614499",
+  "reason": null,
+  "reachable0": 17,
+  "reachable1": 25,
+  "complete": [
+   true,
+   true
+  ],
+  "n_by_stamp_diag": 7,
+  "old_stamp_arrivals": [
+   "s5"
+  ],
+  "new_head": [
+   "s5",
+   "s61",
+   "b61",
+   "b62",
+   "b63",
+   "b64",
+   "b65",
+   "b66"
+  ],
+  "W_s": 3602,
+  "hvis": null
+ },
+ "A3-arrival-incomplete-negative": {
+  "n": null,
+  "sum_work": null,
+  "reason": "ARRIVAL_INCOMPLETE",
+  "reachable0": 17,
+  "reachable1": 0,
+  "complete": [
+   true,
+   false
+  ],
+  "n_by_stamp_diag": null,
+  "old_stamp_arrivals": null,
+  "new_head": null,
+  "W_s": 3602,
+  "hvis": {
+   "H_vis_ub": null,
+   "reason": "NO_N"
+  }
+ },
+ "A4-full-cycle-4000-arrivals": {
+  "n": 4000,
+  "sum_work": "262148000",
+  "same_window_object": true,
+  "cert_kind": "TRUNCATION",
+  "sampled_at_in_window": true,
+  "W_s": 3602,
+  "wCapWindow": 262148,
+  "hvis": {
+   "H_vis_ub": 305620.10666301457,
+   "reason": null,
+   "provisional": true,
+   "gates": {
+    "G1": true,
+    "G2": true,
+    "G3": true,
+    "G4": true,
+    "G5": true
+   },
+   "time_ok": true,
+   "cert_ok": true
+  },
+  "G5": {
+   "pass": true,
+   "exact": 7,
+   "mismatch": 0,
+   "skipped_inexact": 9
+  },
+  "G4_pass": true,
+  "vantage": "single-node-da9",
+  "retries": 0
+ },
+ "R1-transient-retry": {
+  "wCapWindow": 262148,
+  "w_cap_window": "262148",
+  "cert_kind": "TRUNCATION",
+  "cert_missing": 0,
+  "reason": null,
+  "anchor": "b44",
+  "attempts": [
+   {
+    "k": 0,
+    "depth": 16,
+    "anchor": "b44",
+    "anchor_bs": 44,
+    "steps": 16,
+    "genesis": false,
+    "pages": 3,
+    "blocks": 17,
+    "complete": true,
+    "closure_missing": 0,
+    "kind": "TRUNCATION",
+    "bwR_lt_heapMin": true
+   }
+  ],
+  "rpc_calls": {
+   "getBlocks": 8,
+   "getBlock": 18,
+   "getBlockDagInfo": 1,
+   "transientFails": 2
+  },
+  "G1": {
+   "pass": true,
+   "eq": true,
+   "n1": 17,
+   "pages1": 3
+  },
+  "G2": {
+   "pass": true,
+   "missing": 0,
+   "refs": []
+  },
+  "G3": {
+   "certificate_kind": "TRUNCATION",
+   "wCapWindow_null_when_inexact": true,
+   "pass": true
+  },
+  "G5": {
+   "pass": true,
+   "exact": 7,
+   "checked": 7,
+   "mismatch": 0,
+   "skipped_inexact": 9,
+   "skipped_no_bits": 1
+  },
+  "G4_span_s": 7,
+  "G4_pass": false,
+  "vantage": "single-node-da9",
+  "retries": 2,
+  "resumed": 0,
+  "transient_fails": 2,
+  "page_notes": [],
+  "same_as_ref": true,
+  "pages_first_attempt": 3
+ },
+ "R2-resume-cursor": {
+  "wCapWindow": 262148,
+  "w_cap_window": "262148",
+  "cert_kind": "TRUNCATION",
+  "cert_missing": 0,
+  "reason": null,
+  "anchor": "b44",
+  "attempts": [
+   {
+    "k": 0,
+    "depth": 16,
+    "anchor": "b44",
+    "anchor_bs": 44,
+    "steps": 16,
+    "genesis": false,
+    "pages": 3,
+    "blocks": 17,
+    "complete": true,
+    "closure_missing": 0,
+    "kind": "TRUNCATION",
+    "bwR_lt_heapMin": true
+   }
+  ],
+  "rpc_calls": {
+   "getBlocks": 11,
+   "getBlock": 18,
+   "getBlockDagInfo": 1,
+   "transientFails": 5
+  },
+  "G1": {
+   "pass": true,
+   "eq": true,
+   "n1": 17,
+   "pages1": 3
+  },
+  "G2": {
+   "pass": true,
+   "missing": 0,
+   "refs": []
+  },
+  "G3": {
+   "certificate_kind": "TRUNCATION",
+   "wCapWindow_null_when_inexact": true,
+   "pass": true
+  },
+  "G5": {
+   "pass": true,
+   "exact": 7,
+   "checked": 7,
+   "mismatch": 0,
+   "skipped_inexact": 9,
+   "skipped_no_bits": 1
+  },
+  "G4_span_s": 7,
+  "G4_pass": false,
+  "vantage": "single-node-da9",
+  "retries": 5,
+  "resumed": 1,
+  "transient_fails": 5,
+  "page_notes": [],
+  "same_as_ref": true,
+  "pages_first_attempt": 3
+ },
+ "R3-retry-resume-exhausted": {
+  "wCapWindow": null,
+  "w_cap_window": null,
+  "cert_kind": "INEXACT",
+  "cert_missing": 0,
+  "reason": null,
+  "anchor": "b44",
+  "attempts": [
+   {
+    "k": 0,
+    "depth": 16,
+    "anchor": "b44",
+    "anchor_bs": 44,
+    "steps": 16,
+    "genesis": false,
+    "pages": 2,
+    "blocks": 7,
+    "complete": false,
+    "closure_missing": 0,
+    "kind": "INEXACT",
+    "bwR_lt_heapMin": true
+   }
+  ],
+  "rpc_calls": {
+   "getBlocks": 24,
+   "getBlock": 18,
+   "getBlockDagInfo": 1,
+   "transientFails": 20
+  },
+  "G1": {
+   "pass": false,
+   "eq": false,
+   "n1": 7,
+   "pages1": 2
+  },
+  "G2": {
+   "pass": false,
+   "missing": 0,
+   "refs": []
+  },
+  "G3": {
+   "certificate_kind": "INEXACT",
+   "wCapWindow_null_when_inexact": true,
+   "pass": true
+  },
+  "G5": {
+   "pass": true,
+   "exact": 0,
+   "checked": 0,
+   "mismatch": 0,
+   "skipped_inexact": 6,
+   "skipped_no_bits": 1
+  },
+  "G4_span_s": 6,
+  "G4_pass": false,
+  "vantage": "single-node-da9",
+  "retries": 12,
+  "resumed": 2,
+  "transient_fails": 20,
+  "page_notes": [
+   "2:FAILED_AFTER_RETRIES: TRANSIENT: simulated rpc failure at low b50"
+  ]
+ }
+}

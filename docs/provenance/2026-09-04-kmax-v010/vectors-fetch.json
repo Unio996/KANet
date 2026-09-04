@@ -1,0 +1,244 @@
+{
+  "note": "(24)/(21) v0.10 · wcap-fetch replay 向量: 合成 DAG(小参数 SMALL 同 vectors-wcap.json)序列化成 wRPC 形假 RPC, 分页/锚/证书/四闸证据全离线跑; 时钟注入(每次 clock() +1000 ms, t0→t1 固定跨度以便 G4 对账)。绝不连 IBD 活节点; 真跑另派。 法3′ 接收计 A1–A4: 两次轮询之间合成器出块 k 个 ⇒ n 恰 = k(按接收不按戳); 负向量 第二次拉取不完整 ⇒ ARRIVAL_INCOMPLETE ⇒ hVisUb NO_N; A4 全周期 runCycle 共享 arrivalWindow 对象 + n≥4000 出真数。 NWT 预审④⑤⑥: 每页 getBlocks 指数退避重试 3 次 + 续游标 2 次(不重头); evidence.vantage=single-node-da9; G4.pass = 同窗对象 ∧ sampled_at∈[t0,t1]; R1 transient 失败注入 ⇒ 重试成功与基线逐位同; R2 超重试仍失败 ⇒ 续游标 ⇒ 与不中断逐位同; R3 续游标也耗尽 ⇒ FAILED 页 ⇒ complete=false ⇒ INEXACT。",
+  "small": {
+    "windowSize": 5,
+    "sampleRate": 2,
+    "minWindow": 2,
+    "mergesetLimit": 4,
+    "targetTimeMs": 1000,
+    "mergeDepth": 6,
+    "genesisBits": 520159231
+  },
+  "depth0": 16,
+  "cases": [
+    {
+      "id": "F1-steady-full-replay",
+      "desc": "60 块链全史 replay, pageSize 249: 一页到 sink; 锚 bs_top−16 ⇒ 证书乙(TRUNCATION) 一次达标; G1 两次拉取集相等 / G2 闭包 0 缺 / G3 非 INEXACT / G4 窗对象透传给 hVisUb",
+      "gen": {
+        "n": 60
+      },
+      "rpc": {
+        "pageSize": 249
+      },
+      "hvis": {
+        "n": 36000,
+        "spanS": 3600
+      }
+    },
+    {
+      "id": "F2-paged-7-per-page",
+      "desc": "同 F1 但 pageSize 7 ⇒ 多页续游标(≥5 页), 结果与 F1 逐位相同(w_cap/证书/锚)",
+      "gen": {
+        "n": 60
+      },
+      "rpc": {
+        "pageSize": 7
+      },
+      "compareTo": "F1-steady-full-replay"
+    },
+    {
+      "id": "F3-drop-page-negative",
+      "desc": "G3 负向量: 第 3 页整页丢(空返回) ⇒ fetch 不完整 ⇒ 不得出更小窗: wCapWindow=null, G1 fail, 证书 INEXACT 或 fetch_complete=false",
+      "gen": {
+        "n": 60
+      },
+      "rpc": {
+        "pageSize": 7,
+        "dropPages": [
+          3
+        ]
+      }
+    },
+    {
+      "id": "F4-ibd-sync-gate",
+      "desc": "IBD/未同步: isSynced=false ⇒ SYNC_GATE ⇒ 不取块(getBlocks 调用数 0), wCapWindow=null",
+      "gen": {
+        "n": 60
+      },
+      "rpc": {
+        "pageSize": 249,
+        "faults": {
+          "isSynced": false
+        }
+      }
+    },
+    {
+      "id": "F5-anchor-deepen",
+      "desc": "red 密 DAG(每块并 2 red) depth0=16: 记 attempts/锚/证书/anchor_used(本例一次达标; 加深路径见 F8)",
+      "gen": {
+        "n": 40,
+        "redPairsFrom": 3,
+        "redPairsTo": 40
+      },
+      "rpc": {
+        "pageSize": 249
+      }
+    },
+    {
+      "id": "F6-anchor-hits-genesis",
+      "desc": "链只有 10 块 < depth0=16 ⇒ 回溯到真 genesis ⇒ 证书 GENESIS(全史)",
+      "gen": {
+        "n": 10
+      },
+      "rpc": {
+        "pageSize": 249
+      }
+    },
+    {
+      "id": "F7-sink-anticone-tip",
+      "desc": "G2: 未被合并的侧块 s3(sink anticone, 不在 S) 由末页附带返回; 其 SP b3 ∈ past(R) ⇒ 诊断表列出但 S 内窗 missing=0 ⇒ G2 pass",
+      "gen": {
+        "n": 40,
+        "sides": [
+          {
+            "hash": "s3",
+            "parent": "b3",
+            "at": 999,
+            "ts": 3500,
+            "bwDelta": 10
+          }
+        ]
+      },
+      "rpc": {
+        "pageSize": 249
+      }
+    },
+    {
+      "id": "F8-missing-member-inexact",
+      "desc": "G3: 被 b45 合并的侧块 s45 节点缺失 ⇒ S 内窗 missing>0 ⇒ INEXACT; 几何加深 16→32→64 到真 genesis 仍缺 ⇒ 最终 INEXACT, wCapWindow=null(绝不成更小窗)",
+      "gen": {
+        "n": 60,
+        "sides": [
+          {
+            "hash": "s45",
+            "parent": "b43",
+            "at": 45,
+            "ts": 43500,
+            "bwDelta": 100
+          }
+        ]
+      },
+      "rpc": {
+        "pageSize": 249,
+        "hideBlocks": [
+          "s45"
+        ]
+      }
+    },
+    {
+      "id": "A1-arrivals-chain-8",
+      "type": "arrival",
+      "desc": "接收计: 60 块 → 68 块(链上新出 8 块) ⇒ n=8, Σwork=8×work; 按戳对照列亦 8",
+      "gen": {
+        "n": 60
+      },
+      "grow": {
+        "n": 68
+      },
+      "low": "b44",
+      "waitMs": 3600000
+    },
+    {
+      "id": "A2-arrivals-with-old-stamp-side",
+      "type": "arrival",
+      "desc": "MUST-B 证据: 60→66 链块 + 2 侧块(其中 s5 陈父块 b5、旧戳 5500 ms, 被 b63 合并) ⇒ 按接收 n=8(6 链+2 侧); 按戳窗对照只 7(s5 旧戳落窗外) ⇒ old_stamp_arrivals=[s5]",
+      "gen": {
+        "n": 60
+      },
+      "grow": {
+        "n": 66,
+        "sides": [
+          {
+            "hash": "s5",
+            "parent": "b5",
+            "at": 63,
+            "red": true,
+            "ts": 5500,
+            "bwDelta": 10
+          },
+          {
+            "hash": "s61",
+            "parent": "b60",
+            "at": 62,
+            "ts": 61500,
+            "bwDelta": 100
+          }
+        ]
+      },
+      "low": "b44",
+      "waitMs": 3600000
+    },
+    {
+      "id": "A3-arrival-incomplete-negative",
+      "type": "arrival",
+      "desc": "负向量: 第二次拉取首页空(中断) ⇒ complete1=false ⇒ n=null + ARRIVAL_INCOMPLETE ⇒ hVisUbFromEvidence NO_N",
+      "gen": {
+        "n": 60
+      },
+      "grow": {
+        "n": 68
+      },
+      "low": "b44",
+      "waitMs": 3600000,
+      "dropSecondFetch": true,
+      "wCapForHvis": 262148
+    },
+    {
+      "id": "A4-full-cycle-4000-arrivals",
+      "type": "arrival",
+      "cycle": true,
+      "desc": "全周期 runCycle: 60 → 4060 块(新出 4000) ⇒ n=4000 ≥ N_MIN; 接收计与 fetchCover 共享同一 arrivalWindow 对象(闸4); certificate.sampled_at_ms=t1 ∈ 窗; hVisUbFromEvidence 出真数(PROVISIONAL, gates G1–G3)",
+      "gen": {
+        "n": 60
+      },
+      "grow": {
+        "n": 4060
+      },
+      "waitMs": 3600000
+    },
+    {
+      "id": "R1-transient-retry",
+      "type": "chain",
+      "desc": "④ 第 2 页游标(b50) 前 2 次 getBlocks 抛 TRANSIENT ⇒ 重试成功 ⇒ 结果与 F2 逐位同; evidence.retries_total=2(×G1 二次拉取同锚 ⇒ 记两轮)",
+      "gen": {
+        "n": 60
+      },
+      "rpc": {
+        "pageSize": 7,
+        "failOnLow": {
+          "b50": 2
+        }
+      },
+      "compareTo": "F2-paged-7-per-page"
+    },
+    {
+      "id": "R2-resume-cursor",
+      "type": "chain",
+      "desc": "④ 第 2 页游标前 5 次抛(超 maxRetries=3) ⇒ 续游标(resume)从同一 low 再来 ⇒ 成功 ⇒ 与 F2 逐位同; resumed_from 非空",
+      "gen": {
+        "n": 60
+      },
+      "rpc": {
+        "pageSize": 7,
+        "failOnLow": {
+          "b50": 5
+        }
+      },
+      "compareTo": "F2-paged-7-per-page"
+    },
+    {
+      "id": "R3-retry-resume-exhausted",
+      "type": "chain",
+      "desc": "④ 负向量: 第 2 页游标前 20 次抛(超 3 重试 + 2 续) ⇒ 该页 FAILED_AFTER_RETRIES ⇒ complete=false ⇒ G1 fail ⇒ INEXACT/w=null(fail-closed)",
+      "gen": {
+        "n": 60
+      },
+      "rpc": {
+        "pageSize": 7,
+        "failOnLow": {
+          "b50": 20
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,533 @@
+{
+ "V1-genesis-bits": {
+  "target": "88342268989085881633415516702723778855028339727704627466791306615848960",
+  "target_hex": "0xccccc000000000000000000000000000000000000000000000000000000",
+  "roundtrip_bits": 504155340,
+  "work_per_block": "1310721",
+  "H1_Hs": 13107210,
+  "difficulty_ratio": 655360.625000596
+ },
+ "V2-bits-small-exp": {
+  "target": "1193046",
+  "target_hex": "0x123456",
+  "roundtrip_bits": 51524694,
+  "work_per_block": "97055764975995241950711904064708186562029814974297378091104192884197462",
+  "H1_Hs": 9.705576497599523e+71,
+  "difficulty_ratio": 4.8527923163614894e+70
+ },
+ "V3-bits-exp1": {
+  "target": "18",
+  "target_hex": "0x12",
+  "roundtrip_bits": 17956864,
+  "work_per_block": "6094320486174536601240578158351995150172104456086345475760925474100691033680",
+  "H1_Hs": 6.094320486174536e+76,
+  "difficulty_ratio": 3.216446923258783e+75
+ },
+ "V4-bits-negative-mant": {
+  "target": "0",
+  "target_hex": "0x0",
+  "roundtrip_bits": 0,
+  "work_per_block": "115792089237316195423570985008687907853269984665640564039457584007913129639936",
+  "H1_Hs": 1.157920892373162e+78,
+  "difficulty_ratio": null
+ },
+ "V5-bits-mainnet-like": {
+  "target": "4282479099181601388461766133326127197545018302507722733518848",
+  "target_hex": "0x2aa3d0000000000000000000000000000000000000000000000",
+  "roundtrip_bits": 436382269,
+  "work_per_block": "27038564942312157",
+  "H1_Hs": 270385649423121570,
+  "difficulty_ratio": 13519282471156078
+ },
+ "V10-window-ok": {
+  "window": 5000,
+  "clamped": false,
+  "note": null
+ },
+ "V11-window-over-max": {
+  "window": 10000,
+  "clamped": true,
+  "note": "window 10001 > MAX_SAFE_WINDOW_SIZE 10000 (unsafe_rpc=false 拒) ⇒ 夹到上限"
+ },
+ "V12-window-under-min": {
+  "window": 1000,
+  "clamped": true,
+  "note": "window < MIN_WINDOW_SIZE 1000 (difficulty.rs:48) ⇒ 夹到 1000"
+ },
+ "V13-implied-k1000-gpu": {
+  "H_adv_implied": 1998000000000,
+  "devices": {
+   "RTX 4090 (GPU)": {
+    "units": 999,
+    "tier": "B"
+   },
+   "RTX 5090 (GPU, 估)": {
+    "units": null,
+    "tier": "C",
+    "note": "C 档估值只列不折(非 kHeavyHash 专属实测)"
+   },
+   "IceRiver KS3M (ASIC)": {
+    "units": 0.333,
+    "tier": "A"
+   },
+   "Bitmain KS5 Pro (ASIC)": {
+    "units": 0.095,
+    "tier": "B"
+   }
+  }
+ },
+ "V14-implied-k10": {
+  "H_adv_implied": 18000000000,
+  "devices": {
+   "RTX 4090 (GPU)": {
+    "units": 9,
+    "tier": "B"
+   },
+   "RTX 5090 (GPU, 估)": {
+    "units": null,
+    "tier": "C",
+    "note": "C 档估值只列不折(非 kHeavyHash 专属实测)"
+   },
+   "IceRiver KS3M (ASIC)": {
+    "units": 0.003,
+    "tier": "A"
+   },
+   "Bitmain KS5 Pro (ASIC)": {
+    "units": 0.001,
+    "tier": "B"
+   }
+  }
+ },
+ "V15-table": [
+  {
+   "k": 10,
+   "H_adv_implied": 18000000000,
+   "devices": {
+    "RTX 4090 (GPU)": {
+     "units": 9,
+     "tier": "B"
+    },
+    "RTX 5090 (GPU, 估)": {
+     "units": null,
+     "tier": "C",
+     "note": "C 档估值只列不折(非 kHeavyHash 专属实测)"
+    },
+    "IceRiver KS3M (ASIC)": {
+     "units": 0.003,
+     "tier": "A"
+    },
+    "Bitmain KS5 Pro (ASIC)": {
+     "units": 0.001,
+     "tier": "B"
+    }
+   }
+  },
+  {
+   "k": 100,
+   "H_adv_implied": 198000000000,
+   "devices": {
+    "RTX 4090 (GPU)": {
+     "units": 99,
+     "tier": "B"
+    },
+    "RTX 5090 (GPU, 估)": {
+     "units": null,
+     "tier": "C",
+     "note": "C 档估值只列不折(非 kHeavyHash 专属实测)"
+    },
+    "IceRiver KS3M (ASIC)": {
+     "units": 0.033,
+     "tier": "A"
+    },
+    "Bitmain KS5 Pro (ASIC)": {
+     "units": 0.009,
+     "tier": "B"
+    }
+   }
+  },
+  {
+   "k": 1000,
+   "H_adv_implied": 1998000000000,
+   "devices": {
+    "RTX 4090 (GPU)": {
+     "units": 999,
+     "tier": "B"
+    },
+    "RTX 5090 (GPU, 估)": {
+     "units": null,
+     "tier": "C",
+     "note": "C 档估值只列不折(非 kHeavyHash 专属实测)"
+    },
+    "IceRiver KS3M (ASIC)": {
+     "units": 0.333,
+     "tier": "A"
+    },
+    "Bitmain KS5 Pro (ASIC)": {
+     "units": 0.095,
+     "tier": "B"
+    }
+   }
+  }
+ ],
+ "V6-decide-law1-min": {
+  "H_net": 2000000000,
+  "source": "law1",
+  "available": [
+   "law1",
+   "law2"
+  ],
+  "ratio": 1.3,
+  "gate_input": "OK",
+  "note": null
+ },
+ "V7-decide-law2-min": {
+  "H_net": 1800000000,
+  "source": "law2",
+  "available": [
+   "law1",
+   "law2"
+  ],
+  "ratio": 2.778,
+  "gate_input": "FAIL_CLOSED",
+  "note": "可用法相差 >2×(tip bits 陈/窗内停滞/戳塞): 成本表内仍取 min 作参考, 但喂 (23) 入场闸 = 环境违约(测量不可靠) ⇒ fail-closed 不入场, 非取 min 硬用"
+ },
+ "V8-decide-gt2x-failclosed": {
+  "H_net": 1000000000,
+  "source": "law2",
+  "available": [
+   "law1",
+   "law2"
+  ],
+  "ratio": 9,
+  "gate_input": "FAIL_CLOSED",
+  "note": "可用法相差 >2×(tip bits 陈/窗内停滞/戳塞): 成本表内仍取 min 作参考, 但喂 (23) 入场闸 = 环境违约(测量不可靠) ⇒ fail-closed 不入场, 非取 min 硬用"
+ },
+ "V9-decide-law1-only-provisional": {
+  "H_net": 2000000000,
+  "source": "law1_only",
+  "available": [
+   "law1"
+  ],
+  "ratio": null,
+  "gate_input": "PROVISIONAL_OVERESTIMATE",
+  "note": "只有法1(陈难度): 算力跌后过估 H_net ⇒ 攻击成本看着更贵/地板入场太易 = 危险向; 不许作 (23) firm 输入"
+ },
+ "V16-decide-law3-min": {
+  "H_net": 1200000000,
+  "source": "law3",
+  "available": [
+   "law1",
+   "law2",
+   "law3"
+  ],
+  "ratio": 1.667,
+  "gate_input": "OK",
+  "note": null
+ },
+ "V17-decide-law3-only-with-law1": {
+  "H_net": 1500000000,
+  "source": "law3",
+  "available": [
+   "law1",
+   "law3"
+  ],
+  "ratio": 1.333,
+  "gate_input": "OK",
+  "note": null
+ },
+ "V18-law3-count": {
+  "H3": 13107210,
+  "blocks_in_window": 6000,
+  "window_s": 600,
+  "stamp_bias_bound": 0.22
+ },
+ "V19-fold-C-excluded": {
+  "H_adv_implied": 1998000000000,
+  "devices": {
+   "RTX 4090 (GPU)": {
+    "units": 999,
+    "tier": "B"
+   },
+   "RTX 5090 (GPU, 估)": {
+    "units": null,
+    "tier": "C",
+    "note": "C 档估值只列不折(非 kHeavyHash 专属实测)"
+   },
+   "IceRiver KS3M (ASIC)": {
+    "units": 0.333,
+    "tier": "A"
+   },
+   "Bitmain KS5 Pro (ASIC)": {
+    "units": 0.095,
+    "tier": "B"
+   }
+  }
+ },
+ "D1-lambda-n0": {
+  "n": 0,
+  "impl": 6.907755,
+  "gauss_rail": 0,
+  "chernoff_rail": 13.815511,
+  "bracket_ok": true,
+  "ref": 6.907755,
+  "ref_ok": true,
+  "ok": true
+ },
+ "D1-lambda-n10": {
+  "n": 10,
+  "impl": 24.133971,
+  "gauss_rail": 19.77207,
+  "chernoff_rail": 30.54125,
+  "bracket_ok": true,
+  "ref": 24.133971,
+  "ref_ok": true,
+  "ok": true
+ },
+ "D1-lambda-n30": {
+  "n": 30,
+  "impl": 51.083124,
+  "gauss_rail": 46.925722,
+  "chernoff_rail": 58.406183,
+  "bracket_ok": true,
+  "ref": 51.083124,
+  "ref_ok": true,
+  "ok": true
+ },
+ "D1-lambda-n100": {
+  "n": 100,
+  "impl": 134.924319,
+  "gauss_rail": 130.902,
+  "chernoff_rail": 144.713418,
+  "bracket_ok": true,
+  "ref": 134.924319,
+  "ref_ok": true,
+  "ok": true
+ },
+ "D1-lambda-n1000": {
+  "n": 1000,
+  "impl": 1101.626944,
+  "gauss_rail": 1097.720704,
+  "chernoff_rail": 1124.649964,
+  "bracket_ok": true,
+  "ref": 1101.626944,
+  "ref_ok": true,
+  "ok": true
+ },
+ "D1-lambda-n36000": {
+  "n": 36000,
+  "impl": 36590.189486,
+  "gauss_rail": 36586.324226,
+  "chernoff_rail": 36712.177985,
+  "bracket_ok": true,
+  "ref": 36590.189486,
+  "ref_ok": true,
+  "ok": true
+ },
+ "D1-selfcheck": {
+  "ok": true,
+  "sweep_0_200_bracket_failures": [],
+  "rows_ok": [
+   [
+    0,
+    true
+   ],
+   [
+    10,
+    true
+   ],
+   [
+    30,
+    true
+   ],
+   [
+    100,
+    true
+   ],
+   [
+    1000,
+    true
+   ],
+   [
+    36000,
+    true
+   ]
+  ]
+ },
+ "D2-nmin-5pct": {
+  "delta": 0.05,
+  "N_min": 3974
+ },
+ "D2-nmin-3pct": {
+  "delta": 0.03,
+  "N_min": 10867
+ },
+ "D2-nmin-2pct": {
+  "delta": 0.02,
+  "N_min": 24259
+ },
+ "D3-hvis-ok": {
+  "H_vis_ub": 10163941523942170,
+  "lambda_ub": 36590.189486,
+  "n": 36000,
+  "W_s": 3600,
+  "w_cap_window": 1000000000000000,
+  "gate": {
+   "W_ok": true,
+   "n_ok": true,
+   "w_cap_ok": true
+  },
+  "reason": null,
+  "fallback": null,
+  "note": "w_cap_window 由参数注入((23) v0.13 层1 重建器待 Codex 281); 单位 = 每块 work(与 calc_work 同), H_vis_ub = work/s"
+ },
+ "D3-hvis-wmin": {
+  "H_vis_ub": null,
+  "lambda_ub": null,
+  "n": 36000,
+  "W_s": 600,
+  "w_cap_window": 1000000000000000,
+  "gate": {
+   "W_ok": false,
+   "n_ok": true,
+   "w_cap_ok": true
+  },
+  "reason": "W_MIN",
+  "fallback": "(a-total) min(1, H_adv_cap/H_total_lb)"
+ },
+ "D3-hvis-nmin": {
+  "H_vis_ub": null,
+  "lambda_ub": null,
+  "n": 3999,
+  "W_s": 3600,
+  "w_cap_window": 1000000000000000,
+  "gate": {
+   "W_ok": true,
+   "n_ok": false,
+   "w_cap_ok": true
+  },
+  "reason": "N_MIN",
+  "fallback": "(a-total) min(1, H_adv_cap/H_total_lb)"
+ },
+ "D3-hvis-both": {
+  "H_vis_ub": null,
+  "lambda_ub": null,
+  "n": 100,
+  "W_s": 60,
+  "w_cap_window": 1000000000000000,
+  "gate": {
+   "W_ok": false,
+   "n_ok": false,
+   "w_cap_ok": true
+  },
+  "reason": "W_MIN+N_MIN",
+  "fallback": "(a-total) min(1, H_adv_cap/H_total_lb)"
+ },
+ "D3-hvis-nowcap": {
+  "H_vis_ub": null,
+  "lambda_ub": null,
+  "n": 36000,
+  "W_s": 3600,
+  "w_cap_window": null,
+  "gate": {
+   "W_ok": true,
+   "n_ok": true,
+   "w_cap_ok": false
+  },
+  "reason": "NO_W_CAP",
+  "fallback": "(a-total) min(1, H_adv_cap/H_total_lb)"
+ },
+ "D3-hvis-boundary": {
+  "H_vis_ub": 291619519900171.5,
+  "lambda_ub": 4199.321087,
+  "n": 4000,
+  "W_s": 3600,
+  "w_cap_window": 250000000000000,
+  "gate": {
+   "W_ok": true,
+   "n_ok": true,
+   "w_cap_ok": true
+  },
+  "reason": null,
+  "fallback": null,
+  "note": "w_cap_window 由参数注入((23) v0.13 层1 重建器待 Codex 281); 单位 = 每块 work(与 calc_work 同), H_vis_ub = work/s"
+ },
+ "D1-selfcheck-fault-twice": {
+  "first_throws": true,
+  "second_throws": true,
+  "both_throw": true,
+  "good_impl_still_ok": true
+ },
+ "D3-hvis-passthrough-ok": {
+  "H_vis_ub": 2664456.942618392,
+  "lambda_ub": 36590.189486,
+  "n": 36000,
+  "W_s": 3600,
+  "w_cap_window": 262148,
+  "gate": {
+   "W_ok": true,
+   "n_ok": true,
+   "w_cap_ok": true,
+   "time_ok": true,
+   "cert_ok": true
+  },
+  "reason": null,
+  "fallback": null,
+  "note": "w_cap_window 由 (24) fetchCover 透传(certificate + arrivalWindow 同源, (24) v0.2 闸3/闸4); 单位 = 每块 work, H_vis_ub = work/s",
+  "sampledAtMs": 3600000,
+  "certificate_kind": "TRUNCATION"
+ },
+ "D3-hvis-time-mismatch": {
+  "H_vis_ub": null,
+  "lambda_ub": null,
+  "n": 36000,
+  "W_s": 3600,
+  "w_cap_window": 262148,
+  "gate": {
+   "W_ok": true,
+   "n_ok": true,
+   "w_cap_ok": true,
+   "time_ok": false,
+   "cert_ok": true
+  },
+  "reason": "WINDOW_TIME_MISMATCH",
+  "fallback": "(a-total) min(1, H_adv_cap/H_total_lb)",
+  "sampledAtMs": 3600001,
+  "certificate_kind": "TRUNCATION"
+ },
+ "D3-hvis-cert-inexact": {
+  "H_vis_ub": null,
+  "lambda_ub": null,
+  "n": 36000,
+  "W_s": 3600,
+  "w_cap_window": 262148,
+  "gate": {
+   "W_ok": true,
+   "n_ok": true,
+   "w_cap_ok": false,
+   "time_ok": true,
+   "cert_ok": false
+  },
+  "reason": "NO_W_CAP",
+  "fallback": "(a-total) min(1, H_adv_cap/H_total_lb)",
+  "sampledAtMs": 3600000,
+  "certificate_kind": "INEXACT"
+ },
+ "D3-hvis-cert-missing-but-kind-ok": {
+  "H_vis_ub": null,
+  "lambda_ub": null,
+  "n": 36000,
+  "W_s": 3600,
+  "w_cap_window": 262148,
+  "gate": {
+   "W_ok": true,
+   "n_ok": true,
+   "w_cap_ok": false,
+   "time_ok": null,
+   "cert_ok": false
+  },
+  "reason": "NO_W_CAP",
+  "fallback": "(a-total) min(1, H_adv_cap/H_total_lb)",
+  "sampledAtMs": null,
+  "certificate_kind": "TRUNCATION"
+ }
+}

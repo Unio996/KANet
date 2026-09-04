@@ -1,0 +1,356 @@
+{
+  "note": "(21) v0.4 确定性向量。bits→target 镜像 7b1e18cc math/src/lib.rs:64-80(from_compact_target_bits: mant=bits&0xFFFFFF, expt=8×((bits>>24)−3), mant>0x7FFFFF ⇒ 0); 反向 :83-97; work=2^256/(target+1)(difficulty.rs:261-267); H1=work×10 BPS; difficulty_ratio=5.78960446186581e76/target(converter/consensus.rs:49-56, constants.rs:44)。genesis bits = TESTNET12_GENESIS.bits 504155340 (genesis.rs:158)。 v0.5: 法3 瞬时估(墙钟窗按块时间戳计数×work, W≫132 s); decideHNet=min(可用法), 只法1 ⇒ PROVISIONAL_OVERESTIMATE, 相差>2× ⇒ gate_input=FAIL_CLOSED; C 档估值只列不折。 v0.8 (Codex 280 D-STAT-1/2 CLOSED): lambda = Garwood 上括号 + 夹逼(高斯下轨 ≤ impl ≤ Chernoff 上轨) + 精确对照(Codex 独立复算 6 值, 容差 1e-5); selfcheck = 六向量 + n=0..200 夹逼全扫; nmin = δ 反解 5%/3%/2% ⇒ 3974/10867/24259; hvis = 硬闸 W<3600 ∨ n<4000 ∨ 无 w_cap ⇒ null 回 (a-total)。 v0.8 fix-up(NWT): selfCheck 失败不缓存, selfcheck-fault 向量连调两次都 throw。 v0.10 接线: hVisUb 可选 sampledAtMs/certificate(缺省行为与 v0.8 逐字同); D3-hvis 加透传正向量(fixture = (24) replay F1 的 certificate, 窗 3600 s)、time-mismatch 负向量、certificate INEXACT 负向量、missing 边界。",
+  "cases": [
+    {
+      "id": "V1-genesis-bits",
+      "type": "bits",
+      "desc": "TESTNET12_GENESIS bits=504155340 (0x1e0c1a4c) → target/work/H1/ratio, 并 compact 往返",
+      "bits": 504155340
+    },
+    {
+      "id": "V2-bits-small-exp",
+      "type": "bits",
+      "desc": "exp≤3 分支: bits=0x03123456 ⇒ mant 右移 0, target=0x123456",
+      "bits": 51524694
+    },
+    {
+      "id": "V3-bits-exp1",
+      "type": "bits",
+      "desc": "exp=1: bits=0x01123456 ⇒ mant>>16 = 0x12",
+      "bits": 17970262
+    },
+    {
+      "id": "V4-bits-negative-mant",
+      "type": "bits",
+      "desc": "mant>0x7FFFFF(符号位) ⇒ target 0 (源码 ZERO 分支); work 定义为 2^256/(0+1)",
+      "bits": 511705088
+    },
+    {
+      "id": "V5-bits-mainnet-like",
+      "type": "bits",
+      "desc": "高难度示例 bits=0x1a01aa3d 量级核: H1 应 ~1e15 级",
+      "bits": 436382269
+    },
+    {
+      "id": "V10-window-ok",
+      "type": "window",
+      "desc": "1000 ≤ w ≤ 10,000 不夹",
+      "window": 5000
+    },
+    {
+      "id": "V11-window-over-max",
+      "type": "window",
+      "desc": "w=10,001 > MAX_SAFE_WINDOW_SIZE ⇒ 夹到 10,000 并标",
+      "window": 10001
+    },
+    {
+      "id": "V12-window-under-min",
+      "type": "window",
+      "desc": "w=500 < MIN_WINDOW_SIZE 1000 ⇒ 夹到 1000",
+      "window": 500
+    },
+    {
+      "id": "V13-implied-k1000-gpu",
+      "type": "implied",
+      "desc": "H_floor=2.0e9(一张 4090) k=1000 ⇒ H_adv_implied≈2e12 ⇒ ≈1/3 台 KS3M, ≈999 张 4090",
+      "k": 1000,
+      "H_floor": 2000000000
+    },
+    {
+      "id": "V14-implied-k10",
+      "type": "implied",
+      "desc": "k=10 ⇒ 9×H_floor",
+      "k": 10,
+      "H_floor": 2000000000
+    },
+    {
+      "id": "V15-table",
+      "type": "table",
+      "desc": "H_net=2.0e9 的 k∈{10,100,1000} 表",
+      "H_net": 2000000000,
+      "ks": [
+        10,
+        100,
+        1000
+      ]
+    },
+    {
+      "id": "V6-decide-law1-min",
+      "type": "decide",
+      "desc": "H1<H2 ⇒ 取 H1, gate_input OK",
+      "input": {
+        "h1": 2000000000,
+        "h2": 2600000000
+      }
+    },
+    {
+      "id": "V7-decide-law2-min",
+      "type": "decide",
+      "desc": "H2<H1 ⇒ 取 H2, OK",
+      "input": {
+        "h1": 5000000000,
+        "h2": 1800000000
+      }
+    },
+    {
+      "id": "V8-decide-gt2x-failclosed",
+      "type": "decide",
+      "desc": "两法相差 >2× ⇒ 表内仍 min 但 gate_input=FAIL_CLOSED(环境违约)",
+      "input": {
+        "h1": 9000000000,
+        "h2": 1000000000
+      }
+    },
+    {
+      "id": "V9-decide-law1-only-provisional",
+      "type": "decide",
+      "desc": "法2/法3 皆缺 ⇒ 只法1 ⇒ PROVISIONAL_OVERESTIMATE, 不作 firm 输入",
+      "input": {
+        "h1": 2000000000,
+        "h2": null,
+        "h3": null
+      }
+    },
+    {
+      "id": "V16-decide-law3-min",
+      "type": "decide",
+      "desc": "法3 最小(算力刚跌, 法1/法2 陈) ⇒ 取法3, OK(比值 ≤2)",
+      "input": {
+        "h1": 2000000000,
+        "h2": 1900000000,
+        "h3": 1200000000
+      }
+    },
+    {
+      "id": "V17-decide-law3-only-with-law1",
+      "type": "decide",
+      "desc": "法2 缺但法3 在 ⇒ min(法1,法3), 不是 PROVISIONAL",
+      "input": {
+        "h1": 2000000000,
+        "h2": null,
+        "h3": 1500000000
+      }
+    },
+    {
+      "id": "V18-law3-count",
+      "type": "law3",
+      "desc": "窗 600 s 内按块时间戳计 6000 块(其余在窗外) × work(genesis bits) ⇒ H3 = 10 块/s × 1,310,721",
+      "tipTs": 2000000000,
+      "windowS": 600,
+      "bits": 504155340,
+      "inWindow": 6000,
+      "outWindow": 300
+    },
+    {
+      "id": "V19-fold-C-excluded",
+      "type": "implied",
+      "desc": "C 档 5090 估值不折(units=null), A/B 档折",
+      "k": 1000,
+      "H_floor": 2000000000
+    },
+    {
+      "id": "D1-lambda-n0",
+      "type": "lambda",
+      "desc": "Garwood 上括号 λ_ub(0) 须 ≥ 精确参考且在 [高斯, Chernoff] 夹逼内",
+      "n": 0
+    },
+    {
+      "id": "D1-lambda-n10",
+      "type": "lambda",
+      "desc": "Garwood 上括号 λ_ub(10) 须 ≥ 精确参考且在 [高斯, Chernoff] 夹逼内",
+      "n": 10
+    },
+    {
+      "id": "D1-lambda-n30",
+      "type": "lambda",
+      "desc": "Garwood 上括号 λ_ub(30) 须 ≥ 精确参考且在 [高斯, Chernoff] 夹逼内",
+      "n": 30
+    },
+    {
+      "id": "D1-lambda-n100",
+      "type": "lambda",
+      "desc": "Garwood 上括号 λ_ub(100) 须 ≥ 精确参考且在 [高斯, Chernoff] 夹逼内",
+      "n": 100
+    },
+    {
+      "id": "D1-lambda-n1000",
+      "type": "lambda",
+      "desc": "Garwood 上括号 λ_ub(1000) 须 ≥ 精确参考且在 [高斯, Chernoff] 夹逼内",
+      "n": 1000
+    },
+    {
+      "id": "D1-lambda-n36000",
+      "type": "lambda",
+      "desc": "Garwood 上括号 λ_ub(36000) 须 ≥ 精确参考且在 [高斯, Chernoff] 夹逼内",
+      "n": 36000
+    },
+    {
+      "id": "D1-selfcheck",
+      "type": "selfcheck",
+      "desc": "selfCheck: 六精确向量全过 + n=0..200 夹逼零失败"
+    },
+    {
+      "id": "D2-nmin-5pct",
+      "type": "nmin",
+      "desc": "δ=5% ⇒ N_min=3974 (闸取 4000)",
+      "delta": 0.05
+    },
+    {
+      "id": "D2-nmin-3pct",
+      "type": "nmin",
+      "desc": "δ=3% ⇒ 10867",
+      "delta": 0.03
+    },
+    {
+      "id": "D2-nmin-2pct",
+      "type": "nmin",
+      "desc": "δ=2% ⇒ 24259",
+      "delta": 0.02
+    },
+    {
+      "id": "D3-hvis-ok",
+      "type": "hvis",
+      "desc": "n=36000, W=3600 s, w_cap=1e15 ⇒ H_vis_ub = 36590.19×1e15/3600",
+      "input": {
+        "n": 36000,
+        "wCapWindow": 1000000000000000,
+        "t0Ms": 0,
+        "t1Ms": 3600000
+      }
+    },
+    {
+      "id": "D3-hvis-wmin",
+      "type": "hvis",
+      "desc": "W=600 s < 3600 ⇒ null, reason W_MIN",
+      "input": {
+        "n": 36000,
+        "wCapWindow": 1000000000000000,
+        "t0Ms": 0,
+        "t1Ms": 600000
+      }
+    },
+    {
+      "id": "D3-hvis-nmin",
+      "type": "hvis",
+      "desc": "n=3999 < 4000 ⇒ null, reason N_MIN",
+      "input": {
+        "n": 3999,
+        "wCapWindow": 1000000000000000,
+        "t0Ms": 0,
+        "t1Ms": 3600000
+      }
+    },
+    {
+      "id": "D3-hvis-both",
+      "type": "hvis",
+      "desc": "W 与 n 都不足 ⇒ reason W_MIN+N_MIN",
+      "input": {
+        "n": 100,
+        "wCapWindow": 1000000000000000,
+        "t0Ms": 0,
+        "t1Ms": 60000
+      }
+    },
+    {
+      "id": "D3-hvis-nowcap",
+      "type": "hvis",
+      "desc": "无 w_cap_window(重建器未落) ⇒ null, reason NO_W_CAP (不许静默用观测 w_max)",
+      "input": {
+        "n": 36000,
+        "wCapWindow": null,
+        "t0Ms": 0,
+        "t1Ms": 3600000
+      }
+    },
+    {
+      "id": "D3-hvis-boundary",
+      "type": "hvis",
+      "desc": "n=4000, W=3600 s 恰在闸上 ⇒ 出数",
+      "input": {
+        "n": 4000,
+        "wCapWindow": 250000000000000,
+        "t0Ms": 1000,
+        "t1Ms": 3601000
+      }
+    },
+    {
+      "id": "D1-selfcheck-fault-twice",
+      "type": "selfcheck-fault",
+      "desc": "注入坏实现(λ×0.9 欠界): selfCheck 连调两次都须 throw(失败不缓存, 否则第二次静默通过 = fail-open); 之后真实现仍 ok",
+      "factor": 0.9
+    },
+    {
+      "id": "D3-hvis-passthrough-ok",
+      "type": "hvis",
+      "desc": "(24) 透传正向量: F1 replay 的 certificate(TRUNCATION, missing 0) + 同源窗 [0,3600 s] + sampledAtMs=t1 ⇒ 出数, gate.time_ok/cert_ok true",
+      "input": {
+        "n": 36000,
+        "wCapWindow": 262148,
+        "t0Ms": 0,
+        "t1Ms": 3600000,
+        "sampledAtMs": 3600000,
+        "certificate": {
+          "kind": "TRUNCATION",
+          "R": "b44",
+          "R_blue_work": "44000",
+          "heapMin_min": "45000",
+          "missing": 0,
+          "inexact_count": 0
+        }
+      }
+    },
+    {
+      "id": "D3-hvis-time-mismatch",
+      "type": "hvis",
+      "desc": "(24) v0.2 闸4 负向量: sampledAtMs 晚于 t1(异于认证窗) ⇒ WINDOW_TIME_MISMATCH ⇒ null",
+      "input": {
+        "n": 36000,
+        "wCapWindow": 262148,
+        "t0Ms": 0,
+        "t1Ms": 3600000,
+        "sampledAtMs": 3600001,
+        "certificate": {
+          "kind": "TRUNCATION",
+          "R": "b44",
+          "R_blue_work": "44000",
+          "heapMin_min": "45000",
+          "missing": 0,
+          "inexact_count": 0
+        }
+      }
+    },
+    {
+      "id": "D3-hvis-cert-inexact",
+      "type": "hvis",
+      "desc": "(24) v0.2 闸3 负向量: certificate.kind=INEXACT(missing 7) ⇒ NO_W_CAP ⇒ null(不用更小窗)",
+      "input": {
+        "n": 36000,
+        "wCapWindow": 262148,
+        "t0Ms": 0,
+        "t1Ms": 3600000,
+        "sampledAtMs": 3600000,
+        "certificate": {
+          "kind": "INEXACT",
+          "R": "g",
+          "missing": 7,
+          "inexact_count": 7
+        }
+      }
+    },
+    {
+      "id": "D3-hvis-cert-missing-but-kind-ok",
+      "type": "hvis",
+      "desc": "闸3 边界: kind=TRUNCATION 但 missing=1 ⇒ 仍 NO_W_CAP",
+      "input": {
+        "n": 36000,
+        "wCapWindow": 262148,
+        "t0Ms": 0,
+        "t1Ms": 3600000,
+        "certificate": {
+          "kind": "TRUNCATION",
+          "missing": 1
+        }
+      }
+    }
+  ]
+}
