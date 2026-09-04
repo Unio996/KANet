@@ -64,5 +64,10 @@
   4. **抬 fd 预算**：Windows CRT 8192 是硬顶（`setmaxstdio` 上限），且 8192 是二进制里的常数 ⇒ 改它 = 重编译 = 换二进制（D-005 / 7b1e18cc 钉版）⇒ **不在本轮**。
 - **顺序修正**：先 1（零重启、两窗），若 IO Other 与内核态同降 ⇒ 假设坐实；再把 2+3+ram-scale 3.0 恢复 + A2 预判合成**一次**重启。
 
+## 4c. 09-05 00:xxZ 追加：零重启杠杆"进程亲和到 V-cache CCD"的前提实测（机器事实，durable）
+- 机器：AMD Ryzen 9 9900X3D 12C/24T，L3 合计 128 MB（CCD0 96 MB 3D V-cache + CCD1 32 MB）；电源方案 平衡；`amd3dvcacheSvc` Running（按名单把游戏钉到 V-cache CCD，其它进程默认频率 CCD；硬亲和优先于它）。
+- **CCD 映射实测（NWT 自跑，非提权，自己的 node 进程）**：48 MB 随机指针追踪，钉 `0x000FFF` = **21–23 ns/跳**，钉 `0xFFF000` = **73–76 ns/跳**，正反序各一次 ⇒ **LP 0-11 = V-cache CCD**；随机访问 L3 敏感度 3.5×。脚本：scratchpad `l3chase.js`（12M×uint32 打乱、3000 万跳）。
+- 实验判据（给 Bettor）：A-B-A 三窗各 ≥10 min；主指标 cpu 秒/块 + Privileged%（签名 = ops/s 不变而每调用变快），副指标中位块率；SMT 同核抢占用第二臂 `0x000555` 判；亲和不持久（重启即回）；电源方案臂单独做。
+
 ## 4. 与 Owner 口径相关的一句
 "换近端 peer 提速"的真实杠杆是 **IBD 模式（PruningCatchUp 跳块体）**而不是 RTT；现在唯一肯当 syncer 的那台正是把我们锁在慢模式里的那台。判 A 值不值，第一步不是测 RTT，是回答 A2。
