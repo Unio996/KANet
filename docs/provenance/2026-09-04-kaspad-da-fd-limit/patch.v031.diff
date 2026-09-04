@@ -1,0 +1,130 @@
+diff --git a/database/src/db/rocksdb_preset.rs b/database/src/db/rocksdb_preset.rs
+index 5497cceb..05072035 100644
+--- a/database/src/db/rocksdb_preset.rs
++++ b/database/src/db/rocksdb_preset.rs
+@@ -5,6 +5,17 @@
+ 
+ use rocksdb::Options;
+ use std::str::FromStr;
++use rocksdb::Cache;
++use std::sync::OnceLock;
++
++/// D-a P2 (2026-09-05): ONE block cache per process. `ConnBuilder`'s `default_opts!` macro calls
++/// `apply_to_options` once per DB (meta, consensus active/staging, utxoindex, ...), so creating a cache
++/// per call would multiply the budget by the number of DBs. First caller with a budget builds it;
++/// every later caller (any preset) shares the same object. Size comes from --rocksdb-cache-size only.
++static SHARED_BLOCK_CACHE: OnceLock<Cache> = OnceLock::new();
++fn shared_block_cache(cache_size: usize) -> &'static Cache {
++    SHARED_BLOCK_CACHE.get_or_init(|| Cache::new_lru_cache(cache_size))
++}
+ 
+ /// Available RocksDB configuration presets
+ #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+@@ -57,19 +68,33 @@ impl RocksDbPreset {
+     /// * `mem_budget` - Memory budget (only used for Default preset, HDD uses fixed 256MB)
+     pub fn apply_to_options(&self, opts: &mut Options, parallelism: usize, mem_budget: usize, cache_budget: Option<usize>) {
+         match self {
+-            Self::Default => self.apply_default(opts, parallelism, mem_budget),
++            Self::Default => self.apply_default(opts, parallelism, mem_budget, cache_budget),
+             Self::Hdd => self.apply_hdd(opts, parallelism, cache_budget),
+         }
+     }
+ 
+     /// Apply default preset configuration
+-    fn apply_default(&self, opts: &mut Options, parallelism: usize, mem_budget: usize) {
++    fn apply_default(&self, opts: &mut Options, parallelism: usize, mem_budget: usize, cache_budget: Option<usize>) {
+         if parallelism > 1 {
+             opts.increase_parallelism(parallelism as i32);
+         }
+ 
+         // Use the provided memory budget (typically 64MB)
+         opts.optimize_level_style_compaction(mem_budget);
++
++        // D-a P2: opt-in, process-wide shared block cache for the default (SSD) preset.
++        // No budget => untouched library defaults (32MB cache, index/filter in table cache) == 7b1e18cc == P1.
++        if let Some(cache_size) = cache_budget {
++            use rocksdb::BlockBasedOptions;
++            let mut block_opts = BlockBasedOptions::default();
++            block_opts.set_block_cache(shared_block_cache(cache_size));
++            block_opts.set_cache_index_and_filter_blocks(true);
++            // (v0.3.1) set_cache_index_and_filter_blocks_with_high_priority is not exposed by rust-rocksdb 0.24.0;
++            // the library default for that option is already true (see live LOG: ..._with_high_priority: 1).
++            block_opts.set_pin_l0_filter_and_index_blocks_in_cache(true);
++            // block_size stays at the library default 4096 (NVMe point lookups); no bloom, no format change.
++            opts.set_block_based_table_factory(&block_opts);
++        }
+     }
+ 
+     /// Apply HDD preset configuration (HDD-optimized settings)
+@@ -129,7 +154,7 @@ impl RocksDbPreset {
+         opts.set_zstd_max_train_bytes(8 * 1024 * 1024);
+ 
+         // Block-based table options for better caching
+-        use rocksdb::{BlockBasedOptions, Cache};
++        use rocksdb::BlockBasedOptions;
+         let mut block_opts = BlockBasedOptions::default();
+ 
+         // Partitioned Bloom filters (18 bits per key for better false-positive rate)
+@@ -145,8 +170,8 @@ impl RocksDbPreset {
+         // Can be scaled via ram-scale or overridden via --rocksdb-cache-size
+         let default_cache_size = 256 * 1024 * 1024; // 256MB
+         let cache_size = cache_budget.unwrap_or(default_cache_size);
+-        let cache = Cache::new_lru_cache(cache_size);
+-        block_opts.set_block_cache(&cache);
++        let cache = shared_block_cache(cache_size);
++        block_opts.set_block_cache(cache);
+ 
+         // Set block size (256KB - better for sequential HDD reads)
+         block_opts.set_block_size(256 * 1024);
+diff --git a/kaspad/src/daemon.rs b/kaspad/src/daemon.rs
+index bdfcb1f4..3c0d44ef 100644
+--- a/kaspad/src/daemon.rs
++++ b/kaspad/src/daemon.rs
+@@ -235,7 +235,7 @@ fn configure_rocksdb(args: &Args) -> (RocksDbPreset, Option<usize>, Option<PathB
+         RocksDbPreset::Default
+     };
+ 
+-    // Calculate cache budget for HDD preset
++    // Calculate cache budget: HDD preset always; Default preset only when --rocksdb-cache-size is given (D-a P2, opt-in)
+     let cache_budget = if matches!(preset, RocksDbPreset::Hdd) {
+         if let Some(cache_mb) = args.rocksdb_cache_size {
+             let cache_bytes = cache_mb * 1024 * 1024;
+@@ -249,6 +249,22 @@ fn configure_rocksdb(args: &Args) -> (RocksDbPreset, Option<usize>, Option<PathB
+             info!("RocksDB cache size: {} MB (scaled by ram-scale)", final_cache / 1024 / 1024);
+             Some(final_cache)
+         }
++    } else if let Some(cache_mb) = args.rocksdb_cache_size {
++        // D-a P2 lower bound (NWT C5): with cache_index_and_filter_blocks=true every open SST's index/filter block
++        // lives in this LRU. Below ~2x the index total (~1.2-1.9 GB on a 17.6k-SST consensus DB) they get evicted
++        // and re-read on every lookup, which is WORSE than the library default. Refuse rather than clamp, so an
++        // operator can never believe a too-small value "took effect".
++        const DEFAULT_PRESET_MIN_CACHE_MB: usize = 4096;
++        if cache_mb < DEFAULT_PRESET_MIN_CACHE_MB {
++            println!(
++                "--rocksdb-cache-size={} MB is below the minimum {} MB for the default preset: cache_index_and_filter_blocks needs >= 2x the index total, a smaller cache is worse than not enabling it. Pass >= {} MB or omit the flag (library defaults, same as 7b1e18cc).",
++                cache_mb, DEFAULT_PRESET_MIN_CACHE_MB, DEFAULT_PRESET_MIN_CACHE_MB
++            );
++            exit(1);
++        }
++        let cache_bytes = cache_mb * 1024 * 1024;
++        info!("Custom RocksDB cache size (default preset, D-a P2, process-wide shared): {} MB", cache_mb);
++        Some(cache_bytes)
+     } else {
+         None
+     };
+diff --git a/utils/src/fd_budget.rs b/utils/src/fd_budget.rs
+index 051a29ad..a5100925 100644
+--- a/utils/src/fd_budget.rs
++++ b/utils/src/fd_budget.rs
+@@ -75,7 +75,10 @@ pub fn limit() -> i32 {
+             TEST_FD_LIMIT
+         }
+         else if #[cfg(target_os = "windows")] {
+-            rlimit::getmaxstdio() as i32
++            // D-a (2026-09-05): RocksDB on Windows opens SSTs with Win32 CreateFile handles, which are not
++            // bounded by the CRT stdio limit that getmaxstdio() reports (max 8192). Use a fixed handle budget
++            // so the derived consensus max_open_files (fd/2 after utxoindex 1/10) exceeds the ~17.6k SST count.
++            65536
+         }
+         else if #[cfg(unix)] {
+             rlimit::getrlimit(rlimit::Resource::NOFILE).unwrap().0 as i32
