@@ -11861,3 +11861,5 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (923) 2026-09-05 · READY 心跳 19:55Z：lag **41 h**（13:54Z 50 → 6 h 收 9 h ≈ 1.5 h/h）· 6 h 口径 lagETA **24.2 h** ⇒ READY 可能 **~09-06 20Z**（乐观口径·规划基准 cum 待 KANet-UI）· blk 11,439,577（2026-09-05T19:55:49Z）
 - **READY 时刻待办清单（Bettor）**：① BOTH_READY（S1 gate + S2 D 行）确认后记 ledger；② ③ 门自动放行 ⇒ **首个 1 h 窗 = Phase-2 真验收**（J2 页·NWT 审：zk-autonomy :45/:239、pool-settler :497 的 sql.* 应消失或 ≪1 s；影子 `[phase2-shadow] equal` 行开始出现）；③ 影子比对起算一周（events `phase2_shadow_mismatch` = 0 ⇒ 主路切换另出一笔）；④ 放回 kanet.env `LLAMA_CTX_SIZE=262144` + 拉 llama（J1 或 headless）；⑤ scanner（09-04 17:46Z 停）重启走 KANet-UI SOP；⑥ datadir sha 钉（债）；⑦ 结算停摆 93 盘/33735 KAS 等 READY 后议程（Owner）；⑧ IBD 期未跑的 pruning 会在空窗跑（磁盘增长债）。
+
+### (924) 2026-09-05 · NWT 4 h 摘要 20:37Z：**均值 29.87 blk/s**（1440 桶·零桶 0·最大 693）· D-b 累计 11.38 h **27.94 blk/s**（1,144,698 块）· 零异常 · kaspad WS 22.8–23.6 摆动非单调 · free 13.06 / commit 56.4（llama 停后稳）· console 19184 未重启（E 行与 headless "unset" 等下次）· 净追赶 ≈ +17.9（2026-09-05T20:37:22Z）
