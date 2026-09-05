@@ -82,6 +82,12 @@ export { estimateStorageMass };  // re-export so pool.js L9/L471 import stays va
 // #31 ② wire: v08 chunked-settle (computeSettleChunks routes aggregate/chunk; payoutRoot = chunk_0 plan_commit).
 import { computeSettleChunks } from '../lib/pool-settle-chunks.mjs';
 import { payoutRoot as computePayoutRoot } from '../lib/pool-payout-root.mjs';
+// Phase-2 C 包 P2-2 (2026-09-05): 影子比对(默认关; 开关与 A 包同: PHASE2_SHADOW_EVERY); 主路 SQL 仍内联在 legacyRefundBuilderTick 里
+import { refundSidesIdsMaterialized } from '../db/phase2-refund-queries.mjs';
+import { runShadowCompare } from '../db/phase2-shadow.mjs';
+import { resolveShadowEvery, shadowDue } from '../db/phase2-indexes-v200.mjs';
+const PHASE2_SHADOW_EVERY = resolveShadowEvery();   // 默认 0(关); 影子窗内 ≥100
+let _legacyRefundScanCalls = 0;
 
 // J2-tn r382 (Bettor 16:29 钦定): TICK_INTERVAL_MS env-configurable. Default 5min mainnet,
 // demo 期 .env 设 POOL_SETTLER_TICK_SEC=60 (= 1min) 提速 5x 整条流水.
@@ -458,7 +464,12 @@ async function legacyRefundBuilderTick() {
     // legacyRefundBuilderTick 自取 (= entry 2 OP_2 + (deadline+7200)*1000 ms via pool.js
     // bettor-refund-claim isLegacy 检 v0.7 path). maker stake 由 dispatchRefund 已 trigger 异步.
     const unfixablePlaceholders = unfixableIds.length ? unfixableIds.map(() => '?').join(',') : "''";
-    const sidesRaw = sqlite.prepare(`
+    // Phase-2 C 包 P2-2 (2026-09-05, 设计 docs/2026-09-05-j2-phase2-slow-sql-design-v0.1.md §P2-2 · Owner "C GO" ledger 905 · NWT 逐谓词对拍):
+    //   主路【仍走旧查询】——下面这段 SQL 文本一字节不改(只是从 prepare(`…`) 里拎成 _legacySidesSql 常量, 影子要用它去 LIMIT 再跑一次)。
+    //   新 MATERIALIZED 分层查询(src/db/phase2-refund-queries.mjs)只在影子里跑: PHASE2_SHADOW_EVERY(默认 0=关, 与 A 包同一开关)到期时,
+    //   两边【去 LIMIT】按 side_id 集合比, 差异 LOUD 到 events(phase2_shadow_mismatch, 含双方差集样本); 一周零差异后 Bettor 批切换主路。
+    //   影子在主路 SELECT 之后、任何 UPDATE/退款之前跑, 全 try/catch, 不影响主路; 影子自己不动 refund_attempted_at。
+    const _legacySidesSql = `
       SELECT pbs.id AS side_id, pbs.market_id, pbs.bettor_pk, pbs.side_p2sh, pbs.side_lock_tx,
              pbs.side_redeem_script_hex, pbs.stake_amount, pm.deadline, pm.protocol_version
       FROM pool_bettor_sides pbs
@@ -495,7 +506,16 @@ async function legacyRefundBuilderTick() {
         AND json_extract(pm.metadata, '$.refund_authorization') IN (${REFUND_AUTHORIZATION_SQL_IN})
       ORDER BY pbs.stake_amount ASC
       LIMIT ?
-    `).all(...unfixableIds, nowSec, (parseInt(process.env.LEGACY_REFUND_BATCH, 10) || 1) * 4);
+    `;
+    const sidesRaw = sqlite.prepare(_legacySidesSql).all(...unfixableIds, nowSec, (parseInt(process.env.LEGACY_REFUND_BATCH, 10) || 1) * 4);
+    _legacyRefundScanCalls++;
+    if (shadowDue(_legacyRefundScanCalls, PHASE2_SHADOW_EVERY)) {
+      runShadowCompare(sqlite, {
+        site: 'P2-2 legacyRefundBuilderTick sides', source: 'pool-market-settler:legacyRefundBuilderTick',
+        runNew: () => refundSidesIdsMaterialized(sqlite, unfixableIds, REFUND_AUTHORIZATION_SQL_IN, nowSec),
+        runLegacy: () => sqlite.prepare(_legacySidesSql.replace(/LIMIT \?\s*$/, '')).all(...unfixableIds, nowSec).map((r) => r.side_id),
+      });
+    }
     // 🔴 被闸挡下的必须【可计数、不静默】(设计 §10.1/§10.3(a))——否则"退款被挡住了"与"没人来
     //    claim"在读数上完全相同, 而这正是本卡要根治的那一类同形。计数与候选查询【同谓词、只去掉
     //    授权那一段】, 所以它数的就是"若无此闸本可放行"的那批, 不是另一个近似口径。
