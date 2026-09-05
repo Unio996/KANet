@@ -11678,3 +11678,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - NWT（WiFi NIC 200 ms 字节 + log 10 s 桶）：D-b 08:36:43Z 起 23 桶 5679 块 **均值 24.69 blk/s**、median 桶 208、零桶 0、最大 396（=4 批/10 s）；对照 D-a 最后干净小时（06:36–07:36Z·360 桶）14.71 ⇒ **×1.68**（我 ×1.57 同级）。NIC 180 s：25 团 10.4 MB，团尾→下团首字节 median **6.2 s 不变**（切前 6.0–6.8），但每团字节 40→58 KB/s = **×1.44**、最大团 694→1056 KB。回滚三串/IBD 错误/panic 07:45:49Z 起 0；无断连。
 - **判据前提错误（NWT 抓）**：§4 "团间隔中位 ≤4.5 s" 假设第 2 批成独立团，实际对端一轮内连续服务在飞的两个请求、并入同团——由我的 bodies 计数（≈2×99/团）分辨，NWT 的 200 ms 桶给出必然推论（团节奏不变、团变大、吞吐 ×1.4–1.7）三者同向。**v0.1.3 改口径**：每团 bodies ≈ 2×batch（或团字节翻倍）∧ 30 桶均值 ≥20 ⇒ GO 保留；团间隔不作条件（设计文档已改）。
 - 机制结论：对端延迟 = 每轮固定等待、在飞请求一起服务；深度受 C1（route 256）钉死 ⇒ **此路杠杆到此为止**；×1.9 上界未到是第 2 批传输 + 我方处理未完全重叠，预期内。NWT 30 min 后给 ≥180 桶 sustained 确认；稿 §10 提交中。
+
+### (878) 2026-09-05 · console 15196 挂死 → supervisor 第六次重启 → **4536**（08:50:01Z 监听）· **M10 v3-A 生效** · hb_guard 重起 1306846（08:51:39Z）
+- 时间线（KANet-UI 08:48Z 报 + 我核）：15196 自 20:55Z 稳 ~12 h 后，08:03/08:07/08:18Z 三次 60 s 级 curl 失败被 hb_guard 压住，08:36:26Z 一次 330 s，**08:47:32Z HB-GUARD stop（curl :3200 连续失败 600 s、端口仍 LISTEN = 挂死）→ 让位 supervisor** → 08:47:48/08:48:21/~08:48:51Z 三次 health fail → 重起 → **08:50:01Z 4536 监听**（08:51Z curl 仍 000 = 启动中，迁移检查在跑）。kaspad 侧同期无异常（blkRate 24.6/s、WS 19.3、句柄 15,859）。
+- **v3-A 首批读数（启动 2 min 内 23 行 `[diag:step] sql.*`，全在 migrate.js 启动检查）**：`SELECT id FROM events WHERE event_type='admin_confirm_by_address_removed' LIMIT…` **16,891 ms**（migrate.js:5448）· `SELECT COUNT(*) FROM payout_shards WHERE covenant_family='unknown'` 3,546 ms · `UPDATE relation_states …` 1,298 ms · 两条 identities/skills COUNT 各 ~600 ms。⇒ 冷页读形状（859/860 假设）在启动路径先显形；业务 tick 的 sql.* 待首个 ≥1 h body 窗 readout（J2 页 · NWT 审）。
+- hb_guard 1306846 08:50:16Z 起（单独顶层 nohup 形）· 到期 09-08 08:50Z · alive 文件已刷新。
+- 观察（只记）：15196 这 12 h 是昨日五连重启后的首个长稳段；挂死前 45 min 有 4 次 60–330 s 的 curl 失败递增 ⇒ 像渐进恶化非瞬断，v3-A 首窗若在该形状复现前抓到 sql.* 施害者即可对号。
