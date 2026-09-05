@@ -77,6 +77,12 @@
 - 全部在 ③ 门放行（IBD 结束）**之前**落，让放行后首个 1 h 窗直接成为验收窗；验收统一用 v3-A `sql.*` 表（五个 src 各自 0 行）+ lag ≥4 s 次数/Σ 与修前页并排。
 - 影子比对（P2-1/2/3/4）：新查询为准执行，旧查询只算集合、不参与执行，差异 LOUD 到 `events`（`event_type='phase2_shadow_mismatch'`）；一周零差异后删旧查询（单独一笔）。
 
+## 4b. NWT 复审 GREEN（v0.2.1，2026-09-05T12:2xZ）· 落码三条件（进每笔 diff 的验收）
+- **C1 表达式单源**：与 `heavy-index-v199.mjs` 同形——一个模块导出 `ZK_READY_EXPR`（字符串常量）+ `ZK_READY_INDEX_DDL`；migrate v200 与 `_scanZkAutonomyCandidates` 的查询都 import 它拼 SQL，**禁止两处手打**（表达式差一个空格以外的字符就不走索引）。
+- **C2 查询用字面量 `= 'ready'`，不用绑定参数**：本构建 `= ?` 绑 'ready' 也走索引，但那是版本行为不是契约；部分索引可用性靠"查询谓词蕴含索引谓词"，字面量才稳。测试加一向量：`EXPLAIN QUERY PLAN` 断言含 `USING INDEX idx_pool_markets_zk_ready`。
+- **C3 P2-4 前置核查 SQL**（备份副本 readonly，J2 跑、NWT 复核数字）：`SELECT count(*) FROM (SELECT DISTINCT json_extract(payload,'$.market_id') m, json_extract(payload,'$.bettor_pk') b FROM chain_events WHERE event_type='bettor_refund_available' AND json_valid(payload)) ra JOIN pool_bettor_sides s ON lower(s.market_id)=lower(ra.m) AND lower(s.bettor_pk)=lower(ra.b) WHERE s.market_id<>ra.m OR s.bettor_pk<>ra.b` 须 **= 0**；不为 0 ⇒ `COLLATE NOCASE`（连接列与索引同 NOCASE）。
+- NWT 独立实证 A′：同表达式 `= 'ready'` ⇒ `SEARCH … USING INDEX (<expr>=?)`；只索引 ready 行；`SELECT *` 列集不变；坏 JSON 写不抛；去外层括号写法也命中。**A′ 取代 A 成立。**
+
 ## 5. 未做 / 未核
 - 真实耗时只在活库上才有意义，本稿只给计划形与规模数；每项落地后用 v3-A 行做验收，不预估 ms。
 - P2-2/P2-4 的谓词等价与影子比对是 NWT/Owner 闸；本稿只给形。
