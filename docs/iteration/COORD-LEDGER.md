@@ -11655,3 +11655,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - console **15196 自 20:55:52Z 起未自然重启**（昨日 18:41–20:55Z 五次重启后首个 >7 h 稳定段；只报不归因——同期 scanner 停、M10 v2 上线、D-a exe 三变量）⇒ M10 v3-A（76773b76）仍未生效，等下次自然重启。
 - KANet-UI 最新：2026-09-05T04:26:44.818Z blk=10192870 blk=2 lag=60h lagETA(READY,cum)=95.4h blk=18711 blk=17523 
 - 无动作。NWT 盯守续到 ~05:30Z。
+
+### (874) 2026-09-05 · 🟢 **Owner GO：D-b 换 exe**（Owner 终端 ~07:35Z "D-b GO。节点现状？"）· 三条件齐 · 粘贴稿备好 · 等执行（07:37:18Z）
+- 节点现状（07:36Z 现读）：kaspad 27032 **块体相位自 20:54Z 连续 10.7 h**（无 header 相位、无断连；最后 header 行 20:46:54Z）· 近 30 桶均值 **15.18 blk/s**（99/198 交替）· compaction_started 每 ~9 min 一簇 13–20（常态）· 剪枝停 19000 · WS 20.4 GB · 句柄 16,724 · free 9.1 GB · KANet-UI 07:27Z lag **58 h**、lagETA(cum) 93.4 h、blk 10,352,953 · console 15196 连续 10.7 h 未重启（v3-A 未生效）· hb_guard 活。
+- 武装三条件：NWT GREEN ✅ · Owner GO ✅ · 块体干净窗 ✅。执行序列 = `scratch/_bettor_Db_switch_paste_2026-09-05.md`（段 1 只读核 / 段 2 `D:\kaspad-live` 两副本 + sha / 段 3 杀 27032 起新 / 段 4 我改 watchdog :17 + 15 min 闸 + §4 判别）。J1 收件箱 EXECUTE（条件式）单已放：默认 Owner 自贴，J1 只在点名时执行。
+- 预期：停机 + header 重议 ~20 min + 缺体扫描 ~8 min；回滚 = D-a 副本同参数重启。
