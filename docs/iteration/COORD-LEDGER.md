@@ -11852,3 +11852,4 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (921) 2026-09-06 · 🟢 **Owner："停 llama 可"** → 改预防性执行：J1 EXECUTE 单（停 llama-server 4976·提权）· 我已注释 kanet.env `LLAMA_CTX_SIZE`（挡 headless 自动拉回·READY 后放回）（2026-09-05T18:59:24Z）
 - 理由：IBD 期 llama 无消费者、零同步成本；J1 回合制，等 free<6 再派来不及（会被迫走 P1 ~37 min）。free 现 ~7.8、kaspad WS 23.6（+0.3 GB/h）。J1 若长时间不在线且 free 跌破 6 ⇒ 兜底再请 Owner 一行。
+- **(921 补·19:00:56Z·NWT 核 keep-down 链三点全过)**：headless `ENV_FILE=$KANET_ROOT/kanet.env` = 这份文件；加载循环 `#` 开头整行跳过 ⇒ 注释 = unset 非空串（模拟：LLAMA_CTX_SIZE=<unset>·PHASE2_SHADOW_EVERY=100·PORT=3200 不受影响）⇒ 下次 headless 打 "LLAMA_CTX_SIZE unset" 跳过；llm-watchdog 未在跑。停后验收：:8000 无监听、free/commit 前后差、下次 headless 日志 skip 原因须为 "unset"（非 "already serving"）。
