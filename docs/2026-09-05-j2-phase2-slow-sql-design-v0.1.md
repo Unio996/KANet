@@ -1,4 +1,4 @@
-# Phase-2 慢 SQL 根治设计 v0.2（P2-1…P2-5 + 横切 P2-0）
+# Phase-2 慢 SQL 根治设计 v0.2.1（P2-1…P2-5 + 横切 P2-0）
 
 > **Status**: DRAFT-FOR-REVIEW · J2 · v0.1 2026-09-05T11:4xZ → **v0.2 2026-09-05T12:0xZ**（`date -u`，吸收 NWT 预审 GREEN-conditional：P2-3 语义翻转缺陷、P2-4 LIKE 不分大小写缺陷、P2-1/P2-2/P2-0 三条条件）· 派工 Bettor（ledger 891 后）· 目标 **09-08 前 NWT GREEN**（IBD 结束 ③ 门放行前）· **不写码**。
 > v0.1→v0.2 改动一览：P2-3 SQL 改 `json_valid(...) AND json_extract(...) IS NULL`（原 `NOT(...)` 会把坏 JSON 行变成 handoff 候选，与 JS `catch { continue }` 相反）；P2-4 加"LIKE 对 ASCII 不分大小写"前置核查 + `COLLATE NOCASE` 备选，写入方改为 4 处（`:682/:790/:2163/:2437`）；P2-1 注明生成列会进 `SELECT *` 的对外 JSON（33 处 `.get()`），UI 面归 Owner，重建表须带列；P2-2 影子比对去 LIMIT 按集合比；P2-0 `analysis_limit` 本构建默认 0 ⇒ boot 不 `optimize`，ANALYZE 只具名小表、只在低负荷脚本里跑。
@@ -17,11 +17,12 @@
 |---|---|
 | 现 SQL | `SELECT id, metadata FROM pool_markets WHERE metadata LIKE '%zk_continuation%'` → JS 逐行 `JSON.parse` 再筛 `proving.status==='ready' ∧ !exhausted ∧ outpoint ∧ redeemHex` |
 | 活库计划 | `SCAN pool_markets`（4,050 行、27.6 MB 文本 LIKE）⇒ **命中 6 行**；三 tick 各扫一次 ⇒ 每 30 s 扫 83 MB；修前 75 行/h p50 0.4 s、**max 106 s**（三次 ≥60 s 大停顿的起点，两次 106 s 背靠背）|
-| 修法 A（推荐）| **VIRTUAL 生成列 + 部分索引**（零行为差、写入方不改）：`ALTER TABLE pool_markets ADD COLUMN zk_proving_ready INTEGER GENERATED ALWAYS AS (CASE WHEN json_valid(metadata) THEN (json_extract(metadata,'$.zk_continuation.proving.status') = 'ready') END) VIRTUAL; CREATE INDEX idx_pool_markets_zk_ready ON pool_markets(zk_proving_ready) WHERE zk_proving_ready = 1;` 查询改 `WHERE zk_proving_ready = 1`（JS 其余筛选原样保留，`exhausted/outpoint/redeemHex` 仍在 JS 判）。计划 → `SEARCH pool_markets USING INDEX idx_pool_markets_zk_ready (zk_proving_ready=?)`（6 行）。`json_valid` 在生成列表达式里 ⇒ 坏 JSON 行得 NULL 不抛（写路径永不因索引维护失败）|
+| **修法 A′（v0.2.1 推荐，取代 A）** | **守卫式表达式部分索引，无生成列**：`CREATE INDEX idx_pool_markets_zk_ready ON pool_markets((CASE WHEN json_valid(metadata) THEN json_extract(metadata,'$.zk_continuation.proving.status') END)) WHERE (CASE WHEN json_valid(metadata) THEN json_extract(metadata,'$.zk_continuation.proving.status') END) = 'ready'`；查询改 `WHERE (CASE WHEN json_valid(metadata) THEN json_extract(metadata,'$.zk_continuation.proving.status') END) = 'ready'`（表达式须与索引逐字相同才命中，常量放 `lib/` 一处导出）。内存库实证（J2 12:0xZ）：`SEARCH pool_markets USING INDEX idx_zk_ready_expr (<expr>=?)`、`SELECT *` 列集不变（**无对外 JSON 形状变化 ⇒ 无 Owner UI 项**）、坏 JSON 行 INSERT/UPDATE **不抛**（`json_valid` 在表达式里守卫，修法 B 的写路径风险消失）、只索引 ready 行（部分索引，6 行量级）。**重建表须带索引**的备注仍适用（索引会随表重建丢，v3-A `sql.*` 行会抓回）|
+| 修法 A（备选）| **VIRTUAL 生成列 + 部分索引**（零行为差、写入方不改；缺点 = 生成列进 `SELECT *`，见下方 🟡）：`ALTER TABLE pool_markets ADD COLUMN zk_proving_ready INTEGER GENERATED ALWAYS AS (CASE WHEN json_valid(metadata) THEN (json_extract(metadata,'$.zk_continuation.proving.status') = 'ready') END) VIRTUAL; CREATE INDEX idx_pool_markets_zk_ready ON pool_markets(zk_proving_ready) WHERE zk_proving_ready = 1;` 查询改 `WHERE zk_proving_ready = 1`（JS 其余筛选原样保留，`exhausted/outpoint/redeemHex` 仍在 JS 判）。计划 → `SEARCH pool_markets USING INDEX idx_pool_markets_zk_ready (zk_proving_ready=?)`（6 行）。`json_valid` 在生成列表达式里 ⇒ 坏 JSON 行得 NULL 不抛（写路径永不因索引维护失败）|
 | 修法 B（备选）| 纯表达式索引 `ON pool_markets(json_extract(metadata,'$.zk_continuation.proving.status'))` + 查询 `json_extract(...) = 'ready'`。少一列，但**坏 JSON 行会让该行 INSERT/UPDATE 抛错**（表达式索引维护时 `json_extract` 抛）——今天 0 坏行，但把"写失败"引进钱路相邻表，不选 |
 | 修法 C（顺带）| 三 tick 共用一次扫描（30 s 缓存）——A 落地后每次 <1 ms，无必要 |
 | 停机窗 | **不需要**：`ALTER … ADD COLUMN … VIRTUAL` 是元数据操作（O(1)）；`CREATE INDEX` 对 4,050 行各求一次 `json_extract`（27.6 MB 解析）≈ 1–3 s、持写锁 ≤3 s。可走 migrate v200（非 ② 那种 16M 行量级，boot 内建可接受；仍加 `IF NOT EXISTS` + sqlite_master 记账日志）。⚠ drizzle `schema.js` 不知道新列——生成列不入 drizzle schema 无害（drizzle 只读它声明的列）|
-| 🟡 对外形状（v0.2，NWT）| 仓内 **33 处 `SELECT * FROM pool_markets`（全是 `.get()` 单行）**：生成列会出现在 `*` 里 ⇒ 这些 market 对象多一个 `zk_proving_ready` 键（0/1/NULL）。NWT grep：无 `INSERT…SELECT *`、无行展开写回 ⇒ 不破功能；但凡有 API/UI 把整行 JSON 原样吐给前端的，就是**对外 JSON 形状变化** ⇒ 页里写明，涉 UI 归 Owner 批（或改用 `SELECT <列清单>`，另案）。备注：今后任何**重建 `pool_markets` 表**的迁移（SQLite 加 CHECK/改列都要整表重建）必须把生成列与部分索引一起带上，否则 P2-1 静默退化回全扫（v3-A `sql.*` 行会把它抓回来，但要有人看）|
+| 🟡 对外形状（v0.2，NWT；**仅修法 A 才有，A′ 无**）| 仓内 **33 处 `SELECT * FROM pool_markets`（全是 `.get()` 单行；其中 API 层 16 处：`api/pool.js` 15、`api/admin-dedup.js` 1；services 层 17 处）**：生成列会出现在 `*` 里 ⇒ 这些 market 对象多一个 `zk_proving_ready` 键（0/1/NULL）。NWT grep：无 `INSERT…SELECT *`、无行展开写回 ⇒ 不破功能；但凡有 API/UI 把整行 JSON 原样吐给前端的，就是**对外 JSON 形状变化** ⇒ 页里写明，涉 UI 归 Owner 批（或改用 `SELECT <列清单>`，另案）。备注：今后任何**重建 `pool_markets` 表**的迁移（SQLite 加 CHECK/改列都要整表重建）必须把生成列与部分索引一起带上，否则 P2-1 静默退化回全扫（v3-A `sql.*` 行会把它抓回来，但要有人看）|
 | 验收 | v3-A：`sql.all … src=src/lib/zk-autonomy-ticks.mjs:45` 行 **0**（阈 200 ms）；`EXPLAIN` 含 `idx_pool_markets_zk_ready`；候选集合前后相等（离线：临时库塞 ready/非 ready/exhausted/坏 JSON 四类行，新旧两查询 + JS 筛后 `marketId` 集合逐一相等）|
 | 风险面 | **钱路相邻**（closeTickV2/claim 广播的候选集合）：修法只改"怎么找到候选"，不改"找到后做什么"；候选集合等价靠离线测试 + 上线首窗对照（旧 LIKE 查询保留为 `_scanZkAutonomyCandidatesLegacy` 一周，每 tick 比对集合、不等则 LOUD，之后删）|
 
@@ -69,7 +70,7 @@
 ## 4. 落地顺序与打包（建议，Bettor 排）
 | 批 | 内容 | 停机 | 审 |
 |---|---|---|---|
-| A（零行为差）| P2-5 索引 + P2-1 生成列/部分索引（migrate v200，boot 内建 ≤3 s，IF NOT EXISTS + 记账）| 否 | NWT |
+| A（零行为差）| P2-5 索引 + P2-1 守卫式表达式部分索引 A′（migrate v200，boot 内建 ≤3 s，IF NOT EXISTS + 记账；A′ 无 schema 列变化 ⇒ 不再需要 Owner 批 UI 面，只剩 P2-1 查询改写本身的钱路相邻审）| 否 | NWT |
 | B（查询改写·非钱路）| P2-3 | 否 | NWT |
 | C（查询改写·钱路）| P2-2 `MATERIALIZED` 分层、P2-4 反转驱动；各带影子比对一周 | 否 | NWT + Owner |
 | D（横切）| P2-0 小表 `ANALYZE` + boot `PRAGMA optimize`；前后 EXPLAIN 清单对照 | 否（低负荷时）| NWT 单独 |
