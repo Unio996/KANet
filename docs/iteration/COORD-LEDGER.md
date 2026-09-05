@@ -11727,3 +11727,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 ### (887) 2026-09-05 · ✅ **② 复合索引建成·ACCEPTED**（脚本 09:57:15→09:58:05Z）· console 由我 headless 起（09:58:30Z·非提权）（09:58:49Z）
 - 证据副本 `console.db.pre-idx-20260905T0957Z`（+ -wal）9.5 s 复制（13,209 MB·只读永不打开写）。max_rowid 16,179,273。**CREATE INDEX idx_kaspa_tx_log_to_addr_observed: 50.0 s**（预估 2–6 min 的下界之下）· -wal 峰 1,675 MB → `wal_checkpoint(TRUNCATE)` 后 **0 MB**（文件消失）· EXPLAIN after = `SEARCH k USING INDEX idx_kaspa_tx_log_to_addr_observed (to_address=? AND observed_at>?)` + 子查询 idx_bwm_src，**无 TEMP B-TREE** · broker-intake 原查询（Trader-B 地址）**1 ms**（修前 p50 5.5–11.9 s、max 185 s）。
 - 起 console：`nohup bash kanet-start-headless.sh`（含 supervisor 双保险）由我在非提权会话起 ⇒ 以后我自己能 Stop-Process；hb_guard 待 3200 回后重起。验收（884）：boot `[migrate] v199` 记账 · ③ 15 站 skip 行 · ① since_rowid 行 · 首个 broker-intake sql.all ≪1 s（或不出现）· tg-bot 轮询 300 s · `_state.json` 仍 4 条。
+
+### (888) 2026-09-05 · ✅ **Phase-1 四项全部生效·验收全过**：console **5392**（09:58:53Z 监听·boot 9.1 s vs 上次 88 s）· HTTP 1.5 ms 应答（302）· hb_guard 1324160 重起（10:00:19Z）
+- boot：`[migrate] v199: idx_kaspa_tx_log_to_addr_observed 在(停机窗已建), 记账通过` ✅ · ③ **15 行** `[<site>] skip: node not synced (isSynced=false, reason=not-synced)` ✅ · ① `pair.scanAndIngestPairs ms=1 since_rowid=146591 max_rowid=146591`（首扫一次 2.6 s 后每 tick 1 ms）✅ · **broker-intake 自 boot 起零条 sql.* 行**（= <200 ms；修前 p50 11.9 s）✅ · 启动 60 s 内 sql.* 仅 4 行、最大 2.6 s（上次 35 行 Σ260 s）✅ · tg-bot 随 console 加载（300 s 轮询、`_state.json` 4 条待 J2 核）。
+- 停机窗总时长 **09:56:22 → 09:58:53Z = 2.5 min**（预估 5–10）。证据副本 `console.db.pre-idx-20260905T0957Z`。
+- 下一步：J2 修后首窗（≥1 h）readout 对号 884/§6 五条；NWT 核 live 证据；KANet-UI 报首个 ≥10 s lag。kaspad 36912 全程未动（25 blk/s）。
