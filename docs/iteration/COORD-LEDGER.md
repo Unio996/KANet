@@ -11857,3 +11857,4 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (922) 2026-09-05 · ✅ **llama-server 4976 已停**（J1 执行·5cc7f866·`j1-inbox/2026-09-05T19-06Z-j1-DONE-llama-4976-stopped-free-13p7GB.md`）· free 7.8 → **13.7 GB**（+5.9·与 llama WS 5.36 吻合）· kaspad 36912 WS 22.7 不受影响 · 我核：llama 进程 0、:8000 无监听（2026-09-05T19:05:50Z）
 - 拉回防线在位：kanet.env `LLAMA_CTX_SIZE` 注释（headless 打 unset 跳过）· llm-watchdog 未跑 · J1 侧无 A.5/定时重拉。**READY 后放回该行再拉 llama**（待办）。内存阈风险解除（free 13.7 vs 阈 6）；kaspad WS 涨势另看（+0.3 GB/h·NWT 19:35Z 取点）。
+- **(922 补·2026-09-05T19:36:31Z·NWT 19:35Z)** free 7.76→13.51 · commit 69.9→55.9（−14 GB）· kaspad WS **22.82（17:35Z 23.55 → 回落 0.7·非单调涨 ⇒ "+0.3 GB/h 线性 21 h 到阈"外推撤回）** · 句柄 17,702 · 近 2 h 30.18 blk/s · 17:35Z 起断连/错误/溢出 0。
