@@ -1,4 +1,6 @@
-# Phase-2 慢 SQL 根治设计 v0.2.2（P2-1…P2-5 + 横切 P2-0）
+# Phase-2 慢 SQL 根治设计 v0.2.3（P2-1…P2-5 + 横切 P2-0）
+
+> **v0.2.3（2026-09-05T11:3xZ · `date -u`）改动一览**：(1) **影子比对默认 0=关**（NWT 审 A 包条件）：旧 LIKE 全扫 0.4–18 s 同步阻塞、三 tick 各每 N 次 ⇒ 默认开会把 P2-1 要治的停顿以 ~18% 占空比留在活库；只在 Bettor 排的影子窗里 `PHASE2_SHADOW_EVERY=<N≥100>` 打开，`resolveShadowEvery/shadowDue` 单源 + 测试向量"默认 ⇒ 永不调旧查询"。(2) **P2-3 谓词按旧 JS 逐字保真**：v0.2 的 `json_valid AND … IS NULL` 会漏 4 类（`metadata` NULL/''、`zk_continuation` 为 null/false/0/''——旧 JS `row.metadata || '{}'` 与假值判都算候选），改为 `metadata IS NULL OR metadata = '' OR (json_valid AND COALESCE(json_extract(...),0) IN (0,''))`，测试 12 类行对拍；且**必须 `CROSS JOIN` 钉外层为 `payout_shards`**，否则无 stat1 的规划器选 `SCAN pool_markets`（4,050 行 27.6 MB 全过 json_valid = 把 P2-1 刚治的全扫换名留下）。(3) **§4c 两口径钉死 SQL 原文**（NWT 复核：候选集 95=95 用 claim-auto 完整谓词；pair 匹配集 145=145 不带三过滤），持久脚本 `kasia-console/scratch/_j2_p2_c3_casecheck.mjs` 副本重跑复现。
 
 > **Status**: DRAFT-FOR-REVIEW · J2 · v0.1 2026-09-05T11:4xZ → **v0.2 2026-09-05T12:0xZ**（`date -u`，吸收 NWT 预审 GREEN-conditional：P2-3 语义翻转缺陷、P2-4 LIKE 不分大小写缺陷、P2-1/P2-2/P2-0 三条条件）· 派工 Bettor（ledger 891 后）· 目标 **09-08 前 NWT GREEN**（IBD 结束 ③ 门放行前）· **不写码**。
 > v0.1→v0.2 改动一览：P2-3 SQL 改 `json_valid(...) AND json_extract(...) IS NULL`（原 `NOT(...)` 会把坏 JSON 行变成 handoff 候选，与 JS `catch { continue }` 相反）；P2-4 加"LIKE 对 ASCII 不分大小写"前置核查 + `COLLATE NOCASE` 备选，写入方改为 4 处（`:682/:790/:2163/:2437`）；P2-1 注明生成列会进 `SELECT *` 的对外 JSON（33 处 `.get()`），UI 面归 Owner，重建表须带列；P2-2 影子比对去 LIMIT 按集合比；P2-0 `analysis_limit` 本构建默认 0 ⇒ boot 不 `optimize`，ANALYZE 只具名小表、只在低负荷脚本里跑。
@@ -52,7 +54,7 @@
 |---|---|
 | 现 SQL | `SELECT pm.id, ps.payout_redeem_hex, pm.metadata FROM payout_shards ps JOIN pool_markets pm ON pm.id = ps.logical_market_id` → JS 逐行 parse metadata、跳过已有 `zk_continuation`、`readPayoutShardV2AttestedState(redeemHex)`（Buffer 读，廉价）|
 | 活库计划 | `SCAN ps`（722）→ `SEARCH pm (id=?)`：计划形本身合理；成本在**每 tick 搬运 722 份 metadata（≈5 MB）并 JS 解析**；修前 88 行/h p50 1.2 s、max 45 s（max 大概率是被别人堵住时的排队墙钟，见 ④ 判据"受害者"）|
-| 修法（推荐）| 不取 metadata 血：`SELECT pm.id AS marketId, ps.payout_redeem_hex AS redeemHex FROM payout_shards ps JOIN pool_markets pm ON pm.id = ps.logical_market_id WHERE json_valid(pm.metadata) AND json_extract(pm.metadata,'$.zk_continuation') IS NULL`；候选（通常 0–几个）再按 id 单取 `metadata` 供下游 `meta.zk_handoff_pending`（`:284` 用到）。SQL 侧对 722 行各做一次 `json_extract`（≈5 MB 解析，10–30 ms）但**不再把 5 MB 传给 JS 再 parse 一遍**。若 P2-1 修法 A 落地，可再加生成列 `zk_has_continuation`（同表达式）让这条也走索引——增益小，先不做。🔴 **v0.1 缺陷（NWT 抓）**：v0.1 写的是 `WHERE NOT (json_valid(...) AND json_extract(...) IS NOT NULL)`——对坏 JSON 行 `NOT(false)=TRUE` ⇒ 坏 JSON 市场会变成 handoff 候选，而现 JS 是 `catch { continue }` **跳过**它。v0.2 改为两条件同真才算候选，与 JS 等价（坏 JSON ⇒ `json_valid`=0 ⇒ 不候选）。教训进验收：离线四类里"坏 JSON"那类必须断言**不在**候选集 |
+| 修法（推荐）| 不取 metadata 血：`SELECT pm.id AS marketId, ps.payout_redeem_hex AS redeemHex FROM payout_shards ps CROSS JOIN pool_markets pm ON pm.id = ps.logical_market_id WHERE (pm.metadata IS NULL OR pm.metadata = '' OR (json_valid(pm.metadata) AND COALESCE(json_extract(pm.metadata,'$.zk_continuation'), 0) IN (0, '')))`（🔴 **v0.2.3 两处修正**：① 谓词按旧 JS 逐字保真——旧 JS `JSON.parse(row.metadata || '{}')` 把 NULL/'' 当 `{}`，`if (meta.zk_continuation) continue` 对 null/false/0/'' 不跳 ⇒ 这 4+2 类都是候选，v0.2 的 `json_valid AND … IS NULL` 会漏掉；`json_extract` 对 false/0 ⇒ 0、'' ⇒ ''、缺失/null ⇒ NULL、对象 ⇒ 文本、'0' ⇒ 文本 '0'（≠ 整数 0，与 JS '0' 真值一致）。② `CROSS JOIN` 钉外层 = `payout_shards`：普通 JOIN 时规划器（无 stat1）实测选 `SCAN pool_markets`(4,050) + ps 主键点查 ⇒ 4,050 份 metadata 全过 `json_valid` = 27.6 MB 全扫换名留下；CROSS JOIN 是 SQLite 的显式外层指令 ⇒ `SCAN ps`(722) + pm 点查，谓词只对 722 行求值，测试 V5 断言计划形）；候选（通常 0–几个）再按 id 单取 `metadata` 供下游 `meta.zk_handoff_pending`（`:284` 用到）。SQL 侧对 722 行各做一次 `json_extract`（≈5 MB 解析，10–30 ms）但**不再把 5 MB 传给 JS 再 parse 一遍**。若 P2-1 修法 A 落地，可再加生成列 `zk_has_continuation`（同表达式）让这条也走索引——增益小，先不做。🔴 **v0.1 缺陷（NWT 抓）**：v0.1 写的是 `WHERE NOT (json_valid(...) AND json_extract(...) IS NOT NULL)`——对坏 JSON 行 `NOT(false)=TRUE` ⇒ 坏 JSON 市场会变成 handoff 候选，而现 JS 是 `catch { continue }` **跳过**它。v0.2 改为两条件同真才算候选，与 JS 等价（坏 JSON ⇒ `json_valid`=0 ⇒ 不候选）。教训进验收：离线四类里"坏 JSON"那类必须断言**不在**候选集 |
 | 停机窗 | 不需要（查询改写 + 候选补取）|
 | 验收 | `sql.all … zk-autonomy-ticks.mjs:239` 行 0；离线：临时库构造 有/无 `zk_continuation`、坏 JSON、redeem 非法 四类，新旧候选集合相等 |
 | 风险面 | 钱路相邻（handoff 广播候选）：候选集合等价靠离线测试 + 影子比对一周 |
@@ -75,7 +77,7 @@
 | C（查询改写·钱路）| P2-2 `MATERIALIZED` 分层、P2-4 反转驱动；各带影子比对一周 | 否 | NWT + Owner |
 | D（横切）| P2-0 小表 `ANALYZE` + boot `PRAGMA optimize`；前后 EXPLAIN 清单对照 | 否（低负荷时）| NWT 单独 |
 - 全部在 ③ 门放行（IBD 结束）**之前**落，让放行后首个 1 h 窗直接成为验收窗；验收统一用 v3-A `sql.*` 表（五个 src 各自 0 行）+ lag ≥4 s 次数/Σ 与修前页并排。
-- 影子比对（P2-1/2/3/4）：新查询为准执行，旧查询只算集合、不参与执行，差异 LOUD 到 `events`（`event_type='phase2_shadow_mismatch'`）；一周零差异后删旧查询（单独一笔）。
+- 影子比对（P2-1/2/3/4）：**默认关**（`PHASE2_SHADOW_EVERY` 缺省 0；v0.2.3 · NWT 条件：旧查询本身就是要治的全扫，默认开 = 以 ~18% 占空比把停顿留在活库、修后窗被自己污染），只在 Bettor 排的影子窗里设 N ≥ 100（每 tick ~50 min 一次）；新查询为准执行，旧查询只算集合、不参与执行，差异 LOUD 到 `events`（`event_type='phase2_shadow_mismatch'`）；一周零差异后删旧查询（单独一笔）。
 
 ## 4b. NWT 复审 GREEN（v0.2.1，2026-09-05T12:2xZ）· 落码三条件（进每笔 diff 的验收）
 - **C1 表达式单源**：与 `heavy-index-v199.mjs` 同形——一个模块导出 `ZK_READY_EXPR`（字符串常量）+ `ZK_READY_INDEX_DDL`；migrate v200 与 `_scanZkAutonomyCandidates` 的查询都 import 它拼 SQL，**禁止两处手打**（表达式差一个空格以外的字符就不走索引）。
@@ -89,10 +91,16 @@
 | NWT C3 SQL：`lower()` 相等而原值不等的 (side, event) 对 | **0** ✔ |
 | `bettor_refund_available` 事件 / 其中 `json_valid` | 124 / 124 |
 | DISTINCT (market_id, bettor_pk) 对 | 116 |
-| 新法精确 JOIN 命中的 side 行 | **145** |
-| 旧法 LIKE（原谓词逐字）命中的 side 行 | **145**（= 新法，真实数据上等价的直接证据；此计数未加 claim_txid/side_lock_tx/redeem 三过滤，两边同口径）|
-| 耗时（副本上 5 条查询合计）| 2.6 s |
-⇒ P2-4 可用 `=` 精确比较，不需 `COLLATE NOCASE`；落地时仍保留影子比对一周。数字待 NWT 复核（副本已删，复核需再 cp 一次）。
+| **口径 A · pair 匹配集**（不带 claim/lock/redeem 三过滤）：新法精确 JOIN 命中的 side 行 / 旧法 LIKE 命中的 side 行 | **145 / 145** |
+| **口径 B · 候选集**（`bettor-refund-claim-auto.mjs:45-57` 完整谓词：`claim_txid IS NULL ∧ side_lock_tx ∧ side_redeem_script_hex` + `JOIN pool_markets`）：新法 / 旧法 | **95 / 95**（NWT 独立复核同数；145 里 50 个是已 claim 的 side，不是候选）|
+| 耗时（副本上 7 条查询合计，2026-09-05T11:29Z 重跑）| 11.7 s |
+⇒ 两口径下 old = new 各自成立，P2-4 可用 `=` 精确比较，不需 `COLLATE NOCASE`；落地时仍保留影子比对一周（默认关，影子窗内开）。
+🔴 **SQL 原文钉死**（v0.2.3 · 首次 11:18Z 那份脚本未留档，v0.2.3 改为持久脚本 `kasia-console/scratch/_j2_p2_c3_casecheck.mjs`，副本 readonly 重跑复现上表全部数字，输出 `…/_j2_p2_c3_casecheck_out.txt`）：
+- `RA` = `SELECT DISTINCT json_extract(payload,'$.market_id') AS market_id, json_extract(payload,'$.bettor_pk') AS bettor_pk FROM chain_events WHERE event_type = 'bettor_refund_available' AND json_valid(payload)`
+- `OLD_EXISTS` = `EXISTS (SELECT 1 FROM chain_events ce WHERE ce.event_type = 'bettor_refund_available' AND ce.payload LIKE '%"market_id":"' || s.market_id || '"%' AND ce.payload LIKE '%"bettor_pk":"' || s.bettor_pk || '"%')`（claim-auto 现谓词逐字）
+- C3：`SELECT COUNT(*) FROM (RA) ra JOIN pool_bettor_sides s ON lower(s.market_id) = lower(ra.market_id) AND lower(s.bettor_pk) = lower(ra.bettor_pk) WHERE NOT (s.market_id = ra.market_id AND s.bettor_pk = ra.bettor_pk)` ⇒ 0
+- A-new：`SELECT COUNT(*) FROM pool_bettor_sides s WHERE EXISTS (SELECT 1 FROM (RA) ra WHERE ra.market_id = s.market_id AND ra.bettor_pk = s.bettor_pk)` ⇒ 145；A-old：`… FROM pool_bettor_sides s WHERE OLD_EXISTS` ⇒ 145
+- B-new：`SELECT COUNT(*) FROM pool_bettor_sides s JOIN pool_markets m ON m.id = s.market_id WHERE s.claim_txid IS NULL AND s.side_lock_tx IS NOT NULL AND s.side_redeem_script_hex IS NOT NULL AND EXISTS (SELECT 1 FROM (RA) ra WHERE ra.market_id = s.market_id AND ra.bettor_pk = s.bettor_pk)` ⇒ 95；B-old：同前缀 `AND OLD_EXISTS` ⇒ 95
 
 ## 5. 未做 / 未核
 - 真实耗时只在活库上才有意义，本稿只给计划形与规模数；每项落地后用 v3-A 行做验收，不预估 ms。
