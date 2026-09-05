@@ -11835,3 +11835,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (915) 2026-09-05 · NWT 16:17Z：重连后 66 min **均值 29.45 blk/s**（396 桶·零桶 0·异常 0）· D-b 累计 body 2,539 桶 **26.75 blk/s** · WS 23.08 GB（涨·P2 阈 30 内·只报）· 净追赶 ≈ +19 blk/s（本小时）（16:17:32Z）
 - KANet-UI 最新（feeder）：2026-09-05T16:04:06.654Z lag=48h lagETA(READY,cum)=74.0h lagETA(READY,6h)=33.7h 
+
+### (916) 2026-09-05 · 内存抬头（KANet-UI 16:23Z physFree **6.9 GB**·阈 6·15:40Z 7.9 → 缓降 ~0.14 GB/10 min）· 我核分布（16:2xZ）：total 61.6 · kaspad 36912 **WS 23.14 / priv 25.38 GB**（P2 封顶区 23–24）· **llama-server 4976 WS 4.99 / priv 13.71 GB** · Memory Compression 2.26 · 38 个 node 合计 4.72 · claude ×4 ≈1.6 · standby 6.78（可回收）· modified 0.01（16:24:26Z）
+- **预案（跌破 6 GB 时的顺序）**：① 先停 **llama-server**（IBD 期 agents 不能行动、console 结算类 tick 全在 ③ 门外，LLM 无消费者；释放 5–13 GB；零 IBD 成本）→ ② 仍不够才 P1（去 `--rocksdb-cache-size` 重启 kaspad·−8 GB·IBD 周期 ~37 min·块率不受影响因对端锁定，但本机 IO/CPU 回升）。① 是产品面服务，**先请 Owner 一句话预授权**；不预授权则跌破即走 ②（J1 EXECUTE 单）。
