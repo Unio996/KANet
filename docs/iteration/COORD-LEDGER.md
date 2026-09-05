@@ -11775,3 +11775,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - 处置规则（KANet-UI）：收到 completed/killed 即重挂单实例，不再 nohup while-true（本机会增殖）。更强抗收割若需要走 supervisor 侧起，不在其 session。
 
 ### (898) 2026-09-05 · A 包 NWT **GREEN-conditional**（必改：影子比对默认 0、只在影子窗开且 ≥100——否则旧 LIKE 全扫每 ~100 s 一次 18 s 阻塞留 ~18% 占空比）· C3 NWT 亲核 0（95=95·J2 145=145 谓词集不同 → J2 钉 SQL 原文入 §4c）· P2-2 MATERIALIZED 证据闭合 ⇒ C 材料待 §4c 钉完即上 Owner（11:23:18Z）
+
+### (899) 2026-09-05 · C 包材料闭合（NWT §13 33882096 已推）：C3 145 vs 95 口径闭合（145 = 命中事件对全部 side 含 50 已 claim；95 = claim-auto 完整谓词真实候选集；两口径 old=new 均成立）· P2-2 MATERIALIZED 证据闭合 ⇒ **C（P2-2 退款闸改写 / P2-4 自动 claim 反转驱动）上 Owner**（11:25:00Z）
+- 上线形：影子比对一周（新旧查询结果集逐 tick 比对，差异 LOUD 到 events；零差异才切）· 谓词只搬不改 · 各单笔 pathspec · NWT 审 diff · 我批 apply。kaspad D-b 稳态无异常（NWT 盯守续到 ~13:00Z）。
