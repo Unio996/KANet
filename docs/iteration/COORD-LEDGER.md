@@ -11784,3 +11784,7 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - 影子窗打开形 = `PHASE2_SHADOW_EVERY=100` env + 重启一次（并入 ③ 放行前的计划内重启；关闭再重启一次或随自然重启）。未 apply/未 commit/未推。
 
 ### (901) 2026-09-05 · ✅ A 包 v2 + B 包 NWT **GREEN**（B 两处偏离独立核：17 类 metadata 形差分候选集逐类相同；CROSS JOIN 计划复现）→ 我批 apply A→B（各单笔不推·hash 报我再推·随 console 自然重启承载）（11:34:03Z）
+
+### (902) 2026-09-05 · ✅ **Phase-2 A（06f486f3·v200 两索引 + zk 查询改索引·影子默认 0）与 B（f5a78cd3·P2-3 handoff 候选不搬 metadata）落地已推**（NWT GREEN-final 逐行 = 审过补丁）· 设计 v0.2.3 31162ce1 · 生效随 console 自然重启（看 `[migrate] v200 … 建完 N ms` ≤3 s）（11:37:11Z）
+- D（ANALYZE 5 张具名小表脚本）NWT GREEN-conditional：(a) `busy_timeout=10000` + 低负荷窗（chain_events 23 万行持写锁数秒）；(b) **验收看 console 自己的 sql.* 行在下一次自然重启后**（模块级缓存 prepared statement 保留旧计划），脚本 after 清单只是预告；任何 🔶CHANGED 变差 ⇒ `--rollback`（DROP sqlite_stat1）。我排：与 ③ 放行前的计划内重启同窗（先 ANALYZE 再重启）。
+- C（P2-2/P2-4 钱路）等 Owner "C GO"。
