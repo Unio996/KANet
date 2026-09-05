@@ -1,4 +1,4 @@
-# Phase-2 慢 SQL 根治设计 v0.2.1（P2-1…P2-5 + 横切 P2-0）
+# Phase-2 慢 SQL 根治设计 v0.2.2（P2-1…P2-5 + 横切 P2-0）
 
 > **Status**: DRAFT-FOR-REVIEW · J2 · v0.1 2026-09-05T11:4xZ → **v0.2 2026-09-05T12:0xZ**（`date -u`，吸收 NWT 预审 GREEN-conditional：P2-3 语义翻转缺陷、P2-4 LIKE 不分大小写缺陷、P2-1/P2-2/P2-0 三条条件）· 派工 Bettor（ledger 891 后）· 目标 **09-08 前 NWT GREEN**（IBD 结束 ③ 门放行前）· **不写码**。
 > v0.1→v0.2 改动一览：P2-3 SQL 改 `json_valid(...) AND json_extract(...) IS NULL`（原 `NOT(...)` 会把坏 JSON 行变成 handoff 候选，与 JS `catch { continue }` 相反）；P2-4 加"LIKE 对 ASCII 不分大小写"前置核查 + `COLLATE NOCASE` 备选，写入方改为 4 处（`:682/:790/:2163/:2437`）；P2-1 注明生成列会进 `SELECT *` 的对外 JSON（33 处 `.get()`），UI 面归 Owner，重建表须带列；P2-2 影子比对去 LIMIT 按集合比；P2-0 `analysis_limit` 本构建默认 0 ⇒ boot 不 `optimize`，ANALYZE 只具名小表、只在低负荷脚本里跑。
@@ -31,7 +31,7 @@
 |---|---|
 | 现 SQL | `SELECT pbs.…, pm.deadline, pm.protocol_version FROM pool_bettor_sides pbs JOIN pool_markets pm ON pm.id = pbs.market_id WHERE ( (pm.protocol_version IS NULL OR = 'v0.5') OR pm.id IN (<unfixable>) OR (pm.protocol_status IN ('cancelled','refunded') AND pm.protocol_version IN ('v0.6','v0.7')) ) AND pm.deadline <= ? AND pbs.side_lock_tx IS NOT NULL AND pbs.claim_txid IS NULL AND (pbs.refund_attempted_at IS NULL OR < datetime('now','-1 hour')) AND json_valid(pm.metadata) AND json_extract(pm.metadata,'$.refund_authorization') IN (…) ORDER BY pbs.stake_amount ASC LIMIT ?` |
 | 活库计划 | `SEARCH pbs USING INDEX idx_pool_sides_side_lock_tx_unique (side_lock_tx>?)` → `SEARCH pm (id=?)` → `TEMP B-TREE FOR ORDER BY`：sides 驱动 33,859 行，**每 side 求一次 `json_extract(pm.metadata)`**（≈230 MB JSON 解析/tick）；修前 50 行/h p50 1.3 s、max 69 s |
-| 修法（推荐）| **`WITH m AS MATERIALIZED (…市场谓词逐字搬家…) SELECT … FROM m JOIN pool_bettor_sides pbs ON pbs.market_id = m.id WHERE <sides 谓词逐字> ORDER BY … LIMIT ?`**。计划 → `MATERIALIZE m: SEARCH pm USING INDEX idx_pool_markets_deadline (deadline<?)` → `SCAN m` → `SEARCH pbs USING INDEX idx_pool_sides_market (market_id=?)`：市场 4,050 行各解析一次 metadata（27.6 MB，≈50–100 ms），sides 按索引点查。`MATERIALIZED` 让计划**不依赖统计**（P2-0 落不落都成立）。谓词一字不改、只是分层：`pm.*` 条件进 CTE，`pbs.*` 条件留外层，`ORDER BY/LIMIT` 不动 ⇒ 结果集合与顺序相等（LIMIT 内 stake 相等行的并列顺序 SQLite 本就未定义，前后同样未定义，不算变化——NWT 判）|
+| 修法（推荐）| **`WITH m AS MATERIALIZED (…市场谓词逐字搬家…) SELECT … FROM m JOIN pool_bettor_sides pbs ON pbs.market_id = m.id WHERE <sides 谓词逐字> ORDER BY … LIMIT ?`**。计划 → `MATERIALIZE m: SEARCH pm USING INDEX idx_pool_markets_deadline (deadline<?)` → `SCAN m` → `SEARCH pbs USING INDEX idx_pool_sides_market (market_id=?)` → **`USE TEMP B-TREE FOR ORDER BY` 仍在**（v0.2.2，NWT 抓：`ORDER BY stake_amount` 的排序没消失，只是排的是过滤后的 side 集合而不是 36k）：市场 4,050 行各解析一次 metadata（27.6 MB，≈50–100 ms），sides 按索引点查。⚠ 关键字 **`MATERIALIZED` 必须写**——脚本 v0.1 版漏了它，SQLite 把 CTE 展平后计划与 BEFORE 逐行相同（NWT 复现抓出，脚本已修重跑）。`MATERIALIZED` 让计划**不依赖统计**（P2-0 落不落都成立）。谓词一字不改、只是分层：`pm.*` 条件进 CTE，`pbs.*` 条件留外层，`ORDER BY/LIMIT` 不动 ⇒ 结果集合与顺序相等（LIMIT 内 stake 相等行的并列顺序 SQLite 本就未定义，前后同样未定义，不算变化——NWT 判）|
 | 停机窗 | 不需要（纯查询改写）|
 | 验收 | `sql.all … src=…pool-market-settler.js:497` 行 0；EXPLAIN 含 `MATERIALIZE m`；离线：临时库构造三入口各 ≥2 市场 × 多 side（含 `refund_attempted_at` 新旧、`claim_txid` 有无、坏 JSON 市场）新旧查询结果 **逐行相等**（同 `ORDER BY stake_amount, side_id` 归一后比）。🟡 v0.2（NWT）：**影子比对去掉 LIMIT 按集合比**（或 LIMIT 放大到 ≥ 全量），否则 LIMIT 边界上 `stake_amount` 并列行两边取到不同行 = 假阳性 |
 | 风险面 | 🔴 **钱路**：这条 SELECT 就是 P1「验不成 ≠ 可以退款」授权闸（`docs/2026-08-04-p1-…` §10.1）——它选出的行会被拿去发退款。任何谓词漂移 = 闸失效。⇒ 改写只允许"搬家不改字"，NWT 逐谓词对拍；上线保留旧查询影子比对一周（同 P2-1 法）；由 Owner 批（用户面/钱路）|
@@ -82,6 +82,17 @@
 - **C2 查询用字面量 `= 'ready'`，不用绑定参数**：本构建 `= ?` 绑 'ready' 也走索引，但那是版本行为不是契约；部分索引可用性靠"查询谓词蕴含索引谓词"，字面量才稳。测试加一向量：`EXPLAIN QUERY PLAN` 断言含 `USING INDEX idx_pool_markets_zk_ready`。
 - **C3 P2-4 前置核查 SQL**（备份副本 readonly，J2 跑、NWT 复核数字）：`SELECT count(*) FROM (SELECT DISTINCT json_extract(payload,'$.market_id') m, json_extract(payload,'$.bettor_pk') b FROM chain_events WHERE event_type='bettor_refund_available' AND json_valid(payload)) ra JOIN pool_bettor_sides s ON lower(s.market_id)=lower(ra.m) AND lower(s.bettor_pk)=lower(ra.b) WHERE s.market_id<>ra.m OR s.bettor_pk<>ra.b` 须 **= 0**；不为 0 ⇒ `COLLATE NOCASE`（连接列与索引同 NOCASE）。
 - NWT 独立实证 A′：同表达式 `= 'ready'` ⇒ `SEARCH … USING INDEX (<expr>=?)`；只索引 ready 行；`SELECT *` 列集不变；坏 JSON 写不抛；去外层括号写法也命中。**A′ 取代 A 成立。**
+
+## 4c. C3 前置核查结果（2026-09-05T11:18Z · Bettor 批的形式：`cp` 证据副本 `console.db.pre-idx-20260905T0957Z`(+wal) 到 `kasia-console/scratch/_p24_casecheck.db`，readonly 打开跑，跑完删副本）
+| 量 | 值 |
+|---|---|
+| NWT C3 SQL：`lower()` 相等而原值不等的 (side, event) 对 | **0** ✔ |
+| `bettor_refund_available` 事件 / 其中 `json_valid` | 124 / 124 |
+| DISTINCT (market_id, bettor_pk) 对 | 116 |
+| 新法精确 JOIN 命中的 side 行 | **145** |
+| 旧法 LIKE（原谓词逐字）命中的 side 行 | **145**（= 新法，真实数据上等价的直接证据；此计数未加 claim_txid/side_lock_tx/redeem 三过滤，两边同口径）|
+| 耗时（副本上 5 条查询合计）| 2.6 s |
+⇒ P2-4 可用 `=` 精确比较，不需 `COLLATE NOCASE`；落地时仍保留影子比对一周。数字待 NWT 复核（副本已删，复核需再 cp 一次）。
 
 ## 5. 未做 / 未核
 - 真实耗时只在活库上才有意义，本稿只给计划形与规模数；每项落地后用 v3-A 行做验收，不预估 ms。
