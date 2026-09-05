@@ -11798,3 +11798,7 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (904) 2026-09-05 · NWT D-b 4 h 摘要（08:36:43→12:37Z）：**均值 25.76 blk/s**（逐小时 25.4–26.4）· 零断连零错误 · WS 20.1 GB · compaction 每小时 126–224（比 D-a 稳态 30–60 高·与块速 ×1.7 同向·只报）· 净追赶 ≈ +15.8 blk/s（标称口径）（12:38:23Z）
 - console 仍 5392（09:58Z 起未自然重启 ⇒ v200 索引未建）。KANet-UI 最新：2026-09-05T12:24:44.307Z blkRate=24.9/s lag=53h lagETA(READY,cum)=83.2h lagETA(READY,6h)=54.7h 
+
+### (905) 2026-09-05 · 🟢 **Owner GO：Phase-2 C 包**（Owner 终端 "C GO"·13:07:23Z）
+- 范围：P2-2 `pool-market-settler.js:497` 退款授权闸查询改写（`WITH m AS MATERIALIZED` 分层·deadline 索引→点查 sides·谓词只搬不改·ORDER BY stake_amount TEMP B-TREE 仍在（过滤后集合））；P2-4 `bettor-refund-claim-auto.mjs:57` 自动 claim 候选反转驱动（json_extract·LIKE→`=`·C3 前置核查 0·95=95 / 145=145）。
+- 上线形：**影子比对一周**——新旧查询结果集逐 tick 集合比对（去 LIMIT），差异 LOUD 到 events；一周零差异才切主路；`PHASE2_SHADOW_EVERY` 默认 0、影子窗由我排（env + 计划内重启）。流程：J2 镜像 diff 各单笔 → NWT 逐笔审（重点：谓词逐字、驱动表、影子比对不改主路行为）→ 我批 apply → 随 console 重启承载。
