@@ -24,6 +24,7 @@ import { readPayoutShardV2AttestedState } from './bshard-close-enforce.mjs';
 import { getMarketBets } from './pool-bettor-sides-query.mjs';
 import { deriveCloseFeeLeaves } from '../services/bshard-close-voter.js';
 import { randomUUID } from 'crypto';
+import { zkReadyCandidateRows, zkLegacyLikeRows, resolveShadowEvery, shadowDue } from '../db/phase2-indexes-v200.mjs';   // Phase-2 A 包 P2-1 A′: 候选行 SQL 单源(表达式常量与索引 DDL 同文件); 影子节奏(默认关)
 
 const log = (...a) => console.log('[zk-autonomy]', new Date().toISOString().slice(11, 19), ...a);
 
@@ -42,8 +43,12 @@ function _writeZkAutonomyErrorEvent(scope, marketId, message) {
  * parseCloseZkV2State 现读精确路由(下方 §注1 对称守卫), 不在这里按 closed 过滤(那需要先 parse redeemHex,
  * 放在各 tick 自己的 per-market 处理段, 避免这个共享扫描函数意外抛错影响另一个 tick)。
  */
-function _scanZkAutonomyCandidates() {
-  const rows = sqlite.prepare(`SELECT id, metadata FROM pool_markets WHERE metadata LIKE '%zk_continuation%'`).all();
+// Phase-2 A 包 P2-1 A′ (2026-09-05, 设计 docs/2026-09-05-j2-phase2-slow-sql-design-v0.1.md §P2-1 · NWT C1/C2 · Bettor 派工 894):
+//   SQL 从 `metadata LIKE '%zk_continuation%'`(4,050 行 27.6 MB 全扫找 6 行, max 106 s, 三次 ≥60 s 停顿起点)改为守卫式表达式部分索引查询
+//   (ZK_READY_ROWS_SQL, 字面量 = 'ready', 表达式常量单源 src/db/phase2-indexes-v200.mjs)。JS 筛(exhausted/outpoint/redeemHex)一字不动 ⇒ 候选集合不变。
+//   影子比对(一周后单独一笔删): 每 PHASE2_SHADOW_EVERY 次用旧 LIKE 查询再算一次候选集合, 不等 ⇒ LOUD + events 行; 影子只算集合, 不参与执行。
+//   🔴 默认 **0 = 关**(A 包 v2 · NWT 条件): 旧 LIKE 全扫 0.4–18 s 同步阻塞, 默认开会把 P2-1 要治的停顿以影子形式留在活库; 只在 Bettor 排的影子窗里设 PHASE2_SHADOW_EVERY ≥ 100。
+function _filterZkCandidateRows(rows) {
   const out = [];
   for (const row of rows) {
     let meta; try { meta = JSON.parse(row.metadata || '{}'); } catch { continue; }
@@ -52,6 +57,23 @@ function _scanZkAutonomyCandidates() {
     if (!zc.proving || zc.proving.status !== 'ready') continue;
     if (!zc.outpoint || !zc.redeemHex) continue;
     out.push({ marketId: row.id, zc });
+  }
+  return out;
+}
+const PHASE2_SHADOW_EVERY = resolveShadowEvery();   // 默认 0(关); 影子窗内 ≥100
+let _zkScanCalls = 0;
+function _scanZkAutonomyCandidates() {
+  const out = _filterZkCandidateRows(zkReadyCandidateRows(sqlite));
+  _zkScanCalls++;
+  if (shadowDue(_zkScanCalls, PHASE2_SHADOW_EVERY)) {
+    try {
+      const legacy = _filterZkCandidateRows(zkLegacyLikeRows(sqlite)).map((c) => c.marketId).sort();
+      const fresh = out.map((c) => c.marketId).sort();
+      if (JSON.stringify(legacy) !== JSON.stringify(fresh)) {
+        log(`🔴 phase2_shadow_mismatch P2-1: new=[${fresh.join(',')}] legacy=[${legacy.join(',')}]`);
+        _writeZkAutonomyErrorEvent('phase2_shadow_mismatch_p2_1', fresh.length ? fresh[0] : '-', `new=${fresh.length} legacy=${legacy.length} diff=${[...new Set([...fresh, ...legacy])].filter((x) => !(fresh.includes(x) && legacy.includes(x))).join(',')}`);
+      }
+    } catch (e) { log(`phase2 shadow compare fail (non-fatal): ${e.message}`); }
   }
   return out;
 }

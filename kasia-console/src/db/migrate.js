@@ -8,6 +8,7 @@ import { categorizeMarket } from '../lib/market-category.js';
 import { classifyPayoutShardFamily } from '../lib/bshard-payout-family-coherence.mjs';
 import { M0C1_GRANT_TABLE, M0C1_GRANT_DDL } from './m0c1-grant-registry-schema.js';
 import { ensureKaspaTxLogToAddrObservedIndex } from './heavy-index-v199.mjs';   // v199 (Phase-1 ②): 记账式复合索引迁移
+import { ensurePhase2IndexesV200 } from './phase2-indexes-v200.mjs';   // v200 (Phase-2 A 包): P2-5 + P2-1 A′ 索引, boot 内建
 
 export function runMigrations() {
   sqlite.exec(`
@@ -5780,5 +5781,10 @@ export function runMigrations() {
   //   🔴 本块【只记账不建】(裸 IF NOT EXISTS 会在 boot 自建 16M 行索引卡住数分钟): 索引由停机窗脚本建(scratch/_j2_p1_kaspa_tx_log_index_window.mjs),
   //   这里查 sqlite_master —— 在 ⇒ 记账; 不在 ⇒ LOUD 警告不建; KANET_MIGRATE_BUILD_HEAVY_INDEX=1 才在此建。逻辑与测试在 ./heavy-index-v199.mjs / .test.mjs。
   ensureKaspaTxLogToAddrObservedIndex(sqlite);
+  // ── v200 (2026-09-05, J2 · Phase-2 A 包, 设计 docs/2026-09-05-j2-phase2-slow-sql-design-v0.1.md v0.2.1 NWT GREEN · Bettor 894):
+  //   idx_pool_sides_bettor_created(bettor_pk, created_at DESC) [P2-5 my-positions 去全扫+排序] + idx_pool_markets_zk_ready [P2-1 A′ 守卫式表达式部分索引,
+  //   _scanZkAutonomyCandidates 从 LIKE 全扫 27.6 MB 改索引查找]。4,050 / 36k 行量级, boot 内建 ≤3 s(与 v199 的 16M 行不同, 不拒建); IF NOT EXISTS + 记账日志。
+  //   DDL/表达式常量单源在 ./phase2-indexes-v200.mjs(NWT C1)。任何重建这两张表的迁移都必须带上这两个索引。
+  ensurePhase2IndexesV200(sqlite);
   console.log('[migrate] DB migrations complete.');
 }
