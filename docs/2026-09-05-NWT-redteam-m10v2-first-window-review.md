@@ -47,3 +47,9 @@ J2 正式页 `scratch/_j2_m10v2_window1_page_2026-09-04T21-58Z.md`（窗 20:55:5
 - 并排观测（不判因）：D-b 后 kaspad 24 blk/s、SST 读更多 ⇒ 页缓存争用加剧；与 §? Bettor 冷页假设相容。
 - 新实例启动段 sql.*（前 3 min 31 行）：pair-ingestor.mjs:63 `broadcast_messages WHERE id > ?` **47.2 s**（M8 NaN 游标 = 全表扫而非只是不命中）、pool.js:3300 20.8 s/1694 行、broker-fee-emit.mjs:117 19.1 s、zk-autonomy-ticks.mjs:45 LIKE 18.4 s、migrate.js:5448 16.9 s、bshard-close-voter.js:458 ×5。启动段单列，不入稳态窗。
 - **升级**：broker-intake 修法从 Phase-1 候选升为"已实际打挂 console 一次"，建议尽快上 Owner；最小改动 = 复合索引 `(to_address, observed_at DESC)`（16M 行表建索引须 Owner 批 + 停机窗）。
+
+### 9. Phase-1 ③ M2 / ① M8 补丁审（2026-09-05T09:09Z）：两稿 GREEN
+- Owner 全批（ledger 880）：① M8 rowid 游标 ② broker-intake 复合索引 ③ M2 IBD 期跳过 15 站 ④ tg-bot 轮询 30→300 s；Bettor 顺序 ③→①→④→②（881）。
+- **③** `scratch/_j2_p1_m2_ibd_gate_patch_2026-09-05T09-07Z.diff`（sha `31f6aebe…153a`，12 文件 +163）：新 `lib/ibd-tick-gate.mjs`——`ibdGateSkip(site)`：`IBD_TICK_GATE=0` ⇒ 不读门放行；`read()` 抛错 ⇒ 不跳；只 `gate.isSynced === false` 跳；翻转一行 + 10 min 心跳 + resume；共用 `isNodeSyncedCached`（30 s TTL）。15 站逐站对号（settle.tick / pool.tick / close-voter ×3 / refund-claim-auto / prediction-voter / prediction-settler / oracle-pool-scanner / oracle-renewal / zk-prove-worker / zk ×4）= 881 A 清单无漏无多；每站函数第一行、在重入锁与首个扫描之前。测试 6/6（G1–G5 + S1 结构断言）。**GREEN**。
+- **①** `scratch/_j2_p1_m8_pair_cursor_patch_2026-09-05T09-03Z.diff`（sha `ffd879e6…caae`）：`WHERE rowid > ? ORDER BY rowid`、`rows.length < limit` ⇒ 推进到 `MAX(rowid)`、`since_id` 兼容、`max_id` 别名；`broadcast_messages` 为 `id TEXT PRIMARY KEY` 无 WITHOUT ROWID ⇒ 成立。备注：boot 仍从 0 起一次全表 LIKE（一次性）。测试 6/6。**GREEN**。
+- ② 预审（发 Bettor，881 已收）：无 sqlite3 CLI ⇒ node 脚本；索引 ≈1.7 GB、-wal 涨同量 ⇒ 建完 `wal_checkpoint(TRUNCATE)`；2–6 min；同名索引 + migrate v199 `IF NOT EXISTS` 幂等；中断 = 事务回滚；验收 EXPLAIN 无 temp b-tree + 首 tick `sql.all` ≪1 s；停前 quiesce、cp 副本只读。
