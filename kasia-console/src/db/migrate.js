@@ -7,6 +7,7 @@ import { encrypt } from '../services/crypto.js';
 import { categorizeMarket } from '../lib/market-category.js';
 import { classifyPayoutShardFamily } from '../lib/bshard-payout-family-coherence.mjs';
 import { M0C1_GRANT_TABLE, M0C1_GRANT_DDL } from './m0c1-grant-registry-schema.js';
+import { ensureKaspaTxLogToAddrObservedIndex } from './heavy-index-v199.mjs';   // v199 (Phase-1 ②): 记账式复合索引迁移
 
 export function runMigrations() {
   sqlite.exec(`
@@ -5774,5 +5775,10 @@ export function runMigrations() {
     `);
     console.log('[migrate] v198: u1_relay_identity 建表完成 (§10 跨节点 pubkey 身份, register-only; PK=relay_pubkey_xonly 小写64hex CHECK; network 闭枚举 CHECK; 无 local_relay_id 列/无 relay_id 回退索引(活算 fromAddress); epoch UNIQUE; 写入方 = u1-registration.mjs 事务内).');
   }
+  // ── v199 (2026-09-05, J2 · Phase-1 ②, Owner 全批 ledger 880 · Bettor 881/882): kaspa_tx_log 复合索引 idx_kaspa_tx_log_to_addr_observed(to_address, observed_at DESC) ──
+  //   broker-intake-watcher.js:703-717 每 60 s 的 SELECT 现走单列索引 + TEMP B-TREE 排序, 活库 4–30 s 同步阻塞, 09-05 08:44Z 185 s 堵死 15196。
+  //   🔴 本块【只记账不建】(裸 IF NOT EXISTS 会在 boot 自建 16M 行索引卡住数分钟): 索引由停机窗脚本建(scratch/_j2_p1_kaspa_tx_log_index_window.mjs),
+  //   这里查 sqlite_master —— 在 ⇒ 记账; 不在 ⇒ LOUD 警告不建; KANET_MIGRATE_BUILD_HEAVY_INDEX=1 才在此建。逻辑与测试在 ./heavy-index-v199.mjs / .test.mjs。
+  ensureKaspaTxLogToAddrObservedIndex(sqlite);
   console.log('[migrate] DB migrations complete.');
 }
