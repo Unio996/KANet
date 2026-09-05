@@ -20,6 +20,12 @@ import { REFUND_GRACE_SEC } from '../lib/pool-refund-grace.mjs';
 // J1tn r303 P0-#1 sweep helper refactor (Bettor r346/r366b 钦定): KIP-9 storage_mass aware fee
 // 抽 lib/kip9-mass.mjs. 5 call sites 不再各抄.
 import { computeSingleOutputFee } from '../lib/kip9-mass.mjs';
+// Phase-2 C 包 P2-4 (2026-09-05): 主路 SQL 单源 + 影子比对(默认关; 开关与 A 包同: PHASE2_SHADOW_EVERY)
+import { claimSidesLegacy, claimSidesReversed } from '../db/phase2-claim-queries.mjs';
+import { runShadowCompare } from '../db/phase2-shadow.mjs';
+import { resolveShadowEvery, shadowDue } from '../db/phase2-indexes-v200.mjs';
+const PHASE2_SHADOW_EVERY = resolveShadowEvery();   // 默认 0(关); 影子窗内 ≥100
+let _claimScanCalls = 0;
 
 const TICK_INTERVAL_MS = 5 * 60 * 1000;  // 5 min, 同 pool-market-settler
 const STARTUP_GRACE_MS = 60 * 1000;
@@ -42,21 +48,20 @@ export async function claimAutoDispatcherTick() {
     // 该按真实信号 bettor_refund_available chain_event 过滤 (= 一旦 emitted 永久 audit 不变).
     // JOIN chain_events: event_type='bettor_refund_available' AND payload like '%"market_id":"X"%'
     // AND payload like '%"bettor_pk":"P"%' → side claim_txid IS NULL.
-    const sides = sqlite.prepare(`
-      SELECT s.id, s.market_id, s.bettor_pk, s.side_p2sh, s.side_lock_tx, s.side_redeem_script_hex,
-             s.stake_amount, s.direction, m.deadline, m.protocol_status
-      FROM pool_bettor_sides s
-      JOIN pool_markets m ON m.id = s.market_id
-      WHERE s.claim_txid IS NULL
-        AND s.side_lock_tx IS NOT NULL
-        AND s.side_redeem_script_hex IS NOT NULL
-        AND EXISTS (
-          SELECT 1 FROM chain_events ce
-          WHERE ce.event_type = 'bettor_refund_available'
-            AND ce.payload LIKE '%"market_id":"' || s.market_id || '"%'
-            AND ce.payload LIKE '%"bettor_pk":"' || s.bettor_pk || '"%'
-        )
-    `).all();
+    // Phase-2 C 包 P2-4 (2026-09-05, 设计 docs/2026-09-05-j2-phase2-slow-sql-design-v0.1.md §P2-4 · Owner "C GO" ledger 905):
+    //   主路【仍走旧查询】——SQL 逐字搬到 src/db/phase2-claim-queries.mjs 单源(LEGACY_CLAIM_SIDES_SQL)。
+    //   反转驱动新查询(REVERSED_CLAIM_SIDES_SQL: 124 条事件 json_extract 出 (market_id, bettor_pk) 再索引点查, 替代 ≈4.2M 次 LIKE)只在影子里跑:
+    //   PHASE2_SHADOW_EVERY(默认 0=关, 与 A 包同一开关)到期时按 side id 集合比(旧查询本无 LIMIT, 直接复用主路结果), 差异 LOUD 到 events
+    //   (phase2_shadow_mismatch, 含双方差集样本; 已知两条"新法更严"的语义差——坏 JSON 含子串 / 大小写——就靠它显形); 一周零差异后 Bettor 批切换。
+    const sides = claimSidesLegacy(sqlite);
+    _claimScanCalls++;
+    if (shadowDue(_claimScanCalls, PHASE2_SHADOW_EVERY)) {
+      runShadowCompare(sqlite, {
+        site: 'P2-4 claimAutoDispatcherTick sides', source: 'bettor-refund-claim-auto:claimAutoDispatcherTick',
+        runNew: () => claimSidesReversed(sqlite).map((r) => r.id),
+        runLegacy: () => sides.map((r) => r.id),
+      });
+    }
     if (sides.length === 0) return { ok: true, processed: 0 };
 
     const relayCandidates = sqlite.prepare('SELECT id, address FROM relay_nodes WHERE address IS NOT NULL').all();
