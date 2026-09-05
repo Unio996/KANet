@@ -11828,3 +11828,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **(912 闭合·14:40:56Z)** 14:37:20Z `IBD started with peer 136.243.93.17`（断后 3 min 23 s·先例内）→ 14:38:35Z 同剪裁点 syncing ahead → header 相位（≈20 min）→ 缺体扫描 ≈7 min → body 预计 ~15:05Z。链路 Wi-Fi 600 Mbps；三个非 syncer peer 反复 reset（14/7/10 次·一直如此）。回滚三串 0。剪枝第 3 轮空窗里跑到 traversed 12,000 / pruned 1,728，IBD 恢复即停（同形）。
 
 ### (913) 2026-09-05 · 断连 #8 后块体 15:11:41Z 续上（header 244,300 头 ≈33 min）· 我核 D-b 流水线仍在：请求成对（tx≈3.4 KB ×2 相隔 0.1 s·每 ~6.7 s 一轮）· 首 12 桶 `198 396 ×6` = **29.7 blk/s**（15:13:41Z）
+
+### (914) 2026-09-05 · S2（KANet-UI D 行）feeder 可靠性：14:37Z 起的 nohup loop 只写 1 采样即死 ⇒ D 行断档 **14:57→15:41Z（~44 min）**（今日第 2 次·前次 11:16–11:24Z）· 已重挂 33808（15:41:03Z）· **S2 暂非可靠信号**（15:42:45Z）
+- 处置：feeder 改由我的会话以 hb_guard 同形起（`nohup bash <abs>.sh`·外层 while·每 20 min 调 `_ibd_metrics.mjs`·node 失败/超时只记 ERR 不退出·专用 alive 文件）；KANet-UI 出脚本、停自身 loop 避免双写者。READY 判定不受影响：S1（我 `_step0_gate.mjs`）独立；ready_watch 对 D 行 age >60 min 报 STALE。kaspad 36912 正常（15:40Z WS 22.7 / free 7.9）。
