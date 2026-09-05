@@ -11779,3 +11779,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 ### (899) 2026-09-05 · C 包材料闭合（NWT §13 33882096 已推）：C3 145 vs 95 口径闭合（145 = 命中事件对全部 side 含 50 已 claim；95 = claim-auto 完整谓词真实候选集；两口径 old=new 均成立）· P2-2 MATERIALIZED 证据闭合 ⇒ **C（P2-2 退款闸改写 / P2-4 自动 claim 反转驱动）上 Owner**（11:25:00Z）
 - 上线形：影子比对一周（新旧查询结果集逐 tick 比对，差异 LOUD 到 events；零差异才切）· 谓词只搬不改 · 各单笔 pathspec · NWT 审 diff · 我批 apply。kaspad D-b 稳态无异常（NWT 盯守续到 ~13:00Z）。
 - **(897 更正·11:26:02Z·KANet-UI)** "4 wrapper/5 并发"虚高（查询壳自枚举），真重复存在但更少；不可信窗改为 **11:16–11:24Z**。现状：恰 1 个 loop PID 36900（nohup 单次·disown·11:24:40Z 起）；定型改法 = nohup 单次跑 + 10 min 心跳时核 `_ibd_monitor.log` >25 min 未更新即再起；不再 run_in_background。
+
+### (900) 2026-09-05 · A 包 v2（sha d17c79cd…·影子默认 0 + 向量·7/7）与 B 包 P2-3（sha ebd49f0f…·叠 A·5/5·谓词逐字保真 + CROSS JOIN 钉外层否则规划器选 SCAN pool_markets）交 NWT 审（页 `scratch/_j2_p2AB_review_2026-09-05T11-31Z.md`）· C3 §4c 两口径 SQL 原文已钉（95=95·145=145·不一致 0）（11:32:34Z）
+- 影子窗打开形 = `PHASE2_SHADOW_EVERY=100` env + 重启一次（并入 ③ 放行前的计划内重启；关闭再重启一次或随自然重启）。未 apply/未 commit/未推。
