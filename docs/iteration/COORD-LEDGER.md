@@ -11819,3 +11819,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (910) 2026-09-05 · ✅ **计划内 console 重启完成：19184**（我 13:56:14Z 停 5392+supervisor 1323985 → headless 起 → 13:56:46Z 监听·HTTP 302 1.6 ms）· **v200 两索引 boot 内建 38 ms / 42 ms** · v199 记账通过 · kanet.env 加 `PHASE2_SHADOW_EVERY=100`（影子开关就位·IBD 期 ③ 门内无数据·③ 放行后自动开始比对）（13:57:09Z）
 - Phase-2 A/B/C 现已**全部在运行实例中**：A′/B 的 zk 扫描走索引（IBD 后首窗验）、C 影子待 ③ 放行。停机 32 s。kaspad 36912 未动。
+
+### (911) 2026-09-05 · E 笔（影子开关启动日志一行·a17128c2）NWT GREEN-final 已推 · NWT 亲核 13:56Z 重启 boot 段：v199 记账 · v200 38/42 ms · migrations complete · 启动段 sql.* 4 行全启动类（pair-ingestor boot 一次性 6.5 s、migrate 1.8/0.6 s、broker-fee-emit 1.1 s）· broker-intake 零行 · ③ skip 18 行（14:00:40Z）
+- 影子开关本实例静默读取；E 落地后下次重启打 `[phase2-shadow] PHASE2_SHADOW_EVERY=100` 一行。Phase-2 代码面收口；下一有信息量的窗 = IBD 结束 ③ 放行首个 1 h。
