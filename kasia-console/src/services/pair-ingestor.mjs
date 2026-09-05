@@ -4,7 +4,7 @@
 // Per Tier 2.1 propose §1.1 — chain control plane → DB state plane.
 //
 // Public API:
-//   scanAndIngestPairs({ since_id?, limit? }) → { invites_processed, acks_processed, pairs_created }
+//   scanAndIngestPairs({ since_rowid?, limit? }) → { invites_processed, acks_processed, pairs_created, max_rowid }  (M8: rowid 游标)
 //   startPeriodicIngest({ interval_ms = 30000 }) → stop()
 //
 // Idempotent: re-running same txids is safe (= INSERT OR IGNORE + matched-update).
@@ -48,29 +48,37 @@ function isValidPairPayload(env) {
  *   4. Insert OR ignore agent_pairs row (= pair_id = invite_txid+':'+ack_txid)
  *
  * @param {object} opts
- * @param {number} [opts.since_id=0]   — broadcast_messages.id cursor (= idempotent re-scan)
- * @param {number} [opts.limit=200]    — max rows per call
- * @returns {{ invites_processed, acks_processed, pairs_created, max_id }}
+ * @param {number} [opts.since_rowid=0] — broadcast_messages **rowid** cursor (= idempotent re-scan)
+ * @param {number} [opts.since_id]      — 旧参数名(兼容): 只在是有限数时当 since_rowid 用; UUID/NaN/undefined ⇒ 0
+ * @param {number} [opts.limit=200]     — max rows per call
+ * @returns {{ invites_processed, acks_processed, pairs_created, max_rowid, max_id }}  (max_id = max_rowid 的别名, 兼容旧调用方)
+ *
+ * M8 (2026-09-05, J2 · Owner 全批 ledger 880 · Bettor 派工): 游标从 `id`(TEXT UUID 主键) 改为 rowid(整数)。
+ *   旧形 `Math.max(maxId, row.id)` 对 UUID 得 NaN ⇒ `WHERE id > ?` 绑 NULL ⇒ 永假 ⇒ 首次命中后 pair 摄入全停,
+ *   且每 tick 仍对 broadcast_messages 做 LIKE 全扫(v3-A 首窗实测 boot 47 s / tick 0 行)。
+ *   broadcast_messages 是 rowid 表(非 WITHOUT ROWID), rowid 随插入单调 ⇒ 可作游标; 本批不足 limit(= 已扫到表尾)时
+ *   游标推进到表 MAX(rowid), 免得非 pair 行被下一 tick 重扫; 满批时只推进到本批最后一行 rowid(下一 tick 续扫)。
  */
-export function scanAndIngestPairs({ since_id = 0, limit = 200 } = {}) {
-  // Recent broadcast_messages (= post since_id), parse content, filter pair intents
+export function scanAndIngestPairs({ since_rowid, since_id, limit = 200 } = {}) {
+  const since = Number.isFinite(since_rowid) ? since_rowid : (Number.isFinite(since_id) ? since_id : 0);
+  // Recent broadcast_messages (= rowid > cursor), parse content, filter pair intents
   const rows = sqlite.prepare(`
-    SELECT id, sender_address, content, tx_hash
+    SELECT rowid AS rid, id, sender_address, content, tx_hash
     FROM broadcast_messages
-    WHERE id > ? AND content LIKE '%"intent":"pair_%'
-    ORDER BY id ASC
+    WHERE rowid > ? AND content LIKE '%"intent":"pair_%'
+    ORDER BY rowid ASC
     LIMIT ?
-  `).all(since_id, limit);
+  `).all(since, limit);
 
   let invitesProcessed = 0;
   let acksProcessed = 0;
   let pairsCreated = 0;
-  let maxId = since_id;
+  let maxRowid = since;
 
   const invitesById = new Map();  // tx_hash → { env, sender_addr }
 
   for (const row of rows) {
-    maxId = Math.max(maxId, row.id);
+    if (Number.isFinite(row.rid) && row.rid > maxRowid) maxRowid = row.rid;
     const env = tryParseEnvelope(row.content);
     if (!env || !isValidPairPayload(env)) continue;
     if (env.intent === 'pair_invite') {
@@ -115,10 +123,16 @@ export function scanAndIngestPairs({ since_id = 0, limit = 200 } = {}) {
     }
   }
 
-  return { invites_processed: invitesProcessed, acks_processed: acksProcessed, pairs_created: pairsCreated, max_id: maxId };
+  if (rows.length < limit) {
+    // 已扫到表尾: 游标推进到表 MAX(rowid)(rowid 有主键式索引, O(1)), 下一 tick 只看真正的新行
+    const mx = sqlite.prepare('SELECT MAX(rowid) AS m FROM broadcast_messages').get()?.m;
+    if (Number.isFinite(mx) && mx > maxRowid) maxRowid = mx;
+  }
+
+  return { invites_processed: invitesProcessed, acks_processed: acksProcessed, pairs_created: pairsCreated, max_rowid: maxRowid, max_id: maxRowid };
 }
 
-let _lastIngestId = 0;
+let _lastIngestRowid = 0;
 let _periodicTimer = null;
 
 /**
@@ -126,21 +140,21 @@ let _periodicTimer = null;
  * @returns stop() function
  */
 export function startPeriodicIngest({ interval_ms = 30_000 } = {}) {
-  // Boot: catch up from id 0 once
-  const boot = scanAndIngestPairs({ since_id: 0 });
-  _lastIngestId = boot.max_id;
+  // Boot: catch up from rowid 0 once
+  const boot = scanAndIngestPairs({ since_rowid: 0 });
+  _lastIngestRowid = boot.max_rowid;
   if (boot.pairs_created > 0) {
     console.log(`[pair-ingestor] boot scan: ${boot.invites_processed} invites + ${boot.acks_processed} acks → ${boot.pairs_created} pairs created`);
   }
   _periodicTimer = setInterval(() => {
     try {
-      const _t0 = Date.now(); const _since = _lastIngestId;   // M10 observe-only (design v0.2 §3 H2): 打 since_id 当前值, hits = 命中数(非扫描行数)
-      const r = scanAndIngestPairs({ since_id: _lastIngestId });
-      console.log(`[diag:step] pair.scanAndIngestPairs ms=${Date.now() - _t0} since_id=${String(_since).slice(0, 12)} max_id=${String(r.max_id).slice(0, 12)} hits=${r.invites_processed + r.acks_processed} at=${new Date().toISOString()}`);
+      const _t0 = Date.now(); const _since = _lastIngestRowid;   // M10 observe-only (design v0.2 §3 H2): 打游标当前值(M8 后为整数 rowid), hits = 命中数(非扫描行数)
+      const r = scanAndIngestPairs({ since_rowid: _lastIngestRowid });
+      console.log(`[diag:step] pair.scanAndIngestPairs ms=${Date.now() - _t0} since_rowid=${_since} max_rowid=${r.max_rowid} hits=${r.invites_processed + r.acks_processed} at=${new Date().toISOString()}`);
       if (r.pairs_created > 0) {
-        console.log(`[pair-ingestor] tick: ${r.invites_processed}i + ${r.acks_processed}a → ${r.pairs_created} new pairs (cursor ${_lastIngestId} → ${r.max_id})`);
+        console.log(`[pair-ingestor] tick: ${r.invites_processed}i + ${r.acks_processed}a → ${r.pairs_created} new pairs (cursor ${_lastIngestRowid} → ${r.max_rowid})`);
       }
-      _lastIngestId = r.max_id;
+      _lastIngestRowid = r.max_rowid;
     } catch (e) {
       console.warn(`[pair-ingestor] tick fail: ${e.message}`);
     }
