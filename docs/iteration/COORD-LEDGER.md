@@ -11666,3 +11666,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **863 规则补句**：独立目录分版本，**文件名必须仍是 kaspad.exe**（判活键 = 进程名，watchdog :144 / ready_watch / KANet-UI 闸 / NWT 盯守全体依赖）；回滚路径 `D:\kaspad-live\da-1b3046fb\kaspad.exe` 同参数。NWT 提的 `$procName = Split-Path -Leaf $kaspadExe` 记为后续加固（子目录方案下等价常量，Disabled 期不动）。KANet-UI 闸已改 `Name LIKE 'kaspad%'`（07:46Z）双形都盯。
 - watchdog :17 改指子目录路径（本 commit）；:47 不动；任务仍 **Disabled**。旧 exe：`D:\rusty-kaspa-da\target\release\kaspad.exe`（D-a）与 `D:\rusty-kaspa\target\release\kaspad.exe`（旧）原地保留，不再作启动路径。
 - 下一步：header 相位 ~10–15 min + 缺体扫描 ~8 min → 块体相位 → **§4 判别**（我 p2p 100 ms 时间线 + NWT 独立 NIC 200 ms 时间线并排；切换前基线团间隔 6.0–6.8 s；有效 ≤1 s 或至少减半；仍 4–6 s ⇒ 回滚 da 副本）；回滚字符串 `IncomingRouteCapacityReached` / `syncee inconsistency` / `expected block` 盯守中。15 min 闸（句柄/WS/断连）同 D-a。
+
+### (876) 2026-09-05 · ✅ **D-b 判别：有效·保留**（块体相位 08:36:53Z 起·首 60 s p2p 时间线 + 12 桶·08:38:50Z）
+- **首要判别（设计 §4）**：p2p 100 ms 时间线（`_bettor_p2p_bytes_timeline.mjs 60000`）显示**两个请求尖峰成对发出**（tx=3405/3410 相隔 0.8 s；32.2 s 与 59.2 s 处 tx=6819/6811 = 两请求落同一 100 ms），随后**一个到货团内连续送完两批**（团内 bodies 合计 158/198/138/159/198/125/163/102/198 ≈ 2×99），第 2 批首字节**紧接**第 1 批末字节（同团、间隔 0.1–0.3 s）⇒ 对端延迟是**每轮固定等待**（队列/调度型），可与下一请求重叠 ⇒ **流水线有效**。团间隔仍 ~6.6 s（5.1→11.6→18.1→24.7→31.4→38.1→44.6→51.4→58.0），但每团 2 批。
+- **块率**：首 12 桶 `347 247 138 258 331 164 297 198 297 198 288 108` ⇒ 均值 **23.9 blk/s**（切换前 5 min 15.18 / 7.6 h 14.93 ⇒ **×1.6**；设计上界 ×1.9 未到，因团间隔未变、团内两批传输占 ~1.2 s）。回滚字符串 `IncomingRouteCapacityReached` / `syncee inconsistency` / `expected block` = **0 命中**；断连 0。C1 在飞 ≤198 < 256 未破。
+- 15 min 闸首读：kaspad 36912 句柄/WS 见上行（阈 60k / 30 GB 远未及）。header 相位耗时 50 min（380,251 头·比预估 20 min 长：剪枝点重议范围大），已计入本次成本。
+- **裁：保留 D-b。** NWT 独立 NIC 200 ms 时间线并排后补记。净追赶口径：23.9 − 10（标称）≈ **+14 blk/s**（此前 +4.6）⇒ lag 58 h 的乐观下界 ETA 从 ~93 h 缩到 ~30 h 量级（待 KANet-UI cum 口径跟上再报规划基准）。
+- 观察（不派）：对端把队列里的请求一次性顺序服务 ⇒ 深度越大每轮批数越多，但 C1（route 256）锁死深度 2；若要更进一步只能扩 route 容量（NWT 不建议）或另案，记录。
