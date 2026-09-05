@@ -14,7 +14,7 @@
 # 用法: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\kaspad-watchdog.ps1
 #   (常驻循环, Ctrl+C 或关窗口停止; 不提供 stop 参数——只启不杀哲学下没有"watchdog杀节点"这回事)
 
-$kaspadExe = "D:\kaspad-live\kaspad-db-4d0a9e30.exe"   # D-b exe (sha256 2432C36B...361A95 · Owner 2026-09-05 07:43Z 切换 · 独立目录规则 ledger 863 · 回滚 D:\kaspad-live\kaspad-da-1b3046fb.exe sha B73F1415...D5534A · P2 flag 见 :47) · 旧 exe D:\rusty-kaspa\target\release\kaspad.exe 原地保留(回滚: 改回本行 + 去掉 :47 末项)
+$kaspadExe = "D:\kaspad-live\db-4d0a9e30\kaspad.exe"   # D-b exe (sha256 2432C36B...361A95 · Owner 2026-09-05 07:45Z 切换 · 规则 ledger 863/875: 独立子目录分版本、文件名必须仍是 kaspad.exe(判活键 :144) · 回滚 D:\kaspad-live\da-1b3046fb\kaspad.exe sha B73F1415...D5534A 同参数 · P2 flag 见 :47)
 # 🔴 预置改动 (J1tn 2026-07-28, 节点域 owner 自拍; Bettor 频道明示"你那台你自己拍")
 #   borsh RPC 由 0.0.0.0 改绑回环。由来: kaspad 的 borsh RPC 无鉴权, 而 0.0.0.0 让它绑上
 #   tailnet 接口 —— 已两台互证跨机此刻可达 (J1 rc=52 自打 + KANet-UI 从对面实打 rc=52)。
