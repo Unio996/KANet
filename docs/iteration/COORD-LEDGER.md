@@ -11825,3 +11825,4 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (912) 2026-09-05 · 断连 #8（D-b 后首次·14:33:57Z `peer connection is closed`·切后 6.8 h）· **回滚三串 0 ⇒ 非我方 route 溢出** · 同刻 21:33:12–14 本地三个非 syncer peer 全部重连 + DNS seeder 解析暂时错误 ⇒ **本地网络（WiFi）瞬断形**，与 D-b 无关（只报）（14:35:35Z）
 - kaspad 36912 存活（句柄 17,095 · WS 19.6 GB）。断前块率 198/396 桶正常。自恢复进度见下条盯守。
+- **(912 闭合·14:40:56Z)** 14:37:20Z `IBD started with peer 136.243.93.17`（断后 3 min 23 s·先例内）→ 14:38:35Z 同剪裁点 syncing ahead → header 相位（≈20 min）→ 缺体扫描 ≈7 min → body 预计 ~15:05Z。链路 Wi-Fi 600 Mbps；三个非 syncer peer 反复 reset（14/7/10 次·一直如此）。回滚三串 0。剪枝第 3 轮空窗里跑到 traversed 12,000 / pruned 1,728，IBD 恢复即停（同形）。
