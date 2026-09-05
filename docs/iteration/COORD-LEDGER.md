@@ -11738,3 +11738,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - ④：tg-bot 子进程 31640（09:58:36Z）首轮 pollSettleResults **10:03:37Z = 起后 300 s**（唯一 my-positions sql.all 392 ms/26 rows = 真人地址）；boot 后 15 min `http.onSend.big/http.slow my-positions` **0 行**（修前 8/min，10 MB/3.6 MB 测试地址不再出现）；`_state.json` 4 条未 wipe。
 - 早读（正式页 11:00Z）：慢 SQL 5 行（migrate 2、pair boot 全扫 1、broker-fee-emit 1、my-positions 1）；broker-intake sql.all 0 行；lag ≥4 s 0 次。
 - 观察（只记）：console.log 有 `[tg-bot] @Katest202607_bot up` 与 `@KANET_Broker_bot up` 两行（同进程两 bot 名）——不在本轮范围。
+
+### (890) 2026-09-05 · KANet-UI 1 h 观测：**console 5392 起后 1 h 零条 eventloop-lag ≥3 s**（Phase-1 后首见）· RSS 0.15 GB（各前代 0.6–0.9）· kaspad 24.6–26.4 blk/s · lag 55 h（10:58:02Z）
+- kaspad 36912：kaspadPct 10% · remBlk 1,863,801 · closing6h 1.64→1.69 · 仪器 lagETA(READY,6h) 87→79 h（**单窗口径**·规划基准 cum 待稳）· stuck 0 · 闸 WS 21.9 / free 8.5 / 句柄 17,031 / wrpcConns 35 无命中。
