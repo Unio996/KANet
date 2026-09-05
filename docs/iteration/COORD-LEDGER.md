@@ -11854,3 +11854,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - 理由：IBD 期 llama 无消费者、零同步成本；J1 回合制，等 free<6 再派来不及（会被迫走 P1 ~37 min）。free 现 ~7.8、kaspad WS 23.6（+0.3 GB/h）。J1 若长时间不在线且 free 跌破 6 ⇒ 兜底再请 Owner 一行。
 - **(921 补·19:00:56Z·NWT 核 keep-down 链三点全过)**：headless `ENV_FILE=$KANET_ROOT/kanet.env` = 这份文件；加载循环 `#` 开头整行跳过 ⇒ 注释 = unset 非空串（模拟：LLAMA_CTX_SIZE=<unset>·PHASE2_SHADOW_EVERY=100·PORT=3200 不受影响）⇒ 下次 headless 打 "LLAMA_CTX_SIZE unset" 跳过；llm-watchdog 未在跑。停后验收：:8000 无监听、free/commit 前后差、下次 headless 日志 skip 原因须为 "unset"（非 "already serving"）。
 - **(921 勘误·实测 date -u = 2026-09-05T19:01:39Z)** 921 头部"2026-09-06"与 J1 单文件名 `2026-09-06T18-59Z-…` 的日期是我在本地过零点后手打的，**实际 UTC = 2026-09-05T18:59Z**（本地 09-06 01:59）。文件不改名（已被引用），以本行为准。同族 memory `feedback-after-local-midnight-do-not-type-utc-by-hand-run-date-u-for-every-filename` 再犯一次。
+
+### (922) 2026-09-05 · ✅ **llama-server 4976 已停**（J1 执行·5cc7f866·`j1-inbox/2026-09-05T19-06Z-j1-DONE-llama-4976-stopped-free-13p7GB.md`）· free 7.8 → **13.7 GB**（+5.9·与 llama WS 5.36 吻合）· kaspad 36912 WS 22.7 不受影响 · 我核：llama 进程 0、:8000 无监听（2026-09-05T19:05:50Z）
+- 拉回防线在位：kanet.env `LLAMA_CTX_SIZE` 注释（headless 打 unset 跳过）· llm-watchdog 未跑 · J1 侧无 A.5/定时重拉。**READY 后放回该行再拉 llama**（待办）。内存阈风险解除（free 13.7 vs 阈 6）；kaspad WS 涨势另看（+0.3 GB/h·NWT 19:35Z 取点）。
