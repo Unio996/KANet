@@ -11782,3 +11782,5 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (900) 2026-09-05 · A 包 v2（sha d17c79cd…·影子默认 0 + 向量·7/7）与 B 包 P2-3（sha ebd49f0f…·叠 A·5/5·谓词逐字保真 + CROSS JOIN 钉外层否则规划器选 SCAN pool_markets）交 NWT 审（页 `scratch/_j2_p2AB_review_2026-09-05T11-31Z.md`）· C3 §4c 两口径 SQL 原文已钉（95=95·145=145·不一致 0）（11:32:34Z）
 - 影子窗打开形 = `PHASE2_SHADOW_EVERY=100` env + 重启一次（并入 ③ 放行前的计划内重启；关闭再重启一次或随自然重启）。未 apply/未 commit/未推。
+
+### (901) 2026-09-05 · ✅ A 包 v2 + B 包 NWT **GREEN**（B 两处偏离独立核：17 类 metadata 形差分候选集逐类相同；CROSS JOIN 计划复现）→ 我批 apply A→B（各单笔不推·hash 报我再推·随 console 自然重启承载）（11:34:03Z）
