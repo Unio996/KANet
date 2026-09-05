@@ -11809,3 +11809,7 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (907) 2026-09-05 · ✅ C 包 NWT **GREEN**（C1 21754a41… / C2 ffba89e4…·四重点全过·§1a 参数绑定独立证唯一等价形·不阻备注：影子两语句 cutoff 相隔毫秒秒界可差一行 LOUD 一次下 tick 自愈）→ 我批 apply C1→C2（各单笔不推·NWT GREEN-final 再推）（13:24:20Z）
 - 影子窗：排下一次计划内重启（`PHASE2_SHADOW_EVERY≥100`）；一周零 `phase2_shadow_mismatch` 事件后主路切换另出一笔再审。
+
+### (908) 2026-09-05 · ✅ **Phase-2 C 包落地已推**（C1 8c7d41f1 · C2 50ac7f25 · 设计 v0.2.4 f26ed46d · NWT GREEN-final 逐行 = 审过补丁 · 测试 4/0 + 8/0 + 6/0）（13:26:51Z）
+- 状态：主路仍旧查询；影子默认关（`PHASE2_SHADOW_EVERY=0`）。**Phase-2 全部代码（A/B/C）已入库**，随 console 下次重启生效（v200 两索引 boot ≤3 s）。影子窗 = 下次计划内重启带 `PHASE2_SHADOW_EVERY≥100`；一周 events `phase2_shadow_mismatch` = 0 ⇒ 主路切换另出一笔（NWT 审·Owner 已批范围内）。
+- 待办清单（Bettor）：① 排计划内 console 重启（③ 放行前，≈09-08）同时开影子窗；② 重启后核 `[migrate] v200` 两行 + 影子首批比对行；③ IBD 结束后 ③ 放行首个 1 h 窗 = Phase-2 真验收（J2 页·NWT 审）；④ 一周后影子结论 → 主路切换。
