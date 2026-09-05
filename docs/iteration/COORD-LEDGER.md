@@ -11863,3 +11863,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **READY 时刻待办清单（Bettor）**：① BOTH_READY（S1 gate + S2 D 行）确认后记 ledger；② ③ 门自动放行 ⇒ **首个 1 h 窗 = Phase-2 真验收**（J2 页·NWT 审：zk-autonomy :45/:239、pool-settler :497 的 sql.* 应消失或 ≪1 s；影子 `[phase2-shadow] equal` 行开始出现）；③ 影子比对起算一周（events `phase2_shadow_mismatch` = 0 ⇒ 主路切换另出一笔）；④ 放回 kanet.env `LLAMA_CTX_SIZE=262144` + 拉 llama（J1 或 headless）；⑤ scanner（09-04 17:46Z 停）重启走 KANet-UI SOP；⑥ datadir sha 钉（债）；⑦ 结算停摆 93 盘/33735 KAS 等 READY 后议程（Owner）；⑧ IBD 期未跑的 pruning 会在空窗跑（磁盘增长债）。
 
 ### (924) 2026-09-05 · NWT 4 h 摘要 20:37Z：**均值 29.87 blk/s**（1440 桶·零桶 0·最大 693）· D-b 累计 11.38 h **27.94 blk/s**（1,144,698 块）· 零异常 · kaspad WS 22.8–23.6 摆动非单调 · free 13.06 / commit 56.4（llama 停后稳）· console 19184 未重启（E 行与 headless "unset" 等下次）· 净追赶 ≈ +17.9（2026-09-05T20:37:22Z）
+
+### (925) 2026-09-05 · NWT 趋势点 21:36Z：kaspad WS **24.24 GB**（今日 20.1→22.2→20.9→20.1→23.1→23.5→22.8→23.2→24.2：摆动·包络缓升 ~+0.3 GB/h 非单调）· 句柄 17,938（+70/h）· free 11.72（页缓存回填）· commit 57.6 · 近 2 h 29.05 blk/s · 异常 0（2026-09-05T21:37:21Z）
+- 阈 30 GB 按包络最快 ~19 h；**到 26 GB 提前做 P2 缓存回退的事前 EXPLAIN**（NWT），不到不动；00:36Z 再取点。READY（~09-06 20Z）大概率先到。
