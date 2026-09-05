@@ -11769,3 +11769,7 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (896) 2026-09-05 · A 包稿交 NWT（sha a433fb3f…·4 文件·v200 单源 + zk 查询改索引 + 影子比对每 10 次·6/6·未 apply）· C3 前置核查 **0**（124/124 JSON 合法·新法 145 = 旧 LIKE 145 ⇒ P2-4 不需 NOCASE）· 设计 v0.2.2（46918cc3 已推·P2-2 补 MATERIALIZED 必写 + 排序 TEMP B-TREE 仍在）（11:21:53Z）
 - C 包材料修正完成 → 等 NWT 复核 §4c 数字与 v0.2.2 → 再上 Owner。B 包（P2-3）等 A 审完即出。
+
+### (897) 2026-09-05 · KANet-UI 监控循环事故（自曝已修）：run_in_background loop 被 harness 内存压力收走 2 次（free ~8.5 GB = kaspad 块缓存常态非泄漏）→ 改 nohup while-true 在本机 msys 下增殖到 4 wrapper/5 并发 `_ibd_monitor_loop` 同写 `scratch/_ibd_monitor.log` → 已 taskkill 归零、重挂单实例（b8wguvorj）（11:22:17Z）
+- **11:16–11:19Z 窗内 `_ibd_monitor.log` D 行可能交错/重复 ⇒ 该窗 S2 读数不可信**；≤11:17:32Z 与 11:19Z 起正常。kaspad 36912 未受影响；闸盯守未动。
+- 处置规则（KANet-UI）：收到 completed/killed 即重挂单实例，不再 nohup while-true（本机会增殖）。更强抗收割若需要走 supervisor 侧起，不在其 session。
