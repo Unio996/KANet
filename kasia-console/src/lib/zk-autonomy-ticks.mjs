@@ -25,6 +25,7 @@ import { getMarketBets } from './pool-bettor-sides-query.mjs';
 import { deriveCloseFeeLeaves } from '../services/bshard-close-voter.js';
 import { randomUUID } from 'crypto';
 import { zkReadyCandidateRows, zkLegacyLikeRows, resolveShadowEvery, shadowDue } from '../db/phase2-indexes-v200.mjs';   // Phase-2 A 包 P2-1 A′: 候选行 SQL 单源(表达式常量与索引 DDL 同文件); 影子节奏(默认关)
+import { handoffCandidateRows, handoffLegacyRows, marketMetaById } from '../db/phase2-handoff-candidates.mjs';   // Phase-2 B 包 P2-3: handoff 候选 SQL 单源
 
 const log = (...a) => console.log('[zk-autonomy]', new Date().toISOString().slice(11, 19), ...a);
 
@@ -257,18 +258,39 @@ export async function claimAutonomousTick(ctx) {
 
 const HANDOFF_COOLDOWN_MS = Number(process.env.ZK_HANDOFF_TICK_COOLDOWN_MS || 300_000); // §4① 5min 量级
 
-function _scanHandoffCandidates() {
-  const rows = sqlite.prepare(`
-    SELECT pm.id as marketId, ps.payout_redeem_hex as redeemHex, pm.metadata as metadata
-    FROM payout_shards ps JOIN pool_markets pm ON pm.id = ps.logical_market_id
-  `).all();
+// Phase-2 B 包 P2-3 (2026-09-05, 设计 §P2-3 · Bettor 894): 不再每 30 s 搬 722 份 metadata(≈5 MB)到 JS 逐行 parse——"已有 zk_continuation 则跳过"
+//   这一步在 SQL 侧做(src/db/phase2-handoff-candidates.mjs, 谓词与旧 JS 假值语义逐字对拍), 候选(通常 0–几个)再按 id 单取 meta 给下游。
+//   redeem 检查(readPayoutShardV2AttestedState)照旧在 JS。影子比对: 每 PHASE2_SHADOW_EVERY 次(默认 0=关)用旧查询再算一次集合, 不等 ⇒ LOUD + events。
+function _legacyHandoffScan() {
   const out = [];
-  for (const row of rows) {
+  for (const row of handoffLegacyRows(sqlite)) {
     let meta; try { meta = JSON.parse(row.metadata || '{}'); } catch { continue; }
-    if (meta.zk_continuation) continue; // 已经 handoff 过(或在 (b)(c) 管辖态), 不是本 tick 候选
+    if (meta.zk_continuation) continue;
+    try { readPayoutShardV2AttestedState(row.redeemHex); } catch { continue; }
+    out.push(row.marketId);
+  }
+  return out.sort();
+}
+let _handoffScanCalls = 0;
+function _scanHandoffCandidates() {
+  const out = [];
+  for (const row of handoffCandidateRows(sqlite)) {
     try { readPayoutShardV2AttestedState(row.redeemHex); }
     catch { continue; } // 非 closed==1(还没 attest, 或 redeem 非法) — 跳过, 不是错误
+    const meta = marketMetaById(sqlite, row.marketId);   // 旧语义: 坏 JSON ⇒ null ⇒ 跳过; NULL/'' ⇒ {}
+    if (meta === null) continue;
+    if (meta.zk_continuation) continue;   // 扫描与补取之间被写入 ⇒ 不是本 tick 候选(与旧 JS 同判)
     out.push({ marketId: row.marketId, meta });
+  }
+  _handoffScanCalls++;
+  if (shadowDue(_handoffScanCalls, PHASE2_SHADOW_EVERY)) {
+    try {
+      const legacy = _legacyHandoffScan(); const fresh = out.map((c) => c.marketId).sort();
+      if (JSON.stringify(legacy) !== JSON.stringify(fresh)) {
+        log(`🔴 phase2_shadow_mismatch P2-3: new=[${fresh.join(',')}] legacy=[${legacy.join(',')}]`);
+        _writeZkAutonomyErrorEvent('phase2_shadow_mismatch_p2_3', fresh.length ? fresh[0] : '-', `new=${fresh.length} legacy=${legacy.length} diff=${[...new Set([...fresh, ...legacy])].filter((x) => !(fresh.includes(x) && legacy.includes(x))).join(',')}`);
+      }
+    } catch (e) { log(`phase2 shadow compare (P2-3) fail (non-fatal): ${e.message}`); }
   }
   return out;
 }
