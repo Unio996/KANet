@@ -11788,3 +11788,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 ### (902) 2026-09-05 · ✅ **Phase-2 A（06f486f3·v200 两索引 + zk 查询改索引·影子默认 0）与 B（f5a78cd3·P2-3 handoff 候选不搬 metadata）落地已推**（NWT GREEN-final 逐行 = 审过补丁）· 设计 v0.2.3 31162ce1 · 生效随 console 自然重启（看 `[migrate] v200 … 建完 N ms` ≤3 s）（11:37:11Z）
 - D（ANALYZE 5 张具名小表脚本）NWT GREEN-conditional：(a) `busy_timeout=10000` + 低负荷窗（chain_events 23 万行持写锁数秒）；(b) **验收看 console 自己的 sql.* 行在下一次自然重启后**（模块级缓存 prepared statement 保留旧计划），脚本 after 清单只是预告；任何 🔶CHANGED 变差 ⇒ `--rollback`（DROP sqlite_stat1）。我排：与 ③ 放行前的计划内重启同窗（先 ANALYZE 再重启）。
 - C（P2-2/P2-4 钱路）等 Owner "C GO"。
+
+### (903) 2026-09-05 · 🔴 **D（ANALYZE 5 张具名小表）--apply ⇒ WORSE ×2 ⇒ 已按判据 --rollback**（我 11:38:48–11:38:58Z 跑·低负荷窗 = IBD 期 15 站不跑）（11:39:56Z）
+- ANALYZE 耗时：pool_markets 15 ms · pool_bettor_sides 328 ms · market_shards 14 ms · payout_shards 6 ms · chain_events 2,841 ms；sqlite_stat1 18 行。**after 🔴WORSE**：P2-2 settler:497 变 `SCAN pm | SEARCH pbs USING idx_pool_sides_market`；P2-4 claim-auto 变 `SCAN s`（before 均为 SEARCH 走索引）⇒ rc=2 ⇒ `--rollback`（DROP sqlite_stat1）rc=0，新连接核 stat1 table absent。三份 JSON：`kasia-console/scratch/_j2_p2D_explain_{dryrun,apply,rollback}_2026-09-05T11-38-*.json`（sha 见文件名旁）。
+- 🟡 **待 NWT 解释**：回滚后**新连接**重跑 dry-run，P2-4 回到基线（SEARCH s side_lock_tx），但 **P2-2 与最初基线不同**：基线 `SEARCH pbs USING idx_pool_sides_side_lock_tx_unique → SEARCH pm`，现 `SEARCH pm USING idx_pool_markets_deadline (deadline<?) → SEARCH pbs USING idx_pool_sides_market`（两者皆无 stat1）。无统计下本应同计划；候选：schema cookie/索引枚举序变化、或脚本回滚路径内的计划是同连接缓存。**结论：小表 ANALYZE 在本库上反向 ⇒ D 不采**；P2-2/P2-4 的真修仍是 C 包查询改写（谓词/驱动表钉死，不依赖统计）。
+- NWT D 终审 §13 5fe39e42 已推。
