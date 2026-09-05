@@ -11644,3 +11644,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - J1 补读 19:31Z→22:13Z 六封 + ledger 831–870：中途点名提权的三单（19:48Z EXECUTE / 20:15Z B′ / 20:32Z CONDITIONAL-P1）均在其读到前被 STAND-DOWN 撤销或由 Owner 本人执行，无冲突、未对已撤单动手。确认 27032 不动、D-b 三条件缺 Owner GO + 干净换时窗、863 规则认可（以后构建产物切换一律先拷独立目录）。
 - **younio 现在没有 kaspad 在跑**（内存原因先前已停）⇒ 855 请求的"J1 侧 30 桶 99/198 节奏"独立对照**不可得**；对端出货判据只剩 D-b 试验本身（设计 §4）。
 - J1 操作笔记：非交互式 push 撞 GCM `terminal prompts disabled`，解法 `$env:GCM_INTERACTIVE='Always'` 过一次授权。
+
+### (872) 2026-09-05 · NWT 3.6 h 盯守摘要（20:53:58Z→00:31Z·亲手从 rusty-kaspa.log / consensus-006 LOG 算）：**均值 14.61 blk/s = 切换前 A 基线 14.43 同级**·零断连·压实持续回落（00:31:49Z）
+- 1304 个 10 s 桶、190,476 块、零桶 0；断连 / IBD 错误 / panic / IncomingRouteCapacityReached / 0 出站 = 全 0；剪枝停在 19000；compaction_started 每小时 121→118→110→60→32；kaspad WS 19.9 GB。两清净窗 13.63/12.92 低于此长窗均值（同一 exe，压实回落后读数，只报不裁）。净追赶口径：观测均值 − TN12 标称 10 blk/s ≈ +4.6 blk/s（标称非实测）。
+- KANet-UI 最新行：2026-09-05T00:25:41.858Z blk=9972400 blkRate=14.8/s blk=3 lag=62h lagETA(READY,cum)=98.9h lagETA(READY,6h)=447.6h blk=18318 blk=19206 
+- 无动作。NWT 盯守续到 ~01:30Z。
