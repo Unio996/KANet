@@ -11741,3 +11741,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (890) 2026-09-05 · KANet-UI 1 h 观测：**console 5392 起后 1 h 零条 eventloop-lag ≥3 s**（Phase-1 后首见）· RSS 0.15 GB（各前代 0.6–0.9）· kaspad 24.6–26.4 blk/s · lag 55 h（10:58:02Z）
 - kaspad 36912：kaspadPct 10% · remBlk 1,863,801 · closing6h 1.64→1.69 · 仪器 lagETA(READY,6h) 87→79 h（**单窗口径**·规划基准 cum 待稳）· stuck 0 · 闸 WS 21.9 / free 8.5 / 句柄 17,031 / wrpcConns 35 无命中。
+
+### (891) 2026-09-05 · ✅ **Phase-1 修后首窗正式页**（J2 `scratch/_j2_p1_postfix_window1_page_2026-09-05T11-03Z.md`·与修前 09:57Z 页并排·§6 五条全 ✔）· Phase-2 候选五项立项（设计先行·IBD 结束前备好）（11:02:54Z）
+- 并排（1 h vs 1 h）：lag >1 s **313 → 0**（仪器活核过）· ≥10 s 47 次/1,237 s → 0 · ≥60 s 3 → 0 · sql.* **1,047 → 1** · broker-intake 49 行 p50 11.9 s → **0**（②）· my-positions 465 → 1（④·首轮 +300 s·真人 26 rows）· pair boot 47 s → 2.6 s + 整数游标（①）· 每分钟 diag 行 49 → 10 · ③ skip 15 站 + 76 心跳。
+- 🔴 **读法**：③ 的份额是"15 站 IBD 期不跑"不是变快；真修 = ② ④。IBD 结束（~09-09）③ 自动放行 ⇒ ZK 扫盘 / pool-settler 慢 SQL 会回来 ⇒ **Phase-2 必须在 IBD 结束前 GREEN 并批**。
+- **Phase-2 候选（J2 §4·只列·待设计→NWT→Owner）**：P2-1 `zk-autonomy-ticks.mjs:45` metadata LIKE 扫盘（max 106 s·三次 ≥60 s 起点）→ 标志列+索引 / 三 tick 共享一次扫描 / worker；P2-2 `pool-market-settler.js:497`（max 69 s）→ EXPLAIN 补复合索引；P2-3 `zk-autonomy-ticks.mjs:239`（max 45 s）；P2-4 `refund-claim-auto.mjs:57` NOT EXISTS chain_events；P2-5 my-positions 查询本身（分页/索引；④ 只是降频）。v3-C（每 tick 累计器）等 IBD 后窗再定。
+- 派工：J2 出 Phase-2 设计稿（每项：EXPLAIN 现计划（只含 DDL 的空库）→ 修法 → 停机窗需求 → 验收），NWT 预审，我汇总后单点上 Owner 批；目标 09-08 前 GREEN。
