@@ -56,3 +56,15 @@ export function resolveShadowEvery(env = process.env) {
 export function shadowDue(calls, every) {
   return every > 0 && calls > 0 && calls % every === 0;
 }
+/**
+ * 启动时打一行开关值(Bettor 批 ledger 910): 开关读取本是静默的, 影子窗打开与否只能等 ③ 放行后第 N tick 的 equal 行才有正面证据。
+ * 三个消费方(zk-autonomy-ticks / pool-market-settler / bettor-refund-claim-auto)各调一次, 进程内只打【一行】(模块级 guard); 返回是否真打了。
+ */
+let _shadowAnnounced = false;
+export function announceShadowEvery(env = process.env, { log = console.log } = {}) {
+  if (_shadowAnnounced) return false;
+  _shadowAnnounced = true;
+  const raw = env.PHASE2_SHADOW_EVERY;
+  log(`[phase2-shadow] PHASE2_SHADOW_EVERY=${resolveShadowEvery(env)} (raw=${raw === undefined ? '<unset>' : JSON.stringify(raw)}; 0=关; 影子窗内 ≥100; 对 P2-1/P2-3 只在不一致时打, P2-2/P2-4 每次比对打 equal/mismatch)`);
+  return true;
+}

@@ -85,8 +85,9 @@ import { payoutRoot as computePayoutRoot } from '../lib/pool-payout-root.mjs';
 // Phase-2 C 包 P2-2 (2026-09-05): 影子比对(默认关; 开关与 A 包同: PHASE2_SHADOW_EVERY); 主路 SQL 仍内联在 legacyRefundBuilderTick 里
 import { refundSidesIdsMaterialized } from '../db/phase2-refund-queries.mjs';
 import { runShadowCompare } from '../db/phase2-shadow.mjs';
-import { resolveShadowEvery, shadowDue } from '../db/phase2-indexes-v200.mjs';
+import { resolveShadowEvery, shadowDue, announceShadowEvery } from '../db/phase2-indexes-v200.mjs';
 const PHASE2_SHADOW_EVERY = resolveShadowEvery();   // 默认 0(关); 影子窗内 ≥100
+announceShadowEvery();   // 启动打一行开关值(进程内只打一次; Bettor 批 ledger 910)
 let _legacyRefundScanCalls = 0;
 
 // J2-tn r382 (Bettor 16:29 钦定): TICK_INTERVAL_MS env-configurable. Default 5min mainnet,

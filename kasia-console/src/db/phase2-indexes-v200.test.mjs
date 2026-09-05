@@ -80,6 +80,13 @@ t('V6 影子节奏(A v2 · NWT 条件): 默认/缺省/非法/0/负 ⇒ 0 ⇒ sha
   const hits = []; for (let c = 0; c <= 350; c++) if (M.shadowDue(c, 100)) hits.push(c);
   assert.deepEqual(hits, [100, 200, 300]);
 });
+t('V7 announceShadowEvery: 首次打一行 [phase2-shadow] PHASE2_SHADOW_EVERY=<解析值> (raw=…); 再调(任何 env)不打、返回 false', () => {
+  const lines = []; const log = (s) => lines.push(s);
+  assert.equal(M.announceShadowEvery({ PHASE2_SHADOW_EVERY: '100' }, { log }), true);
+  assert.equal(lines.length, 1); assert.match(lines[0], /^\[phase2-shadow\] PHASE2_SHADOW_EVERY=100 \(raw="100"; 0=关/);
+  assert.equal(M.announceShadowEvery({}, { log }), false); assert.equal(M.announceShadowEvery({ PHASE2_SHADOW_EVERY: 'abc' }, { log }), false);
+  assert.equal(lines.length, 1);
+});
 
 try { sqlite.close(); } catch { /* best-effort */ }
 try { rmSync(dir, { recursive: true, force: true }); } catch { /* best-effort */ }

@@ -23,8 +23,9 @@ import { computeSingleOutputFee } from '../lib/kip9-mass.mjs';
 // Phase-2 C 包 P2-4 (2026-09-05): 主路 SQL 单源 + 影子比对(默认关; 开关与 A 包同: PHASE2_SHADOW_EVERY)
 import { claimSidesLegacy, claimSidesReversed } from '../db/phase2-claim-queries.mjs';
 import { runShadowCompare } from '../db/phase2-shadow.mjs';
-import { resolveShadowEvery, shadowDue } from '../db/phase2-indexes-v200.mjs';
+import { resolveShadowEvery, shadowDue, announceShadowEvery } from '../db/phase2-indexes-v200.mjs';
 const PHASE2_SHADOW_EVERY = resolveShadowEvery();   // 默认 0(关); 影子窗内 ≥100
+announceShadowEvery();   // 启动打一行开关值(进程内只打一次; Bettor 批 ledger 910)
 let _claimScanCalls = 0;
 
 const TICK_INTERVAL_MS = 5 * 60 * 1000;  // 5 min, 同 pool-market-settler

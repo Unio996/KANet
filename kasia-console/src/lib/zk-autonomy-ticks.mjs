@@ -24,7 +24,7 @@ import { readPayoutShardV2AttestedState } from './bshard-close-enforce.mjs';
 import { getMarketBets } from './pool-bettor-sides-query.mjs';
 import { deriveCloseFeeLeaves } from '../services/bshard-close-voter.js';
 import { randomUUID } from 'crypto';
-import { zkReadyCandidateRows, zkLegacyLikeRows, resolveShadowEvery, shadowDue } from '../db/phase2-indexes-v200.mjs';   // Phase-2 A 包 P2-1 A′: 候选行 SQL 单源(表达式常量与索引 DDL 同文件); 影子节奏(默认关)
+import { zkReadyCandidateRows, zkLegacyLikeRows, resolveShadowEvery, shadowDue, announceShadowEvery } from '../db/phase2-indexes-v200.mjs';   // Phase-2 A 包 P2-1 A′: 候选行 SQL 单源(表达式常量与索引 DDL 同文件); 影子节奏(默认关)
 import { handoffCandidateRows, handoffLegacyRows, marketMetaById } from '../db/phase2-handoff-candidates.mjs';   // Phase-2 B 包 P2-3: handoff 候选 SQL 单源
 
 const log = (...a) => console.log('[zk-autonomy]', new Date().toISOString().slice(11, 19), ...a);
@@ -62,6 +62,7 @@ function _filterZkCandidateRows(rows) {
   return out;
 }
 const PHASE2_SHADOW_EVERY = resolveShadowEvery();   // 默认 0(关); 影子窗内 ≥100
+announceShadowEvery();   // 启动打一行开关值(进程内只打一次; Bettor 批 ledger 910)
 let _zkScanCalls = 0;
 function _scanZkAutonomyCandidates() {
   const out = _filterZkCandidateRows(zkReadyCandidateRows(sqlite));
