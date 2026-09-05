@@ -11766,3 +11766,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (895) 2026-09-05 · 🟡 C 包证据缺陷（NWT 复跑 schema-only EXPLAIN）：P2-2 脚本 :62 漏 `MATERIALIZED` ⇒ AFTER 计划 = BEFORE；补关键字后计划成立但 `ORDER BY stake_amount` TEMP B-TREE 仍在（排过滤后 side 集非 36k）⇒ **C 上 Owner 的材料暂缓**（11:18:57Z）
 - 处置：J2 修脚本重跑 + 设计文补"排序仍在"句 → NWT 复核 → 再上 Owner。894 里给 Owner 的"C GO"请求**收回**至材料修正。A 包（P2-5 + A′）不受影响照派；P2-1/P2-3/P2-4/P2-5 计划与设计一致。NWT §13 b10f753b 已推。
+
+### (896) 2026-09-05 · A 包稿交 NWT（sha a433fb3f…·4 文件·v200 单源 + zk 查询改索引 + 影子比对每 10 次·6/6·未 apply）· C3 前置核查 **0**（124/124 JSON 合法·新法 145 = 旧 LIKE 145 ⇒ P2-4 不需 NOCASE）· 设计 v0.2.2（46918cc3 已推·P2-2 补 MATERIALIZED 必写 + 排序 TEMP B-TREE 仍在）（11:21:53Z）
+- C 包材料修正完成 → 等 NWT 复核 §4c 数字与 v0.2.2 → 再上 Owner。B 包（P2-3）等 A 审完即出。
