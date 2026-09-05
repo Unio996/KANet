@@ -82,3 +82,4 @@ J2 正式页 `scratch/_j2_m10v2_window1_page_2026-09-04T21-58Z.md`（窗 20:55:5
 - 🟡 P2-2：LIMIT 并列未定义两边同；影子比对去 LIMIT 按集合。
 - 🟡 P2-0：`analysis_limit` 默认 0 ⇒ boot `PRAGMA optimize` 可能对 kaspa_tx_log 全量 ANALYZE（boot-age 判活风暴形）⇒ ANALYZE 只对具名小表、停机窗/低负荷脚本，boot 不 optimize；前后 EXPLAIN 清单保留。
 - ✅ P2-5 索引、打包 A（v200 boot 内建 ≤3 s）成立；顺序 A→B→C→D 同意，C 钱路 Owner + 影子一周。
+- **v0.2 / v0.2.1 复审（2026-09-05T11:16Z）：设计 GREEN**。v0.2（64e1236d）吸收 P2-3 极性、P2-4 前置核查 + 4 写入方、P2-2 去 LIMIT、P2-0 不 boot optimize；v0.2.1（9927d53e）P2-1 改 **A′ 守卫式表达式部分索引**（无生成列）——内存库实证：`SEARCH … USING INDEX (<expr>=?)`、`SELECT *` 列集不变、坏 JSON 写不抛、只索引 ready 行 ⇒ 对外形状/Owner UI 项消失。落码三条件：表达式单源常量（同 heavy-index-v199 形）；查询用字面量 `= 'ready'`（绑定参数本构建也走索引但非契约）+ 计划断言向量；P2-4 前置核查 SQL 形（lower 相等而原值不等计数 = 0，否则 COLLATE NOCASE）。打包 A 可出 diff。
