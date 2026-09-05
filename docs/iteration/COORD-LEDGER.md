@@ -11732,3 +11732,4 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - boot：`[migrate] v199: idx_kaspa_tx_log_to_addr_observed 在(停机窗已建), 记账通过` ✅ · ③ **15 行** `[<site>] skip: node not synced (isSynced=false, reason=not-synced)` ✅ · ① `pair.scanAndIngestPairs ms=1 since_rowid=146591 max_rowid=146591`（首扫一次 2.6 s 后每 tick 1 ms）✅ · **broker-intake 自 boot 起零条 sql.* 行**（= <200 ms；修前 p50 11.9 s）✅ · 启动 60 s 内 sql.* 仅 4 行、最大 2.6 s（上次 35 行 Σ260 s）✅ · tg-bot 随 console 加载（300 s 轮询、`_state.json` 4 条待 J2 核）。
 - 停机窗总时长 **09:56:22 → 09:58:53Z = 2.5 min**（预估 5–10）。证据副本 `console.db.pre-idx-20260905T0957Z`。
 - 下一步：J2 修后首窗（≥1 h）readout 对号 884/§6 五条；NWT 核 live 证据；KANet-UI 报首个 ≥10 s lag。kaspad 36912 全程未动（25 blk/s）。
+- **(888 补·10:01:30Z·KANet-UI 10:01Z）** console 5392 起后 ~2.5 min **零条 eventloop-lag 行**（连 ≥3 s 都无；此前各代起后 +63~101 s 必出 ≥10 s）· wrpcConns 2→35（relay 重连）· scanner 仍停 · supervisor 1323985（headless 双保险）· hb_guard alive · kaspad 36912 WS 21.8/free 9.4/句柄 16,988 无命中。
