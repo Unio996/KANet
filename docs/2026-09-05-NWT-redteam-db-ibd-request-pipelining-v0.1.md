@@ -65,3 +65,8 @@ Owner GO（838 边界）；回滚 = watchdog.ps1:17 指回 D-a exe + 重启；§
 - **判读**：§4 字面判据"第 2 批首字节紧接第 1 批"我的 200 ms 桶分不开同团内紧挨的两批（Bettor 的 bodies/团 ≈ 2×99 才分得开）；我的仪器给出其必然推论——团节奏不变、团变大、吞吐 ×1.4–1.7——三者同向、无反证 ⇒ **有效**。机制：对端延迟是每轮固定等待、在飞请求一起服务；深度 2 每轮塞两批；深度被 C1 钉死，杠杆到此为止；×1.9 上界未到 = 第 2 批传输 + 我方处理未完全重叠（预期）。
 - **判据勘误**：§4"团间隔中位 ≤4.5 s"的前提（第 2 批成独立团）错了，实际并入同团；应改为"每团 bodies ≈ 2×batch 或 团字节量/块率 ≥1.4×"，建议设计 v0.1.3 改口径记 ledger。
 - **待续**：30 min 后 ≥180 桶均值确认 sustained（GO 保留阈 ≥20 blk/s）；watchdog :17 已指子目录，:144 判活键因文件名恢复无需改。
+
+## 11. D-b 首次断连周期（2026-09-05T15:16Z）：无 D-b 签名，自恢复
+- 14:33:57Z `IBD with peer 136.243.93.17 completed with error: peer connection is closed`——21:33:52–57 本地 5 s 内四个 peer 全部 `connection reset`（三个非 syncer 先、syncer 最后）⇒ 本机链路级瞬断，非 D-b；D-b 全程（07:45:49Z 起）`IncomingRouteCapacityReached` / `syncee inconsistency` / `expected block` / `panicked` = **0**（全史 3 条 panic 为 08-26 LOCK）。Wi-Fi Up 600 Mbps。
+- 14:37:20Z `IBD started`（3 min 23 s）→ 同一剪裁点 → header 244,300 头 14:38:35Z→15:05:56Z（27 min，~150–200 hdr/s）→ 缺体扫描 5 min → **body 15:11:03Z 续**；全周期 37 min。续后首 5 min 31 桶 **28.74 blk/s**（median 198、零桶 0、最大 396）。剪枝第 3 轮空窗内 genesis→traversed 12,000 / pruned 1,728，IBD 恢复即停（同前两轮）。
+- 记账：D-b 的重启/断连成本 = 与 D-a 同形（header 重议时长随"上次同步到 tip 的时距"线性增长：6 h ≈ 27 min），流水线本身不增加断连率（首个 6.5 h 内 1 次，网络侧）。
