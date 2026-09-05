@@ -11822,3 +11822,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (911) 2026-09-05 · E 笔（影子开关启动日志一行·a17128c2）NWT GREEN-final 已推 · NWT 亲核 13:56Z 重启 boot 段：v199 记账 · v200 38/42 ms · migrations complete · 启动段 sql.* 4 行全启动类（pair-ingestor boot 一次性 6.5 s、migrate 1.8/0.6 s、broker-fee-emit 1.1 s）· broker-intake 零行 · ③ skip 18 行（14:00:40Z）
 - 影子开关本实例静默读取；E 落地后下次重启打 `[phase2-shadow] PHASE2_SHADOW_EVERY=100` 一行。Phase-2 代码面收口；下一有信息量的窗 = IBD 结束 ③ 放行首个 1 h。
+
+### (912) 2026-09-05 · 断连 #8（D-b 后首次·14:33:57Z `peer connection is closed`·切后 6.8 h）· **回滚三串 0 ⇒ 非我方 route 溢出** · 同刻 21:33:12–14 本地三个非 syncer peer 全部重连 + DNS seeder 解析暂时错误 ⇒ **本地网络（WiFi）瞬断形**，与 D-b 无关（只报）（14:35:35Z）
+- kaspad 36912 存活（句柄 17,095 · WS 19.6 GB）。断前块率 198/396 桶正常。自恢复进度见下条盯守。
