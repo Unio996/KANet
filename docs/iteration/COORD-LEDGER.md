@@ -11806,3 +11806,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 ### (906) 2026-09-05 · C 包稿交 NWT（页 `scratch/_j2_p2C_review_2026-09-05T13-21Z.md`）：C1 = P2-2 + 共用 `phase2-shadow.mjs`（sha 21754a41…·4/4+8/8）· C2 = P2-4（sha ffba89e4…·6/6）· 顺序 C1→C2 · lint 8 文件 0（13:22:08Z）
 - 形：主路仍走旧查询（旧 SQL 文本一字节不改）；新查询只影子跑、去 LIMIT 集合比、差异 LOUD 到 events 含差集样本；开关同 A 包默认 0。
 - 两点：① 新查询里 `refund_attempted_at < datetime(...)` 被 lint `R-SQL-TIME-STRINGCMP` 挡，而 lint 建议的 julianday() 对活库实核的 **5 行整数 epoch 存值不等价（会翻转）** ⇒ 新查询改参数绑定（lint 合法、比较规则同原 TEXT 表达式、三种存值形测试同判）——唯一与旧文本不同处，NWT 重点审；② `refund_attempted_at` 数据形不一致（5 行整数 epoch / 2,273 空格形 / 0 T 形），旧法恰好把整数当旧尝试——**不改、记设计 v0.2.4 另案**。D 不采已写入 v0.2.4。
+
+### (907) 2026-09-05 · ✅ C 包 NWT **GREEN**（C1 21754a41… / C2 ffba89e4…·四重点全过·§1a 参数绑定独立证唯一等价形·不阻备注：影子两语句 cutoff 相隔毫秒秒界可差一行 LOUD 一次下 tick 自愈）→ 我批 apply C1→C2（各单笔不推·NWT GREEN-final 再推）（13:24:20Z）
+- 影子窗：排下一次计划内重启（`PHASE2_SHADOW_EVERY≥100`）；一周零 `phase2_shadow_mismatch` 事件后主路切换另出一笔再审。
