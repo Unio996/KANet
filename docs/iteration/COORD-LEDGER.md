@@ -11795,3 +11795,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - NWT D 终审 §13 5fe39e42 已推。
 - **(903 补·11:42:34Z·根因 = NWT)** 这套 better-sqlite3 编译带 `ENABLE_STAT4` ⇒ ANALYZE 同时写 `sqlite_stat1` 与 `sqlite_stat4`（直方图样本 402 行·五表）；D 脚本 --rollback 只 DROP stat1 ⇒ **stat4 残留**、规划器读 stat4 不依赖 stat1 ⇒ 回滚后 P2-2 计划异于基线；且 DROP 改 schema cookie ⇒ console 5392 新 prepare 已在 stat4 下规划（未审统计态）。我 11:42Z `DROP TABLE IF EXISTS sqlite_stat4/3/2/1`（busy_timeout 10 s）⇒ `sqlite_stat%` = none；新连接 dry-run **P2-2/P2-4 与 11:38:39Z 基线逐字相同** ⇒ 回滚干净。裁定不变：**D 不采**（小表统计在本库不稳定且未审）；D 脚本补 stat1–4 四张状态（J2）。
 - **(903 闭合·11:43:40Z)** NWT readonly 复核 11:43:08Z：sqlite_master 无 sqlite_stat*；新连接 7 条 EXPLAIN 与 11:38:39Z 基线 JSON 逐条相同（7/7）⇒ **GREEN，D 事件闭合**（回滚后证据 `_j2_p2D_explain_dryrun_2026-09-05T11-43-09-125Z.json`）。J2 脚本 v3：--rollback 逐删 stat1–4、残留 rc=3、三模式列四表状态、打印 ENABLE_STAT4。**D 不采、不再排窗**。memory 已记（STAT4 回滚族）。
+
+### (904) 2026-09-05 · NWT D-b 4 h 摘要（08:36:43→12:37Z）：**均值 25.76 blk/s**（逐小时 25.4–26.4）· 零断连零错误 · WS 20.1 GB · compaction 每小时 126–224（比 D-a 稳态 30–60 高·与块速 ×1.7 同向·只报）· 净追赶 ≈ +15.8 blk/s（标称口径）（12:38:23Z）
+- console 仍 5392（09:58Z 起未自然重启 ⇒ v200 索引未建）。KANet-UI 最新：2026-09-05T12:24:44.307Z blkRate=24.9/s lag=53h lagETA(READY,cum)=83.2h lagETA(READY,6h)=54.7h 
