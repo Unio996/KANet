@@ -11778,3 +11778,4 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (899) 2026-09-05 · C 包材料闭合（NWT §13 33882096 已推）：C3 145 vs 95 口径闭合（145 = 命中事件对全部 side 含 50 已 claim；95 = claim-auto 完整谓词真实候选集；两口径 old=new 均成立）· P2-2 MATERIALIZED 证据闭合 ⇒ **C（P2-2 退款闸改写 / P2-4 自动 claim 反转驱动）上 Owner**（11:25:00Z）
 - 上线形：影子比对一周（新旧查询结果集逐 tick 比对，差异 LOUD 到 events；零差异才切）· 谓词只搬不改 · 各单笔 pathspec · NWT 审 diff · 我批 apply。kaspad D-b 稳态无异常（NWT 盯守续到 ~13:00Z）。
+- **(897 更正·11:26:02Z·KANet-UI)** "4 wrapper/5 并发"虚高（查询壳自枚举），真重复存在但更少；不可信窗改为 **11:16–11:24Z**。现状：恰 1 个 loop PID 36900（nohup 单次·disown·11:24:40Z 起）；定型改法 = nohup 单次跑 + 10 min 心跳时核 `_ibd_monitor.log` >25 min 未更新即再起；不再 run_in_background。
