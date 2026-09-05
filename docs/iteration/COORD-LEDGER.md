@@ -11714,3 +11714,7 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 ### (884) 2026-09-05 · Phase-1 ④ ② NWT 全 GREEN（M10 稿 §10 c32d7dc1 已推）· 我批 apply ④ + ②(a)（sha 9f90a18d… 文案版）· **停机窗合并到本次 console 重启**（09:19:25Z）
 - ④ tg-bot settlePollMs 300 s（env）+ 排除测试地址 990001/999001（env）·3/3·deploy 07-19 修正版（API stop/start + _state.json 备份）。②(a) v199 记账式（单源 DDL `src/db/heavy-index-v199.mjs`·三态·每 boot LOUD·不自建；`KANET_MIGRATE_BUILD_HEAVY_INDEX=1` 永不进 kanet.env）。②(b) 停机窗脚本 `kasia-console/scratch/_j2_p1_kaspa_tx_log_index_window.mjs`（3200 守卫·--copy 证据副本含 -wal·同源 DDL·checkpoint TRUNCATE·EXPLAIN 断言 exit 1）。
 - **窗口流程**：J2 apply ②(a)→④ → 我推 → Owner 管理员终端停 supervisor + console 4536（4536 本就不应答·无 ingress 可静默）→ 我跑 ②(b) `--copy --dry-run` 再正式（预计 cp 1–2 min + 建 2–6 min）→ Owner `bash kanet-start.sh` 起（含 supervisor 双保险）→ 验收：boot `[migrate] v199` 记账行 · ③ 15 站 skip 行 · ① since_rowid 行 · 首个 broker-intake `sql.all` ≪1 s。
+
+### (885) 2026-09-05 · Phase-1 四项代码全部入库已推：③ d8760fd8 · ① ab53b1f9 · ②(a) 1993d05f（heavy-index-v199.mjs + test + migrate.js +6）· ④ 3305f61d（tg-bot 3 文件）· NWT §10 勘误 c8180e30 · **停机窗待 Owner 停 supervisor+console**（09:20:40Z）
+- 窗口前核：console.db 13,209 MB · -wal 113 MB · D: free 749 GB · `D:/tmp` 存在（SQLITE_TMPDIR）· 无 KANet 计划任务可见（非提权视角；Owner 侧再核 *Supervisor* 任务并在窗内 Disable）· 4536 仍在（不应答）。
+- 执行序：Owner 管理员终端停 supervisor + 4536 → 我跑 `_j2_p1_kaspa_tx_log_index_window.mjs --copy=console.db.pre-idx-<ts> --dry-run` → 正式 → Owner `bash kanet-start.sh` → 验收四项（884）。tg-bot 重启由 J2 走 API（不依赖窗口）。
