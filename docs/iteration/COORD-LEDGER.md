@@ -11747,3 +11747,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - 🔴 **读法**：③ 的份额是"15 站 IBD 期不跑"不是变快；真修 = ② ④。IBD 结束（~09-09）③ 自动放行 ⇒ ZK 扫盘 / pool-settler 慢 SQL 会回来 ⇒ **Phase-2 必须在 IBD 结束前 GREEN 并批**。
 - **Phase-2 候选（J2 §4·只列·待设计→NWT→Owner）**：P2-1 `zk-autonomy-ticks.mjs:45` metadata LIKE 扫盘（max 106 s·三次 ≥60 s 起点）→ 标志列+索引 / 三 tick 共享一次扫描 / worker；P2-2 `pool-market-settler.js:497`（max 69 s）→ EXPLAIN 补复合索引；P2-3 `zk-autonomy-ticks.mjs:239`（max 45 s）；P2-4 `refund-claim-auto.mjs:57` NOT EXISTS chain_events；P2-5 my-positions 查询本身（分页/索引；④ 只是降频）。v3-C（每 tick 累计器）等 IBD 后窗再定。
 - 派工：J2 出 Phase-2 设计稿（每项：EXPLAIN 现计划（只含 DDL 的空库）→ 修法 → 停机窗需求 → 验收），NWT 预审，我汇总后单点上 Owner 批；目标 09-08 前 GREEN。
+
+### (892) 2026-09-05 · Phase-2 设计稿 v0.1（J2 `docs/2026-09-05-j2-phase2-slow-sql-design-v0.1.md` ec7cb6e8 已推·不写码·NWT 预审中）（11:10:20Z）
+- 五项均**不需停机窗**：P2-1 zk:45 / P2-5 my-positions 走索引/标志列（4,050 / 36k 行·boot 内建 ≤3 s·migrate v200）；P2-2 pool-settler:497 / P2-3 zk:239 / P2-4 refund-claim:57 为查询改写。**P2-2（退款授权闸）与 P2-4（自动 claim 候选）= 钱路**：谓词只搬不改 + 影子比对一周 + Owner 批。
+- **P2-0 横切（新发现）**：活库从未 `ANALYZE`（无 sqlite_stat1）⇒ planner 对 P2-2 选 sides 驱动、每 side 解析一次市场 metadata；小表 ANALYZE = 零代码修但统计全局 ⇒ 单独审、前后 EXPLAIN 清单对照（不含 16M 行 kaspa_tx_log）。
+- 打包顺序（J2 §4）：A（P2-5 + P2-1）→ B（P2-3）→ C（P2-2/P2-4·钱路）→ D（ANALYZE）；全部在 ③ 放行（IBD 结束 ~09-09）前落，放行后首个 1 h 窗 = 验收窗。流程：NWT 预审 → 我汇总单点上 Owner（A/B/D 非钱路可我批；C 须 Owner）。
