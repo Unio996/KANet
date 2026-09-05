@@ -11831,3 +11831,4 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (914) 2026-09-05 · S2（KANet-UI D 行）feeder 可靠性：14:37Z 起的 nohup loop 只写 1 采样即死 ⇒ D 行断档 **14:57→15:41Z（~44 min）**（今日第 2 次·前次 11:16–11:24Z）· 已重挂 33808（15:41:03Z）· **S2 暂非可靠信号**（15:42:45Z）
 - 处置：feeder 改由我的会话以 hb_guard 同形起（`nohup bash <abs>.sh`·外层 while·每 20 min 调 `_ibd_metrics.mjs`·node 失败/超时只记 ERR 不退出·专用 alive 文件）；KANet-UI 出脚本、停自身 loop 避免双写者。READY 判定不受影响：S1（我 `_step0_gate.mjs`）独立；ready_watch 对 D 行 age >60 min 报 STALE。kaspad 36912 正常（15:40Z WS 22.7 / free 7.9）。
+- **(914 补·15:45:29Z)** durable feeder 已由我起：`scratch/_ibd_feeder.sh` **pid 1398737**（15:44:02Z·nohup 单顶层形·每 1200 s 一采样·node 失败只记 ERR 不退出·alive `logs/ibd_feeder-alive.txt`·单写者 `scratch/_ibd_monitor.log`）；首条 D 行 15:44:04Z（blk 10,989,424 · daa 89,206,954 · synced=false）。KANet-UI 自身 loop 已全停（0 双写者）。ready_watch 对 D age >60 min 报 STALE 兜底。
