@@ -11733,3 +11733,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - 停机窗总时长 **09:56:22 → 09:58:53Z = 2.5 min**（预估 5–10）。证据副本 `console.db.pre-idx-20260905T0957Z`。
 - 下一步：J2 修后首窗（≥1 h）readout 对号 884/§6 五条；NWT 核 live 证据；KANet-UI 报首个 ≥10 s lag。kaspad 36912 全程未动（25 blk/s）。
 - **(888 补·10:01:30Z·KANet-UI 10:01Z）** console 5392 起后 ~2.5 min **零条 eventloop-lag 行**（连 ≥3 s 都无；此前各代起后 +63~101 s 必出 ≥10 s）· wrpcConns 2→35（relay 重连）· scanner 仍停 · supervisor 1323985（headless 双保险）· hb_guard alive · kaspad 36912 WS 21.8/free 9.4/句柄 16,988 无命中。
+
+### (889) 2026-09-05 · ✅ ④ 生效核实（J2 10:13Z）+ 修后早读：boot 后 15 min **慢 SQL 5 行 vs 修前 1,047/h · lag ≥4 s 0 次 vs 119/h**（10:14:24Z）
+- ④：tg-bot 子进程 31640（09:58:36Z）首轮 pollSettleResults **10:03:37Z = 起后 300 s**（唯一 my-positions sql.all 392 ms/26 rows = 真人地址）；boot 后 15 min `http.onSend.big/http.slow my-positions` **0 行**（修前 8/min，10 MB/3.6 MB 测试地址不再出现）；`_state.json` 4 条未 wipe。
+- 早读（正式页 11:00Z）：慢 SQL 5 行（migrate 2、pair boot 全扫 1、broker-fee-emit 1、my-positions 1）；broker-intake sql.all 0 行；lag ≥4 s 0 次。
+- 观察（只记）：console.log 有 `[tg-bot] @Katest202607_bot up` 与 `@KANET_Broker_bot up` 两行（同进程两 bot 名）——不在本轮范围。
