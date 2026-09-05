@@ -2,7 +2,7 @@
 // 价值/信任步 NEVER executed here; bot deep-links the USER to Console/relay to act + pay on-chain.
 // Run:  TELEGRAM_BOT_TOKEN=.. BROKER_RELAY_ID=.. INGEST_SECRET=.. node tg-bot/bot.mjs
 import { Bot } from 'grammy';
-import { CONFIG, missingConfig, resolveBrokerRelayId, verifyAndSyncBotUsername } from './config.mjs';
+import { CONFIG, missingConfig, resolveBrokerRelayId, verifyAndSyncBotUsername, isTestBotUser } from './config.mjs';
 import * as api from './console-api.mjs';
 import * as M from './messages.mjs';
 import * as PM from './prediction-menu.mjs';
@@ -595,6 +595,7 @@ export async function pollPendingBets() {
 // 0-custody: read-only my-positions; 不签不付. 跨重启幂等 (seen_settled 持久化 _state.json).
 async function pollSettleResults() {
   for (const u of PM.listLinkedUsers()) {
+    if (isTestBotUser(u.tgUser)) continue;   // Phase-1 ④: 测试机器人地址(4,641/1,694 side ⇒ 10 MB my-positions)不轮询, 见 config.mjs testBotUsers
     try {
       const r = await api.myPositions(u.address);
       if (!r.ok) continue;
@@ -675,7 +676,7 @@ export async function startBot() {
   };
   guardedInterval(pollLoop, CONFIG.pollMs);
   guardedInterval(pollPendingBets, CONFIG.pendingBetPollMs);  // #28: fast poll (3s default) — protects in-flight custodial bet payments from defrag window
-  guardedInterval(pollSettleResults, CONFIG.pollMs);
+  guardedInterval(pollSettleResults, CONFIG.settlePollMs);   // Phase-1 ④: 30 s → 5 min(TG_SETTLE_POLL_MS), M10 H3 my-positions 10 MB 簇根治第一步
   guardedInterval(pollBrokerFeeEvents, CONFIG.pollMs);
   bot.start();
   console.log('[tg-bot] @' + CONFIG.botUsername + ' up (broker=' + (brokerRelayId || 'UNSET — set in Console Settings') + ', 0-key / deep-link only)');

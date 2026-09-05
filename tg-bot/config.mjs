@@ -8,6 +8,12 @@ export const CONFIG = {
   consoleUrl: process.env.CONSOLE_URL || 'http://127.0.0.1:3200',
   ingestSecret: process.env.INGEST_SECRET || '',            // x-ingest-secret on S1/S2 endpoints
   pollMs: parseInt(process.env.TG_POLL_MS || '30000', 10),  // S1 notification poller cadence
+  // Phase-1 ④ (2026-09-05, Owner 全批 ledger 880 · Bettor 881): pollSettleResults 独立节奏, 默认 5 min(原跟 pollMs 30 s).
+  //   根因 M10 H3: 每轮对每个 linked 地址打 GET /api/pool/my-positions 全量(测试机器人地址 4,641 side ⇒ 10 MB/次, handler 同步 ~1 s),
+  //   30 s × 4 地址 = 首窗 350 行 big/slow, Σms/窗长 17.6%(上界)。S1 结算通知延迟 ≤5 min 可接受(Bettor 裁)。
+  settlePollMs: parseInt(process.env.TG_SETTLE_POLL_MS || '300000', 10),
+  // ④ 同批: 测试机器人 tg 用户(990001/999001, 6 位合成 id, 各绑 4,641/1,694 side 的测试地址)不参与结算轮询; env 可改, 空串 = 不排除任何人.
+  testBotUsers: new Set(String(process.env.TG_TEST_BOT_USERS ?? '990001,999001').split(',').map((s) => s.trim()).filter(Boolean)),
   pendingBetPollMs: parseInt(process.env.TG_PENDING_BET_POLL_MS || '3000', 10),  // #28: pending custodial bet poll — fast (3s) to stay within DEFRAG_MIN_DEPTH protection window
   brokerRefreshMs: parseInt(process.env.TG_BROKER_REFRESH_MS || '60000', 10), // re-read broker config
   network: process.env.KASPA_NETWORK || 'testnet-12',
@@ -30,6 +36,11 @@ export const CONFIG = {
 
 // Resolve which broker the bot represents — prefer UI/DB config (Owner sets it in Settings,
 // changeable without restart), fall back to env BROKER_RELAY_ID. Returns '' if neither set.
+/** Phase-1 ④: tg 用户是否测试机器人(不参与结算轮询)。纯函数, cfg 可注入(测试)。 */
+export function isTestBotUser(tgUser, cfg = CONFIG) {
+  return cfg.testBotUsers.has(String(tgUser));
+}
+
 export async function resolveBrokerRelayId() {
   try {
     const res = await fetch(`${CONFIG.consoleUrl}/api/config/tg-bot-broker`, { signal: AbortSignal.timeout(5000) });
