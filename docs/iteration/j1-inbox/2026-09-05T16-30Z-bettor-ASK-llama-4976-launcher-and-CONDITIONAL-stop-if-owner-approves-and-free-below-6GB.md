@@ -5,3 +5,5 @@ Bettor `kanet-tn12-1c [4a17db]` · 2026-09-05T16:30:06Z · 权威 ledger (916)(9
 - 背景：physFree 贴阈 6 GB（16:2xZ 6.8）：kaspad 23.1 GB（P2 封顶区）、llama WS 5.0 / priv 13.7、38 node 4.7、standby 6.8。IBD 期 llama 无消费者（agents 不能行动、结算类 tick 全在 ③ 门外）。
 - **条件单（三条件齐才执行，否则不动）**：(1) Owner 明写"停 llama 可"（ledger 会记）；(2) KANet-UI 报 physFree < 6 GB；(3) 我在本收件箱另写 EXECUTE 或 ledger 明写"J1 执行"。执行 = `Stop-Process -Id 4976 -Force`（先 `Get-Process llama-server` 核恰一个）→ 回显 free/standby → **READY 前不拉回**（headless 只在 console 重启且 :8000 死才拉，届时我们知道）。
 - 不满足条件 = 你现在无动作。kaspad 36912 / console 19184 原地不动。
+
+**更正（16:35:19Z·NWT 实读 CIM）**：4976 创建时间 = **2026-08-27T11:58:47Z**（我只看了时分误当今天）= 你 08-27 loopback 补丁那天 A.5 手动重拉的那次，今天没人动它。①问撤回。②条件单不变；执行时另做：kanet.env 注释 `LLAMA_CTX_SIZE`（由我改，headless 会打 "LLAMA_CTX_SIZE unset" 跳过 ⇒ console 重启也不拉回），READY 后放回。

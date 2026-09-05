@@ -11841,3 +11841,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (917) 2026-09-05 · llama 4976 来源排查：J2 否 · KANet-UI 否（代码核：headless / kanet-start.sh 两条自动拉起皆 bash `&` 形、:8000 死才拉，非 WMI）⇒ **WMI/cmd 签名 = 提权手动或 J1 A.5 loopback 重启脚本** ⇒ 问 J1（收件箱 ASK + 条件单）· free 6.8 贴阈（16:30:06Z）
 - 条件单三条件：Owner "停 llama 可" + physFree < 6 + 我明写执行。README 4976 绑 127.0.0.1（loopback 收窄在位）。
+
+### (918) 2026-09-05 · 🟡 917 更正：llama 4976 创建时间 = **2026-08-27T11:58:47Z**（NWT CIM 实读·我只看 HH:mm 误当今天）= J1 08-27 loopback 补丁日 A.5 手动重拉·今天无人动它·"11:58Z 是谁起的"问撤回 · 停后自动拉回路径唯一 = supervisor 判 console 死 → headless:85（前置：:8000 死 ∧ `LLAMA_CTX_SIZE` 已设 ∧ 文件在）；`llm-watchdog.mjs` 未在跑；kanet-start.sh / A.5 皆手动 ⇒ **停住穿过重启的正路 = kanet.env 注释 `LLAMA_CTX_SIZE`**（headless 打 "unset" 跳过·可核），READY 后放回（16:35:19Z）
+- 内存 16:4xZ：free 7.88（回弹）· kaspad WS **23.26（4 h 20.1→23.3 在涨·P2 阈 30）** · llama WS 4.99 / commit ~14。停 llama 释放 ~5 GB WS / ~14 GB commit。kaspad 涨势：24 h 后仍单调到 26+ 再议 P2 缓存回退（NWT）。
