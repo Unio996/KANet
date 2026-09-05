@@ -11752,3 +11752,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - 五项均**不需停机窗**：P2-1 zk:45 / P2-5 my-positions 走索引/标志列（4,050 / 36k 行·boot 内建 ≤3 s·migrate v200）；P2-2 pool-settler:497 / P2-3 zk:239 / P2-4 refund-claim:57 为查询改写。**P2-2（退款授权闸）与 P2-4（自动 claim 候选）= 钱路**：谓词只搬不改 + 影子比对一周 + Owner 批。
 - **P2-0 横切（新发现）**：活库从未 `ANALYZE`（无 sqlite_stat1）⇒ planner 对 P2-2 选 sides 驱动、每 side 解析一次市场 metadata；小表 ANALYZE = 零代码修但统计全局 ⇒ 单独审、前后 EXPLAIN 清单对照（不含 16M 行 kaspa_tx_log）。
 - 打包顺序（J2 §4）：A（P2-5 + P2-1）→ B（P2-3）→ C（P2-2/P2-4·钱路）→ D（ANALYZE）；全部在 ③ 放行（IBD 结束 ~09-09）前落，放行后首个 1 h 窗 = 验收窗。流程：NWT 预审 → 我汇总单点上 Owner（A/B/D 非钱路可我批；C 须 Owner）。
+
+### (893) 2026-09-05 · NWT 预审 Phase-2 设计 v0.1 **GREEN-conditional**（两处必改 + 四条件）→ J2 出 v0.2（11:13:01Z）
+- 必改：(1) P2-3 `NOT(json_valid AND …)` 会把坏 JSON 市场翻成 handoff 候选（现 JS 是跳过）⇒ 改 `json_valid AND … IS NULL`；(2) P2-4 用 `=` 替 `LIKE`——SQLite LIKE 对 ASCII 不分大小写 ⇒ 落地前置 = 备份副本上大小写不一致计数为 0，否则 COLLATE NOCASE；写入方 4 处非 3。
+- 条件：P2-1 生成列会进 `SELECT *`（33 处）⇒ API market 对象多一键 = **用户面/UI 归 Owner**；P2-2 影子比对去 LIMIT 按集合；P2-0 **不在 boot 跑 PRAGMA optimize**（analysis_limit 0 撞 16M 行表 = boot-age 判活那口井），ANALYZE 只对具名小表在低负荷脚本；打包 A→B→C→D 同意，C 钱路 Owner 批 + 影子一周。
+- Owner 单点批清单（v0.2 GREEN 后一次上）：P2-1（API 多一键）· P2-2/P2-4（钱路·影子一周）；其余（P2-5、P2-3、ANALYZE 小表）我批。
