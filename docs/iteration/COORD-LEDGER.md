@@ -11705,3 +11705,7 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (882) 2026-09-05 · ✅ **D-b sustained 确认（NWT 201 桶 33.5 min 均值 25.02 blk/s·逐 5 min 24.1–28.0 无一段 <24·回滚串/错误/断连 0）⇒ 保留不回滚** · KANet-UI 20 min 窗 25.6（对旧基线 ×1.8）（09:10:41Z）
 - ③ M2（sha 31f6aebe…）与 ① M8（ffd879e6…）NWT GREEN（M10 稿 §9 3bdcca14 已推）；我批 apply ③→①，J2 落码中；落完推 + **计划内重启 console 4536**（现本就不应答）承载。kaspad 36912 09:09Z：WS 22.3 GB（回填中）、free 9.3、句柄 16,912、签名 0。
+
+### (883) 2026-09-05 · ✅ ③ M2 `d8760fd8`（12 文件 +163·15 站入口门·测 6/6）与 ① M8 `ab53b1f9`（+114/−22·测 6/6）落码已推 → **计划内重启 console 4536（我 09:12:11Z Stop-Process）承载**（09:12:15Z）
+- 重启路径：端口消失 → hb_guard 90 s 让位 → supervisor 3×30 s 判死 → 重起（≈3 min）。4536 本就不应答（zk LIKE 扫描常驻堵），无 ingress 可静默。生效证据（J2 抓）：③ 首个 IBD 期 tick 的 15 行 `skip: node not synced (isSynced=false…)` + 10 min 心跳；① 首两条 `since_rowid=` 行（首 tick 一次 ~47 s boot 全扫，一次性）。
+- ② 裁：**采 J2 守卫式 v199**——查 sqlite_master：索引在 ⇒ 记账；不在 ⇒ LOUD 警告 + 跳过（不自动建），仅 `KANET_MIGRATE_BUILD_HEAVY_INDEX=1` 才在 boot 建 ⇒ boot 永不被 16M 行建索引意外卡；停机窗 node 脚本建同名索引。
