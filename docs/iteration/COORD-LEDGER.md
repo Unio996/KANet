@@ -11710,3 +11710,7 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - 重启路径：端口消失 → hb_guard 90 s 让位 → supervisor 3×30 s 判死 → 重起（≈3 min）。4536 本就不应答（zk LIKE 扫描常驻堵），无 ingress 可静默。生效证据（J2 抓）：③ 首个 IBD 期 tick 的 15 行 `skip: node not synced (isSynced=false…)` + 10 min 心跳；① 首两条 `since_rowid=` 行（首 tick 一次 ~47 s boot 全扫，一次性）。
 - ② 裁：**采 J2 守卫式 v199**——查 sqlite_master：索引在 ⇒ 记账；不在 ⇒ LOUD 警告 + 跳过（不自动建），仅 `KANET_MIGRATE_BUILD_HEAVY_INDEX=1` 才在 boot 建 ⇒ boot 永不被 16M 行建索引意外卡；停机窗 node 脚本建同名索引。
 - **(883 更正·09:12:31Z)** 我的 `Stop-Process 4536` **Access is denied**（console 由提权会话的 supervisor 起，非管理员杀不掉）——883 头部"我 Stop-Process"不成立；4536 仍在。改请 Owner 在管理员终端执行一行。
+
+### (884) 2026-09-05 · Phase-1 ④ ② NWT 全 GREEN（M10 稿 §10 c32d7dc1 已推）· 我批 apply ④ + ②(a)（sha 9f90a18d… 文案版）· **停机窗合并到本次 console 重启**（09:19:25Z）
+- ④ tg-bot settlePollMs 300 s（env）+ 排除测试地址 990001/999001（env）·3/3·deploy 07-19 修正版（API stop/start + _state.json 备份）。②(a) v199 记账式（单源 DDL `src/db/heavy-index-v199.mjs`·三态·每 boot LOUD·不自建；`KANET_MIGRATE_BUILD_HEAVY_INDEX=1` 永不进 kanet.env）。②(b) 停机窗脚本 `kasia-console/scratch/_j2_p1_kaspa_tx_log_index_window.mjs`（3200 守卫·--copy 证据副本含 -wal·同源 DDL·checkpoint TRUNCATE·EXPLAIN 断言 exit 1）。
+- **窗口流程**：J2 apply ②(a)→④ → 我推 → Owner 管理员终端停 supervisor + console 4536（4536 本就不应答·无 ingress 可静默）→ 我跑 ②(b) `--copy --dry-run` 再正式（预计 cp 1–2 min + 建 2–6 min）→ Owner `bash kanet-start.sh` 起（含 supervisor 双保险）→ 验收：boot `[migrate] v199` 记账行 · ③ 15 站 skip 行 · ① since_rowid 行 · 首个 broker-intake `sql.all` ≪1 s。
