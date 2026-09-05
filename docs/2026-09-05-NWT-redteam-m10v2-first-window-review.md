@@ -73,3 +73,12 @@ J2 正式页 `scratch/_j2_m10v2_window1_page_2026-09-04T21-58Z.md`（窗 20:55:5
 - J2 页 `scratch/_j2_p1_postfix_window1_page_2026-09-05T11-03Z.md`；我同脚本独立重算逐项相同：lag >1 s **0**（修前 313）、≥4 s 0/0（119/1,663 s）、≥60 s 0（3）；sql.* **1 行**（pool.js:3300 0.4 s；修前 1,047）；broker-intake:717 **0**（修前 49 行 p50 11.9 s）；zk:45/:239、pool-settler:497、refund-claim:57 全 0（③ 门）；my-positions 1 行 rows=26（④）；pair boot 2.6 s + tick `since_rowid=146591 ms=1`（①）；skip 15 站 + 心跳、resume 0；链规则三口径 0/0。
 - **仪器活性核**（防"0 = 静默失败"）：`heartbeat started (expected=1000ms, alert_threshold=1000ms)` 行在；`logs/console-heartbeat.txt` mtime 与 now 差 1 s；`[diag:step]` 10–11 行/min 在流 ⇒ 0 为真 0。
 - **读法（必留）**：③ 份额 = 15 站 IBD 期不跑 = **遮住不是治好**（settle 自环 / ZK 扫盘 / pool 循环都在门外）；真修只有 ②（35 s → <200 ms）与 ④（465 行 → 1 行）。**下一次有信息量的窗 = IBD 结束后 ③ 自动放行的首个 1 h**；v3-C 与 Phase-2 排序到那时按剩余份额定（建议按修前 Σms：zk:45 310 s > pool-settler:497 179 s > zk:239 167 s > refund-claim:57 56 s）。
+
+### 13. Phase-2 设计 v0.1 预审（`docs/2026-09-05-j2-phase2-slow-sql-design-v0.1.md` ec7cb6e8 · 2026-09-05T11:13Z）：GREEN-conditional
+- 环境实证：better-sqlite3 内置 SQLite **3.51.3**；内存库上 VIRTUAL 生成列 + 部分索引（`SEARCH … USING INDEX`）、`WITH … AS MATERIALIZED`、坏 JSON 写入不抛，全 OK。
+- 🔴 **P2-3 语义翻转（必改）**：JS `catch { continue }` 跳过坏 JSON；设计 SQL `NOT (json_valid AND json_extract IS NOT NULL)` 对坏 JSON = TRUE ⇒ 坏元数据市场变 handoff 候选。改 `json_valid(pm.metadata) AND json_extract(...,'$.zk_continuation') IS NULL`。
+- 🔴 **P2-4 大小写（前置条件）**：`LIKE` 对 ASCII 不分大小写（实证 `'…"ABC"…' LIKE '%"abc"%'`=1、`'ABC'='abc'`=0；未设 case_sensitive_like），新 `=` 连接分 ⇒ 落地前在备份副本核"lower 相等而原值不等"计数 = 0，否则 COLLATE NOCASE；写入方 **4 处**（:682/:790/:2163/:2437）键全核在。
+- 🟡 P2-1：生成列进 `SELECT *`（仓内 33 处 `.get()`）⇒ API market 对象多一键 `zk_proving_ready`；无 INSERT…SELECT/行展开写回；走 UI 归 Owner；语义 = JS 超集 ✓；重建表的迁移须带列。
+- 🟡 P2-2：LIMIT 并列未定义两边同；影子比对去 LIMIT 按集合。
+- 🟡 P2-0：`analysis_limit` 默认 0 ⇒ boot `PRAGMA optimize` 可能对 kaspa_tx_log 全量 ANALYZE（boot-age 判活风暴形）⇒ ANALYZE 只对具名小表、停机窗/低负荷脚本，boot 不 optimize；前后 EXPLAIN 清单保留。
+- ✅ P2-5 索引、打包 A（v200 boot 内建 ≤3 s）成立；顺序 A→B→C→D 同意，C 钱路 Owner + 影子一周。
