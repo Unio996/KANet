@@ -11718,3 +11718,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 ### (885) 2026-09-05 · Phase-1 四项代码全部入库已推：③ d8760fd8 · ① ab53b1f9 · ②(a) 1993d05f（heavy-index-v199.mjs + test + migrate.js +6）· ④ 3305f61d（tg-bot 3 文件）· NWT §10 勘误 c8180e30 · **停机窗待 Owner 停 supervisor+console**（09:20:40Z）
 - 窗口前核：console.db 13,209 MB · -wal 113 MB · D: free 749 GB · `D:/tmp` 存在（SQLITE_TMPDIR）· 无 KANet 计划任务可见（非提权视角；Owner 侧再核 *Supervisor* 任务并在窗内 Disable）· 4536 仍在（不应答）。
 - 执行序：Owner 管理员终端停 supervisor + 4536 → 我跑 `_j2_p1_kaspa_tx_log_index_window.mjs --copy=console.db.pre-idx-<ts> --dry-run` → 正式 → Owner `bash kanet-start.sh` → 验收四项（884）。tg-bot 重启由 J2 走 API（不依赖窗口）。
+
+### (886) 2026-09-05 · 🟡 **Phase-1 停机窗开始 09:56:22Z**（Owner 管理员终端：supervisor 26516 停、console 4536 停、listen3200=0）· 索引脚本运行中（09:57:55Z）
+- Owner 侧计划任务：KANet-Console-Supervisor **Disabled** · KANet-KaspadWatchdog Disabled · KANet-TN12-BootSequence Disabled · **KANet-Net-Watchdog / -Boot Ready · KANet-WasmGuard Ready**（窗内若它们拉起 console 会撞索引构建——盯 3200 监听；本次未见）。Owner 原话"以后你找J1干啊" ⇒ 提权操作此后一律派 J1 EXECUTE 单（memory 已记）。
+- 脚本：`_j2_p1_kaspa_tx_log_index_window.mjs --copy=console.db.pre-idx-<ts> --dry-run` → 正式（后台 bi41fy0hm）。
+- J2 v3-A 首窗页（修前基线）`scratch/_j2_m10v3A_window1_page_2026-09-05T09-57Z.md`：broker-intake :717 49 条 **p50 11.9 s / max 35.7 s / Σ598 s = 窗长 17%**（比昨夜 5.5 s 恶化一倍）· my-positions 465 条 Σ680 s · 新具名 zk-autonomy-ticks.mjs:45 扫盘 75 条 max 106 s、pool-market-settler.js:497 max 69 s、zk-autonomy-ticks.mjs:239 max 45 s（③ 门 IBD 期全拦，IBD 后回来各需另案）· close-voter LIKE ✘（0.5–0.7 s）· judgePropose ✘（await UMA RPC 非 SQL）· 对齐率 33/119 · 三次 ≥60 s（186/237/78 s）起点都是 ZK 扫盘 SQL 连发。
