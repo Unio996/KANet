@@ -18,6 +18,7 @@
 // kill switch 默认 OFF(照搬 BSHARD_CLOSE_SUBMIT_V2_ENABLED 等今晚同款模式)。
 
 import { spawn } from 'node:child_process';
+import { ibdGateSkip } from '../lib/ibd-tick-gate.mjs';   // M2 (2026-09-05, Owner 全批 ledger 880): IBD 期(isSynced===false 确认)跳过读链/广播 tick, 门在入口任何 DB 扫描之前
 import { wrapTick } from '../lib/diag-step.mjs';   // M10 v2 observe-only (2026-09-05): setInterval 回调计时(纯透传, 同步段/总墙钟 ≥50ms 才打)
 import { writeFileSync, readFileSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -127,6 +128,7 @@ export function startZkProveWorkerCron() {
 export function stopZkProveWorkerCron() { if (timer) { clearInterval(timer); timer = null; } }
 
 export async function zkProveWorkerTick() {
+  if (await ibdGateSkip('zk-prove-worker.tick')) return { skipped: true, reason: 'ibd' };   // M2: 门在入口, 任何 DB 扫描/重入锁之前(Bettor 硬要求 1); 只认 isSynced===false, unknown/RPC 失败走原路径
   if (running) return { skipped: true };   // NWT pre-review①: proving ~4min, running mutex 防 tick overlap
   running = true;
   try {

@@ -16,6 +16,7 @@
 //                       Actual TX construction + sig orchestration → Sub 2d Phase 2.
 
 import { sqlite } from '../db/client.js';
+import { ibdGateSkip } from '../lib/ibd-tick-gate.mjs';   // M2 (2026-09-05, Owner 全批 ledger 880): IBD 期(isSynced===false 确认)跳过读链/广播 tick, 门在入口任何 DB 扫描之前
 import { sendCommandAsync } from './relay-manager.js';
 import { createHash, randomUUID } from 'node:crypto';
 // 2026-07-14(Bettor #k0i054 修法A, docs/2026-07-14-legacy-refund-self-fetch-deadlock-fix-design.md):
@@ -545,6 +546,7 @@ async function legacyRefundBuilderTick() {
 }
 
 export async function poolSettlerTick() {
+  if (await ibdGateSkip('pool.tick')) return { skipped: true, reason: 'ibd' };   // M2: 门在入口, 任何 DB 扫描/重入锁之前(Bettor 硬要求 1); 只认 isSynced===false, unknown/RPC 失败走原路径
   if (running) { return { skipped: true }; }
   running = true;
   const _tickDiagStart = Date.now();   // 诊断埋点(2026-07-13, Bettor #iynqdt·observe-only), 查完即删

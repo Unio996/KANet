@@ -18,6 +18,7 @@
 // stake escrow + fund_lock prediction 分类 + chain TX 真转), 跟 detect 解耦.
 
 import { sqlite } from '../db/client.js';
+import { ibdGateSkip } from '../lib/ibd-tick-gate.mjs';   // M2 (2026-09-05, Owner 全批 ledger 880): IBD 期(isSynced===false 确认)跳过读链/广播 tick, 门在入口任何 DB 扫描之前
 import { wrapTick } from '../lib/diag-step.mjs';   // M10 v2 observe-only (2026-09-05): setInterval 回调计时(纯透传, 同步段/总墙钟 ≥50ms 才打)
 import { randomUUID, createHash } from 'node:crypto';
 import { verifyPredictionOutcome } from './bettor-prediction-verifier.js';
@@ -45,6 +46,7 @@ export function stopPredictionSettlerCron() {
 }
 
 export async function settlePredictionOutcomes() {
+  if (await ibdGateSkip('prediction-settler.tick')) return { skipped: true, reason: 'ibd' };   // M2: 门在入口, 任何 DB 扫描/重入锁之前(Bettor 硬要求 1); 只认 isSynced===false, unknown/RPC 失败走原路径
   if (running) {
     console.log('[prediction-settler] tick skipped (previous still running)');
     return { skipped: true };

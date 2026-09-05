@@ -3,6 +3,7 @@
 // 不依赖 API endpoint 触发, 服务启动后自动跑.
 
 import { scanAndDerivePool } from './oracle-pool-chain-scanner.mjs';
+import { ibdGateSkip } from '../lib/ibd-tick-gate.mjs';   // M2 (2026-09-05, Owner 全批 ledger 880): IBD 期(isSynced===false 确认)跳过读链/广播 tick, 门在入口任何 DB 扫描之前
 import { wrapTick } from '../lib/diag-step.mjs';   // M10 v2 observe-only (2026-09-05): setInterval 回调计时(纯透传, 同步段/总墙钟 ≥50ms 才打)
 
 const TICK_INTERVAL_MS = 5 * 60 * 1000;
@@ -23,6 +24,7 @@ async function _getCurrentDaa(rpcUrl, networkId) {
 }
 
 export async function oraclePoolScannerTick() {
+  if (await ibdGateSkip('oracle-pool-scanner.tick')) return { skipped: true, reason: 'ibd' };   // M2: 门在入口, 任何 DB 扫描/重入锁之前(Bettor 硬要求 1); 只认 isSynced===false, unknown/RPC 失败走原路径
   if (running) return { skipped: true };
   running = true;
   try {

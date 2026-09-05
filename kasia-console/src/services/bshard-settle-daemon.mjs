@@ -14,6 +14,7 @@
 // 部署: index.js startSettleDaemonCron() (env-gated)。canary: 设 ENABLED=1 MAX=1 → 验 → ramp。
 
 import { sqlite } from '../db/client.js';
+import { ibdGateSkip } from '../lib/ibd-tick-gate.mjs';   // M2 (2026-09-05, Owner 全批 ledger 880): IBD 期(isSynced===false 确认)跳过读链/广播 tick, 门在入口任何 DB 扫描之前
 import { getMarketBets } from '../lib/pool-bettor-sides-query.mjs';
 import { computeSettlePlan, settleMarketLive, deriveResumePlanFromEvidence } from './bshard-auto-settler.mjs';
 import { consolidateAllShards, autoDetectConsolidateResume, verifyRedeemMatchesChainObservedOutput } from '../lib/pool-shard-settle.mjs';
@@ -935,6 +936,7 @@ async function _settleOneMarketAttempt(marketId) {
 }
 
 export async function settleDaemonTick() {
+  if (await ibdGateSkip('settle.tick')) return;   // M2: 门在入口, 任何 DB 扫描/重入锁之前(Bettor 硬要求 1); 只认 isSynced===false, unknown/RPC 失败走原路径
   if (_running) { log('prev tick still running·skip'); return; }
   _running = true;
   const _tickDiagStart = Date.now();   // 诊断埋点(2026-07-13, Bettor #iynqdt·observe-only), 查完即删

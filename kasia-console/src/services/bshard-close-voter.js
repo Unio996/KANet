@@ -17,6 +17,7 @@
 // 分工: J2 = 本 daemon 骨架 + transport + sig 收集 + (a)(b); J1 = enforceCloseAttest + verifyFrozenEvidence (lib).
 
 import { blake2b } from '@noble/hashes/blake2b';
+import { ibdGateSkip } from '../lib/ibd-tick-gate.mjs';   // M2 (2026-09-05, Owner 全批 ledger 880): IBD 期(isSynced===false 确认)跳过读链/广播 tick, 门在入口任何 DB 扫描之前
 import { wrapTick } from '../lib/diag-step.mjs';   // M10 v2 observe-only (2026-09-05): setInterval 回调计时(纯透传, 同步段/总墙钟 ≥50ms 才打)
 import { sqlite } from '../db/client.js';
 import { sendCommandAsync } from './relay-manager.js';
@@ -272,6 +273,7 @@ export function startBshardCloseVoterCron() {
 export function stopBshardCloseVoterCron() { if (timer) { clearInterval(timer); timer = null; } }
 
 export async function bshardCloseVoterTick() {
+  if (await ibdGateSkip('bshard-close-voter.tick')) return { skipped: true, reason: 'ibd' };   // M2: 门在入口, 任何 DB 扫描/重入锁之前(Bettor 硬要求 1); 只认 isSynced===false, unknown/RPC 失败走原路径
   if (running) return { skipped: true };
   running = true;
   try {
@@ -406,6 +408,7 @@ async function processCloseRequest(voter, market, req, enforceCloseAttest) {
 // ⚠ 今天(2026-07-07)诚实标注: 这是 driver-driven 首证的一部分 (Bettor 裁定 (a)+结构化), 不挂进 startBshardCloseVoterCron
 // 自动循环 — 由 3o6cs 一次性驱动脚本直接调用一次。①②③自治接线(含此 tick 挂进持续 cron)留后续任务, 不是今天范围。
 export async function bshardCloseVoterV2Tick() {
+  if (await ibdGateSkip('bshard-close-voter.v2Tick')) return { ok: true, skipped: true, reason: 'ibd' };   // M2: 门在入口, 任何 DB 扫描/重入锁之前(Bettor 硬要求 1); 只认 isSynced===false, unknown/RPC 失败走原路径
   const voterRelays = sqlite.prepare(`SELECT id, name, address FROM relay_nodes WHERE is_oracle = 1`).all();
   if (!voterRelays.length) return { ok: true, voters: 0 };
   const enforceCloseAttestV2 = await loadEnforceV2();
@@ -726,6 +729,7 @@ async function _pollLanded(address, txid, attempts = 15, intervalMs = 2_000) {
 }
 
 export async function bshardCloseSubmitV2Tick() {
+  if (await ibdGateSkip('bshard-close-voter.submitV2Tick')) return { skipped: true, reason: 'ibd' };   // M2: 门在入口, 任何 DB 扫描/重入锁之前(Bettor 硬要求 1); 只认 isSynced===false, unknown/RPC 失败走原路径
   if (submitRunning) return { skipped: true };
   submitRunning = true;
   try {

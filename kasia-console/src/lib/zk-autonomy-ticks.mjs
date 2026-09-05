@@ -13,6 +13,7 @@
 //                                    p2shAddr(redeemHex), p2pkAddr(pkHex) }
 
 import { sqlite } from '../db/client.js';
+import { ibdGateSkip } from './ibd-tick-gate.mjs';   // M2 (2026-09-05, Owner 全批 ledger 880): IBD 期(isSynced===false 确认)跳过读链/广播 tick, 门在入口任何 DB 扫描之前
 import {
   parseCloseZkV2State, buildClaimWitness, buildClaimCommand,
   spliceClaimContinuationRedeem, isNullifierBitSet,
@@ -62,6 +63,7 @@ const _zkAutonomyLeases = new Set();
 
 let _zkCloseV2Running = false;
 export async function zkCloseTickV2(ctx) {
+  if (await ibdGateSkip('zk.closeTickV2')) return { skipped: true, reason: 'ibd' };   // M2: 门在入口, 任何 DB 扫描/重入锁之前(Bettor 硬要求 1); 只认 isSynced===false, unknown/RPC 失败走原路径
   if (_zkCloseV2Running) return { skipped: true };
   _zkCloseV2Running = true;
   try {
@@ -195,6 +197,7 @@ async function _claimOneMarket(marketId, ctx) {
 
 let _claimTickRunning = false;
 export async function claimAutonomousTick(ctx) {
+  if (await ibdGateSkip('zk.claimAutonomousTick')) return { skipped: true, reason: 'ibd' };   // M2: 门在入口, 任何 DB 扫描/重入锁之前(Bettor 硬要求 1); 只认 isSynced===false, unknown/RPC 失败走原路径
   if (_claimTickRunning) return { skipped: true };
   _claimTickRunning = true;
   try {
@@ -264,6 +267,7 @@ function _hasZkContinuationNow(marketId) {
 
 let _zkHandoffTickRunning = false;
 export async function zkHandoffAutonomousTick(ctx) {
+  if (await ibdGateSkip('zk.handoffAutonomousTick')) return { skipped: true, reason: 'ibd' };   // M2: 门在入口, 任何 DB 扫描/重入锁之前(Bettor 硬要求 1); 只认 isSynced===false, unknown/RPC 失败走原路径
   if (_zkHandoffTickRunning) return { skipped: true };
   _zkHandoffTickRunning = true;
   try {
@@ -404,6 +408,7 @@ function _maybeWriteStuckAlert(marketId, deadlineUnixSeconds) {
 
 let _zkJudgeProposeTickRunning = false;
 export async function zkJudgeProposeAutonomousTick(ctx) {
+  if (await ibdGateSkip('zk.judgeProposeAutonomousTick')) return { skipped: true, reason: 'ibd' };   // M2: 门在入口, 任何 DB 扫描/重入锁之前(Bettor 硬要求 1); 只认 isSynced===false, unknown/RPC 失败走原路径
   if (_zkJudgeProposeTickRunning) return { skipped: true };
   _zkJudgeProposeTickRunning = true;
   try {
