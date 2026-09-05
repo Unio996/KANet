@@ -44,7 +44,8 @@ try_join_all(prev); report_completion
 - **首要判别（NWT 5b·分"对端空闲等待"与"对端逐请求串行忙时"）**：p2p 100 ms 时间线上，第 2 个请求（在第 1 团到货前已发）对应的团，其**首字节是否紧接第 1 团末字节**（间隔 ≤ 1 s ⇒ 延迟可重叠 ⇒ 流水线有效），还是**再等 4–6 s**（⇒ 逐请求串行固定成本 ⇒ 无效，立即回滚 D-a exe，不留）。
 - **中间态**：第 2 团首字节在第 1 团末字节后 1–4 s = 部分重叠 ⇒ 有效但期望值下调到实测（不按 ×1.9 报）。
 - **C2 立即回滚字符串（不等 20 min）**：我方 kaspad 日志出现 `IncomingRouteCapacityReached`（C1 被打破的唯一签名）或 `syncee inconsistency` / `expected block … but got` 不匹配 ⇒ 立即换回 D-a exe 重启；另：单批 >60 s 导致 `Timeout` 断连 IBD 重来（§3.9）⇒ 同样回滚。
-- **主判据**：`scratch/_bettor_p2p_bytes_timeline.mjs` 100 ms 时间线——请求尖峰（tx≈3.4 KB）之间的间隔与到货团间隔。**GO 保留**：团间隔中位 ≤ 4.5 s（现 ~6.7 s）且 `Processed N blocks/10s` 30 桶均值 ≥ 20 blk/s（现 12–14）；**回滚**：均值 < 12 blk/s 持续 20 min，或任何 `expected block/header mismatch` / `ProtocolError` 断连。
+- **v0.1.3 口径修正（2026-09-05 08:5xZ·部署后实测·ledger 876/877）**：下条"团间隔中位 ≤4.5 s"的前提错了——写时假设第 2 批会成独立到货团，实际对端把在飞的两个请求**一轮内连续服务、并入同一团**（团间隔仍 ~6.2–6.6 s，团内 bodies ≈ 2×99、团字节量 ×1.44）。判据改为：**每团 bodies ≈ 2×batch（或团字节量翻倍）∧ 30 桶均值 ≥20 blk/s ⇒ GO 保留**；团间隔不再作条件。实测：p2p 时间线两请求成对发、同团送两批；块率 23.9（Bettor 首 12 桶）/ 24.69（NWT 首 23 桶）blk/s = ×1.57–1.68。**裁：有效，保留。** 深度受 C1 钉死，此路杠杆到此为止。
+- **主判据（原文，前提见上）**：`scratch/_bettor_p2p_bytes_timeline.mjs` 100 ms 时间线——请求尖峰（tx≈3.4 KB）之间的间隔与到货团间隔。**GO 保留**：团间隔中位 ≤ 4.5 s（现 ~6.7 s）且 `Processed N blocks/10s` 30 桶均值 ≥ 20 blk/s（现 12–14）；**回滚**：均值 < 12 blk/s 持续 20 min，或任何 `expected block/header mismatch` / `ProtocolError` 断连。
 - **对照口径**：只与切换前后同为"干净 body 相位"（无压实簇、无剪裁遍历、无断连）的 10 min 窗比；A 基线 14.43 / D-a 两窗 13.63、12.92（856）。
 - **副作用监视**：断连率（基率 0.43/天·切换后已 7 次）、kaspad WS/句柄（D-a 后 20–22 GB / 16.3k）、console 停顿（M10 v2 行）。
 
