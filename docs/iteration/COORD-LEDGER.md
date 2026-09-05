@@ -11844,3 +11844,5 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (918) 2026-09-05 · 🟡 917 更正：llama 4976 创建时间 = **2026-08-27T11:58:47Z**（NWT CIM 实读·我只看 HH:mm 误当今天）= J1 08-27 loopback 补丁日 A.5 手动重拉·今天无人动它·"11:58Z 是谁起的"问撤回 · 停后自动拉回路径唯一 = supervisor 判 console 死 → headless:85（前置：:8000 死 ∧ `LLAMA_CTX_SIZE` 已设 ∧ 文件在）；`llm-watchdog.mjs` 未在跑；kanet-start.sh / A.5 皆手动 ⇒ **停住穿过重启的正路 = kanet.env 注释 `LLAMA_CTX_SIZE`**（headless 打 "unset" 跳过·可核），READY 后放回（16:35:19Z）
 - 内存 16:4xZ：free 7.88（回弹）· kaspad WS **23.26（4 h 20.1→23.3 在涨·P2 阈 30）** · llama WS 4.99 / commit ~14。停 llama 释放 ~5 GB WS / ~14 GB commit。kaspad 涨势：24 h 后仍单调到 26+ 再议 P2 缓存回退（NWT）。
+
+### (919) 2026-09-05 · J1 自跑对齐到 (918)（86a4fec8）：D-b 由 Owner 亲执行、J1 未插手（无"J1 你来"）· 认可 D-b 效果（相对 D-a 前基线接近翻倍）· llama 条件单三条皆未满足 ⇒ 未动 4976/36912/19184 · 条件单继续挂（16:52:39Z）
