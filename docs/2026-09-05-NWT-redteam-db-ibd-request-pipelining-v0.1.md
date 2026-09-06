@@ -127,3 +127,12 @@ Owner GO（838 边界）；回滚 = watchdog.ps1:17 指回 D-a exe + 重启；§
 > - **relay 扇入**：本次小轮两波（22:26:25Z 8×5-failures + 29 timeout；22:31:52Z 12 timeout），小于 43 min IBD 的 122；console lag 仅 2.0–2.6 s 三次（对齐 claim :46）；wasm 4.4 MB 平。
 > - **内存**：22:38Z host free 5.47 GB（全日最低；kaspad WS 27.77 GB，两次 IBD 体相位各 +0.6–0.7 GB；J2 D-c cargo 构建 12 rustc 并行叠加）⇒ Claude Code harness 两次杀后台 shell 任务（Monitor 型存活）；Bettor 令构建 -j 2、J1 GO P2(a) `--rocksdb-cache-size=4096`。
 > - **五数表**：① 43.0 min（估 33，1.3×）② −5.7 min ③ 15.0 / 9.3 min（估 11）④ 3 min 06 s（判据 ≤60 s 不满足，机制已定位）⑤ 11 min 58 s（估 8–10，1.2–1.5×）。无一出 2×。
+
+## §17 P2(a) `--rocksdb-cache-size=4096` 重启：首次实例夭折 + 第二次验收（2026-09-06T23:16Z · NWT 亲手读数）
+
+- **首次（J1·22:54:58Z）**：旧实例最后行 05:54:50+07；新实例 pid 9416 只打 4 行（cache 4096 / 版本 4d0a9e30 / 三目录）+ 05:55:02 `[UPnP] Attempting to register upnp…` 后**无任何行**；22:55:07Z 我脚本仍见 pid，22:55:35Z 进程消失；stderr 文件空、无 WER；从没到 `WRPC Server starting` 行。三假设并列后 Bettor 自起成功 ⇒ **LOCK 排除、端口不可证、"SSH 前台子进程随命令返回被收掉"最实**。kaspad 缺席 22:54:50→23:11:13Z（16.4 min）。
+- **缺席期 console**：③ 闸**fail-open**——全部站点 `resume: node synced (reason=rpc-fail: rpc-shared connect timeout 5000ms)`（console.log :23019–:23027），Phase-1 ③ 口径"只 skip isSynced===false"的代价显形；worker 自己的门 fail-closed（`isSynced=null, rpc-fail ⇒ skip`）。立项 **G-1**（rpc-fail 视同未同步或单列），今晚不改；占空比统计把 rpc-fail 段单列。memory 已记。
+- **第二次（Bettor·23:11:13Z·非提权 `Start-Process`·pid 29544·exe db-4d0a9e30 sha 2432C36B…）**：首 3 行 4096 MB / 4d0a9e30 / `WRPC Server starting on 127.0.0.1:17210`；23:11:27Z 连 syncer、23:11:35Z `IBD started`（缺席 17 min ⇒ 曲线估 9–10 min）。
+- **验收（`nwt_p2a_verify.sh 4096`·23:13:06Z·+2 min·头部相位冷缓存）**：① 进程恰 1、版本/cache 行 ✓ ② CPU 73.7%、IO read 10,263/s、IO other 4,186/s、D: 读 5,224/s、**WS 5.89 GB / priv 6.77 GB（起点）**、free 32.79 GB、commit 40.2 GB ③ 体相位块速待本轮扫描行后重跑 ④ 回滚串 0、断连 0。
+- **教训**：kaspad 重启由持久上下文的 `Start-Process` 做（Bettor 实证 datadir 对本用户可写），J1 只留提权项；`watchdog.ps1:47` 已改 4096（6bddf73e）且任务 Disabled。
+- **待补**：本轮 IBD 用时、READY 后 WS 封顶（4096 vs 8192 对照：昨夜 8192 时 READY 后 WS 26–28 GB）。
