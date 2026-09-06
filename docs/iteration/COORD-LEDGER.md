@@ -11879,3 +11879,7 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (929) 2026-09-06 · kaspad WS 越过 P2 预期封顶：22.8（01:32Z）→ 25.3（01:43Z）→ **25.6 GB（01:47Z）**（body 续上后 15 min 单调抬 2.8 GB·切换后新高）· free 11.4 · commit 58.5 · 句柄 18,431 · 无命中（WS 阈 30 距 4.4·free 阈 6 距 5.4）· lag ~32 h（2026-09-06T01:48:31Z）
 - KANet-UI 观测（不判因）：blockCount 过链高 58%，越近 tip 交易越密，RocksDB 工作集自然增长，可能是 block-cache 之外的 memtable/index。软线定：**≥27 报一次·≥28.5 再报（我备 P2 缓存回退单）·≥30 ALERT**；free <6 ALERT 不变。NWT 26 GB 事前 EXPLAIN 线即将触及 ⇒ 请 NWT 开始备 P2 回退方案（去/减 `--rocksdb-cache-size`·成本 = 一次重启 ≈ 与断连同量级 40–50 min）。
+
+### (930) 2026-09-06 · NWT P2 内存预案（01:50Z·亲读 RocksDB LOG 头 + 进程计数器）：**增长源不是块缓存**（块缓存硬顶 8192 MB 且含 index/filter·body 开始几分钟即满；memtable 上限 96 MB）⇒ 非缓存部分 ≈17.7 GB 且在长 = `--ram-scale=3.0` 放大的 kaspad 自有 LRU（headers/reachability/ghostdag/utxo-diff）+ 1.8 万 SST 表缓存元数据；body 续上后 15 min 抬 2.8 GB = header 相位换出后**回填**非新增长（2026-09-06T01:50:43Z）
+- 三案（各一次重启·不改代码·只改 watchdog :47 参数串 + 段 3 换起流程）：(a) `--rocksdb-cache-size=4096`：WS −4 → ~21.7、读 syscall 13k→16–18k、物理读 0.6k→1.5k IOPS、块率不变、CPU/块 +10–20%；(b) 去 flag：WS −8 → ~17.7、读 ~20k+/s、物理 2–3k IOPS、CPU/块 +20–30%；(c) `--ram-scale=1.0`（对准增长源）：WS 粗估 ~14–16 且包络变平，body 块率不变，**header 相位可能变慢**（有先例）。
+- **裁定（采 NWT）**：28.5 触发先 (a)；包络仍升再 (c)。**重启时机 = 紧接一次自恢复周期之后**（tip 刚同步到、header 重议只剩几分钟 ⇒ 成本 ~15 min 而非 45）；或若 READY（~09-06 18Z）先到，则并入 READY 后的第一次计划内重启（已同步节点重启只需追几分钟）。触发前不动。J1 EXECUTE 模板届时按段 3 出（子目录 exe 不变、只改参数串）。
