@@ -44,7 +44,7 @@ $kaspadExe = "D:\kaspad-live\db-4d0a9e30\kaspad.exe"   # D-b exe (sha256 2432C36
 #
 # ⚠️ 这砍掉一个当前无人使用的能力: 跨节点直连本机 RPC。若日后团队确需, 不要退回通配 ——
 #    改绑本机 tailnet 地址(有范围的口), 并当作一次显式决定记账。
-$kaspadArgs = "--testnet --netsuffix=12 --appdir=D:/kaspa-tn12-data --utxoindex --rpclisten-borsh=127.0.0.1:17210 --enable-unsynced-mining --ram-scale=3.0 --rocksdb-cache-size=8192"
+$kaspadArgs = "--testnet --netsuffix=12 --appdir=D:/kaspa-tn12-data --utxoindex --rpclisten-borsh=127.0.0.1:17210 --enable-unsynced-mining --ram-scale=3.0 --rocksdb-cache-size=4096"
 $wlog = "D:\kaspa-tn12-data\kaspad-watchdog.log"
 $stdoutLog = "D:\kaspa-tn12-data\kaspad-stdout.log"
 $stderrLog = "D:\kaspa-tn12-data\kaspad-stderr.log"
