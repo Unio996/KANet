@@ -81,3 +81,12 @@ Owner GO（838 边界）；回滚 = watchdog.ps1:17 指回 D-a exe + 重启；§
 - **轮间空窗剪枝推进**：18 s 内 `Header and Block pruning: traversed: 32000→34000`（整轮 0）——§10/precheck 的"剪枝被 IBD 饿死、只在空窗推进"再证一次。
 - **ETA 重算**（第 2 轮覆盖 11.25 h 链 ≈ 50 min 头 + 3.75 h 体 → ~16:50Z；第 3 轮 ~2 h；第 4/5 轮几何收敛 +1.5 h）：乐观下界[不含周期] **~20:30Z**；规划基准[含 1 次 ~50 min 周期] **~21:00–21:30Z**。08:39Z 报的 ~20Z 漏算了换轮头部相位（每轮 ~50/25/12 min）。
 - **观测·不附成因**：09:00Z、11:00Z 各一个 20 s 突发桶（792/1881、641 块）随即回到 198/396 交替，10:00Z/12:00Z 无 ⇒ 不成规律。`got reject message: The syncer purports to have data in the recent future` 全日志 931 次、全天每 10 min 数次 = 三个非 syncer peer 旧有 churn。
+
+## §14 READY 后：isSynced 20:29Z 翻 false 非抖动 · 中继模式进块 0.75 bps（2026-09-06T20:38Z · 源码 `git show 7b1e18cc`）
+
+- **判据**：`protocol/mining/src/rule_engine.rs:125` `is_nearly_synced` = `unix_now() < sink_timestamp + expected_difficulty_window_duration_ms/4`；`getServerInfo.isSynced` = `has_peers && is_nearly_synced`（`rpc/service/src/service.rs` get_server_info 分支）。用 **sink 区块时间戳**，不看 pmt / IBD / pruning。
+- **TN12 阈**：`params.rs:404` 100 ms × 40 × 661 = 2,644,000 ms；/4 = **661 s = 11.02 min**（`constants.rs`: DIFFICULTY_WINDOW_DURATION 2641 s、SAMPLE_INTERVAL 4 s、TenBps）。pmt ≈ sink − ~135 s。
+- **实测**：READY 20:18:44Z；Bettor 20:29Z 起 isSynced 持续 false、pmt 落后 15.6 min ⇒ sink 落后 ≈13.3 min > 11.02 ✓；时刻 = READY + 11.0 min ✓。kaspad 日志 READY 后每分钟 `Processed` **45 块恒定**（0.75 bps；15 min `Accepted … via relay` 685 块），而尾轮 IBD 显示链 14–19 bps ⇒ sink 每分钟净落后 ≈0.9 min。"45/min 恒定" 只报观测不定因。
+- **为何不再起 IBD**：`v7/blockrelay/flow.rs:265-310` 中继块缺父先查 BlockLocator（深度 `orphan_resolution_range` = 5 + ceil(log2 10) = 9，`flow_context.rs:314`）；在范围内走逐根孤儿解析（03:34:23 本地一对 `Orphaned … queued 1 missing roots / Unorphaned`），超范围才 `try_trigger_ibd`。
+- **待定**：sink lag 趋势（Bettor RPC 采样 5 min）决定是"掉队循环"还是"孤儿解析在追"；若掉队成立，"中继模式吞吐 0.75 bps" 立为独立 D 项（relay/orphan 路径，与 D-b 无关）。
+- ③ 闸随 isSynced 翻动预期内（`isNodeSyncedCached` TTL 30 s）；滞回建议在 M10 窗页。
