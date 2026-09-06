@@ -11930,3 +11930,7 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - S1 gate（`_step0_gate.mjs`）20:22Z 仍 NOT_READY 只因 `ibd_marker_recent_5min`（最后 IBD 行在 5 min 内），≥20:24Z 自翻；S2 feeder 下一采样 ~20:26Z ⇒ BOTH_READY 随后落。
 - **总账**：09-04 13:08Z 接位时 lag ~63 h（切 D-b 时 ~70 h）→ 09-07 20:18Z READY，历时 ~55 h；D-a（本机）+ D-b（对端重叠）+ 两次链路瞬断 + 一次 llama 停 = 全部动作；节点二进制 = 7b1e18cc + D-a 1b3046fb + D-b 4d0a9e30，路径 `D:\kaspad-live\db-4d0a9e30\kaspad.exe`。
 - READY 待办（923）启动：① BOTH_READY 记账（待 S1/S2 翻）② Phase-2 真验收窗（进行中·被 preprune worker 停顿污染·紧急件①落地重启后分两段）③ 影子比对起算 ④ 放回 `LLAMA_CTX_SIZE` + 拉 llama（**等紧急件①重启之后另议，不并入本次**）⑤ scanner 重启（KANet-UI SOP·等 console 稳 1 h）⑥ datadir sha 钉 ⑦ 结算停摆议程（Owner）⑧ 剪枝债（现在自己在跑）。
+
+### (945) 2026-09-07 · ✅ 紧急件①落地 **45dd0d71**（2 文件 +72/−1·注释去"303 s"·测 13/13 + ibd-gate ALL PASS·lint 0·未推）→ 我 20:25:26Z 停 19184 + supervisor → headless → **console 8572 20:25:48Z 监听·HTTP 1.7 ms·停机 22 s**（2026-09-06T20:26:28Z）
+- boot 验收行：`[preprune-capture-worker] disabled by env PREPRUNE_CAPTURE_WORKER=0 (…)` ✅ · `[phase2-shadow] PHASE2_SHADOW_EVERY=100 (raw="100" …)`（E 笔首次生效）✅ · `[migrate] v199/v200 … 记账通过` ✅ · headless `llama.skipped reason="LLAMA_CTX_SIZE unset"`（keep-down 链验证·非 "already serving"）✅。
+- 后续：NWT 逐行核 45dd0d71 → 我推；NWT 验收 (c) 重启后首 30 min ≥10 s 停顿计数（对照放行后 12 min 内 4 次）；Phase-2 首窗页分两段（worker 在 20:08–20:25 / 关 20:26–21:08）。P2-6 设计稿 `docs/2026-09-06-j2-p2-6-preprune-capture-worker-events-like-scan-design-v0.1.md`（J2 实核 events 594,985 行无 event_type 索引、每 tick ≈936 次 SCAN、341 个标记全是 07-17 的）交 NWT。
