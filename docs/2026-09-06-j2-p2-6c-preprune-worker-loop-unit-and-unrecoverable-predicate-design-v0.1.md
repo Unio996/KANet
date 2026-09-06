@@ -1,4 +1,15 @@
-# P2-6c · `preprune-capture-worker` 循环单位改逻辑盘 + "不可恢复"判据换剪枝点两条件 + `pruned_expired_waived` 入终态 · 设计 v0.1（不写码）
+# P2-6c · `preprune-capture-worker` 循环单位改逻辑盘 + "不可恢复"判据换剪枝点两条件 + `pruned_expired_waived` 入终态 · 设计 v0.1.2（不写码）
+
+> **v0.1.2（2026-09-06T23:0xZ · NWT 红队 22:5xZ：α GREEN · γ GREEN · β GREEN-conditional 四条件）采纳项**：
+> (1) **M = merge_depth_bound = 36,000 不是缓冲，是让 (b) 成立的结构最小值**：rusty-kaspa 剪的是 past(P)（扣保留集），不按 daa 排序；daa < P 的块若在 anticone(P) 会留下，但 merge depth 规则保证 anticone(P) 的块 daa ≥ P − 36,000 ⇒ `daa < P − 36,000 ⇒ 必在 past(P)`。12 h 不需要。另加：剪枝**遍历**有顺序但不保证即时（IBD 期 0 推进、READY 后几分钟跑完），所以"锚点已剪、tx 块暂时还在"在遍历中途可能出现——但那块已在 past(P)、我们没有它的 hash、几分钟内必被剪 ⇒ 标它不是误标；08-06 的"剪枝点之下 204,305 DAA 仍能取到"是遍历被饿死的产物，非稳态。
+> (2) **α-1 D_anchor 改 10,000**（每步最小降幅 1 ⇒ 10,000 步只保证 10,000 DAA；20,000 在低并行段可能走满不中又 300 s）。α-2 R_max 真界 = (k+1)=125/步 × 10,000 = 1.25M，取 2.48M 更保守可留。
+> (3) **替代上界成立（NWT 只读实测）**：`U = daa_at(created_at) + 36,000` 对全部 2,863 条有 `side_lock_daa` 的行 `side_lock_daa ≤ U` 2,863/2,863（93% 余量 ≥100k）；tx 晚于 `created_at` 的 83 条最大 3 s，1 h 余量比最坏 lead 大 1,200×。落码时该核查进 test。
+> (4) **fy1yk 可界**（我 §3.1b/§7 过度悲观）：索引最早点 2026-07-10T02:51Z，"取 timestamp ≥ created_at 的第一个索引点"对 06-21 的行返回 07-10 那点——仍是 tx daa 的合法（松）上界 ⇒ U = daa@07-10 + 36k ≪ P − M ⇒ 可标；fail-closed 只在索引里没有任何 timestamp ≥ created_at 的点（行比最新索引还新）时触发。
+> (5) **(a) 的代理块条件写死**：`anchor-pruned` 只在 `anchor.daa ≥ U`（不早于 tx）∧ `anchor.daa < P − M` ∧ 错误恰为 `cannot find header`（非 rpc/超时）时算真实失败。
+> (6) **β 先 dry-run 一窗**：log-only 打 `would-mark market=… U= P= M= reason= upperBoundSource=` 行，计数 ≈72（≤73）核对后再开写。
+> (7) events 消费者今核：`side_lock_daa_unrecoverable` 只有 worker 自己读（seed/常量），**今天没有任何结算读者**（worker 注释"供 K-17 替代结算识别"是意图非现状）⇒ 误标今天无自动钱路后果；Owner 批仍必要（K-17 读者上线即成其输入）。`pruned_expired_waived` 读者 = 两处监控 ⇒ γ 安全。
+> (8) **验收拆两组**：可标/已标组 `Σ ≤ 30 s / 15 min、max ≤ 5 s`；表 1 "≥剪枝点不标"的 7 个盘（U ≈ tip，tip 回溯可达 10,000 步）单列 `max ≤ 60 s` 并要求 `anchorSource=index` 命中率；`Σ ≤ 30 s` 整体保留为守恒量。
+> 落地序：α → 一窗 → β dry-run 一窗 → β 真写（Owner 批）→ γ。
 
 > **Status**: DRAFT-FOR-REVIEW · J2 · 2026-09-06T22:3xZ（`date -u`）· Bettor 派工 ledger 957（P2-6 A 包验收关闭后的下一层）· 交 **NWT 红队** → Bettor → 🔴 **落地须 Owner 批**（bettor side 的终态转换 = 结算路径，钱路状态机）· **本稿零代码零表零开关**。
 > 建在：J1 `docs/2026-08-06-preprune-recapture-permanent-failure-load-rootcause-design.md` v0.7（§2.1 满占空比重试循环、§2.3 闸用错量、§4.2① 剪枝点 + 两条件 fail-closed、§4.2 单位判据、§6 验收）+ 本人 `docs/2026-09-06-j2-p2-6-…-design-v0.1.md`（6a/6b 已落 `e5578a23`）。**不重做那两稿；本稿只补它们各自留下的"未写"格**：08-06 稿 §7 影响面（J2 出数）与 §8.1（`deadline_daa` 分布）、6c 的形。
@@ -32,11 +43,11 @@
 ## 3. 修法
 ### 3.1 ①"不可恢复"判据 = 08-06 §4.2① 两条件（状态改变 · 钱路 · Owner 批）
 **谓词（机械可核）**：对逻辑盘 L，标 `side_lock_daa_unrecoverable` 当且仅当
-- (b) **`U_L < P − M`**，其中 `U_L` = L 的 tx-daa 上界，`P` = 节点自报剪枝点 daa（`pruningDaa()`，同一 RPC，60 s 缓存），`M` = 安全余量（**默认 `merge_depth_bound` = 36,000 = 1 h**；08-06 §4.2① 实测"剪枝点之下仍有一段能取到"（204,305 DAA），M 取 1 h 是**最小**保守值，红队若要求可取 finality 432,000 = 12 h——代价是 [P − 12 h, P − 1 h) 那段多重试 11 h）；
-- (a) **本 tick 对 L 的某个 NULL side 做了一次真实取块尝试且失败**，失败 `reason ∈ {anchor-pruned, anchor-not-found-transient→升级见下, no-block-hash(走完 MAX_STEPS), daa-unresolved}`，**不含** `node-not-synced` / `no-rpc` / `rpc-fail`（那是我们这边坏，不是链上剪了）。
+- (b) **`U_L < P − M`**，其中 `U_L` = L 的 tx-daa 上界，`P` = 节点自报剪枝点 daa（`pruningDaa()`，同一 RPC，60 s 缓存），**`M = merge_depth_bound = 36,000`（v0.1.2 (1)：不是缓冲，是结构最小值——merge depth 规则保证 anticone(P) 的块 daa ≥ P − 36,000，故 `daa < P − 36,000 ⇒ 必在 past(P)` = 必被剪；不取 12 h）**；
+- (a) **本 tick 对 L 的某个 NULL side 做了一次真实取块尝试且失败**，失败 `reason ∈ {anchor-pruned, no-block-hash(走完 MAX_STEPS), daa-unresolved}`，**不含** `node-not-synced` / `no-rpc` / `rpc-fail` / `anchor-not-found-transient` / `walk-futile`（那是我们这边坏或方法到不了，不是链上剪了）。**`anchor-pruned` 的代理块条件写死（v0.1.2 (5)）：`anchor.daa ≥ U_L`（锚点不早于 tx）∧ `anchor.daa < P − M` ∧ 错误恰为 `cannot find header`（非 rpc/超时）**。
 - `U_L` 的取法（**替代上界**，解决 08-06 "NULL deadline 真缺口"）：
   1. `pool_markets.deadline_daa` 非 NULL 且 `< 链高`（排除 840,742,023 这类坏值：`deadline_daa > tip_daa` ⇒ 坏数据，**不标**、单独 warn 一行、计数进 events `deadline_daa_implausible`）；
-  2. 否则 `U_L` = `daa_at(min(side.created_at))`：该盘最早 NULL side 行的 `created_at` 经 `spc_daa_index`（时间→daa，取 ≥ 该时刻的最近索引点）换算，再 **+ 1 h（36,000）** 余量（side 行在 ingest 时插入，tx 最迟在其前后几分钟确认）；索引没有覆盖 ⇒ `U_L` 取不到 ⇒ **不标**（fail-closed）。fy1yk（32 片 / 1,004 行，deadline NULL，created 2026-06-21）走这条。
+  2. 否则 `U_L` = `daa_at(min(side.created_at))`：该盘最早 NULL side 行的 `created_at` 经 `spc_daa_index`（时间→daa，取 **timestamp ≥ 该时刻的第一个索引点**——它是 tx daa 的合法上界，哪怕很松）换算，再 **+ 36,000** 余量（side 行在 ingest 时插入，tx 最迟在其前后几秒确认；NWT 实测 2,863/2,863 行 `side_lock_daa ≤ U`，tx 晚于 created_at 最大 3 s）；**fail-closed 只在索引里没有任何 timestamp ≥ created_at 的点（行比最新索引还新）时触发 ⇒ 不标**。fy1yk（32 片 / 1,004 行，deadline NULL，created 2026-06-21）：索引最早点 2026-07-10T02:51Z ⇒ U = daa@07-10 + 36k ≪ P − M ⇒ **可界可标**（v0.1.2 (4)，我首稿"6 月无索引 ⇒ 不标"过度悲观，撤回）。
 - **标记动作不变**：写 `events(side_lock_daa_unrecoverable, payload{marketId, deadlineDaa|createdAtDaa, pruningDaa, margin, stillNullCount, reason})` + `Set.add`（6b）。payload 多带 `pruningDaa/margin/reason/upperBoundSource` 四字段（审计可复算）。
 - **叶子改动（观测→信息）**：`recaptureSideLockDaaForMarket` 返回值加 `reasons: {<reason>: count}`（不再丢 `cap.reason`）；worker 据此判 (a)。这是 08-06 §4.2③ 那条"最贵的推断本可省掉"。
 - 🔴 **误标 = 什么后果、什么不会发生**（Bettor ②）：标记**只**让 worker 不再重试 recapture；它**不**改 `protocol_status`、不动任何 UTXO、不触发 refund。NULL daa 的 side 会让 `sampleAndStoreCommittee` fail-loud ⇒ 盘停在 verifying（现状：这 93 个盘已经停了两个月）⇒ 要么走 quorum-timeout 路，要么人工处置。⇒ **误标的真实代价** = "本可恢复的 side 被放弃重试 ⇒ 该盘继续卡住"，与不标的现状**同一状态**，只是少了一个每 tick 重试的机会。反例分析（同 memory `project-owner-settle-not-refund-orphan-permanent-loss-precedent` 的纪律：任何"永久"都要说清）：
@@ -58,7 +69,7 @@
 - `scanned` 语义从"分片数"改"逻辑盘数"：读者只有 `preprune-capture-monitor.mjs`（只读 `tick_count/updated_at`，不读 scanned）⇒ 无阈值/比较受影响（NWT 6c 条件核过）；日志行同时打两个数 `scanned=<逻辑盘> shards=<分片>` 避免读旧页的人对不上。
 ### 3.4 α · 纯成本短路（不改状态 · 先行笔 · 判据写成可核的数）
 **回溯语义（`trade-protocol-filter.js:1262–1330`）**：起点 = `kaspa_tx_log.block_hash`（有则用）→ 否则 `_indexAnchor(U)` = `spc_daa_index` 里 `daa_score ≥ U` 的最近块 **且** `spc_daa_index_coverage` 区间命中 → 否则 **tip（`getBlockDagInfo().sink`）**；沿 `verboseData.selectedParentHash` 逐块回走，每块 `getBlock(includeTransactions)` 找 `side_lock_tx`，上限 `MAX_STEPS = 10,000`。实测速率 **≈2 DAA/步**（a4343 校准：5,839 步 ≈ 11,600 DAA，代码注释自述）⇒ 10,000 步 ≈ 20,000 DAA ≈ 33 min 的链；**期望值，不是界**。**界**：每步沿 selected parent 降的 DAA = 该块蓝 mergeset 大小 ∈ [1, `mergeset_size_limit`]，TN12 = **248**（`bps.rs`, k=124）⇒ 10,000 步最多回退 **R_max = 2,480,000 DAA**（≈69 h @10 bps）。
-**α-1 锚点放宽（主收益）**：`_resolveStartCursor` 接受 `spc_daa_index` 里 `daa_score ≥ U` 的最近块 **不再要求 coverage 区间命中**，条件 `anchor.daa − U ≤ D_anchor`（**D_anchor = 20,000 DAA** = 10,000 步 × 实测 2，即"从这个锚点走得到 U"）。coverage 命不中（08-06 §8.2 单点区间）是 aukqt 这批走 tip 的直接原因，而 coverage 对**向下回走**的正确性无关（见反例表）。锚点若已剪 ⇒ 第 0 步 `cannot find header` ⇒ 既有 `anchor-pruned` 逻辑（`:1290–1305`，含 `anchor.daa < pruningDaa` 核）⇒ **一次真实取块失败**（满足 §3.1 (a)），worker 的 (b) 带 M 另核后才标。
+**α-1 锚点放宽（主收益）**：`_resolveStartCursor` 接受 `spc_daa_index` 里 `daa_score ≥ U` 的最近块 **不再要求 coverage 区间命中**，条件 `anchor.daa − U ≤ D_anchor`（**D_anchor = 10,000 DAA**（v0.1.2 (2)：每步最小降幅 1 ⇒ 10,000 步**保证**覆盖 10,000 DAA；20,000 在低并行段可能走满不中又 300 s）；走前可用 100 步探测实际 DAA/步再放宽，留作 α 实现选项）。coverage 命不中（08-06 §8.2 单点区间）是 aukqt 这批走 tip 的直接原因，而 coverage 对**向下回走**的正确性无关（见反例表）。锚点若已剪 ⇒ 第 0 步 `cannot find header` ⇒ 既有 `anchor-pruned` 逻辑（`:1290–1305`，含 `anchor.daa < pruningDaa` 核）⇒ **一次真实取块失败**（满足 §3.1 (a)），worker 的 (b) 带 M 另核后才标。
 **α-2 tip 回溯无望短路（次收益，仅无任何锚点时）**：无 `kaspa_tx_log` hash ∧ 无 α-1 锚点（`spc_daa_index` 在 [U, U + D_anchor] 无块）⇒ 若 **`U < tip_daa − R_max − slack`**（`tip_daa` = 同一 `getBlockDagInfo().virtualDaaScore`；`R_max` = 2,480,000；`slack` = 1,000）⇒ 返回 `reason: 'walk-futile'` **不走**；否则照旧从 tip 走（可能到得了）。它只省成本、**不满足 (a)、不标**，下 tick 再来。
 **数（W2 基线 → 期望）**：aukqt（U = 58,695,372，tip ≈ 79.3M，P = 78.2M）：α-1 命中索引块 ⇒ 1 次 `getBlock` `cannot find header` ⇒ `anchor-pruned`（~30 ms，原 297.7 s）；若 6 月段无索引块 ⇒ α-2：`tip − U ≈ 20.6M > R_max 2.48M` ⇒ walk-futile（0 次 RPC）。fy1yk（U 由 created_at 换算 ≈ 6 月下旬）同。`[P − R_max, P)` 之间（≈ 69 h 内剪掉的）不满足 α-2，但 α-1 一定有索引块（近期索引连续）⇒ 仍是 1 步。期望一窗 `preprune.recapture` Σ 从 811 s 降到 ≤ 30 s。
 **反例表（Bettor 问"短路会不会把本可恢复的盘误判为跳过"）**：
@@ -84,8 +95,8 @@
 α 先落可以立刻拿到 W2 基线的对照（Σ811 s → 秒级）而不改任何状态；β/γ 再改状态。
 
 ## 5. 验收（每笔 · 修前基线 = W2）
-- α：门开一窗（≥10 min）`preprune.recapture` **Σ ≤ 30 s / 15 min**（基线 811 s），`max ≤ 5 s`（基线 297.7 s）；`walk-futile` 计数 ≈ 118+32 分片的 side 数量级；`scanned=<逻辑盘> shards=<分片>` 两数都在；lag ≥4 s 仍 0；`reasons` 直方图出现在 tick 行。
-- β：首窗新增 `side_lock_daa_unrecoverable` 事件数 ≈ 72（+ fy1yk 1 若替代上界成立）—— **不多于表 1 "可标"两行的逻辑盘数 73**；`ge_pp` 7 个盘 **0** 标记（负测试 08-06 §6.3/§6.4：`deadline < P` 但取块成功 ⇒ 不标；`deadline ≥ P` 但取块失败 ⇒ 不标）；`deadline_daa_implausible` 事件 = 1（nnd1g）；下一窗 `scanned` 从 93 降到 ≤ 7。
+- α：门开一窗（≥10 min）`preprune.recapture` 整体 **Σ ≤ 30 s / 15 min**（守恒量，基线 811 s）；**分两组**（v0.1.2 (8)）：可标/已标组（表 1 前两行 + 已标 341）`max ≤ 5 s`（基线 297.7 s）；表 1 "≥剪枝点不标"的 7 个盘（U ≈ tip，tip 回溯可达 10,000 步 ≈300 s）单列 `max ≤ 60 s` 并报 `anchorSource=index` 命中率；`walk-futile` 计数 ≈ 118+32 分片的 side 数量级；`scanned=<逻辑盘> shards=<分片>` 两数都在；lag ≥4 s 仍 0；`reasons` 直方图出现在 tick 行。
+- β **先 dry-run 一窗**（v0.1.2 (6)）：log-only 打 `would-mark market=… U= P= M= reason= upperBoundSource=` 行，计数 ≈72（+fy1yk 1）≤ 73 核对后再开写。真写首窗新增 `side_lock_daa_unrecoverable` 事件数 ≈ 73 —— **不多于表 1 "可标"两行的逻辑盘数 73**；`ge_pp` 7 个盘 **0** 标记（负测试 08-06 §6.3/§6.4：`deadline < P` 但取块成功 ⇒ 不标；`deadline ≥ P` 但取块失败 ⇒ 不标）；`deadline_daa_implausible` 事件 = 1（nnd1g）；下一窗 `scanned` 从 93 降到 ≤ 7。
 - γ：出集合 13 逻辑盘；`scanned` 再降 13。
 - 08-06 §6.2 的"可证伪预测（下次陷阱前 tick 数 62~68）"随 α 应失效——同为验收。
 - 离线用例：两条件四象限（deadline<P−M × 取块成功/失败）各一；坏值 > tip 不标；NULL deadline 用 created_at 换算成立/不成立各一；`rpc-fail`/`node-not-synced` 不算 (a)；`walk-futile` 不标但计数；`pruned_expired_waived` 出集合；循环单位改后 recapture 调用次数 = 分片数不变。
@@ -97,8 +108,8 @@
 - ❌ 跨节点 recapture（08-06 §4.2 已注：各节点各判）。
 
 ## 7. 未核 / 风险
-- `daa_at(created_at)` 换算依赖 `spc_daa_index` 在 6 月的覆盖（fy1yk created 2026-06-21）；若那段没索引 ⇒ fy1yk 仍走 §3.4 短路（省成本）但不标（fail-closed）——可接受。
-- M 的取值（1 h vs 12 h）交红队；两者都比现状（永不标）保守得多。
+- ~~`daa_at(created_at)` 换算依赖 6 月索引~~ → v0.1.2 (4) 撤回：取 timestamp ≥ created_at 的第一个索引点即合法上界，fy1yk 可界。
+- ~~M 1 h vs 12 h~~ → v0.1.2 (1) 定 36,000（结构最小值）。
 - `pruned_expired_waived` 的写入方在 `src/` 外（历史脚本）：若将来有新写入方把"未归因"的盘也写成这个状态，②会让 worker 漏掉它——文档化为"该状态 = 已归因终态"的契约。
 
 ## 8. Pin
