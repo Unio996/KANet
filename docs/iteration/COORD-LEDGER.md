@@ -11919,3 +11919,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 ### (942) 2026-09-07 · ③ 闸在尾轮间**翻动**（NWT 20:13Z）：20:08Z resume → 第 7 轮 header（20:09:50–20:10:26Z）期间 skip(not-synced) → 20:10:49Z 再 resume；settle/pool/prediction-voter 也已 resume · 机理 = kaspad isSynced 在每个尾轮 header 相位短暂回 false · 预计再翻 1–3 次后稳定（2026-09-06T20:11:48Z）
 - 影响：尾轮间隙站点在节点仍写库时 tick；首窗页慢 SQL/空档标"与尾轮重叠"。已见 1 个 4.1 s 空档（20:10:25Z）**无慢 SQL 行对应** = v3-A 覆盖不到的同步站 = v3-C 的题。`0 RpcClient built` 证闸省掉了 RpcClient 构建。
 - 可选项（记录·不派）：闸加滞回（isSynced 连续 ≥3 次/≥60 s 才 resume）；READY 稳定后翻动自然消失，是否做看 §6-3 gate(d) 是否要"放行 T+0"硬时刻。
+
+### (943) 2026-09-07 · 🔴 放行后 9 min 内 3 次 ≥13 s 事件循环停顿（20:09:34 / 20:11:30 / 20:15:30Z 起）· 全落在 `preprune-capture-worker.tick`（73,217 ms / 184,442 ms / 进行中）内 · 20:11:38Z 全部 ~40 relay `Console unreachable`（真影响）· wasm 4.2 MB 平、heap 正常、无 trap（2026-09-06T20:18:29Z）
+- 根因（我读源码 + NWT 读）：tick 体对每个 side_lock_daa IS NULL 的盘（177 个）跑 `_hasBeenMarkedUnrecoverable` = `SELECT id FROM events WHERE event_type=? AND payload_json LIKE '%"marketId":"<id>"%' LIMIT 1`（:68/:83）**同步全表扫、每盘一次**（v3-A 抓到一条 3,459 ms）；再 `recaptureSideLockDaaForMarket` 每 side await RPC 反向 walk（wasm 解码同步·未被包）。`recaptured=0` ⇒ 锚点已剪、结构性无事可做、每 tick 重扫 = 纯浪费。该 worker 门是自己的 `_readNodeSynced`（非 ibdGateSkip），**无 env 开关**。NWT 更正：send-command 303 s 三条不能当停顿证据（relay.js:1765 walk 400 s 超时·可能是 settle walk 慢路径）。
+- **裁定**：不等自愈。J2 紧急小改 = env `PREPRUNE_CAPTURE_WORKER=0` ⇒ `_tick` 入口 return（默认原行为·两向量测试）→ NWT 快审 → 我批 → kanet.env 加开关 → 重启 console（15 s）。真修 **P2-6**：(i) 每 tick 一次扫描装 Set（N→1，同语义·NWT）或 events 加 market_id 列/结论落库；(ii) v3-C 先包该 worker ①② 同步段。走常规审。
+- kaspad：第 8 轮 20:16:49Z 完 → 第 9 轮；READY 签名盯守在岗。
