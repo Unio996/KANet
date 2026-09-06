@@ -11883,3 +11883,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 ### (930) 2026-09-06 · NWT P2 内存预案（01:50Z·亲读 RocksDB LOG 头 + 进程计数器）：**增长源不是块缓存**（块缓存硬顶 8192 MB 且含 index/filter·body 开始几分钟即满；memtable 上限 96 MB）⇒ 非缓存部分 ≈17.7 GB 且在长 = `--ram-scale=3.0` 放大的 kaspad 自有 LRU（headers/reachability/ghostdag/utxo-diff）+ 1.8 万 SST 表缓存元数据；body 续上后 15 min 抬 2.8 GB = header 相位换出后**回填**非新增长（2026-09-06T01:50:43Z）
 - 三案（各一次重启·不改代码·只改 watchdog :47 参数串 + 段 3 换起流程）：(a) `--rocksdb-cache-size=4096`：WS −4 → ~21.7、读 syscall 13k→16–18k、物理读 0.6k→1.5k IOPS、块率不变、CPU/块 +10–20%；(b) 去 flag：WS −8 → ~17.7、读 ~20k+/s、物理 2–3k IOPS、CPU/块 +20–30%；(c) `--ram-scale=1.0`（对准增长源）：WS 粗估 ~14–16 且包络变平，body 块率不变，**header 相位可能变慢**（有先例）。
 - **裁定（采 NWT）**：28.5 触发先 (a)；包络仍升再 (c)。**重启时机 = 紧接一次自恢复周期之后**（tip 刚同步到、header 重议只剩几分钟 ⇒ 成本 ~15 min 而非 45）；或若 READY（~09-06 18Z）先到，则并入 READY 后的第一次计划内重启（已同步节点重启只需追几分钟）。触发前不动。J1 EXECUTE 模板届时按段 3 出（子目录 exe 不变、只改参数串）。
+
+### (931) 2026-09-06 · NWT 02:21Z：kaspad WS **26.60**（01:49Z 25.74 ⇒ **+1.6 GB/h 回填斜率**·周期 #1 后同形曾回落 0.7·03:00Z 前后见分晓）· 若不回落 27 ≈ 02:35Z、**28.5 ≈ 03:30Z** · free 10.17 · 上 30 min 27.4 blk/s（2026-09-06T02:22:47Z）
+- 预置：J1 条件执行单 `j1-inbox/2026-09-06T02-22Z-bettor-CONDITIONAL-EXECUTE-P2a-…md`（触 WS ≥28.5 或 free <6 即执行 (a)：`--rocksdb-cache-size=8192→4096`，段 3 同流程、exe 不变；执行后我改 watchdog :47）。J1 若不在线而触发 ⇒ 兜底请 Owner 贴同一段。
