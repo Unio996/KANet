@@ -109,3 +109,13 @@ Owner GO（838 边界）；回滚 = watchdog.ps1:17 指回 D-a exe + 重启；§
 > - 读法（Bettor·与源码相容）：队列翻到远端 tip 的 inv 后，每个 inv 的块都缺父 ⇒ `process_orphan` 各走一次 locator 往返（`check_orphan_resolution_range`，9 项 ≈51 s）⇒ 在范围内就进孤儿池等根、不 Accept；根越积越多（M 上升）直到某块缺根超出 locator 范围 ⇒ `try_trigger_ibd` ⇒ 21:22:03Z `IBD started`。
 > - 由此得的守恒量（Bettor 提）：**簇内 inv 条数** = 对端每 6.7 s 给我们的块数（3–5），爬行期与孤儿期都一样 ⇒ A′：inv 随簇到达、总量按链速累积、队列翻转。
 > - 观测：IBD 开始后 `Orphaned` 簇仍每 6.7 s 一条（04:22:04→22:58），M 20–40——中继流在 IBD 期继续把 tip 块丢进孤儿池（源码 flow.rs:124 的 "IBD 中且未同步 ⇒ continue" 在 `process_orphan` 之后，不挡这条）。只报观测。
+
+## §16 自触发 IBD 收敛三数 + P2-6 6a/6b 首批 live 证据 + 剪枝完成（2026-09-06T22:17Z · NWT 亲手读数）
+
+- **① IBD 全程 43.0 min**：21:22:03Z `IBD started`（孤儿超 locator 自触发，落后 ≈63 min）→ 4 轮 completed 21:46:01 / 21:56:37 / 22:01:54 / 22:05:01Z（换轮空窗 20/0/0 s；round-1 头 4.9 min·体 19.1 min）→ READY 签名 22:07:41Z。曲线估 33 min ⇒ 1.3×（几何尾 4 轮而非 3）。**未出 2×**。
+- **② 完成→isSynced true = −5.7 min**：门 21:59:20Z resume（round-3 体相位把 sink 拉进 661 s），此前 21:56:20→21:57:50Z 一次 90 s 收敛翻动（round-2 sink 快照 21:46:21Z + 661 s = 21:57:22Z 到期）。
+- **③ true 维持 15.0 min**：21:59:20→22:14:20Z（`[prediction-voter.tick] skip … reason=not-synced` 首条）；READY 后 9.3 min（估 11；差 = 完成时 sink 已落后 ~1.7 min）。**未出 2×**。
+- **P2-6 6a+6b 首批 live（e5578a23·开关撤 20:41Z·门开后）**：tick #1 21:56:19Z **721 ms**（sync=1；修前同 tick 73–184 s）；`preprune.unrecoverableCheck` 哨兵 **0 行**、`:68/:83` **0 行**、`seed FAILED` 0；tick #2–#5 32.7 / 151.4 / 145.8 / 517.0 s **全 sync=0**（异步 `preprune.recapture`：W2 内 169 行 Σ811 s，单次最长 297.7 s aukqt-s1，同批分片每 tick 重走 = 08-06 §2.1 形）；**lag ≥4 s 零**（仅 2.4/2.8 s 两次，对齐 claim :46 主路旧查询）；wasmBytes 4.1→4.4 MB、RpcClient built 0、RSS 213–370 MB 随 GC。⇒ SQL 同步停顿根治成立；剩余全是 RPC 反向 walk（6c 预滤 + J1 08-06 ① 的领域）。
+- **剪枝完成**：22:13:25Z `Header and Block pruning completed: traversed: 758623, pruned 327978`——READY 后 8.4 min 从 300k 跑完（每 100k ≈ 76–120 s）；IBD 期整段 0。饿死机制正向闭环（memory 已补）。
+- **relay 扇入**：本轮 IBD 体相位 21:40:18 / 21:42:30 / 21:44:01Z 三波 `Console unreachable`（M10 §14 勘误）；console 零 lag。
+- **④⑤（J1 bounce 实验）**：待补。
