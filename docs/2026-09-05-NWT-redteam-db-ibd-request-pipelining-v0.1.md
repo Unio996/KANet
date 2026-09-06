@@ -103,3 +103,9 @@ Owner GO（838 边界）；回滚 = watchdog.ps1:17 指回 D-a exe + 重启；§
   - 替代（皆 J1 提权）：(i) 防火墙临时 block syncer 30 s——同效、不需 unsafe RPC；(ii) 重启加 `--unsaferpc`（顺带 debug loglevel）。建议先做一次 (i) 手动实验。
 
 > **§15 勘误（2026-09-06T21:23Z）**：21:22:03Z kaspad **自触发** `IBD started with peer 136.243.93.17`——无 syncer 断连/回连（bounce 计时器只记到该行；21:21:51Z 三条 reset 是 churn peer 常规周期），前导为孤儿升级 `Orphaned … queued N missing roots` 21:10:32Z N=3 → 21:22:11Z N=40。READY 20:18:44Z + 63 min，落在 Bettor 预测 A 的 21:15–21:25Z 窗内；首个孤儿 = READY + 52 min。⇒ §15 "B 下不再起 IBD ⇒ ≈2%" **撤回**；零改动下界回到 ≈10%（63 min 落后 + ~33 min IBD + 11 min true）。B 裁决（ledger 950）待 Bettor 复审；团间 102 B/s 与 pktmon 7 s 簇仍是真读数，可调和解释 = inv 随簇到达而非连续到达，队列仍翻转。本次 IBD 计时与其后 isSynced=true 时长见 §16。
+
+> **§15 补·21:19:50→21:22:03Z 零进块两分钟的机制（日志证据·Bettor 读法标为读法）**：
+> - 对端投递节奏**不变**：每 ≈6.7 s 一簇 3–5 块（04:19:56 / 20:03 / 20:10 / 20:16 / … / 22:58 本地，间隔 6.6–6.8 s）。变的是内容：21:19:49.8Z 最后一条 `Accepted 2 blocks` 之后，**每簇全部 `Orphaned N block(s) … queued M missing roots`**（M 3→10→18→23→40），`Unorphaned` 最后一条 04:19:49；`Processed` 桶 04:20:02→04:22:52 连续 **0**。
+> - 读法（Bettor·与源码相容）：队列翻到远端 tip 的 inv 后，每个 inv 的块都缺父 ⇒ `process_orphan` 各走一次 locator 往返（`check_orphan_resolution_range`，9 项 ≈51 s）⇒ 在范围内就进孤儿池等根、不 Accept；根越积越多（M 上升）直到某块缺根超出 locator 范围 ⇒ `try_trigger_ibd` ⇒ 21:22:03Z `IBD started`。
+> - 由此得的守恒量（Bettor 提）：**簇内 inv 条数** = 对端每 6.7 s 给我们的块数（3–5），爬行期与孤儿期都一样 ⇒ A′：inv 随簇到达、总量按链速累积、队列翻转。
+> - 观测：IBD 开始后 `Orphaned` 簇仍每 6.7 s 一条（04:22:04→22:58），M 20–40——中继流在 IBD 期继续把 tip 块丢进孤儿池（源码 flow.rs:124 的 "IBD 中且未同步 ⇒ continue" 在 `process_orphan` 之后，不挡这条）。只报观测。
