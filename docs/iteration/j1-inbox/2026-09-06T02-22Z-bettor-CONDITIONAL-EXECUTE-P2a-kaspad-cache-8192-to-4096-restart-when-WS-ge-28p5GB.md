@@ -6,12 +6,12 @@ Bettor `kanet-tn12-1c [4a17db]` · 2026-09-06T02:22:47Z · 权威 ledger (929)(9
 - **执行（管理员 PowerShell·同 D-b 段 1/3 形·exe 不变）**：
 ```powershell
 $k = Get-CimInstance Win32_Process -Filter "Name='kaspad.exe'"; $k | Select ProcessId,CreationDate,ExecutablePath | Format-List   # 期望恰 1 个 = 36912, 路径 D:\kaspad-live\db-4d0a9e30\kaspad.exe
-$args47 = (Select-String -Path D:\kanet-tn12\scripts\kaspad-watchdog.ps1 -Pattern '^\ = "(.+)"$').Matches[0].Groups[1].Value
+$args47 = (Select-String -Path D:\kanet-tn12\scripts\kaspad-watchdog.ps1 -Pattern '^\$kaspadArgs = "(.+)"$').Matches[0].Groups[1].Value
 $NEW_ARGS = $args47 -replace '--rocksdb-cache-size=8192','--rocksdb-cache-size=4096'; "NEW_ARGS=$NEW_ARGS"   # 必须含 4096, 其余不变
 $OLD_PID = $k.ProcessId; Stop-Process -Id $OLD_PID -Force; $t=0; while ((Get-Process -Id $OLD_PID -ErrorAction SilentlyContinue) -and $t -lt 60) { Start-Sleep 1; $t++ }; "exited after ${t}s"
 Get-NetTCPConnection -LocalPort 16311,17210 -State Listen -ErrorAction SilentlyContinue   # 期望空
 $NEW_EXE = 'D:\kaspad-live\db-4d0a9e30\kaspad.exe'; (Get-FileHash $NEW_EXE -Algorithm SHA256).Hash   # 2432C36B…361A95
-$stamp = (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ'); foreach ($f in 'kaspad-stdout.log','kaspad-stderr.log') { $p="D:\kaspa-tn12-data\"; if (Test-Path $p) { Move-Item $p "D:\kaspa-tn12-data\archive-$stamp-$f" -Force } }
+$stamp = (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ'); foreach ($f in 'kaspad-stdout.log','kaspad-stderr.log') { $p="D:\kaspa-tn12-data\$f"; if (Test-Path $p) { Move-Item $p "D:\kaspa-tn12-data\archive-$stamp-$f" -Force } }
 $spArgs = @{ FilePath = $NEW_EXE; ArgumentList = $NEW_ARGS; WorkingDirectory = 'D:\kaspad-live\db-4d0a9e30'; WindowStyle = 'Hidden'; PassThru = $true; RedirectStandardOutput = 'D:\kaspa-tn12-data\kaspad-stdout.log'; RedirectStandardError = 'D:\kaspa-tn12-data\kaspad-stderr.log' }
 $proc = Start-Process @spArgs; "T1=$((Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')) NEW_PID=$($proc.Id)"
 Start-Sleep 10; Get-Content D:\kaspa-tn12-data\kaspad-stdout.log -TotalCount 3   # 首行应为 "Custom RocksDB cache size … 4096 MB", 版本串 4d0a9e30
