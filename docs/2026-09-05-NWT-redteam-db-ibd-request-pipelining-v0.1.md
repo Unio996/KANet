@@ -90,3 +90,14 @@ Owner GO（838 边界）；回滚 = watchdog.ps1:17 指回 D-a exe + 重启；§
 - **为何不再起 IBD**：`v7/blockrelay/flow.rs:265-310` 中继块缺父先查 BlockLocator（深度 `orphan_resolution_range` = 5 + ceil(log2 10) = 9，`flow_context.rs:314`）；在范围内走逐根孤儿解析（03:34:23 本地一对 `Orphaned … queued 1 missing roots / Unorphaned`），超范围才 `try_trigger_ibd`。
 - **待定**：sink lag 趋势（Bettor RPC 采样 5 min）决定是"掉队循环"还是"孤儿解析在追"；若掉队成立，"中继模式吞吐 0.75 bps" 立为独立 D 项（relay/orphan 路径，与 D-b 无关）。
 - ③ 闸随 isSynced 翻动预期内（`isNodeSyncedCached` TTL 30 s）；滞回建议在 M10 窗页。
+
+## §15 D-c（中继模式 0.75 bps）候选修法红队 + "bounce 重连" 方案审（2026-09-06T21:05Z · 源码 `git show 7b1e18cc`）
+
+- **坐标复核（Bettor 引·全对）**：`v7/blockrelay/flow.rs` 主循环串行、`request_block` 一次一 hash；`handle_requests.rs` 对端 `for hash in hashes` 多 hash；`block_invs_channel_size = bps×256 = 2560`；`router.rs` InvRelayBlock 溢出 Drop；IBD 仅由 `process_orphan` 超 locator → `try_trigger_ibd(R)`（**需 Block R**）。
+- **A（队列翻转）vs B（对端涓流）**：我方 NIC 不可隔离（共享 Wi-Fi 35 pkt/s 本底；未提权无 pktmon）。结构论证偏 B：一团 11 KB 内完成 5 次请求/响应 ⇒ RTT 几十 ms、我方能拉 ≥10 bps；A 要求团间持续 ~10 帧/s（≥600 B/s），Bettor 测团间 ≈102 B/s。看 inv 率三法：pktmon（J1）/ `--loglevel=info,kaspa_p2p_flows=debug`（J1·flow.rs:109/127/133/168 每 inv 一行）/ getMetrics 无消息计数（未核尽）。
+- **三修法**：(1) 批量请求——仅 A 下有用，且要改成多响应匹配；(2) 落后超阈 `try_trigger_ibd`——B 下无 R 不可行，A 下冗余；(3) 缩队列——只改周期。**第四挑战：n=1 好 peer**（另三 peer 回 finality 冲突拒连）⇒ 先换/加 peer；但 J1 younio 节点因内存未跑（j1-inbox 09-05）⇒ 暂不可得，记结构项。B 下无孤儿超范围 ⇒ 不再起 IBD ⇒ isSynced 只在断连周期后 11 min 为 true ⇒ ≈2% 非 10%。
+- **bounce（ban→unban→addPeer 拿 sink inv）红队**：
+  - 🔴 **#1 硬阻塞**：`service.rs:986/1009/1026` 三 handler 在 `!unsafe_rpc` 下 `UnavailableInSafeMode`；canonical 参数 `scripts/kaspad-watchdog.ps1:47` **无 `--unsaferpc`** ⇒ 从 kaspa-wasm 做不了；加旗 = 改 watchdog + 重启（J1）+ 记暴露授权账（RPC 仅 127.0.0.1）。
+  - #2 ban = terminate + **从 address_store 删地址** + 24 h 自动解；漏 unban ⇒ 唯一 syncer 消失 ⇒ 孤立。#3 连接管理器 30 s tick；非永久失败即丢；永久不可 ban（`IpHasPermanentConnection`）。#4 源码无对端重连惩罚（运营层未核）。#5 机制成立：`send_sink()` 连接时一次；locator 9 项 ≈511 blue ≈51 s ⇒ 落后 >1 min 必超范围 → IBD。
+  - ③ 头部成本曲线（实测）≈4.2 min/链时 + ~1 min；方案 "false >5 min 才 bounce" ⇒ 周期 26 min、synced ≈42%；翻 false 即 bounce ≈58%；按 sink lag ≥8 min 预 bounce ≈85–90%（读 lag 不需 unsafe RPC）。④ 与 D-b 无新路径，仅暴露次数 ×N。⑤ **RPC 无 is_ibd_running** ⇒ 触发器须靠日志判 IBD 在飞，否则误 bounce = 头部从零重议（可白扔 40 min）。
+  - 替代（皆 J1 提权）：(i) 防火墙临时 block syncer 30 s——同效、不需 unsafe RPC；(ii) 重启加 `--unsaferpc`（顺带 debug loglevel）。建议先做一次 (i) 手动实验。
