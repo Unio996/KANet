@@ -145,8 +145,25 @@ export async function isNodeSyncedCached({ ttlMs = 30_000, readFn = _readNodeSyn
 }
 export function _resetNodeSyncedCache() { _syncedCache = { ts: 0, gate: null }; }
 
-// deps 只供 regression case 注入(preprune-capture-worker-ibd-gate.test.mjs); 生产路径 setInterval(_tick) 不传参 ⇒ 全默认。
+// 紧急开关(Bettor ledger 943, 2026-09-06): ③ 放行后本 worker 每 tick 对 177 个 NULL side_lock_daa 盘各跑一次
+//   `SELECT id FROM events WHERE … payload_json LIKE …`(:68/:83, events 全表扫, 单条 0.2–3.5 s, 同步连发)⇒ 20:09–20:15Z 三次 ≥13 s 事件循环停顿、
+//   relay 全体 "Console unreachable"; 且 recaptured 恒 0(锚点已剪, 永远无事可做)。
+//   env PREPRUNE_CAPTURE_WORKER=0 ⇒ _tick 入口即 return(不进 body、不读链), 每 10 min 打一行 disabled by env; 未设/其它值 = 原行为不变。
+//   disabled 时仍写 heartbeat(0,0)——与 IBD skip 路径同款, 免 preprune-capture-monitor 把"人为关"读成"挂死"。结构修见 P2-6 设计(另稿)。
+export function _workerDisabledByEnv(env = process.env) { return String(env.PREPRUNE_CAPTURE_WORKER ?? '').trim() === '0'; }
+const DISABLED_NOTE_MS = 10 * 60 * 1000;
+let _disabledNoteAt = 0;
+// deps 只供 regression case 注入(preprune-capture-worker-ibd-gate.test.mjs / preprune-capture-worker-disable-env.test.mjs); 生产路径 setInterval(_tick) 不传参 ⇒ 全默认。
 export async function _tick(deps = {}) {
+  if ((deps.disabledByEnv || _workerDisabledByEnv)()) {
+    const now = (deps.now || Date.now)();
+    if (now - _disabledNoteAt >= DISABLED_NOTE_MS) {
+      _disabledNoteAt = now;
+      console.log('[preprune-capture-worker] disabled by env PREPRUNE_CAPTURE_WORKER=0 (Bettor ledger 943: events LIKE 全扫致 ≥13 s 停顿; 待 P2-6 结构修)');
+    }
+    try { (deps.writeHeartbeat || _writeHeartbeat)(0, 0); } catch (e) { console.warn(`[preprune-capture-worker] heartbeat write fail on disabled (non-fatal): ${e.message}`); }
+    return { skipped: 'disabled-by-env' };
+  }
   if (_running) return { skipped: 'reentrant' };
   _running = true;
   try {
