@@ -9,6 +9,7 @@ import { classifyPayoutShardFamily } from '../lib/bshard-payout-family-coherence
 import { M0C1_GRANT_TABLE, M0C1_GRANT_DDL } from './m0c1-grant-registry-schema.js';
 import { ensureKaspaTxLogToAddrObservedIndex } from './heavy-index-v199.mjs';   // v199 (Phase-1 ②): 记账式复合索引迁移
 import { ensurePhase2IndexesV200 } from './phase2-indexes-v200.mjs';   // v200 (Phase-2 A 包): P2-5 + P2-1 A′ 索引, boot 内建
+import { ensureEventsTypeCreatedIndexV201 } from './events-type-index-v201.mjs';   // v201 (P2-6 6a): events(event_type, created_at DESC), boot 内建, 不 ANALYZE
 
 export function runMigrations() {
   sqlite.exec(`
@@ -5786,5 +5787,10 @@ export function runMigrations() {
   //   _scanZkAutonomyCandidates 从 LIKE 全扫 27.6 MB 改索引查找]。4,050 / 36k 行量级, boot 内建 ≤3 s(与 v199 的 16M 行不同, 不拒建); IF NOT EXISTS + 记账日志。
   //   DDL/表达式常量单源在 ./phase2-indexes-v200.mjs(NWT C1)。任何重建这两张表的迁移都必须带上这两个索引。
   ensurePhase2IndexesV200(sqlite);
+  // ── v201 (2026-09-06, J2 · P2-6 6a, 设计 docs/2026-09-06-j2-p2-6-preprune-capture-worker-events-like-scan-design-v0.1.md NWT GREEN-conditional · Bettor 945):
+  //   idx_events_type_created(event_type, created_at DESC)。events 594,985 行此前只有 created/level/trace/agent_addr 索引, 全仓 7 处 `FROM events WHERE event_type = ?`
+  //   探测都是 SCAN(preprune-capture-worker 每 tick ≈936 次 ⇒ ≥13 s 事件循环停顿)。595k 行 boot 内建 ~1–2 s; IF NOT EXISTS + 记账日志; 🔴 不 ANALYZE(STAT4 构建回滚不可靠)。
+  //   DDL 单源 ./events-type-index-v201.mjs。任何重建 events 表的迁移都必须带上本索引。
+  ensureEventsTypeCreatedIndexV201(sqlite);
   console.log('[migrate] DB migrations complete.');
 }

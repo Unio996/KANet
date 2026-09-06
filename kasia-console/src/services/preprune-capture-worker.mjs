@@ -20,7 +20,8 @@
 // 与结算时 lazy-recapture(pool-market-settler.js:765)/consolidateAndBuildPsState(bshard-settle-
 // daemon.mjs)三条写路径共享同一张表同一个 WHERE 子句——先写者赢, 后写者 WHERE 落空 no-op, 不冲突。
 import { sqlite } from '../db/client.js';
-import { wrapTick } from '../lib/diag-step.mjs';   // M10 v2 observe-only (2026-09-05): setInterval 回调计时(纯透传, 同步段/总墙钟 ≥50ms 才打)
+import { wrapTick, stepSync, logStep } from '../lib/diag-step.mjs';   // M10 v2 observe-only (2026-09-05): setInterval 回调计时(纯透传, 同步段/总墙钟 ≥50ms 才打); P2-6: unrecoverableCheck 哨兵 + recapture 墙钟
+import { seedMarkedMarketIds } from '../db/events-type-index-v201.mjs';   // P2-6 6b: "已标不可恢复"集合的播种查询单源(与 6a 索引同文件)
 import { randomUUID } from 'node:crypto';
 
 const TICK_MS = 60 * 1000; // 镜像 spc_daa_index 巡检节拍(已验证过的量级)
@@ -62,11 +63,33 @@ function _writeHeartbeat(scanned, recaptured) {
 // 论证的反例(那条论证针对*活跃*/*可能恢复*的行), 而是漏了"已经放弃过的行不该重复烧同样的 RPC 成本"
 // 这条优化。查"该 market 是否已经产出过 side_lock_daa_unrecoverable 事件"(不限时间窗, 一旦结构性不可达
 // 就永远不可达, 跟第 76 行"一小时内只报一次"的告警去重是两回事——这里是"跳过重试"的持久判据)。
+// ── P2-6 6b (2026-09-06, 设计 docs/2026-09-06-j2-p2-6-preprune-capture-worker-events-like-scan-design-v0.1.md · NWT GREEN-conditional 两条件 · Bettor 945) ──
+//   旧形 = 每次 `SELECT id FROM events WHERE event_type = ? AND payload_json LIKE '%"marketId":"X"%' LIMIT 1`(events 595k 行无 event_type 索引 ⇒ SCAN),
+//   分片循环里每 tick ≈936 次 ⇒ ≥13 s 事件循环停顿; 而 341 个标记两个月没变。改为进程内 Set: 首次用 seedMarkedMarketIds 播种一次, 新标即 add。
+//   语义与旧形同: 事件存在即跳过、不限时间窗、永不撤销; 重启 = 重播种(事件持久)。
+//   🔴 NWT 条件①: 播种失败 fail-closed——抛给调用方, _tick 跳过本 tick + LOUD, 绝不带空集合进循环(空集合 = 341 个已放弃盘全部重进 recaptureSideLockDaaForMarket = 08-06 稿 RPC walk 病原样重演)。
+//   🔴 NWT 条件②: LIKE↔精确等价——LIKE 对 ASCII 不分大小写、`_`/`%` 通配; 2026-09-06 NWT 只读实核 pool_markets 4,050 id / market_shards 1,341 / 341 事件 marketId 含 `_`/`%`/大写者 0 ⇒ 今天逐一等价;
+//     seed 后 O(1) 断言 Set.size === 播种行数(行已 DISTINCT; 不等 ⇒ 空值/重复 ⇒ 抛)。Set.add 与写进 payload 的 marketId 同一变量(见 _markUnrecoverableIfBeyondFloor)。
+//   观测(NWT 建议): _hasBeenMarkedUnrecoverable 包 stepSync(阈 5 ms, 6b 后应 ~0 ms, 出现即是哨兵); 每次 recapture 调用记墙钟(≥50 ms 才打)。
+let _unrecoverable = null;   // Set<string> | null(未播种)
+function _seedUnrecoverableSet(db = sqlite) {
+  const rows = seedMarkedMarketIds(db, UNRECOVERABLE_EVENT_TYPE);   // 抛 ⇒ 上抛(fail-closed 在调用方)
+  const set = new Set();
+  for (const r of rows) {
+    if (r.marketId === null || r.marketId === undefined || r.marketId === '') throw new Error(`seed row with empty marketId (rows=${rows.length})`);
+    set.add(String(r.marketId));
+  }
+  if (set.size !== rows.length) throw new Error(`seed size mismatch: set=${set.size} rows=${rows.length}`);
+  _unrecoverable = set;
+  return set;
+}
+function _resetUnrecoverableSet() { _unrecoverable = null; }
+function _unrecoverableSetSize() { return _unrecoverable === null ? null : _unrecoverable.size; }
 function _hasBeenMarkedUnrecoverable(logicalMarketId) {
-  const row = sqlite.prepare(`
-    SELECT id FROM events WHERE event_type = ? AND payload_json LIKE ? LIMIT 1
-  `).get(UNRECOVERABLE_EVENT_TYPE, `%"marketId":"${logicalMarketId}"%`);
-  return !!row;
+  return stepSync('preprune.unrecoverableCheck', () => {
+    if (_unrecoverable === null) _seedUnrecoverableSet();   // 单独调用(测试/别处)时懒播种; 生产路径 _tick 已先播种
+    return _unrecoverable.has(String(logicalMarketId));
+  }, { thresholdMs: 5 });
 }
 
 // fail-loud①(设计§5): 某行 recapture 后仍 NULL, 且其市场 deadline_daa 已经落在 spc_daa_index 有史以来
@@ -83,14 +106,16 @@ function _markUnrecoverableIfBeyondFloor(logicalMarket, stillNullCount) {
   `).get(UNRECOVERABLE_EVENT_TYPE, `%"marketId":"${logicalMarket.id}"%`);
   if (recent) return;
 
+  const marketId = String(logicalMarket.id);   // P2-6 6b: 写进 payload 与 Set.add 用【同一变量】(NWT 条件②)
   sqlite.prepare(`
     INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at)
     VALUES (?, 'system', ?, 'preprune-capture-worker', 'warn', ?, ?, datetime('now'))
   `).run(
     randomUUID(), UNRECOVERABLE_EVENT_TYPE,
-    `market=${String(logicalMarket.id).slice(-8)} 仍有 ${stillNullCount} 条 side_lock_daa NULL, deadline_daa(${logicalMarket.deadline_daa}) < spc_daa_index floor(${floor}) — 结构性剪裁不可达, 标'不可恢复'供替代结算识别(K-17 §5/§6)`,
-    JSON.stringify({ marketId: logicalMarket.id, deadlineDaa: logicalMarket.deadline_daa, floor, stillNullCount }),
+    `market=${marketId.slice(-8)} 仍有 ${stillNullCount} 条 side_lock_daa NULL, deadline_daa(${logicalMarket.deadline_daa}) < spc_daa_index floor(${floor}) — 结构性剪裁不可达, 标'不可恢复'供替代结算识别(K-17 §5/§6)`,
+    JSON.stringify({ marketId, deadlineDaa: logicalMarket.deadline_daa, floor, stillNullCount }),
   );
+  if (_unrecoverable !== null) _unrecoverable.add(marketId);   // P2-6 6b: 新标即入集合(未播种时留给下次播种从 events 读回)
 }
 
 // ── IBD 门(2026-08-30, J2, Bettor 批 · docs/2026-08-30-j2-console-ibd-memory-growth-diagnosis.md §4.5/§8①) ──
@@ -173,6 +198,15 @@ export async function _tick(deps = {}) {
       try { (deps.writeHeartbeat || _writeHeartbeat)(0, 0); } catch (e) { console.warn(`[preprune-capture-worker] heartbeat write fail on skip (non-fatal): ${e.message}`); }
       return { skipped: 'node-not-synced', isSynced: gate.isSynced, reason: gate.reason };
     }
+    // P2-6 6b: 进 body 前先保证集合已播种; 播种失败 ⇒ 跳过本 tick + LOUD(NWT 条件①: 绝不带空集合进循环)。仍写 heartbeat(0,0) 免 monitor 把它读成挂死(LOUD 在这里, 不靠 stale 事件)。
+    //   播种只属于【真 body 路径】(deps.runBody 注入的用例保持旧契约, 除非它们显式注入 seedUnrecoverable)。
+    const seedFn = deps.seedUnrecoverable || (deps.runBody ? null : () => { if (_unrecoverable === null) _seedUnrecoverableSet(); });
+    try { if (seedFn) seedFn(); }
+    catch (e) {
+      console.error(`[preprune-capture-worker] 🔴 unrecoverable-set seed FAILED, tick skipped (fail-closed, 不带空集合进循环): ${e.message}`);
+      try { (deps.writeHeartbeat || _writeHeartbeat)(0, 0); } catch (e2) { console.warn(`[preprune-capture-worker] heartbeat write fail on seed-failed (non-fatal): ${e2.message}`); }
+      return { skipped: 'seed-failed', error: e.message };
+    }
     return await (deps.runBody || _tickBody)();
   } catch (e) {
     console.warn(`[preprune-capture-worker] tick error (non-fatal): ${e.message}`);
@@ -196,8 +230,10 @@ async function _tickBody() {
       if (_hasBeenMarkedUnrecoverable(logicalMarket.id)) continue; // 已确认结构性不可达, 不重烧 RPC walk 成本
       scanned++;
       let rc;
+      const _rt0 = Date.now();   // P2-6 观测(NWT 建议): 每次 recapture 调用记墙钟(含 await; ≥50 ms 才打), 让 ④ 判据能按起点对齐而不是靠 containment
       try { rc = await recaptureSideLockDaaForMarket(marketId); }
-      catch (e) { console.warn(`[preprune-capture-worker] recapture fail market=${String(marketId).slice(-8)} (non-fatal): ${e.message}`); continue; }
+      catch (e) { const _ms = Date.now() - _rt0; if (_ms >= 50) logStep('preprune.recapture', _ms, { market: String(marketId).slice(-8), ok: 0 }); console.warn(`[preprune-capture-worker] recapture fail market=${String(marketId).slice(-8)} (non-fatal): ${e.message}`); continue; }
+      { const _ms = Date.now() - _rt0; if (_ms >= 50) logStep('preprune.recapture', _ms, { market: String(marketId).slice(-8), recaptured: rc.recaptured, remaining: rc.remaining, ok: 1 }); }
       recaptured += rc.recaptured;
       if (!seenLogical.has(logicalMarket.id)) {
         seenLogical.add(logicalMarket.id);
@@ -210,7 +246,7 @@ async function _tickBody() {
   }
 }
 
-export { _hasBeenMarkedUnrecoverable, _markUnrecoverableIfBeyondFloor, _coverageFloor, _resolveLogicalMarket, _writeHeartbeat };
+export { _hasBeenMarkedUnrecoverable, _markUnrecoverableIfBeyondFloor, _coverageFloor, _resolveLogicalMarket, _writeHeartbeat, _seedUnrecoverableSet, _resetUnrecoverableSet, _unrecoverableSetSize };
 
 export function startPrepruneCaptureWorker() {
   if (_interval) return;
