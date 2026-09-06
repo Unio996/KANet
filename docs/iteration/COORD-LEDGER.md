@@ -11938,3 +11938,7 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (946) 2026-09-07 · S1 gate 仪器 bug 修（`scratch/_step0_gate.mjs` IBD_MARK 原含通用统计行 `Processed \d+ blocks and \d+ headers`——中继模式每 10 s 照打 ⇒ ibd_ok 永假 ⇒ S1 永不 READY；改只认 `IBD: Processed` / `Downloaded … pruning point` / `IBD started with peer` / `syncing ahead`）· S2 feeder 20:26:34Z synced=true/lag 0（READY 位等 lag10m 门）· **观察：kaspad isSynced 20:22Z true → 20:29Z 起 false**，中继模式照常（Accepted ~0.9 blk/s·`Processed 5–10 blocks and 5–10 headers/10 s`·无新 IBD started）· pastMedianTime 落后 now ~15.6 min（2026-09-06T20:31:42Z）
 - 待判：isSynced 翻 false 是尾追（syncer 仍领先 ⇒ 将再起一小轮 IBD）还是 kaspad "nearly synced" 判据的抖动；③ 闸随之翻动（预期内）。NWT 盯 IBD started 行；S1/S2 BOTH_READY 以 isSynced 稳定 ≥10 min 为准。
+
+### (947) 2026-09-07 · NWT 源码判（7b1e18cc）：isSynced=false **非抖动** —— `rule_engine.rs:125 is_nearly_synced` = `unix_now() < sink_timestamp + expected_difficulty_window_duration/4`，TN12 = 2,644,000 ms/4 = **661 s ≈ 11.0 min**（看 sink 时间戳，不看 pmt/IBD 状态）；READY 20:18:44Z + 11.0 min = 20:29:44Z = 翻 false 时刻 ✓ · **中继模式本机仅 0.75 bps**（03:19–03:33 本地每分钟恒 45 块·15 min Accepted 685 块）而链 ≥10 bps ⇒ sink 每分钟净落后 ≈0.9 min（2026-09-06T20:37:01Z）
+- 为何不起 IBD：`v7/blockrelay/flow.rs:265-310 process_orphan` 先走 orphan 解析（locator 深度 9）逐根拉取（慢、不记 IBD），只有超出范围才 `try_trigger_ibd` ⇒ 预期循环：掉队 → 接不上 → 小轮 IBD 快速追平 → 再掉队。03:34:23Z 已见 `Orphaned 1 block … / Unorphaned` 对。"45/min 恒定"像节流非饥饿（只报）。
+- 我在跑 5 min sink/pmt 落后趋势采样（`scratch/_bettor_sink_lag_timeline.mjs`·30 s 一点）：增长 = 掉队循环成立 ⇒ 立新 **D-c 项（中继/孤儿路径吞吐）**；缩小 = 孤儿解析在追；恒定 = 稳态节流。③ 闸随 isSynced 翻动预期内；滞回建议仍在。
