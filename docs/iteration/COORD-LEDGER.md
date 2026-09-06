@@ -11915,3 +11915,7 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (941) 2026-09-06 · ③ IBD 闸 **20:08:19Z 放行**（7 站 `resume: node synced (reason=ok)`：zk-prove-worker / close-voter v2Tick & submitV2Tick / zk close/claim/handoff/judgePropose）· kaspad 仍第 6 轮 IBD 92–94%（lag ≈11 min）⇒ isSynced 在接近同步阈内翻 true，闸跟 isSynced 不跟 IBD 状态（预期内）· 轮账：第 3 轮 18:43:44Z / 第 4 轮 19:35:58Z / 第 5 轮 19:58:38Z 完 · 断连 0 · 回滚串 0（~19 h 干净）（2026-09-06T20:09:33Z）
 - **Phase-2 真验收窗 = 20:08→21:08Z**：NWT 逐行盯 sql.* ≥200 ms（钉 zk:45/:239、pool-settler:497、refund-claim:57 回不回来）+ phase2-shadow/mismatch 行 + console WS/priv 5 min 采样（放行后各站建 RpcClient·盯 wasm 线性内存）；21:10Z NWT 出窗页；J2 出正式 readout 页与修前页并排。真 READY（syncer 不再领先、无新 IBD started ≥2 min）另报；P2(a) 缓存回退：28.5 未到、WS 随相位 ⇒ **不做**，除非 READY 后仍升。
+
+### (942) 2026-09-07 · ③ 闸在尾轮间**翻动**（NWT 20:13Z）：20:08Z resume → 第 7 轮 header（20:09:50–20:10:26Z）期间 skip(not-synced) → 20:10:49Z 再 resume；settle/pool/prediction-voter 也已 resume · 机理 = kaspad isSynced 在每个尾轮 header 相位短暂回 false · 预计再翻 1–3 次后稳定（2026-09-06T20:11:48Z）
+- 影响：尾轮间隙站点在节点仍写库时 tick；首窗页慢 SQL/空档标"与尾轮重叠"。已见 1 个 4.1 s 空档（20:10:25Z）**无慢 SQL 行对应** = v3-A 覆盖不到的同步站 = v3-C 的题。`0 RpcClient built` 证闸省掉了 RpcClient 构建。
+- 可选项（记录·不派）：闸加滞回（isSynced 连续 ≥3 次/≥60 s 才 resume）；READY 稳定后翻动自然消失，是否做看 §6-3 gate(d) 是否要"放行 T+0"硬时刻。
