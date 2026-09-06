@@ -103,3 +103,21 @@ loop {
 
 ## 8. 待红队的问题
 Q1 阈值 600 vs 300 与 R-1 的取舍；Q2 `get_syncer_chain_block_locator(None,None)` 在对端剪枝点变化中途调用是否有竞态（负锁）；Q3 `request_single_block` 复用 `RequestIbdBlocks` 会不会与 `sync_missing_block_bodies` 的 IbdBlock 订阅抢消息（同 flow 串行，应无，请核）；Q4 4 个 IbdFlow 各自 timeout 分支同时到期的 thundering herd（都去 locator 一次）是否要加抖动；Q5 lag 读数来源：`sink timestamp` vs `pastMedianTime`（is_nearly_synced 用哪个，源码 `rule_engine.rs:125` 核对）。
+
+## 9. v0.1.1 · NWT 红队（22:31Z）采纳项（方向 GREEN·实现按本节覆盖 §4/§5/§6 对应条）
+| # | 项 | 采纳 |
+|---|---|---|
+| Q5 | lag 读数 = `sink_daa_score_timestamp.timestamp`（sink 块头时间戳，非 pmt），与 `rule_engine.rs:125` is_nearly_synced 同源；矿工时间戳 ±132 s 抖动与 isSynced 一致 | ✓ 同源即可 |
+| Q1 | 阈 600 必翻 false（触发后头部相位 sink 不动 ≈ T×4.2 min/h + 1 min ⇒ 600+102 = 702 > 661）；**部署默认 480**（480+94 = 574，余 87 s；周期 ≈12.5 min）；R-1 有界重发落地后再降 300 | ✓ **默认 480** |
+| Q2 | locator(None,None) 只取 sink hash；随后 `ibd()` 内 `negotiate_missing_syncer_chain_segment` 重新协商，剪枝点中途变化走既有 `determine_ibd_type`，无新竞态 | ✓ |
+| Q3 | 同 flow 串行不抢；**真坑** = D-b 深度 2 下上次 IBD 出错/被中断可能残留 1–2 条 `IbdBlock` ⇒ `request_single_block` 前 **`try_recv` 排空并计数**，响应**按 hash 校验**（不等丢弃重收，超时 fail_backoff）（J2 prep 同判） | ✓ |
+| Q4 | 首次偏移加 `jitter ∈ [0, check_interval)`（上游 PR 形态，一行） | ✓ |
+| ① | cancel-safety：`relay_receiver` = `async_channel::Receiver`（`utils/src/channel.rs:85`），`recv()` 被 `timeout` 取消不丢消息；单槽 job 若已有自然触发，timeout 不抢先 | ✓ 核过 |
+| ② | **不得 return Err 是承重的**：现 `start_impl` `Err(e) => return Err(e)` ⇒ flow 退出 ⇒ 断 peer（今晚 7 次 "completed with error" 周期即此）。自触发分支错误只能 fail_backoff；`_guard` RAII 在分支作用域内释放，不 clone 出去 | ✓ |
+| ③ | relay_block 在 `ibd()` 的用途（:118 determine_ibd_type 头 / :597,:650 头部同步目标与进度分母 / :762–766 同步后不在 DAG 则错 / :222 sync_missing_block_bodies）——对端 sink 恰在其选中链上，比任何 relay 块干净，:762 不触发 | ✓ |
+| ④ | 假 sink DoS 面：恶意 peer 返回伪造高 blue_work 头 ⇒ 争 CAS → 协商失败 → 退避，代价有界但能推迟好 syncer 的自触发。**缓解：只对"至少完成过一次 IBD 的 peer 或当前 syncer"自触发**（每 peer 状态位 `completed_ibd_once`）；上游 PR 必写 | ✓ |
+| ⑤ | 先比再争加 daa 余量：`blue_work` 严格大 **且** `daa_score ≥ local_sink_daa + 600`（≈1 min），免空 IBD | ✓ |
+| ⑥ | finality-conflict peer：其 sink blue_work 可能更高（分叉链）⇒ 争到 CAS ⇒ `ibd()` 以 "pruning points are violating finality" 失败。**协议类错误（finality conflict / 剪枝点不一致 / 数据不合法）仍走原 `return Err` 断连；只把超时/网络类错误改成 backoff**（保连对这类 peer 无益） | ✓ 错误分类表由 J2 在实现稿列出 |
+| §6 补 | (i) 影子跑 T=0 时 `IBD self-trigger` 行 = 0（阴性对照）；(ii) 自触发次数 = 6 h/周期 ±30%；(iii) 每次头部相位 ≤ 2 min；(iv) `incoming_route` 残留丢弃计数 ≥0 且不增长 | ✓ |
+
+**实施授权（Bettor 22:3xZ）**：J2 按 §4 + §9 实现于 `D:\rusty-kaspa-dc\`（branch `j2-dc-self-trigger-ibd` 自 4d0a9e30，`CARGO_TARGET_DIR=D:\rusty-kaspa-dc\target-dc`，rustc 1.96.1），产物 `D:\kaspad-live\dc-<hash>\kaspad.exe` + provenance 同 D-b 形；实现稿 + 错误分类表 + 单测结果交 NWT 逐 hunk 审；**切换 = Owner GO**（同 D-b）；影子跑（T=0）1 h 在 GO 前完成。
