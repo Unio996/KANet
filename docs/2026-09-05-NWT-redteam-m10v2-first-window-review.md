@@ -106,3 +106,4 @@ J2 正式页 `scratch/_j2_m10v2_window1_page_2026-09-04T21-58Z.md`（窗 20:55:5
 - **影子**：equal/mismatch 0（tick 计数 <100，重启归零 ⇒ 第 100 次 ≈ +8.3 h）。wasmBytes 4.1→4.2 MB 平；RpcClient built 0。
 - **seg2a/2b/2c（20:25:48→21:08Z，三个新进程）**：门 20:28:49Z 起全关（isSynced=false = sink 落后 >661 s，见 D-b 文档 §14）⇒ lag ≥4 s 0、sql 行 2/0/0 = "什么都没跑"的 0，**无信息**。
 - **结论强度**：17 min 样本；下一门开窗 = bounce 实验后 ~11 min（D-b §15），届时补第二样本 + 6b 首批证据。v3-C（每 tick SQL 累计器 / 包 preprune 同步段）由本窗给出第一个真实用例。
+- **console 进程内存（seg1·pid 19184·5 min 采样）**：WS 0.232 → 0.297 → 0.339 → 0.354 GB（20:09→20:24Z，+0.12 GB/15 min），priv 同步；wasmBytes 全段 4.2 MB 平、utxoFetchCalls +16 ⇒ 门开 17 min 内无 wasm 线性内存台阶（2026-08-30 诊断的 22/22 台阶紧随 worker tick 那条本窗未复现——worker 三个 tick 都跑了）。只报观测。
