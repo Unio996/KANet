@@ -72,3 +72,12 @@ Owner GO（838 边界）；回滚 = watchdog.ps1:17 指回 D-a exe + 重启；§
 - 记账：D-b 的重启/断连成本 = 与 D-a 同形（header 重议时长随"上次同步到 tip 的时距"线性增长：6 h ≈ 27 min），流水线本身不增加断连率（首个 6.5 h 内 1 次，网络侧）。
 - **断连 #2（2026-09-06T00:59Z）**：00:52:48Z 断——07:52:02–04 / :32–:44 本地两轮三个非 syncer peer `connection reset`、syncer 07:52:48 最后 ⇒ 同 #1 链路级；D-b 回滚串仍 0 → **00:57:05Z `IBD started`（4 min 17 s，先例上沿）** → 00:57:40Z 同剪裁点 → header（上次 tip 15:05Z，约 10 h 新头）。剪枝第 3 轮空窗内 traversed 12,000 → **31,000 / pruned 20,688**（同一轮跨空窗续跑）。Wi-Fi Up 600 Mbps。累计：D-b 16.5 h 内 2 次断连，均网络侧、均自恢复。
 - **断连 #2 闭合（2026-09-06T01:46Z）**：header 371,559 头 00:57:40Z→01:38:54Z（41 min）→ 扫描 3.4 min → **body 01:42:18Z 续**，全周期 49.5 min；续后首 4 min 27.64 blk/s、零桶 0；回滚串 0。规律：周期成本 ≈ header 重议时长 ∝ 上次同步到 tip 的时距（6 h→27 min、10 h→41 min）。
+
+## §12 第 1 轮 IBD 完成·第 2 轮起（2026-09-06T12:14Z · NWT 亲手读数）
+
+- **12:12:12Z** `IBD: Processed 1111184 blocks (100%)` / `IBD with peer 136.243.93.17:16311 completed successfully`；**12:12:31Z** 同 syncer `IBD started`，12:13:39Z `syncing ahead from current pruning point`，首两桶 hdr=960/2034 per 10 s（≈200 hdr/s，与 §11 两次 header 重议同形）。
+- **100% ≠ READY**：99% 行 last block = 2026-09-06 00:39Z，第 1 轮头部快照 ≈00:57Z ⇒ 轮末 lag ≈11.3 h；console.log 无 `resume: node synced`（③ 闸未放行·盯守在岗）。
+- **第 1 轮账**：header 00:57Z→01:39Z（42 min，371,559 头）· 体相位 01:39Z→12:12Z（10.55 h）· 04:37Z→12:12Z 净削 15.2 h / 7.6 h = **2.0 h/h**（吞吐 ≈3.0 链时/时）· 期间零断连、回滚串 0（D-b 自 00:52Z 周期后 11.3 h 干净）。
+- **轮间空窗剪枝推进**：18 s 内 `Header and Block pruning: traversed: 32000→34000`（整轮 0）——§10/precheck 的"剪枝被 IBD 饿死、只在空窗推进"再证一次。
+- **ETA 重算**（第 2 轮覆盖 11.25 h 链 ≈ 50 min 头 + 3.75 h 体 → ~16:50Z；第 3 轮 ~2 h；第 4/5 轮几何收敛 +1.5 h）：乐观下界[不含周期] **~20:30Z**；规划基准[含 1 次 ~50 min 周期] **~21:00–21:30Z**。08:39Z 报的 ~20Z 漏算了换轮头部相位（每轮 ~50/25/12 min）。
+- **观测·不附成因**：09:00Z、11:00Z 各一个 20 s 突发桶（792/1881、641 块）随即回到 198/396 交替，10:00Z/12:00Z 无 ⇒ 不成规律。`got reject message: The syncer purports to have data in the recent future` 全日志 931 次、全天每 10 min 数次 = 三个非 syncer peer 旧有 churn。
