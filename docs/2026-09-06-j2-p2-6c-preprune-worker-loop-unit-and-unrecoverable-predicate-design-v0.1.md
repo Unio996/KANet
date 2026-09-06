@@ -56,9 +56,23 @@
 - 一条 SQL 产出候选：NULL 分片 → `LEFT JOIN market_shards` 归并逻辑盘 → `JOIN pool_markets` 滤 `protocol_status NOT IN (TERMINAL ∪ {pruned_expired_waived})` → 排除已标集合（6b Set 在 JS 侧过滤，或 `NOT IN (SELECT DISTINCT json_extract … )` 走 v201 索引）⇒ 每 tick 迭代 **93 → ①② 后 ≤ 7 个逻辑盘**（表 1 里"不标"的 7 个 + 新盘）。
 - 每个候选逻辑盘：对其分片逐个 `recaptureSideLockDaaForMarket(shardId)`（**调用形不变**），汇总 `reasons`，然后 `_markUnrecoverable(L, remaining, reasons)`（3.1）。
 - `scanned` 语义从"分片数"改"逻辑盘数"：读者只有 `preprune-capture-monitor.mjs`（只读 `tick_count/updated_at`，不读 scanned）⇒ 无阈值/比较受影响（NWT 6c 条件核过）；日志行同时打两个数 `scanned=<逻辑盘> shards=<分片>` 避免读旧页的人对不上。
-### 3.4 纯成本短路（不改状态 · 可与 ① 分笔）
-- **tip 回溯走不到就不走**：叶子里若无锚点（无 `kaspa_tx_log.block_hash`、无 `_indexAnchor` 命中）且 `approxDaaHint`（或 §3.1b 的替代上界）`< tip_daa − MAX_STEPS − slack`（tip_daa 从同一 `getBlockDagInfo`，slack = 1,000）⇒ 直接返回 `reason: 'walk-futile'`，**不走 10,000 步**。这是"这个方法到不了"，不是"链上剪了"：它不满足 (a)（不算真实取块失败），只省成本；但 `walk-futile ∧ (b)` 可作为 (a) 的等价物？——**不可**：08-06 §4.2① 要求真实失败；折中：`walk-futile` 时对 `_indexAnchor` 最近的**任一**索引块（不必在 coverage 区间内）做**一次** `getBlock` 探测，`cannot find header ∧ anchor.daa < P − M` ⇒ 升级为 `anchor-pruned`（满足 (a)）；探测成功 ⇒ 从它起走（有锚点了）；无任何索引块 ⇒ 保持 `walk-futile`，不标、下 tick 再来（成本 1 次 RPC）。
-- 期望：aukqt-s1 297.7 s → ≤ 1 次 getBlock（~30 ms）；W2 169 次 Σ811 s → Σ 秒级。
+### 3.4 α · 纯成本短路（不改状态 · 先行笔 · 判据写成可核的数）
+**回溯语义（`trade-protocol-filter.js:1262–1330`）**：起点 = `kaspa_tx_log.block_hash`（有则用）→ 否则 `_indexAnchor(U)` = `spc_daa_index` 里 `daa_score ≥ U` 的最近块 **且** `spc_daa_index_coverage` 区间命中 → 否则 **tip（`getBlockDagInfo().sink`）**；沿 `verboseData.selectedParentHash` 逐块回走，每块 `getBlock(includeTransactions)` 找 `side_lock_tx`，上限 `MAX_STEPS = 10,000`。实测速率 **≈2 DAA/步**（a4343 校准：5,839 步 ≈ 11,600 DAA，代码注释自述）⇒ 10,000 步 ≈ 20,000 DAA ≈ 33 min 的链；**期望值，不是界**。**界**：每步沿 selected parent 降的 DAA = 该块蓝 mergeset 大小 ∈ [1, `mergeset_size_limit`]，TN12 = **248**（`bps.rs`, k=124）⇒ 10,000 步最多回退 **R_max = 2,480,000 DAA**（≈69 h @10 bps）。
+**α-1 锚点放宽（主收益）**：`_resolveStartCursor` 接受 `spc_daa_index` 里 `daa_score ≥ U` 的最近块 **不再要求 coverage 区间命中**，条件 `anchor.daa − U ≤ D_anchor`（**D_anchor = 20,000 DAA** = 10,000 步 × 实测 2，即"从这个锚点走得到 U"）。coverage 命不中（08-06 §8.2 单点区间）是 aukqt 这批走 tip 的直接原因，而 coverage 对**向下回走**的正确性无关（见反例表）。锚点若已剪 ⇒ 第 0 步 `cannot find header` ⇒ 既有 `anchor-pruned` 逻辑（`:1290–1305`，含 `anchor.daa < pruningDaa` 核）⇒ **一次真实取块失败**（满足 §3.1 (a)），worker 的 (b) 带 M 另核后才标。
+**α-2 tip 回溯无望短路（次收益，仅无任何锚点时）**：无 `kaspa_tx_log` hash ∧ 无 α-1 锚点（`spc_daa_index` 在 [U, U + D_anchor] 无块）⇒ 若 **`U < tip_daa − R_max − slack`**（`tip_daa` = 同一 `getBlockDagInfo().virtualDaaScore`；`R_max` = 2,480,000；`slack` = 1,000）⇒ 返回 `reason: 'walk-futile'` **不走**；否则照旧从 tip 走（可能到得了）。它只省成本、**不满足 (a)、不标**，下 tick 再来。
+**数（W2 基线 → 期望）**：aukqt（U = 58,695,372，tip ≈ 79.3M，P = 78.2M）：α-1 命中索引块 ⇒ 1 次 `getBlock` `cannot find header` ⇒ `anchor-pruned`（~30 ms，原 297.7 s）；若 6 月段无索引块 ⇒ α-2：`tip − U ≈ 20.6M > R_max 2.48M` ⇒ walk-futile（0 次 RPC）。fy1yk（U 由 created_at 换算 ≈ 6 月下旬）同。`[P − R_max, P)` 之间（≈ 69 h 内剪掉的）不满足 α-2，但 α-1 一定有索引块（近期索引连续）⇒ 仍是 1 步。期望一窗 `preprune.recapture` Σ 从 811 s 降到 ≤ 30 s。
+**反例表（Bettor 问"短路会不会把本可恢复的盘误判为跳过"）**：
+| 情形 | α-1 | α-2 | 结论 |
+|---|---|---|---|
+| tx 块在 (U − 20,000 DAA, U]（正常：bet 在 deadline 前不久）| 从锚点走 ≤10,000 步命中 | 不触发（有锚点）| 恢复，比 tip 走快 |
+| tx 块比 U 早超过 D_anchor（bet 下得很早、deadline 很晚）| 走满 10,000 步未命中 ⇒ `no-block-hash`（与现状同，现状从 tip 更到不了）| — | 不恢复，不标（(a) 满足但 (b) 未必；若 (b) 也满足则是真剪了）——**与现状同一结果，只是更快失败** |
+| 锚点已剪但 tx 块未剪 | **不可能**：anchor.daa ≥ U ≥ tx.daa，剪枝从旧到新，锚点没了则更旧的 tx 块也没了；"剪枝点之下仍有一段能取到"只可能让**锚点还在**（那就正常走）| — | 无误判 |
+| tx 块在 selected chain 的 anticone（侧块）| 走 selected parent 看不见 | 同 | **现状（tip 走）同样看不见**，不是新缺口；记为已知限制（accepting block 才在链上；本方法找的是含 tx 的块）|
+| `U` 错：tx 其实在 deadline **之后**（协议无效 bet）| 锚点在 tx 之下 ⇒ 走不到；tip 走可能到 | — | 少一次恢复机会；该 bet 本就违反"bet 在 deadline 前"不变量；且 (b) 用同一 U ⇒ 若 U < P − M 会被标——**这是唯一"错 U ⇒ 错标"的通路**，标记可逆（§3.1），并要求写入方 `deadline_daa` 正确（坏值已单列报警）|
+| α-2 判 walk-futile 但其实走得到 | **不可能**：R_max 是每步降幅上界 × 步数上限 ⇒ 10,000 步到不了 U 以下 | | 无误判；只可能"能走到却没短路"（保守方向）|
+| `getBlockDagInfo` 抖动给错 tip/P | tip 只用于 α-2 且方向保守（tip 偏小 ⇒ 更不短路）；P 缺失 ⇒ 既有逻辑不标 | | fail-closed |
+⇒ **答案**：α-1/α-2 都不会把本可恢复的盘误判为跳过；α-2 只是把"必败的 10,000 步"省掉、下 tick 照常；唯一的错标通路来自错的 `deadline_daa`（§3.1 已列、可逆）。
+**观测**：`reasons` 直方图进 tick 行（`walk-futile` / `anchor-pruned` / `no-block-hash` / `rpc-fail` …）；α-1 命中锚点时打 `anchorSource=index-nocoverage` 计数。
 
 ## 4. 落地顺序与包
 | 笔 | 内容 | 状态影响 | 审批 |
