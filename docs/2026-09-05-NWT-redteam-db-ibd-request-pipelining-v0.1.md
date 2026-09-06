@@ -119,3 +119,11 @@ Owner GO（838 边界）；回滚 = watchdog.ps1:17 指回 D-a exe + 重启；§
 - **剪枝完成**：22:13:25Z `Header and Block pruning completed: traversed: 758623, pruned 327978`——READY 后 8.4 min 从 300k 跑完（每 100k ≈ 76–120 s）；IBD 期整段 0。饿死机制正向闭环（memory 已补）。
 - **relay 扇入**：本轮 IBD 体相位 21:40:18 / 21:42:30 / 21:44:01Z 三波 `Console unreachable`（M10 §14 勘误）；console 零 lag。
 - **④⑤（J1 bounce 实验）**：待补。
+
+> **§16 补·④⑤ + W3（2026-09-06T22:45Z）**：
+> - **④ bounce→IBD started = 3 min 06 s**：J1 封 136.243.93.17 30 s；22:19:12Z 我方 `connection reset`（断得了）→ 回连 22:22:11Z（2 min 59 s：对端旧 router 未清，`flow_context.rs:728-731` 握手后 `hub.has_peer ⇒ PeerAlreadyExists` 即关，我方只见 SynSent/TimeWait；无残留 Block 规则）→ 22:22:18Z `IBD started`（回连→IBD **7 s**，`send_sink()` 路成立）。90 s 判据不满足；"断得了、接不上"。让对端立刻知道断开的唯一办法 = 我方主动 `terminate`（= `ban` RPC，需 `--unsaferpc`）。
+> - **⑤ 小轮 IBD = 11 min 58 s**（落后 ≈16 min）：22:22:18Z → 22:29:30 / 22:32:36 / 22:34:16Z 三轮 completed → READY 签名 22:36:28Z。曲线估 8–10 ⇒ 1.2–1.5×。轮间空窗 0 s ⇒ 剪枝小轮内无推进。
+> - **W3（bounce 后 true 窗）= 22:28:22→22:44:53Z = 16.5 min**（round-1 体相位内开门，完成前 5 min 54 s；完成后 10.6 min，估 11）。外部 bounce 周期 ≈ 26 min 里 true 16.5 min ≈ 63%。
+> - **relay 扇入**：本次小轮两波（22:26:25Z 8×5-failures + 29 timeout；22:31:52Z 12 timeout），小于 43 min IBD 的 122；console lag 仅 2.0–2.6 s 三次（对齐 claim :46）；wasm 4.4 MB 平。
+> - **内存**：22:38Z host free 5.47 GB（全日最低；kaspad WS 27.77 GB，两次 IBD 体相位各 +0.6–0.7 GB；J2 D-c cargo 构建 12 rustc 并行叠加）⇒ Claude Code harness 两次杀后台 shell 任务（Monitor 型存活）；Bettor 令构建 -j 2、J1 GO P2(a) `--rocksdb-cache-size=4096`。
+> - **五数表**：① 43.0 min（估 33，1.3×）② −5.7 min ③ 15.0 / 9.3 min（估 11）④ 3 min 06 s（判据 ≤60 s 不满足，机制已定位）⑤ 11 min 58 s（估 8–10，1.2–1.5×）。无一出 2×。
