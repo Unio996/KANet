@@ -21,18 +21,29 @@ await t('G1 (C1) isSynced===false ⇒ 跳(true); 首次打一行 [site] skip: no
   const r = await ibdGateSkip('settle.tick', { read: mk({ synced: false, isSynced: false, reason: 'not-synced', cached: true }), log: (s) => lines.push(s), now: () => 1_000_000, env: {} });
   assert.equal(r, true); assert.deepEqual(lines, ['[settle.tick] skip: node not synced (isSynced=false, reason=not-synced)']);
 });
-await t('G2 (C1) 极性: isSynced===true / null / undefined / read 抛错 / gate 为 null|{} ⇒ 都不跳(fail-open), 零行', async () => {
+await t('G2 (G-2 改口径, 2026-09-07) 极性: 只有 isSynced===true 放行; null / undefined / no-rpc-url / read 抛错 / gate 为 null|{} ⇒ 都跳(fail-closed); 同站只在进入跳过态打一行', async () => {
   _resetIbdGateState(); const lines = []; const log = (s) => lines.push(s);
-  for (const g of [{ isSynced: true }, { isSynced: null, reason: 'rpc-fail: x' }, { isSynced: undefined }, { synced: false, reason: 'no-rpc-url' }, null, {}]) assert.equal(await ibdGateSkip('x', { read: mk(g), log, env: {} }), false, JSON.stringify(g));
-  assert.equal(await ibdGateSkip('x', { read: async () => { throw new Error('boom'); }, log, env: {} }), false);
+  assert.equal(await ibdGateSkip('x', { read: mk({ isSynced: true }), log, env: {} }), false);
   assert.equal(lines.length, 0);
+  for (const g of [{ isSynced: null, reason: 'rpc-fail: x' }, { isSynced: undefined }, { synced: false, reason: 'no-rpc-url' }, null, {}, { isSynced: null, reason: 'network-mismatch(mainnet!=testnet-12)' }]) assert.equal(await ibdGateSkip('x', { read: mk(g), log, env: {} }), true, JSON.stringify(g));
+  assert.equal(await ibdGateSkip('x', { read: async () => { throw new Error('boom'); }, log, env: {} }), true);
+  assert.equal(lines.length, 1);                                  // 进入跳过态只一行(同站后续不打)
+  assert.equal(lines[0], '[x] skip: node not synced (isSynced=null, reason=rpc-fail: x)');
+  // 读门抛错单独进入跳过态时 reason 带 read-error
+  _resetIbdGateState(); lines.length = 0;
+  assert.equal(await ibdGateSkip('z', { read: async () => { throw new Error('boom'); }, log, env: {} }), true);
+  assert.match(lines[0], /^\[z\] skip: node not synced \(isSynced=null, reason=read-error: boom\)$/);
+  // gate 缺失 ⇒ isSynced=absent, reason=gate-absent
+  _resetIbdGateState(); lines.length = 0;
+  assert.equal(await ibdGateSkip('w', { read: mk(null), log, env: {} }), true);
+  assert.equal(lines[0], '[w] skip: node not synced (isSynced=absent, reason=gate-absent)');
 });
 await t('G3 (C3) 日志只在状态翻转 + 跳过态每 10 min 心跳; 判定不受日志影响; 不同站各自计', async () => {
   _resetIbdGateState(); const lines = []; let clock = 0; let g = { isSynced: false, reason: 'not-synced' };
   const deps = { read: async () => g, log: (s) => lines.push(s), now: () => clock, env: {} };
   for (const c of [0, 30_000, 60_000, 599_999]) { clock = c; assert.equal(await ibdGateSkip('a', deps), true); }
   assert.equal(lines.length, 1);                                  // 进入跳过态只一行, 60 s 内不再打
-  clock = 600_000; assert.equal(await ibdGateSkip('a', deps), true); assert.equal(lines.length, 2); assert.match(lines[1], /heartbeat\)$/);
+  clock = 600_000; assert.equal(await ibdGateSkip('a', deps), true); assert.equal(lines.length, 2); assert.match(lines[1], /heartbeat, streak=5, since=1970-01-01T00:00:00\.000Z\)$/);   // G-2 SHOULD: streak/since 可 grep(5 次 skip: 0/30s/60s/599.999s/600s)
   clock = 900_000; assert.equal(await ibdGateSkip('a', deps), true); assert.equal(lines.length, 2);   // 未到下个 10 min
   g = { isSynced: true, reason: 'ok' }; clock = 901_000; assert.equal(await ibdGateSkip('a', deps), false); assert.equal(lines.length, 3); assert.equal(lines[2], '[a] resume: node synced (reason=ok)');
   assert.equal(await ibdGateSkip('a', deps), false); assert.equal(lines.length, 3);   // 已同步态不打

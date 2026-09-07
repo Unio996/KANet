@@ -79,7 +79,7 @@ console.log('[S1] 批 1 站点 conformance(源码级):');
   const sites = [
     ['src/services/trade-protocol-filter.js', 'captureSideLockDaa', /export async function captureSideLockDaa[\s\S]*?\n  let daa = null;/],
     ['src/lib/faucet-utxo-health.mjs', '_readFaucetUtxoState', /async function _readFaucetUtxoState[\s\S]*?\n}/],
-    ['src/services/rpc-health.js', 'checkLocal', /async function checkLocal[\s\S]*?\n}/],
+    ['src/services/rpc-health.js', 'dataCheck', /export async function dataCheck[\s\S]*?\n}/],   // G-2 (2026-09-07): checkLocal 委托 dataCheck, 客户端在 dataCheck 里取
     ['src/services/preprune-capture-worker.mjs', '_readNodeSynced', /export async function _readNodeSynced[\s\S]*?\n}/],
     ['src/services/oracle-pool-chain-scanner-cron.mjs', '_getCurrentDaa+tick', /async function _getCurrentDaa[\s\S]*?running = false;/],
     ['src/api/relay.js', 'balance x2', /getBalancesByAddresses/],

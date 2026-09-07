@@ -40,7 +40,7 @@ async function runTick(gateResult) {
 
 console.log('[test] ① _readNodeSynced: getServerInfo().isSynced === true ⇒ synced, 且 disconnect 必调:');
 {
-  const rpc = fakeRpc({ serverInfo: { isSynced: true, serverVersion: 'x' } });
+  const rpc = fakeRpc({ serverInfo: { isSynced: true, serverVersion: 'x', networkId: 'testnet-12' } });
   const g = await _readNodeSynced({ rpcFactory: async () => rpc });
   ok(g.synced === true && g.isSynced === true && g.reason === 'ok', `synced=true (${JSON.stringify(g)})`);
   ok(rpc.calls.connect === 1 && rpc.calls.getServerInfo === 1 && rpc.calls.disconnect === 1, 'connect/getServerInfo/disconnect 各 1 次');
@@ -50,9 +50,9 @@ console.log('[test] ① _readNodeSynced: getServerInfo().isSynced === true ⇒ s
 console.log('[test] ② _readNodeSynced 负向四形 ⇒ 全部 synced=false(fail-closed), 且 disconnect 必调:');
 {
   const cases = [
-    ['isSynced=false', fakeRpc({ serverInfo: { isSynced: false } }), (g) => g.isSynced === false && g.reason === 'not-synced'],
-    ['isSynced=null', fakeRpc({ serverInfo: { isSynced: null } }), (g) => g.isSynced === null && /unreadable/.test(g.reason)],
-    ['isSynced 缺字段(undefined)', fakeRpc({ serverInfo: { serverVersion: 'x' } }), (g) => g.isSynced === null && /unreadable\(undefined\)/.test(g.reason)],
+    ['isSynced=false', fakeRpc({ serverInfo: { isSynced: false, networkId: 'testnet-12' } }), (g) => g.isSynced === false && g.reason === 'not-synced'],
+    ['isSynced=null', fakeRpc({ serverInfo: { isSynced: null, networkId: 'testnet-12' } }), (g) => g.isSynced === null && /unreadable/.test(g.reason)],
+    ['isSynced 缺字段(undefined)', fakeRpc({ serverInfo: { serverVersion: 'x', networkId: 'testnet-12' } }), (g) => g.isSynced === null && /unreadable\(undefined\)/.test(g.reason)],
     ['getServerInfo 抛', fakeRpc({ serverInfo: null, throwOnServerInfo: new Error('boom') }), (g) => g.isSynced === null && /rpc-fail: boom/.test(g.reason)],
   ];
   for (const [label, rpc, check] of cases) {
@@ -64,7 +64,7 @@ console.log('[test] ② _readNodeSynced 负向四形 ⇒ 全部 synced=false(fai
 
 console.log('[test] ③ _readNodeSynced: connect 超时(> 4 s) ⇒ synced=false, disconnect 仍调:');
 {
-  const rpc = fakeRpc({ serverInfo: { isSynced: true }, connectDelayMs: 4600 });
+  const rpc = fakeRpc({ serverInfo: { isSynced: true, networkId: 'testnet-12' }, connectDelayMs: 4600 });
   const t0 = Date.now();
   const g = await _readNodeSynced({ rpcFactory: async () => rpc });
   ok(g.synced === false && /rpc-fail: connect timeout/.test(g.reason), `超时 ⇒ fail-closed (${g.reason}, ${Date.now() - t0} ms)`);
@@ -111,7 +111,7 @@ console.log('[test] ⑦ _tick 防重入不受门影响: 门 pending 时第二次
 
 console.log('[test] ⑧ 真 fake 客户端接进 _tick(端到端形): isSynced=false 的客户端 ⇒ getBlock 0 次:');
 {
-  const rpc = fakeRpc({ serverInfo: { isSynced: false } });
+  const rpc = fakeRpc({ serverInfo: { isSynced: false, networkId: 'testnet-12' } });
   let bodyCalls = 0;
   const r = await _tick({ readNodeSynced: () => _readNodeSynced({ rpcFactory: async () => rpc }), runBody: async () => { bodyCalls++; await rpc.getBlock({}); return {}; }, writeHeartbeat: () => {} });
   ok(r?.skipped === 'node-not-synced' && bodyCalls === 0 && rpc.calls.getBlock === 0 && rpc.calls.disconnect === 1, `skip, getBlock=0, disconnect=1 (${JSON.stringify(rpc.calls)})`);
