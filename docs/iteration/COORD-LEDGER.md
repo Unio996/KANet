@@ -12265,3 +12265,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - 四波灰度：0 只读主网节点（与 S-2 合一上第二台机，本周）→ 1 通信/身份（手续费级）→ 2 签名型结算小额（G-1 enforce + NWT 真钱清单 + S-1 + 自动审计）→ 3 ZK 结算（合约迁移 + D-005 隔离测试 + Owner 拍）。TN12 保留 staging；D-c/D-d 不带上主网。
 - 派：J2 三清单（TN12 绑定五类计数 / 1.1.1-toc.1→v2.0.1 ABI 差异 / 主网节点构建与资源）；NWT 真钱前置 MUST/SHOULD 清单。v0.2 合并。
 - Owner 待拍：波 0 GO（第二台机规格/来源）、G-1 GO、合约迁移提为波 3 前置、主网密钥/资金上限策略。
+
+### (1001) NWT 真钱前置清单（`docs/2026-09-07-NWT-mainnet-real-money-preconditions-v0.1.md`·5 域 22 条 MUST/SHOULD·本周坐标）⇒ 评估 v0.1 三处修正 — Bettor 2026-09-07T13:41:28Z
+- **① LOCAL_ONLY 是主网 MUST**：rpc-health 硬编码 mainnet 在主网"恰好对网"，公网 mainnet 节点 isSynced=true 会过 networkId 核 ⇒ 若不设 `KASPA_RPC_LOCAL_ONLY=1`，门读公网、relay 用本机递 = 22:55Z 形状的主网版；反向（testnet 端点当 synced）被 dataCheck 挡。⇒ **G-1 enforce + G-2 + LOCAL_ONLY 三者 MUST，不可后置**。
+- **② 费用面可能直接否决"原样上主网"**：再平衡 cron TN12 实测 84 笔/3 h ≈ 28 笔/h，每笔 fee **5,099,400 sompi**（mempool 直读，≈0.051 KAS）——若主要是 KIP-9 存储质量 × 1 sompi/g，主网 ×100 ⇒ **≈5 KAS/笔、≈140 KAS/h、≈3,400 KAS/天**只为维持 UTXO 形状（估算·MUST 由 J2 用真实 mass 复核）。我 v0.1 的"0.004 KAS/笔"按 2 KB 字节算，**漏了存储质量项**，撤。⇒ 再平衡/合并 cron 在主网必须重设计（频率、目标 UTXO 数、合并策略）或直接停。
+- **③ NO TX NO STATE CHANGE 两处已知违反先修**（CLAUDE.md 状态注记已列）：`exchange-machine.js:828-829` kaspa 路径直接构造 confirmed:true；`bettor-prediction-settler.js:198/216` 拿 txid 即推进——主网错一次 = 真损失；配 ④-1 **submit 对账器**（今天人工三源核变 cron：递出后 T+10 min 三源无 ⇒ 告警 + 冻结该 relay）。
+- 其余 MUST：私钥 40 处常驻 × 40 relay 同机（分离 + 上限）；`api/relay.js:1774` 无白名单直通；0.0.0.0 监听清单（NordLynx/Tailscale/WSL 多网卡）；灰度 = G-1 加 `readonly` 态（先只读 7 天 → 手续费级 → 钱路逐 type）。
+- 评估 v0.2 合并点：波 1 前置加 LOCAL_ONLY+G-2；波 2 前置加"两处违反修 + submit 对账器 + 再平衡重设计 + 密钥分离"；费用节按 J2 真实 mass 重算。
