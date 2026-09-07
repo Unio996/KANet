@@ -192,3 +192,10 @@ Owner GO（838 边界）；回滚 = watchdog.ps1:17 指回 D-a exe + 重启；§
 - **console ⑦**：03:05:27Z PID 30672 重启，`[rpc-shared] build ws://127.0.0.1:17210|testnet-12 (pool size 1)` 恰 1、`[rpc-health] using local node` 全部、零公网回退、3200 LISTENING。
 - **七臂**：①②③⑤⑥⑦ ✓，④ sink 收敛进行中（几何尾轮 + 首个 isSynced=true 待钉；影子 1 h 从该时刻起，Bettor 同意）。
 - **根因闭合**：对端 pp 停滞在索引 41 + 我们 00:05:59Z 一步跳 60→69 ⇒ 对端落出上游硬编码 4 窗 ⇒ `determine_ibd_type` 每轮拒；D-d 0 模式全表命中后 Sync 路径正常。三个其它 peer 均落后于我们（曾以同一分支拒我们 12 次），不是替代 syncer。
+
+## §21 · 步② D-c 开启后首次自触发闭环（2026-09-07T06:20–07:15Z · 本人逐行）
+- T0′ 06:20:05Z / T1′ 06:20:08Z PID 40112，args `$BASE_ARGS --rocksdb-cache-size=4096 --ibd-syncer-pp-lag-tolerance=0`（无 lag-secs ⇒ D-c 默认 480 s / check 60 s / backoff ≤1800 s）；console 30556 06:21:15Z（⑦′ ✓：rpc-shared 本机 1、rpc-health using local node、零公网）。
+- 常规追平：06:21:16→06:44:05Z（23 min）、06:44:51→06:54:25Z（9.5）、06:55:24→07:01:35Z（6）、07:02:02→**07:04:32Z（2.5）= READY**。首个 isSynced=true：J2 06:54:13Z / 我 06:55:33–06:57:33Z（sinkAge 654 s，661 阈值边缘抖动）；Bettor 拍窗起 06:54:13Z。
+- 资格通知：07:04:40 / 07:04:55 / 07:05:20Z 三条 `IBD self-trigger: peer … not eligible until it completes a first IBD with us (lag 185/200/225 s)`——每 peer 一次（flow.rs:173-181 `take_not_eligible_notice`，即 D-c 审 SHOULD②），资格门先于阈值门。
+- **首次自触发**：07:10:43Z `IBD self-trigger with peer 136.243.93.17:16311: sink lag 503s >= 480s, syncer sink 77a22d52… (daa 92368064, local daa 92364041)`（READY + 6 m 11 s）→ 07:11:31Z lags 行 lag 28（D-c 开轮、D-d 放行）→ 07:12:11Z 头 4200 100% → **07:14:35Z `completed successfully` + `IBD self-trigger with peer … completed successfully`**（3 m 52 s）。
+- 计数（本进程至 07:15Z）：started 5 / ok 5 / error 0 / not recognized 0 / self-trigger failed 0 / backoff 0 / 回滚串 0。
