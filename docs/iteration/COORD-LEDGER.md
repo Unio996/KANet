@@ -12171,3 +12171,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - 几何轮（tolerance=0·每轮 `lags … lag 28` 接受·`not recognized` 0）：① 03:05:07→04:26:33Z 81 min 119,483 块 · ② →04:59:28Z 33 min 48,671 · ③ →05:14:58Z 14 min 20,849 · ④ 05:15:38Z 起（头 7,575 100% 05:16:39Z）体进行中。sink 落后峰 12,754 s（03:17Z）→ 575 s（05:19:31Z J2）；三仪器翻真时刻：console 门 `resume: node synced (reason=ok)` ∈ [05:18:49, 05:19:19Z]（J2，门缓存 30 s）、NWT 直读 05:19:20Z（2 min 节拍）、我 60 s 读 05:19:28Z ⇒ **T_s = 05:19:19Z**。
 - **影子判据（NWT 采我的更正）**：窗内 `IBD self-trigger` 行 0 + 回滚串 0 + `not recognized` 0（+ lags 行同 hash/lag 28 = D-d 稳定）；**isSynced 翻 false 是预期基线**（D-c 关 ⇒ ~15 min 后中继爬行、~60 min 后孤儿自触发），作步② 的对照臂，不作翻车。
 - 步②（06:20Z）：Stop 30252 → 起 dc-3d017b6d `$BASE_ARGS --ibd-syncer-pp-lag-tolerance=0`（去 `lag-secs=0` ⇒ D-c 默认 480）→ console 重启 → §6 四项 + 补四条（自触发次数 ≈ 6 h/16 min ±30%、单次 ≤8 min、头部 ≤2 min、false 总时长 ≤10%、回滚串 0、`PeerAlreadyExists` 0、剪枝单调）。
+
+### (984) READY 签名 05:25:42Z（六轮 81/33/14/5.4/2.4/1.2 min·6 started/6 success/0 error/0 not-recognized/0 self-trigger/0 回滚串）· BOTH_READY 第二次（S2 KANet-UI 05:28:41Z D=1/1/1/1）· 影子窗三判据至今 0/0/0 · 预期 ~05:40Z 翻 false 作基线 — Bettor 2026-09-07T05:31:39Z
+- DAG 直读 05:28:06Z（NWT）：isSynced true、sink age 240 s、virtualDaa 92,303,049、headerCount = blockCount = 1,645,808（积压 0）、pp 仍 783f3ece（对端 pp 索引 41）。**④ sink 收敛 ✓：切换前落后 3.3 h → 4 min。七臂全 ✓。**
+- KANet-UI 05:28:41Z feeder synced=true / D=1/1/1/1 / remBlk 0 / lag 0h ⇒ S2=READY；口径已纠：影子期 D-c 关，本窗不会延长，翻 false 属基线。
+- 06:19:20Z NWT 给窗内终判 → 06:20Z 我步②。
