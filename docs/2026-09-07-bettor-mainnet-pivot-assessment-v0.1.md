@@ -50,3 +50,49 @@ TN12 保留为 staging（每波先在 TN12 走一遍再上主网）；D-c/D-d �
 
 ## 7. 待补（v0.2）
 J2：TN12 绑定五类计数与坐标 / 1.1.1-toc.1→v2.0.1 ABI 差异 / 主网节点资源数；NWT：真钱前置 MUST/SHOULD 清单；我：费用面按真实 tx 大小重算、波 0 的 console 网络分支设计。
+
+---
+## v0.2 追加（2026-09-07 14:0xZ · 合并 NWT 真钱清单 + J2 ②③④·J2 ① 代码绑定分类待补）
+
+### A. 费用面重算（撤 v0.1 §2-② 与 ledger 1001 的两个估算）
+J2 实测（本机剪裁窗内真 tx，节点 `verboseData.mass`）：
+| tx 类 | bytes / grams | 主网 100 sompi/gram | 频率 | 日成本 |
+|---|---|---|---|---|
+| 转账 | 175 B / 2,047 | 0.002 KAS | — | — |
+| DM | 549 B / 2,408 | 0.0024 KAS | 按用量 | 小 |
+| **UTXO 再平衡 30→30** | 3,731 B / **45,994** | **0.046 KAS/笔** | 11/h（17 h 实测）～35/h（活跃段） | **12–39 KAS/天（主导项）** |
+| settle covenant（设计 mass 50k–440k） | — | 0.05–0.44 KAS/笔 | 按盘 | 按盘 |
+| Groth16 gate tx（n=5 公共输入） | ≈17k grams | 0.017 KAS | 按盘 | 小 |
+| RISC0 succinct（若用） | transient 2×bytes 主导 | ≈0.3 KAS（估） | 按盘 | 按盘 |
+TN12 现在每笔再平衡 fee 5,099,400 sompi ÷ 45,994 grams ≈ **110 sompi/gram = 我们的 relay 已按主网费率付费** ⇒ 主网费用 ≈ TN12 今日水平，NWT ledger 1001 的"≈5 KAS/笔"是把 ×100 叠在已 ×100 的费上，撤；v0.1 的 0.004 漏存储质量，也撤。**结论：费用不否决，但再平衡 cron 是主导项，主网前重设计（目标 UTXO 数、触发条件、合并策略）。**
+
+### B. 共识/ABI（J2 ② · 7b1e18cc → v2.0.1 = 47 commits / 244 文件）
+- tx v1 **wire 不变**（`TransactionOutput.covenant` / `CovenantBinding` 逐字同；Rust 内部 `mass→compute_commit/storage_mass` 改名，txid/sighash 不变）。
+- OpZk 0xa6、Groth16 0x20（1,400 grams）/ RISC0 0x21（2,500 grams）同值；v2.0.1 新增 Groth16 VK 逐元素计量 2,500 grams/元素 + 拒尾随字节 + `n+1 == gamma_abc` 校验；RISC0 只收 Poseidon2。
+- 100 sompi/gram 是 v2.0.1 mempool 政策（非共识）；`max_signature_script_len` 主网 250k < TN12 300k。
+- **`TESTNET12_PARAMS` 在 v2.0.1 已删**（v2.0.1 跑不了 TN12）；**P2P 协议 9→10**（我们 toc.1 exe 上主网会被拒连）。
+- `determine_ibd_type` 与 4 窗逐字未变、上游无自触发。
+- **最大工程量 = silverscript v1-rc1 迁移**：42 个 .sil 全迁（entry / byte[36] / temporal / dispatch tag ⇒ 字节码与 P2SH 全换），与主网重部署（地址前缀）合并做。
+
+### C. 主网节点（J2 ③）
+- 上游 **v2.0.1 原样，不带 D-b/D-c/D-d**：它们治的是 TN12 拓扑（单前向 peer + 0.75 bps 爬行 + syncer pp 停滞）；主网多 peer 全速收块、pp 随网推进，v2.0.1 还新增拒陈旧 pp 的 syncer。D-d 的拒绝诊断行值得上游 PR。`--rocksdb-cache-size` v2.0.1 自带。
+- 硬件（指南）：最低 8c / 16 GB / **640 GB SSD** / 10 MB/s，推荐 12–16c / 32 GB / 1 TB。elldeeone 报告是 devnet 合成压测，不代表主网。
+- **本机并跑不可行**：12c / 61.6 GB / D: 空闲 712 GB 但 TN12 已占 204 GB 且在涨 ⇒ 磁盘余量 <100 GB；两台 kaspad + console 内存吃紧；llama 必关。端口可分（主网 16111/17110 vs TN12 16311/17210）。⇒ **波 0 的机器 = S-2 第二台机（≥32 GB / ≥1 TB SSD）**，TN12 与主网各一台。
+
+### D. 真钱前置（NWT 清单 5 域 22 条·摘 MUST）
+1. **G-1 enforce + G-2 + `KASPA_RPC_LOCAL_ONLY=1` 三者 MUST**（在主网，rpc-health 硬编码 mainnet"恰好对网"，公网 mainnet 节点 isSynced=true 过 networkId 核 ⇒ 不设 LOCAL_ONLY 就是 22:55Z 形状的主网版）。
+2. **NO TX NO STATE CHANGE 两处已知违反先修**：`exchange-machine.js:828-829`（kaspa 路径硬构造 confirmed:true）、`bettor-prediction-settler.js:198/216`（拿 txid 即推进）+ **submit 对账器** cron（递出后 T+10 min 三源无 ⇒ 告警 + 冻结该 relay）。
+3. 私钥 40 处常驻 × 40 relay 同机 ⇒ 分离 + 上限；`api/relay.js:1774` 无白名单直通；0.0.0.0 监听清单（NordLynx/Tailscale/WSL 多网卡）。
+4. S-1 冻结语义（jepu1 47 天每小时空重试 = 主网真费）。
+5. 灰度形态：G-1 加 `readonly` 态零新判据 ⇒ 只读 7 天 → 手续费级 → 钱路逐 type。
+
+### E. 四波（修订）
+| 波 | 前置（修订后） |
+|---|---|
+| 0 只读主网节点 | S-2 第二台机；上游 v2.0.1；console `KASPA_NETWORK=mainnet` 只读分支 + `readonly` 态 |
+| 1 通信/身份 | LOCAL_ONLY + G-2（已落）+ relay 主网密钥隔离 + 手续费钱包额度 |
+| 2 签名型结算小额 | **G-1 enforce + 两处 NO-TX 违反修 + submit 对账器 + 再平衡 cron 重设计 + 密钥分离 + S-1** + 单笔/日上限 |
+| 3 ZK 结算 | silverscript v1-rc1 全量迁移 + 主网编译 + D-005 隔离测试 + OP_PICK 修复上游 + Groth16 VK 计量下的 proof 成本核 + Owner 拍 |
+
+### F. 待补
+J2 ①（TN12 绑定五类计数与坐标）；再平衡 cron 重设计稿（谁：J2 设计 → NWT）；波 0 console 网络分支设计（我）。
