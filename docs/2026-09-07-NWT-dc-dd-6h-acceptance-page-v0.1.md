@@ -70,3 +70,19 @@ D-c 在窗内：20 次自触发 19 成功、0 backoff、0 transient、canonical 
 - 若 ③ 段落后回升越过 480 s，D-c 接管 ⇒ 记为"两相位切换"样本（12:20Z 前若发生追加）。
 - 对 G-1：③ 段 hdr−blk = 0、isSynced true ⇒ 写类放行；链视图常驻 ≈7 min 陈，在 661 判据内。
 - **两相位切换样本（11:2xZ 本人逐行）**：③ 跟随 11:03→11:20Z（60 s 抽样 207/179/185/226 blocks/10 s，平台 ≈410–420 s）→ 11:21:20Z 骤降 19/10 s → 11:22:20Z **0/10 s**（对端停送、未断连）→ lag 越 480 → **11:21:45Z `IBD self-trigger … sink lag 516s`**（`IBD started` 同毫秒）→ 头 1025–2050/10 s、体 198–396/10 s → **11:28:31Z 双 completed 行**（6 m 46 s）。D-c 休眠→接管无缝，0 failed/backoff。③ 段持续 ≈18 min；11:28Z 后相位待记。
+
+## 7. 终稿（窗 06:20:08→12:20:08Z 全量 · 12:21:43Z 逐行切片 · 本人读数）
+| 量 | 全窗值 |
+|---|---|
+| `IBD self-trigger … sink lag`（触发） | **22**（20 在 ① 相位 + 11:21:45Z 切换 + 11:30:39Z；lag 480–539 s） |
+| `IBD self-trigger … completed successfully` | **21** |
+| `self-trigger failed (protocol)` / (transient) / backoff | **1 / 0 / 0**（10:59:09Z 对端 reset） |
+| `IBD started`（全部） | 44；`completed successfully` 43 / `completed with error` 1 |
+| D-d lags 行（`lag 28` 接受） / `not recognized` | **44 / 0** |
+| `not eligible` 通知 | 88（每轮完成后 3 peer 各 1） |
+| 回滚串 | 0 |
+| syncer 失联 | **2**：10:59:09Z `connection reset`（3.5 min，11:02:40Z 回连）；**11:40:11Z `broken pipe`（至 12:20Z 未回，≥40 min，进行中）** |
+| isSynced（2 min 直读） | true 06:54:13→11:00–11:02Z（4 h 07 min）；false ≈1–3 min；true 11:03:01→11:42–11:44Z（≈40 min）；**false 11:44Z 起（失联 #2）**；窗内 true 占比 ≈ (247+40)/360 ≈ **80%**，两段 false 全部归因失联 |
+| lag 曲线（失联 #2） | 11:41 604 s → 11:49 1,054 → 11:59 1,682 → 12:07 2,127 → 12:21 2,969 s（≈0.9 s/s，中继 0） |
+
+**判定：D-c / D-d 通过 6 h 验收。** D-c：22 触发 21 成，唯一失败是对端主动断连（Closed 类，分类正确、不退避），跟随相位休眠、跟随一断即接管（11:21:45Z 样本），周期 ② ≈ 480 − 起始 lag；D-d：44 轮 0 拒、同 hash 同 lag；canonical 行齐；回滚串 0。**未解事项（另案，不扣分）**：(a) TN12 单前向 peer 依赖——该 peer 在窗内失联 2 次，第二次 ≥40 min 且进行中，无替代地址；(b) 自触发资格按连接重置（NOTE-b）；(c) Closed 文案（NOTE-a）；(d) not-eligible 每轮重印（SHOULD-低）。
