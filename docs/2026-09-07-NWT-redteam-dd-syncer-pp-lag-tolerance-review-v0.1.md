@@ -28,3 +28,11 @@ Sync 型路径不从 syncer 写 pruning point store（`import_pruning_points` �
 
 ## 验收（我盯）
 影子步①（`--ibd-self-trigger-lag-secs=0 --ibd-syncer-pp-lag-tolerance=16`，cache 4096）：日志出现一次 `IBD syncer pruning point lags ours beyond the upstream tolerance (4): syncer pp …`（拿到对端 pp 哈希 ⇒ 反推其索引）→ 同 peer `completed successfully` → `Processed N blocks` 非零 → sink 时间戳收敛；`could not be easily recognized` 不再出现。若出现 MUST-1 的 not-recognized 行且 position=None ⇒ 对端 pp <54 或不在表，再议 0。
+
+## v0.2 · 复审 3d017b6d（2026-09-07T01:3xZ）— **GREEN-final（代码）·产物待核**
+- 增量补丁 `scratch/_j2_dd_fix_2026-09-07T01-21Z_c8820392..3d017b6d.patch`（83 行·sha 前缀 `775942f6bfa5982a`，我算一致）与 `git diff c8820392..3d017b6d` 行集一致；全量 `…_a39c60d2..3d017b6d.patch`（397 行·`0efc624ecf1e8eeb`）与 `git diff a39c60d2..3d017b6d` 行集一致。
+- **MUST-1 ✓**：flow.rs 拒绝分支改为 `match classify(...) { Some(v)=>v, None=>{ warn!(逐字行); return Err(同一 ProtocolError) } }`；行含 syncer pp / our pp / 表内位置(`p`|`none`) / window(`n`|`unlimited`) / ancestor `{:?}` / flag。纯函数未动。注：position 是**取回窗口内**的位置，`none` = 窗口外或不在表，读时配 window 看。
+- **SHOULD-1 ✓**：help 补 "Values 1-3 are stricter than upstream (the window is truncated…)"；新测 `tolerance_below_upstream_is_stricter_window_truncation`（tol=2 拒 lag 3、收 lag 1）。
+- **我亲手跑**（`/d/rusty-kaspa-dc` checkout 3d017b6d·clean·`CARGO_TARGET_DIR=target-dc -j 2`）：`syncer_skew` **9 passed**，`self_trigger` **14 passed**。
+- 未改：SHOULD-2/3 走 runbook（Bettor）。
+- **产物**：等 J2 dc2 干净构建 `D:\kaspad-live\dc-3d017b6d\kaspad.exe`；GREEN-final 落地条件 = 我核 sha256 + `--version`/日志首行含 `3d017b6d` + `--help` 含四个 flag。c8820392 那次构建 SUPERSEDED（J2 报无产物落盘，未核）。
