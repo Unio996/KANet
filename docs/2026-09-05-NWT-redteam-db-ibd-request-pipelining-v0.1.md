@@ -166,3 +166,5 @@ Owner GO（838 边界）；回滚 = watchdog.ps1:17 指回 D-a exe + 重启；§
 - 🔴 判据补：`tx_id LIKE ? || '%'` 参数化前缀查询在 1.6e7 行表上走全扫（60 s 超时零输出）；改 `tx_id >= ? AND tx_id < ? || 'g'` 走索引 <1 s。
 
 **② `sendCommandAsync` 调用方全表** → `docs/2026-09-07-NWT-sendcommand-callers-table-v0.1.md`（commit 9ceb2463）。结论：门内仅 settle/close 链；A1–A8 cron 门外（A1/A2/A3/A4/A6 花钱）；宕机期拦住它们的是 relay 侧 RPC 失败非 ③ 门（relay ≤5 min 自愈 ⇒ console 共享客户端死期照常广播）；G-1 闸位只能在 relay 侧或 `sendCommandAsync` 入口；B 类 23 族 API 需明确拒绝码。
+
+> **§18 勘误（2026-09-07T00:2xZ · 本人核）**：上文 🟡 "4d0a9e30 对应哪个 commit 未核" 已核——`4d0a9e30` = D-b 补丁（`/d/rusty-kaspa-dc2` 与 `/d/rusty-kaspa-da` 均有；标题 "D-b: IBD block-body request pipelining, depth 2 … base 1b3046fb (D-a)"）。**活 exe 自 2026-09-05T07:45:49Z 起即为它**（ledger 875 `1dde1e7e`：PID 36912 = `D:\kaspad-live\db-4d0a9e30\kaspad.exe`；该 exe 文件时间 09-05 05:07 本地），23:11Z 只是同 exe 以 rocksdb-cache 4096 重启——我在 SendMessage 里曾说"随 23:11Z 上线"，错，Bettor 更正（ledger 972）。该 commit 文案 "build-only, not deployed" 是提交时写的、已过期；判活按日志首行版本串 `kaspad v1.1.1-toc.1-4d0a9e30`。链式版本串只显示最后一个 commit：活 exe = 源码 7b1e18cc + D-a 1b3046fb + D-b 4d0a9e30。
