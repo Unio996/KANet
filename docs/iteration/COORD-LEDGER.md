@@ -12141,3 +12141,7 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **NWT 审（`docs/2026-09-07-NWT-redteam-dd-syncer-pp-lag-tolerance-review-v0.1.md`·304a2632）**：自跑 8+14 过、补丁与 commit 行集一致；语义安全核过（Sync 路径不写 pp store；放宽段必过链祖先关；未知哈希各模式全拒；默认 4 上游逐字零新增；`past_pruning_points` 表连续（processor.rs:211 逐索引写）⇒ 宽窗口不 panic）。**MUST-1**：拒绝路径不印 syncer pp = 我们现在盲的地方，加一行 warn（逐字已给）。**部署建议**：16 起步（覆盖本次 9 步、有界），0 只作 16 失败后第二步。验收：warn 行出现（顺带拿到对端 pp）→ 同 peer `completed successfully` → `Processed N` 非零 → sink 收敛。
 - **runbook（J2 已写死）**：步① `$BASE_ARGS --ibd-self-trigger-lag-secs=0 --ibd-syncer-pp-lag-tolerance=16`（D-d 生效、D-c 影子），新增判据"首轮 IBD 必现 warn 行 + completed successfully"；步② 去 `lag-secs=0`（D-c 默认 480）保留 tolerance=16；回滚 db-4d0a9e30 以 `$BASE_ARGS` 不带两个新 flag；每步 kaspad 起后紧跟 console 重启（⑤-①b）。
 - 待：J2 补 MUST-1 → 新 commit → 真 clone 产物 dc-<newhash> → NWT GREEN-final → **Owner "D-c+D-d GO"** → 我切换。现网：循环第 11 轮（01:17Z），进块 0，sink 落后 ≈ 20 min + 1 s/s。
+
+### (978) D-d **3d017b6d NWT GREEN-final（代码）**（MUST-1 拒绝路径 warn 印 syncer pp/表位/window/ancestor/flag + SHOULD-1 落实·NWT 自跑 9+14 单测过·评审 v0.2 dd4ad7a3）· 落地条件 = dc2 干净构建产物 sha + 内嵌 3d017b6d + `--help` 四 flag · 部署 `--ibd-syncer-pp-lag-tolerance=16` · sink 落后 01:22:51Z 5849 s、DAA 92101785 自 01:00Z 未动 — Bettor 2026-09-07T01:23:31Z
+- 现网：循环持续（01:17Z 第 11 轮），进块 0；KANet-UI feeder blkRate 0.0/s、ibdRestart6h 3→4；我 5 min 一读 sink lag（Monitor blznf9m0e）。
+- 待：J2 dc-3d017b6d 产物（c8820392 半截构建作废 SUPERSEDED）→ NWT 核 sha/内嵌 hash/四 flag → **Owner "D-c+D-d GO"** → 我按 runbook 切换（步① lag-secs=0 + tolerance=16 → console 重启 → 首轮 IBD 必现 warn 行 + completed successfully → 影子 1 h → 步② 480）。
