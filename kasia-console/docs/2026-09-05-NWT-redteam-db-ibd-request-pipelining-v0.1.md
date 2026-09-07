@@ -1,2 +1,4 @@
 
 > **§20 收口（05:28Z · 本人读数）**：几何轮 ①03:05:07→04:26:33Z（81 min）②→04:59:28Z（33）③→05:14:58Z（14）④→05:21:01Z（5.4）⑤→05:23:55Z（2.4）⑥→**05:25:42Z（1.2）= READY 签名**（其后 >120 s 无 `IBD started`；05:27:54Z 起 `Processed 5 blocks and 5 headers` 中继态）。每轮 lags 行同 hash / lag 28 / tolerance 0。本进程计数：started 6 / ok 6 / error 0 / not-recognized 0 / self-trigger 0 / 回滚串 0。首个 isSynced=true 05:19:20Z（±2 min·第 4 轮体未完时翻真，同 memory nearly-synced 窗）= 影子窗 T_s，至 06:19:20Z。DAG 05:28:06Z：isSynced true、sink 05:24:06Z（age 240 s）、virtualDaa 92303049、headerCount = blockCount = 1,645,808。**七臂全 ✓**（④ 切换前落后 3.3 h → 4 min）。影子期 D-c 关（lag-secs=0）⇒ 预期中继爬行→isSynced 翻 false→~60 min 孤儿自触发，作步② 对照基线，非失败（Bettor 更正）。
+
+> **影子窗终判（05:19:20Z–06:19:20Z · 06:19:29Z 逐行切片 2630 行）：PASS** —— `IBD self-trigger` 0 / 回滚串 0 / `not recognized` 0 / `completed with error` 0；窗内 `IBD started` 2、`completed successfully` 3（第 5、6 轮），最后 IBD 行 05:25:42Z；窗内无孤儿自触发。基线：isSynced 真态 05:19:20→05:35–37Z（~17 min），随后中继爬行（5–30 blocks/10 s）。步② 归 Bettor。
