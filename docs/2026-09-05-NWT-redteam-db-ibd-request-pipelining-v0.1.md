@@ -147,3 +147,22 @@ Owner GO（838 边界）；回滚 = watchdog.ps1:17 指回 D-a exe + 重启；§
 > - 公网端点：12 个 `wss://…/kaspa/mainnet/wrpc/borsh` 客户端建过（`rpc-health.js:118` 硬编码 `Resolver().getUrl(Borsh,'mainnet')`、只测可达），窗内 0 条 ok 读证据、7 条 rpc-fail 全 connect timeout；"门读数来自公网端点"不可证亦不可证伪（门已开时 ok 读不打行）。
 > - 议题：G-1（③ 闸 rpc-fail 视同未同步）、G-2（共享客户端重建 + discovery 按 network 过滤 + 门读数 networkId 校验）、S-1（jepu1 47 天每小时被拒 1116 次·Owner 结算议程）、门外钱路 cron 清单（`sendCommandAsync` 调用方）。
 > - **门外钱路 cron 清单（2026-09-07T00:08Z grep）**：门内 15 站点 = bshard-close-voter×3 / oracle-pool-scanner / oracle-renewal / pool / prediction-settler / prediction-voter / refund-claim-auto / settle / zk-prove-worker / zk×4（+preprune 自带门）。**门外 ∧ 链面（有 cron ∧ 调 `sendCommandAsync`）9 族**：broadcaster-utxo（再平衡 tx）· mining-utxo-consolidate · market-seeder ×3（做市/auto-pay/退款）· broker-intake ×2（utxo split/退款）· broker-buy-completion · broker-bot-manager · exchange.expireTick（exchange-machine）· broker-state-machine/reconciler/authority · broker-action-queue/settler-router（被驱动）。节点宕机/未同步期照跑，仅靠 relay 错误返回兜底。建议 G-1 至少覆盖真广播的 4 族。
+
+## §18 · 969 ①② 交付 + kaspad 第二次 relay 爬行（2026-09-07T00:12Z · 全部本人读数）
+
+**kaspad（重启 23:11:13Z·日志首行 `kaspad v1.1.1-toc.1-4d0a9e30`·RocksDB cache 4096 MB·🟡 4d0a9e30 对应哪个 commit 未核）**
+- 5 轮 IBD 同 peer 136.243.93.17：started 23:11:35Z → completed 23:26:16 / 23:33:24 / 23:37:09 / 23:39:36 / **23:41:30Z**（轮长 14.7/7.1/3.8/2.4/1.9 min，几何收敛）。此后至 00:10Z 无 `IBD started`。
+- 23:41:30Z 起 `Processed 5|10 blocks and 5|10 headers in the last 10s` 恒定 = 0.5–1.0 bps。DAG 探针（`scratch/_nwt_dag_probe.mjs`）：00:07:37Z sink 1398521ac9ee ts 23:41:35.658Z age 1562 s，virtualDaa 92099731；00:08:57Z sink fecebe801edb ts 23:41:42.313Z age 1635 s，virtualDaa 92099785 —— 80 s 墙钟 sink 推 6.7 s（增陈 0.92 s/s）。isSynced=false；KANet-UI feeder（`logs/_ibd_feeder_nohup.log`）23:46:57Z 行 synced=true D[sync/daa/lag10m/READY]=1/1/1/1，00:06:59Z 行 synced=false blkRate 0.8/s。⇒ READY 四联在 20 min 内翻回；同 §13 的 relay 爬行相同形态；D-c 自触发目标场景（lag≥480 s 已满足 >20 min），D-c 未上线。
+- 剪裁：23:41:30Z `Starting Header and Block pruning`（与最后一轮 IBD 完成同刻）→ 23:44:48Z `completed: traversed 430645, pruned 0` → 00:05:59Z `Periodic pruning point movement … 621138c1… → 783f3ece…` → 00:09:59Z `Verifying the new pruning point UTXO commitment (sanity test)`。feeder 00:06:59Z 行 ppHash 783f3ece1c、blk 计数 13.88M→1.44M（剪裁后计数重置，非倒退）。
+- 只报：00:04:38Z `P2P, got reject message: pruning points are violating finality from peer 70.178.95.86:16311`，00:05:01Z 同 peer 重新注册 flows；DNS seeder 两域名持续解析 WARN。
+
+**① broadcaster-utxo 35 笔落链核（三源·只读）**
+| 源 | 命中 | 说明 |
+|---|---|---|
+| console `kaspa_tx_log`（`scratch/_nwt_txlog_check.cjs`·范围查询） | 26/35 | block_time 23:17:23Z…23:41:22Z；tick→上块 3–6.5 min |
+| 节点 UTXO 集 `getUtxosByAddresses` 9 地址（`scratch/_nwt_utxo_landing_check.mjs`） | 16/35 输出仍未花（00:08:47Z；00:03Z 时 11/35） | blockDaaScore 92088494…；其余被后续 tick 链式花掉或未进本机视图 |
+| 节点 mempool 9 地址 | 0/35 | 现存 9 笔为新 console 23:47Z 后 tick（fee 0.049–0.051 KAS） |
+- **缺 9/35 = 整个 23:13:54Z 首 tick**（重启后 2 m 41 s、header 相位 IBD 中提交；relay 日志记 `tx=` 成功）：三源皆无 ⇒ 疑未落链，**未定**（需 explorer/第二节点）。钱面：自转账，本金 0；若未上块手续费亦未花。归 G-1 输入：节点未同步时 relay submit 该拒不该收。
+- 🔴 判据补：`tx_id LIKE ? || '%'` 参数化前缀查询在 1.6e7 行表上走全扫（60 s 超时零输出）；改 `tx_id >= ? AND tx_id < ? || 'g'` 走索引 <1 s。
+
+**② `sendCommandAsync` 调用方全表** → `docs/2026-09-07-NWT-sendcommand-callers-table-v0.1.md`（commit 9ceb2463）。结论：门内仅 settle/close 链；A1–A8 cron 门外（A1/A2/A3/A4/A6 花钱）；宕机期拦住它们的是 relay 侧 RPC 失败非 ③ 门（relay ≤5 min 自愈 ⇒ console 共享客户端死期照常广播）；G-1 闸位只能在 relay 侧或 `sendCommandAsync` 入口；B 类 23 族 API 需明确拒绝码。
