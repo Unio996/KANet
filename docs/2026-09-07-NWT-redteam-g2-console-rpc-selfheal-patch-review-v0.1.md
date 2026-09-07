@@ -26,3 +26,9 @@
 
 ## 部署 / 验收（同页 §3/§4）
 env `KASPA_RPC_LOCAL_ONLY=1`；回滚 = revert commit（语义已变，去 env 不够）。下次 kaspad 重启看：③ 门零 `resume … reason=rpc-fail`、`REBUILD … source=rpc-health` 后 ≤3 min `BACK-TO-LOCAL`、skip 心跳带 streak、恢复后 `using local node`。达标 ⇒ runbook ⑤-①b 撤。
+
+## v0.2 · 复审 v2 补丁（`scratch/_j2_g2_console_rpc_selfheal_v2_2026-09-07T07-52Z.patch` · 829 行 · sha256 `5afaf4969ea51b711a4fbb48d0234ea8b0f2b049a061e1d21d4427d393f65766` · v1 d831d15b 作废）— **GREEN-final 可 apply**
+- `git apply --check` 对 HEAD 3dba680d 通过；v1→v2 差异（patch-of-patch）只含：SHOULD-2 本机未同步行 `[rpc-health] local node not synced (networkId=… isSynced=…)`（限频键 `url|kind`，REJECT 与它互不压制）+ 断言"有该行且无 REJECT"；SHOULD-3 `BACK-TO-LOCAL after <s>s (was: rpc-fail|not-synced|network-mismatch|tcp-unreachable|unknown)` + H4 钉 `(was: rpc-fail)` 逐字；NOTE-1 const/let 集中文件头；NOTE-2 discover 候选 ≤3。
+- **我亲手**（隔离 worktree `scratch/_wt_nwtg2b`，已删）：rebuild 23/0 · datacheck **23/0**（+1 SHOULD-2 断言）· kaspa-rpc-shared 22/0 · ibd-tick-gate 6/0 · preprune-ibd-gate 30/0 · preprune-capture-worker 15/0 · capture-gate 18/0；lint 9 文件 0 errors。
+- 未折入（另一笔，非阻塞）：SHOULD-1 `getWorkingRpc` 返回 `isSynced`；`api/pool.js:1120` null 检查。
+- apply 归 Bettor（与 6c-α 同次重启，12:20Z 后）；env `KASPA_RPC_LOCAL_ONLY=1`；验收在下次 kaspad 重启（③ 门零 rpc-fail 放行、`REBUILD … source=rpc-health` → ≤3 min `BACK-TO-LOCAL … (was: rpc-fail)`、skip 心跳 streak）。
