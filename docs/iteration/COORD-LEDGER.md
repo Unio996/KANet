@@ -12254,3 +12254,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **收益**：syncer 失联时 N2 顶上（两节点互为未来）；pp 序列由我们自己控制，D-d 容忍可回到有界值；R-1 relay 扇入可分流。**不做的代价**：今天这种失联每次 = 全系统结算停摆直到对端回来（今天已 65 min+）。
 - **落地路径（若 GO）**：J1 在 N2 提权装 kaspad（同 exe dc-3d017b6d + tolerance=0 + 4096 或更小）→ 本机 `--addpeer=N2:16311` 进 watchdog :47（需一次重启，由我做）→ 验收：N2 isSynced、本机 peer 表含 N2、任一方失联另一方 ≤5 min 顶上（人为 bounce 一次验）。
 - **监控降频**：5 min 异常监控改 30 min（bla30syis）；syncer 回连监控（b8wgebbhe）与 KANet-UI/NWT 盯守不变。
+
+### (999) 第二前向 peer 只读扫描（J2 `scratch/_j2_tn12_peer_scan_2026-09-07T13-30Z.md`）：**无候选** · syncer 失联 ≥108 min（13:27:43Z :16311 仍关，ping 通）· 从我们视角 TN12 = 我们 + 1 台在前（现不在）+ 3 台在后 — Bettor 2026-09-07T13:31:57Z
+- ① kaspa-wasm `Resolver.getUrl(Borsh,'testnet-12')` ×15 全 6 s 超时（公共 resolver 无 TN12 条目）；② 136.243.93.17:16311 TCP 关；③ 现连 3 peer 全 `/kaspad:1.1.1-toc.1/`、is_ibd_peer=false：86.48.24.208 开 wRPC 17210 ⇒ testnet-12、isSynced=false、virtualDaa 90,757,031（**比我们低 1.80M**）、pp bacaea94… daa 75,940,341（08-07）、sink 09-05T10:18Z（比我们更陈）；70.178.95.86 / 152.53.236.224 常见 wRPC 口全关；④ DNS seeder 只回这 3 个。
+- **含义**：我们现在是这 3 个 peer 眼中的"未来"（它们每 30 s 来拉又拒——它们的 pp 更陈）；TN12 上在我们未来的只有 136.243.93.17。它不回来 = 孤岛；无本机动作。**选项**：(a) 等它回（今天两次：3.5 min / ≥108 min）；(b) 向 TN12 运营者（kaspad.net / kaspa.ws seeder 维护方）要前向节点地址——需 Owner/J1 出面；(c) S-2 自建 N2（998）。
+- kaspad 40112 健康（D-c 三 peer not-eligible 通知每轮照打、无 error）；console 34928 G-2 fail-closed 正确（`no RPC node available … next note in 10 min` 限频、③ 门全 skip、零 rpc-fail 放行）。lag 13:25Z 6,842 s。
