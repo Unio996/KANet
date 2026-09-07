@@ -12199,3 +12199,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - 其余 MUST：② `pending.submit(rpc)` 4 处（p2sh.mjs:306 漏），lint `R-REALCHAIN-SUBMIT-VIA-GATE` 必须抓到；③ G-2 顺序 = 网络过滤 → 可达 → 数据核（networkId==='testnet-12' ∧ isSynced）→ 才缓存，失败不缓存 + REJECT 行；G2-3 重建由 rpc-health 自己的数据核失败触发。J2 出 v0.1.2 → NWT 复核 → Owner 批（钱路）。
 - 已推：a32e4cf0（设计 v0.1.1）、90144343（D-d README known-issues：not-eligible 通知每轮完成后每 peer 重打一次，≈20 行/h，SHOULD 进程内去重）、61ae4647（D-c provenance 补入库，昨晚漏 commit；MANIFEST exe sha bd5808ab…a8a3 = 实读；README 标 SUPERSEDED by dc-3d017b6d）。上游 PR 草案 `scratch/_j2_upstream_pr_draft_dc_dd_2026-09-07.md`（PR-1 D-d flag；PR-2 D-c 可选）。
 - D-c：第二轮 07:19:47→07:23:45Z（3 min 58 s，4,739 块）；回滚串 0；三 churn peer not-eligible 各一条（peer 重连后新 IbdFlow 各一次，非刷屏）。
+
+### (989) **G-1+G-2 设计 v0.2（1e19e95e）NWT GREEN-final（设计）** ⇒ 待 Owner 批（钱路·铁律 0）· D-c 三次自触发 07:10/07:19/07:24Z 全 completed（周期 544/300 s·第三次为追平尾巴）· isSynced 自 06:58Z 连续 true >30 min（KANet-UI 两 tick 07:08/07:28Z 同证） — Bettor 2026-09-07T07:32:45Z
+- **给 Owner 的一句话（NWT 版）**：新增三个真拦截面——① 节点网络身份核（挡 mainnet 端点冒充 synced）；② relay 侧全部 34 条花钱 submit 路径（p2sh 29 + pending.submit 4 + _sendKaspaInner）接同一闸（挡 23:14Z 那种"IBD 中递上去、三源无"）；③ RPC 失败一律 fail-closed。判据 = 节点自己的 `headerCount − blockCount ≤ 50` 判"IBD 中"，不读日志；代价 = 写类 cron 在 D-c 每 9 min 一轮里最多延 4 min（≈43% 时间 hold），读类不受影响；先 shadow 24 h 出数（记 hdrMinusBlk、会 hold 几笔）再 enforce；G-2 自愈先落，之后 kaspad 重启不再需跟 console 重启。
+- 落码序（Owner 批后）：G-2（console 自愈，非钱路）先落 → G-1 shadow 24 h → enforce；J2 实现 → NWT 逐 hunk → 我推/重启。
+- 待推：NWT 评审 v0.2 段（本地）。6c-α apply 仍排 12:20Z 页后。
