@@ -199,3 +199,9 @@ Owner GO（838 边界）；回滚 = watchdog.ps1:17 指回 D-a exe + 重启；§
 - 资格通知：07:04:40 / 07:04:55 / 07:05:20Z 三条 `IBD self-trigger: peer … not eligible until it completes a first IBD with us (lag 185/200/225 s)`——每 peer 一次（flow.rs:173-181 `take_not_eligible_notice`，即 D-c 审 SHOULD②），资格门先于阈值门。
 - **首次自触发**：07:10:43Z `IBD self-trigger with peer 136.243.93.17:16311: sink lag 503s >= 480s, syncer sink 77a22d52… (daa 92368064, local daa 92364041)`（READY + 6 m 11 s）→ 07:11:31Z lags 行 lag 28（D-c 开轮、D-d 放行）→ 07:12:11Z 头 4200 100% → **07:14:35Z `completed successfully` + `IBD self-trigger with peer … completed successfully`**（3 m 52 s）。
 - 计数（本进程至 07:15Z）：started 5 / ok 5 / error 0 / not recognized 0 / self-trigger failed 0 / backoff 0 / 回滚串 0。
+
+> **（勘误 07:4xZ：下面两段原于 05:28Z / 06:19Z 误写入 kasia-console/docs/ 同名文件——heredoc 相对路径在 cwd 漂移下落错目录；本次并回、删除误件。）**
+
+> **§20 收口（05:28Z · 本人读数）**：几何轮 ①03:05:07→04:26:33Z（81 min）②→04:59:28Z（33）③→05:14:58Z（14）④→05:21:01Z（5.4）⑤→05:23:55Z（2.4）⑥→**05:25:42Z（1.2）= READY 签名**（其后 >120 s 无 `IBD started`；05:27:54Z 起 `Processed 5 blocks and 5 headers` 中继态）。每轮 lags 行同 hash / lag 28 / tolerance 0。本进程计数：started 6 / ok 6 / error 0 / not-recognized 0 / self-trigger 0 / 回滚串 0。首个 isSynced=true 05:19:20Z（±2 min·第 4 轮体未完时翻真，同 memory nearly-synced 窗）= 影子窗 T_s，至 06:19:20Z。DAG 05:28:06Z：isSynced true、sink 05:24:06Z（age 240 s）、virtualDaa 92303049、headerCount = blockCount = 1,645,808。**七臂全 ✓**（④ 切换前落后 3.3 h → 4 min）。影子期 D-c 关（lag-secs=0）⇒ 预期中继爬行→isSynced 翻 false→~60 min 孤儿自触发，作步② 对照基线，非失败（Bettor 更正）。
+
+> **影子窗终判（05:19:20Z–06:19:20Z · 06:19:29Z 逐行切片 2630 行）：PASS** —— `IBD self-trigger` 0 / 回滚串 0 / `not recognized` 0 / `completed with error` 0；窗内 `IBD started` 2、`completed successfully` 3（第 5、6 轮），最后 IBD 行 05:25:42Z；窗内无孤儿自触发。基线：isSynced 真态 05:19:20→05:35–37Z（~17 min），随后中继爬行（5–30 blocks/10 s）。步② 归 Bettor。
