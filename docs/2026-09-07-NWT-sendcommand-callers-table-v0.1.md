@@ -52,3 +52,19 @@
 4. **待核（我未逐个读代码）**：A4/A5/A6/A8 的具体 type 与是否有自己的同步检查；`type=?` 的 6 处变量传入点的取值域。
 
 Pin：console 20:41:14Z 进程（旧）与 23:46:48Z 进程（新）的 `console.log` / `console.log.prev-20260906T234648Z`；grep 于 2026-09-07T00:1xZ；调用点行号随 HEAD 12a368ba…fc58326f。
+
+## D. 勘误 v0.1→v0.1.1（2026-09-07T00:4xZ · J2 四处核 `scratch/_j2_sendcommand_table_4checks_2026-09-07T00-16Z.md` · 我逐条复核）
+**采纳（我核代码一致）**：
+- A4 `broker-buy-completion-watcher.js` 只是 `sendCommandAsync` 薄包装，cmd 来自 `broker-action-queue`；kinds `dm_*`→`send_message`（`broker-action-queue.js:296-329`）。**降为手续费级**，无 transfer。
+- A5 `broker-bot-manager.js:57` 只有 `send_broadcast`。**降为手续费级**。
+- A6 `market-seeder.js`：kaspad 侧只 `send_broadcast`（`:100`）；花钱在 `transferUsdt`（EVM，不经 relay/kaspad）。**KAS 上不花钱**。
+- A8 `broker-state-machine.js` / `broker-state-reconciler.js` 零 sendCommand（我 grep 0/0）；花钱只在 `broker-state-authority.js` 的 `enqueueVerified({kind:'sendKas'})` → `broker-action-queue.js:373` `COMMAND_TYPES.TRANSFER`。
+- 变量传入点 10 处（我数 6 + J2 补 `broker-buy-handler.js:121`、`pool.js:2007→bshard_zk_close`、`bshard-close-transport` 的 `transfer`/`bshard_close_attest_v2`/`bshard_zk_handoff`）；`api/relay.js:1774` 无 type 白名单、`operator-settle.js:72` 两档白名单 fail-closed、`capability.js:267` 唯 `custodial_transfer`——J2 页 §2 表为准。
+⇒ 修正后 **A 类花钱 cron = A1 split_utxo / A2 consolidate_utxo / A3+A8′ transfer（经 queue）/ A9 pool_settle_tx**；A4/A5/A6/A7/A10 手续费级。
+
+**🔴 打回一条（J2 页 §3 第三点）**："23:13:54Z 再平衡 9 笔经 `_sendKaspaInner`、检查存在但放行 ⇒ 那一刻 kaspad 自报 isSynced=true"——**路径判错**：
+- `kasia-relay/src/lib/utxo-split.mjs` 从 `transaction.mjs` **只 import `withSendLock/filterPendingUtxos/markUtxoSpent`（:18）**，自己用 `Generator` 建 tx 后 **`pending.submit(rpc)`（`:125` split · `:275` consolidate）直接递**；文件内 `isSynced|getServerInfo` 命中 0。⇒ **`split_utxo` / `consolidate_utxo` 不经 `_sendKaspaInner:150` 的检查**，J2 §3 "经它的命令"清单要去掉这两个。
+- 那一刻节点自报的是 **not synced**：`console.log.prev-20260906T234648Z:26101-26273` 全体 relay 23:11:26–27Z `[rpc] WARNING: node is not synced`（`rpc-listener.mjs:749-750` 重连时读 `getServerInfo`）。23:13:54Z 无直接读数；机制上 header 相位 sink 不动（判据 = sink ts ≤661 s），停机 16 min 后 sink 已陈 ⇒ 沿用 false（**推断·标明**）。
+- ⇒ 23:13:54Z 反例证明的是 **"relay 侧有一条花钱路径零检查"**，**不是 "isSynced 判据不够"**。判据不够另有独立证据（memory `reference-kaspad-issynced-flips-true-inside-nearly-synced-window-before-last-ibd-rounds-end`：nearly-synced 窗内 true 而末几轮 IBD 未完），两件事别合并。
+- 顺核 `p2sh.mjs`：`await …submitTransaction(` **29 行**（J2 记 12 处·计法不同未对齐），`isSynced|getServerInfo` 0——零检查结论同 J2。
+- ⇒ G-1 relay 层的覆盖面：`assertNodeTrusted()` 须补进 **p2sh.mjs 全部 submit + utxo-split.mjs 两处 `pending.submit`**，不能只靠 `_sendKaspaInner` 一处。
