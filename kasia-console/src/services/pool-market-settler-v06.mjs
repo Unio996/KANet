@@ -417,11 +417,12 @@ export function sampleAndStoreCommittee(marketId, endBlockHash) {
  * MUST be awaited BEFORE sampleAndStoreCommittee (which is sync + cannot do the async RPC recapture itself).
  * @returns {Promise<{recaptured:number, remaining:number}>}
  */
-export async function recaptureSideLockDaaForMarket(marketId) {
+// P2-6c α: 第二参 captureDeps 只供离线 regression case 透传给 captureSideLockDaa(fake RpcClientCtor / pruningDaaFn / rpcUrl); 生产 4 个调用方都单参 ⇒ 全默认。
+export async function recaptureSideLockDaaForMarket(marketId, captureDeps = undefined) {
   const nullBets = sqlite.prepare(
     'SELECT id, side_p2sh, side_lock_tx, stake_amount FROM pool_bettor_sides WHERE market_id = ? AND side_lock_daa IS NULL'
   ).all(marketId);
-  if (!nullBets.length) return { recaptured: 0, remaining: 0 };
+  if (!nullBets.length) return { recaptured: 0, remaining: 0, reasons: {}, anchorSources: {} };
   const { captureSideLockDaa } = await import('./trade-protocol-filter.js');
   const marketRow = sqlite.prepare('SELECT spine_p2sh, deadline_daa FROM pool_markets WHERE id = ?').get(marketId);
   const network = String(marketRow?.spine_p2sh || '').startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
@@ -430,15 +431,21 @@ export async function recaptureSideLockDaaForMarket(marketId) {
   // 内就能找到, 不用从 tip 硬走(registration 到 recapture 之间隔多久跟这条无关)。
   const upd = sqlite.prepare('UPDATE pool_bettor_sides SET side_lock_daa = ? WHERE id = ? AND side_lock_daa IS NULL');
   let recaptured = 0;
+  // P2-6c α (2026-09-06, 08-06 根因稿 §4.2③ "reason 在这里丢失"): 把叶子的 reason / anchorSource 聚成直方图带回调用方(worker 打进 tick 行, 6c-β 用它判 (a) 真实失败)。
+  //   reason 只取冒号/括号前的族名('rpc-fail: …' ⇒ 'rpc-fail', 'not-yet-finality-safe (…)' ⇒ 'not-yet-finality-safe'); 抛异常记 'throw'。
+  const reasons = {}, anchorSources = {};
+  const bump = (h, k) => { h[k] = (h[k] || 0) + 1; };
   for (const b of nullBets) {
     let cap;
     try {
-      cap = await captureSideLockDaa({ side_p2sh: b.side_p2sh, side_lock_tx: b.side_lock_tx, stake_amount: b.stake_amount, network, approxDaaHint: marketRow?.deadline_daa });
-    } catch { cap = { daa: null }; }
+      cap = await captureSideLockDaa({ side_p2sh: b.side_p2sh, side_lock_tx: b.side_lock_tx, stake_amount: b.stake_amount, network, approxDaaHint: marketRow?.deadline_daa }, captureDeps);
+    } catch { cap = { daa: null, reason: 'throw' }; }
+    bump(reasons, String(cap?.reason || 'unknown').split(/[:(]/)[0].trim());
+    if (cap?.anchorSource) bump(anchorSources, cap.anchorSource);
     if (cap && cap.daa !== null && cap.daa !== undefined) { upd.run(cap.daa, b.id); recaptured++; }
   }
   const remaining = sqlite.prepare('SELECT COUNT(*) AS c FROM pool_bettor_sides WHERE market_id = ? AND side_lock_daa IS NULL').get(marketId).c;
-  return { recaptured, remaining };
+  return { recaptured, remaining, reasons, anchorSources };
 }
 
 /**

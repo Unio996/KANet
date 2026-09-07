@@ -131,24 +131,29 @@ function _markUnrecoverableIfBeyondFloor(logicalMarket, stillNullCount) {
 const _withTimeout = (p, ms, tag) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(`${tag} timeout ${ms}ms`)), ms))]);
 const GATE_RPC_TIMEOUT_MS = 4000;
 
-export async function _readNodeSynced({ rpcFactory } = {}) {
+// G-2 (2026-09-07, 设计 v0.2 §4 G2-5/G2-6 · NWT GREEN-final · Bettor GO): 门读数【只读本机节点】KASPA_RPC_URL, 不再经 getWorkingRpc()——
+//   2026-09-06 22:5x rpc-health 回退到公网 mainnet 端点后, 门读到的是 mainnet 节点的 isSynced=true(F2/F3, jepu1 页 §3)。
+//   并核 getServerInfo().networkId === KASPA_NETWORK(实串, 缺/不等 ⇒ 'network-mismatch', fail-closed)。超时: 既有 GATE_RPC_TIMEOUT_MS=4000 包 connect/getServerInfo(设计 G2-6 核实为已存在)。
+export async function _readNodeSynced({ rpcFactory, env = process.env } = {}) {
   let rpc = null, owned = false;
+  const expectNet = env.KASPA_NETWORK || 'testnet-12';
   try {
     if (rpcFactory) {
       rpc = await rpcFactory(); owned = true;   // 测试注入: 自建自断
       await _withTimeout(rpc.connect({}), GATE_RPC_TIMEOUT_MS, 'connect');
     } else {
       // 共享客户端(2026-08-30 J2 批 1, ../lib/kaspa-rpc-shared.mjs): 门自己原本每 60 s new RpcClient = 它要治的泄漏; 现取共享实例, 不 disconnect。
-      const { getWorkingRpc } = await import('./rpc-health.js');
-      const { url } = await getWorkingRpc();
+      const url = env.KASPA_RPC_URL;
       if (!url) return { synced: false, isSynced: null, reason: 'no-rpc-url' };
       const { getSharedRpc } = await import('../lib/kaspa-rpc-shared.mjs');
-      rpc = await getSharedRpc({ url, networkId: process.env.KASPA_NETWORK || 'testnet-12' });
+      rpc = await getSharedRpc({ url, networkId: expectNet });
     }
     const info = await _withTimeout(rpc.getServerInfo(), GATE_RPC_TIMEOUT_MS, 'getServerInfo');
+    const net = info?.networkId;
+    if (net !== expectNet) return { synced: false, isSynced: null, reason: `network-mismatch(${net === undefined ? 'undefined' : String(net)}!=${expectNet})`, networkId: net };
     const v = info?.isSynced;
-    if (v === true) return { synced: true, isSynced: true, reason: 'ok' };
-    return { synced: false, isSynced: typeof v === 'boolean' ? v : null, reason: typeof v === 'boolean' ? 'not-synced' : `isSynced-unreadable(${v === undefined ? 'undefined' : String(v)})` };
+    if (v === true) return { synced: true, isSynced: true, reason: 'ok', networkId: net };
+    return { synced: false, isSynced: typeof v === 'boolean' ? v : null, reason: typeof v === 'boolean' ? 'not-synced' : `isSynced-unreadable(${v === undefined ? 'undefined' : String(v)})`, networkId: net };
   } catch (e) {
     if (rpc && !owned) { try { const { noteSharedRpcError } = await import('../lib/kaspa-rpc-shared.mjs'); await noteSharedRpcError(rpc, e); } catch {} }
     return { synced: false, isSynced: null, reason: `rpc-fail: ${e.message}` };
@@ -207,7 +212,7 @@ export async function _tick(deps = {}) {
       try { (deps.writeHeartbeat || _writeHeartbeat)(0, 0); } catch (e2) { console.warn(`[preprune-capture-worker] heartbeat write fail on seed-failed (non-fatal): ${e2.message}`); }
       return { skipped: 'seed-failed', error: e.message };
     }
-    return await (deps.runBody || _tickBody)();
+    return await (deps.runBody || _tickBody)(deps);
   } catch (e) {
     console.warn(`[preprune-capture-worker] tick error (non-fatal): ${e.message}`);
     return { error: e.message };
@@ -216,37 +221,67 @@ export async function _tick(deps = {}) {
   }
 }
 
-async function _tickBody() {
-  {
-    const { recaptureSideLockDaaForMarket } = await import('./pool-market-settler-v06.mjs');
-    const nullMarketIds = sqlite.prepare(`SELECT DISTINCT market_id FROM pool_bettor_sides WHERE side_lock_daa IS NULL`).all().map(r => r.market_id);
+// ── P2-6c α (2026-09-06, 设计 docs/2026-09-06-j2-p2-6c-preprune-worker-loop-unit-and-unrecoverable-predicate-design-v0.1.md v0.1.2 §3.3 · NWT α GREEN · Bettor 959) ──
+//   循环单位从「有 NULL 行的 shard」改为「逻辑盘」: 一条 SQL 把 NULL-shard → market_shards → pool_markets 连好并在 SQL 侧剔终态(旧形 = 每个 shard 两次点查 + JS 判);
+//   同一逻辑盘的分片在 JS 里归组, 6b 集合判一次/逻辑盘, recapture 仍按 shard 调(pool_bettor_sides.market_id 是 shard id), 不可恢复判据用该逻辑盘【全部分片】remaining 之和(旧形只看第一个分片)。
+//   TERMINAL_STATUSES 本批不动(pruned_expired_waived 入终态 = 6c-γ 另出一笔, 那是判据变更要 Owner 批)。
+//   tick 行同时打逻辑盘数与分片数(旧 scanned = 分片数; 6c 验收基线 W2 是分片口径, 两口径并列免混淆), 外加叶子 reason / anchorSource 直方图。
+//   非 bshard 盘: pool_bettor_sides.market_id 就是逻辑 id, market_shards 无行 ⇒ COALESCE 落回自身(与 _resolveLogicalMarket 同语义)。
+const _NULL_SIDE_LOGICAL_MARKETS_SQL = `
+  SELECT pm.*, s.market_id AS __shard_id
+  FROM (SELECT DISTINCT market_id FROM pool_bettor_sides WHERE side_lock_daa IS NULL) s
+  LEFT JOIN market_shards ms ON ms.shard_market_id = s.market_id
+  JOIN pool_markets pm ON pm.id = COALESCE(ms.logical_market_id, s.market_id)
+  WHERE pm.protocol_status NOT IN (${[...TERMINAL_STATUSES].map(() => '?').join(',')})
+  ORDER BY pm.id, s.market_id`;
+/** 逻辑盘 → 其有 NULL side_lock_daa 行的分片 id 列表(孤儿 shard——市场已删——被 JOIN 自然剔除, 与旧形 `if (!logicalMarket) continue` 同语义) */
+export function _listLogicalMarketsWithNullSides(db = sqlite) {
+  const rows = db.prepare(_NULL_SIDE_LOGICAL_MARKETS_SQL).all(...TERMINAL_STATUSES);
+  const byLogical = new Map();
+  for (const r of rows) {
+    const { __shard_id: shardId, ...pm } = r;
+    let g = byLogical.get(pm.id);
+    if (!g) { g = { logicalMarket: pm, shardIds: [] }; byLogical.set(pm.id, g); }
+    g.shardIds.push(shardId);
+  }
+  return [...byLogical.values()];
+}
+const _mergeHist = (into, from) => { for (const [k, v] of Object.entries(from || {})) into[k] = (into[k] || 0) + v; return into; };
+const _fmtHist = (h) => Object.entries(h).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k}:${v}`).join(',') || '-';
 
-    let scanned = 0, recaptured = 0;
-    const seenLogical = new Set();
-    for (const marketId of nullMarketIds) {
-      const logicalMarket = _resolveLogicalMarket(marketId);
-      if (!logicalMarket) continue; // 孤儿 bettor row(市场已删), 不在本 worker scope
-      if (TERMINAL_STATUSES.has(logicalMarket.protocol_status)) continue; // 非活跃, 数据丢失也不影响钱路
-      if (_hasBeenMarkedUnrecoverable(logicalMarket.id)) continue; // 已确认结构性不可达, 不重烧 RPC walk 成本
+async function _tickBody(deps = {}) {
+  {
+    const recaptureSideLockDaaForMarket = deps.recaptureSideLockDaaForMarket || (await import('./pool-market-settler-v06.mjs')).recaptureSideLockDaaForMarket;
+    const groups = stepSync('preprune.listLogical', () => _listLogicalMarketsWithNullSides(), { thresholdMs: 50 });
+
+    let scanned = 0, shards = 0, recaptured = 0;
+    const reasons = {}, anchorSources = {};
+    for (const { logicalMarket, shardIds } of groups) {
+      if (_hasBeenMarkedUnrecoverable(logicalMarket.id)) continue; // 已确认结构性不可达, 不重烧 RPC walk 成本(6b 集合, 一次/逻辑盘)
       scanned++;
-      let rc;
-      const _rt0 = Date.now();   // P2-6 观测(NWT 建议): 每次 recapture 调用记墙钟(含 await; ≥50 ms 才打), 让 ④ 判据能按起点对齐而不是靠 containment
-      try { rc = await recaptureSideLockDaaForMarket(marketId); }
-      catch (e) { const _ms = Date.now() - _rt0; if (_ms >= 50) logStep('preprune.recapture', _ms, { market: String(marketId).slice(-8), ok: 0 }); console.warn(`[preprune-capture-worker] recapture fail market=${String(marketId).slice(-8)} (non-fatal): ${e.message}`); continue; }
-      { const _ms = Date.now() - _rt0; if (_ms >= 50) logStep('preprune.recapture', _ms, { market: String(marketId).slice(-8), recaptured: rc.recaptured, remaining: rc.remaining, ok: 1 }); }
-      recaptured += rc.recaptured;
-      if (!seenLogical.has(logicalMarket.id)) {
-        seenLogical.add(logicalMarket.id);
-        _markUnrecoverableIfBeyondFloor(logicalMarket, rc.remaining);
+      let remainingTotal = 0, anyOk = false;
+      for (const marketId of shardIds) {
+        shards++;
+        let rc;
+        const _rt0 = Date.now();   // P2-6 观测(NWT 建议): 每次 recapture 调用记墙钟(含 await; ≥50 ms 才打), 让 ④ 判据能按起点对齐而不是靠 containment
+        try { rc = await recaptureSideLockDaaForMarket(marketId); }
+        catch (e) { const _ms = Date.now() - _rt0; if (_ms >= 50) logStep('preprune.recapture', _ms, { market: String(marketId).slice(-8), ok: 0 }); console.warn(`[preprune-capture-worker] recapture fail market=${String(marketId).slice(-8)} (non-fatal): ${e.message}`); _mergeHist(reasons, { throw: 1 }); continue; }
+        { const _ms = Date.now() - _rt0; if (_ms >= 50) logStep('preprune.recapture', _ms, { market: String(marketId).slice(-8), recaptured: rc.recaptured, remaining: rc.remaining, ok: 1, reasons: _fmtHist(rc.reasons || {}) }); }
+        recaptured += rc.recaptured;
+        remainingTotal += Number(rc.remaining) || 0;
+        anyOk = true;
+        _mergeHist(reasons, rc.reasons); _mergeHist(anchorSources, rc.anchorSources);
       }
+      // 只在该逻辑盘至少一个分片 recapture 正常返回时判不可恢复(全部抛异常 ⇒ remaining 未知, 不判; 旧形同——抛就 continue)
+      if (anyOk) _markUnrecoverableIfBeyondFloor(logicalMarket, remainingTotal);
     }
-    _writeHeartbeat(scanned, recaptured);
-    if (scanned > 0) console.log(`[preprune-capture-worker] tick: scanned=${scanned} market(s) w/ NULL side_lock_daa, recaptured=${recaptured}`);
-    return { scanned, recaptured };
+    _writeHeartbeat(shards, recaptured);   // heartbeat 列名 last_scanned_null_rows 一直记的是分片口径, 保持(monitor 只看 stale)
+    if (scanned > 0) console.log(`[preprune-capture-worker] tick: scanned=${scanned} logical market(s) shards=${shards} w/ NULL side_lock_daa, recaptured=${recaptured} reasons={${_fmtHist(reasons)}} anchors={${_fmtHist(anchorSources)}}`);
+    return { scanned, shards, recaptured, reasons, anchorSources };
   }
 }
 
-export { _hasBeenMarkedUnrecoverable, _markUnrecoverableIfBeyondFloor, _coverageFloor, _resolveLogicalMarket, _writeHeartbeat, _seedUnrecoverableSet, _resetUnrecoverableSet, _unrecoverableSetSize };
+export { _hasBeenMarkedUnrecoverable, _markUnrecoverableIfBeyondFloor, _coverageFloor, _resolveLogicalMarket, _writeHeartbeat, _seedUnrecoverableSet, _resetUnrecoverableSet, _unrecoverableSetSize, _tickBody, TERMINAL_STATUSES };
 
 export function startPrepruneCaptureWorker() {
   if (_interval) return;

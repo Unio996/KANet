@@ -1193,14 +1193,36 @@ const _captureUnreachableTx = new Set();        // side_lock_tx
 let _captureGateSkip = { n: 0, lastLogAt: 0, lastReason: '' };
 let _pruningCache = { ts: 0, daa: null };
 const _defaultIsNodeSynced = async () => (await import('./preprune-capture-worker.mjs')).isNodeSyncedCached();
+// ── P2-6c α (2026-09-06, 设计 docs/2026-09-06-j2-p2-6c-preprune-worker-loop-unit-and-unrecoverable-predicate-design-v0.1.md v0.1.2 §3.4 · NWT α GREEN · Bettor 959) ──
+//   纯成本短路, 不改任何状态(不标不可恢复)。W2 基线: preprune worker recapture 169 次 Σ811 s/15 min, aukqt-s1 单次 297.7 s——
+//   全是"无锚点 ⇒ 从 tip 沿 selectedParent 反走 MAX_STEPS=10,000 步后 no-block-hash 放弃"。
+//   α-1: spc_daa_index 里 daa ≥ hint 的最近块**不再要求 coverage 区间命中**(coverage 命不中正是 aukqt 走 tip 的原因, 而它对向下回走的正确性无关),
+//        条件 anchor.daa − hint ≤ CAPTURE_ANCHOR_MAX_AHEAD_DAA(10,000 = 每步最小降幅 1 × 步数上限, **保证**走得到 hint);
+//        锚点已剪 ⇒ 第 0 步 cannot find header ⇒ 既有 anchor-pruned 逻辑(一次真实取块失败)。
+//   α-2: 无任何锚点且 hint < tip − CAPTURE_WALK_REACH_MAX_DAA − CAPTURE_WALK_SLACK_DAA ⇒ 'walk-futile' 不走(界: 每步降幅 ≤ mergeset_size_limit 248 @TN12,
+//        10,000 步最多回退 2,480,000 DAA ⇒ 到不了 hint 以下; 只省必败的走, 不标, 下 tick 再来)。
+//   结果多带 anchorSource ∈ {tx-log, index-coverage, index-nocoverage, tip, none}(观测: 6c 验收看 index 命中率)。
+export const CAPTURE_WALK_MAX_STEPS = 10000;
+export const CAPTURE_ANCHOR_MAX_AHEAD_DAA = 10_000;
+export const CAPTURE_WALK_REACH_MAX_DAA = CAPTURE_WALK_MAX_STEPS * 248;   // 2,480,000 (TN12 mergeset_size_limit 248 = 每步 DAA 降幅上界)
+export const CAPTURE_WALK_SLACK_DAA = 1000;
 function _indexAnchor(approxDaaHint) {
   if (approxDaaHint == null || !Number.isFinite(Number(approxDaaHint))) return null;
+  const hint = Number(approxDaaHint);
   try {
-    const cov = sqlite.prepare('SELECT block_hash, daa_score FROM spc_daa_index WHERE daa_score >= ? ORDER BY daa_score ASC LIMIT 1').get(Number(approxDaaHint));
-    const covRange = sqlite.prepare('SELECT 1 FROM spc_daa_index_coverage WHERE start_daa <= ? AND end_daa >= ? LIMIT 1').get(Number(approxDaaHint), Number(approxDaaHint));
-    if (cov?.block_hash && covRange) return { hash: cov.block_hash, daa: Number(cov.daa_score) };
+    const cov = sqlite.prepare('SELECT block_hash, daa_score FROM spc_daa_index WHERE daa_score >= ? ORDER BY daa_score ASC LIMIT 1').get(hint);
+    if (!cov?.block_hash) return null;
+    const covRange = sqlite.prepare('SELECT 1 FROM spc_daa_index_coverage WHERE start_daa <= ? AND end_daa >= ? LIMIT 1').get(hint, hint);
+    if (covRange) return { hash: cov.block_hash, daa: Number(cov.daa_score), source: 'index-coverage' };
+    // α-1: 无 coverage 命中也可作锚点, 只要从它回走 MAX_STEPS 步保证覆盖到 hint
+    if (Number(cov.daa_score) - hint <= CAPTURE_ANCHOR_MAX_AHEAD_DAA) return { hash: cov.block_hash, daa: Number(cov.daa_score), source: 'index-nocoverage' };
   } catch { /* spc_daa_index tables may not exist pre-v183 DBs */ }
   return null;
+}
+/** α-2 判据(纯函数, 供测试): tip 回溯 MAX_STEPS 步能否到达 hint 以下 */
+export function _walkIsFutile(hint, tipDaa) {
+  if (hint == null || tipDaa == null || !Number.isFinite(Number(hint)) || !Number.isFinite(Number(tipDaa))) return false;
+  return Number(hint) < Number(tipDaa) - CAPTURE_WALK_REACH_MAX_DAA - CAPTURE_WALK_SLACK_DAA;
 }
 function _noteGateSkip(gate) {
   _captureGateSkip.n++; _captureGateSkip.lastReason = gate?.reason || '?';
@@ -1275,16 +1297,16 @@ export async function captureSideLockDaa({ side_p2sh, side_lock_tx, stake_amount
   // 实测 5839 步(≈11600 DAA, ~2 DAA/步实测速率)——bet 通常在 deadline 前"一段时间"下注, 具体多久
   // 取决于市场生命周期长度。10000 步留出安全余量(约两倍实测距离), 覆盖典型验证盘/短生命周期市场;
   // 极端长生命周期市场若 bet 下得早、deadline 拖得晚, 仍可能落在此界外(fail-loud, 不是无界搜索)。
-  const MAX_STEPS = 10000;
+  const MAX_STEPS = CAPTURE_WALK_MAX_STEPS;
+  let anchorSource = row?.block_hash ? 'tx-log' : (anchor ? anchor.source : 'tip');
   async function _resolveStartCursor() {
-    if (approxDaaHint != null && Number.isFinite(Number(approxDaaHint))) {
-      try {
-        const cov = sqlite.prepare('SELECT block_hash FROM spc_daa_index WHERE daa_score >= ? ORDER BY daa_score ASC LIMIT 1').get(Number(approxDaaHint));
-        const covRange = sqlite.prepare('SELECT 1 FROM spc_daa_index_coverage WHERE start_daa <= ? AND end_daa >= ? LIMIT 1').get(Number(approxDaaHint), Number(approxDaaHint));
-        if (cov?.block_hash && covRange) return cov.block_hash;
-      } catch { /* spc_daa_index tables may not exist pre-v183 DBs — fall through to tip */ }
-    }
+    // α-1: 锚点(coverage 命中或放宽形)已在函数开头算好(`anchor`), 同一个对象也用于第 0 步 cannot-find-header 的 anchor-pruned 判定
+    if (anchor?.hash) return anchor.hash;
     const info = await rpc.getBlockDagInfo();
+    // α-2: 无任何锚点时, 先判 tip 回溯能不能到 hint 以下; 到不了就不走(不标, 下 tick 再来; 索引补上后会走 α-1)
+    let tipDaa = null;
+    try { tipDaa = Number(BigInt(info?.virtualDaaScore)); } catch { tipDaa = null; }
+    if (_walkIsFutile(approxDaaHint, tipDaa)) { scanReason = 'walk-futile'; anchorSource = 'none'; return null; }
     return info?.sink || null;
   }
   async function _scanBackwardForTx() {
@@ -1334,7 +1356,7 @@ export async function captureSideLockDaa({ side_p2sh, side_lock_tx, stake_amount
       blk = await _scanBackwardForTx();
       // reason 字符串保持 'no-block-hash'(向后兼容既有调用方/测试的精确匹配, 语义仍是"无法解出
       // block hash"——只是现在多了一条 fallback 路径没找到, 不是历史那种"根本没试第二条路")。
-      if (!blk) { await _release(); return { daa: null, reason: scanReason, ...(scanReason === 'anchor-pruned' ? { skipped: 'anchor-pruned' } : {}) }; }
+      if (!blk) { await _release(); return { daa: null, reason: scanReason, anchorSource, ...(scanReason === 'anchor-pruned' || scanReason === 'walk-futile' ? { skipped: scanReason } : {}) }; }
     }
     // 🔴 finality 门数据源(fetch while still connected — 自建客户端时 `finally` 里断连, 共享客户端不断): current tip,
     // compared against the resolved block's daaScore after the connection closes.
@@ -1352,14 +1374,14 @@ export async function captureSideLockDaa({ side_p2sh, side_lock_tx, stake_amount
     const rawDaa = blk?.header?.daaScore;
     if (rawDaa !== undefined && rawDaa !== null) daa = Number(BigInt(rawDaa));  // daa ~55M fits Number safely
   } catch { daa = null; }
-  if (daa === null) return { daa: null, reason: 'daa-unresolved' };
+  if (daa === null) return { daa: null, reason: 'daa-unresolved', anchorSource };
   // 🔴 finality 门(2026-07-17,治本卡①第一条+K-17 发现 A 同一个洞): 只有 accepting-block 已过
   // CAPTURE_FINALITY_DEPTH(50)才写值——finality 前的值可能被 reorg 换成别的规范链, 写进去比留
   // NULL 更危险(NULL 至少诚实"不知道", 错值带假自信直接过 C1 guard)。
   if (tipDaaScore !== null && (tipDaaScore - daa) < CAPTURE_FINALITY_DEPTH) {
-    return { daa: null, reason: `not-yet-finality-safe (tip=${tipDaaScore}, block=${daa}, depth=${tipDaaScore - daa} < ${CAPTURE_FINALITY_DEPTH})` };
+    return { daa: null, reason: `not-yet-finality-safe (tip=${tipDaaScore}, block=${daa}, depth=${tipDaaScore - daa} < ${CAPTURE_FINALITY_DEPTH})`, anchorSource };
   }
-  return { daa, reason: 'ok' };
+  return { daa, reason: 'ok', anchorSource };
 }
 
 async function handlePoolBetRegistered(msg) {
