@@ -1,6 +1,6 @@
 # G-1 + G-2 · 钱路"节点可信"闸（console `sendCommandAsync` + relay submit 包装层）+ console RPC 本机自愈 · 设计 v0.1（不写码）
 
-> **Status**: DRAFT-FOR-REVIEW · J2 · 2026-09-07T07:3xZ（`date -u`）· Bettor 派工 ledger 970/971/973/974（范围裁定）+ 986（开工）· 交 **NWT 红队** → Bettor → 🔴 **钱路改动 ⇒ Owner 批**后才落码。
+> **Status**: DRAFT-FOR-REVIEW · **v0.1.1**（2026-09-07T07:4xZ · Bettor 拍 S2：sink 时间戳落后 ≤ 900 s 为硬判据，IBD 状态只作观测字段；lint 规则改 R-REALCHAIN 同族）· J2 · 首稿 07:3xZ（`date -u`）· Bettor 派工 ledger 970/971/973/974（范围裁定）+ 986（开工）· 交 **NWT 红队** → Bettor → 🔴 **钱路改动 ⇒ Owner 批**后才落码。
 > 输入：ledger 967–974（fail-open 审计 → jepu1 写者 → 门外钱路清单 → 反例勘误）、NWT `docs/2026-09-07-NWT-sendcommand-callers-table-v0.1.md`（§A/§B/§C + §D 勘误）、J2 `scratch/_j2_jepu1_write_audit_2026-09-06T23-56Z.md`、`scratch/_j2_sendcommand_table_4checks_2026-09-07T00-16Z.md`（v2）、D-c/D-d 落地实况（ledger 980–986）、memory `reference-kaspad-issynced-flips-true-inside-nearly-synced-window-before-last-ibd-rounds-end`。
 > 本稿只裁"改什么、判据是什么、闸放哪、怎么验"；行号随 HEAD `a3a3a6da`（2026-09-07T07:2xZ）。
 
@@ -44,14 +44,16 @@ Bettor 973 三候选：(a) sink 头时间戳落后 ≤ L；(b) "非 IBD 中"；(
 | R4 中继爬行（D-c 480 触发前，0.75 bps，sink 落后 0→500 s 线性涨） | **L=120 ⇒ 每 12.5 min 周期只有 ≈2 min 可用（≈16% 占空比）**——比现状差 | 放行（IBD 空闲） | 爬行 ≈7 DAA/10 s vs 同步 ≈100 ⇒ **挡**（若下界 ≥50） | 🔴 这是 (a) 与 D-c 的冲突点：D-c 设计 Q1 选 480 是为了让 isSynced 跨触发保持 true；(a) 取 120 会把钱路占空比压到 16% |
 | R5 同步态正常跟随（10 bps，lag < 30 s） | 放行 | 放行 | 放行 | — |
 
-**裁定建议（交 NWT/Bettor/Owner）**：
-- **S2 主判据 = (b) "IBD-quiet"**，来源 = kaspad **canonical 日志行**（D-c MUST-② 已保证自触发路径也打）：读 `$KASPAD_LOG`（默认 `D:\kaspa-tn12-data\kaspad-stdout.log`）尾部，最后一条 `IBD started with peer`/`IBD with peer … completed successfully|with error` 中若 started 在后 ⇒ IBD 中 ⇒ S2=false；无任何行 ⇒ 视为 quiet（节点刚起且未触发 IBD 时 isSynced 会为 false 兜底）。同主机 console/relay 都读得到；文件轮转（重启归档 + 新文件）读当前文件即对；kaspad 崩溃留下孤 started ⇒ fail-closed hold 到下一条 completed（LOUD 行）。**这是 RPC 没有 IBD 标志下唯一精确的读法**，且用的正是全队已在 grep 的行。
-- **(a) 作副判据、可配、默认宽**：`NODE_TRUST_MAX_SINK_LAG_S`，默认 **600**（略低于 661，只做"节点判据松动时的保险"，不改变 D-c 480 周期的占空比）；影子期收集 lag 分布后再议收紧（120 与 D-c 480 冲突见 R4，若 Owner 要 120 就得同时把 D-c 阈值压到 ≈100 并接受每 ≈3 min 一轮小 IBD——另出一笔）。
-- **(c) 不作判据，只记观测**：判别度 2×、与同步率纠缠。
+**裁定（Bettor 2026-09-07T07:4xZ，v0.1.1）**：
+- **S2 = 本机 sink 块头时间戳落后 ≤ 900 s**（= D-c 阈 480 + 轮长上界 ≈240 + 余量），`NODE_TRUST_MAX_SINK_LAG_S` 默认 **900**。读法：`getBlockDagInfo().sink` → `getBlock(sink).header.timestamp`，与本机墙钟差；读不到 ⇒ false。
+- **(b) "IBD 中"不作硬判据**（Bettor 理由：D-c 让小轮 IBD 每 ≈9 min 一次、每次 ≈4 min，IBD 中即 hold 会把钱路占空比压到 ≈55%；D-c 轮内链视图最多陈 ≈510 s，不是 23:14Z 那种 20 min 头相位的形）。IBD 状态**只作日志观测字段** `ibdQuiet`（可从 kaspad canonical 行读，读不到就记 `?`，不影响判定）。
+- **(c) 不作判据、不记**：判别度 2×、与同步率纠缠。
+- 🔵 **如实标注**：节点自身 `isSynced` 已含 "sink_ts + 661 s"（F7），900 > 661 ⇒ **isSynced=true 时 S2 永不单独绑定**；S2 的作用是"同一量由我们自己算 + 余量"的双保险（防上游判据改动/`has_peers` 分支），**不是新的拦截面**。本闸真正新增的拦截面 = `networkId` 核（F2/F3）、覆盖面补全（F5/F6）、fail-closed（F1）。表 2.2 的 R2/R3（体相位尾巴、lag < 661）在此裁定下**放行**——接受的风险 = 链视图 ≤ 661 s 陈；R1（20 min 头相位）由 isSynced=false + 覆盖面挡。
+- R4 那行**保留为反例记录**：(a) 取 120 s 会与 D-c 480 冲突把占空比压到 ≈16%——若 Owner 要更紧，必须连 D-c 阈一起议（§7 Q2）。
 - 三元组 + S2 全部**每 5 s 缓存**（同 `isNodeSyncedCached` 形，TTL 可配），一个 tick 内不重复读。
 
 ### 2.3 拒绝码与日志（逐字，供 grep）
-- console：`sendCommandAsync` hold ⇒ `Promise.reject(Object.assign(new Error('NODE_UNTRUSTED'), { code: 'NODE_UNTRUSTED', reason, gate }))`，`reason ∈ {network-mismatch, not-synced, ibd-running, sink-lag, rpc-fail, unreadable}`；日志 **`[node-trust] HOLD type=<type> origin=<origin> relay=<id8> reason=<reason> networkId=<x> isSynced=<b> ibdQuiet=<b> sinkLag=<s>`**；放行不打（影子模式打 `[node-trust] WOULD-HOLD …` 同字段）。
+- console：`sendCommandAsync` hold ⇒ `Promise.reject(Object.assign(new Error('NODE_UNTRUSTED'), { code: 'NODE_UNTRUSTED', reason, gate }))`，`reason ∈ {network-mismatch, not-synced, sink-lag, rpc-fail, unreadable}`（`ibdQuiet` 只是字段，不是 reason）；日志 **`[node-trust] HOLD type=<type> origin=<origin> relay=<id8> reason=<reason> networkId=<x> isSynced=<b> ibdQuiet=<b> sinkLag=<s>`**；放行不打（影子模式打 `[node-trust] WOULD-HOLD …` 同字段）。
 - relay：`assertNodeTrusted` 抛 `Error('NODE_UNTRUSTED: <reason>')`，relay 日志 **`node-trust HOLD submit reason=<reason> …`**，经 IPC 回 `{ok:false, error:'NODE_UNTRUSTED: …', code:'NODE_UNTRUSTED'}`；B 类 API 拿到 5xx 时**带这个 code**（NWT §C.3 要的"明确拒绝码而非静默超时"）。
 - 计数：`[node-trust] stats holds=<n> byReason={…} byType={…} duty=<放行比>`，每 10 min 一行 + `sharedRpcStats()` 旁的 `nodeTrustStats()` 供 /api 读。
 
@@ -67,11 +69,11 @@ Bettor 973 三候选：(a) sink 头时间戳落后 ≤ L；(b) "非 IBD 中"；(
 - 模式开关：`NODE_TRUST_GATE=off|shadow|enforce`（代码默认 `off`——库/测试零行为差；`kanet.env` 先 `shadow` 一天再 `enforce`，同 6c-β dry-run 惯例）。
 
 ### 3.2 第二层：relay `submitTransaction` 包装层
-- 新 `kasia-relay/src/lib/node-trust.mjs`：`assertNodeTrusted(rpc, {cacheMs=5000})` 读 `getServerInfo()`（networkId/isSynced）+ IBD-quiet（日志尾）+ sink lag（`getBlockDagInfo` + `getBlock(sink)`），同 2.1/2.2 规则；relay 侧同样 `NODE_TRUST_GATE` 三态。
+- 新 `kasia-relay/src/lib/node-trust.mjs`：`assertNodeTrusted(rpc, {cacheMs=5000})` 读 `getServerInfo()`（networkId/isSynced）+ sink lag（`getBlockDagInfo` + `getBlock(sink)`，≤ 900 s）；`ibdQuiet` 观测字段可选（日志尾），同 2.1/2.2 规则；relay 侧同样 `NODE_TRUST_GATE` 三态。
 - **挂载点 A（一处，盖 p2sh 29 处）**：`rpc-listener.mjs:_connect` 建好 `_rpc` 后**实例级**包装：`const orig = _rpc.submitTransaction.bind(_rpc); _rpc.submitTransaction = async (req) => { await assertNodeTrusted(_rpc); return orig(req); }`——p2sh.mjs 全部 `rpc.submitTransaction(`（JS 调用）经此；`_scheduleReconnect` 重建实例时同样包（同一函数 `armSubmitGate(_rpc)`）。
-- **挂载点 B（3 行替换，F8 所迫）**：`pending.submit(rpc)` 是 wasm 内部直呼，包装拦不住 ⇒ `transaction.mjs:226`、`utxo-split.mjs:125/:275` 三处改为 `await submitPending(pending, rpc)`（helper：`await assertNodeTrusted(rpc); return pending.submit(rpc)`）。**不是逐点改判据，是逐点改调用形**；lint 规则 `R-RELAY-PENDING-SUBMIT-BARE`：禁止裸 `pending.submit(`/`.submit(rpc)`，只准经 helper（防第 4 处回来）。
+- **挂载点 B（3 行替换，F8 所迫）**：`pending.submit(rpc)` 是 wasm 内部直呼，包装拦不住 ⇒ `transaction.mjs:226`、`utxo-split.mjs:125/:275` 三处改为 `await submitPending(pending, rpc)`（helper：`await assertNodeTrusted(rpc); return pending.submit(rpc)`）。**不是逐点改判据，是逐点改调用形**；lint 规则 **`R-REALCHAIN-SUBMIT-VIA-GATE`**（与 `R-REALCHAIN-SKIP-BATCH` 同族，`scripts/lint-kanet.mjs`）：`kasia-relay/src/**` 内禁止裸 `pending.submit(`/`.submit(rpc)` 与直接 `rpc.submitTransaction(`（白名单只有 `node-trust.mjs` 与 `rpc-listener.mjs` 的包装点），只准经 helper（防第 4 处回来）。
 - `transaction.mjs:150-151` 原检查**保留**（双保险，同一 reason 文案对齐为 `NODE_UNTRUSTED: not-synced`）。
-- relay 侧读日志文件：路径由 `KASPAD_LOG` env 传（console 起 relay 子进程时透传），缺省则 S2 只用 (a)+二元组并 LOUD 一次"IBD-quiet 不可用"。
+- relay 侧 `ibdQuiet` 观测字段读日志文件：路径由 `KASPAD_LOG` env 传（console 起 relay 子进程时透传），缺省/读不到 ⇒ 字段记 `?`，**不影响判定**（判定只用三元组）。
 
 ## 4. G-2 · console RPC 本机自愈
 | # | 改什么 | 在哪 | 为什么（事实） |
@@ -93,14 +95,14 @@ G-2 落地后 runbook ⑤-①b（每次 kaspad 重启紧跟 console 重启）应
 - "第二批待核"（5–9 族 + scavenger/valve/protector）不在本稿；它们若经 `sendCommandAsync` 自动被 3.1 覆盖，若直连 relay RPC 则被 3.2 覆盖——本稿 §7 列出需核的例外：**任何不经这两层的链上写路径**。
 
 ## 6. 验收（影子 → 生效）
-1. **单测（离线）**：type 分档纯函数（全 COMMAND_TYPES 枚举，未列入 ⇒ hold）；`T(node)` 判定纯函数（输入 networkId/isSynced/ibdQuiet/sinkLag/rpc-fail，表 2.2 R1–R5 作 fixture，用今晚日志片段 `2026-09-07 10:03:20…` 等作 IBD-quiet 解析 fixture，含"孤 started"与"文件不存在"两例）；`kaspa-rpc-shared` 重建（假 Ctor 计构造次数：3 次 not-connected 后第 4 次 `getSharedRpc` 新建实例，60 s 内不重建）；`rpc-health` 对 mainnet networkId 的 discovered 节点 REJECT；relay `armSubmitGate` 对假 RpcClient 的 `submitTransaction` 与 `submitPending` 各挡一次并透传一次。
+1. **单测（离线）**：type 分档纯函数（全 COMMAND_TYPES 枚举，未列入 ⇒ hold）；`T(node)` 判定纯函数（输入 networkId/isSynced/sinkLag/rpc-fail，表 2.2 R1–R5 作 fixture：R1 hold(not-synced)、R2/R3 pass、R4 pass、R5 pass、networkId=mainnet hold、lag 901 hold、任一读不到 hold）；`ibdQuiet` 解析器单测（今晚日志片段 `2026-09-07 10:03:20…` 等，含"孤 started"与"文件不存在" ⇒ `?`）；`kaspa-rpc-shared` 重建（假 Ctor 计构造次数：3 次 not-connected 后第 4 次 `getSharedRpc` 新建实例，60 s 内不重建）；`rpc-health` 对 mainnet networkId 的 discovered 节点 REJECT；relay `armSubmitGate` 对假 RpcClient 的 `submitTransaction` 与 `submitPending` 各挡一次并透传一次。
 2. **影子窗（`NODE_TRUST_GATE=shadow`，≥ 24 h，含 ≥ 2 次 kaspad 重启/自触发周期）**：统计 `WOULD-HOLD` 按 reason/type 的计数与占空比；预期：`ibd-running` 只在 `IBD started…completed` 区间内出现；`network-mismatch` = 0（G2-1 后）；`rpc-fail` 出现即对照 G2-3 的 `REBUILD` 行是否在 ≤ 3 min 内跟上。任何 WOULD-HOLD 落在 R5（正常同步态）⇒ 判据误伤，回 NWT。
 3. **生效（Owner 批）**：`enforce`；一次计划内 kaspad 重启做对照：期望 (i) ③ 门零 `rpc-fail` 放行行、(ii) console `BACK-TO-LOCAL` ≤ 3 min、(iii) 重启窗内 `[node-trust] HOLD` 计数 > 0 且 `kaspa_tx_log` 无窗内新 txid（= 没有 23:14:19Z 形状）、(iv) 恢复后 HOLD 归零、门外 cron（A1 再平衡）首次 tick 成功。
 4. **回滚字符串**：`NODE_TRUST_GATE=off` 一行 env 即回；relay 侧包装无状态。
 
 ## 7. 待核 / 交 NWT 的开放点
-- (Q1) S2 取日志行的可用性：console 与 relay 进程对 `D:\kaspa-tn12-data\kaspad-stdout.log` 的读权限与轮转时机（runbook 归档时刻 = 新进程起前）——需 NWT 核一次实际文件权限；备选 = kaspad 把 IBD 状态写一个副文件（要改 kaspad，v0.1 不推）。
-- (Q2) (a) 默认 600 与 D-c 480 的关系：Owner 若要更紧，需连 D-c 阈值一起议（R4）。
+- (Q1) `ibdQuiet` 观测字段读 `D:\kaspa-tn12-data\kaspad-stdout.log` 的权限与轮转时机（非阻塞：读不到记 `?`）——NWT 顺手核一次即可。
+- (Q2) **S2 随 D-c 阈值联动（常设规则）**：`S2 上界 = D-c 阈 + 轮长上界 + 120 s`（今 480 + 240 + 120 = 840 ⇒ 取整 900）；以后 D-c 阈调，S2 随动，两者在同一 env 段落里相邻声明并互引注释。Owner 若要比 661 更紧（R4 的 120 s 形），必须连 D-c 阈一起议。
 - (Q3) 手续费级 `send_*`/`handshake` 是否 hold：本稿 hold（链上 tx 同样会丢）；若 Bettor 认为协议消息延迟代价更高，可降为 PASS + 只记数。
 - (Q4) "第二批待核"里是否有**不经 `sendCommandAsync` 也不经 relay `_rpc`** 的链上写（例：console 直连公网 RPC 的旧路径）——若有，本闸盖不到，须列入。
 - (Q5) G2-3 重建的 wasm 内存代价上界与 4 GiB 顶（memory `reference-console-wasm-linear-memory-4gib-cap…`）：60 s 限频下每天 ≤ 1440 次 × 18 KB ≈ 26 MB 上界，可接受但要在 `sharedRpcStats` 里可见。
