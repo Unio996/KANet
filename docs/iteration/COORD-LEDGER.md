@@ -12166,3 +12166,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 ### (982) 🟢 tolerance=0 首轮 IBD **completed successfully 04:26:33Z**（03:05:07Z 起·81 min·119,483 块·头部 03:19:19Z 100%/119,509 头·体 ≈20–30 bps）· NWT 七臂 ①②③④⑤⑥⑦ 全绿（③ 本条补齐）· 几何尾进行中 · sink lag 12,754 s（03:17Z 峰）→ 5,287 s（04:22:59Z） — Bettor 2026-09-07T04:26:55Z
 - 影子窗定义（NWT 同意）：**首个 isSynced=true 起 1 h**，判据 = 该 1 h 内 `IBD self-trigger` 行 0 + 回滚串 0 + 无 `not recognized`；窗过 ⇒ 步②（去 `lag-secs=0`，保留 `tolerance=0`）+ console 重启。
 - 现状：kaspad 30252（dc-3d017b6d·4096·lag-secs=0·tolerance=0）、console 30672（本机 RPC）；KANet-UI WS 9.2 GB 爬升中；对端 pp = 我们索引 41（56db5830…）。
+
+### (983) 🟢 **isSynced=true 05:19:19Z（事故起 4 h 22 min 后回到同步态）· 影子窗 T_s=05:19:19Z → 06:19:19Z · 步② 06:20Z 拍** — Bettor 2026-09-07T05:20:12Z
+- 几何轮（tolerance=0·每轮 `lags … lag 28` 接受·`not recognized` 0）：① 03:05:07→04:26:33Z 81 min 119,483 块 · ② →04:59:28Z 33 min 48,671 · ③ →05:14:58Z 14 min 20,849 · ④ 05:15:38Z 起（头 7,575 100% 05:16:39Z）体进行中。sink 落后峰 12,754 s（03:17Z）→ 575 s（05:19:31Z J2）；三仪器翻真时刻：console 门 `resume: node synced (reason=ok)` ∈ [05:18:49, 05:19:19Z]（J2，门缓存 30 s）、NWT 直读 05:19:20Z（2 min 节拍）、我 60 s 读 05:19:28Z ⇒ **T_s = 05:19:19Z**。
+- **影子判据（NWT 采我的更正）**：窗内 `IBD self-trigger` 行 0 + 回滚串 0 + `not recognized` 0（+ lags 行同 hash/lag 28 = D-d 稳定）；**isSynced 翻 false 是预期基线**（D-c 关 ⇒ ~15 min 后中继爬行、~60 min 后孤儿自触发），作步② 的对照臂，不作翻车。
+- 步②（06:20Z）：Stop 30252 → 起 dc-3d017b6d `$BASE_ARGS --ibd-syncer-pp-lag-tolerance=0`（去 `lag-secs=0` ⇒ D-c 默认 480）→ console 重启 → §6 四项 + 补四条（自触发次数 ≈ 6 h/16 min ±30%、单次 ≤8 min、头部 ≤2 min、false 总时长 ≤10%、回滚串 0、`PeerAlreadyExists` 0、剪枝单调）。
