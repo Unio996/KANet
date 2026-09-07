@@ -31,3 +31,12 @@ Q1 采 (d) 后不需要。Q2 600 可留作保险，900 无意义。Q3 手续费�
 2. **S2 保留意见**：保留，但 §7 Q2 的随动规则"S2 上界 = D-c 阈 + 轮长上界 + 120 s"要写成**不变量**：`S2_L ≥ isSynced 判据 661` 时它只是保险；一旦有人把 isSynced 判据或 D-c 阈改到让 `S2_L < 661`，它就变成真拦截面且与 D-c 周期互斥——那次改动必须重跑 R1–R5 表。**R2/R3 放行 = 接受 ≤661 s 陈视图下的 submit**，这是钱路上的明确风险接受，须以 Owner 决策一句话入 DECISIONS（不能只在设计稿 §7）。
 3. **`ibdQuiet` 观测字段旁请并列记 `hdrMinusBlk`**（同一次 `getBlockDagInfo`，零成本）：影子期用它统计"若采 (d) 会多 hold 多少笔、落在 R2/R3 的有几笔"——让 Owner 用数字而不是占空比估计拍板。
 4. D-c 观测（J2 报）：非 syncer peer 的 `not eligible` 通知在每轮完成后重置（每 ≈9 min 3 行 ≈ 480 行/天）——与 D-c 设计 §6"一次性"措辞不符。**记 SHOULD-低**（D-c 后续）：改为每 peer 每小时一次或只在 lag ≥ 阈时打；不阻塞 G-1。
+
+## v0.2 复审（J2 commit 1e19e95e · 2026-09-07T08:0xZ）— **GREEN-final（设计）** → Owner 批
+- MUST-1 ✓ §3.2 挂载点 B 列 4 处（含 `p2sh.mjs:306`）；lint `R-REALCHAIN-SUBMIT-VIA-GATE` 要求对现有 4+29 处全部命中作 fixture。
+- MUST-2 ✓ §2.1 `T_read = networkId ∧ isSynced`、`T_write = T_read ∧ (headerCount − blockCount ≤ H=50)`；§2.2 裁定段写明"任何 ≥661 的 lag 阈恒过"、(d) 列用直读 0/106,200/2,971/7,092/0、写类 hold ≈43% 如实；`ibdQuiet` 撤、`hdrMinusBlk` 原值进日志；900 撤回（ledger 988）。
+- MUST-3 ✓ §3.1 分档返回 `class ∈ {CHAIN_WRITE, READ}`，动作 = `class===CHAIN_WRITE ∧ T_write===false ⇒ hold`（非无条件）；未列入 ⇒ CHAIN_WRITE；§6.1 单测枚举 `COMMAND_TYPES` 全量、未显式分类 ⇒ fail。
+- MUST-4 ✓ G2-2 顺序固定（网络过滤 → 可达 → 数据核实串 `testnet-12` ∧ isSynced → 才缓存，失败不缓存 + REJECT）；G2-3 触发点 = rpc-health `checkLocal` 自己的失败路径（≥3 次含超时、限频 60 s），业务侧同函数，硬上限 `NODE_TRUST_REBUILD_MAX`。
+- SHOULD ✓ `[ibd-gate] skip streak` 每 10 min；实串 fixture；影子统计加 `round` 维度。Q3 hold；Q4 落码前补扫 scratch/ 与根 launcher（J2 承诺）；Q5 硬上限。
+- 残余注记（非阻塞）：H=50 的下侧裕量——中继态 `Processed N blocks and N headers` 头体同到，hdr−blk 应恒 0；若影子期观测到 0<hdr−blk<50 的中继态样本，记录其分布再定 H，不必先改。轮尾最后 ≤50 个 body 时 T_write 会提前为真，量级可忽略。
+- 落码顺序建议：G-2（自愈 + ③ 门 fail-closed）先于 G-1 enforce；G-1 先 `shadow` ≥24 h 含 ≥2 次自触发周期 + 1 次 kaspad 重启。钱路 ⇒ Owner 批后落码；落码补丁我逐 hunk。
