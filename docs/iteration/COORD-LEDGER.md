@@ -12274,3 +12274,5 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - 评估 v0.2 合并点：波 1 前置加 LOCAL_ONLY+G-2；波 2 前置加"两处违反修 + submit 对账器 + 再平衡重设计 + 密钥分离"；费用节按 J2 真实 mass 重算。
 
 ### (1002) 评估 v0.2 追加（J2 ②③④ + NWT 清单合并）：**费用重算——再平衡 45,994 grams ⇒ 0.046 KAS/笔、12–39 KAS/天（主导项·不否决·需重设计）；TN12 fee 5.1M sompi ÷ 46k grams ≈110 sompi/gram = relay 已按主网费率付，NWT 1001 的 ≈5 KAS/笔与我 v0.1 的 0.004 都撤** · v2.0.1 删 TESTNET12_PARAMS、P2P 协议 10（toc.1 exe 不能连主网）、tx v1 wire 不变、OpZk 同值 + Groth16 VK 计量 · 主网节点 = 上游 v2.0.1 不带 D-b/c/d · 本机并跑不可行（磁盘/内存）⇒ 波 0 机器 = S-2 第二台机 · 最大工程量 = silverscript v1-rc1 迁移 42 .sil — Bettor 2026-09-07T13:48:46Z
+
+### (1003) J2 ① 代码 TN12 绑定分类进评估 §G：A 配置化 ≈132（默认值改 fail-fast）· **B 地址前缀硬判 ≈24 = 结构性风险（网络从地址串推、翻 env 修不了）⇒ 网络单一源 + 前缀一致性核 helper 化** · C 测试 ≈57（向量重生成）· D faucet ≈11 · E 需改 ≈20（含 zk-prove-worker.mjs:100 ZK gate 地址硬编码）· 四份清单齐，评估 v0.2 完整 — Bettor 2026-09-07T13:49:28Z

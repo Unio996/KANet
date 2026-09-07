@@ -96,3 +96,13 @@ TN12 现在每笔再平衡 fee 5,099,400 sompi ÷ 45,994 grams ≈ **110 sompi/g
 
 ### F. 待补
 J2 ①（TN12 绑定五类计数与坐标）；再平衡 cron 重设计稿（谁：J2 设计 → NWT）；波 0 console 网络分支设计（我）。
+
+### G. 代码 TN12 绑定分类（J2 ①·≈244 命中文件·页 `scratch/_j2_mainnet_pivot_lists_2026-09-07.md`）
+| 类 | 数 | 例 | 修法 |
+|---|---|---|---|
+| A 配置化已就绪 | ≈132 | 多带 `\|\| 'testnet-12'` 默认 | 默认值改 **fail-fast**（无 `KASPA_NETWORK` 即拒启），不留隐式 testnet |
+| **B 地址前缀硬判** | ≈24（console+relay 非测试 16 文件；`api/pool.js` 一家 12 处；settler :2049/2069/2680；trade-filter ×4；bshard-close-voter :141/678；relay.mjs:678；bshard-close-transport:286；u1-same-origin:224） | `startsWith('kaspatest:') ? 'testnet-12' : 'mainnet'` | **结构性风险**：网络从地址串推、不从 env 推 ⇒ 翻 env 修不了——存量 `kaspatest:` 行切换后仍走 testnet-12，没见过前缀的路径静默按 mainnet。修 = 网络单一源（env）+ **前缀一致性核**（地址前缀 ≠ env 网络 ⇒ 拒，不推断），一处 helper 替换 24 处 |
+| C 测试 fixture | ≈57 | golden vectors | 主网前缀重生成，否则绿灯空信息 |
+| D faucet 类 | ≈11 | 主网无 | 关或换手续费钱包 |
+| E 需改代码 | ≈20 | `kanet.env:24` 真开关、`api/tg-wallet.js:27 const NETWORK='testnet-12'`、**`services/zk-prove-worker.mjs:100` ZK gate 地址硬编码 'testnet-12'**、m0c1 两个 `NETWORK_ALLOWLIST`、`scripts/j1-crossnode-verify-tx.mjs:39` | 逐处改；一致地错、易抓 |
+agent-mind / agent-adapter 零命中。⇒ **波 0 前置加：B 类 helper 化 + 前缀一致性核 + A 类 fail-fast + C 类向量重生成**；这是波 0 的主要代码工作（而非节点）。
