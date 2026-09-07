@@ -12230,3 +12230,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (994) Owner 问"tn12 起来没有 / kanet 拉起来了呗 / 开发频道能开吗 / 告诉 J1"：节点 11:05Z isSynced=true lag 79 s（40112）· console 30556 本机 RPC · **dev-coord-testnet 链上广播恢复**（11:07Z `_bettor_send.cjs` 200 + nonce 核实 txId b696b3ed…）· J1 通报单已发 — Bettor 2026-09-07T11:07:28Z
 - 频道自 09-05 IBD 期 `chat/send 500` 起改走 SendMessage/j1-inbox/ledger；现在链上广播落 ⇒ 协调回到频道 + ledger（j1-inbox 保留给 J1）。
+
+### (995) 事故 C 复发：11:40:11Z syncer `broken pipe`（距 11:02:40Z 回连 37 min）→ 11:50:05Z 对端 16311 **TCP False（ping True）**、kaspad `has 0/8 outgoing`（三 churn peer 也不在）→ isSynced 11:41Z 起 false，lag 11:49:57Z 1090 s、DAA 冻 · 本机无动作可做 · ③ 门读确认 false 关闭 — Bettor 2026-09-07T11:50:48Z
+- 相位回顾：11:03→11:21Z 对端 reset 后新连接同速跟随（≈20 bps，lag 平台 410–420 s，自触发休眠）→ 11:21:20Z 对端停送 → 11:21:45Z D-c 接管（lag 516 s，6 m 46 s 完成）→ 11:30:39Z 再自触发（2 m 37 s）= 回到爬行+自触发节律 → 11:40:11Z 对端 broken pipe。**两相位切换无缝、无 failed/backoff。**
+- 对端稳定性（进 6 h 页 §4）：10:59:09Z reset（3.5 min 回）、11:40:11Z broken pipe（>10 min 未回，端口关 = 对端 kaspad 未在跑）。TN12 从我们视角只有这一个前向 peer（复盘 §5 结构项：第二前向节点）。已问 J1 有无别的 TN12 前向节点地址（994 单）。
+- console：isSynced 确认 false ⇒ ③ 门关（旧门只在 rpc-fail 放行，现在 rpc 正常）⇒ 钱路安全；12:20Z 落地包（6c-α + G-2 v2）与节点无关，照排。
