@@ -36,3 +36,9 @@ Sync 型路径不从 syncer 写 pruning point store（`import_pruning_points` �
 - **我亲手跑**（`/d/rusty-kaspa-dc` checkout 3d017b6d·clean·`CARGO_TARGET_DIR=target-dc -j 2`）：`syncer_skew` **9 passed**，`self_trigger` **14 passed**。
 - 未改：SHOULD-2/3 走 runbook（Bettor）。
 - **产物**：等 J2 dc2 干净构建 `D:\kaspad-live\dc-3d017b6d\kaspad.exe`；GREEN-final 落地条件 = 我核 sha256 + `--version`/日志首行含 `3d017b6d` + `--help` 含四个 flag。c8820392 那次构建 SUPERSEDED（J2 报无产物落盘，未核）。
+
+## v0.3 · 产物核（2026-09-07T01:4xZ · 全部本人核）— **GREEN-final 落地**
+- `D:\kaspad-live\dc-3d017b6d\kaspad.exe`：40,629,248 B（08:36 本地）；sha256 `6d5bcebebd528862d6adbc28ba7baab6f21ea74c373325fef0e208fbd1d5106f`（与 J2 报一致）；内嵌全长 `3d017b6d8d59…19f79` ×1、短哈希所在行 2（J2 计 3 处为出现次数，计法不同，实质一致）。
+- `--version` = `kaspad 1.1.1-toc.1`（无 hash，与 D-b/D-c 同形；判活按日志首行）；`--help` 含四 flag `--ibd-self-trigger-{lag,check,backoff-max}-secs` + `--ibd-syncer-pp-lag-tolerance`，help 含 SHOULD-1 "stricter" 句。
+- provenance `docs/provenance/2026-09-07-kaspad-dd-syncer-pp-lag-tolerance/`：`patch.diff` sha 前缀 `0efc624ecf1e8eeb` = 我审的全量补丁；`COMMIT.txt` 3d017b6d ← c8820392；`MANIFEST.sha256` 全部 OK（含 exe）；三份中止日志留痕（detached HEAD 无 hash ×1、build script 陈旧缓存 ×1、源码中途切换 ×1）。
+- **落地验收（起后我盯）**：日志首行 `kaspad v1.1.1-toc.1-3d017b6d`；`--ibd-syncer-pp-lag-tolerance=16` 下出现 `IBD syncer pruning point lags ours beyond the upstream tolerance (4): syncer pp …`（拿到对端 pp）或 `… not recognized: … table position none …`（⇒ 再议 0）；随后同 peer `completed successfully`、`Processed N blocks` 非零、sink 收敛。切换/GO 归 Bettor/Owner。
