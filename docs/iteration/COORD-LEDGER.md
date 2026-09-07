@@ -12247,3 +12247,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **归属根因（J2 自报）**：apply 链把共享文件整文件提在第一笔；共享检出 append-only 不可重拆。裁 (a)：原样推 + 两笔互注 + 回滚"f9054122 + 8f6699ab 一起 revert"。教训（J2 memory）：同一文件跨两笔先 `git add -p` 按 hunk 拆，或共享文件单独第三笔。
 - **G-2 验收（NWT，下一次 kaspad 重启/对端回来时）**：③ 门零 `resume … reason=rpc-fail`；`[rpc-shared] REBUILD … source=rpc-health` 后 ≤3 min `[rpc-health] BACK-TO-LOCAL after <s>s (was: …)`；skip 心跳带 streak；`using local node` 回来 ⇒ runbook ⑤-①b 撤。**6c-α 验收**：首个 isSynced=true 窗内 worker tick 行 `scanned=… logical market(s) shards=… reasons={…}`，recapture Σ ≤30 s/15 min、max ≤5 s（"≥剪枝点不标"7 盘分列）。
 - 节点：syncer 失联 44 min（lag 12:24:59Z 3,193 s，DAA 冻），等对端。
+
+### (998) 提案 S-2「第二个 TN12 前向节点」（给 Owner 拍）· syncer 失联 65 min 仍未回（12:45Z lag 4,396 s）· 监控降频 — Bettor 2026-09-07T12:46:01Z
+- **问题**：从我们视角 TN12 只有一个在我们未来的 peer（136.243.93.17）；它今天 10:59Z 与 11:40Z 两次自断，第二次至今 ≥65 min 端口关。它不在 = 我们零前向来源，D-c/D-d 再好也无用；它的 pp 停滞在索引 41 也是 D-d 不得不放宽到 0 的原因。另三个公网 peer 都落后于我们。
+- **提案 S-2**：自己维护第二个 TN12 节点 N2（pruned，非 archival），与本机互为 `--addpeer`（tailscale 或公网 16311）。**规格**：RAM ≥32 GB（本机 kaspad 稳态 WS 15–28 GB 视 cache；N2 用 `--rocksdb-cache-size=2048` + `--ram-scale=1.0` 可压到 ~10–14 GB）、SSD ≥250 GB（本机 datadir 138 GB 且剪枝后回落）、上行 ≥10 Mbps；初次同步从本机 IBD（本机 pp 索引 69 新鲜，proof 可用），≈2–4 h（同机房/同城）或 ≈1 天（跨洲）。**候选**：younio（J1 说内存不够——若能加到 32 GB 即可）；云 VPS（同城 ≥8 vCPU/32 GB/300 GB SSD，月费量级 Owner 定）；或本机第二实例（不推荐：同一故障域、内存已紧）。
+- **收益**：syncer 失联时 N2 顶上（两节点互为未来）；pp 序列由我们自己控制，D-d 容忍可回到有界值；R-1 relay 扇入可分流。**不做的代价**：今天这种失联每次 = 全系统结算停摆直到对端回来（今天已 65 min+）。
+- **落地路径（若 GO）**：J1 在 N2 提权装 kaspad（同 exe dc-3d017b6d + tolerance=0 + 4096 或更小）→ 本机 `--addpeer=N2:16311` 进 watchdog :47（需一次重启，由我做）→ 验收：N2 isSynced、本机 peer 表含 N2、任一方失联另一方 ≤5 min 顶上（人为 bounce 一次验）。
+- **监控降频**：5 min 异常监控改 30 min（bla30syis）；syncer 回连监控（b8wgebbhe）与 KANet-UI/NWT 盯守不变。
