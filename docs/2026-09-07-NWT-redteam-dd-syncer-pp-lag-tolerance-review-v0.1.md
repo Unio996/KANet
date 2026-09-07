@@ -1,0 +1,30 @@
+# NWT 红队审 · D-d `--ibd-syncer-pp-lag-tolerance`（commit c8820392 on a39c60d2）v0.1 · 2026-09-07T01:2xZ
+
+**对象**：`scratch/_j2_dd_syncer_pp_lag_tolerance_2026-09-07T01-15Z_a39c60d2..c8820392.patch`（365 行·sha256 前缀 `ee77d9fc3a59a745`，我算一致）；`git -C /d/rusty-kaspa-dc2 diff a39c60d2..c8820392` 与补丁**行集一致**（去 index/hunk 头后 diff 为空）。设计页 `scratch/_j2_dd_design_and_hunks_2026-09-07T01-15Z.md`。
+**我亲手跑**：`/d/rusty-kaspa-dc`（HEAD c8820392·clean）`CARGO_TARGET_DIR=target-dc cargo test -j 2 -p kaspa-p2p-flows syncer_skew` ⇒ **8 passed**；`… self_trigger` ⇒ **14 passed**（D-c 不退化）。free 19.6 GB、kaspad WS 16.8 GB 时跑，J2 dc2 构建并行未受扰。
+
+## 判定：**GREEN-conditional**（1 MUST · 3 SHOULD · 3 NOTE）
+
+### MUST-1 · 拒绝路径零可观测（H2）
+`classify_syncer_skew(...).ok_or(ProtocolError::Other(...))?` 在 `None` 时**不印任何东西**——syncer pp 哈希、表内命中位置、ancestor 结果全不落日志。这正是本次事故我们至今**读不到对端 PP** 的原因（§19：日志无任何行印对端 PP）。D-d 上线用 16 若仍失败，我们还是不知道该不该去 0。
+**改法**（一 hunk + 一测）：`None` 分支先 `warn!` 逐字可 grep 行，再返回同一 `ProtocolError`：
+`IBD syncer pruning point not recognized: syncer pp {}, our pp {}, table position {} (window {}), chain-ancestor-of-ours {:?}, tolerance flag = {}`（position 用 `past_pruning_points_newest_first.iter().position(...)` 的 `Some(p)|None`；window 印 `lookup_window(tolerance)`）。纯函数不变，只在 flow.rs 调用点加；测试可在 `syncer_skew` 里加一条"拒绝时 verdict 为 None 且输入可复述"或在 flow 层不测（日志行靠 grep 验收）。
+
+### SHOULD-1 · tolerance 1–3 = 比上游更严，未文档化
+`lookup_window(2)=2` ⇒ 只认 lag 0–1，`p < UPSTREAM_TOLERANCE` 那臂被窗口截断。行为自洽但 help 只说"4 = upstream, 0 = unlimited"。补 help 一句"values below 4 are stricter than upstream"，加测 `tol=2` 拒 lag 3。
+
+### SHOULD-2 · 部署值用 16，不用 0
+0 模式额外接受"不在表内但 `Some(true)` 是我们 PP 链祖先"的任意旧链块当 syncer pp；Sync 路径不再用 syncer_pp，风险低但接受面无界，且 `get_n_last_pruning_points(usize::MAX)` 逐索引读全表（~70 次 DB get）。16 覆盖本次 9 且有界。0 留作 16 失败后的第二步（前提 MUST-1 让我们看见对端 pp 是不是 <54）。
+
+### SHOULD-3 · runbook 加"回滚二进制不认新 flag"
+db-4d0a9e30 不认识 `--ibd-syncer-pp-lag-tolerance`（clap 直接退出）；J2 设计段 §5 已写 `$BASE_ARGS`，请 Bettor runbook 逐字带上，watchdog 的 canonical args 不动。
+
+### NOTE-1 · 表连续性已核（放宽窗口读到从未读过的索引，`get(ind).unwrap()` 会 panic 于缺口）
+`consensus/src/pipeline/pruning_processor/processor.rs:211` 推进时对每个新 pp 按 `current_index + i + 1` 逐个 `insert_batch`（中间索引全写）；`processes/pruning_proof/mod.rs:192` headers-proof 导入 `set(i, …)` 0..k 连续；`consensus/mod.rs:482` 同族。⇒ 60→69 跳步时 61–68 已写；现网 5 轮循环每轮都成功执行了 `get_n_last_pruning_points(4)`（读 66–69）。窗口 16 读 54–69：54–60 来自导入、61–69 来自推进，无缺口。安全。
+### NOTE-2 · 语义
+Sync 型路径不从 syncer 写 pruning point store（`import_pruning_points` 仅 headers-proof :758/:789；`sync_new_utxo_set(syncer_pp)` 仅 HeadersProof/PruningCatchUp）；滞后 syncer 历史只多不少；`(Lagging,false)` 臂原样保留。本机 utxo 00:11:04Z 已 stable ⇒ 放宽后走 `(Lagging,true)`→Sync。ancestor 关：表内 lag≥4 必过 `is_chain_ancestor_of(syncer_pp, our_pp)`，`Some(false)` 拒、`None` 退表——过去 pp 若 reachability 已剪则 `None`，退表是对的（表内 = 本机自己算出的历史 pp）。`unwrap_or(false)` 保持。默认 4 时零新增 ancestor 调用（`needs_ancestor_check(4)=false`），上游语义逐字。
+### NOTE-3 · 工具链
+`Option::is_none_or` 需 Rust ≥1.82；本机 rustc 1.96.1，编译通过。flag 的 `.env(KASPAD_…)` / `require_equals(true)` / `arg_match_unwrap_or::<usize>` 与 D-c 三 flag 同模式（args.rs:489-493、:633）。stability 五臂与 finality-conflict `Err` 不在 diff 内 ⇒ 未动。
+
+## 验收（我盯）
+影子步①（`--ibd-self-trigger-lag-secs=0 --ibd-syncer-pp-lag-tolerance=16`，cache 4096）：日志出现一次 `IBD syncer pruning point lags ours beyond the upstream tolerance (4): syncer pp …`（拿到对端 pp 哈希 ⇒ 反推其索引）→ 同 peer `completed successfully` → `Processed N blocks` 非零 → sink 时间戳收敛；`could not be easily recognized` 不再出现。若出现 MUST-1 的 not-recognized 行且 position=None ⇒ 对端 pp <54 或不在表，再议 0。
