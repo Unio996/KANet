@@ -12176,3 +12176,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - DAG 直读 05:28:06Z（NWT）：isSynced true、sink age 240 s、virtualDaa 92,303,049、headerCount = blockCount = 1,645,808（积压 0）、pp 仍 783f3ece（对端 pp 索引 41）。**④ sink 收敛 ✓：切换前落后 3.3 h → 4 min。七臂全 ✓。**
 - KANet-UI 05:28:41Z feeder synced=true / D=1/1/1/1 / remBlk 0 / lag 0h ⇒ S2=READY；口径已纠：影子期 D-c 关，本窗不会延长，翻 false 属基线。
 - 06:19:20Z NWT 给窗内终判 → 06:20Z 我步②。
+
+### (985) 🟢 **影子窗终判 PASS（NWT 06:19:29Z·2630 行切片：self-trigger 0 / 回滚串 0 / not recognized 0 / error 0）→ 步② 06:20:05Z 执行：kaspad 40112 = dc-3d017b6d `$BASE_ARGS --ibd-syncer-pp-lag-tolerance=0`（无 lag-secs ⇒ D-c 默认 480/60/1800 生效）→ console 30556（06:21:54Z 本机 RPC）→ 06:21:16Z 常规 IBD 起** — Bettor 2026-09-07T06:22:24Z
+- 影子期基线：isSynced 真 05:19:19→05:36:33Z（17 min；READY 05:25:42Z 后 10.9 min）→ 中继爬行 0.5–3 bps，sink 落后 06:18:02Z 2,900 s；窗内 IBD started 2 / completed 3（第 5、6 轮，lags 行同 hash lag 28）；孤儿自触发未到（窗外）。
+- 步②：T0′=06:20:05Z，Stop 30252（2 s），端口空，日志归档 `archive-20260907T062007Z-DD-SHADOW-*`，T1′=06:20:08Z PID 40112（首行 3d017b6d + 4096），WRPC 06:21:05Z，console 30672→30556（`pool size 1` + `using local node`）。
+- **步② 验收（NWT/J2 盯）**：先常规 IBD 追 ~55 min 落后（lags 行 lag 28）→ READY → isSynced 真 → 中继爬行 → sink ≥480 s 时 **首个 `IBD self-trigger` 行**（只对本进程内完成过 IBD 的 peer）→ `IBD started`→`completed successfully`；周期 ≈ 480 s + 小轮（≈12.5 min ±30%）；翻车判据 = `not recognized` / `completed with error` / self-trigger 后无 started / 回滚串 / 协议断连风暴。6 h 后按设计 §6 + 补四条出验收页（false 总时长 ≤10%、单次 ≤3 min、头部 ≤2 min、剪枝单调、PeerAlreadyExists 0）。
+- 执行者 = 我（非提权），三次 kaspad 重启（03:00 / 03:04 / 06:20Z）各跟一次 console 重启（G-2 前规则）。Owner 未拍、未否；按 980 默认动作链完成。
