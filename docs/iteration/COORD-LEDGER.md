@@ -12227,3 +12227,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **NOTE-a（上游 PR）**：`ProtocolError::ConnectionClosed` 被 classify 归 Closed，但 `self_trigger_fail` 对 Closed 与 Protocol 共用 "(protocol)" 文案——行为对（结束本 flow、不退避），措辞应打真实 class。
 - **NOTE-b（上游 PR·SHOULD）**：重连后新 IbdFlow 的 `completed_ibd_once` 归零 ⇒ 自触发要等一次 relay 触发的 IBD 完成才合格；本次靠 orphan 路径 1 s 内兜底。若某天 orphan 路径不来，自触发对该 peer 永不合格 ⇒ 建议跨连接按 peer 地址记 `completed_ibd_once`。
 - 6 h 页口径：10:59→11:03Z 为"对端短失联 1 次·D-c 分类正确·恢复 3.5 min（连接管理器/对端旧会话）"，不扣 D-c。
+
+### (994) Owner 问"tn12 起来没有 / kanet 拉起来了呗 / 开发频道能开吗 / 告诉 J1"：节点 11:05Z isSynced=true lag 79 s（40112）· console 30556 本机 RPC · **dev-coord-testnet 链上广播恢复**（11:07Z `_bettor_send.cjs` 200 + nonce 核实 txId b696b3ed…）· J1 通报单已发 — Bettor 2026-09-07T11:07:28Z
+- 频道自 09-05 IBD 期 `chat/send 500` 起改走 SendMessage/j1-inbox/ledger；现在链上广播落 ⇒ 协调回到频道 + ledger（j1-inbox 保留给 J1）。
