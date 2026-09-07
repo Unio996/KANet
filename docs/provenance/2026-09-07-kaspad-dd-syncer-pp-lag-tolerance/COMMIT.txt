@@ -1,0 +1,2 @@
+3d017b6d8d593ed58d558b69c4374a174e819f79 D-d: NWT review fixes — log every input of a rejected syncer pruning point (MUST-1), document/test that tolerance 1-3 is stricter than upstream (SHOULD-1)
+c8820392318716bbccb48fd40d0d74356779c42e D-d: configurable IBD syncer pruning-point lag tolerance (--ibd-syncer-pp-lag-tolerance, default 4 = upstream)

@@ -1,0 +1,397 @@
+diff --git a/consensus/core/src/config/mod.rs b/consensus/core/src/config/mod.rs
+index 51776c05..47aa8549 100644
+--- a/consensus/core/src/config/mod.rs
++++ b/consensus/core/src/config/mod.rs
+@@ -82,6 +82,10 @@ pub struct Config {
+     pub ibd_self_trigger_check_secs: u64,
+     /// D-c: cap (seconds) for the per-peer exponential backoff after a failed self-trigger attempt.
+     pub ibd_self_trigger_backoff_max_secs: u64,
++    /// D-d: how many of our most recent past pruning points a *lagging* IBD syncer's pruning point may sit in
++    /// before it is rejected as "could not be easily recognized". 4 = upstream hard-coded semantics; 0 = unlimited
++    /// (whole past-pruning-points table, plus a chain-ancestor fallback).
++    pub ibd_syncer_pp_lag_tolerance: usize,
+ }
+ 
+ impl Config {
+@@ -116,6 +120,8 @@ impl Config {
+             ibd_self_trigger_lag_secs: 0,
+             ibd_self_trigger_check_secs: 60,
+             ibd_self_trigger_backoff_max_secs: 1800,
++            // D-d: upstream semantics by default (see kaspad Args / --ibd-syncer-pp-lag-tolerance to relax).
++            ibd_syncer_pp_lag_tolerance: 4,
+         }
+     }
+ 
+diff --git a/kaspad/src/args.rs b/kaspad/src/args.rs
+index 26c32307..37c46158 100644
+--- a/kaspad/src/args.rs
++++ b/kaspad/src/args.rs
+@@ -97,6 +97,7 @@ pub struct Args {
+     pub ibd_self_trigger_lag_secs: u64,
+     pub ibd_self_trigger_check_secs: u64,
+     pub ibd_self_trigger_backoff_max_secs: u64,
++    pub ibd_syncer_pp_lag_tolerance: usize,
+ 
+     pub override_params_file: Option<String>,
+ 
+@@ -158,6 +159,7 @@ impl Default for Args {
+             ibd_self_trigger_lag_secs: 480,
+             ibd_self_trigger_check_secs: 60,
+             ibd_self_trigger_backoff_max_secs: 1800,
++            ibd_syncer_pp_lag_tolerance: 4,
+             override_params_file: None,
+             rocksdb_preset: None,
+             rocksdb_wal_dir: None,
+@@ -186,6 +188,7 @@ impl Args {
+         config.ibd_self_trigger_lag_secs = self.ibd_self_trigger_lag_secs;
+         config.ibd_self_trigger_check_secs = self.ibd_self_trigger_check_secs;
+         config.ibd_self_trigger_backoff_max_secs = self.ibd_self_trigger_backoff_max_secs;
++        config.ibd_syncer_pp_lag_tolerance = self.ibd_syncer_pp_lag_tolerance;
+ 
+         #[cfg(feature = "devnet-prealloc")]
+         if let Some(num_prealloc_utxos) = self.num_prealloc_utxos {
+@@ -473,6 +476,16 @@ a large RAM (~64GB) can set this value to ~3.0-4.0 and gain superior performance
+                 .help("RocksDB block cache size in MB. Default: 256MB for HDD preset (scales with --ram-scale). \
+                        Increase for public RPC nodes with heavy query loads. Example: --rocksdb-cache-size=2048 for 2GB cache.")
+         )
++        .arg(
++            Arg::new("ibd-syncer-pp-lag-tolerance")
++                .long("ibd-syncer-pp-lag-tolerance")
++                .env("KASPAD_IBD_SYNCER_PP_LAG_TOLERANCE")
++                .require_equals(true)
++                .value_parser(clap::value_parser!(usize))
++                .help("IBD: accept a syncer whose pruning point lags ours by up to this many pruning-point indices (upstream hard-codes 4). \
++                       0 = unlimited (any of our past pruning points, or a chain ancestor of our pruning point). Values 1-3 are stricter \
++                       than upstream (the window is truncated to that many entries). Default: 4")
++        )
+         .arg(
+             Arg::new("ibd-self-trigger-lag-secs")
+                 .long("ibd-self-trigger-lag-secs")
+@@ -588,6 +601,11 @@ impl Args {
+                 "ibd-self-trigger-backoff-max-secs",
+                 defaults.ibd_self_trigger_backoff_max_secs,
+             ),
++            ibd_syncer_pp_lag_tolerance: arg_match_unwrap_or::<usize>(
++                &m,
++                "ibd-syncer-pp-lag-tolerance",
++                defaults.ibd_syncer_pp_lag_tolerance,
++            ),
+ 
+             #[cfg(feature = "devnet-prealloc")]
+             num_prealloc_utxos: m.get_one::<u64>("num-prealloc-utxos").cloned(),
+diff --git a/protocol/flows/src/ibd/flow.rs b/protocol/flows/src/ibd/flow.rs
+index 0d287734..19d912bb 100644
+--- a/protocol/flows/src/ibd/flow.rs
++++ b/protocol/flows/src/ibd/flow.rs
+@@ -43,6 +43,7 @@ use std::{
+ };
+ use tokio::time::{sleep, timeout};
+ 
++use super::syncer_skew::{SkewInputs, SyncerSkew, UPSTREAM_TOLERANCE, classify_syncer_skew, lookup_window, needs_ancestor_check};
+ use super::{HeadersChunk, IBD_BATCH_SIZE, PruningPointUtxosetChunkStream, progress::ProgressReporter};
+ type BlockBody = Vec<Transaction>;
+ 
+@@ -482,24 +483,64 @@ impl IbdFlow {
+             info!("current sink is:{}", sink);
+             info!("current pruning point is:{}", pruning_point);
+             if consensus.async_is_chain_ancestor_of(pruning_point, highest_known_syncer_chain_hash).await? {
+-                /// Categorizes the syncer's pruning point position relative to local
+-                enum SyncerSkew {
+-                    Lagging,
+-                    Aligned,
+-                    Leading,
+-                }
+-
+-                let syncer_skew = if syncer_pruning_point == pruning_point {
+-                    SyncerSkew::Aligned
+-                } else if consensus.async_is_chain_ancestor_of(pruning_point, syncer_pruning_point).await.unwrap_or(false) {
+-                    SyncerSkew::Leading
+-                } else if consensus.async_get_n_last_pruning_points(4 /*syncer lag tolerance*/).await.contains(&syncer_pruning_point) {
+-                    SyncerSkew::Lagging
++                // D-d: skew classification extracted to `syncer_skew.rs` (pure, unit-tested); the upstream hard-coded
++                // lag tolerance of 4 is now `--ibd-syncer-pp-lag-tolerance` (default 4 = upstream; 0 = unlimited).
++                let tolerance = self.ctx.config.ibd_syncer_pp_lag_tolerance;
++                let syncer_pp_descends_from_our_pp =
++                    consensus.async_is_chain_ancestor_of(pruning_point, syncer_pruning_point).await.unwrap_or(false);
++                let past_pruning_points_newest_first = consensus.async_get_n_last_pruning_points(lookup_window(tolerance)).await;
++                let syncer_pp_is_chain_ancestor_of_our_pp = if needs_ancestor_check(tolerance) && !syncer_pp_descends_from_our_pp {
++                    // Relaxed modes only (NWT baseline ①): the chain-ancestor gate must hold for anything beyond the upstream
++                    // window; the header may already be pruned => Err => None => the classifier falls back to table membership.
++                    consensus.async_is_chain_ancestor_of(syncer_pruning_point, pruning_point).await.ok()
+                 } else {
+-                    return Err(ProtocolError::Other(
+-                        "The syncer purports to have data in the recent future but their pruning point could not be easily recognized",
+-                    ));
++                    None
++                };
++                let inputs = SkewInputs {
++                    our_pp: pruning_point,
++                    syncer_pp: syncer_pruning_point,
++                    syncer_pp_descends_from_our_pp,
++                    past_pruning_points_newest_first,
++                    syncer_pp_is_chain_ancestor_of_our_pp,
++                    tolerance,
+                 };
++                let verdict = match classify_syncer_skew(&inputs) {
++                    Some(v) => v,
++                    None => {
++                        // NWT MUST-1: the rejection must leave the syncer's pruning point and every input of the decision in the
++                        // log (the 2026-09-07 incident was undiagnosable from the node log alone). Same error as upstream follows.
++                        let table_position = inputs
++                            .past_pruning_points_newest_first
++                            .iter()
++                            .position(|h| *h == syncer_pruning_point)
++                            .map(|p| p.to_string())
++                            .unwrap_or_else(|| "none".to_string());
++                        let window = if tolerance == 0 { "unlimited".to_string() } else { lookup_window(tolerance).to_string() };
++                        warn!(
++                            "IBD syncer pruning point not recognized: syncer pp {}, our pp {}, table position {} (window {}), chain-ancestor-of-ours {:?}, tolerance flag = {}",
++                            syncer_pruning_point,
++                            pruning_point,
++                            table_position,
++                            window,
++                            syncer_pp_is_chain_ancestor_of_our_pp,
++                            tolerance
++                        );
++                        return Err(ProtocolError::Other(
++                            "The syncer purports to have data in the recent future but their pruning point could not be easily recognized",
++                        ));
++                    }
++                };
++                let syncer_skew = verdict.skew;
++                if syncer_skew == SyncerSkew::Lagging && verdict.lag_indices.is_none_or(|lag| lag >= UPSTREAM_TOLERANCE) {
++                    warn!(
++                        "IBD syncer pruning point lags ours beyond the upstream tolerance ({}): syncer pp {}, our pp {}, lag {} pruning-point indices (tolerance flag = {})",
++                        UPSTREAM_TOLERANCE,
++                        syncer_pruning_point,
++                        pruning_point,
++                        verdict.lag_indices.map(|l| l.to_string()).unwrap_or_else(|| "unknown(chain-ancestor)".to_string()),
++                        tolerance
++                    );
++                }
+ 
+                 let is_utxo_stable = consensus.async_is_pruning_utxoset_stable().await;
+                 let is_pp_anticone_synced = consensus.async_is_pruning_point_anticone_fully_synced().await;
+diff --git a/protocol/flows/src/ibd/mod.rs b/protocol/flows/src/ibd/mod.rs
+index 01cb3e0c..68f2b9cd 100644
+--- a/protocol/flows/src/ibd/mod.rs
++++ b/protocol/flows/src/ibd/mod.rs
+@@ -3,6 +3,7 @@ mod negotiate;
+ mod progress;
+ pub mod self_trigger;
+ mod streams;
++pub mod syncer_skew;
+ 
+ pub use flow::*;
+ pub use streams::*;
+diff --git a/protocol/flows/src/ibd/syncer_skew.rs b/protocol/flows/src/ibd/syncer_skew.rs
+new file mode 100644
+index 00000000..9854b5a7
+--- /dev/null
++++ b/protocol/flows/src/ibd/syncer_skew.rs
+@@ -0,0 +1,205 @@
++//! D-d (2026-09-07): syncer pruning-point skew classification, extracted from `IbdFlow::determine_ibd_type`
++//! so the decision is a pure function that can be unit-tested, and so the upstream "syncer lag tolerance"
++//! (hard-coded 4 in `get_n_last_pruning_points(4)`) becomes configurable.
++//!
++//! Incident anchor: 2026-09-07T00:57Z — after our pruning point moved from index 60 to 69 in one step
++//! (blue 77,760,000 -> 89,424,022), the only available syncer (its pruning point stalled since 2026-08-26,
++//! index <= 65) was neither Aligned, nor Leading, nor within the last 4 pruning points => every IBD round
++//! failed with "their pruning point could not be easily recognized" -> disconnect -> reconnect -> ~60 s loop,
++//! sink frozen. A syncer whose pruning point *lags* ours by more than 4 indices still has strictly more
++//! history than we need (it prunes less), so recognizing it as `Lagging` is safe; the existing
++//! `(Lagging, !stable)` arm still refuses it when we need external data it cannot provide.
++
++use kaspa_hashes::Hash;
++
++/// Categorizes the syncer's pruning point position relative to local.
++#[derive(Debug, Clone, Copy, PartialEq, Eq)]
++pub enum SyncerSkew {
++    /// Syncer pruning point is one of our past pruning points (older than ours).
++    Lagging,
++    /// Same pruning point.
++    Aligned,
++    /// Syncer pruning point is in the future of ours (descendant on the selected chain).
++    Leading,
++}
++
++/// Inputs gathered by the async caller; all chain queries are already resolved.
++#[derive(Debug, Clone)]
++pub struct SkewInputs {
++    pub our_pp: Hash,
++    pub syncer_pp: Hash,
++    /// `is_chain_ancestor_of(our_pp, syncer_pp)` (errors mapped to `false`, as upstream does).
++    pub syncer_pp_descends_from_our_pp: bool,
++    /// Our past pruning points, newest first (index 0 = current pruning point), as returned by
++    /// `get_n_last_pruning_points(n)`. The caller sizes `n` from `tolerance` (see [`lookup_window`]).
++    pub past_pruning_points_newest_first: Vec<Hash>,
++    /// `is_chain_ancestor_of(syncer_pp, our_pp)` when the caller evaluated it (only in relaxed mode);
++    /// `None` = not evaluated or errored (e.g. header already pruned) — never treated as a match.
++    pub syncer_pp_is_chain_ancestor_of_our_pp: Option<bool>,
++    /// `--ibd-syncer-pp-lag-tolerance`: number of most recent pruning points a lagging syncer may sit in.
++    /// `UPSTREAM_TOLERANCE` (4) = upstream semantics. `0` = unlimited (whole past-pruning-points table +
++    /// chain-ancestor check).
++    pub tolerance: usize,
++}
++
++/// Upstream hard-coded value (`get_n_last_pruning_points(4 /*syncer lag tolerance*/)`).
++pub const UPSTREAM_TOLERANCE: usize = 4;
++
++/// How many past pruning points the caller must fetch for a given tolerance.
++pub fn lookup_window(tolerance: usize) -> usize {
++    if tolerance == 0 { usize::MAX } else { tolerance }
++}
++
++/// Outcome of a successful classification: the skew plus, for `Lagging`, how many pruning-point indices
++/// the syncer is behind us when known (position in the newest-first list; `None` = recognized only via the
++/// chain-ancestor check).
++#[derive(Debug, Clone, Copy, PartialEq, Eq)]
++pub struct SkewVerdict {
++    pub skew: SyncerSkew,
++    pub lag_indices: Option<usize>,
++}
++
++/// Whether the caller must evaluate `is_chain_ancestor_of(syncer_pp, our_pp)` for this tolerance
++/// (only relaxed modes need it; the upstream window never consults it).
++pub fn needs_ancestor_check(tolerance: usize) -> bool {
++    tolerance == 0 || tolerance > UPSTREAM_TOLERANCE
++}
++
++/// Pure classification. `None` = the syncer's pruning point is not recognized (caller disconnects, as before).
++///
++/// Rules (NWT pre-review baseline, 2026-09-07):
++/// - inside the upstream window (lag < 4): membership alone, exactly as upstream;
++/// - beyond it (relaxed by the flag): membership in our past-pruning-points table **and** the chain-ancestor gate
++///   `is_chain_ancestor_of(syncer_pp, our_pp)` — `Some(true)` passes; `None` (the call errored, e.g. the header is
++///   already pruned) falls back to the table membership; `Some(false)` is rejected even if the hash is in the table;
++/// - unlimited mode (0) additionally accepts a hash that is not in the table but is `Some(true)` a chain ancestor;
++/// - anything else stays `None` (fail-closed, same disconnect as upstream).
++pub fn classify_syncer_skew(inp: &SkewInputs) -> Option<SkewVerdict> {
++    if inp.syncer_pp == inp.our_pp {
++        return Some(SkewVerdict { skew: SyncerSkew::Aligned, lag_indices: Some(0) });
++    }
++    if inp.syncer_pp_descends_from_our_pp {
++        return Some(SkewVerdict { skew: SyncerSkew::Leading, lag_indices: None });
++    }
++    let window = lookup_window(inp.tolerance);
++    let pos = inp.past_pruning_points_newest_first.iter().take(window).position(|h| *h == inp.syncer_pp);
++    match (pos, inp.syncer_pp_is_chain_ancestor_of_our_pp) {
++        (Some(p), _) if p < UPSTREAM_TOLERANCE => Some(SkewVerdict { skew: SyncerSkew::Lagging, lag_indices: Some(p) }),
++        (Some(p), Some(true) | None) => Some(SkewVerdict { skew: SyncerSkew::Lagging, lag_indices: Some(p) }),
++        (Some(_), Some(false)) => None,
++        (None, Some(true)) if inp.tolerance == 0 => Some(SkewVerdict { skew: SyncerSkew::Lagging, lag_indices: None }),
++        (None, _) => None,
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    fn h(i: u64) -> Hash {
++        Hash::from_u64_word(i)
++    }
++    /// Past pruning points newest-first: index 0 = current pp = h(100), index k = h(100 - k).
++    fn past(n: usize) -> Vec<Hash> {
++        (0..n as u64).map(|k| h(100 - k)).collect()
++    }
++    fn inputs(syncer_pp: Hash, descends: bool, ancestor: Option<bool>, tolerance: usize) -> SkewInputs {
++        SkewInputs {
++            our_pp: h(100),
++            syncer_pp,
++            syncer_pp_descends_from_our_pp: descends,
++            past_pruning_points_newest_first: past(20),
++            syncer_pp_is_chain_ancestor_of_our_pp: ancestor,
++            tolerance,
++        }
++    }
++
++    #[test]
++    fn aligned() {
++        let v = classify_syncer_skew(&inputs(h(100), false, None, UPSTREAM_TOLERANCE)).unwrap();
++        assert_eq!(v, SkewVerdict { skew: SyncerSkew::Aligned, lag_indices: Some(0) });
++    }
++
++    #[test]
++    fn leading() {
++        let v = classify_syncer_skew(&inputs(h(7777), true, None, UPSTREAM_TOLERANCE)).unwrap();
++        assert_eq!(v.skew, SyncerSkew::Leading);
++    }
++
++    #[test]
++    fn lagging_within_upstream_tolerance_4() {
++        // index 3 behind: inside the 4-wide window (indices 0..=3)
++        let v = classify_syncer_skew(&inputs(h(97), false, None, UPSTREAM_TOLERANCE)).unwrap();
++        assert_eq!(v, SkewVerdict { skew: SyncerSkew::Lagging, lag_indices: Some(3) });
++        // index 4 behind: outside the upstream window -> unknown (upstream semantics preserved)
++        assert!(classify_syncer_skew(&inputs(h(96), false, None, UPSTREAM_TOLERANCE)).is_none());
++    }
++
++    #[test]
++    fn tolerance_below_upstream_is_stricter_window_truncation() {
++        // NWT SHOULD-1: tol=2 keeps only indices 0..=1; lag 3 (inside upstream's window) is rejected, lag 1 accepted.
++        assert!(classify_syncer_skew(&inputs(h(97), false, None, 2)).is_none());
++        let v = classify_syncer_skew(&inputs(h(99), false, None, 2)).unwrap();
++        assert_eq!(v, SkewVerdict { skew: SyncerSkew::Lagging, lag_indices: Some(1) });
++    }
++
++    #[test]
++    fn lagging_9_recognized_only_when_tolerance_relaxed_and_ancestor_gate_holds() {
++        let far = h(91); // 9 indices behind (incident shape: our pp jumped 60 -> 69)
++        assert!(classify_syncer_skew(&inputs(far, false, None, UPSTREAM_TOLERANCE)).is_none());
++        // relaxed (16) + ancestor gate true -> Lagging(9)
++        let v = classify_syncer_skew(&inputs(far, false, Some(true), 16)).unwrap();
++        assert_eq!(v, SkewVerdict { skew: SyncerSkew::Lagging, lag_indices: Some(9) });
++        // relaxed + ancestor call errored (header pruned) -> fall back to table membership -> Lagging(9)
++        let v = classify_syncer_skew(&inputs(far, false, None, 16)).unwrap();
++        assert_eq!(v, SkewVerdict { skew: SyncerSkew::Lagging, lag_indices: Some(9) });
++        // relaxed + ancestor gate says false -> rejected even though it is in the table (fail-closed)
++        assert!(classify_syncer_skew(&inputs(far, false, Some(false), 16)).is_none());
++        // unlimited (0) behaves the same for a table member
++        let v0 = classify_syncer_skew(&inputs(far, false, Some(true), 0)).unwrap();
++        assert_eq!(v0, SkewVerdict { skew: SyncerSkew::Lagging, lag_indices: Some(9) });
++        // bounded relaxed window still bounds: 9 behind with tolerance 8 -> unknown
++        assert!(classify_syncer_skew(&inputs(far, false, Some(true), 8)).is_none());
++    }
++
++    #[test]
++    fn unknown_hash_stays_error_in_every_mode() {
++        let alien = h(5); // never one of our pruning points
++        for tol in [UPSTREAM_TOLERANCE, 16, 0] {
++            assert!(classify_syncer_skew(&inputs(alien, false, None, tol)).is_none(), "tol={tol}");
++            assert!(classify_syncer_skew(&inputs(alien, false, Some(false), tol)).is_none(), "tol={tol}");
++        }
++        // bounded modes never accept on the ancestor gate alone
++        assert!(classify_syncer_skew(&inputs(alien, false, Some(true), UPSTREAM_TOLERANCE)).is_none());
++        assert!(classify_syncer_skew(&inputs(alien, false, Some(true), 16)).is_none());
++    }
++
++    #[test]
++    fn unlimited_mode_accepts_chain_ancestor_not_in_table_with_unknown_lag() {
++        let ancestor_only = h(5);
++        let v = classify_syncer_skew(&inputs(ancestor_only, false, Some(true), 0)).unwrap();
++        assert_eq!(v, SkewVerdict { skew: SyncerSkew::Lagging, lag_indices: None });
++    }
++
++    #[test]
++    fn finality_conflict_branch_is_upstream_of_classification() {
++        // `determine_ibd_type` only calls the classifier after `is_chain_ancestor_of(our_pp, highest_known_syncer_chain_hash)`
++        // held; the finality-conflict `Err` branch is untouched by D-d (see the flow.rs hunk). The classifier itself never
++        // returns anything for a syncer whose pp is unrelated to ours in every mode:
++        let unrelated = h(4242);
++        assert!(classify_syncer_skew(&inputs(unrelated, false, Some(false), 0)).is_none());
++        assert!(classify_syncer_skew(&inputs(unrelated, false, None, 0)).is_none());
++    }
++
++    #[test]
++    fn helpers() {
++        assert_eq!(lookup_window(0), usize::MAX);
++        assert_eq!(lookup_window(4), 4);
++        assert_eq!(lookup_window(16), 16);
++        assert!(!needs_ancestor_check(4));
++        assert!(!needs_ancestor_check(1));
++        assert!(needs_ancestor_check(5));
++        assert!(needs_ancestor_check(16));
++        assert!(needs_ancestor_check(0));
++    }
++}
