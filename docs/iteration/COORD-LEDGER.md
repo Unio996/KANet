@@ -12221,3 +12221,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **现状**：`getPeerAddresses` = 4 个已知 + 占位，无替代；DNS seeder 返回同 4 个；另三 peer（70.178 / 86.48 / 152.53）可达但每 ~10 s 复位（它们是"从我们同步再拒"的一方，不在我们未来）⇒ **无前向来源，常规 IBD 与自触发都不可能**，lag 无界增长直到对端回来。console 侧 ③ 门读到确认的 isSynced=false ⇒ 跳过（旧门 fail-open 只在 rpc-fail 时，现在不触发）⇒ 钱路安全；G-2 v2（rpc-fail fail-closed）仍按 12:20Z 后 apply。
 - **可做/不可做**：本机无动作可让对端回来；`--addpeer` 需要一个在我们未来的 TN12 节点地址（我们没有，Owner/J1 若有请给）；结构性解 = 自己维护第二个同步节点（复盘 §5 已列，younio 内存不够）。**记为独立事故 C，等对端回来；回来后预期：重连 → 对端 sink inv 落 locator 外 → 常规 IBD → completed → 该 peer 在新 IbdFlow 上重获自触发资格 → 周期恢复。**
 - 6 h 验收页（12:20Z）口径：窗 06:20→10:59Z 为 D-c 有效样本，10:59Z 后为对端失联段分列。
+
+### (993) 992 更正：syncer 11:02:40Z 回连（失联 3.5 min，非下线）→ 11:02:41Z orphan 路径常规 IBD 立即起 → isSynced 11:03:01Z 回真 ⇒ 事故 C 自愈，无停摆 · 两条上游 NOTE — Bettor 2026-09-07T11:03:35Z
+- 时序：10:59:09Z 对端 reset（D-c 轮体相位 49%）→ 11:02:40Z `Connected to outgoing peer 136.243.93.17`（3.5 min，同 PeerAlreadyExists 罚时量级）→ 11:02:41Z relay/orphan 触发 `IBD started` → 完成 → isSynced 11:03:01Z true（false 段 11:00:00→11:03:01Z = 3 min）。NWT 11:01:47Z 的 `Test-NetConnection = False` 是失联窗内的真读数，"下线/无替代"结论过强，撤为"短失联"。
+- **NOTE-a（上游 PR）**：`ProtocolError::ConnectionClosed` 被 classify 归 Closed，但 `self_trigger_fail` 对 Closed 与 Protocol 共用 "(protocol)" 文案——行为对（结束本 flow、不退避），措辞应打真实 class。
+- **NOTE-b（上游 PR·SHOULD）**：重连后新 IbdFlow 的 `completed_ibd_once` 归零 ⇒ 自触发要等一次 relay 触发的 IBD 完成才合格；本次靠 orphan 路径 1 s 内兜底。若某天 orphan 路径不来，自触发对该 peer 永不合格 ⇒ 建议跨连接按 peer 地址记 `completed_ibd_once`。
+- 6 h 页口径：10:59→11:03Z 为"对端短失联 1 次·D-c 分类正确·恢复 3.5 min（连接管理器/对端旧会话）"，不扣 D-c。
