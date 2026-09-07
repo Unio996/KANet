@@ -177,3 +177,9 @@ Owner GO（838 边界）；回滚 = watchdog.ps1:17 指回 D-a exe + 重启；§
 - **对端 PP 不可直读**：日志无任何行印对端 PP（协商/proof/reject 均无）；`getConnectedPeerInfo` 不带。旁证：00:04:38Z peer 70.178.95.86 对我们 reject `pruning points are violating finality`（当时本机 PP 索引 60、陈 9 步）。
 - **对 D-c**：自触发进同一函数，syncer 由 relay 块来源决定（多为 136.243.93.17）⇒ 同样必败；backoff 只拉长间隔。解法（换 PP 正常的 syncer / 等对端 PP 推进 / 其它）不在本机可拍范围，交 Bettor/Owner。
 - 脚本：`kasia-console/scratch/_nwt_pp_depth_probe.mjs`、`_nwt_oldpp_probe.mjs`（只读·短命）。
+
+> **§19 补（2026-09-07T01:1xZ · 本人核日志）— 镜像证据与零代码路评估**
+> - **我们先被拒过 12 次**：23:47:13–00:01:03Z 86.48.24.208 / 152.53.236.224 对我们发 7 次 reject `The syncer purports to have data in the recent future but their pruning point could not be easily recognized`；23:52:56–00:04:38Z 70.178.95.86 对我们发 5 次 reject `pruning points are violating finality`（每次在其重新注册后 1–4 min）。IBD 语境的 Reject 由**同步方**发出 ⇒ 这三个 peer 当时都在拿我们当 syncer，而我们 PP 还是陈旧的索引 60 ⇒ 被同一 else 分支拒绝。86.48.24.208 每 30 s 复位 = 该循环的另一端。⇒ 该分支在协议里的语义就是"陈旧 PP 的节点不配当 syncer"；D-d 放宽的是我们这一侧去接受这样的 syncer。
+> - 我们 PP 00:05:59Z 推进后：零 PP 类 reject；仅 00:12:03Z（70.178）/ 00:14:35Z（152.53）两次 `timeout expired after 120s`（前者落在 00:09:59–00:11:04Z 我们校验 UTXO commitment 的忙窗）与复位；00:15:31Z 起三 peer 安静连着。"不再拒"与"不再试"本机不可分。
+> - **零代码路 `--connect=70.178.95.86` 不达目的**：全日志唯一被证明"在我们未来、能当 syncer"的 peer 只有 136.243.93.17（唯一触发过我们 IBD）；落后/新起的 peer 不会送未来的 relay 块、永远不触发 IBD；`--connect` 独占还会掉线 136.243.93.17。已报 Bettor（msg cad5972a），不建议。
+> - **D-d 预审基线**（flow.rs:360-440）：Sync 型路径不从 syncer 写 pruning point store（`import_pruning_points` 仅 headers-proof :758/:789；`sync_new_utxo_set(syncer_pp)` 仅 HeadersProof/PruningCatchUp :416/:432）；Lagging→Sync 在 `!is_utxo_stable` 时会向 syncer 要**我们 PP** 的 UTXO 集（:387），PP≤65 的 syncer 没有 ⇒ 失败无害。本机 00:11:04Z `Pruning point UTXO commitment was verified correctly` / `Updated the pruning point UTXO set` ⇒ utxo 已 stable ⇒ 放宽后走 `(Lagging, true)`。审点：保留 `is_chain_ancestor_of(syncer_pp, our_pp)` 关、未知哈希 fail-closed、flag 默认 4、warn 行可 grep、单测含未知哈希与 finality 冲突两例。
