@@ -12235,3 +12235,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - 相位回顾：11:03→11:21Z 对端 reset 后新连接同速跟随（≈20 bps，lag 平台 410–420 s，自触发休眠）→ 11:21:20Z 对端停送 → 11:21:45Z D-c 接管（lag 516 s，6 m 46 s 完成）→ 11:30:39Z 再自触发（2 m 37 s）= 回到爬行+自触发节律 → 11:40:11Z 对端 broken pipe。**两相位切换无缝、无 failed/backoff。**
 - 对端稳定性（进 6 h 页 §4）：10:59:09Z reset（3.5 min 回）、11:40:11Z broken pipe（>10 min 未回，端口关 = 对端 kaspad 未在跑）。TN12 从我们视角只有这一个前向 peer（复盘 §5 结构项：第二前向节点）。已问 J1 有无别的 TN12 前向节点地址（994 单）。
 - console：isSynced 确认 false ⇒ ③ 门关（旧门只在 rpc-fail 放行，现在 rpc 正常）⇒ 钱路安全；12:20Z 落地包（6c-α + G-2 v2）与节点无关，照排。
+
+### (996) 🟢 **D-c / D-d 6 h 验收通过**（NWT 终稿 `docs/2026-09-07-NWT-dc-dd-6h-acceptance-page-v0.1.md` §7·窗 06:20:08→12:20:08Z）· 12:20Z 落地窗开：J2 apply 6c-α + G-2 v2 中 · syncer 第二次失联 ≥41 min 未回（另案 a） — Bettor 2026-09-07T12:22:46Z
+- **全窗计数**：自触发 22 / 21 成 / 1 failed(protocol)=对端 reset；transient 0；backoff 0；IBD 44 轮 43 成 1 错；D-d lags 行 44、`not recognized` 0（同 hash lag 28）；回滚串 0；canonical 行齐；跟随相位休眠→接管样本 11:21:45Z；周期 ② 中位 342 s ≈ 480 − 起始 lag。isSynced 直读：true 06:54→11:01Z（4 h 07）、11:03→11:43Z（40 min）⇒ **窗内 ≈80%**，两段 false 全归因 syncer 失联。**对照修前：synced ≈10%，最长 true 17 min。**
+- **未解另案（不扣分）**：(a) **TN12 单前向 peer 依赖**——syncer 窗内失联 2 次（10:59Z reset 3.5 min 自愈；11:40:11Z broken pipe 至今 ≥41 min，端口 False，lag 12:21Z 2,969 s 以 0.9 s/s 涨，地址簿无替代）；(b) 自触发资格按连接重置（SHOULD 按地址）；(c) Closed 文案；(d) not-eligible 每轮重印。杠杆只有第二个 TN12 前向节点（已问 J1）。
+- **落地窗**：12:20:36Z 到；J2 GO apply（6c-α → G-2 v2 → 7+7 组 → lint → 两笔 pathspec commit）；kanet.env:305 `KASPA_RPC_LOCAL_ONLY=1` 已预置（KASPA_NETWORK=testnet-12 在）；我核 hash 后推 → console 重启一次（③ 门全关期，最干净）。
+- **DECISIONS 待记**：D-c/D-d 上线（默认动作 980 执行，Owner 未否）— 等 Owner 一句 ack 后写 D-0xx；G-1 GO 仍待。
