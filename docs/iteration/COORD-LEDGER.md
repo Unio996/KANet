@@ -12086,3 +12086,11 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **967 口径更正**：NWT (b) 按 broadcast/submit/payout 文本计 0，漏了 `pool_settle_tx submit fail` 形 ⇒ **窗内广播尝试 = 1**（jepu1 settle-TX，被节点拒，txid 无，状态未推进——NO TX NO STATE CHANGE 守住）。审计脚本 pattern 请 NWT 加 `submit fail`。
 - **S-1（新·Owner 结算积压议程）**：jepu1 的 GIVEUP 分支条件含 `!refund_dispatched_at`，而它 06-28 已置 ⇒ **永不冻结**；07-18 的"暂停"只是 metadata 注记、status 仍 `collecting_sigs` ⇒ **47 天每小时真广播一次被节点拒（1116 次）**，与 08-06 P1"冻结=状态非注记"同族。裁：不在今晚动（钱路状态机，Owner 批）；进 6c-β/γ 同批评估（终态语义），或单独 P1。
 - G-2 设计 v0.1（J2，D-c 后）须含本条 (c) 作反例：门的 synced 读数必须来自 `networkId === KASPA_NETWORK` 的节点，否则 fail-closed。
+
+### (969) **审计 (b) 再更正（NWT 00:03Z）：窗内广播 = 35 笔真实链上 tx（`broadcaster-utxo` UTXO 再平衡·门外 cron·与窗前同频）+ 1 笔 settle-tx 被拒（relay 层 15 次尝试）** · 审计脚本漏 = 只抓 ISO 戳行（relay/broadcaster 行用本地时间格式）· 新议题：门外钱路 cron 清单 — Bettor 2026-09-07T00:00:06Z
+- **jepu1 settle-TX**：relay `[relay:broker-1] … command pool_settle_tx failed: RPC timeout` 22:57:51Z 起每分钟一条到 23:10:51Z（14 条）→ 23:11:27Z `Rejected transaction f9e64afc…`（kaspad 回来 14 s 后到节点、确定性拒）；settler 侧只记一次 fail#1116 ⇒ 同一提交命令 relay 层 15 次尝试（14 未到节点、1 到节点被拒）。无 txid、无状态推进。
+- **`[broadcaster-utxo]`**（`src/lib/broadcaster-utxo.mjs`，KANet-UI 880 域 N-medium-UTXO 维护 cron，走 `sendCommandAsync` 到 broadcaster relay，**不在 ③ 门 15 站点内**）：窗内 42 行 = **35 条 `<relay> rebalanced 30→29 (target 30) tx=<txid>`** + 7 条 tick 汇总（rebalanced 9/6/1/1/5/4/9，failed 0/3/8/8/4/5/0——failed=8/8 两 tick 落在节点宕机期）。**35 笔真实链上 tx**（自转账/找零维护，只花手续费）；基线窗前一小时 59 行 ⇒ 同频、非窗特有；但审计数必须对。
+- **修正后两数**：状态变更 = 1 行（jepu1 退避簿记）+ 11 标记行；**广播 = 35 笔（UTXO 再平衡·门外）+ 1 笔（settle-tx 被拒）**。落链未核（`kaspa_tx_log` 按地址过滤，broadcaster 地址未必在监视集）⇒ **派 NWT 只读抽样 3–5 笔 getTransaction/utxo**。
+- **脚本漏洞（NWT 自报）**：只抓 `2026-09-06T23:…` ISO 戳行，relay 用 `9/7/2026, 06:11:27` 本地格式、broadcaster 行无 ISO 戳 ⇒ 漏计；已改行号区间 + 相邻 `at=` 钉时。教训同 memory `feedback-shadow-compare-…-a-proof-artefact-must-be-rerun-not-read`：审计 pattern 要先对着日志行形穷举再计数。
+- **G-2 反例口径**：23:11:21Z settle tick "本该 skip 却跑进来" ✓；"门读数来自 mainnet 端点"NWT 只有反面证据（窗内 rpc-fail 全 connect timeout、0 条 ok 读）⇒ **不能证也不能证伪**，红队按"门读数须来自 networkId===KASPA_NETWORK 节点否则 fail-closed"压。
+- **新议题（进 G-1/G-2 清单）**：**门外钱路 cron 清单要列全**——broadcaster-utxo 在节点宕机期照跑（failed=8/8）；NWT 出 `sendCommandAsync` 调用方全表。
