@@ -1,0 +1,803 @@
+diff --git a/consensus/core/src/config/mod.rs b/consensus/core/src/config/mod.rs
+index c30e7070..51776c05 100644
+--- a/consensus/core/src/config/mod.rs
++++ b/consensus/core/src/config/mod.rs
+@@ -74,6 +74,14 @@ pub struct Config {
+ 
+     /// The number of days to keep data for
+     pub retention_period_days: Option<f64>,
++
++    /// D-c relay-mode self-triggered IBD: sink-timestamp lag (seconds) at/above which an idle IBD flow asks its peer for
++    /// its sink and starts a (small) IBD round itself. 0 disables (legacy behavior: IBD only via relay-block orphan path).
++    pub ibd_self_trigger_lag_secs: u64,
++    /// D-c: idle-check interval (seconds) of the IBD flow's relay-block wait.
++    pub ibd_self_trigger_check_secs: u64,
++    /// D-c: cap (seconds) for the per-peer exponential backoff after a failed self-trigger attempt.
++    pub ibd_self_trigger_backoff_max_secs: u64,
+ }
+ 
+ impl Config {
+@@ -103,6 +111,11 @@ impl Config {
+             disable_upnp: false,
+             ram_scale: 1.0,
+             retention_period_days: None,
++            // D-c: library/test/simnet default = 0 (legacy behavior, feature off). The kaspad binary turns it on via
++            // Args (default 480 s, design v0.1.1 §9 Q1: keeps isSynced true across the trigger) -> apply_to_config.
++            ibd_self_trigger_lag_secs: 0,
++            ibd_self_trigger_check_secs: 60,
++            ibd_self_trigger_backoff_max_secs: 1800,
+         }
+     }
+ 
+diff --git a/kaspad/src/args.rs b/kaspad/src/args.rs
+index c2d705a8..26c32307 100644
+--- a/kaspad/src/args.rs
++++ b/kaspad/src/args.rs
+@@ -93,6 +93,10 @@ pub struct Args {
+     pub disable_grpc: bool,
+     pub ram_scale: f64,
+     pub retention_period_days: Option<f64>,
++    // D-c relay-mode self-triggered IBD (docs/2026-09-06-bettor-dc-relay-mode-self-trigger-ibd-design-v0.1.md)
++    pub ibd_self_trigger_lag_secs: u64,
++    pub ibd_self_trigger_check_secs: u64,
++    pub ibd_self_trigger_backoff_max_secs: u64,
+ 
+     pub override_params_file: Option<String>,
+ 
+@@ -151,6 +155,9 @@ impl Default for Args {
+             disable_grpc: false,
+             ram_scale: 1.0,
+             retention_period_days: None,
++            ibd_self_trigger_lag_secs: 480,
++            ibd_self_trigger_check_secs: 60,
++            ibd_self_trigger_backoff_max_secs: 1800,
+             override_params_file: None,
+             rocksdb_preset: None,
+             rocksdb_wal_dir: None,
+@@ -176,6 +183,9 @@ impl Args {
+         config.externalip = self.externalip.map(|v| v.normalize(config.default_p2p_port()));
+         config.ram_scale = self.ram_scale;
+         config.retention_period_days = self.retention_period_days;
++        config.ibd_self_trigger_lag_secs = self.ibd_self_trigger_lag_secs;
++        config.ibd_self_trigger_check_secs = self.ibd_self_trigger_check_secs;
++        config.ibd_self_trigger_backoff_max_secs = self.ibd_self_trigger_backoff_max_secs;
+ 
+         #[cfg(feature = "devnet-prealloc")]
+         if let Some(num_prealloc_utxos) = self.num_prealloc_utxos {
+@@ -463,6 +473,29 @@ a large RAM (~64GB) can set this value to ~3.0-4.0 and gain superior performance
+                 .help("RocksDB block cache size in MB. Default: 256MB for HDD preset (scales with --ram-scale). \
+                        Increase for public RPC nodes with heavy query loads. Example: --rocksdb-cache-size=2048 for 2GB cache.")
+         )
++        .arg(
++            Arg::new("ibd-self-trigger-lag-secs")
++                .long("ibd-self-trigger-lag-secs")
++                .env("KASPAD_IBD_SELF_TRIGGER_LAG_SECS")
++                .require_equals(true)
++                .value_parser(clap::value_parser!(u64))
++                .help("Relay-mode self-triggered IBD: when the sink header timestamp lags wall clock by at least this many seconds, an idle IBD flow \
++                       asks its peer for its sink and starts an IBD round itself. 0 disables (IBD only via relay-block orphan path). Default: 480")
++        )
++        .arg(
++            Arg::new("ibd-self-trigger-check-secs")
++                .long("ibd-self-trigger-check-secs")
++                .require_equals(true)
++                .value_parser(clap::value_parser!(u64))
++                .help("Relay-mode self-triggered IBD: idle-check interval in seconds. Default: 60")
++        )
++        .arg(
++            Arg::new("ibd-self-trigger-backoff-max-secs")
++                .long("ibd-self-trigger-backoff-max-secs")
++                .require_equals(true)
++                .value_parser(clap::value_parser!(u64))
++                .help("Relay-mode self-triggered IBD: cap in seconds for the per-peer exponential backoff after a failed attempt. Default: 1800")
++        )
+         ;
+ 
+     #[cfg(feature = "devnet-prealloc")]
+@@ -544,6 +577,17 @@ impl Args {
+             disable_grpc: arg_match_unwrap_or::<bool>(&m, "nogrpc", defaults.disable_grpc),
+             ram_scale: arg_match_unwrap_or::<f64>(&m, "ram-scale", defaults.ram_scale),
+             retention_period_days: m.get_one::<f64>("retention-period-days").cloned().or(defaults.retention_period_days),
++            ibd_self_trigger_lag_secs: arg_match_unwrap_or::<u64>(&m, "ibd-self-trigger-lag-secs", defaults.ibd_self_trigger_lag_secs),
++            ibd_self_trigger_check_secs: arg_match_unwrap_or::<u64>(
++                &m,
++                "ibd-self-trigger-check-secs",
++                defaults.ibd_self_trigger_check_secs,
++            ),
++            ibd_self_trigger_backoff_max_secs: arg_match_unwrap_or::<u64>(
++                &m,
++                "ibd-self-trigger-backoff-max-secs",
++                defaults.ibd_self_trigger_backoff_max_secs,
++            ),
+ 
+             #[cfg(feature = "devnet-prealloc")]
+             num_prealloc_utxos: m.get_one::<u64>("num-prealloc-utxos").cloned(),
+diff --git a/protocol/flows/src/ibd/flow.rs b/protocol/flows/src/ibd/flow.rs
+index c256e2ef..0d287734 100644
+--- a/protocol/flows/src/ibd/flow.rs
++++ b/protocol/flows/src/ibd/flow.rs
+@@ -1,7 +1,11 @@
+ use crate::{
+     flow_context::FlowContext,
+     flow_trait::Flow,
+-    ibd::{HeadersChunkStream, TrustedEntryStream, negotiate::ChainNegotiationOutput},
++    ibd::{
++        HeadersChunkStream, TrustedEntryStream,
++        negotiate::ChainNegotiationOutput,
++        self_trigger::{ErrClass, Gate, SelfTriggerCfg, SelfTriggerState, Stage, classify, initial_jitter, should_contend, sink_lag},
++    },
+ };
+ use futures::future::{Either, join_all, select, try_join_all};
+ use itertools::Itertools;
+@@ -20,7 +24,7 @@ use kaspa_hashes::Hash;
+ use kaspa_muhash::MuHash;
+ use kaspa_p2p_lib::{
+     IncomingRoute, Router,
+-    common::ProtocolError,
++    common::{DEFAULT_TIMEOUT, ProtocolError},
+     convert::{
+         header::{HeaderFormat, Versioned},
+         model::trusted::TrustedDataPackage,
+@@ -37,7 +41,7 @@ use std::{
+     sync::Arc,
+     time::{Duration, Instant},
+ };
+-use tokio::time::sleep;
++use tokio::time::{sleep, timeout};
+ 
+ use super::{HeadersChunk, IBD_BATCH_SIZE, PruningPointUtxosetChunkStream, progress::ProgressReporter};
+ type BlockBody = Vec<Transaction>;
+@@ -52,6 +56,11 @@ pub struct IbdFlow {
+ 
+     // Receives relay blocks from relay flow which are out of orphan resolution range and hence trigger IBD
+     relay_receiver: JobReceiver<Block>,
++
++    // D-c relay-mode self-triggered IBD (docs/2026-09-06-bettor-dc-relay-mode-self-trigger-ibd-design-v0.1.md §4/§9):
++    // per-peer state (backoff, eligibility, counters) and the node-wide config snapshot.
++    self_trigger: SelfTriggerState,
++    self_trigger_cfg: SelfTriggerCfg,
+ }
+ 
+ #[async_trait::async_trait]
+@@ -87,27 +96,245 @@ impl IbdFlow {
+         body_only_ibd_permitted: bool,
+         header_format: HeaderFormat,
+     ) -> Self {
+-        Self { ctx, router, incoming_route, relay_receiver, body_only_ibd_permitted, header_format }
++        let self_trigger_cfg = SelfTriggerCfg::from_secs(
++            ctx.config.ibd_self_trigger_lag_secs,
++            ctx.config.ibd_self_trigger_check_secs,
++            ctx.config.ibd_self_trigger_backoff_max_secs,
++        );
++        Self {
++            ctx,
++            router,
++            incoming_route,
++            relay_receiver,
++            body_only_ibd_permitted,
++            header_format,
++            self_trigger: SelfTriggerState::new(),
++            self_trigger_cfg,
++        }
+     }
+ 
+     async fn start_impl(&mut self) -> Result<(), ProtocolError> {
+-        while let Ok(relay_block) = self.relay_receiver.recv().await {
+-            if let Some(_guard) = self.ctx.try_set_ibd_running(self.router.key(), relay_block.header.daa_score) {
+-                info!("IBD started with peer {}", self.router);
++        if !self.self_trigger_cfg.enabled() {
++            // Legacy behavior (--ibd-self-trigger-lag-secs=0): IBD is only ever triggered by a relay block
++            // which is out of orphan resolution range (relay flow -> ibd_sender job channel).
++            while let Ok(relay_block) = self.relay_receiver.recv().await {
++                self.run_relay_triggered_ibd(relay_block).await?;
++            }
++            return Ok(());
++        }
+ 
+-                match self.ibd(relay_block).await {
+-                    Ok(_) => info!("IBD with peer {} completed successfully", self.router),
+-                    Err(e) => {
+-                        info!("IBD with peer {} completed with error: {}", self.router, e);
+-                        return Err(e);
+-                    }
+-                }
++        // D-c: same loop, but an idle wait on the relay-block job channel wakes a self-trigger check (design §4.1).
++        // `relay_receiver.recv()` is cancel-safe (async_channel), so a timeout never loses a queued job (§9①).
++        // The first wait is jittered so flows registered together do not all check in the same instant (§9 Q4).
++        let mut wait = initial_jitter(&self.self_trigger_cfg, rand::random::<f64>());
++        loop {
++            match timeout(wait, self.relay_receiver.recv()).await {
++                Ok(Ok(relay_block)) => self.run_relay_triggered_ibd(relay_block).await?,
++                Ok(Err(_)) => return Ok(()), // job channel closed: relay flow exited
++                Err(_elapsed) => self.self_trigger_tick().await?,
+             }
++            wait = self.self_trigger_cfg.check_interval;
+         }
++    }
+ 
++    /// The pre-D-c IBD entry: a relay block out of orphan resolution range triggered us. Semantics unchanged
++    /// (including `return Err` -> flow exit -> disconnect on IBD error); only lifted into a helper so both loops share it.
++    async fn run_relay_triggered_ibd(&mut self, relay_block: Block) -> Result<(), ProtocolError> {
++        if let Some(_guard) = self.ctx.try_set_ibd_running(self.router.key(), relay_block.header.daa_score) {
++            info!("IBD started with peer {}", self.router);
++
++            match self.ibd(relay_block).await {
++                Ok(_) => {
++                    info!("IBD with peer {} completed successfully", self.router);
++                    // D-c §9④: only peers that completed an IBD with us become eligible for self-trigger.
++                    self.self_trigger.mark_completed_ibd();
++                }
++                Err(e) => {
++                    info!("IBD with peer {} completed with error: {}", self.router, e);
++                    return Err(e);
++                }
++            }
++        }
+         Ok(())
+     }
+ 
++    /// D-c idle branch (design §4.1 pseudo-code + §9 items). Any failure here backs off instead of exiting the flow,
++    /// except protocol-class errors from `ibd()` itself which keep the original disconnect semantics (§9⑥).
++    async fn self_trigger_tick(&mut self) -> Result<(), ProtocolError> {
++        let cfg = self.self_trigger_cfg;
++        // Lag = wall clock - sink header timestamp, same source as MiningRuleEngine::is_nearly_synced (§9 Q5).
++        let lag = {
++            let session = self.ctx.consensus().unguarded_session();
++            let sink_ts = session.async_get_sink_daa_score_timestamp().await;
++            sink_lag(unix_now(), sink_ts.timestamp)
++        };
++        match self.self_trigger.gate(&cfg, Instant::now(), self.ctx.is_ibd_running(), lag) {
++            Gate::Ready(_) => {}
++            Gate::NotEligible => {
++                // One info line per peer so ops can see why nothing self-triggers after a restart (NWT SHOULD②).
++                if self.self_trigger.take_not_eligible_notice() {
++                    info!(
++                        "IBD self-trigger: peer {} not eligible until it completes a first IBD with us (lag {}s)",
++                        self.router,
++                        lag.as_secs()
++                    );
++                }
++                return Ok(());
++            }
++            gate => {
++                debug!("IBD self-trigger idle: peer {} gate={:?} lag={}s", self.router, gate, lag.as_secs());
++                return Ok(());
++            }
++        }
++
++        // 0. Drain whatever is still queued on this flow's IBD route BEFORE any request (NWT MUST①): an interrupted
++        //    previous IBD (D-b depth 2) can leave 1–2 unread `IbdBlock`s, and a late `BlockLocator` reply from a timed-out
++        //    earlier attempt can also sit there; either would be read by the next `dequeue_with_timeout!` as an
++        //    `UnexpectedMessage`. In idle state every message on this route is stale.
++        self.drain_stale_route("before-locator");
++
++        // 1. Peer sink hash = first element of its full selected-chain locator (negotiate.rs); only the hash is used here,
++        //    `ibd()` re-negotiates the chain segment itself (§9 Q2).
++        let syncer_sink = match self.get_syncer_chain_block_locator(None, None, DEFAULT_TIMEOUT).await {
++            Ok(v) if !v.is_empty() => v[0],
++            Ok(_) => {
++                return self.self_trigger_fail(
++                    Stage::Locator,
++                    ProtocolError::Other("Expecting initial syncer chain block locator to contain at least one element"),
++                );
++            }
++            Err(e) => return self.self_trigger_fail(Stage::Locator, e),
++        };
++
++        // 2. Fetch the sink block itself (verifies by hash, discards mismatches; §9 Q3).
++        let block = match self.request_single_block(syncer_sink).await {
++            Ok(b) => b,
++            Err(e) => return self.self_trigger_fail(Stage::Block, e),
++        };
++
++        // 3. Compare before contending (§9⑤): strictly more blue work AND daa >= local sink daa + DAA_MARGIN.
++        let (local_blue_work, local_daa) = {
++            let session = self.ctx.consensus().unguarded_session();
++            let sink = session.async_get_sink().await;
++            let header = session.async_get_header(sink).await?;
++            (header.blue_work, header.daa_score)
++        };
++        if !should_contend(local_blue_work, local_daa, block.header.blue_work, block.header.daa_score) {
++            let backoff = self.self_trigger.record_failure(&cfg, Instant::now());
++            warn!(
++                "IBD self-trigger skipped: peer {} sink {} (daa {}) is not newer than local sink (daa {}) — backoff {}s",
++                self.router,
++                block.hash(),
++                block.header.daa_score,
++                local_daa,
++                backoff.as_secs()
++            );
++            return Ok(());
++        }
++
++        // 4. Contend for the node-wide IBD slot; losing means another peer is syncing — skip without backoff (§4.2 (d)).
++        let Some(_guard) = self.ctx.try_set_ibd_running(self.router.key(), block.header.daa_score) else {
++            debug!("IBD self-trigger: peer {} lost the IBD slot (another IBD is running), skipping this round", self.router);
++            return Ok(());
++        };
++        // Canonical lines FIRST (NWT MUST②): every gate/monitor on the host greps `IBD started with peer` /
++        // `IBD with peer … completed successfully|with error`; the self-trigger line below is an additional counter line.
++        info!("IBD started with peer {}", self.router);
++        info!(
++            "IBD self-trigger with peer {}: sink lag {}s >= {}s, syncer sink {} (daa {}, local daa {})",
++            self.router,
++            lag.as_secs(),
++            cfg.lag_threshold.as_secs(),
++            block.hash(),
++            block.header.daa_score,
++            local_daa
++        );
++        match self.ibd(block).await {
++            Ok(()) => {
++                info!("IBD with peer {} completed successfully", self.router);
++                info!("IBD self-trigger with peer {} completed successfully", self.router);
++                self.self_trigger.record_success();
++                Ok(())
++            }
++            Err(e) => {
++                info!("IBD with peer {} completed with error: {}", self.router, e);
++                self.self_trigger_fail(Stage::Ibd, e)
++            }
++        }
++        // `_guard` (IbdRunningGuard) drops here, releasing the IBD slot — never cloned or moved out (§9②).
++    }
++
++    /// Error policy of the self-trigger branch (§9⑥ + NWT MUST③ per-stage table): transient -> drain the route, back
++    /// off, keep the flow; protocol/data errors (ibd stage only) and closed connections -> propagate (flow exits, peer
++    /// disconnects, exactly as the relay path).
++    fn self_trigger_fail(&mut self, stage: Stage, e: ProtocolError) -> Result<(), ProtocolError> {
++        match classify(&e, stage) {
++            ErrClass::Transient => {
++                // A late reply to the request that just failed may still arrive; drop it now so the next attempt's
++                // wait does not read it as an unexpected message (NWT MUST①).
++                self.drain_stale_route("after-transient-failure");
++                let backoff = self.self_trigger.record_failure(&self.self_trigger_cfg, Instant::now());
++                warn!(
++                    "IBD self-trigger failed (transient) at {:?} with peer {}: {} — backoff {}s",
++                    stage,
++                    self.router,
++                    e,
++                    backoff.as_secs()
++                );
++                Ok(())
++            }
++            ErrClass::Protocol | ErrClass::Closed => {
++                info!("IBD self-trigger failed (protocol) at {:?} with peer {}: {}", stage, self.router, e);
++                Err(e)
++            }
++        }
++    }
++
++    /// Non-blocking drain of this flow's IBD route. In idle state (no IBD running in this flow) every queued message is
++    /// stale by construction: leftovers of an interrupted IBD (D-b depth-2 `IbdBlock`s) or late replies to a timed-out
++    /// self-trigger request. Counted into `stale_dropped` (design §6 补 iv: must stay bounded, never grow monotonically).
++    fn drain_stale_route(&mut self, when: &str) {
++        let mut drained = 0u64;
++        while self.incoming_route.try_recv().is_ok() {
++            drained += 1;
++        }
++        if drained > 0 {
++            self.self_trigger.stale_dropped += drained;
++            warn!(
++                "IBD self-trigger: drained {} stale message(s) from the IBD route of peer {} ({}; total {})",
++                drained, self.router, when, self.self_trigger.stale_dropped
++            );
++        }
++    }
++
++    /// Request exactly one full block over the IBD route (`RequestIbdBlocks([hash])` -> `IbdBlock`). Before sending,
++    /// non-blockingly drains whatever is still queued on this flow's route (an interrupted previous IBD under D-b depth 2
++    /// can leave up to two unread `IbdBlock`s); responses are verified by hash and mismatches are discarded (§9 Q3).
++    async fn request_single_block(&mut self, hash: Hash) -> Result<Block, ProtocolError> {
++        self.drain_stale_route("before-block-request");
++        self.router
++            .enqueue(make_message!(Payload::RequestIbdBlocks, RequestIbdBlocksMessage { hashes: vec![(&hash).into()] }))
++            .await?;
++        let deadline = Instant::now() + DEFAULT_TIMEOUT;
++        loop {
++            let remaining = deadline.saturating_duration_since(Instant::now());
++            if remaining.is_zero() {
++                return Err(ProtocolError::Timeout(DEFAULT_TIMEOUT));
++            }
++            let msg = dequeue_with_timeout!(self.incoming_route, Payload::IbdBlock, remaining)?;
++            let block: Block = Versioned(self.header_format, msg).try_into()?;
++            if block.hash() != hash {
++                self.self_trigger.stale_dropped += 1;
++                warn!("IBD self-trigger: discarding unexpected block {} from peer {} (expected {})", block.hash(), self.router, hash);
++                continue;
++            }
++            if block.is_header_only() {
++                return Err(ProtocolError::OtherOwned(format!("sent header of {} where expected block with body", block.hash())));
++            }
++            return Ok(block);
++        }
++    }
++
+     async fn ibd(&mut self, relay_block: Block) -> Result<(), ProtocolError> {
+         let mut session = self.ctx.consensus().session().await;
+ 
+diff --git a/protocol/flows/src/ibd/mod.rs b/protocol/flows/src/ibd/mod.rs
+index 06f7b548..01cb3e0c 100644
+--- a/protocol/flows/src/ibd/mod.rs
++++ b/protocol/flows/src/ibd/mod.rs
+@@ -1,6 +1,7 @@
+ mod flow;
+ mod negotiate;
+ mod progress;
++pub mod self_trigger;
+ mod streams;
+ 
+ pub use flow::*;
+diff --git a/protocol/flows/src/ibd/negotiate.rs b/protocol/flows/src/ibd/negotiate.rs
+index 3732250f..c6a64a2e 100644
+--- a/protocol/flows/src/ibd/negotiate.rs
++++ b/protocol/flows/src/ibd/negotiate.rs
+@@ -167,7 +167,7 @@ impl IbdFlow {
+         Ok(ChainNegotiationOutput { syncer_virtual_selected_parent, highest_known_syncer_chain_hash, syncer_pruning_point })
+     }
+ 
+-    async fn get_syncer_chain_block_locator(
++    pub(super) async fn get_syncer_chain_block_locator(
+         &mut self,
+         low: Option<Hash>,
+         high: Option<Hash>,
+diff --git a/protocol/flows/src/ibd/self_trigger.rs b/protocol/flows/src/ibd/self_trigger.rs
+new file mode 100644
+index 00000000..ddefc4a2
+--- /dev/null
++++ b/protocol/flows/src/ibd/self_trigger.rs
+@@ -0,0 +1,354 @@
++//! D-c: relay-mode self-triggered IBD — pure per-peer state machine (no I/O), so the decision logic is unit-testable
++//! without a router. `IbdFlow::start_impl` drives it from the idle (timeout) branch of `relay_receiver.recv()`.
++//!
++//! Design: docs/2026-09-06-bettor-dc-relay-mode-self-trigger-ibd-design-v0.1.md §4 + §9 (v0.1.1, NWT red-team items).
++//! Rules (design §4.2 / §9): per-peer exponential backoff (×2, capped); "compare before contending" (peer sink must have
++//! strictly greater blue work AND daa >= local + DAA_MARGIN); CAS failure does not enqueue; only peers that completed at
++//! least one IBD with us are eligible (fake-sink DoS mitigation, §9④); transient errors back off, protocol errors keep the
++//! original `return Err` (disconnect) semantics (§9⑥).
++
++use kaspa_p2p_lib::common::ProtocolError;
++use std::time::{Duration, Instant};
++
++/// Peer sink must be at least this many DAA ahead of the local sink to be worth an IBD (design §9⑤, ≈1 min at 10 bps).
++pub const DAA_MARGIN: u64 = 600;
++/// Initial backoff after a failed self-trigger attempt; doubles up to `SelfTriggerCfg::backoff_max`.
++pub const BACKOFF_BASE: Duration = Duration::from_secs(60);
++
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub struct SelfTriggerCfg {
++    /// Sink-timestamp lag at/above which we self-trigger. `Duration::ZERO` disables the feature entirely
++    /// (the flow then behaves exactly as before: plain `relay_receiver.recv()`).
++    pub lag_threshold: Duration,
++    /// Idle interval of the `relay_receiver` wait after which the self-trigger check runs.
++    pub check_interval: Duration,
++    /// Cap for the exponential backoff.
++    pub backoff_max: Duration,
++}
++
++impl SelfTriggerCfg {
++    pub fn from_secs(lag_secs: u64, check_secs: u64, backoff_max_secs: u64) -> Self {
++        Self {
++            lag_threshold: Duration::from_secs(lag_secs),
++            check_interval: Duration::from_secs(check_secs.max(1)),
++            backoff_max: Duration::from_secs(backoff_max_secs.max(1)),
++        }
++    }
++    pub fn enabled(&self) -> bool {
++        !self.lag_threshold.is_zero()
++    }
++}
++
++/// Why the idle branch decided not to (or to) attempt a self-trigger this round.
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub enum Gate {
++    Disabled,
++    IbdRunning,
++    /// Peer never completed an IBD with us (design §9④): not eligible yet.
++    NotEligible,
++    /// Still inside backoff; remaining time.
++    Backoff(Duration),
++    /// Sink lag below threshold; current lag.
++    LagBelow(Duration),
++    /// Attempt now; current lag.
++    Ready(Duration),
++}
++
++/// How a failure in the self-trigger branch must be handled (design §9⑥).
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub enum ErrClass {
++    /// Timeout / peer state oddity: back off and keep the flow (and the connection) alive.
++    Transient,
++    /// Protocol / data-validity errors (finality conflict, pruning-point inconsistencies, malformed or unexpected
++    /// messages, consensus rule errors): keep the original semantics — propagate `Err` so the flow exits and the
++    /// peer is disconnected.
++    Protocol,
++    /// The connection is already gone; the flow must exit.
++    Closed,
++}
++
++/// Where in the self-trigger sequence an error happened (NWT review MUST③: classification is per stage).
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub enum Stage {
++    /// `get_syncer_chain_block_locator(None, None)` — we are the requester; any odd reply is the peer's momentary state.
++    Locator,
++    /// `request_single_block` — same: we are the requester.
++    Block,
++    /// `ibd()` itself — the original IBD error semantics apply (finality / pruning-point / consensus errors disconnect).
++    Ibd,
++}
++
++pub fn classify(err: &ProtocolError, stage: Stage) -> ErrClass {
++    if matches!(err, ProtocolError::ConnectionClosed) {
++        return ErrClass::Closed;
++    }
++    match stage {
++        // Requester stages: timeouts, unexpected/malformed replies, empty locators, header-only blocks — all are
++        // "peer did not give us what we asked for right now": back off and keep the connection (MUST③).
++        Stage::Locator | Stage::Block => ErrClass::Transient,
++        Stage::Ibd => match err {
++            ProtocolError::Timeout(_) => ErrClass::Transient,
++            // Empty locator inside negotiation = peer momentarily has nothing to offer (design §4.1).
++            ProtocolError::Other(s) if s.starts_with("Expecting initial syncer chain block locator") => ErrClass::Transient,
++            _ => ErrClass::Protocol,
++        },
++    }
++}
++
++#[derive(Debug)]
++pub struct SelfTriggerState {
++    backoff: Duration,
++    backoff_until: Option<Instant>,
++    completed_ibd_once: bool,
++    not_eligible_logged: bool,
++    /// Counters for logs / acceptance (§6 补 iv: stale-drop count must stay bounded).
++    pub stale_dropped: u64,
++    pub triggers: u64,
++    pub failures: u64,
++}
++
++impl Default for SelfTriggerState {
++    fn default() -> Self {
++        Self {
++            backoff: BACKOFF_BASE,
++            backoff_until: None,
++            completed_ibd_once: false,
++            not_eligible_logged: false,
++            stale_dropped: 0,
++            triggers: 0,
++            failures: 0,
++        }
++    }
++}
++
++impl SelfTriggerState {
++    pub fn new() -> Self {
++        Self::default()
++    }
++
++    /// Mark that this peer completed an IBD with us (natural or self-triggered) — makes it eligible (design §9④).
++    pub fn mark_completed_ibd(&mut self) {
++        self.completed_ibd_once = true;
++    }
++
++    pub fn completed_ibd_once(&self) -> bool {
++        self.completed_ibd_once
++    }
++
++    pub fn current_backoff(&self) -> Duration {
++        self.backoff
++    }
++
++    /// Returns true exactly once: the first time the caller sees `Gate::NotEligible` (so ops get one info line
++    /// explaining why no self-trigger happens until the first completed IBD — NWT review SHOULD②).
++    pub fn take_not_eligible_notice(&mut self) -> bool {
++        if self.not_eligible_logged {
++            return false;
++        }
++        self.not_eligible_logged = true;
++        true
++    }
++
++    /// Decide whether to attempt a self-trigger this idle round. Pure function of the inputs.
++    pub fn gate(&self, cfg: &SelfTriggerCfg, now: Instant, ibd_running: bool, lag: Duration) -> Gate {
++        if !cfg.enabled() {
++            return Gate::Disabled;
++        }
++        if ibd_running {
++            return Gate::IbdRunning;
++        }
++        if !self.completed_ibd_once {
++            return Gate::NotEligible;
++        }
++        if let Some(until) = self.backoff_until
++            && now < until
++        {
++            return Gate::Backoff(until - now);
++        }
++        if lag < cfg.lag_threshold {
++            return Gate::LagBelow(lag);
++        }
++        Gate::Ready(lag)
++    }
++
++    /// Record a failed attempt: doubles the backoff (capped) and arms `backoff_until`. Returns the backoff applied.
++    pub fn record_failure(&mut self, cfg: &SelfTriggerCfg, now: Instant) -> Duration {
++        self.failures += 1;
++        let applied = self.backoff.min(cfg.backoff_max);
++        self.backoff_until = Some(now + applied);
++        self.backoff = (applied * 2).min(cfg.backoff_max);
++        applied
++    }
++
++    /// Record a successful self-triggered IBD: backoff returns to base, no armed backoff.
++    pub fn record_success(&mut self) {
++        self.triggers += 1;
++        self.backoff = BACKOFF_BASE;
++        self.backoff_until = None;
++        self.completed_ibd_once = true;
++    }
++}
++
++/// "Compare before contending" (design §9⑤): the peer's sink must have strictly greater blue work and be at least
++/// `DAA_MARGIN` DAA ahead of the local sink. `blue_work` is compared as the caller's ordered type via `Ord`.
++pub fn should_contend<W: PartialOrd>(local_blue_work: W, local_daa: u64, peer_blue_work: W, peer_daa: u64) -> bool {
++    peer_blue_work > local_blue_work && peer_daa >= local_daa.saturating_add(DAA_MARGIN)
++}
++
++/// Sink lag from the sink header timestamp (ms since epoch), same source as `MiningRuleEngine::is_nearly_synced`.
++/// Clock skew making the sink "in the future" yields zero lag (never negative).
++pub fn sink_lag(now_unix_ms: u64, sink_timestamp_ms: u64) -> Duration {
++    Duration::from_millis(now_unix_ms.saturating_sub(sink_timestamp_ms))
++}
++
++/// First-wait jitter ∈ [0, check_interval) so flows created together do not all check in the same instant (§9 Q4).
++pub fn initial_jitter(cfg: &SelfTriggerCfg, rand_unit: f64) -> Duration {
++    let f = rand_unit.clamp(0.0, 0.999_999);
++    cfg.check_interval.mul_f64(f)
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    fn cfg() -> SelfTriggerCfg {
++        SelfTriggerCfg::from_secs(480, 60, 1800)
++    }
++    fn eligible() -> SelfTriggerState {
++        let mut s = SelfTriggerState::new();
++        s.mark_completed_ibd();
++        s
++    }
++    const S: fn(u64) -> Duration = Duration::from_secs;
++
++    #[test]
++    fn self_trigger_disabled_when_lag_secs_zero() {
++        let c = SelfTriggerCfg::from_secs(0, 60, 1800);
++        assert!(!c.enabled());
++        assert_eq!(eligible().gate(&c, Instant::now(), false, S(10_000)), Gate::Disabled);
++    }
++
++    #[test]
++    fn timeout_branch_skips_when_ibd_running() {
++        assert_eq!(eligible().gate(&cfg(), Instant::now(), true, S(10_000)), Gate::IbdRunning);
++    }
++
++    #[test]
++    fn not_eligible_before_first_completed_ibd() {
++        assert_eq!(SelfTriggerState::new().gate(&cfg(), Instant::now(), false, S(10_000)), Gate::NotEligible);
++        let mut s = SelfTriggerState::new();
++        s.mark_completed_ibd();
++        assert!(matches!(s.gate(&cfg(), Instant::now(), false, S(10_000)), Gate::Ready(_)));
++    }
++
++    #[test]
++    fn timeout_branch_skips_within_backoff() {
++        let mut s = eligible();
++        let t0 = Instant::now();
++        let applied = s.record_failure(&cfg(), t0);
++        assert_eq!(applied, BACKOFF_BASE);
++        assert!(matches!(s.gate(&cfg(), t0 + S(30), false, S(10_000)), Gate::Backoff(_)));
++        assert!(matches!(s.gate(&cfg(), t0 + S(60), false, S(10_000)), Gate::Ready(_)));
++    }
++
++    #[test]
++    fn lag_below_threshold_no_request() {
++        assert_eq!(eligible().gate(&cfg(), Instant::now(), false, S(479)), Gate::LagBelow(S(479)));
++    }
++
++    #[test]
++    fn lag_at_threshold_is_ready() {
++        assert_eq!(eligible().gate(&cfg(), Instant::now(), false, S(480)), Gate::Ready(S(480)));
++    }
++
++    #[test]
++    fn backoff_doubles_to_cap() {
++        let mut s = eligible();
++        let c = cfg();
++        let t0 = Instant::now();
++        let mut seen = vec![];
++        for i in 0..8 {
++            seen.push(s.record_failure(&c, t0 + S(i * 10_000)).as_secs());
++        }
++        assert_eq!(seen, vec![60, 120, 240, 480, 960, 1800, 1800, 1800]);
++    }
++
++    #[test]
++    fn ibd_ok_resets_backoff() {
++        let mut s = eligible();
++        let c = cfg();
++        let t0 = Instant::now();
++        s.record_failure(&c, t0);
++        s.record_failure(&c, t0);
++        assert!(s.current_backoff() > BACKOFF_BASE);
++        s.record_success();
++        assert_eq!(s.current_backoff(), BACKOFF_BASE);
++        assert!(matches!(s.gate(&c, t0, false, S(10_000)), Gate::Ready(_)));
++        assert_eq!(s.triggers, 1);
++    }
++
++    #[test]
++    fn not_newer_no_contend() {
++        // equal blue work ⇒ no; greater blue work but daa margin not met ⇒ no; both ⇒ yes
++        assert!(!should_contend(100u64, 1000, 100u64, 5000));
++        assert!(!should_contend(100u64, 1000, 101u64, 1000 + DAA_MARGIN - 1));
++        assert!(should_contend(100u64, 1000, 101u64, 1000 + DAA_MARGIN));
++        assert!(!should_contend(100u64, 1000, 99u64, 1_000_000));
++    }
++
++    #[test]
++    fn sink_lag_never_negative() {
++        assert_eq!(sink_lag(1_000_000, 1_500_000), Duration::ZERO);
++        assert_eq!(sink_lag(1_500_000, 1_000_000), Duration::from_millis(500_000));
++    }
++
++    #[test]
++    fn initial_jitter_within_check_interval() {
++        let c = cfg();
++        assert_eq!(initial_jitter(&c, 0.0), Duration::ZERO);
++        assert!(initial_jitter(&c, 0.5) >= S(29) && initial_jitter(&c, 0.5) <= S(31));
++        assert!(initial_jitter(&c, 1.0) < c.check_interval);
++        assert!(initial_jitter(&c, 7.0) < c.check_interval);
++    }
++
++    #[test]
++    fn classify_ibd_stage_transient_vs_protocol() {
++        let s = Stage::Ibd;
++        assert_eq!(classify(&ProtocolError::Timeout(S(1)), s), ErrClass::Transient);
++        assert_eq!(classify(&ProtocolError::ConnectionClosed, s), ErrClass::Closed);
++        assert_eq!(
++            classify(&ProtocolError::Other("Expecting initial syncer chain block locator to contain at least one element"), s),
++            ErrClass::Transient
++        );
++        assert_eq!(
++            classify(&ProtocolError::Other("peer is in a finality conflict with the local pruning point"), s),
++            ErrClass::Protocol
++        );
++        assert_eq!(classify(&ProtocolError::Other("pruning points are violating finality"), s), ErrClass::Protocol);
++        assert_eq!(classify(&ProtocolError::OtherOwned("expected block a but got b".into()), s), ErrClass::Protocol);
++        assert_eq!(classify(&ProtocolError::Other("sent header of x where expected block with body"), s), ErrClass::Protocol);
++    }
++
++    #[test]
++    fn classify_requester_stages_are_transient_except_closed() {
++        for s in [Stage::Locator, Stage::Block] {
++            assert_eq!(classify(&ProtocolError::Timeout(S(1)), s), ErrClass::Transient);
++            assert_eq!(classify(&ProtocolError::UnexpectedMessage("IbdChainBlockLocator", None), s), ErrClass::Transient);
++            assert_eq!(classify(&ProtocolError::Other("sent header of x where expected block with body"), s), ErrClass::Transient);
++            assert_eq!(classify(&ProtocolError::OtherOwned("expected block a but got b".into()), s), ErrClass::Transient);
++            assert_eq!(
++                classify(&ProtocolError::Other("peer is in a finality conflict with the local pruning point"), s),
++                ErrClass::Transient
++            );
++            assert_eq!(classify(&ProtocolError::ConnectionClosed, s), ErrClass::Closed);
++        }
++    }
++
++    #[test]
++    fn not_eligible_notice_fires_once() {
++        let mut s = SelfTriggerState::new();
++        assert!(s.take_not_eligible_notice());
++        assert!(!s.take_not_eligible_notice());
++        assert!(!s.take_not_eligible_notice());
++    }
++}

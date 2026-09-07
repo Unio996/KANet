@@ -1,0 +1,3 @@
+a39c60d27a36d460fe6504c09997ff02b259f24f
+D-c: NWT review fixes (3 MUST + 2 SHOULD) — drain stale IBD route before the locator request, canonical IBD log lines on the self-trigger path, per-stage error classification, Config default off / Args default 480, one-time not-eligible notice
+2026-09-07 05:52:17 +0700
