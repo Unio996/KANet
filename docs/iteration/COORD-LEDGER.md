@@ -12259,3 +12259,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - ① kaspa-wasm `Resolver.getUrl(Borsh,'testnet-12')` ×15 全 6 s 超时（公共 resolver 无 TN12 条目）；② 136.243.93.17:16311 TCP 关；③ 现连 3 peer 全 `/kaspad:1.1.1-toc.1/`、is_ibd_peer=false：86.48.24.208 开 wRPC 17210 ⇒ testnet-12、isSynced=false、virtualDaa 90,757,031（**比我们低 1.80M**）、pp bacaea94… daa 75,940,341（08-07）、sink 09-05T10:18Z（比我们更陈）；70.178.95.86 / 152.53.236.224 常见 wRPC 口全关；④ DNS seeder 只回这 3 个。
 - **含义**：我们现在是这 3 个 peer 眼中的"未来"（它们每 30 s 来拉又拒——它们的 pp 更陈）；TN12 上在我们未来的只有 136.243.93.17。它不回来 = 孤岛；无本机动作。**选项**：(a) 等它回（今天两次：3.5 min / ≥108 min）；(b) 向 TN12 运营者（kaspad.net / kaspa.ws seeder 维护方）要前向节点地址——需 Owner/J1 出面；(c) S-2 自建 N2（998）。
 - kaspad 40112 健康（D-c 三 peer not-eligible 通知每轮照打、无 error）；console 34928 G-2 fail-closed 正确（`no RPC node available … next note in 10 min` 限频、③ 门全 skip、零 rpc-fail 放行）。lag 13:25Z 6,842 s。
+
+### (1000) Owner 指令"尽快转向主网开发·做评估" ⇒ 评估 v0.1 `docs/2026-09-07-bettor-mainnet-pivot-assessment-v0.1.md` · **硬事实：主网 Toccata（covenant + ZK precompile）已激活**（主网 DAA 533,678,661 > 474,165,565，≈06-30 起；节点 v2.0.1；最低费率 100 sompi/gram ×100）· 我们活 kaspad 1.1.1-toc.1 的主网参数 covenant=never ⇒ 主网只用官方 release · J2/NWT 清单已派 — Bettor 2026-09-07T13:39:36Z
+- 结论：可转且应尽快——链侧前提已满足；门槛在钱路安全（G-1 MUST）、合约字节码全换（silverscript v1-rc1 破坏面 ⇒ 42 .sil + P2SH 全换）、费用 ×100、OP_PICK 修复上游作用域。TN12 单前向 peer 病在主网不存在。
+- 四波灰度：0 只读主网节点（与 S-2 合一上第二台机，本周）→ 1 通信/身份（手续费级）→ 2 签名型结算小额（G-1 enforce + NWT 真钱清单 + S-1 + 自动审计）→ 3 ZK 结算（合约迁移 + D-005 隔离测试 + Owner 拍）。TN12 保留 staging；D-c/D-d 不带上主网。
+- 派：J2 三清单（TN12 绑定五类计数 / 1.1.1-toc.1→v2.0.1 ABI 差异 / 主网节点构建与资源）；NWT 真钱前置 MUST/SHOULD 清单。v0.2 合并。
+- Owner 待拍：波 0 GO（第二台机规格/来源）、G-1 GO、合约迁移提为波 3 前置、主网密钥/资金上限策略。
