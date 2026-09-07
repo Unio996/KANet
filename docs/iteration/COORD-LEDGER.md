@@ -12215,3 +12215,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **G-2 验收（在下次 kaspad 重启时）**：③ 门零 `resume … reason=rpc-fail`；`[rpc-shared] REBUILD … source=rpc-health` 后 ≤3 min `[rpc-health] BACK-TO-LOCAL after <s>s (was: rpc-fail)`；skip 心跳带 streak；`using local node` 回来 ⇒ runbook ⑤-①b 撤。SHOULD-1（返回 isSynced 字段）与 api/pool.js:1120 另出一笔。
 - **6c-α 验收**：recapture Σ秒/15 min（基线 W2 169 次 Σ811 s、aukqt-s1 297.7 s ⇒ 目标 Σ ≤30 s、max ≤5 s，"≥剪枝点不标"的 7 盘分列）；window 要一个 isSynced=true 段（D-c 下随时有）。
 - D-c：第六轮后接一轮常规几何尾（07:51:58Z 起）属正常；无 failed/backoff。等 Owner "G-1 GO"。
+
+### (992) 🔴 事故 C「TN12 唯一前向 peer 失联」：10:59:09Z syncer 136.243.93.17 主动 reset（三 peer 同分钟复位·当时本机剪枝遍历 1,268,000）→ D-c 自触发轮以 `failed (protocol): peer connection is closed` 结束（分类正确·不 backoff）→ 11:01:47Z `Test-NetConnection 136.243.93.17:16311 = False`（对端下线）→ isSynced 11:00:00Z 翻 false（自 06:58Z 连续 true 4 h 02 min 后首次）· 无替代前向 peer — Bettor 2026-09-07T11:03:10Z
+- **D-c 6 h 窗内首次失败**，不是 D-c 的错：06:20Z 步② 后自触发 10+ 轮全成功（周期 ≈9–10 min，轮 3.5–5.4 min），10:59Z 前 isSynced 连续真 4 h。
+- **现状**：`getPeerAddresses` = 4 个已知 + 占位，无替代；DNS seeder 返回同 4 个；另三 peer（70.178 / 86.48 / 152.53）可达但每 ~10 s 复位（它们是"从我们同步再拒"的一方，不在我们未来）⇒ **无前向来源，常规 IBD 与自触发都不可能**，lag 无界增长直到对端回来。console 侧 ③ 门读到确认的 isSynced=false ⇒ 跳过（旧门 fail-open 只在 rpc-fail 时，现在不触发）⇒ 钱路安全；G-2 v2（rpc-fail fail-closed）仍按 12:20Z 后 apply。
+- **可做/不可做**：本机无动作可让对端回来；`--addpeer` 需要一个在我们未来的 TN12 节点地址（我们没有，Owner/J1 若有请给）；结构性解 = 自己维护第二个同步节点（复盘 §5 已列，younio 内存不够）。**记为独立事故 C，等对端回来；回来后预期：重连 → 对端 sink inv 落 locator 外 → 常规 IBD → completed → 该 peer 在新 IbdFlow 上重获自触发资格 → 周期恢复。**
+- 6 h 验收页（12:20Z）口径：窗 06:20→10:59Z 为 D-c 有效样本，10:59Z 后为对端失联段分列。
