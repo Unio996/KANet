@@ -1,0 +1,38 @@
+{
+  "tests": [
+    {
+      "name": "probe_pass_matching_covid",
+      "function": "check",
+      "constructor_args": [1],
+      "args": [0, "0x2222222222222222222222222222222222222222222222222222222222222222"],
+      "expect": "pass",
+      "tx": {
+        "active_input_index": 0,
+        "inputs": [
+          {"utxo_value": 1, "covenant_id": "0x0000000000000000000000000000000000000000000000000000000000000000"},
+          {"utxo_value": 1, "covenant_id": "0x2222222222222222222222222222222222222222222222222222222222222222"}
+        ],
+        "outputs": [
+          {"value": 1, "covenant_id": "0x2222222222222222222222222222222222222222222222222222222222222222", "authorizing_input": 1}
+        ]
+      }
+    },
+    {
+      "name": "probe_fail_mismatched_covid",
+      "function": "check",
+      "constructor_args": [1],
+      "args": [0, "0x3333333333333333333333333333333333333333333333333333333333333333"],
+      "expect": "fail",
+      "tx": {
+        "active_input_index": 0,
+        "inputs": [
+          {"utxo_value": 1, "covenant_id": "0x0000000000000000000000000000000000000000000000000000000000000000"},
+          {"utxo_value": 1, "covenant_id": "0x2222222222222222222222222222222222222222222222222222222222222222"}
+        ],
+        "outputs": [
+          {"value": 1, "covenant_id": "0x2222222222222222222222222222222222222222222222222222222222222222", "authorizing_input": 1}
+        ]
+      }
+    }
+  ]
+}

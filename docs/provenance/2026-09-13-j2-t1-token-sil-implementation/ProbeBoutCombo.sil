@@ -1,0 +1,12 @@
+pragma silverscript ^0.1.0;
+contract ProbeBoutCombo(int dummy, byte[] c_prefix, byte[] c_suffix, byte[32] c_hash) {
+    int x = dummy;
+    byte[] claim_tmpl_prefix = c_prefix;
+    byte[] claim_tmpl_suffix = c_suffix;
+    byte[32] claim_tmpl_hash = c_hash;
+    struct ClaimState { byte[32] winner_pk; int amount; }
+    entry check(int out_k, ClaimState cs, byte[32] want) {
+        validateOutputStateWithTemplate(out_k, cs, claim_tmpl_prefix, claim_tmpl_suffix, claim_tmpl_hash);
+        require(OpOutputCovenantId(out_k) == want);
+    }
+}
