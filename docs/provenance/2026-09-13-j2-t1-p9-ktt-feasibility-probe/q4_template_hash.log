@@ -1,0 +1,6 @@
+# Q4 template_hash 依赖实测 2026-09-13T12:16:16Z
+v100_P9.json 58fe86fc497861ba2b71a0cc5ea7f53b96d239ee791cd52b8201c68382f966f0 len 3788 span {"offset":1,"len":112}
+v100_P9_ctor2.json 54dd8e17701bdcbe1291dc06805fff35489dc5f81bdef3806e27447d0439d767 len 4834 span {"offset":1,"len":112}
+v100_P9_ctor3.json a0a6fdc7345631f4ae858c1fa2c5b73d3713de7114803ae0f995a51df0594b96 len 4238 span {"offset":1,"len":112}
+v100_P9_ctor4.json 58fe86fc497861ba2b71a0cc5ea7f53b96d239ee791cd52b8201c68382f966f0 len 3788 span {"offset":1,"len":112}
+args2 = 全换(state+模板后缀+max_ins/outs) · args3 = 只换 max_ins 3→4 · args4 = 只换状态字段(amount/owner/owner_scheme)

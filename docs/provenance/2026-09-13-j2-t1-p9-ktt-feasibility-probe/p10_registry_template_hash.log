@@ -1,0 +1,11 @@
+# P10 · A′ MUST② 注册 covenant R 对照编译 · 2026-09-13T12:27:29Z · silverc v1.0.0 @3ed9733 (scratch/_j2_silverc_v100)
+# 主臂 P10_registry.sil: 状态字段 market_cov_id/market_tmpl_hash/prefix_len/suffix_len/claim_tmpl_hash/... 只做等值比较
+#   a: cov=0x01*32 tmpl=0x02*32 (1,40) claim=0x03*32 (1,12) | b: 0x09/0x08 (7,300) 0x06 (5,4) | c: == a
+a 1432f6edebf876ab3780294d7a36774b7ae97b309b985c78e0d396e60a0d251b bytecode_len 816 state_span {"offset":1,"len":137}
+b 1432f6edebf876ab3780294d7a36774b7ae97b309b985c78e0d396e60a0d251b bytecode_len 816 state_span {"offset":1,"len":137}
+c 1432f6edebf876ab3780294d7a36774b7ae97b309b985c78e0d396e60a0d251b bytecode_len 816 state_span {"offset":1,"len":137}
+# 对照臂 P10_registry_ctrl.sil: 同合约 + 非状态 ctor 常量 structural_n 作 for 上界(结构性用途); ctrl1 n=1, ctrl2 n=2, 其余 ctor == a
+ctrl1 c2b56a49d208b3496348e984d3cb47003128e09cd2fc8cbcdcf36a588fc406f6 bytecode_len 831
+ctrl2 7b919ac033a387376a86a8720fc1d25c05a312d978a179ca68160f8b9fe45bea bytecode_len 838
+# 判读: a==b==c (全换市场特定值 hash 不变) ; ctrl1!=ctrl2 (仅换结构常量 hash 变) ⇒ MUST② 成立且对照臂非空
+# 先前失败记录: v1 用 byte[] market_tmpl_suffix 作状态字段 ⇒ 'compile error: unsupported feature: validateOutputState does not support field type byte[]' ⇒ 改为 byte[32] hash + int 长度

@@ -1,0 +1,14 @@
+# P12 · A″ 市场侧对照编译 · 2026-09-13T13:25:02Z · silverc v1.0.0 @3ed9733
+# P12_market_a2.sil: 7 个 per-instance 值全为状态字段(token_tmpl_hash/token_prefix_len/token_suffix_len/claim_tmpl_hash/oracle_pk/question_hash/deadline); ctor 只赋初值
+#   payout_claim: validateOutputStateWithTemplate(claim_out, ClaimState{market_cov_id: OpInputCovenantId(this.activeInputIndex),…}, witness prefix/suffix, 状态 claim_tmpl_hash)
+#   settle_token: validateOutputStateWithInputTemplate(token_out, out_state, token_in, 状态 prefix_len, 状态 suffix_len, 状态 token_tmpl_hash) — 编译级(运行期需代币输入 sigScript 模板字节, 留 T3)
+a a5c45a36f25b7a166583812c68ea0b6c0434141250db61d8ce1c188991245c0a bytecode_len 808 state_span {"offset":1,"len":159}
+b a5c45a36f25b7a166583812c68ea0b6c0434141250db61d8ce1c188991245c0a bytecode_len 808 state_span {"offset":1,"len":159}
+#   a: token hash 0x22*32 (1,40) claim=ClaimStub.template_hash oracle 0x33 question 0x44 deadline 1000 | b: 0x99 (7,300) 0x66 0x55 0x11 9 ⇒ hash 同一 ⇒ 市场模板不随实例值变(A″ 前提, 含 validateOutputStateWithInputTemplate 的运行期 hash/长度参数)
+# ClaimStub.sil(3 状态字段 market_cov_id/winner_pk/amount, singleton passthrough):
+#   template_hash 209abf735c178c234401d5aea535544f0b58f49d7f1af1d803d7088eac074263 bytecode_len 236 state_span {"offset":1,"len":75} prefix 6b suffix_len 160
+#   P2SH(M) aa20f7f5f72155b43a5aba57874e831e9ec544c3ade6e5ae7b748e851274d5608d7587
+#   P2SH(X) aa2015e7d7f22fb678386e3a34ee746185a85417970562b4898230f19028cb4446e687
+#   P2SH(M,amount 501) aa20021587244502b299534408924e1461c54c7560567985f560b96a9be5c65629c287
+# 运行期(run.log): 市场输入 cov id M, 领取输出 = ClaimStub(M,winner,500) 的 P2SH ⇒ pass; 领取按攻击者 X 造 ⇒ fail; 市场其实是 X 而领取说 M ⇒ fail; 金额改 501 ⇒ fail; 市场续约状态改 deadline ⇒ fail; 翻转臂 FAIL
+# P2SH 算法 = aa20‖blake2b-256(prefix‖state‖suffix)‖87, 对 P8 RootStub 存档重算一致(mk_p12.mjs 自检)

@@ -1,0 +1,6 @@
+# P11 · 模板 hash/前后缀长度作【状态字段】(运行期值) 喂 readInputStateWithTemplate; validateOutputStateWithTemplate 前后缀字节由 witness 供、hash 由状态供 · 2026-09-13T12:33:23Z · silverc v1.0.0 @3ed9733
+# a: (1,40) m_hash=0x02*32 c_hash=0x03*32 nonce 0 | b: (7,300) 0x08 0x06 nonce 5
+a af5dbb29d50b71ef10801e6fd3be115774179039937a20fed5228369247ac522 bytecode_len 735 state_span {"offset":1,"len":93}
+b af5dbb29d50b71ef10801e6fd3be115774179039937a20fed5228369247ac522 bytecode_len 735 state_span {"offset":1,"len":93}
+# 判读: 两组编译均通过(运行期值可作两原语的 hash/长度参数) 且 a==b ⇒ 宿主模板 hash 不随所烤外部模板 hash 变 ⇒ 注册状态可并入宿主自身状态(A″ 前提)
+# 先前失败记录: struct 声明在 contract 外 ⇒ parse error 4:1 ⇒ 移入 contract 内

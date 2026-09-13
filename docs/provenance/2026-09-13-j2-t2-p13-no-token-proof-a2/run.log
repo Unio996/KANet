@@ -1,0 +1,23 @@
+# run 2026-09-13T13:35:14Z · silverc/cli-debugger v1.0.0 (3ed9733 自建) · P13 = T2 骨架 §3.3 B 类不在场证明 A″ 形探针(非实现, 不进 sil-v1/) · P13NoTokenA2 bytecode 576 B span{1,42} · 代币模板 = T1 探针 P9 产物(v100_P9.json: 3788 B, prefix 6b, suffix 3675 B, template_hash 58fe86fc…)
+  RUN   p13_no_token_input_true_bytes_pass
+  PASS  p13_no_token_input_true_bytes_pass
+  RUN   p13_one_token_template_input_fail
+  PASS  p13_one_token_template_input_fail
+  RUN   p13_two_token_template_inputs_fail
+  PASS  p13_two_token_template_inputs_fail
+  RUN   p13_witness_suffix_one_byte_off_dies_at_blake3_fail
+  PASS  p13_witness_suffix_one_byte_off_dies_at_blake3_fail
+  RUN   p13_witness_prefix_one_byte_off_dies_at_blake3_fail
+  PASS  p13_witness_prefix_one_byte_off_dies_at_blake3_fail
+  RUN   p13_input_tail_one_byte_off_not_a_match_pass
+  PASS  p13_input_tail_one_byte_off_not_a_match_pass
+  RUN   p13_attacker_bytes_matching_nothing_fail
+  PASS  p13_attacker_bytes_matching_nothing_fail
+  RUN   harness_flip_pass_vector
+  FAIL  harness_flip_pass_vector
+        FAIL: expected failure but bytecode passed
+        Error: "FAIL"
+
+8 tests: 7 passed, 1 failed
+Error: "some tests failed"
+(harness_flip_pass_vector 预期 FAIL = 翻转臂)

@@ -1,0 +1,6 @@
+# P13 · 2026-09-13T13:35:14Z · silverc v1.0.0 @3ed9733
+# ① 字节序: 合约内 blake3((prefix.length as byte[8]) + prefix + (suffix.length as byte[8]) + suffix) == 状态 token_tmpl_hash(= silverc 产物 template_hash 58fe86fc…) ⇒ 正向量 pass 即证 as byte[8] 与 serialize_script_i64(…,Some(8)) 同字节序、blake3 内建 == silverscript-abi template_hash (lib.rs:103)
+# ② 对照编译: 换 token_tmpl_hash/nonce 值 ⇒ 宿主 template_hash 同一(a==b), 见下
+a 4e2c6f9ed5f72d6e8912d202127edc22cda1953d36736487d0355486d0314662 bytecode_len 576 state_span {"offset":1,"len":42}
+b 4e2c6f9ed5f72d6e8912d202127edc22cda1953d36736487d0355486d0314662 bytecode_len 576 state_span {"offset":1,"len":42}
+# ③ 两层向量(run.log): 无代币输入+真字节 pass · 1/2 个代币模板输入 fail · witness 后缀/前缀差一字节 ⇒ 死在 blake3 fail · 输入尾差一字节 ⇒ 不匹配 pass · 攻击者喂 00/00 fail · 翻转臂 FAIL ⇒ 7/7 + 翻转

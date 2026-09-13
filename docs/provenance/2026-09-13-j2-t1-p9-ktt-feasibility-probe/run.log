@@ -1,0 +1,11 @@
+# run 2026-09-13T11:51:02Z · silverc/cli-debugger v1.0.0 (3ed9733 自建) · P9 = T1 可行性探针(非实现, 不进 sil-v1/) · bytecode 3788 B · entries clawback|mint_issuer|transfer|transfer_delegator
+  PASS  bin_pass_market_input_present
+  PASS  attack_owner_is_non_template_covenant_fail
+  PASS  attack_owner_covid_mismatch_fail
+  PASS  h2_mint_issuer_always_fails_in_test_build
+  FAIL  harness_flip_bin_pass
+        FAIL: expected failure but bytecode passed
+        Error: "FAIL"
+5 tests: 4 passed, 1 failed
+Error: "some tests failed"
+(harness_flip_bin_pass 预期 FAIL = 翻转臂)

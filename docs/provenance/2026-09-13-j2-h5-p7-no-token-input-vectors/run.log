@@ -1,0 +1,18 @@
+# run 2026-09-13T11:23:26Z · cli-debugger v1.0.0 (3ed9733 自建) sha256 b85bb524d22ae761… · silverc sha256 4378ba6557f7b7b0…
+## P7_no_token_input.test.json
+  PASS  v0_no_other_inputs
+  PASS  v1_one_token_template_input
+  PASS  v2_two_token_template_inputs
+  PASS  v3_weak_inject_last_byte_differs
+  PASS  v4_sigscript_shorter_than_suffix
+  PASS  v5_suffix_not_at_tail
+  PASS  v6_mixed_one_match_among_nonmatch
+7 tests: 7 passed, 0 failed
+## P7_harness_check.test.json (expect 翻转 = 必须 FAIL; v7 超界 = 拒)
+  FAIL  v0_no_other_inputs_FLIPPED
+        FAIL: expected failure but bytecode passed
+        Error: "FAIL"
+  FAIL  v1_one_token_template_input_FLIPPED
+        Error: "FAIL"
+  PASS  v7_inputs_exceed_max_ins_bound
+3 tests: 1 passed, 2 failed

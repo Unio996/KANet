@@ -1,0 +1,19 @@
+# run 2026-09-13T13:25:02Z · silverc/cli-debugger v1.0.0 (3ed9733 自建) · P12 = T1 v0.5 A″ 市场侧探针(非实现, 不进 sil-v1/) · P12MarketA2 bytecode 808 B span{offset 1,len 159} · ClaimStub 作领取模板替身
+  RUN   p12_market_writes_own_covid_pass
+  PASS  p12_market_writes_own_covid_pass
+  RUN   p12_claim_built_with_attacker_covid_fail
+  PASS  p12_claim_built_with_attacker_covid_fail
+  RUN   p12_market_is_X_claim_says_M_fail
+  PASS  p12_market_is_X_claim_says_M_fail
+  RUN   p12_claim_amount_tampered_fail
+  PASS  p12_claim_amount_tampered_fail
+  RUN   p12_market_state_tampered_fail
+  PASS  p12_market_state_tampered_fail
+  RUN   harness_flip_pass_vector
+  FAIL  harness_flip_pass_vector
+        FAIL: expected failure but bytecode passed
+        Error: "FAIL"
+
+6 tests: 5 passed, 1 failed
+Error: "some tests failed"
+(harness_flip_pass_vector 预期 FAIL = 翻转臂)

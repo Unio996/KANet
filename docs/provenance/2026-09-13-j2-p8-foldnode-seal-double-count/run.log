@@ -1,0 +1,13 @@
+# run 2026-09-13T11:31:37Z · cli-debugger v1.0.0 (3ed9733 自建) · FoldNode_diag = outB/FoldNode.v1.sil + 仅加 allow 注解(现状,无角色检查) · RootStub_diag = RootStub_probe.v1.sil(7-field root 模板替身)
+  PASS  p8_fold_leader_accepts_group_with_sealed_B
+  PASS  p8_seal_to_root_B_accepts_same_tx
+  PASS  c1_single_input_seal_pass
+  RUN   c1_two_same_cov_inputs_seal_CURRENTLY_PASSES
+  PASS  c1_two_same_cov_inputs_seal_CURRENTLY_PASSES
+  PASS  c1_second_input_not_our_cov_seal_pass
+  PASS  c1_fold_control_two_inputs_pass
+  PASS  p8_aftermath_leaf_count4_cannot_seal
+  PASS  p8_baseline_fold_A_alone
+  PASS  h_seal_root_value_wrong_fails
+  PASS  h_fold_sum_wrong_fails
+10 tests: 10 passed, 0 failed
