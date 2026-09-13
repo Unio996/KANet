@@ -14,6 +14,7 @@ kaspa-scout/data/
 
 # === 根目录敏感配置 ===
 kanet.env
+kanet.mainnet.env
 _relay_env.txt
 
 # === 临时/草稿产物（约定: `_` 前缀 = scratch，禁入库）===
