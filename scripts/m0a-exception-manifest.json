@@ -149,7 +149,7 @@
    "path": "kasia-console/src/services/relay-hotwallet-monitor.js",
    "capability": "m0c3-relay-hotwallet-monitor",
    "justification": "NWT 2-1 v0.2(docs/2026-09-14-nwt-mainnet-relay-hotwallet-cap-and-cold-hot-separation-spec-v0.2.md, Codex TOCTOU 审, Bettor 1150 派工)驻留期热钱包监控——v0.1 的 checkHotwalletAdmission 只在 startRelay() 那一刻生效(准入上限非持久硬上限), relay 一旦启动, 运行期收到入账可以把余额推过上限, 私钥仍在进程内存里, v0.1 完全没覆盖这个窗口。本文件补上这一半: 独立 setInterval tick(结构镜像既有 relay-health-monitor.js 的 setInterval/STARTUP_GRACE_MS/running 互斥重入防护), 故意不复用 relay-health-monitor 的 tick 本身(避免 RH_OFF 连带关闭资金监控这个不该存在的耦合), 开关名 HOTWALLET_MONITOR_OFF(不叫 RH_OFF, 设置时 LOUD console.error 警告), 只在两个 cap env 都未设时不启动(同 v0.1 既有原则)。逐个查活着 relay 的余额: per-relay 上限超线单独 kill; 总额上限超线按 tick-to-tick 余额增量从大到小归因 kill 直到回线下, 无法归因(无正向增量)时保守全部当前活着的 relay 都 kill; 余额查询连续 3 次失败(同既有 MAX_RESTART_PER_HOUR 量级)按 fail-closed 处理为超限, 不当没超限跳过。处置只 kill 子进程(relay-manager.js 既有 stopRelay), 不新增隔离标记字段(v0.1 startRelay() 准入门本身已经是每次启动都重新过一遍的检查, 余额仍超限则任何后续拉起尝试都会被同一条检查挡下), 不自动转移资金(检测到超限=杀进程+写 events 表告警, 钱原地不动, 怎么处理是 Owner 的决定)。告警走既有 events 表机制(同 oracle-voter-health-monitor.js 先例, level=error/event_type=hotwallet_relay_killed), 不新造通知渠道。聚合上限的并发竞态由 relay-manager.js:startRelay() 内的 _withAdmissionLock 处理(39ae30b1 已落码, NWT 认可), 本文件不重复实现——本文件覆盖的是进来之后这一半, 不是进来之前那一半。index.js 无条件调用 startRelayHotwalletMonitorCron(), 门控逻辑(HOTWALLET_MONITOR_OFF/两个cap是否配置)在函数内部自己处理。KANet-UI commit 待 Bettor 推、NWT diff 审。",
-   "review_ref": "pending-nwt-review-bettor-1150",
+   "review_ref": "ce220550",
    "content_digest": "80d1f45d2a4538b25f6218be44d2a046b3d34fbebb6853ee3391076f113f5004"
   }
  ]
