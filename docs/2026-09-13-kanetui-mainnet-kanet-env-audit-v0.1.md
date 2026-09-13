@@ -1,6 +1,8 @@
-# kanet.env 逐项审计 → kanet.mainnet.env（2026-09-13 · KANet-UI · GO-B 交付）
+# kanet.env 逐项审计 → kanet.mainnet.env（2026-09-13 · KANet-UI · GO-B 交付 v0.2）
 
 > **Status: DRAFT**。权威：Bettor GO-B 派工 + NWT `9ba20fb2` 两项遗漏 MUST（KANET_ROOT 显式绝对路径 / CONSOLE_ENCRYPTION_KEY 新生成禁复用）+ Bettor 补三条（DB_PATH 绝对路径 / 密钥禁复用要写进脚本注释 / stdout+stderr 重定向必须有）。本页是 `kanet.mainnet.env` 的可审计对照表（该文件本身 gitignored，不能靠 git diff 审，靠这页）。**本页只记录判断，不执行任何启动动作。**
+>
+> **v0.2 变更（NWT 审 GO-B `b522e7bd` MUST-FIX）**：§6 `MINING_CONSOLIDATE_ENABLED` 从 `0` 订正为字面 `false`（该键判定是 `!== 'false'` 反向语义，`0` 实际关不掉，已在 `kanet.mainnet.env` 同步改）；逐个核实其余五个"关闭"类开关的判定语义（全部 `=== '1'`，`0` 有效）；核实文件内无行内 `#` 注释。
 
 ## 0. 核心结论先行
 - `kanet.env` 现有 **92 个非注释键**。全部过了一遍，分类处置，不是逐行各自独立拍的——**同类同判断**，理由写在每类下面。
@@ -42,14 +44,20 @@
 这些值在 `kanet.env` 里全部是 TN12 relay_nodes 表里的 UUID——新库是空的，这些 UUID 在新库里查不到对应行，写了也是死值。等对应功能真需要在主网上启用、按起服务方案 §3.1 步骤 6 建好新 mainnet relay 身份后，再逐个把对应键回填成新 UUID。**现在留空的直接后果**：这些功能在新实例上不启用（各服务读不到配置的 relay id，通常走"未配置/不启动"分支，不是报错崩溃——具体行为待起来后核实，本页只给判断不代为验证）。
 
 ## 6. 保守起步：显式关闭自动交易/做市类服务
-| 键 | 值 | 理由 |
+
+> 🔴 **订正（NWT 审 GO-B `b522e7bd` MUST-FIX）**：`MINING_CONSOLIDATE_ENABLED=0` **关不掉**——`mining-utxo-consolidate.mjs:31` 判定是 `(env||'true').toLowerCase() !== 'false'`，`'0' !== 'false'` 恒真，写 `0` 实际等于不设（默认 enabled）。这条现在被 `MINING_RELAY_ID` 留空挡住（没有 relay id 大概率功能本身不触发），但 GO-E 回填 relay 后会变成活的钱路 cron——**已改成字面 `false`**（不是这类"关闭"型开关的通用规则，是这一个键专属的反向语义，逐个核实过其余五个才敢下这个结论，见下表逐条附出处）。
+> 顺手核了 `AUTO_BET_TICK_MS=0` 是否有同类坑（代码里有一条旧注释确实提过"曾经 0 关不掉"）——读了 `pool-auto-better.js` 现行代码：`parseTickMs()` 显式 `n>=0` 分支返回 `0`，`startAutoBetterCron()` `if (TICK_INTERVAL_MS === 0) { ...DISABLED...; return; }`——**那条旧注释描述的是已经修过的历史 bug，现在 `0` 是有效值，本页保留 `0` 不改**，没有被旧注释误导成改成别的值。
+
+| 键 | 值 | 出处（`=== '1'`/`!== 'false'` 等判定逐条核过） |
 |---|---|---|
-| `POOL_SEEDER_ENABLED` | `0` | 首次主网起步不需要自动做市 |
-| `PREDICTION_AGENT_ENABLED` | `0` | 同上，不需要自动下注 agent |
-| `AUTO_BET_TICK_MS` | `0` | 同上 |
-| `MINING_CONSOLIDATE_ENABLED` | `0` | 无挖矿业务（这是只读 console 实例） |
-| `ZK_PROVE_WORKER_ENABLED` | `0` | ZK 证明生成是重负载，起步阶段不需要 |
-| `BSHARD_CLOSE_VOTER_V2_ENABLED` / `BSHARD_CLOSE_SUBMIT_V2_ENABLED` | `0` | 同理，没有 mainnet bshard 市场，不需要这两个 tick |
+| `POOL_SEEDER_ENABLED` | `0` | `pool-market-seeder.js:41` `!== '1'` 即视为未启用，`0` 正确 |
+| `PREDICTION_AGENT_ENABLED` | `0` | `conversations.js:338` `=== '1'`，`0` 正确 |
+| `AUTO_BET_TICK_MS` | `0` | `pool-auto-better.js` `parseTickMs`+`startAutoBetterCron` 逐行读过，`0` 是显式 disabled 分支，正确（见上订正说明） |
+| `MINING_CONSOLIDATE_ENABLED` | **`false`**（原 `0` 已订正，见上） | `mining-utxo-consolidate.mjs:31` `!== 'false'` 判定，只有字面 `false` 才真的关 |
+| `ZK_PROVE_WORKER_ENABLED` | `0` | `zk-prove-worker.mjs:119` + `gate-tmpl-hash.mjs:79` 两处都 `=== '1'`，`0` 正确 |
+| `BSHARD_CLOSE_VOTER_V2_ENABLED` / `BSHARD_CLOSE_SUBMIT_V2_ENABLED` | `0` | `bshard-close-voter.js:545`/`:642` 都 `=== '1'`，`0` 正确 |
+
+**另核（NWT 同一条 MUST 里带的第二点）**：`kanet.mainnet.env` 里所有 `KEY=VALUE` 行逐行核过，**没有任何一行带行内 `#` 注释**（本文件的注释全部独立成行，不是"值后面跟 `#`"这种写法）——`kanet.env:285` 记过的那类事故（脚本解析器不剥离行内注释，把注释文字当值的一部分）在这个文件里不存在，不需要改。
 
 其余业务参数类（`POOL_DEADLINE_*`/`DAILY_SEND_LIMIT`/各类 `*_TICK_SEC`/`DEMO_*_OFF` 等约 40 项）判断为**网络无关的行为配置**，本次不改，留给需要真正启用对应功能时再逐项核（多数本身默认就是保守值或"关闭"状态，不因为换网络而需要重新评估）。
 
