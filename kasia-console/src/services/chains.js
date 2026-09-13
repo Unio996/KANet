@@ -18,6 +18,8 @@
  */
 
 import { ethers } from 'ethers';
+import { buildExplorerAddressUrl, buildExplorerUrl } from '../lib/explorer-url.mjs';
+import { configuredNetwork } from '../lib/kaspa-network.mjs';
 
 // ── Registry ──────────────────────────────────────────────────────────────
 
@@ -27,9 +29,11 @@ export const CHAIN_META = {
     isEvm: false,
     nativeSymbol: 'KAS',
     rpcPool: [], // Kaspa uses its own RPC resolver in shared/lib/rpc-utils.mjs
+    // ab-followup (2026-09-13, J2 · 全仓硬编码旧网端口/网络标识扫描 §1.2/R-EXPLORER-URL-BYPASS): 域名字面量
+    //   改走单源 lib/explorer-url.mjs(testnet 诚实返回 null, 不是换个不存在的域名——07-12 全库收敛纪律)。
     explorer: {
-      address: (a) => `https://explorer.kaspa.org/addresses/${a}`,
-      tx: (h) => `https://explorer.kaspa.org/txs/${h}`,
+      address: (a) => buildExplorerAddressUrl(a, configuredNetwork()),
+      tx: (h) => buildExplorerUrl(h, configuredNetwork()),
     },
     stables: {},
   },

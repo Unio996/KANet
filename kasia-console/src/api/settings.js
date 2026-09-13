@@ -25,7 +25,7 @@ export async function registerSettingsRoutes(fastify) {
     } else if (mode === 'discovered') {
       url = (discovered_url || '').trim();
     } else if (mode === 'local') {
-      url = process.env.KASPA_RPC_URL || 'ws://127.0.0.1:17110';   // 本机 = env 单一源(原硬编码 17110 是主网默认端口, TN12 是 17210)
+      url = process.env.KASPA_RPC_URL || 'ws://127.0.0.1:17110';   // lint-allow-net-port-literal: 表单"local 模式"缺省建议值(用户没填 URL 时的占位, 非活连接默认), 本机主网端口
     }
     // mode === 'public' keeps url empty (will fall back to resolver in relay)
 
@@ -103,7 +103,7 @@ export async function registerSettingsRoutes(fastify) {
     const mode = await getConfig('rpc_mode') || 'local';
     const configuredUrl = await getConfig('rpc_url') || '';
     const actual = await getWorkingRpc();
-    const localUrl = process.env.KASPA_RPC_URL || 'ws://127.0.0.1:17110';
+    const localUrl = process.env.KASPA_RPC_URL || 'ws://127.0.0.1:17110';   // lint-allow-net-port-literal: 只读状态比对用的展示值, 非活连接默认(见上 :28 同款理由)
     const configuredReachable = actual.url === configuredUrl
       || (mode === 'local' && actual.url === localUrl);
     const source = actual.isLocal && actual.url === localUrl ? 'local'

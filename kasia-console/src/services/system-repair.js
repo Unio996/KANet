@@ -13,7 +13,7 @@ import { getConfig, setConfig } from '../data/settings/configs.js';
 import { getWorkingRpc, isLocalNode, invalidateCache, isStrictLocalOnly } from './rpc-health.js';
 
 // 本机 RPC 单一源 = env KASPA_RPC_URL(rpc-health.js 顶层已 fail-fast 未设即 throw; 这里的 || 只为 rpc-health 之外的孤立 import 不炸)
-function _localUrl() { return process.env.KASPA_RPC_URL || 'ws://127.0.0.1:17110'; }
+function _localUrl() { return process.env.KASPA_RPC_URL || 'ws://127.0.0.1:17110'; }   // lint-allow-net-port-literal: 见上一行注释, rpc-health.js 已 fail-fast, 这里只防孤立 import
 function _localPort() { try { return parseInt(new URL(_localUrl()).port, 10) || 17110; } catch { return 17110; } }
 import { startScanner, stopScanner, getScannerStatus } from './scanner.js';
 import { getStatus as getRelayStatus } from './relay-manager.js';

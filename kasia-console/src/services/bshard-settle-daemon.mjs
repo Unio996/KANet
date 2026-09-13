@@ -36,6 +36,7 @@ import { randomUUID } from 'crypto';
 import { createRequire } from 'node:module';
 import { persistPayoutShardState } from '../lib/payout-shard-persist.mjs';
 import { logStep } from '../lib/diag-step.mjs';   // M10 v2 observe-only (2026-09-05): tick 分步(pre/select/pregate/post)打点
+import { configuredNetwork } from '../lib/kaspa-network.mjs';   // ab-followup (b 网络单一源扩面): 未设即 throw, 不回退旧网
 const _require = createRequire(import.meta.url);
 // 同 zk-prove-worker.mjs 完全一致的 isolated zk-sdk WASM 路径(D-005 隔离铁律: ZK 工具链绝不碰 live kaspa-wasm,
 // 独立 clone 出的 zk-sdk 构建)——gate witness 重建需要跟铸 gate 时同一份 ZkScriptBuilder API。
@@ -48,8 +49,12 @@ const ZK_SETTLER_RELAY_ID = process.env.BSHARD_SETTLER_RELAY_ID || null;
 registerDomainJudge(espnSportsJudge);
 
 const CONSOLE = process.env.SETTLE_DAEMON_CONSOLE_BASE || 'http://127.0.0.1:3200';
-const RPC_URL = process.env.SETTLE_DAEMON_RPC_URL || 'ws://127.0.0.1:17210';
-const NETWORK = process.env.KASPA_NETWORK || 'testnet-12';
+// ab-followup (2026-09-13, J2 · 全仓硬编码旧网端口/网络标识扫描 §1.1②/§2.1②): 删专属 SETTLE_DAEMON_RPC_URL
+//   env(kanet.env 从未设过这一行 ⇒ 永远走硬编码端口)——改读单一源 KASPA_RPC_URL(同其余 daemon 惯例, 如
+//   oracle-pool-renewal-cron.mjs 的 getWorkingRpc() 链路); NETWORK 改 configuredNetwork()(未设即 throw)。
+const RPC_URL = process.env.KASPA_RPC_URL;
+if (!RPC_URL) throw new Error('bshard-settle-daemon: KASPA_RPC_URL not set — check kanet.env propagation (single source, no fallback)');
+const NETWORK = configuredNetwork();
 const FEE_RELAY_ID = process.env.SETTLE_DAEMON_FEE_RELAY_ID || '8f104e2d-646d-47cd-81f6-97a16b4f6c01';   // J2test
 const PS_SEED_SOMPI = 20000000;
 const FINALITY_BUFFER = 60;   // deadline_daa + buffer 才 ripe (endBlockHash finality depth 50·留余量)

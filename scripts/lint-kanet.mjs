@@ -496,7 +496,13 @@ function checkR10() {
 const _NET_INFER = /startsWith\(\s*['"]kaspatest:['"]\s*\)\s*\?|\.replace\(\s*\/\^kaspatest:\//;
 const _NET_EITHER = /startsWith\(\s*['"]kaspa:['"]\s*\)\s*(?:\|\||&&)\s*!?[\w.()]*startsWith\(\s*['"]kaspatest:['"]\s*\)|startsWith\(\s*['"]kaspatest:['"]\s*\)\s*(?:\|\||&&)\s*!?[\w.()]*startsWith\(\s*['"]kaspa:['"]\s*\)/;
 const _NET_DEFAULT = /\|\|\s*['"](?:mainnet|testnet-1[12])['"]/;
-const _NET_PREFIX_STRICT = true;    // b2 (33 处替换落地) 已翻: INFER/EITHER = violate(BLOCK); DEFAULT-DRIFT 仍 WARN(45 处另一笔)
+// R-NET-PORT-LITERAL (2026-09-13 J2, ab-followup · 全仓硬编码旧网端口/网络标识扫描 §1/§4② Bettor 裁 BLOCK):
+//   kaspad RPC 端口族(gRPC 16110/16210·P2P 16111/16211·borsh 17110/17210·JSON 18110/18210, 主网/旧网各一套)
+//   出现在 `||` 回退默认值里 = 同一枚举族的"硬编码端口"anti-pattern, 与 R-NET-DEFAULT-DRIFT(网络【字符串】默认)
+//   同一根因不同载体——env 一漏, 进程悄悄连一个写死的端口而不是暴露"没配"。零基线直接 BLOCK(本次扫描 5 处全修完 +
+//   3 处既有"表单缺省值/rpc-health 外孤立 import 防炸"合理例外已加 lint-allow-net-port-literal 标注)。
+const _NET_PORT_LITERAL = /\|\|\s*['"`](?:ws|wss|http|https):\/\/[^'"`]*:1[678][012]\d\d['"`]/;
+const _NET_PREFIX_STRICT = true;    // b2 (33 处替换落地) 已翻: INFER/EITHER = violate(BLOCK); DEFAULT-DRIFT 仍 WARN(45 处另一笔); PORT-LITERAL 零基线直接 BLOCK
 function checkR_NET_PREFIX(fp, content) {
   const rel = path.relative(ROOT, fp).replace(/\\/g, '/');
   if (!/^(kasia-console\/src|kasia-relay\/src|shared\/lib)\//.test(rel)) return;
@@ -514,6 +520,7 @@ function checkR_NET_PREFIX(fp, content) {
     if (_NET_INFER.test(l)) emit('R-NET-PREFIX-INFER', i, `[R-NET-PREFIX-INFER] 从地址前缀推断网络(空/未知前缀 ⇒ 'mainnet' fail-open, D-017 主网过渡态存量 kaspatest 地址会被当 testnet-12) — 改 assertAddressOnNetwork(addr, { who }) / isAddressOnNetwork(kasia-console/src/lib/kaspa-network.mjs 或 kasia-relay/src/lib/kaspa-network.mjs); 网络只从 env 来。转义: // lint-allow-net-prefix-infer: <reason>`, /lint-allow-net-prefix-infer:\s*\S/);
     if (_NET_EITHER.test(l)) emit('R-NET-PREFIX-EITHER', i, `[R-NET-PREFIX-EITHER] 'kaspa:' 或 'kaspatest:' 二选一验证 = 跨网地址照收 — 改 isAddressOnNetwork(addr)(只认配置网络的前缀)。转义: // lint-allow-net-prefix-infer: <reason>`, /lint-allow-net-prefix-infer:\s*\S/);
     if (_NET_DEFAULT.test(l)) emit('R-NET-DEFAULT-DRIFT', i, `[R-NET-DEFAULT-DRIFT] 网络默认值 '|| mainnet/testnet-12' — env 一漏同进程两半各认一个网; 改 configuredNetwork()(无默认, 未设 throw)。转义: // lint-allow-net-default: <reason>`, /lint-allow-net-default:\s*\S/);
+    if (_NET_PORT_LITERAL.test(l)) emit('R-NET-PORT-LITERAL', i, `[R-NET-PORT-LITERAL] 硬编码 kaspad RPC 端口回退默认值(ws://…:1[678]xxx) — 同一进程 env 一漏就悄悄连别的网(2026-09-13 J2 全仓扫描: bshard-settle-daemon.mjs/faucet-utxo-health.mjs 等 daemon 从没设专属 env, 永远走硬编码, 2 处真主网路径可达)。改单一源 process.env.KASPA_RPC_URL(未设即 throw, 同 rpc-health.js:19-23)。转义: // lint-allow-net-port-literal: <reason>`, /lint-allow-net-port-literal:\s*\S/);
   });
 }
 

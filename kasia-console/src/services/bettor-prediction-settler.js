@@ -181,9 +181,10 @@ export async function settlePredictionOutcomes() {
         const winnerAddr = makerWon
           ? (offer.maker_kaspa_addr || offer.maker)
           : offer.taker;
-        // r216 Bug surfaced: 之前 `startsWith('kaspa:')` 拒 testnet `kaspatest:` (= Phase 3a 真 round-trip 撞).
-        // accept mainnet kaspa: + testnet-12 kaspatest: 双 prefix.
-        if (!isAddressOnNetwork(winnerAddr, { who: 'bettor-prediction-settler.js:159' })) {   // (b) 赢家收款地址: 原二选一验证跨网照收; 现只认配置网络前缀(含校验和)
+        // r216 Bug surfaced(历史): 之前 `startsWith('kaspa:')` 拒 testnet `kaspatest:` (= Phase 3a 真 round-trip 撞),
+        // 当时修法是"accept 双 prefix"——(b) 已把这条换成单一源判据(下行), ab-followup 补充: 纯主网运营下双前缀
+        // 接受本身是过渡态残留(收窄不是新增限制, 是撤掉一个不该再存在的历史豁免); 只认配置网络前缀(含校验和)。
+        if (!isAddressOnNetwork(winnerAddr, { who: 'bettor-prediction-settler.js:159' })) {
           console.error(`[prediction-settler] payout target missing or invalid ${offer.id.slice(0,8)}: maker_won=${makerWon} winnerAddr=${winnerAddr}`);
           errored++;
           continue;  // 留 delivering, 下次 tick retry (Owner 介入 可能)
