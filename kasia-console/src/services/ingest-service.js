@@ -233,7 +233,8 @@ export async function handleIngestReply(payload) {
 }
 
 export async function handleIngestTx(payload) {
-  const { traceId, conversationId = null, messageId = null, replyId = null, direction = 'outbound', network = 'mainnet', txid, amount = null, fee = null, localAddress = null, status = 'broadcasted', rawTxJson = null, timestamp } = payload;
+  // targetAddress (F4/F5, J2 2026-09-13): 收款地址 —— 对账器 tx-landed-reconciler 用它查 UTXO 集; relay transfer 分支传 cmd.target。
+  const { traceId, conversationId = null, messageId = null, replyId = null, direction = 'outbound', network = 'mainnet', txid, amount = null, fee = null, localAddress = null, targetAddress = null, status = 'broadcasted', rawTxJson = null, timestamp } = payload;
 
   let convId = conversationId;
   if (!convId) {
@@ -247,7 +248,7 @@ export async function handleIngestTx(payload) {
     direction, network, txid,
     amount: amount ? String(amount) : null,
     fee: fee ? String(fee) : null,
-    localAddress,
+    localAddress, targetAddress,
     status, rawTxJson,
   });
 

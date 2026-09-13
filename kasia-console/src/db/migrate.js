@@ -5792,5 +5792,43 @@ export function runMigrations() {
   //   探测都是 SCAN(preprune-capture-worker 每 tick ≈936 次 ⇒ ≥13 s 事件循环停顿)。595k 行 boot 内建 ~1–2 s; IF NOT EXISTS + 记账日志; 🔴 不 ANALYZE(STAT4 构建回滚不可靠)。
   //   DDL 单源 ./events-type-index-v201.mjs。任何重建 events 表的迁移都必须带上本索引。
   ensureEventsTypeCreatedIndexV201(sqlite);
+
+  // ── v202 (2026-09-13, J2 · (c) NO-TX-NO-STATE F2/F4, 设计 docs/2026-09-13-j2-no-tx-no-state-two-violations-and-landed-reconciler-design-v0.1.md v0.3
+  //   NWT PASS 29959d41 · Bettor 1044 进 patch 阶段 · 🔴 钱路合入 Owner 批):
+  //   ① submit_intents — 广播前持久 submit-intent(幂等键 intent_key 随 relay 走; 两阶段 prepared{确定性 txid + 已签名交易字节}/submitted;
+  //      landed 回写)。写入方: lib/submit-intent.mjs(console 侧 pending/submitted/landed/abandoned) + /ingest/submit-intent(relay 侧 prepared/submitted)。
+  //      读取方: bettor-prediction-settler(payout 捡回/落链门) · api/bettor.js 三处 escrow 锁仓 · tx-landed-reconciler(F3 detect+alert)。
+  //   ② tx_records 加 target_address / landed_at / landed_depth / landed_checked_at(F4): 账本第一次有"落链"这一列; status 仍 'broadcasted'(语义不改)。
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS submit_intents (
+      intent_key        TEXT PRIMARY KEY,
+      intent_kind       TEXT NOT NULL,
+      offer_id          TEXT NOT NULL,
+      relay_id          TEXT,
+      target_address    TEXT NOT NULL,
+      amount_kas        TEXT NOT NULL,
+      status            TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','prepared','submitted','landed','abandoned')),
+      attempt           INTEGER NOT NULL DEFAULT 1,
+      parent_intent_key TEXT,
+      prepared_txid     TEXT,
+      prepared_tx_json  TEXT,
+      submitted_txid    TEXT,
+      landed_depth      INTEGER,
+      landed_at         TEXT,
+      last_error        TEXT,
+      created_at        TEXT NOT NULL,
+      updated_at        TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_submit_intents_status_updated ON submit_intents(status, updated_at);
+    CREATE INDEX IF NOT EXISTS idx_submit_intents_offer ON submit_intents(offer_id, intent_kind);
+  `);
+  for (const [col, ddl] of [
+    ['target_address', 'TEXT'], ['landed_at', 'TEXT'], ['landed_depth', 'INTEGER'], ['landed_checked_at', 'TEXT'],
+  ]) {
+    const has = sqlite.prepare("SELECT 1 FROM pragma_table_info('tx_records') WHERE name = ?").get(col);
+    if (!has) sqlite.exec(`ALTER TABLE tx_records ADD COLUMN ${col} ${ddl}`);
+  }
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_tx_records_direction_landed ON tx_records(direction, landed_at)`);
+
   console.log('[migrate] DB migrations complete.');
 }

@@ -15,7 +15,7 @@
 | 类别 | 表名 | 状态 |
 |------|------|------|
 | **核心社交** | relation_states, identities, conversations, messages | 活跃核心 |
-| **链上数据** | chain_events, tx_records, kanet_message_index, broadcast_messages | 活跃核心 |
+| **链上数据** | chain_events, tx_records, kanet_message_index, broadcast_messages, submit_intents（v202） | 活跃核心 |
 | **Agent 配置** | relay_nodes, adapter_nodes, agent_connections, agent_wallets | 活跃核心 |
 | **系统运行** | events, replies, execution_states, pending_actions, skills | 活跃核心 |
 | **交易系统** | mm_orders, mm_quotes, fund_locks, exchange_offers, exchange_accounts, retail_dex_orders | 活跃核心 |
@@ -199,11 +199,15 @@
 | fee | TEXT | 手续费 |
 | local_address | TEXT | 归属 Agent 地址（v45 新增） |
 | conversation_id | TEXT | 关联会话（握手 TX 为 NULL） |
-| status | TEXT NOT NULL | broadcasted（永远是这个，已知局限） |
+| status | TEXT NOT NULL | broadcasted（永远是这个，已知局限——语义不改；"落链"看下面四列） |
 | network | TEXT NOT NULL | mainnet/testnet |
+| target_address | TEXT | 收款地址（v202 · (c) F4/F5 · relay `transfer` 分支传 `cmd.target`；老行 NULL） |
+| landed_at | TEXT | 落链时间（v202 · 对账器 `tx-landed-reconciler` 回写：kaspa_tx_log 命中取 block_time，UTXO 集命中取检查时刻） |
+| landed_depth | INTEGER | 落链深度 = 当前 DAA − 块 DAA（v202 · 块 header 已剪时 NULL） |
+| landed_checked_at | TEXT | 对账器最近一次核过的时间（v202 · 三源都无时也更新） |
 
-**写入方**：ingest-service.js（ingestTx，16 处调用全部补传 local_address）
-**读取方**：ledger API（花费统计唯一来源）
+**写入方**：ingest-service.js（ingestTx，16 处调用全部补传 local_address；`target_address` 目前只有 relay `transfer` 分支传）；`landed_*` 三列只由 `services/tx-landed-reconciler.mjs` 写
+**读取方**：ledger API（花费统计唯一来源）；对账器 `WHERE direction='outbound' AND landed_at IS NULL AND created_at < now−10min`（索引 `idx_tx_records_direction_landed`）
 
 > 花费 = COALESCE(amount,0) + COALESCE(fee,0)
 > 握手 TX 的 conversation_id = NULL，通过 trace_id LIKE 'handshake:%' 识别
@@ -553,6 +557,35 @@
 | api_key_encrypted | TEXT | 加密 API Key |
 | api_secret_encrypted | TEXT | 加密 API Secret |
 | is_default | INTEGER NOT NULL | 是否默认账户 |
+
+---
+
+### submit_intents（v202 · (c) NO-TX-NO-STATE F2 · 2026-09-13 J2）
+**广播前持久 submit-intent：每一笔"console 派 relay 转账"的幂等身份 + 两阶段回执 + 落链回写**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| intent_key | TEXT PK | 幂等键：`payout:<offer_id>` / `escrow:<bet_id>` / `stake:maker:<bet_id>` / `stake:taker:<bet_id>`；重建 attempt≥2 加后缀 `#n` |
+| intent_kind | TEXT NOT NULL | payout / escrow_lock / maker_stake / taker_stake |
+| offer_id | TEXT NOT NULL | exchange_offers.id（或 bet/pending offer id） |
+| relay_id | TEXT | 执行转账的 relay（relay_nodes.id）；捡回/核落链都问它 |
+| target_address | TEXT NOT NULL | 收款地址 |
+| amount_kas | TEXT NOT NULL | KAS 字符串（8 位小数，KI-30） |
+| status | TEXT NOT NULL | pending → prepared → submitted → landed；abandoned = 旧 txid 的输入已被别笔花掉后重建（CHECK 约束；`markIntent` 单调不退） |
+| attempt / parent_intent_key | INTEGER / TEXT | 重建链：`#2` 行的 parent 指向被 abandoned 的原行 |
+| prepared_txid | TEXT | 确定性 txid（签名前后/序列化往返不变；relay 广播【之前】经 `/ingest/submit-intent` 写入） |
+| prepared_tx_json | TEXT | 已签名交易字节（`serializeToSafeJSON` 数组）。重启捡回只允许**同字节重播**（relay `finalize()` 重算 txid 断言相等）；有 txid 无字节 ⇒ 不发不建 + 告警 `intent_prepared_without_bytes` |
+| submitted_txid | TEXT | 广播后的 txid（正常 == prepared_txid） |
+| landed_depth / landed_at | INTEGER / TEXT | `check_utxo_landed(minDepth=REORG_SAFE_MIN_DEPTH)` 或对账器三源回写 |
+| last_error | TEXT | 最近一次失败原因（截 500 字） |
+| created_at / updated_at | TEXT NOT NULL | ISO |
+
+**索引**：idx_submit_intents_status_updated(status, updated_at) / idx_submit_intents_offer(offer_id, intent_kind)
+
+**写入方**：`lib/submit-intent.mjs`（console 侧 pending/submitted/landed/abandoned；调用方注入 `sendCommandAsync`，本模块不 import relay-manager = M0a 门）；`POST /ingest/submit-intent`（relay 侧 prepared{txid,bytes}/submitted 回执，未知 key 409）
+**读取方**：`bettor-prediction-settler.js`（派彩 + delivering 扫描 + prepared 陈行捡回）· `api/bettor.js` 三处 escrow 锁仓 · `tx-landed-reconciler.mjs`（submitted>30min 三源核、prepared>2min 告警）
+
+**陷阱**：① `txId` 回来只是 submitted（进 mempool）≠ landed，推进"完成"态前必须 `checkIntentLanded(minDepth>0)`；② attempt≥2 的重发判据只能是本表 + relay 侧（mempool / UTXO / 同字节重播），**永不读 exchange_offers.metadata**（向量 F2-I5-弱注入 证明删了本表行就会重发）；③ kaspa-wasm `deserializeFromSafeJSON` 信 JSON 里的 `id` 不重算，改过的字节顶着旧 id 能过——relay 重播前必 `finalize()`（serialize-roundtrip.test.mjs 两臂钉住）；④ 残余双付窗（设计 v0.3 F2-R 如实记）：旧笔已落且收款方在重试窗内又花掉、且收款地址不在索引器 watched 集 ⇒ 重播判 inputs_spent ⇒ 重建。
 
 ---
 

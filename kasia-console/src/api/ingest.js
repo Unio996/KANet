@@ -30,6 +30,19 @@ export async function registerIngestRoutes(fastify) {
     return reply.code(201).send({ ok: true, ...result });
   });
 
+  // ── POST /ingest/submit-intent — (c) F2 两阶段回执 (J2 2026-09-13, 设计 v0.3 F2/F2-R) ──
+  //   relay 在【广播之前】POST phase='prepared'{txid, txJson=已签名交易字节}, 拿到 2xx 才 submitTransaction(fail-closed:
+  //   console 不可达 ⇒ 不广播); 广播后 POST phase='submitted'{txid}。console 侧 lib/submit-intent.mjs 单调落表(不会把
+  //   submitted 退回 prepared)。未知 intent_key ⇒ 409(relay 只对 console 先 INSERT 的意图回执)。
+  fastify.post('/ingest/submit-intent', async (request, reply) => {
+    const { intentKey, phase, txid, txJson = null } = request.body || {};
+    if (!intentKey || !phase || !txid) return reply.code(400).send({ ok: false, error: 'intentKey, phase, txid required' });
+    const { recordIntentPhase } = await import('../lib/submit-intent.mjs');
+    const r = recordIntentPhase({ intentKey, phase, txid, txJson });
+    if (!r.ok) return reply.code(409).send({ ok: false, error: r.error });
+    return reply.code(201).send({ ok: true, status: r.intent.status });
+  });
+
   // ── POST /ingest/kaspa-tx — Relay reports an observed Kaspa TX ──
   //
   // Relay pre-filters blocks against watched-addresses set and only posts matches.
