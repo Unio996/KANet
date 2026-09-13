@@ -1,10 +1,12 @@
-# GO-E 身份与充值清单 v0.5（2026-09-14 · KANet-UI · Bettor 派工 · 只写不执行·供 Owner 拍）
+# GO-E 身份与充值清单 v0.6（2026-09-14 · KANet-UI · Bettor 派工 · 只写不执行·供 Owner 拍）
 
-> **Status: DRAFT**。权威：GO-D 已完成（主网 console PID 12404，干净稳态）+ Bettor 派工要求"设计先行，只写"。本页只回答"要不要建、建几个、充多少、谁来充、怎么验"，**不生成任何真实密钥、不发起任何转账**。**在 NWT 复核 v0.5 之前，不生成密钥、不充值、不激活任何身份，不启动任何 relay，不写/不跑 `scripts/relay-delete-row.mjs`。**
+> **Status: DRAFT**。权威：GO-D 已完成（主网 console PID 12404，干净稳态）+ Bettor 派工要求"设计先行，只写"。本页只回答"要不要建、建几个、充多少、谁来充、怎么验"，**不生成任何真实密钥、不发起任何转账**。**在 NWT 复核 v0.6 之前，不生成密钥、不充值、不激活任何身份，不启动任何 relay。**
 >
 > **v0.4 变更（NWT 红队复核 v0.3 `fcc68351`，方向 PASS + 两处 MUST-FIX）**：§5 第 2 条补第三条自动复活路径——`system-repair.js:230-231` 的 `restart_relay_{id}` 修复动作（`POST /api/settings` 人工触发），NWT 抓到我 v0.3 漏了这条；核实 DELETE 后该路径同样失败（`account_not_found`），不需要额外处置，但必须列进静态清单，并明写"静态列举有盲区，以实测兜底"。§2 新增步骤 4：Owner 明确确认备份可读无误，才允许进入 DELETE，未确认宁可留行担已知敞口也不删。§5 原第 4 条升级为九步完整执行流程表（建→验证→停→等 90s 复活窗→确认无拉起→Owner 备份确认关卡→实测第三条路径→DELETE→复核），每步列证据要求。§2 明确拒绝"只置空 address 保留密文"的轻量替代。原六条硬门合并重复项收成五条，内容未减少。
 >
 > **v0.5 变更（NWT 复核 v0.4 `90153e72`，①②③ PASS，两处机械错）**：§5 步骤⑦路径订正——真实路由是 `POST /api/system/repair`（`api/settings.js:129`），不是 v0.4 写的 `/api/settings`（NWT 自己 `fcc68351` 那次就写错了，我 v0.4 照抄，本次读代码独立核实过）。§5 步骤⑧改写——`relay.js` 没有能删整行 `relay_nodes` 的现成端点（只有 wallets/goals 两个子资源 delete，已核实），Bettor 裁定不为此新开 HTTP 端点（破坏性能力不该开成 web 面），改为"停 console → 跑经审查的一次性脚本 `scripts/relay-delete-row.mjs <id>` → 起 console → 复核"，脚本规格写进本页（只读打印非敏感字段/交互确认/DELETE+可选VACUUM/留 provenance 一行），脚本本身另派另审、不在本次一起交。顺带把 §1/§2/§5 里出现的旧网具体名字改成中性说法（"旧网 console.db 的 relay 行"），语义不变。
+>
+> **v0.6 变更（NWT 自纠·Bettor 1131 派工）**：v0.5 判断"没有现成删整行端点"是错的——`relay.js:161` `POST /relays/:id/delete` → `relay-nodes.js:70` `deleteRelayNode(id)` 早已存在（清 `skills` FK 依赖 + `DELETE relay_nodes`），只是 v0.4/v0.5 两轮只查了 `fastify.delete`（RESTful DELETE 方法）没查到 `fastify.post('*/delete')`（POST 路径式删除）这个既有命名习惯，属于查找方式的疏漏。本次独立读代码核实：该路由零 `console.log`、不碰任何其它 relay。§5 步骤⑧改为"停进程→只读 SELECT 留前证→调现成路由→SELECT 留后证"，**删除 `scripts/relay-delete-row.mjs` 全部脚本规格，不再造新删除代码**。§2 步骤 4 引用的"§5 表格步骤⑧DELETE"指代不变（仍是同一个表格位置，只是动作实现变了）。
 >
 > **v0.2 变更（Codex 6480a60d 真钱面 MUST CORRECT，Bettor 拍选项 1）**：§5 撤回"首充金额小=天然资金上限"的说法（余额低是暴露面缩小，不是机器强制的支出策略，Codex 指出的缺陷成立）；改为把验证用途身份严格定义为"自动化热钱包激活范围之外"的一次性手动身份，给出机械可核判据（env 零引用 + 源码零引用的 grep 证据），并明确任何转自动化用途前必须先落实 NWT 2-1 硬上限，不能延后补。§3 把 `0.046 KAS/笔` 的措辞订正为"粗略预算上界代理，非费用估计非安全证明"。§4 首充 1-2 KAS 建议保留为运营选择，未改。
 >
@@ -91,15 +93,9 @@
    | ⑤ 确认无自动拉起 | `Get-Process`/`tasklist` 查该 relay 对应的 PID（新起的，若有）应查无；`relay-health-monitor` 日志里不应出现这个 relay 被重启的行 | 查询的真实命令输出（不是"应该没有"） |
    | ⑥ 🔴 Owner 备份确认关卡（见 §2 新增步骤，MUST） | **Owner 明确回复"备份已核验可读、内容无误"**，否则下一步不能做 | Owner 的确认原话（时间戳+内容），没有这条，流程在这里停住 |
    | ⑦ 实测第三条路径（DELETE 前） | 🔴 **v0.5 路径订正（NWT `90153e72` 抓到，v0.4 抄错了）**：手动触发一次 **`POST /api/system/repair`**（`api/settings.js:129`，不是 `/api/settings`），body `{fixId: 'restart_relay_<id>'}`，确认它真的能把 relay 拉起来（证明这条路径确实存在、确实有效，不是纸上谈兵） | 该次调用的响应内容（应为 `ok:true` + PID）；随即再停一次该进程，重复③④⑤ |
-   | ⑧ DELETE | 🔴 **v0.5 改写（NWT `90153e72` MUST-FIX，Bettor 裁：不新开 HTTP 端点）**：核实过 `kasia-console/src/api/relay.js` 现有 `DELETE` 端点只有 `/api/relay/:id/wallets/:walletId`（925 行）和 `/api/relay/:id/goals/:goalId`（1455 行）两个子资源删除，**没有任何现成端点能删 `relay_nodes` 整行**——不新写一个专门删密钥行的 HTTP 端点（那是破坏性能力，不该开成一个 web 面），改走：① 停 console（用 `start-console-mainnet.ps1` 写的 PID 文件）② 跑一个**经代码审查的一次性脚本** `scripts/relay-delete-row.mjs <id>`（脚本规格见下，脚本本身不在本页写，另派另审）③ 起 console ④ 复核（见步骤⑨） | 停/起 console 的时间戳 + PID；脚本执行的完整终端输出（含脚本自己打印的行摘要和用户确认） |
+   | ⑧ DELETE | 🔴 **v0.6 改写（NWT 自纠：现成路由早已存在，Bettor 1131 裁：不新造删除代码）**：`kasia-console/src/api/relay.js:161` `POST /relays/:id/delete` → `relay-nodes.js:70` `deleteRelayNode(id)`——本次读代码核实：该 handler 内**零 `console.log`**，`deleteRelayNode()` 内部只是两条 `DELETE`（先 `skills` 表按 `relay_node_id` 清 FK 依赖，再 `relay_nodes` 表本行），**不打印任何字段（含密文都不打印）、不碰/不启动/不停止任何其它 relay**——确认干净。流程：① 停该 relay 进程（`Get-Process`/`tasklist` 确认对应 PID 不在）② 只读 `SELECT id,name,address,network,created_at FROM relay_nodes WHERE id=?` 留删除前证据（**不选 `mnemonic_encrypted`/`privkey_encrypted` 字段，不管加密与否都不留在证据里**）③ 调 `POST /relays/:id/delete`（该路由本身会 `reply.redirect('/relays')`，无 JSON body，凭调用后的空 `SELECT` 判定成功，不凭响应体）④ 复核（见步骤⑨）——**不再需要新写脚本，`scripts/relay-delete-row.mjs` 规格作废，本页不再引用它** | 停进程时间戳+PID；步骤②③两次 `SELECT` 的真实输出（删除前有行、删除后无行）；curl/调用命令的真实输出 |
    | ⑨ 复核 | `SELECT * FROM relay_nodes WHERE id=?` 应查无；**再次**触发 `restart_relay_<id>`（走订正后的 `POST /api/system/repair`），应返回 `account_not_found`（实测第三条路径 DELETE 后确实失效，不是只读代码猜的） | 两条查询/调用的真实输出 |
 
-**`scripts/relay-delete-row.mjs <id>` 脚本规格（本页只写规格，脚本本身与代码审查另派、另出 commit，不在这次文档改动里一起交）**：
-- 只读打印该行摘要供人核对：`id`/`name`/`address`/`network`/`created_at`——**绝不打印 `mnemonic_encrypted`/`privkey_encrypted` 密文**（哪怕是密文也不打印，避免任何形式的密钥材料出现在终端/日志里）。
-- 交互式确认：打印摘要后要求终端输入 `y`/`n`，只有 `y` 才继续，其余任何输入（含直接回车）视为 `n` 中止。
-- 执行 `DELETE FROM relay_nodes WHERE id=?`，可选 `VACUUM`（视情况，非必须）。
-- 写一行 provenance 记录（时间戳 + 被删行的 `id`/`name`/`address`，不含密文）到某个 `docs/provenance/` 目录下的文件，留档但不含敏感材料。
-- 脚本本身需要经过代码审查（NWT）才能使用，不是写完就能跑——这是一次性、高权限操作用的工具，审查门槛应该不低于本页其它步骤。
 5. **任何转常驻/后台用途，必须先经 NWT 2-1 硬上限（per-relay 资金上限 + 热钱包总额上限写死 env + 冷热分离）落地，另起一次独立 GO**——不能在这次 ephemeral 用途的基础上"顺便"升级成常驻，两者是两次不同的决定。
 
 （原第 5 条"证据同时记录启动与终止"已在 v0.4 并入上面第 4 条的表格 ②③⑤ 三行，不再单列，避免两处各写一半互相打架——六条硬门在 v0.4 收成五条，内容没有减少，只是合并了重复的部分。）
