@@ -1,0 +1,65 @@
+pragma silverscript ^0.1.0;
+// v0.3 探针(Bettor 1122/1122-补, NWT 边界戳点): 给 scanOwnedTokenInputs()/noTokenInput() 补 max_ins_scan 纪律——
+// require(tx.inputs.length <= max_ins_scan) 先拒超界交易, 再在界内遍历(bound 与循环真实展开深度必须同一个常量)。
+// 本探针把 max_ins_scan 定死为 8(小值只为可测试的展开成本; 生产值由部署时按市场实际最大输入数选, 机制本身跟
+// bound 取值无关——因为超界交易先被 require 拒, victim 不可能"藏在遍历不到的下标之后")。
+contract MarketScanProbe3(byte[] token_prefix, int token_prefix_len, byte[] token_suffix, int token_suffix_len, byte[32] token_tmpl_hash) {
+    struct Tok { byte[32] owner; int amount; }
+    int constant MAX_INS_SCAN = 8;
+
+    entry scan_absorb(int declared_total) {
+        require(tx.inputs.length <= MAX_INS_SCAN);   // ★ 1122 拒超界: victim 无处可藏(等价安全替代, 见 ledger 1122)
+        int total = 0;
+        for (i, 0, tx.inputs.length, MAX_INS_SCAN) {   // ★ 1122-补②: 界与循环深度同一个常量 MAX_INS_SCAN
+            byte[] ss = tx.inputs[i].sigScript;
+            int n = ss.length;
+            bool looksLikeToken = false;
+            if (n >= token_suffix_len) { looksLikeToken = ss.slice(n - token_suffix_len, n) == token_suffix; }
+            if (looksLikeToken) {
+                Tok tk = readInputStateWithTemplate(i, token_prefix_len, token_suffix_len, token_tmpl_hash);
+                if (tk.owner == OpInputCovenantId(this.activeInputIndex)) {
+                    total = total + tk.amount;
+                }
+            }
+        }
+        require(total == declared_total);
+    }
+
+    // ★ 1127① 探针: 输入侧扫描对上了, 但输出侧若不绑派生表达式, 币可被引到陌生地址——本 entry 演示"两条都查"。
+    entry scan_and_bind_output(int declared_total, int selfOutIdx) {
+        require(tx.inputs.length <= MAX_INS_SCAN);
+        int total = 0;
+        for (i, 0, tx.inputs.length, MAX_INS_SCAN) {
+            byte[] ss = tx.inputs[i].sigScript;
+            int n = ss.length;
+            bool looksLikeToken = false;
+            if (n >= token_suffix_len) { looksLikeToken = ss.slice(n - token_suffix_len, n) == token_suffix; }
+            if (looksLikeToken) {
+                Tok tk = readInputStateWithTemplate(i, token_prefix_len, token_suffix_len, token_tmpl_hash);
+                if (tk.owner == OpInputCovenantId(this.activeInputIndex)) {
+                    total = total + tk.amount;
+                }
+            }
+        }
+        require(total == declared_total);   // 输入侧: 归己代币全被处理
+        // 输出侧(1127①新增纪律): 续约去向必须是派生表达式(本 covenant 自身), 不是裸 witness 地址——
+        // 堵住"输入对上了、输出把币转去陌生地址"这一类(NWT/Codex 未点名前的真空白, 1127① 补)。
+        require(OpOutputCovenantId(selfOutIdx) == OpInputCovenantId(this.activeInputIndex));
+        require(tx.outputs[selfOutIdx].value == declared_total);
+    }
+
+    // B 类不在场证明(P13 形): 不区分 owner, 结构匹配到即算"有代币输入"(比 owner-aware 更严, 覆盖 1123 B 类顾虑)
+    entry no_token_entry(int dummy_state_change) {
+        require(tx.inputs.length <= MAX_INS_SCAN);   // ★ 同一 1122 纪律
+        bool found = false;
+        for (i, 0, tx.inputs.length, MAX_INS_SCAN) {
+            byte[] ss = tx.inputs[i].sigScript;
+            int n = ss.length;
+            if (n >= token_suffix_len) {
+                if (ss.slice(n - token_suffix_len, n) == token_suffix) { found = true; }
+            }
+        }
+        require(!found);
+        require(dummy_state_change >= 0);   // ★ 1123-b3 second negative: 入口本身有真实状态变化(非 no-op), 不是靠"啥也不干"躲开攻击
+    }
+}
