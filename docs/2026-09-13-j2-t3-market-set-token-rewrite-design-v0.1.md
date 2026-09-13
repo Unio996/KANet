@@ -1,6 +1,6 @@
 # T3 · 主网集 7 合约的代币化改法 · 设计稿 v0.1（23 入口逐条二选一 + 22 常量去向 + 向量计划 · 不写 .sil）
 
-> **Status**: DRAFT-FOR-REVIEW **v0.1**（2026-09-13 · J2 · Bettor 派工（NWT 合审 89eadff4，ledger 1053）· 输入裁决：**T1 v0.5 GREEN**（三 MUST 独立重编兑现；Q7 `winner_pk = byte[32]`）· **T2 骨架方向 GREEN**（Q1 裁 (b) 领取合约自核代币输出——NWT 对 (a) 构造了 close_attest 浅检查攻击；Q6 SHOULD；§3.3 形 NWT 从 codegen 源码确认与 P13 互证；§3.1 委员收窄为一个 `committee_hash`）· **Q8 裁决**：判据 = **结构性用途才强制 ctor**；`gateTmplHash` **MUST 留 ctor**（搬状态 = 创世状态不受检的洞开在 ZK 电路锚上）；其余 6 个模板 hash **留 ctor**（Bettor：家族链单向不成环）；`poolMerkleRoot`/`committee_hash` 可搬，**T4 对照升 MUST**；`market_id` 删；`predicate_commit` baked-use 两行删；`seal_count`/`min_bet` 由本稿拍 · **Bettor 拍 T4 对照范围 = 市场创世全部状态字段**（单源产物逐字节对照 + P2SH 重算 + `market_genesis` intent + landed 硬门）· 数据 = 盘点稿 `docs/2026-09-13-j2-t3-mainnet-set-ctor-inventory-for-q8-v0.1.md`（22 常量位点）+ 本机 7 文件 34 处 `.value` 引用逐行（§3）· 交 NWT → Bettor → 🔴 市场合约 = 钱路 ⇒ Owner 批（D-017 §3）后才写 `.sil`。
+> **Status**: DRAFT-FOR-REVIEW **v0.2**（2026-09-13 · **Bettor 转 Codex fff9bad2**（独立确认 NWT 那条为真实既有 KAS 域 liveness 缺陷，非代币化引入）：四处 draw-down 入口必须实现**同一语义不变量**（`remaining == 0 ⇒ 无续约输出；remaining > 0 ⇒ 恰一个续约且 amount == remaining`），当语义性质测非边角向量（§3.0.1），**payout 计算器舍元归总额精确 = 可分配额 ⇒ 终态清零是构造上必达**；**T3 .sil 实现验收 HOLD 至四处真落码 + diff/运行期向量审**（本稿只定不变量与最少向量集）· NWT 审 T3 v0.1 **GREEN-with-ONE-MUST-FIX**（b2abee3a，Bettor 转）：**PayoutShard.claim(:217-224) / PayoutShard.refund_claim(:382-389) / PayoutShardV2.refund_claim(:333-344) / RootClaim.claim_draw(:94-108) 四处无条件续约**，缺 CloseZkV2 `claim`/`escape_claim` 的 `if (consolidated_pool == payout) 不留续约输出` 分支——最后一个领取人/退款人精确清零时产生 0 值续约输出被 dust 策略拒；代币化后 `amount > 0` 是硬约束 ⇒ **确定性卡死**。本版：§3 四处按 CloseZkV2 原文分支改（§3.0 原文 + 四处逐条）；absorb 类与 RootClose `convert_*` 不动；`.value` 计数 **34 → 33**（RootClose:22 是注释行，v0.1 grep 误计）；§6 四问按批准写入（DUST_MIN 与 amount>0 **两条都要**）；§7 划掉"CloseZkV2 输出形对 ZK journal 影响"（NWT 判 LOW）· 修法随 T3 一次到位，**不在 TN12 单修**；TN12 历史"最后领取人"只读审计另稿 · v0.1（2026-09-13 · J2 · Bettor 派工（NWT 合审 89eadff4，ledger 1053）· 输入裁决：**T1 v0.5 GREEN**（三 MUST 独立重编兑现；Q7 `winner_pk = byte[32]`）· **T2 骨架方向 GREEN**（Q1 裁 (b) 领取合约自核代币输出——NWT 对 (a) 构造了 close_attest 浅检查攻击；Q6 SHOULD；§3.3 形 NWT 从 codegen 源码确认与 P13 互证；§3.1 委员收窄为一个 `committee_hash`）· **Q8 裁决**：判据 = **结构性用途才强制 ctor**；`gateTmplHash` **MUST 留 ctor**（搬状态 = 创世状态不受检的洞开在 ZK 电路锚上）；其余 6 个模板 hash **留 ctor**（Bettor：家族链单向不成环）；`poolMerkleRoot`/`committee_hash` 可搬，**T4 对照升 MUST**；`market_id` 删；`predicate_commit` baked-use 两行删；`seal_count`/`min_bet` 由本稿拍 · **Bettor 拍 T4 对照范围 = 市场创世全部状态字段**（单源产物逐字节对照 + P2SH 重算 + `market_genesis` intent + landed 硬门）· 数据 = 盘点稿 `docs/2026-09-13-j2-t3-mainnet-set-ctor-inventory-for-q8-v0.1.md`（22 常量位点）+ 本机 7 文件 34 处 `.value` 引用逐行（§3）· 交 NWT → Bettor → 🔴 市场合约 = 钱路 ⇒ Owner 批（D-017 §3）后才写 `.sil`。
 
 ## 0. 一句话
 
@@ -49,9 +49,23 @@ validateOutputStateWithTemplate(claim_out, ClaimState { market_cov_id: OpInputCo
 ```
 `TokenState` 六字段布局 = KCC-0020 §2 原文序（T1 §1）；`tok_in` = 本 tx 里任一代币模板输入（用它的 sigScript 尾部取模板字节——`validateOutputStateWithInputTemplate` 的定位法），A 类入口都至少有一个代币输入。
 
-## 3. 23 条入口逐条（A/B · 34 处 `.value` 逐行替换）
+## 3. 23 条入口逐条（A/B · 33 处 `.value` 逐行替换）
 
-标记：**弃 KAS weld** = 该行改为代币 amount 语义（进 `tokenOutOk` 的 `amount`），KAS 侧只剩 dust（`≥ DUST` 或不核）；**保留** = 与钱无关。
+标记：**弃 KAS weld** = 该行改为代币 amount 语义（进 `tokenOutOk` 的 `amount`），KAS 侧只剩 dust（`≥ DUST_MIN`，§6 ②）；**保留** = 与钱无关。
+
+### 3.0 最后领取人清零分支（v0.2 MUST-FIX · CloseZkV2 原文，四处照搬）
+CloseZkV2 `escape_claim`（:126-130）/ `claim`（:193-199）已有的形，原文：
+```
+require(tx.outputs[payoutOutIdx].value == payout);
+// ★ NWT checklist④: dust 边界修法 … 最后一个 claimant 精确清零 consolidated_pool 时不产生 0-value continuation output(Kaspa dust 策略拒绝)。
+if (consolidated_pool == payout) {
+    require(tx.outputs[payoutOutIdx].value == consolidated_pool);   // 显式守恒(同 escape_claim 同款防御性写法)
+} else {
+    require(tx.outputs[selfOutIdx].value == consolidated_pool - payout);   // ★ 守恒 weld, 逐笔递减
+    validateOutputState(selfOutIdx, { … });
+}
+```
+代币化后的等价形（进 §2 `tokenOutOk`）：`if (pool_amount == payout) { 只核领取输出 amount == pool_amount，不核也不要求本合约的代币续约输出；本合约自身可续约 dust 状态或终态 } else { 领取输出 amount == payout ∧ 本合约代币续约 owner == self, amount == pool_amount − payout }`。KCC-0020 `amount > 0` 使 0 值代币续约在代币合约层就被拒——所以这不是"dust 策略偶发拒"，是**每个市场的最后一笔必卡**。四处：PayoutShard.claim / PayoutShard.refund_claim / PayoutShardV2.refund_claim / RootClaim.claim_draw。**不动**：absorb 类（只增不减）、RootClose `convert_*`（全池整体转移，无递减）、CloseZkV2 两处（已有）。
 
 ### ShardLeaf（2 入口 · 2 value 引用）
 | 入口 | 类 | 改法 |
@@ -70,9 +84,9 @@ validateOutputStateWithTemplate(claim_out, ClaimState { market_cov_id: OpInputCo
 |---|---|---|
 | `absorb` | **A** | 代币（owner = 输家 leaf）→ owner **= 本 PS**（`OpInputCovenantId(this.activeInputIndex)`），`amount == shard_amount`；**:55** `shard_value = tx.inputs[shardInIdx].value` → 改读**代币输入状态** `readInputStateWithTemplate(tok_in, token_prefix_len, token_suffix_len, token_tmpl_hash).amount`；**:62** weld → 代币 `consolidated_pool + shard_amount` |
 | `close_attest` | **B** | 加 `noTokenInput(tok_prefix, tok_suffix)`（witness 两参）；**:167** `== consolidated_pool` KAS weld → 弃（PS 输出 dust） |
-| `claim` | **A** | 代币 → **领取输出**（§2 第三块，`amount == payout`，`winner_pk` = merkle 叶 pk）+ 剩余代币 owner = 本 PS `amount == consolidated_pool − payout`；**:217/:224** 两处 KAS weld → 弃 |
+| `claim` | **A** | 代币 → **领取输出**（§2 第三块，`amount == payout`，`winner_pk` = merkle 叶 pk）+ **§3.0 分支**：`consolidated_pool == payout` ⇒ 不留续约；否则剩余代币 owner = 本 PS `amount == consolidated_pool − payout`；**:217/:224** 两处 KAS weld → 弃（**v0.2 MUST-FIX**：现 :218-224 无条件 `validateOutputState(selfOutIdx…)` + `:224 == consolidated_pool − payout`） |
 | `cancel_attest` | **B** | 加 `noTokenInput`；**:326** 弃 |
-| `refund_claim` | **A** | 代币 → 领取输出（`winner_pk` = bettor pk，`amount == refund`）+ 剩余 owner = 本 PS；**:382/:389** 弃 |
+| `refund_claim` | **A** | 代币 → 领取输出（`winner_pk` = bettor pk，`amount == refund`）+ **§3.0 分支**（`consolidated_pool == refund` ⇒ 不留续约）；**:382/:389** 弃（**v0.2 MUST-FIX**：现 :383-389 无条件续约） |
 
 ### PayoutShardV2（5 · 7）
 | 入口 | 类 | 改法 |
@@ -80,7 +94,7 @@ validateOutputStateWithTemplate(claim_out, ClaimState { market_cov_id: OpInputCo
 | `absorb` | **A** | 同 PayoutShard；**:65/:76** |
 | `close_attest` | **B** | `noTokenInput`；**:180** 弃 |
 | `cancel_attest` | **B** | `noTokenInput`；**:283** 弃 |
-| `refund_claim` | **A** | 同 PayoutShard；**:333/:344** 弃 |
+| `refund_claim` | **A** | 同 PayoutShard + **§3.0 分支**；**:333/:344** 弃（**v0.2 MUST-FIX**：现 :334-344 无条件续约，与同文件 `zk_handoff` 终态形对照——V2 已有"终态不续约"的先例 :399） |
 | `zk_handoff` | **A** | 全部代币 → owner **= CloseZkV2 输出 cov id**（`OpOutputCovenantId(zkOutIdx)`；:378 模板锚核不变），`amount == consolidated_pool`；**:398** 弃；本 PS 终态无续约 |
 
 ### RootClose（4 · 5）
@@ -94,7 +108,7 @@ validateOutputStateWithTemplate(claim_out, ClaimState { market_cov_id: OpInputCo
 ### RootClaim（1 · 2）
 | 入口 | 类 | 改法 |
 |---|---|---|
-| `claim_draw` | **A** | **本稿主形（P12）**：代币 → 领取输出 `ClaimState{ market_cov_id: OpInputCovenantId(this.activeInputIndex), winner_pk: pk（merkle 叶）, amount: payout, token_tmpl_hash }`；剩余 owner = 本 root，`amount == pool_amount − payout`；**:94/:108** 弃；dust-ticket spent-once（:66）不变 |
+| `claim_draw` | **A** | **本稿主形（P12）**：代币 → 领取输出 `ClaimState{ market_cov_id: OpInputCovenantId(this.activeInputIndex), winner_pk: pk（merkle 叶）, amount: payout, token_tmpl_hash }`；**§3.0 分支**：`pool_value == payout` ⇒ 不留 root 续约（`claimed_bitmap` 也随之终结——最后一位领完 root 生命周期结束）；否则剩余 owner = 本 root，`amount == pool_amount − payout`；**:94/:108** 弃（**v0.2 MUST-FIX**：现 :97-108 无条件 `validateOutputState(rootOutIdx…)` + `:108 == pool_value − payout`）；dust-ticket spent-once（:66）不变 |
 
 ### CloseZkV2（4 · 8）
 | 入口 | 类 | 改法 |
@@ -104,7 +118,18 @@ validateOutputStateWithTemplate(claim_out, ClaimState { market_cov_id: OpInputCo
 | `escape_claim` | **A** | 代币 → 领取输出（`winner_pk` = bettor，`amount == stake`）+ 剩余 owner = 本合约；**:126/:128/:130** 弃（:128 的"最后一笔全额"分支 → 剩余 amount == 0 时不留代币输出） |
 | `claim` | **A** | 同 escape_claim 形，`amount == payout`；**:193/:197/:199** 弃 |
 
-**计数**：A 15 / B 8；`.value` 引用 34 处全部弃 KAS weld（改代币 amount weld 或删），**0 处保留**——主网集内 KAS 只剩 dust 与 fee。
+**计数**：A 15 / B 8；`.value` 引用 **33** 处（v0.1 写 34：RootClose:22 是注释行被 grep 误计）全部弃 KAS weld（改代币 amount weld 或删），**0 处保留**——主网集内 KAS 只剩 dust 与 fee。
+
+### 3.0.1 draw-down 不变量（v0.2 · Bettor 转 Codex fff9bad2 独立确认 · MUST）
+Codex 独立核实 NWT 那条是**真实既有 KAS 域 liveness 缺陷**（不是代币化才引入），并指出：payout 计算器把舍入余数归到总额精确等于可分配额（本机 `pool-market-settler.js:1908 winnerDustBI = poolToSplitBI - shareSumBI` 那套"dust → min merkle_index winner"聚拢逻辑正是这个构造），**终态清零是构造上必达，不是偶发边缘**——四处 MUST-FIX 入口必须当**语义性质**测，不是当"某个极端输入"的边角向量。**不变量（四处逐条实现同一句）**：
+```
+remaining = pool_before − payout_this_claim
+if remaining == 0: 本入口不产生任何续约代币输出 / 续约 covenant 输出（本合约实例终态）
+else:              本入口恰产生一个续约输出, 其 amount(代币) / value(RootClaim 是 KAS-in-transition, 见 §3.0 备注) == remaining
+```
+**最少向量集（四处各一套，不是一条）**：① 单赢家全额（唯一赢家，`payout == pool` 即 `remaining == 0`）；② 多赢家中的最后一个领取人（前面已有人领过，本笔把 `pool` 精确清零）；③ 全额退款（`refund_claim` 同形，唯一或最后一个退款人）；④ 非最后一笔的部分领取/退款（`remaining > 0`，续约必须恰一个、amount 必须等于 `remaining`）；⑤ **负向量（必拒）**：`remaining == 0` 时若代币/covenant 输出**仍然存在**（哪怕 0 值，哪怕非 0 值）⇒ 必须 fail（终态被破坏 = 双记/资金滞留风险，同 P8 判读形）；同时 `remaining > 0` 时若续约输出**缺失**或 amount **不等于** `remaining` ⇒ 必须 fail。
+
+**验收 HOLD**（Bettor/Codex 裁）：T3 .sil 实现验收 **HOLD 至四处真落码 + diff 审 + 运行期向量审**——本稿只定不变量与最少向量集，不代表验收完成。
 
 ## 4. 与批 B / C′ / T4 / T5 的顺序
 - 每文件一次打开：本稿 A/B 改法 + 批 B `tx.time` temporal（ShardLeaf/RootClose/CloseZkV2）+ C′ 新拒绝分诊 + Q8 常量搬迁，**同一轮**。
@@ -120,14 +145,15 @@ validateOutputStateWithTemplate(claim_out, ClaimState { market_cov_id: OpInputCo
 | T4 | 5 | T2 骨架 §4 |
 | 翻转臂 | 每文件 1 | |
 
-## 6. 请 NWT 判
-1. `seal_count`/`min_bet` 我拍进状态（§1）。
-2. B 类入口的 KAS dust weld 是否也要核 `≥ DUST`（防输出被压成 0 值不可花）——我倾向核一个常量 `DUST_MIN`（ctor 结构常量）。
-3. `escape_claim`/`claim` 的"最后一笔全额"分支：代币 amount == 0 时不留代币输出——与 KCC-0020 `amount > 0` 约束一致，请确认。
-4. 领取输出的 dust KAS 由结算 tx 的 fee 输入付（T2 Q3）——本稿按此写。
+## 6. 裁定（v0.2 · NWT b2abee3a 批准写入）
+1. `seal_count`/`min_bet` 进状态（§1）——批准。
+2. 所有市场合约续约输出的 KAS dust weld 核 `tx.outputs[selfOutIdx].value >= DUST_MIN`（`DUST_MIN` = ctor 结构常量，跨市场不变）——**要**。
+3. 最后一笔全额分支：`pool == payout` ⇒ **不留**代币续约输出（KCC-0020 `amount > 0`）——**要**；两条（② ③）**都要**，不是二选一：② 管本合约 dust 续约不被压成 0，③ 管代币续约不出现 0 值。
+4. 领取输出的 dust KAS 由结算 tx 的 fee 输入付（T2 Q3）。
 
 ## 7. 没核到的
-- 23 条入口的**完整参数签名**未逐条展开（v0.2 展开，落 .sil 前）；本稿只定每条要加的 `tok_in/tok_out/tok_prefix/tok_suffix/c_prefix/c_suffix` 参数。
+- 23 条入口的**完整参数签名**未逐条展开（落 .sil 前的 v0.3 展开）；本稿只定每条要加的 `tok_in/tok_out/tok_prefix/tok_suffix/c_prefix/c_suffix` 参数。
 - `readInputStateWithTemplate(...).amount` 读代币输入状态（absorb :55 的替换）在 v1.0.0 的形：P11 证 `Foreign m = readInputStateWithTemplate(...)` 可编；`.amount` 字段访问未单独试。
-- CloseZkV2 `claim`/`escape_claim` 的输出形（现在是 P2PK 输出给 bettor？）——改为领取覆盖模板输出后 ZK journal 是否要变（`guestPayoutRoot` 叶公式含 pk 与 payout，不含输出形，应不变；未核）。
+- ~~CloseZkV2 `claim`/`escape_claim` 的输出形改领取模板后 ZK journal 是否要变~~ v0.2：NWT 判 LOW（叶公式只含 pk 与 payout），划掉。
 - RefundClaim 是否在主网集。
+- **TN12 历史里"最后领取人"是否真的卡过**（0 值续约被 dust 拒 / 卡 delivering）——只读审计另稿（Bettor 派），结果决定是否开事故账；修法不在 TN12 单修。
