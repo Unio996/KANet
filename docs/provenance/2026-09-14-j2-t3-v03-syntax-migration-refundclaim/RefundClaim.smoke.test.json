@@ -1,0 +1,412 @@
+{
+ "tests": [
+  {
+   "name": "SMOKE-refund_payout_pass_partial_drawdown",
+   "function": "refund_payout",
+   "constructor_args": [
+    "0x3f20b0dfe8af5aafa0f2081df85d272040b9611b9315b86bc7d9e13e25d5006c",
+    "0x3737373737373737373737373737373737373737373737373737373737373737",
+    0,
+    0,
+    0,
+    100,
+    2,
+    0,
+    "0x0000000000000000000000000000000000000000000000000000000000000000"
+   ],
+   "args": [
+    0,
+    1,
+    2,
+    1,
+    193
+   ],
+   "expect": "pass",
+   "tx": {
+    "active_input_index": 0,
+    "inputs": [
+     {
+      "utxo_value": 1,
+      "covenant_id": "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "state": {
+       "local_yes": 0,
+       "local_no": 0,
+       "count": 0,
+       "pool_value": 100,
+       "closed": 2,
+       "winningSide": 0,
+       "payoutRoot": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+       ]
+      }
+     },
+     {
+      "utxo_value": 1,
+      "covenant_id": "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "signature_script_hex": "0x00ff"
+     },
+     {
+      "utxo_value": 1,
+      "utxo_script_hex": "0xaa20b466598b4a04274219265c9383efbb5a55b8bc1b10bd0b44e69cc1b2848084b587",
+      "signature_script_hex": "0x6b202222222222222222222222222222222222222222222222222222222222222222080000000000000000083c000000000000002037373737373737373737373737373737373737373737373737373737373737376c7604ab7eabfa87637557798201209d75567982599f6975557982599f697554798201209d75b9cb547954795479547953795379537953796079607960796079537958798769527957799c697856799c6976557987695c79519c69b900cc01200116797e010801167958cd7e010801167958cd7e01200116797e7e7e7eb976c902160194765193bc7c7eb976c97602c180937cbc7eaa02000001aa7e01207e7c7e01877e78c3887575757575757575757575757575757575757575757551676a68"
+     }
+    ],
+    "outputs": [
+     {
+      "value": 40,
+      "covenant_id": "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "state": {
+       "local_yes": 0,
+       "local_no": 0,
+       "count": 0,
+       "pool_value": 40,
+       "closed": 2,
+       "winningSide": 0,
+       "payoutRoot": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+       ]
+      }
+     },
+     {
+      "value": 60,
+      "p2pk_pubkey": "0x2222222222222222222222222222222222222222222222222222222222222222"
+     }
+    ]
+   }
+  },
+  {
+   "name": "SMOKE-refund_payout_fail_not_cancelled",
+   "function": "refund_payout",
+   "constructor_args": [
+    "0x3f20b0dfe8af5aafa0f2081df85d272040b9611b9315b86bc7d9e13e25d5006c",
+    "0x3737373737373737373737373737373737373737373737373737373737373737",
+    0,
+    0,
+    0,
+    100,
+    0,
+    0,
+    "0x0000000000000000000000000000000000000000000000000000000000000000"
+   ],
+   "args": [
+    0,
+    1,
+    2,
+    1,
+    193
+   ],
+   "expect": "fail",
+   "tx": {
+    "active_input_index": 0,
+    "inputs": [
+     {
+      "utxo_value": 1,
+      "covenant_id": "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "state": {
+       "local_yes": 0,
+       "local_no": 0,
+       "count": 0,
+       "pool_value": 100,
+       "closed": 2,
+       "winningSide": 0,
+       "payoutRoot": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+       ]
+      }
+     },
+     {
+      "utxo_value": 1,
+      "covenant_id": "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "signature_script_hex": "0x00ff"
+     },
+     {
+      "utxo_value": 1,
+      "utxo_script_hex": "0xaa20b466598b4a04274219265c9383efbb5a55b8bc1b10bd0b44e69cc1b2848084b587",
+      "signature_script_hex": "0x6b202222222222222222222222222222222222222222222222222222222222222222080000000000000000083c000000000000002037373737373737373737373737373737373737373737373737373737373737376c7604ab7eabfa87637557798201209d75567982599f6975557982599f697554798201209d75b9cb547954795479547953795379537953796079607960796079537958798769527957799c697856799c6976557987695c79519c69b900cc01200116797e010801167958cd7e010801167958cd7e01200116797e7e7e7eb976c902160194765193bc7c7eb976c97602c180937cbc7eaa02000001aa7e01207e7c7e01877e78c3887575757575757575757575757575757575757575757551676a68"
+     }
+    ],
+    "outputs": [
+     {
+      "value": 1000,
+      "covenant_id": "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "state": {
+       "local_yes": 0,
+       "local_no": 0,
+       "count": 0,
+       "pool_value": 40,
+       "closed": 0,
+       "winningSide": 0,
+       "payoutRoot": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+       ]
+      }
+     },
+     {
+      "value": 60,
+      "p2pk_pubkey": "0x2222222222222222222222222222222222222222222222222222222222222222"
+     }
+    ]
+   }
+  },
+  {
+   "name": "SMOKE-refund_payout_fail_ticket_wrong_pool",
+   "function": "refund_payout",
+   "constructor_args": [
+    "0x3f20b0dfe8af5aafa0f2081df85d272040b9611b9315b86bc7d9e13e25d5006c",
+    "0x3737373737373737373737373737373737373737373737373737373737373737",
+    0,
+    0,
+    0,
+    100,
+    2,
+    0,
+    "0x0000000000000000000000000000000000000000000000000000000000000000"
+   ],
+   "args": [
+    0,
+    1,
+    2,
+    1,
+    193
+   ],
+   "expect": "fail",
+   "tx": {
+    "active_input_index": 0,
+    "inputs": [
+     {
+      "utxo_value": 1,
+      "covenant_id": "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "state": {
+       "local_yes": 0,
+       "local_no": 0,
+       "count": 0,
+       "pool_value": 100,
+       "closed": 2,
+       "winningSide": 0,
+       "payoutRoot": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+       ]
+      }
+     },
+     {
+      "utxo_value": 1,
+      "covenant_id": "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "signature_script_hex": "0x00ff"
+     },
+     {
+      "utxo_value": 1,
+      "utxo_script_hex": "0xaa20ac60909a09d00426c0ae30a16dad2a340e744125f51bb0892c5300e8335838a087",
+      "signature_script_hex": "0x6b202222222222222222222222222222222222222222222222222222222222222222080000000000000000083c000000000000002055555555555555555555555555555555555555555555555555555555555555556c7604ab7eabfa87637557798201209d75567982599f6975557982599f697554798201209d75b9cb547954795479547953795379537953796079607960796079537958798769527957799c697856799c6976557987695c79519c69b900cc01200116797e010801167958cd7e010801167958cd7e01200116797e7e7e7eb976c902160194765193bc7c7eb976c97602c180937cbc7eaa02000001aa7e01207e7c7e01877e78c3887575757575757575757575757575757575757575757551676a68"
+     }
+    ],
+    "outputs": [
+     {
+      "value": 40,
+      "covenant_id": "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "state": {
+       "local_yes": 0,
+       "local_no": 0,
+       "count": 0,
+       "pool_value": 40,
+       "closed": 2,
+       "winningSide": 0,
+       "payoutRoot": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+       ]
+      }
+     },
+     {
+      "value": 60,
+      "p2pk_pubkey": "0x2222222222222222222222222222222222222222222222222222222222222222"
+     }
+    ]
+   }
+  }
+ ]
+}
