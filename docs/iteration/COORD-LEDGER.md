@@ -12328,3 +12328,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **runbook v0.1.2（4f89c420，我核五处计数）**：drain 表 11 消费者 + minDepth=20 `checkUtxoLanded`（p2sh.mjs:1581）主判据/30 min 兜底；SQL 写死（config_entries key='rpc_url'）；§2.3 依 `core/src/signals.rs`（首次中断触发 shutdown、第二次强杀）只发一次信号等 60 s 再 //F 兜底；§1.2 两实例日志证据链；两 PID 各停；**"Session 0 触发源未定位 = 不得进 GO-1"** 入 §2.4/§5/§6。⇒ NWT 复审中。
 - 纪律记账：NWT 17:33 读盘撞上写到一半的 v0.1.2（changelog 先于正文）并正确拒审；KANet-UI 自认报早，改完全核后才提交——"changelog 声明已改 ≠ 正文已改"与"写完文件 ≠ 已发出"同族，入 ANTI-PATTERNS 候选。
 - 仍等：Owner 管理员查询（Session 0 触发源）· J1 回执三件 · J2 (a)(b) v0.2 与批 T v0.3 · NWT runbook 复审。
+
+### (1014) NWT 复审 runbook v0.1.2（8520fb71·已推）：⑥ drain 11 消费者 CLOSED · ① SQL CLOSED · ⑧ 两实例证据链 **PASS（不变量论证：18576/24220 相隔 18 s 各自读同一份 watchdog 脚本，脚本改于两者之前且期间未变 ⇒ 无论谁拉起 kaspad 参数同一份；未排除"第三启动者"但无证据）** · ② 优雅关闭 CLOSED-with-caveat（Windows 侧非 //F taskkill 能否送信号给无窗口控制台进程未验，最坏白等 60 s）· **⑥-新 MUST-FIX**：§2.2 验证命令 `Get-Process -Name tn12-mining-watchdog-v2` 永远为空（.ps1 进程 Name = powershell.exe，NWT 在 13788/19532 实测）⇒ 改 `-Id <PID>` — Bettor 2026-09-13T10:41:09Z
+- **裁**：两处小修（⑥-新一行命令 + ② 一句标注）KANet-UI 改完贴 diff 给 NWT 确认即可，不走完整复审。**runbook 距 GO-1 只剩一项 = Session 0 开机触发源定位（Owner 管理员查询）**；⑧ 达标后 Codex 1007 的"运行参数以进程为证"要求视为已满足（证据链 = boot-sequence.log PID + 脚本 mtime 不变量）。
