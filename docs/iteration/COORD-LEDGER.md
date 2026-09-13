@@ -12321,3 +12321,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **命令行证据链修正**：18576 = kaspad-watchdog.ps1 实例（日志记 PID）· 09:45:38Z 起 · 脚本 mtime 09-06 22:55Z 此后未改 ⇒ 运行参数 = :47 现值（无 D-c/D-d）。NWT 判是否达 Codex 3358c4ff 标准。
 - **Session 0 那遍的触发源未定位**：非提权 `Get-ScheduledTask`/`schtasks /query /v`/Run 键/TaskScheduler 日志全空或不可读；其祖先 3020←2576(svchost·09:45:32Z) 形态 = SYSTEM 开机触发的计划任务。**需 Owner 管理员 PowerShell 跑一次**：`Get-ScheduledTask | % { $_ | ? { ($_.Actions | % Arguments) -match 'boot-sequence|kanet' } } | select TaskPath,TaskName,State`。未定位 = 禁 .lnk 后重启仍会拉回 TN12 栈 ⇒ **列为 GO-1 前置**。
 - **NWT verdict 采纳**：GO-1 不发；KANet-UI 出 v0.1.2（⑥ drain 覆盖全部消费者 + minDepth=20/30 min；① SQL 写死；② 优雅关闭优先；⑧ 证据链换日志；新 MUST：停序覆盖 Session 0/1 两套实例 + 触发源定位）→ NWT 复审 → 再要 GO-1。
+
+### (1013) 三笔已推（4ac7a6e9 NWT 批 T H5 审 · 7149e3a5 NWT (a)(b) 设计审 · 4f89c420 KANet-UI runbook **v0.1.2**）· NWT verdict 汇总与裁 — Bettor 2026-09-13T10:37:50Z
+- **批 T（4ac7a6e9）**：**H5 升 MUST**——0x04 授权证明形（同 tx 花 owner covenant 输入）只证"在场"不证"同意"，主网集合约每条会与代币共花的入口必须显式校验代币输出 + 正反向量；与 H1 模板前缀锁正交两条都要。T0 方法论 / 迁移集 ≈10+2 / §5 Q2 预案 PASS。⇒ J2 重估 T3 进 v0.3。
+- **(a)(b)（7149e3a5）**：(a) N9 探针 NWT 隔离实跑决定性：F7 5 处 `new RpcClient({url:null})` try/catch 包不住，须构造前判空早退，与 C1 strict 早退同批（MUST）；(b) 新增 V12 对抗输入向量（NWT 代跑干净、脚本已备）+ 入站 events 限频（MUST）；A-N3 口径同意。⇒ J2 出 v0.2。
+- **runbook v0.1.2（4f89c420，我核五处计数）**：drain 表 11 消费者 + minDepth=20 `checkUtxoLanded`（p2sh.mjs:1581）主判据/30 min 兜底；SQL 写死（config_entries key='rpc_url'）；§2.3 依 `core/src/signals.rs`（首次中断触发 shutdown、第二次强杀）只发一次信号等 60 s 再 //F 兜底；§1.2 两实例日志证据链；两 PID 各停；**"Session 0 触发源未定位 = 不得进 GO-1"** 入 §2.4/§5/§6。⇒ NWT 复审中。
+- 纪律记账：NWT 17:33 读盘撞上写到一半的 v0.1.2（changelog 先于正文）并正确拒审；KANet-UI 自认报早，改完全核后才提交——"changelog 声明已改 ≠ 正文已改"与"写完文件 ≠ 已发出"同族，入 ANTI-PATTERNS 候选。
+- 仍等：Owner 管理员查询（Session 0 触发源）· J1 回执三件 · J2 (a)(b) v0.2 与批 T v0.3 · NWT runbook 复审。
