@@ -13,6 +13,7 @@ import * as kaspa from 'kaspa-wasm';
 import { getApi } from './api.mjs';
 import { getWallet, KaspaWallet } from './wallet.mjs';
 import { waitForRpc } from '../rpc-listener.mjs';
+import { configuredNetwork } from './kaspa-network.mjs';   // ab-followup (b 网络单一源扩面): 未设即 throw, 不回退旧网
 
 const { Generator, Encoding, sompiToKaspaString, Address, PaymentOutput } = kaspa;
 const Resolver = kaspa.Resolver || null;
@@ -363,7 +364,9 @@ export async function custodialSendKaspa({ privKeyHex, to, amount, network }) {
   if (!amount) throw new Error('amount required');
   // 校验收款地址合法 (Bettor b): 非法地址 new Address 抛, 在签名/花费前拦下。
   try { new Address(to); } catch { throw new Error('invalid kaspa address (to)'); }
-  const net = network || process.env.KASPA_NETWORK || 'testnet-12';
+  // ab-followup (2026-09-13, J2 · 全仓硬编码旧网端口/网络标识扫描 §2.1①): 网络单一源, 不回退旧网默认值——
+  //   显式 network 参数(调用方声明)优先, 否则读配置(未设即 throw, 同 rpc-health.js:19-23 同款纪律)。
+  const net = network || configuredNetwork();
   let custodialWallet;
   try {
     custodialWallet = KaspaWallet.fromPrivateKey(privKeyHex, net); // 验 64-hex + 构造, 不 log privKeyHex

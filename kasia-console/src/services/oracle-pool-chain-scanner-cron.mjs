@@ -5,6 +5,7 @@
 import { scanAndDerivePool } from './oracle-pool-chain-scanner.mjs';
 import { ibdGateSkip } from '../lib/ibd-tick-gate.mjs';   // M2 (2026-09-05, Owner 全批 ledger 880): IBD 期(isSynced===false 确认)跳过读链/广播 tick, 门在入口任何 DB 扫描之前
 import { wrapTick } from '../lib/diag-step.mjs';   // M10 v2 observe-only (2026-09-05): setInterval 回调计时(纯透传, 同步段/总墙钟 ≥50ms 才打)
+import { configuredNetwork } from '../lib/kaspa-network.mjs';   // ab-followup (b 网络单一源扩面): 未设即 throw, 不回退旧网
 
 const TICK_INTERVAL_MS = 5 * 60 * 1000;
 const STARTUP_GRACE_MS = 60 * 1000;
@@ -31,7 +32,7 @@ export async function oraclePoolScannerTick() {
     const { getWorkingRpc, requireRpcUrl } = await import('./rpc-health.js');
     const { url: rpcUrl } = await getWorkingRpc();
     if (!requireRpcUrl(rpcUrl, 'oracle-pool-scanner.tick')) return { skipped: true, reason: 'no-rpc' };   // C13
-    const networkId = process.env.KASPA_NETWORK || 'testnet-12';
+    const networkId = configuredNetwork();   // ab-followup (b 网络单一源扩面): 未设即 throw, 不回退旧网
 
     const currentDaa = await _getCurrentDaa(rpcUrl, networkId);
     if (!Number.isFinite(currentDaa)) {

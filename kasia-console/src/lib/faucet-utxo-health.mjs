@@ -13,12 +13,13 @@
 import { sqlite } from '../db/client.js';
 import { getWorkingRpc } from '../services/rpc-health.js';
 import { randomUUID } from 'crypto';
+import { configuredNetwork } from './kaspa-network.mjs';   // ab-followup (2026-09-13, J2 · 扫描 §2.1⑤): 原来是纯常量'testnet-12'连 env 读都没有, 比其余几处更严重
 
 const TICK_INTERVAL_MS = Number(process.env.FAUCET_HEALTH_TICK_MS) || 60_000; // 1min
 const STARTUP_GRACE_MS = 60_000;
 const UTXO_COUNT_ALERT_THRESHOLD = Number(process.env.FAUCET_HEALTH_UTXO_ALERT_THRESHOLD) || 400; // 同 mining 那条已知安全线
 const LOW_BALANCE_ALERT_KAS = Number(process.env.FAUCET_HEALTH_LOW_BALANCE_KAS) || 5000; // faucet 单笔 10000, 留一次的余量当告警线
-const NETWORK = 'testnet-12';
+const NETWORK = configuredNetwork();   // 未设即 throw, 不回退旧网
 
 let timer = null;
 let running = false;

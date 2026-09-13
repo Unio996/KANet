@@ -15,6 +15,7 @@ import { ibdGateSkip } from '../lib/ibd-tick-gate.mjs';   // M2 (2026-09-05, Own
 import { wrapTick } from '../lib/diag-step.mjs';   // M10 v2 observe-only (2026-09-05): setInterval 回调计时(纯透传, 同步段/总墙钟 ≥50ms 才打)
 import { sendCommandAsync } from './relay-manager.js';
 import { sendBroadcastChunked } from '../lib/pool-broadcast.mjs';
+import { configuredNetwork } from '../lib/kaspa-network.mjs';   // ab-followup (b 网络单一源扩面): 未设即 throw, 不回退旧网
 
 const TICK_INTERVAL_MS = 60 * 60 * 1000;   // 1 hour
 const STARTUP_GRACE_MS = 2 * 60 * 1000;    // 2 min (let scanner run first)
@@ -124,7 +125,7 @@ export async function oraclePoolRenewalTick() {
     const { getWorkingRpc, requireRpcUrl } = await import('./rpc-health.js');
     const { url: rpcUrl } = await getWorkingRpc();
     if (!requireRpcUrl(rpcUrl, 'oracle-renewal.tick')) return { skipped: true, reason: 'no-rpc' };   // C13: 构造前判空(url=null ⇒ connect 抛 wasm unreachable)
-    const networkId = process.env.KASPA_NETWORK || 'testnet-12';
+    const networkId = configuredNetwork();   // ab-followup (b 网络单一源扩面): 未设即 throw, 不回退旧网
     const { RpcClient, Encoding } = await import('kaspa-wasm');
     const rpc = new RpcClient({ url: rpcUrl, encoding: Encoding.Borsh, networkId });
     await rpc.connect();
