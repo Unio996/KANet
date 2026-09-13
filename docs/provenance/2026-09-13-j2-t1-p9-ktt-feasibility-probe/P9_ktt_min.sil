@@ -1,0 +1,73 @@
+pragma silverscript ^0.1.0;
+// T1 可行性探针(非实现): cov 声明能否接 int[]/struct[] 额外参数 · (b-in) sigScript 尾核 · (b-out) validateOutputStateWithTemplate + OpOutputCovenantId · 编译期常量入口
+contract P9KttMin(
+    int init_amount, byte[32] init_owner, byte init_owner_scheme, byte init_borrow_scheme, byte[32] init_borrow_guard, byte[32] init_extension_commitment,
+    byte[] market_tmpl_suffix, int market_tmpl_suffix_len,
+    byte[] claim_tmpl_prefix, byte[] claim_tmpl_suffix, byte[32] claim_tmpl_hash,
+    int max_ins, int max_outs
+) {
+    int      amount               = init_amount;
+    byte[32] owner                = init_owner;
+    byte     owner_scheme         = init_owner_scheme;
+    byte     borrow_scheme        = init_borrow_scheme;
+    byte[32] borrow_guard         = init_borrow_guard;
+    byte[32] extension_commitment = init_extension_commitment;
+
+    byte constant SCHEME_COVENANT_ID = 0x04;
+    byte constant BORROW_DISABLED    = 0x00;
+    bool constant MODE_TEST_COIN     = true;
+
+    struct ClaimState { byte[32] winner_pk; int amount; }
+
+    function ownerIsMarketInput(int idx, byte[32] want) : bool {   // 无提前 return(v1.0.0: return 须为最后一条语句)
+        byte[] ss = tx.inputs[idx].sigScript;
+        int n = ss.length;
+        bool okTail = false;
+        if (n >= market_tmpl_suffix_len) { okTail = ss.slice(n - market_tmpl_suffix_len, n) == market_tmpl_suffix; }
+        return OpInputCovenantId(idx) == want && okTail;
+    }
+
+    #[covenant(binding = cov, from = max_ins, to = max_outs, name = transfer, delegate_name = transfer_delegator)]
+    function transferPolicy(State[] prev_states, State[] next_states, byte[] witness, int[] owner_input_idx, int[] recv_idx, ClaimState[] new_claims) {
+        require(witness.length == 0);
+        int sum_in = 0;
+        for (i, 0, prev_states.length, max_ins) {
+            require(prev_states[i].owner_scheme == SCHEME_COVENANT_ID);
+            require(prev_states[i].borrow_scheme == BORROW_DISABLED);
+            require(OpInputCovenantId(owner_input_idx[i]) == prev_states[i].owner);
+            sum_in = sum_in + prev_states[i].amount;
+        }
+        int sum_out = 0;
+        for (j, 0, next_states.length, max_outs) {
+            require(next_states[j].amount > 0);
+            require(next_states[j].owner_scheme == SCHEME_COVENANT_ID);
+            require(next_states[j].borrow_scheme == BORROW_DISABLED);
+            require(next_states[j].borrow_guard == byte[32](0x0000000000000000000000000000000000000000000000000000000000000000));
+            require(next_states[j].extension_commitment == byte[32](0x0000000000000000000000000000000000000000000000000000000000000000));
+            sum_out = sum_out + next_states[j].amount;
+            // (b) 二选一: recv_idx[j] >= 0 ⇒ b-in(市场输入); 否则 b-out(领取 covenant 同笔新建, 输出 index = -recv_idx[j]-1)
+            if (recv_idx[j] >= 0) {
+                require(ownerIsMarketInput(recv_idx[j], next_states[j].owner));
+            } else {
+                int out_k = 0 - recv_idx[j] - 1;
+                validateOutputStateWithTemplate(out_k, new_claims[j], claim_tmpl_prefix, claim_tmpl_suffix, claim_tmpl_hash);
+                require(OpOutputCovenantId(out_k) == next_states[j].owner);
+            }
+        }
+        require(sum_in == sum_out);
+    }
+
+    #[covenant.delegate]
+    function transfer_delegator(byte[] witness, int my_owner_input_idx) {
+        require(owner_scheme == SCHEME_COVENANT_ID);
+        require(OpInputCovenantId(my_owner_input_idx) == owner);
+        require(witness.length == 0);
+    }
+
+    // H2: 编译期常量入口(测试构建恒拒)
+    // C1 角色1: leader 合约里的手写 entry 须拒绝同 covenant 共花 + allow 注解(v1.0.0 静态规则; T1 设计 v0.2 落此)
+    #[covenant.allow(rule = manual_entrypoint_in_leader_contract)]
+    entry mint_issuer(sig s) { require(OpCovInputCount(OpInputCovenantId(this.activeInputIndex)) == 1); require(!MODE_TEST_COIN); require(checkSig(s, pubkey(owner))); }
+    #[covenant.allow(rule = manual_entrypoint_in_leader_contract)]
+    entry clawback(sig s, int out_idx) { require(OpCovInputCount(OpInputCovenantId(this.activeInputIndex)) == 1); require(!MODE_TEST_COIN); require(checkSig(s, pubkey(owner))); require(tx.outputs[out_idx].value > 0); }
+}

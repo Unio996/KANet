@@ -1,6 +1,6 @@
 # T1 · `sil-v1/KanetTestToken.sil`（KTT）· KCC-20 测试币合约设计 v0.1（不写 .sil）
 
-> **Status**: DRAFT-FOR-REVIEW v0.1（2026-09-13T11:48Z · J2 · Bettor 派工 SendMessage 11:4xZ「T1 代币合约设计稿：六字段 + 免费 mint + H1 (a)(b) + H2 编译期常量三入口 + H3 borrow_scheme=0x00 + 向量计划，设计不写 .sil」）· 交 NWT 红队 → Bettor → 🔴 **代币合约 = 钱路 ⇒ Owner 批**（D-017 §3）后才写 `.sil`。
+> **Status**: DRAFT-FOR-REVIEW **v0.2**（2026-09-13T11:51Z · Bettor 批准可行性探针 P9（隔离 clone v1.0.0 编 + debugger 跑，产物 `docs/provenance/2026-09-13-j2-t1-p9-ktt-feasibility-probe/`，**不进 `sil-v1/`**）· 结论：**§2.2 形在 v1.0.0 能编能跑**（3788 B）——四条回填：① cov 声明接受 `byte[] witness, int[] owner_input_idx, int[] recv_idx, ClaimState[] new_claims` 额外参数，ABI = `transfer(State[] next_states, witness, int[], int[], ClaimState[])`（**`next_states` 须显式作首参传入**，README "通常不用传"对本形不适用）；② 语言限制：`return` 必须是函数最后一条语句（无提前 return）⇒ §2.2 helper 单出口写法；③ **v1.0.0 C1 规则打到本合约的手写 `mint_issuer` / `clawback`**（leader 合约里的 manual entry）⇒ 两入口第一行必须 `require(OpCovInputCount(OpInputCovenantId(this.activeInputIndex)) == 1)` + `#[covenant.allow(rule = manual_entrypoint_in_leader_contract)]`（角色 1，与 C1 设计同形）；④ 运行期向量 4/4：(b-in) 市场输入在场 pass · 尾差一字节（= NWT §1 自建 covenant）fail · owner cov id 不匹配 fail · 测试构建 `mint_issuer` 恒拒 pass；翻转臂必 FAIL。**(b-out) 只证到编译级**（`validateOutputStateWithTemplate` + `OpOutputCovenantId` 组合编过；运行期需算 genesis cov id，留 T1 实现阶段）· v0.1（2026-09-13T11:48Z · J2 · Bettor 派工 SendMessage 11:4xZ「T1 代币合约设计稿：六字段 + 免费 mint + H1 (a)(b) + H2 编译期常量三入口 + H3 borrow_scheme=0x00 + 向量计划，设计不写 .sil」）· 交 NWT 红队 → Bettor → 🔴 **代币合约 = 钱路 ⇒ Owner 批**（D-017 §3）后才写 `.sil`。
 > 输入：J1 `docs/2026-09-13-owner-mainnet-test-token-kcc20-free-mint-assessment-v0.1.md` §3（v0.1.1）· NWT `docs/2026-09-13-nwt-redteam-j1-kcc20-testtoken-v0.1.md`（§1 攻击链 / §2 P1–P3 / §4 borrowed receive / §8 三条 MUST）· 批 T v0.7 §0.5 H1–H5 · T0 实证（P1 跨模板读 / P4b 前缀切片 / P7 sigScript 尾部匹配 / P2 在场判据）· silverscript v1.0.0 `docs/DECL.md` "KCC20-shaped transfer interface" + `kcc20-book`。
 > 编译器：v1.0.0（`3ed9733`），`pragma ^0.1.0`（J1 §8 实证 `COMPILER_VERSION` 仍 0.1.0）；产物形 `contracts.KanetTestToken.compiled.{bytecode, template_hash, state_span}`。
 
@@ -142,6 +142,7 @@ function transfer_delegator(byte[] witness, int owner_input_idx) {   // 非 lead
 
 ## 7. 没核到的
 
-- 未试编（Bettor 令：设计不写 .sil）；§2.2 的 `int[] owner_input_idx` / `ClaimState[]` 作为 cov 声明的额外参数是否被 v1.0.0 接受（DECL 说 extra call args 允许，struct 数组作参数见 `kcc20_tests.rs` `kcc20_state_array_arg`）——T1 试编第一件事。
+- ~~未试编~~ v0.2：P9 探针已证 §2.2 形能编能跑（见 Status）；**(b-out) 运行期未证**（要在 test.json 里给出 genesis 输出的正确 cov id = `hash(授权输入 outpoint, 有序输出)`，探针没算；T1 实现阶段用 relay 的 `populateGenesisCovenants` 同源算法补一条向量）。
+- P9 的 (b) 路由用 `int[] recv_idx`（≥0 = b-in 输入索引；<0 = b-out 输出索引取负减一）替代 §2.2 的"new_claims 空态判路由"——更机械，建议 v0.3 正式采用。
 - `OpCovInputCount(owner) > 0` 与 `OpInputCovenantId(witness_idx) == owner` 两形取后者（显式索引，P2 已编过），是否有 gas/字节差未量。
 - 领取模板（T2）尚无稿，`claim_tmpl_*` 三参先按占位。
