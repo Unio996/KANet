@@ -1,6 +1,8 @@
-# 主网账号迁移 · 第 2 批（个位数-二十位数小额）执行页 v0.1（2026-09-14 · KANet-UI · Bettor 1182 派工 · 只写不执行）
+# 主网账号迁移 · 第 2 批（个位数-二十位数小额）执行页 v0.2（2026-09-14 · KANet-UI · Bettor 1182 派工 · 只写不执行）
 
 > **Status: DRAFT**。权威链：`docs/2026-09-14-kanetui-mainnet-account-migration-runbook-v0.1.md`（v0.6，下称"迁移 runbook"）§6.2 第 2 批。**本页任何一步都不执行**——执行门 = 本页 → NWT 红队审 → Owner 批 → 执行，同第 1 批执行页（`docs/2026-09-14-kanetui-mainnet-migration-batch1-stress-exec-v0.1.md`，下称"第 1 批执行页"）的执行门。本页按第 1 批模板产出，第 1 批已实际执行验收通过（`docs/provenance/2026-09-14-kanetui-mainnet-migration-batch1-stress/`，10/10 一次通过），本页复用同一套方法，不重新设计机制，差异只在账号名单和 §2 探针改用的冷地址。
+>
+> **v0.2 变更（NWT 审第 1 批 `d4c9584d` GREEN 定案，同时提的一条建议，Bettor 1184 采纳为规矩）**：从第 2 批起，证据页除 README 外，必须附执行窗口的 `stdout`/`stderr` 原始日志副本（同 `docs/provenance/2026-09-14-kanetui-hotwallet-mainnet-deploy/` 部署证据页的做法——那份留了 `console-mainnet-stdout-PID15396.log`/`-stderr...log` 两份独立副本，第 1 批证据页当时只写了摘录进 README，没留原始文件副本）。§7 证据清单补这一条，本批执行时落地。
 
 ## 0. 范围
 
@@ -73,8 +75,9 @@
 4. 再次 `SELECT` 复核应查无。
 5. 源数据未受影响，可重新走 §2/§3 正确流程补导这一行。
 
-## 7. 证据清单（执行完成后落 `docs/provenance/<日期>-kanetui-migration-batch2-small/`，同第 1 批格式）
+## 7. 证据清单（执行完成后落 `docs/provenance/<日期>-kanetui-migration-batch2-small/`，同第 1 批格式 + v0.2 新增第 0 项）
 
+- 🔴 **v0.2 新增（NWT 建议，Bettor 1184 采纳）：执行窗口的 `stdout`/`stderr` 原始日志副本**——从本批起，证据目录除 README 外必须另存两份独立文件（命名同热钱包部署证据页惯例：`console-mainnet-stdout-PID<当次 PID>.log` / `console-mainnet-stderr-PID<当次 PID>.log`），覆盖从 §2 探针发出到 §5 观察窗口结束的完整区间——不是只在 README 里摘录几行，`logs/mainnet/` 下的活动日志会在下次重启时被覆盖，独立副本是本批执行完成后唯一还能重新核对原始文本的地方。第 1 批证据页当时只摘录进了 README、没留这两份独立副本，是本条要补的缺口，第 1 批本身不用补（NWT 已就第 1 批本身 GREEN 定案，这条只管第 2 批起）。
 - §2 探针（MarketMaker-A 版本）的完整 HTTP 响应（状态码 + `Location`，不含请求体明文）。
 - §3 逐行核对结果表：6 行的 `name`/`address` 一致性结果/链上余额比对结果（**不含 `mnemonic` 字段**）。
 - §5 观察到的两个监控 tick 日志片段（覆盖导入后至少 2 个周期）、`events` 表查询结果（导入前后各一次）、子进程数量对照。
