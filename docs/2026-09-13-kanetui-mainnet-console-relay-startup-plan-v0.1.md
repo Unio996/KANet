@@ -1,8 +1,10 @@
-# 主网 console/relay 起服务方案 v0.2（2026-09-13 · KANet-UI · Bettor 派工 · 只写不执行）
+# 主网 console/relay 起服务方案 v0.3（2026-09-13 · KANet-UI · Bettor 派工 · 只写不执行）
 
 > **Status: DRAFT**。权威：Owner 直令（COORD-LEDGER (1061)）"旧测试网一切冻结、全员只做主网"。
 >
-> **v0.2 变更（Bettor 派工·把 §2 写成可执行判据供 NWT 与 v0.1 合并审）**：§2.2/§2.3 补具体验收命令（schema 版本核对/空库抽查/I4 拒起负向量的实际查询）；§3.1 步骤 6"频道 relay 身份重生成"查明具体机制并补全（每个 agent 的 canonical 发送脚本硬编码 RELAY/BASE 常量，需各自新建 mainnet relay_nodes 行+改常量+真实充值）；§5 新增 GO-E（资金/密钥面独立批点）；§1.2 与 J2 已出的合并序预检 `68e766c3` 交叉核对一致。本页覆盖主网主线三支之一（①节点已有独立执行页 `docs/2026-09-13-kanetui-mainnet-node-start-brief-for-j1-v0.1.md`；③代币合约设计另案），本页只做**②console/relay 主网化**。**本文档任何一步都不执行**；执行门 = 本方案 → NWT 红队审 → Owner 逐步批 → 执行。TN12 现有一切原样不动，本页不涉及也不建议动它。
+> **v0.2 变更**：§2.2/§2.3 补具体验收命令（schema 版本核对/空库抽查/I4 拒起负向量的实际查询）；§3.1 步骤 6"频道 relay 身份重生成"查明具体机制并补全（每个 agent 的 canonical 发送脚本硬编码 RELAY/BASE 常量，需各自新建 mainnet relay_nodes 行+改常量+真实充值）；§5 新增 GO-E（资金/密钥面独立批点）；§1.2 与 J2 已出的合并序预检 `68e766c3` 交叉核对一致。
+>
+> **v0.3 变更（NWT 审 MUST-FIX，阻塞 GO-C）**：撤回 v0.2 及更早"原地改 `kanet.env` 三行"的方案——那会让 TN12 那套现跑实例下次重启读到主网值，破坏"旧网原样不动"。改为**独立 env 来源**：新文件 `kanet.mainnet.env`，`kanet.env` 一字不动；主网实例不经过 `kanet-start.sh`（那是 TN12 全栈编排脚本，不改它），改用独立小型启动方式把新文件的值注入这一个进程自己的环境。§3.1 步骤 4 与 §4 同步改措辞，不再提"kanet.env 段"。本页覆盖主网主线三支之一（①节点已有独立执行页 `docs/2026-09-13-kanetui-mainnet-node-start-brief-for-j1-v0.1.md`；③代币合约设计另案），本页只做**②console/relay 主网化**。**本文档任何一步都不执行**；执行门 = 本方案 → NWT 红队审 → Owner 逐步批 → 执行。TN12 现有一切原样不动，本页不涉及也不建议动它。
 
 ## 0. 前提澄清（防误读）
 - 本页假设 §1 的三条前置分支已合入主线（否则后面的一切无从谈起）——**分支合并的具体顺序/冲突消解由 J2 出**（Bettor 已指派），本页只描述"合到主线"这个前提本身，以及我核实到的文件级重叠点供 J2 参考，不代 J2 定合并序。
@@ -22,23 +24,30 @@
 - (b) 与 (c) 都改：`kasia-console/src/api/bettor.js`、`kasia-console/src/services/bettor-prediction-settler.js`——(b) 改的是这两个文件里的网络推断站点，(c) 改的是同文件里的支付确认/落链逻辑，两者改动点大概率不在同一行但需要合并后跑一遍测试确认没有互相踩。
 - (a) 与 (c) 没有文件级重叠。
 
-### 1.3 kanet.env 主网值（本次要改的三行 + 一条注释）
-现值（本机核实）：
-```
-KASPA_RPC_URL=ws://127.0.0.1:17210      # 行 23，TN12 borsh 端口
-KASPA_NETWORK=testnet-12                 # 行 24
-...
-KASPA_RPC_LOCAL_ONLY=1                   # 行 305（文件末行）
-```
-目标主网值：
-```
-KASPA_RPC_URL=ws://127.0.0.1:17110      # 主网 borsh 端口（J1 执行页 876cc412 里起的那个节点）
-KASPA_NETWORK=mainnet
-KASPA_RPC_LOCAL_ONLY=1                   # 值不变，但语义变了，见下
-```
-**`:304` 注释需要同步改**：现在那行注释写的是"2026-09-07 G-2（console RPC self-heal，ledger 990/991）：共享客户端只用本机节点·rpc-health 发现列表按网络过滤"——这句话描述的是 G-2 落地时的语境，没提 (a) 分支落地后 `LOCAL_ONLY=1` 已经变成**严格**语义（本机不可用直接 null，不再有任何回退）。合并 (a) 后这行注释应该更新说明这一点，避免以后有人照着旧注释以为它"还会回退"。
+### 1.3 主网 env 值 —— **独立来源，不改现有 kanet.env（v0.3 MUST-FIX，NWT 指出）**
 
-**⚠ 这三行（连同 §2 数据库那条）不是各自独立生效的——必须一起切换，缺一会造成 network_mismatch 的假阳性/假阴性**（如只改了 `KASPA_NETWORK` 但 `KASPA_RPC_URL` 还指着 TN12 端口，(b) 的 I4 判定会拿"mainnet 环境 + 连到一个实际是 testnet-12 的节点"这种自相矛盾状态，具体后果要看 (b) 判定逻辑是先信 env 还是先信节点自报——这个交叉情形建议 NWT 审时加一条负向量）。
+> 🔴 **v0.3 撤回并更正**：v0.2 及更早版本写的是"改 kanet.env 三行"——**这是错的，NWT 审拦下**。`kanet.env` 是现跑的 TN12 console/relay 那个进程（PID 6716 那套）读的同一份文件；`kanet-start.sh:19` `ENV_FILE="$KANET_ROOT/kanet.env"` 是硬编码路径，没有 override 机制。若真的原地改了这三行，**旧实例本身在跑的这一刻不受影响（env 只在进程启动时读一次），但下一次它被 watchdog/supervisor/任何原因重启，会读到主网值**——直接破坏"TN12 原样不动"这个大前提，而且是那种平时看不出来、只在下次重启时才爆的坑（同本仓其它"改文件不改运行中进程"类教训同一个病）。
+
+目标值不变（主网三项）：
+```
+KASPA_RPC_URL=ws://127.0.0.1:17110      # 主网 borsh 端口（J1 执行页 876cc412 起的那个节点）
+KASPA_NETWORK=mainnet
+KASPA_RPC_LOCAL_ONLY=1                   # 值不变，语义因 (a) 分支变严格，见下
+```
+**但落地方式改为独立来源，`kanet.env` 一个字节不动**：
+- 新建一个独立文件，如 `kanet.mainnet.env`（命名待 Owner/J2 定，本页给建议值不钉死），只放主网这套实例需要的 env（上面三行 + §2 的新 `DB_PATH` + §4 的新 `PORT`，其余沿用代码默认值或按需补）。
+- **不改 `kanet-start.sh`**（那是给 TN12 那套全栈用的，改它 = 又碰了"跟 TN12 共用的东西"，跟"不碰 TN12"的精神冲突，而且引入 ENV_FILE 覆盖参数是给现有脚本加分支逻辑，本身需要独立审查，不该为了主网这一次性起服务夹带进去）。
+- 主网这套实例改用**独立小型启动方式**，不经过 `kanet-start.sh` 的编排：直接起 `kasia-console/src/index.js`（或需要的子系统），env 从 `kanet.mainnet.env` 读进当前 shell 再起进程。示例（PowerShell，骨架非最终命令，起前需按实际需要补全其余 env 键）：
+  ```powershell
+  Get-Content kanet.mainnet.env | ForEach-Object {
+    if ($_ -match '^([^#][^=]+)=(.*)$') { [Environment]::SetEnvironmentVariable($matches[1], $matches[2]) }
+  }
+  node kasia-console/src/index.js
+  ```
+  这样主网实例的环境变量只存在于**这一个进程自己的进程环境**里，物理上碰不到 `kanet.env` 文件，也碰不到 TN12 那个进程已经加载进内存的环境（两个进程的环境变量互相独立，Windows 进程模型本来就是这样，不需要额外隔离机制）。
+- **`:304`/`:305` 那条注释更新的对象也变了**：原计划是"改 kanet.env 里这行注释"，现在 `kanet.env` 不动，这条说明应该写进**新文件** `kanet.mainnet.env` 自己的注释里（解释主网这份 `LOCAL_ONLY=1` 是严格语义），不回去动旧文件。
+
+**⚠ 独立来源不改变"三项必须一起生效"这条**：新文件里的 `KASPA_RPC_URL`/`KASPA_NETWORK`/`KASPA_RPC_LOCAL_ONLY` 仍然要一起对，缺一样会造成 network_mismatch 假阳性/假阴性（同 v0.2 原文分析，逻辑不变，只是现在这三行活在新文件里不是旧文件里）——NWT 审时建议照旧加这条交叉负向量。
 
 ## 2. 数据库：新库，不迁移（含理由 + 可执行判据）
 
@@ -100,7 +109,7 @@ console.log(JSON.stringify(r));
 1. §1 三分支合入主线（J2 定序，NWT 审）。
 2. 新库路径落地（§2.2）：确认 `DB_PATH` 指向新文件，跑一次 migrate，核 schema 版本号与主线一致。
 3. J1 的主网只读节点已起且 `isSynced`（执行页 876cc412 §4 的验收，独立前置，非本页范围但是硬依赖）。
-4. 起一个**新的** console 进程实例（不是重启现有 6716），env 用 §1.3 的主网三行 + 新 `DB_PATH` + 新 `PORT`（见 §4）。
+4. 起一个**新的** console 进程实例（不是重启现有 6716），按 §1.3 的独立 env 来源（`kanet.mainnet.env`，不碰 `kanet.env`）注入主网三行 + 新 `DB_PATH` + 新 `PORT`（见 §4）。
 5. **strict LOCAL_ONLY 运行期验收**（Bettor 点名，具体给）：
    - 正向量：主网节点已起、RPC 可达 ⇒ console 能正常连上、`rpc-health` 报 `using local node: ws://127.0.0.1:17110`。
    - 负向量 A（本机失败 fail-closed 无回退）：临时让主网节点端口不可达（如还没起完），此时 (a) 分支落地后的 `getWorkingRpc()` 应该**直接返回 null**，不应该出现任何"回退到别的节点/别的 URL"的日志行——这是跟旧的非严格行为的关键区别，必须实测验证，不能只读代码就信。
@@ -125,7 +134,7 @@ console.log(JSON.stringify(r));
 | 回滚成本 | 低——新进程杀掉就完事，不影响任何东西 | 中——要改回去，且期间 TN12 那段时间完全没有 console 服务 |
 | 符合"并存不停 TN12"的 Owner 已表态方向 | 是（Owner 已经在节点这层拍过"与 TN12 并存，不先停"，同一精神延伸到 console 层是自然的） | 否 |
 
-**建议：并行**。新 `PORT`（如 3201，具体值待 Owner/Bettor 定，本页不越权钉死）+ 新 `DB_PATH` + 独立 kanet.env 段（或独立 env 文件）+ 独立 PID，跟现有 6716 完全隔离，互不影响，出事故也互不牵连。
+**建议：并行**。新 `PORT`（如 3201，具体值待 Owner/Bettor 定，本页不越权钉死）+ 新 `DB_PATH` + 独立 env 文件 `kanet.mainnet.env`（§1.3 v0.3，**不是 `kanet.env` 里加一段**，是完全独立文件）+ 独立 PID，跟现有 6716 完全隔离，互不影响，出事故也互不牵连。
 
 ## 5. 每步的 Owner 批点
 
