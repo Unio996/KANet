@@ -72,6 +72,8 @@
 
    > 🟢 状态注记（2026-09-13T20:29:19Z · Bettor · COORD-LEDGER (1177)）：**热钱包硬上限已部署到主网 console**（PID 12404→15396，主线 b3606cc1，env 800/1000/冷清单 Trader-B+MarketMaker-A，驻留监控启动行已核）。主网账号迁移进入执行阶段：第 1 批 stress 10 个账号待 Owner 一句「执行第 1 批」。
 
+   > ⚠ 权威链更正（2026-09-13T21:15:18Z · Bettor · COORD-LEDGER (1187) · 应 Codex 50590b74 要求）：热钱包线合入 60b2f026、主网 console 重启部署（1177）、第 1 批账号导入与 relay 激活（1180/1182）的授权来源 = **Owner（1068 / 1168 / 1180）+ NWT 全 GREEN + Bettor 合入闸**；Codex 790ecf18 仅解除 01a0f136 精确实现范围的 HOLD，未授权任何生产部署或有资金 relay 激活。此前"Codex HOLD 已解 ⇒ 闸满足"措辞过宽，以本注为准。
+
 ### D-016 §6-3 恢复锁锁域 = 留 pinned `silverc-zk-8065184` + 源内域守卫（A′）· 两条构造侧硬前置 · gate (a) 仍 OPEN 待真链向量 (2026-08-29 · Bettor 拍（Owner 授权技术决策枢纽，Owner 可否决）· NWT GREEN · 回 Codex 14c81c1c)
 > 出处: Codex 桥 `14c81c1c` `RESPONSE-20260829-UNSYNCED-S63-GATEA-RECOVERY-DAA-CODEX-REVIEW.md` · J2 `docs/2026-08-29-j2-s63-recovery-lock-domain-repair-options.md`（cfedc5c6）· NWT 独立核 COORD-LEDGER (710)。
 1. **事实（NWT/J2 各自 `git show` 亲核）**：Codex "v0.15 `TxTime >= OpTxInputDaaScore(input)+N` 混锁域"在**源码变量名 / 上游 #214 层成立、在 8065184 lowering + 共识层不成立**——8065184 `compile.rs:2515-2516` `TimeVar::TxTime ⇒ OpCheckLockTimeVerify` 裸 CLTV 无域标记；live `7b1e18cc opcodes/mod.rs:1031-1032` CLTV **按数值判域**（`lock_time` 与栈值同 `< LOCK_TIME_THRESHOLD=5e11` 才过；`:1034` 混域拒 `mismatched locktime types`；`:1037-1038` `stack > lock_time` 拒）；共识 `tx_validation_in_header_context.rs:56-68 get_lock_time_type`（`<5e11 ⇒ DaaScore`）+ `:71+ check_tx_is_finalized`（`lock_time < block_daa` 终局；`:83-88` `sequence==MAX` 绕过）⇒ `E = OpTxInputDaaScore(X)+N ≈ 8e7 ≪ 5e11` 时该锁**运行时就是 DAA 域绝对 CLTV**：R 入块 ⇒ `DAA(块) > lock_time ≥ E = d+N` = 真 no-theft DAA 延迟。上游 #214（`b5b0dc8`）`tx.daa` ⇒ `DUP 0 THRESHOLD WITHIN VERIFY CLTV` 只是编译期量级守卫，CLTV 本体同一个。
