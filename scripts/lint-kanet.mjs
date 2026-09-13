@@ -486,6 +486,37 @@ function checkR10() {
   }
 }
 
+// ── R-NET-PREFIX-* (2026-09-13 J2, 设计 docs/2026-09-13-j2-network-single-source-and-prefix-consistency-helper-design-v0.1.md v0.2 §5 · NWT 7149e3a5 PASS · Codex 9fff92b0 #3):
+//   网络身份只能从 env KASPA_NETWORK 来(单一源), 地址前缀只能【对照】它(shared/lib/kaspa-network.mjs assertAddressOnNetwork), 不能【生成】它。
+//   R-NET-PREFIX-INFER  : `startsWith('kaspatest:') ? … : …` / `.replace(/^kaspatest:/` = 从地址推网络(空/未知前缀 ⇒ 'mainnet' fail-open)。
+//   R-NET-PREFIX-EITHER : `startsWith('kaspa:') || startsWith('kaspatest:')` 二选一验证 = 跨网地址照收(bettor-prediction-settler.js:159 赢家地址)。
+//   R-NET-DEFAULT-DRIFT : `|| 'mainnet'` / `|| 'testnet-12'` 默认值 = env 一漏同进程两半各认一个网(45 处)。
+//   级别: b1(helper+lint+向量) 三条全 WARN 不挡存量; b2(33 处替换落地) 把 INFER/EITHER 翻 violate。转义: `lint-allow-net-prefix-infer: <reason>` / `lint-allow-net-default: <reason>`。
+//   范围: kasia-console/src · kasia-relay/src · shared/lib 的非 .test./.mutants./.vectors 文件; helper 自身与 lint 脚本白名单。
+const _NET_INFER = /startsWith\(\s*['"]kaspatest:['"]\s*\)\s*\?|\.replace\(\s*\/\^kaspatest:\//;
+const _NET_EITHER = /startsWith\(\s*['"]kaspa:['"]\s*\)\s*(?:\|\||&&)\s*!?[\w.()]*startsWith\(\s*['"]kaspatest:['"]\s*\)|startsWith\(\s*['"]kaspatest:['"]\s*\)\s*(?:\|\||&&)\s*!?[\w.()]*startsWith\(\s*['"]kaspa:['"]\s*\)/;
+const _NET_DEFAULT = /\|\|\s*['"](?:mainnet|testnet-1[12])['"]/;
+const _NET_PREFIX_STRICT = false;   // b2 落地时翻 true ⇒ INFER/EITHER 由 warn 升 violate
+function checkR_NET_PREFIX(fp, content) {
+  const rel = path.relative(ROOT, fp).replace(/\\/g, '/');
+  if (!/^(kasia-console\/src|kasia-relay\/src|shared\/lib)\//.test(rel)) return;
+  if (/\.(test|mutants|vectors|fixture)\.|\/kaspa-network\.mjs$|lint-kanet\.mjs$/.test(rel)) return;
+  const lines = content.split('\n');
+  const emit = (rule, i, msg, allow) => {
+    const l = lines[i];
+    if (allow.test(l) || (i > 0 && allow.test(lines[i - 1]))) return;
+    const report = (_NET_PREFIX_STRICT && rule !== 'R-NET-DEFAULT-DRIFT') ? violate : warn;
+    report(rule, msg, fp, i + 1);
+  };
+  lines.forEach((l, i) => {
+    const t = l.trimStart();
+    if (t.startsWith('//') || t.startsWith('*') || t.startsWith('/*')) return;
+    if (_NET_INFER.test(l)) emit('R-NET-PREFIX-INFER', i, `[R-NET-PREFIX-INFER] 从地址前缀推断网络(空/未知前缀 ⇒ 'mainnet' fail-open, D-017 主网过渡态存量 kaspatest 地址会被当 testnet-12) — 改 assertAddressOnNetwork(addr, { who }) / isAddressOnNetwork(kasia-console/src/lib/kaspa-network.mjs 或 kasia-relay/src/lib/kaspa-network.mjs); 网络只从 env 来。转义: // lint-allow-net-prefix-infer: <reason>`, /lint-allow-net-prefix-infer:\s*\S/);
+    if (_NET_EITHER.test(l)) emit('R-NET-PREFIX-EITHER', i, `[R-NET-PREFIX-EITHER] 'kaspa:' 或 'kaspatest:' 二选一验证 = 跨网地址照收 — 改 isAddressOnNetwork(addr)(只认配置网络的前缀)。转义: // lint-allow-net-prefix-infer: <reason>`, /lint-allow-net-prefix-infer:\s*\S/);
+    if (_NET_DEFAULT.test(l)) emit('R-NET-DEFAULT-DRIFT', i, `[R-NET-DEFAULT-DRIFT] 网络默认值 '|| mainnet/testnet-12' — env 一漏同进程两半各认一个网; 改 configuredNetwork()(无默认, 未设 throw)。转义: // lint-allow-net-default: <reason>`, /lint-allow-net-default:\s*\S/);
+  });
+}
+
 // ── R11: 中文 deterministic 完成动作 regex 必含 (?:了)? 后缀 ──
 // 检测: const X_REGEX = /^(...|完成|付了|转完|done|...)\s*[!！。.…]*\s*$/  无 (?:了)?
 function checkR11(filepath, content) {
@@ -1507,6 +1538,7 @@ for (const fp of targets) {
   checkR_PS_FAMILY_DISPATCH(fp, content);      // R-PS-FAMILY-DISPATCH [ERROR] (K-18 §3.4 2026-07-21): compilePayoutShardRedeem/V2Redeem 调用点白名单, 防绕过 coherence gate
   checkR_SCA_ALIAS_ORIGIN(fp, content);        // R-SCA-ALIAS-ORIGIN [ERROR] (M0c-1 批C 2026-07-23): sendCommandAsync 别名 call 缺 origin/裸值传参检测, 防 armed 后漏标断路
   checkR_SENDCMD_ORIGIN_REQUIRED(fp, content); // R-SENDCMD-ORIGIN-REQUIRED [WARN→ERROR] (第三断路族根治 2026-07-23): 直调缺 origin 检测, 57 处补标驱动器
+  checkR_NET_PREFIX(fp, content);              // R-NET-PREFIX-INFER/EITHER/DEFAULT-DRIFT [WARN·b1 → INFER/EITHER ERROR·b2] (2026-09-13 J2 设计 v0.2 §5): 网络单一源, 前缀只对照不推断
   checkR_BYTE_CENSUS_PREDICATE(fp, content);   // R-BYTE-CENSUS-PREDICATE [WARN] (COORD-LEDGER (188) 2026-08-12): redeem/covenant 字节谓词禁凭记忆猜写, 落码前先跑 census
 }
 checkR10();
