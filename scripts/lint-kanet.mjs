@@ -22,6 +22,7 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { MONEY_PATH_MANIFESTS } from '../kasia-console/src/lib/money-path-manifests.mjs';
 import { runAllM0aChecks } from './m0a-lib.mjs';
+import { findCtorOnlyTripwireHits } from './r-ctor-only-assignment-tripwire-lib.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -109,6 +110,40 @@ function checkR_NULLIFIER_I64() {
       if (depthOver63) {
         violate('R_NULLIFIER_I64', `单-i64 nullifier bitmap (line ${i64Bitmap + 1}) 但 merkle depth/N 允许 >63 winner → i64 只 63-slot 装不下 → winner#64+ 双领抽干. 必 byte[] 多-slot 或分桶 ≤63/shard (配 feedback-recreatable-utxo-nullifier)`, fp, i64Bitmap + 1);
       }
+    }
+  }
+}
+
+// ── R-CTOR-ONLY-ASSIGNMENT-TRIPWIRE [ERROR] (T4 v0.4 §1.3, docs/2026-09-14-j2-t4-market-genesis-console-
+// side-skeleton-v0.4.md, ledger 1203/1204): poolMerkleRoot/committee_hash/predicate_commit 三字段是 T4
+// 创世对照(c)+(d)覆盖论证的唯一前提("这三个字段在全部 T3 合约里永远 ctor-only、从未被赋值")的具身条件——
+// 当前(J2/NWT 独立 grep)为真, 但这是运行期可能被打破的代码事实, 不是 silverscript 语言层面的保证(它们只是
+// 普通 byte[32] ctor 参数, 没有语言级 const 保护, 完全可以被未来任何一次改动意外加上赋值语句)。
+// 扫全部 git 已跟踪 .sil 文件(不限定当前已知的文件名单——理由见 T4 v0.4 §1.3: kasia-console/src/lib 下的
+// 市场合约文件集合本身有过演进, 硬编码文件名会让未来新文件绕过这条检查)。命中即 ERROR, 不可自行加白名单
+// 跳过——必须先经 NWT 复核这次改动是否推翻 T4 (c)+(d) 覆盖论证的前提, 复核通过后才能改这条规则本身或加例外。
+// 判定逻辑单源在 r-ctor-only-assignment-tripwire-lib.mjs（同 m0a-lib.mjs 之于本文件的既有分层惯例——本
+// 文件顶层是立即执行+process.exit()收尾的脚本非纯模块, 直接 import 会把整个 lint 跑一遍, 判定逻辑必须
+// 拆到无副作用的单独文件, 测试文件才能安全单元测, 见 scripts/r-ctor-only-assignment-tripwire.test.mjs）。
+function checkR_CTOR_ONLY_ASSIGNMENT_TRIPWIRE() {
+  let silFiles;
+  try {
+    const out = execFileSync('git', ['ls-files', '-z', '--', '*.sil'], { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+    silFiles = out.split('\0').filter(Boolean).map((f) => path.join(ROOT, f)).filter(exists);
+  } catch (e) {
+    violate('R-CTOR-ONLY-ASSIGNMENT-TRIPWIRE', `tripwire 扫描本身执行失败(fail-closed, 门不许静默失效): ${e.message}`, file('scripts/lint-kanet.mjs'), 0);
+    return;
+  }
+  for (const fp of silFiles) {
+    let content; try { content = read(fp); } catch { continue; }
+    for (const hit of findCtorOnlyTripwireHits(content)) {
+      violate('R-CTOR-ONLY-ASSIGNMENT-TRIPWIRE',
+        `检测到 "${hit.field}" 出现赋值语句于 ${path.relative(ROOT, fp)}:${hit.line} —— 这个字段之前被 T4 创世对照设计` +
+        `(docs/2026-09-14-j2-t4-market-genesis-console-side-skeleton-v0.4.md §1)认定为『永远 ctor-only、靠 (c)+(d) ` +
+        `全字节比对覆盖，不需要状态区位点比对』，这个赋值语句打破了那条论证的前提——这不是一个可以直接绕过/加` +
+        `白名单跳过的 warning，必须先叫 NWT 复核这次改动是否需要重新设计 T4 的覆盖路径（回到搬进 state + ` +
+        `cheap-tier 那条路），复核通过后才能改这条 lint 规则本身或加例外。`,
+        fp, hit.line);
     }
   }
 }
@@ -1550,6 +1585,7 @@ for (const fp of targets) {
 }
 checkR10();
 checkR_NULLIFIER_I64();
+checkR_CTOR_ONLY_ASSIGNMENT_TRIPWIRE(); // R-CTOR-ONLY-ASSIGNMENT-TRIPWIRE [ERROR] (T4 v0.4 §1.3, ledger 1203/1204): poolMerkleRoot/committee_hash/predicate_commit 全仓 .sil 出现赋值即拒, 打破 T4 (c)+(d) 覆盖论证前提
 checkR_COMMAND_REGISTRATION();  // R-COMMAND-REGISTRATION (#25, KI-49 防重复): relay.mjs case 必在 commands.mjs 三层注册
 checkR_FEE_LEAVES_BYPASS();     // R-FEE-LEAVES-BYPASS [WARN] (P4/D-008, 2026-07-09): ZK 线禁直调 deriveFeeLeaves/FEE_CONFIG
 checkScratchClutter();
