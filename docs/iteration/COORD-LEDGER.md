@@ -12304,3 +12304,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 ### (1008) NWT 红队审 J1 测试币评估 **FINAL v0.1（045bf608·108 行·我逐段核与其 SendMessage 转述一致）**：总判可作批 T 输入 + **3 条 MUST-FIX**（(a) 只挡裸地址不挡自建 covenant 场外流转·KCC-0020 原文 covenant-id/v1 owner-auth=Empty ⇒ §5 措辞收窄 + (b) 升为必要项 / §3.5 态切换必须编译期常量·新部署非运行时标志 / `borrow_scheme` 钉死 0x00 + 负向量）· §6-4 "名下"绑定 HOLD 未设计 · §9 两处 PUSH-BACK（缺 drain 在飞交易；"随时重同步"改条件句）· §7 五拍 ①②③⑤ PASS ④ 加条件 · §8 v1.0.0 断言隔离核全成立 — Bettor 2026-09-13T10:16:43Z
 - **裁**：verdict 全部采纳，D-017 加状态注记。J1 稿 → v0.2 修（措辞/(b)/borrow_scheme/§9 两处）；J2 批 T 评估以三 MUST-FIX + §6-4 名下绑定为硬输入；KANet-UI runbook 必含 drain 在飞交易步骤 + 条件句重同步口径。NWT 捎带的 preconditions v0.2 缺 Status 头，补一笔。**本条不构成对停节点/删数据/合约实现任何一步的批准**（同 NWT 自陈）。
 - 推送：045bf608（NWT，docs only，我核）+ 本条同闸推（期望队列 2）。
+
+### (1009) 推送 184bf6f5（NWT 负测规格 v0.1：A-N1–N5 LOCAL_ONLY 严格 / B-1–B7 网络前缀单一源，24 处 startsWith 实地枚举）+ 23a605a6（KANet-UI runbook **v0.1.1**：§2.0 drain 在飞交易四类查询+判据 / §3 重同步改条件句 / §1.2 命令行说明）· 队列 2/2 我核 · **runbook v0.1.1 送 NWT 审** — Bettor 2026-09-13T10:21:32Z
+- **kaspad 16644 运行命令行证据（补 runbook §6 第 1 条缺口，非提权）**：`scripts/kaspad-watchdog.ps1` mtime 2026-09-06T22:55:31Z = 最后 commit 6bddf73e（09-06 22:55:36Z），早于 watchdog 进程 24220 启动 09-13 09:45:56Z 且此后未改 ⇒ watchdog 内存中的 `` = :47 现值 `--testnet --netsuffix=12 --appdir=D:/kaspa-tn12-data --utxoindex --rpclisten-borsh=127.0.0.1:17210 --enable-unsynced-mining --ram-scale=3.0 --rocksdb-cache-size=4096`，**无 `--ibd-syncer-pp-lag-tolerance`、无 D-c 配置** —— 与 Codex 3358c4ff（1007）判定一致。残余假设：kaspad 由该 watchdog 用该变量拉起（父链 24220→16644 已核）。
+- 12 个未跟踪文件：KANet-UI 本会话否认（mtime 09-04 14:59–23:24 本地早于其 10:02Z 起）；J2 证据指向 J1 经 SSH；等 J1 认领，认领不了则按内容（全 readonly 诊断）移 scratch/，不卡作者。
+- 待：J2 (a)(b) 设计稿 → NWT 按 184bf6f5 验收；NWT runbook 审 → Owner GO-1；J1 回执三件。
