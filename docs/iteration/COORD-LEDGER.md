@@ -12338,3 +12338,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 ### (1016) 🔴 **Owner 终端直令（2026-09-13 ≈10:45Z 原话）：「先把所有测试网（无论哪个测试网）挖矿全部停了。所有重点聚焦迁移主网。」** ⇒ 视为 runbook §2.2（停挖矿桥 + mining-watchdog-v2）单步的 Owner GO，**不是 GO-1**；kaspad / kaspad-watchdog / console / relay 不动 — Bettor 2026-09-13T10:44:51Z
 - **派 KANet-UI 执行**（运维域；Bettor 结构锁 read-only）：① 按 PID 停两套 mining-watchdog-v2（13788 Session 0 / 19532 Session 1）→ stratum-bridge → 任何 miner 进程 → tn10/其他测试网残留；② 两路验证并把停前/停后进程清单发我复核；③ 持久化：`kanet-boot-sequence.ps1` 步骤 ③ 守卫/注掉（两条开机触发链跑的都是它），diff 给 NWT 一句确认后我推。
 - **停前基线（Bettor 只读枚举 2026-09-13T10:44:51Z）**：19532 powershell `tn12-mining-watchdog-v2.ps1`（Session 1，父 23892）→ 4376 `D:\rusty-kaspa-tn10-build\release\stratum-bridge.exe --config D:/kaspa-tn12-mining/bridge-tn12-config.yaml --node-mode external`（16:48:33）+ 瞬时 30712 node `tn12-dag-health-probe.mjs`；13788（Session 0 实例）命令行不可读，按 PID 核；无独立 miner 进程（bzminer/kaspa-cpuminer/kaspa-miner* 目录存在但无进程）。
+
+### (1017) 🔴 **停挖矿执行结果：部分完成，Session 0 链非提权杀不掉 ⇒ 升 Owner 管理员** — Bettor 2026-09-13T10:47:33Z
+- KANet-UI 执行（如实报）：19532（mining-watchdog-v2·Session 1）与 4376（stratum-bridge）**已停**；13788（mining-watchdog-v2·Session 0）`Stop-Process`/`taskkill /F` **Access is denied**；它 1–2 min 后按 CONFIRMED_ABSENT 逻辑重拉 **31636 stratum-bridge（Session 0，17:45:14 本地）**，同样杀不掉。临时阻断：`stratum-bridge.exe` 改名 `.disabled-owner-directive-20260913`（只挡下次拉起，不影响已加载的 31636）。kaspad/kaspad-watchdog/console/relay 未碰。
+- **Bettor 独立复核 2026-09-13T10:47:33Z**：本会话 elevated=False；进程表 13788←3076 与 31636←13788 仍在，**31636 监听 0.0.0.0:5555（stratum）⇒ 挖矿未真正停止**。
+- **升 Owner（管理员 PowerShell 单点）**：`Stop-Process -Id 31636,13788 -Force`（先桥后 watchdog 或同时）+ 同一窗口跑 Session 0 触发源查询（1012）。持久化：KANet-UI 改 `kanet-boot-sequence.ps1` 步骤 ③ 守卫（NWT 确认后我推），两条开机链共用该脚本。
+- 结构性结论：Session 0 那条链上的一切（kaspad-watchdog 18576 / kaspad 16644 / mining-watchdog 13788 / console-supervisor 12260）非提权都停不了 ⇒ **退役 runbook 的执行者必须是管理员权限**，写入 runbook §0 前置。
