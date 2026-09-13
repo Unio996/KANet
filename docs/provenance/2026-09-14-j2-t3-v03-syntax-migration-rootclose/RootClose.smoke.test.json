@@ -1,0 +1,181 @@
+{
+ "tests": [
+  {
+   "name": "SMOKE-close_commit_fail_no_valid_sigs",
+   "function": "close_commit",
+   "constructor_args": [
+    "0xcad7c2f7f17e5a309cdcfaadec7f2e4fdcf1a6b053cbdd2d3df7dfe5142a613d",
+    1700000000000,
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    0,
+    0,
+    0,
+    100,
+    0,
+    0,
+    "0x0000000000000000000000000000000000000000000000000000000000000000"
+   ],
+   "args": [
+    "0x0101010101010101010101010101010101010101010101010101010101010101",
+    "0x0202020202020202020202020202020202020202020202020202020202020202",
+    "0x0303030303030303030303030303030303030303030303030303030303030303",
+    "0x0404040404040404040404040404040404040404040404040404040404040404",
+    "0x0505050505050505050505050505050505050505050505050505050505050505",
+    "0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+    "0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+    "0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+    "0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+    "0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+    0,
+    0,
+    "0x0000000000000000000000000000000000000000000000000000000000000000"
+   ],
+   "expect": "fail",
+   "tx": {
+    "active_input_index": 0,
+    "inputs": [
+     {
+      "utxo_value": 100,
+      "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "state": {
+       "local_yes": 0,
+       "local_no": 0,
+       "count": 0,
+       "pool_value": 100,
+       "closed": 0,
+       "winningSide": 0,
+       "payoutRoot": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+     }
+    ],
+    "outputs": [
+     {
+      "value": 100,
+      "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "state": {
+       "local_yes": 0,
+       "local_no": 0,
+       "count": 0,
+       "pool_value": 100,
+       "closed": 1,
+       "winningSide": 0,
+       "payoutRoot": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+     }
+    ],
+    "lock_time": 1700000000000
+   }
+  },
+  {
+   "name": "SMOKE-refund_flip_pass",
+   "function": "refund_flip",
+   "constructor_args": [
+    "0xcad7c2f7f17e5a309cdcfaadec7f2e4fdcf1a6b053cbdd2d3df7dfe5142a613d",
+    1700000000000,
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    0,
+    0,
+    0,
+    100,
+    0,
+    0,
+    "0x0000000000000000000000000000000000000000000000000000000000000000"
+   ],
+   "args": [
+    0
+   ],
+   "expect": "pass",
+   "tx": {
+    "active_input_index": 0,
+    "lock_time": 1700007200001,
+    "inputs": [
+     {
+      "utxo_value": 100,
+      "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "state": {
+       "local_yes": 0,
+       "local_no": 0,
+       "count": 0,
+       "pool_value": 100,
+       "closed": 0,
+       "winningSide": 0,
+       "payoutRoot": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+     }
+    ],
+    "outputs": [
+     {
+      "value": 100,
+      "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "state": {
+       "local_yes": 0,
+       "local_no": 0,
+       "count": 0,
+       "pool_value": 100,
+       "closed": 2,
+       "winningSide": 0,
+       "payoutRoot": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "SMOKE-refund_flip_fail_before_deadline_grace",
+   "function": "refund_flip",
+   "constructor_args": [
+    "0xcad7c2f7f17e5a309cdcfaadec7f2e4fdcf1a6b053cbdd2d3df7dfe5142a613d",
+    1700000000000,
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    0,
+    0,
+    0,
+    100,
+    0,
+    0,
+    "0x0000000000000000000000000000000000000000000000000000000000000000"
+   ],
+   "args": [
+    0
+   ],
+   "expect": "fail",
+   "tx": {
+    "active_input_index": 0,
+    "lock_time": 1700000000000,
+    "inputs": [
+     {
+      "utxo_value": 100,
+      "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "state": {
+       "local_yes": 0,
+       "local_no": 0,
+       "count": 0,
+       "pool_value": 100,
+       "closed": 0,
+       "winningSide": 0,
+       "payoutRoot": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+     }
+    ],
+    "outputs": [
+     {
+      "value": 100,
+      "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "state": {
+       "local_yes": 0,
+       "local_no": 0,
+       "count": 0,
+       "pool_value": 100,
+       "closed": 2,
+       "winningSide": 0,
+       "payoutRoot": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+     }
+    ]
+   }
+  }
+ ]
+}
