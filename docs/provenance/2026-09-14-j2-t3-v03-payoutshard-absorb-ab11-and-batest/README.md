@@ -67,7 +67,7 @@ State 布局顺序（`contract PayoutShard(...)` 花括号内的字段声明顺�
 V-absorb-7/8/9 全部准确失败在 `scriptPubKey` 比对那一行——三个不同字段（int 顶层 / byte32 / int 数组深处）
 改动均被手写编码正确捕捉，不是只对第一个字段敏感的表面通过。
 
-## 二、close_attest / cancel_attest：`noTokenInput()`（不受 V-T-8 影响）——`battest.run.log`，**4/4 PASS**
+## 二、close_attest / cancel_attest：`noTokenInput()`（不受 V-T-8 影响）——`battest.run.log`，**10/10 PASS**
 
 这两个入口的委员签名逻辑本次一字不动（沿用既有 4-of-5 门限 + depth-8 merkle），只加两条：
 `require(noTokenInput())`（B 类不在场证明，1123 Codex 复核采纳）+ KAS dust weld 下限
@@ -81,6 +81,17 @@ V-absorb-7/8/9 全部准确失败在 `scriptPubKey` 比对那一行——三个�
 | `V-close_attest-1_fail_no_token_sigs_invalid_reaches_sig_gate` | 无代币输入 → `noTokenInput()` 放行 → 落到签名门限(0 个有效签名)才拒——证明 `noTokenInput()` 没有误挡干净交易 |
 | `V-close_attest-2_fail_token_input_present_rejected_by_noTokenInput` | 代币模板输入在场 → 在签名门限**之前**被 `noTokenInput()` 结构性拒绝 |
 | `V-cancel_attest-1/2` | 镜像上两条 |
+
+**1122/1122-补 边界纪律（Bettor 1149 提醒自查后补齐, 三条 × 两入口 = 6 条）**：`noTokenInput()` 跟
+`scanOwnedTokenInputs()` 共享同一个 `MAX_INS_SCAN=8` 常量与同一套 `require(len<=bound)` 先拒超界纪律,
+之前只在 `MarketScanProbe3.sil` 抽象探针里证过机制, **本文件的真实 `noTokenInput()` 实现之前没有专门补这三条
+边界向量**——本次补齐, 均已用 flip-expect 复核真实失败行(不是巧合通过)：
+
+| 向量 | 验证点 | 真实失败行(flip-expect 复核) |
+|---|---|---|
+| `V-{close,cancel}_attest-3_fail_at_bound_8_inputs_no_token_reaches_sig_gate` | 恰好=界(8 输入, 无代币) | `checkSig` 那行(签名门限), 证明界处仍是"干净放行", 不是被长度闸/noTokenInput 误伤 |
+| `V-{close,cancel}_attest-4_fail_bound_plus_one_9_inputs_rejected_by_length_guard` | 界+1(9 输入, 无代币) | `require(tx.inputs.length <= MAX_INS_SCAN)`(noTokenInput 内, 长度闸本身), 隔离出纯粹是长度闸拦的 |
+| `V-{close,cancel}_attest-5_fail_victim_token_at_last_reachable_index_7` | victim 代币在下标 7(8 输入内最后可达位置) | `require(noTokenInput())`(调用点), 证明循环真实展开到下标 7, 不是提前截断 |
 
 ## 三、T3 v0.4 增补（另提交）
 

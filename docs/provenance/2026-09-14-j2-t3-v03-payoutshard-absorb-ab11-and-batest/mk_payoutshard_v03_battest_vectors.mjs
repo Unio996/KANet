@@ -104,5 +104,43 @@ tests.push({
   tx: { active_input_index: 0, inputs: [selfInput(), tokenInput(psOwn100)], outputs: [{ value: 1000, covenant_id: hex(PS_COV) }] },
 });
 
+// ---------- 1122/1122-补 边界纪律: noTokenInput() 也要同一套(Bettor 1149 提醒自查, 不能只有 scanOwnedTokenInputs 有) ----------
+function fillerInput() { return { utxo_value: 1, covenant_id: hex(PS_COV), signature_script_hex: OTHER_SIG }; }
+
+function boundaryVectors(fnName) {
+  const out = [];
+  // 恰好=界(8 输入, active + 7 filler, 无代币) -> noTokenInput() 放行 -> 落到签名门限才拒(证明界处仍是"干净放行").
+  out.push({
+    name: `V-${fnName}-3_fail_at_bound_8_inputs_no_token_reaches_sig_gate`,
+    function: fnName,
+    constructor_args: ctorArgsPS({}),
+    args: committeeArgs(ZERO32),
+    expect: 'fail',
+    tx: { active_input_index: 0, inputs: [selfInput(), fillerInput(), fillerInput(), fillerInput(), fillerInput(), fillerInput(), fillerInput(), fillerInput()], outputs: [{ value: 1000, covenant_id: hex(PS_COV) }] },
+  });
+  // 界+1(9 输入) -> require(tx.inputs.length<=MAX_INS_SCAN) 单独挡下(内容本身无代币, 若无长度闸也会放行到签名门限
+  // 而非在这里就失败——隔离出纯粹是长度闸拦的)。
+  out.push({
+    name: `V-${fnName}-4_fail_bound_plus_one_9_inputs_rejected_by_length_guard`,
+    function: fnName,
+    constructor_args: ctorArgsPS({}),
+    args: committeeArgs(ZERO32),
+    expect: 'fail',
+    tx: { active_input_index: 0, inputs: [selfInput(), fillerInput(), fillerInput(), fillerInput(), fillerInput(), fillerInput(), fillerInput(), fillerInput(), fillerInput()], outputs: [{ value: 1000, covenant_id: hex(PS_COV) }] },
+  });
+  // victim(代币输入) 在下标 7(8 输入内最后一个可达位置) -> noTokenInput() 循环真实展开到那里, 必须抓到.
+  out.push({
+    name: `V-${fnName}-5_fail_victim_token_at_last_reachable_index_7`,
+    function: fnName,
+    constructor_args: ctorArgsPS({}),
+    args: committeeArgs(ZERO32),
+    expect: 'fail',
+    tx: { active_input_index: 0, inputs: [selfInput(), fillerInput(), fillerInput(), fillerInput(), fillerInput(), fillerInput(), fillerInput(), tokenInput(psOwn100)], outputs: [{ value: 1000, covenant_id: hex(PS_COV) }] },
+  });
+  return out;
+}
+tests.push(...boundaryVectors('close_attest'));
+tests.push(...boundaryVectors('cancel_attest'));
+
 fs.writeFileSync('scratch/_t1v06_check/PayoutShard_v03_battest.test.json', JSON.stringify({ tests }, null, 1));
 console.log('wrote', tests.length, 'B-class vectors');
