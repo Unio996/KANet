@@ -35,11 +35,12 @@ pragma silverscript ^0.1.0;
 contract PayoutShard(
     byte[32] poolMerkleRoot,       // depth-8 chain-derived oracle pool root (close/cancel_attest ③ 委员∈pool; == v07 同源)
     byte[32] predicate_commit,     // ★钩子1·命门③ shape: market 完整 resolution rule canonical hash (genesis 烤 immutable; oracle phase 委员 re-derive winningSide 绑它)
-    // —— v0.3 §2/§3 代币化锚(T3 v0.3, Bettor ledger 1131/1133/1136): 市场只认这几个 ctor 常量, 不认代币本身值不值钱/
-    //   谁能铸(§5 币解耦纪律)。token_prefix/token_suffix 直接引用(不重新声明成实例字段, 同 KanetTestToken.sil 既有约定,
-    //   动态数组进 State 会撞 size 推断) ——
-    byte[]   token_prefix,    int token_prefix_len,
-    byte[]   token_suffix,    int token_suffix_len,
+    // —— v0.3 §2/§3 代币化锚(T3 v0.3, Bettor ledger 1131/1133/1136/1151): 市场只嵌一个 32 字节 token_tmpl_hash,
+    //   不烤代币的 prefix/suffix 字节本身(Bettor 1151 裁: 换币=换一个 hash, 不能把代币模板字节焊进市场模板;
+    //   且 readInputStateWithTemplate 本就只需要 len+hash, 字节从输入 sigScript 自取)。prefix/suffix 改
+    //   witness 供(T2 §3.3 P13 已验证形, docs/provenance/2026-09-13-j2-t2-p13-no-token-proof-a2/), 每次调用
+    //   现场 blake3((len as byte[8])+prefix+(len as byte[8])+suffix) 核对 token_tmpl_hash, 见 scanOwnedTokenInputs
+    //   /noTokenInput 两个 helper 的签名——不再是 ctor 参数。
     byte[32] token_tmpl_hash,
     // —— genesis State (20-field): depth-10 winner-axis (≤1024 winner/单片) + 17-word nullifier (17×63=1071≥1024) ——
     //   consolidated_pool v0.3 起语义 = 代币 amount(非 KAS sompi), T1 v0.6 sum_in>=sum_out 的另一半由本文件兑现(D-018)。
@@ -83,17 +84,22 @@ contract PayoutShard(
     int constant OWN_PREFIX_LEN = 1;     // = state_span.offset(本文件当前 ctor 形状下的实测值)
     int constant OWN_STATE_LEN  = 204;   // = state_span.len: 20 字段(2 int + 1 byte32 + 17 int) x tag+payload
 
-    // (A) v0.3 §2/§3: 输入侧扫描——归己(owner==本 covenant)代币输入全部累加, 遍历深度受 MAX_INS_SCAN 约束。
-    function scanOwnedTokenInputs() : int {
+    // (A) v0.3 §2/§3 + 1151 P13 形: 输入侧扫描——witness 供 tok_prefix/tok_suffix, 现场 blake3 核 token_tmpl_hash
+    //   (T2 §3.3 已验证 preimage: blake3((len as byte[8])+prefix+(len as byte[8])+suffix), silverscript-abi
+    //   template_hash 同一算法), 核过后再用验过的 tok_suffix 做 P7 尾匹配, 归己(owner==本 covenant)代币输入
+    //   全部累加, 遍历深度受 MAX_INS_SCAN 约束。
+    function scanOwnedTokenInputs(byte[] tok_prefix, byte[] tok_suffix) : int {
+        require(blake3((tok_prefix.length as byte[8]) + tok_prefix + (tok_suffix.length as byte[8]) + tok_suffix) == token_tmpl_hash);
         require(tx.inputs.length <= MAX_INS_SCAN);
         int total = 0;
+        int L = tok_suffix.length;
         for (i, 0, tx.inputs.length, MAX_INS_SCAN) {
             byte[] ss = tx.inputs[i].sigScript;
             int n = ss.length;
             bool looksLikeToken = false;
-            if (n >= token_suffix_len) { looksLikeToken = ss.slice(n - token_suffix_len, n) == token_suffix; }
+            if (n >= L) { looksLikeToken = ss.slice(n - L, n) == tok_suffix; }
             if (looksLikeToken) {
-                TokenState tk = readInputStateWithTemplate(i, token_prefix_len, token_suffix_len, token_tmpl_hash);
+                TokenState tk = readInputStateWithTemplate(i, tok_prefix.length, tok_suffix.length, token_tmpl_hash);
                 if (tk.owner == OpInputCovenantId(this.activeInputIndex)) {
                     total = total + tk.amount;
                 }
@@ -101,15 +107,18 @@ contract PayoutShard(
         }
         return total;
     }
-    // (B) v0.3 §2/§3: 不在场证明——P13 形结构匹配, 不分 owner(比 owner-aware 更严, 1123 Codex 顾虑已堵)。
-    function noTokenInput() : bool {
+    // (B) v0.3 §2/§3 + 1151 P13 形: 不在场证明——同上先 blake3 核对 witness 供的模板字节, 再用验过的 tok_suffix
+    //   做 P7 尾匹配, 不分 owner(比 owner-aware 更严, 1123 Codex 顾虑已堵)。
+    function noTokenInput(byte[] tok_prefix, byte[] tok_suffix) : bool {
+        require(blake3((tok_prefix.length as byte[8]) + tok_prefix + (tok_suffix.length as byte[8]) + tok_suffix) == token_tmpl_hash);
         require(tx.inputs.length <= MAX_INS_SCAN);
         bool found = false;
+        int L = tok_suffix.length;
         for (i, 0, tx.inputs.length, MAX_INS_SCAN) {
             byte[] ss = tx.inputs[i].sigScript;
             int n = ss.length;
-            if (n >= token_suffix_len) {
-                if (ss.slice(n - token_suffix_len, n) == token_suffix) { found = true; }
+            if (n >= L) {
+                if (ss.slice(n - L, n) == tok_suffix) { found = true; }
             }
         }
         return !found;
@@ -118,14 +127,15 @@ contract PayoutShard(
     // —— entry 0: absorb (输家片全额归集; same-contract continuation 续本 cov_id, 归集态) —— [v0.3 §2/§3 代币化:
     //   委员/归集逻辑一字不动, KAS value weld 换代币 amount weld] ——
     // ★ V-T-8 绕路(见上方 OWN_PREFIX_LEN/OWN_STATE_LEN 注释): 自续约手写编码, 不走 validateOutputState。
-    entry absorb(int selfOutIdx, int shardInIdx, int tok_out, int shard_amount) {
+    entry absorb(int selfOutIdx, int shardInIdx, int tok_out, int shard_amount, byte[] tok_prefix, byte[] tok_suffix) {
         require(closed == 0);
         // ★ v0.3 输入侧(§2/§3 表): 归己(本 PS 自身既有持仓)代币全被处理——shard_amount 尚属输家 leaf, owner 过滤
-        //   天然排除, 是"合法在场不计入"的正例(1127① V-outbind 族同构证据)。
-        int owned_total = scanOwnedTokenInputs();
+        //   天然排除, 是"合法在场不计入"的正例(1127① V-outbind 族同构证据)。tok_prefix/tok_suffix witness 供,
+        //   scanOwnedTokenInputs 内部现场 blake3 核过 token_tmpl_hash(1151 P13 形)。
+        int owned_total = scanOwnedTokenInputs(tok_prefix, tok_suffix);
         require(owned_total == consolidated_pool);
         // ★ 新纳入的 shard 代币: 读其真实 amount(不信任 witness 单独喂的数, T3 v0.1 §3 "读代币输入状态"迁移点)
-        TokenState shardTk = readInputStateWithTemplate(shardInIdx, token_prefix_len, token_suffix_len, token_tmpl_hash);
+        TokenState shardTk = readInputStateWithTemplate(shardInIdx, tok_prefix.length, tok_suffix.length, token_tmpl_hash);
         require(shardTk.amount == shard_amount);
         // ★ v0.3 §4 输出侧派生绑定: 续约代币 owner = 本 PS 自身(OpInputCovenantId 派生表达式, 不是裸 witness)
         validateOutputStateWithInputTemplate(tok_out, TokenState {
@@ -135,7 +145,7 @@ contract PayoutShard(
             borrow_scheme:        TOKEN_BORROW_DISABLED,
             borrow_guard:         byte[32](0x0000000000000000000000000000000000000000000000000000000000000000),
             extension_commitment: byte[32](0x0000000000000000000000000000000000000000000000000000000000000000)
-        }, shardInIdx, token_prefix_len, token_suffix_len, token_tmpl_hash);
+        }, shardInIdx, tok_prefix.length, tok_suffix.length, token_tmpl_hash);
         // ★ V-T-8 绕路: 手写编码新 State(20 字段, 逐字段 tag+payload, 顺序/编码规则见 provenance README
         //   "字段编码表"——int=0x08+8字节小端, byte[32]=0x20+32字节原样, 与 PayoutShardV2.zk_handoff 已有
         //   手写 stateBytes 手法一致)。除 consolidated_pool 外全部原样透传(closed/payoutRoot/w0..w16 不变)。
@@ -185,10 +195,11 @@ contract PayoutShard(
         byte[32] c1s0, byte[32] c1s1, byte[32] c1s2, byte[32] c1s3, byte[32] c1s4, byte[32] c1s5, byte[32] c1s6, byte[32] c1s7,
         byte[32] c2s0, byte[32] c2s1, byte[32] c2s2, byte[32] c2s3, byte[32] c2s4, byte[32] c2s5, byte[32] c2s6, byte[32] c2s7,
         byte[32] c3s0, byte[32] c3s1, byte[32] c3s2, byte[32] c3s3, byte[32] c3s4, byte[32] c3s5, byte[32] c3s6, byte[32] c3s7,
-        byte[32] c4s0, byte[32] c4s1, byte[32] c4s2, byte[32] c4s3, byte[32] c4s4, byte[32] c4s5, byte[32] c4s6, byte[32] c4s7
+        byte[32] c4s0, byte[32] c4s1, byte[32] c4s2, byte[32] c4s3, byte[32] c4s4, byte[32] c4s5, byte[32] c4s6, byte[32] c4s7,
+        byte[]   tok_prefix, byte[] tok_suffix         // v0.3 §2/§3 + 1151 P13 形: witness 供代币模板字节, noTokenInput 内部现场核 token_tmpl_hash
     ) {
         require(closed == 0);                              // ★ write-once: closed 0→1 不可逆
-        require(noTokenInput());                            // ★ v0.3 §2/§3: B 类不在场证明(1123 Codex 复核, 同 1122 边界纪律)
+        require(noTokenInput(tok_prefix, tok_suffix));      // ★ v0.3 §2/§3: B 类不在场证明(1123 Codex 复核, 同 1122 边界纪律)
         // ★钩子1 predicate-commit sanity-use(强制 baked, 防 unused-ctor-omit 坑; 纯 commitment no-op 不 enforce):
         //   oracle phase 此处将 require(winningSide == judgeLine(predicate_commit rule, ESPN fields)) 绑委员 re-derive。
         //   blake2b(x)!=x 恒真(不可 const-fold)= shape 种 predicate_commit 进 redeem→cov_id, behavior 分阶段。
@@ -361,10 +372,11 @@ contract PayoutShard(
         byte[32] c1s0, byte[32] c1s1, byte[32] c1s2, byte[32] c1s3, byte[32] c1s4, byte[32] c1s5, byte[32] c1s6, byte[32] c1s7,
         byte[32] c2s0, byte[32] c2s1, byte[32] c2s2, byte[32] c2s3, byte[32] c2s4, byte[32] c2s5, byte[32] c2s6, byte[32] c2s7,
         byte[32] c3s0, byte[32] c3s1, byte[32] c3s2, byte[32] c3s3, byte[32] c3s4, byte[32] c3s5, byte[32] c3s6, byte[32] c3s7,
-        byte[32] c4s0, byte[32] c4s1, byte[32] c4s2, byte[32] c4s3, byte[32] c4s4, byte[32] c4s5, byte[32] c4s6, byte[32] c4s7
+        byte[32] c4s0, byte[32] c4s1, byte[32] c4s2, byte[32] c4s3, byte[32] c4s4, byte[32] c4s5, byte[32] c4s6, byte[32] c4s7,
+        byte[]   tok_prefix, byte[] tok_suffix         // v0.3 §2/§3 + 1151 P13 形: 同 close_attest
     ) {
         require(closed == 0);                              // ★ write-once latch: closed 0→2 不可逆 (与 close 0→1 互斥)
-        require(noTokenInput());                            // ★ v0.3 §2/§3: B 类不在场证明(同 close_attest)
+        require(noTokenInput(tok_prefix, tok_suffix));      // ★ v0.3 §2/§3: B 类不在场证明(同 close_attest)
         require(blake2b(byte[](predicate_commit)) != predicate_commit);  // predicate_commit baked-use (同 close_attest)
         // ① threshold t=4-of-5 (sighash 覆盖 new_refundRoot = 背书)
         int validSigs = 0;

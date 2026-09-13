@@ -16,5 +16,9 @@
   PASS  V-absorb-8_fail_self_continuation_wrong_payoutRoot_field
   RUN   V-absorb-9_fail_self_continuation_wrong_w5_field
   PASS  V-absorb-9_fail_self_continuation_wrong_w5_field
+  RUN   V-absorb-10_fail_witness_wrong_tok_prefix_blake3_mismatch
+  PASS  V-absorb-10_fail_witness_wrong_tok_prefix_blake3_mismatch
+  RUN   V-absorb-11_fail_witness_wrong_tok_suffix_blake3_mismatch
+  PASS  V-absorb-11_fail_witness_wrong_tok_suffix_blake3_mismatch
 
-9 tests: 9 passed, 0 failed
+11 tests: 11 passed, 0 failed

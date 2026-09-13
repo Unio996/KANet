@@ -18,5 +18,9 @@
   PASS  V-cancel_attest-4_fail_bound_plus_one_9_inputs_rejected_by_length_guard
   RUN   V-cancel_attest-5_fail_victim_token_at_last_reachable_index_7
   PASS  V-cancel_attest-5_fail_victim_token_at_last_reachable_index_7
+  RUN   V-close_attest-6_fail_witness_wrong_tok_prefix_blake3_mismatch
+  PASS  V-close_attest-6_fail_witness_wrong_tok_prefix_blake3_mismatch
+  RUN   V-cancel_attest-6_fail_witness_wrong_tok_prefix_blake3_mismatch
+  PASS  V-cancel_attest-6_fail_witness_wrong_tok_prefix_blake3_mismatch
 
-10 tests: 10 passed, 0 failed
+12 tests: 12 passed, 0 failed

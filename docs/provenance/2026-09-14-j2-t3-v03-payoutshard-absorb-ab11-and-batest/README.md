@@ -1,7 +1,53 @@
 # PayoutShard.sil v0.3 落码 — absorb(V-T-8/AB11 绕路) + close_attest/cancel_attest(noTokenInput)
 
 Bettor ledger 1131（先做 absorb/close_attest/cancel_attest）→ 1140（撞 V-T-8）→ 1142（AB10 死路+AB11 通路）→
-1145（裁：直接用 AB11 改 absorb，四条件）。本目录是 1145 四条件的交付证据。
+1145（裁：直接用 AB11 改 absorb，四条件）→ 1149（补 noTokenInput 的 1122 边界向量）→ **1151（裁：改回 T2 §3.3
+已审设计形——witness 供 tok_prefix/tok_suffix + blake3 现场核 token_tmpl_hash，不维持 ctor 烤死变体）**。
+本目录是全部裁定的合并交付证据。
+
+## 〇、1151 修正：`scanOwnedTokenInputs`/`noTokenInput` 改回 P13 witness+blake3 形
+
+**起因（J2 自纠错误）**：最早落码时误判"blake3 不是 silverscript 可调用的内置函数"（只查了 `TUTORIAL.md`
+的函数列表，没有直接查 silverc 源码），据此把这两个 helper 从 T2 §3.3 原文的"witness 供 prefix/suffix +
+blake3 现场核 token_tmpl_hash"改成了"prefix/suffix 直接 ctor 烤死，不做 hash 校验"。经核实
+`silverscript-lang/src/compiler/compile/expression/builtin.rs:33`，`blake3` 确是注册齐全的真实内置函数，
+误判已纠正并报告。
+
+**Bettor 1151 裁：改回已审设计形，理由四条**：① 偏离已审设计且前提错误，设计先行规矩；② Q8/Owner 币解耦——
+市场模板只嵌 32 字节 `token_tmpl_hash`，换币 = 换一个 hash，不能把代币代码烤进市场模板；③
+`readInputStateWithTemplate` 本就只需要 `len`+`hash`（字节从输入 `sigScript` 自取、内部再校验），烤字节只
+服务 `looksLikeToken` 预筛和 `noTokenInput` 尾比对，这两处按 T2 §3.3 P13 形改 witness 供即可；④ 代币模板
+字节一旦烤进 ctor，就会进每个市场实例的 redeem script，每次调用都要带整段，mass 有放大风险。
+
+**改动**：ctor 删 `token_prefix`/`token_prefix_len`/`token_suffix`/`token_suffix_len` 四个字段（只留
+`token_tmpl_hash`，27 参数 → 23 参数）；`scanOwnedTokenInputs`/`noTokenInput` 签名各加
+`byte[] tok_prefix, byte[] tok_suffix` witness 参数，函数体第一行改为
+`require(blake3((tok_prefix.length as byte[8])+tok_prefix+(tok_suffix.length as byte[8])+tok_suffix) ==
+token_tmpl_hash)`（T2 §3.3 已验证 preimage，`docs/provenance/2026-09-13-j2-t2-p13-no-token-proof-a2/`），
+验过再用验过的 `tok_suffix`/`tok_prefix.length`/`tok_suffix.length` 做后续尾匹配与 `readInputStateWithTemplate`
+调用；`absorb`/`close_attest`/`cancel_attest` 三个入口签名各加 `tok_prefix`/`tok_suffix` 两个 witness 参数,
+调用点相应传入。
+
+**bytecode_length 改前/改后对比**（`measure_output.json`，均为真实 ctor 完整编译产物）：
+
+| | own_prefix_len | own_state_len | own_suffix_len | **bytecode_length（锁定脚本总长）** |
+|---|---|---|---|---|
+| 改前（ctor 烤 token_prefix/suffix，两者取自真实 KanetTestToken 实例，1+3214 字节） | 1 | 204 | 21571 | **21776** |
+| 改后（witness 供，ctor 只留 token_tmpl_hash） | 1 | 204 | 21988 | **22193** |
+
+**如实记录：本次锁定脚本反而略微变大（+417 字节），不是"改小了"**——`OWN_PREFIX_LEN`/`OWN_STATE_LEN` 两个
+V-T-8/AB11 常量本身**没有漂移**（仍是 1/204，量测脚本确认），但 `blake3` 校验逻辑在 `absorb`（经
+`scanOwnedTokenInputs`）与 `close_attest`/`cancel_attest`（各自经 `noTokenInput`）三个调用点各展开一份
+（silverc 对这类 helper 是内联而非共享子程序调用，同此前调试痕迹里反复出现的 `__inline_N_functionName`
+一致），三份 blake3 校验 opcode 加起来的字节数比"只烤一次、约 3215 字节的完整 KanetTestToken 前后缀"更多。
+**这不推翻 Bettor 1151 的四条理由**——理由②③是关于"市场模板不应该跟代币字节内容耦合"这条架构原则，理由④
+关心的是**每次 spend 都要重复携带**的那部分成本（本次量测的是锁定脚本，不是每次调用的 witness 总量；
+换币场景下"改一个 hash 常量 vs 改整段 ctor 字节并影响所有已部署实例的模板哈希"这条差异本次量测没有覆盖，
+量的只是单份锁定脚本大小），只是"字节数变小"这个具体推论，在**本文件这个大小量级**上没有兑现，如实记录
+不掩盖。
+
+**全部既有 19 条向量（9 absorb + 10 battest）+ 本次新增 4 条 witness 错误负向量重跑，23/23 PASS**（详见 §条件(c)
+与 §二，两组 run.log 已更新）。
 
 ## 一、absorb 的 AB11 绕路实现
 
@@ -48,7 +94,7 @@ State 布局顺序（`contract PayoutShard(...)` 花括号内的字段声明顺�
 （`hash(...x...)==x`，原像问题量级，无可行解），改为直接从 `tx.inputs[this.activeInputIndex].sigScript`
 （当前执行脚本自己的完整字节码）切片借出 `ownPrefix`/`ownSuffix`，只替换中间 204 字节的 state 区段。
 
-### 条件 (c)：向量 —— `absorb.run.log`，**9/9 PASS**
+### 条件 (c)：向量 —— `absorb.run.log`，**11/11 PASS**（含 1151 新增 2 条 witness 错误负向量）
 
 | 向量 | 类型 | 验证点 |
 |---|---|---|
@@ -61,13 +107,15 @@ State 布局顺序（`contract PayoutShard(...)` 花括号内的字段声明顺�
 | `V-absorb-7_fail_self_continuation_wrong_closed_field` | 负(条件 c 要求"任一非金额字段错") | `closed` 字段(int, 顶层控制位)被改, 手写编码 scriptPubKey 比对失配 |
 | `V-absorb-8_fail_self_continuation_wrong_payoutRoot_field` | 负(条件 c) | `payoutRoot` 字段(byte[32]) 被改, 同上失配 |
 | `V-absorb-9_fail_self_continuation_wrong_w5_field` | 负(条件 c) | `w5` 字段(int, 17 字数组第 6 个, 深处字段) 被改, 同上失配——证明手写编码覆盖到数组深处, 不是只对齐了前几个字段 |
+| `V-absorb-10_fail_witness_wrong_tok_prefix_blake3_mismatch`（1151 新增） | 负 | witness 供错 `tok_prefix`, 在 `scanOwnedTokenInputs` 的 blake3 现场核那行结构性拒绝, 不会走到后面任何业务检查 |
+| `V-absorb-11_fail_witness_wrong_tok_suffix_blake3_mismatch`（1151 新增） | 负 | 同上, 镜像 `tok_suffix` |
 
 **已用 flip-expect 复核每条负向量的真实失败行**（不是巧合通过）：V-absorb-6 在
 `require(tx.outputs[selfOutIdx].scriptPubKey==...)` 那行**先通过**、下一行 `value>=DUST_MIN` 才失败；
 V-absorb-7/8/9 全部准确失败在 `scriptPubKey` 比对那一行——三个不同字段（int 顶层 / byte32 / int 数组深处）
 改动均被手写编码正确捕捉，不是只对第一个字段敏感的表面通过。
 
-## 二、close_attest / cancel_attest：`noTokenInput()`（不受 V-T-8 影响）——`battest.run.log`，**10/10 PASS**
+## 二、close_attest / cancel_attest：`noTokenInput()`（不受 V-T-8 影响）——`battest.run.log`，**12/12 PASS**（含 1151 新增 2 条 witness 错误负向量）
 
 这两个入口的委员签名逻辑本次一字不动（沿用既有 4-of-5 门限 + depth-8 merkle），只加两条：
 `require(noTokenInput())`（B 类不在场证明，1123 Codex 复核采纳）+ KAS dust weld 下限
@@ -81,6 +129,7 @@ V-absorb-7/8/9 全部准确失败在 `scriptPubKey` 比对那一行——三个�
 | `V-close_attest-1_fail_no_token_sigs_invalid_reaches_sig_gate` | 无代币输入 → `noTokenInput()` 放行 → 落到签名门限(0 个有效签名)才拒——证明 `noTokenInput()` 没有误挡干净交易 |
 | `V-close_attest-2_fail_token_input_present_rejected_by_noTokenInput` | 代币模板输入在场 → 在签名门限**之前**被 `noTokenInput()` 结构性拒绝 |
 | `V-cancel_attest-1/2` | 镜像上两条 |
+| `V-{close,cancel}_attest-6_fail_witness_wrong_tok_prefix_blake3_mismatch`（1151 新增） | witness 供错 `tok_prefix`, 在 `noTokenInput` 的 blake3 现场核那行结构性拒绝(未到长度闸/P7 尾匹配) |
 
 **1122/1122-补 边界纪律（Bettor 1149 提醒自查后补齐, 三条 × 两入口 = 6 条）**：`noTokenInput()` 跟
 `scanOwnedTokenInputs()` 共享同一个 `MAX_INS_SCAN=8` 常量与同一套 `require(len<=bound)` 先拒超界纪律,

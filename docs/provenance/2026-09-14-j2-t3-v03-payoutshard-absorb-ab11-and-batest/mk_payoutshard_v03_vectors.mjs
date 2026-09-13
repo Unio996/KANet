@@ -55,7 +55,7 @@ const tokenTmplHashHex = hex(psOwn100.templateHash);
 function ctorArgsPS({ consolidated_pool, closed = 0, payoutRoot = ZERO32, w = new Array(17).fill(0) }) {
   return [
     hex(ZERO32), hex(ZERO32),
-    tokenPrefixHex, psOwn100.prefix.length, tokenSuffixHex, psOwn100.suffix.length, tokenTmplHashHex,
+    tokenTmplHashHex,
     consolidated_pool, closed, hex(payoutRoot),
     ...w,
   ];
@@ -96,7 +96,7 @@ const psCont150WrongW5 = compilePS({ consolidated_pool: 150, w: w5wrong }, 'cont
 function ctorArgsPSHex({ consolidated_pool, closed = 0, payoutRoot = ZERO32 }) {
   return [
     hex(ZERO32), hex(ZERO32),
-    tokenPrefixHex, psOwn100.prefix.length, tokenSuffixHex, psOwn100.suffix.length, tokenTmplHashHex,
+    tokenTmplHashHex,
     consolidated_pool, closed, hex(payoutRoot),
     ...new Array(17).fill(0),
   ];
@@ -111,7 +111,7 @@ tests.push({
   name: 'V-absorb-1_pass_owned_plus_incoming_shard',
   function: 'absorb',
   constructor_args: ctorArgsPSHex({ consolidated_pool: 100 }),
-  args: [0, 2, 2, 50],
+  args: [0, 2, 2, 50, hex(psOwn100.prefix), hex(psOwn100.suffix)],
   expect: 'pass',
   tx: {
     active_input_index: 1,
@@ -128,7 +128,7 @@ tests.push({
   name: 'V-absorb-2_fail_smuggled_second_owned_token_uncounted',
   function: 'absorb',
   constructor_args: ctorArgsPSHex({ consolidated_pool: 100 }),
-  args: [0, 3, 3, 50],
+  args: [0, 3, 3, 50, hex(psOwn100.prefix), hex(psOwn100.suffix)],
   expect: 'fail',
   tx: {
     active_input_index: 1,
@@ -146,7 +146,7 @@ tests.push({
   name: 'V-absorb-3_pass_stranger_same_template_present_not_counted',
   function: 'absorb',
   constructor_args: ctorArgsPSHex({ consolidated_pool: 100 }),
-  args: [0, 3, 3, 50],
+  args: [0, 3, 3, 50, hex(psOwn100.prefix), hex(psOwn100.suffix)],
   expect: 'pass',
   tx: {
     active_input_index: 1,
@@ -164,7 +164,7 @@ tests.push({
   name: 'V-absorb-4_fail_output_diverted_to_stranger_owner',
   function: 'absorb',
   constructor_args: ctorArgsPSHex({ consolidated_pool: 100 }),
-  args: [0, 2, 2, 50],
+  args: [0, 2, 2, 50, hex(psOwn100.prefix), hex(psOwn100.suffix)],
   expect: 'fail',
   tx: {
     active_input_index: 1,
@@ -181,7 +181,7 @@ tests.push({
   name: 'V-absorb-5_fail_output_wrong_amount',
   function: 'absorb',
   constructor_args: ctorArgsPSHex({ consolidated_pool: 100 }),
-  args: [0, 2, 2, 50],
+  args: [0, 2, 2, 50, hex(psOwn100.prefix), hex(psOwn100.suffix)],
   expect: 'fail',
   tx: {
     active_input_index: 1,
@@ -198,7 +198,7 @@ tests.push({
   name: 'V-absorb-6_fail_self_output_below_dust_min',
   function: 'absorb',
   constructor_args: ctorArgsPSHex({ consolidated_pool: 100 }),
-  args: [0, 2, 2, 50],
+  args: [0, 2, 2, 50, hex(psOwn100.prefix), hex(psOwn100.suffix)],
   expect: 'fail',
   tx: {
     active_input_index: 1,
@@ -215,7 +215,7 @@ tests.push({
   name: 'V-absorb-7_fail_self_continuation_wrong_closed_field',
   function: 'absorb',
   constructor_args: ctorArgsPSHex({ consolidated_pool: 100 }),
-  args: [0, 2, 2, 50],
+  args: [0, 2, 2, 50, hex(psOwn100.prefix), hex(psOwn100.suffix)],
   expect: 'fail',
   tx: {
     active_input_index: 1,
@@ -232,7 +232,7 @@ tests.push({
   name: 'V-absorb-8_fail_self_continuation_wrong_payoutRoot_field',
   function: 'absorb',
   constructor_args: ctorArgsPSHex({ consolidated_pool: 100 }),
-  args: [0, 2, 2, 50],
+  args: [0, 2, 2, 50, hex(psOwn100.prefix), hex(psOwn100.suffix)],
   expect: 'fail',
   tx: {
     active_input_index: 1,
@@ -250,13 +250,49 @@ tests.push({
   name: 'V-absorb-9_fail_self_continuation_wrong_w5_field',
   function: 'absorb',
   constructor_args: ctorArgsPSHex({ consolidated_pool: 100 }),
-  args: [0, 2, 2, 50],
+  args: [0, 2, 2, 50, hex(psOwn100.prefix), hex(psOwn100.suffix)],
   expect: 'fail',
   tx: {
     active_input_index: 1,
     inputs: [shardInput(psOwn100), activeSelfInput(), shardInput(shard50)],
     outputs: [
       { value: 1000, script_hex: psCont150WrongW5.scriptHex },
+      { value: 1, covenant_id: hex(PS_COV) },
+      { value: 1, script_hex: psOut150.scriptHex },
+    ],
+  },
+});
+
+// V-absorb-10 (Bettor 1151): fail -- witness 供错的 tok_prefix, blake3 现场核 token_tmpl_hash 必须先死在这里,
+// 不会走到后面任何一条业务检查(结构性拒绝, 不是巧合失败在别处)。
+tests.push({
+  name: 'V-absorb-10_fail_witness_wrong_tok_prefix_blake3_mismatch',
+  function: 'absorb',
+  constructor_args: ctorArgsPSHex({ consolidated_pool: 100 }),
+  args: [0, 2, 2, 50, hex([0xff]), hex(psOwn100.suffix)],
+  expect: 'fail',
+  tx: {
+    active_input_index: 1,
+    inputs: [shardInput(psOwn100), activeSelfInput(), shardInput(shard50)],
+    outputs: [
+      { value: 1000, script_hex: psCont150.scriptHex },
+      { value: 1, covenant_id: hex(PS_COV) },
+      { value: 1, script_hex: psOut150.scriptHex },
+    ],
+  },
+});
+// V-absorb-11 (Bettor 1151): fail -- witness 供错的 tok_suffix, 同上镜像。
+tests.push({
+  name: 'V-absorb-11_fail_witness_wrong_tok_suffix_blake3_mismatch',
+  function: 'absorb',
+  constructor_args: ctorArgsPSHex({ consolidated_pool: 100 }),
+  args: [0, 2, 2, 50, hex(psOwn100.prefix), hex([0xff, 0xff])],
+  expect: 'fail',
+  tx: {
+    active_input_index: 1,
+    inputs: [shardInput(psOwn100), activeSelfInput(), shardInput(shard50)],
+    outputs: [
+      { value: 1000, script_hex: psCont150.scriptHex },
       { value: 1, covenant_id: hex(PS_COV) },
       { value: 1, script_hex: psOut150.scriptHex },
     ],

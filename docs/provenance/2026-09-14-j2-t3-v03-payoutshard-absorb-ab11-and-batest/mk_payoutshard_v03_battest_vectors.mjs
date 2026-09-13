@@ -37,7 +37,7 @@ const psOwn100 = compileKTT(PS_COV, 100, 'ps_own_100');
 function ctorArgsPS({ consolidated_pool = 100, closed = 0, payoutRoot = ZERO32 }) {
   return [
     hex(ZERO32), hex(ZERO32),
-    hex(psOwn100.prefix), psOwn100.prefix.length, hex(psOwn100.suffix), psOwn100.suffix.length, hex(psOwn100.templateHash),
+    hex(psOwn100.templateHash),
     consolidated_pool, closed, hex(payoutRoot),
     ...new Array(17).fill(0),
   ];
@@ -48,7 +48,7 @@ function tokenInput(t) { return { utxo_value: 10, utxo_script_hex: t.scriptHex, 
 // close_attest/cancel_attest witness args: selfOutIdx, new_payoutRoot/new_refundRoot, 5 sigs, committeePkHash,
 // 5 pks, 5 idx, 5*8 siblings (40 byte32) -- build a generic all-zero committee (checkSig will fail -> validSigs<4
 // -> require fails AFTER noTokenInput, proving noTokenInput ran first and let a clean tx proceed to the next gate).
-function committeeArgs(newRoot) {
+function committeeArgs(newRoot, { tokPrefix = psOwn100.prefix, tokSuffix = psOwn100.suffix } = {}) {
   const pk = (n) => new Array(32).fill(n);
   const c0Pk = pk(0x01), c1Pk = pk(0x02), c2Pk = pk(0x03), c3Pk = pk(0x04), c4Pk = pk(0x05);
   const committeePkHash = [...b2b([...c0Pk, ...c1Pk, ...c2Pk, ...c3Pk, ...c4Pk])];
@@ -60,6 +60,7 @@ function committeeArgs(newRoot) {
     hex(c0Pk), hex(c1Pk), hex(c2Pk), hex(c3Pk), hex(c4Pk),
     0, 0, 0, 0, 0,
     ...zeroSibs, ...zeroSibs, ...zeroSibs, ...zeroSibs, ...zeroSibs,
+    hex(tokPrefix), hex(tokSuffix),   // v0.3 §2/§3 + 1151 P13 形: witness 供代币模板字节(close/cancel_attest 共用)
   ];
 }
 
@@ -141,6 +142,20 @@ function boundaryVectors(fnName) {
 }
 tests.push(...boundaryVectors('close_attest'));
 tests.push(...boundaryVectors('cancel_attest'));
+
+// ---------- Bettor 1151: witness 供错 prefix/suffix 的负向量(两入口各一条) ----------
+function wrongWitnessVectors(fnName) {
+  return [{
+    name: `V-${fnName}-6_fail_witness_wrong_tok_prefix_blake3_mismatch`,
+    function: fnName,
+    constructor_args: ctorArgsPS({}),
+    args: committeeArgs(ZERO32, { tokPrefix: [0xff] }),
+    expect: 'fail',
+    tx: { active_input_index: 0, inputs: [selfInput()], outputs: [{ value: 1000, covenant_id: hex(PS_COV) }] },
+  }];
+}
+tests.push(...wrongWitnessVectors('close_attest'));
+tests.push(...wrongWitnessVectors('cancel_attest'));
 
 fs.writeFileSync('scratch/_t1v06_check/PayoutShard_v03_battest.test.json', JSON.stringify({ tests }, null, 1));
 console.log('wrote', tests.length, 'B-class vectors');
