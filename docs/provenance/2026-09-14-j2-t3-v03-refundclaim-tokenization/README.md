@@ -32,9 +32,13 @@ claim 家族的闸已开，RefundClaim 的③代币化不必再等，形状明�
 2. **P13 形**核 `token_tmpl_hash`，读本合约当前持有的代币输入 `heldTk`（`tokenInIdx`），核
    `heldTk.owner==本合约自身` + `heldTk.amount==pool_value`（不信任 witness，读真实持仓）。
 3. **P13 形**核 `claim_tmpl_hash`（新增字段同款处理）。
-4. **ZERO32 目的地守卫**（NWT 1158 系统性扫查纪律）：`claimCovId = OpOutputCovenantId(claimOutIdx)` 后立即
-   `require(claimCovId != ZERO32)`——独立验证 = 紧跟着的 `claim_tmpl_hash` 结构性核对本身（裸输出通不过那条
-   模板匹配，两条检查合起来堵死"随手指一个裸输出"的攻击面）。
+4. **ZERO32 目的地守卫**（NWT 1158 系统性扫查纪律，措辞按 1173 更正）：`claimCovId = OpOutputCovenantId(claimOutIdx)`
+   后立即 `require(claimCovId != ZERO32)`。**这一条不是 `claim_tmpl_hash` 模板校验的附属/冗余**——NWT 读 rusty-kaspa
+   `covenants.rs` 确认：一笔输出的 `covenant` 绑定字段跟 `script_public_key` 是**完全独立**的两件事；一个输出
+   可以脚本字节逐位匹配真实编译的 `KanetTokenClaim` 模板，同时 `covenant` 字段是 `None`（未声明），此时
+   `OpOutputCovenantId` 照样回退 `ZERO_HASH`——**模板匹配 ≠ covenant 绑定**。NWT 自建的这类向量会被
+   `require(claimCovId != ZERO32)` 精确单独拦下，不是被 `claim_tmpl_hash` 那条模板检查拦下。所以第 4 条和第
+   5 条是两条独立承重的检查，缺一都会留洞，不能把 4 读成"5 的深化/顺带"。
 5. `validateOutputStateWithTemplate(claimOutIdx, ClaimState{...}, claim_prefix, claim_suffix, claim_tmpl_hash)`
    建新 `KanetTokenClaim` 实例——五字段：`market_cov_id=本合约自身身份`（provenance）、`winner_pk=票面 bettor`、
    `amount=票面 stake`、`token_tmpl_hash`/`market_suffix_hash` 透传。
