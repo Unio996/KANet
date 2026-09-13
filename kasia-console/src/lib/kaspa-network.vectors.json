@@ -1,0 +1,16 @@
+{
+  "_": "kaspa-network helper 向量表 (J2 2026-09-13, 设计 v0.2 §4). 地址由固定测试私钥 0x…01 派生(kaspa-wasm toAddress); V9 取自 pool_markets 真实 spine_p2sh. expect ∈ OK|empty|invalid-checksum|prefix-mismatch. 由 kaspa-network.test.mjs 逐行核对.",
+  "vectors": [
+    { "id": "V1",  "address": "kaspatest:qpumuen7l8wthtz45p3ftn58pvrs9xlumvkuu2xet8egzkcklqtes5z8rkmpd", "network": "testnet-12", "expect": "OK", "note": "正向" },
+    { "id": "V2",  "address": "kaspa:qpumuen7l8wthtz45p3ftn58pvrs9xlumvkuu2xet8egzkcklqtes4ypce9sf",     "network": "mainnet",    "expect": "OK", "note": "正向(主网)" },
+    { "id": "V3",  "address": "kaspatest:qpumuen7l8wthtz45p3ftn58pvrs9xlumvkuu2xet8egzkcklqtes5z8rkmpd", "network": "mainnet",    "expect": "prefix-mismatch", "note": "D-017 过渡态: DB 存量 TN12 地址在主网进程 (NWT B-4)" },
+    { "id": "V3p", "address": "kaspa:qpumuen7l8wthtz45p3ftn58pvrs9xlumvkuu2xet8egzkcklqtes4ypce9sf",     "network": "testnet-12", "expect": "prefix-mismatch", "note": "反向 (NWT B-5)" },
+    { "id": "V4",  "address": "kaspa:qpumuen7l8wthtz45p3ftn58pvrs9xlumvkuu2xet8egzkcklqtes5z8rkmpd",     "network": "mainnet",    "expect": "invalid-checksum", "note": "前缀伪造(kaspa:+testnet payload) 死在校验和" },
+    { "id": "V5a", "address": "kaspadev:qpumuen7l8wthtz45p3ftn58pvrs9xlumvkuu2xet8egzkcklqtese6y7tc99",  "network": "mainnet",    "expect": "prefix-mismatch", "note": "未知前缀不映射 mainnet (NWT B-3)" },
+    { "id": "V5b", "address": "kaspasim:qpumuen7l8wthtz45p3ftn58pvrs9xlumvkuu2xet8egzkcklqtes65ue9mw6",  "network": "mainnet",    "expect": "prefix-mismatch" },
+    { "id": "V6",  "address": "",                                                                        "network": "mainnet",    "expect": "empty", "note": "今天 9 处 (x||'') 会得 mainnet" },
+    { "id": "V7",  "address": "KASPATEST:QPUMUEN7L8WTHTZ45P3FTN58PVRS9XLUMVKUU2XET8EGZKCKLQTES5Z8RKMPD", "network": "testnet-12", "expect": "invalid-checksum" },
+    { "id": "V9",  "address": "kaspatest:pq800ddgy4264utx2mecuwgk06wlj7vrx6klkrkrd74uk4yt9g52wa06zcj7e", "network": "testnet-12", "expect": "OK", "note": "P2SH 版本(covenant 市场 spine_p2sh 实取)" },
+    { "id": "V12", "address": "<hostile-battery>", "network": "mainnet", "expect": "empty|invalid-checksum", "note": "11 组对抗输入见 test 文件 (NWT 脚本照抄): 全部 ok:false 不抛不崩" }
+  ]
+}

@@ -7,6 +7,7 @@ import { resolveExpired, isResolverRunning } from '../services/bettor-resolver.j
 import { snapshotOpenPositions, isTrackerRunning } from '../services/bettor-position-tracker.js';
 import { evaluatePositions, isReactorRunning } from '../services/bettor-reactor.js';
 import { isRelayAlive } from '../services/relay-manager.js';
+import { assertAddressOnNetwork, isAddressOnNetwork } from '../lib/kaspa-network.mjs';   // (b) 网络单一源 (设计 v0.2 §3): 前缀只对照 env KASPA_NETWORK, 不从地址推网络
 
 export async function registerBettorRoutes(fastify) {
   // GET /api/bettor/recommendations — top N most-recent batch (optional filter by relay_node_id)
@@ -1100,7 +1101,7 @@ export async function registerBettorRoutes(fastify) {
     const escrowAddr = await getConfig('kanet_prediction_escrow_addr');
     // r216 Bug surfaced: 之前 `startsWith('kaspa:')` 拒 testnet `kaspatest:` prefix (= Phase 3a 真 round-trip 撞到).
     // 修: accept 双 prefix (mainnet kaspa: + testnet-12 kaspatest:).
-    if (!escrowAddr || !(escrowAddr.startsWith('kaspa:') || escrowAddr.startsWith('kaspatest:'))) {
+    if (!isAddressOnNetwork(escrowAddr, { who: 'bettor.js:1103' })) {   // (b) 原"kaspa: 或 kaspatest: 二选一" = 跨网地址照收; 现只认配置网络前缀(含校验和)
       return reply.code(503).send({ ok: false, error: 'kanet_prediction_escrow_addr not configured — operator action required' });
     }
     let escrowTxId = null;
@@ -1401,7 +1402,7 @@ export async function registerBettorRoutes(fastify) {
         deadline, minerFee, brokerFeePct, oracleFeePct,
         makerStakeAmount: stakeKasSompi,
         takerStakeAmount: stakeKasSompi,  // Phase 4a v0 简化: 1:1
-        network: makerRow.address.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet',
+        network: assertAddressOnNetwork(makerRow.address, { who: 'bettor.js:1404' }),
       });
     } catch (e) {
       return reply.code(500).send({ ok: false, error: `SS contract compile fail: ${e.message}` });

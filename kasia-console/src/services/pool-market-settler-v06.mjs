@@ -30,6 +30,7 @@ import {
   selectCommittee,
   COMMITTEE_SIZE,
 } from './pool-committee-sampler.mjs';
+import { assertAddressOnNetwork } from '../lib/kaspa-network.mjs';   // (b) 网络单一源 (设计 v0.2 §3): 前缀只对照 env KASPA_NETWORK, 不从地址推网络
 
 const THRESHOLD = 4; // 4-of-5 (Bettor r19 + J2 r104 lock)
 // J1tn r303 P0-#1 fix (Bettor r299+r300 钦定 不焊死 动态): 此 const 仅 v06 unit test 用 (= production
@@ -425,7 +426,7 @@ export async function recaptureSideLockDaaForMarket(marketId, captureDeps = unde
   if (!nullBets.length) return { recaptured: 0, remaining: 0, reasons: {}, anchorSources: {} };
   const { captureSideLockDaa } = await import('./trade-protocol-filter.js');
   const marketRow = sqlite.prepare('SELECT spine_p2sh, deadline_daa FROM pool_markets WHERE id = ?').get(marketId);
-  const network = String(marketRow?.spine_p2sh || '').startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+  const network = assertAddressOnNetwork(marketRow?.spine_p2sh, { who: 'pool-market-settler-v06.mjs:428' });
   // approxDaaHint(2026-07-12, #gry4yj.2): bet 必然发生在 deadline 之前, deadline_daa 是天然的"≥ 真实
   // daa"上界, 喂给 captureSideLockDaa 当 backward-scan 锚点提示——查 v183 spc_daa_index 命中的话几十步
   // 内就能找到, 不用从 tip 硬走(registration 到 recapture 之间隔多久跟这条无关)。

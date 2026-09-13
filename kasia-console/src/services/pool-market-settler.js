@@ -86,6 +86,7 @@ import { payoutRoot as computePayoutRoot } from '../lib/pool-payout-root.mjs';
 import { refundSidesIdsMaterialized } from '../db/phase2-refund-queries.mjs';
 import { runShadowCompare } from '../db/phase2-shadow.mjs';
 import { resolveShadowEvery, shadowDue, announceShadowEvery } from '../db/phase2-indexes-v200.mjs';
+import { assertAddressOnNetwork } from '../lib/kaspa-network.mjs';   // (b) 网络单一源 (设计 v0.2 §3): 前缀只对照 env KASPA_NETWORK, 不从地址推网络
 const PHASE2_SHADOW_EVERY = resolveShadowEvery();   // 默认 0(关); 影子窗内 ≥100
 announceShadowEvery();   // 启动打一行开关值(进程内只打一次; Bettor 批 ledger 910)
 let _legacyRefundScanCalls = 0;
@@ -2046,7 +2047,7 @@ export async function dispatchPhase2(market, decision) {
     if (market.broker_pk) {
       try {
         const _kw = await import('kaspa-wasm');
-        const _net = market.spine_p2sh && market.spine_p2sh.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+        const _net = assertAddressOnNetwork(market.spine_p2sh, { who: 'pool-market-settler.js:2049' });
         brokerAddress = new _kw.XOnlyPublicKey(market.broker_pk).toAddress(_net).toString();
       } catch (e) {
         console.warn(`[pool-settler] broker pk→addr fail market=${market.id.slice(0,12)} broker_pk=${String(market.broker_pk).slice(0,8)}: ${e.message}`);
@@ -2066,7 +2067,7 @@ export async function dispatchPhase2(market, decision) {
     // (P2SH/multisig) would reconstruct to ≠ original; testnet standard wallets all P2PK
     // so acceptable for first-ship, /link endpoint hardening can validate-on-bind later.
     const kaspaWasm = await import('kaspa-wasm');
-    const settleNetwork = market.spine_p2sh.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+    const settleNetwork = assertAddressOnNetwork(market.spine_p2sh, { who: 'pool-market-settler.js:2069' });
     // #31 ②轴 (chunk-determinism 硬前置, 4方确认 + Bettor 实测): bettor payout addr 一律 pk-derive from
     // bettor_pk (chain-anchored, 两节点 pool_bettor_sides commit 同源) — 删原 node-local relay_nodes 查分叉.
     // 原 bettor_relay_id 路 (SELECT address FROM relay_nodes WHERE id) = NODE-LOCAL: 非持该 relay 的节点查返
@@ -2677,7 +2678,7 @@ export async function buildMakerRefundPreimage(market) {
     console.warn(`[pool-settler] buildMakerRefundPreimage market=${market.id.slice(0,12)} no maker address`);
     return { ok: false, error: 'no maker address' };
   }
-  const networkId = makerRow.address.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+  const networkId = assertAddressOnNetwork(makerRow.address, { who: 'pool-market-settler.js:2680' });
 
   // Fee compute branches by protocol version:
   //   v0.5: legacy fixed minerFee from market row (SS 焊死, can't change here).

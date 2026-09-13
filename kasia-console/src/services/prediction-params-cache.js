@@ -13,6 +13,7 @@
 import { sqlite } from '../db/client.js';
 import { createHash } from 'node:crypto';
 import { sendCommandAsync } from './relay-manager.js';
+import { assertAddressOnNetwork } from '../lib/kaspa-network.mjs';   // (b) 网络单一源 (设计 v0.2 §3): 前缀只对照 env KASPA_NETWORK, 不从地址推网络
 
 const PARAMS_CHANNEL = 'kanet-prediction-params';
 
@@ -103,7 +104,7 @@ async function recompileRedeemScript(ctorParams) {
       oracleFeePct: ctorParams.oracle_fee_pct,
       makerStakeAmount: ctorParams.maker_stake_sompi,
       takerStakeAmount: ctorParams.taker_stake_sompi,
-      network: ctorParams.p2sh_addr?.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet',
+      network: assertAddressOnNetwork(ctorParams.p2sh_addr, { who: 'prediction-params-cache.js:106' }),
     });
     return { ok: true, redeem_script_hex: escrow.redeemScript, p2sh_addr: escrow.p2shAddr };
   } catch (e) {

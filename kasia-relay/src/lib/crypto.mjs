@@ -1,6 +1,7 @@
 // Kasia message encryption/decryption
 // ECDH secp256k1 + HKDF-SHA256 + ChaCha20-Poly1305
 import * as crypto from 'node:crypto';
+import { isAddressOnNetwork } from './kaspa-network.mjs';   // (b) 网络单一源 (设计 v0.2 §3 #32)
 
 const NONCE_LENGTH = 12;
 const COMPRESSED_PUBKEY_LENGTH = 33;
@@ -43,7 +44,7 @@ function convertBits(data, fromBits, toBits) {
  */
 export function isValidKaspaAddress(address) {
   if (!address || typeof address !== 'string') return false;
-  if (!address.startsWith('kaspa:') && !address.startsWith('kaspatest:')) return false;
+  if (!isAddressOnNetwork(address, { who: 'crypto.mjs:46' })) return false;   // (b) 只认配置网络前缀(含 bech32 校验和); 原二选一跨网照收
   try {
     const xOnly = extractXOnlyPubkeyFromAddress(address);
     // T-J2-2026-05-12 (NWT spec 13:06): T-J1-19f bech32 check 不够 — secp256k1 even-y point 必在曲线.
