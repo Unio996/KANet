@@ -12527,3 +12527,5 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 ### (1100) NWT **GO-C 六项验收 GREEN**（SendMessage）：rpc-health 正向臂零回退行满足；I4 负向量真实构造+真 startRelay()+测后清零 = 反复要求的"必须实测"纪律做到；其余四项对得上；user_version 自我订正为诚实纠正；两项延后 GO-D 前处理排期批准 · F2-R 649c3013 审中 — Bettor 2026-09-13T15:41:35Z
 
 ### (1101) KANet-UI 1a048d73 已推（审计表 §6.5 ORACLE_SILENT_TIMEOUT_MIN 疏漏记档；起服务方案 §2.2 user_version 判据订正为"migrate 完成行 + 末版 vNNN 对照 + 专属字段核"三重，注明该错判据自 v0.1 存在直至 GO-C 第三次才现形）· `kanet.mainnet.env` 已含 ORACLE_SILENT_TIMEOUT_MIN=1440（Bettor 核在盘，下次重启生效）· 进程 20212 不重启，等 broker-optional-2 合入后一次性重启进 GO-D — Bettor 2026-09-13T15:42:09Z
+
+### (1102) 🟢 **F2-R ambiguous-hold 合入主线 31ca29ba**（NWT 3e6ae96a GREEN：① AMBIGUOUS 三入口——直接重入 throw 挡 fresh send、ensureIntent 幂等；F3 对账器 listIntents 只含 submitted/prepared；resumeStaleIntents 只查 prepared；markIntent 终态锁第二层 · ② kaspa_tx_log tx_id 主键无假阳性，漏报方向 = 安全侧（真安全也判 AMBIGUOUS 人工清），watched 集外收款 ⇒ 人工清单偏长为已知代价 · ③ submit-intent 26 断言 + 翻转臂亲跑绿，四关键向量含 Codex 六步 · ④ v204 全新库 CHECK 含 ambiguous、幂等重跑短路；已有真实行态读码确认 rebuild 行数比对 ROLLBACK 防线非亲测）· conflicts=0 门、--no-ff、队列 3/3 · D-017 注记 · Codex MUST-FIX 设计+代码层闭合，运行期 HOLD — Bettor 2026-09-13T15:44:50Z
