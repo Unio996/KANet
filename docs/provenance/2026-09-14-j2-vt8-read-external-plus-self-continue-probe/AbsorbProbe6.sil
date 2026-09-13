@@ -1,0 +1,61 @@
+pragma silverscript ^0.1.0;
+contract AbsorbProbe6(byte[] token_prefix, int token_prefix_len, byte[] token_suffix, int token_suffix_len, byte[32] token_tmpl_hash,
+    int init_consolidated_pool, int init_closed, byte[32] init_payoutRoot,
+    int init_w0, int init_w1, int init_w2, int init_w3, int init_w4, int init_w5, int init_w6, int init_w7, int init_w8,
+    int init_w9, int init_w10, int init_w11, int init_w12, int init_w13, int init_w14, int init_w15, int init_w16
+) {
+    int consolidated_pool = init_consolidated_pool;
+    int closed = init_closed;
+    byte[32] payoutRoot = init_payoutRoot;
+    int w0 = init_w0; int w1 = init_w1; int w2 = init_w2; int w3 = init_w3; int w4 = init_w4; int w5 = init_w5;
+    int w6 = init_w6; int w7 = init_w7; int w8 = init_w8; int w9 = init_w9; int w10 = init_w10; int w11 = init_w11;
+    int w12 = init_w12; int w13 = init_w13; int w14 = init_w14; int w15 = init_w15; int w16 = init_w16;
+    struct TokenState {
+        int      amount;
+        byte[32] owner;
+        byte     owner_scheme;
+        byte     borrow_scheme;
+        byte[32] borrow_guard;
+        byte[32] extension_commitment;
+    }
+    int constant MAX_INS_SCAN = 8;
+    function scanOwnedTokenInputs() : int {
+        require(tx.inputs.length <= MAX_INS_SCAN);
+        int total = 0;
+        for (i, 0, tx.inputs.length, MAX_INS_SCAN) {
+            byte[] ss = tx.inputs[i].sigScript;
+            int n = ss.length;
+            bool looksLikeToken = false;
+            if (n >= token_suffix_len) { looksLikeToken = ss.slice(n - token_suffix_len, n) == token_suffix; }
+            if (looksLikeToken) {
+                TokenState tk = readInputStateWithTemplate(i, token_prefix_len, token_suffix_len, token_tmpl_hash);
+                if (tk.owner == OpInputCovenantId(this.activeInputIndex)) {
+                    total = total + tk.amount;
+                }
+            }
+        }
+        return total;
+    }
+    entry absorb6(int selfOutIdx, int shardInIdx, int tok_out, int shard_amount) {
+        require(closed == 0);
+        int owned_total = scanOwnedTokenInputs();
+        require(owned_total == consolidated_pool);
+        TokenState shardTk = readInputStateWithTemplate(shardInIdx, token_prefix_len, token_suffix_len, token_tmpl_hash);
+        require(shardTk.amount == shard_amount);
+        validateOutputStateWithTemplate(tok_out, TokenState {
+            amount:               consolidated_pool + shard_amount,
+            owner:                OpInputCovenantId(this.activeInputIndex),
+            owner_scheme:         0x04,
+            borrow_scheme:        0x00,
+            borrow_guard:         byte[32](0x0000000000000000000000000000000000000000000000000000000000000000),
+            extension_commitment: byte[32](0x0000000000000000000000000000000000000000000000000000000000000000)
+        }, token_prefix, token_suffix, token_tmpl_hash);
+        validateOutputState(selfOutIdx, State {
+            consolidated_pool: consolidated_pool + shard_amount,
+            closed: 0,
+            payoutRoot: payoutRoot,
+            w0: w0, w1: w1, w2: w2, w3: w3, w4: w4, w5: w5, w6: w6, w7: w7, w8: w8, w9: w9, w10: w10, w11: w11, w12: w12, w13: w13, w14: w14, w15: w15, w16: w16
+        });
+        require(tx.outputs[selfOutIdx].value >= 1000);
+    }
+}

@@ -1,0 +1,27 @@
+pragma silverscript ^0.1.0;
+contract AbsorbProbe9(byte[] token_prefix, int token_prefix_len, byte[] token_suffix, int token_suffix_len, byte[32] token_tmpl_hash,
+    int init_consolidated_pool, int init_closed, byte[32] init_payoutRoot
+) {
+    int consolidated_pool = init_consolidated_pool;
+    int closed = init_closed;
+    byte[32] payoutRoot = init_payoutRoot;
+    struct TokenState {
+        int      amount;
+        byte[32] owner;
+        byte     owner_scheme;
+        byte     borrow_scheme;
+        byte[32] borrow_guard;
+        byte[32] extension_commitment;
+    }
+    entry absorb9(int selfOutIdx, int shardInIdx, int shard_amount) {
+        require(closed == 0);
+        validateOutputState(selfOutIdx, State {
+            consolidated_pool: consolidated_pool + shard_amount,
+            closed: 0,
+            payoutRoot: payoutRoot
+        });
+        TokenState shardTk = readInputStateWithTemplate(shardInIdx, token_prefix_len, token_suffix_len, token_tmpl_hash);
+        require(shardTk.amount == shard_amount);
+        require(tx.outputs[selfOutIdx].value >= 1000);
+    }
+}

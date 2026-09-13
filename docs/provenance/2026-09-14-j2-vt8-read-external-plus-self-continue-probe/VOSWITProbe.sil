@@ -1,0 +1,22 @@
+pragma silverscript ^0.1.0;
+// isolation probe: validateOutputStateWithInputTemplate alone, no scan, no self-state continuation.
+contract VOSWITProbe(int token_prefix_len, int token_suffix_len, byte[32] token_tmpl_hash) {
+    struct TokenState {
+        int      amount;
+        byte[32] owner;
+        byte     owner_scheme;
+        byte     borrow_scheme;
+        byte[32] borrow_guard;
+        byte[32] extension_commitment;
+    }
+    entry check(int tok_in, int tok_out, int amount, byte[32] owner) {
+        validateOutputStateWithInputTemplate(tok_out, TokenState {
+            amount:               amount,
+            owner:                owner,
+            owner_scheme:         0x04,
+            borrow_scheme:        0x00,
+            borrow_guard:         byte[32](0x0000000000000000000000000000000000000000000000000000000000000000),
+            extension_commitment: byte[32](0x0000000000000000000000000000000000000000000000000000000000000000)
+        }, tok_in, token_prefix_len, token_suffix_len, token_tmpl_hash);
+    }
+}
