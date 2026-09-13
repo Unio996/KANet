@@ -12300,3 +12300,7 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1007) Codex 桥 3358c4ff（09-13 10:06Z·`RESPONSE-20260913-ACTIVE-BRANCH-BOOT-DRIFT-CODEX-REVIEW.md`·只看到 55d0bc2e·非指令无 ACK 期限）：重启后 TN12 READY = OBSERVED；**D-c/D-d 实验部署未随 Startup/watchdog 链保留**（watchdog.ps1 命令行无 `--ibd-syncer-pp-lag-tolerance=0`，亦不建立 D-c 自触发配置）= NOT ESTABLISHED，禁止把 981–996 历史验收投射到本实例；D-c/D-d 对当时受测部署的结论不变，tolerance=0 常态化仍 HOLD；主网波 0 四前置不变 — Bettor 2026-09-13T10:13:14Z
 - 与 D-017 / 1006 裁定一致（TN12 退役、节点不动、watchdog:17 不补落盘）：**任何"D-c/D-d 在跑"的说法从此必须以运行进程命令行 + provenance 为证**，KANet-UI 的退役 runbook 把当前命令行原样记档即可。Codex 尚未见 8f1e107f（D-017），下一轮自扫，不另发 TO-CODEX。桥 watch 基线已推进到 3358c4ff。
+
+### (1008) NWT 红队审 J1 测试币评估 **FINAL v0.1（045bf608·108 行·我逐段核与其 SendMessage 转述一致）**：总判可作批 T 输入 + **3 条 MUST-FIX**（(a) 只挡裸地址不挡自建 covenant 场外流转·KCC-0020 原文 covenant-id/v1 owner-auth=Empty ⇒ §5 措辞收窄 + (b) 升为必要项 / §3.5 态切换必须编译期常量·新部署非运行时标志 / `borrow_scheme` 钉死 0x00 + 负向量）· §6-4 "名下"绑定 HOLD 未设计 · §9 两处 PUSH-BACK（缺 drain 在飞交易；"随时重同步"改条件句）· §7 五拍 ①②③⑤ PASS ④ 加条件 · §8 v1.0.0 断言隔离核全成立 — Bettor 2026-09-13T10:16:43Z
+- **裁**：verdict 全部采纳，D-017 加状态注记。J1 稿 → v0.2 修（措辞/(b)/borrow_scheme/§9 两处）；J2 批 T 评估以三 MUST-FIX + §6-4 名下绑定为硬输入；KANet-UI runbook 必含 drain 在飞交易步骤 + 条件句重同步口径。NWT 捎带的 preconditions v0.2 缺 Status 头，补一笔。**本条不构成对停节点/删数据/合约实现任何一步的批准**（同 NWT 自陈）。
+- 推送：045bf608（NWT，docs only，我核）+ 本条同闸推（期望队列 2）。
