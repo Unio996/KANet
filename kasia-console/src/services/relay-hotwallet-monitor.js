@@ -36,8 +36,18 @@ const MAX_CONSECUTIVE_QUERY_FAILURES = 3;
 
 let timer = null;
 let running = false;
-const _failureCounts = new Map();   // relayNodeId → 连续查询失败次数
+const _failureCounts = new Map();   // relayNodeId → 连续查询失败次数（含余额查询失败 + 行/地址缺失）
 const _prevBalances = new Map();    // relayNodeId → 上次 tick 成功查到的余额（KAS）, 用于归因总额超线的账
+// 🔴 Codex 审 45594804 抓到的真缺口（Bettor 1154 核过）：resolveRpcUrl() 在 per-relay 的
+// try/catch 之外，RPC 解析持续失败时只走外层 tick catch 打一行 "tick fail" 日志就 return——
+// 不增任何 relay 的 failureCounts、不杀任何 relay，全局 RPC 中断下所有有资金 relay 的私钥
+// 无限期驻留，违反 v0.2 "连续3次查不到=fail-closed"这条对整个 tick 前置条件同样成立的原则
+// （不是只对"查到了但这一个relay余额取不到"成立，"根本拿不到任何relay的可信余额集"这个更上游
+// 的失败一样要 fail-closed，而且更严重——影响的是全部relay不是一个）。用一个独立的全局连续
+// 失败计数覆盖：rpcUrl 解析失败(抛错或返回空)、relay_nodes 行查询本身抛错，这两类"根本拿不到
+// 可信余额集"的前置失败，跟"查到了集合但某一个relay查不到余额"的per-relay失败計数分开算，
+// 各自独立达到阈值各自触发处置（不混在一起，一个全局失败不该稀释/污染某个relay自己的历史）。
+const _globalPrecheckFailureCount = { value: 0 };
 
 // 同 relay-manager.js:_queryBalanceKas 逐字同款实现（getSharedRpc + getBalancesByAddresses,
 // 已验证过能工作的那段逻辑）——本文件是独立模块，不从 relay-manager.js 里 import 这个内部
@@ -90,6 +100,7 @@ function _defaultGetRelayRows(ids) {
  * - `kill(relayNodeId, name, reason, detail)` 覆盖真正的 stopRelay+events 写入（默认）
  * - `failureCounts`/`prevBalances` 覆盖模块级状态 Map（默认用模块级单例——测试传入独立的新
  *   `Map()` 隔离状态，不污染真实监控的连续失败计数/上次余额记忆）
+ * - `globalPrecheckFailureCount` 覆盖模块级 `{value}` 计数容器（同上, 测试传入独立对象隔离）
  * - `perRelayMaxCap`/`totalMaxCap` 覆盖两个上限 env（默认读 process.env）
  */
 export async function relayHotwalletMonitorTick(deps = {}) {
@@ -101,6 +112,7 @@ export async function relayHotwalletMonitorTick(deps = {}) {
     kill = _defaultKill,
     failureCounts = _failureCounts,
     prevBalances = _prevBalances,
+    globalPrecheckFailureCount = _globalPrecheckFailureCount,
     perRelayMaxCap = Number(process.env.RELAY_HOTWALLET_PER_RELAY_MAX_KAS),
     totalMaxCap = Number(process.env.RELAY_HOTWALLET_TOTAL_MAX_KAS),
   } = deps;
@@ -119,15 +131,53 @@ export async function relayHotwalletMonitorTick(deps = {}) {
     return result;
   }
 
+  // 全局前置失败处置：resolveRpcUrl()/getRelayRows() 任一失败都意味着"这一 tick 根本拿不到任何
+  // relay 的可信余额集"——不是某一个relay的问题，是整个 tick 没法判断任何东西。连续 3 次（同一
+  // 阈值，NWT v0.2 §1 第4条原话"连续3次"是唯一权威量级）后 fail-closed：杀掉当前所有正在跑的
+  // relay（此刻唯一能确定的安全动作——不知道谁超限, 但知道"不知道"本身就该当超限处理）。
+  async function _globalPrecheckFail(runningRelays, reason, err) {
+    globalPrecheckFailureCount.value += 1;
+    console.warn(`[relay-hotwallet-monitor] global precheck failed (${globalPrecheckFailureCount.value}/${MAX_CONSECUTIVE_QUERY_FAILURES}) reason=${reason}: ${err?.message || err}`);
+    if (globalPrecheckFailureCount.value >= MAX_CONSECUTIVE_QUERY_FAILURES) {
+      console.error(`[relay-hotwallet-monitor] global precheck persistently failed (${reason}) — fail-closed killing all ${runningRelays.length} running relay(s), 无法确认任何一个的余额是否安全`);
+      for (const r of runningRelays) {
+        await killAndCleanup(r.relayNodeId, r.name, `global_precheck_persistently_failed_fail_closed_${reason}`,
+          { consecutiveGlobalFailures: globalPrecheckFailureCount.value });
+      }
+      globalPrecheckFailureCount.value = 0; // 杀完清零——杀光后下次要么无relay在跑直接短路, 要么是全新一轮
+      return { ok: false, reason: `global_precheck_failed_all_killed_${reason}`, checked: runningRelays.length, killed: runningRelays.length };
+    }
+    return { ok: false, reason: `global_precheck_failed_${reason}`, consecutiveGlobalFailures: globalPrecheckFailureCount.value, checked: 0, killed: 0 };
+  }
+
   try {
     const runningRelays = listRunning(); // [{relayNodeId, name, pid, ...}] — 当前"真的活着"的那些
     if (runningRelays.length === 0) {
       return { ok: true, checked: 0, killed: 0 };
     }
 
-    const rpcUrl = await resolveRpcUrl();
+    // 🔴 两个前置步骤(rpcUrl 解析 / relay_nodes 行查询)共用同一个全局计数——只有【两步都成功】
+    // 才清零，不能在某一步成功后就立即清零：如果只有其中一步持续失败、另一步每次都成功，"每步
+    // 独立清零"会让每次成功的那一步把失败的那一步刚攒的计数抹掉，永远到不了阈值(本条是实测撞出
+    // 来的：写完第一版负向量测试时 getRelayRows 持续抛错但 rpcUrl 总是先成功一步就把计数清零了,
+    // 3 次调用后计数还停在 1，暴露了这个 bug，不是凭空想到要写这条注释)。
+    let rpcUrl;
+    try {
+      rpcUrl = await resolveRpcUrl();
+      if (!rpcUrl) throw new Error('resolveRpcUrl returned empty url');
+    } catch (e) {
+      return await _globalPrecheckFail(runningRelays, 'rpc_url_unavailable', e);
+    }
+
     const ids = runningRelays.map((r) => r.relayNodeId);
-    const rows = getRelayRows(ids);
+    let rows;
+    try {
+      rows = getRelayRows(ids);
+    } catch (e) {
+      return await _globalPrecheckFail(runningRelays, 'relay_rows_query_threw', e);
+    }
+    globalPrecheckFailureCount.value = 0; // 两步都成功——现在才清零
+
     const byId = new Map(rows.map((r) => [r.id, r]));
 
     const killedThisTick = new Set();
@@ -136,7 +186,21 @@ export async function relayHotwalletMonitorTick(deps = {}) {
     // 1) 逐个查余额；per-relay 上限超线立即处置；查询失败计连续失败数，达阈值 fail-closed 处置。
     for (const r of runningRelays) {
       const row = byId.get(r.relayNodeId);
-      if (!row?.address) continue; // 行本身没地址, 理论上不该出现在 _relays 里, 跳过不是本 tick 的判断范围
+      if (!row?.address) {
+        // 🔴 Bettor 1154 ②: 这不是"正常情况，跳过就好"——一个正在跑的 relay 理论上不可能没有
+        // address（startRelay() 的 no_address 检查本该在它启动前就挡住这种情况），出现这个状态
+        // 本身是数据不变量被破坏，必须 LOUD 报出来，且不能无限期静默 skip：计入该 relay 自己的
+        // 连续失败计数，跟余额查询失败走同一条 fail-closed 路径，达阈值一样被杀。
+        const failCount = (failureCounts.get(r.relayNodeId) || 0) + 1;
+        failureCounts.set(r.relayNodeId, failCount);
+        console.error(`[relay-hotwallet-monitor] 🔴 不变量违规: 正在跑的 relay "${r.name}"（${r.relayNodeId}）在 relay_nodes 里查不到行或没有 address（${failCount}/${MAX_CONSECUTIVE_QUERY_FAILURES}）——理论上不该发生, startRelay() 的 no_address 检查本该挡住。`);
+        if (failCount >= MAX_CONSECUTIVE_QUERY_FAILURES) {
+          await killAndCleanup(r.relayNodeId, r.name, 'relay_row_or_address_missing_invariant_violation_fail_closed',
+            { consecutiveFailures: failCount });
+          killedThisTick.add(r.relayNodeId);
+        }
+        continue;
+      }
       let balance;
       try {
         balance = await queryBalanceKas(row.address, row.network, rpcUrl);
