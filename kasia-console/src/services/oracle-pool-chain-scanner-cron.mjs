@@ -28,8 +28,9 @@ export async function oraclePoolScannerTick() {
   if (running) return { skipped: true };
   running = true;
   try {
-    const { getWorkingRpc } = await import('./rpc-health.js');
+    const { getWorkingRpc, requireRpcUrl } = await import('./rpc-health.js');
     const { url: rpcUrl } = await getWorkingRpc();
+    if (!requireRpcUrl(rpcUrl, 'oracle-pool-scanner.tick')) return { skipped: true, reason: 'no-rpc' };   // C13
     const networkId = process.env.KASPA_NETWORK || 'testnet-12';
 
     const currentDaa = await _getCurrentDaa(rpcUrl, networkId);

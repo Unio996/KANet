@@ -35,6 +35,68 @@ let _notLocalReason = '';     // 离开本机时的原因(SHOULD-3: BACK-TO-LOCA
 let _lastLocalReason = '';    // checkLocal 最近一次失败原因
 let _lastAllFailedAt = 0;
 let _localOnlyLogged = false;
+// ── strict local-only（2026-09-13 设计 docs/2026-09-13-j2-local-only-strict-rpc-design-v0.1.md v0.2 · NWT 7149e3a5 PASS · Bettor 派 patch）──
+//   KASPA_RPC_LOCAL_ONLY=1 之前只关 Resolver 发现(discoverNode), 本机失败后仍无条件走 DB 配置端点(checkConfigured) ⇒ 语义是"disable discovery"不是"只信本机"
+//   (Codex 9fff92b0 #2 HOLD)。strict 契约 S1: 唯一可信 RPC = env KASPA_RPC_URL; 本机不行 ⇒ {url:null}, 不调 checkConfigured/discoverNode。
+//   S5: relay/scout/escrow 三处 DB 直读并入同一信任域(resolveChildRpcUrl)。回滚 = env 改 0(non-strict 路径一字未改)。
+let _strictLogged = false;
+const _childIgnoredLogged = new Set();   // resolveChildRpcUrl: 每 caller 只打一次"DB rpc_url ignored"
+const _noRpcSiteNoteAt = new Map();      // requireRpcUrl: 每站 10 min 一行
+
+export function isStrictLocalOnly() { return LOCAL_ONLY; }
+
+/**
+ * 子进程/直读调用方(relay-manager / scanner / escrow)拿 RPC URL 的唯一入口(S5)。
+ * strict ⇒ 恒 env KASPA_RPC_URL(DB rpc_url 被忽略, 每 caller 打一次); non-strict ⇒ 原顺序 DB rpc_url || env。
+ * @param {string} caller  日志用站名
+ * @returns {Promise<string>}  '' 表示没有可用值(strict 下调用方必须拒起子进程, 不得把 '' 递下去——那会触发 relay 侧 console-config/Resolver 链)
+ */
+export async function resolveChildRpcUrl(caller = 'unknown') {
+  if (LOCAL_ONLY) {
+    const dbUrl = await getConfig('rpc_url');
+    if (dbUrl && dbUrl !== LOCAL_RPC && !_childIgnoredLogged.has(caller)) {
+      _childIgnoredLogged.add(caller);
+      console.log(`[rpc-health] strict local-only: DB rpc_url ignored for ${caller}`);
+    }
+    return LOCAL_RPC;
+  }
+  return (await getConfig('rpc_url')) || process.env.KASPA_RPC_URL || '';
+}
+
+/**
+ * C13 (NWT N9 实测: new RpcClient({url:null}).connect() ⇒ wasm RuntimeError: unreachable, try/catch 包不住):
+ * 每个拿 getWorkingRpc() 结果去构造客户端的站点, 构造前必过此闸。true = 可用; false = 已打一行(10 min/站限频), 调用方走各自降级。
+ */
+export function requireRpcUrl(rpcUrl, site = 'unknown') {
+  if (rpcUrl) return true;
+  const now = Date.now();
+  const last = _noRpcSiteNoteAt.get(site) || 0;
+  if (now - last >= ALL_FAILED_NOTE_MS) {
+    _noRpcSiteNoteAt.set(site, now);
+    console.warn(`[${site}] skip: no rpc url (${LOCAL_ONLY ? 'strict local-only' : 'no candidate'}; next note in 10 min)`);
+  }
+  return false;
+}
+
+function _noteAllFailed(strict) {
+  const _nowMs = Date.now();
+  if (_nowMs - _lastAllFailedAt < ALL_FAILED_NOTE_MS) return;
+  _lastAllFailedAt = _nowMs;
+  // canonical 短语 `no RPC node available` 不变(H5 用例与监控按它 grep); strict 下 summary 如实写"configured/discovery 未尝试"
+  console.warn(strict
+    ? '[rpc-health] no RPC node available (local data check failed or not synced; strict local-only: configured/discovery not attempted) — next note in 10 min'
+    : '[rpc-health] no RPC node available (local data check failed or not synced; configured/discovery none) — next note in 10 min');
+  try {
+    sqlite.prepare(`
+      INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at)
+      VALUES (?, 'system', 'rpc_health_check_failed', 'rpc-health', 'warn', ?, '{}', datetime('now'))
+    `).run(randomUUID(), strict
+      ? '本机不可用 (strict local-only: configured/discovery 未尝试; 10 min 限频)'
+      : 'getWorkingRpc() 全部候选(local/configured/discover)均不可用(G-2 后含本机未同步; 10 min 限频)');
+  } catch (e) {
+    console.warn(`[rpc-health] event write failed (non-fatal): ${e.message}`);
+  }
+}
 
 /**
  * TCP ping — 检测主机:端口是否可达
@@ -214,6 +276,16 @@ export async function getWorkingRpc() {
   if (Date.now() >= _localNegUntil) _localNegUntil = Date.now() + LOCAL_NEG_CACHE_MS;
   if (!_notLocalSince) { _notLocalSince = Date.now(); _notLocalReason = _lastLocalReason || 'unknown'; }
 
+  // S1 strict 早退: 本机不行 ⇒ null。不调 checkConfigured()/discoverNode()。
+  //   S2: canonical 行 `discovery disabled (KASPA_RPC_LOCAL_ONLY=1)` 逐字保留(原在 discoverNode 里, strict 后永远到不了那里)。
+  if (LOCAL_ONLY) {
+    if (!_localOnlyLogged) { _localOnlyLogged = true; console.log('[rpc-health] discovery disabled (KASPA_RPC_LOCAL_ONLY=1): no public fallback, fail-closed'); }
+    if (!_strictLogged) { _strictLogged = true; console.log('[rpc-health] strict local-only (KASPA_RPC_LOCAL_ONLY=1): configured fallback skipped'); }
+    _cache = { url: null, isLocal: false, ts: 0 };
+    _noteAllFailed(true);
+    return { url: null, isLocal: false };
+  }
+
   // 2. 配置的 URL
   const configured = await checkConfigured();
   if (configured) {
@@ -241,19 +313,7 @@ export async function getWorkingRpc() {
   // coherence-observability-monitor 判断分层的既有约定, 这里出错也不能影响调用方拿到的返回值)。
   // G-2: "本机未同步"在 D-c 下是每 ≈9 min 一次、每次 ≈4 min 的常态(不再是罕见的全不可达), 15 个调用方每 tick 都会落到这里 ⇒
   //   warn 行与 events 行都限频 10 min 一次(events 表刚在 P2-6 治过 LIKE 全扫, 不能再灌)。
-  const _nowMs = Date.now();
-  if (_nowMs - _lastAllFailedAt >= ALL_FAILED_NOTE_MS) {
-    _lastAllFailedAt = _nowMs;
-    console.warn('[rpc-health] no RPC node available (local data check failed or not synced; configured/discovery none) — next note in 10 min');
-    try {
-      sqlite.prepare(`
-        INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at)
-        VALUES (?, 'system', 'rpc_health_check_failed', 'rpc-health', 'warn', 'getWorkingRpc() 全部候选(local/configured/discover)均不可用(G-2 后含本机未同步; 10 min 限频)', '{}', datetime('now'))
-      `).run(randomUUID());
-    } catch (e) {
-      console.warn(`[rpc-health] event write failed (non-fatal): ${e.message}`);
-    }
-  }
+  _noteAllFailed(false);
   return { url: null, isLocal: false };
 }
 

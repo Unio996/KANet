@@ -12,7 +12,19 @@
  * @param {string} consoleUrl — Console base URL (e.g. http://localhost:3100)
  * @returns {string|null} — WebSocket URL or null
  */
+/**
+ * strict local-only (KASPA_RPC_LOCAL_ONLY=1, 2026-09-13 设计 docs/2026-09-13-j2-local-only-strict-rpc-design-v0.1.md v0.2 S6/C7/C8):
+ * relay/scout 子进程只信 env KASPA_RPC_URL; 未设 ⇒ throw(启动即暴露, 与 kasia-console rpc-health.js:19 同形), 不拉 console 配置、不进 Resolver。
+ */
+export function isStrictLocalOnly(env = process.env) { return env.KASPA_RPC_LOCAL_ONLY === '1'; }
+export function assertStrictRpcEnv(env = process.env) {
+  if (isStrictLocalOnly(env) && !env.KASPA_RPC_URL) {
+    throw new Error('KASPA_RPC_URL not set under KASPA_RPC_LOCAL_ONLY=1 (strict local-only: no console-config / Resolver fallback)');
+  }
+}
+
 export async function resolveRpcUrl(consoleUrl) {
+  if (isStrictLocalOnly()) { assertStrictRpcEnv(); return process.env.KASPA_RPC_URL; }
   if (process.env.KASPA_RPC_URL) return process.env.KASPA_RPC_URL;
   if (consoleUrl) {
     try {

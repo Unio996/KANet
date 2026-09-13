@@ -1116,8 +1116,9 @@ export async function registerPoolRoutes(fastify) {
         // DoD #17 (Bettor r447 钦点 chain-derived 池活化): fetch currentDaa → snapshotDaa=
         // currentDaa-FINALITY_N → ensure scanAndDerivePool 缓存 → derivePoolMerkleRoot(snapshotDaa)
         // 走 chain_view 单一读源, 切掉 legacy null 路 (= 跨节点确定 ctor root==derive(snapshotDaa)).
-        const { getWorkingRpc } = await import('../services/rpc-health.js');
+        const { getWorkingRpc, requireRpcUrl } = await import('../services/rpc-health.js');
         const { url: rpcUrl } = await getWorkingRpc();
+        if (!requireRpcUrl(rpcUrl, 'pool.publish.auto-root')) return reply.code(503).send({ ok: false, error: 'no working Kaspa RPC node — retry shortly' });   // C13
         const { RpcClient, Encoding } = await import('kaspa-wasm');
         const network = process.env.KASPA_NETWORK || 'testnet-12';
         const FINALITY_N = parseInt(process.env.ORACLE_POOL_FINALITY_N, 10) || 600;
