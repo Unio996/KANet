@@ -167,5 +167,22 @@ tests.push({
   },
 });
 
+// V-CLAIM-8 (NWT 1155/1158 系统性扫查 MUST-FIX): to_market_input=false 路径(ii)下, dest_idx 指向一个"裸"
+// 输出(未声明 covenant_id) -- OpOutputCovenantId 对此回退 ZERO_HASH(rusty-kaspa opcodes/mod.rs
+// unwrap_or(ZERO_HASH))。这条路径此前没有独立验证(不像路径(i)有 market_suffix_hash 尾匹配), 必须靠新加的
+// require(target_owner != ZERO32) 单独挡下 -- 结构性拒绝, 不是巧合的后续检查失败。
+tests.push({
+  name: 'V-CLAIM-8_fail_bare_output_destination_zero_owner_rejected',
+  function: 'spend',
+  constructor_args: ctorArgs(),
+  args: [PLACEHOLDER_SIG, 1, 1, false, 0, hex(tokOwnedByClaim.prefix), hex(tokOwnedByClaim.suffix), hex(DEST_MARKET_SUFFIX)],
+  expect: 'fail',
+  tx: {
+    active_input_index: 0,
+    inputs: [selfInput(), tokenInput(tokOwnedByClaim)],
+    outputs: [{ value: 1 }, { value: 1 }],
+  },
+});
+
 fs.writeFileSync('scratch/_t1v06_check/KanetTokenClaim.test.json', JSON.stringify({ tests }, null, 1));
 console.log('wrote', tests.length, 'KanetTokenClaim vectors');

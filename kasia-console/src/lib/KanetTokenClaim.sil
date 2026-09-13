@@ -83,6 +83,11 @@ contract KanetTokenClaim(
             target_owner = OpInputCovenantId(dest_idx);
         } else {
             target_owner = OpOutputCovenantId(dest_idx);
+            // ★ ZERO32 目的地守卫(NWT 1158 系统性扫查·唯一缺口): OpOutputCovenantId 对未声明 covenant_id 的
+            //   "裸"输出回退 ZERO_HASH(rusty-kaspa opcodes/mod.rs unwrap_or(ZERO_HASH))。这条路径(ii)没有像
+            //   路径(i)那样的独立验证(market_suffix_hash 尾匹配), 若不挡, dest_idx 随手指一个裸输出就能把
+            //   target_owner 写成全零——后果不是"转移失败", 而是代币变成任何在场检查对全零恒真的攻击者都能花。
+            require(target_owner != byte[32](0x0000000000000000000000000000000000000000000000000000000000000000));
         }
 
         validateOutputStateWithInputTemplate(tok_out_idx, TokenState {

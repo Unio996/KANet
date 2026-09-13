@@ -65,7 +65,32 @@ D-017 代币只许 covenant 持有——`spend` 提供**两条**合法目的地�
 消失**（没有续约），旧的支配关系（"这份钱归属这个 claim, 只有 winner_pk 能通过它动用"）被新的支配关系
 （"这份钱归属新 owner, 未来由新 owner 的花费规则决定"）**替代**——这正是真实转移的语义，不是记账幻觉。
 
-## 向量（`run.log`，7/7 PASS，均用 flip-expect 复核真实失败行）
+## 〇、NWT 1155/1158 MUST-FIX 修订（ZERO32 目的地守卫）
+
+**发现（NWT 红队复核 22bf679a ③(ii)）**：`OpInputCovenantId`/`OpOutputCovenantId` 对未声明 `covenant_id`
+的输入/输出回退 `ZERO_HASH`（rusty-kaspa `opcodes/mod.rs unwrap_or(ZERO_HASH)`，本文件用最小探针
+`scratch/_t1v06_check/ZeroHashProbe.sil` 在**这个调试器自己的模型**里直接实证复现，不只是信引用）。
+路径 (i)（转回市场）已有独立验证（`market_suffix_hash` 尾匹配）挡住假壳，但路径 (ii)（转手新输出，
+`target_owner = OpOutputCovenantId(dest_idx)`）此前**没有**任何独立验证——`dest_idx` 随手指一个没声明
+`covenant_id` 的裸输出，就能把 `target_owner` 写成全零，后果不是"转移失败"，而是代币变成任何在场检查对
+全零恒真的攻击者都能花（NWT 1158 系统性扫查结论：这是全仓库唯一缺口，`T1 v0.6`/`PayoutShard.absorb` 引用的
+都是 `this.activeInputIndex`，恒安全，不用改）。
+
+**修**：`spend` 的 `else` 分支（`to_market_input=false`）里，`target_owner = OpOutputCovenantId(dest_idx);`
+后立即加 `require(target_owner != byte[32](0x00...00));`（`KanetTokenClaim.sil` 行 86-90）。
+
+**负向量 `V-CLAIM-8`**：`dest_idx` 指向一个裸输出（`{ value: 1 }`，未声明 `covenant_id`）——用交互式
+调试器逐语句步进（8 步，见下）确认 `error: script ran, but verification failed` 的 caret 精确指在这条新加
+的 `require` 表达式上，不是巧合地落在别的检查（例如后面的 `validateOutputStateWithInputTemplate`）：
+
+```
+→   85 |             target_owner = OpOutputCovenantId(dest_idx);
+→   90 |             require(target_owner != byte[32](0x0000...0000));
+(sdb) error: script ran, but verification failed
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ verification failed here
+```
+
+## 向量（`run.log`，8/8 PASS，均用 flip-expect / 交互步进复核真实失败行）
 
 | 向量 | 验证点 | 真实失败行 |
 |---|---|---|
@@ -76,6 +101,7 @@ D-017 代币只许 covenant 持有——`spend` 提供**两条**合法目的地�
 | `V-CLAIM-5` | 被消费的代币不属于本 claim（偷一个恰好同笔在场的陌生代币） | `tk.owner == OpInputCovenantId(this.activeInputIndex)` |
 | `V-CLAIM-6`（**Bettor 明确要求的"假壳 covenant 被拒"负向量**） | `dest_idx` 是攻击者控制、`sigScript` 尾部对不上真市场后缀的 covenant | `destSig.slice(...)==market_suffix_witness` |
 | `V-CLAIM-7` | 输出代币金额被篡改（99≠100） | `validateOutputStateWithInputTemplate` |
+| `V-CLAIM-8`（**NWT 1155/1158 MUST-FIX 负向量**） | 路径(ii) `dest_idx` 指向裸输出，`target_owner` 被算成 ZERO32 | 新加 `require(target_owner != ZERO32)`（交互步进逐行确认，见上） |
 
 ## 本文件不受 V-T-8 影响
 

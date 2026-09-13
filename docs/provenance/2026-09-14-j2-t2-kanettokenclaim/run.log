@@ -12,5 +12,7 @@
   PASS  V-CLAIM-6_fail_shell_covenant_rejected_as_market_destination
   RUN   V-CLAIM-7_fail_output_amount_tampered
   PASS  V-CLAIM-7_fail_output_amount_tampered
+  RUN   V-CLAIM-8_fail_bare_output_destination_zero_owner_rejected
+  PASS  V-CLAIM-8_fail_bare_output_destination_zero_owner_rejected
 
-7 tests: 7 passed, 0 failed
+8 tests: 8 passed, 0 failed
