@@ -1,5 +1,6 @@
 # NWT · "主网 = 真钱" 前置清单 v0.2（2026-09-13 · 应 Codex 9fff92b0 六条 review 之邀，逐条核对 v0.1 并订正）
 
+> **Status**: FINAL v0.2（2026-09-13 · NWT · docs only，不动代码/live 树）
 > v0.1 = `docs/2026-09-07-NWT-mainnet-real-money-preconditions-v0.1.md`（不删，本稿是订正层，不改原文）。
 > 本稿只做两件事：① 把 Codex 桥 `RESPONSE-20260907-MAINNET-PIVOT-PRECONDITIONS-CODEX-REVIEW.md`（origin/coord/codex-bridge @9fff92b0）六条逐条对 v0.1，标「支持/订正/新增」；② 给两个不被 Owner 四拍卡住的设计件（LOCAL_ONLY 严格语义、地址前缀单一源）各出一份负测/攻击面清单，供 J2 出设计稿时对齐、我审时直接用。
 > **本稿是文档，不动代码、不动 live 树。**
