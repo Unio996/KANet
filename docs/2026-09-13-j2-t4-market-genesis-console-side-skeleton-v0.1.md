@@ -1,6 +1,6 @@
-# T4 · 市场创世（console 侧）设计骨架 v0.1（不写码）
+# T4 · 市场创世（console 侧）设计骨架 v0.2（不写码）
 
-> **Status**: DRAFT-FOR-REVIEW **v0.1**（2026-09-13 · J2 · Bettor 派工「console 侧市场创世：状态初值由单源产物生成 + 创世前全部状态字段逐字节对照（范围已拍 = 全部字段）+ P2SH 重算 + `market_genesis` 走 submit_intents + landed 硬门；与 (c) 的 `escrow_landed_at` 消费门衔接（T4 下注入口按 `escrow_landed_at` 非空才匹配）；填错自毁的检测与告警；写清哪些是 (c) 已有机制复用、哪些新增」· 输入：T2 骨架 §4（`docs/2026-09-13-j2-t2-market-and-claim-covenant-a2-skeleton-v0.1.md`，T4 对照检查骨架初稿）· T3 v0.2 §1（22 常量去向，Q8 裁 `poolMerkleRoot/committee_hash` 搬状态 T4 对照升 MUST）· (c) patch（`coord/j2-c-no-tx-landed`，`lib/submit-intent.mjs` / `services/escrow-landed-gate.mjs`，已合入待 Owner 批）· 既有机制：`lib/pool-shard-register.mjs` `ensurePayoutShard`（genesis-mint 流程模板）+ `lib/bshard-payout-family-coherence.mjs` `assertPayoutShardCoherence`（K-18 §3.4，recompile + 逐字节比对 + 三态分类，本稿的对照检查**直接复用/推广**这一个既有函数，不重新发明）· 交 NWT → Bettor → 🔴 市场创世 = 钱路 ⇒ Owner 批（D-017 §3）后才落码。
+> **Status**: DRAFT-FOR-REVIEW **v0.2**（2026-09-13 · NWT 审 T4 骨架方向 **PASS**（1325e70b）+ 三处显式写要求 + 三问裁定，本版逐条落：**① §2.1 增一节明确区分"状态字段走 cheap-tier 字段表"与"ctor 常量（7 个留 ctor 的模板 hash，含 `gateTmplHash`）走 `assertPayoutShardCoherence` 步骤 (c) 全字节重编译比对 + 新增步骤 (d) P2SH 核对，不进字段表"**（§2.1.1）；**② 批次顺序更新为"已满足"**——(c) 已随 `coord/mainline-abc-merge` 合入主线（`91b2ac6c`），`submit-intent.mjs`/`escrow-landed-gate.mjs`/`tx-landed-reconciler.mjs` 不再"只在侧分支"，T4 落码的硬前提已达成（§3 头部更新）；**③ §5.2 创世后 non-blocking 的理由改写为 T4 自己的**：免费代币模型下，创世状态漂移的后果 = 该市场**自毁**（收不到/派不出代币），不是**被盗**（没有第三方能拿走已在链上的价值），"复用既有调用点"只是**实现手段**不是**不阻塞的理由**，两者分开写。**三问裁定**：Q1（`cmdType`/`cmdBuilder` 泛化）**批准，走独立小 diff NWT 审**（不与 T4 docs 混在一起）；Q2（7 解码器）**批准折中方案，且 `poolMerkleRoot`/`committee_hash` 进 cheap tier 第一批**（先做这两个，其余 5 个分期）；Q3（`market_landed_at` 落表位置）**批准延后决定**（等 T3/T5 定表名）。原 v0.1 各节保留，改动处标注 · 输入：T2 骨架 §4（`docs/2026-09-13-j2-t2-market-and-claim-covenant-a2-skeleton-v0.1.md`，T4 对照检查骨架初稿）· T3 v0.2 §1（22 常量去向，Q8 裁 `poolMerkleRoot`/`committee_hash` 搬状态 T4 对照升 MUST，7 个模板 hash 留 ctor）· (c)（已合入主线 `91b2ac6c`，`lib/submit-intent.mjs` / `services/escrow-landed-gate.mjs` / `services/tx-landed-reconciler.mjs`）· 既有机制：`lib/pool-shard-register.mjs` `ensurePayoutShard`（genesis-mint 流程模板）+ `lib/bshard-payout-family-coherence.mjs` `assertPayoutShardCoherence`（K-18 §3.4，recompile + 逐字节比对 + 三态分类，本稿的对照检查**直接复用/推广**这一个既有函数，不重新发明）· 交 NWT → Bettor → 🔴 市场创世 = 钱路 ⇒ Owner 批（D-017 §3）后才落码。
 
 ## 0. 一句话
 
@@ -28,12 +28,20 @@
 | `market_id`（若不删，见 T3 §1 待选） | — | — | T3 §1 倾向删；若删，此行不适用 |
 | `shard_pool_id`/`payout_cov_id`/`deadline`/`seal_count`/`min_bet`/`betsRootBaked`/`refundRootBaked`/`attestedAtMs` | 各自文件 | 新增位点（每个合约需要一个 `decode*State` 解码器——**新增工作量**：7 文件 × 1 个解码器，形照抄 `decodeV1State`，`bshard-payout-family-coherence.mjs` 现在只有 V1/V2 两种，T4 要给主网集 7 文件各配一个） |
 
-**结论**：对照函数**不是**从零写，是把 `bshard-payout-family-coherence.mjs` 的解码器族从 2 个（V1/V2）扩到 **7 个**（每个主网集文件一个），每个解码器把该文件全部状态字段的偏移表出来；`assertPayoutShardCoherence` 本身的三段判据逻辑（a family 声明 / b cheap 结构签名 / c full recompile）**原样复用**，只是判据 (b) 循环的字段列表变长。
+**结论**：对照函数**不是**从零写，是把 `bshard-payout-family-coherence.mjs` 的解码器族从 2 个（V1/V2）扩到 **7 个**（每个主网集文件一个），每个解码器把该文件全部状态字段的偏移表出来；`assertPayoutShardCoherence` 本身的三段判据逻辑（a family 声明 / b cheap 结构签名 / c full recompile）**原样复用**，只是判据 (b) 循环的字段列表变长。**v0.2 裁定（NWT 三问②）**：7 个解码器**批准**（不放弃 cheap tier 改全 full），但**优先级排序** = `poolMerkleRoot`/`committee_hash` 进**第一批**（PayoutShard/PayoutShardV2/RootClose 三文件先配解码器），其余 5 个字段（`shard_pool_id`/`payout_cov_id`/`deadline`/`seal_count`/`min_bet`/`betsRootBaked`/`refundRootBaked`/`attestedAtMs` 分布在 ShardLeaf/ShardLeaf_direct/RootClaim/CloseZkV2 四文件）分期做——理由：`poolMerkleRoot`/`committee_hash` 是委员/oracle 身份锚，填错的攻击面（伪造委员背书）比 `deadline`/`seal_count` 这类参数性字段更值钱，优先覆盖。
+
+### 2.1.1 ctor 常量的覆盖路径（v0.2 · NWT 显式写要求 ①）
+**T3 v0.2 §1 裁定的 7 个模板 hash 留在 ctor**（`ps_tmpl_hash`×3、`rootclose_tmpl_hash`、`closeZkTmplAnchor`、`claim_tmpl_hash`、`refundclaim_tmpl_hash`、`gateTmplHash`）**不进 §2.1 的状态字段表**——它们不是状态，`state_span` 之外，`probeStructuralSignature` 的"解码状态区 + 位点比对"这条路径够不着它们（ctor 值只在编译时进 `template_hash`，不在运行期 UTXO 状态字节里）。这 7 个的覆盖路径是**另外两步**，与 §2.1 的字段表并列、不重叠：
+- **步骤 (c)**（`assertPayoutShardCoherence` 已有，`tier='full'` 才跑）：**全字节重编译比对**——用单源产物（`compileSil` + pinned ctor 值）重新编译一次该合约，把重编译产物的完整 `bytecode` 与链上/DB 记录的 redeem 字节逐字节比对。这一步天然覆盖全部 ctor 常量（包括 7 个模板 hash）——**不是因为专门检查了它们，是因为重编译的字节里天然含它们**，检查粒度是"整个字节串"不是"逐字段"。
+- **步骤 (d)**（**新增**）：**P2SH 核对**——§2.2 已有的"广播前用 `p2sh(redeem)` 重算期望地址、与即将广播的 tx 输出 `scriptPublicKey` 比对"这一步，其正确性同样依赖 ctor 常量没填错（P2SH 是整段 redeem 字节的哈希，ctor 常量是 redeem 字节的一部分）——**(d) 是 (c) 的独立交叉验证，不是 (c) 的重复**：(c) 比对的是"重编译产物 vs DB 记录的字节"，(d) 比对的是"DB 记录的字节重算出的地址 vs 即将上链的 tx 输出地址"，两者分别堵"DB 记录本身被污染"与"tx 构造时又引入新偏差"两个不同的失败模式。
+- **`gateTmplHash` 尤其只能靠 (c)+(d)**：它是 ZK 电路锚（`closeZkTmplAnchor`/`gateTmplHash` 这类），语义上"改 guest image = 新 covenant"，本来就该靠"整个字节串换了 = 重编译比对不过"来发现，逐字段位点比对反而没有意义（它不是一个可以"填错单个字段"的值，是一整块 4 段模板切分拼出来的锚，见 T3 v0.2 §1 表格出处 `PayoutShardV2.sil:378`）。
 
 ### 2.2 P2SH 重算
 `ensurePayoutShard` 里 `psAddr = p2sh(redeem)` 已经是这个动作（`pool-bshard-artifacts.mjs` 的 `p2sh` helper，等价于 P12/P13 探针用的 `aa20‖blake2b(prefix‖state‖suffix)‖87`）。T4 **复用同一 `p2sh` helper**，创世前算一次期望地址，与即将广播的 tx 输出 `scriptPublicKey` 比对；不等 ⇒ 不广播（NO TX）。**不新增算法**，只新增"广播前比对"这一步（现状 `ensurePayoutShard` 是广播后才用 `psAddr` 记账，没有广播前比对——这是 T4 相对现状的真实新增，不是复用）。
 
 ## 3. `market_genesis` intent（复用 (c) submit-intent 框架，新增一个 kind）
+
+**v0.2 · 前提已满足（NWT 显式写要求 ②）**：本节全部"复用 (c)"的表述，v0.1 写作时 (c) 还只是待 Owner 批的侧分支 `coord/j2-c-no-tx-landed`；**现已随 `coord/mainline-abc-merge` 合入主线（`91b2ac6c`）**，`lib/submit-intent.mjs`/`services/escrow-landed-gate.mjs`/`services/tx-landed-reconciler.mjs` 三个文件不再"只在侧分支"存在——**T4 落码的硬前提已经达成**，§3.1/§3.2/§3.3/§4 下面引用的函数签名与位点全部按主线当前状态核对过（未随 T4 稿的编写重新变动）。
 
 ### 3.1 复用（(c) 已有，零改动）
 - `lib/submit-intent.mjs` 的 `ensureIntent`/`recordIntentPhase`/`markIntent`/`checkIntentLanded`/`resumeStaleIntents`/`alertIntent`——**全部函数签名不变**，只是调用方传 `intentKind: 'market_genesis'`。
@@ -64,12 +72,12 @@
 
 "填错"分两类，处置不同：
 1. **创世前能拦的**（§2 对照检查 FAIL）：不广播，`alertIntent`（复用 (c) 的告警函数）打 `market_genesis_coherence_mismatch`，附具体哪个字段不符——这类不是"自毁"，是"根本没创世"，NO TX 原则下最干净。
-2. **创世后才发现的**（对照检查在广播前通过、但源文件与生产用的 pinned 编译器版本之间有漂移，或人手改过市场行）：K-18 已有"逐笔构造前再对照一次"的纪律（同 `_checkCoherenceNonBlocking`，`ensurePayoutShard` 现有代码里已经在查表命中已存在市场时调用）——**复用这个既有调用点**，`tier='cheap'` 每次构造前查，`tier='full'` 定期巡检（同 `bshard-coherence-observability-monitor.mjs` 的既有形，批 T v0.7 提过的 `ps_coherence_gate_fail` 事件）。这类市场"自毁"（创世状态填错、代币模板锚不对）在 A″ 下的后果 = 该市场永远收不到/派不出代币（T1 v0.5 §2.1 已写"是自毁，非漏洞"）；T4 只负责**尽早发现并告警**，不负责修复（修复 = 该市场作废，走既有 refund/cancel 路径，不在 T4 范围）。
+2. **创世后才发现的**（对照检查在广播前通过、但源文件与生产用的 pinned 编译器版本之间有漂移，或人手改过市场行）——**为什么是 non-blocking（v0.2 · NWT 显式写要求 ③，理由改写为 T4 自己的，不再借"复用既有调用点"当理由）**：A″ 是**免费代币模型**——市场状态漂移（模板锚不对/委员 hash 填错）的后果**不是价值被第三方偷走**（代币本身免费无限铸造，不是从别处夺来的有限资源；而市场里"真"沉淀的 KAS 只有 dust），**而是该市场自己收不到/派不出代币**（T1 v0.5 §2.1 的"自毁，非漏洞"）——**受害者是这个市场自己，不是别人**，所以发现晚一点不产生"资金正在被转移、每晚一秒损失扩大"的紧迫性，"检测出来 + 告警 + 事后走既有 refund/cancel 路径作废"这条时间线本身就是安全的，不需要用阻塞式检查把它逼成"实时"。**实现手段**才是复用既有调用点：K-18 已有"逐笔构造前再对照一次"的纪律（同 `_checkCoherenceNonBlocking`，`ensurePayoutShard` 现有代码里已经在查表命中已存在市场时调用），T4 挂在这个点上、`tier='cheap'` 每次构造前查、`tier='full'` 定期巡检（同 `bshard-coherence-observability-monitor.mjs` 的既有形，批 T v0.7 提过的 `ps_coherence_gate_fail` 事件）——但这是"用哪根线接"的问题，不是"为什么可以不阻塞"的答案，两件事分开说。T4 只负责**尽早发现并告警**，不负责修复（修复 = 该市场作废，走既有 refund/cancel 路径，不在 T4 范围）。
 
-## 6. 请 NWT 判
-1. §3.2 的泛化方案（给 `transferWithIntent` 加 `cmdType`/`cmdBuilder` vs 单开 `genesisWithIntent` 复制骨架）——我倾向前者，但会碰 (c) 已合入的文件，需要 NWT 判是否值得为 T4 再开一小笔 (c) 侧 patch，还是等 T4 真正落码时一起做。
-2. §2.1 表格"7 个解码器"的工作量是否值得——替代方案：**放弃 `tier='cheap'` 的逐字段解码**，A″ 下每次都跑 `tier='full'`（recompile，反正只在创世/巡检两个低频时刻用，不在热路径）；代价 = 巡检变慢，收益 = 不用写 7 个解码器。我倾向**保留 cheap tier 但只解码"新增的 4 个代币锚字段"**（其余字段沿用 K-18 现有覆盖或暂不查，分期做），先把 A″ 最要紧的锚点覆盖住。
-3. `market_landed_at` 落在 `pool_markets` 现表还是 A″ 新市场表——依赖 T3/T5 是否重新建表，本稿先写在 `pool_markets`（假设沿用），若 T5 决定新表需要改列位置不改逻辑。
+## 6. 三问裁定（v0.2 · 已定，不再是待判项）
+1. **Q1**（`transferWithIntent` 加 `cmdType`/`cmdBuilder` 泛化 vs 单开 `genesisWithIntent`）——**批准前者，走独立小 diff、NWT 单独审**，不与本 T4 docs 混在一起、也不等 T4 真正落码时才做；具体排期由后续侧分支（`coord/j2-ab-followup` 之后或单独一笔）落实，T4 稿本身不再动这处设计。
+2. **Q2**（7 解码器工作量）——**批准折中方案**（保留 cheap tier，不改全 full），**且 `poolMerkleRoot`/`committee_hash` 进第一批**（§2.1 已更新优先级排序），其余 5 个字段分期。
+3. **Q3**（`market_landed_at` 落表位置）——**批准延后决定**，等 T3/T5 定市场表结构后再定列位置，本稿 §3.3 保留"假设沿用 `pool_markets`，若 T5 新表只改列位置不改逻辑"的写法不变。
 
 ## 7. 没核到的
 - `pool_markets` 表当前是否已有类似"创世确认"语义的列（未逐列核对 34 列全表，只读了 T2/T3 提到的几个）。
