@@ -794,6 +794,56 @@ export function processPaymentSubmit({ offer_id, payment_tx, payment_chain }) {
   return { ok: true, status: 'verifying', message: 'Payment submitted, verifying on-chain...' };
 }
 
+// (c) F1 helpers (J2 2026-09-13) ─────────────────────────────────────────────
+// 🔴 M0a 裸 import 差分门: relay-manager 的 dynamic import 出口数按 baseline 精确镜像, 不新增 —— 原 KAS 交割那处的 import 行
+//   上提到这里, 交割路与 F1 落链门共用同一个出口(路径+形态+计数三者不变)。
+async function _relayCmd() {
+  const { sendCommandAsync } = await import('./relay-manager.js');
+  return sendCommandAsync;
+}
+
+// check_utxo_landed 是纯链查询(地址+txid), 任一本机 relay 都能答; 优先收款地址所属 relay, 其后按 relay_nodes 顺序兜底。
+// sendCommandAsync 对未运行的 relay 立即 reject('Relay not running'), evaluateKaspaPaymentGate 逐个试, 不等超时。
+function _landedCheckRelayIds(expectedTo) {
+  const ids = [];
+  try {
+    if (expectedTo) { const r = sqlite.prepare('SELECT id FROM relay_nodes WHERE address = ?').get(expectedTo); if (r?.id) ids.push(r.id); }
+    for (const r of sqlite.prepare('SELECT id FROM relay_nodes ORDER BY created_at ASC').all()) if (!ids.includes(r.id)) ids.push(r.id);
+  } catch {}
+  return ids;
+}
+
+/**
+ * kaspa 支付两段门 (F1, 单一不变量 completion = recipient/amount valid ∧ landed(depth ≥ minDepth)); 纯函数形, 依赖注入, 离线可测。
+ * @returns vr 形同 verifyCrossChainTx 返回值 + { recipientOk, landed, required: minDepth }
+ */
+export async function evaluateKaspaPaymentGate({ verifyFn, sendCmd, relayIds, txHash, expectedAmount, expectedTo, minDepth }) {
+  if (!(Number(minDepth) > 0)) throw new Error('evaluateKaspaPaymentGate: minDepth > 0 required');
+  const base = { confirmed: false, confirmations: 0, required: minDepth, actualAmount: 0, recipient: expectedTo || '', sender: '', recipientOk: false, landed: false };
+  let vr;
+  try {
+    vr = await verifyFn({ txHash, chain: 'kaspa', expectedAmount, expectedTo });
+  } catch (e) {
+    return { ...base, error: `verify error: ${e.message}` };
+  }
+  if (!vr?.confirmed) return { ...base, ...vr, confirmed: false, required: minDepth, recipientOk: false, landed: false };
+  // (ii) 深度门: relay 侧 UTXO 集 + blockDaaScore; verifier 的 confirmations 字段不参与判定。
+  let last = null;
+  for (const relayId of (relayIds || [])) {
+    try {
+      const r = await sendCmd(relayId, { type: 'check_utxo_landed', address: expectedTo, txid: txHash, minDepth }, 15000, 'internal');
+      if (r && typeof r === 'object' && !r.error) {
+        return { ...vr, confirmed: !!r.landed, confirmations: r.depth ?? 0, required: minDepth, recipientOk: true, landed: !!r.landed };
+      }
+      last = r?.error || 'empty reply';
+    } catch (e) {
+      last = e.message;
+      if (!/Relay not running/i.test(e.message)) break;   // 真错(超时等)不再换 relay, 留 verifying 下次重核
+    }
+  }
+  return { ...vr, confirmed: false, confirmations: 0, required: minDepth, recipientOk: true, landed: false, error: `landed check unavailable: ${last || 'no relay'}` };
+}
+
 async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt = 1) {
   const MAX_ATTEMPTS = 3;
   const RETRY_MS = 60_000;
@@ -823,10 +873,18 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
   try {
     let vr;
 
-    // Kaspa same-chain TX: submitTransaction accepted = TX is real. Trust txId directly.
+    // (c) F1 (J2 2026-09-13, 设计 v0.3 NWT PASS · Codex ③): 原硬构造 `vr = { confirmed: true … }` (2026-04-11 一笔 fix: 装进来的短路,
+    // CLAUDE.md 07-29 状态注记) 删除。kaspa 路两段门: (i) 收款人/金额 = verifyCrossChainTx kaspa 分支(kaspa_tx_log 优先);
+    // (ii) 深度 = relay check_utxo_landed(expectedTo, payment_tx, REORG_SAFE_MIN_DEPTH) —— verifier 的 confirmations:1 是硬编码, 不当深度用。
+    // 任一不满足 ⇒ vr.confirmed=false ⇒ 不写 verified_*, 留 verifying, 由既有 timeoutVerifying/重试兜底(I3 非终态)。
     if (payment_chain === 'kaspa') {
-      console.log(`[exchange] kaspa_tx: trusting txId ${payment_tx.slice(0,16)} (submitTransaction = verified)`);
-      vr = { confirmed: true, confirmations: 1, required: 1, actualAmount: expectedAmount, recipient: expectedTo || '', sender: '' };
+      const { verifyCrossChainTx } = await import('./cross-chain-verify.mjs');
+      const { REORG_SAFE_MIN_DEPTH } = await import('../lib/pool-shard-register.mjs');
+      vr = await evaluateKaspaPaymentGate({
+        verifyFn: verifyCrossChainTx, sendCmd: await _relayCmd(), relayIds: _landedCheckRelayIds(expectedTo),
+        txHash: payment_tx, expectedAmount, expectedTo, minDepth: REORG_SAFE_MIN_DEPTH,
+      });
+      console.log(`[exchange] kaspa_tx ${payment_tx.slice(0,16)} gate: recipient/amount ${vr.recipientOk ? 'ok' : 'FAIL'} · landed ${vr.landed ? `depth ${vr.confirmations}` : 'NO'} (min ${vr.required}) · source ${vr.source || '?'}${vr.error ? ` · ${vr.error}` : ''}`);
     } else {
       const { verifyCrossChainTx } = await import('./cross-chain-verify.mjs');
       vr = await verifyCrossChainTx({
@@ -970,7 +1028,7 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
             try {
               if (give_asset === 'KAS') {
                 // KAS 走现 relay transfer (backward compat 不动)
-                const { sendCommandAsync } = await import('./relay-manager.js');
+                const sendCommandAsync = await _relayCmd();   // (c) F1: 同一 import 出口, M0a baseline 计数不变
                 // NWT 完整清单复核(24da7ea9): daemon auto-deliver 钱路 transfer → origin=internal
                 const sendResult = await sendCommandAsync(deliveryAgent.id, {
                   type: 'transfer',
@@ -1095,7 +1153,8 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
                   kind: 'dm_kas_delivered',
                   peer: deliveryTarget,
                   payload: {
-                    message: `✅ 已发出 ${deliveringOffer.give_amount} KAS 到你 Kasia 钱包, 1-2 分钟到账.\n\nTX: ${deliveryTxId}\n查看: https://explorer.kaspa.org/txs/${deliveryTxId}\n\n感谢使用 KANet broker.`,
+                    // R-EXPLORER-URL-BYPASS(lint 硬阻塞, 本补丁 (c) 触及本文件被闸逼出的 1 行顺手改): explorer 域名走单源 explorer-url.mjs
+                    message: `✅ 已发出 ${deliveringOffer.give_amount} KAS 到你 Kasia 钱包, 1-2 分钟到账.\n\nTX: ${deliveryTxId}\n查看: ${(await import('../lib/explorer-url.mjs')).buildExplorerUrl(deliveryTxId, process.env.KASPA_NETWORK) ?? '(本网络无公开 explorer)'}\n\n感谢使用 KANet broker.`,
                   },
                 });
               } catch (e) { console.warn(`[exchange] dm_kas_delivered enqueue err: ${e.message}`); }

@@ -25,6 +25,9 @@ import { verifyPredictionOutcome } from './bettor-prediction-verifier.js';
 import { transition } from './exchange-machine.js';
 import { sendCommandAsync } from './relay-manager.js';
 import { getConfig } from '../data/settings/configs.js';
+// (c) F2 (J2 2026-09-13, 设计 v0.3 NWT PASS): 派彩走 submit-intent + landed 门; delivering 扫描 + prepared 行重启捡回。
+import { submitPayoutIntent, completeIfLanded, sweepDeliveringPayouts } from './prediction-payout-gate.mjs';
+import { resumeStaleIntents } from '../lib/submit-intent.mjs';
 
 const TICK_INTERVAL_MS = 5 * 60 * 1000;  // 5 min
 const STARTUP_GRACE_MS = 30 * 1000;       // 30s grace 让 Console boot 其他 cron 先稳
@@ -53,6 +56,19 @@ export async function settlePredictionOutcomes() {
   }
   running = true;
   try {
+    // (c) F2/F2-R (J2 2026-09-13): 先扫 delivering 的派彩(submitted ⇒ 核落链才 completed; pending/prepared ⇒ 续发), 再捡回全部 kind 的
+    //   prepared 陈行(进程重启后 relay 内存 Map 与本进程内存都没了, 唯一真相 = submit_intents 表 + relay 侧 mempool/UTXO)。
+    //   两步都只读 relay 侧权威源决定要不要重发, 不读 metadata。
+    try {
+      const { REORG_SAFE_MIN_DEPTH } = await import('../lib/pool-shard-register.mjs');
+      const sw = await sweepDeliveringPayouts({ sendCmd: sendCommandAsync, transitionFn: transition, minDepth: REORG_SAFE_MIN_DEPTH });
+      if (sw.scanned) console.log(`[prediction-settler] payout sweep: scanned=${sw.scanned} completed=${sw.completed} waiting=${sw.waiting} resent=${sw.resent} noIntent=${sw.noIntent} errored=${sw.errored}`);
+      const rs = await resumeStaleIntents({ sendCmd: sendCommandAsync });
+      if (rs.scanned) console.log(`[prediction-settler] intent resume: scanned=${rs.scanned} resolved=${rs.resolved} rebuilt=${rs.rebuilt} held=${rs.held} errored=${rs.errored}`);
+    } catch (e) {
+      console.error(`[prediction-settler] payout sweep/resume error: ${e.message}`);
+    }
+
     // r177 Phase 2b: prediction lifecycle = matched → verifying → delivering → completed.
     // 用 verifying/delivering 都 in DB CHECK 约束 (跟 awaiting_oracle 不同, 后者 CHECK 缺失,
     // 需 v122 migration 才能 enable — 留 Phase 2b' 真链 payout 一起加).
@@ -170,50 +186,26 @@ export async function settlePredictionOutcomes() {
           continue;
         }
 
-        let payoutTxId = null;
-        const PAYOUT_MAX_ATTEMPTS = 3;
-        for (let attempt = 1; attempt <= PAYOUT_MAX_ATTEMPTS; attempt++) {
-          try {
-            const result = await sendCommandAsync(escrowRelay.id, {
-              type: 'transfer',
-              target: winnerAddr,
-              amount: stakeKas.toFixed(8),  // KI-30: Kaspa sompi max 8 decimal precision
-            }, undefined, 'internal');
-            payoutTxId = result?.txId || null;
-            if (payoutTxId) break;
-            if (attempt < PAYOUT_MAX_ATTEMPTS) await new Promise(r => setTimeout(r, attempt * 5000));
-          } catch (err) {
-            console.error(`[prediction-settler] payout attempt ${attempt}/${PAYOUT_MAX_ATTEMPTS} fail ${offer.id.slice(0,8)}: ${err.message}`);
-            if (attempt < PAYOUT_MAX_ATTEMPTS) await new Promise(r => setTimeout(r, attempt * 5000));
-          }
-        }
-        if (!payoutTxId) {
-          console.error(`[prediction-settler] payout chain TX exhausted 3 attempts ${offer.id.slice(0,8)} winner=${winnerAddr.slice(-12)} stake=${stakeKas.toFixed(4)} — stay delivering, next tick retry`);
-          errored++;
-          continue;  // 留 delivering, retry next tick (= 跟 exchange auto-deliver Bug-Z2 pattern 一致)
-        }
-
-        const metaFinal = JSON.stringify({
-          ...metaAfterDetect,
-          payout_tx: payoutTxId,
-          payout_target: winnerAddr,
-          settle_outcome_phase: 'paid',
-        });
+        // (c) F2 (J2 2026-09-13, 设计 v0.3 NWT PASS · Codex ④ + NWT MUST-FIX): 原三次盲重试(txId 空即重发, 无查重)+ 拿 txId 即
+        //   completed(submit ≠ landed) 全部删除。现在: submit-intent(幂等键 'payout:'+offer_id 先于 IPC 落表; attempt ≥ 2 只查 relay 侧
+        //   mempool/landed/同字节重播) → check_utxo_landed(minDepth=REORG_SAFE_MIN_DEPTH) 落了才 completed + reputation 'paid';
+        //   没落 ⇒ 留 delivering(metadata.settle_outcome_phase='submitted'), 下 tick sweepDeliveringPayouts 再核。
+        let payout;
         try {
-          transition(offer.id, 'completed', { metadata: metaFinal });
-        } catch (e) {
-          console.error(`[prediction-settler] transition delivering→completed fail (after payout TX ${payoutTxId.slice(0,12)}) ${offer.id.slice(0,8)}: ${e.message} — manual DB cleanup needed (chain TX done)`);
+          payout = await submitPayoutIntent({
+            sendCmd: sendCommandAsync, relayId: escrowRelay.id, offer, winnerAddr,
+            amountKas: stakeKas.toFixed(8),  // KI-30: Kaspa sompi max 8 decimal precision
+            metaAfterDetect, origin: 'internal',
+          });
+        } catch (err) {
+          console.error(`[prediction-settler] payout intent fail ${offer.id.slice(0,8)} winner=${winnerAddr.slice(-12)} stake=${stakeKas.toFixed(4)}: ${err.message} — stay delivering, sweep retries next tick (intent-gated, no blind resend)`);
           errored++;
           continue;
         }
-        // r177 Phase 2a hotfix PB4: 用 maker_relay_id (UUID) 写 reputation log.
-        // r177 Phase 2b'.2: event_type='paid' 区分 detect-only vs 真链已 payout. (= 'settled' deprecated Phase 2b'.2 后)
-        const makerRelayForLog = offer.maker_relay_id || offer.maker;
-        if (makerRelayForLog) {
-          sqlite.prepare(`INSERT INTO prediction_reputation_log (id, maker_relay_id, event_type, settled_kas_delta, dispute_outcome, recorded_at) VALUES (?, ?, 'paid', ?, NULL, CURRENT_TIMESTAMP)`)
-            .run(randomUUID(), makerRelayForLog, settleKasDelta);
-        }
-        console.log(`[prediction-settler] PAYOUT ${offer.id.slice(0, 8)}: winner=${winner} addr=${winnerAddr.slice(-12)} stake=${stakeKas.toFixed(4)} KAS payout_tx=${payoutTxId.slice(0,12)}`);
+        const { REORG_SAFE_MIN_DEPTH } = await import('../lib/pool-shard-register.mjs');
+        const gate = await completeIfLanded({ sendCmd: sendCommandAsync, transitionFn: transition, offer, intent: payout.intent, minDepth: REORG_SAFE_MIN_DEPTH, origin: 'internal' });
+        console.log(`[prediction-settler] PAYOUT ${offer.id.slice(0, 8)}: winner=${winner} addr=${winnerAddr.slice(-12)} stake=${stakeKas.toFixed(4)} KAS payout_tx=${payout.txId.slice(0,12)} ${payout.reused ? '(reused)' : payout.replayed ? '(replayed)' : ''} → ${gate.completed ? 'LANDED → completed' : `submitted, not yet landed (depth ${gate.depth ?? 'null'}) — stay delivering`}`);
+        if (!gate.completed) { pending++; continue; }
         settled++;
         console.log(`[prediction-settler] settled ${offer.id.slice(0, 8)}: winner=${winner} maker_side=${offer.outcome_side} maker_won=${makerWon} delta=${settleKasDelta.toFixed(4)} KAS`);
       } catch (e) {
