@@ -16,6 +16,7 @@ import { getVerifier } from './exchange-verifiers.js';
 import { recordChainEvent } from './chain-event.js';
 import { executeHedge } from './trade-protocol-filter.js';
 import { releaseFunds, spendFunds } from './fund-lock.js';
+import { escrowGateFor } from './escrow-landed-gate.mjs';   // (c) 第 5 笔 (B): escrow_landed_at 硬消费门, 单一所有权点在 transition()
 import crypto from 'crypto';
 
 // ── Valid Transitions ─────────────────────────────────────────
@@ -63,6 +64,14 @@ export function transition(offerId, newStatus, extra = {}) {
   const allowed = VALID_TRANSITIONS[offer.protocol_status];
   if (!allowed || !allowed.includes(newStatus)) {
     console.log(`[exchange-machine] Invalid transition: ${offer.protocol_status} → ${newStatus}`);
+    return offer;
+  }
+
+  // (c) 第 5 笔 (B) · Codex 8118732e HOLD: 带 escrow 锁的预测 offer, 锁未落链(escrow_landed_at NULL)⇒ 不 matched / 不进结算态 / 不 completed。
+  //   返回原 offer(同 Invalid transition 形), 调用方按 protocol_status 判; 这是业务硬门, 不是 UI 标记。规则单源 escrow-landed-gate.mjs。
+  const escrowGate = escrowGateFor(offer, newStatus);
+  if (!escrowGate.ok) {
+    console.log(`[exchange-machine] escrow gate: ${offerId.slice(0, 8)} ${offer.protocol_status} → ${newStatus} blocked: ${escrowGate.reason}`);
     return offer;
   }
 

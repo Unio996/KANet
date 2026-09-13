@@ -28,6 +28,7 @@ import { getConfig } from '../data/settings/configs.js';
 // (c) F2 (J2 2026-09-13, 设计 v0.3 NWT PASS): 派彩走 submit-intent + landed 门; delivering 扫描 + prepared 行重启捡回。
 import { submitPayoutIntent, completeIfLanded, sweepDeliveringPayouts } from './prediction-payout-gate.mjs';
 import { resumeStaleIntents } from '../lib/submit-intent.mjs';
+import { assertSettleEligible } from './escrow-landed-gate.mjs';   // (c) 第 5 笔 (B): 锁未落链 ⇒ 无结算资格
 
 const TICK_INTERVAL_MS = 5 * 60 * 1000;  // 5 min
 const STARTUP_GRACE_MS = 30 * 1000;       // 30s grace 让 Console boot 其他 cron 先稳
@@ -93,6 +94,12 @@ export async function settlePredictionOutcomes() {
     let settled = 0, pending = 0, errored = 0;
     for (const offer of offers) {
       try {
+        // (c) 第 5 笔 (B): 结算资格门 —— maker/taker 锁未落链的 offer 不做任何 oracle/派彩工作(transition 也会拦, 这里省掉白跑的 oracle 轮)。
+        {
+          const full = sqlite.prepare('SELECT give_asset, want_asset, metadata, escrow_p2sh, escrow_landed_at, taker_escrow_lock_tx, taker_escrow_landed_at FROM exchange_offers WHERE id = ?').get(offer.id);
+          const g = assertSettleEligible({ ...offer, ...full });
+          if (!g.ok) { console.log(`[prediction-settler] ${offer.id.slice(0, 8)} not settle-eligible: ${g.reason} — skip (escrow gate)`); pending++; continue; }
+        }
         // matched → verifying 立 transition (= settler 已认领, 表 oracle 验证中)
         // Sub 8.3 Bug 18: refresh in-memory offer.protocol_status after transition (= dispatchPhase2OrCheckSigs checks it).
         if (offer.protocol_status === 'matched') {
@@ -161,6 +168,9 @@ export async function settlePredictionOutcomes() {
         // escrow_addr config + reverse-lookup relay_id (= relay 控 escrow 私钥) 走 sendCommandAsync transfer.
         try {
           transition(offer.id, 'delivering');
+          // (c) 第 5 笔 (B): transition 被 escrow 门/无效转换拦下时返回原 offer 不抛 —— 必须回读, 否则下面照样派彩(价值移动绕过门)。
+          const after = sqlite.prepare('SELECT protocol_status FROM exchange_offers WHERE id = ?').get(offer.id);
+          if (after?.protocol_status !== 'delivering') throw new Error(`transition did not apply (status ${after?.protocol_status})`);
         } catch (e) {
           console.error(`[prediction-settler] transition verifying→delivering fail ${offer.id.slice(0,8)}: ${e.message}`);
           errored++;

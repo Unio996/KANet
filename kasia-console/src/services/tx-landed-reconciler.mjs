@@ -14,6 +14,7 @@ import { sqlite } from '../db/client.js';
 import { wrapTick } from '../lib/diag-step.mjs';
 import { randomUUID } from 'node:crypto';
 import { listIntents, markIntent } from '../lib/submit-intent.mjs';
+import { applyIntentLanded } from './escrow-landed-gate.mjs';   // (c) 第 5 笔 (B): intent landed ⇒ exchange_offers.escrow_landed_* 唯一写入方
 
 const TICK_MS = 5 * 60 * 1000;
 export const NOT_LANDED_AFTER_MS = 10 * 60 * 1000;
@@ -128,7 +129,12 @@ export async function reconcileIntents({ reader, now = Date.now(), limit = BATCH
     for (const it of submitted) {
       try {
         const res = await resolveLanded({ reader, txid: it.submitted_txid, targetAddress: it.target_address, virtualDaa });
-        if (res.landed) { markIntent(it.intent_key, { status: 'landed', landed_depth: res.depth, landed_at: res.landedAt }); out.landed++; continue; }
+        if (res.landed) {
+          const landedRow = markIntent(it.intent_key, { status: 'landed', landed_depth: res.depth, landed_at: res.landedAt });
+          const ap = applyIntentLanded(landedRow, { landedAt: res.landedAt, depth: res.depth });
+          if (ap.applied) console.log(`[tx-landed-reconciler] ${it.intent_kind} ${it.intent_key} landed → exchange_offers.${ap.column}_at set (depth ${res.depth ?? 'null'})`);
+          out.landed++; continue;
+        }
         if (res.inMempool) continue;
         out.notLanded++;
         if (!_throttled(`intent:${it.intent_key}`)) {

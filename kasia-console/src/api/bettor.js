@@ -1592,6 +1592,13 @@ export async function registerBettorRoutes(fastify) {
     const stakeKasStr = (takerStakeSompi / 1e8).toFixed(8);  // canonical KAS string from baked sompi
     const stakeKas = takerStakeSompi / 1e8;  // for logging only
 
+    // (c) 第 5 笔 (B) · Codex 8118732e: maker 锁仓未落链(escrow_landed_at NULL) ⇒ 无 taker 接受 —— taker 押金不发, 409 让客户端稍后重试。
+    {
+      const { takerAcceptGate } = await import('../services/escrow-landed-gate.mjs');
+      const g = takerAcceptGate(offerId);
+      if (!g.ok) return reply.code(409).send({ ok: false, error: `escrow_not_landed: ${g.reason}`, code: 'escrow_not_landed' });
+    }
+
     // Taker transfer stake → same SS P2SH addr
     const { sendCommandAsync } = await import('../services/relay-manager.js');
     let takerEscrowTxId = null;

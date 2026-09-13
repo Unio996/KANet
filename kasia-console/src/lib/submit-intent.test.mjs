@@ -162,6 +162,17 @@ const replays = (R) => R.calls.filter(c => c.type === 'transfer' && c.replay_tx_
   try { await transferWithIntent(base(R2, 'r6')); } catch (e) { err = e; }
   ok(err?.hold && events('intent_replay_txid_mismatch') === 2 && getIntent(intentKeyFor('payout', 'r6')).status === 'prepared', 'F2-R-弱注入 b′: relay 回了别的 txid → console 侧也拒(hold), 不标 submitted');
 }
+// ── (A) 往返失败 ⇒ fail-closed: relay 回 replay_bad_json ⇒ hold + 告警, 不重试不重建 ──
+{
+  const R = makeRelay();
+  const txid = 'p9'.padEnd(64, '9');
+  ensureIntent({ intentKind: 'payout', offerId: 'r8', relayId: 'relay-A', targetAddress: 'kaspa:qtarget', amountKas: '1' });
+  recordIntentPhase({ intentKey: intentKeyFor('payout', 'r8'), phase: 'prepared', txid, txJson: '["corrupt"]' });
+  R.replayResult = { ok: false, code: 'replay_bad_json', error: 'deserialize failed' };
+  let err = null;
+  try { await transferWithIntent(base(R, 'r8')); } catch (e) { err = e; }
+  ok(err?.hold && err.code === 'replay_bad_json' && replays(R) === 1 && transfers(R) === 0 && R.broadcasts.length === 0 && events('intent_replay_unrecoverable') === 1 && getIntent(intentKeyFor('payout', 'r8')).status === 'prepared', '(A) 往返失败 → hold: 一次重播尝试后零广播零重建, 告警 1 行, 行留 prepared(人工)');
+}
 // ── 查询失败 = 未知 ⇒ 不重发 ──
 {
   const R = makeRelay();

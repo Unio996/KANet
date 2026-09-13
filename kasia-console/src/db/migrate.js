@@ -5829,6 +5829,21 @@ export function runMigrations() {
     if (!has) sqlite.exec(`ALTER TABLE tx_records ADD COLUMN ${col} ${ddl}`);
   }
   sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_tx_records_direction_landed ON tx_records(direction, landed_at)`);
+  console.log('[migrate] v202: submit_intents 表(+2 索引) + tx_records 加 target_address/landed_at/landed_depth/landed_checked_at + idx_tx_records_direction_landed ((c) NO-TX F2/F4, 幂等 IF NOT EXISTS/pragma 守卫).');
+
+  // ── v203 (2026-09-13, J2 · (c) 第 5 笔 · Codex 8118732e (B) escrow_landed_at 硬消费门 · Bettor 派单):
+  //   exchange_offers 加 escrow_landed_at/escrow_landed_depth(maker 锁仓, 两条 publish 路都写 metadata.escrow_lock_tx)
+  //   + taker_escrow_landed_at/taker_escrow_landed_depth(taker 押金, 列 taker_escrow_lock_tx)。
+  //   不变量(services/escrow-landed-gate.mjs, 门在 exchange-machine.transition 单一所有权点): 带 escrow 锁的预测 offer,
+  //   escrow_landed_at IS NULL ⇒ 不能 matched(无 taker 接受/无匹配)、不能 delivering/completed(无结算资格/无对手方价值移动/无声誉终态)。
+  //   写入方只有 tx-landed-reconciler(把 submit_intents landed 回填)。三处 escrow HTTP 处理器仍异步返回 txId; 对象落库即 pending/non-consumable。
+  for (const [col, ddl] of [
+    ['escrow_landed_at', 'TEXT'], ['escrow_landed_depth', 'INTEGER'], ['taker_escrow_landed_at', 'TEXT'], ['taker_escrow_landed_depth', 'INTEGER'],
+  ]) {
+    const has = sqlite.prepare("SELECT 1 FROM pragma_table_info('exchange_offers') WHERE name = ?").get(col);
+    if (!has) sqlite.exec(`ALTER TABLE exchange_offers ADD COLUMN ${col} ${ddl}`);
+  }
+  console.log('[migrate] v203: exchange_offers 加 escrow_landed_at/escrow_landed_depth/taker_escrow_landed_at/taker_escrow_landed_depth ((c) 第 5 笔 escrow 硬消费门, pragma 守卫幂等).');
 
   console.log('[migrate] DB migrations complete.');
 }

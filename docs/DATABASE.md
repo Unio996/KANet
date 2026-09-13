@@ -541,6 +541,8 @@
 | published_price | REAL | r177 Phase 2 publish 时价格快照 |
 | **outcome_oracle_relay_id** | TEXT | **v124 r211 v3** — Path D maker 自选 oracle relay UUID (= relay_nodes.id where is_oracle=1)；触发 settler dispatcher 走 collectMultiOracleVotes (3-of-5 quorum) |
 | **resolution_rule_spec** | TEXT | **v124** — JSON 5 字段 `{data_source_canonical, secondary_sources, ambiguity_handler, dispute_keywords, edge_case_examples}` (= structured oracle 判定规则，voter daemon 读取 deriveVote) |
+| **escrow_landed_at / escrow_landed_depth** | TEXT / INTEGER | **v203 · (c) 第 5 笔 (B) 硬消费门** — maker 锁仓（metadata.escrow_lock_tx）落链时刻/深度。唯一写入方 `tx-landed-reconciler` 经 `escrow-landed-gate.applyIntentLanded`（submit_intents kind escrow_lock/maker_stake landed）。**不变量**：带 escrow 锁的预测 offer，`escrow_landed_at IS NULL ⇒ transition 拒 matched/verifying/delivering/completed`（无 taker 接受/无匹配/无结算资格/无价值移动/无声誉终态），taker-stake 处理器 409，settler 跳过；refunded/cancelled/expired/timed_out/disputed 不拦 |
+| **taker_escrow_landed_at / taker_escrow_landed_depth** | TEXT / INTEGER | **v203** — taker 押金（列 taker_escrow_lock_tx）落链时刻/深度；有 taker 锁时结算态（verifying 起）还要它非空 |
 
 **写入方**：exchange.js（乐观写入）、trade-protocol-filter.js、bettor.js publish (r211 v3 oracle 字段)
 **读取方**：/exchange 页面、bettor-prediction-settler.js (collectMultiOracleVotes + verifyPredictionOutcome dispatcher)、bettor-prediction-voter.js (扫 outcome_oracle_relay_id=this)

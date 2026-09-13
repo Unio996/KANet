@@ -181,6 +181,11 @@ async function resolvePrepared({ sendCmd, relayId, row, origin, log }) {
     alertIntent('intent_replay_txid_mismatch', `intent ${key} relay rejected replay: ${rep.error}`, { intent_key: key, prepared_txid: txid });
     throw new IntentHoldError(`intent ${key}: ${rep.error}`, 'replay_txid_mismatch');
   }
+  if (rep?.code === 'replay_bad_json') {
+    // Codex 8118732e (A): 往返失败(字节反序列化/finalize 失败) ⇒ fail-closed 手工恢复 —— hold, 不重试不重建。
+    alertIntent('intent_replay_unrecoverable', `intent ${key} prepared bytes cannot be deserialized/finalized: ${rep.error} — manual recovery`, { intent_key: key, prepared_txid: txid });
+    throw new IntentHoldError(`intent ${key}: ${rep.error}`, 'replay_bad_json');
+  }
   throw new Error(`intent ${key}: replay failed: ${rep?.error || 'no txId'}`);
 }
 
