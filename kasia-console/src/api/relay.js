@@ -11,7 +11,7 @@ import { Mnemonic } from 'kaspa-wasm';
 import { getWorkingRpc } from '../services/rpc-health.js';
 import { writeFile, readFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import { startRelay, stopRelay } from '../services/relay-manager.js';
+import { startRelay, stopRelay, checkHotwalletAdmission } from '../services/relay-manager.js';
 import { getMind } from '../services/mind-manager.js';
 import { ethers } from 'ethers';
 import { encrypt, decrypt } from '../services/crypto.js';
@@ -96,6 +96,19 @@ export async function registerRelayRoutes(fastify) {
     if (mnemonicClean && !resolvedAddress) {
       try { resolvedAddress = addressFromMnemonic(mnemonicClean, net); } catch {}
     }
+
+    // NWT 2-1 (docs/2026-09-14-nwt-mainnet-relay-hotwallet-cap-and-cold-hot-separation-spec-v0.1.md §4):
+    // 早失败层——跟 relay-manager.js:startRelay() 调同一份检查函数, 但这里不是安全边界(见该函数头注),
+    // 只是更友好地在行还没进库前就拒绝, 真正把关的仍然是 startRelay()。缺两个上限 env 时该项检查不启用。
+    if (resolvedAddress) {
+      const { url: hotwalletRpcUrl } = await getWorkingRpc();
+      const admission = await checkHotwalletAdmission({ address: resolvedAddress, network: net, rpcUrl: hotwalletRpcUrl });
+      if (!admission.ok) {
+        console.warn(`[relay] refuse import "${name.trim()}" (${resolvedAddress}): hotwallet admission ${admission.reason}`);
+        return reply.redirect(`/relays?hotwallet_denied=${encodeURIComponent(admission.reason)}`);
+      }
+    }
+
     const newId = createRelayNode({
       name: name.trim(),
       mnemonic: mnemonicClean,
@@ -153,6 +166,19 @@ export async function registerRelayRoutes(fastify) {
     // dedup: same address already in relay_nodes
     const existing = sqlite.prepare('SELECT id, name FROM relay_nodes WHERE address = ?').get(address);
     if (existing) return reply.code(409).send({ ok: false, error: `address already registered as relay "${existing.name}" (id=${existing.id})`, existing_id: existing.id });
+
+    // NWT 2-1 (docs/2026-09-14-nwt-mainnet-relay-hotwallet-cap-and-cold-hot-separation-spec-v0.1.md §4):
+    // 早失败层——同 POST /relays 那处，不是安全边界（见 checkHotwalletAdmission 头注），真正把关的是
+    // relay-manager.js:startRelay()。缺两个上限 env 时该项检查不启用。
+    {
+      const { url: hotwalletRpcUrl } = await getWorkingRpc();
+      const admission = await checkHotwalletAdmission({ address, network: net, rpcUrl: hotwalletRpcUrl });
+      if (!admission.ok) {
+        console.warn(`[relay] refuse import-privkey "${name.trim()}" (${address}): hotwallet admission ${admission.reason}`);
+        return reply.code(403).send({ ok: false, error: `hotwallet admission denied: ${admission.reason}`, reason: admission.reason });
+      }
+    }
+
     const newId = createRelayNode({ name: name.trim(), privkey: cleanPriv, address, network: net, adapterNodeId: null, pollMs: 2000 });
     console.log(`[relay] r281 imported privkey-relay "${name.trim()}" → ${address}`);
     return reply.send({ ok: true, id: newId, name: name.trim(), address, network: net });
