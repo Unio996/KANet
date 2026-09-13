@@ -88,7 +88,14 @@ for ($i = 0; $i -lt 60; $i++) {
 if ($ready) { Log "kaspad RPC ready after $($i*5)s" } else { Log "WARN: kaspad RPC not ready after 300s timeout, proceeding anyway (mining/console will keep retrying)" }
 
 # ③ 挖矿 watchdog v2(熔断版, detached; 见上 note④——v1 已停用, 不再从本卡派发)
-Start-Watched "powershell.exe" @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "D:\kaspa-tn12-mining\tn12-mining-watchdog-v2.ps1") "tn12-mining-watchdog-v2.ps1" | Out-Null
+# 🔴🔴 守卫(2026-09-13 · KANet-UI · Owner 终端直令原话"先把所有测试网(无论哪个测试网)挖矿全部停了。
+#   所有重点聚焦迁移主网" · Bettor claude-33 转达执行 · COORD-LEDGER (1016))：本步骤起挖矿 watchdog
+#   违反该直令，已守卫掉、不再派发。开机链跑的正是这个脚本，两条触发链（Session 0 + Session 1/`.lnk`）
+#   下次重启都会经过这里，守卫在此一处对两条链同时生效。只改这一步，①②④⑤原样不动，不碰
+#   kaspad/kaspad-watchdog/console/relay。恢复挖矿需 Owner 另一句直令 + 删掉本守卫块（下面原调用行
+#   保留注释，方便原样恢复）。
+Log "step③ tn12-mining-watchdog-v2.ps1 SKIPPED — Owner 直令 2026-09-13 停止全部测试网挖矿(COORD-LEDGER 1016), 守卫已加"
+# Start-Watched "powershell.exe" @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "D:\kaspa-tn12-mining\tn12-mining-watchdog-v2.ps1") "tn12-mining-watchdog-v2.ps1" | Out-Null
 
 # ④ kanet-start.sh(全栈: console+relay+bridge stack; 显式Git-Bash绝对路径, 不走PATH裸 `bash`)
 # 守卫: kanet-start.sh 本身对 :3200 无端口占用检测, 硬起会 EADDRINUSE 崩+pidfile 被覆盖留 debris。
