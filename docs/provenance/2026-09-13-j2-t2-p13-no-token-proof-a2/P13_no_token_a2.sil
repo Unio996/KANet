@@ -1,0 +1,32 @@
+pragma silverscript ^0.1.0;
+// P13 (T2 骨架 §3.3, Bettor 批): A″ 下 B 类入口的不在场证明 —— 市场状态只存 token_tmpl_hash(不烤代币后缀字节, 免成环);
+//   witness 供代币模板前后缀字节, 合约用内建 blake3 按 silverc template_hash 同一 preimage(len8‖prefix‖len8‖suffix)现场验, 再跑 P7 尾匹配。
+contract P13NoTokenA2(byte[32] init_token_tmpl_hash, int init_nonce, int max_ins) {
+    byte[32] token_tmpl_hash = init_token_tmpl_hash;
+    int      nonce           = init_nonce;
+
+    function no_token_input_present(byte[] tok_suffix) : bool {
+        bool found = false;
+        int L = tok_suffix.length;
+        for (i, 0, tx.inputs.length, max_ins) {
+            byte[] ss = tx.inputs[i].sigScript;
+            int n = ss.length;
+            if (n >= L) {
+                byte[] tail = ss.slice(n - L, n);
+                if (tail == tok_suffix) { found = true; }
+            }
+        }
+        return !found;
+    }
+
+    #[covenant.singleton]
+    function attest(State prevState, State newState, byte[] tok_prefix, byte[] tok_suffix) {
+        byte[8] pl = tok_prefix.length as byte[8];
+        byte[8] sl = tok_suffix.length as byte[8];
+        byte[32] h = blake3(pl + tok_prefix + sl + tok_suffix);
+        require(h == prevState.token_tmpl_hash);                 // witness 字节 ⇔ 状态里的模板 hash (silverc template_hash 同 preimage)
+        require(no_token_input_present(tok_suffix));             // P7 尾匹配, 用验过的后缀
+        require(newState.token_tmpl_hash == prevState.token_tmpl_hash);
+        require(newState.nonce == prevState.nonce + 1);
+    }
+}
