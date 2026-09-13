@@ -1,6 +1,7 @@
 # Owner 指令 · 主网跑 KANet · 押注资产 = 自发免费无限铸造的 KCC-20 测试币 · 评估 v0.1
 
-> **Status**: DRAFT v0.1（2026-09-13 · J1 @younio · docs only · 侧分支 `coord/j1-mainnet-testtoken`）· 给 NWT 审 → Bettor cherry-pick
+> **Status**: DRAFT v0.1.1（2026-09-13 · J1 @younio · docs only · 侧分支 `coord/j1-mainnet-testtoken`）· 给 NWT 审 → Bettor cherry-pick
+> **v0.1.1 增补**：Owner 裁定 8–10（稳定币骨架预留 §3.5 / 主网节点上 da9 / **TN12 退役** §9）。§9 改的是 CLAUDE.md 0.5 与 D-005 两条铁律 ⇒ **Bettor 必须落 DECISIONS.md**。
 > **定位**：`docs/2026-09-07-bettor-mainnet-pivot-assessment-v0.1.md`（含 v0.2 追加）的**补丁**——只补"押注资产"这一格，**不改其四个前置、不改四波顺序**。
 > **铁律 0**：本稿不动任何代码、不动 live 树、不动 pinned silverc；§6 的落地步骤每一步各自过 报备→审→批→测。
 > **不是法律意见**（§5）。
@@ -22,6 +23,9 @@
 | 5 | 「烧手续费不怕」 | 费用**不是否决项**；再平衡 cron 重设计只为效率（9/7 评估 §A），不为省钱 |
 | 6 | 「我对公网还贡献节点」 | 主网节点 = 公共品，同时是"我们跑基础设施"的可信度 |
 | 7 | 「聚焦真正应用，系统配置会省下大量时间」 | 目标是把运维时间换成应用时间 |
+| 8 | 「只要是合规的，而且技术上为今后稳定币做好一切铺垫」（同日稍后，Owner 认可"测试币与稳定币同一套合约骨架"） | **测试币合约从第一天起按稳定币骨架写**（§3.5）；第二方向本身仍不公开、不上链 |
+| 9 | 「现在首要任务是把主网节点跑起来，然后把 kanet 在测试网成果全部迁移到主网」「我远端计算机跑节点啊，哪里需要再租呢」 | 主网节点 = **da9 本机**（不租 VPS）；迁移仍**按 9/7 四波**，不是一次性全迁（§2） |
+| 10 | 「tn12 真没必要在跑了」「已经完成历史任务了。剩下来的，呵呵，我们主网慢慢来玩儿」 | **TN12 退役**（§9）；未结盘**不做**逐盘收摊（Owner 接受）；主网节奏 = 按波、不赶 |
 
 ⚠ Owner 原话写的是"krc20"——**本稿按 KCC-20 处理**：KRC-20 是 Kasplex 索引器标准（链下解释、L1 不强制），KANet 结算走 covenant/ZK，市场合约要能在链上**强制**持有与转移，只有 KCC-20（covenant 约束）做得到。
 
@@ -38,6 +42,7 @@
 | 3 ZK 结算 | 按盘上限 | 同上 |
 
 - 6/6 handoff 那句「项目终点 = 测试网公开 demo，非 mainnet」（`docs/2026-06-06-handoff-briefing.md:41`）**已被 Owner 9/7 主网指令取代**；其**G5 口径**（`:40`「测试币零价值，禁"大钱/保护资金/退款金额"框架，不报经济闭环」）**原样沿用到主网测试币**。
+- 9/7 评估 §3「TN12 保留为 staging（每波先 TN12 再主网）」与 §5「不在同一台机上跑第二个 kaspad」**被裁定 9/10 取代**：TN12 退役（§9），staging 场 = 主网上的测试币本身；主网节点跑 da9（llama 已于 9/5 停 ⇒ 内存前提消失；TN12 退役 ⇒ 磁盘前提消失，见 §9-5）。
 
 ## 3. 机制（可执行）
 
@@ -69,6 +74,10 @@ entry mint(int amount, byte[32] to, byte to_scheme)：
 
 **v0.1 = 免费 mint + (a)**。(b) 列为升级项，等 42 合约迁完、模板稳定后再议。
 
+### 3.5 稳定币骨架预留（裁定 8；细节另稿，Owner「先不急」）
+
+测试币与稳定币是**同一套合约**，差别只在几条 `require`。测试币合约**从第一天起保留三个位置**：① `mint` 入口（测试币态：无校验；稳定币态：`require(checkSig(s, issuerPk))`）；② clawback 花费路径（发行方签名可不经持有者转走该 UTXO；测试币态 `require(false)`）；③ 暂停证明入口（`checkMsgSig` 发行方时效签名 + `tx.daa` 窗口；测试币态不检查）。KCC-0020 对这些全部沉默 ⇒ 都是应用层自定义，不违规范。将来切稳定币 = 换 `require` 条件，不换骨架、不换钱包/索引器对接。
+
 ### 3.4 对外口径（每次都要有，一次都不能少）
 
 「**测试币 · 无价值 · 任何人免费无限铸造 · 只能用来押注**」。G5 沿用：不报盈亏、不报"资金"、不报"保护资金"。
@@ -92,7 +101,7 @@ entry mint(int amount, byte[32] to, byte to_scheme)：
 2. **代币合约**：`kasia-console/src/lib/sil-v1/KanetTestToken.sil`（名待 Bettor 拍）——KCC-0020 六字段布局 + `mint` 无校验 + `transfer`/`mint` 限 `owner_scheme==0x04`。
    - 编译器：**silverscript v1.0.0 官方二进制**（sha256 `ce1e0ef5…4b29af`）。🔴 **pragma 保持 `^0.1.0`**：本会话实测 v1.0.0 二进制 `COMPILER_VERSION` 仍是 `"0.1.0"`（`compiler/mod.rs:55`），`^1.0.0` 被拒（"cannot support pragmas that cover future major versions"）——J2 迁移计划 §3"正式版切 `^1.0.0`"**要反过来**，等上游升常量再切。
    - 构造参数按 `docs/CONSTRUCTOR_ARGS.md`（v1.0.0 新增）：`[{"kind":"bytes","value":[…]}, …]`。
-3. **先 TN12 staging**（9/7 §3 原则：每波先 TN12 再主网），再主网 genesis。
+3. ~~先 TN12 staging~~ → **直接主网 genesis**（TN12 退役，§9；隔离测试改为 v1.0.0 `cli-debugger` 行为向量 + 主网手续费级真链）。
 4. **市场合约侧（真正的工程量）**：pool/bshard 的 stake 从 KAS 输出值改为代币 covenant 状态 `amount`，市场 covenant 以 `owner_scheme 0x04` 持币、结算时 `transfer` 给赢家的**市场领取 covenant**（仍是 0x04，不进个人地址；领取 covenant 再按 (a) 规则继续持有——个人"钱包余额"= 其名下领取 covenant 的 amount 之和）。归 J2，与 42 合约 v1 迁移**同批**（9/7 §B「最大工程量」）。
 5. **验收**：行为向量（每 `require` 一正一反，J2 计划 §5 法）+ 主网真链（手续费级）。
 6. **CLAUDE.md 铁律 0.5 注记**另笔补 2026-09-13 状态：上游 v1.0.0 无 OP_PICK bug（#178 重构消除，非合并我们的修复）；本机修复只对仍用 0.1.0 的第三方有意义。
@@ -104,6 +113,19 @@ entry mint(int amount, byte[32] to, byte to_scheme)：
 3. 是否向 `kaspanet/kccs` 提一条 "permissionless mint 用例" 说明——**对外动作，GO 前不做**。
 4. 本稿与 J2 v1 迁移计划的合并点（建议：并入批 A 之后、批 D 之前，作为"批 T"）。
 5. `sil-v1/` 目录 vs `*_v1.sil` 后缀（J2 计划 §6-1 悬而未决，本稿倾向目录）。
+
+## 9. TN12 退役 + 主网节点上 da9（裁定 9/10 · Bettor 执行）
+
+**改变的规则（需 Bettor 落账，本稿只记原话不替他落）**：CLAUDE.md 铁律 0.5「rolling 只维持 live 公测·不停」、D-005「live 节点原地不动」、9/7 评估 §3/§5——三条由裁定 10 取代 ⇒ **DECISIONS.md 新 D-条目 + CLAUDE.md 0.5 下补 2026-09-13 状态注记（不改 Owner 原话）**。不落账，下一个接位 agent 会按铁律拒绝执行。
+
+**未结盘**：不做逐盘结算/退款、不发公告（Owner 原话「剩下来的，呵呵」「就干这几样即可」）。
+
+**Owner 指定的三件事（da9 · 原话顺序 · 不多做）**：
+1. **停 console 里所有指向 TN12 的定时任务、挖矿 watchdog、stratum 桥**：settler / seeder / 再平衡 cron / `bshard-close-*` / `zk-prove-worker`；`tn12-mining-watchdog-v2`；stratum 桥。先停消费者再停节点（否则 G-2 自愈对空节点无限重连刷错）。`KANet-TN12-BootSequence` / `KANet-Console-Supervisor` 计划任务保持 Disabled（9/2 已改）。
+2. **停 TN12 节点（kaspad `1.1.1-toc.1`）。`console.db` 留着（历史证据），kaspad 的 ≈204 GB 数据目录删掉**——链是公开的，随时能重新同步。同样**保留** `docs/evidence/*`、`docs/provenance/*`、pinned silverc（`legacy-2c46231` / `zk-8065184`，已部署 TN12 字节码的复现取证靠它们）。
+3. **腾出的 204 GB + 现有 712 GB ≈ 900 GB 直接跑主网节点，盘先不买**（官方最低 640 GB / 推荐 1 TB；想留余量再加一块**内置 NVMe**，不用 USB 外置）。节点 = 官方 **v2.0.1 原样**（不带 D-b/c/d），独立 datadir + 端口（16111/17110），`--utxoindex`。
+
+**并行留意（不挡路）**：da9 2026-09-08 22:29Z 起掉线 4 天原因未明（Tailscale LastSeen；本机 inbox/commit 零记录）。Bettor 上线后顺手看事件日志；它决定的是"公网贡献节点"的可信度，不决定波 0 能不能起。
 
 ## 8. 本会话实测坐标（v1.0.0，只写 scratchpad，未入库）
 
