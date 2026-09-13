@@ -3,6 +3,7 @@ node_modules/
 /data/
 .env
 *.log
+!docs/provenance/**/*.log
 *.pid
 
 # === 子项目运行时数据（不是源码）===
