@@ -7,9 +7,27 @@
 //   transferWithIntentRelay(假 sendKaspa/假回执): prepared 回执失败 ⇒ 零广播(fail-closed) · 正常 ⇒ prepared 在广播前、submitted 在后 ·
 //        同 key 二次 ⇒ reused 零广播 · replay 路 ⇒ 走 replayFn 不走 sendKaspa
 // Run: cd kasia-relay && node src/lib/serialize-roundtrip.test.mjs
-import * as kaspa from 'kaspa-wasm';
-import { replayPreparedTransactions } from './transaction.mjs';
-import { transferWithIntentRelay, _intentDoneSize } from './submit-intent-relay.mjs';
+//
+// 🔴 合并交互(2026-09-13, coord/mainline-abc-merge 补第 4 笔): b 分支给 rpc-listener.mjs 顶层加了
+//   `const KASPA_NETWORK = _configuredNetwork();`(未设 KASPA_NETWORK 即 throw, 活 relay 进程本该如此暴露)。
+//   本文件静态 import transaction.mjs → 转引 rpc-listener.mjs, 在 c 分支单独存在时这条转引链没有这一步,
+//   b+c 合流后才炸。修法照抄 rpc-health-datacheck.test.mjs 的"自举子进程先设 env 再动态 import"套路:
+//   ESM 静态 import 会被提升到本文件任何语句之前执行, 文件顶部加一行 `process.env.KASPA_NETWORK=...`
+//   救不了(顶层 import 早就跑完了)——自举子进程在 spawnSync 时把 env 传进去, 子进程里再用 await import()
+//   延后到运行期才加载 transaction.mjs/submit-intent-relay.mjs 的模块图, 此时 env 已经在。
+import { spawnSync } from 'node:child_process';
+
+if (!process.env._SERIALIZE_RT_TEST_BOOTSTRAPPED) {
+  const r = spawnSync(process.execPath, [process.argv[1]], {
+    cwd: process.cwd(), stdio: 'inherit',
+    env: { ...process.env, _SERIALIZE_RT_TEST_BOOTSTRAPPED: '1', KASPA_NETWORK: process.env.KASPA_NETWORK || 'mainnet' },
+  });
+  process.exit(r.status ?? 1);
+}
+
+const kaspa = await import('kaspa-wasm');
+const { replayPreparedTransactions } = await import('./transaction.mjs');
+const { transferWithIntentRelay, _intentDoneSize } = await import('./submit-intent-relay.mjs');
 
 const { Keypair, Generator, PaymentOutput, Address, Transaction } = kaspa;
 let fails = 0;

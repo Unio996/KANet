@@ -4,8 +4,22 @@
 // 反序列化失败 ⇒ replay_bad_json ⇒ console 侧 hold)。全部离线, 零 RPC 零广播。
 // 交易形照 relay p2sh.mjs bshard continuation(version 1, P2SH covenant 输入带 utxo.covenantId, no-sig scriptSig 押 redeem, 输出 CovenantBinding(0, covId)) + 一个 P2PK fee 输入真签名。
 // Run: cd kasia-relay && node src/lib/covenant-roundtrip.test.mjs
-import * as kaspa from 'kaspa-wasm';
-import { replayPreparedTransactions } from './transaction.mjs';
+//
+// 🔴 合并交互(2026-09-13, coord/mainline-abc-merge 补第 4 笔): 同 serialize-roundtrip.test.mjs 头注——
+//   本文件静态 import transaction.mjs 转引 rpc-listener.mjs 顶层的 b 分支 `_configuredNetwork()`(未设即 throw)。
+//   修法同款: 自举子进程先设 KASPA_NETWORK 再动态 import。
+import { spawnSync } from 'node:child_process';
+
+if (!process.env._COVENANT_RT_TEST_BOOTSTRAPPED) {
+  const r = spawnSync(process.execPath, [process.argv[1]], {
+    cwd: process.cwd(), stdio: 'inherit',
+    env: { ...process.env, _COVENANT_RT_TEST_BOOTSTRAPPED: '1', KASPA_NETWORK: process.env.KASPA_NETWORK || 'mainnet' },
+  });
+  process.exit(r.status ?? 1);
+}
+
+const kaspa = await import('kaspa-wasm');
+const { replayPreparedTransactions } = await import('./transaction.mjs');
 
 const { Keypair, PrivateKey, Transaction, TransactionOutput, CovenantBinding, Hash, ScriptBuilder, createInputSignature, SighashType, addressFromScriptPublicKey, payToAddressScript } = kaspa;
 let fails = 0;

@@ -13,7 +13,10 @@ if (!process.env._BFEPS_TEST_BOOTSTRAPPED) {
   execSync('node scripts/run-migrations.mjs', { cwd: process.cwd(), env: { ...process.env, DB_PATH: tmpDb }, stdio: 'pipe' });
   const r = spawnSync(process.execPath, [process.argv[1]], {
     cwd: process.cwd(), stdio: 'inherit',
-    env: { ...process.env, DB_PATH: tmpDb, _BFEPS_TEST_BOOTSTRAPPED: '1' },
+    // 🔴 合并交互(2026-09-13, coord/mainline-abc-merge 补第 4 笔): b 分支给 broker-fee-emit.mjs:121 加了
+    //   checkAddressOnNetwork(需要 KASPA_NETWORK), 本文件夹具 spine_p2sh 是 kaspatest: 地址(见下方 :44 注释)
+    //   但从没设这个 env ⇒ 顶层 configuredNetwork() throw。补 env, 值与夹具地址网络一致(不引入 netSkip)。
+    env: { ...process.env, DB_PATH: tmpDb, _BFEPS_TEST_BOOTSTRAPPED: '1', KASPA_NETWORK: process.env.KASPA_NETWORK || 'testnet-12' },
   });
   try { fs.unlinkSync(tmpDb); } catch {}
   process.exit(r.status ?? 1);
