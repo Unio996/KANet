@@ -892,8 +892,17 @@ if (process.env.BROKER_ENABLED === '1') {
 
 // T-NWT-V2 (Owner 真测 #2 退场立项): bsc-incoming-watcher — 30s tick 后台扫 broker EVM 收款
 // 地址 USDT 入账, 调 J2 verifyPaymentForPeer 自动反查 + 主动 DM user. 双路径互补 J2 lazy LLM tool.
-import { start as startBscIncomingWatcher } from './services/bsc-incoming-watcher.js';
-startBscIncomingWatcher();
+// broker-optional-2(2026-09-13, J2 · Bettor GO-C 第三次现场·1099): 本文件自身无 BROKER_RELAY_ID 依赖(import
+// 本身安全, 不放进 index.js 顶层门), 但 tick() 每 30s 无条件 `await import('./broker-buy-handler.js')`——
+// 在检查 peers.length 之前就 import, 而 broker-buy-handler.js 静态 import broker-state-authority.js(它顶层
+// fail-loud throw)。BROKER_ENABLED 门只管了"谁被静态拉进启动路径"没管"这个常驻 tick 会不会自己动态踩上去"
+// ——未启用时干脆不起这个 watcher(全仓扫描: 唯一一处"tick 内无条件动态 import broker-*, 不看有没有待处理项
+// 就先 import"的常驻 cron; broker-state-reconciler 的三处动态 import 都在 `for (const order of rows)` 循环体
+// 内, 空库 rows.length===0 时循环体不执行, 不触发, 不需要额外门)。
+if (process.env.BROKER_ENABLED === '1') {
+  const { start: startBscIncomingWatcher } = await import('./services/bsc-incoming-watcher.js');
+  startBscIncomingWatcher();
+}
 
 // NWT-V3 / Qclaude (2026-04-27): monitor 服务启动 (route 在 fastify.listen 前已注册, 见 line 137)
 // NWT 19:50 修 3 个 bug:
