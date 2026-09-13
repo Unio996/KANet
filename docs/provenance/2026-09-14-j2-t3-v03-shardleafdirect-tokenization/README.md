@@ -53,34 +53,21 @@ mk_shardleafdirect_tokenization_vectors.mjs 脚本末尾打印的 JSON：
 {"rootclose_bytecode_length":16802,"rc_prefix_len":1,"rc_suffix_len":16714,"total_witness_bytes":16715}）
 ```
 
-**估算 mass（两个分量，公式来源 `docs/2026-08-27-j2-s63-gate-d-p3-fee-source-v0.1.md:87`，J2 此前核对
-`consensus/core/src/mass/mod.rs:334-360` 逐字对上）**：
+**估算 mass（更正版，Bettor ledger 1196：真实公式没有额外的 blake2b 计费项）**：
 
-1. **交易体积分量**：`compute_mass` 公式含 `size × mass_per_tx_byte` 项——这 16715 字节直接计入交易序列化
-   体积，按 TN12 继承的 `TESTNET_PARAMS`（`mass_per_tx_byte: 1`，见
-   `docs/2026-08-27-j2-s63-gate-d-p3-fee-source-v0.1.md:88`）逐字节 1:1 计入 mass，即约 **16,715 mass 单位**。
-2. **double-blake2b 哈希分量**：`ShardLeaf_direct.sil` 文件头注释本身记录过同一类操作的真实链上实测比率——
-   `ShardLeaf.convert_to_foldnode` 对 1242 字节 FoldNode 模板做 `WithTemplate` 的 double-blake2b，实测
-   **11242 units，即 ~9 units/byte**（这不是本次新估的数字，是 2026-06-20 probe-B 链上实证值，本次直接复用同
-   一类操作的经验比率）。按同比率估算：16715 × 9 ≈ **150,435 mass 单位**。
+真实 mass 公式：`compute = size × 1`，`transient = size × TRANSIENT_BYTE_TO_MASS_FACTOR(=4)`——**没有**
+"double-blake2b 按字节数额外计费"这一项（v0.1 初版曾用 `ShardLeaf.convert_to_foldnode` 2026-06-20
+probe-B 的"~9 units/byte"链上实测比率去估算一个假想的哈希分量，那条比率描述的是**当年那次具体 probe 测到
+的总 mass 现象**，不是 mass 公式本身的一个独立计费项，本次已确认这个套用是错的，予以撤回）。
 
-**估算合计 ≈ 16,715 + 150,435 ≈ 167,150 mass 单位**（两个分量的口径不同，未必是简单加总——`mass/mod.rs`
-公式里 `compute_budget` 项和 `size×mass_per_tx_byte` 项是否对同一批哈希字节重复计费，本次未逐行核对
-`mass/mod.rs` 源码确认，只是把两个已知分量并列摆出，供 NWT 用真实公式复核，不代表这是精确值）。
+按 `rc_prefix+rc_suffix=16715` 字节真实计入交易体积重算：
+- `compute ≈ 16715 × 1 ≈ **16,715 mass 单位**`
+- `transient ≈ 16715 × 4 ≈ **66,860 mass 单位**`
 
-**如实记录的局限（本次未核实的部分）**：
-- 上面 `mass_per_tx_byte: 1` 与 `~9 units/byte` 两个系数均来自 **TN12/TESTNET_PARAMS** 语境下的既有记录
-  （`docs/2026-08-27-j2-s63-gate-d-p3-fee-source-v0.1.md` 引用 + 本文件自己的历史 probe-B 实测）——D-017 已
-  裁定押注资产迁移到**主网** da9 节点，**本次没有单独核对 `MAINNET_PARAMS` 的 `mass_per_tx_byte`/
-  哈希实际单价是否与 TESTNET_PARAMS 相同**（Bettor 1191 核过的是 `toccata_activation` 阈值和
-  `sigScript` 长度上限 250,000B，不是 mass 单价系数本身）。如果主网系数不同，上面的估算需要按主网真实系数
-  重算。
-- `~9 units/byte` 是"double-blake2b 覆盖整份模板"这一操作类别的经验比率，`convert_to_rootclose` 里
-  `validateOutputStateWithTemplate` 具体的 opcode 序列是否与当年 probe-B 测的 `convert_to_foldnode` 完全同构
-  （例如 hash 次数、是否有其它随字节线性增长的操作）不属于本次重新验证范围，只是同类比率的合理外推。
-- **参照点**：TN12 单块 `compute` mass 上限 500,000（`docs/2026-08-27-...v0.1.md:88`）——若估算量级
-  （~167,150）适用，这一笔 `convert_to_rootclose` 调用大约占单块 compute mass 预算的 **三分之一**，量级本身
-  值得 NWT 单独核实，不能仅凭本次估算下结论。
+**如实记录**：`mass_per_tx_byte=1` 这条系数 Bettor（1195）已核对主网与旧网相同；`TRANSIENT_BYTE_TO_MASS_FACTOR`
+本次未单独重新核对主网数值是否与已引用的旧网参数一致，`compute` 部分的精确公式细节交 NWT 复核（Bettor
+1196）。这两个数字（~16.7k / ~66.9k）都远小于 v0.1 初版误估的 ~167,150，量级判断（"是否会挤占单块预算"）
+应以这版更正后的数字为准，不要再引用已撤回的 "9u/byte" 估算。
 
 ## 向量（`run.log`，14/14 PASS，全部 flip-expect 复核真实失败行）
 

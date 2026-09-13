@@ -145,17 +145,25 @@
    记录"确切的 `binding=cov` codegen 那一行本身未诊断（超出 2h 预算）"，同一未闭环。
 
 2. **RootClose 体积**：代币化后编译产物 `16802` 字节，远超文件头注释"~825B seal 目标预算"。Bettor（1191）
-   已核实主网 post-Toccata（DAA≈539.1M）`sigScript` 上限 250,000B，**尺寸本身合法**；但 `mass_per_tx_byte=1`
-   与旧网相同（Bettor 1194 已核），**compute mass 的另一分量（double-blake2b 哈希开销，本稿 §3 曾用
-   ~9u/byte 经验比率估算约 167,150 mass 单位）仍待 NWT 复核**——这不是"能不能上链"的问题（已确认能），而是
-   "这笔调用占单块 compute mass 预算多大比例、是否需要专门优化"的性能/经济问题，未闭环。
+   已核实主网 post-Toccata（DAA≈539.1M）`sigScript` 上限 250,000B，**尺寸本身合法**。**mass 估算已更正
+   （Bettor 1196）**：真实公式 `compute=size×1`、`transient=size×TRANSIENT_BYTE_TO_MASS_FACTOR(=4)`，**没有**
+   额外的 double-blake2b 按字节计费项——v0.1 初版曾套用 `ShardLeaf_direct` 文件头 2026-06-20 probe-B 的
+   "~9u/byte"经验比率估算约 167,150 mass 单位，这个套用**已确认是错的**并撤回；按真实公式对 `rc_prefix+
+   rc_suffix=16715` 字节重算，`compute≈16,715`、`transient≈66,860`（均远小于误估的 167,150）。`compute`
+   部分精确细节仍交 NWT 复核，但量级判断不应再引用已撤回的旧估算。
 
-3. **hand-off 原子性（ShardLeaf.consolidate_to_payout ↔ PayoutShard.absorb）**：`ShardLeaf.sil` 本次代币化
-   README 如实记录了一个未展开的设计问题——`consolidate_to_payout` 的代币输出是否要求与 `PayoutShard.absorb`
-   在**同一笔交易**里原子执行，还是允许"先产出一笔新 KTT UTXO，后续任意时刻被 absorb 读入"的独立两步。本次
-   实现选了更保守的**独立两步**（不强制同笔）。**Bettor（1194）读 §2 表倾向"同笔"**（`psInIdx` = PS 本笔
-   输入在场这条判据暗示同笔）——**已交 NWT 裁**，本次未改代码，等裁定后再看是否需要调整
-   `ShardLeaf.consolidate_to_payout`/`PayoutShard.absorb` 的签名让两者引用同一批 index。
+3. **hand-off 原子性（ShardLeaf.consolidate_to_payout ↔ PayoutShard.absorb）—— 已闭环（NWT 1196 MUST-FIX，
+   Bettor 1197 批 (b)，见 `docs/provenance/2026-09-14-j2-t3-v03-shardleaf-payoutshard-handoff-fix/`）**：
+   v0.5 初版记录的"未展开的设计问题"——本次证实"独立两步"的假设是**错的**：`KanetTestToken.transferPolicy`
+   的 `(b-in)` 路由检查逼出 `consolidate_to_payout` 与 `absorb` 结构上**必须同笔原子**（新输出 owner=X 要求
+   covenant=X 的输入同笔在场，PS 的 covenant 在场就必然要求 `absorb` 同笔跑）。NWT 红队独立发现：`ShardLeaf`
+   原实现在 `consolidate_to_payout` 里自建了一个 owner=ps_cov 的中间态代币输出，被 `absorb` 的
+   `scanOwnedTokenInputs` 全扫描重复计入，导致 `shard_amount>0` 时代币永久冻结（非被盗）。修法：
+   `consolidate_to_payout` 去掉自建的代币输出，收窄为纯输入侧核对（`scanOwnedTokenInputs()==pool_value`），
+   relabel 完整交给 `absorb` 已有（未改动、已 GREEN）的 `tok_out` 一步做完。`PayoutShard.sil`/
+   `PayoutShardV2.sil` 零改动。`ShardLeaf_direct.convert_to_rootclose` **不适用同一修法**（创建的是本笔
+   新建的 RootClose genesis 输出，没有对手方 entry 同笔运行，必须自己造代币输出，同 `RootClose.convert_to_
+   claim` 形状）。10 条跨合约向量 PASS（含 Codex ledger 1198 补的五条负向量），全部 flip-expect 复核。
 
 4. **RootClaim/RefundClaim ctor 变更对 T4 创世对照的影响**：T4 创世骨架设计（`docs/2026-09-13-j2-t4-market-
    genesis-console-side-skeleton-v0.1.md` §2.1.1）列出"7 个模板 hash 留 ctor、不进状态字段表"的清单
@@ -186,16 +194,30 @@
    拒绝合法交易"——`界=8` 意味着任何真实产生 >8 输入的合法场景都会被结构性拒绝（这是可用性问题，不是安全
    漏洞，但如果真实场景确实需要更多输入，界需要按场景调高）。这条核对本稿写作时尚未做，见 §5 第 6 项。
 
-6. **`MAX_INS_SCAN=8` 的活性核对（Bettor 1195 新增，本次正在做，结果见后续 commit）**：需要对照
-   `kasia-console/src/lib/` 里真实构造这些交易的代码（`bshard-close-transport.mjs`/`bshard-payout-family-
-   coherence.mjs`/`pool-shard-register.mjs`/`pool-shard-settle.mjs`/`pool-bshard-market-setup.mjs`/
-   `pool-bshard-artifacts.mjs` 等），逐个 A/B 入口列出真实交易的**最大输入数**（含多分片归集、多代币输入、
-   ZK close 等场景），证明 ≤8；哪个入口的真实最大输入数超过 8，就按该入口调高 `MAX_INS_SCAN` 并补齐
-   界/界+1/victim 末位三条边界向量（同 1122-补的既有形状）。本稿 v0.5 初版发布时这项核对**尚未进行**——
-   `MAX_INS_SCAN=8` 是沿用 `PayoutShard.sil` 最早引入时的"可测试小值"（该文件头注释里就是这么说的：
-   "生产取值留给 T3 v0.3 全量落码时按各市场合约实际预期的最大输入形态选定"），本次五个文件全部照抄同一个
-   数字，**没有对每个文件的真实场景分别验证过**。这条核对完成后，本节会更新为"已核实 ≤8"或"发现 N 个文件
-   需要调高"的具体结果。
+6. **`MAX_INS_SCAN=8` 的活性核对（Bettor 1195 新增，本次已做，结果如下）**：对照 `kasia-console/src/lib/`
+   真实构造这些交易的代码（`pool-register-builder.mjs`/`pool-shard-register.mjs`/`pool-shard-settle.mjs`/
+   `bshard-close-transport.mjs`/`pool-close-builder.mjs`/`pool-claim-builder.mjs` 等），逐入口核实：
+
+   | 入口 | 真实交易输入数（旧 KAS-value 形态，代码可查） | 备注 |
+   |---|---|---|
+   | `ShardLeaf/ShardLeaf_direct.register_append` | 2（leaf + relay 单笔资金输入） | `pool-register-builder.mjs:57-87`，`bettorFunding` 虽类型标 `[...]` 数组，唯一真实调用点 `pool-shard-register.mjs:396-399` 恒传 1 个元素 |
+   | `ShardLeaf.consolidate_to_payout` + `PayoutShard.absorb`（已确认同笔） | 3（payoutshard + shardleaf + fee） | `pool-shard-settle.mjs:446-484` `consolidateAllShards`——**逐分片各起一笔交易，不批量合并**，印证"一 shard 一 tx"不是"多 shard 一 tx" |
+   | `PayoutShard/V2.close_attest` | 2（payoutshard + fee） | `bshard-close-transport.mjs:407-410`；B 类本就无代币输入 |
+   | `PayoutShardV2.zk_handoff` | 2（payoutshard + fee） | `bshard-close-transport.mjs:531-540` |
+   | `RootClose.close_commit` | 2（root + fee） | `pool-close-builder.mjs:64-67` |
+   | `PayoutShard.claim`（旧 `PoolRoot`-era 构造器，供参考） | 3（root + ticket + fee） | `pool-claim-builder.mjs:96-100`，疑似已被 `RootClaim` 拆分取代，未确认仍在用 |
+   | `RootClose.refund_flip`/`convert_to_claim`/`convert_to_refundclaim`、`PayoutShard/V2.cancel_attest`/
+     `refund_claim`、`ShardLeaf_direct.convert_to_rootclose` | **无真实调用方** | 这些入口作为 relay 命令类型字符串在 `kasia-console/src/lib/*.mjs` 里零命中——T3 本次落码的代币化参数（`tokenInIdx`/`tokenOutIdx`/`stakeInIdx`/`tok_prefix`/`tok_suffix`）**尚未被任何交易构造器接入**，是纯 `.sil` 层实现，还没有对应的 console 侧调用代码 |
+
+   **结论**：所有已确认有真实调用方的入口，最大输入数在 **2-3** 之间（含 fee 输入），远低于 8；代币化新增
+   的字段各占**一个具名槽位**（不是数组），不会把这些数字推高到接近 8。**没有发现任何"多分片批量合并"/
+   "多代币输入累加"/"ZK close 多 nullifier 输入"的真实批量场景**——所有"多 shard"/"多 bettor" 语义都是
+   **串行、逐笔独立交易**处理的，不是攒进一笔宽交易。`MAX_INS_SCAN=8` **对已确认场景成立、且留有充分余量**
+   （8 vs 实际 2-3，约 2.5x-4x 冗余）。**如实记录局限**：这个结论建立在"旧 KAS-value 形态的构造器代码"
+   之上——T3 代币化的新签名还没有真实调用方，无法验证 console 侧接入这些新参数后是否会引入新的、更宽的
+   输入需求（例如把 `stakeInIdx`/`tokenInIdx` 的资金来源从"relay 单笔资金"改成"用户钱包自由 UTXO 选择"，
+   那样 `bettorFunding` 类型标注的 `[...]` 数组就可能不再恒为 1 个元素）——这条留给 console 侧真正接入
+   代币化字段时重新核实，不是本次能提前证明的。
 
 ## 6. 联合合入准备
 

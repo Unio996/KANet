@@ -1,0 +1,8 @@
+  RUN   V-HOF-1_pass_shardleaf_side_consolidate_to_payout
+  PASS  V-HOF-1_pass_shardleaf_side_consolidate_to_payout
+  RUN   V-HOF-5_fail_shardleaf_smuggled_second_owned_token_uncounted
+  PASS  V-HOF-5_fail_shardleaf_smuggled_second_owned_token_uncounted
+  RUN   V-HOF-6_fail_wrong_ps_covenant_id_fake_ps
+  PASS  V-HOF-6_fail_wrong_ps_covenant_id_fake_ps
+
+3 tests: 3 passed, 0 failed

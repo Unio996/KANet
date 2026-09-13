@@ -1,5 +1,12 @@
 # ShardLeaf.sil — T3 v0.3 §2 全 23 入口 A/B 落位表代币化（ledger 1188 批次④第三处）
 
+> 📌 **状态注记（2026-09-14 · NWT ledger 1196 MUST-FIX · Bettor 1197 批 (b)）**：本文件下方"一个未展开的
+> 跨合约设计问题"一节里"独立两步（不强制同笔）"的假设**已证实是错的**——`consolidate_to_payout` 与
+> `PayoutShard.absorb` 结构上必须同笔原子，且原实现自建的中间态代币输出会被 `absorb` 的
+> `scanOwnedTokenInputs` 重复计入、造成代币冻结。修复与完整推导见
+> `docs/provenance/2026-09-14-j2-t3-v03-shardleaf-payoutshard-handoff-fix/README.md`（不改本文件原文，
+> 按仓库通则补状态注记）。本文件下方记录的 `consolidate_to_payout` 签名/向量已被该修复取代，仅作历史记录。
+
 ## 背景
 
 延续 `RootClose.sil` 的代币化批次（`24aea3cc`/`60307fc1`），本次落码 `docs/2026-09-14-j2-t3-market-set-token-rewrite-design-v0.3.md` §2 表里 `ShardLeaf.sil` 的两行：
