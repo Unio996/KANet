@@ -1055,6 +1055,95 @@
      }
     ]
    }
+  },
+  {
+   "name": "V-T-12_fail_next_state_owner_zero32_rejected",
+   "function": "transfer",
+   "constructor_args": [
+    100,
+    "0x1111111111111111111111111111111111111111111111111111111111111111",
+    4,
+    0,
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "0xaabbccddee",
+    5,
+    3,
+    3
+   ],
+   "args": [
+    [
+     {
+      "amount": 100,
+      "owner": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "owner_scheme": 4,
+      "borrow_scheme": 0,
+      "borrow_guard": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "extension_commitment": "0x0000000000000000000000000000000000000000000000000000000000000000"
+     }
+    ],
+    "0x",
+    [
+     2,
+     2
+    ],
+    [
+     3
+    ]
+   ],
+   "expect": "fail",
+   "tx": {
+    "active_input_index": 0,
+    "inputs": [
+     {
+      "utxo_value": 1,
+      "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "state": {
+       "amount": 60,
+       "owner": "0x1111111111111111111111111111111111111111111111111111111111111111",
+       "owner_scheme": 4,
+       "borrow_scheme": 0,
+       "borrow_guard": "0x0000000000000000000000000000000000000000000000000000000000000000",
+       "extension_commitment": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+     },
+     {
+      "utxo_value": 1,
+      "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "state": {
+       "amount": 40,
+       "owner": "0x1111111111111111111111111111111111111111111111111111111111111111",
+       "owner_scheme": 4,
+       "borrow_scheme": 0,
+       "borrow_guard": "0x0000000000000000000000000000000000000000000000000000000000000000",
+       "extension_commitment": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+     },
+     {
+      "utxo_value": 10,
+      "covenant_id": "0x1111111111111111111111111111111111111111111111111111111111111111",
+      "signature_script_hex": "00aabbccddee"
+     },
+     {
+      "utxo_value": 10,
+      "signature_script_hex": "00aabbccddee"
+     }
+    ],
+    "outputs": [
+     {
+      "value": 1,
+      "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "state": {
+       "amount": 100,
+       "owner": "0x0000000000000000000000000000000000000000000000000000000000000000",
+       "owner_scheme": 4,
+       "borrow_scheme": 0,
+       "borrow_guard": "0x0000000000000000000000000000000000000000000000000000000000000000",
+       "extension_commitment": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+     }
+    ]
+   }
   }
  ]
 }

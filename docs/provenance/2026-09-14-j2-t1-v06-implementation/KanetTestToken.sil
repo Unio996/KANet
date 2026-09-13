@@ -92,6 +92,12 @@ contract KanetTestToken(
             require(next_states[j].borrow_scheme == BORROW_DISABLED);
             require(next_states[j].borrow_guard == byte[32](0x0000000000000000000000000000000000000000000000000000000000000000));
             require(next_states[j].extension_commitment == byte[32](0x0000000000000000000000000000000000000000000000000000000000000000));
+            // ★ T1 v0.7(NWT 1158 系统性扫查): next_state.owner 不得为全零。owner 字段随后被喂给
+            //   ownerIsMarketInput(...)==OpInputCovenantId(idx)==want 的等值比对——若 owner 本身能是 ZERO32,
+            //   而 OpInputCovenantId 对任何未声明 covenant_id 的输入回退 ZERO_HASH(rusty-kaspa
+            //   opcodes/mod.rs unwrap_or(ZERO_HASH)), 花费侧就能把新代币铸成"owner=全零"、后续被任何裸输入
+            //   在场核恒真花掉——同一族 ZERO_HASH 缺口, 在铸币(genesis 花费)侧堵死, 不留到花费侧才发现。
+            require(next_states[j].owner != byte[32](0x0000000000000000000000000000000000000000000000000000000000000000));
             sum_out = sum_out + next_states[j].amount;
             require(recv_idx[j] >= 0);
             require(ownerIsMarketInput(recv_idx[j], next_states[j].owner));

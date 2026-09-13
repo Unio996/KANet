@@ -28,6 +28,8 @@
   PASS  V-T-6b_fail_bout_route_removed_negative_recv_idx_now_rejected
   RUN   V-T-7b_pass_burn_allowed_sum_in_greater_than_sum_out
   PASS  V-T-7b_pass_burn_allowed_sum_in_greater_than_sum_out
+  RUN   V-T-12_fail_next_state_owner_zero32_rejected
+  PASS  V-T-12_fail_next_state_owner_zero32_rejected
 
-14 tests: 13 passed, 1 failed
+15 tests: 14 passed, 1 failed
 Error: "some tests failed"
