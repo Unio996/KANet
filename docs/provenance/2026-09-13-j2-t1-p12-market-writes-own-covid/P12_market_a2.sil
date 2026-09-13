@@ -1,0 +1,32 @@
+pragma silverscript ^0.1.0;
+// P12 (T1 v0.5 A″ 市场侧探针, 非实现): per-instance 值(代币模板 hash/长度·领取模板 hash·oracle·问题·截止)全是【状态字段】, ctor 只赋初值 ⇒ 模板稳定;
+//   payout_claim: 领取输出的 market_cov_id 由市场【自己】写 OpInputCovenantId(this.activeInputIndex)(provenance, 不从外部喂);
+//   settle_token: H5 用 validateOutputStateWithInputTemplate 以状态里的 token 模板 hash/长度(运行期值)核代币输出。
+contract P12MarketA2(byte[32] init_token_tmpl_hash, int init_token_prefix_len, int init_token_suffix_len, byte[32] init_claim_tmpl_hash,
+                     byte[32] init_oracle_pk, byte[32] init_question_hash, int init_deadline) {
+    byte[32] token_tmpl_hash  = init_token_tmpl_hash;
+    int      token_prefix_len = init_token_prefix_len;
+    int      token_suffix_len = init_token_suffix_len;
+    byte[32] claim_tmpl_hash  = init_claim_tmpl_hash;
+    byte[32] oracle_pk        = init_oracle_pk;
+    byte[32] question_hash    = init_question_hash;
+    int      deadline         = init_deadline;
+
+    struct ClaimState { byte[32] market_cov_id; byte[32] winner_pk; int amount; }
+    struct TokenState { int amount; byte[32] owner; byte owner_scheme; byte borrow_scheme; byte[32] borrow_guard; byte[32] extension_commitment; }
+
+    entry payout_claim(int claim_out_idx, byte[32] winner_pk, int amount, byte[] c_prefix, byte[] c_suffix) {
+        validateOutputState(0, State { token_tmpl_hash: token_tmpl_hash, token_prefix_len: token_prefix_len, token_suffix_len: token_suffix_len,
+                                       claim_tmpl_hash: claim_tmpl_hash, oracle_pk: oracle_pk, question_hash: question_hash, deadline: deadline });
+        validateOutputStateWithTemplate(claim_out_idx,
+            ClaimState { market_cov_id: OpInputCovenantId(this.activeInputIndex), winner_pk: winner_pk, amount: amount },
+            c_prefix, c_suffix, claim_tmpl_hash);
+    }
+
+    entry settle_token(int token_in_idx, int token_out_idx, TokenState out_state) {
+        validateOutputState(0, State { token_tmpl_hash: token_tmpl_hash, token_prefix_len: token_prefix_len, token_suffix_len: token_suffix_len,
+                                       claim_tmpl_hash: claim_tmpl_hash, oracle_pk: oracle_pk, question_hash: question_hash, deadline: deadline });
+        validateOutputStateWithInputTemplate(token_out_idx, out_state, token_in_idx, token_prefix_len, token_suffix_len, token_tmpl_hash);
+        require(out_state.owner == OpInputCovenantId(this.activeInputIndex));
+    }
+}

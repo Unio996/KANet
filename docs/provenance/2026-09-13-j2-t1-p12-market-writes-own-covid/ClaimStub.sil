@@ -1,0 +1,13 @@
+pragma silverscript ^0.1.0;
+// P12 领取 covenant 替身(A″: per-instance 值 market_cov_id/winner_pk/amount 全在状态, 模板稳定)
+contract ClaimStub(byte[32] init_market_cov_id, byte[32] init_winner_pk, int init_amount) {
+    byte[32] market_cov_id = init_market_cov_id;
+    byte[32] winner_pk     = init_winner_pk;
+    int      amount        = init_amount;
+    #[covenant.singleton]
+    function passthrough(State prevState, State newState) {
+        require(newState.market_cov_id == prevState.market_cov_id);
+        require(newState.winner_pk == prevState.winner_pk);
+        require(newState.amount == prevState.amount);
+    }
+}
