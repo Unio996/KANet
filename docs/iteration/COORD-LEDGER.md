@@ -12316,3 +12316,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1011) KANet-UI 4e9f2390 已推（波 0 骨架页：§2 规格改引用 runbook §4.5 实测表；页首注 **核心前提"找第二台机"已被 D-017 取代**）· **裁**：Owner 四拍之「波 0 GO/第二台机」已由 D-017 裁定 9 解决 = 不起第二台机；**S-2 TN12 第二前向节点（998）关闭**（TN12 退役，零追加投入；Owner 可否决）· D-017 加状态注记 · 剩余 Owner 待拍 = G-1 GO / 合约迁移波 3 前置 / 密钥与资金上限 / GO-1 — Bettor 2026-09-13T10:24:14Z
 - 派 KANet-UI：该页 Status 头改成 `SUPERSEDED-by DECISIONS.md D-017 (2026-09-13)` + 顶部横幅（D-004 文档生命周期机制），原文保留；一笔 docs commit 报我。
+
+### (1012) 🔴 **更正 1005/1009（Bettor 实名）：kaspad 16644 的父进程是 18576，不是 24220**——我最早那张进程表第一列就写着 16644←18576，是我读错自己的输出后连写两块；NWT 审 runbook（fce3898e·已推）⑧ 用独立进程树查证伪。**地面（`logs/boot-sequence.log` 原文）**：09:45Z 重启后 `kanet-boot-sequence.ps1` 跑了 **两遍**——16:45:38 本地（09:45:38Z·Session 0·"kaspad-watchdog.ps1: dispatched OK, PID=18576"）与 16:45:56（09:45:56Z·Session 1·Startup .lnk·PID=24220）；18576 先发现 kaspad 缺失拉起 16644（16:48:06）。两遍各派 tn12-mining-watchdog-v2（13788 / 19532）与 console-supervisor.sh（12260 / 2256）⇒ **本机现成对跑三种守护进程**。07:17Z 第一次重启只跑一遍（14:45:11·PID 23280）— Bettor 2026-09-13T10:31:32Z
+- **命令行证据链修正**：18576 = kaspad-watchdog.ps1 实例（日志记 PID）· 09:45:38Z 起 · 脚本 mtime 09-06 22:55Z 此后未改 ⇒ 运行参数 = :47 现值（无 D-c/D-d）。NWT 判是否达 Codex 3358c4ff 标准。
+- **Session 0 那遍的触发源未定位**：非提权 `Get-ScheduledTask`/`schtasks /query /v`/Run 键/TaskScheduler 日志全空或不可读；其祖先 3020←2576(svchost·09:45:32Z) 形态 = SYSTEM 开机触发的计划任务。**需 Owner 管理员 PowerShell 跑一次**：`Get-ScheduledTask | % { $_ | ? { ($_.Actions | % Arguments) -match 'boot-sequence|kanet' } } | select TaskPath,TaskName,State`。未定位 = 禁 .lnk 后重启仍会拉回 TN12 栈 ⇒ **列为 GO-1 前置**。
+- **NWT verdict 采纳**：GO-1 不发；KANet-UI 出 v0.1.2（⑥ drain 覆盖全部消费者 + minDepth=20/30 min；① SQL 写死；② 优雅关闭优先；⑧ 证据链换日志；新 MUST：停序覆盖 Session 0/1 两套实例 + 触发源定位）→ NWT 复审 → 再要 GO-1。
