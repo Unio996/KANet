@@ -118,6 +118,13 @@ SELECT key, category, value_encrypted, is_sensitive, updated_at FROM config_entr
 
 1. `KANet-TN12-BootSequence.lnk`：改名加 `.disabled` 后缀（同目录已有 `tn10-mining-watchdog.cmd.disabled` 先例，是本仓沿用的禁用记号），**不删除**（保留可回滚）——这一步只堵 Session 1 那个触发源。
 2. **🔴 Session 0 触发源必须先定位并禁用，此项未完成前不得进 GO-1**：待 Bettor 提权查明（候选方向：提权 `Get-ScheduledTask`/组策略启动脚本/服务/WMI 事件订阅——本 runbook 不猜测，等实测结果）。
+   **提权查询命令（Bettor 已发 Owner，回执贴回后本步骤直接填结果，不用再猜候选方向）**：
+   ```powershell
+   Get-ScheduledTask | Where-Object {
+     $_.Actions | Where-Object { $_.Arguments -match 'boot-sequence|kanet|kaspad' }
+   } | Select-Object TaskPath, TaskName, State, @{n='UserId';e={$_.Principal.UserId}}
+   ```
+   （非提权 `Get-ScheduledTask` 在本会话查不到任何 `*KANet*`/`*Console*`/`*Kaspad*` 任务名——但那是按**任务名**过滤，如果 Session 0 触发源是个改了别的名字的任务，本命令改按**动作参数**内容过滤，能扫到任务名不含关键词但实际调用 boot-sequence.ps1/kaspad-watchdog.ps1 的任务；`Principal.UserId` 一栏用来判断触发身份是 SYSTEM 还是某个用户，帮助判断 Session 0 那一遍到底是谁/什么机制起的。）
 3. 验证：下次登录/重启不应再看到 boot-sequence.log 有任何新的 "=== boot sequence start ===" 行（两遍都不该再出现，不是"少了一遍"）。
 
 ### 2.5 回滚（任何一步出问题）
@@ -186,5 +193,5 @@ kaspad.exe --appdir=D:\kaspa-mainnet-data --utxoindex --rpclisten-borsh=127.0.0.
 - pinned silverc 确切路径——待 J2/NWT 核对（确定不在 `D:\kaspa-tn12-data` 内，不影响 §3 删除范围判断）。
 - §1.2 kaspad 16644 的真实运行进程命令行——非提权查询结构性读不到（`SessionId=0`），本 runbook 改用 boot-sequence.log + 脚本 mtime 的日志链证据顶上（v0.1.2），若仍要从进程本身直接验证需 J1/Bettor 提权，非阻塞项。
 - §2.0 `tx_records` 表是否覆盖 `p2sh.mjs`/`utxo-split.mjs` 全部 4 处 submit 调用点的写路径——本 runbook 未逐一追踪代码确认，执行前应核实，不确定则以 relay 日志 grep + `kaspa_tx_log` 交叉核对为准。
-- **🔴 §2.4 Session 0 触发源尚未定位（v0.1.2 新增，GO-1 硬前置，见 §2.4/§5 GO-1）**——Bettor 在查，非提权工具（`Get-ScheduledTask`）看不到，候选方向未定，本 runbook 不猜测。
+- **🔴 §2.4 Session 0 触发源尚未定位（v0.1.2 新增，GO-1 硬前置，见 §2.4/§5 GO-1）**——提权查询命令已给（§2.4 步骤 2），Bettor 已转 Owner 跑；**Owner 回执贴回后直接填 §2.4 步骤 2，不用再等其他排查**。
 - **§6 待核（v0.1.2 新增）：09-13 两次重启行为不对称，原因未知**——07:17Z 那次重启 boot-sequence 只跑了一遍（14:45:11 本地，PID 23280），09:45Z 那次跑了两遍（16:45:38 本地 PID 18576 + 16:45:56 本地 PID 24220，相隔仅 18 秒）。Bettor 猜测"当时 Owner 登录态触发 `.lnk` + 系统级触发叠加"，本 runbook 未独立验证这个猜测，只记录现象：两次重启的触发路径数量不同，且第二次的两遍触发时间相隔极短（18 秒），更像是两个独立触发源几乎同时命中，而不是同一触发源重复了一次。
