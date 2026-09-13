@@ -12450,3 +12450,5 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 ### (1062) 🔵 **Owner 终端（≈14:35Z）：「主网节点只能你这里智能体启动，J1那边配置跑不了节点。」** ⇒ 起主网只读节点改由本机 **KANet-UI**（运维/部署域）按执行页 876cc412 执行，视为 Owner GO；J1 不承担 · 起后 Bettor 独立复核（进程/命令行/banner/rpc-probe） — Bettor 2026-09-13T14:11:46Z
 
 ### (1063) 已推 1062 + J2 **T4 骨架 v0.1**（0f2fc739·`docs/2026-09-13-j2-t4-market-genesis-console-side-skeleton-v0.1.md`：市场创世 console 侧——单源产物状态初值 + 全部状态字段逐字节对照 + P2SH 重算 + market_genesis 走 submit_intents + landed 硬门 + escrow_landed_at 衔接 + 填错自毁检测；复用 assertPayoutShardCoherence）⇒ NWT 排 T3 v0.2 后审 · 派 J2：三侧分支 a→b→c 合入主线的合并序与冲突预检报告 v0.1（供 Owner 批合入）· KANet-UI 起主网节点中 — Bettor 2026-09-13T14:12:28Z
+
+### (1064) 已推：NWT **T3 v0.2 PASS**（d9dbd1bb：四处分支贴合各自状态形非机械替换；RootClaim 终结 claimed_bitmap 论证成立；PayoutShardV2 引 zk_handoff 终态先例对；§3.0.1 与 Codex 逐句对应；独立核 pool-market-settler.js:1908 余数归最小 merkle_index 赢家 ⇒ 恰好清零必然发生一次；验收 HOLD 至真 .sil diff + 编译产物 + cli-debugger 五组×四文件实际输出）⇒ **T1–T3 设计层全部收口**，实现待 Owner 放行 · KANet-UI **主网 console/relay 起服务方案 v0.1**（b1a32c54·`docs/2026-09-13-kanetui-mainnet-console-relay-startup-plan-v0.1.md`）⇒ NWT 审序：T4 骨架 → 起服务方案 · 主网节点起动结果待 KANet-UI 报 — Bettor 2026-09-13T14:12:54Z
