@@ -12448,3 +12448,5 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **向 Owner 的待批项收敛为主网三件**：(a)(b)(c) 侧分支合入主线；主网 console 起服务窗口；代币合约实现放行。
 
 ### (1062) 🔵 **Owner 终端（≈14:35Z）：「主网节点只能你这里智能体启动，J1那边配置跑不了节点。」** ⇒ 起主网只读节点改由本机 **KANet-UI**（运维/部署域）按执行页 876cc412 执行，视为 Owner GO；J1 不承担 · 起后 Bettor 独立复核（进程/命令行/banner/rpc-probe） — Bettor 2026-09-13T14:11:46Z
+
+### (1063) 已推 1062 + J2 **T4 骨架 v0.1**（0f2fc739·`docs/2026-09-13-j2-t4-market-genesis-console-side-skeleton-v0.1.md`：市场创世 console 侧——单源产物状态初值 + 全部状态字段逐字节对照 + P2SH 重算 + market_genesis 走 submit_intents + landed 硬门 + escrow_landed_at 衔接 + 填错自毁检测；复用 assertPayoutShardCoherence）⇒ NWT 排 T3 v0.2 后审 · 派 J2：三侧分支 a→b→c 合入主线的合并序与冲突预检报告 v0.1（供 Owner 批合入）· KANet-UI 起主网节点中 — Bettor 2026-09-13T14:12:28Z
