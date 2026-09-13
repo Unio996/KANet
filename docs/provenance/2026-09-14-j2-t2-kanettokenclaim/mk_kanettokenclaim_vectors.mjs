@@ -184,5 +184,21 @@ tests.push({
   },
 });
 
+// V-CLAIM-9 (NWT 1176 MUST-FIX): 路径(i)转回市场——dest_idx 输入尾字节匹配 market_suffix_witness(NWT 复用
+// V-CLAIM-1 结构), 但该输入没有声明 covenant_id(裸)——OpInputCovenantId 回退 ZERO_HASH, target_owner 必须
+// 被新加的 require(target_owner != ZERO32) 挡下, 不能让尾匹配替 covenant 绑定背书。
+tests.push({
+  name: 'V-CLAIM-9_fail_dest_input_bare_no_covenant_id_tail_matches_target_owner_zero32',
+  function: 'spend',
+  constructor_args: ctorArgs(),
+  args: [PLACEHOLDER_SIG, 1, 2, true, 2, hex(tokOwnedByClaim.prefix), hex(tokOwnedByClaim.suffix), hex(DEST_MARKET_SUFFIX)],
+  expect: 'fail',
+  tx: {
+    active_input_index: 0,
+    inputs: [selfInput(), tokenInput(tokOwnedByClaim), { utxo_value: 1, signature_script_hex: '0x00' + Buffer.from(DEST_MARKET_SUFFIX).toString('hex') }],
+    outputs: [{ value: 1 }, { value: 1 }, { value: 1, script_hex: tokAtMarket.scriptHex }],
+  },
+});
+
 fs.writeFileSync('scratch/_t1v06_check/KanetTokenClaim.test.json', JSON.stringify({ tests }, null, 1));
 console.log('wrote', tests.length, 'KanetTokenClaim vectors');

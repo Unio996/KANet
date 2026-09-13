@@ -70,7 +70,9 @@ D-017 代币只许 covenant 持有——`spend` 提供**两条**合法目的地�
 **发现（NWT 红队复核 22bf679a ③(ii)）**：`OpInputCovenantId`/`OpOutputCovenantId` 对未声明 `covenant_id`
 的输入/输出回退 `ZERO_HASH`（rusty-kaspa `opcodes/mod.rs unwrap_or(ZERO_HASH)`，本文件用最小探针
 `scratch/_t1v06_check/ZeroHashProbe.sil` 在**这个调试器自己的模型**里直接实证复现，不只是信引用）。
-路径 (i)（转回市场）已有独立验证（`market_suffix_hash` 尾匹配）挡住假壳，但路径 (ii)（转手新输出，
+路径 (i)（转回市场）当时判断已有独立验证（`market_suffix_hash` 尾匹配）挡住假壳（**这个判断后来被 NWT
+1176 推翻，见下方新增一节——尾匹配核的是脚本字节，不是 covenant 绑定，两者独立，当时漏了这一层**），
+路径 (ii)（转手新输出，
 `target_owner = OpOutputCovenantId(dest_idx)`）此前**没有**任何独立验证——`dest_idx` 随手指一个没声明
 `covenant_id` 的裸输出，就能把 `target_owner` 写成全零，后果不是"转移失败"，而是代币变成任何在场检查对
 全零恒真的攻击者都能花（NWT 1158 系统性扫查结论：这是全仓库唯一缺口，`T1 v0.6`/`PayoutShard.absorb` 引用的
@@ -90,7 +92,35 @@ D-017 代币只许 covenant 持有——`spend` 提供**两条**合法目的地�
    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ verification failed here
 ```
 
-## 向量（`run.log`，8/8 PASS，均用 flip-expect / 交互步进复核真实失败行）
+## 〇-2、NWT 1176 MUST-FIX 修订（路径(i)同一 class 缺口）
+
+**发现**：NWT 复用 `V-CLAIM-1`（把它当"结构全对"的基线），只删掉 `dest_idx` 那个输入的 `covenant_id`
+声明（sigScript 尾字节完全不变，仍然匹配 `market_suffix_witness`），构造出 `target_owner` 被算成 ZERO32
+的向量——`require(destSig.slice(...)==market_suffix_witness)` 照样通过（它只看 sigScript 字节），但
+`OpInputCovenantId(dest_idx)` 因为该输入没声明 `covenant_id` 而回退 ZERO_HASH。这证明**尾匹配/模板匹配
+不等于 covenant 绑定，是两个完全独立的字段/机制**——1158/1163 处理的是路径(ii)的 `OpOutputCovenantId`
+缺口，这次 NWT 指出路径(i)的 `OpInputCovenantId` 是**同一 class 的另一半**，此前漏判"尾匹配已经够了"。
+
+**修**：路径 (i)（`to_market_input=true`）`target_owner = OpInputCovenantId(dest_idx);` 后立即加
+`require(target_owner != ZERO32)`（`KanetTokenClaim.sil` 行 83-88），跟路径 (ii) 已有的同款守卫对称。
+
+**负向量 `V-CLAIM-9`**：逐字复用 `V-CLAIM-1` 的交易结构，只把 `marketDestInput()` 换成一个没有
+`covenant_id` 字段、sigScript 尾字节原样不变的裸输入。交互步进确认失败行精确落在新加的
+`require(target_owner != ZERO32)` 上，不是巧合落在别处（尾匹配那条 `require` 确实先通过了）：
+
+```
+→   83 |             target_owner = OpInputCovenantId(dest_idx);
+→   88 |             require(target_owner != byte[32](0x0000...0000));
+(sdb) error: script ran, but verification failed
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ verification failed here
+```
+
+**§2 表新增列的定义**（按 1176 措辞，供后续所有入口逐条打勾用）："凡要求输出/输入必须是某 covenant 的
+绑定，尾匹配/模板匹配（脚本字节层面）之外，必须再有 `Op*CovId(other) != ZERO32`（covenant 绑定层面）
+——两层各自独立承重，一层的检查不能替另一层背书。"NWT 复核 `KanetTokenClaim.sil` 其余位点（路径(ii)已有、
+`tk.owner==OpInputCovenantId(this.activeInputIndex)` 引用自身恒安全）判不需要再修。
+
+## 向量（`run.log`，9/9 PASS，均用 flip-expect / 交互步进复核真实失败行）
 
 | 向量 | 验证点 | 真实失败行 |
 |---|---|---|
@@ -102,6 +132,7 @@ D-017 代币只许 covenant 持有——`spend` 提供**两条**合法目的地�
 | `V-CLAIM-6`（**Bettor 明确要求的"假壳 covenant 被拒"负向量**） | `dest_idx` 是攻击者控制、`sigScript` 尾部对不上真市场后缀的 covenant | `destSig.slice(...)==market_suffix_witness` |
 | `V-CLAIM-7` | 输出代币金额被篡改（99≠100） | `validateOutputStateWithInputTemplate` |
 | `V-CLAIM-8`（**NWT 1155/1158 MUST-FIX 负向量**） | 路径(ii) `dest_idx` 指向裸输出，`target_owner` 被算成 ZERO32 | 新加 `require(target_owner != ZERO32)`（交互步进逐行确认，见上） |
+| `V-CLAIM-9`（**NWT 1176 MUST-FIX 负向量**） | 路径(i) `dest_idx` 输入尾字节匹配但没声明 `covenant_id`，`target_owner` 被算成 ZERO32 | 新加 `require(target_owner != ZERO32)`（交互步进逐行确认，见上） |
 
 ## 本文件不受 V-T-8 影响
 

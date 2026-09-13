@@ -81,6 +81,11 @@ contract KanetTokenClaim(
             require(destLen >= msl);
             require(destSig.slice(destLen - msl, destLen) == market_suffix_witness);
             target_owner = OpInputCovenantId(dest_idx);
+            // ★ ZERO32 目的地守卫(NWT 1176 MUST-FIX): sigScript 尾匹配核的是脚本字节, covenant_id 是完全
+            //   独立的字段(同 1173 的教训: 模板/尾匹配 ≠ covenant 绑定)——尾匹配过了不能证明 target_owner
+            //   非零。dest_idx 那个输入可以尾字节对得上、同时压根没声明 covenant_id, OpInputCovenantId 照样
+            //   回退 ZERO_HASH。两条检查各自独立承重, 不能让一条替另一条背书。
+            require(target_owner != byte[32](0x0000000000000000000000000000000000000000000000000000000000000000));
         } else {
             target_owner = OpOutputCovenantId(dest_idx);
             // ★ ZERO32 目的地守卫(NWT 1158 系统性扫查·唯一缺口): OpOutputCovenantId 对未声明 covenant_id 的

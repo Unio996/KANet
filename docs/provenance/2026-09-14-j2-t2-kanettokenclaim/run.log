@@ -14,5 +14,7 @@
   PASS  V-CLAIM-7_fail_output_amount_tampered
   RUN   V-CLAIM-8_fail_bare_output_destination_zero_owner_rejected
   PASS  V-CLAIM-8_fail_bare_output_destination_zero_owner_rejected
+  RUN   V-CLAIM-9_fail_dest_input_bare_no_covenant_id_tail_matches_target_owner_zero32
+  PASS  V-CLAIM-9_fail_dest_input_bare_no_covenant_id_tail_matches_target_owner_zero32
 
-8 tests: 8 passed, 0 failed
+9 tests: 9 passed, 0 failed
