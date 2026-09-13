@@ -100,8 +100,8 @@ export function ingestHandshake({ localAddress, remoteAddress, txid, theirAlias 
   });
 }
 
-/** Record a broadcasted on-chain TX (inbound receipt or outbound send). */
-export function ingestTx({ traceId, txid, direction = "outbound", amount = null, fee = null, localAddress = null }) {
+/** Record a broadcasted on-chain TX (inbound receipt or outbound send). targetAddress (F5, J2 2026-09-13): 收款地址, 对账器用。 */
+export function ingestTx({ traceId, txid, direction = "outbound", amount = null, fee = null, localAddress = null, targetAddress = null }) {
   post("/ingest/tx", {
     traceId,
     network: RELAY_NETWORK,
@@ -110,8 +110,30 @@ export function ingestTx({ traceId, txid, direction = "outbound", amount = null,
     amount,
     fee,
     localAddress,
+    targetAddress,
     status: "broadcasted",
   });
+}
+
+/**
+ * (c) F2 两阶段回执 (J2 2026-09-13): 与 post() 不同, 这个【等】console 2xx 并在失败时 throw —— relay 在广播之前调 phase='prepared'
+ * (带确定性 txid + 已签名交易字节), console 没落表就不许广播(fail-closed: NO TX 而不是"发了没人记")。phase='submitted' 广播后调,
+ * 失败只 warn(IPC 回执也带 txId, console 侧照样落 submitted)。不走 post() 的 backoff 静默跳过——静默跳过 = 发了没记, 正是要根治的病。
+ */
+export async function ingestSubmitIntentPhase({ intentKey, phase, txid, txJson = null }, timeoutMs = 5000) {
+  if (!CONSOLE_URL || !INGEST_SECRET) throw new Error("intent persistence unavailable: CONSOLE_URL / INGEST_SECRET unset");
+  const res = await fetch(`${CONSOLE_URL}/ingest/submit-intent`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-ingest-secret": INGEST_SECRET },
+    body: JSON.stringify({ intentKey, phase, txid, txJson }),
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  if (!res.ok) {
+    let detail = "";
+    try { detail = (await res.text()).slice(0, 200); } catch {}
+    throw new Error(`intent ${phase} not recorded by console: HTTP ${res.status} ${detail}`);
+  }
+  return true;
 }
 
 /**
