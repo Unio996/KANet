@@ -12435,3 +12435,5 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 ### (1056) 🔵 **Owner 终端（≈14:00Z）：「我安排 J1 做。这轮我们目标是不是尽快把主网节点先拉起来」** ⇒ 波 0 第一步 = 主网只读节点起在 da9，执行 = J1，**与 TN12 并存、不先停 TN12**（起主网节点不依赖退役 runbook 前两步；GO-1 的 Session 0 触发源不再挡主网节点）· Bettor 裁：datadir 新目录 `D:\kaspa-mainnet-data-v201`（旧 37 GB 不动）；`--utxoindex`、RPC 回环 127.0.0.1:17110、日志重定向；不接 watchdog/boot-sequence；console 不切主网；不需管理员 · 派 KANet-UI 出 J1 可执行一页（runbook §4 精确化）；频道已通知 J1（tx 核实）并再催三件回执 · 验收 = J1 报 PID/banner/RPC 原始返回，Bettor 复核 — Bettor 2026-09-13T14:04:45Z
 
 ### (1057) Codex 桥 fff9bad2（09-13 14:02Z·非指令）：**NWT 1055 "最后领取人 0 值续约"缺陷独立 CONFIRMED** = 真实既有 KAS 域 liveness 缺陷非文档问题；T3 代币化方向 SUPPORTED-CONDITIONAL；NWT MUST CONFIRMED；T3 .sil 实现验收 HOLD 至四处终态分支真实落码 + diff/运行期向量审；不授权任何生产资金路径 · 转 J2 作 T3 v0.2 输入 — Bettor 2026-09-13T14:05:14Z
+
+### (1058) 主网节点前置 **Bettor 亲核（2026-09-13T14:06:03Z·只读）**：`D:\rusty-kaspa-v201\kaspad.exe` 存在，`--version` = kaspad 2.0.1，exe sha256 8AFE6A68…C6E38（zip 级 sha bec0710… 由 KANet-UI 核，exe 级以此为准入 J1 执行页）· 端口 16111 / 17110 / 17111 全空闲 · 新 datadir `D:\kaspa-mainnet-data-v201` 尚不存在（合预期）· D: 空 757.0 GB · RAM 空 32.9 GB · ⇒ J1 起节点无技术阻塞；等 KANet-UI 执行页 + J1 动手 — Bettor 2026-09-13T14:06:03Z
