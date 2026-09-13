@@ -1,6 +1,8 @@
-# 主网 console/relay 起服务方案 v0.1（2026-09-13 · KANet-UI · Bettor 派工 · 只写不执行）
+# 主网 console/relay 起服务方案 v0.2（2026-09-13 · KANet-UI · Bettor 派工 · 只写不执行）
 
-> **Status: DRAFT**。权威：Owner 直令（COORD-LEDGER (1061)）"旧测试网一切冻结、全员只做主网"。本页覆盖主网主线三支之一（①节点已有独立执行页 `docs/2026-09-13-kanetui-mainnet-node-start-brief-for-j1-v0.1.md`；③代币合约设计另案），本页只做**②console/relay 主网化**。**本文档任何一步都不执行**；执行门 = 本方案 → NWT 红队审 → Owner 逐步批 → 执行。TN12 现有一切原样不动，本页不涉及也不建议动它。
+> **Status: DRAFT**。权威：Owner 直令（COORD-LEDGER (1061)）"旧测试网一切冻结、全员只做主网"。
+>
+> **v0.2 变更（Bettor 派工·把 §2 写成可执行判据供 NWT 与 v0.1 合并审）**：§2.2/§2.3 补具体验收命令（schema 版本核对/空库抽查/I4 拒起负向量的实际查询）；§3.1 步骤 6"频道 relay 身份重生成"查明具体机制并补全（每个 agent 的 canonical 发送脚本硬编码 RELAY/BASE 常量，需各自新建 mainnet relay_nodes 行+改常量+真实充值）；§5 新增 GO-E（资金/密钥面独立批点）；§1.2 与 J2 已出的合并序预检 `68e766c3` 交叉核对一致。本页覆盖主网主线三支之一（①节点已有独立执行页 `docs/2026-09-13-kanetui-mainnet-node-start-brief-for-j1-v0.1.md`；③代币合约设计另案），本页只做**②console/relay 主网化**。**本文档任何一步都不执行**；执行门 = 本方案 → NWT 红队审 → Owner 逐步批 → 执行。TN12 现有一切原样不动，本页不涉及也不建议动它。
 
 ## 0. 前提澄清（防误读）
 - 本页假设 §1 的三条前置分支已合入主线（否则后面的一切无从谈起）——**分支合并的具体顺序/冲突消解由 J2 出**（Bettor 已指派），本页只描述"合到主线"这个前提本身，以及我核实到的文件级重叠点供 J2 参考，不代 J2 定合并序。
@@ -38,7 +40,7 @@ KASPA_RPC_LOCAL_ONLY=1                   # 值不变，但语义变了，见下
 
 **⚠ 这三行（连同 §2 数据库那条）不是各自独立生效的——必须一起切换，缺一会造成 network_mismatch 的假阳性/假阴性**（如只改了 `KASPA_NETWORK` 但 `KASPA_RPC_URL` 还指着 TN12 端口，(b) 的 I4 判定会拿"mainnet 环境 + 连到一个实际是 testnet-12 的节点"这种自相矛盾状态，具体后果要看 (b) 判定逻辑是先信 env 还是先信节点自报——这个交叉情形建议 NWT 审时加一条负向量）。
 
-## 2. 数据库：新库，不迁移（含理由）
+## 2. 数据库：新库，不迁移（含理由 + 可执行判据）
 
 ### 2.1 结论先行：**新库**
 理由是结构性的，不是偏好：我查了 `migrate.js`，全库真正带 `network` 列做逐行区分的表只有 **8 张**（`identities` / `conversations` / `tx_records` / `contracts` / `relay_nodes` / `kaspa_tx_log` / `tg_custodial_wallets` / `u1_relay_identity`），其余大多数业务表（`pool_markets`/`exchange_offers`/`events`/`payout_shards`……34 张活跃表里的大部分）**完全没有网络字段**——它们从设计上就假设"这个库只服务一个网络"。如果让主网 console 和 TN12 console 共用同一个 `console.db`，这些无网络字段的表会把两个网络的市场/交易/结算数据混在一起，没有任何字段可以事后拆开。**这不是能不能接受的问题，是结构上做不到干净隔离**，所以新库是唯一站得住的选项，不是保守选择。
@@ -48,9 +50,48 @@ KASPA_RPC_LOCAL_ONLY=1                   # 值不变，但语义变了，见下
 - console 启动时按 `client.js` 现有逻辑（`DB_PATH` 有值就 `resolve(DB_PATH)`，首启自动建库跑 migrate）——**不需要新写建库逻辑**，现有机制天然支持"换个 `DB_PATH` 就是一个全新空库"，这条路已经存在，只是没人在同机跑过两个并行实例。
 - 新库从 migrate.js 跑一遍全量迁移，得到跟现有库同构但空的 schema——不是从 TN12 库复制数据过滤，是**真正从零开始**。
 
-### 2.3 relay_nodes 现有 32 行的处置（对应 Bettor 问的"哪些表必须清空"）
-**新库路径下这个问题不成立**——新库天然是空的，32 行 TN12 relay 根本不在新库里，不存在"要不要清空"的动作。这 32 行继续留在**旧** `console.db` 里，跟 TN12 一起原样冻结，不动。
+**执行时验收命令（可执行判据，不是散文）**：
+```bash
+# 1. 确认新库文件在起 console 前不存在（防止误覆盖一个已有文件）
+test -f <新DB_PATH> && echo "🔴 文件已存在，先确认这不是误覆盖" || echo "OK 不存在，可以首启建库"
+
+# 2. console 首启完成后，核 schema 版本号与主线 migrate.js 末尾块一致
+node -e "
+const Database = require('./kasia-console/node_modules/better-sqlite3');
+const db = new Database('<新DB_PATH>', {readonly:true});
+console.log('user_version =', db.pragma('user_version', {simple:true}));
+"
+# 对照: grep -n '// ── v' kasia-console/src/db/migrate.js | tail -1   （取这行的版本号，两边必须相等）
+
+# 3. 确认新库是真空库，没有任何业务数据行（举几张代表性表核，不需要 34 张全跑，抽查即可判断"是不是复制了旧库"这种低级错误）
+node -e "
+const Database = require('./kasia-console/node_modules/better-sqlite3');
+const db = new Database('<新DB_PATH>', {readonly:true});
+for (const t of ['relay_nodes','pool_markets','exchange_offers','tx_records','identities']) {
+  console.log(t, '=', db.prepare('SELECT COUNT(*) c FROM '+t).get().c);
+}
+"
+# 判据：全部应为 0（除非 migrate.js 里对某张表有 INSERT OR IGNORE 的种子数据，如 channels 表——那种表允许非 0，核对时对照 migrate.js 里该表是否有种子 INSERT 语句，不是盲判"非 0 就错"）。
+```
+
+### 2.3 relay_nodes 现有 32 行的处置（对应 Bettor 问的"哪些表必须清空" + 可执行判据）
+**新库路径下"清空"这个问题不成立**——新库天然是空的，32 行 TN12 relay 根本不在新库里，不存在"要不要清空"的动作。这 32 行继续留在**旧** `console.db` 里，跟 TN12 一起原样冻结，不动。
 - 若 Owner 将来要在主网上跑某个 relay 身份（如给主网也配一个类似"J2test"角色的自动化账号），那是**在新库里新建一行**，`network='mainnet'`（schema 默认值本来就是 `'mainnet'`，见 `migrate.js:174`——这个默认值不是巧合，本来这张表设计时就是以 mainnet 为默认网络的），全新助记词/私钥，**不是把 TN12 那 32 行里任何一行的密钥拿来复用或"重映射"**（复用同一把密钥跨网络本身就是需要独立评估的安全问题，不在本页讨论范围，也不建议）。
+
+**执行时验收命令（(b) I4"网络≠env 拒起"的负向量，可执行）**：
+```bash
+# 用旧库的一条 TN12 relay 记录做对照实验（只读拿一行看结构，不改旧库任何东西）
+node -e "
+const Database = require('./kasia-console/node_modules/better-sqlite3');
+const db = new Database('./kasia-console/data/console.db', {readonly:true});
+const r = db.prepare(\"SELECT id, name, network FROM relay_nodes LIMIT 1\").get();
+console.log(JSON.stringify(r));
+"
+# 期望看到 network='testnet-12'。然后：在新（主网）console 环境（KASPA_NETWORK=mainnet）下，
+# 尝试用这个 id 走 relay 启动路径（具体调用点待 §1 分支合入后由 J2/NWT 给出准确 file:line，
+# 本页只给判据不给尚不存在的代码路径）——期望：被 I4 拒绝，拒绝日志明确写出 network mismatch
+# 原因（不是静默跳过、不是模糊的 "relay start failed"）。
+```
 - （2.4 附一条备选路径，仅为完整性列出，**本页不推荐**）：若坚持要复用同一个 `console.db`（比如出于运维省事的考虑），那 34 张活跃表里所有**没有** `network` 列的表都需要在启动主网服务前**逐张审计**——分两类处置：本来就该按网络清零重开的（如市场类表，TN12 数据不该被主网服务看到）、和本来就是全局共享不分网络的（如某些配置/日志类表，需要确认真的无害共享）。这个审计本身就是一项不小的工程（34 张表逐张过一遍），而且做完仍然达不到 §2.1 说的结构性隔离——**这是为什么新库更好，不是同等方案的两个选项**。
 
 ## 3. 起服务顺序与验收
@@ -64,7 +105,8 @@ KASPA_RPC_LOCAL_ONLY=1                   # 值不变，但语义变了，见下
    - 正向量：主网节点已起、RPC 可达 ⇒ console 能正常连上、`rpc-health` 报 `using local node: ws://127.0.0.1:17110`。
    - 负向量 A（本机失败 fail-closed 无回退）：临时让主网节点端口不可达（如还没起完），此时 (a) 分支落地后的 `getWorkingRpc()` 应该**直接返回 null**，不应该出现任何"回退到别的节点/别的 URL"的日志行——这是跟旧的非严格行为的关键区别，必须实测验证，不能只读代码就信。
    - 负向量 B（network_mismatch 拒起旧 relay）：在新库里试着（或用已有的旧库 32 行做对照实验）起一个 `network='testnet-12'` 的 relay，env 是 `KASPA_NETWORK=mainnet`，应该被 (b) 的 I4 判定拒绝启动，且有清楚的拒绝原因日志（不是静默跳过）。
-6. 频道 `dev-coord-testnet` 在主网上的 relay 身份重生成——**这条我如实标注：不确定具体指什么**（是新开一个主网频道、还是同一个频道换一把主网密钥发消息、还是别的机制），Bettor 派工原话提到了但没展开，需要 Bettor/NWT 补充具体要求，本页先占位，不编造实现细节。
+6. **频道 relay 身份重生成（这次查到了具体机制，补上）**：`dev-coord-testnet` 频道本身在代码里只是一个字符串（`channels` 表里没有它，见 `migrate.js:1946` 种子 INSERT 只有 `kanet-*` 七个频道——`dev-coord-testnet` 是运行时自然产生的频道名，不是预注册的）；**真正的"身份"是每个 agent 自己那个 relay_nodes 行**，每个 agent 的 canonical 发送脚本（根目录 `_bettor_send.cjs`/`_j2_send.cjs`/`_nwt_send.cjs`/`_kanetui_send.cjs`）都**硬编码**了自己的 `RELAY`（relay_nodes.id）和 `BASE`（console 地址，现值 `http://127.0.0.1:3200`）常量——例如 `_bettor_send.cjs:2` `const RELAY = "5c07f7e5-752b-470c-8a48-f548b3b17068"`。**"身份重生成"= 每个要在主网频道发消息的 agent，都要在新库里新建一行 relay_nodes（`network='mainnet'`，全新密钥，不复用 TN12 那把），并把自己那份 canonical 发送脚本的 `RELAY`/`BASE` 常量改成新值（`BASE` 改成新 console 的端口，见 §4）**。这不是配置切换，是每个 agent 各自一次性的"开新号"动作，且新号需要真实 KAS 才能广播（主网手续费真花钱，不是 TN12 水龙头）——这一条本身就该是 §5 的一个独立 Owner 批点（资金/密钥面），不能跟"起 console 进程"这类纯技术步骤混在一起批。
+   - 验收判据：新 relay 行 `network='mainnet'` 建好后，用它的 id 走 §2.3 负向量**反过来**的正向量（同网络应该能正常启动/发送），跑通一次真实的频道消息收发闭环（发一条、console API 能读到、`sender_address` 对得上新 relay 的地址）才算这一步做完，不是"建了一行数据库记录"就算数。
 
 ### 3.2 验收判据小结
 | 项 | 判据 |
@@ -91,9 +133,10 @@ KASPA_RPC_LOCAL_ONLY=1                   # 值不变，但语义变了，见下
 2. **GO-B**（§2 新库落地前）：Owner 确认"新库、不迁移"这个方向，以及新 `DB_PATH` 的具体命名。
 3. **GO-C**（§3 起主网 console 实例前）：Owner 确认可以起（含端口号，§4 的 3201 或 Owner 指定其它值）；这一步之前 §3.1 步骤 3（J1 节点 isSynced）必须已经满足。
 4. **GO-D**（§3.1 步骤 5 验收通过、正式接入频道/正式对外提供服务前）：Owner 看验收结果拍板"可以正式当主网服务用了"，区别于"起了但还在验"的中间态。
+5. **GO-E**（§3.1 步骤 6，每个 agent 新建 mainnet relay 身份前）：**资金/密钥面，独立批点，不并入 GO-C/GO-D**——新建的每一把 mainnet 私钥都要真实充值 KAS 才能用，这是本方案里唯一直接涉及真钱的一步，Owner 需要单独确认可以给哪些 agent 建号、初始充值额度上限。
 
 ## 6. 未完成事项（本页故意留白）
-- §1.2 三分支合并的精确顺序与冲突消解——J2 域，本页只给了文件级重叠线索。
+- §1.2 三分支合并的精确顺序与冲突消解——J2 域（2026-09-13 补：J2 已出预检报告 `68e766c3`，结论合并序安全，本页 §1.2 的重叠点判断与其一致）。
 - §2.1 新库文件的具体命名与落盘路径——Owner/J2 定，本页不钉死。
-- §3.1 步骤 6"频道 relay 身份重生成"具体要求——需 Bettor/NWT 澄清，本页占位未展开。
+- §3.1 步骤 6 具体机制已查明并补全（见上），但**每个 agent 新建 mainnet relay 身份 + 充值真实 KAS**这件事本身的执行顺序/谁先谁后/资金来源，本页未展开，留给 §5 那个新增批点下再细化。
 - §4 具体端口号——本页给了建议值（3201）示意，非定案。
