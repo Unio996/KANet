@@ -1,0 +1,16 @@
+pragma silverscript ^0.1.0;
+// 最小 dust-ticket 替身: State 形状对齐 RootClaim.sil 的 Tk{bettorPk,direction,stake,shardPoolId} 四字段顺序,
+// 只用于派生 prefix/suffix/template_hash + 构造实例供 readInputStateWithTemplate 读(同 T1 v0.2 探针 TokenStub.sil 手法)。
+contract PoolSideStub(byte[32] init_bettorPk, int init_direction, int init_stake, byte[32] init_shardPoolId) {
+    byte[32] bettorPk = init_bettorPk;
+    int direction = init_direction;
+    int stake = init_stake;
+    byte[32] shardPoolId = init_shardPoolId;
+    #[covenant.singleton]
+    function passthrough(State prevState, State newState) {
+        require(newState.bettorPk == prevState.bettorPk);
+        require(newState.direction == prevState.direction);
+        require(newState.stake == prevState.stake);
+        require(newState.shardPoolId == prevState.shardPoolId);
+    }
+}

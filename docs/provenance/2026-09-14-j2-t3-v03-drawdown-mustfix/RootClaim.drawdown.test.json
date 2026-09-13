@@ -1,0 +1,244 @@
+{
+ "tests": [
+  {
+   "name": "DD-RC-claim_draw-1_pass_exact_no_continuation",
+   "function": "claim_draw",
+   "constructor_args": [
+    "0x3f20b0dfe8af5aafa0f2081df85d272040b9611b9315b86bc7d9e13e25d5006c",
+    "0x3737373737373737373737373737373737373737373737373737373737373737",
+    0,
+    0,
+    0,
+    5000,
+    1,
+    1,
+    "0x7d851d1bf7dcac918614f5aac77cf4deb79565b93ce111c607f50aa252851606",
+    0
+   ],
+   "args": [
+    0,
+    0,
+    5000,
+    0,
+    1,
+    [
+     "0x0000000000000000000000000000000000000000000000000000000000000000"
+    ],
+    2,
+    1,
+    193
+   ],
+   "expect": "pass",
+   "tx": {
+    "active_input_index": 0,
+    "inputs": [
+     {
+      "utxo_value": 5000,
+      "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     },
+     {
+      "utxo_value": 1
+     },
+     {
+      "utxo_value": 10,
+      "utxo_script_hex": "0xaa20c1615539d3a5a13ced4e611f6bbddf00c706f529a1aae0c4f242ae3f2c10d41c87",
+      "signature_script_hex": "0x6b2022222222222222222222222222222222222222222222222222222222222222220801000000000000000800000000000000002037373737373737373737373737373737373737373737373737373737373737376c7604ab7eabfa87637557798201209d75567982599f6975557982599f697554798201209d75b9cb547954795479547953795379537953796079607960796079537958798769527957799c697856799c6976557987695c79519c69b900cc01200116797e010801167958cd7e010801167958cd7e01200116797e7e7e7eb976c902160194765193bc7c7eb976c97602c180937cbc7eaa02000001aa7e01207e7c7e01877e78c3887575757575757575757575757575757575757575757551676a68"
+     }
+    ],
+    "outputs": [
+     {
+      "value": 5000,
+      "p2pk_pubkey": "0x2222222222222222222222222222222222222222222222222222222222222222"
+     }
+    ]
+   }
+  },
+  {
+   "name": "DD-RC-claim_draw-2_pass_partial_with_continuation",
+   "function": "claim_draw",
+   "constructor_args": [
+    "0x3f20b0dfe8af5aafa0f2081df85d272040b9611b9315b86bc7d9e13e25d5006c",
+    "0x3737373737373737373737373737373737373737373737373737373737373737",
+    0,
+    0,
+    0,
+    5000,
+    1,
+    1,
+    "0xaaea266929d5facaa3afaa9a0ee8963519b1aab27c8ec0fb9589ebac1c704383",
+    0
+   ],
+   "args": [
+    1,
+    0,
+    2000,
+    0,
+    1,
+    [
+     "0x0000000000000000000000000000000000000000000000000000000000000000"
+    ],
+    2,
+    1,
+    193
+   ],
+   "expect": "pass",
+   "tx": {
+    "active_input_index": 0,
+    "inputs": [
+     {
+      "utxo_value": 5000,
+      "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     },
+     {
+      "utxo_value": 1
+     },
+     {
+      "utxo_value": 10,
+      "utxo_script_hex": "0xaa20c1615539d3a5a13ced4e611f6bbddf00c706f529a1aae0c4f242ae3f2c10d41c87",
+      "signature_script_hex": "0x6b2022222222222222222222222222222222222222222222222222222222222222220801000000000000000800000000000000002037373737373737373737373737373737373737373737373737373737373737376c7604ab7eabfa87637557798201209d75567982599f6975557982599f697554798201209d75b9cb547954795479547953795379537953796079607960796079537958798769527957799c697856799c6976557987695c79519c69b900cc01200116797e010801167958cd7e010801167958cd7e01200116797e7e7e7eb976c902160194765193bc7c7eb976c97602c180937cbc7eaa02000001aa7e01207e7c7e01877e78c3887575757575757575757575757575757575757575757551676a68"
+     }
+    ],
+    "outputs": [
+     {
+      "value": 2000,
+      "p2pk_pubkey": "0x2222222222222222222222222222222222222222222222222222222222222222"
+     },
+     {
+      "value": 3000,
+      "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "state": {
+       "local_yes": 0,
+       "local_no": 0,
+       "count": 0,
+       "pool_value": 3000,
+       "closed": 1,
+       "winningSide": 1,
+       "payoutRoot": "0xaaea266929d5facaa3afaa9a0ee8963519b1aab27c8ec0fb9589ebac1c704383",
+       "claimed_bitmap": 1
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "DD-RC-claim_draw-3_fail_partial_continuation_wrong_amount",
+   "function": "claim_draw",
+   "constructor_args": [
+    "0x3f20b0dfe8af5aafa0f2081df85d272040b9611b9315b86bc7d9e13e25d5006c",
+    "0x3737373737373737373737373737373737373737373737373737373737373737",
+    0,
+    0,
+    0,
+    5000,
+    1,
+    1,
+    "0xaaea266929d5facaa3afaa9a0ee8963519b1aab27c8ec0fb9589ebac1c704383",
+    0
+   ],
+   "args": [
+    1,
+    0,
+    2000,
+    0,
+    1,
+    [
+     "0x0000000000000000000000000000000000000000000000000000000000000000"
+    ],
+    2,
+    1,
+    193
+   ],
+   "expect": "fail",
+   "tx": {
+    "active_input_index": 0,
+    "inputs": [
+     {
+      "utxo_value": 5000,
+      "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     },
+     {
+      "utxo_value": 1
+     },
+     {
+      "utxo_value": 10,
+      "utxo_script_hex": "0xaa20c1615539d3a5a13ced4e611f6bbddf00c706f529a1aae0c4f242ae3f2c10d41c87",
+      "signature_script_hex": "0x6b2022222222222222222222222222222222222222222222222222222222222222220801000000000000000800000000000000002037373737373737373737373737373737373737373737373737373737373737376c7604ab7eabfa87637557798201209d75567982599f6975557982599f697554798201209d75b9cb547954795479547953795379537953796079607960796079537958798769527957799c697856799c6976557987695c79519c69b900cc01200116797e010801167958cd7e010801167958cd7e01200116797e7e7e7eb976c902160194765193bc7c7eb976c97602c180937cbc7eaa02000001aa7e01207e7c7e01877e78c3887575757575757575757575757575757575757575757551676a68"
+     }
+    ],
+    "outputs": [
+     {
+      "value": 2000,
+      "p2pk_pubkey": "0x2222222222222222222222222222222222222222222222222222222222222222"
+     },
+     {
+      "value": 3001,
+      "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "state": {
+       "local_yes": 0,
+       "local_no": 0,
+       "count": 0,
+       "pool_value": 3000,
+       "closed": 1,
+       "winningSide": 1,
+       "payoutRoot": "0xaaea266929d5facaa3afaa9a0ee8963519b1aab27c8ec0fb9589ebac1c704383",
+       "claimed_bitmap": 1
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "DD-RC-claim_draw-4_fail_partial_missing_continuation",
+   "function": "claim_draw",
+   "constructor_args": [
+    "0x3f20b0dfe8af5aafa0f2081df85d272040b9611b9315b86bc7d9e13e25d5006c",
+    "0x3737373737373737373737373737373737373737373737373737373737373737",
+    0,
+    0,
+    0,
+    5000,
+    1,
+    1,
+    "0xaaea266929d5facaa3afaa9a0ee8963519b1aab27c8ec0fb9589ebac1c704383",
+    0
+   ],
+   "args": [
+    0,
+    0,
+    2000,
+    0,
+    1,
+    [
+     "0x0000000000000000000000000000000000000000000000000000000000000000"
+    ],
+    2,
+    1,
+    193
+   ],
+   "expect": "fail",
+   "tx": {
+    "active_input_index": 0,
+    "inputs": [
+     {
+      "utxo_value": 5000,
+      "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     },
+     {
+      "utxo_value": 1
+     },
+     {
+      "utxo_value": 10,
+      "utxo_script_hex": "0xaa20c1615539d3a5a13ced4e611f6bbddf00c706f529a1aae0c4f242ae3f2c10d41c87",
+      "signature_script_hex": "0x6b2022222222222222222222222222222222222222222222222222222222222222220801000000000000000800000000000000002037373737373737373737373737373737373737373737373737373737373737376c7604ab7eabfa87637557798201209d75567982599f6975557982599f697554798201209d75b9cb547954795479547953795379537953796079607960796079537958798769527957799c697856799c6976557987695c79519c69b900cc01200116797e010801167958cd7e010801167958cd7e01200116797e7e7e7eb976c902160194765193bc7c7eb976c97602c180937cbc7eaa02000001aa7e01207e7c7e01877e78c3887575757575757575757575757575757575757575757551676a68"
+     }
+    ],
+    "outputs": [
+     {
+      "value": 2000,
+      "p2pk_pubkey": "0x2222222222222222222222222222222222222222222222222222222222222222"
+     }
+    ]
+   }
+  }
+ ]
+}

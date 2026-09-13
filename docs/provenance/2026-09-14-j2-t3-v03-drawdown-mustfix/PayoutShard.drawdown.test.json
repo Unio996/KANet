@@ -1,0 +1,596 @@
+{
+ "tests": [
+  {
+   "name": "DD-PS-claim-1_pass_exact_no_continuation",
+   "function": "claim",
+   "constructor_args": [
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    100,
+    1,
+    "0x86fa15c5a1e7d71af2597d4e8a6545bd18ca6551d6e14b725c0bf525947c3add",
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ],
+   "args": [
+    1,
+    0,
+    "0x2222222222222222222222222222222222222222222222222222222222222222",
+    100,
+    5,
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "0x0eb923b0cbd24df54401d998531feead35a47a99f4deed205de4af81120f9761",
+    "0x85c09af929492a871e4fae32d9d5c36e352471cd659bcdb61de08f1722acc3b1",
+    "0xb22df1a126b5ba4e33c16fd6157507610e55ffce20dae7ac44cae168a463612a",
+    "0x209155a276ca3c2417e3876971dd587dd64ed9fcb8ef1fd6e7589ef4255c967f",
+    "0x6f7889ddd723ce6131ff105f416726118e1cf771b81265253b5c59aa6f87c24c",
+    "0x6659a5716acbaaa36b9f81157f9687e0ce9e9851218164900443de7287f85fad",
+    "0x0f6e4e768a8fecbfd286712ca7c4de283082448cccbb71db1d47e93f5327677e",
+    "0x66c4270c625b9e96b934b3f56d9301c44c823d08b342b2cd95ee24519397c14a",
+    "0x3da3596117e16ffe6091c17736590ac20a3ca9dcfcd24ea5eece12d51206f38e"
+   ],
+   "expect": "pass",
+   "tx": {
+    "active_input_index": 0,
+    "inputs": [
+     {
+      "utxo_value": 100,
+      "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     }
+    ],
+    "outputs": [
+     {
+      "value": 100,
+      "p2pk_pubkey": "0x2222222222222222222222222222222222222222222222222222222222222222"
+     }
+    ]
+   }
+  },
+  {
+   "name": "DD-PS-claim-2_pass_partial_with_continuation",
+   "function": "claim",
+   "constructor_args": [
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    100,
+    1,
+    "0x3fa4ce95e68cb33e16d7150cac8ea00c71a2e7806dde944065d89c5a8445ade2",
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ],
+   "args": [
+    1,
+    0,
+    "0x2222222222222222222222222222222222222222222222222222222222222222",
+    40,
+    5,
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "0x0eb923b0cbd24df54401d998531feead35a47a99f4deed205de4af81120f9761",
+    "0x85c09af929492a871e4fae32d9d5c36e352471cd659bcdb61de08f1722acc3b1",
+    "0xb22df1a126b5ba4e33c16fd6157507610e55ffce20dae7ac44cae168a463612a",
+    "0x209155a276ca3c2417e3876971dd587dd64ed9fcb8ef1fd6e7589ef4255c967f",
+    "0x6f7889ddd723ce6131ff105f416726118e1cf771b81265253b5c59aa6f87c24c",
+    "0x6659a5716acbaaa36b9f81157f9687e0ce9e9851218164900443de7287f85fad",
+    "0x0f6e4e768a8fecbfd286712ca7c4de283082448cccbb71db1d47e93f5327677e",
+    "0x66c4270c625b9e96b934b3f56d9301c44c823d08b342b2cd95ee24519397c14a",
+    "0x3da3596117e16ffe6091c17736590ac20a3ca9dcfcd24ea5eece12d51206f38e"
+   ],
+   "expect": "pass",
+   "tx": {
+    "active_input_index": 0,
+    "inputs": [
+     {
+      "utxo_value": 100,
+      "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     }
+    ],
+    "outputs": [
+     {
+      "value": 40,
+      "p2pk_pubkey": "0x2222222222222222222222222222222222222222222222222222222222222222"
+     },
+     {
+      "value": 60,
+      "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "state": {
+       "consolidated_pool": 60,
+       "closed": 1,
+       "payoutRoot": "0x3fa4ce95e68cb33e16d7150cac8ea00c71a2e7806dde944065d89c5a8445ade2",
+       "w0": 32,
+       "w1": 0,
+       "w2": 0,
+       "w3": 0,
+       "w4": 0,
+       "w5": 0,
+       "w6": 0,
+       "w7": 0,
+       "w8": 0,
+       "w9": 0,
+       "w10": 0,
+       "w11": 0,
+       "w12": 0,
+       "w13": 0,
+       "w14": 0,
+       "w15": 0,
+       "w16": 0
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "DD-PS-claim-3_fail_partial_continuation_wrong_amount",
+   "function": "claim",
+   "constructor_args": [
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    100,
+    1,
+    "0x3fa4ce95e68cb33e16d7150cac8ea00c71a2e7806dde944065d89c5a8445ade2",
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ],
+   "args": [
+    1,
+    0,
+    "0x2222222222222222222222222222222222222222222222222222222222222222",
+    40,
+    5,
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "0x0eb923b0cbd24df54401d998531feead35a47a99f4deed205de4af81120f9761",
+    "0x85c09af929492a871e4fae32d9d5c36e352471cd659bcdb61de08f1722acc3b1",
+    "0xb22df1a126b5ba4e33c16fd6157507610e55ffce20dae7ac44cae168a463612a",
+    "0x209155a276ca3c2417e3876971dd587dd64ed9fcb8ef1fd6e7589ef4255c967f",
+    "0x6f7889ddd723ce6131ff105f416726118e1cf771b81265253b5c59aa6f87c24c",
+    "0x6659a5716acbaaa36b9f81157f9687e0ce9e9851218164900443de7287f85fad",
+    "0x0f6e4e768a8fecbfd286712ca7c4de283082448cccbb71db1d47e93f5327677e",
+    "0x66c4270c625b9e96b934b3f56d9301c44c823d08b342b2cd95ee24519397c14a",
+    "0x3da3596117e16ffe6091c17736590ac20a3ca9dcfcd24ea5eece12d51206f38e"
+   ],
+   "expect": "fail",
+   "tx": {
+    "active_input_index": 0,
+    "inputs": [
+     {
+      "utxo_value": 100,
+      "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     }
+    ],
+    "outputs": [
+     {
+      "value": 40,
+      "p2pk_pubkey": "0x2222222222222222222222222222222222222222222222222222222222222222"
+     },
+     {
+      "value": 61,
+      "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "state": {
+       "consolidated_pool": 60,
+       "closed": 1,
+       "payoutRoot": "0x3fa4ce95e68cb33e16d7150cac8ea00c71a2e7806dde944065d89c5a8445ade2",
+       "w0": 32,
+       "w1": 0,
+       "w2": 0,
+       "w3": 0,
+       "w4": 0,
+       "w5": 0,
+       "w6": 0,
+       "w7": 0,
+       "w8": 0,
+       "w9": 0,
+       "w10": 0,
+       "w11": 0,
+       "w12": 0,
+       "w13": 0,
+       "w14": 0,
+       "w15": 0,
+       "w16": 0
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "DD-PS-claim-4_fail_partial_missing_continuation",
+   "function": "claim",
+   "constructor_args": [
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    100,
+    1,
+    "0x3fa4ce95e68cb33e16d7150cac8ea00c71a2e7806dde944065d89c5a8445ade2",
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ],
+   "args": [
+    1,
+    0,
+    "0x2222222222222222222222222222222222222222222222222222222222222222",
+    40,
+    5,
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "0x0eb923b0cbd24df54401d998531feead35a47a99f4deed205de4af81120f9761",
+    "0x85c09af929492a871e4fae32d9d5c36e352471cd659bcdb61de08f1722acc3b1",
+    "0xb22df1a126b5ba4e33c16fd6157507610e55ffce20dae7ac44cae168a463612a",
+    "0x209155a276ca3c2417e3876971dd587dd64ed9fcb8ef1fd6e7589ef4255c967f",
+    "0x6f7889ddd723ce6131ff105f416726118e1cf771b81265253b5c59aa6f87c24c",
+    "0x6659a5716acbaaa36b9f81157f9687e0ce9e9851218164900443de7287f85fad",
+    "0x0f6e4e768a8fecbfd286712ca7c4de283082448cccbb71db1d47e93f5327677e",
+    "0x66c4270c625b9e96b934b3f56d9301c44c823d08b342b2cd95ee24519397c14a",
+    "0x3da3596117e16ffe6091c17736590ac20a3ca9dcfcd24ea5eece12d51206f38e"
+   ],
+   "expect": "fail",
+   "tx": {
+    "active_input_index": 0,
+    "inputs": [
+     {
+      "utxo_value": 100,
+      "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     }
+    ],
+    "outputs": [
+     {
+      "value": 40,
+      "p2pk_pubkey": "0x2222222222222222222222222222222222222222222222222222222222222222"
+     }
+    ]
+   }
+  },
+  {
+   "name": "DD-PS-refund-1_pass_exact_no_continuation",
+   "function": "refund_claim",
+   "constructor_args": [
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    80,
+    2,
+    "0x9dd3bd16869b2db5f68c34631f7611397cd87ed84e5c27dc5a0c8a8aaa5c9d59",
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ],
+   "args": [
+    1,
+    0,
+    "0x2222222222222222222222222222222222222222222222222222222222222222",
+    80,
+    5,
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "0x0eb923b0cbd24df54401d998531feead35a47a99f4deed205de4af81120f9761",
+    "0x85c09af929492a871e4fae32d9d5c36e352471cd659bcdb61de08f1722acc3b1",
+    "0xb22df1a126b5ba4e33c16fd6157507610e55ffce20dae7ac44cae168a463612a",
+    "0x209155a276ca3c2417e3876971dd587dd64ed9fcb8ef1fd6e7589ef4255c967f",
+    "0x6f7889ddd723ce6131ff105f416726118e1cf771b81265253b5c59aa6f87c24c",
+    "0x6659a5716acbaaa36b9f81157f9687e0ce9e9851218164900443de7287f85fad",
+    "0x0f6e4e768a8fecbfd286712ca7c4de283082448cccbb71db1d47e93f5327677e",
+    "0x66c4270c625b9e96b934b3f56d9301c44c823d08b342b2cd95ee24519397c14a",
+    "0x3da3596117e16ffe6091c17736590ac20a3ca9dcfcd24ea5eece12d51206f38e"
+   ],
+   "expect": "pass",
+   "tx": {
+    "active_input_index": 0,
+    "inputs": [
+     {
+      "utxo_value": 80,
+      "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     }
+    ],
+    "outputs": [
+     {
+      "value": 80,
+      "p2pk_pubkey": "0x2222222222222222222222222222222222222222222222222222222222222222"
+     }
+    ]
+   }
+  },
+  {
+   "name": "DD-PS-refund-2_pass_partial_with_continuation",
+   "function": "refund_claim",
+   "constructor_args": [
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    80,
+    2,
+    "0xf42e1a5f5992c5f87ad467ef4df87606cae51bbc550b40d1d67fd6546af8a2ae",
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ],
+   "args": [
+    1,
+    0,
+    "0x2222222222222222222222222222222222222222222222222222222222222222",
+    30,
+    5,
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "0x0eb923b0cbd24df54401d998531feead35a47a99f4deed205de4af81120f9761",
+    "0x85c09af929492a871e4fae32d9d5c36e352471cd659bcdb61de08f1722acc3b1",
+    "0xb22df1a126b5ba4e33c16fd6157507610e55ffce20dae7ac44cae168a463612a",
+    "0x209155a276ca3c2417e3876971dd587dd64ed9fcb8ef1fd6e7589ef4255c967f",
+    "0x6f7889ddd723ce6131ff105f416726118e1cf771b81265253b5c59aa6f87c24c",
+    "0x6659a5716acbaaa36b9f81157f9687e0ce9e9851218164900443de7287f85fad",
+    "0x0f6e4e768a8fecbfd286712ca7c4de283082448cccbb71db1d47e93f5327677e",
+    "0x66c4270c625b9e96b934b3f56d9301c44c823d08b342b2cd95ee24519397c14a",
+    "0x3da3596117e16ffe6091c17736590ac20a3ca9dcfcd24ea5eece12d51206f38e"
+   ],
+   "expect": "pass",
+   "tx": {
+    "active_input_index": 0,
+    "inputs": [
+     {
+      "utxo_value": 80,
+      "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     }
+    ],
+    "outputs": [
+     {
+      "value": 30,
+      "p2pk_pubkey": "0x2222222222222222222222222222222222222222222222222222222222222222"
+     },
+     {
+      "value": 50,
+      "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "state": {
+       "consolidated_pool": 50,
+       "closed": 2,
+       "payoutRoot": "0xf42e1a5f5992c5f87ad467ef4df87606cae51bbc550b40d1d67fd6546af8a2ae",
+       "w0": 32,
+       "w1": 0,
+       "w2": 0,
+       "w3": 0,
+       "w4": 0,
+       "w5": 0,
+       "w6": 0,
+       "w7": 0,
+       "w8": 0,
+       "w9": 0,
+       "w10": 0,
+       "w11": 0,
+       "w12": 0,
+       "w13": 0,
+       "w14": 0,
+       "w15": 0,
+       "w16": 0
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "DD-PS-refund-3_fail_partial_continuation_wrong_amount",
+   "function": "refund_claim",
+   "constructor_args": [
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    80,
+    2,
+    "0xf42e1a5f5992c5f87ad467ef4df87606cae51bbc550b40d1d67fd6546af8a2ae",
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ],
+   "args": [
+    1,
+    0,
+    "0x2222222222222222222222222222222222222222222222222222222222222222",
+    30,
+    5,
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "0x0eb923b0cbd24df54401d998531feead35a47a99f4deed205de4af81120f9761",
+    "0x85c09af929492a871e4fae32d9d5c36e352471cd659bcdb61de08f1722acc3b1",
+    "0xb22df1a126b5ba4e33c16fd6157507610e55ffce20dae7ac44cae168a463612a",
+    "0x209155a276ca3c2417e3876971dd587dd64ed9fcb8ef1fd6e7589ef4255c967f",
+    "0x6f7889ddd723ce6131ff105f416726118e1cf771b81265253b5c59aa6f87c24c",
+    "0x6659a5716acbaaa36b9f81157f9687e0ce9e9851218164900443de7287f85fad",
+    "0x0f6e4e768a8fecbfd286712ca7c4de283082448cccbb71db1d47e93f5327677e",
+    "0x66c4270c625b9e96b934b3f56d9301c44c823d08b342b2cd95ee24519397c14a",
+    "0x3da3596117e16ffe6091c17736590ac20a3ca9dcfcd24ea5eece12d51206f38e"
+   ],
+   "expect": "fail",
+   "tx": {
+    "active_input_index": 0,
+    "inputs": [
+     {
+      "utxo_value": 80,
+      "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     }
+    ],
+    "outputs": [
+     {
+      "value": 30,
+      "p2pk_pubkey": "0x2222222222222222222222222222222222222222222222222222222222222222"
+     },
+     {
+      "value": 49,
+      "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "state": {
+       "consolidated_pool": 50,
+       "closed": 2,
+       "payoutRoot": "0xf42e1a5f5992c5f87ad467ef4df87606cae51bbc550b40d1d67fd6546af8a2ae",
+       "w0": 32,
+       "w1": 0,
+       "w2": 0,
+       "w3": 0,
+       "w4": 0,
+       "w5": 0,
+       "w6": 0,
+       "w7": 0,
+       "w8": 0,
+       "w9": 0,
+       "w10": 0,
+       "w11": 0,
+       "w12": 0,
+       "w13": 0,
+       "w14": 0,
+       "w15": 0,
+       "w16": 0
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "DD-PS-refund-4_fail_partial_missing_continuation",
+   "function": "refund_claim",
+   "constructor_args": [
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    80,
+    2,
+    "0xf42e1a5f5992c5f87ad467ef4df87606cae51bbc550b40d1d67fd6546af8a2ae",
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ],
+   "args": [
+    1,
+    0,
+    "0x2222222222222222222222222222222222222222222222222222222222222222",
+    30,
+    5,
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "0x0eb923b0cbd24df54401d998531feead35a47a99f4deed205de4af81120f9761",
+    "0x85c09af929492a871e4fae32d9d5c36e352471cd659bcdb61de08f1722acc3b1",
+    "0xb22df1a126b5ba4e33c16fd6157507610e55ffce20dae7ac44cae168a463612a",
+    "0x209155a276ca3c2417e3876971dd587dd64ed9fcb8ef1fd6e7589ef4255c967f",
+    "0x6f7889ddd723ce6131ff105f416726118e1cf771b81265253b5c59aa6f87c24c",
+    "0x6659a5716acbaaa36b9f81157f9687e0ce9e9851218164900443de7287f85fad",
+    "0x0f6e4e768a8fecbfd286712ca7c4de283082448cccbb71db1d47e93f5327677e",
+    "0x66c4270c625b9e96b934b3f56d9301c44c823d08b342b2cd95ee24519397c14a",
+    "0x3da3596117e16ffe6091c17736590ac20a3ca9dcfcd24ea5eece12d51206f38e"
+   ],
+   "expect": "fail",
+   "tx": {
+    "active_input_index": 0,
+    "inputs": [
+     {
+      "utxo_value": 80,
+      "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     }
+    ],
+    "outputs": [
+     {
+      "value": 30,
+      "p2pk_pubkey": "0x2222222222222222222222222222222222222222222222222222222222222222"
+     }
+    ]
+   }
+  }
+ ]
+}

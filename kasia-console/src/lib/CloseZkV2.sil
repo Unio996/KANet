@@ -121,7 +121,7 @@ contract CloseZkV2(
         else if (word_idx == 14) { require((w14 / mask) % 2 == 0); nw14 = w14 + mask; }
         else if (word_idx == 15) { require((w15 / mask) % 2 == 0); nw15 = w15 + mask; }
         else                     { require((w16 / mask) % 2 == 0); nw16 = w16 + mask; }
-        byte[34] refundLock = new ScriptPubKeyP2PK(pubkey(bettorPk));
+        byte[36] refundLock = new ScriptPubKeyP2PK(pubkey(bettorPk));
         require(tx.outputs[refundOutIdx].scriptPubKey == byte[](refundLock));
         require(tx.outputs[refundOutIdx].value == stake);
         if (consolidated_pool == stake) {
@@ -188,7 +188,7 @@ contract CloseZkV2(
         else if (word_idx == 14) { require((w14 / mask) % 2 == 0); nw14 = w14 + mask; }
         else if (word_idx == 15) { require((w15 / mask) % 2 == 0); nw15 = w15 + mask; }
         else                     { require((w16 / mask) % 2 == 0); nw16 = w16 + mask; }
-        byte[34] winnerLock = new ScriptPubKeyP2PK(pubkey(bettorPk));
+        byte[36] winnerLock = new ScriptPubKeyP2PK(pubkey(bettorPk));
         require(tx.outputs[payoutOutIdx].scriptPubKey == byte[](winnerLock));
         require(tx.outputs[payoutOutIdx].value == payout);
         // ★ NWT checklist④: dust 边界修法, 逐行照抄 _j2_closezk_repro4.sil escape_claim(L140-160) 同款分支。

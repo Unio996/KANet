@@ -1,0 +1,18 @@
+  RUN   DD-PS-claim-1_pass_exact_no_continuation
+  PASS  DD-PS-claim-1_pass_exact_no_continuation
+  RUN   DD-PS-claim-2_pass_partial_with_continuation
+  PASS  DD-PS-claim-2_pass_partial_with_continuation
+  RUN   DD-PS-claim-3_fail_partial_continuation_wrong_amount
+  PASS  DD-PS-claim-3_fail_partial_continuation_wrong_amount
+  RUN   DD-PS-claim-4_fail_partial_missing_continuation
+  PASS  DD-PS-claim-4_fail_partial_missing_continuation
+  RUN   DD-PS-refund-1_pass_exact_no_continuation
+  PASS  DD-PS-refund-1_pass_exact_no_continuation
+  RUN   DD-PS-refund-2_pass_partial_with_continuation
+  PASS  DD-PS-refund-2_pass_partial_with_continuation
+  RUN   DD-PS-refund-3_fail_partial_continuation_wrong_amount
+  PASS  DD-PS-refund-3_fail_partial_continuation_wrong_amount
+  RUN   DD-PS-refund-4_fail_partial_missing_continuation
+  PASS  DD-PS-refund-4_fail_partial_missing_continuation
+
+8 tests: 8 passed, 0 failed

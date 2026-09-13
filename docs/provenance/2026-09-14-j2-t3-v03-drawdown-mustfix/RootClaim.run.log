@@ -1,0 +1,10 @@
+  RUN   DD-RC-claim_draw-1_pass_exact_no_continuation
+  PASS  DD-RC-claim_draw-1_pass_exact_no_continuation
+  RUN   DD-RC-claim_draw-2_pass_partial_with_continuation
+  PASS  DD-RC-claim_draw-2_pass_partial_with_continuation
+  RUN   DD-RC-claim_draw-3_fail_partial_continuation_wrong_amount
+  PASS  DD-RC-claim_draw-3_fail_partial_continuation_wrong_amount
+  RUN   DD-RC-claim_draw-4_fail_partial_missing_continuation
+  PASS  DD-RC-claim_draw-4_fail_partial_missing_continuation
+
+4 tests: 4 passed, 0 failed
