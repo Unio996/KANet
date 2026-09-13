@@ -1,6 +1,6 @@
 # 网络单一源 + 地址前缀一致性核 helper 化 · 设计 v0.1（不写码）
 
-> **Status**: DRAFT-FOR-REVIEW · v0.1（2026-09-13T10:2xZ `date -u`）· J2 · reviewer **NWT**（fail-open 攻击面 + 向量复核）→ Bettor → 落码分两笔：helper + lint（非钱路，Bettor 批）/ 33 处替换（含 settler/voter/relay 钱路，Owner 批）。
+> **Status**: DRAFT-FOR-REVIEW · **v0.2**（2026-09-13T10:5xZ · NWT 红队 7149e3a5 **PASS**，Q2/Q3/Q4 采纳；**Q1 PASS-with-condition ⇒ 入站站点 events 记录必须限频（§3 #25/#26 + §2.3 新增）**；**V12 对抗输入向量**由 NWT 代跑干净、本稿 §4 补录）· v0.1 10:2xZ · J2 · Bettor 10:4xZ 派 v0.2 → NWT 快审 → patch 阶段（D-011）。落码分两笔：helper + lint + 向量（非钱路，Bettor 批）/ 33 处替换（含 settler/voter/relay 钱路，Owner 批）。
 > 派工：Bettor seed `scratch/_bettor_relaunch_seed_2026-09-13.md` §2 J2 (b)。输入：Codex 复审 finding #3（"configured network is authoritative AND address prefix must match, ELSE reject; never map unknown prefix to mainnet"）· J2 `scratch/_j2_mainnet_pivot_lists_2026-09-07.md` §①（类 B）· 评估 v0.2 §G · ledger (1003) · **D-017**（主网上 da9 + TN12 退役 ⇒ 同一台机、同一个 DB 先后跑两个网络，正是本稿要防的过渡态）。
 > 行号随 HEAD `8f1e107f`。本稿只裁 helper 契约、单一源、逐处替换清单、向量、lint；不落 src。
 > 🔵 **与 NWT 负测规格对齐**（`docs/2026-09-13-nwt-negative-test-spec-local-only-and-network-prefix-v0.1.md` §B，本地 184bf6f5）：B-1 = 本稿 V1；B-3（未知前缀/空/undefined ⇒ 必须 reject）= V5 + V6；B-4 = V3；B-5 = V2 的反向（`kaspa:` 地址 + env `testnet-12` ⇒ reject，本稿 V3 的镜像，向量表补为 V3′）；B-6/B-7 的落点 = §2.2 `shared/lib/kaspa-network.mjs` + §4 向量文件。NWT 规格写"24 处"是 09-07 口径，本稿 F8 实核 33 处。
@@ -46,6 +46,13 @@
 | `kaspa` 参数 | 调用方传已加载的 kaspa-wasm 模块（console/relay 各自已有），helper **不自己 import**（避免 shared 目录再拉一份 wasm、也避免测试要装） | 未传 ⇒ throw `kaspa module required` |
 
 **明确不导出** `networkOfAddress()` 之类"从地址得网络"的函数——它就是今天的病。
+
+### 2.3 入站站点的 reject 记录限频（v0.2 · NWT Q1 条件 · MUST）
+
+#25/#26（`trade-protocol-filter.js:371/787`）与任何对手方可控字段的站点：`isAddressOnNetwork` 为 false ⇒ 丢消息，**但 `events` 表不逐次落行**。对手方只需反复塞任意串（不必是合法地址）即可让每条拒绝写一行 events（P2-6 刚治过 events 全扫）。落法二选一，**与 helper 同笔落**：
+- (i) 沿 `rpc-health.js` 的 `ALL_FAILED_NOTE_MS` 形：每 `(site, reason)` 10 min 内只落一行，行内带本窗计数；或
+- (ii) 按 `(sender_address 前 14 字符, reason)` 聚合计数，定期（同 10 min）落一行汇总。
+helper 本身**不写 events**（它是纯函数）；限频计数器放在调用站点旁的小 `Map`（与 `ibd-tick-gate.mjs` 的 `_state` 同形）。回归：连续 1000 次坏前缀 ⇒ events 新增行 ≤ 1（同 N1/H5 的"限频只一行"断言形）。
 
 ## 3. 逐处替换清单（33 处；"替换形"列一律 `assertAddressOnNetwork(<addr>, { who:'<file>:<line>', kaspa })`，返回值接原变量）
 
@@ -102,6 +109,8 @@
 | V9 | `kaspatest:p…`（任一现存 spine_p2sh，从 `pool_markets` 取一行） | `testnet-12` | 返回 `'testnet-12'` | P2SH 版本也过 validate |
 | **V10 弱注入臂** | V1 全部设置，**只**把 env 翻成 `mainnet` | 由绿翻红 | 断言读的是 env，不是地址 |
 | V11 | 33 处替换后：整仓 `grep -rn "startsWith('kaspatest:')" kasia-console/src kasia-relay/src \| grep -v test` | **0 行** | 清单闭合 |
+| **V12（v0.2 · NWT 代跑·脚本 `kasia-console/scratch/_nwt_address_validate_hostile_probe.mjs` · 11 组对抗输入·结果全部干净）** | ① 空串 · ② 嵌入 NUL 字节 `kaspa:qp\0umuen…` · ③ 1 MB 长串 `kaspa:` + `q`×1,000,000 · ④ 全角/混淆冒号 `kaspa：qpumuen…` · ⑤ 无冒号 · ⑥ 只有 `:` · ⑦ emoji `kaspa:😀😀😀` · ⑧ 控制字符 `kaspa:\x01\x02\x03\x04` · ⑨ 破损代理对 `kaspa:\uD800` · ⑩ 纯数字 `12345` · ⑪ `[object Object]` | 任意 | **全部 `validate()` 返回 false，不抛、不崩**；helper 对同 11 组 ⇒ reject `invalid-checksum`（②–⑪）/ `empty`（①）。**`validate()` 与 `RpcClient.connect()` 不是同一鲁棒等级**（后者对 null url 是 wasm 陷阱，见 (a) 稿 N9）——helper 只用前者 | 格式本身是攻击载荷的一类；照抄 NWT 脚本断言进 `kaspa-network.test.mjs` |
+| V3′ | `kaspa:qpumuen…4ypce9sf`（V2 地址） | `testnet-12` | reject `prefix-mismatch` | NWT B-5 反向 |
 
 向量文件建议：`shared/lib/kaspa-network.test.mjs`（`node` 直跑，注入 `kaspa` 用真模块，离线）+ 同名 `.vectors.json`；`u1-s10-identity.vectors.json` 那类现有 golden vector 的 `"network":"testnet-12"` 字段属类 C，主网切换时重生成，不在本稿。
 

@@ -1,6 +1,7 @@
 # `KASPA_RPC_LOCAL_ONLY=1` 严格语义（strict intended-local-only）· 设计 v0.1（不写码）
 
-> **Status**: DRAFT-FOR-REVIEW · v0.1（2026-09-13T10:1xZ `date -u`）· J2 · reviewer **NWT**（负测归 NWT，本稿 §5 列清单）→ Bettor → 🔴 **rpc-health 是钱路闸（G-1/③ 门）与 relay 子进程的 RPC 读数源 ⇒ 落码按钱路标准走 Owner 批**（铁律 0）。
+> **Status**: DRAFT-FOR-REVIEW · **v0.2**（2026-09-13T10:5xZ · NWT 红队 `docs/2026-09-13-nwt-redteam-j2-local-only-and-network-prefix-designs-v0.1.md` 7149e3a5 **PASS**，Q1/Q2/Q4 全采纳；**N9 已由 NWT 实跑，结果决定性 ⇒ 新增 C13 = F7 五处构造前判空，与 C1 同批 MUST，不得标 OPEN**；A-N3 口径维持）· v0.1 10:1xZ · J2 · Bettor 10:4xZ 派 v0.2 → NWT 快审 → patch 阶段（D-011 内部双审：fail-closed 加固非放行钱路，Owner 知会不逐项点头）。
+> 🔴 **v0.2 增量（NWT N9 实测）**：`new RpcClient({url: null, …})` **构造不抛，`connect()` 抛 wasm `RuntimeError: unreachable`**（三种形态一致：`url:null` / 省略 `url` / 裸 try-catch 无 race）——不是默认走公网（我担心的方向），也不是可捕获错误，是 wasm 层陷阱（同记忆 `kaspa-wasm unreachable trap 毒化实例`）。non-strict 下 `getWorkingRpc()` 几乎不回 null 所以雷不响；**strict 上线后 null 是常态返回值 ⇒ F7 五处 = 可预测的进程级 DoS**。修法只有一种：**在 `getWorkingRpc()` 之后、构造之前判 `url === null` 早退**（503 / 跳本 tick / 记 events），try/catch 包不住。见 §4 C13 + §5 N9。
 > 派工：Bettor seed `scratch/_bettor_relaunch_seed_2026-09-13.md` §2 J2 (a) + SendMessage 10:0xZ 补充（relay 侧纳入同一信任域）。输入：Codex 复审 `RESPONSE-20260907-MAINNET-PIVOT-PRECONDITIONS-CODEX-REVIEW.md` finding #2（HOLD）· NWT 清单 `docs/2026-09-07-NWT-mainnet-real-money-preconditions-v0.1.md` ①（LOCAL_ONLY 主网 MUST）· ledger (1001)(1004)(1005) · G-2 设计 `docs/2026-09-07-j2-g1-g2-node-trust-gate-and-console-rpc-selfheal-design-v0.1.md` v0.2 §4 · **D-017**（主网节点 = da9 本机官方 v2.0.1）。
 > 行号随 HEAD `8f1e107f`（2026-09-13T10:10Z）。本稿只裁"语义是什么、改哪几处、怎么验、怎么回滚"；不落 src、不上链。
 > 🔵 **与 NWT 负测规格对齐**（`docs/2026-09-13-nwt-negative-test-spec-local-only-and-network-prefix-v0.1.md` §A，本地 184bf6f5，与本稿并行写成）：A-N2 = 本稿 N1；**A-N3 口径本稿答：strict = 只信 env `KASPA_RPC_URL`，DB 配置的局域网/回环端点同样 ⇒ null（S1/S8，本稿 N2）**；A-N5 = 本稿 N6 对照臂；A-N4 由 S1 不改负缓存/`checkLocal` 保证。本稿 N4/N5/N8 是 NWT 规格之外的增项（写入口拒写 / relay 信任域 / 弱注入臂）。
@@ -79,8 +80,9 @@
 | C10 | `kasia-relay/src/lib/utxo-split.mjs` :27 | strict 下不认 `RPC_URL` 别名（S6） | relay |
 | C11 | `kanet.env` :304 注释 | 改成 strict 的真实语义 + 指向本稿 | 配置 |
 | C12 | `kasia-console/src/services/rpc-health-datacheck.test.mjs` | 加 §5 N1–N8 | 测试 |
+| **C13（v0.2·MUST·与 C1 同批）** | `oracle-pool.js:371` / `:469` · `pool.js:1120` · `oracle-pool-renewal-cron.mjs:125` · `oracle-pool-chain-scanner-cron.mjs:32` | 在 `const { url: rpcUrl } = await getWorkingRpc();` 之后、`new RpcClient(...)` / `getSharedRpc(...)` 之前加 `if (!rpcUrl) return <各自降级>`：HTTP 路径 503 `no working Kaspa RPC node`（与 `pool.js:1727` 既有文案逐字同）；cron/tick 路径 `return { skipped: 'no-rpc' }` + 一行 `[<site>] skip: no rpc url (strict local-only)`（10 min 限频）。**禁止**用 try/catch 代替（NWT 实测包不住 wasm 陷阱） | console（非钱路但 DoS 面） |
 
-C1 是唯一"必须"；C2–C3 是"写入口拒写"（§7 Q1 待 NWT 判：只读侧忽略是否已够）；C4–C10 是 relay/scout 信任域合一（Bettor 10:0xZ 已点名要）。
+C1 与 **C13** 是"必须且同批"（C13 不落，C1 上线 = 五个定时器/接口在本机每次未命中时把 console 的 kaspa-wasm 实例打进 `unreachable`）；C2–C3 是"写入口拒写"（§7 Q1 待 NWT 判：只读侧忽略是否已够）；C4–C10 是 relay/scout 信任域合一（Bettor 10:0xZ 已点名要）。
 
 ## 5. 负测清单（NWT 出用例 · J2 列判据 · 骨架沿用 `rpc-health-datacheck.test.mjs`：临时 migration 库 + 本机随机端口 listener + 假 `RpcClient` Ctor 注入 + `setConfig` 直写）
 
@@ -94,7 +96,7 @@ C1 是唯一"必须"；C2–C3 是"写入口拒写"（§7 Q1 待 NWT 判：只�
 | **N6 对照臂** | **non-strict**（env 不设）· 其余同 N1 | 返回配置 URL、`using configured node` 行出现 | 老行为一字未改；也证明 N1 的红不是"测试环境本来就连不上" |
 | N7 | strict · 任意 | `discovery disabled (KASPA_RPC_LOCAL_ONLY=1)` 逐字**恰一次** | canonical 行没丢（H6 继续绿） |
 | **N8 弱注入臂**（接位档 §(d)） | N1 的全部设置，**只**把 `KASPA_RPC_LOCAL_ONLY` 翻成 `'0'` | 结果翻成"返回配置 URL" | N1 的断言读的是这个开关，不是别的东西替它答题 |
-| N9（探针·OPEN） | `new RpcClient({ url: null/undefined, encoding, networkId })` 然后 `connect()` —— F7 那 5 处在 strict 下会真的这么调 | 记录它是 throw、还是**默认走公网 Resolver**（若是后者 = strict 被 kaspa-wasm 默认值绕开，5 处必须先加守卫） | 探针有出网动作，NWT 决定跑不跑 |
+| N9（**已跑·NWT 2026-09-13**·`kasia-console/scratch/_nwt_n9_probe*.mjs` 三形态） | `new RpcClient({ url: null/undefined, encoding, networkId })` 然后 `connect()` | **实测**：构造成功；`connect()` ⇒ `RuntimeError: unreachable`（wasm panic，不可捕获）。既非默认走公网，也非优雅错误 ⇒ **C13 MUST** | 落码后回归：对五处各构造 `getWorkingRpc()` 返回 null 的用例，期望走降级分支且 **kaspa-wasm 构造器计数不增**（同 N1 的 `st.ctor` 断言形） |
 
 ## 6. 与 D-017 / 四波 / 回滚
 
