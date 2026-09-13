@@ -1,0 +1,18 @@
+  RUN   zk_close_regression_vs_repro4_verified_data
+  PASS  zk_close_regression_vs_repro4_verified_data
+  RUN   escape_trigger_ms_unit_pass_at_threshold
+  PASS  escape_trigger_ms_unit_pass_at_threshold
+  RUN   escape_trigger_ms_unit_fail_before_threshold
+  PASS  escape_trigger_ms_unit_fail_before_threshold
+  RUN   claim_normal_first_winner
+  PASS  claim_normal_first_winner
+  RUN   claim_dust_boundary_final_winner
+  PASS  claim_dust_boundary_final_winner
+  RUN   claim_negative_wrong_merkle_proof
+  PASS  claim_negative_wrong_merkle_proof
+  RUN   claim_negative_closed_eq_3_should_reject
+  PASS  claim_negative_closed_eq_3_should_reject
+  RUN   claim_negative_double_claim_same_index_blocked
+  PASS  claim_negative_double_claim_same_index_blocked
+
+8 tests: 8 passed, 0 failed
