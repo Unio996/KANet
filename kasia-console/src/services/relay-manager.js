@@ -66,7 +66,11 @@ export async function startRelay(relayNodeId) {
   if (!privkey && !mnemonic) return { ok: false, reason: 'no_key' };
 
   // Resolve config
-  const rpcUrl = await getConfig('rpc_url') || process.env.KASPA_RPC_URL || '';
+  // S5 (strict local-only, 2026-09-13 设计 v0.2 C4): 原 `getConfig('rpc_url') || env` = DB 优先于 env, 绕过 rpc-health ⇒ console 读数走本机而 relay 递交走 DB 端点(T2 split-brain)。
+  //   现统一走 resolveChildRpcUrl: strict ⇒ 恒 env; 且 strict 下空值拒起(把 '' 递下去会触发 relay 侧 console-config → Resolver 公网链, T4)。
+  const { resolveChildRpcUrl, isStrictLocalOnly } = await import('./rpc-health.js');
+  const rpcUrl = await resolveChildRpcUrl('relay-manager');
+  if (isStrictLocalOnly() && !rpcUrl) return { ok: false, reason: 'no_rpc_url_strict' };
   const relayMode = await getConfig('relay_mode') || process.env.RELAY_MODE || 'rpc';
   const ingestSecret = await getConfig('ingest_secret') || process.env.INGEST_SECRET || '';
   const adapterPort = account.adapter_port || 3010;

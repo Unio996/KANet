@@ -117,6 +117,11 @@ export { KASIA_MIN_AMOUNT };
 
 async function resolveRpcUrl() {
   // Priority: env var > console config > null (use resolver)
+  // strict local-only (2026-09-13 设计 v0.2 C7): KASPA_RPC_LOCAL_ONLY=1 ⇒ 只信 env; 空 ⇒ throw, 不拉 console 配置(那条路会把 DB 端点递给花钱路径)
+  if (process.env.KASPA_RPC_LOCAL_ONLY === '1') {
+    if (!process.env.KASPA_RPC_URL) throw new Error('KASPA_RPC_URL not set under KASPA_RPC_LOCAL_ONLY=1 (strict local-only)');
+    return process.env.KASPA_RPC_URL;
+  }
   if (process.env.KASPA_RPC_URL) return process.env.KASPA_RPC_URL;
 
   const consoleUrl = process.env.CONSOLE_URL;

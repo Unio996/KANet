@@ -1103,7 +1103,9 @@ if (process.send) {
           })).catch(() => ({}));
           const RPC_TIMEOUT_MS = 15_000;
           const withTimeout = (p, ms, lbl) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(`timeout ${ms}ms ${lbl}`)), ms))]);
-          const rpc = new RpcClient({ url: process.env.KASPA_RPC_URL || 'ws://127.0.0.1:17210', encoding: Encoding.Borsh, networkId });
+          // C9 (strict local-only 设计 v0.2 / §G 类 E): 删硬编码 TN12 回退 'ws://127.0.0.1:17210', env 必填(主网 17110 / TN12 17210 只在 env 里)
+          if (!process.env.KASPA_RPC_URL) throw new Error('KASPA_RPC_URL not set (relay per-market probe requires env, no hardcoded fallback)');
+          const rpc = new RpcClient({ url: process.env.KASPA_RPC_URL, encoding: Encoding.Borsh, networkId });
           await withTimeout(rpc.connect(), RPC_TIMEOUT_MS, 'connect');
           let spineUtxo;
           try {

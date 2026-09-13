@@ -10,7 +10,11 @@
  * - 只修能修的，不能修的如实报告
  */
 import { getConfig, setConfig } from '../data/settings/configs.js';
-import { getWorkingRpc, isLocalNode, invalidateCache } from './rpc-health.js';
+import { getWorkingRpc, isLocalNode, invalidateCache, isStrictLocalOnly } from './rpc-health.js';
+
+// 本机 RPC 单一源 = env KASPA_RPC_URL(rpc-health.js 顶层已 fail-fast 未设即 throw; 这里的 || 只为 rpc-health 之外的孤立 import 不炸)
+function _localUrl() { return process.env.KASPA_RPC_URL || 'ws://127.0.0.1:17110'; }
+function _localPort() { try { return parseInt(new URL(_localUrl()).port, 10) || 17110; } catch { return 17110; } }
 import { startScanner, stopScanner, getScannerStatus } from './scanner.js';
 import { getStatus as getRelayStatus } from './relay-manager.js';
 import net from 'net';
@@ -40,8 +44,8 @@ function tcpPing(host, port, timeoutMs = 2000) {
 export async function diagnose() {
   const issues = [];
 
-  // ── 1. 节点检测 ──
-  const localUp = await tcpPing('127.0.0.1', 17110, 2000);
+  // ── 1. 节点检测 ──（本机端口 = env KASPA_RPC_URL 单一源; 原硬编码 17110 是主网默认, TN12 实际 17210 ⇒ 诊断在 TN12 上永远"本地不可用"）
+  const localUp = await tcpPing('127.0.0.1', _localPort(), 2000);
   const configuredMode = await getConfig('rpc_mode') || 'local';
   const configuredUrl = await getConfig('rpc_url') || '';
   const { url: workingUrl, isLocal: usingLocal } = await getWorkingRpc();
@@ -177,13 +181,15 @@ export async function diagnose() {
 export async function applyFix(fixId, fixData = {}) {
   switch (fixId) {
     case 'switch_to_local': {
+      const localUrl = _localUrl();
       await setConfig('rpc_mode', 'local', { category: 'node' });
-      await setConfig('rpc_url', 'ws://127.0.0.1:17110', { category: 'node' });
+      await setConfig('rpc_url', localUrl, { category: 'node' });
       invalidateCache();
-      return { ok: true, message: '已切换到本地节点 ws://127.0.0.1:17110' };
+      return { ok: true, message: `已切换到本地节点 ${localUrl}` };
     }
 
     case 'switch_to_discovered': {
+      if (isStrictLocalOnly()) return { ok: false, message: 'strict local-only (KASPA_RPC_LOCAL_ONLY=1): 不允许切到非本机端点' };   // S4
       const url = fixData.url;
       if (!url) return { ok: false, message: '无可用远程节点 URL' };
       await setConfig('rpc_mode', 'discovered', { category: 'node' });
@@ -193,6 +199,7 @@ export async function applyFix(fixId, fixData = {}) {
     }
 
     case 'discover_node': {
+      if (isStrictLocalOnly()) return { ok: false, message: 'strict local-only (KASPA_RPC_LOCAL_ONLY=1): 不允许发现/写入非本机端点' };   // S4
       invalidateCache();
       const { url } = await getWorkingRpc();
       if (!url) return { ok: false, message: '未发现可用节点' };

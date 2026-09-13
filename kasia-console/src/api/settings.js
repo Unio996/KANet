@@ -13,13 +13,19 @@ export async function registerSettingsRoutes(fastify) {
   fastify.post('/settings/node', async (request, reply) => {
     const { mode, custom_url, discovered_url } = request.body;
 
+    // S4 (strict local-only, 2026-09-13 设计 v0.2): 写入口拒写非本机模式——只在读侧忽略会让 /api/config/rpc-status 显示"configured 已设"而实际未用。
+    const { isStrictLocalOnly } = await import('../services/rpc-health.js');
+    if (isStrictLocalOnly() && mode !== 'local') {
+      return reply.code(409).send({ ok: false, error: 'strict-local-only', message: `KASPA_RPC_LOCAL_ONLY=1: rpc_mode '${mode}' 不允许, 只信 env KASPA_RPC_URL` });
+    }
+
     let url = '';
     if (mode === 'custom') {
       url = (custom_url || '').trim();
     } else if (mode === 'discovered') {
       url = (discovered_url || '').trim();
     } else if (mode === 'local') {
-      url = 'ws://127.0.0.1:17110';
+      url = process.env.KASPA_RPC_URL || 'ws://127.0.0.1:17110';   // 本机 = env 单一源(原硬编码 17110 是主网默认端口, TN12 是 17210)
     }
     // mode === 'public' keeps url empty (will fall back to resolver in relay)
 
@@ -97,9 +103,10 @@ export async function registerSettingsRoutes(fastify) {
     const mode = await getConfig('rpc_mode') || 'local';
     const configuredUrl = await getConfig('rpc_url') || '';
     const actual = await getWorkingRpc();
+    const localUrl = process.env.KASPA_RPC_URL || 'ws://127.0.0.1:17110';
     const configuredReachable = actual.url === configuredUrl
-      || (mode === 'local' && actual.url === 'ws://127.0.0.1:17110');
-    const source = actual.isLocal && actual.url === 'ws://127.0.0.1:17110' ? 'local'
+      || (mode === 'local' && actual.url === localUrl);
+    const source = actual.isLocal && actual.url === localUrl ? 'local'
       : actual.isLocal ? 'lan'
       : actual.url ? 'resolver'
       : 'none';

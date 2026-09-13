@@ -395,7 +395,8 @@ function extractSender(tx) {
 }
 
 // Shared RPC utility — extracted to eliminate Relay/Scout duplication
-import { resolveRpcUrl as _sharedResolveRpcUrl } from '../../shared/lib/rpc-utils.mjs';
+import { resolveRpcUrl as _sharedResolveRpcUrl, assertStrictRpcEnv as _assertStrictRpcEnv } from '../../shared/lib/rpc-utils.mjs';
+_assertStrictRpcEnv();   // strict local-only (2026-09-13 设计 v0.2 Q2·NWT 采纳): 模块顶层 throw ⇒ relay 起不来, 错配在启动那一刻暴露
 async function resolveRpcUrl() { return _sharedResolveRpcUrl(CONSOLE_URL); }
 
 async function refreshBlocklist() {
@@ -730,6 +731,9 @@ async function _connect(wallet) {
   _walletRef = wallet;
   const networkId = wallet.getNetworkId();
   const directUrl = await resolveRpcUrl();
+  if (!directUrl && process.env.KASPA_RPC_LOCAL_ONLY === '1') {   // S6/C8: strict 下绝不进 Resolver 分支(上面 assert 已挡, 这里是第二道)
+    throw new Error('strict local-only (KASPA_RPC_LOCAL_ONLY=1): no KASPA_RPC_URL, refusing Resolver fallback');
+  }
 
   const rpcOpts = directUrl
     ? { url: directUrl, encoding: Encoding.Borsh, networkId }

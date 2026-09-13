@@ -150,7 +150,9 @@ export async function registerEscrowRoutes(fastify) {
       // refund 分支：deadline 预检 — 在发到链上之前拦截，避免天书错误
       const lockTime = (branch === 1 && escrow.deadline) ? escrow.deadline : 0;
       if (branch === 1 && escrow.deadline) {
-        const rpcUrl = await getConfig('rpc_url') || process.env.KASPA_RPC_URL;
+        // S5 (strict local-only, 2026-09-13 设计 v0.2 C6): 原 DB 优先于 env 且绕过 rpc-health; 现走 resolveChildRpcUrl(strict ⇒ 恒 env)。
+        const { resolveChildRpcUrl } = await import('../services/rpc-health.js');
+        const rpcUrl = await resolveChildRpcUrl('escrow.refund-precheck');
         if (rpcUrl) {
           const { RpcClient, Encoding } = await import('kaspa-wasm');
           const networkId = process.env.KASPA_NETWORK || 'mainnet';

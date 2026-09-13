@@ -24,6 +24,7 @@ const MIN_BALANCE_FOR_SPLIT = 20_000_000n; // 0.2 KAS
 
 async function resolveRpcUrl() {
   if (process.env.KASPA_RPC_URL) return process.env.KASPA_RPC_URL;
+  if (process.env.KASPA_RPC_LOCAL_ONLY === '1') return null;   // C10 strict: 不认 RPC_URL 别名(第二个真相源)
   if (process.env.RPC_URL) return process.env.RPC_URL;
   return null;
 }
