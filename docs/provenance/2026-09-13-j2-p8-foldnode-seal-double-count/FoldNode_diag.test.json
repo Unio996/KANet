@@ -1,0 +1,547 @@
+{
+  "tests": [
+    {
+      "name": "p8_fold_leader_accepts_group_with_sealed_B",
+      "function": "fold",
+      "constructor_args": [
+        "0x1111111111111111111111111111111111111111111111111111111111111111",
+        "0x1111111111111111111111111111111111111111111111111111111111111111",
+        3,
+        4,
+        "0x292cfe20ae8eaa73e2c78c4614c778b8b2dd951b54701ca8fdf77c2dbecece88",
+        "0x0000000000000000000000000000000000000000000000000000000000000000",
+        0,
+        0,
+        0,
+        0
+      ],
+      "args": [],
+      "expect": "pass",
+      "tx": {
+        "active_input_index": 0,
+        "inputs": [
+          {
+            "utxo_value": 50,
+            "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "state": {
+              "local_yes": 10,
+              "local_no": 40,
+              "count": 1,
+              "pool_value": 50
+            }
+          },
+          {
+            "utxo_value": 100,
+            "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "state": {
+              "local_yes": 30,
+              "local_no": 70,
+              "count": 3,
+              "pool_value": 100
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "value": 150,
+            "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "state": {
+              "local_yes": 40,
+              "local_no": 110,
+              "count": 4,
+              "pool_value": 150
+            }
+          },
+          {
+            "value": 100,
+            "script_hex": "aa2093b413f7b279ee1c094567b69e85a5560e4b00497f8b0d533ce6fef13a532f6c87"
+          }
+        ]
+      }
+    },
+    {
+      "name": "p8_seal_to_root_B_accepts_same_tx",
+      "function": "seal_to_root",
+      "constructor_args": [
+        "0x1111111111111111111111111111111111111111111111111111111111111111",
+        "0x1111111111111111111111111111111111111111111111111111111111111111",
+        3,
+        4,
+        "0x292cfe20ae8eaa73e2c78c4614c778b8b2dd951b54701ca8fdf77c2dbecece88",
+        "0x0000000000000000000000000000000000000000000000000000000000000000",
+        0,
+        0,
+        0,
+        0
+      ],
+      "args": [
+        1,
+        "0x6b",
+        "0x6c76041dca42c1876375577982599f697556795679567956795679567956790108577958cd7e0108577958cd7e0108577958cd7e0108577958cd7e0108577958cd7e0108577958cd7e012057797e7e7e7e7e7e7eb976c902f10094765193bc7c7eb976c976029980937cbc7eaa02000001aa7e01207e7c7e01877e5f79c3885e79c25b799c6975757575757575757575757575757551676a68"
+      ],
+      "expect": "pass",
+      "tx": {
+        "active_input_index": 1,
+        "inputs": [
+          {
+            "utxo_value": 50,
+            "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "state": {
+              "local_yes": 10,
+              "local_no": 40,
+              "count": 1,
+              "pool_value": 50
+            }
+          },
+          {
+            "utxo_value": 100,
+            "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "state": {
+              "local_yes": 30,
+              "local_no": 70,
+              "count": 3,
+              "pool_value": 100
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "value": 150,
+            "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "state": {
+              "local_yes": 40,
+              "local_no": 110,
+              "count": 4,
+              "pool_value": 150
+            }
+          },
+          {
+            "value": 100,
+            "script_hex": "aa2093b413f7b279ee1c094567b69e85a5560e4b00497f8b0d533ce6fef13a532f6c87"
+          }
+        ]
+      }
+    },
+    {
+      "name": "c1_single_input_seal_pass",
+      "function": "seal_to_root",
+      "constructor_args": [
+        "0x1111111111111111111111111111111111111111111111111111111111111111",
+        "0x1111111111111111111111111111111111111111111111111111111111111111",
+        3,
+        4,
+        "0x292cfe20ae8eaa73e2c78c4614c778b8b2dd951b54701ca8fdf77c2dbecece88",
+        "0x0000000000000000000000000000000000000000000000000000000000000000",
+        0,
+        0,
+        0,
+        0
+      ],
+      "args": [
+        0,
+        "0x6b",
+        "0x6c76041dca42c1876375577982599f697556795679567956795679567956790108577958cd7e0108577958cd7e0108577958cd7e0108577958cd7e0108577958cd7e0108577958cd7e012057797e7e7e7e7e7e7eb976c902f10094765193bc7c7eb976c976029980937cbc7eaa02000001aa7e01207e7c7e01877e5f79c3885e79c25b799c6975757575757575757575757575757551676a68"
+      ],
+      "expect": "pass",
+      "tx": {
+        "active_input_index": 0,
+        "inputs": [
+          {
+            "utxo_value": 100,
+            "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "state": {
+              "local_yes": 30,
+              "local_no": 70,
+              "count": 3,
+              "pool_value": 100
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "value": 100,
+            "script_hex": "aa2093b413f7b279ee1c094567b69e85a5560e4b00497f8b0d533ce6fef13a532f6c87"
+          }
+        ]
+      }
+    },
+    {
+      "name": "c1_two_same_cov_inputs_seal_CURRENTLY_PASSES",
+      "function": "seal_to_root",
+      "constructor_args": [
+        "0x1111111111111111111111111111111111111111111111111111111111111111",
+        "0x1111111111111111111111111111111111111111111111111111111111111111",
+        3,
+        4,
+        "0x292cfe20ae8eaa73e2c78c4614c778b8b2dd951b54701ca8fdf77c2dbecece88",
+        "0x0000000000000000000000000000000000000000000000000000000000000000",
+        0,
+        0,
+        0,
+        0
+      ],
+      "args": [
+        1,
+        "0x6b",
+        "0x6c76041dca42c1876375577982599f697556795679567956795679567956790108577958cd7e0108577958cd7e0108577958cd7e0108577958cd7e0108577958cd7e0108577958cd7e012057797e7e7e7e7e7e7eb976c902f10094765193bc7c7eb976c976029980937cbc7eaa02000001aa7e01207e7c7e01877e5f79c3885e79c25b799c6975757575757575757575757575757551676a68"
+      ],
+      "expect": "pass",
+      "tx": {
+        "active_input_index": 1,
+        "inputs": [
+          {
+            "utxo_value": 50,
+            "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "state": {
+              "local_yes": 10,
+              "local_no": 40,
+              "count": 1,
+              "pool_value": 50
+            }
+          },
+          {
+            "utxo_value": 100,
+            "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "state": {
+              "local_yes": 30,
+              "local_no": 70,
+              "count": 3,
+              "pool_value": 100
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "value": 150,
+            "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "state": {
+              "local_yes": 40,
+              "local_no": 110,
+              "count": 4,
+              "pool_value": 150
+            }
+          },
+          {
+            "value": 100,
+            "script_hex": "aa2093b413f7b279ee1c094567b69e85a5560e4b00497f8b0d533ce6fef13a532f6c87"
+          }
+        ]
+      }
+    },
+    {
+      "name": "c1_second_input_not_our_cov_seal_pass",
+      "function": "seal_to_root",
+      "constructor_args": [
+        "0x1111111111111111111111111111111111111111111111111111111111111111",
+        "0x1111111111111111111111111111111111111111111111111111111111111111",
+        3,
+        4,
+        "0x292cfe20ae8eaa73e2c78c4614c778b8b2dd951b54701ca8fdf77c2dbecece88",
+        "0x0000000000000000000000000000000000000000000000000000000000000000",
+        0,
+        0,
+        0,
+        0
+      ],
+      "args": [
+        1,
+        "0x6b",
+        "0x6c76041dca42c1876375577982599f697556795679567956795679567956790108577958cd7e0108577958cd7e0108577958cd7e0108577958cd7e0108577958cd7e0108577958cd7e012057797e7e7e7e7e7e7eb976c902f10094765193bc7c7eb976c976029980937cbc7eaa02000001aa7e01207e7c7e01877e5f79c3885e79c25b799c6975757575757575757575757575757551676a68"
+      ],
+      "expect": "pass",
+      "tx": {
+        "active_input_index": 1,
+        "inputs": [
+          {
+            "utxo_value": 50
+          },
+          {
+            "utxo_value": 100,
+            "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "state": {
+              "local_yes": 30,
+              "local_no": 70,
+              "count": 3,
+              "pool_value": 100
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "value": 50,
+            "script_hex": "aa2093b413f7b279ee1c094567b69e85a5560e4b00497f8b0d533ce6fef13a532f6c87"
+          },
+          {
+            "value": 100,
+            "script_hex": "aa2093b413f7b279ee1c094567b69e85a5560e4b00497f8b0d533ce6fef13a532f6c87"
+          }
+        ]
+      }
+    },
+    {
+      "name": "c1_fold_control_two_inputs_pass",
+      "function": "fold",
+      "constructor_args": [
+        "0x1111111111111111111111111111111111111111111111111111111111111111",
+        "0x1111111111111111111111111111111111111111111111111111111111111111",
+        3,
+        4,
+        "0x292cfe20ae8eaa73e2c78c4614c778b8b2dd951b54701ca8fdf77c2dbecece88",
+        "0x0000000000000000000000000000000000000000000000000000000000000000",
+        0,
+        0,
+        0,
+        0
+      ],
+      "args": [],
+      "expect": "pass",
+      "tx": {
+        "active_input_index": 0,
+        "inputs": [
+          {
+            "utxo_value": 50,
+            "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "state": {
+              "local_yes": 10,
+              "local_no": 40,
+              "count": 1,
+              "pool_value": 50
+            }
+          },
+          {
+            "utxo_value": 100,
+            "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "state": {
+              "local_yes": 30,
+              "local_no": 70,
+              "count": 1,
+              "pool_value": 100
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "value": 150,
+            "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "state": {
+              "local_yes": 40,
+              "local_no": 110,
+              "count": 2,
+              "pool_value": 150
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "p8_aftermath_leaf_count4_cannot_seal",
+      "function": "seal_to_root",
+      "constructor_args": [
+        "0x1111111111111111111111111111111111111111111111111111111111111111",
+        "0x1111111111111111111111111111111111111111111111111111111111111111",
+        3,
+        4,
+        "0x292cfe20ae8eaa73e2c78c4614c778b8b2dd951b54701ca8fdf77c2dbecece88",
+        "0x0000000000000000000000000000000000000000000000000000000000000000",
+        0,
+        0,
+        0,
+        0
+      ],
+      "args": [
+        0,
+        "0x6b",
+        "0x6c76041dca42c1876375577982599f697556795679567956795679567956790108577958cd7e0108577958cd7e0108577958cd7e0108577958cd7e0108577958cd7e0108577958cd7e012057797e7e7e7e7e7e7eb976c902f10094765193bc7c7eb976c976029980937cbc7eaa02000001aa7e01207e7c7e01877e5f79c3885e79c25b799c6975757575757575757575757575757551676a68"
+      ],
+      "expect": "fail",
+      "tx": {
+        "active_input_index": 0,
+        "inputs": [
+          {
+            "utxo_value": 150,
+            "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "state": {
+              "local_yes": 40,
+              "local_no": 110,
+              "count": 4,
+              "pool_value": 150
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "value": 150,
+            "script_hex": "aa2093b413f7b279ee1c094567b69e85a5560e4b00497f8b0d533ce6fef13a532f6c87"
+          }
+        ]
+      }
+    },
+    {
+      "name": "p8_baseline_fold_A_alone",
+      "function": "fold",
+      "constructor_args": [
+        "0x1111111111111111111111111111111111111111111111111111111111111111",
+        "0x1111111111111111111111111111111111111111111111111111111111111111",
+        3,
+        4,
+        "0x292cfe20ae8eaa73e2c78c4614c778b8b2dd951b54701ca8fdf77c2dbecece88",
+        "0x0000000000000000000000000000000000000000000000000000000000000000",
+        0,
+        0,
+        0,
+        0
+      ],
+      "args": [],
+      "expect": "pass",
+      "tx": {
+        "active_input_index": 0,
+        "inputs": [
+          {
+            "utxo_value": 50,
+            "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "state": {
+              "local_yes": 10,
+              "local_no": 40,
+              "count": 1,
+              "pool_value": 50
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "value": 50,
+            "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "state": {
+              "local_yes": 10,
+              "local_no": 40,
+              "count": 1,
+              "pool_value": 50
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "h_seal_root_value_wrong_fails",
+      "function": "seal_to_root",
+      "constructor_args": [
+        "0x1111111111111111111111111111111111111111111111111111111111111111",
+        "0x1111111111111111111111111111111111111111111111111111111111111111",
+        3,
+        4,
+        "0x292cfe20ae8eaa73e2c78c4614c778b8b2dd951b54701ca8fdf77c2dbecece88",
+        "0x0000000000000000000000000000000000000000000000000000000000000000",
+        0,
+        0,
+        0,
+        0
+      ],
+      "args": [
+        1,
+        "0x6b",
+        "0x6c76041dca42c1876375577982599f697556795679567956795679567956790108577958cd7e0108577958cd7e0108577958cd7e0108577958cd7e0108577958cd7e0108577958cd7e012057797e7e7e7e7e7e7eb976c902f10094765193bc7c7eb976c976029980937cbc7eaa02000001aa7e01207e7c7e01877e5f79c3885e79c25b799c6975757575757575757575757575757551676a68"
+      ],
+      "expect": "fail",
+      "tx": {
+        "active_input_index": 1,
+        "inputs": [
+          {
+            "utxo_value": 50,
+            "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "state": {
+              "local_yes": 10,
+              "local_no": 40,
+              "count": 1,
+              "pool_value": 50
+            }
+          },
+          {
+            "utxo_value": 100,
+            "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "state": {
+              "local_yes": 30,
+              "local_no": 70,
+              "count": 3,
+              "pool_value": 100
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "value": 150,
+            "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "state": {
+              "local_yes": 40,
+              "local_no": 110,
+              "count": 4,
+              "pool_value": 150
+            }
+          },
+          {
+            "value": 99,
+            "script_hex": "aa2093b413f7b279ee1c094567b69e85a5560e4b00497f8b0d533ce6fef13a532f6c87"
+          }
+        ]
+      }
+    },
+    {
+      "name": "h_fold_sum_wrong_fails",
+      "function": "fold",
+      "constructor_args": [
+        "0x1111111111111111111111111111111111111111111111111111111111111111",
+        "0x1111111111111111111111111111111111111111111111111111111111111111",
+        3,
+        4,
+        "0x292cfe20ae8eaa73e2c78c4614c778b8b2dd951b54701ca8fdf77c2dbecece88",
+        "0x0000000000000000000000000000000000000000000000000000000000000000",
+        0,
+        0,
+        0,
+        0
+      ],
+      "args": [],
+      "expect": "fail",
+      "tx": {
+        "active_input_index": 0,
+        "inputs": [
+          {
+            "utxo_value": 50,
+            "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "state": {
+              "local_yes": 10,
+              "local_no": 40,
+              "count": 1,
+              "pool_value": 50
+            }
+          },
+          {
+            "utxo_value": 100,
+            "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "state": {
+              "local_yes": 30,
+              "local_no": 70,
+              "count": 3,
+              "pool_value": 100
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "value": 149,
+            "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "state": {
+              "local_yes": 40,
+              "local_no": 110,
+              "count": 4,
+              "pool_value": 149
+            }
+          },
+          {
+            "value": 100,
+            "script_hex": "aa2093b413f7b279ee1c094567b69e85a5560e4b00497f8b0d533ce6fef13a532f6c87"
+          }
+        ]
+      }
+    }
+  ]
+}
