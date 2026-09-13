@@ -169,22 +169,33 @@
    重编译比对天然覆盖，但步骤 (d) P2SH 核对与"7 个"这个具名数字如果被后续实现直接抄，会漏掉新增字段）——
    本次未修改 T4 设计文档，留给 T4 落码时核对。
 
-5. **本分支落后 canonical，且缺一份关键 NWT 复核文档**：`scripts/lint-kanet.mjs` 持续报告本地 `HEAD` 落后
-   `origin/bshard-m3-deploy` 146 commits（且随本次提交还在增长）。更具体的一条：`docs/2026-09-14-nwt-redteam-
-   j2-routing-change-v0.2-review-v0.1.md`（NWT 对路由变更 v0.2 设计的复核，`KanetTestToken.sil` 文件头注释
-   直接引用这份文档）**存在于 canonical `bshard-m3-deploy`（`4b39c801`），但不在本分支 `coord/j2-t3-market-sil`
-   的祖先链里**——本次撰写本稿时才发现这个缺口（fork 调查独立确认）。这份文档给 T1 v0.6+T3 联合合入定了
-   **三条硬前提**：(a) 全部 A 类入口真落码+真向量（本稿 §2/§3 确认已满足）；(b) 每个入口 RHS 等式独立复核
-   （交 NWT）；(c) **`max_ins_scan` 必须钉在"≥协议实际最大输入数"，不能是经验/典型值**——而本次全部落码的
-   `MAX_INS_SCAN` 常量统一用的是 **8**（`RootClose`/`ShardLeaf`/`ShardLeaf_direct`/`PayoutShard`/
-   `PayoutShardV2` 五文件，含 B 类 `noTokenInput` 与 A 类 `scanOwnedTokenInputs` 共享同一个值）——这是
-   **v0.3 §3 设计稿自己论证过的"部署配置决策，非安全参数本身"取值**（论证：`require(len<=bound)` 先整体拒绝
-   超界交易，victim 无处可藏这条安全性质与 `max_ins_scan` 具体取值无关，只要 require 与循环共享同一常量）。
-   **这两份文档（v0.2 复核的"必须 ≥1000"表述 vs v0.3 §3 的"取值与安全性质无关"论证）字面上不一致**——本稿
-   不代为裁定哪一份是权威，**如实记录为待 NWT 确认的开放项**：v0.3 §3 的论证是否已经满足 v0.2 复核的
-   precondition (c)（即"reject-then-loop 结构让具体取值不再是安全参数"这个论证本身是否被 NWT 认可为满足
-   (c) 的方式，而不是要求字面上把 8 改成 1000）。这条不确认清楚，`MAX_INS_SCAN=8` 的五个文件都可能需要按
-   (c) 的字面要求重新评估。
+5. **本分支落后 canonical**：`scripts/lint-kanet.mjs` 持续报告本地 `HEAD` 落后 `origin/bshard-m3-deploy`
+   146+ commits（且随本次提交还在增长）。撰写本稿时发现一个具体缺口：`docs/2026-09-14-nwt-redteam-j2-routing-
+   change-v0.2-review-v0.1.md`（`KanetTestToken.sil` 文件头注释直接引用这份文档）存在于 canonical
+   `bshard-m3-deploy`（`4b39c801`），但不在本分支祖先链里。这份文档的 precondition (c) 原话"`max_ins_scan`
+   必须钉在≥协议实际最大输入数"，字面上似乎与本次全部落码用的 `MAX_INS_SCAN=8`（`RootClose`/`ShardLeaf`/
+   `ShardLeaf_direct`/`PayoutShard`/`PayoutShardV2` 五文件）冲突——v0.5 初版把这条记为待 NWT 确认的开放项。
+
+   **裁定（Bettor ledger 1195，已闭环这条文档层面的疑问）**：权威是 **1122 + 1122-补**——Bettor 明确允许
+   "先 `require(len(tx.inputs)<=界)` 拒超界交易，再界内遍历"这个结构，NWT 认可的判据是**"victim 无处可藏"
+   这条安全性质**，不是具体数字；`a036641c`（NWT 红队复核 T3 v0.3+T1 v0.6+drawdown MUST-FIX）已对 v0.3 §3
+   这条论证给出 GREEN。`4b39c801` precondition (c) 的**字面**表述（"必须≥1000"）被这条更晚的裁定取代——
+   **`MAX_INS_SCAN=8` 在安全性质上成立**，不需要机械改成 1000。文档层面的不一致到此解决，不再是开放项。
+
+   **但裁定同时加了一条新的活性核对要求（尚未完成，见下方新增开放项 6）**：安全性质成立不等于"8 这个界不会
+   拒绝合法交易"——`界=8` 意味着任何真实产生 >8 输入的合法场景都会被结构性拒绝（这是可用性问题，不是安全
+   漏洞，但如果真实场景确实需要更多输入，界需要按场景调高）。这条核对本稿写作时尚未做，见 §5 第 6 项。
+
+6. **`MAX_INS_SCAN=8` 的活性核对（Bettor 1195 新增，本次正在做，结果见后续 commit）**：需要对照
+   `kasia-console/src/lib/` 里真实构造这些交易的代码（`bshard-close-transport.mjs`/`bshard-payout-family-
+   coherence.mjs`/`pool-shard-register.mjs`/`pool-shard-settle.mjs`/`pool-bshard-market-setup.mjs`/
+   `pool-bshard-artifacts.mjs` 等），逐个 A/B 入口列出真实交易的**最大输入数**（含多分片归集、多代币输入、
+   ZK close 等场景），证明 ≤8；哪个入口的真实最大输入数超过 8，就按该入口调高 `MAX_INS_SCAN` 并补齐
+   界/界+1/victim 末位三条边界向量（同 1122-补的既有形状）。本稿 v0.5 初版发布时这项核对**尚未进行**——
+   `MAX_INS_SCAN=8` 是沿用 `PayoutShard.sil` 最早引入时的"可测试小值"（该文件头注释里就是这么说的：
+   "生产取值留给 T3 v0.3 全量落码时按各市场合约实际预期的最大输入形态选定"），本次五个文件全部照抄同一个
+   数字，**没有对每个文件的真实场景分别验证过**。这条核对完成后，本节会更新为"已核实 ≤8"或"发现 N 个文件
+   需要调高"的具体结果。
 
 ## 6. 联合合入准备
 
