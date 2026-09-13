@@ -500,11 +500,45 @@ if (process.send) {
           break;
         }
 
-        case 'transfer':
+        case 'transfer': {
+          // (c) F2 (J2 2026-09-13, 设计 v0.3): intent_key 在 ⇒ 两阶段(prepared 落 console 才广播)+ 进程内幂等 + 同字节重播; 不在 ⇒ 原行为。
+          if (cmd.intent_key) {
+            const { transferWithIntentRelay } = await import('./lib/submit-intent-relay.mjs');
+            let r;
+            try {
+              r = await transferWithIntentRelay({ cmd, sendKaspa, localAddress, log });
+            } catch (err) {
+              r = { ok: false, error: err?.message || String(err), intent_key: cmd.intent_key };
+            }
+            if (r.ok && r.txId && !r.reused && !r.alreadyInMempool && !r.alreadyLanded) {
+              ingestTx({ traceId: r.txId, txid: r.txId, direction: 'outbound', amount: cmd.amount, fee: r.fee, localAddress, targetAddress: cmd.target });
+            }
+            log(`TRANSFER(intent ${cmd.intent_key}) ${cmd.amount} → ${cmd.target?.slice(-12)} ${r.ok ? `TX: ${r.txId}` : `FAIL: ${r.code || ''} ${r.error}`}`);
+            if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ...r, phase: 'execution' } });
+            return;   // 短路 generic reply(已回, 且带 code/intent 字段)
+          }
           sent = await sendKaspa({ to: cmd.target, amount: cmd.amount });
-          ingestTx({ traceId: sent?.txId, txid: sent?.txId, direction: 'outbound', amount: cmd.amount, fee: sent?.fee, localAddress });
+          ingestTx({ traceId: sent?.txId, txid: sent?.txId, direction: 'outbound', amount: cmd.amount, fee: sent?.fee, localAddress, targetAddress: cmd.target });
           log(`TRANSFER ${cmd.amount} → ${cmd.target?.slice(-12)} TX: ${sent?.txId || '?'} fee: ${sent?.fee || '?'}`);
           break;
+        }
+
+        case 'get_mempool_entry': {
+          // (c) F2 (J2 2026-09-13): 只读 mempool 查询 —— submit-intent attempt ≥ 2 重发前查 relay 侧权威源。没找到 RPC 抛错 ⇒ found:false。
+          const { waitForRpc } = await import('./rpc-listener.mjs');
+          const rpc = await waitForRpc();
+          let found = false, error = null;
+          try {
+            const m = await rpc.getMempoolEntry({ transactionId: cmd.txid, includeOrphanPool: true, filterTransactionPool: false });
+            found = !!(m?.entry || m?.mempoolEntry);
+          } catch (e) {
+            // 没找到时 RPC 抛错; 不靠报错串分类(记忆: 抽报错串必须用真实串测过) —— 用独立活性探针区分:
+            //   getBlockDagInfo 成功 ⇒ RPC 活 ⇒ 这次抛错 = not found ⇒ found:false; 探针也失败 ⇒ 真 RPC 错, 如实回 error, 调用方按"未知"不重发。
+            try { await rpc.getBlockDagInfo(); } catch { error = e?.message || String(e); }
+          }
+          if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: error ? { ok: false, error } : { ok: true, found } });
+          return;
+        }
 
         case 'custodial_transfer': {
           // KANet-UI 2026-06-23 — Path C (Bettor 拍): TG 托管钱包转账。Console (持 CONSOLE_ENCRYPTION_KEY,

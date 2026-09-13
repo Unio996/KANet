@@ -847,6 +847,12 @@ startStateReconciler();
 import { startBrokerFeeEmitCron } from './services/broker-fee-emit.mjs';
 startBrokerFeeEmitCron();
 
+// J2 2026-09-13 (c) F3 (设计 docs/2026-09-13-j2-no-tx-no-state-two-violations-and-landed-reconciler-design-v0.1.md v0.3 NWT PASS · Bettor 1044):
+//   submit/landed 对账器 v1 —— tx_records 落链列回写 + submit_intents landed 回写 + tx_not_landed/intent_not_landed/intent_prepared_stale 告警。
+//   只读链(console 共享 RpcClient) + 写账本列, 不自愈; 同档 5 min cron。
+import { startTxLandedReconciler } from './services/tx-landed-reconciler.mjs';
+startTxLandedReconciler();
+
 // J1tn 2026-07-16 (docs/2026-07-08-backward-walk-daa-index-design.md §2.2 note①, Bettor 方向审
 // GREEN + NWT 攻击面终审 GREEN #o0056j): spc_daa_index 完整性巡检 — 9ez2u 同族根因防线。
 import { startSpcDaaIndexStaleCheck } from './services/spc-daa-index-monitor.mjs';
