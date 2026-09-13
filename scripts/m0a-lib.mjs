@@ -166,6 +166,25 @@ export const M0C2_HOTWALLET_ADMISSION_ALLOWLIST = new Set([
   'kasia-console/src/api/relay.js', // POST /relays + POST /api/relay/import-privkey 早失败(非安全边界本身, 真正把关在 relay-manager.js:startRelay())
   'kasia-console/test-framework/cases/system/hotwallet-admission.test.mjs', // checkHotwalletAdmission() 11 用例单测(依赖注入隔离真实 RPC/DB)
 ]);
+
+// ── considered amendment #7(2026-09-14, Bettor 1150 裁定)：窄 capability m0c3-relay-hotwallet-monitor ──
+// NWT 2-1 v0.2 驻留期监控(docs/2026-09-14-nwt-mainnet-relay-hotwallet-cap-and-cold-hot-separation-
+// spec-v0.2.md)新增独立文件 relay-hotwallet-monitor.js, 需要 import { getStatus, stopRelay } from
+// relay-manager.js——跟 m0c2-hotwallet-admission 的 checkHotwalletAdmission 消费者不是同一件事:
+// 这里读的是"当前活着的relay状态"+"kill一个relay"这两个既有公开只读/控制动作, 不涉及余额准入判断
+// 本身。form 不含 checkHotwalletAdmission, 塞进 m0c2 会让它的约束③(专属静态负面检查: 必须含
+// checkHotwalletAdmission)判假拒绝, 也会稀释 m0c2 已经过 NWT 审(ffd3b8dd)那份"恰两项、恰这一个
+// 具名导出"的窄语义——照抄前六次先例道理: 威胁模型不对口就新开窄 capability, 不硬塞。
+//   ① 白名单有界 shrink-only, 恰一项(relay-hotwallet-monitor.js 本身；扩张走 NWT 审 + Owner 知情)。
+//   ② content_digest TOCTOU 锚(批准时内容 sha256, 失配=改过没重审=拒)。
+//   ③ 不加额外静态负面检查(同 m0c-controlled-relay-endpoint 先例的简化形——单文件白名单+digest 已
+//      经是完整防线: 任何往这一行夹带无关新 relay-manager 具名导出的改动都会改变文件内容、改变
+//      digest、触发重审, 不需要再加一层字符串匹配)。
+//   ④ lint 是完整性门, NWT diff 审仍是唯一 load-bearing 闸。
+export const M0C3_HOTWALLET_MONITOR_CAP = 'm0c3-relay-hotwallet-monitor';
+export const M0C3_HOTWALLET_MONITOR_ALLOWLIST = new Set([
+  'kasia-console/src/services/relay-hotwallet-monitor.js', // NWT 2-1 v0.2 驻留期热钱包监控, getStatus()枚举活着的relay + stopRelay()超限kill
+]);
 const TEST_FRAMEWORK_PATH_PREFIX = 'kasia-console/test-framework/';
 const LIVE_CONSOLE_DB_PATH_LITERAL = /kasia-console\/data\/console\.db|kasia-console[\\/]data[\\/]console\.db/;
 
@@ -336,7 +355,7 @@ const MANIFEST_FIELDS = ['id', 'family', 'form', 'path', 'capability', 'justific
 // 七字段(MANIFEST_FIELDS)全必填对所有 capability 生效; content_digest 是"仅此 capability 附加必填"
 // (m0c-controlled-relay-endpoint), 单独校验(见 manifestChecks relay-manager 分支), 不并入 MANIFEST_FIELDS
 // —— 否则 db-readonly / test-fixture 存量条目会因缺新字段被全判挂(向后兼容, NWT 第4约束的兼容边界)。
-const CAPABILITIES = new Set(['db-readonly', 'test-fixture', CONTROLLED_RELAY_CAP, PROVISION_WRITER_CAP, PILOT_CUSTODIAL_WRITER_CAP, TEST_FIXTURE_WRITER_CAP, TEST_FIXTURE_RELAY_SINK_CAP, M0C2_HOTWALLET_ADMISSION_CAP]);
+const CAPABILITIES = new Set(['db-readonly', 'test-fixture', CONTROLLED_RELAY_CAP, PROVISION_WRITER_CAP, PILOT_CUSTODIAL_WRITER_CAP, TEST_FIXTURE_WRITER_CAP, TEST_FIXTURE_RELAY_SINK_CAP, M0C2_HOTWALLET_ADMISSION_CAP, M0C3_HOTWALLET_MONITOR_CAP]);
 
 export function manifestChecks(root) {
   const violations = [];
@@ -360,13 +379,15 @@ export function manifestChecks(root) {
     }
     if (e.family === 'relay-manager') {
       // considered amendment(NWT 4 约束) + considered amendment #5(NWT, m0c1-test-fixture-relay-sink)
-      // + considered amendment #6(Bettor 1144, m0c2-hotwallet-admission):
-      // relay-manager 族只经这三条窄 capability 之一放行(受控生产 funnel / 受控测试 fixture / 热钱包
-      // 准入门早失败+单测)。其他 capability(db-readonly/test-fixture/任何 writer)= 保持既有硬拒
-      // (既有 block, 非新增)。
-      if (e.capability !== CONTROLLED_RELAY_CAP && e.capability !== TEST_FIXTURE_RELAY_SINK_CAP && e.capability !== M0C2_HOTWALLET_ADMISSION_CAP) {
+      // + considered amendment #6(Bettor 1144, m0c2-hotwallet-admission)
+      // + considered amendment #7(Bettor 1150, m0c3-relay-hotwallet-monitor):
+      // relay-manager 族只经这四条窄 capability 之一放行(受控生产 funnel / 受控测试 fixture / 热钱包
+      // 准入门早失败+单测 / 驻留期监控)。其他 capability(db-readonly/test-fixture/任何 writer)=
+      // 保持既有硬拒(既有 block, 非新增)。
+      const RELAY_MANAGER_ALLOWED_CAPS = [CONTROLLED_RELAY_CAP, TEST_FIXTURE_RELAY_SINK_CAP, M0C2_HOTWALLET_ADMISSION_CAP, M0C3_HOTWALLET_MONITOR_CAP];
+      if (!RELAY_MANAGER_ALLOWED_CAPS.includes(e.capability)) {
         violations.push({ rule: 'R-M0A-MANIFEST-SCHEMA', file: MANIFEST_PATH,
-          msg: `manifest 条目 "${e.id}" family=relay-manager 只能经窄 capability {${CONTROLLED_RELAY_CAP}, ${TEST_FIXTURE_RELAY_SINK_CAP}, ${M0C2_HOTWALLET_ADMISSION_CAP}} 之一, 不开 db-readonly/test-fixture/writer 口 —— 其余 relay-manager import 一律正规审批走仓储层/API(设计 §5 + considered amendment #5/#6)。` });
+          msg: `manifest 条目 "${e.id}" family=relay-manager 只能经窄 capability {${RELAY_MANAGER_ALLOWED_CAPS.join(', ')}} 之一, 不开 db-readonly/test-fixture/writer 口 —— 其余 relay-manager import 一律正规审批走仓储层/API(设计 §5 + considered amendment #5/#6/#7)。` });
         continue;
       }
       if (e.capability === CONTROLLED_RELAY_CAP) {
@@ -442,42 +463,77 @@ export function manifestChecks(root) {
         // 全过: 合法测试 fixture relay-sink import(白名单命中 + path 在 test-framework/ 下 + digest 匹配)。放行。
         continue;
       }
-      // e.capability === M0C2_HOTWALLET_ADMISSION_CAP(considered amendment #6, Bettor 1144 裁定;
-      // 家族门已保证走到这里的 capability 只剩这一种, 因为 CONTROLLED_RELAY_CAP/TEST_FIXTURE_RELAY_SINK_CAP
-      // 两支都已各自 continue 退出)
-      // 约束① 白名单有界、shrink-only: 非白名单文件用此 capability = 拒。
-      if (!M0C2_HOTWALLET_ADMISSION_ALLOWLIST.has(e.path)) {
-        violations.push({ rule: 'R-M0A-MANIFEST-SCHEMA', file: MANIFEST_PATH,
-          msg: `manifest 条目 "${e.id}" capability=${M0C2_HOTWALLET_ADMISSION_CAP} 但 path ${e.path} 不在白名单 — 只有 {${[...M0C2_HOTWALLET_ADMISSION_ALLOWLIST].join(', ')}} 可用此 capability(白名单 shrink-only, 扩张走 NWT 审 + Owner 知情)。` });
+      if (e.capability === M0C2_HOTWALLET_ADMISSION_CAP) {
+        // 🔴 KANet-UI 2026-09-14(amendment #7 落码时顺手修): 这层 if 包装本身是这次新补的——原代码
+        // 这里同样只有注释标注、无条件执行, 理由跟当初 TEST_FIXTURE_RELAY_SINK_CAP 那次一模一样:
+        // "家族门当时只放行三种 capability, 排除前两支后隐含必然是 M0C2"这个前提在只有三种时成立,
+        // amendment #7 加了第四种(M0C3_HOTWALLET_MONITOR_CAP)后同一个坑又出现一次。这次显式包装,
+        // 不再依赖"数一数还剩几种"这种隐含推理。
+        // 约束① 白名单有界、shrink-only: 非白名单文件用此 capability = 拒。
+        if (!M0C2_HOTWALLET_ADMISSION_ALLOWLIST.has(e.path)) {
+          violations.push({ rule: 'R-M0A-MANIFEST-SCHEMA', file: MANIFEST_PATH,
+            msg: `manifest 条目 "${e.id}" capability=${M0C2_HOTWALLET_ADMISSION_CAP} 但 path ${e.path} 不在白名单 — 只有 {${[...M0C2_HOTWALLET_ADMISSION_ALLOWLIST].join(', ')}} 可用此 capability(白名单 shrink-only, 扩张走 NWT 审 + Owner 知情)。` });
+          continue;
+        }
+        // 约束③ 专属静态负面检查: 该 import 语句必须真的含 checkHotwalletAdmission 具名导出——防这个窄
+        // 口子被挪用去掩护同一行上其它跟热钱包准入无关的新增 relay-manager 具名导出。
+        if (!String(e.form || '').includes('checkHotwalletAdmission')) {
+          violations.push({ rule: 'R-M0A-MANIFEST-SCHEMA', file: MANIFEST_PATH,
+            msg: `manifest 条目 "${e.id}" capability=${M0C2_HOTWALLET_ADMISSION_CAP} 但 form "${e.form}" 不含 checkHotwalletAdmission — 这条 capability 只为该具名导出开, 不适配其它 relay-manager 具名导出。` });
+          continue;
+        }
+        // 约束② TOCTOU 防御: content_digest 仅此 capability 必填, 核现文件内容 sha256 == 批准时 digest。
+        if (!('content_digest' in e) || e.content_digest === '' || e.content_digest == null) {
+          violations.push({ rule: 'R-M0A-MANIFEST-SCHEMA', file: MANIFEST_PATH,
+            msg: `manifest 条目 "${e.id}" capability=${M0C2_HOTWALLET_ADMISSION_CAP} 缺 content_digest — 该 capability 条目必填(批准时内容 sha256 hex, TOCTOU 防御)。` });
+          continue;
+        }
+        const admissionContent = readStagedContent(root, e.path);
+        if (admissionContent == null) {
+          violations.push({ rule: 'R-M0A-MANIFEST-SCHEMA', file: MANIFEST_PATH,
+            msg: `manifest 条目 "${e.id}" 指向的文件 ${e.path} 不存在于 index — path 锚定 fail-closed: 文件移动必须同步改 manifest。` });
+          continue;
+        }
+        const admissionDigest = sha256Hex(admissionContent);
+        if (admissionDigest !== e.content_digest) {
+          violations.push({ rule: 'R-M0A-MANIFEST-SCHEMA', file: MANIFEST_PATH,
+            msg: `文件 ${e.path} 内容变更(digest 失配: 现 ${admissionDigest.slice(0, 12)}… ≠ manifest ${String(e.content_digest).slice(0, 12)}…)需重新 NWT 审并更新 content_digest。` });
+          continue;
+        }
+        // 全过: 合法热钱包准入门消费者(白名单命中 + form 含 checkHotwalletAdmission + digest 匹配)。放行。
         continue;
       }
-      // 约束③ 专属静态负面检查: 该 import 语句必须真的含 checkHotwalletAdmission 具名导出——防这个窄
-      // 口子被挪用去掩护同一行上其它跟热钱包准入无关的新增 relay-manager 具名导出。
-      if (!String(e.form || '').includes('checkHotwalletAdmission')) {
-        violations.push({ rule: 'R-M0A-MANIFEST-SCHEMA', file: MANIFEST_PATH,
-          msg: `manifest 条目 "${e.id}" capability=${M0C2_HOTWALLET_ADMISSION_CAP} 但 form "${e.form}" 不含 checkHotwalletAdmission — 这条 capability 只为该具名导出开, 不适配其它 relay-manager 具名导出。` });
+      // e.capability === M0C3_HOTWALLET_MONITOR_CAP(considered amendment #7, Bettor 1150 裁定;
+      // 家族门此刻放行四种 capability, 前三支都已各自 continue 退出, 这里显式判断而不是隐含推理
+      // "数一数还剩几种"——amendment #6 落码时正是这个隐含推理在 amendment #7 出现后失效过一次)
+      if (e.capability === M0C3_HOTWALLET_MONITOR_CAP) {
+        // 约束①: 白名单有界、shrink-only——恰一项。
+        if (!M0C3_HOTWALLET_MONITOR_ALLOWLIST.has(e.path)) {
+          violations.push({ rule: 'R-M0A-MANIFEST-SCHEMA', file: MANIFEST_PATH,
+            msg: `manifest 条目 "${e.id}" capability=${M0C3_HOTWALLET_MONITOR_CAP} 但 path ${e.path} 不在白名单 — 只有 {${[...M0C3_HOTWALLET_MONITOR_ALLOWLIST].join(', ')}} 可用此 capability(白名单 shrink-only, 扩张走 NWT 审 + Owner 知情)。` });
+          continue;
+        }
+        // 约束②: content_digest TOCTOU 锚, 核现文件内容 sha256 == 批准时 digest。
+        if (!('content_digest' in e) || e.content_digest === '' || e.content_digest == null) {
+          violations.push({ rule: 'R-M0A-MANIFEST-SCHEMA', file: MANIFEST_PATH,
+            msg: `manifest 条目 "${e.id}" capability=${M0C3_HOTWALLET_MONITOR_CAP} 缺 content_digest — 该 capability 条目必填(批准时内容 sha256 hex, TOCTOU 防御)。` });
+          continue;
+        }
+        const monitorContent = readStagedContent(root, e.path);
+        if (monitorContent == null) {
+          violations.push({ rule: 'R-M0A-MANIFEST-SCHEMA', file: MANIFEST_PATH,
+            msg: `manifest 条目 "${e.id}" 指向的文件 ${e.path} 不存在于 index — path 锚定 fail-closed: 文件移动必须同步改 manifest。` });
+          continue;
+        }
+        const monitorDigest = sha256Hex(monitorContent);
+        if (monitorDigest !== e.content_digest) {
+          violations.push({ rule: 'R-M0A-MANIFEST-SCHEMA', file: MANIFEST_PATH,
+            msg: `文件 ${e.path} 内容变更(digest 失配: 现 ${monitorDigest.slice(0, 12)}… ≠ manifest ${String(e.content_digest).slice(0, 12)}…)需重新 NWT 审并更新 content_digest。` });
+          continue;
+        }
+        // 全过: 合法驻留期监控消费者(白名单命中 + digest 匹配)。放行。
         continue;
       }
-      // 约束② TOCTOU 防御: content_digest 仅此 capability 必填, 核现文件内容 sha256 == 批准时 digest。
-      if (!('content_digest' in e) || e.content_digest === '' || e.content_digest == null) {
-        violations.push({ rule: 'R-M0A-MANIFEST-SCHEMA', file: MANIFEST_PATH,
-          msg: `manifest 条目 "${e.id}" capability=${M0C2_HOTWALLET_ADMISSION_CAP} 缺 content_digest — 该 capability 条目必填(批准时内容 sha256 hex, TOCTOU 防御)。` });
-        continue;
-      }
-      const admissionContent = readStagedContent(root, e.path);
-      if (admissionContent == null) {
-        violations.push({ rule: 'R-M0A-MANIFEST-SCHEMA', file: MANIFEST_PATH,
-          msg: `manifest 条目 "${e.id}" 指向的文件 ${e.path} 不存在于 index — path 锚定 fail-closed: 文件移动必须同步改 manifest。` });
-        continue;
-      }
-      const admissionDigest = sha256Hex(admissionContent);
-      if (admissionDigest !== e.content_digest) {
-        violations.push({ rule: 'R-M0A-MANIFEST-SCHEMA', file: MANIFEST_PATH,
-          msg: `文件 ${e.path} 内容变更(digest 失配: 现 ${admissionDigest.slice(0, 12)}… ≠ manifest ${String(e.content_digest).slice(0, 12)}…)需重新 NWT 审并更新 content_digest。` });
-        continue;
-      }
-      // 全过: 合法热钱包准入门消费者(白名单命中 + form 含 checkHotwalletAdmission + digest 匹配)。放行。
-      continue;
     }
     if (e.capability === PROVISION_WRITER_CAP) {
       // ↓↓↓ considered amendment #2: m0c1-provision-writer 安全控制校验(先例四约束 + writer 静态负面检查)↓↓↓
