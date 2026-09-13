@@ -1,6 +1,27 @@
 # 批 T（KCC-20 测试币）并入 silverscript v1 迁移计划 · 评估骨架 v0.1（只评估 · 不写 .sil · 不落 src）
 
-> **Status**: DRAFT-FOR-REVIEW · **v0.6**（2026-09-13T11:31Z · **P8 实测**：`docs/2026-09-13-j2-p8-foldnode-seal-to-root-double-count-offline-test-v0.1.md`——脚本层双记成立（10/10），但 **fold-tree 家族在 TN12 从未上链且 (A) 重设计已废弃、relay 无任何 1→N covenant 路径** ⇒ 非活缺陷；**主网集瘦身 v2（建议）**：剔除 FoldNode / FoldNode_sealonly / PoolLeaf / PoolShard_fold / PoolLeaf_nofold_probe ⇒ 主网集 = ShardLeaf / ShardLeaf_direct / PayoutShard / PayoutShardV2 / RootClose / RootClaim / CloseZkV2 **≈7 + 新 2**；**C1 三处随 fold-tree 出集**，角色 1 修复退为"复活 fold-tree 才做"（NWT 已 GREEN 的设计留档）· v0.5（2026-09-13T11:2xZ · **H5 写法离线实证成立**：`docs/2026-09-13-j2-h5-no-token-input-proof-vectors-v0.1.md`（7 向量全部与预期一致 + harness 自检 + 超界即拒，产物 `docs/provenance/2026-09-13-j2-h5-p7-no-token-input-vectors/`）· **C1 角色 1 最小修设计**：`docs/2026-09-13-j2-c1-manual-entry-role1-design-v0.1.md`（含 seal_to_root 双记推演交 NWT 判）· T3 数字仍撤回）· v0.4（2026-09-13T11:3xZ · NWT 红队 `docs/2026-09-13-nwt-redteam-j2-batch-t-v0.3-and-recompile-list-v0.1.md` f4abb387 四条全收：① H5 不在场证明改为遍历输入按模板匹配（**P7 试编过**，§0.5 H5 行更新）· ② C1 三处手写 entry **实核 = 三选一一种都没实现**，allow 不能直接贴，列独立任务（§3 C1 行）· ③ A2/A8 **逐字节实证等价**（§T0 ⑦）· ④ T3 数字撤回不作排期依据（§3 T3 行））· v0.3 10:5xZ · NWT 红队 `docs/2026-09-13-nwt-redteam-j2-batch-t-h5-and-skeleton-v0.1.md` 4ac7a6e9：**H5「在场≠同意」升 MUST，与 H1 正交两条都要**；T0 方法论 / §2 瘦身 / §5 Q2 预案 PASS ⇒ 本版 §0.5 加 H5 行、§3 T3 按"每条共花代币入口新增显式代币输出校验 + 正反向量"重估；并挂上 42 文件 v1.0.0 全量重编清单 `docs/2026-09-13-j2-silverscript-v100-full-recompile-list-v0.1.md` 的两条新静态规则）· v0.2 T0 实证 10:5xZ · v0.1 骨架 10:3xZ · J2 · 交 NWT → Bettor → 合约/市场改造 = 钱路 ⇒ Owner 批（D-017 §3）。
+> **Status**: DRAFT-FOR-REVIEW · **v0.7**（2026-09-13T11:4xZ · Bettor 终裁（NWT c5c88415）：**主网集瘦身 v2 采纳 = 7 + 新 2**、不开事故账、C1 角色 1 只留设计；本版按 7+2 **重算批 A 九条计数与 T3**（见紧接下方「v0.7 重算」表），重编清单同步）· v0.6（2026-09-13T11:31Z · **P8 实测**：`docs/2026-09-13-j2-p8-foldnode-seal-to-root-double-count-offline-test-v0.1.md`——脚本层双记成立（10/10），但 **fold-tree 家族在 TN12 从未上链且 (A) 重设计已废弃、relay 无任何 1→N covenant 路径** ⇒ 非活缺陷；**主网集瘦身 v2（建议）**：剔除 FoldNode / FoldNode_sealonly / PoolLeaf / PoolShard_fold / PoolLeaf_nofold_probe ⇒ 主网集 = ShardLeaf / ShardLeaf_direct / PayoutShard / PayoutShardV2 / RootClose / RootClaim / CloseZkV2 **≈7 + 新 2**；**C1 三处随 fold-tree 出集**，角色 1 修复退为"复活 fold-tree 才做"（NWT 已 GREEN 的设计留档）· v0.5（2026-09-13T11:2xZ · **H5 写法离线实证成立**：`docs/2026-09-13-j2-h5-no-token-input-proof-vectors-v0.1.md`（7 向量全部与预期一致 + harness 自检 + 超界即拒，产物 `docs/provenance/2026-09-13-j2-h5-p7-no-token-input-vectors/`）· **C1 角色 1 最小修设计**：`docs/2026-09-13-j2-c1-manual-entry-role1-design-v0.1.md`（含 seal_to_root 双记推演交 NWT 判）· T3 数字仍撤回）· v0.4（2026-09-13T11:3xZ · NWT 红队 `docs/2026-09-13-nwt-redteam-j2-batch-t-v0.3-and-recompile-list-v0.1.md` f4abb387 四条全收：① H5 不在场证明改为遍历输入按模板匹配（**P7 试编过**，§0.5 H5 行更新）· ② C1 三处手写 entry **实核 = 三选一一种都没实现**，allow 不能直接贴，列独立任务（§3 C1 行）· ③ A2/A8 **逐字节实证等价**（§T0 ⑦）· ④ T3 数字撤回不作排期依据（§3 T3 行））· v0.3 10:5xZ · NWT 红队 `docs/2026-09-13-nwt-redteam-j2-batch-t-h5-and-skeleton-v0.1.md` 4ac7a6e9：**H5「在场≠同意」升 MUST，与 H1 正交两条都要**；T0 方法论 / §2 瘦身 / §5 Q2 预案 PASS ⇒ 本版 §0.5 加 H5 行、§3 T3 按"每条共花代币入口新增显式代币输出校验 + 正反向量"重估；并挂上 42 文件 v1.0.0 全量重编清单 `docs/2026-09-13-j2-silverscript-v100-full-recompile-list-v0.1.md` 的两条新静态规则）· v0.2 T0 实证 10:5xZ · v0.1 骨架 10:3xZ · J2 · 交 NWT → Bettor → 合约/市场改造 = 钱路 ⇒ Owner 批（D-017 §3）。
+
+## v0.7 重算 · 主网集 7 + 新 2（Bettor 终裁 · 数据 = 重编清单 `results_A.json` 按文件过滤，非重估）
+
+**主网集（既有 7）**：`ShardLeaf` · `ShardLeaf_direct` · `PayoutShard` · `PayoutShardV2` · `RootClose` · `RootClaim` · `CloseZkV2`；**新 2**：`KanetTestToken`（T1）· `KanetTokenClaim`（T2）。**出集**：fold-tree 家族 5（FoldNode / FoldNode_sealonly / PoolLeaf / PoolShard_fold / PoolLeaf_nofold_probe，2026-06-20 架构性废弃）· rolling 系 ≈12 · 签名型 escrow 6 · 探针 8。
+
+| 项 | 42 全量（重编清单 §2） | **主网集 7** | 说明 |
+|---|---|---|---|
+| A1 `entry` | 42 / 104 | **7 / 23** | |
+| A2 `byte[36]` | 24 / 106 | **4 / 6** | ⑦ 已证逐字节等价 |
+| A3 `as byte[N]` | 13 / 52 | **4 / 17** | |
+| A4 `checkMsgSig` | 1 / 2 | **0** | |
+| A5 `State {` / 外模板 struct | 13 / 23 · 16 / 31 | **4 / 7 · 5 / 16** | RootClose 1 处外模板需手工 `struct` 声明（A5-manual） |
+| A6 拼接包 `byte[]()` | 12 / 90 | **2 / 19** | |
+| A7 hash 参数包 | 20 / 79 | **6 / 23** | |
+| A8 `byte[N](int)`→`as` | 1 / 6 | **1 / 6**（PayoutShardV2） | ⑦ 已证逐字节等价 |
+| A9 spk 比较同型 | 3 / 3 | **2 / 2** | |
+| 严格臂结果 | 17/42 过 | **4/7 过**（PayoutShard · PayoutShardV2 · RootClaim · ShardLeaf_direct）· 3 个只剩批 B（CloseZkV2 · ShardLeaf · RootClose，RootClose 另叠 A5-manual） | 诊断臂（中和 tx.time）6/7 过 |
+| C1 新静态规则 | 3 命中 | **0** | 三处全在出集文件里 ⇒ 角色 1 只留设计 |
+| 批 B `tx.time` | 24 文件 / 43 处 | **3 文件**（CloseZkV2 · ShardLeaf · RootClose；处数按计划附录 A 逐处表取） | |
+
+**T3 重算（结构不变，数字换底）**：主网集入口 = **23 条手写 entry + 0 条 covenant 声明**（原 34 = 31 + 3；出集的 11 条里含全部 3 条 cov 声明与 C1 三处）。每条入口二选一：(A) 会与代币共花 ⇒ 读法改 `amount` + `validateOutputStateWithInputTemplate` 核代币输出（H5 MUST，向量一正一反）；(B) 不共花 ⇒ H5 不在场证明（遍历输入按模板尾部匹配，P7 已实证，向量 0/1/多/差一字节四档）。**排期口径**：T3 ≈ 23 入口 × (一段校验 + ≥2 向量)，仍是批 T 主体；具体工时等 T1 代币合约定稿（H1/H2/H3 三条 require 定型后，(A)/(B) 分类才能逐入口落）再报。
 
 ## T0 · v1.0.0 原语实证（2026-09-13 · 全部本机自跑 · 隔离 clone `scratch/_j2_silverc_v100`@`3ed9733` · exe sha256 前 16 `4378ba6557f7b7b0`（自建，与 J1 报的官方包 `ce1e0ef5…` 不是同一个二进制，语义同 commit）· 探针与产物在 `scratch/_j2_t0_probes/`）
 

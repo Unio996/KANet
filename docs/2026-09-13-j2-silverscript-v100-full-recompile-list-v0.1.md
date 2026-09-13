@@ -14,7 +14,8 @@
 |---|---|---|---|
 | 严格批 A | **17 / 42** | 25 | B(tx.time) 纯 21 · B + C1 1（PoolShard_fold）· B + A5-manual 1（RootClose）· C1 2（FoldNode / PoolLeaf） |
 | 诊断（+B 中和） | **38 / 42** | 4 | C1 ×3（FoldNode / PoolLeaf / PoolShard_fold）· A5-manual ×1（RootClose） |
-| 主网集 11（批 T v0.2 §2） | 5 直接过（FoldNode_sealonly / PayoutShard / PayoutShardV2 / RootClaim / ShardLeaf_direct） | 6 | B 纯 3（CloseZkV2 / ShardLeaf / RootClose→+A5-manual）· C1 3（FoldNode / PoolLeaf / PoolShard_fold） |
+| ~~主网集 11（批 T v0.2 §2）~~ | ~~5 直接过~~ | ~~6~~ | ~~B 纯 3 · C1 3~~ |
+| **主网集 7（v0.1.1 · Bettor 终裁瘦身 v2 · 2026-09-13T11:4xZ · fold-tree 家族 5 出集）** | **4 直接过**（PayoutShard / PayoutShardV2 / RootClaim / ShardLeaf_direct） | 3 | 全部只剩批 B（CloseZkV2 / ShardLeaf / RootClose，RootClose 另叠 A5-manual 一处 struct 声明）· **C1 = 0**（三处命中全在出集的 FoldNode / PoolLeaf / PoolShard_fold） |
 
 ## 2. 批 A 机械变换全表（迁移计划 §4 批 A 原 4 条 + 本次新发现 5 条 · 计数 = 严格臂实际施加）
 
@@ -36,7 +37,7 @@
 
 | # | 规则 | 命中 | 含义 / 处置 |
 |---|---|---|---|
-| **C1** | `manual entrypoint '<e>' belongs to leader contract '<C>' and may participate in a same-covenant input group; use a cov-bound declaration or acknowledge manual covenant-group checks with #[covenant.allow(rule = manual_entrypoint_in_leader_contract)]` | FoldNode `seal_to_root` · PoolLeaf `register_append` · PoolShard_fold `register_append`（三个都是同时有 `#[covenant(binding = cov …)]` 声明 + 手写 `entry` 的文件） | 二选一：(i) 加 `allow` 注解 = **明确承认编译器不再校验该 entry 的 covenant 组逻辑**（DECL.md:336-340）；(ii) 把手写 entry 改成 cov-bound 声明。**这是设计决策不是语法**，与批 T 的 H5（每条共花代币入口自校输出）同一批人审最省 |
+| **C1** | `manual entrypoint '<e>' belongs to leader contract '<C>' and may participate in a same-covenant input group; use a cov-bound declaration or acknowledge manual covenant-group checks with #[covenant.allow(rule = manual_entrypoint_in_leader_contract)]` | FoldNode `seal_to_root` · PoolLeaf `register_append` · PoolShard_fold `register_append`（三个都是同时有 `#[covenant(binding = cov …)]` 声明 + 手写 `entry` 的文件） | 二选一：(i) 加 `allow` 注解 = **明确承认编译器不再校验该 entry 的 covenant 组逻辑**（DECL.md:336-340）；(ii) 把手写 entry 改成 cov-bound 声明。**这是设计决策不是语法**。📌 **v0.1.1（2026-09-13T11:4xZ）**：三处实核一种角色都没实现（`docs/2026-09-13-j2-c1-manual-entry-role1-design-v0.1.md`，NWT GREEN）；**但三个文件随 fold-tree 家族出主网集（Bettor 终裁瘦身 v2，P8 实测 `docs/2026-09-13-j2-p8-…-v0.1.md`），角色 1 修复只留设计不落码** |
 | **A5-manual** | `unknown struct field 'claimed_bitmap'` | RootClose（向 RootClaim 模板写状态，字面量字段既非本合约 State 也无本地 `struct` 声明） | 在 RootClose 里声明 `struct ClaimState { … }` 镜像 RootClaim 布局（FoldNode_sealonly:42 `struct RootState` 已是同一做法） |
 
 ## 4. 批 B 实证（不在本清单范围，只记对账）
