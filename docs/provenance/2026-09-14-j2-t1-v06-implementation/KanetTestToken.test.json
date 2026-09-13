@@ -1,0 +1,1060 @@
+{
+ "tests": [
+  {
+   "name": "V-T-1_pass_two_inputs_owner_market_consolidate",
+   "function": "transfer",
+   "constructor_args": [
+    100,
+    "0x1111111111111111111111111111111111111111111111111111111111111111",
+    4,
+    0,
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "0xaabbccddee",
+    5,
+    3,
+    3
+   ],
+   "args": [
+    [
+     {
+      "amount": 100,
+      "owner": "0x1111111111111111111111111111111111111111111111111111111111111111",
+      "owner_scheme": 4,
+      "borrow_scheme": 0,
+      "borrow_guard": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "extension_commitment": "0x0000000000000000000000000000000000000000000000000000000000000000"
+     }
+    ],
+    "0x",
+    [
+     2,
+     2
+    ],
+    [
+     2
+    ]
+   ],
+   "expect": "pass",
+   "tx": {
+    "active_input_index": 0,
+    "inputs": [
+     {
+      "utxo_value": 1,
+      "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "state": {
+       "amount": 60,
+       "owner": "0x1111111111111111111111111111111111111111111111111111111111111111",
+       "owner_scheme": 4,
+       "borrow_scheme": 0,
+       "borrow_guard": "0x0000000000000000000000000000000000000000000000000000000000000000",
+       "extension_commitment": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+     },
+     {
+      "utxo_value": 1,
+      "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "state": {
+       "amount": 40,
+       "owner": "0x1111111111111111111111111111111111111111111111111111111111111111",
+       "owner_scheme": 4,
+       "borrow_scheme": 0,
+       "borrow_guard": "0x0000000000000000000000000000000000000000000000000000000000000000",
+       "extension_commitment": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+     },
+     {
+      "utxo_value": 10,
+      "covenant_id": "0x1111111111111111111111111111111111111111111111111111111111111111",
+      "signature_script_hex": "00aabbccddee"
+     }
+    ],
+    "outputs": [
+     {
+      "value": 1,
+      "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "state": {
+       "amount": 100,
+       "owner": "0x1111111111111111111111111111111111111111111111111111111111111111",
+       "owner_scheme": 4,
+       "borrow_scheme": 0,
+       "borrow_guard": "0x0000000000000000000000000000000000000000000000000000000000000000",
+       "extension_commitment": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "V-T-2_fail_conservation_violated",
+   "function": "transfer",
+   "constructor_args": [
+    100,
+    "0x1111111111111111111111111111111111111111111111111111111111111111",
+    4,
+    0,
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "0xaabbccddee",
+    5,
+    3,
+    3
+   ],
+   "args": [
+    [
+     {
+      "amount": 101,
+      "owner": "0x1111111111111111111111111111111111111111111111111111111111111111",
+      "owner_scheme": 4,
+      "borrow_scheme": 0,
+      "borrow_guard": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "extension_commitment": "0x0000000000000000000000000000000000000000000000000000000000000000"
+     }
+    ],
+    "0x",
+    [
+     2,
+     2
+    ],
+    [
+     2
+    ]
+   ],
+   "expect": "fail",
+   "tx": {
+    "active_input_index": 0,
+    "inputs": [
+     {
+      "utxo_value": 1,
+      "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "state": {
+       "amount": 60,
+       "owner": "0x1111111111111111111111111111111111111111111111111111111111111111",
+       "owner_scheme": 4,
+       "borrow_scheme": 0,
+       "borrow_guard": "0x0000000000000000000000000000000000000000000000000000000000000000",
+       "extension_commitment": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+     },
+     {
+      "utxo_value": 1,
+      "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "state": {
+       "amount": 40,
+       "owner": "0x1111111111111111111111111111111111111111111111111111111111111111",
+       "owner_scheme": 4,
+       "borrow_scheme": 0,
+       "borrow_guard": "0x0000000000000000000000000000000000000000000000000000000000000000",
+       "extension_commitment": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+     },
+     {
+      "utxo_value": 10,
+      "covenant_id": "0x1111111111111111111111111111111111111111111111111111111111111111",
+      "signature_script_hex": "00aabbccddee"
+     }
+    ],
+    "outputs": [
+     {
+      "value": 1,
+      "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "state": {
+       "amount": 101,
+       "owner": "0x1111111111111111111111111111111111111111111111111111111111111111",
+       "owner_scheme": 4,
+       "borrow_scheme": 0,
+       "borrow_guard": "0x0000000000000000000000000000000000000000000000000000000000000000",
+       "extension_commitment": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "V-T-3a_fail_prev_owner_scheme_not_covenant",
+   "function": "transfer",
+   "constructor_args": [
+    100,
+    "0x1111111111111111111111111111111111111111111111111111111111111111",
+    4,
+    0,
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "0xaabbccddee",
+    5,
+    3,
+    3
+   ],
+   "args": [
+    [
+     {
+      "amount": 100,
+      "owner": "0x1111111111111111111111111111111111111111111111111111111111111111",
+      "owner_scheme": 4,
+      "borrow_scheme": 0,
+      "borrow_guard": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "extension_commitment": "0x0000000000000000000000000000000000000000000000000000000000000000"
+     }
+    ],
+    "0x",
+    [
+     1
+    ],
+    [
+     1
+    ]
+   ],
+   "expect": "fail",
+   "tx": {
+    "active_input_index": 0,
+    "inputs": [
+     {
+      "utxo_value": 1,
+      "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "state": {
+       "amount": 100,
+       "owner": "0x1111111111111111111111111111111111111111111111111111111111111111",
+       "owner_scheme": 0,
+       "borrow_scheme": 0,
+       "borrow_guard": "0x0000000000000000000000000000000000000000000000000000000000000000",
+       "extension_commitment": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+     },
+     {
+      "utxo_value": 10,
+      "covenant_id": "0x1111111111111111111111111111111111111111111111111111111111111111",
+      "signature_script_hex": "00aabbccddee"
+     }
+    ],
+    "outputs": [
+     {
+      "value": 1,
+      "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "state": {
+       "amount": 100,
+       "owner": "0x1111111111111111111111111111111111111111111111111111111111111111",
+       "owner_scheme": 4,
+       "borrow_scheme": 0,
+       "borrow_guard": "0x0000000000000000000000000000000000000000000000000000000000000000",
+       "extension_commitment": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "V-T-4_fail_owner_not_present_at_claimed_index",
+   "function": "transfer",
+   "constructor_args": [
+    100,
+    "0x1111111111111111111111111111111111111111111111111111111111111111",
+    4,
+    0,
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "0xaabbccddee",
+    5,
+    3,
+    3
+   ],
+   "args": [
+    [
+     {
+      "amount": 100,
+      "owner": "0x1111111111111111111111111111111111111111111111111111111111111111",
+      "owner_scheme": 4,
+      "borrow_scheme": 0,
+      "borrow_guard": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "extension_commitment": "0x0000000000000000000000000000000000000000000000000000000000000000"
+     }
+    ],
+    "0x",
+    [
+     2
+    ],
+    [
+     1
+    ]
+   ],
+   "expect": "fail",
+   "tx": {
+    "active_input_index": 0,
+    "inputs": [
+     {
+      "utxo_value": 1,
+      "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "state": {
+       "amount": 100,
+       "owner": "0x1111111111111111111111111111111111111111111111111111111111111111",
+       "owner_scheme": 4,
+       "borrow_scheme": 0,
+       "borrow_guard": "0x0000000000000000000000000000000000000000000000000000000000000000",
+       "extension_commitment": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+     },
+     {
+      "utxo_value": 10,
+      "covenant_id": "0x1111111111111111111111111111111111111111111111111111111111111111",
+      "signature_script_hex": "00aabbccddee"
+     },
+     {
+      "utxo_value": 5,
+      "covenant_id": "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+     }
+    ],
+    "outputs": [
+     {
+      "value": 1,
+      "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "state": {
+       "amount": 100,
+       "owner": "0x1111111111111111111111111111111111111111111111111111111111111111",
+       "owner_scheme": 4,
+       "borrow_scheme": 0,
+       "borrow_guard": "0x0000000000000000000000000000000000000000000000000000000000000000",
+       "extension_commitment": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "V-T-5_fail_market_sigscript_tail_one_byte_off",
+   "function": "transfer",
+   "constructor_args": [
+    100,
+    "0x1111111111111111111111111111111111111111111111111111111111111111",
+    4,
+    0,
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "0xaabbccddee",
+    5,
+    3,
+    3
+   ],
+   "args": [
+    [
+     {
+      "amount": 100,
+      "owner": "0x1111111111111111111111111111111111111111111111111111111111111111",
+      "owner_scheme": 4,
+      "borrow_scheme": 0,
+      "borrow_guard": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "extension_commitment": "0x0000000000000000000000000000000000000000000000000000000000000000"
+     }
+    ],
+    "0x",
+    [
+     1
+    ],
+    [
+     1
+    ]
+   ],
+   "expect": "fail",
+   "tx": {
+    "active_input_index": 0,
+    "inputs": [
+     {
+      "utxo_value": 1,
+      "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "state": {
+       "amount": 100,
+       "owner": "0x1111111111111111111111111111111111111111111111111111111111111111",
+       "owner_scheme": 4,
+       "borrow_scheme": 0,
+       "borrow_guard": "0x0000000000000000000000000000000000000000000000000000000000000000",
+       "extension_commitment": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+     },
+     {
+      "utxo_value": 10,
+      "covenant_id": "0x1111111111111111111111111111111111111111111111111111111111111111",
+      "signature_script_hex": "00aabbccddef"
+     }
+    ],
+    "outputs": [
+     {
+      "value": 1,
+      "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "state": {
+       "amount": 100,
+       "owner": "0x1111111111111111111111111111111111111111111111111111111111111111",
+       "owner_scheme": 4,
+       "borrow_scheme": 0,
+       "borrow_guard": "0x0000000000000000000000000000000000000000000000000000000000000000",
+       "extension_commitment": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "V-T-9a_fail_borrow_scheme_enabled",
+   "function": "transfer",
+   "constructor_args": [
+    100,
+    "0x1111111111111111111111111111111111111111111111111111111111111111",
+    4,
+    0,
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "0xaabbccddee",
+    5,
+    3,
+    3
+   ],
+   "args": [
+    [
+     {
+      "amount": 100,
+      "owner": "0x1111111111111111111111111111111111111111111111111111111111111111",
+      "owner_scheme": 4,
+      "borrow_scheme": 1,
+      "borrow_guard": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "extension_commitment": "0x0000000000000000000000000000000000000000000000000000000000000000"
+     }
+    ],
+    "0x",
+    [
+     1
+    ],
+    [
+     1
+    ]
+   ],
+   "expect": "fail",
+   "tx": {
+    "active_input_index": 0,
+    "inputs": [
+     {
+      "utxo_value": 1,
+      "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "state": {
+       "amount": 100,
+       "owner": "0x1111111111111111111111111111111111111111111111111111111111111111",
+       "owner_scheme": 4,
+       "borrow_scheme": 0,
+       "borrow_guard": "0x0000000000000000000000000000000000000000000000000000000000000000",
+       "extension_commitment": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+     },
+     {
+      "utxo_value": 10,
+      "covenant_id": "0x1111111111111111111111111111111111111111111111111111111111111111",
+      "signature_script_hex": "00aabbccddee"
+     }
+    ],
+    "outputs": [
+     {
+      "value": 1,
+      "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "state": {
+       "amount": 100,
+       "owner": "0x1111111111111111111111111111111111111111111111111111111111111111",
+       "owner_scheme": 4,
+       "borrow_scheme": 1,
+       "borrow_guard": "0x0000000000000000000000000000000000000000000000000000000000000000",
+       "extension_commitment": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "V-T-9b_fail_witness_nonempty",
+   "function": "transfer",
+   "constructor_args": [
+    100,
+    "0x1111111111111111111111111111111111111111111111111111111111111111",
+    4,
+    0,
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "0xaabbccddee",
+    5,
+    3,
+    3
+   ],
+   "args": [
+    [
+     {
+      "amount": 100,
+      "owner": "0x1111111111111111111111111111111111111111111111111111111111111111",
+      "owner_scheme": 4,
+      "borrow_scheme": 0,
+      "borrow_guard": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "extension_commitment": "0x0000000000000000000000000000000000000000000000000000000000000000"
+     }
+    ],
+    "0x01",
+    [
+     1
+    ],
+    [
+     1
+    ]
+   ],
+   "expect": "fail",
+   "tx": {
+    "active_input_index": 0,
+    "inputs": [
+     {
+      "utxo_value": 1,
+      "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "state": {
+       "amount": 100,
+       "owner": "0x1111111111111111111111111111111111111111111111111111111111111111",
+       "owner_scheme": 4,
+       "borrow_scheme": 0,
+       "borrow_guard": "0x0000000000000000000000000000000000000000000000000000000000000000",
+       "extension_commitment": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+     },
+     {
+      "utxo_value": 10,
+      "covenant_id": "0x1111111111111111111111111111111111111111111111111111111111111111",
+      "signature_script_hex": "00aabbccddee"
+     }
+    ],
+    "outputs": [
+     {
+      "value": 1,
+      "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "state": {
+       "amount": 100,
+       "owner": "0x1111111111111111111111111111111111111111111111111111111111111111",
+       "owner_scheme": 4,
+       "borrow_scheme": 0,
+       "borrow_guard": "0x0000000000000000000000000000000000000000000000000000000000000000",
+       "extension_commitment": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "V-T-10_fail_extension_commitment_nonzero",
+   "function": "transfer",
+   "constructor_args": [
+    100,
+    "0x1111111111111111111111111111111111111111111111111111111111111111",
+    4,
+    0,
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "0xaabbccddee",
+    5,
+    3,
+    3
+   ],
+   "args": [
+    [
+     {
+      "amount": 100,
+      "owner": "0x1111111111111111111111111111111111111111111111111111111111111111",
+      "owner_scheme": 4,
+      "borrow_scheme": 0,
+      "borrow_guard": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "extension_commitment": "0x0101010101010101010101010101010101010101010101010101010101010101"
+     }
+    ],
+    "0x",
+    [
+     1
+    ],
+    [
+     1
+    ]
+   ],
+   "expect": "fail",
+   "tx": {
+    "active_input_index": 0,
+    "inputs": [
+     {
+      "utxo_value": 1,
+      "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "state": {
+       "amount": 100,
+       "owner": "0x1111111111111111111111111111111111111111111111111111111111111111",
+       "owner_scheme": 4,
+       "borrow_scheme": 0,
+       "borrow_guard": "0x0000000000000000000000000000000000000000000000000000000000000000",
+       "extension_commitment": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+     },
+     {
+      "utxo_value": 10,
+      "covenant_id": "0x1111111111111111111111111111111111111111111111111111111111111111",
+      "signature_script_hex": "00aabbccddee"
+     }
+    ],
+    "outputs": [
+     {
+      "value": 1,
+      "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "state": {
+       "amount": 100,
+       "owner": "0x1111111111111111111111111111111111111111111111111111111111111111",
+       "owner_scheme": 4,
+       "borrow_scheme": 0,
+       "borrow_guard": "0x0000000000000000000000000000000000000000000000000000000000000000",
+       "extension_commitment": "0x0101010101010101010101010101010101010101010101010101010101010101"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "V-T-11a_pass_multi_instance_covA",
+   "function": "transfer",
+   "constructor_args": [
+    100,
+    "0x1111111111111111111111111111111111111111111111111111111111111111",
+    4,
+    0,
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "0xaabbccddee",
+    5,
+    3,
+    3
+   ],
+   "args": [
+    [
+     {
+      "amount": 50,
+      "owner": "0x1111111111111111111111111111111111111111111111111111111111111111",
+      "owner_scheme": 4,
+      "borrow_scheme": 0,
+      "borrow_guard": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "extension_commitment": "0x0000000000000000000000000000000000000000000000000000000000000000"
+     }
+    ],
+    "0x",
+    [
+     1
+    ],
+    [
+     1
+    ]
+   ],
+   "expect": "pass",
+   "tx": {
+    "active_input_index": 0,
+    "inputs": [
+     {
+      "utxo_value": 1,
+      "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "state": {
+       "amount": 50,
+       "owner": "0x1111111111111111111111111111111111111111111111111111111111111111",
+       "owner_scheme": 4,
+       "borrow_scheme": 0,
+       "borrow_guard": "0x0000000000000000000000000000000000000000000000000000000000000000",
+       "extension_commitment": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+     },
+     {
+      "utxo_value": 10,
+      "covenant_id": "0x1111111111111111111111111111111111111111111111111111111111111111",
+      "signature_script_hex": "00aabbccddee"
+     }
+    ],
+    "outputs": [
+     {
+      "value": 1,
+      "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "state": {
+       "amount": 50,
+       "owner": "0x1111111111111111111111111111111111111111111111111111111111111111",
+       "owner_scheme": 4,
+       "borrow_scheme": 0,
+       "borrow_guard": "0x0000000000000000000000000000000000000000000000000000000000000000",
+       "extension_commitment": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "V-T-11b_pass_multi_instance_covB_second_run",
+   "function": "transfer",
+   "constructor_args": [
+    100,
+    "0x1111111111111111111111111111111111111111111111111111111111111111",
+    4,
+    0,
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "0xaabbccddee",
+    5,
+    3,
+    3
+   ],
+   "args": [
+    [
+     {
+      "amount": 70,
+      "owner": "0x1111111111111111111111111111111111111111111111111111111111111111",
+      "owner_scheme": 4,
+      "borrow_scheme": 0,
+      "borrow_guard": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "extension_commitment": "0x0000000000000000000000000000000000000000000000000000000000000000"
+     }
+    ],
+    "0x",
+    [
+     1
+    ],
+    [
+     1
+    ]
+   ],
+   "expect": "pass",
+   "tx": {
+    "active_input_index": 0,
+    "inputs": [
+     {
+      "utxo_value": 1,
+      "covenant_id": "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "state": {
+       "amount": 70,
+       "owner": "0x1111111111111111111111111111111111111111111111111111111111111111",
+       "owner_scheme": 4,
+       "borrow_scheme": 0,
+       "borrow_guard": "0x0000000000000000000000000000000000000000000000000000000000000000",
+       "extension_commitment": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+     },
+     {
+      "utxo_value": 10,
+      "covenant_id": "0x1111111111111111111111111111111111111111111111111111111111111111",
+      "signature_script_hex": "00aabbccddee"
+     }
+    ],
+    "outputs": [
+     {
+      "value": 1,
+      "covenant_id": "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "state": {
+       "amount": 70,
+       "owner": "0x1111111111111111111111111111111111111111111111111111111111111111",
+       "owner_scheme": 4,
+       "borrow_scheme": 0,
+       "borrow_guard": "0x0000000000000000000000000000000000000000000000000000000000000000",
+       "extension_commitment": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "V-H2-1_fail_mint_issuer_always_rejects_in_test_build",
+   "function": "mint_issuer",
+   "constructor_args": [
+    100,
+    "0x1111111111111111111111111111111111111111111111111111111111111111",
+    4,
+    0,
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "0xaabbccddee",
+    5,
+    3,
+    3
+   ],
+   "args": [
+    "0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+   ],
+   "expect": "fail",
+   "tx": {
+    "active_input_index": 0,
+    "inputs": [
+     {
+      "utxo_value": 1,
+      "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "state": {
+       "amount": 100,
+       "owner": "0x1111111111111111111111111111111111111111111111111111111111111111",
+       "owner_scheme": 4,
+       "borrow_scheme": 0,
+       "borrow_guard": "0x0000000000000000000000000000000000000000000000000000000000000000",
+       "extension_commitment": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+     }
+    ],
+    "outputs": [
+     {
+      "value": 1,
+      "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "state": {
+       "amount": 100,
+       "owner": "0x1111111111111111111111111111111111111111111111111111111111111111",
+       "owner_scheme": 4,
+       "borrow_scheme": 0,
+       "borrow_guard": "0x0000000000000000000000000000000000000000000000000000000000000000",
+       "extension_commitment": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "V-harness_flip_of_V-T-1_expect_fail",
+   "function": "transfer",
+   "constructor_args": [
+    100,
+    "0x1111111111111111111111111111111111111111111111111111111111111111",
+    4,
+    0,
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "0xaabbccddee",
+    5,
+    3,
+    3
+   ],
+   "args": [
+    [
+     {
+      "amount": 100,
+      "owner": "0x1111111111111111111111111111111111111111111111111111111111111111",
+      "owner_scheme": 4,
+      "borrow_scheme": 0,
+      "borrow_guard": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "extension_commitment": "0x0000000000000000000000000000000000000000000000000000000000000000"
+     }
+    ],
+    "0x",
+    [
+     2,
+     2
+    ],
+    [
+     2
+    ]
+   ],
+   "expect": "fail",
+   "tx": {
+    "active_input_index": 0,
+    "inputs": [
+     {
+      "utxo_value": 1,
+      "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "state": {
+       "amount": 60,
+       "owner": "0x1111111111111111111111111111111111111111111111111111111111111111",
+       "owner_scheme": 4,
+       "borrow_scheme": 0,
+       "borrow_guard": "0x0000000000000000000000000000000000000000000000000000000000000000",
+       "extension_commitment": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+     },
+     {
+      "utxo_value": 1,
+      "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "state": {
+       "amount": 40,
+       "owner": "0x1111111111111111111111111111111111111111111111111111111111111111",
+       "owner_scheme": 4,
+       "borrow_scheme": 0,
+       "borrow_guard": "0x0000000000000000000000000000000000000000000000000000000000000000",
+       "extension_commitment": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+     },
+     {
+      "utxo_value": 10,
+      "covenant_id": "0x1111111111111111111111111111111111111111111111111111111111111111",
+      "signature_script_hex": "00aabbccddee"
+     }
+    ],
+    "outputs": [
+     {
+      "value": 1,
+      "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "state": {
+       "amount": 100,
+       "owner": "0x1111111111111111111111111111111111111111111111111111111111111111",
+       "owner_scheme": 4,
+       "borrow_scheme": 0,
+       "borrow_guard": "0x0000000000000000000000000000000000000000000000000000000000000000",
+       "extension_commitment": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "V-T-6b_fail_bout_route_removed_negative_recv_idx_now_rejected",
+   "function": "transfer",
+   "constructor_args": [
+    100,
+    "0x1111111111111111111111111111111111111111111111111111111111111111",
+    4,
+    0,
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "0xaabbccddee",
+    5,
+    3,
+    3
+   ],
+   "args": [
+    [
+     {
+      "amount": 100,
+      "owner": "0x1111111111111111111111111111111111111111111111111111111111111111",
+      "owner_scheme": 4,
+      "borrow_scheme": 0,
+      "borrow_guard": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "extension_commitment": "0x0000000000000000000000000000000000000000000000000000000000000000"
+     }
+    ],
+    "0x",
+    [
+     2,
+     2
+    ],
+    [
+     -1
+    ]
+   ],
+   "expect": "fail",
+   "tx": {
+    "active_input_index": 0,
+    "inputs": [
+     {
+      "utxo_value": 1,
+      "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "state": {
+       "amount": 60,
+       "owner": "0x1111111111111111111111111111111111111111111111111111111111111111",
+       "owner_scheme": 4,
+       "borrow_scheme": 0,
+       "borrow_guard": "0x0000000000000000000000000000000000000000000000000000000000000000",
+       "extension_commitment": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+     },
+     {
+      "utxo_value": 1,
+      "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "state": {
+       "amount": 40,
+       "owner": "0x1111111111111111111111111111111111111111111111111111111111111111",
+       "owner_scheme": 4,
+       "borrow_scheme": 0,
+       "borrow_guard": "0x0000000000000000000000000000000000000000000000000000000000000000",
+       "extension_commitment": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+     },
+     {
+      "utxo_value": 10,
+      "covenant_id": "0x1111111111111111111111111111111111111111111111111111111111111111",
+      "signature_script_hex": "00aabbccddee"
+     }
+    ],
+    "outputs": [
+     {
+      "value": 1,
+      "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "state": {
+       "amount": 100,
+       "owner": "0x1111111111111111111111111111111111111111111111111111111111111111",
+       "owner_scheme": 4,
+       "borrow_scheme": 0,
+       "borrow_guard": "0x0000000000000000000000000000000000000000000000000000000000000000",
+       "extension_commitment": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "V-T-7b_pass_burn_allowed_sum_in_greater_than_sum_out",
+   "function": "transfer",
+   "constructor_args": [
+    100,
+    "0x1111111111111111111111111111111111111111111111111111111111111111",
+    4,
+    0,
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "0xaabbccddee",
+    5,
+    3,
+    3
+   ],
+   "args": [
+    [
+     {
+      "amount": 60,
+      "owner": "0x1111111111111111111111111111111111111111111111111111111111111111",
+      "owner_scheme": 4,
+      "borrow_scheme": 0,
+      "borrow_guard": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "extension_commitment": "0x0000000000000000000000000000000000000000000000000000000000000000"
+     }
+    ],
+    "0x",
+    [
+     2,
+     2
+    ],
+    [
+     2
+    ]
+   ],
+   "expect": "pass",
+   "tx": {
+    "active_input_index": 0,
+    "inputs": [
+     {
+      "utxo_value": 1,
+      "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "state": {
+       "amount": 60,
+       "owner": "0x1111111111111111111111111111111111111111111111111111111111111111",
+       "owner_scheme": 4,
+       "borrow_scheme": 0,
+       "borrow_guard": "0x0000000000000000000000000000000000000000000000000000000000000000",
+       "extension_commitment": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+     },
+     {
+      "utxo_value": 1,
+      "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "state": {
+       "amount": 40,
+       "owner": "0x1111111111111111111111111111111111111111111111111111111111111111",
+       "owner_scheme": 4,
+       "borrow_scheme": 0,
+       "borrow_guard": "0x0000000000000000000000000000000000000000000000000000000000000000",
+       "extension_commitment": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+     },
+     {
+      "utxo_value": 10,
+      "covenant_id": "0x1111111111111111111111111111111111111111111111111111111111111111",
+      "signature_script_hex": "00aabbccddee"
+     }
+    ],
+    "outputs": [
+     {
+      "value": 1,
+      "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "state": {
+       "amount": 60,
+       "owner": "0x1111111111111111111111111111111111111111111111111111111111111111",
+       "owner_scheme": 4,
+       "borrow_scheme": 0,
+       "borrow_guard": "0x0000000000000000000000000000000000000000000000000000000000000000",
+       "extension_commitment": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+     }
+    ]
+   }
+  }
+ ]
+}
