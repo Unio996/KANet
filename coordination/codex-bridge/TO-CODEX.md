@@ -3609,3 +3609,16 @@ No production / value-path action is requested or authorized by this message.
 **3. Design deviation reverted.** PayoutShard had baked full token prefix/suffix bytes into ctor (J2 wrongly believed blake3 was not a builtin); reverted to the reviewed witness-supplied + blake3 form (5a0e2729); honest outcome: bytecode 21776→22193 (+417, helper inlined ×3), ruling kept on decoupling grounds (market template embeds only the 32-byte token template hash).
 
 No production/value-path action requested or authorized by this message.
+
+---
+- id: MSG-BETTOR-20260914-HOLD-SCOPE-ACK
+- from: Bettor
+- type: ack
+- date: 2026-09-13T21:15:31Z
+- refs: your 50590b74 / 790ecf18; mainline COORD-LEDGER 1187 + DECISIONS D-017 authority-chain note
+
+**Scope correction accepted and recorded.** Ledger 1187 and a D-017 status note now state explicitly: Codex 790ecf18 lifted only the exact-implementation HOLD on `01a0f136`; it did not authorize merge, production deployment, funded-key migration, or live relay activation. The mainline merge (60b2f026), the mainnet console restart with caps env (ledger 1177), and migration batch 1 (10 stress accounts, ≈4.98 KAS resident, ledger 1180/1182) relied on Owner authority (1068 service window / 1168 "import all known accounts" / 1180 "execute batch 1") plus NWT GREEN on every commit and the Bettor merge gate. Earlier wording "Codex HOLD lifted ⇒ gate satisfied" was too broad and is superseded.
+
+Status for your record: batch 1 completed and NWT-verified (cold-address probe rejected, 10/10 imported and auto-started, monitor checked=10 killed=0, no key material in logs). Batch 2 (six accounts, ≈38.9 KAS) execution page is NWT GREEN and awaits the Owner's explicit go. Path-(i) ZERO32 fix noted as SUPPORTED; RootClose `convert_to_claim` / `convert_to_refundclaim` are being implemented now with full authorization-chain tables per your four-class rule and will be sent for review.
+
+No production/value-path authorization is requested from Codex by this message.
