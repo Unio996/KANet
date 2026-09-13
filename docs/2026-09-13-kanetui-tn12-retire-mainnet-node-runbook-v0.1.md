@@ -1,10 +1,12 @@
-# TN12 退役 + 主网只读节点上线 runbook v0.1.2（2026-09-13 · KANet-UI · 只写不执行）
+# TN12 退役 + 主网只读节点上线 runbook v0.1.3（2026-09-13 · KANet-UI · 只写不执行）
 
 > **Status: DRAFT**。权威：`docs/DECISIONS.md` D-017（Owner 裁定：主网节点跑 da9 本机官方 v2.0.1、TN12 退役）+ COORD-LEDGER (1006) Bettor 派工。**本文档任何一步都不执行**；执行门 = 本 runbook → NWT 红队审 → Owner 终端单点 GO → 执行（逐步，每步验证）。凡涉及停节点/删数据/改端口/改服务配置，一律走此门，任何 agent 不得自行做。
 >
 > **v0.1.1 变更**：新增 §2.0 drain 在飞交易；§3 重同步口径改条件句；§1.2 补 kaspad 当前进程命令行记档尝试（Codex 3358c4ff / ledger (1007)）。
 >
-> **v0.1.2 变更（NWT 红队 `fce3898e`，`docs/2026-09-13-nwt-redteam-kanetui-tn12-retire-runbook-v0.1.md`·GO-1 未放行，MUST 收敛）**：⑥ §2.0 表扩到 §1.1 全部消费者，窗口 N 改为 **minDepth=20（本仓 `check_utxo_landed` 惯例）为主判据 + 30 分钟 wall-clock 兜底**；① §2 风险条款的 LOCAL_ONLY 现查命令写死为具体 SQL；② §2.3 改**先优雅关闭、taskkill //F 只作兜底**（RocksDB 未刷盘风险），§2.5 回滚假设同步改；⑧ **撤回 v0.1.1 里"kaspad-watchdog PID 24220"的单一进程框架**——地面事实（`logs/boot-sequence.log`）是 09:45Z 重启后 boot-sequence 跑了**两遍**（Session 0 一遍 + Session 1/Startup .lnk 一遍），§1.2 改用日志链+脚本 mtime 作证据；新增 **MUST**：§2 停序须覆盖两套实例全部 PID，§2.4 除禁用 `.lnk` 外还须定位并禁掉 Session 0 那遍的触发源（非提权查不到，Bettor 在查）——**触发源未定位 = 不得进 GO-1**。**GO-1 之前，本文档任何一步都不执行，含 §2.0。**
+> **v0.1.2 变更（NWT 红队 `fce3898e`，`docs/2026-09-13-nwt-redteam-kanetui-tn12-retire-runbook-v0.1.md`·GO-1 未放行，MUST 收敛）**：⑥ §2.0 表扩到 §1.1 全部消费者，窗口 N 改为 **minDepth=20（本仓 `check_utxo_landed` 惯例）为主判据 + 30 分钟 wall-clock 兜底**；① §2 风险条款的 LOCAL_ONLY 现查命令写死为具体 SQL；② §2.3 改**先优雅关闭、taskkill //F 只作兜底**（RocksDB 未刷盘风险），§2.5 回滚假设同步改；⑧ **撤回 v0.1.1 里"kaspad-watchdog PID 24220"的单一进程框架**——地面事实（`logs/boot-sequence.log`）是 09:45Z 重启后 boot-sequence 跑了**两遍**（Session 0 一遍 + Session 1/Startup .lnk 一遍），§1.2 改用日志链+脚本 mtime 作证据；新增 **MUST**：§2 停序须覆盖两套实例全部 PID，§2.4 除禁用 `.lnk` 外还须定位并禁掉 Session 0 那遍的触发源（非提权查不到，Bettor 在查）——**触发源未定位 = 不得进 GO-1**。
+>
+> **v0.1.3 变更（NWT 复审 `8520fb71`：⑥①⑧ CLOSED/PASS，两处小修）**：§2.2 验证命令改 `Get-Process -Id 13788,19532`（原 `-Name tn12-mining-watchdog-v2` 按脚本名查会永远空手——`.ps1` 进程的 `Name` 是 `powershell.exe`，NWT 在活着的实例上实测过这个坑，会把"还活着"误读成"已停"）；§2.3 补一句未独立验证的假设（非 `//F` 的 `taskkill` 能否把控制台中断事件送到 `-WindowStyle Hidden` 起的无窗口进程，本 runbook 没实测过，最坏只是白等满 60 s 再落到 `//F` 兜底，不会卡死）。GO-1 现在唯一挡着的是 §2.4 的 Session 0 触发源（等 Owner 提权查询回执）。**GO-1 之前，本文档任何一步都不执行，含 §2.0。**
 
 ## 0. 范围与不做什么
 - 本机（da9）：停 TN12 消费者 → 停 TN12 kaspad → 起主网 v2.0.1 只读节点，同盘、独立 datadir/端口。
@@ -100,14 +102,14 @@ SELECT key, category, value_encrypted, is_sensitive, updated_at FROM config_entr
 ### 2.2 停挖矿桥 + mining-watchdog-v2（两套实例都要停，见 §1.2）
 1. 先停两个 `tn12-mining-watchdog-v2.ps1` 实例（PID **13788** 与 **19532**，`Stop-Process`）——它们是"只启不杀"，先停才能安全停下游 stratum-bridge 而不被当"死了"重新拉起。
 2. 停 `stratum-bridge.exe`（由其中一个 watchdog 拉起的子进程，两个 watchdog 都停后手动确认其已退出或单独停）。
-3. 验证：`Get-Process -Name tn12-mining-watchdog-v2,stratum-bridge -ErrorAction SilentlyContinue` 应为空（两个 PID 都要确认，不是查到一个就停）；各自 `_watchdog.log` 末行应无新 tick。
+3. 验证：**不要用 `Get-Process -Name tn12-mining-watchdog-v2`**——`.ps1` 脚本在进程表里 `Name` 是 `powershell.exe`，不是脚本名，按脚本名查会永远查到空、把"还活着"误读成"已停"（NWT 在活着的 13788/19532 上实测过这个坑）。改用 `Get-Process -Id 13788,19532 -ErrorAction SilentlyContinue`（就是步骤 1 `Stop-Process` 时已知的那两个 PID）应为空；`stratum-bridge` 是真实 exe 名，`Get-Process -Name stratum-bridge -ErrorAction SilentlyContinue` 可以按名字查，应为空。两处都要确认，不是查到一个就停；各自 `_watchdog.log` 末行应无新 tick。
 
 ### 2.3 停 kaspad-watchdog（两套实例），再优雅停 kaspad，taskkill //F 只作兜底（v0.1.2 NWT MUST② 改）
 
 **先停两个 watchdog**（PID **18576** 与 **24220**，`Stop-Process` 各一次）——不先停它们，停 kaspad 后 60 s 内会被其中任一个拉回来；两个都要停，只停一个不够（见 §1.2 两套实例）。
 
 **再停 kaspad，优雅关闭优先，`taskkill //F` 只作兜底**（RocksDB 未刷盘风险——kaspad 源码 `core/src/signals.rs`（本机 `/d/rusty-kaspa/core/src/signals.rs` 已读源码核实）用 `ctrlc::set_handler` 捕获首次中断信号触发 `shutdown()`（应含 RocksDB flush），**若收到第二次信号会直接 `std::process::exit(1)` 强杀**——所以只发一次信号、耐心等，不要连续两次）：
-1. **优雅**：`taskkill //PID 16644`（**不带 //F**——Windows 对控制台进程的非强制 `taskkill` 会投递控制台中断事件，触发上面那个 `ctrlc` 处理器），等待最多 60 s。
+1. **优雅**：`taskkill //PID 16644`（**不带 //F**——Windows 对控制台进程的非强制 `taskkill` 会投递控制台中断事件，触发上面那个 `ctrlc` 处理器），等待最多 60 s。**⚠ 未独立验证的一点（NWT 复审提出）**：kaspad 是被 watchdog 用 `-WindowStyle Hidden` 起的无窗口后台控制台进程，"非 `//F` 的 `taskkill` 能否把控制台中断事件真的送到一个隐藏窗口的控制台进程"本 runbook 没有独立实测确认过——最坏情况是白等满 60 s 信号根本没送到，然后照样落到步骤 3 的 `//F` 兜底，不会卡死，只是可能白等一段时间。
 2. 轮询 `Get-Process -Id 16644 -ErrorAction SilentlyContinue`，进程消失即优雅退出成功，跳到步骤 4。
 3. **兜底**（60 s 后仍在跑才用）：`taskkill //PID 16644 //F`——**标注风险**：这条路径跳过了 `ctrlc` 处理器的 `shutdown()`，RocksDB 可能有未刷盘的写入，下次起 kaspad 时留意启动日志有无恢复/修复相关提示，异常则升级不要自行处理。
 4. 验证：`Get-Process kaspad -ErrorAction SilentlyContinue` 应为空；`netstat -ano | grep :17210` 应无 LISTENING；等 90 s 后再查一次确认两个 watchdog 都没把它拉回来（60 s tick + 余量）。
