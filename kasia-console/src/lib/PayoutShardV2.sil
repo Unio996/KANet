@@ -613,8 +613,8 @@ contract PayoutShardV2(
         require(heldTk.owner == OpInputCovenantId(this.activeInputIndex));
         require(heldTk.amount == consolidated_pool);
 
-        // ★ ZERO32 目的地守卫(NWT 1158 系统性扫查纪律): 独立验证 = 上面 closeZkTmplAnchor 的全字节比对
-        //   (裸输出/假模板通不过那条检查, 不是只信 OpOutputCovenantId 单独一条)。
+        // ★ ZERO32 目的地守卫(NWT 1158/1173 系统性扫查纪律): 独立验证 = 上面 closeZkTmplAnchor 的全字节比对
+        //   (脚本字节匹配 ≠ covenant 绑定, 两层各自独立承重)。
         byte[32] zkCovId = OpOutputCovenantId(zkOutIdx);
         require(zkCovId != byte[32](0x0000000000000000000000000000000000000000000000000000000000000000));
 
