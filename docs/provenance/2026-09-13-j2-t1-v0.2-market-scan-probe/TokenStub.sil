@@ -1,0 +1,13 @@
+pragma silverscript ^0.1.0;
+// v0.2 探针用的代币替身: State 形状对齐 KanetTestToken.sil 的 owner/amount 两个关键字段(其余字段本探针不需要,
+// 保持最小 State 以缩小编译面; 不是真实 KCC-0020 六字段, 只用于派生 prefix/suffix/template_hash + 构造
+// 若干实例的合法 script_hex, 供 MarketScanProbe.sil 的 readInputStateWithTemplate 去读)。
+contract TokenStub(byte[32] init_owner, int init_amount) {
+    byte[32] owner = init_owner;
+    int amount = init_amount;
+    #[covenant.singleton]
+    function passthrough(State prevState, State newState) {
+        require(newState.owner == prevState.owner);
+        require(newState.amount == prevState.amount);
+    }
+}

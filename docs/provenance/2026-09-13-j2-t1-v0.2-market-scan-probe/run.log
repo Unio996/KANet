@@ -1,0 +1,19 @@
+  RUN   V-scan-1_pass_two_owned_tokens_summed
+  PASS  V-scan-1_pass_two_owned_tokens_summed
+  RUN   V-scan-2_fail_silent_second_token_caught_by_scan
+  PASS  V-scan-2_fail_silent_second_token_caught_by_scan
+  RUN   V-scan-3_pass_other_owner_same_template_not_counted
+  PASS  V-scan-3_pass_other_owner_same_template_not_counted
+  RUN   V-scan-4_pass_non_token_input_safely_skipped
+  PASS  V-scan-4_pass_non_token_input_safely_skipped
+  RUN   V-harness_flip_of_V-scan-1_expect_fail
+  FAIL  V-harness_flip_of_V-scan-1_expect_fail
+        FAIL: expected failure but bytecode passed
+        Error: "FAIL"
+
+5 tests: 4 passed, 1 failed
+Error: "some tests failed"
+  RUN   read_one_pass
+  PASS  read_one_pass
+
+1 tests: 1 passed, 0 failed
