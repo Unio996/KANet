@@ -8,7 +8,10 @@ import { verifyIngestRequest } from '../services/ingest-auth.js';
 import { getSidesByLogicalMarket } from '../lib/pool-bettor-sides-query.mjs';
 import { reclaimBshardMakerBond } from '../services/bshard-auto-settler.mjs';
 import { buildCtx, clearRepeatOffenderMarker } from '../services/bshard-settle-daemon.mjs';
-import { listZ20CircuitBroken, clearZ20Circuit } from '../services/broker-intake-watcher.js';
+// broker-optional (2026-09-13, J2 · Bettor GO-C 第二崩派单·1090): broker-intake-watcher.js 模块顶层对
+// BROKER_RELAY_ID 缺失 fail-loud throw——本文件是 admin-dedup 全局 API 注册点(index.js 无条件 import),
+// 若在此静态 import 会绕开 index.js 里给 broker-intake-watcher 加的 BROKER_ENABLED 门(主网新库 relay
+// 身份全空时静态 import 一样崩启动)。改成 handler 内动态 import(同 api/conversations.js 既有惯例)。
 
 const HEX64 = /^[0-9a-fA-F]{64}$/;
 
@@ -129,6 +132,7 @@ export async function registerBshardBondReclaimRoutes(fastify) {
 export async function registerZ20CircuitRoutes(fastify) {
   // GET /api/admin/z20-circuit-broken — 挂账清单: 谁被熔断/为什么/多少钱/归谁
   fastify.get('/api/admin/z20-circuit-broken', { preHandler: async (request, reply) => { await verifyIngestRequest(request, reply); } }, async (request, reply) => {
+    const { listZ20CircuitBroken } = await import('../services/broker-intake-watcher.js');
     const results = listZ20CircuitBroken();
     return reply.send({ ok: true, count: results.length, results });
   });
@@ -140,6 +144,7 @@ export async function registerZ20CircuitRoutes(fastify) {
     if (!Array.isArray(offerIds) || !offerIds.length) {
       return reply.code(400).send({ ok: false, error: 'offerIds must be a non-empty array' });
     }
+    const { clearZ20Circuit } = await import('../services/broker-intake-watcher.js');
     const results = offerIds.map((id) => ({ id, ...clearZ20Circuit(id, reason) }));
     return reply.send({ ok: true, results });
   });
