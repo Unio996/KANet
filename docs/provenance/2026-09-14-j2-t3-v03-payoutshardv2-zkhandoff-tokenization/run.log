@@ -1,0 +1,12 @@
+  RUN   V-ZKHO-1_pass_full_handoff
+  PASS  V-ZKHO-1_pass_full_handoff
+  RUN   V-ZKHO-2_fail_wrong_templateD_anchor_mismatch
+  PASS  V-ZKHO-2_fail_wrong_templateD_anchor_mismatch
+  RUN   V-ZKHO-3_fail_token_owner_diverted_to_stranger
+  PASS  V-ZKHO-3_fail_token_owner_diverted_to_stranger
+  RUN   V-ZKHO-4_fail_witness_wrong_tok_prefix
+  PASS  V-ZKHO-4_fail_witness_wrong_tok_prefix
+  RUN   V-ZKHO-5_fail_zk_output_bare_no_covenant_id_zero32
+  PASS  V-ZKHO-5_fail_zk_output_bare_no_covenant_id_zero32
+
+5 tests: 5 passed, 0 failed
