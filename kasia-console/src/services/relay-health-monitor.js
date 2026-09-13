@@ -7,6 +7,16 @@
 // 还是孤儿、押注/广播照样断到手动拉".
 //
 // 配合 r424 Console supervisor: supervisor 救 Console 死, 此 monitor 救 relay 死/没起来.
+//
+// 🔴 NWT 2-1 v0.3 MUST-FIX（2026-09-14, Bettor 1169 派工, 排在两大额热钱包账号导入之前）：
+// 本文件原来只在 startRelay() 成功时调 _recordRestart()——对 cold_address_denied/
+// per_relay_cap_exceeded 这类【永远会被拒】的候选（NWT 2-1 热钱包准入门, relay-manager.js:
+// startRelay() 内部三条检查, 见 checkHotwalletAdmission），这个候选的"最近一小时重启次数"
+// 永远是 0，MAX_RESTART_PER_HOUR 这条节流从未对它生效，30s tick 永久重试、每账号每 tick
+// 打 3 行日志（两个大额账号 ≈17,280 行/天）、日志里的"auto-restart attempt #1"永远是 #1
+// （因为"最近一小时次数"这个计数分母从未真的涨过）。修法：_recordRestart() 改成【只要真的
+// 调用了 startRelay()，无论结果成功失败都记】——节流是"我们尝试过几次"，不是"我们成功过
+// 几次"，被准入门永久拒绝的候选跟真实故障候选一样，都不该无限期占用 tick 资源。
 
 import { sqlite } from '../db/client.js';
 import { getStatus, isRelayAlive, startRelay } from './relay-manager.js';
@@ -14,63 +24,94 @@ import { getStatus, isRelayAlive, startRelay } from './relay-manager.js';
 const TICK_INTERVAL_MS = Number(process.env.RELAY_HEALTH_TICK_MS) || 30_000;  // 30s
 const STARTUP_GRACE_MS = 90_000;  // wait 90s after Console boot so initial startAll has chance
 const MAX_RESTART_PER_HOUR = Number(process.env.RELAY_HEALTH_MAX_RESTART_PER_HOUR) || 3;
+// 节流命中(restart_stormed)时的摘要日志间隔——不再每 tick 打一行, 降到每小时一条摘要。
+const STORM_LOG_INTERVAL_MS = 3600_000;
 
 let timer = null;
 let running = false;
-const _restartHistory = new Map();  // relayNodeId → [timestamps]
+const _restartHistory = new Map();  // relayNodeId → [timestamps]（真实调用 startRelay 的次数, 不分成功失败）
+const _stormLogState = new Map();   // relayNodeId → { lastLoggedAt, skippedSinceLastLog }
 
-function _restartCountInLastHour(relayNodeId) {
-  const arr = _restartHistory.get(relayNodeId) || [];
+function _restartCountInLastHour(relayNodeId, restartHistory) {
+  const arr = restartHistory.get(relayNodeId) || [];
   const cutoff = Date.now() - 3600_000;
   const recent = arr.filter(t => t >= cutoff);
-  _restartHistory.set(relayNodeId, recent);
+  restartHistory.set(relayNodeId, recent);
   return recent.length;
 }
 
-function _recordRestart(relayNodeId) {
-  const arr = _restartHistory.get(relayNodeId) || [];
+// 🔴 无论 startRelay() 的结果是成功、fail-closed 拒绝、还是抛异常, 只要这次 tick 真的调用
+// 了它, 就记一次——这是本次 MUST-FIX 的核心：节流针对"尝试次数", 不是"成功次数"。
+function _recordRestart(relayNodeId, restartHistory) {
+  const arr = restartHistory.get(relayNodeId) || [];
   arr.push(Date.now());
-  _restartHistory.set(relayNodeId, arr);
+  restartHistory.set(relayNodeId, arr);
 }
 
-export async function relayHealthMonitorTick() {
-  const __t0 = Date.now(); // BETTOR_RH_TIMER
-  if (running) return { skipped: true };
-  running = true;
-  // 2026-07-14 J2/Bettor 双轨定罪轨道1(Owner直令#kul7j3, 头号嫌疑relayHealthMonitorTick 31个relay
-  // 串行await startRelay理论): observe-only 计时探针, 零行为改动, 照抄今天settle-daemon同款
-  // [diag:tick-duration]模式。装载后直接看数值定罪(单轮=264秒量级=铁证)。
-  const _tickStart = Date.now();
-  try {
-    // 2026-07-04 (查漏补缺·qzdh7nar/KANet-UI): 原 INNER JOIN adapter_nodes 把没绑 adapter 的 relay
-    // 排除在健康监控外——但 startRelay()(relay-manager.js) 本身用 LEFT JOIN，压根不需要 adapter 才能跑。
-    // 这条件比实际需求严，导致无 adapter 的 relay 被孤儿化(挂了没人重启)。#34 挖矿 relay today 撞过这个坑
-    // (临时靠手动绑 adapter 绕过，根没修)。改成不要求 adapter，跟 startRelay() 的资格条件对齐。
-    const eligible = sqlite.prepare(`
+// 节流命中时的摘要日志——同一个 relay 在 STORM_LOG_INTERVAL_MS 窗口内只打一行, 内容是
+// "这段时间内跳过了几次", 不是每次跳过都打一行。
+function _logStormSkipIfDue(relayNodeId, name, recent, stormLogState) {
+  const state = stormLogState.get(relayNodeId) || { lastLoggedAt: 0, skippedSinceLastLog: 0 };
+  state.skippedSinceLastLog += 1;
+  const now = Date.now();
+  if (now - state.lastLoggedAt >= STORM_LOG_INTERVAL_MS) {
+    console.warn(`[relay-health] ${name} 节流摘要：过去 ${state.lastLoggedAt ? Math.round((now - state.lastLoggedAt) / 60000) : '<60'} 分钟内跳过 ${state.skippedSinceLastLog} 次自动重启尝试（${recent} restarts in last hour ≥ MAX(${MAX_RESTART_PER_HOUR})）— manual investigation needed if unexpected`);
+    state.lastLoggedAt = now;
+    state.skippedSinceLastLog = 0;
+  }
+  stormLogState.set(relayNodeId, state);
+}
+
+/**
+ * 单次 tick。第一参 `deps` 是可选依赖注入（同 checkHotwalletAdmission/relayHotwalletMonitorTick
+ * 既有 DI 约定——不是 `*ForTests` 专名导出，是默认走真实实现、测试可覆盖的普通可选参数）：
+ * - `listEligible()` 覆盖对 relay_nodes 的查询（默认真实 SELECT）
+ * - `checkAlive(id)` 覆盖 isRelayAlive（默认）
+ * - `doStartRelay(id)` 覆盖 startRelay（默认）
+ * - `restartHistory`/`stormLogState` 覆盖模块级状态 Map（默认用模块级单例——测试传入独立的
+ *   新 Map() 隔离状态，不污染真实监控的重启历史/摘要日志节流状态）
+ */
+export async function relayHealthMonitorTick(deps = {}) {
+  const {
+    listEligible = () => sqlite.prepare(`
       SELECT r.id, r.name
       FROM relay_nodes r
       WHERE r.address IS NOT NULL
         AND (r.mnemonic_encrypted IS NOT NULL OR r.privkey_encrypted IS NOT NULL)
-    `).all();
+    `).all(),
+    checkAlive = isRelayAlive,
+    doStartRelay = startRelay,
+    restartHistory = _restartHistory,
+    stormLogState = _stormLogState,
+  } = deps;
+
+  const __t0 = Date.now();
+  if (running) return { skipped: true };
+  running = true;
+  const _tickStart = Date.now();
+  try {
+    const eligible = listEligible();
     let healthy = 0, restarted = 0, restart_stormed = 0, errored = 0, deadCount = 0;
     for (const r of eligible) {
-      const aliveCheck = isRelayAlive(r.id);
+      const aliveCheck = checkAlive(r.id);
       if (aliveCheck?.alive) { healthy++; continue; }
       deadCount++;
 
-      const recent = _restartCountInLastHour(r.id);
+      const recent = _restartCountInLastHour(r.id, restartHistory);
       if (recent >= MAX_RESTART_PER_HOUR) {
         restart_stormed++;
-        console.warn(`[relay-health] ${r.name} died but ${recent} restarts in last hour ≥ MAX(${MAX_RESTART_PER_HOUR}) — skip (manual investigation needed)`);
+        _logStormSkipIfDue(r.id, r.name, recent, stormLogState);
         continue;
       }
       console.log(`[relay-health] ${r.name} dead (reason=${aliveCheck?.reason || 'unknown'}) — auto-restart attempt #${recent + 1}`);
       const _srStart = Date.now();
+      // 🔴 MUST-FIX 核心：记录发生在调用之后、不看结果——无论成功/fail-closed拒绝/抛异常，
+      // "尝试过一次"这件事本身就该计入节流分母。
       try {
-        const result = await startRelay(r.id);
+        const result = await doStartRelay(r.id);
+        _recordRestart(r.id, restartHistory);
         console.log(`[diag:relay-health-per-relay] ${r.name} startRelay ms=${Date.now() - _srStart}`);
         if (result?.ok) {
-          _recordRestart(r.id);
           restarted++;
           console.log(`[relay-health] ${r.name} auto-restarted pid=${result.pid}`);
         } else {
@@ -78,6 +119,7 @@ export async function relayHealthMonitorTick() {
           console.warn(`[relay-health] ${r.name} startRelay fail: ${result?.reason || 'unknown'}`);
         }
       } catch (e) {
+        _recordRestart(r.id, restartHistory);
         console.log(`[diag:relay-health-per-relay] ${r.name} startRelay ms=${Date.now() - _srStart} (threw)`);
         errored++;
         console.warn(`[relay-health] ${r.name} startRelay exception: ${e.message}`);

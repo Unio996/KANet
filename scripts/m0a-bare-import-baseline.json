@@ -1074,14 +1074,6 @@
    "burn_down": "M1"
   },
   {
-   "path": "kasia-console/src/api/relay.js",
-   "family": "relay-manager",
-   "form": "import { startRelay, stopRelay } from relay-manager.js",
-   "count": 1,
-   "owner": "console-core",
-   "burn_down": "M1"
-  },
-  {
    "path": "kasia-console/src/api/tg-wallet.js",
    "family": "relay-manager",
    "form": "const { sendCommandAsync } = await import(relay-manager.js)",

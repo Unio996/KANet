@@ -698,6 +698,13 @@ catchUpUningestedMarkets({ windowHours: 24, force: true }).catch((e) => console.
 import { startRelayHealthMonitorCron } from './services/relay-health-monitor.js';
 if (process.env.RH_OFF !== '1') startRelayHealthMonitorCron(); else console.log('[bettor-bisect] RelayHealth disabled');
 
+// NWT 2-1 v0.2 驻留期热钱包监控（docs/2026-09-14-nwt-mainnet-relay-hotwallet-cap-and-cold-hot-
+// separation-spec-v0.2.md, Bettor 1150 派工）：relay-health 只管"进程死没死"，本监控管"活着的进程
+// 私钥余额有没有被推过上限"——独立开关 HOTWALLET_MONITOR_OFF（不是 RH_OFF，故意不耦合），
+// 函数内部已经处理"设了 LOUD 警告"+"未设两个 cap env 就不启动"两条门，这里无条件调用即可。
+import { startRelayHotwalletMonitorCron } from './services/relay-hotwallet-monitor.js';
+startRelayHotwalletMonitorCron();
+
 // Oracle-voter PRODUCING-health (KANet-UI, Q2 durability hard-req per NWT/Bettor r989/r997): relay-health
 // catches a DEAD relay, but Q2 was a SILENT 0-vote stall while the voter cron ran fine (process-alive).
 // 2min cron flags verifying markets a LOCAL committee oracle owes a vote on but hasn't cast (>10min) →

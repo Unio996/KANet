@@ -25,6 +25,131 @@ const CONSOLE_PORT = process.env.PORT || '3100';
 // relayNodeId → { child, pid, startedAt, lastLog }
 const _relays = {};
 
+// NWT 2-1 (docs/2026-09-14-nwt-mainnet-relay-hotwallet-cap-and-cold-hot-separation-spec-v0.1.md §5,
+// Codex TOCTOU 审·Bettor 1138 裁两点调整): 冷清单 + per-relay 上限 + 热钱包总额上限, 三条【启动时】
+// 准入检查的唯一实现。startRelay() 在私钥进子进程 env 之前调用它 —— 这是本会话反复确认过的唯一私钥
+// 入内存前置点, 是安全边界本身。导入端点(api/relay.js POST /relays, POST /api/relay/import-privkey)
+// 也调用同一份函数做"早失败"—— 那只是更友好, 不是边界, 边界只有这一处。缺两个上限 env = 该项检查不
+// 启用(向后兼容现有行为); 余额查询失败 = fail-closed 拒绝, 绝不当 0 继续放行。日志只打地址与数值,
+// 从不打印助记词/私钥/密文。
+//
+// 🔴 这是【启动时】准入门, 不是持续生效的硬上限——relay 一旦被放行启动, 运行期间余额如何变化(比如
+// 收到新转账)不受这三条检查约束, 那是另一个问题(运行期监控, 见下方 onRelayAdmitted 挂钩点)。任何
+// 引用本函数的文档不能把"准入门"写成"硬上限"这两者不是一回事。
+//
+// Codex TOCTOU 指出: 若不做任何串行化, 两个 startRelay() 并发调用可能各自查到同一个"当前运行总额",
+// 各自判断"加上自己没超线"就都放行, 实际总额却超了。修法: _admissionLock 把每次 startRelay() 从
+// "查总额"到"成功后登记进 _relays"这一段串行化(同一时刻只有一个准入判断在跑), 且总额查询不缓存
+// (曾经的 30s TTL 缓存已按 Codex 意见去掉——缓存的陈旧总额本身就是让准入判断依据一个不再为真的数字,
+// 跟"每次现查"要解决的问题矛盾)。
+let _admissionLock = Promise.resolve();
+function _withAdmissionLock(fn) {
+  const run = _admissionLock.then(fn, fn);
+  _admissionLock = run.then(() => {}, () => {}); // 链条本身永不因某次调用失败而断, 后续调用仍能排队
+  return run;
+}
+
+async function _queryBalanceKas(address, network, rpcUrl) {
+  const { Address } = await import('kaspa-wasm');
+  const { getSharedRpc } = await import('../lib/kaspa-rpc-shared.mjs');
+  const rpc = await getSharedRpc({ url: rpcUrl, networkId: network || 'mainnet' });
+  const { entries } = await rpc.getBalancesByAddresses([new Address(address)]);
+  return Number(entries?.[0]?.balance || 0n) / 1e8;
+}
+
+// 遍历当前"正在跑"(child 存在)的 relay, 各自查一次链上余额求和。【不缓存】——每次都是链上现查
+// (Bettor 1138: 聚合上限检查不得用陈旧总额)。调用方(checkHotwalletAdmission 的总额分支)必须在
+// _withAdmissionLock 保护下调用本函数, 否则并发场景下仍然是 TOCTOU。
+async function _sumRunningRelayBalancesKas(network, rpcUrl, queryBalanceKas = _queryBalanceKas) {
+  const runningIds = Object.entries(_relays).filter(([, s]) => s.child).map(([id]) => id);
+  let total = 0;
+  if (runningIds.length > 0) {
+    const placeholders = runningIds.map(() => '?').join(',');
+    const rows = sqlite.prepare(
+      `SELECT address FROM relay_nodes WHERE id IN (${placeholders}) AND address IS NOT NULL`
+    ).all(...runningIds);
+    for (const row of rows) {
+      total += await queryBalanceKas(row.address, network, rpcUrl);
+    }
+  }
+  return total;
+}
+
+/**
+ * 三条【启动时】准入检查(NWT 2-1 §5)。address/network/rpcUrl 都是公开信息, 函数内部从不接触密钥材料。
+ * 返回 { ok: true, balance? } 或 { ok: false, reason, ...细节(从不含密钥) }。
+ *
+ * 🔴 本函数自己【不加锁】——总额检查的并发安全边界在调用方：`startRelay()` 把"本函数判断 → fork →
+ * 登记进 `_relays`"整段包进 `_withAdmissionLock`（见下方 startRelay 内部），登记完成锁才释放, 下一个
+ * 并发 startRelay() 的总额查询才会看到这一行。导入端点(api/relay.js)调用本函数做"早失败"提示时不
+ * 经过这把锁——那条路径本来就不是安全边界, 真正把关的是 startRelay() 自己那次加锁的判断。
+ *
+ * 第二参 `deps` 是可选依赖注入(同 `kaspa-rpc-shared.mjs` 的 `getSharedRpc({url,networkId},{Ctor})`
+ * 既有约定——不是 `*ForTests` 专名导出, 是默认走真实实现、测试可覆盖的普通可选参数)：
+ * `queryBalanceKas(address, network, rpcUrl)` 覆盖单地址余额查询, `sumRunningRelayBalancesKas(network, rpcUrl)`
+ * 覆盖"正在跑的 relay 余额总和"查询——测试借此在不连真实 RPC、不碰 `_relays`/DB 的情况下验证三条
+ * 判断逻辑本身（含"总额刚好超线的第 N 个候选被拒"这类需要控制运行总额的场景）。
+ */
+export async function checkHotwalletAdmission({ address, network, rpcUrl }, deps = {}) {
+  const queryBalanceKas = deps.queryBalanceKas || _queryBalanceKas;
+  const sumRunningRelayBalancesKas = deps.sumRunningRelayBalancesKas
+    || ((net, url) => _sumRunningRelayBalancesKas(net, url, queryBalanceKas));
+
+  const coldList = (process.env.RELAY_HOTWALLET_COLD_ADDRESSES || '')
+    .split(',').map((s) => s.trim()).filter(Boolean);
+  if (coldList.includes(address)) {
+    console.warn(`[relay-manager] hotwallet admission refuse ${address}: cold_address_denied`);
+    return { ok: false, reason: 'cold_address_denied' };
+  }
+
+  const perRelayMax = Number(process.env.RELAY_HOTWALLET_PER_RELAY_MAX_KAS);
+  const totalMax = Number(process.env.RELAY_HOTWALLET_TOTAL_MAX_KAS);
+  if (!Number.isFinite(perRelayMax) && !Number.isFinite(totalMax)) {
+    return { ok: true }; // 两个上限都未设 = 该项检查不启用, 向后兼容现有行为
+  }
+  if (!rpcUrl) {
+    console.error(`[relay-manager] hotwallet admission refuse ${address}: no rpc url to query balance (fail-closed)`);
+    return { ok: false, reason: 'balance_query_failed' };
+  }
+
+  let candidateBalanceKas;
+  try {
+    candidateBalanceKas = await queryBalanceKas(address, network, rpcUrl);
+  } catch (err) {
+    console.error(`[relay-manager] hotwallet admission refuse ${address}: candidate balance query failed (fail-closed): ${err.message}`);
+    return { ok: false, reason: 'balance_query_failed' };
+  }
+
+  if (Number.isFinite(perRelayMax) && candidateBalanceKas > perRelayMax) {
+    console.warn(`[relay-manager] hotwallet admission refuse ${address}: per_relay_cap_exceeded (balance=${candidateBalanceKas} cap=${perRelayMax})`);
+    return { ok: false, reason: 'per_relay_cap_exceeded', balance: candidateBalanceKas, cap: perRelayMax };
+  }
+
+  if (Number.isFinite(totalMax)) {
+    let runningTotal;
+    try {
+      runningTotal = await sumRunningRelayBalancesKas(network, rpcUrl);
+    } catch (err) {
+      console.error(`[relay-manager] hotwallet admission refuse ${address}: running total balance query failed (fail-closed): ${err.message}`);
+      return { ok: false, reason: 'balance_query_failed' };
+    }
+    if (runningTotal + candidateBalanceKas > totalMax) {
+      console.warn(`[relay-manager] hotwallet admission refuse ${address}: hotwallet_total_cap_exceeded (running=${runningTotal} candidate=${candidateBalanceKas} cap=${totalMax})`);
+      return { ok: false, reason: 'hotwallet_total_cap_exceeded', running: runningTotal, candidate: candidateBalanceKas, cap: totalMax };
+    }
+  }
+
+  return { ok: true, balance: candidateBalanceKas };
+}
+
+// 运行期监控挂钩点(NWT 2-1 v0.2 待定语义, Bettor 1138: 现在只留钩子, 不自己定语义)——relay 通过
+// 准入门、实际启动成功后会调这里，传入当时核过的候选余额。**现在是空函数**：不做周期性复检、不做
+// 超限自动停/隔离，那些行为的具体语义(检查频率/超限动作/隔离态如何表示等)由 NWT 2-1 v0.2 规格定，
+// 这里只保证"关"这个动作以后接得进来"的调用点已经存在，不需要以后再去改 startRelay() 的调用方。
+function onRelayAdmitted(relayNodeId, address, admittedBalanceKas) {
+  // 有意留空——见上方注释。
+}
+
 
 /**
  * Start a relay process for a specific account.
@@ -67,94 +192,112 @@ export async function startRelay(relayNodeId) {
     console.log(`[relay-manager] Fixed identity type for ${account.name}: ${existingId.identity_type} → local`);
   }
 
-  // r281 (Owner P0): privkey-backed relay 优先 (无助记词只有裸 kaspa 私钥的地址,
-  // 如 Owner 已绑 TG 的 qrymjvc). Wallet.mjs getWallet 优先读 KASPA_PRIVKEY env.
-  // 助记词型 relay 保持原行为. 二者必至少一个.
-  const privkey = getRelayPrivkey(relayNodeId);
-  const mnemonic = privkey ? null : getRelayMnemonic(relayNodeId);
-  if (!privkey && !mnemonic) return { ok: false, reason: 'no_key' };
-
   // Resolve config
   // S5 (strict local-only, 2026-09-13 设计 v0.2 C4): 原 `getConfig('rpc_url') || env` = DB 优先于 env, 绕过 rpc-health ⇒ console 读数走本机而 relay 递交走 DB 端点(T2 split-brain)。
   //   现统一走 resolveChildRpcUrl: strict ⇒ 恒 env; 且 strict 下空值拒起(把 '' 递下去会触发 relay 侧 console-config → Resolver 公网链, T4)。
+  // 🔴 NWT 1147: 这段挪到解密(getRelayPrivkey/getRelayMnemonic)之前——热钱包准入检查只需要
+  // account.address + net + rpcUrl, 不需要密钥材料, 提前到这里让准入检查能在解密发生之前跑完。
   const { resolveChildRpcUrl, isStrictLocalOnly } = await import('./rpc-health.js');
   const rpcUrl = await resolveChildRpcUrl('relay-manager');
   if (isStrictLocalOnly() && !rpcUrl) return { ok: false, reason: 'no_rpc_url_strict' };
-  const relayMode = await getConfig('relay_mode') || process.env.RELAY_MODE || 'rpc';
-  const ingestSecret = await getConfig('ingest_secret') || process.env.INGEST_SECRET || '';
-  const adapterPort = account.adapter_port || 3010;
 
-  const env = {
-    ...process.env,
-    CONSOLE_URL: `http://localhost:${CONSOLE_PORT}`,
-    INGEST_SECRET: ingestSecret,
-    RELAY_NODE_ID: relayNodeId,
-    NETWORK: net,
-    KASPA_NETWORK: net,   // (b) 单一源: env KASPA_NETWORK(已核 = relay_nodes.network)
-    KASPA_RPC_URL: rpcUrl,
-    RELAY_MODE: relayMode,
-    POLL_MS: String(account.poll_ms || 2000),
-    IS_SERVICE: account.is_service ? '1' : '0',  // R5 T-J2-16: Service 模式 relay (broker) 跳 anti-spam dedup
-    // M0c-1 app provision: grant registry 只读路径 (relay 侧 authorizeAppCommand fresh 读,
-    // grant-registry.mjs readOnly 直开)。console 侧解析成绝对路径 — relay cwd=RELAY_DIR, 相对路径会解错。
-    M0C1_GRANT_DB_PATH: resolve(process.env.DB_PATH || './data/console.db'),
-  };
-  // r281: pass exactly one of KASPA_PRIVKEY / KASPA_MNEMONIC (privkey wins). wallet.mjs reads them.
-  // 🔴 N5(A2 spec v1.2-rc · @J1tn 审视 8969aca7 · @Bettor 批B GO): **互斥必须双向 + 切断继承向**。
-  //   见下方 buildRelayKeyEnv 的头注 —— 这三行是那份读数的落码, 别单独读。
-  Object.assign(env, buildRelayKeyEnv({ privkey, mnemonic }));
+  // NWT 2-1 热钱包准入门 + Codex TOCTOU 修（Bettor 1138）：从"查总额判断"到"登记进 _relays"整段
+  // 串行化——同一时刻只有一个 startRelay() 在做准入判断+登记，下一个并发调用的总额查询才能看到
+  // 这一行已经算进去了，不会两个都各自查到"加上自己没超线"就一起放行。
+  // 🔴 NWT 1147: 准入检查挪到解密之前——只用 account.address + net + rpcUrl（三者都是公开信息，
+  // 不接触密钥材料）；被拒的候选在这里就 return，getRelayPrivkey/getRelayMnemonic 根本不会被调用，
+  // 连解密动作本身都不发生（不只是"解密了但不用"）。
+  return _withAdmissionLock(async () => {
+    const admission = await checkHotwalletAdmission({ address: account.address, network: net, rpcUrl });
+    if (!admission.ok) {
+      console.warn(`[relay-manager] refuse start ${account.name}: hotwallet admission ${admission.reason}`);
+      return admission;
+    }
 
-  try {
-    const child = fork('src/relay.mjs', [], {
-      cwd: RELAY_DIR,
-      env,
-      stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
-    });
+    // r281 (Owner P0): privkey-backed relay 优先 (无助记词只有裸 kaspa 私钥的地址,
+    // 如 Owner 已绑 TG 的 qrymjvc). Wallet.mjs getWallet 优先读 KASPA_PRIVKEY env.
+    // 助记词型 relay 保持原行为. 二者必至少一个.
+    const privkey = getRelayPrivkey(relayNodeId);
+    const mnemonic = privkey ? null : getRelayMnemonic(relayNodeId);
+    if (!privkey && !mnemonic) return { ok: false, reason: 'no_key' };
 
-    const state = {
-      child,
-      pid: child.pid,
-      name: account.name,
-      startedAt: new Date().toISOString(),
-      lastLog: '',
-      lastLogAt: 0,  // r216 bug fix: lastLog 是文本不能 new Date() 解析, 加独立 timestamp.
+    const relayMode = await getConfig('relay_mode') || process.env.RELAY_MODE || 'rpc';
+    const ingestSecret = await getConfig('ingest_secret') || process.env.INGEST_SECRET || '';
+    const adapterPort = account.adapter_port || 3010;
+
+    const env = {
+      ...process.env,
+      CONSOLE_URL: `http://localhost:${CONSOLE_PORT}`,
+      INGEST_SECRET: ingestSecret,
+      RELAY_NODE_ID: relayNodeId,
+      NETWORK: net,
+      KASPA_NETWORK: net,   // (b) 单一源: env KASPA_NETWORK(已核 = relay_nodes.network)
+      KASPA_RPC_URL: rpcUrl,
+      RELAY_MODE: relayMode,
+      POLL_MS: String(account.poll_ms || 2000),
+      IS_SERVICE: account.is_service ? '1' : '0',  // R5 T-J2-16: Service 模式 relay (broker) 跳 anti-spam dedup
+      // M0c-1 app provision: grant registry 只读路径 (relay 侧 authorizeAppCommand fresh 读,
+      // grant-registry.mjs readOnly 直开)。console 侧解析成绝对路径 — relay cwd=RELAY_DIR, 相对路径会解错。
+      M0C1_GRANT_DB_PATH: resolve(process.env.DB_PATH || './data/console.db'),
     };
+    // r281: pass exactly one of KASPA_PRIVKEY / KASPA_MNEMONIC (privkey wins). wallet.mjs reads them.
+    // 🔴 N5(A2 spec v1.2-rc · @J1tn 审视 8969aca7 · @Bettor 批B GO): **互斥必须双向 + 切断继承向**。
+    //   见下方 buildRelayKeyEnv 的头注 —— 这三行是那份读数的落码, 别单独读。
+    Object.assign(env, buildRelayKeyEnv({ privkey, mnemonic }));
 
-    child.stdout.on('data', (data) => {
-      const lines = data.toString().trim().split('\n');
-      for (const line of lines) {
-        if (line) console.log(`[relay:${account.name}] ${line}`);
-      }
-      state.lastLog = lines.pop() || state.lastLog;
-      state.lastLogAt = Date.now();
-    });
-    child.stderr.on('data', (data) => {
-      const lines = data.toString().trim().split('\n');
-      for (const line of lines) {
-        if (line) console.log(`[relay:${account.name}] ${line}`);
-      }
-      state.lastLog = lines.pop() || state.lastLog;
-      state.lastLogAt = Date.now();
-    });
+    try {
+      const child = fork('src/relay.mjs', [], {
+        cwd: RELAY_DIR,
+        env,
+        stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+      });
 
-    child.on('exit', (code) => {
-      console.log(`[relay-manager] ${account.name} relay exited (code ${code})`);
-      delete _relays[relayNodeId];
-    });
+      const state = {
+        child,
+        pid: child.pid,
+        name: account.name,
+        startedAt: new Date().toISOString(),
+        lastLog: '',
+        lastLogAt: 0,  // r216 bug fix: lastLog 是文本不能 new Date() 解析, 加独立 timestamp.
+      };
 
-    child.on('error', (err) => {
-      console.error(`[relay-manager] ${account.name} relay error: ${err.message}`);
-      delete _relays[relayNodeId];
-    });
+      child.stdout.on('data', (data) => {
+        const lines = data.toString().trim().split('\n');
+        for (const line of lines) {
+          if (line) console.log(`[relay:${account.name}] ${line}`);
+        }
+        state.lastLog = lines.pop() || state.lastLog;
+        state.lastLogAt = Date.now();
+      });
+      child.stderr.on('data', (data) => {
+        const lines = data.toString().trim().split('\n');
+        for (const line of lines) {
+          if (line) console.log(`[relay:${account.name}] ${line}`);
+        }
+        state.lastLog = lines.pop() || state.lastLog;
+        state.lastLogAt = Date.now();
+      });
 
-    _relays[relayNodeId] = state;
-    console.log(`[relay-manager] Started ${account.name} relay (PID ${child.pid})`);
+      child.on('exit', (code) => {
+        console.log(`[relay-manager] ${account.name} relay exited (code ${code})`);
+        delete _relays[relayNodeId];
+      });
 
-    return { ok: true, pid: child.pid, name: account.name };
-  } catch (err) {
-    console.error(`[relay-manager] Failed to start ${account.name}: ${err.message}`);
-    return { ok: false, reason: 'spawn_failed', error: err.message };
-  }
+      child.on('error', (err) => {
+        console.error(`[relay-manager] ${account.name} relay error: ${err.message}`);
+        delete _relays[relayNodeId];
+      });
+
+      _relays[relayNodeId] = state;
+      console.log(`[relay-manager] Started ${account.name} relay (PID ${child.pid})`);
+      onRelayAdmitted(relayNodeId, account.address, admission.balance);
+
+      return { ok: true, pid: child.pid, name: account.name };
+    } catch (err) {
+      console.error(`[relay-manager] Failed to start ${account.name}: ${err.message}`);
+      return { ok: false, reason: 'spawn_failed', error: err.message };
+    }
+  });
 }
 
 /**
