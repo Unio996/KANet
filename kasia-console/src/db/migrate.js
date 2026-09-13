@@ -5845,5 +5845,53 @@ export function runMigrations() {
   }
   console.log('[migrate] v203: exchange_offers 加 escrow_landed_at/escrow_landed_depth/taker_escrow_landed_at/taker_escrow_landed_depth ((c) 第 5 笔 escrow 硬消费门, pragma 守卫幂等).');
 
+  // ── v204 (2026-09-13, J2 · F2-R MUST-FIX, Codex 3ce6513a·ledger 1093): submit_intents.status CHECK 加 'ambiguous' ──
+  //   AMBIGUOUS/HOLD 新态(lib/submit-intent.mjs resolvePrepared): inputs_spent 三缺(mempool 无+目标 UTXO 无+发送方
+  //   输入缺失)与"prepared 已落地、收款方秒花+未被 kaspa_tx_log watched-addresses 盯上"完全相容——旧逻辑一律
+  //   abandoned+重建 = 残余双付窗。收紧后没有正向证据(kaspa_tx_log 命中 prepared_txid)时落 ambiguous 终态(同
+  //   abandoned 一样不可被后续 markIntent 覆盖, 只能人工清), 而不是自动重建。v202 建表时 CHECK 里没有这个值,
+  //   同 v132 exchange_offers 手法 rebuild table(SQLite 不支持直接改列级 CHECK)。
+  {
+    const tableInfo = sqlite.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='submit_intents'").get();
+    const checkMatch = tableInfo?.sql?.match(/CHECK\s*\(\s*status\s+IN\s*\(([^)]+)\)\s*\)/);
+    const currentCheckStates = checkMatch ? checkMatch[1].split(',').map(s => s.trim().replace(/'/g, '')) : [];
+    if (tableInfo?.sql && !currentCheckStates.includes('ambiguous')) {
+      const indexes = sqlite.prepare(`SELECT name, sql FROM sqlite_master WHERE type='index' AND tbl_name='submit_intents' AND sql IS NOT NULL`).all();
+      const rowCountBefore = sqlite.prepare(`SELECT COUNT(*) AS cnt FROM submit_intents`).get().cnt;
+      const colsList = sqlite.prepare(`PRAGMA table_info(submit_intents)`).all().map(c => c.name);
+      const colsCsv = colsList.join(', ');
+      const allStates = [...currentCheckStates, 'ambiguous'];
+      const newCheckClause = `CHECK (status IN (${allStates.map(s => `'${s}'`).join(',')}))`;
+      const newSql = tableInfo.sql
+        .replace(/CREATE TABLE\s+"?submit_intents"?/, 'CREATE TABLE submit_intents_v204')
+        .replace(/CHECK\s*\(\s*status\s+IN\s*\([^)]+\)\s*\)/, newCheckClause);
+
+      sqlite.exec('BEGIN TRANSACTION');
+      try {
+        sqlite.exec('DROP TABLE IF EXISTS submit_intents_v204');
+        sqlite.exec(newSql);
+        sqlite.exec(`INSERT INTO submit_intents_v204 (${colsCsv}) SELECT ${colsCsv} FROM submit_intents`);
+        const rowCountAfter = sqlite.prepare(`SELECT COUNT(*) AS cnt FROM submit_intents_v204`).get().cnt;
+        if (rowCountAfter !== rowCountBefore) {
+          throw new Error(`v204 row count mismatch: before=${rowCountBefore} after=${rowCountAfter}`);
+        }
+        sqlite.exec('DROP TABLE submit_intents');
+        sqlite.exec('ALTER TABLE submit_intents_v204 RENAME TO submit_intents');
+        for (const idx of indexes) {
+          if (idx.sql) {
+            try { sqlite.exec(idx.sql); }
+            catch (ie) { console.warn(`[migrate] v204 index ${idx.name} recreate fail: ${ie.message}`); }
+          }
+        }
+        sqlite.exec('COMMIT');
+        console.log(`[migrate] v204: submit_intents rebuilt (${rowCountBefore} rows preserved, ${indexes.length} indexes recreated, CHECK 加 'ambiguous').`);
+      } catch (e) {
+        sqlite.exec('ROLLBACK');
+        console.error(`[migrate] v204 ROLLBACK: ${e.message}`);
+        throw e;
+      }
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }

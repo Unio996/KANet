@@ -124,16 +124,56 @@ const replays = (R) => R.calls.filter(c => c.type === 'transfer' && c.replay_tx_
   const rp = R.calls.find(c => c.replay_tx_json);
   ok(t.replayed && t.txId === txid && rp?.replay_tx_json === '["signed-bytes"]' && rp?.prepared_txid === txid && transfers(R) === 0 && new Set(R.broadcasts).size === 1, 'F2-R-2: 同字节重播(带 bytes+prepared_txid), 不重建, distinct txid=1');
 }
-// ── F2-R-3: 重播被 relay 判 inputs_spent ⇒ 旧行 abandoned + '#2' 新行 ⇒ 重建 ⇒ distinct 2, 旧 txid 链上永不出现 ──
+// ── F2-R-3 (Codex 3ce6513a MUST-FIX·1093, 改判): 重播被 relay 判 inputs_spent + kaspa_tx_log 无正向证据
+//    ⇒ AMBIGUOUS/HOLD, 不 abandon 不重建, 零付款(旧逻辑"abandoned+重建"= 残余双付窗, 已收紧) ──
 {
   const R = makeRelay();
   const old = 'p3'.padEnd(64, '3');
   ensureIntent({ intentKind: 'payout', offerId: 'r3', relayId: 'relay-A', targetAddress: 'kaspa:qtarget', amountKas: '1' });
   recordIntentPhase({ intentKey: intentKeyFor('payout', 'r3'), phase: 'prepared', txid: old, txJson: '["bytes"]' });
   R.replayResult = { ok: false, code: 'inputs_spent', error: 'input spent' };
-  const t = await transferWithIntent(base(R, 'r3'));
-  const oldRow = getIntent(intentKeyFor('payout', 'r3')), newRow = getIntent(intentKeyFor('payout', 'r3', 2));
-  ok(oldRow.status === 'abandoned' && newRow?.status === 'submitted' && newRow.parent_intent_key === oldRow.intent_key && t.txId !== old && !R.broadcasts.includes(old) && new Set(R.broadcasts).size === 1 && events('intent_rebuilt_after_inputs_spent') === 1, 'F2-R-3: inputs_spent → 旧 abandoned, #2 重建, 旧 txid 从未广播');
+  let err = null;
+  try { await transferWithIntent(base(R, 'r3')); } catch (e) { err = e; }
+  const row = getIntent(intentKeyFor('payout', 'r3')), noRebuild = getIntent(intentKeyFor('payout', 'r3', 2));
+  ok(err?.hold && err.code === 'ambiguous_inputs_spent' && row.status === 'ambiguous' && !noRebuild && R.broadcasts.length === 0 && replays(R) === 1 && transfers(R) === 0 && events('intent_ambiguous_inputs_spent') === 1, 'F2-R-3: inputs_spent 三缺 + kaspa_tx_log 无命中 → AMBIGUOUS/HOLD, 不 abandon 不建 #2, 零广播');
+  // 同一 offer 再来一次(重启/重试常态) → 必须继续抛 ambiguous, 绝不静默落到"pending ⇒ fresh send"补付一次。
+  let err2 = null;
+  try { await transferWithIntent(base(R, 'r3')); } catch (e) { err2 = e; }
+  ok(err2?.hold && err2.code === 'ambiguous_inputs_spent' && R.broadcasts.length === 0 && transfers(R) === 0, 'F2-R-3-续: ambiguous 行再入口 → 继续 hold, 不会绕过去补付');
+}
+// ── F2-R-3-正证据: 同样 inputs_spent 三缺, 但 kaspa_tx_log 里有 prepared_txid→target_address 的落表记录
+//    (console 自己的嵌入式 indexer, 按 tx_id 主键, 不随收款方后续花费而消失) ⇒ 正向证据确认 prepared 自己
+//    上链了, 直接 submitted, 不进 AMBIGUOUS ──
+{
+  const R = makeRelay();
+  const txid = 'p3b'.padEnd(64, 'b');
+  ensureIntent({ intentKind: 'payout', offerId: 'r3b', relayId: 'relay-A', targetAddress: 'kaspa:qtarget', amountKas: '1' });
+  recordIntentPhase({ intentKey: intentKeyFor('payout', 'r3b'), phase: 'prepared', txid, txJson: '["bytes"]' });
+  sqlite.prepare(`INSERT INTO kaspa_tx_log (tx_id, to_address, amount, observed_at, network) VALUES (?, ?, ?, ?, ?)`)
+    .run(txid, 'kaspa:qtarget', 1.0, new Date().toISOString(), 'mainnet');
+  R.replayResult = { ok: false, code: 'inputs_spent', error: 'input spent' };
+  const t = await transferWithIntent(base(R, 'r3b'));
+  ok(t.txId === txid && getIntent(intentKeyFor('payout', 'r3b')).status === 'submitted' && R.broadcasts.length === 0 && !getIntent(intentKeyFor('payout', 'r3b', 2)), 'F2-R-3-正证据: kaspa_tx_log 命中 prepared_txid → submitted, 不进 AMBIGUOUS 不重建');
+}
+// ── Codex 六步负向量(1093 ②): 广播落地 → 回执丢停 prepared → 收款方先花 → 目标 UTXO 查无 → 输入缺失 ⇒
+//    不建 attempt #2、零付款(还原残余窗的完整现场, 不只是断言 relay 返回码) ──
+{
+  const R = makeRelay();
+  const txid = 'p3c'.padEnd(64, 'c');
+  // ① prepared 行存在(有 txid+bytes), relay 那边其实已经广播落地(mempool 有过, 但由于 IPC/进程重启,
+  //    console 这边的回执状态"卡在 prepared" —— 复现 IPC 回执丢失场景)。
+  ensureIntent({ intentKind: 'payout', offerId: 'r3c', relayId: 'relay-A', targetAddress: 'kaspa:qtarget', amountKas: '1' });
+  recordIntentPhase({ intentKey: intentKeyFor('payout', 'r3c'), phase: 'prepared', txid, txJson: '["bytes"]' });
+  // ② 收款方"先花": 该笔早已确认, 输出已被收款方另一笔交易消费 —— mempool 里已经没有 prepared_txid 本身
+  //    (它已确认出块, 不再是 mempool entry), 也没有留在 target 的 UTXO 集里(collateral 已被花掉)。
+  //    ③ 目标 UTXO 查无(collateral 已花): base R.landed 没设置该 txid ⇒ check_utxo_landed 返回 landed:false。
+  // ④ 输入缺失: relay 侧 replayPreparedTransactions() 走到"发送方输入是否还在 UTXO 集"这一步时因为
+  //    prepared tx 自己的输入已经被自己(唯一确认过的那笔)消费掉 ⇒ 判定 inputs_spent。
+  R.replayResult = { ok: false, code: 'inputs_spent', error: 'input spent' };
+  let err = null;
+  try { await transferWithIntent(base(R, 'r3c')); } catch (e) { err = e; }
+  const row = getIntent(intentKeyFor('payout', 'r3c'));
+  ok(err?.hold && err.code === 'ambiguous_inputs_spent' && row.status === 'ambiguous' && !getIntent(intentKeyFor('payout', 'r3c', 2)) && R.broadcasts.length === 0 && transfers(R) === 0 && replays(R) === 1, 'Codex 六步负向量: 广播落地+回执丢+收款方先花+目标UTXO查无+输入缺失 ⇒ 不建 attempt #2, 零付款, HOLD');
 }
 // ── F2-R-弱注入 (必须为红): prepared 无 bytes ⇒ 不发不建 + 告警 ──
 {

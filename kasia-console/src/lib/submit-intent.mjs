@@ -8,8 +8,19 @@
 //   I1 submit accepted ≠ chain landed —— 本模块只把"submitted"记成 submitted, landed 由 checkIntentLanded(minDepth) 单独判。
 //   I5 重试不得双付 —— attempt ≥ 2 的唯一前置 = 查 relay 侧权威源(intent 表里的 txid → get_mempool_entry / check_utxo_landed / 同字节重播),
 //      **永不读调用方自己的 metadata**。
-//   F2-R 重启捡回 —— prepared 行只允许【同字节重播】(relay 断言 txid == prepared_txid); 重建(新 UTXO 选择)只在 relay 判定
-//      "旧 txid 的某输入已被别的 txid 花掉"(code inputs_spent)时; 有 txid 无字节 ⇒ 不发不建 + 告警 intent_prepared_without_bytes。
+//   F2-R 重启捡回 —— prepared 行只允许【同字节重播】(relay 断言 txid == prepared_txid); 有 txid 无字节 ⇒ 不发不建 + 告警
+//      intent_prepared_without_bytes。
+//   🔴 F2-R MUST-FIX(Codex 3ce6513a, 2026-09-13, ledger 1093): inputs_spent(relay 侧 mempool 无 + 目标 UTXO 无 +
+//      发送方输入缺失三缺)与"prepared 早已落地、收款方在重试窗内秒花掉了它、且收款地址没被 kaspa_tx_log 的
+//      watched-addresses 盯上"完全相容(kasia-relay/transaction.mjs 源码注释自陈的残余窗)——旧逻辑一律"abandoned +
+//      重建"= 这个窗口下是货真价实的双付(recipient 已经拿到钱, 我们又送一遍)。收紧: 三缺【不是】"安全重建"的
+//      证据, 只是"两个都解释得通"的证据。全仓扫描 + kaspad RPC 能力核实(无 txindex, 无法在确认后查"谁花了这个
+//      outpoint"; getMempoolEntriesByAddresses/getVirtualChainFromBlock 都够不到"已确认状态下的历史归属"这个问题)
+//      后唯一可用的正向证据源 = console 自己的嵌入式 indexer kaspa_tx_log(v60, PRIMARY KEY tx_id, 落表后不随收款
+//      方后续花费而消失) —— 命中 prepared_txid+target_address ⇒ 证明 prepared 确实自己上链了, 安全推进 submitted、
+//      不重建。查不到 ⇒【不是】"被别的 tx 抢走"的证据(kaspa_tx_log 只覆盖 watched-addresses 三类地址, 未命中经常
+//      只是没被盯上, 不代表没有别的 tx) —— 找不到"冲突花费者 txid ≠ prepared_txid"这条正向证据前, 一律
+//      AMBIGUOUS/HOLD: 不 abandon、不建 attempt #2、零付款, 告警人工核实。
 //
 // 🔴 M0a 门: 本文件【不】import relay-manager(裸 import 差分门硬拒新通道) —— 调用方把 sendCommandAsync 以 sendCmd 注入。
 //   这同时让全部向量离线可测(假 sendCmd), 不需要 _xxxForTests 出口。
@@ -17,7 +28,7 @@ import { sqlite } from '../db/client.js';
 import { randomUUID } from 'node:crypto';
 
 export const INTENT_KINDS = Object.freeze(['payout', 'escrow_lock', 'maker_stake', 'taker_stake']);
-export const INTENT_STATUS = Object.freeze({ PENDING: 'pending', PREPARED: 'prepared', SUBMITTED: 'submitted', LANDED: 'landed', ABANDONED: 'abandoned' });
+export const INTENT_STATUS = Object.freeze({ PENDING: 'pending', PREPARED: 'prepared', SUBMITTED: 'submitted', LANDED: 'landed', ABANDONED: 'abandoned', AMBIGUOUS: 'ambiguous' });
 
 const KIND_PREFIX = { payout: 'payout:', escrow_lock: 'escrow:', maker_stake: 'stake:maker:', taker_stake: 'stake:taker:' };
 
@@ -62,11 +73,12 @@ export function ensureIntent({ intentKind, offerId, relayId, targetAddress, amou
 export function markIntent(intentKey, patch) {
   const cur = getIntent(intentKey);
   if (!cur) throw new Error(`markIntent: intent ${intentKey} not found`);
-  const RANK = { pending: 0, prepared: 1, submitted: 2, landed: 3, abandoned: 9 };
+  const RANK = { pending: 0, prepared: 1, submitted: 2, landed: 3, abandoned: 9, ambiguous: 9 };
+  const TERMINAL = (s) => s === 'abandoned' || s === 'ambiguous';
   const cols = [], vals = [];
   for (const [k, v] of Object.entries(patch)) {
-    if (k === 'status' && RANK[v] < RANK[cur.status] && cur.status !== 'abandoned') continue;   // 单调
-    if (k === 'status' && cur.status === 'abandoned') continue;                                   // 终态
+    if (k === 'status' && RANK[v] < RANK[cur.status] && !TERMINAL(cur.status)) continue;   // 单调
+    if (k === 'status' && TERMINAL(cur.status)) continue;                                   // 终态(abandoned/ambiguous 只能人工清)
     cols.push(`${k} = ?`); vals.push(v === undefined ? null : v);
   }
   if (!cols.length) return cur;
@@ -169,13 +181,22 @@ async function resolvePrepared({ sendCmd, relayId, row, origin, log }) {
     return { txId: txid, replayed: true, intent: markIntent(key, { status: 'submitted', submitted_txid: txid }) };
   }
   if (rep?.code === 'inputs_spent') {
-    markIntent(key, { status: 'abandoned', last_error: rep.error || 'inputs_spent' });
-    const next = ensureIntent({
-      intentKind: row.intent_kind, offerId: row.offer_id, relayId: row.relay_id, targetAddress: row.target_address,
-      amountKas: row.amount_kas, attempt: (row.attempt || 1) + 1, parentIntentKey: key,
-    });
-    alertIntent('intent_rebuilt_after_inputs_spent', `intent ${key} abandoned (inputs spent by another tx) → ${next.intent_key}`, { old: key, new: next.intent_key, prepared_txid: txid }, 'info');
-    return { rebuilt: true, intent: next };
+    // F2-R MUST-FIX(Codex 3ce6513a·1093): 三缺(mempool 无+目标 UTXO 无+发送方输入缺失)与"prepared 已落地,
+    // 收款方秒花+未被 watched-addresses 盯上"完全相容——先查唯一可用的正向证据源 kaspa_tx_log(按 tx_id 主键,
+    // 不随收款方后续花费而消失); 命中 ⇒ prepared 确实自己上链了, 直接 submitted 不重建。
+    let positiveLanded = false;
+    try {
+      positiveLanded = !!sqlite.prepare('SELECT 1 FROM kaspa_tx_log WHERE tx_id = ? AND to_address = ?').get(txid, row.target_address);
+    } catch (e) { log.log(`[submit-intent] ${key} kaspa_tx_log positive-evidence lookup err: ${e.message}`); }
+    if (positiveLanded) {
+      log.log(`[submit-intent] ${key} inputs_spent but kaspa_tx_log has positive landing evidence for ${txid.slice(0, 12)} → submitted (no rebuild)`);
+      return { txId: txid, intent: markIntent(key, { status: 'submitted', submitted_txid: txid }) };
+    }
+    // 查不到 ≠ "被别的 tx 抢走"的证据(kaspa_tx_log 只覆盖 watched-addresses, 未命中经常只是没被盯上)。
+    // 没有"冲突花费者 txid ≠ prepared_txid"这条正向证据前, 一律 AMBIGUOUS/HOLD —— 不 abandon、不建 attempt #2。
+    markIntent(key, { status: 'ambiguous', last_error: rep.error || 'inputs_spent (no positive evidence either way)' });
+    alertIntent('intent_ambiguous_inputs_spent', `intent ${key} inputs spent, no positive evidence of conflicting spender (kaspa_tx_log miss) — HOLD, no rebuild, no abandon`, { intent_key: key, prepared_txid: txid, target_address: row.target_address }, 'error');
+    throw new IntentHoldError(`intent ${key}: inputs spent, ambiguous — no positive evidence of conflicting spender, HOLD (manual review)`, 'ambiguous_inputs_spent');
   }
   if (rep?.code === 'replay_txid_mismatch') {
     alertIntent('intent_replay_txid_mismatch', `intent ${key} relay rejected replay: ${rep.error}`, { intent_key: key, prepared_txid: txid });
@@ -211,6 +232,11 @@ export async function transferWithIntent({
       const r = await resolvePrepared({ sendCmd, relayId, row, origin, log });   // hold ⇒ throws out of the loop
       if (r.txId) return { txId: r.txId, intent: r.intent, replayed: !!r.replayed };
       row = r.intent;   // rebuilt: fresh send with the new attempt row
+    }
+    // AMBIGUOUS(F2-R MUST-FIX·1093) 是终态 hold, 绝不能落到下面"pending ⇒ fresh send"分支——那样等于绕开
+    // 整个 hold 机制、静默再付一次。同一 offer 再来一次 transferWithIntent() 必须继续抛, 直到人工清掉这行。
+    if (row.status === 'ambiguous') {
+      throw new IntentHoldError(`intent ${row.intent_key}: ambiguous (inputs spent, no positive evidence) — HOLD, manual review required, will not auto-retry`, 'ambiguous_inputs_spent');
     }
     // pending ⇒ fresh send; relay writes prepared(+bytes) via /ingest/submit-intent before it broadcasts.
     try {
