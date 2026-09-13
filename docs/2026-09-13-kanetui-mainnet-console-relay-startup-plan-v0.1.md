@@ -1,10 +1,12 @@
-# 主网 console/relay 起服务方案 v0.3（2026-09-13 · KANet-UI · Bettor 派工 · 只写不执行）
+# 主网 console/relay 起服务方案 v0.4（2026-09-13 · KANet-UI · Bettor 派工）
 
-> **Status: DRAFT**。权威：Owner 直令（COORD-LEDGER (1061)）"旧测试网一切冻结、全员只做主网"。
+> **Status: GO-C 已实起且通过六项验收**（2026-09-13，PID 20212，端口 3202）。权威：Owner 直令（COORD-LEDGER (1061)）"旧测试网一切冻结、全员只做主网"。**GO-D（正式对外/接入频道）仍未批，进程目前只读验证态、按 Bettor 指示暂不重启，等下一批修复合入后一次性重启再进 GO-D。**
 >
 > **v0.2 变更**：§2.2/§2.3 补具体验收命令（schema 版本核对/空库抽查/I4 拒起负向量的实际查询）；§3.1 步骤 6"频道 relay 身份重生成"查明具体机制并补全（每个 agent 的 canonical 发送脚本硬编码 RELAY/BASE 常量，需各自新建 mainnet relay_nodes 行+改常量+真实充值）；§5 新增 GO-E（资金/密钥面独立批点）；§1.2 与 J2 已出的合并序预检 `68e766c3` 交叉核对一致。
 >
-> **v0.3 变更（NWT 审 MUST-FIX，阻塞 GO-C）**：撤回 v0.2 及更早"原地改 `kanet.env` 三行"的方案——那会让 TN12 那套现跑实例下次重启读到主网值，破坏"旧网原样不动"。改为**独立 env 来源**：新文件 `kanet.mainnet.env`，`kanet.env` 一字不动；主网实例不经过 `kanet-start.sh`（那是 TN12 全栈编排脚本，不改它），改用独立小型启动方式把新文件的值注入这一个进程自己的环境。§3.1 步骤 4 与 §4 同步改措辞，不再提"kanet.env 段"。本页覆盖主网主线三支之一（①节点已有独立执行页 `docs/2026-09-13-kanetui-mainnet-node-start-brief-for-j1-v0.1.md`；③代币合约设计另案），本页只做**②console/relay 主网化**。**本文档任何一步都不执行**；执行门 = 本方案 → NWT 红队审 → Owner 逐步批 → 执行。TN12 现有一切原样不动，本页不涉及也不建议动它。
+> **v0.3 变更（NWT 审 MUST-FIX，阻塞 GO-C）**：撤回 v0.2 及更早"原地改 `kanet.env` 三行"的方案——那会让 TN12 那套现跑实例下次重启读到主网值，破坏"旧网原样不动"。改为**独立 env 来源**：新文件 `kanet.mainnet.env`，`kanet.env` 一字不动；主网实例不经过 `kanet-start.sh`（那是 TN12 全栈编排脚本，不改它），改用独立小型启动方式把新文件的值注入这一个进程自己的环境。§3.1 步骤 4 与 §4 同步改措辞，不再提"kanet.env 段"。本页覆盖主网主线三支之一（①节点已有独立执行页 `docs/2026-09-13-kanetui-mainnet-node-start-brief-for-j1-v0.1.md`；③代币合约设计另案），本页只做**②console/relay 主网化**。
+>
+> **v0.4 变更（GO-C 第三次实起，事后订正 §2.2 验收命令）**：🔴 §2.2 的 `PRAGMA user_version` 判据是错的——`grep user_version migrate.js` 零命中，这个 codebase 从不用这个 pragma。已改为"`[migrate] DB migrations complete.` 日志行 + 末版 vNNN 对照 + 可选的末版专属字段核实"三重判据。这条错误判据在 v0.1-v0.3 期间只存在于文档里、从未被真正执行验证过，GO-C 第一、二次尝试都在更早的阶段崩溃，直到第三次真正跑到这一步才发现。
 
 ## 0. 前提澄清（防误读）
 - 本页假设 §1 的三条前置分支已合入主线（否则后面的一切无从谈起）——**分支合并的具体顺序/冲突消解由 J2 出**（Bettor 已指派），本页只描述"合到主线"这个前提本身，以及我核实到的文件级重叠点供 J2 参考，不代 J2 定合并序。
@@ -64,13 +66,20 @@ KASPA_RPC_LOCAL_ONLY=1                   # 值不变，语义因 (a) 分支变�
 # 1. 确认新库文件在起 console 前不存在（防止误覆盖一个已有文件）
 test -f <新DB_PATH> && echo "🔴 文件已存在，先确认这不是误覆盖" || echo "OK 不存在，可以首启建库"
 
-# 2. console 首启完成后，核 schema 版本号与主线 migrate.js 末尾块一致
+# 2. console 首启完成后，核迁移是否真正跑完——🔴 v0.2 订正（GO-C 第三次实起才验出旧判据是错的）：
+#    PRAGMA user_version 不是本项目的判据，migrate.js 从不写这个 pragma（grep 零命中）。
+#    正确判据 = ① 日志出现 "[migrate] DB migrations complete." ② 日志里最后一条
+#    "[migrate] vNNN" 的 NNN 与 migrate.js 末版一致 ③（更硬的证据）末版 patch 专属字段已建：
+grep "\[migrate\]" <console 日志路径> | tail -3
+# 期望最后一行是 "[migrate] DB migrations complete."，倒数第二行左右的 vNNN 对照:
+grep -n '// ── v' kasia-console/src/db/migrate.js | tail -1
+# 更硬的第三重核（可选，示例用 v203 的字段）：
 node -e "
 const Database = require('./kasia-console/node_modules/better-sqlite3');
 const db = new Database('<新DB_PATH>', {readonly:true});
-console.log('user_version =', db.pragma('user_version', {simple:true}));
+const cols = db.prepare(\"PRAGMA table_info(exchange_offers)\").all().map(c=>c.name);
+console.log('has escrow_landed_at (v203 标志字段):', cols.includes('escrow_landed_at'));
 "
-# 对照: grep -n '// ── v' kasia-console/src/db/migrate.js | tail -1   （取这行的版本号，两边必须相等）
 
 # 3. 确认新库是真空库，没有任何业务数据行（举几张代表性表核，不需要 34 张全跑，抽查即可判断"是不是复制了旧库"这种低级错误）
 node -e "

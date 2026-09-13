@@ -1,8 +1,10 @@
-# kanet.env 逐项审计 → kanet.mainnet.env（2026-09-13 · KANet-UI · GO-B 交付 v0.2）
+# kanet.env 逐项审计 → kanet.mainnet.env（2026-09-13 · KANet-UI · GO-B 交付 v0.3）
 
 > **Status: DRAFT**。权威：Bettor GO-B 派工 + NWT `9ba20fb2` 两项遗漏 MUST（KANET_ROOT 显式绝对路径 / CONSOLE_ENCRYPTION_KEY 新生成禁复用）+ Bettor 补三条（DB_PATH 绝对路径 / 密钥禁复用要写进脚本注释 / stdout+stderr 重定向必须有）。本页是 `kanet.mainnet.env` 的可审计对照表（该文件本身 gitignored，不能靠 git diff 审，靠这页）。**本页只记录判断，不执行任何启动动作。**
 >
 > **v0.2 变更（NWT 审 GO-B `b522e7bd` MUST-FIX）**：§6 `MINING_CONSOLIDATE_ENABLED` 从 `0` 订正为字面 `false`（该键判定是 `!== 'false'` 反向语义，`0` 实际关不掉，已在 `kanet.mainnet.env` 同步改）；逐个核实其余五个"关闭"类开关的判定语义（全部 `=== '1'`，`0` 有效）；核实文件内无行内 `#` 注释。
+>
+> **v0.3 变更（GO-C 第三次实起，Bettor 地面核指出）**：新增 `ORACLE_SILENT_TIMEOUT_MIN=1440`（代码自带主网钢线 v0.5 spec §4.3，起服务时 `[pool-settler] WARN` 提醒补，见 §6 新增行）。🔴 另外，`user_version` pragma 判据的订正**不在本页范围**——那条验收命令写在 `docs/2026-09-13-kanetui-mainnet-console-relay-startup-plan-v0.1.md` §2.2，已在那份文档同步订正，本页此前没有引用过这条判据，不需要改。
 
 ## 0. 核心结论先行
 - `kanet.env` 现有 **92 个非注释键**。全部过了一遍，分类处置，不是逐行各自独立拍的——**同类同判断**，理由写在每类下面。
@@ -58,6 +60,11 @@
 | `BSHARD_CLOSE_VOTER_V2_ENABLED` / `BSHARD_CLOSE_SUBMIT_V2_ENABLED` | `0` | `bshard-close-voter.js:545`/`:642` 都 `=== '1'`，`0` 正确 |
 
 **另核（NWT 同一条 MUST 里带的第二点）**：`kanet.mainnet.env` 里所有 `KEY=VALUE` 行逐行核过，**没有任何一行带行内 `#` 注释**（本文件的注释全部独立成行，不是"值后面跟 `#`"这种写法）——`kanet.env:285` 记过的那类事故（脚本解析器不剥离行内注释，把注释文字当值的一部分）在这个文件里不存在，不需要改。
+
+## 6.5 主网钢线（v0.3 新增，GO-C 第三次实起才暴露）
+| 键 | 值 | 出处 |
+|---|---|---|
+| `ORACLE_SILENT_TIMEOUT_MIN` | `1440` | `[pool-settler]` 启动时 WARN：代码自带值须 ≥1440（= mainnet 24h 钢线，v0.5 spec §4.3）；此前 GO-B 审计漏了这个键（既不在"核心四项"也不在"relay 身份"也不在"保守起步"三类里，是纯粹的疏漏，不是判断错误），GO-C 第三次实际起服务才靠 stderr WARN 暴露出来——这也是"只读代码审计"和"真起一次"两种验证方式的差距的一个实例，记一笔。
 
 其余业务参数类（`POOL_DEADLINE_*`/`DAILY_SEND_LIMIT`/各类 `*_TICK_SEC`/`DEMO_*_OFF` 等约 40 项）判断为**网络无关的行为配置**，本次不改，留给需要真正启用对应功能时再逐项核（多数本身默认就是保守值或"关闭"状态，不因为换网络而需要重新评估）。
 
