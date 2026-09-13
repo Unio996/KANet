@@ -1,6 +1,8 @@
-# 主网账号迁移 · 第 1 批（stress 验证批）执行页 v0.1（2026-09-14 · KANet-UI · Bettor 1177 派工 · 只写不执行）
+# 主网账号迁移 · 第 1 批（stress 验证批）执行页 v0.2（2026-09-14 · KANet-UI · Bettor 1177 派工 · 只写不执行）
 
 > **Status: DRAFT**。权威链：`docs/2026-09-14-kanetui-mainnet-account-migration-runbook-v0.1.md`（v0.6，下称"迁移 runbook"）§6.2 第 1 批。**本页任何一步都不执行**——执行门 = 本页 → NWT 红队审 → Owner 批 → 执行，跟迁移 runbook 本身的执行门是同一条。本页只把迁移 runbook 的通用方法（§1-§7）针对**第 1 批这 10 个具体账号**落成可打钩的步骤清单，不重新定义任何机制——所有引用编号（如"§5.1 第 2 层"）均指迁移 runbook 的对应章节。
+>
+> **v0.2 变更（NWT 审 `676d83be`：GREEN-with-ONE-SMALL-FIX，Bettor 转达）**：v0.1 §2 第 5 点"探针万一没被拒绝"只写了"停下、回 §1 重新核实"，没写**那个已经插入的探针行本身怎么处理**——NWT 指出这种情况下 DB 里会留一条 `mnemonic=null`、`name` 形如 `zzz-admission-probe-<timestamp>` 的空壳行，不清理会污染 §1 第 5 项"新库尚无同名行"这类后续幂等检查的前提。§2 第 5 点补一步：先按 §6 第 3 步同款 `POST /relays/:id/delete` 删掉这个探针行，再回 §1 重新核实，两个动作顺序不能反（先删残留、再判断能不能继续，不是先判断再顺手删）。
 
 ## 0. 范围
 
@@ -23,7 +25,9 @@
 2. 代码路径核实（`relay.js:89-108`）：`address` 显式传入时 `resolvedAddress` 直接取这个值（不需要 `mnemonic` 来派生），所以 `if (resolvedAddress)` 分支会执行、`checkHotwalletAdmission()` 会被调用——探针能测到準入检查，但因为没有 `mnemonic`，即便万一没被挡下也不会有任何真实密钥材料写进库（`createRelayNode()` 的 `mnemonic` 字段会是 `null`，这一行本身就是个没有密钥的空壳，等同一个手误的空名单行，不是可用的热钱包）。
 3. **预期结果**：HTTP 响应是一个 `302` 重定向，`Location` header 应为 `/relays?hotwallet_denied=cold_address_denied`（`relay.js:106` 的 `reply.redirect` 分支，字面拼出这个 reason 字符串——跟 `relay-manager.js:102` `checkHotwalletAdmission()` 内部 `return { ok: false, reason: 'cold_address_denied' }` 是同一个字符串，同一处代码，不是脚本自己判断"看起来像拒绝"）。
 4. **验证行没有被创建**：`SELECT COUNT(*) FROM relay_nodes WHERE name LIKE 'zzz-admission-probe-%'` 执行探针前后应从 `0` 到 `0`（`relay.js:105-109`：`admission.ok` 为假时函数在 `createRelayNode()` 之前就 `return`，行从未进 `INSERT`）。
-5. **如果探针没有被拒绝**（响应不是预期的 302+reason，或者行真的被插入了）：**立即停止，不得继续本页任何后续步骤**——说明§1 检查清单第 3 项"env 仍生效"这条实际上是假的（可能中途 env 被改过、或者当前 PID 不是带着三条准入门起来的那个进程），先回到 §1 重新核实，不是"反正后面还有 startRelay() 那层兜底就继续导"。
+5. **如果探针没有被拒绝**（响应不是预期的 302+reason，或者行真的被插入了）：**立即停止，不得继续本页任何后续步骤**——说明§1 检查清单第 3 项"env 仍生效"这条实际上是假的（可能中途 env 被改过、或者当前 PID 不是带着三条准入门起来的那个进程）。**先清理再核实，顺序不能反**：
+   a. 先按 §6 第 3 步同款操作，对这条意外插入的探针行执行 `POST /relays/:id/delete`（`zzz-admission-probe-<timestamp>` 这一行本身 `mnemonic` 为 `null`，删除动作本身不涉及任何密钥材料，跟 §6 回滚的风险等级一致）——不清理会在 DB 里留一条空壳行，污染 §1 第 5 项"新库尚无同名行"这类后续幂等检查的前提（下次重新走 §1 时如果忘了这条残留，可能被误判成"上次已经导过"）。
+   b. `SELECT` 复核该行已查无，再回到 §1 重新核实——不是"反正后面还有 `startRelay()` 那层兜底就继续导"，探针失败意味着**两层准入的第一层这次没有按预期拦下**，必须先弄清楚原因（env 漂移/PID 换过/代码没部署对）才能判断继续导入是否安全，不能靠"第二层应该还在"这种未经验证的假设往下走。
 
 **为什么用 import 端点探针就足以代表 `startRelay()` 那层"唯一真正的安全边界"**：`checkHotwalletAdmission()` 是同一个函数，`relay.js:105`（import 早失败层）和 `relay-manager.js:206`（`startRelay()` 内部）**调的是同一处代码，不是两套独立实现各自维护一份逻辑**（迁移 runbook §5.1 第 2 点原话："三条自动拉起路径最终都收敛到这一个函数"）——探针证明的是这个共享函数在**这个具体部署实例、带着这个具体 env 配置**下真的按预期工作，这正是侧分支单元测试（跑在隔离测试库里）没有、也不可能覆盖到的最后一环。
 
