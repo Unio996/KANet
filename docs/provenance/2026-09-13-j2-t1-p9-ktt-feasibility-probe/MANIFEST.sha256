@@ -1,4 +1,3 @@
-e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 *docs/provenance/2026-09-13-j2-t1-p9-ktt-feasibility-probe/MANIFEST.sha256
 7bf7ea394c719c1ee07d814100e64635e499fa4cf7259b1d153312b25a04a358 *docs/provenance/2026-09-13-j2-t1-p9-ktt-feasibility-probe/P9.args.json
 08469e852bbaf3a589c1fd8aeccfa31fa58f5148182207b0f27f40a90d1533a0 *docs/provenance/2026-09-13-j2-t1-p9-ktt-feasibility-probe/P9.args2.json
 aa98e406bbd909d0862ec7cb30b894a7126c2d7cb9582dbd7efefc318306effe *docs/provenance/2026-09-13-j2-t1-p9-ktt-feasibility-probe/P9.args3.json
@@ -7,3 +6,15 @@ f26b4c576d5d64ccf2d14a7229989a359cabefc75b1df1a9f94bf6d53b17ddcc *docs/provenanc
 9704b61290fc10cec7c7dd9646c3ca37bfc7e04cfa6be06fb35776033a7c3d24 *docs/provenance/2026-09-13-j2-t1-p9-ktt-feasibility-probe/P9_ktt_min.sil
 b5c731050ddb999d65d8626c608d45406d40d1fa8306929f78efc6242653ba39 *docs/provenance/2026-09-13-j2-t1-p9-ktt-feasibility-probe/q4_template_hash.log
 c74dad289e0435c458f05738336e3a61b5128d14e169717a2264eac4df1ebe31 *docs/provenance/2026-09-13-j2-t1-p9-ktt-feasibility-probe/run.log
+3d3fd6f011343294953aa904536fd9cdabe528dde1acd5a86690e95655cdc4ff *docs/provenance/2026-09-13-j2-t1-p9-ktt-feasibility-probe/P10_registry.sil
+1fc0a3209cbafd88d496ce6ffe1817701dee14a246515246a373016cb25f3753 *docs/provenance/2026-09-13-j2-t1-p9-ktt-feasibility-probe/P10_registry_ctrl.sil
+079e834ff530a96d24606d0c15b566d1af712d1ee2587ac4a3934572c48f4b98 *docs/provenance/2026-09-13-j2-t1-p9-ktt-feasibility-probe/P10.a.json
+fc9d65c6c312899cb17119b99eb76fed30e2623edeabcf43864b92addd2b8c86 *docs/provenance/2026-09-13-j2-t1-p9-ktt-feasibility-probe/P10.b.json
+079e834ff530a96d24606d0c15b566d1af712d1ee2587ac4a3934572c48f4b98 *docs/provenance/2026-09-13-j2-t1-p9-ktt-feasibility-probe/P10.c.json
+a6445dc19c42f1e2d7bdd992bd4fe6eb4af97c13ac3e652ab979ce21dd66c703 *docs/provenance/2026-09-13-j2-t1-p9-ktt-feasibility-probe/P10.ctrl1.json
+d6d278e5591f5a31e9c69f101b5df66d27b1324815dc544a8eaa5de8e29dc96e *docs/provenance/2026-09-13-j2-t1-p9-ktt-feasibility-probe/P10.ctrl2.json
+b68adf69ac2f962709ed516a965664257f8d4423e6a4daa3268328c7b93a7f57 *docs/provenance/2026-09-13-j2-t1-p9-ktt-feasibility-probe/p10_registry_template_hash.log
+9be3f98d74adb8b37e21033e6afe4587b099a2227ccb7c121281dbebc0ce0950 *docs/provenance/2026-09-13-j2-t1-p9-ktt-feasibility-probe/P11_state_args.sil
+b6a55f581bd6199142be465a39ab04599440f7b564d2f1e137d8c53596bfefaa *docs/provenance/2026-09-13-j2-t1-p9-ktt-feasibility-probe/P11.a.json
+4ebe3bbca3d6bfca33cfe565ade285b378ecc17d0697408d9dfde9ac561f0e2e *docs/provenance/2026-09-13-j2-t1-p9-ktt-feasibility-probe/P11.b.json
+cb038c03fd02aea6ceba5e8bf225aeb7423837ba0e750fee70a3ed12c4eaf5f6 *docs/provenance/2026-09-13-j2-t1-p9-ktt-feasibility-probe/p11_state_args_template_hash.log

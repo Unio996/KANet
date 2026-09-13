@@ -1,0 +1,39 @@
+pragma silverscript ^0.1.0;
+// A′ MUST②探针: 模板注册 covenant R —— 市场特定字段只做等值比较(非结构性), 换值 template_hash 应不变
+// v2: 状态字段不得为变长 byte[](validateOutputState 不支持) ⇒ 模板以 hash + prefix/suffix 长度(int)表示
+contract P10Registry(byte[32] init_market_cov_id, byte[32] init_market_tmpl_hash, int init_market_prefix_len, int init_market_suffix_len,
+                     byte[32] init_claim_tmpl_hash, int init_claim_prefix_len, int init_claim_suffix_len, bool init_bound) {
+    byte[32] market_cov_id      = init_market_cov_id;
+    byte[32] market_tmpl_hash   = init_market_tmpl_hash;
+    int      market_prefix_len  = init_market_prefix_len;
+    int      market_suffix_len  = init_market_suffix_len;
+    byte[32] claim_tmpl_hash    = init_claim_tmpl_hash;
+    int      claim_prefix_len   = init_claim_prefix_len;
+    int      claim_suffix_len   = init_claim_suffix_len;
+    bool     bound              = init_bound;
+
+    #[covenant.singleton]
+    function bind(State prevState, State newState, int market_out_idx) {
+        require(!prevState.bound);
+        require(newState.bound);
+        require(newState.market_cov_id == OpOutputCovenantId(market_out_idx));   // provenance-bind: 从同笔市场输出读, 非外部喂值
+        require(newState.market_tmpl_hash == prevState.market_tmpl_hash);
+        require(newState.market_prefix_len == prevState.market_prefix_len);
+        require(newState.market_suffix_len == prevState.market_suffix_len);
+        require(newState.claim_tmpl_hash == prevState.claim_tmpl_hash);
+        require(newState.claim_prefix_len == prevState.claim_prefix_len);
+        require(newState.claim_suffix_len == prevState.claim_suffix_len);
+    }
+    #[covenant.singleton]
+    function passthrough(State prevState, State newState) {
+        require(prevState.bound);
+        require(newState.bound);
+        require(newState.market_cov_id == prevState.market_cov_id);
+        require(newState.market_tmpl_hash == prevState.market_tmpl_hash);
+        require(newState.market_prefix_len == prevState.market_prefix_len);
+        require(newState.market_suffix_len == prevState.market_suffix_len);
+        require(newState.claim_tmpl_hash == prevState.claim_tmpl_hash);
+        require(newState.claim_prefix_len == prevState.claim_prefix_len);
+        require(newState.claim_suffix_len == prevState.claim_suffix_len);
+    }
+}
