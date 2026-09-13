@@ -1,8 +1,10 @@
-# GO-E 身份与充值清单 v0.4（2026-09-14 · KANet-UI · Bettor 派工 · 只写不执行·供 Owner 拍）
+# GO-E 身份与充值清单 v0.5（2026-09-14 · KANet-UI · Bettor 派工 · 只写不执行·供 Owner 拍）
 
-> **Status: DRAFT**。权威：GO-D 已完成（主网 console PID 12404，干净稳态）+ Bettor 派工要求"设计先行，只写"。本页只回答"要不要建、建几个、充多少、谁来充、怎么验"，**不生成任何真实密钥、不发起任何转账**。**在 NWT 复核 v0.4 之前，不生成密钥、不充值、不激活任何身份，不启动任何 relay。**
+> **Status: DRAFT**。权威：GO-D 已完成（主网 console PID 12404，干净稳态）+ Bettor 派工要求"设计先行，只写"。本页只回答"要不要建、建几个、充多少、谁来充、怎么验"，**不生成任何真实密钥、不发起任何转账**。**在 NWT 复核 v0.5 之前，不生成密钥、不充值、不激活任何身份，不启动任何 relay，不写/不跑 `scripts/relay-delete-row.mjs`。**
 >
 > **v0.4 变更（NWT 红队复核 v0.3 `fcc68351`，方向 PASS + 两处 MUST-FIX）**：§5 第 2 条补第三条自动复活路径——`system-repair.js:230-231` 的 `restart_relay_{id}` 修复动作（`POST /api/settings` 人工触发），NWT 抓到我 v0.3 漏了这条；核实 DELETE 后该路径同样失败（`account_not_found`），不需要额外处置，但必须列进静态清单，并明写"静态列举有盲区，以实测兜底"。§2 新增步骤 4：Owner 明确确认备份可读无误，才允许进入 DELETE，未确认宁可留行担已知敞口也不删。§5 原第 4 条升级为九步完整执行流程表（建→验证→停→等 90s 复活窗→确认无拉起→Owner 备份确认关卡→实测第三条路径→DELETE→复核），每步列证据要求。§2 明确拒绝"只置空 address 保留密文"的轻量替代。原六条硬门合并重复项收成五条，内容未减少。
+>
+> **v0.5 变更（NWT 复核 v0.4 `90153e72`，①②③ PASS，两处机械错）**：§5 步骤⑦路径订正——真实路由是 `POST /api/system/repair`（`api/settings.js:129`），不是 v0.4 写的 `/api/settings`（NWT 自己 `fcc68351` 那次就写错了，我 v0.4 照抄，本次读代码独立核实过）。§5 步骤⑧改写——`relay.js` 没有能删整行 `relay_nodes` 的现成端点（只有 wallets/goals 两个子资源 delete，已核实），Bettor 裁定不为此新开 HTTP 端点（破坏性能力不该开成 web 面），改为"停 console → 跑经审查的一次性脚本 `scripts/relay-delete-row.mjs <id>` → 起 console → 复核"，脚本规格写进本页（只读打印非敏感字段/交互确认/DELETE+可选VACUUM/留 provenance 一行），脚本本身另派另审、不在本次一起交。顺带把 §1/§2/§5 里出现的旧网具体名字改成中性说法（"旧网 console.db 的 relay 行"），语义不变。
 >
 > **v0.2 变更（Codex 6480a60d 真钱面 MUST CORRECT，Bettor 拍选项 1）**：§5 撤回"首充金额小=天然资金上限"的说法（余额低是暴露面缩小，不是机器强制的支出策略，Codex 指出的缺陷成立）；改为把验证用途身份严格定义为"自动化热钱包激活范围之外"的一次性手动身份，给出机械可核判据（env 零引用 + 源码零引用的 grep 证据），并明确任何转自动化用途前必须先落实 NWT 2-1 硬上限，不能延后补。§3 把 `0.046 KAS/笔` 的措辞订正为"粗略预算上界代理，非费用估计非安全证明"。§4 首充 1-2 KAS 建议保留为运营选择，未改。
 >
@@ -14,7 +16,7 @@
 ## 1. 12 个变量逐条：必需 / 可延后 / 不需要
 | 变量 | 判定 | 理由（哪条 cron/服务用它） |
 |---|---|---|
-| `FAUCET_RELAY_ID` | **不需要** | 水龙头是 TN12 测试币免费发放概念，主网没有"免费发真 KAS"这回事，这个功能本身在主网语境下不该存在，不是"延后"是"不适用" |
+| `FAUCET_RELAY_ID` | **不需要** | 水龙头是旧测试网测试币免费发放概念，主网没有"免费发真 KAS"这回事，这个功能本身在主网语境下不该存在，不是"延后"是"不适用" |
 | `POOL_SEEDER_MAKER_RELAY` | **可延后**（波 2） | `pool-market-seeder.js` 做市 cron，本次已 `POOL_SEEDER_ENABLED=0` |
 | `GATEWAY_RELAY_ID` | **可延后**（波 2） | 同一做市 cron 里的 broker 网关字段，有硬编码默认值兜底，即便波 2 开启也不一定需要单独配 |
 | `BROKER_PREDICTION_BROKER_RELAY_ID` / `BROKER_RELAY_ID` | **可延后**（波 2） | broker 子系统，本次 `BROKER_ENABLED` 默认关（GO-C/D 已验证），11 个 broker-*.js 文件全部不加载 |
@@ -31,10 +33,10 @@
 ## 2. 生成流程（每个身份，若 Owner 选择要建）
 本仓已有现成端点，不需要新写代码：
 1. `POST /relays/generate-mnemonic`（body `{network: 'mainnet'}`）→ 返回全新 12 词助记词 + 对应 mainnet 地址（`relay.js:1288-1292`，用的是 `Mnemonic.random(12)`，真随机，不是任何已有身份的派生）。
-2. 用返回的助记词 + 地址，在（新库）`relay_nodes` 表新建一行：`network='mainnet'`（schema 默认值就是这个），`mnemonic_encrypted` 走 console 自己的 `encrypt()`（用**当前这个 mainnet console 实例自己的** `CONSOLE_ENCRYPTION_KEY`——GO-B 已生成、全新、未复用 TN12 那把），其余字段（`name`/`created_at`/`updated_at` 等）按建relay 的既有表单流程填。
+2. 用返回的助记词 + 地址，在（新库）`relay_nodes` 表新建一行：`network='mainnet'`（schema 默认值就是这个），`mnemonic_encrypted` 走 console 自己的 `encrypt()`（用**当前这个 mainnet console 实例自己的** `CONSOLE_ENCRYPTION_KEY`——GO-B 已生成、全新、未复用旧网那把），其余字段（`name`/`created_at`/`updated_at` 等）按建relay 的既有表单流程填。
 3. **备份位置**：助记词生成那一刻是唯一能拿到明文的时刻（`generate-mnemonic` 端点返回明文，落库后就只有密文）——这个明文谁看到、存哪，是本页要 Owner 明确拍的一条（建议：Owner 亲自在返回的那一刻记录到自己的密码管理器，不经过任何 agent 的频道/ledger/scratch 文件——同 GO-B 那把 `CONSOLE_ENCRYPTION_KEY` 的处理方式，本页不建议由某个 agent 会话代为"记录备份"）。
 4. 🔴 **v0.4 新增确认关卡（NWT MUST-FIX，在步骤 3 与 §5 表格步骤⑧DELETE 之间）**：DELETE 会让这个身份的密钥从 console DB 彻底消失——助记词只在生成那一刻的响应里出现过一次（步骤 3），之后就只剩 Owner 手上那份备份是唯一副本。**DELETE 之前必须先拿到 Owner 明确回复"备份已核验可读、内容无误"**——不是"Owner 说了会存"就够，是"存完之后 Owner 自己打开核对过，确认那份备份是对的、能用"。**未确认之前，宁可留着这一行、承担 §5 描述的"进程能被拉起"这个已知敞口，也不能删**——一次性身份如果密钥连备份都没确认对就没了，就从"一次性但可复验"变成"直接丢了"，这比留一行数据风险更大。这条关卡的存在，是本页唯一允许"暂不执行 DELETE"的正当理由，其余情况下 DELETE 都不能拖。
-5. **绝不复用旧网密钥**：不从 `console.db`（TN12 那套，`kanet.mainnet.env` 独立生效以来一直没碰）里的 32 个 `testnet-12` relay 行拿任何助记词/私钥往这边搬——理由同 GO-B `CONSOLE_ENCRYPTION_KEY` 那条纪律：跨网络复用同一把密钥是真实安全风险，"重映射"不是选项（起服务方案 §2.3 已定过这条）。
+5. **绝不复用旧网密钥**：不从旧网 `console.db`（`kanet.mainnet.env` 独立生效以来一直没碰）里的 32 个旧网 relay 行拿任何助记词/私钥往这边搬——理由同 GO-B `CONSOLE_ENCRYPTION_KEY` 那条纪律：跨网络复用同一把密钥是真实安全风险，"重映射"不是选项（起服务方案 §2.3 已定过这条）。
 6. **这一行的生命周期不是"建了就一直留着"**——验证动作做完、余额/链上都核过、**且步骤 4 的 Owner 备份确认关卡已通过**之后，走 §5 表格的完整流程 `DELETE` 这一行，不是只停进程。原因：`relay-manager.js` 的 `startAll()`（console 每次重启都跑）、`relay-health-monitor.js`（30 秒 cron）、`system-repair.js` 的 `restart_relay_` 修复动作（人工触发，见 §5 表格第 2 点 v0.4 补的第三条）三条路径，都只要看到这一行"有地址+有密钥"就会把进程拉回来，跟这个身份"一次性、不常驻"的设计初衷矛盾——留行不留进程挡不住这三条路径，只有删行才挡得住。
 7. 🔴 **明确不采用的轻量替代方案（NWT MUST-FIX 保留项）**：**不推荐"只把 `address` 置空、保留密文（`mnemonic_encrypted`）"这种更轻的处置**——那样密文（虽然加密，但密钥材料的存在本身）仍然残留在 DB 里，没有达到"这个身份真的没了"的效果，只是看起来干净，跟 §5 那五条硬门想要的"有始有终"不是一回事。要做就做完整 `DELETE`，不做半吊子的"隐藏但留底"。
 
@@ -88,14 +90,21 @@
    | ④ 等复活窗口 **≥90 秒** | 不做任何动作，纯等待——90 秒是 `relay-health-monitor.js:15` `STARTUP_GRACE_MS=90_000` 的实际值，等这个时长才能确定健康监控 cron 真的没把它拉回来（不是拍脑袋定的数） | 等待开始/结束时间戳 |
    | ⑤ 确认无自动拉起 | `Get-Process`/`tasklist` 查该 relay 对应的 PID（新起的，若有）应查无；`relay-health-monitor` 日志里不应出现这个 relay 被重启的行 | 查询的真实命令输出（不是"应该没有"） |
    | ⑥ 🔴 Owner 备份确认关卡（见 §2 新增步骤，MUST） | **Owner 明确回复"备份已核验可读、内容无误"**，否则下一步不能做 | Owner 的确认原话（时间戳+内容），没有这条，流程在这里停住 |
-   | ⑦ 实测第三条路径（DELETE 前） | 手动触发一次 `POST /api/settings {fixId: 'restart_relay_<id>'}`，确认它真的能把 relay 拉起来（证明这条路径确实存在、确实有效，不是纸上谈兵） | 该次调用的响应内容（应为 `ok:true` + PID）；随即再停一次该进程，重复③④⑤ |
-   | ⑧ DELETE | `DELETE FROM relay_nodes WHERE id=?` | 执行前该行内容快照（用于万一要回滚核对，但不含明文密钥——密文即可）、执行后受影响行数 |
-   | ⑨ 复核 | `SELECT * FROM relay_nodes WHERE id=?` 应查无；**再次**触发 `restart_relay_<id>`，应返回 `account_not_found`（实测第三条路径 DELETE 后确实失效，不是只读代码猜的） | 两条查询/调用的真实输出 |
+   | ⑦ 实测第三条路径（DELETE 前） | 🔴 **v0.5 路径订正（NWT `90153e72` 抓到，v0.4 抄错了）**：手动触发一次 **`POST /api/system/repair`**（`api/settings.js:129`，不是 `/api/settings`），body `{fixId: 'restart_relay_<id>'}`，确认它真的能把 relay 拉起来（证明这条路径确实存在、确实有效，不是纸上谈兵） | 该次调用的响应内容（应为 `ok:true` + PID）；随即再停一次该进程，重复③④⑤ |
+   | ⑧ DELETE | 🔴 **v0.5 改写（NWT `90153e72` MUST-FIX，Bettor 裁：不新开 HTTP 端点）**：核实过 `kasia-console/src/api/relay.js` 现有 `DELETE` 端点只有 `/api/relay/:id/wallets/:walletId`（925 行）和 `/api/relay/:id/goals/:goalId`（1455 行）两个子资源删除，**没有任何现成端点能删 `relay_nodes` 整行**——不新写一个专门删密钥行的 HTTP 端点（那是破坏性能力，不该开成一个 web 面），改走：① 停 console（用 `start-console-mainnet.ps1` 写的 PID 文件）② 跑一个**经代码审查的一次性脚本** `scripts/relay-delete-row.mjs <id>`（脚本规格见下，脚本本身不在本页写，另派另审）③ 起 console ④ 复核（见步骤⑨） | 停/起 console 的时间戳 + PID；脚本执行的完整终端输出（含脚本自己打印的行摘要和用户确认） |
+   | ⑨ 复核 | `SELECT * FROM relay_nodes WHERE id=?` 应查无；**再次**触发 `restart_relay_<id>`（走订正后的 `POST /api/system/repair`），应返回 `account_not_found`（实测第三条路径 DELETE 后确实失效，不是只读代码猜的） | 两条查询/调用的真实输出 |
+
+**`scripts/relay-delete-row.mjs <id>` 脚本规格（本页只写规格，脚本本身与代码审查另派、另出 commit，不在这次文档改动里一起交）**：
+- 只读打印该行摘要供人核对：`id`/`name`/`address`/`network`/`created_at`——**绝不打印 `mnemonic_encrypted`/`privkey_encrypted` 密文**（哪怕是密文也不打印，避免任何形式的密钥材料出现在终端/日志里）。
+- 交互式确认：打印摘要后要求终端输入 `y`/`n`，只有 `y` 才继续，其余任何输入（含直接回车）视为 `n` 中止。
+- 执行 `DELETE FROM relay_nodes WHERE id=?`，可选 `VACUUM`（视情况，非必须）。
+- 写一行 provenance 记录（时间戳 + 被删行的 `id`/`name`/`address`，不含密文）到某个 `docs/provenance/` 目录下的文件，留档但不含敏感材料。
+- 脚本本身需要经过代码审查（NWT）才能使用，不是写完就能跑——这是一次性、高权限操作用的工具，审查门槛应该不低于本页其它步骤。
 5. **任何转常驻/后台用途，必须先经 NWT 2-1 硬上限（per-relay 资金上限 + 热钱包总额上限写死 env + 冷热分离）落地，另起一次独立 GO**——不能在这次 ephemeral 用途的基础上"顺便"升级成常驻，两者是两次不同的决定。
 
 （原第 5 条"证据同时记录启动与终止"已在 v0.4 并入上面第 4 条的表格 ②③⑤ 三行，不再单列，避免两处各写一半互相打架——六条硬门在 v0.4 收成五条，内容没有减少，只是合并了重复的部分。）
 
-本次身份运行在跟 TN12 那 32 个旧身份、以及本机其它一切 relay 进程同一台物理机上——"同一台机"这个风险面本身不会因为是新网络新身份而消失；但严格满足上面六条，这个身份活着的那一小段时间产生的风险敞口是"一次性、有始有终、有证据"的，跟 2-1 描述的"~40 个常驻自动化进程"是性质不同的两件事，不是靠混淆概念绕过去的。
+本次身份运行在跟旧网那 32 个旧身份、以及本机其它一切 relay 进程同一台物理机上——"同一台机"这个风险面本身不会因为是新网络新身份而消失；但严格满足上面五条，这个身份活着的那一小段时间产生的风险敞口是"一次性、有始有终、有证据"的，跟 2-1 描述的"~40 个常驻自动化进程"是性质不同的两件事，不是靠混淆概念绕过去的。
 
 ## 6. 未完成事项（本页故意留白）
 - §1 末尾"要不要建、建几个"是 Owner 选择题，本页不代为拍板。
