@@ -1,0 +1,102 @@
+pragma silverscript ^0.1.0;
+// KanetTokenClaim.sil — T2 §2 领取 covenant(J2, 2026-09-14)。
+// 设计: docs/2026-09-13-j2-t2-market-and-claim-covenant-a2-skeleton-v0.1.md §2(Q1 裁 (b): 领取合约自核
+// 代币输出, 不外包给市场/代币合约的正确性——"每条共花入口自己核"是 H5 的原则)。
+//
+// 状态四字段(§2.1 + Q1(b) 追加 token_tmpl_hash) + 本文件追加第五字段 market_suffix_hash(理由见下):
+//   market_cov_id: 创建本 claim 的市场入口写 OpInputCovenantId(this.activeInputIndex)(P12 形, provenance)。
+//   winner_pk:     市场入口从 payout merkle 叶取的 pk(H4 承重点: 赢家身份的价值来源)。
+//   amount:        市场入口写的应得代币量(记账副本; 真实持有量在一枚独立的 KanetTestToken UTXO, owner=本 claim
+//                  自身 cov id——市场结算时另需一步把该数量的代币 owner 转到本 claim, 不在本文件范围内)。
+//   token_tmpl_hash: 代币模板 hash(状态, 不进 ctor——领取合约本身"无任何非状态 ctor 常量" §2.1, 模板对所有
+//                  实例稳定, ClaimStub 三组 ctor 前后缀与 hash 同一, P12 实证)。
+//   market_suffix_hash: 本文件追加(Owner 终端 1147 三问②的具体回应, 见 README): "转回市场再下注"这条路径
+//                  (to_market_input==true)必须验证 dest_idx 真的是个市场 covenant, 不是攻击者随手包的假壳——
+//                  跟 KanetTestToken.sil 的 ownerIsMarketInput 同一手法(核 sigScript 尾部), 但 claim 合约不能
+//                  烤市场后缀字节的完整内容进 ctor(会跟着市场变, 不稳定), 改成创建本 claim 的市场写入
+//                  blake3(market_tmpl_suffix) 存进状态, spend 时 witness 供实际后缀字节验 hash 再核尾匹配。
+//
+// spend(唯一入口, §2.2): checkSig(H4) + §3.3 形验代币模板(witness 供 tok_prefix/tok_suffix + blake3 现场核
+// token_tmpl_hash, 源码坐实 silverscript-abi template_hash = blake3(len8‖prefix‖len8‖suffix), blake3 是
+// 语言内建——J2 此前误判"blake3 不可调用"已纠正, 见 ledger) + 核被消费的代币真属于本 claim(H1 在场, 角②"最后
+// 一步也要适用") + 目的地二选一(H5 正交, §2.2 原文):
+//   (i) to_market_input=true:  代币 owner -> OpInputCovenantId(dest_idx)(再下注), 且 dest_idx 必须是真市场
+//       covenant(本文件追加的 market_suffix_hash 验证, 挡假壳)。
+//   (ii) to_market_input=false: 代币 owner -> OpOutputCovenantId(dest_idx)(新建输出, 转手/拆分)。新输出本身
+//       是 KanetTestToken 的 genesis(T1 设计: genesis 免权限, 任何人可构造), 不需要额外验证"这是真某某覆盖",
+//       因为 owner 字段本身不断言目的地合约的类型, 只是记账用的 32 字节——真正的"归属"安全性由该 owner
+//       covenant 自己未来花费时的授权逻辑保证, 不是本文件的职责(角②只要求本文件不主动把钱导向自己都不知道
+//       是谁的地方; 全新输出的 owner 就是 witness 明确指定的那个值, 调用方=赢家自己选, 赢家自己负责——
+//       这条不对称是本文件的设计判断, 见 README 完整论证, 请 NWT 复核是否需要同等力度)。
+// 花后不续约(终态, §2.1"领取 UTXO 一次性")——本文件没有任何 validateOutputState/State 自续约调用, 不受 V-T-8 影响。
+contract KanetTokenClaim(
+    byte[32] init_market_cov_id,
+    byte[32] init_winner_pk,
+    int      init_amount,
+    byte[32] init_token_tmpl_hash,
+    byte[32] init_market_suffix_hash
+) {
+    byte[32] market_cov_id      = init_market_cov_id;
+    byte[32] winner_pk          = init_winner_pk;
+    int      amount             = init_amount;
+    byte[32] token_tmpl_hash    = init_token_tmpl_hash;
+    byte[32] market_suffix_hash = init_market_suffix_hash;
+
+    struct TokenState {
+        int      amount;
+        byte[32] owner;
+        byte     owner_scheme;
+        byte     borrow_scheme;
+        byte[32] borrow_guard;
+        byte[32] extension_commitment;
+    }
+
+    entry spend(
+        sig      s,
+        int      tok_in_idx,
+        int      tok_out_idx,
+        bool     to_market_input,
+        int      dest_idx,
+        byte[]   tok_prefix,
+        byte[]   tok_suffix,
+        byte[]   market_suffix_witness
+    ) {
+        // §3.3 形: witness 供代币模板前后缀字节, 现场核状态里的 token_tmpl_hash(不烤 ctor, 避免环)。
+        require(blake3((tok_prefix.length as byte[8]) + tok_prefix + (tok_suffix.length as byte[8]) + tok_suffix) == token_tmpl_hash);
+
+        // ★ H1 在场纪律最后一步也要适用(Owner 1147 角②): 被消费的代币真实归属本 claim, 不是随手指一个
+        //   在场的、跟本 claim 无关的代币实例("偷"一个恰好同笔存在的别人的代币)。
+        TokenState tk = readInputStateWithTemplate(tok_in_idx, tok_prefix.length, tok_suffix.length, token_tmpl_hash);
+        require(tk.owner == OpInputCovenantId(this.activeInputIndex));
+        require(tk.amount == amount);
+
+        byte[32] target_owner = byte[32](0x0000000000000000000000000000000000000000000000000000000000000000);
+        if (to_market_input) {
+            // ★ 角②(本文件追加): dest_idx 必须是真市场 covenant, 不是假壳——核 sigScript 尾部匹配
+            //   blake3 验过的 market_suffix_witness(同 KanetTestToken.ownerIsMarketInput 手法)。
+            require(blake3(market_suffix_witness) == market_suffix_hash);
+            byte[] destSig = tx.inputs[dest_idx].sigScript;
+            int destLen = destSig.length;
+            int msl = market_suffix_witness.length;
+            require(destLen >= msl);
+            require(destSig.slice(destLen - msl, destLen) == market_suffix_witness);
+            target_owner = OpInputCovenantId(dest_idx);
+        } else {
+            target_owner = OpOutputCovenantId(dest_idx);
+        }
+
+        validateOutputStateWithInputTemplate(tok_out_idx, TokenState {
+            amount:               amount,
+            owner:                target_owner,
+            owner_scheme:         0x04,
+            borrow_scheme:        0x00,
+            borrow_guard:         byte[32](0x0000000000000000000000000000000000000000000000000000000000000000),
+            extension_commitment: byte[32](0x0000000000000000000000000000000000000000000000000000000000000000)
+        }, tok_in_idx, tok_prefix.length, tok_suffix.length, token_tmpl_hash);
+
+        // H4: 只有赢家能动——放在末尾纯粹是可测试性考量(require 顺序不影响最终判定, 全部条件都要满足才算
+        // 通过; 放最后能让离线向量在没有真实私钥的情况下, 仍然逐条独立验证上面每一条结构性检查各自成立,
+        // 不会被"没有真签名"这一件事整体掩盖——同项目里 close_attest/cancel_attest 委员签名向量已有先例)。
+        require(checkSig(s, pubkey(winner_pk)));
+    }
+}
