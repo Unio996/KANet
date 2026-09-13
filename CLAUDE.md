@@ -29,6 +29,7 @@
 - **rolling 处置**：只维持 live 公测过渡（真人钱在里面·不停）·**零追加投入**。
 - **🚫 禁止把这个决策当"待定"重新讨论/调研/回退** —— Owner 已多次数落"之前共识过、你们一再耽搁回退、浪费无数资源"。**决策已定 = 执行·不再讨论**（违反 = 又一次炒陈饭·D-002 复发计数）。
 - **慎重铁律（D-005）**：ZK 全隔离开发·live 节点原地不动·真上线 = 充分测试后 Owner 拍的独立迁移。
+  > 📌 **状态注记（2026-09-13 · Bettor · 出处 `docs/DECISIONS.md` D-017 · 不改上方 Owner 原话）**：Owner 2026-09-13 裁定 **TN12 退役**、主网节点跑 da9 本机（官方 v2.0.1 原样，不带 D-b/c/d）、押注资产 = 自发免费无限铸造的 KCC-20 测试币（只许 covenant 持有）。上方「rolling 只维持 live 公测·不停」与「live 节点原地不动」中关于 **TN12 live 节点**的部分由 D-017 取代；ZK committed 架构、工具链隔离、铁律 0 不变。停 TN12 消费者/节点、删数据目录一律走 D-017 §3 执行门（KANet-UI runbook → NWT 审 → Owner 终端单点 GO），任何 agent 不得自行停/删。
 - **权威记录**：`docs/DECISIONS.md` D-001 + KB `architecture/zk-track-c §9` + memory `reference-zk-committed-rolling-crossnode-deadend`。
 - 🔨 **通则（2026-07-28 立·根治"接位必读文件里的过期指令"）**：**本文件不新增「做到哪了」；进度一律以 `docs/DECISIONS.md` 为权威。**
   已有的进度描述（尤其 Owner 钦定正文，**不改原话**）**紧贴其下**补一条带日期与出处的**状态注记**。

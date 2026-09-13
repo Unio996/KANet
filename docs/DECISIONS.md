@@ -24,6 +24,14 @@
 
 ## 🔴 当前有效的战略决策 (CURRENT)
 
+### D-017 主网转向落地形态：押注资产 = 自发免费无限铸造 KCC-20 测试币（只许 covenant 持有）· 主网节点 = da9 本机官方 v2.0.1 · TN12 退役 (2026-09-13 · Owner 10 条原话经 J1 转录 5c6995e9 §1 + Owner 本机终端 10:1xZ「J1刚刚给你发了一系列东西。我们要转向了」· Bettor 记账 · NWT 红队审进行中)
+> 出处: J1 `docs/2026-09-13-owner-mainnet-test-token-kcc20-free-mint-assessment-v0.1.md`（`origin/coord/j1-mainnet-testtoken` 3269d334 + 5c6995e9 · DRAFT v0.1.1 · NWT 审后 Bettor cherry-pick 入主分支）· 9/7 评估 `docs/2026-09-07-bettor-mainnet-pivot-assessment-v0.1.md` · COORD-LEDGER (1000)–(1006)。
+1. **取代**：D-005 中「live 节点原地不动」的 **TN12 live 节点**部分（ZK/工具链隔离纪律仍有效）· CLAUDE.md 铁律 0.5「rolling 只维持 live 公测·不停」· 9/7 评估 §3「TN12 保留为 staging」与 §5「不在同一台机跑第二个 kaspad」· 6/6 handoff「终点 = 测试网 demo」。**未取代**：9/7 四个前置（G-1 钱路闸 / 42 合约迁 silverscript v1 / NO-TX 两处违反 / 主网用官方 release）与四波顺序；D-001/D-015 ZK 目标形态；G5 口径（测试币零价值·不报盈亏/资金）原样沿用到主网测试币。
+2. **裁定要点（10 条原文见 J1 稿 §1；原始 Owner 消息不在本机，我未核到原文，仅核到 Owner 终端确认转向）**：合规跑主网；押注 ≠ KAS（硬约束）；自发 KCC-20 测试币任何人免费无限 mint、只许 `owner_scheme==0x04` covenant 持有；烧手续费不怕；主网贡献公共节点；测试币合约从第一天按稳定币骨架预留（mint / clawback / pause 三入口，第二方向不公开不上链）；主网节点跑 da9 本机不租 VPS；迁移仍按 9/7 四波；TN12 退役、未结盘不逐盘收摊。
+3. **执行门（铁律 0 不变）**：J1 稿 §9 三件（停 TN12 消费者 → 停 TN12 节点 → 同盘起主网 v2.0.1 只读 `--utxoindex` 独立 datadir/端口）= 宿主机不可逆操作，走 **KANet-UI runbook → NWT 审 → Owner 终端单点 GO → 执行**。**删 TN12 ≈204 GB 数据目录不是起主网节点的前置**：D: 现空 758.7 GB > 官方最低 640 GB（Bettor 2026-09-13T10:07:36Z 自跑 Get-PSDrive），删除推迟到主网节点同步完成、`console.db`/`docs/evidence`/`docs/provenance`/pinned silverc 保留核对后。代币合约与市场合约改造 = 钱路：设计 → NWT 红队 → Owner 批 → 实现。
+4. **Bettor 拍（J1 稿 §7 五问，NWT 审后生效，Owner 可否决）**：① 转移档 v0.1 = (a) 只许 0x04，(b) 模板前缀锁等 42 合约迁完模板稳定再议；② 合约 `kasia-console/src/lib/sil-v1/KanetTestToken.sil`、ticker `KTT`（Owner 可改名）；③ 向 `kaspanet/kccs` 提 permissionless-mint 用例说明 = 对外动作，GO 前不做；④ 并入 J2 v1 迁移计划为「批 T」（批 A 后、批 D 前）；⑤ 目录 `sil-v1/`（不用后缀）。
+5. **另案不挡路**：da9 2026-09-08 22:29Z → 09-13 07:17Z 停机原因（KANet-UI 查事件日志）；J1 稿 §8 v1.0.0 `COMPILER_VERSION` 仍 "0.1.0" ⇒ pragma 保持 `^0.1.0`，J2 迁移计划 §3 反过来；J2 批 A/B/C 离线编译要在 v1.0.0 重跑。
+
 ### D-016 §6-3 恢复锁锁域 = 留 pinned `silverc-zk-8065184` + 源内域守卫（A′）· 两条构造侧硬前置 · gate (a) 仍 OPEN 待真链向量 (2026-08-29 · Bettor 拍（Owner 授权技术决策枢纽，Owner 可否决）· NWT GREEN · 回 Codex 14c81c1c)
 > 出处: Codex 桥 `14c81c1c` `RESPONSE-20260829-UNSYNCED-S63-GATEA-RECOVERY-DAA-CODEX-REVIEW.md` · J2 `docs/2026-08-29-j2-s63-recovery-lock-domain-repair-options.md`（cfedc5c6）· NWT 独立核 COORD-LEDGER (710)。
 1. **事实（NWT/J2 各自 `git show` 亲核）**：Codex "v0.15 `TxTime >= OpTxInputDaaScore(input)+N` 混锁域"在**源码变量名 / 上游 #214 层成立、在 8065184 lowering + 共识层不成立**——8065184 `compile.rs:2515-2516` `TimeVar::TxTime ⇒ OpCheckLockTimeVerify` 裸 CLTV 无域标记；live `7b1e18cc opcodes/mod.rs:1031-1032` CLTV **按数值判域**（`lock_time` 与栈值同 `< LOCK_TIME_THRESHOLD=5e11` 才过；`:1034` 混域拒 `mismatched locktime types`；`:1037-1038` `stack > lock_time` 拒）；共识 `tx_validation_in_header_context.rs:56-68 get_lock_time_type`（`<5e11 ⇒ DaaScore`）+ `:71+ check_tx_is_finalized`（`lock_time < block_daa` 终局；`:83-88` `sequence==MAX` 绕过）⇒ `E = OpTxInputDaaScore(X)+N ≈ 8e7 ≪ 5e11` 时该锁**运行时就是 DAA 域绝对 CLTV**：R 入块 ⇒ `DAA(块) > lock_time ≥ E = d+N` = 真 no-theft DAA 延迟。上游 #214（`b5b0dc8`）`tx.daa` ⇒ `DUP 0 THRESHOLD WITHIN VERIFY CLTV` 只是编译期量级守卫，CLTV 本体同一个。
@@ -253,6 +261,8 @@
 - **🔴 通用习惯(NWT 提·记 memory 族F)**: **任何写/build 操作前先查目标路径是不是活进程的目录**(tasklist/wmic 查 kaspad.exe/node.exe 实际路径)——"操作前查目标是否活"·别凭'我以为隔离'的印象(J2 一度错判 D:/rusty-kaspa 已隔离=只读·实为 live)。
 
 
+
+   > 📌 状态注记（2026-09-13 · Bettor · 出处 D-017）：其中「live 节点原地不动」对 **TN12 live 节点**的约束由 D-017 取代（Owner 裁定 TN12 退役、主网节点跑 da9）；本条的 ZK/工具链隔离、"操作前查目标是否活进程目录"纪律**继续有效**，且同样适用于主网节点目录。
 
 ### D-004 统一知识框架 — KB 做成唯一 durable 家·知识层上单一真值纪律 (2026-07-06 · Owner "把 KB 统一" · Bettor 出方案)
 - **根因(读完 OIL-v0.3 框架后定位)**: 框架的**状态层(Ledger)有单一真值纪律**(§8.4 频道→Ledger 铁律),但**知识层(KB + 265 memory + 散 docs)从没上同纪律** → 知识散在四处、无单一入口、KB 烂尾在 6/28 → 每轮新 agent 拼碎片 → 漂移/炒陈饭。
