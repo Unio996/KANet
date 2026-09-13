@@ -14,7 +14,11 @@
 import { sqlite } from '../db/client.js';
 import { wrapTick } from '../lib/diag-step.mjs';   // M10 v2 observe-only (2026-09-05): setInterval 回调计时(纯透传, 同步段/总墙钟 ≥50ms 才打)
 import { randomUUID } from 'node:crypto';
-import { advanceToRefunded } from './broker-state-authority.js';
+// broker-optional (2026-09-13, J2 · Bettor GO-C 第二崩派单·1090): broker-state-authority.js 模块顶层对
+// BROKER_RELAY_ID 缺失 fail-loud throw——本文件(broker-state-reconciler)被 index.js 无条件静态 import
+// 常驻(不在 BROKER_ENABLED 门内, 因为它自身没有身份依赖), 若在此静态 import 就会把 state-authority 的
+// throw 一并顶层拉进来, 绕开 index.js 给 broker-intake-watcher/broker-state-authority 加的门。改成
+// 三处调用点各自动态 import(均已在 try/catch 内, 未启用时按现有 catch 逻辑记警告、tick 继续)。
 
 const TICK_MS = 5 * 60 * 1000;
 const STUCK_REFUNDING_AGE_MS = 5 * 60 * 1000;
@@ -63,6 +67,7 @@ async function _checkStuckRefunding() {
     // advanceToRefunded Pre-check chain-truth dedup → found chain TX → _backfillRefundedState (Phase 3 sync)
     // 真 idempotent — already 'refunded' 真 alreadyRefunded return early
     try {
+      const { advanceToRefunded } = await import("./broker-state-authority.js");
       const result = await advanceToRefunded({ orderId: order.id, reason: 'reconciler_retry' });
       if (result?.ok && result?.alreadyRefunded) {
         backfilled++;
@@ -106,6 +111,7 @@ async function _checkRetryableExpiredFailedRefund() {
     const ageMin = Math.round(order.age_ms / 60000);
     // Wire 1: retry sendKas via advanceToRefunded
     try {
+      const { advanceToRefunded } = await import("./broker-state-authority.js");
       const result = await advanceToRefunded({ orderId: order.id, reason: 'reconciler_retry' });
       if (result?.ok) {
         retried++;
@@ -201,6 +207,7 @@ async function _checkStuckNoOfferRefund() {
   for (const order of stuck) {
     // KI-3 已 SQL EXISTS filter 真 single-source-of-truth, inner check redundant 删除.
     try {
+      const { advanceToRefunded } = await import("./broker-state-authority.js");
       const result = await advanceToRefunded({ orderId: order.id, reason: 'reconciler_self_heal_stuck' });
       if (result?.ok) {
         healed++;

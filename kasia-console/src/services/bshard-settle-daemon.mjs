@@ -55,7 +55,10 @@ const CONSOLE = process.env.SETTLE_DAEMON_CONSOLE_BASE || 'http://127.0.0.1:3200
 const RPC_URL = process.env.KASPA_RPC_URL;
 if (!RPC_URL) throw new Error('bshard-settle-daemon: KASPA_RPC_URL not set — check kanet.env propagation (single source, no fallback)');
 const NETWORK = configuredNetwork();
-const FEE_RELAY_ID = process.env.SETTLE_DAEMON_FEE_RELAY_ID || '8f104e2d-646d-47cd-81f6-97a16b4f6c01';   // J2test
+// broker-optional (2026-09-13, J2 · Bettor GO-C 第二崩 派单·1090): 删旧网默认 fee relay id 硬编码——
+// 未设 = 空(同 BSHARD_SETTLER_RELAY_ID/ZK_SETTLER_RELAY_ID 既有形, 见下方 startSettleDaemonCron 门),
+// 不许静默拿旧网 id 去查(该 id 在主网新库里查不到任何 relay_nodes 行, 用了也只是另一种崩)。
+const FEE_RELAY_ID = process.env.SETTLE_DAEMON_FEE_RELAY_ID || null;
 const PS_SEED_SOMPI = 20000000;
 const FINALITY_BUFFER = 60;   // deadline_daa + buffer 才 ripe (endBlockHash finality depth 50·留余量)
 const TICK_MS = parseInt(process.env.SETTLE_DAEMON_TICK_MS, 10) || 60000;
@@ -1031,6 +1034,7 @@ export async function settleDaemonTick() {
 
 export function startSettleDaemonCron() {
   if (!ENABLED) { log('disabled (SETTLE_DAEMON_ENABLED!=1)·not starting'); return; }
+  if (!FEE_RELAY_ID) { log('NOT starting — SETTLE_DAEMON_FEE_RELAY_ID unset(同 BSHARD_SETTLER_RELAY_ID 形, 不拿旧网默认 id 顶)'); return; }
   if (_timer) return;
   log(`starting·tick=${TICK_MS}ms·MAX_PER_TICK=${MAX_PER_TICK}·feeRelay=${FEE_RELAY_ID.slice(0, 8)}`);
   _timer = setInterval(() => { settleDaemonTick().catch(e => log(`tick uncaught: ${e.message}`)); }, TICK_MS);

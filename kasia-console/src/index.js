@@ -819,15 +819,24 @@ if (process.env.DEMO_POOL_MARKET_SEEDER_OFF !== '1') { startPoolMarketSeeder(); 
 // 直走 broker-buy/sell-handler + broker-action-queue. retail_dex_orders 表保留
 // (broker-intake-watcher / broker-sell-handler 仍用做用户意图绑定).
 
-// Phase 3 (T-J2-06): broker-intake-watcher — 入账 4 场景兜底 (v2.1 §4.2)
-import { startIntakeWatcher } from './services/broker-intake-watcher.js';
-startIntakeWatcher();
+// broker-optional (2026-09-13, J2 · Bettor GO-C 第二崩派单·1090): broker-intake-watcher.js /
+// broker-state-authority.js 模块顶层对 BROKER_RELAY_ID 缺失 fail-loud throw(身份迁移补全既有规矩,
+// 不软化)——主网新库 relay 身份全空(等 GO-E)时静态 import 直接崩启动。条件动态 import: 未启用时
+// 整块跳过、连 import 都不发生(throw 逻辑原样保留在各自文件里, 只是 BROKER_ENABLED!=1 时不会
+// 被加载到)。BROKER_ENABLED 默认关。
+if (process.env.BROKER_ENABLED === '1') {
+  // Phase 3 (T-J2-06): broker-intake-watcher — 入账 4 场景兜底 (v2.1 §4.2)
+  const { startIntakeWatcher } = await import('./services/broker-intake-watcher.js');
+  startIntakeWatcher();
 
-// J1-3 (Phase E v3 Step 1c, J1 #55 propose + NWT 01:15 ack): _sweepStaleAligning cron 5min
-// — broker-intake-watcher refund tick 仅 process 'awaiting_payment', 'aligning' rows 永不 sweep.
-// J2 Step 1b setConvoStateLock 入口 INSERT 'aligning' row 后必 cleanup pattern.
-import { startStaleAligningSweep } from './services/broker-state-authority.js';
-startStaleAligningSweep();
+  // J1-3 (Phase E v3 Step 1c, J1 #55 propose + NWT 01:15 ack): _sweepStaleAligning cron 5min
+  // — broker-intake-watcher refund tick 仅 process 'awaiting_payment', 'aligning' rows 永不 sweep.
+  // J2 Step 1b setConvoStateLock 入口 INSERT 'aligning' row 后必 cleanup pattern.
+  const { startStaleAligningSweep } = await import('./services/broker-state-authority.js');
+  startStaleAligningSweep();
+} else {
+  console.log('[broker] disabled (BROKER_ENABLED!=1)');
+}
 
 // SA-5b (J2 Phase Y+1 Ship A): reconcileStaleOrders 15min cron tick + 1h startup grace.
 // 找 awaiting_payment 30min+ 老 + 0 paid evidence + checkBrokerEscrow=false (broker 真没持) → force-fail.
@@ -873,9 +882,13 @@ import { startPrepruneCaptureStaleCheck } from './services/preprune-capture-moni
 startPrepruneCaptureWorker();
 startPrepruneCaptureStaleCheck();
 
-// Phase 4 (T-J2-09): broker-buy-completion-watcher — BUY 闭环, broker 代 accept 后 DM user KAS 到账
-import { startCompletionWatcher } from './services/broker-buy-completion-watcher.js';
-startCompletionWatcher();
+// broker-optional (2026-09-13, J2 · Bettor GO-C 第二崩派单·1090): 同上, broker-buy-completion-watcher.js
+// 模块顶层同款 BROKER_RELAY_ID fail-loud throw, 同一条件门。
+if (process.env.BROKER_ENABLED === '1') {
+  // Phase 4 (T-J2-09): broker-buy-completion-watcher — BUY 闭环, broker 代 accept 后 DM user KAS 到账
+  const { startCompletionWatcher } = await import('./services/broker-buy-completion-watcher.js');
+  startCompletionWatcher();
+}
 
 // T-NWT-V2 (Owner 真测 #2 退场立项): bsc-incoming-watcher — 30s tick 后台扫 broker EVM 收款
 // 地址 USDT 入账, 调 J2 verifyPaymentForPeer 自动反查 + 主动 DM user. 双路径互补 J2 lazy LLM tool.

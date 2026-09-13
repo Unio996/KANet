@@ -7,6 +7,12 @@
 //   H2  能看到 "[migrate] DB migrations complete." (= runMigrations() 真的跑完, 不是提前崩溃侥幸没报错)。
 //   H3  能看到至少一行 cron/daemon 的 "started" 日志(= migrate 完成后续代码真的继续执行, 不是卡在别处)。
 //   H4  子进程退出前没有 uncaughtException/unhandledRejection 堆栈(index.js 自己的顶层 catch 之外的漏网)。
+//
+// 第二臂(2026-09-13, J2 · Bettor GO-C 第二崩派单·1090): 上面第一臂给 BROKER_RELAY_ID 塞了个 stub 值
+// ('j2-freshdb-boot-test-stub')——这恰好掩盖了真实崩溃现场(主网新库身份全空, 不是"有个假值")。
+// 新增 arm B: BROKER_ENABLED 不设 + 全部 *_RELAY_ID 类 env 一个都不给(真实"全新未配置主网库"现场),
+// 断言进程存活 ≥30s(被我们自己的 timeout SIGKILL 掉, 不是它自己提前崩)、零 FATAL、能看到
+// broker 门禁的 disabled 日志。
 // Run: cd kasia-console && node src/fresh-db-boot.test.mjs
 import { spawnSync, execSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -60,4 +66,40 @@ if (fails) { console.log('\n--- captured output (for diagnosis) ---'); console.l
 { const before = fails; ok(/SqliteError|no such table/i.test(out), 'harness-flip (expect FAIL)'); if (fails === before + 1) { fails--; console.log('  ✅ harness flip arm went red as required'); } else { fails++; } }
 
 console.log(fails ? `\n❌ ${fails} failure(s)` : '\n✅ fresh-db full boot path: zero SqliteError, migrations completed, daemons started');
+
+// ── arm B: BROKER_ENABLED 未设 + 全部 relay id 类 env 全空 → 进程存活 ≥30s, 零 FATAL ──────────
+console.log('\n--- arm B: BROKER_ENABLED unset + all relay-id envs empty (real unconfigured-mainnet-console shape) ---');
+const tmpDb2 = `${process.env.TEMP || '/tmp'}/_j2_freshdb_boot_armB_${process.pid}.db`;
+try { fs.unlinkSync(tmpDb2); } catch {}
+const RELAY_ID_ENV_KEYS = [
+  'BROKER_RELAY_ID', 'BOT_AUTOFUND_SOURCE_RELAY_ID', 'BROADCASTER_RELAY_ID',
+  'BROKER_PREDICTION_BROKER_RELAY_ID', 'BSHARD_SETTLER_RELAY_ID', 'CUSTODIAL_RELAY_ID',
+  'FAUCET_RELAY_ID', 'GATEWAY_RELAY_ID', 'KANET_INTERNAL_RELAY_ID', 'MINING_RELAY_ID',
+  'RPC_HEALTH_ALERT_RELAY_ID', 'SETTLE_DAEMON_FEE_RELAY_ID', 'SETTLE_FAILED_ALERT_RELAY_ID',
+  'WORLDCUP_MAKER_RELAY_ID', 'ZK_PROVE_STUCK_ALERT_RELAY_ID', 'BROKER_ENABLED',
+];
+const envB = { ...process.env, DB_PATH: tmpDb2, KASPA_RPC_URL: 'ws://127.0.0.1:17110', KASPA_NETWORK: 'mainnet', CONSOLE_ENCRYPTION_KEY: crypto.randomBytes(32).toString('hex'), PORT: '0' };
+for (const k of RELAY_ID_ENV_KEYS) delete envB[k];   // 真"没配"不是"配了空字符串"(空字符串会走别的分支, 不是本次要复现的现场)
+const ARM_B_SURVIVE_MS = 30_000;
+const rB = spawnSync(process.execPath, ['--input-type=module', '-e', "import('./src/index.js').catch(e=>{console.error('BOOT-IMPORT-FAIL:',e.stack);process.exit(1);});"], {
+  cwd: process.cwd(), env: envB,
+  timeout: ARM_B_SURVIVE_MS, killSignal: 'SIGKILL',
+  encoding: 'utf8', maxBuffer: 32 * 1024 * 1024,
+});
+try { fs.unlinkSync(tmpDb2); } catch {}
+const outB = `${rB.stdout || ''}\n${rB.stderr || ''}`;
+let failsB = 0;
+const okB = (cond, label) => { if (cond) console.log(`  ✅ ${label}`); else { console.error(`  ❌ ${label}`); failsB++; } };
+// FATAL_MARKER: 精确匹配 11 个 broker-*.js fail-loud throw 的真实格式 `[xxx] FATAL: ...`(大写+冒号)——
+// 裸 /FATAL/i 撞过一次假阳性(migrate.js v86 注释里的小写 "fatal bug", 与本次要抓的崩溃标记无关)。
+const FATAL_MARKER = /\[[\w/-]+\]\s+FATAL:/;
+okB(rB.signal === 'SIGKILL' && rB.status === null, `arm B H1: 进程存活 ≥${ARM_B_SURVIVE_MS / 1000}s(被 harness timeout 打断, 非自己提前退出; 实际 signal=${rB.signal} status=${rB.status})`);
+okB(/\[broker\] disabled \(BROKER_ENABLED!=1\)/.test(outB), 'arm B H2: 看到 broker 门禁 disabled 日志(BROKER_ENABLED 门真的生效, 不是没跑到这行)');
+okB(!FATAL_MARKER.test(outB), 'arm B H3: 零 FATAL(11 个 broker-*.js 顶层 throw 都没被触发)');
+okB(!/UnhandledPromiseRejection|uncaughtException/i.test(outB), 'arm B H4: 无未捕获异常/未处理拒绝');
+if (failsB) { console.log('\n--- arm B captured output (for diagnosis) ---'); console.log(outB.split('\n').slice(0, 80).join('\n')); }
+{ const before = failsB; okB(FATAL_MARKER.test(outB), 'arm B harness-flip (expect FAIL)'); if (failsB === before + 1) { failsB--; console.log('  ✅ arm B harness flip arm went red as required'); } else { failsB++; } }
+console.log(failsB ? `\n❌ arm B: ${failsB} failure(s)` : '\n✅ arm B: unconfigured mainnet console survives ≥30s with zero FATAL');
+
+fails += failsB;
 process.exit(fails ? 1 : 0);
