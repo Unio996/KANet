@@ -12344,3 +12344,5 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **Bettor 独立复核 2026-09-13T10:47:33Z**：本会话 elevated=False；进程表 13788←3076 与 31636←13788 仍在，**31636 监听 0.0.0.0:5555（stratum）⇒ 挖矿未真正停止**。
 - **升 Owner（管理员 PowerShell 单点）**：`Stop-Process -Id 31636,13788 -Force`（先桥后 watchdog 或同时）+ 同一窗口跑 Session 0 触发源查询（1012）。持久化：KANet-UI 改 `kanet-boot-sequence.ps1` 步骤 ③ 守卫（NWT 确认后我推），两条开机链共用该脚本。
 - 结构性结论：Session 0 那条链上的一切（kaspad-watchdog 18576 / kaspad 16644 / mining-watchdog 13788 / console-supervisor 12260）非提权都停不了 ⇒ **退役 runbook 的执行者必须是管理员权限**，写入 runbook §0 前置。
+
+### (1018) NWT 审批 T v0.3 + 重编清单（f4abb387·已推）：**H5 不在场证明 `OpCovInputCount(token_cov)==0` 写法不对（MUST-FIX）**——该原语吃具体 covenant-id，多实例代币模型下市场合约无法预知 id ⇒ 改为遍历 tx 输入用 H1 的模板匹配原语判"无代币模板输入"；H5 核心判断不变 · C1 走 allow 注解 = 低风险，前置 = 独立核三处手写 entry 已实现 DECL.md leader 语义 ⇒ J2 出批 T v0.4；(a) patch 仍优先 — Bettor 2026-09-13T10:48:20Z
