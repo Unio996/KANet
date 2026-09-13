@@ -45,7 +45,7 @@ const MUTANTS = [
     (s) => s.replace('      continue;   // 绑定不成立的行不参与"同根聚合", 否则会拿垃圾根算出假的违规/假的干净', '')],
   // ⑨ V5 地址归一化
   ['地址不去 kaspatest: 前缀(同一个地址被当成两个)',
-    (s) => s.replace(".replace(/^kaspatest:/, '')", '')],
+    (s) => s.replace(".replace(/^[a-z]+:/, '')", '')],
   // ⑩ classify 先验绑定那一步(拆了看有没有用例守着)
   ['classify 跳过绑定校验(直接比根)',
     (s) => s.replace('if (!a.ok || !b.ok) {', 'if (false) {')],

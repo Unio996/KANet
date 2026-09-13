@@ -23,6 +23,7 @@ import { ZK_GATE } from '../lib/zk-close-builder.mjs';
 import { ensureGateTmplHashFresh } from '../lib/gate-tmpl-hash.mjs';
 import { kaspaZk } from '../services/zk-prove-worker.mjs';
 import { checkAdminSecretTier } from '../lib/admin-secret-tier.mjs';
+import { assertAddressOnNetwork } from '../lib/kaspa-network.mjs';   // (b) 网络单一源 (设计 v0.2 §3): 前缀只对照 env KASPA_NETWORK, 不从地址推网络
 
 // 件⑤步骤2 疑似死端点命中计数(2026-07-16, KANet-UI, Owner终裁+Bettor #nig8da 派工): observe-only,
 // 零业务逻辑影响, 持久化(跨重启存活)——4个疑似死端点各挂一次调用, 7天观察窗到期零命中才走删除决策,
@@ -189,7 +190,7 @@ function _resolveZkNativeCtorExtras(market, silverc, computeCloseZkTmplAnchor) {
 //   现 3 处 (create/v06/v07). 将来加第 4 条 broker_pk-derive 建市路径忘调 = 非 P2PK gateway 旁路漏.
 async function assertBrokerP2PK(brokerPk, brokerAddress) {
   const kaspa = await import('kaspa-wasm');
-  const net = (brokerAddress || '').startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+  const net = assertAddressOnNetwork(brokerAddress, { who: 'pool.js:192' });
   const roundTrip = new kaspa.XOnlyPublicKey(brokerPk).toAddress(net).toString();
   if (roundTrip !== brokerAddress) {
     const e = new Error('broker relay 地址非 P2PK (round-trip ≠ 原址) — gateway 须 P2PK 保跨节点 settle fee 派生到对处 (Bettor r606/J1 #143)');
@@ -741,7 +742,7 @@ export async function registerPoolRoutes(fastify) {
     const marketMetadataHash = createHash('sha256').update(metaInput).digest('hex');
 
     // Compute spine P2SH
-    const network = makerRow.address.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+    const network = assertAddressOnNetwork(makerRow.address, { who: 'pool.js:744' });
     let spineResult;
     try {
       spineResult = await computeSpineP2SH({
@@ -947,7 +948,7 @@ export async function registerPoolRoutes(fastify) {
     const marketMetadataHash = createHash('sha256').update(metaInput).digest('hex');
 
     // v0.6 spine P2SH via PoolSpine_v06.sil + the v06 builder.
-    const network = makerRow.address.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+    const network = assertAddressOnNetwork(makerRow.address, { who: 'pool.js:950' });
     const { computeSpineP2SH_v06 } = await import('../lib/pool-p2sh-v06.mjs');
     let spineResult;
     try {
@@ -1116,8 +1117,9 @@ export async function registerPoolRoutes(fastify) {
         // DoD #17 (Bettor r447 钦点 chain-derived 池活化): fetch currentDaa → snapshotDaa=
         // currentDaa-FINALITY_N → ensure scanAndDerivePool 缓存 → derivePoolMerkleRoot(snapshotDaa)
         // 走 chain_view 单一读源, 切掉 legacy null 路 (= 跨节点确定 ctor root==derive(snapshotDaa)).
-        const { getWorkingRpc } = await import('../services/rpc-health.js');
+        const { getWorkingRpc, requireRpcUrl } = await import('../services/rpc-health.js');
         const { url: rpcUrl } = await getWorkingRpc();
+        if (!requireRpcUrl(rpcUrl, 'pool.publish.auto-root')) return reply.code(503).send({ ok: false, error: 'no working Kaspa RPC node — retry shortly' });   // C13
         const { RpcClient, Encoding } = await import('kaspa-wasm');
         const network = process.env.KASPA_NETWORK || 'testnet-12';
         const FINALITY_N = parseInt(process.env.ORACLE_POOL_FINALITY_N, 10) || 600;
@@ -1358,7 +1360,7 @@ export async function registerPoolRoutes(fastify) {
 
     // Generate marketId FIRST so we can derive market_id hash for SS ctor.
     const marketId = 'ext-pool-v07-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
-    const network = makerRow.address.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+    const network = assertAddressOnNetwork(makerRow.address, { who: 'pool.js:1361' });
     const { computeSpineP2SH_v07, deriveMarketIdHash } = await import('../lib/pool-p2sh-v07.mjs');
     const market_id_hash = deriveMarketIdHash(marketId);
 
@@ -1503,7 +1505,7 @@ export async function registerPoolRoutes(fastify) {
       const bettorRow = sqlite.prepare('SELECT id, address FROM relay_nodes WHERE id = ?').get(b.bettor_relay_id);
       if (!bettorRow?.address) return reply.code(400).send({ ok: false, error: 'bettor relay not found' });
       bettorPk = await deriveXOnlyPubkey(bettorRow.address);
-      network = bettorRow.address.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+      network = assertAddressOnNetwork(bettorRow.address, { who: 'pool.js:1506' });
     }
 
     // gateway relay = market host (maker_relay_id); funds genesis/register, custodies bettor stake (testnet ramp).
@@ -1639,7 +1641,7 @@ export async function registerPoolRoutes(fastify) {
     const gw = await sendCommandAsync(gatewayRelayId, { type: 'get_pubkey' }, undefined, 'legacy-unmigrated');
     const relayAddr = gw.address;
     if (!relayAddr) { reply.code(503).send({ ok: false, error: 'gateway relay get_pubkey returned no address' }); return null; }
-    const network = relayAddr.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+    const network = assertAddressOnNetwork(relayAddr, { who: 'pool.js:1642' });
     const nonce = _v07PayNonce(logicalMarketId, bettorPk, v.direction, b.bet_id);
     const payAmountSompi = v.stakeAmount + nonce;
     // 🔴 #28 (B) wire-3/3 (J1 2026-07-01·Owner money-path 根治): payAddr = 【per-bet 独立 P2SH】(替共享 gw relayAddr)。
@@ -2254,7 +2256,7 @@ export async function registerPoolRoutes(fastify) {
     // committee chosen at settle), oracle1/2/3_pk = NULL on row. 不分支 → v0.7 押注全死
     // 'oracle1Pk must be hex string' (= NULL parse fail).
     const spineP2shHash = createHash('sha256').update(market.spine_p2sh).digest('hex');
-    const network = bettorRow.address.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+    const network = assertAddressOnNetwork(bettorRow.address, { who: 'pool.js:2257' });
 
     let sideResult;
     try {
@@ -2373,7 +2375,7 @@ export async function registerPoolRoutes(fastify) {
       throw Object.assign(new Error('linked address is the market maker — maker bets implicitly via outcome_side (area-1)'), { code: 403 });
     }
     const spineP2shHash = createHash('sha256').update(market.spine_p2sh).digest('hex');
-    const network = market.spine_p2sh.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+    const network = assertAddressOnNetwork(market.spine_p2sh, { who: 'pool.js:2376' });
     const sideResult = await computeSideP2SH({
       bettorPk, spineP2shHash,
       oraclePks: [market.oracle1_pk, market.oracle2_pk, market.oracle3_pk],
@@ -2548,7 +2550,7 @@ export async function registerPoolRoutes(fastify) {
       throw Object.assign(new Error('v0.6 market missing pool_merkle_root — corrupt market row'), { code: 500 });
     }
     const spineP2shHash = createHash('sha256').update(market.spine_p2sh).digest('hex');
-    const network = market.spine_p2sh.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+    const network = assertAddressOnNetwork(market.spine_p2sh, { who: 'pool.js:2551' });
     const { computeSideP2SH_v06 } = await import('../lib/pool-p2sh-v06.mjs');
     const sideResult = await computeSideP2SH_v06({
       bettorPk, spineP2shHash,
@@ -2573,7 +2575,7 @@ export async function registerPoolRoutes(fastify) {
       throw Object.assign(new Error('v0.7 market missing pool_merkle_root — corrupt market row'), { code: 500 });
     }
     const spineP2shHash = createHash('sha256').update(market.spine_p2sh).digest('hex');
-    const network = market.spine_p2sh.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+    const network = assertAddressOnNetwork(market.spine_p2sh, { who: 'pool.js:2576' });
     const { computeSideP2SH_v07 } = await import('../lib/pool-p2sh-v07.mjs');
     const sideResult = await computeSideP2SH_v07({
       bettorPk, spineP2shHash,
@@ -3335,7 +3337,7 @@ export async function registerPoolRoutes(fastify) {
     const _payoutAddrSet = new Set([linkedAddr]);
     try {
       const _kw = await import('kaspa-wasm');
-      const _net = linkedAddr.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+      const _net = assertAddressOnNetwork(linkedAddr, { who: 'pool.js:3338' });
       _payoutAddrSet.add(new _kw.XOnlyPublicKey(bettorPk).toAddress(_net).toString());
     } catch { /* derive fail → linkedAddr-only match (degrades to projection fallback) */ }
 
@@ -3672,7 +3674,7 @@ export async function registerPoolRoutes(fastify) {
 
     // Kaspa explorer base — 单源契约(explorer-url.mjs): testnet-12 无公网 explorer(explorer-tn12.kaspa.org
     // DNS 不存在, Owner 实测 ENOTFOUND), 诚实返回 null 而非拼一个死链。
-    const network = (market.spine_p2sh || '').startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+    const network = assertAddressOnNetwork(market.spine_p2sh, { who: 'pool.js:3675' });
     const txUrl = (txid) => buildExplorerUrl(txid, network);
     const addrUrl = (addr) => buildExplorerAddressUrl(addr, network);
 

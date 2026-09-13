@@ -221,7 +221,7 @@ export function findDuplicateAddresses(rows) {
   if (!Array.isArray(rows)) throw new Error('rows must be an array');
   const seen = new Map();
   for (const r of rows) {
-    const addr = String(r?.address ?? '').trim().replace(/^kaspatest:/, '').toLowerCase();
+    const addr = String(r?.address ?? '').trim().replace(/^[a-z]+:/, '').toLowerCase();   // (b) 去任意网络前缀(原只剥 kaspatest: ⇒ 主网 kaspa: 永不匹配, 去重静默失效)
     if (!addr) continue;
     if (!seen.has(addr)) seen.set(addr, []);
     seen.get(addr).push(r?.name ?? r?.id ?? '(unnamed)');

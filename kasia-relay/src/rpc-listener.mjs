@@ -27,7 +27,8 @@ const Resolver = kaspa.Resolver || null;  // npm ^0.13.0 removed Resolver
 // ── Config ──────────────────────────────────────────────────────────────────
 
 const CONSOLE_URL   = process.env.CONSOLE_URL || '';
-const KASPA_NETWORK = process.env.KASPA_NETWORK || 'mainnet';
+import { configuredNetwork as _configuredNetwork } from './lib/kaspa-network.mjs';
+const KASPA_NETWORK = _configuredNetwork();   // (b) 网络单一源 I1: 未设/未知 ⇒ 顶层 throw, relay 起不来即暴露(原 `|| 'mainnet'` = 默认漂移)
 
 const RECONNECT_BASE_MS      = 5000;
 const RECONNECT_MAX_MS       = 60000;
@@ -395,7 +396,8 @@ function extractSender(tx) {
 }
 
 // Shared RPC utility — extracted to eliminate Relay/Scout duplication
-import { resolveRpcUrl as _sharedResolveRpcUrl } from '../../shared/lib/rpc-utils.mjs';
+import { resolveRpcUrl as _sharedResolveRpcUrl, assertStrictRpcEnv as _assertStrictRpcEnv } from '../../shared/lib/rpc-utils.mjs';
+_assertStrictRpcEnv();   // strict local-only (2026-09-13 设计 v0.2 Q2·NWT 采纳): 模块顶层 throw ⇒ relay 起不来, 错配在启动那一刻暴露
 async function resolveRpcUrl() { return _sharedResolveRpcUrl(CONSOLE_URL); }
 
 async function refreshBlocklist() {
@@ -730,6 +732,9 @@ async function _connect(wallet) {
   _walletRef = wallet;
   const networkId = wallet.getNetworkId();
   const directUrl = await resolveRpcUrl();
+  if (!directUrl && process.env.KASPA_RPC_LOCAL_ONLY === '1') {   // S6/C8: strict 下绝不进 Resolver 分支(上面 assert 已挡, 这里是第二道)
+    throw new Error('strict local-only (KASPA_RPC_LOCAL_ONLY=1): no KASPA_RPC_URL, refusing Resolver fallback');
+  }
 
   const rpcOpts = directUrl
     ? { url: directUrl, encoding: Encoding.Borsh, networkId }

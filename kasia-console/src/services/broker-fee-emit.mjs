@@ -35,6 +35,7 @@ import { matchLandedFeeOutputs, emitLandedNotification } from '../../../packages
 // 混用 = 独立断言拿错基数, 触发假 CRITICAL mismatch(安全网接住不花错钱, 但断言本身算错)。改调用与
 // computeSettlePlan 完全同源的 getMarketBets, 不再自己拼基数。
 import { getMarketBets } from '../lib/pool-bettor-sides-query.mjs';
+import { checkAddressOnNetwork } from '../lib/kaspa-network.mjs';   // (b) 网络单一源 (设计 v0.2 §3): 循环站点核-跳过, 不从地址推网络
 
 // J1tn 2026-07-08 (§2.1 broker-fee-reconciler-design 启用件): 本模块此前写好但零调用点(index.js 从没
 //   import 过) — Owner 直接指令"之前有这个模块没启用,查!"坐实。这里只做"接上一根已经焊好的线",
@@ -116,9 +117,12 @@ export function brokerFeeLandedEmitTick(db, deriveBrokerAddress, log = () => {})
        )
   `).all();
 
-  let emitted = 0, pendingIndex = 0, noBrokerOutput = 0, packageFallback = 0;
+  let emitted = 0, pendingIndex = 0, noBrokerOutput = 0, packageFallback = 0, netSkip = 0;
   for (const m of candidates) {
-    const network = String(m.spine_p2sh || '').startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+    // (b) 网络单一源: 循环站点用"核-跳过"不用"抛"——一行坏/异网地址(D-017 过渡态 = 存量 kaspatest 行)不许拖死整个 tick(I4: 行不进 live 路径)。
+    const _nc = checkAddressOnNetwork(m.spine_p2sh, { who: 'broker-fee-emit.mjs:121' });
+    if (!_nc.ok) { netSkip++; log(`[broker-fee-emit] skip market=${String(m.id).slice(0, 12)}: spine_p2sh not on configured network (${_nc.code}, expected=${_nc.expectedPrefix} actual=${_nc.actualPrefix || '-'})`); continue; }
+    const network = _nc.network;
     let brokerAddress;
     // 🔴 broker_pk 传【as-stored】(不 lowercase) — 与 settle 路 L1681 `XOnlyPublicKey(market.broker_pk).toAddress`
     //   逐字节同源·保证派生地址 == settle TX broker output 地址 (case-normalize 会与 settle 不一致→漏 output)。

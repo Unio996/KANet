@@ -7,6 +7,7 @@ import { resolveExpired, isResolverRunning } from '../services/bettor-resolver.j
 import { snapshotOpenPositions, isTrackerRunning } from '../services/bettor-position-tracker.js';
 import { evaluatePositions, isReactorRunning } from '../services/bettor-reactor.js';
 import { isRelayAlive } from '../services/relay-manager.js';
+import { assertAddressOnNetwork, isAddressOnNetwork } from '../lib/kaspa-network.mjs';   // (b) 网络单一源 (设计 v0.2 §3): 前缀只对照 env KASPA_NETWORK, 不从地址推网络
 
 export async function registerBettorRoutes(fastify) {
   // GET /api/bettor/recommendations — top N most-recent batch (optional filter by relay_node_id)
@@ -1100,27 +1101,25 @@ export async function registerBettorRoutes(fastify) {
     const escrowAddr = await getConfig('kanet_prediction_escrow_addr');
     // r216 Bug surfaced: 之前 `startsWith('kaspa:')` 拒 testnet `kaspatest:` prefix (= Phase 3a 真 round-trip 撞到).
     // 修: accept 双 prefix (mainnet kaspa: + testnet-12 kaspatest:).
-    if (!escrowAddr || !(escrowAddr.startsWith('kaspa:') || escrowAddr.startsWith('kaspatest:'))) {
+    if (!isAddressOnNetwork(escrowAddr, { who: 'bettor.js:1103' })) {   // (b) 原"kaspa: 或 kaspatest: 二选一" = 跨网地址照收; 现只认配置网络前缀(含校验和)
       return reply.code(503).send({ ok: false, error: 'kanet_prediction_escrow_addr not configured — operator action required' });
     }
     let escrowTxId = null;
     {
       const { sendCommandAsync } = await import('../services/relay-manager.js');
-      const ESCROW_MAX_ATTEMPTS = 3;
-      for (let attempt = 1; attempt <= ESCROW_MAX_ATTEMPTS; attempt++) {
-        try {
-          const result = await sendCommandAsync(b.maker_relay_id, {
-            type: 'transfer',
-            target: escrowAddr,
-            amount: stakeKas.toFixed(8),  // KI-30: Kaspa sompi max 8 decimal precision, JS float 17-digit → reject
-          }, undefined, 'legacy-unmigrated');
-          escrowTxId = result?.txId || null;
-          if (escrowTxId) break;
-          if (attempt < ESCROW_MAX_ATTEMPTS) await new Promise(r => setTimeout(r, attempt * 5000));
-        } catch (err) {
-          console.log(`[prediction-publish] escrow attempt ${attempt}/${ESCROW_MAX_ATTEMPTS} fail: ${err.message}`);
-          if (attempt < ESCROW_MAX_ATTEMPTS) await new Promise(r => setTimeout(r, attempt * 5000));
-        }
+      // (c) F2-E (J2 2026-09-13, NWT 706f1cfb 第三站点·设计 v0.3): 盲重试循环 → submit-intent。intent_key='escrow:'+offer id 先于
+      // 任何 IPC INSERT(客户端重 POST 同 offer 命中同 key ⇒ 不重发); attempt ≥ 2 只查 relay 侧(mempool/landed/同字节重播), 不查 metadata。
+      // 🔴 拿到 txId = submitted(进 mempool) ≠ landed; 落链由 tx-landed-reconciler(F3) 回填 submit_intents/tx_records, 本处理器不等 ≥20 块。
+      const { transferWithIntent } = await import('../lib/submit-intent.mjs');
+      try {
+        const t = await transferWithIntent({
+          sendCmd: sendCommandAsync, relayId: b.maker_relay_id, intentKind: 'escrow_lock', offerId: id,
+          targetAddress: escrowAddr, amountKas: stakeKas.toFixed(8),  // KI-30: Kaspa sompi max 8 decimal precision, JS float 17-digit → reject
+          origin: 'legacy-unmigrated',
+        });
+        escrowTxId = t.txId;
+      } catch (err) {
+        console.log(`[prediction-publish] escrow lock intent fail: ${err.message}`);
       }
     }
     if (!escrowTxId) {
@@ -1401,7 +1400,7 @@ export async function registerBettorRoutes(fastify) {
         deadline, minerFee, brokerFeePct, oracleFeePct,
         makerStakeAmount: stakeKasSompi,
         takerStakeAmount: stakeKasSompi,  // Phase 4a v0 简化: 1:1
-        network: makerRow.address.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet',
+        network: assertAddressOnNetwork(makerRow.address, { who: 'bettor.js:1404' }),
       });
     } catch (e) {
       return reply.code(500).send({ ok: false, error: `SS contract compile fail: ${e.message}` });
@@ -1410,18 +1409,20 @@ export async function registerBettorRoutes(fastify) {
     // Maker transfer stake KAS → SS P2SH addr (= 替 trust-based escrow_addr)
     const { sendCommandAsync } = await import('../services/relay-manager.js');
     let escrowTxId = null;
-    for (let attempt = 1; attempt <= 3; attempt++) {
+    {
+      // (c) F2-E (J2 2026-09-13): 盲重试 → submit-intent(kind maker_stake, key 'stake:maker:'+pending_offer_id)。txId = submitted ≠ landed(F3 回填)。
+      const { transferWithIntent } = await import('../lib/submit-intent.mjs');
       try {
-        const r = await sendCommandAsync(b.maker_relay_id, { type: 'transfer', target: escrow.p2shAddr, amount: stakeKasStr }, undefined, 'legacy-unmigrated');
-        escrowTxId = r?.txId || null;
-        if (escrowTxId) break;
-        if (attempt < 3) await new Promise(r => setTimeout(r, attempt * 5000));
+        const t = await transferWithIntent({
+          sendCmd: sendCommandAsync, relayId: b.maker_relay_id, intentKind: 'maker_stake', offerId: b.pending_offer_id,
+          targetAddress: escrow.p2shAddr, amountKas: stakeKasStr, origin: 'legacy-unmigrated',
+        });
+        escrowTxId = t.txId;
       } catch (err) {
-        console.log(`[prediction-publish-v2] escrow lock attempt ${attempt}/3 fail: ${err.message}`);
-        if (attempt < 3) await new Promise(r => setTimeout(r, attempt * 5000));
+        console.log(`[prediction-publish-v2] escrow lock intent fail: ${err.message}`);
       }
     }
-    if (!escrowTxId) return reply.code(503).send({ ok: false, error: `escrow SS lock chain TX failed after 3 attempts, P2SH=${escrow.p2shAddr}` });
+    if (!escrowTxId) return reply.code(503).send({ ok: false, error: `escrow SS lock chain TX failed (submit-intent exhausted), P2SH=${escrow.p2shAddr}` });
 
     // INSERT offer
     const offerId = 'ext-pred-v2-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
@@ -1592,21 +1593,30 @@ export async function registerBettorRoutes(fastify) {
     const stakeKasStr = (takerStakeSompi / 1e8).toFixed(8);  // canonical KAS string from baked sompi
     const stakeKas = takerStakeSompi / 1e8;  // for logging only
 
+    // (c) 第 5 笔 (B) · Codex 8118732e: maker 锁仓未落链(escrow_landed_at NULL) ⇒ 无 taker 接受 —— taker 押金不发, 409 让客户端稍后重试。
+    {
+      const { takerAcceptGate } = await import('../services/escrow-landed-gate.mjs');
+      const g = takerAcceptGate(offerId);
+      if (!g.ok) return reply.code(409).send({ ok: false, error: `escrow_not_landed: ${g.reason}`, code: 'escrow_not_landed' });
+    }
+
     // Taker transfer stake → same SS P2SH addr
     const { sendCommandAsync } = await import('../services/relay-manager.js');
     let takerEscrowTxId = null;
-    for (let attempt = 1; attempt <= 3; attempt++) {
+    {
+      // (c) F2-E (J2 2026-09-13): 盲重试 → submit-intent(kind taker_stake, key 'stake:taker:'+offerId)。txId = submitted ≠ landed(F3 回填)。
+      const { transferWithIntent } = await import('../lib/submit-intent.mjs');
       try {
-        const r = await sendCommandAsync(b.taker_relay_id, { type: 'transfer', target: offer.escrow_p2sh, amount: stakeKasStr }, undefined, 'legacy-unmigrated');
-        takerEscrowTxId = r?.txId || null;
-        if (takerEscrowTxId) break;
-        if (attempt < 3) await new Promise(r => setTimeout(r, attempt * 5000));
+        const t = await transferWithIntent({
+          sendCmd: sendCommandAsync, relayId: b.taker_relay_id, intentKind: 'taker_stake', offerId,
+          targetAddress: offer.escrow_p2sh, amountKas: stakeKasStr, origin: 'legacy-unmigrated',
+        });
+        takerEscrowTxId = t.txId;
       } catch (err) {
-        console.log(`[prediction-taker-stake] attempt ${attempt}/3 fail: ${err.message}`);
-        if (attempt < 3) await new Promise(r => setTimeout(r, attempt * 5000));
+        console.log(`[prediction-taker-stake] escrow lock intent fail: ${err.message}`);
       }
     }
-    if (!takerEscrowTxId) return reply.code(503).send({ ok: false, error: `taker escrow lock chain TX failed after 3 attempts, P2SH=${offer.escrow_p2sh}` });
+    if (!takerEscrowTxId) return reply.code(503).send({ ok: false, error: `taker escrow lock chain TX failed (submit-intent exhausted), P2SH=${offer.escrow_p2sh}` });
 
     try {
       // 非 status cols 直 UPDATE

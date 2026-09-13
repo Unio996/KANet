@@ -121,8 +121,9 @@ export async function oraclePoolRenewalTick() {
   if (running) return { skipped: true };
   running = true;
   try {
-    const { getWorkingRpc } = await import('./rpc-health.js');
+    const { getWorkingRpc, requireRpcUrl } = await import('./rpc-health.js');
     const { url: rpcUrl } = await getWorkingRpc();
+    if (!requireRpcUrl(rpcUrl, 'oracle-renewal.tick')) return { skipped: true, reason: 'no-rpc' };   // C13: 构造前判空(url=null ⇒ connect 抛 wasm unreachable)
     const networkId = process.env.KASPA_NETWORK || 'testnet-12';
     const { RpcClient, Encoding } = await import('kaspa-wasm');
     const rpc = new RpcClient({ url: rpcUrl, encoding: Encoding.Borsh, networkId });

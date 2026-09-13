@@ -367,8 +367,10 @@ export async function registerOraclePoolRoutes(fastify) {
     if (!Number.isFinite(requestedDaa) || requestedDaa <= 0) {
       // No daa specified → derive at currentDaa - FINALITY_N (= scan time).
       try {
-        const { getWorkingRpc } = await import('../services/rpc-health.js');
+        const { getWorkingRpc, requireRpcUrl } = await import('../services/rpc-health.js');
         const { url: rpcUrl } = await getWorkingRpc();
+        // C13 (NWT N9 实测: url=null 构造后 connect() 抛 wasm unreachable, try/catch 包不住) ⇒ 构造前判空早退
+        if (!requireRpcUrl(rpcUrl, 'oracle-pool.chain-snapshot')) return reply.code(503).send({ ok: false, error: 'no working Kaspa RPC node — retry shortly' });
         const { RpcClient, Encoding } = await import('kaspa-wasm');
         const rpc = new RpcClient({ url: rpcUrl, encoding: Encoding.Borsh, networkId: process.env.KASPA_NETWORK || 'testnet-12' });
         await rpc.connect();
@@ -465,8 +467,9 @@ export async function registerOraclePoolRoutes(fastify) {
     // Check current DAA via RPC vs lock_until_daa.
     const network = process.env.KASPA_NETWORK || 'testnet-12';
     try {
-      const { getWorkingRpc } = await import('../services/rpc-health.js');
+      const { getWorkingRpc, requireRpcUrl } = await import('../services/rpc-health.js');
       const { url: rpcUrl } = await getWorkingRpc();
+      if (!requireRpcUrl(rpcUrl, 'oracle-pool.unlock')) return reply.code(503).send({ ok: false, error: 'no working Kaspa RPC node — retry shortly' });   // C13
       const { RpcClient, Encoding } = await import('kaspa-wasm');
       const rpc = new RpcClient({ url: rpcUrl, encoding: Encoding.Borsh, networkId: network });
       await rpc.connect();

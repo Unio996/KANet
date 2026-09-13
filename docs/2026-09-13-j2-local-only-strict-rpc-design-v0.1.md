@@ -105,12 +105,12 @@ C1 与 **C13** 是"必须且同批"（C13 不落，C1 上线 = 五个定时器/�
 - **回滚**：`KASPA_RPC_LOCAL_ONLY=0` + 重启 = 老行为（strict 全部由 env 门控，代码不改老路径）。这一点比 G-2 好（G-2 的 NWT 审注明"语义已变，去 env 不够"）。
 - **顺序**：本稿 → NWT 红队（§5 + §7）→ Bettor → Owner 批（钱路读数源）→ 落码（C1 先，C4–C10 同批或紧随）→ N1–N8 绿 → 部署。
 
-## 7. 请 NWT 判 / 请 Bettor 拍
+## 7. 裁定记录（v0.1 提问 → NWT 7149e3a5 / Bettor 10:4xZ 已采纳 · 措辞按 NWT 小瑕疵在 patch 那次 commit 更正）
 
-1. **Q1 写入口**：只在读侧忽略（C1+C4–C6）够不够，还是 C2–C3 拒写也要？我倾向**都要**——只忽略会让 `/api/config/rpc-status` 显示"configured 已设"而实际未用，UI 在撒谎。
-2. **Q2 relay 侧 throw 的形**：`transaction.mjs` strict 且 env 空 ⇒ throw 在模块顶层（relay 起不来，最响）还是在 `resolveRpcUrl()` 调用时（每次发送失败）？我倾向**顶层**：与 `rpc-health.js:19` 同形，错配在启动那一刻就暴露。
-3. **Q3 N9 跑不跑**：它决定 F7 的 5 处要不要先补守卫。
-4. **Q4 落码归类**：C1/C2/C3/C5 非钱路，C4/C6/C7/C9 钱路。是否拆两笔（非钱路 Bettor 批先落，钱路 Owner 批）？我倾向**不拆**：拆开 = 一段时间里 console 读数 strict 而 relay 递交不 strict，恰好是 T2。
+1. **Q1 写入口 — 已采纳"都要"**：读侧忽略（C1+C4–C6）+ 写入口拒写（C2–C3）。只忽略会让 `/api/config/rpc-status` 显示"configured 已设"而实际未用。
+2. **Q2 relay 侧 throw — 已采纳"模块顶层"**：落在 `kasia-relay/src/rpc-listener.mjs` 静态 import 的 `shared/lib/rpc-utils.mjs` 的 `assertStrictRpcEnv()`（relay 起不来即暴露，与 `rpc-health.js:19` 同形）；`transaction.mjs` 的 `resolveRpcUrl()` 再挡一道（它只被动态 import，不能当顶层）。
+3. **Q3 N9 — 已跑（NWT），结果决定性**：见 §5 N9 / §4 C13。
+4. **Q4 落码 — 已采纳"不拆"**：C1–C13 一笔，落地窗 = 波 0 主网 console 首次起来那次（Bettor：不为 TN12 单开重启窗）。走 D-011 内部双审（fail-closed 加固，非放行钱路），Owner 知会。
 
 ## 8. 本稿没核到的（写明）
 

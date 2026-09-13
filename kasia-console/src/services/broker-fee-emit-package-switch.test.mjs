@@ -13,7 +13,10 @@ if (!process.env._BFEPS_TEST_BOOTSTRAPPED) {
   execSync('node scripts/run-migrations.mjs', { cwd: process.cwd(), env: { ...process.env, DB_PATH: tmpDb }, stdio: 'pipe' });
   const r = spawnSync(process.execPath, [process.argv[1]], {
     cwd: process.cwd(), stdio: 'inherit',
-    env: { ...process.env, DB_PATH: tmpDb, _BFEPS_TEST_BOOTSTRAPPED: '1' },
+    // 🔴 合并交互(2026-09-13, coord/mainline-abc-merge 补第 4 笔): b 分支给 broker-fee-emit.mjs:121 加了
+    //   checkAddressOnNetwork(需要 KASPA_NETWORK), 本文件夹具 spine_p2sh 是 kaspatest: 地址(见下方 :44 注释)
+    //   但从没设这个 env ⇒ 顶层 configuredNetwork() throw。补 env, 值与夹具地址网络一致(不引入 netSkip)。
+    env: { ...process.env, DB_PATH: tmpDb, _BFEPS_TEST_BOOTSTRAPPED: '1', KASPA_NETWORK: process.env.KASPA_NETWORK || 'testnet-12' },
   });
   try { fs.unlinkSync(tmpDb); } catch {}
   process.exit(r.status ?? 1);
@@ -41,7 +44,8 @@ function seedMarket(id, over = {}) {
   const uniq = [...new Set(cols)];
   const defaults = {
     protocol_version: 'v0.7', protocol_status: 'completed', broker_pk: null, settle_txid: null,
-    spine_p2sh: 'kaspatest:dummy', resolution_rule_spec: '{}', metadata: '{}', fee_rules: null,
+    spine_p2sh: 'kaspatest:qpumuen7l8wthtz45p3ftn58pvrs9xlumvkuu2xet8egzkcklqtes5z8rkmpd',   // (b) 夹具须过 bech32 校验和(kaspa-network helper 不再从前缀推网络); 固定测试私钥 0x…01 派生, 见 kaspa-network.vectors.json V1
+    resolution_rule_spec: '{}', metadata: '{}', fee_rules: null,
     maker_stake_amount: 0, deadline_daa: 1000, deadline: 1000, pool_merkle_root: 'aa'.repeat(32), maker_pk: 'ff'.repeat(32),
   };
   const vals = uniq.map(c => (c === 'id' ? id : (over[c] !== undefined ? over[c] : (defaults[c] !== undefined ? defaults[c] : 'x'))));

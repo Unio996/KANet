@@ -14,6 +14,8 @@ import { verifyAppEnvelope } from './app-envelope.mjs';
 
 export const READONLY_ALLOWLIST = new Set([
   'get_rpc_state', 'get_pubkey', 'check_utxo_landed', 'get_address_utxos',
+  'get_mempool_entry',   // (c) F2 (J2 2026-09-13): 只读 mempool 查询, attempt ≥ 2 重发前的 relay 侧权威源之一
+
   'chain_get_current_daa_score', 'chain_get_blocks_from_daa_score', 'chain_get_block_at_daa',
   'get_per_bet_address', 'pool_v07_compute_refund_mass',
   // Path B pilot 围栏 §2.7 (docs/2026-07-23-m0c-1-path-b-pilot-containment-design.md·Bettor 定为

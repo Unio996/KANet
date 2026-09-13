@@ -5,6 +5,7 @@ import { getConversations, getMessages, sendMessage, acceptHandshake, sendKaspa,
 import { getWallet } from "./lib/wallet.mjs";
 import { isValidKaspaAddress } from "./lib/crypto.mjs";
 import { ingestMessage, ingestReply, ingestTx, ingestHandshake } from "./ingest.mjs";
+import { assertAddressOnNetwork } from './lib/kaspa-network.mjs';   // (b) 网络单一源 (设计 v0.2 §3): 前缀只对照 env KASPA_NETWORK, 不从地址推网络
 
 const RELAY_MODE = process.env.RELAY_MODE || "indexer";
 const POLL_MS = parseInt(process.env.POLL_MS || "2000");
@@ -499,11 +500,45 @@ if (process.send) {
           break;
         }
 
-        case 'transfer':
+        case 'transfer': {
+          // (c) F2 (J2 2026-09-13, 设计 v0.3): intent_key 在 ⇒ 两阶段(prepared 落 console 才广播)+ 进程内幂等 + 同字节重播; 不在 ⇒ 原行为。
+          if (cmd.intent_key) {
+            const { transferWithIntentRelay } = await import('./lib/submit-intent-relay.mjs');
+            let r;
+            try {
+              r = await transferWithIntentRelay({ cmd, sendKaspa, localAddress, log });
+            } catch (err) {
+              r = { ok: false, error: err?.message || String(err), intent_key: cmd.intent_key };
+            }
+            if (r.ok && r.txId && !r.reused && !r.alreadyInMempool && !r.alreadyLanded) {
+              ingestTx({ traceId: r.txId, txid: r.txId, direction: 'outbound', amount: cmd.amount, fee: r.fee, localAddress, targetAddress: cmd.target });
+            }
+            log(`TRANSFER(intent ${cmd.intent_key}) ${cmd.amount} → ${cmd.target?.slice(-12)} ${r.ok ? `TX: ${r.txId}` : `FAIL: ${r.code || ''} ${r.error}`}`);
+            if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ...r, phase: 'execution' } });
+            return;   // 短路 generic reply(已回, 且带 code/intent 字段)
+          }
           sent = await sendKaspa({ to: cmd.target, amount: cmd.amount });
-          ingestTx({ traceId: sent?.txId, txid: sent?.txId, direction: 'outbound', amount: cmd.amount, fee: sent?.fee, localAddress });
+          ingestTx({ traceId: sent?.txId, txid: sent?.txId, direction: 'outbound', amount: cmd.amount, fee: sent?.fee, localAddress, targetAddress: cmd.target });
           log(`TRANSFER ${cmd.amount} → ${cmd.target?.slice(-12)} TX: ${sent?.txId || '?'} fee: ${sent?.fee || '?'}`);
           break;
+        }
+
+        case 'get_mempool_entry': {
+          // (c) F2 (J2 2026-09-13): 只读 mempool 查询 —— submit-intent attempt ≥ 2 重发前查 relay 侧权威源。没找到 RPC 抛错 ⇒ found:false。
+          const { waitForRpc } = await import('./rpc-listener.mjs');
+          const rpc = await waitForRpc();
+          let found = false, error = null;
+          try {
+            const m = await rpc.getMempoolEntry({ transactionId: cmd.txid, includeOrphanPool: true, filterTransactionPool: false });
+            found = !!(m?.entry || m?.mempoolEntry);
+          } catch (e) {
+            // 没找到时 RPC 抛错; 不靠报错串分类(记忆: 抽报错串必须用真实串测过) —— 用独立活性探针区分:
+            //   getBlockDagInfo 成功 ⇒ RPC 活 ⇒ 这次抛错 = not found ⇒ found:false; 探针也失败 ⇒ 真 RPC 错, 如实回 error, 调用方按"未知"不重发。
+            try { await rpc.getBlockDagInfo(); } catch { error = e?.message || String(e); }
+          }
+          if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: error ? { ok: false, error } : { ok: true, found } });
+          return;
+        }
 
         case 'custodial_transfer': {
           // KANet-UI 2026-06-23 — Path C (Bettor 拍): TG 托管钱包转账。Console (持 CONSOLE_ENCRYPTION_KEY,
@@ -675,7 +710,7 @@ if (process.send) {
           const wallet = getWallet();
           const addr = wallet.getAddress();
           const xOnlyHex = kaspa.XOnlyPublicKey.fromAddress(new kaspa.Address(addr)).toString();
-          const networkId = String(addr).startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+          const networkId = assertAddressOnNetwork(addr, { who: 'relay.mjs:678' });
           const { marketId, bettorPk, direction, payAmountSompi, betId } = cmd;
           if (!marketId || !bettorPk || direction == null || !payAmountSompi || !betId) {
             throw new Error('get_per_bet_address: marketId/bettorPk/direction/payAmountSompi/betId 必传 (per-bet 唯一性)');
@@ -1103,7 +1138,9 @@ if (process.send) {
           })).catch(() => ({}));
           const RPC_TIMEOUT_MS = 15_000;
           const withTimeout = (p, ms, lbl) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(`timeout ${ms}ms ${lbl}`)), ms))]);
-          const rpc = new RpcClient({ url: process.env.KASPA_RPC_URL || 'ws://127.0.0.1:17210', encoding: Encoding.Borsh, networkId });
+          // C9 (strict local-only 设计 v0.2 / §G 类 E): 删硬编码 TN12 回退 'ws://127.0.0.1:17210', env 必填(主网 17110 / TN12 17210 只在 env 里)
+          if (!process.env.KASPA_RPC_URL) throw new Error('KASPA_RPC_URL not set (relay per-market probe requires env, no hardcoded fallback)');
+          const rpc = new RpcClient({ url: process.env.KASPA_RPC_URL, encoding: Encoding.Borsh, networkId });
           await withTimeout(rpc.connect(), RPC_TIMEOUT_MS, 'connect');
           let spineUtxo;
           try {

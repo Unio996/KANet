@@ -17,6 +17,7 @@ import { randomUUID } from 'crypto';
 import { encrypt } from '../services/crypto.js';
 import { reconcileBrokerBots, brokerBotsStatus, stopBrokerBot } from '../services/broker-bot-manager.js';
 import { computeMarketBrokerFee } from '../lib/broker-fee-chain.mjs';
+import { assertAddressOnNetwork } from '../lib/kaspa-network.mjs';   // (b) 网络单一源 (设计 v0.2 §3): 前缀只对照 env KASPA_NETWORK, 不从地址推网络
 
 // 地址格式校验 (testnet-12 = kaspatest: / mainnet = kaspa:). 宽松长度界, 防垃圾提交.
 const KAS_ADDR_RE = /^kaspa(test)?:[a-z0-9]{50,80}$/;
@@ -65,7 +66,7 @@ export function registerBrokerOnboardRoute(fastify) {
     }
     const now = new Date().toISOString();
     const tokenEnc = hasToken ? encrypt(String(bot_token).trim()) : null;
-    const net = broker_address.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+    const net = assertAddressOnNetwork(broker_address, { who: 'kanet-broker.js:68' });
 
     // upsert by address (地址制 UNIQUE)。重复提交 = 更新 token/username。
     //   (status 列已于 v194 移除 —— 它 vestigial·恒 'pending'·无产生路径; 见 migrate.js v194。)

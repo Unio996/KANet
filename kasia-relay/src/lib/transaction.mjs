@@ -117,6 +117,11 @@ export { KASIA_MIN_AMOUNT };
 
 async function resolveRpcUrl() {
   // Priority: env var > console config > null (use resolver)
+  // strict local-only (2026-09-13 设计 v0.2 C7): KASPA_RPC_LOCAL_ONLY=1 ⇒ 只信 env; 空 ⇒ throw, 不拉 console 配置(那条路会把 DB 端点递给花钱路径)
+  if (process.env.KASPA_RPC_LOCAL_ONLY === '1') {
+    if (!process.env.KASPA_RPC_URL) throw new Error('KASPA_RPC_URL not set under KASPA_RPC_LOCAL_ONLY=1 (strict local-only)');
+    return process.env.KASPA_RPC_URL;
+  }
   if (process.env.KASPA_RPC_URL) return process.env.KASPA_RPC_URL;
 
   const consoleUrl = process.env.CONSOLE_URL;
@@ -136,7 +141,10 @@ export function sendKaspa(...args) {
   return withSendLock(() => _sendKaspaInner(...args));
 }
 
-async function _sendKaspaInner(to, amountSompi, priorityFee = 0n, payload, _isRetry = false, walletOverride = null) {
+// opts.beforeSubmit ((c) F2 两阶段, J2 2026-09-13): 所有交易签好但【一笔都没广播】时回调一次, 参数 [{ txid, txJson }](txJson = serializeToSafeJSON,
+//   txid = 确定性 id, 签名前后/序列化往返不变—serialize-roundtrip.test.mjs 实证)。回调 throw ⇒ 不广播任何一笔(fail-closed)。
+//   不传 = 原行为(逐笔 sign→submit)完全不变。
+async function _sendKaspaInner(to, amountSompi, priorityFee = 0n, payload, _isRetry = false, walletOverride = null, opts = {}) {
   // KANet-UI 2026-06-23 (Path C, Bettor 拍): walletOverride = TG 托管钱包的 ad-hoc KaspaWallet
   //   (KaspaWallet.fromPrivateKey)。signs/广播/KIP-9/change/ledger 全 100% 复用此函数, 只换 key+from-addr。
   //   零新广播码 (Bettor 驳 B: 别在 Console 重造 KIP-9), 守 "Relay 唯一出口"。null = relay 自己的钱包 (原行为)。
@@ -221,11 +229,27 @@ async function _sendKaspaInner(to, amountSompi, priorityFee = 0n, payload, _isRe
     });
 
     let pending, lastTxId = '';
-    while ((pending = await generator.next())) {
-      await pending.sign([wallet.getPrivateKey()]);
-      const txId = await pending.submit(rpc);
-      submittedTxIds.push(txId);
-      lastTxId = txId;
+    if (typeof opts.beforeSubmit === 'function') {
+      // 两阶段: 全部生成+签名 → 回调(console 落 prepared{txid, bytes}) → 逐笔广播。任何一步 throw 在广播前 ⇒ submittedTxIds 空 ⇒ 原 catch 路径。
+      const pendings = [];
+      while ((pending = await generator.next())) {
+        await pending.sign([wallet.getPrivateKey()]);
+        pendings.push(pending);
+      }
+      if (!pendings.length) throw new Error('Transaction generation failed: no transactions produced');
+      await opts.beforeSubmit(pendings.map(p => ({ txid: p.id, txJson: p.serializeToSafeJSON() })));
+      for (const p of pendings) {
+        const txId = await p.submit(rpc);
+        submittedTxIds.push(txId);
+        lastTxId = txId;
+      }
+    } else {
+      while ((pending = await generator.next())) {
+        await pending.sign([wallet.getPrivateKey()]);
+        const txId = await pending.submit(rpc);
+        submittedTxIds.push(txId);
+        lastTxId = txId;
+      }
     }
 
     if (!lastTxId) throw new Error('Transaction generation failed: no transactions produced');
@@ -243,7 +267,7 @@ async function _sendKaspaInner(to, amountSompi, priorityFee = 0n, payload, _isRe
         const { triggerReconnect } = await import('../rpc-listener.mjs');
         triggerReconnect('ws_error_in_sendkaspa');
         await new Promise(r => setTimeout(r, 2000));
-        return _sendKaspaInner(to, amountSompi, priorityFee, payload, /* _isRetry= */ true, walletOverride);
+        return _sendKaspaInner(to, amountSompi, priorityFee, payload, /* _isRetry= */ true, walletOverride, opts);
       }
     }
     if (submittedTxIds.length > 0) {
@@ -264,7 +288,67 @@ export async function sendKaspaByAmount(params) {
     return sendKaspa(params.to, 0n, 0n, params.payload);
   }
   const amountSompi = kasToSompi(params.amount);
-  return sendKaspa(params.to, amountSompi, BigInt(params.priorityFee || 0), params.payload);
+  const opts = params.beforeSubmit ? { beforeSubmit: params.beforeSubmit } : {};
+  return sendKaspa(params.to, amountSompi, BigInt(params.priorityFee || 0), params.payload, false, null, opts);
+}
+
+/**
+ * (c) F2-R 同字节重播 (J2 2026-09-13, 设计 v0.3): console 持久化的已签名交易字节(prepared_tx_json = serializeToSafeJSON 数组)原样重播。
+ *   ① 反序列化, 断言末笔 txid == expectedTxId(不等 ⇒ replay_txid_mismatch, 一个字节都不改)
+ *   ② 已在 mempool ⇒ ok(alreadyInMempool); 已落到收款地址 UTXO 集 ⇒ ok(alreadyLanded) —— 两者都【不】再广播
+ *   ③ 外部输入(非本链内前一笔的输出)必须还在发送方 UTXO 集里; 少一个 ⇒ inputs_spent(旧笔永远上不了链, console 才允许重建)
+ *   ④ 逐笔 submitTransaction; 某笔抛错时查 mempool 有它 ⇒ 视为已进(不靠报错串分类); 否则 replay_rejected
+ * 🔴 残余窗(设计 F2-R 如实记): 旧笔已落链且收款方在重试窗内又花掉了它、且收款地址不在索引器 watched 集 ⇒ ②看不见、③判 inputs_spent ⇒
+ *   console 重建 ⇒ 双付。窗 = prepared 行存在(IPC 回执丢失)∧ 收款方秒花 ∧ 未被索引; console 侧 resolvePrepared 之前还查一次 landed, 再收窄一层。
+ */
+export async function replayPreparedTransactions({ txJsonList, expectedTxId, senderAddress, targetAddress = null, rpcOverride = null }) {
+  const rpc = rpcOverride || await waitForRpc();
+  const { Transaction } = kaspa;
+  let txs;
+  try {
+    txs = txJsonList.map(j => Transaction.deserializeFromSafeJSON(typeof j === 'string' ? j : JSON.stringify(j)));
+    // 🔴 safe JSON 自带 "id" 字段, deserializeFromSafeJSON 【信它不重算】(实测: 改输出金额后 tx.id 仍是旧 id) ⇒ 不 finalize 的话
+    //    txid 断言是空的(被改过的字节顶着旧 id 过关, 上链后 kaspad 自算出另一个 txid = 双付面)。finalize() 从字节重算 id(实测 ≠ 旧 id)。
+    for (const t of txs) t.finalize();
+  } catch (e) {
+    return { ok: false, code: 'replay_bad_json', error: `deserialize failed: ${e.message}` };
+  }
+  if (!txs.length) return { ok: false, code: 'replay_bad_json', error: 'empty tx list' };
+  const lastId = txs[txs.length - 1].id;
+  if (lastId !== expectedTxId) return { ok: false, code: 'replay_txid_mismatch', error: `replay bytes txid ${lastId} ≠ prepared_txid ${expectedTxId}` };
+
+  const inMempool = async (txid) => {
+    try { const m = await rpc.getMempoolEntry({ transactionId: txid, includeOrphanPool: true, filterTransactionPool: false }); return !!(m?.entry || m?.mempoolEntry); }
+    catch { return false; }
+  };
+  if (await inMempool(expectedTxId)) return { ok: true, txId: expectedTxId, alreadyInMempool: true };
+  if (targetAddress) {
+    try {
+      const { entries } = await rpc.getUtxosByAddresses([targetAddress]);
+      if ((entries || []).some(e => (e.outpoint?.transactionId || e.entry?.outpoint?.transactionId) === expectedTxId)) return { ok: true, txId: expectedTxId, alreadyLanded: true };
+    } catch { /* 查不到收款地址 UTXO 集 ⇒ 不据此判定, 继续走输入检查 */ }
+  }
+  const internal = new Set(txs.map(t => t.id));
+  const { entries } = await rpc.getUtxosByAddresses([senderAddress]);
+  const have = new Set((entries || []).map(e => `${e.outpoint?.transactionId || e.entry?.outpoint?.transactionId}:${e.outpoint?.index ?? e.entry?.outpoint?.index}`));
+  for (const t of txs) {
+    for (const inp of t.inputs) {
+      const po = inp.previousOutpoint;
+      if (internal.has(po.transactionId)) continue;
+      const k = `${po.transactionId}:${po.index}`;
+      if (!have.has(k)) return { ok: false, code: 'inputs_spent', error: `input ${po.transactionId.slice(0, 12)}:${po.index} no longer in sender UTXO set — prepared tx ${expectedTxId.slice(0, 12)} can never land` };
+    }
+  }
+  for (const t of txs) {
+    try {
+      await rpc.submitTransaction({ transaction: t, allowOrphan: false });
+    } catch (e) {
+      if (await inMempool(t.id)) continue;   // 并发/重复提交: 已在池里就算成功, 不解析报错串
+      return { ok: false, code: 'replay_rejected', error: `submit ${t.id.slice(0, 12)}: ${e?.message || String(e)}` };
+    }
+  }
+  for (const t of txs) for (const inp of t.inputs) markUtxoSpentByOutpoint(inp.previousOutpoint.transactionId, inp.previousOutpoint.index);
+  return { ok: true, txId: lastId, replayed: true };
 }
 
 // KANet-UI 2026-06-23 — Path C (Bettor 拍·Owner 钦定托管钱包 /send): 用【传入的托管 privkey】从托管钱包

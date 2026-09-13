@@ -95,7 +95,10 @@ export async function startScanner() {
   _lastLog = '';
 
   // Resolve RPC URL and ingest secret
-  const rpcUrl = await getConfig('rpc_url') || process.env.KASPA_RPC_URL || '';
+  // S5 (strict local-only, 2026-09-13 设计 v0.2 C5): 与 relay-manager 同一入口; strict ⇒ 恒 env, DB rpc_url 被忽略。
+  const { resolveChildRpcUrl, isStrictLocalOnly } = await import('./rpc-health.js');
+  const rpcUrl = await resolveChildRpcUrl('scanner');
+  if (isStrictLocalOnly() && !rpcUrl) return { ok: false, reason: 'no_rpc_url_strict' };
   // INGEST_SECRET is set by ensureIngestSecret() in index.js at startup
   const ingestSecret = process.env.INGEST_SECRET || '';
 
