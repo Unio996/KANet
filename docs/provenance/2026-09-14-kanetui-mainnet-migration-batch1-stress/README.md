@@ -61,3 +61,14 @@
 ## 结论
 
 10/10 全部按执行页 v0.2 流程一次通过，无需任何回滚/清理分支。这批账号导入后按执行页 §4 预期"导入即启动、私钥即驻留"——10 个 relay 子进程已在跑，持有合计约 4.98 KAS，两层准入门（拒绝场景探针 §2 + 实际导入观察 §4/§5）均确认按设计工作。
+
+## 补注（2026-09-14 · KANet-UI · Bettor 1182 核实要求）
+
+Bettor 地面复核发现日志里 `cold_address_denied` 出现 **2 次**，问是不是探针发了两次。核实结论：**不是两次探针，是同一次 HTTP 请求触发了两条日志**——`grep -n cold_address_denied` 命中的两行紧邻（`console-mainnet-stderr.log:9-10`），中间没有任何其它请求痕迹，`name` 字段都是同一个 `zzz-admission-probe-1789332136552`（本页 §2 那次唯一的探针请求）：
+
+```
+[relay-manager] hotwallet admission refuse <地址>: cold_address_denied         ← checkHotwalletAdmission() 自身记的（relay-manager.js:101）
+[relay] refuse import "zzz-admission-probe-...": hotwallet admission cold_address_denied  ← POST /relays 早失败层记的（relay.js:106）
+```
+
+两行来自代码里两个不同层：**被调用的共享函数 `checkHotwalletAdmission()`（`relay-manager.js:101`）在返回拒绝之前自己先 `console.warn` 一行**，随后**调用它的 `POST /relays` 早失败层（`relay.js:106`）拿到 `admission.reason` 后又 `console.warn` 一行、把 reason 嵌进自己的消息文本里**——这是防御性日志的正常分层写法（"被调用方记一次自己的判断依据 + 调用方记一次自己采取的动作"），不是两次判断、不是两次请求、更不是探针意外重试。两行的字面文本都含 `cold_address_denied` 这个 token 是巧合式重叠（一个是 reason 本身，一个是把 reason 塞进 `${admission.reason}` 模板字符串），不代表两条独立事件。§2 原文"响应 302 + `Location` 命中一次"这条判据本身没有问题，本条只是把日志计数的疑问解释清楚，不改 §2 结论。
