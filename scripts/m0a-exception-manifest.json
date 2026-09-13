@@ -129,7 +129,7 @@
    "path": "kasia-console/src/api/relay.js",
    "capability": "m0c2-hotwallet-admission",
    "justification": "NWT 2-1 热钱包准入门(docs/2026-09-14-nwt-mainnet-relay-hotwallet-cap-and-cold-hot-separation-spec-v0.1.md §5, Bettor 1137/1138 派工)在 relay-manager.js:startRelay() 私钥进子进程 env 之前加三条【启动时】准入检查(冷清单/per-relay 上限/总额上限, 已在 a65c28dc 落码, 该 commit 未触发本闸——问题只在本文件)。api/relay.js 的 POST /relays 与 POST /api/relay/import-privkey 两个既有导入端点调同一份 checkHotwalletAdmission() 做\"早失败\"提示(按 NWT 规格原话: 这层只是更友好的早失败, 不是安全边界, 真正把关的仍然是 startRelay() 那次经 _withAdmissionLock 串行化的判断)。本文件已经合法导入 relay-manager(startRelay/stopRelay 早已各自在 baseline)——本次只是同一行加一个新具名导出, 但 M0a 差分检测器按整行归一化文本逐字匹配, 旧 form 现实归零+新 form 需要这条 manifest 授权。日志只打地址与数值, 从不打印助记词/私钥/密文(POST /relays 分支 console.warn 地址+reason; import-privkey 分支同)。Bettor 1144 裁定走 considered amendment #6, 不接受绕开导入行的接法。KANet-UI commit 待 Bettor 推、NWT diff 审。",
-   "review_ref": "pending-nwt-review-bettor-1144",
+   "review_ref": "ffd3b8dd",
    "content_digest": "1014fcb262ef41601b010cce4040fa499afbd8aaed2cbdd7be2f1e5328caf4c8"
   },
   {
@@ -139,7 +139,7 @@
    "path": "kasia-console/test-framework/cases/system/hotwallet-admission.test.mjs",
    "capability": "m0c2-hotwallet-admission",
    "justification": "checkHotwalletAdmission() 单测, 11 用例(冷清单/per-relay 上限/总额上限三条各一正一反 + \"总额刚好超线的第 N 个候选被拒\" + 三种 fail-closed 场景), 同 kaspa-rpc-shared.mjs 既有 getSharedRpc({url,networkId},{Ctor}) DI 约定用第二参依赖注入替换掉真实 RPC 调用/_relays/DB, 不连真实节点、不起真实 relay 子进程, 不适配 m0c1-test-fixture-relay-sink(那个 capability 语义专锚 fork 假 relay 子进程隔离测试, 本文件不 fork 任何进程)。本地 DB_PATH=<temp> node --test 全绿(11/11 PASS)。Bettor 1144 裁定走 considered amendment #6, 与 relay.js 那条同批授权、同一份 justification 背景, 分两个条目锚(路径不同, digest 各自独立, 改一个不牵动另一个重审)。KANet-UI commit 待 Bettor 推、NWT diff 审。",
-   "review_ref": "pending-nwt-review-bettor-1144",
+   "review_ref": "ffd3b8dd",
    "content_digest": "78ec4fd8367a32d2305085ad46df3325ece6b75f93dda98ddd50f1e6f795ec6f"
   }
  ]

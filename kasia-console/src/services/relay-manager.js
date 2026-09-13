@@ -192,52 +192,58 @@ export async function startRelay(relayNodeId) {
     console.log(`[relay-manager] Fixed identity type for ${account.name}: ${existingId.identity_type} → local`);
   }
 
-  // r281 (Owner P0): privkey-backed relay 优先 (无助记词只有裸 kaspa 私钥的地址,
-  // 如 Owner 已绑 TG 的 qrymjvc). Wallet.mjs getWallet 优先读 KASPA_PRIVKEY env.
-  // 助记词型 relay 保持原行为. 二者必至少一个.
-  const privkey = getRelayPrivkey(relayNodeId);
-  const mnemonic = privkey ? null : getRelayMnemonic(relayNodeId);
-  if (!privkey && !mnemonic) return { ok: false, reason: 'no_key' };
-
   // Resolve config
   // S5 (strict local-only, 2026-09-13 设计 v0.2 C4): 原 `getConfig('rpc_url') || env` = DB 优先于 env, 绕过 rpc-health ⇒ console 读数走本机而 relay 递交走 DB 端点(T2 split-brain)。
   //   现统一走 resolveChildRpcUrl: strict ⇒ 恒 env; 且 strict 下空值拒起(把 '' 递下去会触发 relay 侧 console-config → Resolver 公网链, T4)。
+  // 🔴 NWT 1147: 这段挪到解密(getRelayPrivkey/getRelayMnemonic)之前——热钱包准入检查只需要
+  // account.address + net + rpcUrl, 不需要密钥材料, 提前到这里让准入检查能在解密发生之前跑完。
   const { resolveChildRpcUrl, isStrictLocalOnly } = await import('./rpc-health.js');
   const rpcUrl = await resolveChildRpcUrl('relay-manager');
   if (isStrictLocalOnly() && !rpcUrl) return { ok: false, reason: 'no_rpc_url_strict' };
-  const relayMode = await getConfig('relay_mode') || process.env.RELAY_MODE || 'rpc';
-  const ingestSecret = await getConfig('ingest_secret') || process.env.INGEST_SECRET || '';
-  const adapterPort = account.adapter_port || 3010;
-
-  const env = {
-    ...process.env,
-    CONSOLE_URL: `http://localhost:${CONSOLE_PORT}`,
-    INGEST_SECRET: ingestSecret,
-    RELAY_NODE_ID: relayNodeId,
-    NETWORK: net,
-    KASPA_NETWORK: net,   // (b) 单一源: env KASPA_NETWORK(已核 = relay_nodes.network)
-    KASPA_RPC_URL: rpcUrl,
-    RELAY_MODE: relayMode,
-    POLL_MS: String(account.poll_ms || 2000),
-    IS_SERVICE: account.is_service ? '1' : '0',  // R5 T-J2-16: Service 模式 relay (broker) 跳 anti-spam dedup
-    // M0c-1 app provision: grant registry 只读路径 (relay 侧 authorizeAppCommand fresh 读,
-    // grant-registry.mjs readOnly 直开)。console 侧解析成绝对路径 — relay cwd=RELAY_DIR, 相对路径会解错。
-    M0C1_GRANT_DB_PATH: resolve(process.env.DB_PATH || './data/console.db'),
-  };
-  // r281: pass exactly one of KASPA_PRIVKEY / KASPA_MNEMONIC (privkey wins). wallet.mjs reads them.
-  // 🔴 N5(A2 spec v1.2-rc · @J1tn 审视 8969aca7 · @Bettor 批B GO): **互斥必须双向 + 切断继承向**。
-  //   见下方 buildRelayKeyEnv 的头注 —— 这三行是那份读数的落码, 别单独读。
-  Object.assign(env, buildRelayKeyEnv({ privkey, mnemonic }));
 
   // NWT 2-1 热钱包准入门 + Codex TOCTOU 修（Bettor 1138）：从"查总额判断"到"登记进 _relays"整段
   // 串行化——同一时刻只有一个 startRelay() 在做准入判断+登记，下一个并发调用的总额查询才能看到
   // 这一行已经算进去了，不会两个都各自查到"加上自己没超线"就一起放行。
+  // 🔴 NWT 1147: 准入检查挪到解密之前——只用 account.address + net + rpcUrl（三者都是公开信息，
+  // 不接触密钥材料）；被拒的候选在这里就 return，getRelayPrivkey/getRelayMnemonic 根本不会被调用，
+  // 连解密动作本身都不发生（不只是"解密了但不用"）。
   return _withAdmissionLock(async () => {
     const admission = await checkHotwalletAdmission({ address: account.address, network: net, rpcUrl });
     if (!admission.ok) {
       console.warn(`[relay-manager] refuse start ${account.name}: hotwallet admission ${admission.reason}`);
       return admission;
     }
+
+    // r281 (Owner P0): privkey-backed relay 优先 (无助记词只有裸 kaspa 私钥的地址,
+    // 如 Owner 已绑 TG 的 qrymjvc). Wallet.mjs getWallet 优先读 KASPA_PRIVKEY env.
+    // 助记词型 relay 保持原行为. 二者必至少一个.
+    const privkey = getRelayPrivkey(relayNodeId);
+    const mnemonic = privkey ? null : getRelayMnemonic(relayNodeId);
+    if (!privkey && !mnemonic) return { ok: false, reason: 'no_key' };
+
+    const relayMode = await getConfig('relay_mode') || process.env.RELAY_MODE || 'rpc';
+    const ingestSecret = await getConfig('ingest_secret') || process.env.INGEST_SECRET || '';
+    const adapterPort = account.adapter_port || 3010;
+
+    const env = {
+      ...process.env,
+      CONSOLE_URL: `http://localhost:${CONSOLE_PORT}`,
+      INGEST_SECRET: ingestSecret,
+      RELAY_NODE_ID: relayNodeId,
+      NETWORK: net,
+      KASPA_NETWORK: net,   // (b) 单一源: env KASPA_NETWORK(已核 = relay_nodes.network)
+      KASPA_RPC_URL: rpcUrl,
+      RELAY_MODE: relayMode,
+      POLL_MS: String(account.poll_ms || 2000),
+      IS_SERVICE: account.is_service ? '1' : '0',  // R5 T-J2-16: Service 模式 relay (broker) 跳 anti-spam dedup
+      // M0c-1 app provision: grant registry 只读路径 (relay 侧 authorizeAppCommand fresh 读,
+      // grant-registry.mjs readOnly 直开)。console 侧解析成绝对路径 — relay cwd=RELAY_DIR, 相对路径会解错。
+      M0C1_GRANT_DB_PATH: resolve(process.env.DB_PATH || './data/console.db'),
+    };
+    // r281: pass exactly one of KASPA_PRIVKEY / KASPA_MNEMONIC (privkey wins). wallet.mjs reads them.
+    // 🔴 N5(A2 spec v1.2-rc · @J1tn 审视 8969aca7 · @Bettor 批B GO): **互斥必须双向 + 切断继承向**。
+    //   见下方 buildRelayKeyEnv 的头注 —— 这三行是那份读数的落码, 别单独读。
+    Object.assign(env, buildRelayKeyEnv({ privkey, mnemonic }));
 
     try {
       const child = fork('src/relay.mjs', [], {
