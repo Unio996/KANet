@@ -12379,3 +12379,5 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1030) 🔴 **1029 "seal_to_root 不开事故账" 降级为「待 P8 实测确认，非最终定论」**（NWT 自行收回：前论证只覆盖"B 已被折走"，漏了"B 活着、同笔被 A.fold() 按 cov-id 盲读进 value_sum、B 自己又跑 seal_to_root"；`scratch/_j2_silverc_v100/docs/DECL.md:519-533` 同质模板假设证实 leader 侧 readInputState 循环不判输入跑哪个 entry）· 账：Σin≤Σout 共识不放行，除非攻击者自掏一份 B.pool_value 真 KAS ⇒ 非免费铸币，但可造出复制 B 真实记账（local_yes/no/count/pool_value/shard_pool_id）的重复 root，claim_draw 按 shard_pool_id 认票 ⇒ **同一批真实凭证可能对两个 root 各兑一次** · **决定性问题 = 同市场 fold 树未合并平行分支的 covenant-id 是否相同**（相同 ⇒ 链成立 = 既有缺陷，同时在 TN12 live 与主网集；不同 ⇒ 链断）— Bettor 2026-09-13T11:29:01Z
 - **裁**：P8 提到 J2 队首：① 源码答 cov-id 派生/作用域（file:line）；② 离线组合交易实测（A fold 读 B + B seal_to_root，外部补差额）。成立则单开事故账升 Owner。NWT 主动推翻自己 = 正面账。
+
+### (1031) NWT 审批 T v0.5（0e9b2ef0·已推）：H5 七档向量 **PASS**（harness 自检证非摆设；提醒 token_tmpl_suffix 与 H1 模板字节同源，须同步重烤重跑）· **C1 角色 1 设计 PASS 可 GREEN 进批 C**（与 cov-id 是否共享无关地安全：共享则堵死、不共享则空判据无害且满足编译器显式声明）· §4 等 P8 两步结果 · **裁**：角色 1 进批 C 排期；.sil patch 待 P8 结果后出，侧分支 `coord/j2-c1-manual-entry-role1`，NWT diff 审 — Bettor 2026-09-13T11:30:15Z
