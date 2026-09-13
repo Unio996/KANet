@@ -80,7 +80,10 @@ const RELAY_ID_ENV_KEYS = [
 ];
 const envB = { ...process.env, DB_PATH: tmpDb2, KASPA_RPC_URL: 'ws://127.0.0.1:17110', KASPA_NETWORK: 'mainnet', CONSOLE_ENCRYPTION_KEY: crypto.randomBytes(32).toString('hex'), PORT: '0' };
 for (const k of RELAY_ID_ENV_KEYS) delete envB[k];   // 真"没配"不是"配了空字符串"(空字符串会走别的分支, 不是本次要复现的现场)
-const ARM_B_SURVIVE_MS = 30_000;
+// broker-optional-2(2026-09-13, J2 · Bettor GO-C 第三次现场·1099): 30s 撞过一次假绿——bsc-incoming-watcher
+// 的 tick 周期正好也是 30s, 杀进程的那一刻可能刚好卡在第一次 tick 触发前, FATAL 字样一次都没来得及打印
+// 就被 SIGKILL 掉(真实部署 ≥5min 才现形)。窗口拉到覆盖至少 2 个完整 tick 周期, 不再靠运气撞见。
+const ARM_B_SURVIVE_MS = 65_000;
 const rB = spawnSync(process.execPath, ['--input-type=module', '-e', "import('./src/index.js').catch(e=>{console.error('BOOT-IMPORT-FAIL:',e.stack);process.exit(1);});"], {
   cwd: process.cwd(), env: envB,
   timeout: ARM_B_SURVIVE_MS, killSignal: 'SIGKILL',
