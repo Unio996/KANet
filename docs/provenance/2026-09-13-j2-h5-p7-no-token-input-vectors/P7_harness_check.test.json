@@ -1,0 +1,124 @@
+{
+  "tests": [
+    {
+      "name": "v0_no_other_inputs_FLIPPED",
+      "function": "step_without_token",
+      "constructor_args": [
+        "0xaabbccddee",
+        5,
+        4,
+        100
+      ],
+      "expect": "fail",
+      "tx": {
+        "active_input_index": 0,
+        "inputs": [
+          {
+            "utxo_value": 1000,
+            "covenant_id": "0x1111111111111111111111111111111111111111111111111111111111111111",
+            "state": {
+              "amount": 100
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "value": 1000,
+            "covenant_id": "0x1111111111111111111111111111111111111111111111111111111111111111",
+            "state": {
+              "amount": 100
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "v1_one_token_template_input_FLIPPED",
+      "function": "step_without_token",
+      "constructor_args": [
+        "0xaabbccddee",
+        5,
+        4,
+        100
+      ],
+      "expect": "pass",
+      "tx": {
+        "active_input_index": 0,
+        "inputs": [
+          {
+            "utxo_value": 1000,
+            "covenant_id": "0x1111111111111111111111111111111111111111111111111111111111111111",
+            "state": {
+              "amount": 100
+            }
+          },
+          {
+            "utxo_value": 500,
+            "signature_script_hex": "00aabbccddee"
+          }
+        ],
+        "outputs": [
+          {
+            "value": 1000,
+            "covenant_id": "0x1111111111111111111111111111111111111111111111111111111111111111",
+            "state": {
+              "amount": 100
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "v7_inputs_exceed_max_ins_bound",
+      "function": "step_without_token",
+      "constructor_args": [
+        "0xaabbccddee",
+        5,
+        4,
+        100
+      ],
+      "expect": "fail",
+      "tx": {
+        "active_input_index": 0,
+        "inputs": [
+          {
+            "utxo_value": 1000,
+            "covenant_id": "0x1111111111111111111111111111111111111111111111111111111111111111",
+            "state": {
+              "amount": 100
+            }
+          },
+          {
+            "utxo_value": 500,
+            "signature_script_hex": "00"
+          },
+          {
+            "utxo_value": 500,
+            "signature_script_hex": "01"
+          },
+          {
+            "utxo_value": 500,
+            "signature_script_hex": "02"
+          },
+          {
+            "utxo_value": 500,
+            "signature_script_hex": "03"
+          },
+          {
+            "utxo_value": 500,
+            "signature_script_hex": "04"
+          }
+        ],
+        "outputs": [
+          {
+            "value": 1000,
+            "covenant_id": "0x1111111111111111111111111111111111111111111111111111111111111111",
+            "state": {
+              "amount": 100
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

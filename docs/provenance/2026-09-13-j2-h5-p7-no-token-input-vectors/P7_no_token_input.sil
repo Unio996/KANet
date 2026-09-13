@@ -1,0 +1,25 @@
+pragma silverscript ^0.1.0;
+// H5 不在场证明(NWT MUST-FIX 改写): 遍历本 tx 输入, 用代币模板尾部字节(H1 同源)判"没有任何代币模板输入在场"
+// 多实例代币模型下不能用 OpCovInputCount(具体 id); 用 sigScript 尾部 = redeem 模板后缀 匹配
+contract P7NoTokenInput(byte[] token_tmpl_suffix, int token_tmpl_suffix_len, int max_ins, int init_amount) {
+    int amount = init_amount;
+
+    function no_token_input_present() : bool {
+        bool found = false;
+        for (i, 0, tx.inputs.length, max_ins) {
+            byte[] ss = tx.inputs[i].sigScript;
+            int n = ss.length;
+            if (n >= token_tmpl_suffix_len) {
+                byte[] tail = ss.slice(n - token_tmpl_suffix_len, n);
+                if (tail == token_tmpl_suffix) { found = true; }
+            }
+        }
+        return !found;
+    }
+
+    #[covenant.singleton]
+    function step_without_token(State prevState, State newState) {
+        require(no_token_input_present());
+        require(newState.amount == prevState.amount);
+    }
+}

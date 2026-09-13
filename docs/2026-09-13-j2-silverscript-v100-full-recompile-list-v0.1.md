@@ -51,7 +51,11 @@
 - 4 处 `⚠two-arg-left` 全在注释（`PoolSpine_v07:327/334`、`PoolSpine_i_proto` 同）。
 - `_j2_closezk_repro4.sil`（根目录）与 `docs/provenance/…/S63A_TransitionProbe.sil` 是取证副本，随大流编，不进任何批。
 
-## 附 · 42 行明细（严格臂 × 诊断臂）
+## 附 A · 离线向量跑法补记（2026-09-13 v0.1.1 · Bettor 要求记档）
+
+v1.0.0 `cli-debugger <x>.sil --run-all --test-file <x>.test.json`：`tests[].tx.inputs[]` 除 README 写的 `utxo_value / covenant_id / state / constructor_args` 外，**每输入还可显式喂 `signature_script_hex`**（`debugger/cli/src/main.rs:712/810`，README 未写）⇒ 依赖其它输入 sigScript 的逻辑（H5 不在场证明、模板前缀锁）可离线跑；实例 `docs/provenance/2026-09-13-j2-h5-p7-no-token-input-vectors/`。expect 翻转必 FAIL（harness 不是空信息）。
+
+## 附 B · 42 行明细（严格臂 × 诊断臂）
 
 | # | 文件 | 主网集 | 批 A 机械应用（A1–A9 计数） | ctor 参数数 | 严格批 A | 类别 | 诊断臂（批 A + tx.time 中和） | 字节码 |
 |---|---|---|---|---|---|---|---|---|
