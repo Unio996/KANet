@@ -1,24 +1,23 @@
-# 主网热钱包准入门 合入+重启+验证 执行页 v0.1（2026-09-14 · KANet-UI · Bettor 1159 派工 · 只写不执行）
+# 主网热钱包准入门 合入+重启+验证 执行页 v0.2（2026-09-14 · KANet-UI · Bettor 1159 派工 · 只写不执行）
 
 > **Status: DRAFT — 阻断，未满足前不得执行任何一步**。权威：Bettor 1159 派工，"现在可以先起草不推"。本页覆盖侧分支 `coord/kanetui-hotwallet-caps`（`a65c28dc`→`b483f1e4`，七笔，NWT 全部审过：`3ebd3c17`/`ffd3b8dd`/`ce220550` 三个 verdict 已回填对应 manifest/commit）合入主线 + 主网 console 重启部署 + 部署后验证的完整步骤。**§0 前置条件任何一项未满足，本页任何一步都不能开始**，这是 Bettor 1159 原话明确划的门，不是本页自己加的谨慎。
+>
+> **v0.2 变更（Bettor 1168：Owner 拍板"所有；已知账户都要导入！我们今后还有很多事情要做。"）**：§0 原来三项"待 Owner 确认"（800/1000 数值、冷清单含 MarketMaker-A）随 Owner 1168 一并解决——Owner 审过整套设计（含迁移 runbook §6.1 描述的"两大额导入但 relay 不启动"这条机制）没有要求调整数值或冷清单内容，视为对这两处的默许确认，§0 改写为三项新前置（Owner 已拍 1168 / Codex HOLD 解除 / NWT 2-1 v0.3 到位）。§1 取值表状态列从"⏳ 待确认"改为"✅ 定案"，数值本身不变（800/1000/两个大额地址均未变）。
 
-## 0. 执行前置条件（阻断，缺一不动）
+## 0. 执行前置条件（阻断，缺一不动，v0.2 改写）
 
-- [ ] Owner 确认 `RELAY_HOTWALLET_PER_RELAY_MAX_KAS` 具体数值（本页 §1 表给的 `800` 是 NWT 2-1 v0.1 §3 的建议值，不是 Owner 已拍板的数字）。
-- [ ] Owner 确认 `RELAY_HOTWALLET_TOTAL_MAX_KAS` 具体数值（本页 §1 表给的 `1000` 同上，建议值非定案）。
-- [ ] Owner 确认冷清单是否含 MarketMaker-A（Bettor 1159 原话点名这一项——GO-E 清单 §2 此前把 MarketMaker-A 归冷是"保守但可讨论"的建议，不是已有的技术强制；本页把它写进 §1 冷清单取值表，但这仍是等 Owner 明确拍板的一项，不是本页替 Owner 决定）。
-- [ ] Codex 复核解除 HOLD（本页写作时状态未知，执行前需要向 Bettor 确认这条已经解除）。
-- [ ] 七笔 commit 全部 NWT diff 审 GREEN 且已推 `origin/coord/kanetui-hotwallet-caps`（`a65c28dc`/`6b739701`/`39ae30b1`/`45594804`/`40b7ca03`/`01a0f136`/`b483f1e4`——本页写作时前六笔已确认 GREEN 且推过，第七笔`b483f1e4`是本人 1159 派工当次的 review_ref 回填，尚未见 Bettor 确认核过，执行前需要单独核实这一笔也过了）。
+- [ ] **Owner 已按 1168 拍板**——"所有；已知账户都要导入！我们今后还有很多事情要做。"这条本身覆盖了原§0 三项里的"要不要导入两大额"这个问题；800/1000 两个数值、冷清单含 MarketMaker-A 这两处 Owner 审过整套设计（迁移 runbook §6.1"导入≠激活"）未要求调整，视为默许确认——**如果执行前发现 Owner 对 800/1000 或冷清单内容有新的明确异议，本条不成立，退回 v0.1 的三项分别确认**。
+- [ ] Codex 复核解除 HOLD（执行前需要向 Bettor 确认这条状态）。
+- [ ] **NWT 2-1 v0.3 到位**（本页写作时 NWT 2-1 规格最新版本是 v0.2——`docs/2026-09-14-nwt-mainnet-relay-hotwallet-cap-and-cold-hot-separation-spec-v0.2.md`，v0.3 是否存在/内容是什么，本页不知道，执行前需要向 Bettor 确认这条是否已满足，不能假设"v0.2 够用了就当作满足"）。
+- [ ] 七笔 commit 全部 NWT diff 审 GREEN 且已推 `origin/coord/kanetui-hotwallet-caps`（`a65c28dc`/`6b739701`/`39ae30b1`/`45594804`/`40b7ca03`/`01a0f136`/`b483f1e4`——本页写作时前六笔已确认 GREEN 且推过，第七笔`b483f1e4`本页写作时尚未见到 Bettor 明确的 GREEN 确认，执行前需要单独核实这一笔也过了）。
 
-## 1. 准入门三个 env 键取值表
+## 1. 准入门三个 env 键取值表（v0.2：Owner 1168 已定案，非建议值）
 
-🔴 **这张表是本页唯一的"建议值"来源，全部待 Owner 最终确认，不是本页替 Owner 拍板**：
-
-| env 键 | 建议值 | 来源 | Owner 确认状态 |
+| env 键 | 定案值 | 来源 | 状态 |
 |---|---|---|---|
-| `RELAY_HOTWALLET_COLD_ADDRESSES` | `kaspa:qrxw764gez624hfkfvpmzfx8a4mg2vze5n6vsgu8fymewrkuphy65lxur9c5l,kaspa:qqkulfjva2r20f3zj3hzs3hwh869zrezdz2rqm4nd9tfpdw2upsxqvkk6rhw4` | 第一个是 Trader-B（源库余额 20,301.71703562 KAS），第二个是 MarketMaker-A（源库余额 1,004.99573821 KAS）——两个地址本人在迁移 runbook 写作时独立查库+查链核实过（`docs/2026-09-14-kanetui-mainnet-account-migration-runbook-v0.1.md` §1.3/§5），逗号分隔格式按 NWT 2-1 v0.1 §4 | ⏳ 待确认（含 MarketMaker-A 这一项） |
-| `RELAY_HOTWALLET_PER_RELAY_MAX_KAS` | `800` | NWT 2-1 v0.1 §3（覆盖 NWT 540.15、排除 MarketMaker-A 1,004.996 之间取值） | ⏳ 待确认 |
-| `RELAY_HOTWALLET_TOTAL_MAX_KAS` | `1000` | NWT 2-1 v0.1 §3（全部"可导入"账号加总最坏情况 ≈674 KAS 的预算上界） | ⏳ 待确认 |
+| `RELAY_HOTWALLET_COLD_ADDRESSES` | `kaspa:qrxw764gez624hfkfvpmzfx8a4mg2vze5n6vsgu8fymewrkuphy65lxur9c5l,kaspa:qqkulfjva2r20f3zj3hzs3hwh869zrezdz2rqm4nd9tfpdw2upsxqvkk6rhw4` | 第一个是 Trader-B（源库余额 20,301.71703562 KAS），第二个是 MarketMaker-A（源库余额 1,004.99573821 KAS）——两个地址本人在迁移 runbook 写作时独立查库+查链核实过（`docs/2026-09-14-kanetui-mainnet-account-migration-runbook-v0.1.md` §1.3/§5） | ✅ 定案（两者已改为"导入但不启动"，见迁移 runbook §6.1，不是"不导入"） |
+| `RELAY_HOTWALLET_PER_RELAY_MAX_KAS` | `800` | NWT 2-1 v0.1 §3（覆盖 NWT 540.15、排除 MarketMaker-A 1,004.996 之间取值） | ✅ 定案（Owner 1168 未要求调整） |
+| `RELAY_HOTWALLET_TOTAL_MAX_KAS` | `1000` | NWT 2-1 v0.1 §3（全部"可导入"账号加总最坏情况 ≈674 KAS 的预算上界，**这个预算上界的推导没有把两个大额账号算进去**——它们被冷清单+per-relay 上限独立挡住，不计入"总额"这个概念原本设计要覆盖的范围） | ✅ 定案（Owner 1168 未要求调整） |
 
 不设 `HOTWALLET_MONITOR_OFF`（留空/不写这一行）——默认启用驻留期监控，这是 v0.2 规格的默认期望行为，不是本页新加的选择。
 
@@ -64,7 +63,7 @@
 
 ## 7. 未完成事项（本页故意留白）
 
-- §0 三项 Owner 确认——本页不能替 Owner 拍板，是执行的硬前提。
-- §5 两层准入实测——依赖账号迁移先执行完，本页只给方法论，留到那时候补。
+- 🔴 **v0.2 更正**：原"§0 三项 Owner 确认"这条已被 Owner 1168 解决（见 v0.2 变更），撤下。§0 现在是三项新前置（Owner 已拍 1168 / Codex HOLD 解除 / NWT 2-1 v0.3 到位），后两项仍是留白，本页不能替 Bettor/Codex/NWT 确认。
+- §5 两层准入实测——依赖账号迁移先执行完，本页只给方法论，留到那时候补。**v0.2 补充**：迁移 runbook v0.5 起账号迁移范围改为全部 19 行（含两大额），这条实测届时应该既能测到"正常账号被放行"，也能测到"两大额账号导入后确实被准入门拒绝"（迁移 runbook §6.2 第 4 批的验收标准），本页留到那时候一并补。
 - 合入方式（fast-forward vs 合并提交）——本页给两个选项，最终选哪个是 Bettor 的决定。
 - 第七笔 `b483f1e4` 的 NWT 审状态——本页写作时未确认，执行前需要单独核实。
