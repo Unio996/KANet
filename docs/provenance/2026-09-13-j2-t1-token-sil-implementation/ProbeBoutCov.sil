@@ -1,0 +1,21 @@
+pragma silverscript ^0.1.0;
+contract ProbeBoutCov(int init_amount, byte[32] init_owner, byte[] c_prefix, byte[] c_suffix, byte[32] c_hash, int max_ins, int max_outs) {
+    int amount = init_amount;
+    byte[32] owner = init_owner;
+    byte[] claim_tmpl_prefix = c_prefix;
+    byte[] claim_tmpl_suffix = c_suffix;
+    byte[32] claim_tmpl_hash = c_hash;
+    struct ClaimState { byte[32] winner_pk; int amount; }
+    #[covenant(binding = cov, from = max_ins, to = max_outs, name = transfer, delegate_name = transfer_delegator)]
+    function transferPolicy(State[] prev_states, State[] next_states, int[] recv_idx, ClaimState[] new_claims) {
+        for (j, 0, next_states.length, max_outs) {
+            int out_k = 0 - recv_idx[j] - 1;
+            validateOutputStateWithTemplate(out_k, new_claims[j], claim_tmpl_prefix, claim_tmpl_suffix, claim_tmpl_hash);
+            require(OpOutputCovenantId(out_k) == next_states[j].owner);
+        }
+    }
+    #[covenant.delegate]
+    function transfer_delegator() {
+        require(true);
+    }
+}

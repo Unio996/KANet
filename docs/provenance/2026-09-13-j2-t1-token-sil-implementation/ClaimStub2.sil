@@ -1,0 +1,14 @@
+pragma silverscript ^0.1.0;
+// T1 领取 covenant 替身(仅供本次 provenance 派生 claim_tmpl_prefix/suffix/hash + 各测试用 script_hex,
+// 不是真领取合约实现——T2/T3 才落地真领取逻辑)。State 形状必须与 KanetTestToken.sil 的
+// struct ClaimState { byte[32] winner_pk; int amount; } 字段顺序/类型完全一致(否则 state_span 编码
+// 对不上, validateOutputStateWithTemplate 的 blake2b(prefix||encoded_state||suffix) 算不出同一个值)。
+contract ClaimStub2(byte[32] init_winner_pk, int init_amount) {
+    byte[32] winner_pk = init_winner_pk;
+    int      amount    = init_amount;
+    #[covenant.singleton]
+    function passthrough(State prevState, State newState) {
+        require(newState.winner_pk == prevState.winner_pk);
+        require(newState.amount == prevState.amount);
+    }
+}
