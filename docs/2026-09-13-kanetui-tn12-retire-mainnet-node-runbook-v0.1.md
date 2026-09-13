@@ -1,8 +1,10 @@
-# TN12 退役 + 主网只读节点上线 runbook v0.1.1（2026-09-13 · KANet-UI · 只写不执行）
+# TN12 退役 + 主网只读节点上线 runbook v0.1.2（2026-09-13 · KANet-UI · 只写不执行）
 
 > **Status: DRAFT**。权威：`docs/DECISIONS.md` D-017（Owner 裁定：主网节点跑 da9 本机官方 v2.0.1、TN12 退役）+ COORD-LEDGER (1006) Bettor 派工。**本文档任何一步都不执行**；执行门 = 本 runbook → NWT 红队审 → Owner 终端单点 GO → 执行（逐步，每步验证）。凡涉及停节点/删数据/改端口/改服务配置，一律走此门，任何 agent 不得自行做。
 >
-> **v0.1.1 变更（NWT 红队 FINAL v0.1 对 J1 §9 的两条 PUSH-BACK，Bettor ledger (1008) 转发·MUST）**：新增 §2.0 drain 在飞交易；§3 重同步口径改条件句；§1.2 补 kaspad 当前进程命令行记档（Codex 3358c4ff / ledger (1007)：从此"D-c/D-d 在跑"只认运行进程命令行，不认脚本文件/历史验收）。**GO-1 之前，本文档任何一步都不执行，含 §2.0。**
+> **v0.1.1 变更**：新增 §2.0 drain 在飞交易；§3 重同步口径改条件句；§1.2 补 kaspad 当前进程命令行记档尝试（Codex 3358c4ff / ledger (1007)）。
+>
+> **v0.1.2 变更（NWT 红队 `fce3898e`，`docs/2026-09-13-nwt-redteam-kanetui-tn12-retire-runbook-v0.1.md`·GO-1 未放行，MUST 收敛）**：⑥ §2.0 表扩到 §1.1 全部消费者，窗口 N 改为 **minDepth=20（本仓 `check_utxo_landed` 惯例）为主判据 + 30 分钟 wall-clock 兜底**；① §2 风险条款的 LOCAL_ONLY 现查命令写死为具体 SQL；② §2.3 改**先优雅关闭、taskkill //F 只作兜底**（RocksDB 未刷盘风险），§2.5 回滚假设同步改；⑧ **撤回 v0.1.1 里"kaspad-watchdog PID 24220"的单一进程框架**——地面事实（`logs/boot-sequence.log`）是 09:45Z 重启后 boot-sequence 跑了**两遍**（Session 0 一遍 + Session 1/Startup .lnk 一遍），§1.2 改用日志链+脚本 mtime 作证据；新增 **MUST**：§2 停序须覆盖两套实例全部 PID，§2.4 除禁用 `.lnk` 外还须定位并禁掉 Session 0 那遍的触发源（非提权查不到，Bettor 在查）——**触发源未定位 = 不得进 GO-1**。**GO-1 之前，本文档任何一步都不执行，含 §2.0。**
 
 ## 0. 范围与不做什么
 - 本机（da9）：停 TN12 消费者 → 停 TN12 kaspad → 起主网 v2.0.1 只读节点，同盘、独立 datadir/端口。
@@ -30,63 +32,98 @@
 🟡 以上未必是全部（`kasia-console/src/services/` 下还有 pool-auto-better / pool-bot-autofund / pool-house-agent / bettor-position-* / bettor-reactor / bettor-resolver / bettor-scanner / bettor-scavenger / bettor-variant-expander / broker-* 等 20+ 文件带 setInterval，未逐一列出 file:line——**停 console 进程本身会一并停掉所有这些**，本表只列了 Bettor 点名的几类，不代表其余不受影响）。
 
 ### 1.2 独立 Windows 进程（console 外）
+
+> 🔴 **v0.1.2 撤回（Bettor 更正）**：v0.1.1 把当前 watchdog/mining-watchdog-v2/console-supervisor 各按**一个 PID** 记档，隐含"只有一套实例在跑"——**这是错的**。地面事实见下方"两套实例"小节，本表已按两套实例重写。
+
 | 消费者 | 证据 | 说明 |
 |---|---|---|
-| kaspad（TN12） | 现 PID 16644，`D:\kaspad-live\db-4d0a9e30\kaspad.exe`，参数见 `scripts/kaspad-watchdog.ps1:47`：`--testnet --netsuffix=12 --appdir=D:/kaspa-tn12-data --utxoindex --rpclisten-borsh=127.0.0.1:17210 --enable-unsynced-mining --ram-scale=3.0 --rocksdb-cache-size=4096` | — |
-| kaspad-watchdog | 现 PID 24220，`scripts/kaspad-watchdog.ps1` | **只启不杀哲学**（脚本头注释明示："不提供 stop 参数"）——它不会主动杀 kaspad，但 kaspad 死后 60 s tick 内会**重新拉起**；因此必须先停 watchdog 本身，否则停 kaspad 后它会把节点拉回来 |
-| tn12-mining-watchdog-v2 | 现 PID 19532，`D:\kaspa-tn12-mining\tn12-mining-watchdog-v2.ps1` | 三态判定（OWNED_RUNNING/CONFIRMED_ABSENT/UNKNOWN_OR_CONFLICT），tips≥220 brake；同样只启不杀 |
-| stratum-bridge | 由 tn12-mining-watchdog-v2 拉起，`D:\rusty-kaspa-tn10-build\release\stratum-bridge.exe`，配置 `D:\kaspa-tn12-mining\bridge-tn12-config.yaml`：`kaspad_address: 127.0.0.1:16210`（gRPC 端口），`node_mode: external` | 挖矿桥，连的是 TN12 kaspad 的 gRPC 端口（非 borsh 17210） |
-| Startup 自启动项 | `C:\Users\ADMIN\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup\KANet-TN12-BootSequence.lnk` → `powershell.exe -File D:\kanet-tn12\scripts\kanet-boot-sequence.ps1` | 每次**用户登录**触发（非 Scheduled Task），五步：①kaspad-watchdog ②等 RPC ready(超时300s) ③tn12-mining-watchdog-v2 ④kanet-start.sh(全栈) ⑤console-supervisor.sh start；**本次改造必须先改/禁用这个 .lnk，否则下次开机/登录它会把已停的 TN12 栈重新拉起** |
-| console-supervisor | 无 Scheduled Task（`Get-ScheduledTask` 对 `*KANet*`/`*Console*`/`*Kaspad*` 查询为空，2026-09-13 实测）；由 boot-sequence.ps1 步⑤ `bash scripts/kanet-console-supervisor.sh start` 拉起，是一个**后台 bash 循环**（PID 见 `logs/pids/console-supervisor.pid`），非 Windows 任务——它 curl 探活 :3200，死则自动 `kanet-start-headless.sh` 拉起 console | Bettor 问的"KANet-Console-Supervisor 任务状态"= **不存在这个任务，实体是上面那个 bash 循环** |
+| kaspad（TN12） | 现 PID 16644（**只有这一个**，两套 watchdog 实例里先注意到它缺失的那个把它拉起来，另一个"只启不杀"什么也不做），`D:\kaspad-live\db-4d0a9e30\kaspad.exe`，参数见 `scripts/kaspad-watchdog.ps1:47`：`--testnet --netsuffix=12 --appdir=D:/kaspa-tn12-data --utxoindex --rpclisten-borsh=127.0.0.1:17210 --enable-unsynced-mining --ram-scale=3.0 --rocksdb-cache-size=4096` | — |
+| kaspad-watchdog **×2** | PID **18576**（Session 0，16:45:38 本地起）+ PID **24220**（Session 1/交互登录，16:45:56 本地起）；`scripts/kaspad-watchdog.ps1` | **只启不杀哲学**——两个都要停，只停一个的话没停的那个仍会在 kaspad 死后 60 s 内把它拉回来 |
+| tn12-mining-watchdog-v2 **×2** | PID **13788**（16:48:23 本地，随 Session 0 那遍完成）+ PID **19532**（16:48:24 本地，随 Session 1 那遍完成）；`D:\kaspa-tn12-mining\tn12-mining-watchdog-v2.ps1` | 三态判定（OWNED_RUNNING/CONFIRMED_ABSENT/UNKNOWN_OR_CONFLICT），tips≥220 brake；同样只启不杀；两个都要停 |
+| stratum-bridge | 由某一个 mining-watchdog-v2 实例拉起（哪个尚未逐一核实），`D:\rusty-kaspa-tn10-build\release\stratum-bridge.exe`，配置 `D:\kaspa-tn12-mining\bridge-tn12-config.yaml`：`kaspad_address: 127.0.0.1:16210`（gRPC 端口），`node_mode: external` | 挖矿桥，连的是 TN12 kaspad 的 gRPC 端口（非 borsh 17210）；正常情况只会有一个实例真正持有它（v2 的 UNKNOWN_OR_CONFLICT 三态判定本就是防双开），但两个 watchdog 都要停才能确认 |
+| Startup 自启动项 | `C:\Users\ADMIN\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup\KANet-TN12-BootSequence.lnk` → `powershell.exe -File D:\kanet-tn12\scripts\kanet-boot-sequence.ps1` | 五步：①kaspad-watchdog ②等 RPC ready(超时300s) ③tn12-mining-watchdog-v2 ④kanet-start.sh(全栈) ⑤console-supervisor.sh start；**只是两遍触发源之一（Session 1/交互登录那遍），不是全部**，见下方"两套实例"小节 |
+| console-supervisor **×2** | 无 Scheduled Task（`Get-ScheduledTask` 对 `*KANet*`/`*Console*`/`*Kaspad*` 查询为空，2026-09-13 实测）；PID **12260**（16:48:23 本地）+ PID **2256**（16:48:24 本地），各自一个**后台 bash 循环**——两个同时探活/自愈同一个 :3200，是冗余风险；非 Windows 任务 | Bettor 问的"KANet-Console-Supervisor 任务状态"= **不存在这个任务，实体是这两个 bash 循环** |
+
+**🔴 两套实例（Bettor 更正，地面事实 = `logs/boot-sequence.log`）**：09-13 09:45Z 重启后，boot-sequence.ps1 **跑了两遍**，不是一遍：
+- 第一遍 16:45:38 本地（`=== boot sequence start ===`）→ kaspad-watchdog PID **18576**；
+- 第二遍 16:45:56 本地（同样的 `=== boot sequence start ===`，18 秒后）→ kaspad-watchdog PID **24220**；
+- 两遍各自继续跑完剩余步骤，分别在 16:48:23/16:48:24 本地完成（各自的 mining-watchdog-v2 与 console-supervisor 两行），两遍完成时间只差 1 秒——两遍应该都是各自等 kaspad RPC ready（step②最长300s），巧合在差不多同一时刻发现 RPC 已就绪。
+- **对照**：09-13 07:17Z 那次重启，boot-sequence 只跑了**一遍**（14:45:11 本地，PID 23280，与 ledger (1004) 记的一致）——两次重启行为不同，原因待核（见 §6）。
+- v0.1.1 记的 PID 24220 是这两遍里**第二遍**（Session 1/交互登录、走 `.lnk`）的 kaspad-watchdog，**不是唯一一个**，v0.1.1 把它当成"kaspad 的父进程"这个框架本身不完整——已撤回，改成上表的两套实例记法。
 
 **当前 kaspad（PID 16644）进程命令行（Codex 3358c4ff / ledger (1007) 裁定：从此"D-c/D-d 在跑"只认运行进程命令行，不认脚本文件本身或历史验收记录，本条按此要求记档）**：
 - 🔴 **本次记档失败，原样记录失败原因，不冒充成功**：`Get-CimInstance Win32_Process -Filter "ProcessId=16644"` 与按 `Name='kaspad.exe'` 查询，`CommandLine`/`Path` 字段均返回**空**；进一步核实 `SessionId=0`（非交互式会话，通常是提权/服务级上下文），我当前是非提权交互会话（`desktop-da9qq46\admin`，与 console/17428 等已知 SYSTEM 级进程同一权限边界问题，见记忆），**结构性读不到**，不是漏查。
-- **可用替代（脚本静态参数字符串，非从运行进程读出，两者不能等价）**：`scripts/kaspad-watchdog.ps1:47` 现值 `--testnet --netsuffix=12 --appdir=D:/kaspa-tn12-data --utxoindex --rpclisten-borsh=127.0.0.1:17210 --enable-unsynced-mining --ram-scale=3.0 --rocksdb-cache-size=4096`——这是 watchdog **拉起 kaspad 时会传的参数**，前提是当前 16644 确实是 watchdog 按此脚本拉起的（进程树时间线吻合，见 (1005)），但**未经进程本身验证**，不满足 Codex 3358c4ff 的"只认运行进程命令行"标准。
-- **待办**：真要满足这条权威要求，需要 J1/Bettor 提权读一次 `Get-CimInstance Win32_Process -Filter "ProcessId=16644" | Select CommandLine`（或等效的提权查询），执行本 runbook 前应补上；本 runbook 现状 = **诚实标注缺口，不是补全**。
+- **改用证据（Bettor v0.1.2 裁：日志链 + 脚本 mtime，非猜测参数字符串）**：`scripts/kaspad-watchdog.ps1` 的 mtime（`git log` 最近改动 09-06 22:55Z，早于两个 watchdog 实例 09-13 16:45Z 的起动时间，且期间文件未改）⇒ 无论是哪个实例（18576 或 24220）拉起了 16644，它读到的都是同一份 `:47` 现值——运行参数 = 脚本 :47 现值，逻辑链完整（文件在进程起动前已定、期间无改动、两个实例读同一份文件），比 v0.1.1 单纯"脚本参数字符串"的说法多了 mtime 时序证据，但仍**不是从进程本身直接读出**，跟 Codex 3358c4ff 字面要求的"运行进程命令行"仍有一层推断距离——这层距离本 runbook 认为可接受（同一文件、无改动窗口），最终是否够格由 NWT/Codex 复审判。
+- **待办**：若仍要从进程本身直接验证，需要 J1/Bettor 提权读一次 `Get-CimInstance Win32_Process -Filter "ProcessId=16644" | Select CommandLine`；非阻塞项，本 runbook 按上面的日志链证据推进。
 
 ## 2.0 drain 在飞交易（停消费者之前，NWT PUSH-BACK·MUST，GO-1 前不执行）
 
-停节点会让任何"已 submit 但还没链上确认"的交易永远卡在半吊子状态（换节点后没人再去查它的最终结果）；删数据目录后更是连查都查不清。**§2.1 开始前必须先确认下面四类都已 drain（或明确判定为"不会再动、不算在飞"）**：
+停节点会让任何"已 submit 但还没链上确认"的交易永远卡在半吊子状态（换节点后没人再去查它的最终结果）；删数据目录后更是连查都查不清。**§2.1 开始前必须先确认下面全部消费者都已 drain（或明确判定为"不会再动、不算在飞"）**：
+
+**v0.1.2（NWT MUST⑥）：下表已扩到 §1.1 全部 11 个 console 内 tick 消费者**，不再只挑 4 个。
 
 | 消费者 | 队列/状态来源 | 查询 | 判据（drained） |
 |---|---|---|---|
-| P2SH 资金相关 submit（fund/lock、settle、refund、sweep、bshard_*、closezk_v2_*，含 J2 G-1 设计 v0.2 MUST-1 点名的 4 处 `pending.submit` 站点：`kasia-relay/src/lib/p2sh.mjs:306`、`transaction.mjs:226`、`utxo-split.mjs:125/:275`） | 无独立"pending 队列表"——这些是同步调用（提交后立即拿到 txId 或抛错），风险窗口只是"最近提交、还没上链确认"；relay 侧通用出账记录表 `tx_records`（`kasia-console/src/db/migrate.js:86`，`status` 默认 `'broadcasted'`，带 `confirmations` 列，**但本 runbook 未逐一核实这张表是否覆盖全部 4 处调用点，执行前需先核实写路径**） | ① `grep -n "submit\|pending.submit" logs/relay-*.log`（或对应 relay 进程日志）取最近一段时间窗内的提交记录；② 对每个拿到的 txid，查 `kaspa_tx_log`（`migrate.js:1861`，本机嵌入式链上索引器）或 `tx_records.status`，确认已从 `broadcasted` 变为确认态（或明确 `failed`）；③ 或直接用 `scripts/_kanetui_coverify_*.cjs` 式链读模板核对 `outputs_json` |
-| relay UTXO 再平衡（`broadcaster-utxo.mjs:98`） | 同步 tick，日志行 `[broadcaster-utxo] <relay8> rebalanced N→M (target N) tx=<txid>` + 收尾 `[broadcaster-utxo] tick: N relays, rebalanced=N skipped=N failed=N` | `grep "\[broadcaster-utxo\]" logs/console.log \| tail -20` | 最近一次 tick 收尾行之后，把行里出现的每个 `tx=` 短 txid 前缀去 `kaspa_tx_log` 核实已确认（脚本注释自述"N 个输出需 ~1 confirmation"，不是 0） |
-| bshard 平仓签名队列（`bshard-close-voter.js:270`，日志标签 `[bshard-close-voter-v2]`） | 日志行本身就带计数：`[bshard-close-voter-v2] tick: N pending \| signed=x refused=y skipped=z errored=w` | `grep "\[bshard-close-voter-v2\] tick:" logs/console.log \| tail -5` | **`pending` 字段 = 0** 即为 drained（本机现状实测：`1 pending`，几笔一直是 `refused`——那是已知的 `frozen_evidence: canonical fetch fail` 弃签行为，非在飞，见 §2.0 备注） |
-| 退款自动认领（`bettor-refund-claim-auto.mjs`，表 `pool_bettor_sides`，列 `claim_txid`/`refund_attempted_at`） | 同步 tick 内提交后立即 `UPDATE ... SET claim_txid=?`；风险窗口极短（一个 tick 内） | ① `grep "\[claim-auto\]" logs/console.log \| tail -20` 看最近是否有 `CLAIMED` 行仍在发生；② 若要，SQL：`SELECT id, refund_attempted_at FROM pool_bettor_sides WHERE claim_txid IS NULL AND refund_attempted_at IS NOT NULL ORDER BY refund_attempted_at DESC LIMIT 20` | **⚠ 区分"真在飞"与"结构性死锁"**：8/22 频道已record 一批 95 笔 `claim_txid IS NULL` 且永远进不了授权函数的死锁记录（`J2-CLAIM-DEADLOCK`，protocol_status 全 `refunded` 但候选 WHERE 条件要求 `unresolved_needs_authorization`，两头堵死）——**这类不是"在飞"，等多久都不会变，是另一个已知未解问题，不算本步骤的阻塞项**；真正要等的只是"最近几分钟内 `refund_attempted_at` 有更新但还没落 `claim_txid` 的那几条" |
+| P2SH 资金相关 submit（fund/lock、settle、refund、sweep、bshard_*、closezk_v2_*，含 J2 G-1 设计 v0.2 MUST-1 点名的 4 处 `pending.submit` 站点：`kasia-relay/src/lib/p2sh.mjs:306`、`transaction.mjs:226`、`utxo-split.mjs:125/:275`） | 无独立"pending 队列表"——这些是同步调用（提交后立即拿到 txId 或抛错），风险窗口只是"最近提交、还没上链确认"；relay 侧通用出账记录表 `tx_records`（`kasia-console/src/db/migrate.js:86`，`status` 默认 `'broadcasted'`，带 `confirmations` 列，**但本 runbook 未逐一核实这张表是否覆盖全部 4 处调用点，执行前需先核实写路径**） | ① `grep -n "submit\|pending.submit" logs/relay-*.log`（或对应 relay 进程日志）取最近一段时间窗内的提交记录；② 对每个拿到的 txid，查 `kaspa_tx_log`（`migrate.js:1861`，本机嵌入式链上索引器）或 `tx_records.status`，确认已从 `broadcasted` 变为确认态（或明确 `failed`）；③ 或直接用 `scripts/_kanetui_coverify_*.cjs` 式链读模板核对 `outputs_json` | 见下方通用判据 |
+| pool-market-settler（`pool-market-settler.js:206`，表 `pool_markets` 列 `protocol_status`） | 无独立"broadcasting"锁列，风险窗口 = tick 内"生成 tx→DB 更新"之间；已知稳定态 `verifying`/`unresolved_needs_authorization`/`disputed`/`cancelled`/`settle_failed` | `grep "\[pool-market-settler\]" logs/console.log \| tail -20`（若有 submit 相关行）+ 对拿到的 txid 查 `kaspa_tx_log` | 见下方通用判据；本 runbook 未找到该文件专属的"N pending"式 tick 汇总行，只能靠日志 grep + txid 交叉核 |
+| bettor-prediction-settler（`bettor-prediction-settler.js:41`，表 `exchange_offers`） | 日志行自带计数：`[prediction-settler] tick: N expired, settled=x pending=y errored=z`（`:224`） | `grep "\[prediction-settler\] tick:" logs/console.log \| tail -5` | **`pending` 字段 = 0** |
+| bshard-settle-daemon（`bshard-settle-daemon.mjs:1031`，表 `pool_markets`） | 无独立"N pending"式 tick 汇总行；已知终态 `settle_failed`/`settled_partial_claims` | `grep "\[bshard-settle\|settle-daemon\]" logs/console.log \| tail -20` + 对近期 submit 类 txid 查 `kaspa_tx_log` | 见下方通用判据 |
+| market-seeder（`market-seeder.js:24`，表 `retail_dex_buy_publications` 列 `state`） | 状态机 `deposited→published`/`refunding→refunded\|failed` | `SELECT id, state, updated_at FROM retail_dex_buy_publications WHERE state IN ('refunding') ORDER BY updated_at DESC LIMIT 20`（`refunding` 是跨链退款中间态，风险最高） | 查询空结果，或结果里每条 `updated_at` 都已过通用判据窗口 |
+| pool-market-seeder（`pool-market-seeder.js:52`，表 `pool_markets`） | 日志行：`[pool-seeder] tick: +N market(s), live X→Y/target`（`:186`）；同步创建，非长期挂起队列 | `grep "\[pool-seeder\] tick:" logs/console.log \| tail -5` | 最近一次 tick 之后无新增（`+0`），或新增市场的建仓 tx 已过通用判据窗口 |
+| bshard 平仓签名队列（`bshard-close-voter.js:270`，日志标签 `[bshard-close-voter-v2]`） | 日志行本身就带计数：`[bshard-close-voter-v2] tick: N pending \| signed=x refused=y skipped=z errored=w` | `grep "\[bshard-close-voter-v2\] tick:" logs/console.log \| tail -5` | **`pending` 字段 = 0**（本机现状实测：`1 pending`，几笔一直是 `refused`——那是已知的 `frozen_evidence: canonical fetch fail` 弃签行为，非在飞） |
+| zk-prove-worker（`zk-prove-worker.mjs:125`，表 `zk_prove_jobs` 列 `status`） | 显式状态机 `pending→in_progress→done\|failed`（`:137-139/:230/:243`） | `SELECT id, status, updated_at FROM zk_prove_jobs WHERE status = 'in_progress' ORDER BY updated_at DESC` | 查询空结果；可交叉核 `zk-prove-job-stuck-alert.mjs` 的告警状态 |
+| 退款自动认领（`bettor-refund-claim-auto.mjs:180`，表 `pool_bettor_sides`，列 `claim_txid`/`refund_attempted_at`） | 同步 tick 内提交后立即 `UPDATE ... SET claim_txid=?`；风险窗口极短（一个 tick 内） | ① `grep "\[claim-auto\]" logs/console.log \| tail -20` 看最近是否有 `CLAIMED` 行仍在发生；② SQL：`SELECT id, refund_attempted_at FROM pool_bettor_sides WHERE claim_txid IS NULL AND refund_attempted_at IS NOT NULL ORDER BY refund_attempted_at DESC LIMIT 20` | **⚠ 区分"真在飞"与"结构性死锁"**：8/22 频道已record 一批 95 笔 `claim_txid IS NULL` 且永远进不了授权函数的死锁记录（`J2-CLAIM-DEADLOCK`，protocol_status 全 `refunded` 但候选 WHERE 条件要求 `unresolved_needs_authorization`，两头堵死）——**这类不是"在飞"，等多久都不会变，是另一个已知未解问题，不算本步骤的阻塞项**；真正要等的只是"最近几分钟内 `refund_attempted_at` 有更新但还没落 `claim_txid` 的那几条" |
+| Oracle 续期 cron（`oracle-pool-renewal-cron.mjs:212`） | 日志行：`[oracle-renewal] tick: currentDaa=D ...`（`:156/:168/:172`，无"N pending"式计数，逐次全量判断） | `grep "\[oracle-renewal\] tick:" logs/console.log \| tail -5` | 最近一次 tick 行明确是"no renewals needed"/"no local enrollments"，或已续期的最新一笔已过通用判据窗口 |
+| Oracle 链扫描 cron（`oracle-pool-chain-scanner-cron.mjs:62`） | 日志行：`[oracle-pool-scanner-cron] tick: snapshotDaa=... scanned=.../valid=.../rejected=...`；只读扫描，本身不提交 tx | `grep "\[oracle-pool-scanner-cron\] tick:" logs/console.log \| tail -5` | 只读消费者，无需等交易确认；停 console 即视为 drained，列出仅为完整性 |
+| relay UTXO 再平衡（`broadcaster-utxo.mjs:98`） | 同步 tick，日志行 `[broadcaster-utxo] <relay8> rebalanced N→M (target N) tx=<txid>` + 收尾 `[broadcaster-utxo] tick: N relays, rebalanced=N skipped=N failed=N` | `grep "\[broadcaster-utxo\]" logs/console.log \| tail -20` | 最近一次 tick 收尾行之后，把行里出现的每个 `tx=` 短 txid 前缀去 `kaspa_tx_log` 核实已确认，见下方通用判据 |
 
-**通用判据**：以上四类都查到"最近 N 分钟无新提交 + 所有近期 txid 已确认（或明确 failed）"，且 bshard-close-voter 的 `pending` 字段为 0，才算 drained，可以进 §2.1。N 的具体值（建议覆盖 2-3 个确认深度的时间窗）由执行时 NWT/Bettor 定，本 runbook 不钉死。
+**通用判据（v0.1.2 NWT MUST⑥ 钉死，不再留"由执行时定"的空白）**：对上表每一类里出现的 txid（P2SH submit / pool-market-settler / bshard-settle-daemon / market-seeder / pool-market-seeder / broadcaster-utxo），主判据 = **`checkUtxoLanded(address, txid, networkId, minDepth=20)` 返回 `landed:true`**（`kasia-relay/src/lib/p2sh.mjs:1581`，本仓既有惯例：`virtualDaaScore − blockDaaScore ≥ 20` ≈ 20× 实测单块最大间隔·~2.5s@8BPS 的深度，防浅确认被 reorg 退）；**兜底** = 若 `checkUtxoLanded` 因节点已停/不可用而查不到，改用 **30 分钟 wall-clock**（相关 log 行时间戳距当前 ≥30 min 且期间无新提交）作为退而求其次的判据。bshard-close-voter/prediction-settler 的 `pending` 字段必须为 0（这两个有精确计数，不用 minDepth/wall-clock 判据）。全部满足才算 drained，可以进 §2.1。
 
 ## 2. 停止顺序（消费者先、节点后；每步给验证命令）
 
 **核心风险（Bettor 点名，须写清）——G-2 自愈对"节点已停但仍被期待可连"窗口的行为**：
 G-2（`docs/2026-09-07-j2-g1-g2-node-trust-gate-and-console-rpc-selfheal-design-v0.1.md`，已落地 09-07）的设计是**本机 RPC 连不上 N 次后重建客户端**，且 `KASPA_RPC_LOCAL_ONLY=1` 时**理应**跳过 discovery、直接 fail-closed 报 `no RPC node available`——这本身对"节点已停"是安全的（不会去连别的节点）。**但**当前有一个**未闭合**的已知缺口（NWT/J2 2026-09-13 核实、Codex 9fff92b0 第 2 条确认）：`rpc-health.js` 的 `getWorkingRpc()` 在本机 RPC 失败后**仍会走 `checkConfigured()`**，如果 DB 里配置了某个"已配置的外部 TN12 端点"，LOCAL_ONLY 挡不住这条路 ⇒ **停 TN12 节点后，console 有非零概率悄悄连到别的 TN12 公网节点继续 tick，而不是真正静默**。
-⇒ **停节点前必须先核 DB 里有没有配置外部 TN12 RPC 端点**（`adapter_nodes` 或类似表，具体字段待执行时现查），有则一并清空或改成本机 loopback-only，否则"停节点"不等于"consumer 真的停了"。这条在 (a) LOCAL_ONLY 严格语义设计落地前是**已知未消除的风险**，不是本 runbook 能单独关掉的，只能靠"停之前核实配置"降低。
+⇒ **停节点前必须先核 DB 里有没有配置外部 TN12 RPC 端点**，有则一并清空或改成本机 loopback-only，否则"停节点"不等于"consumer 真的停了"。这条在 (a) LOCAL_ONLY 严格语义设计落地前是**已知未消除的风险**，不是本 runbook 能单独关掉的，只能靠"停之前核实配置"降低。
+
+**v0.1.2（NWT MUST①）现查命令（写死，非"执行时现查"）**：
+```sql
+SELECT key, category, value_encrypted, is_sensitive, updated_at FROM config_entries WHERE key = 'rpc_url';
+```
+（`kasia-console/src/services/rpc-health.js:139` `checkConfigured()` 读 `getConfig('rpc_url')`；`kasia-console/src/data/settings/configs.js:6` `getConfig` 的底层查询就是 `SELECT * FROM config_entries WHERE key = ?`；写入方 `kasia-console/src/api/settings.js:27` 固定 `category: 'node'`。）非空且 `value_encrypted` 不是本机 loopback（`ws://127.0.0.1:...` / `127.0.0.1`）⇒ 命中风险，执行时须清空该行（`DELETE FROM config_entries WHERE key='rpc_url'`）或改写成本机地址，再进 §2.1。
 
 ### 2.1 停消费者（console + console 侧子系统）
 1. 通知频道 + Bettor（不可逆操作前置报备）。
-2. 核 DB 有无外部 TN12 RPC 端点配置（见上，风险条款）。
+2. 核 DB 有无外部 TN12 RPC 端点配置（见上，风险条款，SQL 已给）。
 3. `bash kanet-stop.sh`（会停 console 及其全部子进程/tick，见 §1.1 全表）。
 4. 验证：`curl -sf http://127.0.0.1:3200/` 应连接失败（非 200/302）；`netstat -ano | grep :3200` 应无 LISTENING。
 
-### 2.2 停挖矿桥 + mining-watchdog-v2
-1. 先停 `tn12-mining-watchdog-v2.ps1`（PID 19532，`Stop-Process`）——它是"只启不杀"，先停它才能安全停下游 stratum-bridge 而不被它当"死了"重新拉起。
-2. 停 `stratum-bridge.exe`（由 watchdog 拉起的子进程，watchdog 停后手动确认其已退出或单独停）。
-3. 验证：`Get-Process stratum-bridge -ErrorAction SilentlyContinue` 应为空；watchdog 自身的 `_watchdog.log` 末行应无新 tick。
+### 2.2 停挖矿桥 + mining-watchdog-v2（两套实例都要停，见 §1.2）
+1. 先停两个 `tn12-mining-watchdog-v2.ps1` 实例（PID **13788** 与 **19532**，`Stop-Process`）——它们是"只启不杀"，先停才能安全停下游 stratum-bridge 而不被当"死了"重新拉起。
+2. 停 `stratum-bridge.exe`（由其中一个 watchdog 拉起的子进程，两个 watchdog 都停后手动确认其已退出或单独停）。
+3. 验证：`Get-Process -Name tn12-mining-watchdog-v2,stratum-bridge -ErrorAction SilentlyContinue` 应为空（两个 PID 都要确认，不是查到一个就停）；各自 `_watchdog.log` 末行应无新 tick。
 
-### 2.3 停 kaspad-watchdog，再停 kaspad
-1. **先停 watchdog**（PID 24220，`Stop-Process`）——不先停它，停 kaspad 后 60 s 内会被拉回来。
-2. 再停 kaspad（PID 16644，`taskkill //PID 16644 //F`）。
-3. 验证：`Get-Process kaspad -ErrorAction SilentlyContinue` 应为空；`netstat -ano | grep :17210` 应无 LISTENING；等 90 s 后再查一次确认 watchdog 没把它拉回来（60 s tick + 余量）。
+### 2.3 停 kaspad-watchdog（两套实例），再优雅停 kaspad，taskkill //F 只作兜底（v0.1.2 NWT MUST② 改）
 
-### 2.4 禁用开机自启动（否则下次登录/重启整套 TN12 栈会被拉回）
-1. `KANet-TN12-BootSequence.lnk`：改名加 `.disabled` 后缀（同目录已有 `tn10-mining-watchdog.cmd.disabled` 先例，是本仓沿用的禁用记号），**不删除**（保留可回滚）。
-2. 验证：下次登录不应再看到 boot-sequence.log 有新的 "=== boot sequence start ===" 行。
+**先停两个 watchdog**（PID **18576** 与 **24220**，`Stop-Process` 各一次）——不先停它们，停 kaspad 后 60 s 内会被其中任一个拉回来；两个都要停，只停一个不够（见 §1.2 两套实例）。
+
+**再停 kaspad，优雅关闭优先，`taskkill //F` 只作兜底**（RocksDB 未刷盘风险——kaspad 源码 `core/src/signals.rs`（本机 `/d/rusty-kaspa/core/src/signals.rs` 已读源码核实）用 `ctrlc::set_handler` 捕获首次中断信号触发 `shutdown()`（应含 RocksDB flush），**若收到第二次信号会直接 `std::process::exit(1)` 强杀**——所以只发一次信号、耐心等，不要连续两次）：
+1. **优雅**：`taskkill //PID 16644`（**不带 //F**——Windows 对控制台进程的非强制 `taskkill` 会投递控制台中断事件，触发上面那个 `ctrlc` 处理器），等待最多 60 s。
+2. 轮询 `Get-Process -Id 16644 -ErrorAction SilentlyContinue`，进程消失即优雅退出成功，跳到步骤 4。
+3. **兜底**（60 s 后仍在跑才用）：`taskkill //PID 16644 //F`——**标注风险**：这条路径跳过了 `ctrlc` 处理器的 `shutdown()`，RocksDB 可能有未刷盘的写入，下次起 kaspad 时留意启动日志有无恢复/修复相关提示，异常则升级不要自行处理。
+4. 验证：`Get-Process kaspad -ErrorAction SilentlyContinue` 应为空；`netstat -ano | grep :17210` 应无 LISTENING；等 90 s 后再查一次确认两个 watchdog 都没把它拉回来（60 s tick + 余量）。
+
+### 2.4 禁用开机自启动（两个触发源都要处理，否则下次登录/重启整套 TN12 栈会被拉回）
+
+🔴 **v0.1.2 新 MUST（NWT）：本节第 2 点是 GO-1 前置，不是"尽量做"** —— §1.2 已证实 09-13 09:45Z 重启后 boot-sequence 跑了两遍（Session 0 一遍 + Session 1/`.lnk` 一遍），Session 1 那遍的触发源明确（`.lnk`），**Session 0 那遍的触发源尚未定位**（非提权 `Get-ScheduledTask` 查不到，Bettor 在另外查）。只禁 `.lnk` 只堵住其中一个触发源，Session 0 那个不堵，下次重启/登录整套 TN12 栈会被它重新拉回来——**这条不是"最好也做"，是"没做完不能进 GO-1"**。
+
+1. `KANet-TN12-BootSequence.lnk`：改名加 `.disabled` 后缀（同目录已有 `tn10-mining-watchdog.cmd.disabled` 先例，是本仓沿用的禁用记号），**不删除**（保留可回滚）——这一步只堵 Session 1 那个触发源。
+2. **🔴 Session 0 触发源必须先定位并禁用，此项未完成前不得进 GO-1**：待 Bettor 提权查明（候选方向：提权 `Get-ScheduledTask`/组策略启动脚本/服务/WMI 事件订阅——本 runbook 不猜测，等实测结果）。
+3. 验证：下次登录/重启不应再看到 boot-sequence.log 有任何新的 "=== boot sequence start ===" 行（两遍都不该再出现，不是"少了一遍"）。
 
 ### 2.5 回滚（任何一步出问题）
-- 恢复 `.lnk`（去掉 `.disabled` 后缀）。
-- 重新手动起 `kaspad-watchdog.ps1` → 等 RPC ready → `tn12-mining-watchdog-v2.ps1` → `kanet-start.sh` → `console-supervisor.sh start`（= boot-sequence.ps1 的五步，手动顺序重放）。
-- kaspad 本身不需要特殊恢复：`--appdir=D:/kaspa-tn12-data` 数据目录本步骤未删，watchdog 拉起后会从原状态继续。
+- 恢复 `.lnk`（去掉 `.disabled` 后缀）+ 恢复 §2.4-2 里禁用的 Session 0 触发源。
+- 重新手动起两套 `kaspad-watchdog.ps1` → 等 RPC ready → 两套 `tn12-mining-watchdog-v2.ps1` → `kanet-start.sh` → 两套 `console-supervisor.sh start`（= boot-sequence.ps1 的五步，两个触发源各自手动顺序重放一遍）。
+- kaspad 本身：若走的是 §2.3 步骤 1-2 的优雅路径，`--appdir=D:/kaspa-tn12-data` 数据目录应正常，watchdog 拉起后直接从原状态继续；**若走了步骤 3 的 `//F` 兜底**，重启前留意 kaspad 启动日志有无 RocksDB 恢复/修复相关提示，异常升级不自行处理。
 
 ## 3. TN12 数据目录
 
@@ -137,7 +174,7 @@ kaspad.exe --appdir=D:\kaspa-mainnet-data --utxoindex --rpclisten-borsh=127.0.0.
 
 ## 5. GO 检查点（哪一步之前必须 Owner 一句 GO，非菜单）
 
-1. **GO-1（本 runbook 整体执行前）**：Owner 看过本 runbook + NWT 红队审结论，终端单点确认可以开始 §2.1。
+1. **GO-1（本 runbook 整体执行前）**：Owner 看过本 runbook + NWT 红队审结论，终端单点确认可以开始 §2.1。**v0.1.2 新增硬前置**：§2.4 的 Session 0 触发源必须已定位并有禁用方案，否则不得进 GO-1（禁用 `.lnk` 只堵一半）。
 2. **GO-2（§2.3 停 kaspad 前，若与 GO-1 分开要）**：TN12 停节点是本次唯一真正不可逆的"服务中断"动作（消费者/挖矿桥停止都可随时重启复原，节点数据本身不删），若 Owner 想在这一步再确认一次可单独设卡；默认并入 GO-1，除非 Owner 要求拆开。
 3. **GO-3（§4 起主网节点前）**：确认 §4.2 的 `D:\kaspa-mainnet-data` 陈旧内容已判断清楚（复用或清空）之后再起。
 4. **GO-4（独立、晚于本 runbook）**：删除 `D:\kaspa-tn12-data`（§3）——主网节点同步完成后的第二次 GO，与本 runbook 执行无关联时间点，另开一次报备。
@@ -146,8 +183,8 @@ kaspad.exe --appdir=D:\kaspa-mainnet-data --utxoindex --rpclisten-borsh=127.0.0.
 
 - §4.2 `D:\kaspa-mainnet-data` 旧内容具体是什么、能不能复用——执行前必查，本 runbook 不代查。
 - §4.4 主网 IBD 预计时长——无可引用坐标，等 J2/官方文档。
-- §2 风险条款提到的 DB 外部 TN12 RPC 端点配置——具体字段/表名待执行时现查（不在本 runbook 阅读阶段做，因为这本身是只读核查，放执行步骤里更准确）。
 - pinned silverc 确切路径——待 J2/NWT 核对（确定不在 `D:\kaspa-tn12-data` 内，不影响 §3 删除范围判断）。
-- §1.2 kaspad 16644 的真实运行进程命令行——本次非提权查询结构性读不到（`SessionId=0`），需 J1/Bettor 提权补一次，执行本 runbook 前应补上（Codex 3358c4ff 的硬要求）。
+- §1.2 kaspad 16644 的真实运行进程命令行——非提权查询结构性读不到（`SessionId=0`），本 runbook 改用 boot-sequence.log + 脚本 mtime 的日志链证据顶上（v0.1.2），若仍要从进程本身直接验证需 J1/Bettor 提权，非阻塞项。
 - §2.0 `tx_records` 表是否覆盖 `p2sh.mjs`/`utxo-split.mjs` 全部 4 处 submit 调用点的写路径——本 runbook 未逐一追踪代码确认，执行前应核实，不确定则以 relay 日志 grep + `kaspa_tx_log` 交叉核对为准。
-- §2.0 drain 的等待窗口 N（分钟）——本 runbook 未钉死具体值，执行时 NWT/Bettor 定。
+- **🔴 §2.4 Session 0 触发源尚未定位（v0.1.2 新增，GO-1 硬前置，见 §2.4/§5 GO-1）**——Bettor 在查，非提权工具（`Get-ScheduledTask`）看不到，候选方向未定，本 runbook 不猜测。
+- **§6 待核（v0.1.2 新增）：09-13 两次重启行为不对称，原因未知**——07:17Z 那次重启 boot-sequence 只跑了一遍（14:45:11 本地，PID 23280），09:45Z 那次跑了两遍（16:45:38 本地 PID 18576 + 16:45:56 本地 PID 24220，相隔仅 18 秒）。Bettor 猜测"当时 Owner 登录态触发 `.lnk` + 系统级触发叠加"，本 runbook 未独立验证这个猜测，只记录现象：两次重启的触发路径数量不同，且第二次的两遍触发时间相隔极短（18 秒），更像是两个独立触发源几乎同时命中，而不是同一触发源重复了一次。
