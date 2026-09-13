@@ -27,7 +27,8 @@ const Resolver = kaspa.Resolver || null;  // npm ^0.13.0 removed Resolver
 // ── Config ──────────────────────────────────────────────────────────────────
 
 const CONSOLE_URL   = process.env.CONSOLE_URL || '';
-const KASPA_NETWORK = process.env.KASPA_NETWORK || 'mainnet';
+import { configuredNetwork as _configuredNetwork } from './lib/kaspa-network.mjs';
+const KASPA_NETWORK = _configuredNetwork();   // (b) 网络单一源 I1: 未设/未知 ⇒ 顶层 throw, relay 起不来即暴露(原 `|| 'mainnet'` = 默认漂移)
 
 const RECONNECT_BASE_MS      = 5000;
 const RECONNECT_MAX_MS       = 60000;

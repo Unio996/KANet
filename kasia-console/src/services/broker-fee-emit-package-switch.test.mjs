@@ -41,7 +41,8 @@ function seedMarket(id, over = {}) {
   const uniq = [...new Set(cols)];
   const defaults = {
     protocol_version: 'v0.7', protocol_status: 'completed', broker_pk: null, settle_txid: null,
-    spine_p2sh: 'kaspatest:dummy', resolution_rule_spec: '{}', metadata: '{}', fee_rules: null,
+    spine_p2sh: 'kaspatest:qpumuen7l8wthtz45p3ftn58pvrs9xlumvkuu2xet8egzkcklqtes5z8rkmpd',   // (b) 夹具须过 bech32 校验和(kaspa-network helper 不再从前缀推网络); 固定测试私钥 0x…01 派生, 见 kaspa-network.vectors.json V1
+    resolution_rule_spec: '{}', metadata: '{}', fee_rules: null,
     maker_stake_amount: 0, deadline_daa: 1000, deadline: 1000, pool_merkle_root: 'aa'.repeat(32), maker_pk: 'ff'.repeat(32),
   };
   const vals = uniq.map(c => (c === 'id' ? id : (over[c] !== undefined ? over[c] : (defaults[c] !== undefined ? defaults[c] : 'x'))));

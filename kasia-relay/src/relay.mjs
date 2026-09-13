@@ -5,6 +5,7 @@ import { getConversations, getMessages, sendMessage, acceptHandshake, sendKaspa,
 import { getWallet } from "./lib/wallet.mjs";
 import { isValidKaspaAddress } from "./lib/crypto.mjs";
 import { ingestMessage, ingestReply, ingestTx, ingestHandshake } from "./ingest.mjs";
+import { assertAddressOnNetwork } from './lib/kaspa-network.mjs';   // (b) 网络单一源 (设计 v0.2 §3): 前缀只对照 env KASPA_NETWORK, 不从地址推网络
 
 const RELAY_MODE = process.env.RELAY_MODE || "indexer";
 const POLL_MS = parseInt(process.env.POLL_MS || "2000");
@@ -675,7 +676,7 @@ if (process.send) {
           const wallet = getWallet();
           const addr = wallet.getAddress();
           const xOnlyHex = kaspa.XOnlyPublicKey.fromAddress(new kaspa.Address(addr)).toString();
-          const networkId = String(addr).startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+          const networkId = assertAddressOnNetwork(addr, { who: 'relay.mjs:678' });
           const { marketId, bettorPk, direction, payAmountSompi, betId } = cmd;
           if (!marketId || !bettorPk || direction == null || !payAmountSompi || !betId) {
             throw new Error('get_per_bet_address: marketId/bettorPk/direction/payAmountSompi/betId 必传 (per-bet 唯一性)');

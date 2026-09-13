@@ -45,13 +45,22 @@ export async function startRelay(relayNodeId) {
   if (!account) return { ok: false, reason: 'account_not_found' };
   if (!account.address) return { ok: false, reason: 'no_address' };
 
+  // (b) 网络单一源 I4 (设计 v0.2 §2.1 / F6): env KASPA_NETWORK 是唯一真相; relay_nodes.network 行值 ≠ env ⇒ 该 relay 不进 live 路径(不重映射)。
+  //   D-017 主网过渡态: 32 行 testnet-12 relay 在 env=mainnet 下由此拒起 = TN12 退役的代码侧表达。
+  //   同批: 原 `account.network || 'mainnet'` 给子进程的 KASPA_NETWORK 是默认漂移(R-NET-DEFAULT-DRIFT), 改 configuredNetwork()。
+  const { configuredNetwork, rowNetworkMatches } = await import('../lib/kaspa-network.mjs');
+  const net = configuredNetwork();
+  if (account.network && !rowNetworkMatches(account.network, { network: net })) {
+    console.warn(`[relay-manager] refuse start ${account.name}: relay_nodes.network=${account.network} != KASPA_NETWORK=${net} (I4: row network is not a second source)`);
+    return { ok: false, reason: 'network_mismatch' };
+  }
   // Ensure this agent's address is registered as 'local' identity
   // Without this, Scout won't recognize handshakes to this agent, and relation_states won't be created
-  const existingId = sqlite.prepare('SELECT id, identity_type FROM identities WHERE address = ? AND network = ?').get(account.address, account.network || 'mainnet');
+  const existingId = sqlite.prepare('SELECT id, identity_type FROM identities WHERE address = ? AND network = ?').get(account.address, net);
   if (!existingId) {
     const { randomUUID } = await import('crypto');
     const now = new Date().toISOString();
-    sqlite.prepare("INSERT INTO identities (id, network, address, display_name, identity_type, created_at, updated_at) VALUES (?, ?, ?, ?, 'local', ?, ?)").run(randomUUID(), account.network || 'mainnet', account.address, account.name, now, now);
+    sqlite.prepare("INSERT INTO identities (id, network, address, display_name, identity_type, created_at, updated_at) VALUES (?, ?, ?, ?, 'local', ?, ?)").run(randomUUID(), net, account.address, account.name, now, now);
     console.log(`[relay-manager] Created local identity for ${account.name}`);
   } else if (existingId.identity_type !== 'local') {
     sqlite.prepare("UPDATE identities SET identity_type = 'local' WHERE id = ?").run(existingId.id);
@@ -76,8 +85,8 @@ export async function startRelay(relayNodeId) {
     CONSOLE_URL: `http://localhost:${CONSOLE_PORT}`,
     INGEST_SECRET: ingestSecret,
     RELAY_NODE_ID: relayNodeId,
-    NETWORK: account.network || 'mainnet',
-    KASPA_NETWORK: account.network || 'mainnet',
+    NETWORK: net,
+    KASPA_NETWORK: net,   // (b) 单一源: env KASPA_NETWORK(已核 = relay_nodes.network)
     KASPA_RPC_URL: rpcUrl,
     RELAY_MODE: relayMode,
     POLL_MS: String(account.poll_ms || 2000),

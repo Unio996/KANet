@@ -16,6 +16,34 @@ import { recordChainEvent } from './chain-event.js';
 import { checkLimits } from './trade-limits.js';
 import { placeOrder } from './exchange-orders.js';
 import { decrypt } from './crypto.js';
+import { assertAddressOnNetwork, checkAddressOnNetwork, configuredNetwork } from '../lib/kaspa-network.mjs';   // (b) 网络单一源 (设计 v0.2 §3): 前缀只对照 env KASPA_NETWORK, 不从地址推网络
+
+// (b) §2.3 入站站点(对手方可控字段 msg.p2sh_addr / msg.spine_p2sh)的拒绝记录限频 —— NWT Q1 条件(PASS-with-condition):
+//   逐次落 events = 对手方塞任意坏串就能刷表(P2-6 刚治过 events 全扫)。每 (site, code) 10 min 只落一行 + 一行 warn, 行内带本窗计数。
+//   helper 本身不写 events(纯函数); 计数器住这里(与 ibd-tick-gate.mjs 的 _state 同形)。
+const NET_REJECT_NOTE_MS = 10 * 60 * 1000;
+const _netRejectState = new Map();   // `${site}|${code}` → { count, lastNoteAt }
+function _inboundNetCheck(addr, site) {
+  const r = checkAddressOnNetwork(addr, { who: site });
+  if (r.ok) return r;
+  const key = `${site}|${r.code}`;
+  const st = _netRejectState.get(key) || { count: 0, lastNoteAt: 0 };
+  st.count++;
+  const now = Date.now();
+  if (now - st.lastNoteAt >= NET_REJECT_NOTE_MS) {
+    st.lastNoteAt = now;
+    console.warn(`[${site}] reject: address not on configured network (code=${r.code} expected=${r.expectedPrefix} actual=${r.actualPrefix || '-'} addr=${r.addr}) — ${st.count} in window; next note in 10 min`);
+    try {
+      sqlite.prepare(`INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at)
+        VALUES (?, 'system', 'inbound_address_network_reject', ?, 'warn', ?, ?, datetime('now'))`)
+        .run(randomUUID(), site, `入站地址不在配置网络 ${configuredNetwork()} (code=${r.code}; 10 min 窗内 ${st.count} 次; 限频只记一行)`, JSON.stringify({ code: r.code, expectedPrefix: r.expectedPrefix, actualPrefix: r.actualPrefix, addr: r.addr, count: st.count }));
+    } catch (e) { console.warn(`[${site}] events write failed (non-fatal): ${e.message}`); }
+    st.count = 0;
+  }
+  _netRejectState.set(key, st);
+  return r;
+}
+export function _resetInboundNetRejectState() { _netRejectState.clear(); }
 // exchange-machine imports merged below at line ~352
 
 /**
@@ -368,7 +396,9 @@ async function handleOracleStakeEnroll(msg) {
   }
 
   // 1. Recompute P2SH (= ctor anchor 跨节点同源 invariant). Mismatch = forgery / version skew.
-  const network = (msg.p2sh_addr || '').startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+  const _nc = _inboundNetCheck(msg.p2sh_addr, 'trade-filter:oracle-enroll');   // (b) 入站: 不抛, 丢消息 + 限频记录(原 (x||'') ⇒ 空串当 mainnet)
+  if (!_nc.ok) return;
+  const network = _nc.network;
   let recomputed;
   try {
     const { computeStakeP2SH_v1 } = await import('../lib/oracle-stake-v1.mjs');
@@ -784,7 +814,9 @@ async function handlePoolMarketPublished(msg) {
       return;
     }
     const { RpcClient, Encoding, Address } = await import('kaspa-wasm');
-    const network = msg.spine_p2sh.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+    const _nc = _inboundNetCheck(msg.spine_p2sh, 'trade-filter:market-pub');   // (b) 入站: 不抛, 丢消息 + 限频记录
+    if (!_nc.ok) return;
+    const network = _nc.network;
     const rpc = new RpcClient({ url: rpcUrl, encoding: Encoding.Borsh, networkId: network });
     let utxos;
     try {
@@ -1422,6 +1454,10 @@ async function handlePoolBetRegistered(msg) {
     return;
   }
 
+  // (b) 网络单一源: 本机 market 行的 spine_p2sh 必须在配置网络上(D-017 过渡态存量 kaspatest 行在主网进程里由此丢弃); 入站路径不抛, 限频记录。
+  const _bnc = _inboundNetCheck(market.spine_p2sh, 'trade-filter:bet-reg');
+  if (!_bnc.ok) return;
+
   // 2. Recompute side_p2sh + verify == payload. Path differs v0.5/v0.6/v0.7.
   // J2-tn r345 (J1 r320 catch): v0.7 path 漏 → 跨节点 bet ingest 全栈 silent skip → settle 路径
   // 0 bettors visible 跨节点 → committee 抽样后 fund-lock 错 → settle 出账失败. fix mirror api/pool.js
@@ -1431,7 +1467,7 @@ async function handlePoolBetRegistered(msg) {
   try {
     const ver = msg.protocol_version || market.protocol_version;
     const spineP2shHash = createHash('sha256').update(market.spine_p2sh).digest('hex');
-    const network = market.spine_p2sh.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+    const network = _bnc.network;   // (b) 上方已核
     if (ver === 'v0.7') {
       const { computeSideP2SH_v07 } = await import('../lib/pool-p2sh-v07.mjs');
       const r = await computeSideP2SH_v07({
@@ -1467,7 +1503,7 @@ async function handlePoolBetRegistered(msg) {
   //    daa, zero divergence. The committee bettor-exclude set chain-anchors to side_lock_daa <= deadline_daa.
   const cap = await captureSideLockDaa({
     side_p2sh: msg.side_p2sh, side_lock_tx: msg.side_lock_tx, stake_amount: msg.stake_amount,
-    network: market.spine_p2sh.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet',
+    network: _bnc.network,   // (b) 上方已核
   });
   if (cap.reason === 'no-rpc' || cap.reason.startsWith('rpc-fail')) {
     console.warn(`[trade-filter:bet-reg] ${cap.reason} market=${msg.market_id.slice(0,12)} — skip (replay later)`);

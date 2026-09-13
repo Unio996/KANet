@@ -33,6 +33,7 @@ import { _splicePayoutV2CloseRedeem, readPayoutShardV2AttestedState } from '../l
 import { deriveSettlementFeeLeaves } from '../lib/pool-shard-settle.mjs';
 import { enqueueZkProveJob } from '../lib/zk-prove-enqueue.mjs';
 import { persistPayoutShardState } from '../lib/payout-shard-persist.mjs';
+import { assertAddressOnNetwork } from '../lib/kaspa-network.mjs';   // (b) 网络单一源 (设计 v0.2 §3): 前缀只对照 env KASPA_NETWORK, 不从地址推网络
 
 const TICK_MS = 30_000;   // 30s tick (close_attest 时效性 > 普通 vote; settler 等 quorum)
 let timer = null, running = false;
@@ -138,7 +139,7 @@ export function _shard9PhantomExcludeFor(marketId) {
  * @param {{id, deadline_daa}} market   pool_markets v0.7 row (logical market)
  */
 export function buildEnforceCtx(voter, voterPk, market) {
-  const network = String(voter.address || '').startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+  const network = assertAddressOnNetwork(voter.address, { who: 'bshard-close-voter.js:141' });
   const chainReader = createRelayChainReader(voter.id);
   const deadlineDaa = (market.deadline_daa != null && Number.isFinite(Number(market.deadline_daa))) ? Number(market.deadline_daa) : null;
   // W2 blockhash_parity(J2 2026-07-07·Bettor 钉①): daemon 自己本地 market 行的 resolution_rule_spec, 供
@@ -675,7 +676,7 @@ async function _persistAttestedPsState(marketId, req, txId, psContAddress) {
     // 🔴 network 来源: tick 内没有 voter, 改用两个调用点都已持有的 psContAddress —— 它本身就是 kaspa
     //    地址, 判法与 buildEnforceCtx(:138) 同款同源, 不新造真相来源。
     try { await ensureKaspaWasm(); } catch { /* 交给 p2sh 那一层记账降级, 不在这里吞掉主流程 */ }
-    const network = String(psContAddress || '').startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+    const network = assertAddressOnNetwork(psContAddress, { who: 'bshard-close-voter.js:678' });
     persistPayoutShardState({
       sqlite, marketId, redeemHex: spliced, outpoint: `${txId}:0`,
       p2sh: (hex) => p2shFromRedeemSync(hex, network), source: 'bshard-close-submit-v2',

@@ -6,6 +6,7 @@
 
 import { sqlite } from '../db/client.js';
 import { persistPayoutShardState } from './payout-shard-persist.mjs';
+import { assertAddressOnNetwork } from './kaspa-network.mjs';   // (b) 网络单一源 (设计 v0.2 §3): 前缀只对照 env KASPA_NETWORK, 不从地址推网络
 
 const QUORUM = 4;   // 4-of-5 committee (close_attest .sil require ≥4 distinct sig)
 
@@ -283,7 +284,7 @@ export async function buildProposeCloseRequestV2(marketId, judged) {
     if (needConsolidate) {
       const relayAddrForConsolidate = (await rc({ type: 'get_pubkey' })).address;
       const kaspaForP2sh = await import('kaspa-wasm');
-      const p2shFn = (redeemHex) => kaspaForP2sh.addressFromScriptPublicKey(kaspaForP2sh.ScriptBuilder.fromScript(new Uint8Array(Buffer.from(redeemHex, 'hex'))).createPayToScriptHashScript(), relayAddrForConsolidate.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet').toString();
+      const p2shFn = (redeemHex) => kaspaForP2sh.addressFromScriptPublicKey(kaspaForP2sh.ScriptBuilder.fromScript(new Uint8Array(Buffer.from(redeemHex, 'hex'))).createPayToScriptHashScript(), assertAddressOnNetwork(relayAddrForConsolidate, { who: 'bshard-close-transport.mjs:286' })).toString();
       const { transferAndConfirm } = await import('../services/relay-manager.js');
       const { REORG_SAFE_MIN_DEPTH } = await import('./pool-shard-register.mjs');
       const landedFn = async (txid, addr) => { for (let i = 0; i < 25; i++) { const j = await sendCommandAsync(settlerRelayId, { type: 'check_utxo_landed', address: addr, txid, minDepth: REORG_SAFE_MIN_DEPTH }, 20000, 'internal'); if (j.landed || j.found) return true; await new Promise(r => setTimeout(r, 2000)); } return false; };

@@ -30,6 +30,7 @@ import {
   isEvmChain,
 } from '../services/chains.js';
 import { recordChainEvent } from '../services/chain-event.js';
+import { assertAddressOnNetwork } from '../lib/kaspa-network.mjs';   // (b) 网络单一源 (设计 v0.2 §3): 前缀只对照 env KASPA_NETWORK, 不从地址推网络
 
 const KANET_ROOT = process.env.KANET_ROOT || 'D:/Anthropic';
 const MINDS_DIR = `${KANET_ROOT}/agent-mind/minds`;
@@ -241,7 +242,7 @@ export async function registerRelayRoutes(fastify) {
       try {
         const kaspa = await import('kaspa-wasm');
         const addr = relay.address;
-        const net = (addr || '').startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+        const net = assertAddressOnNetwork(addr, { who: 'relay.js:244' });
         const pk = kaspa.XOnlyPublicKey.fromAddress(new kaspa.Address(addr)).toString();
         const roundTrip = new kaspa.XOnlyPublicKey(pk).toAddress(net).toString();
         if (roundTrip !== addr) {

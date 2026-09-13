@@ -496,7 +496,7 @@ function checkR10() {
 const _NET_INFER = /startsWith\(\s*['"]kaspatest:['"]\s*\)\s*\?|\.replace\(\s*\/\^kaspatest:\//;
 const _NET_EITHER = /startsWith\(\s*['"]kaspa:['"]\s*\)\s*(?:\|\||&&)\s*!?[\w.()]*startsWith\(\s*['"]kaspatest:['"]\s*\)|startsWith\(\s*['"]kaspatest:['"]\s*\)\s*(?:\|\||&&)\s*!?[\w.()]*startsWith\(\s*['"]kaspa:['"]\s*\)/;
 const _NET_DEFAULT = /\|\|\s*['"](?:mainnet|testnet-1[12])['"]/;
-const _NET_PREFIX_STRICT = false;   // b2 落地时翻 true ⇒ INFER/EITHER 由 warn 升 violate
+const _NET_PREFIX_STRICT = true;    // b2 (33 处替换落地) 已翻: INFER/EITHER = violate(BLOCK); DEFAULT-DRIFT 仍 WARN(45 处另一笔)
 function checkR_NET_PREFIX(fp, content) {
   const rel = path.relative(ROOT, fp).replace(/\\/g, '/');
   if (!/^(kasia-console\/src|kasia-relay\/src|shared\/lib)\//.test(rel)) return;

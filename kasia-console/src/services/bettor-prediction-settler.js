@@ -25,6 +25,7 @@ import { verifyPredictionOutcome } from './bettor-prediction-verifier.js';
 import { transition } from './exchange-machine.js';
 import { sendCommandAsync } from './relay-manager.js';
 import { getConfig } from '../data/settings/configs.js';
+import { isAddressOnNetwork } from '../lib/kaspa-network.mjs';   // (b) 网络单一源 (设计 v0.2 §3 #31)
 
 const TICK_INTERVAL_MS = 5 * 60 * 1000;  // 5 min
 const STARTUP_GRACE_MS = 30 * 1000;       // 30s grace 让 Console boot 其他 cron 先稳
@@ -156,7 +157,7 @@ export async function settlePredictionOutcomes() {
           : offer.taker;
         // r216 Bug surfaced: 之前 `startsWith('kaspa:')` 拒 testnet `kaspatest:` (= Phase 3a 真 round-trip 撞).
         // accept mainnet kaspa: + testnet-12 kaspatest: 双 prefix.
-        if (!winnerAddr || !(String(winnerAddr).startsWith('kaspa:') || String(winnerAddr).startsWith('kaspatest:'))) {
+        if (!isAddressOnNetwork(winnerAddr, { who: 'bettor-prediction-settler.js:159' })) {   // (b) 赢家收款地址: 原二选一验证跨网照收; 现只认配置网络前缀(含校验和)
           console.error(`[prediction-settler] payout target missing or invalid ${offer.id.slice(0,8)}: maker_won=${makerWon} winnerAddr=${winnerAddr}`);
           errored++;
           continue;  // 留 delivering, 下次 tick retry (Owner 介入 可能)
