@@ -2,7 +2,9 @@
 
 > 执行范围：D-019 编译器钉线九笔合入主线（`31ec5f25`，Bettor `b4afbf90`），主网 console 重启验收。本次不涉及任何账号导入/市场创建/covenant 创世动作——三个 `ZK_*_TMPL_HASH` env 按 Bettor 1236 明确要求保持 UNSET。
 >
-> **更正（2026-09-14 · Bettor 1240 · MUST-FIX）**：原 `68dbf7fe` 版本 §③ 把 DB 备份文件路径误写在本 git 工作树内（`docs/provenance/.../console.mainnet.db.pre-d019-backup`，2MB 含全部加密助记词，untracked 且 `git check-ignore` 无命中）——Bettor 独立核实抓到，任何一次 `git add -A` 会把这份含密文的主网账号库推上 GitHub。已用 `Move-Item` 移到非 git 路径 `C:\KANet\backups\`，移动后原地重算 sha256 逐位一致（未损坏），`git status` 复核确认仓内已无该文件。§③ 原文按此更正，不删除原有其它内容。已追加 `docs/ANTI-PATTERNS.md` 规则 83（任何备份/导出/数据库文件不得落在任何 git 工作树内，含 scratch worktree）。
+> **更正（2026-09-14 · Bettor 1240 · MUST-FIX）**：原 `68dbf7fe` 版本 §③ 把 DB 备份文件路径误写在本 git 工作树内（`docs/provenance/.../console.mainnet.db.pre-d019-backup`，2MB 含全部加密助记词，untracked 且 `git check-ignore` 无命中）——Bettor 独立核实抓到，任何一次 `git add -A` 会把这份含密文的主网账号库推上 GitHub。已用 `Move-Item` 移到 `C:\KANet\backups\`，移动后原地重算 sha256 逐位一致（未损坏），`git status` 复核确认仓内已无该文件。§③ 原文按此更正，不删除原有其它内容。已追加 `docs/ANTI-PATTERNS.md` 规则 83（任何备份/导出/数据库文件不得落在任何 git 工作树内，含 scratch worktree）。
+>
+> **二次更正（2026-09-14 · Bettor 1241/1241-补）**：上一条更正把文件挪到 `C:\KANet\backups\`，误以为挪出了 `D:\kanet-tn12` 这棵树就够了——本人核实发现 `C:\KANet` 自己也是一棵 git 工作树（分支 `docs/oracle-v06-runtime`），挂着真实的 GitHub `origin` 远端（`https://github.com/Unio996/KANet.git`）且当前分支正在 `track` 它，只是最近一次活动是 2026-05-24（几个月未推，但配置仍在、随时可能被下一次 `git push` 带走）。第一次核实时误判该树"没有网络 remote"（命令输出被截断，只看到本地 bundle `main-reply`，漏看了 `origin`）——**发现后没有照错误结论写文档，先向 Bettor 报告了这个不一致，等 Bettor 复核裁定后才落笔**。裁定：`.gitignore` 覆盖不构成豁免（可被改/可被 `git add -f`），**任何** git 工作树内都不合格，不分是否被 ignore。文件已再次 `Move-Item` 到 `C:\KANet-backups\`（`C:\` 盘根确认不是任何 git 树），移动后原地重算 sha256 仍为 `5025a80d...`（逐位一致），`C:\KANet\backups\` 下确认不留副本。`docs/ANTI-PATTERNS.md` 规则 83 同步补了这条精确判据（判定方法：候选目录里跑 `git rev-parse --is-inside-work-tree`，`true` 即不合格，不能只看"是不是在 `D:\kanet-tn12` 底下"）。
 
 ## 时间
 
@@ -37,7 +39,7 @@ RELAY_HOTWALLET_TOTAL_MAX_KAS=1000（原样）
 | `migrate.js` 版本基线 | v204 已应用，v205（D-019 第 5a 笔，`payout_shards`/`market_shards` 三/一个 ctor-only 常量列）待启动时应用 |
 
 **DB 备份**（Bettor 1236 要求，路径+sha256 记证据）：用 `better-sqlite3` 的 WAL-aware `.backup()` API（不停进程、一致性快照，不是裸文件复制——原库当时有活跃 `-wal`，裸复制可能不一致）：
-- 备份文件：**`C:\KANet\backups\console.mainnet.db.pre-d019-backup`**（🔴 v0.2 更正——最初误放在 `docs/provenance/2026-09-14-kanetui-d019-pin-deploy/` 这个 git 工作树内，Bettor 1240 独立核实抓到：untracked 且 `git check-ignore` 无命中，任何一次 `git add -A` 就会把含全部加密助记词的主网账号库推上 GitHub，判 MUST-FIX。已用 `Move-Item` 移到这个非 git 路径，移动后原地重算 sha256 仍为 `5025a80d...`（逐位一致，移动过程未损坏文件），`git status` 复核确认仓内该文件已消失。此后任何备份/导出/数据库文件一律遵守 `docs/ANTI-PATTERNS.md` 规则 83：不得落在任何 git 工作树内，含 scratch worktree）。
+- 备份文件：**`C:\KANet-backups\console.mainnet.db.pre-d019-backup`**（🔴 v0.3 更正，经两轮搬迁——① 最初误放在 `docs/provenance/2026-09-14-kanetui-d019-pin-deploy/` 这个 git 工作树内（Bettor 1240 抓到，untracked 且 `git check-ignore` 无命中）；② 第一次搬到 `C:\KANet\backups\`，以为挪出了 `D:\kanet-tn12` 就够了，但 `C:\KANet` 自己也是一棵 git 工作树（分支 `docs/oracle-v06-runtime`，挂着真实 GitHub `origin` 远端且当前分支在 track），只是被该树 `.gitignore` 的 `backups/` 规则覆盖——Bettor 1241-补裁定"`.gitignore` 覆盖不构成豁免（可被改/可被 `git add -f`），任何 git 工作树内都不合格"，再次搬迁；③ 最终落在 `C:\KANet-backups\`（`C:\` 盘根确认不是任何 git 树，`git rev-parse --is-inside-work-tree` 返回非 true）。每次搬移后原地重算 sha256 均为 `5025a80d...`（逐位一致，三次搬移均未损坏文件），旧位置逐一 `git status`/`Get-ChildItem` 复核确认不留副本。`docs/ANTI-PATTERNS.md` 规则 83 已按最终裁定补精确判据：判定方法是候选目录里跑 `git rev-parse --is-inside-work-tree`，不能只看"是不是在某个已知仓库根目录底下"）。
 - SHA256：`5025a80dc3a6d090417da9267402bc74ba07bc779ecf32d14577ac46ce513108`
 - 大小：2,097,152 bytes
 
@@ -73,4 +75,4 @@ RELAY_HOTWALLET_TOTAL_MAX_KAS=1000（原样）
 
 D-019 编译器钉线部署到主网 console 完成，六步全部按执行页 v0.3 走完，验收全绿：pin 自检 PASS 1 次 FAIL 0 次、v205 迁移正确应用、10 个批 1 relay 全部健康存活、驻留期监控/健康监控 tick 均正常、kaspad 未受影响、零 FATAL/UNMET。本次未改动任何 env 值（`SILVERC_V100_PATH` 沿用既有、三个 `ZK_*` 保持 UNSET），未导入任何新账号，未创建任何市场。
 
-原始日志留档：`console-mainnet-stdout-PID25516.log` / `console-mainnet-stderr-PID25516.log`（本目录内独立副本，`logs/mainnet/` 下的活动日志会在下次重启时被覆盖）。DB 备份文件留存于 `C:\KANet\backups\`（非 git 路径，见 §③ 更正），sha256 已记于 §③。
+原始日志留档：`console-mainnet-stdout-PID25516.log` / `console-mainnet-stderr-PID25516.log`（本目录内独立副本，`logs/mainnet/` 下的活动日志会在下次重启时被覆盖）。DB 备份文件留存于 `C:\KANet-backups\`（确认非任何 git 工作树内，见 §③ 两轮更正），sha256 已记于 §③。
