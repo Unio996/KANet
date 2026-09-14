@@ -137,5 +137,43 @@ await t('⑤重叠 tick 被跳过: 第一次 driveOnce 还在跑(慢 sendCmd 卡
   await p1; // 收尾, 避免未处理 promise 泄漏到下一个测试
 });
 
+// ══════════════ ⑥bet_mint步骤A(Stage 2): pending intent 被驱动推进 ══════════════
+const { ensureBetIntent, getBetIntent } = await import('../lib/proto-bet-intent.mjs');
+let betId1;
+// 🔴 共享 DB 里此时可能还留着前面测试(④/⑤)没推完的市场行(genesis_pending/genesis_submitted)——
+// cap 必须给够余量, sendCmd 必须能通用处理全部类型(不能像前几个测试那样窄范围throw), 否则会被
+// leftover 市场行的推进/落地检查抢走 cap 或撞上"不该走到这里"的窄范围假设。
+await t('⑥bet_mint 步骤A pending intent 经 runProtoDriverTick 真实推进到 submitted(真kaspa-wasm KTT genesis构造)', async () => {
+  const { runProtoDriverTick } = await import('./proto-driver.mjs');
+  betId1 = 'bet-driver-001';
+  sqlite.prepare(`INSERT INTO proto_bets (id, market_id, bettor_pk, side, stake, status, created_at) VALUES (?, ?, ?, 0, 20, 'pending', datetime('now'))`).run(betId1, market1.id, 'cc'.repeat(32));
+  ensureBetIntent({ betId: betId1, step: 'mint' });
+  const { sendCmd, calls } = makeSendCmd();
+  const out = await runProtoDriverTick({ sendCmd, relayId: RELAY_ID, kaspa, network: 'mainnet', relayAddress: relayAddr, log: quiet, cap: 20 });
+  if (out.betMintAdvanced !== 1) throw new Error(`期望推进1条bet_mint, 实际 ${JSON.stringify(out)}`);
+  const intent = getBetIntent(`proto-bet:${betId1}:mint`);
+  if (intent.status !== 'submitted') throw new Error(`期望 submitted, 实际 ${intent.status}`);
+  if (!calls.some((c) => c.type === 'covenant_broadcast' && c.intent_key === `proto-bet:${betId1}:mint`)) throw new Error('没有真的为这个bet发出 covenant_broadcast');
+});
+
+// ══════════════ ⑦bet_mint步骤A landed后proto_bets记账 ══════════════
+await t('⑦bet_mint 步骤A submitted intent landed 后, proto_bets.mint_txid/status 被真实写回(两张表之间的桥)', async () => {
+  const { runProtoDriverTick } = await import('./proto-driver.mjs');
+  const intentBefore = getBetIntent(`proto-bet:${betId1}:mint`);
+  const sendCmd = async (relayId, cmd) => {
+    if (cmd.type === 'get_address_utxos') return { ok: true, utxos: [{ outpoint: { transactionId: 'ab'.repeat(32), index: 0 }, amount: '10000000000' }] };
+    if (cmd.type === 'covenant_broadcast') return { ok: true, txId: cmd.expected_txid, intent_key: cmd.intent_key };
+    if (cmd.type === 'check_utxo_landed') return { ok: true, landed: true, depth: 25 };
+    throw new Error(`unexpected cmd ${cmd.type}`);
+  };
+  const out = await runProtoDriverTick({ sendCmd, relayId: RELAY_ID, kaspa, network: 'mainnet', relayAddress: relayAddr, log: quiet, cap: 20 });
+  if (out.betMintLanded !== 1) throw new Error(`期望判定1条landed, 实际 ${JSON.stringify(out)}`);
+  const bet = sqlite.prepare('SELECT * FROM proto_bets WHERE id = ?').get(betId1);
+  if (bet.mint_txid !== intentBefore.submitted_txid) throw new Error(`proto_bets.mint_txid 应该等于 intent.submitted_txid(实际 ${bet.mint_txid} vs ${intentBefore.submitted_txid})`);
+  if (bet.status !== 'chip_minted_pending_stake') throw new Error(`proto_bets.status 应该推进, 实际 ${bet.status}`);
+  const intentAfter = getBetIntent(`proto-bet:${betId1}:mint`);
+  if (intentAfter.status !== 'landed') throw new Error(`intent 行也应该推进到 landed, 实际 ${intentAfter.status}`);
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exitCode = fail === 0 ? 0 : 1;

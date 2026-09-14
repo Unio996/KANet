@@ -203,17 +203,48 @@ export async function registerProtoRoutes(fastify) {
     if (!Number.isFinite(stakeAmount) || stakeAmount < market.min_bet) {
       return reply.code(400).send({ ok: false, error: `amount must be a number >= min_bet(${market.min_bet})` });
     }
-    // NO-TX-NO-STATE: 不写 proto_bets 行, 等步骤A(铸筹码)真实广播确认后才写(见设计稿 §2.3 失败态矩阵)。
-    // bettor_pk 不从请求体读——复用本市场 committee_privkey_enc 解出的那把 keypair 兼任(文件头注,
-    // Bettor 1354 裁定), 不为每笔下注新造。🔴 上面这行 market 查询故意不取 committee_privkey_enc
-    // (PUBLIC_MARKET_COLS 不含它)——buildAndBroadcast 真正实现时若需要解密这把 key, 必须另起一条
-    // 只取 committee_privkey_enc 单列的查询, 就地 decrypt、就地用掉, 不把它并进这个到处传递的 market
-    // 对象里(NWT 1359: 防"下次有人把 market 对象 spread 进错误信息"这类泄露)。
-    try {
-      await buildAndBroadcast('bet_mint', { market, direction, stakeAmount });
-    } catch (err) {
-      return notImplemented(reply, 'bet_mint', err);
+    // §6/§9 已定案, 真实实现 Stage 2(账本1425/1438/1442, 步骤A铸筹码): pending 行必须先于任何 IPC
+    // 存在(同 market_genesis 硬条件①, ensureBetIntent 自己的文档要求)——proto_bets(status='pending')
+    // + proto_bet_intents(step='mint', status='pending') 两张表都在发命令之前落表。bettor_pk 不从
+    // 请求体读——复用本市场委员会 pubkey 兼任(文件头注, Bettor 1354 裁定), 不为每笔下注新造。步骤B
+    // (register_append)留 Stage 3, 本端点目前只推进到"铸好stake筹码"这一步。
+    let committeePubkeys;
+    try { committeePubkeys = JSON.parse(market.committee_pubkeys_json); } catch { committeePubkeys = []; }
+    const bettorPk = committeePubkeys[0];
+    if (!bettorPk) return reply.code(500).send({ ok: false, error: 'market has no committee pubkey recorded — cannot derive bettor_pk' });
+
+    const betId = randomUUID();
+    sqlite.prepare(`
+      INSERT INTO proto_bets (id, market_id, bettor_pk, side, stake, status, created_at)
+      VALUES (?, ?, ?, ?, ?, 'pending', ?)
+    `).run(betId, market.id, bettorPk, direction, stakeAmount, nowIso());
+
+    const { ensureBetIntent, driveBetIntent } = await import('../lib/proto-bet-intent.mjs');
+    ensureBetIntent({ betId, step: 'mint' });
+
+    const { isProtoDriverEnabled } = await import('../services/proto-driver.mjs');
+    if (!isProtoDriverEnabled()) {
+      return reply.code(409).send({ ok: false, error: 'proto_driver_disabled', id: betId, status: 'pending' });
     }
+
+    const { buildBetMintStepAAndBroadcast, betMintStepATargetAddress } = await import('../lib/proto-broadcast-ops.mjs');
+    const { PROTO_RELAY_ID, assertProtoRelayHealthy } = await import('../lib/proto-relay-guard.mjs');
+    const { protoSendCmd } = await import('../lib/proto-relay-ipc.mjs');
+    const kaspa = await import('kaspa-wasm');
+    const network = process.env.KASPA_NETWORK || 'mainnet';
+    const bet = sqlite.prepare(`SELECT ${PUBLIC_BET_COLS} FROM proto_bets WHERE id = ?`).get(betId);
+    try {
+      const health = await assertProtoRelayHealthy();
+      const targetAddress = betMintStepATargetAddress({ kaspa, network, bet });
+      await driveBetIntent({
+        sendCmd: protoSendCmd, relayId: PROTO_RELAY_ID, betId, step: 'mint', targetAddress, maxAttempts: 1, origin: 'http',
+        buildAndBroadcast: () => buildBetMintStepAAndBroadcast({ kaspa, network, bet, sendCmd: protoSendCmd, relayId: PROTO_RELAY_ID, relayAddress: health.address }),
+      });
+    } catch (e) {
+      // 立即尝试失败/HOLD 都不阻塞响应——这只是"最好情况下立即有进展"的优化, 后台驱动会继续重试/恢复。
+    }
+    const after = sqlite.prepare(`SELECT ${PUBLIC_BET_COLS} FROM proto_bets WHERE id = ?`).get(betId);
+    return reply.code(202).send({ ok: true, id: betId, status: after.status });
   });
 
   // ══════════════════════════════════════════════════════════════════════
