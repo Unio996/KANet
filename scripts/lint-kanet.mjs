@@ -2063,6 +2063,51 @@ function checkR_TESTONLY_EXPORT_IN_PROD() {
 }
 checkR_TESTONLY_EXPORT_IN_PROD(); // R-TESTONLY-EXPORT-IN-PROD (2026-08-29, v4: 轴1 定义也违例 + 轴2/3 全 test-context 路径 + 符号轴去字符串/行尾注释)
 
+// ── R-TEMPLATE-HASH-SOURCE [ERROR] (2026-09-15 J2, 账本 1412/1413, NWT+Bettor 用 silverscript v1.0.0
+// 权威源码核过 GO): silverscript v1.0.0 换了 template_hash 公式(blake3(len8LE+prefix+len8LE+suffix)),
+// pool-template-artifact.mjs 的 extractTemplateArtifact()/`.expectedTemplateHashHex` 还是旧编译器的
+// blake2b(prefix‖suffix) 公式(仅对 legacy PoolLeaf/PoolRoot/PoolSideTicket 族仍然正确, 未改动)——J2 KTT
+// v0.3 落码期间实测撞出: 用旧公式给 v1.0.0 合约算出的 hash 值(241e5206...)与编译器/运行期内建原语实际比对
+// 用的权威值(compiled.template_hash_bytes, 225ebcde...)不同, 若被写进 ctor 常量会让合约永远读不到正确的
+// 外部代币模板(结构性拒绝, 不是"少防一层"那种软失败)。
+// 只在"确定只跑 v1.0.0 合约"的路径上硬 BLOCK(而不是全仓一刀切禁用旧函数, 旧函数对 legacy 族仍然正确):
+// src/lib/sil-v1/**(v1.0.0 专属目录)、T3 四文件(ShardLeaf_direct/RootClaim/RefundClaim/RootClose)的生产
+// builder pool-bshard-market-setup.mjs、proto-v0 API 层 src/api/proto.js、scripts/proto-v0-* 系列脚本。
+// 命中 `extractTemplateArtifact(`(不含 V100 后缀) 或 `.expectedTemplateHashHex` 一律 ERROR, 提示改用
+// extractTemplateArtifactV100(compiled)/compiled.template_hash_bytes。转义: 若确有理由在上述路径里读
+// legacy 值(理论上不该发生), 加 `// lint-allow-template-hash-source: <理由>`。
+const _THS_SCOPE = [
+  path.join(ROOT, 'kasia-console', 'src', 'lib', 'sil-v1'),
+  path.join(ROOT, 'kasia-console', 'src', 'lib', 'pool-bshard-market-setup.mjs'),
+  path.join(ROOT, 'kasia-console', 'src', 'api', 'proto.js'),
+];
+const _THS_SCRIPT_PREFIX = path.join(ROOT, 'scripts', 'proto-v0-');
+const _THS_BAD = /extractTemplateArtifact\s*\((?!.*V100)|\.expectedTemplateHashHex\b/;
+function _thsInScope(abs) {
+  if (_THS_SCOPE.some((p) => abs === p || abs.startsWith(p + path.sep))) return true;
+  if (abs.startsWith(_THS_SCRIPT_PREFIX)) return true;
+  return false;
+}
+function checkR_TEMPLATE_HASH_SOURCE() {
+  for (const abs of targets) {
+    if (!/\.(m?js)$/.test(abs)) continue;
+    if (!_thsInScope(abs)) continue;
+    if (path.basename(abs) === 'pool-template-artifact.mjs') continue; // 定义处本身, 不是误用处
+    let content; try { content = read(abs); } catch { continue; }
+    if (content.includes('lint-allow-template-hash-source')) continue;
+    const lines = content.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const t = line.trimStart();
+      if (t.startsWith('//') || t.startsWith('*')) continue;
+      if (_THS_BAD.test(line)) {
+        violate('R-TEMPLATE-HASH-SOURCE', `v1.0.0 专属路径引用了 legacy blake2b 公式的 extractTemplateArtifact()/.expectedTemplateHashHex —— 对 v1.0.0 合约算出的值是错的(实测: 241e5206... vs 权威 225ebcde...)。改用 extractTemplateArtifactV100(compiled) 或直接读 compiled.template_hash_bytes。`, abs, i + 1);
+      }
+    }
+  }
+}
+checkR_TEMPLATE_HASH_SOURCE(); // R-TEMPLATE-HASH-SOURCE (2026-09-15)
+
 // ── 报告 ──
 // warnings first (non-blocking — WARN rules are migration checklists, not hard blockers)
 if (warnings.length > 0) {

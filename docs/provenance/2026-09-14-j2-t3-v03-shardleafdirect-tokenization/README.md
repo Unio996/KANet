@@ -1,5 +1,15 @@
 # ShardLeaf_direct.sil — T3 v0.3 §2 全 23 入口 A/B 落位表代币化 + ZERO32 守卫（ledger 1186/1188/1121 批次④第四处，最后一处）
 
+> **RERUN 状态注记(2026-09-15, 账本 1408/1409/1410/1413)**：Owner 裁定撤销 H1(b)("代币就是代币")后，本
+> provenance 原用的 KTT(10 ctor 字段，含 `market_tmpl_suffix`/`market_tmpl_suffix_len`)已作废——已改用
+> v0.3(方案C)副本(`docs/provenance/2026-09-14-j2-ktt-v03-planC-remove-h1b/KanetTestToken.v0.3-planC.sil`,
+> 8 ctor 字段)重新编译并重跑全部 14 条向量，**14/14 pass**（`ShardLeaf_direct.sil` 本身未改动，字节级
+> diff 对照确认；只是它读的外部 KTT 模板形状变了，token_tmpl_hash 换成
+> `225ebcdec51f5439326e6bc48e47c288ceacbd3bea07aea6771548eeed44d80e`——与 KTT v0.3 provenance、
+> KanetTokenClaim 端到端向量用的是同一个值，编译器自报 `compiled.template_hash`，非
+> `extractTemplateArtifact`(blake2b)公式算出的错值）。详见 `run.log` 末尾 RERUN 章节；
+> `mk_shardleafdirect_tokenization_vectors.mjs` 已就地更新 KTT 路径与 ctor 字段数，不是另开一份。
+
 ## 背景
 
 批次④最后一处，`docs/2026-09-14-j2-t3-market-set-token-rewrite-design-v0.3.md` §2 表：

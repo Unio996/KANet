@@ -1,5 +1,10 @@
 # RefundClaim.sil — v0.3 §2/§3 代币化（ledger 1164③ 三步之三，claim 家族已开闸）
 
+> **RERUN 状态注记(2026-09-15, 账本 1408/1409/1415·f7342a32)**：同 RootClaim.sil——Owner 撤销 H1(b) 后
+> "同病同治"删除本文件 ctor 的 `market_suffix_hash` 参数、`ClaimState.market_suffix_hash` 字段、构造字面量
+> 那一行(仅三处, 逻辑零改动)。用真实生产 `KanetTestToken.sil`(v0.3方案C)+`KanetTokenClaim.sil`(v0.3,
+> 4字段)+本文件重编译重跑既有 6 条向量，**6/6 pass**。详见 `run.log` 末尾 RERUN 章节。
+
 Bettor ledger 1164/1166 裁：KanetTokenClaim 已 GREEN（主体 22bf679a + ZERO32 修 95e7c909，NWT 0073b0a5），
 claim 家族的闸已开，RefundClaim 的③代币化不必再等，形状明确给出：`refund_payout` 的退款目的地改成本笔新建的
 `KanetTokenClaim` 输出，`ClaimState` 五字段填齐，`validateOutputStateWithTemplate` 绑 `claim_tmpl_hash`

@@ -30,7 +30,17 @@
 | `KanetTestToken` | 3471-5359 B（视此前哪个版本） | **3191 B** | 更小——删除整个市场识别机制 |
 | `KanetTokenClaim` | 1454 B | **1347 B** | 更小 |
 
-`KanetTestToken` v0.3 的 `token_tmpl_hash`（`extractTemplateArtifact` 产物）：`241e52069168e22d0bd92b6e705b99c641bf0424c90419ca16c847f014a618ac`（真实编译产物，落码时 `ShardLeaf_direct`/`RootClaim`/`RefundClaim`/`RootClose` ctor 里引用的 `token_tmpl_hash` 需要换成这个新值，因为源码变了）。
+`KanetTestToken` v0.3 的 `token_tmpl_hash`：**`225ebcdec51f5439326e6bc48e47c288ceacbd3bea07aea6771548eeed44d80e`**
+（`compiled.template_hash_bytes`，编译器自报的权威值——真实编译产物，落码时 `ShardLeaf_direct`/`RootClaim`/
+`RefundClaim`/`RootClose` ctor 里引用的 `token_tmpl_hash` 需要换成这个新值，因为源码变了）。
+
+> 🔴 **更正（2026-09-15，账本 1412/1413，NWT+Bettor 用 silverscript v1.0.0 权威源码核过）**：本节曾写
+> `241e52069168e22d0bd92b6e705b99c641bf0424c90419ca16c847f014a618ac`（`extractTemplateArtifact` 产物，
+> blake2b(prefix‖suffix) 公式）——**这是错值**。v1.0.0 换了公式（`blake3(len8LE(prefix.len)‖prefix‖
+> len8LE(suffix.len)‖suffix)`，源码 `silverscript-lang/src/template.rs`），`extractTemplateArtifact` 还在
+> 用旧公式，对 v1.0.0 产物算出的值不对。上面已改为正确值（`compiled.template_hash_bytes`），不删旧值只
+> 标错，如实记录这次是怎么错的：见 `docs/provenance/2026-09-14-j2-ktt-v03-planC-remove-h1b/
+> kanettokenclaim-e2e-vectors.mjs` 文件头的完整订正记录。
 
 ## cli-debugger 向量（`ktt-v03-vectors.test.json`，`KanetTestToken` 侧，D-019 pin 的 v1.0.0 二进制跑通）
 
@@ -41,7 +51,14 @@
 
 **实测过程中的一次真实语义订正**：第一次尝试用"给输出指定一个全新 covenant_id"来模拟"收方是任意市场"时撞上 `WrongGenesisCovenantId`——debugger 报错让我们发现 `#[covenant(binding=cov,...)]` 声明式转账的 `next_states` 全部是**同一个 KTT 覆盖组的续约实例**（covenant id 由 consensus/调试器按 leader 的 covenant 组自动派生，不能在测试里手工指定成别的值）。`ownerIsMarketInput` 真正检查的从来不是"这个输出属于哪个 covenant 组"（那是宏自动保证的结构性质），而是"`next_states[j].owner` 这个 byte32 值是否对应本 tx 里某个真实在场的 covenant 输入"——这是被删掉的检查，修正后的 `V03-1` 向量准确反映了这一点。另有一个更早的理解错误：`args[0]` 曾被误当成 `prev_states`，实际按 `DECL.md`"Generated entrypoint args are new_states plus optional extra call args"是 `next_states`（调用方声明的目标状态），`prev_states` 反而是从 `tx.inputs[]` 里带 `state` 字段的输入自动读回——两次错误都是在实测中被 debugger 的真实行为纠正的，不是凭空猜对的。
 
-`KanetTokenClaim` 侧只做了真实编译验证（1347 B，成功），未构造完整 cli-debugger 向量（该 `entry spend` 需要真实 `checkSig` 签名 + `readInputStateWithTemplate` 读代币输入等更多前置条件，工作量显著大于 `KanetTestToken` 的 `transfer`）——这是本 provenance 明确标注的范围限制，落码前应补一条完整向量。
+`KanetTokenClaim` 侧已补齐完整端到端向量（`kanettokenclaim-e2e-vectors.mjs` → `kanettokenclaim-v03-vectors.test.json`，
+4 条：`V03-CLAIM-1`「假壳目标, 只在签名门失败」/`V03-CLAIM-2`「代币不归本 claim 所有」/`V03-CLAIM-3`「to_market_input=false
+裸输出」/`V03-CLAIM-4`「to_market_input=true 裸输入」——用真实 `checkSig` 占位签名+沿用既定的"fails-only-at-sig-gate"惯例,
+逐条用非 `-r` 交互模式核过精确失败行号, 4/4 pass），另外 cherry-pick 了 NWT 的 2 条补充向量
+（`nwt_build_claim_vectors.mjs` → `nwt-ktc-v03-vectors.test.json`）, 2/2 pass。真实过程中修了两个独立 bug（都记在
+`kanettokenclaim-e2e-vectors.mjs` 文件头）：① `token_tmpl_hash` 一度误用 `extractTemplateArtifact`（blake2b 公式,
+v1.0.0 已换成 blake3 长度前缀公式）算出的错值；② 手写"续约输出"State 编码时把 int 字段的 8 字节值写成大端，逐字节比对真实
+重编译产物才发现 silverscript v1.0.0 是**小端**——两个 bug 都已订正并有独立脚本核对过 `identical=true`/逐条精确失败行确认。
 
 ## (1121) 守恒两半等价性在 v0.3(α) 下是否仍成立
 

@@ -22,3 +22,31 @@
   PASS  V-CZK-ZC-B3_fail_victim_token_at_last_reachable_index_7
 
 11 tests: 11 passed, 0 failed
+
+
+=== RERUN(2026-09-15, 账本1408/1409/1415·f7342a32 同病同治: market_suffix_hash 删除+KTT/KanetTokenClaim换v0.3方案C真实生产文件) ===
+cli-debugger.exe sha256: b85bb524d22ae761150dcb80b070f0bf1beb95a1c6604470501883b4d0f552c6
+  RUN   V-CZK-ET-1_pass_no_token_present_reaches_time_gate
+  PASS  V-CZK-ET-1_pass_no_token_present_reaches_time_gate
+  RUN   V-CZK-ET-2_fail_token_input_present_rejected_by_noTokenInput
+  PASS  V-CZK-ET-2_fail_token_input_present_rejected_by_noTokenInput
+  RUN   V-CZK-ET-3_fail_before_time_threshold
+  PASS  V-CZK-ET-3_fail_before_time_threshold
+  RUN   V-CZK-escape_trigger-B1_pass_at_bound_8_inputs_no_token
+  PASS  V-CZK-escape_trigger-B1_pass_at_bound_8_inputs_no_token
+  RUN   V-CZK-escape_trigger-B2_fail_bound_plus_one_9_inputs_rejected_by_length_guard
+  PASS  V-CZK-escape_trigger-B2_fail_bound_plus_one_9_inputs_rejected_by_length_guard
+  RUN   V-CZK-escape_trigger-B3_fail_victim_token_at_last_reachable_index_7
+  PASS  V-CZK-escape_trigger-B3_fail_victim_token_at_last_reachable_index_7
+  RUN   V-CZK-ZC-1_pass_no_token_present
+  PASS  V-CZK-ZC-1_pass_no_token_present
+  RUN   V-CZK-ZC-2_fail_token_input_present_rejected_by_noTokenInput
+  PASS  V-CZK-ZC-2_fail_token_input_present_rejected_by_noTokenInput
+  RUN   V-CZK-ZC-B1_pass_at_bound_8_inputs_no_token
+  PASS  V-CZK-ZC-B1_pass_at_bound_8_inputs_no_token
+  RUN   V-CZK-ZC-B2_fail_bound_plus_one_9_inputs_rejected_by_length_guard
+  PASS  V-CZK-ZC-B2_fail_bound_plus_one_9_inputs_rejected_by_length_guard
+  RUN   V-CZK-ZC-B3_fail_victim_token_at_last_reachable_index_7
+  PASS  V-CZK-ZC-B3_fail_victim_token_at_last_reachable_index_7
+
+11 tests: 11 passed, 0 failed

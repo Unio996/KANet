@@ -23,19 +23,23 @@
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { compileSilV100, ctorBytes32V100, ctorIntV100 } from '../kasia-console/src/lib/pool-bshard-artifacts.mjs';
-import { extractTemplateArtifact } from '../kasia-console/src/lib/pool-template-artifact.mjs';
+import { extractTemplateArtifactV100 } from '../kasia-console/src/lib/pool-template-artifact.mjs';
 
 const POOL_SIDE_TICKET_SIL = './kasia-console/src/lib/sil-v1/PoolSideTicket.sil';
 const Z32 = '00'.repeat(32);
 
 console.log('=== ① PoolSideTicket.ps_tmpl_hash(唯一已证协议常量) ===');
-// 占位值任意——4 个 ctor 参数全是 State(bettorPk/direction/stake/shardPoolId), extractTemplateArtifact
-// 排除的正是这个区域, 模板 hash 与具体值无关(provenance ①/⑤ 已实测两组截然不同占位值得到同一 hash)。
+// 占位值任意——4 个 ctor 参数全是 State(bettorPk/direction/stake/shardPoolId), 模板 hash 排除的正是
+// 这个区域, 与具体值无关(provenance ①/⑤ 已实测两组截然不同占位值得到同一 hash)。
+// 🔴 订正(2026-09-15, 账本 1412/1413): PoolSideTicket.sil 住在 src/lib/sil-v1/, 走 compileSilV100(v1.0.0
+// 编译器), 之前这里错用了 legacy extractTemplateArtifact()(blake2b 公式)——对 v1.0.0 产物是错值(J2 KTT
+// v0.3 落码期间才实测撞出这条通用问题, 一并修here)。改用 extractTemplateArtifactV100(),
+// 读编译器自报的 compiled.template_hash_bytes, 并自证一遍 blake3(len8LE+prefix+len8LE+suffix) 公式。
 const psCtor = [ctorBytes32V100(Z32), ctorIntV100(0), ctorIntV100(0), ctorBytes32V100(Z32)];
 const psCompiled = compileSilV100(POOL_SIDE_TICKET_SIL, psCtor, 'PoolSideTicket');
-const psArtifact = extractTemplateArtifact(psCompiled);
+const psArtifact = extractTemplateArtifactV100(psCompiled);
 const psSourceSha256 = createHash('sha256').update(readFileSync(POOL_SIDE_TICKET_SIL)).digest('hex');
-console.log('ps_tmpl_hash:', psArtifact.expectedTemplateHashHex);
+console.log('ps_tmpl_hash(v1.0.0 权威值, compiled.template_hash_bytes):', psArtifact.templateHashHex);
 console.log('PoolSideTicket.sil sha256(源码漂移检测用):', psSourceSha256);
 
 console.log('\n=== ② feeProfile[market_genesis](来自既有 mass 实验 provenance) ===');
@@ -85,7 +89,7 @@ const out = {
       sourceSha256: psSourceSha256,
       templatePrefixHex: psArtifact.templatePrefix.toString('hex'),
       templateSuffixHex: psArtifact.templateSuffix.toString('hex'),
-      ps_tmpl_hash: psArtifact.expectedTemplateHashHex,
+      ps_tmpl_hash: psArtifact.templateHashHex,
     },
   },
   feeProfile,

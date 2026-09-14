@@ -24,10 +24,11 @@ contract CloseZkV2(
     int      init_consolidated_pool,   // genesis-mint时读phase1 continuation实际UTXO金额烤入(D-017后语义=代币amount)
     int init_w0, int init_w1, int init_w2, int init_w3, int init_w4, int init_w5, int init_w6, int init_w7, int init_w8,
     int init_w9, int init_w10, int init_w11, int init_w12, int init_w13, int init_w14, int init_w15, int init_w16,  // 17-word nullifier(claim/escape_claim共用, 见§5安全性论证)
-    // —— v0.3 §2/§3 代币化(T3, ledger 1170): 同 PayoutShardV2.sil/RefundClaim.sil 三件套, P13 witness+blake3 形 ——
+    // —— v0.3 §2/§3 代币化(T3, ledger 1170): 同 PayoutShardV2.sil/RefundClaim.sil 家族, P13 witness+blake3 形 ——
+    // 🔴 v0.3 方案C 同病同治(账本 1408/1409/1415, f7342a32): market_suffix_hash 一并删——纯透传镜像
+    // KanetTokenClaim 已删除的同名字段, 不参与本文件任何 require, 删除不改变任何检查逻辑。
     byte[32] token_tmpl_hash,
-    byte[32] claim_tmpl_hash,
-    byte[32] market_suffix_hash
+    byte[32] claim_tmpl_hash
 ) {
     int attestedWinner = init_attestedWinner;
     int closed = init_closed;
@@ -52,7 +53,6 @@ contract CloseZkV2(
         byte[32] winner_pk;
         int      amount;
         byte[32] token_tmpl_hash;
-        byte[32] market_suffix_hash;
     }
     byte constant TOKEN_SCHEME_COVENANT_ID = 0x04;
     byte constant TOKEN_BORROW_DISABLED    = 0x00;
@@ -190,7 +190,8 @@ contract CloseZkV2(
         // ★ Q8: witness 供 KanetTokenClaim 编译模板前后缀, 现场核 claim_tmpl_hash——结构性用途。
         require(blake3((claim_prefix.length as byte[8]) + claim_prefix + (claim_suffix.length as byte[8]) + claim_suffix) == claim_tmpl_hash);
 
-        // ★ ZERO32 目的地守卫(NWT 1158 系统性扫查纪律): 独立验证 = 上面 claim_tmpl_hash 的现场核对。
+        // ★ ZERO32 目的地守卫(NWT 1158/1173 系统性扫查纪律): 独立验证 = 上面 claim_tmpl_hash 的现场核对
+        //   (脚本字节匹配 ≠ covenant 绑定, 两层各自独立承重)。
         byte[32] claimCovId = OpOutputCovenantId(claimOutIdx);
         require(claimCovId != byte[32](0x0000000000000000000000000000000000000000000000000000000000000000));
 
@@ -199,8 +200,7 @@ contract CloseZkV2(
             market_cov_id:       OpInputCovenantId(this.activeInputIndex),
             winner_pk:           bettorPk,
             amount:              stake,
-            token_tmpl_hash:     token_tmpl_hash,
-            market_suffix_hash:  market_suffix_hash
+            token_tmpl_hash:     token_tmpl_hash
         }, claim_prefix, claim_suffix, claim_tmpl_hash);
 
         // 代币输出: 转给新 claim 的那份, owner = 新 claim covenant id(上面已核非 ZERO32)。
@@ -323,7 +323,8 @@ contract CloseZkV2(
         // ★ Q8: witness 供 KanetTokenClaim 编译模板前后缀, 现场核 claim_tmpl_hash——结构性用途。
         require(blake3((claim_prefix.length as byte[8]) + claim_prefix + (claim_suffix.length as byte[8]) + claim_suffix) == claim_tmpl_hash);
 
-        // ★ ZERO32 目的地守卫(NWT 1158 系统性扫查纪律): 独立验证 = 上面 claim_tmpl_hash 的现场核对。
+        // ★ ZERO32 目的地守卫(NWT 1158/1173 系统性扫查纪律): 独立验证 = 上面 claim_tmpl_hash 的现场核对
+        //   (脚本字节匹配 ≠ covenant 绑定, 两层各自独立承重)。
         byte[32] claimCovId = OpOutputCovenantId(claimOutIdx);
         require(claimCovId != byte[32](0x0000000000000000000000000000000000000000000000000000000000000000));
 
@@ -332,8 +333,7 @@ contract CloseZkV2(
             market_cov_id:       OpInputCovenantId(this.activeInputIndex),
             winner_pk:           bettorPk,
             amount:              payout,
-            token_tmpl_hash:     token_tmpl_hash,
-            market_suffix_hash:  market_suffix_hash
+            token_tmpl_hash:     token_tmpl_hash
         }, claim_prefix, claim_suffix, claim_tmpl_hash);
 
         // 代币输出: 转给新 claim 的那份, owner = 新 claim covenant id(上面已核非 ZERO32)。

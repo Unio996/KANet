@@ -12,17 +12,21 @@ const { blake3 } = require('D:/kanet-tn12/scratch/_j2_wt_broker_optional/kasia-c
 const b2b = (buf) => blake2b(Uint8Array.from(buf), { dkLen: 32 });
 const p2sh = (bytecode) => 'aa20' + Buffer.from(b2b(bytecode)).toString('hex') + '87';
 const SILVERC = 'D:/kanet-tn12/scratch/_j2_silverc_v100/target/release/silverc.exe';
-const KTT = 'D:/kanet-tn12/scratch/_j2_wt_t3_market/kasia-console/src/lib/sil-v1/KanetTestToken.sil';
-const KTC = 'D:/kanet-tn12/scratch/_j2_wt_t3_market/kasia-console/src/lib/KanetTokenClaim.sil';
+// 🔴 更新(2026-09-15, 账本 1408/1409/1415, f7342a32·同病同治): KTT/KanetTokenClaim/RootClaim 全部改指向
+// 已落生产的 v0.3 版本(coord/j2-proto-v0-backend 分支 _j2_wt_proto_v0 工作树)——不再用旧的 10 字段 KTT /
+// 5 字段 KanetTokenClaim(含 market_tmpl_suffix / market_suffix_hash), 也不再用 _j2_wt_t3_market 里的旧
+// RootClaim.sil 副本, 直接对真实已改的生产文件重编译+跑向量, "与真实 v0.3 KanetTokenClaim 编译产物逐字节
+// 对照"才有意义。
+const KTT = 'D:/kanet-tn12/scratch/_j2_wt_proto_v0/kasia-console/src/lib/sil-v1/KanetTestToken.sil';
+const KTC = 'D:/kanet-tn12/scratch/_j2_wt_proto_v0/kasia-console/src/lib/KanetTokenClaim.sil';
 const STUB = 'D:/kanet-tn12/scratch/_j2_wt_t3_market/docs/provenance/2026-09-14-j2-t3-v03-drawdown-mustfix/PoolSideStub.sil';
-const RC = 'D:/kanet-tn12/scratch/_j2_wt_t3_market/kasia-console/src/lib/RootClaim.sil';
+const RC = 'D:/kanet-tn12/scratch/_j2_wt_proto_v0/kasia-console/src/lib/RootClaim.sil';
 const CWD = 'D:/kanet-tn12/scratch/_j2_wt_t3_market';
 
 const ZERO32 = new Array(32).fill(0);
 const RC_COV = new Array(32).fill(0xbb);
 const BETTOR_PK = new Array(32).fill(0x22);
 const SHARD_POOL_ID = new Array(32).fill(0x37);
-const MARKET_TMPL_SUFFIX = [0xaa, 0xbb, 0xcc, 0xdd, 0xee];
 const MERKLE_INDEX = 0;
 const TREE_DEPTH = 1;
 const WINNING_SIDE = 1;
@@ -38,11 +42,11 @@ function compileGeneric(sil, ctor, tag) {
   const { offset, len } = c.state_span;
   return { prefix: bc.slice(0, offset), suffix: bc.slice(offset + len), templateHash: c.template_hash, bc, scriptHex: '0x' + p2sh(bc), fullBytecodeHex: '0x' + Buffer.from(bc).toString('hex') };
 }
+// v0.3(方案C) ctor: 8 字段, market_tmpl_suffix/market_tmpl_suffix_len 已删除(H1(b) 撤销)。
 function compileKTT(ownerCov, amount, tag) {
   const ctor = [
     { kind: 'int', value: amount }, { kind: 'bytes', value: ownerCov }, { kind: 'byte', value: 4 }, { kind: 'byte', value: 0 },
     { kind: 'bytes', value: ZERO32 }, { kind: 'bytes', value: ZERO32 },
-    { kind: 'bytes', value: MARKET_TMPL_SUFFIX }, { kind: 'int', value: MARKET_TMPL_SUFFIX.length },
     { kind: 'int', value: 3 }, { kind: 'int', value: 3 },
   ];
   return compileGeneric(KTT, ctor, `ktt_${tag}`);
@@ -54,19 +58,19 @@ function compileTicket(bettorPk, direction, stake, shardPoolId, tag) {
   ];
   return compileGeneric(STUB, ctor, `ticket_${tag}`);
 }
-function compileKTC({ marketCovId, winnerPk, amount, tokenTmplHash, marketSuffixHash }, tag) {
+// v0.3 方案C 同病同治(账本 1409/1415): KanetTokenClaim ctor 现只有 4 字段(market_suffix_hash 已删)。
+function compileKTC({ marketCovId, winnerPk, amount, tokenTmplHash }, tag) {
   const ctor = [
     { kind: 'bytes', value: marketCovId }, { kind: 'bytes', value: winnerPk }, { kind: 'int', value: amount },
-    { kind: 'bytes', value: tokenTmplHash }, { kind: 'bytes', value: marketSuffixHash },
+    { kind: 'bytes', value: tokenTmplHash },
   ];
   return compileGeneric(KTC, ctor, `ktc_${tag}`);
 }
 
-const ktcAnchor = compileKTC({ marketCovId: ZERO32, winnerPk: ZERO32, amount: 0, tokenTmplHash: ZERO32, marketSuffixHash: ZERO32 }, 'anchor');
+const ktcAnchor = compileKTC({ marketCovId: ZERO32, winnerPk: ZERO32, amount: 0, tokenTmplHash: ZERO32 }, 'anchor');
 const claimTmplHash = ktcAnchor.templateHash;
 const tokAnchor = compileKTT(RC_COV, 1, 'anchor');
 const tokenTmplHash = tokAnchor.templateHash;
-const marketSuffixHash = [...blake3(Uint8Array.from(MARKET_TMPL_SUFFIX))];
 const ticketAnchor = compileTicket(BETTOR_PK, WINNING_SIDE, 1, SHARD_POOL_ID, 'anchor');
 const psTmplHash = ticketAnchor.templateHash;
 
@@ -80,7 +84,7 @@ function buildRootFor(payout, idx) {
 function rclCtor({ pool_value, closed = 1, payoutRoot, claimed_bitmap = 0 }) {
   return [
     hex(psTmplHash), hex(SHARD_POOL_ID), 0, 0, 0, pool_value, closed, WINNING_SIDE, hex(payoutRoot), claimed_bitmap,
-    hex(tokenTmplHash), hex(claimTmplHash), hex(marketSuffixHash),
+    hex(tokenTmplHash), hex(claimTmplHash),
   ];
 }
 function compileRCL(ctorOverrides, tag) {
@@ -103,7 +107,7 @@ function buildScenario({ pool_value, payout, tag, wrongClaimOut, wrongTokenOwner
   const { treeRoot, siblings } = buildRootFor(payout, MERKLE_INDEX);
   const ticket = compileTicket(BETTOR_PK, WINNING_SIDE, payout, SHARD_POOL_ID, `ticket_${tag}`);
   const heldTok = compileKTT(RC_COV, pool_value, `held_${tag}`);
-  const realClaimOut = compileKTC({ marketCovId: RC_COV, winnerPk: BETTOR_PK, amount: payout, tokenTmplHash, marketSuffixHash }, `claimout_${tag}`);
+  const realClaimOut = compileKTC({ marketCovId: RC_COV, winnerPk: BETTOR_PK, amount: payout, tokenTmplHash }, `claimout_${tag}`);
   const claimOut = wrongClaimOut || realClaimOut;
   const tokenOutOwner = wrongTokenOwner || claimCovId;
   const tokenOutToClaim = compileKTT(tokenOutOwner, payout, `tokoutclaim_${tag}`);

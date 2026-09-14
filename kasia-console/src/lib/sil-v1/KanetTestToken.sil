@@ -24,6 +24,19 @@ pragma silverscript ^0.1.0;
 //
 // A″(v0.5 §4.0, v0.6 延续): 代币 ctor 只烤【稳定】的市场模板(per-instance 值在状态里, 模板 hash 不随实例变 = P12
 // 实证); 市场/领取【不烤】代币 hash(走各自状态字段) ⇒ 依赖图单向无环(v0.3 Q4 成环已解)。
+//
+// 🔴 v0.3 方案C(Owner 裁定, 账本 1408, docs/DECISIONS.md D-017 注记 · 落码 138c2f21/a16f6452/9be0805c):
+// 撤销上面 H1(b)("接收方必须是 KANet 模板")这条检查本身——"代币就是代币", 参考上游标准实现
+// silverscript-lang/tests/examples/kcc20.sil(56 行): 一个正常的可替代代币合约只关心谁能花(owner 在场)、
+// 花的时候有没有做旁的坏事(minter 标记不能被伪造)、有没有守恒, 从不关心代币被转去了哪种类型的 covenant。
+// "这份代币是不是我这个市场认可的注额"完全是接收方自己的问题(ShardLeaf_direct.scanOwnedTokenInputs 已经
+// 独立在做这件事)——删除 market_tmpl_suffix/market_tmpl_suffix_len ctor 字段、删除 ownerIsMarketInput
+// 函数、transferPolicy 签名删除 recv_idx 参数、删除两行 recv_idx 相关 require。守恒式 sum_in>=sum_out
+// 不受影响(那条 v0.6 就已经放宽, 论证不依赖 H1(b))。设计: docs/2026-09-14-j2-ktt-bin-template-lock-fix-
+// design-v0.3.md。真实编译+cli-debugger 向量: docs/provenance/2026-09-14-j2-ktt-v03-planC-remove-h1b/
+// (V03-1/V03-2, D-019 pin 的 v1.0.0 二进制真实跑通)。token_tmpl_hash(compiled.template_hash_bytes,
+// 权威值, 不是 extractTemplateArtifact 的 blake2b 公式): 225ebcdec51f5439326e6bc48e47c288ceacbd3bea07aea
+// 6771548eeed44d80e。
 contract KanetTestToken(
     // —— genesis State(任何人可任填; 合约不校验 genesis, 只校验花费)——
     int      init_amount,
@@ -32,9 +45,6 @@ contract KanetTestToken(
     byte     init_borrow_scheme,
     byte[32] init_borrow_guard,
     byte[32] init_extension_commitment,
-    // —— KANet 模板锁(H1 b · A″, v0.6 只剩 b-in 一条): sigScript 尾核(P7/P9 运行期已证)
-    //   market_tmpl_suffix + 长度, 不烤 hash(尾匹配不需要, 同源于市场/代币双方约定的常量字节)
-    byte[]   market_tmpl_suffix,   int market_tmpl_suffix_len,
     int      max_ins, int max_outs
 ) {
     int      amount               = init_amount;
@@ -50,14 +60,7 @@ contract KanetTestToken(
     bool constant MODE_TEST_COIN = true;
     pubkey constant ISSUER_PK = pubkey(byte[32](0x0000000000000000000000000000000000000000000000000000000000000000));   // 稳定币构建时换真 key; 测试构建下不被任何可达路径读取(P3)
 
-    // (b-in) 判据: 输入 idx 的 covenant-id == want 且其 sigScript 尾部 == market_tmpl_suffix(市场模板在场证明, P7/P9 同源)
-    function ownerIsMarketInput(int idx, byte[32] want) : bool {   // 单出口(v1.0.0: return 须为最后一条语句, 无提前 return)
-        byte[] ss = tx.inputs[idx].sigScript;
-        int n = ss.length;
-        bool okTail = false;
-        if (n >= market_tmpl_suffix_len) { okTail = ss.slice(n - market_tmpl_suffix_len, n) == market_tmpl_suffix; }
-        return OpInputCovenantId(idx) == want && okTail;
-    }
+    // v0.3 方案C: ownerIsMarketInput 整个删除(连同 H1(b) 一起撤销, 见 ctor 头注)。
 
     // §2.3 pause_guard: 被 transfer 内联调用。测试构建恒放行(MODE_TEST_COIN 编译期常量为 true ⇒ 恒真, 无早退,
     // 不触碰 Q5 的"早退被 codegen 折叠"疑虑——本函数没有任何提前 return, 只有末尾一条)。稳定币态的时效签名/窗口
@@ -69,7 +72,7 @@ contract KanetTestToken(
     }
 
     #[covenant(binding = cov, from = max_ins, to = max_outs, name = transfer, delegate_name = transfer_delegator)]
-    function transferPolicy(State[] prev_states, State[] next_states, byte[] witness, int[] owner_input_idx, int[] recv_idx) {
+    function transferPolicy(State[] prev_states, State[] next_states, byte[] witness, int[] owner_input_idx) {
         require(pauseGuardOk());   // §2.3 P3: 测试构建恒真, 不拦任何 transfer
         // (H3) borrowed-receive 路径拒绝: witness 首字节 0x01 = KCC-0020 §5 第二转移路径, 本合约不支持
         require(witness.length == 0);
@@ -81,10 +84,10 @@ contract KanetTestToken(
             require(OpInputCovenantId(owner_input_idx[i]) == prev_states[i].owner);  // 在场(P2 形)
             sum_in = sum_in + prev_states[i].amount;
         }
-        // (H1 a+b + H3) 接收侧: 每个 next 只能被 KANet 市场模板持有——v0.6 (b) 路由只剩 b-in 一条(退路①,
-        // 见文件头注释): recv_idx[j] 必须 >= 0 且指向本 tx 一个已在场的市场模板输入。"进入全新领取 covenant"
-        // 的自证责任已移交领取合约自身(手写 entry, P12MarketA2 方向), 代币合约花费侧不再构造/校验任何新建
-        // 输出的领取模板状态——这正是删掉 b-out 分支、也是守恒式必须放宽为 >= 的原因(见下)。
+        // v0.3 方案C(Owner 1408裁定): 接收侧不再检查"必须是市场模板"——next_states[j] 可以是任意
+        // covenant 输入, 代币合约只管自己的 owner_scheme/borrow_scheme/owner 非零/守恒这几条不变量,
+        // 不管代币流向哪里、流向的是什么类型的合约。真正的"这份代币是不是我这个市场认可的注额"这个
+        // 问题完全交给接收方自己(比如 ShardLeaf_direct 的 scanOwnedTokenInputs), 代币侧不越俎代庖。
         int sum_out = 0;
         for (j, 0, next_states.length, max_outs) {
             require(next_states[j].amount > 0);
@@ -92,15 +95,12 @@ contract KanetTestToken(
             require(next_states[j].borrow_scheme == BORROW_DISABLED);
             require(next_states[j].borrow_guard == byte[32](0x0000000000000000000000000000000000000000000000000000000000000000));
             require(next_states[j].extension_commitment == byte[32](0x0000000000000000000000000000000000000000000000000000000000000000));
-            // ★ T1 v0.7(NWT 1158 系统性扫查): next_state.owner 不得为全零。owner 字段随后被喂给
-            //   ownerIsMarketInput(...)==OpInputCovenantId(idx)==want 的等值比对——若 owner 本身能是 ZERO32,
-            //   而 OpInputCovenantId 对任何未声明 covenant_id 的输入回退 ZERO_HASH(rusty-kaspa
-            //   opcodes/mod.rs unwrap_or(ZERO_HASH)), 花费侧就能把新代币铸成"owner=全零"、后续被任何裸输入
-            //   在场核恒真花掉——同一族 ZERO_HASH 缺口, 在铸币(genesis 花费)侧堵死, 不留到花费侧才发现。
+            // ★ T1 v0.7(NWT 1158 系统性扫查): next_state.owner 不得为全零——owner=0 会让后续任何裸输入
+            //   的在场核对(OpInputCovenantId 对未声明 covenant_id 的输入回退 ZERO_HASH)恒真通过, 等于
+            //   代币被铸成任何人都能花。这条与"接收方是不是市场"无关, 是独立的资金安全底线, 不受 v0.3
+            //   删除市场识别检查影响。
             require(next_states[j].owner != byte[32](0x0000000000000000000000000000000000000000000000000000000000000000));
             sum_out = sum_out + next_states[j].amount;
-            require(recv_idx[j] >= 0);
-            require(ownerIsMarketInput(recv_idx[j], next_states[j].owner));
         }
         // ★ v0.6 守恒(routing v0.2 §1/§4): 不能再收紧为 == ——本函数验证不到"离场代币是否被市场/领取侧完整
         // 处理"(那部分内省能力正是 V-T-6 撞死的墙); sum_in>=sum_out 只保住"不能凭空印钱"这条结构性上限。

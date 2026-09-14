@@ -1,5 +1,13 @@
 # PayoutShard.sil — claim / refund_claim 代币化（ledger 1183，claim 家族四处之二/三）
 
+> **RERUN 状态注记(2026-09-15, 账本 1408/1409/1415·f7342a32)**：Owner 撤销 H1(b) 后"同病同治"删除本文件
+> ctor 的 `market_suffix_hash` 参数、`ClaimState.market_suffix_hash` 字段、`claim`/`refund_claim` 两处
+> 构造字面量各自的那一行（仅四处，逻辑零改动，ctor 从 25 参数变 24 参数）。用真实生产
+> `KanetTestToken.sil`(v0.3方案C)+`KanetTokenClaim.sil`(v0.3, 4字段)+本文件重编译重跑既有 12 条向量，
+> **12/12 pass**。详见 `run.log` 末尾 RERUN 章节。下方"25 参数"相关的旧状态注记随之过期——现为 24 参数,
+> `docs/provenance/2026-09-14-j2-t3-v03-payoutshard-current-suite/` 的同款向量集若仍留 25 参数旧 ctor
+> 形状/`market_suffix_hash`，需要同一批订正（本次未动，超出 1415 明确点名的范围，留意别漏）。
+
 > 📌 **状态注记（2026-09-14 · Bettor ledger 1209）**：本目录向量集用的 ctor 形状与当前 `PayoutShard.sil`
 > 一致（25 参数），**不是历史陈旧**——本次 1209 派工把这 12 条向量原样并入
 > `docs/provenance/2026-09-14-j2-t3-v03-payoutshard-current-suite/`（完整现行套件，`claim`/`refund_claim`

@@ -28,3 +28,40 @@
   PASS  V-convert_to_rootclose-6_fail_smuggled_second_owned_token_uncounted
 
 14 tests: 14 passed, 0 failed
+
+
+=== RERUN(2026-09-15, 账本1408/1409/1410/1413·Owner裁定撤销H1(b)后, KTT换成v0.3方案C副本重跑) ===
+=== rebuild(v0.3 KTT swap, 2026-09-15) ===
+cli-debugger.exe sha256: b85bb524d22ae761150dcb80b070f0bf1beb95a1c6604470501883b4d0f552c6
+cli-debugger source HEAD: 3ed973335b59269293564805cc2c58a14595ec03 (tag v1.0.0)
+KTT template_hash (used in this run's ctor): 225ebcdec51f5439326e6bc48e47c288ceacbd3bea07aea6771548eeed44d80e
+  RUN   V-register_append-1_pass_first_bet_zero_existing_pool
+  PASS  V-register_append-1_pass_first_bet_zero_existing_pool
+  RUN   V-register_append-2_fail_smuggled_second_owned_token_uncounted
+  PASS  V-register_append-2_fail_smuggled_second_owned_token_uncounted
+  RUN   V-register_append-3_fail_output_diverted_to_stranger_owner
+  PASS  V-register_append-3_fail_output_diverted_to_stranger_owner
+  RUN   V-register_append-4_fail_output_wrong_amount
+  PASS  V-register_append-4_fail_output_wrong_amount
+  RUN   V-register_append-5_fail_self_output_below_dust_min
+  PASS  V-register_append-5_fail_self_output_below_dust_min
+  RUN   V-register_append-6_fail_self_continuation_wrong_pool_value_field
+  PASS  V-register_append-6_fail_self_continuation_wrong_pool_value_field
+  RUN   V-register_append-7_fail_witness_wrong_tok_prefix
+  PASS  V-register_append-7_fail_witness_wrong_tok_prefix
+  RUN   V-register_append-8_fail_stake_amount_mismatch
+  PASS  V-register_append-8_fail_stake_amount_mismatch
+  RUN   V-convert_to_rootclose-1_pass_real_bridge_full_pool_token_out
+  PASS  V-convert_to_rootclose-1_pass_real_bridge_full_pool_token_out
+  RUN   V-convert_to_rootclose-2_fail_bare_output_no_covenant_id_zero32
+  PASS  V-convert_to_rootclose-2_fail_bare_output_no_covenant_id_zero32
+  RUN   V-convert_to_rootclose-3_fail_fake_template_shell
+  PASS  V-convert_to_rootclose-3_fail_fake_template_shell
+  RUN   V-convert_to_rootclose-4_fail_outbind_token_diverted_to_stranger
+  PASS  V-convert_to_rootclose-4_fail_outbind_token_diverted_to_stranger
+  RUN   V-convert_to_rootclose-5_fail_witness_wrong_tok_prefix
+  PASS  V-convert_to_rootclose-5_fail_witness_wrong_tok_prefix
+  RUN   V-convert_to_rootclose-6_fail_smuggled_second_owned_token_uncounted
+  PASS  V-convert_to_rootclose-6_fail_smuggled_second_owned_token_uncounted
+
+14 tests: 14 passed, 0 failed

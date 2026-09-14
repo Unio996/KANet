@@ -1,5 +1,12 @@
 # CloseZkV2.sil — v0.3 §2/§3 代币化（ledger 1170/1172/1173，zk_handoff+CloseZkV2 联合项之二）
 
+> **RERUN 状态注记(2026-09-15, 账本 1408/1409/1415·f7342a32)**：同 RootClaim.sil——Owner 撤销 H1(b) 后
+> "同病同治"删除本文件 ctor 的 `market_suffix_hash` 参数、`ClaimState.market_suffix_hash` 字段、两处
+> （`claim`/`escape_claim`）构造字面量各自的那一行（仅四处，逻辑零改动）。用真实生产
+> `KanetTestToken.sil`(v0.3方案C)+`KanetTokenClaim.sil`(v0.3, 4字段)+本文件重编译重跑既有 23 条向量
+> （part1 B-class 11条 + part2 A-class claim/escape_claim 12条），**23/23 pass**。详见 `part1.run.log`/
+> `part2.run.log` 末尾 RERUN 章节。
+
 ## 改了什么
 
 - ctor +3（25→28）：`token_tmpl_hash`/`claim_tmpl_hash`/`market_suffix_hash`，同 PayoutShardV2.sil/

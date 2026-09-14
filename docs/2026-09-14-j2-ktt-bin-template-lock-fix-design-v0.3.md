@@ -55,7 +55,9 @@ v0.1（State + `readInputStateWithTemplate`）被 NWT Decoy 攻击证伪，v0.2�
 
 ## §4 T3 侧四份文件确认
 
-**`ShardLeaf_direct.sil`/`RootClaim.sil`/`RefundClaim.sil`/`RootClose.sil` 四份文件不需要任何代码/逻辑改动**——`token_tmpl_hash` 按 Owner 1408 裁定继续留在 ctor（不挪 State，v0.2 那条"依赖反转"改动作废）。唯一需要的是**机械更新**：这四份文件 ctor 里烤的 `token_tmpl_hash` 常量值，从旧的 KTT 编译产物 hash 换成 v0.3（方案 C）新的编译产物 hash（`241e52069168e22d0bd92b6e705b99c641bf0424c90419ca16c847f014a618ac`，见 `docs/provenance/2026-09-14-j2-ktt-v03-planC-remove-h1b/run.log`）——这是**数值更新**，不是**结构性改动**，落码时体现在 `proto-v0-template-anchors.json` 或对应的协议常量计算脚本里，不需要改这四份 `.sil` 源码本身。
+**`ShardLeaf_direct.sil`/`RootClose.sil` 两份文件不需要任何代码/逻辑改动**——`token_tmpl_hash` 按 Owner 1408 裁定继续留在 ctor（不挪 State，v0.2 那条"依赖反转"改动作废）。唯一需要的是**机械更新**：这两份文件 ctor 里烤的 `token_tmpl_hash` 常量值，从旧的 KTT 编译产物 hash 换成 v0.3（方案 C）新的编译产物 hash（**`225ebcdec51f5439326e6bc48e47c288ceacbd3bea07aea6771548eeed44d80e`**，`compiled.template_hash_bytes` 权威值，见 `docs/provenance/2026-09-14-j2-ktt-v03-planC-remove-h1b/run.log`）——这是**数值更新**，不是**结构性改动**。
+
+🔴 **范围更正（2026-09-15，账本 1408/1409/1415，f7342a32）**：`RootClaim.sil`/`RefundClaim.sil` **不属于**"零代码改动"这一类——账本 1409/1415 把"同病同治"扩大到这两份文件（以及 `CloseZkV2.sil`/`PayoutShard.sil`/`PayoutShardV2.sil`）各自手写的 `ClaimState` struct 镜像：它们逐字段复刻 `KanetTokenClaim` 的隐式 State 用于构造"新建 claim 输出"，v0.3 删除 `KanetTokenClaim.sil` 的 `market_suffix_hash` 字段后，这五份文件的镜像结构必须同步删除该字段（各自 ctor 参数 + `ClaimState` 字段 + 构造字面量，仅三处/文件，逻辑零改动），否则构造出的"新 claim 输出"字节布局与真实 v0.3 `KanetTokenClaim` 编译产物对不上。详见各自的 `docs/provenance/2026-09-14-j2-t3-v03-*-tokenization/` provenance（README 的 RERUN 状态注记）。上文曾写"四份文件不需要任何代码/逻辑改动"这句对 `RootClaim.sil`/`RefundClaim.sil` 不成立，仅对 `ShardLeaf_direct.sil`/`RootClose.sil` 成立。原句已改，本条记录这次范围收窄的由来，不删旧文只标错。
 
 ## §5 已知限制
 

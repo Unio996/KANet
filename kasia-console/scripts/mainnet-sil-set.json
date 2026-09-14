@@ -3,57 +3,58 @@
   "schemaVersion": 2,
   "declaredBy": "J2",
   "declaredAt": "2026-09-14T18:30:00+07:00",
-  "sourceLedgerRef": "COORD-LEDGER (1325)/(1327)/(1338)",
+  "sourceLedgerRef": "COORD-LEDGER (1325)/(1327)/(1338)/(1408)/(1409)/(1410)/(1413)/(1415)",
+  "_update20260915": "账本1408/1409/1410/1413/1415, f7342a32: Owner裁定撤销H1(b)+同病同治删除market_suffix_hash镜像字段, 7个文件源码sha256/bytes改动(KanetTestToken/KanetTokenClaim/PayoutShard/PayoutShardV2/RefundClaim/CloseZkV2/RootClaim), 逻辑/角色/path不变——只更新本文件里的sha256/bytes字段, templateHash类字段本文件从不存, 不受v1.0.0公式订正影响。",
   "physicalCollectionStatus": "PENDING — 与 (1317) 目录改名/合并运维窗合并执行,不在原型期做(Bettor 裁,见 1327 回复)",
   "contracts": [
     {
       "name": "KanetTestToken",
       "role": "T1 代币",
       "path": "src/lib/sil-v1/KanetTestToken.sil",
-      "sha256": "5e01af343c312a96e9419bb3bea2bb135ba89d9c44286ff2dbf1c658044c914a",
-      "bytes": 11151
+      "sha256": "1b3b80946f572fa4bada81612e97f16c9f76d5c25d2abebbc910f81f14409154",
+      "bytes": 11435
     },
     {
       "name": "PayoutShard",
       "role": "T3 市场·非ZK委员分账层(v1)",
       "path": "src/lib/PayoutShard.sil",
-      "sha256": "1bd558bc905384fd01b045f62cc576508250df25c76005c8bd210d82ee36b06c",
-      "bytes": 63963
+      "sha256": "9376a9d0a86e92688e479cc35eea638dc519d75e6efec6c63b08822409aaef5b",
+      "bytes": 63988
     },
     {
       "name": "PayoutShardV2",
       "role": "T3 市场·ZK结算专用委员分账层",
       "path": "src/lib/PayoutShardV2.sil",
-      "sha256": "4533a6eeacc6aa7cf96dc4752d05b4f55bf4b3dea6fe3f97a32f192523f523b9",
-      "bytes": 55370
+      "sha256": "563ac01a4796684bd0d923eb4f7d03f277f4925828802e7c3512a0ee3f7c1948",
+      "bytes": 55467
     },
     {
       "name": "KanetTokenClaim",
       "role": "T3 市场·claim/refund落地目的地(纯代币持有covenant)",
       "path": "src/lib/KanetTokenClaim.sil",
-      "sha256": "a39f9b32ced5679dcb5ef08eae8d4fb62572a1b6139ab8601945978baaf92bbf",
-      "bytes": 8324
+      "sha256": "96724cdd19dd05bac15a5af5f306a0e68926dd2834bf873126b73610bcd32dd6",
+      "bytes": 8216
     },
     {
       "name": "RefundClaim",
       "role": "T3 市场·退款腿(RootClose.convert_to_refundclaim新建)",
       "path": "src/lib/RefundClaim.sil",
-      "sha256": "7b45a296f378070931d92cea04f43d57a1215e170b9edbb239d9b76ee8e268a1",
-      "bytes": 10536
+      "sha256": "a4f9fc2308412e3decafb34076f620a9b50da05c9a5030de07b3c9cdfa00cc3d",
+      "bytes": 10335
     },
     {
       "name": "CloseZkV2",
       "role": "T3 市场·ZK结算closing covenant",
       "path": "src/lib/CloseZkV2.sil",
-      "sha256": "bbcd19a8d02d963c645bcb8d9a9014117eab44f35efbf23cf3b66c928c1f21cb",
-      "bytes": 32402
+      "sha256": "6b9f537861a940dd09276786b005e23781a8880b0ae5cc417f410c8df7ab7277",
+      "bytes": 32465
     },
     {
       "name": "RootClaim",
       "role": "T3 市场·claim腿(RootClose.convert_to_claim新建)",
       "path": "src/lib/RootClaim.sil",
-      "sha256": "3cf149fe1327cc417a9b07ccef054d77d7f3d020e100aeda1c8a70ebceec2121",
-      "bytes": 14079
+      "sha256": "e8356ed49eb4c3a952764f1f1ee251b7b8ac6b1ee3975ec50a214c7c09fc13d5",
+      "bytes": 14313
     },
     {
       "name": "RootClose",
