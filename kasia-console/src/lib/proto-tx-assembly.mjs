@@ -11,6 +11,9 @@
 // 而不是跨包 import relay 代码("Console 传导不碰链"角色分工铁律), 改动任一侧必须同步改另一侧。
 
 import { sqlite } from '../db/client.js';
+import { encodeRegisterAppendAction, combineActionAndRedeem as combineRegisterAppendActionAndRedeem } from './proto-register-append-witness.mjs';
+import { encodeKttTransferZeroOutAction, combineKttActionAndRedeem } from './proto-ktt-transfer-witness.mjs';
+import { encodeLeafStateBytes } from './proto-leaf-state.mjs';
 
 export const GENESIS_OUTPUT_SOMPI = 20_000_000n;
 export const CONTINUATION_OUTPUT_SOMPI = 20_000_000n;
@@ -272,4 +275,150 @@ export function verifyShardLeafCovIdAgainstLandedTx({ kaspa, expectedCovId, land
     return { ok: false, actualCovId, reason: `落链交易实际算出的 covenant_id(${actualCovId}) 与 prepared 阶段存的 shardleaf_cov_id(${expectedCovId}) 不一致` };
   }
   return { ok: true, actualCovId };
+}
+
+/**
+ * bet_mint 步骤B(register_append)的完整 tx_json 组装——不签名(relay 侧只签 fee 输入)。
+ * 生产真实形状(账本1425/1434/1436 一路验证过的那个形状): 输入=[leaf, (held 可选), stake, fee],
+ * 输出=[leaf续约(CovenantBinding到leaf自己), PoolSideTicket genesis, 合并KTT genesis(owner=leaf的
+ * covenant_id, 真实kaspa.covenantId算出, authorizing_input=fee输入), fee找零]。
+ * leaf/held/stake 三个 covenant 输入的 sigScript 全部本地确定性算出(不需要私钥, 同 AB11/binding=cov
+ * 声明宏的既有性质), 只有 fee 输入留空待 relay 签。
+ *
+ * @param {object} o
+ * @param {*} o.kaspa
+ * @param {string} o.network
+ * @param {Buffer} o.leafRedeemScript  computeShardLeafRedeemScript(当前 state)的产物
+ * @param {{start:number,len:number}} o.leafStateLayout
+ * @param {{txid:string, vout:number}} o.leafOutpoint  proto_markets.shardleaf_txid/vout
+ * @param {string} o.leafCovId  proto_markets.shardleaf_cov_id(32字节hex, 无0x)
+ * @param {{local_yes:number,local_no:number,count:number,pool_value:number}} o.currentState  下注前的 state(deriveLeafState)
+ * @param {{local_yes:number,local_no:number,count:number,pool_value:number}} o.newState  下注后的 state
+ * @param {object|null} o.heldInput  首次下注为 null; 否则 {txid,vout,value,scriptPublicKeyHex,redeemScript(Buffer),covId,entryAbi,stateFieldCount}
+ * @param {object} o.stakeInput  {txid,vout,value,scriptPublicKeyHex,redeemScript(Buffer),covId,entryAbi,stateFieldCount}
+ * @param {object} o.feeUtxo  {txid,vout,value,scriptPublicKeyHex}
+ * @param {string} o.relayChangeScriptPublicKeyHex
+ * @param {object} o.registerAppendEntryAbi  compileSilV100(...)._raw.contracts.ShardLeaf_direct.entries.register_append(当前ctor下重新编译现读, 不跨市场复用)
+ * @param {object} o.registerAppendArgs  {side, stake, bettorPk(32字节hex), psPrefix, psSuffix, tokPrefix, tokSuffix}
+ * @param {string} o.ticketScriptPubKeyHex  PoolSideTicket genesis 的 scriptPubKeyHex(computeGeneric 产物)
+ * @param {string} o.mergedKttScriptPubKeyHex  合并KTT genesis(computeKttGenesisArtifact({amount:pool_value+stake, ownerCovIdHex:leafCovId}))的 scriptPubKeyHex(不含0x的裸脚本hex, 用于起算covenant_id)
+ * @param {Buffer} o.mergedKttScript  同上, 完整脚本字节(Buffer)
+ * @param {bigint} o.absFeeCapSompi  feeProfile.bet_mint_step_b.cap
+ */
+export function buildRegisterAppendTxJson({
+  kaspa, network, leafRedeemScript, leafStateLayout, leafOutpoint, leafCovId, currentState, newState,
+  heldInput, stakeInput, feeUtxo, relayChangeScriptPublicKeyHex,
+  registerAppendEntryAbi, registerAppendArgs, ticketScriptPubKeyHex, mergedKttScript, absFeeCapSompi,
+}) {
+  const { Transaction, TransactionOutput, GenesisCovenantGroup } = kaspa;
+  const mergedAmount = newState.pool_value; // = currentState.pool_value + registerAppendArgs.stake, 调用方已算好放进 newState
+
+  // ── 输入 index 布局: [0]leaf [1]held?(可选) [2 或 1]stake [最后]fee ──
+  const inputs = [];
+  const leafOutpointObj = { transactionId: leafOutpoint.txid, index: leafOutpoint.vout };
+  inputs.push({ kind: 'leaf' });
+  let heldIdx = -1, stakeIdx, feeIdx;
+  if (heldInput) {
+    heldIdx = inputs.length; inputs.push({ kind: 'held' });
+  }
+  stakeIdx = inputs.length; inputs.push({ kind: 'stake' });
+  feeIdx = inputs.length; inputs.push({ kind: 'fee' });
+
+  const leafSpk = scriptPublicKeyFromHex(kaspa, '0x' + p2shHexFromScript(kaspa, leafRedeemScript));
+  const feeUtxoSpk = scriptPublicKeyFromHex(kaspa, feeUtxo.scriptPublicKeyHex);
+  const stakeSpk = scriptPublicKeyFromHex(kaspa, stakeInput.scriptPublicKeyHex);
+  const heldSpk = heldInput ? scriptPublicKeyFromHex(kaspa, heldInput.scriptPublicKeyHex) : null;
+
+  // leaf 自己的 register_append witness(不需要私钥, AB11 声明宏性质——见 proto-register-append-witness.mjs)。
+  const leafAction = encodeRegisterAppendAction(kaspa, registerAppendEntryAbi, {
+    side: registerAppendArgs.side, stake: registerAppendArgs.stake, leafOutIdx: 0, psOutIdx: 1,
+    bettorPk: registerAppendArgs.bettorPk, ps_prefix: registerAppendArgs.psPrefix, ps_suffix: registerAppendArgs.psSuffix,
+    stakeInIdx: stakeIdx, tok_out: 2, tok_prefix: registerAppendArgs.tokPrefix, tok_suffix: registerAppendArgs.tokSuffix,
+  });
+  const leafSigScriptHex = combineRegisterAppendActionAndRedeem(kaspa, leafAction, leafRedeemScript);
+  const stakeAction = encodeKttTransferZeroOutAction(kaspa, stakeInput.entryAbi, stakeInput.stateFieldCount, [0]); // owner_input_idx=[0]=leaf(账本1436: owner=STAKE_CHIP_OWNER_UNBOUND, 在场证明走leaf自己的covenant_id)
+  const stakeSigScriptHex = combineKttActionAndRedeem(kaspa, stakeAction, stakeInput.redeemScript);
+  const heldSigScriptHex = heldInput
+    ? combineKttActionAndRedeem(kaspa, encodeKttTransferZeroOutAction(kaspa, heldInput.entryAbi, heldInput.stateFieldCount, [0]), heldInput.redeemScript)
+    : null;
+
+  const mkInput = (outpoint, value, spk, sigScriptHex) => ({
+    previousOutpoint: outpoint, signatureScript: sigScriptHex ?? new Uint8Array(0), sequence: 0n, sigOpCount: 1, computeBudget: 0,
+    utxo: { outpoint, amount: value, scriptPublicKey: spk, blockDaaScore: 0n },
+  });
+
+  // 新 leaf 续约的 AB11 手写 state 字节(与合约自己内部算的完全同一套编码, 已用真实编译独立交叉验证过, 见 proto-leaf-state.mjs)。
+  const newStateBytes = encodeLeafStateBytes(newState);
+  const leafPrefix = leafRedeemScript.subarray(0, leafStateLayout.start);
+  const leafSuffix = leafRedeemScript.subarray(leafStateLayout.start + leafStateLayout.len);
+  const leafContRedeem = Buffer.concat([leafPrefix, newStateBytes, leafSuffix]);
+  const leafContSpk = scriptPublicKeyFromHex(kaspa, '0x' + p2shHexFromScript(kaspa, leafContRedeem));
+  const mergedKttSpk = scriptPublicKeyFromHex(kaspa, '0x' + p2shHexFromScript(kaspa, mergedKttScript));
+  const ticketSpk = scriptPublicKeyFromHex(kaspa, ticketScriptPubKeyHex);
+
+  const mkTx = (feeChangeSompi) => {
+    const feeInputSigScript = new Uint8Array(0); // relay 待签
+    const txInputs = [];
+    txInputs[0] = mkInput(leafOutpointObj, currentStateUtxoValueOf(leafOutpoint), leafSpk, leafSigScriptHex);
+    if (heldInput) txInputs[heldIdx] = mkInput({ transactionId: heldInput.txid, index: heldInput.vout }, heldInput.value, heldSpk, heldSigScriptHex);
+    txInputs[stakeIdx] = mkInput({ transactionId: stakeInput.txid, index: stakeInput.vout }, stakeInput.value, stakeSpk, stakeSigScriptHex);
+    txInputs[feeIdx] = mkInput({ transactionId: feeUtxo.txid, index: feeUtxo.vout }, feeUtxo.value, feeUtxoSpk, feeInputSigScript);
+
+    const t = new Transaction({
+      version: 1,
+      inputs: txInputs,
+      outputs: [
+        new TransactionOutput(CONTINUATION_OUTPUT_SOMPI, leafContSpk), // [0] leaf续约, CovenantBinding 后面 populateGenesisCovenants/CovenantBinding 声明
+        new TransactionOutput(GENESIS_OUTPUT_SOMPI, ticketSpk), // [1] ticket genesis(无covenant声明)
+        new TransactionOutput(GENESIS_OUTPUT_SOMPI, mergedKttSpk), // [2] 合并KTT genesis
+        new TransactionOutput(feeChangeSompi === undefined ? 0n : feeChangeSompi, feeUtxoSpk), // [3] fee找零(占位spk复用fee自己的, 调用方可在真正广播前替换成真实找零地址; 本函数不决定找零去向, 只决定形状)
+      ].filter((_, i) => !(feeChangeSompi === undefined && i === 3)),
+      lockTime: 0n, subnetworkId: '0'.repeat(40), gas: 0n, payload: '',
+    });
+    // leaf续约: CovenantBinding到leaf自己(authorizing_input=0, covenant_id=leafCovId)
+    t.outputs[0].covenant = new kaspa.CovenantBinding(0, new kaspa.Hash(leafCovId));
+    // 合并KTT genesis: authorizing_input=fee输入(账本1434③要求, 规避authorizing input本身是covenant的未知项)
+    t.populateGenesisCovenants([new GenesisCovenantGroup(feeIdx, [2])]);
+    return t;
+  };
+
+  const leftover = feeUtxo.value - CONTINUATION_OUTPUT_SOMPI - GENESIS_OUTPUT_SOMPI - GENESIS_OUTPUT_SOMPI;
+  const shape = selectChangeShape({
+    kaspa, network, leftoverSompi: leftover,
+    buildTxWithChange: (changeSompi) => mkTx(changeSompi),
+    buildTxNoChange: () => mkTx(undefined),
+    absFeeCapSompi,
+  });
+
+  const mergedKttCovId = String(shape.tx.outputs[2].covenant.covenantId);
+
+  return {
+    txJson: shape.tx.serializeToSafeJSON(),
+    expectedTxid: shape.tx.id,
+    mergedKttCovId,
+    includeChange: shape.includeChange,
+    changeSompi: shape.changeSompi,
+    requiredFee: shape.requiredFee,
+    netLoss: shape.netLoss,
+    signInputIndices: [feeIdx],
+    genesisOutputIndices: [2],
+    continuationOutputIndices: [0],
+  };
+}
+
+function p2shHexFromScript(kaspa, scriptBytes) {
+  // 复用 ScriptBuilder 的 createPayToScriptHashScript 更省事, 但要用真实脚本先建 builder;
+  // 这里直接用 kaspa.payToScriptHashScript(若存在)否则退回本地 blake2b 拼接(与 proto-covenant-builder.mjs 的 p2sh 一致公式)。
+  if (typeof kaspa.payToScriptHashScript === 'function') {
+    const spk = kaspa.payToScriptHashScript(new Uint8Array(scriptBytes));
+    return spk.script;
+  }
+  throw new Error('p2shHexFromScript: kaspa.payToScriptHashScript not available');
+}
+
+function currentStateUtxoValueOf() {
+  // leaf 自己的 UTXO 面值恒为 CONTINUATION_OUTPUT_SOMPI(每次续约都固定在这个 KIP-9 最优点, 见
+  // kasia-relay/src/lib/covenant-broadcast.mjs 同名常量)。独立成一个具名函数只是为了将来若这个假设
+  // 需要改成"从链上查真实值"时, 只有一处要改。
+  return CONTINUATION_OUTPUT_SOMPI;
 }
