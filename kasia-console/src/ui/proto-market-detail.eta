@@ -1,14 +1,17 @@
 <%~ include('partials/page-open', { _page: 'proto-market-detail', pageTitle: '市场详情（原型）', ...it }) %>
 
-<!-- 原型 v0.3(1325 派工·线框稿 §3/§4, Bettor 1328 裁定; 下注两步流程 = v0.3 改动, ledger 1335 J2
-     合约约束核实): 独立新页, 下注+结算/领取合并一屏。非 ZK 简单路径: 出单人到期手动宣布结果 → 赢家
-     claim; 无人宣布 → 全员 refund。
+<!-- 原型 v0.4(1325 派工·线框稿 §3/§4, Bettor 1328 裁定; 下注两步流程 = v0.3, ledger 1335 J2 合约约束
+     核实; v0.4 = 读 J2 已推分支 coord/j2-proto-v0-backend b6a63d27 源码, 字段/状态值对齐真实契约, 非
+     猜测): 独立新页, 下注+结算/领取合并一屏。非 ZK 简单路径: 出单人到期手动宣布结果 → 赢家 claim;
+     无人宣布 → 全员 refund/cancelled。
      🔴 下注不是一步: KTT 没有通用余额, 每次下注都要先【铸筹码】(铸一份绑定本市场的代币) 再【下注】
      (把这份代币转进市场 covenant)——两笔各自的 tx。第 2 步没真正落链前, 不能显示"已下注"; 第 1 步
      成功、第 2 步失败, 必须能看出"筹码铸了、注没下成", 不能含糊成一个笼统的失败提示。
-     响应契约(占位, 具体字段名待与 J2 对齐): POST .../bet 返回 { ok, steps: [{step:'mint',ok,txId,error},
-     {step:'bet',ok,txId,error}] }——J2 设计稿会给两步失败态矩阵, 届时按实际字段调整, 不改这个两步骨架。
-     GET /api/proto-markets/:id、POST .../bet、.../resolve、.../claim 尚未落地(J2), 失败态如实显示。 -->
+     GET /api/proto-markets/:id 响应形状是 { ok, market, bets, claims }(不是直接就是 market 对象);
+     market 行字段 = proto_markets 表原样(question/token_ticker/deadline_ms/status/winning_side, 见
+     kasia-console/src/db/migrate.js v206), status CHECK IN (betting/sealed/resolved/cancelled)。
+     POST .../bet 广播落地前统一 501(kind 占位错误信息), 无 steps 字段——前端按"没有 steps 数组=两步都
+     还没开始"降级处理。resolutionNote 目前后端 DB 里还没有对应列(J2 §2.3 TODO), 可能显示为空, 不是 bug。 -->
 
 <div class="p-6 max-w-2xl mx-auto" x-data="protoMarketDetailPage()" x-init="init()" x-cloak>
 
@@ -22,15 +25,15 @@
       <div class="card p-6">
         <div class="flex items-center gap-2 mb-1">
           <span class="text-[10px] px-1.5 py-0.5 rounded font-medium" :class="statusBadge(market.status)" x-text="statusLabel(market.status)"></span>
-          <span class="text-xs text-ink-400">结算代币: <span x-text="market.ticker || '?'"></span></span>
+          <span class="text-xs text-ink-400">结算代币: <span x-text="market.token_ticker || '?'"></span></span>
         </div>
-        <h1 class="text-xl font-display text-ink-800" x-text="market.title"></h1>
+        <h1 class="text-xl font-display text-ink-800" x-text="market.question"></h1>
         <p class="text-xs text-ink-400 mt-1" x-show="market.resolutionNote" x-text="market.resolutionNote"></p>
-        <p class="text-xs text-ink-400 mt-1">截止: <span x-text="(market.deadline || '').slice(0,16)"></span></p>
+        <p class="text-xs text-ink-400 mt-1">截止: <span x-text="fmtDeadline(market.deadline_ms)"></span></p>
       </div>
 
-      <!-- 下注面板(仅 open 态) — 两步: ①铸筹码 ②下注, 各自独立成败态, 第②步没成功前不算"已下注" -->
-      <template x-if="market.status === 'open'">
+      <!-- 下注面板(仅 betting 态) — 两步: ①铸筹码 ②下注, 各自独立成败态, 第②步没成功前不算"已下注" -->
+      <template x-if="market.status === 'betting'">
         <div class="card p-6 space-y-3">
           <h2 class="text-sm font-semibold text-ink-700">下注</h2>
           <div class="flex gap-2">
@@ -38,7 +41,7 @@
             <button @click="bet.direction = 1" class="btn flex-1" :class="bet.direction === 1 ? 'btn-danger' : 'btn-ghost'">NO</button>
           </div>
           <div>
-            <label class="text-xs text-ink-400">数量（<span x-text="market.ticker || '?'"></span>）</label>
+            <label class="text-xs text-ink-400">数量（<span x-text="market.token_ticker || '?'"></span>）</label>
             <input x-model.number="bet.amount" type="number" min="0" step="any"
               class="w-full mt-1 border border-warm-300 rounded-lg px-3 py-2 text-sm focus:border-brand-400 focus:outline-none bg-warm-50">
           </div>
@@ -73,8 +76,9 @@
         </div>
       </template>
 
-      <!-- 出单人宣布结果面板(仅 open/closed 态; 是否显示由后端按 relay 归属判定, 前端先都显示占位) -->
-      <template x-if="market.status === 'open' || market.status === 'closed'">
+      <!-- 出单人宣布结果面板(betting/sealed 态; 后端实际只在 sealed 才接受 resolve, betting 态点了会
+           收到 409, 如实透传——前端不模拟 betting→sealed 的自动切换, 那是后端状态机的事) -->
+      <template x-if="market.status === 'betting' || market.status === 'sealed'">
         <div class="card p-6 space-y-3">
           <h2 class="text-sm font-semibold text-ink-700">出单人：宣布结果</h2>
           <p class="text-[11px] text-ink-300">只有本市场出单人的操作会被接受；非出单人调用后端会拒绝。</p>
@@ -86,12 +90,12 @@
         </div>
       </template>
 
-      <!-- 领取面板(resolved/refunded 态) -->
-      <template x-if="market.status === 'resolved' || market.status === 'refunded'">
+      <!-- 领取面板(resolved/cancelled 态) -->
+      <template x-if="market.status === 'resolved' || market.status === 'cancelled'">
         <div class="card p-6 space-y-3">
           <h2 class="text-sm font-semibold text-ink-700">领取</h2>
-          <p class="text-xs text-ink-500" x-show="market.status === 'resolved'">结果：<span class="font-medium" x-text="market.outcome === 0 ? 'YES 赢' : 'NO 赢'"></span></p>
-          <p class="text-xs text-ink-500" x-show="market.status === 'refunded'">到期无人宣布结果，全员退款。</p>
+          <p class="text-xs text-ink-500" x-show="market.status === 'resolved'">结果：<span class="font-medium" x-text="market.winning_side === 0 ? 'YES 赢' : 'NO 赢'"></span></p>
+          <p class="text-xs text-ink-500" x-show="market.status === 'cancelled'">市场已取消/退款。</p>
           <div x-show="claimMsg" class="text-xs" :class="claimOk ? 'text-emerald-700' : 'text-red-600'" x-text="claimMsg"></div>
           <button @click="claim()" :disabled="claimSubmitting" class="btn btn-primary w-full">
             <span x-show="!claimSubmitting">Claim</span>
@@ -117,24 +121,32 @@ function protoMarketDetailPage() {
     resolveSubmitting: false, resolveMsg: '', resolveOk: false,
     claimSubmitting: false, claimMsg: '', claimOk: false,
 
+    // GET /api/proto-markets/:id 响应形状 { ok, market, bets, claims } — market 在 data.market 里,
+    // 不是响应体本身(读 J2 proto.js 源码核实过, 之前的版本这里直接把整个响应体当 market 是个 bug)。
     async init() {
       try {
         const res = await fetch('/api/proto-markets/' + encodeURIComponent(this.marketId));
         if (!res.ok) { this.loadFailed = 'HTTP ' + res.status; this.loading = false; return; }
-        this.market = await res.json().catch(() => null);
-        if (!this.market) this.loadFailed = '返回数据为空';
+        const data = await res.json().catch(() => null);
+        this.market = data && data.market ? data.market : null;
+        if (!this.market) this.loadFailed = data && data.error ? data.error : '返回数据为空';
       } catch (err) { this.loadFailed = err.message; }
       this.loading = false;
     },
 
+    // 状态值对齐真实 schema(migrate.js v206 proto_markets.status CHECK): betting/sealed/resolved/cancelled。
     statusBadge(s) {
       if (s === 'resolved') return 'bg-emerald-100 text-emerald-700';
-      if (s === 'refunded') return 'bg-warm-200 text-ink-500';
+      if (s === 'cancelled') return 'bg-warm-200 text-ink-500';
       return 'bg-amber-100 text-amber-700';
     },
     statusLabel(s) {
-      const m = { open: '押注中', closed: '等待结算', resolved: '已结算', refunded: '已退款' };
+      const m = { betting: '押注中', sealed: '等待结算', resolved: '已结算', cancelled: '已取消/退款' };
       return m[s] || s || '?';
+    },
+    fmtDeadline(ms) {
+      if (!ms) return '';
+      try { return new Date(Number(ms)).toISOString().slice(0, 16).replace('T', ' '); } catch { return ''; }
     },
 
     // 下注 = 两笔独立 tx(①铸筹码 ②下注), 后端按 §0 注释里的占位契约返回 steps 数组。

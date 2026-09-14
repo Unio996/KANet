@@ -1,8 +1,11 @@
 <%~ include('partials/page-open', { _page: 'tokens-list', pageTitle: '代币', ...it }) %>
 
-<!-- 原型 v0.3(1325 派工·线框稿 §1 附带小节, 改自 v0.1/v0.2 — ledger 1335 合约约束核实):
-     这里列的是"代币定义"(DB only), 不是链上余额——KTT 没有通用余额概念, 每次下注才各自铸一份。
-     样式对齐 my-markets.eta 的表格模式。GET /api/tokens 尚未落地(J2), 空/失败态如实显示。 -->
+<!-- 原型 v0.4(1325 派工·线框稿 §1 附带小节, 改自 v0.1/v0.2 — ledger 1335 合约约束核实; v0.4 = 读 J2
+     coord/j2-proto-v0-backend b6a63d27 源码字段对齐): 这里列的是"代币定义"(DB only), 不是链上余额——
+     KTT 没有通用余额概念, 每次下注才各自铸一份。GET /api/tokens 已落码, 返回 proto_token_defs 原始行
+     (字段 default_denomination, 不是 faceValue——响应体没有做字段改名)。"用于哪些市场"列后端目前
+     没有聚合这个信息(J2 GET /api/tokens 只查单表), 会一直显示"还没有市场用它"直到 J2 加这个聚合——
+     不是前端 bug, 是后端尚未实现的已知缺口。样式对齐 my-markets.eta 的表格模式。 -->
 
 <div class="p-6 max-w-5xl mx-auto" x-data="tokensListPage()" x-init="init()">
   <div class="flex items-center justify-between mb-5">
@@ -41,7 +44,7 @@
           <tr class="border-t border-warm-100 hover:bg-warm-50">
             <td class="py-2 px-3" x-text="tk.name || '(未命名)'"></td>
             <td class="py-2 px-3 font-mono text-xs" x-text="tk.ticker || '?'"></td>
-            <td class="py-2 px-3 text-right tabular-nums text-ink-600" x-text="tk.faceValue ?? '—'"></td>
+            <td class="py-2 px-3 text-right tabular-nums text-ink-600" x-text="tk.default_denomination ?? '—'"></td>
             <td class="py-2 px-3 text-ink-500 text-xs" x-text="(tk.usedByMarkets && tk.usedByMarkets.length) ? tk.usedByMarkets.join(', ') : '（还没有市场用它）'"></td>
             <td class="py-2 px-3 text-right text-[11px] text-ink-400" x-text="(tk.created_at || '').slice(0, 16)"></td>
           </tr>

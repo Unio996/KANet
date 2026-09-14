@@ -1,6 +1,10 @@
 <%~ include('partials/page-open', { _page: 'proto-market-list', pageTitle: '市场（原型）', ...it }) %>
 
-<!-- 原型 v0(1325 派工·线框稿 §3, Bettor 1328 裁定): 独立新页, GET /api/proto-markets 尚未落地(J2)。 -->
+<!-- 原型 v0.3(1325 派工·线框稿 §3, Bettor 1328 裁定): 独立新页。GET /api/proto-markets 已落码
+     (J2 分支 coord/j2-proto-v0-backend b6a63d27, 读源码逐字段核过): 响应行原样透传 proto_markets 表
+     (JOIN token_name/token_ticker), 不是"title/ticker/deadline/status(open..)"这套猜测字段名——本页
+     字段/状态值已按真实 schema 对齐(question/token_ticker/deadline_ms/status IN betting|sealed|resolved|
+     cancelled), 见 kasia-console/src/db/migrate.js v206。 -->
 
 <div class="p-6 max-w-5xl mx-auto" x-data="protoMarketListPage()" x-init="init()">
   <div class="flex items-center justify-between mb-5">
@@ -37,12 +41,12 @@
       <tbody>
         <template x-for="m in markets" :key="m.id">
           <tr class="border-t border-warm-100 hover:bg-warm-50">
-            <td class="py-2 px-3 max-w-[320px] truncate" :title="m.title" x-text="m.title || '(无标题)'"></td>
-            <td class="py-2 px-3 text-ink-500 text-xs" x-text="m.ticker || '?'"></td>
+            <td class="py-2 px-3 max-w-[320px] truncate" :title="m.question" x-text="m.question || '(无标题)'"></td>
+            <td class="py-2 px-3 text-ink-500 text-xs" x-text="m.token_ticker || '?'"></td>
             <td class="py-2 px-3 text-center">
               <span class="text-[10px] px-1.5 py-0.5 rounded font-medium" :class="statusBadge(m.status)" x-text="statusLabel(m.status)"></span>
             </td>
-            <td class="py-2 px-3 text-right text-[11px] text-ink-400" x-text="(m.deadline || '').slice(0, 16)"></td>
+            <td class="py-2 px-3 text-right text-[11px] text-ink-400" x-text="fmtDeadline(m.deadline_ms)"></td>
             <td class="py-2 px-3 text-center">
               <a :href="'/proto-markets/' + m.id" class="text-brand-500 hover:text-brand-700 text-xs">详情 →</a>
             </td>
@@ -68,14 +72,19 @@ function protoMarketListPage() {
       } catch (err) { this.loadFailed = err.message; }
       this.loading = false;
     },
+    // 状态值对齐真实 schema(migrate.js v206 proto_markets.status CHECK): betting/sealed/resolved/cancelled。
     statusBadge(s) {
       if (s === 'resolved') return 'bg-emerald-100 text-emerald-700';
-      if (s === 'refunded') return 'bg-warm-200 text-ink-500';
+      if (s === 'cancelled') return 'bg-warm-200 text-ink-500';
       return 'bg-amber-100 text-amber-700';
     },
     statusLabel(s) {
-      const m = { open: '押注中', closed: '等待结算', resolved: '已结算', refunded: '已退款' };
+      const m = { betting: '押注中', sealed: '等待结算', resolved: '已结算', cancelled: '已取消/退款' };
       return m[s] || s || '?';
+    },
+    fmtDeadline(ms) {
+      if (!ms) return '';
+      try { return new Date(Number(ms)).toISOString().slice(0, 16).replace('T', ' '); } catch { return ''; }
     },
   };
 }
