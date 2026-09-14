@@ -109,7 +109,7 @@ export const ctorInt = (n) => ({ kind: 'int', data: Number(n) });
 // 重复内嵌 sha256 字面量（同"避免同一事实两处各存一份必陈"通则）。
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const SILVERC_PIN_PATH = join(REPO_ROOT, 'scripts', 'silverc-pin.json');
-const DEFAULT_SILVERC_V100_PATH = 'D:/silverscript/versioned-builds/silverc-v100-3ed9733.exe';
+export const DEFAULT_SILVERC_V100_PATH = 'D:/silverscript/versioned-builds/silverc-v100-3ed9733.exe';
 
 let _silvercPinCache = null;
 function _loadSilvercPin() {
