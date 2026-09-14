@@ -95,7 +95,7 @@ export async function registerProtoRoutes(fastify) {
   fastify.post('/api/proto-markets/create', async (request, reply) => {
     const { tokenId, title, deadline, resolutionNote } = request.body || {};
     if (!tokenId) return reply.code(400).send({ ok: false, error: 'tokenId required' });
-    const tokenDef = sqlite.prepare('SELECT * FROM proto_token_defs WHERE id = ?').get(tokenId);
+    const tokenDef = sqlite.prepare(`SELECT ${PUBLIC_TOKEN_DEF_COLS} FROM proto_token_defs WHERE id = ?`).get(tokenId);
     if (!tokenDef) return reply.code(404).send({ ok: false, error: 'token definition not found' });
     if (!title?.trim()) return reply.code(400).send({ ok: false, error: 'title required' });
     // 前端 <input type="datetime-local"> 送来的是本地时间字符串(如 "2026-09-20T15:30")，服务端转 unix-ms。
@@ -145,7 +145,7 @@ export async function registerProtoRoutes(fastify) {
   // 未落地阶段直接走 501(无 steps 字段), 前端"没有 steps 数组"分支会显示通用错误, 已兼容。
   // ══════════════════════════════════════════════════════════════════════
   fastify.post('/api/proto-markets/:id/bet', async (request, reply) => {
-    const market = sqlite.prepare('SELECT * FROM proto_markets WHERE id = ?').get(request.params.id);
+    const market = sqlite.prepare(`SELECT ${PUBLIC_MARKET_COLS} FROM proto_markets m WHERE m.id = ?`).get(request.params.id);
     if (!market) return reply.code(404).send({ ok: false, error: 'market not found' });
     if (market.status !== 'betting') return reply.code(409).send({ ok: false, error: `market status is ${market.status}, not accepting bets` });
     const { direction, amount } = request.body || {};
@@ -156,7 +156,10 @@ export async function registerProtoRoutes(fastify) {
     }
     // NO-TX-NO-STATE: 不写 proto_bets 行, 等步骤A(铸筹码)真实广播确认后才写(见设计稿 §2.3 失败态矩阵)。
     // bettor_pk 不从请求体读——复用本市场 committee_privkey_enc 解出的那把 keypair 兼任(文件头注,
-    // Bettor 1354 裁定), 不为每笔下注新造。
+    // Bettor 1354 裁定), 不为每笔下注新造。🔴 上面这行 market 查询故意不取 committee_privkey_enc
+    // (PUBLIC_MARKET_COLS 不含它)——buildAndBroadcast 真正实现时若需要解密这把 key, 必须另起一条
+    // 只取 committee_privkey_enc 单列的查询, 就地 decrypt、就地用掉, 不把它并进这个到处传递的 market
+    // 对象里(NWT 1359: 防"下次有人把 market 对象 spread 进错误信息"这类泄露)。
     try {
       await buildAndBroadcast('bet_mint', { market, direction, stakeAmount });
     } catch (err) {
@@ -168,7 +171,7 @@ export async function registerProtoRoutes(fastify) {
   // 委员宣布结果 —— RootClose.close_commit(v0: §5 单 keypair 模拟 5 委员)。
   // ══════════════════════════════════════════════════════════════════════
   fastify.post('/api/proto-markets/:id/resolve', async (request, reply) => {
-    const market = sqlite.prepare('SELECT * FROM proto_markets WHERE id = ?').get(request.params.id);
+    const market = sqlite.prepare(`SELECT ${PUBLIC_MARKET_COLS} FROM proto_markets m WHERE m.id = ?`).get(request.params.id);
     if (!market) return reply.code(404).send({ ok: false, error: 'market not found' });
     if (market.status !== 'sealed') return reply.code(409).send({ ok: false, error: `market status is ${market.status}, must be sealed before resolve` });
     const { outcome } = request.body || {};
@@ -189,14 +192,14 @@ export async function registerProtoRoutes(fastify) {
   // 挑第一个, 那样会在假设被打破的那一刻悄悄 claim 错人)。
   // ══════════════════════════════════════════════════════════════════════
   fastify.post('/api/proto-markets/:id/claim', async (request, reply) => {
-    const market = sqlite.prepare('SELECT * FROM proto_markets WHERE id = ?').get(request.params.id);
+    const market = sqlite.prepare(`SELECT ${PUBLIC_MARKET_COLS} FROM proto_markets m WHERE m.id = ?`).get(request.params.id);
     if (!market) return reply.code(404).send({ ok: false, error: 'market not found' });
     if (market.status !== 'resolved' && market.status !== 'cancelled') {
       return reply.code(409).send({ ok: false, error: `market status is ${market.status}, must be resolved or cancelled before claim` });
     }
     const candidates = market.status === 'resolved'
-      ? sqlite.prepare('SELECT * FROM proto_bets WHERE market_id = ? AND side = ? AND status = ?').all(market.id, market.winning_side, 'confirmed')
-      : sqlite.prepare('SELECT * FROM proto_bets WHERE market_id = ? AND status = ?').all(market.id, 'confirmed');
+      ? sqlite.prepare(`SELECT ${PUBLIC_BET_COLS} FROM proto_bets WHERE market_id = ? AND side = ? AND status = ?`).all(market.id, market.winning_side, 'confirmed')
+      : sqlite.prepare(`SELECT ${PUBLIC_BET_COLS} FROM proto_bets WHERE market_id = ? AND status = ?`).all(market.id, 'confirmed');
     if (candidates.length === 0) return reply.code(404).send({ ok: false, error: 'no claimable confirmed bet found in this market' });
     if (candidates.length > 1) {
       return reply.code(409).send({ ok: false, error: `ambiguous: ${candidates.length} claimable bets found in this market — v0 single-operator assumption violated, refusing to auto-pick one (needs a bettor filter param, not built in v0)` });
@@ -217,9 +220,9 @@ export async function registerProtoRoutes(fastify) {
   // 适用: v0 单操作员场景接受)。
   // ══════════════════════════════════════════════════════════════════════
   fastify.post('/api/proto-markets/:id/withdraw', async (request, reply) => {
-    const market = sqlite.prepare('SELECT * FROM proto_markets WHERE id = ?').get(request.params.id);
+    const market = sqlite.prepare(`SELECT ${PUBLIC_MARKET_COLS} FROM proto_markets m WHERE m.id = ?`).get(request.params.id);
     if (!market) return reply.code(404).send({ ok: false, error: 'market not found' });
-    const claim = sqlite.prepare('SELECT * FROM proto_claims WHERE market_id = ? AND withdrawn_at IS NULL ORDER BY created_at ASC LIMIT 1').get(market.id);
+    const claim = sqlite.prepare(`SELECT ${PUBLIC_CLAIM_COLS} FROM proto_claims WHERE market_id = ? AND withdrawn_at IS NULL ORDER BY created_at ASC LIMIT 1`).get(market.id);
     if (!claim) return reply.code(404).send({ ok: false, error: 'no un-withdrawn claim found in this market' });
     try {
       await buildAndBroadcast('withdraw', { market, claim });
