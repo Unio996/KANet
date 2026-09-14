@@ -55,6 +55,50 @@ export const GLOBAL_ABS_FEE_CAP_SOMPI = 100_000_000n; // 1.0 KAS——任何 kin
 export const SIGNED_INPUT_CEILING_SOMPI = 100_000_000n; // 1.0 KAS(Bettor 1386②, 原 0.5 KAS 装不下 genesis)
 export const SOMPI_PER_MASS = 100n;
 
+// 🔴 GENESIS_OUTPUT_SOMPI / CONTINUATION_OUTPUT_SOMPI(spec §9.6, 账本1425 硬条件②, Bettor 裁定):
+// KIP-9 storage mass 的 p²/v U 形曲线全局最优点——genesis/续约类 covenant 输出的面值钉死在这个常量,
+// 不接受"介于 0 和这个值之间"的任何数字(mass 惩罚在小值区间爆炸式增长, 见
+// docs/provenance/2026-09-14-j2-proto-v0-genesis-mass-fee-estimate/ + …-bet-mint-stepB-…/)。
+// 两个常量数值相同(都是 20,000,000 sompi = 0.2 KAS), 语义分开导出(genesis 输出 vs 续约/找零输出)是
+// 为了 cmd 里能分别声明"这次广播的哪些输出属于哪一类", 不是因为算法本身不同。
+// 🔴 relay 强制执行(硬条件②, 不是 console 单方面自律): covenant_broadcast 在签名之前必须校验
+// cmd 声明为 genesis/续约的每一个输出, value 恰好等于对应常量, 否则 fail-closed 拒签——console 侧
+// 构造器只是"应该"传对, relay 侧"必须"验证, 防止 console 一侧的 bug/被绕过导致构造出一个 mass
+// 灾难性或经济无意义的输出却仍然被签名广播。
+export const GENESIS_OUTPUT_SOMPI = 20_000_000n; // 0.2 KAS
+export const CONTINUATION_OUTPUT_SOMPI = 20_000_000n; // 0.2 KAS(含续约/找零输出, 找零形状约束同一常量, spec §9.5②)
+
+/**
+ * 纯函数(签名前即可算): cmd 声明为 genesis 的输出下标, 每一个的 value 必须恰好等于
+ * GENESIS_OUTPUT_SOMPI; 声明为续约(含找零)的输出下标, 每一个必须恰好等于 CONTINUATION_OUTPUT_SOMPI。
+ * 不接受"够接近"或"大于等于"——spec §9.6/§9.5② 明确要求"恰好等于, 不接受介于 0 和常量之间的任何值"。
+ * @param {object} o
+ * @param {PlainOutput[]} o.outputs
+ * @param {number[]} [o.genesisOutputIndices]
+ * @param {number[]} [o.continuationOutputIndices]
+ * @returns {{ok:true} | {ok:false, reason:string}}
+ */
+export function validateFixedValueOutputs({ outputs, genesisOutputIndices = [], continuationOutputIndices = [] }) {
+  if (!Array.isArray(outputs)) return { ok: false, reason: 'outputs must be an array' };
+  const checkSet = (indices, expected, label) => {
+    for (const idx of indices) {
+      if (!Number.isInteger(idx) || idx < 0 || idx >= outputs.length) {
+        return { ok: false, reason: `${label} output index ${idx} out of bounds (outputs.length=${outputs.length})` };
+      }
+      const actual = outputs[idx].valueSompi;
+      if (actual !== expected) {
+        return { ok: false, reason: `${label} output[${idx}].valueSompi=${actual} != required ${expected} (must be exactly equal, not >= or approximate)` };
+      }
+    }
+    return null;
+  };
+  const g = checkSet(genesisOutputIndices, GENESIS_OUTPUT_SOMPI, 'genesis');
+  if (g) return g;
+  const c = checkSet(continuationOutputIndices, CONTINUATION_OUTPUT_SOMPI, 'continuation');
+  if (c) return c;
+  return { ok: true };
+}
+
 /**
  * 纯函数(签名前即可算，不需要真实 mass): Σ(relay 签名的 input.value) ≤ SIGNED_INPUT_CEILING。
  * @param {object} o
