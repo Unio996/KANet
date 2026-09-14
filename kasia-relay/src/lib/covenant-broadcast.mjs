@@ -19,14 +19,21 @@
 //   ④ finalize 后 txid == expected_txid —— 同字节重播断言(同 TRANSFER 命令 prepared_txid 既有契约)。
 //
 // 职责分层(不变量): §9.2 的安全性质完全建立在纯函数(validateSignedInputCeiling / validateNetLoss)
-// 上——它们不碰 kaspa-wasm、不碰私钥，输入输出都是普通 JS 值(sompi 用 BigInt，scriptPubKey 用 hex
-// 字符串)，100% 离线可测；`required_fee` 的计算(必须调 kaspa-wasm calculateTransactionMass，且必须
-// 在签名之后才能算，因为 mass 依赖真实脚本大小)被拆成单独一步 computeRequiredFeeSompi()，validateNetLoss
-// 接收算好的 requiredFeeSompi 作为参数，不在内部调 wasm——这样"net_loss 判定逻辑本身"仍然可以完全离线
-// 单测(直接喂任意 requiredFeeSompi 值)，"mass 算得对不对"是另一层单独关心的问题，两者不混在一次测试里。
+// 上——它们不碰 kaspa-wasm、不碰私钥，输入输出都是普通 JS 值(sompi 用 BigInt)，100% 离线可测；
+// `required_fee` 的计算(必须调 kaspa-wasm calculateTransactionMass，且必须在签名之后才能算，因为
+// mass 依赖真实脚本大小)被拆成单独一步 computeRequiredFeeSompi()，validateNetLoss 接收算好的
+// requiredFeeSompi 作为参数，不在内部调 wasm——这样"net_loss 判定逻辑本身"仍然可以完全离线单测
+// (直接喂任意 requiredFeeSompi 值)，"mass 算得对不对"是另一层单独关心的问题，两者不混在一次测试里。
+//
+// 🔴 scriptPubKey 的表示(2026-09-14 订正，见 docs/provenance/2026-09-14-j2-covenant-broadcast-scriptpubkey-verification/):
+// 早先文档写"scriptPubKey 用 hex 字符串"是错的——真实 kaspa-wasm `ScriptPublicKey.toString()` 吐出的
+// 是 JSON 字符串 `{"script":"<hex>","version":n}`，不是纯 hex。PlainInput/PlainOutput 的
+// `scriptPubKeyRaw` 字段就是这个未经处理的原始 toString() 输出，任何要比较"是不是同一个脚本"的地方
+// 一律先过 `canonicalScriptHex()`(见下)取出真正的 hex 再比，不要直接字符串比较 raw 值(碰巧能比对是
+// 因为两边都用同一条 toString() 路径产出同构 JSON，属于历史遗留的巧合，不是保证)。
 
-/** @typedef {{index:number, amountSompi:bigint, scriptPubKeyHex:string}} PlainInput */
-/** @typedef {{valueSompi:bigint, scriptPubKeyHex:string}} PlainOutput */
+/** @typedef {{index:number, amountSompi:bigint, scriptPubKeyRaw:string}} PlainInput */
+/** @typedef {{valueSompi:bigint, scriptPubKeyRaw:string}} PlainOutput */
 
 export const ABS_FEE_CAP_SOMPI = 5_000_000n;        // 0.05 KAS 绝对硬顶(NWT 1353)
 export const SIGNED_INPUT_CEILING_SOMPI = 50_000_000n; // 0.5 KAS
@@ -85,6 +92,30 @@ export function computeRequiredFeeSompi({ kaspa, networkId, signedTx }) {
 }
 
 /**
+ * 把"任意形式的 scriptPubKey 表示"统一成小写 hex，供相等比较用。三种输入形式都接受(2026-09-14
+ * 订正 NWT 1355 的"转 hex"假设错误，见文件头注 + provenance 目录):
+ *   ① 真实 kaspa-wasm ScriptPublicKey 对象 —— 有 `.toString()`，产出 JSON 字符串 `{"script":"<hex>","version":n}`。
+ *   ② 已经是这个 JSON 字符串本身(比如从别处 `.toString()` 完存过一遍) —— 同样解析取 `.script`。
+ *   ③ 已经是纯 hex 字符串(比如手写测试向量、或未来换了别的取法) —— JSON.parse 会失败，原样当 hex 用。
+ * 不认识的输入(null/undefined) → 空字符串(不 throw——调用方靠"两边比不出相等"自然拒绝，不需要在
+ * 这一层就报错，保持 validateNetLoss 的 fail-closed 语义不变)。
+ * @param {*} spk
+ * @returns {string} 小写 hex(可能是空字符串)
+ */
+export function canonicalScriptHex(spk) {
+  if (spk == null) return '';
+  const raw = typeof spk === 'string' ? spk : String(spk);
+  let hex = raw;
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object' && typeof parsed.script === 'string') {
+      hex = parsed.script;
+    }
+  } catch { /* 不是 JSON ⇒ 假设 raw 本身就是 hex，原样用 */ }
+  return hex.toLowerCase();
+}
+
+/**
  * 纯函数: net_loss = Σ(relay 签名的 input.value) − Σ(outputs 中 scriptPubKey == relay 自身地址 的 value)。
  * require(net_loss ≤ min(requiredFeeSompi × 2, ABS_FEE_CAP))。requiredFeeSompi 由调用方传入(见
  * computeRequiredFeeSompi，必须是签名后算出来的真实值，本函数不负责算、不碰 wasm)。
@@ -92,16 +123,18 @@ export function computeRequiredFeeSompi({ kaspa, networkId, signedTx }) {
  * @param {PlainInput[]} o.inputs
  * @param {PlainOutput[]} o.outputs
  * @param {number[]} o.signInputIndices
- * @param {string} o.relayScriptPubKeyHex
+ * @param {*} o.relayScriptPubKey  relay 自己地址的 scriptPubKey——wasm 对象 / `.toString()` JSON 字符串 /
+ *   纯 hex 字符串三种都行，内部过 canonicalScriptHex() 统一(不要求调用方自己先转好, 也不要求"是 hex"——
+ *   这个参数以前叫 relayScriptPubKeyHex, 那个名字里的"Hex"是错误承诺, 已订正)。
  * @param {bigint} o.requiredFeeSompi  computeRequiredFeeSompi() 的结果(签名后算出的真实 mass×费率)
  * @param {bigint} [o.absFeeCapSompi]
  * @returns {{ok:true, netLossSompi:bigint, feeCeilingSompi:bigint} | {ok:false, reason:string, netLossSompi?:bigint, feeCeilingSompi?:bigint}}
  */
-export function validateNetLoss({ inputs, outputs, signInputIndices, relayScriptPubKeyHex, requiredFeeSompi, absFeeCapSompi = ABS_FEE_CAP_SOMPI }) {
+export function validateNetLoss({ inputs, outputs, signInputIndices, relayScriptPubKey, requiredFeeSompi, absFeeCapSompi = ABS_FEE_CAP_SOMPI }) {
   if (!Array.isArray(inputs) || !inputs.length) return { ok: false, reason: 'inputs must be a non-empty array' };
   if (!Array.isArray(outputs)) return { ok: false, reason: 'outputs must be an array' };
   if (!Array.isArray(signInputIndices) || !signInputIndices.length) return { ok: false, reason: 'signInputIndices must be a non-empty array' };
-  if (!relayScriptPubKeyHex) return { ok: false, reason: 'relayScriptPubKeyHex required' };
+  if (!relayScriptPubKey) return { ok: false, reason: 'relayScriptPubKey required' };
   if (typeof requiredFeeSompi !== 'bigint' || requiredFeeSompi < 0n) return { ok: false, reason: 'requiredFeeSompi must be a non-negative bigint (computed via computeRequiredFeeSompi, post-signing)' };
 
   let signedInputTotalSompi = 0n;
@@ -112,10 +145,10 @@ export function validateNetLoss({ inputs, outputs, signInputIndices, relayScript
     signedInputTotalSompi += BigInt(inputs[idx].amountSompi);
   }
 
-  const relayKeyNorm = String(relayScriptPubKeyHex).toLowerCase();
+  const relayKeyNorm = canonicalScriptHex(relayScriptPubKey);
   let returnedToRelaySompi = 0n;
   for (const out of outputs) {
-    if (String(out.scriptPubKeyHex || '').toLowerCase() === relayKeyNorm) {
+    if (canonicalScriptHex(out.scriptPubKeyRaw) === relayKeyNorm) {
       returnedToRelaySompi += BigInt(out.valueSompi);
     }
   }
@@ -135,15 +168,12 @@ export function validateNetLoss({ inputs, outputs, signInputIndices, relayScript
  * kasia-console/src/lib/bshard-close-transport.mjs:422-423 —— input.utxo.amount(BigInt) /
  * output.value(BigInt) / output.scriptPublicKey，是本仓既有 covenant 构造代码已经在用的真实字段名。
  *
- * 🔴 接线 TODO(NWT 1355，必做，第一件事): `.scriptPublicKey.toString()` 转 hex 这个假设全仓零先例
- * (NWT 用真实 wasm 对象没能验到底——其测试地址无效导致 wasm 崩溃，不是这里的问题，是没条件验)。接线
- * 时必须先拿一个真实 kaspa-wasm Transaction 对象跑一遍，确认 `toString()` 吐出的格式与
- * `relayScriptPubKeyHex`（这个值从哪来也要一并确认——大概率是 relay 自己地址算出的 ScriptPublicKey
- * 走同一个 `.toString()`，两边必须用同一条转换路径，不能一边 `.toString()`、一边走别的 hex 转换）
- * 能不能直接比对；若不能，改用 `bshard-close-transport.mjs` 里 `payToAddressScript()` 那条已验证过的
- * hex 取法。**错的方向是过度拒绝**（比对失败 ⇒ 找不到"付回自己"的输出 ⇒ net_loss 算偏大 ⇒ 被
- * `validateNetLoss` 拒绝广播）——fail-closed，不是资金风险，但会让接线当天所有 covenant_broadcast
- * 请求都失败，必须第一件事就验证掉，不要等到广播失败了才去查。
+ * ✅ 接线 TODO(NWT 1355)已核验解决(2026-09-14，见
+ * docs/provenance/2026-09-14-j2-covenant-broadcast-scriptpubkey-verification/): 用离线一次性
+ * throwaway 密钥构造真实 kaspa-wasm Transaction 对象核实——`.scriptPublicKey.toString()` 吐出的不是
+ * 纯 hex，是 JSON 字符串 `{"script":"<hex>","version":n}`；`scriptPubKeyRaw` 字段存的就是这个原始未
+ * 处理输出。`validateNetLoss` 内部经 `canonicalScriptHex()` 统一取出真正的 hex 再比较，不依赖"两边
+ * 恰好是同一种格式"这个巧合。
  * @param {import('kaspa-wasm').Transaction} tx
  * @returns {{inputs: PlainInput[], outputs: PlainOutput[]}}
  */
@@ -151,11 +181,11 @@ export function extractTxShape(tx) {
   const inputs = tx.inputs.map((inp, index) => ({
     index,
     amountSompi: BigInt(inp.utxo.amount),
-    scriptPubKeyHex: inp.utxo.scriptPublicKey.toString(),
+    scriptPubKeyRaw: inp.utxo.scriptPublicKey.toString(),
   }));
   const outputs = tx.outputs.map((out) => ({
     valueSompi: BigInt(out.value),
-    scriptPubKeyHex: out.scriptPublicKey.toString(),
+    scriptPubKeyRaw: out.scriptPublicKey.toString(),
   }));
   return { inputs, outputs };
 }

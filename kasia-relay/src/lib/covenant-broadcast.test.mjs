@@ -5,7 +5,7 @@
 import assert from 'node:assert';
 import {
   validateSignedInputCeiling, validateNetLoss, computeRequiredFeeSompi, assertFinalTxid,
-  ABS_FEE_CAP_SOMPI, SIGNED_INPUT_CEILING_SOMPI, SOMPI_PER_MASS,
+  canonicalScriptHex, ABS_FEE_CAP_SOMPI, SIGNED_INPUT_CEILING_SOMPI, SOMPI_PER_MASS,
 } from './covenant-broadcast.mjs';
 
 let pass = 0, fail = 0;
@@ -49,9 +49,9 @@ t('SIC-6 未声明签名索引的输入不计入总额(只信声明,不猜)', ()
 t('NL-1 🔴 NWT 1352 绕过构造: 1 KAS 输入, 0.00001 KAS 回自己 + 0.99999 KAS 转走 ⇒ 必须拒(旧"存在性"表述挡不住的场景; 注: 1 KAS 输入在真实管线里会先被 SignedInputCeiling(0.5 KAS)拦下, 这里单独测 validateNetLoss 自身的逻辑, 见 NL-1b 测两道闸协同的真实场景)', () => {
   const oneK = 100_000_000n;
   const r = validateNetLoss({
-    inputs: [{ amountSompi: oneK, scriptPubKeyHex: RELAY_SPK }],
-    outputs: [{ valueSompi: 1_000n, scriptPubKeyHex: RELAY_SPK }, { valueSompi: oneK - 1_000n, scriptPubKeyHex: OTHER_SPK }],
-    signInputIndices: [0], relayScriptPubKeyHex: RELAY_SPK, requiredFeeSompi: 3_000n,
+    inputs: [{ amountSompi: oneK, scriptPubKeyRaw: RELAY_SPK }],
+    outputs: [{ valueSompi: 1_000n, scriptPubKeyRaw: RELAY_SPK }, { valueSompi: oneK - 1_000n, scriptPubKeyRaw: OTHER_SPK }],
+    signInputIndices: [0], relayScriptPubKey: RELAY_SPK, requiredFeeSompi: 3_000n,
   });
   assert.strictEqual(r.ok, false, 'must reject the bypass construction');
   assert.ok(r.netLossSompi > 90_000_000n, `net_loss should be ~0.99999 KAS, got ${r.netLossSompi}`);
@@ -61,9 +61,9 @@ t('NL-1b 🔴 NWT 1355 真实管线场景: 签名输入 ≤ 0.5 KAS(不会先被
   const sic = validateSignedInputCeiling({ inputs: [{ amountSompi: halfK }], signInputIndices: [0] });
   assert.strictEqual(sic.ok, true, 'precondition: 0.5 KAS input must pass SignedInputCeiling in the real pipeline');
   const r = validateNetLoss({
-    inputs: [{ amountSompi: halfK, scriptPubKeyHex: RELAY_SPK }],
-    outputs: [{ valueSompi: 1_000n, scriptPubKeyHex: RELAY_SPK }, { valueSompi: halfK - 1_000n, scriptPubKeyHex: OTHER_SPK }],
-    signInputIndices: [0], relayScriptPubKeyHex: RELAY_SPK, requiredFeeSompi: 3_000n,
+    inputs: [{ amountSompi: halfK, scriptPubKeyRaw: RELAY_SPK }],
+    outputs: [{ valueSompi: 1_000n, scriptPubKeyRaw: RELAY_SPK }, { valueSompi: halfK - 1_000n, scriptPubKeyRaw: OTHER_SPK }],
+    signInputIndices: [0], relayScriptPubKey: RELAY_SPK, requiredFeeSompi: 3_000n,
   });
   assert.strictEqual(r.ok, false, 'must still be rejected by validateNetLoss even though it survives SignedInputCeiling');
 });
@@ -71,9 +71,9 @@ t('NL-2 正常 covenant 花费: net_loss 恰等于 required_fee ⇒ 放行(NWT 1
   const requiredFee = 789_800n; // NWT 1353 实测 settle_consensual 真实量级
   const inputAmt = 10_000_000n;
   const r = validateNetLoss({
-    inputs: [{ amountSompi: inputAmt, scriptPubKeyHex: RELAY_SPK }],
-    outputs: [{ valueSompi: inputAmt - requiredFee, scriptPubKeyHex: RELAY_SPK }],
-    signInputIndices: [0], relayScriptPubKeyHex: RELAY_SPK, requiredFeeSompi: requiredFee,
+    inputs: [{ amountSompi: inputAmt, scriptPubKeyRaw: RELAY_SPK }],
+    outputs: [{ valueSompi: inputAmt - requiredFee, scriptPubKeyRaw: RELAY_SPK }],
+    signInputIndices: [0], relayScriptPubKey: RELAY_SPK, requiredFeeSompi: requiredFee,
   });
   assert.strictEqual(r.ok, true, r.reason);
   assert.strictEqual(r.netLossSompi, requiredFee);
@@ -84,9 +84,9 @@ t('NL-3 net_loss = required_fee×2 + 1 sompi ⇒ 拒(NWT 1353 边界要求)', ()
   const inputAmt = 10_000_000n;
   const netLoss = ceiling + 1n;
   const r = validateNetLoss({
-    inputs: [{ amountSompi: inputAmt, scriptPubKeyHex: RELAY_SPK }],
-    outputs: [{ valueSompi: inputAmt - netLoss, scriptPubKeyHex: RELAY_SPK }],
-    signInputIndices: [0], relayScriptPubKeyHex: RELAY_SPK, requiredFeeSompi: requiredFee,
+    inputs: [{ amountSompi: inputAmt, scriptPubKeyRaw: RELAY_SPK }],
+    outputs: [{ valueSompi: inputAmt - netLoss, scriptPubKeyRaw: RELAY_SPK }],
+    signInputIndices: [0], relayScriptPubKey: RELAY_SPK, requiredFeeSompi: requiredFee,
   });
   assert.strictEqual(r.ok, false);
   assert.strictEqual(r.feeCeilingSompi, ceiling);
@@ -96,9 +96,9 @@ t('NL-4 net_loss = required_fee×2 恰好等于动态上限 ⇒ 放行(闭区间
   const inputAmt = 10_000_000n;
   const netLoss = requiredFee * 2n;
   const r = validateNetLoss({
-    inputs: [{ amountSompi: inputAmt, scriptPubKeyHex: RELAY_SPK }],
-    outputs: [{ valueSompi: inputAmt - netLoss, scriptPubKeyHex: RELAY_SPK }],
-    signInputIndices: [0], relayScriptPubKeyHex: RELAY_SPK, requiredFeeSompi: requiredFee,
+    inputs: [{ amountSompi: inputAmt, scriptPubKeyRaw: RELAY_SPK }],
+    outputs: [{ valueSompi: inputAmt - netLoss, scriptPubKeyRaw: RELAY_SPK }],
+    signInputIndices: [0], relayScriptPubKey: RELAY_SPK, requiredFeeSompi: requiredFee,
   });
   assert.strictEqual(r.ok, true);
 });
@@ -106,31 +106,71 @@ t('NL-5 required_fee 很大时改用 ABS_FEE_CAP(取 min): required_fee×2 > ABS
   const requiredFee = ABS_FEE_CAP_SOMPI; // ×2 会远超 ABS_FEE_CAP
   const inputAmt = 100_000_000n;
   const r = validateNetLoss({
-    inputs: [{ amountSompi: inputAmt, scriptPubKeyHex: RELAY_SPK }],
-    outputs: [{ valueSompi: inputAmt - ABS_FEE_CAP_SOMPI, scriptPubKeyHex: RELAY_SPK }],
-    signInputIndices: [0], relayScriptPubKeyHex: RELAY_SPK, requiredFeeSompi: requiredFee,
+    inputs: [{ amountSompi: inputAmt, scriptPubKeyRaw: RELAY_SPK }],
+    outputs: [{ valueSompi: inputAmt - ABS_FEE_CAP_SOMPI, scriptPubKeyRaw: RELAY_SPK }],
+    signInputIndices: [0], relayScriptPubKey: RELAY_SPK, requiredFeeSompi: requiredFee,
   });
   assert.strictEqual(r.ok, true, r.reason);
   assert.strictEqual(r.feeCeilingSompi, ABS_FEE_CAP_SOMPI, 'ceiling should be capped at ABS_FEE_CAP, not required_fee*2');
 });
-t('NL-6 scriptPubKeyHex 大小写不敏感比对(不因为大小写误判"没找到自己的找零")', () => {
+t('NL-6 scriptPubKeyRaw(纯 hex 形式)大小写不敏感比对(不因为大小写误判"没找到自己的找零")', () => {
   const requiredFee = 1_000n;
   const inputAmt = 10_000_000n;
   const r = validateNetLoss({
-    inputs: [{ amountSompi: inputAmt, scriptPubKeyHex: RELAY_SPK.toUpperCase() }],
-    outputs: [{ valueSompi: inputAmt - requiredFee, scriptPubKeyHex: RELAY_SPK.toLowerCase() }],
-    signInputIndices: [0], relayScriptPubKeyHex: RELAY_SPK.toUpperCase(), requiredFeeSompi: requiredFee,
+    inputs: [{ amountSompi: inputAmt, scriptPubKeyRaw: RELAY_SPK.toUpperCase() }],
+    outputs: [{ valueSompi: inputAmt - requiredFee, scriptPubKeyRaw: RELAY_SPK.toLowerCase() }],
+    signInputIndices: [0], relayScriptPubKey: RELAY_SPK.toUpperCase(), requiredFeeSompi: requiredFee,
   });
   assert.strictEqual(r.ok, true, r.reason);
 });
 t('NL-7 requiredFeeSompi 非 bigint(如误传 number) ⇒ 拒(不静默转型算出可能错误的值)', () => {
   const r = validateNetLoss({
-    inputs: [{ amountSompi: 100n, scriptPubKeyHex: RELAY_SPK }],
-    outputs: [{ valueSompi: 99n, scriptPubKeyHex: RELAY_SPK }],
-    signInputIndices: [0], relayScriptPubKeyHex: RELAY_SPK, requiredFeeSompi: 1000, // number, not bigint
+    inputs: [{ amountSompi: 100n, scriptPubKeyRaw: RELAY_SPK }],
+    outputs: [{ valueSompi: 99n, scriptPubKeyRaw: RELAY_SPK }],
+    signInputIndices: [0], relayScriptPubKey: RELAY_SPK, requiredFeeSompi: 1000, // number, not bigint
   });
   assert.strictEqual(r.ok, false);
   assert.ok(/must be a non-negative bigint/.test(r.reason));
+});
+
+// ── canonicalScriptHex(2026-09-14 补: NWT 1355 假设订正后新加, Bettor 裁定"现在改不留给接线笔") ──
+// 参照 docs/provenance/2026-09-14-j2-covenant-broadcast-scriptpubkey-verification/run.log 里真实
+// kaspa-wasm ScriptPublicKey.toString() 观测到的原始形状造 fixture, 不是凭空编的字符串。
+const REAL_WASM_HEX = '203225beb2a059066ee0caf9e602bbc86d8a1663344223ffc056505b1f35a506ebac';
+const REAL_WASM_JSON_STR = JSON.stringify({ script: REAL_WASM_HEX, version: 0 });
+
+t('CSH-1 JSON 字符串输入(真实 wasm .toString() 形状)⇒ 取出 .script 并转小写', () => {
+  assert.strictEqual(canonicalScriptHex(REAL_WASM_JSON_STR), REAL_WASM_HEX.toLowerCase());
+});
+t('CSH-2 纯 hex 字符串输入(非 JSON, 手写测试向量常见形状)⇒ JSON.parse 失败, 原样当 hex 用', () => {
+  assert.strictEqual(canonicalScriptHex(RELAY_SPK), RELAY_SPK.toLowerCase());
+});
+t('CSH-3 大小写混合(JSON 内 script 字段大小写混合 + 纯 hex 大小写混合)都能归一到同一小写值', () => {
+  const mixedJson = JSON.stringify({ script: REAL_WASM_HEX.toUpperCase(), version: 0 });
+  assert.strictEqual(canonicalScriptHex(mixedJson), REAL_WASM_HEX.toLowerCase());
+  assert.strictEqual(canonicalScriptHex(RELAY_SPK.toUpperCase()), RELAY_SPK.toLowerCase());
+});
+t('CSH-4 真实 wasm 对象形状(有 .toString() 而非字符串本身)⇒ 走同一条路径, 结果与直接传字符串相同', () => {
+  const fakeWasmObj = { toString: () => REAL_WASM_JSON_STR }; // 模拟 ScriptPublicKey 对象, 不是字符串
+  assert.strictEqual(canonicalScriptHex(fakeWasmObj), canonicalScriptHex(REAL_WASM_JSON_STR));
+  assert.strictEqual(canonicalScriptHex(fakeWasmObj), REAL_WASM_HEX.toLowerCase());
+});
+t('CSH-5 null/undefined ⇒ 空字符串, 不 throw(fail-closed 交给上层"比不出相等"处理, 不在这层报错)', () => {
+  assert.strictEqual(canonicalScriptHex(null), '');
+  assert.strictEqual(canonicalScriptHex(undefined), '');
+});
+
+t('NL-8 端到端: relayScriptPubKey 传"真实 wasm 对象"形状, outputs.scriptPubKeyRaw 传 extractTxShape() 会产出的 JSON 字符串形状——两种不同表示形式仍能正确匹配(这正是 canonicalScriptHex 存在的理由: 不要求调用方先手动统一格式)', () => {
+  const relayAsWasmObj = { toString: () => REAL_WASM_JSON_STR }; // 模拟 relay 自己地址算出的真实 ScriptPublicKey 对象, 未经手动转换
+  const requiredFee = 1_000n;
+  const inputAmt = 10_000_000n;
+  const r = validateNetLoss({
+    inputs: [{ amountSompi: inputAmt, scriptPubKeyRaw: REAL_WASM_JSON_STR }], // extractTxShape() 实际会产出的形状
+    outputs: [{ valueSompi: inputAmt - requiredFee, scriptPubKeyRaw: REAL_WASM_JSON_STR }],
+    signInputIndices: [0], relayScriptPubKey: relayAsWasmObj, requiredFeeSompi: requiredFee,
+  });
+  assert.strictEqual(r.ok, true, r.reason);
+  assert.strictEqual(r.netLossSompi, requiredFee, 'wasm 对象 vs JSON 字符串两种表示正确识别为"同一个脚本" ⇒ 找零被计入返还, net_loss 只剩手续费');
 });
 
 // ── computeRequiredFeeSompi ────────────────────────────────────────────────
