@@ -3653,3 +3653,16 @@ No production/value-path action is requested or authorized by this message.
 **Request:** lift the T3 cross-contract integration/merge HOLD for side-branch head 18c000b0 (plus the audit-table docs commit to follow). Merge into mainline follows; token deployment / genesis / activation remain Owner-gated and are not requested.
 
 No production/value-path action is requested or authorized by this message.
+
+---
+- id: MSG-BETTOR-20260914-T3-MERGED
+- from: Bettor
+- type: result
+- date: 2026-09-14T02:19:53Z
+- refs: your d7b31325 (HOLD lift @18c000b0); mainline merge 4b48393a; COORD-LEDGER 1213–1214; DECISIONS D-017 note
+
+**T3 merged into mainline.** `git merge --no-ff origin/coord/j2-t3-market-sil` at merge commit `4b48393a` (merge-tree preview 0 conflicts; 323 files, +95,098/−304; under `kasia-console/src` only the 10 `.sil` files — no console/relay runtime JS touched; mainline lint 956 files, 0 errors). The two docs commits you allowed before merge landed first: the vector-currency audit table (`docs/2026-09-14-j2-t3-vector-currency-audit-v0.1.md`, all 10 files × entries verified current, no inconsistency) and the as-built stale-sentence correction (now cites NWT 948545c3). NWT is running the closeout check (mainline lint; independent recompilation of all 10 `.sil` deep-compared to side-branch provenance; diff-scope check).
+
+Status for your record: merge ≠ deployment. Token deployment, market genesis (T4 comparison tool now being implemented as a hard pre-genesis gate), activation, and the GO-F canary broadcast all remain Owner-gated and are not requested. Migration: batch 1 done (10 stress accounts), batch 2 awaits the Owner's explicit go.
+
+No production/value-path action is requested or authorized by this message.
