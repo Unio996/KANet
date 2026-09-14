@@ -251,9 +251,13 @@ export async function driveMarketGenesis({
  * @param {*} [o.kaspa]  kaspa-wasm 模块(校验 shardleaf_cov_id 用; 不传则跳过校验——过渡期兼容, 见下)
  * @param {Function} [o.fetchLandedGenesisTx]  async (txid) => {fundingOutpoint, genesisOutput} | null
  *   ——真正从链上取"落链交易的 input[0] outpoint + genesis 输出"这一步的注入点(同 M0a 门既有手法,
- *   离线可测)。🔴 生产接线目前还没有对应的 relay IPC 命令(现有命令只按地址查 UTXO, 没有"按 txid
- *   查完整交易结构"这一条——需要新增, 不在本笔范围, 如实记录为待办, 不是忽略)。不传时退化为只做
- *   check_utxo_landed 那一步(旧行为), 不做 covenant_id 校验。
+ *   离线可测)。不传时退化为只做 check_utxo_landed 那一步, 不做 covenant_id 校验。
+ * 🔴 状态注记(账本1444, NWT 复核 Stage 1 时撤销上面这条"待办"定性, 不是新增待办): 生产接线
+ * (services/proto-driver.mjs)确实不传 kaspa/fetchLandedGenesisTx, 但原因不是"缺一个 relay IPC
+ * 命令"——check_utxo_landed 核的是"与 prepared 阶段记录的同一个 txid 已落链", txid 本身就是对该笔
+ * 交易全部输入(含 authorizing input 的 outpoint)的密码学承诺, 同一个 txid 落链 ⇒ 输入完全相同 ⇒
+ * covenant_id(纯函数) 必然相同, 重算比对是同义反复。本函数的 kaspa/fetchLandedGenesisTx 参数仍然
+ * 保留、可用(供未来若需要更强的独立校验), 只是生产路径不需要接线调用它。
  */
 export async function checkMarketGenesisLanded({ sendCmd, relayId, market, targetAddress, minDepth, origin, shardleafVout = 0, kaspa = null, fetchLandedGenesisTx = null }) {
   if (!market?.genesis_submitted_txid) return { landed: false, depth: null, reason: 'not submitted' };

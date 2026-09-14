@@ -115,9 +115,28 @@ await t('⑤protoSendCmd 适配旧签名 sendCmd(relayId, cmd, timeoutMs, origin
   if (!threw || !/not in allowlist/.test(threw.message)) throw new Error(`应该按 type='transfer' 走白名单拒绝, 实际 ${threw && threw.message}`);
 });
 
+await t('⑥(账本1444, NWT复核抓到)8个Object.prototype自带属性名当type一律被拒(原型链洞), mock sendCommandAsync从未被调用', async () => {
+  const dangerous = ['toString', 'constructor', '__proto__', 'valueOf', 'hasOwnProperty', 'isPrototypeOf', 'propertyIsEnumerable', 'toLocaleString'];
+  for (const type of dangerous) {
+    let called = false;
+    const fakeSendCommandAsync = () => { called = true; return Promise.resolve({ ok: true }); };
+    let threw = null;
+    try { await sendProtoCommand(type, { x: 1 }, { _sendCommandAsyncForTest: fakeSendCommandAsync }); }
+    catch (e) { threw = e; }
+    if (!threw || !/not in allowlist/.test(threw.message)) throw new Error(`type='${type}' 应该被拒(原型链继承属性不是自有属性), 实际 ${threw && threw.message}`);
+    if (called) throw new Error(`type='${type}' 时假 sendCommandAsync 竟然被调用了(原型链洞未堵住)`);
+  }
+});
+
+await t('⑥b(账本1444卫生项) payload 是数组时被拒', async () => {
+  let threw = null;
+  try { await sendProtoCommand('get_address_utxos', ['not', 'an', 'object']); } catch (e) { threw = e; }
+  if (!threw || !/must not be an array/.test(threw.message)) throw new Error(`应该 throw 数组拒绝错误, 实际 ${threw && threw.message}`);
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail === 0) {
-  console.log('\n[test] ⑥(独立子进程) PROTO_RELAY_ID 未配置 ⇒ sendProtoCommand 一律 throw(fail-closed):');
+  console.log('\n[test] ⑦(独立子进程) PROTO_RELAY_ID 未配置 ⇒ sendProtoCommand 一律 throw(fail-closed):');
   const tmpDb2 = `${process.env.TEMP || '/tmp'}/_j2_proto_relay_ipc_unconfigured_${process.pid}.db`;
   execSync('node scripts/run-migrations.mjs', { cwd: process.cwd(), env: { ...process.env, DB_PATH: tmpDb2 }, stdio: 'pipe' });
   const r2 = spawnSync(process.execPath, ['--input-type=module', '-e', `

@@ -62,11 +62,14 @@ export function isProtoDriverEnabled() {
  *      checkBetIntentLanded, landed 后额外调 markBetMintStepALanded 把结果写回 proto_bets(两张表
  *      之间唯一的桥, 见 proto-broadcast-ops.mjs 该函数的文档)。步骤B(register_append)留 Stage 3
  *      (需要 held 输入查找 + 同市场 append 串行, 账本1429/1441裁定, 尚未落码)。
- * 🔴 已知限制(如实记录, 不是忽略): fetchLandedGenesisTx 还没有对应的 relay IPC 命令("按 txid 查完整
- * 交易结构", 现有命令只按地址查 UTXO——见 proto-market-intent.mjs checkMarketGenesisLanded 的文档
- * 同一条已知限制), 本函数传 kaspa:null/fetchLandedGenesisTx:null, 落地判断退化为只做
- * check_utxo_landed(不做 1429/1431 的 shardleaf_cov_id 落链重算比对)。这个能力补齐后只需要在这里
- * 补两个参数, 不需要改其余逻辑。
+ * 🔴 账本1444(NWT复核撤销1432③"已知限制"的定性, 不是新增待办): 本函数传 kaspa:null/
+ * fetchLandedGenesisTx:null, 落地判断只做 check_utxo_landed, 不额外重算 shardleaf_cov_id 比对
+ * ——这不是缺一个能力(fetchLandedGenesisTx 确实还没有对应的 relay IPC 命令"按 txid 查完整交易结构",
+ * 但那不是这里需要它的理由)。check_utxo_landed 核的是"与 prepared 阶段记录的同一个 txid 已落链",
+ * 而 txid 本身就是对该笔交易全部输入(含 authorizing input 的 outpoint)的密码学承诺——同一个 txid
+ * 落链意味着输入完全相同, covenant_id(outpoint, auth_outputs) 是这些输入的纯函数, 因此必然相同,
+ * 重算比对是同义反复的冗余检查, 不提供额外保证。这条本身在 verifyShardLeafCovIdAgainstLandedTx
+ * (proto-tx-assembly.mjs)仍然保留、可用——只是生产路径不需要接线调用它。
  * @returns {Promise<{actioned:number, genesisAdvanced:number, genesisLandedChecked:number, genesisLanded:number, betMintAdvanced:number, betMintLandedChecked:number, betMintLanded:number, errored:number, held:number}>}
  */
 export async function runProtoDriverTick({ sendCmd, relayId, kaspa, network, relayAddress, log = console, cap = DEFAULT_TICK_CAP }) {
@@ -108,7 +111,7 @@ export async function runProtoDriverTick({ sendCmd, relayId, kaspa, network, rel
         const targetAddress = shardLeafTargetAddress({ kaspa, network, market });
         const r = await checkMarketGenesisLanded({
           sendCmd, relayId, market, targetAddress, minDepth: REORG_SAFE_MIN_DEPTH, origin: 'proto-driver',
-          kaspa: null, fetchLandedGenesisTx: null, // 已知限制, 见函数头注
+          kaspa: null, fetchLandedGenesisTx: null, // 账本1444: 同txid落链⇒输入相同⇒covenant_id必然相同, 重算比对冗余, 见函数头注
         });
         out.genesisLandedChecked++;
         if (r.landed) out.genesisLanded++;

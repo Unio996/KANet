@@ -45,8 +45,16 @@ export const PROTO_COMMAND_ALLOWLIST = Object.freeze({
  *      fail-closed 拒掉, 静默破坏整个 proto 功能。改用 'internal'(乙路 TCB 放行语义, 与 proto 出口
  *      "Console 自己内部决定发这个命令, 非外部签名 grant/非 operator-settle 单点白名单"的信任模型
  *      吻合), 且不接受调用方注入(防绕过分类)。
- * @param {string} type  必须在 PROTO_COMMAND_ALLOWLIST 白名单里
- * @param {object} [payload]  命令体其余字段(不含 type/relay_id/relayId——出口恒用 PROTO_RELAY_ID 与真实 type)
+ * 🔴 账本1444(NWT 复核 Stage 1 抓到的真实原型链洞): `PROTO_COMMAND_ALLOWLIST[type]` 是普通属性
+ * 访问, 会沿原型链查找——type 传 'toString'/'constructor'/'__proto__'/'valueOf' 等 Object.prototype
+ * 自带属性名时, 取到的是真实存在的函数/对象, `!mode` 判断拦不住(它们都是 truthy), 且这些值
+ * 都 !== 'write', 驱动闸也不生效, 命令会直接到达 sendCommandAsync——现在没出事只是因为 relay 侧
+ * commands.mjs:118 用 Set 校验兜底拦下, 但这打破了"出口自身就是唯一强制点"的设计前提。修法: 查表
+ * 前先用 Object.prototype.hasOwnProperty.call 判断自有属性, 且 mode 必须严格等于 'read'/'write'
+ * 之一才放行, 其余(含原型链命中但值非法的情况)一律 throw。同笔卫生项: payload 是数组也 throw
+ * (数组的数字下标/length 等不该被当成一个命令体的字段集合误用)。
+ * @param {string} type  必须在 PROTO_COMMAND_ALLOWLIST 白名单里(自有属性, 非原型链继承)
+ * @param {object} [payload]  命令体其余字段(不含 type/relay_id/relayId——出口恒用 PROTO_RELAY_ID 与真实 type; 不得是数组)
  * @param {object} [opts]
  * @param {number} [opts.timeoutMs]
  * @param {Function} [opts._sendCommandAsyncForTest]  测试专用注入点(默认真实 sendCommandAsync)——
@@ -56,9 +64,15 @@ export const PROTO_COMMAND_ALLOWLIST = Object.freeze({
  * @returns {Promise<object>}
  */
 export async function sendProtoCommand(type, payload = {}, { timeoutMs, _sendCommandAsyncForTest } = {}) {
-  const mode = PROTO_COMMAND_ALLOWLIST[type];
-  if (!mode) {
+  if (!Object.prototype.hasOwnProperty.call(PROTO_COMMAND_ALLOWLIST, type)) {
     throw new Error(`sendProtoCommand: type '${type}' not in allowlist {${Object.keys(PROTO_COMMAND_ALLOWLIST).join(', ')}}`);
+  }
+  const mode = PROTO_COMMAND_ALLOWLIST[type];
+  if (mode !== 'read' && mode !== 'write') {
+    throw new Error(`sendProtoCommand: type '${type}' resolved to an invalid allowlist mode '${mode}' — refusing (fail-closed)`);
+  }
+  if (Array.isArray(payload)) {
+    throw new Error('sendProtoCommand: payload must not be an array');
   }
   if (payload && typeof payload === 'object') {
     for (const forbidden of ['relay_id', 'relayId', 'type']) {
