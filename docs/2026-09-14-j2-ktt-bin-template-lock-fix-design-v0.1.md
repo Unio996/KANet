@@ -1,4 +1,4 @@
-> **Status**: CURRENT
+> **Status**: SUPERSEDED — 见 `docs/2026-09-14-j2-ktt-bin-template-lock-fix-design-v0.2.md`。本文档提出的方案②被 NWT (1395/1399) 用 Decoy 合约构造性证伪（`mkt_prefix`/`mkt_suffix`/`marketTmplHash` 全是 spender 自选的 witness 值，比旧尾部匹配设计还松，不是"更强得多"）——本文档 §4 的"如实标注不挡 fork"结论方向是对的，但低估了洞的严重程度（不只是"不挡精心构造的 fork"，是"任意无关 Decoy 合约都能通过"）。v0.2 采用候选④（依赖反转）作为主案。
 
 # KTT (b-in) 模板锁修法设计 v0.1 — 用 State + `readInputStateWithTemplate` 替换尾部字节匹配
 

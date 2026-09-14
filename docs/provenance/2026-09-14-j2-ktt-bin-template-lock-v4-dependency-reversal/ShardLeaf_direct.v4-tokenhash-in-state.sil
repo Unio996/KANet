@@ -1,0 +1,214 @@
+// ShardLeaf_direct.sil — bshard cascade SINGLE-SHARD direct 合约 (J1, 2026-06-20; 解 STEP1 convert_to_foldnode SIZE 墙).
+//
+// 动因(stitch STEP1 链上实证 2026-06-20): ShardLeaf.convert_to_foldnode 的 WithTemplate 目标=完整 FoldNode(模板 1242B),
+//   double-blake2b over 1242B(实测 11242 units, ~9u/byte 非 header 焊的 6.58)>> 9999 → BUST。这是"零件全绿≠机制跑通"
+//   现形: seal 零件测从 direct-funded FoldNode 起跳, ShardLeaf→FoldNode 这跳 stitch 首次真跑才暴。
+//
+// 解(三方收敛 shardCount=1 skip-fold; NWT retarget-convert 路, J1 拍板 impl): DoD 单小市场=1 shard=无多片可聚合 →
+//   FoldNode/fold 逻辑上多余。本合约 = ShardLeaf 把 convert 的 WithTemplate 目标【从 FoldNode(1242B)retarget 到
+//   RootClose(模板 851B < 预算; RootClose 之前当 seal 目标已 LANDED 验过)】, 直接 ShardLeaf→RootClose 跳 FoldNode。
+//   register_append 与 ShardLeaf BYTE-IDENTICAL(零语义改); convert 的 new_state 从 4-field(FoldNode)→ 7-field(RootClose
+//   canonical), 合约略长 → ★register 侧【必 J2 链上 probe 实测】(NWT flag: retarget 长得少但仍长, 别凭 model 假设
+//   register 免 probe = STEP1-redux; UI probe-not-model 锁死)。fallback 若 register re-bust = FoldNode_sealonly(register
+//   字节不变, 多一跳)。
+//
+// ABI(2-entry, J2 wire): register_append=entry0=OP_0('00') / convert_to_rootclose=entry1=OP_1('51') — selector 与原
+//   ShardLeaf 同(STEP0/STEP1 selector 不变), 只 convert 目标+carry state 变。state_layout.start=1(多-entry)。
+// 链: ShardLeaf_direct →(convert_to_rootclose, 7-field canonical)→ RootClose →(close_commit)→ ...→ RootClaim/RefundClaim。
+//   FoldNode 整个绕开(multi-shard fold = post-DoD, 用回 ShardLeaf+FoldNode)。
+// 承重锚: register output-bind weld(leaf value==pool_value+stake) + convert 跨合约 value 守恒(RootClose value==pool_value)
+//   + canonical outcome literal/ctor-const 硬设(closed:0/winningSide:0/payoutRoot:init)= committee-bypass 保护链不变
+//   (与 FoldNode.seal_to_root 的 canonical 硬设同语义)。单 shard 无聚合 → 无 commit_v2 校验需求(单 leaf accounts 即全量)。
+//
+// ★ T3 v0.3 §2 全 23 入口 A/B 落位表代币化(ledger 1188/1121 批次④第三处, "同 RootClose 形"): register_append
+//   同 ShardLeaf.sil 完全一致的处置(A 类, AB11 自续约, 归己既有持仓 scan + 新注 stakeTk 合法在场不计入)。
+//   convert_to_rootclose(A 类, RHS=pool_value 全池整体转出) 是"③ShardLeaf_direct convert_to_rootclose 同 RootClose
+//   convert 同形"点名对象——它跟 RootClose.convert_to_claim/convert_to_refundclaim 一样是"新建外部合约实例"的
+//   foreign-template 桥(这里新建的是 RootClose 本身), 同一 class 的 ZERO32 目的地守卫风险(validateOutputStateWithTemplate
+//   只核脚本字节匹配, 不核 covenant 绑定, 1173/1176/1181/1186 反复证过): 已加 require(OpOutputCovenantId(rcOutIdx)
+//   != ZERO32) + scanOwnedTokenInputs()==pool_value 输入侧 + tokenOutOk 输出侧派生绑定(owner=已核非 ZERO32 的
+//   新建 RootClose covenant id)。原 KAS value-weld(==pool_value+stake / ==pool_value)全部改 >=DUST_MIN(D-018)。
+
+pragma silverscript ^0.1.0;
+
+contract ShardLeaf_direct(
+    byte[32] market_id,
+    byte[32] ps_tmpl_hash,           // dust PoolSide-ticket expectedTemplateHash (register 造 ticket)
+    byte[32] shard_pool_id,          // 本 pool 身份 (ticket 记此)
+    int      seal_count,             // count==seal_count 才可 convert (单-shard DoD=1)
+    int      min_bet,
+    byte[32] rootclose_tmpl_hash,    // RootClose expectedTemplateHash (convert_to_rootclose foreign-template 桥; baked; 替原 fn_tmpl_hash)
+    byte[32] rootclose_init_payoutRoot, // RootClose genesis payoutRoot (canonical ZERO; convert 硬设)
+    // EXPERIMENTAL(候选④ 依赖反转, 仅供字节预算/hash 不变性实测, 不是生产代码): token_tmpl_hash
+    // 从 ctor-only 常量挪进 genesis State(同 owner/amount 等既有 State 字段一样"genesis 任填, 花费
+    // 时才核") —— 目的: 让本合约自己的 template hash 与 token_tmpl_hash 的具体取值无关, 从而
+    // KanetTestToken(候选④设计)可以反过来把"这个市场的 template hash"当 ctor 常量烤死。
+    // —— genesis State (现为 5-field: 原 4-field + token_tmpl_hash) ——
+    int      init_local_yes,
+    int      init_local_no,
+    int      init_count,
+    int      init_pool_value,
+    byte[32] init_token_tmpl_hash
+) {
+    int local_yes  = init_local_yes;
+    int local_no   = init_local_no;
+    int count      = init_count;
+    int pool_value = init_pool_value;
+    byte[32] token_tmpl_hash = init_token_tmpl_hash;
+
+    // dust PoolSide-ticket State (= PoolSide_v08_shard 4 字段; register 造 ticket 的 validateOutputStateWithTemplate 类型锚)
+    struct Tk {
+        byte[32] bettorPk;
+        int      direction;
+        int      stake;
+        byte[32] shardPoolId;
+    }
+    // RootClose 7-field State 镜像 (convert_to_rootclose foreign-template 布局; 字段序/类型必 == RootClose State)
+    struct RootCloseState {
+        int      local_yes;
+        int      local_no;
+        int      count;
+        int      pool_value;
+        int      closed;
+        int      winningSide;
+        byte[32] payoutRoot;
+    }
+    // KanetTestToken 六字段布局镜像(同 ShardLeaf.sil/PayoutShard.sil/RootClose.sil 三件套一致)
+    struct TokenState {
+        int      amount;
+        byte[32] owner;
+        byte     owner_scheme;
+        byte     borrow_scheme;
+        byte[32] borrow_guard;
+        byte[32] extension_commitment;
+    }
+    byte constant TOKEN_SCHEME_COVENANT_ID = 0x04;
+    byte constant TOKEN_BORROW_DISABLED    = 0x00;
+    int constant MAX_INS_SCAN = 8;
+    int constant DUST_MIN = 1000;
+    // ★ V-T-8 绕路(register_append 需要 readInputStateWithTemplate(经 scanOwnedTokenInputs)+ 本合约 self-
+    //   continuation 共存, 同 ShardLeaf.sil 一致处置)。常量按本文件*实际编译产物*量测得出(与 ShardLeaf.sil
+    //   结构相同但 ctor 不同, 不假设数值相同, 已重新量测, 见 provenance)。
+    int constant OWN_PREFIX_LEN = 1;
+    int constant OWN_STATE_LEN  = 36;
+
+    // (A) v0.3 §2/§3 + 1151 P13 形: 输入侧扫描(同 ShardLeaf.sil/PayoutShard.sil/RootClose.sil 逐字节一致手法)。
+    function scanOwnedTokenInputs(byte[] tok_prefix, byte[] tok_suffix) : int {
+        require(blake3((tok_prefix.length as byte[8]) + tok_prefix + (tok_suffix.length as byte[8]) + tok_suffix) == token_tmpl_hash);
+        require(tx.inputs.length <= MAX_INS_SCAN);
+        int total = 0;
+        int L = tok_suffix.length;
+        for (i, 0, tx.inputs.length, MAX_INS_SCAN) {
+            byte[] ss = tx.inputs[i].sigScript;
+            int n = ss.length;
+            bool looksLikeToken = false;
+            if (n >= L) { looksLikeToken = ss.slice(n - L, n) == tok_suffix; }
+            if (looksLikeToken) {
+                TokenState tk = readInputStateWithTemplate(i, tok_prefix.length, tok_suffix.length, token_tmpl_hash);
+                if (tk.owner == OpInputCovenantId(this.activeInputIndex)) {
+                    total = total + tk.amount;
+                }
+            }
+        }
+        return total;
+    }
+
+    // —— entry 0: register_append (收注; 与 ShardLeaf entry 0 语义一致 + v0.3 代币化, 同 ShardLeaf.sil 处置) ——
+    // ★ V-T-8 绕路(见上方 OWN_PREFIX_LEN/OWN_STATE_LEN 注释): leaf 自身续约手写编码, 不走 validateOutputState。
+    entry register_append(
+        int      side,
+        int      stake,
+        int      leafOutIdx,
+        int      psOutIdx,
+        byte[32] bettorPk,
+        byte[]   ps_prefix,
+        byte[]   ps_suffix,
+        int      stakeInIdx,
+        int      tok_out,
+        byte[]   tok_prefix, byte[] tok_suffix
+    ) {
+        require(count < seal_count);
+        require(side == 0 || side == 1);
+        require(stake >= min_bet);
+
+        // mint dust ticket (spent-once claim/refund 凭证)
+        validateOutputStateWithTemplate(psOutIdx, Tk {
+            bettorPk: bettorPk,
+            direction: side,
+            stake: stake,
+            shardPoolId: shard_pool_id
+        }, ps_prefix, ps_suffix, ps_tmpl_hash);
+
+        int owned_total = scanOwnedTokenInputs(tok_prefix, tok_suffix);
+        require(owned_total == pool_value);
+        TokenState stakeTk = readInputStateWithTemplate(stakeInIdx, tok_prefix.length, tok_suffix.length, token_tmpl_hash);
+        require(stakeTk.amount == stake);
+        validateOutputStateWithInputTemplate(tok_out, TokenState {
+            amount:               pool_value + stake,
+            owner:                OpInputCovenantId(this.activeInputIndex),
+            owner_scheme:         TOKEN_SCHEME_COVENANT_ID,
+            borrow_scheme:        TOKEN_BORROW_DISABLED,
+            borrow_guard:         byte[32](0x0000000000000000000000000000000000000000000000000000000000000000),
+            extension_commitment: byte[32](0x0000000000000000000000000000000000000000000000000000000000000000)
+        }, stakeInIdx, tok_prefix.length, tok_suffix.length, token_tmpl_hash);
+
+        byte[] stateBytes = byte[](8 as byte[1]) + byte[]((local_yes + stake * (1 - side)) as byte[8])
+                          + byte[](8 as byte[1]) + byte[]((local_no + stake * side) as byte[8])
+                          + byte[](8 as byte[1]) + byte[]((count + 1) as byte[8])
+                          + byte[](8 as byte[1]) + byte[]((pool_value + stake) as byte[8]);
+        byte[] ownSig = tx.inputs[this.activeInputIndex].sigScript;
+        int ownLen = ownSig.length;
+        byte[] ownPrefix = ownSig.slice(0, OWN_PREFIX_LEN);
+        byte[] ownSuffix = ownSig.slice(OWN_PREFIX_LEN + OWN_STATE_LEN, ownLen);
+        byte[32] expectedHash = blake2b(ownPrefix + stateBytes + ownSuffix);
+        byte[37] expectedSpk = new ScriptPubKeyP2SH(expectedHash);
+        require(tx.outputs[leafOutIdx].scriptPubKey == byte[](expectedSpk));
+        require(tx.outputs[leafOutIdx].value >= DUST_MIN);   // v0.3: KAS 侧只剩 dust
+    }
+
+    // —— entry 1: convert_to_rootclose (count 满 → 1:1 直转 RootClose 外模板; 7-field canonical; 跳 FoldNode) ——
+    // ★ ZERO32 目的地守卫("同 RootClose convert 形", ledger 1186/1188 点名): validateOutputStateWithTemplate 只核
+    //   脚本字节匹配, 不核 covenant 绑定——一笔输出可以脚本字节逐位匹配真实编译的 RootClose 模板, 同时 covenant
+    //   字段是 None, OpOutputCovenantId 照样回退 ZERO_HASH。两条检查各自独立承重, 缺一都留洞。
+    // ★ v0.3 §2/§3 代币化: A 类单一去向入口, 无续约(entry 是本 leaf 生命周期终点), 同 RootClose.convert_to_claim
+    //   同形, 不触发 V-T-8。
+    entry convert_to_rootclose(
+        int      rcOutIdx,
+        byte[]   rc_prefix,              // RootClose redeem state 区前段 (witness; blake2b(prefix‖suffix)==rootclose_tmpl_hash 焊)
+        byte[]   rc_suffix,
+        int      tokenInIdx,
+        int      tokenOutIdx,
+        byte[]   tok_prefix, byte[] tok_suffix
+    ) {
+        require(count == seal_count);                      // 仅收满的 leaf 可转 (= 原 seal 门)
+
+        int owned_total = scanOwnedTokenInputs(tok_prefix, tok_suffix);
+        require(owned_total == pool_value);
+
+        // 产 RootClose genesis: 4-field account 真值 carry + canonical outcome 硬设(closed:0/winningSide:0/payoutRoot:init)
+        //   = committee-bypass(只 close_commit 能改 outcome; 此处 literal/ctor-const 不可被 witness 操纵)。
+        validateOutputStateWithTemplate(rcOutIdx, RootCloseState {
+            local_yes:   local_yes,
+            local_no:    local_no,
+            count:       count,
+            pool_value:  pool_value,
+            closed:      0,
+            winningSide: 0,
+            payoutRoot:  rootclose_init_payoutRoot
+        }, rc_prefix, rc_suffix, rootclose_tmpl_hash);
+        byte[32] rcCovId = OpOutputCovenantId(rcOutIdx);
+        require(rcCovId != byte[32](0x0000000000000000000000000000000000000000000000000000000000000000));
+        require(tx.outputs[rcOutIdx].value >= DUST_MIN);    // v0.3: KAS 侧只剩 dust
+
+        // ★ v0.3 §2 表 A 列输出侧派生绑定: 代币全额转给新建 RootClose 实例, owner=OpOutputCovenantId(rcOutIdx)
+        //   (已核非 ZERO32, 派生表达式, 不是裸 witness)。
+        validateOutputStateWithInputTemplate(tokenOutIdx, TokenState {
+            amount:               pool_value,
+            owner:                rcCovId,
+            owner_scheme:         TOKEN_SCHEME_COVENANT_ID,
+            borrow_scheme:        TOKEN_BORROW_DISABLED,
+            borrow_guard:         byte[32](0x0000000000000000000000000000000000000000000000000000000000000000),
+            extension_commitment: byte[32](0x0000000000000000000000000000000000000000000000000000000000000000)
+        }, tokenInIdx, tok_prefix.length, tok_suffix.length, token_tmpl_hash);
+    }
+}
