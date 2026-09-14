@@ -162,6 +162,28 @@ console.log('[test] ⑧ 🔴 MUST(KANet-UI隔离联调发现·Bettor 1356升级)
   ok(detailRes.body.includes('pubkey-a'), '公开信息committee_pubkeys_json仍然存在(不是矫枉过正清空了整个market对象)');
 }
 
+console.log('[test] ⑨ 🔴 接线笔③三项纪律之一(设计 §9.2③): 所有链上端点请求体带 relay_id 字段一律 400 拒绝(不进入任何业务逻辑, 优先于其它校验):');
+{
+  const create = await app.inject({ method: 'POST', url: '/api/proto-markets/create', payload: { tokenId: 'x', title: 'y', deadline: '2099-01-01', relay_id: 'sneaky' } });
+  ok(create.statusCode === 400 && JSON.parse(create.body).error.includes('relay_id'), `market create 带 relay_id → 400(实际 ${create.statusCode})`);
+
+  const bet = await app.inject({ method: 'POST', url: '/api/proto-markets/does-not-exist/bet', payload: { direction: 0, amount: 5, relay_id: 'sneaky' } });
+  ok(bet.statusCode === 400 && JSON.parse(bet.body).error.includes('relay_id'), `bet 带 relay_id → 400(优先于 market-not-found 的 404, 实际 ${bet.statusCode})`);
+
+  const resolve = await app.inject({ method: 'POST', url: '/api/proto-markets/does-not-exist/resolve', payload: { outcome: 0, relay_id: 'sneaky' } });
+  ok(resolve.statusCode === 400 && JSON.parse(resolve.body).error.includes('relay_id'), `resolve 带 relay_id → 400(实际 ${resolve.statusCode})`);
+
+  const claim = await app.inject({ method: 'POST', url: '/api/proto-markets/does-not-exist/claim', payload: { relay_id: 'sneaky' } });
+  ok(claim.statusCode === 400 && JSON.parse(claim.body).error.includes('relay_id'), `claim 带 relay_id → 400(实际 ${claim.statusCode})`);
+
+  const withdraw = await app.inject({ method: 'POST', url: '/api/proto-markets/does-not-exist/withdraw', payload: { relay_id: 'sneaky' } });
+  ok(withdraw.statusCode === 400 && JSON.parse(withdraw.body).error.includes('relay_id'), `withdraw 带 relay_id → 400(实际 ${withdraw.statusCode})`);
+
+  // 对照: 不带 relay_id 时行为不变(仍然是既有的 404/501, 证明这条检查没有误伤正常请求——KANet-UI 前端从不传这个字段)
+  const createNormal = await app.inject({ method: 'POST', url: '/api/proto-markets/create', payload: { tokenId: 'does-not-exist', title: 'y', deadline: '2099-01-01' } });
+  ok(createNormal.statusCode === 404, `对照: 不带 relay_id 的 market create 行为不变, 仍是既有的 404(实际 ${createNormal.statusCode})`);
+}
+
 console.log(fails === 0
   ? '\n✅✅ ALL PASS — 原型v0端点骨架(代币定义CRUD真实可用 + 链上端点校验先行+501占位+零DB副作用 + claim候选数量硬闸) 全绿'
   : `\n❌ ${fails} assertions failed`);

@@ -23,6 +23,7 @@
 
 import { sqlite } from '../db/client.js';
 import { randomUUID } from 'node:crypto';
+import { rejectRelayIdInBody } from '../lib/proto-relay-guard.mjs';
 
 const nowIso = () => new Date().toISOString();
 
@@ -93,6 +94,8 @@ export async function registerProtoRoutes(fastify) {
   // 建市场壳 —— ShardLeaf_direct genesis。校验/查询真实; 广播占位(§6/§9 未定案)。
   // ══════════════════════════════════════════════════════════════════════
   fastify.post('/api/proto-markets/create', async (request, reply) => {
+    const relayIdRejection = rejectRelayIdInBody(request.body);
+    if (relayIdRejection) return reply.code(400).send({ ok: false, error: relayIdRejection });
     const { tokenId, title, deadline, resolutionNote } = request.body || {};
     if (!tokenId) return reply.code(400).send({ ok: false, error: 'tokenId required' });
     const tokenDef = sqlite.prepare(`SELECT ${PUBLIC_TOKEN_DEF_COLS} FROM proto_token_defs WHERE id = ?`).get(tokenId);
@@ -145,6 +148,8 @@ export async function registerProtoRoutes(fastify) {
   // 未落地阶段直接走 501(无 steps 字段), 前端"没有 steps 数组"分支会显示通用错误, 已兼容。
   // ══════════════════════════════════════════════════════════════════════
   fastify.post('/api/proto-markets/:id/bet', async (request, reply) => {
+    const relayIdRejection = rejectRelayIdInBody(request.body);
+    if (relayIdRejection) return reply.code(400).send({ ok: false, error: relayIdRejection });
     const market = sqlite.prepare(`SELECT ${PUBLIC_MARKET_COLS} FROM proto_markets m WHERE m.id = ?`).get(request.params.id);
     if (!market) return reply.code(404).send({ ok: false, error: 'market not found' });
     if (market.status !== 'betting') return reply.code(409).send({ ok: false, error: `market status is ${market.status}, not accepting bets` });
@@ -171,6 +176,8 @@ export async function registerProtoRoutes(fastify) {
   // 委员宣布结果 —— RootClose.close_commit(v0: §5 单 keypair 模拟 5 委员)。
   // ══════════════════════════════════════════════════════════════════════
   fastify.post('/api/proto-markets/:id/resolve', async (request, reply) => {
+    const relayIdRejection = rejectRelayIdInBody(request.body);
+    if (relayIdRejection) return reply.code(400).send({ ok: false, error: relayIdRejection });
     const market = sqlite.prepare(`SELECT ${PUBLIC_MARKET_COLS} FROM proto_markets m WHERE m.id = ?`).get(request.params.id);
     if (!market) return reply.code(404).send({ ok: false, error: 'market not found' });
     if (market.status !== 'sealed') return reply.code(409).send({ ok: false, error: `market status is ${market.status}, must be sealed before resolve` });
@@ -192,6 +199,8 @@ export async function registerProtoRoutes(fastify) {
   // 挑第一个, 那样会在假设被打破的那一刻悄悄 claim 错人)。
   // ══════════════════════════════════════════════════════════════════════
   fastify.post('/api/proto-markets/:id/claim', async (request, reply) => {
+    const relayIdRejection = rejectRelayIdInBody(request.body);
+    if (relayIdRejection) return reply.code(400).send({ ok: false, error: relayIdRejection });
     const market = sqlite.prepare(`SELECT ${PUBLIC_MARKET_COLS} FROM proto_markets m WHERE m.id = ?`).get(request.params.id);
     if (!market) return reply.code(404).send({ ok: false, error: 'market not found' });
     if (market.status !== 'resolved' && market.status !== 'cancelled') {
@@ -220,6 +229,8 @@ export async function registerProtoRoutes(fastify) {
   // 适用: v0 单操作员场景接受)。
   // ══════════════════════════════════════════════════════════════════════
   fastify.post('/api/proto-markets/:id/withdraw', async (request, reply) => {
+    const relayIdRejection = rejectRelayIdInBody(request.body);
+    if (relayIdRejection) return reply.code(400).send({ ok: false, error: relayIdRejection });
     const market = sqlite.prepare(`SELECT ${PUBLIC_MARKET_COLS} FROM proto_markets m WHERE m.id = ?`).get(request.params.id);
     if (!market) return reply.code(404).send({ ok: false, error: 'market not found' });
     const claim = sqlite.prepare(`SELECT ${PUBLIC_CLAIM_COLS} FROM proto_claims WHERE market_id = ? AND withdrawn_at IS NULL ORDER BY created_at ASC LIMIT 1`).get(market.id);
