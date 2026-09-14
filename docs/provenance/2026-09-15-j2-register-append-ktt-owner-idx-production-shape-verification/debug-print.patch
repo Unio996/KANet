@@ -1,0 +1,11 @@
+--- a/debugger/cli/src/main.rs
++++ b/debugger/cli/src/main.rs
+@@ -907,6 +907,10 @@
+         let entry = active_contract.entry(&selected_name).ok_or_else(|| format!("entry '{selected_name}' not found"))?;
+         let typed_args = parse_artifact_args(&active_compiled.abi, active_contract, &entry.params, &raw_args)?;
+         encode_contract_entry_sig_script(&active_compiled.abi, &parsed_contract.name, &selected_name, &typed_args)?
+     };
++    if std::env::var("J2_DUMP_ACTIVE_SIGSCRIPT").is_ok() {
++        let hex: String = active_sigscript.iter().map(|b| format!("{b:02x}")).collect();
++        eprintln!("J2_ACTIVE_SIGSCRIPT_HEX={hex}");
++    }

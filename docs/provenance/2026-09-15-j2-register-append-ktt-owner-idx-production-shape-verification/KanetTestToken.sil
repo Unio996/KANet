@@ -1,0 +1,135 @@
+pragma silverscript ^0.1.0;
+// KanetTestToken (KTT) — KCC-0020 六字段测试币 covenant · T1 v0.6 实现
+// 设计: docs/2026-09-13-j2-t1-kanet-test-token-kcc20-contract-design-v0.1.md v0.5(基座)
+//      + docs/2026-09-13-j2-t1-t2-t3-routing-change-remove-bout-design-v0.2.md(路由变更, Bettor 裁·NWT ledger 1121 机制 PASS)
+// NWT 红队: docs/2026-09-13-nwt-redteam-j1-kcc20-testtoken-v0.1.md(v0.5 基座) +
+//          docs/2026-09-14-nwt-redteam-j2-routing-change-v0.2-review-v0.1.md(v0.2 路由机制 PASS·守恒等价性条件式 MUST-FIX)
+// 直接沿用已跑通的可行性探针 docs/provenance/2026-09-13-j2-t1-p9-ktt-feasibility-probe/P9_ktt_min.sil 的合约体(P9 4/4 运行期向量),
+// 本文件 = P9 形定稿 + pause_guard(§2.3 第三入口, 单出口布尔形避开 Q5 早退折叠疑虑) + 完整 doc 注释。
+//
+// 一句话(§0): "mint" 不是入口而是 genesis(任何人用任意资金输入构造一个代币模板 P2SH 输出即造出一个新代币 covenant
+// 实例——免费无限无签名, Owner 裁定4的落地形); 合约只在【花费】时执行: transfer 守恒 + 只认 owner_scheme 0x04 +
+// 接收方必须是 KANet 模板(在场核 sigScript 尾部)(H1 a+b) + borrow_scheme 钉死 0x00(H3); 稳定币三入口以编译期
+// 常量存在于源码但测试币构建里恒拒(H2/P1), 切态 = 改常量重编 + 新部署。
+//
+// 🔴 v0.6 变更(退路①·V-T-6 根因=silverc binding=cov 层无法内省非本 covenant 输出, docs 2026-09-13 ledger 1116/1117/1120/1121):
+// 删掉 (b) 二选一路由的 b-out 分支——"代币进入全新领取 covenant" 的接收方自证责任移交给领取合约自身的手写
+// entry(P12MarketA2 方向, 非 binding=cov, 不受 V-T-6 限制), 代币合约花费侧只保留 (b-in): 接收方必须是本 tx
+// 一个已在场的市场模板输入。相应删除 ClaimState struct + claim_tmpl_prefix/suffix/hash ctor 参数(不再需要,
+// 代币合约不再在花费时构造任何"全新领取 covenant" 的输出状态)。
+// 守恒式改 sum_in >= sum_out(不能再收紧为 == , 因为花费侧再验证不到"离开本合约、进入市场/领取侧"的代币总量是否
+// 被完整处理——这一半责任现在在市场/领取合约自己的 scanOwnedTokenInputs() 里, 详见各市场合约 v0.3 T3 变更)。
+// 两半合起来(代币侧 sum_in>=sum_out + 市场/领取侧 require(scanOwnedTokenInputs()==本入口处理量)) 等价旧的精确
+// sum_in==sum_out——NWT ledger 1121 机制 PASS, 等价性裁为条件式(T3 v0.3 逐条落码 + 复核后方视为已兑现)。
+//
+// A″(v0.5 §4.0, v0.6 延续): 代币 ctor 只烤【稳定】的市场模板(per-instance 值在状态里, 模板 hash 不随实例变 = P12
+// 实证); 市场/领取【不烤】代币 hash(走各自状态字段) ⇒ 依赖图单向无环(v0.3 Q4 成环已解)。
+//
+// 🔴 v0.3 方案C(Owner 裁定, 账本 1408, docs/DECISIONS.md D-017 注记 · 落码 138c2f21/a16f6452/9be0805c):
+// 撤销上面 H1(b)("接收方必须是 KANet 模板")这条检查本身——"代币就是代币", 参考上游标准实现
+// silverscript-lang/tests/examples/kcc20.sil(56 行): 一个正常的可替代代币合约只关心谁能花(owner 在场)、
+// 花的时候有没有做旁的坏事(minter 标记不能被伪造)、有没有守恒, 从不关心代币被转去了哪种类型的 covenant。
+// "这份代币是不是我这个市场认可的注额"完全是接收方自己的问题(ShardLeaf_direct.scanOwnedTokenInputs 已经
+// 独立在做这件事)——删除 market_tmpl_suffix/market_tmpl_suffix_len ctor 字段、删除 ownerIsMarketInput
+// 函数、transferPolicy 签名删除 recv_idx 参数、删除两行 recv_idx 相关 require。守恒式 sum_in>=sum_out
+// 不受影响(那条 v0.6 就已经放宽, 论证不依赖 H1(b))。设计: docs/2026-09-14-j2-ktt-bin-template-lock-fix-
+// design-v0.3.md。真实编译+cli-debugger 向量: docs/provenance/2026-09-14-j2-ktt-v03-planC-remove-h1b/
+// (V03-1/V03-2, D-019 pin 的 v1.0.0 二进制真实跑通)。token_tmpl_hash(compiled.template_hash_bytes,
+// 权威值, 不是 extractTemplateArtifact 的 blake2b 公式): 225ebcdec51f5439326e6bc48e47c288ceacbd3bea07aea
+// 6771548eeed44d80e。
+contract KanetTestToken(
+    // —— genesis State(任何人可任填; 合约不校验 genesis, 只校验花费)——
+    int      init_amount,
+    byte[32] init_owner,
+    byte     init_owner_scheme,
+    byte     init_borrow_scheme,
+    byte[32] init_borrow_guard,
+    byte[32] init_extension_commitment,
+    int      max_ins, int max_outs
+) {
+    int      amount               = init_amount;
+    byte[32] owner                = init_owner;
+    byte     owner_scheme         = init_owner_scheme;
+    byte     borrow_scheme        = init_borrow_scheme;
+    byte[32] borrow_guard         = init_borrow_guard;
+    byte[32] extension_commitment = init_extension_commitment;
+
+    byte constant SCHEME_COVENANT_ID = 0x04;   // covenant-id/v1(唯一允许)
+    byte constant BORROW_DISABLED    = 0x00;   // disabled/v1(H3)
+    // —— H2/P1: 态是编译期常量; 切稳定币态 = 改这里 + 重编 + 新部署(新 template_hash / 新 covenant-id), 不是状态转移 ——
+    bool constant MODE_TEST_COIN = true;
+    pubkey constant ISSUER_PK = pubkey(byte[32](0x0000000000000000000000000000000000000000000000000000000000000000));   // 稳定币构建时换真 key; 测试构建下不被任何可达路径读取(P3)
+
+    // v0.3 方案C: ownerIsMarketInput 整个删除(连同 H1(b) 一起撤销, 见 ctor 头注)。
+
+    // §2.3 pause_guard: 被 transfer 内联调用。测试构建恒放行(MODE_TEST_COIN 编译期常量为 true ⇒ 恒真, 无早退,
+    // 不触碰 Q5 的"早退被 codegen 折叠"疑虑——本函数没有任何提前 return, 只有末尾一条)。稳定币态的时效签名/窗口
+    // 校验字段 v0.5 §1 状态布局未收录(设计留白, 未定案参数类型)——本合约只编 MODE_TEST_COIN=true 的测试币构建,
+    // 该分支在这次编译产物里不存在也不可达(如实记, 非漏洞; 留稳定币变体单独定接口, 见 provenance 报告"没核到")。
+    function pauseGuardOk() : bool {
+        bool ok = MODE_TEST_COIN;
+        return ok;
+    }
+
+    #[covenant(binding = cov, from = max_ins, to = max_outs, name = transfer, delegate_name = transfer_delegator)]
+    function transferPolicy(State[] prev_states, State[] next_states, byte[] witness, int[] owner_input_idx) {
+        require(pauseGuardOk());   // §2.3 P3: 测试构建恒真, 不拦任何 transfer
+        // (H3) borrowed-receive 路径拒绝: witness 首字节 0x01 = KCC-0020 §5 第二转移路径, 本合约不支持
+        require(witness.length == 0);
+        // (H1 a) 花费侧: 每个 prev 只认 covenant 持有 + owner covenant 在场(T0 ② 判据)
+        int sum_in = 0;
+        for (i, 0, prev_states.length, max_ins) {
+            require(prev_states[i].owner_scheme == SCHEME_COVENANT_ID);
+            require(prev_states[i].borrow_scheme == BORROW_DISABLED);                // H3 花费侧
+            require(OpInputCovenantId(owner_input_idx[i]) == prev_states[i].owner);  // 在场(P2 形)
+            sum_in = sum_in + prev_states[i].amount;
+        }
+        // v0.3 方案C(Owner 1408裁定): 接收侧不再检查"必须是市场模板"——next_states[j] 可以是任意
+        // covenant 输入, 代币合约只管自己的 owner_scheme/borrow_scheme/owner 非零/守恒这几条不变量,
+        // 不管代币流向哪里、流向的是什么类型的合约。真正的"这份代币是不是我这个市场认可的注额"这个
+        // 问题完全交给接收方自己(比如 ShardLeaf_direct 的 scanOwnedTokenInputs), 代币侧不越俎代庖。
+        int sum_out = 0;
+        for (j, 0, next_states.length, max_outs) {
+            require(next_states[j].amount > 0);
+            require(next_states[j].owner_scheme == SCHEME_COVENANT_ID);
+            require(next_states[j].borrow_scheme == BORROW_DISABLED);
+            require(next_states[j].borrow_guard == byte[32](0x0000000000000000000000000000000000000000000000000000000000000000));
+            require(next_states[j].extension_commitment == byte[32](0x0000000000000000000000000000000000000000000000000000000000000000));
+            // ★ T1 v0.7(NWT 1158 系统性扫查): next_state.owner 不得为全零——owner=0 会让后续任何裸输入
+            //   的在场核对(OpInputCovenantId 对未声明 covenant_id 的输入回退 ZERO_HASH)恒真通过, 等于
+            //   代币被铸成任何人都能花。这条与"接收方是不是市场"无关, 是独立的资金安全底线, 不受 v0.3
+            //   删除市场识别检查影响。
+            require(next_states[j].owner != byte[32](0x0000000000000000000000000000000000000000000000000000000000000000));
+            sum_out = sum_out + next_states[j].amount;
+        }
+        // ★ v0.6 守恒(routing v0.2 §1/§4): 不能再收紧为 == ——本函数验证不到"离场代币是否被市场/领取侧完整
+        // 处理"(那部分内省能力正是 V-T-6 撞死的墙); sum_in>=sum_out 只保住"不能凭空印钱"这条结构性上限。
+        // 精确守恒的另一半由市场/领取合约自己的 require(scanOwnedTokenInputs()==本入口处理量) 兑现(T3 v0.3),
+        // 两半合起来等价旧的 sum_in==sum_out——NWT ledger 1121 机制 PASS, 等价性条件式(T3 逐条落码后方兑现)。
+        require(sum_in >= sum_out);
+    }
+    #[covenant.delegate]
+    function transfer_delegator(byte[] witness, int my_owner_input_idx) {   // 非 leader 的代币输入: 各自证明自己的 owner 在场(DECL: 组内每个输入各验本地义务)
+        require(owner_scheme == SCHEME_COVENANT_ID);
+        require(OpInputCovenantId(my_owner_input_idx) == owner);
+        require(witness.length == 0);
+    }
+
+    // §2.3 稳定币骨架(H2 · P1 编译期常量 · P3 向量): 本合约是 leader 合约(有 binding=cov 的 transfer),
+    // v1.0.0 对其中手写 entry 强制 DECL.md 三选一——两处按角色 1 编(C1, NWT MUST): 拒绝与同 covenant 其它输入共花。
+    // require(!MODE_TEST_COIN) 在测试构建(true)下恒 revert, 其后的 checkSig 分支在本次编译产物里不可达(P3);
+    // 切到稳定币构建(改常量 false + 换 ISSUER_PK 真 key + 重编)时同一行代码变成真实签名校验, 不是另一份源码。
+    #[covenant.allow(rule = manual_entrypoint_in_leader_contract)]
+    entry mint_issuer(sig s) {
+        require(OpCovInputCount(OpInputCovenantId(this.activeInputIndex)) == 1);   // C1 角色1
+        require(!MODE_TEST_COIN);                                                  // H2: 测试币构建恒拒(mint 只走 genesis)
+        require(checkSig(s, ISSUER_PK));                                           // 稳定币构建: 受控增发签名
+    }
+    #[covenant.allow(rule = manual_entrypoint_in_leader_contract)]
+    entry clawback(sig s, int out_idx) {
+        require(OpCovInputCount(OpInputCovenantId(this.activeInputIndex)) == 1);   // C1 角色1
+        require(!MODE_TEST_COIN);                                                  // H2: 测试币构建恒拒
+        require(checkSig(s, ISSUER_PK));                                           // 稳定币构建: 发行方无持有者授权转走
+        require(tx.outputs[out_idx].value > 0);
+    }
+}

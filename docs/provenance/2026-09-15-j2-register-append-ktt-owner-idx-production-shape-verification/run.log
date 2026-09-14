@@ -1,0 +1,14 @@
+=== A) held owner_input_idx=[0] ===
+debugger exit status: 0
+stdout tail: PASS
+
+captured hex: 000000000000000800000000000000000424a3e4a8
+my encoder hex: 000000000000000800000000000000000424a3e4a8
+MATCH: true
+=== B) stake(first-bet) owner_input_idx=[2] ===
+debugger exit status: 0
+stdout tail: PASS
+
+captured hex: 000000000000000802000000000000000424a3e4a8
+my encoder hex: 000000000000000802000000000000000424a3e4a8
+MATCH: true

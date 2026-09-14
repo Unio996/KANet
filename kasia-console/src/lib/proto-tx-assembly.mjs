@@ -336,7 +336,13 @@ export function buildRegisterAppendTxJson({
     stakeInIdx: stakeIdx, tok_out: 2, tok_prefix: registerAppendArgs.tokPrefix, tok_suffix: registerAppendArgs.tokSuffix,
   });
   const leafSigScriptHex = combineRegisterAppendActionAndRedeem(kaspa, leafAction, leafRedeemScript);
-  const stakeAction = encodeKttTransferZeroOutAction(kaspa, stakeInput.entryAbi, stakeInput.stateFieldCount, [0]); // owner_input_idx=[0]=leaf(账本1436: owner=STAKE_CHIP_OWNER_UNBOUND, 在场证明走leaf自己的covenant_id)
+  // 🔴 账本1436订正(本笔发现并修复的真实bug): stake.owner=STAKE_CHIP_OWNER_UNBOUND(全零32字节),
+  // 在场证明要靠 OpInputCovenantId(owner_input_idx)==ZERO32 成立——这要求 owner_input_idx 指向一个
+  // 【非covenant】输入(P2PK 的 fee 输入, OpInputCovenantId 对它返回 ZERO_HASH)。指向 leaf(有真实非零
+  // covenant_id)是被 docs/provenance/2026-09-15-j2-stake-chip-owner-unbound-verification/ 向量②
+  // (②stake_transfer_owner_unbound_via_leaf_input_fail)明确证伪的写法——早前这里错写成 [0](leaf),
+  // 与 held 的 owner_input_idx=[0](owner=leaf的covenant_id, 用 leaf 自证)混淆了两种不同的 owner 语义。
+  const stakeAction = encodeKttTransferZeroOutAction(kaspa, stakeInput.entryAbi, stakeInput.stateFieldCount, [feeIdx]);
   const stakeSigScriptHex = combineKttActionAndRedeem(kaspa, stakeAction, stakeInput.redeemScript);
   const heldSigScriptHex = heldInput
     ? combineKttActionAndRedeem(kaspa, encodeKttTransferZeroOutAction(kaspa, heldInput.entryAbi, heldInput.stateFieldCount, [0]), heldInput.redeemScript)
