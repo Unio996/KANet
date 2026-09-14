@@ -198,10 +198,13 @@ export class OnboardBrokerSkill extends Skill {
             console.log(`[onboard-broker] Download complete: ${(dlResult.size / 1024 / 1024).toFixed(1)} MB`);
             _ibkrDownloadState = { status: 'downloaded', filePath: dlResult.filePath, size: dlResult.size, cached: dlResult.cached };
             // 自动启动安装程序
+            // T-SYSTEM-RUN-RCE 热修(2026-09-14): /api/system/run 改收 actionId(不再收 filePath，
+            // dlResult.filePath 不再被这个调用使用) — actionId 就是上面下载那次用的同一个变量,
+            // 见 kasia-console/src/api/broker.js + src/services/system-actions.js 头注。
             fetchJson(`${consoleUrl}/api/system/run`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ filePath: dlResult.filePath }),
+              body: JSON.stringify({ actionId }),
             }).then(runResult => {
               if (runResult.ok) {
                 console.log(`[onboard-broker] Installer launched: PID ${runResult.pid}`);

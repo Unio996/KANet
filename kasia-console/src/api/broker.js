@@ -9,6 +9,7 @@ import { randomUUID } from 'crypto';
 import { encrypt, decrypt } from '../services/crypto.js';
 import { createIbkrAdapter } from '../services/broker-ibkr.js';
 import { downloadFile, runInstaller, checkProcess, getSystemInfo, getAvailableDownloads, checkInstalled } from '../services/system-actions.js';
+import { checkAdminSecretTier } from '../lib/admin-secret-tier.mjs';
 import { createAlpacaAdapter } from '../services/broker-alpaca.js';
 import { createTradierAdapter } from '../services/broker-tradier.js';
 import { createTigerAdapter } from '../services/broker-tiger.js';
@@ -298,7 +299,12 @@ export async function registerBrokerRoutes(fastify) {
   });
 
   // POST /api/system/download — 下载白名单文件
+  // T-SYSTEM-RUN-RCE 热修(2026-09-14, Bettor 1299 派工): 主网默认关闭(ADMIN_SECRET_SYSTEM_ACTIONS
+  // 未设 = 503) —— 这条本身没有 runInstaller 那个路径可控的洞(actionId 早就是白名单 key)，
+  // 但跟 /api/system/run 是同一族"本机零鉴权可触发的系统级动作"，一并落到同一 tier 下。
   fastify.post('/api/system/download', async (request, reply) => {
+    const auth = checkAdminSecretTier(request, 'ADMIN_SECRET_SYSTEM_ACTIONS');
+    if (!auth.ok) return reply.code(auth.code).send({ error: auth.error });
     const { actionId } = request.body || {};
     if (!actionId) return reply.code(400).send({ error: 'actionId required' });
     const result = await downloadFile(actionId);
@@ -306,10 +312,17 @@ export async function registerBrokerRoutes(fastify) {
   });
 
   // POST /api/system/run — 运行白名单安装程序
+  // T-SYSTEM-RUN-RCE 热修(2026-09-14, NWT 发现·Bettor 1299 派工): 原来零鉴权 + 调用方直接给
+  // filePath，只用 basename 正则校验——本机任意进程可以让 console 执行任意同名形状文件
+  // (RCE)。两层修：① 本端点接 ADMIN_SECRET_SYSTEM_ACTIONS tier(未设=503，主网默认关闭)；
+  // ② 请求体改收 actionId(不再收路径)，真正的路径计算/realpath 校验全部挪进
+  // runInstaller() 内部(见 system-actions.js)，调用方完全不再能影响实际执行的文件路径。
   fastify.post('/api/system/run', async (request, reply) => {
-    const { filePath } = request.body || {};
-    if (!filePath) return reply.code(400).send({ error: 'filePath required' });
-    const result = runInstaller(filePath);
+    const auth = checkAdminSecretTier(request, 'ADMIN_SECRET_SYSTEM_ACTIONS');
+    if (!auth.ok) return reply.code(auth.code).send({ error: auth.error });
+    const { actionId } = request.body || {};
+    if (!actionId) return reply.code(400).send({ error: 'actionId required' });
+    const result = runInstaller(actionId);
     return reply.send(result);
   });
 

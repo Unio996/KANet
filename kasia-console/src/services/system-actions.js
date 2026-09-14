@@ -12,8 +12,8 @@
  */
 
 import { execFile, spawn } from 'child_process';
-import { createWriteStream, existsSync, mkdirSync, statSync } from 'fs';
-import { join, basename } from 'path';
+import { createWriteStream, existsSync, mkdirSync, statSync, realpathSync } from 'fs';
+import { join, basename, dirname } from 'path';
 import { pipeline } from 'stream/promises';
 import { Readable } from 'stream';
 
@@ -93,25 +93,50 @@ export async function downloadFile(actionId) {
 
 /**
  * 运行安装程序（白名单校验）
- * @param {string} filePath — 要运行的文件
+ *
+ * T-SYSTEM-RUN-RCE 热修（2026-09-14, NWT 发现·Bettor 1299 派工）：原实现直接吃调用方传来的
+ * `filePath`，只用 `basename(filePath)` 对正则校验——本机任意进程只要凑出一个"文件名匹配、
+ * 内容任意"的路径就能让 console 执行它（RCE 级，不是"白名单形同虚设"这种程度的问题）。
+ * 改用跟 downloadFile() 同款模式：调用方只给 actionId（不给路径），服务端自己从固定
+ * ALLOWED_INSTALLERS + ALLOWED_DOWNLOADS 计算出唯一合法路径，`realpathSync` 解析符号链接
+ * 后再核实解析结果真的落在固定下载目录内、文件名真的匹配——调用方从"提供要跑什么"降级成
+ * "只能从固定候选集里选一个"，路径本身完全不受调用方影响。
+ *
+ * @param {string} actionId — ALLOWED_INSTALLERS 的 key（同 downloadFile 的 actionId 语义）
+ * @param {{spawnFn?: Function}} deps — 测试用注入点(同项目既有 deps={} 约定，如
+ *   checkConsoleUrlListening)：负向用例走不到 spawn；正向用例需要验证"校验全过、
+ *   确实会去 spawn 这个真实路径"但不该在自动化测试里真的拉起一个进程，注入替身。
  * @returns {{ ok, pid, error? }}
  */
-export function runInstaller(filePath) {
-  const fileName = basename(filePath);
+export function runInstaller(actionId, deps = {}) {
+  const { spawnFn = spawn } = deps;
+  const rule = ALLOWED_INSTALLERS[actionId];
+  if (!rule) return { ok: false, error: `不允许运行: ${actionId}` };
+  const downloadEntry = ALLOWED_DOWNLOADS[actionId];
+  if (!downloadEntry) return { ok: false, error: `安装项缺对应下载条目: ${actionId}` };
 
-  // 白名单校验
-  const allowed = Object.values(ALLOWED_INSTALLERS).some(rule => rule.match.test(fileName));
-  if (!allowed) return { ok: false, error: `不允许运行: ${fileName}` };
+  const expectedPath = join(DOWNLOAD_DIR, downloadEntry.filename);
+  if (!existsSync(expectedPath)) return { ok: false, error: `文件不存在: ${expectedPath}` };
 
-  if (!existsSync(filePath)) return { ok: false, error: `文件不存在: ${filePath}` };
-
-  console.log(`[system-actions] Running installer: ${filePath}`);
+  let realPath, realDownloadDir;
   try {
-    const child = spawn(filePath, [], {
-      detached: true,
-      stdio: 'ignore',
-      shell: true,
-    });
+    realPath = realpathSync(expectedPath);
+    realDownloadDir = realpathSync(DOWNLOAD_DIR);
+  } catch (e) {
+    return { ok: false, error: `路径解析失败: ${e.message}` };
+  }
+  if (dirname(realPath) !== realDownloadDir) {
+    return { ok: false, error: `文件不在下载目录内(疑似符号链接逃逸): ${realPath}` };
+  }
+  const fileName = basename(realPath);
+  if (!rule.match.test(fileName)) return { ok: false, error: `文件名不匹配白名单: ${fileName}` };
+
+  console.log(`[system-actions] Running installer: ${realPath}`);
+  try {
+    // shell:true 去掉(2026-09-14 热修)——本来就没有需要 shell 解释的场景(固定路径、无参数)，
+    // shell:true 在 Windows 下经 cmd.exe 转发，路径若含 shell 元字符还会带出额外的命令注入面，
+    // 不是这个函数需要的能力。
+    const child = spawnFn(realPath, [], { detached: true, stdio: 'ignore' });
     child.unref();
     return { ok: true, pid: child.pid, file: fileName };
   } catch (e) {
