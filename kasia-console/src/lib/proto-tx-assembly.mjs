@@ -19,6 +19,12 @@ export const GENESIS_OUTPUT_SOMPI = 20_000_000n;
 export const CONTINUATION_OUTPUT_SOMPI = 20_000_000n;
 export const SOMPI_PER_MASS = 100n;
 
+// 🔴 buildRegisterAppendTxJson 输出布局具名常量(账本1439, Bettor要求"vout在builder里定义为具名
+// 常量, 推算函数引用同一个常量"——不在两处各自重复写字面量0/1/2, 防将来改布局漏改一处)。
+export const REGISTER_APPEND_LEAF_CONT_OUT_INDEX = 0; // leaf续约输出
+export const REGISTER_APPEND_TICKET_OUT_INDEX = 1;    // PoolSideTicket genesis 输出
+export const REGISTER_APPEND_TOK_OUT_INDEX = 2;       // 合并KTT genesis 输出(下一次 register_append 的 held 输入指向这里)
+
 /**
  * ① 构造层守卫: 输出值必须逐位等于协议常量, 不接受"减法算出来接近但不精确相等"的值。
  * 与 relay 侧 validateFixedValueOutputs 是两条独立防线——这条在构造阶段、送进 covenant_broadcast
@@ -399,9 +405,9 @@ export function buildRegisterAppendTxJson({
 
   // leaf 自己的 register_append witness(不需要私钥, AB11 声明宏性质——见 proto-register-append-witness.mjs)。
   const leafAction = encodeRegisterAppendAction(kaspa, registerAppendEntryAbi, {
-    side: registerAppendArgs.side, stake: registerAppendArgs.stake, leafOutIdx: 0, psOutIdx: 1,
+    side: registerAppendArgs.side, stake: registerAppendArgs.stake, leafOutIdx: REGISTER_APPEND_LEAF_CONT_OUT_INDEX, psOutIdx: REGISTER_APPEND_TICKET_OUT_INDEX,
     bettorPk: registerAppendArgs.bettorPk, ps_prefix: registerAppendArgs.psPrefix, ps_suffix: registerAppendArgs.psSuffix,
-    stakeInIdx: stakeIdx, tok_out: 2, tok_prefix: registerAppendArgs.tokPrefix, tok_suffix: registerAppendArgs.tokSuffix,
+    stakeInIdx: stakeIdx, tok_out: REGISTER_APPEND_TOK_OUT_INDEX, tok_prefix: registerAppendArgs.tokPrefix, tok_suffix: registerAppendArgs.tokSuffix,
   });
   const leafSigScriptHex = combineRegisterAppendActionAndRedeem(kaspa, leafAction, leafRedeemScript);
   // 🔴 账本1436订正(本笔发现并修复的真实bug): stake.owner=STAKE_CHIP_OWNER_UNBOUND(全零32字节),
@@ -450,9 +456,9 @@ export function buildRegisterAppendTxJson({
       lockTime: 0n, subnetworkId: '0'.repeat(40), gas: 0n, payload: '',
     });
     // leaf续约: CovenantBinding到leaf自己(authorizing_input=0, covenant_id=leafCovId)
-    t.outputs[0].covenant = new kaspa.CovenantBinding(0, new kaspa.Hash(leafCovId));
+    t.outputs[REGISTER_APPEND_LEAF_CONT_OUT_INDEX].covenant = new kaspa.CovenantBinding(0, new kaspa.Hash(leafCovId));
     // 合并KTT genesis: authorizing_input=fee输入(账本1434③要求, 规避authorizing input本身是covenant的未知项)
-    t.populateGenesisCovenants([new GenesisCovenantGroup(feeIdx, [2])]);
+    t.populateGenesisCovenants([new GenesisCovenantGroup(feeIdx, [REGISTER_APPEND_TOK_OUT_INDEX])]);
     return t;
   };
 
@@ -464,7 +470,7 @@ export function buildRegisterAppendTxJson({
     absFeeCapSompi,
   });
 
-  const mergedKttCovId = String(shape.tx.outputs[2].covenant.covenantId);
+  const mergedKttCovId = String(shape.tx.outputs[REGISTER_APPEND_TOK_OUT_INDEX].covenant.covenantId);
 
   return {
     txJson: shape.tx.serializeToSafeJSON(),
@@ -475,8 +481,8 @@ export function buildRegisterAppendTxJson({
     requiredFee: shape.requiredFee,
     netLoss: shape.netLoss,
     signInputIndices: [feeIdx],
-    genesisOutputIndices: [2],
-    continuationOutputIndices: [0],
+    genesisOutputIndices: [REGISTER_APPEND_TOK_OUT_INDEX],
+    continuationOutputIndices: [REGISTER_APPEND_LEAF_CONT_OUT_INDEX],
   };
 }
 

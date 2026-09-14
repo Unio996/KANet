@@ -8,6 +8,8 @@
 
 import { sqlite } from '../db/client.js';
 import { createRequire } from 'node:module';
+import { REGISTER_APPEND_LEAF_CONT_OUT_INDEX, REGISTER_APPEND_TOK_OUT_INDEX, CONTINUATION_OUTPUT_SOMPI, scriptPublicKeyFromHex } from './proto-tx-assembly.mjs';
+import { computeKttGenesisArtifact } from './proto-covenant-builder.mjs';
 const require = createRequire(import.meta.url);
 const { blake2b } = require('../../node_modules/@noble/hashes/blake2b.js');
 
@@ -28,6 +30,93 @@ export function deriveLeafState(marketId) {
     FROM proto_bets WHERE market_id = ? AND status = 'confirmed'
   `).get(marketId);
   return { local_yes: row.local_yes, local_no: row.local_no, count: row.count, pool_value: row.pool_value };
+}
+
+/**
+ * (账本1439) 市场当前 leaf 续约 UTXO 的 outpoint——从已 landed 的 append intent 推算, 不单独存储
+ * (同 deriveLeafState 的"不加列"原则): 最近一笔 status='landed' 的 append intent(按 landed_at 取
+ * 最新) 的 submitted_txid + REGISTER_APPEND_LEAF_CONT_OUT_INDEX(=0, 与 buildRegisterAppendTxJson
+ * 的输出布局共用同一个具名常量, 不各自重复写字面量)。没有任何已 landed 的 append(第一笔下注之前)
+ * ⇒ 退回 genesis 的 proto_markets.shardleaf_txid/vout(genesis 未落链时 throw, 不静默返回空指针)。
+ */
+export function deriveLeafOutpoint(marketId) {
+  const row = sqlite.prepare(`
+    SELECT pbi.submitted_txid FROM proto_bet_intents pbi
+    JOIN proto_bets pb ON pb.id = pbi.bet_id
+    WHERE pb.market_id = ? AND pbi.step = 'append' AND pbi.status = 'landed'
+    ORDER BY pbi.landed_at DESC LIMIT 1
+  `).get(marketId);
+  if (row) return { txid: row.submitted_txid, vout: REGISTER_APPEND_LEAF_CONT_OUT_INDEX };
+  const market = sqlite.prepare('SELECT shardleaf_txid, shardleaf_vout FROM proto_markets WHERE id = ?').get(marketId);
+  if (!market || !market.shardleaf_txid) {
+    throw new Error(`deriveLeafOutpoint: market ${marketId} has no landed append and no shardleaf_txid recorded (genesis not landed yet) — cannot construct register_append`);
+  }
+  return { txid: market.shardleaf_txid, vout: market.shardleaf_vout };
+}
+
+/**
+ * (账本1439) 市场当前"池子累计筹码"(合并KTT)UTXO 的 outpoint(register_append 的 held 输入)——同样
+ * 从已 landed 的 append intent 推算: 最近一笔 landed append 的 submitted_txid +
+ * REGISTER_APPEND_TOK_OUT_INDEX(=2)。没有任何已 landed 的 append ⇒ 返回 null(第一笔下注形状,
+ * buildRegisterAppendTxJson 的 heldInput=null 分支)。
+ * @returns {{txid:string, vout:number}|null}
+ */
+export function deriveHeldKttOutpoint(marketId) {
+  const row = sqlite.prepare(`
+    SELECT pbi.submitted_txid FROM proto_bet_intents pbi
+    JOIN proto_bets pb ON pb.id = pbi.bet_id
+    WHERE pb.market_id = ? AND pbi.step = 'append' AND pbi.status = 'landed'
+    ORDER BY pbi.landed_at DESC LIMIT 1
+  `).get(marketId);
+  if (!row) return null;
+  return { txid: row.submitted_txid, vout: REGISTER_APPEND_TOK_OUT_INDEX };
+}
+
+/**
+ * (账本1439②) 构造B前 fail-closed 链上核对 held outpoint——三条同时满足才放行, 任一不符 ⇒ throw
+ * held_ktt_drift。这一步本身就是"落链后重算比对"(不需要另写一个针对 mergedKttCovId 的独立验证器,
+ * Bettor 1439 原话)。
+ * @param {object} o
+ * @param {string} o.marketId
+ * @param {string} o.leafCovId  proto_markets.shardleaf_cov_id(held 的 owner 字段值)
+ * @param {{scriptPublicKeyHex:string, spent:boolean, value:bigint}|null} o.chainUtxo  调用方经
+ *   relay IPC 查到的 held outpoint 现状(注入, 本函数不碰 RPC——同 assertLeafStateMatchesChain 既有
+ *   手法)。null = 查不到(可能已花费到别处/指针错误)。
+ */
+export function assertHeldKttOutpointMatchesChain({ marketId, leafCovId, chainUtxo }) {
+  const state = deriveLeafState(marketId);
+  const expectedArtifact = computeKttGenesisArtifact({ amount: state.pool_value, ownerCovIdHex: leafCovId });
+  if (!chainUtxo) {
+    throw new Error(`assertHeldKttOutpointMatchesChain: held_ktt_drift — market ${marketId} 的 held KTT UTXO 查不到(指针错误或已被花费到未追踪的输出)`);
+  }
+  if (chainUtxo.spent) {
+    throw new Error(`assertHeldKttOutpointMatchesChain: held_ktt_drift — market ${marketId} 的 held KTT UTXO 已被花费, 拒绝在一个不存在的 UTXO 上构造交易`);
+  }
+  const actualSpk = String(chainUtxo.scriptPublicKeyHex).toLowerCase();
+  if (expectedArtifact.scriptPubKeyHex.toLowerCase() !== actualSpk) {
+    throw new Error(`assertHeldKttOutpointMatchesChain: held_ktt_drift — 推算状态(pool_value=${state.pool_value})对应的 P2SH(${expectedArtifact.scriptPubKeyHex}) 与链上 UTXO 实际 scriptPubKey(${actualSpk}) 不一致`);
+  }
+  if (BigInt(chainUtxo.value) !== CONTINUATION_OUTPUT_SOMPI) {
+    throw new Error(`assertHeldKttOutpointMatchesChain: held_ktt_drift — 链上 UTXO 面值(${chainUtxo.value}) != CONTINUATION_OUTPUT_SOMPI(${CONTINUATION_OUTPUT_SOMPI})`);
+  }
+  return { ok: true, state, expectedScriptPubKeyHex: expectedArtifact.scriptPubKeyHex };
+}
+
+/**
+ * (账本1439③) 一致性交叉检查: deriveLeafState().pool_value > 0(意味着至少有一笔已确认下注, held
+ * 应该存在) 而 deriveHeldKttOutpoint() 返回 null(或反过来: pool_value===0 但 held 却存在), 两者
+ * 矛盾 ⇒ throw pool_state_inconsistent——这条防的是 proto_bets/proto_bet_intents 两张表之间出现
+ * 未预料的不同步(例如某次记账写漏了一半)。
+ */
+export function assertLeafAndHeldConsistent(marketId) {
+  const state = deriveLeafState(marketId);
+  const held = deriveHeldKttOutpoint(marketId);
+  const hasPool = state.pool_value > 0;
+  const hasHeld = held !== null;
+  if (hasPool !== hasHeld) {
+    throw new Error(`assertLeafAndHeldConsistent: pool_state_inconsistent — market ${marketId}: pool_value=${state.pool_value}(hasPool=${hasPool}) 与 held outpoint 存在性(hasHeld=${hasHeld}) 不一致`);
+  }
+  return { ok: true, state, held };
 }
 
 /**

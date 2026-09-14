@@ -167,5 +167,116 @@ await t('⑥covenant_broadcast 命令本身失败(relay 拒绝) ⇒ 返回 {erro
   });
 }
 
+// ══════════════ bet_mint 步骤B(Stage 3, register_append, 账本1425/1429/1436/1439) ══════════════
+{
+  const { computeShardLeafRedeemScript, computeKttGenesisArtifact } = await import('./proto-covenant-builder.mjs');
+  const { deriveLeafState } = await import('./proto-leaf-state.mjs');
+  const { buildRegisterAppendAndBroadcast, registerAppendTargetAddress, markBetAppendLanded } = await import('./proto-broadcast-ops.mjs');
+  const { scriptPublicKeyFromHex } = await import('./proto-tx-assembly.mjs');
+  const { sqlite } = await import('../db/client.js');
+
+  // 市场genesis已落链(测试①/②已经把shardleaf_cov_id写好了), 但shardleaf_txid/vout本测试文件从没
+  // 跑过checkMarketGenesisLanded那条路径——手动设一个模拟的genesis outpoint, 模拟"genesis已落链"。
+  const GENESIS_TXID = 'ae'.repeat(32); // 有效hex(之前误用'ge'.repeat(32), 'g'不是合法hex字符, 撞出"Invalid character")
+  sqlite.prepare(`UPDATE proto_markets SET shardleaf_txid = ?, shardleaf_vout = 0 WHERE id = ?`).run(GENESIS_TXID, MARKET_ID);
+  const marketRow = getMarketRow(MARKET_ID);
+  const bet = sqlite.prepare('SELECT * FROM proto_bets WHERE id = ?').get('bet-stage2-001'); // 已chip_minted_pending_stake(测试⑨), mint_txid/vout已设
+
+  function leafAddressFor(state) {
+    const leafRedeem = computeShardLeafRedeemScript({ marketId: MARKET_ID, minBet: marketRow.min_bet, sealCount: marketRow.seal_count, rootcloseTmplHash: marketRow.rootclose_tmpl_hash, state });
+    const spk = scriptPublicKeyFromHex(kaspa, leafRedeem.scriptPubKeyHex);
+    return kaspa.addressFromScriptPublicKey(spk, 'mainnet').toString();
+  }
+  function heldAddressFor(poolValue) {
+    const artifact = computeKttGenesisArtifact({ amount: poolValue, ownerCovIdHex: marketRow.shardleaf_cov_id });
+    const spk = scriptPublicKeyFromHex(kaspa, artifact.scriptPubKeyHex);
+    return kaspa.addressFromScriptPublicKey(spk, 'mainnet').toString();
+  }
+
+  function makeStage3SendCmd({ heldOutpoint } = {}) {
+    const calls = [];
+    const currentState = deriveLeafState(MARKET_ID);
+    const leafAddress = leafAddressFor(currentState);
+    const leafOutpointTxid = currentState.count === 0 ? GENESIS_TXID : null; // 只有第一笔下注时leaf outpoint是genesis; 有landed append后deriveLeafOutpoint会用那条intent的txid, 由调用方在heldOutpoint里一并给
+    const sendCmd = async (relayId, cmd) => {
+      calls.push(cmd);
+      if (cmd.type === 'get_address_utxos') {
+        if (cmd.address === leafAddress) {
+          const txid = heldOutpoint ? heldOutpoint.leafTxid : leafOutpointTxid;
+          return { ok: true, utxos: [{ outpoint: { transactionId: txid, index: 0 }, amount: '1000' }] };
+        }
+        if (heldOutpoint && cmd.address === heldAddressFor(currentState.pool_value)) {
+          return { ok: true, utxos: [{ outpoint: { transactionId: heldOutpoint.txid, index: 2 }, amount: '20000000' }] };
+        }
+        if (cmd.address === relayAddr) return { ok: true, utxos: [{ outpoint: { transactionId: FEE_UTXO_TXID, index: 0 }, amount: '10000000000' }] };
+        return { ok: true, utxos: [] };
+      }
+      if (cmd.type === 'covenant_broadcast') return { ok: true, txId: cmd.expected_txid, intent_key: cmd.intent_key };
+      throw new Error(`unexpected cmd ${cmd.type} addr=${cmd.address}`);
+    };
+    return { sendCmd, calls };
+  }
+
+  let firstBetTxid;
+  await t('⑪(Stage 3, 第一笔下注/无held) buildRegisterAppendAndBroadcast 真实构造成功(三项fail-closed核对全过)', async () => {
+    const { sendCmd, calls } = makeStage3SendCmd();
+    const res = await buildRegisterAppendAndBroadcast({ kaspa, network: 'mainnet', market: marketRow, bet, sendCmd, relayId: 'relay-A', relayAddress: relayAddr });
+    if (!res.txId) throw new Error(`未拿到txId: ${JSON.stringify(res)}`);
+    firstBetTxid = res.txId;
+    const bcCall = calls.find((c) => c.type === 'covenant_broadcast');
+    if (!bcCall || bcCall.intent_key !== betIntentKeyFor(bet.id, 'append')) throw new Error(`intent_key不对: ${bcCall && bcCall.intent_key}`);
+    if (JSON.stringify(bcCall.genesis_output_indices) !== '[2]' || JSON.stringify(bcCall.continuation_output_indices) !== '[0]') {
+      throw new Error(`输出索引不对: ${JSON.stringify(bcCall.genesis_output_indices)} / ${JSON.stringify(bcCall.continuation_output_indices)}`);
+    }
+  });
+
+  await t('⑫registerAppendTargetAddress 确定性重算(下注后的新state), 两次调用结果逐字节一致', () => {
+    const a1 = registerAppendTargetAddress({ kaspa, network: 'mainnet', market: marketRow, bet });
+    const a2 = registerAppendTargetAddress({ kaspa, network: 'mainnet', market: marketRow, bet });
+    if (!a1.startsWith('kaspa:')) throw new Error(`地址形状不对: ${a1}`);
+    if (a1 !== a2) throw new Error('两次确定性重算结果不一致');
+  });
+
+  await t('⑬markBetAppendLanded 把proto_bets推进到confirmed(stake_tx_id/ticket_txid写入), 幂等(WHERE status=chip_minted_pending_stake)', () => {
+    markBetAppendLanded({ betId: bet.id, txid: firstBetTxid });
+    const after = sqlite.prepare('SELECT * FROM proto_bets WHERE id = ?').get(bet.id);
+    if (after.status !== 'confirmed') throw new Error(`应该是confirmed, 实际 ${after.status}`);
+    if (after.stake_tx_id !== firstBetTxid) throw new Error('stake_tx_id未写入');
+    if (after.ticket_txid !== firstBetTxid || after.ticket_vout !== 1) throw new Error(`ticket_txid/vout不对: ${after.ticket_txid}/${after.ticket_vout}`);
+    markBetAppendLanded({ betId: bet.id, txid: 'zz'.repeat(32) }); // 幂等: 已经confirmed, 不该被覆盖
+    const after2 = sqlite.prepare('SELECT * FROM proto_bets WHERE id = ?').get(bet.id);
+    if (after2.stake_tx_id !== firstBetTxid) throw new Error('幂等失败: stake_tx_id被第二次调用覆盖');
+  });
+
+  // ── 第二笔下注(有held): 手动补一条landed的append intent, 模拟"第一笔已经真的landed" ──
+  const BET_ID2 = 'bet-stage3-002';
+  sqlite.prepare(`INSERT INTO proto_bets (id, market_id, bettor_pk, side, stake, status, mint_txid, mint_vout, created_at) VALUES (?, ?, ?, 1, 30, 'chip_minted_pending_stake', ?, 0, datetime('now'))`)
+    .run(BET_ID2, MARKET_ID, 'cc'.repeat(32), 'aa'.repeat(32));
+  sqlite.prepare(`INSERT INTO proto_bet_intents (intent_key, bet_id, step, status, submitted_txid, landed_at, created_at, updated_at) VALUES (?, ?, 'append', 'landed', ?, datetime('now'), datetime('now'), datetime('now'))`)
+    .run(betIntentKeyFor(bet.id, 'append'), bet.id, firstBetTxid);
+  const bet2 = sqlite.prepare('SELECT * FROM proto_bets WHERE id = ?').get(BET_ID2);
+
+  await t('⑭(Stage 3, 第二笔下注/有held) buildRegisterAppendAndBroadcast 真实构造成功(held outpoint推算+链上核对全过)', async () => {
+    const { sendCmd, calls } = makeStage3SendCmd({ heldOutpoint: { txid: firstBetTxid, leafTxid: firstBetTxid } });
+    const res = await buildRegisterAppendAndBroadcast({ kaspa, network: 'mainnet', market: marketRow, bet: bet2, sendCmd, relayId: 'relay-A', relayAddress: relayAddr });
+    if (!res.txId) throw new Error(`未拿到txId: ${JSON.stringify(res)}`);
+    const bcCall = calls.find((c) => c.type === 'covenant_broadcast');
+    if (!bcCall) throw new Error('没有真的发出covenant_broadcast');
+  });
+
+  await t('⑮(账本1429) 同一市场存在in-flight append intent时, 新的append被assertNoInFlightAppend拒绝', async () => {
+    const BET_ID3 = 'bet-stage3-003';
+    sqlite.prepare(`INSERT INTO proto_bets (id, market_id, bettor_pk, side, stake, status, mint_txid, mint_vout, created_at) VALUES (?, ?, ?, 0, 5, 'chip_minted_pending_stake', ?, 0, datetime('now'))`)
+      .run(BET_ID3, MARKET_ID, 'dd'.repeat(32), 'bb'.repeat(32));
+    sqlite.prepare(`INSERT INTO proto_bet_intents (intent_key, bet_id, step, status, created_at, updated_at) VALUES (?, ?, 'append', 'prepared', datetime('now'), datetime('now'))`)
+      .run(betIntentKeyFor(bet2.id, 'append'), bet2.id); // bet2的append还在飞(prepared, 模拟还没landed)
+    const bet3 = sqlite.prepare('SELECT * FROM proto_bets WHERE id = ?').get(BET_ID3);
+    const { sendCmd, calls } = makeStage3SendCmd();
+    const res = await buildRegisterAppendAndBroadcast({ kaspa, network: 'mainnet', market: marketRow, bet: bet3, sendCmd, relayId: 'relay-A', relayAddress: relayAddr });
+    if (!res.error || !/market_append_in_flight/.test(res.error)) throw new Error(`应该拒绝并报market_append_in_flight, 实际 ${JSON.stringify(res)}`);
+    if (calls.some((c) => c.type === 'covenant_broadcast')) throw new Error('不该发出covenant_broadcast');
+  });
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exitCode = fail === 0 ? 0 : 1;

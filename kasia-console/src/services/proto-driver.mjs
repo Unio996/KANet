@@ -1,5 +1,12 @@
-// proto-driver.mjs — 原型 v0 后台驱动(账本1438③, J2 buildAndBroadcast 接线 Stage 1 覆盖
-// market_genesis; Stage 2 本笔补 bet_mint 步骤A(铸stake筹码); 步骤B(register_append)留 Stage 3)。
+// proto-driver.mjs — 原型 v0 后台驱动(账本1438③, J2 buildAndBroadcast 接线: Stage 1 覆盖
+// market_genesis; Stage 2 补 bet_mint 步骤A(铸stake筹码); Stage 3 本笔补步骤B(register_append))。
+//
+// 🔴 账本1443(Bettor 明确要求): 步骤A landed 后, 驱动在【同一个 tick 内】就为该笔下注建 append
+// pending 行并尝试推进步骤B, 不等到下一次 tick——依据账本1436, 无主筹码(stake 已铸但还没真正并入
+// leaf)在步骤A、B之间的窗口要尽量短。实现手法: mint 落地检测那段里, landed 后立即调
+// ensureBetIntent({step:'append'}) 建行, 本函数末尾的 append 推进循环在同一次 runProtoDriverTick
+// 调用里(同一个 cap 预算内)紧接着扫到这行刚建好的 pending append 并尝试推进——不是靠"等下一次
+// setInterval 触发", 是同一次函数调用内顺序执行到的。
 //
 // 职责: bet_mint/market_genesis 都需要"广播后等 landed 才能推进下一步", 单次 HTTP 请求内不可能
 // 同步等完——本文件是那个"在后台反复检查、能推进的推进一步"的循环, 照抄 services/tx-landed-
@@ -22,10 +29,11 @@ import { sqlite } from '../db/client.js';
 import { wrapTick } from '../lib/diag-step.mjs';
 import { PROTO_RELAY_ID, assertProtoRelayHealthy } from '../lib/proto-relay-guard.mjs';
 import { getMarketRow, driveMarketGenesis, checkMarketGenesisLanded } from '../lib/proto-market-intent.mjs';
-import { getBetIntent, driveBetIntent, checkBetIntentLanded } from '../lib/proto-bet-intent.mjs';
+import { getBetIntent, ensureBetIntent, betIntentKeyFor, driveBetIntent, checkBetIntentLanded } from '../lib/proto-bet-intent.mjs';
 import {
   buildMarketGenesisAndBroadcast, shardLeafTargetAddress,
   buildBetMintStepAAndBroadcast, betMintStepATargetAddress, markBetMintStepALanded,
+  buildRegisterAppendAndBroadcast, registerAppendTargetAddress, markBetAppendLanded,
 } from '../lib/proto-broadcast-ops.mjs';
 
 const DEFAULT_INTERVAL_MS = 20_000; // 账本1438③-6, 可用 PROTO_DRIVER_INTERVAL_MS 覆盖
@@ -60,8 +68,13 @@ export function isProtoDriverEnabled() {
  *   bet_mint 步骤A(Stage 2, 铸stake筹码): ③ proto_bet_intents 里 step='mint' 且 pending/prepared
  *      的行 → driveBetIntent(maxAttempts=1, 同上不阻塞太久)。④ step='mint' 且 submitted 的行 →
  *      checkBetIntentLanded, landed 后额外调 markBetMintStepALanded 把结果写回 proto_bets(两张表
- *      之间唯一的桥, 见 proto-broadcast-ops.mjs 该函数的文档)。步骤B(register_append)留 Stage 3
- *      (需要 held 输入查找 + 同市场 append 串行, 账本1429/1441裁定, 尚未落码)。
+ *      之间唯一的桥, 见 proto-broadcast-ops.mjs 该函数的文档), 并立即 ensureBetIntent(step='append')
+ *      建行(账本1443, 同一个tick内追发, 不等下一次tick)。
+ *   bet_mint 步骤B(Stage 3, register_append, 账本1425/1429/1436/1439): ⑤ step='append' 且
+ *      pending/prepared 的行(含刚在④建好的) → driveBetIntent(内部调 buildRegisterAppendAndBroadcast,
+ *      构造前一并完成同市场串行/held推算+链上核对/一致性检查三项fail-closed, 见该函数文档)。⑥
+ *      step='append' 且 submitted 的行 → checkBetIntentLanded, landed 后调 markBetAppendLanded 把
+ *      proto_bets 推进到 confirmed(deriveLeafState 靠这个状态筛选已确认下注)。
  * 🔴 账本1444(NWT复核撤销1432③"已知限制"的定性, 不是新增待办): 本函数传 kaspa:null/
  * fetchLandedGenesisTx:null, 落地判断只做 check_utxo_landed, 不额外重算 shardleaf_cov_id 比对
  * ——这不是缺一个能力(fetchLandedGenesisTx 确实还没有对应的 relay IPC 命令"按 txid 查完整交易结构",
@@ -70,12 +83,13 @@ export function isProtoDriverEnabled() {
  * 落链意味着输入完全相同, covenant_id(outpoint, auth_outputs) 是这些输入的纯函数, 因此必然相同,
  * 重算比对是同义反复的冗余检查, 不提供额外保证。这条本身在 verifyShardLeafCovIdAgainstLandedTx
  * (proto-tx-assembly.mjs)仍然保留、可用——只是生产路径不需要接线调用它。
- * @returns {Promise<{actioned:number, genesisAdvanced:number, genesisLandedChecked:number, genesisLanded:number, betMintAdvanced:number, betMintLandedChecked:number, betMintLanded:number, errored:number, held:number}>}
+ * @returns {Promise<{actioned:number, genesisAdvanced:number, genesisLandedChecked:number, genesisLanded:number, betMintAdvanced:number, betMintLandedChecked:number, betMintLanded:number, betAppendAdvanced:number, betAppendLandedChecked:number, betAppendLanded:number, errored:number, held:number}>}
  */
 export async function runProtoDriverTick({ sendCmd, relayId, kaspa, network, relayAddress, log = console, cap = DEFAULT_TICK_CAP }) {
   const out = {
     actioned: 0, genesisAdvanced: 0, genesisLandedChecked: 0, genesisLanded: 0,
-    betMintAdvanced: 0, betMintLandedChecked: 0, betMintLanded: 0, errored: 0, held: 0,
+    betMintAdvanced: 0, betMintLandedChecked: 0, betMintLanded: 0,
+    betAppendAdvanced: 0, betAppendLandedChecked: 0, betAppendLanded: 0, errored: 0, held: 0,
   };
 
   const pendingRows = sqlite.prepare(`
@@ -162,10 +176,64 @@ export async function runProtoDriverTick({ sendCmd, relayId, kaspa, network, rel
         if (r.landed) {
           out.betMintLanded++;
           markBetMintStepALanded({ betId: bet.id, txid: intent.submitted_txid });
+          // 🔴 账本1443: 同一个tick内立即建append pending行(不等下一次tick)——下面的append推进
+          // 循环会在这同一次函数调用里紧接着扫到它。dependsOn=mint intent自己的key, 满足
+          // driveBetIntent的checkDependencyLanded前置(该intent此刻刚被markBetIntent推进到landed)。
+          ensureBetIntent({ betId: bet.id, step: 'append', dependsOn: row.intent_key });
         }
       } catch (e) {
         if (e.hold) out.held++; else out.errored++;
         log.log(`[proto-driver] bet_mint ${row.bet_id} landed-check: ${e.message}`);
+      }
+    }
+  }
+
+  const remaining4 = cap - out.actioned;
+  if (remaining4 > 0) {
+    const appendPendingRows = sqlite.prepare(`
+      SELECT intent_key, bet_id, depends_on FROM proto_bet_intents WHERE step = 'append' AND status IN ('pending','prepared') ORDER BY created_at ASC LIMIT ?
+    `).all(remaining4);
+    for (const row of appendPendingRows) {
+      if (out.actioned >= cap) return out;
+      out.actioned++;
+      try {
+        const bet = getBetRow(row.bet_id);
+        const market = getMarketRow(bet.market_id);
+        const targetAddress = registerAppendTargetAddress({ kaspa, network, market, bet });
+        await driveBetIntent({
+          sendCmd, relayId, betId: bet.id, step: 'append', dependsOn: row.depends_on, targetAddress, origin: 'proto-driver', maxAttempts: 1, log,
+          buildAndBroadcast: () => buildRegisterAppendAndBroadcast({ kaspa, network, market, bet, sendCmd, relayId, relayAddress }),
+        });
+        out.betAppendAdvanced++;
+      } catch (e) {
+        if (e.hold) out.held++; else out.errored++;
+        log.log(`[proto-driver] bet_append ${row.bet_id} advance: ${e.message}`);
+      }
+    }
+  }
+
+  const remaining5 = cap - out.actioned;
+  if (remaining5 > 0) {
+    const appendSubmittedRows = sqlite.prepare(`
+      SELECT intent_key, bet_id FROM proto_bet_intents WHERE step = 'append' AND status = 'submitted' ORDER BY updated_at ASC LIMIT ?
+    `).all(remaining5);
+    for (const row of appendSubmittedRows) {
+      if (out.actioned >= cap) return out;
+      out.actioned++;
+      try {
+        const bet = getBetRow(row.bet_id);
+        const market = getMarketRow(bet.market_id);
+        const targetAddress = registerAppendTargetAddress({ kaspa, network, market, bet });
+        const intent = getBetIntent(row.intent_key);
+        const r = await checkBetIntentLanded({ sendCmd, relayId, intent, targetAddress, minDepth: REORG_SAFE_MIN_DEPTH, origin: 'proto-driver' });
+        out.betAppendLandedChecked++;
+        if (r.landed) {
+          out.betAppendLanded++;
+          markBetAppendLanded({ betId: bet.id, txid: intent.submitted_txid });
+        }
+      } catch (e) {
+        if (e.hold) out.held++; else out.errored++;
+        log.log(`[proto-driver] bet_append ${row.bet_id} landed-check: ${e.message}`);
       }
     }
   }

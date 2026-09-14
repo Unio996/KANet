@@ -17,11 +17,31 @@
 // UPDATE 语句写入(better-sqlite3 单语句本身是原子的, 满足"同一个数据库事务"的要求)。
 
 import { sqlite } from '../db/client.js';
-import { scriptPublicKeyFromHex, buildMarketGenesisTxJson, buildKttGenesisTxJson, selectFeeUtxo, GENESIS_OUTPUT_SOMPI } from './proto-tx-assembly.mjs';
-import { computeShardLeafRedeemScript, computeKttGenesisArtifact, STAKE_CHIP_OWNER_UNBOUND, loadFeeProfileCap } from './proto-covenant-builder.mjs';
+import {
+  scriptPublicKeyFromHex, buildMarketGenesisTxJson, buildKttGenesisTxJson, buildRegisterAppendTxJson,
+  selectFeeUtxo, GENESIS_OUTPUT_SOMPI, CONTINUATION_OUTPUT_SOMPI, REGISTER_APPEND_TICKET_OUT_INDEX,
+} from './proto-tx-assembly.mjs';
+import {
+  computeShardLeafRedeemScript, computeKttGenesisArtifact, computeTicketGenesisArtifact,
+  STAKE_CHIP_OWNER_UNBOUND, loadFeeProfileCap, loadProtocolConstants,
+} from './proto-covenant-builder.mjs';
+import { compileSilV100, ctorBytes32V100, ctorIntV100 } from './pool-bshard-artifacts.mjs';
 import { marketIntentKeyFor, markMarketStatus } from './proto-market-intent.mjs';
 import { betIntentKeyFor } from './proto-bet-intent.mjs';
+import {
+  deriveLeafState, deriveLeafOutpoint, deriveHeldKttOutpoint, assertNoInFlightAppend,
+  assertLeafAndHeldConsistent, assertLeafStateMatchesChain, assertHeldKttOutpointMatchesChain,
+} from './proto-leaf-state.mjs';
 import { PROTO_COVENANT_BROADCAST_TYPE } from './proto-relay-guard.mjs';
+
+const SHARD_LEAF_DIRECT_SIL = new URL('./ShardLeaf_direct.sil', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
+
+/** 在 get_address_utxos(address) 的返回集里找特定 outpoint, 找到 ⇒ {value}(隐含"未花费+scriptPubKey
+ * 匹配该地址", 因为 RPC 只按地址匹配返回它自己的 scriptPubKey 下的 UTXO), 找不到 ⇒ null。 */
+function findUtxoValueAt(rawUtxos, txid, vout) {
+  const hit = (rawUtxos || []).find((u) => u.outpoint && u.outpoint.transactionId === txid && Number(u.outpoint.index) === Number(vout));
+  return hit ? BigInt(hit.amount || 0) : null;
+}
 
 /** get_address_utxos 原始返回项 → buildMarketGenesisTxJson 期望的 feeUtxo 形状。 */
 function toFeeUtxoCandidates(rawUtxos, feeSpk, feeSpkHex) {
@@ -169,4 +189,178 @@ export function markBetMintStepALanded({ betId, txid }) {
     UPDATE proto_bets SET mint_txid = ?, mint_vout = 0, status = 'chip_minted_pending_stake'
     WHERE id = ? AND status = 'pending'
   `).run(txid, betId);
+}
+
+/**
+ * driveBetIntent(step='append') 的 buildAndBroadcast({attempt}) 回调实体(Stage 3, bet_mint 步骤B:
+ * register_append, 账本1425/1429/1436/1439)。构造前的三项 fail-closed 核对(账本1429/1439, Bettor
+ * 明确要求"放在构造B之前的同一个fail-closed步骤里完成", 不分散到多处):
+ *   ① assertNoInFlightAppend: 同一市场 append 串行(调用方——proto-driver.mjs——已经在外层做过一次,
+ *      这里再做一次是双重防线, 便宜的查询, 不怕重复)。
+ *   ② 链上核对 leaf 当前 UTXO(assertLeafStateMatchesChain)+ held KTT UTXO(若存在,
+ *      assertHeldKttOutpointMatchesChain)——两者的 outpoint 由 deriveLeafOutpoint/
+ *      deriveHeldKttOutpoint(账本1439①)推算, 链上现状经 get_address_utxos 查询(找到=未花费+
+ *      scriptPubKey匹配该地址, 找不到=null, 两种情况下面两个 assert 函数自己处理)。
+ *   ③ assertLeafAndHeldConsistent: pool_value 与 held 存在性的交叉一致性检查。
+ * 任一失败直接 throw(不吞、不重试、不构造)。
+ * @param {object} o
+ * @param {*} o.kaspa
+ * @param {string} o.network
+ * @param {object} o.market  proto_markets 行(需要 shardleaf_cov_id 已经写好, 即 genesis 已 landed)
+ * @param {object} o.bet  这一笔要 append 的 proto_bets 行(id/side/stake/bettor_pk/mint_txid/mint_vout 必须已存在)
+ * @param {Function} o.sendCmd
+ * @param {string} o.relayId
+ * @param {string} o.relayAddress
+ * @returns {Promise<{txId:string}|{error:string}>}
+ */
+export async function buildRegisterAppendAndBroadcast({ kaspa, network, market, bet, sendCmd, relayId, relayAddress }) {
+  const { Address } = kaspa;
+  const marketId = market.id;
+  const leafCovId = market.shardleaf_cov_id;
+  if (!leafCovId) return { error: 'market has no shardleaf_cov_id recorded — genesis not landed yet' };
+
+  // ── 唯一的 fail-closed 前置步骤(账本1429/1439, 三项都在这里做) ──
+  try { assertNoInFlightAppend(marketId); } catch (e) { return { error: e.message }; }
+
+  const currentState = deriveLeafState(marketId);
+  let leafOutpoint, heldOutpointRaw;
+  try {
+    leafOutpoint = deriveLeafOutpoint(marketId);
+    heldOutpointRaw = deriveHeldKttOutpoint(marketId);
+    assertLeafAndHeldConsistent(marketId);
+  } catch (e) { return { error: e.message }; }
+
+  const leafRedeem = computeShardLeafRedeemScript({
+    marketId, minBet: market.min_bet, sealCount: market.seal_count, rootcloseTmplHash: market.rootclose_tmpl_hash, state: currentState,
+  });
+  const leafSpk = scriptPublicKeyFromHex(kaspa, leafRedeem.scriptPubKeyHex);
+  const leafAddress = kaspa.addressFromScriptPublicKey(leafSpk, network).toString();
+  const leafUtxoRes = await sendCmd(relayId, { type: 'get_address_utxos', address: leafAddress }, 15000, 'proto-driver');
+  if (!leafUtxoRes?.ok) return { error: `get_address_utxos(leaf) failed: ${leafUtxoRes?.error || 'no response'}` };
+  const leafValue = findUtxoValueAt(leafUtxoRes.utxos, leafOutpoint.txid, leafOutpoint.vout);
+  try {
+    assertLeafStateMatchesChain({
+      marketId, shardLeafRedeemScript: leafRedeem.script, stateLayout: leafRedeem.stateLayout,
+      chainUtxo: leafValue === null ? null : { scriptPublicKeyHex: leafRedeem.scriptPubKeyHex, spent: false },
+    });
+  } catch (e) { return { error: e.message }; }
+
+  let heldArtifact = null;
+  if (heldOutpointRaw) {
+    heldArtifact = computeKttGenesisArtifact({ amount: currentState.pool_value, ownerCovIdHex: leafCovId });
+    const heldSpk = scriptPublicKeyFromHex(kaspa, heldArtifact.scriptPubKeyHex);
+    const heldAddress = kaspa.addressFromScriptPublicKey(heldSpk, network).toString();
+    const heldUtxoRes = await sendCmd(relayId, { type: 'get_address_utxos', address: heldAddress }, 15000, 'proto-driver');
+    if (!heldUtxoRes?.ok) return { error: `get_address_utxos(held) failed: ${heldUtxoRes?.error || 'no response'}` };
+    const heldValue = findUtxoValueAt(heldUtxoRes.utxos, heldOutpointRaw.txid, heldOutpointRaw.vout);
+    try {
+      assertHeldKttOutpointMatchesChain({
+        marketId, leafCovId,
+        chainUtxo: heldValue === null ? null : { scriptPublicKeyHex: heldArtifact.scriptPubKeyHex, spent: false, value: heldValue },
+      });
+    } catch (e) { return { error: e.message }; }
+  }
+
+  // ── 前置核对全过, 开始真正构造 ──
+  const newState = {
+    local_yes: currentState.local_yes + (bet.side === 0 ? bet.stake : 0),
+    local_no: currentState.local_no + (bet.side === 1 ? bet.stake : 0),
+    count: currentState.count + 1,
+    pool_value: currentState.pool_value + bet.stake,
+  };
+
+  const { ps_tmpl_hash, token_tmpl_hash, ps_prefix, ps_suffix, token_prefix, token_suffix } = loadProtocolConstants();
+  const sldCtor = [
+    ctorBytes32V100(marketId), ctorBytes32V100(ps_tmpl_hash), ctorBytes32V100(marketId),
+    ctorIntV100(market.seal_count), ctorIntV100(market.min_bet), ctorBytes32V100(market.rootclose_tmpl_hash), ctorBytes32V100('00'.repeat(32)),
+    ctorBytes32V100(token_tmpl_hash), ctorIntV100(currentState.local_yes), ctorIntV100(currentState.local_no), ctorIntV100(currentState.count), ctorIntV100(currentState.pool_value),
+  ];
+  const sldCompiled = compileSilV100(SHARD_LEAF_DIRECT_SIL, sldCtor, 'ShardLeaf_direct');
+  const registerAppendEntryAbi = sldCompiled._raw.contracts.ShardLeaf_direct.entries.register_append;
+
+  const stakeArtifact = computeKttGenesisArtifact({ amount: bet.stake, ownerCovIdHex: STAKE_CHIP_OWNER_UNBOUND });
+  const stakeInput = {
+    txid: bet.mint_txid, vout: bet.mint_vout, value: GENESIS_OUTPUT_SOMPI, scriptPublicKeyHex: stakeArtifact.scriptPubKeyHex,
+    redeemScript: stakeArtifact.script, entryAbi: stakeArtifact.entryAbi, stateFieldCount: stakeArtifact.stateFieldCount,
+  };
+  let heldInput = null;
+  if (heldOutpointRaw) {
+    heldInput = {
+      txid: heldOutpointRaw.txid, vout: heldOutpointRaw.vout, value: CONTINUATION_OUTPUT_SOMPI, scriptPublicKeyHex: heldArtifact.scriptPubKeyHex,
+      redeemScript: heldArtifact.script, entryAbi: heldArtifact.entryAbi, stateFieldCount: heldArtifact.stateFieldCount,
+    };
+  }
+
+  const ticketArtifact = computeTicketGenesisArtifact({ bettorPk: bet.bettor_pk, direction: bet.side, stake: bet.stake, shardPoolId: marketId });
+  const mergedKttArtifact = computeKttGenesisArtifact({ amount: newState.pool_value, ownerCovIdHex: leafCovId });
+
+  const { Address: _A } = kaspa;
+  const relaySpk = kaspa.payToAddressScript(new Address(relayAddress));
+  const relaySpkHex = '0x' + relaySpk.script;
+  const cap = loadFeeProfileCap('bet_mint_step_b');
+  const minRequired = CONTINUATION_OUTPUT_SOMPI + GENESIS_OUTPUT_SOMPI + GENESIS_OUTPUT_SOMPI + cap;
+  const feeUtxoRes = await sendCmd(relayId, { type: 'get_address_utxos', address: relayAddress }, 15000, 'proto-driver');
+  if (!feeUtxoRes?.ok) return { error: `get_address_utxos(fee) failed: ${feeUtxoRes?.error || 'no response'}` };
+  const feeCandidates = toFeeUtxoCandidates(feeUtxoRes.utxos, relaySpk, relaySpkHex);
+  let feeUtxo;
+  try { feeUtxo = selectFeeUtxo(feeCandidates, minRequired); }
+  catch (e) { return { error: e.message }; }
+
+  let built;
+  try {
+    built = buildRegisterAppendTxJson({
+      kaspa, network,
+      leafRedeemScript: leafRedeem.script, leafStateLayout: leafRedeem.stateLayout, leafOutpoint, leafCovId,
+      currentState, newState, heldInput, stakeInput, feeUtxo, relayChangeScriptPublicKeyHex: relaySpkHex,
+      registerAppendEntryAbi,
+      registerAppendArgs: {
+        side: bet.side, stake: bet.stake, bettorPk: '0x' + bet.bettor_pk,
+        psPrefix: '0x' + ps_prefix, psSuffix: '0x' + ps_suffix, tokPrefix: '0x' + token_prefix, tokSuffix: '0x' + token_suffix,
+      },
+      ticketScriptPubKeyHex: ticketArtifact.scriptPubKeyHex, mergedKttScript: mergedKttArtifact.script, absFeeCapSompi: cap,
+    });
+  } catch (e) { return { error: `buildRegisterAppendTxJson failed: ${e.message}` }; }
+
+  const rep = await sendCmd(relayId, {
+    type: PROTO_COVENANT_BROADCAST_TYPE,
+    intent_key: betIntentKeyFor(bet.id, 'append'),
+    tx_json: built.txJson,
+    sign_input_indices: built.signInputIndices,
+    expected_txid: built.expectedTxid,
+    genesis_output_indices: built.genesisOutputIndices,
+    continuation_output_indices: built.continuationOutputIndices,
+  }, 30000, 'proto-driver');
+
+  if (rep?.ok && rep?.txId) return { txId: rep.txId };
+  return { error: rep?.error || `covenant_broadcast failed (code=${rep?.code || 'unknown'})` };
+}
+
+/** bet_mint 步骤B 落链判据用的地址——新 leaf 续约输出(REGISTER_APPEND_LEAF_CONT_OUT_INDEX)的 P2SH
+ * bech32 地址, 从"下注后"的新 state 确定性重算。 */
+export function registerAppendTargetAddress({ kaspa, network, market, bet }) {
+  const currentState = deriveLeafState(market.id);
+  const newState = {
+    local_yes: currentState.local_yes + (bet.side === 0 ? bet.stake : 0),
+    local_no: currentState.local_no + (bet.side === 1 ? bet.stake : 0),
+    count: currentState.count + 1,
+    pool_value: currentState.pool_value + bet.stake,
+  };
+  const leafRedeem = computeShardLeafRedeemScript({
+    marketId: market.id, minBet: market.min_bet, sealCount: market.seal_count, rootcloseTmplHash: market.rootclose_tmpl_hash, state: newState,
+  });
+  const spk = scriptPublicKeyFromHex(kaspa, leafRedeem.scriptPubKeyHex);
+  return kaspa.addressFromScriptPublicKey(spk, network).toString();
+}
+
+/**
+ * bet_mint 步骤B landed 后的 proto_bets 记账(两张表之间的桥, 同 markBetMintStepALanded 的既有模式):
+ * status 推进到 'confirmed'(deriveLeafState 的 SQL 查询就是靠这个状态筛选已确认下注, landed 后立即
+ * 推进能让下一笔下注马上看到正确的 pool_value)、stake_tx_id/ticket_txid/ticket_vout 写入。
+ * WHERE status='chip_minted_pending_stake' 做幂等。
+ */
+export function markBetAppendLanded({ betId, txid }) {
+  sqlite.prepare(`
+    UPDATE proto_bets SET status = 'confirmed', confirmed_at = datetime('now'), stake_tx_id = ?, ticket_txid = ?, ticket_vout = ?
+    WHERE id = ? AND status = 'chip_minted_pending_stake'
+  `).run(txid, txid, REGISTER_APPEND_TICKET_OUT_INDEX, betId);
 }

@@ -18,6 +18,7 @@ if (!process.env._PROTO_LEAF_STATE_TEST_BOOTSTRAPPED) {
 const { sqlite } = await import('../db/client.js');
 const {
   deriveLeafState, assertNoInFlightAppend, encodeLeafStateBytes, computeExpectedLeafScriptPubKey, assertLeafStateMatchesChain,
+  deriveLeafOutpoint, deriveHeldKttOutpoint, assertHeldKttOutpointMatchesChain, assertLeafAndHeldConsistent,
 } = await import('./proto-leaf-state.mjs');
 
 let pass = 0, fail = 0;
@@ -196,6 +197,104 @@ if (!process.env.CONSOLE_ENCRYPTION_KEY) process.env.CONSOLE_ENCRYPTION_KEY = '1
     }
   });
 }
+
+// ============ deriveLeafOutpoint / deriveHeldKttOutpoint(账本1439, 0/1/2笔已landed append) ============
+function mkIntentFull({ key, betId, step, status, submittedTxid, landedAt }) {
+  sqlite.prepare(`INSERT INTO proto_bet_intents (intent_key, bet_id, step, status, submitted_txid, landed_at, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)`)
+    .run(key, betId, step, status, submittedTxid, landedAt, now, now);
+}
+
+mkMarket('m_op0');
+sqlite.prepare(`UPDATE proto_markets SET shardleaf_txid = ?, shardleaf_vout = 0 WHERE id = ?`).run('ge'.repeat(32), 'm_op0');
+t('deriveLeafOutpoint-0笔landed: 退回genesis的shardleaf_txid/vout', () => {
+  const o = deriveLeafOutpoint('m_op0');
+  if (o.txid !== 'ge'.repeat(32) || o.vout !== 0) throw new Error(JSON.stringify(o));
+});
+t('deriveHeldKttOutpoint-0笔landed: 返回null(第一笔下注形状)', () => {
+  const h = deriveHeldKttOutpoint('m_op0');
+  if (h !== null) throw new Error(`应该是null, 实际 ${JSON.stringify(h)}`);
+});
+
+mkMarket('m_op1');
+sqlite.prepare(`UPDATE proto_markets SET shardleaf_txid = ?, shardleaf_vout = 0 WHERE id = ?`).run('ge'.repeat(32), 'm_op1');
+mkBet({ id: 'b_op1', marketId: 'm_op1', side: 0, stake: 10, status: 'confirmed' });
+mkIntentFull({ key: 'proto-bet:b_op1:append', betId: 'b_op1', step: 'append', status: 'landed', submittedTxid: 'a1'.repeat(32), landedAt: '2026-09-15T01:00:00.000Z' });
+t('deriveLeafOutpoint-1笔landed: 用该intent的submitted_txid+续约输出索引0', () => {
+  const o = deriveLeafOutpoint('m_op1');
+  if (o.txid !== 'a1'.repeat(32) || o.vout !== 0) throw new Error(JSON.stringify(o));
+});
+t('deriveHeldKttOutpoint-1笔landed: 用该intent的submitted_txid+合并KTT输出索引2', () => {
+  const h = deriveHeldKttOutpoint('m_op1');
+  if (!h || h.txid !== 'a1'.repeat(32) || h.vout !== 2) throw new Error(JSON.stringify(h));
+});
+
+mkBet({ id: 'b_op1b', marketId: 'm_op1', side: 1, stake: 20, status: 'confirmed' });
+mkIntentFull({ key: 'proto-bet:b_op1b:append', betId: 'b_op1b', step: 'append', status: 'landed', submittedTxid: 'a2'.repeat(32), landedAt: '2026-09-15T02:00:00.000Z' });
+t('deriveLeafOutpoint-2笔landed: 取landed_at最新的那一条, 不是随便一条', () => {
+  const o = deriveLeafOutpoint('m_op1');
+  if (o.txid !== 'a2'.repeat(32)) throw new Error(`应该是第2笔(a2...), 实际 ${o.txid.slice(0, 8)}`);
+});
+
+mkBet({ id: 'b_op1c', marketId: 'm_op1', side: 0, stake: 30, status: 'chip_minted_pending_stake' });
+mkIntentFull({ key: 'proto-bet:b_op1c:append', betId: 'b_op1c', step: 'append', status: 'submitted', submittedTxid: 'a3'.repeat(32), landedAt: null });
+t('deriveLeafOutpoint-submitted(未landed)的append不计入, 仍取上一笔已landed的', () => {
+  const o = deriveLeafOutpoint('m_op1');
+  if (o.txid !== 'a2'.repeat(32)) throw new Error(`submitted append不该被算入, 应仍是a2..., 实际 ${o.txid.slice(0, 8)}`);
+});
+
+// ============ assertHeldKttOutpointMatchesChain(账本1439②, 三种drift) ============
+mkMarket('m_held_ok');
+mkBet({ id: 'b_held_ok', marketId: 'm_held_ok', side: 0, stake: 42, status: 'confirmed' });
+const LEAF_COV_ID = 'cc'.repeat(32);
+const { computeKttGenesisArtifact } = await import('./proto-covenant-builder.mjs');
+const { CONTINUATION_OUTPUT_SOMPI } = await import('./proto-tx-assembly.mjs');
+const heldArtifact = computeKttGenesisArtifact({ amount: 42, ownerCovIdHex: LEAF_COV_ID });
+t('assertHeldKttOutpointMatchesChain-1: scriptPubKey+value+未花费全对 ⇒ 通过', () => {
+  const r = assertHeldKttOutpointMatchesChain({ marketId: 'm_held_ok', leafCovId: LEAF_COV_ID, chainUtxo: { scriptPublicKeyHex: heldArtifact.scriptPubKeyHex, spent: false, value: CONTINUATION_OUTPUT_SOMPI } });
+  if (!r.ok) throw new Error('应该通过');
+});
+t('assertHeldKttOutpointMatchesChain-2: 已花费 ⇒ held_ktt_drift', () => {
+  let threw = null;
+  try { assertHeldKttOutpointMatchesChain({ marketId: 'm_held_ok', leafCovId: LEAF_COV_ID, chainUtxo: { scriptPublicKeyHex: heldArtifact.scriptPubKeyHex, spent: true, value: CONTINUATION_OUTPUT_SOMPI } }); }
+  catch (e) { threw = e; }
+  if (!threw || !/held_ktt_drift/.test(threw.message)) throw new Error('应该拒绝并报held_ktt_drift');
+});
+t('assertHeldKttOutpointMatchesChain-3: scriptPubKey不符(例如amount对不上) ⇒ held_ktt_drift', () => {
+  const wrongArtifact = computeKttGenesisArtifact({ amount: 43, ownerCovIdHex: LEAF_COV_ID });
+  let threw = null;
+  try { assertHeldKttOutpointMatchesChain({ marketId: 'm_held_ok', leafCovId: LEAF_COV_ID, chainUtxo: { scriptPublicKeyHex: wrongArtifact.scriptPubKeyHex, spent: false, value: CONTINUATION_OUTPUT_SOMPI } }); }
+  catch (e) { threw = e; }
+  if (!threw || !/held_ktt_drift/.test(threw.message)) throw new Error('应该拒绝并报held_ktt_drift');
+});
+t('assertHeldKttOutpointMatchesChain-4: value不等于CONTINUATION_OUTPUT_SOMPI ⇒ held_ktt_drift', () => {
+  let threw = null;
+  try { assertHeldKttOutpointMatchesChain({ marketId: 'm_held_ok', leafCovId: LEAF_COV_ID, chainUtxo: { scriptPublicKeyHex: heldArtifact.scriptPubKeyHex, spent: false, value: CONTINUATION_OUTPUT_SOMPI - 1n } }); }
+  catch (e) { threw = e; }
+  if (!threw || !/held_ktt_drift/.test(threw.message)) throw new Error('应该拒绝并报held_ktt_drift');
+});
+t('assertHeldKttOutpointMatchesChain-5: chainUtxo为null(查不到) ⇒ held_ktt_drift', () => {
+  let threw = null;
+  try { assertHeldKttOutpointMatchesChain({ marketId: 'm_held_ok', leafCovId: LEAF_COV_ID, chainUtxo: null }); }
+  catch (e) { threw = e; }
+  if (!threw || !/held_ktt_drift/.test(threw.message)) throw new Error('应该拒绝并报held_ktt_drift');
+});
+
+// ============ assertLeafAndHeldConsistent(账本1439③) ============
+t('assertLeafAndHeldConsistent-1: pool_value=0 且 held=null(第一笔下注前) ⇒ 一致, 通过', () => {
+  const r = assertLeafAndHeldConsistent('m_op0');
+  if (!r.ok) throw new Error('应该通过');
+});
+t('assertLeafAndHeldConsistent-2: pool_value>0 且 held存在(已有landed append) ⇒ 一致, 通过', () => {
+  const r = assertLeafAndHeldConsistent('m_op1');
+  if (!r.ok) throw new Error('应该通过');
+});
+t('assertLeafAndHeldConsistent-3: pool_value>0 但没有任何landed append(构造矛盾场景) ⇒ pool_state_inconsistent', () => {
+  mkMarket('m_inconsistent1');
+  mkBet({ id: 'b_inc1', marketId: 'm_inconsistent1', side: 0, stake: 10, status: 'confirmed' }); // 已确认但从未真的append过(数据完整性异常场景)
+  let threw = null;
+  try { assertLeafAndHeldConsistent('m_inconsistent1'); } catch (e) { threw = e; }
+  if (!threw || !/pool_state_inconsistent/.test(threw.message)) throw new Error('应该拒绝并报pool_state_inconsistent');
+});
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exitCode = fail === 0 ? 0 : 1;

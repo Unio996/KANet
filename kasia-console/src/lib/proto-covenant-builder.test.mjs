@@ -12,7 +12,7 @@ import assert from 'node:assert';
 import { compileSilV100, ctorBytes32V100, ctorIntV100 } from './pool-bshard-artifacts.mjs';
 import { extractTemplateArtifactV100 } from './pool-template-artifact.mjs';
 import {
-  computeMarketGenesisArtifacts, computeKttGenesisArtifact, loadProtocolConstants, p2sh, ZERO32,
+  computeMarketGenesisArtifacts, computeKttGenesisArtifact, computeTicketGenesisArtifact, loadProtocolConstants, p2sh, ZERO32,
 } from './proto-covenant-builder.mjs';
 
 let pass = 0, fail = 0;
@@ -124,6 +124,19 @@ await t('⑪ computeShardLeafRedeemScript 换一组非零 state ⇒ 产出不同
   const r2 = computeShardLeafRedeemScript({ marketId: MARKET_ID, minBet: MIN_BET, sealCount: 2, rootcloseTmplHash: artifacts.rootCloseTmplHash, state: { local_yes: 100, local_no: 20, count: 2, pool_value: 120 } });
   assert.notStrictEqual(r1.scriptPubKeyHex, r2.scriptPubKeyHex);
   assert.strictEqual(r2.stateLayout.len, 36, 'ShardLeaf_direct 的 state_layout.len 应该恒为36(4个int字段)');
+});
+
+await t('⑫(账本1439) computeTicketGenesisArtifact: PoolSideTicket genesis ctor 真实编译, 不同 bettorPk/stake 产出不同脚本', () => {
+  const t1 = computeTicketGenesisArtifact({ bettorPk: 'dd'.repeat(32), direction: 0, stake: 20, shardPoolId: MARKET_ID });
+  const t2 = computeTicketGenesisArtifact({ bettorPk: 'ee'.repeat(32), direction: 1, stake: 30, shardPoolId: MARKET_ID });
+  assert.match(t1.scriptPubKeyHex, /^0xaa20[0-9a-f]{64}87$/);
+  assert.notStrictEqual(Buffer.compare(t1.script, t2.script), 0, '不同参数应该产出不同脚本');
+});
+
+await t('⑬ computeTicketGenesisArtifact: bettorPk 格式错误 ⇒ throw', () => {
+  let threw = null;
+  try { computeTicketGenesisArtifact({ bettorPk: 'short', direction: 0, stake: 1, shardPoolId: MARKET_ID }); } catch (e) { threw = e; }
+  assert.ok(threw && /32-byte hex/.test(threw.message));
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

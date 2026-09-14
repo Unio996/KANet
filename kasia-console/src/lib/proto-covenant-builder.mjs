@@ -31,6 +31,7 @@ const REFUND_CLAIM_SIL = new URL('./RefundClaim.sil', import.meta.url).pathname.
 const ROOT_CLOSE_SIL = new URL('./RootClose.sil', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
 const SHARD_LEAF_DIRECT_SIL = new URL('./ShardLeaf_direct.sil', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
 const KANET_TEST_TOKEN_SIL = new URL('./sil-v1/KanetTestToken.sil', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
+const POOL_SIDE_TICKET_SIL = new URL('./sil-v1/PoolSideTicket.sil', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
 const ANCHORS_JSON = new URL('../../scripts/proto-v0-template-anchors.json', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
 
 const ZERO32 = Buffer.alloc(32, 0x00);
@@ -42,7 +43,12 @@ let _anchorsCache = null;
 /**
  * 读协议常量(一次性计算, 全市场复用)——不在这里重算, 只读 scripts/proto-v0-template-anchors.mjs
  * 的产物。缺文件/字段直接 throw(fail-loud, 不静默用旧值/占位值)。
- * @returns {{ps_tmpl_hash:string, token_tmpl_hash:string, claim_tmpl_hash:string}} 全部 32 字节 hex(无 0x 前缀)
+ * 🔴 ps_prefix/ps_suffix/token_prefix/token_suffix(账本1439, Stage 3 register_append witness 需要
+ * 的 ps_prefix/ps_suffix/tok_prefix/tok_suffix 四个字段, 见 proto-tx-assembly.mjs
+ * buildRegisterAppendTxJson 的 registerAppendArgs)——这些是"锚定 ctor"编译产物的模板 prefix/suffix
+ * (与 ps_tmpl_hash/token_tmpl_hash 来自同一次 anchors 生成, anchors.json 早就存了这两个字段, 只是
+ * 之前没读出来)。
+ * @returns {{ps_tmpl_hash:string, token_tmpl_hash:string, claim_tmpl_hash:string, ps_prefix:string, ps_suffix:string, token_prefix:string, token_suffix:string}} hash 全部 32 字节 hex(无 0x 前缀), prefix/suffix 为原始 hex(无 0x 前缀, 长度不定)
  */
 export function loadProtocolConstants() {
   if (_anchorsCache) return _anchorsCache;
@@ -50,10 +56,17 @@ export function loadProtocolConstants() {
   const ps = raw?.contracts?.PoolSideTicket?.ps_tmpl_hash;
   const token = raw?.contracts?.KanetTestToken?.token_tmpl_hash;
   const claim = raw?.contracts?.KanetTokenClaim?.claim_tmpl_hash;
-  if (!ps || !token || !claim) {
-    throw new Error(`loadProtocolConstants: missing field(s) in ${ANCHORS_JSON} — run scripts/proto-v0-template-anchors.mjs first (ps_tmpl_hash=${!!ps} token_tmpl_hash=${!!token} claim_tmpl_hash=${!!claim})`);
+  const psPrefix = raw?.contracts?.PoolSideTicket?.templatePrefixHex;
+  const psSuffix = raw?.contracts?.PoolSideTicket?.templateSuffixHex;
+  const tokenPrefix = raw?.contracts?.KanetTestToken?.templatePrefixHex;
+  const tokenSuffix = raw?.contracts?.KanetTestToken?.templateSuffixHex;
+  if (!ps || !token || !claim || !psPrefix || !psSuffix || !tokenPrefix || !tokenSuffix) {
+    throw new Error(`loadProtocolConstants: missing field(s) in ${ANCHORS_JSON} — run scripts/proto-v0-template-anchors.mjs first (ps_tmpl_hash=${!!ps} token_tmpl_hash=${!!token} claim_tmpl_hash=${!!claim} ps_prefix=${!!psPrefix} ps_suffix=${!!psSuffix} token_prefix=${!!tokenPrefix} token_suffix=${!!tokenSuffix})`);
   }
-  _anchorsCache = { ps_tmpl_hash: ps, token_tmpl_hash: token, claim_tmpl_hash: claim };
+  _anchorsCache = {
+    ps_tmpl_hash: ps, token_tmpl_hash: token, claim_tmpl_hash: claim,
+    ps_prefix: psPrefix, ps_suffix: psSuffix, token_prefix: tokenPrefix, token_suffix: tokenSuffix,
+  };
   return _anchorsCache;
 }
 
@@ -212,6 +225,33 @@ export function computeKttGenesisArtifact({ amount, ownerCovIdHex }) {
     ctorIntV100(3), ctorIntV100(3),
   ];
   const compiled = compileSilV100(KANET_TEST_TOKEN_SIL, ctor, 'KanetTestToken');
+  const artifact = artifactOf(compiled);
+  // 🔴 账本1439(Stage 3 register_append 消费 held/stake 这两个 KTT 输入时需要): entryAbi(transfer
+  // 入口的编译产物, encodeKttTransferZeroOutAction 要用)与 stateFieldCount(State 字段数, 同样用途)
+  // 一起返回——这两项和 amount/owner 是同一次编译产物的不同切面, 不该让调用方为了拿到它们再重编一次
+  // (那样会跑两次 silverc 且必须保证两次 ctor 完全一致, 容易出错)。
+  return {
+    script: artifact.script, scriptPubKeyHex: '0x' + p2sh(artifact.script), templateHashHex: artifact.templateHashHex,
+    entryAbi: compiled._raw.contracts.KanetTestToken.entries.transfer,
+    stateFieldCount: compiled._raw.contracts.KanetTestToken.runtime_state.fields.length,
+  };
+}
+
+/**
+ * (账本1439, Stage 3) PoolSideTicket genesis ctor 真实编译——register_append 每次下注都新铸一份
+ * 赢票(不像 KTT stake 筹码那样可能有 held/续约, 每笔下注恰好一张新票, 不会被合并)。
+ * @param {object} o
+ * @param {string} o.bettorPk  32字节hex(无0x)
+ * @param {number} o.direction  0=YES, 1=NO(下注方向)
+ * @param {number} o.stake
+ * @param {string} o.shardPoolId  32字节hex(无0x)——v0 用 marketId 本身(单市场单份额池)
+ * @returns {{script:Buffer, scriptPubKeyHex:string, templateHashHex:string}}
+ */
+export function computeTicketGenesisArtifact({ bettorPk, direction, stake, shardPoolId }) {
+  if (!/^[0-9a-f]{64}$/.test(bettorPk)) throw new Error(`computeTicketGenesisArtifact: bettorPk must be 32-byte hex, got ${bettorPk}`);
+  if (!/^[0-9a-f]{64}$/.test(shardPoolId)) throw new Error(`computeTicketGenesisArtifact: shardPoolId must be 32-byte hex, got ${shardPoolId}`);
+  const ctor = [ctorBytes32V100(bettorPk), ctorIntV100(direction), ctorIntV100(stake), ctorBytes32V100(shardPoolId)];
+  const compiled = compileSilV100(POOL_SIDE_TICKET_SIL, ctor, 'PoolSideTicket');
   const artifact = artifactOf(compiled);
   return { script: artifact.script, scriptPubKeyHex: '0x' + p2sh(artifact.script), templateHashHex: artifact.templateHashHex };
 }
