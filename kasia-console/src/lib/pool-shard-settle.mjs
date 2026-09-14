@@ -64,7 +64,7 @@ export function computePariMutuelPayout({ bettors, winningDirection, poolTotalSo
 }
 
 /**
- * 价值分成 fee-leaf 单源派生 (J1 co-verify 边界①单源②整数③provenance). claim builder + enforceCommitteeSign re-derive 两处
+ * 价值分成 fee-leaf 单源派生 (J1 co-verify 边界①单源②整数③provenance). claim builder + bshard-close-enforce.mjs 的 _enforceCloseAttestCore re-derive 两处
  * 【必调此一个函数】否则 bind 永假. 所有 fee-recipient pk 必【链锚派生】(broker/introducer = market create-committed,
  * oracle+node = pool_merkle_root 派生委员集) — caller 绑 provenance, 本 fn 纯算 (BigInt floor, fee-dust→committee[0] 确定性).
  *
@@ -146,7 +146,7 @@ export function deriveSettlementFeeLeaves(market, consolidatedPoolSompi) {
 }
 
 /**
- * 单源 fee-leaf 派生 (claim builder + enforceCommitteeSign re-derive 两处【必调此一个】). 委员【确定性派生零 driver/settler 输入】:
+ * 单源 fee-leaf 派生 (claim builder + bshard-close-enforce.mjs 的 _enforceCloseAttestCore re-derive 两处【必调此一个】). 委员【确定性派生零 driver/settler 输入】:
  *   committee = selectCommittee(poolMembers, deriveCommitteeSeed(marketId, endBlockHash, poolMerkleRoot)) — reuse Bettor r42
  *   anti-bribery sampler (stake-weighted N=5, 链锚 3-因子 seed 防 grinding, excludePks 排 maker/broker pk 防双角色). 解耦:
  *   committee=fee-set 确定性独立于实签的 M-of-N (J1/Bettor 收敛, liveness 只影响签名 quorum 不影响 fee 集 → re-derive byte-identical).
@@ -264,63 +264,15 @@ export function deriveMarketPredicateCommit(market) {
   return computeMarketCommit(predicate, { brokerPk: market.broker_pk || null, introducerPk: market.introducer_pk || null });
 }
 
-// PayoutShard.sil (canonical 873e799e) ctor-baked predicate_commit 在 redeem 的 byte offset (J2 probe: 两 predicate_commit
-//   compile diff → first occurrence @518). ⚠ .sil 变则 offset 变 — provenance-pinned 873e799e 下稳定. NWT 命门① 审.
-const _PREDICATE_COMMIT_REDEEM_OFFSET = 518;
-
-export async function enforceCommitteeSign({ rcOn, committeeRelayId, txSafeJson, claimedPayoutRoot, predicate, psRedeemHex, p2sh, frozenFields, bettors, feeBps = 0, feeParams = null }) {
-  // 🔑 命门① predicate hash-bind (NWT/Bettor load-bearing catch): 委员【不信 caller】. 不取 caller 的 predicateCommit param
-  //   (= vacuous, caller 可填假) — 而是【从被签 close_attest tx 的 PS input redeem 抽 ON-CHAIN ctor-baked predicate_commit】+
-  //   chain-bound(check_utxo_landed 验 p2sh(redeem)==被签 PS input 的链上地址 → redeem 不可伪). 然后验 blake2b(canonical(predicate))
-  //   == on-chain predicate_commit. 假 predicate(自洽假 payoutRoot)→ hash 不符 → 拒签.
-  //   genesis 必烤 predicate_commit=blake2b(canonical(predicate))(orchestrator 改; 现烤 market_metadata_hash 则永假).
-  if (!psRedeemHex || !p2sh) return { ok: false, reason: `命门①: psRedeemHex + p2sh 必传(链上读 predicate_commit, 不信 caller param)` };
-  let psInputTxid;
-  try { psInputTxid = JSON.parse(txSafeJson).inputs[0].transactionId; } catch { return { ok: false, reason: 'txSafeJson parse fail (no PS input)' }; }
-  const psAddr = p2sh(psRedeemHex);
-  const landedRes = await rcOn(committeeRelayId, { type: 'check_utxo_landed', address: psAddr, txid: psInputTxid });
-  if (!(landedRes?.landed || landedRes?.found)) {
-    return { ok: false, reason: `命门①: p2sh(psRedeem)=${psAddr.slice(0, 16)} 不是被签 PS input(txid ${psInputTxid.slice(0, 12)})的链上地址 — redeem 假/不绑链, 委员拒签` };
-  }
-  const onChainPredicateCommit = Buffer.from(psRedeemHex, 'hex').slice(_PREDICATE_COMMIT_REDEEM_OFFSET, _PREDICATE_COMMIT_REDEEM_OFFSET + 32).toString('hex');
-  // 命门①+④: fee-市场烤 computeMarketCommit({predicate, fee_recipients}) 进 offset-518; predicate-only 市场烤 computePredicateCommit.
-  //   委员从【被花 PS UTXO redeem】(p2sh-verified above)读 commit + 单源验. fee-市场: brokerPk/introducerPk 经此 hash-绑链上 →
-  //   settler 改 fee 地址 → computeMarketCommit 不符 → BUST (NWT 底线: fee 地址链上 committed 不可伪). genesis 与此【同函数=单源】.
-  const predHash = feeParams ? computeMarketCommit(predicate, feeParams) : computePredicateCommit(predicate);
-  if (predHash !== onChainPredicateCommit) {
-    return { ok: false, reason: `命门①${feeParams ? '+④' : ''} hash-bind FAIL: ${feeParams ? 'computeMarketCommit(predicate+fee_recipients)' : 'predicate_commit'} ${predHash.slice(0, 14)} != ON-CHAIN ${onChainPredicateCommit.slice(0, 14)} (假 predicate/fee 地址, 委员拒签)` };
-  }
-  const { judgeLine } = await import('./judgeline.mjs');
-  const verdict = judgeLine(predicate, frozenFields);                 // 'YES' | 'NO' | 'ABSTAIN' (byte-identical 跨节点)
-  if (verdict !== 'YES' && verdict !== 'NO') {
-    return { ok: false, reason: `judgeLine ${verdict} (字段不足/无法判, abstain-not-guess) — 委员拒签` };
-  }
-  const winningDirection = verdict === 'YES' ? 0 : 1;
-  // 价值分成 fee (J1/Bettor 收敛: 委员【不信 caller 的 fee-leaf/committee】, 自己从链锚确定性派生 = 单源 deriveFeeLeavesForMarket).
-  //   feeParams 不传 = 无 fee (机制测/旧 teeth 向后兼容). 传则委员 re-derive 含 fee → 假 fee 地址/bps/committee → re-derive≠claimed → BUST.
-  let feeLeaves = [];
-  if (feeParams) {
-    // J1 footgun-close (cross-layer-consistency): 只接【pinned committeePks】(= loadCommittee = sampleAndStoreCommittee 写,
-    //   已 maker/broker/bettor-excluded) → fee集==签名集 by construction. 【不 re-sample】(deriveFeeLeavesForMarket 的 excludePks
-    //   ≠ sampler → fee委员≠签名委员 gap, NWT/Bettor BREAKER). committeePks 必传, 缺则拒签 (不 silent fallback 到错路).
-    if (!feeParams.committeePks || !feeParams.committeePks.length) {
-      return { ok: false, reason: `命门④: feeParams.committeePks (pinned pool_committee) 必传 — 不 re-sample (fee集必==签名集 by construction)` };
-    }
-    const poolSompi = bettors.reduce((s, b) => s + BigInt(b.stake), 0n);
-    try {
-      feeLeaves = deriveFeeLeaves({ poolSompi: poolSompi.toString(), feeConfig: feeParams.feeConfig, brokerPk: feeParams.brokerPk, introducerPk: feeParams.introducerPk, committeePks: feeParams.committeePks }).feeLeaves;
-    } catch (e) { return { ok: false, reason: `命门④ fee-leaf 派生 FAIL: ${String(e.message).slice(0, 120)}` }; }
-  }
-  const pm = computePariMutuelPayout({ bettors, winningDirection, feeBps, feeLeaves });
-  if (pm.degenerate) return { ok: false, reason: `degenerate (${pm.reason}) — 单边池需 refund 路` };
-  const reDerivedRoot = settlePayoutRoot(pm.payoutLeaves && pm.payoutLeaves.length ? pm.payoutLeaves : pm.winners);
-  if (reDerivedRoot !== String(claimedPayoutRoot)) {
-    return { ok: false, reason: `命门③ REJECT: re-derive payoutRoot ${reDerivedRoot.slice(0, 14)} != claimed ${String(claimedPayoutRoot).slice(0, 14)} (假 winningSide/payoutRoot/fee)` };
-  }
-  const sj = await rcOn(committeeRelayId, { type: 'sign_input_for_settle', tx_hex: txSafeJson, input_index: 0, safe_json: true });
-  if (!sj?.signature) return { ok: false, reason: `re-derive 匹配但 relay 签失败: ${JSON.stringify(sj).slice(0, 100)}` };
-  return { ok: true, signature: sj.signature, verdict, reDerivedRoot };
-}
+// T-DEAD-518(ledger 1267/1268, NWT 发现·J2 复核确认零活跃调用点后删除): 原 enforceCommitteeSign 函数
+// (driver/probe-only, 从未被任何生产代码或测试调用过——grep 全仓 `enforceCommitteeSign` 只有本文件的
+// export 和 bshard-close-voter.js 注释里提它"是被 Track B 替掉的盲签自签路", 无一处 import/调用) 连同它
+// 唯一使用的硬编码常量 `_PREDICATE_COMMIT_REDEEM_OFFSET = 518` 一并删除——该常量正是本 session 全程在
+// 清理的那一类"编译器/`.sil` 一变就悄悄过期、没有测试会发现"的硬编码绝对偏移(委员校验 offset 已经迁到
+// deriveCommitteeCheckOffsets 运行时派生单源, `bshard-close-enforce.mjs`/`bshard-payout-family-
+// coherence.mjs` 的生产拒签闸/结构签名探针都已经不用它了)。确定没有调用点直接删除, 不"顺手修好"成调用
+// `deriveCommitteeCheckOffsets`——那样只是把一份没人会跑到的死码从"错误但沉默"变成"正确但仍然沉默",
+// 不能真的验证它, 反而制造"看起来接了新机制"的假象。
 
 /** payoutRoot (depth-10, ≤1024) for a winners-with-amount list. Throws >1024 (needs rolling payout-shard). */
 export function settlePayoutRoot(winners) {
