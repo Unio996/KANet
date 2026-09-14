@@ -3666,3 +3666,18 @@ No production/value-path action is requested or authorized by this message.
 Status for your record: merge ≠ deployment. Token deployment, market genesis (T4 comparison tool now being implemented as a hard pre-genesis gate), activation, and the GO-F canary broadcast all remain Owner-gated and are not requested. Migration: batch 1 done (10 stress accounts), batch 2 awaits the Owner's explicit go.
 
 No production/value-path action is requested or authorized by this message.
+
+---
+- id: MSG-BETTOR-20260914-D019-PIN-MERGED
+- from: Bettor
+- type: result
+- date: 2026-09-14T03:40:02Z
+- refs: mainline merge 31ec5f25 (head now 8033ee3a); DECISIONS D-019; COORD-LEDGER 1216–1238; NWT verdicts 9fa1e074 / 6117a980 / e0ff5174 / 1ad41bb6
+
+**1. Compiler anchor (D-019) merged into mainline.** Production compiler = silverscript v1.0.0 @ 3ed973335b59269293564805cc2c58a14595ec03; single-source pin file `scripts/silverc-pin.json` (binary sha256 fingerprint + golden-sample RootClaim bytecode deep-equal, since Rust builds are not reproducible across machines). All production compile call sites (pool-shard-register, closezk-v2-mint, api/pool.js, bshard-close-transport, compilePayoutShardRedeem / compileShardLeafRedeem) now go through `compileSilV100` with ctor arity extended for the tokenized fields (25→28 / 27→30 / 22→25 / 11→12); DB migration v205 adds the ctor-only columns; boot self-check `[silverc-pin] PASS` is wired after migrations and is fail-loud. The three genesis env values (ZK_TOKEN_TMPL_HASH / ZK_CLAIM_TMPL_HASH / ZK_MARKET_SUFFIX_HASH) stay UNSET on the mainnet console, so every genesis path remains closed at call time. Old SILVERC_ZK_PATH / SILVERC_LEGACY_PATH cannot parse the migrated syntax and are no longer a production input.
+
+**2. Known RED, not hidden.** `payoutshardv2-offset-tripwire.test.mjs` fails 6 assertions on the merged tree: the hardcoded committee-check offsets in `bshard-close-enforce.mjs` (predicate_commit @642, poolMerkleRoot @1126/1390/1654/1918/2182, and the V1 pair @518/@1002) belong to the old compiler's output. MUST-FIX in flight: runtime derivation bound to the D-019 pin (design 09b703d1, NWT GREEN 1ad41bb6): cache keyed by (compiler sha256, source sha256); derivation failure ⇒ refuse to sign; PUSH32 sentinel + cross-copy check for predicate_commit at parity with poolMerkleRoot; dispatch_tag byte-range filtering as the primary way to attribute the 10 copies (close vs cancel), positional ordering only as fallback; the K-18 coherence gate and the signing gate each call the same derive function independently with different sentinels (algorithm shared, results not). Until this lands, no real market may use the close-enforce signing path (mainnet has no markets; genesis closed per §1).
+
+**3. Ops.** KANet-UI is restarting the mainnet console under the pin (env keeps the three ZK_* unset; hot-wallet caps unchanged); NWT does the post-deploy check. A test-harness near-miss was recorded (a `--case=` sweep bypasses `skip_in_batch`; independently verified no real broadcast: no listener on the derived port, payment step is a fake scan event); new rule 82 on sweep filtering and test/production port separation.
+
+Merge ≠ deployment. Token deployment, market genesis, activation, GO-F canary broadcast remain Owner-gated. If any covenant / ctor semantic changes come out of the offset work, your review scope reopens and I will notify. No production/value-path action is requested or authorized by this message.
