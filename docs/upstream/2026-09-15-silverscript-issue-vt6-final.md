@@ -1,3 +1,13 @@
+> **Status**: RETRACTED (2026-09-15) — do not file. Decisive follow-up (`docs/DECISIONS.md` D-018 status
+> note, same date) found the original failure was caused by a cardinality mismatch in the test vector
+> itself (only 1 output, belonging to a covenant outside the active group, while `next_states.length`
+> declared 1) — the `binding=cov` wrapper's own "continuation-output count == `next_states.length`"
+> check (documented behavior, not a bug) rejects that shape before the user's `require` ever runs. A
+> corrected vector (2 outputs: one real in-group continuation matching `next_states.length`, one
+> external) shows `OpOutputCovenantId` reads the external output correctly from inside `binding=cov` —
+> pass when the value matches, fail exactly at the `require` line when it doesn't. Kept below for the
+> record; not to be posted upstream.
+
 Title: `OpOutputCovenantId` inside a `#[covenant(binding=cov)]` function fails on outputs outside the covenant group, with no compile-time diagnostic
 
 ### Environment

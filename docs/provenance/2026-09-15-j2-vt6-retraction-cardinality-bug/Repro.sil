@@ -1,0 +1,13 @@
+pragma silverscript ^0.1.0;
+contract Repro(int init_amount, byte[32] init_owner, int max_ins, int max_outs) {
+    int amount = init_amount;
+    byte[32] owner = init_owner;
+    #[covenant(binding = cov, from = max_ins, to = max_outs, name = transfer, delegate_name = transfer_delegator)]
+    function transferPolicy(State[] prev_states, State[] next_states) {
+        require(OpOutputCovenantId(1) == next_states[0].owner);
+    }
+    #[covenant.delegate]
+    function transfer_delegator() {
+        require(true);
+    }
+}
