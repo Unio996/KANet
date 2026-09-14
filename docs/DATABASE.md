@@ -649,7 +649,9 @@ created_at, sealed_at,
 **current_leaf_outpoint** (v172, `txid:idx`，当前 ShardLeaf 续约 UTXO outpoint — (A) 模型 ShardLeaf covenant 每 register
 续约地址变，shard_p2sh 只 holds 创世；buildRegisterCommand 下一笔 register 的 leaf input)，
 **current_leaf_state** (v172, JSON `{count, local_yes, local_no, pool_value}` — `spliceLeafState` 重算续约 redeem，
-不存全 redeem_hex，J2 已验 byte-equal)。
+不存全 redeem_hex，J2 已验 byte-equal)，
+**shard_token_tmpl_hash** (v205, 2026-09-14, D-019 迁移——`ShardLeaf.sil` T3 代币化 ctor-only 常量，创世时
+由 T4 单源产物写入，允许 NULL；genesis-mint 时缺值须 fail-loud 拒绝，不猜值)。
 **UNIQUE(logical_market_id, shard_index)** = 注册竞态锁（并发开新片只一个 INSERT 赢，输者重试读已开片）；
 **UNIQUE(shard_market_id)** = 一物理片一行。索引 `idx_market_shards_open(logical_market_id, status)`。
 
@@ -684,11 +686,13 @@ allocateForRegister 顺序填。
 ### payout_shards（v172+，每逻辑市场一个 PayoutShard covenant）
 **一行 = 一个逻辑市场唯一的 consolidation sink covenant（每片 ShardLeaf consolidate 目的地，genesis-mint 一次）**
 
-**字段**：logical_market_id (PK), payout_cov_id, payout_ps_addr (P2SH 地址), payout_ps_outpoint (`txid:idx`), payout_redeem_hex (当前 redeem，随 consolidate/close 推进而 splice 更新), pool_merkle_root, predicate_commit, created_at, **covenant_family**（v189, 2026-07-21, K-18 §3.1——`v1_committee`(committee-sig)/`v2_zk`(ZK-native)/`unknown`(backfill 判不出，需人工归因)，不可变列，genesis-mint 时由写入点声明——`ensurePayoutShard`→`v1_committee`/`ensurePayoutShardV2`→`v2_zk`；`src/lib/bshard-payout-family-coherence.mjs` 提供 `assertPayoutShardCoherence` 四步一致性花费前 gate + `assertZkNativeImmutable` 铸后不可变守卫）。
+**字段**：logical_market_id (PK), payout_cov_id, payout_ps_addr (P2SH 地址), payout_ps_outpoint (`txid:idx`), payout_redeem_hex (当前 redeem，随 consolidate/close 推进而 splice 更新), pool_merkle_root, predicate_commit, created_at, **covenant_family**（v189, 2026-07-21, K-18 §3.1——`v1_committee`(committee-sig)/`v2_zk`(ZK-native)/`unknown`(backfill 判不出，需人工归因)，不可变列，genesis-mint 时由写入点声明——`ensurePayoutShard`→`v1_committee`/`ensurePayoutShardV2`→`v2_zk`；`src/lib/bshard-payout-family-coherence.mjs` 提供 `assertPayoutShardCoherence` 四步一致性花费前 gate + `assertZkNativeImmutable` 铸后不可变守卫），**token_tmpl_hash / claim_tmpl_hash / market_suffix_hash**（v205, 2026-09-14, D-019 迁移——`PayoutShard.sil`/`PayoutShardV2.sil` T3 代币化 ctor-only 常量，创世时由 T4 单源产物写入，允许 NULL；结算/重编译路径（`compilePayoutShardRedeem`/`compilePayoutShardV2Redeem`）读回这三列，缺列/缺值须 fail-loud 拒结算，不能假设"现在的全局配置应该还是那个值"）。
 
 **写入方**：`src/lib/pool-shard-register.mjs`（`ensurePayoutShard`/`ensurePayoutShardV2`，genesis-mint 时 INSERT）→ consolidate/close 流程 UPDATE `payout_redeem_hex`（splice-not-recompile 为权威，见 `docs/2026-07-21-p0-consolidated-pool-rederive-implementation-plan.md`）。
 **读取方**：`bshard-settle-daemon.mjs`/`bshard-auto-settler.mjs`（consolidate/claim 编排）、K-18 backfill/coherence gate。
 **陷阱**：`payout_redeem_hex` 的字段布局（state 区 offset 0/1/10/19/52 + ctor 常量区 predicateCommit@518/poolMerkleRoot@1002(V1)、predicateCommit@642(V2)）已实测定稿（`docs/2026-07-21-p2-batch1-truth-source-layer-k18-landing-design.md` §1），不是从 ctor 参数顺序推断——改动前必读该文档，不能凭 `.sil` ctor 声明顺序猜字节位置。
+> 📌 **状态注记（2026-09-14 · D-019 迁移，ledger 1224/1226）**：上面这组 V2 offset（含 `_PMR_COMMITTEE_CHECK_OFFSETS_V2`）经实测确认**已随 ctor 25/27→30 参数扩容 + silverc v1.0.0 迁移全部漂移**（新实测值与旧值相差约 15000 字节量级），`payoutshardv2-offset-tripwire.test.mjs` 目前保留已知 RED——不是本条陷阱描述错了，是这批 V2 offset 字面量本身需要重新 live-derive（另立独立报备，见
+> `docs/2026-09-14-j2-d019-silverc-v100-migration-inventory-v0.1.md` §2.1），V1 offset（518/1002）未在 D-019 本批范围内验证是否同样受影响。
 
 ---
 
@@ -878,7 +882,9 @@ M0c-1 app provision grant registry（2026-07-23, 设计 `docs/2026-07-23-m0c-1-a
 3. 改字段：SQLite 不支持直接改，需建新表→迁移→删旧表
 4. 新表：migrate.js 新版本，加 `IF NOT EXISTS` 保护
 
-**当前最新版本：v198（2026-08-27 u1_relay_identity 建表 · §10 跨节点 pubkey 身份）**
+**当前最新版本：v205（2026-09-14 D-019 迁移第 5a 笔 · payout_shards/market_shards 代币化 ctor-only 列）**
+（v199-v204 本文件changelog未逐条回填，见上方既有说明"以 migrate.js 实际为准"——本行只保证指向 migrate.js
+真实末尾版本号，不代表 v199-v204 都已在下方逐条记录。）
 
 > 🔵 **库路径解析（`src/db/client.js`, 2026-08-28 入口感知）**: `DB_PATH` 有 ⇒ 用之（不拒建）; 无 ⇒ 仅 console 入口（`argv[1]` = `kasia-console/src/index.js` 或 `KANET_CONSOLE_ENTRY=1`）锚定 `<repo>/kasia-console/data/console.db`（与 cwd 无关）并回写 env; **其它入口无 `DB_PATH` ⇒ throw**。加载时打印 `[db] path=<abs> source=…`。脚本要读 live 须显式 `DB_PATH=<绝对路径>`（ANTI-PATTERNS 规则 74）。
 
@@ -889,6 +895,16 @@ M0c-1 app provision grant registry（2026-07-23, 设计 `docs/2026-07-23-m0c-1-a
 
 ## 版本历史（近期）
 
+- **v205 (2026-09-14 D-019 迁移第 5a 笔·PayoutShard/ShardLeaf 代币化 ctor-only 列)**: `payout_shards` 加
+  `token_tmpl_hash`/`claim_tmpl_hash`/`market_suffix_hash`（TEXT，允许 NULL）+ `market_shards` 加
+  `shard_token_tmpl_hash`（TEXT，允许 NULL）。用途：`PayoutShard.sil`/`PayoutShardV2.sil`/`ShardLeaf.sil`
+  T3 代币化（ledger 1183/1188）给 ctor 新增的字面量常量——`compilePayoutShardRedeem`/`compileShardLeafRedeem`
+  迁移到当前 25/12 参数 shape 后，结算/重编译路径需要从 DB 读回创世时真实烤入的值（K-18"谁编译谁 declare"
+  纪律：不能假设现在的全局配置还是创世时那个值）。前提确认（Bettor 只读查生产库）：`pool_markets=0`、
+  `payout_shards=0`，主网零存量市场、零旧 shape 实例，不做新旧 shape 兼容分支，直接加列。写入方：创世时由
+  T4 单源产物写入（`ensurePayoutShard`/`ensurePayoutShardV2`/`registerBettorOnShard` 'open_new' 分支）。
+  读取方：`bshard-auto-settler.mjs`/`bshard-settle-daemon.mjs`/`bshard-payout-family-coherence.mjs`（缺列/
+  缺值 fail-loud 拒结算，不猜值）。见 `docs/2026-09-14-j2-d019-silverc-v100-migration-inventory-v0.1.md`。
 - **v198 (2026-08-27 §10 跨节点 pubkey 身份表 · register-only)**: `u1_relay_identity` 新表。用途：§10 v1 的**身份权威表**——跨节点判断只认 canonical `relayPubkeyXOnly`（D-013 §1 "§10 GO"；设计 `docs/2026-08-19-s10-pubkey-identity-design.md`@847bcf22 L1/L4/§4；切片计划 `docs/2026-08-27-j2-s10-commit-slice-plan-v0.1.md` C2）。字段：`relay_pubkey_xonly`(**PK**，`CHECK length=64 ∧ NOT GLOB '*[^0-9a-f]*'` = 恰 64 位**小写** hex，与验证器 L1 同口径；写法是全串 hex，**不是** `GLOB '[0-9a-f]*'` 只挡首字符、也**不是** `[!...]` 字面集错形) / `network`(NOT NULL，**CHECK IN ('testnet-12','mainnet')** 表级闭枚举 = 验证器 `S10_NETWORKS` 同集，④-8 机械比对；Codex MSG-285 SHOULD-FIX，C6 就地改 DDL——live 从未跑过 v198，`IF NOT EXISTS` 对 live 等价首次) / `operation`(NOT NULL，**CHECK = 'register'**，v1 硬白名单在表层再钉一次) / `epoch`(NOT NULL，**UNIQUE**：同一 challenge 只承载一次 S10 注册) / `signature`(留证不作键) / `registered_at`。**🔴 主键是 pubkey 不是 relay_id**：抢 pubkey X 必须签得出 X 的私钥 ⇒ first-squatter 攻击对 pubkey 主键天然失效。**🔴 陷阱：没有 `local_relay_id` 列、没有任何按 relay_id / `relay_nodes.ecdsa_pubkey_xonly` 的回退索引（NWT 裁，P5）**——relay_id→pubkey 的本地便利映射一律**活算** `XOnlyPublicKey.fromAddress(relay_nodes.address)`（`feedback.js:18` 先例），**别加回退列**：列不存在 = 结构上无法被当权威读；谁为便利加回来就是把"relay_id 变身份"的滑回面重开（ANTI-PATTERNS 一条随 C5）。**写入方：今日无**（C3 起 `registerIdentity` 事务内 INSERT，与 A2 INSERT 同一 `.immediate` 事务、S10 失败整笔回滚）。读取方：C3 起 `u1-registration.mjs`（PK 冲突 = 该 pubkey 已注册）。验收 `src/lib/u1-v198-migration-acceptance.mjs`（④-1..④-7，**跑真 migration + 临时库**；④-3 含 `'a'+'z'×63` 向量专防弱 GLOB 假绿）。对 live 即时影响零（additive、IF NOT EXISTS、无写入方）；**代码入库 ≠ live**，生产库迁移 = D-005 独立迁移 Owner 另拍。
 - **v197 (2026-08-18 u1 A2 一次性挑战表)**: `u1_identity_challenge` 新表。用途：承载 A2 注册的**一次性挑战**（N8 PoP 的防重放载体）。字段：`challenge`(**PK**) / `used_at`(可空，**NULL = 未消费**) / `expires_at`(**NOT NULL**)；另建**部分索引** `idx_u1_challenge_unused ON (expires_at) WHERE used_at IS NULL`。**🔴 `challenge` 作主键不是"顺手"**：一次性消费走 CAS —— `UPDATE … SET used_at=? WHERE challenge=? AND used_at IS NULL` 判 `changes===1`，**该 CAS 走主键**；两个并发请求只会有一个拿到 1。**🔵 那条部分索引【不参与 CAS 正确性】，只服务清理/巡检**（"还有多少未消费且已过期"）——明写于此免得下一个人当它是闸；而且这不是一句声明：验收 ③-4 **删掉该索引后重跑并发 CAS 必须仍全绿**，那才是"它不承重"的正向证据。**`expires_at NOT NULL`** 比旧测试夹具那份收紧一格（缺过期时间的挑战不该存在）。**🔴 它是 §6-1 LIVE wiring 的真阻塞**：`registerIdentity` 要求 `challengeStore` 必传，而 `createChallengeStore` 的工厂**校验表存在** ⇒ 本表不在时注册入口**根本接不上线**，且是 fail-closed 的"不能半工作"（直接 throw，无静默降级）——这也是 ③→① 顺序的由来。**写入方：今日无**（注册入口尚未接线，等 ①）。读取方/权威：`kasia-console/src/lib/u1-challenge-store.mjs`（动词式导出，不交 ops 对象）。验收 `src/lib/u1-v197-migration-acceptance.mjs`（③-1..③-7，**跑真 migration + 临时库**）。设计 `docs/2026-08-17-j2-s61-live-wiring-design.md` §3 + §9-bis。
 - **v196 (2026-08-12 u1 A2 同源判定登记表)**: `u1_identity_registration` 新表。用途：记录**委员身份 ↔ 登记根（账户层 xpub）的绑定证据**，A2「两个身份是不是同一份 mnemonic 派生的」靠它判。字段：`relay_id`(PK) / `root_fingerprint`(**UNIQUE**) / `root_xpub` / `identity_index`(**CHECK = 0**) / `identity_pubkey_xonly` / `custody`(**CHECK = 'mnemonic'**) / `registered_at`。**🔴 三条 CHECK/UNIQUE 是把规范条款升成【写入时结构约束】**：`UNIQUE(root_fingerprint)`=N3（identities-per-account 锁死 1，Bettor 2026-08-12 裁）⇒ 同根第二身份**写不进来**；`CHECK(identity_index=0)` 同源；`CHECK(custody='mnemonic')`=N4（privkey-only 不入委员，ledger (159) §8.3）。理由是在册那条：**扫描器只有有人跑它时才说话，约束不依赖任何人记得跑**。**⚠ 约束挡不住的**：只挡**同一张表内**同根重复，**挡不住同一 seed 的另一个硬化账户**（两个不同的根 = 两条各自合法的行）——那是 spec §1 的 C 边界（仪式域），**别读成"数据库保证了不同源"**。**⚠ 轮换（R5 换钥不搬钥）会撞 `relay_id` 主键 ⇒ 旧行必须先归档/删除**。**写入方：今日无**（注册入口尚未落码，等 A-2 余下部分 + N8 PoP 接线）。读取方：`kasia-console/src/lib/u1-same-origin.mjs`（判定库，已落码）。结构约束用例 `src/lib/u1-identity-registration.schema.test.mjs`（7 格，**跑真 migration 不跑抄本**）。规范 `docs/2026-08-12-u1-a2-same-origin-spec-v1.0.md`（v1.1-rc），设计 `docs/2026-08-12-j2-a2-registration-storage-design-v0.1.md`。

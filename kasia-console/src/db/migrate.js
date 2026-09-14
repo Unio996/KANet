@@ -5893,5 +5893,37 @@ export function runMigrations() {
     }
   }
 
+  // v205 (2026-09-14, J2, D-019 迁移第 5a 笔, ledger 1225-1227): PayoutShard.sil/ShardLeaf.sil 的 T3
+  // 代币化(ledger 1183/1188)给 ctor 新增了 token_tmpl_hash(两文件都有)/claim_tmpl_hash/market_suffix_hash
+  // (仅 PayoutShard.sil) 三个 ctor-only 字面量常量——compilePayoutShardRedeem/compileShardLeafRedeem 之前
+  // 一直编的是旧 22/11 参数 shape(缺这些字段), 迁到当前 25/12 参数 shape 后, 结算/重编译路径(bshard-auto-
+  // settler.mjs/bshard-settle-daemon.mjs/bshard-payout-family-coherence.mjs)需要从 DB 读回创世时真实烤入
+  // 的值——不能假设"反正是同一个全局常量"重新猜一份(K-18"谁编译谁 declare"纪律: 存创世时实际用的值,
+  // 核对时读回同一份, 不信任"现在的全局配置应该还是那个值"这种隐含假设)。
+  // 🔵 前提确认(Bettor 1227, 只读查生产 console.mainnet.db): pool_markets=0, payout_shards=0(9 列,
+  // 无新字段)——主网零存量市场, 零旧 shape 实例需要兼容, 不做新旧 shape 分支, 直接加列即可(旧网 DB/栈
+  // 已冻结退役, 不复用, 不迁移旧网数据)。
+  // 幂等: ADD COLUMN 用标准 table_info 存在性守卫(同 v189/v172 既有模式)。三列/一列全部允许 NULL(不给
+  // DEFAULT 猜测值——K-18 同一条纪律的延伸: 缺列不该被一个看似无害的默认值掩盖, 消费方读到 NULL 必须
+  // fail-loud 拒绝, 不能把 NULL 当"可以忽略"处理; 值只应该来自创世时 T4 单源产物的真实写入)。
+  {
+    const psCols = sqlite.pragma('table_info(payout_shards)').map(c => c.name);
+    for (const col of ['token_tmpl_hash', 'claim_tmpl_hash', 'market_suffix_hash']) {
+      if (!psCols.includes(col)) {
+        try {
+          sqlite.exec(`ALTER TABLE payout_shards ADD COLUMN ${col} TEXT`);
+          console.log(`[migrate] v205: payout_shards.${col} 列已加(T3 代币化 ctor-only 常量, D-019 迁移, 创世时由 T4 单源产物写入).`);
+        } catch (e) { if (!/duplicate column/i.test(e.message)) console.warn(`[migrate] v205 payout_shards.${col} fail: ${e.message}`); }
+      }
+    }
+    const msCols = sqlite.pragma('table_info(market_shards)').map(c => c.name);
+    if (!msCols.includes('shard_token_tmpl_hash')) {
+      try {
+        sqlite.exec(`ALTER TABLE market_shards ADD COLUMN shard_token_tmpl_hash TEXT`);
+        console.log('[migrate] v205: market_shards.shard_token_tmpl_hash 列已加(ShardLeaf.sil T3 代币化 ctor-only 常量, D-019 迁移).');
+      } catch (e) { if (!/duplicate column/i.test(e.message)) console.warn(`[migrate] v205 market_shards.shard_token_tmpl_hash fail: ${e.message}`); }
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
