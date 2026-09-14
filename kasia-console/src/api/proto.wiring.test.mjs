@@ -84,6 +84,12 @@ try {
   let exited = child.exitCode !== null || child.signalCode !== null;
   if (!exited) {
     child.kill('SIGTERM');
+    // 🔴 NWT 实测(2026-09-14): Windows 上 `child.kill('SIGTERM')` 由 Node 直接终止子进程，不经过子进程
+    // 自己的 JS 信号处理器(Windows 没有真正的 POSIX 信号语义，Node 在这个平台上把 SIGTERM 模拟成直接
+    // TerminateProcess) —— 所以下面这条 500ms 超时后的 SIGKILL 兜底在 Windows 上几乎永远触发不到
+    // (SIGTERM 已经把进程杀掉了，`exit` 事件几乎立即触发)；这条兜底真正起作用的场景是 Unix(那里子进程
+    // 若自己注册了 SIGTERM 处理器可以选择不退出，才需要 SIGKILL 强制收尾)。在 Windows 上复现本文件时
+    // 看到 SIGKILL 分支从未被打到，这是预期行为，不代表上面的兜底逻辑写错了。
     exited = await new Promise((resolve) => {
       const timer = setTimeout(() => resolve(false), 500);
       child.once('exit', () => { clearTimeout(timer); resolve(true); });
