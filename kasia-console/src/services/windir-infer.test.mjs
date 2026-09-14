@@ -17,7 +17,7 @@ function freshDb() {
   db.exec(`
     CREATE TABLE pool_markets (id TEXT PRIMARY KEY, protocol_version TEXT, metadata TEXT, resolution_rule_spec TEXT, fee_rules TEXT);
     CREATE TABLE market_shards (logical_market_id TEXT, shard_market_id TEXT, shard_index INTEGER, status TEXT DEFAULT 'sealed');
-    CREATE TABLE pool_bettor_sides (market_id TEXT, bettor_pk TEXT, stake_amount TEXT, direction INTEGER, side_lock_daa INTEGER, side_lock_tx TEXT);
+    CREATE TABLE pool_bettor_sides (id INTEGER PRIMARY KEY AUTOINCREMENT, market_id TEXT, bettor_pk TEXT, stake_amount TEXT, direction INTEGER, side_lock_daa INTEGER, side_lock_tx TEXT);
     CREATE TABLE payout_shards (logical_market_id TEXT, pool_merkle_root TEXT, predicate_commit TEXT, token_tmpl_hash TEXT, claim_tmpl_hash TEXT, market_suffix_hash TEXT);
     CREATE TABLE kaspa_tx_log (tx_id TEXT PRIMARY KEY, outputs_json TEXT);
     CREATE TABLE events (id TEXT PRIMARY KEY, event_scope TEXT, event_type TEXT, source TEXT, level TEXT, summary TEXT, payload_json TEXT, created_at TEXT);
