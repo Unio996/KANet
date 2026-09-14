@@ -1,7 +1,9 @@
 > **Status: DRAFT · 只写不执行**
 
-# 偏移派生线合主线主网 console 重启执行页 v0.1（2026-09-14 · KANet-UI · Bettor 1275 派工）
+# 偏移派生线合主线主网 console 重启执行页 v0.2（2026-09-14 · KANet-UI · Bettor 1275/1281 派工）
 
+> **v0.2 变更（Bettor 1281 提醒）**：legacy-null-diag 已合主线，§5 新增 T-LEGACY-NULL-COLS 迁移诊断行的验证项——查过 `migrate.js` 源码，只在计数 >0 时才打印，鉴于当前主网 0 市场，预期本次不打印。
+>
 > 权威链：偏移派生线合主线 `d7d61fc0`（`coord/j2-offset-live-derive`，6 commits，head `a55ebdfb`；NWT 全线终审 GREEN `8144f071`；Codex HOLD 解除 `a55e19c7`）——用 D-019-pinned 派生替换 `bshard-close-enforce.mjs`/K-18 两处硬编码 offset。**本页任何一步都不执行**——执行门 = 本页 → Bettor 推 → 执行，同 D-019/T-KEY-EXPORT 两次部署执行页的执行门（`docs/2026-09-14-kanetui-d019-pin-deploy-exec-v0.1.md`、`docs/2026-09-14-kanetui-relay-key-export-route-lockdown-design-v0.1.md` 对应的部署执行页），本页按同一套模板产出，不重新设计机制。
 
 ## 0. 范围与背景
@@ -60,6 +62,7 @@ grep -c "^SILVERC_V100_PATH" kanet.mainnet.env  → 应为 1（既有值，不�
 | `relayHotwalletMonitorTick` | `checked=16 killed=0` |
 | `events.hotwallet_relay_killed` | 与 §3 基线一致（不凭空增加） |
 | kaspad 探针 | daa 只增不减，节点未受重启影响 |
+| **T-LEGACY-NULL-COLS 迁移诊断行**（v0.2 新增，Bettor 1281 提醒：legacy-null-diag 已合主线）| `migrate.js` 里这条诊断只在 `legacyNullCount > 0` 时才 `console.warn`（查过源码，`payout_shards` 里 `covenant_family='v1_committee'` 且三列任一 `NULL` 的市场计数，每次 `runMigrations()` 都重新数）——鉴于 ledger 1267/1268 已记"主网 0 市场"，预期这条**不打印**（`grep -c 'T-LEGACY-NULL-COLS'` 应为 `0`）；如果打印了，原文记下计数，不当异常（设计上就是 fail-closed 留痕，不拒启动） |
 
 ## 6. 回滚
 
