@@ -1,6 +1,13 @@
 // proto-bet-intent.test.mjs — 两步下注状态机离线向量(J2 2026-09-14, 设计 v0.1 §2.3.1, NWT MUST-FIX 1336)。
 // 真 migration 临时库(DB_PATH) + 假 sendCmd(脚本化 relay), 零链零 IPC。同 submit-intent.test.mjs 手法。
 // Run: cd kasia-console && node src/lib/proto-bet-intent.test.mjs
+//
+// 🔴 TODO(NWT 1352, 待 covenant_broadcast 命令定案后补): 下面 8 组测试没有一组真正走到 ambiguous
+// 分支——mock relay 目前没有任何命令会返回 `{code:'inputs_spent'}`(因为 covenant_broadcast 命令本身
+// 还没定案, resolvePrepared 里那个分支目前是死代码路径, 见 §9)。命令定案落码后必须补第 9 组:
+// mock 返回 `{code:'inputs_spent'}` + kaspa_tx_log 查无正向证据 ⇒ 断言真正进 ambiguous 终态, 且后续
+// 对该 intent_key 的任何 markBetIntent/driveBetIntent 调用都被拒绝(终态只能人工清, 同 submit-intent.mjs
+// 既有纪律)。NWT 到时候会专门核这一条。
 
 import { execSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
