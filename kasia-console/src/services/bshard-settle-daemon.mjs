@@ -345,7 +345,11 @@ async function consolidateAndBuildPsState(marketId, ps, ctx) {
   //   支撑"不一致就拒绝"这条硬闸, 贸然 throw 反而会把从未验证过的既有 V1 盘一起挡住(同 K-18 §5 DoD-0 warning)。
   if (!psRedeemHex) throw new Error(`consolidateAndBuildPsState: psRedeemHex 未设置(market ${marketId}), 内部逻辑错误——每条路径都必须显式赋值 splice 权威字节, 不允许隐式回落 undefined`);
   try {
-    const recompiled = compilePayoutShardRedeem({ poolMerkleRoot: ps.pool_merkle_root, predicateCommit: ps.predicate_commit, consolidatedPool, closed: 0 });
+    // D-019 迁移(ledger 1225-1227): PayoutShard.sil 当前 ctor 实读 25 参数, compilePayoutShardRedeem 现在
+    // fail-loud 要求 token_tmpl_hash/claim_tmpl_hash/market_suffix_hash——这三列若缺失(理论上不该发生,
+    // 见 migrate v205 + 前提确认: 主网零存量旧 shape 市场), compilePayoutShardRedeem 会 throw, 下面既有
+    // catch(非阻塞校验, K-18 DoD 硬前置完成前不拒绝)会照样捕获跳过, 不引入新的阻塞路径。
+    const recompiled = compilePayoutShardRedeem({ poolMerkleRoot: ps.pool_merkle_root, predicateCommit: ps.predicate_commit, consolidatedPool, closed: 0, tokenTmplHash: ps.token_tmpl_hash, claimTmplHash: ps.claim_tmpl_hash, marketSuffixHash: ps.market_suffix_hash });
     if (recompiled !== psRedeemHex) {
       log(`${marketId.slice(-8)} 🟡 K-18 §3.3(c) 校验(非阻塞): recompile 字节 != splice 权威字节(silverc 版本漂移或数据不一致, 已用 splice 权威值, 未拒绝) recompiled=${recompiled.slice(0, 24)}… spliced=${psRedeemHex.slice(0, 24)}…`);
       try {
@@ -357,7 +361,11 @@ async function consolidateAndBuildPsState(marketId, ps, ctx) {
     }
   } catch (e) { log(`${marketId.slice(-8)} K-18 §3.3(c) recompile 校验跳过(非阻塞, silverc 不可用等): ${e.message}`); }
 
-  return { outpointTxid: psOutpointTxid, index: psIdx, redeem_hex: psRedeemHex, consolidatedPool, poolMerkleRoot: ps.pool_merkle_root, predicateCommit: ps.predicate_commit };
+  return { outpointTxid: psOutpointTxid, index: psIdx, redeem_hex: psRedeemHex, consolidatedPool, poolMerkleRoot: ps.pool_merkle_root, predicateCommit: ps.predicate_commit,
+    // D-019 迁移(ledger 1225-1227): 透传给下游 cancelMarketLive(bshard-auto-settler.mjs)用同一 camelCase
+    // 命名惯例(既有 poolMerkleRoot/predicateCommit 同款), 该函数自己的 compilePayoutShardRedeem 调用点
+    // 需要这三个字段。
+    tokenTmplHash: ps.token_tmpl_hash, claimTmplHash: ps.claim_tmpl_hash, marketSuffixHash: ps.market_suffix_hash };
 }
 
 function buildCtx() {

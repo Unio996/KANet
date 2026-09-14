@@ -106,11 +106,15 @@ export function allocateForRegister(db, logicalMarketId, nextStakeSompi) {
  * Throws on UNIQUE(logical_market_id, shard_index) — concurrent open_new losers catch this and re-run
  * allocateForRegister (which now sees the winner's open shard). This serializes shard opening across nodes/reqs.
  */
-export function registerShard(db, { logicalMarketId, shardIndex, shardMarketId, shardP2sh, currentLeafOutpoint = null, currentLeafState = null, shardRedeemHex = null, nowSec = null }) {
+export function registerShard(db, { logicalMarketId, shardIndex, shardMarketId, shardP2sh, currentLeafOutpoint = null, currentLeafState = null, shardRedeemHex = null, shardTokenTmplHash = null, nowSec = null }) {
+  // D-019 迁移(ledger 1225-1227): shardTokenTmplHash = ShardLeaf.sil T3 代币化 ctor-only 字面量, 创世时
+  // 由调用方(registerBettorOnShard 'open_new' 分支)传入并存进 market_shards.shard_token_tmpl_hash 列
+  // (v205 迁移新增), K-18"谁编译谁 declare"纪律的延伸——不在这里做格式校验(compileShardLeafRedeem 已经
+  // fail-loud 校验过, 这里只是记账写入, 值到这里时已经真实用于编译过 genRedeem)。
   db.prepare(
-    `INSERT INTO market_shards (logical_market_id, shard_index, shard_market_id, shard_p2sh, current_leaf_outpoint, current_leaf_state, shard_redeem_hex, status, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?)`
-  ).run(logicalMarketId, shardIndex, shardMarketId, shardP2sh, currentLeafOutpoint, currentLeafState ? JSON.stringify(currentLeafState) : null, shardRedeemHex, nowSec);
+    `INSERT INTO market_shards (logical_market_id, shard_index, shard_market_id, shard_p2sh, current_leaf_outpoint, current_leaf_state, shard_redeem_hex, shard_token_tmpl_hash, status, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?)`
+  ).run(logicalMarketId, shardIndex, shardMarketId, shardP2sh, currentLeafOutpoint, currentLeafState ? JSON.stringify(currentLeafState) : null, shardRedeemHex, shardTokenTmplHash, nowSec);
 }
 
 /** Mark the previous open shard sealed when a new shard supersedes it (atomic part of open_new). */

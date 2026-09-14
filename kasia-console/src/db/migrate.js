@@ -5909,15 +5909,16 @@ export function runMigrations() {
   {
     const psCols = sqlite.pragma('table_info(payout_shards)').map(c => c.name);
     for (const col of ['token_tmpl_hash', 'claim_tmpl_hash', 'market_suffix_hash']) {
-      if (!psCols.includes(col)) {
-        try {
-          sqlite.exec(`ALTER TABLE payout_shards ADD COLUMN ${col} TEXT`);
-          console.log(`[migrate] v205: payout_shards.${col} 列已加(T3 代币化 ctor-only 常量, D-019 迁移, 创世时由 T4 单源产物写入).`);
-        } catch (e) { if (!/duplicate column/i.test(e.message)) console.warn(`[migrate] v205 payout_shards.${col} fail: ${e.message}`); }
-      }
+      if (psCols.includes(col)) { console.log(`[migrate] v205: payout_shards.${col} 在, 记账通过`); continue; }
+      try {
+        sqlite.exec(`ALTER TABLE payout_shards ADD COLUMN ${col} TEXT`);
+        console.log(`[migrate] v205: payout_shards.${col} 列已加(T3 代币化 ctor-only 常量, D-019 迁移, 创世时由 T4 单源产物写入).`);
+      } catch (e) { if (!/duplicate column/i.test(e.message)) console.warn(`[migrate] v205 payout_shards.${col} fail: ${e.message}`); }
     }
     const msCols = sqlite.pragma('table_info(market_shards)').map(c => c.name);
-    if (!msCols.includes('shard_token_tmpl_hash')) {
+    if (msCols.includes('shard_token_tmpl_hash')) {
+      console.log('[migrate] v205: market_shards.shard_token_tmpl_hash 在, 记账通过');
+    } else {
       try {
         sqlite.exec(`ALTER TABLE market_shards ADD COLUMN shard_token_tmpl_hash TEXT`);
         console.log('[migrate] v205: market_shards.shard_token_tmpl_hash 列已加(ShardLeaf.sil T3 代币化 ctor-only 常量, D-019 迁移).');

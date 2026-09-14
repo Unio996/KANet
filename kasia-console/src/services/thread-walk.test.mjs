@@ -38,13 +38,17 @@ const CLOSE_TXID = 'cc'.repeat(32);
 const PMR = 'd1'.repeat(32);
 const PC = 'd2'.repeat(32);
 const SEED = 20000000;
+// D-019 迁移(ledger 1225-1227): PayoutShard.sil 当前 ctor 实读 25 参数, compilePayoutShardRedeem 现在
+// fail-loud 要求这三个新字段(不接受占位符, 但本测试是纯本地 thread-walk resume 逻辑, 不涉及真实链上
+// 系统的 token 身份, 用固定占位值即可——不像 assertPayoutShardCoherence 那样需要跟 DB 声明值比对)。
+const TTH = 'd3'.repeat(32), CTH = 'd4'.repeat(32), MSH = 'd5'.repeat(32);
 const fakeP2sh = (redeemHex) => 'p2shtest:' + Buffer.from(blake2b(Buffer.from(String(redeemHex)), { dkLen: 20 })).toString('hex');
 
 // ── 与生产同源构造: plan.winners(payoutLeaves 序)→ 逐步状态转移 → 候选续约地址序(真 splice/真 compile)──
 const pm = computePariMutuelPayout({ bettors: [W1, W2, L1].map(b => ({ pk: b.pk, stake: b.stake, direction: b.direction })), winningDirection: 1 });
 const ROOT = buildPayoutRoot(pm.payoutLeaves).toString('hex');
 const POOL0 = (BigInt(W1.stake) + BigInt(W2.stake) + BigInt(L1.stake) + BigInt(SEED)).toString();   // consolidatedPool 含 seed
-const closedRedeem = compilePayoutShardRedeem({ poolMerkleRoot: PMR, predicateCommit: PC, consolidatedPool: POOL0, closed: 1, payoutRoot: ROOT });
+const closedRedeem = compilePayoutShardRedeem({ poolMerkleRoot: PMR, predicateCommit: PC, consolidatedPool: POOL0, closed: 1, payoutRoot: ROOT, tokenTmplHash: TTH, claimTmplHash: CTH, marketSuffixHash: MSH });
 const steps = [];   // steps[k] = { addr(第k+1步续约地址), txId(该步claim txid), poolAfter }
 {
   let curRedeem = closedRedeem, curPool = BigInt(POOL0);
@@ -75,7 +79,7 @@ function freshDb({ txLogSteps = 0 } = {}) {
   _insertDyn('pool_markets', { id: MID, protocol_version: 'v0.7', metadata: JSON.stringify({ settle_evidence: { close_txid: CLOSE_TXID, win_direction: 1, payout_root: ROOT } }), resolution_rule_spec: '{}', protocol_status: 'settled_partial_claims' });
   _insertDyn('market_shards', { logical_market_id: MID, shard_market_id: SHARD, shard_index: 0, status: 'sealed' });
   for (const b of [W1, W2, L1]) _insertDyn('pool_bettor_sides', { market_id: SHARD, bettor_pk: b.pk, stake_amount: b.stake, direction: b.direction });
-  _insertDyn('payout_shards', { logical_market_id: MID, pool_merkle_root: PMR, predicate_commit: PC });
+  _insertDyn('payout_shards', { logical_market_id: MID, pool_merkle_root: PMR, predicate_commit: PC, token_tmpl_hash: TTH, claim_tmpl_hash: CTH, market_suffix_hash: MSH });
   for (let k = 0; k < txLogSteps; k++) {
     _insertDyn('kaspa_tx_log', { tx_id: steps[k].txId, outputs_json: JSON.stringify([{ address: 'winner-addr' }, { address: steps[k].addr }]), block_time: 1000 + k });
   }

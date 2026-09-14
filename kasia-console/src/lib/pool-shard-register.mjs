@@ -116,40 +116,63 @@ export function spliceLeafState(baseRedeemHex, st) {
 }
 
 /**
- * Compile a production-shape PayoutShard redeem (22-param ctor incl predicate_commit 2nd).
- * @param {object} o { poolMerkleRoot(hex), predicateCommit(hex), consolidatedPool(int), closed(int), payoutRoot(hex), silverc }
+ * Compile a production-shape PayoutShard redeem (25-param ctor incl predicate_commit 2nd).
+ * 🔴 D-019 迁移(ledger 1225-1227, 落码期间实测确认): 原 ctor 只填 22 个值(缺 T3 代币化新增的
+ * token_tmpl_hash 插在 predicateCommit 之后 + claim_tmpl_hash/market_suffix_hash 追加末尾, 当前
+ * PayoutShard.sil 实读 25 参数), 且硬编码走 SILVERC_LEGACY——已改走 compileSilV100 + ctor 补齐。前提
+ * (Bettor 1227 只读查生产库确认): 主网 payout_shards=0, 零旧 22 参数 shape 存量市场需要兼容, 不做新旧
+ * shape 分支。三个新字段跟 PayoutShardV2 那半同一条纪律: ctor-only 字面量, 必须传真实值, 不接受占位符。
+ * @param {object} o { poolMerkleRoot(hex), predicateCommit(hex), consolidatedPool(int), closed(int),
+ *   payoutRoot(hex), tokenTmplHash(hex), claimTmplHash(hex), marketSuffixHash(hex) }
  */
-export function compilePayoutShardRedeem({ poolMerkleRoot, predicateCommit, consolidatedPool, closed = 0, payoutRoot = z32 }) {
-  const ctor = [ctorBytes32(poolMerkleRoot), ctorBytes32(predicateCommit), ctorInt(Number(consolidatedPool)), ctorInt(closed), ctorBytes32(payoutRoot), ...W17()];
-  return Buffer.from(compileSil(join(LIB, 'PayoutShard.sil'), ctor, SILVERC_LEGACY).script).toString('hex');
+export function compilePayoutShardRedeem({ poolMerkleRoot, predicateCommit, consolidatedPool, closed = 0, payoutRoot = z32, tokenTmplHash, claimTmplHash, marketSuffixHash }) {
+  for (const [label, v] of [['tokenTmplHash', tokenTmplHash], ['claimTmplHash', claimTmplHash], ['marketSuffixHash', marketSuffixHash]]) {
+    if (!/^[0-9a-fA-F]{64}$/.test(String(v || ''))) throw new Error(`compilePayoutShardRedeem: ${label} 必须是 32B hex，收到 ${JSON.stringify(v)} — ctor-only 字面量，不接受占位符/缺省值`);
+  }
+  const ctor = [
+    ctorBytes32V100(poolMerkleRoot), ctorBytes32V100(predicateCommit), ctorBytes32V100(tokenTmplHash),
+    ctorIntV100(Number(consolidatedPool)), ctorIntV100(closed), ctorBytes32V100(payoutRoot),
+    ...W17V100(),
+    ctorBytes32V100(claimTmplHash), ctorBytes32V100(marketSuffixHash),
+  ];
+  return Buffer.from(compileSilV100(join(LIB, 'PayoutShard.sil'), ctor, 'PayoutShard').script).toString('hex');
 }
 
 /**
- * Compile a ShardLeaf redeem with the given (A) 4-field state baked.
+ * Compile a ShardLeaf redeem with the given (A) 4-field state baked (12-param ctor).
+ * 🔴 D-019 迁移(ledger 1225-1227): 原 ctor 只填 11 个值(缺 T3 代币化新增的 token_tmpl_hash, 插在
+ * deadline 之后、init_local_yes 之前, 当前 ShardLeaf.sil 实读 12 参数)——已改走 compileSilV100 + ctor
+ * 补齐, tokenTmplHash 必须传真实值, 不接受占位符。
  * @returns {{ redeemHex, psTmplHashHex }}
  */
-export function compileShardLeafRedeem({ marketIdHash, psTmplHashHex, shardPoolId, sealCount, payoutCovId, deadline, localYes, localNo, count, poolValue }) {
+export function compileShardLeafRedeem({ marketIdHash, psTmplHashHex, shardPoolId, sealCount, payoutCovId, deadline, localYes, localNo, count, poolValue, tokenTmplHash }) {
+  if (!/^[0-9a-fA-F]{64}$/.test(String(tokenTmplHash || ''))) throw new Error(`compileShardLeafRedeem: tokenTmplHash 必须是 32B hex，收到 ${JSON.stringify(tokenTmplHash)} — ctor-only 字面量，不接受占位符/缺省值`);
   // ★件1(J1): deadline 加在常量区(payoutCovId 后, init State 前) — State 区仍 offset 1/4×PUSH8 不变 (spliceLeafState byte-equal 保持)。
   const ctor = [
-    ctorBytes32(marketIdHash), ctorBytes32(psTmplHashHex), ctorBytes32(shardPoolId),
-    ctorInt(sealCount), ctorInt(MIN_BET), ctorBytes32(payoutCovId), ctorInt(deadline),
-    ctorInt(localYes), ctorInt(localNo), ctorInt(count), ctorInt(poolValue),
+    ctorBytes32V100(marketIdHash), ctorBytes32V100(psTmplHashHex), ctorBytes32V100(shardPoolId),
+    ctorIntV100(sealCount), ctorIntV100(MIN_BET), ctorBytes32V100(payoutCovId), ctorIntV100(deadline),
+    ctorBytes32V100(tokenTmplHash),
+    ctorIntV100(localYes), ctorIntV100(localNo), ctorIntV100(count), ctorIntV100(poolValue),
   ];
-  return Buffer.from(compileSil(join(LIB, 'ShardLeaf.sil'), ctor, SILVERC_LEGACY).script).toString('hex');
+  return Buffer.from(compileSilV100(join(LIB, 'ShardLeaf.sil'), ctor, 'ShardLeaf').script).toString('hex');
 }
 
 /**
  * Ensure the per-logical-market PayoutShard covenant exists (genesis-mint once). Reads/writes payout_shards (v172).
  * @returns {{ payoutCovId, psAddr, psOutpoint, psRedeemGenesis }}
  */
-export async function ensurePayoutShard({ db, rc, transfer, landed, p2sh, logicalMarketId, poolMerkleRoot, predicateCommit, relayAddr, silverc }) {
+export async function ensurePayoutShard({ db, rc, transfer, landed, p2sh, logicalMarketId, poolMerkleRoot, predicateCommit, tokenTmplHash, claimTmplHash, marketSuffixHash, relayAddr }) {
   const existing = db.prepare(`SELECT * FROM payout_shards WHERE logical_market_id = ?`).get(logicalMarketId);
   if (existing) {
     _checkCoherenceNonBlocking(db, existing, p2sh);
     return { payoutCovId: existing.payout_cov_id, psAddr: existing.payout_ps_addr, psOutpoint: existing.payout_ps_outpoint, psRedeemGenesis: existing.payout_redeem_hex };
   }
 
-  const redeem = compilePayoutShardRedeem({ poolMerkleRoot, predicateCommit, consolidatedPool: PS_SEED, closed: 0, payoutRoot: z32, silverc });
+  // D-019 迁移(ledger 1225-1227): PayoutShard.sil 当前 ctor 实读 25 参数(T3 代币化新增 token_tmpl_hash/
+  // claim_tmpl_hash/market_suffix_hash 三个字段), 调用方必须显式提供真实值——不接受占位符(见
+  // compilePayoutShardRedeem 内部的 hex 格式 fail-loud 校验)。v205 迁移已给 payout_shards 加同名三列,
+  // 这里 genesis-mint 时一并写入(K-18"谁编译谁 declare"纪律: 存创世时实际用的值)。
+  const redeem = compilePayoutShardRedeem({ poolMerkleRoot, predicateCommit, consolidatedPool: PS_SEED, closed: 0, payoutRoot: z32, tokenTmplHash, claimTmplHash, marketSuffixHash });
   const fundTx = await transfer(relayAddr, PS_SEED + 100_000_000);   // seed + headroom to gateway
   const gj = await rc({ type: 'bshard_genesis_mint_payout', payoutshard: { redeem_hex: redeem, seedSompi: String(PS_SEED) }, inputs: { funding: { address: relayAddr, outpointTxid: fundTx, index: 0 } }, outputs: { change_address: relayAddr } });
   const payoutCovId = gj.payoutCovId, psTx = gj.txId || gj.txid, psAddr = p2sh(redeem);
@@ -159,8 +182,8 @@ export async function ensurePayoutShard({ db, rc, transfer, landed, p2sh, logica
   // K-18 §3.1(covenant_family 列, migrate v189): 谁编译谁 declare — 这里走 compilePayoutShardRedeem(V1),
   // 声明 'v1_committee'。不可变(§3.2 assertZkNativeImmutable 只护 genesis 之后; genesis 这一刻本身就是
   // 唯一定家族的时刻, 不需要额外守卫)。
-  db.prepare(`INSERT INTO payout_shards (logical_market_id, payout_cov_id, payout_ps_addr, payout_ps_outpoint, payout_redeem_hex, pool_merkle_root, predicate_commit, created_at, covenant_family)
-    VALUES (?,?,?,?,?,?,?,?,?)`).run(logicalMarketId, payoutCovId, psAddr, `${psTx}:0`, redeem, poolMerkleRoot, predicateCommit, Math.floor(Date.now() / 1000), 'v1_committee');
+  db.prepare(`INSERT INTO payout_shards (logical_market_id, payout_cov_id, payout_ps_addr, payout_ps_outpoint, payout_redeem_hex, pool_merkle_root, predicate_commit, created_at, covenant_family, token_tmpl_hash, claim_tmpl_hash, market_suffix_hash)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(logicalMarketId, payoutCovId, psAddr, `${psTx}:0`, redeem, poolMerkleRoot, predicateCommit, Math.floor(Date.now() / 1000), 'v1_committee', tokenTmplHash, claimTmplHash, marketSuffixHash);
   return { payoutCovId, psAddr, psOutpoint: `${psTx}:0`, psRedeemGenesis: redeem };
 }
 
@@ -375,11 +398,14 @@ export async function registerBettorOnShard(o) {
 async function _registerBettorOnShardInner(o) {
   const {
     db, rc, transfer, landed, p2sh, logicalMarketId, poolMerkleRoot, predicateCommit,
-    bettorPk, direction, stakeSompi, relayAddr, silverc, sealCount, deadline, createShardMarketRow, recordBettor,
+    bettorPk, direction, stakeSompi, relayAddr, sealCount, deadline, createShardMarketRow, recordBettor,
     zkNative = false, closeZkTmplAnchor,   // 2026-07-07 新增: ZK-native 市场显式开关。默认 false——
     // 不传这两个字段的既有 committee-sig 调用方行为一字不变(走原 ensurePayoutShard)。这是显式参数，
     // 不是本函数内部推断——上层市场创建流程必须自己知道"这是 ZK-native 市场"才传 zkNative:true，
     // ShardLeaf/register 主体逻辑本身不感知/不判断市场类型(NWT W3 审核重点②)。
+    tokenTmplHash, claimTmplHash, marketSuffixHash,   // D-019 迁移(ledger 1225-1227): T3 代币化 ctor-only
+    // 字面量, PayoutShard/PayoutShardV2/ShardLeaf 三个合约创世都要用(ShardLeaf 只用 tokenTmplHash)——
+    // 同一个 KanetTestToken 模板系统, 调用方一次性提供, 本函数负责分发给下面各自的 compile*/ensure* 调用。
   } = o;
   if (!Number.isFinite(Number(deadline)) || Number(deadline) <= 0) throw new Error(`registerBettorOnShard: deadline (Unix ts, ctor-baked partial-sweep gate) required, got ${deadline}`);
   if (direction !== 0 && direction !== 1) throw new Error(`direction must be 0|1, got ${direction}`);
@@ -391,8 +417,8 @@ async function _registerBettorOnShardInner(o) {
   // Per-market PayoutShard (genesis-mint once at first shard) — the consolidation sink every ShardLeaf bakes by cov_id.
   // zkNative 显式 true 才走 V2；committee-sig 市场(zkNative 未传/false)连这个分支的调用点都摸不到。
   const { payoutCovId } = zkNative
-    ? await ensurePayoutShardV2({ db, rc, transfer, landed, p2sh, logicalMarketId, poolMerkleRoot, predicateCommit, closeZkTmplAnchor, relayAddr, silverc })
-    : await ensurePayoutShard({ db, rc, transfer, landed, p2sh, logicalMarketId, poolMerkleRoot, predicateCommit, relayAddr, silverc });
+    ? await ensurePayoutShardV2({ db, rc, transfer, landed, p2sh, logicalMarketId, poolMerkleRoot, predicateCommit, closeZkTmplAnchor, tokenTmplHash, claimTmplHash, marketSuffixHash, relayAddr })
+    : await ensurePayoutShard({ db, rc, transfer, landed, p2sh, logicalMarketId, poolMerkleRoot, predicateCommit, tokenTmplHash, claimTmplHash, marketSuffixHash, relayAddr });
 
   const alloc = allocateForRegister(db, logicalMarketId, stake);
 
@@ -471,7 +497,7 @@ async function _registerBettorOnShardInner(o) {
   // 🔴 事故修复(2026-07-07): 同上处理，强制 SILVERC_LEGACY，不依赖调用方传入的 silverc。
   const psArtifact = computePoolSideArtifact(join(LIB, 'PoolSide_v08_shard.sil'), [ctorBytes32(bettorPk), ctorInt(direction), ctorInt(stake), ctorBytes32(z32)], SILVERC_LEGACY);
   const genState = { local_yes: 0, local_no: 0, count: 0, pool_value: 0 };  // 空 maker seed (非 bettor; level2-A Σcount==loaded 排除它)
-  const genRedeem = compileShardLeafRedeem({ marketIdHash, psTmplHashHex: psArtifact.templateHashHex, shardPoolId, sealCount, payoutCovId, deadline, localYes: 0, localNo: 0, count: 0, poolValue: 0, silverc });
+  const genRedeem = compileShardLeafRedeem({ marketIdHash, psTmplHashHex: psArtifact.templateHashHex, shardPoolId, sealCount, payoutCovId, deadline, localYes: 0, localNo: 0, count: 0, poolValue: 0, tokenTmplHash });
   const genAddr = p2sh(genRedeem);
   const genTx = await transfer(genAddr, SHARD_GENESIS_SEED);                // 空 genesis seed (dust, 非 bet stake)
   if (!await landed(genTx, genAddr)) throw new Error('ShardLeaf empty-genesis no land');
@@ -480,7 +506,7 @@ async function _registerBettorOnShardInner(o) {
   const shardMarketId = createShardMarketRow ? await createShardMarketRow(shardIndex, genAddr) : `${logicalMarketId}#${shardIndex}`;
   try {
     if (alloc.sealPrevId) sealShard(db, alloc.sealPrevId, Math.floor(Date.now() / 1000));
-    registerShard(db, { logicalMarketId, shardIndex, shardMarketId, shardP2sh: genAddr, currentLeafOutpoint: `${genTx}:0`, currentLeafState: genState, shardRedeemHex: genRedeem, nowSec: Math.floor(Date.now() / 1000) });
+    registerShard(db, { logicalMarketId, shardIndex, shardMarketId, shardP2sh: genAddr, currentLeafOutpoint: `${genTx}:0`, currentLeafState: genState, shardRedeemHex: genRedeem, shardTokenTmplHash: tokenTmplHash, nowSec: Math.floor(Date.now() / 1000) });
   } catch (e) {
     // UNIQUE(logical_market_id, shard_index) race: another concurrent open_new won → retry the whole register.
     if (/UNIQUE/i.test(e.message)) { o._retry = (o._retry || 0) + 1; if (o._retry > 3) throw new Error('open_new race retry exhausted'); return registerBettorOnShard(o); }

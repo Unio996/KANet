@@ -121,11 +121,11 @@ export async function computeSettlePlan(marketId, ctx) {
   const payoutRootHex = buildPayoutRoot(pm.payoutLeaves).toString('hex');
 
   // 5. predicted closed-PS 地址 (driver enforce 的应锚地址·= 今晚 pzmm5hg7 predict)
-  const psRow = db.prepare('SELECT pool_merkle_root, predicate_commit FROM payout_shards WHERE logical_market_id = ?').get(marketId);
+  const psRow = db.prepare('SELECT pool_merkle_root, predicate_commit, token_tmpl_hash, claim_tmpl_hash, market_suffix_hash FROM payout_shards WHERE logical_market_id = ?').get(marketId);
   let expectedClosedAddr = null;
   if (psRow) {
     const consolidatedPool = (BigInt(poolSompi) + BigInt(ctx.psSeedSompi ?? 20000000)).toString();   // pool + PS_SEED
-    const closedRedeem = compilePayoutShardRedeem({ poolMerkleRoot: psRow.pool_merkle_root, predicateCommit: psRow.predicate_commit, consolidatedPool, closed: 1, payoutRoot: payoutRootHex });
+    const closedRedeem = compilePayoutShardRedeem({ poolMerkleRoot: psRow.pool_merkle_root, predicateCommit: psRow.predicate_commit, consolidatedPool, closed: 1, payoutRoot: payoutRootHex, tokenTmplHash: psRow.token_tmpl_hash, claimTmplHash: psRow.claim_tmpl_hash, marketSuffixHash: psRow.market_suffix_hash });
     expectedClosedAddr = ctx.p2shAddr ? ctx.p2shAddr(closedRedeem) : null;   // caller 提供 p2sh 派生 (kaspa-wasm)
   }
 
@@ -240,7 +240,7 @@ export function _inferWinDirectionFromChain(marketId, market, evidence, ctx) {
   let rrs = null; try { rrs = JSON.parse(market.resolution_rule_spec || '{}'); } catch {}
   if (rrs?.zk_native === true) return fail('zk_native 市场不适用 V1 closed-redeem 推断, 拒绝 resume');
   if (typeof ctx.p2shAddr !== 'function') return fail('ctx.p2shAddr 缺(需 daemon ctx), 无法编译候选地址, fail-closed');
-  const psRow = db.prepare('SELECT pool_merkle_root, predicate_commit FROM payout_shards WHERE logical_market_id = ?').get(marketId);
+  const psRow = db.prepare('SELECT pool_merkle_root, predicate_commit, token_tmpl_hash, claim_tmpl_hash, market_suffix_hash FROM payout_shards WHERE logical_market_id = ?').get(marketId);
   if (!psRow) return fail('payout_shards 行缺, 无法编译候选 closed redeem, fail-closed');
   // 链读靶: close_txid 的 output0 地址(kaspa_tx_log 本地观测——indexer 有缺口族, 缺=fail-closed 落 F3 账)
   const txRow = db.prepare('SELECT outputs_json FROM kaspa_tx_log WHERE tx_id = ?').get(evidence.close_txid);
@@ -266,7 +266,7 @@ export function _inferWinDirectionFromChain(marketId, market, evidence, ctx) {
     const pm = computePariMutuelPayout({ bettors: bets.map(b => ({ pk: b.pk, stake: b.stake, direction: b.direction })), winningDirection: dir, feeLeaves });
     if (pm.degenerate) continue;   // 单边方向天然无 root(refund-root 盘两方向都进不来 = zero-match, F3)
     const rootDir = buildPayoutRoot(pm.payoutLeaves).toString('hex');
-    const redeem = compilePayoutShardRedeem({ poolMerkleRoot: psRow.pool_merkle_root, predicateCommit: psRow.predicate_commit, consolidatedPool, closed: 1, payoutRoot: rootDir });
+    const redeem = compilePayoutShardRedeem({ poolMerkleRoot: psRow.pool_merkle_root, predicateCommit: psRow.predicate_commit, consolidatedPool, closed: 1, payoutRoot: rootDir, tokenTmplHash: psRow.token_tmpl_hash, claimTmplHash: psRow.claim_tmpl_hash, marketSuffixHash: psRow.market_suffix_hash });
     const addr = ctx.p2shAddr(redeem);
     if (addr && addr === chainAddr) matches.push({ dir, addr, rootDir });
   }
@@ -360,8 +360,8 @@ export async function settleMarketLive(marketId, ctx) {
     //    影响, 已由 NWT 独立核实全部 3 个调用点)。孤儿资金作为 covenant leftover 续存(不会被误分给 registered
     //    赢家), 但 close 落链后**永久不可再花**(PayoutShard.sil 只有 payoutRoot-proof claim 一条路, 孤儿 leaf
     //    从未入树——NWT 读源码坐实, 5 个 entrypoint 均不通)——此后果已向 Owner 明确披露并经确认接受。
-    const psRowForEnforce = ctx.db.prepare('SELECT pool_merkle_root, predicate_commit FROM payout_shards WHERE logical_market_id = ?').get(marketId);
-    const realClosedRedeem = compilePayoutShardRedeem({ poolMerkleRoot: psRowForEnforce.pool_merkle_root, predicateCommit: psRowForEnforce.predicate_commit, consolidatedPool: String(ps.consolidatedPool), closed: 1, payoutRoot: plan.payoutRoot });
+    const psRowForEnforce = ctx.db.prepare('SELECT pool_merkle_root, predicate_commit, token_tmpl_hash, claim_tmpl_hash, market_suffix_hash FROM payout_shards WHERE logical_market_id = ?').get(marketId);
+    const realClosedRedeem = compilePayoutShardRedeem({ poolMerkleRoot: psRowForEnforce.pool_merkle_root, predicateCommit: psRowForEnforce.predicate_commit, consolidatedPool: String(ps.consolidatedPool), closed: 1, payoutRoot: plan.payoutRoot, tokenTmplHash: psRowForEnforce.token_tmpl_hash, claimTmplHash: psRowForEnforce.claim_tmpl_hash, marketSuffixHash: psRowForEnforce.market_suffix_hash });
     const realExpectedClosedAddr = ctx.p2shAddr(realClosedRedeem);
     if (buildRes.psContAddress !== realExpectedClosedAddr) {
       ctx.alert?.(marketId, `🔴 enforce FAIL: build psContAddress ${buildRes.psContAddress} != expected(real-pool=${ps.consolidatedPool}) ${realExpectedClosedAddr} — NO submit`);
@@ -411,7 +411,7 @@ export async function settleMarketLive(marketId, ctx) {
   const claimData = winnerClaimData(plan.winners);
   // psRow(poolMerkleRoot/predicateCommit) + consolidatedPool 独立于 ps(fresh-close 分支专属变量)重算——
   // resume 分支没有 ps, 且这两条本身就是 market 级不变量(跟是不是第一次 close 无关), 统一取一次更简单可靠。
-  const psRow = ctx.db.prepare('SELECT pool_merkle_root, predicate_commit FROM payout_shards WHERE logical_market_id = ?').get(marketId);
+  const psRow = ctx.db.prepare('SELECT pool_merkle_root, predicate_commit, token_tmpl_hash, claim_tmpl_hash, market_suffix_hash FROM payout_shards WHERE logical_market_id = ?').get(marketId);
   // 🔴 2026-07-20 06:28 修复(NWT读码坐实, #su2ksh系列第3处·跟 enforce§2/landed§6 同一 bug class):
   //   跟上面两处一样, 这里也一直用 plan.poolSompi(DB registered Σstake)+seed 的公式预测 consolidatedPool,
   //   不是 close 落链时真实 baked 的值——resume 分支(ps 在这里从不存在, 只有 fresh-close 分支才有 ps)
@@ -434,7 +434,7 @@ export async function settleMarketLive(marketId, ctx) {
   let consolidatedPool = null;
   let curRedeem = null;   // 复用验证循环里已经编译过的候选字节, 不在下面重复调一次 compilePayoutShardRedeem
   for (const candidate of [evidencePool, formulaPool].filter(Boolean)) {
-    const candidateRedeem = compilePayoutShardRedeem({ poolMerkleRoot: psRow.pool_merkle_root, predicateCommit: psRow.predicate_commit, consolidatedPool: candidate, closed: 1, payoutRoot: plan.payoutRoot });
+    const candidateRedeem = compilePayoutShardRedeem({ poolMerkleRoot: psRow.pool_merkle_root, predicateCommit: psRow.predicate_commit, consolidatedPool: candidate, closed: 1, payoutRoot: plan.payoutRoot, tokenTmplHash: psRow.token_tmpl_hash, claimTmplHash: psRow.claim_tmpl_hash, marketSuffixHash: psRow.market_suffix_hash });
     const verified = ctx.db && ctx.p2shAddr && await verifyRedeemMatchesChainObservedOutput({ db: ctx.db, p2sh: ctx.p2shAddr, candidateRedeemHex: candidateRedeem, outpointTxid: closeTxid, outpointIdx: 0, getUtxos: ctx.getUtxos });
     if (verified) { consolidatedPool = candidate; curRedeem = candidateRedeem; break; }
   }
@@ -772,11 +772,11 @@ export async function computeRefundPlan(marketId, ctx) {
   });
 
   // predicted cancelled-PS 地址 (closed=2, payoutRoot 槽复用装 refundRoot·driver enforce 应锚地址)。
-  const psRow = db.prepare('SELECT pool_merkle_root, predicate_commit FROM payout_shards WHERE logical_market_id = ?').get(marketId);
+  const psRow = db.prepare('SELECT pool_merkle_root, predicate_commit, token_tmpl_hash, claim_tmpl_hash, market_suffix_hash FROM payout_shards WHERE logical_market_id = ?').get(marketId);
   let expectedCancelledAddr = null;
   if (psRow) {
     const consolidatedPool = (BigInt(poolSompi) + BigInt(ctx.psSeedSompi ?? 20000000)).toString();
-    const cancelledRedeem = compilePayoutShardRedeem({ poolMerkleRoot: psRow.pool_merkle_root, predicateCommit: psRow.predicate_commit, consolidatedPool, closed: 2, payoutRoot: refundRootHex });
+    const cancelledRedeem = compilePayoutShardRedeem({ poolMerkleRoot: psRow.pool_merkle_root, predicateCommit: psRow.predicate_commit, consolidatedPool, closed: 2, payoutRoot: refundRootHex, tokenTmplHash: psRow.token_tmpl_hash, claimTmplHash: psRow.claim_tmpl_hash, marketSuffixHash: psRow.market_suffix_hash });
     expectedCancelledAddr = ctx.p2shAddr ? ctx.p2shAddr(cancelledRedeem) : null;
   }
 
@@ -871,7 +871,7 @@ export async function cancelMarketLive(marketId, ctx) {
   let curPool = BigInt(ps.consolidatedPool);
   let curState = { consolidated_pool: curPool.toString(), closed: 2, payoutRoot: plan.refundRoot };
   for (let i = 0; i < 17; i++) curState['w' + i] = 0;
-  let curRedeem = compilePayoutShardRedeem({ poolMerkleRoot: ps.poolMerkleRoot, predicateCommit: ps.predicateCommit, consolidatedPool: String(ps.consolidatedPool), closed: 2, payoutRoot: plan.refundRoot });
+  let curRedeem = compilePayoutShardRedeem({ poolMerkleRoot: ps.poolMerkleRoot, predicateCommit: ps.predicateCommit, consolidatedPool: String(ps.consolidatedPool), closed: 2, payoutRoot: plan.refundRoot, tokenTmplHash: ps.tokenTmplHash, claimTmplHash: ps.claimTmplHash, marketSuffixHash: ps.marketSuffixHash });
   const claims = [];
   let needsManualAttribution = false;
   for (const cd of claimData) {

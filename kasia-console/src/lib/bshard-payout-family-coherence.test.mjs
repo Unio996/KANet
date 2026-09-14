@@ -46,6 +46,12 @@ const sj = (v) => JSON.stringify(v, (k, val) => typeof val === 'bigint' ? val.to
 // ── fixture builders (V189 offset table, P2 §1 实测定稿) ──────────────────────────────────────
 const PC = 'ab'.repeat(32);   // predicate_commit fixture
 const PMR = 'cd'.repeat(32);  // pool_merkle_root fixture
+// D-019 迁移(ledger 1225-1227): PayoutShard.sil/PayoutShardV2.sil 当前 ctor 新增三个 ctor-only 字面量,
+// compilePayoutShardRedeem/V2Redeem 现在 fail-loud 要求真实值——测试 fixture 补齐, 值与 PC/PMR/genesis
+// hash 系列互不相同(避免任何两个 marker 意外相等造成的假通过)。
+const TTH = 'ee'.repeat(32);  // token_tmpl_hash fixture
+const CTH = 'ff'.repeat(32);  // claim_tmpl_hash fixture
+const MSH = '12'.repeat(32);  // market_suffix_hash fixture
 const ROOT0 = '00'.repeat(32);
 
 // 🔴 事故修复(2026-07-21, NWT diff 审阻塞级抓漏坐实): 早前这里 buf[0]=0x08 是照抄
@@ -89,9 +95,15 @@ function seedRow(overrides = {}) {
     predicate_commit: overrides.predicate_commit ?? PC,
     created_at: Math.floor(Date.now() / 1000),
     covenant_family: overrides.covenant_family ?? 'v1_committee',
+    // D-019 迁移(ledger 1225-1227): 默认填合法 32B hex, 避免 assertPayoutShardCoherence 步骤(c) 的新增
+    // 格式校验(缺列/缺值 FAIL)意外掩盖测试本来要验的"recompile byte-compare 不等"这条路径——两者都返回
+    // failedStep='c', 不给真实值会让测试巧合通过但验的是错的东西(同本 session 全程的 flip-expect 纪律)。
+    token_tmpl_hash: overrides.token_tmpl_hash ?? TTH,
+    claim_tmpl_hash: overrides.claim_tmpl_hash ?? CTH,
+    market_suffix_hash: overrides.market_suffix_hash ?? MSH,
   };
-  sqlite.prepare(`INSERT INTO payout_shards (logical_market_id, payout_cov_id, payout_ps_addr, payout_ps_outpoint, payout_redeem_hex, pool_merkle_root, predicate_commit, created_at, covenant_family)
-    VALUES (@logical_market_id,@payout_cov_id,@payout_ps_addr,@payout_ps_outpoint,@payout_redeem_hex,@pool_merkle_root,@predicate_commit,@created_at,@covenant_family)`).run(row);
+  sqlite.prepare(`INSERT INTO payout_shards (logical_market_id, payout_cov_id, payout_ps_addr, payout_ps_outpoint, payout_redeem_hex, pool_merkle_root, predicate_commit, created_at, covenant_family, token_tmpl_hash, claim_tmpl_hash, market_suffix_hash)
+    VALUES (@logical_market_id,@payout_cov_id,@payout_ps_addr,@payout_ps_outpoint,@payout_redeem_hex,@pool_merkle_root,@predicate_commit,@created_at,@covenant_family,@token_tmpl_hash,@claim_tmpl_hash,@market_suffix_hash)`).run(row);
   return row;
 }
 
@@ -303,12 +315,12 @@ if (HAVE_SILVERC) {
   const stubLanded = async () => true;
 
   const marketIdV1 = `psfam-genesis-v1-${randomUUID().slice(0, 8)}`;
-  await ensurePayoutShard({ db: sqlite, rc: stubRc, transfer: stubTransfer, landed: stubLanded, p2sh: fakeP2sh, logicalMarketId: marketIdV1, poolMerkleRoot: PMR, predicateCommit: PC, relayAddr: 'kaspatest:relay' });
+  await ensurePayoutShard({ db: sqlite, rc: stubRc, transfer: stubTransfer, landed: stubLanded, p2sh: fakeP2sh, logicalMarketId: marketIdV1, poolMerkleRoot: PMR, predicateCommit: PC, tokenTmplHash: TTH, claimTmplHash: CTH, marketSuffixHash: MSH, relayAddr: 'kaspatest:relay' });
   const rowV1 = sqlite.prepare('SELECT covenant_family FROM payout_shards WHERE logical_market_id = ?').get(marketIdV1);
   ok(rowV1?.covenant_family === 'v1_committee', `ensurePayoutShard INSERT 声明 covenant_family='v1_committee' (got ${rowV1?.covenant_family})`);
 
   const marketIdV2 = `psfam-genesis-v2-${randomUUID().slice(0, 8)}`;
-  await ensurePayoutShardV2({ db: sqlite, rc: stubRc, transfer: stubTransfer, landed: stubLanded, p2sh: fakeP2sh, logicalMarketId: marketIdV2, poolMerkleRoot: PMR, predicateCommit: PC, closeZkTmplAnchor: 'dd'.repeat(32), relayAddr: 'kaspatest:relay' });
+  await ensurePayoutShardV2({ db: sqlite, rc: stubRc, transfer: stubTransfer, landed: stubLanded, p2sh: fakeP2sh, logicalMarketId: marketIdV2, poolMerkleRoot: PMR, predicateCommit: PC, closeZkTmplAnchor: 'dd'.repeat(32), tokenTmplHash: TTH, claimTmplHash: CTH, marketSuffixHash: MSH, relayAddr: 'kaspatest:relay' });
   const rowV2 = sqlite.prepare('SELECT covenant_family FROM payout_shards WHERE logical_market_id = ?').get(marketIdV2);
   ok(rowV2?.covenant_family === 'v2_zk', `ensurePayoutShardV2 INSERT 声明 covenant_family='v2_zk' (got ${rowV2?.covenant_family})`);
 } else {
