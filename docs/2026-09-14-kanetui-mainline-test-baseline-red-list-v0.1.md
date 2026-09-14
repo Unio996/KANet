@@ -1,8 +1,8 @@
 > **Status**: CURRENT
 
-# 主线测试基线 RED 清单（rule 82 安全跑法）v0.1
+# 主线测试基线 RED 清单（rule 82 安全跑法）v0.2
 
-**2026-09-14 · KANet-UI · Bettor 1265 派工**（"主线测试基线 RED 清单文档，用 rule 82 后的安全跑法，只用 --domain/--all，不再逐文件 --case=，把'从来没有运行证据的 184 个'分域列出哪些红、哪些挂起、哪些依赖不可达组件"）。
+**2026-09-14 · KANet-UI · Bettor 1265 派工**（"主线测试基线 RED 清单文档，用 rule 82 后的安全跑法，只用 --domain/--all，不再逐文件 --case=，把'从来没有运行证据的 184 个'分域列出哪些红、哪些挂起、哪些依赖不可达组件"）。v0.2 追加（Bettor 1270 派工）：①(a) discovery loop 修法已落码；(b) system 域 4 个 env 污染文件逐个分档（§6）；(c) 5 项真实 RED 开票+归属（§7）。
 
 ## 0. 范围与方法
 
@@ -34,6 +34,8 @@ Runner error: Error: 定位不到 bettor 退款扫描(sidesRaw)那段查询 —�
 - **受影响文件数**：predictions 域 82 个 `.test.mjs` 里 63 个是真实 `export default` case-object（dm 12 / dm-agent 36 / journey 1 / pool+ss-sub4-mutation 剩余部分），**全部 63 个自建库以来可能从未真正执行过一次**——不是"红"，是"没有任何证据能说是红是绿"。
 - **这不是本次唯一一个会触发同种崩溃的文件**：`pool/` 下另有 `claim_confirmation_depth_gate_regression` / `shard9_phantom_exclude_regression` / `zk_autonomy_ticks_regression` 三个文件同样是"自跑脚本 + 显式 `process.exit()`"模式（本次因为字母序在它们之前就已经撞上了 `p1_refund` 而未触达，但只要 `p1_refund` 被修好，下一次大概率撞上这几个之一）。
 - **本次未修**：这是 runner 机制层面的缺陷（discovery loop 缺错误隔离），修法涉及改 `scripts/test.mjs` 本体，超出本次"纯读跑测"授权范围，如实记录、留 Bettor/NWT 判断优先级与修法（候选方向：discovery loop 加 try/catch，把单文件 import 失败当作"该文件跑测失败"而非"整个 batch 中止"，并在 Summary 里显式列出"因 import 失败被跳过"的文件清单，而不是让后续文件连带隐形消失）。
+
+> **v0.2 更新（Bettor 1270 派工）**：修法已落码 —— `coord/kanetui-test-rot` 分支新 commit `67beb09e`（discovery loop 单文件 try/catch + `_importFailures` 汇总 + 非零退出码 + `findCases()` 新增 `KANET_TEST_CASES_DIR` 测试用覆盖）+ 永久回归 `test-framework/cases/system/discovery-loop-resilience.test.mjs`（子进程 fixture：throw 文件前后各一个正常 case，断言两者都跑了、throw 文件被点名、退出码非 0 且非旧的 exit(2)）。手工复现 + 回归用例本身均 1/1 PASS；rule 82①② 回归验证未受影响；lint 0 errors。**本 commit 含代码，按推送纪律未自推，等 Bettor 推 + NWT 审。**
 
 ### 🟡 B. system 域：import 期全局 env 污染 tripwire 命中 4 个文件（机制本身工作正常，是内容需要人分档）
 
@@ -81,11 +83,31 @@ Runner error: Error: 定位不到 bettor 退款扫描(sidesRaw)那段查询 —�
 
 broker 34 + exchange 6 + support 3 = **43 个 FAIL**，逐条 trace 核对，**100% 是同一行 `ERROR: fetch failed`**——本次是在一个刻意不起任何 console/kaspad 实例的隔离 worktree 里跑测（避免真打到任何 live 服务），这是**本次调查方法论的预期后果，不是 43 个独立代码缺陷**。这批文件本身是否真的绿，需要在一个起了隔离 console（`KANET_CONSOLE_URL` 显式指向自己起的测试实例）的环境里重跑才能判定——本次未做，因为"起一个 console 实例"超出"纯读跑测"授权范围，如需要请另行派工。
 
+## 6. system 域 4 个 env 污染文件分档（v0.2 新增，Bettor 1270 (b)）
+
+tripwire 报的 4 个文件（§1-B）：`hotwallet-admission.test.mjs`（改了 `RELAY_HOTWALLET_PER_RELAY_MAX_KAS`）、`llm-health.test.mjs`（同一键）、`relay-child-rpc-state-vs-console.test.mjs`（改了 `RELAY_HOTWALLET_TOTAL_MAX_KAS`）、`relay-health-monitor.test.mjs`（同一键）。逐个核实：
+
+- **源码级排查**：4 个文件里，只有 `hotwallet-admission.test.mjs` 的源码里**真的出现**这两个 env 键（9 处赋值）；其余 3 个文件全文 `grep` **零命中**——它们的源码根本不碰这两个变量。
+- **`hotwallet-admission.test.mjs` 自身设计核实**：全部 9 个 `test()` 块**逐一**核对，每一块都是 `clearCapEnv()` 起手 + `try { ... } finally { clearCapEnv() }` 收尾（无一遗漏）——**按设计本身是干净的、平衡的**，不是"设了不还原"的那类真泄漏。孤立跑这一个文件（`node --test hotwallet-admission.test.mjs` 后立即读 `process.env`）也验证了跑完即干净。
+- **真实根因 = tripwire 自身的时序假设不成立**：discovery 循环对每个文件做的是"`await import(file)` 前后各拍一次 `process.env` 快照"——这个模型假设"文件的全部副作用在 `import()` 的 Promise resolve 前就已经跑完"。但 `node:test` 的 `test(name, fn)` 在**不经 `node --test` CLI、被当普通模块 `import()`** 时，是**注册**后异步调度执行，不是同步跑完才让 `import()` 返回。于是 `hotwallet-admission.test.mjs` 那 9 组"设置→跑→清理"的窗口，会**跨过** `import()` 的 resolve 点，散落到后续几个文件各自的 before/after 快照窗口里——4 个文件被点名，是因为它们恰好在这个残留窗口"在场"，不是它们自己的代码有问题。
+- **判定**：**4 个文件均无需修改**。真实、瞬时、自愈的窗口来源是 `hotwallet-admission.test.mjs`（但它自身设计已经正确），tripwire 把责任错记到了下游 3 个无辜文件头上。因为另外 3 个文件的源码里根本不读这两个键，即便窗口期真被别的文件读到脏值，它们也不会消费到——本次未发现任何实际的跨用例污染后果，只是一次误报的**证据链**（不是 2026-08-09 那次"永久不还原、后续 3 个用例全部实际受害"的同类事故）。
+- **不建议修 tripwire 本身**：修 tripwire 要求"snapshot 前先 drain 掉 node:test 的调度队列"，改动面进 runner 核心时序假设，本次判定为"已知的、无实际后果的误报模式"，留档即可，不建议现在动。
+
+## 7. 5 项真实 RED 开票（v0.2 新增，Bettor 1270 (c)，归属已按裁定分线）
+
+| # | 域/文件 | 断言 | 归属 | 备注 |
+|---|---|---|---|---|
+| 1 | exchange / `exchange_sol_tron_publish_no_slice_crash.test.mjs` | `state-machine._validateAddr handles sol+tron chain types (non-EVM branch)` | **J2 线** | 文件自身注释已标"5/12 sediment §3.3 待补"，已知未完工区 |
+| 2 | exchange / 同上 | `timeoutVerifying uses verifying_started_at threshold (~30 min) for state filter` | **J2 线** | 同上文件，需域主判断 |
+| 3 | exchange / 同上 | `timeoutVerifying broadcasts timeout_v1 + transitions reopens (per 4/11 KI-20 sediment)` | **J2 线** | 同上 |
+| 4 | system / `llm-health.test.mjs` | `llm-watchdog.mjs uses env var override (Anti-pattern #1)`——断言源码含 `process.env.LITELLM_EXE` | **KANet-UI（我）** | 已查明根因：`scripts/llm-watchdog.mjs` 代理组件早已从"独立 LiteLLM 可执行文件"演进成"起一个 Node 脚本"（`PROXY_SCRIPT` 覆盖点，`spawn('node', [PROXY_SCRIPT], ...)`），全文件零 `LITELLM_EXE` 引用——这是**测试断言过期**，非代码缺口。修法方向：把断言检查列表 `['KANET_ROOT', 'LLAMA_EXE', 'LITELLM_EXE', 'CONSOLE_URL']` 里的 `LITELLM_EXE` 换成 `PROXY_SCRIPT`（纯测试文件改动，不碰生产代码）。**本次未直接改，待 Bettor 确认后再动**（测试断言修改仍按流程走）。 |
+| 5 | system / `ws-proxy-hijack-detection.test.mjs` | `relay-manager.js exports getRelayRpcState with 5s timeout override`——正则 `5000\)` 要求 `5000` 后紧跟右括号 | **KANet-UI（我）** | 已查明根因：`relay-manager.js:491` 实际调用是 `sendCommandAsync(relayNodeId, { type: 'get_rpc_state' }, 5000, 'legacy-unmigrated')`——5s 超时确实传了（行为本身是对的），但后面多了一个 T-J2-2026-05-12 加的 origin 追踪参数 `'legacy-unmigrated'`，导致正则要求的"`5000` 后紧跟 `)`"匹配不上。这是**测试正则过严/过期**，非代码缺口。修法方向：正则松到不锚定 `5000` 后必须立即闭括号（如 `5000[,)]`）。**本次未直接改，待 Bettor 确认后再动**（同上，测试断言修改仍按流程走）。 |
+
 ## 4. 建议（未自行实施，留 Bettor/NWT 定夺）
 
-1. **优先级最高**：predictions 域 discovery loop 错误隔离（§1-A）——现状是"63 个测试的存在与否对 CI/人工都不可见"，比明确的 RED 更危险（RED 至少有人看得见）。
-2. system 域 4 个 env 污染文件分档认领（§1-B）——tripwire 已经在正确报警，缺的是人来判定 bug vs 合法前置。
-3. exchange SOL/TRON 3 项 + system 2 项真实 RED（§1-C/D）——域主判断测试断言是否已过期 or 代码确有缺口。
+1. ~~**优先级最高**：predictions 域 discovery loop 错误隔离（§1-A）~~ — **v0.2：已落码**，见 §1-A 更新。
+2. ~~system 域 4 个 env 污染文件分档认领（§1-B）~~ — **v0.2：已分档**，见 §6，判定"4 个文件均无需修改"。
+3. exchange SOL/TRON 3 项 + system 2 项真实 RED（§1-C/D）— **v0.2：已开票+归属**，见 §7；exchange 3 项转 J2 线；system 2 项我已查明根因+修法方向，待 Bettor 确认后动手（均为测试文件改动，不碰生产代码）。
 4. 若要拿到 broker/exchange/support 43 个 "fetch failed" 用例的真实红绿判定，需要另起一个隔离 console 实例（非主网/非 TN12）重跑，非本次任务范围。
 
 ## 5. 过程附注
