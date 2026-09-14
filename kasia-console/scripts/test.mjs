@@ -90,10 +90,17 @@ async function main() {
   const allFlag = args.includes('--all');
   const isTelegram = domain === 'tg-bot' || domain === 'telegram';  // live-smoke tg-bot tests (subprocess)
   const quietFlag = args.includes('--quiet');  // 只输出 summary, 不 dump 每 case 详情 (post-commit 用)
+  // rule 82(NWT GREEN 8578050b·ledger 1233/1251, 设计 docs/2026-09-14-kanetui-test-runner-skip-gate-and-
+  // console-url-safety-design-v0.1.md §1.2): --case= 显式点名单个 case 时原 isBatch 恒 false, skip_in_batch
+  // 保护形同虚设——RC_01_buy_kas_real_full.test.mjs(真钱 skip_in_batch+real_chain)被遍历脚本用 --case=
+  // 逐个跑到时才发现完全不受保护(手动 TaskStop 止损, 本人+Bettor 各自独立核实无真实广播)。
+  // allowManualOnly 显式旗标, 默认不给 = 保护永远激活, 与"怎么选 case"(--case/--domain/--all/--tag)解耦。
+  const allowManualOnly = args.includes('--allow-manual-only');
   if (!caseFile && !domain && !tag && !allFlag && adversarial === null) {
     console.log('Usage: node scripts/test.mjs --case=<path> | --domain=<broker|seeker|...> | --tag=<critical|security|...> | --all');
     console.log('       --adversarial[=<category>]  load probes.mjs adversarial probes (phase 7a, --adversarial=race for race only)');
     console.log('       --quiet  仅输出 summary');
+    console.log('       --allow-manual-only  绕过 skip_in_batch/skip_in_cron 保护(含 real_chain 真花钱用例), 默认不给');
     process.exit(1);
   }
 
@@ -116,6 +123,10 @@ async function main() {
   // J1 phase 7a-1 polish (NWT 7c66dd00 finding): --adversarial 显式 override skip_in_batch
   // (用户明确要跑 adversarial, 不是 cron batch 默认 — adversarial 自身 manual-only 设计是为了 cron 不污染).
   const isBatch = !caseFile && adversarial === null;
+  // rule 82: 保护是否激活跟"怎么选 case"完全解耦——不共用 isBatch, 默认永远激活, 只有 --allow-manual-only
+  // 能关。--adversarial 走的是完全不同的 case 来源(loadAdversarialCases 产出的 probe DSL 对象, 不是文件系统
+  // 里带 skip_in_batch 字段的 .test.mjs), 不受这条影响, isBatch 原变量的既有语义/既有用途不变。
+  const skipGateActive = !allowManualOnly;
   // Build unified case list: file-loaded + adapter-loaded adversarial probes
   const casesToRun = [];
   // ── ② 检测哨: import 期 env 污染 trip-wire(Bettor 2026-08-09 16:47 裁 · J2 实现 · NWT 审)──
@@ -162,11 +173,29 @@ async function main() {
     console.log('');
   }
   for (const adv of adversarialCases) casesToRun.push(adv);
+  // rule 82 LOUD 提示：--allow-manual-only 关闭了保护, 跑之前把绕过的范围说清楚——尤其 real_chain
+  // 这个真花钱的子集单独点出来, 不是所有 skip_in_batch 用例都花钱(有些只是"跑起来慢/依赖外部状态不
+  // 适合 cron"), 不能笼统一句带过。
+  if (allowManualOnly) {
+    const manualOnlyCases = casesToRun.filter((c) => c.skip_in_batch || c.skip_in_cron);
+    const realChainCases = manualOnlyCases.filter((c) => (c.tags || []).includes('real_chain'));
+    if (manualOnlyCases.length) {
+      console.log('');
+      console.log(`⚠⚠⚠ --allow-manual-only 已绕过 skip_in_batch/skip_in_cron 保护 —— 即将真实运行 ${manualOnlyCases.length} 个标记用例：`);
+      for (const c of manualOnlyCases) console.log(`   ${c.id}${(c.tags || []).includes('real_chain') ? '  🔴 real_chain(真花钱)' : ''}`);
+      if (realChainCases.length) {
+        console.log(`🔴🔴🔴 其中 ${realChainCases.length} 个带 real_chain tag —— 真实链上广播+真实花费, 不是模拟。确认这是你想要的。`);
+      }
+      console.log('');
+    }
+  }
   for (const testCase of casesToRun) {
     // tag filter (case 必含此 tag)
     if (tag && !(testCase.tags || []).includes(tag)) continue;
-    if (isBatch && testCase.skip_in_batch) {
-      if (!quietFlag) console.log(`SKIP (manual-only): ${testCase.id}`);
+    // rule 82: 同时读 skip_in_batch 和 skip_in_cron 两个字段——skip_in_cron 此前从未被任何 runner 代码
+    // 读取过(全仓 grep 核实过, 纯装饰), 这次一并接上, 不再只认 skip_in_batch 一个。
+    if (skipGateActive && (testCase.skip_in_batch || testCase.skip_in_cron)) {
+      if (!quietFlag) console.log(`SKIP (manual-only, pass --allow-manual-only to run): ${testCase.id}`);
       totalSkipped++;
       continue;
     }
