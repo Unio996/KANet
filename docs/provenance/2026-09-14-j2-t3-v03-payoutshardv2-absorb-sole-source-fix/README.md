@@ -1,5 +1,9 @@
 # PayoutShardV2.absorb — sole-source MUST-FIX（ledger 1208，Codex 独立发现，Bettor 核过成立）
 
+> 📌 **状态注记（2026-09-14 · Bettor ledger 1209）**：本目录 6 条向量已原样并入
+> `docs/provenance/2026-09-14-j2-t3-v03-payoutshardv2-current-suite/`（完整现行套件）。本目录继续有效，
+> 不是历史陈旧，两处不冲突。
+
 与 `PayoutShard.sil` 那半（`docs/provenance/2026-09-14-j2-t3-v03-payoutshard-absorb-sole-source-fix/
 README.md`）逐字同构的问题、同构的修法——`PayoutShardV2.sil` 的 `absorb` 历来就是 `PayoutShard.sil` 的
 `absorb` 逐字复制（ZK-native 结算变体，`absorb` 归集逻辑一字不动），本文件只记这一半特有的坐标差异，

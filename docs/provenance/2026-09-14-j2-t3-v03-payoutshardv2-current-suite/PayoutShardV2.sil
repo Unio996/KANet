@@ -1,0 +1,660 @@
+// PayoutShardV2.sil — ZK-native 结算的 committee-attest + fund-consolidation 层(J2, 2026-07-07)。
+//   设计文档: docs/2026-07-07-zk-genesis-mint-pipeline-design.md(v2.1, NWT+Bettor 设计层面 GREEN)。
+//
+//   ★ REGRESSION-safe(同 CloseZkRepro3→4 纪律): 相对 PayoutShard.sil 的改动逐条列清单，方便 NWT diff 审：
+//     ① ctor 新增 5 字段: closeZkTmplAnchor(§锚定用) + init_attestedWinner/init_attestedAtMs/
+//        init_betsRootBaked/init_refundRootBaked(ZK 结算需要的委员背书值，genesis 起始占位)。
+//     ② absorb 逻辑【一字不动】——committee 验证/守恒 weld 全部原样；仅 validateOutputState 补齐新增 4 个
+//        state 字段的透传(attestedWinner/attestedAtMs/betsRootBaked/refundRootBaked 不变)。
+//     ③ close_attest 委员 ①②③(threshold/pubkey-distinctness/depth-8 merkle membership)逻辑【一字不动】；
+//        新增 4 个 witness 参数(new_attestedWinner/new_betsRoot/new_refundRoot/new_attestedAtMs)，
+//        一并进 committee sighash 覆盖，写入 state。
+//     ④ cancel_attest 逻辑【一字不动】；validateOutputState 补齐新增 4 字段透传(不变，cancel 路径跟 ZK 无关)。
+//     ⑤ 🔴 claim entrypoint 整个物理删除(不是 flag 门)——Bettor 拍板：若赢家在 zk_handoff 广播前走这条路
+//        领走一份，CloseZkRepro4 的 guest proof 仍按全量原始 bets 算 payoutRoot，会导致后续赢家分不到钱
+//        (分配数学错配，不是资金安全但是正确性 bug)。ZK-native 市场的赢家支付路径 = CloseZkRepro4 独占。
+//     ⑥ refund_claim 逻辑【一字不动】——保留：closed==2(cancel 路径)专用，跟 zk_handoff(closed==1)互斥
+//        (closed 是 write-once 0→1 XOR 0→2)，不影响。validateOutputState 补齐新增 4 字段透传(不变)。
+//     ⑦ 新增 zk_handoff entrypoint：committee attest(closed==1)后，一次性把全部 consolidated_pool
+//        交接给新铸的 CloseZkRepro4 genesis output。无 continuation(同 escape_claim 的 last-claimant
+//        分支手法，UTXO 花过即不存在，零 double-invoke 风险)。
+//
+//   🔑 covenant 身份 / cov_id provenance 机制：跟 PayoutShard.sil 完全一致(见该文件顶部注释)，
+//     ShardLeaf.sil 零改动(J2 源码级 verify: consolidate_to_payout 只认 cov_id 身份，不认 bytecode 类型)。
+//
+//   ⚠ zk_handoff 的字节级 splice 机制(NWT 待审重点)：CloseZkRepro4 genesis redeem 的 ctor 值嵌入，
+//     经 silverc 实测(J2 2026-07-07)证实【至少部分 int 字段用 minimal-push 变长编码，非固定宽度】
+//     (attestedAtSeconds 从 0 改到 999，编译产物总长度 +2 字节)——这意味着 off-chain genesis-mint 工具
+//     构造 CloseZkRepro4 的 ctor 参数时，必须对所有会被 zk_handoff 见证/拼接的字段使用【强制固定宽度编码】
+//     (同 pool-payout-root.mjs 的 serializeI64 fixed-8-byte 模式，不能依赖 silverc 默认的 minimal-push
+//     ctor 参数嵌入)，否则 witness 供的 prefix/suffix 分段点会因为字段宽度不定而对不上。这条留给 NWT
+//     byte-level 审核 + 实际 diff 时用 canonical-pipeline 工具核对，不在本文件里假装已经解决。
+
+pragma silverscript ^0.1.0;
+
+contract PayoutShardV2(
+    byte[32] poolMerkleRoot,
+    byte[32] predicate_commit,
+    byte[32] closeZkTmplAnchor,        // 新增: CloseZkRepro4 编译模板(prefix+suffix)的 blake2b 锚 hash
+    // —— v0.3 §2/§3 代币化锚(T3, 与 PayoutShard.sil 同形, Bettor ledger 1151/1163): 市场只嵌一个 32 字节
+    //   token_tmpl_hash, 不烤代币 prefix/suffix 字节本身。prefix/suffix 改 witness 供(P13 已验证形), 见下
+    //   scanOwnedTokenInputs/noTokenInput 两个 helper 的签名——不再是 ctor 参数。
+    byte[32] token_tmpl_hash,
+    // —— genesis State ——
+    int      init_consolidated_pool,
+    int      init_closed,
+    byte[32] init_payoutRoot,
+    int init_w0, int init_w1, int init_w2, int init_w3, int init_w4, int init_w5, int init_w6, int init_w7, int init_w8,
+    int init_w9, int init_w10, int init_w11, int init_w12, int init_w13, int init_w14, int init_w15, int init_w16,
+    // —— 新增 ZK 结算 state(genesis 起始占位: -1/0/ZERO32/ZERO32，close_attest 时委员写真值) ——
+    int      init_attestedWinner,
+    int      init_attestedAtMs,
+    byte[32] init_betsRootBaked,
+    byte[32] init_refundRootBaked,
+    // —— v0.3 §2/§3 代币化(T3, ledger 1183): refund_claim 目的地重定向到新建 KanetTokenClaim, 同
+    //   RefundClaim.sil/CloseZkV2.sil/RootClaim.sil/PayoutShard.sil 三件套, P13 witness+blake3 现场核。
+    byte[32] claim_tmpl_hash,
+    byte[32] market_suffix_hash
+) {
+    int consolidated_pool = init_consolidated_pool;
+    int closed            = init_closed;
+    byte[32] payoutRoot   = init_payoutRoot;
+    int w0 = init_w0; int w1 = init_w1; int w2 = init_w2; int w3 = init_w3; int w4 = init_w4; int w5 = init_w5;
+    int w6 = init_w6; int w7 = init_w7; int w8 = init_w8; int w9 = init_w9; int w10 = init_w10; int w11 = init_w11;
+    int w12 = init_w12; int w13 = init_w13; int w14 = init_w14; int w15 = init_w15; int w16 = init_w16;
+    int attestedWinner        = init_attestedWinner;
+    int attestedAtMs          = init_attestedAtMs;
+    byte[32] betsRootBaked    = init_betsRootBaked;
+    byte[32] refundRootBaked = init_refundRootBaked;
+
+    // KanetTokenClaim.sil 隐式 State 布局镜像(同 RefundClaim.sil/CloseZkV2.sil/RootClaim.sil/
+    // PayoutShard.sil 用途: claim 家族目的地重定向)
+    struct ClaimState {
+        byte[32] market_cov_id;
+        byte[32] winner_pk;
+        int      amount;
+        byte[32] token_tmpl_hash;
+        byte[32] market_suffix_hash;
+    }
+    // KanetTestToken 六字段布局镜像(同 PayoutShard.sil §T3 v0.3 §2/§3 代币化)
+    struct TokenState {
+        int      amount;
+        byte[32] owner;
+        byte     owner_scheme;
+        byte     borrow_scheme;
+        byte[32] borrow_guard;
+        byte[32] extension_commitment;
+    }
+    byte constant TOKEN_SCHEME_COVENANT_ID = 0x04;
+    byte constant TOKEN_BORROW_DISABLED    = 0x00;
+    // ★ 1122 边界纪律(同 PayoutShard.sil): require(len<=bound) 先拒超界交易 + 循环展开深度用同一个常量。
+    int constant MAX_INS_SCAN = 8;
+    // ★ B 类入口 KAS dust weld 下限(同 PayoutShard.sil, kasia-relay/src/lib/p2sh.mjs:129 MIN_OUTPUT_DUST_SOMPI)。
+    int constant DUST_MIN = 1000;
+    // ★ V-T-8 绕路(同 PayoutShard.sil, docs/provenance/2026-09-14-j2-vt8-read-external-plus-self-continue-probe/):
+    //   absorb 需要 readInputStateWithTemplate(读 shard 代币状态) + 自续本合约 State 共存, 触发运行期崩溃,
+    //   改手写等价形式。以下两常量按本文件*实际编译产物*量测得出(measure_payoutshardv2_state_span.mjs, 见
+    //   provenance), 不是拍脑袋照抄 PayoutShard.sil 的值——本文件 State 是 24 字段(比 PayoutShard.sil 多
+    //   attestedWinner/attestedAtMs/betsRootBaked/refundRootBaked 四个), 字节数不同, 必须独立测。
+    int constant OWN_PREFIX_LEN = 1;
+    int constant OWN_STATE_LEN  = 288;
+
+    // (A) v0.3 §2/§3 + 1151 P13 形(同 PayoutShard.sil 逐字复制): 输入侧扫描。
+    function scanOwnedTokenInputs(byte[] tok_prefix, byte[] tok_suffix) : int {
+        require(blake3((tok_prefix.length as byte[8]) + tok_prefix + (tok_suffix.length as byte[8]) + tok_suffix) == token_tmpl_hash);
+        require(tx.inputs.length <= MAX_INS_SCAN);
+        int total = 0;
+        int L = tok_suffix.length;
+        for (i, 0, tx.inputs.length, MAX_INS_SCAN) {
+            byte[] ss = tx.inputs[i].sigScript;
+            int n = ss.length;
+            bool looksLikeToken = false;
+            if (n >= L) { looksLikeToken = ss.slice(n - L, n) == tok_suffix; }
+            if (looksLikeToken) {
+                TokenState tk = readInputStateWithTemplate(i, tok_prefix.length, tok_suffix.length, token_tmpl_hash);
+                if (tk.owner == OpInputCovenantId(this.activeInputIndex)) {
+                    total = total + tk.amount;
+                }
+            }
+        }
+        return total;
+    }
+    // ★ ledger 1208 MUST-FIX(同 PayoutShard.sil 逐字复制, Codex 独立发现, Bettor 核过成立): absorb 原来只验
+    //   shardInIdx 单点, 不证明它是本笔交易里唯一的"同模板、非本 PS 持有"代币输入——两个合法 ShardLeaf
+    //   同笔各自 consolidate_to_payout, absorb 只点名一个, 另一个被静默销毁。
+    function countStrayNonOwnedTokenInputs(byte[] tok_prefix, byte[] tok_suffix, int excludeIdx) : int {
+        require(blake3((tok_prefix.length as byte[8]) + tok_prefix + (tok_suffix.length as byte[8]) + tok_suffix) == token_tmpl_hash);
+        require(tx.inputs.length <= MAX_INS_SCAN);
+        int strayCount = 0;
+        int L = tok_suffix.length;
+        for (i, 0, tx.inputs.length, MAX_INS_SCAN) {
+            if (i != excludeIdx) {
+                byte[] ss = tx.inputs[i].sigScript;
+                int n = ss.length;
+                bool looksLikeToken = false;
+                if (n >= L) { looksLikeToken = ss.slice(n - L, n) == tok_suffix; }
+                if (looksLikeToken) {
+                    TokenState tk = readInputStateWithTemplate(i, tok_prefix.length, tok_suffix.length, token_tmpl_hash);
+                    if (tk.owner != OpInputCovenantId(this.activeInputIndex)) {
+                        strayCount = strayCount + 1;
+                    }
+                }
+            }
+        }
+        return strayCount;
+    }
+    // (B) v0.3 §2/§3 + 1151 P13 形(同 PayoutShard.sil 逐字复制): 不在场证明。
+    function noTokenInput(byte[] tok_prefix, byte[] tok_suffix) : bool {
+        require(blake3((tok_prefix.length as byte[8]) + tok_prefix + (tok_suffix.length as byte[8]) + tok_suffix) == token_tmpl_hash);
+        require(tx.inputs.length <= MAX_INS_SCAN);
+        bool found = false;
+        int L = tok_suffix.length;
+        for (i, 0, tx.inputs.length, MAX_INS_SCAN) {
+            byte[] ss = tx.inputs[i].sigScript;
+            int n = ss.length;
+            if (n >= L) {
+                if (ss.slice(n - L, n) == tok_suffix) { found = true; }
+            }
+        }
+        return !found;
+    }
+
+    // —— entry 0: absorb —— [v0.3 §2/§3 代币化: 归集逻辑保留, KAS value weld 换代币 amount weld, 同 PayoutShard.sil] ——
+    // ★ V-T-8 绕路: 自续约手写编码, 不走 validateOutputState(见上方 OWN_PREFIX_LEN/OWN_STATE_LEN 注释)。
+    entry absorb(int selfOutIdx, int shardInIdx, int tok_out, int shard_amount, byte[] tok_prefix, byte[] tok_suffix) {
+        require(closed == 0);
+        int owned_total = scanOwnedTokenInputs(tok_prefix, tok_suffix);
+        require(owned_total == consolidated_pool);
+        TokenState shardTk = readInputStateWithTemplate(shardInIdx, tok_prefix.length, tok_suffix.length, token_tmpl_hash);
+        require(shardTk.amount == shard_amount);
+        // ★ ledger 1208 MUST-FIX(同 PayoutShard.sil): shardInIdx 必须真是非本 PS 持有 + 本笔无任何未被
+        //   shardInIdx 说明的同模板陌生代币输入(唯一来源证明)。
+        require(shardTk.owner != OpInputCovenantId(this.activeInputIndex));
+        require(countStrayNonOwnedTokenInputs(tok_prefix, tok_suffix, shardInIdx) == 0);
+        validateOutputStateWithInputTemplate(tok_out, TokenState {
+            amount:               consolidated_pool + shard_amount,
+            owner:                OpInputCovenantId(this.activeInputIndex),
+            owner_scheme:         TOKEN_SCHEME_COVENANT_ID,
+            borrow_scheme:        TOKEN_BORROW_DISABLED,
+            borrow_guard:         byte[32](0x0000000000000000000000000000000000000000000000000000000000000000),
+            extension_commitment: byte[32](0x0000000000000000000000000000000000000000000000000000000000000000)
+        }, shardInIdx, tok_prefix.length, tok_suffix.length, token_tmpl_hash);
+        // ★ V-T-8 绕路: 手写编码新 State(24 字段, 逐字段 tag+payload, 顺序与 ctor 声明顺序一致——
+        //   consolidated_pool/closed/payoutRoot/w0..w16/attestedWinner/attestedAtMs/betsRootBaked/refundRootBaked。
+        //   int=0x08+8字节小端, byte[32]=0x20+32字节原样, 除 consolidated_pool 外全部原样透传。
+        byte[] newStateBytes = byte[](8 as byte[1]) + byte[]((consolidated_pool + shard_amount) as byte[8])
+                              + byte[](8 as byte[1]) + byte[](closed as byte[8])
+                              + byte[](32 as byte[1]) + byte[](payoutRoot)
+                              + byte[](8 as byte[1]) + byte[](w0 as byte[8])
+                              + byte[](8 as byte[1]) + byte[](w1 as byte[8])
+                              + byte[](8 as byte[1]) + byte[](w2 as byte[8])
+                              + byte[](8 as byte[1]) + byte[](w3 as byte[8])
+                              + byte[](8 as byte[1]) + byte[](w4 as byte[8])
+                              + byte[](8 as byte[1]) + byte[](w5 as byte[8])
+                              + byte[](8 as byte[1]) + byte[](w6 as byte[8])
+                              + byte[](8 as byte[1]) + byte[](w7 as byte[8])
+                              + byte[](8 as byte[1]) + byte[](w8 as byte[8])
+                              + byte[](8 as byte[1]) + byte[](w9 as byte[8])
+                              + byte[](8 as byte[1]) + byte[](w10 as byte[8])
+                              + byte[](8 as byte[1]) + byte[](w11 as byte[8])
+                              + byte[](8 as byte[1]) + byte[](w12 as byte[8])
+                              + byte[](8 as byte[1]) + byte[](w13 as byte[8])
+                              + byte[](8 as byte[1]) + byte[](w14 as byte[8])
+                              + byte[](8 as byte[1]) + byte[](w15 as byte[8])
+                              + byte[](8 as byte[1]) + byte[](w16 as byte[8])
+                              + byte[](8 as byte[1]) + byte[](attestedWinner as byte[8])
+                              + byte[](8 as byte[1]) + byte[](attestedAtMs as byte[8])
+                              + byte[](32 as byte[1]) + byte[](betsRootBaked)
+                              + byte[](32 as byte[1]) + byte[](refundRootBaked);
+        byte[] ownSig = tx.inputs[this.activeInputIndex].sigScript;
+        int ownLen = ownSig.length;
+        byte[] ownPrefix = ownSig.slice(0, OWN_PREFIX_LEN);
+        byte[] ownSuffix = ownSig.slice(OWN_PREFIX_LEN + OWN_STATE_LEN, ownLen);
+        byte[] expectedRedeem = ownPrefix + newStateBytes + ownSuffix;
+        byte[32] expectedHash = blake2b(expectedRedeem);
+        byte[37] expectedSpk = new ScriptPubKeyP2SH(expectedHash);
+        require(tx.outputs[selfOutIdx].scriptPubKey == byte[](expectedSpk));
+        require(tx.outputs[selfOutIdx].value >= DUST_MIN);  // KAS 侧只剩 dust, 代币 amount 才是真实守恒对象
+    }
+
+    // —— entry 1: close_attest —— [REGRESSION: 委员①②③逻辑一字不动；新增4 witness参数+state透传] ——
+    entry close_attest(
+        int      selfOutIdx,
+        byte[32] new_payoutRoot,
+        int      new_attestedWinner,      // 新增
+        byte[32] new_betsRoot,            // 新增
+        byte[32] new_refundRoot,          // 新增
+        int      new_attestedAtMs,        // 新增, witness供(self-read tx.time 经实测证实不可行，见文件头注释)
+        sig      c0Sig, sig c1Sig, sig c2Sig, sig c3Sig, sig c4Sig,
+        byte[32] committeePkHash,
+        byte[32] c0Pk, byte[32] c1Pk, byte[32] c2Pk, byte[32] c3Pk, byte[32] c4Pk,
+        int      c0Idx, int c1Idx, int c2Idx, int c3Idx, int c4Idx,
+        byte[32] c0s0, byte[32] c0s1, byte[32] c0s2, byte[32] c0s3, byte[32] c0s4, byte[32] c0s5, byte[32] c0s6, byte[32] c0s7,
+        byte[32] c1s0, byte[32] c1s1, byte[32] c1s2, byte[32] c1s3, byte[32] c1s4, byte[32] c1s5, byte[32] c1s6, byte[32] c1s7,
+        byte[32] c2s0, byte[32] c2s1, byte[32] c2s2, byte[32] c2s3, byte[32] c2s4, byte[32] c2s5, byte[32] c2s6, byte[32] c2s7,
+        byte[32] c3s0, byte[32] c3s1, byte[32] c3s2, byte[32] c3s3, byte[32] c3s4, byte[32] c3s5, byte[32] c3s6, byte[32] c3s7,
+        byte[32] c4s0, byte[32] c4s1, byte[32] c4s2, byte[32] c4s3, byte[32] c4s4, byte[32] c4s5, byte[32] c4s6, byte[32] c4s7,
+        byte[]   tok_prefix, byte[] tok_suffix         // v0.3 §2/§3 + 1151 P13 形: witness 供代币模板字节, noTokenInput 内部现场核 token_tmpl_hash
+    ) {
+        require(closed == 0);
+        require(noTokenInput(tok_prefix, tok_suffix));      // ★ v0.3 §2/§3: B 类不在场证明(同 PayoutShard.sil close_attest)
+        require(blake2b(byte[](predicate_commit)) != predicate_commit);
+        int validSigs = 0;
+        if (checkSig(c0Sig, pubkey(c0Pk))) { validSigs = validSigs + 1; }
+        if (checkSig(c1Sig, pubkey(c1Pk))) { validSigs = validSigs + 1; }
+        if (checkSig(c2Sig, pubkey(c2Pk))) { validSigs = validSigs + 1; }
+        if (checkSig(c3Sig, pubkey(c3Pk))) { validSigs = validSigs + 1; }
+        if (checkSig(c4Sig, pubkey(c4Pk))) { validSigs = validSigs + 1; }
+        require(validSigs >= 4);
+        require(c0Pk != c1Pk); require(c0Pk != c2Pk); require(c0Pk != c3Pk); require(c0Pk != c4Pk);
+        require(c1Pk != c2Pk); require(c1Pk != c3Pk); require(c1Pk != c4Pk);
+        require(c2Pk != c3Pk); require(c2Pk != c4Pk);
+        require(c3Pk != c4Pk);
+        byte[64] cConcat0 = c0Pk + c1Pk;
+        byte[96] cConcat1 = cConcat0 + c2Pk;
+        byte[128] cConcat2 = cConcat1 + c3Pk;
+        byte[160] cConcat3 = cConcat2 + c4Pk;
+        require(blake2b(byte[](cConcat3)) == committeePkHash);
+        require(c0Idx >= 0); require(c0Idx < 256);
+        byte[32] c0Cur = blake2b(byte[](c0Pk));
+        int c0b0 = c0Idx % 2;       if (c0b0 == 0) { c0Cur = blake2b(byte[](c0Cur) + byte[](c0s0)); } else { c0Cur = blake2b(byte[](c0s0) + byte[](c0Cur)); }
+        int c0b1 = (c0Idx / 2) % 2;  if (c0b1 == 0) { c0Cur = blake2b(byte[](c0Cur) + byte[](c0s1)); } else { c0Cur = blake2b(byte[](c0s1) + byte[](c0Cur)); }
+        int c0b2 = (c0Idx / 4) % 2;  if (c0b2 == 0) { c0Cur = blake2b(byte[](c0Cur) + byte[](c0s2)); } else { c0Cur = blake2b(byte[](c0s2) + byte[](c0Cur)); }
+        int c0b3 = (c0Idx / 8) % 2;  if (c0b3 == 0) { c0Cur = blake2b(byte[](c0Cur) + byte[](c0s3)); } else { c0Cur = blake2b(byte[](c0s3) + byte[](c0Cur)); }
+        int c0b4 = (c0Idx / 16) % 2; if (c0b4 == 0) { c0Cur = blake2b(byte[](c0Cur) + byte[](c0s4)); } else { c0Cur = blake2b(byte[](c0s4) + byte[](c0Cur)); }
+        int c0b5 = (c0Idx / 32) % 2; if (c0b5 == 0) { c0Cur = blake2b(byte[](c0Cur) + byte[](c0s5)); } else { c0Cur = blake2b(byte[](c0s5) + byte[](c0Cur)); }
+        int c0b6 = (c0Idx / 64) % 2; if (c0b6 == 0) { c0Cur = blake2b(byte[](c0Cur) + byte[](c0s6)); } else { c0Cur = blake2b(byte[](c0s6) + byte[](c0Cur)); }
+        int c0b7 = (c0Idx / 128) % 2;if (c0b7 == 0) { c0Cur = blake2b(byte[](c0Cur) + byte[](c0s7)); } else { c0Cur = blake2b(byte[](c0s7) + byte[](c0Cur)); }
+        require(c0Cur == poolMerkleRoot);
+        require(c1Idx >= 0); require(c1Idx < 256);
+        byte[32] c1Cur = blake2b(byte[](c1Pk));
+        int c1b0 = c1Idx % 2;       if (c1b0 == 0) { c1Cur = blake2b(byte[](c1Cur) + byte[](c1s0)); } else { c1Cur = blake2b(byte[](c1s0) + byte[](c1Cur)); }
+        int c1b1 = (c1Idx / 2) % 2;  if (c1b1 == 0) { c1Cur = blake2b(byte[](c1Cur) + byte[](c1s1)); } else { c1Cur = blake2b(byte[](c1s1) + byte[](c1Cur)); }
+        int c1b2 = (c1Idx / 4) % 2;  if (c1b2 == 0) { c1Cur = blake2b(byte[](c1Cur) + byte[](c1s2)); } else { c1Cur = blake2b(byte[](c1s2) + byte[](c1Cur)); }
+        int c1b3 = (c1Idx / 8) % 2;  if (c1b3 == 0) { c1Cur = blake2b(byte[](c1Cur) + byte[](c1s3)); } else { c1Cur = blake2b(byte[](c1s3) + byte[](c1Cur)); }
+        int c1b4 = (c1Idx / 16) % 2; if (c1b4 == 0) { c1Cur = blake2b(byte[](c1Cur) + byte[](c1s4)); } else { c1Cur = blake2b(byte[](c1s4) + byte[](c1Cur)); }
+        int c1b5 = (c1Idx / 32) % 2; if (c1b5 == 0) { c1Cur = blake2b(byte[](c1Cur) + byte[](c1s5)); } else { c1Cur = blake2b(byte[](c1s5) + byte[](c1Cur)); }
+        int c1b6 = (c1Idx / 64) % 2; if (c1b6 == 0) { c1Cur = blake2b(byte[](c1Cur) + byte[](c1s6)); } else { c1Cur = blake2b(byte[](c1s6) + byte[](c1Cur)); }
+        int c1b7 = (c1Idx / 128) % 2;if (c1b7 == 0) { c1Cur = blake2b(byte[](c1Cur) + byte[](c1s7)); } else { c1Cur = blake2b(byte[](c1s7) + byte[](c1Cur)); }
+        require(c1Cur == poolMerkleRoot);
+        require(c2Idx >= 0); require(c2Idx < 256);
+        byte[32] c2Cur = blake2b(byte[](c2Pk));
+        int c2b0 = c2Idx % 2;       if (c2b0 == 0) { c2Cur = blake2b(byte[](c2Cur) + byte[](c2s0)); } else { c2Cur = blake2b(byte[](c2s0) + byte[](c2Cur)); }
+        int c2b1 = (c2Idx / 2) % 2;  if (c2b1 == 0) { c2Cur = blake2b(byte[](c2Cur) + byte[](c2s1)); } else { c2Cur = blake2b(byte[](c2s1) + byte[](c2Cur)); }
+        int c2b2 = (c2Idx / 4) % 2;  if (c2b2 == 0) { c2Cur = blake2b(byte[](c2Cur) + byte[](c2s2)); } else { c2Cur = blake2b(byte[](c2s2) + byte[](c2Cur)); }
+        int c2b3 = (c2Idx / 8) % 2;  if (c2b3 == 0) { c2Cur = blake2b(byte[](c2Cur) + byte[](c2s3)); } else { c2Cur = blake2b(byte[](c2s3) + byte[](c2Cur)); }
+        int c2b4 = (c2Idx / 16) % 2; if (c2b4 == 0) { c2Cur = blake2b(byte[](c2Cur) + byte[](c2s4)); } else { c2Cur = blake2b(byte[](c2s4) + byte[](c2Cur)); }
+        int c2b5 = (c2Idx / 32) % 2; if (c2b5 == 0) { c2Cur = blake2b(byte[](c2Cur) + byte[](c2s5)); } else { c2Cur = blake2b(byte[](c2s5) + byte[](c2Cur)); }
+        int c2b6 = (c2Idx / 64) % 2; if (c2b6 == 0) { c2Cur = blake2b(byte[](c2Cur) + byte[](c2s6)); } else { c2Cur = blake2b(byte[](c2s6) + byte[](c2Cur)); }
+        int c2b7 = (c2Idx / 128) % 2;if (c2b7 == 0) { c2Cur = blake2b(byte[](c2Cur) + byte[](c2s7)); } else { c2Cur = blake2b(byte[](c2s7) + byte[](c2Cur)); }
+        require(c2Cur == poolMerkleRoot);
+        require(c3Idx >= 0); require(c3Idx < 256);
+        byte[32] c3Cur = blake2b(byte[](c3Pk));
+        int c3b0 = c3Idx % 2;       if (c3b0 == 0) { c3Cur = blake2b(byte[](c3Cur) + byte[](c3s0)); } else { c3Cur = blake2b(byte[](c3s0) + byte[](c3Cur)); }
+        int c3b1 = (c3Idx / 2) % 2;  if (c3b1 == 0) { c3Cur = blake2b(byte[](c3Cur) + byte[](c3s1)); } else { c3Cur = blake2b(byte[](c3s1) + byte[](c3Cur)); }
+        int c3b2 = (c3Idx / 4) % 2;  if (c3b2 == 0) { c3Cur = blake2b(byte[](c3Cur) + byte[](c3s2)); } else { c3Cur = blake2b(byte[](c3s2) + byte[](c3Cur)); }
+        int c3b3 = (c3Idx / 8) % 2;  if (c3b3 == 0) { c3Cur = blake2b(byte[](c3Cur) + byte[](c3s3)); } else { c3Cur = blake2b(byte[](c3s3) + byte[](c3Cur)); }
+        int c3b4 = (c3Idx / 16) % 2; if (c3b4 == 0) { c3Cur = blake2b(byte[](c3Cur) + byte[](c3s4)); } else { c3Cur = blake2b(byte[](c3s4) + byte[](c3Cur)); }
+        int c3b5 = (c3Idx / 32) % 2; if (c3b5 == 0) { c3Cur = blake2b(byte[](c3Cur) + byte[](c3s5)); } else { c3Cur = blake2b(byte[](c3s5) + byte[](c3Cur)); }
+        int c3b6 = (c3Idx / 64) % 2; if (c3b6 == 0) { c3Cur = blake2b(byte[](c3Cur) + byte[](c3s6)); } else { c3Cur = blake2b(byte[](c3s6) + byte[](c3Cur)); }
+        int c3b7 = (c3Idx / 128) % 2;if (c3b7 == 0) { c3Cur = blake2b(byte[](c3Cur) + byte[](c3s7)); } else { c3Cur = blake2b(byte[](c3s7) + byte[](c3Cur)); }
+        require(c3Cur == poolMerkleRoot);
+        require(c4Idx >= 0); require(c4Idx < 256);
+        byte[32] c4Cur = blake2b(byte[](c4Pk));
+        int c4b0 = c4Idx % 2;       if (c4b0 == 0) { c4Cur = blake2b(byte[](c4Cur) + byte[](c4s0)); } else { c4Cur = blake2b(byte[](c4s0) + byte[](c4Cur)); }
+        int c4b1 = (c4Idx / 2) % 2;  if (c4b1 == 0) { c4Cur = blake2b(byte[](c4Cur) + byte[](c4s1)); } else { c4Cur = blake2b(byte[](c4s1) + byte[](c4Cur)); }
+        int c4b2 = (c4Idx / 4) % 2;  if (c4b2 == 0) { c4Cur = blake2b(byte[](c4Cur) + byte[](c4s2)); } else { c4Cur = blake2b(byte[](c4s2) + byte[](c4Cur)); }
+        int c4b3 = (c4Idx / 8) % 2;  if (c4b3 == 0) { c4Cur = blake2b(byte[](c4Cur) + byte[](c4s3)); } else { c4Cur = blake2b(byte[](c4s3) + byte[](c4Cur)); }
+        int c4b4 = (c4Idx / 16) % 2; if (c4b4 == 0) { c4Cur = blake2b(byte[](c4Cur) + byte[](c4s4)); } else { c4Cur = blake2b(byte[](c4s4) + byte[](c4Cur)); }
+        int c4b5 = (c4Idx / 32) % 2; if (c4b5 == 0) { c4Cur = blake2b(byte[](c4Cur) + byte[](c4s5)); } else { c4Cur = blake2b(byte[](c4s5) + byte[](c4Cur)); }
+        int c4b6 = (c4Idx / 64) % 2; if (c4b6 == 0) { c4Cur = blake2b(byte[](c4Cur) + byte[](c4s6)); } else { c4Cur = blake2b(byte[](c4s6) + byte[](c4Cur)); }
+        int c4b7 = (c4Idx / 128) % 2;if (c4b7 == 0) { c4Cur = blake2b(byte[](c4Cur) + byte[](c4s7)); } else { c4Cur = blake2b(byte[](c4s7) + byte[](c4Cur)); }
+        require(c4Cur == poolMerkleRoot);
+        validateOutputState(selfOutIdx, State {
+            consolidated_pool:  consolidated_pool,
+            closed:             1,
+            payoutRoot:         new_payoutRoot,
+            w0: w0, w1: w1, w2: w2, w3: w3, w4: w4, w5: w5, w6: w6, w7: w7, w8: w8, w9: w9, w10: w10, w11: w11, w12: w12, w13: w13, w14: w14, w15: w15, w16: w16,
+            attestedWinner:    new_attestedWinner,
+            attestedAtMs:      new_attestedAtMs,
+            betsRootBaked:     new_betsRoot,
+            refundRootBaked:   new_refundRoot
+        });
+        require(tx.outputs[selfOutIdx].value >= DUST_MIN);  // ★ v0.3: close 不动代币, KAS 侧只剩 dust(同 PayoutShard.sil)
+    }
+
+    // 🔴 entry "claim" 已删除(Bettor 拍板，非 flag 门) —— 见文件头注释⑤。ZK-native 市场的赢家支付路径 =
+    //    CloseZkRepro4 独占，PayoutShardV2 上没有第二条领钱路径。
+
+    // —— entry 2(原3): cancel_attest —— [REGRESSION: 委员逻辑一字不动；补新增4字段透传, 跟 ZK 无关不变] ——
+    entry cancel_attest(
+        int      selfOutIdx,
+        byte[32] new_refundRoot,
+        sig      c0Sig, sig c1Sig, sig c2Sig, sig c3Sig, sig c4Sig,
+        byte[32] committeePkHash,
+        byte[32] c0Pk, byte[32] c1Pk, byte[32] c2Pk, byte[32] c3Pk, byte[32] c4Pk,
+        int      c0Idx, int c1Idx, int c2Idx, int c3Idx, int c4Idx,
+        byte[32] c0s0, byte[32] c0s1, byte[32] c0s2, byte[32] c0s3, byte[32] c0s4, byte[32] c0s5, byte[32] c0s6, byte[32] c0s7,
+        byte[32] c1s0, byte[32] c1s1, byte[32] c1s2, byte[32] c1s3, byte[32] c1s4, byte[32] c1s5, byte[32] c1s6, byte[32] c1s7,
+        byte[32] c2s0, byte[32] c2s1, byte[32] c2s2, byte[32] c2s3, byte[32] c2s4, byte[32] c2s5, byte[32] c2s6, byte[32] c2s7,
+        byte[32] c3s0, byte[32] c3s1, byte[32] c3s2, byte[32] c3s3, byte[32] c3s4, byte[32] c3s5, byte[32] c3s6, byte[32] c3s7,
+        byte[32] c4s0, byte[32] c4s1, byte[32] c4s2, byte[32] c4s3, byte[32] c4s4, byte[32] c4s5, byte[32] c4s6, byte[32] c4s7,
+        byte[]   tok_prefix, byte[] tok_suffix         // v0.3 §2/§3 + 1151 P13 形: 同 close_attest
+    ) {
+        require(closed == 0);
+        require(noTokenInput(tok_prefix, tok_suffix));      // ★ v0.3 §2/§3: B 类不在场证明(同 close_attest)
+        require(blake2b(byte[](predicate_commit)) != predicate_commit);
+        int validSigs = 0;
+        if (checkSig(c0Sig, pubkey(c0Pk))) { validSigs = validSigs + 1; }
+        if (checkSig(c1Sig, pubkey(c1Pk))) { validSigs = validSigs + 1; }
+        if (checkSig(c2Sig, pubkey(c2Pk))) { validSigs = validSigs + 1; }
+        if (checkSig(c3Sig, pubkey(c3Pk))) { validSigs = validSigs + 1; }
+        if (checkSig(c4Sig, pubkey(c4Pk))) { validSigs = validSigs + 1; }
+        require(validSigs >= 4);
+        require(c0Pk != c1Pk); require(c0Pk != c2Pk); require(c0Pk != c3Pk); require(c0Pk != c4Pk);
+        require(c1Pk != c2Pk); require(c1Pk != c3Pk); require(c1Pk != c4Pk);
+        require(c2Pk != c3Pk); require(c2Pk != c4Pk);
+        require(c3Pk != c4Pk);
+        byte[64] dConcat0 = c0Pk + c1Pk;
+        byte[96] dConcat1 = dConcat0 + c2Pk;
+        byte[128] dConcat2 = dConcat1 + c3Pk;
+        byte[160] dConcat3 = dConcat2 + c4Pk;
+        require(blake2b(byte[](dConcat3)) == committeePkHash);
+        require(c0Idx >= 0); require(c0Idx < 256);
+        byte[32] d0Cur = blake2b(byte[](c0Pk));
+        int d0b0 = c0Idx % 2;       if (d0b0 == 0) { d0Cur = blake2b(byte[](d0Cur) + byte[](c0s0)); } else { d0Cur = blake2b(byte[](c0s0) + byte[](d0Cur)); }
+        int d0b1 = (c0Idx / 2) % 2;  if (d0b1 == 0) { d0Cur = blake2b(byte[](d0Cur) + byte[](c0s1)); } else { d0Cur = blake2b(byte[](c0s1) + byte[](d0Cur)); }
+        int d0b2 = (c0Idx / 4) % 2;  if (d0b2 == 0) { d0Cur = blake2b(byte[](d0Cur) + byte[](c0s2)); } else { d0Cur = blake2b(byte[](c0s2) + byte[](d0Cur)); }
+        int d0b3 = (c0Idx / 8) % 2;  if (d0b3 == 0) { d0Cur = blake2b(byte[](d0Cur) + byte[](c0s3)); } else { d0Cur = blake2b(byte[](c0s3) + byte[](d0Cur)); }
+        int d0b4 = (c0Idx / 16) % 2; if (d0b4 == 0) { d0Cur = blake2b(byte[](d0Cur) + byte[](c0s4)); } else { d0Cur = blake2b(byte[](c0s4) + byte[](d0Cur)); }
+        int d0b5 = (c0Idx / 32) % 2; if (d0b5 == 0) { d0Cur = blake2b(byte[](d0Cur) + byte[](c0s5)); } else { d0Cur = blake2b(byte[](c0s5) + byte[](d0Cur)); }
+        int d0b6 = (c0Idx / 64) % 2; if (d0b6 == 0) { d0Cur = blake2b(byte[](d0Cur) + byte[](c0s6)); } else { d0Cur = blake2b(byte[](c0s6) + byte[](d0Cur)); }
+        int d0b7 = (c0Idx / 128) % 2;if (d0b7 == 0) { d0Cur = blake2b(byte[](d0Cur) + byte[](c0s7)); } else { d0Cur = blake2b(byte[](c0s7) + byte[](d0Cur)); }
+        require(d0Cur == poolMerkleRoot);
+        require(c1Idx >= 0); require(c1Idx < 256);
+        byte[32] d1Cur = blake2b(byte[](c1Pk));
+        int d1b0 = c1Idx % 2;       if (d1b0 == 0) { d1Cur = blake2b(byte[](d1Cur) + byte[](c1s0)); } else { d1Cur = blake2b(byte[](c1s0) + byte[](d1Cur)); }
+        int d1b1 = (c1Idx / 2) % 2;  if (d1b1 == 0) { d1Cur = blake2b(byte[](d1Cur) + byte[](c1s1)); } else { d1Cur = blake2b(byte[](c1s1) + byte[](d1Cur)); }
+        int d1b2 = (c1Idx / 4) % 2;  if (d1b2 == 0) { d1Cur = blake2b(byte[](d1Cur) + byte[](c1s2)); } else { d1Cur = blake2b(byte[](c1s2) + byte[](d1Cur)); }
+        int d1b3 = (c1Idx / 8) % 2;  if (d1b3 == 0) { d1Cur = blake2b(byte[](d1Cur) + byte[](c1s3)); } else { d1Cur = blake2b(byte[](c1s3) + byte[](d1Cur)); }
+        int d1b4 = (c1Idx / 16) % 2; if (d1b4 == 0) { d1Cur = blake2b(byte[](d1Cur) + byte[](c1s4)); } else { d1Cur = blake2b(byte[](c1s4) + byte[](d1Cur)); }
+        int d1b5 = (c1Idx / 32) % 2; if (d1b5 == 0) { d1Cur = blake2b(byte[](d1Cur) + byte[](c1s5)); } else { d1Cur = blake2b(byte[](c1s5) + byte[](d1Cur)); }
+        int d1b6 = (c1Idx / 64) % 2; if (d1b6 == 0) { d1Cur = blake2b(byte[](d1Cur) + byte[](c1s6)); } else { d1Cur = blake2b(byte[](c1s6) + byte[](d1Cur)); }
+        int d1b7 = (c1Idx / 128) % 2;if (d1b7 == 0) { d1Cur = blake2b(byte[](d1Cur) + byte[](c1s7)); } else { d1Cur = blake2b(byte[](c1s7) + byte[](d1Cur)); }
+        require(d1Cur == poolMerkleRoot);
+        require(c2Idx >= 0); require(c2Idx < 256);
+        byte[32] d2Cur = blake2b(byte[](c2Pk));
+        int d2b0 = c2Idx % 2;       if (d2b0 == 0) { d2Cur = blake2b(byte[](d2Cur) + byte[](c2s0)); } else { d2Cur = blake2b(byte[](c2s0) + byte[](d2Cur)); }
+        int d2b1 = (c2Idx / 2) % 2;  if (d2b1 == 0) { d2Cur = blake2b(byte[](d2Cur) + byte[](c2s1)); } else { d2Cur = blake2b(byte[](c2s1) + byte[](d2Cur)); }
+        int d2b2 = (c2Idx / 4) % 2;  if (d2b2 == 0) { d2Cur = blake2b(byte[](d2Cur) + byte[](c2s2)); } else { d2Cur = blake2b(byte[](c2s2) + byte[](d2Cur)); }
+        int d2b3 = (c2Idx / 8) % 2;  if (d2b3 == 0) { d2Cur = blake2b(byte[](d2Cur) + byte[](c2s3)); } else { d2Cur = blake2b(byte[](c2s3) + byte[](d2Cur)); }
+        int d2b4 = (c2Idx / 16) % 2; if (d2b4 == 0) { d2Cur = blake2b(byte[](d2Cur) + byte[](c2s4)); } else { d2Cur = blake2b(byte[](c2s4) + byte[](d2Cur)); }
+        int d2b5 = (c2Idx / 32) % 2; if (d2b5 == 0) { d2Cur = blake2b(byte[](d2Cur) + byte[](c2s5)); } else { d2Cur = blake2b(byte[](c2s5) + byte[](d2Cur)); }
+        int d2b6 = (c2Idx / 64) % 2; if (d2b6 == 0) { d2Cur = blake2b(byte[](d2Cur) + byte[](c2s6)); } else { d2Cur = blake2b(byte[](c2s6) + byte[](d2Cur)); }
+        int d2b7 = (c2Idx / 128) % 2;if (d2b7 == 0) { d2Cur = blake2b(byte[](d2Cur) + byte[](c2s7)); } else { d2Cur = blake2b(byte[](c2s7) + byte[](d2Cur)); }
+        require(d2Cur == poolMerkleRoot);
+        require(c3Idx >= 0); require(c3Idx < 256);
+        byte[32] d3Cur = blake2b(byte[](c3Pk));
+        int d3b0 = c3Idx % 2;       if (d3b0 == 0) { d3Cur = blake2b(byte[](d3Cur) + byte[](c3s0)); } else { d3Cur = blake2b(byte[](c3s0) + byte[](d3Cur)); }
+        int d3b1 = (c3Idx / 2) % 2;  if (d3b1 == 0) { d3Cur = blake2b(byte[](d3Cur) + byte[](c3s1)); } else { d3Cur = blake2b(byte[](c3s1) + byte[](d3Cur)); }
+        int d3b2 = (c3Idx / 4) % 2;  if (d3b2 == 0) { d3Cur = blake2b(byte[](d3Cur) + byte[](c3s2)); } else { d3Cur = blake2b(byte[](c3s2) + byte[](d3Cur)); }
+        int d3b3 = (c3Idx / 8) % 2;  if (d3b3 == 0) { d3Cur = blake2b(byte[](d3Cur) + byte[](c3s3)); } else { d3Cur = blake2b(byte[](c3s3) + byte[](d3Cur)); }
+        int d3b4 = (c3Idx / 16) % 2; if (d3b4 == 0) { d3Cur = blake2b(byte[](d3Cur) + byte[](c3s4)); } else { d3Cur = blake2b(byte[](c3s4) + byte[](d3Cur)); }
+        int d3b5 = (c3Idx / 32) % 2; if (d3b5 == 0) { d3Cur = blake2b(byte[](d3Cur) + byte[](c3s5)); } else { d3Cur = blake2b(byte[](c3s5) + byte[](d3Cur)); }
+        int d3b6 = (c3Idx / 64) % 2; if (d3b6 == 0) { d3Cur = blake2b(byte[](d3Cur) + byte[](c3s6)); } else { d3Cur = blake2b(byte[](c3s6) + byte[](d3Cur)); }
+        int d3b7 = (c3Idx / 128) % 2;if (d3b7 == 0) { d3Cur = blake2b(byte[](d3Cur) + byte[](c3s7)); } else { d3Cur = blake2b(byte[](c3s7) + byte[](d3Cur)); }
+        require(d3Cur == poolMerkleRoot);
+        require(c4Idx >= 0); require(c4Idx < 256);
+        byte[32] d4Cur = blake2b(byte[](c4Pk));
+        int d4b0 = c4Idx % 2;       if (d4b0 == 0) { d4Cur = blake2b(byte[](d4Cur) + byte[](c4s0)); } else { d4Cur = blake2b(byte[](c4s0) + byte[](d4Cur)); }
+        int d4b1 = (c4Idx / 2) % 2;  if (d4b1 == 0) { d4Cur = blake2b(byte[](d4Cur) + byte[](c4s1)); } else { d4Cur = blake2b(byte[](c4s1) + byte[](d4Cur)); }
+        int d4b2 = (c4Idx / 4) % 2;  if (d4b2 == 0) { d4Cur = blake2b(byte[](d4Cur) + byte[](c4s2)); } else { d4Cur = blake2b(byte[](c4s2) + byte[](d4Cur)); }
+        int d4b3 = (c4Idx / 8) % 2;  if (d4b3 == 0) { d4Cur = blake2b(byte[](d4Cur) + byte[](c4s3)); } else { d4Cur = blake2b(byte[](c4s3) + byte[](d4Cur)); }
+        int d4b4 = (c4Idx / 16) % 2; if (d4b4 == 0) { d4Cur = blake2b(byte[](d4Cur) + byte[](c4s4)); } else { d4Cur = blake2b(byte[](c4s4) + byte[](d4Cur)); }
+        int d4b5 = (c4Idx / 32) % 2; if (d4b5 == 0) { d4Cur = blake2b(byte[](d4Cur) + byte[](c4s5)); } else { d4Cur = blake2b(byte[](c4s5) + byte[](d4Cur)); }
+        int d4b6 = (c4Idx / 64) % 2; if (d4b6 == 0) { d4Cur = blake2b(byte[](d4Cur) + byte[](c4s6)); } else { d4Cur = blake2b(byte[](c4s6) + byte[](d4Cur)); }
+        int d4b7 = (c4Idx / 128) % 2;if (d4b7 == 0) { d4Cur = blake2b(byte[](d4Cur) + byte[](c4s7)); } else { d4Cur = blake2b(byte[](c4s7) + byte[](d4Cur)); }
+        require(d4Cur == poolMerkleRoot);
+        validateOutputState(selfOutIdx, State {
+            consolidated_pool:  consolidated_pool,
+            closed:             2,
+            payoutRoot:         new_refundRoot,
+            w0: w0, w1: w1, w2: w2, w3: w3, w4: w4, w5: w5, w6: w6, w7: w7, w8: w8, w9: w9, w10: w10, w11: w11, w12: w12, w13: w13, w14: w14, w15: w15, w16: w16,
+            attestedWinner:    attestedWinner,
+            attestedAtMs:      attestedAtMs,
+            betsRootBaked:     betsRootBaked,
+            refundRootBaked:   refundRootBaked
+        });
+        require(tx.outputs[selfOutIdx].value >= DUST_MIN);  // ★ v0.3: cancel 不动代币, KAS 侧只剩 dust(同 PayoutShard.sil)
+    }
+
+    // 🔴 v0.3 范围决定(J2, 落码时说明, 待 Bettor/NWT 复核): refund_claim / zk_handoff 本次【不改】——
+    //   ① refund_claim 跟 PayoutShard.sil 的 claim/refund_claim 是同一族(真实付出价值给赢家/退款人),
+    //      按 ledger 1136 的既定顺序, 这一族要等 KanetTokenClaim.sil 拿到 NWT GREEN 后才统一改成"目的地
+    //      重定向到新铸 KanetTokenClaim 实例"这个形状——不在本次 absorb/close_attest/cancel_attest 三入口
+    //      范围内, 现在改会是猜测该重定向长什么样, 违反"先计划再编码"。
+    //   ② zk_handoff 把 consolidated_pool 整体"交接"给新铸的 CloseZkRepro4 genesis output——但 D-017 之后
+    //      consolidated_pool 语义已经是代币 amount 而非裸 KAS sompi, 这意味着 zk_handoff 可能也需要真实的
+    //      代币 owner 转移(而不只是 KAS 侧数值匹配), 即 CloseZkRepro4 是否也要变成"持有代币的 covenant"是一个
+    //      需要 Owner/Bettor 定的架构问题, 不是本次 tokenization 落码可以顺手替它决定的——留白, 明确报告。
+
+    // —— entry 3(原4): refund_claim —— [merkle/nullifier 逻辑一字不动, closed==2 跟 zk_handoff 互斥] ——
+    // ★ v0.3 §2/§3 代币化(ledger 1183, 同 claim 家族其余三处形状): 退款目的地不再是裸 P2PK(D-017)——
+    //   本笔交易新建一个 KanetTokenClaim 实例, 把退款人的份额以"代币 owner = 新 claim covenant"的形式
+    //   转过去。
+    entry refund_claim(
+        int selfOutIdx, int claimOutIdx,
+        int tokenInIdx, int tokenOutIdx, int remainTokenOutIdx,
+        byte[32] bettorPk, int refund, int merkle_index,
+        byte[32] s0, byte[32] s1, byte[32] s2, byte[32] s3, byte[32] s4, byte[32] s5, byte[32] s6, byte[32] s7, byte[32] s8, byte[32] s9,
+        byte[] tok_prefix, byte[] tok_suffix,       // v0.3 §2/§3 + 1151 P13 形: witness 供代币模板字节
+        byte[] claim_prefix, byte[] claim_suffix    // Q8: witness 供 KanetTokenClaim 编译模板字节, 现场核 claim_tmpl_hash
+    ) {
+        require(closed == 2);
+        require(merkle_index >= 0); require(merkle_index < 1024);
+        require(refund >= 1); require(refund <= consolidated_pool);
+        byte[32] cur = blake2b(byte[](bettorPk) + byte[](refund as byte[8]));
+        int div = 1;
+        int b0 = (merkle_index / div) % 2; if (b0 == 0) { cur = blake2b(byte[](cur) + byte[](s0)); } else { cur = blake2b(byte[](s0) + byte[](cur)); } div = div * 2;
+        int b1 = (merkle_index / div) % 2; if (b1 == 0) { cur = blake2b(byte[](cur) + byte[](s1)); } else { cur = blake2b(byte[](s1) + byte[](cur)); } div = div * 2;
+        int b2 = (merkle_index / div) % 2; if (b2 == 0) { cur = blake2b(byte[](cur) + byte[](s2)); } else { cur = blake2b(byte[](s2) + byte[](cur)); } div = div * 2;
+        int b3 = (merkle_index / div) % 2; if (b3 == 0) { cur = blake2b(byte[](cur) + byte[](s3)); } else { cur = blake2b(byte[](s3) + byte[](cur)); } div = div * 2;
+        int b4 = (merkle_index / div) % 2; if (b4 == 0) { cur = blake2b(byte[](cur) + byte[](s4)); } else { cur = blake2b(byte[](s4) + byte[](cur)); } div = div * 2;
+        int b5 = (merkle_index / div) % 2; if (b5 == 0) { cur = blake2b(byte[](cur) + byte[](s5)); } else { cur = blake2b(byte[](s5) + byte[](cur)); } div = div * 2;
+        int b6 = (merkle_index / div) % 2; if (b6 == 0) { cur = blake2b(byte[](cur) + byte[](s6)); } else { cur = blake2b(byte[](s6) + byte[](cur)); } div = div * 2;
+        int b7 = (merkle_index / div) % 2; if (b7 == 0) { cur = blake2b(byte[](cur) + byte[](s7)); } else { cur = blake2b(byte[](s7) + byte[](cur)); } div = div * 2;
+        int b8 = (merkle_index / div) % 2; if (b8 == 0) { cur = blake2b(byte[](cur) + byte[](s8)); } else { cur = blake2b(byte[](s8) + byte[](cur)); } div = div * 2;
+        int b9 = (merkle_index / div) % 2; if (b9 == 0) { cur = blake2b(byte[](cur) + byte[](s9)); } else { cur = blake2b(byte[](s9) + byte[](cur)); } div = div * 2;
+        require(cur == payoutRoot);
+        int word_idx = merkle_index / 63;
+        int bit_in   = merkle_index % 63;
+        int mask = 1;
+        for (b, 0, bit_in, 63) { mask = mask * 2; }
+        int nw0 = w0; int nw1 = w1; int nw2 = w2; int nw3 = w3; int nw4 = w4; int nw5 = w5; int nw6 = w6; int nw7 = w7; int nw8 = w8;
+        int nw9 = w9; int nw10 = w10; int nw11 = w11; int nw12 = w12; int nw13 = w13; int nw14 = w14; int nw15 = w15; int nw16 = w16;
+        if (word_idx == 0)       { require((w0 / mask) % 2 == 0); nw0 = w0 + mask; }
+        else if (word_idx == 1)  { require((w1 / mask) % 2 == 0); nw1 = w1 + mask; }
+        else if (word_idx == 2)  { require((w2 / mask) % 2 == 0); nw2 = w2 + mask; }
+        else if (word_idx == 3)  { require((w3 / mask) % 2 == 0); nw3 = w3 + mask; }
+        else if (word_idx == 4)  { require((w4 / mask) % 2 == 0); nw4 = w4 + mask; }
+        else if (word_idx == 5)  { require((w5 / mask) % 2 == 0); nw5 = w5 + mask; }
+        else if (word_idx == 6)  { require((w6 / mask) % 2 == 0); nw6 = w6 + mask; }
+        else if (word_idx == 7)  { require((w7 / mask) % 2 == 0); nw7 = w7 + mask; }
+        else if (word_idx == 8)  { require((w8 / mask) % 2 == 0); nw8 = w8 + mask; }
+        else if (word_idx == 9)  { require((w9 / mask) % 2 == 0); nw9 = w9 + mask; }
+        else if (word_idx == 10) { require((w10 / mask) % 2 == 0); nw10 = w10 + mask; }
+        else if (word_idx == 11) { require((w11 / mask) % 2 == 0); nw11 = w11 + mask; }
+        else if (word_idx == 12) { require((w12 / mask) % 2 == 0); nw12 = w12 + mask; }
+        else if (word_idx == 13) { require((w13 / mask) % 2 == 0); nw13 = w13 + mask; }
+        else if (word_idx == 14) { require((w14 / mask) % 2 == 0); nw14 = w14 + mask; }
+        else if (word_idx == 15) { require((w15 / mask) % 2 == 0); nw15 = w15 + mask; }
+        else                     { require((w16 / mask) % 2 == 0); nw16 = w16 + mask; }
+        // ★ P13 形: witness 供代币模板前后缀, 现场核 token_tmpl_hash, 核过后再读被消费的代币(同
+        //   absorb/zk_handoff 一致手法)。
+        require(blake3((tok_prefix.length as byte[8]) + tok_prefix + (tok_suffix.length as byte[8]) + tok_suffix) == token_tmpl_hash);
+        TokenState heldTk = readInputStateWithTemplate(tokenInIdx, tok_prefix.length, tok_suffix.length, token_tmpl_hash);
+        require(heldTk.owner == OpInputCovenantId(this.activeInputIndex));   // ★ H1 在场: 被消费的代币真属本合约
+        require(heldTk.amount == consolidated_pool);                        // ★ 持仓量跟自身账本一致(不信任 witness)
+
+        // ★ Q8: witness 供 KanetTokenClaim 编译模板前后缀, 现场核 claim_tmpl_hash——结构性用途。
+        require(blake3((claim_prefix.length as byte[8]) + claim_prefix + (claim_suffix.length as byte[8]) + claim_suffix) == claim_tmpl_hash);
+
+        // ★ ZERO32 目的地守卫(NWT 1158/1173 系统性扫查纪律): 独立验证 = 上面 claim_tmpl_hash 的现场核对
+        //   (脚本字节匹配 ≠ covenant 绑定, 两层各自独立承重)。
+        byte[32] claimCovId = OpOutputCovenantId(claimOutIdx);
+        require(claimCovId != byte[32](0x0000000000000000000000000000000000000000000000000000000000000000));
+
+        // 新建 KanetTokenClaim 实例: market_cov_id=本合约自身身份 / winner_pk=票面 bettor(退款人) /
+        // amount=票面 refund / token_tmpl_hash/market_suffix_hash 透传。
+        validateOutputStateWithTemplate(claimOutIdx, ClaimState {
+            market_cov_id:       OpInputCovenantId(this.activeInputIndex),
+            winner_pk:           bettorPk,
+            amount:              refund,
+            token_tmpl_hash:     token_tmpl_hash,
+            market_suffix_hash:  market_suffix_hash
+        }, claim_prefix, claim_suffix, claim_tmpl_hash);
+
+        // 代币输出: 转给新 claim 的那份, owner = 新 claim covenant id(上面已核非 ZERO32)。
+        validateOutputStateWithInputTemplate(tokenOutIdx, TokenState {
+            amount:               refund,
+            owner:                claimCovId,
+            owner_scheme:         TOKEN_SCHEME_COVENANT_ID,
+            borrow_scheme:        TOKEN_BORROW_DISABLED,
+            borrow_guard:         byte[32](0x0000000000000000000000000000000000000000000000000000000000000000),
+            extension_commitment: byte[32](0x0000000000000000000000000000000000000000000000000000000000000000)
+        }, tokenInIdx, tok_prefix.length, tok_suffix.length, token_tmpl_hash);
+
+        // ★ v0.2 MUST-FIX(docs/2026-09-13-j2-t3-market-set-token-rewrite-design-v0.1.md §3.0, Bettor ledger 1068,
+        //   Codex fff9bad2 独立确认既有 KAS 域 liveness 缺陷): 四处之三。remaining==0 ⇒ 无续约输出;
+        //   remaining>0 ⇒ 代币续一份剩余量给本合约自己 + bookkeeping 续约(V-T-8 处置不变: 本函数已有
+        //   readInputStateWithTemplate, 自续约改 AB11, 复用 absorb/zk_handoff 已量测的 OWN_PREFIX_LEN/
+        //   OWN_STATE_LEN, 24 字段 State 形状本次未变)。
+        if (consolidated_pool != refund) {
+            validateOutputStateWithInputTemplate(remainTokenOutIdx, TokenState {
+                amount:               consolidated_pool - refund,
+                owner:                OpInputCovenantId(this.activeInputIndex),
+                owner_scheme:         TOKEN_SCHEME_COVENANT_ID,
+                borrow_scheme:        TOKEN_BORROW_DISABLED,
+                borrow_guard:         byte[32](0x0000000000000000000000000000000000000000000000000000000000000000),
+                extension_commitment: byte[32](0x0000000000000000000000000000000000000000000000000000000000000000)
+            }, tokenInIdx, tok_prefix.length, tok_suffix.length, token_tmpl_hash);
+
+            // ★ V-T-8 绕路(AB11): 手写编码新 State(24 字段), 不走 validateOutputState。
+            byte[] rfcStateBytes = byte[](8 as byte[1]) + byte[]((consolidated_pool - refund) as byte[8])
+                                  + byte[](8 as byte[1]) + byte[](2 as byte[8])
+                                  + byte[](32 as byte[1]) + byte[](payoutRoot)
+                                  + byte[](8 as byte[1]) + byte[](nw0 as byte[8])
+                                  + byte[](8 as byte[1]) + byte[](nw1 as byte[8])
+                                  + byte[](8 as byte[1]) + byte[](nw2 as byte[8])
+                                  + byte[](8 as byte[1]) + byte[](nw3 as byte[8])
+                                  + byte[](8 as byte[1]) + byte[](nw4 as byte[8])
+                                  + byte[](8 as byte[1]) + byte[](nw5 as byte[8])
+                                  + byte[](8 as byte[1]) + byte[](nw6 as byte[8])
+                                  + byte[](8 as byte[1]) + byte[](nw7 as byte[8])
+                                  + byte[](8 as byte[1]) + byte[](nw8 as byte[8])
+                                  + byte[](8 as byte[1]) + byte[](nw9 as byte[8])
+                                  + byte[](8 as byte[1]) + byte[](nw10 as byte[8])
+                                  + byte[](8 as byte[1]) + byte[](nw11 as byte[8])
+                                  + byte[](8 as byte[1]) + byte[](nw12 as byte[8])
+                                  + byte[](8 as byte[1]) + byte[](nw13 as byte[8])
+                                  + byte[](8 as byte[1]) + byte[](nw14 as byte[8])
+                                  + byte[](8 as byte[1]) + byte[](nw15 as byte[8])
+                                  + byte[](8 as byte[1]) + byte[](nw16 as byte[8])
+                                  + byte[](8 as byte[1]) + byte[](attestedWinner as byte[8])
+                                  + byte[](8 as byte[1]) + byte[](attestedAtMs as byte[8])
+                                  + byte[](32 as byte[1]) + byte[](betsRootBaked)
+                                  + byte[](32 as byte[1]) + byte[](refundRootBaked);
+            byte[] rfcOwnSig = tx.inputs[this.activeInputIndex].sigScript;
+            int rfcOwnLen = rfcOwnSig.length;
+            byte[] rfcOwnPrefix = rfcOwnSig.slice(0, OWN_PREFIX_LEN);
+            byte[] rfcOwnSuffix = rfcOwnSig.slice(OWN_PREFIX_LEN + OWN_STATE_LEN, rfcOwnLen);
+            byte[32] rfcExpectedHash = blake2b(rfcOwnPrefix + rfcStateBytes + rfcOwnSuffix);
+            byte[37] rfcExpectedSpk = new ScriptPubKeyP2SH(rfcExpectedHash);
+            require(tx.outputs[selfOutIdx].scriptPubKey == byte[](rfcExpectedSpk));
+            require(tx.outputs[selfOutIdx].value >= DUST_MIN);   // ★ v0.3: KAS 侧只剩 dust
+        }
+    }
+
+    // —— entry 4: zk_handoff(新增) —— committee attest 完成(closed==1)后，一次性把全部 consolidated_pool
+    //    交接给新铸的 CloseZkRepro4 genesis output。无 continuation(生命周期终点，同 escape_claim last-claimant)。
+    //
+    // 🔴 byte-exact 重构(2026-07-07，J2 用 fixed silverc 实测 CloseZkRepro4 编译产物验证，非猜测)：
+    //   genesis redeem = byte[1](107)                                             // 固定(script[0:1]，跟 state 值无关)
+    //                  + STATE_BYTES(attestedWinner/closed=1/payoutRootField=ZERO32/consolidated_pool/17×w=0)  // 213B，canonical fixed-width splice(同 pool-shard-state-serialize.mjs 模式)
+    //                  + templateA(59B: script[214:273]，含 gateTmplHash 32B，对所有 ZK-native 市场固定不变)
+    //                  + betsRootBaked(32B，本合约 state)
+    //                  + templateB(336B: script[305:641])
+    //                  + [0x06 + attestedAtMs 6B LE](7B，本合约 state；仅在 2^40≤attestedAtMs<2^47 时宽度稳定
+    //                    —— 见下方 bounds guard，Bettor+NWT 联合实测确认 2026 年起 10 年内 ms 时间戳全部落在此域)
+    //                  + templateC(748B: script[648:1396])
+    //                  + refundRootBaked(32B，本合约 state)
+    //                  + templateD(2903B: script[1428:end])
+    //   templateA+B+C+D 四段拼接后的 blake2b = closeZkTmplAnchor(ctor 烤值)。J2 已在 JS 侧对真实编译产物做过
+    //   逐字节自测(scratch 环境，非本文件)：reconstructed.equals(realCompiledScript) === true。NWT 复核用
+    //   同样手法(canonical-pipeline 工具，非手打猜)重新验证一遍，不能只信这段注释。
+    // ★ A 类代币转移(ledger 1170): zkOutIdx 承接的不只是"这份 KAS 数值"——D-017 之后 consolidated_pool
+    //   代表 KCC-20 代币 amount, 本 entry 必须像 absorb 一样真实读取本合约当前持有的代币输入, 全额转给新建
+    //   CloseZkV2 实例的 covenant, 而不是只比对 KAS scriptPubKey/value(那部分继续保留, 独立校验
+    //   closeZkTmplAnchor 意味着新建实例本身真是编译过的 CloseZkV2 字节, 跟代币 owner 是否正确转移是两件事)。
+    entry zk_handoff(
+        int      zkOutIdx,
+        int      tokenInIdx,           // 本合约当前持有的代币输入
+        int      tokenOutIdx,          // 转给新 CloseZkV2 实例的代币输出(amount=consolidated_pool, 全额)
+        byte[]   tok_prefix, byte[] tok_suffix,   // v0.3 §2/§3 + 1151 P13 形: witness 供代币模板字节
+        byte[]   templateA,
+        byte[]   templateB,
+        byte[]   templateC,
+        byte[]   templateD
+    ) {
+        require(closed == 1);
+        // ⚠ bounds guard(NWT+Bettor 联合提案，实测确认稳定域): attestedAtMs 必须落在 [2^40, 2^47) 才能保证
+        // 6-byte minimal-push 宽度稳定(J2 实测: now/+1y/+2y/+10y 全部同宽同位置)。越界拒绝，不静默产生错误宽度。
+        require(attestedAtMs >= 1099511627776);
+        require(attestedAtMs < 140737488355328);
+        // 🔒 锚定检查: witness 供的 4 段固定模板必须匹配 ctor 烤死的模板锚——防止 caller 自由构造任意
+        // "CloseZk 模板"(带后门 redeem)通过下面的重构检查卷走全池(同 w0in CRITICAL bug 同一 class)。
+        require(blake2b(templateA + templateB + templateC + templateD) == closeZkTmplAnchor);
+        // STATE_BYTES: attestedWinner(9B)+closed=1(9B)+payoutRootField=ZERO32(33B)+consolidated_pool(9B)+17×w=0(9B each)。
+        byte[1] push8 = 8 as byte[1];
+        byte[1] push32 = 32 as byte[1];
+        // 🔴 修复(debugger实测抓出): byte[32](0)不合法——NUM2BIN target size对int-to-bytes cast上限8字节,
+        // 不能直接把int 0扩到32字节。改用4×8字节零拼接达到32字节(同8字节上限内合法)。
+        byte[] zero32 = byte[](0 as byte[8]) + byte[](0 as byte[8]) + byte[](0 as byte[8]) + byte[](0 as byte[8]);
+        byte[] zeroWord = push8 + byte[](0 as byte[8]);
+        byte[] stateBytes = push8 + byte[](attestedWinner as byte[8])
+            + push8 + byte[](1 as byte[8])
+            + push32 + zero32
+            + push8 + byte[](consolidated_pool as byte[8])
+            + zeroWord + zeroWord + zeroWord + zeroWord + zeroWord + zeroWord + zeroWord + zeroWord + zeroWord
+            + zeroWord + zeroWord + zeroWord + zeroWord + zeroWord + zeroWord + zeroWord + zeroWord;
+        byte[1] genesisMarker = 107 as byte[1];
+        byte[1] atMsMarker = 6 as byte[1];
+        byte[] atMsBytes = atMsMarker + byte[](attestedAtMs as byte[6]);
+        byte[32] expectedCloseZkRedeemHash = blake2b(genesisMarker + stateBytes
+            + templateA + betsRootBaked + templateB + atMsBytes + templateC + refundRootBaked + templateD);
+        require(tx.outputs[zkOutIdx].scriptPubKey == byte[](new ScriptPubKeyP2SH(expectedCloseZkRedeemHash)));
+        require(tx.outputs[zkOutIdx].value >= DUST_MIN);   // ★ v0.3: KAS 侧只剩 dust, 代币 amount 才是真实价值载体
+
+        // ★ 读本合约当前持有的代币(P13 形, 同 absorb): 核 token_tmpl_hash, H1 在场, 持仓量跟自身账本一致。
+        require(blake3((tok_prefix.length as byte[8]) + tok_prefix + (tok_suffix.length as byte[8]) + tok_suffix) == token_tmpl_hash);
+        TokenState heldTk = readInputStateWithTemplate(tokenInIdx, tok_prefix.length, tok_suffix.length, token_tmpl_hash);
+        require(heldTk.owner == OpInputCovenantId(this.activeInputIndex));
+        require(heldTk.amount == consolidated_pool);
+
+        // ★ ZERO32 目的地守卫(NWT 1158/1173 系统性扫查纪律): 独立验证 = 上面 closeZkTmplAnchor 的全字节比对
+        //   (脚本字节匹配 ≠ covenant 绑定, 两层各自独立承重)。
+        byte[32] zkCovId = OpOutputCovenantId(zkOutIdx);
+        require(zkCovId != byte[32](0x0000000000000000000000000000000000000000000000000000000000000000));
+
+        // 代币全额转给新 CloseZkV2 实例: owner = 新实例 covenant id。
+        validateOutputStateWithInputTemplate(tokenOutIdx, TokenState {
+            amount:               consolidated_pool,
+            owner:                zkCovId,
+            owner_scheme:         TOKEN_SCHEME_COVENANT_ID,
+            borrow_scheme:        TOKEN_BORROW_DISABLED,
+            borrow_guard:         byte[32](0x0000000000000000000000000000000000000000000000000000000000000000),
+            extension_commitment: byte[32](0x0000000000000000000000000000000000000000000000000000000000000000)
+        }, tokenInIdx, tok_prefix.length, tok_suffix.length, token_tmpl_hash);
+        // 无 validateOutputState —— 本 entry 是 PayoutShardV2 生命周期终点(UTXO 花过即不存在)。
+    }
+}

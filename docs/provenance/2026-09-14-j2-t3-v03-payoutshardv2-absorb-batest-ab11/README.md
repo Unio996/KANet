@@ -1,5 +1,11 @@
 # PayoutShardV2.sil — T3 v0.3 §2/§3 代币化落码(absorb AB11+P13 + close/cancel_attest B 类, 1122 边界)
 
+> 📌 **状态注记（2026-09-14 · Bettor ledger 1209）**：本目录向量集用的是 **28 参数 ctor**（`claim_tmpl_hash`/
+> `market_suffix_hash` 加入前），当前 `PayoutShardV2.sil` 是 **30 参数**——直接重跑会报
+> `constructor expects 30 arguments, got 28`，**不适用重跑**（历史陈旧，非本次回归）。**superseded by**
+> `docs/provenance/2026-09-14-j2-t3-v03-payoutshardv2-current-suite/`（完整现行向量套件）。本文件下方内容
+> 保留作历史记录，不改原文。
+
 Bettor ledger 1156/1160/1163: KanetTokenClaim ZERO32 → T1 v0.7 → **PayoutShardV2**(本次)→ RefundClaim 三步 →
 其余，一律照 P13 witness+blake3 形，一次带齐边界向量。本文件与 `docs/provenance/2026-09-14-j2-t3-v03-payoutshard-absorb-ab11-and-batest/`（PayoutShard.sil 的同类工作）逐条对照，方法论完全一致——不同点只在 State 字段数
 （PayoutShardV2 是 24 字段，比 PayoutShard.sil 多 `attestedWinner`/`attestedAtMs`/`betsRootBaked`/`refundRootBaked`

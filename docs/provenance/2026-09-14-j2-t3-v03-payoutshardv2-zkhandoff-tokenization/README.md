@@ -1,5 +1,11 @@
 # PayoutShardV2.zk_handoff — v0.3 §2/§3 A 类代币转移（ledger 1170/1181，联合项之一）
 
+> 📌 **状态注记（2026-09-14 · Bettor ledger 1209）**：本目录向量集用的是 **28 参数 ctor**，当前
+> `PayoutShardV2.sil` 是 **30 参数**——`constructor expects 30 arguments, got 28`，**不适用重跑**（历史
+> 陈旧，非本次回归）。**superseded by**
+> `docs/provenance/2026-09-14-j2-t3-v03-payoutshardv2-current-suite/`（`V-ZKHO-1..5` 已在当前 ctor 下
+> 重新生成+验证）。本文件下方内容保留作历史记录，不改原文。
+
 ## 改了什么
 
 `zk_handoff`（`selfOutIdx` 改名 `zkOutIdx`，同 Bettor 1170 的措辞）新增 `tokenInIdx`/`tokenOutIdx`/
