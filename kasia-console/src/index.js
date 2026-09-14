@@ -82,6 +82,7 @@ import { registerChainDataRoutes } from './api/chain-data.js';
 import { registerStockRoutes } from './api/stocks.js';
 import { registerBettorRoutes } from './api/bettor.js';
 import { registerPoolRoutes } from './api/pool.js';
+import { registerProtoRoutes } from './api/proto.js'; // 原型v0代币/市场(2026-09-14, 设计docs/2026-09-14-j2-proto-v0-backend-api-design-v0.1.md), 链上端点§6/§9未定案前501占位
 import { registerAdminDedupRoutes, registerBshardBondReclaimRoutes, registerZ20CircuitRoutes } from './api/admin-dedup.js'; // #27 dedup 存量清理 admin endpoint + 2026-07-13 bshard maker bond reclaim + 2026-07-14 Z20 熔断挂账清单
 import { registerCoordStatusRoutes } from './api/coord-status.js'; // D-010 落地① coord-status 内容签名
 import { registerOperatorSettleRoutes } from './api/operator-settle.js'; // M0c-1 批B operator 结算专道 (relay.js:1726 收敛 A money-path 出口)
@@ -262,6 +263,7 @@ await registerExchangeRoutes(fastify);
 await registerAuditPredictionRoutes(fastify);
 await registerBettorRoutes(fastify);
 await registerPoolRoutes(fastify);
+await registerProtoRoutes(fastify);
 await registerFeedbackRoutes(fastify);
 await registerAdminDedupRoutes(fastify);
 await registerBshardBondReclaimRoutes(fastify);
