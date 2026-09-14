@@ -44,6 +44,11 @@ t('SIC-6 未声明签名索引的输入不计入总额(只信声明,不猜)', ()
   assert.strictEqual(r.ok, true);
   assert.strictEqual(r.signedInputTotalSompi, 1n);
 });
+t('SIC-7 🔴 NWT 1376 非阻断建议落地: signInputIndices 含重复索引 ⇒ 显式拒绝(不依赖"重复只会让总额变大更易拒"这条方向安全的隐性性质)', () => {
+  const r = validateSignedInputCeiling({ inputs: [{ amountSompi: 1n }], signInputIndices: [0, 0] });
+  assert.strictEqual(r.ok, false);
+  assert.ok(/duplicate index 0/.test(r.reason), `reason 应指明重复索引(实际: ${r.reason})`);
+});
 
 // ── validateNetLoss ────────────────────────────────────────────────────────
 t('NL-1 🔴 NWT 1352 绕过构造: 1 KAS 输入, 0.00001 KAS 回自己 + 0.99999 KAS 转走 ⇒ 必须拒(旧"存在性"表述挡不住的场景; 注: 1 KAS 输入在真实管线里会先被 SignedInputCeiling(0.5 KAS)拦下, 这里单独测 validateNetLoss 自身的逻辑, 见 NL-1b 测两道闸协同的真实场景)', () => {
@@ -168,6 +173,15 @@ t('NL-11 对照: relayScriptPubKey 正常非空时, outputs 里缺失/畸形的 
   });
   assert.strictEqual(r.ok, false, '畸形输出不被误判为找零, 全额算进 net_loss, 超出手续费上限应被拒');
   assert.strictEqual(r.netLossSompi, inputAmt, 'net_loss 应是全部输入(没有任何输出被正确识别为"付回自己"), 不是 0');
+});
+t('NL-12 🔴 NWT 1376 非阻断建议落地(与 SIC-7 同款): signInputIndices 含重复索引 ⇒ 显式拒绝', () => {
+  const r = validateNetLoss({
+    inputs: [{ amountSompi: 1_000_000n, scriptPubKeyRaw: RELAY_SPK }],
+    outputs: [{ valueSompi: 999_000n, scriptPubKeyRaw: RELAY_SPK }],
+    signInputIndices: [0, 0], relayScriptPubKey: RELAY_SPK, requiredFeeSompi: 1_000n,
+  });
+  assert.strictEqual(r.ok, false);
+  assert.ok(/duplicate index 0/.test(r.reason), `reason 应指明重复索引(实际: ${r.reason})`);
 });
 
 // ── canonicalScriptHex(2026-09-14 补: NWT 1355 假设订正后新加, Bettor 裁定"现在改不留给接线笔") ──

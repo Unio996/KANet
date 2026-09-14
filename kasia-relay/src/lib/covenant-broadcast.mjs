@@ -50,6 +50,17 @@ export const SOMPI_PER_MASS = 100n;
 export function validateSignedInputCeiling({ inputs, signInputIndices, signedInputCeilingSompi = SIGNED_INPUT_CEILING_SOMPI }) {
   if (!Array.isArray(inputs) || !inputs.length) return { ok: false, reason: 'inputs must be a non-empty array' };
   if (!Array.isArray(signInputIndices) || !signInputIndices.length) return { ok: false, reason: 'signInputIndices must be a non-empty array' };
+  // 🔴 NWT 1376(非阻断建议, 显式拒绝而非依赖"方向安全"的隐性性质): 重复索引现在只会让
+  // signedInputTotalSompi 被重复加总、更容易触发 SIGNED_INPUT_CEILING 拒绝(方向安全, 不是漏洞)，
+  // 但依赖"刚好方向安全"不如直接拒绝清楚——调用方传重复索引本身就是构造错误(不可能有意义地对
+  // 同一个 input 签两次), 显式拒绝能在问题源头就报错, 不必等到 ceiling 判定这一步才间接暴露。
+  {
+    const seen = new Set();
+    for (const idx of signInputIndices) {
+      if (seen.has(idx)) return { ok: false, reason: `signInputIndices contains duplicate index ${idx}` };
+      seen.add(idx);
+    }
+  }
   for (const idx of signInputIndices) {
     if (!Number.isInteger(idx) || idx < 0 || idx >= inputs.length) {
       return { ok: false, reason: `signInputIndices contains out-of-range index ${idx} (inputs.length=${inputs.length})` };
@@ -137,6 +148,16 @@ export function validateNetLoss({ inputs, outputs, signInputIndices, relayScript
   if (!relayScriptPubKey) return { ok: false, reason: 'relayScriptPubKey required' };
   if (typeof requiredFeeSompi !== 'bigint' || requiredFeeSompi < 0n) return { ok: false, reason: 'requiredFeeSompi must be a non-negative bigint (computed via computeRequiredFeeSompi, post-signing)' };
 
+  // 🔴 NWT 1376(非阻断建议, 同 validateSignedInputCeiling 一致): 显式拒绝重复索引, 不依赖"重复只会
+  // 让 net_loss 算大更易拒"这条方向安全的隐性性质——构造错误在源头就报错。
+  {
+    const seen = new Set();
+    for (const idx of signInputIndices) {
+      if (seen.has(idx)) return { ok: false, reason: `signInputIndices contains duplicate index ${idx}` };
+      seen.add(idx);
+    }
+  }
+
   let signedInputTotalSompi = 0n;
   for (const idx of signInputIndices) {
     if (!Number.isInteger(idx) || idx < 0 || idx >= inputs.length) {
@@ -215,6 +236,12 @@ export function assertFinalTxid(tx, expectedTxid) {
 /**
  * 只签 signInputIndices 列出的索引，其余输入原样保留——防止调用方哄骗 relay 签一个它没被要求签的、
  * 意料之外的输入(§9.2 约束①)。
+ *
+ * 🔴 假设声明(NWT 1376 非阻断建议): 本函数不判断"某个索引是否真的该由 relay 签"——这是调用方的
+ * 职责。sign_input_indices 由可信调用方(console 后端, 经 PROTO_RELAY_ID 执行权限门)构造, 本函数
+ * 信任这个输入。若调用方签错了索引(比如误把一个 covenant 输入也塞进 sign_input_indices), 后果是
+ * 那个输入的 witness 被 relay 的签名覆盖掉, 不再满足它自己的 covenant 脚本要求 ⇒ 广播后共识层拒绝
+ * ——失败方向是安全的(交易上不了链, 不是资金泄露), 但不是本函数负责拦的那一层。
  *
  * ✅ 真实实现(2026-09-14, Owner §6=B′ 拍板后接线笔②, 见
  * docs/provenance/2026-09-14-j2-sign-only-declared-inputs-verification/): 用离线一次性 throwaway
