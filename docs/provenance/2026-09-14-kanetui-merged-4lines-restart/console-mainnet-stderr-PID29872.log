@@ -1,0 +1,5 @@
+[migrate] v199: 🔴 idx_kaspa_tx_log_to_addr_observed 缺失 — 不在 boot 自建(kaspa_tx_log ~16M 行, 分钟级持写锁); 请在停机窗跑 kasia-console/scratch/_j2_p1_kaspa_tx_log_index_window.mjs, 或 KANET_MIGRATE_BUILD_HEAVY_INDEX=1 明确要求在此建(🔴 永不进 kanet.env; 只允许 supervisor/hb_guard 已停时手动单跑 migrate, 否则 boot-age 判活会把建到一半的进程杀掉 ⇒ 回滚 ⇒ 重启风暴)。正路始终是停机窗脚本。broker-intake 的 60 s SELECT 在此之前仍是 4–30 s 同步阻塞。
+[zk-prove-server] ZK_PROVE_SERVER_TOKEN not set — server NOT started (fail-closed, not fail-open).
+[external-gateway] 未配置 KANET_EXTERNAL_GATEWAY_HOST / _PORT ⇒ 不启动(fail-closed)。 🔴 这不是错误: 没有配置就没有对外口。
+[key-export] refuse mnemonic export relay=df5f15d7: key export disabled (RELAY_KEY_EXPORT_ENABLED_UNTIL env 未设)
+[key-export] refuse privkey export relay=df5f15d7 wallet=ceholder: key export disabled (RELAY_KEY_EXPORT_ENABLED_UNTIL env 未设)
