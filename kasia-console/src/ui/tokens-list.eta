@@ -1,15 +1,16 @@
 <%~ include('partials/page-open', { _page: 'tokens-list', pageTitle: '代币', ...it }) %>
 
-<!-- 原型 v0(1325 派工·线框稿 §1 附带小节): 代币列表, 给"市场创建"选代币用的最小来源。
+<!-- 原型 v0.3(1325 派工·线框稿 §1 附带小节, 改自 v0.1/v0.2 — ledger 1335 合约约束核实):
+     这里列的是"代币定义"(DB only), 不是链上余额——KTT 没有通用余额概念, 每次下注才各自铸一份。
      样式对齐 my-markets.eta 的表格模式。GET /api/tokens 尚未落地(J2), 空/失败态如实显示。 -->
 
 <div class="p-6 max-w-5xl mx-auto" x-data="tokensListPage()" x-init="init()">
   <div class="flex items-center justify-between mb-5">
     <div>
-      <h1 class="text-2xl font-display text-ink-800">代币</h1>
-      <p class="text-xs text-ink-400 mt-1">已创建的测试代币, 用来开市场。</p>
+      <h1 class="text-2xl font-display text-ink-800">代币定义</h1>
+      <p class="text-xs text-ink-400 mt-1">已保存的代币定义，开市场时选一个做结算单位（代币本身在下注时才铸造）。</p>
     </div>
-    <a href="/tokens/create" class="btn btn-primary btn-sm">创建代币 →</a>
+    <a href="/tokens/create" class="btn btn-primary btn-sm">创建定义 →</a>
   </div>
 
   <div x-show="loading" class="text-center py-12 text-ink-400">载入中...</div>
@@ -20,7 +21,7 @@
 
   <div x-show="!loading && !loadFailed && tokens.length === 0" class="text-center py-16 bg-warm-50 rounded-lg">
     <div class="text-3xl mb-3">🪙</div>
-    <p class="text-ink-500">还没有创建过代币。</p>
+    <p class="text-ink-500">还没有代币定义。</p>
     <a href="/tokens/create" class="text-brand-500 hover:text-brand-700 text-sm mt-2 inline-block">创建第一个 →</a>
   </div>
 
@@ -30,8 +31,8 @@
         <tr>
           <th class="text-left py-2 px-3">名称</th>
           <th class="text-left py-2 px-3">Ticker</th>
-          <th class="text-right py-2 px-3">发行量</th>
-          <th class="text-left py-2 px-3">出单人</th>
+          <th class="text-right py-2 px-3">默认面额</th>
+          <th class="text-left py-2 px-3">用于哪些市场</th>
           <th class="text-right py-2 px-3">创建时间</th>
         </tr>
       </thead>
@@ -40,8 +41,8 @@
           <tr class="border-t border-warm-100 hover:bg-warm-50">
             <td class="py-2 px-3" x-text="tk.name || '(未命名)'"></td>
             <td class="py-2 px-3 font-mono text-xs" x-text="tk.ticker || '?'"></td>
-            <td class="py-2 px-3 text-right tabular-nums text-ink-600" x-text="tk.amount ?? '?'"></td>
-            <td class="py-2 px-3 text-ink-500 text-xs" x-text="tk.relay_name || tk.relayId || '?'"></td>
+            <td class="py-2 px-3 text-right tabular-nums text-ink-600" x-text="tk.faceValue ?? '—'"></td>
+            <td class="py-2 px-3 text-ink-500 text-xs" x-text="(tk.usedByMarkets && tk.usedByMarkets.length) ? tk.usedByMarkets.join(', ') : '（还没有市场用它）'"></td>
             <td class="py-2 px-3 text-right text-[11px] text-ink-400" x-text="(tk.created_at || '').slice(0, 16)"></td>
           </tr>
         </template>

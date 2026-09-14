@@ -1,7 +1,13 @@
 <%~ include('partials/page-open', { _page: 'proto-market-detail', pageTitle: '市场详情（原型）', ...it }) %>
 
-<!-- 原型 v0(1325 派工·线框稿 §3/§4, Bettor 1328 裁定): 独立新页, 下注+结算/领取合并一屏(对应线框稿两屏,
-     实现上更省心)。非 ZK 简单路径: 出单人到期手动宣布结果 → 赢家 claim; 无人宣布 → 全员 refund。
+<!-- 原型 v0.3(1325 派工·线框稿 §3/§4, Bettor 1328 裁定; 下注两步流程 = v0.3 改动, ledger 1335 J2
+     合约约束核实): 独立新页, 下注+结算/领取合并一屏。非 ZK 简单路径: 出单人到期手动宣布结果 → 赢家
+     claim; 无人宣布 → 全员 refund。
+     🔴 下注不是一步: KTT 没有通用余额, 每次下注都要先【铸筹码】(铸一份绑定本市场的代币) 再【下注】
+     (把这份代币转进市场 covenant)——两笔各自的 tx。第 2 步没真正落链前, 不能显示"已下注"; 第 1 步
+     成功、第 2 步失败, 必须能看出"筹码铸了、注没下成", 不能含糊成一个笼统的失败提示。
+     响应契约(占位, 具体字段名待与 J2 对齐): POST .../bet 返回 { ok, steps: [{step:'mint',ok,txId,error},
+     {step:'bet',ok,txId,error}] }——J2 设计稿会给两步失败态矩阵, 届时按实际字段调整, 不改这个两步骨架。
      GET /api/proto-markets/:id、POST .../bet、.../resolve、.../claim 尚未落地(J2), 失败态如实显示。 -->
 
 <div class="p-6 max-w-2xl mx-auto" x-data="protoMarketDetailPage()" x-init="init()" x-cloak>
@@ -23,7 +29,7 @@
         <p class="text-xs text-ink-400 mt-1">截止: <span x-text="(market.deadline || '').slice(0,16)"></span></p>
       </div>
 
-      <!-- 下注面板(仅 open 态) -->
+      <!-- 下注面板(仅 open 态) — 两步: ①铸筹码 ②下注, 各自独立成败态, 第②步没成功前不算"已下注" -->
       <template x-if="market.status === 'open'">
         <div class="card p-6 space-y-3">
           <h2 class="text-sm font-semibold text-ink-700">下注</h2>
@@ -36,8 +42,30 @@
             <input x-model.number="bet.amount" type="number" min="0" step="any"
               class="w-full mt-1 border border-warm-300 rounded-lg px-3 py-2 text-sm focus:border-brand-400 focus:outline-none bg-warm-50">
           </div>
+
+          <!-- 两步进度: 提交后才显示 -->
+          <div x-show="betSteps.mint.state !== 'idle'" class="space-y-1.5 text-xs border border-warm-200 rounded-lg p-3 bg-warm-50">
+            <div class="flex items-center gap-2">
+              <span x-text="stepIcon(betSteps.mint.state)"></span>
+              <span class="font-medium">① 铸筹码</span>
+              <span class="text-ink-400 font-mono text-[10px]" x-show="betSteps.mint.txId" x-text="betSteps.mint.txId.slice(0,12)+'...'"></span>
+            </div>
+            <div class="text-red-600 pl-5" x-show="betSteps.mint.state === 'failed'" x-text="betSteps.mint.error"></div>
+            <div class="flex items-center gap-2">
+              <span x-text="stepIcon(betSteps.bet.state)"></span>
+              <span class="font-medium">② 下注</span>
+              <span class="text-ink-400 font-mono text-[10px]" x-show="betSteps.bet.txId" x-text="betSteps.bet.txId.slice(0,12)+'...'"></span>
+            </div>
+            <div class="text-red-600 pl-5" x-show="betSteps.bet.state === 'failed'" x-text="betSteps.bet.error"></div>
+            <div class="text-amber-700 pl-5" x-show="betSteps.mint.state === 'done' && betSteps.bet.state === 'failed'">
+              筹码已铸出但没能下成注——这份筹码目前没有绑定到本次下注，别当作"已下注"。
+            </div>
+          </div>
+
           <div x-show="betError" class="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2" x-text="betError"></div>
-          <div x-show="betOk" class="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2" x-text="betOk"></div>
+          <div x-show="betSteps.mint.state === 'done' && betSteps.bet.state === 'done'" class="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
+            ✓ 已下注（两步均已落链）
+          </div>
           <button @click="placeBet()" :disabled="betSubmitting || !(bet.direction !== null && bet.amount > 0)" class="btn btn-primary w-full">
             <span x-show="!betSubmitting">提交下注</span>
             <span x-show="betSubmitting">提交中...</span>
@@ -84,7 +112,8 @@ function protoMarketDetailPage() {
     loadFailed: '',
     market: null,
     bet: { direction: null, amount: null },
-    betSubmitting: false, betError: '', betOk: '',
+    betSubmitting: false, betError: '',
+    betSteps: { mint: { state: 'idle', txId: '', error: '' }, bet: { state: 'idle', txId: '', error: '' } },
     resolveSubmitting: false, resolveMsg: '', resolveOk: false,
     claimSubmitting: false, claimMsg: '', claimOk: false,
 
@@ -108,18 +137,38 @@ function protoMarketDetailPage() {
       return m[s] || s || '?';
     },
 
+    // 下注 = 两笔独立 tx(①铸筹码 ②下注), 后端按 §0 注释里的占位契约返回 steps 数组。
+    // 没有 steps 数组(比如 404/网络错误, 根本没走到后端逻辑) = 视为两步都还没开始, 只报通用错误,
+    // 不瞎猜走到了哪一步。
     async placeBet() {
-      this.betSubmitting = true; this.betError = ''; this.betOk = '';
+      this.betSubmitting = true; this.betError = '';
+      this.betSteps = { mint: { state: 'running', txId: '', error: '' }, bet: { state: 'idle', txId: '', error: '' } };
       try {
         const res = await fetch('/api/proto-markets/' + encodeURIComponent(this.marketId) + '/bet', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ direction: this.bet.direction, amount: this.bet.amount }),
         });
         const data = await res.json().catch(() => ({}));
-        if (!res.ok || !data.ok) { this.betError = '下注失败: ' + (data.error || ('HTTP ' + res.status)); return; }
-        this.betOk = '下注成功，TX: ' + (data.txId || '').slice(0, 16) + '...';
-      } catch (err) { this.betError = '请求失败: ' + err.message; }
-      finally { this.betSubmitting = false; }
+        const steps = Array.isArray(data.steps) ? data.steps : null;
+        if (!steps) {
+          this.betSteps = { mint: { state: 'idle', txId: '', error: '' }, bet: { state: 'idle', txId: '', error: '' } };
+          this.betError = '下注失败: ' + (data.error || ('HTTP ' + res.status)) + (res.status === 404 ? '（后端接口尚未上线）' : '');
+          return;
+        }
+        const mintStep = steps.find(s => s.step === 'mint') || {};
+        const betStep = steps.find(s => s.step === 'bet') || {};
+        this.betSteps.mint = { state: mintStep.ok ? 'done' : 'failed', txId: mintStep.txId || '', error: mintStep.error || '' };
+        this.betSteps.bet = mintStep.ok
+          ? { state: betStep.ok ? 'done' : (betStep.error ? 'failed' : 'idle'), txId: betStep.txId || '', error: betStep.error || '' }
+          : { state: 'idle', txId: '', error: '' };
+        // 只有两步都 ok 才算成功; 任何一步没成功都不显示"已下注"(HTML 里 x-show 已经按这个判断)。
+      } catch (err) {
+        this.betSteps = { mint: { state: 'idle', txId: '', error: '' }, bet: { state: 'idle', txId: '', error: '' } };
+        this.betError = '请求失败: ' + err.message;
+      } finally { this.betSubmitting = false; }
+    },
+    stepIcon(state) {
+      return { idle: '○', running: '◉', done: '✓', failed: '✗' }[state] || '○';
     },
 
     async resolveOutcome(direction) {

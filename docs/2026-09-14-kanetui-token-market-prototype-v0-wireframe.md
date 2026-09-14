@@ -1,4 +1,4 @@
-> **Status**: CURRENT（v0.2）— 第一步交付(范围稿 §4 KANet-UI 行)。v0.1 已 Bettor GREEN 入账 (1326)；v0.2 按 Bettor (1328) 裁定改路线：市场创建/浏览/下注/claim 改走独立新路由 `/proto-markets/*`，**零改动** `predictions-pool-create.eta`/`predictions-pool-detail.eta`/`predictions.eta`/tg-bot（见 §2/§3/§4 更正）。五屏路由与页面已落码（前端 UI 已提交，后端端点均待 J2）：`/tokens`、`/tokens/create`、`/proto-markets`、`/proto-markets/create`、`/proto-markets/:id`。
+> **Status**: CURRENT（v0.3）— 第一步交付(范围稿 §4 KANet-UI 行)。v0.1 已 Bettor GREEN 入账 (1326)；v0.2 按 Bettor (1328) 裁定改路线：市场创建/浏览/下注/claim 改走独立新路由 `/proto-markets/*`，**零改动** `predictions-pool-create.eta`/`predictions-pool-detail.eta`/`predictions.eta`/tg-bot（见 §2/§3/§4 更正）。**v0.3（ledger 1335，J2 合约约束核实，Bettor 转达）**：KTT 从铸造起就绑定某个市场，不存在"通用余额"——`/tokens/create` 改为保存"代币定义"（DB only，不广播不产生 TX）；下注改成两步（①铸筹码 ②下注），各自独立成败、第②步没落链前不算"已下注"（见 §1/§3b）。五屏路由与页面已落码（前端 UI 已提交，后端端点均待 J2）：`/tokens`、`/tokens/create`、`/proto-markets`、`/proto-markets/create`、`/proto-markets/:id`。
 
 # 原型 v0 线框稿：代币创建 + 市场创建/浏览/下注/claim
 
@@ -26,30 +26,31 @@
 
 ## 1. 代币创建界面 — `/tokens/create`（新页，已落码 `tokens-create.eta`）
 
-### 字段（已用 `kasia-console/src/lib/sil-v1/KanetTestToken.sil` ctor 核对，非猜测）
+### v0.3 更正：这一屏不再铸币，只存"代币定义"
 
-合约 ctor 七项里，只有下面这些是**用户需要有意义填的**，其余（`market_tmpl_suffix`/`max_ins`/`max_outs` 等协议常量）后端钉死、界面不暴露：
+**推翻的假设**（v0.1/v0.2）：以为 `/tokens/create` 直接对应 `KanetTestToken.sil` 的 genesis 花费（选出单人 + 填 `init_amount` → 广播创世 P2SH）。J2 核合约后指出（ledger 1335）：**KTT 从铸造那一刻起就绑定某个具体市场**，不存在"某个 agent 持有 N 枚 KTT，之后拿去随便用"这种通用余额语义——真正的铸币动作发生在**下注**那一步（见 §3b 两步流程），不在代币创建这一屏。
 
-| 界面字段 | 对应链上/DB | 说明 |
+**v0.3 字段**（这一屏现在只是 DB 保存一份"代币定义"，供市场创建时选用，不广播、不产生 TX）：
+
+| 界面字段 | 存哪 | 说明 |
 |---|---|---|
-| 出单人（选择已有 agent/relay） | `init_owner` = 所选 agent 的 covenant-id | 下拉，`it.relayNodes` 过滤非 oracle |
-| 发行数量 `init_amount` | 链上 state | 数字输入，必填，>0 |
-| 代币名称 | DB only（链上没有这字段） | 文本输入 |
-| Ticker（如 `KTT`） | DB only | 文本输入，≤6 位，自动转大写 |
-| 说明/描述（可选） | DB only | 文本域 |
+| 名称 | DB | 文本输入 |
+| Ticker（如 `KTT`） | DB | 文本输入，≤6 位，自动转大写 |
+| 默认面额（可选） | DB | 数字，市场创建时预填、可改，纯便利字段不是协议参数 |
+| 说明/描述（可选） | DB | 文本域 |
 
-**后端钉死、界面不填**：`init_owner_scheme`=`0x04`（固定 covenant-id）、`init_borrow_scheme`=`0x00`（固定 disabled）、`init_borrow_guard`/`init_extension_commitment`=全零、`market_tmpl_suffix`+长度、`max_ins`/`max_outs`——协议级常量，J2 后端 API 直接填，界面完全不出现。
+真正的链上 ctor 字段（`init_owner`/`init_amount`/`owner_scheme` 等）全部推迟到 §3b 的"铸筹码"步骤才用得上，界面不在这一屏出现。
 
 ### 流程/状态（已实现）
 
-1. 空表单（出单人 + 数量 + 名称 + ticker + 描述）
-2. 提交 → `POST /api/tokens/create`（J2 待建），"创建中"禁用态
-3. 完成态：✓ 已创建 + TX 摘要 + 「查看代币列表」/「再造一个」
+1. 空表单（名称 + ticker + 默认面额 + 描述）
+2. 提交 → `POST /api/tokens/create`（语义已变：现在是"存定义"，J2 待建），"保存中"禁用态
+3. 完成态：✓ 定义已保存（**没有 TX**）+「去建市场」/「查看定义列表」/「再造一个」
 4. 失败态：如实显示错误（含 404 时的"后端接口尚未上线"提示），不假装成功、不清空已填字段
 
-### `/tokens`（代币列表，已实现）
+### `/tokens`（代币定义列表，已实现）
 
-给市场创建"选一个已创建的代币"用。表格：名称/ticker/发行量/出单人/创建时间，样式对齐 `my-markets.eta`。`GET /api/tokens`（J2 待建）失败/空态均如实显示。
+给市场创建"选一个代币定义"用。表格：名称/ticker/默认面额/**用于哪些市场**/创建时间，样式对齐 `my-markets.eta`。「用于哪些市场」列需要后端聚合（哪些 `proto-markets` 引用了这个定义），字段名待 J2。`GET /api/tokens`（J2 待建）失败/空态均如实显示。
 
 ---
 
@@ -59,7 +60,7 @@
 
 | 字段 | 说明 |
 |---|---|
-| 结算代币 | 下拉，来源 `GET /api/tokens` |
+| 结算代币 | 下拉，来源 `GET /api/tokens`（v0.3：现在是代币**定义**列表，不是链上代币） |
 | 议题标题 | 文本，≤140 字 |
 | 截止时间 | `datetime-local` |
 | 结算说明（可选） | 文本域，怎么判 YES/NO |
@@ -76,7 +77,19 @@
 
 ## 3b. 下注界面 — `/proto-markets/:id` 详情页的"下注"面板（已落码 `proto-market-detail.eta`）
 
-**v0.2 更正**：不再扩展 `predictions-pool-detail.eta`（原因见 §0）。合并进详情页（见 §4）：`open` 态显示 YES/NO 选边 + 数量输入 + 提交，`POST /proto-markets/:id/bet`（J2 待建）。
+**v0.2 更正**：不再扩展 `predictions-pool-detail.eta`（原因见 §0）。合并进详情页（见 §4）：`open` 态显示 YES/NO 选边 + 数量输入 + 提交。
+
+**v0.3 更正：下注不是一笔 tx，是两笔**（ledger 1335）——KTT 没有通用余额，每次下注都要：
+
+1. **① 铸筹码**：铸一份绑定本次下注（本市场 + 本方向 + 本金额）的 KTT
+2. **② 下注**：把这份筹码转进市场 covenant
+
+两步各自独立成败，UI 用一个两步进度块显示（各自的 txid + 状态图标 ○待开始/◉进行中/✓完成/✗失败）：
+- ① 失败 → ② 保持"未开始"，不尝试
+- ① 成功、② 失败 → 明确提示"筹码已铸出但没能下成注，别当作已下注"，**不显示笼统的失败/成功文案**
+- ①②都成功 → 才显示"✓ 已下注（两步均已落链）"
+
+响应契约（占位，具体字段名等 J2 设计稿定）：`POST /proto-markets/:id/bet` 返回 `{ ok, steps: [{step:'mint',ok,txId,error}, {step:'bet',ok,txId,error}] }`。J2 设计稿会给两步失败态矩阵（比如网络中断在哪一步、UTXO 冲突算哪一步失败），届时按实际字段名调整，**不改这个"两步各自成败"的骨架**。
 
 ---
 
@@ -106,5 +119,5 @@
 1. ~~`market.eta`/`market-v2.eta` vs `predictions.eta`/`predictions-pool-detail.eta` 对应关系订正~~ — **已确认**：Bettor 独立核实 `market-v2.eta`（"买入/卖出 KAS"、价格(USD) 字段）确系 OTC 订单簿，非预测下注页。
 2. ~~路由改走独立前缀 `/proto-markets/*`，不扩展既有生产页~~ — **已裁定**（Bettor 1328 ①②③），已按此实现。
 3. `/tokens`、`/tokens/create` 路由命名 — 已确认无冲突（Bettor 1328 ④）。
-4. **待 J2**：五个后端端点契约（`POST /api/tokens/create`、`GET /api/tokens`、`POST /api/proto-markets/create`、`GET /api/proto-markets`、`GET /api/proto-markets/:id`、`POST /proto-markets/:id/{bet,resolve,claim}`）——本稿字段/流程是前端先行假设，接口细节以 J2 实际落地为准，前端随之调整。Bettor 已同步要求 J2：原型状态落新表，不写生产结算 daemon 轮询的表。
-5. **待做**：真机验证（重启 console 加载新路由/模板，实际点一遍五屏渲染是否正常）——纯新增路由，风险低，但涉及重启现网 da9 mainnet console（持有热钱包私钥的活进程），何时重启待 Bettor 协调。
+4. **待 J2**：六个后端端点契约（`POST /api/tokens/create`、`GET /api/tokens`、`POST /api/proto-markets/create`、`GET /api/proto-markets`、`GET /api/proto-markets/:id`、`POST /proto-markets/:id/{bet,resolve,claim}`）——本稿字段/流程是前端先行假设，接口细节以 J2 实际落地为准，前端随之调整；`bet` 端点的两步 `steps` 响应契约（§3b）尤其待 J2 设计稿定字段名。Bettor 已同步要求 J2：原型状态落新表，不写生产结算 daemon 轮询的表。
+5. ~~真机验证~~ — 本地隔离实例（port 3205，空库，死 RPC，全自动化关）自验通过（v0.2 + v0.3 各测一轮），五屏 HTTP 200、关键文案渲染正确。**真正的 da9 主网 console 实机点验**待 Owner GO，清单见 `docs/2026-09-14-kanetui-proto-v0-realmachine-verification-checklist.md`（也需按 v0.3 字段/两步流程小改，见该文件）。

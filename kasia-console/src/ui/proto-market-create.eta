@@ -1,8 +1,10 @@
 <%~ include('partials/page-open', { _page: 'proto-market-create', pageTitle: '创建市场（原型）', ...it }) %>
 
-<!-- 原型 v0(1325 派工·线框稿 §2, Bettor 1328 裁定②③): 独立新页, 不碰 predictions-pool-create.eta /
-     predictions-pool-detail.eta / predictions.eta / tg-bot 任何一行。走非 ZK 简单 claim/refund 路径
-     (范围稿 §2): 出单人到期后手动宣布结果, 赢家凭结果 claim, 无人宣布则 refund——不接 oracle 委员会/ZK。
+<!-- 原型 v0.3(1325 派工·线框稿 §2, Bettor 1328 裁定②③, v0.3 改动见 ledger 1335): 独立新页, 不碰
+     predictions-pool-create.eta / predictions-pool-detail.eta / predictions.eta / tg-bot 任何一行。
+     走非 ZK 简单 claim/refund 路径(范围稿 §2): 出单人到期后手动宣布结果, 赢家凭结果 claim, 无人宣布则
+     refund——不接 oracle 委员会/ZK。"结算代币"下拉来源改为 GET /api/tokens 的代币定义列表(DB only,
+     非链上代币——KTT 没有通用余额, 真正铸币发生在 §3 详情页的下注两步流程里)。
      提交端点 POST /api/proto-markets/create 尚未落地(J2), 失败态如实显示。 -->
 
 <div class="p-6 max-w-xl mx-auto" x-data="protoMarketCreatePage()" x-init="init()" x-cloak>
@@ -37,7 +39,7 @@
             <option :value="tk.id" x-text="(tk.name || '?') + ' (' + (tk.ticker || '?') + ')'"></option>
           </template>
         </select>
-        <p class="text-[11px] text-ink-300 mt-1" x-show="tokens.length === 0 && !tokensLoadFailed">还没有代币，先去 <a href="/tokens/create" class="text-brand-500 hover:underline">创建一个</a>。</p>
+        <p class="text-[11px] text-ink-300 mt-1" x-show="tokens.length === 0 && !tokensLoadFailed">还没有代币定义，先去 <a href="/tokens/create" class="text-brand-500 hover:underline">创建一个</a>。</p>
       </div>
       <div>
         <label class="text-xs text-ink-400">议题标题</label>
