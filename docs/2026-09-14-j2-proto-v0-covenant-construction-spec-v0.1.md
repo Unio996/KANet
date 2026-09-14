@@ -70,10 +70,12 @@ Covenant genesis/spend 本身不产生 KAS——每一笔 `covenant_broadcast` �
 
 ```
 net_loss = Σ(relay 签名的 input.value) − Σ(outputs 中 scriptPubKey == relay 自身地址 的 value)
-require(net_loss ≤ min(required_fee × 2, ABS_FEE_CAP))
+require(net_loss ≤ min(required_fee × 2, absFeeCapSompi, GLOBAL_ABS_FEE_CAP_SOMPI))
 ```
 
-**每个 kind 的"找零/手续费形状"一节，回答的就是**：这个 fee input 出多少钱、找零多少回 relay 自己、net_loss 是不是只等于真实 mass 费（不多不少）。**通则**：fee input 金额 = `估计所需 KAS`（覆盖 mass 费 + 给 covenant 输出的 dust 最小值，如果这笔交易恰好需要给某个新建/续约的 covenant 输出补 `DUST_MIN=1000` sompi 级别的垫底 KAS），找零 = fee input 金额 − 真实花掉的部分，找零输出的 `scriptPubKey` 必须等于 relay 自己地址的 `payToAddressScript`（这样 `validateNetLoss` 才能正确识别"这是找零，不是净损耗"）。
+> 📌 **修订（Bettor 1386①/NWT 1387 架构裁定，2026-09-14，落码见 `kasia-relay/src/lib/covenant-broadcast.mjs` 提交 14c9cf22）**：原公式里的 `ABS_FEE_CAP` 是**单一全局常量**（0.05 KAS）——mass 实验（`docs/provenance/2026-09-14-j2-proto-v0-genesis-mass-fee-estimate/`）证明这对 `ShardLeaf_direct` 这类大脚本 covenant **完全不够用**（理论最小 net_loss ≈0.4 KAS，是旧硬顶 8 倍）。现改为**两条独立生效的防线**（详见新增 §9.4）：`absFeeCapSompi` 是 per-kind 精细上限（各 kind 自己的 mass 实验结果算出、由 console 侧硬编码传入，`validateNetLoss` 现在**要求**调用方显式传这个参数，不再有隐式默认值），`GLOBAL_ABS_FEE_CAP_SOMPI = 1.0 KAS` 是 relay 侧硬编码的、与 kind 无关的最终硬顶。三者取最小。
+
+**每个 kind 的"找零/手续费形状"一节，回答的就是**：这个 fee input 出多少钱、找零多少回 relay 自己、net_loss 是不是只等于真实 mass 费（不多不少）。**通则**：fee input 金额 = `估计所需 KAS`（覆盖 mass 费 + 给 covenant 输出的 dust 最小值，如果这笔交易恰好需要给某个新建/续约的 covenant 输出补 `DUST_MIN=1000` sompi 级别的垫底 KAS），找零 = fee input 金额 − 真实花掉的部分，找零输出的 `scriptPubKey` 必须等于 relay 自己地址的 `payToAddressScript`（这样 `validateNetLoss` 才能正确识别"这是找零，不是净损耗"）。**fee input 的 UTXO 选择本身也有约束，见 §9.5**：不能随手抓一个能用的大额 UTXO（比如种子 2 KAS），必须选面值与所需金额相配的 UTXO，没有则先做一笔自找零拆分。
 
 ## §2 market_genesis（`POST /api/proto-markets/create`）
 
@@ -81,7 +83,9 @@ require(net_loss ≤ min(required_fee × 2, ABS_FEE_CAP))
 
 无 entry——genesis。合约 `ShardLeaf_direct`（`src/lib/ShardLeaf_direct.sil`，`sha256` 见 `mainnet-sil-set.json` 第 9 条）。
 
-### ctor 字段清单（10 项，按源码原序）
+### ctor 字段清单（12 项，按源码原序）
+
+> 📌 **勘误（NWT GREEN-with-notes 第 5 点，2026-09-14）**：本节标题原写"10 项"，实际逐行清点是 **12 项**（`init_local_yes`/`init_local_no`/`init_count`/`init_pool_value` 这一行是 4 个字段合并展示，容易数漏）——按本文件通则"它就是唯一记录 ⇒ 配一条自查命令"：`grep -c '^|' <(sed -n '86,96p' 本文件)` 数据表行数 + 展开合并行即得 12，不是重新定义字段，只是把标题数字改成和下表一致。
 
 | ctor 字段 | 类型 | 来源 |
 |---|---|---|
@@ -103,7 +107,11 @@ require(net_loss ≤ min(required_fee × 2, ABS_FEE_CAP))
 
 ### 找零/手续费形状
 
-Fee input 金额 = `estimatedFee + genesisOutputValue`（`genesisOutputValue` 是给新建 `ShardLeaf_direct` covenant 输出的 KAS 金额，建议给一个比 `DUST_MIN=1000` sompi 宽松一些的固定值，比如 10000 sompi，避免未来 `register_append`/`convert_to_rootclose` 时因为 value 太贴近下限而在别的 require 上出问题——**具体数值待落码时结合真实 mass 估算校准，这里只定方向**）。输出 = `[genesis ShardLeaf_direct 输出, 找零回 relay 自己地址]`。`net_loss` = fee input 金额 − 找零金额 = 真实花掉的部分（mass 费 + genesis output value）——**这里 `genesisOutputValue` 本身也会被算进 `net_loss`**，因为它离开了 relay 自己的地址、进了一个新建的 covenant，这是**预期之中的花费**，不是"净损耗超限"的异常——`ABS_FEE_CAP=0.05 KAS` 需要覆盖真实 mass 费 + 这个 genesis dust 金额，如果 `genesisOutputValue` 定得太大（比如超过 0.05 KAS），会直接撞 `validateNetLoss` 的硬顶而被拒——**这是需要在 §9.2 安全约束和"给 covenant 输出多少启动资金"这两个目标之间做取舍的地方，建议 `genesisOutputValue` 控制在几千到一万 sompi 量级（远低于 0.05 KAS = 5,000,000 sompi），不贴近上限**。
+Fee input 金额 = `estimatedFee + genesisOutputValue`。
+
+> 📌 **修订（Bettor 1386①，2026-09-14，出处 `docs/provenance/2026-09-14-j2-proto-v0-genesis-mass-fee-estimate/`）**：原文这里建议 `genesisOutputValue` 定在"几千到一万 sompi"、认为越小越省——**实测证伪**：真实 `calculateTransactionMass` 对 `ShardLeaf_direct`（15687 字节的编译产物）跑出的 KIP-9 storage mass 惩罚，让 `required_fee` 与 `genesisOutputValue` 精确成反比（`required_fee × genesisOutputValue ≈ 4×10^14` 常数），`net_loss(v) = v + required_fee(v)` 是 U 形曲线，**越小的 `genesisOutputValue` 反而 `net_loss` 越大**（1000 sompi 时 net_loss ≈4000 KAS，荒谬地大）。全局最优点在 **`genesisOutputValue = 20,000,000 sompi（0.2 KAS）`，此时 `required_fee ≈ 20,000,000 sompi`，`net_loss ≈ 40,000,000 sompi（0.4 KAS）`**——与生产代码 `pool-shard-register.mjs:85` 独立选定的 `SHARD_GENESIS_SEED = 20_000_000` 完全吻合，交叉验证了这个值。`genesisOutputValue` 应**定死为 20,000,000 sompi**，不是"越省越好"的可调参数。
+
+输出 = `[genesis ShardLeaf_direct 输出, 找零回 relay 自己地址]`。`net_loss` = fee input 金额 − 找零金额 = 真实花掉的部分（mass 费 + genesis output value）——**这里 `genesisOutputValue` 本身也会被算进 `net_loss`**，因为它离开了 relay 自己的地址、进了一个新建的 covenant，这是**预期之中的花费**，不是"净损耗超限"的异常。`genesisOutputValue=20,000,000` 对应的最优 `net_loss≈0.4 KAS` 需要 console 侧 `CAP_MARKET_GENESIS` 覆盖（候选值 0.4/0.5/0.8 KAS，见 provenance README，最终数值由该 kind 落码提交时定），且必须 `≤ GLOBAL_ABS_FEE_CAP_SOMPI = 1.0 KAS`（见 §1.4 修订、§9.4）。
 
 ### T4-lite 人工核清单（创世前逐字节对照）
 
@@ -253,6 +261,8 @@ Fee input 金额 = `estimatedFee + genesisOutputValue`（`genesisOutputValue` �
 - **T-PROTO-PAYOUT-DEPTH-CAP**：§4.1 的 depth-1 上限导致 v0 最多支持每个市场 2 个"不同 `payout` 取值"的赢家（不是 2 个赢家笔数，是 2 个不同金额）——超过需要显式拒绝 resolve，不是静默出错。
 - **T-PROTO-COMMITTEE-SIG-DISTINCTNESS**：§4 的 `close_commit` 5 个 `sig` 参数是否可以填同一个签名值 5 遍（合约没有 distinctness 检查是前提条件，但"5 个相同字节"这个具体场景没有实测过），标注待落码时用离线向量核实。
 - **T-PROTO-WITHDRAW-DEST-ADDRESS**：§6 "赢家自己的地址"在 v0 场景下实际上是 committee keypair 派生的地址，不是真正独立的用户钱包——这是 v0 单操作员模型的自然延伸，不是新发现的漏洞，但界面上不能暗示这是"用户自己的钱包地址"，需要如实展示。
+- **T-PROTO-ENTRY-WITNESS-ABI-UNVERIFIED**（NWT GREEN-with-notes 第 5 票，1385，须在 resolve 落码前 close）：§1.2 表格②层"委员会/bettor witness 签名"作为 entry 调用参数传入这件事，本文档只描述了机制（`createInputSignature` 算出的签名字节编码进 entry 调用参数），**没有实测验证 silverscript entry 的具体 ABI 编码方式**（参数顺序、`sig` 类型在字节码层面期望的确切编码——是否等价于 `checkMsgSig` 直接接受的形状、还是需要额外包装）与本文档假设的编码方式逐字节一致。落 `market_resolve`（`close_commit` 5 个 `sig` 参数）代码前，必须先用离线 cli-debugger 向量核实一遍真实签名字节能被合约 `entry` 正确校验通过，不能只凭本文档的文字描述就假设 ABI 对得上。
+- **T-PROTO-FEE-UTXO-SELECTION-UNIMPLEMENTED**（NWT 1387 架构裁定②，见 §9.5，未落码）：`buildAndBroadcast` 选 fee input UTXO 的"面值匹配 + 无匹配先自找零拆分"逻辑尚未实现——目前如果 relay 手头只有种子那笔大额 UTXO（2 KAS），会因为面值撞 `SIGNED_INPUT_CEILING_SOMPI`/`GLOBAL_ABS_FEE_CAP_SOMPI` 被直接拒绝（这是预期行为，不是 bug，但意味着 `market_genesis` 首次落码时如果没先实现这条拆分逻辑，第一笔真实广播大概率打不过去）。
 
 ## §8 关于"生产 daemon 复用现有 legacy wrapper 会不会因为这次改动受影响"——不会
 
@@ -290,3 +300,28 @@ await sendCommandAsync(PROTO_RELAY_ID, { type: 'covenant_broadcast', /* ... 40+ 
 ```
 
 本条是纯代码风格规范，不改动 lint 规则本身（40 行上限是 `R-SCA-ALIAS-ORIGIN`/`R-SENDCMD-ORIGIN-REQUIRED`/`R-PROTO-RELAY-ID-CONST` 三条规则共用的既有引擎 `extractCallArgSpanShared`，改它的扫描窗口影响面超出本次范围，写代码时避开触发条件即可）。
+
+### §9.4 fee cap 两层架构：relay 硬编码 GLOBAL vs console 硬编码 per-kind（NWT 1387 架构裁定，回应"写进 §9.2 修订"要求）
+
+> 📌 本节回应 NWT 消息原文"两层各自独立，写进设计稿 §9.2 修订"——**编号落在 §9.4 而不是 §9.2**：既有 §9.2 是"私钥生命周期"（不同主题，Bettor 1382 裁定的既有编号，不能挪位/覆盖），本条按内容归入 §9（buildAndBroadcast 实现规范）新增一节，避免编号冲突覆盖既有正文；内容完整落实 NWT 的要求，只是章节号不同，特此说明避免"号对不上"的误解。落码见 `kasia-relay/src/lib/covenant-broadcast.mjs` + `covenant-broadcast-relay.mjs` 提交 `14c9cf22`。
+
+`validateNetLoss` 的 fee ceiling 现在是**两条独立生效的防线**取最小值（§1.4 已更新公式），职责严格分层，**任何一层都不能依赖另一层的正确性**：
+
+1. **per-kind 精细上限（`absFeeCapSompi`）——职责在 console 侧**：每个 kind 各自的 mass 实验（§1.4、genesis 见 provenance `2026-09-14-j2-proto-v0-genesis-mass-fee-estimate`）算出 `cap[kind] = measured_min_net_loss[kind] × 2`，**硬编码**在 console 侧 `buildAndBroadcast` 里各 kind 自己的代码路径（例如 `const CAP_MARKET_GENESIS = 80_000_000n; // 0.4 KAS × 2, 见 provenance`），调用 `validateNetLoss(..., absFeeCapSompi: CAP_MARKET_GENESIS)` 时直接传常量字面量。**这个值绝不能来自请求体/命令字段/任何调用方可控的输入**——若来自外部输入，攻击者可以给任意一笔交易贴上"cap 最宽的 kind"标签绕过更严格限制（这正是 NWT 指出的攻击面）。
+2. **全局硬顶（`GLOBAL_ABS_FEE_CAP_SOMPI = 1.0 KAS`）——职责在 relay 侧**：relay（`covenant-broadcast-relay.mjs`）调用 `validateNetLoss` 时，`absFeeCapSompi` 参数**硬编码**为 `GLOBAL_ABS_FEE_CAP_SOMPI` 字面量，**绝不读取 `cmd` 对象里任何"这次该用哪个 cap"的字段**（哪怕未来某天有人想加一个 `cmd.abs_fee_cap_sompi` 字段图方便，也不能让 relay 信任它——relay 完全不知道、也不需要知道"这是哪个 kind"，它只做与 kind 无关的最终兜底）。
+
+**两层不是"选一层就够"，是缺一不可的 defense in depth**：即使 console 侧某个 kind 的 per-kind cap 写错（比如手滑复制粘贴了别的 kind 的值、或者以后新增 kind 忘了单独硬编码），relay 侧的 GLOBAL 硬顶仍然兜底防止 net_loss 无限增长；即使 relay 侧的 GLOBAL 硬顶定得比较宽松（1.0 KAS 远大于任何单个 kind 的真实需求），per-kind cap 仍然把每个 kind 收紧到它自己真正需要的范围，不会因为"反正 relay 兜底"就疏于给每个 kind 单独算数。
+
+**自验证记录（提交 `14c9cf22` commit message 已附，此处摘要供设计稿读者不必翻 commit）**：注入回归模拟"relay 信任 cmd 传来的 cap"，用一笔合法交易 + 恶意极小 `cmd.abs_fee_cap_sompi='1'` 验证：注入态下合法交易被错误拒绝（证明这条攻击面真实可触发），revert 后测试全绿。另发现当前参数下 `SIGNED_INPUT_CEILING_SOMPI` 与 `GLOBAL_ABS_FEE_CAP_SOMPI` 数值恰好相等（都是 1.0 KAS），使得"cmd 贴恶意大 cap 让 net_loss 超 GLOBAL"这条具体路径被更早的独立闸门顺带挡住——这是当前数值配置下的巧合重叠，不代表硬编码 GLOBAL 这条修复本身没必要（两个上限未来分离后，重叠保护会消失）。
+
+### §9.5 fee input 的 UTXO 选择与自找零拆分（NWT 1387 架构裁定②，实现期硬要求，未落码）
+
+`SIGNED_INPUT_CEILING_SOMPI` 提到 1.0 KAS 后，relay 手头如果只有一个大额 UTXO（例如 Owner 授权的种子 2 KAS）被当作某个小额 kind 的 fee input 使用，**这个 UTXO 自己的面值就会撞上 `SIGNED_INPUT_CEILING`/`GLOBAL_ABS_FEE_CAP_SOMPI` 而被误拒**——即使这笔交易真正花掉的 `net_loss`（扣掉找零后）远低于上限，因为 `validateSignedInputCeiling`/`validateNetLoss` 都是看"签了名的 input 面值"而不是"净损耗"来判定其中一部分逻辑（`validateSignedInputCeiling` 明确是看面值）。
+
+**⇒ `buildAndBroadcast` 选 fee input UTXO 时不能"随手抓一个能用的"**，必须：
+
+1. 从 relay 自己的 UTXO 集合里，**优先选面值与本次所需金额（`estimatedFee + genesisOutputValue` 或对应 kind 的净花费）量级相配的 UTXO**（比如需要 0.2~1 KAS 级别的 fee input，不要用 2 KAS 的大额 UTXO，即使技术上能覆盖）。
+2. **如果没有面值匹配的 UTXO**（比如种子到账后手头只有那一笔 2 KAS，还没拆分过），**必须先发起一笔 relay 自付的"自找零拆分"交易**：把大额 UTXO 拆成若干个面值贴近各 kind 典型需求的小额 UTXO，再用拆出来的小额 UTXO 做后续 kind 的 fee input。这笔拆分交易本身也是一笔 `covenant_broadcast`-同级别的 relay 自付交易，**同样受 §9.4 两层 cap 约束**（拆分交易的"net_loss"是拆分本身产生的 mass 费，用哪个 kind 的 cap 或者是否需要一个专门的 `CAP_UTXO_SPLIT` 常量，留给拆分逻辑落码时具体设计，不在本节展开）。
+3. 首次拿到种子（2 KAS）后大概率需要先做一次这样的拆分，才能开始 `market_genesis`（0.2 KAS 量级）——这是 §7 之外新增的一条实现顺序前提，不是可选优化。
+
+**T-PROTO-FEE-UTXO-SELECTION-UNIMPLEMENTED**（新增已知限制，本节机制未落码，待 `buildAndBroadcast` 具体实现时补齐，实现前 `market_genesis` 广播如果 relay 手头只有大额 UTXO 会直接被 ceiling 拒绝，属预期行为不是 bug）。
