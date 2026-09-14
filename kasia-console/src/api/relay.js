@@ -16,7 +16,7 @@ import { getMind } from '../services/mind-manager.js';
 import { ethers } from 'ethers';
 import { encrypt, decrypt } from '../services/crypto.js';
 import { verifyIngestRequest } from '../services/ingest-auth.js';
-import { checkKeyExportWindow } from '../lib/admin-secret-tier.mjs';
+import { checkKeyExportWindow, checkAdminSecretTier } from '../lib/admin-secret-tier.mjs';
 import { randomUUID } from 'crypto';
 import {
   CHAIN_META,
@@ -532,7 +532,11 @@ export async function registerRelayRoutes(fastify) {
   });
 
   // Transfer KAS via Relay
+  // T-LOOPBACK-AUTHZ 热修(2026-09-14, NWT 发现·Bettor 派工): 原来零鉴权——本机任意进程一次 POST
+  // 就能让 17 个在跑的 relay 真实转账。接 ADMIN_SECRET_FUNDS tier(未设=503,主网默认关闭)。
   fastify.post('/api/relay/:id/transfer', async (request, reply) => {
+    const auth = checkAdminSecretTier(request, 'ADMIN_SECRET_FUNDS');
+    if (!auth.ok) return reply.code(auth.code).send({ error: auth.error });
     const relay = getRelayNode(request.params.id);
     if (!relay?.address) return reply.code(404).send({ error: 'Account not found' });
 

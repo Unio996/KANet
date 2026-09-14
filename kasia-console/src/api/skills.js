@@ -458,46 +458,12 @@ export async function registerSkillRoutes(fastify) {
   });
 
   // Upload a .mjs skill file → save to skills dir + register in DB
+  // T-LOOPBACK-AUTHZ 热修(2026-09-14, Bettor 派工, 选项(b)采纳): 原来零鉴权——任意 fileContent
+  // 写进 agent-mind/src/skills/, registry autoDiscover 启动时逐个 import() = RCE 级(mind 进程
+  // 启动时触发)。主网没人在线上传技能, 最小面处置 = 直接下线本路由; 若未来确需在线上传, 改回
+  // 挂 checkAdminSecretTier(request,'ADMIN_SECRET_SYSTEM_ACTIONS')(与 /api/system/run 同档, 见
+  // 该文件历史)而不是恢复零鉴权。
   fastify.post('/skills/upload', async (request, reply) => {
-    const fs = await import('node:fs/promises');
-    const path = await import('node:path');
-    const KANET_ROOT = process.env.KANET_ROOT || 'D:/Anthropic';
-    const SKILLS_DIR = `${KANET_ROOT}/agent-mind/src/skills`;
-
-    const { fileName, fileContent, displayName, description, category } = request.body || {};
-    if (!fileName || !fileContent) return reply.redirect('/skills');
-
-    // Validate: must be .mjs, must contain extends Skill and super('name','desc')
-    if (!fileName.endsWith('.mjs')) return reply.redirect('/skills');
-    const match = fileContent.match(/super\(\s*'([^']+)'\s*,\s*'([^']+)'\s*\)/);
-    if (!match) return reply.redirect('/skills');
-
-    const [, skillName] = match;
-
-    // Save file
-    const safeName = fileName.replace(/[^a-z0-9_\-.]/gi, '_');
-    await fs.writeFile(path.default.join(SKILLS_DIR, safeName), fileContent, 'utf-8');
-
-    // Register in DB via shared function (picks up the new file)
-    const { registerMindSkills } = await import('../data/settings/skills.js');
-    await registerMindSkills(SKILLS_DIR);
-
-    // Update display_name, description, source, and category for all per-account copies
-    const { updateSkill } = await import('../data/settings/skills.js');
-    const { sqlite: db } = await import('../db/client.js');
-    const rows = db.prepare(
-      "SELECT id, display_name, description FROM skills WHERE name = ? AND action_type = 'mind'"
-    ).all(skillName);
-    for (const row of rows) {
-      await updateSkill(row.id, {
-        displayName: displayName || row.display_name,
-        description: description || row.description,
-      });
-      // Mark as uploaded + set category
-      db.prepare('UPDATE skills SET source = ?, category = ? WHERE id = ?')
-        .run('uploaded', category || 'other', row.id);
-    }
-
-    return reply.redirect('/skills');
+    return reply.code(404).send({ error: 'skill upload via UI disabled on mainnet — use offline git workflow instead' });
   });
 }
