@@ -312,17 +312,26 @@ Console-不碰链）同时满足。
    要求签的、意料之外的输入。
 2. **净损耗守恒公式（NWT 1352 打回重写，原"存在一个付回自身的输出"表述可被绕过：relay 签一笔 1 KAS
    输入，输出 A 付 0.00001 KAS 回自己满足"存在性"、输出 B 把 0.99999 KAS 转去任意地址，relay 净损
-   ≈1 KAS 而旧表述挡不住这个）——两条互相独立、缺一不可**：
+   ≈1 KAS 而旧表述挡不住这个）——两条互相独立、缺一不可，且 `FEE_CEILING` 必须动态算，不能写死常量
+   （NWT 1353 二次打回：`bettor.js:1383 settle_consensual` 实测需要 789,800 sompi = 7898 mass × 100
+   sompi/mass，写死"几千 sompi"会把所有合法广播全部自拒）**：
 
    ```
+   SIGNED_INPUT_CEILING = 0.5 KAS (50,000,000 sompi)
+   require(Σ(relay 签名的 input.value) ≤ SIGNED_INPUT_CEILING)   // 签名前即可算, 与手续费无关
+
+   required_fee = calculateTransactionMass(networkId, signedTx) × 100 sompi/mass   // 签名后才能算(mass 依赖真实脚本大小); 算不出 ⇒ fail-loud 拒签, 不 fallback(kasia-relay/src/lib/p2sh.mjs:135 主网已在用这个调用)
+   ABS_FEE_CAP = 0.05 KAS (5,000,000 sompi)                       // 绝对硬顶
+   fee_ceiling = min(required_fee × 2, ABS_FEE_CAP)
    net_loss = Σ(relay 签名的 input.value) − Σ(outputs 中 scriptPubKey == relay 自身地址 的 value)
-   require(net_loss ≤ FEE_CEILING)         // 硬编码常量, 量级 = 一笔真实手续费(几千 sompi), 远小于 0.5 KAS
-   require(Σ(relay 签名的 input.value) ≤ SIGNED_INPUT_CEILING)   // 0.5 KAS——防止即使 net_loss 算对, 签一笔巨额输入本身也是风险(如输入被恶意 UTXO 污染/女巫)
+   require(net_loss ≤ fee_ceiling)
    ```
 
-   `net_loss` 卡的是"这笔交易到底净花掉了 relay 多少钱"（即使找零精确到自己地址、总输入很小，也不能让
-   净损耗超过手续费量级）；`SIGNED_INPUT_CEILING` 卡的是"relay 一次性签名暴露的总价值上限"（两者是不同
-   的量、不同的攻击面，分开写清楚，不用一条描述性语言笼统带过）。
+   `SIGNED_INPUT_CEILING` 卡的是"relay 一次性签名暴露的总价值上限"（签名前就能算，与真实手续费无关）；
+   `net_loss` 卡的是"这笔交易到底净花掉了 relay 多少钱"（必须用签名后的真实 mass 算出的手续费做基准，
+   乘 2 留余量，再叠一个绝对硬顶——两者取更严的那个）。两条卡不同的量、不同的攻击面，不用一条描述性
+   语言笼统带过。落码见 `kasia-relay/src/lib/covenant-broadcast.mjs`（`validateSignedInputCeiling` /
+   `computeRequiredFeeSompi` / `validateNetLoss` 三个纯函数分层，19 条向量本机实跑全绿）。
 3. **执行权限**：(B′) 形态下，只允许 `PROTO_RELAY_ID` 那一个 relay 执行该命令（其余 relay 收到直接
    拒绝，同 T-LOOPBACK-AUTHZ 那批热修"专属 tier"的思路）；(C) 形态下，该命令只在独立 proto relay 进程
    里注册，生产 relay 完全不认识它——两种形态都确保"生产 relay 永远不会被这条命令误用"。
