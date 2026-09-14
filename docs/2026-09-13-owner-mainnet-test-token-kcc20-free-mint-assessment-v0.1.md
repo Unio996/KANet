@@ -125,7 +125,22 @@ entry mint(int amount, byte[32] to, byte to_scheme)：
 2. **停 TN12 节点（kaspad `1.1.1-toc.1`）。`console.db` 留着（历史证据），kaspad 的 ≈204 GB 数据目录删掉**——链是公开的，随时能重新同步。同样**保留** `docs/evidence/*`、`docs/provenance/*`、pinned silverc（`legacy-2c46231` / `zk-8065184`，已部署 TN12 字节码的复现取证靠它们）。
 3. **腾出的 204 GB + 现有 712 GB ≈ 900 GB 直接跑主网节点，盘先不买**（官方最低 640 GB / 推荐 1 TB；想留余量再加一块**内置 NVMe**，不用 USB 外置）。节点 = 官方 **v2.0.1 原样**（不带 D-b/c/d），独立 datadir + 端口（16111/17110），`--utxoindex`。
 
-**并行留意（不挡路）**：da9 2026-09-08 22:29Z 起掉线 4 天原因未明（Tailscale LastSeen；本机 inbox/commit 零记录）。Bettor 上线后顺手看事件日志；它决定的是"公网贡献节点"的可信度，不决定波 0 能不能起。
+**da9 2026-09-08→09-13 掉线 4.5 天 · 根因（2026-09-14 J1 只读实核，三源：System 事件日志 / Tailscale 服务日志 / KANet 日志与计划任务）**
+
+三个条件同时成立，任一不成立都不会掉 4 天：
+1. **Windows 自动更新重启**：`MoUsoCoreWorker.exe` 于 2026-09-08 22:29:04Z（曼谷 05:29）发起重启，装 KB5124008 / KB5124007 / KB5126052（安装日期 9/8），22:30–22:33Z 连续三次 servicing 重启，22:33:46Z WiFi `Yang_5G 2` 已连、NTP 全程可达（机器与外网**一直正常**：9/9–9/12 System 日志每日 27–55 条，Windows 维护任务天天跑）。活动时段 `ActiveHoursStart=11 / End=5`，05:29 在窗外 ⇒ 重启"合法"。
+2. **重启后无人登录 Windows**：`AutoAdminLogon` 未设；`quser` 显示 admin 于 09-13 16:45 本地才登录 console。KANet 日志 9/9–9/12 **零行**、`keep-awake` 未跑：全是用户会话内进程；`KANet-TN12-BootSequence` 9/2 起刻意 Disabled。
+3. **Tailscale 未开 unattended**：`HKLM\SOFTWARE\Tailscale IPN` 无 `UnattendedMode`。每次开机 tailscaled 日志逐字：`profile data directory: profile not found` → `Switching ipn state NoState -> NeedsLogin (WantRunning=false)` → `health: Tailscale is stopped.`，然后**不再写任何日志**（`tailscale-service-20260909T053339` 末行 22:35:30Z，下一份文件是 09-13 07:16:55Z）。**09-13 两次重启完全复现**：07:17:35Z NeedsLogin → 14:44:50 本地 `SessionChange`（有人登录）→ 14:45:14 Running；09:45:36Z NeedsLogin → 16:45:40 `SessionChange` → 16:45:54 Running。
+- 排除项：Modern Standby 506/507 计数 0；S3 睡眠 42/107 事件 0；SCM 无 Tailscale 崩溃记录（故失败恢复策略未触发——它是"未登录"不是"崩溃"）；NordVPN 开机自连（NordLynx 10.5.0.2）为旁枝，非因。
+- ⚠ 分析陷阱（J1 自记）：先只读了该日志首尾，据"2 分钟后不再写日志 + 0 active derp conns + NordLynx 出现"推断"服务卡死 / VPN 冲突"——**错**；决定性的三行在中段。整份读完再理论。
+
+**修法（三条任一可防、建议全做）——① ② 已于 2026-09-14 ≈07:58Z 按 Owner 直令由 J1 经 SSH 施加并读回（回执：inbox `2026-09-14T08-05Z-j1-DONE-da9-outage-rootcause-softfix-applied-owner-order.md`）**：
+1. ✅ Tailscale unattended：`tailscale set --unattended=true` ⇒ `debug prefs` `ForceDaemon: true`，status Running。
+2. ✅ Windows 更新禁自动装/禁自动重启：新建 `HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU`，`AUOptions=2` + `NoAutoRebootWithLoggedOnUsers=1`（da9 = Windows 11 **Pro**，策略被完整尊重）。补丁改为维护窗手动装。
+3. ⏸ admin 自动登录：**未动**（需密码，Owner 自决 `netplwiz`）——或把 KANet 改为不登录也运行的计划任务（`BootSequence` 机制已有，TN12 退役 / 主网节点就绪后重新启用）。
+- 🔴 **改了配置 ≠ 生效**（9/2 Modern Standby 同病）。**唯一判据 = 无人登录状态下重启一次、Tailscale 自行 Running**——归 Bettor，与 §9 停 TN12 同窗做；验证前任何账本不得写"已修"。
+- 作用域：只盖「重启后门没开」这一类；不盖蓝屏/死机起不来、停电、5G 路由卡死、大版本更新重置策略 ⇒ 硬件从"必须"降为"可选"：UPS + 看门狗插座仍建议，NanoKVM 可缓。
+- NanoKVM 方案仍成立：它管"机器起不来"那一类，与本次不是同一病。
 
 ## 8. 本会话实测坐标（v1.0.0，只写 scratchpad，未入库）
 
