@@ -28,7 +28,12 @@ console.log('[test] P1: real derivation, PayoutShardV2 (V2) — matches manually
   const r = deriveCommitteeCheckOffsets({ isV2: true, pmrSentinelHex: PMR_S, pcSentinelHex: PC_S });
   ok(r.predicateCommitOffset === 16569, `predicateCommitOffset=16569 (got ${r.predicateCommitOffset})`);
   ok(JSON.stringify(r.poolMerkleRootOffsets) === JSON.stringify([17089, 17385, 17681, 17977, 18273]), `poolMerkleRootOffsets matches appendix (got ${JSON.stringify(r.poolMerkleRootOffsets)})`);
-  ok(r.referenceMismatch === true, 'referenceMismatch=true (checked-in reference is stale, expected per D-019 findings)');
+  // T-REF-OFFSETS-REFRESH(ledger 1285): checked-in reference just got refreshed to match the current
+  // .sil/compiler pin — flip-expect (this session's established discipline): a fresh derivation on the
+  // CURRENT files should now agree with the reference, not disagree. If this goes RED again, it means
+  // the .sil actually changed since the refresh and the reference needs updating again (WARN-not-block
+  // is still the runtime behavior for real markets; this test just checks the reference itself stays in sync).
+  ok(r.referenceMismatch === false, `referenceMismatch=false (checked-in reference was just refreshed to match current .sil/pin — got ${r.referenceMismatch})`);
 }
 
 console.log('[test] P2: real derivation, PayoutShard (V1):');
