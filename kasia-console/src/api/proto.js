@@ -24,6 +24,7 @@
 import { sqlite } from '../db/client.js';
 import { randomUUID } from 'node:crypto';
 import { rejectRelayIdInBody } from '../lib/proto-relay-guard.mjs';
+import { rejectExternalMarketIdentityInBody, logProtoSingleOperatorMode } from '../lib/proto-single-operator-guard.mjs';
 
 const nowIso = () => new Date().toISOString();
 
@@ -69,6 +70,9 @@ function notImplemented(reply, kind, err) {
 }
 
 export async function registerProtoRoutes(fastify) {
+  // 🔴 index.js 的 Fastify 实例是 `logger: false`(fastify.log.* 是 no-op)——用 console.log 直写
+  // stdout, 不经过 fastify 的日志器, 否则这行 LOUD 日志会静默消失(同既有 index.js 启动日志惯例)。
+  logProtoSingleOperatorMode(console.log);
   // ══════════════════════════════════════════════════════════════════════
   // 代币定义 —— 纯 DB, 不上链, 不产生任何可花费余额(Owner"代币属性配置需要界面互动"落这一层)。
   // ══════════════════════════════════════════════════════════════════════
@@ -96,6 +100,8 @@ export async function registerProtoRoutes(fastify) {
   fastify.post('/api/proto-markets/create', async (request, reply) => {
     const relayIdRejection = rejectRelayIdInBody(request.body);
     if (relayIdRejection) return reply.code(400).send({ ok: false, error: relayIdRejection });
+    const externalIdentityRejection = rejectExternalMarketIdentityInBody(request.body);
+    if (externalIdentityRejection) return reply.code(400).send({ ok: false, error: externalIdentityRejection });
     const { tokenId, title, deadline, resolutionNote } = request.body || {};
     if (!tokenId) return reply.code(400).send({ ok: false, error: 'tokenId required' });
     const tokenDef = sqlite.prepare(`SELECT ${PUBLIC_TOKEN_DEF_COLS} FROM proto_token_defs WHERE id = ?`).get(tokenId);
@@ -150,6 +156,8 @@ export async function registerProtoRoutes(fastify) {
   fastify.post('/api/proto-markets/:id/bet', async (request, reply) => {
     const relayIdRejection = rejectRelayIdInBody(request.body);
     if (relayIdRejection) return reply.code(400).send({ ok: false, error: relayIdRejection });
+    const externalIdentityRejection = rejectExternalMarketIdentityInBody(request.body);
+    if (externalIdentityRejection) return reply.code(400).send({ ok: false, error: externalIdentityRejection });
     const market = sqlite.prepare(`SELECT ${PUBLIC_MARKET_COLS} FROM proto_markets m WHERE m.id = ?`).get(request.params.id);
     if (!market) return reply.code(404).send({ ok: false, error: 'market not found' });
     if (market.status !== 'betting') return reply.code(409).send({ ok: false, error: `market status is ${market.status}, not accepting bets` });
@@ -178,6 +186,8 @@ export async function registerProtoRoutes(fastify) {
   fastify.post('/api/proto-markets/:id/resolve', async (request, reply) => {
     const relayIdRejection = rejectRelayIdInBody(request.body);
     if (relayIdRejection) return reply.code(400).send({ ok: false, error: relayIdRejection });
+    const externalIdentityRejection = rejectExternalMarketIdentityInBody(request.body);
+    if (externalIdentityRejection) return reply.code(400).send({ ok: false, error: externalIdentityRejection });
     const market = sqlite.prepare(`SELECT ${PUBLIC_MARKET_COLS} FROM proto_markets m WHERE m.id = ?`).get(request.params.id);
     if (!market) return reply.code(404).send({ ok: false, error: 'market not found' });
     if (market.status !== 'sealed') return reply.code(409).send({ ok: false, error: `market status is ${market.status}, must be sealed before resolve` });
@@ -201,6 +211,8 @@ export async function registerProtoRoutes(fastify) {
   fastify.post('/api/proto-markets/:id/claim', async (request, reply) => {
     const relayIdRejection = rejectRelayIdInBody(request.body);
     if (relayIdRejection) return reply.code(400).send({ ok: false, error: relayIdRejection });
+    const externalIdentityRejection = rejectExternalMarketIdentityInBody(request.body);
+    if (externalIdentityRejection) return reply.code(400).send({ ok: false, error: externalIdentityRejection });
     const market = sqlite.prepare(`SELECT ${PUBLIC_MARKET_COLS} FROM proto_markets m WHERE m.id = ?`).get(request.params.id);
     if (!market) return reply.code(404).send({ ok: false, error: 'market not found' });
     if (market.status !== 'resolved' && market.status !== 'cancelled') {
@@ -231,6 +243,8 @@ export async function registerProtoRoutes(fastify) {
   fastify.post('/api/proto-markets/:id/withdraw', async (request, reply) => {
     const relayIdRejection = rejectRelayIdInBody(request.body);
     if (relayIdRejection) return reply.code(400).send({ ok: false, error: relayIdRejection });
+    const externalIdentityRejection = rejectExternalMarketIdentityInBody(request.body);
+    if (externalIdentityRejection) return reply.code(400).send({ ok: false, error: externalIdentityRejection });
     const market = sqlite.prepare(`SELECT ${PUBLIC_MARKET_COLS} FROM proto_markets m WHERE m.id = ?`).get(request.params.id);
     if (!market) return reply.code(404).send({ ok: false, error: 'market not found' });
     const claim = sqlite.prepare(`SELECT ${PUBLIC_CLAIM_COLS} FROM proto_claims WHERE market_id = ? AND withdrawn_at IS NULL ORDER BY created_at ASC LIMIT 1`).get(market.id);
