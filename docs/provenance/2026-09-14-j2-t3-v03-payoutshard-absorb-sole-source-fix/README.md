@@ -1,5 +1,10 @@
 # PayoutShard.absorb — sole-source MUST-FIX（ledger 1208，Codex 独立发现，Bettor 核过成立）
 
+> 📌 **状态注记（2026-09-14 · Bettor ledger 1209）**：本目录 6 条向量已原样并入
+> `docs/provenance/2026-09-14-j2-t3-v03-payoutshard-current-suite/`（完整现行套件，与 `absorb`/
+> `close_attest`/`cancel_attest`/`claim`/`refund_claim` 全部现行向量合并为一份 43 条的套件）。本目录继续
+> 有效，不是历史陈旧，两处不冲突。
+
 ## 背景
 
 `ShardLeaf`↔`PayoutShard.absorb` 的 hand-off MUST-FIX（`9ff095a3`，ledger 1196）修完双计数冻结 bug 后，

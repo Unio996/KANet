@@ -1,5 +1,10 @@
 # PayoutShard.sil — claim / refund_claim 代币化（ledger 1183，claim 家族四处之二/三）
 
+> 📌 **状态注记（2026-09-14 · Bettor ledger 1209）**：本目录向量集用的 ctor 形状与当前 `PayoutShard.sil`
+> 一致（25 参数），**不是历史陈旧**——本次 1209 派工把这 12 条向量原样并入
+> `docs/provenance/2026-09-14-j2-t3-v03-payoutshard-current-suite/`（完整现行套件，`claim`/`refund_claim`
+> 那两个 function 直接复用本目录的构造逻辑），本目录本身继续有效，两处不冲突。
+
 ## 改了什么
 
 - ctor +2（23→25）：`claim_tmpl_hash`/`market_suffix_hash`（`token_tmpl_hash` 已在早前 absorb 代币化时

@@ -1,5 +1,16 @@
 # T3 v0.3 落码留痕 — 四处 draw-down MUST-FIX（§3.0.1）+ 必要 v1.0.0 兼容修复
 
+> 📌 **状态注记（2026-09-14 · Bettor ledger 1209）**：本目录 `PayoutShard.claim`/`PayoutShard.refund_claim`
+> 那两处的向量集，用的是**代币化之前**（claim-family tokenization `0d8a61ee` 之前）的裸 P2PK 目的地签名
+> 与 22 参数 ctor——当前 `claim`/`refund_claim` 的目的地已改为新建 `KanetTokenClaim` 实例、入口参数也随之
+> 扩展，这两处向量不只是 ctor 参数数不匹配，入口**签名结构本身**已不同，不适用重跑。**"恰好为 0"这条
+> draw-down 不变量本身没有丢**——已由 `docs/provenance/2026-09-14-j2-t3-v03-payoutshard-claim-family-
+> tokenization/`（ledger 1183，代币化落码时）的 `V-PSCF-CLM-2_pass_exact_no_remainder`/
+> `V-PSCF-RFC-2_pass_exact_no_remainder` 两条在**当前签名下**独立重新证明过，并入
+> `docs/provenance/2026-09-14-j2-t3-v03-payoutshard-current-suite/`（完整现行向量套件）。本目录
+> `PayoutShardV2.refund_claim`/`RootClaim.claim_draw` 那两处如果也已代币化，同一性质，如实记录不逐一
+> 复核（不在本次 1209 派工范围）。本文件下方内容保留作历史记录，不改原文。
+
 对应 `docs/2026-09-13-j2-t3-market-set-token-rewrite-design-v0.1.md` §3.0/§3.0.1 MUST-FIX，Bettor ledger 1121 GREEN
 放行落码。四处：`PayoutShard.claim` / `PayoutShard.refund_claim` / `PayoutShardV2.refund_claim` /
 `RootClaim.claim_draw`，逐条实现同一不变量：`remaining==0 ⇒ 无续约输出；remaining>0 ⇒ 恰一续约且 amount(此处是

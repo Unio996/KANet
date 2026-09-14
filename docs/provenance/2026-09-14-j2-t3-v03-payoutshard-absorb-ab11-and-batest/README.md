@@ -1,5 +1,12 @@
 # PayoutShard.sil v0.3 落码 — absorb(V-T-8/AB11 绕路) + close_attest/cancel_attest(noTokenInput)
 
+> 📌 **状态注记（2026-09-14 · Bettor ledger 1209）**：本目录向量集用的是 **23 参数 ctor**（`claim_tmpl_hash`/
+> `market_suffix_hash` 加入前），当前 `PayoutShard.sil` 是 **25 参数**——直接重跑本目录的 test.json 会报
+> `constructor expects 25 arguments, got 23`，**不适用重跑**（历史陈旧，非本次回归）。**superseded by**
+> `docs/provenance/2026-09-14-j2-t3-v03-payoutshard-current-suite/`（完整现行向量套件，含本目录全部
+> absorb/close_attest/cancel_attest 向量在当前 ctor 下的等价重生成 + `absorb` 新增的 sole-source 6 条 +
+> 1122 边界 3 条）。本文件下方内容保留作历史记录，不改原文。
+
 Bettor ledger 1131（先做 absorb/close_attest/cancel_attest）→ 1140（撞 V-T-8）→ 1142（AB10 死路+AB11 通路）→
 1145（裁：直接用 AB11 改 absorb，四条件）→ 1149（补 noTokenInput 的 1122 边界向量）→ **1151（裁：改回 T2 §3.3
 已审设计形——witness 供 tok_prefix/tok_suffix + blake3 现场核 token_tmpl_hash，不维持 ctor 烤死变体）**。
