@@ -1,0 +1,22 @@
+=== ① payToAddressScript(addr).toString() 直接输出的形状 ===
+typeof spkA: object
+spkA.toString(): {"script":"203225beb2a059066ee0caf9e602bbc86d8a1663344223ffc056505b1f35a506ebac","version":0}
+spkA.toString() 是否形如纯 hex(仅 0-9a-f): false
+
+=== ② 同一地址两次独立调用 payToAddressScript, toString() 是否恒等(可比对的前提) ===
+两次结果字符串相等: true
+
+=== ③ addressFromScriptPublicKey(spk, networkId) 往回转地址, 是否与原地址一致(round-trip) ===
+round-trip 地址: kaspa:qqezt04j5pvsvmhqetu7vq4mepkc59nrx3pz8l7q2eg9k8e455rwk6ldsqwed
+与原地址 addrA 相等: true
+
+=== ④ 包进真实 Transaction 对象后, tx.outputs[i]/tx.inputs[i].utxo 的 scriptPublicKey.toString() 是否与①直接调用结果一致 ===
+(这是 extractTxShape() 实际读取路径, 不是①那种直接调用——先证两者同源再算验完)
+tx.outputs[0].scriptPublicKey.toString() === spkA.toString(): true
+tx.inputs[0].utxo.scriptPublicKey.toString() === spkA.toString(): true
+
+=== ⑤ 核心问题: extractTxShape()+validateNetLoss() 实际依赖的比对——能否只用 toString() 直接字符串比对判断"这个输出是不是付回 addrB" ===
+tx.outputs[1](付给addrB) .toString() === relay 自己算的 addrB spk .toString(): true
+
+=== ⑥ 备选路径: addressFromScriptPublicKey(out.scriptPublicKey, networkId) 转回地址字符串直接比对地址, 不比 hex ===
+tx.outputs[1] 转回的地址 === addrB: true
