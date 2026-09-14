@@ -24,6 +24,14 @@
 
 ## 🔴 当前有效的战略决策 (CURRENT)
 
+### D-019 主网集编译器锚点 = silverscript v1.0.0 @ 3ed973335b59269293564805cc2c58a14595ec03 · 单源 pin · 旧 ZK pin 退出主网集 (2026-09-14 · Bettor 裁 · NWT 确认 · COORD-LEDGER 1216–1218)
+
+1. **锚点**：主网集全部 10 个 .sil（KanetTestToken、KanetTokenClaim、PayoutShard、PayoutShardV2、RootClaim、RootClose、ShardLeaf、ShardLeaf_direct、CloseZkV2、RefundClaim）的生产编译器 = **silverscript v1.0.0，源 commit `3ed973335b59269293564805cc2c58a14595ec03`（tag v1.0.0）**，生产二进制 = J2 隔离克隆 `_j2_silverc_v100` 的**干净构建**，`silverc.exe` sha256 `4378ba6557f7b7b088d6ad7a400422acb51a7ffd04f86ed974055c4177ef8643`。T1–T3 全部 provenance、现行套件（43+44 等）、NWT 独立复现均以此源 commit 构建的编译器产出，从未换版。
+2. **sha256 差异说明（防误判）**：NWT 复核用的 `/d/silverscript-v100` 构建 sha256 为 `2ca22dc5…ecf82c`，与生产值不同，原因 = 该树含 1 行未提交的诊断 `eprintln!`（V-T-8 调查期加于 compile.rs，写 stderr、在 actual_size 算出后插入、不改任何变量/控制流/返回值）⇒ 只改变编译器二进制本身，不改变其对 .sil 产出的 bytecode；NWT 全部 deep-equal 比对对象是 bytecode 非二进制，结论不受影响。NWT 将 revert 该行。**两个 sha256 不同 ≠ 锚点不一致。**
+3. **单源声明**：`scripts/silverc-pin.json`（name / source commit / binary sha256 / 产物 JSON schema 版本）+ env `SILVERC_V100_PATH`（指向 `D:/silverscript/versioned-builds/silverc-v100-3ed9733.exe`，由 KANet-UI 放置并登记 MANIFEST.txt）；任何以该编译器产出创世参数的工具启动时校验二进制 sha256 ≠ pin 即拒跑。
+4. **旧 pin 处置**：`SILVERC_ZK_PATH`（silverc-zk-8065184）不能解析 T3 迁移后的语法（`as byte[8]` parse error），**当前主线上三个真实生产调用点（api/pool.js:180、bshard-close-transport.mjs:518、closezk-v2-mint.mjs:226）在旧 pin 下是坏的**；修法 = 这些调用点及 `computeCloseZkTmplAnchor` / `compileCloseZkV2Redeem` 迁至新 pin + 产物 schema 适配 + CloseZkV2 ctor 25→28，旧 pin 仅保留给历史复现（无合法主网集调用者则标 deprecated）。修补部署前，主网 console 不创建市场、不触发创世（1217-补 守卫）。
+5. **变更纪律**：换锚点 = 全部 provenance 失效，须 NWT 全量重编对照 + D-019 状态注记；不得静默升级编译器。
+
 ### D-018 代币合约守恒不变量降级：sum_in == sum_out → sum_in >= sum_out（代币层允许销毁）· 由市场/领取合约上层补回 (2026-09-14 · Owner 终端直令要求记入 DECISIONS · Bettor 记账 · 状态 PENDING 至 T1 v0.6 + T3 v0.3 联合合入)
 
 1. **变更**：代币合约（`KanetTestToken.sil`，`binding=cov` transferPolicy）守恒式由精确等式放宽为 `sum_in >= sum_out`——等于承认**代币合约层允许销毁**。这是一条 invariant 的降级，铁律级变更记录，不留在代码注释里。
