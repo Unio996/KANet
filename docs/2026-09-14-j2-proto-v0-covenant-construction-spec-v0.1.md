@@ -75,7 +75,7 @@ require(net_loss ≤ min(required_fee × 2, absFeeCapSompi, GLOBAL_ABS_FEE_CAP_S
 
 > 📌 **修订（Bettor 1386①/NWT 1387 架构裁定，2026-09-14，落码见 `kasia-relay/src/lib/covenant-broadcast.mjs` 提交 14c9cf22）**：原公式里的 `ABS_FEE_CAP` 是**单一全局常量**（0.05 KAS）——mass 实验（`docs/provenance/2026-09-14-j2-proto-v0-genesis-mass-fee-estimate/`）证明这对 `ShardLeaf_direct` 这类大脚本 covenant **完全不够用**（理论最小 net_loss ≈0.4 KAS，是旧硬顶 8 倍）。现改为**两条独立生效的防线**（详见新增 §9.4）：`absFeeCapSompi` 是 per-kind 精细上限（各 kind 自己的 mass 实验结果算出、由 console 侧硬编码传入，`validateNetLoss` 现在**要求**调用方显式传这个参数，不再有隐式默认值），`GLOBAL_ABS_FEE_CAP_SOMPI = 1.0 KAS` 是 relay 侧硬编码的、与 kind 无关的最终硬顶。三者取最小。
 
-**每个 kind 的"找零/手续费形状"一节，回答的就是**：这个 fee input 出多少钱、找零多少回 relay 自己、net_loss 是不是只等于真实 mass 费（不多不少）。**通则**：fee input 金额 = `估计所需 KAS`（覆盖 mass 费 + 给 covenant 输出的 dust 最小值，如果这笔交易恰好需要给某个新建/续约的 covenant 输出补 `DUST_MIN=1000` sompi 级别的垫底 KAS），找零 = fee input 金额 − 真实花掉的部分，找零输出的 `scriptPubKey` 必须等于 relay 自己地址的 `payToAddressScript`（这样 `validateNetLoss` 才能正确识别"这是找零，不是净损耗"）。**fee input 的 UTXO 选择本身也有约束，见 §9.5**：不能随手抓一个能用的大额 UTXO（比如种子 2 KAS），必须选面值与所需金额相配的 UTXO，没有则先做一笔自找零拆分。
+**每个 kind 的"找零/手续费形状"一节，回答的就是**：这个 fee input 出多少钱、找零多少回 relay 自己、net_loss 是不是只等于真实 mass 费（不多不少）。**通则**：fee input 金额 = `估计所需 KAS`（覆盖 mass 费 + 给 covenant 输出的 dust 最小值，如果这笔交易恰好需要给某个新建/续约的 covenant 输出补 `DUST_MIN=1000` sompi 级别的垫底 KAS），找零 = fee input 金额 − 真实花掉的部分，找零输出的 `scriptPubKey` 必须等于 relay 自己地址的 `payToAddressScript`（这样 `validateNetLoss` 才能正确识别"这是找零，不是净损耗"）。**fee input 的 UTXO 选择本身也有约束，见 §9.5**：不能随手抓一个能用的大额 UTXO，必须选面值最小但仍够用、且找零形状合法（0 或 ≥DUST_MIN）的 UTXO，没有合适的 fail-loud 报 `no_suitable_fee_utxo`（v0 范围不含自动拆分，见 §9.5 范围裁定）。
 
 ## §2 market_genesis（`POST /api/proto-markets/create`）
 
@@ -262,7 +262,7 @@ Fee input 金额 = `estimatedFee + genesisOutputValue`。
 - **T-PROTO-COMMITTEE-SIG-DISTINCTNESS**：§4 的 `close_commit` 5 个 `sig` 参数是否可以填同一个签名值 5 遍（合约没有 distinctness 检查是前提条件，但"5 个相同字节"这个具体场景没有实测过），标注待落码时用离线向量核实。
 - **T-PROTO-WITHDRAW-DEST-ADDRESS**：§6 "赢家自己的地址"在 v0 场景下实际上是 committee keypair 派生的地址，不是真正独立的用户钱包——这是 v0 单操作员模型的自然延伸，不是新发现的漏洞，但界面上不能暗示这是"用户自己的钱包地址"，需要如实展示。
 - **T-PROTO-ENTRY-WITNESS-ABI-UNVERIFIED**（NWT GREEN-with-notes 第 5 票，1385，须在 resolve 落码前 close）：§1.2 表格②层"委员会/bettor witness 签名"作为 entry 调用参数传入这件事，本文档只描述了机制（`createInputSignature` 算出的签名字节编码进 entry 调用参数），**没有实测验证 silverscript entry 的具体 ABI 编码方式**（参数顺序、`sig` 类型在字节码层面期望的确切编码——是否等价于 `checkMsgSig` 直接接受的形状、还是需要额外包装）与本文档假设的编码方式逐字节一致。落 `market_resolve`（`close_commit` 5 个 `sig` 参数）代码前，必须先用离线 cli-debugger 向量核实一遍真实签名字节能被合约 `entry` 正确校验通过，不能只凭本文档的文字描述就假设 ABI 对得上。
-- **T-PROTO-FEE-UTXO-SELECTION-UNIMPLEMENTED**（NWT 1387 架构裁定②，见 §9.5，未落码）：`buildAndBroadcast` 选 fee input UTXO 的"面值匹配 + 无匹配先自找零拆分"逻辑尚未实现——目前如果 relay 手头只有种子那笔大额 UTXO（2 KAS），会因为面值撞 `SIGNED_INPUT_CEILING_SOMPI`/`GLOBAL_ABS_FEE_CAP_SOMPI` 被直接拒绝（这是预期行为，不是 bug，但意味着 `market_genesis` 首次落码时如果没先实现这条拆分逻辑，第一笔真实广播大概率打不过去）。
+- **T-PROTO-FEE-UTXO-SELECTION-UNIMPLEMENTED**（NWT 1387 架构裁定②，见 §9.5，未落码）：`buildAndBroadcast` 选 fee input UTXO 的"最小满足面值 + 找零形状校验 + fail-loud"选择器逻辑尚未实现（v0 范围不含自动拆分，见 §9.5 范围裁定，种子已改 4×0.5 KAS 规避首次金丝雀对拆分的依赖）——落码前如果误用"随手抓一个能用的 UTXO"会绕开这条设计意图，即使技术上暂时能广播成功。
 
 ## §8 关于"生产 daemon 复用现有 legacy wrapper 会不会因为这次改动受影响"——不会
 
@@ -314,14 +314,16 @@ await sendCommandAsync(PROTO_RELAY_ID, { type: 'covenant_broadcast', /* ... 40+ 
 
 **自验证记录（提交 `14c9cf22` commit message 已附，此处摘要供设计稿读者不必翻 commit）**：注入回归模拟"relay 信任 cmd 传来的 cap"，用一笔合法交易 + 恶意极小 `cmd.abs_fee_cap_sompi='1'` 验证：注入态下合法交易被错误拒绝（证明这条攻击面真实可触发），revert 后测试全绿。另发现当前参数下 `SIGNED_INPUT_CEILING_SOMPI` 与 `GLOBAL_ABS_FEE_CAP_SOMPI` 数值恰好相等（都是 1.0 KAS），使得"cmd 贴恶意大 cap 让 net_loss 超 GLOBAL"这条具体路径被更早的独立闸门顺带挡住——这是当前数值配置下的巧合重叠，不代表硬编码 GLOBAL 这条修复本身没必要（两个上限未来分离后，重叠保护会消失）。
 
-### §9.5 fee input 的 UTXO 选择与自找零拆分（NWT 1387 架构裁定②，实现期硬要求，未落码）
+### §9.5 fee input 的 UTXO 选择（NWT 1387 架构裁定②，Bettor 复核后简化范围，实现期硬要求，未落码）
 
-`SIGNED_INPUT_CEILING_SOMPI` 提到 1.0 KAS 后，relay 手头如果只有一个大额 UTXO（例如 Owner 授权的种子 2 KAS）被当作某个小额 kind 的 fee input 使用，**这个 UTXO 自己的面值就会撞上 `SIGNED_INPUT_CEILING`/`GLOBAL_ABS_FEE_CAP_SOMPI` 而被误拒**——即使这笔交易真正花掉的 `net_loss`（扣掉找零后）远低于上限，因为 `validateSignedInputCeiling`/`validateNetLoss` 都是看"签了名的 input 面值"而不是"净损耗"来判定其中一部分逻辑（`validateSignedInputCeiling` 明确是看面值）。
+`SIGNED_INPUT_CEILING_SOMPI` 提到 1.0 KAS 后，relay 手头如果只有一个大额 UTXO 被当作某个小额 kind 的 fee input 使用，**这个 UTXO 自己的面值就会撞上 `SIGNED_INPUT_CEILING`/`GLOBAL_ABS_FEE_CAP_SOMPI` 而被误拒**——即使这笔交易真正花掉的 `net_loss`（扣掉找零后）远低于上限，因为 `validateSignedInputCeiling`/`validateNetLoss` 都是看"签了名的 input 面值"而不是"净损耗"来判定其中一部分逻辑（`validateSignedInputCeiling` 明确是看面值）。
 
-**⇒ `buildAndBroadcast` 选 fee input UTXO 时不能"随手抓一个能用的"**，必须：
+> 📌 **范围裁定（Bettor 复核 14c9cf22 后，2026-09-14）**：原文这里设计的"面值匹配 + 无匹配先自找零拆分"**范围收窄**——本节只做**选择器**，**不做自拆分**（自拆分本身也受 1.0 KAS 上限约束、单个大额 UTXO 拆分逻辑留到之后单独设计，不在这批实现范围内）。配合此收窄，**执行页种子形状改为 4 笔 × 0.5 KAS**（KANet-UI 出，v0.4）——到账即是四个独立的 0.5 KAS UTXO，`market_genesis`（net_loss≈0.4 KAS ≤ cap 0.8 KAS，签名输入 0.5 KAS ≤ 1.0 KAS 上限）、bet_mint 步骤 A/B 各用一个即可，首次金丝雀不需要拆分就能跑通。
 
-1. 从 relay 自己的 UTXO 集合里，**优先选面值与本次所需金额（`estimatedFee + genesisOutputValue` 或对应 kind 的净花费）量级相配的 UTXO**（比如需要 0.2~1 KAS 级别的 fee input，不要用 2 KAS 的大额 UTXO，即使技术上能覆盖）。
-2. **如果没有面值匹配的 UTXO**（比如种子到账后手头只有那一笔 2 KAS，还没拆分过），**必须先发起一笔 relay 自付的"自找零拆分"交易**：把大额 UTXO 拆成若干个面值贴近各 kind 典型需求的小额 UTXO，再用拆出来的小额 UTXO 做后续 kind 的 fee input。这笔拆分交易本身也是一笔 `covenant_broadcast`-同级别的 relay 自付交易，**同样受 §9.4 两层 cap 约束**（拆分交易的"net_loss"是拆分本身产生的 mass 费，用哪个 kind 的 cap 或者是否需要一个专门的 `CAP_UTXO_SPLIT` 常量，留给拆分逻辑落码时具体设计，不在本节展开）。
-3. 首次拿到种子（2 KAS）后大概率需要先做一次这样的拆分，才能开始 `market_genesis`（0.2 KAS 量级）——这是 §7 之外新增的一条实现顺序前提，不是可选优化。
+**⇒ `buildAndBroadcast` 选 fee input UTXO 时不能"随手抓一个能用的"**，选择算法（v0 简化版）：
+
+1. 从 relay 自己的 UTXO 集合里，**选面值最小但仍 ≥ 本次所需金额（`estimatedFee + genesisOutputValue` 或对应 kind 的净花费）的那一个**——不是"选面值匹配的"这种模糊描述，是确定性算法：按面值升序排列，取第一个 `utxo.amount ≥ needed` 的 UTXO。
+2. **找零形状约束（Bettor 复核新增要求）**：选中 UTXO 后算出的找零金额，**必须要么恰好为 0（UTXO 面值精确等于所需金额，无找零输出），要么 ≥ `DUST_MIN`（1000 sompi 量级）**——只判断"面值 ≥ 所需"不够：如果某个 kind 的所需金额与某个 UTXO 面值贴得很近，找零会落在 `(0, DUST_MIN)` 这个 kaspad 会拒绝的区间（低于 dust 下限但又不是恰好 0）。选择器必须把这种"会产生卡在 dust 附近的找零"的候选 UTXO 也排除掉，不能只看面值够不够。本批 4×0.5 KAS 的种子形状不会撞到这条（genesis 找零 ≈0.5−0.4=0.1 KAS，远高于 DUST_MIN），但规则现在就写进选择算法，不等未来某个贴近面值的 kind 撞上才补。
+3. **如果没有任何 UTXO 同时满足①面值 ≥ 所需 ②找零形状合法**，**`buildAndBroadcast` 必须 fail-loud，返回明确的 `no_suitable_fee_utxo` 错误**，不静默降级、不随手抓一个凑合用的 UTXO、不自动拆分（自拆分逻辑见下方 T-PROTO-FEE-UTXO-SELECTION-UNIMPLEMENTED 票，留给之后单独实现）。
 
 **T-PROTO-FEE-UTXO-SELECTION-UNIMPLEMENTED**（新增已知限制，本节机制未落码，待 `buildAndBroadcast` 具体实现时补齐，实现前 `market_genesis` 广播如果 relay 手头只有大额 UTXO 会直接被 ceiling 拒绝，属预期行为不是 bug）。
