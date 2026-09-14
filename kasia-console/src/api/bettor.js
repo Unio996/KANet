@@ -8,6 +8,7 @@ import { snapshotOpenPositions, isTrackerRunning } from '../services/bettor-posi
 import { evaluatePositions, isReactorRunning } from '../services/bettor-reactor.js';
 import { isRelayAlive } from '../services/relay-manager.js';
 import { assertAddressOnNetwork, isAddressOnNetwork } from '../lib/kaspa-network.mjs';   // (b) 网络单一源 (设计 v0.2 §3): 前缀只对照 env KASPA_NETWORK, 不从地址推网络
+import { checkAdminSecretTier } from '../lib/admin-secret-tier.mjs';
 
 export async function registerBettorRoutes(fastify) {
   // GET /api/bettor/recommendations — top N most-recent batch (optional filter by relay_node_id)
@@ -1266,7 +1267,11 @@ export async function registerBettorRoutes(fastify) {
   //   4. maker ≠ taker ≠ oracle (= 8 unique pubkeys, computeEscrowP2SH 再校 belt-and-suspenders)
   //   5. 5 oracle isRelayAlive (= 防 ghost market, 跟 Phase 3a 同)
   //   6. KAS price 在 publish 时锁 (= 防 stake math drift)
+  // T-LOOPBACK-AUTHZ 热修(2026-09-14, NWT v1.0 必入清单#1): maker_relay_id 由调用方指定,
+  // 零鉴权 = 本机任意进程可代任意 relay 发起真实转账锁资金。接 ADMIN_SECRET_FUNDS tier。
   fastify.post('/api/prediction/publish-v2', async (request, reply) => {
+    const auth = checkAdminSecretTier(request, 'ADMIN_SECRET_FUNDS');
+    if (!auth.ok) return reply.code(auth.code).send({ error: auth.error });
     const b = request.body || {};
     const required = [
       'maker_relay_id', 'broker_relay_id', 'outcome_oracle_relay_ids',
@@ -1566,7 +1571,10 @@ export async function registerBettorRoutes(fastify) {
   });
 
   // POST /api/prediction/taker-stake/:offer_id — taker funds SS P2SH escrow (= E step 4, 触发 matched).
+  // T-LOOPBACK-AUTHZ 热修(2026-09-14, NWT v1.0 必入清单#2): taker_relay_id 由调用方指定, 同 #1。
   fastify.post('/api/prediction/taker-stake/:offer_id', async (request, reply) => {
+    const auth = checkAdminSecretTier(request, 'ADMIN_SECRET_FUNDS');
+    if (!auth.ok) return reply.code(auth.code).send({ error: auth.error });
     const offerId = request.params.offer_id;
     const b = request.body || {};
     if (!b.taker_relay_id) return reply.code(400).send({ ok: false, error: 'missing taker_relay_id (= 用 taker 自己 relay 转账)' });
@@ -1845,7 +1853,11 @@ export async function registerBettorRoutes(fastify) {
   //   - matched offer + (dissent_max_rounds OR deadline 过) → refund_both (= 双 stake 双 output)
   //   - open_awaiting_taker_stake + deadline 过 → refund_maker_unjoined (= 单 stake 单 output)
   // race protection: WHERE refund_txid IS NULL (= 防 manual + auto 双 trigger 撞 chain TX).
+  // T-LOOPBACK-AUTHZ 热修(2026-09-14, NWT v1.0 建议同批#5): relay_id/收款方从 DB 读, 只能被提前
+  // 触发不能被重定向——风险低于 #1-#4, 但仍是"零鉴权即可触发真实链上退款 TX", 同档处理。
   fastify.post('/api/prediction/refund/:offer_id', async (request, reply) => {
+    const auth = checkAdminSecretTier(request, 'ADMIN_SECRET_FUNDS');
+    if (!auth.ok) return reply.code(auth.code).send({ error: auth.error });
     const offerId = request.params.offer_id;
     const offer = sqlite.prepare(`SELECT * FROM exchange_offers WHERE id = ?`).get(offerId);
     if (!offer) return reply.code(404).send({ ok: false, error: 'offer not found' });
