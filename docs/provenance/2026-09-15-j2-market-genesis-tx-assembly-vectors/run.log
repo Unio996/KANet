@@ -1,0 +1,10 @@
+=== ① 真实编译 ShardLeaf_direct/KTT/PoolSideTicket(与既有 mass 实验同一套 ctor) ===
+
+=== ② 构造 register_append 交易(3 输入 4 输出), A=带 CovenantBinding / B=故意漏掉 ===
+带 CovenantBinding:    mass=449203  required_fee=44920300 sompi (0.4492 KAS)
+漏 CovenantBinding:    mass=149203  required_fee=14920300 sompi (0.1492 KAS)
+比值(漏/带): 0.33x  |  比值(带/漏): 3.01x
+[PASS] 漏掉 CovenantBinding 确实显著改变(此实验方向: 低估 3.01x)required_fee——
+这就是 proto-tx-assembly.mjs 的 buildContinuationOutput() 把 CovenantBinding 做成结构上不可省略的唯一构造
+入口的现实依据: 手写 new TransactionOutput(...) 漏第三个参数是一个真实存在、后果严重且容易犯的错, 无论
+它是让 fee 虚高还是虚低——虚低对钱路更危险(可能因 fee 不足被链拒绝)。
