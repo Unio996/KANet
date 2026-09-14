@@ -207,6 +207,45 @@ export async function ensurePayoutShard({ db, rc, transfer, landed, p2sh, logica
 const _CLOSEZK_SUFFIX_BASE = 214; // = state_layout.start(1) + state_layout.len(213), state 区固定宽度编码, 不随市场值变
 
 /**
+ * _sliceCloseZkTemplateSegments — 从一份 CloseZkV2 真实编译产物(compiled.script)里, 用给定的
+ * betsRoot/refundRoot/attestedAtMs 具体字节值做 findUnique 定位, 切出四段固定模板(A/B/C/D)。
+ * T-ANCHOR-XCHECK(ledger 1293/1297)单源纪律: computeCloseZkTmplAnchor(喂 dummy 值) 与
+ * T-ANCHOR-XCHECK 的真实值交叉校验回归测试各自调用**同一个**函数——不是各写一份切分逻辑, 复制粘贴改
+ * 几个变量名(同 deriveCommitteeCheckOffsets/K-18 双闸独立性纪律的另一例: "独立调用"指的是各自真实触发
+ * 计算, 不是各自维护一份可能悄悄分叉的实现)。
+ * @param {Buffer} fullBuf 完整编译产物字节(compiled.script)
+ * @param {Buffer} templateSuffix extractTemplateArtifact(compiled) 切出的 suffix(排除 state 区之后的部分)
+ * @param {{betsRootHex:string, refundRootHex:string, attestedAtMsValue:number}} o 要定位的三个具体值
+ *   (dummy 路径传 dummy 值; 交叉校验回归测试传真实值)
+ * @returns {{templateA:Buffer, templateB:Buffer, templateC:Buffer, templateD:Buffer}}
+ */
+export function _sliceCloseZkTemplateSegments(fullBuf, templateSuffix, { betsRootHex, refundRootHex, attestedAtMsValue }) {
+  // live 定位(不信硬编码常量): 在完整编译产物里搜索 betsRoot/refundRoot 的字节位置, 各自必须精确出现
+  // 1 次——出现 0 次或 >=2 次都 fail-loud(同 handoff driver 的 findUnique 纪律, 不猜第一个)。
+  function findUnique(buf, needle, label) {
+    const first = buf.indexOf(needle);
+    if (first < 0) throw new Error(`_sliceCloseZkTemplateSegments: findUnique(${label}) 找不到 marker — .sil 源码/silverc 产物跟预期结构不符`);
+    const second = buf.indexOf(needle, first + 1);
+    if (second >= 0) throw new Error(`_sliceCloseZkTemplateSegments: findUnique(${label}) marker 出现 >=2 次(offset ${first},${second}) — offset 碰撞风险, 拒绝猜第一个`);
+    return first;
+  }
+  const betsBuf = Buffer.from(betsRootHex, 'hex');
+  const refundBuf = Buffer.from(refundRootHex, 'hex');
+  const atMsBuf6 = Buffer.alloc(6); atMsBuf6.writeUIntLE(Number(attestedAtMsValue), 0, 6);
+  const atMsMarkerAndData = Buffer.concat([Buffer.from([6]), atMsBuf6]);
+  const betsAbs = findUnique(fullBuf, betsBuf, 'betsRoot');
+  const atMsAbs = findUnique(fullBuf, atMsMarkerAndData, 'atMs-marker+data');
+  const refundAbs = findUnique(fullBuf, refundBuf, 'refundRoot');
+  const _rel = (abs) => abs - _CLOSEZK_SUFFIX_BASE;
+  return {
+    templateA: templateSuffix.subarray(0, _rel(betsAbs)),
+    templateB: templateSuffix.subarray(_rel(betsAbs) + 32, _rel(atMsAbs)),
+    templateC: templateSuffix.subarray(_rel(atMsAbs) + 7, _rel(refundAbs)),
+    templateD: templateSuffix.subarray(_rel(refundAbs) + 32),
+  };
+}
+
+/**
  * 计算 PayoutShardV2 ctor 需要的 closeZkTmplAnchor = blake2b(4 段固定模板拼接)。CloseZkV2.sil 零改动，
  * 编译一次(dummy ctor，模板跟 betsRoot/refundRoot/attestedWinner/consolidated_pool 具体值无关，只有
  * gateTmplHash/tokenTmplHash/claimTmplHash/marketSuffixHash 会真实嵌入模板——它们全部是 ctor-only
@@ -253,28 +292,16 @@ export function computeCloseZkTmplAnchor(closeZkSilPath, gateTmplHash, tokenTmpl
   const { templatePrefix, templateSuffix } = extractTemplateArtifact(compiled); // prefix=script[0:1], suffix=script[214:end]
   const fullBuf = Buffer.from(compiled.script);
 
-  // live 定位(不信硬编码常量): 在完整编译产物里搜索 dummy betsRoot/refundRoot 的字节位置, 各自必须
-  // 精确出现 1 次——出现 0 次或 >=2 次都 fail-loud(同 handoff driver 的 findUnique 纪律, 不猜第一个)。
-  function findUnique(buf, needle, label) {
-    const first = buf.indexOf(needle);
-    if (first < 0) throw new Error(`computeCloseZkTmplAnchor: findUnique(${label}) 找不到 marker — .sil 源码/silverc 产物跟预期结构不符`);
-    const second = buf.indexOf(needle, first + 1);
-    if (second >= 0) throw new Error(`computeCloseZkTmplAnchor: findUnique(${label}) marker 出现 >=2 次(offset ${first},${second}) — offset 碰撞风险, 拒绝猜第一个`);
-    return first;
-  }
   const dummyBetsBuf = Buffer.from(dummyBetsRoot, 'hex');
   const dummyRefundBuf = Buffer.from(dummyRefundRoot, 'hex');
   const atMsBuf6 = Buffer.alloc(6); atMsBuf6.writeUIntLE(dummyAtMs, 0, 6);
   const atMsMarkerAndData = Buffer.concat([Buffer.from([6]), atMsBuf6]);
-  const betsAbs = findUnique(fullBuf, dummyBetsBuf, 'betsRoot');
-  const atMsAbs = findUnique(fullBuf, atMsMarkerAndData, 'atMs-marker+data');
-  const refundAbs = findUnique(fullBuf, dummyRefundBuf, 'refundRoot');
-
-  const _rel = (abs) => abs - _CLOSEZK_SUFFIX_BASE;
-  const templateA = templateSuffix.subarray(0, _rel(betsAbs));
-  const templateB = templateSuffix.subarray(_rel(betsAbs) + 32, _rel(atMsAbs));
-  const templateC = templateSuffix.subarray(_rel(atMsAbs) + 7, _rel(refundAbs));
-  const templateD = templateSuffix.subarray(_rel(refundAbs) + 32);
+  // T-ANCHOR-XCHECK(ledger 1293/1297): 切分逻辑抽成参数化共享函数 _sliceCloseZkTemplateSegments(单源，
+  // 同 deriveCommitteeCheckOffsets 纪律)——dummy 路径(这里)与 T-ANCHOR-XCHECK 的真实值回归测试各自调用
+  // 同一个函数，不是各写一份、复制粘贴改几个变量名。
+  const { templateA, templateB, templateC, templateD } = _sliceCloseZkTemplateSegments(fullBuf, templateSuffix, {
+    betsRootHex: dummyBetsRoot, refundRootHex: dummyRefundRoot, attestedAtMsValue: dummyAtMs,
+  });
 
   // round-trip 自证(built into 这次 run, 非事后单独验证): genesisMarker+state(全 0 dummy 值)+4 段模板+
   // dummy betsRoot/refundRoot/atMs 拼回, 必须 byte-exact 等于原始 compiled.script, 不 match 直接 throw
