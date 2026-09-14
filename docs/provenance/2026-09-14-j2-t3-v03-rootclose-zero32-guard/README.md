@@ -1,5 +1,14 @@
 # RootClose.sil — convert_to_claim / convert_to_refundclaim ZERO32 目的地守卫（ledger 1186，批次④之一）
 
+> 📌 **状态注记（2026-09-14 · Bettor ledger 1210 向量现行性审计）**：本目录 6 条向量（`V-RCLZ-1..6`）对
+> **当前** `RootClose.sil` 实测已不可运行——`constructor expects 12 arguments, got 11`：本快照早于同一天
+> 随后的 `60307fc1`（完整代币化，ctor 11→12，新增 `token_tmpl_hash`）。**superseded by**
+> `docs/provenance/2026-09-14-j2-t3-v03-rootclose-tokenization/`——其
+> `V-convert_to_claim-2_fail_bare_output_no_covenant_id_zero32`/
+> `V-convert_to_refundclaim-2_fail_bare_output_no_covenant_id_zero32` 两条在当前 ctor 下 PASS，与本目录
+> `V-RCLZ-2`/`V-RCLZ-5` 验证的 ZERO32 守卫语义逐字一致——ZERO32 守卫本身在当前代码里连续现行被覆盖，不是
+> 安全回退，只是覆盖它的向量文件换了。不改本文件下方原文。
+
 ## 背景（Codex/NWT 点名最高风险）
 
 `RootClose.sil` 是 seal 目标合约（cascade convert-split 架构，~825B 预算），4 个 entry 里
