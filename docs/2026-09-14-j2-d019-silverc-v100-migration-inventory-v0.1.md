@@ -115,7 +115,7 @@ OFFSET_V2` 漂移，`DATABASE.md` payout_shards 陷阱段落当时状态注记�
 | 测试 | 结果 |
 |---|---|
 | `closezk-v2-mint.e2e.test.mjs` | ✅ 11/11 PASS（新增 3 条断言验证三个新字段真的被烤进 redeem 字节） |
-| `payoutshardv2-offset-tripwire.test.mjs` | 🔴 6/7 FAIL（**已知 RED**，见 §2.1，独立笔处理，不在本次范围内修） |
+| `payoutshardv2-offset-tripwire.test.mjs` | 🔴 6/7 FAIL（**已知 RED**，见 §2.1，独立笔处理，不在本次范围内修） → ✅ **状态注记(2026-09-14, K-18 offset-live-derive 线 commit-4)**：已整篇重写，全绿。旧版断言硬编码绝对偏移(642/[1126,...])，D-019 迁移后这两个数字本身已失去意义；新版验三件事——①派生偏移能否在一份携带已知不同值的**独立真实编译产物**上精确取到正确字段(instance-binding)、②两道闸(close-enforce/K-18，各自不同哨兵)在同一族(V1/V2)上算出完全相同的数字偏移、③checked-in 参考值不匹配只 WARN 不 block——不再引入任何自己的硬编码偏移断言，且首次覆盖 V1(旧版只测过 V2)。详见 `docs/2026-09-14-j2-committee-offset-live-derive-design-v0.1.md` §6 + 本次 commit。 |
 | `bshard-payout-family-coherence.test.mjs` | ✅ all checks passed（含 `seedRow`/两处 genesis-mint fixture 补齐三新字段，flip 式复核确认"hand-crafted fixture 拒于(c)"这条断言仍精确落在 recompile byte-compare、不是被新格式校验巧合掩盖） |
 | `bshard-payout-coherence-perf.test.mjs` | ✅ all checks passed |
 | `compileSilV100`/`assertSilvercV100Pinned`/`assertSilvercV100GoldenSample` | ✅ 正向+负向手工 smoke test 全部通过（正确 sha256/黄金样本匹配时放行；换错二进制/路径不存在/黄金样本不符均正确拒绝） |

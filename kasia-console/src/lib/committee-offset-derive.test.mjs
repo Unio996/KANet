@@ -15,7 +15,7 @@ import {
   deriveCommitteeCheckOffsets, CHECKED_IN_REFERENCE_OFFSETS, _analyzeCompiledBuffer,
   _ctorV1, _ctorV2, PAYOUT_SHARD_SIL, PAYOUT_SHARD_V2_SIL,
 } from './committee-offset-derive.mjs';
-import { compileSilV100 } from './pool-bshard-artifacts.mjs';
+import { compileSilV100, ctorBytes32V100, ctorIntV100 } from './pool-bshard-artifacts.mjs';
 
 let fails = 0;
 const ok = (cond, label) => { if (cond) console.log(`  ✅ ${label}`); else { console.error(`  ❌ ${label}`); fails++; } };
@@ -142,6 +142,72 @@ console.log('[test] N4: identical pmrSentinelHex/pcSentinelHex (would cross-cont
     ok(false, 'should have thrown on identical sentinels');
   } catch (e) {
     ok(/不能相同/.test(e.message), `correctly rejected (got: ${e.message.slice(0, 60)}...)`);
+  }
+}
+
+// ── P4: ctor int/bytes32 value changes do not shift sentinel offsets (Codex/Bettor 1256/1259/1263) ──
+// Made PERMANENT here after a one-off manual probe (docs/2026-09-14-j2-ctor-int-encoding-width-probe-v0.1.md)
+// found: PayoutShard.sil/PayoutShardV2.sil serialize every ctor int field via an explicit
+// `byte[](8 as byte[1]) + byte[](x as byte[8])` fixed-width cast in their state-splice logic — so
+// deriveCommitteeCheckOffsets's placeholder-ctor derivation is safe to apply to ANY real market's real
+// ctor values (Bettor 1263 ruled (A), not (B), for these two files — UNLIKE CloseZkV2.sil's `dummyAtMs`,
+// a genuinely variable-length field in a DIFFERENT file this module doesn't touch, tracked as a separate
+// backlog item). This block turns that one-time finding into a regression guard: if a future .sil edit
+// ever drops one of those `as byte[8]` casts, this test goes RED instead of silently letting offsets drift
+// out from under every real market's redeem.
+console.log('[test] P4: ctor int/bytes32 value changes do not shift sentinel offsets (fixed-width `as byte[8]` state serialization, V1+V2, matrix per Bettor 1256/1263):');
+{
+  const MATRIX = [0, 1, 255, 256, 2 ** 31, 2 ** 40, -1, Number.MAX_SAFE_INTEGER];
+  const w17Ctor = (vals) => vals.map(v => ctorIntV100(v));
+  const zeroW17 = Array(17).fill(0);
+
+  function ctorV1({ consolidatedPool = 0, closed = 0, w17 = zeroW17, tokenHex = 'dd'.repeat(32), payoutRootHex = 'ee'.repeat(32), claimHex = 'ff'.repeat(32), marketHex = '11'.repeat(32) } = {}) {
+    return [
+      ctorBytes32V100(PMR_S), ctorBytes32V100(PC_S), ctorBytes32V100(tokenHex),
+      ctorIntV100(consolidatedPool), ctorIntV100(closed), ctorBytes32V100(payoutRootHex),
+      ...w17Ctor(w17),
+      ctorBytes32V100(claimHex), ctorBytes32V100(marketHex),
+    ];
+  }
+  function ctorV2({ consolidatedPool = 0, attestedWinner = -1, attestedAtMs = 0, w17 = zeroW17, tokenHex = 'dd'.repeat(32), payoutRootHex = 'ee'.repeat(32), claimHex = 'ff'.repeat(32), marketHex = '11'.repeat(32), closeZkHex = 'cc'.repeat(32), betsHex = 'ff'.repeat(32), refundHex = '22'.repeat(32) } = {}) {
+    return [
+      ctorBytes32V100(PMR_S), ctorBytes32V100(PC_S), ctorBytes32V100(closeZkHex),
+      ctorBytes32V100(tokenHex),
+      ctorIntV100(consolidatedPool), ctorIntV100(0), ctorBytes32V100(payoutRootHex),
+      ...w17Ctor(w17),
+      ctorIntV100(attestedWinner), ctorIntV100(attestedAtMs), ctorBytes32V100(betsHex), ctorBytes32V100(refundHex),
+      ctorBytes32V100(claimHex), ctorBytes32V100(marketHex),
+    ];
+  }
+  function analyze(silPath, name, ctor) {
+    const compiled = compileSilV100(silPath, ctor, name);
+    return _analyzeCompiledBuffer(Buffer.from(compiled.script), compiled._raw, name, PMR_S, PC_S);
+  }
+  const sameOffsets = (a, b) => a.predicateCommitOffset === b.predicateCommitOffset && JSON.stringify(a.poolMerkleRootOffsets) === JSON.stringify(b.poolMerkleRootOffsets);
+
+  const baseV1 = analyze(PAYOUT_SHARD_SIL, 'PayoutShard', ctorV1());
+  for (const v of MATRIX) ok(sameOffsets(analyze(PAYOUT_SHARD_SIL, 'PayoutShard', ctorV1({ consolidatedPool: v })), baseV1), `V1 consolidatedPool=${v}: offsets unchanged`);
+  for (const v of [0, 1, -1]) ok(sameOffsets(analyze(PAYOUT_SHARD_SIL, 'PayoutShard', ctorV1({ closed: v })), baseV1), `V1 closed=${v}: offsets unchanged`);
+  {
+    const randW17 = Array.from({ length: 17 }, () => Math.floor(Math.random() * 2 ** 40));
+    ok(sameOffsets(analyze(PAYOUT_SHARD_SIL, 'PayoutShard', ctorV1({ w17: randW17 })), baseV1), 'V1 w0..w16=random large ints (today every real caller passes all-zero, but that is not a structural guarantee — assert the offset invariant holds regardless): offsets unchanged');
+  }
+  {
+    const rnd = () => randomBytes(32).toString('hex');
+    ok(sameOffsets(analyze(PAYOUT_SHARD_SIL, 'PayoutShard', ctorV1({ tokenHex: rnd(), payoutRootHex: rnd(), claimHex: rnd(), marketHex: rnd() })), baseV1), 'V1 bytes32 fields=random: offsets unchanged');
+  }
+
+  const baseV2 = analyze(PAYOUT_SHARD_V2_SIL, 'PayoutShardV2', ctorV2());
+  for (const v of MATRIX) ok(sameOffsets(analyze(PAYOUT_SHARD_V2_SIL, 'PayoutShardV2', ctorV2({ consolidatedPool: v })), baseV2), `V2 consolidatedPool=${v}: offsets unchanged`);
+  for (const v of [-1, 0, 1]) ok(sameOffsets(analyze(PAYOUT_SHARD_V2_SIL, 'PayoutShardV2', ctorV2({ attestedWinner: v })), baseV2), `V2 attestedWinner=${v}: offsets unchanged`);
+  for (const v of [0, 1, 255, 256, 2 ** 31, 2 ** 40, 2 ** 40 + 12345, 2 ** 46]) ok(sameOffsets(analyze(PAYOUT_SHARD_V2_SIL, 'PayoutShardV2', ctorV2({ attestedAtMs: v })), baseV2), `V2 attestedAtMs=${v}: offsets unchanged`);
+  {
+    const randW17 = Array.from({ length: 17 }, () => Math.floor(Math.random() * 2 ** 40));
+    ok(sameOffsets(analyze(PAYOUT_SHARD_V2_SIL, 'PayoutShardV2', ctorV2({ w17: randW17 })), baseV2), 'V2 w0..w16=random large ints: offsets unchanged');
+  }
+  {
+    const rnd = () => randomBytes(32).toString('hex');
+    ok(sameOffsets(analyze(PAYOUT_SHARD_V2_SIL, 'PayoutShardV2', ctorV2({ tokenHex: rnd(), payoutRootHex: rnd(), claimHex: rnd(), marketHex: rnd(), closeZkHex: rnd(), betsHex: rnd(), refundHex: rnd() })), baseV2), 'V2 bytes32 fields=random: offsets unchanged');
   }
 }
 
