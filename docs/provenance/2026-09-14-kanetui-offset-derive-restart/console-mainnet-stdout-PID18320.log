@@ -1,0 +1,393 @@
+[db] path=D:\kanet-tn12\kasia-console\data\console.mainnet.db source=DB_PATH
+[phase2-shadow] PHASE2_SHADOW_EVERY=0 (raw=<unset>; 0=关; 影子窗内 ≥100; 对 P2-1/P2-3 只在不一致时打, P2-2/P2-4 每次比对打 equal/mismatch)
+[console] CONSOLE_ENCRYPTION_KEY fingerprint: 5ac9b85e
+[migrate] v9: interaction_records table created.
+[migrate] v10: account_relations table created, migrated 0 conversations.
+[migrate] v46: account_relations dropped.
+[migrate] v47: interaction_records dropped.
+[migrate] v68: retail_dex_orders table created.
+[migrate] v70: no orphan relation_states to backfill
+[migrate] v77: idx_offers_open_expires partial index created (expire watcher acceleration).
+[migrate] v79: broker_conversations table created (per-peer broker state, J1 #31 ship).
+[migrate] v80: broker_conversations.completed_at column added (Phase 2 profile sediment future-proof).
+[migrate] v81: broker_conversations dropped (Owner 抓错药戳穿 — 复用 retail_dex_orders + retail_dex_user_memory + relation_states 现有 pipeline).
+[migrate] v95: role backfill — broker=1, trader=1, predictor=1, dev=2.
+[migrate] v96: role 'dev' → 'general' rename — 2 rows.
+[migrate] v162: oracle_stake_enrollments + oracle_pool_chain_view tables created (DoD §2.2 chain-derived pool).
+[migrate] v167: broker_recommendations table (DoD 问1 prevet-gate + 排序).
+[migrate] v171: market_shards table created (rolling-shard registry for unlimited betting — bshard B + self-claim C).
+[migrate] v172: payout_shards table (per-market (A) PayoutShard covenant sink — cov_id provenance + settle redeem).
+[migrate] v173: broker_onboarding table (玩家→轻路 broker 自助 onboarding, 地址制, bot_token 加密, 审批复用 identities.trust).
+[migrate] v174: tg_custodial_wallets table (电报 DM 托管钱包, 助记词 aes-256-gcm 加密 fail-loud, display-once 无明文回取, Owner 钦定).
+[migrate] v175: escrow_states table (Silverscript P2SH escrow — buyer/seller/arbiter 三方合约, lock/execute via relay IPC).
+[migrate] v176: oracle_shadow_ledger table (影子判定台账 — 我们 oracle vs 权威 命中率历史, 纯记录不碰结算, Owner 自我进化 #26).
+[migrate] v181: zk_prove_jobs 补 fee_leaves_json/pool_total_sompi(§4硬门⑤禁bps-fallback, guest需要完整fee_leaves).
+[migrate] v192: pilot_rate_limit_log 建表 (M0c-1 Path B pilot 围栏 §2.4, gateway 限流 keyed by grant_id).
+[migrate] v195: u1_domain_assignment 建表完成 (u1 隔离施工的域→relay 映射记录; 纯记录表, 不参与签名判定).
+[migrate] v196: u1_identity_registration 建表完成 (A2 同源判定登记表; N3 锁1/N4 mnemonic 型已落成 UNIQUE+CHECK 结构约束; 今日无写入方).
+[migrate] v197: u1_identity_challenge 建表完成 (A2 一次性挑战; challenge PK 走 CAS, used_at NULL=未消费, expires_at NOT NULL; 部分索引仅巡检不参与正确性; 今日无写入方).
+[migrate] v198: u1_relay_identity 建表完成 (§10 跨节点 pubkey 身份, register-only; PK=relay_pubkey_xonly 小写64hex CHECK; network 闭枚举 CHECK; 无 local_relay_id 列/无 relay_id 回退索引(活算 fromAddress); epoch UNIQUE; 写入方 = u1-registration.mjs 事务内).
+[migrate] v200: idx_pool_sides_bettor_created 在, 记账通过
+[migrate] v200: idx_pool_markets_zk_ready 在, 记账通过
+[migrate] v201: idx_events_type_created 在, 记账通过
+[migrate] v202: submit_intents 表(+2 索引) + tx_records 加 target_address/landed_at/landed_depth/landed_checked_at + idx_tx_records_direction_landed ((c) NO-TX F2/F4, 幂等 IF NOT EXISTS/pragma 守卫).
+[migrate] v203: exchange_offers 加 escrow_landed_at/escrow_landed_depth/taker_escrow_landed_at/taker_escrow_landed_depth ((c) 第 5 笔 escrow 硬消费门, pragma 守卫幂等).
+[migrate] v205: payout_shards.token_tmpl_hash 在, 记账通过
+[migrate] v205: payout_shards.claim_tmpl_hash 在, 记账通过
+[migrate] v205: payout_shards.market_suffix_hash 在, 记账通过
+[migrate] v205: market_shards.shard_token_tmpl_hash 在, 记账通过
+[migrate] DB migrations complete.
+[silverc-pin] PASS sha256=4378ba65... golden=RootClaim ok
+[kasia-console] running at http://localhost:3202
+[zk-prove-worker] cron NOT started — ZK_PROVE_WORKER_ENABLED!=1 (真实 RISC0 proving + 真 KAS 注资, 默认不自动跑)
+2026-09-14T07:40:03.842Z [adapter-launcher] 0/0 adapters started
+[mind-manager] No relay nodes with adapters, skipping Mind init
+[mind-manager] stress-user-01: proactive every 60min, reflect every 24h
+[mind-manager] stress-user-02: proactive every 60min, reflect every 24h
+[mind-manager] stress-user-03: proactive every 60min, reflect every 24h
+[mind-manager] stress-user-04: proactive every 60min, reflect every 24h
+[mind-manager] stress-user-05: proactive every 60min, reflect every 24h
+[mind-manager] stress-user-06: proactive every 60min, reflect every 24h
+[mind-manager] stress-user-07: proactive every 60min, reflect every 24h
+[mind-manager] stress-user-08: proactive every 60min, reflect every 24h
+[mind-manager] stress-control-01: proactive every 60min, reflect every 24h
+[mind-manager] stress-control-02: proactive every 60min, reflect every 24h
+[mind-manager] J2: proactive every 60min, reflect every 24h
+[mind-manager] KANet-UI: proactive every 60min, reflect every 24h
+[mind-manager] Trader-A: proactive every 60min, reflect every 24h
+[mind-manager] Qclaude: proactive every 60min, reflect every 24h
+[mind-manager] Trader-M: proactive every 60min, reflect every 24h
+[mind-manager] Bettor: proactive every 60min, reflect every 24h
+[mind-manager] Scheduler started for 16 agents
+[mind-manager] Price monitor active: ±3%
+[rpc-shared] build ws://127.0.0.1:17110|mainnet (pool size 1) — one instance per key, never per-call
+[relay-manager] Started stress-user-01 relay (PID 6948)
+[relay-manager] Started stress-user-02 relay (PID 1564)
+[relay-manager] Started stress-user-03 relay (PID 7388)
+[relay-manager] Started stress-user-04 relay (PID 14884)
+[relay-manager] Started stress-user-05 relay (PID 3980)
+[relay-manager] Started stress-user-06 relay (PID 27536)
+[relay-manager] Started stress-user-07 relay (PID 24244)
+[relay-manager] Started stress-user-08 relay (PID 11320)
+[relay-manager] Started stress-control-01 relay (PID 4880)
+[relay-manager] Started stress-control-02 relay (PID 13280)
+[relay-manager] Started J2 relay (PID 9760)
+[relay-manager] Started KANet-UI relay (PID 4108)
+[relay-manager] Started Trader-A relay (PID 24112)
+[relay-manager] Started Qclaude relay (PID 17160)
+[relay-manager] Started Trader-M relay (PID 29992)
+[relay-manager] Started Bettor relay (PID 29456)
+[relay-manager] 16/16 relays started
+[tg-bot-manager] TELEGRAM_BOT_TOKEN not set (config or env) — bot not auto-started (configure + start from Settings)
+[broker-bot-mgr] boot reconcile: {"ok":true,"approved":0,"started":0,"already_up":0,"skipped_bad_token":0,"running":0}
+[scavenger] startup catchup: last scan 7.2h ago > 1h threshold, fire immediate
+[scavenger] start (trigger=cron_startup_catchup, relay=27e2b2ac)
+[scavenger] cron registered: every 6h
+[bettor-resolver] cron registered: every 1h (boot tick 15s before tracker/reactor)
+[bettor-tracker] cron registered: every 1h
+[bettor-tracker] urgent cron registered: every 15min (positions <24h to expiry)
+[bettor-reactor] cron registered: every 1h (Phase 3e-6 Kelly delta 模型)
+[auto-valve] started (1h cron, 4 valves: A redeem / B sim resolved / C -30%pnl 12h / D 90d zombie)
+[position-protector] started (1 min cron, Phase 1 skeleton — detect new positions + INSERT pending_owner_ack rules, NO firing)
+[position-protector] startup catchup: last audit 29822860.1min ago > 1h threshold, fire immediate
+[position-watcher] started (30 min cron, alert-only — no auto-fire)
+[position-watcher] startup catchup: last audit 29822860.1min ago > 30min, fire immediate
+[fossa-stable-scanner] started (1h cron, due-diligence enforced, no auto-fire)
+[fossa-stable-scanner] startup catchup: last scan 435min ago > 60min, fire in 30s
+[prediction-settler] started — 5min cron, settle expired prediction_outcome_share offers (Phase 2c detect+mark+log, payout 真链 Phase 2b)
+[prediction-voter] started — 5min cron, scan is_oracle=1 relays + vote offers (Phase 3a r211 v3)
+[bshard-close-voter] cron NOT started — BSHARD_CLOSE_VOTER_ENABLED!=1 (Track B 待 live e2e 实证 + D4 relay-gate 未闭, 默认不自动签; 设=1 供受控 live e2e)
+[bshard-close-voter-v2] cron NOT started — BSHARD_CLOSE_VOTER_V2_ENABLED!=1 (默认不自动签, 设=1 供受控 live e2e)
+[bshard-close-submit-v2] cron NOT started — BSHARD_CLOSE_SUBMIT_V2_ENABLED!=1 (唯一新造 money-path tick, 默认不自动广播)
+[pool-settler] started — 5min cron, aggregate 3 oracle votes + consensus check, silent_timeout=1440min (Sub 2d Phase 1)
+[diag:eventloop-lag] heartbeat started (expected=1000ms, alert_threshold=1000ms, heap_sample_every=60s)
+[utxo-fetch-probe] installed (patches RpcClient.prototype.getUtxosByAddresses, all call sites covered)
+[claim-auto] started — 5min cron, auto-dispatch unclaimed bettor refunds for cancelled markets (DoD C 收尾 Bettor r393).
+[auto-bet] DISABLED (AUTO_BET_TICK_MS=0)
+[house-agent] started — tick=300000ms stake=20 relay=HouseAgent (#42 击败Agent 玩法: 判断+真押世界杯盘)
+[bot-autofund] BOT_AUTOFUND_SOURCE_RELAY_ID not set — cron not started
+[relay-health] started — tick=30000ms grace=90000ms max_restart_per_hour=3
+[relay-hotwallet-monitor] started — tick=30000ms grace=90000ms max_consecutive_failures=3
+[oracle-voter-health] started — tick=120000ms grace=120000ms stale=10min
+[oracle-pool-scanner-cron] started — 5min cron, scan + derive chain_view (Bettor r449 活化质押池).
+[oracle-renewal] started — 1h cron, auto-renew expiring oracle enrollments (threshold=3M DAA ≈3.5d, new_lock=10M DAA ≈11.5d). Transfer → UTXO-landed gate → DB update (NO-TX-NO-STATE).
+[settle-daemon] 07:40:03 disabled (SETTLE_DAEMON_ENABLED!=1)·not starting
+[settle-daemon] 07:40:03 zkCloseTickV2 disabled (ZK_CLOSE_TICK_V2_ENABLED!=1)·not starting
+[settle-daemon] 07:40:03 claimAutonomousTick disabled (ZK_CLAIM_TICK_ENABLED!=1)·not starting
+[settle-daemon] 07:40:03 zkHandoffAutonomousTick disabled (ZK_HANDOFF_TICK_ENABLED!=1)·not starting
+[settle-daemon] 07:40:04 zkJudgeProposeAutonomousTick disabled (ZK_JUDGE_PROPOSE_TICK_ENABLED!=1)·not starting
+[broadcaster-utxo] started — tick=180000ms target=30 UTXOs/broadcaster (design-v2 B, pairs with parallel-broadcast A)
+[mining-consolidate] MINING_CONSOLIDATE_ENABLED=false — cron not started (kill-switch, see TREASURY-UTXO-UNREADABLE card)
+[faucet-health] FAUCET_RELAY_ID not set — cron not started
+[settle-failed-alert] started — tick=60000ms (只读监控, 不改daemon逻辑, 新增settle_failed立刻写events表+发dev-coord-testnet频道)
+[disk-space-alert] started — tick=300000ms drives=C,D lowThresholdGB=15 (只读监控, 不做任何清理动作)
+[rpc-health-degradation-alert] started — tick=60000ms, window=3min, threshold=5, selfRestart=OFF (写events+播dev-coord-testnet频道)
+[zk-prove-job-stuck-alert] started — tick=300000ms, threshold=15min(占位待校准) (只读监控, 去重落 events 表非内存, 每tick含首个都全量检查不建baseline)
+[variant-expander] started (30 min cron, Phase 1 skeleton — 3-tier variant expansion stub, real algorithm Phase 2)
+[variant-expander] startup catchup: last variant 29822860.1min ago > 1h threshold, fire immediate
+[worldcup-schedule] starting·tick=1800000ms·maker=15593e10
+[relay:stress-user-01] 9/14/2026, 14:40:03 Kasia Relay started (RPC mode — local node subscription).
+[relay:stress-user-02] 9/14/2026, 14:40:03 Kasia Relay started (RPC mode — local node subscription).
+[relay:stress-user-03] 9/14/2026, 14:40:03 Kasia Relay started (RPC mode — local node subscription).
+[relay:stress-user-04] 9/14/2026, 14:40:03 Kasia Relay started (RPC mode — local node subscription).
+[relay:stress-user-02] 2026-09-14T07:40:04.018Z [rpc] connecting to ws://127.0.0.1:17110
+[relay:stress-user-06] 9/14/2026, 14:40:04 Kasia Relay started (RPC mode — local node subscription).
+[relay:stress-user-05] 9/14/2026, 14:40:04 Kasia Relay started (RPC mode — local node subscription).
+[relay:stress-user-01] 2026-09-14T07:40:04.019Z [rpc] connecting to ws://127.0.0.1:17110
+[relay:stress-user-07] 9/14/2026, 14:40:04 Kasia Relay started (RPC mode — local node subscription).
+[relay:stress-user-03] 2026-09-14T07:40:04.024Z [rpc] connecting to ws://127.0.0.1:17110
+[relay:stress-user-04] 2026-09-14T07:40:04.027Z [rpc] connecting to ws://127.0.0.1:17110
+[relay:stress-user-05] 2026-09-14T07:40:04.039Z [rpc] connecting to ws://127.0.0.1:17110
+[relay:stress-user-06] 2026-09-14T07:40:04.040Z [rpc] connecting to ws://127.0.0.1:17110
+[relay:stress-user-07] 2026-09-14T07:40:04.044Z [rpc] connecting to ws://127.0.0.1:17110
+[relay:stress-user-02] 2026-09-14T07:40:04.046Z [rpc] node is synced
+[relay:stress-user-08] 9/14/2026, 14:40:04 Kasia Relay started (RPC mode — local node subscription).
+[relay:stress-user-02] 2026-09-14T07:40:04.047Z [rpc] subscribed to new blocks
+[relay:stress-user-02] 2026-09-14T07:40:04.047Z [rpc] watching address: kaspa:qzy3c6nvfmx027...j5w88thy
+[relay:stress-user-02] 2026-09-14T07:40:04.047Z [rpc] protocol support: handshake, comm, payment
+[relay:stress-user-01] 9/14/2026, 14:40:04 command split_utxo failed: RPC Server (remote error) -> WebSocket -> WebSocket is not connected
+[relay:stress-user-04] 2026-09-14T07:40:04.058Z [rpc] node is synced
+[relay:stress-user-01] 2026-09-14T07:40:04.058Z [rpc] node is synced
+[relay:stress-control-02] 9/14/2026, 14:40:04 Kasia Relay started (RPC mode — local node subscription).
+[relay:stress-user-01] 2026-09-14T07:40:04.059Z [rpc] subscribed to new blocks
+[relay:stress-control-01] 9/14/2026, 14:40:04 Kasia Relay started (RPC mode — local node subscription).
+[relay:stress-user-01] 2026-09-14T07:40:04.059Z [rpc] watching address: kaspa:qrwnrehtfzygkw...086n8wqv
+[relay:stress-user-01] 2026-09-14T07:40:04.059Z [rpc] protocol support: handshake, comm, payment
+[relay:stress-user-03] 2026-09-14T07:40:04.061Z [rpc] node is synced
+[relay:stress-user-04] 2026-09-14T07:40:04.060Z [rpc] subscribed to new blocks
+[relay:stress-user-04] 2026-09-14T07:40:04.060Z [rpc] watching address: kaspa:qqk5n73lgy0udr...vaa4xh2v
+[relay:stress-user-04] 2026-09-14T07:40:04.060Z [rpc] protocol support: handshake, comm, payment
+[relay:stress-user-03] 2026-09-14T07:40:04.063Z [rpc] subscribed to new blocks
+[relay:stress-user-03] 2026-09-14T07:40:04.063Z [rpc] watching address: kaspa:qrv64pa7hvmnx6...cqltlmwk
+[relay:stress-user-03] 2026-09-14T07:40:04.063Z [rpc] protocol support: handshake, comm, payment
+[relay:stress-user-08] 2026-09-14T07:40:04.068Z [rpc] connecting to ws://127.0.0.1:17110
+[relay:stress-user-05] 2026-09-14T07:40:04.071Z [rpc] node is synced
+[relay:stress-user-06] 2026-09-14T07:40:04.072Z [rpc] node is synced
+[relay:stress-user-02] 9/14/2026, 14:40:04 UTXO SPLIT: skipped balance_too_low_for_split
+[relay:stress-user-06] 2026-09-14T07:40:04.073Z [rpc] subscribed to new blocks
+[relay:stress-user-06] 2026-09-14T07:40:04.073Z [rpc] watching address: kaspa:qrl5mz8ckd78ry...wtzvh5v7
+[relay:stress-user-06] 2026-09-14T07:40:04.073Z [rpc] protocol support: handshake, comm, payment
+[relay:stress-user-07] 2026-09-14T07:40:04.074Z [rpc] node is synced
+[relay:stress-user-07] 2026-09-14T07:40:04.076Z [rpc] subscribed to new blocks
+[relay:stress-user-07] 2026-09-14T07:40:04.076Z [rpc] watching address: kaspa:qz4xldyphshmq8...sr3vvjnv
+[relay:stress-user-07] 2026-09-14T07:40:04.076Z [rpc] protocol support: handshake, comm, payment
+[relay:stress-control-02] 2026-09-14T07:40:04.078Z [rpc] connecting to ws://127.0.0.1:17110
+[relay:J2] 9/14/2026, 14:40:04 Kasia Relay started (RPC mode — local node subscription).
+[relay:stress-user-05] 2026-09-14T07:40:04.079Z [rpc] subscribed to new blocks
+[relay:stress-user-05] 2026-09-14T07:40:04.079Z [rpc] watching address: kaspa:qpyj7hrahj3l2x...hy4apyhr
+[relay:stress-user-05] 2026-09-14T07:40:04.079Z [rpc] protocol support: handshake, comm, payment
+[relay:stress-control-01] 2026-09-14T07:40:04.080Z [rpc] connecting to ws://127.0.0.1:17110
+[relay:stress-user-02] 2026-09-14T07:40:04.086Z [rpc] indexer: watching 16 addresses
+[relay:stress-user-02] 2026-09-14T07:40:04.087Z [rpc] listening...
+[relay:stress-user-02] 2026-09-14T07:40:04.087Z [rpc] catching up from Console DB...
+[relay:stress-user-02] 2026-09-14T07:40:04.091Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:stress-user-02] 2026-09-14T07:40:04.091Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:KANet-UI] 9/14/2026, 14:40:04 Kasia Relay started (RPC mode — local node subscription).
+[relay:stress-user-01] 2026-09-14T07:40:04.089Z [rpc] indexer: watching 16 addresses
+[relay:stress-user-01] 2026-09-14T07:40:04.090Z [rpc] listening...
+[relay:stress-user-03] 9/14/2026, 14:40:04 UTXO SPLIT: skipped balance_too_low_for_split
+[relay:stress-user-01] 2026-09-14T07:40:04.090Z [rpc] catching up from Console DB...
+[relay:stress-user-04] 2026-09-14T07:40:04.090Z [rpc] indexer: watching 16 addresses
+[relay:stress-user-04] 2026-09-14T07:40:04.091Z [rpc] listening...
+[relay:stress-user-04] 2026-09-14T07:40:04.092Z [rpc] catching up from Console DB...
+[relay:stress-user-01] 2026-09-14T07:40:04.094Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:stress-user-01] 2026-09-14T07:40:04.094Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:stress-user-08] 2026-09-14T07:40:04.098Z [rpc] node is synced
+[relay:Qclaude] 9/14/2026, 14:40:04 Kasia Relay started (RPC mode — local node subscription).
+[relay:stress-user-08] 2026-09-14T07:40:04.099Z [rpc] subscribed to new blocks
+[relay:stress-user-08] 2026-09-14T07:40:04.100Z [rpc] watching address: kaspa:qquz2qte4cv876...q4wzmv2w
+[relay:stress-user-08] 2026-09-14T07:40:04.100Z [rpc] protocol support: handshake, comm, payment
+[relay:stress-user-03] 2026-09-14T07:40:04.099Z [rpc] indexer: watching 16 addresses
+[relay:stress-user-03] 2026-09-14T07:40:04.100Z [rpc] listening...
+[relay:stress-user-03] 2026-09-14T07:40:04.100Z [rpc] catching up from Console DB...
+[relay:J2] 2026-09-14T07:40:04.100Z [rpc] connecting to ws://127.0.0.1:17110
+[relay:stress-user-07] 2026-09-14T07:40:04.101Z [rpc] indexer: watching 16 addresses
+[relay:stress-user-07] 2026-09-14T07:40:04.102Z [rpc] listening...
+[relay:stress-user-07] 2026-09-14T07:40:04.102Z [rpc] catching up from Console DB...
+[relay:stress-user-04] 9/14/2026, 14:40:04 UTXO SPLIT: skipped balance_too_low_for_split
+[relay:stress-user-04] 2026-09-14T07:40:04.101Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:stress-user-04] 2026-09-14T07:40:04.101Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:stress-user-06] 2026-09-14T07:40:04.104Z [rpc] indexer: watching 16 addresses
+[relay:stress-user-03] 2026-09-14T07:40:04.104Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:stress-user-03] 2026-09-14T07:40:04.104Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:stress-user-06] 2026-09-14T07:40:04.105Z [rpc] listening...
+[relay:stress-user-06] 2026-09-14T07:40:04.105Z [rpc] catching up from Console DB...
+[relay:stress-user-07] 2026-09-14T07:40:04.106Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:stress-user-07] 2026-09-14T07:40:04.106Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:stress-user-06] 2026-09-14T07:40:04.108Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:stress-user-06] 2026-09-14T07:40:04.108Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:stress-control-02] 2026-09-14T07:40:04.108Z [rpc] node is synced
+[relay:stress-control-02] 2026-09-14T07:40:04.110Z [rpc] subscribed to new blocks
+[relay:stress-control-02] 2026-09-14T07:40:04.110Z [rpc] watching address: kaspa:qpuwsxct0fu3ut...prvkg2va
+[relay:stress-control-02] 2026-09-14T07:40:04.110Z [rpc] protocol support: handshake, comm, payment
+[relay:stress-control-01] 2026-09-14T07:40:04.111Z [rpc] node is synced
+[relay:Trader-A] 9/14/2026, 14:40:04 Kasia Relay started (RPC mode — local node subscription).
+[relay:stress-control-01] 2026-09-14T07:40:04.112Z [rpc] subscribed to new blocks
+[relay:stress-control-01] 2026-09-14T07:40:04.112Z [rpc] watching address: kaspa:qzlvn9gg0gyhur...vpenvskw
+[relay:stress-control-01] 2026-09-14T07:40:04.112Z [rpc] protocol support: handshake, comm, payment
+[relay:stress-user-05] 9/14/2026, 14:40:04 UTXO SPLIT: skipped balance_too_low_for_split
+[relay:KANet-UI] 2026-09-14T07:40:04.113Z [rpc] connecting to ws://127.0.0.1:17110
+[relay:stress-user-05] 2026-09-14T07:40:04.116Z [rpc] indexer: watching 16 addresses
+[relay:stress-user-05] 2026-09-14T07:40:04.116Z [rpc] listening...
+[relay:stress-user-05] 2026-09-14T07:40:04.117Z [rpc] catching up from Console DB...
+[relay:Bettor] 9/14/2026, 14:40:04 Kasia Relay started (RPC mode — local node subscription).
+[relay:Trader-M] 9/14/2026, 14:40:04 Kasia Relay started (RPC mode — local node subscription).
+[relay:Qclaude] 2026-09-14T07:40:04.120Z [rpc] connecting to ws://127.0.0.1:17110
+[relay:stress-user-05] 2026-09-14T07:40:04.120Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:stress-user-05] 2026-09-14T07:40:04.121Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:stress-user-06] 9/14/2026, 14:40:04 UTXO SPLIT: skipped balance_too_low_for_split
+[relay:stress-user-08] 2026-09-14T07:40:04.126Z [rpc] indexer: watching 16 addresses
+[relay:stress-user-08] 2026-09-14T07:40:04.126Z [rpc] listening...
+[relay:stress-user-08] 2026-09-14T07:40:04.126Z [rpc] catching up from Console DB...
+[relay:stress-user-08] 2026-09-14T07:40:04.130Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:stress-user-08] 2026-09-14T07:40:04.130Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:stress-user-07] 9/14/2026, 14:40:04 UTXO SPLIT: skipped balance_too_low_for_split
+[relay:J2] 2026-09-14T07:40:04.133Z [rpc] node is synced
+[relay:Trader-A] 2026-09-14T07:40:04.134Z [rpc] connecting to ws://127.0.0.1:17110
+[relay:J2] 2026-09-14T07:40:04.135Z [rpc] subscribed to new blocks
+[relay:J2] 2026-09-14T07:40:04.135Z [rpc] watching address: kaspa:qr7km875u5hhl4...e78fjev3
+[relay:J2] 2026-09-14T07:40:04.135Z [rpc] protocol support: handshake, comm, payment
+[relay:stress-control-02] 2026-09-14T07:40:04.136Z [rpc] indexer: watching 16 addresses
+[relay:stress-control-02] 2026-09-14T07:40:04.136Z [rpc] listening...
+[relay:stress-control-01] 2026-09-14T07:40:04.137Z [rpc] indexer: watching 16 addresses
+[relay:stress-control-02] 2026-09-14T07:40:04.137Z [rpc] catching up from Console DB...
+[relay:stress-control-01] 2026-09-14T07:40:04.137Z [rpc] listening...
+[relay:stress-control-01] 2026-09-14T07:40:04.138Z [rpc] catching up from Console DB...
+[relay:Bettor] 2026-09-14T07:40:04.138Z [rpc] connecting to ws://127.0.0.1:17110
+[relay:Trader-M] 2026-09-14T07:40:04.140Z [rpc] connecting to ws://127.0.0.1:17110
+[relay:stress-user-08] 9/14/2026, 14:40:04 UTXO SPLIT: skipped balance_too_low_for_split
+[relay:stress-control-02] 2026-09-14T07:40:04.141Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:stress-control-02] 2026-09-14T07:40:04.141Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:stress-control-01] 2026-09-14T07:40:04.141Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:stress-control-01] 2026-09-14T07:40:04.141Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:KANet-UI] 2026-09-14T07:40:04.143Z [rpc] node is synced
+[relay:KANet-UI] 2026-09-14T07:40:04.144Z [rpc] subscribed to new blocks
+[relay:KANet-UI] 2026-09-14T07:40:04.145Z [rpc] watching address: kaspa:qpf2f39dp869lf...7err0tz9
+[relay:KANet-UI] 2026-09-14T07:40:04.145Z [rpc] protocol support: handshake, comm, payment
+[relay:Qclaude] 2026-09-14T07:40:04.148Z [rpc] node is synced
+[relay:stress-control-01] 9/14/2026, 14:40:04 UTXO SPLIT: skipped balance_too_low_for_split
+[relay:Qclaude] 2026-09-14T07:40:04.149Z [rpc] subscribed to new blocks
+[relay:Qclaude] 2026-09-14T07:40:04.149Z [rpc] watching address: kaspa:qruc370pkq0e9a...v3hd6efu
+[relay:Qclaude] 2026-09-14T07:40:04.149Z [rpc] protocol support: handshake, comm, payment
+[relay:stress-control-02] 9/14/2026, 14:40:04 UTXO SPLIT: skipped balance_too_low_for_split
+[relay:Trader-A] 2026-09-14T07:40:04.158Z [rpc] node is synced
+[relay:Trader-A] 2026-09-14T07:40:04.159Z [rpc] subscribed to new blocks
+[relay:Trader-A] 2026-09-14T07:40:04.159Z [rpc] watching address: kaspa:qpsys3gzy4lg8t...a2cr843s
+[relay:Trader-A] 2026-09-14T07:40:04.159Z [rpc] protocol support: handshake, comm, payment
+[relay:J2] 9/14/2026, 14:40:04 UTXO SPLIT: skipped sufficient
+[relay:Trader-M] 2026-09-14T07:40:04.166Z [rpc] node is synced
+[relay:Bettor] 2026-09-14T07:40:04.165Z [rpc] node is synced
+[relay:Trader-M] 2026-09-14T07:40:04.167Z [rpc] subscribed to new blocks
+[relay:Trader-M] 2026-09-14T07:40:04.167Z [rpc] watching address: kaspa:qqndp3hcrce942...9z9xn7rh
+[relay:Trader-M] 2026-09-14T07:40:04.167Z [rpc] protocol support: handshake, comm, payment
+[relay:Bettor] 2026-09-14T07:40:04.166Z [rpc] subscribed to new blocks
+[relay:Bettor] 2026-09-14T07:40:04.166Z [rpc] watching address: kaspa:qz60muet908mma...uhfkdtk8
+[relay:Bettor] 2026-09-14T07:40:04.166Z [rpc] protocol support: handshake, comm, payment
+[relay:J2] 2026-09-14T07:40:04.168Z [rpc] indexer: watching 16 addresses
+[relay:J2] 2026-09-14T07:40:04.168Z [rpc] listening...
+[relay:J2] 2026-09-14T07:40:04.169Z [rpc] catching up from Console DB...
+[relay:Qclaude] 2026-09-14T07:40:04.171Z [rpc] indexer: watching 16 addresses
+[relay:J2] 2026-09-14T07:40:04.171Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:J2] 2026-09-14T07:40:04.171Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:Qclaude] 2026-09-14T07:40:04.171Z [rpc] listening...
+[relay:Qclaude] 2026-09-14T07:40:04.172Z [rpc] catching up from Console DB...
+[relay:Qclaude] 2026-09-14T07:40:04.174Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:Qclaude] 2026-09-14T07:40:04.174Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:Trader-A] 2026-09-14T07:40:04.178Z [rpc] indexer: watching 16 addresses
+[relay:Trader-A] 2026-09-14T07:40:04.178Z [rpc] listening...
+[relay:Trader-A] 2026-09-14T07:40:04.178Z [rpc] catching up from Console DB...
+[relay:KANet-UI] 2026-09-14T07:40:04.181Z [rpc] indexer: watching 16 addresses
+[relay:KANet-UI] 2026-09-14T07:40:04.182Z [rpc] listening...
+[relay:KANet-UI] 2026-09-14T07:40:04.182Z [rpc] catching up from Console DB...
+[relay:Trader-A] 2026-09-14T07:40:04.182Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:Trader-A] 2026-09-14T07:40:04.182Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[utxo-splitter] KANet-UI: 5 → 4 UTXOs (fee: 0.012332 KAS)
+[relay:KANet-UI] 9/14/2026, 14:40:04 UTXO SPLIT: 5→4
+[relay:KANet-UI] 2026-09-14T07:40:04.186Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:KANet-UI] 2026-09-14T07:40:04.186Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:Bettor] 2026-09-14T07:40:04.186Z [rpc] indexer: watching 16 addresses
+[relay:Trader-M] 2026-09-14T07:40:04.187Z [rpc] indexer: watching 16 addresses
+[relay:Bettor] 2026-09-14T07:40:04.186Z [rpc] listening...
+[relay:Trader-M] 2026-09-14T07:40:04.188Z [rpc] listening...
+[relay:Bettor] 2026-09-14T07:40:04.187Z [rpc] catching up from Console DB...
+[relay:Trader-M] 2026-09-14T07:40:04.188Z [rpc] catching up from Console DB...
+[relay:Bettor] 2026-09-14T07:40:04.189Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:Trader-M] 2026-09-14T07:40:04.191Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:Bettor] 2026-09-14T07:40:04.189Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:Trader-M] 2026-09-14T07:40:04.191Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[utxo-splitter] Trader-A: 7 → 6 UTXOs (fee: 0.015392 KAS)
+[relay:Trader-A] 9/14/2026, 14:40:04 UTXO SPLIT: 7→6
+[relay:Qclaude] 9/14/2026, 14:40:04 UTXO SPLIT: skipped balance_too_low_for_split
+[utxo-splitter] Trader-M: 4 → 3 UTXOs (fee: 0.010802 KAS)
+[relay:Trader-M] 9/14/2026, 14:40:04 UTXO SPLIT: 4→3
+[utxo-splitter] Bettor: 3 → 3 UTXOs (fee: 0.009684 KAS)
+[utxo-splitter] 4/16 accounts split
+[scanner:watchdog] started — liveness via scout_checkpoint freshness (check 45s, stall 120s)
+[connection-manager] Refresh worker started (60s interval)
+[seeder] Market seeder started (5min interval)
+[seeder] seeder deposit watcher started (30s interval)
+[seeder] seeder refund worker started (30s interval)
+[pool-seeder] disabled (set POOL_SEEDER_ENABLED=1 to enable)
+[broker] disabled (BROKER_ENABLED!=1)
+[broker-reconcile] cron started, interval=15min, startup_grace=1h
+[state-reconciler] start, tick=300000ms
+[broker-fee-emit] cron start, tick=300000ms
+[tx-landed-reconciler] started (tick 5 min, detect+alert only, landed columns backfill)
+[spc-daa-index-monitor] cron start, tick=300000ms
+[bshard-coherence-observability-monitor] cron start, tick=3600000ms, window=24h
+[preprune-capture-worker] cron start, tick=60000ms (K-17)
+[preprune-capture-monitor] cron start, tick=300000ms
+[relay:Bettor] 9/14/2026, 14:40:04 UTXO SPLIT: 3→3
+[relay:Bettor] 2026-09-14T07:40:04.270Z [rpc] block #1 (attempted: 0)
+[relay:Trader-M] 2026-09-14T07:40:04.272Z [rpc] block #1 (attempted: 0)
+[relay:Qclaude] 2026-09-14T07:40:04.272Z [rpc] block #1 (attempted: 0)
+[relay:stress-user-07] 2026-09-14T07:40:04.272Z [rpc] block #1 (attempted: 0)
+[relay:stress-user-05] 2026-09-14T07:40:04.271Z [rpc] block #1 (attempted: 0)
+[relay:Trader-A] 2026-09-14T07:40:04.271Z [rpc] block #1 (attempted: 0)
+[relay:stress-user-03] 2026-09-14T07:40:04.272Z [rpc] block #1 (attempted: 0)
+[relay:stress-control-01] 2026-09-14T07:40:04.271Z [rpc] block #1 (attempted: 0)
+[relay:stress-user-08] 2026-09-14T07:40:04.272Z [rpc] block #1 (attempted: 0)
+[relay:stress-control-02] 2026-09-14T07:40:04.271Z [rpc] block #1 (attempted: 0)
+[relay:stress-user-06] 2026-09-14T07:40:04.271Z [rpc] block #1 (attempted: 0)
+[relay:KANet-UI] 2026-09-14T07:40:04.272Z [rpc] block #1 (attempted: 0)
+[relay:J2] 2026-09-14T07:40:04.272Z [rpc] block #1 (attempted: 0)
+[relay:stress-user-04] 2026-09-14T07:40:04.270Z [rpc] block #1 (attempted: 0)
+[relay:stress-user-02] 2026-09-14T07:40:04.272Z [rpc] block #1 (attempted: 0)
+[relay:stress-user-01] 2026-09-14T07:40:04.271Z [rpc] block #1 (attempted: 0)
+[relay:Bettor] 2026-09-14T07:40:04.630Z [rpc] block #2 (attempted: 0)
+[relay:stress-control-02] 2026-09-14T07:40:04.631Z [rpc] block #2 (attempted: 0)
+[relay:stress-user-02] 2026-09-14T07:40:04.631Z [rpc] block #2 (attempted: 0)
+[relay:stress-user-07] 2026-09-14T07:40:04.631Z [rpc] block #2 (attempted: 0)
+[relay:stress-user-06] 2026-09-14T07:40:04.631Z [rpc] block #2 (attempted: 0)
+[relay:stress-control-01] 2026-09-14T07:40:04.631Z [rpc] block #2 (attempted: 0)
+[relay:J2] 2026-09-14T07:40:04.631Z [rpc] block #2 (attempted: 0)
+[relay:stress-user-05] 2026-09-14T07:40:04.631Z [rpc] block #2 (attempted: 0)
+[relay:stress-user-08] 2026-09-14T07:40:04.632Z [rpc] block #2 (attempted: 0)
+[relay:stress-user-04] 2026-09-14T07:40:04.630Z [rpc] block #2 (attempted: 0)
+[relay:stress-user-03] 2026-09-14T07:40:04.631Z [rpc] block #2 (attempted: 0)
+[relay:Trader-A] 2026-09-14T07:40:04.631Z [rpc] block #2 (attempted: 0)
+[relay:Qclaude] 2026-09-14T07:40:04.631Z [rpc] block #2 (attempted: 0)
+[relay:stress-user-01] 2026-09-14T07:40:04.630Z [rpc] block #2 (attempted: 0)
+[relay:KANet-UI] 2026-09-14T07:40:04.631Z [rpc] block #2 (attempted: 0)
+[relay:Trader-M] 2026-09-14T07:40:04.631Z [rpc] block #2 (attempted: 0)
+[relay:Trader-M] 2026-09-14T07:40:04.664Z [rpc] block #3 (attempted: 0)
+[relay:stress-user-01] 2026-09-14T07:40:04.663Z [rpc] block #3 (attempted: 0)
+[relay:stress-user-08] 2026-09-14T07:40:04.665Z [rpc] block #3 (attempted: 0)
+[relay:Qclaude] 2026-09-14T07:40:04.664Z [rpc] block #3 (attempted: 0)
+[relay:Trader-A] 2026-09-14T07:40:04.664Z [rpc] block #3 (attempted: 0)
+[relay:KANet-UI] 2026-09-14T07:40:04.664Z [rpc] block #3 (attempted: 0)
+[relay:stress-user-02] 2026-09-14T07:40:04.665Z [rpc] block #3 (attempted: 0)
+[relay:stress-user-07] 2026-09-14T07:40:04.664Z [rpc] block #3 (attempted: 0)
+[relay:stress-control-01] 2026-09-14T07:40:04.664Z [rpc] block #3 (attempted: 0)
+[relay:stress-user-03] 2026-09-14T07:40:04.664Z [rpc] block #3 (attempted: 0)
+[relay:Bettor] 2026-09-14T07:40:04.663Z [rpc] block #3 (attempted: 0)
+[relay:stress-control-02] 2026-09-14T07:40:04.664Z [rpc] block #3 (attempted: 0)
+[relay:stress-user-05] 2026-09-14T07:40:04.664Z [rpc] block #3 (attempted: 0)
+[relay:stress-user-06] 2026-09-14T07:40:04.664Z [rpc] block #3 (attempted: 0)
+[relay:stress-user-04] 2026-09-14T07:40:04.663Z [rpc] block #3 (attempted: 0)
+[relay:J2] 2026-09-14T07:40:04.665Z [rpc] block #3 (attempted: 0)
+[scavenger] FAILED: Spread syntax requires ...iterable[Symbol.iterator] to be a function
+[diag:step] pair.scanAndIngestPairs ms=0 since_rowid=0 max_rowid=0 hits=0 at=2026-09-14T07:40:33.815Z
+[diag:tick-duration] relayHealthMonitorTick ms=1 eligible=16 deadCount=0
+[rpc-health] using local node: ws://127.0.0.1:17110
+[diag:tick-duration] relayHotwalletMonitorTick ms=16 checked=16 killed=0
