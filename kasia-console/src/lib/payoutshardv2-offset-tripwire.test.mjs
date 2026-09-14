@@ -21,6 +21,12 @@ const MARKER_POOL_MERKLE_ROOT = 'aa'.repeat(32);
 const MARKER_PREDICATE_COMMIT = 'bb'.repeat(32);
 const MARKER_CLOSEZK_ANCHOR = 'cc'.repeat(32);
 const MARKER_CONSOLIDATED_POOL = 123456789;
+// D-019 迁移(ledger 1216-1222): compilePayoutShardV2Redeem 现在必须传这三个新字段(T3 代币化 ctor-only
+// 字面量, 30 参数里新增的部分)——用互不相同、且与上面既有 marker 不同的值, 避免任何两个 marker 意外相等
+// 导致 findUnique 类断言(本文件没有直接用, 但保持全文件同一纪律)误判。
+const MARKER_TOKEN_TMPL_HASH = '11'.repeat(32);
+const MARKER_CLAIM_TMPL_HASH = '22'.repeat(32);
+const MARKER_MARKET_SUFFIX_HASH = '33'.repeat(32);
 
 function findUnique(buf, needle, label) {
   const first = buf.indexOf(needle);
@@ -36,6 +42,7 @@ function main() {
     predicateCommit: MARKER_PREDICATE_COMMIT,
     closeZkTmplAnchor: MARKER_CLOSEZK_ANCHOR,
     consolidatedPool: MARKER_CONSOLIDATED_POOL,
+    tokenTmplHash: MARKER_TOKEN_TMPL_HASH, claimTmplHash: MARKER_CLAIM_TMPL_HASH, marketSuffixHash: MARKER_MARKET_SUFFIX_HASH,
   });
   const buf = Buffer.from(redeemHex, 'hex');
 
