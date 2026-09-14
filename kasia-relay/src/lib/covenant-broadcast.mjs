@@ -50,6 +50,17 @@ export const SOMPI_PER_MASS = 100n;
 export function validateSignedInputCeiling({ inputs, signInputIndices, signedInputCeilingSompi = SIGNED_INPUT_CEILING_SOMPI }) {
   if (!Array.isArray(inputs) || !inputs.length) return { ok: false, reason: 'inputs must be a non-empty array' };
   if (!Array.isArray(signInputIndices) || !signInputIndices.length) return { ok: false, reason: 'signInputIndices must be a non-empty array' };
+  // 🔴 NWT 1376(非阻断建议, 显式拒绝而非依赖"方向安全"的隐性性质): 重复索引现在只会让
+  // signedInputTotalSompi 被重复加总、更容易触发 SIGNED_INPUT_CEILING 拒绝(方向安全, 不是漏洞)，
+  // 但依赖"刚好方向安全"不如直接拒绝清楚——调用方传重复索引本身就是构造错误(不可能有意义地对
+  // 同一个 input 签两次), 显式拒绝能在问题源头就报错, 不必等到 ceiling 判定这一步才间接暴露。
+  {
+    const seen = new Set();
+    for (const idx of signInputIndices) {
+      if (seen.has(idx)) return { ok: false, reason: `signInputIndices contains duplicate index ${idx}` };
+      seen.add(idx);
+    }
+  }
   for (const idx of signInputIndices) {
     if (!Number.isInteger(idx) || idx < 0 || idx >= inputs.length) {
       return { ok: false, reason: `signInputIndices contains out-of-range index ${idx} (inputs.length=${inputs.length})` };
@@ -137,6 +148,16 @@ export function validateNetLoss({ inputs, outputs, signInputIndices, relayScript
   if (!relayScriptPubKey) return { ok: false, reason: 'relayScriptPubKey required' };
   if (typeof requiredFeeSompi !== 'bigint' || requiredFeeSompi < 0n) return { ok: false, reason: 'requiredFeeSompi must be a non-negative bigint (computed via computeRequiredFeeSompi, post-signing)' };
 
+  // 🔴 NWT 1376(非阻断建议, 同 validateSignedInputCeiling 一致): 显式拒绝重复索引, 不依赖"重复只会
+  // 让 net_loss 算大更易拒"这条方向安全的隐性性质——构造错误在源头就报错。
+  {
+    const seen = new Set();
+    for (const idx of signInputIndices) {
+      if (seen.has(idx)) return { ok: false, reason: `signInputIndices contains duplicate index ${idx}` };
+      seen.add(idx);
+    }
+  }
+
   let signedInputTotalSompi = 0n;
   for (const idx of signInputIndices) {
     if (!Number.isInteger(idx) || idx < 0 || idx >= inputs.length) {
@@ -213,18 +234,52 @@ export function assertFinalTxid(tx, expectedTxid) {
 }
 
 /**
- * 只签 signInputIndices 列出的索引——kaspa-wasm 的 sign 系 API 通常是"对整笔交易签、按脚本类型自动
- * 匹配能签的输入"，这里显式只对声明的索引调用签名(而不是让 wasm 自己扫全部输入去猜), 防止调用方
- * 声明的 signInputIndices 与 wasm 实际签的集合不一致而产生"以为只签了 A，其实 wasm 顺手也签了 B"
- * 这种静默扩大授权范围的情况。真正的 wasm 签名 API 调用方式由接线那笔(等 Owner 选 B′/C)时对齐,
- * 这里先占位声明契约形状, 不假装已经跑通真实签名(NO-TX-NO-STATE 同一条纪律的落码期延伸: 没有真的
- * 调通 wasm 签名 API 之前, 不写看起来能跑但实际没跑过的实现)。
+ * 只签 signInputIndices 列出的索引，其余输入原样保留——防止调用方哄骗 relay 签一个它没被要求签的、
+ * 意料之外的输入(§9.2 约束①)。
+ *
+ * 🔴 假设声明(NWT 1376 非阻断建议): 本函数不判断"某个索引是否真的该由 relay 签"——这是调用方的
+ * 职责。sign_input_indices 由可信调用方(console 后端, 经 PROTO_RELAY_ID 执行权限门)构造, 本函数
+ * 信任这个输入。若调用方签错了索引(比如误把一个 covenant 输入也塞进 sign_input_indices), 后果是
+ * 那个输入的 witness 被 relay 的签名覆盖掉, 不再满足它自己的 covenant 脚本要求 ⇒ 广播后共识层拒绝
+ * ——失败方向是安全的(交易上不了链, 不是资金泄露), 但不是本函数负责拦的那一层。
+ *
+ * ✅ 真实实现(2026-09-14, Owner §6=B′ 拍板后接线笔②, 见
+ * docs/provenance/2026-09-14-j2-sign-only-declared-inputs-verification/): 用离线一次性 throwaway
+ * 密钥 + 真实 kaspa-wasm 核验过——顶层导出的 `createInputSignature(tx, idx, privateKey, sighashType)`
+ * (kaspa.d.ts:279，专为普通 `Transaction` 对象设计，区别于 `PendingTransaction` 专用的
+ * `signInput`/`fillInput`——那是 Generator 高层 API 专属，我们这里拿到的是从 tx_json 反序列化出的
+ * 普通 Transaction，不是 PendingTransaction，两者的 sign 系方法不能混用) + 原地赋值
+ * `tx.inputs[idx].signatureScript = sigHex` 就是正确路径，**不需要重新构造整个 Transaction 对象**。
+ * 已验证: 原地赋值在真实 wasm 下完全生效(序列化/反序列化往返一致)，covenant 侧其他输入的 witness
+ * 全程不受影响，依次对多个索引签名互不干扰(与 wasm 自带的 `signTransaction(tx,[priv],verify_sig=true)`
+ * 官方"自动签名+验证"路径同构，产出的 txid 完全一致)。
+ *
+ * 先校验全部 signInputIndices 合法(fail-fast)，再统一签名——不允许"签到一半发现某个索引越界"这种
+ * 半成品状态(校验失败时 tx 一个字节都没被动过)。
  * @param {object} o
- * @param {import('kaspa-wasm').Transaction} o.tx
+ * @param {import('kaspa-wasm').Transaction} o.tx  未 finalize 的 Transaction(签名后调用方负责 finalize)
  * @param {number[]} o.signInputIndices
- * @param {*} o.privateKey
- * @returns {Promise<void>}
+ * @param {*} o.privateKey  kaspa-wasm PrivateKey 对象(relay 自己的私钥, 通过 getWallet().getPrivateKey() 取得——本函数不碰私钥的存取, 只用调用方已经拿到的对象)
+ * @param {*} o.kaspa  kaspa-wasm 模块(注入，供测试用假实现替换，同 computeRequiredFeeSompi 的既有模式)
+ * @returns {void}  同步函数(内部全是同步操作, 不像 computeRequiredFeeSompi 那样需要等 RPC/wasm 异步调用；
+ *   原设计文档签名写的 Promise<void> 是占位期的预留, 真实实现后改回同步, 与文件里其余纯函数风格一致)
  */
-export async function signOnlyDeclaredInputs({ tx, signInputIndices, privateKey }) {
-  throw new Error('signOnlyDeclaredInputs: 未实现 —— 等 Owner 在 (B′)/(C) 定案、接线那笔落码时对齐真实 kaspa-wasm 签名 API 调用方式(见 covenant-broadcast.mjs 头注)。validateSignedInputCeiling/validateNetLoss 的安全校验逻辑已完成且可独立于本函数测试。');
+export function signOnlyDeclaredInputs({ tx, signInputIndices, privateKey, kaspa }) {
+  if (!Array.isArray(signInputIndices) || !signInputIndices.length) {
+    throw new Error('signOnlyDeclaredInputs: signInputIndices must be a non-empty array');
+  }
+  if (typeof kaspa?.createInputSignature !== 'function') {
+    throw new Error('signOnlyDeclaredInputs: kaspa.createInputSignature not available — fail-loud, no fallback');
+  }
+  const inputsLen = tx?.inputs?.length ?? 0;
+  for (const idx of signInputIndices) {
+    if (!Number.isInteger(idx) || idx < 0 || idx >= inputsLen) {
+      throw new Error(`signOnlyDeclaredInputs: signInputIndices contains out-of-range index ${idx} (inputs.length=${inputsLen}) — refusing before signing any input`);
+    }
+  }
+  const sighashAll = kaspa.SighashType?.All;
+  for (const idx of signInputIndices) {
+    const sigHex = kaspa.createInputSignature(tx, idx, privateKey, sighashAll);
+    tx.inputs[idx].signatureScript = sigHex;
+  }
 }

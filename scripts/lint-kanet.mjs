@@ -971,6 +971,59 @@ function checkR_SCA_ALIAS_ORIGIN(filepath, content) {
   }
 }
 
+// ── R-PROTO-RELAY-ID-CONST [ERROR] (2026-09-14, J2 接线笔④, Bettor 1365/1375): proto 模块
+// (kasia-console/src/**/*proto*.{js,mjs}, 测试文件豁免)内 sendCommandAsync 调用的第一个实参
+// (relay_id 位置)必须字面上就是标识符 `PROTO_RELAY_ID`——不能是字符串字面量、别的变量名、或
+// 请求体字段(如 cmd.relay_id / request.body.relay_id)。原型 v0 资金路径只信这一个硬编码来源
+// (kasia-console/src/lib/proto-relay-guard.mjs 导出的常量, 启动时读 process.env.PROTO_RELAY_ID
+// 并做健康断言)；relay.mjs 侧虽然也有执行权限门兜底(§9.2③, 非 PROTO_RELAY_ID 的 relay 直接拒),
+// 但 console 侧调用点本身不该存在"传别的值"这条路径——纵深防御, 不依赖单一层。
+function checkR_PROTO_RELAY_ID_CONST(filepath, content) {
+  const rel = path.relative(ROOT, filepath).replace(/\\/g, '/');
+  if (!rel.startsWith('kasia-console/src/')) return;
+  // 🔴 按文件名(basename)前缀匹配, 不是路径任意位置子串——'proto' 子串会误中
+  // trade-protocol-filter.js('protocol' 包含 'proto')这类无关文件(2026-09-14 J2 实测踩到,
+  // 全仓 lint 跑出 5 处假阳性才发现)。proto v0 模块的真实命名模式是文件名本身以 proto 开头
+  // 或恰好是 proto.js/proto.mjs(如 proto.js / proto-bet-intent.mjs / proto-relay-guard.mjs)。
+  const base = path.basename(rel);
+  if (!/^proto([-.]|$)/i.test(base)) return;
+  if (/\.test\.[cm]?js$/.test(rel)) return; // 测试文件里的假 sendCommandAsync mock 不受此限
+  const lines = content.split('\n');
+  const callRe = /(?:^|[^.\w$])sendCommandAsync\s*\(/;
+  for (let i = 0; i < lines.length; i++) {
+    const code = stripLineStrings(lines[i].replace(/\/\/.*$/, ''));
+    if (/^\s*(?:\*|\/\*|import\b|export\s+\{)/.test(lines[i])) continue;
+    const cm = callRe.exec(code);
+    if (!cm) continue;
+    const openCol = code.indexOf('(', cm.index + cm[0].length - 1);
+    const r = extractCallArgSpanShared(lines, i, openCol >= 0 ? openCol : 0);
+    if (!r) {
+      violate('R-PROTO-RELAY-ID-CONST', `proto 模块 sendCommandAsync 调用实参 40 行内未闭合(可疑, 无法校验 relay_id 实参)。`, filepath, i + 1);
+      continue;
+    }
+    const firstArg = splitFirstTopLevelArg(r.span).trim();
+    if (firstArg !== 'PROTO_RELAY_ID') {
+      violate('R-PROTO-RELAY-ID-CONST', `proto 模块 sendCommandAsync 第一个实参必须是 PROTO_RELAY_ID 常量标识符, 实际是 '${firstArg.slice(0, 60)}' — 原型 v0 资金路径只信这一个硬编码来源(kasia-console/src/lib/proto-relay-guard.mjs), 不能传别的变量/字面量/请求体字段。`, filepath, i + 1);
+    }
+  }
+}
+
+// 从 extractCallArgSpanShared() 产出的完整调用实参 span 里切出【第一个顶层实参】的原始文本
+// (深度计数跳过嵌套 ()/[]/{} 和字符串内的逗号, 遇到第一个深度为 0 的逗号或 span 末尾即停)。
+function splitFirstTopLevelArg(span) {
+  let depth = 0, inStr = null, out = '';
+  for (let i = 0; i < span.length; i++) {
+    const ch = span[i], prev = i > 0 ? span[i - 1] : '';
+    if (inStr) { out += ch; if (ch === inStr && prev !== '\\') inStr = null; continue; }
+    if (ch === '"' || ch === "'" || ch === '`') { inStr = ch; out += ch; continue; }
+    if (ch === '(' || ch === '[' || ch === '{') { depth++; out += ch; continue; }
+    if (ch === ')' || ch === ']' || ch === '}') { depth--; out += ch; continue; }
+    if (ch === ',' && depth === 0) return out;
+    out += ch;
+  }
+  return out;
+}
+
 // R-NWT-2026-04-28 Bug-Z22 (Owner production 真撞): "真**真**真" stutter pattern leaked from
 // dev-coord agent broadcast style INTO broker user-facing strings. Real users see broker DM
 // replies containing "真**真**真**真 cancel" (Owner screenshot 04:33). Catastrophic UX —
@@ -1582,6 +1635,7 @@ for (const fp of targets) {
   checkR_SENDCMD_ORIGIN_REQUIRED(fp, content); // R-SENDCMD-ORIGIN-REQUIRED [WARN→ERROR] (第三断路族根治 2026-07-23): 直调缺 origin 检测, 57 处补标驱动器
   checkR_NET_PREFIX(fp, content);              // R-NET-PREFIX-INFER/EITHER/DEFAULT-DRIFT [WARN·b1 → INFER/EITHER ERROR·b2] (2026-09-13 J2 设计 v0.2 §5): 网络单一源, 前缀只对照不推断
   checkR_BYTE_CENSUS_PREDICATE(fp, content);   // R-BYTE-CENSUS-PREDICATE [WARN] (COORD-LEDGER (188) 2026-08-12): redeem/covenant 字节谓词禁凭记忆猜写, 落码前先跑 census
+  checkR_PROTO_RELAY_ID_CONST(fp, content);    // R-PROTO-RELAY-ID-CONST [ERROR] (2026-09-14, J2 接线笔④): proto 模块 sendCommandAsync 的 relay_id 实参必须是 PROTO_RELAY_ID 常量
 }
 checkR10();
 checkR_NULLIFIER_I64();

@@ -263,7 +263,18 @@ await registerExchangeRoutes(fastify);
 await registerAuditPredictionRoutes(fastify);
 await registerBettorRoutes(fastify);
 await registerPoolRoutes(fastify);
-await registerProtoRoutes(fastify);
+// 🔴 接线笔③启动断言(设计 §9.2③/§6(B′), Bettor 1354/1365): PROTO_RELAY_ID 必须配置且健康
+// (relay_nodes 表里存在、name 前缀 'proto-'、链上余额 < PROTO_MAX_BALANCE_KAS)才注册这批端点——
+// 不满足 ⇒ 只让 proto 路由整体不可用(404), 不让整个 console 启动失败(影响面最小化: 一个还在打磨
+// 的原型模块的健康检查失败, 不该拖垮生产其它功能)。LOUD 日志记录原因, 供 operator 排查。
+try {
+  const { assertProtoRelayHealthy } = await import('./lib/proto-relay-guard.mjs');
+  const health = await assertProtoRelayHealthy();
+  console.log(`[proto] PROTO_RELAY_ID healthy: name=${health.name} balance=${health.balanceKas}KAS — registering proto routes`);
+  await registerProtoRoutes(fastify);
+} catch (err) {
+  console.error(`🔴 [proto] PROTO_RELAY_ID health check failed, proto routes NOT registered (fail-closed): ${err.message}`);
+}
 await registerFeedbackRoutes(fastify);
 await registerAdminDedupRoutes(fastify);
 await registerBshardBondReclaimRoutes(fastify);

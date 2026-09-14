@@ -107,6 +107,10 @@ export const COMMAND_TYPES = Object.freeze({
   // ── P2 pxvml escape 退款 (2026-07-09, J2, Bettor GREEN-with-notes + NWT GREEN-with-conditions): CloseZkV2 escape 双 entry ──
   CLOSEZK_V2_ESCAPE_TRIGGER: 'closezk_v2_escape_trigger',      // CloseZkV2 escape_trigger OP_1, closed 1→3 write-once 不动钱, tx.time>=attestedAtMs+GRACE(链上裁决)
   CLOSEZK_V2_ESCAPE_CLAIM: 'closezk_v2_escape_claim',          // CloseZkV2 escape_claim OP_2, closed==3 前置, refundRootBaked merkle+17-word nullifier+P2PK(bettorPk) 原额退款
+  // ── 原型 v0 covenant_broadcast (2026-09-14, J2 接线笔①, 设计 §9, Owner §6=B′ 拍板): relay 侧
+  // 广播"调用方已构造好的任意签名交易", 只签 sign_input_indices 声明的索引, 执行权限限定于
+  // PROTO_RELAY_ID(covenant-broadcast-relay.mjs)。三层注册必齐(同上 KI-49 防坑纪律)。
+  COVENANT_BROADCAST: 'covenant_broadcast',
 });
 
 export const COMMAND_TYPE_SET = new Set(Object.values(COMMAND_TYPES));
@@ -180,6 +184,10 @@ export const COMMAND_PAYLOAD_SCHEMA = Object.freeze({
   [COMMAND_TYPES.CLOSEZK_V2_CLAIM]: ['witness', 'inputs', 'outputs'],
   [COMMAND_TYPES.CLOSEZK_V2_ESCAPE_TRIGGER]: ['witness', 'inputs'],
   [COMMAND_TYPES.CLOSEZK_V2_ESCAPE_CLAIM]: ['witness', 'inputs'],
+  // 只有 intent_key 是两条路径(fresh/replay)共通的最小契约(同 TRANSFER 模式); tx_json/
+  // sign_input_indices/expected_txid(fresh) 与 replay_tx_json/prepared_txid(replay) 互斥可选,
+  // 由 covenant-broadcast-relay.mjs 运行时判断到底走哪条, 不在这里强制其中一组必填。
+  [COMMAND_TYPES.COVENANT_BROADCAST]: ['intent_key'],
 });
 
 // R38 (Z23 sediment): typeof spec per field. Bug-Z23 真根因 — broker enqueue amount: number,
@@ -197,6 +205,11 @@ export const COMMAND_FIELD_TYPES = Object.freeze({
   // intent_key / replay_tx_json / prepared_txid 可选 ((c) F2 submit-intent, J2 2026-09-13): 带 intent_key = 两阶段 prepared/submitted 回执 +
   //   进程内幂等; 带 replay_tx_json+prepared_txid = 同字节重播(relay 断言 txid 相等, 不重建)。三者缺省 = 原 transfer 行为不变。
   [COMMAND_TYPES.TRANSFER]: { target: 'string', amount: ['string', 'number'], intent_key: 'string', replay_tx_json: 'string', prepared_txid: 'string' },
+  // 原型 v0 covenant_broadcast(2026-09-14, 设计 §9.1): fresh path 用 tx_json(已构造未签/半签交易
+  // JSON, wasm safeJSON 格式——string 或 caller 未先手动序列化的 object 都行, relay 侧统一处理)/
+  // sign_input_indices(数组)/expected_txid; replay path 复用 TRANSFER 已验证的 replay_tx_json/
+  // prepared_txid 同字节重播契约。intent_key 两条路径通用。
+  [COMMAND_TYPES.COVENANT_BROADCAST]: { intent_key: 'string', tx_json: ['string', 'object'], sign_input_indices: 'array', expected_txid: 'string', replay_tx_json: 'string', prepared_txid: 'string' },
   // KANet-UI: TG 托管转账 — privkeyHex/target/fromAddress string, amount string|number, network optional string。
   // fromAddress 转必填 (M0c-1 §3.3a v0.3): 唯一现网调用方 tg-wallet.js:130 已传该字段, 转必填零现网影响。
   [COMMAND_TYPES.CUSTODIAL_TRANSFER]: { privkeyHex: 'string', target: 'string', amount: ['string', 'number'], fromAddress: 'string' },

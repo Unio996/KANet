@@ -5,7 +5,7 @@
 import assert from 'node:assert';
 import {
   validateSignedInputCeiling, validateNetLoss, computeRequiredFeeSompi, assertFinalTxid,
-  canonicalScriptHex, ABS_FEE_CAP_SOMPI, SIGNED_INPUT_CEILING_SOMPI, SOMPI_PER_MASS,
+  signOnlyDeclaredInputs, canonicalScriptHex, ABS_FEE_CAP_SOMPI, SIGNED_INPUT_CEILING_SOMPI, SOMPI_PER_MASS,
 } from './covenant-broadcast.mjs';
 
 let pass = 0, fail = 0;
@@ -43,6 +43,11 @@ t('SIC-6 未声明签名索引的输入不计入总额(只信声明,不猜)', ()
   const r = validateSignedInputCeiling({ inputs: [{ amountSompi: 1n }, { amountSompi: SIGNED_INPUT_CEILING_SOMPI + 999n }], signInputIndices: [0] });
   assert.strictEqual(r.ok, true);
   assert.strictEqual(r.signedInputTotalSompi, 1n);
+});
+t('SIC-7 🔴 NWT 1376 非阻断建议落地: signInputIndices 含重复索引 ⇒ 显式拒绝(不依赖"重复只会让总额变大更易拒"这条方向安全的隐性性质)', () => {
+  const r = validateSignedInputCeiling({ inputs: [{ amountSompi: 1n }], signInputIndices: [0, 0] });
+  assert.strictEqual(r.ok, false);
+  assert.ok(/duplicate index 0/.test(r.reason), `reason 应指明重复索引(实际: ${r.reason})`);
 });
 
 // ── validateNetLoss ────────────────────────────────────────────────────────
@@ -169,6 +174,15 @@ t('NL-11 对照: relayScriptPubKey 正常非空时, outputs 里缺失/畸形的 
   assert.strictEqual(r.ok, false, '畸形输出不被误判为找零, 全额算进 net_loss, 超出手续费上限应被拒');
   assert.strictEqual(r.netLossSompi, inputAmt, 'net_loss 应是全部输入(没有任何输出被正确识别为"付回自己"), 不是 0');
 });
+t('NL-12 🔴 NWT 1376 非阻断建议落地(与 SIC-7 同款): signInputIndices 含重复索引 ⇒ 显式拒绝', () => {
+  const r = validateNetLoss({
+    inputs: [{ amountSompi: 1_000_000n, scriptPubKeyRaw: RELAY_SPK }],
+    outputs: [{ valueSompi: 999_000n, scriptPubKeyRaw: RELAY_SPK }],
+    signInputIndices: [0, 0], relayScriptPubKey: RELAY_SPK, requiredFeeSompi: 1_000n,
+  });
+  assert.strictEqual(r.ok, false);
+  assert.ok(/duplicate index 0/.test(r.reason), `reason 应指明重复索引(实际: ${r.reason})`);
+});
 
 // ── canonicalScriptHex(2026-09-14 补: NWT 1355 假设订正后新加, Bettor 裁定"现在改不留给接线笔") ──
 // 参照 docs/provenance/2026-09-14-j2-covenant-broadcast-scriptpubkey-verification/run.log 里真实
@@ -226,6 +240,67 @@ t('CRF-3 calculateTransactionMass 抛错(如 panic) ⇒ throw, 不吞掉不 fall
 });
 t('CRF-4 缺 networkId ⇒ throw', () => {
   assert.throws(() => computeRequiredFeeSompi({ kaspa: { calculateTransactionMass: () => 1n }, signedTx: {} }), /networkId required/);
+});
+
+// ── signOnlyDeclaredInputs(2026-09-14 真实实现, 接线笔②, Bettor 1365) ────────
+// 假 kaspa mock(同 computeRequiredFeeSompi 的 CRF-1..4 既有模式) —— 只测"只签声明索引/fail-fast/
+// fail-loud"这些参数层逻辑；真实 wasm 签名机制本身的核验见
+// docs/provenance/2026-09-14-j2-sign-only-declared-inputs-verification/(离线 throwaway 密钥 + 真实
+// kaspa-wasm 核验过 createInputSignature + 原地赋值这条路径)。
+function makeFakeTx(n) {
+  return { inputs: Array.from({ length: n }, (_, i) => ({ signatureScript: `unsigned-${i}` })) };
+}
+function makeFakeKaspa({ throwOn = null } = {}) {
+  const calls = [];
+  return {
+    calls,
+    SighashType: { All: 'ALL' },
+    createInputSignature: (tx, idx, privKey, sighashType) => {
+      calls.push({ idx, privKey, sighashType });
+      if (throwOn === idx) throw new Error(`simulated sign failure at idx ${idx}`);
+      return `sig-for-${idx}`;
+    },
+  };
+}
+t('SOD-1 只签声明的索引, 其余 input 的 signatureScript 原样保留(不被误动)', () => {
+  const tx = makeFakeTx(3);
+  const fakeKaspa = makeFakeKaspa();
+  signOnlyDeclaredInputs({ tx, signInputIndices: [1], privateKey: 'PK', kaspa: fakeKaspa });
+  assert.strictEqual(tx.inputs[0].signatureScript, 'unsigned-0', 'idx0 未声明, 必须原样不变');
+  assert.strictEqual(tx.inputs[1].signatureScript, 'sig-for-1', 'idx1 声明了, 必须被签');
+  assert.strictEqual(tx.inputs[2].signatureScript, 'unsigned-2', 'idx2 未声明, 必须原样不变');
+});
+t('SOD-2 多个索引依次都被签, 调用参数(tx/idx/privateKey/sighashType)正确传递', () => {
+  const tx = makeFakeTx(3);
+  const fakeKaspa = makeFakeKaspa();
+  signOnlyDeclaredInputs({ tx, signInputIndices: [0, 2], privateKey: 'MY_PK', kaspa: fakeKaspa });
+  assert.strictEqual(tx.inputs[0].signatureScript, 'sig-for-0');
+  assert.strictEqual(tx.inputs[1].signatureScript, 'unsigned-1', '未声明的 idx1 保持不变');
+  assert.strictEqual(tx.inputs[2].signatureScript, 'sig-for-2');
+  assert.strictEqual(fakeKaspa.calls.length, 2);
+  assert.deepStrictEqual(fakeKaspa.calls.map(c => c.idx), [0, 2]);
+  assert.ok(fakeKaspa.calls.every(c => c.privKey === 'MY_PK' && c.sighashType === 'ALL'), '每次调用都传了正确的 privateKey/sighashType');
+});
+t('SOD-3 signInputIndices 为空数组 ⇒ throw(不是静默不签)', () => {
+  const tx = makeFakeTx(2);
+  assert.throws(() => signOnlyDeclaredInputs({ tx, signInputIndices: [], privateKey: 'PK', kaspa: makeFakeKaspa() }), /non-empty array/);
+});
+t('SOD-4 signInputIndices 含越界索引 ⇒ fail-fast 全部拒签, 不留"签到一半"的半成品状态', () => {
+  const tx = makeFakeTx(2);
+  const fakeKaspa = makeFakeKaspa();
+  assert.throws(() => signOnlyDeclaredInputs({ tx, signInputIndices: [0, 5], privateKey: 'PK', kaspa: fakeKaspa }), /out-of-range index 5/);
+  assert.strictEqual(fakeKaspa.calls.length, 0, '越界校验必须在任何签名调用之前完成 —— 不能先签了 idx0 才发现 idx5 越界');
+  assert.strictEqual(tx.inputs[0].signatureScript, 'unsigned-0', 'fail-fast: 校验失败时 tx 一个字节都没被动过');
+});
+t('SOD-5 kaspa.createInputSignature 不存在 ⇒ throw(fail-loud, 无 fallback, 同 computeRequiredFeeSompi CRF-2 既有纪律)', () => {
+  const tx = makeFakeTx(1);
+  assert.throws(() => signOnlyDeclaredInputs({ tx, signInputIndices: [0], privateKey: 'PK', kaspa: {} }), /createInputSignature not available/);
+});
+t('SOD-6 kaspa.createInputSignature 对某个索引抛错(如 wasm panic) ⇒ 直接抛出, 不吞掉不 fallback', () => {
+  const tx = makeFakeTx(2);
+  const fakeKaspa = makeFakeKaspa({ throwOn: 1 });
+  assert.throws(() => signOnlyDeclaredInputs({ tx, signInputIndices: [0, 1], privateKey: 'PK', kaspa: fakeKaspa }), /simulated sign failure at idx 1/);
+  assert.strictEqual(tx.inputs[0].signatureScript, 'sig-for-0', 'idx0 在 idx1 抛错前已经真的被签了(不回滚, 调用方需知道这一点——tx 对象是可变的, 抛错后仍可能是半签状态, 与 fail-fast 的"越界检查"阶段不同)');
 });
 
 // ── assertFinalTxid ────────────────────────────────────────────────────────

@@ -365,3 +365,89 @@ rep = await sendCmd(relayId, {
 ——由调用方注入的 `buildAndBroadcast` 回调自己发送首次 `covenant_broadcast`（带 `tx_json`/
 `sign_input_indices`/`expected_txid` 等构造专属字段），并在真正广播前先调 `recordBetIntentPhase('prepared', ...)`
 落表，这一点与 `submit-intent.mjs` 的既有约定完全一致，不是新规则。
+
+> 📌 **状态注记（2026-09-14 · J2 接线笔①落码时发现 · Bettor 1366 确认订正）**：上面这句"调
+> `recordBetIntentPhase`"**漏了一个关键前提**——`recordBetIntentPhase` 是 **console 进程内部的本地
+> SQL 函数**，不是 HTTP 端点；而"真正广播前落表"这个时序要求的是 **relay 进程**在调用
+> `submitTransaction` 之前主动通知 console（同 `submit-intent-relay.mjs` 对 TRANSFER 的既有做法：
+> relay 进程内部 HTTP POST `/ingest/submit-intent`，不是 console 等 IPC 回执后自己调本地函数——
+> 这个时序差别正是 NO-TX-NO-STATE 要防的那个窗口：relay 签好字节、广播出去后、还没来得及把 IPC
+> 回执传回 console 就崩溃）。`proto_bet_intents` 表是独立表（`proto-bet-intent.mjs` 文件头原话
+> "不复用 submit_intents 表"），relay 进程没有任何现成的 HTTP 路径能触达它。**⇒ 见下方 §9.5，
+> 新增专属端点 `POST /ingest/proto-bet-intent-phase` 补上这条路径**——不是新规则，是把这句本该
+> 成立、但漏了"谁在什么时序调用"这个前提的表述落到实处。
+
+### §9.5 relay → console 的 `proto_bet_intents` 两阶段回执端点：`POST /ingest/proto-bet-intent-phase`
+
+（ledger 1366，Bettor 四条硬条件·NWT 一并审）
+
+#### 端点设计
+
+- 路径挂在 `kasia-console/src/api/ingest.js` 现有 `/ingest/*` 前缀下，自动获得该文件顶层
+  `fastify.addHook('preHandler', ...)` 里统一的 `verifyIngestRequest`（PSK 鉴权，与 `/ingest/submit-intent`
+  完全同款，不另写一遍）。
+- **body**：`{ relay_id, intentKey, phase, txid, txJson? }`。
+- **① relay 身份限定（硬条件①）**：`relay_id` 必须等于 `process.env.PROTO_RELAY_ID`——不等 ⇒
+  `403` + LOUD 日志（`console.error` 级别，带 `relay_id`/`intentKey` 供审计）。`PROTO_RELAY_ID` 未设置
+  时视为"没有任何 relay 被授权"（fail-closed 方向：未配置 ⇒ 全部拒绝，不是全部放行）。生产 relay
+  （非 `PROTO_RELAY_ID` 那一个）即使拿到了 ingest 密钥，也永远打不进 `proto_bet_intents` 表。
+- **② 幂等 + 单调（硬条件②）**：直接调用既有 `recordBetIntentPhase({intentKey, phase, txid, txJson})`
+  ——不需要新写幂等逻辑，`markBetIntent` 内部的 RANK 表（`pending=0 < prepared=1 < submitted=2 <
+  landed=3 < ambiguous=9`）已经保证"重复调用同一 phase"和"倒退到更早 phase"都是 no-op（`patch.status`
+  只在满足单调递增条件时才会被写入，`recordBetIntentPhase` 本身对已经处于目标状态的 intent 重复调用
+  不产生错误，返回同样的 `{ok:true, intent}`）——relay 端网络重试导致同一个 phase 打两次是安全的。
+- 未知 `intentKey`（console 还没 `ensureBetIntent` 建过这一行）⇒ `409`，同 `/ingest/submit-intent`
+  现有的"relay 只对 console 先 INSERT 的意图回执"契约一致，不新造语义。
+- 成功 ⇒ `201 {ok:true, status: <intent.status>}`。
+
+#### relay 侧调用契约（硬条件③：fail-closed，且明确记录与 TRANSFER 现状的差异）
+
+**先核实 TRANSFER 现状**（`kasia-relay/src/lib/submit-intent-relay.mjs` 当前代码，未改）：
+
+```js
+_done.set(key, { txId: sent.txId, fee: sent.fee });
+try { await ingestPhase({ intentKey: key, phase: 'submitted', txid: sent.txId }); }
+catch (e) { log(`⚠ INTENT ${key} submitted receipt not recorded: ${e.message} (IPC reply still carries txId)`); }
+return { ok: true, txId: sent.txId, fee: sent.fee, intent_key: key };
+```
+
+TRANSFER 现状：**submitted 阶段 ingest 失败时仍返回 `ok:true`**（只 log 一条 warning，没有专门的错误码
+区分"广播成功但落表失败"这种边缘情况）——**本次不改这段代码**（按 Bettor 交代"若不是，照它现状写清
+差异，别默默改 TRANSFER"）。
+
+`covenant_broadcast` 采用更明确的契约（比 TRANSFER 严格，原因：`proto_bet_intents` 的状态机比
+`submit_intents` 多一层 `depends_on` 链式依赖 + `ambiguous` 终态，调用方 `resolvePrepared`/
+`driveBetIntent` 需要能区分"落表确实失败了、要不要额外兜底"这种情况，不能被一个笼统的 `ok:true`
+盖过去）：
+
+```
+prepared 阶段 ingest 失败(非 2xx / 超时)
+  ⇒ 不广播(fail-closed) ⇒ 返回 {ok:false, code:'prepared_ingest_failed', error:...}
+
+submitted 阶段 ingest 失败(非 2xx / 超时)
+  ⇒ 已广播的事实不可撤(不能假装没发生) ⇒ 返回 {ok:true, txId, code:'ingest_after_broadcast_failed', error:...}
+     (ok 仍是 true——广播本身确实成功了，调用方不应该因为这个 code 就去做危险的重试/双花；
+      但 code 让 console 侧 buildAndBroadcast 有机会立即在本地补一次 recordBetIntentPhase('submitted', ...)
+      兜底——不需要等 resumeStaleBetIntents 下一轮扫描, 因为 console 进程本身还活着、IPC 回执也送达了)
+```
+
+#### 崩溃窗口的最终兜底：`resumeStaleBetIntents`
+
+即使 relay 在"广播成功、submitted ingest 失败"之后紧接着整个进程崩溃（IPC 回执也没能送回
+console，上面②的本地补救没有机会触发），`proto_bet_intents` 该行仍然停在 `prepared`（因为 prepared
+阶段已经成功落表——这是本设计存在的全部意义）。console 侧既有的 `resumeStaleBetIntents` +
+`resolvePrepared`（`proto-bet-intent.mjs`，NWT 1352 PASS 的既有机制）会在下一轮扫描时发现这行陈旧
+的 `prepared` 记录，通过 `get_mempool_entry`/`check_utxo_landed` 查出这笔交易其实已经落地，判定为
+`submitted`——不需要为这个场景新写代码，这正是这套两阶段机制原本就要覆盖的崩溃窗口。
+
+#### 测试（硬条件④）
+
+四条向量：
+1. prepared 阶段 ingest 失败 ⇒ **零广播**（mock rpc 的 `submitTransaction` 断言未被调用）。
+2. `relay_id !== PROTO_RELAY_ID` ⇒ `403`（console 侧 ingest 端点测试）。
+3. 重复调用同一 phase（如两次 `phase:'prepared'` 打同一个 `intentKey`/`txid`）⇒ 幂等，返回同样的
+   `status`，不报错、不产生副作用。
+4. 模拟"relay 崩在广播后、ingest 前"：直接用 `recordBetIntentPhase` 把某个 intent 落到 `prepared`
+   （模拟 relay 已经完成 prepared ingest），不调用 submitted ingest（模拟 relay 崩溃），再跑
+   `resumeStaleBetIntents`（mock `sendCmd` 让 `get_mempool_entry`/`check_utxo_landed` 返回"已经在链上"）
+   ，断言最终该 intent 行状态变成 `submitted`——证明这条崩溃路径确实被现有机制兜住，不是纸面设计。

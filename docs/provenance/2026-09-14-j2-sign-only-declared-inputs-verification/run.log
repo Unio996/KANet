@@ -1,0 +1,43 @@
+=== ① createInputSignature 对未签名 tx 调用 ===
+sigHex 长度(hex chars): 132 (p2sh.mjs 注释预期 132 = 66 bytes push-encoded)
+sigHex 前 10 字符: 419518f2db
+
+=== ② 原地赋值 tx.inputs[0].signatureScript = sigHex 是否生效 ===
+赋值后读回 tx.inputs[0].signatureScript: 419518f2db4a90234c54dee9c5e939925569cd57e30310ac7e3653e1b86b198827989f8c8aa74c87662dd1e2275ea41d67aadffa005befc282d1bfe7a14c62893201
+是否等于 sigHex: true
+
+=== ③ 重新构造新 Transaction, 只替换 input[0] 的 signatureScript, input[1] 保持原样 ===
+重建后 input[0].signatureScript === sig0: true
+重建后 input[1].signatureScript 保持不变(deadbeef): true
+
+=== ④ finalize() 后 txid 确定性/可重复 ===
+txid: 5404f9fe69b5fcf11bc2996478135de3aa48a277c38c195f3d36fe02f6050727
+txid2 (重新构造同样字段): 5404f9fe69b5fcf11bc2996478135de3aa48a277c38c195f3d36fe02f6050727
+两次 txid 相等(确定性): true
+
+=== ⑤ 签名对签名前的 tx 快照敏感——如果签名后再改别的字段, sig 是否还对得上(sighash 覆盖范围探测) ===
+output 金额换了之后, input0 的签名是否不同(证明 sighash 覆盖 outputs, 不能签完再改金额): true
+
+=== ⑥ 关键复核: 原地赋值路径 finalize()+序列化后, 字节里是否真的带着新签名(不是JS属性表面假象) ===
+finalize 后 txid: 5404f9fe69b5fcf11bc2996478135de3aa48a277c38c195f3d36fe02f6050727
+序列化 JSON 里 inputs[0].signatureScript 是否等于我们赋的 sig: true (实际: 41c6b51213d2e8831114 )
+反序列化+finalize 后 txid 与原 txid 相等: true
+反序列化后 inputs[0].signatureScript 仍等于 sig: true
+反序列化后 inputs[1].signatureScript 仍是 deadbeef(covenant witness 未被误动): true
+
+=== ⑦ 多个索引依次签名互不干扰(即使本次设计通常只签一个, 代码要通用遍历数组) ===
+依次签名: sig0 与基线相同(顺序不影响 idx0): false
+依次签名: sig1 与基线相同(idx0 已填签名不影响 idx1 的 sighash): false
+finalize 成功, txid: 2424c07aea030978b17c32520b47c82095a85aed209819d6cbc7f1b7cb5ee2e9
+
+=== ⑧ 排除混淆变量: 同一个 tx 对象、同一个 idx, 连续调用两次 createInputSignature, 结果是否一致(排除"签名算法本身带随机数"这个可能性) ===
+两次对同一个未改动 tx 的同一个 idx 签名, 结果相等(排除随机数假设): false
+
+=== ⑨ 用 wasm 自带 signTransaction(tx, [priv], verify_sig=true) 做参考验证: 两个"relay自己的输入"都能被同一把私钥匹配签名, 若 verify_sig=true 跑通不抛错, 证明"依次对多个 input 签名"这条路径在协议层面自洽且通过验证 ===
+signTransaction(verify_sig=true) 未抛错, 说明 wasm 自己对"依次签两个 input"的结果做过验证且通过
+结果 tx.inputs[0].signatureScript 非空: true
+结果 tx.inputs[1].signatureScript 非空: true
+finalize txid: 2424c07aea030978b17c32520b47c82095a85aed209819d6cbc7f1b7cb5ee2e9
+
+用我自己的"顶层 createInputSignature + 原地赋值"路径复刻同一笔 tx, 对比结构(除签名字节外)是否等价:
+我自己手动路径产出的 txid: 2424c07aea030978b17c32520b47c82095a85aed209819d6cbc7f1b7cb5ee2e9 (签名内容不同属正常——schnorr 随机数, 但两条路径都应该能各自独立 finalize 成功, 不抛错)
