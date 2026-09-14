@@ -71,6 +71,17 @@ export async function registerIngestRoutes(fastify) {
       return reply.code(403).send({ ok: false, error: 'relay_id mismatch: only PROTO_RELAY_ID may call this endpoint' });
     }
     if (!intentKey || !phase || !txid) return reply.code(400).send({ ok: false, error: 'intentKey, phase, txid required' });
+    // 🔴 market_genesis 分派(账本1425硬条件①): market_genesis 不进 proto_bet_intents(FK 是
+    // bet_id, 市场创世没有 bet 行)——covenant_broadcast 命令本身与 kind 无关, 同一个端点靠
+    // intent_key 前缀区分该回执落进哪张表/哪个状态机模块, 不是新开一个端点。'genesis:' 前缀
+    // 见 marketIntentKeyFor(proto-market-intent.mjs); 其余(如 'proto-bet:') 走既有
+    // recordBetIntentPhase(proto-bet-intent.mjs)。
+    if (intentKey.startsWith('genesis:')) {
+      const { recordMarketIntentPhase } = await import('../lib/proto-market-intent.mjs');
+      const r = recordMarketIntentPhase({ intentKey, phase, txid, txJson });
+      if (!r.ok) return reply.code(409).send({ ok: false, error: r.error });
+      return reply.code(201).send({ ok: true, status: r.market.status });
+    }
     const { recordBetIntentPhase } = await import('../lib/proto-bet-intent.mjs');
     const r = recordBetIntentPhase({ intentKey, phase, txid, txJson });
     if (!r.ok) return reply.code(409).send({ ok: false, error: r.error });
