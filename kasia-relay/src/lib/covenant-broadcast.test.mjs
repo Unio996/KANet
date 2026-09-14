@@ -133,6 +133,43 @@ t('NL-7 requiredFeeSompi 非 bigint(如误传 number) ⇒ 拒(不静默转型算
   assert.ok(/must be a non-negative bigint/.test(r.reason));
 });
 
+t('NL-9 🔴 Bettor 1364 自查: relayScriptPubKey 缺失(null/undefined/空字符串) ⇒ 早退拒绝, 绝不会走到匹配逻辑算出 net_loss=0', () => {
+  const inputAmt = 10_000_000n;
+  for (const badKey of [null, undefined, '']) {
+    const r = validateNetLoss({
+      inputs: [{ amountSompi: inputAmt, scriptPubKeyRaw: RELAY_SPK }],
+      outputs: [{ valueSompi: inputAmt, scriptPubKeyRaw: RELAY_SPK }], // 全额"付回"某处, 若被误判会 net_loss=0 放行
+      signInputIndices: [0], relayScriptPubKey: badKey, requiredFeeSompi: 1_000n,
+    });
+    assert.strictEqual(r.ok, false, `relayScriptPubKey=${JSON.stringify(badKey)} 必须被拒`);
+    assert.ok(/relayScriptPubKey required/.test(r.reason), `reason 应指明缺 relayScriptPubKey(实际: ${r.reason})`);
+  }
+});
+t('NL-10 🔴 Bettor 1364 自查核心场景: relayScriptPubKey 非空但归一化后是空字符串(畸形 JSON `{"script":"",...}`) ⇒ 必须拒, 不能跟 outputs 里缺失/畸形的 scriptPubKeyRaw(同样归一成空串)错误配成一对而把 net_loss 算小', () => {
+  const inputAmt = 10_000_000n;
+  const malformedRelayKey = JSON.stringify({ script: '', version: 0 }); // 通过 `!relayScriptPubKey` 闸(非空字符串), 但 canonicalScriptHex 会归一成 ''
+  const r = validateNetLoss({
+    inputs: [{ amountSompi: inputAmt, scriptPubKeyRaw: RELAY_SPK }],
+    outputs: [
+      { valueSompi: inputAmt, scriptPubKeyRaw: undefined }, // 畸形/缺失输出——canonicalScriptHex(undefined) 也是 ''
+    ],
+    signInputIndices: [0], relayScriptPubKey: malformedRelayKey, requiredFeeSompi: 1_000n,
+  });
+  assert.strictEqual(r.ok, false, '两个空值不能互相匹配算成"付回自己"');
+  assert.ok(/canonicalized to an empty hex string/.test(r.reason), `reason 应指明空归一值被拒(实际: ${r.reason})`);
+});
+t('NL-11 对照: relayScriptPubKey 正常非空时, outputs 里缺失/畸形的 scriptPubKeyRaw 不会被误判成"付回自己"(canonicalScriptHex(undefined)="" 不等于正常非空 relayKeyNorm)', () => {
+  const inputAmt = 10_000_000n;
+  const requiredFee = 1_000n;
+  const r = validateNetLoss({
+    inputs: [{ amountSompi: inputAmt, scriptPubKeyRaw: RELAY_SPK }],
+    outputs: [{ valueSompi: inputAmt - requiredFee, scriptPubKeyRaw: undefined }], // 畸形输出, 但 relay key 是正常值
+    signInputIndices: [0], relayScriptPubKey: RELAY_SPK, requiredFeeSompi: requiredFee,
+  });
+  assert.strictEqual(r.ok, false, '畸形输出不被误判为找零, 全额算进 net_loss, 超出手续费上限应被拒');
+  assert.strictEqual(r.netLossSompi, inputAmt, 'net_loss 应是全部输入(没有任何输出被正确识别为"付回自己"), 不是 0');
+});
+
 // ── canonicalScriptHex(2026-09-14 补: NWT 1355 假设订正后新加, Bettor 裁定"现在改不留给接线笔") ──
 // 参照 docs/provenance/2026-09-14-j2-covenant-broadcast-scriptpubkey-verification/run.log 里真实
 // kaspa-wasm ScriptPublicKey.toString() 观测到的原始形状造 fixture, 不是凭空编的字符串。

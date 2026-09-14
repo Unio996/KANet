@@ -146,6 +146,14 @@ export function validateNetLoss({ inputs, outputs, signInputIndices, relayScript
   }
 
   const relayKeyNorm = canonicalScriptHex(relayScriptPubKey);
+  // 🔴 Bettor 1364(自查项): relayScriptPubKey 本身非空(过了上面的 `!relayScriptPubKey` 闸)，但如果它
+  // 经 canonicalScriptHex 归一后变成空字符串(比如传进来一个 `{"script":"","version":0}` 这种畸形值)，
+  // 就会跟"outputs 里某个同样缺 scriptPubKeyRaw / 畸形到归一成空串"的输出错误配成一对——两个空值互相
+  // 匹配上，把一笔本不该算"付回自己"的输出算进 returnedToRelaySompi，net_loss 被静默做小，可能放行本该拒
+  // 的广播。空归一值不是一个合法脚本，不能参与匹配——fail-closed 直接拒，不进比较循环。
+  if (!relayKeyNorm) {
+    return { ok: false, reason: 'relayScriptPubKey canonicalized to an empty hex string — refusing to match (would spuriously equal any output with a missing/malformed scriptPubKeyRaw)' };
+  }
   let returnedToRelaySompi = 0n;
   for (const out of outputs) {
     if (canonicalScriptHex(out.scriptPubKeyRaw) === relayKeyNorm) {
