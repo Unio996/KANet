@@ -202,4 +202,36 @@ export function computeKttGenesisArtifact({ amount, ownerCovIdHex }) {
   return { script: artifact.script, scriptPubKeyHex: '0x' + p2sh(artifact.script), templateHashHex: artifact.templateHashHex };
 }
 
+/**
+ * register_append(bet_mint 步骤B)构造前, 从 proto_markets 已存的值**确定性**重算 ShardLeaf_direct
+ * 当前(即将被消费)的完整 redeem 脚本——不调用 computeMarketGenesisArtifacts(那个函数每次都会
+ * generateCommitteeKeypair() 生成一把**新的**随机委员会密钥对, 算出的 committee_hash/rootCloseTmplHash
+ * 会跟着变, 用来重算"已经落链的市场"的脚本会得到错误结果)。市场创世时唯一变化的量是委员会公钥/
+ * RootClaim/RefundClaim/RootClose 这条链——但它们的**最终产物** `rootclose_tmpl_hash` 已经原样存在
+ * `proto_markets.rootclose_tmpl_hash` 里, 不需要重新推导那条链, 直接用存的值当 ctor 参数即可, 确定性
+ * 且与创世时编译出的字节逐位相同。
+ * @param {object} o
+ * @param {string} o.marketId  32字节hex(无0x)
+ * @param {number} o.minBet
+ * @param {number} o.sealCount
+ * @param {string} o.rootcloseTmplHash  32字节hex(无0x), 来自 proto_markets.rootclose_tmpl_hash
+ * @param {{local_yes:number, local_no:number, count:number, pool_value:number}} o.state
+ *   当前 State(deriveLeafState 现算的值, 或 genesis 时的全 0)
+ * @returns {{script:Buffer, scriptPubKeyHex:string, stateLayout:{start:number,len:number}}}
+ */
+export function computeShardLeafRedeemScript({ marketId, minBet, sealCount, rootcloseTmplHash, state }) {
+  if (!/^[0-9a-f]{64}$/.test(marketId)) throw new Error(`computeShardLeafRedeemScript: marketId must be 32-byte hex, got ${marketId}`);
+  if (!/^[0-9a-f]{64}$/.test(rootcloseTmplHash)) throw new Error(`computeShardLeafRedeemScript: rootcloseTmplHash must be 32-byte hex, got ${rootcloseTmplHash}`);
+  const { ps_tmpl_hash, token_tmpl_hash } = loadProtocolConstants();
+  const ctor = [
+    ctorBytes32V100(marketId), ctorBytes32V100(ps_tmpl_hash), ctorBytes32V100(marketId),
+    ctorIntV100(sealCount), ctorIntV100(minBet), ctorBytes32V100(rootcloseTmplHash), ctorBytes32V100(ZERO32.toString('hex')),
+    ctorBytes32V100(token_tmpl_hash),
+    ctorIntV100(state.local_yes), ctorIntV100(state.local_no), ctorIntV100(state.count), ctorIntV100(state.pool_value),
+  ];
+  const compiled = compileSilV100(SHARD_LEAF_DIRECT_SIL, ctor, 'ShardLeaf_direct');
+  const artifact = artifactOf(compiled);
+  return { script: artifact.script, scriptPubKeyHex: '0x' + p2sh(artifact.script), stateLayout: artifact.stateLayout };
+}
+
 export { p2sh, hex, ZERO32 };

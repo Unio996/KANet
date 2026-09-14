@@ -108,5 +108,23 @@ await t('⑨ computeKttGenesisArtifact: ownerCovIdHex 格式错误 ⇒ throw', (
   assert.ok(threw && /32-byte hex/.test(threw.message));
 });
 
+await t('⑩ computeShardLeafRedeemScript(genesis state 全0) 与 computeMarketGenesisArtifacts 算出的 shardLeafDirect 逐字节一致(确定性重算, 不依赖随机委员会密钥)', async () => {
+  const { computeShardLeafRedeemScript } = await import('./proto-covenant-builder.mjs');
+  const r = computeShardLeafRedeemScript({
+    marketId: MARKET_ID, minBet: MIN_BET, sealCount: 2, rootcloseTmplHash: artifacts.rootCloseTmplHash,
+    state: { local_yes: 0, local_no: 0, count: 0, pool_value: 0 },
+  });
+  assert.strictEqual(r.scriptPubKeyHex, artifacts.shardLeafDirect.scriptPubKeyHex, 'genesis state 下应该与 computeMarketGenesisArtifacts 的产物完全一致');
+  assert.strictEqual(Buffer.compare(r.script, artifacts.shardLeafDirect.script), 0, '脚本字节也完全一致');
+});
+
+await t('⑪ computeShardLeafRedeemScript 换一组非零 state ⇒ 产出不同的 scriptPubKey(证明真的把 state 编码进去参与了哈希)', async () => {
+  const { computeShardLeafRedeemScript } = await import('./proto-covenant-builder.mjs');
+  const r1 = computeShardLeafRedeemScript({ marketId: MARKET_ID, minBet: MIN_BET, sealCount: 2, rootcloseTmplHash: artifacts.rootCloseTmplHash, state: { local_yes: 0, local_no: 0, count: 0, pool_value: 0 } });
+  const r2 = computeShardLeafRedeemScript({ marketId: MARKET_ID, minBet: MIN_BET, sealCount: 2, rootcloseTmplHash: artifacts.rootCloseTmplHash, state: { local_yes: 100, local_no: 20, count: 2, pool_value: 120 } });
+  assert.notStrictEqual(r1.scriptPubKeyHex, r2.scriptPubKeyHex);
+  assert.strictEqual(r2.stateLayout.len, 36, 'ShardLeaf_direct 的 state_layout.len 应该恒为36(4个int字段)');
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
