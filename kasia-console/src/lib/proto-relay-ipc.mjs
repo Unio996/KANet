@@ -31,20 +31,41 @@ export const PROTO_COMMAND_ALLOWLIST = Object.freeze({
 });
 
 /**
+ * 🔴 账本1442(Bettor 审 e0d62784 抓到的两处真实漏洞, 已修):
+ *   ① payload 里的 type 键会在 `{ type, ...payload }` 展开时覆盖已经过白名单/驱动闸检查的 type
+ *      参数(例: sendProtoCommand('get_mempool_entry', {type:'transfer',...}) 按 read 放行、驱动闸
+ *      不拦, 实际发出的却是 transfer)。protoSendCmd 因为先解构掉了 cmd.type 才碰巧安全, 但
+ *      sendProtoCommand 本身是导出函数, 可以被直接调用绕过——修法: payload 携带 type 键(同
+ *      relay_id/relayId)一律 throw; 且拼装顺序改成 `{ ...payload, type }`(双保险, 即使检查被绕过
+ *      也不会被 payload 里的 type 覆盖真正发出的类型)。
+ *   ② origin 原来由调用方通过 opts.origin 传入——relay-manager/relay 侧 origin 五值 fail-closed 授权
+ *      闸(kasia-relay/src/lib/authorize.mjs §4.0, armed=on 时生效)按字面量区分权限, 不是自由文本标签
+ *      (先例 capability.js 强制覆写 origin 就是防调用方绕过分类)。'proto' 不在 {internal/operator/
+ *      app/legacy-unmigrated} 五值之列——一旦 arm, 会被 authorize.mjs 的兜底分支当"origin 缺失/非法"
+ *      fail-closed 拒掉, 静默破坏整个 proto 功能。改用 'internal'(乙路 TCB 放行语义, 与 proto 出口
+ *      "Console 自己内部决定发这个命令, 非外部签名 grant/非 operator-settle 单点白名单"的信任模型
+ *      吻合), 且不接受调用方注入(防绕过分类)。
  * @param {string} type  必须在 PROTO_COMMAND_ALLOWLIST 白名单里
- * @param {object} [payload]  命令体其余字段(不含 type; 不得含 relay_id/relayId——出口恒用 PROTO_RELAY_ID)
+ * @param {object} [payload]  命令体其余字段(不含 type/relay_id/relayId——出口恒用 PROTO_RELAY_ID 与真实 type)
  * @param {object} [opts]
  * @param {number} [opts.timeoutMs]
- * @param {string} [opts.origin]
+ * @param {Function} [opts._sendCommandAsyncForTest]  测试专用注入点(默认真实 sendCommandAsync)——
+ *   relay-manager.js 的 `_relays` 状态是模块私有、无法从外部起一个假子进程观测真正发给它的实参,
+ *   这是验证"origin 恒为 'internal', 调用方传值不生效"这条不变量唯一可行的注入方式, 不是给生产
+ *   代码开后门(生产路径永远不传这个参数, 落到下面的真实 sendCommandAsync)。
  * @returns {Promise<object>}
  */
-export async function sendProtoCommand(type, payload = {}, { timeoutMs, origin = 'proto' } = {}) {
+export async function sendProtoCommand(type, payload = {}, { timeoutMs, _sendCommandAsyncForTest } = {}) {
   const mode = PROTO_COMMAND_ALLOWLIST[type];
   if (!mode) {
     throw new Error(`sendProtoCommand: type '${type}' not in allowlist {${Object.keys(PROTO_COMMAND_ALLOWLIST).join(', ')}}`);
   }
-  if (payload && typeof payload === 'object' && (Object.prototype.hasOwnProperty.call(payload, 'relay_id') || Object.prototype.hasOwnProperty.call(payload, 'relayId'))) {
-    throw new Error('sendProtoCommand: payload must not carry relay_id/relayId — this funnel always uses PROTO_RELAY_ID, callers cannot override');
+  if (payload && typeof payload === 'object') {
+    for (const forbidden of ['relay_id', 'relayId', 'type']) {
+      if (Object.prototype.hasOwnProperty.call(payload, forbidden)) {
+        throw new Error(`sendProtoCommand: payload must not carry '${forbidden}' — this funnel always uses PROTO_RELAY_ID and the explicit type argument, callers cannot override either`);
+      }
+    }
   }
   if (!PROTO_RELAY_ID) {
     throw new Error('sendProtoCommand: PROTO_RELAY_ID not configured — refusing (fail-closed)');
@@ -52,18 +73,21 @@ export async function sendProtoCommand(type, payload = {}, { timeoutMs, origin =
   if (mode === 'write' && process.env.PROTO_DRIVER_ENABLED !== '1') {
     throw new Error(`sendProtoCommand: proto_driver_disabled — '${type}' refused (write command, PROTO_DRIVER_ENABLED != 1; read commands are not affected by this gate)`);
   }
+  if (_sendCommandAsyncForTest) {
+    return _sendCommandAsyncForTest(PROTO_RELAY_ID, { ...payload, type }, timeoutMs, 'internal');
+  }
   const { sendCommandAsync } = await import('../services/relay-manager.js');
-  return sendCommandAsync(PROTO_RELAY_ID, { type, ...payload }, timeoutMs, origin);
+  return sendCommandAsync(PROTO_RELAY_ID, { ...payload, type }, timeoutMs, 'internal');
 }
 
 /**
  * 适配既有 sendCmd(relayId, cmd, timeoutMs, origin) 调用形状——driveMarketGenesis/driveBetIntent/
  * checkMarketGenesisLanded/checkBetIntentLanded(proto-market-intent.mjs/proto-bet-intent.mjs)与
- * proto-broadcast-ops.mjs 全部用这个签名, 改用这个适配器就不需要动那些已经测试过的文件。relayId
- * 参数被忽略(sendProtoCommand 内部恒用 PROTO_RELAY_ID)——调用方仍应传 PROTO_RELAY_ID(那些函数自己
- * 会校验 relayId 非空), 只是这里不会真的拿它去发命令。
+ * proto-broadcast-ops.mjs 全部用这个签名, 改用这个适配器就不需要动那些已经测试过的文件。relayId/
+ * origin 两个参数都被忽略(sendProtoCommand 内部恒用 PROTO_RELAY_ID 与字面量 'internal', 账本1442②)——
+ * 调用方仍应传 PROTO_RELAY_ID(那些函数自己会校验 relayId 非空), 只是这里不会真的拿它去发命令。
  */
-export function protoSendCmd(_relayIdIgnored, cmd, timeoutMs, origin) {
+export function protoSendCmd(_relayIdIgnored, cmd, timeoutMs, _originIgnored) {
   const { type, ...payload } = cmd || {};
-  return sendProtoCommand(type, payload, { timeoutMs, origin });
+  return sendProtoCommand(type, payload, { timeoutMs });
 }

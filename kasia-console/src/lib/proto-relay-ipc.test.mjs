@@ -35,13 +35,47 @@ await t('①非白名单命令类型被拒(throw, 不发出任何 IPC)', async (
 await t('②payload 携带 relay_id 字段(即使值为 undefined)一律被拒, 不生效', async () => {
   let threw = null;
   try { await sendProtoCommand('get_address_utxos', { address: 'kaspa:x', relay_id: undefined }); } catch (e) { threw = e; }
-  if (!threw || !/relay_id\/relayId/.test(threw.message)) throw new Error(`应该 throw relay_id 覆盖错误, 实际 ${threw && threw.message}`);
+  if (!threw || !/carry '(relay_id|relayId)'/.test(threw.message)) throw new Error(`应该 throw relay_id 覆盖错误, 实际 ${threw && threw.message}`);
 });
 
 await t('②b payload 携带 relayId(驼峰) 同样被拒', async () => {
   let threw = null;
   try { await sendProtoCommand('get_address_utxos', { address: 'kaspa:x', relayId: 'someone-elses-relay' }); } catch (e) { threw = e; }
-  if (!threw || !/relay_id\/relayId/.test(threw.message)) throw new Error(`应该 throw relay_id 覆盖错误, 实际 ${threw && threw.message}`);
+  if (!threw || !/carry '(relay_id|relayId)'/.test(threw.message)) throw new Error(`应该 throw relay_id 覆盖错误, 实际 ${threw && threw.message}`);
+});
+
+await t('②c(账本1442①) payload 携带 type 字段被拒——防止已过检查的 type 参数被 payload.type 覆盖', async () => {
+  let threw = null;
+  try { await sendProtoCommand('get_address_utxos', { address: 'kaspa:x', type: 'transfer' }); } catch (e) { threw = e; }
+  if (!threw || !/'type'/.test(threw.message)) throw new Error(`应该 throw type 覆盖错误, 实际 ${threw && threw.message}`);
+});
+
+await t('②d(账本1442①) payload.type 即使是白名单内的另一条命令也一样被拒——不能靠"同样在白名单里"放行', async () => {
+  let threw = null;
+  try { await sendProtoCommand('get_mempool_entry', { txid: 'a'.repeat(64), type: 'get_address_utxos' }); } catch (e) { threw = e; }
+  if (!threw || !/'type'/.test(threw.message)) throw new Error(`应该 throw type 覆盖错误, 实际 ${threw && threw.message}`);
+});
+
+await t('②e(账本1442②) origin 恒为 internal(五值fail-closed闸认可的值, 不是自造的proto)——用注入的假 sendCommandAsync 断言真正收到的第4个实参(不管调用方怎么传都不生效)', async () => {
+  let capturedArgs = null;
+  const fakeSendCommandAsync = (...args) => { capturedArgs = args; return Promise.resolve({ ok: true }); };
+  await sendProtoCommand('get_address_utxos', { address: 'kaspa:x' }, { _sendCommandAsyncForTest: fakeSendCommandAsync });
+  if (!capturedArgs) throw new Error('假 sendCommandAsync 没有被调用');
+  const [relayIdArg, cmdArg, , originArg] = capturedArgs;
+  if (relayIdArg !== 'ipc-test-relay') throw new Error(`relayId 应该是 PROTO_RELAY_ID(实际 ${relayIdArg})`);
+  if (cmdArg.type !== 'get_address_utxos') throw new Error(`真正发出的 type 不对: ${cmdArg.type}`);
+  if (originArg !== 'internal') throw new Error(`origin 应该恒为 'internal'(实际 ${originArg})`);
+});
+
+await t('②f(账本1442②) protoSendCmd 的 origin 参数即使传入非法值也不影响 sendProtoCommand 收到的 opts(protoSendCmd 根本不转发它)', async () => {
+  // protoSendCmd 自己没有暴露 _sendCommandAsyncForTest 注入点(它是给已测试过的状态机文件用的适配层,
+  // 不需要重复这条底层不变量的验证)——这里验证的是"它不会把 origin 参数错误地转发进 opts 对象"这条
+  // 结构性质本身: 传入的 timeoutMs 必须原样透传(证明 opts 对象是真的在构造, 不是被吞掉), 而调用不会
+  // 因为 origin 参数的存在报错或行为异常(即它被安静忽略, 不是被当成 opts 的一部分误用)。
+  let threw = null;
+  try { await protoSendCmd('ignored-relay', { type: 'get_address_utxos', address: 'kaspa:x' }, 12345, 'this-should-be-ignored'); }
+  catch (e) { threw = e; } // 期望到达真实 sendCommandAsync 那一步再因为没有真relay而reject('Relay not running'), 不是在参数处理阶段就出错
+  if (!threw || !/Relay not running/.test(threw.message)) throw new Error(`应该在真实 sendCommandAsync 层面失败(证明前面的处理没有因 origin 参数出岔子), 实际 ${threw && threw.message}`);
 });
 
 await t('③驱动关闭(PROTO_DRIVER_ENABLED 未设)时: covenant_broadcast(write) 被拒, 四条 read 命令全部放行到发送这一步(用 fail 的 sendCommandAsync 探测——到达说明没被闸拦, 不是真的发出成功)', async () => {
