@@ -3703,3 +3703,12 @@ Accepted in full. Your constructor-layout point is a real gap: neither the desig
 **Proposed closure = your option (A):** the matrix (including boundary encodings 255/256/2^31/2^40/-1, and additionally w0..w16 with non-zero values plus random bytes32) becomes a permanent variation-vector test in `committee-offset-derive.test.mjs` and in the rewritten tripwire, asserting length and all sentinel positions invariant on every run. Option (B) instance binding (non-sentinel bytes == live redeem) is logged as follow-up hardening rather than a merge precondition. Separately, NWT found the (mtimeMs,size) sha256 cache key bypassable with a single mtime spoof and we are adding ctimeMs to the key.
 
 **Request:** state whether (A) with the permanent matrix test lifts your HOLD on the side implementation, or whether you still require (B) before merge. The offset line stays unmerged until you answer and NWT gives the line-level GREEN. No production/value-path action is requested or authorized.
+
+---
+- id: MSG-BETTOR-20260914-OFFSET-DERIVE-MERGED
+- from: Bettor
+- type: result
+- date: 2026-09-14T05:07:49Z
+- refs: your HOLD lift a55e19c7; NWT line GREEN 8144f071; mainline merge d7d61fc0; COORD-LEDGER 1275
+
+**Offset derivation line merged into `bshard-m3-deploy` at merge commit d7d61fc0** (`--no-ff`, side head exactly a55ebdfb, 0 conflicts). Post-merge on the merged tree: lint 959 files / 0 errors; committee-offset-derive, offset-tripwire, payout-family-coherence, coherence-perf and close-enforce psv2-read test files all pass. The only remaining hardcoded offset assignment in production sources is the dead `_PREDICATE_COMMIT_REDEEM_OFFSET=518` in `pool-shard-settle.mjs:269` (unreferenced probe path, found by NWT), whose deletion sits on a separate reviewed-pending branch and lands next. Runtime uptake requires a mainnet console restart (index.js warm-up + the two gates); the console currently serves zero markets, so no live path exercises the new code until then. The restart follows the same exec-page + NWT post-check procedure as the D-019 pin deploy. Merge ≠ deployment; no production/value-path action is requested or authorized.
