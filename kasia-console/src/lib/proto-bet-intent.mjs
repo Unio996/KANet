@@ -19,6 +19,7 @@
 
 import { sqlite } from '../db/client.js';
 import { randomUUID } from 'node:crypto';
+import { PROTO_COVENANT_BROADCAST_TYPE } from './proto-relay-guard.mjs';
 
 export const BET_INTENT_STEPS = Object.freeze(['mint', 'append']);
 export const BET_INTENT_STATUS = Object.freeze({ PENDING: 'pending', PREPARED: 'prepared', SUBMITTED: 'submitted', LANDED: 'landed', AMBIGUOUS: 'ambiguous' });
@@ -158,18 +159,16 @@ async function resolvePrepared({ sendCmd, relayId, row, targetAddress, origin, l
     alertBetIntent('bet_intent_prepared_without_bytes', `bet intent ${key} prepared txid ${txid.slice(0, 12)} has no signed bytes — manual review`, { intent_key: key, prepared_txid: txid });
     throw new BetIntentHoldError(`bet intent ${key}: prepared without bytes — hold (no resend, no rebuild)`, 'prepared_without_bytes');
   }
-  // 🔴 待定(阻塞项, 见文件头 TODO): `type` 目前写的 'broadcast_raw_tx' 是占位符——kasia-relay 的
-  // COMMAND_FIELD_TYPES(kasia-relay/src/lib/commands.mjs:199)里 replay_tx_json/prepared_txid/intent_key
-  // 三个字段目前只挂在既有 TRANSFER 命令类型上(语义="从某地址转账"), 没有一个通用的"广播这笔我已经构造好
-  // 的任意签名交易"命令类型——covenant genesis/entry-spend 交易不是 address→amount 转账, 不能直接塞进
-  // TRANSFER。这是一个真正的新 relay 命令类型, 需要单独设计+NWT审+落码(kasia-relay 侧), 且与 §6 KAS
-  // 资金来源(B'/(B)/(C) 三选一未决)高度耦合——两者应该一起定, 不要各自抢跑。在那笔完成前, driveBetIntent
-  // 的 resolvePrepared 分支实际不可用(pending→fresh build 分支不受影响, 因为 buildAndBroadcast 由调用方
-  // 注入, 调用方可以先走别的机制; 只有"prepared 态同字节重播"这条恢复路径依赖这个还不存在的命令)。
+  // 🔴 订正(2026-09-15, J2 buildAndBroadcast 接线核对时发现漏改): §9.4 原文说"命令定案后, 只需要把
+  // type:'broadcast_raw_tx' 改成 type:'covenant_broadcast'"——covenant_broadcast 命令现在真的定案落地
+  // 了(kasia-relay/src/lib/covenant-broadcast-relay.mjs, relay.mjs 已接线), proto-market-intent.mjs 那边
+  // 的同名分支已经改过(见其 resolvePrepared), 这里当时漏改, 一直卡在占位符状态, resolvePrepared 的同
+  // 字节重播分支实际不可用。现在补上, 与 market-intent 那边保持一致(replay_tx_json/prepared_txid/
+  // intent_key 三个字段名同 TRANSFER 既有契约, 不需要改)。
   let rep;
   try {
     rep = await sendCmd(relayId, {
-      type: 'broadcast_raw_tx', intent_key: key, replay_tx_json: row.prepared_tx_json, prepared_txid: txid,
+      type: PROTO_COVENANT_BROADCAST_TYPE, intent_key: key, replay_tx_json: row.prepared_tx_json, prepared_txid: txid,
     }, undefined, origin);
   } catch (e) { throw new Error(`bet intent ${key}: replay IPC failed (${e.message})`); }
   if (rep?.txId) {

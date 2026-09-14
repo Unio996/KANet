@@ -16,6 +16,11 @@ export const PROTO_RELAY_ID = process.env.PROTO_RELAY_ID || null;
 const PROTO_NAME_PREFIX = 'proto-';
 export const PROTO_MAX_BALANCE_KAS = 5; // Bettor 1365: 启动断言硬顶——这个 relay 只该持有原型规模的资金
 
+// 🔴 单一来源(账本1438①, J2 buildAndBroadcast 接线核对发现 proto-bet-intent.mjs 遗漏改用真实命令名
+// 而 proto-market-intent.mjs 已经改过——两处各自手打字面量导致漂移)。两个 intent 状态机文件的
+// resolvePrepared 同字节重播分支都从这里导入, 不再各自写字面量 'covenant_broadcast'。
+export const PROTO_COVENANT_BROADCAST_TYPE = 'covenant_broadcast';
+
 /**
  * 启动断言(index.js 启动流程调用一次, fail-closed): PROTO_RELAY_ID 必须已配置、relay_nodes 表
  * 里存在这一行、name 前缀 'proto-'、链上余额 < PROTO_MAX_BALANCE_KAS。任一不满足 ⇒ throw——

@@ -27,6 +27,7 @@ const {
   driveBetIntent, checkBetIntentLanded, resumeStaleBetIntents, recordBetIntentPhase,
   getBetIntent, ensureBetIntent, markBetIntent, betIntentKeyFor, activeBetIntent, checkDependencyLanded,
 } = BI;
+const { PROTO_COVENANT_BROADCAST_TYPE } = await import('./proto-relay-guard.mjs');
 
 let fails = 0;
 const ok = (cond, label) => { if (cond) console.log(`  ✅ ${label}`); else { console.error(`  ❌ ${label}: ${JSON.stringify(cond)}`); fails++; } };
@@ -201,7 +202,7 @@ console.log('[test] ⑨a resolvePrepared: 同字节重播遇 inputs_spent 但 ka
     R.calls.push(cmd);
     if (cmd.type === 'get_mempool_entry') return { ok: true, found: false };
     if (cmd.type === 'check_utxo_landed') return { ok: true, landed: false, depth: null };
-    if (cmd.type === 'broadcast_raw_tx') return { code: 'inputs_spent', error: 'transaction output already spent' };
+    if (cmd.type === PROTO_COVENANT_BROADCAST_TYPE) return { code: 'inputs_spent', error: 'transaction output already spent' };
     throw new Error(`unexpected cmd ${cmd.type}`);
   };
   // 正向证据: 独立的链上观察(kasia-relay 的内嵌 indexer 报的), 不是这个模块自己写的——这正是它可信的原因。
@@ -232,7 +233,7 @@ console.log('[test] ⑨b resolvePrepared: inputs_spent 且 kaspa_tx_log 查无�
     R.calls.push(cmd);
     if (cmd.type === 'get_mempool_entry') return { ok: true, found: false };
     if (cmd.type === 'check_utxo_landed') return { ok: true, landed: false, depth: null };
-    if (cmd.type === 'broadcast_raw_tx') return { code: 'inputs_spent', error: 'transaction output already spent' };
+    if (cmd.type === PROTO_COVENANT_BROADCAST_TYPE) return { code: 'inputs_spent', error: 'transaction output already spent' };
     throw new Error(`unexpected cmd ${cmd.type}`);
   };
   // 故意不往 kaspa_tx_log 里插这个 txid——模拟"谁花了这个输入完全不知道, 既不能确认是我方重播成功
@@ -266,6 +267,16 @@ console.log('[test] ⑨b resolvePrepared: inputs_spent 且 kaspa_tx_log 查无�
   } catch (e) { threw2 = e; }
   ok(threw2 && threw2.hold === true && threw2.code === 'ambiguous_inputs_spent', 'ambiguous 行再次 driveBetIntent 立即 HOLD(不重试, 不轮询)');
   ok(R.calls.length === 0, `第二次调用完全没碰 sendCmd(实际 ${R.calls.length} 次) —— activeBetIntent 排除 ambiguous 行会造一条新 pending 行, 若命中说明依赖 activeBetIntent 的排除逻辑有洞`);
+}
+
+console.log('[test] ⑩(账本1438①) proto-bet-intent 与 proto-market-intent 的 resolvePrepared 用同一个命令类型字符串(源码级断言, 防止各自手打字面量再次漂移):');
+{
+  const fs2 = fs;
+  const betSrc = fs2.readFileSync(new URL('./proto-bet-intent.mjs', import.meta.url), 'utf8');
+  const marketSrc = fs2.readFileSync(new URL('./proto-market-intent.mjs', import.meta.url), 'utf8');
+  ok(betSrc.includes('PROTO_COVENANT_BROADCAST_TYPE') && !/type:\s*['"]broadcast_raw_tx['"]\s*,/.test(betSrc), 'proto-bet-intent.mjs 用共享常量, 不再把 broadcast_raw_tx 当实际命令类型值(纯文字提及历史命名不算)');
+  ok(marketSrc.includes('PROTO_COVENANT_BROADCAST_TYPE'), 'proto-market-intent.mjs 也用同一个共享常量');
+  ok(PROTO_COVENANT_BROADCAST_TYPE === 'covenant_broadcast', `共享常量值就是真实命令名(实际 ${PROTO_COVENANT_BROADCAST_TYPE})`);
 }
 
 console.log(fails === 0

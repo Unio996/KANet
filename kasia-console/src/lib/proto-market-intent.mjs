@@ -19,6 +19,7 @@
 
 import { sqlite } from '../db/client.js';
 import { randomUUID } from 'node:crypto';
+import { PROTO_COVENANT_BROADCAST_TYPE } from './proto-relay-guard.mjs';
 
 export const MARKET_GENESIS_STATUS = Object.freeze({
   PENDING: 'genesis_pending', PREPARED: 'genesis_prepared', SUBMITTED: 'genesis_submitted',
@@ -160,7 +161,7 @@ async function resolvePrepared({ sendCmd, relayId, row, targetAddress, origin, l
   let rep;
   try {
     rep = await sendCmd(relayId, {
-      type: 'covenant_broadcast', intent_key: marketIntentKeyFor(marketId), replay_tx_json: row.genesis_prepared_tx_json, prepared_txid: txid,
+      type: PROTO_COVENANT_BROADCAST_TYPE, intent_key: marketIntentKeyFor(marketId), replay_tx_json: row.genesis_prepared_tx_json, prepared_txid: txid,
     }, undefined, origin);
   } catch (e) { throw new Error(`market genesis ${marketId}: replay IPC failed (${e.message})`); }
   if (rep?.txId) {
