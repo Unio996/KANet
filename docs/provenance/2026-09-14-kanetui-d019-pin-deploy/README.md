@@ -1,6 +1,8 @@
 # D-019 pin 修补主网部署证据（2026-09-14 · KANet-UI · Bettor 1236 派工 · 按执行页 v0.3 f451795b 执行）
 
 > 执行范围：D-019 编译器钉线九笔合入主线（`31ec5f25`，Bettor `b4afbf90`），主网 console 重启验收。本次不涉及任何账号导入/市场创建/covenant 创世动作——三个 `ZK_*_TMPL_HASH` env 按 Bettor 1236 明确要求保持 UNSET。
+>
+> **更正（2026-09-14 · Bettor 1240 · MUST-FIX）**：原 `68dbf7fe` 版本 §③ 把 DB 备份文件路径误写在本 git 工作树内（`docs/provenance/.../console.mainnet.db.pre-d019-backup`，2MB 含全部加密助记词，untracked 且 `git check-ignore` 无命中）——Bettor 独立核实抓到，任何一次 `git add -A` 会把这份含密文的主网账号库推上 GitHub。已用 `Move-Item` 移到非 git 路径 `C:\KANet\backups\`，移动后原地重算 sha256 逐位一致（未损坏），`git status` 复核确认仓内已无该文件。§③ 原文按此更正，不删除原有其它内容。已追加 `docs/ANTI-PATTERNS.md` 规则 83（任何备份/导出/数据库文件不得落在任何 git 工作树内，含 scratch worktree）。
 
 ## 时间
 
@@ -35,7 +37,7 @@ RELAY_HOTWALLET_TOTAL_MAX_KAS=1000（原样）
 | `migrate.js` 版本基线 | v204 已应用，v205（D-019 第 5a 笔，`payout_shards`/`market_shards` 三/一个 ctor-only 常量列）待启动时应用 |
 
 **DB 备份**（Bettor 1236 要求，路径+sha256 记证据）：用 `better-sqlite3` 的 WAL-aware `.backup()` API（不停进程、一致性快照，不是裸文件复制——原库当时有活跃 `-wal`，裸复制可能不一致）：
-- 备份文件：`docs/provenance/2026-09-14-kanetui-d019-pin-deploy/console.mainnet.db.pre-d019-backup`（本地保留，**不进 git**——DB 含加密助记词密文，即便加密也不进版本历史，同项目一贯纪律）。
+- 备份文件：**`C:\KANet\backups\console.mainnet.db.pre-d019-backup`**（🔴 v0.2 更正——最初误放在 `docs/provenance/2026-09-14-kanetui-d019-pin-deploy/` 这个 git 工作树内，Bettor 1240 独立核实抓到：untracked 且 `git check-ignore` 无命中，任何一次 `git add -A` 就会把含全部加密助记词的主网账号库推上 GitHub，判 MUST-FIX。已用 `Move-Item` 移到这个非 git 路径，移动后原地重算 sha256 仍为 `5025a80d...`（逐位一致，移动过程未损坏文件），`git status` 复核确认仓内该文件已消失。此后任何备份/导出/数据库文件一律遵守 `docs/ANTI-PATTERNS.md` 规则 83：不得落在任何 git 工作树内，含 scratch worktree）。
 - SHA256：`5025a80dc3a6d090417da9267402bc74ba07bc779ecf32d14577ac46ce513108`
 - 大小：2,097,152 bytes
 
@@ -71,4 +73,4 @@ RELAY_HOTWALLET_TOTAL_MAX_KAS=1000（原样）
 
 D-019 编译器钉线部署到主网 console 完成，六步全部按执行页 v0.3 走完，验收全绿：pin 自检 PASS 1 次 FAIL 0 次、v205 迁移正确应用、10 个批 1 relay 全部健康存活、驻留期监控/健康监控 tick 均正常、kaspad 未受影响、零 FATAL/UNMET。本次未改动任何 env 值（`SILVERC_V100_PATH` 沿用既有、三个 `ZK_*` 保持 UNSET），未导入任何新账号，未创建任何市场。
 
-原始日志留档：`console-mainnet-stdout-PID25516.log` / `console-mainnet-stderr-PID25516.log`（本目录内独立副本，`logs/mainnet/` 下的活动日志会在下次重启时被覆盖）。DB 备份文件本地留存（不进 git），sha256 已记于 §③。
+原始日志留档：`console-mainnet-stdout-PID25516.log` / `console-mainnet-stderr-PID25516.log`（本目录内独立副本，`logs/mainnet/` 下的活动日志会在下次重启时被覆盖）。DB 备份文件留存于 `C:\KANet\backups\`（非 git 路径，见 §③ 更正），sha256 已记于 §③。
