@@ -1,0 +1,26 @@
+  RUN   V-PSCF-CLM-1_pass_partial_with_remainder
+  PASS  V-PSCF-CLM-1_pass_partial_with_remainder
+  RUN   V-PSCF-CLM-2_pass_exact_no_remainder
+  PASS  V-PSCF-CLM-2_pass_exact_no_remainder
+  RUN   V-PSCF-CLM-3_fail_destination_not_real_claim_template
+  PASS  V-PSCF-CLM-3_fail_destination_not_real_claim_template
+  RUN   V-PSCF-CLM-4_fail_token_owner_diverted_to_stranger
+  PASS  V-PSCF-CLM-4_fail_token_owner_diverted_to_stranger
+  RUN   V-PSCF-CLM-5_fail_witness_wrong_tok_prefix
+  PASS  V-PSCF-CLM-5_fail_witness_wrong_tok_prefix
+  RUN   V-PSCF-CLM-6_fail_witness_wrong_claim_prefix
+  PASS  V-PSCF-CLM-6_fail_witness_wrong_claim_prefix
+  RUN   V-PSCF-RFC-1_pass_partial_with_remainder
+  PASS  V-PSCF-RFC-1_pass_partial_with_remainder
+  RUN   V-PSCF-RFC-2_pass_exact_no_remainder
+  PASS  V-PSCF-RFC-2_pass_exact_no_remainder
+  RUN   V-PSCF-RFC-3_fail_destination_not_real_claim_template
+  PASS  V-PSCF-RFC-3_fail_destination_not_real_claim_template
+  RUN   V-PSCF-RFC-4_fail_token_owner_diverted_to_stranger
+  PASS  V-PSCF-RFC-4_fail_token_owner_diverted_to_stranger
+  RUN   V-PSCF-RFC-5_fail_witness_wrong_tok_prefix
+  PASS  V-PSCF-RFC-5_fail_witness_wrong_tok_prefix
+  RUN   V-PSCF-RFC-6_fail_witness_wrong_claim_prefix
+  PASS  V-PSCF-RFC-6_fail_witness_wrong_claim_prefix
+
+12 tests: 12 passed, 0 failed

@@ -1,0 +1,26 @@
+  RUN   V-close_attest-1_fail_no_token_sigs_invalid_reaches_sig_gate
+  PASS  V-close_attest-1_fail_no_token_sigs_invalid_reaches_sig_gate
+  RUN   V-close_attest-2_fail_token_input_present_rejected_by_noTokenInput
+  PASS  V-close_attest-2_fail_token_input_present_rejected_by_noTokenInput
+  RUN   V-cancel_attest-1_fail_no_token_sigs_invalid_reaches_sig_gate
+  PASS  V-cancel_attest-1_fail_no_token_sigs_invalid_reaches_sig_gate
+  RUN   V-cancel_attest-2_fail_token_input_present_rejected_by_noTokenInput
+  PASS  V-cancel_attest-2_fail_token_input_present_rejected_by_noTokenInput
+  RUN   V-close_attest-3_fail_at_bound_8_inputs_no_token_reaches_sig_gate
+  PASS  V-close_attest-3_fail_at_bound_8_inputs_no_token_reaches_sig_gate
+  RUN   V-close_attest-4_fail_bound_plus_one_9_inputs_rejected_by_length_guard
+  PASS  V-close_attest-4_fail_bound_plus_one_9_inputs_rejected_by_length_guard
+  RUN   V-close_attest-5_fail_victim_token_at_last_reachable_index_7
+  PASS  V-close_attest-5_fail_victim_token_at_last_reachable_index_7
+  RUN   V-cancel_attest-3_fail_at_bound_8_inputs_no_token_reaches_sig_gate
+  PASS  V-cancel_attest-3_fail_at_bound_8_inputs_no_token_reaches_sig_gate
+  RUN   V-cancel_attest-4_fail_bound_plus_one_9_inputs_rejected_by_length_guard
+  PASS  V-cancel_attest-4_fail_bound_plus_one_9_inputs_rejected_by_length_guard
+  RUN   V-cancel_attest-5_fail_victim_token_at_last_reachable_index_7
+  PASS  V-cancel_attest-5_fail_victim_token_at_last_reachable_index_7
+  RUN   V-close_attest-6_fail_witness_wrong_tok_prefix_blake3_mismatch
+  PASS  V-close_attest-6_fail_witness_wrong_tok_prefix_blake3_mismatch
+  RUN   V-cancel_attest-6_fail_witness_wrong_tok_prefix_blake3_mismatch
+  PASS  V-cancel_attest-6_fail_witness_wrong_tok_prefix_blake3_mismatch
+
+12 tests: 12 passed, 0 failed

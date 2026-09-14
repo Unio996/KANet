@@ -1,0 +1,20 @@
+{
+  "tests": [
+    {
+      "name": "P_neg1_twoscomplement",
+      "function": "probe",
+      "constructor_args": [-1],
+      "args": ["0xffffffffffffffff"],
+      "expect": "pass",
+      "tx": { "active_input_index": 0, "inputs": [{ "utxo_value": 1, "signature_script_hex": "0x00" }], "outputs": [{ "value": 1 }] }
+    },
+    {
+      "name": "P_neg1_signmagnitude",
+      "function": "probe",
+      "constructor_args": [-1],
+      "args": ["0x0100000000000080"],
+      "expect": "pass",
+      "tx": { "active_input_index": 0, "inputs": [{ "utxo_value": 1, "signature_script_hex": "0x00" }], "outputs": [{ "value": 1 }] }
+    }
+  ]
+}

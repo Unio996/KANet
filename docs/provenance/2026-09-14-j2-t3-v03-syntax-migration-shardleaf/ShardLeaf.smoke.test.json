@@ -1,0 +1,116 @@
+{
+ "tests": [
+  {
+   "name": "SMOKE-register_append_pass",
+   "function": "register_append",
+   "constructor_args": [
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "0x3f20b0dfe8af5aafa0f2081df85d272040b9611b9315b86bc7d9e13e25d5006c",
+    "0x3737373737373737373737373737373737373737373737373737373737373737",
+    10,
+    1,
+    "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    1700000000,
+    0,
+    0,
+    0,
+    0
+   ],
+   "args": [
+    0,
+    50,
+    0,
+    1,
+    "0x2222222222222222222222222222222222222222222222222222222222222222",
+    "0x6b",
+    "0x6c7604ab7eabfa87637557798201209d75567982599f6975557982599f697554798201209d75b9cb547954795479547953795379537953796079607960796079537958798769527957799c697856799c6976557987695c79519c69b900cc01200116797e010801167958cd7e010801167958cd7e01200116797e7e7e7eb976c902160194765193bc7c7eb976c97602c180937cbc7eaa02000001aa7e01207e7c7e01877e78c3887575757575757575757575757575757575757575757551676a68"
+   ],
+   "expect": "pass",
+   "tx": {
+    "active_input_index": 0,
+    "inputs": [
+     {
+      "utxo_value": 1,
+      "covenant_id": "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "state": {
+       "local_yes": 0,
+       "local_no": 0,
+       "count": 0,
+       "pool_value": 0
+      }
+     }
+    ],
+    "outputs": [
+     {
+      "value": 50,
+      "covenant_id": "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "state": {
+       "local_yes": 50,
+       "local_no": 0,
+       "count": 1,
+       "pool_value": 50
+      }
+     },
+     {
+      "value": 1,
+      "script_hex": "0xaa2061ec635b8399252604fb54e7555181c5de083ac12fdf6e4abfe1ca98a925d37587"
+     }
+    ]
+   }
+  },
+  {
+   "name": "SMOKE-consolidate_to_payout_pass_sealed",
+   "function": "consolidate_to_payout",
+   "constructor_args": [
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "0x3f20b0dfe8af5aafa0f2081df85d272040b9611b9315b86bc7d9e13e25d5006c",
+    "0x3737373737373737373737373737373737373737373737373737373737373737",
+    10,
+    1,
+    "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    1700000000,
+    0,
+    0,
+    10,
+    300
+   ],
+   "args": [
+    1,
+    1
+   ],
+   "expect": "pass",
+   "tx": {
+    "active_input_index": 0,
+    "lock_time": 1700000000000,
+    "inputs": [
+     {
+      "utxo_value": 1,
+      "covenant_id": "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "state": {
+       "local_yes": 300,
+       "local_no": 0,
+       "count": 10,
+       "pool_value": 300
+      }
+     },
+     {
+      "utxo_value": 500,
+      "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "signature_script_hex": "0x00ffffffffffffffffffffffffffffffffffffffff"
+     }
+    ],
+    "outputs": [
+     {
+      "value": 1,
+      "covenant_id": "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+     },
+     {
+      "value": 800,
+      "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "authorizing_input": 1
+     }
+    ]
+   }
+  }
+ ]
+}

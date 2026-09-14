@@ -1,0 +1,393 @@
+pragma silverscript ^0.1.0;
+
+// CloseZkV2.sil — claim-complete 版 CloseZk covenant(J2 2026-07-07,应急跨域顶卡1,J1 机器网络层 unreachable)。
+// 设计文档: docs/2026-07-07-closezk-claim-complete-design.md(NWT+Bettor 双审 GO)。
+// 相对 _j2_closezk_repro4.sil 的改动(诚实列清单,方便 NWT diff 审,不是"整份重写"):
+//   ① ctor 字段 attestedAtSeconds 改名 attestedAtMs(单位统一到毫秒域, 删除 escape_trigger 的 *1000 转换 — §1)。
+//   ② 新增 claim entrypoint(closed==2 前置, 验对象 payoutRootField, 逐行照抄 PayoutShard.sil claim(L171-225)
+//      的 merkle membership 逻辑 + _j2_closezk_repro4.sil escape_claim(L140-160) 的 dust 边界修法 — §2.4)。
+//   ③ zk_close / escape_trigger(单位改动除外) / escape_claim 逻辑与 _j2_closezk_repro4.sil 逐字节一致,零改动。
+//   ④ closeZkTmplAnchor 相关: 本文件是不同字节码(多了 claim entry), genesis-mint 时锚值必须对本文件实际编译
+//      产物重新计算, 不得复用 repro4 时代缓存值(设计文档 §4 硬门第⑥条)。
+//
+// #NWT-checklist ①③④⑤(继承自 repro3/repro4, 未变): attested_winner/betsRootBaked 都是本合约自己的 STATE
+//   (continuation 里的, 非 witness/非 caller 自报); groth16 proof 本体不进 redeem(只有 gate_tmpl_hash 32B 烤);
+//   journalHash 用 sha256(RISC0 digest), betsRoot/payoutRoot 本身 blake2b。
+contract CloseZkV2(
+    byte[32] gateTmplHash,          // blake2b(gatePrefix||gateSuffix), 烤死(改guest image_id=新covenant=新hash)
+    byte[32] betsRootBaked,         // genesis烤: 本市场bets的hash-chain根(zk_close journalHash用, 非merkle, 不可做membership proof)
+    byte[32] refundRootBaked,       // genesis-mint时用既有 payoutRoot()/levelsOf() depth-10 merkle 构造烤(喂{pk,amount:stake}), escape_claim 用
+    int      attestedAtMs,          // §1 修正: 直接读 PayoutShardV2 close_attest state 的 attestedAtMs 原值烤入, 不转换单位
+    int      init_attestedWinner,   // phase1 oracle_attest_verdict已经写入的STATE(0=还没attest/1=YES/2=NO, 本例用int简化)
+    int      init_closed,           // 0=待attest(理论态,生产管线不产生,见设计文档§3) / 1=已attest待zk_close或待escape / 2=zk_close完成待claim / 3=escape已触发待逐bettor领
+    byte[32] init_payoutRootField,
+    int      init_consolidated_pool,   // genesis-mint时读phase1 continuation实际UTXO金额烤入(D-017后语义=代币amount)
+    int init_w0, int init_w1, int init_w2, int init_w3, int init_w4, int init_w5, int init_w6, int init_w7, int init_w8,
+    int init_w9, int init_w10, int init_w11, int init_w12, int init_w13, int init_w14, int init_w15, int init_w16,  // 17-word nullifier(claim/escape_claim共用, 见§5安全性论证)
+    // —— v0.3 §2/§3 代币化(T3, ledger 1170): 同 PayoutShardV2.sil/RefundClaim.sil 三件套, P13 witness+blake3 形 ——
+    byte[32] token_tmpl_hash,
+    byte[32] claim_tmpl_hash,
+    byte[32] market_suffix_hash
+) {
+    int attestedWinner = init_attestedWinner;
+    int closed = init_closed;
+    byte[32] payoutRootField = init_payoutRootField;
+    int consolidated_pool = init_consolidated_pool;
+    int w0 = init_w0; int w1 = init_w1; int w2 = init_w2; int w3 = init_w3; int w4 = init_w4; int w5 = init_w5;
+    int w6 = init_w6; int w7 = init_w7; int w8 = init_w8; int w9 = init_w9; int w10 = init_w10; int w11 = init_w11;
+    int w12 = init_w12; int w13 = init_w13; int w14 = init_w14; int w15 = init_w15; int w16 = init_w16;
+
+    // KanetTestToken 六字段布局镜像(同 PayoutShard.sil/PayoutShardV2.sil/RefundClaim.sil §T3 v0.3 §2/§3 代币化)
+    struct TokenState {
+        int      amount;
+        byte[32] owner;
+        byte     owner_scheme;
+        byte     borrow_scheme;
+        byte[32] borrow_guard;
+        byte[32] extension_commitment;
+    }
+    // KanetTokenClaim.sil 隐式 State 布局镜像(同 RefundClaim.sil 用途: claim 家族目的地重定向)
+    struct ClaimState {
+        byte[32] market_cov_id;
+        byte[32] winner_pk;
+        int      amount;
+        byte[32] token_tmpl_hash;
+        byte[32] market_suffix_hash;
+    }
+    byte constant TOKEN_SCHEME_COVENANT_ID = 0x04;
+    byte constant TOKEN_BORROW_DISABLED    = 0x00;
+    int constant MAX_INS_SCAN = 8;
+    int constant DUST_MIN = 1000;
+    // ★ V-T-8 绕路(ledger 1172/1173, Bettor 裁: 根因仍未定位·NWT 排除体积假说, 处置不变——含
+    //   readInputStateWithTemplate + validateOutputState 同函数共存组合的入口一律 AB11 + 实测, 不因某一次
+    //   实测未崩就当安全豁免; 详见 docs/provenance/2026-09-14-j2-vt8-read-external-plus-self-continue-probe/)。
+    //   claim/escape_claim 的 partial 分支需要读被消费代币(readInputStateWithTemplate) + 续本合约自身
+    //   State(21 字段: attestedWinner/closed/payoutRootField/consolidated_pool/w0..w16), 因此改手写等价形式。
+    //   以下两常量按本文件*实际编译产物*量测得出(measure_closezkv2_state_span.mjs, 见 provenance), 不是
+    //   拍脑袋——换本文件源码结构必须重新编译重新量重新填这两个数(量测脚本内置漂移检测)。
+    int constant OWN_PREFIX_LEN = 1;
+    int constant OWN_STATE_LEN  = 213;
+
+    // (B) v0.3 §2/§3 + 1151 P13 形(同 PayoutShard.sil/PayoutShardV2.sil 逐字复制): 不在场证明, B 类入口用。
+    function noTokenInput(byte[] tok_prefix, byte[] tok_suffix) : bool {
+        require(blake3((tok_prefix.length as byte[8]) + tok_prefix + (tok_suffix.length as byte[8]) + tok_suffix) == token_tmpl_hash);
+        require(tx.inputs.length <= MAX_INS_SCAN);
+        bool found = false;
+        int L = tok_suffix.length;
+        for (i, 0, tx.inputs.length, MAX_INS_SCAN) {
+            byte[] ss = tx.inputs[i].sigScript;
+            int n = ss.length;
+            if (n >= L) {
+                if (ss.slice(n - L, n) == tok_suffix) { found = true; }
+            }
+        }
+        return !found;
+    }
+
+    // entry 0: zk_close — 只读本合约自己的state(attestedWinner/betsRootBaked), 不接受任何witness喂的winner值。
+    // [REGRESSION: 逻辑一字不动, 逐字节照抄 _j2_closezk_repro4.sil]
+    entry zk_close(
+        byte[] gateSuffix,           // witness喂: gate redeem的后缀部分(不含journal_hash, 不含groth16 proof本体)
+        byte[32] guestPayoutRoot,    // witness喂: guest算出的payout_root(将被烤进continuation, 供claim entry验证)
+        int selfOutIdx,
+        byte[] tok_prefix, byte[] tok_suffix   // v0.3 §2/§3 + 1151 P13 形: witness 供代币模板字节, noTokenInput 内部现场核 token_tmpl_hash
+    ) {
+        require(closed == 1);   // write-once: 必须已经过phase1 attest, 与 escape_trigger 的 1→3 互斥
+        require(noTokenInput(tok_prefix, tok_suffix));   // ★ v0.3 §2/§3: B 类不在场证明(本 entry 不动代币)
+
+        byte[32] journalHash = sha256(betsRootBaked + byte[](attestedWinner as byte[1]) + guestPayoutRoot);
+
+        byte[1] gatePrefix = byte[1](0x20);
+        require(blake2b(gatePrefix + gateSuffix) == gateTmplHash);
+
+        byte[32] gateRedeemHash = blake2b(gatePrefix + journalHash + gateSuffix);
+        require(tx.inputs[1].scriptPubKey == byte[](new ScriptPubKeyP2SH(gateRedeemHash)));
+
+        validateOutputState(selfOutIdx, State {
+            attestedWinner: attestedWinner,
+            closed: 2,
+            payoutRootField: guestPayoutRoot,
+            consolidated_pool: consolidated_pool,
+            w0: w0, w1: w1, w2: w2, w3: w3, w4: w4, w5: w5, w6: w6, w7: w7, w8: w8, w9: w9, w10: w10, w11: w11, w12: w12, w13: w13, w14: w14, w15: w15, w16: w16
+        });
+        require(tx.outputs[selfOutIdx].value >= DUST_MIN);   // ★ v0.3: zk_close 不动代币, KAS 侧只剩 dust
+    }
+
+    // entry 1: escape_trigger — permissionless flag-flip, 不碰钱, 一次性 closed 1→3。
+    // §1 单位修正: attestedAtMs + ESCAPE_GRACE_MS, 全链路统一毫秒域, 删除原来的 *1000 转换。
+    entry escape_trigger(int selfOutIdx, byte[] tok_prefix, byte[] tok_suffix) {
+        require(closed == 1);                                            // 同 zk_close 前置, 与其 1→2 互斥
+        require(noTokenInput(tok_prefix, tok_suffix));                   // ★ v0.3 §2/§3: B 类不在场证明(本 entry 不动代币)
+        require(tx.time >= temporal(attestedAtMs + 21600000));           // ESCAPE_GRACE_MS=21600000(6h, 仍是占位数, 设计文档§4③要求团队另行签字确认时长)。v1.0.0: tx.time 只收 temporal, int 须显式 temporal(...) 转型(语义不变, 纯类型迁移)
+        require(tx.outputs[selfOutIdx].value >= DUST_MIN);               // ★ v0.3: trigger 不动代币, KAS 侧只剩 dust
+        validateOutputState(selfOutIdx, State {
+            attestedWinner: attestedWinner,
+            closed: 3,
+            payoutRootField: payoutRootField,
+            consolidated_pool: consolidated_pool,
+            w0: w0, w1: w1, w2: w2, w3: w3, w4: w4, w5: w5, w6: w6, w7: w7, w8: w8, w9: w9, w10: w10, w11: w11, w12: w12, w13: w13, w14: w14, w15: w15, w16: w16
+        });
+    }
+
+    // entry 2: escape_claim — 逐bettor可重复调用, precondition closed==3, postcondition closed不变。
+    // [REGRESSION: 逻辑一字不动, 逐字节照抄 _j2_closezk_repro4.sil L85-161, 验对象 refundRootBaked]
+    // ★ v0.3 §2/§3 代币化(ledger 1170, 同 RefundClaim.refund_payout 形状): 退款目的地不再是裸 P2PK(D-017)——
+    //   本笔交易新建一个 KanetTokenClaim 实例, 把 bettor 的份额以"代币 owner = 新 claim covenant"的形式转过去。
+    entry escape_claim(
+        int selfOutIdx, int claimOutIdx,
+        int tokenInIdx, int tokenOutIdx, int remainTokenOutIdx,
+        byte[32] bettorPk, int stake, int merkle_index,
+        byte[32] s0, byte[32] s1, byte[32] s2, byte[32] s3, byte[32] s4, byte[32] s5, byte[32] s6, byte[32] s7, byte[32] s8, byte[32] s9,
+        byte[] tok_prefix, byte[] tok_suffix,       // v0.3 §2/§3 + 1151 P13 形: witness 供代币模板字节
+        byte[] claim_prefix, byte[] claim_suffix    // Q8: witness 供 KanetTokenClaim 编译模板字节, 现场核 claim_tmpl_hash
+    ) {
+        require(closed == 3);                                             // ★ 精确 ==3, 消歧于 zk_close 的 closed==2, 与其互斥
+        require(merkle_index >= 0); require(merkle_index < 1024);         // depth-10 cap
+        require(stake >= 1); require(stake <= consolidated_pool);
+        byte[32] cur = blake2b(byte[](bettorPk) + byte[](stake as byte[8]));
+        int div = 1;
+        int b0 = (merkle_index / div) % 2; if (b0 == 0) { cur = blake2b(byte[](cur) + byte[](s0)); } else { cur = blake2b(byte[](s0) + byte[](cur)); } div = div * 2;
+        int b1 = (merkle_index / div) % 2; if (b1 == 0) { cur = blake2b(byte[](cur) + byte[](s1)); } else { cur = blake2b(byte[](s1) + byte[](cur)); } div = div * 2;
+        int b2 = (merkle_index / div) % 2; if (b2 == 0) { cur = blake2b(byte[](cur) + byte[](s2)); } else { cur = blake2b(byte[](s2) + byte[](cur)); } div = div * 2;
+        int b3 = (merkle_index / div) % 2; if (b3 == 0) { cur = blake2b(byte[](cur) + byte[](s3)); } else { cur = blake2b(byte[](s3) + byte[](cur)); } div = div * 2;
+        int b4 = (merkle_index / div) % 2; if (b4 == 0) { cur = blake2b(byte[](cur) + byte[](s4)); } else { cur = blake2b(byte[](s4) + byte[](cur)); } div = div * 2;
+        int b5 = (merkle_index / div) % 2; if (b5 == 0) { cur = blake2b(byte[](cur) + byte[](s5)); } else { cur = blake2b(byte[](s5) + byte[](cur)); } div = div * 2;
+        int b6 = (merkle_index / div) % 2; if (b6 == 0) { cur = blake2b(byte[](cur) + byte[](s6)); } else { cur = blake2b(byte[](s6) + byte[](cur)); } div = div * 2;
+        int b7 = (merkle_index / div) % 2; if (b7 == 0) { cur = blake2b(byte[](cur) + byte[](s7)); } else { cur = blake2b(byte[](s7) + byte[](cur)); } div = div * 2;
+        int b8 = (merkle_index / div) % 2; if (b8 == 0) { cur = blake2b(byte[](cur) + byte[](s8)); } else { cur = blake2b(byte[](s8) + byte[](cur)); } div = div * 2;
+        int b9 = (merkle_index / div) % 2; if (b9 == 0) { cur = blake2b(byte[](cur) + byte[](s9)); } else { cur = blake2b(byte[](s9) + byte[](cur)); } div = div * 2;
+        require(cur == refundRootBaked);                                  // ★ 验对象是 refundRootBaked
+        int word_idx = merkle_index / 63;
+        int bit_in   = merkle_index % 63;
+        int mask = 1;
+        for (b, 0, bit_in, 63) { mask = mask * 2; }
+        int nw0 = w0; int nw1 = w1; int nw2 = w2; int nw3 = w3; int nw4 = w4; int nw5 = w5; int nw6 = w6; int nw7 = w7; int nw8 = w8;
+        int nw9 = w9; int nw10 = w10; int nw11 = w11; int nw12 = w12; int nw13 = w13; int nw14 = w14; int nw15 = w15; int nw16 = w16;
+        if (word_idx == 0)       { require((w0 / mask) % 2 == 0); nw0 = w0 + mask; }
+        else if (word_idx == 1)  { require((w1 / mask) % 2 == 0); nw1 = w1 + mask; }
+        else if (word_idx == 2)  { require((w2 / mask) % 2 == 0); nw2 = w2 + mask; }
+        else if (word_idx == 3)  { require((w3 / mask) % 2 == 0); nw3 = w3 + mask; }
+        else if (word_idx == 4)  { require((w4 / mask) % 2 == 0); nw4 = w4 + mask; }
+        else if (word_idx == 5)  { require((w5 / mask) % 2 == 0); nw5 = w5 + mask; }
+        else if (word_idx == 6)  { require((w6 / mask) % 2 == 0); nw6 = w6 + mask; }
+        else if (word_idx == 7)  { require((w7 / mask) % 2 == 0); nw7 = w7 + mask; }
+        else if (word_idx == 8)  { require((w8 / mask) % 2 == 0); nw8 = w8 + mask; }
+        else if (word_idx == 9)  { require((w9 / mask) % 2 == 0); nw9 = w9 + mask; }
+        else if (word_idx == 10) { require((w10 / mask) % 2 == 0); nw10 = w10 + mask; }
+        else if (word_idx == 11) { require((w11 / mask) % 2 == 0); nw11 = w11 + mask; }
+        else if (word_idx == 12) { require((w12 / mask) % 2 == 0); nw12 = w12 + mask; }
+        else if (word_idx == 13) { require((w13 / mask) % 2 == 0); nw13 = w13 + mask; }
+        else if (word_idx == 14) { require((w14 / mask) % 2 == 0); nw14 = w14 + mask; }
+        else if (word_idx == 15) { require((w15 / mask) % 2 == 0); nw15 = w15 + mask; }
+        else                     { require((w16 / mask) % 2 == 0); nw16 = w16 + mask; }
+        // ★ P13 形: witness 供代币模板前后缀, 现场核 token_tmpl_hash, 核过后再读被消费的代币(同
+        //   RefundClaim.refund_payout, PayoutShardV2.absorb/zk_handoff 一致手法)。
+        require(blake3((tok_prefix.length as byte[8]) + tok_prefix + (tok_suffix.length as byte[8]) + tok_suffix) == token_tmpl_hash);
+        TokenState heldTk = readInputStateWithTemplate(tokenInIdx, tok_prefix.length, tok_suffix.length, token_tmpl_hash);
+        require(heldTk.owner == OpInputCovenantId(this.activeInputIndex));   // ★ H1 在场: 被消费的代币真属本合约
+        require(heldTk.amount == consolidated_pool);                        // ★ 持仓量跟自身账本一致(不信任 witness)
+
+        // ★ Q8: witness 供 KanetTokenClaim 编译模板前后缀, 现场核 claim_tmpl_hash——结构性用途。
+        require(blake3((claim_prefix.length as byte[8]) + claim_prefix + (claim_suffix.length as byte[8]) + claim_suffix) == claim_tmpl_hash);
+
+        // ★ ZERO32 目的地守卫(NWT 1158 系统性扫查纪律): 独立验证 = 上面 claim_tmpl_hash 的现场核对。
+        byte[32] claimCovId = OpOutputCovenantId(claimOutIdx);
+        require(claimCovId != byte[32](0x0000000000000000000000000000000000000000000000000000000000000000));
+
+        // 新建 KanetTokenClaim 实例: market_cov_id=本合约自身身份 / winner_pk=票面 bettor / amount=票面 stake。
+        validateOutputStateWithTemplate(claimOutIdx, ClaimState {
+            market_cov_id:       OpInputCovenantId(this.activeInputIndex),
+            winner_pk:           bettorPk,
+            amount:              stake,
+            token_tmpl_hash:     token_tmpl_hash,
+            market_suffix_hash:  market_suffix_hash
+        }, claim_prefix, claim_suffix, claim_tmpl_hash);
+
+        // 代币输出: 转给新 claim 的那份, owner = 新 claim covenant id(上面已核非 ZERO32)。
+        validateOutputStateWithInputTemplate(tokenOutIdx, TokenState {
+            amount:               stake,
+            owner:                claimCovId,
+            owner_scheme:         TOKEN_SCHEME_COVENANT_ID,
+            borrow_scheme:        TOKEN_BORROW_DISABLED,
+            borrow_guard:         byte[32](0x0000000000000000000000000000000000000000000000000000000000000000),
+            extension_commitment: byte[32](0x0000000000000000000000000000000000000000000000000000000000000000)
+        }, tokenInIdx, tok_prefix.length, tok_suffix.length, token_tmpl_hash);
+
+        // ★ draw-down(同 RefundClaim.refund_payout 形状): remaining==0 ⇒ 无代币剩余续约、无 bookkeeping
+        //   续约; remaining>0 ⇒ 代币续一份剩余量给本合约自己 + bookkeeping 续一份 consolidated_pool-stake。
+        if (consolidated_pool != stake) {
+            validateOutputStateWithInputTemplate(remainTokenOutIdx, TokenState {
+                amount:               consolidated_pool - stake,
+                owner:                OpInputCovenantId(this.activeInputIndex),
+                owner_scheme:         TOKEN_SCHEME_COVENANT_ID,
+                borrow_scheme:        TOKEN_BORROW_DISABLED,
+                borrow_guard:         byte[32](0x0000000000000000000000000000000000000000000000000000000000000000),
+                extension_commitment: byte[32](0x0000000000000000000000000000000000000000000000000000000000000000)
+            }, tokenInIdx, tok_prefix.length, tok_suffix.length, token_tmpl_hash);
+            require(tx.outputs[selfOutIdx].value >= DUST_MIN);  // ★ v0.3: KAS 侧只剩 dust
+            // ★ V-T-8 绕路(AB11, 见上方 OWN_PREFIX_LEN/OWN_STATE_LEN 注释): 手写编码新 State(21 字段,
+            //   逐字段 tag+payload), 不走 validateOutputState(同函数已有 readInputStateWithTemplate)。
+            byte[] escStateBytes = byte[](8 as byte[1]) + byte[](attestedWinner as byte[8])
+                                  + byte[](8 as byte[1]) + byte[](3 as byte[8])
+                                  + byte[](32 as byte[1]) + byte[](payoutRootField)
+                                  + byte[](8 as byte[1]) + byte[]((consolidated_pool - stake) as byte[8])
+                                  + byte[](8 as byte[1]) + byte[](nw0 as byte[8])
+                                  + byte[](8 as byte[1]) + byte[](nw1 as byte[8])
+                                  + byte[](8 as byte[1]) + byte[](nw2 as byte[8])
+                                  + byte[](8 as byte[1]) + byte[](nw3 as byte[8])
+                                  + byte[](8 as byte[1]) + byte[](nw4 as byte[8])
+                                  + byte[](8 as byte[1]) + byte[](nw5 as byte[8])
+                                  + byte[](8 as byte[1]) + byte[](nw6 as byte[8])
+                                  + byte[](8 as byte[1]) + byte[](nw7 as byte[8])
+                                  + byte[](8 as byte[1]) + byte[](nw8 as byte[8])
+                                  + byte[](8 as byte[1]) + byte[](nw9 as byte[8])
+                                  + byte[](8 as byte[1]) + byte[](nw10 as byte[8])
+                                  + byte[](8 as byte[1]) + byte[](nw11 as byte[8])
+                                  + byte[](8 as byte[1]) + byte[](nw12 as byte[8])
+                                  + byte[](8 as byte[1]) + byte[](nw13 as byte[8])
+                                  + byte[](8 as byte[1]) + byte[](nw14 as byte[8])
+                                  + byte[](8 as byte[1]) + byte[](nw15 as byte[8])
+                                  + byte[](8 as byte[1]) + byte[](nw16 as byte[8]);
+            byte[] escOwnSig = tx.inputs[this.activeInputIndex].sigScript;
+            int escOwnLen = escOwnSig.length;
+            byte[] escOwnPrefix = escOwnSig.slice(0, OWN_PREFIX_LEN);
+            byte[] escOwnSuffix = escOwnSig.slice(OWN_PREFIX_LEN + OWN_STATE_LEN, escOwnLen);
+            byte[32] escExpectedHash = blake2b(escOwnPrefix + escStateBytes + escOwnSuffix);
+            byte[37] escExpectedSpk = new ScriptPubKeyP2SH(escExpectedHash);
+            require(tx.outputs[selfOutIdx].scriptPubKey == byte[](escExpectedSpk));
+        }
+    }
+
+    // entry 3: claim(新增, 设计文档§2.4) — 逐bettor可重复调用, precondition closed==2, postcondition closed不变。
+    //   NWT checklist③: 验对象是 payoutRootField(zk_close 写入, guest 算出的 pari-mutuel payout 树),
+    //   不是 refundRootBaked(escape_claim 专用的原始 stake 树, 语义不同: payout 金额 ≠ 原始 stake)。
+    //   leaf 公式 blake2b(bettorPk + byte[](payout,8)) 照抄 PayoutShard.sil claim entry(L179), 非重发明。
+    // ★ v0.3 §2/§3 代币化(ledger 1170, 同 escape_claim/RefundClaim.refund_payout 形状): 派彩目的地不再是裸
+    //   P2PK(D-017)——本笔交易新建一个 KanetTokenClaim 实例, 把赢家的份额以"代币 owner = 新 claim covenant"
+    //   的形式转过去。
+    entry claim(
+        int selfOutIdx, int claimOutIdx,
+        int tokenInIdx, int tokenOutIdx, int remainTokenOutIdx,
+        byte[32] bettorPk, int payout, int merkle_index,
+        byte[32] s0, byte[32] s1, byte[32] s2, byte[32] s3, byte[32] s4, byte[32] s5, byte[32] s6, byte[32] s7, byte[32] s8, byte[32] s9,
+        byte[] tok_prefix, byte[] tok_suffix,       // v0.3 §2/§3 + 1151 P13 形: witness 供代币模板字节
+        byte[] claim_prefix, byte[] claim_suffix    // Q8: witness 供 KanetTokenClaim 编译模板字节, 现场核 claim_tmpl_hash
+    ) {
+        require(closed == 2);                                             // ★ 精确 ==2: zk_close 已完成, 与 escape_claim 的 ==3 互斥(§3⑤)
+        require(merkle_index >= 0); require(merkle_index < 1024);         // depth-10 cap, 同 PayoutShard.sil claim / escape_claim
+        require(payout >= 1); require(payout <= consolidated_pool);
+        byte[32] cur = blake2b(byte[](bettorPk) + byte[](payout as byte[8]));
+        int div = 1;
+        int b0 = (merkle_index / div) % 2; if (b0 == 0) { cur = blake2b(byte[](cur) + byte[](s0)); } else { cur = blake2b(byte[](s0) + byte[](cur)); } div = div * 2;
+        int b1 = (merkle_index / div) % 2; if (b1 == 0) { cur = blake2b(byte[](cur) + byte[](s1)); } else { cur = blake2b(byte[](s1) + byte[](cur)); } div = div * 2;
+        int b2 = (merkle_index / div) % 2; if (b2 == 0) { cur = blake2b(byte[](cur) + byte[](s2)); } else { cur = blake2b(byte[](s2) + byte[](cur)); } div = div * 2;
+        int b3 = (merkle_index / div) % 2; if (b3 == 0) { cur = blake2b(byte[](cur) + byte[](s3)); } else { cur = blake2b(byte[](s3) + byte[](cur)); } div = div * 2;
+        int b4 = (merkle_index / div) % 2; if (b4 == 0) { cur = blake2b(byte[](cur) + byte[](s4)); } else { cur = blake2b(byte[](s4) + byte[](cur)); } div = div * 2;
+        int b5 = (merkle_index / div) % 2; if (b5 == 0) { cur = blake2b(byte[](cur) + byte[](s5)); } else { cur = blake2b(byte[](s5) + byte[](cur)); } div = div * 2;
+        int b6 = (merkle_index / div) % 2; if (b6 == 0) { cur = blake2b(byte[](cur) + byte[](s6)); } else { cur = blake2b(byte[](s6) + byte[](cur)); } div = div * 2;
+        int b7 = (merkle_index / div) % 2; if (b7 == 0) { cur = blake2b(byte[](cur) + byte[](s7)); } else { cur = blake2b(byte[](s7) + byte[](cur)); } div = div * 2;
+        int b8 = (merkle_index / div) % 2; if (b8 == 0) { cur = blake2b(byte[](cur) + byte[](s8)); } else { cur = blake2b(byte[](s8) + byte[](cur)); } div = div * 2;
+        int b9 = (merkle_index / div) % 2; if (b9 == 0) { cur = blake2b(byte[](cur) + byte[](s9)); } else { cur = blake2b(byte[](s9) + byte[](cur)); } div = div * 2;
+        require(cur == payoutRootField);                                   // ★ NWT checklist③: 验对象是 payoutRootField
+        int word_idx = merkle_index / 63;
+        int bit_in   = merkle_index % 63;
+        int mask = 1;
+        for (b, 0, bit_in, 63) { mask = mask * 2; }
+        int nw0 = w0; int nw1 = w1; int nw2 = w2; int nw3 = w3; int nw4 = w4; int nw5 = w5; int nw6 = w6; int nw7 = w7; int nw8 = w8;
+        int nw9 = w9; int nw10 = w10; int nw11 = w11; int nw12 = w12; int nw13 = w13; int nw14 = w14; int nw15 = w15; int nw16 = w16;
+        // ★ NWT checklist⑤: 复用 escape_claim 同一份 w0-16 顶层 state 变量, 安全性论证见设计文档 §5
+        //   (closed write-once 互斥, 同一实例终身只绑一棵树, 不存在同一 bit 被两棵树各解读一次的冲突)。
+        if (word_idx == 0)       { require((w0 / mask) % 2 == 0); nw0 = w0 + mask; }
+        else if (word_idx == 1)  { require((w1 / mask) % 2 == 0); nw1 = w1 + mask; }
+        else if (word_idx == 2)  { require((w2 / mask) % 2 == 0); nw2 = w2 + mask; }
+        else if (word_idx == 3)  { require((w3 / mask) % 2 == 0); nw3 = w3 + mask; }
+        else if (word_idx == 4)  { require((w4 / mask) % 2 == 0); nw4 = w4 + mask; }
+        else if (word_idx == 5)  { require((w5 / mask) % 2 == 0); nw5 = w5 + mask; }
+        else if (word_idx == 6)  { require((w6 / mask) % 2 == 0); nw6 = w6 + mask; }
+        else if (word_idx == 7)  { require((w7 / mask) % 2 == 0); nw7 = w7 + mask; }
+        else if (word_idx == 8)  { require((w8 / mask) % 2 == 0); nw8 = w8 + mask; }
+        else if (word_idx == 9)  { require((w9 / mask) % 2 == 0); nw9 = w9 + mask; }
+        else if (word_idx == 10) { require((w10 / mask) % 2 == 0); nw10 = w10 + mask; }
+        else if (word_idx == 11) { require((w11 / mask) % 2 == 0); nw11 = w11 + mask; }
+        else if (word_idx == 12) { require((w12 / mask) % 2 == 0); nw12 = w12 + mask; }
+        else if (word_idx == 13) { require((w13 / mask) % 2 == 0); nw13 = w13 + mask; }
+        else if (word_idx == 14) { require((w14 / mask) % 2 == 0); nw14 = w14 + mask; }
+        else if (word_idx == 15) { require((w15 / mask) % 2 == 0); nw15 = w15 + mask; }
+        else                     { require((w16 / mask) % 2 == 0); nw16 = w16 + mask; }
+        // ★ P13 形: witness 供代币模板前后缀, 现场核 token_tmpl_hash, 核过后再读被消费的代币(同 escape_claim)。
+        require(blake3((tok_prefix.length as byte[8]) + tok_prefix + (tok_suffix.length as byte[8]) + tok_suffix) == token_tmpl_hash);
+        TokenState heldTk = readInputStateWithTemplate(tokenInIdx, tok_prefix.length, tok_suffix.length, token_tmpl_hash);
+        require(heldTk.owner == OpInputCovenantId(this.activeInputIndex));   // ★ H1 在场: 被消费的代币真属本合约
+        require(heldTk.amount == consolidated_pool);                        // ★ 持仓量跟自身账本一致(不信任 witness)
+
+        // ★ Q8: witness 供 KanetTokenClaim 编译模板前后缀, 现场核 claim_tmpl_hash——结构性用途。
+        require(blake3((claim_prefix.length as byte[8]) + claim_prefix + (claim_suffix.length as byte[8]) + claim_suffix) == claim_tmpl_hash);
+
+        // ★ ZERO32 目的地守卫(NWT 1158 系统性扫查纪律): 独立验证 = 上面 claim_tmpl_hash 的现场核对。
+        byte[32] claimCovId = OpOutputCovenantId(claimOutIdx);
+        require(claimCovId != byte[32](0x0000000000000000000000000000000000000000000000000000000000000000));
+
+        // 新建 KanetTokenClaim 实例: market_cov_id=本合约自身身份 / winner_pk=票面 bettor / amount=票面 payout。
+        validateOutputStateWithTemplate(claimOutIdx, ClaimState {
+            market_cov_id:       OpInputCovenantId(this.activeInputIndex),
+            winner_pk:           bettorPk,
+            amount:              payout,
+            token_tmpl_hash:     token_tmpl_hash,
+            market_suffix_hash:  market_suffix_hash
+        }, claim_prefix, claim_suffix, claim_tmpl_hash);
+
+        // 代币输出: 转给新 claim 的那份, owner = 新 claim covenant id(上面已核非 ZERO32)。
+        validateOutputStateWithInputTemplate(tokenOutIdx, TokenState {
+            amount:               payout,
+            owner:                claimCovId,
+            owner_scheme:         TOKEN_SCHEME_COVENANT_ID,
+            borrow_scheme:        TOKEN_BORROW_DISABLED,
+            borrow_guard:         byte[32](0x0000000000000000000000000000000000000000000000000000000000000000),
+            extension_commitment: byte[32](0x0000000000000000000000000000000000000000000000000000000000000000)
+        }, tokenInIdx, tok_prefix.length, tok_suffix.length, token_tmpl_hash);
+
+        // ★ NWT checklist④ 的 dust 边界修法沿用(remaining==0 ⇒ 无续约; remaining>0 ⇒ 代币剩余量续给本合约
+        //   自己 + bookkeeping 续 consolidated_pool-payout, 同 escape_claim/RefundClaim.refund_payout 形状)。
+        if (consolidated_pool != payout) {
+            validateOutputStateWithInputTemplate(remainTokenOutIdx, TokenState {
+                amount:               consolidated_pool - payout,
+                owner:                OpInputCovenantId(this.activeInputIndex),
+                owner_scheme:         TOKEN_SCHEME_COVENANT_ID,
+                borrow_scheme:        TOKEN_BORROW_DISABLED,
+                borrow_guard:         byte[32](0x0000000000000000000000000000000000000000000000000000000000000000),
+                extension_commitment: byte[32](0x0000000000000000000000000000000000000000000000000000000000000000)
+            }, tokenInIdx, tok_prefix.length, tok_suffix.length, token_tmpl_hash);
+            require(tx.outputs[selfOutIdx].value >= DUST_MIN);   // ★ v0.3: KAS 侧只剩 dust
+            // ★ V-T-8 绕路(AB11, 同 escape_claim, 见上方 OWN_PREFIX_LEN/OWN_STATE_LEN 注释): 手写编码新
+            //   State(21 字段), 不走 validateOutputState(同函数已有 readInputStateWithTemplate)。
+            byte[] clmStateBytes = byte[](8 as byte[1]) + byte[](attestedWinner as byte[8])
+                                  + byte[](8 as byte[1]) + byte[](2 as byte[8])
+                                  + byte[](32 as byte[1]) + byte[](payoutRootField)
+                                  + byte[](8 as byte[1]) + byte[]((consolidated_pool - payout) as byte[8])
+                                  + byte[](8 as byte[1]) + byte[](nw0 as byte[8])
+                                  + byte[](8 as byte[1]) + byte[](nw1 as byte[8])
+                                  + byte[](8 as byte[1]) + byte[](nw2 as byte[8])
+                                  + byte[](8 as byte[1]) + byte[](nw3 as byte[8])
+                                  + byte[](8 as byte[1]) + byte[](nw4 as byte[8])
+                                  + byte[](8 as byte[1]) + byte[](nw5 as byte[8])
+                                  + byte[](8 as byte[1]) + byte[](nw6 as byte[8])
+                                  + byte[](8 as byte[1]) + byte[](nw7 as byte[8])
+                                  + byte[](8 as byte[1]) + byte[](nw8 as byte[8])
+                                  + byte[](8 as byte[1]) + byte[](nw9 as byte[8])
+                                  + byte[](8 as byte[1]) + byte[](nw10 as byte[8])
+                                  + byte[](8 as byte[1]) + byte[](nw11 as byte[8])
+                                  + byte[](8 as byte[1]) + byte[](nw12 as byte[8])
+                                  + byte[](8 as byte[1]) + byte[](nw13 as byte[8])
+                                  + byte[](8 as byte[1]) + byte[](nw14 as byte[8])
+                                  + byte[](8 as byte[1]) + byte[](nw15 as byte[8])
+                                  + byte[](8 as byte[1]) + byte[](nw16 as byte[8]);
+            byte[] clmOwnSig = tx.inputs[this.activeInputIndex].sigScript;
+            int clmOwnLen = clmOwnSig.length;
+            byte[] clmOwnPrefix = clmOwnSig.slice(0, OWN_PREFIX_LEN);
+            byte[] clmOwnSuffix = clmOwnSig.slice(OWN_PREFIX_LEN + OWN_STATE_LEN, clmOwnLen);
+            byte[32] clmExpectedHash = blake2b(clmOwnPrefix + clmStateBytes + clmOwnSuffix);
+            byte[37] clmExpectedSpk = new ScriptPubKeyP2SH(clmExpectedHash);
+            require(tx.outputs[selfOutIdx].scriptPubKey == byte[](clmExpectedSpk));
+        }
+    }
+}

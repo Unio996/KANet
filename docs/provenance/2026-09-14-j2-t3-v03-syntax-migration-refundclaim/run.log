@@ -1,0 +1,8 @@
+  RUN   SMOKE-refund_payout_pass_partial_drawdown
+  PASS  SMOKE-refund_payout_pass_partial_drawdown
+  RUN   SMOKE-refund_payout_fail_not_cancelled
+  PASS  SMOKE-refund_payout_fail_not_cancelled
+  RUN   SMOKE-refund_payout_fail_ticket_wrong_pool
+  PASS  SMOKE-refund_payout_fail_ticket_wrong_pool
+
+3 tests: 3 passed, 0 failed

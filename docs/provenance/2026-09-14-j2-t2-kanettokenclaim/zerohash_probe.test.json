@@ -1,0 +1,16 @@
+{
+  "tests": [
+    {
+      "name": "P_bare_output_covenant_id_is_zero32",
+      "function": "probe",
+      "constructor_args": [0],
+      "args": [0],
+      "expect": "pass",
+      "tx": {
+        "active_input_index": 0,
+        "inputs": [{ "utxo_value": 1, "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "signature_script_hex": "0x00ff" }],
+        "outputs": [{ "value": 1 }]
+      }
+    }
+  ]
+}

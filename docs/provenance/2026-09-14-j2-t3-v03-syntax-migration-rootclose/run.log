@@ -1,0 +1,8 @@
+  RUN   SMOKE-close_commit_fail_no_valid_sigs
+  PASS  SMOKE-close_commit_fail_no_valid_sigs
+  RUN   SMOKE-refund_flip_pass
+  PASS  SMOKE-refund_flip_pass
+  RUN   SMOKE-refund_flip_fail_before_deadline_grace
+  PASS  SMOKE-refund_flip_fail_before_deadline_grace
+
+3 tests: 3 passed, 0 failed

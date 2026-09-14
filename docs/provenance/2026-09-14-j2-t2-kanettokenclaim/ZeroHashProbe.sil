@@ -1,0 +1,11 @@
+pragma silverscript ^0.1.0;
+// Minimal probe: what does OpOutputCovenantId(idx) return for an output with NO declared covenant_id?
+// (NWT 1158 claims rusty-kaspa opcodes/mod.rs unwrap_or(ZERO_HASH) -- verify against THIS debugger's model
+// directly, empirically, rather than trust the citation by inference alone.)
+contract ZeroHashProbe(int dummy) {
+    int x = dummy;
+    entry probe(int out_idx) {
+        byte[32] got = OpOutputCovenantId(out_idx);
+        require(got == byte[32](0x0000000000000000000000000000000000000000000000000000000000000000));
+    }
+}

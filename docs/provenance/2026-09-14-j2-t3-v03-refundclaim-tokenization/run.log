@@ -1,0 +1,14 @@
+  RUN   V-RC-TOK-1_pass_partial_refund_with_remainder
+  PASS  V-RC-TOK-1_pass_partial_refund_with_remainder
+  RUN   V-RC-TOK-2_pass_exact_no_remainder
+  PASS  V-RC-TOK-2_pass_exact_no_remainder
+  RUN   V-RC-TOK-3_fail_destination_not_real_claim_template
+  PASS  V-RC-TOK-3_fail_destination_not_real_claim_template
+  RUN   V-RC-TOK-4_fail_token_owner_diverted_to_stranger
+  PASS  V-RC-TOK-4_fail_token_owner_diverted_to_stranger
+  RUN   V-RC-TOK-5_fail_witness_wrong_tok_prefix
+  PASS  V-RC-TOK-5_fail_witness_wrong_tok_prefix
+  RUN   V-RC-TOK-6_fail_witness_wrong_claim_prefix
+  PASS  V-RC-TOK-6_fail_witness_wrong_claim_prefix
+
+6 tests: 6 passed, 0 failed

@@ -1,0 +1,14 @@
+  RUN   V-RCLZ-1_pass_convert_to_claim_real_bridge
+  PASS  V-RCLZ-1_pass_convert_to_claim_real_bridge
+  RUN   V-RCLZ-2_fail_convert_to_claim_bare_output_no_covenant_id_zero32
+  PASS  V-RCLZ-2_fail_convert_to_claim_bare_output_no_covenant_id_zero32
+  RUN   V-RCLZ-3_fail_convert_to_claim_fake_template_shell
+  PASS  V-RCLZ-3_fail_convert_to_claim_fake_template_shell
+  RUN   V-RCLZ-4_pass_convert_to_refundclaim_real_bridge
+  PASS  V-RCLZ-4_pass_convert_to_refundclaim_real_bridge
+  RUN   V-RCLZ-5_fail_convert_to_refundclaim_bare_output_no_covenant_id_zero32
+  PASS  V-RCLZ-5_fail_convert_to_refundclaim_bare_output_no_covenant_id_zero32
+  RUN   V-RCLZ-6_fail_convert_to_refundclaim_fake_template_shell
+  PASS  V-RCLZ-6_fail_convert_to_refundclaim_fake_template_shell
+
+6 tests: 6 passed, 0 failed

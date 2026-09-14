@@ -1,0 +1,6 @@
+  RUN   SMOKE-register_append_pass
+  PASS  SMOKE-register_append_pass
+  RUN   SMOKE-consolidate_to_payout_pass_sealed
+  PASS  SMOKE-consolidate_to_payout_pass_sealed
+
+2 tests: 2 passed, 0 failed

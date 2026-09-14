@@ -1,0 +1,31 @@
+pragma silverscript ^0.1.0;
+// v0.2 探针(Bettor/NWT 1119 要求, 不许纸上假定): 手写 entry(非 binding=cov)遍历 tx.inputs, 对每个输入先做
+// P13 形结构匹配(sigScript 尾部比对 token_suffix, 不 abort, 只是布尔判断)——只有"看起来像代币"的输入才去调
+// readInputStateWithTemplate 读它的真实 state(owner/amount), 且只累加 owner == 本 market(this.activeInputIndex
+// 的 covenant id) 的那些——同 owner 不同 covenant 家族的输入(结构匹配但 owner 不是我)不计入, 呼应 Bettor 1119-补
+// ①"遍历只认 owner==本 market 的代币模板输入"。累加完后跟调用方声明的 declared_total 做等式约束, 证明"这笔
+// 交易里所有归属本 market 的代币输入都被处理了", 堵住 NWT 6da618e8 的攻击(token#2 被静默漏过)。
+//
+// 🔴 ctor 参数不重新声明成实例字段(同 KanetTestToken.sil 既有约定): token_prefix/token_suffix 是 byte[]
+// 动态数组, 若重新声明成 `byte[] token_prefix = tok_prefix;` 会被当成 State 的一部分(动态长度字段进 State
+// 会撞 size 推断/初始化错误, 本探针第一版就撞过——直接引用 ctor 参数名, 不重新声明)。
+contract MarketScanProbe(byte[] token_prefix, int token_prefix_len, byte[] token_suffix, int token_suffix_len, byte[32] token_tmpl_hash, int max_check) {
+    struct Tok { byte[32] owner; int amount; }
+
+    entry scan_absorb(int declared_total) {
+        int total = 0;
+        for (i, 0, tx.inputs.length, max_check) {
+            byte[] ss = tx.inputs[i].sigScript;
+            int n = ss.length;
+            bool looksLikeToken = false;
+            if (n >= token_suffix_len) { looksLikeToken = ss.slice(n - token_suffix_len, n) == token_suffix; }
+            if (looksLikeToken) {
+                Tok tk = readInputStateWithTemplate(i, token_prefix_len, token_suffix_len, token_tmpl_hash);
+                if (tk.owner == OpInputCovenantId(this.activeInputIndex)) {
+                    total = total + tk.amount;
+                }
+            }
+        }
+        require(total == declared_total);
+    }
+}

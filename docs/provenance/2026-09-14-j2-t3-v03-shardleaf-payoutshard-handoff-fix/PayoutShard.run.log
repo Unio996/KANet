@@ -1,0 +1,16 @@
+  RUN   V-HOF-1_pass_payoutshard_side_absorb_same_tx
+  PASS  V-HOF-1_pass_payoutshard_side_absorb_same_tx
+  RUN   V-HOF-2_pass_next_absorb_correctly_counts_merged_token
+  PASS  V-HOF-2_pass_next_absorb_correctly_counts_merged_token
+  RUN   V-HOF-3_fail_smuggled_second_owned_token_uncounted
+  PASS  V-HOF-3_fail_smuggled_second_owned_token_uncounted
+  RUN   V-HOF-4_fail_shard_amount_undercount_mismatch
+  PASS  V-HOF-4_fail_shard_amount_undercount_mismatch
+  RUN   V-HOF-7_fail_duplicate_shard_token_inflated_output
+  PASS  V-HOF-7_fail_duplicate_shard_token_inflated_output
+  RUN   V-HOF-8_fail_wrong_output_amount
+  PASS  V-HOF-8_fail_wrong_output_amount
+  RUN   V-HOF-9_fail_missing_continuation_scriptpubkey_mismatch
+  PASS  V-HOF-9_fail_missing_continuation_scriptpubkey_mismatch
+
+7 tests: 7 passed, 0 failed

@@ -1,0 +1,20 @@
+  RUN   V-bound-1_pass_exactly_at_bound_8_inputs
+  PASS  V-bound-1_pass_exactly_at_bound_8_inputs
+  RUN   V-bound-2_fail_bound_plus_one_rejected_by_length_guard
+  PASS  V-bound-2_fail_bound_plus_one_rejected_by_length_guard
+  RUN   V-bound-3_pass_victim_at_last_reachable_index_7
+  PASS  V-bound-3_pass_victim_at_last_reachable_index_7
+  RUN   V-bound-4_fail_victim_at_index_7_not_declared
+  PASS  V-bound-4_fail_victim_at_index_7_not_declared
+  RUN   V-notoken-1_pass_no_token_input_present
+  PASS  V-notoken-1_pass_no_token_input_present
+  RUN   V-notoken-2_fail_smuggled_owned_token_no_continuation_noop_entry
+  PASS  V-notoken-2_fail_smuggled_owned_token_no_continuation_noop_entry
+  RUN   V-notoken-3_fail_smuggled_owned_token_with_real_state_change
+  PASS  V-notoken-3_fail_smuggled_owned_token_with_real_state_change
+  RUN   V-outbind-1_pass_output_bound_to_self
+  PASS  V-outbind-1_pass_output_bound_to_self
+  RUN   V-outbind-2_fail_input_matched_output_diverted_to_stranger
+  PASS  V-outbind-2_fail_input_matched_output_diverted_to_stranger
+
+9 tests: 9 passed, 0 failed

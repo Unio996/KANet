@@ -1,0 +1,13 @@
+{
+ "measured": {
+  "own_prefix_len": 1,
+  "own_state_len": 288,
+  "own_suffix_len": 19045,
+  "bytecode_length": 19334
+ },
+ "declared": {
+  "own_prefix_len": 1,
+  "own_state_len": 288
+ }
+}
+OK: no drift, hardcoded constants match the actual compiled artifact.

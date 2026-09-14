@@ -1,0 +1,35 @@
+  RUN   V-T-1_pass_two_inputs_owner_market_consolidate
+  PASS  V-T-1_pass_two_inputs_owner_market_consolidate
+  RUN   V-T-2_fail_conservation_violated
+  PASS  V-T-2_fail_conservation_violated
+  RUN   V-T-3a_fail_prev_owner_scheme_not_covenant
+  PASS  V-T-3a_fail_prev_owner_scheme_not_covenant
+  RUN   V-T-4_fail_owner_not_present_at_claimed_index
+  PASS  V-T-4_fail_owner_not_present_at_claimed_index
+  RUN   V-T-5_fail_market_sigscript_tail_one_byte_off
+  PASS  V-T-5_fail_market_sigscript_tail_one_byte_off
+  RUN   V-T-9a_fail_borrow_scheme_enabled
+  PASS  V-T-9a_fail_borrow_scheme_enabled
+  RUN   V-T-9b_fail_witness_nonempty
+  PASS  V-T-9b_fail_witness_nonempty
+  RUN   V-T-10_fail_extension_commitment_nonzero
+  PASS  V-T-10_fail_extension_commitment_nonzero
+  RUN   V-T-11a_pass_multi_instance_covA
+  PASS  V-T-11a_pass_multi_instance_covA
+  RUN   V-T-11b_pass_multi_instance_covB_second_run
+  PASS  V-T-11b_pass_multi_instance_covB_second_run
+  RUN   V-H2-1_fail_mint_issuer_always_rejects_in_test_build
+  PASS  V-H2-1_fail_mint_issuer_always_rejects_in_test_build
+  RUN   V-harness_flip_of_V-T-1_expect_fail
+  FAIL  V-harness_flip_of_V-T-1_expect_fail
+        FAIL: expected failure but bytecode passed
+        Error: "FAIL"
+  RUN   V-T-6b_fail_bout_route_removed_negative_recv_idx_now_rejected
+  PASS  V-T-6b_fail_bout_route_removed_negative_recv_idx_now_rejected
+  RUN   V-T-7b_pass_burn_allowed_sum_in_greater_than_sum_out
+  PASS  V-T-7b_pass_burn_allowed_sum_in_greater_than_sum_out
+  RUN   V-T-12_fail_next_state_owner_zero32_rejected
+  PASS  V-T-12_fail_next_state_owner_zero32_rejected
+
+15 tests: 14 passed, 1 failed
+Error: "some tests failed"

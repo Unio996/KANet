@@ -1,0 +1,20 @@
+  RUN   V-CLAIM-1_fail_only_at_sig_gate_market_redirect_otherwise_valid
+  PASS  V-CLAIM-1_fail_only_at_sig_gate_market_redirect_otherwise_valid
+  RUN   V-CLAIM-2_fail_only_at_sig_gate_new_output_redirect_otherwise_valid
+  PASS  V-CLAIM-2_fail_only_at_sig_gate_new_output_redirect_otherwise_valid
+  RUN   V-CLAIM-3_fail_wrong_tok_prefix_witness_blake3_mismatch
+  PASS  V-CLAIM-3_fail_wrong_tok_prefix_witness_blake3_mismatch
+  RUN   V-CLAIM-4_fail_wrong_tok_suffix_witness_blake3_mismatch
+  PASS  V-CLAIM-4_fail_wrong_tok_suffix_witness_blake3_mismatch
+  RUN   V-CLAIM-5_fail_token_not_owned_by_this_claim_steal_attempt
+  PASS  V-CLAIM-5_fail_token_not_owned_by_this_claim_steal_attempt
+  RUN   V-CLAIM-6_fail_shell_covenant_rejected_as_market_destination
+  PASS  V-CLAIM-6_fail_shell_covenant_rejected_as_market_destination
+  RUN   V-CLAIM-7_fail_output_amount_tampered
+  PASS  V-CLAIM-7_fail_output_amount_tampered
+  RUN   V-CLAIM-8_fail_bare_output_destination_zero_owner_rejected
+  PASS  V-CLAIM-8_fail_bare_output_destination_zero_owner_rejected
+  RUN   V-CLAIM-9_fail_dest_input_bare_no_covenant_id_tail_matches_target_owner_zero32
+  PASS  V-CLAIM-9_fail_dest_input_bare_no_covenant_id_tail_matches_target_owner_zero32
+
+9 tests: 9 passed, 0 failed

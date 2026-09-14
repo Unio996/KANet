@@ -1,0 +1,11 @@
+pragma silverscript ^0.1.0;
+// 调试探针: 去掉循环和 sigScript 判断, 直接硬编码读 input[1], 隔离到底是"读外部 covenant 输入状态"本身
+// 坏了, 还是"循环+条件判断"这层坏了。
+contract MarketScanProbe2(int token_prefix_len, int token_suffix_len, byte[32] token_tmpl_hash) {
+    struct Tok { byte[32] owner; int amount; }
+    entry read_one(int declared_amount, byte[32] declared_owner) {
+        Tok tk = readInputStateWithTemplate(1, token_prefix_len, token_suffix_len, token_tmpl_hash);
+        require(tk.amount == declared_amount);
+        require(tk.owner == declared_owner);
+    }
+}

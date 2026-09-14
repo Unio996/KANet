@@ -1,0 +1,14 @@
+  RUN   V-PSV2RFC-1_pass_partial_with_remainder
+  PASS  V-PSV2RFC-1_pass_partial_with_remainder
+  RUN   V-PSV2RFC-2_pass_exact_no_remainder
+  PASS  V-PSV2RFC-2_pass_exact_no_remainder
+  RUN   V-PSV2RFC-3_fail_destination_not_real_claim_template
+  PASS  V-PSV2RFC-3_fail_destination_not_real_claim_template
+  RUN   V-PSV2RFC-4_fail_token_owner_diverted_to_stranger
+  PASS  V-PSV2RFC-4_fail_token_owner_diverted_to_stranger
+  RUN   V-PSV2RFC-5_fail_witness_wrong_tok_prefix
+  PASS  V-PSV2RFC-5_fail_witness_wrong_tok_prefix
+  RUN   V-PSV2RFC-6_fail_witness_wrong_claim_prefix
+  PASS  V-PSV2RFC-6_fail_witness_wrong_claim_prefix
+
+6 tests: 6 passed, 0 failed

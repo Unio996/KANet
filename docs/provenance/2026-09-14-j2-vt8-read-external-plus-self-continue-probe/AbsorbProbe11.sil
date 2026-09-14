@@ -1,0 +1,42 @@
+pragma silverscript ^0.1.0;
+// AB11: 手写等价自续约, 完全不走 validateOutputState/WithTemplate/WithInputTemplate -- 自己拼 State 编码字节
+// (int 字段 = 0x08 + 8字节小端; byte[32] 字段 = 0x20 + 32字节原样, 经 AbsorbProbe8_real 编译产物逐字节实测确认)
+// + 从 tx.inputs[this.activeInputIndex].sigScript 原样借用 own prefix/suffix(own_prefix_len/own_suffix_len
+// 是编译期常量, 取决于本合约源码结构 + ctor 动态字节长度, 一旦 token_prefix/suffix 模板长度固定就固定;
+// 部署时需按实际编译产物重算这两个数, 本探针为验证概念用 AbsorbProbe8_real 的真实值硬编码)。
+contract AbsorbProbe11(byte[] token_prefix, int token_prefix_len, byte[] token_suffix, int token_suffix_len, byte[32] token_tmpl_hash,
+    int init_consolidated_pool, int init_closed, byte[32] init_payoutRoot
+) {
+    int consolidated_pool = init_consolidated_pool;
+    int closed = init_closed;
+    byte[32] payoutRoot = init_payoutRoot;
+    int constant OWN_PREFIX_LEN = 1;    // AbsorbProbe8_real 实测值(state_span.offset)
+    int constant OWN_STATE_LEN = 51;    // 8(consolidated_pool)+8(closed)+32(payoutRoot) 各带1字节push前缀=1+8+1+8+1+32=51
+    struct TokenState {
+        int      amount;
+        byte[32] owner;
+        byte     owner_scheme;
+        byte     borrow_scheme;
+        byte[32] borrow_guard;
+        byte[32] extension_commitment;
+    }
+    entry absorb11(int selfOutIdx, int shardInIdx, int shard_amount) {
+        require(closed == 0);
+        TokenState shardTk = readInputStateWithTemplate(shardInIdx, token_prefix_len, token_suffix_len, token_tmpl_hash);
+        require(shardTk.amount == shard_amount);
+        // 手写编码新 State: consolidated_pool' = consolidated_pool+shard_amount, closed'=0, payoutRoot'=payoutRoot
+        byte[] newStateBytes = byte[](8 as byte[1]) + byte[]((consolidated_pool + shard_amount) as byte[8])
+                              + byte[](8 as byte[1]) + byte[](0 as byte[8])
+                              + byte[](32 as byte[1]) + byte[](payoutRoot);
+        // 借用本合约自身(active input)的 prefix/suffix 原始字节, 只替换中间的 state 区段
+        byte[] ownSig = tx.inputs[this.activeInputIndex].sigScript;
+        int ownLen = ownSig.length;
+        byte[] ownPrefix = ownSig.slice(0, OWN_PREFIX_LEN);
+        byte[] ownSuffix = ownSig.slice(OWN_PREFIX_LEN + OWN_STATE_LEN, ownLen);
+        byte[] expectedRedeem = ownPrefix + newStateBytes + ownSuffix;
+        byte[32] expectedHash = blake2b(expectedRedeem);
+        byte[37] expectedSpk = new ScriptPubKeyP2SH(expectedHash);
+        require(tx.outputs[selfOutIdx].scriptPubKey == byte[](expectedSpk));
+        require(tx.outputs[selfOutIdx].value >= 1000);
+    }
+}

@@ -1,0 +1,32 @@
+  RUN   V-register_append-1_pass_first_bet_zero_existing_pool
+  PASS  V-register_append-1_pass_first_bet_zero_existing_pool
+  RUN   V-register_append-2_pass_second_bet_nonzero_existing_pool
+  PASS  V-register_append-2_pass_second_bet_nonzero_existing_pool
+  RUN   V-register_append-3_fail_smuggled_second_owned_token_uncounted
+  PASS  V-register_append-3_fail_smuggled_second_owned_token_uncounted
+  RUN   V-register_append-4_fail_output_diverted_to_stranger_owner
+  PASS  V-register_append-4_fail_output_diverted_to_stranger_owner
+  RUN   V-register_append-5_fail_output_wrong_amount
+  PASS  V-register_append-5_fail_output_wrong_amount
+  RUN   V-register_append-6_fail_self_output_below_dust_min
+  PASS  V-register_append-6_fail_self_output_below_dust_min
+  RUN   V-register_append-7_fail_self_continuation_wrong_count_field
+  PASS  V-register_append-7_fail_self_continuation_wrong_count_field
+  RUN   V-register_append-8_fail_self_continuation_wrong_pool_value_field
+  PASS  V-register_append-8_fail_self_continuation_wrong_pool_value_field
+  RUN   V-register_append-9_fail_witness_wrong_tok_prefix
+  PASS  V-register_append-9_fail_witness_wrong_tok_prefix
+  RUN   V-register_append-10_fail_stake_amount_mismatch
+  PASS  V-register_append-10_fail_stake_amount_mismatch
+  RUN   V-consolidate_to_payout-1_pass_sealed_full_pool_transfer
+  PASS  V-consolidate_to_payout-1_pass_sealed_full_pool_transfer
+  RUN   V-consolidate_to_payout-2_fail_outbind_token_diverted_to_stranger
+  PASS  V-consolidate_to_payout-2_fail_outbind_token_diverted_to_stranger
+  RUN   V-consolidate_to_payout-3_fail_output_wrong_amount
+  PASS  V-consolidate_to_payout-3_fail_output_wrong_amount
+  RUN   V-consolidate_to_payout-4_fail_witness_wrong_tok_prefix
+  PASS  V-consolidate_to_payout-4_fail_witness_wrong_tok_prefix
+  RUN   V-consolidate_to_payout-5_fail_smuggled_second_owned_token_uncounted
+  PASS  V-consolidate_to_payout-5_fail_smuggled_second_owned_token_uncounted
+
+15 tests: 15 passed, 0 failed

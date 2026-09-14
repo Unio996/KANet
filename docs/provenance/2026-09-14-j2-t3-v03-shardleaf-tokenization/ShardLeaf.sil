@@ -1,0 +1,208 @@
+// ShardLeaf.sil — bshard convert-split REGISTER-side 合约 (J1, 2026-06-19; 解 register SIZE-bound 9999).
+//
+// 动因(probe-B 链上实证 SIZE-bound): register_append validate-调用数恒定(2: ps WithTemplate + leaf self),
+//   register 成本纯∝揭示合约大小。原 PoolLeaf(register+fold+seal 2088B)→register 揭全约→13738u>9999。
+//   convert-split: 把 fold/seal 字节移到 FoldNode 模板, ShardLeaf 只留 register + 轻 convert(1:1→FoldNode) → ~490B
+//   → register 揭小约 → <9999(probe-B 493B 链上实证过 units cap)。
+//
+// 本合约 = ShardLeaf(register-side): register_append(收注, 与原 PoolLeaf byte-identical) + consolidate_to_payout
+//   (关池后本片全额归集进【真 PayoutShard covenant 实例】, cov_id provenance destination-bind, value 守恒)。
+//
+// 🔑 (A) cov_id 重设计(NWT 异质核承重修, 2026-06-20): 原 convert_to_foldnode(fold-tree 路)在 (A)/rolling 整个废弃。
+//   归集 destination 必绑 cov_id PROVENANCE 非 template LOCATION — template-match 可被 recreatable-UTXO 造【同 template
+//   自控 state 的假 PayoutShard】击穿 → 输家片导入假 PS 被 attacker claim = 真 theft。∴ bake 真 payout_cov_id(market
+//   创建 genesis-mint PayoutShard 时已知), consolidate 用 OpInputCovenantId 绑(假 PS 的 cov_id≠baked → BUST)。
+//   单向 DAG 破 circular: PayoutShard 身份独立本片(其 ctor 不 bake 本片任何东西)→ 本片单向 bake payout_cov_id, 无循环。
+//
+// 承重锚: register output-bind weld(leaf value==pool_value+stake) + consolidate cov_id-bind + 全额守恒(out==in+pool_value)。
+// 4-field 无 outcome = 结构上不可结算; 结算经 PayoutShard.close_attest(委员 attest payoutRoot)+ claim(store-payout)。
+//
+// ★ T3 v0.3 §2 全 23 入口 A/B 落位表代币化(ledger 1188 批次④第二处): 两入口均 A 类。
+//   register_append: RHS=pool_value(本 leaf 既有持仓, 首次调用=0), 合法在场不计入=是(bettor 新下的注 owner 尚未
+//     变成本 leaf, 天然被 owner 过滤排除, 同 PayoutShard.absorb 的 shard_amount 正例), 输出侧派生绑定 =
+//     tok_out owner=OpInputCovenantId(this.activeInputIndex)(自身)。V-T-8(readInputStateWithTemplate + 本合约
+//     self-continuation 同函数共存): 命中——leaf 自身 4-field State 续约改 AB11 手写编码(同 PayoutShard.absorb
+//     手法, 常量按本文件实际编译产物量测, 见 provenance measure 脚本)。
+//   consolidate_to_payout: RHS=pool_value(leaf 全部持仓, 整体转出), 合法在场不计入=否, 输出侧派生绑定 =
+//     tok_out owner=OpInputCovenantId(psInIdx)(真 PS 实例, 已核==payout_cov_id)。无续约(leaf 生命周期终点,
+//     不调用 validateOutputState 续自身)→ 不触发 V-T-8, 不需要 AB11(同 RootClose.convert_to_claim/
+//     PayoutShardV2.zk_handoff 同形)。原 KAS value-weld(==pool_value / ==tx.inputs[psInIdx].value+pool_value)
+//     全部改 >=DUST_MIN(D-018: pool_value 现为代币 amount 语义, KAS 侧只剩 dust)。
+
+pragma silverscript ^0.1.0;
+
+contract ShardLeaf(
+    byte[32] market_id,
+    byte[32] ps_tmpl_hash,        // dust PoolSide-ticket expectedTemplateHash (register 造 ticket)
+    byte[32] shard_pool_id,       // 本 pool 身份 (ticket 记此)
+    int      seal_count,          // count==seal_count 才可 consolidate (= 原 PoolLeaf seal 门)
+    int      min_bet,
+    byte[32] payout_cov_id,       // ★ 真 PayoutShard covenant cov_id (genesis-mint 已知; consolidate destination provenance-bind; baked)
+    int      deadline,            // ★件1(J1): partial-shard sweep deadline (Unix ts, ctor-baked immutable=spender 不可伪; partial 片仅 tx.time>=deadline 可归集)
+    // —— v0.3 §2/§3 代币化(T3, ledger 1188): 市场只嵌一个 32 字节 token_tmpl_hash(Bettor 1151 裁), scanOwnedTokenInputs
+    //   的 prefix/suffix 改 witness 供。
+    byte[32] token_tmpl_hash,
+    // —— genesis State (4-field, 无 outcome) ——
+    int      init_local_yes,
+    int      init_local_no,
+    int      init_count,
+    int      init_pool_value
+) {
+    int local_yes  = init_local_yes;
+    int local_no   = init_local_no;
+    int count      = init_count;
+    int pool_value = init_pool_value;
+
+    // dust PoolSide-ticket State (= PoolSide_v08_shard 4 字段; register 造 ticket 的 validateOutputStateWithTemplate 类型锚)
+    struct Tk {
+        byte[32] bettorPk;
+        int      direction;
+        int      stake;
+        byte[32] shardPoolId;
+    }
+    // KanetTestToken 六字段布局镜像(同 PayoutShard.sil/RootClose.sil 三件套一致)
+    struct TokenState {
+        int      amount;
+        byte[32] owner;
+        byte     owner_scheme;
+        byte     borrow_scheme;
+        byte[32] borrow_guard;
+        byte[32] extension_commitment;
+    }
+    byte constant TOKEN_SCHEME_COVENANT_ID = 0x04;
+    byte constant TOKEN_BORROW_DISABLED    = 0x00;
+    // ★ 1122 边界纪律: require(len<=bound) 先拒超界交易 + 循环展开深度用同一个常量(v0.3 稿 §3, 探针 9/9 已证机制)。
+    int constant MAX_INS_SCAN = 8;
+    int constant DUST_MIN = 1000;
+    // ★ V-T-8 绕路(register_append 需要 readInputStateWithTemplate(经 scanOwnedTokenInputs)+ 本合约 self-
+    //   continuation 共存, 架构级 silverc 限制, ledger 1140/1142/1145 裁: 直接用 AB11 手写形改)。以下两个常量
+    //   按本文件*实际编译产物*量测得出(measure_shardleaf_state_span.mjs, 见 provenance), 不是拍脑袋——换本文件
+    //   源码结构、或换 ctor 里字段, 必须重新编译重新量重新填这两个数(量测脚本内置漂移检测)。
+    int constant OWN_PREFIX_LEN = 1;
+    int constant OWN_STATE_LEN  = 36;
+
+    // (A) v0.3 §2/§3 + 1151 P13 形: 输入侧扫描(同 PayoutShard.sil/RootClose.sil 逐字节一致手法)。
+    function scanOwnedTokenInputs(byte[] tok_prefix, byte[] tok_suffix) : int {
+        require(blake3((tok_prefix.length as byte[8]) + tok_prefix + (tok_suffix.length as byte[8]) + tok_suffix) == token_tmpl_hash);
+        require(tx.inputs.length <= MAX_INS_SCAN);
+        int total = 0;
+        int L = tok_suffix.length;
+        for (i, 0, tx.inputs.length, MAX_INS_SCAN) {
+            byte[] ss = tx.inputs[i].sigScript;
+            int n = ss.length;
+            bool looksLikeToken = false;
+            if (n >= L) { looksLikeToken = ss.slice(n - L, n) == tok_suffix; }
+            if (looksLikeToken) {
+                TokenState tk = readInputStateWithTemplate(i, tok_prefix.length, tok_suffix.length, token_tmpl_hash);
+                if (tk.owner == OpInputCovenantId(this.activeInputIndex)) {
+                    total = total + tk.amount;
+                }
+            }
+        }
+        return total;
+    }
+
+    // —— entry 0: register_append (收注; 与原 PoolLeaf entry 0 语义一致 + v0.3 代币化) ——
+    // ★ V-T-8 绕路(见上方 OWN_PREFIX_LEN/OWN_STATE_LEN 注释): leaf 自身续约手写编码, 不走 validateOutputState。
+    entry register_append(
+        int      side,
+        int      stake,
+        int      leafOutIdx,
+        int      psOutIdx,
+        byte[32] bettorPk,
+        byte[]   ps_prefix,
+        byte[]   ps_suffix,
+        int      stakeInIdx,        // v0.3: 新下注的真实代币输入(读 amount, 不信任 witness 单独喂的 stake 数)
+        int      tok_out,           // v0.3: leaf 自身代币续约输出(amount=pool_value+stake, owner=自身)
+        byte[]   tok_prefix, byte[] tok_suffix
+    ) {
+        require(count < seal_count);
+        require(side == 0 || side == 1);
+        require(stake >= min_bet);
+
+        // mint dust ticket (spent-once claim/refund 凭证)
+        validateOutputStateWithTemplate(psOutIdx, Tk {
+            bettorPk: bettorPk,
+            direction: side,
+            stake: stake,
+            shardPoolId: shard_pool_id
+        }, ps_prefix, ps_suffix, ps_tmpl_hash);
+
+        // ★ v0.3 输入侧(§2 表): 归己(本 leaf 既有持仓, 首次调用=0)代币全被处理——新下的注(stake)owner 尚未
+        //   变成本 leaf, 天然被 owner 过滤排除, 是"合法在场不计入"的正例(同 PayoutShard.absorb 的 shard_amount)。
+        int owned_total = scanOwnedTokenInputs(tok_prefix, tok_suffix);
+        require(owned_total == pool_value);
+        // ★ 新下注真实 amount(不信任 witness 单独喂的数, T3 迁移点)
+        TokenState stakeTk = readInputStateWithTemplate(stakeInIdx, tok_prefix.length, tok_suffix.length, token_tmpl_hash);
+        require(stakeTk.amount == stake);
+        // ★ v0.3 §4 输出侧派生绑定: leaf 自身续约代币 owner=自身(OpInputCovenantId 派生表达式, 不是裸 witness)
+        validateOutputStateWithInputTemplate(tok_out, TokenState {
+            amount:               pool_value + stake,
+            owner:                OpInputCovenantId(this.activeInputIndex),
+            owner_scheme:         TOKEN_SCHEME_COVENANT_ID,
+            borrow_scheme:        TOKEN_BORROW_DISABLED,
+            borrow_guard:         byte[32](0x0000000000000000000000000000000000000000000000000000000000000000),
+            extension_commitment: byte[32](0x0000000000000000000000000000000000000000000000000000000000000000)
+        }, stakeInIdx, tok_prefix.length, tok_suffix.length, token_tmpl_hash);
+
+        // ★ V-T-8 绕路(AB11): 手写编码新 State(4 字段: local_yes/local_no/count/pool_value), 不走
+        //   validateOutputState(同函数已有 readInputStateWithTemplate, 经 scanOwnedTokenInputs)。
+        byte[] stateBytes = byte[](8 as byte[1]) + byte[]((local_yes + stake * (1 - side)) as byte[8])
+                          + byte[](8 as byte[1]) + byte[]((local_no + stake * side) as byte[8])
+                          + byte[](8 as byte[1]) + byte[]((count + 1) as byte[8])
+                          + byte[](8 as byte[1]) + byte[]((pool_value + stake) as byte[8]);
+        byte[] ownSig = tx.inputs[this.activeInputIndex].sigScript;
+        int ownLen = ownSig.length;
+        byte[] ownPrefix = ownSig.slice(0, OWN_PREFIX_LEN);
+        byte[] ownSuffix = ownSig.slice(OWN_PREFIX_LEN + OWN_STATE_LEN, ownLen);
+        byte[32] expectedHash = blake2b(ownPrefix + stateBytes + ownSuffix);
+        byte[37] expectedSpk = new ScriptPubKeyP2SH(expectedHash);
+        require(tx.outputs[leafOutIdx].scriptPubKey == byte[](expectedSpk));
+        require(tx.outputs[leafOutIdx].value >= DUST_MIN);   // v0.3: KAS 侧只剩 dust, 代币 amount 才是真实价值载体
+    }
+
+    // —— entry 1: consolidate_to_payout (替废弃 convert_to_foldnode; 本片全额归集进【真 PayoutShard covenant 实例】) ——
+    // NWT 异质核承重: destination 绑 cov_id PROVENANCE 非 template LOCATION (防 recreatable-UTXO 假 PayoutShard 抢归集偷池)。
+    // 双 teeth: ①cov_id-bind(只能进真 PS)②全额守恒(无 skim)。
+    // ★ v0.3 §2/§3 代币化(ledger 1188): A 类单一去向入口, 无续约(entry 是本 leaf 生命周期终点)——同
+    //   RootClose.convert_to_claim/PayoutShardV2.zk_handoff 同形, 不触发 V-T-8, 不需要 AB11 绕路。
+    entry consolidate_to_payout(
+        int psInIdx,        // 真 PayoutShard covenant input 位
+        int psOutIdx,       // PayoutShard 延续输出位 (absorb 续锁同 cov_id)
+        int tokenInIdx,     // v0.3: leaf 自身当前持有的代币输入(全部, ==pool_value)
+        int tokenOutIdx,    // v0.3: 转给真 PayoutShard cov_id 的代币输出
+        byte[] tok_prefix, byte[] tok_suffix
+    ) {
+        // ★件1(J1) rolling-shard partial-sweep: 满片(count==seal_count)随时归集 / partial 片仅截止后归集。
+        //   解最后一片永远 partial(count<seal_count)归集不了→资金卡死 的核心 gap。deadline ctor-baked 不可伪。
+        //   ⚠ tx.time 单位=【毫秒】(链上 LANDED refund precedent p2sh.mjs L7/SS L275 证, 非文档的秒, J2 chain-probe 抓)。
+        //     deadline 烤【秒】(=market.deadline) → 合约 ×1000 转 ms 比对(同 working refund 模式), 否则 ms>=秒 恒 TRUE=vacuous 假牙。
+        //   ⚠ da9fc22 parser 限 tx.time 只能 standalone require(不能进 || 复合)→拆成 if (arithmetic RHS 已由 refund precedent 证可编译):
+        //   sealed: 不进 if→随时 LAND / partial: 进 if→premature(tx.time < deadline*1000)→BUST / deadline 后→LAND。
+        if (count != seal_count) {
+            require(tx.time >= temporal(deadline * 1000));
+        }
+        // ★ destination = PROVENANCE: 输入是【真 payout_cov_id 的 PayoutShard 实例】(假 template-PS 的 cov_id≠baked → BUST)
+        byte[32] ps_cov = OpInputCovenantId(psInIdx);
+        require(ps_cov == payout_cov_id);
+        require(OpCovOutputCount(ps_cov) >= 1);            // 0==0 防呆: 非法/零 cov_id 令此 fail (NWT 钉; DECL: OpCovOutputCount 拒非 covenant 数据)
+        // ★ 本片 KAS 侧只剩 dust: value 真正载体已改代币(D-018/§6②)
+        byte[32] out_cov = OpOutputCovenantId(psOutIdx);
+        require(out_cov == payout_cov_id);
+        require(tx.outputs[psOutIdx].value >= DUST_MIN);
+
+        // ★ v0.3 §2 表 A 列输入侧: 本 leaf 当前持有的代币必须恰好等于 pool_value(全部持仓, 整体转出, 无续约)。
+        int owned_total = scanOwnedTokenInputs(tok_prefix, tok_suffix);
+        require(owned_total == pool_value);
+        // ★ v0.3 §2 表 A 列输出侧派生绑定: 代币全额转给真 PayoutShard 实例, owner=OpInputCovenantId(psInIdx)
+        //   (已核==payout_cov_id, 派生表达式, 不是裸 witness)。
+        validateOutputStateWithInputTemplate(tokenOutIdx, TokenState {
+            amount:               pool_value,
+            owner:                ps_cov,
+            owner_scheme:         TOKEN_SCHEME_COVENANT_ID,
+            borrow_scheme:        TOKEN_BORROW_DISABLED,
+            borrow_guard:         byte[32](0x0000000000000000000000000000000000000000000000000000000000000000),
+            extension_commitment: byte[32](0x0000000000000000000000000000000000000000000000000000000000000000)
+        }, tokenInIdx, tok_prefix.length, tok_suffix.length, token_tmpl_hash);
+    }
+}

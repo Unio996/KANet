@@ -1,0 +1,26 @@
+  RUN   V-CZK-CLM-1_pass_partial_refund_with_remainder
+  PASS  V-CZK-CLM-1_pass_partial_refund_with_remainder
+  RUN   V-CZK-CLM-2_pass_exact_no_remainder
+  PASS  V-CZK-CLM-2_pass_exact_no_remainder
+  RUN   V-CZK-CLM-3_fail_destination_not_real_claim_template
+  PASS  V-CZK-CLM-3_fail_destination_not_real_claim_template
+  RUN   V-CZK-CLM-4_fail_token_owner_diverted_to_stranger
+  PASS  V-CZK-CLM-4_fail_token_owner_diverted_to_stranger
+  RUN   V-CZK-CLM-5_fail_witness_wrong_tok_prefix
+  PASS  V-CZK-CLM-5_fail_witness_wrong_tok_prefix
+  RUN   V-CZK-CLM-6_fail_witness_wrong_claim_prefix
+  PASS  V-CZK-CLM-6_fail_witness_wrong_claim_prefix
+  RUN   V-CZK-ESC-1_pass_partial_refund_with_remainder
+  PASS  V-CZK-ESC-1_pass_partial_refund_with_remainder
+  RUN   V-CZK-ESC-2_pass_exact_no_remainder
+  PASS  V-CZK-ESC-2_pass_exact_no_remainder
+  RUN   V-CZK-ESC-3_fail_destination_not_real_claim_template
+  PASS  V-CZK-ESC-3_fail_destination_not_real_claim_template
+  RUN   V-CZK-ESC-4_fail_token_owner_diverted_to_stranger
+  PASS  V-CZK-ESC-4_fail_token_owner_diverted_to_stranger
+  RUN   V-CZK-ESC-5_fail_witness_wrong_tok_prefix
+  PASS  V-CZK-ESC-5_fail_witness_wrong_tok_prefix
+  RUN   V-CZK-ESC-6_fail_witness_wrong_claim_prefix
+  PASS  V-CZK-ESC-6_fail_witness_wrong_claim_prefix
+
+12 tests: 12 passed, 0 failed

@@ -1,0 +1,24 @@
+  RUN   V-absorb-1_pass_owned_plus_incoming_shard
+  PASS  V-absorb-1_pass_owned_plus_incoming_shard
+  RUN   V-absorb-2_fail_smuggled_second_owned_token_uncounted
+  PASS  V-absorb-2_fail_smuggled_second_owned_token_uncounted
+  RUN   V-absorb-3_pass_stranger_same_template_present_not_counted
+  PASS  V-absorb-3_pass_stranger_same_template_present_not_counted
+  RUN   V-absorb-4_fail_output_diverted_to_stranger_owner
+  PASS  V-absorb-4_fail_output_diverted_to_stranger_owner
+  RUN   V-absorb-5_fail_output_wrong_amount
+  PASS  V-absorb-5_fail_output_wrong_amount
+  RUN   V-absorb-6_fail_self_output_below_dust_min
+  PASS  V-absorb-6_fail_self_output_below_dust_min
+  RUN   V-absorb-7_fail_self_continuation_wrong_closed_field
+  PASS  V-absorb-7_fail_self_continuation_wrong_closed_field
+  RUN   V-absorb-8_fail_self_continuation_wrong_payoutRoot_field
+  PASS  V-absorb-8_fail_self_continuation_wrong_payoutRoot_field
+  RUN   V-absorb-9_fail_self_continuation_wrong_w5_field
+  PASS  V-absorb-9_fail_self_continuation_wrong_w5_field
+  RUN   V-absorb-10_fail_witness_wrong_tok_prefix_blake3_mismatch
+  PASS  V-absorb-10_fail_witness_wrong_tok_prefix_blake3_mismatch
+  RUN   V-absorb-11_fail_witness_wrong_tok_suffix_blake3_mismatch
+  PASS  V-absorb-11_fail_witness_wrong_tok_suffix_blake3_mismatch
+
+11 tests: 11 passed, 0 failed

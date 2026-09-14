@@ -1,0 +1,8 @@
+pragma silverscript ^0.1.0;
+contract NegIntProbe(int dummy) {
+    int x = dummy;
+    entry probe(byte[] expected) {
+        byte[] got = byte[](x as byte[8]);
+        require(got == expected);
+    }
+}
