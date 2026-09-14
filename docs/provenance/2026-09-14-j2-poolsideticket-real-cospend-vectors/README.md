@@ -58,7 +58,7 @@ T3 provenance 里的 `PoolSideStub(2).sil` 是"替身实例"（`#[covenant.singl
 
 （`run.log` 为完整原始输出。）
 
-## 🔴 两个落码期间踩到、值得记录的坑（防下一个人重踩）
+## 🔴 三个落码期间踩到、值得记录的坑（防下一个人重踩）
 
 1. **compileSilV100 的 `template_hash_bytes` ≠ `extractTemplateArtifact` 独立复算的 hash**：裸调 CLI
    编译 + 读编译器自报的 `template_hash` 字段，得到 `73f79f9e...`；用 `compileSilV100` +
