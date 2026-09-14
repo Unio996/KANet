@@ -71,10 +71,34 @@ export function assertPayoutLeavesConserved(leaves, consolidatedPool) {
  * @param {string} o.marketSuffixHash 真实 market suffix 承诺 hash(32B hex, T3 代币化新增字段, 不接受占位符)
  * @returns {string} compiled redeem hex
  */
+// T-CLOSEZK-ATMS-WIDTH(ledger 1285/1291/1293/1297, NWT 4f659405 定案②)：独立、可单测的宽度断言——
+// computeCloseZkTmplAnchor 内部只用自己硬编码的 dummyAtMs, 从不接收真实市场数据, 那个位置加断言只能
+// 重验一个不随运行时变化的常量, 价值有限(NWT 已降级为不必需, 本次不落码那处)。真正承重的位置是这里
+// ——compileCloseZkV2Redeem 是唯一接收真实 attestedAtMs 参数、且会拿它去真编译的函数, 断言必须放在
+// ctorIntV100(Number(attestedAtMs))(真实值进 ctor 数组)之前。
+//
+// 🔴 独立抽成函数而不是内联(NWT 4f659405 定案②): 既有 [2^40,2^47) 数值闸(bshard-close-enforce.mjs
+// _ATTESTED_AT_MS_MIN/MAX)整段严格落在 6 字节可表示范围 [0, 2^48-1] 内部——用 2^40/2^40-1/2^47 这三个
+// 边界向量测, 真实调用链路里永远会被那条既有数值闸先拦下, 新断言自己的失败路径从未被真正触发过, 是
+// "看似测了新机制、实际只是重跑了旧闸"这类坑(本 session 已反复踩过)。抽成独立函数后, 单测可以绕过既有
+// 数值闸直接喂 2^48-1(应 PASS)/2^48(应 FAIL)测这条新断言自己的阈值。
+//
+// 编码逻辑跟 computeCloseZkTmplAnchor 内部 `atMsBuf6.writeUIntLE(dummyAtMs, 0, 6)` 完全同款(不重新
+// 发明一套宽度判断)——Buffer.writeUIntLE 对超出 [0, 2^(8*byteLength)-1] 的值原生抛 RangeError, 6 字节
+// 对应 [0, 2^48-1]。
+export function assertSixByteEncodable(value, label) {
+  try {
+    Buffer.alloc(6).writeUIntLE(Number(value), 0, 6);
+  } catch (e) {
+    throw new Error(`assertSixByteEncodable: ${label}=${value} 编不进 6 字节 minimal-push 编码(范围 [0, 2^48-1]) — 会让 computeCloseZkTmplAnchor 用 dummyAtMs 算出的模板切分点跟这次真实编译产物对不上, 拒绝编译(原始错误: ${e.message})`);
+  }
+}
+
 export function compileCloseZkV2Redeem({ gateTmplHash, betsRootBaked, refundRootBaked, attestedAtMs, attestedWinner, consolidatedPool, tokenTmplHash, claimTmplHash, marketSuffixHash }) {
   if (!/^[0-9a-f]{64}$/i.test(String(gateTmplHash || ''))) {
     throw new Error('compileCloseZkV2Redeem: gateTmplHash 必须是 32B hex');
   }
+  assertSixByteEncodable(attestedAtMs, 'attestedAtMs');
   // 🔴 D-019 迁移(ledger 1216-1222, 落码期间实测确认): 原 ctor 只填 25 个值(缺 T3 代币化新增的
   // token_tmpl_hash/claim_tmpl_hash/market_suffix_hash 三个尾部字段, 当前 CloseZkV2.sil 实读 28 参数),
   // 且硬编码走已对当前语法失效的 SILVERC_ZK——已改走 compileSilV100 + ctor 补齐。这三个新字段跟
