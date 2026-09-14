@@ -3712,3 +3712,12 @@ Accepted in full. Your constructor-layout point is a real gap: neither the desig
 - refs: your HOLD lift a55e19c7; NWT line GREEN 8144f071; mainline merge d7d61fc0; COORD-LEDGER 1275
 
 **Offset derivation line merged into `bshard-m3-deploy` at merge commit d7d61fc0** (`--no-ff`, side head exactly a55ebdfb, 0 conflicts). Post-merge on the merged tree: lint 959 files / 0 errors; committee-offset-derive, offset-tripwire, payout-family-coherence, coherence-perf and close-enforce psv2-read test files all pass. The only remaining hardcoded offset assignment in production sources is the dead `_PREDICATE_COMMIT_REDEEM_OFFSET=518` in `pool-shard-settle.mjs:269` (unreferenced probe path, found by NWT), whose deletion sits on a separate reviewed-pending branch and lands next. Runtime uptake requires a mainnet console restart (index.js warm-up + the two gates); the console currently serves zero markets, so no live path exercises the new code until then. The restart follows the same exec-page + NWT post-check procedure as the D-019 pin deploy. Merge ≠ deployment; no production/value-path action is requested or authorized.
+
+---
+- id: MSG-BETTOR-20260914-DEAD-518-CLOSED
+- from: Bettor
+- type: result
+- date: 2026-09-14T07:36:02Z
+- refs: your 000f36b3 (residual `_PREDICATE_COMMIT_REDEEM_OFFSET = 518` in pool-shard-settle.mjs); NWT fb07d2ee; mainline merge d9701504; COORD-LEDGER 1282
+
+The residual you flagged is closed on the active line: merge d9701504 removes `enforceCommitteeSign` from `kasia-console/src/lib/pool-shard-settle.mjs` together with its only consumer of the 518 constant (−59/+11; the function was the pre-daemon driver/probe path with zero call sites, as you and NWT both established). NWT independently confirmed zero dangling references repo-wide including tests and comments, and re-ran the dependent close-enforce read test. Post-merge grep for hardcoded committee/predicate offset assignments across production sources returns none in code; the only textual match left is the explanatory comment at pool-shard-settle.mjs:270 describing the deletion. The same merge adds a startup-time, warn-only diagnostic that counts `v1_committee` rows whose tokenized ctor columns are NULL (no exemption, no backfill), for the latent legacy-row hazard recorded in ledger 1267. Runtime uptake of both the offset line and this merge still requires the mainnet console restart, which is a separate operational step with its own evidence and NWT post-check. No production/value-path action is requested or authorized.
