@@ -11,11 +11,22 @@
 //   ② `feeProfile[kind]`——各 kind 的 mass 实验结果(genesisOutputValue/requiredFeeAtOptimum/
 //      minNetLoss/cap), 目前只有 market_genesis 一个 kind 跑过实验(见
 //      docs/provenance/2026-09-14-j2-proto-v0-genesis-mass-fee-estimate/)。
-// market_tmpl_suffix/token_tmpl_hash/claim_tmpl_hash/refundclaim_tmpl_hash 不进本文件——它们要么
-// 挪进 market_genesis 内部按市场现算(claim_tmpl_hash/refundclaim_tmpl_hash, 同 rootclose_tmpl_hash
-// 一个套路), 要么整个"sigScript 尾匹配"机制本身正在被红队(NWT (1395))推翻重新设计
+// market_tmpl_suffix/claim_tmpl_hash/refundclaim_tmpl_hash 不进本文件——它们要么挪进 market_genesis
+// 内部按市场现算(claim_tmpl_hash/refundclaim_tmpl_hash——RootClaim/RefundClaim 的 ctor 都烤了
+// shard_pool_id=market_id 这个逐市场变化的 ctor-only 常量, 跟 rootclose_tmpl_hash 同一个套路,
+// 不是协议常量), 要么整个"sigScript 尾匹配"机制本身正在被红队(NWT (1395))推翻重新设计
 // (market_tmpl_suffix, 见 docs/2026-09-14-j2-proto-v0-covenant-construction-spec-v0.1.md §7
 // T-PROTO-TEMPLATE-CONST-ASSUMPTION-CORRECTED)。
+//
+// 🔴 订正(2026-09-15, 账本1425, market_genesis落码): `token_tmpl_hash`(KanetTestToken 的 template
+// hash)**重新加回本文件**——上面这段 2026-09-14 的裁定是在 H1(b) 撤销之前写的, 当时 KTT ctor 还有
+// `market_tmpl_suffix`(逐市场变化的字段, 参与哈希, 确实不是协议常量)。v0.3 方案C(账本1408)删掉了
+// 这个字段后, KTT 现在只剩 8 个 ctor 参数(amount/owner/owner_scheme/borrow_scheme/borrow_guard/
+// extension_commitment 全是 State, 排除在哈希外; max_ins/max_outs 是协议级固定常量 3/3, 不随市场
+// 变化)——`token_tmpl_hash` 现在**真的是**协议常量了(同 ps_tmpl_hash 一样, 编译一次全市场复用),
+// 不再属于上面那条"逐市场变化"的裁定范围。claim_tmpl_hash/refundclaim_tmpl_hash 仍然逐市场变化
+// (RootClaim/RefundClaim 的 ctor 直接烤 shard_pool_id, 不像 KTT 那样把市场相关字段全部挪进了 State),
+// 继续留在 market_genesis 内部现算, 不进本文件。
 //
 // Run(从仓库根目录跑, 借 kasia-console 已装好的 kaspa-wasm/silverc 依赖):
 //   node scripts/proto-v0-template-anchors.mjs
@@ -26,7 +37,9 @@ import { compileSilV100, ctorBytes32V100, ctorIntV100 } from '../kasia-console/s
 import { extractTemplateArtifactV100 } from '../kasia-console/src/lib/pool-template-artifact.mjs';
 
 const POOL_SIDE_TICKET_SIL = './kasia-console/src/lib/sil-v1/PoolSideTicket.sil';
+const KANET_TEST_TOKEN_SIL = './kasia-console/src/lib/sil-v1/KanetTestToken.sil';
 const Z32 = '00'.repeat(32);
+const byteN = (n) => ({ kind: 'byte', value: n });
 
 console.log('=== ① PoolSideTicket.ps_tmpl_hash(唯一已证协议常量) ===');
 // 占位值任意——4 个 ctor 参数全是 State(bettorPk/direction/stake/shardPoolId), 模板 hash 排除的正是
@@ -41,6 +54,16 @@ const psArtifact = extractTemplateArtifactV100(psCompiled);
 const psSourceSha256 = createHash('sha256').update(readFileSync(POOL_SIDE_TICKET_SIL)).digest('hex');
 console.log('ps_tmpl_hash(v1.0.0 权威值, compiled.template_hash_bytes):', psArtifact.templateHashHex);
 console.log('PoolSideTicket.sil sha256(源码漂移检测用):', psSourceSha256);
+
+console.log('\n=== ①b KanetTestToken.token_tmpl_hash(v0.3 方案C 后真正的协议常量) ===');
+// v0.3(方案C) ctor: 8 字段, 全部要么是 State(排除在哈希外)要么是协议级固定常量(max_ins/max_outs=3/3),
+// 没有任何逐市场变化的字段——占位值任意, 同 ps_tmpl_hash 的既有惯例。
+const kttCtor = [ctorIntV100(0), ctorBytes32V100(Z32), byteN(4), byteN(0), ctorBytes32V100(Z32), ctorBytes32V100(Z32), ctorIntV100(3), ctorIntV100(3)];
+const kttCompiled = compileSilV100(KANET_TEST_TOKEN_SIL, kttCtor, 'KanetTestToken');
+const kttArtifact = extractTemplateArtifactV100(kttCompiled);
+const kttSourceSha256 = createHash('sha256').update(readFileSync(KANET_TEST_TOKEN_SIL)).digest('hex');
+console.log('token_tmpl_hash(v1.0.0 权威值, compiled.template_hash_bytes):', kttArtifact.templateHashHex);
+console.log('KanetTestToken.sil sha256(源码漂移检测用):', kttSourceSha256);
 
 console.log('\n=== ② feeProfile[market_genesis](来自既有 mass 实验 provenance) ===');
 // 数值来源: docs/provenance/2026-09-14-j2-proto-v0-genesis-mass-fee-estimate/README.md
@@ -81,7 +104,7 @@ const feeProfile = {
 };
 
 const out = {
-  _comment: '一次性协议常量, 范围裁定见本脚本文件头注(2026-09-14) — market_tmpl_suffix/token_tmpl_hash/claim_tmpl_hash/refundclaim_tmpl_hash 不在此文件, 已挪出本脚本范围。',
+  _comment: '一次性协议常量, 范围裁定见本脚本文件头注(2026-09-14, 2026-09-15 订正) — market_tmpl_suffix/claim_tmpl_hash/refundclaim_tmpl_hash 不在此文件(逐市场变化, market_genesis 内部现算); token_tmpl_hash 2026-09-15 起重新加回(H1(b) 撤销后真正的协议常量)。',
   generatedAt: new Date().toISOString(),
   contracts: {
     PoolSideTicket: {
@@ -90,6 +113,13 @@ const out = {
       templatePrefixHex: psArtifact.templatePrefix.toString('hex'),
       templateSuffixHex: psArtifact.templateSuffix.toString('hex'),
       ps_tmpl_hash: psArtifact.templateHashHex,
+    },
+    KanetTestToken: {
+      sourcePath: 'src/lib/sil-v1/KanetTestToken.sil',
+      sourceSha256: kttSourceSha256,
+      templatePrefixHex: kttArtifact.templatePrefix.toString('hex'),
+      templateSuffixHex: kttArtifact.templateSuffix.toString('hex'),
+      token_tmpl_hash: kttArtifact.templateHashHex,
     },
   },
   feeProfile,
