@@ -2,12 +2,12 @@
 // 真 migration 临时库(DB_PATH) + 假 sendCmd(脚本化 relay), 零链零 IPC。同 submit-intent.test.mjs 手法。
 // Run: cd kasia-console && node src/lib/proto-bet-intent.test.mjs
 //
-// 🔴 TODO(NWT 1352, 待 covenant_broadcast 命令定案后补): 下面 8 组测试没有一组真正走到 ambiguous
-// 分支——mock relay 目前没有任何命令会返回 `{code:'inputs_spent'}`(因为 covenant_broadcast 命令本身
-// 还没定案, resolvePrepared 里那个分支目前是死代码路径, 见 §9)。命令定案落码后必须补第 9 组:
-// mock 返回 `{code:'inputs_spent'}` + kaspa_tx_log 查无正向证据 ⇒ 断言真正进 ambiguous 终态, 且后续
-// 对该 intent_key 的任何 markBetIntent/driveBetIntent 调用都被拒绝(终态只能人工清, 同 submit-intent.mjs
-// 既有纪律)。NWT 到时候会专门核这一条。
+// 🔴 第⑨组补记(Bettor 1362 授权预备, covenant_broadcast 命令真正落码前可先补·不落生产路径):
+// resolvePrepared 的 inputs_spent 分支只依赖注入的 sendCmd 返回形状 + kaspa_tx_log 表直查, 两者都可
+// 完全离线构造——不需要等 covenant_broadcast 命令真正在 kasia-relay 落码即可测状态机自身的分支逻辑
+// (广播命令的名字/参数形状是"待定", 但 resolvePrepared 只关心 sendCmd 的返回值里有没有 `code:'inputs_spent'`,
+// 这一层耦合已经用注入解耦了)。命令真正落码后仍要再补一条集成级冒烟(kasia-relay 真实返回该 code 的形状
+// 核对), 那条留给 NWT 到时候专门核, 本组只覆盖状态机分支。
 
 import { execSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -187,7 +187,88 @@ console.log('[test] ⑧ resumeStaleBetIntents: 扫到陈旧 prepared 行并恢�
   ok(after.status === 'submitted', `恢复后状态为 submitted(实际 ${after.status})`);
 }
 
+console.log('[test] ⑨a resolvePrepared: 同字节重播遇 inputs_spent 但 kaspa_tx_log 有正向落地证据 → submitted(不重建):');
+{
+  seedBet('bet5');
+  const R = makeRelay();
+  const key = betIntentKeyFor('bet5', 'mint');
+  ensureBetIntent({ betId: 'bet5', step: 'mint' });
+  const txid = 'a1a1a1a1'.repeat(8);
+  recordBetIntentPhase({ intentKey: key, phase: 'prepared', txid, txJson: JSON.stringify({ id: txid }) });
+  // mempool/landed 都查不到(典型: relay 重启丢了 mempool, UTXO 也还没到 minDepth 判据能看见的地步),
+  // 逼 resolvePrepared 走到"同字节重播"分支。
+  R.sendCmd = async (relayId, cmd) => {
+    R.calls.push(cmd);
+    if (cmd.type === 'get_mempool_entry') return { ok: true, found: false };
+    if (cmd.type === 'check_utxo_landed') return { ok: true, landed: false, depth: null };
+    if (cmd.type === 'broadcast_raw_tx') return { code: 'inputs_spent', error: 'transaction output already spent' };
+    throw new Error(`unexpected cmd ${cmd.type}`);
+  };
+  // 正向证据: 独立的链上观察(kasia-relay 的内嵌 indexer 报的), 不是这个模块自己写的——这正是它可信的原因。
+  sqlite.prepare(`INSERT INTO kaspa_tx_log (tx_id, observed_at, network) VALUES (?, ?, 'mainnet')`).run(txid, new Date().toISOString());
+
+  let threw = null, res = null;
+  try {
+    res = await driveBetIntent({
+      sendCmd: R.sendCmd, relayId: 'relay-A', betId: 'bet5', step: 'mint',
+      targetAddress: 'kaspatest:mint-addr5', buildAndBroadcast: async () => { throw new Error('should-not-be-called: prepared 态走重播不走重建'); }, log: quiet,
+    });
+  } catch (e) { threw = e; }
+  ok(threw === null, `没有 throw(实际 ${threw && threw.message})`);
+  ok(res && res.txId === txid, `resolvePrepared 靠 kaspa_tx_log 正向证据确认 submitted, txid 不变(实际 ${res && res.txId})`);
+  const after = getBetIntent(key);
+  ok(after.status === 'submitted', `intent 行落为 submitted, 不是 ambiguous(实际 ${after.status})`);
+}
+
+console.log('[test] ⑨b resolvePrepared: inputs_spent 且 kaspa_tx_log 查无正向证据 → ambiguous 终态, HOLD 不重建不放弃:');
+{
+  seedBet('bet6');
+  const R = makeRelay();
+  const key = betIntentKeyFor('bet6', 'mint');
+  ensureBetIntent({ betId: 'bet6', step: 'mint' });
+  const txid = 'b2b2b2b2'.repeat(8);
+  recordBetIntentPhase({ intentKey: key, phase: 'prepared', txid, txJson: JSON.stringify({ id: txid }) });
+  R.sendCmd = async (relayId, cmd) => {
+    R.calls.push(cmd);
+    if (cmd.type === 'get_mempool_entry') return { ok: true, found: false };
+    if (cmd.type === 'check_utxo_landed') return { ok: true, landed: false, depth: null };
+    if (cmd.type === 'broadcast_raw_tx') return { code: 'inputs_spent', error: 'transaction output already spent' };
+    throw new Error(`unexpected cmd ${cmd.type}`);
+  };
+  // 故意不往 kaspa_tx_log 里插这个 txid——模拟"谁花了这个输入完全不知道, 既不能确认是我方重播成功
+  // 也不能确认是别人抢跑双花"的真正歧义态(区别于 ⑨a: 那里有独立观察佐证, 这里没有)。
+
+  let threw = null;
+  let buildCalls = 0;
+  try {
+    await driveBetIntent({
+      sendCmd: R.sendCmd, relayId: 'relay-A', betId: 'bet6', step: 'mint',
+      targetAddress: 'kaspatest:mint-addr6', buildAndBroadcast: async () => { buildCalls++; return { txId: 'should-not-happen' }; }, log: quiet,
+    });
+  } catch (e) { threw = e; }
+  ok(threw && threw.hold === true, 'driveBetIntent throw 了 HoldError(不是普通异常, 调用方能区分"需要人工"vs"程序错误")');
+  ok(threw && threw.code === 'ambiguous_inputs_spent', `hold code 正确(实际 ${threw && threw.code})`);
+  ok(buildCalls === 0, `buildAndBroadcast 未被调用(实际 ${buildCalls} 次) —— 没有在歧义态悄悄重建双花`);
+  const after = getBetIntent(key);
+  ok(after.status === 'ambiguous', `intent 行落为 ambiguous 终态(实际 ${after.status})`);
+
+  console.log('[test] ⑨c ambiguous 是终态: markBetIntent 不能把它改回任何非 ambiguous 状态, 后续 driveBetIntent 直接 HOLD 不再碰 sendCmd:');
+  const afterPatch = markBetIntent(key, { status: 'prepared' });
+  ok(afterPatch.status === 'ambiguous', `尝试把 ambiguous 改回 prepared 被拒(实际 ${afterPatch.status}) —— 终态只能人工清`);
+
+  R.calls.length = 0; // 清空调用记录, 验证下一次 driveBetIntent 完全不碰 relay(在 for 循环第一轮就短路 throw)
+  let threw2 = null;
+  try {
+    await driveBetIntent({
+      sendCmd: R.sendCmd, relayId: 'relay-A', betId: 'bet6', step: 'mint',
+      targetAddress: 'kaspatest:mint-addr6', buildAndBroadcast: async () => { buildCalls++; return { txId: 'should-not-happen' }; }, log: quiet,
+    });
+  } catch (e) { threw2 = e; }
+  ok(threw2 && threw2.hold === true && threw2.code === 'ambiguous_inputs_spent', 'ambiguous 行再次 driveBetIntent 立即 HOLD(不重试, 不轮询)');
+  ok(R.calls.length === 0, `第二次调用完全没碰 sendCmd(实际 ${R.calls.length} 次) —— activeBetIntent 排除 ambiguous 行会造一条新 pending 行, 若命中说明依赖 activeBetIntent 的排除逻辑有洞`);
+}
+
 console.log(fails === 0
-  ? '\n✅✅ ALL PASS — proto-bet-intent 两步链状态机(依赖闸/幂等/单调/恢复) 全绿'
+  ? '\n✅✅ ALL PASS — proto-bet-intent 两步链状态机(依赖闸/幂等/单调/恢复/inputs_spent 歧义终态) 全绿'
   : `\n❌ ${fails} assertions failed`);
 process.exit(fails === 0 ? 0 : 1);
