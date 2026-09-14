@@ -1049,10 +1049,12 @@ async function executeTradeAction(action, config) {
       }
 
       case 'SYSTEM_RUN': {
+        // T-SYSTEM-RUN-RCE 热修(2026-09-14): /api/system/run 改收 actionId(不再收 filePath) — 见
+        // kasia-console/src/api/broker.js + src/services/system-actions.js 头注。
         const res = await fetchJson(`${consoleUrl}/api/system/run`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ filePath: params.filePath }),
+          body: JSON.stringify({ actionId: params.actionId }),
         });
         console.log(`[mind] SYSTEM_RUN: ${res.ok ? 'PID ' + res.pid : res.error}`);
         return res;
