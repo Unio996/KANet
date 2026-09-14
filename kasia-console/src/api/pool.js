@@ -160,7 +160,7 @@ function deriveXOnlyPubkey(address) {
 // 🔴 单一真值(2026-07-08, Bettor #bo75z6): 曾经两处调用点(monolithic /register-v07 + /register-v07/confirm)
 // 各自独立读取这段逻辑, 后者漏抄导致 cswib 首证撞见的 zk_native=true 市场静默铸成 V1 PayoutShard 事故——
 // 抽成这一个共享函数, 两处调用同一份, 不再各自维护各自的副本(今晚已两次撞"两套并行实现同族病"教训)。
-function _resolveZkNativeCtorExtras(market, silverc, computeCloseZkTmplAnchor) {
+function _resolveZkNativeCtorExtras(market, computeCloseZkTmplAnchor) {
   let zkNative = false, closeZkTmplAnchor = null;
   try { zkNative = JSON.parse(market.resolution_rule_spec || '{}')?.zk_native === true; } catch {}
   if (zkNative) {
@@ -170,6 +170,13 @@ function _resolveZkNativeCtorExtras(market, silverc, computeCloseZkTmplAnchor) {
     // bshard-close-transport.mjs:453-461 已落地的同款纪律对齐, 不留"看起来能跑但值可能不对"的窗口。
     if (!process.env.ZK_GATE_TMPL_HASH) throw new Error('_resolveZkNativeCtorExtras: ZK_GATE_TMPL_HASH env 必需(不接受硬编码 fallback, 该值随 guest image 变化易过期)');
     if (!process.env.ZK_CLOSEZK_SIL_PATH) throw new Error('_resolveZkNativeCtorExtras: ZK_CLOSEZK_SIL_PATH env 必需(不接受硬编码 fallback, 路径随归位进度变化)');
+    // D-019 迁移(ledger 1216-1222): T3 代币化给 CloseZkV2.sil 新增三个 ctor-only 字面量字段(同
+    // gateTmplHash 一样必须传真实值, 不能省略/用占位符——computeCloseZkTmplAnchor 内部已 fail-loud 校验
+    // hex 格式, 这里的 env 检查是同一条纪律往前挪一步, 让"缺配置"在 genesis-mint 现场就报错, 不是等
+    // 编译内部才报一个更难读的错)。同 ZK_GATE_TMPL_HASH/ZK_CLOSEZK_SIL_PATH 一样不接受硬编码 fallback。
+    if (!process.env.ZK_TOKEN_TMPL_HASH) throw new Error('_resolveZkNativeCtorExtras: ZK_TOKEN_TMPL_HASH env 必需(T3 代币化新增, 不接受硬编码 fallback)');
+    if (!process.env.ZK_CLAIM_TMPL_HASH) throw new Error('_resolveZkNativeCtorExtras: ZK_CLAIM_TMPL_HASH env 必需(T3 代币化新增, 不接受硬编码 fallback)');
+    if (!process.env.ZK_MARKET_SUFFIX_HASH) throw new Error('_resolveZkNativeCtorExtras: ZK_MARKET_SUFFIX_HASH env 必需(T3 代币化新增, 不接受硬编码 fallback)');
     // 根修(2026-07-09, NWT finding①(b)HIGH): 这是 zkNative 市场 genesis-mint 的 ctor 组装点——之前的
     // guard 只在 prove/close(genesis 下游)才检查, 这里(genesis 本身)从来没人验过 env 跟 ZK_GATE 是否
     // 配对新鲜。force=true: 走进这个 if 分支已经确定 zkNative=true(真在铸 ZK-native genesis), 非 ZK 节点
@@ -177,7 +184,13 @@ function _resolveZkNativeCtorExtras(market, silverc, computeCloseZkTmplAnchor) {
     ensureGateTmplHashFresh(ZK_GATE, kaspaZk, { force: true });
     const gateTmplHash = process.env.ZK_GATE_TMPL_HASH;
     const closeZkSilPath = process.env.ZK_CLOSEZK_SIL_PATH;
-    closeZkTmplAnchor = computeCloseZkTmplAnchor(closeZkSilPath, gateTmplHash, silverc).anchorHex;
+    // 🔴 D-019 迁移顺手修正(落码期间实测确认): 旧代码这里第三个位置参数传的是 silverc(一个二进制路径
+    // 字符串, SILVERC_LEGACY_PATH)——computeCloseZkTmplAnchor 从来只有 2 个具名参数, 这个第三参数一直是
+    // 死传参(函数内部硬编码走自己的 SILVERC_ZK 常量, 从不读调用方传的东西, 见函数顶部旧版注释"硬编码，
+    // 不依赖调用方传参正确")。现在函数第三个位置是 tokenTmplHash(真参数)——若不删掉这个死传参, 一个
+    // 文件路径字符串会被塞进 tokenTmplHash 的位置(好在函数内部有 hex 格式校验会 fail-loud 拒绝, 不会
+    // 静默算错, 但错误信息会很费解)。已删除, 改传三个真实新字段。
+    closeZkTmplAnchor = computeCloseZkTmplAnchor(closeZkSilPath, gateTmplHash, process.env.ZK_TOKEN_TMPL_HASH, process.env.ZK_CLAIM_TMPL_HASH, process.env.ZK_MARKET_SUFFIX_HASH).anchorHex;
   }
   return { zkNative, closeZkTmplAnchor };
 }
@@ -1566,7 +1579,7 @@ export async function registerPoolRoutes(fastify) {
       // silverc.exe，会随任意 cargo build 原地漂移，07-07 事故的确切病灶), 改跟 pool-bshard-artifacts.mjs
       // 已修的那行同一模式——固定 versioned-builds 下按族 pin 的已知良性文件, 不再吃 target/release 默认。
       const silverc = process.env.SILVERC_LEGACY_PATH || 'D:/silverscript/versioned-builds/silverc-legacy-2c46231.exe';
-      const { zkNative: _zkNative, closeZkTmplAnchor: _closeZkTmplAnchor } = _resolveZkNativeCtorExtras(market, silverc, computeCloseZkTmplAnchor);
+      const { zkNative: _zkNative, closeZkTmplAnchor: _closeZkTmplAnchor } = _resolveZkNativeCtorExtras(market, computeCloseZkTmplAnchor);
       // 命门①④ genesis coherence: commit 槽派生收敛为单源 deriveMarketPredicateCommit(B线落2, 2026-07-12,
       //   取代此处与 confirm/admin-confirm 两处的同型四行拷贝——"两套并行实现"家族病, 同 _resolveZkNativeCtorExtras
       //   收敛先例)。分支: fee_rules 非空→computeMarketCommitV2(P1: 含 predicate-null 折 identity 锚);
@@ -1837,7 +1850,7 @@ export async function registerPoolRoutes(fastify) {
       // PayoutShardV2——市场从 genesis 起物理上没有 zk_handoff/zk_close/claim 三个 entry, ZK 彩排/结算走不通。
       // 老的单体 /register-v07 endpoint 一直有这段逻辑, 只是没人发现两条路径分叉了。Bettor 裁定(#bo75z6):
       // 不抄一段重复代码(今晚已两次撞"两套并行实现"同族病), 抽共享函数 _resolveZkNativeCtorExtras, 两处调用同一份。
-      const { zkNative: _zkNative, closeZkTmplAnchor: _closeZkTmplAnchor } = _resolveZkNativeCtorExtras(market, silverc, computeCloseZkTmplAnchor);
+      const { zkNative: _zkNative, closeZkTmplAnchor: _closeZkTmplAnchor } = _resolveZkNativeCtorExtras(market, computeCloseZkTmplAnchor);
       const result = await registerBettorOnShard({
         db: sqlite, rc, transfer, landed, p2sh, logicalMarketId,
         poolMerkleRoot: market.pool_merkle_root, predicateCommit,

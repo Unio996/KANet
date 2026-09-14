@@ -150,10 +150,18 @@ export function assertPayoutShardCoherence(psRow, { p2sh, tier = 'full' } = {}) 
     if (!_hex32(psRow.pool_merkle_root) || !_hex32(psRow.predicate_commit)) {
       return { ok: false, failedStep: 'c', reason: `pool_merkle_root/predicate_commit 列本身不是合法 32B hex(marketId=${marketId}) — 数据问题, 不是环境问题, fail-closed 拒绝` };
     }
+    // D-019 迁移(ledger 1225-1227): PayoutShard.sil 当前 ctor 实读 25 参数, compilePayoutShardRedeem 现在
+    // fail-loud 要求 token_tmpl_hash/claim_tmpl_hash/market_suffix_hash——同 pool_merkle_root/
+    // predicate_commit 一样, 这三列本身格式不对/缺失是"数据问题不是环境问题", 归 FAIL 不归 inconclusive
+    // (同上一段①②③三态分类纪律, 不能混进 catch 被降级)。
+    if (!_hex32(psRow.token_tmpl_hash) || !_hex32(psRow.claim_tmpl_hash) || !_hex32(psRow.market_suffix_hash)) {
+      return { ok: false, failedStep: 'c', reason: `token_tmpl_hash/claim_tmpl_hash/market_suffix_hash 列本身不是合法 32B hex 或缺失(marketId=${marketId}) — D-019 迁移新增列, 数据问题不是环境问题, fail-closed 拒绝, 不猜值` };
+    }
     try {
       const recompiled = compilePayoutShardRedeem({
         poolMerkleRoot: psRow.pool_merkle_root, predicateCommit: psRow.predicate_commit,
         consolidatedPool: sig.decoded.consolidatedPool, closed: sig.decoded.closed, payoutRoot: sig.decoded.payoutRoot,
+        tokenTmplHash: psRow.token_tmpl_hash, claimTmplHash: psRow.claim_tmpl_hash, marketSuffixHash: psRow.market_suffix_hash,
       });
       if (recompiled !== psRow.payout_redeem_hex) {
         return { ok: false, failedStep: 'c', reason: `recompile byte-compare 不等(marketId=${marketId}, closed=${sig.decoded.closed}) — structural 校验失败(可能 w0..w16 非零/其它字段漂移), fail-closed 拒绝` };

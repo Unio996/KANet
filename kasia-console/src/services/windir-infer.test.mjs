@@ -18,7 +18,7 @@ function freshDb() {
     CREATE TABLE pool_markets (id TEXT PRIMARY KEY, protocol_version TEXT, metadata TEXT, resolution_rule_spec TEXT, fee_rules TEXT);
     CREATE TABLE market_shards (logical_market_id TEXT, shard_market_id TEXT, shard_index INTEGER, status TEXT DEFAULT 'sealed');
     CREATE TABLE pool_bettor_sides (market_id TEXT, bettor_pk TEXT, stake_amount TEXT, direction INTEGER, side_lock_daa INTEGER, side_lock_tx TEXT);
-    CREATE TABLE payout_shards (logical_market_id TEXT, pool_merkle_root TEXT, predicate_commit TEXT);
+    CREATE TABLE payout_shards (logical_market_id TEXT, pool_merkle_root TEXT, predicate_commit TEXT, token_tmpl_hash TEXT, claim_tmpl_hash TEXT, market_suffix_hash TEXT);
     CREATE TABLE kaspa_tx_log (tx_id TEXT PRIMARY KEY, outputs_json TEXT);
     CREATE TABLE events (id TEXT PRIMARY KEY, event_scope TEXT, event_type TEXT, source TEXT, level TEXT, summary TEXT, payload_json TEXT, created_at TEXT);
   `);
@@ -33,6 +33,9 @@ const CLOSE_TXID = 'cc'.repeat(32);
 const PMR = 'd1'.repeat(32);
 const PC = 'd2'.repeat(32);
 const SEED = 20000000;
+// D-019 迁移(ledger 1225-1227): PayoutShard.sil 当前 ctor 实读 25 参数, compilePayoutShardRedeem 现在
+// fail-loud 要求这三个新字段——本测试自带 in-memory schema(非真 migrate.js), 同步加了三列 + 这里补 fixture。
+const TTH = 'd3'.repeat(32), CTH = 'd4'.repeat(32), MSH = 'd5'.repeat(32);
 // 测试用确定性 p2sh(推断只要求候选与链上地址同函数同 redeem 时相等——真 p2sh 派生非被测点)
 const fakeP2sh = (redeemHex) => 'p2shtest:' + Buffer.from(blake2b(Buffer.from(String(redeemHex)), { dkLen: 20 })).toString('hex');
 
@@ -40,13 +43,13 @@ function seed(db, { metadata, chainAddrOverride = null, noTxLog = false, rrs = '
   db.prepare('INSERT INTO pool_markets (id, protocol_version, metadata, resolution_rule_spec) VALUES (?,?,?,?)').run(MID, 'v0.7', JSON.stringify(metadata || {}), rrs);
   db.prepare('INSERT INTO market_shards (logical_market_id, shard_market_id, shard_index) VALUES (?,?,0)').run(MID, SHARD);
   for (const b of [WINNER, LOSER]) db.prepare('INSERT INTO pool_bettor_sides (market_id, bettor_pk, stake_amount, direction) VALUES (?,?,?,?)').run(SHARD, b.pk, b.stake, b.direction);
-  db.prepare('INSERT INTO payout_shards (logical_market_id, pool_merkle_root, predicate_commit) VALUES (?,?,?)').run(MID, PMR, PC);
+  db.prepare('INSERT INTO payout_shards (logical_market_id, pool_merkle_root, predicate_commit, token_tmpl_hash, claim_tmpl_hash, market_suffix_hash) VALUES (?,?,?,?,?,?)').run(MID, PMR, PC, TTH, CTH, MSH);
   if (!noTxLog) {
     // 链上 output0 地址 = 真编译 dir=1 候选 redeem 的地址(除非 override)
     const pm1 = computePariMutuelPayout({ bettors: [WINNER, LOSER].map(b => ({ pk: b.pk, stake: b.stake, direction: b.direction })), winningDirection: 1 });
     const root1 = buildPayoutRoot(pm1.payoutLeaves).toString('hex');
     const pool = (BigInt(WINNER.stake) + BigInt(LOSER.stake) + BigInt(SEED)).toString();
-    const redeem1 = compilePayoutShardRedeem({ poolMerkleRoot: PMR, predicateCommit: PC, consolidatedPool: pool, closed: 1, payoutRoot: root1 });
+    const redeem1 = compilePayoutShardRedeem({ poolMerkleRoot: PMR, predicateCommit: PC, consolidatedPool: pool, closed: 1, payoutRoot: root1, tokenTmplHash: TTH, claimTmplHash: CTH, marketSuffixHash: MSH });
     const addr = chainAddrOverride || fakeP2sh(redeem1);
     db.prepare('INSERT INTO kaspa_tx_log (tx_id, outputs_json) VALUES (?,?)').run(CLOSE_TXID, JSON.stringify([{ address: addr, amount: 1 }]));
   }

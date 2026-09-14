@@ -505,6 +505,12 @@ export async function buildZkHandoffRequestV2(marketId, args) {
   // 缺 env 直接 throw, 逼调用方显式配置, 不留"看起来能跑但值可能不对"的窗口。
   if (!process.env.ZK_GATE_TMPL_HASH) throw new Error('buildZkHandoffRequestV2: ZK_GATE_TMPL_HASH env 必需(不接受硬编码 fallback, 该值随 guest image 变化易过期)');
   if (!process.env.ZK_CLOSEZK_SIL_PATH) throw new Error('buildZkHandoffRequestV2: ZK_CLOSEZK_SIL_PATH env 必需(不接受硬编码 fallback, 路径随归位进度变化)');
+  // D-019 迁移(ledger 1216-1222): T3 代币化给 CloseZkV2.sil 新增三个 ctor-only 字面量字段——跟
+  // gateTmplHash/closeZkSilPath 同一条纪律(必须跟这个市场 genesis-mint 时烤入的同一份值, 不能另起一份,
+  // 否则四段模板跟链上已烤的 anchor 对不上), 缺 env 直接 throw。
+  if (!process.env.ZK_TOKEN_TMPL_HASH) throw new Error('buildZkHandoffRequestV2: ZK_TOKEN_TMPL_HASH env 必需(T3 代币化新增, 不接受硬编码 fallback)');
+  if (!process.env.ZK_CLAIM_TMPL_HASH) throw new Error('buildZkHandoffRequestV2: ZK_CLAIM_TMPL_HASH env 必需(T3 代币化新增, 不接受硬编码 fallback)');
+  if (!process.env.ZK_MARKET_SUFFIX_HASH) throw new Error('buildZkHandoffRequestV2: ZK_MARKET_SUFFIX_HASH env 必需(T3 代币化新增, 不接受硬编码 fallback)');
   // 根修(2026-07-09, NWT finding①(b)HIGH·docs/2026-07-09-NWT-redteam-gate-tmplhash-live-derive-66de59c6.md):
   // 这是 zk_handoff 铸 CloseZkV2 genesis 的实际调用点——pxvml 出生缺陷的历史事发路径原文("错值经 kanet.env
   // 烤进 pxvml genesis")。之前的 guard 只在 prove/close(genesis 下游)检查, genesis 本身这个点从没验过。
@@ -515,7 +521,7 @@ export async function buildZkHandoffRequestV2(marketId, args) {
   ensureGateTmplHashFresh(ZK_GATE, kaspaZk, { force: true });
   const gateTmplHash = process.env.ZK_GATE_TMPL_HASH;
   const closeZkSilPath = process.env.ZK_CLOSEZK_SIL_PATH;
-  const { templateA, templateB, templateC, templateD } = computeCloseZkTmplAnchor(closeZkSilPath, gateTmplHash);
+  const { templateA, templateB, templateC, templateD } = computeCloseZkTmplAnchor(closeZkSilPath, gateTmplHash, process.env.ZK_TOKEN_TMPL_HASH, process.env.ZK_CLAIM_TMPL_HASH, process.env.ZK_MARKET_SUFFIX_HASH);
 
   const rc = (cmd, t = 90000) => sendCommandAsync(settlerRelayId, cmd, t, 'internal');
   const relayAddr = (await rc({ type: 'get_pubkey' })).address;

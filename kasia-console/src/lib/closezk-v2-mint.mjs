@@ -5,7 +5,7 @@
 //   两块通过 zk_continuation schema 契约解耦(docs/iteration/COORD-LEDGER.md T2b(i) 段, commit 34ccb6af)。
 
 import { sqlite } from '../db/client.js';
-import { compileSil, ctorBytes32, ctorInt } from './pool-bshard-artifacts.mjs';
+import { compileSil, ctorBytes32, ctorInt, compileSilV100, ctorBytes32V100, ctorIntV100 } from './pool-bshard-artifacts.mjs';
 import { computeCloseZkTmplAnchor } from './pool-shard-register.mjs';
 import { readPayoutShardV2AttestedState } from './bshard-close-enforce.mjs';
 import { join, dirname } from 'node:path';
@@ -13,9 +13,13 @@ import { fileURLToPath } from 'node:url';
 
 const LIB = dirname(fileURLToPath(import.meta.url));
 const CLOSEZK_V2_SIL = join(LIB, 'CloseZkV2.sil');
+// 🟡 DEPRECATED(D-019, ledger 1218/1222): 本文件内已无真实调用点(compileCloseZkV2Redeem 已迁
+// compileSilV100)——保留常量定义不删。这个二进制对当前(v1.0.0 语法迁移后) CloseZkV2.sil 已结构性失效
+// (解析都过不了, 见 pool-shard-register.mjs 的同款 D-019 迁移注释), 不要想当然重新接上。
 const SILVERC_ZK = process.env.SILVERC_ZK_PATH || 'D:/silverscript/versioned-builds/silverc-zk-8065184.exe';
 const z32 = '00'.repeat(32);
 const W17 = () => Array.from({ length: 17 }, () => ctorInt(0));
+const W17V100 = () => Array.from({ length: 17 }, () => ctorIntV100(0));   // D-019: v100 ctor 方言专用
 
 /**
  * assertPayoutLeavesConserved — §4 硬门⑤(承重件, Bettor 15:33 独立源码核验升级为 BLOCKING)。
@@ -62,22 +66,34 @@ export function assertPayoutLeavesConserved(leaves, consolidatedPool) {
  * @param {number} o.attestedAtMs J1 那段 state-splice 读出的原值, 严禁做任何 *1000//1000 转换(§4 硬门②)
  * @param {number} o.attestedWinner 0|1, 委员判定值
  * @param {number|string} o.consolidatedPool
+ * @param {string} o.tokenTmplHash 真实 KanetTestToken 模板 hash(32B hex, T3 代币化新增字段, 不接受占位符)
+ * @param {string} o.claimTmplHash 真实 KanetTokenClaim 模板 hash(32B hex, T3 代币化新增字段, 不接受占位符)
+ * @param {string} o.marketSuffixHash 真实 market suffix 承诺 hash(32B hex, T3 代币化新增字段, 不接受占位符)
  * @returns {string} compiled redeem hex
  */
-export function compileCloseZkV2Redeem({ gateTmplHash, betsRootBaked, refundRootBaked, attestedAtMs, attestedWinner, consolidatedPool }) {
+export function compileCloseZkV2Redeem({ gateTmplHash, betsRootBaked, refundRootBaked, attestedAtMs, attestedWinner, consolidatedPool, tokenTmplHash, claimTmplHash, marketSuffixHash }) {
   if (!/^[0-9a-f]{64}$/i.test(String(gateTmplHash || ''))) {
     throw new Error('compileCloseZkV2Redeem: gateTmplHash 必须是 32B hex');
   }
+  // 🔴 D-019 迁移(ledger 1216-1222, 落码期间实测确认): 原 ctor 只填 25 个值(缺 T3 代币化新增的
+  // token_tmpl_hash/claim_tmpl_hash/market_suffix_hash 三个尾部字段, 当前 CloseZkV2.sil 实读 28 参数),
+  // 且硬编码走已对当前语法失效的 SILVERC_ZK——已改走 compileSilV100 + ctor 补齐。这三个新字段跟
+  // gateTmplHash 同类(ctor-only 字面量, 被 claim/escape_claim 入口体内的 require 直接引用, 会真实改变
+  // 编译产物字节), 必须传真实值, 不能用占位符(同 computeCloseZkTmplAnchor 已有的纪律)。
+  for (const [label, v] of [['tokenTmplHash', tokenTmplHash], ['claimTmplHash', claimTmplHash], ['marketSuffixHash', marketSuffixHash]]) {
+    if (!/^[0-9a-fA-F]{64}$/.test(String(v || ''))) throw new Error(`compileCloseZkV2Redeem: ${label} 必须是 32B hex，收到 ${JSON.stringify(v)} — ctor-only 字面量，不接受占位符/缺省值`);
+  }
   const ctor = [
-    ctorBytes32(gateTmplHash), ctorBytes32(betsRootBaked), ctorBytes32(refundRootBaked),
-    ctorInt(Number(attestedAtMs)),      // §4 硬门②: 原值直接烤入, 调用方保证零转换
-    ctorInt(Number(attestedWinner)),
-    ctorInt(1),                          // init_closed: 恒为 1(§4 硬门①, closed==0 是理论态, mint 只产 closed==1 实例)
-    ctorBytes32(z32),                    // init_payoutRootField: ZERO32 占位, zk_close 完成后才写真实值
-    ctorInt(Number(consolidatedPool)),
-    ...W17(),
+    ctorBytes32V100(gateTmplHash), ctorBytes32V100(betsRootBaked), ctorBytes32V100(refundRootBaked),
+    ctorIntV100(Number(attestedAtMs)),      // §4 硬门②: 原值直接烤入, 调用方保证零转换
+    ctorIntV100(Number(attestedWinner)),
+    ctorIntV100(1),                          // init_closed: 恒为 1(§4 硬门①, closed==0 是理论态, mint 只产 closed==1 实例)
+    ctorBytes32V100(z32),                    // init_payoutRootField: ZERO32 占位, zk_close 完成后才写真实值
+    ctorIntV100(Number(consolidatedPool)),
+    ...W17V100(),
+    ctorBytes32V100(tokenTmplHash), ctorBytes32V100(claimTmplHash), ctorBytes32V100(marketSuffixHash),
   ];
-  return Buffer.from(compileSil(CLOSEZK_V2_SIL, ctor, SILVERC_ZK).script).toString('hex');
+  return Buffer.from(compileSilV100(CLOSEZK_V2_SIL, ctor, 'CloseZkV2').script).toString('hex');
 }
 
 /**
@@ -219,11 +235,16 @@ export function updateProvingFailed(marketId, errorMessage) {
  * @param {string} psv2RedeemHex 已落链的 PayoutShardV2 continuation redeem hex(closed 已被委员写成 1)
  * @param {string} gateTmplHash 32B hex — CloseZkV2 自己的 ctor 字段, 来自 guest image 绑定的 gate 模板哈希(跟
  *   committee-attested 值无关, 调用方显式传入, 不从 psv2 state 推导)
+ * @param {string} tokenTmplHash 32B hex — D-019 迁移新增(ledger 1216-1222)：T3 代币化 ctor-only 字段，同
+ *   gateTmplHash 一样调用方显式传入，不从 psv2 state 推导（这三个字段是本市场创世共用的模板/承诺锚，不
+ *   是某次 attest 才产生的委员判定值）
+ * @param {string} claimTmplHash 32B hex — 同上
+ * @param {string} marketSuffixHash 32B hex — 同上
  * @returns {{redeemHex:string, anchorHex:string, consolidatedPool:bigint, attestedWinner:number, attestedAtMs:number}}
  */
-export function buildCloseZkV2GenesisFromAttestedState(psv2RedeemHex, gateTmplHash) {
+export function buildCloseZkV2GenesisFromAttestedState(psv2RedeemHex, gateTmplHash, tokenTmplHash, claimTmplHash, marketSuffixHash) {
   const state = readPayoutShardV2AttestedState(psv2RedeemHex);   // J1 的切片, fail-closed 四项已在函数内部核过
-  const anchor = computeCloseZkTmplAnchor(CLOSEZK_V2_SIL, gateTmplHash);   // §4 硬门①: 每次对 CloseZkV2 当次编译重算
+  const anchor = computeCloseZkTmplAnchor(CLOSEZK_V2_SIL, gateTmplHash, tokenTmplHash, claimTmplHash, marketSuffixHash);   // §4 硬门①: 每次对 CloseZkV2 当次编译重算
   const redeemHex = compileCloseZkV2Redeem({
     gateTmplHash,
     betsRootBaked: state.betsRootHex,
@@ -231,6 +252,7 @@ export function buildCloseZkV2GenesisFromAttestedState(psv2RedeemHex, gateTmplHa
     attestedAtMs: state.attestedAtMs,
     attestedWinner: state.attestedWinner,
     consolidatedPool: state.consolidatedPool,
+    tokenTmplHash, claimTmplHash, marketSuffixHash,
   });
   return { redeemHex, anchorHex: anchor.anchorHex, consolidatedPool: state.consolidatedPool, attestedWinner: state.attestedWinner, attestedAtMs: state.attestedAtMs };
 }

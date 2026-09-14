@@ -16,9 +16,10 @@
 
 import { execFileSync } from 'node:child_process';
 import { writeFileSync, readFileSync, mkdtempSync, existsSync, mkdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import { blake2b } from '@noble/hashes/blake2b';
 import { extractTemplateArtifact } from './pool-template-artifact.mjs';
 import { procStep } from './diag-step.mjs';   // M10 v2 observe-only (2026-09-05): 同步子进程站计时, 纯透传
@@ -43,11 +44,13 @@ const SILVERC = process.env.SILVERC_LEGACY_PATH || 'D:/silverscript/versioned-bu
 // "MUST compile with the SAME silverc binary" 场景, 比原本无 cache 的慢更危险(错的哈希会被烤进链上模板)。
 const CACHE_DIR = process.env.SS_ARTIFACT_CACHE_DIR || join(tmpdir(), 'kanet-ss-artifact-cache');
 
-/** Compile a .sil with ctor JSON via silverc → {script:number[], state_layout:{start,len}} (silverc -o JSON). */
-export function compileSil(silPath, ctorArr, silvercPath = SILVERC) {
+// silverc 子进程调用(sha256(source+silvercPath+ctor) cache + timeout:30_000)——compileSil(旧 schema)与
+// compileSilV100(新 schema, 下方)共用这一段, 各自在拿到原始 JSON 之后按自己的 schema 校验/整形, 不重复
+// 维护两份几乎一样的 execFileSync+cache 逻辑。cache key 含 silvercPath, 旧/新两个二进制天然各自独立缓存,
+// 不会互相污染(同一份既有纪律, 见下方 compileSil 原注释)。
+function _runSilverc(silPath, ctorArr, silvercPath) {
   const ctorJsonStr = JSON.stringify(ctorArr);
   const sourceHash = createHash('sha256').update(readFileSync(silPath)).digest('hex').slice(0, 16);
-  // silvercPath 编进 key: 同 .sil+ctor 在 legacy/zk 两个二进制间必须各自独立缓存, 不能共享。
   const cacheKey = createHash('sha256').update(sourceHash + silvercPath + ctorJsonStr).digest('hex');
   if (!existsSync(CACHE_DIR)) mkdirSync(CACHE_DIR, { recursive: true });
   const cacheFile = join(CACHE_DIR, `${cacheKey}.json`);
@@ -70,18 +73,174 @@ export function compileSil(silPath, ctorArr, silvercPath = SILVERC) {
     throw new Error(`silverc compile ${silPath} fail: ${detail.slice(0, 300)}`);
   }
   const o = JSON.parse(readFileSync(outPath, 'utf8'));
-  if (!Array.isArray(o.script) || !o.state_layout) throw new Error(`silverc output missing script/state_layout for ${silPath}`);
   writeFileSync(cacheFile, JSON.stringify(o));
   return o;
 }
 
-/** ctor helpers (silverc ctor JSON node format). */
+/** Compile a .sil with ctor JSON via silverc → {script:number[], state_layout:{start,len}} (silverc -o JSON). */
+export function compileSil(silPath, ctorArr, silvercPath = SILVERC) {
+  const o = _runSilverc(silPath, ctorArr, silvercPath);
+  if (!Array.isArray(o.script) || !o.state_layout) throw new Error(`silverc output missing script/state_layout for ${silPath}`);
+  return o;
+}
+
+/** ctor helpers (旧 silverc ctor JSON node format——SILVERC_LEGACY/SILVERC_ZK 两个旧二进制专用, 不适用 v1.0.0)。 */
 export const ctorBytes32 = (hexOrBuf) => {
   const b = Buffer.isBuffer(hexOrBuf) ? hexOrBuf : Buffer.from(hexOrBuf, 'hex');
   if (b.length !== 32) throw new Error(`bytes32 must be 32B, got ${b.length}`);
   return { kind: 'array', data: [...b].map(x => ({ kind: 'byte', data: x })) };
 };
 export const ctorInt = (n) => ({ kind: 'int', data: Number(n) });
+
+// ── silverc v1.0.0(D-019 锚点, ledger 1216-1218) ──────────────────────────────────────────────────────
+//
+// 生产权威二进制、产物 schema、ctor JSON 方言都跟上面的旧 SILVERC_LEGACY/SILVERC_ZK **不是同一族**——
+// 三处都实测确认过差异, 不是猜测:
+//   ① 产物 schema: 旧 = 顶层 {script:number[], state_layout:{start,len}}；v1.0.0 = 嵌套
+//      {contracts:{<ContractName>:{compiled:{bytecode:hexString, template_hash:byte[], state_span:{offset,len}}}}}。
+//   ② ctor JSON 节点方言: 旧 = {kind:'array',data:[{kind:'byte',data:n},...]} / {kind:'int',data:n}；
+//      v1.0.0 = {kind:'bytes',value:[...]} / {kind:'int',value:n}(实测: 旧方言喂 v1.0.0 CLI 直接
+//      "missing field `value`" 拒收, 不是"能凑合用旧格式"——两族 ctor 数组不能混用同一份 helper)。
+//   ③ 编译器本身: SILVERC_ZK_PATH(silverc-zk-8065184.exe)连当前(v1.0.0 语法迁移后) CloseZkV2.sil 都解析
+//      不了(`as byte[8]` 转型语法, parse error), 不只是 ctor 参数数不对——这是 T3 语法迁移(b5a2924c 等)
+//      之后, 旧编译器对主网集 .sil 文件已经**结构性作废**, 不是"版本旧但还能凑合编"。
+//
+// 权威锚点 = scripts/silverc-pin.json（D-019）：name/commit/sha256/schema 版本单源记录，本文件只读它，不
+// 重复内嵌 sha256 字面量（同"避免同一事实两处各存一份必陈"通则）。
+const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+const SILVERC_PIN_PATH = join(REPO_ROOT, 'scripts', 'silverc-pin.json');
+const DEFAULT_SILVERC_V100_PATH = 'D:/silverscript/versioned-builds/silverc-v100-3ed9733.exe';
+
+let _silvercPinCache = null;
+function _loadSilvercPin() {
+  if (_silvercPinCache) return _silvercPinCache;
+  if (!existsSync(SILVERC_PIN_PATH)) throw new Error(`silverc-pin.json 不存在: ${SILVERC_PIN_PATH}（D-019 权威锚点缺失, 拒绝编译）`);
+  const raw = JSON.parse(readFileSync(SILVERC_PIN_PATH, 'utf8'));
+  if (!/^[0-9a-f]{64}$/i.test(String(raw.sha256 || ''))) throw new Error(`silverc-pin.json 的 sha256 字段缺失或格式非法(${SILVERC_PIN_PATH})`);
+  _silvercPinCache = raw;
+  return raw;
+}
+
+/**
+ * 启动/每次调用前算二进制 sha256, 与 scripts/silverc-pin.json(D-019)比对——不符即拒跑, 不猜哪个对
+ * (ledger 1216 原话: "启动 sha256 自检不符即拒跑")。不做跨调用缓存"上次核过就跳过"——sha256 一份
+ * ~5MB 二进制是毫秒级, 这不是热路径(创世/anchor 计算低频), 正确性优先于这点性能, 也避免"文件被换了但
+ * 内存里缓存的还是旧核对结果"这类窗口。
+ * @param {string} v100Path
+ * @returns {object} pin 文件内容(调用方可能想读 artifactSchemaVersion 等字段)
+ */
+export function assertSilvercV100Pinned(v100Path) {
+  const pin = _loadSilvercPin();
+  if (!existsSync(v100Path)) {
+    throw new Error(`silverc v1.0.0 二进制不存在: ${v100Path}（env SILVERC_V100_PATH 或默认路径 ${DEFAULT_SILVERC_V100_PATH}）— 不接受"文件缺失就跳过检查"`);
+  }
+  const actualSha256 = createHash('sha256').update(readFileSync(v100Path)).digest('hex');
+  if (actualSha256 !== pin.sha256) {
+    throw new Error(`silverc v1.0.0 二进制 sha256 不符 D-019 锚点(${SILVERC_PIN_PATH}): 期望 ${pin.sha256}, 实际 ${actualSha256}(路径 ${v100Path}) — 拒绝编译, 不猜哪个对`);
+  }
+  return pin;
+}
+
+/**
+ * 黄金样本 deep-equal 校验(ledger 1221, Bettor)：Rust 不是可复现构建——同一份源码在不同机器/不同时间干净
+ * 重建，产出的可执行文件 sha256 可以不同（已实证：NWT 独立干净构建的二进制 sha256 与本文件不同，D-019
+ * 注记记录为构建环境差异，不是分叉/被调包）——**二进制 sha256 只是防调包指纹**（挡"这文件被换成完全不
+ * 相干的东西"这种粗暴篡改），**不是"这就是同一个编译器"的判据**。真正的同源判据是：拿一份固定 `.sil` +
+ * 固定 ctor 在待核二进制上编译一次，产物 `bytecode` 逐字节 deep-equal 参考值——只要三方对同一源码产出
+ * 逐字节相同的机器码，就证明它们是"同一个编译器在做同一件事"，无论各自可执行文件本身的 sha256 是否一致。
+ * @param {string} v100Path
+ */
+export function assertSilvercV100GoldenSample(v100Path) {
+  const pin = _loadSilvercPin();
+  const g = pin.goldenSample;
+  if (!g || !g.silPath || !g.contractName || !Array.isArray(g.ctor) || !g.expectedBytecodeSha256) {
+    throw new Error(`silverc-pin.json 缺 goldenSample{silPath,contractName,ctor,expectedBytecodeSha256} 字段(${SILVERC_PIN_PATH}) — ledger 1221 要求，不接受只核二进制 sha256`);
+  }
+  const goldenSilAbsPath = join(REPO_ROOT, g.silPath);
+  if (!existsSync(goldenSilAbsPath)) throw new Error(`黄金样本源文件不存在: ${goldenSilAbsPath}(pin 文件 goldenSample.silPath=${g.silPath})`);
+  const o = _runSilverc(goldenSilAbsPath, g.ctor, v100Path);
+  const c = o?.contracts?.[g.contractName];
+  const bytecode = c?.compiled?.bytecode;
+  if (!Array.isArray(bytecode)) {
+    throw new Error(`黄金样本编译产物里没有 contracts["${g.contractName}"].compiled.bytecode(number[]) — 二进制跑起来了但产物形状不对, 拒绝信任(${v100Path})`);
+  }
+  const actualSha256 = createHash('sha256').update(Buffer.from(bytecode)).digest('hex');
+  if (actualSha256 !== g.expectedBytecodeSha256) {
+    throw new Error(`黄金样本编译产物 sha256 不符 D-019 锚点(${SILVERC_PIN_PATH} goldenSample.expectedBytecodeSha256): 期望 ${g.expectedBytecodeSha256}, 实际 ${actualSha256}(二进制 ${v100Path}) — 二进制 sha256 或许对得上，但同源判据不过，拒绝编译`);
+  }
+}
+
+/**
+ * 启动期自检(observability-only, ledger 1230/1233)——console 启动时若 SILVERC_V100_PATH 已设, 跑一遍两道
+ * D-019 校验并 LOUD 打印固定格式日志行, 供 KANet-UI 部署页/人工巡检一眼判断"这台机器的 v1.0.0 编译器锚点
+ * 对不对"。**这个函数本身永不 throw**——真正的承重闸在 compileSilV100 内部(每次真实编译前都会调
+ * assertSilvercV100Pinned/assertSilvercV100GoldenSample, 那两个函数该抛照抛), 本函数只是把同一次检查提前
+ * 到进程启动时做一遍、把结果 LOUD 打出来, 让"这台机器编译器锚点从一开始就不对"这件事不用等到第一次真实
+ * genesis-mint 才会被发现——FAIL 不阻止 console 正常启动继续跑 relay 等其它职责(SILVERC_V100_PATH 未设
+ * 视为"这台机器暂不需要这条能力", 直接跳过, 不算 FAIL)。
+ *
+ * 固定日志格式(写入 README, KANet-UI 部署页据此判断, 改动前跟部署方同步)：
+ *   PASS: `[silverc-pin] PASS sha256=<前8位hex>... golden=<goldenSample.contractName> ok`
+ *   FAIL: `[silverc-pin] FAIL <错误信息全文>`
+ *   跳过(未设 env): 不打印任何行(沉默, 不是"隐藏失败"——本来就不要求这台机器具备这条能力)。
+ * @param {string} [v100Path] 默认 env SILVERC_V100_PATH；显式传 undefined/空字符串 = 跳过检查
+ * @returns {{skipped:true}|{ok:true,sha256:string,golden:string}|{ok:false,error:string}}
+ */
+export function checkSilvercPinAtStartup(v100Path = process.env.SILVERC_V100_PATH) {
+  if (!v100Path) return { skipped: true };
+  try {
+    const pin = assertSilvercV100Pinned(v100Path);
+    assertSilvercV100GoldenSample(v100Path);
+    console.log(`[silverc-pin] PASS sha256=${pin.sha256.slice(0, 8)}... golden=${pin.goldenSample?.contractName || '?'} ok`);
+    return { ok: true, sha256: pin.sha256, golden: pin.goldenSample?.contractName };
+  } catch (e) {
+    console.error(`[silverc-pin] FAIL ${e.message}`);
+    return { ok: false, error: e.message };
+  }
+}
+
+/**
+ * Compile a .sil with ctor JSON via silverc v1.0.0 → 适配成旧 schema 形状返回({script,state_layout}), 让
+ * extractTemplateArtifact 等既有下游零改动直接吃, 不用为新 schema 另外教一遍下游代码。
+ * @param {string} silPath
+ * @param {Array} ctorArr v1.0.0 ctor JSON 数组(用 ctorBytes32V100/ctorIntV100 构造, 不是上面旧的 ctorBytes32/ctorInt)
+ * @param {string} contractName .sil 里 `contract <Name>(...)` 的确切名字——v1.0.0 产物按这个 key 嵌套
+ *   (`contracts[contractName]`), 必须与源码里的名字逐字一致, 不猜大小写/下划线变体
+ * @param {string} [v100Path] 默认 env SILVERC_V100_PATH, 缺省时退到 pin 文件记录的生产路径(D-019)——注意:
+ *   落码/本地测试期间生产路径可能还没放好二进制, 必须显式设 SILVERC_V100_PATH 指向自己的干净构建,
+ *   assertSilvercV100Pinned 的 sha256 核对不因为"本地测试"就放宽。
+ * @returns {{script:number[], state_layout:{start:number,len:number}, template_hash_bytes:number[]|undefined, _raw:object}}
+ */
+export function compileSilV100(silPath, ctorArr, contractName, v100Path = process.env.SILVERC_V100_PATH || DEFAULT_SILVERC_V100_PATH) {
+  assertSilvercV100Pinned(v100Path);       // ① 二进制 sha256 == D-019 锚点(防调包)
+  assertSilvercV100GoldenSample(v100Path); // ② 黄金样本 deep-equal(真正的同源判据, ledger 1221)
+  const o = _runSilverc(silPath, ctorArr, v100Path);
+  const c = o?.contracts?.[contractName];
+  if (!c || !c.compiled) {
+    throw new Error(`silverc v1.0.0 产物里没有 contracts["${contractName}"].compiled — 检查 .sil 里 contract 名是否与传入的 contractName 精确一致(${silPath}), 现有顶层 contracts key: ${Object.keys(o?.contracts || {}).join(',') || '(none)'}`);
+  }
+  const { bytecode, template_hash, state_span } = c.compiled;
+  // 实测更正(落码期间自测发现, 非猜测): bytecode 是**字节数组**(number[], 同旧 schema 的 script 字段)，
+  // **不是 hex 字符串**——最初以为是 hex 字符串纯属没查 typeof 就假设，已用真实编译产物(RefundClaim.sil)
+  // 验证 typeof bytecode === 'object' 且 Array.isArray(bytecode) === true, 值域 0-255。
+  if (!Array.isArray(bytecode) || !state_span || typeof state_span.offset !== 'number' || typeof state_span.len !== 'number') {
+    throw new Error(`silverc v1.0.0 产物 contracts["${contractName}"].compiled 缺 bytecode(number[])/state_span{offset,len} — schema 漂移? (${silPath})`);
+  }
+  return {
+    script: bytecode,
+    state_layout: { start: state_span.offset, len: state_span.len },
+    template_hash_bytes: Array.isArray(template_hash) ? template_hash : undefined,
+    _raw: o,
+  };
+}
+
+/** ctor helpers for silverc v1.0.0(D-019)——方言与上面旧的 ctorBytes32/ctorInt 不同, 见本节顶部①②③。 */
+export const ctorBytes32V100 = (hexOrBuf) => {
+  const b = Buffer.isBuffer(hexOrBuf) ? hexOrBuf : Buffer.from(hexOrBuf, 'hex');
+  if (b.length !== 32) throw new Error(`bytes32V100 must be 32B, got ${b.length}`);
+  return { kind: 'bytes', value: [...b] };
+};
+export const ctorIntV100 = (n) => ({ kind: 'int', value: Number(n) });
 
 /**
  * PoolRoot artifact (CP3, J2 2026-08-13 · @Bettor 21:0xZ 采纳 @J1tn (205) 升级为设计定向).

@@ -54,9 +54,14 @@ const { compilePayoutShardRedeem } = await import('../lib/pool-shard-register.mj
 // bug 的手搓 fixture 自证自洽): "全绿"这个信号本身在 silverc 环境不一致时有歧义——必须显式区分"真的编译
 // 验证过"和"环境跳过没验证", 不能让两者在输出上长得一模一样。用这个计数器追踪, 结尾摘要显式报告。
 let _realCompileCount = 0, _fallbackCompileCount = 0;
+// D-019 迁移(ledger 1225-1227): PayoutShard.sil 当前 ctor 实读 25 参数, compilePayoutShardRedeem 现在
+// fail-loud 要求 tokenTmplHash/claimTmplHash/marketSuffixHash——不传会在"真编译"这条路直接 throw, 意外
+// 落进下面的 catch 手搓字节兜底(掩盖了"其实这台机器真的能编译"这个事实, 又把我们带回本文件顶部注释描述
+// 的那个环境不一致坑)。用固定值(与 seedMarket 写进 DB 行的三列一致, 见下方 seedMarket)。
+const TTH = 'ee'.repeat(32), CTH = 'ff'.repeat(32), MSH = '12'.repeat(32);
 function fakeRedeemHex(seed, { consolidatedPool = 20000000n, closed = 0, poolMerkleRoot, predicateCommit } = {}) {
   try {
-    const r = compilePayoutShardRedeem({ poolMerkleRoot, predicateCommit, consolidatedPool: Number(consolidatedPool), closed, payoutRoot: '00'.repeat(32) });
+    const r = compilePayoutShardRedeem({ poolMerkleRoot, predicateCommit, consolidatedPool: Number(consolidatedPool), closed, payoutRoot: '00'.repeat(32), tokenTmplHash: TTH, claimTmplHash: CTH, marketSuffixHash: MSH });
     _realCompileCount++;
     return r;
   } catch {
@@ -99,8 +104,11 @@ function seedMarket(marketId, { poolMerkleRoot, predicateCommit, consolidatedPoo
   sqlite.prepare(`INSERT INTO market_shards (logical_market_id, shard_index, shard_market_id, shard_p2sh, status, created_at, current_leaf_state) VALUES (?, 1, ?, 'kaspatest:s1', 'settled', datetime('now'), ?)`).run(marketId, s1, JSON.stringify({ pool_value: 0 }));
   const redeemHex = fakeRedeemHex(marketId, { consolidatedPool: BigInt(consolidatedPoolSeed), poolMerkleRoot, predicateCommit });
   const psAddr = realP2sh(redeemHex);   // K-18 §3.3(d): payout_ps_addr 必须真的是 redeemHex 的 p2sh 推导值, 否则新 gate 会在(d)拦下(不是随手的占位字符串了)
-  sqlite.prepare(`INSERT INTO payout_shards (logical_market_id, payout_cov_id, payout_ps_addr, payout_ps_outpoint, payout_redeem_hex, pool_merkle_root, predicate_commit, created_at, covenant_family)
-    VALUES (?, 'covtest', ?, ?, ?, ?, ?, strftime('%s','now'), 'v1_committee')`).run(marketId, psAddr, psOutpoint, redeemHex, poolMerkleRoot, predicateCommit);
+  // D-019 迁移(ledger 1225-1227): assertPayoutShardCoherence 步骤(c) 现在也格式校验 token_tmpl_hash/
+  // claim_tmpl_hash/market_suffix_hash(缺失即 FAIL)——必须跟 fakeRedeemHex 内部真编译用的 TTH/CTH/MSH
+  // 一致(同一份值), 否则 DB 声明的值与 redeemHex 实际烤入的值不符, gate 步骤(c) recompile 会真的不等。
+  sqlite.prepare(`INSERT INTO payout_shards (logical_market_id, payout_cov_id, payout_ps_addr, payout_ps_outpoint, payout_redeem_hex, pool_merkle_root, predicate_commit, created_at, covenant_family, token_tmpl_hash, claim_tmpl_hash, market_suffix_hash)
+    VALUES (?, 'covtest', ?, ?, ?, ?, ?, strftime('%s','now'), 'v1_committee', ?, ?, ?)`).run(marketId, psAddr, psOutpoint, redeemHex, poolMerkleRoot, predicateCommit, TTH, CTH, MSH);
   return { redeemHex };
 }
 
