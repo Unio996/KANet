@@ -126,5 +126,75 @@ t('找零形状: 0 或 >= CONTINUATION_OUTPUT_SOMPI 通过, 中间的 dust 值�
   if (!threw) throw new Error('dust 找零应该被拒绝');
 });
 
+// ============ market_genesis tx_json 真实端到端组装(真 kaspa-wasm + 真编译 ShardLeaf_direct) ============
+// 目的: 证明 buildMarketGenesisTxJson 产出的 tx_json 不只是"格式对", 而是 relay 侧真代码
+// (Transaction.deserializeFromSafeJSON → extractTxShape → validateFixedValueOutputs → 签名 →
+// assertFinalTxid)能够真的吃下去、真的通过、txid 真的对得上——这是"两边分开写的代码是否真的接得上"
+// 这一层, 光测 proto-tx-assembly.mjs 自己内部逻辑测不出这种问题。
+// relay 侧函数只在测试里做只读交叉核验(不是生产依赖——"Console 传导不碰链"角色分工不变, 生产代码
+// 从不 import kasia-relay)。
+if (!process.env.CONSOLE_ENCRYPTION_KEY) process.env.CONSOLE_ENCRYPTION_KEY = '1'.repeat(64);
+{
+  const kaspa = await import('kaspa-wasm');
+  const { buildMarketGenesisTxJson, GENESIS_OUTPUT_SOMPI: GOS } = await import('./proto-tx-assembly.mjs');
+  const { computeMarketGenesisArtifacts } = await import('./proto-covenant-builder.mjs');
+  const { extractTxShape, validateFixedValueOutputs, signOnlyDeclaredInputs, assertFinalTxid } = await import('../../../kasia-relay/src/lib/covenant-broadcast.mjs');
+  const { randomBytes } = await import('node:crypto');
+
+  const artifacts = await computeMarketGenesisArtifacts({ marketId: 'ab'.repeat(32), minBet: 100, deadlineMs: 1700000000000 });
+
+  const priv = new kaspa.PrivateKey(randomBytes(32).toString('hex'));
+  const relayAddr = priv.toPublicKey().toAddress('mainnet');
+  const relaySpk = kaspa.payToAddressScript(relayAddr);
+  const feeUtxo = { txid: 'ee'.repeat(32), vout: 0, value: 10_000_000_000n, scriptPublicKeyHex: '0x' + relaySpk.script };
+
+  let built;
+  t('genesis-e2e-1 buildMarketGenesisTxJson 真实构造成功(真 mass 计算, 找零非负)', () => {
+    built = buildMarketGenesisTxJson({ kaspa, network: 'mainnet', feeUtxo, relayChangeScriptPublicKeyHex: '0x' + relaySpk.script, shardLeafScriptPubKeyHex: artifacts.shardLeafDirect.scriptPubKeyHex });
+    if (!built.txJson || built.signInputIndices.length !== 1 || built.genesisOutputIndices.length !== 1) throw new Error('返回形状不对');
+  });
+
+  t('genesis-e2e-2 relay 侧真代码能反序列化 + extractTxShape + validateFixedValueOutputs 通过(未签名阶段)', () => {
+    const tx = kaspa.Transaction.deserializeFromSafeJSON(built.txJson);
+    const shape = extractTxShape(tx);
+    const fv = validateFixedValueOutputs({ outputs: shape.outputs, genesisOutputIndices: built.genesisOutputIndices, continuationOutputIndices: built.continuationOutputIndices });
+    if (!fv.ok) throw new Error(`relay 真代码拒绝了 console 构造出的 tx: ${fv.reason}`);
+    if (shape.outputs[0].valueSompi !== GOS) throw new Error(`genesis 输出值不是协议常量: ${shape.outputs[0].valueSompi}`);
+  });
+
+  t('genesis-e2e-3 relay 真签名(signOnlyDeclaredInputs)后 finalize, txid 与 console 预期的 expectedTxid 一致(txid 不含 witness)', () => {
+    const tx = kaspa.Transaction.deserializeFromSafeJSON(built.txJson);
+    signOnlyDeclaredInputs({ tx, signInputIndices: built.signInputIndices, privateKey: priv, kaspa });
+    tx.finalize();
+    const r = assertFinalTxid(tx, built.expectedTxid);
+    if (!r.ok) throw new Error(`签名后 txid=${r.actualTxid} != console 预期的 expectedTxid=${built.expectedTxid}(说明 txid 计算不是真的不受 witness 影响, 或者构造有 bug)`);
+  });
+
+  t('genesis-e2e-4 篡改 genesis 输出值后(模拟构造层被绕过), relay 真代码 validateFixedValueOutputs 必须拦下', () => {
+    // 用一个更小/不同的输出值重建交易, 模拟"如果某处绕过了构造层的常量写死"这个反例。
+    const feeSpk2 = kaspa.payToAddressScript(relayAddr);
+    const genesisSpk2 = new kaspa.ScriptPublicKey(0, artifacts.shardLeafDirect.scriptPubKeyHex.slice(2));
+    const tamperedTx = new kaspa.Transaction({
+      version: 1,
+      inputs: [{ previousOutpoint: { transactionId: feeUtxo.txid, index: feeUtxo.vout }, signatureScript: new Uint8Array(0), sequence: 0n, sigOpCount: 1, computeBudget: 0, utxo: { outpoint: { transactionId: feeUtxo.txid, index: feeUtxo.vout }, amount: feeUtxo.value, scriptPublicKey: feeSpk2, blockDaaScore: 0n } }],
+      outputs: [
+        new kaspa.TransactionOutput(GOS - 1n, genesisSpk2),
+        new kaspa.TransactionOutput(feeUtxo.value - GOS - 100000n, feeSpk2),
+      ],
+      lockTime: 0n, subnetworkId: '0'.repeat(40), gas: 0n, payload: '',
+    });
+    const shape = extractTxShape(tamperedTx);
+    const fv = validateFixedValueOutputs({ outputs: shape.outputs, genesisOutputIndices: [0], continuationOutputIndices: [] });
+    if (fv.ok) throw new Error('relay 真代码本该拒绝差 1 sompi 的 genesis 输出, 却放行了');
+  });
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail === 0 ? 0 : 1);
+// 🔴 用 process.exitCode(不强制终止, 让事件循环自然收尾)而不是 process.exit(): 实测
+// kaspa.createInputSignature() 之后立即 process.exit() 会在 kaspa-wasm 的 wasm 异步句柄清理未完成时
+// 被强行掐断, 触发 Windows 下 libuv 断言崩溃(`Assertion failed: !(handle->flags & UV_HANDLE_CLOSING)`,
+// src\win\async.c:76) —— 退出码变成 127, 会被外层 spawnSync 误判成"测试失败", 但其实全部断言已经真的
+// 跑完并且是真的 pass。不是 kaspa-wasm 用错了, 是"签名后立刻强制退出"这个动作本身撞了 wasm 的异步
+// 清理时序——用 process.exitCode 交给事件循环自然收尾就不会崩(已用 scratch/_bisect2~5 四步二分定位到
+// 触发点确切是 createInputSignature 之后的 process.exit(), 不是 deserialize/finalize/tx 构造)。
+process.exitCode = fail === 0 ? 0 : 1;

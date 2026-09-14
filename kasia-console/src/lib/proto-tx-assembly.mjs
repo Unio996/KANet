@@ -96,3 +96,64 @@ export function buildContinuationOutput({ TransactionOutput, CovenantBinding, Ha
   if (!covenantIdHex) throw new Error('buildContinuationOutput: covenantIdHex required(续约输出必须声明 CovenantBinding)');
   return new TransactionOutput(valueSompi, scriptPublicKey, new CovenantBinding(authInputIdx, new Hash(covenantIdHex)));
 }
+
+/** 把 '0x...' P2SH scriptPubKey hex(computeMarketGenesisArtifacts/computeKttGenesisArtifact 的返回形状)
+ *  转成 kaspa-wasm ScriptPublicKey 对象(version=0, 标准脚本版本)。 */
+export function scriptPublicKeyFromHex({ ScriptPublicKey }, hexStr) {
+  const clean = hexStr.startsWith('0x') ? hexStr.slice(2) : hexStr;
+  return new ScriptPublicKey(0, clean);
+}
+
+/**
+ * market_genesis 的 tx_json 组装(不签名——relay 侧签 fee 输入): 1 个 relay fee 输入 + 2 个输出
+ * [genesis ShardLeaf_direct(固定 GENESIS_OUTPUT_SOMPI) , 找零回 relay]。
+ * mass 与输出【值】无关只与【结构】有关, 所以先拿一个占位找零值算一次 mass 拿到 requiredFee, 再拿真实
+ * 找零值重建一次拿到最终 tx/txid(两遍构造, 标准做法——第一遍不能直接当成品广播, 找零值是错的)。
+ * @param {object} o
+ * @param {*} o.kaspa  kaspa-wasm 模块(注入, 供测试用假实现替换)
+ * @param {string} o.network
+ * @param {{txid:string, vout:number, value:bigint, scriptPublicKeyHex:string}} o.feeUtxo
+ * @param {string} o.relayChangeScriptPublicKeyHex  relay 自己地址的 scriptPublicKey(找零去向)
+ * @param {string} o.shardLeafScriptPubKeyHex  computeMarketGenesisArtifacts().shardLeafDirect.scriptPubKeyHex
+ * @returns {{txJson:string, expectedTxid:string, signInputIndices:number[], genesisOutputIndices:number[], continuationOutputIndices:number[]}}
+ */
+export function buildMarketGenesisTxJson({ kaspa, network, feeUtxo, relayChangeScriptPublicKeyHex, shardLeafScriptPubKeyHex }) {
+  const { Transaction, TransactionOutput } = kaspa;
+  assertFixedOutputValue(GENESIS_OUTPUT_SOMPI, GENESIS_OUTPUT_SOMPI, 'market_genesis'); // 防未来重构悄悄换成算出来的值
+
+  const feeUtxoSpk = scriptPublicKeyFromHex(kaspa, feeUtxo.scriptPublicKeyHex);
+  const genesisSpk = scriptPublicKeyFromHex(kaspa, shardLeafScriptPubKeyHex);
+  const changeSpk = scriptPublicKeyFromHex(kaspa, relayChangeScriptPublicKeyHex);
+  const outpoint = { transactionId: feeUtxo.txid, index: feeUtxo.vout };
+
+  const mkInput = (sigScript) => ({
+    previousOutpoint: outpoint, signatureScript: sigScript, sequence: 0n, sigOpCount: 1, computeBudget: 0,
+    utxo: { outpoint, amount: feeUtxo.value, scriptPublicKey: feeUtxoSpk, blockDaaScore: 0n },
+  });
+  const mkTx = (changeSompi) => new Transaction({
+    version: 1,
+    inputs: [mkInput(new Uint8Array(0))],
+    outputs: [
+      new TransactionOutput(GENESIS_OUTPUT_SOMPI, genesisSpk),
+      new TransactionOutput(changeSompi, changeSpk),
+    ],
+    lockTime: 0n, subnetworkId: '0'.repeat(40), gas: 0n, payload: '',
+  });
+
+  const draft = mkTx(feeUtxo.value - GENESIS_OUTPUT_SOMPI); // 占位找零, 只为量 mass(与结构无关不看值)
+  draft.finalize();
+  const requiredFee = computeRequiredFeeSompiOrThrow(kaspa, network, draft);
+  const change = feeUtxo.value - GENESIS_OUTPUT_SOMPI - requiredFee;
+  if (change < 0n) throw new Error(`buildMarketGenesisTxJson: insufficient fee UTXO(${feeUtxo.value} < genesis ${GENESIS_OUTPUT_SOMPI} + fee ${requiredFee})`);
+  assertChangeShape(change);
+
+  const final = mkTx(change);
+  final.finalize();
+  return {
+    txJson: final.serializeToSafeJSON(),
+    expectedTxid: final.id,
+    signInputIndices: [0],
+    genesisOutputIndices: [0],
+    continuationOutputIndices: [],
+  };
+}
