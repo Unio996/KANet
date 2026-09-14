@@ -13,9 +13,7 @@
   "envVar": "SILVERC_V100_PATH",
   "goldenSample": {
     "purpose": "Rust 非可复现构建（ledger 1221）：不同机器干净重建同一 commit 的二进制 sha256 会不同（已见 NWT 独立构建 sha 与本文件不同的实例，D-019 注记记录为构建环境差异非分叉），二进制 sha256 只是防调包指纹（挡'被换成另一个完全不同的东西'），不是同源判据。真正的同源判据 = 用这份黄金样本（固定 .sil + 固定 ctor）在待核二进制上编译一次，产物 bytecode 逐字节 deep-equal 参考值——三方（本机干净构建 / NWT 独立构建 / 未来任何第三次构建）在这一步应当一致，即使各自的可执行文件 sha256 不同。",
-    "_fix20260915": "账本1415, NWT复核发现: 原先直接指向生产 kasia-console/src/lib/RootClaim.sil, v0.3落码(c6c0e35c)把该文件ctor从13参数改成12参数后, 每次compileSilV100(...)调用前的自检会用本文件仍烤着的13值旧ctor去编译新的12参数源码, 报'constructor argument count mismatch'——挡住了所有compileSilV100调用, 不限于RootClaim本身。修法: silPath改指向冻结样本(下方frozenFrom标注的历史快照), 不再引用会被生产代码持续修改的活文件; ctor/expectedBytecodeLength/expectedBytecodeSha256三项数值本身不变(冻结样本编译产物逐字节验证与原值相同)。",
-    "silPath": "scripts/silverc-golden/RootClaim.golden.sil",
-    "frozenFrom": "6b1e5208:kasia-console/src/lib/RootClaim.sil",
+    "silPath": "kasia-console/src/lib/RootClaim.sil",
     "contractName": "RootClaim",
     "ctorNote": "13 参数，全部填零/占位（ps_tmpl_hash/shard_pool_id/init_payoutRoot/token_tmpl_hash/claim_tmpl_hash/market_suffix_hash 各 32 字节全零，6 个 int 字段 + init_claimed_bitmap 全 0）——编译不执行入口逻辑，值本身不影响能否编译，只要求形状（类型+个数）对，用全零最省事且可复现。",
     "ctor": [

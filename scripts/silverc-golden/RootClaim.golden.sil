@@ -1,0 +1,210 @@
+// 🔴 D-019 编译器同源判据用的冻结样本(2026-09-15, 账本 1415 NWT 复核发现+ Bettor 裁定修法)——永远不要改
+// 这份文件。它是 kasia-console/src/lib/RootClaim.sil 在 v0.3(方案C)落码前(commit 6b1e5208)的原样快照
+// (`git show 6b1e5208:kasia-console/src/lib/RootClaim.sil`), 只用来在 compileSilV100(...) 每次调用前
+// 自证"当前二进制确实是 D-019 pin 的那个 silverc"(scripts/silverc-pin.json 的 goldenSample, deep-equal
+// 固定字节产物, 与 ctor/expectedBytecodeLength/expectedBytecodeSha256 三项配套锁死)——跟生产合约的任何
+// 后续改动无关, 生产 RootClaim.sil 改 ctor 参数个数/逻辑都不影响这份冻结样本, 也不需要跟着它改。
+// 原始文件正文如下, 逐字节原样, 未作任何修改:
+//
+// RootClaim.sil — cascade convert-split ROOT-CLAIM 合约 (J1, 2026-06-20; 拆 PoolRoot 降 SIZE).
+//
+// 拆分动因: claim_draw 的 merkle for-loop 是 PoolRoot 字节大头 → 隔离到本合约, 让 seal 目标 RootClose 极简(过 P1)。
+// 职责 = 串行派彩(winner merkle-bound draw-down)。1-entry: claim_draw(self-recreation, single-blake2b ~2.5u/B)。
+// 7-field state {local_yes, local_no, count, pool_value, closed, winningSide, payoutRoot}。
+// **RootClaim 只能经 RootClose.convert_to_claim 创建**(foreign-template, claim_tmpl_hash=本合约模板焊进 RootClose);
+//   convert require(closed==1) → RootClaim 结构上只见 closed==1(§3: 无跨合约 closed race, XOR 留在 RootClose)。
+// 承重 = output-bind weld(claim draw-down -payout)+ dust-ticket spent-once nullifier(R7 防 double-claim)+ Σin==Σout。
+//
+// ⚠ DRAFT (spec docs/2026-06-19-cascade-convert-split-spec.md §2.2/§3 对齐; claim_draw 从 PoolRoot.sil verbatim 港为
+//   独立 1-entry。R7: 读+花 dust-ticket(ticketInIdx)= spent-once。merkle depth-cap=8(256 winner); §4 若 P2 撞墙=降 cap 是合法 lever)。
+
+pragma silverscript ^0.1.0;
+
+contract RootClaim(
+    byte[32] ps_tmpl_hash,        // dust PoolSide-ticket expectedTemplateHash (R7: claim 读 spent-once 凭证)
+    byte[32] shard_pool_id,       // 本 pool 身份 (ticket 记此; per-instance P2SH 唯一性锚)
+    // —— genesis State (7-field; 实际由 RootClose.convert_to_claim 提供, init_* 仅定义 State 布局) ——
+    int      init_local_yes,
+    int      init_local_no,
+    int      init_count,
+    int      init_pool_value,
+    int      init_closed,
+    int      init_winningSide,
+    byte[32] init_payoutRoot,
+    int      init_claimed_bitmap,  // R7 re-mint fix: 已领 winner slot 位图 (depth-2=4winner=4bit); convert 创建时 0
+    // —— v0.3 §2/§3 代币化(T3, ledger 1183): pool_value 语义 = 代币 amount(D-017)。三个 ctor-only 常量
+    //   (不进 State, 直接引用), 同 RefundClaim.sil/CloseZkV2.sil 三件套, 一律 P13 witness+blake3 现场核。
+    byte[32] token_tmpl_hash,
+    byte[32] claim_tmpl_hash,
+    byte[32] market_suffix_hash
+) {
+    int local_yes   = init_local_yes;
+    int local_no    = init_local_no;
+    int count       = init_count;
+    int pool_value  = init_pool_value;
+    int closed      = init_closed;
+    int winningSide = init_winningSide;
+    byte[32] payoutRoot = init_payoutRoot;
+    int claimed_bitmap = init_claimed_bitmap;   // R7: claim 标记 merkle_index slot, re-mint 同 slot 已置位被挡
+
+    // dust PoolSide-ticket State (claim 读 spent-once 凭证)
+    struct Tk {
+        byte[32] bettorPk;
+        int      direction;
+        int      stake;
+        byte[32] shardPoolId;
+    }
+    // KanetTestToken 六字段布局镜像(同 RefundClaim.sil/CloseZkV2.sil §T3 v0.3 §2/§3 代币化)
+    struct TokenState {
+        int      amount;
+        byte[32] owner;
+        byte     owner_scheme;
+        byte     borrow_scheme;
+        byte[32] borrow_guard;
+        byte[32] extension_commitment;
+    }
+    // KanetTokenClaim.sil 隐式 State 布局镜像(同 RefundClaim.sil/CloseZkV2.sil 用途: claim 家族目的地重定向)
+    struct ClaimState {
+        byte[32] market_cov_id;
+        byte[32] winner_pk;
+        int      amount;
+        byte[32] token_tmpl_hash;
+        byte[32] market_suffix_hash;
+    }
+    byte constant TOKEN_SCHEME_COVENANT_ID = 0x04;
+    byte constant TOKEN_BORROW_DISABLED    = 0x00;
+    int constant DUST_MIN = 1000;
+    // ★ V-T-8 绕路(AB11, ledger 1172/1173 处置不变: 含 readInputStateWithTemplate + validateOutputState
+    //   同函数共存组合的入口一律 AB11 + 实测, 不因某一次实测偶然未崩就当安全豁免)。claim_draw 的 partial
+    //   分支需要读被消费代币 + 续本合约自身 8 字段 State(local_yes/local_no/count/pool_value/closed/
+    //   winningSide/payoutRoot/claimed_bitmap), 因此改手写等价形式。以下两常量按本文件*实际编译产物*
+    //   量测得出(measure_rootclaim_state_span.mjs, 见 provenance), 不是拍脑袋。
+    int constant OWN_PREFIX_LEN = 1;
+    int constant OWN_STATE_LEN  = 96;
+
+    // —— entry 0: claim_draw (winner 串行从 root 取; closed==1; payout merkle-bound draw-down) —— [PoolRoot verbatim]
+    // ★ v0.3 §2/§3 代币化(ledger 1183): 派彩目的地不再是裸 P2PK(D-017)——本笔交易新建一个 KanetTokenClaim
+    //   实例, 把赢家的份额以"代币 owner = 新 claim covenant"的形式转过去(同 RefundClaim.refund_payout/
+    //   CloseZkV2.claim 形状)。
+    entry claim_draw(
+        int      rootOutIdx,           // 重建 RootClaim continuation (self, 仅 partial 分支用)
+        int      claimOutIdx,          // 新建 KanetTokenClaim genesis 输出
+        int      tokenInIdx,           // 本合约当前持有的代币输入
+        int      tokenOutIdx,          // 转给新 claim 的代币输出(amount=payout)
+        int      remainTokenOutIdx,    // 本合约剩余代币续约输出(仅 partial 分支用)
+        int      payout,               // witness; merkle-prove ∈ payoutRoot
+        int      merkle_index,
+        int      tree_depth,
+        byte[32][] siblings,
+        int      ticketInIdx,          // dust-ticket UTXO 在 inputs 的位 (R7 spent-once)
+        int      ticket_prefix_len,
+        int      ticket_suffix_len,
+        byte[]   tok_prefix, byte[] tok_suffix,       // v0.3 §2/§3 + 1151 P13 形: witness 供代币模板字节
+        byte[]   claim_prefix, byte[] claim_suffix    // Q8: witness 供 KanetTokenClaim 编译模板字节, 现场核 claim_tmpl_hash
+    ) {
+        require(closed == 1);                              // 仅 settled 可 claim (convert 已 gate, 此为结构保证 + 深度防御)
+        require(tree_depth >= 0); require(tree_depth <= 1);  // ★ DoD cap depth-1 (2 winner/market): claimed-bitmap(R7 fix)加
+        //   +122B template → depth-2+bitmap template ~892B>790 bust(桥模板先破), depth-1+bitmap ~764B<790 ✅(J2/UI dual-vantage
+        //   probe 坐实)。DoD §0=单小市场跑通一次, 2winner 够。winner-scale(recursive-merkle/winner-tree-shard §7)post-DoD。
+        require(merkle_index >= 0);
+        require(payout >= 1000);
+        require(payout <= pool_value);                     // fail-fast (weld+共识本就兜负输出, 此条更快更清晰)
+
+        // 读 dust-ticket (R7 spent-once; 原语验 ps_tmpl_hash + 取 bettorPk/direction/stake/shardPoolId; spend 为 tx input = nullifier)
+        Tk tk = readInputStateWithTemplate(ticketInIdx, ticket_prefix_len, ticket_suffix_len, ps_tmpl_hash);
+        require(tk.shardPoolId == shard_pool_id);          // ticket 属本 pool
+        require(tk.direction == winningSide);              // winner (赢向绑 root.winningSide)
+
+        // merkle-prove payout ∈ payoutRoot: leaf=blake2b(pk‖ser(payout,8)), pk-ASC, running-divisor climb
+        byte[32] cur = blake2b(byte[](tk.bettorPk) + byte[](payout as byte[8]));
+        int div = 1;
+        for (k, 0, tree_depth, 1) {                        // ★ loop bound 1 = unroll 1 iter (DoD depth-1 cap=2winner); bound 控制编译字节非 tree_depth runtime
+            int bit = (merkle_index / div) % 2;
+            if (bit == 0) { cur = blake2b(byte[](cur) + byte[](siblings[k])); }
+            else          { cur = blake2b(byte[](siblings[k]) + byte[](cur)); }
+            div = div * 2;
+        }
+        require(cur == payoutRoot);
+        // ★ R7 aliasing fix(Bettor 抓): climb 后 div=2^tree_depth=叶数。merkle_index 必 <叶数 —— 否则 index=2 与 index=0
+        //   产同 climb(bit=(2/1)%2=0=(0/1)%2)却 mask=2^2=4≠slot0(mask=1)=同票换 alias index 双领。绑死 index∈[0,2^depth)。
+        require(merkle_index < div);
+
+        // ★ R7 re-mint fix: claimed-bitmap nullifier — winner slot merkle_index 领一次。re-mint 假 ticket 同 leaf→同
+        //   merkle_index→同 slot, 已置位被挡(spent-once 真锚=合约 state 的 slot 位, 非可重铸的 ticket UTXO)。
+        //   SS 无 << → mask=2^merkle_index 用 loop(像 merkle div*2); 无 >> → /mask %2 查位; +mask 置位(位已验0=同 |)。
+        int mask = 1;
+        for (b, 0, merkle_index, 2) { mask = mask * 2; }   // mask = 2^merkle_index (depth-1: index 0-1, bound 2 够)
+        require((claimed_bitmap / mask) % 2 == 0);          // slot 未领过
+
+        // ★ P13 形: witness 供代币模板前后缀, 现场核 token_tmpl_hash, 核过后再读被消费的代币(同
+        //   RefundClaim.refund_payout/CloseZkV2.claim 一致手法)。
+        require(blake3((tok_prefix.length as byte[8]) + tok_prefix + (tok_suffix.length as byte[8]) + tok_suffix) == token_tmpl_hash);
+        TokenState heldTk = readInputStateWithTemplate(tokenInIdx, tok_prefix.length, tok_suffix.length, token_tmpl_hash);
+        require(heldTk.owner == OpInputCovenantId(this.activeInputIndex));   // ★ H1 在场: 被消费的代币真属本合约
+        require(heldTk.amount == pool_value);                               // ★ 持仓量跟自身账本一致(不信任 witness)
+
+        // ★ Q8: witness 供 KanetTokenClaim 编译模板前后缀, 现场核 claim_tmpl_hash——结构性用途。
+        require(blake3((claim_prefix.length as byte[8]) + claim_prefix + (claim_suffix.length as byte[8]) + claim_suffix) == claim_tmpl_hash);
+
+        // ★ ZERO32 目的地守卫(NWT 1158/1173 系统性扫查纪律): 独立验证 = 上面 claim_tmpl_hash 的现场核对
+        //   (脚本字节匹配 ≠ covenant 绑定, 两层各自独立承重, 见 KanetTokenClaim V-CLAIM-8/9 教训)。
+        byte[32] claimCovId = OpOutputCovenantId(claimOutIdx);
+        require(claimCovId != byte[32](0x0000000000000000000000000000000000000000000000000000000000000000));
+
+        // 新建 KanetTokenClaim 实例: market_cov_id=本合约自身身份(provenance) / winner_pk=票面 bettor /
+        // amount=票面 payout / token_tmpl_hash/market_suffix_hash 透传。
+        validateOutputStateWithTemplate(claimOutIdx, ClaimState {
+            market_cov_id:       OpInputCovenantId(this.activeInputIndex),
+            winner_pk:           tk.bettorPk,
+            amount:              payout,
+            token_tmpl_hash:     token_tmpl_hash,
+            market_suffix_hash:  market_suffix_hash
+        }, claim_prefix, claim_suffix, claim_tmpl_hash);
+
+        // 代币输出: 转给新 claim 的那份, owner = 新 claim covenant id(上面已核非 ZERO32)。
+        validateOutputStateWithInputTemplate(tokenOutIdx, TokenState {
+            amount:               payout,
+            owner:                claimCovId,
+            owner_scheme:         TOKEN_SCHEME_COVENANT_ID,
+            borrow_scheme:        TOKEN_BORROW_DISABLED,
+            borrow_guard:         byte[32](0x0000000000000000000000000000000000000000000000000000000000000000),
+            extension_commitment: byte[32](0x0000000000000000000000000000000000000000000000000000000000000000)
+        }, tokenInIdx, tok_prefix.length, tok_suffix.length, token_tmpl_hash);
+
+        // ★ v0.2 MUST-FIX(docs/2026-09-13-j2-t3-market-set-token-rewrite-design-v0.1.md §3.0, Bettor ledger 1068,
+        //   Codex fff9bad2 独立确认既有 KAS 域 liveness 缺陷): 四处之四。pool_value == payout ⇒ 不留 root 续约——
+        //   claimed_bitmap 这个 nullifier 的作用是防止同一个 slot 被重复 claim, 一旦本 covenant 实例整个终止
+        //   (没有续约输出), 就不存在"以后还有人能调用同一个实例的 claim_draw"这件事, claimed_bitmap 的终值
+        //   不需要被任何地方读到, 不留续约不会漏掉这个记账(NWT 红队 T3 v0.2 已核实此论证成立)。remaining>0
+        //   分支不变: 代币续一份剩余量给本合约自己 + bookkeeping 续一份 pool_value-payout(AB11 手写编码)。
+        if (pool_value != payout) {
+            validateOutputStateWithInputTemplate(remainTokenOutIdx, TokenState {
+                amount:               pool_value - payout,
+                owner:                OpInputCovenantId(this.activeInputIndex),
+                owner_scheme:         TOKEN_SCHEME_COVENANT_ID,
+                borrow_scheme:        TOKEN_BORROW_DISABLED,
+                borrow_guard:         byte[32](0x0000000000000000000000000000000000000000000000000000000000000000),
+                extension_commitment: byte[32](0x0000000000000000000000000000000000000000000000000000000000000000)
+            }, tokenInIdx, tok_prefix.length, tok_suffix.length, token_tmpl_hash);
+
+            // ★ V-T-8 绕路(AB11): 手写编码新 State(8 字段), 不走 validateOutputState(同函数已有
+            //   readInputStateWithTemplate)。
+            byte[] stateBytes = byte[](8 as byte[1]) + byte[](local_yes as byte[8])
+                              + byte[](8 as byte[1]) + byte[](local_no as byte[8])
+                              + byte[](8 as byte[1]) + byte[](count as byte[8])
+                              + byte[](8 as byte[1]) + byte[]((pool_value - payout) as byte[8])
+                              + byte[](8 as byte[1]) + byte[](1 as byte[8])
+                              + byte[](8 as byte[1]) + byte[](winningSide as byte[8])
+                              + byte[](32 as byte[1]) + byte[](payoutRoot)
+                              + byte[](8 as byte[1]) + byte[]((claimed_bitmap + mask) as byte[8]);
+            byte[] ownSig = tx.inputs[this.activeInputIndex].sigScript;
+            int ownLen = ownSig.length;
+            byte[] ownPrefix = ownSig.slice(0, OWN_PREFIX_LEN);
+            byte[] ownSuffix = ownSig.slice(OWN_PREFIX_LEN + OWN_STATE_LEN, ownLen);
+            byte[32] expectedHash = blake2b(ownPrefix + stateBytes + ownSuffix);
+            byte[37] expectedSpk = new ScriptPubKeyP2SH(expectedHash);
+            require(tx.outputs[rootOutIdx].scriptPubKey == byte[](expectedSpk));
+            require(tx.outputs[rootOutIdx].value >= DUST_MIN);   // ★ v0.3: KAS 侧只剩 dust
+        }
+    }
+}

@@ -1,0 +1,43 @@
+=== BUG REPRO (before fix) ===
+$ node scripts/proto-v0-template-anchors.mjs (with unmodified pin still pointing at live RootClaim.sil)
+Error: silverc compile ...RootClaim.sil fail: compile error: unsupported feature: constructor argument count mismatch: expected 12, got 13
+
+=== GOLDEN SAMPLE RECOMPILE (frozen RootClaim.golden.sil, 13-param ctor) ===
+length=2991 sha256=755cdd0134cc30c371c3f47fd1b19ad89fe9fa054a51dc3754609781ea795a56 state_span={offset:1,len:96}
+(matches silverc-pin.json's unmodified expectedBytecodeLength/expectedBytecodeSha256/expectedStateSpan)
+
+=== CLEAN CACHE VERIFICATION (SS_ARTIFACT_CACHE_DIR=/d/kanet-tn12/scratch/_clean_cache_20260915_192351, never used before) ===
+$ node scripts/proto-v0-template-anchors.mjs
+ps_tmpl_hash(v1.0.0 权威值, compiled.template_hash_bytes): 73f79f9eebbbfc94f945d7578c398d155b2d7e4cb3a176346e6069c8a9b2a919
+
+$ node kasia-console/src/lib/pool-template-artifact.test.mjs
+全部通过
+
+$ node docs/provenance/2026-09-14-j2-ktt-v03-planC-remove-h1b/kanettokenclaim-e2e-vectors.mjs
+token_tmpl_hash(权威值, compiled.template_hash_bytes): 225ebcdec51f5439326e6bc48e47c288ceacbd3bea07aea6771548eeed44d80e
+已生成 4 条向量
+
+cli-debugger --run-all results (D-019 pin, sha256 b85bb524d22ae761150dcb80b070f0bf1beb95a1c6604470501883b4d0f552c6):
+  ktt-v03-vectors.test.json: 2 tests: 2 passed, 0 failed
+  kanettokenclaim-v03-vectors.test.json: 4 tests: 4 passed, 0 failed
+  nwt-ktc-v03-vectors.test.json: 2 tests: 2 passed, 0 failed
+  RootClaim.tokenization.test.json: 6 tests: 6 passed, 0 failed
+  RefundClaim.tokenization.test.json: 6 tests: 6 passed, 0 failed
+  CloseZkV2.tokenization.part1.test.json: 11 tests: 11 passed, 0 failed
+  CloseZkV2.tokenization.part2.test.json: 12 tests: 12 passed, 0 failed
+  PayoutShard.claimfamily.test.json: 12 tests: 12 passed, 0 failed
+  PayoutShardV2.refundclaim.test.json: 6 tests: 6 passed, 0 failed
+  ShardLeafDirect.tokenization.test.json: 14 tests: 14 passed, 0 failed
+
+=== 11 mainnet contracts recompile sanity (all under clean cache where applicable) ===
+KanetTestToken: silverc direct compile exit=0 (3191 bytes)
+KanetTokenClaim: silverc direct compile exit=0 (1347 bytes)
+RootClaim: via mk_rootclaim_tokenization_vectors.mjs, exit=0
+RefundClaim: via mk_refundclaim_tokenization_vectors.mjs, exit=0
+CloseZkV2: via mk_closezkv2_tokenization_vectors.mjs, exit=0
+PayoutShard: via mk_payoutshard_claimfamily_vectors.mjs, exit=0
+PayoutShardV2: via mk_payoutshardv2_refundclaim_vectors.mjs, exit=0
+ShardLeaf_direct: via mk_shardleafdirect_tokenization_vectors.mjs, exit=0
+RootClose: silverc direct compile with fresh 12-param zero ctor, exit=0
+ShardLeaf: silverc direct compile with fresh 12-param zero ctor, exit=0
+PoolSideTicket: via proto-v0-template-anchors.mjs (compileSilV100), exit=0
