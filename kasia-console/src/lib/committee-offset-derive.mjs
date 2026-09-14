@@ -26,11 +26,19 @@ const LIB = dirname(fileURLToPath(import.meta.url));
 const PAYOUT_SHARD_SIL = join(LIB, 'PayoutShard.sil');
 const PAYOUT_SHARD_V2_SIL = join(LIB, 'PayoutShardV2.sil');
 
-// ── checked-in 参考值(v0.1 硬编码常量的历史快照，非权威——仅用于 §4 WARN-not-block 比对，任何计算路径
-//   不得引用这些数字，见 v0.2 附录 ledger 1239 提醒①) ──────────────────────────────────────────────
+// ── checked-in 参考值(非权威——仅用于 §4 WARN-not-block 比对，任何计算路径不得引用这些数字，见 v0.2
+//   附录 ledger 1239 提醒①) ────────────────────────────────────────────────────────────────────────
+// T-REF-OFFSETS-REFRESH(ledger 1285)：上一版是 v0.1 手工写的硬编码常量快照(518/642 等)，D-019 迁移后
+// 跟真实编译产物早就对不上——2026-09-14 主网 console(PID 18320)启动日志证实每次启动都打出这条 WARN
+// (来源 provenance `e9a2ba32`)，陈旧参考值让 WARN 变成永久噪音，不是一次性提醒。本次刷新为当前钉住
+// 编译器(D-019 pin，`scripts/silverc-pin.json`)+当前 `PayoutShard.sil`/`PayoutShardV2.sil` 下的真实
+// 派生值——出处：NWT 整线终审 GREEN `8144f071`、J2 offset-derive 线落地 `e3237844`(ctor 编码宽度矩阵
+// 实测，证明这两个文件的偏移在合法值域内对 ctor 值变化保持稳定，参考值刷新后不会因为下一个真实市场的
+// consolidatedPool/attestedAtMs 取值不同又立刻变陈)。若未来 `.sil` 结构再变，WARN 会再次出现——这是
+// 设计意图(留痕不拒签)，不是本次刷新要消灭的信号，本次只消灭"值从一开始就没对过"这种确定性噪音。
 const _REFERENCE_OFFSETS = {
-  v1: { predicateCommitOffset: 518, poolMerkleRootOffsets: [1002, 1266, 1530, 1794, 2058] },
-  v2: { predicateCommitOffset: 642, poolMerkleRootOffsets: [1126, 1390, 1654, 1918, 2182] },
+  v1: { predicateCommitOffset: 16411, poolMerkleRootOffsets: [16931, 17227, 17523, 17819, 18115] },
+  v2: { predicateCommitOffset: 16569, poolMerkleRootOffsets: [17089, 17385, 17681, 17977, 18273] },
 };
 
 const W17V100 = () => Array.from({ length: 17 }, () => ctorIntV100(0));
