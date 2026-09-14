@@ -5926,5 +5926,21 @@ export function runMigrations() {
     }
   }
 
+  // T-LEGACY-NULL-COLS(ledger 1267/1268, Bettor 裁): v205 加的三列不给 legacy 豁免——NULL 被 tier=full
+  // coherence gate 拦下(eafc7e91)正是设计意图, 不是要绕过的 bug(那三列本来就该"谁编译谁 declare", NULL
+  // 就该被拒)。但"当前这台机器上到底有多少市场会撞上这条拦"从"要手工查库才知道"变成"每次启动 LOUD 打一
+  // 行"——纯可观测性诊断, 不 throw, 不放行, 不回填, 每次 runMigrations() 都重新数一遍(不是一次性
+  // backfill 判定), 只含计数(不点名 marketId——排查需要时人工再查, 这里只回答"有没有、多少个")。
+  {
+    const legacyNullCount = sqlite.prepare(`
+      SELECT COUNT(*) c FROM payout_shards
+      WHERE covenant_family = 'v1_committee'
+        AND (token_tmpl_hash IS NULL OR claim_tmpl_hash IS NULL OR market_suffix_hash IS NULL)
+    `).get().c;
+    if (legacyNullCount > 0) {
+      console.warn(`[migrate] T-LEGACY-NULL-COLS: ${legacyNullCount} 个 v1_committee 市场的 token_tmpl_hash/claim_tmpl_hash/market_suffix_hash 三列存在 NULL(T3 代币化前创世的旧市场，没有可回填的真实值) — 这些市场结算/close-transport 的 tier=full coherence gate 会被 eafc7e91 的 hex32 检查拦下(fail-closed，设计意图，不是 bug)——本行只留痕，不放行、不回填(ledger 1267/1268 裁：不加 legacy 豁免)`);
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
