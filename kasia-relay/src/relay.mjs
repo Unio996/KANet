@@ -523,6 +523,31 @@ if (process.send) {
           break;
         }
 
+        // 原型 v0 covenant_broadcast (J2 2026-09-14, 接线笔①, 设计 §9/§9.5, Owner §6=B′ 拍板):
+        // 执行权限门(只有 PROTO_RELAY_ID 那一个 relay 放行)+ §9.2 安全校验 + 两阶段回执全部在
+        // covenant-broadcast-relay.mjs 里, 这里只负责拼依赖(kaspa/rpc/wallet/networkId)+回 IPC。
+        case 'covenant_broadcast': {
+          const { covenantBroadcastRelay } = await import('./lib/covenant-broadcast-relay.mjs');
+          const kaspaMod = await import('kaspa-wasm');
+          const { waitForRpc } = await import('./rpc-listener.mjs');
+          let r;
+          try {
+            const rpcClient = await waitForRpc();
+            r = await covenantBroadcastRelay({
+              cmd, kaspa: kaspaMod, rpc: rpcClient, wallet: getWallet(),
+              networkId: KASPA_NETWORK, senderAddress: localAddress, log,
+            });
+          } catch (err) {
+            r = { ok: false, error: err?.message || String(err), intent_key: cmd.intent_key };
+          }
+          if (r.ok && r.txId && !r.reused) {
+            ingestTx({ traceId: r.txId, txid: r.txId, direction: 'outbound', amount: '0', fee: null, localAddress });
+          }
+          log(`COVENANT_BROADCAST(intent ${cmd.intent_key}) ${r.ok ? `TX: ${r.txId}${r.code ? ` [${r.code}]` : ''}` : `FAIL: ${r.code || ''} ${r.error}`}`);
+          if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ...r, phase: 'execution' } });
+          return;   // 短路 generic reply(已回, 且带 code/intent 字段, 同 TRANSFER 既有模式)
+        }
+
         case 'get_mempool_entry': {
           // (c) F2 (J2 2026-09-13): 只读 mempool 查询 —— submit-intent attempt ≥ 2 重发前查 relay 侧权威源。没找到 RPC 抛错 ⇒ found:false。
           const { waitForRpc } = await import('./rpc-listener.mjs');
