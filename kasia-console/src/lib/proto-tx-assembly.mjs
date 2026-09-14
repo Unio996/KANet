@@ -254,6 +254,74 @@ export function buildMarketGenesisTxJson({ kaspa, network, feeUtxo, relayChangeS
 }
 
 /**
+ * bet_mint 步骤A(KTT genesis, 铸stake筹码)的 tx_json 组装(不签名——relay 侧签 fee 输入): 1 个
+ * relay fee 输入 + 2 个输出 [KTT genesis(固定 GENESIS_OUTPUT_SOMPI, owner=STAKE_CHIP_OWNER_UNBOUND,
+ * 由调用方通过 computeKttGenesisArtifact({amount, ownerCovIdHex:STAKE_CHIP_OWNER_UNBOUND}) 算好传入),
+ * 找零回 relay]。结构与 buildMarketGenesisTxJson 完全对称(同样是"1 fee 输入 genesis 一个新 covenant
+ * 实例"的形状), 唯一差异是 genesis 的是 KTT 而不是 ShardLeaf_direct, authorizing_input 恒为 0(唯一
+ * 输入就是 fee 输入本身)。
+ * @param {object} o
+ * @param {*} o.kaspa
+ * @param {string} o.network
+ * @param {{txid:string, vout:number, value:bigint, scriptPublicKeyHex:string}} o.feeUtxo
+ * @param {string} o.relayChangeScriptPublicKeyHex
+ * @param {string} o.kttScriptPubKeyHex  computeKttGenesisArtifact({amount, ownerCovIdHex:STAKE_CHIP_OWNER_UNBOUND}).scriptPubKeyHex
+ * @param {bigint} o.absFeeCapSompi  feeProfile.bet_mint_step_a.cap
+ * @returns {{txJson:string, expectedTxid:string, stakeCovId:string, includeChange:boolean, changeSompi:bigint, requiredFee:bigint, netLoss:bigint, signInputIndices:number[], genesisOutputIndices:number[], continuationOutputIndices:number[]}}
+ */
+export function buildKttGenesisTxJson({ kaspa, network, feeUtxo, relayChangeScriptPublicKeyHex, kttScriptPubKeyHex, absFeeCapSompi }) {
+  const { Transaction, TransactionOutput, GenesisCovenantGroup } = kaspa;
+  assertFixedOutputValue(GENESIS_OUTPUT_SOMPI, GENESIS_OUTPUT_SOMPI, 'bet_mint_step_a');
+  if (typeof absFeeCapSompi !== 'bigint') throw new Error('buildKttGenesisTxJson: absFeeCapSompi(bigint, feeProfile.bet_mint_step_a.cap) required');
+
+  const feeUtxoSpk = scriptPublicKeyFromHex(kaspa, feeUtxo.scriptPublicKeyHex);
+  const kttSpk = scriptPublicKeyFromHex(kaspa, kttScriptPubKeyHex);
+  const changeSpk = scriptPublicKeyFromHex(kaspa, relayChangeScriptPublicKeyHex);
+  const outpoint = { transactionId: feeUtxo.txid, index: feeUtxo.vout };
+
+  const mkInput = (sigScript) => ({
+    previousOutpoint: outpoint, signatureScript: sigScript, sequence: 0n, sigOpCount: 1, computeBudget: 0,
+    utxo: { outpoint, amount: feeUtxo.value, scriptPublicKey: feeUtxoSpk, blockDaaScore: 0n },
+  });
+  const mkOutputs = (changeSompi) => changeSompi === undefined
+    ? [new TransactionOutput(GENESIS_OUTPUT_SOMPI, kttSpk)]
+    : [new TransactionOutput(GENESIS_OUTPUT_SOMPI, kttSpk), new TransactionOutput(changeSompi, changeSpk)];
+  const mkTx = (changeSompi) => {
+    const t = new Transaction({
+      version: 1,
+      inputs: [mkInput(new Uint8Array(0))],
+      outputs: mkOutputs(changeSompi),
+      lockTime: 0n, subnetworkId: '0'.repeat(40), gas: 0n, payload: '',
+    });
+    t.populateGenesisCovenants([new GenesisCovenantGroup(0, [0])]);
+    return t;
+  };
+
+  const leftover = feeUtxo.value - GENESIS_OUTPUT_SOMPI;
+  const shape = selectChangeShape({
+    kaspa, network, leftoverSompi: leftover,
+    buildTxWithChange: (changeSompi) => mkTx(changeSompi),
+    buildTxNoChange: () => mkTx(undefined),
+    absFeeCapSompi,
+  });
+
+  const stakeCovId = String(shape.tx.outputs[0].covenant.covenantId);
+
+  return {
+    txJson: shape.tx.serializeToSafeJSON(),
+    expectedTxid: shape.tx.id,
+    stakeCovId,
+    includeChange: shape.includeChange,
+    changeSompi: shape.changeSompi,
+    requiredFee: shape.requiredFee,
+    netLoss: shape.netLoss,
+    signInputIndices: [0],
+    genesisOutputIndices: [0],
+    continuationOutputIndices: [],
+  };
+}
+
+/**
  * 落链校验(账本1429/1431 要求的 fail-closed 重算比对): genesis 交易一旦落链, 从**实际落链交易**的
  * input[0] outpoint + genesis 输出本身, 用同一个 consensus 纯函数(kaspa.covenantId)重新算一遍
  * covenant_id, 必须与 prepared 阶段存的 shardleaf_cov_id 完全一致——防"库里存的值与链上实际情况不符"
