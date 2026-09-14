@@ -84,6 +84,7 @@
       "bytes": 3330
     }
   ],
+  "excludedLegacyExamplesNote": "dust ticket 权威版 = src/lib/sil-v1/PoolSideTicket.sil(第11条,见上)；下面 'src/lib/PoolSide*.sil' 匹配的是顶层旧文件(PoolSide.sil/PoolSide_v06.sil/PoolSide_v07.sil/PoolSide_v08_shard.sil 等)，不匹配 sil-v1/ 下的新文件——PoolSide_v08_shard.sil 是 PoolSideTicket.sil 的 v0.1.0 旧语法源，已迁移，仍正确算 legacy(ledger 1344, NWT nit)。",
   "excludedLegacyExamples": [
     "src/lib/PoolSide*.sil", "src/lib/PoolSpine*.sil", "src/lib/PoolRoot.sil",
     "src/lib/PredictionEscrow*.sil", "src/lib/PredictionPoolUnanimous3.sil",
