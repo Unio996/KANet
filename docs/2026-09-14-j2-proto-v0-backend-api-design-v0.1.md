@@ -91,6 +91,20 @@ consolidated `ShardLeaf_direct` continuation（手写 AB11 形 state 编码，�
 stake_tx_id, status, created_at, confirmed_at）；`UPDATE proto_markets SET shardleaf_txid=?, shardleaf_vout=?`
 （仅在 B 确认后推进当前 UTXO 指针）。
 
+> 📌 **状态注记（2026-09-15 · J2 · 账本1435/1436 落码实测 · 不改上方原文）**：§0 描述的 `ownerIsMarketInput`/
+> "b-in" 接收路径是 v0.6 的旧设计——KTT 已经过 v0.3 方案C（Owner 1408 裁定）撤销这条检查（"代币就是代币"，
+> 见 `src/lib/sil-v1/KanetTestToken.sil` 头注 2026-09-14 段落），下面这句因此也过期。
+> 上方 **§2.3 步骤A"`init_owner`=本市场 `ShardLeaf_direct` 的 covenant id"这句已被证伪并订正**：真实
+> `covenant_id` 公式把输出完整脚本字节（含 State，含 `owner` 自身）喂进哈希（rusty-kaspa
+> `consensus/core/src/hashing/covenant_id.rs:13-14`），"某代币的 owner=它自己的covenant_id"是自指不动点
+> 方程无解；"owner=leaf 的 covenant_id"则会被 `ShardLeaf_direct.sil` 的 `scanOwnedTokenInputs` 误计入奖池
+> （真实撞出的回归，见 `docs/provenance/2026-09-15-j2-register-append-full-tx-three-execution/`）。
+> **裁定值（账本1436）**：`init_owner` = 全零32字节，具名常量 `STAKE_CHIP_OWNER_UNBOUND`
+> （`kasia-console/src/lib/proto-covenant-builder.mjs`）。已知代价（步骤A落链后、步骤B前的窗口可被任意
+> 非covenant输入冒充在场花掉，但等价于免费自铸、无真实损失）并入 `docs/DATABASE.md` 的
+> `T-ORPHAN-CHIP-RECOVERY-ENTRY`，仅在"KTT零价值测试币"前提下成立。7条真实 cli-debugger 向量见
+> `docs/provenance/2026-09-15-j2-stake-chip-owner-unbound-verification/`。
+
 ### 2.3.1 NWT 保留项答复（1336，落码前必须满足）
 
 **MUST：中间态接既有 intent 机制**——`submit-intent.mjs`（`src/lib/submit-intent.mjs`）是全仓这一类问题

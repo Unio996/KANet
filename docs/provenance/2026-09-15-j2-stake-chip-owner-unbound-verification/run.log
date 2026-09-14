@@ -1,0 +1,20 @@
+=== ①a_leaf_pass_owned_total_equals_pool_value (ShardLeaf_direct.sil) ===
+PASS
+
+=== ①b_held_transfer_zero_out_pass (KanetTestToken.sil) ===
+PASS
+
+=== ①c_stake_transfer_owner_unbound_via_fee_input_pass (KanetTestToken.sil) ===
+PASS
+
+=== ②stake_transfer_owner_unbound_via_leaf_input_fail (expect fail, line 84) ===
+PASS (expected failure)
+
+=== ③leaf_fail_when_stake_owner_equals_leaf_cov_id_regression (expect fail) ===
+PASS (expected failure)
+
+=== ④a_leaf_first_bet_no_held_input_pass ===
+PASS
+
+=== ④b_stake_first_bet_owner_unbound_via_fee_input_pass ===
+PASS

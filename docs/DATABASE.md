@@ -877,6 +877,7 @@ M0c-1 app provision grant registry（2026-07-23, 设计 `docs/2026-07-23-m0c-1-a
 - **`proto_claims`**：赢家/退款人 claim + `KanetTokenClaim.spend` 提现状态。`side` CHECK 区分 `win`/`refund`。写入方 `POST /api/proto/markets/:id/claim`、`POST /api/proto/markets/:id/withdraw`（待落码）。
 
 **已知限制（不得漂成"已处理"，任何引用本条目须原样带走）**：① T-PROTO-BETTORPK-BINDING——`register_append` 的 `bettorPk` witness 参数与被消费的代币输入之间无签名绑定，v0 单操作员场景接受，**任何第二方参与前必须先修**；② T-ORPHAN-CHIP-RECOVERY-ENTRY——见上 `proto_bets` 说明，合约层缺口非本轮范围。
+  > 📌 **状态注记（2026-09-15 · J2 · 账本1435/1436 bet_mint 步骤A落码 · 并入②不改原文）**：bet_mint 步骤A新铸 stake 筹码的 `owner` 字段裁定为 `STAKE_CHIP_OWNER_UNBOUND`（全零32字节，见 `kasia-console/src/lib/proto-covenant-builder.mjs`）——起因是"owner=它自己的covenant_id(自持有)"被证明是自指不动点方程无解（真实 rusty-kaspa `consensus/core/src/hashing/covenant_id.rs` 把输出完整脚本字节喂进哈希，含 owner 自身，见 `docs/provenance/2026-09-15-j2-stake-chip-owner-unbound-verification/`）。代价：步骤A落链后、步骤B广播前的窗口，任何人可用任意非covenant输入冒充在场把这枚筹码花掉，导致孤儿化——但攻击者所得与自己免费铸一份等价，无真实损失路径，**并入本条 T-ORPHAN-CHIP-RECOVERY-ENTRY**，v0 接受。🔴 该取舍只在"KTT是零价值测试币"前提下成立，KTT 若承载真实价值必须重做。
 > 📌 **状态注记（2026-09-15 · J2）**：KAS 侧资金/签名来源那句"待 Owner 定"已过期——**已裁定 (B′)**：专属 `proto-` 前缀 relay 身份（`PROTO_RELAY_ID` env 钉死+`name` 前缀/余额上限双重 fail-closed 断言）+ 既有 relay IPC 通道（`sendCommand`/`sendCommandAsync`）+ 新 relay 命令 `covenant_broadcast`（`kasia-relay/src/lib/covenant-broadcast.mjs`/`covenant-broadcast-relay.mjs`，含 `GENESIS_OUTPUT_SOMPI`/`CONTINUATION_OUTPUT_SOMPI`=20,000,000 sompi 签名前强制校验），不新造密钥存储/不违反 Console-不碰链。见 `docs/2026-09-14-j2-proto-v0-backend-api-design-v0.1.md` §6/§9。
 
 ---

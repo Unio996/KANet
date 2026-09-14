@@ -228,9 +228,12 @@ export function buildMarketGenesisTxJson({ kaspa, network, feeUtxo, relayChangeS
 
   // shardLeafCovId: consensus 的 covenant_id(funding.outpoint, [outputIndices]) 是纯函数, 不需要上链
   // 确认——本地就能算出、且不受后续找零值影响(与哪个形状/找零值无关, 同一 outpoint+outIdx 恒定)。
-  // 这就是 bet_mint 步骤A(KTT genesis)的 ownerCovIdHex 参数必须传的值——不能瞎填, 必须是这个市场
-  // ShardLeaf_direct 实例真实的 covenant_id, 否则 register_append 的 scanOwnedTokenInputs()
-  // (owner==OpInputCovenantId(this.activeInputIndex))永远扫不到这笔 KTT。
+  // 🔴 订正(账本1435→1436, 撤销早前错误说法): 这个值只用于 register_append 的"合并奖池代币"
+  // (held/新genesis)的 owner 字段, 绝不能也用作 bet_mint 步骤A(每注新铸 stake 筹码)的 ownerCovIdHex——
+  // covenant_id(outpoint,[index,output]) 的真实公式吃的是输出的完整脚本字节(含 State), "某代币的
+  // owner=它自己的covenant_id"是自指不动点方程, 无解(rusty-kaspa consensus/core/src/hashing/
+  // covenant_id.rs:13-14 doc 原话+真实kaspa-wasm实测确认)。stake 筹码的 ownerCovIdHex 用
+  // STAKE_CHIP_OWNER_UNBOUND(见 proto-covenant-builder.mjs), 不是这个值。
   const shardLeafCovId = String(shape.tx.outputs[0].covenant.covenantId);
 
   return {
