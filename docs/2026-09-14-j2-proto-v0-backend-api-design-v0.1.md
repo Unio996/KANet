@@ -283,7 +283,7 @@ Console-不碰链）同时满足。
    `proto_bets.orphaned_chip` 终态如实展示。**这是合约层缺口，需要新增一个回收 entry 才能真正解决**，不在
    本轮范围。
 
-## §9 新增 relay 命令 `covenant_broadcast`（ledger 1348，与 §6 一起报 Owner）
+## §9 新增 relay 命令 `covenant_broadcast`（ledger 1347，与 §6 一起报 Owner）
 
 `proto-bet-intent.mjs` 的 `resolvePrepared`（同字节重播分支）需要一个能广播"调用方已经构造好的任意
 签名交易"的 relay 命令——**这个命令目前不存在**。核实过 `kasia-relay/src/lib/commands.mjs:197-199`：
