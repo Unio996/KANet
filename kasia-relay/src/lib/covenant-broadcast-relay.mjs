@@ -23,6 +23,7 @@
 import {
   validateSignedInputCeiling, computeRequiredFeeSompi, validateNetLoss,
   extractTxShape, assertFinalTxid, signOnlyDeclaredInputs, GLOBAL_ABS_FEE_CAP_SOMPI,
+  SIGNED_INPUT_CEILING_SOMPI,
 } from './covenant-broadcast.mjs';
 import { ingestProtoBetIntentPhase } from '../ingest.mjs';
 
@@ -45,11 +46,17 @@ export function _covenantDoneSize() { return _done.size; }
  * @param {Function} [o.log]
  * @param {Function} [o.replayFn]  注入点, 供测试替换
  * @param {Function} [o.ingestPhase]  注入点, 供测试替换(默认 ingestProtoBetIntentPhase)
+ * @param {bigint} [o.signedInputCeilingSompi]  注入点, 供测试替换(默认 SIGNED_INPUT_CEILING_SOMPI)——
+ *   生产调用永不传这个参数, 只用于隔离验证"relay 不读 cmd 的 cap 字段"这条性质本身, 不依赖
+ *   SIGNED_INPUT_CEILING_SOMPI 与 GLOBAL_ABS_FEE_CAP_SOMPI 当前数值恰好相等这个巧合(见
+ *   covenant-broadcast-relay.test.mjs FRESH-9)。absFeeCapSompi 本身不可注入——它必须永远是
+ *   GLOBAL_ABS_FEE_CAP_SOMPI 字面量, 这正是本函数要保证的不变量, 不能开一个后门绕过去。
  * @returns {Promise<{ok:boolean, txId?:string, code?:string, error?:string, intent_key?:string, reused?:boolean}>}
  */
 export async function covenantBroadcastRelay({
   cmd, kaspa, rpc, wallet, networkId, senderAddress,
   log = console.log, replayFn = null, ingestPhase = ingestProtoBetIntentPhase,
+  signedInputCeilingSompi = SIGNED_INPUT_CEILING_SOMPI,
 }) {
   const key = cmd.intent_key;
   if (!key) return { ok: false, error: 'intent_key required' };
@@ -110,7 +117,7 @@ export async function covenantBroadcastRelay({
 
   const shape = extractTxShape(tx); // 只提取一次——amountSompi/scriptPubKeyRaw 都不受后续签名影响
 
-  const sic = validateSignedInputCeiling({ inputs: shape.inputs, signInputIndices: cmd.sign_input_indices });
+  const sic = validateSignedInputCeiling({ inputs: shape.inputs, signInputIndices: cmd.sign_input_indices, signedInputCeilingSompi });
   if (!sic.ok) {
     log(`COVENANT_BROADCAST ${key} REJECTED (signed input ceiling): ${sic.reason}`);
     return { ok: false, code: 'signed_input_ceiling_exceeded', error: sic.reason, intent_key: key };
