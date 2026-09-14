@@ -125,6 +125,14 @@ t('找零形状: 0 或 >= CONTINUATION_OUTPUT_SOMPI 通过, 中间的 dust 值�
   try { assertChangeShape(1_000n); } catch (e) { threw = e; }
   if (!threw) throw new Error('dust 找零应该被拒绝');
 });
+t('找零形状: (0, CONTINUATION_OUTPUT_SOMPI) 中间地带(Bettor 1427 复核点名的边界)一律 throw, 不并入手续费, 不静默放行(例如 15,000,000——恰好是 15M 那个已接受例外的数量级, 但那条例外用在别的固定种子面值场景, 不是这里的找零下限, 这里没有"折算进 fee"的隐藏分支)', () => {
+  let threw = null;
+  try { assertChangeShape(15_000_000n); } catch (e) { threw = e; }
+  if (!threw) throw new Error('15,000,000(严格在 0 和 CONTINUATION_OUTPUT_SOMPI 之间)应该被拒绝, 不能因为接近某个已接受的例外数量级就放行');
+  let threw2 = null;
+  try { assertChangeShape(CONTINUATION_OUTPUT_SOMPI - 1n); } catch (e) { threw2 = e; }
+  if (!threw2) throw new Error('差 1 sompi 也要拒绝, 不是"差不多就行"');
+});
 
 // ============ market_genesis tx_json 真实端到端组装(真 kaspa-wasm + 真编译 ShardLeaf_direct) ============
 // 目的: 证明 buildMarketGenesisTxJson 产出的 tx_json 不只是"格式对", 而是 relay 侧真代码
@@ -149,17 +157,20 @@ if (!process.env.CONSOLE_ENCRYPTION_KEY) process.env.CONSOLE_ENCRYPTION_KEY = '1
   const feeUtxo = { txid: 'ee'.repeat(32), vout: 0, value: 10_000_000_000n, scriptPublicKeyHex: '0x' + relaySpk.script };
 
   let built;
-  t('genesis-e2e-1 buildMarketGenesisTxJson 真实构造成功(真 mass 计算, 找零非负)', () => {
+  t('genesis-e2e-1 buildMarketGenesisTxJson 真实构造成功(真 mass 计算, 找零非负, 返回 shardLeafCovId)', () => {
     built = buildMarketGenesisTxJson({ kaspa, network: 'mainnet', feeUtxo, relayChangeScriptPublicKeyHex: '0x' + relaySpk.script, shardLeafScriptPubKeyHex: artifacts.shardLeafDirect.scriptPubKeyHex });
     if (!built.txJson || built.signInputIndices.length !== 1 || built.genesisOutputIndices.length !== 1) throw new Error('返回形状不对');
+    if (!built.shardLeafCovId || built.shardLeafCovId === '0'.repeat(64)) throw new Error(`shardLeafCovId 应该是非零派生值, 实际 ${built.shardLeafCovId}`);
   });
 
-  t('genesis-e2e-2 relay 侧真代码能反序列化 + extractTxShape + validateFixedValueOutputs 通过(未签名阶段)', () => {
+  t('genesis-e2e-2 relay 侧真代码能反序列化 + extractTxShape + validateFixedValueOutputs 通过(未签名阶段), covenant_id 在序列化往返后不变(populateGenesisCovenants 声明真的被序列化保留, 不是本地对象独有的临时状态)', () => {
     const tx = kaspa.Transaction.deserializeFromSafeJSON(built.txJson);
     const shape = extractTxShape(tx);
     const fv = validateFixedValueOutputs({ outputs: shape.outputs, genesisOutputIndices: built.genesisOutputIndices, continuationOutputIndices: built.continuationOutputIndices });
     if (!fv.ok) throw new Error(`relay 真代码拒绝了 console 构造出的 tx: ${fv.reason}`);
     if (shape.outputs[0].valueSompi !== GOS) throw new Error(`genesis 输出值不是协议常量: ${shape.outputs[0].valueSompi}`);
+    const covIdAfterRoundtrip = String(tx.outputs[0].covenant?.covenantId ?? '');
+    if (covIdAfterRoundtrip !== built.shardLeafCovId) throw new Error(`反序列化后 covenant_id=${covIdAfterRoundtrip} != 构造时算出的 ${built.shardLeafCovId}(populateGenesisCovenants 声明在序列化往返中丢失/改变了)`);
   });
 
   t('genesis-e2e-3 relay 真签名(signOnlyDeclaredInputs)后 finalize, txid 与 console 预期的 expectedTxid 一致(txid 不含 witness)', () => {

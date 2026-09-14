@@ -118,7 +118,7 @@ export function scriptPublicKeyFromHex({ ScriptPublicKey }, hexStr) {
  * @returns {{txJson:string, expectedTxid:string, signInputIndices:number[], genesisOutputIndices:number[], continuationOutputIndices:number[]}}
  */
 export function buildMarketGenesisTxJson({ kaspa, network, feeUtxo, relayChangeScriptPublicKeyHex, shardLeafScriptPubKeyHex }) {
-  const { Transaction, TransactionOutput } = kaspa;
+  const { Transaction, TransactionOutput, GenesisCovenantGroup } = kaspa;
   assertFixedOutputValue(GENESIS_OUTPUT_SOMPI, GENESIS_OUTPUT_SOMPI, 'market_genesis'); // 防未来重构悄悄换成算出来的值
 
   const feeUtxoSpk = scriptPublicKeyFromHex(kaspa, feeUtxo.scriptPublicKeyHex);
@@ -130,15 +130,24 @@ export function buildMarketGenesisTxJson({ kaspa, network, feeUtxo, relayChangeS
     previousOutpoint: outpoint, signatureScript: sigScript, sequence: 0n, sigOpCount: 1, computeBudget: 0,
     utxo: { outpoint, amount: feeUtxo.value, scriptPublicKey: feeUtxoSpk, blockDaaScore: 0n },
   });
-  const mkTx = (changeSompi) => new Transaction({
-    version: 1,
-    inputs: [mkInput(new Uint8Array(0))],
-    outputs: [
-      new TransactionOutput(GENESIS_OUTPUT_SOMPI, genesisSpk),
-      new TransactionOutput(changeSompi, changeSpk),
-    ],
-    lockTime: 0n, subnetworkId: '0'.repeat(40), gas: 0n, payload: '',
-  });
+  // 🔴 genesis 输出(第一次创建 covenant 实例, 不是续约)不用 CovenantBinding——那是"延续既有 covenant_id"
+  // 的声明方式。genesis 用 populateGenesisCovenants([new GenesisCovenantGroup(authInputIdx, [outIdx,...])])
+  // 声明"output[outIdx] 的 covenant_id 由 input[authInputIdx] 的 outpoint 派生", 同 kasia-relay/src/lib/
+  // p2sh.mjs:1878-1885 unlockBshardGenesisMintPayout 既有生产手法逐字一致(Bettor 1427 复核点名)。必须在
+  // finalize()/签名之前调用——v1 sighash 把 covenant 字段焊进去, 顺序错了 sighash 就不对。
+  const mkTx = (changeSompi) => {
+    const t = new Transaction({
+      version: 1,
+      inputs: [mkInput(new Uint8Array(0))],
+      outputs: [
+        new TransactionOutput(GENESIS_OUTPUT_SOMPI, genesisSpk),
+        new TransactionOutput(changeSompi, changeSpk),
+      ],
+      lockTime: 0n, subnetworkId: '0'.repeat(40), gas: 0n, payload: '',
+    });
+    t.populateGenesisCovenants([new GenesisCovenantGroup(0, [0])]);
+    return t;
+  };
 
   const draft = mkTx(feeUtxo.value - GENESIS_OUTPUT_SOMPI); // 占位找零, 只为量 mass(与结构无关不看值)
   draft.finalize();
@@ -147,11 +156,19 @@ export function buildMarketGenesisTxJson({ kaspa, network, feeUtxo, relayChangeS
   if (change < 0n) throw new Error(`buildMarketGenesisTxJson: insufficient fee UTXO(${feeUtxo.value} < genesis ${GENESIS_OUTPUT_SOMPI} + fee ${requiredFee})`);
   assertChangeShape(change);
 
+  // shardLeafCovId: consensus 的 covenant_id(funding.outpoint, [outputIndices]) 是纯函数, 不需要上链
+  // 确认——本地就能算出、且不受后续找零值影响(与 draft/final 用哪次构造无关, 同一 outpoint+outIdx 恒定)。
+  // 这就是 bet_mint 步骤A(KTT genesis)的 ownerCovIdHex 参数必须传的值——不能瞎填, 必须是这个市场
+  // ShardLeaf_direct 实例真实的 covenant_id, 否则 register_append 的 scanOwnedTokenInputs()
+  // (owner==OpInputCovenantId(this.activeInputIndex))永远扫不到这笔 KTT。
+  const shardLeafCovId = String(draft.outputs[0].covenant.covenantId);
+
   const final = mkTx(change);
   final.finalize();
   return {
     txJson: final.serializeToSafeJSON(),
     expectedTxid: final.id,
+    shardLeafCovId,
     signInputIndices: [0],
     genesisOutputIndices: [0],
     continuationOutputIndices: [],
