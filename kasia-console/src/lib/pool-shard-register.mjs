@@ -19,7 +19,7 @@
 //   via the bettor→gateway transfer the caller performs before invoking (custody-bound, like publish). mainnet: bettor-direct
 //   funding input is a follow-up (TODO custody-hardening).
 
-import { compileSil, computePoolSideArtifact, ctorBytes32, ctorInt } from './pool-bshard-artifacts.mjs';
+import { compileSil, computePoolSideArtifact, ctorBytes32, ctorInt, compileSilV100, ctorBytes32V100, ctorIntV100 } from './pool-bshard-artifacts.mjs';
 import { extractTemplateArtifact } from './pool-template-artifact.mjs';
 import { buildRegisterWitness, buildRegisterCommand } from './pool-register-builder.mjs';
 import { allocateForRegister, registerShard, sealShard, onBettorRegistered } from './shard-allocator.mjs';
@@ -71,9 +71,14 @@ const SILVERC_LEGACY = process.env.SILVERC_LEGACY_PATH || 'D:/silverscript/versi
 // compilePayoutShardV2Redeem 原来完全依赖调用方显式传对 silverc——生产代码(pool.js register-v07)传对了，
 // 但 NWT 自己写验证脚本时忘了传，结果默默吃了 compileSil 的模块级默认值(刚被本次事故修复从 ZK 改成
 // legacy)，编出错误字节都不会报错。跟 ShardLeaf/PayoutShard V1 同款处理：硬编码，不依赖调用方传参正确。
+// 🟡 DEPRECATED(D-019, ledger 1218/1222): 本文件内已无真实调用点(computeCloseZkTmplAnchor/
+// compilePayoutShardV2Redeem 均已迁 compileSilV100)——保留常量定义不删(同批约定: 标记不删), 只是不再有
+// 任何函数引用它。若未来有人想复用这个常量, 先读上面 D-019 迁移注释: 这个二进制对当前(v1.0.0 语法迁移后)
+// 主网集 .sil 已结构性失效(解析都过不了), 不要想当然重新接上。
 const SILVERC_ZK = process.env.SILVERC_ZK_PATH || 'D:/silverscript/versioned-builds/silverc-zk-8065184.exe';
 const z32 = '00'.repeat(32);
 const W17 = () => Array.from({ length: 17 }, () => ctorInt(0));
+const W17V100 = () => Array.from({ length: 17 }, () => ctorIntV100(0));   // D-019: v100 ctor 方言专用, 见 ctorBytes32V100/ctorIntV100 注释
 const MIN_BET = 100000;                                   // dust-ticket floor (sompi); matches (d)/helper
 const TICKET_DUST = 20_000_000;                           // 0.2 KAS PoolSide dust ticket (KIP-9 safe, matches helper)
 const PS_SEED = 20_000_000;                               // PayoutShard genesis seed (0.2 KAS sink, matches (d))
@@ -179,19 +184,36 @@ export async function ensurePayoutShard({ db, rc, transfer, landed, p2sh, logica
 const _CLOSEZK_SUFFIX_BASE = 214; // = state_layout.start(1) + state_layout.len(213), state 区固定宽度编码, 不随市场值变
 
 /**
- * 计算 PayoutShardV2 ctor 需要的 closeZkTmplAnchor = blake2b(4 段固定模板拼接)。CloseZkRepro4.sil/CloseZkV2.sil
- * 零改动，编译一次(dummy ctor，模板跟 betsRoot/refundRoot/attestedWinner/consolidated_pool 具体值无关，只有
- * gateTmplHash 会真实嵌入模板——它绑定具体 guest image_id，必须传真实值，不能用占位符)即可，不需要每个
- * 市场重算(同一个 guest image 的所有 ZK-native 市场共用同一个 anchor)。
+ * 计算 PayoutShardV2 ctor 需要的 closeZkTmplAnchor = blake2b(4 段固定模板拼接)。CloseZkV2.sil 零改动，
+ * 编译一次(dummy ctor，模板跟 betsRoot/refundRoot/attestedWinner/consolidated_pool 具体值无关，只有
+ * gateTmplHash/tokenTmplHash/claimTmplHash/marketSuffixHash 会真实嵌入模板——它们全部是 ctor-only
+ * 常量、直接被 entry 体内的 require 引用为字面量，不进 state 区，因此**必须传真实值，不能用占位符**，
+ * 用错值会算出一个跟真实 genesis 字节不匹配的 anchor)即可，不需要每个市场重算(同一个 guest image +
+ * 同一套代币/claim 家族模板的所有 ZK-native 市场共用同一个 anchor)。
+ *
+ * 🔴 D-019 迁移(ledger 1216-1221, 落码期间实测确认): 原实现硬编码走 SILVERC_ZK(silverc-zk-8065184.exe)，
+ * 该二进制连当前(T3 语法迁移后) CloseZkV2.sil 都解析不了('as byte[8]' 转型语法, parse error)——不只是
+ * ctor 参数数不对，是这个旧二进制对主网集 .sil 文件已经结构性作废。已改走 compileSilV100(D-019 锚点 +
+ * 黄金样本双重校验), ctor 从 25 补齐到当前源码实读的 28 个(补 3 个新增尾部字段, T3 代币化 ledger 1170/
+ * 1188 引入)。
  * @param {string} closeZkSilPath 指向 CloseZkV2.sil(或归位后的正式路径)
  * @param {string} gateTmplHash 真实 gate 模板 hash(32B hex，绑定具体 guest image_id——不能传占位符，会导致 anchor 算错)
+ * @param {string} tokenTmplHash 真实 KanetTestToken 模板 hash(32B hex，T3 代币化新增字段，不能传占位符)
+ * @param {string} claimTmplHash 真实 KanetTokenClaim 模板 hash(32B hex，T3 代币化新增字段，不能传占位符——
+ *   注意跟 RootClose 语境的同名字段指向不同物，见 docs/2026-09-14-j2-t4-market-genesis-console-side-
+ *   skeleton-v0.3.md §2 命名碰撞警告)
+ * @param {string} marketSuffixHash 真实 market suffix 承诺 hash(32B hex，T3 代币化新增字段，不能传占位符)
+ * @param {string} [v100Path] 覆盖用(测试注入)，默认走 compileSilV100 自己的 env/pin 逻辑
  */
-export function computeCloseZkTmplAnchor(closeZkSilPath, gateTmplHash) {
+export function computeCloseZkTmplAnchor(closeZkSilPath, gateTmplHash, tokenTmplHash, claimTmplHash, marketSuffixHash, v100Path) {
+  for (const [label, v] of [['gateTmplHash', gateTmplHash], ['tokenTmplHash', tokenTmplHash], ['claimTmplHash', claimTmplHash], ['marketSuffixHash', marketSuffixHash]]) {
+    if (!/^[0-9a-fA-F]{64}$/.test(String(v || ''))) throw new Error(`computeCloseZkTmplAnchor: ${label} 必须是 32B hex，收到 ${JSON.stringify(v)} — 这四个字段全部烤进模板字面量，不接受占位符/缺省值`);
+  }
   // dummyAtMs 必须落在 J2 实测的稳定值域 [2^40, 2^47) 内(同 PayoutShardV2.sil zk_handoff 的 bounds guard)，
   // 否则 minimal-push 变长编码会让模板切分点跟真实 market 用的值对不上。用一个具体真实量级(非边界值)。
   const dummyAtMs = 1783500000000;
   // ⚠ NWT 核实确认(2026-07-07): init_attestedWinner/init_closed/init_consolidated_pool 这三个值(下面写
-  // 0/1/0)可以随便填、不影响算出的 anchor —— 它们全部落在 CloseZkRepro4 自己的 state_layout 区域内，
+  // 0/1/0)可以随便填、不影响算出的 anchor —— 它们全部落在 CloseZkV2 自己的 state_layout 区域内，
   // extractTemplateArtifact 会把整个 state 区域从 templateSuffix 里切掉(不进最终 hash)。之所以这里仍写
   // 具体值(而非全 0)，纯粹是为了让 dummy ctor 数组形状/类型跟真实 ctor 一致，不是这些值本身有意义。
   // 🔴 distinct non-zero dummy markers (fix): z32 用于两个 dummy 槽会跟 ctor 里其它全零字段(init_payoutRoot
@@ -199,11 +221,12 @@ export function computeCloseZkTmplAnchor(closeZkSilPath, gateTmplHash) {
   // 0x2222.../0x3333... 同款手法, 避免任何看似合理的占位值意外撞见).
   const dummyBetsRoot = '11'.repeat(32), dummyRefundRoot = '22'.repeat(32);
   const ctor = [
-    ctorBytes32(gateTmplHash), ctorBytes32(dummyBetsRoot), ctorBytes32(dummyRefundRoot),
-    ctorInt(dummyAtMs), ctorInt(0), ctorInt(1), ctorBytes32(z32), ctorInt(0),
-    ...W17(),
+    ctorBytes32V100(gateTmplHash), ctorBytes32V100(dummyBetsRoot), ctorBytes32V100(dummyRefundRoot),
+    ctorIntV100(dummyAtMs), ctorIntV100(0), ctorIntV100(1), ctorBytes32V100(z32), ctorIntV100(0),
+    ...W17V100(),
+    ctorBytes32V100(tokenTmplHash), ctorBytes32V100(claimTmplHash), ctorBytes32V100(marketSuffixHash),
   ];
-  const compiled = compileSil(closeZkSilPath, ctor, SILVERC_ZK);
+  const compiled = compileSilV100(closeZkSilPath, ctor, 'CloseZkV2', v100Path);
   const { templatePrefix, templateSuffix } = extractTemplateArtifact(compiled); // prefix=script[0:1], suffix=script[214:end]
   const fullBuf = Buffer.from(compiled.script);
 
@@ -262,17 +285,30 @@ export function computeCloseZkTmplAnchor(closeZkSilPath, gateTmplHash) {
  *   init_w0..init_w16(17), init_attestedWinner, init_attestedAtMs, init_betsRootBaked, init_refundRootBaked。
  * @param {object} o { poolMerkleRoot(hex), predicateCommit(hex), closeZkTmplAnchor(hex), consolidatedPool(int), silverc }
  */
-export function compilePayoutShardV2Redeem({ poolMerkleRoot, predicateCommit, closeZkTmplAnchor, consolidatedPool }) {
+/**
+ * 🔴 D-019 迁移(ledger 1216-1221, 落码期间实测确认): 原实现 ctor 只填 27 个值(缺 T3 代币化新增的
+ * token_tmpl_hash/claim_tmpl_hash/market_suffix_hash 三个尾部字段, 当前 PayoutShardV2.sil 实读 30
+ * 参数), 且硬编码走已对当前语法失效的 SILVERC_ZK——已改走 compileSilV100 + ctor 补齐到 30, 三个新字段
+ * 同 computeCloseZkTmplAnchor 一样是 ctor-only 字面量(不进 state), 必须传真实值。
+ * @param {object} o { poolMerkleRoot(hex), predicateCommit(hex), closeZkTmplAnchor(hex), consolidatedPool(int),
+ *   tokenTmplHash(hex), claimTmplHash(hex), marketSuffixHash(hex) }
+ */
+export function compilePayoutShardV2Redeem({ poolMerkleRoot, predicateCommit, closeZkTmplAnchor, consolidatedPool, tokenTmplHash, claimTmplHash, marketSuffixHash }) {
+  for (const [label, v] of [['tokenTmplHash', tokenTmplHash], ['claimTmplHash', claimTmplHash], ['marketSuffixHash', marketSuffixHash]]) {
+    if (!/^[0-9a-fA-F]{64}$/.test(String(v || ''))) throw new Error(`compilePayoutShardV2Redeem: ${label} 必须是 32B hex，收到 ${JSON.stringify(v)} — ctor-only 字面量，不接受占位符/缺省值`);
+  }
   const ctor = [
-    ctorBytes32(poolMerkleRoot), ctorBytes32(predicateCommit), ctorBytes32(closeZkTmplAnchor),
-    ctorInt(Number(consolidatedPool)), ctorInt(0), ctorBytes32(z32),
-    ...W17(),
-    ctorInt(-1),        // init_attestedWinner: -1=待attest
-    ctorInt(0),         // init_attestedAtMs: 0=待attest
-    ctorBytes32(z32),   // init_betsRootBaked: ZERO32=待attest
-    ctorBytes32(z32),   // init_refundRootBaked: ZERO32=待attest
+    ctorBytes32V100(poolMerkleRoot), ctorBytes32V100(predicateCommit), ctorBytes32V100(closeZkTmplAnchor),
+    ctorBytes32V100(tokenTmplHash),
+    ctorIntV100(Number(consolidatedPool)), ctorIntV100(0), ctorBytes32V100(z32),
+    ...W17V100(),
+    ctorIntV100(-1),        // init_attestedWinner: -1=待attest
+    ctorIntV100(0),         // init_attestedAtMs: 0=待attest
+    ctorBytes32V100(z32),   // init_betsRootBaked: ZERO32=待attest
+    ctorBytes32V100(z32),   // init_refundRootBaked: ZERO32=待attest
+    ctorBytes32V100(claimTmplHash), ctorBytes32V100(marketSuffixHash),
   ];
-  return Buffer.from(compileSil(join(LIB, 'PayoutShardV2.sil'), ctor, SILVERC_ZK).script).toString('hex');
+  return Buffer.from(compileSilV100(join(LIB, 'PayoutShardV2.sil'), ctor, 'PayoutShardV2').script).toString('hex');
 }
 
 /**
@@ -280,14 +316,17 @@ export function compilePayoutShardV2Redeem({ poolMerkleRoot, predicateCommit, cl
  * 上层调用方(市场类型判断，非本函数内部推断)必须显式知道这是 ZK-native 市场才调用这个函数。
  * @returns {{ payoutCovId, psAddr, psOutpoint, psRedeemGenesis }}
  */
-export async function ensurePayoutShardV2({ db, rc, transfer, landed, p2sh, logicalMarketId, poolMerkleRoot, predicateCommit, closeZkTmplAnchor, relayAddr, silverc }) {
+export async function ensurePayoutShardV2({ db, rc, transfer, landed, p2sh, logicalMarketId, poolMerkleRoot, predicateCommit, closeZkTmplAnchor, tokenTmplHash, claimTmplHash, marketSuffixHash, relayAddr, silverc }) {
   const existing = db.prepare(`SELECT * FROM payout_shards WHERE logical_market_id = ?`).get(logicalMarketId);
   if (existing) {
     _checkCoherenceNonBlocking(db, existing, p2sh);
     return { payoutCovId: existing.payout_cov_id, psAddr: existing.payout_ps_addr, psOutpoint: existing.payout_ps_outpoint, psRedeemGenesis: existing.payout_redeem_hex };
   }
 
-  const redeem = compilePayoutShardV2Redeem({ poolMerkleRoot, predicateCommit, closeZkTmplAnchor, consolidatedPool: PS_SEED, silverc });
+  // D-019 迁移(ledger 1216-1221): PayoutShardV2.sil 当前 ctor 实读 30 参数(T3 代币化新增 token_tmpl_hash/
+  // claim_tmpl_hash/market_suffix_hash 三个尾部字段), 调用方必须显式提供真实值——不接受占位符(见
+  // compilePayoutShardV2Redeem 内部的 hex 格式 fail-loud 校验)。
+  const redeem = compilePayoutShardV2Redeem({ poolMerkleRoot, predicateCommit, closeZkTmplAnchor, consolidatedPool: PS_SEED, tokenTmplHash, claimTmplHash, marketSuffixHash });
   const fundTx = await transfer(relayAddr, PS_SEED + 100_000_000);
   const gj = await rc({ type: 'bshard_genesis_mint_payout', payoutshard: { redeem_hex: redeem, seedSompi: String(PS_SEED) }, inputs: { funding: { address: relayAddr, outpointTxid: fundTx, index: 0 } }, outputs: { change_address: relayAddr } });
   const payoutCovId = gj.payoutCovId, psTx = gj.txId || gj.txid, psAddr = p2sh(redeem);

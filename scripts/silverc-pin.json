@@ -1,7 +1,7 @@
 {
   "name": "silverscript-v100",
   "sourceRepo": "https://github.com/kaspanet/silverscript (J2 隔离 clone, scratch/_j2_silverc_v100)",
-  "sourceCommit": "3ed9733",
+  "sourceCommit": "3ed973335b59269293564805cc2c58a14595ec03",
   "sourceTag": "v1.0.0",
   "sha256": "4378ba6557f7b7b088d6ad7a400422acb51a7ffd04f86ed974055c4177ef8643",
   "artifactSchemaVersion": 1,
@@ -9,7 +9,7 @@
   "decision": "D-019",
   "notes": "生产权威锚点，D-019（Bettor ledger 1218）：NWT 独立构建的二进制 sha256 与本文件不同，原因已记录在 D-019（非分叉，构建环境差异）——本文件的 sha256 是唯一真相，任何调用方启动时必须以此为准做二进制核对，不符即拒跑。产物 schema：contracts[<ContractName>].compiled.{bytecode(hex string), template_hash(byte array), state_span:{offset,len}}，与旧 silverc-legacy-2c46231.exe / silverc-zk-8065184.exe 的顶层 {script(number[]), state_layout:{start,len}} 完全不同，调用方须走适配层（pool-bshard-artifacts.mjs 的 compileSilV100），不能直接把新产物喂给假设旧 schema 的 extractTemplateArtifact。",
   "productionBinaryPath": "D:/silverscript/versioned-builds/silverc-v100-3ed9733.exe",
-  "productionBinaryPlacedBy": "KANet-UI（放置中，ledger 1218）",
+  "productionBinaryPlacedBy": "KANet-UI（已放置，provenance 66086cb6，sha256 复制前后一致，ledger 1222）",
   "envVar": "SILVERC_V100_PATH",
   "goldenSample": {
     "purpose": "Rust 非可复现构建（ledger 1221）：不同机器干净重建同一 commit 的二进制 sha256 会不同（已见 NWT 独立构建 sha 与本文件不同的实例，D-019 注记记录为构建环境差异非分叉），二进制 sha256 只是防调包指纹（挡'被换成另一个完全不同的东西'），不是同源判据。真正的同源判据 = 用这份黄金样本（固定 .sil + 固定 ctor）在待核二进制上编译一次，产物 bytecode 逐字节 deep-equal 参考值——三方（本机干净构建 / NWT 独立构建 / 未来任何第三次构建）在这一步应当一致，即使各自的可执行文件 sha256 不同。",
