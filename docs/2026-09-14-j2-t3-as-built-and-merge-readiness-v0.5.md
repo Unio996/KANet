@@ -45,7 +45,13 @@
 | 29 | `07026eef` | **ShardLeaf** 全 A/B 落位表代币化 | ShardLeaf | provenance `shardleaf-tokenization` 15/15 PASS；ledger 1194 已核已推，**NWT 审中** |
 | 30 | `de7582ca` | **ShardLeaf_direct** ZERO32 守卫 + 全 A/B 落位表代币化 | ShardLeaf_direct | provenance `shardleafdirect-tokenization` 14/14 PASS；ledger 1194 已核已推，**NWT 审中** |
 | 31 | `c8153301` | as-built 稿 MAX_INS_SCAN 文档演进说明(裁定 8 成立)+ 新增活性核对开放项 | docs | ledger 1195 裁定 |
-| 32 | `9ff095a3` | **ShardLeaf.consolidate_to_payout ↔ PayoutShard.absorb 手接口 MUST-FIX**(相接口重复计数导致代币冻结，修法 (b)：consolidate_to_payout 收窄为纯输入侧核对) | ShardLeaf(改) + PayoutShard(未改，仅新增跨合约验收向量) | provenance `shardleaf-payoutshard-handoff-fix` 10/10 PASS(3 ShardLeaf+7 PayoutShard)；NWT ledger 1196 发现 MUST-FIX，Codex ledger 1198 独立确认+补五条负向量，Bettor 1197 批 (b)；**待 NWT 独立复现** |
+| 32 | `9ff095a3` | **ShardLeaf.consolidate_to_payout ↔ PayoutShard.absorb 手接口 MUST-FIX**(相接口重复计数导致代币冻结，修法 (b)：consolidate_to_payout 收窄为纯输入侧核对) | ShardLeaf(改) + PayoutShard(未改，仅新增跨合约验收向量) | provenance `shardleaf-payoutshard-handoff-fix` 10/10 PASS(3 ShardLeaf+7 PayoutShard)；NWT ledger 1196 发现 MUST-FIX，Codex ledger 1198 独立确认+补五条负向量，Bettor 1197 批 (b)；Codex 后续复核判该缺陷 CODE-CLOSED、同笔原子方向 SUPPORTED（见 #35/#36） |
+| 33 | `cf2bdd0b` | as-built 稿补记 #31/#32 两笔 commit 的提交清单行 + 逐文件表更新(ShardLeaf/PayoutShard) | docs | — |
+| 34 | `d1e53d11` | T4 v0.3：创世对照清单扩到 8 合约新 ctor 常量 + 核出 poolMerkleRoot/committee_hash/predicate_commit 三字段 T4 v0.2 假设失实 | docs | ledger 1195 |
+| 35 | `5c8c2b6f` | T4 v0.3 加裁定引用(ledger 1200 选②：三字段保持 ctor-only 走(c)+(d)，cheap-tier 放弃) | docs | ledger 1200 |
+| 36 | `0ca4fdb2` | T4 v0.4：tripwire 硬性注释+lint钩子方案(只写方案) + predicate_commit 措辞更正(结构完整性已covered/业务裁决门未接线) | docs | NWT 复核要求，ledger 1203 |
+| 37 | `e0ae924a` | **PayoutShard.absorb sole-source MUST-FIX**(shardInIdx 必须是本笔交易唯一非自持同模板代币输入，否则同笔多个合法 leaf 只点名一个会静默销毁另一个) | PayoutShard | provenance `payoutshard-absorb-sole-source-fix` 6/6 PASS；Codex ledger 1208 独立发现，Bettor 核过成立；**待 NWT 独立复现** |
+| 38 | `adc37c0a` | **PayoutShardV2.absorb sole-source MUST-FIX**(同 #37 逐字复制) | PayoutShardV2 | provenance `payoutshardv2-absorb-sole-source-fix` 6/6 PASS；同上；**待 NWT 独立复现** |
 
 （表格从 #2 开始编号是因为 #1 `2a5c1eb0` 是范围起点，不计入"自其起"的清单本身；`949dfc96` 起才是本表主体，
 上面按 `git log --oneline 2a5c1eb0..HEAD` 的时间序原样排列，未重排。）
@@ -62,8 +68,8 @@
 | `RootClose.sil` | 12 | `close_commit`(B) `refund_flip`(B) `convert_to_claim`(A) `convert_to_refundclaim`(A) | 无 AB11(两 A 类均无续约) | 16802 | {1,87} | 6(zero32-guard) + 24(tokenization) = 30 |
 | `ShardLeaf.sil` | 12 | `register_append`(A) `consolidate_to_payout`(A，`9ff095a3` 手接口 MUST-FIX 后收窄为纯输入侧核对) | 1/36 | 15166（`9ff095a3` 后，原 15542） | {1,36} | 15(tokenization) + 3(handoff-fix，本文件那半) |
 | `ShardLeaf_direct.sil` | 12 | `register_append`(A) `convert_to_rootclose`(A) | 1/36 | 15687 | {1,36} | 14(tokenization) |
-| `PayoutShard.sil` | 25 | `absorb`(A，本身未改动) `close_attest`(B) `cancel_attest`(B) `claim`(A) `refund_claim`(A) | 1/204 | 25967（未变） | {1,204} | 23(absorb-ab11-and-batest) + 12(claim-family) + 7(handoff-fix，跨合约验收，本文件那半) = 42 |
-| `PayoutShardV2.sil` | 30 | `absorb`(A) `close_attest`(B) `cancel_attest`(B) `refund_claim`(A) `zk_handoff`(A) | 1/288 | 22518 | {1,288} | 13(absorb-batest-ab11) + 6(refundclaim) + 5(zkhandoff) = 24 |
+| `PayoutShard.sil` | 25 | `absorb`(A，`e0ae924a` 加 sole-source 两条 require) `close_attest`(B) `cancel_attest`(B) `claim`(A) `refund_claim`(A) | 1/204 | 32779（`e0ae924a` 后，原 25967） | {1,204} | 23(absorb-ab11-and-batest) + 12(claim-family) + 7(handoff-fix) + 6(absorb-sole-source-fix) = 48 |
+| `PayoutShardV2.sil` | 30 | `absorb`(A，`adc37c0a` 加 sole-source 两条 require) `close_attest`(B) `cancel_attest`(B) `refund_claim`(A) `zk_handoff`(A) | 1/288 | 29328（`adc37c0a` 后，原 22518） | {1,288} | 13(absorb-batest-ab11) + 6(refundclaim) + 5(zkhandoff) + 6(absorb-sole-source-fix) = 30 |
 | `RootClaim.sil` | 13 | `claim_draw`(A) | 1/96 | 2991 | {1,96} | 6(tokenization) |
 | `RefundClaim.sil` | 12 | `refund_payout`(A) | 无 AB11(直接读, 无续约同函数组合) | 2656 | {1,87} | 6(tokenization) + 4(drawdown-mustfix) + 3(语法迁移) = 13 |
 | `CloseZkV2.sil` | 28 | `zk_close`(B) `escape_trigger`(B) `escape_claim`(A) `claim`(A) | 1/213 | 13382 | {1,213} | 11(tokenization) + 8(语法迁移) = 19 |
@@ -131,7 +137,8 @@
 `j2-t3-v03-payoutshardv2-{absorb-batest-ab11,refundclaim-tokenization,zkhandoff-tokenization}`、
 `j2-t3-v03-{rootclaim,refundclaim,closezkv2}-tokenization`、
 `j2-t3-v03-rootclose-zero32-guard`、`j2-t3-v03-rootclose-tokenization`、
-`j2-t3-v03-{shardleaf,shardleafdirect}-tokenization`、`j2-t3-v03-shardleaf-payoutshard-handoff-fix`
+`j2-t3-v03-{shardleaf,shardleafdirect}-tokenization`、`j2-t3-v03-shardleaf-payoutshard-handoff-fix`、
+`j2-t3-v03-payoutshard-absorb-sole-source-fix`、`j2-t3-v03-payoutshardv2-absorb-sole-source-fix`
 
 全部 `docs/provenance/` 下均含 `README.md`+源码副本+向量 JSON+`run.log`+`MANIFEST.sha256`（n/n 文件计数）。
 累计向量数（§2 表逐行相加，不同 provenance 各自独立计数，非去重后的唯一断言数）≈ **205 条**，全部 PASS
@@ -166,6 +173,14 @@
    `PayoutShardV2.sil` 零改动。`ShardLeaf_direct.convert_to_rootclose` **不适用同一修法**（创建的是本笔
    新建的 RootClose genesis 输出，没有对手方 entry 同笔运行，必须自己造代币输出，同 `RootClose.convert_to_
    claim` 形状）。10 条跨合约向量 PASS（含 Codex ledger 1198 补的五条负向量），全部 flip-expect 复核。
+
+   **后续（ledger 1208）**：Codex 复核这笔修复时判"P+S 双计数"这个具体缺陷 **CODE-CLOSED**、"同笔原子"
+   方向 **SUPPORTED**，但独立发现了**另一条**缺口——`absorb` 只验 `shardInIdx` 单点的模板/金额，不证明它
+   是本笔交易里**唯一**的"同模板、非本 PS 持有"代币输入，两个合法 `ShardLeaf` 同笔各自
+   `consolidate_to_payout`、`absorb` 只点名一个会导致另一个被**静默销毁**。已修（`e0ae924a`/`adc37c0a`，
+   两文件各一 commit，新增 `countStrayNonOwnedTokenInputs` 排除法计数 + `shardTk.owner!=self` 双重核对），
+   见 `docs/provenance/2026-09-14-j2-t3-v03-{payoutshard,payoutshardv2}-absorb-sole-source-fix/`，各 6/6
+   向量 PASS，全部 flip-expect 复核，**待 NWT 独立复现**（尚未见到复核记录）。
 
 4. **RootClaim/RefundClaim ctor 变更对 T4 创世对照的影响**：T4 创世骨架设计（`docs/2026-09-13-j2-t4-market-
    genesis-console-side-skeleton-v0.1.md` §2.1.1）列出"7 个模板 hash 留 ctor、不进状态字段表"的清单
