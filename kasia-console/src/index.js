@@ -53,6 +53,9 @@ if (process.env.CPU_PROF_AUTO_EXIT_MS) {
 // DB setup
 import { runMigrations } from './db/migrate.js';
 import { checkSilvercPinAtStartup } from './lib/pool-bshard-artifacts.mjs';
+import { warmupCommitteeOffsetCache } from './lib/committee-offset-derive.mjs';
+import { _ENFORCE_PMR_SENTINEL, _ENFORCE_PC_SENTINEL } from './lib/bshard-close-enforce.mjs';
+import { _K18_PMR_SENTINEL, _K18_PC_SENTINEL } from './lib/bshard-payout-family-coherence.mjs';
 import { sqlite as _sqlite } from './db/client.js';
 
 // Config
@@ -126,6 +129,18 @@ runMigrations();
 // 这条能力, 静默跳过, 不打印任何行。固定日志格式见 pool-bshard-artifacts.mjs checkSilvercPinAtStartup
 // 的注释 + README(KANet-UI 部署页据此判断)。
 checkSilvercPinAtStartup();
+
+// D-019(ledger 1224/1226/1233/1237/1239/1243/1246/1247): 委员校验 offset 派生缓存启动预热——
+// bshard-close-enforce.mjs(委员拒签闸) + bshard-payout-family-coherence.mjs(K-18 probeStructuralSignature)
+// 两道闸各自独立调用 deriveCommitteeCheckOffsets(不同 sentinel，NWT 1237③独立性)，两者共同的"每笔下注/
+// 每次签名请求都是零子进程热路径"承诺依赖这个缓存在真实流量到达前已经焐热——预热覆盖 V1×V2 × 两组
+// sentinel = 4 个缓存键。预热失败(编译器不对等) = LOUD console.error，不阻止 console 启动、不影响任何
+// gate 之后各自 fail-closed 的行为(同 checkSilvercPinAtStartup 的既定哲学，ledger 1247 裁：预热失败处置
+// 与 pin FAIL 同款)。
+warmupCommitteeOffsetCache([
+  { label: 'bshard-close-enforce', pmrSentinelHex: _ENFORCE_PMR_SENTINEL, pcSentinelHex: _ENFORCE_PC_SENTINEL },
+  { label: 'bshard-payout-family-coherence(K-18)', pmrSentinelHex: _K18_PMR_SENTINEL, pcSentinelHex: _K18_PC_SENTINEL },
+]);
 
 // Auto-generate INGEST_SECRET if not configured
 async function ensureIngestSecret() {

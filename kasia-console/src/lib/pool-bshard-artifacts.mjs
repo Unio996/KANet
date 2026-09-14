@@ -15,7 +15,7 @@
 //   - claim witness: spine_prefix_len / spine_suffix_len
 
 import { execFileSync } from 'node:child_process';
-import { writeFileSync, readFileSync, mkdtempSync, existsSync, mkdirSync } from 'node:fs';
+import { writeFileSync, readFileSync, mkdtempSync, existsSync, mkdirSync, statSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
@@ -121,11 +121,35 @@ function _loadSilvercPin() {
   return raw;
 }
 
+// 🔴 更正(ledger 1247 落码期实测发现): 本函数原来的头注写"不做跨调用缓存——这不是热路径", 那句话在写
+// 下时是真的(彼时唯一调用方是创世/anchor 计算, 低频)。D-019 offset-live-derive 工作(ledger
+// 1224-1247)给它添了一个新调用方——committee-offset-derive.mjs 的 deriveCommitteeCheckOffsets, 在
+// probeStructuralSignature(K-18 §3.3 零子进程结构签名探针)里**每笔下注/每次委员校验都会调一次**, 且
+// 就算 deriveCommitteeCheckOffsets 自己的偏移结果缓存命中, 它仍在缓存查找**之前**无条件调一次本函数
+// 算 cacheKey——"这不是热路径"这个前提被新调用方打破了(2026-09-14 实测: sha256 一份 6998016 字节的
+// pin 二进制在本机耗时 ~4ms/次, 200 次循环即拖慢 800ms+, bshard-payout-coherence-perf.test.mjs 的零
+// 子进程计时判据因此显红——不是因为发生了 subprocess spawn, 是因为这个文件哈希本身的固定成本, 该判据
+// 才第一次把这条隐藏成本measure出来)。修法: 按(路径,mtimeMs,size)做 cache key 缓存 sha256 结果——
+// 文件真被换过(哪怕只换一个字节)mtimeMs/size 几乎必变(理论上存在 mtime/size 均不变但内容被换的极端
+// 场景, 但那已经不是这层缓存该防的威胁——本地文件系统被这样精确篡改, 等价于本机已被攻陷, 任何内存态
+// 缓存都救不了), 命中同一份没变的文件时跳过重新读盘+哈希——不改变"文件真变了必须重新核对"这条安全语义,
+// 只去掉"文件没变也每次重算"这个从未被要求过的额外成本。
+const _fileSha256Cache = new Map(); // path -> { mtimeMs, size, sha256 }
+function _cachedFileSha256(path) {
+  const st = statSync(path);
+  const cached = _fileSha256Cache.get(path);
+  if (cached && cached.mtimeMs === st.mtimeMs && cached.size === st.size) return cached.sha256;
+  const sha256 = createHash('sha256').update(readFileSync(path)).digest('hex');
+  _fileSha256Cache.set(path, { mtimeMs: st.mtimeMs, size: st.size, sha256 });
+  return sha256;
+}
+export { _cachedFileSha256 as cachedFileSha256 };
+
 /**
- * 启动/每次调用前算二进制 sha256, 与 scripts/silverc-pin.json(D-019)比对——不符即拒跑, 不猜哪个对
- * (ledger 1216 原话: "启动 sha256 自检不符即拒跑")。不做跨调用缓存"上次核过就跳过"——sha256 一份
- * ~5MB 二进制是毫秒级, 这不是热路径(创世/anchor 计算低频), 正确性优先于这点性能, 也避免"文件被换了但
- * 内存里缓存的还是旧核对结果"这类窗口。
+ * 启动/每次调用前核二进制 sha256, 与 scripts/silverc-pin.json(D-019)比对——不符即拒跑, 不猜哪个对
+ * (ledger 1216 原话: "启动 sha256 自检不符即拒跑")。sha256 结果按(mtimeMs,size)缓存(见上方状态注记)——
+ * 文件真的被换掉(mtime/size 任一变化)会自动触发重新哈希+比对, 不存在"文件被换了但内存里缓存的还是
+ * 旧核对结果"这个窗口。
  * @param {string} v100Path
  * @returns {object} pin 文件内容(调用方可能想读 artifactSchemaVersion 等字段)
  */
@@ -134,7 +158,7 @@ export function assertSilvercV100Pinned(v100Path) {
   if (!existsSync(v100Path)) {
     throw new Error(`silverc v1.0.0 二进制不存在: ${v100Path}（env SILVERC_V100_PATH 或默认路径 ${DEFAULT_SILVERC_V100_PATH}）— 不接受"文件缺失就跳过检查"`);
   }
-  const actualSha256 = createHash('sha256').update(readFileSync(v100Path)).digest('hex');
+  const actualSha256 = _cachedFileSha256(v100Path);
   if (actualSha256 !== pin.sha256) {
     throw new Error(`silverc v1.0.0 二进制 sha256 不符 D-019 锚点(${SILVERC_PIN_PATH}): 期望 ${pin.sha256}, 实际 ${actualSha256}(路径 ${v100Path}) — 拒绝编译, 不猜哪个对`);
   }

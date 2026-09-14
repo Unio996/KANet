@@ -40,8 +40,10 @@ import { deriveCommitteeCheckOffsets } from './committee-offset-derive.mjs';
 // K-18 双闸独立性(NWT 1237③): 本文件(委员拒签闸)与 bshard-payout-family-coherence.mjs(probeStructural-
 // Signature)各自独立调用 deriveCommitteeCheckOffsets，且传入不同的 sentinel 常量——下面这两个 sentinel
 // 只属于本文件(拒签闸)专用，不与另一道闸共享，缓存 key 含 sentinel 天然保证两道闸各自触发真实独立派生。
-const _ENFORCE_PMR_SENTINEL = 'a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1';
-const _ENFORCE_PC_SENTINEL = 'c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2';
+// 导出(非下划线语义上的"私有"，只是命名习惯保留)供 index.js 启动预热挂载点引用——见
+// committee-offset-derive.mjs 的 warmupCommitteeOffsetCache 与 ledger 1247 的预热设计。
+export const _ENFORCE_PMR_SENTINEL = 'a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1';
+export const _ENFORCE_PC_SENTINEL = 'c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2';
 const _hex32 = (s) => Buffer.from(blake2b(Buffer.from(s), { dkLen: 32 })).toString('hex');
 // canonical (A) 4-field ShardLeaf state splice (= pool-shard-register.spliceLeafState 单源, byte-equal to recompile, J2 已验)。
 // ⚠ landmine 修正(NWT 2026-07-07 实测坐实+紧急抓漏): 真 silverc/rusty-kaspa byte[](int,size) 对负数用

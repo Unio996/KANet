@@ -6,20 +6,28 @@
 // console/daemon 花费前 coherence gate 共用, 不重复实现结构探针/家族判定逻辑。
 //
 // 🔴 调用点分级(K-18 原设计, NWT MUST-FIX③ 已折入)——本文件刻意拆两个函数, 不是随手拆分:
-//   probeStructuralSignature() = 零子进程(纯 byte offset 解码 + DB 列比对), 高频/低频调用点(§3.3(a)(b)(d))共用。
+//   probeStructuralSignature() = 启动预热后零子进程(纯 byte offset 解码 + DB 列比对，offset 来自
+//     deriveCommitteeCheckOffsets 的缓存命中——预热失败/缓存未命中时的首次调用是一次性 spawn + LOUD WARN,
+//     不是本函数自己内部特判/降级，见 committee-offset-derive.mjs 的 warmupCommitteeOffsetCache 与
+//     index.js 的启动挂载点，ledger 1247)，高频/低频调用点(§3.3(a)(b)(d))共用。
 //   classifyPayoutShardFamily() = 会 recompile(子进程, compileSil→execFileSync), 只给 migrate v189 backfill
-//     (declared 家族未知→判定)用, 绝不能被高频调用点(每笔下注)直接或间接调用——那会破坏"零子进程"承诺。
+//     (declared 家族未知→判定)用, 绝不能被高频调用点(每笔下注)直接或间接调用——那会破坏上面的预热假设。
 //   assertPayoutShardCoherence() 的 tier='full'(低频专属)才会跑 (c) recompile byte-equality, 且直接调用
 //     compilePayoutShardRedeem/V2Redeem, 不经过 classifyPayoutShardFamily(避免高频误引入子进程依赖链)。
+//
+// 🔴 D-019 迁移(ledger 1224/1226/1233/1237/1239/1243/1246/1247): 原本这里是 V1/V2 各自的硬编码绝对偏移
+// 常量(_PREDICATE_COMMIT_OFF/_POOL_MERKLE_ROOT_OFF)，实测证实会随 .sil 改动漂移而不报错地过期。改走
+// committee-offset-derive.mjs 的 deriveCommitteeCheckOffsets——K-18 这道闸(probeStructuralSignature)与
+// bshard-close-enforce.mjs 的委员拒签闸各自独立调用同一个函数本体，传入**本文件专属**的 sentinel 常量
+// (与 close-enforce 的 a1/c2 不同)，缓存 key 含 sentinel 天然保证两道闸不会命中同一条目(NWT 1237③)。
 
 import { compilePayoutShardRedeem } from './pool-shard-register.mjs';
+import { deriveCommitteeCheckOffsets } from './committee-offset-derive.mjs';
 
-// V1 offset 表(P2 §1, 2026-07-21 4 样本跨 3 个月 byte-exact 实测定稿, 非推断——见设计稿 commit 7b4591b0)。
-const V1_PREDICATE_COMMIT_OFF = 518;
-const V1_POOL_MERKLE_ROOT_OFF = 1002;
-// V2 offset(既有 bshard-close-enforce.mjs `_PREDICATE_COMMIT_REDEEM_OFFSET_V2`, W2 2026-07-07 indexOf 实测+
-// 结构推导双证坐实——单源复用同一数值, 不重新定义/不可能跟那边漂移)。
-const V2_PREDICATE_COMMIT_OFF = 642;
+// K-18 gate 专属 sentinel(export 供 index.js 启动预热挂载点引用，与 bshard-close-enforce.mjs 的
+// _ENFORCE_PMR_SENTINEL/_ENFORCE_PC_SENTINEL 不同——两道闸各自独立派生，互不复用对方的缓存条目)。
+export const _K18_PMR_SENTINEL = 'd3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3';
+export const _K18_PC_SENTINEL = 'e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4';
 
 function _hexAt(buf, off, len) {
   if (off < 0 || off + len > buf.length) return null;
@@ -63,15 +71,30 @@ export function probeStructuralSignature(row, declaredFamily) {
   if (declaredFamily === 'v1_committee') {
     const v1State = decodeV1State(buf);
     if (!v1State) return { ok: false, reason: `V1 state 区解码失败(byteLen=${buf.length}, marker@1=0x${buf[1]?.toString(16) ?? '??'})` };
-    const pcAt = _hexAt(buf, V1_PREDICATE_COMMIT_OFF, 32);
-    const pmrAt = _hexAt(buf, V1_POOL_MERKLE_ROOT_OFF, 32);
-    if (pcAt !== pc) return { ok: false, reason: `predicateCommit@${V1_PREDICATE_COMMIT_OFF} 跟 DB 列不符(got=${pcAt}, want=${pc})` };
-    if (pmrAt !== pmr) return { ok: false, reason: `poolMerkleRoot@${V1_POOL_MERKLE_ROOT_OFF} 跟 DB 列不符(got=${pmrAt}, want=${pmr})` };
+    let offsets;
+    try {
+      offsets = deriveCommitteeCheckOffsets({ isV2: false, pmrSentinelHex: _K18_PMR_SENTINEL, pcSentinelHex: _K18_PC_SENTINEL });
+    } catch (e) {
+      return { ok: false, reason: `V1 offset 派生失败: ${e.message}` };
+    }
+    const v1PredicateCommitOff = offsets.predicateCommitOffset;
+    const v1PoolMerkleRootOff = offsets.poolMerkleRootOffsets[0];
+    const pcAt = _hexAt(buf, v1PredicateCommitOff, 32);
+    const pmrAt = _hexAt(buf, v1PoolMerkleRootOff, 32);
+    if (pcAt !== pc) return { ok: false, reason: `predicateCommit@${v1PredicateCommitOff} 跟 DB 列不符(got=${pcAt}, want=${pc})` };
+    if (pmrAt !== pmr) return { ok: false, reason: `poolMerkleRoot@${v1PoolMerkleRootOff} 跟 DB 列不符(got=${pmrAt}, want=${pmr})` };
     return { ok: true, decoded: v1State };
   }
   if (declaredFamily === 'v2_zk') {
-    const pcAt = _hexAt(buf, V2_PREDICATE_COMMIT_OFF, 32);
-    if (pcAt !== pc) return { ok: false, reason: `predicateCommit@${V2_PREDICATE_COMMIT_OFF} 跟 DB 列不符(got=${pcAt}, want=${pc})` };
+    let offsets;
+    try {
+      offsets = deriveCommitteeCheckOffsets({ isV2: true, pmrSentinelHex: _K18_PMR_SENTINEL, pcSentinelHex: _K18_PC_SENTINEL });
+    } catch (e) {
+      return { ok: false, reason: `V2 offset 派生失败: ${e.message}` };
+    }
+    const v2PredicateCommitOff = offsets.predicateCommitOffset;
+    const pcAt = _hexAt(buf, v2PredicateCommitOff, 32);
+    if (pcAt !== pc) return { ok: false, reason: `predicateCommit@${v2PredicateCommitOff} 跟 DB 列不符(got=${pcAt}, want=${pc})` };
     return { ok: true };
   }
   return { ok: false, reason: `未知 declaredFamily '${declaredFamily}'` };

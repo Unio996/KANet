@@ -18,10 +18,9 @@
 //   条目, 不存在"一道闸吃另一道闸算好的结果"这回事, 两次都是真实独立的编译+定位+验证。
 
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { compileSilV100, ctorBytes32V100, ctorIntV100, assertSilvercV100Pinned, DEFAULT_SILVERC_V100_PATH } from './pool-bshard-artifacts.mjs';
+import { compileSilV100, ctorBytes32V100, ctorIntV100, assertSilvercV100Pinned, DEFAULT_SILVERC_V100_PATH, cachedFileSha256 } from './pool-bshard-artifacts.mjs';
 
 const LIB = dirname(fileURLToPath(import.meta.url));
 const PAYOUT_SHARD_SIL = join(LIB, 'PayoutShard.sil');
@@ -186,7 +185,11 @@ export function deriveCommitteeCheckOffsets({ isV2, pmrSentinelHex, pcSentinelHe
   const contractName = isV2 ? 'PayoutShardV2' : 'PayoutShard';
   const resolvedV100Path = v100Path || process.env.SILVERC_V100_PATH || DEFAULT_SILVERC_V100_PATH;
   const pin = assertSilvercV100Pinned(resolvedV100Path); // 显式先调一次: 即使下面 compileSilV100 内部也会调，这里提前让"编译器不对"这个失败在缓存 key 计算之前就发生，且给出的 sha256 直接进 key，不用再读一次文件。
-  const sourceSha256 = createHash('sha256').update(readFileSync(silPath)).digest('hex');
+  // cachedFileSha256(按 mtimeMs+size 缓存, 见 pool-bshard-artifacts.mjs 头注): 本函数每次调用(含缓存
+  // 命中前)都要先算 pin.sha256(上一行, 缓存内)与 sourceSha256(这一行)才能拼出 cacheKey——这两次哈希
+  // 本身不缓存的话, "缓存命中"只是省了 compileSilV100, 省不了这两次读盘+哈希(2026-09-14 实测: 未缓存时
+  // 每次调用仍要 ~4ms, 热路径每笔下注都要付这个成本)。
+  const sourceSha256 = cachedFileSha256(silPath);
   const cacheKey = createHash('sha256').update(`${pin.sha256}:${sourceSha256}:${pmrSentinelHex}:${pcSentinelHex}:${isV2}`).digest('hex');
   if (_cache.has(cacheKey)) return _cache.get(cacheKey);
 
@@ -212,3 +215,34 @@ export function deriveCommitteeCheckOffsets({ isV2, pmrSentinelHex, pcSentinelHe
 export { _REFERENCE_OFFSETS as CHECKED_IN_REFERENCE_OFFSETS };
 // 测试专用导出(白盒单测用，不是公开 API 的一部分——生产调用方只应该用上面的 deriveCommitteeCheckOffsets)。
 export { _ctorV1, _ctorV2, PAYOUT_SHARD_SIL, PAYOUT_SHARD_V2_SIL };
+
+/**
+ * 启动期预热(observability-only, ledger 1247)——console 启动时对每一组(gate 专属 sentinel)×(V1,V2)各真实
+ * 派生一次，让"每笔下注/每次委员签名请求都是热路径"这条既有承诺在**真实流量到达前**就已经缓存命中，而不是
+ * 让第一笔真实请求背上一次性 spawn 延迟。**这不是承重闸**——预热失败(编译器不对/派生逻辑异常)只 LOUD
+ * console.error，不 throw、不阻止 console 启动继续跑其它职责(同 checkSilvercPinAtStartup 的既定哲学，
+ * ledger 1247 裁：预热失败处置与 pin FAIL 同款)。真正的安全闸仍是 deriveCommitteeCheckOffsets 本身——预热
+ * 没跑成不代表放行，只代表"这次没有提前把缓存焐热"，后续每个 gate 调用它时该抛照抛，各闸各自 fail-closed。
+ * 预热成功但缓存未命中(不该发生，除非并发竞态或缓存被清空)会在调用点自然触发一次真实派生 + 该函数自己的
+ * WARN(见 deriveCommitteeCheckOffsets 内 referenceMismatch 那条日志)，不是本函数额外再包一层。
+ * @param {Array<{label:string, pmrSentinelHex:string, pcSentinelHex:string, v100Path?:string}>} sentinelSets
+ *   每个 gate 一组（自己的专属 sentinel），本函数不替调用方决定用哪些 sentinel——单源只在"怎么派生"这件事
+ *   上，不在"用哪个 sentinel"上（那仍是各 gate 自己的选择，NWT 1237③ 独立性要求的延伸）。
+ * @returns {Array<{label:string, isV2:boolean, ok:boolean, error?:string}>} 逐条结果(供调用方需要时检查，
+ *   多数情况下只需要看 LOUD 日志，不强制处理返回值)。
+ */
+export function warmupCommitteeOffsetCache(sentinelSets) {
+  const results = [];
+  for (const set of sentinelSets) {
+    for (const isV2 of [false, true]) {
+      try {
+        deriveCommitteeCheckOffsets({ isV2, pmrSentinelHex: set.pmrSentinelHex, pcSentinelHex: set.pcSentinelHex, v100Path: set.v100Path });
+        results.push({ label: set.label, isV2, ok: true });
+      } catch (e) {
+        console.error(`[committee-offset-derive] WARMUP FAIL (label=${set.label}, isV2=${isV2}): ${e.message} — console 继续启动，该 gate 之后真实调用时会自己 fail-closed，不是被这里的预热失败放行`);
+        results.push({ label: set.label, isV2, ok: false, error: e.message });
+      }
+    }
+  }
+  return results;
+}
