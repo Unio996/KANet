@@ -69,9 +69,10 @@ const feeProfile = {
   bet_mint_step_b: {
     leafContinuationValue: '20000000',
     kttContinuationValue: '20000000',
-    requiredFeeEstimate: '59920300',
-    cap: '119840600',
-    _source: 'docs/provenance/2026-09-14-j2-bet-mint-stepB-register-append-mass-fee-estimate/README.md（续约输出必须维持 U 形最优值 20,000,000 sompi，否则 storage mass 与 genesis 同款爆炸；witness 精确编码/tok_prefix-suffix 长度未最终定案，见该 provenance 已知限制）',
+    minFeeInputFaceValue: '95000000', // Bettor 定案种子面值(0.95 KAS)，找零≈15,000,000（略低于 CONTINUATION_OUTPUT_SOMPI 20,000,000 干净线，实测仅多花约 0.02 KAS，Bettor 复核接受，非危险区）
+    requiredFeeEstimate: '59900000', // 0.95 KAS 种子实测收敛值（迭代求解，见下方 _source）
+    cap: '100000000', // 三层取最小时 GLOBAL_ABS_FEE_CAP_SOMPI(1.0 KAS)先于本 kind cap 生效，本字段仅供 console 侧调用参考
+    _source: 'docs/provenance/2026-09-14-j2-bet-mint-stepB-register-append-mass-fee-estimate/README.md + Bettor 种子面值核算(2026-09-14)——注意 requiredFee 会随 fee input 实际面值/找零大小小幅浮动(迭代收敛值，非固定常数)，witness 精确编码/tok_prefix-suffix 长度未最终定案，见该 provenance 已知限制',
   },
 };
 

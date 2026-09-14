@@ -325,7 +325,48 @@ await sendCommandAsync(PROTO_RELAY_ID, { type: 'covenant_broadcast', /* ... 40+ 
 **⇒ `buildAndBroadcast` 选 fee input UTXO 时不能"随手抓一个能用的"**，选择算法（v0 简化版）：
 
 1. 从 relay 自己的 UTXO 集合里，**选面值最小但仍 ≥ 本次所需金额（`estimatedFee + genesisOutputValue` 或对应 kind 的净花费）的那一个**——不是"选面值匹配的"这种模糊描述，是确定性算法：按面值升序排列，取第一个 `utxo.amount ≥ needed` 的 UTXO。
-2. **找零形状约束（Bettor 复核新增要求）**：选中 UTXO 后算出的找零金额，**必须要么恰好为 0（UTXO 面值精确等于所需金额，无找零输出），要么 ≥ `DUST_MIN`（1000 sompi 量级）**——只判断"面值 ≥ 所需"不够：如果某个 kind 的所需金额与某个 UTXO 面值贴得很近，找零会落在 `(0, DUST_MIN)` 这个 kaspad 会拒绝的区间（低于 dust 下限但又不是恰好 0）。选择器必须把这种"会产生卡在 dust 附近的找零"的候选 UTXO 也排除掉，不能只看面值够不够。本批 4×0.5 KAS 的种子形状不会撞到这条（genesis 找零 ≈0.5−0.4=0.1 KAS，远高于 DUST_MIN），但规则现在就写进选择算法，不等未来某个贴近面值的 kind 撞上才补。
+2. **找零形状约束（Bettor 复核新增要求，2026-09-14 二次修订——原定 `DUST_MIN` 门槛被证伪）**：选中 UTXO 后算出的找零金额，**必须要么恰好为 0（UTXO 面值精确等于所需金额，无找零输出），要么 ≥ `CONTINUATION_OUTPUT_SOMPI`（20,000,000 sompi，见 §9.6）**——原文这里写"≥`DUST_MIN`（1000 sompi）"已被 bet_mint 步骤 B mass 实验证伪：**找零输出跟 genesis/续约输出一样受同一条 KIP-9 `p²/v` storage mass 曲线约束，不区分是不是 covenant 输出**（实测：纯 P2PK 找零输出 value=1000 sompi 时 mass 惩罚等价于 required_fee≈100,000,000,000 sompi/1000 KAS 量级；value=20,000,000 时惩罚降到可忽略的 5,000,000 sompi/0.05 KAS 量级，见 `docs/provenance/2026-09-14-j2-bet-mint-stepB-register-append-mass-fee-estimate/`）。`DUST_MIN=1000` 只是 silverscript 合约自己 `require(value >= DUST_MIN)` 检查的字面下限，**从来不是** mass 意义上的安全值——选择器/`buildAndBroadcast` 一律不得用 `DUST_MIN` 作为"这个值够小、可以当零头"的判据，找零要么不留（0），要么留够 `CONTINUATION_OUTPUT_SOMPI` 量级。
 3. **如果没有任何 UTXO 同时满足①面值 ≥ 所需 ②找零形状合法**，**`buildAndBroadcast` 必须 fail-loud，返回明确的 `no_suitable_fee_utxo` 错误**，不静默降级、不随手抓一个凑合用的 UTXO、不自动拆分（自拆分逻辑见下方 T-PROTO-FEE-UTXO-SELECTION-UNIMPLEMENTED 票，留给之后单独实现）。
 
 **T-PROTO-FEE-UTXO-SELECTION-UNIMPLEMENTED**（新增已知限制，本节机制未落码，待 `buildAndBroadcast` 具体实现时补齐，实现前 `market_genesis` 广播如果 relay 手头只有大额 UTXO 会直接被 ceiling 拒绝，属预期行为不是 bug）。
+
+### §9.6 `CONTINUATION_OUTPUT_SOMPI` 常量（Bettor 复核 bet_mint 步骤 B 实验后升级为硬要求，实现期强制）
+
+`docs/provenance/2026-09-14-j2-bet-mint-stepB-register-append-mass-fee-estimate/` 实测发现：**任何**新建的 KAS 承载输出（covenant 续约/genesis/relay 找零，不区分类型）如果面值贴近 `DUST_MIN`（1000 sompi）量级，会撞上 KIP-9 `p²/v` storage mass 惩罚，`required_fee` 可以炸到几十亿 sompi（数千 KAS）量级——`ShardLeaf_direct.sil` 自己 `require(tx.outputs[...].value >= DUST_MIN)` 这条检查只回答"够不够铺垫一个合法 UTXO"，**从不回答"mass 意义上够不够"**，两者是完全不同的问题，`buildAndBroadcast` 不能把合约的字面下限当成运营安全值。
+
+**硬要求**：
+
+```js
+// 写死在 buildAndBroadcast 所在模块, 不是散落各处的魔法数字
+export const CONTINUATION_OUTPUT_SOMPI = 20_000_000n; // 0.2 KAS — KIP-9 storage mass U 形曲线全局最优点
+// (docs/provenance/2026-09-14-j2-proto-v0-genesis-mass-fee-estimate/ +
+//  docs/provenance/2026-09-14-j2-bet-mint-stepB-register-append-mass-fee-estimate/ 两份 provenance
+//  实测吻合。DUST_MIN(=1000 sompi, 合约自己的字面下限)不是这个值的替代品——按 DUST_MIN 构造
+//  required_fee 会炸到 40 亿 sompi 量级, 见上述 provenance)。
+```
+
+构造**任何**以下输出时，必须断言其面值 `>= CONTINUATION_OUTPUT_SOMPI`（或恰好为 0，即该输出根本不存在，比如 fee input 恰好花完不留找零）——不接受"介于 0 和 `CONTINUATION_OUTPUT_SOMPI` 之间"的任何值：
+
+1. genesis 输出（`market_genesis` 的 `ShardLeaf_direct`、bet_mint 步骤 A 的 `KanetTestToken`、bet_mint 步骤 B 新铸的 `PoolSideTicket`）。
+2. 续约输出（`register_append`/`convert_to_rootclose` 里续约的 `ShardLeaf_direct`/`KanetTestToken` 自身）。
+3. relay 自己的找零输出（§9.5 步骤②的找零形状约束已同步更新引用本常量，不再引用 `DUST_MIN`）。
+
+> 📌 **补充硬要求（Bettor 复核种子面值核算后，2026-09-14）**：`genesisOutputValue` 本身也必须是硬编码常量，**绝不能从 `seed − 所需金额` 这类减法反推**——
+> ```js
+> export const GENESIS_OUTPUT_SOMPI = 20_000_000n; // 同 CONTINUATION_OUTPUT_SOMPI, U 形曲线全局最优点
+> ```
+> 找零永远等于 `feeInputFaceValue − GENESIS_OUTPUT_SOMPI − requiredFeeSompi`，不是"面值减去某个笼统的最低门槛"。实测证明这两种算法会得到完全不同的结果：若把 `genesisOutputValue` 错算成"seed 减去 0.4 KAS 这个此前报过的最低门槛"（比如 seed=0.5 KAS 时算成 0.4 KAS 而不是钉死的 0.2 KAS），找零会掉到 10,000,000（< `CONTINUATION_OUTPUT_SOMPI`，撞上本节的找零形状约束），且 `net_loss` 会顶到 `required_fee×2` 动态上限附近甚至超过——**落码时必须补一条向量**：故意把 `genesisOutputValue` 算成非常量的"seed 减法"结果，断言找零形状检查或 `validateNetLoss` 正确拒绝这笔构造，确认"`genesisOutputValue` 必须是常量不是算出来的"这条纪律在代码里被测试覆盖。
+
+### §9.7 续约类 covenant 输出必须声明 `CovenantBinding`（实现期硬要求 + 向量）
+
+自验证过程中（见 `docs/provenance/2026-09-14-j2-bet-mint-stepB-register-append-mass-fee-estimate/README.md` "一次值得记录的自我纠正"一节）发现：**续约（非 genesis）的 covenant 输出，如果漏掉 `new CovenantBinding(authInputIdx, covId)` 声明**（`kaspa-wasm` 的 `TransactionOutput` 构造函数第三个参数），`calculateTransactionMass` 会把它当成"未声明用途的巨型脚本 P2SH"，产出荒谬的 `required_fee`（实测 ~20 KAS 量级，对比正确声明后的 ~0.6 KAS）——这是跟 genesis 输出漏 `populateGenesisCovenants` 同一族的构造陷阱，只是续约版本。
+
+**硬要求**：`buildAndBroadcast` 构造任何续约输出（`ShardLeaf_direct`/`KanetTestToken` 的自续约）时，**必须**传入 `new CovenantBinding(authInputIdx, covId)`（`authInputIdx` = 触发这次续约的那个输入索引，`covId` = 该 covenant 的真实链上 id，通常从被消费的那个输入的 `UtxoEntry.covenantId` 读出）——不接受"先跑通再说，declaration 以后再补"的实现顺序。
+
+**落码时必须补一条向量**：故意漏掉 `CovenantBinding` 声明，断言 `computeRequiredFeeSompi`/mass 计算的结果远超正常值（比如 `> 10× 正常值`），确认这条"漏声明 ⇒ fee 异常放大"的因果关系在自己的构造代码里被测试覆盖，不是只在这次 provenance 实验里验证过一次就完事——防止未来有人重构 `buildAndBroadcast` 时不小心漏掉这个声明而没人发现（同 `validateNetLoss`/`validateSignedInputCeiling` 那批"自验证：注入回归确认测试真的会抓"的纪律）。
+
+### §9.8 市场侧 KTT 输入选取规则：只认 `proto_bets`/`proto_markets` 记录的 outpoint，禁止按 owner 扫 UTXO（T-SHARDLEAF-STRAY-TOKEN-DOS）
+
+NWT 提出的攻击面：如果 `buildAndBroadcast` 构造 `register_append` 时，选择"哪个 UTXO 是 bettor 要抵押的 KTT"这一步是靠**扫描链上所有 owner 字段等于某个 covenant id 的 KTT UTXO**（一种看似合理的"自动发现"实现方式），攻击者可以**主动铸造大量指向该市场 covenant id 的杂散（stray）假 KTT token 塞进链上**，把这个扫描过程变成 DoS（扫描结果被大量噪音污染，或扫到攻击者故意构造的、会导致后续构造逻辑出错/耗尽预算的畸形 token）。
+
+**硬要求**：`buildAndBroadcast` 选择 `register_append` 的 `stakeInIdx` 对应的 KTT UTXO 时，**只允许**使用 `proto_bets`（或对应的意图落表，参照 §2.3.1 两步状态机）里**已经记录好的、这次 bet_mint 步骤 A 自己刚铸出的那个具体 outpoint**（`txid`+`vout`，从步骤 A 广播成功后的回执直接拿到，不是重新去链上按条件扫）——**永远不通过"扫描所有 owner 字段匹配某 covenant id 的 UTXO"这种方式发现 KTT 输入**，不管这种扫描看起来多么方便。这条规则跟 §9.5"fee input 只从 relay 自己维护的 UTXO 集合选，不做链上条件扫描发现"是同一个纪律方向：**任何"这个 UTXO 该拿来用"的判断都必须来自己方已落表的记录，不能来自对链上内容的模式匹配**——模式匹配天然可以被对手构造的数据欺骗或污染，己方记录不能被外部输入污染。
