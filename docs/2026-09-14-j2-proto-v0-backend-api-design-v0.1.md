@@ -282,3 +282,70 @@ Console-不碰链）同时满足。
    孤儿化，当前 9 个合约里**没有任何入口能追回**。v0 处置 = 发起 TX1 前的预检（降低触发概率，不消除）+
    `proto_bets.orphaned_chip` 终态如实展示。**这是合约层缺口，需要新增一个回收 entry 才能真正解决**，不在
    本轮范围。
+
+## §9 新增 relay 命令 `covenant_broadcast`（ledger 1348，与 §6 一起报 Owner）
+
+`proto-bet-intent.mjs` 的 `resolvePrepared`（同字节重播分支）需要一个能广播"调用方已经构造好的任意
+签名交易"的 relay 命令——**这个命令目前不存在**。核实过 `kasia-relay/src/lib/commands.mjs:197-199`：
+`replay_tx_json`/`prepared_txid`/`intent_key` 三个字段只挂在既有 `TRANSFER` 命令类型上（转账语义，
+`target`+`amount`），没有通用形态。**这改变了 §6 的决策账**：无论选 (B′) 还是 (C)，都需要在 kasia-relay
+新增这个命令，不再是"零新代码"。
+
+### §9.1 命令名与语义：`covenant_broadcast`
+
+- **输入**：
+  - `tx_json`：已构造（未签或半签）交易的 JSON 表示（同 kaspa-wasm `Transaction` 可序列化形态，
+    inputs/outputs/scriptPubKeys 齐全，covenant 侧的 witness/sigScript 由调用方在构造阶段填好，
+    relay 不碰这部分）。
+  - `sign_input_indices`：需要 relay 用自身私钥签名的输入索引清单（通常只有"花费 relay 自己持有的
+    KAS 那一个输入"需要签，covenant 相关的输入已经带着自己的 witness，不需要 relay 签）。
+  - `expected_txid`：期望的最终 txid（finalize 后），用于同字节重播断言——**同 `TRANSFER` 命令
+    `prepared_txid` 的既有契约**，relay 侧断言重播产出的 txid 必须等于这个值，不相等即拒绝（防止
+    "同一个 intent_key 重播出两笔不同的交易"这种双花窗口）。
+  - `intent_key`：复用 `TRANSFER` 已经验证过的两阶段回执机制（`prepared` 在广播前落表，`submitted`
+    在广播后落表——`lib/submit-intent-relay.mjs` 那一套，`covenant_broadcast` 直接复用，不重新发明）。
+- **输出**：`{ok, txId, fee, code, error}`，与 `TRANSFER`/`custodial_transfer` 现有回执形状一致。
+
+### §9.2 安全约束
+
+1. **只签 `sign_input_indices` 列出的索引**，其余输入原样保留——防止调用方哄骗 relay 签一个它没被
+   要求签的、意料之外的输入。
+2. **拒绝任何"把 relay 自己的 UTXO 花到非找零地址"的输出**：任何被 relay 私钥签名花掉的 UTXO，其
+   找零部分必须原样回到 relay 自己的地址，不能被调用方重定向到任意地址——防止这条命令被滥用成一个
+   通用转账后门（关键差异：`TRANSFER` 命令的整个设计意图就是"转账去任意地址"，`covenant_broadcast`
+   必须反过来，专门防这件事）。
+3. **单笔 KAS 上限 ≤0.5 KAS（含手续费）**——硬性封顶这条命令能移动的最大真实价值，即使调用方逻辑有
+   漏洞，损失也被限制在这个量级（§6 已定的 proto relay 总余额上限 <5 KAS 是另一层，这条是单笔层面）。
+4. **执行权限**：(B′) 形态下，只允许 `PROTO_RELAY_ID` 那一个 relay 执行该命令（其余 relay 收到直接
+   拒绝，同 T-LOOPBACK-AUTHZ 那批热修"专属 tier"的思路）；(C) 形态下，该命令只在独立 proto relay 进程
+   里注册，生产 relay 完全不认识它——两种形态都确保"生产 relay 永远不会被这条命令误用"。
+
+### §9.3 (B′) vs (C) 改动量表
+
+| | (B′) 复用现有 relay 基础设施 | (C) 独立 proto relay 进程 |
+|---|---|---|
+| 碰 `relay-manager.js`？ | 否——权限检查直接在 `relay.mjs` 的命令 handler 里做（"只有 `PROTO_RELAY_ID` 才认这条命令"），不需要新的启动/准入逻辑 | 否——完全平行体系，`relay-manager.js` 不知道这个进程存在 |
+| 碰 `relay_nodes` 表结构？ | 否——不改 schema，只是走既有导入流程新增一行数据（`name` 前缀 `proto-`） | 否——这个进程根本不进 `relay_nodes` 表 |
+| 新增/改动文件 | 3 个：`commands.mjs`（+1 行字段注册）、`relay.mjs`（+1 个 `case` 分支，~50-80 行，含两阶段回执+§9.2 约束校验）、新文件 `lib/covenant-broadcast.mjs`（核心签名+校验逻辑，~100-150 行） | 5-8 个：全新独立入口脚本（如 `proto-relay.mjs`，需要重新实现自己的 IPC dispatch/私钥加载/广播逻辑，即使复用 `sendKaspa` 等既有库函数，胶水代码不少）+ 对应的命令处理模块 |
+| 运维复杂度 | 低——现有 relay 进程多认一个命令 | 高——多一个独立进程要启动/监控/纳入健康检查 |
+| 代码信任基础 | 高——复用已经过 T-LOOPBACK-AUTHZ 等审查的现有 relay IPC 骨架 | 低——新写的并行基础设施没有跟现有 relay 同等程度的审查历史 |
+
+**（B）console 内自持私钥独立签名**已在 §6 否决（违反"Relay 是唯一链上出口"架构铁律），不再进这张表。
+
+### §9.4 与 `proto-bet-intent.mjs` `resolvePrepared` 的接口契约
+
+`src/lib/proto-bet-intent.mjs` 当前的占位代码（`resolvePrepared` 同字节重播分支）：
+
+```js
+rep = await sendCmd(relayId, {
+  type: 'broadcast_raw_tx', intent_key: key, replay_tx_json: row.prepared_tx_json, prepared_txid: txid,
+}, undefined, origin);
+```
+
+命令定案后，**只需要把 `type: 'broadcast_raw_tx'` 改成 `type: 'covenant_broadcast'`**——`replay_tx_json`/
+`prepared_txid` 两个字段名刻意沿用 `TRANSFER` 已验证过的同字节重播契约，`rep.txId`/`rep.code ===
+'inputs_spent'` 等返回值判断逻辑也完全复用，`resolvePrepared` 函数本体不需要因为换了命令类型而改
+一行逻辑，只改这一个字符串常量。首次构造（pending→prepared→submitted）那一半不经过 `resolvePrepared`
+——由调用方注入的 `buildAndBroadcast` 回调自己发送首次 `covenant_broadcast`（带 `tx_json`/
+`sign_input_indices`/`expected_txid` 等构造专属字段），并在真正广播前先调 `recordBetIntentPhase('prepared', ...)`
+落表，这一点与 `submit-intent.mjs` 的既有约定完全一致，不是新规则。
