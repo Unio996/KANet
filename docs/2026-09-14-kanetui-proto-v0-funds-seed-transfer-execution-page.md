@@ -1,4 +1,4 @@
-> **Status**: CURRENT（v0.3）— 待 B′ 接线合入重启窗执行，NWT 审两轮（③顺序拆分 + 3b 第4项期望值更正，见下），改完即闭不再二审。Owner 授权见 ledger (1373)，源账号选择见 (1374)，proto-v0-funds relay 创建记录见 (1375)。v0.2 理由（NWT）：这次重启窗同时带 B′ 接线笔=环境第一次真走私钥解密+签名路径，"新签名路径首次被真实调用"不能和"真实花钱"叠在同一步，六项读数必须在花钱前显式跑完、任一未过不进下一步。v0.3 理由（NWT）：3a 已设好 `ADMIN_SECRET_FUNDS` 并重启，到 3b 检查点时资金路由不带 header **应为 403**（闸已启用、钥匙不对），**若仍 503 = env 没生效（key 名写错/重启没读新 env）= 真正的失败信号**——v0.2 误写成"503"会把这个失败当通过划勾，故更正。
+> **Status**: CURRENT（v0.4）— 待 B′ 接线合入重启窗执行，NWT 审三轮（③顺序拆分 + 3b 第4项期望值更正 + 第4步拆四笔，见下），改完即闭不再二审。Owner 授权见 ledger (1373)，源账号选择见 (1374)，proto-v0-funds relay 创建记录见 (1375)。v0.2 理由（NWT）：这次重启窗同时带 B′ 接线笔=环境第一次真走私钥解密+签名路径，"新签名路径首次被真实调用"不能和"真实花钱"叠在同一步，六项读数必须在花钱前显式跑完、任一未过不进下一步。v0.3 理由（NWT）：3a 已设好 `ADMIN_SECRET_FUNDS` 并重启，到 3b 检查点时资金路由不带 header **应为 403**（闸已启用、钥匙不对），**若仍 503 = env 没生效（key 名写错/重启没读新 env）= 真正的失败信号**——v0.2 误写成"503"会把这个失败当通过划勾，故更正。v0.4 理由（Bettor，账本 1386/1388）：fee cap 设计变更后 relay 签名输入上限 = 1.0 KAS，一个 2 KAS 的 UTXO 当手续费输入会因面值超限被拒，原型期不做自拆分逻辑 ⇒ 改成源头就转 4 笔各 0.5 KAS，总额仍是 Owner 授权的 2 KAS。
 
 # 执行页：proto relay 种子转账（2 KAS，J2 → proto-v0-funds）
 
@@ -18,5 +18,6 @@
      - [ ] stderr 尾部零 `FATAL`
      - [ ] NWT 部署后核 GREEN，回执号：______
    - **3c**：NO-TX 检查（源 relay `27e2b2ac...` 子进程在跑、无同 relay 并发 pending 转账）。
-4. **执行**：`POST /api/relay/27e2b2ac-8c8e-4a3d-874e-c57ebd239757/transfer`，header `X-KANet-Admin-Secret: <ADMIN_SECRET_FUNDS值>`，body `{"to":"kaspa:qpq956nh8ud2z85mg0elg6ju3pufukknx2f7vnqpwjjsznzvwj4a2mtqc2anq","amount":"2.00000000"}`；记录返回 `txId`。
-5. **验收**：两地址转账前后余额（源 ≈19.481，目标 = 2）+ Bettor 独立链上核 txId landed；结果落 COORD-LEDGER。
+4. **执行（v0.4：拆 4 笔各 0.5 KAS，非一笔 2 KAS）**：relay 签名输入面值上限 1.0 KAS（1386/1388），2 KAS 单笔会因输入超限被拒。循环 4 次，**每次都等上一笔 landed 再发下一笔**（NO-TX-NO-STATE，避免同 relay 并发 pending）：
+   `POST /api/relay/27e2b2ac-8c8e-4a3d-874e-c57ebd239757/transfer`，header `X-KANet-Admin-Secret: <ADMIN_SECRET_FUNDS值>`，body `{"to":"kaspa:qpq956nh8ud2z85mg0elg6ju3pufukknx2f7vnqpwjjsznzvwj4a2mtqc2anq","amount":"0.50000000"}` × 4；每笔记录返回 `txId`，landed 后再发下一笔。四笔分别对应原型 genesis / bet 步骤A / bet 步骤B 各自要用的 UTXO。
+5. **验收**：目标地址链上应见 **4 个独立 UTXO 各 0.5 KAS**（非合并成一个 2 KAS UTXO）；源余额减 2 KAS + 4 笔手续费；四个 `txId` 均 landed（Bettor 独立链上核）；结果落 COORD-LEDGER。
