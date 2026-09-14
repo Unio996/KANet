@@ -16,6 +16,7 @@ import { getMind } from '../services/mind-manager.js';
 import { ethers } from 'ethers';
 import { encrypt, decrypt } from '../services/crypto.js';
 import { verifyIngestRequest } from '../services/ingest-auth.js';
+import { checkKeyExportWindow } from '../lib/admin-secret-tier.mjs';
 import { randomUUID } from 'crypto';
 import {
   CHAIN_META,
@@ -551,9 +552,37 @@ export async function registerRelayRoutes(fastify) {
     }
   });
 
+  // ── T-KEY-EXPORT LOUD 日志(2026-09-14, 设计 docs/2026-09-14-kanetui-relay-key-export-route-
+  //    lockdown-design-v0.1.md §2.4, NWT GREEN 80d0d62a)：成功导出必打 —— 不打印密钥内容本身，只
+  //    打印"这件事发生了"。失败/被拒不走这条(只是普通 warn，避免时间窗过期后的正常拒绝刷屏)。
+  function _logKeyExportSuccess({ relayId, route, walletId = null }) {
+    const idTail = String(relayId || '').slice(-8);
+    console.error(`🔴 [key-export] relay=${idTail} route=${route}${walletId ? ` wallet=${String(walletId).slice(-8)}` : ''} 已导出`);
+    try {
+      sqlite.prepare(`
+        INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at)
+        VALUES (?, 'system', 'relay_key_exported', 'relay.js', 'error', ?, ?, datetime('now'))
+      `).run(
+        randomUUID(),
+        `🔴 [密钥导出] relay=${idTail} route=${route} 已导出明文密钥`,
+        JSON.stringify({ relayId, route, walletId })
+      );
+    } catch (e) {
+      console.error(`[key-export] events insert fail (non-fatal): ${e.message}`);
+    }
+  }
+
   // Reveal mnemonic (local UI only)
   fastify.get('/relays/:id/mnemonic', async (request, reply) => {
+    const gate = checkKeyExportWindow(request);
+    if (!gate.ok) {
+      console.warn(`[key-export] refuse mnemonic export relay=${String(request.params.id).slice(-8)}: ${gate.error}`);
+      return reply.code(gate.code).send({ error: gate.error });
+    }
     const mnemonic = getRelayMnemonic(request.params.id);
+    // 只在真的吐出密钥时才 LOUD(mnemonic 为空=relay 不存在/没有助记词, 没有任何密钥物离开这次调用,
+    // 不构成"导出事件", 同设计页 §2.4 原话"真的吐出了密钥"这个判据)。
+    if (mnemonic) _logKeyExportSuccess({ relayId: request.params.id, route: 'mnemonic' });
     return reply.send({ mnemonic: mnemonic || null });
   });
 
@@ -842,6 +871,11 @@ export async function registerRelayRoutes(fastify) {
 
   // GET /api/relay/:id/wallets/:walletId/privkey — get decrypted private key
   fastify.get('/api/relay/:id/wallets/:walletId/privkey', async (request, reply) => {
+    const gate = checkKeyExportWindow(request);
+    if (!gate.ok) {
+      console.warn(`[key-export] refuse privkey export relay=${String(request.params.id).slice(-8)} wallet=${String(request.params.walletId).slice(-8)}: ${gate.error}`);
+      return reply.code(gate.code).send({ error: gate.error });
+    }
     const relay = getRelayNode(request.params.id);
     if (!relay) return reply.code(404).send({ error: 'Relay not found' });
 
@@ -853,6 +887,7 @@ export async function registerRelayRoutes(fastify) {
 
     try {
       const privateKey = decrypt(wallet.privkey_encrypted);
+      _logKeyExportSuccess({ relayId: request.params.id, route: 'privkey', walletId: request.params.walletId });
       return reply.send({ privateKey });
     } catch (err) {
       return reply.code(500).send({ error: 'Failed to decrypt private key' });
