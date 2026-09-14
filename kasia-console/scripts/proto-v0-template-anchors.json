@@ -1,6 +1,6 @@
 {
   "_comment": "一次性协议常量, 范围裁定见本脚本文件头注(2026-09-14) — market_tmpl_suffix/token_tmpl_hash/claim_tmpl_hash/refundclaim_tmpl_hash 不在此文件, 已挪出本脚本范围。",
-  "generatedAt": "2026-09-14T16:51:34.911Z",
+  "generatedAt": "2026-09-14T17:01:29.306Z",
   "contracts": {
     "PoolSideTicket": {
       "sourcePath": "src/lib/sil-v1/PoolSideTicket.sil",
@@ -17,6 +17,13 @@
       "minNetLoss": "40000000",
       "cap": "80000000",
       "_source": "docs/provenance/2026-09-14-j2-proto-v0-genesis-mass-fee-estimate/README.md + Bettor 1386 裁定(cap=2×minNetLoss)"
+    },
+    "bet_mint_step_a": {
+      "genesisOutputValue": "20000000",
+      "requiredFeeAtOptimum": "20000000",
+      "minNetLoss": "40000000",
+      "cap": "80000000",
+      "_source": "docs/provenance/2026-09-14-j2-bet-mint-stepA-ktt-genesis-mass-fee-estimate/README.md（与 market_genesis 相同的结构性原因, 非假设照抄）"
     }
   }
 }

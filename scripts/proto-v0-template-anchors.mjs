@@ -52,8 +52,18 @@ const feeProfile = {
     cap: '80000000',
     _source: 'docs/provenance/2026-09-14-j2-proto-v0-genesis-mass-fee-estimate/README.md + Bettor 1386 裁定(cap=2×minNetLoss)',
   },
-  // bet_mint 步骤 A(KTT genesis)/步骤 B(register_append)尚未跑 mass 实验——Bettor 1386③
-  // "不假设一样, 每 kind 单独跑一遍"——下一步任务, 跑完后在这里补两个 key, 不预填占位值。
+  // bet_mint 步骤 A(KTT genesis)实测: 数值与 market_genesis 逐 sompi 相同——不是"假设一样",
+  // 是实测后发现的结构性原因(genesis 交易的 KIP-9 storage mass 只看输出 scriptPubKey 长度, P2SH
+  // 包装的 scriptPubKey 长度恒定, 与被包装的 redeem 脚本大小无关), 见下方 _source provenance。
+  bet_mint_step_a: {
+    genesisOutputValue: '20000000',
+    requiredFeeAtOptimum: '20000000',
+    minNetLoss: '40000000',
+    cap: '80000000',
+    _source: 'docs/provenance/2026-09-14-j2-bet-mint-stepA-ktt-genesis-mass-fee-estimate/README.md（与 market_genesis 相同的结构性原因, 非假设照抄）',
+  },
+  // bet_mint 步骤 B(register_append)不是 genesis, 上面这条"P2SH 输出 mass 与 redeem 大小无关"的
+  // 结论不适用——需要独立、更复杂的花费侧 mass 实验(多输入输出+线性 mass), 尚未跑, 不预填占位值。
 };
 
 const out = {
