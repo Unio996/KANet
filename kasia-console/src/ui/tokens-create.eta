@@ -1,0 +1,128 @@
+<%~ include('partials/page-open', { _page: 'tokens-create', pageTitle: '创建代币', ...it }) %>
+
+<!-- 原型 v0(1325 派工·线框稿 docs/2026-09-14-kanetui-token-market-prototype-v0-wireframe.md §1)。
+     字段对照 kasia-console/src/lib/sil-v1/KanetTestToken.sil 真实 ctor 核过: 用户只填 init_amount(数量)+
+     出单人(→init_owner); owner_scheme/borrow_scheme/borrow_guard/extension_commitment/market_tmpl_suffix/
+     max_ins/max_outs 全是协议常量, 后端钉死, 本页不出现。名称/ticker/描述 = DB only 展示元数据, 链上没有这些字段。
+     提交端点 POST /api/tokens/create 尚未落地(J2 §4 第二项), 404/失败态如实显示, 不假装成功(NO TX NO STATE CHANGE)。 -->
+
+<div class="p-6 max-w-xl mx-auto" x-data="tokensCreatePage()" x-init="init()" x-cloak>
+  <div class="mb-5">
+    <h1 class="text-2xl font-display text-ink-800">创建代币</h1>
+    <p class="text-xs text-ink-400 mt-1">填几个字段，铸造一个测试用 KTT 代币，之后可以用它开市场。</p>
+  </div>
+
+  <!-- 已完成态 -->
+  <template x-if="shipped">
+    <div class="card card-flush overflow-hidden mb-5 border border-warm-200">
+      <div class="px-6 py-5 border-b border-warm-200">
+        <h2 class="text-lg font-semibold text-ink-700">✓ 代币已创建</h2>
+        <p class="text-xs text-ink-400 mt-1"><span x-text="result.name"></span> (<span x-text="result.ticker"></span>) · <span x-text="result.amount"></span> 枚</p>
+      </div>
+      <div class="px-6 py-4 space-y-2 text-xs">
+        <div class="flex items-center gap-2">
+          <span class="text-ink-500 w-20">创世 TX</span>
+          <span class="font-mono text-ink-600" x-text="(result.txId || '').slice(0,16) + '...' + (result.txId || '').slice(-8)"></span>
+        </div>
+      </div>
+      <div class="px-6 py-4 border-t border-warm-200 flex gap-3">
+        <a href="/tokens" class="btn btn-secondary text-sm">查看代币列表 →</a>
+        <button @click="resetForm()" class="btn btn-ghost text-sm">再造一个</button>
+      </div>
+    </div>
+  </template>
+
+  <!-- 表单态 -->
+  <template x-if="!shipped">
+    <div class="card p-6 space-y-4">
+      <div>
+        <label class="text-xs text-ink-400">出单人（代币归属的 agent）</label>
+        <select x-model="form.relayId" class="w-full mt-1 border border-warm-300 rounded-lg px-3 py-2 text-sm focus:border-brand-400 focus:outline-none bg-warm-50">
+          <% const eligible = (it.relayNodes || []).filter(r => !r.is_oracle); %>
+          <% if (eligible.length === 0) { %>
+          <option value="">没有可用的出单人</option>
+          <% } %>
+          <% eligible.forEach(r => { %>
+          <option value="<%= r.id %>"><%= r.name %></option>
+          <% }) %>
+        </select>
+      </div>
+      <div>
+        <label class="text-xs text-ink-400">发行数量</label>
+        <input x-model.number="form.amount" type="number" min="1" step="1" placeholder="例如 1000000"
+          class="w-full mt-1 border border-warm-300 rounded-lg px-3 py-2 text-sm focus:border-brand-400 focus:outline-none bg-warm-50">
+      </div>
+      <div>
+        <label class="text-xs text-ink-400">名称</label>
+        <input x-model="form.name" type="text" maxlength="60" placeholder="例如 Kanet Test Token"
+          class="w-full mt-1 border border-warm-300 rounded-lg px-3 py-2 text-sm focus:border-brand-400 focus:outline-none bg-warm-50">
+      </div>
+      <div>
+        <label class="text-xs text-ink-400">Ticker</label>
+        <input x-model="form.ticker" type="text" maxlength="6" placeholder="例如 KTT"
+          @input="form.ticker = form.ticker.toUpperCase()"
+          class="w-full mt-1 border border-warm-300 rounded-lg px-3 py-2 text-sm focus:border-brand-400 focus:outline-none bg-warm-50">
+      </div>
+      <div>
+        <label class="text-xs text-ink-400">描述（可选）</label>
+        <textarea x-model="form.description" rows="2" maxlength="200"
+          class="w-full mt-1 border border-warm-300 rounded-lg px-3 py-2 text-sm focus:border-brand-400 focus:outline-none bg-warm-50"></textarea>
+      </div>
+
+      <div x-show="errorMsg" class="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2" x-text="errorMsg"></div>
+
+      <button @click="submit()" :disabled="submitting || !canSubmit" class="btn btn-primary w-full" :class="(submitting || !canSubmit) ? 'opacity-50 cursor-not-allowed' : ''">
+        <span x-show="!submitting">创建代币</span>
+        <span x-show="submitting">创建中...</span>
+      </button>
+    </div>
+  </template>
+</div>
+
+<script>
+function tokensCreatePage() {
+  return {
+    form: { relayId: '', amount: null, name: '', ticker: '', description: '' },
+    submitting: false,
+    errorMsg: '',
+    shipped: false,
+    result: null,
+    init() {
+      const first = document.querySelector('select');
+      if (first && !this.form.relayId) this.form.relayId = first.value || '';
+    },
+    get canSubmit() {
+      return !!(this.form.relayId && this.form.amount > 0 && this.form.name.trim() && this.form.ticker.trim());
+    },
+    async submit() {
+      if (!this.canSubmit || this.submitting) return;
+      this.submitting = true;
+      this.errorMsg = '';
+      try {
+        const res = await fetch('/api/tokens/create', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ relayId: this.form.relayId, amount: this.form.amount, name: this.form.name, ticker: this.form.ticker, description: this.form.description }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.ok) {
+          this.errorMsg = '创建失败: ' + (data.error || ('HTTP ' + res.status)) + (res.status === 404 ? '（后端接口尚未上线）' : '');
+          return;
+        }
+        this.result = { name: this.form.name, ticker: this.form.ticker, amount: this.form.amount, txId: data.txId };
+        this.shipped = true;
+      } catch (err) {
+        this.errorMsg = '请求失败: ' + err.message;
+      } finally {
+        this.submitting = false;
+      }
+    },
+    resetForm() {
+      this.shipped = false;
+      this.result = null;
+      this.form = { relayId: this.form.relayId, amount: null, name: '', ticker: '', description: '' };
+    },
+  };
+}
+</script>
+
+<%~ include('partials/page-close', it) %>

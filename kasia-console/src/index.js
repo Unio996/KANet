@@ -458,6 +458,41 @@ fastify.get('/predictions/pool/create', async (request, reply) => {
   return reply.viewAsync('predictions-pool-create', { lang, t, dir: isRtl(lang) ? 'rtl' : 'ltr', relayNodes, _page: 'predictions-pool-create' });
 });
 
+// 原型 v0(Bettor 1325 派工·线框稿 docs/2026-09-14-kanetui-token-market-prototype-v0-wireframe.md §1)：
+// 代币创建/列表 — 纯新增页面, 不改动任何既有路由。POST /api/tokens/create + GET /api/tokens 由 J2 提供(§4)。
+fastify.get('/tokens/create', async (request, reply) => {
+  const lang = parseLang(request.headers.cookie);
+  const t = getT(lang);
+  const relayNodes = _listRelayNodes();
+  return reply.viewAsync('tokens-create', { lang, t, dir: isRtl(lang) ? 'rtl' : 'ltr', relayNodes, _page: 'tokens-create' });
+});
+
+fastify.get('/tokens', async (request, reply) => {
+  const lang = parseLang(request.headers.cookie);
+  const t = getT(lang);
+  return reply.viewAsync('tokens-list', { lang, t, dir: isRtl(lang) ? 'rtl' : 'ltr', _page: 'tokens-list' });
+});
+
+// 原型 v0 市场创建/浏览/下注/claim — 独立路由前缀 /proto-markets/*, 与 /predictions/pool/* 完全不重叠
+// (Bettor 1328 裁定①②: 不落在 /predictions/pool/* 下, 对现网 predictions-*.eta/tg-bot 零改动)。
+fastify.get('/proto-markets/create', async (request, reply) => {
+  const lang = parseLang(request.headers.cookie);
+  const t = getT(lang);
+  return reply.viewAsync('proto-market-create', { lang, t, dir: isRtl(lang) ? 'rtl' : 'ltr', _page: 'proto-market-create' });
+});
+
+fastify.get('/proto-markets/:id', async (request, reply) => {
+  const lang = parseLang(request.headers.cookie);
+  const t = getT(lang);
+  return reply.viewAsync('proto-market-detail', { lang, t, dir: isRtl(lang) ? 'rtl' : 'ltr', marketId: request.params.id, _page: 'proto-market-detail' });
+});
+
+fastify.get('/proto-markets', async (request, reply) => {
+  const lang = parseLang(request.headers.cookie);
+  const t = getT(lang);
+  return reply.viewAsync('proto-market-list', { lang, t, dir: isRtl(lang) ? 'rtl' : 'ltr', _page: 'proto-market-list' });
+});
+
 // /predictions/oracle-registry — retired (Gap 3 dedup, Bettor r36 GO).
 // Subsumed by /oracle home (Owner 钦定 ② independent oracle system UI, Bettor r35 CLOSE).
 // 信任系统 tab + 我的 oracle tab 覆盖 registry 全功能 + 池透明 + 每市场信任 + onboarding.

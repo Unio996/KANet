@@ -1,0 +1,153 @@
+<%~ include('partials/page-open', { _page: 'proto-market-detail', pageTitle: '市场详情（原型）', ...it }) %>
+
+<!-- 原型 v0(1325 派工·线框稿 §3/§4, Bettor 1328 裁定): 独立新页, 下注+结算/领取合并一屏(对应线框稿两屏,
+     实现上更省心)。非 ZK 简单路径: 出单人到期手动宣布结果 → 赢家 claim; 无人宣布 → 全员 refund。
+     GET /api/proto-markets/:id、POST .../bet、.../resolve、.../claim 尚未落地(J2), 失败态如实显示。 -->
+
+<div class="p-6 max-w-2xl mx-auto" x-data="protoMarketDetailPage()" x-init="init()" x-cloak>
+
+  <div x-show="loading" class="text-center py-12 text-ink-400">载入中...</div>
+  <div x-show="!loading && loadFailed" class="text-center py-12 bg-red-50 rounded-lg text-red-600 text-sm">
+    加载失败：<span x-text="loadFailed"></span>（后端接口尚未上线，或该市场不存在）
+  </div>
+
+  <template x-if="!loading && !loadFailed && market">
+    <div class="space-y-5">
+      <div class="card p-6">
+        <div class="flex items-center gap-2 mb-1">
+          <span class="text-[10px] px-1.5 py-0.5 rounded font-medium" :class="statusBadge(market.status)" x-text="statusLabel(market.status)"></span>
+          <span class="text-xs text-ink-400">结算代币: <span x-text="market.ticker || '?'"></span></span>
+        </div>
+        <h1 class="text-xl font-display text-ink-800" x-text="market.title"></h1>
+        <p class="text-xs text-ink-400 mt-1" x-show="market.resolutionNote" x-text="market.resolutionNote"></p>
+        <p class="text-xs text-ink-400 mt-1">截止: <span x-text="(market.deadline || '').slice(0,16)"></span></p>
+      </div>
+
+      <!-- 下注面板(仅 open 态) -->
+      <template x-if="market.status === 'open'">
+        <div class="card p-6 space-y-3">
+          <h2 class="text-sm font-semibold text-ink-700">下注</h2>
+          <div class="flex gap-2">
+            <button @click="bet.direction = 0" class="btn flex-1" :class="bet.direction === 0 ? 'btn-primary' : 'btn-ghost'">YES</button>
+            <button @click="bet.direction = 1" class="btn flex-1" :class="bet.direction === 1 ? 'btn-danger' : 'btn-ghost'">NO</button>
+          </div>
+          <div>
+            <label class="text-xs text-ink-400">数量（<span x-text="market.ticker || '?'"></span>）</label>
+            <input x-model.number="bet.amount" type="number" min="0" step="any"
+              class="w-full mt-1 border border-warm-300 rounded-lg px-3 py-2 text-sm focus:border-brand-400 focus:outline-none bg-warm-50">
+          </div>
+          <div x-show="betError" class="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2" x-text="betError"></div>
+          <div x-show="betOk" class="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2" x-text="betOk"></div>
+          <button @click="placeBet()" :disabled="betSubmitting || !(bet.direction !== null && bet.amount > 0)" class="btn btn-primary w-full">
+            <span x-show="!betSubmitting">提交下注</span>
+            <span x-show="betSubmitting">提交中...</span>
+          </button>
+        </div>
+      </template>
+
+      <!-- 出单人宣布结果面板(仅 open/closed 态; 是否显示由后端按 relay 归属判定, 前端先都显示占位) -->
+      <template x-if="market.status === 'open' || market.status === 'closed'">
+        <div class="card p-6 space-y-3">
+          <h2 class="text-sm font-semibold text-ink-700">出单人：宣布结果</h2>
+          <p class="text-[11px] text-ink-300">只有本市场出单人的操作会被接受；非出单人调用后端会拒绝。</p>
+          <div class="flex gap-2">
+            <button @click="resolveOutcome(0)" :disabled="resolveSubmitting" class="btn btn-ghost flex-1">判 YES 赢</button>
+            <button @click="resolveOutcome(1)" :disabled="resolveSubmitting" class="btn btn-ghost flex-1">判 NO 赢</button>
+          </div>
+          <div x-show="resolveMsg" class="text-xs" :class="resolveOk ? 'text-emerald-700' : 'text-red-600'" x-text="resolveMsg"></div>
+        </div>
+      </template>
+
+      <!-- 领取面板(resolved/refunded 态) -->
+      <template x-if="market.status === 'resolved' || market.status === 'refunded'">
+        <div class="card p-6 space-y-3">
+          <h2 class="text-sm font-semibold text-ink-700">领取</h2>
+          <p class="text-xs text-ink-500" x-show="market.status === 'resolved'">结果：<span class="font-medium" x-text="market.outcome === 0 ? 'YES 赢' : 'NO 赢'"></span></p>
+          <p class="text-xs text-ink-500" x-show="market.status === 'refunded'">到期无人宣布结果，全员退款。</p>
+          <div x-show="claimMsg" class="text-xs" :class="claimOk ? 'text-emerald-700' : 'text-red-600'" x-text="claimMsg"></div>
+          <button @click="claim()" :disabled="claimSubmitting" class="btn btn-primary w-full">
+            <span x-show="!claimSubmitting">Claim</span>
+            <span x-show="claimSubmitting">处理中...</span>
+          </button>
+        </div>
+      </template>
+    </div>
+  </template>
+</div>
+
+<script>
+function protoMarketDetailPage() {
+  const marketId = location.pathname.split('/').filter(Boolean).pop();
+  return {
+    marketId,
+    loading: true,
+    loadFailed: '',
+    market: null,
+    bet: { direction: null, amount: null },
+    betSubmitting: false, betError: '', betOk: '',
+    resolveSubmitting: false, resolveMsg: '', resolveOk: false,
+    claimSubmitting: false, claimMsg: '', claimOk: false,
+
+    async init() {
+      try {
+        const res = await fetch('/api/proto-markets/' + encodeURIComponent(this.marketId));
+        if (!res.ok) { this.loadFailed = 'HTTP ' + res.status; this.loading = false; return; }
+        this.market = await res.json().catch(() => null);
+        if (!this.market) this.loadFailed = '返回数据为空';
+      } catch (err) { this.loadFailed = err.message; }
+      this.loading = false;
+    },
+
+    statusBadge(s) {
+      if (s === 'resolved') return 'bg-emerald-100 text-emerald-700';
+      if (s === 'refunded') return 'bg-warm-200 text-ink-500';
+      return 'bg-amber-100 text-amber-700';
+    },
+    statusLabel(s) {
+      const m = { open: '押注中', closed: '等待结算', resolved: '已结算', refunded: '已退款' };
+      return m[s] || s || '?';
+    },
+
+    async placeBet() {
+      this.betSubmitting = true; this.betError = ''; this.betOk = '';
+      try {
+        const res = await fetch('/api/proto-markets/' + encodeURIComponent(this.marketId) + '/bet', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ direction: this.bet.direction, amount: this.bet.amount }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.ok) { this.betError = '下注失败: ' + (data.error || ('HTTP ' + res.status)); return; }
+        this.betOk = '下注成功，TX: ' + (data.txId || '').slice(0, 16) + '...';
+      } catch (err) { this.betError = '请求失败: ' + err.message; }
+      finally { this.betSubmitting = false; }
+    },
+
+    async resolveOutcome(direction) {
+      this.resolveSubmitting = true; this.resolveMsg = '';
+      try {
+        const res = await fetch('/api/proto-markets/' + encodeURIComponent(this.marketId) + '/resolve', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ outcome: direction }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.ok) { this.resolveOk = false; this.resolveMsg = '宣布失败: ' + (data.error || ('HTTP ' + res.status)); return; }
+        this.resolveOk = true; this.resolveMsg = '已宣布，刷新页面查看最新状态。';
+      } catch (err) { this.resolveOk = false; this.resolveMsg = '请求失败: ' + err.message; }
+      finally { this.resolveSubmitting = false; }
+    },
+
+    async claim() {
+      this.claimSubmitting = true; this.claimMsg = '';
+      try {
+        const res = await fetch('/api/proto-markets/' + encodeURIComponent(this.marketId) + '/claim', { method: 'POST' });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.ok) { this.claimOk = false; this.claimMsg = 'Claim 失败: ' + (data.error || ('HTTP ' + res.status)); return; }
+        this.claimOk = true; this.claimMsg = 'Claim 成功，TX: ' + (data.txId || '').slice(0, 16) + '...';
+      } catch (err) { this.claimOk = false; this.claimMsg = '请求失败: ' + err.message; }
+      finally { this.claimSubmitting = false; }
+    },
+  };
+}
+</script>
+
+<%~ include('partials/page-close', it) %>

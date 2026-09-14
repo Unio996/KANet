@@ -1,0 +1,121 @@
+<%~ include('partials/page-open', { _page: 'proto-market-create', pageTitle: '创建市场（原型）', ...it }) %>
+
+<!-- 原型 v0(1325 派工·线框稿 §2, Bettor 1328 裁定②③): 独立新页, 不碰 predictions-pool-create.eta /
+     predictions-pool-detail.eta / predictions.eta / tg-bot 任何一行。走非 ZK 简单 claim/refund 路径
+     (范围稿 §2): 出单人到期后手动宣布结果, 赢家凭结果 claim, 无人宣布则 refund——不接 oracle 委员会/ZK。
+     提交端点 POST /api/proto-markets/create 尚未落地(J2), 失败态如实显示。 -->
+
+<div class="p-6 max-w-xl mx-auto" x-data="protoMarketCreatePage()" x-init="init()" x-cloak>
+  <div class="mb-5">
+    <h1 class="text-2xl font-display text-ink-800">创建市场（原型）</h1>
+    <p class="text-xs text-ink-400 mt-1">选一个代币，填市场信息，开一个可以下注的市场。</p>
+  </div>
+
+  <template x-if="shipped">
+    <div class="card card-flush overflow-hidden mb-5 border border-warm-200">
+      <div class="px-6 py-5 border-b border-warm-200">
+        <h2 class="text-lg font-semibold text-ink-700">✓ 市场已创建</h2>
+        <p class="text-xs text-ink-400 mt-1" x-text="result.title"></p>
+      </div>
+      <div class="px-6 py-4 border-t border-warm-200 flex gap-3">
+        <a :href="'/proto-markets/' + result.id" class="btn btn-secondary text-sm">查看市场 →</a>
+        <button @click="resetForm()" class="btn btn-ghost text-sm">再开一个</button>
+      </div>
+    </div>
+  </template>
+
+  <template x-if="!shipped">
+    <div class="card p-6 space-y-4">
+      <div x-show="tokensLoadFailed" class="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+        代币列表加载失败：<span x-text="tokensLoadFailed"></span>
+      </div>
+      <div>
+        <label class="text-xs text-ink-400">结算代币</label>
+        <select x-model="form.tokenId" class="w-full mt-1 border border-warm-300 rounded-lg px-3 py-2 text-sm focus:border-brand-400 focus:outline-none bg-warm-50">
+          <option value="">选一个代币...</option>
+          <template x-for="tk in tokens" :key="tk.id">
+            <option :value="tk.id" x-text="(tk.name || '?') + ' (' + (tk.ticker || '?') + ')'"></option>
+          </template>
+        </select>
+        <p class="text-[11px] text-ink-300 mt-1" x-show="tokens.length === 0 && !tokensLoadFailed">还没有代币，先去 <a href="/tokens/create" class="text-brand-500 hover:underline">创建一个</a>。</p>
+      </div>
+      <div>
+        <label class="text-xs text-ink-400">议题标题</label>
+        <input x-model="form.title" type="text" maxlength="140" placeholder="例如：这场比赛主队会赢吗？"
+          class="w-full mt-1 border border-warm-300 rounded-lg px-3 py-2 text-sm focus:border-brand-400 focus:outline-none bg-warm-50">
+      </div>
+      <div>
+        <label class="text-xs text-ink-400">截止时间</label>
+        <input x-model="form.deadline" type="datetime-local"
+          class="w-full mt-1 border border-warm-300 rounded-lg px-3 py-2 text-sm focus:border-brand-400 focus:outline-none bg-warm-50">
+      </div>
+      <div>
+        <label class="text-xs text-ink-400">结算说明（怎么判定 YES/NO，可选）</label>
+        <textarea x-model="form.resolutionNote" rows="2" maxlength="300"
+          class="w-full mt-1 border border-warm-300 rounded-lg px-3 py-2 text-sm focus:border-brand-400 focus:outline-none bg-warm-50"></textarea>
+      </div>
+      <p class="text-[11px] text-ink-300">原型 v0：出单人到期后手动宣布 YES/NO 结果，赢家凭结果 claim；到期无人宣布则全员 refund。不走 ZK/委员会仲裁。</p>
+
+      <div x-show="errorMsg" class="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2" x-text="errorMsg"></div>
+
+      <button @click="submit()" :disabled="submitting || !canSubmit" class="btn btn-primary w-full" :class="(submitting || !canSubmit) ? 'opacity-50 cursor-not-allowed' : ''">
+        <span x-show="!submitting">创建市场</span>
+        <span x-show="submitting">创建中...</span>
+      </button>
+    </div>
+  </template>
+</div>
+
+<script>
+function protoMarketCreatePage() {
+  return {
+    form: { tokenId: '', title: '', deadline: '', resolutionNote: '' },
+    tokens: [],
+    tokensLoadFailed: '',
+    submitting: false,
+    errorMsg: '',
+    shipped: false,
+    result: null,
+    async init() {
+      try {
+        const res = await fetch('/api/tokens');
+        if (!res.ok) { this.tokensLoadFailed = 'HTTP ' + res.status; return; }
+        const data = await res.json().catch(() => ({}));
+        this.tokens = data.tokens || data || [];
+      } catch (err) { this.tokensLoadFailed = err.message; }
+    },
+    get canSubmit() {
+      return !!(this.form.tokenId && this.form.title.trim() && this.form.deadline);
+    },
+    async submit() {
+      if (!this.canSubmit || this.submitting) return;
+      this.submitting = true;
+      this.errorMsg = '';
+      try {
+        const res = await fetch('/api/proto-markets/create', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tokenId: this.form.tokenId, title: this.form.title, deadline: this.form.deadline, resolutionNote: this.form.resolutionNote }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.ok) {
+          this.errorMsg = '创建失败: ' + (data.error || ('HTTP ' + res.status)) + (res.status === 404 ? '（后端接口尚未上线）' : '');
+          return;
+        }
+        this.result = { id: data.id, title: this.form.title };
+        this.shipped = true;
+      } catch (err) {
+        this.errorMsg = '请求失败: ' + err.message;
+      } finally {
+        this.submitting = false;
+      }
+    },
+    resetForm() {
+      this.shipped = false;
+      this.result = null;
+      this.form = { tokenId: this.form.tokenId, title: '', deadline: '', resolutionNote: '' };
+    },
+  };
+}
+</script>
+
+<%~ include('partials/page-close', it) %>
