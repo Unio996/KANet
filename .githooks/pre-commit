@@ -29,4 +29,23 @@ node scripts/check-tree-fresh.mjs || true
 #   而 pre-commit 是唯一一个"一定会有人经过"的位置。
 node scripts/check-tests-fresh.mjs || true
 
+# ④ check-worktree-junctions: block-on-fail (2026-09-14, Bettor 1281/1287 派工·规则81机制化，
+#   设计 docs/2026-09-14-kanetui-worktree-junction-gate-mechanical-design-v0.1.md，J2 审 GREEN-with-notes)
+#   跨树 →LIVE/external 链存在 = 本机 worktree 处于危险状态(删任一侧树都可能连坐)，不该让这种
+#   状态下还能继续往前推进。退出码 1=发现坏链，3=扫描自身出错(git worktree list 失败等)——
+#   两者都拦，文案分开方便一眼看出是哪一档，不需要读日志文本猜。
+node scripts/check-worktree-junctions.mjs --all
+STATUS=$?
+if [ $STATUS -ne 0 ]; then
+  echo ""
+  if [ $STATUS -eq 3 ]; then
+    echo "[pre-commit] ✗ 跨树 junction 检查本身出错(未能扫完，不是扫完发现干净)·commit 拦截."
+  else
+    echo "[pre-commit] ✗ 检测到跨树 junction (→LIVE 或 external)·commit 拦截."
+  fi
+  echo "  规则81: 删 worktree 前先拆链 (cmd: rmdir <link> / PowerShell: [System.IO.Directory]::Delete(link,\$false))"
+  echo "  手动重跑: node scripts/check-worktree-junctions.mjs --all"
+  exit 1
+fi
+
 exit 0
