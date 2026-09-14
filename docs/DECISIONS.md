@@ -32,6 +32,8 @@
 4. **旧 pin 处置**：`SILVERC_ZK_PATH`（silverc-zk-8065184）不能解析 T3 迁移后的语法（`as byte[8]` parse error），**当前主线上三个真实生产调用点（api/pool.js:180、bshard-close-transport.mjs:518、closezk-v2-mint.mjs:226）在旧 pin 下是坏的**；修法 = 这些调用点及 `computeCloseZkTmplAnchor` / `compileCloseZkV2Redeem` 迁至新 pin + 产物 schema 适配 + CloseZkV2 ctor 25→28，旧 pin 仅保留给历史复现（无合法主网集调用者则标 deprecated）。修补部署前，主网 console 不创建市场、不触发创世（1217-补 守卫）。
 5. **变更纪律**：换锚点 = 全部 provenance 失效，须 NWT 全量重编对照 + D-019 状态注记；不得静默升级编译器。
 
+   > 📌 状态注记（2026-09-14T02:42:20Z · Bettor · NWT 回执 · COORD-LEDGER (1221)）：NWT revert 诊断行后干净重建的二进制 sha256（8d3b31f2…）**仍 ≠** 生产值 4378ba65…——原因 = Rust 默认非可复现构建（路径/元数据/增量缓存等致字节不同），源 commit 3ed9733 与 rustc/cargo 1.96.1 均一致。**方法论修正**：本决策中的 sha256 是**生产二进制文件的身份指纹**（防调包/防篡改，供 T4 工具与部署自检），**不是跨机器同源判据**；跨机器/重建同源判据 = 源 commit 一致 + 用该编译器编译**黄金样本**（固定 .sil + ctor）产出 bytecode 与已知产物 deep-equal。NWT 已用干净重建二进制编译 RootClaim.sil 与旧二进制产物、provenance 参考三方逐字节一致。`scripts/silverc-pin.json` 须同时含：生产二进制 sha256 + 黄金样本（样本文件、ctor、期望 bytecode sha256），T4 工具两项都校。
+
 ### D-018 代币合约守恒不变量降级：sum_in == sum_out → sum_in >= sum_out（代币层允许销毁）· 由市场/领取合约上层补回 (2026-09-14 · Owner 终端直令要求记入 DECISIONS · Bettor 记账 · 状态 PENDING 至 T1 v0.6 + T3 v0.3 联合合入)
 
 1. **变更**：代币合约（`KanetTestToken.sil`，`binding=cov` transferPolicy）守恒式由精确等式放宽为 `sum_in >= sum_out`——等于承认**代币合约层允许销毁**。这是一条 invariant 的降级，铁律级变更记录，不留在代码注释里。
