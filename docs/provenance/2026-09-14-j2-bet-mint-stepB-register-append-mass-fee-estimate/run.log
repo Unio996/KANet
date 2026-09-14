@@ -1,0 +1,19 @@
+=== ① 编译真实 ShardLeaf_direct(代表性 ctor) / KTT(修法后设计) / PoolSideTicket ===
+ShardLeaf_direct redeem 长度: 15690 | 真实 mkt_prefix 长度: 1 | 真实 mkt_suffix 长度: 15653
+KanetTestToken(修法后)redeem 长度: 5359
+PoolSideTicket redeem 长度: 117
+
+=== ② 构造 register_append 交易(3 输入 4 输出), KTT witness 携带真实 mkt_prefix/mkt_suffix ===
+leaf(ShardLeaf_direct) sigScript 总长度: 15849
+KTT sigScript 总长度(含真实 mkt_suffix witness): 21036
+
+=== ③ 修正后: 续约输出带 CovenantBinding + U 形最优值(20,000,000 sompi), 扫描 ps ticket genesis 声明 on/off ===
+
+--- ps ticket 输出是否声明 populateGenesisCovenants = false ---
+mass: 449203  required_fee: 44920300 sompi ( 0.4492 KAS)
+
+--- ps ticket 输出是否声明 populateGenesisCovenants = true ---
+mass: 599203  required_fee: 59920300 sompi ( 0.5992 KAS)
+
+=== ④ 对照组: 若沿用旧设计(已推翻)的 KTT sigScript 大小量级(仅供对比参考) ===
+旧设计 KTT sigScript 长度量级 ≈ 3529 (不是本次采用的方案, 仅对比新设计因 mkt_suffix witness 多付出多少字节)
