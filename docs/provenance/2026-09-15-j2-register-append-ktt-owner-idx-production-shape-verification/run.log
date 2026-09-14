@@ -12,3 +12,10 @@ stdout tail: PASS
 captured hex: 000000000000000802000000000000000424a3e4a8
 my encoder hex: 000000000000000802000000000000000424a3e4a8
 MATCH: true
+=== C) stake(second-bet) owner_input_idx=[3] ===
+debugger exit status: 0
+stdout tail: PASS
+
+captured hex: 000000000000000803000000000000000424a3e4a8
+my encoder hex: 000000000000000803000000000000000424a3e4a8
+MATCH: true

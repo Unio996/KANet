@@ -158,3 +158,45 @@ function runDebugger(testJsonPath, testName) {
   console.log('my encoder hex:', myHex);
   console.log('MATCH:', capturedHex && capturedHex.toLowerCase() === myHex.toLowerCase());
 }
+
+// ===== C(Bettor回执补: 修复后的生产builder在第二笔下注形状里, stake作active时实际会走的字节,
+// 不能用修复前用另一个入口做的旧引用代替) =====
+// 第二笔下注形状: [0]leaf [1]held [2]stake [3]fee, active=stake(2), owner_input_idx=[3](=feeIdx)
+{
+  const POOL_VALUE = 100;
+  const ctorArgs = sldCtor(POOL_VALUE);
+  const active = compileSLD(ctorArgs, 'active_C');
+  const heldTok = compileKTT(SL_COV, POOL_VALUE, 'held_C');
+  const stakeTok = compileKTT(STAKE_CHIP_OWNER_UNBOUND, STAKE, 'stake_C');
+  const ticketOut = compileTicket({ bettorPk, direction: SIDE, stake: STAKE, shardPoolId: marketId }, 'ticketout_C');
+  const contCtor = sldCtor(POOL_VALUE); contCtor[8] = STAKE; contCtor[10] = 1; contCtor[11] = POOL_VALUE + STAKE;
+  const cont = compileSLD(contCtor, 'cont_C');
+  const mergedTok = compileKTT(SL_COV, POOL_VALUE + STAKE, 'merged_C');
+  const inputs = [
+    { utxo_value: 1000, covenant_id: hex(SL_COV), utxo_script_hex: active.scriptHex, signature_script_hex: active.fullBytecodeHex },
+    { utxo_value: 10, covenant_id: hex(HELD_COV), utxo_script_hex: heldTok.scriptHex, signature_script_hex: heldTok.fullBytecodeHex },
+    { utxo_value: 10, covenant_id: hex(STAKE_COV), utxo_script_hex: stakeTok.scriptHex, signature_script_hex: stakeTok.fullBytecodeHex },
+    { utxo_value: 10_000_000_000, p2pk_pubkey: hex(FEE_PUBKEY) },
+  ];
+  const mergedGenesisCovId = computeGenesisCovId(3, 2, 1, mergedTok.scriptHex.slice(2));
+  const outputs = [
+    { value: 1000, covenant_id: hex(SL_COV), authorizing_input: 0, script_hex: cont.scriptHex },
+    { value: 1, script_hex: ticketOut.scriptHex },
+    { value: 1, covenant_id: mergedGenesisCovId, authorizing_input: 3, script_hex: mergedTok.scriptHex },
+    { value: 9_999_999_000, p2pk_pubkey: hex(FEE_PUBKEY) },
+  ];
+  const test = { tests: [{ name: 'C_stake_transfer_owner_idx3_second_bet', function: 'transfer', constructor_args: [STAKE, hex(STAKE_CHIP_OWNER_UNBOUND), 4, 0, hex(ZERO32), hex(ZERO32), 3, 3], args: [[], '0x', [3]], expect: 'pass', tx: { active_input_index: 2, inputs, outputs } }] };
+  const p = 'scratch/_j2_owneridx_check/vectorC.test.json';
+  fs.writeFileSync(p, JSON.stringify(test, null, 1));
+  const { status, capturedHex, stdout } = runDebugger(p, 'C_stake_transfer_owner_idx3_second_bet');
+  console.log('=== C) stake(second-bet) owner_input_idx=[3] ===');
+  console.log('debugger exit status:', status);
+  console.log('stdout tail:', stdout.slice(-300));
+  console.log('captured hex:', capturedHex);
+  const compiled = compileSilV100(KTT, [{ kind: 'int', value: STAKE }, { kind: 'bytes', value: STAKE_CHIP_OWNER_UNBOUND }, { kind: 'byte', value: 4 }, { kind: 'byte', value: 0 }, { kind: 'bytes', value: ZERO32 }, { kind: 'bytes', value: ZERO32 }, { kind: 'int', value: 3 }, { kind: 'int', value: 3 }], 'KanetTestToken');
+  const entryAbi = compiled._raw.contracts.KanetTestToken.entries.transfer;
+  const stateFieldCount = compiled._raw.contracts.KanetTestToken.runtime_state.fields.length;
+  const myHex = encodeKttTransferZeroOutAction(kaspa, entryAbi, stateFieldCount, [3]).replace(/^0x/, '');
+  console.log('my encoder hex:', myHex);
+  console.log('MATCH:', capturedHex && capturedHex.toLowerCase() === myHex.toLowerCase());
+}

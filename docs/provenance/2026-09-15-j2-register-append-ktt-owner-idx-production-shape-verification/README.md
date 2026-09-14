@@ -43,7 +43,7 @@ consensus-level 正确性，两层必须分别验证。
 
 沿用 `docs/provenance/2026-09-15-j2-register-append-entry-witness-abi-verification/debug-print.patch`
 的手法（D-019 pin `3ed973335b59269293564805cc2c58a14595ec03`，临时加一行 `eprintln`，验证后 `git
-checkout` 还原+重编回原始二进制，`git status`/`git rev-parse HEAD` 确认干净）。构造两笔生产真实形状的
+checkout` 还原+重编回原始二进制，`git status`/`git rev-parse HEAD` 确认干净）。构造三笔生产真实形状的
 完整交易（复用 `2026-09-15-j2-stake-chip-owner-unbound-verification` 已验证过的构造手法），分别在
 held/stake 是 active input 时真实执行 `transfer`，捕获真实 `active_sigscript`：
 
@@ -51,20 +51,25 @@ held/stake 是 active input 时真实执行 `transfer`，捕获真实 `active_si
 |---|---|---|---|---|---|
 | A) 第二笔下注(有held) | `[0]leaf [1]held [2]stake [3]fee` | held(1) | `[0]`(=leaf) | PASS | ✅ 逐字节一致 |
 | B) 第一笔下注(无held) | `[0]leaf [1]stake [2]fee` | stake(1) | `[2]`(=fee) | PASS | ✅ 逐字节一致 |
+| C) 第二笔下注(有held) | `[0]leaf [1]held [2]stake [3]fee` | stake(2) | `[3]`(=fee) | PASS | ✅ 逐字节一致 |
 
-（第二笔下注场景下 stake 的 `owner_input_idx=[3]`=fee 情况，与 `2026-09-15-j2-stake-chip-owner-unbound-
-verification` 的 `①c_stake_transfer_owner_unbound_via_fee_input_pass` 用的是**完全同一笔交易形状**，
-已在 `2026-09-15-j2-ktt-transfer-witness-abi-verification` 逐字节验证过，本笔不重复捕获，直接引用。）
+（🔴 Bettor 回执订正：C 这条不能用 `2026-09-15-j2-ktt-transfer-witness-abi-verification` 里那条
+`owner_input_idx=[3]` 的旧捕获代替——那条捕获发生在本笔修复 bug **之前**，是直接调
+`encodeKttTransferZeroOutAction` 验证编码器本身，不是修复后的 `buildRegisterAppendTxJson` 在第二笔
+下注形状里实际会走的那次调用。虽然两者理论上该编出同样的字节（编码器本身没变，只是调用方传参
+从写死的 `[0]` 改成了正确的 `[feeIdx]`），但证据必须来自修复后 builder 的真实产出，不能靠"应该一样"
+的推断代替实测——已按同样手法补上独立捕获，见下。）
 
-捕获的两组字节：
+捕获的三组字节：
 
 ```
 A) held,  owner_input_idx=[0]: 000000000000000800000000000000000424a3e4a8
 B) stake, owner_input_idx=[2]: 000000000000000802000000000000000424a3e4a8
+C) stake, owner_input_idx=[3]: 000000000000000803000000000000000424a3e4a8
 ```
 
-用 `encodeKttTransferZeroOutAction(kaspa, entryAbi, 6, [0])` / `[2]` 独立编码出的字节与上面两行**逐字节
-完全一致**（`mk_and_run.mjs` 输出 `MATCH: true` ×2，`run.log` 留档）。
+用 `encodeKttTransferZeroOutAction(kaspa, entryAbi, 6, [0])` / `[2]` / `[3]` 独立编码出的字节与上面三行
+**逐字节完全一致**（`mk_and_run.mjs` 输出 `MATCH: true` ×3，`run.log` 留档）。
 
 ## leader (`transfer`) vs delegate (`transfer_delegator`)：确认后者在本设计下不可达
 
