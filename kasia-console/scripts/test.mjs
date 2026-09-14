@@ -7,7 +7,7 @@
 // DoD-E env 单源 (J1 Bettor r739 Option A): 必须排在 runner.mjs import 之前 —— 派生
 // KANET_CONSOLE_URL + PORT from kanet.env PORT, 让 runner.mjs:19 顶层 const + case TN12_CONSOLE
 // 都跟随跑测节点 (测试节点无关). 见 test-framework/lib/env-bootstrap.mjs 头注.
-import '../test-framework/lib/env-bootstrap.mjs';
+import { checkConsoleUrlListening } from '../test-framework/lib/env-bootstrap.mjs';
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import { pathToFileURL, fileURLToPath } from 'node:url';
@@ -189,6 +189,12 @@ async function main() {
       console.log('');
     }
   }
+  // rule 82: 端口安全检查必须晚于 case 选定(需要知道这批"实际会执行"的 case 里有没有 real_chain)——
+  // "会执行"= 没被 skip 门拦下的那些(skipGateActive 时排除 skip_in_batch/skip_in_cron, --allow-manual-only
+  // 时不排除, 跟下面主循环的判据是同一条, 不能各写一份互相漂移)。
+  const willRunCases = casesToRun.filter((c) => !(skipGateActive && (c.skip_in_batch || c.skip_in_cron)));
+  const hasRealChain = willRunCases.some((c) => (c.tags || []).includes('real_chain'));
+  await checkConsoleUrlListening({ hasRealChain });
   for (const testCase of casesToRun) {
     // tag filter (case 必含此 tag)
     if (tag && !(testCase.tags || []).includes(tag)) continue;
