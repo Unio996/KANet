@@ -242,6 +242,12 @@ export function checkSilvercPinAtStartup(v100Path = process.env.SILVERC_V100_PAT
  *   落码/本地测试期间生产路径可能还没放好二进制, 必须显式设 SILVERC_V100_PATH 指向自己的干净构建,
  *   assertSilvercV100Pinned 的 sha256 核对不因为"本地测试"就放宽。
  * @returns {{script:number[], state_layout:{start:number,len:number}, template_hash_bytes:number[]|undefined, _raw:object}}
+ *   🔴 勿信 template_hash_bytes 算真正的模板锚(ledger 1338, J2 落码 PoolSideTicket.sil 期间实测发现):
+ *   它是编译器自报的字段, 跟全仓每一处真正被消费的 *_tmpl_hash(ps_tmpl_hash/token_tmpl_hash/
+ *   claim_tmpl_hash/closeZkTmplAnchor 等)用的值**不同**(同一份 ctor 实测: 编译器自报 73f79f9e...,
+ *   extractTemplateArtifact 独立复算 blake2b(prefix‖suffix) 得 37de5497...)。生产代码从未读过这个
+ *   字段(纯直通, 未使用)——要算模板锚, 一律走 extractTemplateArtifact(compileSilV100(...)), 不要
+ *   改读 template_hash_bytes 抄近路。
  */
 export function compileSilV100(silPath, ctorArr, contractName, v100Path = process.env.SILVERC_V100_PATH || DEFAULT_SILVERC_V100_PATH) {
   assertSilvercV100Pinned(v100Path);       // ① 二进制 sha256 == D-019 锚点(防调包)
