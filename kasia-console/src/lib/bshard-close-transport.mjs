@@ -478,6 +478,53 @@ export async function buildProposeCloseRequestV2(marketId, judged) {
  * @param {object} args { settlerRelayId, dryRun? }
  * @returns {object} relay 返回值(dryRun:true 时 broadcasted:false + 可核字段; 否则含 txId)
  */
+/**
+ * assertZkHandoffTmplCoherent — 校验 handoff 时 ZK_* env 现值跟这个市场自己 genesis①(pool.js:
+ * _resolveZkNativeCtorExtras 铸 PayoutShardV2 时)declare 在 payout_shards 三列里的值一致(J2 设计
+ * docs/2026-09-14-j2-t4-genesis-compare-tool-v0.2-gap-closure-and-hard-gate-design.md §3，
+ * Bettor 1288 派工落码；v1_committee 家族全链路零引用这三个 env，NWT 1288 确认不需要对应门)。
+ *
+ * 风险场景(两处代码注释早就点过、之前没有代码在防): pool.js genesis①烤入这个市场的 PayoutShardV2 ctor
+ * 用的是【那时候】的 ZK_TOKEN_TMPL_HASH/ZK_CLAIM_TMPL_HASH/ZK_MARKET_SUFFIX_HASH——如果这期间
+ * kanet.env 被改过(比如换了下一批市场的代币模板)，本函数的调用点(handoff 时)重新读【现在】的 env 值
+ * 去 computeCloseZkTmplAnchor，算出的 templateA..D 会跟链上已经烤好的 anchor 对不上。
+ *
+ * 四种情形均 throw(NULL 处置与 T-LEGACY-NULL-COLS 诊断一致——都是"NULL=数据问题, fail-closed 拒绝",
+ * 不是同一段代码, 是同一条纪律在观测层跟花钱前硬门两处各自的体现)：
+ *   - psRow 为空(查无此 payout_shards 行 — genesis 从没发生过或数据丢失)
+ *   - psRow 三列任一为 NULL(D-019 之前的旧市场, 或 genesis 时写入方漏传)
+ *   - env 三个值任一为空(defensive 兜底——调用点已在此之前检查过 env, 这里不依赖调用顺序)
+ *   - DB 值与 env 现值不一致(大小写不敏感 hex 比较)
+ *
+ * 🔴 已知可用性瑕疵(NWT 1288 记录, 不改行为，只留痕): 若 kanet.env 在某个市场创建后被"合法"更新过
+ * (比如确实换了下一批新市场的代币模板，旧市场早已 claim 完不会再走 handoff)，本函数仍会对**任何**还
+ * 没 handoff 过的旧市场拒绝——包括那些其实不需要重新计算模板、只是恰好还没跑到这一步的市场。这是保守
+ * 换安全的代价：宁可拦一个"其实无所谓"的旧市场，也不留一个"env 漂移后悄悄用错值"的窗口。若未来这类
+ * 误拦频繁到需要处理，正确修法是给旧市场提供一条明确的"按 genesis 时的值重放"路径(不是放宽这个校验)。
+ *
+ * @param {{token_tmpl_hash, claim_tmpl_hash, market_suffix_hash}|undefined|null} psRow 来自
+ *   payout_shards 的这一行(未查到传 undefined/null)
+ * @param {string} marketId 仅用于错误信息定位
+ * @param {{tokenTmplHash, claimTmplHash, marketSuffixHash}} envVals 调用方读出的 env 现值（process.env，
+ *   不在本函数内读——NWT 1288 确认比对对象是 process.env 不是 kanet.env 文件，读取职责留给调用点，本函数
+ *   只管比较，便于单测直接注入任意值不依赖真实进程 env）
+ */
+export function assertZkHandoffTmplCoherent(psRow, marketId, { tokenTmplHash, claimTmplHash, marketSuffixHash }) {
+  if (!psRow) throw new Error(`assertZkHandoffTmplCoherent: market=${marketId} 找不到 payout_shards 行 — genesis 从没发生过或数据丢失, 拒绝 handoff`);
+  const checks = [
+    ['token_tmpl_hash', psRow.token_tmpl_hash, tokenTmplHash],
+    ['claim_tmpl_hash', psRow.claim_tmpl_hash, claimTmplHash],
+    ['market_suffix_hash', psRow.market_suffix_hash, marketSuffixHash],
+  ];
+  for (const [label, dbVal, envVal] of checks) {
+    if (!dbVal) throw new Error(`assertZkHandoffTmplCoherent: market=${marketId} 的 payout_shards.${label} 是 NULL(D-019 之前的旧市场, 或 genesis 时写入方漏传) — 无法核对, 拒绝 handoff(不猜测/不放行)`);
+    if (!envVal) throw new Error(`assertZkHandoffTmplCoherent: market=${marketId} 核对 ${label} 时对应 env 现值为空 — 拒绝 handoff(防御性兜底, 调用方应已在此之前检查过 env)`);
+    if (String(dbVal).toLowerCase() !== String(envVal).toLowerCase()) {
+      throw new Error(`assertZkHandoffTmplCoherent: market=${marketId} 的 ${label} 当前 env 值(${envVal})跟 genesis 时烤入的值(db=${dbVal})不一致 — env 在这个市场创建之后被改过, 用当前 env 重算会跟链上已烤的值对不上, 拒绝 handoff, 不静默用新值`);
+    }
+  }
+}
+
 export async function buildZkHandoffRequestV2(marketId, args) {
   // 🔴 NWT footgun catch(2026-07-08): 默认 dryRun=true(安全默认), 跟 admin endpoint 层的
   //   `dry_run !== false` 默认值方向对齐——本函数是 exported 的, 未来若有人绕过 endpoint 直接
@@ -493,7 +540,9 @@ export async function buildZkHandoffRequestV2(marketId, args) {
   if (!market) throw new Error(`buildZkHandoffRequestV2: market ${marketId} not found`);
   // verify-value-source: PS 当前 redeem 现读(不信任何缓存字段, 今晚三次 stale-read 教训) — closed==1
   // 由 readPayoutShardV2AttestedState 内部 fail-closed 校验(不是 close_attest_v2 刚落链的窗口会直接拒绝)。
-  const ps = sqlite.prepare('SELECT payout_redeem_hex, payout_ps_outpoint FROM payout_shards WHERE logical_market_id = ?').get(marketId);
+  // token_tmpl_hash/claim_tmpl_hash/market_suffix_hash(v205, D-019 迁移)一并取出——供下方
+  // assertZkHandoffTmplCoherent 用, 复用这一次查询, 不为它专门再查一遍同一行。
+  const ps = sqlite.prepare('SELECT payout_redeem_hex, payout_ps_outpoint, token_tmpl_hash, claim_tmpl_hash, market_suffix_hash FROM payout_shards WHERE logical_market_id = ?').get(marketId);
   if (!ps) throw new Error(`buildZkHandoffRequestV2: no payout_shards row for ${marketId}`);
   const state = readPayoutShardV2AttestedState(ps.payout_redeem_hex);   // throws if closed != 1(还没 attest / 状态已推进)
 
@@ -511,6 +560,14 @@ export async function buildZkHandoffRequestV2(marketId, args) {
   if (!process.env.ZK_TOKEN_TMPL_HASH) throw new Error('buildZkHandoffRequestV2: ZK_TOKEN_TMPL_HASH env 必需(T3 代币化新增, 不接受硬编码 fallback)');
   if (!process.env.ZK_CLAIM_TMPL_HASH) throw new Error('buildZkHandoffRequestV2: ZK_CLAIM_TMPL_HASH env 必需(T3 代币化新增, 不接受硬编码 fallback)');
   if (!process.env.ZK_MARKET_SUFFIX_HASH) throw new Error('buildZkHandoffRequestV2: ZK_MARKET_SUFFIX_HASH env 必需(T3 代币化新增, 不接受硬编码 fallback)');
+  // 值一致性硬门(ledger 1288，见 assertZkHandoffTmplCoherent 头注)——上面三行只查了"env 有没有设",
+  // 这里再查"env 现在的值是不是还是这个市场 genesis 时烤的那个值"，插在 computeCloseZkTmplAnchor 之前，
+  // 任何转账/广播都还没发生。
+  assertZkHandoffTmplCoherent(ps, marketId, {
+    tokenTmplHash: process.env.ZK_TOKEN_TMPL_HASH,
+    claimTmplHash: process.env.ZK_CLAIM_TMPL_HASH,
+    marketSuffixHash: process.env.ZK_MARKET_SUFFIX_HASH,
+  });
   // 根修(2026-07-09, NWT finding①(b)HIGH·docs/2026-07-09-NWT-redteam-gate-tmplhash-live-derive-66de59c6.md):
   // 这是 zk_handoff 铸 CloseZkV2 genesis 的实际调用点——pxvml 出生缺陷的历史事发路径原文("错值经 kanet.env
   // 烤进 pxvml genesis")。之前的 guard 只在 prove/close(genesis 下游)检查, genesis 本身这个点从没验过。
