@@ -38,6 +38,7 @@ import { extractTemplateArtifactV100 } from '../kasia-console/src/lib/pool-templ
 
 const POOL_SIDE_TICKET_SIL = './kasia-console/src/lib/sil-v1/PoolSideTicket.sil';
 const KANET_TEST_TOKEN_SIL = './kasia-console/src/lib/sil-v1/KanetTestToken.sil';
+const KANET_TOKEN_CLAIM_SIL = './kasia-console/src/lib/KanetTokenClaim.sil';
 const Z32 = '00'.repeat(32);
 const byteN = (n) => ({ kind: 'byte', value: n });
 
@@ -64,6 +65,18 @@ const kttArtifact = extractTemplateArtifactV100(kttCompiled);
 const kttSourceSha256 = createHash('sha256').update(readFileSync(KANET_TEST_TOKEN_SIL)).digest('hex');
 console.log('token_tmpl_hash(v1.0.0 权威值, compiled.template_hash_bytes):', kttArtifact.templateHashHex);
 console.log('KanetTestToken.sil sha256(源码漂移检测用):', kttSourceSha256);
+
+console.log('\n=== ①c KanetTokenClaim.claim_tmpl_hash(协议常量——ctor 4 字段全是 State, 无逐市场 baked 常量) ===');
+// KanetTokenClaim.sil ctor: init_market_cov_id/init_winner_pk/init_amount/init_token_tmpl_hash 全部
+// init_ 前缀 = 全是 State 字段, 排除在 template_hash 哈希区域外——跟 RootClaim.sil 自己的 claim_tmpl_hash
+// 字段(= 本值)不是同一件事: RootClaim/RefundClaim 的 ctor 直接烤这个值, 用来构造"新建 KanetTokenClaim
+// 实例"这个输出, 而这个值本身对所有市场恒定, 是可以复用的协议常量(同 ps_tmpl_hash/token_tmpl_hash)。
+const ktcCtor = [ctorBytes32V100(Z32), ctorBytes32V100(Z32), ctorIntV100(0), ctorBytes32V100(Z32)];
+const ktcCompiled = compileSilV100(KANET_TOKEN_CLAIM_SIL, ktcCtor, 'KanetTokenClaim');
+const ktcArtifact = extractTemplateArtifactV100(ktcCompiled);
+const ktcSourceSha256 = createHash('sha256').update(readFileSync(KANET_TOKEN_CLAIM_SIL)).digest('hex');
+console.log('claim_tmpl_hash(v1.0.0 权威值, compiled.template_hash_bytes):', ktcArtifact.templateHashHex);
+console.log('KanetTokenClaim.sil sha256(源码漂移检测用):', ktcSourceSha256);
 
 console.log('\n=== ② feeProfile[market_genesis](来自既有 mass 实验 provenance) ===');
 // 数值来源: docs/provenance/2026-09-14-j2-proto-v0-genesis-mass-fee-estimate/README.md
@@ -120,6 +133,13 @@ const out = {
       templatePrefixHex: kttArtifact.templatePrefix.toString('hex'),
       templateSuffixHex: kttArtifact.templateSuffix.toString('hex'),
       token_tmpl_hash: kttArtifact.templateHashHex,
+    },
+    KanetTokenClaim: {
+      sourcePath: 'src/lib/KanetTokenClaim.sil',
+      sourceSha256: ktcSourceSha256,
+      templatePrefixHex: ktcArtifact.templatePrefix.toString('hex'),
+      templateSuffixHex: ktcArtifact.templateSuffix.toString('hex'),
+      claim_tmpl_hash: ktcArtifact.templateHashHex,
     },
   },
   feeProfile,
