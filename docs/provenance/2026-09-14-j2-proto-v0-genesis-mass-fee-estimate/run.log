@@ -1,0 +1,89 @@
+=== ① 编译 ShardLeaf_direct(占位 ctor), 拿真实 redeem 脚本长度 ===
+ShardLeaf_direct redeem 脚本长度(bytes): 15687
+genesis P2SH 地址: kaspa:pzm04zr528l2tzce6nrwa9yyngscdp9cwcmvf7hhs8tahw2guryekffjhf5yq
+
+=== ② 构造一个 throwaway 私钥模拟 relay 自己的 fee input + 找零地址 ===
+
+--- genesisOutputValue = 1000 sompi ---
+mass: 4000000000
+required_fee (mass × 100 sompi/mass): 400000000000 sompi
+net_loss 会计入的量(genesisOutputValue + required_fee): 400000001000 sompi
+fee_ceiling = min(required_fee×2, ABS_FEE_CAP=5,000,000): 5000000
+net_loss <= fee_ceiling ? false
+
+--- genesisOutputValue = 10000 sompi ---
+mass: 400000000
+required_fee (mass × 100 sompi/mass): 40000000000 sompi
+net_loss 会计入的量(genesisOutputValue + required_fee): 40000010000 sompi
+fee_ceiling = min(required_fee×2, ABS_FEE_CAP=5,000,000): 5000000
+net_loss <= fee_ceiling ? false
+
+--- genesisOutputValue = 100000 sompi ---
+mass: 40000000
+required_fee (mass × 100 sompi/mass): 4000000000 sompi
+net_loss 会计入的量(genesisOutputValue + required_fee): 4000100000 sompi
+fee_ceiling = min(required_fee×2, ABS_FEE_CAP=5,000,000): 5000000
+net_loss <= fee_ceiling ? false
+
+--- genesisOutputValue = 1000000 sompi ---
+mass: 4000000
+required_fee (mass × 100 sompi/mass): 400000000 sompi
+net_loss 会计入的量(genesisOutputValue + required_fee): 401000000 sompi
+fee_ceiling = min(required_fee×2, ABS_FEE_CAP=5,000,000): 5000000
+net_loss <= fee_ceiling ? false
+
+--- genesisOutputValue = 5000000 sompi ---
+mass: 800000
+required_fee (mass × 100 sompi/mass): 80000000 sompi
+net_loss 会计入的量(genesisOutputValue + required_fee): 85000000 sompi
+fee_ceiling = min(required_fee×2, ABS_FEE_CAP=5,000,000): 5000000
+net_loss <= fee_ceiling ? false
+
+--- genesisOutputValue = 10000000 sompi ---
+mass: 400000
+required_fee (mass × 100 sompi/mass): 40000000 sompi
+net_loss 会计入的量(genesisOutputValue + required_fee): 50000000 sompi
+fee_ceiling = min(required_fee×2, ABS_FEE_CAP=5,000,000): 5000000
+net_loss <= fee_ceiling ? false
+
+--- genesisOutputValue = 15000000 sompi ---
+mass: 266666
+required_fee (mass × 100 sompi/mass): 26666600 sompi
+net_loss 会计入的量(genesisOutputValue + required_fee): 41666600 sompi
+fee_ceiling = min(required_fee×2, ABS_FEE_CAP=5,000,000): 5000000
+net_loss <= fee_ceiling ? false
+
+--- genesisOutputValue = 20000000 sompi ---
+mass: 200000
+required_fee (mass × 100 sompi/mass): 20000000 sompi
+net_loss 会计入的量(genesisOutputValue + required_fee): 40000000 sompi
+fee_ceiling = min(required_fee×2, ABS_FEE_CAP=5,000,000): 5000000
+net_loss <= fee_ceiling ? false
+
+--- genesisOutputValue = 25000000 sompi ---
+mass: 160000
+required_fee (mass × 100 sompi/mass): 16000000 sompi
+net_loss 会计入的量(genesisOutputValue + required_fee): 41000000 sompi
+fee_ceiling = min(required_fee×2, ABS_FEE_CAP=5,000,000): 5000000
+net_loss <= fee_ceiling ? false
+
+--- genesisOutputValue = 30000000 sompi ---
+mass: 133333
+required_fee (mass × 100 sompi/mass): 13333300 sompi
+net_loss 会计入的量(genesisOutputValue + required_fee): 43333300 sompi
+fee_ceiling = min(required_fee×2, ABS_FEE_CAP=5,000,000): 5000000
+net_loss <= fee_ceiling ? false
+
+--- genesisOutputValue = 50000000 sompi ---
+mass: 80000
+required_fee (mass × 100 sompi/mass): 8000000 sompi
+net_loss 会计入的量(genesisOutputValue + required_fee): 58000000 sompi
+fee_ceiling = min(required_fee×2, ABS_FEE_CAP=5,000,000): 5000000
+net_loss <= fee_ceiling ? false
+
+--- genesisOutputValue = 100000000 sompi ---
+mass: 40001
+required_fee (mass × 100 sompi/mass): 4000100 sompi
+net_loss 会计入的量(genesisOutputValue + required_fee): 104000100 sompi
+fee_ceiling = min(required_fee×2, ABS_FEE_CAP=5,000,000): 5000000
+net_loss <= fee_ceiling ? false
