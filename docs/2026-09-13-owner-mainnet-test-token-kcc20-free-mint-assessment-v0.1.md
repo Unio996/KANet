@@ -145,6 +145,7 @@ entry mint(int amount, byte[32] to, byte to_scheme)：
 - **RustDesk 实核**：服务在掉线 4 天里**一直在线**（09-10/11/12 每日与 `rs-ny.rustdesk.com` 通信；09-12 13:20 本地 `request_pk`×3 = 有人按 ID 尝试连入未成）；而 09-13 两次成功连入来源 = **younio 的 Tailscale IP**（`direct-server='Y'`）⇒ Owner 的 RustDesk 路径经 Tailscale、同断。**独立第二扇门 = RustDesk ID + 永久密码经官方中继**（登录界面即可用）。安全建议（Owner 拍）：关 `allow-remote-config-modification`、开 2FA、**AnyDesk 9.7.8 亦在 da9 作为服务运行 → 建议卸载只留 RustDesk**（同机 40 把 relay 私钥）。
 - ✅ 09:05Z Owner 直令已执行：`allow-remote-config-modification 'Y'→'N'`（两份配置；服务未重启——Owner 当时正经 RustDesk 在线，重启窗口落实）；**AnyDesk 已卸载**（服务/exe/进程/Uninstall 项/Run 键全 0），配置目录改名封存 `*.removed-20260914`。回执：inbox `2026-09-14T09-05Z-j1-DONE-da9-rustdesk-remoteconfig-off-anydesk-removed-owner-order.md`。
 - ⏸ 只能 Owner 做：RustDesk 2FA（GUI）；Tailscale 控制台 Disable key expiry（da9 + younio）；手机端存 RustDesk ID+永久密码。
+- ✅ 09:35Z RustDesk 永久密码重设（Owner 从未保存旧密码）：`rustdesk --password`，密码只落 da9 非同步路径由 Owner 读后 J1 删；期间发现桌面被重定向到 **OneDrive** 且客户端在跑 ⇒ 删副本 + 再轮换一次。✅ 09:45Z **OneDrive 已卸载**（Owner 直令；卸前核 0 云端占位、无 KANet 敏感文件；153 文件仍在本地；已知文件夹重定向未改）。回执 inbox `2026-09-14T09-45Z-j1-DONE-da9-rustdesk-pw-rotated-onedrive-removed-owner-order.md`。
 - NanoKVM 方案仍成立：它管"机器起不来"那一类，与本次不是同一病。
 
 ## 8. 本会话实测坐标（v1.0.0，只写 scratchpad，未入库）
