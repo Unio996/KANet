@@ -1,0 +1,87 @@
+{
+  "_comment": "D-0xx 权威声明:当前主网集(T1代币+T3市场)是哪10个.sil,单一来源。收拢到 src/lib/sil-v1/ 的物理搬迁并入 (1317) 目录改名/合并运维窗执行,本文件是搬迁前后都成立的声明层(T4/任何自动化工具直接消费此文件,不靠文件名猜)。",
+  "schemaVersion": 1,
+  "declaredBy": "J2",
+  "declaredAt": "2026-09-14T11:20:00+07:00",
+  "sourceLedgerRef": "COORD-LEDGER (1325)/(1327)",
+  "physicalCollectionStatus": "PENDING — 与 (1317) 目录改名/合并运维窗合并执行,不在原型期做(Bettor 裁,见 1327 回复)",
+  "contracts": [
+    {
+      "name": "KanetTestToken",
+      "role": "T1 代币",
+      "path": "src/lib/sil-v1/KanetTestToken.sil",
+      "sha256": "5e01af343c312a96e9419bb3bea2bb135ba89d9c44286ff2dbf1c658044c914a",
+      "bytes": 11151
+    },
+    {
+      "name": "PayoutShard",
+      "role": "T3 市场·非ZK委员分账层(v1)",
+      "path": "src/lib/PayoutShard.sil",
+      "sha256": "1bd558bc905384fd01b045f62cc576508250df25c76005c8bd210d82ee36b06c",
+      "bytes": 63963
+    },
+    {
+      "name": "PayoutShardV2",
+      "role": "T3 市场·ZK结算专用委员分账层",
+      "path": "src/lib/PayoutShardV2.sil",
+      "sha256": "4533a6eeacc6aa7cf96dc4752d05b4f55bf4b3dea6fe3f97a32f192523f523b9",
+      "bytes": 55370
+    },
+    {
+      "name": "KanetTokenClaim",
+      "role": "T3 市场·claim/refund落地目的地(纯代币持有covenant)",
+      "path": "src/lib/KanetTokenClaim.sil",
+      "sha256": "a39f9b32ced5679dcb5ef08eae8d4fb62572a1b6139ab8601945978baaf92bbf",
+      "bytes": 8324
+    },
+    {
+      "name": "RefundClaim",
+      "role": "T3 市场·退款腿(RootClose.convert_to_refundclaim新建)",
+      "path": "src/lib/RefundClaim.sil",
+      "sha256": "7b45a296f378070931d92cea04f43d57a1215e170b9edbb239d9b76ee8e268a1",
+      "bytes": 10536
+    },
+    {
+      "name": "CloseZkV2",
+      "role": "T3 市场·ZK结算closing covenant",
+      "path": "src/lib/CloseZkV2.sil",
+      "sha256": "bbcd19a8d02d963c645bcb8d9a9014117eab44f35efbf23cf3b66c928c1f21cb",
+      "bytes": 32402
+    },
+    {
+      "name": "RootClaim",
+      "role": "T3 市场·claim腿(RootClose.convert_to_claim新建)",
+      "path": "src/lib/RootClaim.sil",
+      "sha256": "3cf149fe1327cc417a9b07ccef054d77d7f3d020e100aeda1c8a70ebceec2121",
+      "bytes": 14079
+    },
+    {
+      "name": "RootClose",
+      "role": "T3 市场·主壳(下注归集+委员判定+分流claim/refund)",
+      "path": "src/lib/RootClose.sil",
+      "sha256": "2b11685276ac9145750db9527075c6ce97acc4ff62d617fc3400a882b4c3a3d7",
+      "bytes": 16242
+    },
+    {
+      "name": "ShardLeaf",
+      "role": "T3 市场·多分片下注归集叶子(partial-shard sweep)",
+      "path": "src/lib/ShardLeaf.sil",
+      "sha256": "bce6fbd949e3f9ec800145c01c2f5abcace6b82a6feab7867e1725cf0c20e664",
+      "bytes": 14827
+    },
+    {
+      "name": "ShardLeaf_direct",
+      "role": "T3 市场·单分片下注归集叶子(v0原型建议用这个)",
+      "path": "src/lib/ShardLeaf_direct.sil",
+      "sha256": "572eb53dc41447e9dfa8b38153de90c1de9b2764efcfaceba2bac1d0abc7f641",
+      "bytes": 12705
+    }
+  ],
+  "excludedLegacyExamples": [
+    "src/lib/PoolSide*.sil", "src/lib/PoolSpine*.sil", "src/lib/PoolRoot.sil",
+    "src/lib/PredictionEscrow*.sil", "src/lib/PredictionPoolUnanimous3.sil",
+    "src/lib/WinningsPool_v1.sil", "src/lib/*Probe*.sil", "src/lib/RootStub_probe*.sil",
+    "src/lib/FoldNode*.sil", "src/lib/PoolLeaf*.sil", "src/lib/OracleStake_v1.sil"
+  ],
+  "verifyCommand": "cd kasia-console/src/lib && sha256sum sil-v1/KanetTestToken.sil PayoutShard.sil PayoutShardV2.sil KanetTokenClaim.sil RefundClaim.sil CloseZkV2.sil RootClaim.sil RootClose.sil ShardLeaf.sil ShardLeaf_direct.sil"
+}
