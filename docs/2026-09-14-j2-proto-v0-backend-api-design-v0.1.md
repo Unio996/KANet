@@ -310,13 +310,20 @@ Console-不碰链）同时满足。
 
 1. **只签 `sign_input_indices` 列出的索引**，其余输入原样保留——防止调用方哄骗 relay 签一个它没被
    要求签的、意料之外的输入。
-2. **拒绝任何"把 relay 自己的 UTXO 花到非找零地址"的输出**：任何被 relay 私钥签名花掉的 UTXO，其
-   找零部分必须原样回到 relay 自己的地址，不能被调用方重定向到任意地址——防止这条命令被滥用成一个
-   通用转账后门（关键差异：`TRANSFER` 命令的整个设计意图就是"转账去任意地址"，`covenant_broadcast`
-   必须反过来，专门防这件事）。
-3. **单笔 KAS 上限 ≤0.5 KAS（含手续费）**——硬性封顶这条命令能移动的最大真实价值，即使调用方逻辑有
-   漏洞，损失也被限制在这个量级（§6 已定的 proto relay 总余额上限 <5 KAS 是另一层，这条是单笔层面）。
-4. **执行权限**：(B′) 形态下，只允许 `PROTO_RELAY_ID` 那一个 relay 执行该命令（其余 relay 收到直接
+2. **净损耗守恒公式（NWT 1352 打回重写，原"存在一个付回自身的输出"表述可被绕过：relay 签一笔 1 KAS
+   输入，输出 A 付 0.00001 KAS 回自己满足"存在性"、输出 B 把 0.99999 KAS 转去任意地址，relay 净损
+   ≈1 KAS 而旧表述挡不住这个）——两条互相独立、缺一不可**：
+
+   ```
+   net_loss = Σ(relay 签名的 input.value) − Σ(outputs 中 scriptPubKey == relay 自身地址 的 value)
+   require(net_loss ≤ FEE_CEILING)         // 硬编码常量, 量级 = 一笔真实手续费(几千 sompi), 远小于 0.5 KAS
+   require(Σ(relay 签名的 input.value) ≤ SIGNED_INPUT_CEILING)   // 0.5 KAS——防止即使 net_loss 算对, 签一笔巨额输入本身也是风险(如输入被恶意 UTXO 污染/女巫)
+   ```
+
+   `net_loss` 卡的是"这笔交易到底净花掉了 relay 多少钱"（即使找零精确到自己地址、总输入很小，也不能让
+   净损耗超过手续费量级）；`SIGNED_INPUT_CEILING` 卡的是"relay 一次性签名暴露的总价值上限"（两者是不同
+   的量、不同的攻击面，分开写清楚，不用一条描述性语言笼统带过）。
+3. **执行权限**：(B′) 形态下，只允许 `PROTO_RELAY_ID` 那一个 relay 执行该命令（其余 relay 收到直接
    拒绝，同 T-LOOPBACK-AUTHZ 那批热修"专属 tier"的思路）；(C) 形态下，该命令只在独立 proto relay 进程
    里注册，生产 relay 完全不认识它——两种形态都确保"生产 relay 永远不会被这条命令误用"。
 
