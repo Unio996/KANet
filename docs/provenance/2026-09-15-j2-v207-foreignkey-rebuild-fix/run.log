@@ -1,0 +1,20 @@
+=== BEFORE FIX: real v206-shape data (1 proto_markets + 1 proto_bets + 1 proto_bet_intents, FK-linked) hits v207 ===
+[migrate] v206: proto_token_defs/proto_markets/proto_bets/proto_bet_intents/proto_claims 建表...
+SqliteError: FOREIGN KEY constraint failed
+    at Database.exec (...\better-sqlite3\lib\methods\wrappers.js:9:14)
+    at runMigrations (...\migrate.js:6085:16)   <- sqlite.exec('DROP TABLE proto_markets')
+  code: 'SQLITE_CONSTRAINT_FOREIGNKEY'
+(console boot would crash on next restart against a production DB with any market+bet data present)
+
+=== AFTER FIX: PRAGMA foreign_keys=OFF (outside transaction) / rebuild / foreign_key_check / PRAGMA foreign_keys=ON ===
+[migrate] v207: proto_markets rebuilt (1 rows preserved, 2 indexes recreated, ...).
+[migrate] DB migrations complete.
+
+Assertions (all pass, real DB, real FK-linked rows):
+  ① PRAGMA foreign_key_check: []
+  ② proto_bets CREATE TABLE sql: "... REFERENCES proto_markets(id) ..." (literal table name, RENAME did not rewrite this — sqlite_master text is unaffected by renaming a different table)
+     proto_bet_intents CREATE TABLE sql: "... REFERENCES proto_bets(id) ..." (unaffected, different table entirely)
+  ③ Row counts before == after: markets=1, bets=1, intents=1 (all preserved, existing market.status='betting' untouched by the new DEFAULT change)
+  ④ Idempotent: second run on the same populated DB → "already has genesis intent columns/CHECK states (idempotent skip)", fk_check still [], row counts still 1/1/1
+
+Fresh-install path (empty DB, no pre-existing data) re-verified post-fix: v207 still applies cleanly, 0 rows preserved (correct, nothing existed).

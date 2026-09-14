@@ -6073,28 +6073,47 @@ export function runMigrations() {
         `$1                             genesis_prepared_txid    TEXT,\n                             genesis_prepared_tx_json TEXT,\n                             genesis_submitted_txid   TEXT,\n                             genesis_landed_depth     INTEGER,\n                             genesis_landed_at        TEXT,\n                             genesis_last_error       TEXT,\n`
       );
 
-      sqlite.exec('BEGIN TRANSACTION');
+      // 🔴 外键风险修复(NWT 复核发现, 账本1425后续): proto_bets.market_id REFERENCES proto_markets(id)——
+      // 在 foreign_keys=ON(client.js:47 恒开)下直接 DROP TABLE proto_markets 会被 SQLite 硬拒
+      // (SQLITE_CONSTRAINT_FOREIGNKEY, 实测: 一个真实带数据——1 market+1 proto_bets+1 proto_bet_intents
+      // ——的库上直接崩, 不是理论风险)。同 v83(exchange_offers/retail_dex_orders 互相有 FK 那次)既有手法:
+      // PRAGMA foreign_keys=OFF 必须在事务外执行(SQLite 规定: 事务内改这个 pragma 是 no-op), 重建完成后
+      // 事务外再打开。RENAME 本身不改写子表(proto_bets)的 FK 目标名——sqlite_master 里 proto_bets 的
+      // CREATE TABLE 原文一直写的是字面量 "proto_markets", RENAME 只是把另一个表对象的名字换了, 不会去
+      // 改写 proto_bets 那行 DDL 文本里的引用, 实测已核对(见 provenance)。
+      sqlite.exec('PRAGMA foreign_keys = OFF');
       try {
-        sqlite.exec('DROP TABLE IF EXISTS proto_markets_v207');
-        sqlite.exec(newSql);
-        sqlite.exec(`INSERT INTO proto_markets_v207 (${colsCsv}) SELECT ${colsCsv} FROM proto_markets`);
-        const rowCountAfter = sqlite.prepare(`SELECT COUNT(*) AS cnt FROM proto_markets_v207`).get().cnt;
-        if (rowCountAfter !== rowCountBefore) {
-          throw new Error(`v207 row count mismatch: before=${rowCountBefore} after=${rowCountAfter}`);
-        }
-        sqlite.exec('DROP TABLE proto_markets');
-        sqlite.exec('ALTER TABLE proto_markets_v207 RENAME TO proto_markets');
-        for (const idx of indexes) {
-          if (idx.sql) {
-            try { sqlite.exec(idx.sql); }
-            catch (ie) { console.warn(`[migrate] v207 index ${idx.name} recreate fail: ${ie.message}`); }
+        sqlite.exec('BEGIN TRANSACTION');
+        try {
+          sqlite.exec('DROP TABLE IF EXISTS proto_markets_v207');
+          sqlite.exec(newSql);
+          sqlite.exec(`INSERT INTO proto_markets_v207 (${colsCsv}) SELECT ${colsCsv} FROM proto_markets`);
+          const rowCountAfter = sqlite.prepare(`SELECT COUNT(*) AS cnt FROM proto_markets_v207`).get().cnt;
+          if (rowCountAfter !== rowCountBefore) {
+            throw new Error(`v207 row count mismatch: before=${rowCountBefore} after=${rowCountAfter}`);
           }
+          sqlite.exec('DROP TABLE proto_markets');
+          sqlite.exec('ALTER TABLE proto_markets_v207 RENAME TO proto_markets');
+          for (const idx of indexes) {
+            if (idx.sql) {
+              try { sqlite.exec(idx.sql); }
+              catch (ie) { console.warn(`[migrate] v207 index ${idx.name} recreate fail: ${ie.message}`); }
+            }
+          }
+          sqlite.exec('COMMIT');
+          console.log(`[migrate] v207: proto_markets rebuilt (${rowCountBefore} rows preserved, ${indexes.length} indexes recreated, CHECK 加 genesis_pending/genesis_prepared/genesis_submitted/genesis_ambiguous, DEFAULT 改 genesis_pending, 加 6 个 genesis_* 回执列).`);
+        } catch (e) {
+          sqlite.exec('ROLLBACK');
+          throw e;
         }
-        sqlite.exec('COMMIT');
-        console.log(`[migrate] v207: proto_markets rebuilt (${rowCountBefore} rows preserved, ${indexes.length} indexes recreated, CHECK 加 genesis_pending/genesis_prepared/genesis_submitted/genesis_ambiguous, DEFAULT 改 genesis_pending, 加 6 个 genesis_* 回执列).`);
-      } catch (e) {
-        sqlite.exec('ROLLBACK');
-        throw e;
+        // 🔴 fk_check 必须在重新打开 foreign_keys 之前、在 proto_markets 已经是重建后新表的状态下跑——
+        // 确认 proto_bets/proto_bet_intents 对 proto_markets(id) 的引用全部仍然有效(没有留下悬空外键)。
+        const fkViolations = sqlite.pragma('foreign_key_check');
+        if (fkViolations.length) {
+          throw new Error(`v207 foreign_key_check found ${fkViolations.length} violation(s) after rebuild: ${JSON.stringify(fkViolations)}`);
+        }
+      } finally {
+        sqlite.exec('PRAGMA foreign_keys = ON');
       }
     } else {
       console.log('[migrate] v207: proto_markets already has genesis intent columns/CHECK states (idempotent skip).');
