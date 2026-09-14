@@ -43,6 +43,40 @@ export async function registerIngestRoutes(fastify) {
     return reply.code(201).send({ ok: true, status: r.intent.status });
   });
 
+  // ── POST /ingest/proto-bet-intent-phase — covenant_broadcast 两阶段回执 (J2 2026-09-14, 设计
+  //    docs/2026-09-14-j2-proto-v0-backend-api-design-v0.1.md §9.5, ledger 1366, Bettor 四条硬条件)。
+  //
+  //   relay 在【广播之前】POST phase='prepared'{txid, txJson=已签名交易字节}, 拿到 2xx 才 submitTransaction
+  //   (fail-closed: console 不可达 ⇒ 不广播); 广播后 POST phase='submitted'{txid}。
+  //
+  //   与 /ingest/submit-intent(TRANSFER 专属, 写 submit_intents 表)不共用一张表——proto_bet_intents
+  //   是独立表(proto-bet-intent.mjs 文件头原话"不复用 submit_intents 表", 多一个 depends_on 链式依赖字段)。
+  //
+  //   🔴 relay 身份限定(硬条件①): body 必须带 relay_id, 且必须等于 process.env.PROTO_RELAY_ID——
+  //   不等(含 PROTO_RELAY_ID 未配置的情况, fail-closed 方向: 未配置 = 无人被授权, 不是全部放行)
+  //   ⇒ 403 + LOUD 日志。生产 relay 即使拿到了 ingest 共享密钥(PSK, 上面 preHandler 已经过了那一关),
+  //   也永远打不进这张表——PSK 只证明"这是一个合法 relay 进程", relay_id 匹配才证明"是那一个被
+  //   授权碰这套原型资金逻辑的 relay"，两层鉴权职责不同, 不能互相替代。
+  //
+  //   幂等+单调(硬条件②): 直接复用既有 recordBetIntentPhase + markBetIntent 的 RANK 单调机制,
+  //   不新写幂等逻辑——重复调用同一 phase、或试图倒退到更早 phase, 都是 no-op(不报错)。
+  //
+  //   未知 intentKey(console 还没 ensureBetIntent 建过这一行) ⇒ 409, 同 /ingest/submit-intent
+  //   现有的"relay 只对 console 先 INSERT 的意图回执"契约一致, 不新造语义。
+  fastify.post('/ingest/proto-bet-intent-phase', async (request, reply) => {
+    const { relay_id, intentKey, phase, txid, txJson = null } = request.body || {};
+    const PROTO_RELAY_ID = process.env.PROTO_RELAY_ID;
+    if (!PROTO_RELAY_ID || relay_id !== PROTO_RELAY_ID) {
+      console.error(`[ingest] proto-bet-intent-phase DENIED: relay_id=${relay_id || '(missing)'} != PROTO_RELAY_ID(${PROTO_RELAY_ID ? 'configured' : 'NOT SET'}) — intentKey=${intentKey || '(missing)'}`);
+      return reply.code(403).send({ ok: false, error: 'relay_id mismatch: only PROTO_RELAY_ID may call this endpoint' });
+    }
+    if (!intentKey || !phase || !txid) return reply.code(400).send({ ok: false, error: 'intentKey, phase, txid required' });
+    const { recordBetIntentPhase } = await import('../lib/proto-bet-intent.mjs');
+    const r = recordBetIntentPhase({ intentKey, phase, txid, txJson });
+    if (!r.ok) return reply.code(409).send({ ok: false, error: r.error });
+    return reply.code(201).send({ ok: true, status: r.intent.status });
+  });
+
   // ── POST /ingest/kaspa-tx — Relay reports an observed Kaspa TX ──
   //
   // Relay pre-filters blocks against watched-addresses set and only posts matches.
