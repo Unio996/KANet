@@ -5,17 +5,30 @@
 // 执行权限门。这两处等 Owner 在 (B′)/(C) 之间拍板后再落——B′ 与 C 完全共用这一层，差别只在"注册在哪个
 // 进程、谁能调"。
 //
-// 设计要点(§9.1/§9.2，NWT 1353 修正版):
+// 设计要点(§9.1/§9.2，NWT 1353 修正版；Bettor 1386 设计变更见下 ②③):
 //   ① 只签 sign_input_indices 列出的索引，其余输入原样保留。
-//   ② SIGNED_INPUT_CEILING(0.5 KAS)——Σ(relay 签名的 input.value) 硬上限，卡"一次性签名暴露的总
-//      价值"，与真实手续费无关，签名前就能算(不需要先签名才知道 mass)。
+//   ② SIGNED_INPUT_CEILING = **1.0 KAS**(Bettor 1386②, 原 0.5 KAS——实测
+//      `ShardLeaf_direct` genesis 这类大脚本 covenant 的 fee input 需要覆盖 net_loss+找零, 0.5 KAS
+//      装不下, 见 docs/provenance/2026-09-14-j2-proto-v0-genesis-mass-fee-estimate/)——Σ(relay 签名
+//      的 input.value) 硬上限，卡"一次性签名暴露的总价值"，与真实手续费无关，签名前就能算(不需要先
+//      签名才知道 mass)。
 //   ③ 🔴 required_fee 必须是**动态算出来的**，不能写死"几千 sompi"占位(NWT 1353 实测: bettor.js:1383
 //      settle_consensual 需 789,800 sompi = 7898 mass × 100 sompi/mass，写死几千会把所有合法广播全部
 //      自拒)——`required_fee = calculateTransactionMass(networkId, signedTx) × 100 sompi/mass`
 //      (kasia-relay/src/lib/p2sh.mjs:135 主网已在用这个调用；**算不出 mass ⇒ fail-loud 拒签，不
 //      fallback**——不像 p2sh.mjs 那条红线 7 observe 阶段的"wasm panic 就退本地上界"，这里没有"observe
-//      阶段"，直接拒)。`require(net_loss ≤ min(required_fee × 2, ABS_FEE_CAP))`，`ABS_FEE_CAP` =
-//      0.05 KAS(5,000,000 sompi)硬顶——两者取更严的那个。
+//      阶段"，直接拒)。
+//   🔴 ABS_FEE_CAP 设计变更(Bettor 1386①, 取代 NWT 1353 原"0.05 KAS 全局硬顶"): 实测
+//      `ShardLeaf_direct` genesis 的 net_loss 理论最小值 ≈0.4 KAS(15687 字节巨型 covenant 脚本在
+//      mainnet KIP-9 storage mass 规则下的物理约束，不是选错了金额——见上述 provenance)，是原 0.05 KAS
+//      硬顶的 8 倍，说明"全局唯一硬顶"这个设计本身对不同大小的合约不成立。**改为按 kind 派生**：
+//      每个 kind 各自离线跑一次 mass 实验(生产真实 genesis 形态 version:1+populateGenesisCovenants)
+//      算出 `cap[kind] = measured_min_net_loss[kind] × 2`，写进
+//      `kasia-console/scripts/proto-v0-template-anchors.json` 的 `feeProfile[kind].cap`——
+//      `validateNetLoss` 的 `absFeeCapSompi` 参数因此**改为必填**(不再有默认值), 调用方必须显式传
+//      对应 kind 的 cap，防止"忘记传就悄悄用了一个不适用的默认值"。另加 **GLOBAL_ABS_FEE_CAP_SOMPI
+//      = 1.0 KAS**(任何 kind 都不得超的最终硬顶，三者取最小：`min(required_fee×2, absFeeCapSompi,
+//      GLOBAL_ABS_FEE_CAP_SOMPI)`)——即使某个 kind 的 cap 因为疏忽被设得过大，全局硬顶仍然兜底。
 //   ④ finalize 后 txid == expected_txid —— 同字节重播断言(同 TRANSFER 命令 prepared_txid 既有契约)。
 //
 // 职责分层(不变量): §9.2 的安全性质完全建立在纯函数(validateSignedInputCeiling / validateNetLoss)
@@ -35,8 +48,11 @@
 /** @typedef {{index:number, amountSompi:bigint, scriptPubKeyRaw:string}} PlainInput */
 /** @typedef {{valueSompi:bigint, scriptPubKeyRaw:string}} PlainOutput */
 
-export const ABS_FEE_CAP_SOMPI = 5_000_000n;        // 0.05 KAS 绝对硬顶(NWT 1353)
-export const SIGNED_INPUT_CEILING_SOMPI = 50_000_000n; // 0.5 KAS
+// 🔴 ABS_FEE_CAP_SOMPI(旧 0.05 KAS 全局常量, NWT 1353)已废弃(Bettor 1386①)——不再导出、不再是
+// validateNetLoss 的默认值来源。cap 现在按 kind 从 proto-v0-template-anchors.json 的 feeProfile[kind]
+// 取, 由调用方显式传入 validateNetLoss({absFeeCapSompi})。
+export const GLOBAL_ABS_FEE_CAP_SOMPI = 100_000_000n; // 1.0 KAS——任何 kind 都不得超的最终硬顶(Bettor 1386①)
+export const SIGNED_INPUT_CEILING_SOMPI = 100_000_000n; // 1.0 KAS(Bettor 1386②, 原 0.5 KAS 装不下 genesis)
 export const SOMPI_PER_MASS = 100n;
 
 /**
@@ -128,8 +144,9 @@ export function canonicalScriptHex(spk) {
 
 /**
  * 纯函数: net_loss = Σ(relay 签名的 input.value) − Σ(outputs 中 scriptPubKey == relay 自身地址 的 value)。
- * require(net_loss ≤ min(requiredFeeSompi × 2, ABS_FEE_CAP))。requiredFeeSompi 由调用方传入(见
- * computeRequiredFeeSompi，必须是签名后算出来的真实值，本函数不负责算、不碰 wasm)。
+ * require(net_loss ≤ min(requiredFeeSompi × 2, absFeeCapSompi, GLOBAL_ABS_FEE_CAP_SOMPI))。
+ * requiredFeeSompi 由调用方传入(见 computeRequiredFeeSompi，必须是签名后算出来的真实值，本函数不
+ * 负责算、不碰 wasm)。
  * @param {object} o
  * @param {PlainInput[]} o.inputs
  * @param {PlainOutput[]} o.outputs
@@ -138,15 +155,19 @@ export function canonicalScriptHex(spk) {
  *   纯 hex 字符串三种都行，内部过 canonicalScriptHex() 统一(不要求调用方自己先转好, 也不要求"是 hex"——
  *   这个参数以前叫 relayScriptPubKeyHex, 那个名字里的"Hex"是错误承诺, 已订正)。
  * @param {bigint} o.requiredFeeSompi  computeRequiredFeeSompi() 的结果(签名后算出的真实 mass×费率)
- * @param {bigint} [o.absFeeCapSompi]
+ * @param {bigint} o.absFeeCapSompi  🔴 Bettor 1386①: 必填, 不再有默认值——按 kind 从
+ *   proto-v0-template-anchors.json 的 feeProfile[kind].cap 传入(每个 kind 各自离线跑一次 mass 实验
+ *   算出的 cap = measured_min_net_loss × 2)。忘记传会被下面的显式校验拒, 不会静默落到一个不适用
+ *   于当前 kind 的旧全局默认值上。
  * @returns {{ok:true, netLossSompi:bigint, feeCeilingSompi:bigint} | {ok:false, reason:string, netLossSompi?:bigint, feeCeilingSompi?:bigint}}
  */
-export function validateNetLoss({ inputs, outputs, signInputIndices, relayScriptPubKey, requiredFeeSompi, absFeeCapSompi = ABS_FEE_CAP_SOMPI }) {
+export function validateNetLoss({ inputs, outputs, signInputIndices, relayScriptPubKey, requiredFeeSompi, absFeeCapSompi }) {
   if (!Array.isArray(inputs) || !inputs.length) return { ok: false, reason: 'inputs must be a non-empty array' };
   if (!Array.isArray(outputs)) return { ok: false, reason: 'outputs must be an array' };
   if (!Array.isArray(signInputIndices) || !signInputIndices.length) return { ok: false, reason: 'signInputIndices must be a non-empty array' };
   if (!relayScriptPubKey) return { ok: false, reason: 'relayScriptPubKey required' };
   if (typeof requiredFeeSompi !== 'bigint' || requiredFeeSompi < 0n) return { ok: false, reason: 'requiredFeeSompi must be a non-negative bigint (computed via computeRequiredFeeSompi, post-signing)' };
+  if (typeof absFeeCapSompi !== 'bigint' || absFeeCapSompi < 0n) return { ok: false, reason: 'absFeeCapSompi must be a non-negative bigint (Bettor 1386: per-kind cap from proto-v0-template-anchors.json feeProfile[kind].cap — no global default, caller must pass it explicitly)' };
 
   // 🔴 NWT 1376(非阻断建议, 同 validateSignedInputCeiling 一致): 显式拒绝重复索引, 不依赖"重复只会
   // 让 net_loss 算大更易拒"这条方向安全的隐性性质——构造错误在源头就报错。
@@ -183,9 +204,12 @@ export function validateNetLoss({ inputs, outputs, signInputIndices, relayScript
   }
   const netLossSompi = signedInputTotalSompi - returnedToRelaySompi;
   const dynamicCeiling = requiredFeeSompi * 2n;
-  const feeCeilingSompi = dynamicCeiling < absFeeCapSompi ? dynamicCeiling : absFeeCapSompi; // min(...)
+  // 🔴 Bettor 1386①: 三者取最小——kind 专属 cap(absFeeCapSompi)之外, 再叠一层
+  // GLOBAL_ABS_FEE_CAP_SOMPI(1.0 KAS)兜底, 防止某个 kind 的 cap 因疏忽被设得过大。
+  let feeCeilingSompi = dynamicCeiling < absFeeCapSompi ? dynamicCeiling : absFeeCapSompi; // min(dynamic, kind cap)
+  if (GLOBAL_ABS_FEE_CAP_SOMPI < feeCeilingSompi) feeCeilingSompi = GLOBAL_ABS_FEE_CAP_SOMPI; // 全局硬顶再钳一次
   if (netLossSompi > feeCeilingSompi) {
-    return { ok: false, reason: `net_loss ${netLossSompi} exceeds fee ceiling ${feeCeilingSompi} (= min(required_fee×2=${dynamicCeiling}, ABS_FEE_CAP=${absFeeCapSompi}); signed_input_total=${signedInputTotalSompi}, returned_to_relay=${returnedToRelaySompi})`, netLossSompi, feeCeilingSompi };
+    return { ok: false, reason: `net_loss ${netLossSompi} exceeds fee ceiling ${feeCeilingSompi} (= min(required_fee×2=${dynamicCeiling}, absFeeCapSompi=${absFeeCapSompi}, GLOBAL_ABS_FEE_CAP_SOMPI=${GLOBAL_ABS_FEE_CAP_SOMPI}); signed_input_total=${signedInputTotalSompi}, returned_to_relay=${returnedToRelaySompi})`, netLossSompi, feeCeilingSompi };
   }
   return { ok: true, netLossSompi, feeCeilingSompi };
 }

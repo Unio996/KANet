@@ -148,7 +148,7 @@ await tAsync('FRESH-4 validateSignedInputCeiling 失败(签名前) ⇒ 不签名
   const kaspa = makeFakeKaspa();
   const rpc = makeRpc();
   const ingest = makeIngestPhase();
-  const cmd = makeCmd({ intentKey: 'proto-bet:f4:mint', inputAmt: '60000000' }); // > SIGNED_INPUT_CEILING(50_000_000)
+  const cmd = makeCmd({ intentKey: 'proto-bet:f4:mint', inputAmt: '110000000' }); // > SIGNED_INPUT_CEILING(Bettor 1386②: 1.0 KAS = 100_000_000)
   const r = await covenantBroadcastRelay({ cmd, kaspa, rpc, wallet: makeWallet(), networkId: 'mainnet', senderAddress: 'relay-addr', log: () => {}, ingestPhase: ingest.fn });
   assert.strictEqual(r.ok, false);
   assert.strictEqual(r.code, 'signed_input_ceiling_exceeded');

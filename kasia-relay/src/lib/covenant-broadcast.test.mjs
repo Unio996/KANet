@@ -5,7 +5,7 @@
 import assert from 'node:assert';
 import {
   validateSignedInputCeiling, validateNetLoss, computeRequiredFeeSompi, assertFinalTxid,
-  signOnlyDeclaredInputs, canonicalScriptHex, ABS_FEE_CAP_SOMPI, SIGNED_INPUT_CEILING_SOMPI, SOMPI_PER_MASS,
+  signOnlyDeclaredInputs, canonicalScriptHex, GLOBAL_ABS_FEE_CAP_SOMPI, SIGNED_INPUT_CEILING_SOMPI, SOMPI_PER_MASS,
 } from './covenant-broadcast.mjs';
 
 let pass = 0, fail = 0;
@@ -13,6 +13,10 @@ const t = (n, f) => { try { f(); pass++; console.log('[PASS] ' + n); } catch (e)
 
 const RELAY_SPK = 'aa'.repeat(35);
 const OTHER_SPK = 'bb'.repeat(35);
+// 🔴 Bettor 1386①: absFeeCapSompi 现在必填、按 kind 派生(无全局默认值)——测试里用一个假设的"某
+// kind cap"常量(不代表任何真实 kind, 只用来测 validateNetLoss 的通用逻辑), 与 GLOBAL_ABS_FEE_CAP_SOMPI
+// (1.0 KAS 全局硬顶)区分开, 专门测两层兜底各自生效。
+const TEST_KIND_CAP_SOMPI = 5_000_000n; // 假设的 kind cap(0.05 KAS 量级, 沿用旧 NWT 1353 边界值方便复用既有测试数据)
 
 // ── validateSignedInputCeiling ────────────────────────────────────────────
 t('SIC-1 单输入在上限内 ⇒ ok', () => {
@@ -56,7 +60,7 @@ t('NL-1 🔴 NWT 1352 绕过构造: 1 KAS 输入, 0.00001 KAS 回自己 + 0.9999
   const r = validateNetLoss({
     inputs: [{ amountSompi: oneK, scriptPubKeyRaw: RELAY_SPK }],
     outputs: [{ valueSompi: 1_000n, scriptPubKeyRaw: RELAY_SPK }, { valueSompi: oneK - 1_000n, scriptPubKeyRaw: OTHER_SPK }],
-    signInputIndices: [0], relayScriptPubKey: RELAY_SPK, requiredFeeSompi: 3_000n,
+    signInputIndices: [0], relayScriptPubKey: RELAY_SPK, requiredFeeSompi: 3_000n, absFeeCapSompi: TEST_KIND_CAP_SOMPI,
   });
   assert.strictEqual(r.ok, false, 'must reject the bypass construction');
   assert.ok(r.netLossSompi > 90_000_000n, `net_loss should be ~0.99999 KAS, got ${r.netLossSompi}`);
@@ -68,7 +72,7 @@ t('NL-1b 🔴 NWT 1355 真实管线场景: 签名输入 ≤ 0.5 KAS(不会先被
   const r = validateNetLoss({
     inputs: [{ amountSompi: halfK, scriptPubKeyRaw: RELAY_SPK }],
     outputs: [{ valueSompi: 1_000n, scriptPubKeyRaw: RELAY_SPK }, { valueSompi: halfK - 1_000n, scriptPubKeyRaw: OTHER_SPK }],
-    signInputIndices: [0], relayScriptPubKey: RELAY_SPK, requiredFeeSompi: 3_000n,
+    signInputIndices: [0], relayScriptPubKey: RELAY_SPK, requiredFeeSompi: 3_000n, absFeeCapSompi: TEST_KIND_CAP_SOMPI,
   });
   assert.strictEqual(r.ok, false, 'must still be rejected by validateNetLoss even though it survives SignedInputCeiling');
 });
@@ -78,7 +82,7 @@ t('NL-2 正常 covenant 花费: net_loss 恰等于 required_fee ⇒ 放行(NWT 1
   const r = validateNetLoss({
     inputs: [{ amountSompi: inputAmt, scriptPubKeyRaw: RELAY_SPK }],
     outputs: [{ valueSompi: inputAmt - requiredFee, scriptPubKeyRaw: RELAY_SPK }],
-    signInputIndices: [0], relayScriptPubKey: RELAY_SPK, requiredFeeSompi: requiredFee,
+    signInputIndices: [0], relayScriptPubKey: RELAY_SPK, requiredFeeSompi: requiredFee, absFeeCapSompi: TEST_KIND_CAP_SOMPI,
   });
   assert.strictEqual(r.ok, true, r.reason);
   assert.strictEqual(r.netLossSompi, requiredFee);
@@ -91,7 +95,7 @@ t('NL-3 net_loss = required_fee×2 + 1 sompi ⇒ 拒(NWT 1353 边界要求)', ()
   const r = validateNetLoss({
     inputs: [{ amountSompi: inputAmt, scriptPubKeyRaw: RELAY_SPK }],
     outputs: [{ valueSompi: inputAmt - netLoss, scriptPubKeyRaw: RELAY_SPK }],
-    signInputIndices: [0], relayScriptPubKey: RELAY_SPK, requiredFeeSompi: requiredFee,
+    signInputIndices: [0], relayScriptPubKey: RELAY_SPK, requiredFeeSompi: requiredFee, absFeeCapSompi: TEST_KIND_CAP_SOMPI,
   });
   assert.strictEqual(r.ok, false);
   assert.strictEqual(r.feeCeilingSompi, ceiling);
@@ -103,20 +107,49 @@ t('NL-4 net_loss = required_fee×2 恰好等于动态上限 ⇒ 放行(闭区间
   const r = validateNetLoss({
     inputs: [{ amountSompi: inputAmt, scriptPubKeyRaw: RELAY_SPK }],
     outputs: [{ valueSompi: inputAmt - netLoss, scriptPubKeyRaw: RELAY_SPK }],
-    signInputIndices: [0], relayScriptPubKey: RELAY_SPK, requiredFeeSompi: requiredFee,
+    signInputIndices: [0], relayScriptPubKey: RELAY_SPK, requiredFeeSompi: requiredFee, absFeeCapSompi: TEST_KIND_CAP_SOMPI,
   });
   assert.strictEqual(r.ok, true);
 });
-t('NL-5 required_fee 很大时改用 ABS_FEE_CAP(取 min): required_fee×2 > ABS_FEE_CAP ⇒ 上限是 ABS_FEE_CAP', () => {
-  const requiredFee = ABS_FEE_CAP_SOMPI; // ×2 会远超 ABS_FEE_CAP
+t('NL-5 required_fee 很大时改用 kind cap(取 min): required_fee×2 > absFeeCapSompi ⇒ 上限是 absFeeCapSompi(Bettor 1386①: 按 kind 派生, 不再是全局 ABS_FEE_CAP)', () => {
+  const requiredFee = TEST_KIND_CAP_SOMPI; // ×2 会远超 kind cap
   const inputAmt = 100_000_000n;
   const r = validateNetLoss({
     inputs: [{ amountSompi: inputAmt, scriptPubKeyRaw: RELAY_SPK }],
-    outputs: [{ valueSompi: inputAmt - ABS_FEE_CAP_SOMPI, scriptPubKeyRaw: RELAY_SPK }],
-    signInputIndices: [0], relayScriptPubKey: RELAY_SPK, requiredFeeSompi: requiredFee,
+    outputs: [{ valueSompi: inputAmt - TEST_KIND_CAP_SOMPI, scriptPubKeyRaw: RELAY_SPK }],
+    signInputIndices: [0], relayScriptPubKey: RELAY_SPK, requiredFeeSompi: requiredFee, absFeeCapSompi: TEST_KIND_CAP_SOMPI,
   });
   assert.strictEqual(r.ok, true, r.reason);
-  assert.strictEqual(r.feeCeilingSompi, ABS_FEE_CAP_SOMPI, 'ceiling should be capped at ABS_FEE_CAP, not required_fee*2');
+  assert.strictEqual(r.feeCeilingSompi, TEST_KIND_CAP_SOMPI, 'ceiling should be capped at kind cap, not required_fee*2');
+});
+t('NL-5b 🔴 Bettor 1386①: absFeeCapSompi 缺失/非 bigint ⇒ 拒(不静默落到任何默认值——旧全局 ABS_FEE_CAP_SOMPI 已废弃)', () => {
+  const r1 = validateNetLoss({
+    inputs: [{ amountSompi: 10_000_000n, scriptPubKeyRaw: RELAY_SPK }],
+    outputs: [{ valueSompi: 9_999_000n, scriptPubKeyRaw: RELAY_SPK }],
+    signInputIndices: [0], relayScriptPubKey: RELAY_SPK, requiredFeeSompi: 1_000n, // absFeeCapSompi 缺失
+  });
+  assert.strictEqual(r1.ok, false);
+  assert.ok(/absFeeCapSompi must be a non-negative bigint/.test(r1.reason), `实际: ${r1.reason}`);
+  const r2 = validateNetLoss({
+    inputs: [{ amountSompi: 10_000_000n, scriptPubKeyRaw: RELAY_SPK }],
+    outputs: [{ valueSompi: 9_999_000n, scriptPubKeyRaw: RELAY_SPK }],
+    signInputIndices: [0], relayScriptPubKey: RELAY_SPK, requiredFeeSompi: 1_000n, absFeeCapSompi: 5_000_000, // number, not bigint
+  });
+  assert.strictEqual(r2.ok, false);
+  assert.ok(/absFeeCapSompi must be a non-negative bigint/.test(r2.reason), `实际: ${r2.reason}`);
+});
+t('NL-5c 🔴 Bettor 1386①: GLOBAL_ABS_FEE_CAP_SOMPI(1.0 KAS)兜底——即使某个 kind 的 absFeeCapSompi 被(疏忽或恶意)设得比全局硬顶还大, feeCeilingSompi 仍然被全局硬顶钳制, 不会被 kind cap 突破', () => {
+  const hugeKindCap = GLOBAL_ABS_FEE_CAP_SOMPI * 10n; // 故意设一个远超全局硬顶的 kind cap
+  const requiredFee = GLOBAL_ABS_FEE_CAP_SOMPI * 5n; // required_fee×2 也远超全局硬顶, 逼 feeCeiling 走到"该用 kind cap"这条分支
+  const inputAmt = GLOBAL_ABS_FEE_CAP_SOMPI * 20n;
+  const netLoss = GLOBAL_ABS_FEE_CAP_SOMPI + 1n; // 恰好比全局硬顶多 1 sompi
+  const r = validateNetLoss({
+    inputs: [{ amountSompi: inputAmt, scriptPubKeyRaw: RELAY_SPK }],
+    outputs: [{ valueSompi: inputAmt - netLoss, scriptPubKeyRaw: RELAY_SPK }],
+    signInputIndices: [0], relayScriptPubKey: RELAY_SPK, requiredFeeSompi: requiredFee, absFeeCapSompi: hugeKindCap,
+  });
+  assert.strictEqual(r.ok, false, 'net_loss 只比全局硬顶多 1 sompi, 即使 kind cap 本身远大于全局硬顶, 仍应被全局硬顶钳制拒绝');
+  assert.strictEqual(r.feeCeilingSompi, GLOBAL_ABS_FEE_CAP_SOMPI, `feeCeilingSompi 应该被钳制到 GLOBAL_ABS_FEE_CAP_SOMPI, 不是 hugeKindCap(实际 ${r.feeCeilingSompi})`);
 });
 t('NL-6 scriptPubKeyRaw(纯 hex 形式)大小写不敏感比对(不因为大小写误判"没找到自己的找零")', () => {
   const requiredFee = 1_000n;
@@ -124,7 +157,7 @@ t('NL-6 scriptPubKeyRaw(纯 hex 形式)大小写不敏感比对(不因为大小�
   const r = validateNetLoss({
     inputs: [{ amountSompi: inputAmt, scriptPubKeyRaw: RELAY_SPK.toUpperCase() }],
     outputs: [{ valueSompi: inputAmt - requiredFee, scriptPubKeyRaw: RELAY_SPK.toLowerCase() }],
-    signInputIndices: [0], relayScriptPubKey: RELAY_SPK.toUpperCase(), requiredFeeSompi: requiredFee,
+    signInputIndices: [0], relayScriptPubKey: RELAY_SPK.toUpperCase(), requiredFeeSompi: requiredFee, absFeeCapSompi: TEST_KIND_CAP_SOMPI,
   });
   assert.strictEqual(r.ok, true, r.reason);
 });
@@ -132,7 +165,7 @@ t('NL-7 requiredFeeSompi 非 bigint(如误传 number) ⇒ 拒(不静默转型算
   const r = validateNetLoss({
     inputs: [{ amountSompi: 100n, scriptPubKeyRaw: RELAY_SPK }],
     outputs: [{ valueSompi: 99n, scriptPubKeyRaw: RELAY_SPK }],
-    signInputIndices: [0], relayScriptPubKey: RELAY_SPK, requiredFeeSompi: 1000, // number, not bigint
+    signInputIndices: [0], relayScriptPubKey: RELAY_SPK, requiredFeeSompi: 1000, absFeeCapSompi: TEST_KIND_CAP_SOMPI, // number, not bigint
   });
   assert.strictEqual(r.ok, false);
   assert.ok(/must be a non-negative bigint/.test(r.reason));
@@ -144,7 +177,7 @@ t('NL-9 🔴 Bettor 1364 自查: relayScriptPubKey 缺失(null/undefined/空字�
     const r = validateNetLoss({
       inputs: [{ amountSompi: inputAmt, scriptPubKeyRaw: RELAY_SPK }],
       outputs: [{ valueSompi: inputAmt, scriptPubKeyRaw: RELAY_SPK }], // 全额"付回"某处, 若被误判会 net_loss=0 放行
-      signInputIndices: [0], relayScriptPubKey: badKey, requiredFeeSompi: 1_000n,
+      signInputIndices: [0], relayScriptPubKey: badKey, requiredFeeSompi: 1_000n, absFeeCapSompi: TEST_KIND_CAP_SOMPI,
     });
     assert.strictEqual(r.ok, false, `relayScriptPubKey=${JSON.stringify(badKey)} 必须被拒`);
     assert.ok(/relayScriptPubKey required/.test(r.reason), `reason 应指明缺 relayScriptPubKey(实际: ${r.reason})`);
@@ -158,7 +191,7 @@ t('NL-10 🔴 Bettor 1364 自查核心场景: relayScriptPubKey 非空但归一�
     outputs: [
       { valueSompi: inputAmt, scriptPubKeyRaw: undefined }, // 畸形/缺失输出——canonicalScriptHex(undefined) 也是 ''
     ],
-    signInputIndices: [0], relayScriptPubKey: malformedRelayKey, requiredFeeSompi: 1_000n,
+    signInputIndices: [0], relayScriptPubKey: malformedRelayKey, requiredFeeSompi: 1_000n, absFeeCapSompi: TEST_KIND_CAP_SOMPI,
   });
   assert.strictEqual(r.ok, false, '两个空值不能互相匹配算成"付回自己"');
   assert.ok(/canonicalized to an empty hex string/.test(r.reason), `reason 应指明空归一值被拒(实际: ${r.reason})`);
@@ -169,7 +202,7 @@ t('NL-11 对照: relayScriptPubKey 正常非空时, outputs 里缺失/畸形的 
   const r = validateNetLoss({
     inputs: [{ amountSompi: inputAmt, scriptPubKeyRaw: RELAY_SPK }],
     outputs: [{ valueSompi: inputAmt - requiredFee, scriptPubKeyRaw: undefined }], // 畸形输出, 但 relay key 是正常值
-    signInputIndices: [0], relayScriptPubKey: RELAY_SPK, requiredFeeSompi: requiredFee,
+    signInputIndices: [0], relayScriptPubKey: RELAY_SPK, requiredFeeSompi: requiredFee, absFeeCapSompi: TEST_KIND_CAP_SOMPI,
   });
   assert.strictEqual(r.ok, false, '畸形输出不被误判为找零, 全额算进 net_loss, 超出手续费上限应被拒');
   assert.strictEqual(r.netLossSompi, inputAmt, 'net_loss 应是全部输入(没有任何输出被正确识别为"付回自己"), 不是 0');
@@ -178,7 +211,7 @@ t('NL-12 🔴 NWT 1376 非阻断建议落地(与 SIC-7 同款): signInputIndices
   const r = validateNetLoss({
     inputs: [{ amountSompi: 1_000_000n, scriptPubKeyRaw: RELAY_SPK }],
     outputs: [{ valueSompi: 999_000n, scriptPubKeyRaw: RELAY_SPK }],
-    signInputIndices: [0, 0], relayScriptPubKey: RELAY_SPK, requiredFeeSompi: 1_000n,
+    signInputIndices: [0, 0], relayScriptPubKey: RELAY_SPK, requiredFeeSompi: 1_000n, absFeeCapSompi: TEST_KIND_CAP_SOMPI,
   });
   assert.strictEqual(r.ok, false);
   assert.ok(/duplicate index 0/.test(r.reason), `reason 应指明重复索引(实际: ${r.reason})`);
@@ -218,7 +251,7 @@ t('NL-8 端到端: relayScriptPubKey 传"真实 wasm 对象"形状, outputs.scri
   const r = validateNetLoss({
     inputs: [{ amountSompi: inputAmt, scriptPubKeyRaw: REAL_WASM_JSON_STR }], // extractTxShape() 实际会产出的形状
     outputs: [{ valueSompi: inputAmt - requiredFee, scriptPubKeyRaw: REAL_WASM_JSON_STR }],
-    signInputIndices: [0], relayScriptPubKey: relayAsWasmObj, requiredFeeSompi: requiredFee,
+    signInputIndices: [0], relayScriptPubKey: relayAsWasmObj, requiredFeeSompi: requiredFee, absFeeCapSompi: TEST_KIND_CAP_SOMPI,
   });
   assert.strictEqual(r.ok, true, r.reason);
   assert.strictEqual(r.netLossSompi, requiredFee, 'wasm 对象 vs JSON 字符串两种表示正确识别为"同一个脚本" ⇒ 找零被计入返还, net_loss 只剩手续费');

@@ -11,9 +11,18 @@
 // 两阶段回执(设计 §9.5): prepared 在真正广播前落 proto_bet_intents 表(fail-closed: ingest 失败就不
 // 广播), submitted 在广播后落表(失败不可撤回, 返回 code:'ingest_after_broadcast_failed' 让 console
 // 侧调用方有机会本地立即补一次, 不必等 resumeStaleBetIntents 下一轮扫描)。
+//
+// 🔴 net_loss 上限设计(Bettor 1386①/NWT 1387 架构裁定, 覆盖 covenant construction spec §9.2 修订):
+// relay 侧**硬编码** `GLOBAL_ABS_FEE_CAP_SOMPI`(1.0 KAS)作为 `validateNetLoss` 的 `absFeeCapSompi`
+// 参数——**绝不从 `cmd` 读取任何"这次该用哪个 cap"的字段**。NWT 明确裁定: kind→cap 的精细映射必须
+// 硬编码在 console 侧各 kind 自己的代码路径里(buildAndBroadcast 内部为每个 kind 分别调一次
+// `validateNetLoss(..., absFeeCapSompi=CAP_<KIND>)` 做预检查), 不能由请求体/调用方/命令字段影响
+// relay 侧用哪个 cap——否则攻击者能给任意一笔交易贴上"cap 最宽的 kind"标签绕过更严格的限制。
+// relay 侧因此只做一层粗粒度、与 kind 无关的最终兜底(GLOBAL 硬顶)，per-kind 的精细校验在 console
+// 侧完成、relay 完全不信任、也不需要知道"这是哪个 kind"。
 import {
   validateSignedInputCeiling, computeRequiredFeeSompi, validateNetLoss,
-  extractTxShape, assertFinalTxid, signOnlyDeclaredInputs,
+  extractTxShape, assertFinalTxid, signOnlyDeclaredInputs, GLOBAL_ABS_FEE_CAP_SOMPI,
 } from './covenant-broadcast.mjs';
 import { ingestProtoBetIntentPhase } from '../ingest.mjs';
 
@@ -130,9 +139,11 @@ export async function covenantBroadcastRelay({
   }
 
   const relayScriptPubKey = payToAddressScript(new Address(wallet.getAddress()));
+  // 🔴 硬编码 GLOBAL_ABS_FEE_CAP_SOMPI, 不读 cmd 的任何字段(见文件头注)——relay 这一层只做
+  // kind-无关的最终兜底, per-kind 更严格的上限是 console 侧的责任, relay 不信任、不需要知道 kind。
   const nl = validateNetLoss({
     inputs: shape.inputs, outputs: shape.outputs, signInputIndices: cmd.sign_input_indices,
-    relayScriptPubKey, requiredFeeSompi,
+    relayScriptPubKey, requiredFeeSompi, absFeeCapSompi: GLOBAL_ABS_FEE_CAP_SOMPI,
   });
   if (!nl.ok) {
     log(`COVENANT_BROADCAST ${key} REJECTED (net loss exceeds ceiling): ${nl.reason}`);
