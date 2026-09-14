@@ -227,46 +227,58 @@ witness 供）。`UPDATE proto_markets SET status='sealed', rootclose_txid=?, ro
 这部分需要一个新的 `scripts/proto-v0-template-anchors.mjs` 一次性计算脚本（只读，产出写进
 `kasia-console/scripts/proto-v0-template-anchors.json`，落码阶段单独一笔提交，NWT 审）。
 
-## §5 v0 简化：单操作员模拟 5-委员会
+## §5 v0 简化：单操作员模拟 5-委员会 — **已裁定（Bettor GREEN-with-rulings，本轮）**
 
 `RootClose.close_commit` 要求 4-of-5 委员签名（`c0Sig..c4Sig` 对 `c0Pk..c4Pk`，且
-`blake2b(c0Pk+c1Pk+c2Pk+c3Pk+c4Pk) == committee_hash`）。v0 是单操作员场景，**建议**：市场创建时后端生成
-**一个**测试用 keypair，`c0Pk..c4Pk` 全部填同一个公钥（`committee_hash` 相应地是这同一个 pubkey 拼 5 遍的
-hash——合约代码里没有"5 个 pubkey 互不相同"的显式 distinctness 检查，`validSigs>=4` 用同一把 sig 验 5 次
-即可全过）。私钥只存在 `proto_markets.committee_privkey_ref`（**独立于 `relay_nodes` 表**，纯粹是本市场自己
-的一次性测试身份，不经过 `startRelay()`/任何 relay 管理路径，符合范围稿 §3）。
+`blake2b(c0Pk+c1Pk+c2Pk+c3Pk+c4Pk) == committee_hash`）。**裁定：v0 接受**市场创建时后端生成**一个**测试用
+keypair、`c0Pk..c4Pk` 全部填同一个公钥（合约代码里没有"5 个 pubkey 互不相同"的显式 distinctness 检查，
+`validSigs>=4` 用同一把 sig 验 5 次即可全过）——**条件**：① NWT 落码审时独立确认合约无 distinctness 检查
+这一读码结论（不是我一个人说了算）；② `committee_privkey_ref` **不落明文**，用 `src/services/crypto.js` 的 `encrypt`/`decrypt`（`CONSOLE_ENCRYPTION_KEY`
+派生，`relay_nodes` 表私钥列已在用同一对函数）存——复用既有加密工具函数，不是复用 `relay_nodes` 表本身：
+私钥仍然独立于 relay 系统，只是加密/解密走同一份已审过的库函数，不用另造一套明文/弱加密存储。
 
-**这是刻意的简化，不是漏洞遗留**——生产委员会机制（真正的去中心化 5 独立委员）不在 v0 范围内，NWT 边界核
-时请确认这条只是"用同一把钥匙代表 5 个委员槽位"，不是绕过签名验证本身。
+**这是刻意的简化，不是漏洞遗留**——生产委员会机制（真正的去中心化 5 独立委员）不在 v0 范围内。
 
-## §6 KAS 侧资金来源（未决，需 Bettor/NWT 定）
+## §6 KAS 侧资金来源 — **已裁定（B′，Bettor GREEN-with-rulings，本轮）**
 
 上述每一笔链上操作（genesis dust 输出、covenant 续约 KAS weld ≥DUST_MIN）都需要一个真实付 KAS 的输入/找零
-来源——KTT 代币本身不承载 KAS 价值。**两个选项**：
+来源——KTT 代币本身不承载 KAS 价值。**两个此前提出的方案都被否决**：
 
-- **(A)** 复用既有"fee-relay"模式（`bshard-settle-daemon.mjs:108 feeRelayAddr()` 一类，生产 covenant 交易
-  已经在用同一手法付 KAS 侧）——不调用 `startRelay()`，不经 `/relays/*` `/api/relay/*` 端点，走既有 relay
-  IPC 签名通道。**范围稿 §3 字面禁止的是"新增读取/导出私钥、调用 startRelay()、碰 ADMIN_SECRET_*、暴露
-  /relays/* /api/relay/* 端点"这几类新代码路径**——复用一个已经存在、已经被生产结算代码使用的 fee-relay
-  签名通道，是否落在这条边界之内，我判断不了，需要 Bettor/NWT 明确。
-- **(B)** 生成一个完全独立于 `relay_nodes` 系统的一次性"原型资金"keypair，由操作员手动转入少量 KAS 启动，
-  之后所有原型交易的找零自我循环（同代币模型：一次性种子资金，非持续外部资助）。**更干净地符合 §3 字面**，
-  代价是需要 Owner/操作员手动转一笔 KAS 种子资金（金额很小，仅覆盖 dust+fee，不是"真钱在原型里"的量级）。
+- ~~(A) 复用生产 fee-relay 签名通道~~ —— 否决：原型 bug 直接耦合到持真钱的 relay，违反范围稿 §3 精神。
+- ~~(B) console 进程内自持私钥独立签名~~ —— 否决：违反架构铁律"Relay 是唯一链上出口 / Console 不碰链"
+  （`CLAUDE.md`"必读：安全审查遗留问题"第 2 条），且要新造一套明文密钥存储机制。
 
-**我倾向 (B)**（干净隔离，不产生"§3 边界到底算不算被碰"这种可以各执一词的情况），但需要 Owner/Bettor 拍板
-种子资金怎么给、给多少。
+**裁定 (B′)：建一个专属原型 relay 身份**（名字前缀 `proto-`，**由操作员经既有 relay 导入路径一次性创建**——
+这是操作员在既有 UI 上的手动动作，不是本轮新写的代码路径；Owner 转入 ≈2 KAS 种子资金）。原型后端只经**既有
+relay IPC 通道**（`sendCommand`/`sendCommandAsync`，同生产代码复用的同一套机制，非新开端点）对**这一个**
+relay 发交易构造/签名请求。
 
-## §7 §3 边界自查清单（供 NWT 轻量核对照）
+**硬闸**（落码时必须实现，不是建议）：
+- `PROTO_RELAY_ID` 由 env 变量钉死，后端代码**不接受请求体传入 relay_id**（杜绝调用方指定任意 relay，同
+  T-LOOPBACK-AUTHZ 那批热修堵的洞是同一种形状，这里从设计层面直接不留这个参数）。
+- 每次发交易前**断言**：该 relay 的 `name` 以 `proto-` 开头 **且** 链上余额 `< 5 KAS`——两条任一不满足
+  fail-closed 拒发（防止原型代码不小心配置指向了某个真实生产 relay，或该 relay 意外被转入大额资金）。
+
+这样资金隔离（专属身份、金额上限）+ 架构合规（走既有 relay 签名通道，不新造明文密钥存储、不违反
+Console-不碰链）同时满足。
+
+## §7 §3 边界自查清单（供 NWT 轻量核对照，按 §5/§6 裁定更新）
 
 - [ ] 零新增 `import` 来自 `relay-manager.js` 的 `startRelay`/`stopRelay`/私钥相关导出。
 - [ ] 零调用 `/relays/*` `/api/relay/*` 系列端点（HTTP 内部调用或直接函数调用均不算）。
 - [ ] 零读取 `ADMIN_SECRET_*` 环境变量。
-- [ ] §5 的测试 keypair 私钥只落 `proto_markets` 自己的字段，不进 `relay_nodes` 表，不被
-      `relay-hotwallet-monitor.js` 或任何健康检查扫描到。
-- [ ] §6 若选 (A)，需 NWT 单独确认"复用 fee-relay 签名通道"不算触碰边界；若选 (B)，此项天然满足。
+- [ ] §5 的测试 keypair 私钥用 `relay_nodes` 同款加密 helper 存进 `proto_markets` 自己的字段，不进
+      `relay_nodes` 表本身，不被 `relay-hotwallet-monitor.js` 或任何健康检查扫描到。
+- [ ] §6 (B′)：`PROTO_RELAY_ID` 确实由 env 钉死、代码路径里搜不到任何"请求体 relay_id 直接喂进发交易函数"
+      的形状；每次发交易前的 `name` 前缀 + 余额上限双重断言确实在广播前执行、fail-closed。
 
-## §8 待 Bettor/NWT 裁定的开放问题汇总
+## §8 已知限制（不得漂成"已处理"——落码/交付材料引用本节须原样带走这句话）
 
-1. ~~代币/市场创建顺序~~ — **已裁定（1335）**：定义层纯 DB，铸筹码并入下注复合动作，见 §0/§1。
-2. §6：KAS 侧资金来源走 (A) 复用 fee-relay 还是 (B) 独立种子资金？
-3. §5 单 keypair 模拟委员会的简化是否可接受（NWT 需确认合约代码里没有 distinctness 检查这一读码结论）？
+1. **T-PROTO-BETTORPK-BINDING**（§2.3.1 保留项①）：`register_append` 的 `bettorPk` witness 参数与
+   `stakeInIdx` 那个代币输入之间**没有签名绑定**，TX1（铸筹码）落链到 TX2 确认之间存在真实抢跑窗口。
+   **v0 单操作员场景接受**（没有第二方在监听 mempool 抢跑，实际发生概率为零）——**任何第二方/多用户场景
+   参与前必须先修这条**，不是"以后有空再说"的一般性技术债。
+2. **T-ORPHAN-CHIP-RECOVERY-ENTRY**（§2.3.1 保留项②）：`count` 字段可被并发下注耗尽，导致已铸筹码永久
+   孤儿化，当前 9 个合约里**没有任何入口能追回**。v0 处置 = 发起 TX1 前的预检（降低触发概率，不消除）+
+   `proto_bets.orphaned_chip` 终态如实展示。**这是合约层缺口，需要新增一个回收 entry 才能真正解决**，不在
+   本轮范围。
