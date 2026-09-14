@@ -1,0 +1,14 @@
+  RUN   V-SSF-1_pass_single_leaf_sole_source
+  PASS  V-SSF-1_pass_single_leaf_sole_source
+  RUN   V-SSF-2_fail_dual_leaf_only_one_named_other_silently_destroyed
+  PASS  V-SSF-2_fail_dual_leaf_only_one_named_other_silently_destroyed
+  RUN   V-SSF-3_fail_shardInIdx_already_self_owned_double_credit
+  PASS  V-SSF-3_fail_shardInIdx_already_self_owned_double_credit
+  RUN   V-SSF-4_fail_unrelated_stray_same_template_input_unaccounted
+  PASS  V-SSF-4_fail_unrelated_stray_same_template_input_unaccounted
+  RUN   V-SSF-5_fail_hidden_extra_ps_owned_token_uncounted
+  PASS  V-SSF-5_fail_hidden_extra_ps_owned_token_uncounted
+  RUN   V-SSF-6_fail_wrong_output_amount
+  PASS  V-SSF-6_fail_wrong_output_amount
+
+6 tests: 6 passed, 0 failed
