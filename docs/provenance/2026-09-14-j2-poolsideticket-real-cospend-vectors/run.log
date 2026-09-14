@@ -1,0 +1,6 @@
+  RUN   V-TICKET-1_fail_no_signature_reaches_sig_gate_realistic_cospend
+  PASS  V-TICKET-1_fail_no_signature_reaches_sig_gate_realistic_cospend
+  RUN   V-TICKET-2_fail_wrong_key_signature_reaches_sig_gate_realistic_cospend
+  PASS  V-TICKET-2_fail_wrong_key_signature_reaches_sig_gate_realistic_cospend
+
+2 tests: 2 passed, 0 failed
