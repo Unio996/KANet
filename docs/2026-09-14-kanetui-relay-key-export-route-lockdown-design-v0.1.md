@@ -14,11 +14,20 @@
 |---|---|---|---|---|
 | `GET /relays/:id/mnemonic` | `src/api/relay.js:555` | **无** | 解密后的**已有** relay 明文助记词 | 🔴 **本页要锁的两条之一** |
 | `GET /api/relay/:id/wallets/:walletId/privkey` | `src/api/relay.js:844` | **无** | 解密后的**已有**钱包明文私钥 | 🔴 **本页要锁的两条之一** |
-| `POST /relays/generate-mnemonic` | `src/api/relay.js:1314` | 无 | **新生成**的随机助记词（`Mnemonic.random(12)`，非从库里解密已有材料） | 🟡 **本页判定不锁**，见 §1.1 理由，供 NWT 复核 |
+| `POST /relays/generate-mnemonic` | `src/api/relay.js:1314` | 无 | **新生成**的随机助记词（`Mnemonic.random(12)`，非从库里解密已有材料） | 🟡 **本页判定不锁**，见 §1.3 理由，供 NWT 复核 |
 | `POST /api/relay/import-privkey` | `src/api/relay.js:150` | 有（`verifyIngestRequest`，`x-ingest-secret` header） | **不回显**任何密钥字段（响应只有 `id`/`name`/`address`/`network`） | ✅ 已有鉴权，本来就不返回密钥物，本页不动（Bettor 明确要求③"不改任何现有导入路径行为"，这条是导入路径的一部分） |
 | `POST /relays`（mnemonic 导入，`relay.js:89`） | 同上 | 无（早失败层是 `checkHotwalletAdmission`，与身份鉴权是两回事） | **不回显**任何密钥字段（`reply.redirect('/relays')`） | ✅ 同上，导入路径，不动 |
+| `GET /api/backup/export` | `src/api/backup.js:21` | **无** | 见 §1.2——**不含密钥物**，本页判定不纳入锁 | ✅ 已核实不返回密钥物，不需要同一把锁 |
 
-### 1.1 为什么 `POST /relays/generate-mnemonic` 本页判定不锁（供 NWT 复核，不是本页替 NWT 拍板）
+### 1.2 `GET /api/backup/export` 补盘（Bettor 1248 派工，本人独立读代码核实，不是转述文件头注释）
+
+文件头注释自称范围"只包含链上无/不可重建的数据"且"不包含...加密敏感...`agent_connections`/`adapter_nodes`(含加密凭证)"——**没有直接信这句注释，逐行读了 `buildExportSnapshot()` 函数体核实**：三段 `sqlite.prepare()` 查询分别覆盖 `identities`（`address`/`network`/`display_name`/`tags`/`notes`/`trust_level`）、`relation_states`（`local_address`/`peer_address`/`classification`/`trust_level`/`is_blocked`）、`relay_nodes`（**显式列名** `name`/`address`/`vision`/`principles_json`/`style`/`evolution_interval_hours`/`proactive_interval_minutes`/`social_style`/`social_overrides`/`focus`）——**三段查询没有一段碰 `mnemonic_encrypted`/`privkey_encrypted` 这两列，也没有任何一段查询碰 `agent_wallets` 表**（该表才是 `privkey_encrypted` 真正所在的表，`GET /api/relay/:id/wallets/:walletId/privkey` 那条查的是它，`backup.js` 完全没有 import/引用这张表）。注释描述与代码行为一致，核实通过。
+
+**结论**：`GET /api/backup/export` **不含密钥物**，按 Bettor 1248 原话"若含密钥物则纳入同一档"的条件——这条不成立，本页判定**不纳入** `ADMIN_SECRET_KEY_EXPORT`/时间窗锁。
+
+**附带记一笔、不代为处理**：这条路由本身当前也是**无鉴权**（跟本页要锁的两条一样，任意本机进程可读），导出内容虽不含密钥，但含 `identities`/`relation_states` 的社交图谱数据（`trust_level`/`classification`/`is_blocked` 这类关系判断）——是否值得单独一层鉴权是一个不同严重等级的问题（隐私/数据完整性，不是"资金可能被直接花掉"），不在 Bettor 1244/1248 这次派工的"密钥导出"范围内，本页不代为扩大范围处理，如实记一笔供后续单独评估。
+
+### 1.3 为什么 `POST /relays/generate-mnemonic` 本页判定不锁（供 NWT 复核，不是本页替 NWT 拍板）
 
 这条路由返回的是**当场随机生成、此刻尚未绑定任何链上资金**的助记词——不是从库里解密出的"某个已有账户"的密钥。风险模型不同：`GET .../mnemonic`/`.../privkey` 泄露的是**已经可能持有真实 KAS 余额**的账户密钥（第 1 批迁移的 10 个 relay 就是这类），后果是直接可花费的资金损失；`generate-mnemonic` 泄露的是一个"任何人都能自己在本地生成一个"的随机值，唯一的额外风险是"调用方生成后不知道被谁看到、之后又真的往这个地址充了钱"——这个风险存在，但属于**调用方自己后续操作**引入的，不是这条路由本身泄露了任何本来受保护的东西（跟任何人在任何地方生成一个新钱包地址给自己用、生成过程被人看到，是同一类风险，不特属于 console）。本页建议不纳入同一把锁（避免这把锁变得过宽、影响正常的"建新 relay"操作体验），但把判断权交给 NWT——如果 NWT 认为"生成后到入库前这个窗口"仍然值得同一层防护，加进来的改动量很小（跟另外两条共用同一个 gate 函数）。
 
