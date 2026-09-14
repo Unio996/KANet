@@ -52,7 +52,11 @@ test('relay.mjs IPC handler case get_rpc_state present + short-circuits generic 
 
 test('relay-manager.js exports getRelayRpcState with 5s timeout override', () => {
   assert.match(RELAY_MGR, /export\s+async\s+function\s+getRelayRpcState/, 'export getRelayRpcState missing');
-  assert.match(RELAY_MGR, /sendCommandAsync\([^,]+,\s*\{[^}]*type:\s*['"]get_rpc_state['"][^}]*\},\s*5000\)/, '5s timeout override missing');
+  // 正则原锁死"5000 后紧跟右括号"(主线测试基线 RED 清单 3f85d543 §1-D / Bettor 1270→1273 确认): T-J2-2026-05-12
+  // 给 getRelayRpcState 的 sendCommandAsync 调用合法加了第 4 个 origin 追踪参数('legacy-unmigrated'),
+  // 5s 超时本身一直都在传、行为从未变过——只是正则没跟上这次合法加参, 不是标准放宽, 改成不锚定
+  // "5000 后立即闭括号", 允许后面还有更多参数。
+  assert.match(RELAY_MGR, /sendCommandAsync\([^,]+,\s*\{[^}]*type:\s*['"]get_rpc_state['"][^}]*\},\s*5000[,)]/, '5s timeout override missing');
 });
 
 test('api/relay.js registers both endpoints (per-relay + aggregate)', () => {

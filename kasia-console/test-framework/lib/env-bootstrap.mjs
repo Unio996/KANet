@@ -17,6 +17,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import net from 'node:net';
 
 function deriveConsolePort() {
   // 优先级: 显式 PORT env > kanet.env PORT > 3300 (tn sandbox 默认 fallback, 仅 kanet.env 缺时).
@@ -35,9 +36,74 @@ function deriveConsolePort() {
   return '3300';
 }
 
+// rule 82(NWT GREEN 8578050b·ledger 1233/1251)：记录 KANET_CONSOLE_URL 在本模块动手之前是不是已经被
+// 显式设置——下面 checkConsoleUrlListening() 要区分"调用方自己明确指了这个 URL" vs "本模块派生出来的"，
+// 两者对"端口有人监听"这件事的处置强度不同（导出给 scripts/test.mjs 用，本模块自己不在这里做探测/拒绝
+// 判断——探测时机要晚于 case 选择完成，那时才知道这批 case 里有没有 real_chain，这里只负责派生+记录）。
+export const wasConsoleUrlExplicit = !!process.env.KANET_CONSOLE_URL;
+
 const port = deriveConsolePort();
 if (!process.env.PORT) process.env.PORT = port;
 if (!process.env.KANET_CONSOLE_URL) process.env.KANET_CONSOLE_URL = `http://127.0.0.1:${port}`;
+
+/**
+ * checkConsoleUrlListening — rule 82 探测+LOUD 提示+（仅派生场景）拒绝。
+ * 必须在 case 列表选定之后调用（需要 hasRealChain），不在本模块 import 时自动跑。
+ * @param {{ hasRealChain: boolean }} opts hasRealChain: 本批即将真正执行的 case 里有没有 real_chain tag
+ * @param {{ probe?: Function, exit?: Function, consoleUrl?: string, explicit?: boolean }} deps
+ *   可选依赖注入（默认走真实实现，测试可覆盖——同 checkHotwalletAdmission/relayHotwalletMonitorTick
+ *   既有 DI 约定，不是 `*ForTests` 专名导出）：probe(host,port)→Promise<boolean> 替换真实 socket 探测；
+ *   exit(code) 替换 process.exit（"应该退出"这条路径测试用，不真的杀测试进程自己）；consoleUrl/explicit
+ *   覆盖模块级派生值（测试不用真的改 process.env）。
+ * @returns {Promise<void>} 派生场景下端口有人监听时会调 exit(1)，不 return（真实实现下 process.exit 本身
+ *   不返回；测试注入的 exit 可以选择返回，调用方按需处理）
+ */
+export async function checkConsoleUrlListening({ hasRealChain = false } = {}, deps = {}) {
+  const {
+    probe = (host, checkPort) => new Promise((resolve) => {
+      // (b) NWT GREEN 要求：裸 socket connect 级探测，connect 后立即 destroy，不发任何 HTTP 字节
+      // （不能用 fetch/http.request 探测——那样会真的发一次请求，本条要的是"零字节"探测）。
+      const sock = net.connect({ host, port: checkPort, timeout: 300 });
+      sock.once('connect', () => { sock.destroy(); resolve(true); });
+      sock.once('timeout', () => { sock.destroy(); resolve(false); });
+      sock.once('error', () => { resolve(false); });
+    }),
+    exit = (code) => process.exit(code),
+    consoleUrl = process.env.KANET_CONSOLE_URL,
+    explicit = wasConsoleUrlExplicit,
+  } = deps;
+  const url = new URL(consoleUrl);
+  const host = url.hostname;
+  const checkPort = Number(url.port) || (url.protocol === 'https:' ? 443 : 80);
+
+  const isListening = await probe(host, checkPort);
+
+  if (!isListening) return; // 空端口，既有行为不变，零摩擦。
+
+  const severityBanner = hasRealChain
+    ? '🔴🔴🔴 最高级警告：本批含 real_chain 用例，即将对一个当前有服务在监听的端口发起真实请求'
+    : '🔴 警告：检测到目标端口当前有服务在监听';
+  console.log('');
+  console.log(severityBanner);
+  console.log(`   KANET_CONSOLE_URL=${consoleUrl}（${explicit ? '调用方显式设置' : '本模块从 kanet.env PORT 派生'}）`);
+  console.log(`   探测方式：裸 socket connect ${host}:${checkPort}，connect 成功即视为"有人监听"，未发送任何 HTTP 字节。`);
+
+  if (explicit) {
+    // (a) NWT GREEN 要求：显式 URL 不必然拒绝——调用方明确知道自己要打哪，只提醒不拦截；
+    // 严重度随 hasRealChain 升到最高级横幅，但不 exit。
+    console.log('   调用方显式设置了这个 URL，不拦截——仅提醒。若这不是你预期要打的实例，Ctrl+C 中止。');
+    console.log('');
+    return;
+  }
+
+  // 未显式设置 = 本模块自己派生出来的，且端口有人监听：不能确认这是不是一个安全的测试专用实例，
+  // 拒绝派生值静默生效，逼调用方显式确认。
+  console.log(`   这个 URL 不是调用方显式设置的，是从 kanet.env PORT 自动派生的——本模块无法确认这个端口上跑的是什么服务，拒绝默认沿用。`);
+  console.log(`   如果这确实是你自己起的测试 console，显式传 KANET_CONSOLE_URL=${consoleUrl} 再跑一次；`);
+  console.log(`   如果不确定，先用 Get-NetTCPConnection/lsof 核实这个端口上跑的是什么。`);
+  console.log('');
+  return exit(1);
+}
 
 // ── DB 隔离 (KANet-UI, Bettor/NWT 2026-08-04 拍板, runner 硬化卡) ──────────────────
 //

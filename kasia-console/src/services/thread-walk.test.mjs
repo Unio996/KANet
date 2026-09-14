@@ -80,6 +80,11 @@ function freshDb({ txLogSteps = 0 } = {}) {
   _insertDyn('market_shards', { logical_market_id: MID, shard_market_id: SHARD, shard_index: 0, status: 'sealed' });
   for (const b of [W1, W2, L1]) _insertDyn('pool_bettor_sides', { market_id: SHARD, bettor_pk: b.pk, stake_amount: b.stake, direction: b.direction });
   _insertDyn('payout_shards', { logical_market_id: MID, pool_merkle_root: PMR, predicate_commit: PC, token_tmpl_hash: TTH, claim_tmpl_hash: CTH, market_suffix_hash: MSH });
+  // closeTxid:0 覆盖(缺失导致 verifyRedeemMatchesChainObservedOutput 查无→fallback 也查无→
+  // consolidatedPool 无法链上验证→fail-closed 早停，bshard-auto-settler.mjs:438/442)——每步 claim 的
+  // consolidatedPool 校验固定用 outpointTxid=closeTxid/outpointIdx=0 核对 CLOSE 状态自己的 P2SH 地址，
+  // 这一行与 txLogSteps 无关，任何场景都需要，不放进上面的 for 循环。
+  _insertDyn('kaspa_tx_log', { tx_id: CLOSE_TXID, outputs_json: JSON.stringify([{ address: fakeP2sh(closedRedeem) }]), block_time: 999 });
   for (let k = 0; k < txLogSteps; k++) {
     _insertDyn('kaspa_tx_log', { tx_id: steps[k].txId, outputs_json: JSON.stringify([{ address: 'winner-addr' }, { address: steps[k].addr }]), block_time: 1000 + k });
   }

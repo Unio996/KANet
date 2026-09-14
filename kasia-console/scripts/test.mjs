@@ -7,7 +7,7 @@
 // DoD-E env 单源 (J1 Bettor r739 Option A): 必须排在 runner.mjs import 之前 —— 派生
 // KANET_CONSOLE_URL + PORT from kanet.env PORT, 让 runner.mjs:19 顶层 const + case TN12_CONSOLE
 // 都跟随跑测节点 (测试节点无关). 见 test-framework/lib/env-bootstrap.mjs 头注.
-import '../test-framework/lib/env-bootstrap.mjs';
+import { checkConsoleUrlListening } from '../test-framework/lib/env-bootstrap.mjs';
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import { pathToFileURL, fileURLToPath } from 'node:url';
@@ -27,7 +27,11 @@ async function findCases({ caseFile, domain, all }) {
     const abs = path.isAbsolute(caseFile) ? caseFile : path.resolve(process.cwd(), caseFile);
     return [abs];
   }
-  const casesDir = path.join(FRAMEWORK_ROOT, 'cases');
+  // KANET_TEST_CASES_DIR: 测试自身用(discovery-resilience.test.mjs 拿它指向临时 fixture 目录,
+  // 不碰真实 test-framework/cases/) — 未显式设时行为不变, 走真实目录。
+  const casesDir = process.env.KANET_TEST_CASES_DIR
+    ? path.resolve(process.env.KANET_TEST_CASES_DIR)
+    : path.join(FRAMEWORK_ROOT, 'cases');
   const out = [];
   async function walk(dir, currentDomain) {
     const entries = await fs.readdir(dir, { withFileTypes: true });
@@ -90,10 +94,17 @@ async function main() {
   const allFlag = args.includes('--all');
   const isTelegram = domain === 'tg-bot' || domain === 'telegram';  // live-smoke tg-bot tests (subprocess)
   const quietFlag = args.includes('--quiet');  // 只输出 summary, 不 dump 每 case 详情 (post-commit 用)
+  // rule 82(NWT GREEN 8578050b·ledger 1233/1251, 设计 docs/2026-09-14-kanetui-test-runner-skip-gate-and-
+  // console-url-safety-design-v0.1.md §1.2): --case= 显式点名单个 case 时原 isBatch 恒 false, skip_in_batch
+  // 保护形同虚设——RC_01_buy_kas_real_full.test.mjs(真钱 skip_in_batch+real_chain)被遍历脚本用 --case=
+  // 逐个跑到时才发现完全不受保护(手动 TaskStop 止损, 本人+Bettor 各自独立核实无真实广播)。
+  // allowManualOnly 显式旗标, 默认不给 = 保护永远激活, 与"怎么选 case"(--case/--domain/--all/--tag)解耦。
+  const allowManualOnly = args.includes('--allow-manual-only');
   if (!caseFile && !domain && !tag && !allFlag && adversarial === null) {
     console.log('Usage: node scripts/test.mjs --case=<path> | --domain=<broker|seeker|...> | --tag=<critical|security|...> | --all');
     console.log('       --adversarial[=<category>]  load probes.mjs adversarial probes (phase 7a, --adversarial=race for race only)');
     console.log('       --quiet  仅输出 summary');
+    console.log('       --allow-manual-only  绕过 skip_in_batch/skip_in_cron 保护(含 real_chain 真花钱用例), 默认不给');
     process.exit(1);
   }
 
@@ -116,6 +127,10 @@ async function main() {
   // J1 phase 7a-1 polish (NWT 7c66dd00 finding): --adversarial 显式 override skip_in_batch
   // (用户明确要跑 adversarial, 不是 cron batch 默认 — adversarial 自身 manual-only 设计是为了 cron 不污染).
   const isBatch = !caseFile && adversarial === null;
+  // rule 82: 保护是否激活跟"怎么选 case"完全解耦——不共用 isBatch, 默认永远激活, 只有 --allow-manual-only
+  // 能关。--adversarial 走的是完全不同的 case 来源(loadAdversarialCases 产出的 probe DSL 对象, 不是文件系统
+  // 里带 skip_in_batch 字段的 .test.mjs), 不受这条影响, isBatch 原变量的既有语义/既有用途不变。
+  const skipGateActive = !allowManualOnly;
   // Build unified case list: file-loaded + adapter-loaded adversarial probes
   const casesToRun = [];
   // ── ② 检测哨: import 期 env 污染 trip-wire(Bettor 2026-08-09 16:47 裁 · J2 实现 · NWT 审)──
@@ -130,22 +145,40 @@ async function main() {
   //      档2 = 合法(用例确需在 import 前置环境, 如把假 relay 塞进模块私有状态)⇒ 认领并注释
   //    自动判红会把档2 一起打死, 而它们是过审的设计。
   const _envOffenders = [];
+  // ── discovery loop 错误隔离(Bettor 1270 派工 · 主线测试基线 RED 清单 3f85d543 §1-A 根治)──
+  // 🔴 被修的洞: 本循环之前没有 try/catch —— 任何一个文件在 import 期同步 throw(无论是意外
+  //    bug, 还是像 p1_refund_authorization_gate.test.mjs 那样"生产结构变了故意拒绝放行"的
+  //    自我保护设计), 都会直接冒穿到 main().catch() 把整个进程 exit(2), **该文件字母序之后
+  //    的所有文件永远不会被 discover, 更别说跑**——包括已经在它之前被成功 import 进
+  //    casesToRun 的文件, 因为执行循环排在整个 discovery 循环【之后】, discovery 没走完
+  //    执行就压根没开始。predictions 域 63 个真实 case-object 因此可能从未被真正执行过一次
+  //    (2026-09-14 主线测试基线调查坐实, trace 目录零命中验证)。
+  // 🔵 修法: 单文件 import/containment-guard 失败 = 【该文件】的 RED(记录错误文本), 不是整个
+  //    batch 的死刑 —— continue 到下一文件, 结束时汇总"N 个文件 import 失败"且非零退出码
+  //    (总不能让"批里有文件连 import 都进不去"看起来跟"全部干净跑完"一个退出码)。
+  const _importFailures = [];
   for (const file of files) {
     const _envPre = { ...process.env };
-    const mod = await import(pathToFileURL(file).href);
-    // 🔴 ⑤ blocker① (C) 的第二道:交接单陷阱一 —— 遏制靠"谁先加载"成立, 顺序一变遏制就没了,
-    //    而【没有任何东西会报错】, 出站会安安静静打到真 relay。bootstrap 那一道只看得见它自己
-    //    那一刻;用例在【自己的模块加载期】把 RELAY_DIR 改走, 只有这里看得见。
-    //    ⇒ 在跑该用例的任何 step 之前就抛, 这才是"import 前即 fail"里的"前"。
-    (await import('../test-framework/lib/containment-guard.mjs')).assertContained(`case:${path.basename(file)}`);
-    // 逐文件比对 ⇒ 直接点名源头, 而不是只说"import 之后 env 变了"
-    const changed = [];
-    for (const k of new Set([...Object.keys(_envPre), ...Object.keys(process.env)])) {
-      if (_envPre[k] !== process.env[k]) changed.push(k);
+    try {
+      const mod = await import(pathToFileURL(file).href);
+      // 🔴 ⑤ blocker① (C) 的第二道:交接单陷阱一 —— 遏制靠"谁先加载"成立, 顺序一变遏制就没了,
+      //    而【没有任何东西会报错】, 出站会安安静静打到真 relay。bootstrap 那一道只看得见它自己
+      //    那一刻;用例在【自己的模块加载期】把 RELAY_DIR 改走, 只有这里看得见。
+      //    ⇒ 在跑该用例的任何 step 之前就抛, 这才是"import 前即 fail"里的"前"。
+      (await import('../test-framework/lib/containment-guard.mjs')).assertContained(`case:${path.basename(file)}`);
+      // 逐文件比对 ⇒ 直接点名源头, 而不是只说"import 之后 env 变了"
+      const changed = [];
+      for (const k of new Set([...Object.keys(_envPre), ...Object.keys(process.env)])) {
+        if (_envPre[k] !== process.env[k]) changed.push(k);
+      }
+      if (changed.length) _envOffenders.push({ file, keys: changed });
+      if (mod.default?.id) casesToRun.push(mod.default);
+      else if (!quietFlag) console.log(`SKIP (no default export): ${file}`);
+    } catch (err) {
+      _importFailures.push({ file, error: err?.message || String(err) });
+      console.error(`✗ IMPORT FAILED: ${file}`);
+      console.error(`   ${err?.message || err}`);
     }
-    if (changed.length) _envOffenders.push({ file, keys: changed });
-    if (mod.default?.id) casesToRun.push(mod.default);
-    else if (!quietFlag) console.log(`SKIP (no default export): ${file}`);
   }
   if (_envOffenders.length) {
     console.log('');
@@ -162,11 +195,35 @@ async function main() {
     console.log('');
   }
   for (const adv of adversarialCases) casesToRun.push(adv);
+  // rule 82 LOUD 提示：--allow-manual-only 关闭了保护, 跑之前把绕过的范围说清楚——尤其 real_chain
+  // 这个真花钱的子集单独点出来, 不是所有 skip_in_batch 用例都花钱(有些只是"跑起来慢/依赖外部状态不
+  // 适合 cron"), 不能笼统一句带过。
+  if (allowManualOnly) {
+    const manualOnlyCases = casesToRun.filter((c) => c.skip_in_batch || c.skip_in_cron);
+    const realChainCases = manualOnlyCases.filter((c) => (c.tags || []).includes('real_chain'));
+    if (manualOnlyCases.length) {
+      console.log('');
+      console.log(`⚠⚠⚠ --allow-manual-only 已绕过 skip_in_batch/skip_in_cron 保护 —— 即将真实运行 ${manualOnlyCases.length} 个标记用例：`);
+      for (const c of manualOnlyCases) console.log(`   ${c.id}${(c.tags || []).includes('real_chain') ? '  🔴 real_chain(真花钱)' : ''}`);
+      if (realChainCases.length) {
+        console.log(`🔴🔴🔴 其中 ${realChainCases.length} 个带 real_chain tag —— 真实链上广播+真实花费, 不是模拟。确认这是你想要的。`);
+      }
+      console.log('');
+    }
+  }
+  // rule 82: 端口安全检查必须晚于 case 选定(需要知道这批"实际会执行"的 case 里有没有 real_chain)——
+  // "会执行"= 没被 skip 门拦下的那些(skipGateActive 时排除 skip_in_batch/skip_in_cron, --allow-manual-only
+  // 时不排除, 跟下面主循环的判据是同一条, 不能各写一份互相漂移)。
+  const willRunCases = casesToRun.filter((c) => !(skipGateActive && (c.skip_in_batch || c.skip_in_cron)));
+  const hasRealChain = willRunCases.some((c) => (c.tags || []).includes('real_chain'));
+  await checkConsoleUrlListening({ hasRealChain });
   for (const testCase of casesToRun) {
     // tag filter (case 必含此 tag)
     if (tag && !(testCase.tags || []).includes(tag)) continue;
-    if (isBatch && testCase.skip_in_batch) {
-      if (!quietFlag) console.log(`SKIP (manual-only): ${testCase.id}`);
+    // rule 82: 同时读 skip_in_batch 和 skip_in_cron 两个字段——skip_in_cron 此前从未被任何 runner 代码
+    // 读取过(全仓 grep 核实过, 纯装饰), 这次一并接上, 不再只认 skip_in_batch 一个。
+    if (skipGateActive && (testCase.skip_in_batch || testCase.skip_in_cron)) {
+      if (!quietFlag) console.log(`SKIP (manual-only, pass --allow-manual-only to run): ${testCase.id}`);
       totalSkipped++;
       continue;
     }
@@ -197,6 +254,13 @@ async function main() {
 
   console.log('='.repeat(60));
   console.log(`Summary: ${totalPass} PASS / ${totalFail} FAIL / ${totalPass + totalFail} run`);
+  if (_importFailures.length) {
+    console.log(`${_importFailures.length} 个文件 import 失败(未计入上面 run 统计 — 这些文件既没 PASS 也没 FAIL, 是"连门都没进去"):`);
+    for (const f of _importFailures) {
+      console.log(`  IMPORT-FAIL ${f.file}`);
+      console.log(`        ${f.error}`);
+    }
+  }
   const historicalCases = summary.filter(s => s.historical);
   if (historicalCases.length > 0) {
     console.log('');
@@ -220,7 +284,7 @@ async function main() {
       console.log(`Trace files: logs/test-runs/ (${traceFiles.length} written)`);
     }
   }
-  process.exit(totalFail > 0 ? 1 : 0);
+  process.exit((totalFail > 0 || _importFailures.length > 0) ? 1 : 0);
 }
 
 main().catch(err => {

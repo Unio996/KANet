@@ -46,8 +46,12 @@ test('llm-watchdog.mjs broadcasts on respawn (Anti-pattern #2 / KI-9)', () => {
 
 test('llm-watchdog.mjs uses env var override (Anti-pattern #1)', () => {
   const src = readFileSync(join(ROOT, 'scripts/llm-watchdog.mjs'), 'utf-8');
-  // Check at least 4 critical env vars are overridable
-  for (const v of ['KANET_ROOT', 'LLAMA_EXE', 'LITELLM_EXE', 'CONSOLE_URL']) {
+  // Check at least 4 critical env vars are overridable.
+  // LITELLM_EXE → PROXY_SCRIPT (主线测试基线 RED 清单 3f85d543 §1-D / Bettor 1270/1273): watchdog 的
+  // 代理组件早已从"起一个独立 LiteLLM 可执行文件"演进成"起一个 Node 脚本"(spawn('node', [PROXY_SCRIPT]))，
+  // 断言列表里的 LITELLM_EXE 从未在源码里出现过，是断言过期没跟上这次合法重构——不是放宽标准，PROXY_SCRIPT
+  // 才是当前真正承担"代理可执行体覆盖点"这个角色的变量。
+  for (const v of ['KANET_ROOT', 'LLAMA_EXE', 'PROXY_SCRIPT', 'CONSOLE_URL']) {
     assert.match(src, new RegExp(`process\\.env\\.${v}`), `watchdog must support process.env.${v} override`);
   }
 });
