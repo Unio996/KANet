@@ -134,20 +134,28 @@ function _loadSilvercPin() {
 // 场景, 但那已经不是这层缓存该防的威胁——本地文件系统被这样精确篡改, 等价于本机已被攻陷, 任何内存态
 // 缓存都救不了), 命中同一份没变的文件时跳过重新读盘+哈希——不改变"文件真变了必须重新核对"这条安全语义,
 // 只去掉"文件没变也每次重算"这个从未被要求过的额外成本。
-const _fileSha256Cache = new Map(); // path -> { mtimeMs, size, sha256 }
+// 🔴 更正(ledger 1259, NWT 实测): 原键只用 (mtimeMs,size)——NWT 实测一条 PowerShell(`(Get-Item
+// $path).LastWriteTime = <过去时间>`)就能把 mtime 精确回拨到缓存记录的旧值, 同时保持 size 不变(换等长
+// 内容), 让被换过内容的文件继续读缓存里的旧 sha256, 绕过"文件真变了必须重新核对"这条安全语义——这不是
+// 假设风险, 是 NWT 实测复现的真绕过面。ctime(Windows 上是"文件属性/内容最后变更时间", 不是创建时间)在
+// 同一次实测里**不会**跟着 mtime 回拨——普通文件写入/替换会推进 ctime, 而重设 mtime 本身那个操作也会
+// 推进 ctime(因为它改了文件的"最后修改元数据"这件事本身)，攻击者要同时精确控制 mtime 回拨到位**且**
+// ctime 也保持旧值, 在 NTFS 上没有普通文件 API 能做到（需要更底层的手段, 已超出"内存缓存该防的威胁"）。
+// 键加 ctimeMs 三元组后, 单独回拨 mtime 不再能命中旧缓存条目。
+const _fileSha256Cache = new Map(); // path -> { mtimeMs, ctimeMs, size, sha256 }
 function _cachedFileSha256(path) {
   const st = statSync(path);
   const cached = _fileSha256Cache.get(path);
-  if (cached && cached.mtimeMs === st.mtimeMs && cached.size === st.size) return cached.sha256;
+  if (cached && cached.mtimeMs === st.mtimeMs && cached.ctimeMs === st.ctimeMs && cached.size === st.size) return cached.sha256;
   const sha256 = createHash('sha256').update(readFileSync(path)).digest('hex');
-  _fileSha256Cache.set(path, { mtimeMs: st.mtimeMs, size: st.size, sha256 });
+  _fileSha256Cache.set(path, { mtimeMs: st.mtimeMs, ctimeMs: st.ctimeMs, size: st.size, sha256 });
   return sha256;
 }
 export { _cachedFileSha256 as cachedFileSha256 };
 
 /**
  * 启动/每次调用前核二进制 sha256, 与 scripts/silverc-pin.json(D-019)比对——不符即拒跑, 不猜哪个对
- * (ledger 1216 原话: "启动 sha256 自检不符即拒跑")。sha256 结果按(mtimeMs,size)缓存(见上方状态注记)——
+ * (ledger 1216 原话: "启动 sha256 自检不符即拒跑")。sha256 结果按(mtimeMs,ctimeMs,size)缓存(见上方状态注记)——
  * 文件真的被换掉(mtime/size 任一变化)会自动触发重新哈希+比对, 不存在"文件被换了但内存里缓存的还是
  * 旧核对结果"这个窗口。
  * @param {string} v100Path
