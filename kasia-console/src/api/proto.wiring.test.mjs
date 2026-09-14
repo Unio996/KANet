@@ -78,13 +78,26 @@ try {
     ok(Array.isArray(relistBody.tokens) && relistBody.tokens.some((t) => t.id === createBody.id), '刚创建的定义能在列表里读回(真实端到端, 非 mock)');
   }
 } finally {
-  child.kill('SIGTERM');
-  await new Promise((r) => setTimeout(r, 500));
-  if (!child.killed) child.kill('SIGKILL');
+  // 🔴 NWT 修正(ledger 1358): `child.killed` 表示"kill() 被调用过", 不是"进程已退出"——SIGTERM 那行
+  // 调完下一行它就已经是 true, `if (!child.killed)` 永远 false, SIGKILL 兜底是死代码。改判真实退出
+  // (exitCode/signalCode 任一非 null = 进程已经真的退出了), 500ms 内没退出才补 SIGKILL。
+  let exited = child.exitCode !== null || child.signalCode !== null;
+  if (!exited) {
+    child.kill('SIGTERM');
+    exited = await new Promise((resolve) => {
+      const timer = setTimeout(() => resolve(false), 500);
+      child.once('exit', () => { clearTimeout(timer); resolve(true); });
+    });
+  }
+  if (!exited) child.kill('SIGKILL');
   try { fs.unlinkSync(tmpDb); } catch {}
 }
 
 console.log(fails === 0
   ? '\n✅✅ ALL PASS — registerProtoRoutes() 真的被 index.js 接线了(真实 spawn + 真实 HTTP, 不是 app.inject 绕过接线检查)'
   : `\n❌ ${fails} assertions failed`);
-process.exit(fails === 0 ? 0 : 1);
+// 🔴 不用 process.exit(): 本文件真 spawn 了一个子进程, 子进程的 stdio pipe 句柄在 kill 后需要事件循环
+// 自己走完关闭流程——立即同步 process.exit() 会在 Windows 上撞 libuv 断言崩溃(实测: "Assertion failed:
+// !(handle->flags & UV_HANDLE_CLOSING), file src\win\async.c" ——断言在全部测试通过之后才炸, exit code
+// 变成 127 而不是 0, 会被误判为测试失败)。改用 exitCode 属性, 让进程自然退出、句柄自然清干净。
+process.exitCode = fails === 0 ? 0 : 1;

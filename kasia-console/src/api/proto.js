@@ -37,6 +37,27 @@ async function buildAndBroadcast(kind, _params) {
   throw new Error(`buildAndBroadcast(${kind}): 未实现 —— 等 §6 KAS资金来源(B′/(B)/(C)) + §9 covenant_broadcast 命令定案(docs/2026-09-14-j2-proto-v0-backend-api-design-v0.1.md §6/§9),与 Owner 决策同批。`);
 }
 
+// 🔴 MUST(KANet-UI 隔离联调发现·Bettor 1356 升级为 MUST): GET 端点原来用 `SELECT m.*` 把
+// proto_markets.committee_privkey_enc(加密后的委员会/bettor 兼任 keypair, §5/1354)原样吐进无鉴权
+// 响应体——密文不等于安全(密钥泄露/算法弱化/离线爆破分析都靠它), 这是"读端点把私钥列带出去"这一族的
+// 模式问题, 不是这一处的孤立小事。所有 proto 读端点一律改显式列清单, 永不 SELECT *。
+// PUBLIC_MARKET_COLS 是单一来源(两处 GET 共用, 避免各写一份将来漏改一处)——明确不含任何 *_enc /
+// *privkey* / *mnemonic* 列; committee_pubkeys_json 是公开信息, 保留。
+const PUBLIC_MARKET_COLS = `
+  m.id, m.token_def_id, m.question, m.deadline_ms, m.min_bet, m.seal_count,
+  m.committee_pubkeys_json, m.rootclose_tmpl_hash,
+  m.shardleaf_txid, m.shardleaf_vout, m.rootclose_txid, m.rootclose_vout,
+  m.status, m.winning_side, m.payout_root, m.created_at, m.updated_at
+`;
+// proto_token_defs 当前没有任何 *_enc/*privkey*/*mnemonic* 列, 但同一条 MUST 的字面要求是"所有 proto
+// 读端点一律显式列清单, 永不 SELECT *"——不是"只在已知有敏感列时才写", 这样将来给这张表加了敏感列,
+// 老代码也不会因为忘记回来改这个查询而悄悄泄露。
+const PUBLIC_TOKEN_DEF_COLS = 'id, name, ticker, description, default_denomination, created_at';
+// proto_bets/proto_claims 目前的全部列本身就都不敏感(bettor_pk 是公钥不是私钥；没有任何 *_enc 列)，
+// 但同样按above的"永不 SELECT *"要求显式列出，不依赖"当前没有敏感列"这个会随 schema 演进而失效的前提。
+const PUBLIC_BET_COLS = 'id, market_id, bettor_pk, side, stake, mint_txid, mint_vout, ticket_txid, ticket_vout, stake_tx_id, status, created_at, confirmed_at';
+const PUBLIC_CLAIM_COLS = 'id, market_id, bettor_pk, side, amount, claim_txid, claim_vout, claimed_at, withdraw_txid, withdrawn_at, created_at';
+
 function notImplemented(reply, kind, err) {
   return reply.code(501).send({
     ok: false,
@@ -64,7 +85,7 @@ export async function registerProtoRoutes(fastify) {
   });
 
   fastify.get('/api/tokens', async (request, reply) => {
-    const rows = sqlite.prepare('SELECT * FROM proto_token_defs ORDER BY created_at DESC').all();
+    const rows = sqlite.prepare(`SELECT ${PUBLIC_TOKEN_DEF_COLS} FROM proto_token_defs ORDER BY created_at DESC`).all();
     return reply.send({ ok: true, tokens: rows });
   });
 
@@ -99,7 +120,7 @@ export async function registerProtoRoutes(fastify) {
 
   fastify.get('/api/proto-markets', async (request, reply) => {
     const rows = sqlite.prepare(`
-      SELECT m.*, t.name AS token_name, t.ticker AS token_ticker
+      SELECT ${PUBLIC_MARKET_COLS}, t.name AS token_name, t.ticker AS token_ticker
       FROM proto_markets m JOIN proto_token_defs t ON t.id = m.token_def_id
       ORDER BY m.created_at DESC
     `).all();
@@ -108,13 +129,13 @@ export async function registerProtoRoutes(fastify) {
 
   fastify.get('/api/proto-markets/:id', async (request, reply) => {
     const market = sqlite.prepare(`
-      SELECT m.*, t.name AS token_name, t.ticker AS token_ticker
+      SELECT ${PUBLIC_MARKET_COLS}, t.name AS token_name, t.ticker AS token_ticker
       FROM proto_markets m JOIN proto_token_defs t ON t.id = m.token_def_id
       WHERE m.id = ?
     `).get(request.params.id);
     if (!market) return reply.code(404).send({ ok: false, error: 'market not found' });
-    const bets = sqlite.prepare('SELECT * FROM proto_bets WHERE market_id = ? ORDER BY created_at ASC').all(market.id);
-    const claims = sqlite.prepare('SELECT * FROM proto_claims WHERE market_id = ? ORDER BY created_at ASC').all(market.id);
+    const bets = sqlite.prepare(`SELECT ${PUBLIC_BET_COLS} FROM proto_bets WHERE market_id = ? ORDER BY created_at ASC`).all(market.id);
+    const claims = sqlite.prepare(`SELECT ${PUBLIC_CLAIM_COLS} FROM proto_claims WHERE market_id = ? ORDER BY created_at ASC`).all(market.id);
     return reply.send({ ok: true, market, bets, claims });
   });
 

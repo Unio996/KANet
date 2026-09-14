@@ -142,6 +142,26 @@ console.log('[test] ⑦ claim: 候选数量必须恰好1条(Bettor 1354裁定, �
   ok(/ambiguous/.test(twoBody.error), `错误信息说明是"ambiguous": ${twoBody.error}`);
 }
 
+console.log('[test] ⑧ 🔴 MUST(KANet-UI隔离联调发现·Bettor 1356升级): GET响应绝不含committee_privkey_enc(列名或密文内容都不能出现):');
+{
+  const marketId = 'm-test-8-privkey-leak';
+  const now = new Date().toISOString();
+  const SECRET_DUMMY_CIPHERTEXT = 'CIPHERTEXT_SHOULD_NEVER_LEAK_abc123def456';
+  sqlite.prepare(`INSERT INTO proto_markets (id,token_def_id,deadline_ms,min_bet,committee_pubkeys_json,committee_privkey_enc,rootclose_tmpl_hash,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)`)
+    .run(marketId, tokenDefId, Date.now() + 100000, 10, '["pubkey-a"]', SECRET_DUMMY_CIPHERTEXT, 'aa'.repeat(32), 'betting', now, now);
+
+  const listRes = await app.inject({ method: 'GET', url: '/api/proto-markets' });
+  ok(!listRes.body.includes('committee_privkey_enc'), 'GET /api/proto-markets 响应体不含"committee_privkey_enc"列名');
+  ok(!listRes.body.includes(SECRET_DUMMY_CIPHERTEXT), 'GET /api/proto-markets 响应体不含密文内容本身');
+
+  const detailRes = await app.inject({ method: 'GET', url: `/api/proto-markets/${marketId}` });
+  ok(!detailRes.body.includes('committee_privkey_enc'), 'GET /api/proto-markets/:id 响应体不含"committee_privkey_enc"列名');
+  ok(!detailRes.body.includes(SECRET_DUMMY_CIPHERTEXT), 'GET /api/proto-markets/:id 响应体不含密文内容本身');
+
+  // 正例(防止断言本身是空判定): committee_pubkeys_json 这种公开信息应该还在, 证明不是"整个字段都被清空"
+  ok(detailRes.body.includes('pubkey-a'), '公开信息committee_pubkeys_json仍然存在(不是矫枉过正清空了整个market对象)');
+}
+
 console.log(fails === 0
   ? '\n✅✅ ALL PASS — 原型v0端点骨架(代币定义CRUD真实可用 + 链上端点校验先行+501占位+零DB副作用 + claim候选数量硬闸) 全绿'
   : `\n❌ ${fails} assertions failed`);
