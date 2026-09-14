@@ -182,5 +182,71 @@ console.log('[test] ⑨ resumeStaleMarketIntents(F2-R 重启捡回): genesis_pre
   ok(getMarketRow('m4').status === 'genesis_submitted', `m4 状态推进到 genesis_submitted(实际 ${getMarketRow('m4').status})`);
 }
 
+console.log('[test] ⑩ shardleaf_cov_id(账本1429/1431): prepared 阶段写入 + 落链 fail-closed 重算比对:');
+{
+  const kaspa = await import('kaspa-wasm');
+  const { scriptPublicKeyFromHex } = await import('./proto-tx-assembly.mjs');
+
+  const marketId = 'm5';
+  ensureMarketPending({ id: marketId, ...seedMarketFields(marketId) });
+  const R = makeRelay();
+  const txid = 'tx-m5'.padEnd(64, '0');
+
+  const realFundingOutpoint = { transactionId: 'ff'.repeat(32), index: 0 };
+  const forgedFundingOutpoint = { transactionId: 'ee'.repeat(32), index: 0 }; // 伪造: 不同的 input outpoint
+  const genesisSpkHex = '0x' + 'aa20' + 'bb'.repeat(32) + '87';
+  const genesisOutput = { value: 20_000_000n, scriptPublicKeyHex: genesisSpkHex };
+  const spk = scriptPublicKeyFromHex(kaspa, genesisSpkHex);
+  const realCovId = String(kaspa.covenantId(realFundingOutpoint, [{ index: 0, output: new kaspa.TransactionOutput(genesisOutput.value, spk) }]));
+
+  recordMarketIntentPhase({ intentKey: marketIntentKeyFor(marketId), phase: 'prepared', txid, txJson: JSON.stringify({ id: txid }), shardLeafCovId: realCovId });
+  ok(getMarketRow(marketId).shardleaf_cov_id === realCovId, 'prepared 阶段 shardleaf_cov_id 写入成功');
+  recordMarketIntentPhase({ intentKey: marketIntentKeyFor(marketId), phase: 'submitted', txid });
+
+  R.landed.set(txid, 25);
+
+  console.log('  -- ⑩a 落链交易真实 input[0] outpoint 与存的值一致 ⇒ 通过, 推进到 betting --');
+  const rOk = await checkMarketGenesisLanded({
+    sendCmd: R.sendCmd, relayId: 'relay-A', market: getMarketRow(marketId), targetAddress: 'kaspatest:m5-addr', minDepth: 20,
+    kaspa, fetchLandedGenesisTx: async () => ({ fundingOutpoint: realFundingOutpoint, genesisOutput }),
+  });
+  ok(rOk.landed === true, `一致时 landed=true(实际 ${rOk.landed})`);
+  ok(getMarketRow(marketId).status === 'betting', `一致时状态推进到 betting(实际 ${getMarketRow(marketId).status})`);
+}
+
+console.log('[test] ⑪ 伪造落链交易的 input outpoint 不同 ⇒ 拒绝推进, genesis_ambiguous, 不自动重建:');
+{
+  const kaspa = await import('kaspa-wasm');
+  const { scriptPublicKeyFromHex } = await import('./proto-tx-assembly.mjs');
+
+  const marketId = 'm6';
+  ensureMarketPending({ id: marketId, ...seedMarketFields(marketId) });
+  const R = makeRelay();
+  const txid = 'tx-m6'.padEnd(64, '0');
+
+  const realFundingOutpoint = { transactionId: 'ff'.repeat(32), index: 0 };
+  const forgedFundingOutpoint = { transactionId: 'ee'.repeat(32), index: 0 };
+  const genesisSpkHex = '0x' + 'aa20' + 'cc'.repeat(32) + '87';
+  const genesisOutput = { value: 20_000_000n, scriptPublicKeyHex: genesisSpkHex };
+  const spk = scriptPublicKeyFromHex(kaspa, genesisSpkHex);
+  const realCovId = String(kaspa.covenantId(realFundingOutpoint, [{ index: 0, output: new kaspa.TransactionOutput(genesisOutput.value, spk) }]));
+
+  recordMarketIntentPhase({ intentKey: marketIntentKeyFor(marketId), phase: 'prepared', txid, txJson: JSON.stringify({ id: txid }), shardLeafCovId: realCovId });
+  recordMarketIntentPhase({ intentKey: marketIntentKeyFor(marketId), phase: 'submitted', txid });
+  R.landed.set(txid, 25);
+
+  let threw = null;
+  try {
+    await checkMarketGenesisLanded({
+      sendCmd: R.sendCmd, relayId: 'relay-A', market: getMarketRow(marketId), targetAddress: 'kaspatest:m6-addr', minDepth: 20,
+      kaspa, fetchLandedGenesisTx: async () => ({ fundingOutpoint: forgedFundingOutpoint, genesisOutput }), // 伪造: 不同 input
+    });
+  } catch (e) { threw = e; }
+  ok(threw && threw.hold === true && threw.code === 'covid_mismatch', `不一致时 throw MarketIntentHoldError(covid_mismatch)(实际 ${threw?.code})`);
+  const after = getMarketRow(marketId);
+  ok(after.status === 'genesis_ambiguous', `状态推进到 genesis_ambiguous, 不是 betting(实际 ${after.status})`);
+  ok(!!after.genesis_last_error, 'genesis_last_error 记录了不一致原因');
+}
+
 console.log(`\n${fails === 0 ? '✅✅ ALL PASS' : `❌ ${fails} 处失败`}`);
-process.exit(fails === 0 ? 0 : 1);
+process.exitCode = fails === 0 ? 0 : 1;

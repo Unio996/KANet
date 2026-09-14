@@ -6053,13 +6053,19 @@ export function runMigrations() {
     const checkMatch = tableInfo?.sql?.match(/CHECK\s*\(\s*status\s+IN\s*\(([^)]+)\)\s*\)/);
     const currentCheckStates = checkMatch ? checkMatch[1].split(',').map(s => s.trim().replace(/'/g, '')) : [];
     const newStates = ['genesis_pending', 'genesis_prepared', 'genesis_submitted', 'genesis_ambiguous'];
-    const missing = newStates.filter(s => !currentCheckStates.includes(s));
-    if (tableInfo?.sql && missing.length) {
+    const missingStates = newStates.filter(s => !currentCheckStates.includes(s));
+    const existingCols = tableInfo?.sql ? sqlite.prepare(`PRAGMA table_info(proto_markets)`).all().map(c => c.name) : [];
+    // 🔴 账本1429/1431: shardleaf_cov_id 是 genesis 时算一次、之后不变、库里没有其它数据能推算出来的
+    // 一次性事实(同 shardleaf_txid/shardleaf_vout 那一类, 不是可推算冗余——不属于1429否决的leaf运行态
+    // 那种)。v207 还没合并/没在任何生产库跑过, 并进这一版而不是另开一版(Bettor 1431 明确要求)。
+    const missingCols = ['shardleaf_cov_id'].filter(c => !existingCols.includes(c));
+    const missing = tableInfo?.sql && (missingStates.length || missingCols.length);
+    if (missing) {
       const indexes = sqlite.prepare(`SELECT name, sql FROM sqlite_master WHERE type='index' AND tbl_name='proto_markets' AND sql IS NOT NULL`).all();
       const rowCountBefore = sqlite.prepare(`SELECT COUNT(*) AS cnt FROM proto_markets`).get().cnt;
-      const colsList = sqlite.prepare(`PRAGMA table_info(proto_markets)`).all().map(c => c.name);
+      const colsList = existingCols;
       const colsCsv = colsList.join(', ');
-      const allStates = [...currentCheckStates, ...missing];
+      const allStates = [...currentCheckStates, ...missingStates];
       const newCheckClause = `CHECK (status IN (${allStates.map(s => `'${s}'`).join(',')}))`;
       let newSql = tableInfo.sql
         .replace(/CREATE TABLE\s+"?proto_markets"?/, 'CREATE TABLE proto_markets_v207')
@@ -6068,9 +6074,14 @@ export function runMigrations() {
       // 新增 genesis 两阶段回执列(同 proto_bet_intents 的 prepared_txid/prepared_tx_json/submitted_txid/
       // landed_depth/landed_at/last_error 形状, 单数前缀 genesis_ 而不是表名前缀, 因为这张表本身就是
       // proto_markets, 不需要再重复一次表名)。插在 status 那一行之后, 保持列顺序可读。
+      // shardleaf_cov_id(账本1429/1431批准, 并进本版而非另开v208): genesis 交易 input[0] outpoint 决定的
+      // covenant_id, 一次性事实, genesis_prepared 阶段与 genesis_prepared_txid 一起写入(见
+      // proto-market-intent.mjs recordMarketIntentPhase)。🔴 按 F2-R 规则 genesis 进入 ambiguous 后不
+      // 重建, 因此不存在"换输入后这一列过期"的路径——但如果未来任何代码路径重建了 genesis 交易, 必须
+      // 同时重写这一列, 否则落链校验(checkMarketGenesisLanded 的 fail-closed 重算比对)会永远不匹配。
       newSql = newSql.replace(
         /(status\s+TEXT NOT NULL DEFAULT 'genesis_pending'\s*\n\s*CHECK[^\n]*\n)/,
-        `$1                             genesis_prepared_txid    TEXT,\n                             genesis_prepared_tx_json TEXT,\n                             genesis_submitted_txid   TEXT,\n                             genesis_landed_depth     INTEGER,\n                             genesis_landed_at        TEXT,\n                             genesis_last_error       TEXT,\n`
+        `$1                             genesis_prepared_txid    TEXT,\n                             genesis_prepared_tx_json TEXT,\n                             genesis_submitted_txid   TEXT,\n                             genesis_landed_depth     INTEGER,\n                             genesis_landed_at        TEXT,\n                             genesis_last_error       TEXT,\n                             shardleaf_cov_id         TEXT,\n`
       );
 
       // 🔴 外键风险修复(NWT 复核发现, 账本1425后续): proto_bets.market_id REFERENCES proto_markets(id)——
@@ -6101,7 +6112,7 @@ export function runMigrations() {
             }
           }
           sqlite.exec('COMMIT');
-          console.log(`[migrate] v207: proto_markets rebuilt (${rowCountBefore} rows preserved, ${indexes.length} indexes recreated, CHECK 加 genesis_pending/genesis_prepared/genesis_submitted/genesis_ambiguous, DEFAULT 改 genesis_pending, 加 6 个 genesis_* 回执列).`);
+          console.log(`[migrate] v207: proto_markets rebuilt (${rowCountBefore} rows preserved, ${indexes.length} indexes recreated, CHECK 加 genesis_pending/genesis_prepared/genesis_submitted/genesis_ambiguous, DEFAULT 改 genesis_pending, 加 6 个 genesis_* 回执列 + shardleaf_cov_id).`);
         } catch (e) {
           sqlite.exec('ROLLBACK');
           throw e;

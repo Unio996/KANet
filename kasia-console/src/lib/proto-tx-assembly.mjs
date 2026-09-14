@@ -246,3 +246,27 @@ export function buildMarketGenesisTxJson({ kaspa, network, feeUtxo, relayChangeS
     continuationOutputIndices: [],
   };
 }
+
+/**
+ * 落链校验(账本1429/1431 要求的 fail-closed 重算比对): genesis 交易一旦落链, 从**实际落链交易**的
+ * input[0] outpoint + genesis 输出本身, 用同一个 consensus 纯函数(kaspa.covenantId)重新算一遍
+ * covenant_id, 必须与 prepared 阶段存的 shardleaf_cov_id 完全一致——防"库里存的值与链上实际情况不符"
+ * (无论是构造 bug、还是——理论上不该发生但要防——广播过程中输入被替换)。
+ * @param {object} o
+ * @param {*} o.kaspa
+ * @param {string} o.expectedCovId  proto_markets.shardleaf_cov_id(prepared 阶段存的值)
+ * @param {{transactionId:string, index:number}} o.landedFundingOutpoint  落链交易实际的 input[0].previousOutpoint
+ * @param {{value:bigint, scriptPublicKeyHex:string}} o.landedGenesisOutput  落链交易实际的 genesis 输出(output[genesisOutputIndex])
+ * @param {number} o.genesisOutputIndex
+ * @returns {{ok:true}|{ok:false, actualCovId:string, reason:string}}
+ */
+export function verifyShardLeafCovIdAgainstLandedTx({ kaspa, expectedCovId, landedFundingOutpoint, landedGenesisOutput, genesisOutputIndex }) {
+  if (!expectedCovId) throw new Error('verifyShardLeafCovIdAgainstLandedTx: expectedCovId required(proto_markets.shardleaf_cov_id 为空——genesis_prepared 阶段没写上这一列)');
+  const genesisSpk = scriptPublicKeyFromHex(kaspa, landedGenesisOutput.scriptPublicKeyHex);
+  const output = new kaspa.TransactionOutput(landedGenesisOutput.value, genesisSpk);
+  const actualCovId = String(kaspa.covenantId(landedFundingOutpoint, [{ index: genesisOutputIndex, output }]));
+  if (actualCovId.toLowerCase() !== String(expectedCovId).toLowerCase()) {
+    return { ok: false, actualCovId, reason: `落链交易实际算出的 covenant_id(${actualCovId}) 与 prepared 阶段存的 shardleaf_cov_id(${expectedCovId}) 不一致` };
+  }
+  return { ok: true, actualCovId };
+}

@@ -85,8 +85,14 @@ export function markMarketStatus(marketId, patch) {
   return getMarketRow(marketId);
 }
 
-/** relay 侧 HTTP 回执落表(同 recordBetIntentPhase 语义): prepared 在广播前写, submitted 在广播后写。 */
-export function recordMarketIntentPhase({ intentKey, phase, txid, txJson = null }) {
+/**
+ * relay 侧 HTTP 回执落表(同 recordBetIntentPhase 语义): prepared 在广播前写, submitted 在广播后写。
+ * @param {string} [o.shardLeafCovId]  仅 phase='prepared' 时用——genesis 交易 input[0] outpoint 决定的
+ *   covenant_id(账本1429/1431批准, 与 genesis_prepared_txid 同一时点写入)。一次性事实, 写入后不再变
+ *   (F2-R 规则: genesis 进 ambiguous 后不重建; 若未来任何路径真的重建了 genesis 交易, 必须同时重写
+ *   这一列, 否则 checkMarketGenesisLanded 的落链校验会永远比对失败)。
+ */
+export function recordMarketIntentPhase({ intentKey, phase, txid, txJson = null, shardLeafCovId = null }) {
   const marketId = marketIdFromIntentKey(intentKey);
   if (!marketId) return { ok: false, error: `not a market_genesis intent_key: ${intentKey}` };
   const cur = getMarketRow(marketId);
@@ -95,6 +101,7 @@ export function recordMarketIntentPhase({ intentKey, phase, txid, txJson = null 
   if (phase === 'prepared') {
     const patch = { genesis_prepared_txid: txid };
     if (txJson) patch.genesis_prepared_tx_json = typeof txJson === 'string' ? txJson : JSON.stringify(txJson);
+    if (shardLeafCovId) patch.shardleaf_cov_id = shardLeafCovId;
     if (cur.status === 'genesis_pending') patch.status = 'genesis_prepared';
     return { ok: true, market: markMarketStatus(marketId, patch) };
   }
@@ -234,12 +241,42 @@ export async function driveMarketGenesis({
   throw new Error(`market genesis ${marketId} exhausted ${maxAttempts} attempts: ${lastError}`);
 }
 
-/** landed 门: check_utxo_landed(target, submitted_txid, minDepth). landed ⇒ status→'betting'(=active) + depth。 */
-export async function checkMarketGenesisLanded({ sendCmd, relayId, market, targetAddress, minDepth, origin, shardleafVout = 0 }) {
+/**
+ * landed 门: check_utxo_landed(target, submitted_txid, minDepth). landed ⇒ 先做 fail-closed 落链
+ * 校验(账本1429/1431): 从**实际落链交易**重算 shardleaf_cov_id, 与 prepared 阶段存的值比对, 不一致
+ * ⇒ genesis_ambiguous + 告警, 不推进到可下注状态(同 (1102) F2-R 规则: ambiguous 终态只能人工清,
+ * 不自动重建)。
+ * @param {object} o
+ * @param {*} [o.kaspa]  kaspa-wasm 模块(校验 shardleaf_cov_id 用; 不传则跳过校验——过渡期兼容, 见下)
+ * @param {Function} [o.fetchLandedGenesisTx]  async (txid) => {fundingOutpoint, genesisOutput} | null
+ *   ——真正从链上取"落链交易的 input[0] outpoint + genesis 输出"这一步的注入点(同 M0a 门既有手法,
+ *   离线可测)。🔴 生产接线目前还没有对应的 relay IPC 命令(现有命令只按地址查 UTXO, 没有"按 txid
+ *   查完整交易结构"这一条——需要新增, 不在本笔范围, 如实记录为待办, 不是忽略)。不传时退化为只做
+ *   check_utxo_landed 那一步(旧行为), 不做 covenant_id 校验。
+ */
+export async function checkMarketGenesisLanded({ sendCmd, relayId, market, targetAddress, minDepth, origin, shardleafVout = 0, kaspa = null, fetchLandedGenesisTx = null }) {
   if (!market?.genesis_submitted_txid) return { landed: false, depth: null, reason: 'not submitted' };
   if (!(Number(minDepth) > 0)) throw new Error('checkMarketGenesisLanded: minDepth > 0 required (pass REORG_SAFE_MIN_DEPTH)');
   const r = await sendCmd(relayId, { type: 'check_utxo_landed', address: targetAddress, txid: market.genesis_submitted_txid, minDepth }, 15000, origin);
   if (r?.landed) {
+    if (kaspa && fetchLandedGenesisTx) {
+      const landedTx = await fetchLandedGenesisTx(market.genesis_submitted_txid);
+      if (!landedTx) {
+        markMarketStatus(market.id, { status: 'genesis_ambiguous', genesis_last_error: 'landed but fetchLandedGenesisTx returned null — cannot verify shardleaf_cov_id' });
+        alertMarketIntent('market_genesis_covid_verify_fetch_failed', `market ${market.id} genesis landed but could not fetch tx to verify shardleaf_cov_id — HOLD`, { market_id: market.id, txid: market.genesis_submitted_txid }, 'error');
+        throw new MarketIntentHoldError(`market genesis ${market.id}: landed but shardleaf_cov_id verification fetch failed — HOLD`, 'covid_verify_fetch_failed');
+      }
+      const { verifyShardLeafCovIdAgainstLandedTx } = await import('./proto-tx-assembly.mjs');
+      const v = verifyShardLeafCovIdAgainstLandedTx({
+        kaspa, expectedCovId: market.shardleaf_cov_id, landedFundingOutpoint: landedTx.fundingOutpoint,
+        landedGenesisOutput: landedTx.genesisOutput, genesisOutputIndex: shardleafVout,
+      });
+      if (!v.ok) {
+        markMarketStatus(market.id, { status: 'genesis_ambiguous', genesis_last_error: v.reason });
+        alertMarketIntent('market_genesis_covid_mismatch', `market ${market.id} genesis landed but recomputed covenant_id doesn't match stored shardleaf_cov_id — HOLD, no auto-advance to betting`, { market_id: market.id, txid: market.genesis_submitted_txid, expected: market.shardleaf_cov_id, actual: v.actualCovId }, 'error');
+        throw new MarketIntentHoldError(`market genesis ${market.id}: shardleaf_cov_id mismatch on landed tx — HOLD (manual review)`, 'covid_mismatch');
+      }
+    }
     const updated = markMarketStatus(market.id, {
       status: 'betting', genesis_landed_depth: r.depth ?? null, genesis_landed_at: nowIso(),
       shardleaf_txid: market.genesis_submitted_txid, shardleaf_vout: shardleafVout,
