@@ -135,9 +135,44 @@ OFFSET_V2` 漂移，`DATABASE.md` payout_shards 陷阱段落当时状态注记�
    `registerBettorOnShard`/`bshard-payout-family-coherence.mjs`/`bshard-auto-settler.mjs`/
    `bshard-settle-daemon.mjs`）改参 + 既有测试补齐三新字段 + 本文档 §2.2/§2.3 更新
 
-## 6. 未完成/留待后续（ledger 1230 追加，尚未落码）
+## 6. 启动期自检（5c，ledger 1230/1233，本笔落地）
 
-**启动期自检**：console 启动时若 `SILVERC_V100_PATH` 已设，跑 `assertSilvercV100Pinned`+
-`assertSilvercV100GoldenSample`，LOUD 打印固定格式日志行（PASS/FAIL），失败不阻止 console 启动（只阻止
-真正调用编译的路径，调用时的断言仍是唯一承重守卫）。另需确认三个 `ZK_*` env 是调用时读取（不是模块加载
-时），部署环境未设置这些 env 不影响 console 正常启动。本笔尚未实现，留作独立小笔（"5c"）。
+`kasia-console/src/index.js`（`runMigrations()` 之后紧接一行）新增 `checkSilvercPinAtStartup()`
+（`pool-bshard-artifacts.mjs`）：`SILVERC_V100_PATH` 已设时跑一遍 `assertSilvercV100Pinned` +
+`assertSilvercV100GoldenSample`，LOUD 打印固定格式日志；未设时**静默跳过**（不打印任何行——这台机器
+暂不需要这条能力，不是"隐藏失败"）。**这个函数本身永不 throw，FAIL 不阻止 console 启动**——真正的
+承重闸仍是 `compileSilV100` 内部每次真实编译前的断言（本自检只是把同一次检查提前到进程启动时做一遍并
+LOUD 报告，让"这台机器编译器锚点从一开始就不对"不用等到第一次真实 genesis-mint 才被发现）。
+
+**固定日志格式（KANet-UI 部署页据此判断，改动前须跟部署方同步）**：
+
+```
+PASS: [silverc-pin] PASS sha256=<sha256前8位hex>... golden=<goldenSample.contractName> ok
+FAIL: [silverc-pin] FAIL <错误信息全文>
+跳过: (不打印任何行)
+```
+
+实测三种情形（`SILVERC_V100_PATH` 未设 / 指向真实生产二进制 / 指向错误二进制如 `silverc-zk-8065184.exe`）：
+
+```
+--- 未设 ---
+result: {"skipped":true}
+--- 真实生产二进制(D:/silverscript/versioned-builds/silverc-v100-3ed9733.exe) ---
+[silverc-pin] PASS sha256=4378ba65... golden=RootClaim ok
+--- 错误二进制 ---
+[silverc-pin] FAIL silverc v1.0.0 二进制 sha256 不符 D-019 锚点(...): 期望 4378ba65..., 实际 9de7f2f6...(...) — 拒绝编译, 不猜哪个对
+```
+
+**三个 `ZK_*` env（`ZK_TOKEN_TMPL_HASH`/`ZK_CLAIM_TMPL_HASH`/`ZK_MARKET_SUFFIX_HASH`）确认**：逐行核对
+`api/pool.js`/`bshard-close-transport.mjs` 全部 `process.env.ZK_*` 引用，**均在函数体内部读取（调用时），
+不是模块顶层 const（模块加载时）**——部署环境未设置这些 env 不影响 console 启动，只在真正尝试 zkNative
+市场 genesis-mint/zk_handoff 时才会 fail-loud 拒绝。
+
+## 7. 已知 RED 测试处置更新（ledger 1233）
+
+- `thread-walk.test.mjs`/`windir-infer.test.mjs`（§2.3②，与代币化无关的既有 fixture/schema 陈旧）——
+  Bettor 裁：派 KANet-UI 单独修 fixture，不在本分支范围内。
+- `bshard-consolidated-pool-rederive.test.mjs` 场景 A/B + `payoutshardv2-offset-tripwire.test.mjs`
+  （V1/V2 offset 漂移，§2.1/§2.3①）——归入统一的"偏移重新 live-derive"独立报备笔（下一步：先出方案
+  一页，覆盖 ledger 1226 三点 + `_PREDICATE_COMMIT_REDEEM_OFFSET` 系列结构哨兵补齐 + V1 `@518` 一并处理，
+  NWT 审后再落码）。

@@ -52,6 +52,7 @@ if (process.env.CPU_PROF_AUTO_EXIT_MS) {
 
 // DB setup
 import { runMigrations } from './db/migrate.js';
+import { checkSilvercPinAtStartup } from './lib/pool-bshard-artifacts.mjs';
 import { sqlite as _sqlite } from './db/client.js';
 
 // Config
@@ -119,6 +120,12 @@ console.log(`[console] CONSOLE_ENCRYPTION_KEY fingerprint: ${currentKeyFingerpri
 
 // Run migrations
 runMigrations();
+
+// D-019(ledger 1230/1233): silverc v1.0.0 锚点启动期自检——observability-only, 不阻止 console 启动
+// (真正的承重闸在 compileSilV100 内部每次真实编译前的断言)。SILVERC_V100_PATH 未设 = 这台机器暂不需要
+// 这条能力, 静默跳过, 不打印任何行。固定日志格式见 pool-bshard-artifacts.mjs checkSilvercPinAtStartup
+// 的注释 + README(KANet-UI 部署页据此判断)。
+checkSilvercPinAtStartup();
 
 // Auto-generate INGEST_SECRET if not configured
 async function ensureIngestSecret() {

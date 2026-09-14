@@ -171,6 +171,35 @@ export function assertSilvercV100GoldenSample(v100Path) {
 }
 
 /**
+ * 启动期自检(observability-only, ledger 1230/1233)——console 启动时若 SILVERC_V100_PATH 已设, 跑一遍两道
+ * D-019 校验并 LOUD 打印固定格式日志行, 供 KANet-UI 部署页/人工巡检一眼判断"这台机器的 v1.0.0 编译器锚点
+ * 对不对"。**这个函数本身永不 throw**——真正的承重闸在 compileSilV100 内部(每次真实编译前都会调
+ * assertSilvercV100Pinned/assertSilvercV100GoldenSample, 那两个函数该抛照抛), 本函数只是把同一次检查提前
+ * 到进程启动时做一遍、把结果 LOUD 打出来, 让"这台机器编译器锚点从一开始就不对"这件事不用等到第一次真实
+ * genesis-mint 才会被发现——FAIL 不阻止 console 正常启动继续跑 relay 等其它职责(SILVERC_V100_PATH 未设
+ * 视为"这台机器暂不需要这条能力", 直接跳过, 不算 FAIL)。
+ *
+ * 固定日志格式(写入 README, KANet-UI 部署页据此判断, 改动前跟部署方同步)：
+ *   PASS: `[silverc-pin] PASS sha256=<前8位hex>... golden=<goldenSample.contractName> ok`
+ *   FAIL: `[silverc-pin] FAIL <错误信息全文>`
+ *   跳过(未设 env): 不打印任何行(沉默, 不是"隐藏失败"——本来就不要求这台机器具备这条能力)。
+ * @param {string} [v100Path] 默认 env SILVERC_V100_PATH；显式传 undefined/空字符串 = 跳过检查
+ * @returns {{skipped:true}|{ok:true,sha256:string,golden:string}|{ok:false,error:string}}
+ */
+export function checkSilvercPinAtStartup(v100Path = process.env.SILVERC_V100_PATH) {
+  if (!v100Path) return { skipped: true };
+  try {
+    const pin = assertSilvercV100Pinned(v100Path);
+    assertSilvercV100GoldenSample(v100Path);
+    console.log(`[silverc-pin] PASS sha256=${pin.sha256.slice(0, 8)}... golden=${pin.goldenSample?.contractName || '?'} ok`);
+    return { ok: true, sha256: pin.sha256, golden: pin.goldenSample?.contractName };
+  } catch (e) {
+    console.error(`[silverc-pin] FAIL ${e.message}`);
+    return { ok: false, error: e.message };
+  }
+}
+
+/**
  * Compile a .sil with ctor JSON via silverc v1.0.0 → 适配成旧 schema 形状返回({script,state_layout}), 让
  * extractTemplateArtifact 等既有下游零改动直接吃, 不用为新 schema 另外教一遍下游代码。
  * @param {string} silPath
