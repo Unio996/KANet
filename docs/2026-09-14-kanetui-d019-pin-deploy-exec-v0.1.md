@@ -1,8 +1,10 @@
-# D-019 pin 修补部署执行页 v0.2（2026-09-14 · KANet-UI · Bettor 1228 预派 · 只写不执行）
+# D-019 pin 修补部署执行页 v0.3（2026-09-14 · KANet-UI · Bettor 1228 预派 · 只写不执行）
 
 > **Status: DRAFT**。权威链：`docs/2026-09-14-j2-d019-silverc-v100-migration-inventory-v0.1.md`（`051af204`，侧分支 `coord/j2-t4-genesis-compare`）+ `docs/2026-09-14-kanetui-mainnet-closezkv2-genesis-autotrigger-audit-v0.1.md`（本人 `3e749698`，确认当前无自动触发面）+ `docs/2026-09-14-kanetui-silverc-v100-versioned-copy-plan-v0.1.md`/provenance `66086cb6`（二进制已就位）。**本页只写方案，不执行**——执行门：本页 → NWT 审 → **前置条件（§0）满足** → Bettor 一声令下 → 执行。
 >
 > **v0.2 变更（Bettor 1230 裁定 v0.1 两处缺口）**：①三个 `ZK_*_TMPL_HASH` env **本次部署保持未设**——它们只在市场创建/`zk_handoff` 调用时读且 fail-loud，未设 = 创世路径关闭，正是 `3e749698` 无自动触发面结论要的守卫；真值等 T4 工具（J2 第 6 笔）落码、由单源产物算出后再另行决定何时写入。§2② 按此改写，v0.1 那版"取值来源待定"的分析不再是阻断本次部署的问题——**本次部署的范围缩小为只换编译器路径（`SILVERC_V100_PATH`已就位）+ 换调用点代码，不涉及给这三个新字段赋真值**。②J2 会在 5b/5c 加开机期自检 LOUD 日志（`SILVERC_V100_PATH` 已设时跑两项校验，打印 PASS/FAIL + sha256 前 16 位 + 黄金样本结果）——§2⑤ 按这行改写，**确切字符串待 Bettor 后续给出，本页先占位、字符串一到立即补**。时序提醒（基线 `relay_nodes` 按执行当天实际值记）已在 v0.1 写法里体现，本版不变。
+>
+> **v0.3 变更（Bettor 1234：5c 落地 `a9f2d751`，确切自检字符串给出）**：本人核实侧分支 `coord/j2-t4-genesis-compare` 当前 `docs/2026-09-14-j2-d019-silverc-v100-migration-inventory-v0.1.md` §6 原文（不是照抄 Bettor 转述——转述里"sha256 前 16 位"与该文档实际格式"前 8 位"有出入，本页以直接读到的文档原文为准，见下方精确格式引用）。§2⑤ 判据按此改写：重启后日志里 `grep -c '\[silverc-pin\] PASS'` 应为 `1`、`grep -c '\[silverc-pin\] FAIL'` 应为 `0`（Bettor 1234 给出的 grep 判据，不依赖 hex 位数这类容易转述出错的细节，本页采用这条作为主判据）。
 
 ## 0. 前置条件（Bettor 1228 原话，本页照录为阻断条件，不代为判定是否满足）
 
@@ -43,7 +45,13 @@
 
 ### ⑤ 重启后验证
 - 监听 `127.0.0.1:3202` under 新 PID。
-- 🔴 **pin 自检 LOUD 日志（v0.2 改写，Bettor 1230②）**：J2 会在 5b/5c 加开机期自检——`SILVERC_V100_PATH` 已设时跑两项校验（二进制 sha256 比对 + 黄金样本 deep-equal），打印 PASS/FAIL + sha256 前 16 位 + 黄金样本结果。**确切字符串待 Bettor 给出，本条先占位**：拿到字符串后立即出 v0.3 补上精确 `grep` 判据，在此之前执行方需要向 Bettor 索取确切行文本再验收这一项，不能凭本页猜一个格式。
+- **pin 自检 LOUD 日志（v0.3 确定，Bettor 1234·5c `a9f2d751`）**：`kasia-console/src/index.js` 在 `runMigrations()` 之后调用 `checkSilvercPinAtStartup()`（`pool-bshard-artifacts.mjs`）——`SILVERC_V100_PATH` 已设时跑 `assertSilvercV100Pinned`+`assertSilvercV100GoldenSample`，格式：
+  ```
+  PASS: [silverc-pin] PASS sha256=<前8位hex>... golden=<contractName> ok
+  FAIL: [silverc-pin] FAIL <错误信息全文>
+  未设 SILVERC_V100_PATH: 不打印任何行（不是隐藏失败——这台机器不需要这条能力）
+  ```
+  本次部署 `SILVERC_V100_PATH` 已在此前（`66086cb6`）就位，预期落在 PASS 分支。**判据（Bettor 1234 原话，本页采纳为主判据——不依赖 hex 位数这类容易转述出错的细节）**：重启后完整日志里 `grep -c '\[silverc-pin\] PASS'` 应恰为 `1`，`grep -c '\[silverc-pin\] FAIL'` 应为 `0`。该函数本身永不 throw（FAIL 不阻止 console 启动，见迁移盘点文档 §6 原话"真正的承重闸仍是 `compileSilV100` 内部每次真实编译前的断言"）——**这条自检是提前告警，不是安全边界本身**，即便这一项验证时因为某种原因漏看，也不代表创世路径失去防护，写这条区分是为了不让执行方误判"日志没这行=部署不安全"，两者是两回事。
 - `migrate.js` 版本号确认已推进（对照③基线，`PRAGMA user_version` 或等价方式核实，具体命令按当时 `migrate.js` 实际暴露的核查方式）。
 - 10 个（或按③执行时实际数字）relay 重新被 health-monitor cron 拉起，`[relay-hotwallet-monitor] started`/`[relay-health-monitor]`（或对应初始化行）均出现。
 - 无 `FATAL`/`UNMET`/`MODULE_NOT_FOUND`（同既有验收惯例，≥65s 观察窗口）。
