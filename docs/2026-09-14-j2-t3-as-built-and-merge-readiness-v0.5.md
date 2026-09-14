@@ -50,8 +50,8 @@
 | 34 | `d1e53d11` | T4 v0.3：创世对照清单扩到 8 合约新 ctor 常量 + 核出 poolMerkleRoot/committee_hash/predicate_commit 三字段 T4 v0.2 假设失实 | docs | ledger 1195 |
 | 35 | `5c8c2b6f` | T4 v0.3 加裁定引用(ledger 1200 选②：三字段保持 ctor-only 走(c)+(d)，cheap-tier 放弃) | docs | ledger 1200 |
 | 36 | `0ca4fdb2` | T4 v0.4：tripwire 硬性注释+lint钩子方案(只写方案) + predicate_commit 措辞更正(结构完整性已covered/业务裁决门未接线) | docs | NWT 复核要求，ledger 1203 |
-| 37 | `e0ae924a` | **PayoutShard.absorb sole-source MUST-FIX**(shardInIdx 必须是本笔交易唯一非自持同模板代币输入，否则同笔多个合法 leaf 只点名一个会静默销毁另一个) | PayoutShard | provenance `payoutshard-absorb-sole-source-fix` 6/6 PASS；Codex ledger 1208 独立发现，Bettor 核过成立；**待 NWT 独立复现** |
-| 38 | `adc37c0a` | **PayoutShardV2.absorb sole-source MUST-FIX**(同 #37 逐字复制) | PayoutShardV2 | provenance `payoutshardv2-absorb-sole-source-fix` 6/6 PASS；同上；**待 NWT 独立复现** |
+| 37 | `e0ae924a` | **PayoutShard.absorb sole-source MUST-FIX**(shardInIdx 必须是本笔交易唯一非自持同模板代币输入，否则同笔多个合法 leaf 只点名一个会静默销毁另一个) | PayoutShard | provenance `payoutshard-absorb-sole-source-fix` 6/6 PASS；Codex ledger 1208 独立发现，Bettor 核过成立；**已由 NWT 独立复现 GREEN（`948545c3`）** |
+| 38 | `adc37c0a` | **PayoutShardV2.absorb sole-source MUST-FIX**(同 #37 逐字复制) | PayoutShardV2 | provenance `payoutshardv2-absorb-sole-source-fix` 6/6 PASS；同上；**已由 NWT 独立复现 GREEN（`948545c3`）** |
 | 39 | `a8d05729` | **PayoutShard 完整现行向量套件**(Bettor 1209 裁：历史快照因 ctor 演进不适用重跑，"全部向量通过"合入前提不成立，按当前 25 参数 ctor 重建 absorb/close_attest/cancel_attest/claim/refund_claim 全覆盖套件) | 文档，`PayoutShard.sil` 未改动 | provenance `payoutshard-current-suite` 43/43 PASS，含新增 1122 边界 3 条(absorb 侧此前从未单独证过) |
 | 40 | `18c5d4c6` | **PayoutShardV2 完整现行向量套件**(同 #39 逐字同构) | 文档，`PayoutShardV2.sil` 未改动 | provenance `payoutshardv2-current-suite` 44/44 PASS |
 
@@ -183,7 +183,8 @@
    `consolidate_to_payout`、`absorb` 只点名一个会导致另一个被**静默销毁**。已修（`e0ae924a`/`adc37c0a`，
    两文件各一 commit，新增 `countStrayNonOwnedTokenInputs` 排除法计数 + `shardTk.owner!=self` 双重核对），
    见 `docs/provenance/2026-09-14-j2-t3-v03-{payoutshard,payoutshardv2}-absorb-sole-source-fix/`，各 6/6
-   向量 PASS，全部 flip-expect 复核，**待 NWT 独立复现**（尚未见到复核记录）。
+   向量 PASS，全部 flip-expect 复核，**已由 NWT 独立复现 GREEN**（`948545c3`，四判据全绿：caret 精确落点、
+   43/43+44/44 独立 --run-all、AB11 常量+bytecode deep-equal 零漂移、8 份旧目录状态注记独立核实）。
 
 4. **RootClaim/RefundClaim ctor 变更对 T4 创世对照的影响**：T4 创世骨架设计（`docs/2026-09-13-j2-t4-market-
    genesis-console-side-skeleton-v0.1.md` §2.1.1）列出"7 个模板 hash 留 ctor、不进状态字段表"的清单
