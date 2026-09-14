@@ -27,7 +27,11 @@ async function findCases({ caseFile, domain, all }) {
     const abs = path.isAbsolute(caseFile) ? caseFile : path.resolve(process.cwd(), caseFile);
     return [abs];
   }
-  const casesDir = path.join(FRAMEWORK_ROOT, 'cases');
+  // KANET_TEST_CASES_DIR: 测试自身用(discovery-resilience.test.mjs 拿它指向临时 fixture 目录,
+  // 不碰真实 test-framework/cases/) — 未显式设时行为不变, 走真实目录。
+  const casesDir = process.env.KANET_TEST_CASES_DIR
+    ? path.resolve(process.env.KANET_TEST_CASES_DIR)
+    : path.join(FRAMEWORK_ROOT, 'cases');
   const out = [];
   async function walk(dir, currentDomain) {
     const entries = await fs.readdir(dir, { withFileTypes: true });
@@ -141,22 +145,40 @@ async function main() {
   //      档2 = 合法(用例确需在 import 前置环境, 如把假 relay 塞进模块私有状态)⇒ 认领并注释
   //    自动判红会把档2 一起打死, 而它们是过审的设计。
   const _envOffenders = [];
+  // ── discovery loop 错误隔离(Bettor 1270 派工 · 主线测试基线 RED 清单 3f85d543 §1-A 根治)──
+  // 🔴 被修的洞: 本循环之前没有 try/catch —— 任何一个文件在 import 期同步 throw(无论是意外
+  //    bug, 还是像 p1_refund_authorization_gate.test.mjs 那样"生产结构变了故意拒绝放行"的
+  //    自我保护设计), 都会直接冒穿到 main().catch() 把整个进程 exit(2), **该文件字母序之后
+  //    的所有文件永远不会被 discover, 更别说跑**——包括已经在它之前被成功 import 进
+  //    casesToRun 的文件, 因为执行循环排在整个 discovery 循环【之后】, discovery 没走完
+  //    执行就压根没开始。predictions 域 63 个真实 case-object 因此可能从未被真正执行过一次
+  //    (2026-09-14 主线测试基线调查坐实, trace 目录零命中验证)。
+  // 🔵 修法: 单文件 import/containment-guard 失败 = 【该文件】的 RED(记录错误文本), 不是整个
+  //    batch 的死刑 —— continue 到下一文件, 结束时汇总"N 个文件 import 失败"且非零退出码
+  //    (总不能让"批里有文件连 import 都进不去"看起来跟"全部干净跑完"一个退出码)。
+  const _importFailures = [];
   for (const file of files) {
     const _envPre = { ...process.env };
-    const mod = await import(pathToFileURL(file).href);
-    // 🔴 ⑤ blocker① (C) 的第二道:交接单陷阱一 —— 遏制靠"谁先加载"成立, 顺序一变遏制就没了,
-    //    而【没有任何东西会报错】, 出站会安安静静打到真 relay。bootstrap 那一道只看得见它自己
-    //    那一刻;用例在【自己的模块加载期】把 RELAY_DIR 改走, 只有这里看得见。
-    //    ⇒ 在跑该用例的任何 step 之前就抛, 这才是"import 前即 fail"里的"前"。
-    (await import('../test-framework/lib/containment-guard.mjs')).assertContained(`case:${path.basename(file)}`);
-    // 逐文件比对 ⇒ 直接点名源头, 而不是只说"import 之后 env 变了"
-    const changed = [];
-    for (const k of new Set([...Object.keys(_envPre), ...Object.keys(process.env)])) {
-      if (_envPre[k] !== process.env[k]) changed.push(k);
+    try {
+      const mod = await import(pathToFileURL(file).href);
+      // 🔴 ⑤ blocker① (C) 的第二道:交接单陷阱一 —— 遏制靠"谁先加载"成立, 顺序一变遏制就没了,
+      //    而【没有任何东西会报错】, 出站会安安静静打到真 relay。bootstrap 那一道只看得见它自己
+      //    那一刻;用例在【自己的模块加载期】把 RELAY_DIR 改走, 只有这里看得见。
+      //    ⇒ 在跑该用例的任何 step 之前就抛, 这才是"import 前即 fail"里的"前"。
+      (await import('../test-framework/lib/containment-guard.mjs')).assertContained(`case:${path.basename(file)}`);
+      // 逐文件比对 ⇒ 直接点名源头, 而不是只说"import 之后 env 变了"
+      const changed = [];
+      for (const k of new Set([...Object.keys(_envPre), ...Object.keys(process.env)])) {
+        if (_envPre[k] !== process.env[k]) changed.push(k);
+      }
+      if (changed.length) _envOffenders.push({ file, keys: changed });
+      if (mod.default?.id) casesToRun.push(mod.default);
+      else if (!quietFlag) console.log(`SKIP (no default export): ${file}`);
+    } catch (err) {
+      _importFailures.push({ file, error: err?.message || String(err) });
+      console.error(`✗ IMPORT FAILED: ${file}`);
+      console.error(`   ${err?.message || err}`);
     }
-    if (changed.length) _envOffenders.push({ file, keys: changed });
-    if (mod.default?.id) casesToRun.push(mod.default);
-    else if (!quietFlag) console.log(`SKIP (no default export): ${file}`);
   }
   if (_envOffenders.length) {
     console.log('');
@@ -232,6 +254,13 @@ async function main() {
 
   console.log('='.repeat(60));
   console.log(`Summary: ${totalPass} PASS / ${totalFail} FAIL / ${totalPass + totalFail} run`);
+  if (_importFailures.length) {
+    console.log(`${_importFailures.length} 个文件 import 失败(未计入上面 run 统计 — 这些文件既没 PASS 也没 FAIL, 是"连门都没进去"):`);
+    for (const f of _importFailures) {
+      console.log(`  IMPORT-FAIL ${f.file}`);
+      console.log(`        ${f.error}`);
+    }
+  }
   const historicalCases = summary.filter(s => s.historical);
   if (historicalCases.length > 0) {
     console.log('');
@@ -255,7 +284,7 @@ async function main() {
       console.log(`Trace files: logs/test-runs/ (${traceFiles.length} written)`);
     }
   }
-  process.exit(totalFail > 0 ? 1 : 0);
+  process.exit((totalFail > 0 || _importFailures.length > 0) ? 1 : 0);
 }
 
 main().catch(err => {
