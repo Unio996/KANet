@@ -6040,5 +6040,66 @@ export function runMigrations() {
   `);
   console.log('[migrate] v206: proto_token_defs/proto_markets/proto_bets/proto_bet_intents/proto_claims 建表(原型 v0 隔离命名空间, pragma 守卫幂等).');
 
+  // ── v207 (2026-09-15, J2 · market_genesis 落码, 账本 1425 硬条件①): proto_markets 加 genesis 两阶段
+  //   状态机字段 ──
+  //   market_genesis 不进 proto_bet_intents(FK 是 bet_id, 市场创世没有 bet 行)——Bettor 裁定: 用
+  //   proto_markets.status 自己的状态机, 形状照抄 proto_bet_intents 的 pending→prepared→submitted→
+  //   landed/ambiguous, 只是没有 depends_on(单步, 不是两步链)。DEFAULT 从 'betting' 改成
+  //   'genesis_pending'——硬条件①要求"发 IPC 之前先 INSERT pending 行", 不再是"广播成功才 INSERT"。
+  //   'betting' 保留作为落链confirmed 后的终态(= 硬条件①说的"active"——market 可以开始接受下注,
+  //   复用既有语义, 不新造一个 'active' 值)。
+  {
+    const tableInfo = sqlite.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='proto_markets'").get();
+    const checkMatch = tableInfo?.sql?.match(/CHECK\s*\(\s*status\s+IN\s*\(([^)]+)\)\s*\)/);
+    const currentCheckStates = checkMatch ? checkMatch[1].split(',').map(s => s.trim().replace(/'/g, '')) : [];
+    const newStates = ['genesis_pending', 'genesis_prepared', 'genesis_submitted', 'genesis_ambiguous'];
+    const missing = newStates.filter(s => !currentCheckStates.includes(s));
+    if (tableInfo?.sql && missing.length) {
+      const indexes = sqlite.prepare(`SELECT name, sql FROM sqlite_master WHERE type='index' AND tbl_name='proto_markets' AND sql IS NOT NULL`).all();
+      const rowCountBefore = sqlite.prepare(`SELECT COUNT(*) AS cnt FROM proto_markets`).get().cnt;
+      const colsList = sqlite.prepare(`PRAGMA table_info(proto_markets)`).all().map(c => c.name);
+      const colsCsv = colsList.join(', ');
+      const allStates = [...currentCheckStates, ...missing];
+      const newCheckClause = `CHECK (status IN (${allStates.map(s => `'${s}'`).join(',')}))`;
+      let newSql = tableInfo.sql
+        .replace(/CREATE TABLE\s+"?proto_markets"?/, 'CREATE TABLE proto_markets_v207')
+        .replace(/CHECK\s*\(\s*status\s+IN\s*\([^)]+\)\s*\)/, newCheckClause)
+        .replace(/status\s+TEXT NOT NULL DEFAULT 'betting'/, "status TEXT NOT NULL DEFAULT 'genesis_pending'");
+      // 新增 genesis 两阶段回执列(同 proto_bet_intents 的 prepared_txid/prepared_tx_json/submitted_txid/
+      // landed_depth/landed_at/last_error 形状, 单数前缀 genesis_ 而不是表名前缀, 因为这张表本身就是
+      // proto_markets, 不需要再重复一次表名)。插在 status 那一行之后, 保持列顺序可读。
+      newSql = newSql.replace(
+        /(status\s+TEXT NOT NULL DEFAULT 'genesis_pending'\s*\n\s*CHECK[^\n]*\n)/,
+        `$1                             genesis_prepared_txid    TEXT,\n                             genesis_prepared_tx_json TEXT,\n                             genesis_submitted_txid   TEXT,\n                             genesis_landed_depth     INTEGER,\n                             genesis_landed_at        TEXT,\n                             genesis_last_error       TEXT,\n`
+      );
+
+      sqlite.exec('BEGIN TRANSACTION');
+      try {
+        sqlite.exec('DROP TABLE IF EXISTS proto_markets_v207');
+        sqlite.exec(newSql);
+        sqlite.exec(`INSERT INTO proto_markets_v207 (${colsCsv}) SELECT ${colsCsv} FROM proto_markets`);
+        const rowCountAfter = sqlite.prepare(`SELECT COUNT(*) AS cnt FROM proto_markets_v207`).get().cnt;
+        if (rowCountAfter !== rowCountBefore) {
+          throw new Error(`v207 row count mismatch: before=${rowCountBefore} after=${rowCountAfter}`);
+        }
+        sqlite.exec('DROP TABLE proto_markets');
+        sqlite.exec('ALTER TABLE proto_markets_v207 RENAME TO proto_markets');
+        for (const idx of indexes) {
+          if (idx.sql) {
+            try { sqlite.exec(idx.sql); }
+            catch (ie) { console.warn(`[migrate] v207 index ${idx.name} recreate fail: ${ie.message}`); }
+          }
+        }
+        sqlite.exec('COMMIT');
+        console.log(`[migrate] v207: proto_markets rebuilt (${rowCountBefore} rows preserved, ${indexes.length} indexes recreated, CHECK 加 genesis_pending/genesis_prepared/genesis_submitted/genesis_ambiguous, DEFAULT 改 genesis_pending, 加 6 个 genesis_* 回执列).`);
+      } catch (e) {
+        sqlite.exec('ROLLBACK');
+        throw e;
+      }
+    } else {
+      console.log('[migrate] v207: proto_markets already has genesis intent columns/CHECK states (idempotent skip).');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
