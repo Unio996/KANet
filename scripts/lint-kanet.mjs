@@ -1962,8 +1962,17 @@ checkR_SQL_TIME_STRINGCMP(); // R-SQL-TIME-STRINGCMP (2026-08-29)
 //   判据: 去整行注释 (// | * | /*) 后逐行扫; 报 文件:行:列。只扫 targets (staged/传入)。guard test (recovery-lock-builder.test.mjs) 用 spawn 跑本脚本 + 9 条阳性/阴性对照 + 两轴突变。
 const TESTONLY_SYM_RE = /\b_[A-Za-z0-9]+ForTests\b/g;
 const TESTONLY_PATH_RE = /(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*|^\s*import\s+)['"`][^'"`]*(?:\.test\.|\.fixture\.|\.testonly\.|(?:^|\/)test-framework\/|__testonly__\/)[^'"`]*['"`]/g;
+// 🔴 2026-09-14(KANet-UI，独立发现的既有缺口，非本次新引入)：kasia-console/scripts/test.mjs 是
+// test-framework 的 CLI 入口本身(`node scripts/test.mjs --case=.../--domain=.../--all`)——它 import
+// test-framework/ 下的 runner.mjs/env-bootstrap.mjs/load-probes.mjs/containment-guard.mjs 正是它存在的
+// 意义，不是"生产代码绕过资金安全闸偷跑 test-only 分支"那个病（本规则要防的是这个）。白名单此前没有
+// 覆盖这一个具体文件——不是因为审过认为它该被拦，是因为默认全仓 lint 扫描目录(DEFAULT_LINT_DIRS)是
+// 仓根 scripts/，不是 kasia-console/scripts/，这条规则从 2026-08-29 立规到今天从未在这个具体路径上被
+// 扫描到过(本人对着 committed 原文件单独跑过 lint 核实：4 处命中，跟改动前后一致，非本次引入)。只加
+// 这一个精确路径，不放宽成任何模式(如 `scripts/*.mjs` 那种会连累仓根无关脚本的写法)。
+const TEST_RUNNER_ENTRY_WHITELIST = new Set(['kasia-console/scripts/test.mjs']);
 export function isTestContextPath(relPosix) {
-  return /\.test\.(m?js|cjs|mts|cts)$/.test(relPosix) || /\.fixture\.(m?js|cjs|mts|cts)$/.test(relPosix) || /\.testonly\.(m?js|cjs|mts|cts)$/.test(relPosix) || /(^|\/)test-framework\//.test(relPosix) || /(^|\/)__testonly__\//.test(relPosix);   // NWT 8/29: +.cjs/.mts/.cts
+  return /\.test\.(m?js|cjs|mts|cts)$/.test(relPosix) || /\.fixture\.(m?js|cjs|mts|cts)$/.test(relPosix) || /\.testonly\.(m?js|cjs|mts|cts)$/.test(relPosix) || /(^|\/)test-framework\//.test(relPosix) || /(^|\/)__testonly__\//.test(relPosix) || TEST_RUNNER_ENTRY_WHITELIST.has(relPosix);   // NWT 8/29: +.cjs/.mts/.cts
 }
 // 符号轴预处理 (v4 ④): 去单行字符串字面量与行尾 // 注释, 让"字符串/注释里提名字"不算引用 (路径轴用原行, 它正需要字面量)
 function stripStringsAndTrailingComment(line) {
