@@ -939,6 +939,14 @@ startBrokerFeeEmitCron();
 import { startTxLandedReconciler } from './services/tx-landed-reconciler.mjs';
 startTxLandedReconciler();
 
+// J2 2026-09-15 (账本1425/1438③): proto v0 后台驱动 —— market_genesis/bet_mint 广播后需要等 landed
+//   才能推进下一步(bet_mint 两步链式尤其如此), 单次 HTTP 请求内不可能同步等完, 需要这个后台循环。
+//   🔴 硬条件①(钱路闸): 默认关闭, 只有 PROTO_DRIVER_ENABLED=1 且 PROTO_RELAY_ID 已配置才真的起
+//   setInterval——startProtoDriver() 内部自己判断, 不满足条件只打一行 disabled 日志。Stage 1 只驱动
+//   market_genesis, bet_mint 两步在后续 Stage 补齐(services/proto-driver.mjs 文件头注)。
+import { startProtoDriver } from './services/proto-driver.mjs';
+startProtoDriver();
+
 // J1tn 2026-07-16 (docs/2026-07-08-backward-walk-daa-index-design.md §2.2 note①, Bettor 方向审
 // GREEN + NWT 攻击面终审 GREEN #o0056j): spc_daa_index 完整性巡检 — 9ez2u 同族根因防线。
 import { startSpcDaaIndexStaleCheck } from './services/spc-daa-index-monitor.mjs';

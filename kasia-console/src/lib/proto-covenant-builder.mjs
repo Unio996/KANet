@@ -57,6 +57,20 @@ export function loadProtocolConstants() {
   return _anchorsCache;
 }
 
+/**
+ * 读 `feeProfile[kind].cap`(同一份 anchors.json, `proto-v0-template-anchors.json` §4/§9.2 引用的
+ * per-kind cap)——buildAndBroadcast 接线用, 与 covenant-broadcast-relay.mjs 硬编码的
+ * GLOBAL_ABS_FEE_CAP_SOMPI(kind-无关最终兜底)是两条独立防线, 不是同一个数字的两处写法。
+ * @param {string} kind  'market_genesis' | 'bet_mint_step_a' | 'bet_mint_step_b'
+ * @returns {bigint}
+ */
+export function loadFeeProfileCap(kind) {
+  const raw = JSON.parse(readFileSync(ANCHORS_JSON, 'utf8'));
+  const cap = raw?.feeProfile?.[kind]?.cap;
+  if (!cap) throw new Error(`loadFeeProfileCap: missing feeProfile.${kind}.cap in ${ANCHORS_JSON}`);
+  return BigInt(cap);
+}
+
 /** 编译产物的常用切片(prefix/suffix, 供后续 witness 用) + template_hash, 统一形状。 */
 function artifactOf(compiled) {
   const artifact = extractTemplateArtifactV100(compiled);

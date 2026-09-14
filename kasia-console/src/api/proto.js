@@ -114,17 +114,53 @@ export async function registerProtoRoutes(fastify) {
     }
     const minBet = 1; // v0 不在创建表单上暴露，后端给个不挡门槛的默认值(设计稿 §2 最少字段清单)
     const sealCount = 2; // v0 固定(depth-1 payoutRoot merkle cap, 设计稿 §2.2/§5)，不接受调用方覆盖
+    // 🔴 已知限制(如实记录, 不在本笔范围): resolutionNote 目前无处存(proto_markets 没有对应列),
+    // 请求体接受这个字段但当前丢弃——不是本笔引入的新问题, 是既有占位代码就没接的字段。
 
-    // NO-TX-NO-STATE: 广播占位阶段, 不写任何 proto_markets 行。定案后这里换成:
-    //   ① 生成一次性委员会 keypair(§5, 5 槽同一把 pubkey) → crypto.encrypt 存 committee_privkey_enc
-    //   ② 编译一份携带真实 committee_hash/deadline_ms/token_tmpl_hash 的 RootClose 模板 → rootclose_tmpl_hash
-    //   ③ compileSilV100(ShardLeaf_direct.sil) genesis 输出 + buildAndBroadcast('market_genesis', ...)
-    //   ④ 广播成功后才 INSERT proto_markets(shardleaf_txid/vout 已知, question=title, resolutionNote 存 metadata)
+    // §6/§9 已定案, 真实实现(账本1425/1438): 生成一次性委员会 keypair + 一次性 32 字节 hex marketId →
+    // ensureMarketPending 写 genesis_pending 行(NO-TX-NO-STATE: 这一步不是"已广播", 只是必须先于任何
+    // IPC 存在的记账行, 同 driveMarketGenesis 硬条件①) → 驱动关闭时 409 不发 IPC; 驱动开启时立即尝试
+    // 推进一次(maxAttempts=1, 不阻塞太久), 剩余的重试/落链检测交给后台 proto-driver。
+    const { randomBytes } = await import('node:crypto');
+    const marketId = randomBytes(32).toString('hex');
+    const { computeMarketGenesisArtifacts } = await import('../lib/proto-covenant-builder.mjs');
+    let artifacts;
     try {
-      await buildAndBroadcast('market_genesis', { tokenDef, deadlineMs, minBet, sealCount, title, resolutionNote });
+      artifacts = await computeMarketGenesisArtifacts({ marketId, minBet, deadlineMs });
     } catch (err) {
-      return notImplemented(reply, 'market_genesis', err);
+      return reply.code(500).send({ ok: false, error: `market genesis artifact computation failed: ${err.message}` });
     }
+    const { ensureMarketPending, driveMarketGenesis, getMarketRow } = await import('../lib/proto-market-intent.mjs');
+    const market = ensureMarketPending({
+      id: marketId, token_def_id: tokenId, question: title.trim(), deadline_ms: deadlineMs, min_bet: minBet, seal_count: sealCount,
+      committee_pubkeys_json: JSON.stringify([artifacts.committeePubkeyHex]), committee_privkey_enc: artifacts.committeePrivkeyEnvelope,
+      rootclose_tmpl_hash: artifacts.rootCloseTmplHash,
+    });
+
+    const { isProtoDriverEnabled } = await import('../services/proto-driver.mjs');
+    if (!isProtoDriverEnabled()) {
+      return reply.code(409).send({ ok: false, error: 'proto_driver_disabled', id: marketId, status: market.status });
+    }
+
+    // 🔴 M0a 门(账本1440/1441, considered amendment #8): 不 bare-import relay-manager——发命令一律
+    // 走 lib/proto-relay-ipc.mjs 的 protoSendCmd(全仓唯一裸 import relay-manager 的受控出口)。
+    const { buildMarketGenesisAndBroadcast, shardLeafTargetAddress } = await import('../lib/proto-broadcast-ops.mjs');
+    const { PROTO_RELAY_ID, assertProtoRelayHealthy } = await import('../lib/proto-relay-guard.mjs');
+    const { protoSendCmd } = await import('../lib/proto-relay-ipc.mjs');
+    const kaspa = await import('kaspa-wasm');
+    const network = process.env.KASPA_NETWORK || 'mainnet';
+    try {
+      const health = await assertProtoRelayHealthy();
+      const targetAddress = shardLeafTargetAddress({ kaspa, network, market });
+      await driveMarketGenesis({
+        sendCmd: protoSendCmd, relayId: PROTO_RELAY_ID, marketId, targetAddress, maxAttempts: 1, origin: 'http',
+        buildAndBroadcast: () => buildMarketGenesisAndBroadcast({ kaspa, network, market, sendCmd: protoSendCmd, relayId: PROTO_RELAY_ID, relayAddress: health.address }),
+      });
+    } catch (e) {
+      // 立即尝试失败/HOLD 都不阻塞响应——这只是"最好情况下立即有进展"的优化, 后台驱动会继续重试/恢复。
+    }
+    const after = getMarketRow(marketId);
+    return reply.code(202).send({ ok: true, id: marketId, status: after.status });
   });
 
   fastify.get('/api/proto-markets', async (request, reply) => {
