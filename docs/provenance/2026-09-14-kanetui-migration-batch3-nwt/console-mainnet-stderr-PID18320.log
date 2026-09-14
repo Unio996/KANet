@@ -1,0 +1,27 @@
+[migrate] v199: 🔴 idx_kaspa_tx_log_to_addr_observed 缺失 — 不在 boot 自建(kaspa_tx_log ~16M 行, 分钟级持写锁); 请在停机窗跑 kasia-console/scratch/_j2_p1_kaspa_tx_log_index_window.mjs, 或 KANET_MIGRATE_BUILD_HEAVY_INDEX=1 明确要求在此建(🔴 永不进 kanet.env; 只允许 supervisor/hb_guard 已停时手动单跑 migrate, 否则 boot-age 判活会把建到一半的进程杀掉 ⇒ 回滚 ⇒ 重启风暴)。正路始终是停机窗脚本。broker-intake 的 60 s SELECT 在此之前仍是 4–30 s 同步阻塞。
+[committee-offset-derive] WARN: derived != checked-in reference (isV2=false, derived predicateCommitOffset=16411, reference=518, derived poolMerkleRootOffsets=[16931,17227,17523,17819,18115], reference=[1002,1266,1530,1794,2058]) — .sil 已改动，建议更新 checked-in 参考值(不拒签，仅留痕)
+[committee-offset-derive] WARN: derived != checked-in reference (isV2=true, derived predicateCommitOffset=16569, reference=642, derived poolMerkleRootOffsets=[17089,17385,17681,17977,18273], reference=[1126,1390,1654,1918,2182]) — .sil 已改动，建议更新 checked-in 参考值(不拒签，仅留痕)
+[committee-offset-derive] WARN: derived != checked-in reference (isV2=false, derived predicateCommitOffset=16411, reference=518, derived poolMerkleRootOffsets=[16931,17227,17523,17819,18115], reference=[1002,1266,1530,1794,2058]) — .sil 已改动，建议更新 checked-in 参考值(不拒签，仅留痕)
+[committee-offset-derive] WARN: derived != checked-in reference (isV2=true, derived predicateCommitOffset=16569, reference=642, derived poolMerkleRootOffsets=[17089,17385,17681,17977,18273], reference=[1126,1390,1654,1918,2182]) — .sil 已改动，建议更新 checked-in 参考值(不拒签，仅留痕)
+[zk-prove-server] ZK_PROVE_SERVER_TOKEN not set — server NOT started (fail-closed, not fail-open).
+[external-gateway] 未配置 KANET_EXTERNAL_GATEWAY_HOST / _PORT ⇒ 不启动(fail-closed)。 🔴 这不是错误: 没有配置就没有对外口。
+[key-export] refuse mnemonic export relay=df5f15d7: key export disabled (RELAY_KEY_EXPORT_ENABLED_UNTIL env 未设)
+[key-export] refuse privkey export relay=df5f15d7 wallet=ceholder: key export disabled (RELAY_KEY_EXPORT_ENABLED_UNTIL env 未设)
+[oracle-pool-scanner-cron] tick fail: pool empty (≥1 required)
+[key-export] refuse mnemonic export relay=1: key export disabled (RELAY_KEY_EXPORT_ENABLED_UNTIL env 未设)
+[key-export] refuse privkey export relay=1 wallet=1: key export disabled (RELAY_KEY_EXPORT_ENABLED_UNTIL env 未设)
+[oracle-pool-scanner-cron] tick fail: pool empty (≥1 required)
+[oracle-pool-scanner-cron] tick fail: pool empty (≥1 required)
+[relay-health] stress-user-05 startRelay fail: already_running
+[oracle-pool-scanner-cron] tick fail: pool empty (≥1 required)
+[relay-health] J2 startRelay fail: already_running
+[relay-health] Trader-A startRelay fail: already_running
+[relay-health] Qclaude startRelay fail: already_running
+[oracle-pool-scanner-cron] tick fail: pool empty (≥1 required)
+[oracle-pool-scanner-cron] tick fail: pool empty (≥1 required)
+[oracle-pool-scanner-cron] tick fail: pool empty (≥1 required)
+[oracle-pool-scanner-cron] tick fail: pool empty (≥1 required)
+[oracle-pool-scanner-cron] tick fail: pool empty (≥1 required)
+[relay-manager] hotwallet admission refuse kaspa:qrxw764gez624hfkfvpmzfx8a4mg2vze5n6vsgu8fymewrkuphy65lxur9c5l: cold_address_denied
+[relay] refuse import "zzz-admission-probe-1789374229501" (kaspa:qrxw764gez624hfkfvpmzfx8a4mg2vze5n6vsgu8fymewrkuphy65lxur9c5l): hotwallet admission cold_address_denied
+[oracle-pool-scanner-cron] tick fail: pool empty (≥1 required)
