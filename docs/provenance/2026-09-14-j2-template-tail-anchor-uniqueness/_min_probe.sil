@@ -1,0 +1,11 @@
+pragma silverscript ^0.1.0;
+
+contract MinProbe(
+    byte[32] init_owner
+) {
+    byte[32] owner = init_owner;
+
+    entry ping(sig s) {
+        require(checkSig(s, pubkey(owner)));
+    }
+}
