@@ -9,6 +9,7 @@ import { getReply } from '../services/mind-manager.js';
 import { onBroadcastWritten } from '../services/trade-protocol-filter.js';
 import { recordChainEvent } from '../services/chain-event.js';
 import { checkBudget, recordSpend } from '../services/social-budget.js';
+import { checkAdminSecretTier } from '../lib/admin-secret-tier.mjs';
 
 // ── Sub 9.15 (KI-13.6) — broadcast chain-content alignment ──
 // kasia-relay/src/relay.mjs:28 capMessage truncates broadcast payloads to MAX_MESSAGE_CHARS=5000
@@ -333,7 +334,12 @@ export async function registerChatRoutes(fastify) {
   // POST /api/chat/local — local chat (free, instant, no on-chain TX)
   // Owner talks to Agent directly through Mind. Agent responds instantly.
   // relayId='__all__' → group chat: all agents reply in sequence.
+  // T-LOOPBACK-AUTHZ 热修(2026-09-14, NWT 发现·Bettor 派工): 原来零鉴权——本机任意进程可以把
+  // sender 硬拼成 'owner:'+relayId, 满足 mind.mjs:459 canTrade, 借此触发 agent 自主真实交易/转账。
+  // 接 ADMIN_SECRET_FUNDS tier(未设=503,主网默认关闭)。
   fastify.post('/api/chat/local', async (request, reply) => {
+    const auth = checkAdminSecretTier(request, 'ADMIN_SECRET_FUNDS');
+    if (!auth.ok) return reply.code(auth.code).send({ error: auth.error });
     const { relayId, channel, message } = request.body || {};
     if (!relayId || !channel?.trim() || !message?.trim()) {
       return reply.code(400).send({ error: 'relayId, channel, message are required' });

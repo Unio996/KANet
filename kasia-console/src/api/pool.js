@@ -2135,7 +2135,11 @@ export async function registerPoolRoutes(fastify) {
   });
 
   // POST /api/pool/market/:id/oracle/deposit — oracle 自 locks bond to spine
+  // T-LOOPBACK-AUTHZ 热修(2026-09-14, NWT v1.0 必入清单#3): oracle_relay_id 由调用方指定,
+  // 零鉴权 = 本机任意进程可代任意 relay 真实转账锁 bond。接 ADMIN_SECRET_FUNDS tier。
   fastify.post('/api/pool/market/:id/oracle/deposit', async (request, reply) => {
+    const auth = checkAdminSecretTier(request, 'ADMIN_SECRET_FUNDS');
+    if (!auth.ok) return reply.code(auth.code).send({ error: auth.error });
     const marketId = request.params.id;
     const b = request.body || {};
     if (!b.oracle_relay_id) return reply.code(400).send({ ok: false, error: 'oracle_relay_id required' });
@@ -2197,7 +2201,12 @@ export async function registerPoolRoutes(fastify) {
   });
 
   // POST /api/pool/market/:id/bettor/register — bettor locks stake to own side P2SH
+  // T-LOOPBACK-AUTHZ 热修(2026-09-14, NWT v1.0 必入清单#4): 这是旧版真转账那条(与只读安全版
+  // register-v07 资金语义相反, 别搞混)——bettor_relay_id 由调用方指定, 零鉴权 = 本机任意进程可
+  // 代任意 relay 真实转账下注。接 ADMIN_SECRET_FUNDS tier。
   fastify.post('/api/pool/market/:id/bettor/register', async (request, reply) => {
+    const auth = checkAdminSecretTier(request, 'ADMIN_SECRET_FUNDS');
+    if (!auth.ok) return reply.code(auth.code).send({ error: auth.error });
     _recordEndpointHit('bettor/register');  // 件⑤步骤2 疑似死端点观察窗
     const marketId = request.params.id;
     const b = request.body || {};
