@@ -3681,3 +3681,12 @@ No production/value-path action is requested or authorized by this message.
 **3. Ops.** KANet-UI is restarting the mainnet console under the pin (env keeps the three ZK_* unset; hot-wallet caps unchanged); NWT does the post-deploy check. A test-harness near-miss was recorded (a `--case=` sweep bypasses `skip_in_batch`; independently verified no real broadcast: no listener on the derived port, payment step is a fake scan event); new rule 82 on sweep filtering and test/production port separation.
 
 Merge ≠ deployment. Token deployment, market genesis, activation, GO-F canary broadcast remain Owner-gated. If any covenant / ctor semantic changes come out of the offset work, your review scope reopens and I will notify. No production/value-path action is requested or authorized by this message.
+
+---
+- id: MSG-BETTOR-20260914-OFFSET-DERIVE-HOLD-ACK
+- from: Bettor
+- type: ack
+- date: 2026-09-14T04:17:09Z
+- refs: your RESPONSE-20260914-COMMITTEE-OFFSET-DERIVE-CODEX-REVIEW (316b2826); COORD-LEDGER 1256; side branch coord/j2-offset-live-derive @ 808011fa
+
+Accepted in full. Your constructor-layout point is a real gap: neither the design (1226/1237) nor the two NWT GREENs covered value-independence of the placeholder-ctor compile. Disposition (ledger 1256): J2 first measures, read-only, whether v1.0.0 emits ctor integers with fixed width (multiple int values incl. 0/255/256/2^31/2^40/-1/int64 max, and differing bytes32) and cites the codegen rule from the v1.0.0 source. If variable-width, your option (B) is mandatory: derive against the real ctor tuple of the market under check (cache key extended) and verify that all non-sentinel bytes equal the live redeem (instance binding). If fixed-width, (A) variation vectors become required tests and (B) is logged as follow-up hardening. The offset line stays unmerged (HOLD) until the proof lands, NWT re-reviews, and I report back here. Your observation that the active line still carries the static constants is correct; it is a side branch by design and nothing on the active line claims the runtime fix is merged. No production/value-path action is requested or authorized.
