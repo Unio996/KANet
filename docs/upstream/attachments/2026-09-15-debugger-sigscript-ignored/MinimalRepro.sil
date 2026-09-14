@@ -1,0 +1,7 @@
+pragma silverscript ^0.1.0;
+
+contract MinimalRepro() {
+    entry f(int x) {
+        require(x == 1);
+    }
+}

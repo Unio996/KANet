@@ -1,0 +1,13 @@
+=== vector a (fnargs x=1, expect pass) ===
+PASS
+=== vector b (fnargs x=2, sigscript_hex=x1 correct bytes) ===
+error: script ran, but verification failed
+   --> 5:9
+   |
+ 4 |     entry f(int x) {
+ 5 |         require(x == 1);
+   |         ^^^^^^^^^^^^^^^^ verification failed here
+   |   x = 2
+   |
+
+Error: "FAIL"
