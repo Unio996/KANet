@@ -177,3 +177,28 @@ env-missing throw 走同一条错误路径（`buildZkHandoffRequestV2` 目前没
   时是否一致"校验——现有机制是"跟当前 guest image 是否新鲜"，跟本文档"跟这个市场自己的历史值是否一致"
   是不同的问题，值得追问但需要先读 `ensureGateTmplHashFresh`/`gate-tmpl-hash.mjs` 的完整设计再评估，本
   次没有展开，只标记。
+
+## 5. v0.3 追记（Bettor 1288，NWT 审 T4 工具 + 本文档 v0.2 双 GREEN `09ed3772` 的三点结论）
+
+1. **`v1_committee` 不需要对应门**：NWT 复核确认 `v1_committee` 家族全链路（`compilePayoutShardRedeem`/
+   `computeMarketCommit`/`enforceCloseAttest` 等）零引用 `ZK_TOKEN_TMPL_HASH`/`ZK_CLAIM_TMPL_HASH`/
+   `ZK_MARKET_SUFFIX_HASH` 三个 env——这三个字段是 T3 代币化专属，`v1_committee` 走的是不同的模板绑定
+   机制（不经 `computeCloseZkTmplAnchor`）。跟本文档 §2 的分析结论一致，`assertZkHandoffTmplCoherent`
+   只需要覆盖 `v2_zk`/`buildZkHandoffRequestV2` 这一条路径，不需要在 `v1_committee` 侧另开一道门。
+2. **NULL 处置口径与 `T-LEGACY-NULL-COLS` 一致**：两者都是"`payout_shards` 三列任一为 NULL = 数据问题，
+   fail-closed"——`T-LEGACY-NULL-COLS`（`migrate.js`）是观测层面的启动期计数 WARN，`assertZk
+   HandoffTmplCoherent` 是花钱前的硬门 throw，两处场景不同（一个是"有多少市场处于这个状态"的可观测性，
+   一个是"这一次具体的 handoff 要不要放行"的花钱前判定），但对"NULL 代表什么"这件事的判断是同一条纪律
+   在两个不同层级的体现，不是两套互相矛盾的标准。
+3. **比对对象 = `process.env`，不是 `kanet.env` 文件**：本文档 §3.1/§3.2 原来写的"env 现值"没有精确
+   指明取哪个源——`assertZkHandoffTmplCoherent` 比对的是**调用时刻的 `process.env`**（`buildZkHandoff
+   RequestV2` 已有的 5 处 env 检查读的也是 `process.env`，本设计延续同一个源，不引入第二套读取逻辑）。
+   T4 只读对照工具（`t4-zk-tmpl-env-db-compare.mjs`）因为要兼顾"进程没设但配置文件里写了"这种诊断场景，
+   才会退回读 `kanet.env` 文件并标注来源——那是诊断工具的额外贴心，不是硬门的行为，硬门只认运行时进程
+   真正带着的值，跟生产实际执行路径完全一致，不会出现"硬门看的是文件、生产代码看的是进程"这种两套口径
+   打架的情况。
+
+落码见 commit（`coord/j2-zk-handoff-coherent` 分支）：`assertZkHandoffTmplCoherent`
+（`bshard-close-transport.mjs`）+ `bshard-close-transport-zk-tmpl-coherent.test.mjs`（4 负向 + 1 正向 +
+1 接线核实）。NWT 记录的可用性瑕疵（env 中途合法更新后会拦下"其实不需要重算模板"的旧市场 handoff）见该
+函数头注，不改行为，只留痕说明为什么这是保守换安全的代价。
