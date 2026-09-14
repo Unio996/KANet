@@ -1,0 +1,22 @@
+=== ① 真实编译 v0.3(方案C) ===
+脚本长度: 3191 (对照: v0.1原设计3471-5359B视版本, v0.3方案C更小——删除整个市场识别机制)
+state_layout: {"start":1,"len":112}
+token_tmpl_hash: 241e52069168e22d0bd92b6e705b99c641bf0424c90419ca16c847f014a618ac
+
+=== ② 生成 cli-debugger 向量: 正向"收方为任意 covenant 输入" + 负向"owner 不在场" ===
+已生成 ../docs/provenance/2026-09-14-j2-ktt-v03-planC-remove-h1b/ktt-v03-vectors.test.json
+
+=== ③ 真实编译 KanetTokenClaim v0.3(方案C, 账本1409扩大范围) ===
+KanetTokenClaim 脚本长度: 1347 (对照: 旧设计 1454 B)
+claim_tmpl_hash: e6e406ddb67c922584ec37efd8ed97da419c535cce80bc8cb6fe946945436140
+(未构造完整 cli-debugger 向量, 见 README "已知限制")
+
+=== cli-debugger --run-all (D-019 pinned v1.0.0 build) ===
+cli-debugger.exe sha256: b85bb524d22ae761150dcb80b070f0bf1beb95a1c6604470501883b4d0f552c6
+cli-debugger source HEAD: 3ed973335b59269293564805cc2c58a14595ec03
+  RUN   V03-1_pass_owner_field_is_arbitrary_value_no_presence_check
+  PASS  V03-1_pass_owner_field_is_arbitrary_value_no_presence_check
+  RUN   V03-2_fail_owner_not_present_at_claimed_index
+  PASS  V03-2_fail_owner_not_present_at_claimed_index
+
+2 tests: 2 passed, 0 failed
