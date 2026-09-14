@@ -137,6 +137,29 @@ export async function ingestSubmitIntentPhase({ intentKey, phase, txid, txJson =
 }
 
 /**
+ * covenant_broadcast 两阶段回执 (J2 2026-09-14, 设计 §9.5, ledger 1366) —— 与 ingestSubmitIntentPhase
+ * 同款语义(等 2xx, 失败 throw, 不走 post() 的静默 backoff), 但打的是独立端点/独立表(proto_bet_intents,
+ * 不是 submit_intents), 且必须带 relay_id(= process.env.RELAY_NODE_ID, 这个 relay 自己的身份)——
+ * console 侧会核对它是否等于 PROTO_RELAY_ID, 不等则 403(生产 relay 永远打不进这张表)。
+ */
+export async function ingestProtoBetIntentPhase({ intentKey, phase, txid, txJson = null }, timeoutMs = 5000) {
+  if (!CONSOLE_URL || !INGEST_SECRET) throw new Error("proto bet intent persistence unavailable: CONSOLE_URL / INGEST_SECRET unset");
+  const relay_id = process.env.RELAY_NODE_ID || "";
+  const res = await fetch(`${CONSOLE_URL}/ingest/proto-bet-intent-phase`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-ingest-secret": INGEST_SECRET },
+    body: JSON.stringify({ relay_id, intentKey, phase, txid, txJson }),
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  if (!res.ok) {
+    let detail = "";
+    try { detail = (await res.text()).slice(0, 200); } catch {}
+    throw new Error(`proto bet intent ${phase} not recorded by console: HTTP ${res.status} ${detail}`);
+  }
+  return true;
+}
+
+/**
  * Report a Kaspa TX observed in a block to the embedded indexer.
  * Relay pre-filters TXs against watched addresses; Console writes to kaspa_tx_log.
  * Phase 1 stress test S10B drove this — RPC UTXO verification is fragile after spend.
