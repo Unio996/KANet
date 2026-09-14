@@ -1,0 +1,60 @@
+=== ① 编译 KanetTestToken(占位 ctor, market_tmpl_suffix 占位长度 132 字节), 拿真实 redeem 脚本长度 ===
+KanetTestToken redeem 脚本长度(bytes): 3867
+genesis P2SH 地址: kaspa:prnfcka8fc6vgwzqwhjuqtkw24apqhlsztwcsmg0qghxlhzrz3ahc265plzfp
+
+=== ② throwaway 私钥模拟 relay 自己的 fee input + 找零地址 ===
+
+--- genesisOutputValue = 1000 sompi ---
+mass: 4000000000
+required_fee (mass × 100 sompi/mass): 400000000000 sompi
+net_loss(genesisOutputValue + required_fee): 400000001000 sompi ( 4000.0000 KAS)
+
+--- genesisOutputValue = 100000 sompi ---
+mass: 40000000
+required_fee (mass × 100 sompi/mass): 4000000000 sompi
+net_loss(genesisOutputValue + required_fee): 4000100000 sompi ( 40.0010 KAS)
+
+--- genesisOutputValue = 1000000 sompi ---
+mass: 4000000
+required_fee (mass × 100 sompi/mass): 400000000 sompi
+net_loss(genesisOutputValue + required_fee): 401000000 sompi ( 4.0100 KAS)
+
+--- genesisOutputValue = 5000000 sompi ---
+mass: 800000
+required_fee (mass × 100 sompi/mass): 80000000 sompi
+net_loss(genesisOutputValue + required_fee): 85000000 sompi ( 0.8500 KAS)
+
+--- genesisOutputValue = 10000000 sompi ---
+mass: 400000
+required_fee (mass × 100 sompi/mass): 40000000 sompi
+net_loss(genesisOutputValue + required_fee): 50000000 sompi ( 0.5000 KAS)
+
+--- genesisOutputValue = 15000000 sompi ---
+mass: 266666
+required_fee (mass × 100 sompi/mass): 26666600 sompi
+net_loss(genesisOutputValue + required_fee): 41666600 sompi ( 0.4167 KAS)
+
+--- genesisOutputValue = 20000000 sompi ---
+mass: 200000
+required_fee (mass × 100 sompi/mass): 20000000 sompi
+net_loss(genesisOutputValue + required_fee): 40000000 sompi ( 0.4000 KAS)
+
+--- genesisOutputValue = 25000000 sompi ---
+mass: 160000
+required_fee (mass × 100 sompi/mass): 16000000 sompi
+net_loss(genesisOutputValue + required_fee): 41000000 sompi ( 0.4100 KAS)
+
+--- genesisOutputValue = 30000000 sompi ---
+mass: 133333
+required_fee (mass × 100 sompi/mass): 13333300 sompi
+net_loss(genesisOutputValue + required_fee): 43333300 sompi ( 0.4333 KAS)
+
+--- genesisOutputValue = 50000000 sompi ---
+mass: 80000
+required_fee (mass × 100 sompi/mass): 8000000 sompi
+net_loss(genesisOutputValue + required_fee): 58000000 sompi ( 0.5800 KAS)
+
+--- genesisOutputValue = 100000000 sompi ---
+mass: 40001
+required_fee (mass × 100 sompi/mass): 4000100 sompi
+net_loss(genesisOutputValue + required_fee): 104000100 sompi ( 1.0400 KAS)

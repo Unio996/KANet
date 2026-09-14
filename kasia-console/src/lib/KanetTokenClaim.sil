@@ -3,25 +3,29 @@ pragma silverscript ^0.1.0;
 // 设计: docs/2026-09-13-j2-t2-market-and-claim-covenant-a2-skeleton-v0.1.md §2(Q1 裁 (b): 领取合约自核
 // 代币输出, 不外包给市场/代币合约的正确性——"每条共花入口自己核"是 H5 的原则)。
 //
-// 状态四字段(§2.1 + Q1(b) 追加 token_tmpl_hash) + 本文件追加第五字段 market_suffix_hash(理由见下):
+// 状态四字段(§2.1 + Q1(b) 追加 token_tmpl_hash):
 //   market_cov_id: 创建本 claim 的市场入口写 OpInputCovenantId(this.activeInputIndex)(P12 形, provenance)。
 //   winner_pk:     市场入口从 payout merkle 叶取的 pk(H4 承重点: 赢家身份的价值来源)。
 //   amount:        市场入口写的应得代币量(记账副本; 真实持有量在一枚独立的 KanetTestToken UTXO, owner=本 claim
 //                  自身 cov id——市场结算时另需一步把该数量的代币 owner 转到本 claim, 不在本文件范围内)。
 //   token_tmpl_hash: 代币模板 hash(状态, 不进 ctor——领取合约本身"无任何非状态 ctor 常量" §2.1, 模板对所有
 //                  实例稳定, ClaimStub 三组 ctor 前后缀与 hash 同一, P12 实证)。
-//   market_suffix_hash: 本文件追加(Owner 终端 1147 三问②的具体回应, 见 README): "转回市场再下注"这条路径
-//                  (to_market_input==true)必须验证 dest_idx 真的是个市场 covenant, 不是攻击者随手包的假壳——
-//                  跟 KanetTestToken.sil 的 ownerIsMarketInput 同一手法(核 sigScript 尾部), 但 claim 合约不能
-//                  烤市场后缀字节的完整内容进 ctor(会跟着市场变, 不稳定), 改成创建本 claim 的市场写入
-//                  blake3(market_tmpl_suffix) 存进状态, spend 时 witness 供实际后缀字节验 hash 再核尾匹配。
+//
+// 🔴 v0.3 方案C(Owner 裁定, 账本 1408, docs/DECISIONS.md D-017 注记; 账本 1409"同病同治"扩大范围到本文件·
+// 落码 6b1e5208/a16f6452/9be0805c): 撤销下方原 market_suffix_hash 字段与 to_market_input=true 分支里的
+// sigScript 尾部匹配验证("dest_idx 必须是真市场 covenant, 不是假壳")——理由同 KanetTestToken.sil v0.3 头注:
+// "这份代币是不是我这个市场认可的注额"完全是接收方自己的问题, 不该由代币/领取侧的合约越俎代庖去验证目的地
+// 的类型。**保留** target_owner = OpInputCovenantId(dest_idx) 与 ZERO32 目的地守卫(NWT 1176 MUST-FIX)——
+// 那条守卫防的是"owner=0 赢币被任何裸输入花掉"这个真实资金损失, 跟市场识别无关, 不受本次撤销影响。真实编译
+// +cli-debugger 端到端向量(4/4, 逐条核过精确失败行): docs/provenance/2026-09-14-j2-ktt-v03-planC-remove-h1b/
+// kanettokenclaim-e2e-vectors.mjs。
 //
 // spend(唯一入口, §2.2): checkSig(H4) + §3.3 形验代币模板(witness 供 tok_prefix/tok_suffix + blake3 现场核
 // token_tmpl_hash, 源码坐实 silverscript-abi template_hash = blake3(len8‖prefix‖len8‖suffix), blake3 是
 // 语言内建——J2 此前误判"blake3 不可调用"已纠正, 见 ledger) + 核被消费的代币真属于本 claim(H1 在场, 角②"最后
 // 一步也要适用") + 目的地二选一(H5 正交, §2.2 原文):
-//   (i) to_market_input=true:  代币 owner -> OpInputCovenantId(dest_idx)(再下注), 且 dest_idx 必须是真市场
-//       covenant(本文件追加的 market_suffix_hash 验证, 挡假壳)。
+//   (i) to_market_input=true:  代币 owner -> OpInputCovenantId(dest_idx)(再下注)。v0.3 后不再验证 dest_idx
+//       是否"真市场"(见上方 v0.3 方案C 注记), 只保留 ZERO32 目的地守卫。
 //   (ii) to_market_input=false: 代币 owner -> OpOutputCovenantId(dest_idx)(新建输出, 转手/拆分)。新输出本身
 //       是 KanetTestToken 的 genesis(T1 设计: genesis 免权限, 任何人可构造), 不需要额外验证"这是真某某覆盖",
 //       因为 owner 字段本身不断言目的地合约的类型, 只是记账用的 32 字节——真正的"归属"安全性由该 owner
@@ -33,14 +37,12 @@ contract KanetTokenClaim(
     byte[32] init_market_cov_id,
     byte[32] init_winner_pk,
     int      init_amount,
-    byte[32] init_token_tmpl_hash,
-    byte[32] init_market_suffix_hash
+    byte[32] init_token_tmpl_hash
 ) {
     byte[32] market_cov_id      = init_market_cov_id;
     byte[32] winner_pk          = init_winner_pk;
     int      amount             = init_amount;
     byte[32] token_tmpl_hash    = init_token_tmpl_hash;
-    byte[32] market_suffix_hash = init_market_suffix_hash;
 
     struct TokenState {
         int      amount;
@@ -58,8 +60,7 @@ contract KanetTokenClaim(
         bool     to_market_input,
         int      dest_idx,
         byte[]   tok_prefix,
-        byte[]   tok_suffix,
-        byte[]   market_suffix_witness
+        byte[]   tok_suffix
     ) {
         // §3.3 形: witness 供代币模板前后缀字节, 现场核状态里的 token_tmpl_hash(不烤 ctor, 避免环)。
         require(blake3((tok_prefix.length as byte[8]) + tok_prefix + (tok_suffix.length as byte[8]) + tok_suffix) == token_tmpl_hash);
@@ -72,14 +73,9 @@ contract KanetTokenClaim(
 
         byte[32] target_owner = byte[32](0x0000000000000000000000000000000000000000000000000000000000000000);
         if (to_market_input) {
-            // ★ 角②(本文件追加): dest_idx 必须是真市场 covenant, 不是假壳——核 sigScript 尾部匹配
-            //   blake3 验过的 market_suffix_witness(同 KanetTestToken.ownerIsMarketInput 手法)。
-            require(blake3(market_suffix_witness) == market_suffix_hash);
-            byte[] destSig = tx.inputs[dest_idx].sigScript;
-            int destLen = destSig.length;
-            int msl = market_suffix_witness.length;
-            require(destLen >= msl);
-            require(destSig.slice(destLen - msl, destLen) == market_suffix_witness);
+            // v0.3 方案C: 不再核"dest_idx 是不是真市场"——target_owner 直接取该输入的 covenant_id,
+            // 是不是"市场"由接收方自己的合约逻辑负责(比如 ShardLeaf_direct 自己的 scanOwnedTokenInputs),
+            // 本合约只管 owner 非零(见下 ZERO32 守卫), 不越俎代庖。
             target_owner = OpInputCovenantId(dest_idx);
             // ★ ZERO32 目的地守卫(NWT 1176 MUST-FIX): sigScript 尾匹配核的是脚本字节, covenant_id 是完全
             //   独立的字段(同 1173 的教训: 模板/尾匹配 ≠ covenant 绑定)——尾匹配过了不能证明 target_owner

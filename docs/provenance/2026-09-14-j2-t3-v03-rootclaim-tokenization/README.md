@@ -1,5 +1,16 @@
 # RootClaim.sil — v0.3 §2/§3 代币化（ledger 1183，claim 家族四处之一，先做——此前未过任何代币化）
 
+> **RERUN 状态注记(2026-09-15, 账本 1408/1409/1415·f7342a32)**：Owner 裁定撤销 H1(b)后，本文件的
+> `ClaimState` 镜像结构(与 KanetTokenClaim.sil 手写同步的字段列表)与真实 v0.3 KanetTokenClaim(已删除
+> `market_suffix_hash`)对不上——"同病同治"扩大范围，删除本文件 ctor 的 `market_suffix_hash` 参数、
+> `ClaimState.market_suffix_hash` 字段、构造字面量里的 `market_suffix_hash: market_suffix_hash` 那一行
+> （仅这三处，逻辑零改动）。已用真实生产 `KanetTestToken.sil`(v0.3方案C)+`KanetTokenClaim.sil`(v0.3,
+> 4字段)+本文件重编译，既有 6 条向量全部重新生成并重跑，**6/6 pass**（其中 `V-RCL-TOK-1/2` 本身就是
+> "构造一个新建 KanetTokenClaim 输出、用 `validateOutputStateWithTemplate` 逐字节比对"的向量，PASS 即
+> 逐字节对照通过，不是另需一条单独的比对）。详见 `run.log` 末尾 RERUN 章节；`mk_rootclaim_tokenization_
+> vectors.mjs` 已就地更新（KTT/KanetTokenClaim/RootClaim 三个路径全部改指向 `coord/j2-proto-v0-backend`
+> 分支已落地的真实生产文件，不再用旧 worktree 里的旧版本）。
+
 ## 改了什么
 
 - ctor +3（10→13）：`token_tmpl_hash`/`claim_tmpl_hash`/`market_suffix_hash`，同 RefundClaim.sil/

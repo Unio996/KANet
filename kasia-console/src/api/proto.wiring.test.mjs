@@ -52,7 +52,7 @@ async function killAndCleanup(child, tmpDb) {
   try { fs.unlinkSync(tmpDb); } catch {}
 }
 
-async function spawnConsole({ dbSetup = null, port, protoRelayId }) {
+async function spawnConsole({ dbSetup = null, port, protoRelayId, protoSingleOperator }) {
   const tmpDb = `${process.env.TEMP || '/tmp'}/_j2_proto_wiring_${port}_${process.pid}.db`;
   try { fs.unlinkSync(tmpDb); } catch {}
   execSync('node scripts/run-migrations.mjs', { cwd: process.cwd(), env: { ...process.env, DB_PATH: tmpDb }, stdio: 'pipe' });
@@ -69,6 +69,7 @@ async function spawnConsole({ dbSetup = null, port, protoRelayId }) {
       KASPA_NETWORK: 'mainnet',
       CONSOLE_ENCRYPTION_KEY: '00'.repeat(32),
       ...(protoRelayId ? { PROTO_RELAY_ID: protoRelayId } : { PROTO_RELAY_ID: '' }),
+      ...(protoSingleOperator ? { PROTO_SINGLE_OPERATOR: '1' } : {}),
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -150,6 +151,59 @@ console.log('\n[test] 第②轮: PROTO_RELAY_ID 未配置 → proto 路由整体
 
       const { stderr } = getLogs();
       ok(/PROTO_RELAY_ID health check failed/.test(stderr) || /PROTO_RELAY_ID not configured/.test(stderr), 'stderr 里有 LOUD 日志说明具体拒绝原因, 不是静默吞掉');
+    }
+  } finally {
+    await killAndCleanup(child, tmpDb);
+  }
+}
+
+console.log('\n[test] 第③轮: PROTO_SINGLE_OPERATOR=1 → 多方入口结构性不存在(未知 market_id 一律 404, 外部市场/bettor 身份字段一律 400) — 证明 bet/resolve/claim/withdraw 没有绕过 proto_markets 已落表记录的路径:');
+{
+  const PROTO_TEST_RELAY_ID = 'wiring-test-proto-relay-single-op';
+  const { child, tmpDb, up, getLogs } = await spawnConsole({
+    port: 32063,
+    protoRelayId: PROTO_TEST_RELAY_ID,
+    protoSingleOperator: true,
+    dbSetup: async (dbPath) => {
+      execSync('node src/api/proto.wiring.test.seed-relay.mjs ' + PROTO_TEST_RELAY_ID, {
+        cwd: process.cwd(), env: { ...process.env, DB_PATH: dbPath }, stdio: 'pipe',
+      });
+    },
+  });
+  try {
+    ok(up, `console 在 32063 上真实起来了(PROTO_SINGLE_OPERATOR=1)`);
+    if (!up) {
+      const { stdout, stderr } = getLogs();
+      console.error('--- stdout tail ---\n' + stdout.slice(-2000));
+      console.error('--- stderr tail ---\n' + stderr.slice(-2000));
+    } else {
+      const UNKNOWN_MARKET_ID = 'ffffffff-0000-0000-0000-000000000000'; // 格式合法但从未落表的 market_id
+      for (const [path, body] of [
+        [`/api/proto-markets/${UNKNOWN_MARKET_ID}/bet`, { direction: 0, amount: 10 }],
+        [`/api/proto-markets/${UNKNOWN_MARKET_ID}/resolve`, { outcome: 0 }],
+        [`/api/proto-markets/${UNKNOWN_MARKET_ID}/claim`, {}],
+        [`/api/proto-markets/${UNKNOWN_MARKET_ID}/withdraw`, {}],
+      ]) {
+        const res = await fetch(`http://127.0.0.1:32063${path}`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+        });
+        ok(res.status === 404, `POST ${path}(未知 market_id, 正常字段) ⇒ 404(实际 ${res.status}) —— 唯一合法入口是 proto_markets 已落表记录, 不存在别的市场发现路径`);
+      }
+
+      // 外部身份字段(即使 market_id 也是未知的)一律 400——证明这条检查发生在 DB 查询之前, 是请求级
+      // 结构性拒绝, 不依赖"market 存不存在"这个后续判断。
+      for (const [field, value] of [['covenant_id', 'x'], ['bettor_pk', 'y'], ['shardleaf_txid', 'z']]) {
+        const res = await fetch(`http://127.0.0.1:32063/api/proto-markets/${UNKNOWN_MARKET_ID}/bet`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ direction: 0, amount: 10, [field]: value }),
+        });
+        ok(res.status === 400, `POST bet 请求体含外部身份字段 ${field} ⇒ 400(实际 ${res.status}), 不是 404 —— 证明该拒绝在 market 查询之前生效`);
+        const resBody = await res.json().catch(() => ({}));
+        ok(typeof resBody.error === 'string' && resBody.error.includes(field), `错误信息点名具体字段 ${field}(实际: ${JSON.stringify(resBody).slice(0, 150)})`);
+      }
+
+      const { stdout } = getLogs();
+      ok(/PROTO_SINGLE_OPERATOR=1/.test(stdout), 'stdout 里有 LOUD 日志确认 PROTO_SINGLE_OPERATOR 模式已生效(不是静默开启)');
     }
   } finally {
     await killAndCleanup(child, tmpDb);

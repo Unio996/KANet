@@ -1,0 +1,17 @@
+=== ① 编译真实 M(ShardLeaf_direct v4), 取真实 prefix/suffix 用于本向量 ===
+state_layout: {"start":1,"len":69} (期望 start=1, len=69)
+真实 prefix(hex): 6b 真实 suffix 长度: 15018
+
+=== ② genesis 态(count=0, pool_value=0) → register_append 一次(stake=100000, side=0) → 续约态(count=1, pool_value=100000) ===
+两次编码都用同一个 token_tmpl_hash = abababababababababababababababababababababababababababababababab (genesis 写一次, 续约原样携带, 不重新赋值)
+genesis stateBytes 长度: 69 (期望 69, 与 state_layout.len 吻合)
+genesis 完整脚本 blake2b: e59d43a3252dde0d363152a51ef772abc94b88cd6987a27df5f05e1d6fddadae
+续约后 stateBytes 长度: 69
+续约后完整脚本 blake2b: 698ff59f92e9f12bfed3364cd78e164d63b14ba2ce576440af2c4cce3fee6f3b
+
+=== ③ 验证: 若续约时误把 token_tmpl_hash 编码漏掉(回退到旧 4 字段版), hash 会完全不同 ===
+漏拷贝版 stateBytes 长度: 36 (只有 36, 比正确的 69 少 33 字节——
+  若合约仍按 OWN_STATE_LEN=69 去 slice ownSuffix, 这个漏拷贝的构造根本对不上 state_layout, 会在更早的字节比较就失败;
+  这正是"漏加这一行=continuation 丢失 token_tmpl_hash"这条 Bettor 要求的字面意思——不是"能跑但语义错", 是"编码长度都对不上, 直接构造失败", 危害更明确、更容易在测试阶段就抓到, 不会悄悄放过一笔坏交易。
+
+✅ 最小编码向量验证通过: state_layout.len 与手写常量吻合(69) + genesis/续约两次编码 token_tmpl_hash 保持一致 + 漏拷贝版本会产生明显不匹配的长度(可在落码阶段的单元测试里直接断言这一点，不需要等到完整交易broadcast才发现)。

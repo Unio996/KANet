@@ -1,0 +1,17 @@
+=== (b) M(ShardLeaf_direct)自身模板 hash 与 token_tmpl_hash(现为 State)取值无关 ===
+M 脚本长度: 15076 (原始占位版本约 15687-15690)
+M_hash(token_tmpl_hash=Z32): dd059b32c03a2ea3ea932aea1c5c2dd87ff4b661842ceff73802c69d05e89ad7
+M_hash(token_tmpl_hash=F32): dd059b32c03a2ea3ea932aea1c5c2dd87ff4b661842ceff73802c69d05e89ad7
+M 自身模板 hash 恒定? true
+
+=== (a) KTT_M ctor 烤该市场 M_hash, 两个不同市场产出不同模板 hash(代币不互通, 预期如此) ===
+KTT_M(真实 M_hash) 脚本长度: 4326
+KTT_M(真实市场 M) hash: d44e07b799e43bfa4cb8991f3847786a7da26a5dea6d8a1cfedcfa84ac127d11
+KTT_M(假想市场B) hash: 474aa220ba3b6ce22167f735027a8990bf37c03c5124aa20dc96bcaf3df11f9d
+两个市场的 KTT_M 模板 hash 不同(代币不可跨市场互转)? true
+
+=== (c) 字节预算小结 ===
+原始(旧②设计, byte[] witness) KTT: 5359 B（v1，已作废）
+② 修正版(int 长度, State 存 market_tmpl_hash) KTT: 4697 B
+④ 依赖反转版(ctor 烤 market_tmpl_hash, 无 witness) KTT_M: 4326 B
+M(ShardLeaf_direct, token_tmpl_hash 挪 State): 15076 B (原始占位版本约 15687-15690 B)

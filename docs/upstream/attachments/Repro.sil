@@ -1,0 +1,26 @@
+pragma silverscript ^0.1.0;
+// Minimal reproduction for silverscript v1.0.0 (tag v1.0.0, commit 3ed973335b59269293564805cc2c58a14595ec03)
+// runtime crash: readInputStateWithTemplate + validateOutputState in the same entry function.
+contract Repro(
+    byte[] ext_prefix, int ext_prefix_len, byte[] ext_suffix, int ext_suffix_len, byte[32] ext_tmpl_hash,
+    int init_counter, int init_closed, byte[32] init_root
+) {
+    int counter = init_counter;
+    int closed = init_closed;
+    byte[32] root = init_root;
+    struct Ext {
+        int      amount;
+        byte[32] owner;
+    }
+    entry step(int selfOutIdx, int extInIdx, int ext_amount) {
+        require(closed == 0);
+        Ext e = readInputStateWithTemplate(extInIdx, ext_prefix_len, ext_suffix_len, ext_tmpl_hash);
+        require(e.amount == ext_amount);
+        validateOutputState(selfOutIdx, State {
+            counter: counter + ext_amount,
+            closed: 0,
+            root: root
+        });
+        require(tx.outputs[selfOutIdx].value >= 1000);
+    }
+}

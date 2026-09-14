@@ -12,14 +12,20 @@ const p2sh = (bytecode) => 'aa20' + Buffer.from(b2b(bytecode)).toString('hex') +
 const SILVERC = 'D:/kanet-tn12/scratch/_j2_silverc_v100/target/release/silverc.exe';
 const SLD = 'D:/kanet-tn12/scratch/_j2_wt_t3_market/kasia-console/src/lib/ShardLeaf_direct.sil';
 const RC = 'D:/kanet-tn12/scratch/_j2_wt_t3_market/kasia-console/src/lib/RootClose.sil';
-const KTT = 'D:/kanet-tn12/scratch/_j2_wt_t3_market/kasia-console/src/lib/sil-v1/KanetTestToken.sil';
+// 🔴 更新(2026-09-15, 账本 1408/1409/1410/1413, Owner 裁定撤销 H1(b)"代币就是代币"·v0.3 方案C): 原先指向的
+// KTT 是删除前的旧设计(10 ctor 字段, 含 market_tmpl_suffix/market_tmpl_suffix_len)——那个机制已被 Owner
+// 撤销、NWT 终核 GREEN、批准落生产。改指向 v0.3(方案C)副本(8 ctor 字段, 已用真实 cli-debugger 验证过 2
+// 条 KTT 向量 + 4 条 KanetTokenClaim 端到端向量, 见同目录 provenance)。ShardLeaf_direct/RootClose 这两份
+// T3 文件本身不需要改(token_tmpl_hash 留 ctor 是 Owner 1408 裁定的既定方向, 没有变), 只是它们读的外部
+// KTT 模板形状变了, 必须用新形状重新编译取新的 template_hash 并重跑这批向量, 否则向量验证的是一个已经
+// 不存在的旧协议形状。
+const KTT = 'D:/kanet-tn12/scratch/_j2_wt_proto_v0/docs/provenance/2026-09-14-j2-ktt-v03-planC-remove-h1b/KanetTestToken.v0.3-planC.sil';
 const TICKET = 'D:/kanet-tn12/scratch/_j2_wt_t3_market/docs/provenance/2026-09-14-j2-t3-v03-drawdown-mustfix/PoolSideStub.sil';
 const CWD = 'D:/kanet-tn12/scratch/_j2_wt_t3_market';
 
 const ZERO32 = new Array(32).fill(0);
 const SL_COV = new Array(32).fill(0xee);
 const STRANGER_COV = new Array(32).fill(0x99);
-const MARKET_TMPL_SUFFIX = [0xaa, 0xbb, 0xcc, 0xdd, 0xee];
 
 function compileGeneric(sil, ctor, tag) {
   const ctorPath = `scratch/_t1v06_check/SLD_${tag}.ctor.json`;
@@ -32,11 +38,11 @@ function compileGeneric(sil, ctor, tag) {
   const { offset, len } = c.state_span;
   return { prefix: bc.slice(0, offset), suffix: bc.slice(offset + len), templateHash: c.template_hash, bc, scriptHex: '0x' + p2sh(bc), fullBytecodeHex: '0x' + Buffer.from(bc).toString('hex') };
 }
+// v0.3(方案C) ctor: 8 字段, market_tmpl_suffix/market_tmpl_suffix_len 已删除(H1(b) 撤销)。
 function compileKTT(ownerCov, amount, tag) {
   const ctor = [
     { kind: 'int', value: amount }, { kind: 'bytes', value: ownerCov }, { kind: 'byte', value: 4 }, { kind: 'byte', value: 0 },
     { kind: 'bytes', value: ZERO32 }, { kind: 'bytes', value: ZERO32 },
-    { kind: 'bytes', value: MARKET_TMPL_SUFFIX }, { kind: 'int', value: MARKET_TMPL_SUFFIX.length },
     { kind: 'int', value: 3 }, { kind: 'int', value: 3 },
   ];
   return compileGeneric(KTT, ctor, `ktt_${tag}`);

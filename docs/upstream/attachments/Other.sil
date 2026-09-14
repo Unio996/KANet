@@ -1,0 +1,6 @@
+pragma silverscript ^0.1.0;
+contract Other(int init_amount, byte[32] init_owner) {
+    int amount = init_amount;
+    byte[32] owner = init_owner;
+    entry noop() { require(amount >= 0); }
+}

@@ -242,12 +242,18 @@ export function checkSilvercPinAtStartup(v100Path = process.env.SILVERC_V100_PAT
  *   落码/本地测试期间生产路径可能还没放好二进制, 必须显式设 SILVERC_V100_PATH 指向自己的干净构建,
  *   assertSilvercV100Pinned 的 sha256 核对不因为"本地测试"就放宽。
  * @returns {{script:number[], state_layout:{start:number,len:number}, template_hash_bytes:number[]|undefined, _raw:object}}
- *   🔴 勿信 template_hash_bytes 算真正的模板锚(ledger 1338, J2 落码 PoolSideTicket.sil 期间实测发现):
- *   它是编译器自报的字段, 跟全仓每一处真正被消费的 *_tmpl_hash(ps_tmpl_hash/token_tmpl_hash/
- *   claim_tmpl_hash/closeZkTmplAnchor 等)用的值**不同**(同一份 ctor 实测: 编译器自报 73f79f9e...,
- *   extractTemplateArtifact 独立复算 blake2b(prefix‖suffix) 得 37de5497...)。生产代码从未读过这个
- *   字段(纯直通, 未使用)——要算模板锚, 一律走 extractTemplateArtifact(compileSilV100(...)), 不要
- *   改读 template_hash_bytes 抄近路。
+ *   🔴 订正(2026-09-15, 账本 1412/1413, NWT+Bettor 用 silverscript v1.0.0 权威源码核过, 撤销下面这条
+ *   2026-06 写的旧警告——旧警告本身在它写的那一刻是真的, 只是没交代清楚"跟哪个公式比对"这个作用域):
+ *   `template_hash_bytes` 与旧警告提到的 `extractTemplateArtifact(...)`(pool-template-artifact.mjs,
+ *   blake2b(prefix‖suffix) 公式, legacy PoolLeaf/PoolRoot 族专用)确实不是同一个值——但那不是因为
+ *   `template_hash_bytes` 不可信, 而是因为 v1.0.0 换了公式(blake3(len8LE(prefix.len)‖prefix‖
+ *   len8LE(suffix.len)‖suffix), 源码见 silverscript-lang/src/template.rs), `extractTemplateArtifact`
+ *   还在用旧公式。**`template_hash_bytes` 才是 v1.0.0 权威值**——`readInputStateWithTemplate`/
+ *   `validateOutputStateWithTemplate`/`validateOutputStateWithInputTemplate` 内建原语与显式
+ *   `blake3(...)` 源码校验用的都是这同一个值(J2 KTT v0.3 落码期间用真实 cli-debugger 逐条核过)。
+ *   v1.0.0 合约要算模板锚, 一律读这个字段, 或调 `extractTemplateArtifactV100(compiled)`
+ *   (pool-template-artifact.mjs, 顺带切 prefix/suffix 并自证一遍公式)——**不要**调
+ *   `extractTemplateArtifact`(那是 legacy 编译器产物专用, 对 v1.0.0 产物算出来是错值)。
  */
 export function compileSilV100(silPath, ctorArr, contractName, v100Path = process.env.SILVERC_V100_PATH || DEFAULT_SILVERC_V100_PATH) {
   assertSilvercV100Pinned(v100Path);       // ① 二进制 sha256 == D-019 锚点(防调包)

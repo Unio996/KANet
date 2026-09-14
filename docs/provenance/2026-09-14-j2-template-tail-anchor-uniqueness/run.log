@@ -1,0 +1,148 @@
+=== RUN 01-invariance-check.mjs ===
+=== ① ShardLeaf_direct: market_id/ps_tmpl_hash/shard_pool_id/rootclose_tmpl_hash/rootclose_init_payoutRoot/token_tmpl_hash/min_bet 两组不同占位值 ===
+ShardLeaf_direct: 🔴 NOT INVARIANT(两次不同!! 设计假设有误, 需要重新设计)
+  prefixLenA/B: 1 1
+  suffixLenA/B: 15650 15653
+  hashA: 08bee1db5b56f6d6b15d05bb92f1114871b455671d1d335911ccde15a8052c3d
+  hashB: 3ff151efa21c2611df64e617570b8ffb0aa24b17508796d68307383bea81635b
+  (供后用) suffix hex(前 40 字节预览): 6c7604381b064e8763755e7982599f69755d7982599f69755c7982599f69755b7982599f69755a79
+
+=== ② RootClaim: shard_pool_id/claim_tmpl_hash(自引用)/market_suffix_hash 两组不同占位值 ===
+RootClaim: 🔴 NOT INVARIANT(两次不同!! 设计假设有误, 需要重新设计)
+  prefixLenA/B: 1 1
+  suffixLenA/B: 2894 2894
+  hashA: 301a1d3a53e2bc53f84568fb3fdad026b4ad8f5a761975979ac52e2377f7a169
+  hashB: 002bb9066c4fecc03e4f8a6b1e4403b5997502fbc95b20e6c046e5e91e5bd911
+
+=== ③ RefundClaim: shard_pool_id/claim_tmpl_hash(自引用)/market_suffix_hash 两组不同占位值 ===
+RefundClaim: 🔴 NOT INVARIANT(两次不同!! 设计假设有误, 需要重新设计)
+  prefixLenA/B: 1 1
+  suffixLenA/B: 2568 2568
+  hashA: 40e3d0a1bf2e7aecfc4b98e8a0278e154c70af89d67997d4d53419c4e364021c
+  hashB: 3de3116451b1f22886290fb59f41c82df3123b8a928778077604ed682c1f6563
+
+=== ④ KanetTestToken: market_tmpl_suffix 两组不同占位值(同长度, 内容不同) ===
+KanetTestToken: 🔴 NOT INVARIANT(两次不同!! 设计假设有误, 需要重新设计)
+  prefixLenA/B: 1 1
+  suffixLenA/B: 3409 3409
+  hashA: e6a7f118e546e118267b37bcbdbc5371749698c43c8f8e0beed86c8e1cc210b7
+  hashB: c813566ed426384ad1ec718495c2f469aad2fe17c59895d0fa3631601a088dd0
+
+=== ⑤ PoolSideTicket: 全部非 State 无关字段(此合约无 ctor-only 常量, 全 4 项都是 State——纯对照组, 预期天然 invariant) ===
+PoolSideTicket: ✅ INVARIANT(两次占位值不同, prefix/suffix/hash 完全一致)
+
+🔴 存在 NOT INVARIANT 的合约——protocol-constant 假设不成立, 必须停下重新设计, 不能继续写 anchors 脚本。
+
+=== RUN 02-isolate-shardleafdirect-8fields.mjs ===
+baseline suffixLen= 15650 hash= 08bee1db5b56f6d6b15d05bb92f1114871b455671d1d335911ccde15a8052c3d
+只换 market_id(0) → F32: prefix不变(len=1) suffix不变(len=15650)
+只换 ps_tmpl_hash(1) → F32: prefix不变(len=1) suffix变了(len=15650)
+只换 shard_pool_id(2) → F32: prefix不变(len=1) suffix变了(len=15650)
+只换 rootclose_tmpl_hash(5) → F32: prefix不变(len=1) suffix变了(len=15650)
+只换 rootclose_init_payoutRoot(6) → F32: prefix不变(len=1) suffix变了(len=15650)
+只换 token_tmpl_hash(7) → F32: prefix不变(len=1) suffix变了(len=15650)
+只换 min_bet 1→2: suffix变了(len=15650, baseline=15650)
+只换 seal_count(3) 2→999: suffix变了(len=15654, baseline=15650)
+
+=== 8 字段全表小结(与 NWT 独立复现对账) ===
+market_id(0): 不变(唯一不影响 hash 的字段)
+ps_tmpl_hash(1): 变了
+shard_pool_id(2): 变了
+seal_count(3): 变了 ← 此前漏测, 本次补上
+min_bet(4): 变了
+rootclose_tmpl_hash(5): 变了
+rootclose_init_payoutRoot(6): 变了
+token_tmpl_hash(7): 变了
+⇒ 8 个非-State ctor 字段里 7 个影响 template hash, 与 NWT 独立复现完全一致。
+
+=== RUN 03-isolate-rootclaim-refundclaim.mjs ===
+
+=== RootClaim 逐字段隔离 ===
+baseline suffixLen= 2894 hash= 301a1d3a53e2bc53f84568fb3fdad026b4ad8f5a761975979ac52e2377f7a169
+只换 ps_tmpl_hash(0) → F32: 变了
+只换 shard_pool_id(1) → F32: 变了
+只换 token_tmpl_hash(10) → F32: 变了
+只换 claim_tmpl_hash(11,自引用) → F32: 变了
+只换 market_suffix_hash(12) → F32: 变了
+
+=== RefundClaim 逐字段隔离 ===
+baseline suffixLen= 2568 hash= 40e3d0a1bf2e7aecfc4b98e8a0278e154c70af89d67997d4d53419c4e364021c
+只换 ps_tmpl_hash(0) → F32: 变了
+只换 shard_pool_id(1) → F32: 变了
+只换 token_tmpl_hash(9) → F32: 变了
+只换 claim_tmpl_hash(10,自引用) → F32: 变了
+只换 market_suffix_hash(11) → F32: 变了
+
+=== RUN 04-cycle-fixedpoint-iteration.mjs ===
+=== 不动点迭代: token_tmpl_hash ⇄ market_tmpl_suffix ===
+第0轮: token_tmpl_hash 占位 = Z32
+  → ShardLeaf_direct.suffix_v1 长度: 15650 hash(仅供参考): 08bee1db5b56f6d6
+  取 suffix_v1 尾部 20 字节作为候选 market_tmpl_suffix_v1: 75757575757575757575757575757551676a6868
+第1轮: 用 market_tmpl_suffix_v1 编译 KTT → token_tmpl_hash_v1 = d7ef13b61c5a64544adbe6a0b57c3d9057bb37742217125da82cd843f51eb74c
+第2轮: 用 token_tmpl_hash_v1 重编 ShardLeaf_direct → suffix_v2 尾部 20 字节: 75757575757575757575757575757551676a6868
+
+✅ suffix_v1 == suffix_v2 —— 巧合收敛(不代表无环, 但至少这一步没立刻发散; 仍需多轮验证是否真稳定不动点)
+
+诊断: token_tmpl_hash_v1(32 字节) 是否原样出现在重编译后的 ShardLeaf_direct suffix 里: 是, offset=290
+
+=== RUN 05-stable-tail-search.mjs ===
+baseline 全脚本长度: 15687
+全部换 F32/大 min_bet: 脚本长度=15691, 与 baseline 共同尾部长度=132
+只换 token_tmpl_hash: 脚本长度=15687, 与 baseline 共同尾部长度=132
+只换 shard_pool_id: 脚本长度=15687, 与 baseline 共同尾部长度=15501
+只换 min_bet(1→987654321): 脚本长度=15691, 与 baseline 共同尾部长度=15542
+只换 rootclose_tmpl_hash: 脚本长度=15687, 与 baseline 共同尾部长度=557
+
+所有变体共同的最小稳定尾部长度 = 132 字节
+稳定尾部内容(hex): 5879827c75519658cd59797e5879827c75519658cd59797e7ed9880108567958cd7e012056797e010156797e010156797e012056797e012056797e7e7e7e7e7e58797c7e57797eaa02000001aa7e01207e7c7e01877e012079c38875757575757575757575757575757575757575757575757575757575757575757575757551676a6868
+→ 如果这个值 > 0 且在所有实验里都稳定, 说明确实存在一段"无论 ctor 非-State 字段怎么变都不变"的
+  固定尾部字节, market_tmpl_suffix 若被设计为"取这段固定尾部的一部分", 环可能不成立(需要);
+  但如果 minStable 很小(比如 < market_tmpl_suffix_len 实际需要的长度), 仍然不够用。
+
+=== 补充: 5 组随机值(排除 F32 巧合)再验一遍最小稳定尾部 ===
+随机组 #0: 共同尾部长度=132
+随机组 #1: 共同尾部长度=132
+随机组 #2: 共同尾部长度=132
+随机组 #3: 共同尾部长度=132
+随机组 #4: 共同尾部长度=132
+5 组随机值最小稳定尾部 = 132 (与之前 132 对比)
+
+=== RUN 06-uniqueness-scan-11contracts.mjs ===
+ShardLeaf_direct 编译产物长度: 15687 取尾部 132 字节作为比对基准。
+
+=== 与 ShardLeaf_direct 132 字节稳定尾部的最长公共后缀(理论上只有 ShardLeaf_direct 自己应该 =132) ===
+KanetTestToken                                                    script长度=  3522  与稳定尾部公共后缀=   2  ⚠ 部分重叠, 但短于132
+PoolSideTicket                                                    script长度=   117  与稳定尾部公共后缀=   1  ⚠ 部分重叠, 但短于132
+ShardLeaf_direct                                                  script长度= 15687  与稳定尾部公共后缀= 132  ✅(自比对, 预期 132)
+ShardLeaf                                                         script长度= 15168  与稳定尾部公共后缀=  24  ⚠ 部分重叠, 但短于132
+RootClose                                                         script长度= 16802  与稳定尾部公共后缀=   2  ⚠ 部分重叠, 但短于132
+RootClaim                                                         script长度=  2991  与稳定尾部公共后缀=   1  ⚠ 部分重叠, 但短于132
+RefundClaim                                                       script长度=  2656  与稳定尾部公共后缀=   1  ⚠ 部分重叠, 但短于132
+KanetTokenClaim                                                   script长度=  1454  与稳定尾部公共后缀=   1  ⚠ 部分重叠, 但短于132
+PayoutShard                                                       script长度= 32779  与稳定尾部公共后缀=   2  ⚠ 部分重叠, 但短于132
+PayoutShardV2                                                     script长度= 29328  与稳定尾部公共后缀=   2  ⚠ 部分重叠, 但短于132
+CloseZkV2                                                         script长度= 13382  与稳定尾部公共后缀=   2  ⚠ 部分重叠, 但短于132
+MinProbe(无关最小合约, 单 entry checkSig, 与市场/代币逻辑零关联)                   script长度=    60  与稳定尾部公共后缀=   1  ⚠ 部分重叠, 但短于132
+
+=== 补充: ShardLeaf(同族最像) 换 3 组不同 ctor 值, 确认 24 字节重叠不会因取值不同而意外逼近132 ===
+ShardLeaf 随机组 #0: 与 ShardLeaf_direct 稳定尾部公共后缀 = 24
+ShardLeaf 随机组 #1: 与 ShardLeaf_direct 稳定尾部公共后缀 = 24
+ShardLeaf 随机组 #2: 与 ShardLeaf_direct 稳定尾部公共后缀 = 24
+
+=== RUN 07-build-real-vector.mjs ===
+真实 ShardLeaf_direct 132 字节稳定尾部(hex):
+5879827c75519658cd59797e5879827c75519658cd59797e7ed9880108567958cd7e012056797e010156797e010156797e012056797e012056797e7e7e7e7e7e58797c7e57797eaa02000001aa7e01207e7c7e01877e012079c38875757575757575757575757575757575757575757575757575757575757575757575757551676a6868
+KTT(真实 market_tmpl_suffix) 编译成功, 脚本长度: 4767
+已生成 ktt-real-vector.test.json (3 条向量: 正向1 + 负向-尾部改1字节 + 负向-covenant_id不匹配)
+
+=== RUN cli-debugger --run-all (D-019 pinned v1.0.0 build) ===
+cli-debugger.exe sha256: b85bb524d22ae761150dcb80b070f0bf1beb95a1c6604470501883b4d0f552c6
+cli-debugger source HEAD: 3ed973335b59269293564805cc2c58a14595ec03
+  RUN   REAL-V1_pass_market_sigscript_tail_matches_real_shardleafdirect_132byte_stable_tail
+  PASS  REAL-V1_pass_market_sigscript_tail_matches_real_shardleafdirect_132byte_stable_tail
+  RUN   REAL-V2_fail_market_sigscript_tail_one_byte_off_from_real_shardleafdirect_tail
+  PASS  REAL-V2_fail_market_sigscript_tail_one_byte_off_from_real_shardleafdirect_tail
+  RUN   REAL-V3_fail_market_covenant_id_mismatch_despite_correct_sigscript_tail
+  PASS  REAL-V3_fail_market_covenant_id_mismatch_despite_correct_sigscript_tail
+
+3 tests: 3 passed, 0 failed

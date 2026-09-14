@@ -148,7 +148,7 @@ await tAsync('FRESH-4 validateSignedInputCeiling 失败(签名前) ⇒ 不签名
   const kaspa = makeFakeKaspa();
   const rpc = makeRpc();
   const ingest = makeIngestPhase();
-  const cmd = makeCmd({ intentKey: 'proto-bet:f4:mint', inputAmt: '60000000' }); // > SIGNED_INPUT_CEILING(50_000_000)
+  const cmd = makeCmd({ intentKey: 'proto-bet:f4:mint', inputAmt: '110000000' }); // > SIGNED_INPUT_CEILING(Bettor 1386②: 1.0 KAS = 100_000_000)
   const r = await covenantBroadcastRelay({ cmd, kaspa, rpc, wallet: makeWallet(), networkId: 'mainnet', senderAddress: 'relay-addr', log: () => {}, ingestPhase: ingest.fn });
   assert.strictEqual(r.ok, false);
   assert.strictEqual(r.code, 'signed_input_ceiling_exceeded');
@@ -194,6 +194,26 @@ await tAsync('FRESH-8 signOnlyDeclaredInputs 本身失败(如 wasm 抛错) ⇒ �
   assert.strictEqual(r.ok, false);
   assert.strictEqual(r.code, 'sign_failed');
   assert.strictEqual(rpc.calls.length, 0);
+});
+
+await tAsync('FRESH-9(NWT 1387 复核要求) net_loss cap 与 SIGNED_INPUT_CEILING 解耦验证: 临时把 SIGNED_INPUT_CEILING 注入抬高到 2.0 KAS(解除"两值当前恰好相等"这个巧合遮蔽), cmd 里贴一个恶意/意外的假 abs_fee_cap_sompi=5 KAS(relay 从不读这个字段, 但仍显式放进 cmd 模拟"如果被读了会怎样"), 签名输入 1.5 KAS(远低于注入后的 2.0 KAS 输入闸, 不会被那道闸先挡住) ⇒ 仍应在 validateNetLoss 这一步被硬编码的 GLOBAL_ABS_FEE_CAP_SOMPI(1.0 KAS)拒绝, 且错误信息里引用的是 1 亿(GLOBAL)不是 5 亿(cmd 假 cap)——证明"relay 不读 cmd 的 cap"这条性质是真的独立生效, 不是被 SIGNED_INPUT_CEILING 顺带挡住的巧合', async () => {
+  // mass=10_000_000 ⇒ required_fee=1_000_000_000(10 KAS)×2=20 KAS, 远大于两个候选 cap(1/5 KAS)——
+  // 让 required_fee×2 这一支不可能成为 min() 里的约束项, 真正在比的是 absFeeCapSompi vs GLOBAL。
+  const kaspa = makeFakeKaspa({ massValue: 10_000_000n });
+  const rpc = makeRpc();
+  // 签名输入 150_000_000(1.5 KAS), 找零仅留 1000 sompi dust ⇒ net_loss ≈ 149_999_000(~1.4999 KAS)
+  //   > GLOBAL_ABS_FEE_CAP_SOMPI(1.0 KAS)应拒; 若 relay 错误读了 cmd 假 cap(5 KAS)则会被错误放行。
+  const cmd = makeCmd({ intentKey: 'proto-bet:f9:mint', inputAmt: '150000000', changeAmt: '1000' });
+  cmd.abs_fee_cap_sompi = '500000000'; // 恶意/意外贴的假 cap(5 KAS)——relay 绝不应该读它
+  const r = await covenantBroadcastRelay({
+    cmd, kaspa, rpc, wallet: makeWallet(), networkId: 'mainnet', senderAddress: 'relay-addr', log: () => {},
+    signedInputCeilingSompi: 200_000_000n, // 注入抬高到 2.0 KAS —— 1.5 KAS 的签名输入不会撞这道闸
+  });
+  assert.strictEqual(r.ok, false, JSON.stringify(r));
+  assert.strictEqual(r.code, 'net_loss_exceeded', `本该在 net_loss 这一步被拒, 实际: ${JSON.stringify(r)}`);
+  assert.ok(r.error.includes('GLOBAL_ABS_FEE_CAP_SOMPI=100000000'), `ceiling 应引用硬编码 GLOBAL(100000000), 实际: ${r.error}`);
+  assert.ok(!r.error.includes('500000000'), `不该出现 cmd 贴的假 cap(500000000), 实际: ${r.error}`);
+  assert.strictEqual(rpc.calls.length, 0, '零广播');
 });
 
 await tAsync('IDEMPOTENT-1 同一 intent_key 二次调用(进程内已完成) ⇒ reused, 不重新广播', async () => {

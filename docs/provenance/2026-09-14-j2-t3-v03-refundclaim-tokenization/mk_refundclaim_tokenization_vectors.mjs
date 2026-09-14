@@ -10,17 +10,18 @@ const b2b = (buf) => blake2b(Uint8Array.from(buf), { dkLen: 32 });
 const hex = (a) => '0x' + Buffer.from(a).toString('hex');
 const p2sh = (bytecode) => 'aa20' + Buffer.from(b2b(bytecode)).toString('hex') + '87';
 const SILVERC = 'D:/kanet-tn12/scratch/_j2_silverc_v100/target/release/silverc.exe';
-const KTT = 'D:/kanet-tn12/scratch/_j2_wt_t3_market/kasia-console/src/lib/sil-v1/KanetTestToken.sil';
-const KTC = 'D:/kanet-tn12/scratch/_j2_wt_t3_market/kasia-console/src/lib/KanetTokenClaim.sil';
+// 🔴 更新(2026-09-15, 账本1408/1409/1415, f7342a32·同病同治): 三个路径全部改指向真实已落生产的 v0.3
+// 文件(coord/j2-proto-v0-backend 分支 _j2_wt_proto_v0 工作树), 不再用旧 worktree 里的旧版本。
+const KTT = 'D:/kanet-tn12/scratch/_j2_wt_proto_v0/kasia-console/src/lib/sil-v1/KanetTestToken.sil';
+const KTC = 'D:/kanet-tn12/scratch/_j2_wt_proto_v0/kasia-console/src/lib/KanetTokenClaim.sil';
 const STUB = 'D:/kanet-tn12/scratch/_j2_wt_t3_market/docs/provenance/2026-09-14-j2-t3-v03-drawdown-mustfix/PoolSideStub.sil';
-const RC = 'D:/kanet-tn12/scratch/_j2_wt_t3_market/kasia-console/src/lib/RefundClaim.sil';
+const RC = 'D:/kanet-tn12/scratch/_j2_wt_proto_v0/kasia-console/src/lib/RefundClaim.sil';
 const CWD = 'D:/kanet-tn12/scratch/_j2_wt_t3_market';
 
 const ZERO32 = new Array(32).fill(0);
 const RC_COV = new Array(32).fill(0xcc);
 const BETTOR_PK = new Array(32).fill(0x22);
 const SHARD_POOL_ID = new Array(32).fill(0x37);
-const MARKET_TMPL_SUFFIX = [0xaa, 0xbb, 0xcc, 0xdd, 0xee];
 
 function compileGeneric(sil, ctor, tag) {
   const ctorPath = `scratch/_t1v06_check/RCtok_${tag}.ctor.json`;
@@ -34,11 +35,11 @@ function compileGeneric(sil, ctor, tag) {
   return { prefix: bc.slice(0, offset), suffix: bc.slice(offset + len), templateHash: c.template_hash, bc, scriptHex: '0x' + p2sh(bc), fullBytecodeHex: '0x' + Buffer.from(bc).toString('hex') };
 }
 
+// v0.3(方案C) ctor: 8 字段, market_tmpl_suffix/market_tmpl_suffix_len 已删除(H1(b) 撤销)。
 function compileKTT(ownerCov, amount, tag) {
   const ctor = [
     { kind: 'int', value: amount }, { kind: 'bytes', value: ownerCov }, { kind: 'byte', value: 4 }, { kind: 'byte', value: 0 },
     { kind: 'bytes', value: ZERO32 }, { kind: 'bytes', value: ZERO32 },
-    { kind: 'bytes', value: MARKET_TMPL_SUFFIX }, { kind: 'int', value: MARKET_TMPL_SUFFIX.length },
     { kind: 'int', value: 3 }, { kind: 'int', value: 3 },
   ];
   return compileGeneric(KTT, ctor, `ktt_${tag}`);
@@ -52,27 +53,28 @@ function compileTicket(bettorPk, direction, stake, shardPoolId, tag) {
 }
 
 // ---------- KanetTokenClaim compile helper (for both claim_tmpl_hash derivation AND real target instances) ----------
-function compileKTC({ marketCovId, winnerPk, amount, tokenTmplHash, marketSuffixHash }, tag) {
+// v0.3 方案C 同病同治(账本 1409/1415): KanetTokenClaim ctor 现只有 4 字段(market_suffix_hash 已删)。
+function compileKTC({ marketCovId, winnerPk, amount, tokenTmplHash }, tag) {
   const ctor = [
     { kind: 'bytes', value: marketCovId }, { kind: 'bytes', value: winnerPk }, { kind: 'int', value: amount },
-    { kind: 'bytes', value: tokenTmplHash }, { kind: 'bytes', value: marketSuffixHash },
+    { kind: 'bytes', value: tokenTmplHash },
   ];
   return compileGeneric(KTC, ctor, `ktc_${tag}`);
 }
 
 // Derive claim_tmpl_hash/prefix/suffix from ANY KanetTokenClaim instance (template_hash is ctor-value-invariant,
 // same T1 "template invariance" property already relied on throughout this project for token/claim templates).
-const ktcAnyInstance = compileKTC({ marketCovId: ZERO32, winnerPk: ZERO32, amount: 0, tokenTmplHash: ZERO32, marketSuffixHash: ZERO32 }, 'anchor');
+const ktcAnyInstance = compileKTC({ marketCovId: ZERO32, winnerPk: ZERO32, amount: 0, tokenTmplHash: ZERO32 }, 'anchor');
 const claimTmplHash = ktcAnyInstance.templateHash;
 
 // Token template anchor (KTT template invariant across ctor values, same pattern used throughout).
 const tokAnchor = compileKTT(RC_COV, 1, 'anchor');
 const tokenTmplHash = tokAnchor.templateHash;
 
-const marketSuffixHash = [...blake3(Uint8Array.from(MARKET_TMPL_SUFFIX))]; // arbitrary stand-in value for RefundClaim's own "market_suffix_hash" ctor field
-
+// v0.3 方案C 同病同治(账本 1408/1409/1415, f7342a32): RefundClaim.sil 自身 ctor 的 market_suffix_hash 字段
+// 一并删除——它原本只是镜像 KanetTokenClaim 已删除的同名字段, 纯透传。
 function ctorArgsRC({ pool_value, closed = 2, psTmplHash, tokenTmplHashOverride = tokenTmplHash, claimTmplHashOverride = claimTmplHash }) {
-  return [hex(psTmplHash), hex(SHARD_POOL_ID), 0, 0, 0, pool_value, closed, 0, hex(ZERO32), hex(tokenTmplHashOverride), hex(claimTmplHashOverride), hex(marketSuffixHash)];
+  return [hex(psTmplHash), hex(SHARD_POOL_ID), 0, 0, 0, pool_value, closed, 0, hex(ZERO32), hex(tokenTmplHashOverride), hex(claimTmplHashOverride)];
 }
 function selfInput(pool_value) { return { utxo_value: 1, covenant_id: hex(RC_COV), state: { local_yes: 0, local_no: 0, count: 0, pool_value, closed: 2, winningSide: 0, payoutRoot: ZERO32 } }; }
 function ticketInput(t) { return { utxo_value: 1, utxo_script_hex: t.scriptHex, signature_script_hex: t.fullBytecodeHex }; }
@@ -87,7 +89,7 @@ const tests = [];
 function buildScenario({ pool_value, stake, tag, tokenTmplHashOverride, claimTmplHashOverride, wrongClaimOut, wrongTokenOwner, wrongTokPrefix, wrongClaimPrefix }) {
   const ticket = compileTicket(BETTOR_PK, 0, stake, SHARD_POOL_ID, `ticket_${tag}`);
   const heldTok = compileKTT(RC_COV, pool_value, `held_${tag}`);
-  const realClaimOut = compileKTC({ marketCovId: RC_COV, winnerPk: BETTOR_PK, amount: stake, tokenTmplHash, marketSuffixHash }, `claimout_${tag}`);
+  const realClaimOut = compileKTC({ marketCovId: RC_COV, winnerPk: BETTOR_PK, amount: stake, tokenTmplHash }, `claimout_${tag}`);
   const claimOut = wrongClaimOut || realClaimOut;
   // ★ debugger genesis-covenant quirk (established project convention): an output declaring a `covenant_id`
   // with no matching continuation input anywhere in the tx is treated as a GENESIS output, whose covenant_id

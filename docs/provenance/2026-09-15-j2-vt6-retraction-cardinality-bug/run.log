@@ -1,0 +1,85 @@
+=== compile A (with check) ===
+exit=0
+=== compile B (no check) ===
+exit=0
+
+=== cli-debugger: Repro.sil (A/C) ===
+  RUN   A_pass_ext_output_matches_next_states_owner
+  PASS  A_pass_ext_output_matches_next_states_owner
+  RUN   C_fail_ext_output_does_not_match_next_states_owner
+  PASS  C_fail_ext_output_does_not_match_next_states_owner
+
+2 tests: 2 passed, 0 failed
+
+=== cli-debugger: ReproNoCheck.sil (shape-validity control for both A and C tx) ===
+  RUN   A_pass_ext_output_matches_next_states_owner
+  PASS  A_pass_ext_output_matches_next_states_owner
+  RUN   C_fail_ext_output_does_not_match_next_states_owner
+  FAIL  C_fail_ext_output_does_not_match_next_states_owner
+        FAIL: expected failure but bytecode passed
+        Error: "FAIL"
+
+2 tests: 1 passed, 1 failed
+Error: "some tests failed"
+
+=== interactive trace: C failure location ===
+Stepping through 437 bytes of bytecode
+→    1 | pragma silverscript ^0.1.0;
+     2 | contract Repro(int init_amount, byte[32] init_owner, int max_ins, int max_outs) {
+     3 |     int amount = init_amount;
+     4 |     byte[32] owner = init_owner;
+     5 |     #[covenant(binding = cov, from = max_ins, to = max_outs, name = transfer, delegate_name = transfer_delegator)]
+     6 |     function transferPolicy(State[] prev_states, State[] next_states) {
+     7 |         require(OpOutputCovenantId(1) == next_states[0].owner);
+Constructor Args:
+  init_amount (int) = 100
+  init_owner (byte[32]) = 0x1111111111111111111111111111111111111111111111111111111111111111
+  max_ins (int) = 1
+  max_outs (int) = 1
+Call Arguments:
+  amount (int) = 100
+  next_states (State[]) = [{amount: 100, owner: 0x9999999999999999999999999999999999999999999999999999999999999999}]
+  owner (byte[32]) = 0x1111111111111111111111111111111111111111111111111111111111111111
+(sdb)      1 | pragma silverscript ^0.1.0;
+     2 | contract Repro(int init_amount, byte[32] init_owner, int max_ins, int max_outs) {
+     3 |     int amount = init_amount;
+     4 |     byte[32] owner = init_owner;
+     5 |     #[covenant(binding = cov, from = max_ins, to = max_outs, name = transfer, delegate_name = transfer_delegator)]
+     6 |     function transferPolicy(State[] prev_states, State[] next_states) {
+→    7 |         require(OpOutputCovenantId(1) == next_states[0].owner);
+     8 |     }
+     9 |     #[covenant.delegate]
+    10 |     function transfer_delegator() {
+    11 |         require(true);
+    12 |     }
+    13 | }
+Constructor Args:
+  init_amount (int) = 100
+  init_owner (byte[32]) = 0x1111111111111111111111111111111111111111111111111111111111111111
+  max_ins (int) = 1
+  max_outs (int) = 1
+Call Arguments:
+  amount (int) = 100
+  next_states (State[]) = [{amount: 100, owner: 0x9999999999999999999999999999999999999999999999999999999999999999}]
+  owner (byte[32]) = 0x1111111111111111111111111111111111111111111111111111111111111111
+Locals:
+  __cov_id (byte[32]) = 0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  __cov_in_count (int) = 1
+  __cov_in_k (int) = 100
+  __cov_out_count (int) = 1
+  __for_0___inline_4___cov_in_k_start (int) = 0
+  __for_1___inline_4___cov_in_k_end (int) = 1
+  __for_2___inline_4___cov_in_k (int) = 100
+  __read_input_state_0 (State) = <unavailable: numeric value is longer than 8 bytes>
+  prev_states (State[]) = [{amount: 100, owner: 0x1111111111111111111111111111111111111111111111111111111111111111}]
+(sdb) error: script ran, but verification failed
+   --> 7:9
+   |
+ 6 |     function transferPolicy(State[] prev_states, State[] next_states) {
+ 7 |         require(OpOutputCovenantId(1) == next_states[0].owner);
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ verification failed here
+   |   __cov_id = 0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, __cov_in_count = 1, __cov_in_k = 100, __cov_out_count = 1, __for_0___inline_4___cov_in_k_start = 0, __for_1___inline_4___cov_in_k_end = 1, __for_2___inline_4___cov_in_k = 100, __read_input_state_0 = <unavailable: numeric value is longer than 8 bytes>, amount = 100, init_amount = 100, init_owner = 0x1111111111111111111111111111111111111111111111111111111111111111, max_ins = 1, max_outs = 1, next_states = [{amount: 100, owner: 0x9999999999999999999999999999999999999999999999999999999999999999}], owner = 0x1111111111111111111111111111111111111111111111111111111111111111, prev_states = [{amount: 100, owner: 0x1111111111111111111111111111111111111111111111111111111111111111}]
+   |
+
+b85bb524d22ae761150dcb80b070f0bf1beb95a1c6604470501883b4d0f552c6 */d/kanet-tn12/scratch/_j2_silverc_v100/target/release/cli-debugger.exe
+4378ba6557f7b7b088d6ad7a400422acb51a7ffd04f86ed974055c4177ef8643 */d/kanet-tn12/scratch/_j2_silverc_v100/target/release/silverc.exe

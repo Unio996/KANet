@@ -50,9 +50,10 @@ contract PayoutShard(
     int init_w0, int init_w1, int init_w2, int init_w3, int init_w4, int init_w5, int init_w6, int init_w7, int init_w8,
     int init_w9, int init_w10, int init_w11, int init_w12, int init_w13, int init_w14, int init_w15, int init_w16,  // 17-word nullifier
     // —— v0.3 §2/§3 代币化(T3, ledger 1183): claim/refund_claim 目的地重定向到新建 KanetTokenClaim, 同
-    //   RefundClaim.sil/CloseZkV2.sil/RootClaim.sil 三件套, P13 witness+blake3 现场核。
-    byte[32] claim_tmpl_hash,
-    byte[32] market_suffix_hash
+    //   RefundClaim.sil/CloseZkV2.sil/RootClaim.sil 家族, P13 witness+blake3 现场核。
+    // 🔴 v0.3 方案C 同病同治(账本 1408/1409/1415, f7342a32): market_suffix_hash 一并删——纯透传镜像
+    // KanetTokenClaim 已删除的同名字段, 不参与本文件任何 require, 删除不改变任何检查逻辑。
+    byte[32] claim_tmpl_hash
 ) {
     int consolidated_pool = init_consolidated_pool;
     int closed            = init_closed;
@@ -68,7 +69,6 @@ contract PayoutShard(
         byte[32] winner_pk;
         int      amount;
         byte[32] token_tmpl_hash;
-        byte[32] market_suffix_hash;
     }
     // KanetTestToken 六字段布局镜像(T1 §1 原序: amount/owner/owner_scheme/borrow_scheme/borrow_guard/extension_commitment)
     struct TokenState {
@@ -120,6 +120,34 @@ contract PayoutShard(
         }
         return total;
     }
+    // ★ ledger 1208 MUST-FIX(Codex 独立发现, Bettor 核过成立): absorb 原来只验 shardInIdx 单点的模板/金额,
+    //   不证明它是本笔交易里【唯一】的"同模板、非本 PS 持有"代币输入——两个合法 ShardLeaf A/B 同笔各自跑
+    //   consolidate_to_payout(各自的 scanOwnedTokenInputs()==pool_value 独立成立, 互不知情), absorb 若只
+    //   点名其中一个(如 B)当 shardInIdx, 另一个(A)的代币被消费却从未被任何输出计入 = 静默销毁(非通胀,
+    //   是销毁——真实资产损失, 不是"多印钱")。同一遍扫描里数"同模板、owner!=本 PS、且下标!=excludeIdx"
+    //   的代币输入个数——若 >0, 证明存在没被 shardInIdx 说明的"陌生同模板代币", 必须拒(absorb 调用点传
+    //   excludeIdx=shardInIdx, 见 require(countStrayNonOwnedTokenInputs(...)==0))。
+    function countStrayNonOwnedTokenInputs(byte[] tok_prefix, byte[] tok_suffix, int excludeIdx) : int {
+        require(blake3((tok_prefix.length as byte[8]) + tok_prefix + (tok_suffix.length as byte[8]) + tok_suffix) == token_tmpl_hash);
+        require(tx.inputs.length <= MAX_INS_SCAN);
+        int strayCount = 0;
+        int L = tok_suffix.length;
+        for (i, 0, tx.inputs.length, MAX_INS_SCAN) {
+            if (i != excludeIdx) {
+                byte[] ss = tx.inputs[i].sigScript;
+                int n = ss.length;
+                bool looksLikeToken = false;
+                if (n >= L) { looksLikeToken = ss.slice(n - L, n) == tok_suffix; }
+                if (looksLikeToken) {
+                    TokenState tk = readInputStateWithTemplate(i, tok_prefix.length, tok_suffix.length, token_tmpl_hash);
+                    if (tk.owner != OpInputCovenantId(this.activeInputIndex)) {
+                        strayCount = strayCount + 1;
+                    }
+                }
+            }
+        }
+        return strayCount;
+    }
     // (B) v0.3 §2/§3 + 1151 P13 形: 不在场证明——同上先 blake3 核对 witness 供的模板字节, 再用验过的 tok_suffix
     //   做 P7 尾匹配, 不分 owner(比 owner-aware 更严, 1123 Codex 顾虑已堵)。
     function noTokenInput(byte[] tok_prefix, byte[] tok_suffix) : bool {
@@ -150,6 +178,13 @@ contract PayoutShard(
         // ★ 新纳入的 shard 代币: 读其真实 amount(不信任 witness 单独喂的数, T3 v0.1 §3 "读代币输入状态"迁移点)
         TokenState shardTk = readInputStateWithTemplate(shardInIdx, tok_prefix.length, tok_suffix.length, token_tmpl_hash);
         require(shardTk.amount == shard_amount);
+        // ★ ledger 1208 MUST-FIX: shardInIdx 本身必须真是"非本 PS 持有"(挡"自己已持有的代币冒充新纳入"
+        //   的重复入账企图, 同 1196 那族但方向相反——1196 是"自己代币被提前 relabel 后被误计两次",
+        //   这条是"malicious caller 故意拿自己已持有的代币冒充 shardInIdx 骗一次多余入账")+ 本笔交易里
+        //   不存在任何【未被 shardInIdx 说明】的同模板陌生代币输入(证明 shardInIdx 是唯一来源, 堵"两个
+        //   合法 leaf 同笔只点名一个, 另一个被静默销毁"这条 MUST-FIX)。
+        require(shardTk.owner != OpInputCovenantId(this.activeInputIndex));
+        require(countStrayNonOwnedTokenInputs(tok_prefix, tok_suffix, shardInIdx) == 0);
         // ★ v0.3 §4 输出侧派生绑定: 续约代币 owner = 本 PS 自身(OpInputCovenantId 派生表达式, 不是裸 witness)
         validateOutputStateWithInputTemplate(tok_out, TokenState {
             amount:               consolidated_pool + shard_amount,
@@ -369,13 +404,12 @@ contract PayoutShard(
         require(claimCovId != byte[32](0x0000000000000000000000000000000000000000000000000000000000000000));
 
         // 新建 KanetTokenClaim 实例: market_cov_id=本合约自身身份(provenance) / winner_pk=票面 bettor /
-        // amount=票面 payout / token_tmpl_hash/market_suffix_hash 透传。
+        // amount=票面 payout / token_tmpl_hash 透传。
         validateOutputStateWithTemplate(claimOutIdx, ClaimState {
             market_cov_id:       OpInputCovenantId(this.activeInputIndex),
             winner_pk:           bettorPk,
             amount:              payout,
-            token_tmpl_hash:     token_tmpl_hash,
-            market_suffix_hash:  market_suffix_hash
+            token_tmpl_hash:     token_tmpl_hash
         }, claim_prefix, claim_suffix, claim_tmpl_hash);
 
         // 代币输出: 转给新 claim 的那份, owner = 新 claim covenant id(上面已核非 ZERO32)。
@@ -609,13 +643,12 @@ contract PayoutShard(
         require(claimCovId != byte[32](0x0000000000000000000000000000000000000000000000000000000000000000));
 
         // 新建 KanetTokenClaim 实例: market_cov_id=本合约自身身份 / winner_pk=票面 bettor(此处为退款人) /
-        // amount=票面 refund / token_tmpl_hash/market_suffix_hash 透传。
+        // amount=票面 refund / token_tmpl_hash 透传。
         validateOutputStateWithTemplate(claimOutIdx, ClaimState {
             market_cov_id:       OpInputCovenantId(this.activeInputIndex),
             winner_pk:           bettorPk,
             amount:              refund,
-            token_tmpl_hash:     token_tmpl_hash,
-            market_suffix_hash:  market_suffix_hash
+            token_tmpl_hash:     token_tmpl_hash
         }, claim_prefix, claim_suffix, claim_tmpl_hash);
 
         // 代币输出: 转给新 claim 的那份, owner = 新 claim covenant id(上面已核非 ZERO32)。

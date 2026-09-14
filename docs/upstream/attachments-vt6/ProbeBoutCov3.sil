@@ -1,0 +1,20 @@
+pragma silverscript ^0.1.0;
+contract ProbeBoutCov3(int init_amount, byte[32] init_owner, byte init_owner_scheme, byte init_borrow_scheme, byte[32] init_borrow_guard, byte[32] init_extension_commitment, int max_ins, int max_outs) {
+    int amount = init_amount;
+    byte[32] owner = init_owner;
+    byte owner_scheme = init_owner_scheme;
+    byte borrow_scheme = init_borrow_scheme;
+    byte[32] borrow_guard = init_borrow_guard;
+    byte[32] extension_commitment = init_extension_commitment;
+    struct ClaimState { byte[32] winner_pk; int amount; }
+    #[covenant(binding = cov, from = max_ins, to = max_outs, name = transfer, delegate_name = transfer_delegator)]
+    function transferPolicy(State[] prev_states, State[] next_states, byte[] witness, int[] owner_input_idx, int[] recv_idx, ClaimState[] new_claims) {
+        require(witness.length == 0);
+        int out_k = 0 - recv_idx[0] - 1;
+        require(OpOutputCovenantId(out_k) == next_states[0].owner);
+    }
+    #[covenant.delegate]
+    function transfer_delegator() {
+        require(true);
+    }
+}

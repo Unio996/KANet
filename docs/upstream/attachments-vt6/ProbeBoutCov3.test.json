@@ -1,0 +1,72 @@
+{
+  "tests": [
+    {
+      "name": "cov_id_only_pass",
+      "function": "transfer",
+      "constructor_args": [
+        100,
+        "0x1111111111111111111111111111111111111111111111111111111111111111",
+        4,
+        0,
+        "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "0x0000000000000000000000000000000000000000000000000000000000000000",
+        3,
+        3
+      ],
+      "args": [
+        [
+          {
+            "amount": 100,
+            "owner": "0x3e4b0775073c8af63b5ab26209e575d67c5bc11d91410bd858e6ebbb4eb80677",
+            "owner_scheme": 4,
+            "borrow_scheme": 0,
+            "borrow_guard": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "extension_commitment": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          }
+        ],
+        "0x",
+        [
+          1
+        ],
+        [
+          -1
+        ],
+        [
+          {
+            "winner_pk": "0x7777777777777777777777777777777777777777777777777777777777777777",
+            "amount": 500
+          }
+        ]
+      ],
+      "expect": "pass",
+      "tx": {
+        "active_input_index": 0,
+        "inputs": [
+          {
+            "utxo_value": 1,
+            "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "state": {
+              "amount": 100,
+              "owner": "0x1111111111111111111111111111111111111111111111111111111111111111",
+              "owner_scheme": 4,
+              "borrow_scheme": 0,
+              "borrow_guard": "0x0000000000000000000000000000000000000000000000000000000000000000",
+              "extension_commitment": "0x0000000000000000000000000000000000000000000000000000000000000000"
+            }
+          },
+          {
+            "utxo_value": 1,
+            "covenant_id": "0x3e4b0775073c8af63b5ab26209e575d67c5bc11d91410bd858e6ebbb4eb80677"
+          }
+        ],
+        "outputs": [
+          {
+            "value": 1,
+            "covenant_id": "0x3e4b0775073c8af63b5ab26209e575d67c5bc11d91410bd858e6ebbb4eb80677",
+            "authorizing_input": 1
+          }
+        ]
+      }
+    }
+  ]
+}

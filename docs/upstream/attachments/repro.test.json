@@ -1,0 +1,50 @@
+{
+ "tests": [
+  {
+   "name": "repro_crash_read_external_plus_self_continue",
+   "function": "step",
+   "constructor_args": [
+    "0x6b",
+    1,
+    "0x6c76042f1190ab8763757800a269757551676a68",
+    20,
+    "0xe601414877c7bc3d1c5af416c3c26b0e6f8805e01b2a6a1c9a4d98e5e347da63",
+    100,
+    0,
+    "0x0000000000000000000000000000000000000000000000000000000000000000"
+   ],
+   "args": [
+    0,
+    1,
+    100
+   ],
+   "expect": "pass",
+   "tx": {
+    "active_input_index": 0,
+    "inputs": [
+     {
+      "utxo_value": 1,
+      "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "signature_script_hex": "0x00ffffffffffffffffffff"
+     },
+     {
+      "utxo_value": 10,
+      "utxo_script_hex": "0xaa20016fbfffbb2ab31b1d53eabee7758f2adb44147f56780c20811e29268d05fefe87",
+      "signature_script_hex": "0x6b0864000000000000002011111111111111111111111111111111111111111111111111111111111111116c76042f1190ab8763757800a269757551676a68"
+     }
+    ],
+    "outputs": [
+     {
+      "value": 1000,
+      "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "state": {
+       "counter": 200,
+       "closed": 0,
+       "root": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+     }
+    ]
+   }
+  }
+ ]
+}

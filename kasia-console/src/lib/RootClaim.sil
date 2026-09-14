@@ -24,11 +24,13 @@ contract RootClaim(
     int      init_winningSide,
     byte[32] init_payoutRoot,
     int      init_claimed_bitmap,  // R7 re-mint fix: 已领 winner slot 位图 (depth-2=4winner=4bit); convert 创建时 0
-    // —— v0.3 §2/§3 代币化(T3, ledger 1183): pool_value 语义 = 代币 amount(D-017)。三个 ctor-only 常量
-    //   (不进 State, 直接引用), 同 RefundClaim.sil/CloseZkV2.sil 三件套, 一律 P13 witness+blake3 现场核。
+    // —— v0.3 §2/§3 代币化(T3, ledger 1183): pool_value 语义 = 代币 amount(D-017)。两个 ctor-only 常量
+    //   (不进 State, 直接引用), 同 RefundClaim.sil/CloseZkV2.sil 家族, 一律 P13 witness+blake3 现场核。
+    //   🔴 v0.3 方案C 同病同治(账本 1408/1409/1415, f7342a32): market_suffix_hash 一并删——它原本只是
+    //   镜像 KanetTokenClaim 已删除的同名字段(见 KanetTokenClaim.sil v0.3 头注), 纯透传, 不参与本文件
+    //   任何 require, 删除本身不改变任何检查逻辑, 只是让 ClaimState 镜像重新对齐真实 4 字段 State。
     byte[32] token_tmpl_hash,
-    byte[32] claim_tmpl_hash,
-    byte[32] market_suffix_hash
+    byte[32] claim_tmpl_hash
 ) {
     int local_yes   = init_local_yes;
     int local_no    = init_local_no;
@@ -61,7 +63,6 @@ contract RootClaim(
         byte[32] winner_pk;
         int      amount;
         byte[32] token_tmpl_hash;
-        byte[32] market_suffix_hash;
     }
     byte constant TOKEN_SCHEME_COVENANT_ID = 0x04;
     byte constant TOKEN_BORROW_DISABLED    = 0x00;
@@ -144,13 +145,12 @@ contract RootClaim(
         require(claimCovId != byte[32](0x0000000000000000000000000000000000000000000000000000000000000000));
 
         // 新建 KanetTokenClaim 实例: market_cov_id=本合约自身身份(provenance) / winner_pk=票面 bettor /
-        // amount=票面 payout / token_tmpl_hash/market_suffix_hash 透传。
+        // amount=票面 payout / token_tmpl_hash 透传。
         validateOutputStateWithTemplate(claimOutIdx, ClaimState {
             market_cov_id:       OpInputCovenantId(this.activeInputIndex),
             winner_pk:           tk.bettorPk,
             amount:              payout,
-            token_tmpl_hash:     token_tmpl_hash,
-            market_suffix_hash:  market_suffix_hash
+            token_tmpl_hash:     token_tmpl_hash
         }, claim_prefix, claim_suffix, claim_tmpl_hash);
 
         // 代币输出: 转给新 claim 的那份, owner = 新 claim covenant id(上面已核非 ZERO32)。

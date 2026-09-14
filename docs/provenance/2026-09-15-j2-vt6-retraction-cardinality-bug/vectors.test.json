@@ -1,0 +1,44 @@
+{
+ "tests": [
+  {
+   "name": "A_pass_ext_output_matches_next_states_owner",
+   "function": "transfer",
+   "constructor_args": [100, "0x1111111111111111111111111111111111111111111111111111111111111111", 1, 1],
+   "args": [
+    [{ "amount": 100, "owner": "0x3e4b0775073c8af63b5ab26209e575d67c5bc11d91410bd858e6ebbb4eb80677" }]
+   ],
+   "expect": "pass",
+   "tx": {
+    "active_input_index": 0,
+    "inputs": [
+     { "utxo_value": 1, "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "state": { "amount": 100, "owner": "0x1111111111111111111111111111111111111111111111111111111111111111" } },
+     { "utxo_value": 1, "covenant_id": "0x3e4b0775073c8af63b5ab26209e575d67c5bc11d91410bd858e6ebbb4eb80677" }
+    ],
+    "outputs": [
+     { "value": 1, "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "authorizing_input": 0, "state": { "amount": 100, "owner": "0x3e4b0775073c8af63b5ab26209e575d67c5bc11d91410bd858e6ebbb4eb80677" } },
+     { "value": 1, "covenant_id": "0x3e4b0775073c8af63b5ab26209e575d67c5bc11d91410bd858e6ebbb4eb80677", "authorizing_input": 1 }
+    ]
+   }
+  },
+  {
+   "name": "C_fail_ext_output_does_not_match_next_states_owner",
+   "function": "transfer",
+   "constructor_args": [100, "0x1111111111111111111111111111111111111111111111111111111111111111", 1, 1],
+   "args": [
+    [{ "amount": 100, "owner": "0x9999999999999999999999999999999999999999999999999999999999999999" }]
+   ],
+   "expect": "fail",
+   "tx": {
+    "active_input_index": 0,
+    "inputs": [
+     { "utxo_value": 1, "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "state": { "amount": 100, "owner": "0x1111111111111111111111111111111111111111111111111111111111111111" } },
+     { "utxo_value": 1, "covenant_id": "0x3e4b0775073c8af63b5ab26209e575d67c5bc11d91410bd858e6ebbb4eb80677" }
+    ],
+    "outputs": [
+     { "value": 1, "covenant_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "authorizing_input": 0, "state": { "amount": 100, "owner": "0x9999999999999999999999999999999999999999999999999999999999999999" } },
+     { "value": 1, "covenant_id": "0x3e4b0775073c8af63b5ab26209e575d67c5bc11d91410bd858e6ebbb4eb80677", "authorizing_input": 1 }
+    ]
+   }
+  }
+ ]
+}

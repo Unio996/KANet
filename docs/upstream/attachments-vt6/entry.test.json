@@ -1,0 +1,21 @@
+{
+ "tests": [
+  {
+   "name": "entry_control_pass",
+   "function": "check",
+   "constructor_args": [0],
+   "args": [0, "0x3e4b0775073c8af63b5ab26209e575d67c5bc11d91410bd858e6ebbb4eb80677"],
+   "expect": "pass",
+   "tx": {
+    "active_input_index": 0,
+    "inputs": [
+     { "utxo_value": 1, "utxo_script_hex": "0xaa20016fbfffbb2ab31b1d53eabee7758f2adb44147f56780c20811e29268d05fefe87", "signature_script_hex": "0x00" },
+     { "utxo_value": 1, "covenant_id": "0x3e4b0775073c8af63b5ab26209e575d67c5bc11d91410bd858e6ebbb4eb80677", "signature_script_hex": "0x00ff" }
+    ],
+    "outputs": [
+     { "value": 1, "covenant_id": "0x3e4b0775073c8af63b5ab26209e575d67c5bc11d91410bd858e6ebbb4eb80677", "authorizing_input": 1 }
+    ]
+   }
+  }
+ ]
+}

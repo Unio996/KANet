@@ -3,6 +3,17 @@
 **Status**: OPEN — 但范围已大幅收窄；debugger 与共识语义**已确认一致**(v0.1 猜测的"debugger 可能用占位/
 与共识不符"已排除)。不阻塞其余 14 向量交付。
 
+> 🔴 **状态注记（2026-09-15 · J2 · 账本 1417/1418）**：本文件与其 v0.3 版本（`git show
+> 0d9a1f61:docs/provenance/2026-09-13-j2-t1-token-sil-implementation/KNOWN-GAP-V-T-6.v0.3.md`）记录的
+> "根因"最终判定为**误判**——**V-T-6 不存在，是探针向量的基数构造错误**：4 个新探针（`ProbeBoutCov`/2/3/4）
+> 的失败交易只有 1 个输出且属于外部 covenant，`next_states.length` 却声明为 1，撞上了 `binding=cov`
+> wrapper 自己的"组内续约输出数 == `next_states.length`"基数检查（真实报错 `__cov_out_count = 0` 正对应
+> 这个，失败位置在 wrapper 层 `1:1` 不在探针的 `require` 那行）——不是"`OpOutputCovenantId` 对外部输出
+> 内省失效"。决定性反证（中性重写、D-019 pin 真实编译+跑通）：把组内续约输出数补齐到与 `next_states.length`
+> 一致后，`OpOutputCovenantId` 对外部输出的读值在 `binding=cov` 内完全正确。详见 `docs/DECISIONS.md`
+> D-018 同日期状态注记（含完整反证细节）。不影响本文件描述的"退路①"最终采纳——那是被 Owner 更晚的独立
+> 裁定（H1(b) 撤销，D-017 注记，账本 1408）取代的，不是靠 V-T-6 成立才需要的。
+
 ## ①②：OpOutputCovenantId 的 lowering 与共识语义(源码钉死, 非猜测)
 
 - **silverc codegen(3ed9733 隔离 clone)**: `compiler/compile/expression/builtin.rs:70` 把
