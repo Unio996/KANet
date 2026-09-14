@@ -1,6 +1,6 @@
 // t-loopback-authz-funds-hotfix.test.mjs — T-LOOPBACK-AUTHZ 热修回归(J2 2026-09-14, Bettor/NWT v1.0 派工)。
 // 覆盖 ADMIN_SECRET_FUNDS 三态(未设=503 / 设+带正确header=放行到原逻辑 / 设+不带或错header=403)
-// 六条路由：/api/relay/:id/transfer、/api/chat/local、/api/prediction/publish-v2、
+// 七条路由：/api/relay/:id/transfer、/api/chat/local、/api/prediction/publish-v2、
 // /api/prediction/taker-stake/:offer_id、/api/prediction/refund/:offer_id、
 // /api/pool/market/:id/oracle/deposit、/api/pool/market/:id/bettor/register；
 // 外加 /skills/upload 恒 404(选项(b)，不受任何 env/header 影响)。
@@ -36,7 +36,7 @@ const ok = (cond, label) => { if (cond) console.log(`  ✅ ${label}`); else { co
 const HEADER = 'x-kanet-admin-secret';
 const SECRET = 'test-funds-secret-9f3a';
 
-// 六条路由的最小安全 payload(不真实触发转账/写状态 —— 全部指向不存在的 relay/offer/market,
+// 七条路由的最小安全 payload(不真实触发转账/写状态 —— 全部指向不存在的 relay/offer/market,
 // 目的只是验证"过了鉴权闸之后落到原逻辑的早期 404/400", 不是真跑一遍业务)。
 const CASES = [
   { name: 'relay/:id/transfer', method: 'POST', url: '/api/relay/does-not-exist/transfer', payload: { to: 'kaspatest:x', amount: '1' } },
@@ -64,7 +64,7 @@ async function buildApp() {
   return app;
 }
 
-console.log('[test] ① ADMIN_SECRET_FUNDS 未设 → 全部六条路由 503(主网默认关闭):');
+console.log('[test] ① ADMIN_SECRET_FUNDS 未设 → 全部七条路由 503(主网默认关闭):');
 {
   delete process.env.ADMIN_SECRET_FUNDS;
   const app = await buildApp();
@@ -75,7 +75,7 @@ console.log('[test] ① ADMIN_SECRET_FUNDS 未设 → 全部六条路由 503(主
   await app.close();
 }
 
-console.log('[test] ② ADMIN_SECRET_FUNDS 已设 + 不带 header → 全部六条路由 403(不是绕过, 是明确拒绝):');
+console.log('[test] ② ADMIN_SECRET_FUNDS 已设 + 不带 header → 全部七条路由 403(不是绕过, 是明确拒绝):');
 {
   process.env.ADMIN_SECRET_FUNDS = SECRET;
   const app = await buildApp();
@@ -97,7 +97,7 @@ console.log('[test] ③ ADMIN_SECRET_FUNDS 已设 + 带正确 header → 放行�
   await app.close();
 }
 
-console.log('[test] ④ /skills/upload 恒 404 —— 不受 env/header 影响(选项(b)硬下线, 与上面六条不同处置):');
+console.log('[test] ④ /skills/upload 恒 404 —— 不受 env/header 影响(选项(b)硬下线, 与上面七条不同处置):');
 {
   delete process.env.ADMIN_SECRET_FUNDS;
   const appNoEnv = await buildApp();
@@ -115,6 +115,6 @@ console.log('[test] ④ /skills/upload 恒 404 —— 不受 env/header 影响(�
 delete process.env.ADMIN_SECRET_FUNDS;
 
 console.log(fails === 0
-  ? '\n✅✅ ALL PASS — T-LOOPBACK-AUTHZ 六条路由三态(503/403/放行) + skills/upload 恒404 全绿'
+  ? '\n✅✅ ALL PASS — T-LOOPBACK-AUTHZ 七条路由三态(503/403/放行) + skills/upload 恒404 全绿'
   : `\n❌ ${fails} assertions failed`);
 process.exit(fails === 0 ? 0 : 1);
