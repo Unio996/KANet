@@ -28,16 +28,20 @@ import { buildPoolMerkleTree } from '../services/pool-merkle-v06.mjs';   // C2: 
 import { findExtractor, extractStructuredFields } from './oracle-evidence-extractors.mjs';   // verifyFrozenEvidence canonical fetch (J1)
 import { listShards } from './shard-allocator.mjs';                                          // C1 cross-shard iteration (单源, register/consolidate 同表)
 import { canonicalBetOrder, computeBetsRoot, payoutRoot as computeMerkleRoot } from './pool-payout-root.mjs';   // W2: committee 独立重算 betsRoot/refundRoot
-const _PREDICATE_COMMIT_REDEEM_OFFSET = 518;
-// 🔴 V2 offset(W2, J2 2026-07-07·NWT 实测 indexOf + 源码引用次数双证坐实, Bettor 批): PayoutShardV2.sil 多一个
-// closeZkTmplAnchor ctor 字段(+absorb/close_attest 的 validateOutputState 多 4 字段透传)→ 整个 ctor-常量池段系统性
-// 后移 +124B(predicate_commit/committee-check offset 全部受影响; state 区_PS_STATE_START/_PSV2_* 不受影响,
-// 那些已 byte-exact 测过)。双证: ①indexOf 在真实 3o6cs redeem 里搜 predicate_commit 命中 642(=518+124)
-// ②结构推导: .sil 源码 predicate_commit 被引用 2 次(close_attest/cancel_attest 各一次, 每次 tautology check
-// 内用 2 次), 4 份 inline copy(642/676 close_attest 一对, 2623/2657 cancel_attest 一对)——取每对第一份(642)
-// 跟 V1(518)同一"entry 内第一次出现"选取逻辑, 非巧合碰撞。V1/V2 两套常量按 ctx.resolutionRuleSpec.zk_native 显式选择
-// (同 silverc 双 binary 按族 pin 同款哲学), V1 路径(955 真实赢家)逐字节不变。
-const _PREDICATE_COMMIT_REDEEM_OFFSET_V2 = 642;
+import { deriveCommitteeCheckOffsets } from './committee-offset-derive.mjs';
+// 🔴 D-019 迁移(ledger 1224/1226/1233/1237/1239): 原本这里是 4 个硬编码绝对偏移常量
+// (_PREDICATE_COMMIT_REDEEM_OFFSET(_V2)=518/642、_PMR_COMMITTEE_CHECK_OFFSETS(_V2)=[1002,...]/
+// [1126,...])——实测证实这类常量会随 .sil 改动/编译器版本漂移而不报错地过期(D-019 迁移期间两族全部漂移，
+// 差了上万字节量级)。已改走 committee-offset-derive.mjs 的 deriveCommitteeCheckOffsets：每次调用对固定
+// git-tracked 源码用 D-019 pin 编译器现场编译+用 dispatch_tag 结构性定界，不再是需要人记得手动重量的
+// 数字。checked-in 参考值(旧常量的历史快照)单源移到 committee-offset-derive.mjs 的 _REFERENCE_OFFSETS，
+// 本文件不再各自维护一份(避免两处 "参考值" 互相漂移)。
+//
+// K-18 双闸独立性(NWT 1237③): 本文件(委员拒签闸)与 bshard-payout-family-coherence.mjs(probeStructural-
+// Signature)各自独立调用 deriveCommitteeCheckOffsets，且传入不同的 sentinel 常量——下面这两个 sentinel
+// 只属于本文件(拒签闸)专用，不与另一道闸共享，缓存 key 含 sentinel 天然保证两道闸各自触发真实独立派生。
+const _ENFORCE_PMR_SENTINEL = 'a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1';
+const _ENFORCE_PC_SENTINEL = 'c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2';
 const _hex32 = (s) => Buffer.from(blake2b(Buffer.from(s), { dkLen: 32 })).toString('hex');
 // canonical (A) 4-field ShardLeaf state splice (= pool-shard-register.spliceLeafState 单源, byte-equal to recompile, J2 已验)。
 // ⚠ landmine 修正(NWT 2026-07-07 实测坐实+紧急抓漏): 真 silverc/rusty-kaspa byte[](int,size) 对负数用
@@ -345,7 +349,7 @@ export async function _enforceCloseAttestCore(signRequest, ctx) {
   //    一样的信任边界——委员自己查的本地 DB, 绝不从 signRequest/proposal 读)。HTTP/feeMarket 两条既有分支逐字不动。
   // 🔴 V1/V2 offset 表按 ctx.resolutionRuleSpec.zk_native 显式选择(daemon-trusted, 已是 W2 既有信任边界), 不隐式推断。
   const _isV2Layout = ctx.resolutionRuleSpec?.zk_native === true;
-  const _predicateCommitOffset = _isV2Layout ? _PREDICATE_COMMIT_REDEEM_OFFSET_V2 : _PREDICATE_COMMIT_REDEEM_OFFSET;
+  const _predicateCommitOffset = deriveCommitteeCheckOffsets({ isV2: _isV2Layout, pmrSentinelHex: _ENFORCE_PMR_SENTINEL, pcSentinelHex: _ENFORCE_PC_SENTINEL }).predicateCommitOffset;
   const onChainCommit = String(psRedeemHex).slice(_predicateCommitOffset * 2, (_predicateCommitOffset + 32) * 2);
   const feeMarket = !!broker_pk;
   // B线落2(2026-07-12, NWT P1/P3): fee_rules 市场判别式 = 【载荷有无 feeRules】(Bettor 注1: 全文载荷携带
@@ -723,18 +727,15 @@ export async function verifyFrozenEvidence(predicate, proposedSnapshot, ctx = {}
 
 // ── C2-anchor: 从链锚 PS redeem 读 genesis-烤 poolMerkleRoot ──
 //   poolMerkleRoot 是 PayoutShard ctor byte[32] 常量, silverc inline 在每个 require(cXCur == poolMerkleRoot) 站点 (probe: 共 10×)。
-//   close_attest 5 委员 merkle 校验 = 5 个 inlined 副本 @ offsets 1002/1266/1530/1794/2058 (264B 等距, PUSH32 前缀)。
+//   close_attest 5 委员 merkle 校验 = 5 个 inlined 副本(264B 等距, PUSH32 前缀)。
 //   读这 5 个并 cross-check 必全相等 (任一不符 = 非-canonical .sil / silverc build-drift → throw fail-loud, 永不 wrong-pass)。
-//   ⚠ .sil-pinned (= offset-518 predicate_commit 同款 fragility): PayoutShard 22-arg shape。 .sil 变则 offsets 变 → cross-check
-//     自动 fail-loud (安全降级, 非静默错读)。J2 daemon 应优先用 ctx.onChainPoolMerkleRoot (scout 链读 PS state) 绕过 offset 依赖。
-const _PMR_COMMITTEE_CHECK_OFFSETS = [1002, 1266, 1530, 1794, 2058];
-// 🔴 V2 offset(W2, J2 2026-07-07·双证同 _PREDICATE_COMMIT_REDEEM_OFFSET_V2 一致坐实): close_attest 的 5 committee-check
-// inlined poolMerkleRoot copies, PayoutShardV2 因 ctor 常量池 +124B 后移到这组(cancel_attest 自己另一组
-// [3107,3371,3635,3899,4163] 今天 close_attest 路径用不到, 不在此表)。
-const _PMR_COMMITTEE_CHECK_OFFSETS_V2 = [1126, 1390, 1654, 1918, 2182];
+// 🔴 D-019 迁移(ledger 1224/1226/1233/1237/1239): offset 数字改走 deriveCommitteeCheckOffsets 运行时派生
+// (dispatch_tag 结构性定界，见文件头 import 处的完整说明)，不再是硬编码在这里的绝对偏移——checked-in
+// 参考值单源移到 committee-offset-derive.mjs 的 _REFERENCE_OFFSETS。J2 daemon 应优先用
+// ctx.onChainPoolMerkleRoot (scout 链读 PS state) 绕过 offset 依赖，本函数是那条路径不可用时的兜底。
 export function extractOnChainPoolMerkleRoot(psRedeemHex, isV2 = false) {
   const redeem = Buffer.from(String(psRedeemHex), 'hex');
-  const offsets = isV2 ? _PMR_COMMITTEE_CHECK_OFFSETS_V2 : _PMR_COMMITTEE_CHECK_OFFSETS;
+  const offsets = deriveCommitteeCheckOffsets({ isV2, pmrSentinelHex: _ENFORCE_PMR_SENTINEL, pcSentinelHex: _ENFORCE_PC_SENTINEL }).poolMerkleRootOffsets;
   const reads = [];
   for (const o of offsets) {
     if (redeem.length < o + 32 || redeem[o - 1] !== 0x20) {
