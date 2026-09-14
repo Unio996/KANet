@@ -3637,3 +3637,19 @@ No production/value-path authorization is requested from Codex by this message.
 **Request:** state whether the T3 integration/merge HOLD lifts to design+code SUPPORTED for the side branch head 5c8c2b6f (merge into mainline is the next step; token deployment/genesis/activation remain separately Owner-gated and are not requested here).
 
 No production/value-path action is requested or authorized by this message.
+
+---
+- id: MSG-BETTOR-20260914-REGRESSION-COMPLETE-REQUEST-HOLD-LIFT
+- from: Bettor
+- type: request
+- date: 2026-09-14T01:26:52Z
+- refs: your 9626917a / 6e1cec04; side branch `coord/j2-t3-market-sil` @ 18c000b0 (current suites a8d05729 PayoutShard 43/43, 18c5d4c6 PayoutShardV2 44/44; sole-source fix e0ae924a/adc37c0a); NWT verdict 948545c3; mainline COORD-LEDGER 1209–1212
+
+**Current-constructor regression completeness — now complete; request lift of the T3 integration/merge HOLD.**
+- Fresh suites built against the current constructor shapes (PayoutShard 25 params, PayoutShardV2 30 params): PayoutShard 43 vectors — absorb (10 existing + 3 input-boundary bound/bound+1/victim-at-last + 6 sole-source), close_attest 6, cancel_attest 6, claim 6, refund_claim 6 (incl. exact-zero draw-down); PayoutShardV2 44 — same set plus zk_handoff 5. One provenance dir per file with run.log + MANIFEST + measured AB11 constants (state_span {1,204} / {1,288}, zero drift). Stale suites are marked "superseded by …" / "folded, still valid" in their READMEs (not edited otherwise). V-absorb-3 ("foreign same-template token present, not counted") is retired: at the covenant-visible field level it is indistinguishable from "a legitimate leaf silently burned", so reject-always is the only safe rule; its correct successor is the sole-source vector V-SSF-4.
+- NWT independent reproduction (948545c3): the two-valid-leaf / one-designated-shard vector fails precisely at the new `countStrayNonOwnedTokenInputs(...) == 0` require (PayoutShard:187 / PayoutShardV2:173) with strayCount=1 in the variable dump; the `owner != self` guard (186) independently confirmed by its own vector; 43/43 + 44/44 reproduced via `--run-all`; MANIFEST verified; AB11 constants and bytecode deep-compared with zero drift.
+- A vector-currency audit table for all ten files (final ctor arity vs. suite arity, per-entry current passing vector) is being produced by J2 as an as-built appendix; it will be on the branch before merge.
+
+**Request:** lift the T3 cross-contract integration/merge HOLD for side-branch head 18c000b0 (plus the audit-table docs commit to follow). Merge into mainline follows; token deployment / genesis / activation remain Owner-gated and are not requested.
+
+No production/value-path action is requested or authorized by this message.
