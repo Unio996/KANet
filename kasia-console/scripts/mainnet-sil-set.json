@@ -1,9 +1,9 @@
 {
-  "_comment": "D-0xx 权威声明:当前主网集(T1代币+T3市场)是哪10个.sil,单一来源。收拢到 src/lib/sil-v1/ 的物理搬迁并入 (1317) 目录改名/合并运维窗执行,本文件是搬迁前后都成立的声明层(T4/任何自动化工具直接消费此文件,不靠文件名猜)。",
-  "schemaVersion": 1,
+  "_comment": "D-0xx 权威声明:当前主网集(T1代币+T3市场+票据)是哪11个.sil,单一来源。收拢到 src/lib/sil-v1/ 的物理搬迁并入 (1317) 目录改名/合并运维窗执行,本文件是搬迁前后都成立的声明层(T4/任何自动化工具直接消费此文件,不靠文件名猜)。2026-09-14 二次更新(Bettor 1338 发现):此前只声明 10 个,漏了 dust spent-once 票据合约——T3 provenance 里的 PoolSideStub(2).sil 是'替身实例'(covenant.singleton passthrough,无 authorize_spend,从未验过真票被 co-spend 消费),真正会被 register_append 铸出/被 claim_draw+refund_payout 真实消费的票据是 PoolSideTicket.sil(PoolSide_v08_shard.sil 的 §7 v1.0.0 语法迁移),补为第 11 条。",
+  "schemaVersion": 2,
   "declaredBy": "J2",
-  "declaredAt": "2026-09-14T11:20:00+07:00",
-  "sourceLedgerRef": "COORD-LEDGER (1325)/(1327)",
+  "declaredAt": "2026-09-14T18:30:00+07:00",
+  "sourceLedgerRef": "COORD-LEDGER (1325)/(1327)/(1338)",
   "physicalCollectionStatus": "PENDING — 与 (1317) 目录改名/合并运维窗合并执行,不在原型期做(Bettor 裁,见 1327 回复)",
   "contracts": [
     {
@@ -75,6 +75,13 @@
       "path": "src/lib/ShardLeaf_direct.sil",
       "sha256": "572eb53dc41447e9dfa8b38153de90c1de9b2764efcfaceba2bac1d0abc7f641",
       "bytes": 12705
+    },
+    {
+      "name": "PoolSideTicket",
+      "role": "T3 市场·dust spent-once 票据(register_append 铸出, claim_draw/refund_payout 经 authorize_spend(sig) 真实 co-spend 消费; PoolSide_v08_shard.sil §7 v1.0.0 语法迁移, ledger 1338 补漏)",
+      "path": "src/lib/sil-v1/PoolSideTicket.sil",
+      "sha256": "332c66d2fc8508eb36e44a57f7a29e821d0a7c1483f4996ba011631a0cac0437",
+      "bytes": 3330
     }
   ],
   "excludedLegacyExamples": [
@@ -83,5 +90,5 @@
     "src/lib/WinningsPool_v1.sil", "src/lib/*Probe*.sil", "src/lib/RootStub_probe*.sil",
     "src/lib/FoldNode*.sil", "src/lib/PoolLeaf*.sil", "src/lib/OracleStake_v1.sil"
   ],
-  "verifyCommand": "cd kasia-console/src/lib && sha256sum sil-v1/KanetTestToken.sil PayoutShard.sil PayoutShardV2.sil KanetTokenClaim.sil RefundClaim.sil CloseZkV2.sil RootClaim.sil RootClose.sil ShardLeaf.sil ShardLeaf_direct.sil"
+  "verifyCommand": "cd kasia-console/src/lib && sha256sum sil-v1/KanetTestToken.sil PayoutShard.sil PayoutShardV2.sil KanetTokenClaim.sil RefundClaim.sil CloseZkV2.sil RootClaim.sil RootClose.sil ShardLeaf.sil ShardLeaf_direct.sil sil-v1/PoolSideTicket.sil"
 }
