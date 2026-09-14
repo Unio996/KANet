@@ -143,6 +143,8 @@ entry mint(int amount, byte[32] to, byte to_scheme)：
 - ✅ 08:40Z 再一处（Owner 直令）：`tailscale set --auto-update=false` ⇒ `AutoUpdate: {Check: true, Apply: false}`（只提示不自动装）。
 - 🔴 **定时炸弹**：Tailscale 节点密钥 da9 `2026-12-24T15:29:54Z` / younio `2027-02-15` 到期 ⇒ 届时需人工重登录，与本次同形。**只能在 Tailscale 网页控制台 Disable key expiry（Owner）**；Bettor 入账本催办。
 - **RustDesk 实核**：服务在掉线 4 天里**一直在线**（09-10/11/12 每日与 `rs-ny.rustdesk.com` 通信；09-12 13:20 本地 `request_pk`×3 = 有人按 ID 尝试连入未成）；而 09-13 两次成功连入来源 = **younio 的 Tailscale IP**（`direct-server='Y'`）⇒ Owner 的 RustDesk 路径经 Tailscale、同断。**独立第二扇门 = RustDesk ID + 永久密码经官方中继**（登录界面即可用）。安全建议（Owner 拍）：关 `allow-remote-config-modification`、开 2FA、**AnyDesk 9.7.8 亦在 da9 作为服务运行 → 建议卸载只留 RustDesk**（同机 40 把 relay 私钥）。
+- ✅ 09:05Z Owner 直令已执行：`allow-remote-config-modification 'Y'→'N'`（两份配置；服务未重启——Owner 当时正经 RustDesk 在线，重启窗口落实）；**AnyDesk 已卸载**（服务/exe/进程/Uninstall 项/Run 键全 0），配置目录改名封存 `*.removed-20260914`。回执：inbox `2026-09-14T09-05Z-j1-DONE-da9-rustdesk-remoteconfig-off-anydesk-removed-owner-order.md`。
+- ⏸ 只能 Owner 做：RustDesk 2FA（GUI）；Tailscale 控制台 Disable key expiry（da9 + younio）；手机端存 RustDesk ID+永久密码。
 - NanoKVM 方案仍成立：它管"机器起不来"那一类，与本次不是同一病。
 
 ## 8. 本会话实测坐标（v1.0.0，只写 scratchpad，未入库）
