@@ -20,6 +20,7 @@
 1. **代币创建界面**：表单填 genesis 参数（对照 `kasia-console/src/lib/sil-v1/KanetTestToken.sil` 当前 ctor：`init_amount` / `init_owner` / `init_owner_scheme` 等），生成创世 P2SH 输出并广播。人类只需要填有意义的那几项（数量、名称/ticker 这类展示用元数据，链上没有的放 DB），其余协议级常量（`market_tmpl_suffix`、`max_ins/outs` 等）界面不暴露、后端钉死。
 2. **市场创建界面**：选一个已创建的代币 → 填市场参数（议题、结算方式、截止时间等）→ 生成市场创世。**T3 市场合约（PayoutShard/RootClaim 等）现在散落在 `docs/provenance/*` 和 worktree 里，没有收拢到 `src/lib/sil-v1/` 单一目录**——J2 第一步先把主网集 10 个 .sil 收拢成单一权威目录 + 列出每个合约真实 ctor 字段，这是界面能填什么的事实依据，不能靠猜。
 3. **下注/参与界面**：复用现有 `market.eta` / `market-v2.eta` / `my-markets.eta` 页面框架，接到新合约。
+   > 📌 **更正（2026-09-14 · KANet-UI 读源码发现 + Bettor 独立核实确认）**：`market.eta`/`market-v2.eta` 实为 OTC/exchange 订单簿页面（KAS↔USDT 买卖盘，Bettor 独立读源码确认：`market-v2.eta` 含"卖出 KAS"/"买入 KAS"/价格(USD) 字段，与预测市场下注无关）。真正对应"下注/参与"与"结算/领取"的既有页面是 `predictions.eta`（列表）+ `predictions-pool-detail.eta`（详情+下注+claim，Bettor 核实其源码含 oracle 审计/YES-NO/claim 相关内容）。§1.3/§1.4 以此订正为准，详见 `docs/2026-09-14-kanetui-token-market-prototype-v0-wireframe.md`。
 4. **结算/领取界面**：复用/扩展 `my-markets.eta`，显示 claim 状态与操作。
 5. UI 一律复用 console 现有 `.eta` 模板体系与配色，不引入新前端框架。
 
