@@ -1,6 +1,8 @@
-# D-019 pin 修补部署执行页 v0.1（2026-09-14 · KANet-UI · Bettor 1228 预派 · 只写不执行）
+# D-019 pin 修补部署执行页 v0.2（2026-09-14 · KANet-UI · Bettor 1228 预派 · 只写不执行）
 
 > **Status: DRAFT**。权威链：`docs/2026-09-14-j2-d019-silverc-v100-migration-inventory-v0.1.md`（`051af204`，侧分支 `coord/j2-t4-genesis-compare`）+ `docs/2026-09-14-kanetui-mainnet-closezkv2-genesis-autotrigger-audit-v0.1.md`（本人 `3e749698`，确认当前无自动触发面）+ `docs/2026-09-14-kanetui-silverc-v100-versioned-copy-plan-v0.1.md`/provenance `66086cb6`（二进制已就位）。**本页只写方案，不执行**——执行门：本页 → NWT 审 → **前置条件（§0）满足** → Bettor 一声令下 → 执行。
+>
+> **v0.2 变更（Bettor 1230 裁定 v0.1 两处缺口）**：①三个 `ZK_*_TMPL_HASH` env **本次部署保持未设**——它们只在市场创建/`zk_handoff` 调用时读且 fail-loud，未设 = 创世路径关闭，正是 `3e749698` 无自动触发面结论要的守卫；真值等 T4 工具（J2 第 6 笔）落码、由单源产物算出后再另行决定何时写入。§2② 按此改写，v0.1 那版"取值来源待定"的分析不再是阻断本次部署的问题——**本次部署的范围缩小为只换编译器路径（`SILVERC_V100_PATH`已就位）+ 换调用点代码，不涉及给这三个新字段赋真值**。②J2 会在 5b/5c 加开机期自检 LOUD 日志（`SILVERC_V100_PATH` 已设时跑两项校验，打印 PASS/FAIL + sha256 前 16 位 + 黄金样本结果）——§2⑤ 按这行改写，**确切字符串待 Bettor 后续给出，本页先占位、字符串一到立即补**。时序提醒（基线 `relay_nodes` 按执行当天实际值记）已在 v0.1 写法里体现，本版不变。
 
 ## 0. 前置条件（Bettor 1228 原话，本页照录为阻断条件，不代为判定是否满足）
 
@@ -18,20 +20,13 @@
 ### ① 主检出 `git pull --ff-only`
 共享检出模型下，若合入发生在本地 `.git`（同 Bettor 之前的合入模式），本步骤可能同前几次部署一样发现本地已经在合入后的头上——执行时按实际 `git fetch` + `git rev-parse HEAD`/`origin/<branch>` 核实，不假设一定需要真的 pull。
 
-### ② `kanet.mainnet.env` 补三个新 env
+### ② 三个新 env **本次部署保持未设**（v0.2 Bettor 1230 裁定，v0.1 这里原写"补三个新 env"已作废）
 
-**键名已确认**（本人直接 `git show 051af204` 核实 diff，非转述）：
-```
-ZK_TOKEN_TMPL_HASH=<待定>
-ZK_CLAIM_TMPL_HASH=<待定>
-ZK_MARKET_SUFFIX_HASH=<待定>
-```
-三个键均在 `api/pool.js` `_resolveZkNativeCtorExtras`（两处调用）与 `bshard-close-transport.mjs` `buildZkHandoffRequestV2` 里 fail-loud 校验（`if (!process.env.X) throw`），同 `ZK_GATE_TMPL_HASH`/`ZK_CLOSEZK_SIL_PATH` 既有纪律一致。
+**键名已确认**（本人直接 `git show 051af204` 核实 diff，非转述）：`ZK_TOKEN_TMPL_HASH`/`ZK_CLAIM_TMPL_HASH`/`ZK_MARKET_SUFFIX_HASH`，均在 `api/pool.js` `_resolveZkNativeCtorExtras`（两处调用）与 `bshard-close-transport.mjs` `buildZkHandoffRequestV2` 里 fail-loud 校验（`if (!process.env.X) throw`），同 `ZK_GATE_TMPL_HASH`/`ZK_CLOSEZK_SIL_PATH` 既有纪律一致。
 
-🔴 **取值来源目前待定，不是本页疏漏，是真实依赖第 5 笔**：迁移盘点文档 `051af204` §3 原话"D-019 锚点摘要...本文档不重复内嵌数值"——三个值的权威来源是"用 D-019 单源编译器把 T4 相关 `.sil` 模板各编一次拿到的 `template_hash`"，而**这套编译对照工具本身**（`t4-genesis-compare.mjs`/`assertGenesisTemplatesCoherent`，设计见 `e9fe9102`）截至本页写作时**只有方案、还没有落码**——这正是 §0 第 1 项"J2 第 5 笔"要交付的东西。**执行本步骤前必须先确认**：
-- 第 5 笔是否已经把三个真实哈希值以某种可核实的形式产出（例如落进一个新的 provenance 文件、或 `scripts/silverc-pin.json` 的姊妹文件）；
-- 如果第 5 笔只是把"计算这三个值"的工具/schema 适配层做好、但没有替这次特定的生产部署实际跑一遍算出数字——那么执行这一步之前还需要**先手动跑一次**这套工具，拿到三个真实值，不能假设第 5 笔顺带算好了。
-- **不接受用占位/全零/旧文档里黄金样本的全零 ctor 值顶替**——`scripts/silverc-pin.json` 的黄金样本 `RootClaim.sil` ctor 里这三个字段全零，那是"验证编译器能不能编"用的占位值，不是这次生产部署要用的真实值，两者用途完全不同，混用会让 genesis-mint 用错误的模板哈希烤进链上数据。
+**本次部署不写这三行**——Bettor 1230 裁定：这三个 env 只在市场创建/`zk_handoff` 调用时读且 fail-loud，**未设 = 创世路径关闭**，这正是本人 `3e749698`（无自动触发面结论）要的守卫效果的延续，不是绕过它。真值要等 T4 单源编译对照工具（`t4-genesis-compare.mjs`/`assertGenesisTemplatesCoherent`，设计见 `e9fe9102`，落码是"J2 第 6 笔"——v0.1 这里误认作"第 5 笔"要交付，v0.2 按 1230 原话更正为第 6 笔）落码、真的跑出权威哈希值之后，**另开一次独立的报备+写入动作**，不在本次部署里顺带做。
+
+**本次部署 ② 这一步的实际内容缩小为**：确认 `kanet.mainnet.env` 里这三行确实**不存在**（不是"忘了写"，是"确认过不该写"）——执行前跑一次 `grep -c "^ZK_TOKEN_TMPL_HASH\|^ZK_CLAIM_TMPL_HASH\|^ZK_MARKET_SUFFIX_HASH" kanet.mainnet.env`，应为 `0`，作为本次部署"创世路径确实保持关闭"这条前提的可核实证据，写进 §7 证据清单。
 
 ### ③ 重启前基线
 | 项 | 本页写作时的已知值（执行时必须重新核实，不能直接抄本页数字） |
@@ -48,15 +43,15 @@ ZK_MARKET_SUFFIX_HASH=<待定>
 
 ### ⑤ 重启后验证
 - 监听 `127.0.0.1:3202` under 新 PID。
-- 🔴 **"日志含 pin 自检（二进制 sha256 + 黄金样本）通过行"——本人已读 `assertSilvercV100Pinned`/`assertSilvercV100GoldenSample`（`coord/j2-t4-genesis-compare` 分支当前版本的 `pool-bshard-artifacts.mjs`）两个函数本身，目前是纯断言函数（校验不过 `throw`，校验过**没有**任何 `console.log`/`console.error` 输出）**——如果第 5 笔没有额外补一行"通过"日志，执行时可能根本看不到 Bettor 期待的这一行。执行前需要确认：第 5 笔是否新增了这行日志；如果没有，这一项验证要么改成"确认没有 pin 相关的 FATAL/throw 出现在 stderr"（反向确认，没报错=隐含通过），要么在部署前顺手加一行 `console.log`（如果加，走正常报备流程，不在部署当天临时加代码）。本页不假设一个可能不存在的日志字符串。
+- 🔴 **pin 自检 LOUD 日志（v0.2 改写，Bettor 1230②）**：J2 会在 5b/5c 加开机期自检——`SILVERC_V100_PATH` 已设时跑两项校验（二进制 sha256 比对 + 黄金样本 deep-equal），打印 PASS/FAIL + sha256 前 16 位 + 黄金样本结果。**确切字符串待 Bettor 给出，本条先占位**：拿到字符串后立即出 v0.3 补上精确 `grep` 判据，在此之前执行方需要向 Bettor 索取确切行文本再验收这一项，不能凭本页猜一个格式。
 - `migrate.js` 版本号确认已推进（对照③基线，`PRAGMA user_version` 或等价方式核实，具体命令按当时 `migrate.js` 实际暴露的核查方式）。
 - 10 个（或按③执行时实际数字）relay 重新被 health-monitor cron 拉起，`[relay-hotwallet-monitor] started`/`[relay-health-monitor]`（或对应初始化行）均出现。
 - 无 `FATAL`/`UNMET`/`MODULE_NOT_FOUND`（同既有验收惯例，≥65s 观察窗口）。
-- 补充一项本页新增、Bettor 原话没点名但逻辑上必须做的检查：**手动跑一次 §2 描述的三个新 env 的 fail-loud 校验路径**（不需要真的创建市场——可以是一次读代码确认 `process.env.ZK_TOKEN_TMPL_HASH` 等三行在新进程里确实读到了非空值，例如通过一个只读诊断脚本 `console.log(!!process.env.ZK_TOKEN_TMPL_HASH)` 而不是等某个真实调用点意外触发才发现漏配），因为 §1 已确认这些调用点当前不会被自动触发，**光靠"进程正常跑起来"这一件事本身证明不了三个 env 真的配对了**——env 写错/漏写不会让 console 启动失败，只会在未来某次真的创建 zkNative 市场时才报错，那时候可能已经不是"部署当天"这个容易回滚的时间点了。
+- 🔴 **v0.2 改写（因②已改为"保持未设"，原"验证三个 env 确实配对"这条不再适用，改成反方向确认）**：确认三个 `ZK_*_TMPL_HASH` 仍然是 unset（同 §2② 的 `grep -c` 核实一致，重启后再核一次防止部署过程中意外被写入），且 `3e749698` 描述的四层阻断在重启后的新进程上依然成立（尤其第②层"五个自治 cron unset"——本次部署不涉及改动 `kanet.mainnet.env` 里那五个 `*_ENABLED` 变量，理论上不受影响，但重启是状态重置点，习惯性复核一次比假设"应该没变"更可靠）。
 
 ### ⑥ 回滚
 两层（同热钱包部署执行页既有的"轻/重"两级回滚模式）：
-- **轻**（env 配错/新值有问题）：`kanet.mainnet.env` 把 `SILVERC_V100_PATH`/三个新 `ZK_*_TMPL_HASH`/`ZK_MARKET_SUFFIX_HASH` 改回执行前记录的值（或直接删掉新增的这几行，回到部署前的"零消费点、功能不启用"状态），重启 console。
+- **轻**（env 配错/新值有问题）：`kanet.mainnet.env` 把 `SILVERC_V100_PATH` 改回执行前记录的值（该行本次部署前已存在，见 provenance `66086cb6`，不是本次新写）；三个 `ZK_*_TMPL_HASH` 本次部署本来就不写（v0.2 ②），回滚层面没有这三行需要处理。重启 console。
 - **重**（代码本身有问题）：`git revert`（**不强推**，Bettor 原话，留给 Bettor 决定是否/何时推），回滚合入主线的那几笔提交，重启 console。
 - 两层回滚前都要先确认：回滚动作本身不会撞上 §1 提到的"当前无自动触发面"这条结论失效的场景（例如如果部署之后、发现问题之前已经有人手动创建了 zkNative 市场——这种情况回滚 env/代码不会撤销已经发生的链上动作，需要按当时实际状态单独评估，不是本页能预先写死的分支）。
 
@@ -64,8 +59,8 @@ ZK_MARKET_SUFFIX_HASH=<待定>
 落 `docs/provenance/<执行日期>-kanetui-d019-pin-deploy/`，同已有惯例（热钱包部署证据页格式）：
 - 旧/新 PID、③/⑤ 两组基线数字对照表。
 - `stdout`/`stderr` 独立副本（同 `docs/provenance/2026-09-14-kanetui-hotwallet-mainnet-deploy/` 的命名惯例，`console-mainnet-stdout-PID<新PID>.log`/`-stderr-...log`）。
-- 三个新 env 的**取值来源**记录（哪个工具/哪次编译产出的、谁跑的、对应哪个 provenance）——不只记"写了什么值"，还要记"这个值是从哪来的"，因为这正是本次部署跟以往几次最大的不同点（以前写的 env 值都是地址/数字上限这类容易独立核实的公开信息，这次是编译产物哈希，独立核实的方法本身也要留档）。
-- ⑤ 验证结论逐项对照。
+- **三个 `ZK_*_TMPL_HASH` 保持 unset 的证据**（v0.2 改写）：部署前后各一次 `grep -c` 结果（均应为 `0`），作为"创世路径确实保持关闭"这条前提的可核实记录——不是记录"值从哪来"（本次没有值），是记录"确实没写"。
+- ⑤ 验证结论逐项对照（含 pin 自检 LOUD 日志的实际截图/文本，等 v0.3 补上确切判据后按判据核对）。
 
 ## 3. 与其它待办的关系
 
