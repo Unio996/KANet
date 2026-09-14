@@ -5942,5 +5942,103 @@ export function runMigrations() {
     }
   }
 
+  // ── v206 (2026-09-14, J2, 原型 v0 代币/市场原型, 设计 docs/2026-09-14-j2-proto-v0-backend-api-design-v0.1.md
+  //   v0.1, Bettor GREEN-with-rulings): 完全隔离的新命名空间 `proto_*`(见设计稿 §3)——生产结算 daemon
+  //   (bshard-settle-daemon.mjs 等)硬编码查 pool_markets/market_shards/payout_shards/pool_bettor_sides,
+  //   与这五张新表零表名交集, 结构性碰不到, 不是运行时过滤。
+  //   proto_token_defs: 代币定义(纯 DB 展示层, 不对应任何链上实例, §2.1)。
+  //   proto_markets: 市场壳 + 当前 UTXO 指针 + 状态机, FK 指向一个 proto_token_defs(§2.2)。
+  //   proto_bets: 下注(铸筹码+register_append 两步复合动作的最终态, 含 orphaned_chip 终态, §2.3/§8-1/§8-2)。
+  //   proto_bet_intents: A/B 两步各自的 prepared/submitted/landed/ambiguous 状态机(§2.3.1, 照抄
+  //   submit-intent.mjs 哲学但独立 schema, 不改生产 submit_intents 表)。
+  //   proto_claims: claim/refund + withdraw 状态(§2.5/§2.6)。
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS proto_token_defs (
+      id                    TEXT PRIMARY KEY,
+      name                  TEXT NOT NULL,
+      ticker                TEXT NOT NULL,
+      description           TEXT,
+      default_denomination  INTEGER,
+      created_at            TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS proto_markets (
+      id                     TEXT PRIMARY KEY,
+      token_def_id           TEXT NOT NULL REFERENCES proto_token_defs(id),
+      question               TEXT,
+      deadline_ms            INTEGER NOT NULL,
+      min_bet                INTEGER NOT NULL,
+      seal_count             INTEGER NOT NULL DEFAULT 2,
+      committee_pubkeys_json TEXT NOT NULL,
+      committee_privkey_enc  TEXT NOT NULL,
+      rootclose_tmpl_hash    TEXT NOT NULL,
+      shardleaf_txid         TEXT,
+      shardleaf_vout         INTEGER,
+      rootclose_txid         TEXT,
+      rootclose_vout         INTEGER,
+      status                 TEXT NOT NULL DEFAULT 'betting'
+                               CHECK (status IN ('betting','sealed','resolved','cancelled')),
+      winning_side           INTEGER,
+      payout_root            TEXT,
+      created_at             TEXT NOT NULL,
+      updated_at             TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_proto_markets_token_def ON proto_markets(token_def_id);
+    CREATE INDEX IF NOT EXISTS idx_proto_markets_status ON proto_markets(status);
+
+    CREATE TABLE IF NOT EXISTS proto_bets (
+      id            TEXT PRIMARY KEY,
+      market_id     TEXT NOT NULL REFERENCES proto_markets(id),
+      bettor_pk     TEXT NOT NULL,
+      side          INTEGER NOT NULL,
+      stake         INTEGER NOT NULL,
+      mint_txid     TEXT,
+      mint_vout     INTEGER,
+      ticket_txid   TEXT,
+      ticket_vout   INTEGER,
+      stake_tx_id   TEXT,
+      status        TEXT NOT NULL DEFAULT 'pending'
+                     CHECK (status IN ('pending','chip_minted_pending_stake','confirmed','orphaned_chip')),
+      created_at    TEXT NOT NULL,
+      confirmed_at  TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_proto_bets_market ON proto_bets(market_id, status);
+
+    CREATE TABLE IF NOT EXISTS proto_bet_intents (
+      intent_key       TEXT PRIMARY KEY,
+      bet_id           TEXT NOT NULL REFERENCES proto_bets(id),
+      step             TEXT NOT NULL CHECK (step IN ('mint','append')),
+      depends_on       TEXT,
+      status           TEXT NOT NULL DEFAULT 'pending'
+                        CHECK (status IN ('pending','prepared','submitted','landed','ambiguous')),
+      prepared_txid    TEXT,
+      prepared_tx_json TEXT,
+      submitted_txid   TEXT,
+      landed_depth     INTEGER,
+      landed_at        TEXT,
+      last_error       TEXT,
+      created_at       TEXT NOT NULL,
+      updated_at       TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_proto_bet_intents_bet ON proto_bet_intents(bet_id, step);
+    CREATE INDEX IF NOT EXISTS idx_proto_bet_intents_status_updated ON proto_bet_intents(status, updated_at);
+
+    CREATE TABLE IF NOT EXISTS proto_claims (
+      id            TEXT PRIMARY KEY,
+      market_id     TEXT NOT NULL REFERENCES proto_markets(id),
+      bettor_pk     TEXT NOT NULL,
+      side          TEXT NOT NULL CHECK (side IN ('win','refund')),
+      amount        INTEGER NOT NULL,
+      claim_txid    TEXT,
+      claim_vout    INTEGER,
+      claimed_at    TEXT,
+      withdraw_txid TEXT,
+      withdrawn_at  TEXT,
+      created_at    TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_proto_claims_market ON proto_claims(market_id);
+  `);
+  console.log('[migrate] v206: proto_token_defs/proto_markets/proto_bets/proto_bet_intents/proto_claims 建表(原型 v0 隔离命名空间, pragma 守卫幂等).');
+
   console.log('[migrate] DB migrations complete.');
 }
