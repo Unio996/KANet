@@ -1,0 +1,7 @@
+pragma silverscript ^0.1.0;
+contract ReproEntry(int dummy) {
+    int x = dummy;
+    entry check(int out_k, byte[32] want) {
+        require(OpOutputCovenantId(out_k) == want);
+    }
+}
