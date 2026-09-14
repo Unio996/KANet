@@ -81,10 +81,78 @@ export function selectFeeUtxo(candidates, minRequiredSompi) {
   return sufficient[0];
 }
 
-export function assertChangeShape(changeSompi) {
-  if (changeSompi !== 0n && changeSompi < CONTINUATION_OUTPUT_SOMPI) {
-    throw new Error(`assertChangeShape: 找零 ${changeSompi} sompi 既不是 0 也不 >= ${CONTINUATION_OUTPUT_SOMPI}(dust 找零, 拒绝)`);
+// 🔴 找零形状选择(账本1427 Bettor 复核订正——原来的"必须 0 或 >=20M dust 门槛"与 (1404) 已定案的
+// 0.95 KAS 步骤B种子面值冲突, 真实迭代出来的找零≈15M 会被那条硬门槛拒到构造不出来)。20M 只是 KIP-9
+// U 形曲线上"比较省"的经验点, 不是节点规则——不该当成人为门槛写死。改成按真实成本二选一:
+//   (a) 带找零输出: net_loss = 那次真实 mass 算出来的 requiredFee(找零吸收了剩下的全部)。
+//   (b) 不留找零, 全部并入手续费: net_loss = 全部剩余(留在合约里的输出 + fee, 没有找零)。
+// 在"requiredFee(该形状自己的真实 mass) <= 实际支付的 fee"且"net_loss <= 动态上限
+// min(requiredFee×2, absFeeCapSompi, GLOBAL_ABS_FEE_CAP_SOMPI)"都成立的形状里选 net_loss 更小的那个；
+// 两个都不成立 ⇒ throw no_viable_change_shape, 报文带两种形状各自的数字。
+export const GLOBAL_ABS_FEE_CAP_SOMPI = 100_000_000n; // 1.0 KAS——镜像 kasia-relay/src/lib/covenant-broadcast.mjs 的同名常量, 两侧必须保持一致
+
+export function dynamicNetLossCeiling(requiredFeeSompi, absFeeCapSompi) {
+  let ceiling = requiredFeeSompi * 2n;
+  if (absFeeCapSompi < ceiling) ceiling = absFeeCapSompi;
+  if (GLOBAL_ABS_FEE_CAP_SOMPI < ceiling) ceiling = GLOBAL_ABS_FEE_CAP_SOMPI;
+  return ceiling;
+}
+
+/**
+ * @param {object} o
+ * @param {*} o.kaspa
+ * @param {string} o.network
+ * @param {bigint} o.leftoverSompi  Σin − 保留在合约里的输出总额(找零+fee 两者合计的"剩余额度", 未知谁占多少)
+ * @param {Function} o.buildTxWithChange  (changeSompi:bigint) => Transaction(未 finalize, 含找零输出)
+ * @param {Function} o.buildTxNoChange  () => Transaction(未 finalize, 无找零输出——剩余全部并入 fee)
+ * @param {bigint} o.absFeeCapSompi  该 kind 的 per-kind cap(来自 proto-v0-template-anchors.json 的 feeProfile[kind].cap)
+ * @returns {{includeChange:boolean, changeSompi:bigint, requiredFee:bigint, netLoss:bigint, ceiling:bigint, tx:*}}
+ */
+export function selectChangeShape({ kaspa, network, leftoverSompi, buildTxWithChange, buildTxNoChange, absFeeCapSompi }) {
+  if (leftoverSompi < 0n) throw new Error(`selectChangeShape: insufficient inputs(leftover=${leftoverSompi} < 0)`);
+
+  if (leftoverSompi === 0n) {
+    const tx = buildTxNoChange();
+    tx.finalize();
+    const requiredFee = computeRequiredFeeSompiOrThrow(kaspa, network, tx);
+    const netLoss = 0n;
+    const ceiling = dynamicNetLossCeiling(requiredFee, absFeeCapSompi);
+    if (requiredFee > netLoss || netLoss > ceiling) {
+      throw new Error(`selectChangeShape: no_viable_change_shape(zero-leftover) requiredFee=${requiredFee} netLoss=${netLoss} ceiling=${ceiling}`);
+    }
+    return { includeChange: false, changeSompi: 0n, requiredFee, netLoss, ceiling, tx };
   }
+
+  // 形状(a): 带找零。先占位建一次量 mass(与找零【值】无关, 只与结构有关), 再拿真实找零重建。
+  let shapeA = null;
+  const draftA = buildTxWithChange(leftoverSompi);
+  draftA.finalize();
+  const requiredFeeA = computeRequiredFeeSompiOrThrow(kaspa, network, draftA);
+  const changeA = leftoverSompi - requiredFeeA;
+  if (changeA >= 0n) {
+    const txA = buildTxWithChange(changeA);
+    txA.finalize();
+    const netLossA = leftoverSompi - changeA; // = requiredFeeA(找零吸收了剩下的一切)
+    const ceilingA = dynamicNetLossCeiling(requiredFeeA, absFeeCapSompi);
+    const okA = requiredFeeA <= netLossA && netLossA <= ceilingA;
+    shapeA = { includeChange: true, changeSompi: changeA, requiredFee: requiredFeeA, netLoss: netLossA, ceiling: ceilingA, tx: txA, ok: okA };
+  }
+
+  // 形状(b): 不留找零, 剩余全部并入 fee。
+  const txB = buildTxNoChange();
+  txB.finalize();
+  const requiredFeeB = computeRequiredFeeSompiOrThrow(kaspa, network, txB);
+  const netLossB = leftoverSompi; // 没有找零输出, 剩余全部计入 net_loss
+  const ceilingB = dynamicNetLossCeiling(requiredFeeB, absFeeCapSompi);
+  const okB = requiredFeeB <= netLossB && netLossB <= ceilingB;
+  const shapeB = { includeChange: false, changeSompi: 0n, requiredFee: requiredFeeB, netLoss: netLossB, ceiling: ceilingB, tx: txB, ok: okB };
+
+  const candidates = [shapeA, shapeB].filter((s) => s && s.ok);
+  if (!candidates.length) {
+    throw new Error(`selectChangeShape: no_viable_change_shape — withChange(requiredFee=${shapeA?.requiredFee ?? 'n/a(insufficient)'}, netLoss=${shapeA?.netLoss ?? 'n/a'}, ceiling=${shapeA?.ceiling ?? 'n/a'}) noChange(requiredFee=${requiredFeeB}, netLoss=${netLossB}, ceiling=${ceilingB})`);
+  }
+  candidates.sort((x, y) => (x.netLoss < y.netLoss ? -1 : x.netLoss > y.netLoss ? 1 : 0));
+  return candidates[0];
 }
 
 /**
@@ -117,9 +185,10 @@ export function scriptPublicKeyFromHex({ ScriptPublicKey }, hexStr) {
  * @param {string} o.shardLeafScriptPubKeyHex  computeMarketGenesisArtifacts().shardLeafDirect.scriptPubKeyHex
  * @returns {{txJson:string, expectedTxid:string, signInputIndices:number[], genesisOutputIndices:number[], continuationOutputIndices:number[]}}
  */
-export function buildMarketGenesisTxJson({ kaspa, network, feeUtxo, relayChangeScriptPublicKeyHex, shardLeafScriptPubKeyHex }) {
+export function buildMarketGenesisTxJson({ kaspa, network, feeUtxo, relayChangeScriptPublicKeyHex, shardLeafScriptPubKeyHex, absFeeCapSompi }) {
   const { Transaction, TransactionOutput, GenesisCovenantGroup } = kaspa;
   assertFixedOutputValue(GENESIS_OUTPUT_SOMPI, GENESIS_OUTPUT_SOMPI, 'market_genesis'); // 防未来重构悄悄换成算出来的值
+  if (typeof absFeeCapSompi !== 'bigint') throw new Error('buildMarketGenesisTxJson: absFeeCapSompi(bigint, feeProfile.market_genesis.cap) required');
 
   const feeUtxoSpk = scriptPublicKeyFromHex(kaspa, feeUtxo.scriptPublicKeyHex);
   const genesisSpk = scriptPublicKeyFromHex(kaspa, shardLeafScriptPubKeyHex);
@@ -135,40 +204,43 @@ export function buildMarketGenesisTxJson({ kaspa, network, feeUtxo, relayChangeS
   // 声明"output[outIdx] 的 covenant_id 由 input[authInputIdx] 的 outpoint 派生", 同 kasia-relay/src/lib/
   // p2sh.mjs:1878-1885 unlockBshardGenesisMintPayout 既有生产手法逐字一致(Bettor 1427 复核点名)。必须在
   // finalize()/签名之前调用——v1 sighash 把 covenant 字段焊进去, 顺序错了 sighash 就不对。
+  const mkOutputs = (changeSompi) => changeSompi === undefined
+    ? [new TransactionOutput(GENESIS_OUTPUT_SOMPI, genesisSpk)]
+    : [new TransactionOutput(GENESIS_OUTPUT_SOMPI, genesisSpk), new TransactionOutput(changeSompi, changeSpk)];
   const mkTx = (changeSompi) => {
     const t = new Transaction({
       version: 1,
       inputs: [mkInput(new Uint8Array(0))],
-      outputs: [
-        new TransactionOutput(GENESIS_OUTPUT_SOMPI, genesisSpk),
-        new TransactionOutput(changeSompi, changeSpk),
-      ],
+      outputs: mkOutputs(changeSompi),
       lockTime: 0n, subnetworkId: '0'.repeat(40), gas: 0n, payload: '',
     });
     t.populateGenesisCovenants([new GenesisCovenantGroup(0, [0])]);
     return t;
   };
 
-  const draft = mkTx(feeUtxo.value - GENESIS_OUTPUT_SOMPI); // 占位找零, 只为量 mass(与结构无关不看值)
-  draft.finalize();
-  const requiredFee = computeRequiredFeeSompiOrThrow(kaspa, network, draft);
-  const change = feeUtxo.value - GENESIS_OUTPUT_SOMPI - requiredFee;
-  if (change < 0n) throw new Error(`buildMarketGenesisTxJson: insufficient fee UTXO(${feeUtxo.value} < genesis ${GENESIS_OUTPUT_SOMPI} + fee ${requiredFee})`);
-  assertChangeShape(change);
+  const leftover = feeUtxo.value - GENESIS_OUTPUT_SOMPI;
+  const shape = selectChangeShape({
+    kaspa, network, leftoverSompi: leftover,
+    buildTxWithChange: (changeSompi) => mkTx(changeSompi),
+    buildTxNoChange: () => mkTx(undefined),
+    absFeeCapSompi,
+  });
 
   // shardLeafCovId: consensus 的 covenant_id(funding.outpoint, [outputIndices]) 是纯函数, 不需要上链
-  // 确认——本地就能算出、且不受后续找零值影响(与 draft/final 用哪次构造无关, 同一 outpoint+outIdx 恒定)。
+  // 确认——本地就能算出、且不受后续找零值影响(与哪个形状/找零值无关, 同一 outpoint+outIdx 恒定)。
   // 这就是 bet_mint 步骤A(KTT genesis)的 ownerCovIdHex 参数必须传的值——不能瞎填, 必须是这个市场
   // ShardLeaf_direct 实例真实的 covenant_id, 否则 register_append 的 scanOwnedTokenInputs()
   // (owner==OpInputCovenantId(this.activeInputIndex))永远扫不到这笔 KTT。
-  const shardLeafCovId = String(draft.outputs[0].covenant.covenantId);
+  const shardLeafCovId = String(shape.tx.outputs[0].covenant.covenantId);
 
-  const final = mkTx(change);
-  final.finalize();
   return {
-    txJson: final.serializeToSafeJSON(),
-    expectedTxid: final.id,
+    txJson: shape.tx.serializeToSafeJSON(),
+    expectedTxid: shape.tx.id,
     shardLeafCovId,
+    includeChange: shape.includeChange,
+    changeSompi: shape.changeSompi,
+    requiredFee: shape.requiredFee,
+    netLoss: shape.netLoss,
     signInputIndices: [0],
     genesisOutputIndices: [0],
     continuationOutputIndices: [],

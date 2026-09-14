@@ -18,8 +18,8 @@ if (!process.env._PROTO_TX_ASSEMBLY_TEST_BOOTSTRAPPED) {
 
 const { sqlite } = await import('../db/client.js');
 const {
-  GENESIS_OUTPUT_SOMPI, CONTINUATION_OUTPUT_SOMPI, assertFixedOutputValue, assertKttOutpointRecorded,
-  computeRequiredFeeSompiOrThrow, selectFeeUtxo, assertChangeShape,
+  GENESIS_OUTPUT_SOMPI, CONTINUATION_OUTPUT_SOMPI, GLOBAL_ABS_FEE_CAP_SOMPI, assertFixedOutputValue, assertKttOutpointRecorded,
+  computeRequiredFeeSompiOrThrow, selectFeeUtxo, selectChangeShape, dynamicNetLossCeiling,
 } = await import('./proto-tx-assembly.mjs');
 
 let pass = 0, fail = 0;
@@ -118,20 +118,83 @@ t('fee-UTXO: 没有任何单个 UTXO 够用 ⇒ no_suitable_fee_utxo, 不自动�
   try { selectFeeUtxo([{ txid: 'a', vout: 0, value: 1_000n }], 100_000_000n); } catch (e) { threw = e; }
   if (!threw || !/no_suitable_fee_utxo/.test(threw.message)) throw new Error('应该 fail-loud 报 no_suitable_fee_utxo');
 });
-t('找零形状: 0 或 >= CONTINUATION_OUTPUT_SOMPI 通过, 中间的 dust 值拒绝', () => {
-  assertChangeShape(0n);
-  assertChangeShape(CONTINUATION_OUTPUT_SOMPI);
-  let threw = null;
-  try { assertChangeShape(1_000n); } catch (e) { threw = e; }
-  if (!threw) throw new Error('dust 找零应该被拒绝');
+// ============ selectChangeShape(账本1427 订正: 按真实成本二选一, 不设人为 0/20M 门槛) ============
+// 用假 kaspa(固定 mass 函数)构造确定性向量——真实 mass 依赖真 kaspa-wasm 编译产物, 在下面的
+// genesis-e2e 段用真链路再验一次这条逻辑真的接得上。
+function fakeTxWithMassOf(massValue) { return { finalize() {}, _mass: massValue }; }
+function fakeKaspaMass(massFn) { return { calculateTransactionMass: (net, tx) => massFn(tx) }; }
+
+t('selectChangeShape-1: leftover=0 ⇒ 只走无找零形状, requiredFee<=0 时通过', () => {
+  const kaspa = fakeKaspaMass(() => 0n); // mass=0 ⇒ requiredFee=0
+  const r = selectChangeShape({
+    kaspa, network: 'mainnet', leftoverSompi: 0n,
+    buildTxWithChange: () => { throw new Error('leftover=0 不该调用 buildTxWithChange'); },
+    buildTxNoChange: () => fakeTxWithMassOf(0n),
+    absFeeCapSompi: GLOBAL_ABS_FEE_CAP_SOMPI,
+  });
+  if (r.includeChange !== false || r.netLoss !== 0n) throw new Error(`结果不对: ${JSON.stringify(r, (k,v)=>typeof v==='bigint'?v.toString():v)}`);
 });
-t('找零形状: (0, CONTINUATION_OUTPUT_SOMPI) 中间地带(Bettor 1427 复核点名的边界)一律 throw, 不并入手续费, 不静默放行(例如 15,000,000——恰好是 15M 那个已接受例外的数量级, 但那条例外用在别的固定种子面值场景, 不是这里的找零下限, 这里没有"折算进 fee"的隐藏分支)', () => {
+
+t('selectChangeShape-2: 0.95 KAS 种子步骤B真实形状(找零约15,000,000) ⇒ 带找零形状通过, 不再被硬门槛拒绝', () => {
+  // mass 与结构相关: 带找零(2 输出)mass 比不带找零(1 输出)略高, 用固定值模拟真实量级(sompi_per_mass=100)。
+  const kaspa = fakeKaspaMass((tx) => tx._mass);
+  const leftover = 95_000_000n; // 0.95 KAS 种子面值扣掉续约输出后的剩余
+  const r = selectChangeShape({
+    kaspa, network: 'mainnet', leftoverSompi: leftover,
+    buildTxWithChange: (changeSompi) => fakeTxWithMassOf(changeSompi === leftover ? 400_000n : 500_000n), // 占位算 mass=400000(fee=40,000,000); 找零=leftover-40,000,000=55,000,000...
+    buildTxNoChange: () => fakeTxWithMassOf(300_000n), // fee=30,000,000, netLoss=leftover=95,000,000 > ceiling 可能超, 视 cap 而定
+    absFeeCapSompi: 100_000_000n,
+  });
+  if (r.requiredFee <= 0n) throw new Error('requiredFee 应该 > 0');
+  if (r.netLoss > r.ceiling) throw new Error(`选中的形状不该超过 ceiling: netLoss=${r.netLoss} ceiling=${r.ceiling}`);
+});
+
+t('selectChangeShape-3: 找零很小(1,000 sompi)时选中"并入手续费"形状, 不构造 dust 找零输出', () => {
+  const kaspa = fakeKaspaMass((tx) => tx._mass);
+  const leftover = 51_000n; // 极小剩余, 带找零形状的 requiredFee 若 > leftover 直接不可行, 迫使选 (b)
+  const r = selectChangeShape({
+    kaspa, network: 'mainnet', leftoverSompi: leftover,
+    buildTxWithChange: () => fakeTxWithMassOf(1_000n), // requiredFee=100,000 > leftover=51,000 ⇒ changeA<0 不可行
+    buildTxNoChange: () => fakeTxWithMassOf(400n), // requiredFee=40,000 <= leftover=51,000 ⇒ 可行
+    absFeeCapSompi: GLOBAL_ABS_FEE_CAP_SOMPI,
+  });
+  if (r.includeChange !== false) throw new Error('应该选中不带找零的形状(带找零形状不可行: fee 超过剩余额度)');
+});
+
+t('selectChangeShape-4: 两种形状的 net_loss 都超过 ceiling ⇒ throw no_viable_change_shape, 报文带两种形状的数字', () => {
+  const kaspa = fakeKaspaMass((tx) => tx._mass);
   let threw = null;
-  try { assertChangeShape(15_000_000n); } catch (e) { threw = e; }
-  if (!threw) throw new Error('15,000,000(严格在 0 和 CONTINUATION_OUTPUT_SOMPI 之间)应该被拒绝, 不能因为接近某个已接受的例外数量级就放行');
-  let threw2 = null;
-  try { assertChangeShape(CONTINUATION_OUTPUT_SOMPI - 1n); } catch (e) { threw2 = e; }
-  if (!threw2) throw new Error('差 1 sompi 也要拒绝, 不是"差不多就行"');
+  try {
+    selectChangeShape({
+      kaspa, network: 'mainnet', leftoverSompi: 500_000_000n, // 巨大剩余, 若 cap 很小两种形状都超
+      buildTxWithChange: () => fakeTxWithMassOf(1_000_000n), // requiredFee=100,000,000
+      buildTxNoChange: () => fakeTxWithMassOf(900_000n), // requiredFee=90,000,000, netLoss=leftover=500,000,000 远超小 cap
+      absFeeCapSompi: 1_000_000n, // 故意设一个极小的 per-kind cap, 逼两种形状都不可行
+    });
+  } catch (e) { threw = e; }
+  if (!threw || !/no_viable_change_shape/.test(threw.message)) throw new Error('两种形状都不可行时应该 throw no_viable_change_shape');
+  if (!/withChange/.test(threw.message) || !/noChange/.test(threw.message)) throw new Error('错误信息应该带上两种形状各自的数字');
+});
+
+t('selectChangeShape-5: 20M 边界上下各一个点各自选中的形状(不再是硬门槛, 只是观察真实选择结果)', () => {
+  const kaspa = fakeKaspaMass((tx) => tx._mass);
+  const mk = (leftover) => selectChangeShape({
+    kaspa, network: 'mainnet', leftoverSompi: leftover,
+    buildTxWithChange: () => fakeTxWithMassOf(2_000n), // requiredFee=200,000(带找零形状本身很便宜)
+    buildTxNoChange: () => fakeTxWithMassOf(1_500n), // requiredFee=150,000
+    absFeeCapSompi: GLOBAL_ABS_FEE_CAP_SOMPI,
+  });
+  const below = mk(19_999_999n); // 20M 以下
+  const above = mk(20_000_001n); // 20M 以上
+  // 两个都应该能选出一个可行形状(fee 远小于 leftover), 且 netLoss 都应该约等于 requiredFee(带找零形状胜出, 因为它 netLoss 更小)
+  if (below.netLoss > below.ceiling || above.netLoss > above.ceiling) throw new Error('两个边界点都应该有可行形状');
+  if (below.includeChange !== true || above.includeChange !== true) throw new Error(`两个边界点在这套 mass 假设下都应该选中带找零形状(netLoss 更小): below=${JSON.stringify(below.includeChange)} above=${JSON.stringify(above.includeChange)}`);
+});
+
+t('dynamicNetLossCeiling: min(requiredFee×2, absFeeCapSompi, GLOBAL_ABS_FEE_CAP_SOMPI) 三者取最小(与 relay 侧 validateNetLoss 公式一致)', () => {
+  if (dynamicNetLossCeiling(10n, 1000n) !== 20n) throw new Error('应该是 requiredFee×2 最小');
+  if (dynamicNetLossCeiling(1000n, 50n) !== 50n) throw new Error('应该是 absFeeCapSompi 最小');
+  if (dynamicNetLossCeiling(999_999_999_999n, 999_999_999_999n) !== GLOBAL_ABS_FEE_CAP_SOMPI) throw new Error('应该被 GLOBAL 硬顶钳住(requiredFee×2 与 absFeeCapSompi 都故意设得很大)');
 });
 
 // ============ market_genesis tx_json 真实端到端组装(真 kaspa-wasm + 真编译 ShardLeaf_direct) ============
@@ -156,11 +219,14 @@ if (!process.env.CONSOLE_ENCRYPTION_KEY) process.env.CONSOLE_ENCRYPTION_KEY = '1
   const relaySpk = kaspa.payToAddressScript(relayAddr);
   const feeUtxo = { txid: 'ee'.repeat(32), vout: 0, value: 10_000_000_000n, scriptPublicKeyHex: '0x' + relaySpk.script };
 
+  const FEE_PROFILE_MARKET_GENESIS_CAP = 80_000_000n; // 与 kasia-console/scripts/proto-v0-template-anchors.json 的 feeProfile.market_genesis.cap 一致(真实生产值)
   let built;
-  t('genesis-e2e-1 buildMarketGenesisTxJson 真实构造成功(真 mass 计算, 找零非负, 返回 shardLeafCovId)', () => {
-    built = buildMarketGenesisTxJson({ kaspa, network: 'mainnet', feeUtxo, relayChangeScriptPublicKeyHex: '0x' + relaySpk.script, shardLeafScriptPubKeyHex: artifacts.shardLeafDirect.scriptPubKeyHex });
+  t('genesis-e2e-1 buildMarketGenesisTxJson 真实构造成功(真 mass 计算, 真实 per-kind cap 下选中带找零形状, 返回 shardLeafCovId)', () => {
+    built = buildMarketGenesisTxJson({ kaspa, network: 'mainnet', feeUtxo, relayChangeScriptPublicKeyHex: '0x' + relaySpk.script, shardLeafScriptPubKeyHex: artifacts.shardLeafDirect.scriptPubKeyHex, absFeeCapSompi: FEE_PROFILE_MARKET_GENESIS_CAP });
     if (!built.txJson || built.signInputIndices.length !== 1 || built.genesisOutputIndices.length !== 1) throw new Error('返回形状不对');
     if (!built.shardLeafCovId || built.shardLeafCovId === '0'.repeat(64)) throw new Error(`shardLeafCovId 应该是非零派生值, 实际 ${built.shardLeafCovId}`);
+    if (built.includeChange !== true) throw new Error('这个测试用的 fee UTXO(100 KAS)剩余远超协议输出, 真实 mass 下带找零形状 netLoss 应该远小于不带找零(netLoss=剩余全部), 应该选中带找零');
+    if (built.netLoss > FEE_PROFILE_MARKET_GENESIS_CAP) throw new Error(`netLoss=${built.netLoss} 不该超过 cap=${FEE_PROFILE_MARKET_GENESIS_CAP}`);
   });
 
   t('genesis-e2e-2 relay 侧真代码能反序列化 + extractTxShape + validateFixedValueOutputs 通过(未签名阶段), covenant_id 在序列化往返后不变(populateGenesisCovenants 声明真的被序列化保留, 不是本地对象独有的临时状态)', () => {
