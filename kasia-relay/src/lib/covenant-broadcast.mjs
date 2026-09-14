@@ -134,6 +134,16 @@ export function validateNetLoss({ inputs, outputs, signInputIndices, relayScript
  * 不会绕过校验本身(校验逻辑与本函数完全解耦，见文件头分层说明)。字段来源核实:
  * kasia-console/src/lib/bshard-close-transport.mjs:422-423 —— input.utxo.amount(BigInt) /
  * output.value(BigInt) / output.scriptPublicKey，是本仓既有 covenant 构造代码已经在用的真实字段名。
+ *
+ * 🔴 接线 TODO(NWT 1355，必做，第一件事): `.scriptPublicKey.toString()` 转 hex 这个假设全仓零先例
+ * (NWT 用真实 wasm 对象没能验到底——其测试地址无效导致 wasm 崩溃，不是这里的问题，是没条件验)。接线
+ * 时必须先拿一个真实 kaspa-wasm Transaction 对象跑一遍，确认 `toString()` 吐出的格式与
+ * `relayScriptPubKeyHex`（这个值从哪来也要一并确认——大概率是 relay 自己地址算出的 ScriptPublicKey
+ * 走同一个 `.toString()`，两边必须用同一条转换路径，不能一边 `.toString()`、一边走别的 hex 转换）
+ * 能不能直接比对；若不能，改用 `bshard-close-transport.mjs` 里 `payToAddressScript()` 那条已验证过的
+ * hex 取法。**错的方向是过度拒绝**（比对失败 ⇒ 找不到"付回自己"的输出 ⇒ net_loss 算偏大 ⇒ 被
+ * `validateNetLoss` 拒绝广播）——fail-closed，不是资金风险，但会让接线当天所有 covenant_broadcast
+ * 请求都失败，必须第一件事就验证掉，不要等到广播失败了才去查。
  * @param {import('kaspa-wasm').Transaction} tx
  * @returns {{inputs: PlainInput[], outputs: PlainOutput[]}}
  */

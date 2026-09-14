@@ -46,7 +46,7 @@ t('SIC-6 未声明签名索引的输入不计入总额(只信声明,不猜)', ()
 });
 
 // ── validateNetLoss ────────────────────────────────────────────────────────
-t('NL-1 🔴 NWT 1352 绕过构造: 1 KAS 输入, 0.00001 KAS 回自己 + 0.99999 KAS 转走 ⇒ 必须拒(旧"存在性"表述挡不住的场景)', () => {
+t('NL-1 🔴 NWT 1352 绕过构造: 1 KAS 输入, 0.00001 KAS 回自己 + 0.99999 KAS 转走 ⇒ 必须拒(旧"存在性"表述挡不住的场景; 注: 1 KAS 输入在真实管线里会先被 SignedInputCeiling(0.5 KAS)拦下, 这里单独测 validateNetLoss 自身的逻辑, 见 NL-1b 测两道闸协同的真实场景)', () => {
   const oneK = 100_000_000n;
   const r = validateNetLoss({
     inputs: [{ amountSompi: oneK, scriptPubKeyHex: RELAY_SPK }],
@@ -55,6 +55,17 @@ t('NL-1 🔴 NWT 1352 绕过构造: 1 KAS 输入, 0.00001 KAS 回自己 + 0.9999
   });
   assert.strictEqual(r.ok, false, 'must reject the bypass construction');
   assert.ok(r.netLossSompi > 90_000_000n, `net_loss should be ~0.99999 KAS, got ${r.netLossSompi}`);
+});
+t('NL-1b 🔴 NWT 1355 真实管线场景: 签名输入 ≤ 0.5 KAS(不会先被 SignedInputCeiling 拦下)时同款绕过构造仍必须被 validateNetLoss 拒——两道闸协同, 不是只测函数单独逻辑', () => {
+  const halfK = SIGNED_INPUT_CEILING_SOMPI; // 恰好 0.5 KAS, 通过 SignedInputCeiling 检查
+  const sic = validateSignedInputCeiling({ inputs: [{ amountSompi: halfK }], signInputIndices: [0] });
+  assert.strictEqual(sic.ok, true, 'precondition: 0.5 KAS input must pass SignedInputCeiling in the real pipeline');
+  const r = validateNetLoss({
+    inputs: [{ amountSompi: halfK, scriptPubKeyHex: RELAY_SPK }],
+    outputs: [{ valueSompi: 1_000n, scriptPubKeyHex: RELAY_SPK }, { valueSompi: halfK - 1_000n, scriptPubKeyHex: OTHER_SPK }],
+    signInputIndices: [0], relayScriptPubKeyHex: RELAY_SPK, requiredFeeSompi: 3_000n,
+  });
+  assert.strictEqual(r.ok, false, 'must still be rejected by validateNetLoss even though it survives SignedInputCeiling');
 });
 t('NL-2 正常 covenant 花费: net_loss 恰等于 required_fee ⇒ 放行(NWT 1353 边界要求)', () => {
   const requiredFee = 789_800n; // NWT 1353 实测 settle_consensual 真实量级
