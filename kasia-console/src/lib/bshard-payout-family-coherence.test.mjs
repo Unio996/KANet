@@ -2,18 +2,16 @@
 // (docs/2026-07-21-p2-batch1-truth-source-layer-k18-landing-design.md, §4 DoD item 1): probeStructuralSignature/
 // classifyPayoutShardFamily/assertPayoutShardCoherence/assertZkNativeImmutable.
 //
-// Environment honesty note (matches established precedent, bshard-consolidated-pool-rederive.test.mjs comment):
-// compilePayoutShardRedeem/V2Redeem shell out to a pinned silverc binary (D:/silverscript/versioned-builds/)
-// that is NOT present on this machine (J1tn's isolated :3300 node — confirmed via `ls`, same gap already
-// documented for the K-18 backfill dry-run scripts). Tests that exercise probeStructuralSignature/
-// assertPayoutShardCoherence's steps (a)(b)(d) (the zero-subprocess, high-frequency-tier path — arguably the
-// MORE load-bearing path to verify, since it runs on every bet) use hand-crafted deterministic byte fixtures
-// and need no silverc. Only assertPayoutShardCoherence's tier='full' step (c) for v1_committee still needs
-// real recompile — it detects silverc absence and SKIPs with an explicit reason rather than faking a pass;
-// when this file runs on a machine with silverc pinned (KANet-UI's/J2's, per DoD item 3 "装载后活代码复跑"),
-// that block executes for real instead of skipping. classifyPayoutShardFamily no longer needs silverc at all
-// (P2 batch2 §3, 2026-07-21: family classification now relies solely on probeStructuralSignature — recompile
-// byte-equal moved to being assertPayoutShardCoherence step (c)'s exclusive concern, not duplicated here).
+// 🔴 D-019 迁移(ledger 1224/1226/1233/1237/1239/1243/1246/1247)更正: 下面这段"环境诚实注记"原文描述的是
+// D-019 之前的状态(SILVERC_LEGACY_PATH 本机不存在, probeStructuralSignature 因此用手搓小 buffer 摆在硬编码
+// 小偏移(518/1002/642)上，不需要真编译)——D-019 迁移后 probeStructuralSignature 改走
+// deriveCommitteeCheckOffsets(真实 v1.0.0 编译产物 dispatch_tag 定界，偏移落在 ~16000+ 而不是几百/几千)，
+// 手搓小 buffer 在新偏移位置上根本没有数据(_hexAt 返回 null)——"零子进程/手搓即可"这个假设本身被 D-019
+// 迁移证伪，不是本次测试改错了。已把 buildFakeV1RedeemHex/buildFakeV2RedeemHex 改成调用真实
+// compilePayoutShardRedeem/V2Redeem(D-019 pin 二进制现在本机就有，不再是"本机没有 silverc"的环境)，产出
+// 真实编译的 redeem，其内部 predicate_commit/poolMerkleRoot 位置天然落在 deriveCommitteeCheckOffsets 会
+// 派生出的真实位置上——不再需要"往哪个固定偏移写字节"这个假设，两边(测试 fixture 与被测代码)现在共享
+// 同一个真相来源(真实编译器)，不会再因为"谁的偏移假设先过期"而各说各话。
 //
 // Run: cd kasia-console && node src/lib/bshard-payout-family-coherence.test.mjs
 import { execSync, spawnSync } from 'child_process';
@@ -35,7 +33,7 @@ const { sqlite } = await import('../db/client.js');
 const {
   probeStructuralSignature, classifyPayoutShardFamily, assertPayoutShardCoherence, assertZkNativeImmutable,
 } = await import('./bshard-payout-family-coherence.mjs');
-const { ensurePayoutShard, ensurePayoutShardV2 } = await import('./pool-shard-register.mjs');
+const { ensurePayoutShard, ensurePayoutShardV2, compilePayoutShardRedeem, compilePayoutShardV2Redeem } = await import('./pool-shard-register.mjs');
 const { randomUUID } = await import('node:crypto');
 
 let fails = 0;
@@ -54,29 +52,21 @@ const CTH = 'ff'.repeat(32);  // claim_tmpl_hash fixture
 const MSH = '12'.repeat(32);  // market_suffix_hash fixture
 const ROOT0 = '00'.repeat(32);
 
-// 🔴 事故修复(2026-07-21, NWT diff 审阻塞级抓漏坐实): 早前这里 buf[0]=0x08 是照抄
-// bshard-payout-family-coherence.mjs 原 decodeV1State() 的(错误)假设手搓的——marker 真实位置是
-// _PS_STATE_START=1(byte[1]), 不是 byte[0](KANet-UI 09:01 hex dump 对 ozzeu 行实测 byte[0] != 0x08 才
-// 坐实这个类型错误)。手搓 fixture 自己也把 buf[0] 设成 0x08 = 跟错误假设自证自洽, 这正是这个 bug 没被
-// 20+ 断言抓到的根因。现在 buf[0] 故意设成一个明确不是 0x08 的值(0x6b, KANet-UI 实测观察到的真实前导
-// byte——即使不是普适常量, 用真实观测值而非顺手挑的占位符, 且刻意跟 marker 值 0x08 不同, 用来验证
-// decodeV1State 真的不再依赖 buf[0] 的值), 真正的 marker 立在 buf[1]。
-function buildFakeV1RedeemHex({ consolidatedPool = 1000n, closed = 0, payoutRoot = ROOT0, predicateCommit = PC, poolMerkleRoot = PMR, totalLen = 1040 } = {}) {
-  const buf = Buffer.alloc(totalLen, 0x11);   // 0x11 filler (not 0x00) — catches "byte just happens to be zero" false positives
-  buf[0] = 0x6b;   // 前导 byte(KANet-UI 实测观察值, 非 0x08——证明本函数不再错误依赖这个位置)
-  buf[1] = 0x08;   // 真正的 PUSH8 marker(_PS_STATE_START=1)
-  buf.writeBigInt64LE(BigInt(consolidatedPool), 2);
-  buf.writeBigInt64LE(BigInt(closed), 11);
-  Buffer.from(payoutRoot, 'hex').copy(buf, 20);
-  Buffer.from(predicateCommit, 'hex').copy(buf, 518);
-  Buffer.from(poolMerkleRoot, 'hex').copy(buf, 1002);
-  return buf.toString('hex');
+// D-019 迁移: 两个函数名/参数形状保留(18 处既有调用点零改动)，内部改成真实编译(compilePayoutShardRedeem/
+// V2Redeem，D-019 pin 二进制)而不是手搓字节——理由见上方文件头新状态注记。真实编译产物里 byte[1] 天然是
+// state 区 PUSH8 marker(_PS_STATE_START=1，本 session 反复验证过的结构性事实，跟 ctor 值/字段数无关)，
+// decodeV1State 对它的既有断言(buf[1]===0x08)不需要跟着改。
+function buildFakeV1RedeemHex({ consolidatedPool = 1000n, closed = 0, payoutRoot = ROOT0, predicateCommit = PC, poolMerkleRoot = PMR } = {}) {
+  return compilePayoutShardRedeem({
+    poolMerkleRoot, predicateCommit, consolidatedPool: Number(consolidatedPool), closed, payoutRoot,
+    tokenTmplHash: TTH, claimTmplHash: CTH, marketSuffixHash: MSH,
+  });
 }
-function buildFakeV2RedeemHex({ predicateCommit = PC, totalLen = 700 } = {}) {
-  const buf = Buffer.alloc(totalLen, 0x22);
-  buf[0] = 0x6b;   // 同上, V2 结构签名探针本来就不检查 buf[0], 这里只是保持跟 V1 fixture 一致的"非 0x08"前导字节
-  Buffer.from(predicateCommit, 'hex').copy(buf, 642);
-  return buf.toString('hex');
+function buildFakeV2RedeemHex({ predicateCommit = PC, poolMerkleRoot = PMR } = {}) {
+  return compilePayoutShardV2Redeem({
+    poolMerkleRoot, predicateCommit, closeZkTmplAnchor: '99'.repeat(32), consolidatedPool: 1000,
+    tokenTmplHash: TTH, claimTmplHash: CTH, marketSuffixHash: MSH,
+  });
 }
 // deterministic fake p2sh (no kaspa-wasm needed — assertPayoutShardCoherence just needs the SAME function to
 // round-trip consistently between "stored payout_ps_addr" and "derived from stored redeem", not a real address).
@@ -197,7 +187,7 @@ console.log('[test] assertPayoutShardCoherence — covenant_family=unknown → �
 
 console.log('[test] assertPayoutShardCoherence — incoherent 行(实际是 V2 redeem 字节, declared covenant_family=v1_committee)→ 步骤(b) 结构签名拒, 不是 silent pass:');
 {
-  const v2RedeemBytes = buildFakeV2RedeemHex();   // 真实字节结构是 V2(predicateCommit@642), 不是 V1(@518)
+  const v2RedeemBytes = buildFakeV2RedeemHex();   // 真实字节结构(30 参数 ctor)是 V2, 不是 V1(25 参数 ctor)——V1 分支 decodeV1State 对 V2 字节的 state 区解码会失败
   const row = seedRow({ covenant_family: 'v1_committee', payout_redeem_hex: v2RedeemBytes, payout_ps_addr: fakeP2sh(v2RedeemBytes) });
   const r = assertPayoutShardCoherence(row, { p2sh: fakeP2sh, tier: 'cheap' });
   ok(r.ok === false && r.failedStep === 'b', `family 错配(V2 字节 declared V1) → 拒于步骤(b) (got ${sj(r)})`);
@@ -226,14 +216,26 @@ console.log('[test] assertPayoutShardCoherence(tier=full) — V2 declared 行(�
   ok(r.ok === true, `V2 full-tier 通过, 不因缺 silverc 而 FAIL (got ${sj(r)})`);
 }
 
-console.log(`[test] assertPayoutShardCoherence(tier=full) — V1 declared 行(步骤(c) 需要 recompile, 依赖 silverc)${HAVE_SILVERC ? '' : ' — 本机无 silverc, SKIP(见文件头说明, 交 KANet-UI 机器复跑)'}:`);
+console.log(`[test] assertPayoutShardCoherence(tier=full) — V1 declared 行, DB 列跟真实编译产物一致(步骤(c) recompile byte-compare 应该 PASS)${HAVE_SILVERC ? '' : ' — 本机无 silverc, SKIP(见文件头说明, 交 KANet-UI 机器复跑)'}:`);
 if (HAVE_SILVERC) {
+  // D-019 迁移后 fixture 本身就是真实编译产物(见文件头新状态注记), seedRow 默认 DB 列(PC/PMR/TTH/CTH/MSH)
+  // 与 buildFakeV1RedeemHex 默认 ctor 输入完全一致 → recompile 出的字节理应跟 payout_redeem_hex 逐字节相等。
+  // 这条从"hand-crafted 必然不等"翻转成"真实一致必然相等"(flip-expect, 同本 session 全程纪律), 覆盖 step(c)
+  // 的 happy path(以前从未被真正验证过, 因为 fixture 从来没是过真实编译产物)。
   const row = seedRow({ covenant_family: 'v1_committee' });
   const r = assertPayoutShardCoherence(row, { p2sh: fakeP2sh, tier: 'full' });
-  // hand-crafted fixture 不是真实 silverc 编译产物 → recompile 必然 byte-不等 → 步骤(c) 应该 FAIL(不是 crash)
-  ok(r.ok === false && r.failedStep === 'c', `hand-crafted fixture 非真实编译产物 → recompile byte-compare 正确识别不等, 拒于(c) (got ${sj(r)})`);
+  ok(r.ok === true, `DB 列与真实编译产物一致 → step(c) recompile byte-compare 通过 (got ${sj(r)})`);
 } else {
   skip('V1 full-tier recompile(silverc 不在本机, 见文件头环境说明)');
+}
+
+console.log(`[test] assertPayoutShardCoherence(tier=full) — V1 declared 行, token_tmpl_hash 列被改成跟 redeem 里实际烤入值不同的另一个合法 32B hex(step(b) 结构签名只查 predicate_commit/pool_merkle_root, 查不到这个漂移; 只有 step(c) 的 recompile 字节比对能抓到) → 应该 FAIL, 拒于(c)${HAVE_SILVERC ? '' : ' — 本机无 silverc, SKIP'}:`);
+if (HAVE_SILVERC) {
+  const row = seedRow({ covenant_family: 'v1_committee', token_tmpl_hash: '5a'.repeat(32) });
+  const r = assertPayoutShardCoherence(row, { p2sh: fakeP2sh, tier: 'full' });
+  ok(r.ok === false && r.failedStep === 'c', `token_tmpl_hash 列跟真实编译产物不一致(step(b) 查不到) → recompile byte-compare 正确识别不等, 拒于(c) (got ${sj(r)})`);
+} else {
+  skip('V1 full-tier recompile mismatch on ctor-only literal(silverc 不在本机)');
 }
 
 // ── P2 批2 §1: ensurePayoutShard/V2 早返回分支 non-blocking gate 接线(零 silverc 依赖, tier=cheap

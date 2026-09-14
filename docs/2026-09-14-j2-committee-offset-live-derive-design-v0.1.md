@@ -1,6 +1,81 @@
-# 委员校验 offset 运行时派生 — 实现方案 v0.1（docs，不写码，ledger 1224/1226/1233 派发）
+# 委员校验 offset 运行时派生 — 实现方案 v0.2（附录：真实产物归属顺序实测，ledger 1235/1237）
 
-> **Status**: DRAFT-FOR-REVIEW v0.1（2026-09-14 · J2 · 方向已由 NWT 定案 `7f6dacc4`：选项 (b) 运行时从编译
+> **Status**: v0.2 — NWT 已判 GREEN（`1ad41bb6`，ledger 1237），四点采纳意见见附录末尾，落码进行中（侧分支
+> `coord/j2-offset-live-derive`，基于 `b4afbf90`）。v0.1 正文原文不动，本次只加附录。
+
+## 附录 A（v0.2，ledger 1235）：真实产物验证"前 5/后 5"归属顺序（只读实测，未改任何 `.mjs`）
+
+**方法一（结构性，NWT 1237 裁定为主路径）：dispatch_tag 字节偏移定界**。v1.0.0 编译产物的
+`contracts[Name].entries[entryName].dispatch_tag` 是该 entry 的选择器 tag（hex）——实测确认这个 tag 的
+字节序列在完整 bytecode 里**精确出现 1 次**，其偏移即该 entry 的 dispatch 分支起点；把全部 entry 的 tag
+偏移排序，相邻两个之间的区间就是"这个 entry 的字节范围"。任何字段的 offset 落在哪个区间，即归属哪个
+entry——**运行时可验证，不依赖对源码声明顺序的假设**。
+
+**方法二（位置法，v0.1 提过、现在降为备选）**：假设"declaration 顺序 = 编译产物物理布局顺序"，取
+`indexOf` 全部命中里最小的 N 个当作"更早声明的那个 entry"。
+
+**实测数据（`PayoutShardV2.sil`，真实 D-019 pin 二进制，sentinel `aa`×32 for poolMerkleRoot / `77`×32
+for predicate_commit，占位 ctor，30 参数）**：
+
+```
+dispatch_tag 偏移（排序后）：absorb@292 < close_attest@15367 < cancel_attest@18820 < refund_claim@22233 < zk_handoff@27680
+poolMerkleRoot 10 处命中（PUSH32 哨兵全部通过）：
+  [17089,17385,17681,17977,18273]  ⊂ [close_attest@15367, cancel_attest@18820)  → 归 close_attest
+  [20510,20806,21102,21398,21694]  ⊂ [cancel_attest@18820, refund_claim@22233)  → 归 cancel_attest
+predicate_commit 4 处命中（PUSH32 哨兵全部通过）：
+  [16569,16603]  ⊂ [close_attest@15367, cancel_attest@18820)   → 归 close_attest
+  [19990,20024]  ⊂ [cancel_attest@18820, refund_claim@22233)   → 归 cancel_attest
+```
+
+**交叉验证（独立第三种方法，不依赖 dispatch_tag 也不依赖单纯"最小 N 个"假设）**：把 `PayoutShardV2.sil`
+的 `cancel_attest` entry 整段（源码第 330-444 行）物理删除后用同一 sentinel、同一 ctor 重新编译——
+
+```
+原始(含 cancel_attest): 10 处命中 [17089,17385,17681,17977,18273, 20510,20806,21102,21398,21694]
+删除 cancel_attest 后:   5 处命中 [17089,17385,17681,17977,18273]  —— 与原始"前 5"逐位节节byte-identical
+```
+
+删除**物理上更后面**的 `cancel_attest` 之后，**前 5 个 offset 完全不变**（不是"数值接近"，是 byte-exact
+相同）——这是最直接的因果证据：这前 5 个位置的字节，在 `cancel_attest` 存在与否两种情况下**编译产物完全
+一致**，说明它们确实不属于 `cancel_attest` 的编译输出，只能属于物理上更靠前的 `close_attest`。**方法一
+（dispatch_tag 定界）与方法二（位置排序）与这个独立删除实验**三者结论完全一致。
+
+**`PayoutShard.sil`（V1，25 参数）同一实验，结论一致**：
+
+```
+dispatch_tag 偏移：absorb@208 < close_attest@15241 < claim@18603 < cancel_attest@24008 < refund_claim@27370
+poolMerkleRoot: [16931,17227,17523,17819,18115] ⊂ [close_attest,claim) → close_attest
+                [25698,25994,26290,26586,26882] ⊂ [cancel_attest,refund_claim) → cancel_attest
+删除 cancel_attest(源码478-584行)后重编译: 5 处命中，与原始前5 byte-identical，验证通过。
+```
+
+**结论**：`_PMR_COMMITTEE_CHECK_OFFSETS(_V2)`/`_PREDICATE_COMMIT_REDEEM_OFFSET(_V2)` 现有硬编码常量的
+"前 N 个属于 close_attest、后 N 个属于 cancel_attest"这条既有假设——**在当前 v1.0.0 编译产物上成立，三种
+独立方法交叉验证一致**。落码时**主路径用 dispatch_tag 定界**（NWT 1237 裁：结构性、每次编译都重新验证，
+不会因为未来某次 `.sil` 改动使"声明顺序=物理顺序"这个隐含假设失效而悄悄错判），位置排序法保留作为
+（a）自检互证的第二条独立信号，（b）`entries` schema 若未来缺失 `dispatch_tag` 字段时的降级路径。
+
+## 附录 B（v0.2，ledger 1237）：NWT 四点采纳意见（落码执行清单）
+
+1. 五要点照 v0.1 正文方案（缓存/fail-closed/checked-in 参考值 WARN/predicate_commit 哨兵补齐/tripwire 重设计）不变。
+2. **"前 5/后 5"归属主路径改为 dispatch_tag 字节范围过滤**（见附录 A 方法一），位置排序法降为备选/互证；
+   两法在真实 v1.0.0 产物上结果一致的证据（附录 A）已入档。
+3. **K-18 双闸独立性**：`bshard-payout-family-coherence.mjs` 的 `probeStructuralSignature` 与
+   `bshard-close-enforce.mjs` 的拒签闸**各自独立调用同一个 `deriveCommitteeCheckOffsets` 本体**，不许一道
+   闸拿另一道闸算好的结果对象直接复用；两道闸各自传入**不同的 sentinel 常量**（独立计算，即使结果理论上
+   应该相同，这是故意的冗余设计，不是疏漏）。
+4. **缓存 key = (编译器 sha256, 源码 sha256)**，首次触发（冷启动/进程首次调用）必须真的走一遍编译+定位+
+   验证，不允许任何预置/硬编码的"跳过首次验证"捷径。
+
+**验收标准（落码完成的判据）**：
+- `payoutshardv2-offset-tripwire.test.mjs` 从 RED 变 GREEN。
+- 源码里不再有任何**用于计算**（不是"作为 checked-in 参考值摆着"）的硬编码绝对偏移数字。
+- 负向量至少 3 条：① 两次编译 sentinel 位置不一致（模拟 `.sil`/编译器不稳定）→ 拒绝；② 定位到的拷贝数量
+  不足预期（4 或 5）→ 拒绝；③ 二进制 sha256 不符 D-019 锚点 → 拒绝签名，不静默降级使用旧值。
+- V1（`@518`/`@1002`）与 V2（`@642`/`@1126...`）**一并**落码，不是只修 V2 留 V1 债。
+
+**分支纪律**：本次落码在 `coord/j2-offset-live-derive`（基于 `b4afbf90`，独立 worktree），与 T4 创世对照
+工具（`e9fe9102` 方案，`coord/j2-t4-genesis-compare`，已随 D-019 收尾关闭）**分开分支、分开提交**，不混。
 > 产物派生，绑 D-019 pin + 固定 git-tracked 源码路径，绝不从 `signRequest` 传入的产物派生。本稿只出方案，
 > 落码前 NWT 再审一遍。范围：`bshard-close-enforce.mjs` 的 `_PREDICATE_COMMIT_REDEEM_OFFSET`/`_V2` +
 > `_PMR_COMMITTEE_CHECK_OFFSETS`/`_V2` 四组硬编码常量，V1（`@518`/`@1002`）与 V2（`@642`/`@1126...`）**一并**

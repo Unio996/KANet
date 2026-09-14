@@ -4,6 +4,13 @@
 // costing "zero subprocess spawns" — this test makes that a checked property, not an assumed one (DoD item 7:
 // "not 'code doesn't call execFileSync' — needs real evidence").
 //
+// 🔴 D-019 迁移更正(ledger 1247 (e)): probeStructuralSignature(tier='cheap' 步骤(b), 这条早返回路径每次都
+// 会走到)现在调用 deriveCommitteeCheckOffsets 派生委员校验偏移——"零子进程"这个断言的准确措辞收窄成了
+// "启动预热后零子进程"(预热失败 = 首次调用一次性 spawn + WARN, 不是永久零)。本文件的判据因此也改成"先调
+// 用生产同一入口 warmupCommitteeOffsetCache 预热, 再验证预热之后的 N 次热路径调用是零子进程"——预热本身
+// 那一次 spawn 不计入热路径成本(它发生在 index.js 启动期, 不发生在每次下注请求里), 计时反证法(下方
+// 保留)只用来验预热后的稳态。
+//
 // 🔴 2026-07-21 rewrite (NWT diff review caught the first version's approach was vacuous): the original design
 // tried to patch `child_process`'s CJS exports (via createRequire) and assert execFileSync's call count stayed
 // at 0 across N calls, with a "sanity check" that called the patched reference directly to "prove" interception
@@ -46,7 +53,9 @@ if (!process.env._PSPERF_TEST_BOOTSTRAPPED) {
 }
 
 const { sqlite } = await import('../db/client.js');
-const { ensurePayoutShard, ensurePayoutShardV2 } = await import('./pool-shard-register.mjs');
+const { ensurePayoutShard, ensurePayoutShardV2, } = await import('./pool-shard-register.mjs');
+const { _K18_PMR_SENTINEL, _K18_PC_SENTINEL } = await import('./bshard-payout-family-coherence.mjs');
+const { warmupCommitteeOffsetCache } = await import('./committee-offset-derive.mjs');
 const { readFileSync } = await import('node:fs');
 const { fileURLToPath } = await import('node:url');
 const { randomUUID } = await import('node:crypto');
@@ -76,6 +85,24 @@ console.log('[test] static code-path check: assertPayoutShardCoherence step (c) 
   const registerLibPath = fileURLToPath(new URL('./pool-shard-register.mjs', import.meta.url));
   const registerSrc = readFileSync(registerLibPath, 'utf8');
   ok(/_checkCoherenceNonBlocking[\s\S]{0,400}tier: 'cheap'/.test(registerSrc), `_checkCoherenceNonBlocking (called from ensurePayoutShard/V2's early-return branch) textually passes tier:'cheap' in the live source`);
+}
+
+// ── D-019 迁移(ledger 1247e) 更正: probeStructuralSignature(tier='cheap' 步骤(b), 这条早返回路径每次都
+// 会走到)迁到调用 deriveCommitteeCheckOffsets 之后, "零子进程"这个前提本身改成了"启动预热后零子进程"
+// (预热失败 = 首次调用一次性 spawn + WARN, 见 committee-offset-derive.mjs/index.js 头注)。这个测试文件
+// 原先没有先预热就直接跑 N 次循环, 落到"首次调用真实 spawn 一次"的路径, 被下面的计时判据正确抓出 RED
+// (2026-09-14 复跑实测: 200 次循环均摊出 4.4ms/call, 远超安全边际 0.35ms —— 不是回归, 是这个测试原本就该
+// 在迁移后变红, 因为它验的性质(零子进程)从"任何时候"收窄成了"预热之后")。修法: 测试自己先调用生产环境
+// 同一入口 warmupCommitteeOffsetCache(用 K-18 gate 自己的哨兵, 跟 probeStructuralSignature 内部实际调用
+// deriveCommitteeCheckOffsets 时用的哨兵一致——同 index.js 挂载预热时的调用形状), 再跑 N 次循环——这样
+// 测的是"预热完成后"的稳态零子进程性质, 不是"从进程刚起来"那个必然要花一次 spawn 的性质(那次已经在
+// warmupCommitteeOffsetCache 自己身上花掉了, 不该记在热路径头上)。保留原有的真实 spawn 计时反证法。
+console.log('\n[test] 预热: 调用 warmupCommitteeOffsetCache(K-18 gate 自己的哨兵), 模拟 index.js 启动期挂载点, 之后热路径调用才应该是零子进程:');
+{
+  const results = warmupCommitteeOffsetCache([
+    { label: 'bshard-payout-family-coherence(K-18)-perf-test', pmrSentinelHex: _K18_PMR_SENTINEL, pcSentinelHex: _K18_PC_SENTINEL },
+  ]);
+  ok(results.every(r => r.ok), `预热两个 family(V1+V2) 均成功(got ${JSON.stringify(results)}) — 后续热路径调用应命中缓存`);
 }
 
 // ── (1) calibrated timing — the load-bearing evidence ───────────────────────────────────────────────────
