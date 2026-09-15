@@ -39,7 +39,7 @@
       "cap": "80000000",
       "_source": "docs/provenance/2026-09-14-j2-bet-mint-stepA-ktt-genesis-mass-fee-estimate/README.md（与 market_genesis 相同的结构性原因, 非假设照抄）"
     },
-    "bet_mint_step_b": {
+    "register_append": {
       "leafContinuationValue": "20000000",
       "kttContinuationValue": "20000000",
       "minFeeInputFaceValue": "95000000",
