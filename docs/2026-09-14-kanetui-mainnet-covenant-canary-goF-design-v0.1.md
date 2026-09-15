@@ -78,7 +78,13 @@ SELECT id, status FROM proto_bets WHERE status != 'confirmed';
 
 - Console 侧（`kasia-console/src/lib/proto-broadcast-ops.mjs`/`proto-leaf-state.mjs`）：`no_suitable_fee_utxo`、`leaf_state_drift`（`assertLeafStateMatchesChain`）、`held_ktt_drift`（`assertHeldKttOutpointMatchesChain`）、`market_append_in_flight`（`assertNoInFlightAppend`，ambiguous 存在时新的步骤不自动清）。
 - Console API 层（`proto.js`）：`proto_driver_disabled`（驱动未开启时的 409）。
-- Relay 侧（`kasia-relay/src/lib/covenant-broadcast-relay.mjs`）：拒签统一走 `COVENANT_BROADCAST <key> REJECTED (<reason>): <detail>` 这行日志前缀（grep `COVENANT_BROADCAST.*REJECTED` 能找到全部拒绝），细分 `code` 有 `fixed_value_output_mismatch`/`signed_input_ceiling_exceeded`/`sign_failed`/`txid_mismatch`/`fee_calc_failed`/`net_loss_exceeded`。
+- Relay 侧（`kasia-relay/src/lib/covenant-broadcast-relay.mjs`，逐行核过，**不是所有拒绝都带 "REJECTED"**）：
+  - **`REJECTED (<reason>): <detail>`** 格式的 5 个：`fixed_value_output_mismatch`（:130）、`signed_input_ceiling_exceeded`（:136）、`txid_mismatch`（:150）、`fee_calc_failed`（:158）、`net_loss_exceeded`（:170）。
+  - **不带 "REJECTED"** 的几种，日志措辞各不同：`not_proto_relay`（:68-69，执行权限门，日志是 `COVENANT_BROADCAST <key> DENIED: ...`）、`sign_failed`（:143-144，`... sign failed: ...`）、`prepared_ingest_failed`（:180-181，`... prepared receipt failed ...`）、`broadcast_failed`（:188-189，`... broadcast failed: ...`）。
+  - **执行时用更宽的前缀 `COVENANT_BROADCAST <key>` 去 grep**（不要只 grep `REJECTED`，会漏掉上面这几种）。
+  - **额外一个本页起草时发现、NWT 清单未列但跟 MUST① 残留清理直接相关的 code：`ingest_after_broadcast_failed`**（:96、:198，`... submitted receipt not recorded ...`）——这是**广播已经成功发出、只是本地回执记录失败**的情况，比 `prepared_ingest_failed`/`broadcast_failed`（这两者是广播动作本身没成功）更需要走 §4/§6b 的"链上核对、不删、报 Bettor"处理：交易大概率已经在链上，只是我们的 DB 可能没跟上。
+
+**这几个 code 里，`prepared_ingest_failed`/`broadcast_failed`/`ingest_after_broadcast_failed` 三者跟 §4/§6b 的残留清理直接相关——出现这三者中任一个，务必按那两节的分类处理（链上核对、不删、报 Bettor→Owner），不要因为"看着像是失败了"就直接删记录。
 
 ### 6b. 中止后同 §4 的收尾
 
