@@ -187,6 +187,7 @@ if (!process.env.CONSOLE_ENCRYPTION_KEY) process.env.CONSOLE_ENCRYPTION_KEY = '1
       ctorIntV100(2), ctorIntV100(MIN_BET), ctorBytes32V100(artifacts.rootCloseTmplHash), ctorBytes32V100('00'.repeat(32)),
       ctorBytes32V100(token_tmpl_hash),
       ctorIntV100(state.local_yes), ctorIntV100(state.local_no), ctorIntV100(state.count), ctorIntV100(state.pool_value),
+      ctorIntV100(artifacts.shardLeafOwnRedeemLen),
     ];
     const independentCompiled = compileSilV100('./src/lib/ShardLeaf_direct.sil', independentCtor, 'ShardLeaf_direct');
     const independentSpk = '0x' + p2sh(Buffer.from(independentCompiled.script));

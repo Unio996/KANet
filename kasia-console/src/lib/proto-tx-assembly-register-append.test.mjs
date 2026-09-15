@@ -74,7 +74,7 @@ const kttStateFieldCount = kttCompiled._raw.contracts.KanetTestToken.runtime_sta
   const currentState = { local_yes: 0, local_no: 0, count: 0, pool_value: 0 };
   const newState = { local_yes: SIDE === 0 ? STAKE : 0, local_no: SIDE === 1 ? STAKE : 0, count: 1, pool_value: STAKE };
 
-  const leafRedeem = computeShardLeafRedeemScript({ marketId: MARKET_ID, minBet: MIN_BET, sealCount: SEAL_COUNT, rootcloseTmplHash: genesisArtifacts.rootCloseTmplHash, state: currentState });
+  const leafRedeem = computeShardLeafRedeemScript({ marketId: MARKET_ID, minBet: MIN_BET, sealCount: SEAL_COUNT, rootcloseTmplHash: genesisArtifacts.rootCloseTmplHash, state: currentState, ownRedeemLen: genesisArtifacts.shardLeafOwnRedeemLen });
 
   // register_append 的真实 entryAbi(用当前 ctor 现编, 与 leafRedeem 同一份 ctor)——D-020: 10 参数, 无 stakeInIdx。
   const { ctorBytes32V100, ctorIntV100 } = await import('./pool-bshard-artifacts.mjs');
@@ -82,6 +82,7 @@ const kttStateFieldCount = kttCompiled._raw.contracts.KanetTestToken.runtime_sta
     ctorBytes32V100(MARKET_ID), ctorBytes32V100(ps_tmpl_hash), ctorBytes32V100(MARKET_ID),
     ctorIntV100(SEAL_COUNT), ctorIntV100(MIN_BET), ctorBytes32V100(genesisArtifacts.rootCloseTmplHash), ctorBytes32V100('00'.repeat(32)),
     ctorBytes32V100(token_tmpl_hash), ctorIntV100(0), ctorIntV100(0), ctorIntV100(0), ctorIntV100(0),
+    ctorIntV100(genesisArtifacts.shardLeafOwnRedeemLen),
   ];
   const sldCompiled = compileEntryAbi(SLD_PATH, sldCtor, 'ShardLeaf_direct');
   const registerAppendEntryAbi = sldCompiled._raw.contracts.ShardLeaf_direct.entries.register_append;
@@ -179,13 +180,14 @@ const kttStateFieldCount = kttCompiled._raw.contracts.KanetTestToken.runtime_sta
   const currentState = { local_yes: 20, local_no: 0, count: 1, pool_value: 20 }; // 第一笔下注(side=0,stake=20)落链后的状态
   const newState = { local_yes: currentState.local_yes, local_no: currentState.local_no + STAKE, count: currentState.count + 1, pool_value: currentState.pool_value + STAKE };
 
-  const leafRedeem = computeShardLeafRedeemScript({ marketId: MARKET_ID, minBet: MIN_BET, sealCount: SEAL_COUNT, rootcloseTmplHash: genesisArtifacts.rootCloseTmplHash, state: currentState });
+  const leafRedeem = computeShardLeafRedeemScript({ marketId: MARKET_ID, minBet: MIN_BET, sealCount: SEAL_COUNT, rootcloseTmplHash: genesisArtifacts.rootCloseTmplHash, state: currentState, ownRedeemLen: genesisArtifacts.shardLeafOwnRedeemLen });
 
   const { ctorBytes32V100, ctorIntV100 } = await import('./pool-bshard-artifacts.mjs');
   const sldCtor = [
     ctorBytes32V100(MARKET_ID), ctorBytes32V100(ps_tmpl_hash), ctorBytes32V100(MARKET_ID),
     ctorIntV100(SEAL_COUNT), ctorIntV100(MIN_BET), ctorBytes32V100(genesisArtifacts.rootCloseTmplHash), ctorBytes32V100('00'.repeat(32)),
     ctorBytes32V100(token_tmpl_hash), ctorIntV100(0), ctorIntV100(0), ctorIntV100(0), ctorIntV100(0),
+    ctorIntV100(genesisArtifacts.shardLeafOwnRedeemLen),
   ];
   const sldCompiled = compileEntryAbi(SLD_PATH, sldCtor, 'ShardLeaf_direct');
   const registerAppendEntryAbi = sldCompiled._raw.contracts.ShardLeaf_direct.entries.register_append;
