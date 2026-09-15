@@ -63,10 +63,26 @@ async function mineOne(payAddress) {
   const r = await rpc.submitBlock({ block, allowNonDAABlocks: true });
   return r;
 }
+async function probeMempoolMass(txid, label) {
+  // 🔴 账本1489 Bettor要求: kaspa-wasm本地calculateTransactionMass对v1交易的compute_budget计算
+  // 不完整(漏读.compute_budget()字段, wallet/core/src/tx/mass.rs已知TODO)——在mineOne确认之前查
+  // getMempoolEntry, 拿节点自己(真实共识层calc_non_contextual_masses, 完整算法)算出的权威mass,
+  // 与本地wasm计算值+J2手算值三方对照, 不只信客户端本地数字。
+  try {
+    const entry = await rpc.getMempoolEntry({ transactionId: txid, includeOrphanPool: true, filterTransactionPool: false });
+    const me = entry?.mempoolEntry ?? entry?.entry ?? entry;
+    const meKeysOnly = me ? Object.fromEntries(Object.entries(me).filter(([k]) => k !== 'transaction')) : me;
+    const txKeysOnly = me?.transaction ? Object.fromEntries(Object.entries(me.transaction).filter(([k]) => !['inputs', 'outputs'].includes(k))) : null;
+    console.log(`${label} 节点侧getMempoolEntry(去掉冗长sigScript, 只留元数据字段):`, JSON.stringify({ ...meKeysOnly, transactionMeta: txKeysOnly }, (k, v) => (typeof v === 'bigint' ? v.toString() : v)));
+  } catch (e) {
+    console.log(`${label} getMempoolEntry查询失败(可能已被立即confirm或字段不支持): ${e.message}`);
+  }
+}
 async function submitAndConfirm(tx, label, minerAddr) {
   console.log(`\n--- 提交 ${label}: txid=${tx.id} mass=${kaspa.calculateTransactionMass(NETWORK, tx)} ---`);
   const res = await rpc.submitTransaction({ transaction: tx, allowOrphan: false });
   console.log(`${label} submit result:`, JSON.stringify(res));
+  await probeMempoolMass(tx.id, label);
   await mineOne(minerAddr);
   console.log(`已挖1块确认 ${label}`);
   return res;
@@ -110,7 +126,11 @@ if (!chain.genesis) {
   // context.rs:78-89)必须走"tx.lock_time < 当前时间/DAA"这条真实分支才能通过——没有sequence旁路。
   // 生产真实市场deadline是问题设置的未来时间, 到了close_commit时早已过去, 这里为了在同一次session内
   // 立即验证, deadline_ms直接设成部署时刻之前, 模拟"已过截止时间"的真实市场。
-  const DEADLINE_MS = Date.now() - 3600_000;
+  // 🔴 本次审计复跑实测: -3600_000(1小时)缓冲在这个跑了很久、断续挖矿的simnet上不够——close_commit
+  // 被真实节点拒收"transaction input #0 is not finalized"(check_tx_is_finalized), 怀疑是
+  // PastMedianTime窗口(最近若干块的中位数)在稀疏挖矿场景下滞后于真实墙钟。放大缓冲到6小时更稳健
+  // (不影响结论本身——deadline只要"已经过去"即可, 缓冲大小不改变CLTV/finality规则本身)。
+  const DEADLINE_MS = Date.now() - 6 * 3600_000;
 
   const artifacts = await computeMarketGenesisArtifacts({ marketId: MARKET_ID, minBet: MIN_BET, deadlineMs: DEADLINE_MS });
   const genesisCap = loadFeeProfileCap('market_genesis');
@@ -573,6 +593,7 @@ if (chain.convertToRootclose && !chain.closeCommit) {
   console.log(`\n--- 提交 close_commit(决定性): txid=${shape.tx.id} mass=${kaspa.calculateTransactionMass(NETWORK, shape.tx)} ---`);
   const res = await rpc.submitTransaction({ transaction: shape.tx, allowOrphan: false });
   console.log('close_commit submit result(完整原文):', JSON.stringify(res, (k, v) => (typeof v === 'bigint' ? v.toString() : v)));
+  if (res && res.transactionId) await probeMempoolMass(shape.tx.id, 'close_commit');
 
   chain.closeCommit = {
     builder: '审计构造(committee签名走kaspa.createInputSignature, 同kasia-relay生产签名底层调用一致)',
@@ -892,6 +913,7 @@ if (chain.convertToClaim && !chain.claimDraw) {
   console.log(`\n--- 提交 claim_draw: txid=${shape.tx.id} mass=${kaspa.calculateTransactionMass(NETWORK, shape.tx)} ---`);
   const res = await rpc.submitTransaction({ transaction: shape.tx, allowOrphan: false });
   console.log('claim_draw submit result(完整原文):', JSON.stringify(res, (k, v) => (typeof v === 'bigint' ? v.toString() : v)));
+  if (res && res.transactionId) await probeMempoolMass(shape.tx.id, 'claim_draw');
 
   chain.claimDraw = {
     builder: '审计构造(full分支, ticket签名走kaspa.createInputSignature)',
@@ -1028,6 +1050,7 @@ if (chain.claimDraw?.accepted && !chain.spend) {
   console.log(`\n--- 提交 spend(最后一步): txid=${shape.tx.id} mass=${kaspa.calculateTransactionMass(NETWORK, shape.tx)} ---`);
   const res = await rpc.submitTransaction({ transaction: shape.tx, allowOrphan: false });
   console.log('spend submit result(完整原文):', JSON.stringify(res, (k, v) => (typeof v === 'bigint' ? v.toString() : v)));
+  if (res && res.transactionId) await probeMempoolMass(shape.tx.id, 'spend');
 
   chain.spend = {
     builder: '审计构造(赢家checkSig走kaspa.createInputSignature)',
@@ -1046,6 +1069,94 @@ if (chain.claimDraw?.accepted && !chain.spend) {
   console.log('\n=== 步骤8(spend, 全链最后一步)完成——结果已记录 ===');
 } else {
   console.log('\n=== 步骤8(spend)已完成或前置未就绪, 跳过 ===', chain.spend?.txid, 'accepted=', chain.spend?.accepted);
+}
+
+// ══════════════════ 步骤9(账本1490 Bettor派活): 输家ticket自我签名回收验证 ══════════════════
+// Bettor读PoolSideTicket.sil发现: entry authorize_spend(sig bettorSig){require(checkSig(...))}
+// 没有其它约束——输家自己应该随时可以authorize_spend把这张ticket的0.2 KAS花回relay地址, 不是
+// §0.14"永久锁死"。本步骤用输家(bet2, side=1/NO, 本轮市场YES赢)自己的真实私钥构造真实spend交易,
+// 真实simnet提交验证。
+if (chain.claimDraw?.accepted && !chain.loserTicketReclaim) {
+  const loserBet = chain.bet1.side === chain.closeCommit.newWinningSide ? chain.bet2 : chain.bet1;
+  console.log(`\n输家ticket回收验证: 输家=side${loserBet.side}(bettorPk=${loserBet.bettorPk.slice(0, 16)}...), 赢方=side${chain.closeCommit.newWinningSide}`);
+
+  const loserPriv = new kaspa.PrivateKey(loserBet.bettorPrivHex);
+  const ticketCtorLoser = [ctorBytes32V100(loserBet.bettorPk), ctorIntV100(loserBet.side), ctorIntV100(loserBet.stake), ctorBytes32V100(chain.genesis.marketId)];
+  const ticketCompiledLoser = compileSilV100(TICKET_PATH, ticketCtorLoser, 'PoolSideTicket');
+  const ticketScriptLoser = Buffer.from(ticketCompiledLoser.script);
+  const ticketEntryAbiLoser = ticketCompiledLoser._raw.contracts.PoolSideTicket.entries.authorize_spend;
+  const ticketSpkHexLoser = p2sh(ticketScriptLoser);
+  const ticketSpkObjLoser = scriptPublicKeyFromHex(kaspa, '0x' + ticketSpkHexLoser);
+  const ticketOutpointObjLoser = { transactionId: loserBet.ticketOutpoint.txid, index: loserBet.ticketOutpoint.vout };
+
+  const dummySig65HexLoser = '0x' + Buffer.alloc(65, 0).toString('hex');
+  function buildLoserTicketSigScript(sigHexWithPrefix) {
+    const act = encodeEntryActionGeneric(kaspa, ticketEntryAbiLoser, { bettorSig: sigHexWithPrefix });
+    return combineActionAndRedeem(kaspa, act, ticketScriptLoser);
+  }
+  const dummyLoserSigScript = buildLoserTicketSigScript(dummySig65HexLoser);
+
+  const relayAddrObj = new kaspa.Address(relayAddr);
+  const relaySpkObj = scriptPublicKeyFromHex(kaspa, '0x' + kaspa.payToAddressScript(relayAddrObj).script);
+
+  const ticketInput = {
+    previousOutpoint: ticketOutpointObjLoser, signatureScript: dummyLoserSigScript, sequence: 0n, sigOpCount: 0, computeBudget: PROTO_V0_COMPUTE_BUDGET,
+    utxo: { outpoint: ticketOutpointObjLoser, amount: GENESIS_OUTPUT_SOMPI, scriptPublicKey: ticketSpkObjLoser, blockDaaScore: 0n },
+  };
+  // 单输入自付: ticket自己的0.2 KAS面值覆盖自己的mass费(p=1普通输出, 不是covenant, storage mass
+  // 敏感度低——J2 §0.14b已修正过这条plurality判断), 不需要额外relay fee输入, 更贴近"输家自己独立操作,
+  // 不依赖relay"这个真实场景的语义。
+  const mkTx = (outputSompi) => new kaspa.Transaction({
+    version: 1,
+    inputs: [ticketInput],
+    outputs: [new kaspa.TransactionOutput(outputSompi, relaySpkObj)],
+    lockTime: 0n, subnetworkId: '0'.repeat(40), gas: 0n, payload: '',
+  });
+  // 🔴 真实实测发现: kaspa.calculateTransactionMass本地对这笔"单covenant输入(p=1)+单P2PK输出"的
+  // 极简交易严重低估——本地报mass=814, 但真实节点拒收报"compute mass 7750需要775000 fee"(本地数字
+  // 只有真实值的~1/9.5)。这与§0.14b观察到的"本地数字比节点高2-13k"是不同方向、不同量级的另一处
+  // kaspa-wasm本地mass计算不可靠的独立实例(交易形状差异很大: 那边是4输入的复杂covenant交易, 这里是
+  // 1输入的极简交易)——不再信本地数字做收敛, 直接用远高于观测门槛的固定fee(2,000,000 sompi, 约
+  // 观测门槛775,000的2.6倍)一次性构造, 用probeMempoolMass拿真实节点mass做最终记录依据。
+  const FIXED_FEE_SOMPI = 2_000_000n;
+  const outputGuess = GENESIS_OUTPUT_SOMPI - FIXED_FEE_SOMPI;
+  const finalTx = mkTx(outputGuess);
+  const finalFee = FIXED_FEE_SOMPI;
+  console.log('输家ticket回收 built: expectedTxid=', finalTx.id, 'output=', outputGuess.toString(), 'fixedFee=', finalFee.toString(), '(本地mass估算不可信, 见上方注释)');
+
+  const sig66 = kaspa.createInputSignature(finalTx, 0, loserPriv, kaspa.SighashType.All);
+  const sig65Hex = sig66.slice(2);
+  const realLoserSigScript = buildLoserTicketSigScript('0x' + sig65Hex);
+  if (realLoserSigScript.length !== dummyLoserSigScript.length) throw new Error(`输家ticket回收: 真实sigScript长度(${realLoserSigScript.length}) != 占位长度(${dummyLoserSigScript.length})`);
+  finalTx.inputs[0].signatureScript = realLoserSigScript;
+  finalTx.finalize();
+
+  let sumIn = 0n; for (const inp of finalTx.inputs) sumIn += BigInt(inp.utxo.amount);
+  let sumOut = 0n; for (const out of finalTx.outputs) sumOut += BigInt(out.value);
+  console.log('输家ticket回收 独立复算 implied fee:', (sumIn - sumOut).toString());
+
+  console.log(`\n--- 提交 输家ticket自我回收: txid=${finalTx.id} mass=${kaspa.calculateTransactionMass(NETWORK, finalTx)} ---`);
+  const res = await rpc.submitTransaction({ transaction: finalTx, allowOrphan: false });
+  console.log('输家ticket回收 submit result(完整原文):', JSON.stringify(res, (k, v) => (typeof v === 'bigint' ? v.toString() : v)));
+  if (res && res.transactionId) await probeMempoolMass(finalTx.id, '输家ticket回收');
+
+  chain.loserTicketReclaim = {
+    builder: '审计构造(输家自己checkSig, 单输入ticket自付mass费, 无relay fee输入)',
+    submitted: true, submitResult: res, txid: finalTx.id, loserSide: loserBet.side, reclaimedSompi: outputGuess.toString(),
+  };
+  saveChain();
+  if (res && res.transactionId) {
+    await mineOne(minerAddr);
+    console.log('✅ 输家ticket自我回收被真实simnet共识接受! 确认PoolSideTicket.sil无"永久锁死"约束——输家随时可authorize_spend取回0.2 KAS。');
+    chain.loserTicketReclaim.accepted = true;
+  } else {
+    console.log('❌ 输家ticket自我回收被真实simnet共识拒绝——见上方完整原始报错。');
+    chain.loserTicketReclaim.accepted = false;
+  }
+  saveChain();
+  console.log('\n=== 步骤9(输家ticket自我回收验证)完成——结果已记录 ===');
+} else {
+  console.log('\n=== 步骤9(输家ticket自我回收)已完成或前置未就绪, 跳过 ===', chain.loserTicketReclaim?.txid, 'accepted=', chain.loserTicketReclaim?.accepted);
 }
 
 await rpc.disconnect();

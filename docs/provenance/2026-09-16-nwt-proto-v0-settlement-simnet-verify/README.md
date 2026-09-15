@@ -225,9 +225,127 @@ node scripts/simnet/run-full-chain.mjs
 需已有一个持久化、已挖矿资金的 relay 测试身份（首次跑需要先完成资金准备步骤，脚本会在缺失时报错提示）。
 脚本对每一步都做幂等检查（`scratch/_nwt_simnet_chain.json` 记录进度），重跑会跳过已完成步骤。
 
+## 追加验证①：节点侧权威mass分维度抽核（账本1489/1490 Bettor要求，`probeMempoolMass`工具）
+
+**背景**：J2的结算设计v0.6（`docs/2026-09-16-j2-proto-v0-settlement-design-v0.1.md` §0.14b）用手算
+KIP-9公式给出"register_append真实margin约93.6%（比kaspa-wasm本地`calculateTransactionMass`看到的
+约89%更紧）"这个结论，理由是"kaspa-wasm本地mass计算漏算v1交易的`compute_budget`项"。Bettor要求用
+真实节点RPC（`getMempoolEntry`，不是本地wasm计算）逐维度（compute mass / storage mass / transient
+mass）抽核，margin按"最大那个维度/500,000"算，并注明每列对应哪个RPC字段。
+
+**方法**：新增`probeMempoolMass(txid, label)`函数（`run-full-chain.mjs`），在`submitTransaction`成功
+后、`mineOne`确认前，调用`rpc.getMempoolEntry({transactionId, includeOrphanPool:true,
+filterTransactionPool:false})`——此时交易仍在mempool里，节点已经对它做过完整的`calc_non_contextual_
+masses`真实共识层计算并存进mempool entry，取得的数字是节点自己算出来的权威值，不是我方本地估算。
+
+**RPC返回字段映射**（`getMempoolEntry`响应结构，逐字段核对过）：
+- `mempoolEntry.transaction.mass` — 本轮实测**始终等于**`mempoolEntry.transaction.storageMass`（8/9
+  笔样本无一例外）；未见独立的"transient mass"字段——**这个RPC不暴露transient mass**，若KIP-9协议
+  层确有这个独立维度，需要换一个更底层的RPC（或读源码确认是否只在特定场景才产生非零transient mass，
+  本轮未继续深挖，留作后续）。
+- `mempoolEntry.transaction.verboseData.computeMass` — 独立字段，与`mass`/`storageMass`不是同一个数
+  （第9笔样本里`computeMass`(7,750) > `mass`/`storageMass`(5,555)，证实两个维度确实各自独立计算，
+  `mass`字段不是`max(compute,storage)`合并值，而是单独就是storage mass；margin判定必须**分别**核对
+  两个维度各自是否超500,000，不能只看`mass`这一个字段）。
+
+**8步+1步节点侧权威mass表**（8步为§0.4的边界形状复现`min_bet=1/stake=1,999`，第9步为下方"追加验证②"
+的输家ticket自我回收；`margin`列取`max(storageMass, computeMass)/500,000`）：
+
+| # | 步骤 | storageMass(=`mass`字段) | computeMass | 二者较大值 | margin(较大值/500,000) | 本地kaspa-wasm mass(对照) |
+|---|------|---|---|---|---|---|
+| 1 | `market_genesis` | 200,013 | 8,083 | 200,013 | 40.00% | 200,013(完全一致) |
+| 2 | `register_append`#1 | 445,518 | 33,927 | 445,518 | **89.10%** | 448,342(高出2,824) |
+| 3 | `register_append`#2 | 435,969 | 44,198 | 435,969 | 87.19% | 445,350(高出9,381) |
+| 4 | `convert_to_rootclose` | 385,410 | 60,422 | 385,410 | 77.08% | 395,159(高出9,749) |
+| 5 | `close_commit` | 194,960 | 35,560 | 194,960 | 38.99% | 198,120(高出3,160) |
+| 6 | `convert_to_claim` | 384,865 | 48,618 | 384,865 | 76.97% | 394,977(高出10,112) |
+| 7 | `claim_draw` | 377,634 | 40,407 | 377,634 | 75.53% | 390,434(高出12,800) |
+| 8 | `KanetTokenClaim.spend` | 184,263 | 29,914 | 184,263 | 36.85% | 194,766(高出10,503) |
+| 9 | 输家ticket自我回收(见下) | 5,555 | **7,750** | **7,750**(compute占优) | 1.55% | 814(严重低估, 见下方说明) |
+
+**核心发现（订正J2 §0.14b的方向性结论）**：**全部7个非平凡步骤的节点权威mass都比本地kaspa-wasm数字
+更低**（低2,824-12,800不等），方向与J2"本地漏算compute_budget、真实值应该更高"的假设**相反**。
+`register_append`的真实margin是**87.19%-89.10%**，不是J2手算的93.6%——好消息是真实margin比J2估计的
+更安全，但§0.14b那张表的具体数字（尤其"93.6%"这个引用值）需要重新写，不能沿用手算结果。**倾向解释
+（供J2核实，不代下结论）**：本地`calculateTransactionMass`看起来已经内含一个接近storage mass的计算
+（不是"只有一个不完整的compute mass分量"），只是这个本地公式本身比真实KIP-9公式系统性偏高几千到
+一万出头个单位——这与"漏算compute_budget"是两件独立的事，可能是J2手算时把"本地基线本身有小偏差"
+和"漏算了一整项compute_budget"这两个问题合并成了一个，方向判断反了。
+
+**第9步的独立新发现**：本地`calculateTransactionMass`对这笔"单covenant输入(p=1)+单P2PK输出"的极简
+交易反过来**严重低估**（本地814 vs 节点真实7,750，本地只有真实值的约1/9.5）——与上面7步"本地略高"
+是**不同方向、不同量级**的另一处独立的kaspa-wasm本地mass不可靠实例（交易形状差异很大：那边是
+2-4输入的复杂covenant交易，这里是1输入的极简交易）。**结论：kaspa-wasm本地`calculateTransactionMass`
+在两种不同交易形状下都不可信，且偏差方向不统一（复杂covenant交易本地偏高，极简单输入交易本地偏
+低）——任何依赖本地数字做margin判断的代码，必须换成`getMempoolEntry`真实核对，不能假设本地数字
+有固定方向的偏差可以简单加减修正**。
+
+**结论对§0.14b的具体影响**：全部9笔（含追加验证）都远低于各自维度的500,000上限，"资金充足/mass全部
+安全"这个总结论不变；但§0.14b"register_append真实margin约93.6%"这句具体表述需要改成"87-89%
+（节点getMempoolEntry真实值，见本节）"，且"kaspa-wasm本地漏算compute_budget"这个归因需要重新表述为
+"kaspa-wasm本地mass计算与真实节点值有偏差，偏差方向随交易形状变化，不能假设单一修正方向"。
+
+## 追加验证②：输家ticket并非永久锁死——`authorize_spend`可自我回收（账本1490 Bettor读合约发现）
+
+**背景**：§0.14/§0.4曾把"输家ticket（0.2 KAS）在(A)路线执行完毕后永久锁死"记为一条产品问题
+（"要不要给输家ticket设计sweep回收路径"，见J2设计v0.4 §0.12选项组3）。Bettor直接读
+`PoolSideTicket.sil`发现该合约**唯一入口**是：
+
+```
+entry authorize_spend(sig bettorSig) { require(checkSig(bettorSig, pubkey(bettorPk))); }
+```
+
+没有其它约束——bettor自己随时可以用自己的私钥签名把这张ticket花掉，取回其中的0.2 KAS，不需要等
+`claim_draw`/`refund_payout`消费它，也不需要任何新增合约entry。
+
+**真实验证（本轮边界形状市场的输家ticket，bet2/side=NO/stake=999，本市场YES赢，bet2票是输家票）**：
+构造真实`authorize_spend`交易——单输入（该ticket UTXO）+单输出（0.2 KAS减fee转给relay测试地址），
+用bet2自己的真实私钥（`kaspa.createInputSignature`）签名，真实广播：
+
+- txid：`f86a9535a844b3bf5a36ebc870ace894104ecc7294af0c46448065a5f67b2e1d`
+- 节点侧mass：`storageMass=5,555`，`computeMass=7,750`（本轮唯一一笔compute mass占优的样本，见上表#9）
+- fee：2,000,000 sompi（固定给的、远高于观测门槛的值——本地mass预估在这个交易形状下不可靠，见上节）
+- 结果：**✅ simnet真实共识ACCEPT**，成功取回18,000,000 sompi（0.2 KAS减2,000,000 sompi fee）
+
+**结论：`PoolSideTicket.sil`当前代码没有"永久锁死"这回事**——这是**builder/流程设计缺口**（现有
+proto-v0结算流程从未构造过这笔`authorize_spend`交易，不是合约层面做不到），修法是**只需新增一个
+builder**（`buildTicketReclaimTxJson`或类似命名），**不需要改任何`.sil`文件**、不需要新增合约entry、
+不改变任何`_tmpl_hash`、不影响既有市场P2SH（这点与§0.8"要不要修合约"那类选项性质完全不同——这里
+根本不涉及合约变更）。
+
+**关于"提前花自己的ticket"的后果核实（Bettor第二问）**：读`RootClaim.claim_draw`/`RefundClaim
+.refund_payout`源码确认——两者都通过`readInputStateWithTemplate(ticketInIdx,...)`直接消费**当前这笔
+交易里作为输入提供的那个具体ticket UTXO**，市场的`pool_value`/`count`等聚合账目在`register_append`
+阶段就已经写死进`ShardLeaf_direct`/`RootClose`自己的state（不依赖任何ticket UTXO是否还存在于链上）。
+**结论：某个bettor提前（在`resolve`之前，或在`refund_flip`之后但在自己触发`refund_payout`之前）
+自行`authorize_spend`花掉自己的ticket，唯一后果是这个人自己放弃了该票日后的`claim_draw`/
+`refund_payout`资格（因为票已经不在了，没有UTXO可以再拿去做那笔交易的输入）——不影响其他任何
+bettor的资金或权利，也不影响`pool_value`/`winning_side`/`payout_root`等市场级账目（这些账目的权威
+来源是RootClose/RootClaim自己的state，不是ticket UTXO集合）**。这是一个纯粹的"个人选择放弃自己
+权益"场景，不构成安全问题，也不需要额外的合约层保护。
+
+**对J2设计文档的影响（J2待更新，本报告只提供验证证据）**：§0.12选项组3（"输家ticket永久锁死要不要
+设计回收路径"）与§0.14"永久锁死的dust"这条发现，需要改写为——不存在"永久锁死"，回收路径已经存在于
+合约层（`authorize_spend`），唯一缺的是backend/relay侧的一个builder（暴露"回收自己的ticket"这个
+操作给用户），不涉及任何`.sil`修改、不改变模板hash、不影响既有市场P2SH。
+
+## 测试环境说明（非共识规则，供后续复现者参考）
+
+本轮验证过程中，close_commit一度被真实节点拒收（`"transaction input #0 is not finalized"`），
+排查后确认**不是新的共识规则发现**，是**本机这个simnet的测试环境本身的问题**：该simnet节点在本次
+长会话里断续挖矿、稀疏出块（大量mint-loop批量挖矿与真实业务交易穿插，出块节奏很不均匀），怀疑其
+`PastMedianTime`窗口（最近若干区块时间戳的中位数，`check_tx_is_finalized`用它判断CLTV的`deadline`
+是否"已经真实过去"）在这种稀疏挖矿场景下**滞后**于真实墙钟——原本`DEADLINE_MS = Date.now() -
+3600_000`（1小时缓冲）在正常连续出块的场景下绰绰有余，但在本机这个断续挖矿数小时的simnet实例上
+不够。**修法**：把缓冲从1小时放大到6小时（`run-full-chain.mjs`当前值），问题消失，全部重跑通过。
+**这条只是本机测试环境的出块节奏问题，不是MUST-1记录的CLTV/节点finality规则本身有任何变化**——
+生产环境的真实市场deadline是以天为单位的真实业务截止时间，真实钱包/节点在正常持续出块下不会遇到
+这种"稀疏挖矿导致中位数滞后小时级"的情况，MUST-1的规则描述本身不需要改动。
+
 ## 文件清单
 
-- `kasia-console/scripts/simnet/run-full-chain.mjs` — 全链 8 步构造+签名+提交脚本（本报告的可执行来源）。
+- `kasia-console/scripts/simnet/run-full-chain.mjs` — 全链 8 步 + 输家 ticket 自我回收（第9步）构造+
+  签名+提交脚本，含 `probeMempoolMass` 节点侧权威 mass 抽核工具（本报告的可执行来源）。
 - `kasia-console/scripts/simnet/mine-loop.mjs` — simnet 出块循环（`skip_proof_of_work=true`，无需真实 PoW）。
 - `kasia-console/scripts/audit/generic-entry-witness.mjs` — 通用 entry witness ABI 编码器（J2 原作，账本1473，从 `coord/j2-proto-v0-settlement-design-v0.1` 分支同步，本轮依赖但未改动）。
 
