@@ -68,7 +68,6 @@ export function assertPayoutLeavesConserved(leaves, consolidatedPool) {
  * @param {number|string} o.consolidatedPool
  * @param {string} o.tokenTmplHash 真实 KanetTestToken 模板 hash(32B hex, T3 代币化新增字段, 不接受占位符)
  * @param {string} o.claimTmplHash 真实 KanetTokenClaim 模板 hash(32B hex, T3 代币化新增字段, 不接受占位符)
- * @param {string} o.marketSuffixHash 真实 market suffix 承诺 hash(32B hex, T3 代币化新增字段, 不接受占位符)
  * @returns {string} compiled redeem hex
  */
 // T-CLOSEZK-ATMS-WIDTH(ledger 1285/1291/1293/1297, NWT 4f659405 定案②)：独立、可单测的宽度断言——
@@ -94,17 +93,21 @@ export function assertSixByteEncodable(value, label) {
   }
 }
 
-export function compileCloseZkV2Redeem({ gateTmplHash, betsRootBaked, refundRootBaked, attestedAtMs, attestedWinner, consolidatedPool, tokenTmplHash, claimTmplHash, marketSuffixHash }) {
+export function compileCloseZkV2Redeem({ gateTmplHash, betsRootBaked, refundRootBaked, attestedAtMs, attestedWinner, consolidatedPool, tokenTmplHash, claimTmplHash }) {
   if (!/^[0-9a-f]{64}$/i.test(String(gateTmplHash || ''))) {
     throw new Error('compileCloseZkV2Redeem: gateTmplHash 必须是 32B hex');
   }
   assertSixByteEncodable(attestedAtMs, 'attestedAtMs');
   // 🔴 D-019 迁移(ledger 1216-1222, 落码期间实测确认): 原 ctor 只填 25 个值(缺 T3 代币化新增的
-  // token_tmpl_hash/claim_tmpl_hash/market_suffix_hash 三个尾部字段, 当前 CloseZkV2.sil 实读 28 参数),
-  // 且硬编码走已对当前语法失效的 SILVERC_ZK——已改走 compileSilV100 + ctor 补齐。这三个新字段跟
-  // gateTmplHash 同类(ctor-only 字面量, 被 claim/escape_claim 入口体内的 require 直接引用, 会真实改变
-  // 编译产物字节), 必须传真实值, 不能用占位符(同 computeCloseZkTmplAnchor 已有的纪律)。
-  for (const [label, v] of [['tokenTmplHash', tokenTmplHash], ['claimTmplHash', claimTmplHash], ['marketSuffixHash', marketSuffixHash]]) {
+  // token_tmpl_hash/claim_tmpl_hash 两个尾部字段, 当前 CloseZkV2.sil 实读 27 参数), 且硬编码走已对当前
+  // 语法失效的 SILVERC_ZK——已改走 compileSilV100 + ctor 补齐。这两个新字段跟 gateTmplHash 同类(ctor-only
+  // 字面量, 被 claim/escape_claim 入口体内的 require 直接引用, 会真实改变编译产物字节), 必须传真实值,
+  // 不能用占位符(同 computeCloseZkTmplAnchor 已有的纪律)。
+  // 🔴 账本 1415/1458 修: marketSuffixHash 曾是这两个字段之外的第三个 ctor-only 尾字段(把 28 参数误记成
+  // 上一句的历史数字), 账本 1408/1409/1415(v0.3 方案C 同病同治)已从 CloseZkV2.sil 构造参数删除——那一轮
+  // 裁定"12 个 JS 消费者这次不改", 本函数当时仍传 28 个值, 真调用会 100% silverc 编译失败(账本 1458
+  // 回归报告实测复现)。此处删除 marketSuffixHash 形参/校验/ctor 元素, 对齐合入后 27 参数真实签名。
+  for (const [label, v] of [['tokenTmplHash', tokenTmplHash], ['claimTmplHash', claimTmplHash]]) {
     if (!/^[0-9a-fA-F]{64}$/.test(String(v || ''))) throw new Error(`compileCloseZkV2Redeem: ${label} 必须是 32B hex，收到 ${JSON.stringify(v)} — ctor-only 字面量，不接受占位符/缺省值`);
   }
   const ctor = [
@@ -115,7 +118,7 @@ export function compileCloseZkV2Redeem({ gateTmplHash, betsRootBaked, refundRoot
     ctorBytes32V100(z32),                    // init_payoutRootField: ZERO32 占位, zk_close 完成后才写真实值
     ctorIntV100(Number(consolidatedPool)),
     ...W17V100(),
-    ctorBytes32V100(tokenTmplHash), ctorBytes32V100(claimTmplHash), ctorBytes32V100(marketSuffixHash),
+    ctorBytes32V100(tokenTmplHash), ctorBytes32V100(claimTmplHash),
   ];
   return Buffer.from(compileSilV100(CLOSEZK_V2_SIL, ctor, 'CloseZkV2').script).toString('hex');
 }
@@ -263,12 +266,15 @@ export function updateProvingFailed(marketId, errorMessage) {
  *   gateTmplHash 一样调用方显式传入，不从 psv2 state 推导（这三个字段是本市场创世共用的模板/承诺锚，不
  *   是某次 attest 才产生的委员判定值）
  * @param {string} claimTmplHash 32B hex — 同上
- * @param {string} marketSuffixHash 32B hex — 同上
  * @returns {{redeemHex:string, anchorHex:string, consolidatedPool:bigint, attestedWinner:number, attestedAtMs:number}}
  */
-export function buildCloseZkV2GenesisFromAttestedState(psv2RedeemHex, gateTmplHash, tokenTmplHash, claimTmplHash, marketSuffixHash) {
+// 🔴 账本 1415/1458 修: computeCloseZkTmplAnchor 是位置参数函数, 原 5 参调用(...claimTmplHash,
+// marketSuffixHash) 若原样保留、只在被调函数那头删掉 marketSuffixHash 形参, marketSuffixHash 会静默
+// 错位绑到新的第 5 位形参 v100Path(不会抛错, 是那种"看起来能跑但值被误用"的暗雷)——本函数签名与调用都
+// 一并删除 marketSuffixHash, 不留错位窗口。
+export function buildCloseZkV2GenesisFromAttestedState(psv2RedeemHex, gateTmplHash, tokenTmplHash, claimTmplHash) {
   const state = readPayoutShardV2AttestedState(psv2RedeemHex);   // J1 的切片, fail-closed 四项已在函数内部核过
-  const anchor = computeCloseZkTmplAnchor(CLOSEZK_V2_SIL, gateTmplHash, tokenTmplHash, claimTmplHash, marketSuffixHash);   // §4 硬门①: 每次对 CloseZkV2 当次编译重算
+  const anchor = computeCloseZkTmplAnchor(CLOSEZK_V2_SIL, gateTmplHash, tokenTmplHash, claimTmplHash);   // §4 硬门①: 每次对 CloseZkV2 当次编译重算
   const redeemHex = compileCloseZkV2Redeem({
     gateTmplHash,
     betsRootBaked: state.betsRootHex,
@@ -276,7 +282,7 @@ export function buildCloseZkV2GenesisFromAttestedState(psv2RedeemHex, gateTmplHa
     attestedAtMs: state.attestedAtMs,
     attestedWinner: state.attestedWinner,
     consolidatedPool: state.consolidatedPool,
-    tokenTmplHash, claimTmplHash, marketSuffixHash,
+    tokenTmplHash, claimTmplHash,
   });
   return { redeemHex, anchorHex: anchor.anchorHex, consolidatedPool: state.consolidatedPool, attestedWinner: state.attestedWinner, attestedAtMs: state.attestedAtMs };
 }

@@ -578,7 +578,11 @@ export async function buildZkHandoffRequestV2(marketId, args) {
   ensureGateTmplHashFresh(ZK_GATE, kaspaZk, { force: true });
   const gateTmplHash = process.env.ZK_GATE_TMPL_HASH;
   const closeZkSilPath = process.env.ZK_CLOSEZK_SIL_PATH;
-  const { templateA, templateB, templateC, templateD } = computeCloseZkTmplAnchor(closeZkSilPath, gateTmplHash, process.env.ZK_TOKEN_TMPL_HASH, process.env.ZK_CLAIM_TMPL_HASH, process.env.ZK_MARKET_SUFFIX_HASH);
+  // 账本 1415/1458 修: computeCloseZkTmplAnchor 签名已收窄(删 marketSuffixHash, 见该函数顶注) —— 上面
+  // ZK_MARKET_SUFFIX_HASH env 必需检查 + assertZkHandoffTmplCoherent 的 market_suffix_hash 一致性核对
+  // 仍保留不动(那是"这个市场 genesis 时 declare 过的值跟当前 env 是否一致"的历史声明核验, 跟合约 ctor
+  // 现在还要不要吃这个字段是两件事, 不因为合约不再吃它就不再核), 只是不再把它传进 ctor 编译。
+  const { templateA, templateB, templateC, templateD } = computeCloseZkTmplAnchor(closeZkSilPath, gateTmplHash, process.env.ZK_TOKEN_TMPL_HASH, process.env.ZK_CLAIM_TMPL_HASH);
 
   const rc = (cmd, t = 90000) => sendCommandAsync(settlerRelayId, cmd, t, 'internal');
   const relayAddr = (await rc({ type: 'get_pubkey' })).address;
