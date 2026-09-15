@@ -1,17 +1,19 @@
 <%~ include('partials/page-open', { _page: 'proto-market-detail', pageTitle: '市场详情（原型）', ...it }) %>
 
-<!-- 原型 v0.4(1325 派工·线框稿 §3/§4, Bettor 1328 裁定; 下注两步流程 = v0.3, ledger 1335 J2 合约约束
-     核实; v0.4 = 读 J2 已推分支 coord/j2-proto-v0-backend b6a63d27 源码, 字段/状态值对齐真实契约, 非
-     猜测): 独立新页, 下注+结算/领取合并一屏。非 ZK 简单路径: 出单人到期手动宣布结果 → 赢家 claim;
-     无人宣布 → 全员 refund/cancelled。
-     🔴 下注不是一步: KTT 没有通用余额, 每次下注都要先【铸筹码】(铸一份绑定本市场的代币) 再【下注】
-     (把这份代币转进市场 covenant)——两笔各自的 tx。第 2 步没真正落链前, 不能显示"已下注"; 第 1 步
-     成功、第 2 步失败, 必须能看出"筹码铸了、注没下成", 不能含糊成一个笼统的失败提示。
+<!-- 原型 v0.5(1325 派工·线框稿 §3/§4, Bettor 1328 裁定; v0.5 = D-020 必然改动, 账本1446/1448/1450/1451,
+     读 J2 已推分支 coord/j2-market-genesis-bet-mint 40f90d9b 源码字段对齐, 仅对齐单步契约, 无新增交互):
+     独立新页, 下注+结算/领取合并一屏。非 ZK 简单路径: 出单人到期手动宣布结果 → 赢家 claim; 无人宣布 →
+     全员 refund/cancelled。
+     🔴 D-020 取消了原两步"铸筹码→下注"设计(KTT 免费无限铸造, 独立 stake 筹码只制造一个可被第三方
+     整笔取走的中间 UTXO, 不证明任何事)——下注现在是 register_append **一笔**交易。POST .../bet 成功
+     返回 **202 {ok:true, id:betId, status}**(status 来自 proto_bets.status, pending→confirmed), 无
+     steps 字段; 驱动未开启返回 **409 {error:'proto_driver_disabled'}**——前端据此显示专属提示而非笼统
+     "下注失败"。没有单笔下注的 GET 端点, 轮询用 GET /api/proto-markets/:id 的 bets[] 数组按 id 找自己
+     那笔(读 proto.js 源码确认过, 没有就不发明端点)。
      GET /api/proto-markets/:id 响应形状是 { ok, market, bets, claims }(不是直接就是 market 对象);
      market 行字段 = proto_markets 表原样(question/token_ticker/deadline_ms/status/winning_side, 见
      kasia-console/src/db/migrate.js v206), status CHECK IN (betting/sealed/resolved/cancelled)。
-     POST .../bet 广播落地前统一 501(kind 占位错误信息), 无 steps 字段——前端按"没有 steps 数组=两步都
-     还没开始"降级处理。resolutionNote 目前后端 DB 里还没有对应列(J2 §2.3 TODO), 可能显示为空, 不是 bug。 -->
+     resolutionNote 目前后端 DB 里还没有对应列(J2 §2.3 TODO), 可能显示为空, 不是 bug。 -->
 
 <div class="p-6 max-w-2xl mx-auto" x-data="protoMarketDetailPage()" x-init="init()" x-cloak>
 
@@ -32,7 +34,7 @@
         <p class="text-xs text-ink-400 mt-1">截止: <span x-text="fmtDeadline(market.deadline_ms)"></span></p>
       </div>
 
-      <!-- 下注面板(仅 betting 态) — 两步: ①铸筹码 ②下注, 各自独立成败态, 第②步没成功前不算"已下注" -->
+      <!-- 下注面板(仅 betting 态) — D-020: 单笔交易, 202 后按 id 轮询 bets[] 里自己那笔的 status -->
       <template x-if="market.status === 'betting'">
         <div class="card p-6 space-y-3">
           <h2 class="text-sm font-semibold text-ink-700">下注</h2>
@@ -46,29 +48,14 @@
               class="w-full mt-1 border border-warm-300 rounded-lg px-3 py-2 text-sm focus:border-brand-400 focus:outline-none bg-warm-50">
           </div>
 
-          <!-- 两步进度: 提交后才显示 -->
-          <div x-show="betSteps.mint.state !== 'idle'" class="space-y-1.5 text-xs border border-warm-200 rounded-lg p-3 bg-warm-50">
-            <div class="flex items-center gap-2">
-              <span x-text="stepIcon(betSteps.mint.state)"></span>
-              <span class="font-medium">① 铸筹码</span>
-              <span class="text-ink-400 font-mono text-[10px]" x-show="betSteps.mint.txId" x-text="betSteps.mint.txId.slice(0,12)+'...'"></span>
-            </div>
-            <div class="text-red-600 pl-5" x-show="betSteps.mint.state === 'failed'" x-text="betSteps.mint.error"></div>
-            <div class="flex items-center gap-2">
-              <span x-text="stepIcon(betSteps.bet.state)"></span>
-              <span class="font-medium">② 下注</span>
-              <span class="text-ink-400 font-mono text-[10px]" x-show="betSteps.bet.txId" x-text="betSteps.bet.txId.slice(0,12)+'...'"></span>
-            </div>
-            <div class="text-red-600 pl-5" x-show="betSteps.bet.state === 'failed'" x-text="betSteps.bet.error"></div>
-            <div class="text-amber-700 pl-5" x-show="betSteps.mint.state === 'done' && betSteps.bet.state === 'failed'">
-              筹码已铸出但没能下成注——这份筹码目前没有绑定到本次下注，别当作"已下注"。
-            </div>
+          <!-- 提交后状态: pending(轮询中)→confirmed -->
+          <div x-show="betId" class="flex items-center gap-2 text-xs border border-warm-200 rounded-lg p-3 bg-warm-50">
+            <span x-text="betStatus === 'confirmed' ? '✓' : '◉'"></span>
+            <span class="font-medium" x-text="betStatusLabel(betStatus)"></span>
+            <span class="text-ink-400 font-mono text-[10px]" x-show="betId" x-text="betId ? betId.slice(0,8)+'...' : ''"></span>
           </div>
 
           <div x-show="betError" class="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2" x-text="betError"></div>
-          <div x-show="betSteps.mint.state === 'done' && betSteps.bet.state === 'done'" class="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
-            ✓ 已下注（两步均已落链）
-          </div>
           <button @click="placeBet()" :disabled="betSubmitting || !(bet.direction !== null && bet.amount > 0)" class="btn btn-primary w-full">
             <span x-show="!betSubmitting">提交下注</span>
             <span x-show="betSubmitting">提交中...</span>
@@ -117,7 +104,7 @@ function protoMarketDetailPage() {
     market: null,
     bet: { direction: null, amount: null },
     betSubmitting: false, betError: '',
-    betSteps: { mint: { state: 'idle', txId: '', error: '' }, bet: { state: 'idle', txId: '', error: '' } },
+    betId: null, betStatus: null, _betPollTimer: null,
     resolveSubmitting: false, resolveMsg: '', resolveOk: false,
     claimSubmitting: false, claimMsg: '', claimOk: false,
 
@@ -149,38 +136,49 @@ function protoMarketDetailPage() {
       try { return new Date(Number(ms)).toISOString().slice(0, 16).replace('T', ' '); } catch { return ''; }
     },
 
-    // 下注 = 两笔独立 tx(①铸筹码 ②下注), 后端按 §0 注释里的占位契约返回 steps 数组。
-    // 没有 steps 数组(比如 404/网络错误, 根本没走到后端逻辑) = 视为两步都还没开始, 只报通用错误,
-    // 不瞎猜走到了哪一步。
+    // D-020: 下注是 register_append 一笔交易。成功 202 {ok:true, id, status}(status 通常 'pending'),
+    // 没有单笔查询端点, 轮询 GET /api/proto-markets/:id 的 bets[] 数组按 id 比对拿最新 status。
+    // 409 proto_driver_disabled 单独文案(不是"下注失败", 是"这条链路本来就没开"), 其余错误照实展示。
     async placeBet() {
-      this.betSubmitting = true; this.betError = '';
-      this.betSteps = { mint: { state: 'running', txId: '', error: '' }, bet: { state: 'idle', txId: '', error: '' } };
+      this.betSubmitting = true; this.betError = ''; this.betId = null; this.betStatus = null;
+      if (this._betPollTimer) { clearTimeout(this._betPollTimer); this._betPollTimer = null; }
       try {
         const res = await fetch('/api/proto-markets/' + encodeURIComponent(this.marketId) + '/bet', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ direction: this.bet.direction, amount: this.bet.amount }),
         });
         const data = await res.json().catch(() => ({}));
-        const steps = Array.isArray(data.steps) ? data.steps : null;
-        if (!steps) {
-          this.betSteps = { mint: { state: 'idle', txId: '', error: '' }, bet: { state: 'idle', txId: '', error: '' } };
-          this.betError = '下注失败: ' + (data.error || ('HTTP ' + res.status)) + (res.status === 404 ? '（后端接口尚未上线）' : '');
+        if (res.status === 202 && data.ok) {
+          this.betId = data.id;
+          this.betStatus = data.status || 'pending';
+          this._pollBetStatus();
           return;
         }
-        const mintStep = steps.find(s => s.step === 'mint') || {};
-        const betStep = steps.find(s => s.step === 'bet') || {};
-        this.betSteps.mint = { state: mintStep.ok ? 'done' : 'failed', txId: mintStep.txId || '', error: mintStep.error || '' };
-        this.betSteps.bet = mintStep.ok
-          ? { state: betStep.ok ? 'done' : (betStep.error ? 'failed' : 'idle'), txId: betStep.txId || '', error: betStep.error || '' }
-          : { state: 'idle', txId: '', error: '' };
-        // 只有两步都 ok 才算成功; 任何一步没成功都不显示"已下注"(HTML 里 x-show 已经按这个判断)。
+        if (data.error === 'proto_driver_disabled') {
+          this.betError = '原型尚未开启真实交易（proto driver 未启用，等 Owner 打开金丝雀开关）';
+          return;
+        }
+        this.betError = '下注失败: ' + (data.error || ('HTTP ' + res.status)) + (res.status === 404 ? '（后端接口尚未上线）' : '');
       } catch (err) {
-        this.betSteps = { mint: { state: 'idle', txId: '', error: '' }, bet: { state: 'idle', txId: '', error: '' } };
         this.betError = '请求失败: ' + err.message;
       } finally { this.betSubmitting = false; }
     },
-    stepIcon(state) {
-      return { idle: '○', running: '◉', done: '✓', failed: '✗' }[state] || '○';
+    betStatusLabel(s) {
+      const m = { pending: '已提交，等待上链确认', confirmed: '已下注', orphaned_chip: '异常状态，请联系出单人核实' };
+      return m[s] || (s ? '状态: ' + s : '');
+    },
+    _pollBetStatus() {
+      if (!this.betId) return;
+      const tick = async () => {
+        try {
+          const res = await fetch('/api/proto-markets/' + encodeURIComponent(this.marketId));
+          const data = await res.json().catch(() => null);
+          const bet = data && Array.isArray(data.bets) ? data.bets.find(b => b.id === this.betId) : null;
+          if (bet) this.betStatus = bet.status;
+        } catch {}
+        if (this.betStatus === 'pending') this._betPollTimer = setTimeout(tick, 5000);
+      };
+      this._betPollTimer = setTimeout(tick, 5000);
     },
 
     async resolveOutcome(direction) {
