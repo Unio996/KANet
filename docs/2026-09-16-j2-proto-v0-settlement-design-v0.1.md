@@ -92,38 +92,71 @@ V-T-8，可以放心用内建函数，编译器在**编译期自己**做不动�
 `convert_to_refundclaim`只做外部模板校验（去往RootClose/RootClaim/RefundClaim，不是"自己"续约），
 同样不触发。
 
-### §0.4 逐入口结论表（v0.2 更新：每条标注交易version/编码器commit/debugger sha256——账本1479 Bettor要求）
+### §0.4 逐入口结论表（v0.4 定稿：并入NWT simnet真实全链共识结果——账本1485-1487，出处
+`docs/provenance/2026-09-16-nwt-proto-v0-settlement-simnet-verify/README.md`@`af019c17`，
+本节只摘要/引用，不复制其脚本）
 
-**公共基线**（除非表格里单独标注差异，每一行都是这个基线）：交易`version=1`；ABI编码器
-`kasia-console/scripts/audit/generic-entry-witness.mjs`修复后版本，commit `449745f4`（修复"drain()
-返回hex字符串被当UTF-8文本二次编码"这个bug之前的任何结果一律作废、不采信，见§0.9）；debugger二进制
-D-019 pin `3ed9733`，sha256 `b85bb524d22ae761150dcb80b070f0bf1beb95a1c6604470501883b4d0f552c6`。
+**证据层级说明（v0.4新增，须先读）**：本文档此前（v0.1-v0.3）的"真实执行"全部指cli-debugger
+**离线**执行——它精确复现`.sil`的`require()`链逻辑，但**不模拟**真实kaspad节点的交易finality检查、
+KIP-9 storage mass、以及"其它输入自己的脚本执行"（debugger只验证active input）。NWT用**与主网完全
+同款**的v2.0.1二进制在隔离simnet上真实broadcast+确认了全部8步结算链，这是比debugger离线执行更高
+一级的证据——**本节起，debugger结论与simnet结论冲突时，以simnet为准**（§0.13已定此闸）。
 
-**分类（Bettor账本1479口径）**：PASS = `convert_to_rootclose`、`convert_to_claim`、
-`convert_to_refundclaim`、`claim_draw`(full分支)、`refund_flip`、`refund_payout`(full/partial分支)；
-FAIL（真实缺陷，非harness伪影）= `claim_draw`(partial分支)；待定 = `close_commit`、
-`KanetTokenClaim.spend`。
+**公共基线（debugger离线部分，v0.1-v0.3遗留内容，仍适用于未被simnet覆盖的行）**：交易`version=1`；
+ABI编码器`kasia-console/scripts/audit/generic-entry-witness.mjs`修复后版本，commit `449745f4`；
+debugger二进制D-019 pin `3ed9733`，sha256 `b85bb524d22ae761150dcb80b070f0bf1beb95a1c6604470501883b4d0f552c6`。
 
-| 入口 | 组合 | 结论 | 真实执行证据（version/编码器commit/debugger sha256均为公共基线，仅标注差异） |
+**分类（v0.4更新）**：simnet ACCEPT = `register_append`、`convert_to_rootclose`、**`close_commit`**、
+`convert_to_claim`、`claim_draw`(full分支)、**`KanetTokenClaim.spend`**（后两项由v0.3的"待定"改判，
+见下方8步表）；debugger PASS（未被simnet覆盖，仍是debugger离线证据）= `convert_to_refundclaim`、
+`refund_flip`、`refund_payout`(full/partial分支)；FAIL（真实缺陷，非harness伪影）=
+`claim_draw`(partial分支)（此结论simnet未推翻，见下方追加验证）；**结构性阻塞点（v0.4新增分类）**=
+`RootClaim.sil:103 require(payout>=1000)`（见下方"RootClaim待修清单"）。
+
+**8步全链simnet结果（route A精确参数：`a59c7b48`同形状复现——`min_bet=1`，第一笔`YES stake=1`，
+第二笔`NO stake=999`，`pool_value=1000`，裁决`winningSide=YES`，唯一赢票`payout=1000==pool_value`
+恰好卡在`RootClaim.sil:103`门槛上，走`claim_draw` full分支）**：
+
+| # | 入口 | 构造来源 | mass | requiredFee(sompi) | 结果 |
+|---|------|---------|------|---------------------|------|
+| 1 | `market_genesis` | 生产builder（`proto-covenant-builder.mjs`+`proto-tx-assembly.mjs`，主线代码） | 200,006 | 20,000,300 | ✅ simnet ACCEPT |
+| 2 | `register_append`#1（YES, stake=1） | 生产builder（`buildRegisterAppendTxJson`） | 448,870 | 44,886,300 | ✅ simnet ACCEPT |
+| 3 | `register_append`#2（NO, stake=999, held） | 生产builder（同上） | 446,880 | 44,687,300 | ✅ simnet ACCEPT |
+| 4 | `convert_to_rootclose`（封盘） | 审计构造（尚无生产builder，见下方"审计构造结论的地位"） | 396,794 | 39,678,700 | ✅ simnet ACCEPT |
+| 5 | **`close_commit`**（winningSide=YES，5委员checkSig） | 审计构造（委员签名走`kaspa.createInputSignature`，与生产签名同一底层函数） | 198,771 | 19,876,700 | ✅ **simnet ACCEPT**（debugger离线持续FAIL卡在`validSigs>=4`，与共识不一致，已不作依据，根因未定案） |
+| 6 | `convert_to_claim` | 审计构造 | 396,718 | 39,671,100 | ✅ simnet ACCEPT |
+| 7 | `claim_draw`（payout=1000，恰在门槛上） | 审计构造（ticket消费需真实bettor `authorize_spend`签名） | 393,781 | 39,377,400 | ✅ simnet ACCEPT |
+| 8 | **`KanetTokenClaim.spend`** | 审计构造（赢家checkSig） | 196,628 | 19,662,500 | ✅ **simnet ACCEPT** |
+
+**审计构造结论的地位**：④⑤⑥⑦⑧五步目前**没有生产builder**（proto-v0结算侧尚未落码），结论范围限定
+在"这套合约逻辑在真实共识上可执行、参数/witness形状如上表"——**等生产builder实现后必须用生产字节
+在simnet重跑，才是最终验收依据**（不能拿本轮审计构造的ACCEPT直接当生产验收凭证，见下方"实现清单"）。
+①②③生产builder已是mainline代码，可直接作为验收依据。implied fee恒等式（Σinputs.amount−
+Σoutputs.value==内部算出的netLoss/requiredFee）已从反序列化真实tx对象独立复算确认一致（账本1455
+纪律，全部✅）。
+
+| 入口 | 组合 | 结论 | 证据 |
 |---|---|---|---|
-| `ShardLeaf_direct.register_append` | readInputStateWithTemplate + 自续约(AB11) | ✅ **已修复**(账本1468/1469: ctor烤入`own_redeem_len`+JS不动点收敛) | ✅ **PASS 6/6**（账本1469④，`verify-run-1469-ctor-matrix.log`；用的是`register_append`专用编码器`proto-register-append-witness.mjs`，不是本轮`generic-entry-witness.mjs`，该专用编码器从未有双重hex编码bug，不受449745f4影响） |
-| `ShardLeaf_direct.convert_to_rootclose` | 只有`scanOwnedTokenInputs`(读, 无自续约) | ✅ **安全** | ✅ **PASS**（NWT用`generic-entry-witness.mjs`测得——**编码器版本已由NWT自证为449745f4修复后版本**：她重跑后mass从113,105/61,777/60,473变为38,926/27,122/26,796，约减半，与"去掉双重编码后见证字节变回真实长度一半"的预期吻合；若仍是旧bug编码器，两次跑出的garbage字节长度会完全相同，不会系统性减半——这是比对时间戳更硬的证据，采信） |
-| `RootClose.refund_flip` | 只有`noTokenInput`(不读state) + 内建`validateOutputState` + CLTV | ✅ **安全** | ✅ **PASS**（`06_audit_rootclose_refund_flip.mjs`，我方跑，公共基线）——初次FAIL是harness用法错误(test.json的`lock_time`字段必须嵌在`tx`对象内部, 不是顶层, 见§0.10) |
-| `RootClose.close_commit` | 同上 + 5次`checkSig`(唯一涉及真实签名的入口) | 🟡 **待定（最终以simnet真实全链共识结果为准，见§0.13）** | ❌ **debugger离线执行FAIL（卡在`validSigs>=4`），根因未100%钉死**——`07_audit_rootclose_close_commit.mjs`，公共基线。已排除sig_op_count/computeBudget（读consensus源码确认version>=1时该字段完全不参与sighash）、kaspa-wasm `createInputSignature`独立实现（确认调用同一`calc_schnorr_signature_hash`）、以及3,618/20,423字节长度差（NWT逐push解码确认这是explicit hex携带完整RootClose redeem而debugger自编译redeem不含这段的预期差异，不是重建路径bug）三个候选。剩余怀疑收窄到sighash聚合分量（`previous_outputs_hash`等中间hash未逐分量核对）。已交NWT接手（§0.10），本文档不再推进 |
-| `RootClose.convert_to_claim`/`convert_to_refundclaim` | `scanOwnedTokenInputs`(读) + 外部模板(非自续约) | ✅ **安全** | ✅ **PASS**（NWT测得，同convert_to_rootclose一行的编码器版本证据，采信） |
-| **`RootClaim.claim_draw`(payout==pool_value, 无续约分支)** | 无自续约, 只读ticket/token | ✅ **安全** | ✅ **PASS**（`01_audit_rootclaim_claim_draw.mjs`，公共基线，16参数全部真实ABI编码、真实协议常量尺寸、active input显式`signature_script_hex`，见§0.5①） |
-| **`RootClaim.claim_draw`(payout<pool_value, partial续约分支)** | `readInputStateWithTemplate`(读ticket+token) + **手写AB11自续约, `ownSig.slice(0, OWN_PREFIX_LEN)`** | 🔴 **确认真实缺陷**（同账本1468同类defect） | ❌ **FAIL（符合预期）**——`01_audit_rootclaim_claim_draw.mjs`，公共基线。诚实backend按"正确offset"（即`register_append`已修复的`ownLen-own_redeem_len`手法）构造出的续约输出，被合约自己的错误自检拒绝：`error: script ran, but verification failed`精确命中`ownSig.slice(...)`那一行`require`（§0.5②）。用449745f4修复后编码器复测，结论不变——不是编码bug的假象，是真实合约缺陷 |
-| `RefundClaim.refund_payout`(pool_value==stake, 无续约分支) | 无自续约 | ✅ **安全** | ✅ **PASS**（`03_audit_refundclaim_refund_payout.mjs`，公共基线） |
-| **`RefundClaim.refund_payout`(pool_value≠stake, partial续约分支)** | `readInputStateWithTemplate`(读ticket+token) + **内建`validateOutputState`(自续约)** | ✅ **安全** | ✅ **PASS**（`03_audit_refundclaim_refund_payout.mjs`，公共基线——首次报告曾误判raw/state模式不一致，根因是审计脚本自身的双重hex编码bug，已用449745f4修复重跑确认，见§0.9自我纠错记录） |
-| `KanetTokenClaim.spend` | 无自续约(终态, 头注明确"不受V-T-8影响") | 🟡 **待定** | ⚪ **本轮未真实执行**——现有证据（源码逐行核对+`docs/provenance/2026-09-14-j2-ktt-v03-planC-remove-h1b/`）是**代币化重写之前的旧版本合约**（§0.6已证：那份夹具的`claim_draw`只有9参数、无`tok_prefix`等4个v0.3才加的witness参数，与当前16参数活跃版本不是同一份合约），不能直接采信为当前版本的结论。需要补一条针对当前`KanetTokenClaim.sil`的真实cli-debugger向量，本文档不代为担保"安全" |
+| `ShardLeaf_direct.register_append` | readInputStateWithTemplate + 自续约(AB11) | ✅ **已修复**(账本1468/1469) | ✅ debugger PASS 6/6 + ✅ **simnet ACCEPT**（上表①②③） |
+| `ShardLeaf_direct.convert_to_rootclose` | 只有`scanOwnedTokenInputs`(读, 无自续约) | ✅ **安全** | ✅ debugger PASS（NWT）+ ✅ **simnet ACCEPT**（上表④，审计构造） |
+| `RootClose.refund_flip` | 只有`noTokenInput`(不读state) + 内建`validateOutputState` + CLTV | ✅ **安全** | ✅ debugger PASS（`06_audit_rootclose_refund_flip.mjs`）——**未做simnet验证**，CLTV节点级约束已由NWT在close_commit那条上验证（同一段`OpCheckLockTimeVerify`代码路径，见§0.11 MUST-1v0.4更新），结构性风险低，但字面上仍是"debugger PASS，simnet未测" |
+| `RootClose.close_commit` | 同上 + 5次`checkSig`(唯一涉及真实签名的入口) | ✅ **simnet ACCEPT（定论，debugger结论已不作依据）** | ✅ **simnet真实共识ACCEPT**（上表⑤）；❌ debugger离线持续FAIL卡在`validSigs>=4`——已排除witness参数短占位、debugger见证重建缺陷（NWT逐push解码确认长度差是预期的redeem脚本差异，非bug）；根因仍锁定debugger自己的sighash计算路径（`silverscript#253`同族疑点），**未定案，不下"上游缺陷"结论**，仅记录"debugger与真实共识不一致"这一事实 |
+| `RootClose.convert_to_claim`/`convert_to_refundclaim` | `scanOwnedTokenInputs`(读) + 外部模板(非自续约) | ✅ **安全** | `convert_to_claim`：✅ debugger PASS + ✅ **simnet ACCEPT**（上表⑥，审计构造）；`convert_to_refundclaim`：✅ debugger PASS（NWT），未做simnet验证 |
+| **`RootClaim.claim_draw`(payout==pool_value, 无续约分支)** | 无自续约, 只读ticket/token | ✅ **安全** | ✅ debugger PASS（`01_audit_rootclaim_claim_draw.mjs`，见§0.5①）+ ✅ **simnet ACCEPT**（上表⑦，审计构造，`payout=1000`恰在门槛上） |
+| **`RootClaim.claim_draw`(payout<pool_value, partial续约分支)** | `readInputStateWithTemplate`(读ticket+token) + **手写AB11自续约** | 🔴 **确认真实缺陷**（同账本1468同类defect） | ❌ debugger FAIL（符合预期，见§0.5②，449745f4修复后编码器复测结论不变）——**simnet未测这个分支**（本轮8步链走的是full分支），结论仍以debugger离线FAIL为准（这条debugger结论一直可信，不在close_commit那种"debugger与共识冲突"的例外范围内） |
+| **`RootClaim.sil:103 require(payout>=1000)`（v0.4新增：结构性阻塞点，非本次构造错误）** | 代币化前KAS sompi时代遗留字面量 | 🔴 **结构性阻塞**：API真实默认`min_bet=1`的小额市场，只要赢家`payout<1000`枚代币，永远无法`claim_draw` | ✅ **simnet真实复现**：本轮第一次因此FAIL而误把`min_bet`临时改成1000才跑通（掩盖了这条真实阻塞）；追加验证用`min_bet=1`精确复刻`a59c7b48`同形状，`payout=1000`（门槛值本身）simnet ACCEPT；`payout<1000`（如999）未上链测试，但`.sil`字面是`>=`非`>`，源码已确定会FAIL，不需要再耗测试网资源验证。详见"RootClaim待修清单" |
+| `RefundClaim.refund_payout`(pool_value==stake, 无续约分支) | 无自续约 | ✅ **安全** | ✅ debugger PASS（`03_audit_refundclaim_refund_payout.mjs`），未做simnet验证 |
+| **`RefundClaim.refund_payout`(pool_value≠stake, partial续约分支)** | `readInputStateWithTemplate`(读ticket+token) + **内建`validateOutputState`(自续约)** | ✅ **安全** | ✅ debugger PASS（同上，见§0.9自我纠错记录），未做simnet验证 |
+| `KanetTokenClaim.spend` | 无自续约(终态, 头注明确"不受V-T-8影响") | ✅ **simnet ACCEPT（定论）** | ✅ **simnet真实共识ACCEPT**（上表⑧，审计构造）——v0.3的"待定"（旧证据是代币化前9参数合约，见§0.6）现由simnet真实执行覆盖解决，不再需要针对当前`.sil`补debugger向量 |
 
-**mass（真实KIP-9 storage mass，block限500,000，NWT用449745f4修复后编码器测得，公共基线，非估算）**：
-`claim_draw`(A路线full分支) ≈ **331,580**（margin约34%，比预想更紧，不是随便留出来的余量）；
-`convert_to_rootclose`/`convert_to_claim`/`convert_to_refundclaim` ≈ **38,926 / 27,122 / 26,796**
-（NWT重跑后的修复后数字，见上表证据栏说明）。其余入口（`close_commit`/`refund_flip`/
-`refund_payout`full+partial）的真实mass尚未测得，NWT`nwt_05_mass_check.mjs`此前撞到
-`kaspa.TransactionOutput`需要真实`ScriptPublicKey`实例（不能传plain object）这个构造错误，已告知修法，
-此处暂缺数字，不臆造。
+**mass观察（Bettor要求：占比最大来源，后续优化观察项）**：8步mass从196,628（spend）到448,870
+（register_append#1），**register_append系与convert_to_*系（约397k-449k）已逼近simnet
+500,000 compute mass上限的80%-90%**——`register_append`本身margin最紧（约10%）。NWT独立确证了
+KIP-9 storage mass对**小面值covenant输出**极度敏感（`reference-kip9-storage-mass-plurality-is-not-one-covenant-utxo-is-p2`）：首次把新建covenant输出面值设成`.sil`里`DUST_MIN`字面值（1000 sompi）时，
+`requiredFee`被算成约4000 KAS（storage mass含`p²/v`项，v极小时被放大到天文数字）——**改用
+`CONTINUATION_OUTPUT_SOMPI`（20,000,000 sompi，与其它续约/genesis输出同量级）后恢复正常**，这是
+本节新增MUST-4的直接依据（见下）。精确compute/storage拆分因`kaspa.calculateStorageMass`撞
+wasm `RuntimeError: unreachable`未取得，留作后续优化观察项。
 
 ### §0.5 独立复现`claim_draw`两个分支（工具问题已解决，真实执行完成）
 
@@ -188,6 +221,15 @@ v0.1初版的**校正**：`claim_draw`按ticket领奖，若两笔下注押同一
 `claim_draw`(无续约分支)/`KanetTokenClaim.spend`全部结构性安全（§0.4表），不需要碰任何`.sil`文件，
 不需要放弃`a59c7b48`。
 
+**(A)路线精确参数（v0.4：NWT simnet已按此精确形状真实全链验证过，见§0.4的8步表）**：`a59c7b48`
+第二笔下注**押NO，stake=999**（第一笔已有YES stake=1，两笔合计`pool_value=1000`，恰好卡在
+`RootClaim.sil:103 require(payout>=1000)`门槛上——见§0.8/§0.4"结构性阻塞点"一行，`payout==1000`
+本身是simnet真实验证过能通过的边界值，不需要再往上调）；委员**裁决YES**（唯一赢票，`payout=1000
+==pool_value`，走full分支，无续约）。NWT的simnet全链验证走的正是这个精确参数组合（`min_bet=1`，
+第一笔`YES stake=1`，第二笔`NO stake=999`），8步从`register_append`#2到`KanetTokenClaim.spend`
+全部真实共识ACCEPT——**(A)路线不再是"结构性安全"这种理论推断，是有一整条真实链上共识确认过的
+精确参数可以直接照抄执行**。
+
 **(B) 路线（供新市场）**：用账本1469同款ctor烤入`own_redeem_len`+JS不动点收敛手法，修复
 `RootClaim.claim_draw`partial分支（§0.5已用真实cli-debugger确诊defect，§0.8给出具体设计），修复后
 需要真实cli-debugger PASS（§0.5的夹具/方法论已经现成）；`RefundClaim.refund_payout`已确认安全
@@ -202,11 +244,12 @@ P2SH脱钩"结论，机制完全一致）。**走(B)意味着`a59c7b48`必须放
 **(A)(B)不互斥**：(A)是救活既有市场`a59c7b48`的短期路径，(B)是修复合约供未来新市场用的长期路径，
 两者可以同时推进，不是二选一放弃另一个。
 
-**🔴 两条路线均依赖`close_commit`结论出来，在此之前都不能真正落地**：`close_commit`是resolve的
-必经环节（委员宣布结果），(A)需要它完成"裁决YES"这一步，(B)修复`RootClaim.claim_draw`后的新市场
-同样需要`close_commit`能正常工作才能走到claim那一步——§0.10/§0.4已确认`close_commit`真实签名验证
-**当前仍FAIL**，根因未钉死，已交NWT接手。**在NWT给出`close_commit`是"harness伪影"还是"真实合约
-缺陷"这个结论之前，(A)(B)两条路线都只是"设计已就绪、尚不能执行"的状态，不是"可以立即执行"**。
+**🟢 v0.4更新：`close_commit`这个阻塞项已解除**——NWT的simnet真实全链共识验证已确认
+`close_commit`真实ACCEPT（§0.4/§0.13），debugger离线FAIL已不再作为"能不能执行"的依据。(A)路线
+现在是"有真实共识确认过的精确参数、可以直接执行"的状态，不再是"设计已就绪、尚不能执行"。(B)路线
+仍需要先完成§0.8的`RootClaim.sil`修复（两处缺陷合并一次修改）并在simnet用真实partial形状重新
+验证，但不再受close_commit本身的不确定性阻塞——(B)路线剩余的阻塞项纯粹是"`RootClaim.sil`还没修"，
+不是"close_commit不知道能不能用"。
 
 **本文档建议（仅供参考，不代Owner决定）**：先问清楚v0的业务规则是否要求支持"同一市场2个不同payout
 赢家各自claim"——如果产品意图上v0本来就是"赢家通吃、一次性全额claim"（parimutuel常见简化：所有赢家
@@ -215,9 +258,18 @@ P2SH脱钩"结论，机制完全一致）。**走(B)意味着`a59c7b48`必须放
 推迟到真正需要多赢家分别claim的那一刻——性质上等同于账本1471的`T-PROTO-LEAF-ARTIFACT-VERSIONING`
 观察票（问题真实存在, 但触发条件是"未来需要", 不是"现在必须"）。
 
-### §0.8 若走(B)：`RootClaim.claim_draw`的修复设计（预案，不实现，仅供Owner选(B)后直接执行）
+### §0.8 `RootClaim.sil`待修清单（v0.4更新：两处缺陷合并一次修改，预案，不实现，仅供Owner批准后
+直接执行）——账本1484/1485-1487 Bettor复核+NWT simnet追加验证
 
-与账本1469`ShardLeaf_direct.register_append`完全同构的手法，六点对应：
+**v0.4更新说明**：本节原本只覆盖partial续约偏移这一处（§0.5②确诊的真实缺陷）。NWT在simnet全链
+验证时**追加发现第二处独立缺陷**：`RootClaim.sil:103 require(payout >= 1000)`是代币化之前
+（KAS sompi时代）遗留的字面量，代币化后`payout`是KTT数量、不是sompi，两者量级完全不可比——**任何
+`min_bet=1`（API真实默认值，`src/api/proto.js:118`）的小额市场，只要赢家最终`payout<1000`枚代币，
+永远无法`claim_draw`**，这不是边缘情况，是**默认配置下的常见情况**（默认值本身就在这条门槛之下）。
+Bettor要求**两处缺陷放在同一次修改里一并处理**，避免重复改`RootClaim.sil`两次，修后须在simnet用
+真实多赢家partial形状重新全链跑通。
+
+**与账本1469`ShardLeaf_direct.register_append`完全同构的手法**，六点对应partial续约偏移那处：
 
 1. `RootClaim.sil`：新增ctor参数`int own_redeem_len`（第13个字段，接在`init_claimed_bitmap`/
    `token_tmpl_hash`/`claim_tmpl_hash`之后）；partial分支`ownSig.slice(0, OWN_PREFIX_LEN)`改成
@@ -240,6 +292,32 @@ P2SH脱钩"结论，机制完全一致）。**走(B)意味着`a59c7b48`必须放
    本来就因为`shard_pool_id`逐市场字段而不是真正协议常量"这条既有认知完全吻合，不是新增的复杂度，
    只是把"需要逐市场现算"的理由从"`shard_pool_id`不同"扩展到"再加上`own_redeem_len`也不同"）。
 6. `RefundClaim.sil`已确认安全（§0.9），不需要修改。
+7. **（v0.4新增）`RootClaim.sil:103 require(payout >= 1000)`需要重新评估这条下限在代币化后的
+   正确取值**——本文档只列选项与各自防的损失，不代为选择具体修法：
+   - **选项a：直接删除这条require**——完全信任上游"`payout`必然是ticket合法claim出来的、不需要
+     下限保护"这个假设；**防住的损失**：任何`min_bet>=1`的正常市场都不会被这条门槛卡住；**代价/
+     风险**：如果这条`require`原本除了"防sompi时代dust金额"之外还兼有别的隐含防护作用（比如防止
+     `payout=0`这种退化情形——需要额外确认`payout=0`是否已经被别的地方拦住，不能假设删掉这条
+     就万事大吉），删除前需要通读`RootClaim.sil`全部`require`链，确认没有其它依赖这条下限成立的
+     隐含前提。
+   - **选项b：改成`require(payout > 0)`**——只防`payout=0`这种退化情形，不设任何有意义的下限；
+     **防住的损失**：同选项a能救所有`min_bet>=1`的市场，同时保留"payout不能是0"这条最基本的
+     健全性检查；**代价/风险**：如果Owner未来想要一个"最小claim金额"的产品性下限（比如为了控制
+     链上小额claim产生的手续费浪费），这个选项没有提供该能力，需要另外在backend业务层（不是合约层）
+     实现。
+   - **选项c：改成与`min_bet`/`pool_value`关联的动态下限**（比如`payout >= min_bet`，或者
+     `payout >= pool_value / some_divisor`）——**防住的损失**：给"防止链上出现经济上无意义的
+     极小额claim"这个诉求提供了合约层强制；**代价/风险**：需要新增ctor参数或读取市场级的
+     `min_bet`值，增加`RootClaim.sil`的state依赖面，且"多小算无意义"这个业务判断本身也需要
+     Owner拍板一个具体数字或公式，不是纯技术决策。
+   - 本文档倾向选项b最简单、最不引入新假设（仅供参考，不代Owner选），但最终选择需要Owner/Bettor
+     确认。
+8. **（v0.4新增）修复完成后，必须用真实多赢家partial形状在simnet重新全链跑通**——不能只靠
+   cli-debugger离线PASS就认为修复完成，理由同§0.13的证据层级纪律：debugger验证的是"合约逻辑本身
+   正确"，但simnet才能验证"真实节点会不会因为其它我们没预料到的节点级约束（如CLTV finality规则、
+   KIP-9 storage mass，见MUST-1/MUST-4）而拒绝这笔交易"。回归场景至少覆盖：两个不同`payout`值
+   的赢家各自`claim_draw`（真正触发partial续约代码路径，本轮8步链走的是full分支，从未真实覆盖过
+   partial）+ `payout`恰好等于修复后新下限的边界值。
 
 ### §0.9 `RefundClaim.refund_payout`的V-T-8开放问题——已真实执行, 结论正面(自我纠错记录见下)
 
@@ -370,16 +448,30 @@ NWT接手**（她用本文档`07_audit_rootclose_close_commit.mjs`工具+eprintl
 sighash中间分量入手），本文档不再继续这条调查——但**结论最终以NWT正在起的simnet真实全链共识结果
 为准**，不是debugger离线执行结果，见新增§0.13。
 
-### §0.11 MUST：结算builder的三条硬约束（账本1479 Bettor要求，写入设计，供NWT实现§1时直接遵守）
+### §0.11 MUST：结算builder的硬约束（账本1479/1482 Bettor要求；MUST-1/MUST-4已按NWT simnet真实
+共识发现在v0.4更新为精确规则，写入设计，供NWT实现§1时直接遵守）
 
-**MUST-1：`close_commit`/`refund_flip`的builder必须显式设置`lockTime`（毫秒时间戳），不能依赖
-默认值。** 依据：§0.10发现`refund_flip`初次真实执行FAIL（`Unsatisfied lock time`）的根因不是合约
-缺陷，而是test.json把`lock_time`字段写在了顶层（与`tx`同级）而不是`tx`对象内部，debugger读到的
-locktime因此静默变成0，CLTV检查必然失败——**这个坑对生产builder同样成立**：`kaspa.Transaction`
-构造函数的`lockTime`字段必须显式赋值为**毫秒时间戳**（不是DAA分数、不是秒），且必须放在
-`Transaction`构造对象本身（不是某个嵌套子对象），否则会静默变成0导致CLTV永远视为"已过期"或
-"从未过期"（取决于比较方向），这类静默默认值错误在生产环境里不会报错、只会让链上行为与预期不符
-（同类"字段位置错→静默取默认值→无报错"模式已作为ANTI-PATTERNS候选写入，见附录）。
+**MUST-1（v0.4更新为精确规则）：`close_commit`/`refund_flip`的builder必须显式设置
+`lockTime = deadline_ms`（`refund_flip`为`deadline_ms + 7,200,000`），committee签名input（active
+input）的`sequence`必须取普通值`0`（不能是`MAX_TX_IN_SEQUENCE_NUM`），且提交时**节点当前时间必须
+已经真实过了这个lockTime**。** 依据（v0.1-v0.3版本只写了"必须显式设lockTime"，NWT在simnet真实
+提交时发现这远不是全部规则，是两条相互制约的节点级检查）：
+1. **`OpCheckLockTimeVerify`本身要求ACTIVE input的`sequence < MAX_TX_IN_SEQUENCE_NUM`**
+   （`rusty-kaspa` `crypto/txscript/src/opcodes/mod.rs:1055`，错误`"transaction input is finalized"`）
+   ——这条规则专门防止用`sequence=MAX`把CLTV检查短路掉。
+2. **节点级交易finality检查**（`consensus/src/processes/transaction_validator/
+   tx_validation_in_header_context.rs:71-92`，`check_tx_is_finalized`）：若`tx.lock_time`>=当前
+   区块时间/DAA，交易被判"未最终化"直接拒收（`NotFinalized`），**除非**该交易**全部**input的
+   `sequence==MAX`。
+
+**两条规则叠加的唯一自洽解**：committee-签名input的`sequence`必须是普通值（`0`），这就迫使规则2
+必须走"`lock_time`已经真实过去"这条分支才能通过——**没有任何sequence组合能绕开"deadline必须已经
+真实过去"这个前提**（NWT第一次尝试用"部署时刻+1小时"的未来deadline配合两个input都`sequence=MAX`，
+被真实节点拒收；这是**cli-debugger完全测不出的**节点级约束，debugger从不模拟`check_tx_is_finalized`）。
+**对当前活市场`a59c7b48`的含义**：其deadline已过，`close_commit`现在即可提交；`refund_flip`同样
+已满足`deadline+2h`窗口，理论上任何人现在都能提交（MUST-3的permissionless风险已经是当前真实可
+触发状态，不是理论风险）。这类"字段位置错/规则不完整→静默取默认值或被节点拒收"模式已作为
+ANTI-PATTERNS候选写入，见附录。
 
 **MUST-2：封盘（`market_seal`/`convert_to_rootclose`）与`close_commit`必须背靠背提交，
 `close_commit`的输入UTXO必须从封盘广播时暂存的`prepared_tx_json`派生，不能查链。** 依据：账本1478
@@ -403,6 +495,20 @@ deadline+2h宽限期过去，任何持有网络访问权限的人（不需要是
 需要明确知道并接受的产品事实：**deadline+2h之后，市场的退款路径不再受任何权限控制**——具体
 deadline/宽限期时长该设多久，以及要不要在这条路径上补一层委员签名，是产品选择，见§0.12列给
 Owner的选项，本文档不代为决定。
+
+**MUST-4（v0.4新增）：新建covenant输出的KAS值不得取`.sil`注释里`DUST_MIN`常量的字面值
+（1000 sompi），必须与续约输出同量级（`CONTINUATION_OUTPUT_SOMPI`，20,000,000 sompi）。**
+依据：NWT第一次构造`convert_to_claim`时把`claimOutIdx`的输出值直接设成`.sil`注释"KAS侧只剩dust
+（DUST_MIN=1000）"字面提到的1000 sompi，`selectChangeShape`算出`requiredFee≈400,019,728,500 sompi`
+（约4000 KAS）——根因是KIP-9 storage mass公式含`p²/v`项（`v`=输出面值），`v=1000`这种极小面值配合
+covenant输出的plurality`p=2`，storage mass被放大到天文数字（同既有记忆
+`reference-kip9-storage-mass-plurality-is-not-one-covenant-utxo-is-p2`的直接实例）。**这不是
+debugger能测出的**（debugger不实现KIP-9 storage mass），是本轮除CLTV之外第二个"只有真实节点才会
+暴露"的约束——`.sil`注释里"dust"这个词字面理解为"用DUST_MIN常量的具体数字"会直接产出天价fee交易，
+必须统一改用远高于字面`DUST_MIN`、与其它covenant输出同量级的真实"dust"值（`CONTINUATION_OUTPUT_SOMPI
+=20,000,000`，即0.2 KAS），改用后各步fee恢复到2000万-4500万sompi的正常区间（见§0.4的8步simnet
+mass/fee表）。**这条约束同时也是MUST-2"找零判定"的具体门槛来源**——任何fee input找零，必须是0或者
+`≥20,000,000 sompi`，不能落在"看起来是正常小数值但实际会触发storage mass爆炸"的中间地带。
 
 ### §0.12 给Owner的产品选项（本文档只列选项与各自防的损失，不替Owner选）
 
@@ -450,10 +556,60 @@ sha256 `8afe6a68…`，commit `cfafeb4c`）起了一个**隔离simnet**（`tocca
    1482这次的具体实践（simnet节点sha256核对与主网一致后才使用），也同§0.1本文档一直坚持的"pin
    commit+sha256"纪律的自然延伸，适用对象从"debugger二进制"扩大到"simnet节点二进制"。
 
-**当前状态**：NWT正在该simnet上跑Bettor要求的30分钟主网健康观察窗，随后进入
-genesis→market_seal→close_commit→convert_to_claim→claim_draw→KanetTokenClaim.spend全链真实共识
-验证，`close_commit`能否被真共识接受将是这条阻塞项的最终答案（不是debugger离线FAIL/PASS）。结果
-出来后由NWT补充本节，本文档暂不预判结果。
+**结果（v0.4：NWT全链验证已完成，账本1485-1487，出处
+`docs/provenance/2026-09-16-nwt-proto-v0-settlement-simnet-verify/README.md`@`af019c17`，本节只
+摘要/引用，不复制其脚本，本文档所有具体结论以Bettor派工时给出的这份provenance为准）**：30分钟
+主网健康观察窗完成（全程主网节点PID未被触碰，同步状态/`virtualDaaScore`持续增长、console无新
+FATAL）后，genesis→register_append×2→convert_to_rootclose→close_commit→convert_to_claim→
+claim_draw→KanetTokenClaim.spend**8步全链**在v2.0.1 simnet真实提交，**全部真实共识ACCEPT**（逐步
+mass/fee/构造来源见§0.4新表）。`close_commit`——本轮验证的决定性问题——真实共识**接受**，与
+cli-debugger持续FAIL形成明确不一致：**已按本节闸的口径判定"debugger结论与真实共识不一致，
+debugger不再作为close_commit可执行性的依据"，根因未定案（不排除debugger自身未公开bug，也不排除
+其它未触及的边界条件），不下"上游silverscript缺陷"结论**。`KanetTokenClaim.spend`同样simnet
+ACCEPT，v0.3的"待定"状态解除。途中另确认两项cli-debugger完全测不出的节点级真实约束（CLTV
+finality规则、KIP-9 storage mass对小面值covenant输出的敏感性），已写入§0.11 MUST-1/MUST-4；
+并追加发现`RootClaim.sil:103 require(payout>=1000)`是代币化前遗留的结构性阻塞点，已写入§0.8/
+§0.4。
+
+### §0.14 主网资金推演：(A)路线剩余6笔交易的fee UTXO选择与执行完毕资金（v0.4新增，账本1482
+Bettor要求；D-021合规：本节只给结构性形状与推演结论，不给真实地址/完整txid，具体UTXO/txid见
+`docs-private/proto-v0-funds-seed-transfer-balances.md`）
+
+**起点（proto relay当前真实UTXO形状，账本1475）**：4枚约0.95 KAS + 3笔小额找零（约0.117/0.087/
+0.087 KAS），合计约**4.09 KAS**。(A)路线`a59c7b48`剩余6笔交易：**第二笔下注
+（`register_append`#2）→ 封盘（`convert_to_rootclose`）→ `close_commit` → `convert_to_claim` →
+`claim_draw` → `KanetTokenClaim.spend`**（`market_genesis`/首笔下注已完成，不计入本次推演）。
+
+**每笔所需fee（引用§0.4 simnet 8步表里对应的requiredFee，同一精确参数组合`min_bet=1`/
+`NO stake=999`/`payout=1000`）**：
+
+| 步骤 | mass | requiredFee | 换算KAS |
+|---|---|---|---|
+| 第二笔下注(`register_append`#2) | 446,880 | 44,687,300 sompi | 0.446873 |
+| 封盘(`convert_to_rootclose`) | 396,794 | 39,678,700 sompi | 0.396787 |
+| `close_commit` | 198,771 | 19,876,700 sompi | 0.198767 |
+| `convert_to_claim` | 396,718 | 39,671,100 sompi | 0.396711 |
+| `claim_draw` | 393,781 | 39,377,400 sompi | 0.393774 |
+| `KanetTokenClaim.spend` | 196,628 | 19,662,500 sompi | 0.196625 |
+| **合计** | — | 202,953,700 sompi | **2.029537** |
+
+**fee UTXO逐笔选择（约束：单个签名输入≤`SIGNED_INPUT_CEILING_SOMPI`1.0 KAS；找零必须0或
+≥20,000,000 sompi，MUST-4）**：3笔小额找零（约0.087-0.117 KAS）**均小于本轮最小的单笔所需fee**
+（`spend`的0.196625 KAS），不能单独覆盖任何一步，暂时闲置（不影响本次推演，可留待后续与其它小额
+一并整理）。4枚约0.95 KAS的UTXO足够覆盖前4笔较大fee（下注/封盘/claim/convert_to_claim，各自找零
+0.50-0.56 KAS，均≥0.2 KAS门槛，合规）；`close_commit`与`spend`这两笔较小的fee，改用前面步骤产生
+的找零（约0.50-0.55 KAS一档）支付，找零后仍剩约0.30-0.36 KAS（≥0.2 KAS门槛，合规）。**全部6笔
+的fee input均未超过签名输入上限，全部找零均满足MUST-4门槛，没有任何一步卡在"资金不够"或"找零
+违规"上。**
+
+**mass margin提示（与§0.4"mass观察"呼应）**：6笔里最紧的是第二笔下注，mass占simnet
+500,000上限约89%——不是本次推演的资金问题，但提示"这条链路对区块mass上限的敏感度已经不低"，
+若未来市场规模扩大（更多下注方/更大state），需要重新核这个margin，不能想当然沿用当前数字。
+
+**执行完毕后剩余资金**：4.09 KAS − 2.029537 KAS ≈ **2.06 KAS**（含此前提到的3笔小额找零约0.29 KAS
+仍然闲置未用，以及4步大额交易产生的找零合计约1.77 KAS）——**资金充足，(A)路线6笔交易全部执行完毕
+后proto relay仍剩约2.06 KAS，没有缺口**。若Owner后续想追加新市场（走(B)路线的genesis），
+这笔剩余资金里应留出至少0.2 KAS genesis fee的余量，具体分配不在本节推演范围内。
 
 ## §1 每步交易形状（inputs/outputs/签名输入/covenant绑定/mass/fee）
 
@@ -669,49 +825,117 @@ fail-closed拒绝），理由：(B)路线下一旦发现`RootClaim.sil`/`RefundC
 
 ---
 
-## §7 主网执行页草案（顺序、验收读数、中止条件）
+## §7 实现清单（v0.4新增：五个结算builder + 意图状态机 + 驱动接线 + relay漏斗命令，账本1482
+Bettor要求）
 
-**前提（v0.3新增第0步，账本1482 simnet闸——§0.13）**：本节所有步骤上主网广播前，必须先满足§0.13
-的simnet真实全链共识验证闸——用生产builder构造的真实字节在NWT起的隔离simnet（真实kaspad 2.0.1，
-版本/sha256核对过与主网一致）上真实提交并确认；`close_commit`/`KanetTokenClaim.spend`在simnet结果
-出来前维持"待定"，不得因为debugger离线PASS/FAIL就推进到主网执行。debugger审计（本文档§0全篇）是
-开发期定位`require()`链具体断言失败位置的工具，不是上主网的充分依据。
+**总纪律（适用于本节全部条目）**：每一项实现完成后，**输出的真实字节必须在§0.13的simnet上真实
+提交确认，才能合入mainline**——不能只靠单元测试/cli-debugger PASS就合并。simnet ACCEPT是必要
+条件，不是可选的加分项（同§0.8第8点对`RootClaim.sil`修复的同一条纪律，适用到全部结算builder）。
 
-**前提**（走(A)路线，`a59c7b48`继续用）：
+### §7.1 五个结算builder
 
-1. **确认市场状态**：`a59c7b48` betting，count=1；若Owner计划再加1笔下注，**须押相反方（NO）**，
-   不是同一方（§0.7 v0.3校正：同一方会产生两张赢票、各自payout<pool_value，必然触发partial续约
-   分支，走不了(A)）。
+| # | Builder | 对应entry | 相关MUST | 回归要求 |
+|---|---------|----------|---------|---------|
+| 1 | `buildMarketSealTxJson`（封盘） | `ShardLeaf_direct.convert_to_rootclose` | MUST-2（广播成功后立即暂存`prepared_tx_json`供下一步用）、MUST-4（新建covenant输出KAS值用`CONTINUATION_OUTPUT_SOMPI`，不用字面`DUST_MIN`） | simnet真实ACCEPT（§0.4④已用审计构造验证过合约逻辑本身可行，生产builder字节需重新过simnet） |
+| 2 | `buildCloseCommitTxJson`（resolve） | `RootClose.close_commit` | MUST-1（`lockTime=deadline_ms`+committee input `sequence=0`+提交时须已过deadline）、MUST-2（输入UTXO从封盘`prepared_tx_json`派生、不查链、与封盘背靠背提交） | simnet真实ACCEPT（§0.4⑤已用审计构造验证，debugger离线FAIL不作为验收依据，见§0.13） |
+| 3 | `buildConvertToClaimTxJson`/`buildConvertToRefundclaimTxJson`（对称，共用大部分逻辑） | `RootClose.convert_to_claim`/`convert_to_refundclaim` | MUST-4（新建RootClaim/RefundClaim genesis输出KAS值） | `convert_to_claim`：simnet真实ACCEPT（§0.4⑥）；`convert_to_refundclaim`：目前只有debugger PASS，**必须补simnet验证**才能合入（symmetric不代表可以免测） |
+| 4 | `buildClaimDrawTxJson`/`buildRefundPayoutTxJson`（对称） | `RootClaim.claim_draw`/`RefundClaim.refund_payout` | 若走(B)：§0.8修复完成后须用真实partial形状回归；full分支已有§0.4⑦simnet证据 | `claim_draw`(full)：simnet真实ACCEPT（§0.4⑦）；`claim_draw`(partial)：**阻塞于§0.8修复**，修复前不得合入；`refund_payout`(full/partial)：目前只有debugger PASS，需要补simnet验证 |
+| 5 | `buildWithdrawTxJson`（提现） | `KanetTokenClaim.spend` | 无（`.sil`头注"不受V-T-8影响"，本身不涉及自续约） | simnet真实ACCEPT（§0.4⑧） |
+
+**审计构造→生产builder的落码提醒**：§0.4表④⑤⑥⑦⑧五步目前用的是NWT的**审计构造**（非生产
+builder），只证明了"合约逻辑在真实共识上可执行"；上表每个builder落码后，必须用**生产字节**重新
+在simnet跑一遍，不能直接复用审计构造的ACCEPT结果当验收凭证（§0.4"审计构造结论的地位"已强调过
+这条边界，此处重申适用到具体实现工作）。
+
+### §7.2 意图状态机（§2既有设计，本节只列与本轮新发现相关的更新点）
+
+- 状态机的`pending→prepared→submitted→landed/ambiguous`模式（§2）不变；**新增**：`prepared`态
+  必须携带完整`prepared_tx_json`（不只是`prepared_txid`），供MUST-2的"背靠背+不查链"派生使用——
+  这是本轮新增的字段完整性要求，之前的意图表设计可能只按惯例存了txid。
+- `resolve`（`close_commit`）与`market_seal`两步在状态机里需要标记为"背靠背对"（一个逻辑单元，
+  中间不能被别的操作打断），不是两个独立的、可以任意顺序/任意时间执行的普通步骤。
+
+### §7.3 驱动接线（触发/轮询逻辑）
+
+- `market_seal`的触发条件`count==seal_count`已有（§1.1），驱动逻辑本身不变；**新增CLTV约束**
+  （MUST-1）：`close_commit`/`refund_flip`的驱动逻辑必须先检查"当前时间是否已经真实超过
+  `deadline_ms`（`refund_flip`为`+7,200,000`）"，未到时间点提交会被节点`NotFinalized`直接拒收，
+  驱动逻辑应该在拒收之前就做好这个前置检查，不要依赖"广播失败再重试"这种被动模式。
+- `claim_draw`驱动逻辑触发前需要判断走full还是partial分支（§0.7路线判断）——(B)路线修复前，
+  驱动逻辑遇到partial场景应该**直接拒绝构造**（同§7旧版"中止条件"里"立即停止，不允许先广播试试看"
+  的既有纪律，移到这里延续）。
+
+### §7.4 relay漏斗命令（IPC/命令类型注册）
+
+- 五个结算builder对应的命令类型需要在`kasia-relay/src/lib/commands.mjs`里注册（同现有
+  `register_append`等命令的既有模式），**必须同时在`COMMAND_FIELD_TYPES`里注册对应字段类型**——
+  本仓lint（`R-COMMAND-REGISTRATION`）现有WARN规则专门抓"命令类型注册了但字段类型没注册"这种
+  半截注册，新增命令类型必须两处同步登记，不能只加一半。
+- committee签名（`close_commit`）与bettor签名（`claim_draw`消费ticket，见§1.3"待NWT核实的技术点"）
+  这两类"非fee input"的签名，需要在漏斗命令层面明确区分签名者身份（不能全部走`signOnlyDeclaredInputs`
+  的默认fee签名路径），具体接线方式留给NWT实现时按现有`covenant-broadcast.mjs`的既有扩展模式决定，
+  本文档不代为设计具体API形状。
+
+## §8 主网执行页草案（v0.4更新：close_commit阻塞解除、精确参数、simnet闸前置条件）
+
+**前提（simnet闸，账本1482——§0.13）**：本节所有步骤上主网广播前，必须先满足§0.13的simnet真实
+全链共识验证闸——用生产builder构造的真实字节在simnet（真实kaspad 2.0.1，版本/sha256核对过与主网
+一致）上真实提交并确认。debugger审计（本文档§0全篇）是开发期定位`require()`链具体断言失败位置的
+工具，不是上主网的充分依据（§0.13闸内容第3点）。**`close_commit`/`KanetTokenClaim.spend`已由NWT
+的审计构造simnet验证ACCEPT（§0.4/§0.13结果），但生产builder落码后仍需用生产字节重新过一遍simnet
+——审计构造的ACCEPT不能直接当生产验收凭证（§7.1已强调）**。
+
+**执行步骤**（走(A)路线，`a59c7b48`继续用，精确参数见§0.7"（A）路线精确参数"）：
+
+1. **确认市场状态**：`a59c7b48` betting，count=1。第二笔下注**押NO，stake=999**（不是同一方，
+   §0.7 v0.2校正；精确数字见§0.7"(A)路线精确参数"——NWT已用这个精确组合在simnet全链验证过）。
 2. **`market_seal`**：`count==seal_count`时触发。验收：`proto_markets.status→sealed`,
-   `rootclose_txid/vout`写入，链上核对RootClose UTXO存在、代币金额==pool_value。中止条件：广播失败
-   不推进status（NO-TX-NO-STATE），leaf仍可重试。**MUST-2（§0.11）**：`market_seal`广播成功后，
-   立即把`prepared_tx_json`暂存供下一步`close_commit`直接派生输入UTXO用，不依赖后续查链。
-3. **`resolve`**：操作员传`outcome`。**须与`market_seal`背靠背提交**（MUST-2）：`close_commit`的
-   输入UTXO从上一步暂存的`prepared_tx_json`派生，不查链。**builder必须显式设置`lockTime`为毫秒
-   时间戳**（MUST-1），不能依赖默认值。验收：`close_commit`广播成功且已通过§0.13 simnet真实共识
-   确认（不是debugger离线PASS）、`proto_markets.status→resolved`,`winning_side`/`payout_root`
-   落库且与独立重算值一致（§4）。中止条件：委员私钥解密失败/签名验证失败——fail-closed，不允许
-   "跳过签名校验直接推进status"这种降级；`close_commit`当前simnet结果未出，**在NWT给出结论前，
-   本步骤不得上主网执行**。
-4. **`convert_to_claim`**：验收：RootClaim genesis成功，代币全额转入。
-5. **`claim_draw`**：验收：KanetTokenClaim genesis成功，`proto_claims`记账（`claim_txid`/`amount`）。
-   中止条件：若发现实际场景需要partial续约（payout<pool_value）——**立即停止，回退到§0.7路线判断，
-   不允许"先广播试试看"**（§0已经证明这条代码路径未经充分验证）。
-6. **`withdraw`**：验收：赢家提现成功，`proto_claims.withdrawn_at`/`withdraw_txid`落库——
-   `KanetTokenClaim.spend`同样待simnet结论（§0.13），debugger侧证据（§0.4）目前不足以单独判定安全。
+   `rootclose_txid/vout`写入，链上核对RootClose UTXO存在、代币金额==pool_value；生产builder字节
+   须先simnet ACCEPT。中止条件：广播失败不推进status（NO-TX-NO-STATE），leaf仍可重试。
+   **MUST-2**：广播成功后立即把`prepared_tx_json`暂存供下一步`close_commit`直接派生输入UTXO用，
+   不依赖后续查链。**MUST-4**：新建covenant输出KAS值用`CONTINUATION_OUTPUT_SOMPI`
+   （20,000,000 sompi），不能用`.sil`注释字面`DUST_MIN`（1000 sompi），否则storage mass爆炸
+   （§0.11 MUST-4）。
+3. **`resolve`（`close_commit`）**：操作员传`outcome=YES`。**须与`market_seal`背靠背提交**
+   （MUST-2）：输入UTXO从上一步暂存的`prepared_tx_json`派生，不查链。**builder必须显式设置
+   `lockTime=deadline_ms`，committee签名input的`sequence`取`0`，且提交时节点当前时间必须已经
+   真实超过`deadline_ms`**（MUST-1 v0.4精确规则——`a59c7b48`的deadline已过，现在满足这个前提）。
+   验收：`close_commit`广播成功且生产字节已过simnet真实共识确认，`proto_markets.status→resolved`,
+   `winning_side`/`payout_root`落库且与独立重算值一致（§4）。中止条件：委员私钥解密失败/签名验证
+   失败——fail-closed，不允许"跳过签名校验直接推进status"这种降级。
+4. **`convert_to_claim`**：验收：RootClaim genesis成功，代币全额转入；生产builder字节须先simnet
+   ACCEPT（§0.4⑥已有审计构造证据）。**MUST-4**同上，新建RootClaim genesis输出KAS值同样不能用
+   字面`DUST_MIN`。
+5. **`claim_draw`**：验收：KanetTokenClaim genesis成功，`proto_claims`记账（`claim_txid`/`amount`），
+   `payout=1000==pool_value`走full分支（无续约，§0.7精确参数）；生产builder字节须先simnet ACCEPT
+   （§0.4⑦已有审计构造证据）。中止条件：若发现实际场景需要partial续约（payout<pool_value）——
+   **立即停止，回退到§0.7路线判断，走(B)前须先完成§0.8的`RootClaim.sil`修复**，不允许"先广播
+   试试看"（partial续约的代码路径仍是§0.5②确诊的真实缺陷，未修复前不能用）。
+6. **`withdraw`**：验收：赢家提现成功，`proto_claims.withdrawn_at`/`withdraw_txid`落库；生产
+   builder字节须先simnet ACCEPT（§0.4⑧已有审计构造证据，v0.3的"待定"已解除）。
 
 **通用中止条件（所有步骤）**：任何一步的`net_loss`/`SIGNED_INPUT_CEILING_SOMPI`检查失败——fail-closed
 报`no_suitable_fee_utxo`或`net_loss超限`，不允许放宽阈值"让它先过"；proto relay余额检查
 （`assertProtoRelayHealthy`，`covenant-construction-spec-v0.1.md` §9.1）必须在每一步广播前重新核实，
-不是只在流程开始时查一次；`refund_flip`的builder同样必须显式设置毫秒时间戳`lockTime`（MUST-1），
-且执行页需要向操作员明示MUST-3的风险（deadline+2h后任何人都可触发refund_flip，不受权限控制）。
+不是只在流程开始时查一次；`refund_flip`的builder同样必须显式设置`lockTime=deadline_ms+7,200,000`+
+committee input `sequence=0`（MUST-1），且执行页需要向操作员明示MUST-3的风险（deadline+2h后任何人
+都可触发refund_flip，不受权限控制——`a59c7b48`的这个窗口目前也已经满足，理论上任何人现在都能提交，
+见§0.11 MUST-1）；任何新建covenant输出必须遵守MUST-4的KAS值下限，不能取字面`DUST_MIN`。
+
+**资金充足性**：(A)路线剩余6笔交易的fee UTXO选择、找零合规性、执行完毕后剩余资金，见§0.14"主网
+资金推演"——结论是资金充足，无缺口，唯一需要留意的是`register_append`那一步的mass margin
+（约89%，见§0.14"mass margin提示"）。
 
 **Owner需要在实现前先拍板的问题（汇总，本文档不代为决定）**：
 
-- §0.7：(A)还是(B)？
+- §0.7：(A)还是(B)？（v0.4更新：(A)已有simnet真实共识确认的精确参数可直接执行，不再受
+  close_commit不确定性阻塞；(B)仍需先完成§0.8修复）
 - §0.7括号内：v0业务规则是否要求"同一市场支持2个不同payout值的赢家各自claim"，还是"赢家通吃/份额
   加总一次性发放"就够？这直接决定(A)是否真的适用，不只是"能不能技术上跑通"的问题。
+- §0.8：`RootClaim.sil:103 require(payout>=1000)`的修法选项a/b/c，Owner/Bettor需要确认选哪个
+  （本文档倾向选项b，仅供参考）。
 - §0.9已解决：`RefundClaim.refund_payout`确认安全，走(B)不需要动它，只需修`RootClaim.sil`。
+- §0.12：新市场的deadline/grace时长、refund_payout是否需要委员签名——两组产品选项，Owner分别拍板。
 
 ---
 
