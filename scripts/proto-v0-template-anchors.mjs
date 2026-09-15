@@ -102,11 +102,14 @@ const feeProfile = {
     cap: '80000000',
     _source: 'docs/provenance/2026-09-14-j2-bet-mint-stepA-ktt-genesis-mass-fee-estimate/README.md（与 market_genesis 相同的结构性原因, 非假设照抄）',
   },
-  // bet_mint 步骤 B(register_append)实测: 不是 genesis, U 形曲线最优点对续约输出的"值"同样适用
+  // register_append(D-020后bet_mint唯一步骤)实测: 不是 genesis, U 形曲线最优点对续约输出的"值"同样适用
   // (KIP-9 storage mass 对 covenant 输出只看 value, 不分 genesis/续约), 但续约输出本身的 cap 与
   // genesis 不是同一件事(genesis 只算一次, 续约每次 bet 都要重付, 且要额外背 mkt_prefix/mkt_suffix
   // 这笔线性 mass 开销)——cap 数值按实测 required_fee(≈0.5992 KAS)×2 留余量, 见下方 _source。
-  bet_mint_step_b: {
+  // 🔴 账本1462改名: 原键名 'bet_mint_step_b' 是 D-020(账本1446/1448) 取消两步设计前的遗留命名——
+  // register_append 现在是下注唯一的一步, 不再有"步骤B"这个概念(这个键名本身就是导致 loadFeeProfileCap
+  // 调用点看起来指向一个已经不存在的东西的困惑源, 数据内容不变, 只改名)。
+  register_append: {
     leafContinuationValue: '20000000',
     kttContinuationValue: '20000000',
     minFeeInputFaceValue: '95000000', // Bettor 定案种子面值(0.95 KAS)，找零≈15,000,000（略低于 CONTINUATION_OUTPUT_SOMPI 20,000,000 干净线，实测仅多花约 0.02 KAS，Bettor 复核接受，非危险区）

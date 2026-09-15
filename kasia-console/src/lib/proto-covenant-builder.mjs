@@ -74,7 +74,8 @@ export function loadProtocolConstants() {
  * 读 `feeProfile[kind].cap`(同一份 anchors.json, `proto-v0-template-anchors.json` §4/§9.2 引用的
  * per-kind cap)——buildAndBroadcast 接线用, 与 covenant-broadcast-relay.mjs 硬编码的
  * GLOBAL_ABS_FEE_CAP_SOMPI(kind-无关最终兜底)是两条独立防线, 不是同一个数字的两处写法。
- * @param {string} kind  'market_genesis' | 'bet_mint_step_a' | 'bet_mint_step_b'
+ * @param {string} kind  'market_genesis' | 'bet_mint_step_a' | 'register_append'(账本1462改名，原
+ *   'bet_mint_step_b'——D-020 取消两步设计后这个键名已无对应概念，数据内容不变，只改名)
  * @returns {bigint}
  */
 export function loadFeeProfileCap(kind) {

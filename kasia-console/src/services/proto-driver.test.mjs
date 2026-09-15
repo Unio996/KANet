@@ -51,7 +51,9 @@ function makeSendCmd() {
   const calls = [];
   const sendCmd = async (relayId, cmd) => {
     calls.push(cmd);
-    if (cmd.type === 'get_address_utxos') return { ok: true, utxos: [{ outpoint: { transactionId: 'ab'.repeat(32), index: 0 }, amount: '10000000000' }] };
+    // 账本1462修复后 SIGNED_INPUT_CEILING_SOMPI(1.0 KAS)会预先过滤面值过大的候选——原100 KAS巨额假面值
+    // 已不再可用, 改用真实种子面值同量级的0.5 KAS(genesis真实所需仅≈0.213 KAS)。
+    if (cmd.type === 'get_address_utxos') return { ok: true, utxos: [{ outpoint: { transactionId: 'ab'.repeat(32), index: 0 }, amount: '50000000' }] };
     if (cmd.type === 'covenant_broadcast') return { ok: true, txId: cmd.expected_txid, intent_key: cmd.intent_key };
     if (cmd.type === 'check_utxo_landed') return { ok: true, landed: false, depth: null };
     throw new Error(`unexpected cmd ${cmd.type}`);
@@ -157,7 +159,7 @@ await t('⑥bet_mint(register_append) pending intent 经 runProtoDriverTick 真�
   ensureBetIntent({ betId: betId1, step: 'append' });
   const sendCmd = async (relayId, cmd) => {
     if (cmd.type === 'get_address_utxos') {
-      return { ok: true, utxos: [{ outpoint: { transactionId: market1Row.shardleaf_txid, index: 0 }, amount: '10000000000' }] };
+      return { ok: true, utxos: [{ outpoint: { transactionId: market1Row.shardleaf_txid, index: 0 }, amount: '95000000' }] }; // 账本1462: 0.95 KAS, 覆盖首笔下注≈0.82 KAS最小可行门槛(原100 KAS假面值已超SIGNED_INPUT_CEILING_SOMPI被过滤)
     }
     if (cmd.type === 'covenant_broadcast') return { ok: true, txId: cmd.expected_txid, intent_key: cmd.intent_key };
     if (cmd.type === 'check_utxo_landed') return { ok: true, landed: false, depth: null };
@@ -174,7 +176,7 @@ await t('⑦bet_mint(register_append) submitted intent landed 后, proto_bets.st
   const { runProtoDriverTick } = await import('./proto-driver.mjs');
   const intentBefore = getBetIntent(`proto-bet:${betId1}:append`);
   const sendCmd = async (relayId, cmd) => {
-    if (cmd.type === 'get_address_utxos') return { ok: true, utxos: [{ outpoint: { transactionId: market1Row.shardleaf_txid, index: 0 }, amount: '10000000000' }] };
+    if (cmd.type === 'get_address_utxos') return { ok: true, utxos: [{ outpoint: { transactionId: market1Row.shardleaf_txid, index: 0 }, amount: '95000000' }] }; // 账本1462: 0.95 KAS, 覆盖首笔下注≈0.82 KAS最小可行门槛(原100 KAS假面值已超SIGNED_INPUT_CEILING_SOMPI被过滤)
     if (cmd.type === 'covenant_broadcast') return { ok: true, txId: cmd.expected_txid, intent_key: cmd.intent_key };
     if (cmd.type === 'check_utxo_landed') return { ok: true, landed: true, depth: 25 };
     throw new Error(`unexpected cmd ${cmd.type}`);

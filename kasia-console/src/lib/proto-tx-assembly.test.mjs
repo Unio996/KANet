@@ -19,8 +19,8 @@ if (!process.env._PROTO_TX_ASSEMBLY_TEST_BOOTSTRAPPED) {
 }
 
 const {
-  GENESIS_OUTPUT_SOMPI, CONTINUATION_OUTPUT_SOMPI, GLOBAL_ABS_FEE_CAP_SOMPI, assertFixedOutputValue,
-  computeRequiredFeeSompiOrThrow, selectFeeUtxo, selectChangeShape, dynamicNetLossCeiling,
+  GENESIS_OUTPUT_SOMPI, CONTINUATION_OUTPUT_SOMPI, GLOBAL_ABS_FEE_CAP_SOMPI, SIGNED_INPUT_CEILING_SOMPI, assertFixedOutputValue,
+  computeRequiredFeeSompiOrThrow, selectFeeUtxo, selectFeeUtxoByConstruction, selectChangeShape, dynamicNetLossCeiling,
 } = await import('./proto-tx-assembly.mjs');
 
 let pass = 0, fail = 0;
@@ -83,6 +83,67 @@ t('fee-UTXO: 没有任何单个 UTXO 够用 ⇒ no_suitable_fee_utxo, 不自动�
   let threw = null;
   try { selectFeeUtxo([{ txid: 'a', vout: 0, value: 1_000n }], 100_000_000n); } catch (e) { threw = e; }
   if (!threw || !/no_suitable_fee_utxo/.test(threw.message)) throw new Error('应该 fail-loud 报 no_suitable_fee_utxo');
+});
+
+// ============ selectFeeUtxoByConstruction(账本1462: 闸3金丝雀中止的根因修复——不猜保守下界, 按真实构造逐个尝试) ============
+t('selectFeeUtxoByConstruction: 按面值升序逐个真实调用tryBuild, 第一个成功的即选中(不是选面值最大的)', () => {
+  const attempts = [];
+  const tryBuild = (u) => {
+    attempts.push(u.value);
+    if (u.value < 50_000_000n) throw new Error('too small for this fake build');
+    return { built: true, usedValue: u.value };
+  };
+  const candidates = [
+    { txid: 'big', vout: 0, value: 95_000_000n },
+    { txid: 'small', vout: 0, value: 10_000_000n },
+    { txid: 'mid', vout: 0, value: 60_000_000n },
+  ];
+  const { feeUtxo, built } = selectFeeUtxoByConstruction(candidates, tryBuild);
+  if (feeUtxo.txid !== 'mid') throw new Error(`应该选中第一个真实构造成功的(按升序: 10M失败→60M成功), 实际选中 ${feeUtxo.txid}`);
+  if (attempts.map(String).join(',') !== '10000000,60000000') throw new Error(`应该按升序尝试且在第一个成功后停止, 实际尝试顺序 ${attempts}`);
+  if (!built.built || built.usedValue !== 60_000_000n) throw new Error('返回的built应该是tryBuild真正返回的对象');
+});
+t('selectFeeUtxoByConstruction: 面值超过SIGNED_INPUT_CEILING_SOMPI的候选被预先过滤, 不会去尝试构造它(relay侧反正会拒签)', () => {
+  const attempts = [];
+  const tryBuild = (u) => { attempts.push(u.value); return { built: true }; };
+  const candidates = [
+    { txid: 'toobig', vout: 0, value: SIGNED_INPUT_CEILING_SOMPI + 1n },
+    { txid: 'ok', vout: 0, value: 50_000_000n },
+  ];
+  const { feeUtxo } = selectFeeUtxoByConstruction(candidates, tryBuild);
+  if (feeUtxo.txid !== 'ok') throw new Error('应该选中未超上限的候选');
+  if (attempts.some((v) => v > SIGNED_INPUT_CEILING_SOMPI)) throw new Error('不该尝试构造超过SIGNED_INPUT_CEILING_SOMPI的候选');
+});
+t('selectFeeUtxoByConstruction: 全部候选真实构造都失败 ⇒ throw no_suitable_fee_utxo, 报文附带每个候选的面值+失败原因', () => {
+  const tryBuild = (u) => { throw new Error(`build failed for ${u.value}`); };
+  const candidates = [{ txid: 'a', vout: 0, value: 30_000_000n }, { txid: 'b', vout: 0, value: 40_000_000n }];
+  let threw = null;
+  try { selectFeeUtxoByConstruction(candidates, tryBuild); } catch (e) { threw = e; }
+  if (!threw || !/no_suitable_fee_utxo/.test(threw.message)) throw new Error('应该 throw no_suitable_fee_utxo');
+  if (!/value=30000000/.test(threw.message) || !/value=40000000/.test(threw.message)) throw new Error(`报文应该附带每个候选的面值, 实际: ${threw.message}`);
+  if (!/build failed/.test(threw.message)) throw new Error('报文应该附带每个候选真实的失败原因');
+});
+t('selectFeeUtxoByConstruction: 没有任何候选面值 <= 上限(全部被过滤) ⇒ throw, 报文说明被排除的候选数, 不假装尝试过', () => {
+  const tryBuild = () => { throw new Error('should never be called'); };
+  const candidates = [{ txid: 'a', vout: 0, value: SIGNED_INPUT_CEILING_SOMPI + 1n }];
+  let threw = null;
+  try { selectFeeUtxoByConstruction(candidates, tryBuild); } catch (e) { threw = e; }
+  if (!threw || !/no_suitable_fee_utxo/.test(threw.message)) throw new Error('应该 throw no_suitable_fee_utxo');
+  if (!/超过上限被排除=1/.test(threw.message)) throw new Error(`报文应该说明被排除的候选数, 实际: ${threw.message}`);
+});
+t('selectFeeUtxoByConstruction: 真实种子面值场景(0.5/0.5/0.95 KAS)——用一个"minRequired 阈值判定"的假tryBuild模拟真实构造对每个面值的接受/拒绝, 验证不再被保守下界一刀切拒绝', () => {
+  // 模拟真实的 buildRegisterAppendTxJson 行为: 面值 >= 某个真实阈值(账本1462引用的75dc9263实算约0.41-0.44 KAS
+  // requiredFee, 这里用0.45 KAS模拟"真实构造需要的下限")才能真实构造成功——不是像旧 selectFeeUtxo 那样
+  // 用 CONTINUATION*2+GENESIS+cap(≈1.2 KAS, 全部种子面值都不够)去预筛。
+  const REALISTIC_MIN = 45_000_000n; // 0.45 KAS, 模拟真实mass计算出的下限, 远低于旧公式的~1.0-1.2 KAS门槛
+  const tryBuild = (u) => { if (u.value < REALISTIC_MIN) throw new Error('mass太小, 构造不出可行找零形状'); return { requiredFee: 41_000_000n, usedValue: u.value }; };
+  const seedCandidates = [
+    { txid: 's1', vout: 0, value: 50_000_000n },  // 0.5 KAS
+    { txid: 's2', vout: 0, value: 50_000_000n },  // 0.5 KAS
+    { txid: 's3', vout: 0, value: 95_000_000n },  // 0.95 KAS
+  ];
+  const { feeUtxo } = selectFeeUtxoByConstruction(seedCandidates, tryBuild);
+  if (feeUtxo.value !== 50_000_000n) throw new Error(`真实种子面值场景下应该选中0.5 KAS(第一个够用的), 实际选中 ${feeUtxo.value}`);
 });
 // ============ selectChangeShape(账本1427 订正: 按真实成本二选一, 不设人为 0/20M 门槛) ============
 // 用假 kaspa(固定 mass 函数)构造确定性向量——真实 mass 依赖真 kaspa-wasm 编译产物, 在下面的

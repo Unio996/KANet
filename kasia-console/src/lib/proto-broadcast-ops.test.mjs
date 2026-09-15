@@ -55,7 +55,9 @@ function makeSendCmd({ covenantBroadcastResult } = {}) {
   const sendCmd = async (relayId, cmd) => {
     calls.push(cmd);
     if (cmd.type === 'get_address_utxos') {
-      return { ok: true, utxos: [{ outpoint: { transactionId: FEE_UTXO_TXID, index: 0 }, amount: '10000000000' }] };
+      // 账本1462修复后 SIGNED_INPUT_CEILING_SOMPI(1.0 KAS)会预先过滤面值过大的候选——原100 KAS巨额假面值
+      // 已不再可用(会被判定"超过上限被排除"), 改用真实种子面值同量级的0.5 KAS(genesis真实所需仅≈0.213 KAS)。
+      return { ok: true, utxos: [{ outpoint: { transactionId: FEE_UTXO_TXID, index: 0 }, amount: '50000000' }] };
     }
     if (cmd.type === 'covenant_broadcast') {
       return covenantBroadcastResult ? covenantBroadcastResult(cmd) : { ok: true, txId: cmd.expected_txid, intent_key: cmd.intent_key };
@@ -163,7 +165,9 @@ await t('⑥covenant_broadcast 命令本身失败(relay 拒绝) ⇒ 返回 {erro
         if (heldOutpoint && cmd.address === heldAddressFor(currentState.pool_value)) {
           return { ok: true, utxos: [{ outpoint: { transactionId: heldOutpoint.txid, index: 2 }, amount: '20000000' }] };
         }
-        if (cmd.address === relayAddr) return { ok: true, utxos: [{ outpoint: { transactionId: FEE_UTXO_TXID, index: 0 }, amount: '10000000000' }] };
+        // 账本1462修复后 SIGNED_INPUT_CEILING_SOMPI(1.0 KAS)会预先过滤面值过大的候选——原100 KAS巨额假
+        // 面值已不再可用, 改用0.95 KAS(真实种子面值, 覆盖首笔下注≈0.82 KAS的最小可行门槛留有余量)。
+        if (cmd.address === relayAddr) return { ok: true, utxos: [{ outpoint: { transactionId: FEE_UTXO_TXID, index: 0 }, amount: '95000000' }] };
         return { ok: true, utxos: [] };
       }
       if (cmd.type === 'covenant_broadcast') return { ok: true, txId: cmd.expected_txid, intent_key: cmd.intent_key };
@@ -230,6 +234,149 @@ await t('⑥covenant_broadcast 命令本身失败(relay 拒绝) ⇒ 返回 {erro
     const res = await buildRegisterAppendAndBroadcast({ kaspa, network: 'mainnet', market: marketRow, bet: bet3, sendCmd, relayId: 'relay-A', relayAddress: relayAddr });
     if (!res.error || !/market_append_in_flight/.test(res.error)) throw new Error(`应该拒绝并报market_append_in_flight, 实际 ${JSON.stringify(res)}`);
     if (calls.some((c) => c.type === 'covenant_broadcast')) throw new Error('不该发出covenant_broadcast');
+  });
+}
+
+// ══════════════ 账本1462: 闸3金丝雀中止根因回归——真实种子面值(0.5/0.5/0.95 KAS)全链路 ══════════════
+// 现象: proto-v0-funds 只有 0.5/0.5/0.95 KAS 三枚UTXO(1404/1456定案面值), market_genesis每个tick报
+// no_suitable_fee_utxo。根因: 旧公式(GENESIS_OUTPUT_SOMPI+cap / CONTINUATION*2+GENESIS+cap)算出的
+// "保守下界"(≈0.6-1.2 KAS)比真实所需(≈0.41-0.44 KAS requiredFee)宽松得多, 把这三枚真实种子UTXO全部
+// 预筛掉——从未真正尝试构造。本节独立于上面的假面值(10000000000=100 KAS)测试段, 单独验证换成
+// selectFeeUtxoByConstruction 之后, 用【真实种子面值】能不能真的选中+构造成功。
+{
+  const { computeShardLeafRedeemScript, computeKttGenesisArtifact } = await import('./proto-covenant-builder.mjs');
+  const { deriveLeafState } = await import('./proto-leaf-state.mjs');
+  const { buildRegisterAppendAndBroadcast } = await import('./proto-broadcast-ops.mjs');
+  const { scriptPublicKeyFromHex } = await import('./proto-tx-assembly.mjs');
+  const { sqlite } = await import('../db/client.js');
+
+  const MARKET_ID_2 = 'ee'.repeat(32);
+  const artifacts2 = await computeMarketGenesisArtifacts({ marketId: MARKET_ID_2, minBet: 5, deadlineMs: 1700000000000 });
+  const market2 = ensureMarketPending({
+    id: MARKET_ID_2, token_def_id: 't1', question: 'seed-face-value market(账本1462)', deadline_ms: 1700000000000, min_bet: 5, seal_count: 2,
+    committee_pubkeys_json: JSON.stringify([artifacts2.committeePubkeyHex]), committee_privkey_enc: artifacts2.committeePrivkeyEnvelope,
+    rootclose_tmpl_hash: artifacts2.rootCloseTmplHash,
+  });
+
+  const SEED_0_5 = 50_000_000n, SEED_0_95 = 95_000_000n;
+  const decodeInputAmounts = (txJson) => JSON.parse(txJson).inputs.map((i) => BigInt(i.utxo.amount));
+
+  let genesisFeeValue;
+  await t('⑫账本1462 genesis: 真实种子三枚UTXO(0.5/0.5/0.95 KAS)候选 ⇒ 构造成功且选中0.5 KAS(不再被保守下界一刀切拒绝)', async () => {
+    const sendCmd = async (relayId, cmd) => {
+      if (cmd.type === 'get_address_utxos') {
+        // lint-allow-chain-amount-precision: SEED_0_5/SEED_0_95 是 sompi 整数 BigInt(非 KAS 浮点数), String(bigint)
+        // 精确无损, 不是 KI-30 防的"KAS 浮点转字符串丢精度"那类风险(且这是构造 mock UTXO fixture, 非真实链上TX)。
+        return { ok: true, utxos: [
+          { outpoint: { transactionId: 'e1'.repeat(32), index: 0 }, amount: String(SEED_0_5) },
+          { outpoint: { transactionId: 'e2'.repeat(32), index: 0 }, amount: String(SEED_0_5) },
+          { outpoint: { transactionId: 'e3'.repeat(32), index: 0 }, amount: String(SEED_0_95) },
+        ] };
+      }
+      if (cmd.type === 'covenant_broadcast') {
+        genesisFeeValue = decodeInputAmounts(cmd.tx_json)[0];
+        return { ok: true, txId: cmd.expected_txid, intent_key: cmd.intent_key };
+      }
+      throw new Error(`unexpected cmd ${cmd.type}`);
+    };
+    const res = await buildMarketGenesisAndBroadcast({ kaspa, network: 'mainnet', market: market2, sendCmd, relayId: 'relay-B', relayAddress: relayAddr });
+    if (!res.txId) throw new Error(`应该构造成功(0.5/0.5/0.95三枚候选里应有可行解), 实际: ${JSON.stringify(res)}`);
+    if (genesisFeeValue !== SEED_0_5) throw new Error(`应该选中0.5 KAS(第一个真实构造成功的, 按升序尝试不是0.95), 实际选中fee input面值=${genesisFeeValue}`);
+  });
+
+  const GENESIS_TXID_2 = 'e4'.repeat(32);
+  sqlite.prepare(`UPDATE proto_markets SET shardleaf_txid = ?, shardleaf_vout = 0 WHERE id = ?`).run(GENESIS_TXID_2, MARKET_ID_2);
+  const marketRow2 = getMarketRow(MARKET_ID_2);
+
+  sqlite.prepare(`INSERT INTO proto_bets (id, market_id, bettor_pk, side, stake, status, created_at) VALUES (?, ?, ?, 0, 20, 'pending', datetime('now'))`)
+    .run('bet-1462-001', MARKET_ID_2, 'f1'.repeat(32));
+  const bet1462_1 = sqlite.prepare('SELECT * FROM proto_bets WHERE id = ?').get('bet-1462-001');
+
+  function leafAddressFor2(state) {
+    const leafRedeem = computeShardLeafRedeemScript({ marketId: MARKET_ID_2, minBet: marketRow2.min_bet, sealCount: marketRow2.seal_count, rootcloseTmplHash: marketRow2.rootclose_tmpl_hash, state });
+    const spk = scriptPublicKeyFromHex(kaspa, leafRedeem.scriptPubKeyHex);
+    return kaspa.addressFromScriptPublicKey(spk, 'mainnet').toString();
+  }
+  function heldAddressFor2(poolValue) {
+    const artifact = computeKttGenesisArtifact({ amount: poolValue, ownerCovIdHex: marketRow2.shardleaf_cov_id });
+    const spk = scriptPublicKeyFromHex(kaspa, artifact.scriptPubKeyHex);
+    return kaspa.addressFromScriptPublicKey(spk, 'mainnet').toString();
+  }
+  // 首笔(genesis之后剩0.5/0.95, 无genesis找零单独建模——只测fee候选集合本身够不够, 不追加第三个候选,
+  // 因为找零值本身不影响"能不能选中0.95这个真实需要的面值"这条断言)的fee候选: [0.5, 0.95]。
+  function makeRealFeeSendCmd({ feeCandidates, heldOutpoint } = {}) {
+    const calls = [];
+    const currentState = deriveLeafState(MARKET_ID_2);
+    const leafAddress = leafAddressFor2(currentState);
+    const leafOutpointTxid = currentState.count === 0 ? GENESIS_TXID_2 : null;
+    const sendCmd = async (relayId, cmd) => {
+      calls.push(cmd);
+      if (cmd.type === 'get_address_utxos') {
+        if (cmd.address === leafAddress) {
+          const txid = heldOutpoint ? heldOutpoint.leafTxid : leafOutpointTxid;
+          return { ok: true, utxos: [{ outpoint: { transactionId: txid, index: 0 }, amount: '1000' }] };
+        }
+        if (heldOutpoint && cmd.address === heldAddressFor2(currentState.pool_value)) {
+          return { ok: true, utxos: [{ outpoint: { transactionId: heldOutpoint.txid, index: 2 }, amount: '20000000' }] };
+        }
+        if (cmd.address === relayAddr) {
+          // txid 必须是合法 64 位 hex(32 字节 Hash) — 早前 `f${i}`.repeat(16) 只拼出32字符(16字节),
+          // kaspa-wasm 反序列化时报 "size error: Slice must have the length of Hash"。
+          // lint-allow-chain-amount-precision: feeCandidates 里的 v 全部是 sompi 整数 BigInt, String(v) 精确
+          // 无损(非 KI-30 防的 KAS 浮点转字符串场景), 且这是 mock UTXO fixture 非真实链上TX。
+          return { ok: true, utxos: feeCandidates.map((v, i) => ({ outpoint: { transactionId: (10 + i).toString(16).padStart(2, '0').repeat(32), index: 0 }, amount: String(v) })) };
+        }
+        return { ok: true, utxos: [] };
+      }
+      if (cmd.type === 'covenant_broadcast') return { ok: true, txId: cmd.expected_txid, intent_key: cmd.intent_key, _tx_json: cmd.tx_json };
+      throw new Error(`unexpected cmd ${cmd.type} addr=${cmd.address}`);
+    };
+    return { sendCmd, calls };
+  }
+
+  let firstBetTxid2, firstBetFeeValue;
+  await t('⑬账本1462 首笔下注(无held)真实种子候选[0.5,0.95] KAS ⇒ 0.5太小构造不出可行找零形状(真实首笔最小可行≈0.82 KAS), 逐个真实尝试后选中0.95且构造成功', async () => {
+    const { sendCmd, calls } = makeRealFeeSendCmd({ feeCandidates: [SEED_0_5, SEED_0_95] });
+    const res = await buildRegisterAppendAndBroadcast({ kaspa, network: 'mainnet', market: marketRow2, bet: bet1462_1, sendCmd, relayId: 'relay-B', relayAddress: relayAddr });
+    if (!res.txId) throw new Error(`应该最终用0.95 KAS构造成功, 实际: ${JSON.stringify(res)}`);
+    firstBetTxid2 = res.txId;
+    const bcCall = calls.find((c) => c.type === 'covenant_broadcast');
+    firstBetFeeValue = decodeInputAmounts(bcCall.tx_json).at(-1); // fee输入是最后一个input(见buildRegisterAppendTxJson的[leaf,(held?),fee]布局)
+    if (firstBetFeeValue !== SEED_0_95) throw new Error(`应该选中0.95 KAS(0.5太小逐个尝试后失败, 0.95是第一个真实构造成功的), 实际选中fee input面值=${firstBetFeeValue}`);
+  });
+
+  const { markBetAppendLanded: markBetAppendLanded2 } = await import('./proto-broadcast-ops.mjs');
+  markBetAppendLanded2({ betId: bet1462_1.id, txid: firstBetTxid2 });
+  sqlite.prepare(`INSERT INTO proto_bet_intents (intent_key, bet_id, step, status, submitted_txid, landed_at, created_at, updated_at) VALUES (?, ?, 'append', 'landed', ?, datetime('now'), datetime('now'), datetime('now'))`)
+    .run(betIntentKeyFor(bet1462_1.id, 'append'), bet1462_1.id, firstBetTxid2);
+
+  sqlite.prepare(`INSERT INTO proto_bets (id, market_id, bettor_pk, side, stake, status, created_at) VALUES (?, ?, ?, 1, 30, 'pending', datetime('now'))`)
+    .run('bet-1462-002', MARKET_ID_2, 'f2'.repeat(32));
+  const bet1462_2 = sqlite.prepare('SELECT * FROM proto_bets WHERE id = ?').get('bet-1462-002');
+
+  await t('⑭账本1462 第二笔下注(有held)真实种子候选[0.5] KAS ⇒ 如实报告(Bettor要求): 你实算最小可行约0.56 KAS, 0.5低于此值, 应当构造失败并报错(不是意外成功)', async () => {
+    const { sendCmd } = makeRealFeeSendCmd({ feeCandidates: [SEED_0_5], heldOutpoint: { txid: firstBetTxid2, leafTxid: firstBetTxid2 } });
+    const res = await buildRegisterAppendAndBroadcast({ kaspa, network: 'mainnet', market: marketRow2, bet: bet1462_2, sendCmd, relayId: 'relay-B', relayAddress: relayAddr });
+    if (res.txId) throw new Error(`如实报告: 预期0.5 KAS对第二笔下注(有held)不够用应该失败, 实际却构造成功了(txId=${res.txId}) —— 说明真实最小可行面值比之前估算的≈0.56 KAS更低, 需要更新对execution page的成本核算指导`);
+    if (!res.error || !/no_suitable_fee_utxo/.test(res.error)) throw new Error(`预期失败原因是no_suitable_fee_utxo, 实际: ${JSON.stringify(res)}`);
+  });
+
+  await t('⑮账本1462 第二笔下注(有held)真实种子候选[0.95] KAS ⇒ 0.95远高于≈0.56 KAS最小可行值, 应当构造成功(确认0.95作为execution page保底值仍然可靠)', async () => {
+    const { sendCmd } = makeRealFeeSendCmd({ feeCandidates: [SEED_0_95], heldOutpoint: { txid: firstBetTxid2, leafTxid: firstBetTxid2 } });
+    const res = await buildRegisterAppendAndBroadcast({ kaspa, network: 'mainnet', market: marketRow2, bet: bet1462_2, sendCmd, relayId: 'relay-B', relayAddress: relayAddr });
+    if (!res.txId) throw new Error(`0.95 KAS应该足够第二笔下注(有held)构造成功, 实际: ${JSON.stringify(res)}`);
+  });
+
+  await t('⑯账本1462 全部候选面值 > SIGNED_INPUT_CEILING_SOMPI(1.0 KAS) ⇒ 全部被预先过滤, 报no_suitable_fee_utxo, 不浪费一次真实构造尝试', async () => {
+    const sendCmd = async (relayId, cmd) => {
+      if (cmd.type === 'get_address_utxos') {
+        return { ok: true, utxos: [{ outpoint: { transactionId: 'ff'.repeat(32), index: 0 }, amount: '150000000' }] }; // 1.5 KAS
+      }
+      throw new Error(`不该走到这里: ${cmd.type}`);
+    };
+    const res = await buildMarketGenesisAndBroadcast({ kaspa, network: 'mainnet', market: market2, sendCmd, relayId: 'relay-B', relayAddress: relayAddr });
+    if (!res.error || !/no_suitable_fee_utxo/.test(res.error)) throw new Error(`应该报no_suitable_fee_utxo(全部候选超过SIGNED_INPUT_CEILING_SOMPI), 实际: ${JSON.stringify(res)}`);
+    if (!/超过上限被排除/.test(res.error)) throw new Error(`报错信息应该说明是因为超过上限被排除, 不是构造失败, 实际: ${res.error}`);
   });
 }
 
