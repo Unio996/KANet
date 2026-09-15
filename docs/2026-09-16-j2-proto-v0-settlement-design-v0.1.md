@@ -149,12 +149,14 @@ debugger二进制D-019 pin `3ed9733`，sha256 `b85bb524d22ae761150dcb80b070f0bf1
 | **`RefundClaim.refund_payout`(pool_value≠stake, partial续约分支)** | `readInputStateWithTemplate`(读ticket+token) + **内建`validateOutputState`(自续约)** | ✅ **安全** | ✅ debugger PASS（同上，见§0.9自我纠错记录），未做simnet验证 |
 | `KanetTokenClaim.spend` | 无自续约(终态, 头注明确"不受V-T-8影响") | ✅ **simnet ACCEPT（定论）** | ✅ **simnet真实共识ACCEPT**（上表⑧，审计构造）——v0.3的"待定"（旧证据是代币化前9参数合约，见§0.6）现由simnet真实执行覆盖解决，不再需要针对当前`.sil`补debugger向量 |
 
-**mass观察（Bettor要求：占比最大来源，后续优化观察项；v0.6更新：kaspa-wasm本地数字未计v1交易的
-compute_budget项，真实margin比这里的原始数字更紧，精确核算见§0.14b）**：8步mass从196,628（spend）
+**mass观察（Bettor要求：占比最大来源，后续优化观察项；v0.7更新：NWT用节点侧`getMempoolEntry`权威
+数字实测，真实mass比kaspa-wasm本地数字更低，精确核算见§0.14b）**：8步mass从196,628（spend）
 到448,870（register_append#1），**register_append系与convert_to_*系（约397k-449k）已逼近simnet
-500,000 compute mass上限的80%-90%**（这是kaspa-wasm本地`calculateTransactionMass`报告的数字，
-未计`compute_budget`——§0.14b用真实源码补上这一项后，`register_append`margin从约89%收紧到约
-93.6%，仍在安全范围内，但比这里看到的更紧）。NWT独立确证了
+500,000 compute mass上限的80%-90%**（这是kaspa-wasm本地`calculateTransactionMass`报告的数字——
+v0.6一度怀疑本地数字漏算v1交易的`compute_budget`项、真实margin应该更紧，但NWT实测节点侧权威mass
+后发现方向相反：**全部8步节点侧真实mass都比本地估算更低**（差2,824-12,800），`register_append`
+真实占比约87-89%，跟本地数字基本一致甚至更宽松，v0.6"收紧到93.6%"的猜测已被推翻删除，精确的
+compute/storage维度拆分见§0.14b）。NWT独立确证了
 KIP-9 storage mass对**小面值covenant输出**极度敏感（`reference-kip9-storage-mass-plurality-is-not-one-covenant-utxo-is-p2`）：首次把新建covenant输出面值设成`.sil`里`DUST_MIN`字面值（1000 sompi）时，
 `requiredFee`被算成约4000 KAS（storage mass含`p²/v`项，v极小时被放大到天文数字）——**改用
 `CONTINUATION_OUTPUT_SOMPI`（20,000,000 sompi，与其它续约/genesis输出同量级）后恢复正常**，这是
@@ -542,43 +544,59 @@ storage mass**——真实公式是`max(0, harmonic_outs − arithmetic_ins或ha
 措辞最终版**：找零本身无代码门槛，但受storage mass约束（对所有输出、不止covenant输出生效）；
 是否安全由构造期真实mass计算把关，不能靠"面值大小看着正常"这类目测判断。
 
-另外（账本1489同批发现）：**kaspa-wasm本地`calculateTransactionMass`对v1交易的compute_budget字段
-计算不完整**——直接读`wallet/core/src/tx/mass.rs::calc_compute_mass_for_client_transaction_input`
-源码，该函数只读`input.compute_commit.sig_op_count()`（v1交易的`ComputeBudget`变体这个方法返回
-`None`，`unwrap_or(0)`直接归零），完全没有读`.compute_budget()`字段本身，代码里明确留了一行注释
-`// TODO: Add support for v1 transactions.`——这是wallet-core（kaspa-wasm的JS绑定层）一个**已知未
-完成**的缺口，不是我瞎猜；真正的共识层计算（`consensus/core/src/mass/mod.rs::calc_non_contextual_masses`）
-是完整的，会算`GRAMS_PER_COMPUTE_BUDGET_UNIT(100) × Σ每个input的compute_budget`这一项。本轮全部
-6步用的`PROTO_V0_COMPUTE_BUDGET=70`，每个input因此有100×70=7,000的真实mass被kaspa-wasm本地计算
-漏掉，按每步的input数量（2-4个不等）算，每步实际少算14,000-28,000——**在§0.14 v0.6的重算表里已经
-把这部分加回去**，`register_append`那步（本来就是margin最紧的）修正后利用率从约89%收紧到约93.6%
-（还在安全范围内，但margin比此前认知的更紧，值得留意）。
+另外（账本1489同批发现，v0.7更新：这条代码观察本身仍然真实，但由此推出的"真实mass应该更紧"这个
+方向性结论已被NWT的节点侧实测推翻，不能再用来调整margin数字）：**kaspa-wasm本地
+`calculateTransactionMass`对v1交易的compute_budget字段计算不完整**——直接读
+`wallet/core/src/tx/mass.rs::calc_compute_mass_for_client_transaction_input`源码，该函数只读
+`input.compute_commit.sig_op_count()`（v1交易的`ComputeBudget`变体这个方法返回`None`，
+`unwrap_or(0)`直接归零），完全没有读`.compute_budget()`字段本身，代码里明确留了一行注释
+`// TODO: Add support for v1 transactions.`——这个观察本身属实（wallet-core确实有这个已知未完成的
+缺口），**但v0.6据此推出的"每步应该补7,000-14,000×input数量的真实mass、register_append margin
+从89%收紧到93.6%"这个结论是错的**——NWT直接用`getMempoolEntry`查真实节点已接受交易的权威mass，
+发现全部8步的节点侧真实值都**低于**kaspa-wasm本地估算（不是更高），方向与v0.6的推理相反，说明
+本地"unsigned tx"估算路径本身还有其它未被v0.6考虑到的、量级更大的偏差（可能是
+`calc_compute_mass_for_unsigned_consensus_transaction`给未签名交易额外叠加的合成签名字节
+预估——真实已签名交易不需要这部分，见§0.14b的详细讨论），把两个方向不同的偏差混在一起简单相加
+是错误的推理方式。v0.6那次"93.6%"的数字已删除，改用NWT节点侧权威数字（约87-89%，精确
+compute/storage维度拆分待补，见§0.14b）。
 
 ### §0.12 给Owner的产品选项（本文档只列选项与各自防的损失，不替Owner选）
 
-**选项组1：新市场的deadline / grace（宽限期）时长该设多久**
+**v0.7更正（Bettor账本1490，NWT审出）**：v0.5版本的选项组2把"抢跑风险"的根源写错了——真正的
+抢跑风险来自`RootClose.refund_flip`（无签名，deadline+2h后任何人都可调用，见§0.10/MUST-3），
+**不是**`RefundClaim.refund_payout`。给`refund_payout`加委员签名，挡不住`refund_flip`被抢先
+触发这件事本身（市场已经被推进到"已退款"状态了，`refund_payout`加不加签名都改变不了这个既成事实），
+反而会破坏委员真的失联时用户拿回本金这条兜底路径（`refund_payout`本来就是这条兜底链路的最后一步，
+加签名等于让兜底依赖一个可能已经不存在的委员）。v0.7把选项组2改成正确的靶子——"谁、何时可以触发
+`refund_flip`"，并与选项组1（deadline/grace时长）合并表述（两者本来就是同一个机制的不同维度：
+时长决定"多久之后"，触发权限决定"届时谁能动"）。
+
+**选项组1+2合并：新市场的deadline/grace时长该设多久，以及deadline之后谁能触发`refund_flip`**
 
 | 选项 | 防住的损失 | 代价/风险 |
 |---|---|---|
-| 短deadline+短grace（如24h+2h，接近当前主网市场的量级） | 资金被套住的时间短，委员失联时更快进入"任何人可refund_flip"的兜底状态，避免用户资金长期锁死 | grace窗口短，委员一旦真的短暂离线（网络故障、维护），更容易被外部人抢先触发refund_flip，即使委员随后就恢复也来不及裁决 |
-| 长deadline+长grace（如7天+24h） | 给委员充分时间完成真实裁决，降低"委员只是暂时离线"却被外部人抢先refund的概率 | 用户资金被锁定的时间更长，如果委员真的永久失联（钥匙丢失/团队解散），用户要等更久才能拿回本金 |
-| 中间值+可配置（每个市场genesis时由创建方自己指定deadline/grace，不写死协议常量） | 不同风险偏好的市场（小额测试市场 vs 大额市场）可以各自选适合自己的窗口，不用一刀切 | 增加ctor参数和实现复杂度，需要在市场genesis页面给创建方解释这两个数字的含义，用户理解成本更高 |
+| 维持现状（deadline过后+grace(如2h)，任何人都可触发`refund_flip`，无签名门槛） | 委员失联时用户仍能自主推进退款流程，不需要等待任何第三方动作——这是refund路径存在的本意（兜底，见§0.10/MUST-3） | grace窗口一过，**任何人都可以抢在委员真实裁决完成前**把市场推进到"已退款"状态——如果委员只是暂时离线（网络故障、维护）而不是真的失联，这条路径会抢跑掉一个本该有真实赢家的市场，所有下注者只拿回本金、赢家拿不到应得的赔付（资金错配，不是资金被盗，但赢家合理预期落空） |
+| deadline后先进入"仅委员可flip"窗口（如deadline+短grace），之后才进入"任何人可flip"的更长宽限期（如再等7天） | 兼顾两头：短窗口内给委员优先裁决/flip的机会，抑制"委员只是暂时离线就被抢跑"这个风险；长宽限期过后仍保留permissionless兜底，委员真的永久失联时用户依然能拿回本金，不会退化成资金永久锁死 | 需要修改`RootClose.sil`的`refund_flip`entry，新增"仅委员"这个时间窗口的签名校验分支，**会改变`rootclose_tmpl_hash`**——同(B)路线一样，只适用于新市场，救不了`a59c7b48`这类已经把`rootclose_tmpl_hash`烤进`ShardLeaf_direct`的既有市场；且两段时间窗口本身的具体时长（多短的"仅委员"窗口、多长的"任何人"宽限期）仍需要Owner拍一个具体数字，不是纯技术决策能替代的 |
+| 中间值+可配置（每个市场genesis时由创建方自己指定deadline/grace/委员优先窗口，不写死协议常量） | 不同风险偏好的市场（小额测试市场 vs 大额市场）可以各自选适合自己的窗口，不用一刀切 | 增加ctor参数和实现复杂度，需要在市场genesis页面给创建方解释这几个数字的含义，用户理解成本更高；若采用"仅委员窗口"这个机制，同样需要改`RootClose.sil`，同上一条一样只适用于新市场 |
 
-**选项组2：`refund_payout`是否需要委员签名**
+**选项组3（v0.5新增，§0.14资金推演发现；v0.7更正：前提可能不成立，待simnet确认）**：输家ticket
+永久锁死dust要不要设计回收路径
+
+**v0.7更正**：v0.5假设"输家ticket需要新增合约entry才能回收"这个前提**可能站不住脚**——NWT指出
+`PoolSideTicket.sil`唯一入口`authorize_spend(sig bettorSig)`只要求**bettor自己的签名**，没有
+其它条件（比如"必须是赢家"这种校验）。这意味着**输家bettor自己拿私钥签名，理论上就能直接花掉
+自己那张ticket的0.2 KAS**，不需要`claim_draw`、不需要合约改动、只需要一个新写的"回收builder"
+脚本（读ticket的redeem/state，构造真实`authorize_spend`签名witness，花给自己）。NWT正在simnet
+实测这个假设是否真的成立（比如`PoolSideTicket`的state是否有其它隐含约束会拒绝"非赢家"花费自己
+的ticket——本文档不假设结果，标记**待simnet确认**）：
 
 | 选项 | 防住的损失 | 代价/风险 |
 |---|---|---|
-| 维持现状（`refund_payout`无需委员签名，任何持有正确ticket的bettor可在refund_flip之后自行退款） | 委员失联时用户仍能自主拿回本金，不需要等待任何第三方动作——这是refund路径存在的本意（兜底） | 如果`refund_flip`本身被抢先触发（MUST-3的风险），市场会在委员还没来得及裁决真实结果时就被推进到"退款"状态，所有下注者只拿回本金、赢家拿不到应得的赔付——这对"确实有一方真实赢了"的市场是一种资金错配（虽然不是资金被盗，但赢家的合理预期落空） |
-| 加一层委员签名要求（`refund_payout`需要committee的`checkSig`，同`close_commit`的4-of-5模式） | 防止`refund_flip`被恶意/误触发后，资金立刻可以被任何人退款——即使`refund_flip`被抢先调用，真正的资金转移（`refund_payout`）仍需要委员参与，给委员一个"回来纠正"的窗口 | 需要修改`RefundClaim.sil`（新增签名校验逻辑），改变`refundclaim_tmpl_hash`，同(B)路线一样会让现有市场的P2SH地址脱钩，需要重新genesis；且如果委员是真的永久失联（不是暂时离线），加签名要求反而让用户连兜底退款都拿不到，退化成"资金永久锁死"，与refund路径设计初衷（防止委员失联导致资金永久锁死）自相矛盾 |
+| **若simnet确认"输家可自行签名花回ticket"成立**：只需实现一个回收builder（bettor自助操作），不改任何合约 | 不需要碰`PoolSideTicket.sil`/`RootClaim.sil`，不改任何模板hash，`a59c7b48`这类既有市场同样适用；回收后§0.14"执行完毕后剩余资金"应加回这0.2 KAS（2.260398→**2.460398**，因为这0.2 KAS本来就还在bettor自己控制的ticket里，不是relay的钱，但对整个协议而言不再是"永久锁死"） | 需要教育/引导输家bettor自己发起这笔回收交易（不是自动的，是需要用户主动操作的一步），若用户不知道/不操作，dust依然会长期挂在链上（只是"可以回收"变成了现实约束，不是协议强制清空） |
+| 维持现状（不做任何事，即使输家可自行回收，也不主动提示/引导） | 不增加任何产品/文档工作量 | 即使技术上可行，大多数用户不会主动想到"我还有一张没用的ticket可以自己签名拿回0.2 KAS"，实践中大概率还是长期挂账，跟"无法回收"的实际效果接近 |
+| **若simnet证伪**（`PoolSideTicket`有其它隐含约束拒绝这笔自签花费）：回退到v0.5的选项——新增"sweep输家ticket"合约入口 | 回收本可永久锁死的KAS，减少长期资源浪费 | 需要新增合约entry（改变模板hash，同(B)路线一样与既有市场P2SH脱钩），且"回收去向"本身是一个需要Owner拍板的产品/治理问题（给谁？创建者？协议金库？按什么规则分配？），不是纯技术决策 |
 
-**选项组3（v0.5新增，§0.14资金推演发现）：输家ticket永久锁死dust要不要设计回收路径**
-
-| 选项 | 防住的损失 | 代价/风险 |
-|---|---|---|
-| 维持现状（输家ticket无回收机制，永久留在链上） | 不增加任何合约复杂度/攻击面，`claim_draw`的"赢家通吃"设计保持最简单 | 每个市场结算后，每张输家ticket永久锁死0.2 KAS——市场数量越多、参与人数越多，累计锁死的KAS总量会持续增长，是一笔沉没成本，不是资金安全问题，但长期看是可观的资源浪费 |
-| 新增一个"sweep输家ticket"入口（任何人可调用，回收0.2 KAS到某个约定去向，比如市场创建者或协议金库） | 回收本可永久锁死的KAS，减少长期资源浪费 | 需要新增合约entry（改变模板hash，同(B)路线一样与既有市场P2SH脱钩），且"回收去向"本身是一个需要Owner拍板的产品/治理问题（给谁？创建者？协议金库？按什么规则分配？），不是纯技术决策 |
-
-以上三组选项相互独立（deadline/grace时长、refund_payout签名要求、输家ticket回收路径，互不影响），
+以上选项相互独立（deadline/grace时长+触发权限、输家ticket回收路径，互不影响），
 Owner可以分别决定；本文档不推荐任何一个具体选项，只列出已知的、真实执行验证过的技术事实
 （§0.10/MUST-3/§0.14）所决定的取舍空间。
 
@@ -705,60 +723,70 @@ input**（`selectFeeUtxoByConstruction`逐个尝试单一候选，未见合并�
   = 2.260398），两条独立算路交叉验证吻合，**没有内部不一致**。
 - **链上仍锁定在covenant里的KAS**：`spend`完成后，赢家的代币转出目的地（新genesis KTT实例，赢家
   控制）持有**0.2 KAS**——这是设计上的终态（赢家的钱，不是relay的钱，也不是"丢了"）。
-- **永久锁死的dust（v0.5新增发现，直接来自本节的I/O分类）**：**第二笔下注（NO，输的那方）创建的
-  ticket，0.2 KAS，全程未被任何步骤消费**——`claim_draw`full分支只消费赢家（YES）那张ticket，
-  输家的ticket在proto-v0现有设计里**没有任何回收/清空机制**，永久留在链上作为不可再花费的UTXO。
-  这不是本次执行的新问题，是`claim_draw`/parimutuel"赢家通吃"设计的必然结果——旧市场`a0c4d628`的
-  leaf dust（0.2 KAS，账本1473记录，同样永久锁死）是同一类问题的先例。**这条建议加入§0.12"给
-  Owner的产品选项"，作为"要不要给输家ticket设计一个可选的sweep/回收路径"这个新问题**（本节先如实
-  记录发现，不代Owner决定要不要处理）。
-### §0.14b mass真实核算（v0.6新增，账本1489 Bettor要求：不能只做算术，须用真实公式逐笔核对mass）
+- **"永久锁死"的dust（v0.5新增发现，v0.7更正：是否真的永久锁死待simnet确认）**：**第二笔下注
+  （NO，输的那方）创建的ticket，0.2 KAS，`claim_draw`full分支不会消费它**（只消费赢家YES那张）。
+  v0.5曾认为这必然永久锁死——**v0.7更正**：NWT指出`PoolSideTicket.sil`唯一入口
+  `authorize_spend(sig bettorSig)`只要求bettor自己签名，理论上输家bettor可以自己签名花回这
+  0.2 KAS，不一定需要新合约入口，只需要一个回收builder脚本——NWT正在simnet实测这个假设，**结果
+  出来前本节暂不确定这笔dust到底是"真永久锁死"还是"技术上可回收、只是需要用户主动操作"**，两种
+  情况下§0.12的选项组3给出的应对选项不同（分别见该节v0.7两个分支）。若simnet确认可回收，
+  §0.14"执行完毕后剩余资金"应视为2.460398（2.260398+这0.2 KAS本来就还在bettor自己控制之下，
+  不算relay资金流出，只是协议层面"未使用"而非"锁死"）而不是2.260398；若simnet证伪，维持v0.5
+  "永久锁死"的原判。同族先例（旧市场`a0c4d628`的leaf dust，0.2 KAS，账本1473记录）**未经过同样
+  的重新核实，暂不确定是否同样可能可回收，本文档不代为下结论**。
+
+### §0.14b mass真实核算（v0.7更新：kaspa-wasm本地估算已由NWT节点侧权威数字取代，见下）
 
 **背景**：Bettor指出v0.5的推演只算了资金（fee/找零），没有验证"换成不同fee UTXO后，这笔交易真实
 mass会不会变、会不会顶到500,000上限"——这是必须补的一环，因为KIP-9 storage mass对输出/输入的**面值**
 本身敏感（不只是covenant输出，见MUST-4 v0.6更正），换一个面值不同的fee UTXO，交易的真实mass确实
 会变，不能假设"跟NWT那次一样"。
 
-**方法**：直接读两处真实源码算，不用kaspa-wasm本地`calculateTransactionMass`（该函数对v1交易的
-compute_budget计算不完整，见MUST-4 v0.6更正）——
-1. `consensus/core/src/mass/mod.rs::calc_storage_mass`（KIP-9真实公式，已用Bettor给的两个例子
-   核对过完全吻合）算每步在**我方选中的fee UTXO/找零**下的真实storage mass。
-2. 用NWT真实simnet报告的mass数字反推每步的"compute_mass(buggy，未计compute_budget)"分量
-   （因为compute_mass的字节结构部分不随选哪个fee UTXO变化，只有共识层遗漏的
-   `100×70×input数量`这一项需要补），得到"real_compute_mass = NWT报告mass + 补上的compute_budget项"
-   （compute_mass在NWT报告的mass与storage_mass_baseline里取更大值，逐步验证过storage_mass_baseline
-   一律小于NWT报告值，即NWT报告的mass本身就是compute_mass分量，可以直接拿来做补项基准）。
-3. 该笔交易最终mass = `max(real_compute_mass, 我方选中面值下的真实storage_mass)`。
+**v0.6的方法（已由v0.7的真实节点数据部分推翻，见下）**：直接读两处rusty-kaspa源码手算——
+`consensus/core/src/mass/mod.rs::calc_storage_mass`（KIP-9真实公式）算真实storage mass，再用
+"NWT报告mass + 补上kaspa-wasm本地遗漏的compute_budget项（100×70×input数量）"推算所谓"real
+compute_mass"，取两者较大值。**这个手算方向被v0.7的真实数据证明是错的**（见下）。
 
-**逐步结果**（`register_append`过程中把ticket的plurality由误判的p=2修正为p=1——直接读
-`buildRegisterAppendTxJson`源码确认"ticket genesis(无covenant声明)"，只有leaf续约/合并KTT这两个
-输出真正调用`populateGenesisCovenants`/`CovenantBinding`，ticket没有，这处修正也用来消解了一次
-"我的storage_mass手算比NWT真实报告的总mass还大"这种不可能出现的矛盾，倒推出的修正）：
+**v0.7更正（Bettor账本1490，NWT用`getMempoolEntry`取节点侧权威mass实测全部8步）**：NWT直接查询
+真实kaspad节点已接受交易的**权威mass**（不是本地估算，是节点自己算出、决定这笔交易能不能进块的
+那个真实数字），结果**全部8步的节点侧真实mass都低于kaspa-wasm本地估算值**，差距在2,824-12,800
+之间——**方向与v0.6手算的"本地漏算compute_budget⇒真实应该更高"完全相反**。`register_append`
+真实占比约87-89%，不是v0.6手算出的93.6%。**v0.6那次手算已确认存在错误，具体错在哪一步（是
+"NWT报告mass=compute_mass分量"这个假设不成立，还是kaspa-wasm本地"unsigned tx"估算路径本身就
+带有v0.6未曾考虑的、方向相反的另一个偏差项——最可能的候选是`calc_compute_mass_for_unsigned_consensus_transaction`
+会为"未签名"交易额外加一份`calc_signature_compute_mass_for_inputs`合成签名字节预估，而真实
+已签名交易不需要这部分，导致本地"unsigned"估算本身就系统性偏高，掩盖甚至反超了compute_budget
+那部分真实存在的漏算——这是本文档基于代码逻辑给出的一个合理猜测，不是NWT证实过的根因，如实
+标注），**不再深究根因，直接采信NWT的节点侧权威数字作为最终结论**：kaspa-wasm本地估算不可靠
+（无论方向哪边偏），真实mass以节点`getMempoolEntry`返回值为准，这是比debugger、比本地wasm计算
+都更高一级的证据来源（同§0.13"simnet真实全链共识验证闸"的证据层级纪律——离线估算终归要以真实
+节点的裁决为准）。
 
-| # | 步骤 | 我方选中面值下真实storage mass | 补compute_budget后的real_compute_mass | 该步最终mass | 500,000占比 |
-|---|---|---|---|---|---|
-| 1 | 第二笔下注 | 297,803 | 467,880（446,880+3input×7,000） | **467,880** | **93.6%** |
-| 2 | 封盘 | 232,891 | 417,794（396,794+3×7,000） | 417,794 | 83.6% |
-| 3 | `close_commit` | 117,138 | 212,771（198,771+2×7,000） | 212,771 | 42.6% |
-| 4 | `convert_to_claim` | 201,598 | 417,718（396,718+3×7,000） | 417,718 | 83.5% |
-| 5 | `claim_draw` | 180,966 | 421,781（393,781+4×7,000） | 421,781 | 84.4% |
-| 6 | `spend` | **0**（净storage mass算出负数, 截0——小额fee input的输入侧抵扣项反而更大） | 217,628（196,628+3×7,000） | 217,628 | 43.5% |
+**逐步结果（v0.7，NWT节点侧权威数字，本文档删除v0.6手算的93.6%）**：
 
-**结论**：**全部6步在补上compute_budget修正之后依然全部安全，没有一步超过500,000上限**；
-最紧的仍是第二笔下注，但真实占比是**93.6%**（margin约6.4%），比NWT原始报告里看到的约89%更紧——
-这条margin值得记进后续观察项，若未来这一步的输入/输出结构有任何变化（比如held合并逻辑改动），
-需要重新核这个数字，不能想当然沿用。**`spend`步骤用0.087 KAS小额UTXO当fee input，实际是6步里
-最安全的一步（storage mass截到0），不是危险操作**——这具体反驳了"小额找零一定危险"这个直觉，但
-这个安全结论只对**这个具体的输入输出组合**成立（KanetTokenClaim+token两个p=2输入提供的抵扣项，
-比这一步本身很小的fee/output面值需要的storage mass charge大得多），换一组不同的输入输出，必须
-重新代入公式验证，不能类推。
+| # | 步骤 | kaspa-wasm本地估算(v0.6引用的NWT原始报告) | 节点侧权威mass(`getMempoolEntry`) | 500,000占比(节点侧) |
+|---|---|---|---|---|
+| 1 | 第二笔下注 | 446,880 | 约434,080-444,056（本地值−2,824~−12,800区间，精确数字待NWT分维度数据补齐） | **约87-89%** |
+| 2 | 封盘 | 396,794 | 待NWT分维度数据补齐 | 待补 |
+| 3 | `close_commit` | 198,771 | 待NWT分维度数据补齐 | 待补 |
+| 4 | `convert_to_claim` | 396,718 | 待NWT分维度数据补齐 | 待补 |
+| 5 | `claim_draw` | 393,781 | 待NWT分维度数据补齐 | 待补 |
+| 6 | `spend` | 196,628 | 待NWT分维度数据补齐 | 待补 |
 
-**结论**：**资金充足，无缺口，执行完毕后relay剩余2.260398 KAS**（两条独立算路——"6步净流出合计"
-与"逐笔UTXO模拟表直接相加"——交叉核对完全一致，比v0.4错误算出的约2.06 KAS多约0.2 KAS，多出的部分
-正是v0.4漏算的`claim_draw`/`spend`两步净释放）；**mass同样安全，6步全部在500,000上限内（最紧
-93.6%），已用真实KIP-9公式逐笔核对，不是只做了算术**。额外发现一条新的产品问题：**输家ticket
-（0.2 KAS）在(A)路线执行完毕后永久锁死**，建议补进§0.12的Owner选项清单（本节先如实记录发现，
-不代Owner决定要不要处理）。
+**结论（v0.7，待NWT分维度compute/storage数据到位后补齐精确数字，方向性结论已定）**：**全部6步
+真实mass都在500,000以内，且比此前担心的更宽松（节点侧数字比本地估算更低，不是更高）**；最紧的
+仍是第二笔下注，真实占比约87-89%（不是v0.6错误算出的93.6%——v0.6那次"本地漏算compute_budget
+⇒真实应该更紧"的方向性推理已被真实节点数据推翻，须整体删除，不只是改一个数字）。NWT会补充按
+compute/storage两个维度拆分的精确数字，margin以`两个维度里较大的那个 / 500,000`计算——本节
+先如实记录方向性结论（安全，比预期更宽松）与待补的精确数字缺口，不在数据到位前编造精确百分比。
+
+**资金结论（v0.5/v0.6均未变，与mass是两件独立的事）**：**资金充足，无缺口，执行完毕后relay剩余
+2.260398 KAS**（两条独立算路——"6步净流出合计"与"逐笔UTXO模拟表直接相加"——交叉核对完全一致，
+比v0.4错误算出的约2.06 KAS多约0.2 KAS，多出的部分正是v0.4漏算的`claim_draw`/`spend`两步净释放）
+——**若§0.12选项组3的simnet实测确认输家ticket可自行回收，这个数字应视为2.460398**（见§0.12
+v0.7更正）。额外发现一条产品问题：**输家ticket（0.2 KAS）在(A)路线执行完毕后是否真的永久锁死，
+待simnet确认**（v0.7更正：v0.5曾断言"永久锁死"，现已不确定，见§0.12选项组3），已补进§0.12的
+Owner选项清单（本节先如实记录发现，不代Owner决定要不要处理）。
 
 ## §1 每步交易形状（inputs/outputs/签名输入/covenant绑定/mass/fee）
 
@@ -1072,9 +1100,9 @@ committee input `sequence=0`（MUST-1），且执行页需要向操作员明示M
 见§0.11 MUST-1）；任何新建covenant输出必须遵守MUST-4的KAS值下限，不能取字面`DUST_MIN`。
 
 **资金充足性**：(A)路线剩余6笔交易的fee UTXO选择、找零合规性、执行完毕后剩余资金，见§0.14"主网
-资金推演"——结论是资金充足，无缺口；mass已用真实KIP-9公式逐笔核对（§0.14b），全部6步安全，唯一
-需要留意的是`register_append`那一步的真实mass margin（约93.6%，比kaspa-wasm本地计算显示的约89%
-更紧，因为本地计算漏算了v1交易的compute_budget项，见MUST-4 v0.6更正）。
+资金推演"——结论是资金充足，无缺口（2.260398 KAS，若§0.12输家ticket可回收的simnet实测确认，则
+为2.460398）；mass已由NWT用节点侧`getMempoolEntry`权威数字实测全部6步安全，唯一需要留意的是
+`register_append`那一步的真实mass margin（约87-89%，精确compute/storage维度拆分见§0.14b）。
 
 **Owner需要在实现前先拍板的问题（汇总，本文档不代为决定）**：
 
@@ -1085,7 +1113,8 @@ committee input `sequence=0`（MUST-1），且执行页需要向操作员明示M
 - §0.8：`RootClaim.sil:103 require(payout>=1000)`的修法选项a/b/c，Owner/Bettor需要确认选哪个
   （本文档倾向选项b，仅供参考）。
 - §0.9已解决：`RefundClaim.refund_payout`确认安全，走(B)不需要动它，只需修`RootClaim.sil`。
-- §0.12：新市场的deadline/grace时长、refund_payout是否需要委员签名——两组产品选项，Owner分别拍板。
+- §0.12：新市场的deadline/grace时长与`refund_flip`的触发权限（合并选项组）、输家ticket能否自行
+  回收（待simnet确认）——两组产品选项，Owner分别拍板。
 
 ---
 
