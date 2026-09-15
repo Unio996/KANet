@@ -2,15 +2,27 @@
 
 > **Status: DRAFT（v0.2）**。v0.2 = D-020 单笔金丝雀，**取代** v0.1 的独立 KTT-genesis-only probe 方案（v0.1 原文完整保留在本页末尾 `## SUPERSEDED（v0.1）` 小节，不删不改，供追溯）。**取代原因**：v0.1 写作时（2026-09-14）原型 v0 后端还没有任何真实广播代码，"验证我们的实现能否被主网接受"只能靠一个专门为验证目的手写的一次性探针脚本；现在（2026-09-15）D-020 单笔 `register_append` 市场创建/下注路径已完整合入主线（`c019a933`，见 (1452)(1453)），已经过 NWT 集中复核 GREEN、有完整的执行门（`assertProtoRelayHealthy`/`validateFixedValueOutputs`/`validateNetLoss`/`assertLeafStateMatchesChain` 等）——**直接用这条真实产品路径做金丝雀，比另写一个不会被任何人复用的探针脚本更划算**：验证的是"我们准备实际使用的代码"，不是"一个专门为了验证而单独造的近似物"。执行门不变：① 本页 → NWT 审 → 方向批准；② 广播动作本身仍须 Owner 单独批（三道闸结构见 (1453)，本页对应**闸 3**，排在闸 1（执行页 A，重启+环境配置）与闸 2（种子转账执行页 v0.7）完成之后）。D-021 规矩：本页不写密钥值、不写余额、不写地址。
 
+> 🔴 **规则（NWT MUST①，账本 1454）：任何人重新开启 `PROTO_DRIVER_ENABLED` 之前，必须先完成 §1 的前置检查。** `runProtoDriverTick`（`kasia-console/src/services/proto-driver.mjs`）每一轮都会查 `proto_markets`/`proto_bet_intents` 里状态未终结的行去推进/核落链，**不区分"本次新建"还是上一轮卡住的残留**——不做这个检查，重开驱动会把上次异常中止时留下的半成品意图当成新任务静默续发。
+
 ## 0. 前提（本页写清楚，不代为满足）
 
 1. 闸 1（`docs/2026-09-15-kanetui-proto-v0-restart-window-execution-page.md`）与闸 2（`docs/2026-09-14-kanetui-proto-v0-funds-seed-transfer-execution-page.md` v0.7）必须已经完成、验收读数全过，proto-v0-funds relay 已持有种子资金（1.95 KAS，三笔 0.5/0.5/0.95），本页（闸 3）才能开始。
 2. 本页只做**一个**市场、**一笔**下注——不是压力测试，不追加第二个市场/第二笔注。
 3. resolve/claim/withdraw 端点当前仍是 501 占位（§6/§9 结算入口未定案）——本页**明确不包含**这三步，金丝雀跑完就停在"下注已确认"，见 §5 的锁定说明。
 
-## 1. 设置 `PROTO_DRIVER_ENABLED=1` 并重启
+## 1. 前置检查（MUST，开驱动之前）+ 设置 `PROTO_DRIVER_ENABLED=1` 并重启
 
-- `kanet.mainnet.env` 新增一行 `PROTO_DRIVER_ENABLED=1`（执行页 A 那次重启**特意没加**这一行，本页是它专属的重启窗）。
+**只读查询，不改任何数据**，在改 env 之前对主网库跑：
+
+```sql
+SELECT id, status FROM proto_markets WHERE status NOT IN ('betting','sealed','resolved','cancelled');
+SELECT intent_key, bet_id, step, status FROM proto_bet_intents WHERE step = 'append' AND status != 'landed';
+SELECT id, status FROM proto_bets WHERE status != 'confirmed';
+```
+
+- **三条查询结果必须全部为 0 行才允许继续**——本页闸 1（执行页 A）之后、本页 §1 之前，proto 表理应一直是空的（种子转账不写这几张表，代币定义/市场/下注创建全部待本页才发生），0 行是预期结果，不是需要特意制造的条件。
+- 若非 0 行：**停下来，不设 `PROTO_DRIVER_ENABLED`，SendMessage 报 Bettor**，附查询结果——这意味着上一次尝试（本页或别的什么操作）留下了未清理的残留状态，直接开驱动会让 `runProtoDriverTick` 把这些残留当新任务静默续发（见页首规则）。
+- 三条全 0 行：`kanet.mainnet.env` 新增一行 `PROTO_DRIVER_ENABLED=1`（执行页 A 那次重启**特意没加**这一行，本页是它专属的重启窗）。
 - 走标准六步重启（同执行页 A §4）：NO-TX 检查 → 停旧 PID → 确认端口释放 → 起新进程 → 记新 PID。
 - 验收：stdout 应出现 `[proto-driver] enabled`（或等价的"已启动"日志，具体措辞以 `services/proto-driver.mjs` 实际打印为准，执行时对照源码确认，不猜字面）——**跟执行页 A §5b 的 `[proto-driver] disabled` 正好相反**，这是本页唯一预期会变化的读数，其余（资金路由 403、敏感路由 503、五屏 200 等）应保持执行页 A 验收过的状态不变。
 
@@ -40,12 +52,15 @@
 - 完成 §3 且核对一致后，**立即**从 `kanet.mainnet.env` 删除 `PROTO_DRIVER_ENABLED=1` 这一行，重启 console。
 - 验收：stdout 恢复 `[proto-driver] disabled`（同执行页 A §5b 那条），资金路由/敏感路由/五屏读数复核一遍确认未受影响。
 - **不因为"这次跑通了"就顺手再跑第二个市场/第二笔注**——本页范围就是"1 个市场 + 1 笔下注"，验证到此为止，扩大范围是另一次独立决定，不在本页授权内。
+- **重跑 §1 那三条前置检查查询，逐行分类处理**（关闭后的收尾，跟 §1 的开驱动前检查是同一套查询，目的相反——一个是确认干净才敢开，一个是确认关闭后没留手尾）：
+  - 状态为 `genesis_pending`/`pending`（`prepared_txid`/`genesis_submitted_txid` 等字段为空，说明从未真正发过 IPC）⇒ **可以删**，但只能由执行人经 Bettor 确认后删除，不自行删。
+  - 状态为 `genesis_prepared`/`genesis_submitted`/`prepared`/`submitted`/`genesis_ambiguous`/`ambiguous`（交易可能已经广播出去，链上可能已经有记录）⇒ **禁止删除**——这正是 NO TX NO STATE CHANGE 的反面：本地记录可能对应一笔已经上链的真实交易，删记录不会撤销链上的事实，只会让我们自己失去追踪它的能力。处置：用记录里的 `txid`（`prepared_txid`/`genesis_submitted_txid`/等价字段）到区块浏览器/`get_address_utxos` 核实是否落链——落链了就转人工对账（这笔市场/下注实际发生了，只是驱动没能把它推进到终态，需要人工把 DB 状态修到跟链一致，不是本页范围内的自动化操作）；没落链也**不重发**（重发可能造成双花/冲突，具体处置留给人工判断）；把这些行整理成清单（`id`/`intent_key`/`status`/`prepared_txid` 等字段）报 Bettor → Owner，不自行决定。
 
 ## 5. 成本与锁定说明
 
 🔴 **明确写给 Owner 看**：**resolve / claim / withdraw 三个端点目前仍是 501 未实现**（§6/§9 结算入口尚未定案）。这意味着本金丝雀锁进市场 covenant 的 KAS（下注那一笔的 stake，此时归属市场的 leaf/held 状态，不再是任何人钱包里的自由余额）**在结算入口真正落地之前，没有任何路径能取回**——这不是"暂时卡住等一下"，是"这条路径本身还没写"。金丝雀完成后，这笔资金会长期处于锁定态，直到未来某次独立的结算实现工作完成为止。
 
-**预计净损耗**（数量级判断，非精确承诺，最终以实际构造时 `calculateTransactionMass` 计算结果为准——同 GO-F v0.1 §4 一贯的口径）：
+**预计净损耗**（数量级判断，非精确承诺，最终以实际构造时 `calculateTransactionMass` 计算结果为准——同 GO-F v0.1 §4 一贯的口径）：**🟡 以下区间是 D-020 之前（步骤 A+B 两步设计）的实验数字，J2 正在按 D-020 单笔形状重算，算好后替换本节数字，本页当前先保留旧区间占位，不代表已核实的最终值。**
 
 - `market_genesis`：约 0.4 KAS（`GENESIS_OUTPUT_SOMPI` 硬编码 20,000,000 sompi + `required_fee` 约 20,000,000 sompi，见 (1402)）。种子转账第 1 笔（0.5 KAS）覆盖此项，留有余量。
 - 下注（`register_append` 单笔交易，含续约 ShardLeaf_direct + 新铸 ps ticket + 续约 KTT + relay 找零四个输出）：约 0.6–0.8 KAS 区间（(1400)/(1402)/(1404)/(1406) 多轮真实编译+mass 实验的收敛范围，成本大头是三个各自钉 20,000,000 sompi 的 covenant/genesis 输出的 KIP-9 storage mass，脚本大小只占小头）。种子转账第 3 笔（0.95 KAS，原为 D-020 之前的"步骤 B"预留）覆盖此项，留有余量。
@@ -58,6 +73,16 @@
 - `GET /api/proto-markets/:id` 推算出的状态与链上实际观察（区块浏览器/`get_address_utxos` 直查）不一致。
 - relay（proto-v0-funds）拒绝签名（`assertProtoRelayHealthy`/`validateFixedValueOutputs`/`validateSignedInputCeiling`/`validateNetLoss` 任一断言在正常参数下意外拒绝）。
 - proto relay 余额断言触发（余额意外接近或超过 `PROTO_MAX_BALANCE_KAS=5`——正常情况下种子只有 1.95 KAS，不该发生，一旦发生说明有资金来源之外的异常）。
+
+### 6a. 对着 stdout 查的具体错误码/前缀（读源码逐条核对，非猜测）
+
+- Console 侧（`kasia-console/src/lib/proto-broadcast-ops.mjs`/`proto-leaf-state.mjs`）：`no_suitable_fee_utxo`、`leaf_state_drift`（`assertLeafStateMatchesChain`）、`held_ktt_drift`（`assertHeldKttOutpointMatchesChain`）、`market_append_in_flight`（`assertNoInFlightAppend`，ambiguous 存在时新的步骤不自动清）。
+- Console API 层（`proto.js`）：`proto_driver_disabled`（驱动未开启时的 409）。
+- Relay 侧（`kasia-relay/src/lib/covenant-broadcast-relay.mjs`）：拒签统一走 `COVENANT_BROADCAST <key> REJECTED (<reason>): <detail>` 这行日志前缀（grep `COVENANT_BROADCAST.*REJECTED` 能找到全部拒绝），细分 `code` 有 `fixed_value_output_mismatch`/`signed_input_ceiling_exceeded`/`sign_failed`/`txid_mismatch`/`fee_calc_failed`/`net_loss_exceeded`。
+
+### 6b. 中止后同 §4 的收尾
+
+触发中止后，除了立即关闭驱动，**同样跑 §4 那三条前置检查查询并按同一套规则分类处理**（`pending`/`genesis_pending` 经 Bettor 确认可删；`prepared`/`submitted`/`ambiguous` 一律禁止删除、链上核对、报 Bettor→Owner，不重发不自行处理）——中止跟正常完成后的"立即关闭"在清理这一步没有区别，都要走这套只读优先、有广播嫌疑就不删的规则。
 - 出现以上任一情况：**立即**执行 §4 的关闭步骤（删 `PROTO_DRIVER_ENABLED` + 重启），保留现场（stdout 日志、DB 当前行、驱动 tick 记录）供诊断，SendMessage 报 Bettor，**不自行重试、不自行诊断后继续**。
 
 ## 7. 证据清单（执行完成后落 `docs/provenance/2026-09-15-kanetui-proto-v0-mainnet-canary/`）
@@ -86,11 +111,11 @@
 ### 0.2 阻断前提（本页写清楚，不代为满足）
 1. **身份必须先存在且已启动**——GO-F 需要一个已经持有真实 KAS、relay 进程已在跑的 mainnet 身份来签名+广播（见 §1）。这个身份来自迁移第 2 批（`docs/2026-09-14-kanetui-mainnet-migration-batch2-small-exec-v0.1.md`），**本页写作时第 2 批尚未执行**——GO-F 的广播动作不能早于第 2 批验收通过。
 2. 本页（设计）本身不需要等第 2 批完成就能写/审，但**广播执行**必须排在第 2 批之后。
-3. NWT 2-1 热钱包硬上限（`RELAY_HOTWALLET_PER_RELAY_MAX_KAS=800`/`_TOTAL_MAX_KAS=1000`）已部署生效（`docs/provenance/2026-09-14-kanetui-hotwallet-mainnet-deploy/`）——GO-F 用的身份余额（1.59 或 7.46 KAS）远低于两个上限，不受影响，只是记录这条已满足的前提，不是待办。
+3. NWT 2-1 热钱包硬上限（`RELAY_HOTWALLET_PER_RELAY_MAX_KAS=800`/`_TOTAL_MAX_KAS=1000`）已部署生效（`docs/provenance/2026-09-14-kanetui-hotwallet-mainnet-deploy/`）——GO-F 用的身份余额远低于两个上限（余额见 docs-private），不受影响，只是记录这条已满足的前提，不是待办。
 
 ## 1. 身份
 
-**用迁移进来的小额账号**（迁移 runbook `docs/2026-09-14-kanetui-mainnet-account-migration-runbook-v0.1.md` §8、GO-E 清单 `docs/2026-09-13-kanetui-mainnet-relay-identity-funding-checklist-v0.1.md` 状态注记已定的同一条决定）：`Bettor`（1.59303211 KAS）或 `Trader-A`（7.45579730 KAS）二选一——两者选哪个对本页设计没有实质影响，留给 Bettor/Owner 定，本页不代为拍板。`Trader-B` 因 Rule 1 零引用 grep 命中源码硬编码常量，**永不能**用作这个用途，此前已定，本页不重复展开判据本身。
+**用迁移进来的小额账号**（迁移 runbook `docs/2026-09-14-kanetui-mainnet-account-migration-runbook-v0.1.md` §8、GO-E 清单 `docs/2026-09-13-kanetui-mainnet-relay-identity-funding-checklist-v0.1.md` 状态注记已定的同一条决定）：账户 A（余额见 docs-private）或账户 B（余额见 docs-private）二选一——两者选哪个对本页设计没有实质影响，留给 Bettor/Owner 定，本页不代为拍板。`Trader-B` 因 Rule 1 零引用 grep 命中源码硬编码常量，**永不能**用作这个用途，此前已定，本页不重复展开判据本身。
 
 ### 1.1 GO-E 纪律怎么用在这里——一个需要 Bettor/NWT/Owner 明确确认的分歧点
 
