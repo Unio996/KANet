@@ -190,7 +190,11 @@ function _resolveZkNativeCtorExtras(market, computeCloseZkTmplAnchor) {
     // 不依赖调用方传参正确")。现在函数第三个位置是 tokenTmplHash(真参数)——若不删掉这个死传参, 一个
     // 文件路径字符串会被塞进 tokenTmplHash 的位置(好在函数内部有 hex 格式校验会 fail-loud 拒绝, 不会
     // 静默算错, 但错误信息会很费解)。已删除, 改传三个真实新字段。
-    closeZkTmplAnchor = computeCloseZkTmplAnchor(closeZkSilPath, gateTmplHash, process.env.ZK_TOKEN_TMPL_HASH, process.env.ZK_CLAIM_TMPL_HASH, process.env.ZK_MARKET_SUFFIX_HASH).anchorHex;
+    // 账本 1415/1458 修: computeCloseZkTmplAnchor 签名已收窄(删 marketSuffixHash, 该字段账本
+    // 1408/1409/1415 已从 CloseZkV2.sil 构造参数删除)——上面 ZK_MARKET_SUFFIX_HASH env 必需检查原样
+    // 保留(仍是这个市场 genesis 时对外 declare 的值, 供 payout_shards.market_suffix_hash 列记账/供
+    // assertZkHandoffTmplCoherent 事后核对), 只是不再传进 ctor 编译调用。
+    closeZkTmplAnchor = computeCloseZkTmplAnchor(closeZkSilPath, gateTmplHash, process.env.ZK_TOKEN_TMPL_HASH, process.env.ZK_CLAIM_TMPL_HASH).anchorHex;
   }
   return { zkNative, closeZkTmplAnchor };
 }

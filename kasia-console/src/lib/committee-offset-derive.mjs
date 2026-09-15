@@ -43,16 +43,27 @@ const _REFERENCE_OFFSETS = {
 
 const W17V100 = () => Array.from({ length: 17 }, () => ctorIntV100(0));
 
-/** 占位 ctor(V1, 25 参数)——结构不依赖 ctor 值，sentinel 槽位真实填入，其余占位互不相同避免碰撞。 */
+/**
+ * 占位 ctor(V1, 24 参数——账本 1415/1458 修：market_suffix_hash 已随 PayoutShard.sil 构造参数一并删除，
+ * 本函数曾仍传旧 25 参数形状，是 committee-offset-derive 启动预热 WARMUP FAIL 回归的根因，此处对齐
+ * PayoutShard.sil 当前真实签名: poolMerkleRoot/predicate_commit/token_tmpl_hash/init_consolidated_pool/
+ * init_closed/init_payoutRoot/init_w0..init_w16(17)/claim_tmpl_hash)——结构不依赖 ctor 值，sentinel 槽位真实
+ * 填入，其余占位互不相同避免碰撞。
+ */
 function _ctorV1(pmrSentinel, pcSentinel) {
   return [
     ctorBytes32V100(pmrSentinel), ctorBytes32V100(pcSentinel), ctorBytes32V100('dd'.repeat(32)),
     ctorIntV100(0), ctorIntV100(0), ctorBytes32V100('ee'.repeat(32)),
     ...W17V100(),
-    ctorBytes32V100('ff'.repeat(32)), ctorBytes32V100('11'.repeat(32)),
+    ctorBytes32V100('11'.repeat(32)),
   ];
 }
-/** 占位 ctor(V2, 30 参数)。 */
+/**
+ * 占位 ctor(V2, 29 参数——同上账本 1415/1458 修：market_suffix_hash 已删，对齐 PayoutShardV2.sil 当前真实签名:
+ * poolMerkleRoot/predicate_commit/closeZkTmplAnchor/token_tmpl_hash/init_consolidated_pool/init_closed/
+ * init_payoutRoot/init_w0..init_w16(17)/init_attestedWinner/init_attestedAtMs/init_betsRootBaked/
+ * init_refundRootBaked/claim_tmpl_hash)。
+ */
 function _ctorV2(pmrSentinel, pcSentinel) {
   return [
     ctorBytes32V100(pmrSentinel), ctorBytes32V100(pcSentinel), ctorBytes32V100('cc'.repeat(32)),
@@ -60,7 +71,7 @@ function _ctorV2(pmrSentinel, pcSentinel) {
     ctorIntV100(0), ctorIntV100(0), ctorBytes32V100('ee'.repeat(32)),
     ...W17V100(),
     ctorIntV100(-1), ctorIntV100(0), ctorBytes32V100('ff'.repeat(32)), ctorBytes32V100('11'.repeat(32)),
-    ctorBytes32V100('22'.repeat(32)), ctorBytes32V100('33'.repeat(32)),
+    ctorBytes32V100('33'.repeat(32)),
   ];
 }
 

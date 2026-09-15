@@ -35,6 +35,21 @@ export async function splitUtxos(relayNodeId, targetCount = TARGET_UTXO_COUNT, o
   }
 }
 
+// 账本 1459(闸3阻断修复, Bettor/NWT 复核): 原型 v0(proto-tx-assembly.mjs 的 market_genesis/register_append)
+// 的 UTXO 形状是执行页(canary execution page)按每笔真实构造需要的最小可行 fee-input 手动/半手动摆的
+// (见 docs/provenance/2026-09-15-j2-d020-register-append-fee-formula-fix/recompute-fixed-cost.mjs 算出的
+// 真实阈值)，不是"越多小额 UTXO 越好"这个通用假设的适用对象——autoSplitAll 每次 console 启动都无条件对
+// 全部 relay 跑 split_utxo(targetCount=8), 若原型 relay 余额不为 0(闸2 种子转账后就会是), 会把它拆成
+// 8 份均等小额 UTXO, 按 KIP-9 公式那 1.95 KAS 拆 8 份每份 ≈0.24 KAS——不够任何一笔下注需要的 ≥0.56 KAS
+// fee-input 门槛(见上面同一份 provenance 的注脚), 首笔下注直接 no_suitable_fee_utxo, 且白付一笔拆分手续费。
+// 闸3(打开 PROTO_DRIVER_ENABLED)恰好需要重启 console 触发, 必然撞上这条——原型 relay 的 UTXO 形状交给
+// 执行页自己管理, autoSplitAll 必须跳过它(同 UNREADABLE_RELAY_IDS 那条"这类 relay 不适用通用逻辑"的先例)。
+function _isProtoRelay(a) {
+  if (process.env.PROTO_RELAY_ID && a.id === process.env.PROTO_RELAY_ID) return true;
+  if (typeof a.name === 'string' && a.name.startsWith('proto-')) return true;
+  return false;
+}
+
 /**
  * Auto-split all relay accounts. Called after relays are started.
  */
@@ -47,6 +62,10 @@ export async function autoSplitAll() {
   for (const a of accounts) {
     if (UNREADABLE_RELAY_IDS.has(a.id)) {
       console.warn(`[utxo-splitter] ${a.name}: skipped: address unreadable, see card (TREASURY-UTXO-UNREADABLE)`);
+      continue;
+    }
+    if (_isProtoRelay(a)) {
+      console.log(`[utxo-splitter] ${a.name}: skip (proto relay — UTXO shape managed by execution page)`);
       continue;
     }
     try {

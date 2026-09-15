@@ -14,6 +14,12 @@ import { compileCloseZkV2Redeem } from './closezk-v2-mint.mjs';
 let fails = 0;
 const ok = (cond, label) => { if (cond) console.log(`  ✅ ${label}`); else { console.error(`  ❌ ${label}`); fails++; } };
 
+// 🔴 预先存在的缺口(J2 2026-09-15 顺手抓到, 账本 1458 修复期间跑全量测试暴露, 与本次 market_suffix_hash
+// 修复无关): BASE 一直缺 tokenTmplHash/claimTmplHash——D-019 迁移(ledger 1216-1222)早就给
+// compileCloseZkV2Redeem 加了这两个必需字段的 fail-loud hex32 校验, 本文件自那以后就没更新过 BASE,
+// 每次跑都在第一行 assertFieldLandsInOwnSlot 调用处直接 throw(tokenTmplHash 必须是 32B hex, 收到
+// undefined)——不是这次改动引入的红, 是一直没人跑过这个文件才没被抓到(同 CLAUDE.md 里"regression case
+// 是交付那一刻的证据, 不是一直在岗的哨兵"那条纪律的活例子)。顺手补上, 不额外改动测试意图。
 const BASE = {
   gateTmplHash: 'aa'.repeat(32),
   betsRootBaked: 'bb'.repeat(32),
@@ -21,6 +27,8 @@ const BASE = {
   attestedAtMs: 1783413621808,
   attestedWinner: 1,
   consolidatedPool: 100000000,
+  tokenTmplHash: '11'.repeat(32),
+  claimTmplHash: '22'.repeat(32),
 };
 
 function assertFieldLandsInOwnSlot(fieldName, newValueHex) {

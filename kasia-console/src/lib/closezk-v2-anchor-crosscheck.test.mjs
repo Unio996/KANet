@@ -43,6 +43,9 @@ const ok = (cond, label) => { if (cond) console.log(`  ✅ ${label}`); else { co
 // [2^40,2^47) 真实生产值域内的量级(NWT §四 point 1 原话："比如 2^41 附近某个具体数字")——这条测试验的
 // 是"生产范围内任意真实值都适用"，不是重复测 T-CLOSEZK-ATMS-WIDTH 已经覆盖的编码宽度边界本身。
 const GATE = 'ab'.repeat(32);
+// 账本 1415/1458 修: marketSuffixHash 已从 CloseZkV2.sil 构造参数删除(见 compileCloseZkV2Redeem 顶注)，
+// 不再是需要两边一致的第四个真实承诺——REAL_SUFFIX 保留常量本身(仍传给 compileCloseZkV2Redeem，会被
+// 无害忽略)但不再传给 computeCloseZkTmplAnchor。
 const REAL_TOKEN = 'c1'.repeat(32), REAL_CLAIM = 'c2'.repeat(32), REAL_SUFFIX = 'c3'.repeat(32);
 const REAL_BETS_ROOT = 'd1'.repeat(32), REAL_REFUND_ROOT = 'd2'.repeat(32);
 const REAL_ATMS = 2 ** 41 + 123456789;   // 落在 [2^40,2^47) 内, 跟 dummyAtMs 不同, 6 字节编码
@@ -51,7 +54,7 @@ console.log('[test] T-ANCHOR-XCHECK instance-binding: dummy-derived templateA/B/
 {
   // ① dummy 路径(生产实际调用的函数，不是重新实现一遍)——同一份 gateTmplHash/tokenTmplHash/claimTmplHash/
   //   marketSuffixHash(这四个是"这个市场"的真实承诺，两边必须一致，不是要交叉校验的对象)。
-  const anchor = computeCloseZkTmplAnchor(CLOSEZK_V2_SIL, GATE, REAL_TOKEN, REAL_CLAIM, REAL_SUFFIX);
+  const anchor = computeCloseZkTmplAnchor(CLOSEZK_V2_SIL, GATE, REAL_TOKEN, REAL_CLAIM);
 
   // ② 完全独立的真实值编译(compileCloseZkV2Redeem，生产实际调用的函数)——attestedAtMs/betsRootBaked/
   //   refundRootBaked 全部换成跟 dummy 不同的真实值，attestedWinner/consolidatedPool 也换成非 dummy 值。
@@ -89,7 +92,7 @@ console.log('[test] T-ANCHOR-XCHECK instance-binding: dummy-derived templateA/B/
 
 console.log('\n[test] negative(证明这条测试不是摆设，真能抓到不一致): 用一个不同的 gateTmplHash 编译真实产物(模拟"两处独立实现的输入意外不同步"这个真实故障模式，同本票 T-ANCHOR-XCHECK 现状分析原话)，四段模板不应该再全部匹配:');
 {
-  const anchor = computeCloseZkTmplAnchor(CLOSEZK_V2_SIL, GATE, REAL_TOKEN, REAL_CLAIM, REAL_SUFFIX);
+  const anchor = computeCloseZkTmplAnchor(CLOSEZK_V2_SIL, GATE, REAL_TOKEN, REAL_CLAIM);
   const DIFFERENT_GATE = 'ff'.repeat(32);   // 故意跟 anchor 用的 GATE 不同
   const mismatchedRedeemHex = compileCloseZkV2Redeem({
     gateTmplHash: DIFFERENT_GATE, betsRootBaked: REAL_BETS_ROOT, refundRootBaked: REAL_REFUND_ROOT,

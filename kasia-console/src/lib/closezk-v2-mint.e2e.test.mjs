@@ -42,11 +42,13 @@ const SENT = {
 };
 const landedPsv2Redeem = _splicePayoutV2CloseRedeem(base, SENT);
 const GATE_TMPL_HASH = '66'.repeat(32);   // distinct from all other sentinels used above (bets/refund/payout roots)
-// D-019 迁移(ledger 1216-1222): T3 代币化新增三个 ctor-only 字面量字段, 同 gateTmplHash 一样必须传真实值
-// 且会被烤进模板——用与既有 sentinel 互不相同的新值(77/88/dd), 便于下面断言真的能在 redeem 字节里找到它们。
-const TOKEN_TMPL_HASH = '77'.repeat(32), CLAIM_TMPL_HASH = '88'.repeat(32), MARKET_SUFFIX_HASH = 'dd'.repeat(32);
+// D-019 迁移(ledger 1216-1222): T3 代币化新增两个 ctor-only 字面量字段(原为三个含 market_suffix_hash,
+// 账本 1415/1458 修: market_suffix_hash 已从 CloseZkV2.sil 构造参数删除, 见 compileCloseZkV2Redeem 顶注),
+// 同 gateTmplHash 一样必须传真实值且会被烤进模板——用与既有 sentinel 互不相同的新值(77/88), 便于下面断言
+// 真的能在 redeem 字节里找到它们。
+const TOKEN_TMPL_HASH = '77'.repeat(32), CLAIM_TMPL_HASH = '88'.repeat(32);
 
-const result = buildCloseZkV2GenesisFromAttestedState(landedPsv2Redeem, GATE_TMPL_HASH, TOKEN_TMPL_HASH, CLAIM_TMPL_HASH, MARKET_SUFFIX_HASH);
+const result = buildCloseZkV2GenesisFromAttestedState(landedPsv2Redeem, GATE_TMPL_HASH, TOKEN_TMPL_HASH, CLAIM_TMPL_HASH);
 
 ok(result.consolidatedPool === CONSOLIDATED_POOL, `consolidatedPool passthrough byte-exact (${result.consolidatedPool})`);
 ok(result.attestedWinner === SENT.newAttestedWinner, `attestedWinner byte-exact (${result.attestedWinner})`);
@@ -61,14 +63,14 @@ ok(!redeemBuf.includes(Buffer.from(SENT.newPayoutRootHex, 'hex')), 'compiled red
 // D-019 迁移(ledger 1216-1222)新增断言: 三个新 ctor-only 字面量字段确实被烤进 redeem 字节(不是 no-op 传参)
 ok(redeemBuf.includes(Buffer.from(TOKEN_TMPL_HASH, 'hex')), 'compiled redeem contains tokenTmplHash (D-019 ctor 补齐验证)');
 ok(redeemBuf.includes(Buffer.from(CLAIM_TMPL_HASH, 'hex')), 'compiled redeem contains claimTmplHash (D-019 ctor 补齐验证)');
-ok(redeemBuf.includes(Buffer.from(MARKET_SUFFIX_HASH, 'hex')), 'compiled redeem contains marketSuffixHash (D-019 ctor 补齐验证)');
+// marketSuffixHash 断言已删(账本 1415/1458 修: 该字段已从 CloseZkV2.sil 构造参数删除, 不再烤进 redeem)。
 
 // direct compileCloseZkV2Redeem re-check: confirm buildCloseZkV2GenesisFromAttestedState is not silently
 // diverging from calling compileCloseZkV2Redeem directly (defends against future refactors decoupling them).
 const direct = compileCloseZkV2Redeem({
   gateTmplHash: GATE_TMPL_HASH, betsRootBaked: SENT.newBetsRootHex, refundRootBaked: SENT.newRefundRootHex,
   attestedAtMs: SENT.newAttestedAtMs, attestedWinner: SENT.newAttestedWinner, consolidatedPool: CONSOLIDATED_POOL,
-  tokenTmplHash: TOKEN_TMPL_HASH, claimTmplHash: CLAIM_TMPL_HASH, marketSuffixHash: MARKET_SUFFIX_HASH,
+  tokenTmplHash: TOKEN_TMPL_HASH, claimTmplHash: CLAIM_TMPL_HASH,
 });
 ok(direct === result.redeemHex, 'buildCloseZkV2GenesisFromAttestedState redeem byte-exact == direct compileCloseZkV2Redeem call with same values');
 

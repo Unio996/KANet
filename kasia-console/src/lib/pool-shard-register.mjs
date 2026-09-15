@@ -116,24 +116,29 @@ export function spliceLeafState(baseRedeemHex, st) {
 }
 
 /**
- * Compile a production-shape PayoutShard redeem (25-param ctor incl predicate_commit 2nd).
+ * Compile a production-shape PayoutShard redeem (24-param ctor incl predicate_commit 2nd).
  * 🔴 D-019 迁移(ledger 1225-1227, 落码期间实测确认): 原 ctor 只填 22 个值(缺 T3 代币化新增的
- * token_tmpl_hash 插在 predicateCommit 之后 + claim_tmpl_hash/market_suffix_hash 追加末尾, 当前
- * PayoutShard.sil 实读 25 参数), 且硬编码走 SILVERC_LEGACY——已改走 compileSilV100 + ctor 补齐。前提
- * (Bettor 1227 只读查生产库确认): 主网 payout_shards=0, 零旧 22 参数 shape 存量市场需要兼容, 不做新旧
- * shape 分支。三个新字段跟 PayoutShardV2 那半同一条纪律: ctor-only 字面量, 必须传真实值, 不接受占位符。
+ * token_tmpl_hash 插在 predicateCommit 之后 + claim_tmpl_hash 追加末尾, 当前 PayoutShard.sil 实读 24
+ * 参数), 且硬编码走 SILVERC_LEGACY——已改走 compileSilV100 + ctor 补齐。前提(Bettor 1227 只读查生产库
+ * 确认): 主网 payout_shards=0, 零旧 22 参数 shape 存量市场需要兼容, 不做新旧 shape 分支。
+ * 🔴 账本 1415/1458 修: market_suffix_hash 曾是这两个新字段之外的第三个 ctor-only 尾字段, 账本
+ * 1408/1409/1415(v0.3 方案C 同病同治)把它从 PayoutShard.sil 构造参数里删除(纯透传镜像
+ * KanetTokenClaim 已删除的同名字段, 不参与本文件任何 require), 但那一轮明确裁定"12 个 JS 消费者这次
+ * 不改"——本函数当时仍传 25 个值(含 marketSuffixHash), 导致真调用时 100% silverc 编译失败
+ * (constructor argument count mismatch: expected 24, got 25; 账本 1458 回归报告实测复现)。此处补齐:
+ * 删除 marketSuffixHash 形参/校验/ctor 元素, 与合入后的 PayoutShard.sil 真实签名对齐。
  * @param {object} o { poolMerkleRoot(hex), predicateCommit(hex), consolidatedPool(int), closed(int),
- *   payoutRoot(hex), tokenTmplHash(hex), claimTmplHash(hex), marketSuffixHash(hex) }
+ *   payoutRoot(hex), tokenTmplHash(hex), claimTmplHash(hex) }
  */
-export function compilePayoutShardRedeem({ poolMerkleRoot, predicateCommit, consolidatedPool, closed = 0, payoutRoot = z32, tokenTmplHash, claimTmplHash, marketSuffixHash }) {
-  for (const [label, v] of [['tokenTmplHash', tokenTmplHash], ['claimTmplHash', claimTmplHash], ['marketSuffixHash', marketSuffixHash]]) {
+export function compilePayoutShardRedeem({ poolMerkleRoot, predicateCommit, consolidatedPool, closed = 0, payoutRoot = z32, tokenTmplHash, claimTmplHash }) {
+  for (const [label, v] of [['tokenTmplHash', tokenTmplHash], ['claimTmplHash', claimTmplHash]]) {
     if (!/^[0-9a-fA-F]{64}$/.test(String(v || ''))) throw new Error(`compilePayoutShardRedeem: ${label} 必须是 32B hex，收到 ${JSON.stringify(v)} — ctor-only 字面量，不接受占位符/缺省值`);
   }
   const ctor = [
     ctorBytes32V100(poolMerkleRoot), ctorBytes32V100(predicateCommit), ctorBytes32V100(tokenTmplHash),
     ctorIntV100(Number(consolidatedPool)), ctorIntV100(closed), ctorBytes32V100(payoutRoot),
     ...W17V100(),
-    ctorBytes32V100(claimTmplHash), ctorBytes32V100(marketSuffixHash),
+    ctorBytes32V100(claimTmplHash),
   ];
   return Buffer.from(compileSilV100(join(LIB, 'PayoutShard.sil'), ctor, 'PayoutShard').script).toString('hex');
 }
@@ -161,18 +166,19 @@ export function compileShardLeafRedeem({ marketIdHash, psTmplHashHex, shardPoolI
  * Ensure the per-logical-market PayoutShard covenant exists (genesis-mint once). Reads/writes payout_shards (v172).
  * @returns {{ payoutCovId, psAddr, psOutpoint, psRedeemGenesis }}
  */
-export async function ensurePayoutShard({ db, rc, transfer, landed, p2sh, logicalMarketId, poolMerkleRoot, predicateCommit, tokenTmplHash, claimTmplHash, marketSuffixHash, relayAddr }) {
+export async function ensurePayoutShard({ db, rc, transfer, landed, p2sh, logicalMarketId, poolMerkleRoot, predicateCommit, tokenTmplHash, claimTmplHash, relayAddr }) {
   const existing = db.prepare(`SELECT * FROM payout_shards WHERE logical_market_id = ?`).get(logicalMarketId);
   if (existing) {
     _checkCoherenceNonBlocking(db, existing, p2sh);
     return { payoutCovId: existing.payout_cov_id, psAddr: existing.payout_ps_addr, psOutpoint: existing.payout_ps_outpoint, psRedeemGenesis: existing.payout_redeem_hex };
   }
 
-  // D-019 迁移(ledger 1225-1227): PayoutShard.sil 当前 ctor 实读 25 参数(T3 代币化新增 token_tmpl_hash/
-  // claim_tmpl_hash/market_suffix_hash 三个字段), 调用方必须显式提供真实值——不接受占位符(见
-  // compilePayoutShardRedeem 内部的 hex 格式 fail-loud 校验)。v205 迁移已给 payout_shards 加同名三列,
-  // 这里 genesis-mint 时一并写入(K-18"谁编译谁 declare"纪律: 存创世时实际用的值)。
-  const redeem = compilePayoutShardRedeem({ poolMerkleRoot, predicateCommit, consolidatedPool: PS_SEED, closed: 0, payoutRoot: z32, tokenTmplHash, claimTmplHash, marketSuffixHash });
+  // D-019 迁移(ledger 1225-1227): PayoutShard.sil 当前 ctor 实读 24 参数(T3 代币化新增 token_tmpl_hash/
+  // claim_tmpl_hash 两个字段, market_suffix_hash 账本1415 已删——见 compilePayoutShardRedeem 顶注),
+  // 调用方必须显式提供真实值——不接受占位符(见 compilePayoutShardRedeem 内部的 hex 格式 fail-loud 校验)。
+  // v205 迁移给 payout_shards 加的 market_suffix_hash 列仍在(历史列, 不撤 migrate), 但不再写入(K-18
+  // "谁编译谁 declare"纪律: 只存创世时真实用过的值——不再喂给编译器就不再声称用过)。
+  const redeem = compilePayoutShardRedeem({ poolMerkleRoot, predicateCommit, consolidatedPool: PS_SEED, closed: 0, payoutRoot: z32, tokenTmplHash, claimTmplHash });
   const fundTx = await transfer(relayAddr, PS_SEED + 100_000_000);   // seed + headroom to gateway
   const gj = await rc({ type: 'bshard_genesis_mint_payout', payoutshard: { redeem_hex: redeem, seedSompi: String(PS_SEED) }, inputs: { funding: { address: relayAddr, outpointTxid: fundTx, index: 0 } }, outputs: { change_address: relayAddr } });
   const payoutCovId = gj.payoutCovId, psTx = gj.txId || gj.txid, psAddr = p2sh(redeem);
@@ -182,8 +188,8 @@ export async function ensurePayoutShard({ db, rc, transfer, landed, p2sh, logica
   // K-18 §3.1(covenant_family 列, migrate v189): 谁编译谁 declare — 这里走 compilePayoutShardRedeem(V1),
   // 声明 'v1_committee'。不可变(§3.2 assertZkNativeImmutable 只护 genesis 之后; genesis 这一刻本身就是
   // 唯一定家族的时刻, 不需要额外守卫)。
-  db.prepare(`INSERT INTO payout_shards (logical_market_id, payout_cov_id, payout_ps_addr, payout_ps_outpoint, payout_redeem_hex, pool_merkle_root, predicate_commit, created_at, covenant_family, token_tmpl_hash, claim_tmpl_hash, market_suffix_hash)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(logicalMarketId, payoutCovId, psAddr, `${psTx}:0`, redeem, poolMerkleRoot, predicateCommit, Math.floor(Date.now() / 1000), 'v1_committee', tokenTmplHash, claimTmplHash, marketSuffixHash);
+  db.prepare(`INSERT INTO payout_shards (logical_market_id, payout_cov_id, payout_ps_addr, payout_ps_outpoint, payout_redeem_hex, pool_merkle_root, predicate_commit, created_at, covenant_family, token_tmpl_hash, claim_tmpl_hash)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?)`).run(logicalMarketId, payoutCovId, psAddr, `${psTx}:0`, redeem, poolMerkleRoot, predicateCommit, Math.floor(Date.now() / 1000), 'v1_committee', tokenTmplHash, claimTmplHash);
   return { payoutCovId, psAddr, psOutpoint: `${psTx}:0`, psRedeemGenesis: redeem };
 }
 
@@ -264,12 +270,16 @@ export function _sliceCloseZkTemplateSegments(fullBuf, templateSuffix, { betsRoo
  * @param {string} claimTmplHash 真实 KanetTokenClaim 模板 hash(32B hex，T3 代币化新增字段，不能传占位符——
  *   注意跟 RootClose 语境的同名字段指向不同物，见 docs/2026-09-14-j2-t4-market-genesis-console-side-
  *   skeleton-v0.3.md §2 命名碰撞警告)
- * @param {string} marketSuffixHash 真实 market suffix 承诺 hash(32B hex，T3 代币化新增字段，不能传占位符)
+ * 🔴 账本 1415/1458 修: marketSuffixHash 原是第四个 ctor-only 尾字段, 账本 1408/1409/1415(v0.3 方案C
+ * 同病同治)已从 CloseZkV2.sil 构造参数删除(纯透传镜像 KanetTokenClaim 已删除的同名字段)——那一轮裁定
+ * "12 个 JS 消费者这次不改", 本函数当时仍传 28 个值, 真调用会 100% silverc 编译失败(账本 1458 回归报告
+ * 实测复现: constructor argument count mismatch)。此处删除 marketSuffixHash 形参/校验/ctor 元素, 对齐
+ * 合入后 CloseZkV2.sil 真实 27 参数签名——调用方需同步更新(位置参数, 签名收窄一位)。
  * @param {string} [v100Path] 覆盖用(测试注入)，默认走 compileSilV100 自己的 env/pin 逻辑
  */
-export function computeCloseZkTmplAnchor(closeZkSilPath, gateTmplHash, tokenTmplHash, claimTmplHash, marketSuffixHash, v100Path) {
-  for (const [label, v] of [['gateTmplHash', gateTmplHash], ['tokenTmplHash', tokenTmplHash], ['claimTmplHash', claimTmplHash], ['marketSuffixHash', marketSuffixHash]]) {
-    if (!/^[0-9a-fA-F]{64}$/.test(String(v || ''))) throw new Error(`computeCloseZkTmplAnchor: ${label} 必须是 32B hex，收到 ${JSON.stringify(v)} — 这四个字段全部烤进模板字面量，不接受占位符/缺省值`);
+export function computeCloseZkTmplAnchor(closeZkSilPath, gateTmplHash, tokenTmplHash, claimTmplHash, v100Path) {
+  for (const [label, v] of [['gateTmplHash', gateTmplHash], ['tokenTmplHash', tokenTmplHash], ['claimTmplHash', claimTmplHash]]) {
+    if (!/^[0-9a-fA-F]{64}$/.test(String(v || ''))) throw new Error(`computeCloseZkTmplAnchor: ${label} 必须是 32B hex，收到 ${JSON.stringify(v)} — 这三个字段全部烤进模板字面量，不接受占位符/缺省值`);
   }
   // dummyAtMs 必须落在 J2 实测的稳定值域 [2^40, 2^47) 内(同 PayoutShardV2.sil zk_handoff 的 bounds guard)，
   // 否则 minimal-push 变长编码会让模板切分点跟真实 market 用的值对不上。用一个具体真实量级(非边界值)。
@@ -286,7 +296,7 @@ export function computeCloseZkTmplAnchor(closeZkSilPath, gateTmplHash, tokenTmpl
     ctorBytes32V100(gateTmplHash), ctorBytes32V100(dummyBetsRoot), ctorBytes32V100(dummyRefundRoot),
     ctorIntV100(dummyAtMs), ctorIntV100(0), ctorIntV100(1), ctorBytes32V100(z32), ctorIntV100(0),
     ...W17V100(),
-    ctorBytes32V100(tokenTmplHash), ctorBytes32V100(claimTmplHash), ctorBytes32V100(marketSuffixHash),
+    ctorBytes32V100(tokenTmplHash), ctorBytes32V100(claimTmplHash),
   ];
   const compiled = compileSilV100(closeZkSilPath, ctor, 'CloseZkV2', v100Path);
   const { templatePrefix, templateSuffix } = extractTemplateArtifact(compiled); // prefix=script[0:1], suffix=script[214:end]
@@ -337,14 +347,18 @@ export function computeCloseZkTmplAnchor(closeZkSilPath, gateTmplHash, tokenTmpl
  */
 /**
  * 🔴 D-019 迁移(ledger 1216-1221, 落码期间实测确认): 原实现 ctor 只填 27 个值(缺 T3 代币化新增的
- * token_tmpl_hash/claim_tmpl_hash/market_suffix_hash 三个尾部字段, 当前 PayoutShardV2.sil 实读 30
- * 参数), 且硬编码走已对当前语法失效的 SILVERC_ZK——已改走 compileSilV100 + ctor 补齐到 30, 三个新字段
- * 同 computeCloseZkTmplAnchor 一样是 ctor-only 字面量(不进 state), 必须传真实值。
+ * token_tmpl_hash/claim_tmpl_hash 两个尾部字段, 当前 PayoutShardV2.sil 实读 29 参数——见下 1415/1458
+ * 状态注记, 曾一度是 30, 现已收回 29), 且硬编码走已对当前语法失效的 SILVERC_ZK——已改走 compileSilV100 +
+ * ctor 补齐, 两个新字段同 computeCloseZkTmplAnchor 一样是 ctor-only 字面量(不进 state), 必须传真实值。
+ * 🔴 账本 1415/1458 修: marketSuffixHash 曾是这两个字段之外的第三个 ctor-only 尾字段(把 30 参数误写成
+ * 上面这句里的历史数字), 账本 1408/1409/1415(v0.3 方案C 同病同治)已从 PayoutShardV2.sil 构造参数删除,
+ * 那一轮裁定"12 个 JS 消费者这次不改"——本函数当时仍传 30 个值, 真调用会 100% silverc 编译失败(账本
+ * 1458 回归报告实测复现)。此处删除 marketSuffixHash 形参/校验/ctor 元素, 对齐合入后 29 参数真实签名。
  * @param {object} o { poolMerkleRoot(hex), predicateCommit(hex), closeZkTmplAnchor(hex), consolidatedPool(int),
- *   tokenTmplHash(hex), claimTmplHash(hex), marketSuffixHash(hex) }
+ *   tokenTmplHash(hex), claimTmplHash(hex) }
  */
-export function compilePayoutShardV2Redeem({ poolMerkleRoot, predicateCommit, closeZkTmplAnchor, consolidatedPool, tokenTmplHash, claimTmplHash, marketSuffixHash }) {
-  for (const [label, v] of [['tokenTmplHash', tokenTmplHash], ['claimTmplHash', claimTmplHash], ['marketSuffixHash', marketSuffixHash]]) {
+export function compilePayoutShardV2Redeem({ poolMerkleRoot, predicateCommit, closeZkTmplAnchor, consolidatedPool, tokenTmplHash, claimTmplHash }) {
+  for (const [label, v] of [['tokenTmplHash', tokenTmplHash], ['claimTmplHash', claimTmplHash]]) {
     if (!/^[0-9a-fA-F]{64}$/.test(String(v || ''))) throw new Error(`compilePayoutShardV2Redeem: ${label} 必须是 32B hex，收到 ${JSON.stringify(v)} — ctor-only 字面量，不接受占位符/缺省值`);
   }
   const ctor = [
@@ -356,7 +370,7 @@ export function compilePayoutShardV2Redeem({ poolMerkleRoot, predicateCommit, cl
     ctorIntV100(0),         // init_attestedAtMs: 0=待attest
     ctorBytes32V100(z32),   // init_betsRootBaked: ZERO32=待attest
     ctorBytes32V100(z32),   // init_refundRootBaked: ZERO32=待attest
-    ctorBytes32V100(claimTmplHash), ctorBytes32V100(marketSuffixHash),
+    ctorBytes32V100(claimTmplHash),
   ];
   return Buffer.from(compileSilV100(join(LIB, 'PayoutShardV2.sil'), ctor, 'PayoutShardV2').script).toString('hex');
 }
