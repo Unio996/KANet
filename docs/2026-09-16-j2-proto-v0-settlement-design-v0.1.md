@@ -98,7 +98,8 @@ V-T-8，可以放心用内建函数，编译器在**编译期自己**做不动�
 |---|---|---|---|
 | `ShardLeaf_direct.register_append` | readInputStateWithTemplate + 自续约(AB11) | **已修复**(账本1468/1469: ctor烤入`own_redeem_len`+JS不动点收敛) | 真实cli-debugger 6/6 PASS(账本1469④, `verify-run-1469-ctor-matrix.log`) |
 | `ShardLeaf_direct.convert_to_rootclose` | 只有`scanOwnedTokenInputs`(读, 无自续约) | 结构性安全 | 源码逐行核对+架构论证(§0.3); 未在本轮单独重跑, 建议实现前补1条向量 |
-| `RootClose.close_commit`/`refund_flip` | 只有`noTokenInput`(不读state) + 内建`validateOutputState` | 结构性安全 | 源码逐行核对+架构论证(§0.3); 未在本轮单独重跑, 建议实现前补1条向量 |
+| `RootClose.refund_flip` | 只有`noTokenInput`(不读state) + 内建`validateOutputState` + CLTV | ✅ **安全** | ✅ **真实cli-debugger PASS**——初次FAIL是harness用法错误(test.json的`lock_time`字段必须嵌在`tx`对象内部, 不是顶层, 见§0.10) |
+| `RootClose.close_commit` | 同上 + 5次`checkSig`(唯一涉及真实签名的入口) | 结构性看起来安全(require链逻辑清白) | 🟡 **真实执行未通过, 卡在`validSigs>=4`, 根因尚未100%钉死**——已排除多个候选(sig_op_count/computeBudget对version1 sighash零影响, 已读consensus源码逐行确认; kaspa-wasm的`createInputSignature`确认调用与debugger同一个`calc_schnorr_signature_hash`函数, 非独立实现), 详见§0.10 |
 | `RootClose.convert_to_claim`/`convert_to_refundclaim` | `scanOwnedTokenInputs`(读) + 外部模板(非自续约) | 结构性安全 | 同上 |
 | **`RootClaim.claim_draw`(payout==pool_value, 无续约分支)** | 无自续约, 只读ticket/token | **安全**——不经过下面的bug代码 | ✅ **真实cli-debugger PASS**（16参数全部真实ABI编码、真实协议常量尺寸、active input显式`signature_script_hex`——见§0.5①） |
 | **`RootClaim.claim_draw`(payout<pool_value, partial续约分支)** | `readInputStateWithTemplate`(读ticket+token) + **手写AB11自续约, `ownSig.slice(0, OWN_PREFIX_LEN)`** | **🔴 确认同账本1468同类defect, 真实cli-debugger复现**——诚实backend按"正确offset"（即`register_append`已修复的`ownLen-own_redeem_len`手法）构造出的续约输出，被合约自己的错误自检拒绝：`error: script ran, but verification failed` 精确命中`ownSig.slice(...)`那一行`require` | ✅ **真实cli-debugger FAIL（符合预期）**——见§0.5② |
@@ -271,6 +272,63 @@ _refund_payout.mjs`）：
 **给Owner/NWT的现状（已更新，不再是开放问题）**：`RefundClaim.refund_payout`的partial续约分支
 **结构性安全**，走(A)或(B)都不受这条影响；(B)路线只需要处理`RootClaim.sil`（§0.8），不需要再改
 `RefundClaim.sil`。上游`silverscript#253`若NWT有余力仍可独立跟进（不影响本文档任何结论）。
+
+### §0.10 `RootClose.refund_flip`/`close_commit`真实执行（账本1479 Bettor派活，NWT并行审全部6入口）
+
+**`refund_flip`：harness用法错误，已修复，确认安全**——`entry refund_flip(rootOutIdx, tok_prefix,
+tok_suffix)`不涉及签名（只有`noTokenInput`+内建`validateOutputState`+CLTV）。首次真实执行FAIL报
+`Unsatisfied lock time`——排查发现是**我自己的test.json写错了字段位置**：cli-debugger的`lock_time`
+字段必须嵌在`tx`对象**内部**（`tx.lock_time`），我最初写在顶层（与`tx`同级），debugger读到的locktime
+恒为0。挪进`tx`对象后**立即PASS**，无其它问题。**这是本轮发现的第3处审计工具/harness用法坑**（前两处
+是账本1473的双重hex编码bug）——NWT此前报告"refund_flip未过"极可能是同一类错误，不是合约缺陷。
+
+**`close_commit`：真实签名验证未通过，已排除多个候选根因，仍未100%钉死**——`entry close_commit`是
+本轮唯一需要真实`checkSig`（committee 4-of-5签名）验证的入口。构造真实`kaspa.Transaction`签名（用
+`kaspa.createInputSignature(tx, 0, priv, SighashType.All)`）并喂给cli-debugger，**卡在
+`require(validSigs >= 4)`**（`committee_hash`校验、CLTV、`noTokenInput`等更早的检查全部通过，说明
+构造的其它部分是对的）。已用真实eprintln转储（同§0.5/账本1431先例）+ **直接读D-019 pin对应的
+`rusty-kaspa a41a333b08848f41bf737b72592e463a6011b8ac`真实源码**（不是猜测），排除了以下候选：
+
+1. **`version`/`lock_time`/`sequence`/UTXO amount+scriptPubKey/输出value+scriptPubKey**——逐字段
+   eprintln转储debugger内部真实构造的`kas_tx`，与我自己签名用的`unsignedTx`**逐字节比对完全一致**
+   （比对过程顺带抓出**第4处harness/工具坑**：我给debugger的`output[0]`用了
+   `Buffer.from(placeholderOutSpk.script)`——`kaspa.ScriptPublicKey.script`同样是hex字符串而非字节
+   ，同一类双重编码错误，已修复；修复后output[0]确认与签名tx一致，但close_commit依然FAIL，说明
+   这不是唯一根因）。
+2. **`sig_op_count`/`computeBudget`（compute_commit字段）**——直接读
+   `consensus/core/src/hashing/sighash.rs::calc_schnorr_signature_hash`源码逐行确认：
+   `if tx.version < 1 { ...sig_op_counts_hash... }`——**这个字段对version>=1交易的sighash完全没有
+   影响**（v1时这两处相关hasher调用被跳过, 不管填什么值都不改变sighash）。之前怀疑debugger内部
+   `SigopCount(...).into()`固定构造`ComputeCommit::SigopCount`变体（不感知version, 源码
+   `impl From<SigopCount> for ComputeCommit`确认无条件转换）会导致v1语义不一致——**这个怀疑本身
+   成立（这是真实的debugger实现局限, 值得记录), 但因为v1根本不hash这个字段, 不是本次checkSig
+   失败的原因**。
+3. **kaspa-wasm的`createInputSignature`是否有v1专属的sighash bug**（Bettor派活里明确提出的候选，
+   出处"kaspa-wasm对version 1交易的支持有已知TODO"）——直接读`consensus/wasm/src/utils.rs`源码确认
+   `createInputSignature`内部**直接调用**`kaspa_consensus_core::hashing::sighash::
+   calc_schnorr_signature_hash`（与debugger内部用的是同一个函数、同一个crate、同一个pin commit），
+   不是WASM独立实现的另一套逻辑——**排除"kaspa-wasm算错sighash"这个候选**。
+
+**尚未排除、下一步该查的候选**（如实列出，不假装已经穷尽）：
+- `previous_outputs_hash`/`sequences_hash`/`outputs_hash`是"对全部inputs/outputs聚合"的hash（不是
+  只看active input一个），理论上我的tx只有1个input+2个output应该trivially一致，但没有做逐分量单独
+  eprintln核对（只核对了最终字段值，没有核对这几个中间hash本身）——这是最应该补的下一步验证。
+- `checkSig`在silverscript/kaspa-txscript里到底是`OpCheckSig`还是走了covenant专属的另一条校验路径
+  （本合约在`covenants_enabled: true`的EngineFlags下执行，理论上`checkSig`应该是标准opcode，但没有
+  直接读`kaspa-txscript`里`OpCheckSig`的具体实现代码来100%确认它调用的正是
+  `calc_schnorr_signature_hash`而非某个covenant模式下的变体）。
+- silverscript的ABI层是否在`sig`类型参数与`checkSig`之间有一次额外的字节转换（比如是否要求提交的
+  65字节`sig`本身就是`schnorr_sig(64B)+sighash_type(1B)`，还是有其它打包约定）——`silverscript-abi`
+  的`push_fixed_bytes(...,65)`只管"推65字节"，不关心这65字节内部语义，真正解释这65字节的是
+  `kaspa-txscript`的`OpCheckSig`实现，同上一条一样没有直接读到那段代码确认。
+
+**处置建议**：`close_commit`不影响(A)路线本身能不能做（(A)路线仍然需要`close_commit`——委员宣布
+结果这一步是resolve的必经环节，不因为选(A)还是(B)而不同）——**这条FAIL如果反映的是真实的委员签名
+构造问题，(A)(B)两条路线都会被挡住，是比"RootClaim/RefundClaim该不该修"更优先的阻塞项**。已把完整
+工具链（真实签名构造脚本`07_audit_rootclose_close_commit.mjs`、eprintln patch后的debugger、逐字段
+比对方法）留给NWT/后续会话接手，不需要从零开始——建议按上面"尚未排除的候选"清单顺序查，`checkSig`/
+`OpCheckSig`的具体实现是当前最大的未知，需要真正读`kaspa-txscript`（不是`kaspa-consensus-core`）
+对应的opcode执行代码。
 
 ---
 
@@ -540,3 +598,17 @@ fail-closed拒绝），理由：(B)路线下一旦发现`RootClaim.sil`/`RefundC
   记录（PASS/FAIL摘要）。
 - `kasia-console/scratch/j2_settlement_audit/refundclaim-refund_payout-audit-run.log`：`refund_payout`
   两场景真实运行记录（均PASS）。
+- `kasia-console/scratch/j2_settlement_audit/06_audit_rootclose_refund_flip.mjs`：**完整可运行**的
+  `refund_flip`真实执行夹具（§0.10，PASS）。
+- `kasia-console/scratch/j2_settlement_audit/rootclose-refund_flip-audit-run.log`：对应运行记录。
+- `kasia-console/scratch/j2_settlement_audit/07_audit_rootclose_close_commit.mjs`：`close_commit`
+  真实签名+真实执行夹具（§0.10，**当前仍FAIL**，留给NWT/后续会话接手排查，脚本内含"MY SIGNED TX
+  DUMP"直接打印签名用tx的每个字段，配合下面的patch可直接逐字段比对）。
+- `kasia-console/scratch/j2_settlement_audit/rootclose-close_commit-audit-run.log`：对应运行记录。
+- **`/d/silverscript-debugger-3ed9733-eprintln`**（本机路径，未入库——不是本仓文件，是D-019 pin
+  commit `3ed9733`的独立临时worktree，加了两处`eprintln!`：①`main.rs`~911行转储`active_sigscript`
+  hex；②`main.rs`~941行转储完整`kas_tx`的version/lock_time/每个input的prevOutpoint+sequence+
+  compute_commit+sigscript+每个output的value+scriptPubKey+每个utxo的amount+scriptPubKey+
+  covenant_id——均只读打印，未改一行判定逻辑。二进制：
+  `target/release/cli-debugger.exe`（`CARGO_TARGET_DIR`独立，不冲突干净pin那份）。NWT/后续会话可
+  直接复用，不需要重新patch重编。
