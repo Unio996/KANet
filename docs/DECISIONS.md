@@ -24,6 +24,24 @@
 
 ## 🔴 当前有效的战略决策 (CURRENT)
 
+### D-021 仓库公开（有意）· 公开仓库写作规矩 (2026-09-15 · Owner 本机终端原话「公开源代码有利于整个kaspa生态。你立规矩建议不错，采纳。」· Bettor 记账 · COORD-LEDGER 1437 / 1448)
+1. **公开是 Owner 有意决定**：`Unio996/KANet` 保持 PUBLIC，代码、合约、设计与协调记录对 Kaspa 生态开放。不改可见性，不重写历史。
+2. **从今天起，所有进入仓库的文字（账本、DECISIONS、设计稿、provenance、commit message、代码注释）不得写**：
+   - ① 任何私钥、助记词、种子、ADMIN_SECRET / CONSOLE_ENCRYPTION_KEY / ingest PSK 等密钥的**值**（名称可写）；
+   - ② 真实账户的资金数额与持仓规模（热钱包、冷钱包、relay 余额、Owner 个人资产），以及能把地址与持有人、持仓对应起来的描述；
+   - ③ **尚未修复部署**的可利用漏洞的利用细节（触发步骤、可复现的攻击交易构造、绕过方法）——修复部署前只写"类别 + 影响范围 + 修复状态"，修复部署后才可写机制；
+   - ④ 主机内网 IP、Tailscale 地址、远程控制（RustDesk / SSH）入口、端口暴露细节。
+3. **可以写**：协议参数与常量（例如 20,000,000 sompi、fee 上限）、测试币数额、合约与算法机制、已修复漏洞的机制与教训、公开链上交易 ID（不附带持有人信息）。
+4. **敏感记录去哪**：写进本机 gitignored 目录 `docs-private/`（不入库），账本里只写"详情见 docs-private/<文件名>，类别 X，状态 Y"。
+5. **执行**：Bettor 推送前对自己的账本条目自查；审核他人提交时把本条列入检查项；违反 = 新提交删改（不改历史），并视内容轻重评估是否需要轮换或迁移。
+6. **不追溯清洗**既有历史内容（Owner 已知悉并选择公开）；但若发现**密钥类（第 2 条 ①）**已入库，一律按泄露处理并轮换。2026-09-15 Bettor 对当前跟踪文件做了启发式扫描（env 文件、密钥赋值、私钥十六进制、助记词），未发现明文密钥；历史提交未扫描。
+
+### D-020 下注改为单笔交易 · 取消 stake 筹码（步骤 A）(2026-09-15 · Owner 本机终端「第一个问题：采纳」· Bettor 提议 · NWT 实证可行 · COORD-LEDGER 1445–1448)
+1. **决定**：`ShardLeaf_direct.register_append` 不再读取独立 stake 代币输入（删 `stakeInIdx`、`readInputStateWithTemplate(stakeInIdx,…)`、`require(stakeTk.amount == stake)`）；合并奖池 KTT 输出由 `validateOutputStateWithTemplate(tok_out, {amount: pool_value + stake, owner: leaf covenant_id, …}, tok_prefix, tok_suffix, token_tmpl_hash)` 直接作为 genesis 校验。held 奖池代币输入、`scanOwnedTokenInputs == pool_value` 保留。**下注 = 一笔交易**。
+2. **理由**：KTT 免费无限铸造（D-017），stake 代币输入不证明任何事；两步设计产生一个 owner 只能为 ZERO32、锁定真实 KAS 的中间 UTXO，NWT 实证第三方可整笔取走（1446）。取消该步从机制上关闭这一类漏洞，同时关闭 T-ORPHAN-CHIP-RECOVERY-ENTRY 与每笔额外约 0.4 KAS 成本。与 D-017 修订注记（2026-09-15「代币就是代币，人人可 mint」）同一原则。
+3. **取代**：(1435)(1436) stake 筹码 owner 裁定、proto 原型设计中 bet_mint 两步流程（spec §3、backend 设计 §2.3 / §2.3.1）；已复核的 Stage 2 步骤 A 代码（61f0fa0c / fc4ec459）作废。KanetTestToken.sil 与 token_tmpl_hash 不变。
+4. **执行门**：J2 侧分支实施（合约改动 + 代码删改 + 一笔 migration + 设计稿状态注记 + 旧 provenance 标 SUPERSEDED）→ NWT 钱路复核（全新缓存、生产形状整笔交易各脚本执行）→ Bettor 合并。部署与首笔上链仍须 Owner 单独批准（PROTO_DRIVER_ENABLED 为执行闸，1438）。
+
 ### D-019 主网集编译器锚点 = silverscript v1.0.0 @ 3ed973335b59269293564805cc2c58a14595ec03 · 单源 pin · 旧 ZK pin 退出主网集 (2026-09-14 · Bettor 裁 · NWT 确认 · COORD-LEDGER 1216–1218)
 
 1. **锚点**：主网集全部 10 个 .sil（KanetTestToken、KanetTokenClaim、PayoutShard、PayoutShardV2、RootClaim、RootClose、ShardLeaf、ShardLeaf_direct、CloseZkV2、RefundClaim）的生产编译器 = **silverscript v1.0.0，源 commit `3ed973335b59269293564805cc2c58a14595ec03`（tag v1.0.0）**，生产二进制 = J2 隔离克隆 `_j2_silverc_v100` 的**干净构建**，`silverc.exe` sha256 `4378ba6557f7b7b088d6ad7a400422acb51a7ffd04f86ed974055c4177ef8643`。T1–T3 全部 provenance、现行套件（43+44 等）、NWT 独立复现均以此源 commit 构建的编译器产出，从未换版。

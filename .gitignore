@@ -104,3 +104,6 @@ scripts/channel-bridge.lastts.json
 
 # harness② 变异隔离副本(kasia-console/.mut-tmp-<pid>/) —— 每次跑完即删, 绝不入库
 .mut-tmp-*/
+
+# D-021: 公开仓库写作规矩——敏感记录（资金规模、未修复漏洞细节、内网入口）只写本机，不入库
+docs-private/
