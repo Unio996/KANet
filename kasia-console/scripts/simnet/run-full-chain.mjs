@@ -38,6 +38,12 @@ const fieldBytes32 = (b) => Buffer.concat([Buffer.from([32]), b]);
 const fieldInt = (n) => { const le8 = Buffer.alloc(8); le8.writeBigInt64LE(BigInt(n)); return Buffer.concat([Buffer.from([8]), le8]); };
 const ZERO32 = Buffer.alloc(32, 0x00);
 const DUST_MIN_SOMPI = 1000n; // RootClose.sil/RootClaim.sil DUST_MIN常量(sompi), convert_to_claim/convert_to_refundclaim的KAS侧只剩dust
+// 🔴 账本1484 Bettor复核发现: RootClaim.sil:103 require(payout>=1000)里的1000是代币化前(KAS sompi
+// 时代)遗留字面量——代币化后payout是KTT数量, 不是sompi。API默认min_bet=1(src/api/proto.js:118),
+// 小额市场赢家payout<1000枚会永远无法claim_draw(结构性阻塞, 待列入RootClaim待修清单)。本变量控制
+// 这次复现用哪一方作为赢家, 验证"a59c7b48同形状"(bet1=YES stake=1, bet2=NO stake=999, 裁决YES,
+// 唯一赢票payout=pool_value=1000, 恰好卡在门槛上)是否可行——设0=bet1(YES)赢, 1=bet2(NO)赢。
+const WINNER_SIDE = 0;
 
 const NETWORK = 'simnet';
 const RPC_URL = 'ws://127.0.0.1:18510';
@@ -92,7 +98,10 @@ if (!chain.genesis) {
   // FAIL): RootClaim.claim_draw硬性要求payout>=1000(pool_value过小时, 结算根本无法完成——真实市场
   // stake规模必须让pool_value comfortably超过1000这个下限, 不是"随便给个非零值"就行, 早前用单测夹具
   // 里的小额stake(20/30)是构造错误)。
-  const MIN_BET = 1000;
+  // 🔴 账本1484复核: 这次改回min_bet=1(API真实默认值, src/api/proto.js:118), 配合bet1=1/bet2=999
+  // (pool_value恰好=1000, 卡在RootClaim.sil:103 require(payout>=1000)门槛上), 复现"a59c7b48同形状"
+  // 场景——验证这个边界情形是否可行, 而不是回避它。
+  const MIN_BET = 1;
   const SEAL_COUNT = 2;
   // 🔴 真实simnet实测发现(close_commit首次尝试): deadline_ms设成未来值会被真实节点拒绝——
   // OpCheckLockTimeVerify要求ACTIVE input(RootClose自己)的sequence < MAX_TX_IN_SEQUENCE_NUM
@@ -235,7 +244,7 @@ async function doRegisterAppend({ stepKey, leafOutpoint, currentState, newState,
 // ══════════════════ 步骤2: register_append 第一笔下注(无held) ══════════════════
 if (chain.genesis && !chain.bet1) {
   const currentState = { local_yes: 0, local_no: 0, count: 0, pool_value: 0 };
-  const SIDE = 0, STAKE = 2000;
+  const SIDE = 0, STAKE = 1;
   const newState = { local_yes: SIDE === 0 ? STAKE : 0, local_no: SIDE === 1 ? STAKE : 0, count: 1, pool_value: STAKE };
   // 🔴 bettorPk必须是真实持有私钥的keypair(非随机哨兵字节)——PoolSideTicket.sil的authorize_spend
   // entry要求checkSig(bettorSig, pubkey(bettorPk)), claim_draw消费此票时需要真实签名, 随机字节没有对应私钥。
@@ -256,7 +265,7 @@ if (chain.genesis && !chain.bet1) {
 // ══════════════════ 步骤3: register_append 第二笔下注(held=第一笔的合并KTT) ══════════════════
 if (chain.bet1 && !chain.bet2) {
   const currentState = chain.bet1.newState; // { local_yes:20, local_no:0, count:1, pool_value:20 }
-  const SIDE = 1, STAKE = 3000;
+  const SIDE = 1, STAKE = 999;
   const newState = { local_yes: currentState.local_yes, local_no: currentState.local_no + STAKE, count: currentState.count + 1, pool_value: currentState.pool_value + STAKE };
   const bettorPriv2 = new kaspa.PrivateKey(randomBytes(32).toString('hex'));
   const bettorPk2 = bettorPriv2.toPublicKey().toXOnlyPublicKey().toString();
@@ -458,14 +467,17 @@ if (chain.convertToRootclose && !chain.closeCommit) {
   const currentRcSpkHex = p2sh(currentRcRedeem);
   // 落链校验: 必须与convert_to_rootclose时预算的rootCloseCovId对应的scriptPubKey一致(即真实outpoint的spk)。
 
-  const NEW_WINNING_SIDE = chain.bet2.side; // bet2(side=1/NO, stake=30)是赢方, 见此前给Bettor的报告
+  // WINNER_SIDE(顶部配置)决定bet1/bet2哪一方赢——两笔下注ctor里side固定(bet1=0/YES, bet2=1/NO),
+  // 赢家就是side==WINNER_SIDE的那一笔。
+  const winnerBet = chain.bet1.side === WINNER_SIDE ? chain.bet1 : chain.bet2;
+  const NEW_WINNING_SIDE = WINNER_SIDE;
   // 🔴 payoutRoot不能是随机值——claim_draw会从payout+bettorPk沿merkle路径爬回, 要求cur==payoutRoot
-  // (RootClaim.sil claim_draw)。本市场只有1个赢家(bet2), 用tree_depth=0(DoD单赢家最简形): 不走siblings
-  // 循环, payoutRoot直接等于叶子哈希blake2b(bettorPk ‖ payout_as_8byteLE_raw)。payout=pool_value=50
+  // (RootClaim.sil claim_draw)。本市场只有1个赢家, 用tree_depth=0(DoD单赢家最简形): 不走siblings
+  // 循环, payoutRoot直接等于叶子哈希blake2b(bettorPk ‖ payout_as_8byteLE_raw)。payout=pool_value
   // (单赢家全池, 对应full分支, 不留continuation)。
   const PAYOUT = chain.genesis && chain.convertToRootclose ? chain.convertToRootclose.state.pool_value : 0;
   const le8Raw = (n) => { const b = Buffer.alloc(8); b.writeBigInt64LE(BigInt(n)); return b; };
-  const NEW_PAYOUT_ROOT = b2b(Buffer.concat([Buffer.from(chain.bet2.bettorPk, 'hex'), le8Raw(PAYOUT)]));
+  const NEW_PAYOUT_ROOT = b2b(Buffer.concat([Buffer.from(winnerBet.bettorPk, 'hex'), le8Raw(PAYOUT)]));
   const DEADLINE_MS = chain.genesis.deadlineMs;
   const LOCK_TIME = DEADLINE_MS + 1000;
   // 🔴 真实simnet实测(第一次尝试用未来deadline_ms+sequence=MAX绕开节点级finality门, 被真实节点拒绝:
@@ -567,7 +579,7 @@ if (chain.convertToRootclose && !chain.closeCommit) {
     submitted: true, submitResult: res, txid: shape.tx.id, newWinningSide: NEW_WINNING_SIDE, newPayoutRoot: NEW_PAYOUT_ROOT.toString('hex'),
     lockTime: LOCK_TIME, rootCloseContOutpoint: { txid: shape.tx.id, vout: 0 },
     finalState: newRootCloseState,
-    winnerPayout: { bettorPk: chain.bet2.bettorPk, payout: PAYOUT, treeDepth: 0, merkleIndex: 0, siblings: [] },
+    winnerPayout: { bettorPk: winnerBet.bettorPk, payout: PAYOUT, treeDepth: 0, merkleIndex: 0, siblings: [] },
   };
   saveChain();
   if (res && res.transactionId) {
@@ -730,7 +742,8 @@ if (chain.convertToClaim && !chain.claimDraw) {
   const cs = chain.convertToClaim.claimState; // {local_yes,local_no,count,pool_value,closed:1,winningSide,payoutRoot,claimed_bitmap:0}
   const wp = chain.closeCommit.winnerPayout; // {bettorPk, payout, treeDepth:0, merkleIndex:0, siblings:[]}
   if (wp.payout !== cs.pool_value) throw new Error(`claim_draw审计范围只覆盖full分支(payout==pool_value), 实际payout=${wp.payout} pool_value=${cs.pool_value}`);
-  const bettorPriv2 = new kaspa.PrivateKey(chain.bet2.bettorPrivHex);
+  const winnerBet = chain.bet1.bettorPk === wp.bettorPk ? chain.bet1 : chain.bet2;
+  const bettorPriv2 = new kaspa.PrivateKey(winnerBet.bettorPrivHex);
 
   // RootClaim当前redeem脚本(closed:1, claimed_bitmap:0——convert_to_claim刚建, 尚未有人领过)。
   const rootClaimProbeCtor = [
@@ -767,8 +780,9 @@ if (chain.convertToClaim && !chain.claimDraw) {
   const newKtcRedeem = Buffer.concat([ktcPrefix, ktcStateBytes, ktcSuffix]);
   const ktcSpkHex = p2sh(newKtcRedeem);
 
-  // 赢家的PoolSideTicket(bet2)真实redeem脚本重建(与register_append#2铸出时ctor完全一致)。
-  const ticketCtor2 = [ctorBytes32V100(chain.bet2.bettorPk), ctorIntV100(chain.bet2.side), ctorIntV100(chain.bet2.stake), ctorBytes32V100(chain.genesis.marketId)];
+  // 赢家(winnerBet, 可能是bet1或bet2, 见顶部WINNER_SIDE)的PoolSideTicket真实redeem脚本重建(与
+  // register_append铸出时ctor完全一致)。
+  const ticketCtor2 = [ctorBytes32V100(winnerBet.bettorPk), ctorIntV100(winnerBet.side), ctorIntV100(winnerBet.stake), ctorBytes32V100(chain.genesis.marketId)];
   const ticketCompiled2 = compileSilV100(TICKET_PATH, ticketCtor2, 'PoolSideTicket');
   const ticketScript2 = Buffer.from(ticketCompiled2.script);
   const ticketEntryAbi = ticketCompiled2._raw.contracts.PoolSideTicket.entries.authorize_spend;
@@ -811,7 +825,7 @@ if (chain.convertToClaim && !chain.claimDraw) {
   const heldSigScript = combineKttActionAndRedeem(kaspa, heldAction, heldArtifact.script);
 
   const claimOutpointObj = { transactionId: chain.convertToClaim.claimOutpoint.txid, index: chain.convertToClaim.claimOutpoint.vout };
-  const ticketOutpointObj = { transactionId: chain.bet2.ticketOutpoint.txid, index: chain.bet2.ticketOutpoint.vout };
+  const ticketOutpointObj = { transactionId: winnerBet.ticketOutpoint.txid, index: winnerBet.ticketOutpoint.vout };
   const heldOutpointObj = { transactionId: chain.convertToClaim.tokenOutpoint.txid, index: chain.convertToClaim.tokenOutpoint.vout };
   const claimSpkObj = scriptPublicKeyFromHex(kaspa, '0x' + currentClaimSpkHex);
   const ticketSpkObj = scriptPublicKeyFromHex(kaspa, '0x' + ticketSpkHex2);
@@ -903,8 +917,9 @@ if (chain.convertToClaim && !chain.claimDraw) {
 
 // ══════════════════ 步骤8(全链最后一步): KanetTokenClaim.spend(审计构造, 赢家提取真正代币) ══════════════════
 if (chain.claimDraw?.accepted && !chain.spend) {
-  const bettorPriv2 = new kaspa.PrivateKey(chain.bet2.bettorPrivHex);
   const ks = chain.claimDraw.ktcState; // {marketCovId, winnerPk, amount, tokenTmplHash}
+  const winnerBet = chain.bet1.bettorPk === ks.winnerPk ? chain.bet1 : chain.bet2;
+  const bettorPriv2 = new kaspa.PrivateKey(winnerBet.bettorPrivHex);
 
   const ktcCtor = [ctorBytes32V100(ks.marketCovId), ctorBytes32V100(ks.winnerPk), ctorIntV100(ks.amount), ctorBytes32V100(ks.tokenTmplHash)];
   const ktcCompiled = compileSilV100(KTC_SIL, ktcCtor, 'KanetTokenClaim');
