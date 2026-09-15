@@ -3265,7 +3265,7 @@ WHERE id IN (...) AND protocol_status IN ('verifying', 'pending_bettors')
 ## 规则 85（候选）—— cli-debugger的`test.json`里`lock_time`/`version`必须嵌在`tx`对象内部，写在顶层会静默取默认值`lock_time=0`，报错信息（`Unsatisfied lock time`）本身不指向字段位置错误（2026-09-16 · J2/NWT 结算审计 · 账本1479）
 
 - ❌ **错误**：构造`refund_flip`/`close_commit`真实执行夹具时，`test.json`把`lock_time: LOCK_TIME`和`version: 1`写在测试对象顶层（与`tx`同级），而不是`tx: { lock_time: LOCK_TIME, version: 1, ... }`这样嵌在`tx`对象内部。
-- 💥 **后果**：debugger读不到顶层的`lock_time`，静默按schema默认值取`0`，CLTV相关的`require`检查因此必然当作"锁尚未到期"失败，报错`Unsatisfied lock time: mismatched locktime types`——这条报错信息完全没有提示"字段位置写错了"，第一直觉是去查CLTV计算逻辑本身或时间戳数值对不对，实际根因是纯粹的JSON嵌套层级错误。J2与NWT两人独立分别撞上同一个坑。
+- 💥 **后果**：debugger读不到顶层的`lock_time`，静默按schema默认值取`0`，CLTV相关的`require`检查因此必然当作"锁尚未到期"失败，报错`Unsatisfied lock time: mismatched locktime types`——这条报错信息完全没有提示"字段位置写错了"，第一直觉是去查CLTV计算逻辑本身或时间戳数值对不对，实际根因是纯粹的JSON嵌套层级错误。J2撞上；NWT同期`refund_flip`失败是否同因未确认。
 - 🧠 **为什么会犯**：`test.json`的schema里`tx`是一个嵌套对象，装的是"这笔交易本身的字段"（version/lock_time/inputs/outputs），但手写测试夹具时容易把"看起来像是顶层交易属性"的字段（尤其是`lock_time`这种在很多其它上下文里确实是顶层字段的量）习惯性提到外层；且debugger对未知/多余的顶层字段没有报警（不是`Unknown field`报错，是"缺失预期字段→取schema默认值"这种更隐蔽的静默失败）。
 - 🔨 **怎么做才对**：写任何新的cli-debugger `test.json`前，先对照一份已知能跑通的既有夹具（如`register_append`的），逐字段核对嵌套层级，不要凭记忆或凭"看起来应该在哪一层"重写结构；遇到CLTV/locktime类报错时，第一步就该`grep`确认自己的`lock_time`到底写在了JSON的哪一层，而不是先去怀疑数值或业务逻辑。
 - **同族**：本条是规则66（"字段列在表里≠字段被读出来"）在测试夹具schema上的具体发生——字段"写了"不等于"写在了被读取的位置"。
