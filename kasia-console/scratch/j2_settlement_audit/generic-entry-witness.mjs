@@ -74,20 +74,33 @@ export function encodeEntryActionGeneric(kaspa, entryAbi, argsByName) {
     }
   }
   b.addData(hexToBytes(entryAbi.dispatch_tag));
-  return Buffer.from(b.drain());
+  // 🔴 账本1473自我纠错(见provenance/流水记录): kaspa.ScriptBuilder.drain()返回的是【hex字符串】,
+  // 不是字节——同proto-register-append-witness.mjs已确认的既有坑(kaspa-wasm一贯行为, 全仓多处踩过
+  // 同类"drain()/serializeToJSON返回hex字符串却被Buffer.from()当UTF8文本二次编码"的坑)。此前这里
+  // 写的是`return Buffer.from(b.drain())`——把hex字符串"55"当UTF8文本编码成[0x35,0x35]而不是解码
+  // 成真正的字节[0x55], 导致这个通用编码器产出的每一个action字节串全部是双重编码的垃圾。用真实
+  // patched cli-debugger(eprintln转储active_sigscript, 见provenance)逐字节比对才发现——自检脚本
+  // 00_self_check_generic_encoder.mjs此前"PASS"是假阳性: 它拿这份垃圾去跟同样被
+  // `Buffer.from(encodeRegisterAppendAction(...))`包了一层的"专用编码器"比, 两边用同一种错误方式
+  // 编码, 恰好互相吻合, 掩盖了问题——同账本1468"debugger自己合成见证掩盖bug"同一类"两边都错却互相
+  // 印证"的教训, 只是这次错在我自己的审计工具而不是被测合约。修复: 返回hex字符串本身(不转Buffer),
+  // 调用方需要原始字节时自己按需hexToBytes。
+  return b.drain(); // hex string(无0x前缀), 不转Buffer
 }
 
-/** action ++ pushdata(redeem) — 同 debugger/cli/src/main.rs combine_action_and_redeem。 */
-export function combineActionAndRedeem(kaspa, actionBytes, redeemScriptBytes) {
-  const b = kaspa.ScriptBuilder.fromScript(Buffer.isBuffer(actionBytes) ? actionBytes : hexToBytes(actionBytes), { flags: { covenantsEnabled: true } });
+/** action ++ pushdata(redeem) — 同 debugger/cli/src/main.rs combine_action_and_redeem。
+ * @param {string} actionHex encodeEntryActionGeneric的返回值(hex字符串, 无0x前缀) */
+export function combineActionAndRedeem(kaspa, actionHex, redeemScriptBytes) {
+  if (typeof actionHex !== 'string') throw new Error('combineActionAndRedeem: actionHex must be the hex string returned by encodeEntryActionGeneric, not a Buffer(ScriptBuilder.fromScript需要hex字符串, 见kaspa-wasm实测确认)');
+  const b = kaspa.ScriptBuilder.fromScript(actionHex, { flags: { covenantsEnabled: true } });
   b.addData(hexToBytes(redeemScriptBytes));
-  return Buffer.from(b.drain());
+  return Buffer.from(b.drain(), 'hex'); // 最终交付调用方(cli-debugger fixture/tx assembly)的是真实字节, 这里才转Buffer且用'hex'正确解码
 }
 
-/** 一步到位: entry witness + redeem 揭示 -> 完整 sigScript(Buffer)。 */
+/** 一步到位: entry witness + redeem 揭示 -> 完整 sigScript(Buffer, 真实字节)。 */
 export function buildEntrySigScript(kaspa, entryAbi, argsByName, redeemScriptBytes) {
-  const action = encodeEntryActionGeneric(kaspa, entryAbi, argsByName);
-  return combineActionAndRedeem(kaspa, action, redeemScriptBytes);
+  const actionHex = encodeEntryActionGeneric(kaspa, entryAbi, argsByName);
+  return combineActionAndRedeem(kaspa, actionHex, redeemScriptBytes);
 }
 
 export { hexToBytes };

@@ -1,9 +1,9 @@
 === RootClaim.claim_draw 真实action witness(现实尺寸) cli-debugger审计(账本1473 Step-0) ===
 
---- full_no_continuation --- wrote C:\Users\ADMIN\AppData\Local\Temp\j2-rootclaim-claimdraw-w0g4Gv\RootClaim.full_no_continuation.test.json
+--- full_no_continuation --- wrote C:\Users\ADMIN\AppData\Local\Temp\j2-rootclaim-claimdraw-clWQvI\RootClaim.full_no_continuation.test.json
 ✅ PASS
 
---- partial_correct_offset --- wrote C:\Users\ADMIN\AppData\Local\Temp\j2-rootclaim-claimdraw-f1OuHU\RootClaim.partial_correct_offset.test.json
+--- partial_correct_offset --- wrote C:\Users\ADMIN\AppData\Local\Temp\j2-rootclaim-claimdraw-jE9bwg\RootClaim.partial_correct_offset.test.json
 error: script ran, but verification failed
     --> 198:13
 
@@ -13,14 +13,14 @@ error: script ran, but verification failed
     --> 198:13
 
 Error: "FAIL"
-Command failed: D:/silverscript/versioned-builds/cli-debugger-v100-3ed9733.exe D:/kanet-tn12/scratch/_j2_wt_proto_v0/kasia-console/src/lib/RootClaim.sil --run --test-name AUDIT_claim_draw_partial_correct_offset --test-file C:\Users\ADMIN\AppData\Local\Temp\j2-rootclaim-claimdraw-f1OuHU\RootClaim.partial_correct_offset.test.json
+Command failed: D:/silverscript/versioned-builds/cli-debugger-v100-3ed9733.exe D:/kanet-tn12/scratch/_j2_wt_proto_v0/kasia-console/src/lib/RootClaim.sil --run --test-name AUDIT_claim_draw_partial_correct_offset --test-file C:\Users\ADMIN\AppData\Local\Temp\j2-rootclaim-claimdraw-jE9bwg\RootClaim.partial_correct_offset.test.json
 error: script ran, but verification failed
     --> 198:13
 
 Error: "FAIL"
 
 
---- partial_buggy_offset --- wrote C:\Users\ADMIN\AppData\Local\Temp\j2-rootclaim-claimdraw-EHEOE1\RootClaim.partial_buggy_offset.test.json
+--- partial_buggy_offset --- wrote C:\Users\ADMIN\AppData\Local\Temp\j2-rootclaim-claimdraw-yPMlEF\RootClaim.partial_buggy_offset.test.json
 error: script ran, but verification failed
     --> 198:13
 
@@ -30,7 +30,7 @@ error: script ran, but verification failed
     --> 198:13
 
 Error: "FAIL"
-Command failed: D:/silverscript/versioned-builds/cli-debugger-v100-3ed9733.exe D:/kanet-tn12/scratch/_j2_wt_proto_v0/kasia-console/src/lib/RootClaim.sil --run --test-name AUDIT_claim_draw_partial_buggy_offset --test-file C:\Users\ADMIN\AppData\Local\Temp\j2-rootclaim-claimdraw-EHEOE1\RootClaim.partial_buggy_offset.test.json
+Command failed: D:/silverscript/versioned-builds/cli-debugger-v100-3ed9733.exe D:/kanet-tn12/scratch/_j2_wt_proto_v0/kasia-console/src/lib/RootClaim.sil --run --test-name AUDIT_claim_draw_partial_buggy_offset --test-file C:\Users\ADMIN\AppData\Local\Temp\j2-rootclaim-claimdraw-yPMlEF\RootClaim.partial_buggy_offset.test.json
 error: script ran, but verification failed
     --> 198:13
 

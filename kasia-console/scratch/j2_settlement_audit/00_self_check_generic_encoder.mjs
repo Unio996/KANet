@@ -28,16 +28,22 @@ const w = {
   tok_prefix: '0x' + randomBytes(11).toString('hex'), tok_suffix: '0x' + randomBytes(3164).toString('hex'),
 };
 
-const specific = Buffer.from(encodeRegisterAppendAction(kaspa, entryAbi, w));
+// 🔴 账本1473自我纠错(初版自检曾是假阳性): encodeRegisterAppendAction/encodeEntryActionGeneric
+// 两者都返回kaspa.ScriptBuilder.drain()的原始返回值——真实实测drain()返回hex字符串(无0x前缀),
+// 不是字节。初版自检把两边都套了一层`Buffer.from(...)`(把hex字符串当UTF8文本编码), 两边用
+// 同一种错误方式变形, 恰好互相吻合, PASS是假的。修复: 直接比较两个hex字符串本身, 不做任何
+// Buffer转换。
+const specific = encodeRegisterAppendAction(kaspa, entryAbi, w);
 const generic = encodeEntryActionGeneric(kaspa, entryAbi, w);
 
-console.log('specific.length', specific.length, 'generic.length', generic.length);
-if (Buffer.compare(specific, generic) === 0) {
-  console.log('✅ PASS: 通用编码器与已验证的register_append专用编码器逐字节一致');
+console.log('specific.length(hex chars)', specific.length, 'generic.length(hex chars)', generic.length);
+console.log('typeof specific', typeof specific, 'typeof generic', typeof generic);
+if (specific === generic) {
+  console.log('✅ PASS: 通用编码器与已验证的register_append专用编码器逐字符(hex字符串)一致');
   process.exit(0);
 } else {
   console.log('❌ FAIL: 不一致!');
-  console.log('specific hex head:', specific.subarray(0, 60).toString('hex'));
-  console.log('generic  hex head:', generic.subarray(0, 60).toString('hex'));
+  console.log('specific hex head:', specific.slice(0, 120));
+  console.log('generic  hex head:', generic.slice(0, 120));
   process.exit(1);
 }
