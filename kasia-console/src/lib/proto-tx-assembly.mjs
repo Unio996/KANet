@@ -21,6 +21,34 @@ export const GENESIS_OUTPUT_SOMPI = 20_000_000n;
 export const CONTINUATION_OUTPUT_SOMPI = 20_000_000n;
 export const SOMPI_PER_MASS = 100n;
 
+// 🔴 账本1465(闸3重试再次中止, 主网RPC层拒收根因修复): rusty-kaspa v2.0.1(节点实跑版本, tag v2.0.1=
+// commit cfafeb4c)的 rpc/core/src/convert/tx.rs:19-42(TryFrom<RpcInputWithVersion> for TransactionInput)
+// + consensus/core/src/tx.rs:91-96(ComputeCommit::version_expects_compute_budget_field)钦定的规则:
+// version>=1 的交易, 每个 input 必须 sig_op_count===0(否则 RpcError "sig_op_count is inconsistent with
+// transaction version 1", 账本1465实测复现原文)、用 compute_budget(u16)字段代替表达该输入允许消耗的脚本
+// 执行预算; version 0 反过来(compute_budget 必须是0, sig_op_count 才生效)。本文件两处 mkInput
+// (buildMarketGenesisTxJson/buildRegisterAppendTxJson)构造的都是 version:1 交易, 之前误写成
+// `sigOpCount: 1, computeBudget: 0`——恰好是这条规则的反面, 每次真广播到主网节点都会在 RPC 层被拒。
+// 🔴 这不只是格式问题: consensus/src/processes/transaction_validator/tx_validation_in_utxo_context.rs:
+// 198-209(check_scripts_sequential/check_scripts_par_iter) 显示 compute_budget 换算出的
+// allowed_script_units(= compute_budget×10,000 + 9,999, 见 consensus/core/src/mass/units.rs 的
+// SCRIPT_UNITS_PER_COMPUTE_BUDGET_UNIT=10,000 + free_script_units_per_input()=9,999)是真实喂给
+// TxScriptEngine 的执行预算上限——覆盖的输入若脚本执行(hash/状态校验等)超过这个预算, 会在真实共识校验
+// 这一层(而非仅仅 RPC 格式层)被拒, 不是"多花一点手续费"那么简单。选值必须真的够用。
+// 🔴 已如实核实(账本1465③要求): rusty-kaspa v2.0.1 的 RPC API(rpc/core/src/api/rpc.rs)不存在任何
+// dry-run/仅校验不入池的方法——唯一入口 submit_transaction 一旦通过校验就真的进 mempool; kaspa-wasm
+// 也不导出任何本地脚本执行引擎(grep 全部导出符号, 无 TxScriptEngine/checkScripts 等)。因此**没有离线、
+// 不广播的办法能针对我们这两个具体脚本(ShardLeaf_direct.register_append / KTT transfer-zero-out)精确
+// 验证某个 compute_budget 数值是否真的够用**——这里选用的 70 是从 kasia-relay/src/lib/p2sh.mjs 的
+// `_BSHARD_COMPUTE_BUDGET = 70` 原样借用(该值已被同一份代码库里更复杂的 close_attest 脚本(5 checkSig+
+// 40 merkle blake2b+validateOutputState 4448B+10 pairwise !=, 实测需要 510,026 script units, 70 留出
+// 709,999 units 的余量)真实验证过是够用的)——register_append 明确不含任何 checkSig(bettorPk 是无签名
+// witness 值, 见文件头注), KTT transfer-zero-out 结构也更简单, 理论上所需 script units 应显著低于
+// close_attest, 借用同一个数字是"用已验证过的更大预算兜住理论上更小的需求", 不是重新独立测过这两个
+// 具体脚本——留痕明确, 不冒充"已验证"。若未来有能力真实测(比如 NWT/KANet-UI 拿到一个可安全试错的测试
+// relay+测试网), 应该用真实测量值替换这个借用值。
+export const PROTO_V0_COMPUTE_BUDGET = 70;
+
 // 🔴 buildRegisterAppendTxJson 输出布局具名常量(账本1439, Bettor要求"vout在builder里定义为具名
 // 常量, 推算函数引用同一个常量"——不在两处各自重复写字面量0/1/2, 防将来改布局漏改一处)。
 export const REGISTER_APPEND_LEAF_CONT_OUT_INDEX = 0; // leaf续约输出
@@ -222,6 +250,33 @@ export function assertImpliedFeeMatches(tx, expectedFeeSompi, label) {
 }
 
 /**
+ * 账本1465修复: 构造层唯一的节点RPC层输入版本一致性断言——镜像 rusty-kaspa v2.0.1(tag v2.0.1=commit
+ * cfafeb4c, 主网节点实跑版本)的两条规则:
+ *   consensus/core/src/tx.rs:91-96 (ComputeCommit::version_expects_compute_budget_field: version>=1)
+ *   rpc/core/src/convert/tx.rs:19-42 (TryFrom<RpcInputWithVersion> for TransactionInput 的实际校验/报错点)
+ * version>=1 的交易每个 input 必须 sigOpCount===0(用 computeBudget 代替); version 0 反过来必须
+ * computeBudget===0(用 sigOpCount 代替)。这条规则只在 RPC 提交这一层用 Rust 代码校验, kaspa-wasm 的
+ * Transaction 构造器/calculateTransactionMass 都不会本地拦下违反它的交易(账本1465闸3金丝雀两次中止都是
+ * 在真实广播这一步才被节点拒收, 本地构造+签名+txid核对全部通过——这条断言把"要广播到真实节点才会发现"的
+ * 错误挪到"每次构造完成就地拒绝", fail-closed, 不依赖记得手动核对这条规则)。
+ * @param {*} tx  已 finalize() 的真实 kaspa-wasm Transaction 对象
+ * @param {string} label  报错信息里标注是哪个 kind(market_genesis/register_append)
+ */
+export function assertKaspadInputVersionRule(tx, label) {
+  const expectsComputeBudget = Number(tx.version) >= 1;
+  for (let i = 0; i < tx.inputs.length; i++) {
+    const input = tx.inputs[i];
+    if (expectsComputeBudget) {
+      if (Number(input.sigOpCount) !== 0) {
+        throw new Error(`assertKaspadInputVersionRule(${label}): input[${i}].sigOpCount=${input.sigOpCount} != 0 — tx.version=${tx.version}(>=1)的交易每个input的sigOpCount必须恒为0(用computeBudget代替), 否则主网节点RPC层会拒收(实测原文: "RpcTransactionInput.sig_op_count is inconsistent with transaction version ${tx.version}", 账本1465)`);
+      }
+    } else if (Number(input.computeBudget) !== 0) {
+      throw new Error(`assertKaspadInputVersionRule(${label}): input[${i}].computeBudget=${input.computeBudget} != 0 — tx.version=${tx.version}(0)的交易每个input的computeBudget必须恒为0(用sigOpCount代替), 否则主网节点RPC层会拒收`);
+    }
+  }
+}
+
+/**
  * 续约输出的唯一构造入口: 强制带 CovenantBinding 声明, 结构上不存在"忘记声明"这条代码路径
  * (省得下一个人手写 new TransactionOutput(...) 漏掉第三个参数——那会让 calculateTransactionMass
  * 把续约输出当成未声明用途的巨型脚本 P2SH, 实测量级可达 >10 倍真实 mass, 见 provenance 向量②)。
@@ -261,8 +316,9 @@ export function buildMarketGenesisTxJson({ kaspa, network, feeUtxo, relayChangeS
   const changeSpk = scriptPublicKeyFromHex(kaspa, relayChangeScriptPublicKeyHex);
   const outpoint = { transactionId: feeUtxo.txid, index: feeUtxo.vout };
 
+  // 账本1465修复: version:1交易sig_op_count必须恒为0, 用compute_budget代替(见文件头PROTO_V0_COMPUTE_BUDGET注释)。
   const mkInput = (sigScript) => ({
-    previousOutpoint: outpoint, signatureScript: sigScript, sequence: 0n, sigOpCount: 1, computeBudget: 0,
+    previousOutpoint: outpoint, signatureScript: sigScript, sequence: 0n, sigOpCount: 0, computeBudget: PROTO_V0_COMPUTE_BUDGET,
     utxo: { outpoint, amount: feeUtxo.value, scriptPublicKey: feeUtxoSpk, blockDaaScore: 0n },
   });
   // 🔴 genesis 输出(第一次创建 covenant 实例, 不是续约)不用 CovenantBinding——那是"延续既有 covenant_id"
@@ -294,6 +350,7 @@ export function buildMarketGenesisTxJson({ kaspa, network, feeUtxo, relayChangeS
   assertImpliedFeeMatches(shape.tx, shape.netLoss, 'market_genesis'); // 账本1455: market_genesis 只有
   // 1 个输入(fee 自己), leftover 公式本身没有"漏计其它输入"这个 bug 的作用面, 这里加断言是纵深防御
   // (万一未来改动引入新输入种类), 不是修复本函数自身的问题。
+  assertKaspadInputVersionRule(shape.tx, 'market_genesis'); // 账本1465: 主网节点RPC层输入版本一致性规则
 
   // shardLeafCovId: consensus 的 covenant_id(funding.outpoint, [outputIndices]) 是纯函数, 不需要上链
   // 确认——本地就能算出、且不受后续找零值影响(与哪个形状/找零值无关, 同一 outpoint+outIdx 恒定)。
@@ -406,8 +463,9 @@ export function buildRegisterAppendTxJson({
     ? combineKttActionAndRedeem(kaspa, encodeKttTransferZeroOutAction(kaspa, heldInput.entryAbi, heldInput.stateFieldCount, [0]), heldInput.redeemScript)
     : null;
 
+  // 账本1465修复: version:1交易sig_op_count必须恒为0, 用compute_budget代替(见文件头PROTO_V0_COMPUTE_BUDGET注释)。
   const mkInput = (outpoint, value, spk, sigScriptHex) => ({
-    previousOutpoint: outpoint, signatureScript: sigScriptHex ?? new Uint8Array(0), sequence: 0n, sigOpCount: 1, computeBudget: 0,
+    previousOutpoint: outpoint, signatureScript: sigScriptHex ?? new Uint8Array(0), sequence: 0n, sigOpCount: 0, computeBudget: PROTO_V0_COMPUTE_BUDGET,
     utxo: { outpoint, amount: value, scriptPublicKey: spk, blockDaaScore: 0n },
   });
 
@@ -466,6 +524,7 @@ export function buildRegisterAppendTxJson({
     absFeeCapSompi,
   });
   assertImpliedFeeMatches(shape.tx, shape.netLoss, 'register_append');
+  assertKaspadInputVersionRule(shape.tx, 'register_append'); // 账本1465: 主网节点RPC层输入版本一致性规则
 
   const mergedKttCovId = String(shape.tx.outputs[REGISTER_APPEND_TOK_OUT_INDEX].covenant.covenantId);
 
