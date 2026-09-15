@@ -149,9 +149,12 @@ debugger二进制D-019 pin `3ed9733`，sha256 `b85bb524d22ae761150dcb80b070f0bf1
 | **`RefundClaim.refund_payout`(pool_value≠stake, partial续约分支)** | `readInputStateWithTemplate`(读ticket+token) + **内建`validateOutputState`(自续约)** | ✅ **安全** | ✅ debugger PASS（同上，见§0.9自我纠错记录），未做simnet验证 |
 | `KanetTokenClaim.spend` | 无自续约(终态, 头注明确"不受V-T-8影响") | ✅ **simnet ACCEPT（定论）** | ✅ **simnet真实共识ACCEPT**（上表⑧，审计构造）——v0.3的"待定"（旧证据是代币化前9参数合约，见§0.6）现由simnet真实执行覆盖解决，不再需要针对当前`.sil`补debugger向量 |
 
-**mass观察（Bettor要求：占比最大来源，后续优化观察项）**：8步mass从196,628（spend）到448,870
-（register_append#1），**register_append系与convert_to_*系（约397k-449k）已逼近simnet
-500,000 compute mass上限的80%-90%**——`register_append`本身margin最紧（约10%）。NWT独立确证了
+**mass观察（Bettor要求：占比最大来源，后续优化观察项；v0.6更新：kaspa-wasm本地数字未计v1交易的
+compute_budget项，真实margin比这里的原始数字更紧，精确核算见§0.14b）**：8步mass从196,628（spend）
+到448,870（register_append#1），**register_append系与convert_to_*系（约397k-449k）已逼近simnet
+500,000 compute mass上限的80%-90%**（这是kaspa-wasm本地`calculateTransactionMass`报告的数字，
+未计`compute_budget`——§0.14b用真实源码补上这一项后，`register_append`margin从约89%收紧到约
+93.6%，仍在安全范围内，但比这里看到的更紧）。NWT独立确证了
 KIP-9 storage mass对**小面值covenant输出**极度敏感（`reference-kip9-storage-mass-plurality-is-not-one-covenant-utxo-is-p2`）：首次把新建covenant输出面值设成`.sil`里`DUST_MIN`字面值（1000 sompi）时，
 `requiredFee`被算成约4000 KAS（storage mass含`p²/v`项，v极小时被放大到天文数字）——**改用
 `CONTINUATION_OUTPUT_SOMPI`（20,000,000 sompi，与其它续约/genesis输出同量级）后恢复正常**，这是
@@ -523,6 +526,34 @@ plurality)对`p²/v`极敏感，后者p=1(普通输出)敏感度低5个数量级
 门槛套用到两种不同性质的输出上。这处过度扩大化在§0.14的资金推演中曾被直接采用为约束条件，导致
 推演结果有系统性偏差，已在§0.14 v0.5中重新按真实代码逻辑推演。
 
+**v0.6再更正（Bettor账本1489指出v0.5仍不够严谨）**：v0.5说"P2PK找零无最小值门槛"是对的（代码
+确实没有硬编码门槛），但**不代表小额P2PK找零就一定安全**——KIP-9 storage mass公式
+`C·p²/v`对**所有**输出都生效，`p`只是把covenant输出的敏感度再放大4倍（p=2时p²=4），并不是说
+p=1（普通输出）就不受`1/v`这一项影响。直接读`consensus/core/src/mass/mod.rs::calc_storage_mass`
+真实源码验证：`v=0.0867 KAS`(8,670,000 sompi)的P2PK找零单独算，`storage_mass_parameter/v
+=10^12/8,670,000≈115,340`；`v=0.01 KAS`(1,000,000 sompi)单独算是`10^12/1,000,000=1,000,000`
+——后者单独就超过500,000区块上限。**但这只是"harmonic_outs"这一项单独的数字，不是交易最终的
+storage mass**——真实公式是`max(0, harmonic_outs − arithmetic_ins或harmonic_ins)`，输入侧同样
+按plurality贡献一个抵扣项，找零到底安不安全，取决于这笔交易全部输入输出一起代入公式算出的**净值**，
+不能只看找零这一项的孤立harmonic分量。§0.14 v0.6用真实公式逐笔核对了本节6步实际选中的找零，全部
+安全（含一笔用0.087 KAS小额UTXO的`spend`步骤，净storage mass算出来是0，因为输入侧的抵扣项足够大）
+——但这是**这几个具体案例的核算结果**，不是"小额找零总是安全"这个结论，每次换一组不同的
+输入/输出面值组合，都需要重新代入公式核实，不能凭"之前测过安全"就假设新案例也安全。**MUST-4
+措辞最终版**：找零本身无代码门槛，但受storage mass约束（对所有输出、不止covenant输出生效）；
+是否安全由构造期真实mass计算把关，不能靠"面值大小看着正常"这类目测判断。
+
+另外（账本1489同批发现）：**kaspa-wasm本地`calculateTransactionMass`对v1交易的compute_budget字段
+计算不完整**——直接读`wallet/core/src/tx/mass.rs::calc_compute_mass_for_client_transaction_input`
+源码，该函数只读`input.compute_commit.sig_op_count()`（v1交易的`ComputeBudget`变体这个方法返回
+`None`，`unwrap_or(0)`直接归零），完全没有读`.compute_budget()`字段本身，代码里明确留了一行注释
+`// TODO: Add support for v1 transactions.`——这是wallet-core（kaspa-wasm的JS绑定层）一个**已知未
+完成**的缺口，不是我瞎猜；真正的共识层计算（`consensus/core/src/mass/mod.rs::calc_non_contextual_masses`）
+是完整的，会算`GRAMS_PER_COMPUTE_BUDGET_UNIT(100) × Σ每个input的compute_budget`这一项。本轮全部
+6步用的`PROTO_V0_COMPUTE_BUDGET=70`，每个input因此有100×70=7,000的真实mass被kaspa-wasm本地计算
+漏掉，按每步的input数量（2-4个不等）算，每步实际少算14,000-28,000——**在§0.14 v0.6的重算表里已经
+把这部分加回去**，`register_append`那步（本来就是margin最紧的）修正后利用率从约89%收紧到约93.6%
+（还在安全范围内，但margin比此前认知的更紧，值得留意）。
+
 ### §0.12 给Owner的产品选项（本文档只列选项与各自防的损失，不替Owner选）
 
 **选项组1：新市场的deadline / grace（宽限期）时长该设多久**
@@ -681,15 +712,53 @@ input**（`selectFeeUtxoByConstruction`逐个尝试单一候选，未见合并�
   leaf dust（0.2 KAS，账本1473记录，同样永久锁死）是同一类问题的先例。**这条建议加入§0.12"给
   Owner的产品选项"，作为"要不要给输家ticket设计一个可选的sweep/回收路径"这个新问题**（本节先如实
   记录发现，不代Owner决定要不要处理）。
-- **mass margin提示（与§0.4"mass观察"呼应）**：6步里最紧的是第二笔下注，mass占simnet
-  500,000上限约89%——不是资金问题，但提示这条链路对区块mass上限的敏感度已经不低，若未来市场规模
-  扩大需要重新核这个margin。
+### §0.14b mass真实核算（v0.6新增，账本1489 Bettor要求：不能只做算术，须用真实公式逐笔核对mass）
+
+**背景**：Bettor指出v0.5的推演只算了资金（fee/找零），没有验证"换成不同fee UTXO后，这笔交易真实
+mass会不会变、会不会顶到500,000上限"——这是必须补的一环，因为KIP-9 storage mass对输出/输入的**面值**
+本身敏感（不只是covenant输出，见MUST-4 v0.6更正），换一个面值不同的fee UTXO，交易的真实mass确实
+会变，不能假设"跟NWT那次一样"。
+
+**方法**：直接读两处真实源码算，不用kaspa-wasm本地`calculateTransactionMass`（该函数对v1交易的
+compute_budget计算不完整，见MUST-4 v0.6更正）——
+1. `consensus/core/src/mass/mod.rs::calc_storage_mass`（KIP-9真实公式，已用Bettor给的两个例子
+   核对过完全吻合）算每步在**我方选中的fee UTXO/找零**下的真实storage mass。
+2. 用NWT真实simnet报告的mass数字反推每步的"compute_mass(buggy，未计compute_budget)"分量
+   （因为compute_mass的字节结构部分不随选哪个fee UTXO变化，只有共识层遗漏的
+   `100×70×input数量`这一项需要补），得到"real_compute_mass = NWT报告mass + 补上的compute_budget项"
+   （compute_mass在NWT报告的mass与storage_mass_baseline里取更大值，逐步验证过storage_mass_baseline
+   一律小于NWT报告值，即NWT报告的mass本身就是compute_mass分量，可以直接拿来做补项基准）。
+3. 该笔交易最终mass = `max(real_compute_mass, 我方选中面值下的真实storage_mass)`。
+
+**逐步结果**（`register_append`过程中把ticket的plurality由误判的p=2修正为p=1——直接读
+`buildRegisterAppendTxJson`源码确认"ticket genesis(无covenant声明)"，只有leaf续约/合并KTT这两个
+输出真正调用`populateGenesisCovenants`/`CovenantBinding`，ticket没有，这处修正也用来消解了一次
+"我的storage_mass手算比NWT真实报告的总mass还大"这种不可能出现的矛盾，倒推出的修正）：
+
+| # | 步骤 | 我方选中面值下真实storage mass | 补compute_budget后的real_compute_mass | 该步最终mass | 500,000占比 |
+|---|---|---|---|---|---|
+| 1 | 第二笔下注 | 297,803 | 467,880（446,880+3input×7,000） | **467,880** | **93.6%** |
+| 2 | 封盘 | 232,891 | 417,794（396,794+3×7,000） | 417,794 | 83.6% |
+| 3 | `close_commit` | 117,138 | 212,771（198,771+2×7,000） | 212,771 | 42.6% |
+| 4 | `convert_to_claim` | 201,598 | 417,718（396,718+3×7,000） | 417,718 | 83.5% |
+| 5 | `claim_draw` | 180,966 | 421,781（393,781+4×7,000） | 421,781 | 84.4% |
+| 6 | `spend` | **0**（净storage mass算出负数, 截0——小额fee input的输入侧抵扣项反而更大） | 217,628（196,628+3×7,000） | 217,628 | 43.5% |
+
+**结论**：**全部6步在补上compute_budget修正之后依然全部安全，没有一步超过500,000上限**；
+最紧的仍是第二笔下注，但真实占比是**93.6%**（margin约6.4%），比NWT原始报告里看到的约89%更紧——
+这条margin值得记进后续观察项，若未来这一步的输入/输出结构有任何变化（比如held合并逻辑改动），
+需要重新核这个数字，不能想当然沿用。**`spend`步骤用0.087 KAS小额UTXO当fee input，实际是6步里
+最安全的一步（storage mass截到0），不是危险操作**——这具体反驳了"小额找零一定危险"这个直觉，但
+这个安全结论只对**这个具体的输入输出组合**成立（KanetTokenClaim+token两个p=2输入提供的抵扣项，
+比这一步本身很小的fee/output面值需要的storage mass charge大得多），换一组不同的输入输出，必须
+重新代入公式验证，不能类推。
 
 **结论**：**资金充足，无缺口，执行完毕后relay剩余2.260398 KAS**（两条独立算路——"6步净流出合计"
 与"逐笔UTXO模拟表直接相加"——交叉核对完全一致，比v0.4错误算出的约2.06 KAS多约0.2 KAS，多出的部分
-正是v0.4漏算的`claim_draw`/`spend`两步净释放）。额外发现一条新的产品问题：**输家ticket（0.2 KAS）
-在(A)路线执行完毕后永久锁死**，建议补进§0.12的Owner选项清单（本节先如实记录发现，不代Owner决定
-要不要处理）。
+正是v0.4漏算的`claim_draw`/`spend`两步净释放）；**mass同样安全，6步全部在500,000上限内（最紧
+93.6%），已用真实KIP-9公式逐笔核对，不是只做了算术**。额外发现一条新的产品问题：**输家ticket
+（0.2 KAS）在(A)路线执行完毕后永久锁死**，建议补进§0.12的Owner选项清单（本节先如实记录发现，
+不代Owner决定要不要处理）。
 
 ## §1 每步交易形状（inputs/outputs/签名输入/covenant绑定/mass/fee）
 
@@ -1003,8 +1072,9 @@ committee input `sequence=0`（MUST-1），且执行页需要向操作员明示M
 见§0.11 MUST-1）；任何新建covenant输出必须遵守MUST-4的KAS值下限，不能取字面`DUST_MIN`。
 
 **资金充足性**：(A)路线剩余6笔交易的fee UTXO选择、找零合规性、执行完毕后剩余资金，见§0.14"主网
-资金推演"——结论是资金充足，无缺口，唯一需要留意的是`register_append`那一步的mass margin
-（约89%，见§0.14"mass margin提示"）。
+资金推演"——结论是资金充足，无缺口；mass已用真实KIP-9公式逐笔核对（§0.14b），全部6步安全，唯一
+需要留意的是`register_append`那一步的真实mass margin（约93.6%，比kaspa-wasm本地计算显示的约89%
+更紧，因为本地计算漏算了v1交易的compute_budget项，见MUST-4 v0.6更正）。
 
 **Owner需要在实现前先拍板的问题（汇总，本文档不代为决定）**：
 
