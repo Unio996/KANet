@@ -109,7 +109,7 @@ FAIL（真实缺陷，非harness伪影）= `claim_draw`(partial分支)；待定 
 | `ShardLeaf_direct.register_append` | readInputStateWithTemplate + 自续约(AB11) | ✅ **已修复**(账本1468/1469: ctor烤入`own_redeem_len`+JS不动点收敛) | ✅ **PASS 6/6**（账本1469④，`verify-run-1469-ctor-matrix.log`；用的是`register_append`专用编码器`proto-register-append-witness.mjs`，不是本轮`generic-entry-witness.mjs`，该专用编码器从未有双重hex编码bug，不受449745f4影响） |
 | `ShardLeaf_direct.convert_to_rootclose` | 只有`scanOwnedTokenInputs`(读, 无自续约) | ✅ **安全** | ✅ **PASS**（NWT用`generic-entry-witness.mjs`测得——**编码器版本已由NWT自证为449745f4修复后版本**：她重跑后mass从113,105/61,777/60,473变为38,926/27,122/26,796，约减半，与"去掉双重编码后见证字节变回真实长度一半"的预期吻合；若仍是旧bug编码器，两次跑出的garbage字节长度会完全相同，不会系统性减半——这是比对时间戳更硬的证据，采信） |
 | `RootClose.refund_flip` | 只有`noTokenInput`(不读state) + 内建`validateOutputState` + CLTV | ✅ **安全** | ✅ **PASS**（`06_audit_rootclose_refund_flip.mjs`，我方跑，公共基线）——初次FAIL是harness用法错误(test.json的`lock_time`字段必须嵌在`tx`对象内部, 不是顶层, 见§0.10) |
-| `RootClose.close_commit` | 同上 + 5次`checkSig`(唯一涉及真实签名的入口) | 🟡 **待定** | ❌ **FAIL（卡在`validSigs>=4`），根因未100%钉死**——`07_audit_rootclose_close_commit.mjs`，公共基线。已排除sig_op_count/computeBudget（读consensus源码确认version>=1时该字段完全不参与sighash）与kaspa-wasm `createInputSignature`独立实现（确认调用同一`calc_schnorr_signature_hash`）两个候选。NWT用eprintln patch新查到：debugger内部实际验证用的`active_sigscript`只有**3,618字节**，我方构造喂给它的是**20,423字节**——量级差5.6倍，不像单一字段错位，更像main.rs:983那条重建路径对"5个sig类型参数+大redeem脚本"这种复杂entry整体没重建对，已报Bettor定夺是否精细patch定位还是先记harness缺陷。已交NWT接手（§0.10），本文档不再推进 |
+| `RootClose.close_commit` | 同上 + 5次`checkSig`(唯一涉及真实签名的入口) | 🟡 **待定（最终以simnet真实全链共识结果为准，见§0.13）** | ❌ **debugger离线执行FAIL（卡在`validSigs>=4`），根因未100%钉死**——`07_audit_rootclose_close_commit.mjs`，公共基线。已排除sig_op_count/computeBudget（读consensus源码确认version>=1时该字段完全不参与sighash）、kaspa-wasm `createInputSignature`独立实现（确认调用同一`calc_schnorr_signature_hash`）、以及3,618/20,423字节长度差（NWT逐push解码确认这是explicit hex携带完整RootClose redeem而debugger自编译redeem不含这段的预期差异，不是重建路径bug）三个候选。剩余怀疑收窄到sighash聚合分量（`previous_outputs_hash`等中间hash未逐分量核对）。已交NWT接手（§0.10），本文档不再推进 |
 | `RootClose.convert_to_claim`/`convert_to_refundclaim` | `scanOwnedTokenInputs`(读) + 外部模板(非自续约) | ✅ **安全** | ✅ **PASS**（NWT测得，同convert_to_rootclose一行的编码器版本证据，采信） |
 | **`RootClaim.claim_draw`(payout==pool_value, 无续约分支)** | 无自续约, 只读ticket/token | ✅ **安全** | ✅ **PASS**（`01_audit_rootclaim_claim_draw.mjs`，公共基线，16参数全部真实ABI编码、真实协议常量尺寸、active input显式`signature_script_hex`，见§0.5①） |
 | **`RootClaim.claim_draw`(payout<pool_value, partial续约分支)** | `readInputStateWithTemplate`(读ticket+token) + **手写AB11自续约, `ownSig.slice(0, OWN_PREFIX_LEN)`** | 🔴 **确认真实缺陷**（同账本1468同类defect） | ❌ **FAIL（符合预期）**——`01_audit_rootclaim_claim_draw.mjs`，公共基线。诚实backend按"正确offset"（即`register_append`已修复的`ownLen-own_redeem_len`手法）构造出的续约输出，被合约自己的错误自检拒绝：`error: script ran, but verification failed`精确命中`ownSig.slice(...)`那一行`require`（§0.5②）。用449745f4修复后编码器复测，结论不变——不是编码bug的假象，是真实合约缺陷 |
@@ -356,14 +356,19 @@ tok_suffix)`不涉及签名（只有`noTokenInput`+内建`validateOutputState`+C
 `OpCheckSig`的具体实现是当前最大的未知，需要真正读`kaspa-txscript`（不是`kaspa-consensus-core`）
 对应的opcode执行代码。
 
-**账本1482更新（NWT eprintln转储新发现）**：debugger内部实际验证用的`active_sigscript`长度只有
-**3,618字节**，我方按真实ABI编码构造喂给它的是**20,423字节**——差5.6倍，量级上不像是某个单一字段
-偏移错位（偏移错位通常只差几字节到几十字节），更像main.rs:983那条"从`signature_script_hex`重建
-`active_sigscript`"的路径，对`close_commit`这种"5个`sig`类型参数+一份不小的redeem脚本"的复杂entry
-形状，整体没重建对（比如可能漏算了某个循环/漏拼了某一段）。NWT已把这个新发现报给Bettor，待定夺是否
-值得投入更细粒度的patch（分别dump redeem长度和witness长度两段来精确定位）还是先把这条计为
-harness缺陷、开issue追踪。**根因调查此后归NWT接手（她用本文档`07_audit_rootclose_close_commit.mjs`
-工具+账本1482新patch，从UTXO entries与sighash中间分量入手），本文档不再继续这条调查**。
+**账本1482更新（NWT逐push解码，v0.3更正：3,618/20,423的长度差不是重建路径bug）**：NWT把debugger
+内部`active_sigscript`与我方explicit hex两份sigScript**逐push解码比对**，结论与§0.9①最初的猜测
+（"main.rs:983整体没重建对"）**不一样，须更正**——前16个push**逐字节相同**（pubkey、真实签名、
+全长`tok_suffix`都在其中）；3,618与20,423的差额，**恰好等于**explicit hex末尾那一段**16,802字节
+的`RootClose` redeem push**——debugger自己编译`.sil`产出它内部用的redeem脚本，**不包含**我方
+explicit hex里携带的这一段，这是**预期行为**（debugger走自己编译的redeem，我方走生产redeem字节，
+两者本来就不该长度相同），**不是main.rs重建路径的bug**，v0.2那版"整体没重建对"的表述作废。
+**签名侧`scriptPubKey`与test.json的`utxo_script_hex`同源**，这条也已排除。**剩余怀疑收窄到sighash
+聚合分量本身**（同上面"尚未排除"清单第一条：`previous_outputs_hash`/`sequences_hash`/
+`outputs_hash`这几个中间聚合hash，只核对过最终字段值，没有核对聚合hash本身）。**根因调查此后归
+NWT接手**（她用本文档`07_audit_rootclose_close_commit.mjs`工具+eprintln patch，从UTXO entries与
+sighash中间分量入手），本文档不再继续这条调查——但**结论最终以NWT正在起的simnet真实全链共识结果
+为准**，不是debugger离线执行结果，见新增§0.13。
 
 ### §0.11 MUST：结算builder的三条硬约束（账本1479 Bettor要求，写入设计，供NWT实现§1时直接遵守）
 
@@ -419,6 +424,36 @@ Owner的选项，本文档不代为决定。
 以上两组选项相互独立（deadline/grace时长的选择不影响是否给refund_payout加签名，反之亦然），
 Owner可以分别决定；本文档不推荐任何一个具体选项，只列出已知的、真实执行验证过的技术事实
 （§0.10/MUST-3）所决定的取舍空间。
+
+### §0.13 simnet真实全链共识验证闸（v0.3新增，账本1482 Bettor批准，NWT主导执行）
+
+**背景**：§0全篇的"真实执行"指的是cli-debugger**离线**执行——它精确复现`.sil`的`require()`链
+判定逻辑（这是它相对纯JS测试的核心价值，见§0.1），但它**不是**真实kaspad节点的共识引擎，不会做
+真实网络的mempool校验、完整交易格式校验、或者debugger自身实现里可能存在的、与真实共识不一致的
+细节偏差。NWT已经在本机用**与主网同款的官方kaspad 2.0.1二进制**（`D:\rusty-kaspa-v201`，
+sha256 `8afe6a68…`，commit `cfafeb4c`）起了一个**隔离simnet**（`toccata always`+
+`skip_proof_of_work`，不联公网、不影响主网/TN12任何数据），可以真实提交完整交易并让真实共识引擎
+给出裁决——这是比debugger离线执行更高一级、更接近"上主网会发生什么"的验证手段。
+
+**闸的内容（本轮起，此后所有结算相关合约上主网前均适用）**：
+1. **任何结算步骤（`market_seal`/`close_commit`/`convert_to_claim`/`convert_to_refundclaim`/
+   `claim_draw`/`refund_flip`/`refund_payout`/`KanetTokenClaim.spend`）上主网前，必须先用**生产
+   builder**（不是debugger的test.json/审计脚本，是真正会在relay里跑的那份构造代码）构造出的真实
+   字节，在这个simnet上真实提交并等待确认**——debugger的PASS只是准入门槛，不是上主网的充分条件。
+2. **`close_commit`与`KanetTokenClaim.spend`当前的"待定"结论，以simnet真实全链共识结果为最终定论**
+   ——§0.4表格里这两行的"待定"状态在simnet结果出来前不升级为"安全"或"确认缺陷"，debugger侧的
+   FAIL（`close_commit`）/证据过期（`KanetTokenClaim.spend`）只是背景信息，不代替simnet结论。
+3. **cli-debugger离线审计降级为开发期辅助手段，不再作为"能不能上主网"的依据**——它仍然是排查
+   `require()`链逻辑、快速定位具体是哪一行断言失败的最高效工具（§0.1的价值论证不变），但"debugger
+   PASS"这句话本身，从本轮起不再等同于"可以上主网"，两者是不同层级的验证，必须都做。
+4. **节点/编译器/debugger使用前一律先核版本与sha256，不能凭路径名或"应该是这个"假设**——同账本
+   1482这次的具体实践（simnet节点sha256核对与主网一致后才使用），也同§0.1本文档一直坚持的"pin
+   commit+sha256"纪律的自然延伸，适用对象从"debugger二进制"扩大到"simnet节点二进制"。
+
+**当前状态**：NWT正在该simnet上跑Bettor要求的30分钟主网健康观察窗，随后进入
+genesis→market_seal→close_commit→convert_to_claim→claim_draw→KanetTokenClaim.spend全链真实共识
+验证，`close_commit`能否被真共识接受将是这条阻塞项的最终答案（不是debugger离线FAIL/PASS）。结果
+出来后由NWT补充本节，本文档暂不预判结果。
 
 ## §1 每步交易形状（inputs/outputs/签名输入/covenant绑定/mass/fee）
 
@@ -636,26 +671,40 @@ fail-closed拒绝），理由：(B)路线下一旦发现`RootClaim.sil`/`RefundC
 
 ## §7 主网执行页草案（顺序、验收读数、中止条件）
 
+**前提（v0.3新增第0步，账本1482 simnet闸——§0.13）**：本节所有步骤上主网广播前，必须先满足§0.13
+的simnet真实全链共识验证闸——用生产builder构造的真实字节在NWT起的隔离simnet（真实kaspad 2.0.1，
+版本/sha256核对过与主网一致）上真实提交并确认；`close_commit`/`KanetTokenClaim.spend`在simnet结果
+出来前维持"待定"，不得因为debugger离线PASS/FAIL就推进到主网执行。debugger审计（本文档§0全篇）是
+开发期定位`require()`链具体断言失败位置的工具，不是上主网的充分依据。
+
 **前提**（走(A)路线，`a59c7b48`继续用）：
 
-1. **确认市场状态**：`a59c7b48` betting，count=1；若Owner计划再加1笔下注，需先与业务侧确认"两笔
-   下注是否押同一方"（决定resolve后是否真的落在(A)路线的"单一payout值"前提内，见§0.7约束）。
+1. **确认市场状态**：`a59c7b48` betting，count=1；若Owner计划再加1笔下注，**须押相反方（NO）**，
+   不是同一方（§0.7 v0.3校正：同一方会产生两张赢票、各自payout<pool_value，必然触发partial续约
+   分支，走不了(A)）。
 2. **`market_seal`**：`count==seal_count`时触发。验收：`proto_markets.status→sealed`,
    `rootclose_txid/vout`写入，链上核对RootClose UTXO存在、代币金额==pool_value。中止条件：广播失败
-   不推进status（NO-TX-NO-STATE），leaf仍可重试。
-3. **`resolve`**：操作员传`outcome`。验收：`close_commit`广播成功，`proto_markets.status→resolved`,
-   `winning_side`/`payout_root`落库且与独立重算值一致（§4）。中止条件：委员私钥解密失败/签名验证
-   失败——fail-closed，不允许"跳过签名校验直接推进status"这种降级。
+   不推进status（NO-TX-NO-STATE），leaf仍可重试。**MUST-2（§0.11）**：`market_seal`广播成功后，
+   立即把`prepared_tx_json`暂存供下一步`close_commit`直接派生输入UTXO用，不依赖后续查链。
+3. **`resolve`**：操作员传`outcome`。**须与`market_seal`背靠背提交**（MUST-2）：`close_commit`的
+   输入UTXO从上一步暂存的`prepared_tx_json`派生，不查链。**builder必须显式设置`lockTime`为毫秒
+   时间戳**（MUST-1），不能依赖默认值。验收：`close_commit`广播成功且已通过§0.13 simnet真实共识
+   确认（不是debugger离线PASS）、`proto_markets.status→resolved`,`winning_side`/`payout_root`
+   落库且与独立重算值一致（§4）。中止条件：委员私钥解密失败/签名验证失败——fail-closed，不允许
+   "跳过签名校验直接推进status"这种降级；`close_commit`当前simnet结果未出，**在NWT给出结论前，
+   本步骤不得上主网执行**。
 4. **`convert_to_claim`**：验收：RootClaim genesis成功，代币全额转入。
 5. **`claim_draw`**：验收：KanetTokenClaim genesis成功，`proto_claims`记账（`claim_txid`/`amount`）。
    中止条件：若发现实际场景需要partial续约（payout<pool_value）——**立即停止，回退到§0.7路线判断，
    不允许"先广播试试看"**（§0已经证明这条代码路径未经充分验证）。
-6. **`withdraw`**：验收：赢家提现成功，`proto_claims.withdrawn_at`/`withdraw_txid`落库。
+6. **`withdraw`**：验收：赢家提现成功，`proto_claims.withdrawn_at`/`withdraw_txid`落库——
+   `KanetTokenClaim.spend`同样待simnet结论（§0.13），debugger侧证据（§0.4）目前不足以单独判定安全。
 
 **通用中止条件（所有步骤）**：任何一步的`net_loss`/`SIGNED_INPUT_CEILING_SOMPI`检查失败——fail-closed
 报`no_suitable_fee_utxo`或`net_loss超限`，不允许放宽阈值"让它先过"；proto relay余额检查
 （`assertProtoRelayHealthy`，`covenant-construction-spec-v0.1.md` §9.1）必须在每一步广播前重新核实，
-不是只在流程开始时查一次。
+不是只在流程开始时查一次；`refund_flip`的builder同样必须显式设置毫秒时间戳`lockTime`（MUST-1），
+且执行页需要向操作员明示MUST-3的风险（deadline+2h后任何人都可触发refund_flip，不受权限控制）。
 
 **Owner需要在实现前先拍板的问题（汇总，本文档不代为决定）**：
 
@@ -670,16 +719,27 @@ fail-closed拒绝），理由：(B)路线下一旦发现`RootClaim.sil`/`RefundC
 `kasia-console/scripts/audit/`——`scratch/`是gitignored目录，审计工具是长期可复用资产，不该待在
 一次性目录里；账本1479 Bettor要求，供NWT复核/复用，未进`src/lib`）
 
-**方法论新增两条断言（账本1479要求，此后每次跑新入口的真实执行审计都必须显式检查，不能只看
+**方法论新增两条断言（账本1479/1482要求，此后每次跑新入口的真实执行审计都必须显式检查，不能只看
 "PASS/FAIL"这一个信号）**：
-1. **debugger内部重建的`active_sigscript`必须与我方显式提供的`signature_script_hex`逐字节一致**——
-   §0.10发现`close_commit`的`active_sigscript`重建长度（3,618字节）与我方构造长度（20,423字节）
-   相差5.6倍，这类量级级别的不一致必须在跑完整逻辑判定之前先检查出来，不能等到`require`失败了才
-   回头查；PASS的结果如果没有做这条逐字节核对，也不能100%排除"侥幸凑巧的字节碰撞"（虽然概率极低，
-   但方法论上应该显式核过，不是省略）。
+1. **debugger内部重建的`active_sigscript`必须逐push解码后与我方显式提供的`signature_script_hex`
+   逐字节比对，不能只比总长度**——§0.10最初只看到`close_commit`的`active_sigscript`重建长度
+   （3,618字节）与我方构造长度（20,423字节）相差5.6倍，一度误判为"main.rs重建路径整体没对"；
+   NWT逐push解码后发现前16个push（pubkey、真实签名、全长`tok_suffix`）逐字节相同，长度差恰好等于
+   explicit hex末尾一段16,802字节的`RootClose` redeem push——debugger自己编译`.sil`产出的redeem
+   与我方携带的生产redeem字节本来就不该长度相同，这是**预期差异**，不是bug。**教训：总长度不一致
+   不能直接下"重建路径错误"的结论，必须先逐push拆开比对，排除"两边redeem脚本本来源头就不同"这类
+   结构性预期差异，再看剩余部分是否真的不一致**。
 2. **`lock_time`必须核实位于`test.json`的`tx`对象内部，不是顶层**——§0.10的`refund_flip`初次FAIL
    就是这条坑（见MUST-1/ANTI-PATTERNS候选②），此后写任何新的test.json前先grep自己的脚本确认
    `lock_time`的嵌套位置，不要等到CLTV报错才回头查字段位置。
+3. **自检/回归比对必须至少有一侧是独立可信来源，不能是"两份自己写的实现互相比"**（账本1480教训，
+   ANTI-PATTERNS候选见规则84同族补充）——账本1473的双重hex编码bug之所以能存活一整轮审计，正是因为
+   `00_self_check_generic_encoder.mjs`比对的是"通用编码器"与"`register_append`专用编码器"两份都由
+   本轮/前几轮自己写的实现，两者共享同一个`Buffer.from(drain())`错误封装，比对出"完全相同"的假阳性
+   PASS；真正发现bug是靠eprintln转储**debugger自己内部**的真实构造这个独立来源做比对，才发现长度
+   减半的矛盾。此后任何自检脚本，如果两侧都是"我方自己写的代码"，其PASS只能证明"两份实现互相一致"，
+   不能证明"两份都对"——必须至少有一侧换成debugger内部真实状态（eprintln转储）或simnet真实广播结果
+   （见§0.13）这类独立于我方编码逻辑的来源，才能真正验证正确性。
 
 - `kasia-console/scripts/audit/generic-entry-witness.mjs`：通用entry witness ABI
   编码器，已对已验证的`register_append`专用编码器做过逐字节自检（PASS）。
