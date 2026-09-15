@@ -166,22 +166,26 @@ console.log('[test] P4: ctor int/bytes32 value changes do not shift sentinel off
   const w17Ctor = (vals) => vals.map(v => ctorIntV100(v));
   const zeroW17 = Array(17).fill(0);
 
-  function ctorV1({ consolidatedPool = 0, closed = 0, w17 = zeroW17, tokenHex = 'dd'.repeat(32), payoutRootHex = 'ee'.repeat(32), claimHex = 'ff'.repeat(32), marketHex = '11'.repeat(32) } = {}) {
+  // 账本 1415/1458 修：market_suffix_hash 已随 PayoutShard.sil/PayoutShardV2.sil 构造参数一并删除，
+  // 此处两个本地 ctor 曾仍传旧形状(多一个 marketHex 尾参)，导致 P4 本身 silverc 编译报
+  // "constructor argument count mismatch" 崩溃(与 committee-offset-derive.mjs 里 _ctorV1/_ctorV2 同一根因，
+  // 但这是本测试文件自己另起的一份本地 ctor，两处需分别对齐)。
+  function ctorV1({ consolidatedPool = 0, closed = 0, w17 = zeroW17, tokenHex = 'dd'.repeat(32), payoutRootHex = 'ee'.repeat(32), claimHex = 'ff'.repeat(32) } = {}) {
     return [
       ctorBytes32V100(PMR_S), ctorBytes32V100(PC_S), ctorBytes32V100(tokenHex),
       ctorIntV100(consolidatedPool), ctorIntV100(closed), ctorBytes32V100(payoutRootHex),
       ...w17Ctor(w17),
-      ctorBytes32V100(claimHex), ctorBytes32V100(marketHex),
+      ctorBytes32V100(claimHex),
     ];
   }
-  function ctorV2({ consolidatedPool = 0, attestedWinner = -1, attestedAtMs = 0, w17 = zeroW17, tokenHex = 'dd'.repeat(32), payoutRootHex = 'ee'.repeat(32), claimHex = 'ff'.repeat(32), marketHex = '11'.repeat(32), closeZkHex = 'cc'.repeat(32), betsHex = 'ff'.repeat(32), refundHex = '22'.repeat(32) } = {}) {
+  function ctorV2({ consolidatedPool = 0, attestedWinner = -1, attestedAtMs = 0, w17 = zeroW17, tokenHex = 'dd'.repeat(32), payoutRootHex = 'ee'.repeat(32), claimHex = 'ff'.repeat(32), closeZkHex = 'cc'.repeat(32), betsHex = 'ff'.repeat(32), refundHex = '22'.repeat(32) } = {}) {
     return [
       ctorBytes32V100(PMR_S), ctorBytes32V100(PC_S), ctorBytes32V100(closeZkHex),
       ctorBytes32V100(tokenHex),
       ctorIntV100(consolidatedPool), ctorIntV100(0), ctorBytes32V100(payoutRootHex),
       ...w17Ctor(w17),
       ctorIntV100(attestedWinner), ctorIntV100(attestedAtMs), ctorBytes32V100(betsHex), ctorBytes32V100(refundHex),
-      ctorBytes32V100(claimHex), ctorBytes32V100(marketHex),
+      ctorBytes32V100(claimHex),
     ];
   }
   function analyze(silPath, name, ctor) {
@@ -199,7 +203,7 @@ console.log('[test] P4: ctor int/bytes32 value changes do not shift sentinel off
   }
   {
     const rnd = () => randomBytes(32).toString('hex');
-    ok(sameOffsets(analyze(PAYOUT_SHARD_SIL, 'PayoutShard', ctorV1({ tokenHex: rnd(), payoutRootHex: rnd(), claimHex: rnd(), marketHex: rnd() })), baseV1), 'V1 bytes32 fields=random: offsets unchanged');
+    ok(sameOffsets(analyze(PAYOUT_SHARD_SIL, 'PayoutShard', ctorV1({ tokenHex: rnd(), payoutRootHex: rnd(), claimHex: rnd() })), baseV1), 'V1 bytes32 fields=random: offsets unchanged');
   }
 
   const baseV2 = analyze(PAYOUT_SHARD_V2_SIL, 'PayoutShardV2', ctorV2());
@@ -212,7 +216,7 @@ console.log('[test] P4: ctor int/bytes32 value changes do not shift sentinel off
   }
   {
     const rnd = () => randomBytes(32).toString('hex');
-    ok(sameOffsets(analyze(PAYOUT_SHARD_V2_SIL, 'PayoutShardV2', ctorV2({ tokenHex: rnd(), payoutRootHex: rnd(), claimHex: rnd(), marketHex: rnd(), closeZkHex: rnd(), betsHex: rnd(), refundHex: rnd() })), baseV2), 'V2 bytes32 fields=random: offsets unchanged');
+    ok(sameOffsets(analyze(PAYOUT_SHARD_V2_SIL, 'PayoutShardV2', ctorV2({ tokenHex: rnd(), payoutRootHex: rnd(), claimHex: rnd(), closeZkHex: rnd(), betsHex: rnd(), refundHex: rnd() })), baseV2), 'V2 bytes32 fields=random: offsets unchanged');
   }
 }
 
