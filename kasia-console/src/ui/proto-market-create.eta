@@ -5,7 +5,10 @@
      走非 ZK 简单 claim/refund 路径(范围稿 §2): 出单人到期后手动宣布结果, 赢家凭结果 claim, 无人宣布则
      refund——不接 oracle 委员会/ZK。"结算代币"下拉来源改为 GET /api/tokens 的代币定义列表(DB only,
      非链上代币——KTT 没有通用余额, 真正铸币发生在 §3 详情页的下注两步流程里)。
-     提交端点 POST /api/proto-markets/create 尚未落地(J2), 失败态如实显示。 -->
+     提交端点 POST /api/proto-markets/create 已落地(J2 分支 coord/j2-market-genesis-bet-mint)。
+     🔴 v0.4(账本1438 驱动闸 + Bettor 批准, 跟 proto-market-detail.eta 的 placeBet() 同款改动):
+     驱动未开启(PROTO_DRIVER_ENABLED 未设)时创建市场会收到 409 {error:'proto_driver_disabled'}——
+     显示专属提示而非笼统"创建失败", 其余错误照旧展示。 -->
 
 <div class="p-6 max-w-xl mx-auto" x-data="protoMarketCreatePage()" x-init="init()" x-cloak>
   <div class="mb-5">
@@ -100,6 +103,10 @@ function protoMarketCreatePage() {
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok || !data.ok) {
+          if (data.error === 'proto_driver_disabled') {
+            this.errorMsg = '原型尚未开启真实交易（proto driver 未启用，等 Owner 打开金丝雀开关）';
+            return;
+          }
           this.errorMsg = '创建失败: ' + (data.error || ('HTTP ' + res.status)) + (res.status === 404 ? '（后端接口尚未上线）' : '');
           return;
         }
