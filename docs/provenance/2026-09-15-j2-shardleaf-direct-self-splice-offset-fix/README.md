@@ -137,3 +137,61 @@ senderAddress"。派生失败或没有`.utxo`字段时退回原有senderAddress�
 本文档只写协议常量、字节偏移量、公开的.sil逻辑、合成/随机值——不含任何真实relay地址、真实账户余额、
 真实bettor公钥、或完整的真实广播txid。诊断过程中读取过的真实mainnet数据（该市场的market_id/
 bettor_pk/relay关联txid等）仅在本机内存/本地临时文件中处理，未写入任何提交物，诊断完成后已删除。
+
+---
+
+> 📌 **状态注记（2026-09-15 · J2 · 账本1469/1470/1471 · Bettor裁定 · 取代上方"修复"一节里的
+> `OWN_REDEEM_LEN` 常量方案）**：上方"修复"一节写的 `OWN_REDEEM_LEN=14746` 是**第一版**修复，已被
+> 证实不完整——**保留本节作为历史记录，不改原文，问题与订正如下**：
+>
+> **问题（J2 矩阵实测, NWT min_bet=20 独立复现证实）**：`OWN_REDEEM_LEN` 当时被当作"ctor 全是定宽
+> byte[32]/int 字段, 编译产物字节数不随 ctor 取值变化, 是稳定常量"——这个假设是**错的**。用
+> `compileSilV100` 对 `seal_count`/`min_bet`/四个 `init_*` state 字段分别扫
+> `[0,1,15,16,17,255,256,65535,65536,2^31,2^32,2^40,-1,MAX_SAFE_INTEGER]` 实测：`local_yes`/
+> `local_no`/`count`/`pool_value`（state 区, 运行期 `as byte[8]` 定宽转型）确实不影响编译产物长度；
+> 但 `seal_count`/`min_bet`（纯 ctor 常量, 从不进 state 区, 直接被 `require()` 引用为字面量）的
+> minimal-push 编码宽度会随 magnitude 跨界增长（最多 +14 字节）——同一份 `.sil` 源码换一组
+> `seal_count`/`min_bet`, 真实 redeem 长度就不是 14746, 硬编码单一 constant 只对账本1468 金丝雀市场
+> 那组极小值（seal_count=2, min_bet=1）成立, 换一个真实量级的市场就会再次触发同一类拒收。
+>
+> **方案取舍（Bettor 裁定）**：曾考虑"per-call 见证传长度"（register_append 调用时把长度当 witness
+> 参数传入, 不烤进 ctor）——**被否决**：调用方可控长度 ⇒ 自续约切片可指向 action 见证内部任意位置
+> ⇒ 攻击者只需同时构造一个匹配的续约输出 scriptPubKey, 就能让"同合约只改 state"这条 `require()`
+> 通过一个实际上改写了合约逻辑的续约输出 ⇒ 可卷走 leaf 与其持有的 held KTT（真实资金损失, 不是理论
+> 风险）。ctor 烤入方案由我方代码在 genesis 时一次性计算、写入不可变的 ctor 字段, 之后任何调用方都
+> 无法覆盖, 不存在这个攻击面。
+>
+> **订正后的方案（已实现, 见 `ShardLeaf_direct.sil`/`proto-covenant-builder.mjs` 当前版本）**：
+> 1. `OWN_REDEEM_LEN` 从 `.sil` 内部 `constant` 改成 ctor 参数 `own_redeem_len`（第13个字段）。
+> 2. JS 侧新增 `convergeShardLeafOwnRedeemLen`：不动点收敛（编译→量长度→以此长度再编→直到长度不再
+>    变化, ≤4轮不收敛则 throw, 起始猜测种子用14746 只影响收敛快慢不影响正确性）, 只在 genesis 时
+>    调用一次, 结果连同其余 genesis artifacts 一起返回。
+> 3. `proto_markets` 新增列 `shardleaf_own_redeem_len`（v209 迁移, 允许 NULL 无 DEFAULT, 同 K-18
+>    纪律）, genesis 时写入, 是"一次性事实之后不变"的字段, 同 `shardleaf_cov_id`/`rootclose_tmpl_hash`
+>    一类。
+> 4. `computeShardLeafRedeemScript`（register_append 重建路径）新增必填参数 `ownRedeemLen`, 从
+>    `proto_markets.shardleaf_own_redeem_len` 原样读回, **不重新猜/不重新收敛**——genesis 时的收敛
+>    结果是唯一真值来源。
+> 5. fail-closed 双闸：`convergeShardLeafOwnRedeemLen`（genesis 侧）与 `computeShardLeafRedeemScript`
+>    （register_append 侧）都断言"真实编译出的长度 == ctor 里的 own_redeem_len"，不等即 throw 拒绝
+>    返回——不会构造出一笔"看起来成功但链上必拒"的交易。
+> 6. 回归覆盖：`verify-shardleaf-direct-scripts.mjs` 现跑 3 组 ctor 组合
+>    `(seal_count=2,min_bet=1)`/`(seal_count=1000,min_bet=100000)`/`(seal_count=2,min_bet=2^40)`,
+>    每组首笔（无held）+ 次笔（有held）都真实构造 → 真实签名 → 喂 `cli-debugger` 真执行, 共 6 次
+>    PASS（见 `verify-run-1469-ctor-matrix.log`, own_redeem_len 分别收敛为 14746/14753/14752, 证明
+>    确实随 ctor 变化）；`proto-covenant-builder.test.mjs` 新增 ctor 取值矩阵单测（14 组组合, 断言
+>    收敛成功 + fail-closed 断言成立）+ fail-closed 真的会拦的负向测试。
+>
+> **ShardLeaf.sil（legacy, 铁律0.5冻结, 不改）同类缺陷记录（Bettor⑥要求）**：`ShardLeaf.sil` 的
+> `OWN_PREFIX_LEN`/`OWN_STATE_LEN`/`ownSig.slice(0, ...)` 与本文件订正前的第一版缺陷模式逐字节相同
+> （grep 确认存在于该文件, 未核实是否也有"长度随ctor变化"的同族问题, 因为不在本次修复范围, 该文件
+> 不在proto-v0活路径上）——按铁律0.5不追加投入, 只记录, 不修复。
+>
+> **前瞻观察票（Bettor判, 不扩本次范围）T-PROTO-LEAF-ARTIFACT-VERSIONING**：NWT 独立证实"合约源码
+> 一改, 旧市场的 P2SH 就与新代码脱钩"这一机制本身成立（P2SH = 编译字节的哈希, 任何字节变化都换地址），
+> 但不改变旧市场（a0c4d628…）"已实现损失、任何修复都救不回"这个结论——旧市场锁死的根因是旧字节
+> `register_append` 本身的偏移缺陷 + `convert_to_rootclose` 需要 `count == seal_count`, 不是"脱钩"
+> 本身。真实前瞻风险是：未来合约再次修改时, 若届时已有活市场持仓, 需要一个版本一致性机制（genesis 时
+> 落库合约源 commit + 编译 hash, builder 发现当前编译 hash 与链上 P2SH 不一致时 fail-closed 拒绝）。
+> 触发条件：出现第二个活市场，或下次再修改 `ShardLeaf_direct.sil` 之前——原型 v0 目前无活市场, 本次
+> 不实现, 只记录。

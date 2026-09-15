@@ -1,4 +1,5 @@
-// verify-shardleaf-direct-scripts.mjs — 账本1465/1468(闸3两次中止)修复后的永久性节点脚本执行验证。
+// verify-shardleaf-direct-scripts.mjs — 账本1465/1468/1469(闸3两次中止 + own_redeem_len ctor烤入改造)
+// 修复后的永久性节点脚本执行验证。
 //
 // 背景(为什么需要这个脚本, 不是"加几条JS单测"就够): kaspa-wasm不导出任何本地脚本执行引擎(账本1465已
 // 核实, 全部导出符号检索零命中 TxScriptEngine/checkScripts 等), calculateTransactionMass只算字节数公式
@@ -14,11 +15,11 @@
 // 同一个commit 3ed9733——见README `docs/DEVELOPER-GUIDE.md`/账本1394登记), 它内嵌了跟节点consensus
 // 同一份kaspa-txscript(cargo pin同一个rev)真实脚本引擎。
 //
-// 本脚本做的事: 用proto-tx-assembly.mjs/proto-covenant-builder.mjs的【真实生产函数】(不是重新写一遍逻辑)
-// 构造两种真实交易形状(market_genesis + 首笔/次笔register_append, 全部协议常量/合成随机值, D-021安全),
-// relay侧真签名, 导出成cli-debugger认识的.test.json协议(tx.inputs[i].signature_script_hex直接喂我们
-// 真实产出的字节, 不用debugger自己的witness构造器——这样测的是"我们真实产出的字节能不能过", 不是"debugger
-// 会不会自己造出能过的字节"这种同义反复), 再(可选)调用本机的cli-debugger二进制真跑一遍。
+// 🔴 账本1469(Bettor裁定④): own_redeem_len(register_append自续约切片要用的长度)证实会随
+// seal_count/min_bet的minimal-push编码宽度门槛变化(账本1468矩阵实测)——单一ctor组合的验证不足以
+// 覆盖这个变化面。本脚本因此跑 3 组 Bettor 指定的 ctor 组合, 每组都真实收敛own_redeem_len(不同组合
+// 收敛出的值不同, 见下方打印), 首笔(无held)与次笔(有held)都各自真实构造 → 真实签名 → 喂cli-debugger
+// 真执行, 6 次 PASS 才算通过。
 //
 // 用法:
 //   node scripts/verify-shardleaf-direct-scripts.mjs                    # 只生成 .test.json, 不跑debugger
@@ -40,7 +41,7 @@ if (!process.env.CONSOLE_ENCRYPTION_KEY) process.env.CONSOLE_ENCRYPTION_KEY = '1
 const kaspa = await import('kaspa-wasm');
 const { buildMarketGenesisTxJson, buildRegisterAppendTxJson } = await import('../src/lib/proto-tx-assembly.mjs');
 const {
-  computeMarketGenesisArtifacts, computeShardLeafRedeemScript, loadProtocolConstants,
+  computeMarketGenesisArtifacts, computeShardLeafRedeemScript, convergeShardLeafOwnRedeemLen, loadProtocolConstants,
   computeKttGenesisArtifact, computeTicketGenesisArtifact,
 } = await import('../src/lib/proto-covenant-builder.mjs');
 const { compileSilV100, ctorBytes32V100, ctorIntV100 } = await import('../src/lib/pool-bshard-artifacts.mjs');
@@ -85,43 +86,51 @@ const relaySpk = kaspa.payToAddressScript(relayAddr);
 const relaySpkHex = '0x' + relaySpk.script;
 const { ps_tmpl_hash, token_tmpl_hash, ps_prefix, ps_suffix, token_prefix, token_suffix } = loadProtocolConstants();
 
-const MARKET_ID = randomBytes(32).toString('hex');
-const artifacts = await computeMarketGenesisArtifacts({ marketId: MARKET_ID, minBet: 1, deadlineMs: 1700000000000 });
+// rootCloseTmplHash 与 seal_count/min_bet 无关(RootClose 自己的 ctor 不含这两个字段, 见
+// proto-covenant-builder.mjs computeMarketGenesisArtifacts 步骤④)——一次性算好, 3 组 ctor 组合共用。
+const SHARED_ROOTCLOSE_ARTIFACTS = await computeMarketGenesisArtifacts({ marketId: randomBytes(32).toString('hex'), minBet: 1, deadlineMs: 1700000000000 });
+const ROOTCLOSE_TMPL_HASH = SHARED_ROOTCLOSE_ARTIFACTS.rootCloseTmplHash;
 
-// ── market_genesis(单输入 fee, 无covenant读写自己以外的逻辑——主要覆盖账本1465的sig_op_count规则) ──
-const genesis = buildMarketGenesisTxJson({
-  kaspa, network: 'mainnet', feeUtxo: { txid: randomBytes(32).toString('hex'), vout: 0, value: 50_000_000n, scriptPublicKeyHex: relaySpkHex },
-  relayChangeScriptPublicKeyHex: relaySpkHex, shardLeafScriptPubKeyHex: artifacts.shardLeafDirect.scriptPubKeyHex, absFeeCapSompi: 80_000_000n,
-});
-const genesisTx = kaspa.Transaction.deserializeFromSafeJSON(genesis.txJson);
-const leafOutpoint = { txid: genesisTx.id, vout: 0 };
-const leafCovId = genesis.shardLeafCovId;
-
-function sldCtorFor(state0 = { local_yes: 0, local_no: 0, count: 0, pool_value: 0 }) {
-  return [
-    ctorBytes32V100(MARKET_ID), ctorBytes32V100(ps_tmpl_hash), ctorBytes32V100(MARKET_ID),
-    ctorIntV100(2), ctorIntV100(1), ctorBytes32V100(artifacts.rootCloseTmplHash), ctorBytes32V100('00'.repeat(32)),
-    ctorBytes32V100(token_tmpl_hash), ctorIntV100(state0.local_yes), ctorIntV100(state0.local_no), ctorIntV100(state0.count), ctorIntV100(state0.pool_value),
-  ];
-}
-const debuggerCtorArgsFor = (state0) => [
-  '0x' + MARKET_ID, '0x' + ps_tmpl_hash, '0x' + MARKET_ID,
-  2, 1, '0x' + artifacts.rootCloseTmplHash, '0x' + '00'.repeat(32),
-  '0x' + token_tmpl_hash, state0.local_yes, state0.local_no, state0.count, state0.pool_value,
+// 🔴 账本1469(Bettor④): 3 组 ctor 组合, 覆盖 seal_count/min_bet 的不同 minimal-push 编码宽度门槛。
+const CTOR_CASES = [
+  { label: 'sc2_mb1', sealCount: 2, minBet: 1 },
+  { label: 'sc1000_mb100000', sealCount: 1000, minBet: 100000 },
+  { label: 'sc2_mb2p40', sealCount: 2, minBet: 2 ** 40 },
 ];
 
-async function buildAndVerifyBet({ label, currentState, side, stake, heldInput }) {
+function sldCtorFor({ marketId, sealCount, minBet, ownRedeemLen }, state0) {
+  return [
+    ctorBytes32V100(marketId), ctorBytes32V100(ps_tmpl_hash), ctorBytes32V100(marketId),
+    ctorIntV100(sealCount), ctorIntV100(minBet), ctorBytes32V100(ROOTCLOSE_TMPL_HASH), ctorBytes32V100('00'.repeat(32)),
+    ctorBytes32V100(token_tmpl_hash), ctorIntV100(state0.local_yes), ctorIntV100(state0.local_no), ctorIntV100(state0.count), ctorIntV100(state0.pool_value),
+    ctorIntV100(ownRedeemLen),
+  ];
+}
+function debuggerCtorArgsFor({ marketId, sealCount, minBet, ownRedeemLen }, state0) {
+  return [
+    '0x' + marketId, '0x' + ps_tmpl_hash, '0x' + marketId,
+    sealCount, minBet, '0x' + ROOTCLOSE_TMPL_HASH, '0x' + '00'.repeat(32),
+    '0x' + token_tmpl_hash, state0.local_yes, state0.local_no, state0.count, state0.pool_value,
+    ownRedeemLen,
+  ];
+}
+
+async function buildAndVerifyBet({ ctorCase, label, leafOutpoint, leafCovId, currentState, side, stake, heldInput }) {
+  const { marketId, sealCount, minBet, ownRedeemLen } = ctorCase;
   const newState = {
     local_yes: currentState.local_yes + (side === 0 ? stake : 0),
     local_no: currentState.local_no + (side === 1 ? stake : 0),
     count: currentState.count + 1,
     pool_value: currentState.pool_value + stake,
   };
-  const leafRedeem = computeShardLeafRedeemScript({ marketId: MARKET_ID, minBet: 1, sealCount: 2, rootcloseTmplHash: artifacts.rootCloseTmplHash, state: currentState });
-  const sldCompiled = compileSilV100(SIL_PATH, sldCtorFor(currentState), 'ShardLeaf_direct');
+  // register_append 侧: 从"已存 own_redeem_len"原样重建(不重新收敛), 与 buildRegisterAppendAndBroadcast
+  // 生产路径的调用形态完全一致——这正是本脚本要验证的路径(账本1469 Bettor③"register_append 必须从
+  // 市场已存 ctor 重建, 不能重新猜")。
+  const leafRedeem = computeShardLeafRedeemScript({ marketId, minBet, sealCount, rootcloseTmplHash: ROOTCLOSE_TMPL_HASH, state: currentState, ownRedeemLen });
+  const sldCompiled = compileSilV100(SIL_PATH, sldCtorFor(ctorCase, currentState), 'ShardLeaf_direct');
   const registerAppendEntryAbi = sldCompiled._raw.contracts.ShardLeaf_direct.entries.register_append;
   const bettorPk = randomBytes(32).toString('hex');
-  const ticketArtifact = computeTicketGenesisArtifact({ bettorPk, direction: side, stake, shardPoolId: MARKET_ID });
+  const ticketArtifact = computeTicketGenesisArtifact({ bettorPk, direction: side, stake, shardPoolId: marketId });
   const mergedKttArtifact = computeKttGenesisArtifact({ amount: newState.pool_value, ownerCovIdHex: leafCovId });
 
   const built = buildRegisterAppendTxJson({
@@ -139,17 +148,17 @@ async function buildAndVerifyBet({ label, currentState, side, stake, heldInput }
   signOnlyDeclaredInputs({ tx, signInputIndices: built.signInputIndices, privateKey: priv, kaspa });
   tx.finalize();
   const shape = txToDebuggerShape(tx, 0, leafCovId);
-  const tokOutIdx = heldInput ? 2 : 2; // REGISTER_APPEND_TOK_OUT_INDEX 恒为2(见proto-tx-assembly.mjs)
+  const tokOutIdx = 2; // REGISTER_APPEND_TOK_OUT_INDEX 恒为2(见proto-tx-assembly.mjs)
   const testName = `VERIFY_${label}`;
   const test = { tests: [{
-    name: testName, function: 'register_append', constructor_args: debuggerCtorArgsFor(currentState),
+    name: testName, function: 'register_append', constructor_args: debuggerCtorArgsFor(ctorCase, currentState),
     args: [side, stake, 0, 1, '0x' + bettorPk, '0x' + ps_prefix, '0x' + ps_suffix, tokOutIdx, '0x' + token_prefix, '0x' + token_suffix],
     expect: 'pass',
     tx: { active_input_index: 0, inputs: shape.inputs, outputs: shape.outputs },
   }] };
   const testFile = join(mkdtempSync(join(tmpdir(), 'j2-sld-verify-testjson-')), `ShardLeaf_direct.${label}.test.json`);
   writeFileSync(testFile, JSON.stringify(test, null, 2));
-  console.log(`[${label}] wrote ${testFile} (ninputs=${shape.inputs.length}, noutputs=${shape.outputs.length})`);
+  console.log(`[${label}] own_redeem_len=${ownRedeemLen} wrote ${testFile} (ninputs=${shape.inputs.length}, noutputs=${shape.outputs.length})`);
   const result = runDebugger(testFile, testName);
   if (result) {
     console.log(result.ok ? `  ✅ [${label}] cli-debugger: PASS` : `  ❌ [${label}] cli-debugger: FAIL\n${result.out}`);
@@ -157,25 +166,53 @@ async function buildAndVerifyBet({ label, currentState, side, stake, heldInput }
   return { newState, built, result };
 }
 
-console.log('=== market_genesis + register_append 真实生产构造 → cli-debugger 真执行验证(账本1465/1468) ===');
-const first = await buildAndVerifyBet({ label: 'first_bet_no_held', currentState: { local_yes: 0, local_no: 0, count: 0, pool_value: 0 }, side: 0, stake: 5, heldInput: null });
+console.log('=== market_genesis + register_append 真实生产构造(3组ctor × 首笔/次笔) → cli-debugger 真执行验证(账本1465/1468/1469) ===');
 
-// 第二笔(有held)——held的outpoint/covId不需要真实链上存在, 我们直接构造一个合成的heldInput对象喂给
-// buildRegisterAppendTxJson(它只是把这个值原样嵌进tx.inputs[1], 不校验它是否真实存在于任何UTXO集——
-// 那是proto-leaf-state.mjs的assertHeldKttOutpointMatchesChain的职责, 不是这个函数的职责)。
-const heldArtifact = computeKttGenesisArtifact({ amount: first.newState.pool_value, ownerCovIdHex: leafCovId });
-const second = await buildAndVerifyBet({
-  label: 'second_bet_with_held', currentState: first.newState, side: 1, stake: 3,
-  heldInput: {
-    txid: first.built.expectedTxid, vout: 2, value: 20_000_000n, scriptPublicKeyHex: heldArtifact.scriptPubKeyHex,
-    redeemScript: heldArtifact.script, entryAbi: heldArtifact.entryAbi, stateFieldCount: heldArtifact.stateFieldCount,
-  },
-});
+const allResults = [];
+for (const c of CTOR_CASES) {
+  const marketId = randomBytes(32).toString('hex');
+  const zeroState = { local_yes: 0, local_no: 0, count: 0, pool_value: 0 };
+  // 🔴 账本1469(Bettor②): genesis 时不动点收敛 own_redeem_len(每组 ctor 组合各自收敛, 不假设跨组合共用)。
+  const { ownRedeemLen } = convergeShardLeafOwnRedeemLen({
+    marketId, psTmplHash: ps_tmpl_hash, sealCount: c.sealCount, minBet: c.minBet,
+    rootCloseTmplHash: ROOTCLOSE_TMPL_HASH, tokenTmplHash: token_tmpl_hash, state: zeroState,
+  });
+  const ctorCase = { ...c, marketId, ownRedeemLen };
+  console.log(`\n--- ctor组合 ${c.label}(seal_count=${c.sealCount}, min_bet=${c.minBet}) 收敛 own_redeem_len=${ownRedeemLen} ---`);
 
-const anyRan = [first.result, second.result].some(r => r !== null);
+  const leafRedeemGenesis = computeShardLeafRedeemScript({ marketId, minBet: c.minBet, sealCount: c.sealCount, rootcloseTmplHash: ROOTCLOSE_TMPL_HASH, state: zeroState, ownRedeemLen });
+  const genesis = buildMarketGenesisTxJson({
+    kaspa, network: 'mainnet', feeUtxo: { txid: randomBytes(32).toString('hex'), vout: 0, value: 50_000_000n, scriptPublicKeyHex: relaySpkHex },
+    relayChangeScriptPublicKeyHex: relaySpkHex, shardLeafScriptPubKeyHex: leafRedeemGenesis.scriptPubKeyHex, absFeeCapSompi: 80_000_000n,
+  });
+  const genesisTx = kaspa.Transaction.deserializeFromSafeJSON(genesis.txJson);
+  const leafOutpoint = { txid: genesisTx.id, vout: 0 };
+  const leafCovId = genesis.shardLeafCovId;
+
+  const first = await buildAndVerifyBet({
+    ctorCase, label: `${c.label}_first_bet_no_held`, leafOutpoint, leafCovId,
+    currentState: zeroState, side: 0, stake: c.minBet, heldInput: null,
+  });
+
+  // 第二笔(有held)——held的outpoint/covId不需要真实链上存在, 我们直接构造一个合成的heldInput对象喂给
+  // buildRegisterAppendTxJson(它只是把这个值原样嵌进tx.inputs[1], 不校验它是否真实存在于任何UTXO集——
+  // 那是proto-leaf-state.mjs的assertHeldKttOutpointMatchesChain的职责, 不是这个函数的职责)。
+  const heldArtifact = computeKttGenesisArtifact({ amount: first.newState.pool_value, ownerCovIdHex: leafCovId });
+  const second = await buildAndVerifyBet({
+    ctorCase, label: `${c.label}_second_bet_with_held`, leafOutpoint, leafCovId,
+    currentState: first.newState, side: 1, stake: c.minBet, heldInput: {
+      txid: first.built.expectedTxid, vout: 2, value: 20_000_000n, scriptPublicKeyHex: heldArtifact.scriptPubKeyHex,
+      redeemScript: heldArtifact.script, entryAbi: heldArtifact.entryAbi, stateFieldCount: heldArtifact.stateFieldCount,
+    },
+  });
+
+  allResults.push(first.result, second.result);
+}
+
+const anyRan = allResults.some(r => r !== null);
 if (anyRan) {
-  const allPass = [first.result, second.result].every(r => r === null || r.ok);
-  console.log(allPass ? '\n✅✅ ALL PASS(真实cli-debugger执行)' : '\n❌ 存在FAIL, 见上方输出');
+  const allPass = allResults.every(r => r === null || r.ok);
+  console.log(allPass ? '\n✅✅ ALL PASS(真实cli-debugger执行, 3组ctor × 首笔/次笔 共 6 次)' : '\n❌ 存在FAIL, 见上方输出');
   process.exit(allPass ? 0 : 1);
 } else {
   console.log('\n(仅生成.test.json, 未设置CLI_DEBUGGER_PATH——未真实验证, 见上方各行"跳过真实执行"提示)');
