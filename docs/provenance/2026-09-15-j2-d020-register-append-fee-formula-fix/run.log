@@ -1,0 +1,42 @@
+[db] path=D:\kanet-tn12\scratch\_j2_final_check_cache\canary_calc_unused.db source=DB_PATH
+[diag:step] proc.silverc.compile.bshard-artifacts ms=75 cmd=silverc ok=1 at=2026-09-15T08:32:56.419Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=50 cmd=silverc ok=1 at=2026-09-15T08:32:56.474Z
+
+=== ①market_genesis(0.5 KAS) ===
+  requiredFee     = 0.21333300 KAS (21333300 sompi)
+  netLoss         = 0.21333300 KAS (21333300 sompi)
+  includeChange   = true
+  changeSompi     = 0.08666700 KAS (8666700 sompi)
+  lockedIntoContractOutputs = 0.20000000 KAS (20000000 sompi)
+[diag:step] proc.silverc.compile.bshard-artifacts ms=28 cmd=silverc ok=1 at=2026-09-15T08:32:56.518Z
+
+=== ②首笔下注register_append(无held, fee输入0.95 KAS) ===
+  requiredFee     = 0.43339900 KAS (43339900 sompi)
+  netLoss         = 0.43339900 KAS (43339900 sompi)
+  includeChange   = true
+  changeSompi     = 0.11660100 KAS (11660100 sompi)
+  lockedIntoContractOutputs = 0.60000000 KAS (60000000 sompi)
+
+=== ③第二笔下注(有held) 真实最小可行fee输入探测 ===
+[diag:step] proc.silverc.compile.bshard-artifacts ms=51 cmd=silverc ok=1 at=2026-09-15T08:32:56.581Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=27 cmd=silverc ok=1 at=2026-09-15T08:32:56.618Z
+  feeInput=0.5 KAS -> FAIL: selectChangeShape: no_viable_change_shape — withChange(requiredFee=n/a(insufficient), netLoss=n/a, ceiling=n/a) noChange(requiredFee=35000100, netLoss=30000000, ceiling=70000200)
+  feeInput=0.55 KAS -> FAIL: selectChangeShape: no_viable_change_shape — withChange(requiredFee=n/a(insufficient), netLoss=n/a, ceiling=n/a) noChange(requiredFee=35526600, netLoss=35000000, ceiling=71053200)
+  feeInput=0.56 KAS -> OK requiredFee=35625000 netLoss=36000000 includeChange=false changeSompi=0
+  feeInput=0.57 KAS -> OK requiredFee=35721900 netLoss=37000000 includeChange=false changeSompi=0
+  feeInput=0.58 KAS -> OK requiredFee=35816400 netLoss=38000000 includeChange=false changeSompi=0
+  feeInput=0.6 KAS -> OK requiredFee=38500000 netLoss=38500000 includeChange=true changeSompi=1500000
+  feeInput=0.65 KAS -> OK requiredFee=38650900 netLoss=38650900 includeChange=true changeSompi=6349100
+  feeInput=0.95 KAS -> OK requiredFee=39666700 netLoss=39666700 includeChange=true changeSompi=35333300
+
+=== ③第二笔下注register_append(有held, 探测到的最小可行值 fee输入0.56 KAS) ===
+  requiredFee     = 0.35625000 KAS (35625000 sompi)
+  netLoss         = 0.36000000 KAS (36000000 sompi)
+  includeChange   = false
+  changeSompi     = 0.00000000 KAS (0 sompi)
+  lockedIntoContractOutputs = 0.60000000 KAS (60000000 sompi)
+
+
+=== 与修复前(账本1455发现时)的对照 ===
+  修复前(旧leftover公式, 只计fee输入): 首笔下注真实最小可行fee输入 ≈ 1.05 KAS, 第二笔 ≈ 1.05 KAS(有无held不影响门槛, 这正是bug的症状)
+  修复后(本次核算): 首笔下注真实最小可行fee输入 ≈ 0.82 KAS(0.95 KAS舒适可行, 见②); 第二笔下注 ≈ 0.56 KAS
