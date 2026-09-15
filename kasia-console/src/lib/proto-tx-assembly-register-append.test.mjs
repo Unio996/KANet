@@ -132,6 +132,34 @@ const kttStateFieldCount = kttCompiled._raw.contracts.KanetTestToken.runtime_sta
     const r = assertFinalTxid(tx, built.expectedTxid);
     if (!r.ok) throw new Error(`签名后txid=${r.actualTxid} != 预期${built.expectedTxid}`);
   });
+
+  // ── ⑦⑧ 账本1455回归向量: leftover公式修复后, 首笔下注真实最小可行fee输入从~1.05 KAS降到~0.82 KAS
+  //    (修复前leaf输入的0.2 KAS真实面值被漏计, 每笔都静默多付真实矿工费, 见proto-tx-assembly.mjs
+  //    buildRegisterAppendTxJson内leftover公式的注释) ──
+  let builtMin;
+  t('⑦first_bet 账本1455回归: fee输入0.85 KAS(舒适地高于真实最小可行值~0.82 KAS, 但远低于修复前的~1.05 KAS门槛)构造成功——证明leftover公式确实把leaf自身的续约价值credit回预算, 不再要求fee输入单独垫付全部0.6 KAS dust', () => {
+    builtMin = buildRegisterAppendTxJson({
+      kaspa, network: 'mainnet',
+      leafRedeemScript: leafRedeem.script, leafStateLayout: leafRedeem.stateLayout,
+      leafOutpoint, leafCovId, currentState, newState,
+      heldInput: null,
+      feeUtxo: { txid: 'dd'.repeat(32), vout: 0, value: 85_000_000n, scriptPublicKeyHex: relaySpkHex }, // 0.85 KAS
+      relayChangeScriptPublicKeyHex: relaySpkHex,
+      registerAppendEntryAbi, registerAppendArgs: { side: SIDE, stake: STAKE, bettorPk, psPrefix: psPrefixHex, psSuffix: psSuffixHex, tokPrefix: tokPrefixHex, tokSuffix: tokSuffixHex },
+      ticketScriptPubKeyHex: ticketSpkHex, mergedKttScript: mergedArtifact.script,
+      absFeeCapSompi: 100_000_000n,
+    });
+    if (!builtMin.txJson) throw new Error('0.85 KAS fee输入本该构造成功(账本1455修复后的真实可行值), 却失败了——回归了');
+    if (builtMin.requiredFee > 50_000_000n) throw new Error(`requiredFee应该在~0.41-0.44 KAS量级, 实际 ${builtMin.requiredFee}(过大, 可能公式又漂移了)`);
+  });
+  t('⑧独立复算Σ真实inputs.utxo.amount − Σ真实outputs.value必须【恰好】等于built.netLoss(不只信内部assertImpliedFeeMatches没抛错, 从反序列化出的真实tx对象外部独立复核一遍——账本1455的核心不变量)', () => {
+    const tx = kaspa.Transaction.deserializeFromSafeJSON(builtMin.txJson);
+    let sumIn = 0n; for (const inp of tx.inputs) sumIn += BigInt(inp.utxo.amount);
+    let sumOut = 0n; for (const out of tx.outputs) sumOut += BigInt(out.value);
+    const impliedFee = sumIn - sumOut;
+    if (impliedFee !== builtMin.netLoss) throw new Error(`隐含手续费(Σin-Σout=${impliedFee})与built.netLoss(${builtMin.netLoss})不一致——这正是账本1455那个bug的症状(真实交易多付/少付了built.netLoss没有反映出来的差额)`);
+    if (impliedFee !== builtMin.requiredFee) throw new Error(`带找零形状下netLoss应该恰好等于requiredFee(真实付给网络的手续费), 实际 netLoss=${impliedFee} requiredFee=${builtMin.requiredFee}`);
+  });
 }
 
 // ── ④⑤⑥ 第二笔下注(有 held 输入, currentState.pool_value=第一笔下注后的值, [leaf,held,fee] 三输入) ──
@@ -198,6 +226,33 @@ const kttStateFieldCount = kttCompiled._raw.contracts.KanetTestToken.runtime_sta
     tx.finalize();
     const r = assertFinalTxid(tx, built.expectedTxid);
     if (!r.ok) throw new Error(`签名后txid=${r.actualTxid} != 预期${built.expectedTxid}`);
+  });
+
+  // ── ⑦⑧ 账本1455回归向量(第二笔下注/有held): 修复后真实最小可行fee输入从~1.05 KAS降到~0.58 KAS
+  //    (修复前leaf+held两个输入合计0.4 KAS真实面值被漏计) ──
+  let builtMin;
+  t('⑦second_bet 账本1455回归: fee输入0.65 KAS(舒适地高于真实最小可行值~0.58 KAS, 远低于修复前的~1.05 KAS门槛)构造成功——held自身的续约价值也被credit回预算', () => {
+    builtMin = buildRegisterAppendTxJson({
+      kaspa, network: 'mainnet',
+      leafRedeemScript: leafRedeem.script, leafStateLayout: leafRedeem.stateLayout,
+      leafOutpoint, leafCovId, currentState, newState,
+      heldInput: { txid: heldOutpoint.txid, vout: heldOutpoint.vout, value: 20_000_000n, scriptPublicKeyHex: heldArtifact.scriptPubKeyHex, redeemScript: heldArtifact.script, entryAbi: kttEntryAbi, stateFieldCount: kttStateFieldCount },
+      feeUtxo: { txid: 'dd'.repeat(32), vout: 0, value: 65_000_000n, scriptPublicKeyHex: relaySpkHex }, // 0.65 KAS
+      relayChangeScriptPublicKeyHex: relaySpkHex,
+      registerAppendEntryAbi, registerAppendArgs: { side: SIDE, stake: STAKE, bettorPk, psPrefix: psPrefixHex, psSuffix: psSuffixHex, tokPrefix: tokPrefixHex, tokSuffix: tokSuffixHex },
+      ticketScriptPubKeyHex: ticketSpkHex, mergedKttScript: mergedArtifact.script,
+      absFeeCapSompi: 100_000_000n,
+    });
+    if (!builtMin.txJson) throw new Error('0.65 KAS fee输入本该构造成功(账本1455修复后的真实可行值), 却失败了——回归了');
+    if (builtMin.requiredFee > 50_000_000n) throw new Error(`requiredFee应该在~0.38-0.40 KAS量级, 实际 ${builtMin.requiredFee}(过大, 可能公式又漂移了)`);
+  });
+  t('⑧独立复算Σ真实inputs.utxo.amount(含leaf+held两个非fee输入) − Σ真实outputs.value必须【恰好】等于built.netLoss', () => {
+    const tx = kaspa.Transaction.deserializeFromSafeJSON(builtMin.txJson);
+    let sumIn = 0n; for (const inp of tx.inputs) sumIn += BigInt(inp.utxo.amount);
+    let sumOut = 0n; for (const out of tx.outputs) sumOut += BigInt(out.value);
+    const impliedFee = sumIn - sumOut;
+    if (impliedFee !== builtMin.netLoss) throw new Error(`隐含手续费(Σin-Σout=${impliedFee})与built.netLoss(${builtMin.netLoss})不一致`);
+    if (impliedFee !== builtMin.requiredFee) throw new Error(`带找零形状下netLoss应该恰好等于requiredFee, 实际 netLoss=${impliedFee} requiredFee=${builtMin.requiredFee}`);
   });
 }
 
