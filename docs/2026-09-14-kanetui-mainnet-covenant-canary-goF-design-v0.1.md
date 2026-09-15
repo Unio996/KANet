@@ -1,3 +1,79 @@
+# GO-F：主网 covenant 金丝雀设计页 v0.2（2026-09-15 · KANet-UI · Bettor (1453) 派工，取代 v0.1 · 只写不执行）
+
+> **Status: DRAFT（v0.2）**。v0.2 = D-020 单笔金丝雀，**取代** v0.1 的独立 KTT-genesis-only probe 方案（v0.1 原文完整保留在本页末尾 `## SUPERSEDED（v0.1）` 小节，不删不改，供追溯）。**取代原因**：v0.1 写作时（2026-09-14）原型 v0 后端还没有任何真实广播代码，"验证我们的实现能否被主网接受"只能靠一个专门为验证目的手写的一次性探针脚本；现在（2026-09-15）D-020 单笔 `register_append` 市场创建/下注路径已完整合入主线（`c019a933`，见 (1452)(1453)），已经过 NWT 集中复核 GREEN、有完整的执行门（`assertProtoRelayHealthy`/`validateFixedValueOutputs`/`validateNetLoss`/`assertLeafStateMatchesChain` 等）——**直接用这条真实产品路径做金丝雀，比另写一个不会被任何人复用的探针脚本更划算**：验证的是"我们准备实际使用的代码"，不是"一个专门为了验证而单独造的近似物"。执行门不变：① 本页 → NWT 审 → 方向批准；② 广播动作本身仍须 Owner 单独批（三道闸结构见 (1453)，本页对应**闸 3**，排在闸 1（执行页 A，重启+环境配置）与闸 2（种子转账执行页 v0.7）完成之后）。D-021 规矩：本页不写密钥值、不写余额、不写地址。
+
+## 0. 前提（本页写清楚，不代为满足）
+
+1. 闸 1（`docs/2026-09-15-kanetui-proto-v0-restart-window-execution-page.md`）与闸 2（`docs/2026-09-14-kanetui-proto-v0-funds-seed-transfer-execution-page.md` v0.7）必须已经完成、验收读数全过，proto-v0-funds relay 已持有种子资金（1.95 KAS，三笔 0.5/0.5/0.95），本页（闸 3）才能开始。
+2. 本页只做**一个**市场、**一笔**下注——不是压力测试，不追加第二个市场/第二笔注。
+3. resolve/claim/withdraw 端点当前仍是 501 占位（§6/§9 结算入口未定案）——本页**明确不包含**这三步，金丝雀跑完就停在"下注已确认"，见 §5 的锁定说明。
+
+## 1. 设置 `PROTO_DRIVER_ENABLED=1` 并重启
+
+- `kanet.mainnet.env` 新增一行 `PROTO_DRIVER_ENABLED=1`（执行页 A 那次重启**特意没加**这一行，本页是它专属的重启窗）。
+- 走标准六步重启（同执行页 A §4）：NO-TX 检查 → 停旧 PID → 确认端口释放 → 起新进程 → 记新 PID。
+- 验收：stdout 应出现 `[proto-driver] enabled`（或等价的"已启动"日志，具体措辞以 `services/proto-driver.mjs` 实际打印为准，执行时对照源码确认，不猜字面）——**跟执行页 A §5b 的 `[proto-driver] disabled` 正好相反**，这是本页唯一预期会变化的读数，其余（资金路由 403、敏感路由 503、五屏 200 等）应保持执行页 A 验收过的状态不变。
+
+## 2. 经 UI 创建 1 个市场
+
+- 打开 `/proto-markets/create`，选一个已有代币定义（若没有，先走 `/tokens/create` 建一个——这一步不涉及广播，纯 DB）。
+- **min_bet / seal_count 无需填写**：读 `proto.js:118-119` 源码确认——这两项**后端硬编码**（`minBet=1`、`sealCount=2`），从未在创建表单上暴露，UI 上只填 结算代币/议题标题/截止时间/结算说明（可选）即可，天然就是"最小参数"。
+- 截止时间填一个近期但留够操作余量的时间点（例如提交后 1 小时），避免金丝雀还没跑完市场就过期进入 `sealed`。
+- 提交后逐步记录（不用 D-021 禁写的形式——`marketId`、`txid` 是协议数据不是持仓信息，可以写）：
+  1. `POST /api/proto-markets/create` 的响应（`id`/`status`，创建成功此时状态应为某个"pending 广播"态，如 `genesis_pending`，具体值以实际返回为准）
+  2. 驱动是否在响应内立即尝试推进（源码里 handler 会做一次"立即尝试"，失败不阻塞响应，后台驱动 tick 继续重试——见 `proto.js` `POST /api/proto-markets/create` 里 `driveMarketGenesis`/`buildAndBroadcast` 调用段的注释）
+  3. 轮询 `GET /api/proto-markets/:id`，观察 `market.status` 何时从 `genesis_pending`（或等价初始态）变为 `betting`——变化即代表 genesis 交易已落链确认
+  4. 链上核对：`market.shardleaf_txid`（若响应字段暴露；未暴露则从驱动日志/DB 取）在区块浏览器上查一遍，确认存在、确认数达标
+- 若长时间（建议设一个明确超时，如 10 分钟）状态未变化，按 §6 中止条件处置，不无限等待。
+
+## 3. 下 1 笔最小注额
+
+- 在市场详情页 `/proto-markets/:id`（此时应已是 `betting` 态）选 YES 或 NO、填最小金额（业务上任意值即可，不强求恰好等于 `min_bet`，但建议填一个小额如 `1`，降低金丝雀本身占用的种子资金）。
+- 提交后同 §2 逐步记录：
+  1. `POST /proto-markets/:id/bet` 响应（`202 {ok,id,status}`，`status` 初始应为 `pending`——前端页面已按这个契约实现，本页记录后端实际给出的值供交叉核对）
+  2. 轮询 `GET /api/proto-markets/:id` 的 `bets[]` 数组按 `id` 找这一笔，观察 `status` 何时从 `pending` 变为 `confirmed`
+  3. **leaf 状态推算与链上核对**：`deriveLeafState`（(1452) 集中复核确认的现有函数，`status='confirmed'` 才计入、`get_address_utxos` 失败或目标 outpoint 缺失即拒绝方向）算出的市场当前状态，与直接用 `GET /api/relay/:id/wallets` 或区块浏览器查该 outpoint 的真实链上内容做一次人工比对，确认一致——这是本金丝雀真正要验证的核心事实："我们的推算代码跟真实链上状态一致"，不是只看 API 返回 200 就算过。
+- 同 §2，设超时上限，不无限等待。
+
+## 4. 立即关闭
+
+- 完成 §3 且核对一致后，**立即**从 `kanet.mainnet.env` 删除 `PROTO_DRIVER_ENABLED=1` 这一行，重启 console。
+- 验收：stdout 恢复 `[proto-driver] disabled`（同执行页 A §5b 那条），资金路由/敏感路由/五屏读数复核一遍确认未受影响。
+- **不因为"这次跑通了"就顺手再跑第二个市场/第二笔注**——本页范围就是"1 个市场 + 1 笔下注"，验证到此为止，扩大范围是另一次独立决定，不在本页授权内。
+
+## 5. 成本与锁定说明
+
+🔴 **明确写给 Owner 看**：**resolve / claim / withdraw 三个端点目前仍是 501 未实现**（§6/§9 结算入口尚未定案）。这意味着本金丝雀锁进市场 covenant 的 KAS（下注那一笔的 stake，此时归属市场的 leaf/held 状态，不再是任何人钱包里的自由余额）**在结算入口真正落地之前，没有任何路径能取回**——这不是"暂时卡住等一下"，是"这条路径本身还没写"。金丝雀完成后，这笔资金会长期处于锁定态，直到未来某次独立的结算实现工作完成为止。
+
+**预计净损耗**（数量级判断，非精确承诺，最终以实际构造时 `calculateTransactionMass` 计算结果为准——同 GO-F v0.1 §4 一贯的口径）：
+
+- `market_genesis`：约 0.4 KAS（`GENESIS_OUTPUT_SOMPI` 硬编码 20,000,000 sompi + `required_fee` 约 20,000,000 sompi，见 (1402)）。种子转账第 1 笔（0.5 KAS）覆盖此项，留有余量。
+- 下注（`register_append` 单笔交易，含续约 ShardLeaf_direct + 新铸 ps ticket + 续约 KTT + relay 找零四个输出）：约 0.6–0.8 KAS 区间（(1400)/(1402)/(1404)/(1406) 多轮真实编译+mass 实验的收敛范围，成本大头是三个各自钉 20,000,000 sompi 的 covenant/genesis 输出的 KIP-9 storage mass，脚本大小只占小头）。种子转账第 3 笔（0.95 KAS，原为 D-020 之前的"步骤 B"预留）覆盖此项，留有余量。
+- 种子转账第 2 笔（0.5 KAS，原为 D-020 已取消的"步骤 A 铸筹码"预留）**本金丝雀用不上**——D-020 取消该步骤后不再需要，这笔资金闲置在 proto-v0-funds，不构成风险，也不需要额外处置，留给未来的第二次/后续金丝雀或直接留存。
+- 两笔真实花费合计预计 ≤1.2 KAS，proto-v0-funds 种子总额 1.95 KAS，覆盖充分；实际数字以广播时真实计算结果为准，写入 §7 证据清单。
+
+## 6. 中止条件（任一触发 ⇒ 立即关闭驱动并上报，不重试）
+
+- 任一步交易返回/被判定为 `ambiguous`（状态机存在但无法确定真实链上结果，如 `checkDependencyLanded`/驱动重试逻辑报告 ambiguous）。
+- `GET /api/proto-markets/:id` 推算出的状态与链上实际观察（区块浏览器/`get_address_utxos` 直查）不一致。
+- relay（proto-v0-funds）拒绝签名（`assertProtoRelayHealthy`/`validateFixedValueOutputs`/`validateSignedInputCeiling`/`validateNetLoss` 任一断言在正常参数下意外拒绝）。
+- proto relay 余额断言触发（余额意外接近或超过 `PROTO_MAX_BALANCE_KAS=5`——正常情况下种子只有 1.95 KAS，不该发生，一旦发生说明有资金来源之外的异常）。
+- 出现以上任一情况：**立即**执行 §4 的关闭步骤（删 `PROTO_DRIVER_ENABLED` + 重启），保留现场（stdout 日志、DB 当前行、驱动 tick 记录）供诊断，SendMessage 报 Bettor，**不自行重试、不自行诊断后继续**。
+
+## 7. 证据清单（执行完成后落 `docs/provenance/2026-09-15-kanetui-proto-v0-mainnet-canary/`）
+
+- 市场创建：`marketId`、`shardleaf_txid`（或驱动日志记录的等价字段）、状态转移时间线（`genesis_pending`→`betting` 各自时间戳）、区块浏览器核对截图/链接。
+- 下注：`betId`、`register_append` 的 txid、状态转移时间线（`pending`→`confirmed`）、leaf 状态推算 vs 链上直查的比对结论。
+- 实际花费：两笔交易各自真实 mass 与 required_fee（`calculateTransactionMass` 真实输出，不是估算），确认落在 §5 数量级区间内。
+- 关闭确认：`[proto-driver] disabled` 复现的 stdout 截取、重启前后各项读数对照。
+- 明确写"本次不涉及"的范围：resolve/claim/withdraw、第二个市场、多笔下注、任何超出本页 §1-4 步骤的操作。
+
+---
+
+## SUPERSEDED（v0.1，2026-09-14 原文，完整保留供追溯，不再是当前执行路径）
+
+> ⚠ 以下内容按 v0.2 (1453) 派工**已被取代**：本页 v0.2 改用 D-020 已合入主线的真实市场/下注路径做金丝雀，不再需要下面这个独立的、手写的 KTT-genesis-only 探针脚本方案。保留原文供追溯 v0.1 当时的技术判断（Toccata 激活状态核实、身份分歧讨论、成本核算方法论等仍有参考价值）。
+
 # GO-F：主网 covenant 金丝雀设计页 v0.1（2026-09-14 · KANet-UI · Bettor 1191 派工 · 只写不执行）
 
 > **Status: DRAFT**。权威：`docs/2026-09-14-nwt-redteam-rootclose-tokenization-and-mainnet-covenant-blocker-v0.1.md`（GO-F 这个名字的出处——该文档结论"本项目确实从未对真实主网节点广播测试过一笔 covenant 交易，端到端从未验证"，Bettor 明确认可，"已立 GO-F 金丝雀验证补上"）。**本页只设计，不执行任何广播/转账/签名**。执行门分两层，不能合并：① 本页 → NWT 红队审 → 方向批准（"设计可以照这个做"）；② **广播动作本身须 Owner 单独批**（Bettor 1191 原话），即便①已过，广播前仍要另一次独立的 Owner GO，不能"设计批了就等于广播批了"。
