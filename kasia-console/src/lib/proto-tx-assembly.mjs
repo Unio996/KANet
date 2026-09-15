@@ -149,6 +149,32 @@ export function selectChangeShape({ kaspa, network, leftoverSompi, buildTxWithCh
 }
 
 /**
+ * 🔴 账本1455(金丝雀成本核算暴露的真实bug, NWT/Bettor诊断): 构造层唯一的余额不变量断言——finalize
+ * 后的真实交易, Σ(inputs.utxo.amount) − Σ(outputs.value) 必须【恰好】等于所选找零形状本该实付的手续费
+ * (selectChangeShape 返回的 netLoss——带找零形状=requiredFee, 并入形状=leftoverSompi 全部, 两种情况下
+ * netLoss 字段本身已经是这个值, 不需要调用方另外判断 includeChange 再挑一个)。
+ * 根因(register_append 曾经的真实bug, 已修复): leftoverSompi 计算公式如果漏计某个非fee输入的真实
+ * 面值(比如 leaf/held 这类 covenant 输入自带的、本该抵扣掉的续约价值), 构造出来的交易会比 mass 计算出的
+ * requiredFee 多付出那部分差额——这部分差额不会被拒绝广播(kaspad 只要求"至少付够最低费", 不要求"恰好"),
+ * 而是静默烧给矿工, 每笔都发生, 且不会在任何地方报错。这条断言把"构造出的真实交易"与"我们以为构造出的
+ * 交易"之间的隐性偏差, 从"永远不会被发现的静默财务泄漏"变成"fail-closed 立即拒绝, 绝不返回一笔可能
+ * 多付/少付真实矿工费的交易"。
+ * @param {*} tx  已 finalize() 的真实 kaspa-wasm Transaction 对象
+ * @param {bigint} expectedFeeSompi  期望的真实实付手续费(= selectChangeShape 返回的 netLoss)
+ * @param {string} label  报错信息里标注是哪个 kind(market_genesis/register_append)
+ */
+export function assertImpliedFeeMatches(tx, expectedFeeSompi, label) {
+  let sumIn = 0n;
+  for (const inp of tx.inputs) sumIn += BigInt(inp.utxo.amount);
+  let sumOut = 0n;
+  for (const out of tx.outputs) sumOut += BigInt(out.value);
+  const impliedFeeSompi = sumIn - sumOut;
+  if (impliedFeeSompi !== expectedFeeSompi) {
+    throw new Error(`assertImpliedFeeMatches(${label}): implied_fee_mismatch — Σinputs(${sumIn}) - Σoutputs(${sumOut}) = ${impliedFeeSompi} sompi, 与预期实付手续费 ${expectedFeeSompi} sompi 不符(构造层余额公式算错, fail-closed 拒绝返回这笔交易——真实原因见账本1455)`);
+  }
+}
+
+/**
  * 续约输出的唯一构造入口: 强制带 CovenantBinding 声明, 结构上不存在"忘记声明"这条代码路径
  * (省得下一个人手写 new TransactionOutput(...) 漏掉第三个参数——那会让 calculateTransactionMass
  * 把续约输出当成未声明用途的巨型脚本 P2SH, 实测量级可达 >10 倍真实 mass, 见 provenance 向量②)。
@@ -218,6 +244,9 @@ export function buildMarketGenesisTxJson({ kaspa, network, feeUtxo, relayChangeS
     buildTxNoChange: () => mkTx(undefined),
     absFeeCapSompi,
   });
+  assertImpliedFeeMatches(shape.tx, shape.netLoss, 'market_genesis'); // 账本1455: market_genesis 只有
+  // 1 个输入(fee 自己), leftover 公式本身没有"漏计其它输入"这个 bug 的作用面, 这里加断言是纵深防御
+  // (万一未来改动引入新输入种类), 不是修复本函数自身的问题。
 
   // shardLeafCovId: consensus 的 covenant_id(funding.outpoint, [outputIndices]) 是纯函数, 不需要上链
   // 确认——本地就能算出、且不受后续找零值影响(与哪个形状/找零值无关, 同一 outpoint+outIdx 恒定)。
@@ -369,13 +398,27 @@ export function buildRegisterAppendTxJson({
     return t;
   };
 
-  const leftover = feeUtxo.value - CONTINUATION_OUTPUT_SOMPI - GENESIS_OUTPUT_SOMPI - GENESIS_OUTPUT_SOMPI;
+  // 🔴 账本1455修复(真实bug, 金丝雀成本核算暴露·NWT/Bettor诊断): 原公式
+  // `feeUtxo.value - CONTINUATION_OUTPUT_SOMPI - GENESIS_OUTPUT_SOMPI - GENESIS_OUTPUT_SOMPI`
+  // 只计入 fee 输入的面值, 但真实交易的 txInputs(见上面 mkTx)还包含 leaf 输入(其真实面值
+  // currentStateUtxoValueOf(leafOutpoint) = CONTINUATION_OUTPUT_SOMPI, 每笔恒有)以及——第二笔起——
+  // held 输入(heldInput.value = CONTINUATION_OUTPUT_SOMPI)。这两个输入各自的真实面值本该被记入
+  // "总可用余额"(它们各自 1:1 抵扣掉 leaf续约/合并KTT 这两个输出里对应的那一份, 是这两个 covenant
+  // 输入"自带"的续约价值, 不是凭空冒出来的), 漏计的后果是: 每次构造出的真实交易, Σ真实inputs −
+  // Σ真实outputs(= 真实矿工费)会比这里算出来的 requiredFee 恰好多出 leafValue(+heldValue, 若有)——
+  // 这部分差额不会被 kaspad 拒绝广播(节点只要求"至少付够最低费", 不要求"恰好"), 而是每笔都静默烧给
+  // 矿工, 从不在任何地方报错。leaf/held 各自的真实输入面值取自同一个来源(currentStateUtxoValueOf/
+  // heldInput.value), 与上面 mkTx 实际塞进 txInputs 的值完全同源, 不另写一份可能漂移的常量。
+  const leafInputValue = currentStateUtxoValueOf(leafOutpoint);
+  const heldInputValue = heldInput ? heldInput.value : 0n;
+  const leftover = feeUtxo.value + leafInputValue + heldInputValue - CONTINUATION_OUTPUT_SOMPI - GENESIS_OUTPUT_SOMPI - GENESIS_OUTPUT_SOMPI;
   const shape = selectChangeShape({
     kaspa, network, leftoverSompi: leftover,
     buildTxWithChange: (changeSompi) => mkTx(changeSompi),
     buildTxNoChange: () => mkTx(undefined),
     absFeeCapSompi,
   });
+  assertImpliedFeeMatches(shape.tx, shape.netLoss, 'register_append');
 
   const mergedKttCovId = String(shape.tx.outputs[REGISTER_APPEND_TOK_OUT_INDEX].covenant.covenantId);
 

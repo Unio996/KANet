@@ -259,6 +259,53 @@ export function validateNetLoss({ inputs, outputs, signInputIndices, relayScript
 }
 
 /**
+ * 🔴 账本1455(纵深防御, NWT/Bettor裁定): validateNetLoss 只统计【relay 自己签名的输入】减去【回到
+ * relay 自己地址的输出】——它回答的是"relay 这次签名到底让自己损失了多少", 完全看不见"整笔交易真正
+ * 付给矿工的隐含手续费(Σ全部输入 − Σ全部输出)是不是合理"这件事。console 侧的构造层曾经真实犯过这个
+ * 错(见 kasia-console/src/lib/proto-tx-assembly.mjs buildRegisterAppendTxJson 的 leftover 公式漏计
+ * leaf/held 这类非签名输入的真实面值, 导致每笔都静默多付真实矿工费——见账本1455), console 侧已经修
+ * 并加了构造层不变量断言, 但 relay 侧不能只信任调用方"这次改对了"——万一未来又有类似疏漏(某个新 kind
+ * 漏计某个输入), 这条独立、不依赖 console 侧逻辑的检查是最后一道闸: 不管 console 侧算得对不对, 只要
+ * 反序列化出来的真实交易本身隐含的矿工费超过合理上限, 一律拒签。
+ * @param {object} o
+ * @param {PlainInput[]} o.inputs  extractTxShape() 产出的【全部】输入(不筛 signInputIndices——隐含
+ *   手续费是 Σ全部输入 − Σ全部输出, 不管谁签的)
+ * @param {PlainOutput[]} o.outputs  extractTxShape() 产出的【全部】输出
+ * @param {bigint} o.requiredFeeSompi  computeRequiredFeeSompi() 的结果(与 validateNetLoss 用同一个值,
+ *   在签名后才能算出——本函数因此必须放在签名之后、广播之前调用, 与 validateNetLoss 并列)
+ * @returns {{ok:true, impliedFeeSompi:bigint, ceiling:bigint} | {ok:false, reason:string, impliedFeeSompi?:bigint, ceiling?:bigint}}
+ */
+export function validateImpliedMinerFee({ inputs, outputs, requiredFeeSompi }) {
+  if (!Array.isArray(inputs) || !inputs.length) return { ok: false, reason: 'inputs must be a non-empty array' };
+  if (!Array.isArray(outputs)) return { ok: false, reason: 'outputs must be an array' };
+  if (typeof requiredFeeSompi !== 'bigint' || requiredFeeSompi < 0n) return { ok: false, reason: 'requiredFeeSompi must be a non-negative bigint (computed via computeRequiredFeeSompi, post-signing)' };
+
+  let sumInSompi = 0n;
+  for (const inp of inputs) sumInSompi += BigInt(inp.amountSompi);
+  let sumOutSompi = 0n;
+  for (const out of outputs) sumOutSompi += BigInt(out.valueSompi);
+  const impliedFeeSompi = sumInSompi - sumOutSompi;
+
+  if (impliedFeeSompi < 0n) {
+    return { ok: false, reason: `implied miner fee is negative(${impliedFeeSompi}) — Σoutputs(${sumOutSompi}) exceeds Σinputs(${sumInSompi}), transaction does not balance`, impliedFeeSompi };
+  }
+
+  // 与 validateNetLoss 同一个动态上限公式(账本1455明确要求"与 validateNetLoss 同一公式")——
+  // min(requiredFee×2, GLOBAL_ABS_FEE_CAP_SOMPI), 不额外引入 per-kind cap(relay 层本来就不知道
+  // kind, 这条检查的定位是"隐含手续费本身合不合理", 不是 kind 专属的净损耗上限)。
+  let ceiling = requiredFeeSompi * 2n;
+  if (GLOBAL_ABS_FEE_CAP_SOMPI < ceiling) ceiling = GLOBAL_ABS_FEE_CAP_SOMPI;
+  if (impliedFeeSompi > ceiling) {
+    return {
+      ok: false,
+      reason: `implied miner fee ${impliedFeeSompi} exceeds ceiling ${ceiling} (= min(required_fee×2=${requiredFeeSompi * 2n}, GLOBAL_ABS_FEE_CAP_SOMPI=${GLOBAL_ABS_FEE_CAP_SOMPI})); Σinputs=${sumInSompi}, Σoutputs=${sumOutSompi} — refusing to sign/broadcast a transaction that silently overpays the miner`,
+      impliedFeeSompi, ceiling,
+    };
+  }
+  return { ok: true, impliedFeeSompi, ceiling };
+}
+
+/**
  * 从真实 kaspa-wasm Transaction 对象抽取 validateSignedInputCeiling/validateNetLoss 需要的 plain
  * shape。薄适配层——不含安全判断，读错字段只会导致下游校验用错误的值算出错误结论(会被断言拦下)，
  * 不会绕过校验本身(校验逻辑与本函数完全解耦，见文件头分层说明)。字段来源核实:
