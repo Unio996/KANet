@@ -20,7 +20,7 @@
 import { sqlite } from '../db/client.js';
 import {
   scriptPublicKeyFromHex, buildMarketGenesisTxJson, buildRegisterAppendTxJson,
-  selectFeeUtxo, GENESIS_OUTPUT_SOMPI, CONTINUATION_OUTPUT_SOMPI, REGISTER_APPEND_TICKET_OUT_INDEX,
+  selectFeeUtxoByConstruction, CONTINUATION_OUTPUT_SOMPI, REGISTER_APPEND_TICKET_OUT_INDEX,
 } from './proto-tx-assembly.mjs';
 import {
   computeShardLeafRedeemScript, computeKttGenesisArtifact, computeTicketGenesisArtifact,
@@ -73,21 +73,17 @@ export async function buildMarketGenesisAndBroadcast({ kaspa, network, market, s
   });
 
   const cap = loadFeeProfileCap('market_genesis');
-  const minRequired = GENESIS_OUTPUT_SOMPI + cap; // 保守下界: 留够 GENESIS 输出 + 整个 cap 的余量, 保证 selectChangeShape 有解
   const utxoRes = await sendCmd(relayId, { type: 'get_address_utxos', address: relayAddress }, 15000, 'proto-driver');
   if (!utxoRes?.ok) return { error: `get_address_utxos failed: ${utxoRes?.error || 'no response'}` };
   const candidates = toFeeUtxoCandidates(utxoRes.utxos, relaySpk, relaySpkHex);
-  let feeUtxo;
-  try { feeUtxo = selectFeeUtxo(candidates, minRequired); }
+  // 账本1462修复: 不再用"GENESIS_OUTPUT_SOMPI+cap"这个保守下界预筛候选(cap 是异常上限不是预期值, 会把
+  // 真正够用的种子面值 UTXO 错误滤掉)——改为按真实构造逐个尝试, 第一个真能编出交易的就是答案。
+  let feeUtxo, built;
+  try { ({ feeUtxo, built } = selectFeeUtxoByConstruction(candidates, (u) => buildMarketGenesisTxJson({
+    kaspa, network, feeUtxo: u, relayChangeScriptPublicKeyHex: relaySpkHex,
+    shardLeafScriptPubKeyHex: leafRedeem.scriptPubKeyHex, absFeeCapSompi: cap,
+  }))); }
   catch (e) { return { error: e.message }; }
-
-  let built;
-  try {
-    built = buildMarketGenesisTxJson({
-      kaspa, network, feeUtxo, relayChangeScriptPublicKeyHex: relaySpkHex,
-      shardLeafScriptPubKeyHex: leafRedeem.scriptPubKeyHex, absFeeCapSompi: cap,
-    });
-  } catch (e) { return { error: `buildMarketGenesisTxJson failed: ${e.message}` }; }
 
   // 🔴 账本1438②: 发 IPC 之前原子写入(单条 UPDATE), 不等 relay 回执。
   markMarketStatus(market.id, { shardleaf_cov_id: built.shardLeafCovId });
@@ -218,29 +214,28 @@ export async function buildRegisterAppendAndBroadcast({ kaspa, network, market, 
   const { Address: _A } = kaspa;
   const relaySpk = kaspa.payToAddressScript(new Address(relayAddress));
   const relaySpkHex = '0x' + relaySpk.script;
-  const cap = loadFeeProfileCap('bet_mint_step_b');
-  const minRequired = CONTINUATION_OUTPUT_SOMPI + GENESIS_OUTPUT_SOMPI + GENESIS_OUTPUT_SOMPI + cap;
+  // 账本1462修复: feeProfile 键名从遗留的 'bet_mint_step_b'(D-020 之前的两步设计残留命名)改为
+  // 'register_append'(见 scripts/proto-v0-template-anchors.json/.mjs 同步改名), 数据内容不变。
+  const cap = loadFeeProfileCap('register_append');
   const feeUtxoRes = await sendCmd(relayId, { type: 'get_address_utxos', address: relayAddress }, 15000, 'proto-driver');
   if (!feeUtxoRes?.ok) return { error: `get_address_utxos(fee) failed: ${feeUtxoRes?.error || 'no response'}` };
   const feeCandidates = toFeeUtxoCandidates(feeUtxoRes.utxos, relaySpk, relaySpkHex);
-  let feeUtxo;
-  try { feeUtxo = selectFeeUtxo(feeCandidates, minRequired); }
+  // 账本1462修复(同 market_genesis 一侧): 不再用"CONTINUATION+GENESIS+GENESIS+cap"这个保守下界预筛
+  // 候选——改为按真实构造逐个尝试。buildRegisterAppendTxJson 内部的 leaf/held 输入值来源
+  // (currentStateUtxoValueOf/heldInput.value)与上面①②步骤查到的链上现状同源, 未受影响(账本1455教训)。
+  let feeUtxo, built;
+  try { ({ feeUtxo, built } = selectFeeUtxoByConstruction(feeCandidates, (u) => buildRegisterAppendTxJson({
+    kaspa, network,
+    leafRedeemScript: leafRedeem.script, leafStateLayout: leafRedeem.stateLayout, leafOutpoint, leafCovId,
+    currentState, newState, heldInput, feeUtxo: u, relayChangeScriptPublicKeyHex: relaySpkHex,
+    registerAppendEntryAbi,
+    registerAppendArgs: {
+      side: bet.side, stake: bet.stake, bettorPk: '0x' + bet.bettor_pk,
+      psPrefix: '0x' + ps_prefix, psSuffix: '0x' + ps_suffix, tokPrefix: '0x' + token_prefix, tokSuffix: '0x' + token_suffix,
+    },
+    ticketScriptPubKeyHex: ticketArtifact.scriptPubKeyHex, mergedKttScript: mergedKttArtifact.script, absFeeCapSompi: cap,
+  }))); }
   catch (e) { return { error: e.message }; }
-
-  let built;
-  try {
-    built = buildRegisterAppendTxJson({
-      kaspa, network,
-      leafRedeemScript: leafRedeem.script, leafStateLayout: leafRedeem.stateLayout, leafOutpoint, leafCovId,
-      currentState, newState, heldInput, feeUtxo, relayChangeScriptPublicKeyHex: relaySpkHex,
-      registerAppendEntryAbi,
-      registerAppendArgs: {
-        side: bet.side, stake: bet.stake, bettorPk: '0x' + bet.bettor_pk,
-        psPrefix: '0x' + ps_prefix, psSuffix: '0x' + ps_suffix, tokPrefix: '0x' + token_prefix, tokSuffix: '0x' + token_suffix,
-      },
-      ticketScriptPubKeyHex: ticketArtifact.scriptPubKeyHex, mergedKttScript: mergedKttArtifact.script, absFeeCapSompi: cap,
-    });
-  } catch (e) { return { error: `buildRegisterAppendTxJson failed: ${e.message}` }; }
 
   const rep = await sendCmd(relayId, {
     type: PROTO_COVENANT_BROADCAST_TYPE,

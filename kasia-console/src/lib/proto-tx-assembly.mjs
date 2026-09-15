@@ -63,6 +63,13 @@ export function computeRequiredFeeSompiOrThrow(kaspa, network, tx) {
 /**
  * §9.5 fee-UTXO 选择器: 只选"单个够用的 UTXO", v0 明确不做自动拆分/合并(不做的范围, Bettor 1425 条件⑥认可)。
  * 找零形状必须是 0(全部耗尽)或 >= CONTINUATION_OUTPUT_SOMPI(留下的找零本身要能再花, 不留 dust 找零)。
+ * 🔴 账本1462(闸3金丝雀中止, Bettor/NWT诊断): 本函数用一个"保守下界"(minRequiredSompi, 调用方按
+ * GENESIS_OUTPUT_SOMPI+cap 或 CONTINUATION×N+cap 这类字面量算出来的估计值)预筛 UTXO——这个估计值比
+ * 真实构造需要的面值明显偏大(真实 requiredFee 约 0.41-0.44 KAS, 这里按 cap 上限抬到 ~0.6-1.0 KAS)，
+ * 导致真实种子面值(0.5/0.5/0.95 KAS)全部被这道"保守但不准"的门槛拒之门外——市场从未真正尝试构造就
+ * 直接 no_suitable_fee_utxo。本函数原样保留(仍是一个合法的、更简单的原语，proto-tx-assembly.test.mjs
+ * 的既有单测继续覆盖它)，但 proto-broadcast-ops.mjs 的两个生产调用点已改用下面的
+ * selectFeeUtxoByConstruction(按真实构造逐个尝试，不猜下界)。
  */
 export function selectFeeUtxo(candidates, minRequiredSompi) {
   if (typeof minRequiredSompi !== 'bigint') throw new Error('selectFeeUtxo: minRequiredSompi must be bigint');
@@ -72,6 +79,46 @@ export function selectFeeUtxo(candidates, minRequiredSompi) {
   }
   sufficient.sort((a, b) => (a.value < b.value ? -1 : a.value > b.value ? 1 : 0));
   return sufficient[0];
+}
+
+// 镜像 kasia-relay/src/lib/covenant-broadcast.mjs 的同名常量(relay 侧 validateSignedInputCeiling 的硬顶,
+// Bettor 1386②)——console 侧独立持有一份而不是跨包 import relay 代码("Console 传导不碰链"角色分工铁律,
+// 同 GLOBAL_ABS_FEE_CAP_SOMPI 已有的先例)。面值超过这个数的 UTXO 就算真能构造出交易, relay 侧签名前也
+// 会被 validateSignedInputCeiling 拒签——预先滤掉, 不浪费一次真实构造+relay round-trip 才发现拒签。
+export const SIGNED_INPUT_CEILING_SOMPI = 100_000_000n; // 1.0 KAS
+
+/**
+ * §9.5 fee-UTXO 选择器 v2(账本1462修复, 取代 selectFeeUtxo 在 proto-broadcast-ops.mjs 里的用法):
+ * 不再用"保守下界"公式猜一个门槛去过滤候选——公式本身(GENESIS_OUTPUT_SOMPI+cap 这类)天然比真实
+ * requiredFee 宽松得多(cap 是"发现异常时的上限"不是"预期值"), 用它做预筛选会把真正够用的小面值 UTXO
+ * 错误排除掉。改为: 过滤掉面值超过 SIGNED_INPUT_CEILING_SOMPI 的候选(这些即使构造成功, relay 侧也会
+ * 拒签, 尝试它们没有意义), 按面值升序逐个真实调用 tryBuild(feeUtxo) 尝试构造(buildMarketGenesisTxJson/
+ * buildRegisterAppendTxJson 内部会真的走 calculateTransactionMass + selectChangeShape +
+ * assertImpliedFeeMatches——不是估算, 是这笔交易真正需要多少 fee 的唯一权威答案), 第一个构造成功的
+ * 立即返回(优先选面值最接近够用的, 减少找零/浪费)。全部失败(或没有一个候选面值 <= 上限)⇒ 抛
+ * no_suitable_fee_utxo, 错误信息附上每个候选面值(sompi)+构造失败原因(不含地址——账本1462③要求)。
+ * 构造本身是纯本地操作(不签名不广播), 逐个尝试没有副作用, 全部失败也不留任何状态改动。
+ * @param {Array<{txid,vout,value:bigint,scriptPublicKeyHex}>} candidates
+ * @param {(feeUtxo:object) => object} tryBuild  真实构造函数, 成功返回构造结果对象, 失败 throw
+ * @returns {{feeUtxo:object, built:object}}
+ */
+export function selectFeeUtxoByConstruction(candidates, tryBuild) {
+  const eligible = (candidates || []).filter((u) => u.value <= SIGNED_INPUT_CEILING_SOMPI);
+  const sorted = [...eligible].sort((a, b) => (a.value < b.value ? -1 : a.value > b.value ? 1 : 0));
+  const failures = [];
+  for (const feeUtxo of sorted) {
+    try {
+      const built = tryBuild(feeUtxo);
+      return { feeUtxo, built };
+    } catch (e) {
+      failures.push(`value=${feeUtxo.value}: ${e.message}`);
+    }
+  }
+  const excludedCount = (candidates || []).length - eligible.length;
+  const detail = failures.length
+    ? `逐个真实构造全部失败 — ${failures.join(' | ')}`
+    : `没有候选 UTXO 面值 <= SIGNED_INPUT_CEILING_SOMPI(${SIGNED_INPUT_CEILING_SOMPI})(候选总数=${(candidates || []).length}, 超过上限被排除=${excludedCount})`;
+  throw new Error(`selectFeeUtxoByConstruction: no_suitable_fee_utxo(${detail})`);
 }
 
 // 🔴 找零形状选择(账本1427 Bettor 复核订正——原来的"必须 0 或 >=20M dust 门槛"与 (1404) 已定案的
@@ -323,7 +370,7 @@ export function verifyShardLeafCovIdAgainstLandedTx({ kaspa, expectedCovId, land
  * @param {string} o.ticketScriptPubKeyHex  PoolSideTicket genesis 的 scriptPubKeyHex(computeGeneric 产物)
  * @param {string} o.mergedKttScriptPubKeyHex  合并KTT genesis(computeKttGenesisArtifact({amount:pool_value+stake, ownerCovIdHex:leafCovId}))的 scriptPubKeyHex(不含0x的裸脚本hex, 用于起算covenant_id)
  * @param {Buffer} o.mergedKttScript  同上, 完整脚本字节(Buffer)
- * @param {bigint} o.absFeeCapSompi  feeProfile.bet_mint_step_b.cap
+ * @param {bigint} o.absFeeCapSompi  feeProfile.register_append.cap(账本1462改名，原 bet_mint_step_b)
  */
 export function buildRegisterAppendTxJson({
   kaspa, network, leafRedeemScript, leafStateLayout, leafOutpoint, leafCovId, currentState, newState,
