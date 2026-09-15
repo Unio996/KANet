@@ -1,4 +1,6 @@
-> **Status**: CURRENT
+> **Status**: SUPERSEDED-BY D-020
+
+> 📌 **状态注记（2026-09-15 · J2 · D-020 账本1446/1448/a4878d7d）**：本文档验证的是 bet_mint 两步设计（独立铸 stake 筹码 + register_append 消费它）下的构造/编码行为——NWT 用真实 cli-debugger 证明该设计存在更严重问题（ZERO32-owner 的筹码可被任意第三方连本带锁定的真实 KAS 一起偷走，见账本1446），Owner 裁定 D-020：取消步骤A，register_append 改单笔交易。本文档内容作为历史记录保留（不删除，不改原文），新的验证见 `docs/provenance/2026-09-15-j2-d020-register-append-single-tx-verification/`。
 
 # stake 新铸筹码 owner=STAKE_CHIP_OWNER_UNBOUND(全零32字节)真实验证(账本1436)
 

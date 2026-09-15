@@ -127,6 +127,16 @@ Fee input 金额 = `estimatedFee + genesisOutputValue`。
 
 ## §3 bet_mint（`POST /api/proto-markets/:id/bet`）—— 两步复合动作
 
+> 📌 **状态注记（2026-09-15 · J2 · D-020 账本1446/1448/a4878d7d · 不改下方原文）**：本节"两步复合动作"
+> 的设计（步骤A独立铸 stake 筹码 + 步骤B `register_append` 消费它，含下方 11 参数 entry 列表、
+> `stakeInIdx` 等）已被 **D-020 取代**——NWT 用真实 cli-debugger 证明步骤A新铸筹码的
+> `owner=STAKE_CHIP_OWNER_UNBOUND`（全零32字节）设计存在比"孤儿化"更严重的问题：该筹码可被任意
+> 第三方连本带锁定的真实 KAS 一起偷走（推翻账本1436"无损失"判断，见
+> `docs/provenance/2026-09-15-j2-d020-register-append-single-tx-verification/`）。Owner 裁定：
+> 取消步骤A，`register_append` 改单笔交易（10 参数，去掉 `stakeInIdx`）。下方内容作为历史设计记录
+> 保留，实现请以生产代码（`kasia-console/src/lib/proto-tx-assembly.mjs` `buildRegisterAppendTxJson`
+> / `proto-broadcast-ops.mjs` `buildRegisterAppendAndBroadcast`）与新 provenance 目录为准。
+
 这是唯一一个内部两步的端点，`docs/2026-09-14-j2-proto-v0-backend-api-design-v0.1.md` §2.3/§2.3.1 已经把失败态矩阵、`proto_bet_intents` 状态机、两个已知限制（`register_append` 无签名绑定的抢跑竞态 T-PROTO-BETTORPK-BINDING、`count` 耗尽导致的孤儿筹码 T-ORPHAN-CHIP-RECOVERY-ENTRY）讲得很完整，本节只补代码级细节，**不重复那份文档已经讲清楚的部分**。
 
 ### 步骤 A — 铸定向筹码（`KanetTestToken` genesis）

@@ -105,6 +105,19 @@ stake_tx_id, status, created_at, confirmed_at）；`UPDATE proto_markets SET sha
 > `T-ORPHAN-CHIP-RECOVERY-ENTRY`，仅在"KTT零价值测试币"前提下成立。7条真实 cli-debugger 向量见
 > `docs/provenance/2026-09-15-j2-stake-chip-owner-unbound-verification/`。
 
+> 📌 **状态注记（2026-09-15 · J2 · D-020 账本1446/1448/a4878d7d · 不改上方原文）**：
+> 上方"账本1436裁定值"这整段（步骤A铸 `owner=STAKE_CHIP_OWNER_UNBOUND` 的独立 stake 筹码 + 步骤B
+> 消费它的两步设计）**已被 D-020 取代**——NWT 用真实 cli-debugger 证明该设计比"孤儿化代价"更严重：
+> ZERO32-owner 的筹码可被任意第三方连本带锁定的真实 KAS 一起偷走，推翻账本1436"无损失"判断（见
+> `docs/provenance/2026-09-15-j2-d020-register-append-single-tx-verification/`）。Owner 裁定取消
+> 步骤A，`register_append` 改单笔交易（本节"失败态矩阵"里 A 广播失败/A已上链B未发起/A已上链B广播失败
+> 三行随之全部作废——单笔交易只有"广播成功"和"广播失败/未上链"两态，不再有"A/B 分离"这个中间态空间）。
+> `proto_bets` 表删 `mint_txid`/`mint_vout` 列，`status` CHECK 收窄到 `pending`/`confirmed`（v208
+> 迁移）。**`T-ORPHAN-CHIP-RECOVERY-ENTRY` 随之关闭**（场景结构性消失，不是修好）；
+> **`T-PROTO-BETTORPK-BINDING`（下方§2.3.1）与本次改动无关，继续成立**。生产代码以
+> `proto-tx-assembly.mjs`/`proto-broadcast-ops.mjs`/`proto-bet-intent.mjs` 为准，`docs/DATABASE.md`
+> 已同步 schema 说明。
+
 ### 2.3.1 NWT 保留项答复（1336，落码前必须满足）
 
 **MUST：中间态接既有 intent 机制**——`submit-intent.mjs`（`src/lib/submit-intent.mjs`）是全仓这一类问题
@@ -296,6 +309,16 @@ Console-不碰链）同时满足。
    孤儿化，当前 9 个合约里**没有任何入口能追回**。v0 处置 = 发起 TX1 前的预检（降低触发概率，不消除）+
    `proto_bets.orphaned_chip` 终态如实展示。**这是合约层缺口，需要新增一个回收 entry 才能真正解决**，不在
    本轮范围。
+
+> 📌 **状态注记（2026-09-15 · J2 · D-020 账本1446/1448/a4878d7d · 不改上方原文）**：
+> - **T-ORPHAN-CHIP-RECOVERY-ENTRY 关闭**：D-020 取消独立 stake 筹码（步骤A）后，"TX1 铸筹码落链、
+>   TX2 未确认"这个窗口结构性不存在了——register_append 是单笔交易，要么整笔上链要么整笔没上链，
+>   没有"筹码已铸但没并入池子"的中间态可以孤儿化。不是新增了回收 entry 修好它，是这个场景本身消失了。
+> - **T-PROTO-BETTORPK-BINDING 继续成立，未被 D-020 触及**：这条说的是 `bettorPk` witness 值与
+>   *某个代币输入* 之间无签名绑定的抢跑竞态——D-020 去掉的是 `stakeInIdx` 那个被消费的独立代币输入，
+>   `bettorPk` 本身仍然是无签名绑定的纯 witness 值（`PoolSideTicket` 的 `bettorPk` 字段一样不经任何
+>   `checkSig`），这条限制的成因与 D-020 处理的问题是两个独立的坑，不能因为处理了一个就当另一个也解决了。
+>   结论：**v0 单操作员场景下继续接受，任何第二方/多用户参与前仍必须先修**，与本文档②裁定时的表述一致。
 
 ## §9 新增 relay 命令 `covenant_broadcast`（ledger 1347，与 §6 一起报 Owner）
 
