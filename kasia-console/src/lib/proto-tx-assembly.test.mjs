@@ -1,4 +1,6 @@
-// proto-tx-assembly.test.mjs — Bettor 1425 复核清单向量①③④(账本1425续)。
+// proto-tx-assembly.test.mjs — Bettor 1425 复核清单向量①④(账本1425续)。原③(assertKttOutpointRecorded,
+// 守 bet_mint 步骤A铸出的独立stake筹码 outpoint 来源)已随 D-020(账本1446/1448)取消步骤A一起删除,
+// 见 kasia-console/src/lib/proto-tx-assembly.mjs 文件头注。
 // ①②④ 纯 JS/真 DB, 零链零 IPC。②(CovenantBinding 遗漏→mass >10x)是独立的真 kaspa-wasm 构造实验,
 // 见 docs/provenance/2026-09-15-j2-market-genesis-tx-assembly-vectors/vector2-covenant-binding-omission.mjs
 // (真链构造成本高、依赖 kaspa-wasm 全量, 不适合塞进这个跑得快的离线测试文件)。
@@ -16,9 +18,8 @@ if (!process.env._PROTO_TX_ASSEMBLY_TEST_BOOTSTRAPPED) {
   process.exit(r.status ?? 1);
 }
 
-const { sqlite } = await import('../db/client.js');
 const {
-  GENESIS_OUTPUT_SOMPI, CONTINUATION_OUTPUT_SOMPI, GLOBAL_ABS_FEE_CAP_SOMPI, assertFixedOutputValue, assertKttOutpointRecorded,
+  GENESIS_OUTPUT_SOMPI, CONTINUATION_OUTPUT_SOMPI, GLOBAL_ABS_FEE_CAP_SOMPI, assertFixedOutputValue,
   computeRequiredFeeSompiOrThrow, selectFeeUtxo, selectChangeShape, dynamicNetLossCeiling,
 } = await import('./proto-tx-assembly.mjs');
 
@@ -47,41 +48,6 @@ t('①-4 非 bigint 类型直接拒绝(防止 Number 精度静默出错)', () =>
   let threw = null;
   try { assertFixedOutputValue(20000000, GENESIS_OUTPUT_SOMPI, 'genesis'); } catch (e) { threw = e; }
   if (!threw || !/must be bigint/.test(threw.message)) throw new Error('非 bigint 应该被拒绝并明确报错');
-});
-
-// ============ 向量③ KTT 输入 outpoint 不在 proto_bets 记录里 ⇒ 拒绝 ============
-const now = new Date().toISOString();
-sqlite.prepare(`INSERT INTO proto_token_defs (id,name,ticker,created_at) VALUES (?,?,?,?)`).run('tok1', 'Test', 'TST', now);
-sqlite.prepare(`INSERT INTO proto_markets (id, token_def_id, question, deadline_ms, min_bet, seal_count, committee_pubkeys_json, committee_privkey_enc, rootclose_tmpl_hash, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
-  .run('mkt1', 'tok1', 'q?', 1700000000000, 100, 2, '[]', 'enc', 'aa'.repeat(32), now, now);
-sqlite.prepare(`INSERT INTO proto_bets (id, market_id, bettor_pk, side, stake, mint_txid, mint_vout, status, created_at) VALUES (?,?,?,?,?,?,?,?,?)`)
-  .run('bet1', 'mkt1', 'bb'.repeat(32), 0, 100, 'real'.repeat(16), 0, 'chip_minted_pending_stake', now);
-sqlite.prepare(`INSERT INTO proto_bets (id, market_id, bettor_pk, side, stake, status, created_at) VALUES (?,?,?,?,?,?,?)`)
-  .run('bet2_no_mint_yet', 'mkt1', 'bb'.repeat(32), 0, 100, 'pending', now);
-
-t('③-1 outpoint 与 proto_bets.mint_txid/mint_vout 完全一致 ⇒ 通过', () => {
-  const r = assertKttOutpointRecorded({ betId: 'bet1', txid: 'real'.repeat(16), vout: 0 });
-  if (r.txid !== 'real'.repeat(16) || r.vout !== 0) throw new Error('返回值不对');
-});
-t('③-2 outpoint 是"按 owner 扫链扫到的另一个 UTXO"(vout 不同) ⇒ 拒绝', () => {
-  let threw = null;
-  try { assertKttOutpointRecorded({ betId: 'bet1', txid: 'real'.repeat(16), vout: 1 }); } catch (e) { threw = e; }
-  if (!threw || !/不一致/.test(threw.message)) throw new Error('应该拒绝且报"不一致"');
-});
-t('③-3 outpoint 是完全不相干的另一笔 txid ⇒ 拒绝', () => {
-  let threw = null;
-  try { assertKttOutpointRecorded({ betId: 'bet1', txid: 'ff'.repeat(32), vout: 0 }); } catch (e) { threw = e; }
-  if (!threw) throw new Error('应该拒绝');
-});
-t('③-4 bet 存在但步骤 A 还没落地(mint_txid 为空) ⇒ 拒绝, 不是把 null 当"随便什么都行"', () => {
-  let threw = null;
-  try { assertKttOutpointRecorded({ betId: 'bet2_no_mint_yet', txid: 'aa'.repeat(32), vout: 0 }); } catch (e) { threw = e; }
-  if (!threw || !/尚未记录/.test(threw.message)) throw new Error('应该拒绝且报"尚未记录"');
-});
-t('③-5 bet_id 根本不存在 ⇒ 拒绝', () => {
-  let threw = null;
-  try { assertKttOutpointRecorded({ betId: 'no_such_bet', txid: 'aa'.repeat(32), vout: 0 }); } catch (e) { threw = e; }
-  if (!threw || !/找不到/.test(threw.message)) throw new Error('应该拒绝且报"找不到"');
 });
 
 // ============ 向量④ console 侧调用 calculateTransactionMass 不可用 ⇒ fail-loud ============

@@ -63,8 +63,10 @@ t('deriveLeafState-3: 3 注混合两边(30@0, 70@1, 20@0) ⇒ local_yes=50, loca
 });
 
 mkBet({ id: 'b5_pending', marketId: 'm_three', side: 0, stake: 999, status: 'pending' });
-mkBet({ id: 'b6_chip_only', marketId: 'm_three', side: 1, stake: 888, status: 'chip_minted_pending_stake' });
-t('deriveLeafState-4: prepared/未落链(pending, chip_minted_pending_stake)的下注不计入累加(只信已确认)', () => {
+// 🔴 D-020(账本1446/1448): 'chip_minted_pending_stake' 中间态随两步设计取消而删除(status CHECK
+// 只剩 pending/confirmed)——原本要证明的"未确认不计入"性质由 pending 这一个值单独覆盖, 不需要
+// 第二个未确认状态值来加强这条断言。
+t('deriveLeafState-4: 未落链(pending)的下注不计入累加(只信已确认)', () => {
   const s = deriveLeafState('m_three');
   if (s.local_yes !== 50 || s.local_no !== 70 || s.count !== 3 || s.pool_value !== 120) throw new Error(`未确认行不该被计入: ${JSON.stringify(s)}`);
 });
@@ -98,12 +100,8 @@ t('assertNoInFlightAppend-4: 已 landed 的 append intent 不算 in-flight ⇒ �
   assertNoInFlightAppend('m_serial_landed');
 });
 
-mkMarket('m_serial_mint_only');
-mkBet({ id: 'b_serial4', marketId: 'm_serial_mint_only', side: 0, stake: 10, status: 'confirmed' });
-mkIntent({ key: 'proto-bet:b_serial4:mint', betId: 'b_serial4', step: 'mint', status: 'prepared' });
-t('assertNoInFlightAppend-5: 只有 mint(步骤A) intent 在飞, 不算 append in-flight ⇒ 通过(两步互不阻塞)', () => {
-  assertNoInFlightAppend('m_serial_mint_only');
-});
+// 🔴 D-020(账本1446/1448): 原"只有 mint(步骤A) intent 在飞, 不算 append in-flight"向量随两步设计
+// 取消而删除——proto_bet_intents.step CHECK 现在只剩 'append' 一个值, 不存在 step='mint' 这种行了。
 
 // ============ encodeLeafStateBytes / computeExpectedLeafScriptPubKey / assertLeafStateMatchesChain ============
 t('encodeLeafStateBytes: 4 个 int 各自 [08]+8字节小端, 总长 36 字节', () => {
@@ -235,7 +233,7 @@ t('deriveLeafOutpoint-2笔landed: 取landed_at最新的那一条, 不是随便�
   if (o.txid !== 'a2'.repeat(32)) throw new Error(`应该是第2笔(a2...), 实际 ${o.txid.slice(0, 8)}`);
 });
 
-mkBet({ id: 'b_op1c', marketId: 'm_op1', side: 0, stake: 30, status: 'chip_minted_pending_stake' });
+mkBet({ id: 'b_op1c', marketId: 'm_op1', side: 0, stake: 30, status: 'pending' });
 mkIntentFull({ key: 'proto-bet:b_op1c:append', betId: 'b_op1c', step: 'append', status: 'submitted', submittedTxid: 'a3'.repeat(32), landedAt: null });
 t('deriveLeafOutpoint-submitted(未landed)的append不计入, 仍取上一笔已landed的', () => {
   const o = deriveLeafOutpoint('m_op1');

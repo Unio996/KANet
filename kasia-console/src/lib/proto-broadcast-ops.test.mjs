@@ -1,6 +1,8 @@
-// proto-broadcast-ops.test.mjs — buildMarketGenesisAndBroadcast 真实构造 + driveMarketGenesis 端到端
-// (账本1425/1438, Stage 1)。真 kaspa-wasm + 真编译, sendCmd 用脚本化假 relay(get_address_utxos/
-// covenant_broadcast 两种命令), 零真链零真 IPC。
+// proto-broadcast-ops.test.mjs — buildMarketGenesisAndBroadcast(market_genesis)+
+// buildRegisterAppendAndBroadcast(bet_mint, D-020单笔交易, 账本1425/1429/1436/1439/1446/1448)
+// 真实构造端到端。真 kaspa-wasm + 真编译, sendCmd 用脚本化假 relay(get_address_utxos/
+// covenant_broadcast 两种命令), 零真链零真 IPC。原 Stage 2(独立铸stake筹码步骤A)的测试段已随
+// D-020取消步骤A一起删除。
 // Run: cd kasia-console && node src/lib/proto-broadcast-ops.test.mjs
 
 import { execSync, spawnSync } from 'node:child_process';
@@ -21,7 +23,6 @@ if (!process.env.CONSOLE_ENCRYPTION_KEY) process.env.CONSOLE_ENCRYPTION_KEY = '1
 const kaspa = await import('kaspa-wasm');
 const {
   buildMarketGenesisAndBroadcast, shardLeafTargetAddress,
-  buildBetMintStepAAndBroadcast, betMintStepATargetAddress, markBetMintStepALanded,
 } = await import('./proto-broadcast-ops.mjs');
 const { computeMarketGenesisArtifacts } = await import('./proto-covenant-builder.mjs');
 const { ensureMarketPending, getMarketRow, marketIntentKeyFor } = await import('./proto-market-intent.mjs');
@@ -117,57 +118,7 @@ await t('⑥covenant_broadcast 命令本身失败(relay 拒绝) ⇒ 返回 {erro
   if (!res.error || !/too expensive/.test(res.error)) throw new Error(`应该透传 relay 的拒绝原因, 实际 ${JSON.stringify(res)}`);
 });
 
-// ══════════════ bet_mint 步骤A(Stage 2, 铸stake筹码, 账本1425/1436) ══════════════
-{
-  const { sqlite } = await import('../db/client.js');
-  const BET_ID = 'bet-stage2-001';
-  const now = new Date().toISOString();
-  sqlite.prepare(`
-    INSERT OR IGNORE INTO proto_bets (id, market_id, bettor_pk, side, stake, status, created_at)
-    VALUES (?, ?, ?, 0, 20, 'pending', ?)
-  `).run(BET_ID, MARKET_ID, 'bb'.repeat(32), now);
-  const bet = sqlite.prepare('SELECT * FROM proto_bets WHERE id = ?').get(BET_ID);
-
-  await t('⑦buildBetMintStepAAndBroadcast 真实构造成功(get_address_utxos→真kaspa-wasm KTT genesis构造→covenant_broadcast)', async () => {
-    const { sendCmd, calls } = makeSendCmd();
-    const res = await buildBetMintStepAAndBroadcast({ kaspa, network: 'mainnet', bet, sendCmd, relayId: 'relay-A', relayAddress: relayAddr });
-    if (!res.txId) throw new Error(`未拿到 txId: ${JSON.stringify(res)}`);
-    const bcCall = calls.find((c) => c.type === 'covenant_broadcast');
-    if (!bcCall || bcCall.intent_key !== betIntentKeyFor(BET_ID, 'mint')) throw new Error(`intent_key 不对: ${bcCall && bcCall.intent_key}`);
-    if (JSON.stringify(bcCall.genesis_output_indices) !== '[0]') throw new Error(`genesis_output_indices 应该是[0], 实际 ${JSON.stringify(bcCall.genesis_output_indices)}`);
-  });
-
-  await t('⑧betMintStepATargetAddress 确定性重算(owner恒为STAKE_CHIP_OWNER_UNBOUND, 不依赖任何随机值), 两次调用结果逐字节一致', () => {
-    const addr1 = betMintStepATargetAddress({ kaspa, network: 'mainnet', bet });
-    const addr2 = betMintStepATargetAddress({ kaspa, network: 'mainnet', bet });
-    if (!addr1.startsWith('kaspa:')) throw new Error(`地址形状不对: ${addr1}`);
-    if (addr1 !== addr2) throw new Error(`两次确定性重算结果不一致: ${addr1} != ${addr2}`);
-  });
-
-  await t('⑨markBetMintStepALanded 把结果写回proto_bets(mint_txid/mint_vout=0/status推进), 幂等(WHERE status=pending)', () => {
-    const txid = 'fe'.repeat(32);
-    markBetMintStepALanded({ betId: BET_ID, txid });
-    const after = sqlite.prepare('SELECT * FROM proto_bets WHERE id = ?').get(BET_ID);
-    if (after.mint_txid !== txid) throw new Error(`mint_txid 未写入: ${after.mint_txid}`);
-    if (after.mint_vout !== 0) throw new Error(`mint_vout 应该是0: ${after.mint_vout}`);
-    if (after.status !== 'chip_minted_pending_stake') throw new Error(`status 应该推进, 实际 ${after.status}`);
-    // 幂等: 再调一次(不同txid), 因为 status 已经不是 pending, WHERE 条件不命中, 不应该被覆盖。
-    markBetMintStepALanded({ betId: BET_ID, txid: 'ff'.repeat(32) });
-    const after2 = sqlite.prepare('SELECT * FROM proto_bets WHERE id = ?').get(BET_ID);
-    if (after2.mint_txid !== txid) throw new Error(`幂等失败: mint_txid 被第二次调用覆盖成 ${after2.mint_txid}`);
-  });
-
-  await t('⑩buildBetMintStepAAndBroadcast 的 fee UTXO 不足时返回{error}, 不 throw', async () => {
-    const sendCmd = async (relayId, cmd) => {
-      if (cmd.type === 'get_address_utxos') return { ok: true, utxos: [{ outpoint: { transactionId: FEE_UTXO_TXID, index: 0 }, amount: '1000' }] };
-      throw new Error(`不该走到这里: ${cmd.type}`);
-    };
-    const res = await buildBetMintStepAAndBroadcast({ kaspa, network: 'mainnet', bet, sendCmd, relayId: 'relay-A', relayAddress: relayAddr });
-    if (!res.error || !/no_suitable_fee_utxo/.test(res.error)) throw new Error(`应该报 no_suitable_fee_utxo, 实际 ${JSON.stringify(res)}`);
-  });
-}
-
-// ══════════════ bet_mint 步骤B(Stage 3, register_append, 账本1425/1429/1436/1439) ══════════════
+// ══════════════ bet_mint(register_append 单笔交易, D-020账本1446/1448) ══════════════
 {
   const { computeShardLeafRedeemScript, computeKttGenesisArtifact } = await import('./proto-covenant-builder.mjs');
   const { deriveLeafState } = await import('./proto-leaf-state.mjs');
@@ -180,7 +131,11 @@ await t('⑥covenant_broadcast 命令本身失败(relay 拒绝) ⇒ 返回 {erro
   const GENESIS_TXID = 'ae'.repeat(32); // 有效hex(之前误用'ge'.repeat(32), 'g'不是合法hex字符, 撞出"Invalid character")
   sqlite.prepare(`UPDATE proto_markets SET shardleaf_txid = ?, shardleaf_vout = 0 WHERE id = ?`).run(GENESIS_TXID, MARKET_ID);
   const marketRow = getMarketRow(MARKET_ID);
-  const bet = sqlite.prepare('SELECT * FROM proto_bets WHERE id = ?').get('bet-stage2-001'); // 已chip_minted_pending_stake(测试⑨), mint_txid/vout已设
+  // D-020: 下注直接从 pending 开始, 没有铸筹码中间态——不再需要 mint_txid/mint_vout。
+  const BET_ID = 'bet-stage3-001';
+  sqlite.prepare(`INSERT INTO proto_bets (id, market_id, bettor_pk, side, stake, status, created_at) VALUES (?, ?, ?, 0, 20, 'pending', datetime('now'))`)
+    .run(BET_ID, MARKET_ID, 'bb'.repeat(32));
+  const bet = sqlite.prepare('SELECT * FROM proto_bets WHERE id = ?').get(BET_ID);
 
   function leafAddressFor(state) {
     const leafRedeem = computeShardLeafRedeemScript({ marketId: MARKET_ID, minBet: marketRow.min_bet, sealCount: marketRow.seal_count, rootcloseTmplHash: marketRow.rootclose_tmpl_hash, state });
@@ -218,7 +173,7 @@ await t('⑥covenant_broadcast 命令本身失败(relay 拒绝) ⇒ 返回 {erro
   }
 
   let firstBetTxid;
-  await t('⑪(Stage 3, 第一笔下注/无held) buildRegisterAppendAndBroadcast 真实构造成功(三项fail-closed核对全过)', async () => {
+  await t('⑦(第一笔下注/无held) buildRegisterAppendAndBroadcast 真实构造成功(三项fail-closed核对全过)', async () => {
     const { sendCmd, calls } = makeStage3SendCmd();
     const res = await buildRegisterAppendAndBroadcast({ kaspa, network: 'mainnet', market: marketRow, bet, sendCmd, relayId: 'relay-A', relayAddress: relayAddr });
     if (!res.txId) throw new Error(`未拿到txId: ${JSON.stringify(res)}`);
@@ -230,14 +185,14 @@ await t('⑥covenant_broadcast 命令本身失败(relay 拒绝) ⇒ 返回 {erro
     }
   });
 
-  await t('⑫registerAppendTargetAddress 确定性重算(下注后的新state), 两次调用结果逐字节一致', () => {
+  await t('⑧registerAppendTargetAddress 确定性重算(下注后的新state), 两次调用结果逐字节一致', () => {
     const a1 = registerAppendTargetAddress({ kaspa, network: 'mainnet', market: marketRow, bet });
     const a2 = registerAppendTargetAddress({ kaspa, network: 'mainnet', market: marketRow, bet });
     if (!a1.startsWith('kaspa:')) throw new Error(`地址形状不对: ${a1}`);
     if (a1 !== a2) throw new Error('两次确定性重算结果不一致');
   });
 
-  await t('⑬markBetAppendLanded 把proto_bets推进到confirmed(stake_tx_id/ticket_txid写入), 幂等(WHERE status=chip_minted_pending_stake)', () => {
+  await t('⑨markBetAppendLanded 把proto_bets推进到confirmed(stake_tx_id/ticket_txid写入), 幂等(WHERE status=pending, D-020: 无中间态)', () => {
     markBetAppendLanded({ betId: bet.id, txid: firstBetTxid });
     const after = sqlite.prepare('SELECT * FROM proto_bets WHERE id = ?').get(bet.id);
     if (after.status !== 'confirmed') throw new Error(`应该是confirmed, 实际 ${after.status}`);
@@ -250,13 +205,13 @@ await t('⑥covenant_broadcast 命令本身失败(relay 拒绝) ⇒ 返回 {erro
 
   // ── 第二笔下注(有held): 手动补一条landed的append intent, 模拟"第一笔已经真的landed" ──
   const BET_ID2 = 'bet-stage3-002';
-  sqlite.prepare(`INSERT INTO proto_bets (id, market_id, bettor_pk, side, stake, status, mint_txid, mint_vout, created_at) VALUES (?, ?, ?, 1, 30, 'chip_minted_pending_stake', ?, 0, datetime('now'))`)
-    .run(BET_ID2, MARKET_ID, 'cc'.repeat(32), 'aa'.repeat(32));
+  sqlite.prepare(`INSERT INTO proto_bets (id, market_id, bettor_pk, side, stake, status, created_at) VALUES (?, ?, ?, 1, 30, 'pending', datetime('now'))`)
+    .run(BET_ID2, MARKET_ID, 'cc'.repeat(32));
   sqlite.prepare(`INSERT INTO proto_bet_intents (intent_key, bet_id, step, status, submitted_txid, landed_at, created_at, updated_at) VALUES (?, ?, 'append', 'landed', ?, datetime('now'), datetime('now'), datetime('now'))`)
     .run(betIntentKeyFor(bet.id, 'append'), bet.id, firstBetTxid);
   const bet2 = sqlite.prepare('SELECT * FROM proto_bets WHERE id = ?').get(BET_ID2);
 
-  await t('⑭(Stage 3, 第二笔下注/有held) buildRegisterAppendAndBroadcast 真实构造成功(held outpoint推算+链上核对全过)', async () => {
+  await t('⑩(第二笔下注/有held) buildRegisterAppendAndBroadcast 真实构造成功(held outpoint推算+链上核对全过)', async () => {
     const { sendCmd, calls } = makeStage3SendCmd({ heldOutpoint: { txid: firstBetTxid, leafTxid: firstBetTxid } });
     const res = await buildRegisterAppendAndBroadcast({ kaspa, network: 'mainnet', market: marketRow, bet: bet2, sendCmd, relayId: 'relay-A', relayAddress: relayAddr });
     if (!res.txId) throw new Error(`未拿到txId: ${JSON.stringify(res)}`);
@@ -264,10 +219,10 @@ await t('⑥covenant_broadcast 命令本身失败(relay 拒绝) ⇒ 返回 {erro
     if (!bcCall) throw new Error('没有真的发出covenant_broadcast');
   });
 
-  await t('⑮(账本1429) 同一市场存在in-flight append intent时, 新的append被assertNoInFlightAppend拒绝', async () => {
+  await t('⑪(账本1429) 同一市场存在in-flight append intent时, 新的append被assertNoInFlightAppend拒绝', async () => {
     const BET_ID3 = 'bet-stage3-003';
-    sqlite.prepare(`INSERT INTO proto_bets (id, market_id, bettor_pk, side, stake, status, mint_txid, mint_vout, created_at) VALUES (?, ?, ?, 0, 5, 'chip_minted_pending_stake', ?, 0, datetime('now'))`)
-      .run(BET_ID3, MARKET_ID, 'dd'.repeat(32), 'bb'.repeat(32));
+    sqlite.prepare(`INSERT INTO proto_bets (id, market_id, bettor_pk, side, stake, status, created_at) VALUES (?, ?, ?, 0, 5, 'pending', datetime('now'))`)
+      .run(BET_ID3, MARKET_ID, 'dd'.repeat(32));
     sqlite.prepare(`INSERT INTO proto_bet_intents (intent_key, bet_id, step, status, created_at, updated_at) VALUES (?, ?, 'append', 'prepared', datetime('now'), datetime('now'))`)
       .run(betIntentKeyFor(bet2.id, 'append'), bet2.id); // bet2的append还在飞(prepared, 模拟还没landed)
     const bet3 = sqlite.prepare('SELECT * FROM proto_bets WHERE id = ?').get(BET_ID3);

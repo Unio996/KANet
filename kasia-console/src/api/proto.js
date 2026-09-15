@@ -45,10 +45,13 @@ async function buildAndBroadcast(kind, _params) {
 // 模式问题, 不是这一处的孤立小事。所有 proto 读端点一律改显式列清单, 永不 SELECT *。
 // PUBLIC_MARKET_COLS 是单一来源(两处 GET 共用, 避免各写一份将来漏改一处)——明确不含任何 *_enc /
 // *privkey* / *mnemonic* 列; committee_pubkeys_json 是公开信息, 保留。
+// 🔴 shardleaf_cov_id(账本1429/1431, D-020 bet 端点直接需要——buildRegisterAppendAndBroadcast 的
+// 前置 fail-closed 核对靠它): 公开可推算值(genesis 交易 input[0] outpoint 决定的 covenant_id), 不是
+// *_enc/*privkey*/*mnemonic* 类敏感列, 放进公开列清单不违反上面的 MUST。
 const PUBLIC_MARKET_COLS = `
   m.id, m.token_def_id, m.question, m.deadline_ms, m.min_bet, m.seal_count,
   m.committee_pubkeys_json, m.rootclose_tmpl_hash,
-  m.shardleaf_txid, m.shardleaf_vout, m.rootclose_txid, m.rootclose_vout,
+  m.shardleaf_txid, m.shardleaf_vout, m.rootclose_txid, m.rootclose_vout, m.shardleaf_cov_id,
   m.status, m.winning_side, m.payout_root, m.created_at, m.updated_at
 `;
 // proto_token_defs 当前没有任何 *_enc/*privkey*/*mnemonic* 列, 但同一条 MUST 的字面要求是"所有 proto
@@ -57,7 +60,7 @@ const PUBLIC_MARKET_COLS = `
 const PUBLIC_TOKEN_DEF_COLS = 'id, name, ticker, description, default_denomination, created_at';
 // proto_bets/proto_claims 目前的全部列本身就都不敏感(bettor_pk 是公钥不是私钥；没有任何 *_enc 列)，
 // 但同样按above的"永不 SELECT *"要求显式列出，不依赖"当前没有敏感列"这个会随 schema 演进而失效的前提。
-const PUBLIC_BET_COLS = 'id, market_id, bettor_pk, side, stake, mint_txid, mint_vout, ticket_txid, ticket_vout, stake_tx_id, status, created_at, confirmed_at';
+const PUBLIC_BET_COLS = 'id, market_id, bettor_pk, side, stake, ticket_txid, ticket_vout, stake_tx_id, status, created_at, confirmed_at';
 const PUBLIC_CLAIM_COLS = 'id, market_id, bettor_pk, side, amount, claim_txid, claim_vout, claimed_at, withdraw_txid, withdrawn_at, created_at';
 
 function notImplemented(reply, kind, err) {
@@ -185,9 +188,8 @@ export async function registerProtoRoutes(fastify) {
   });
 
   // ══════════════════════════════════════════════════════════════════════
-  // 下注 —— 复合动作(铸筹码 genesis + register_append spend, 两步各自 proto_bet_intents 状态机)。
-  // 响应形状 {ok, steps:[{step,ok,txId,error}]}(前端已按这个形状写好渲染逻辑, 见 proto-market-detail.eta)——
-  // 未落地阶段直接走 501(无 steps 字段), 前端"没有 steps 数组"分支会显示通用错误, 已兼容。
+  // 下注 —— register_append 单笔交易(D-020, 账本1446/1448, 取消原两步设计里独立铸stake筹码的步骤A)。
+  // proto_bet_intents 只有一个 step='append'。
   // ══════════════════════════════════════════════════════════════════════
   fastify.post('/api/proto-markets/:id/bet', async (request, reply) => {
     const relayIdRejection = rejectRelayIdInBody(request.body);
@@ -203,11 +205,10 @@ export async function registerProtoRoutes(fastify) {
     if (!Number.isFinite(stakeAmount) || stakeAmount < market.min_bet) {
       return reply.code(400).send({ ok: false, error: `amount must be a number >= min_bet(${market.min_bet})` });
     }
-    // §6/§9 已定案, 真实实现 Stage 2(账本1425/1438/1442, 步骤A铸筹码): pending 行必须先于任何 IPC
-    // 存在(同 market_genesis 硬条件①, ensureBetIntent 自己的文档要求)——proto_bets(status='pending')
-    // + proto_bet_intents(step='mint', status='pending') 两张表都在发命令之前落表。bettor_pk 不从
-    // 请求体读——复用本市场委员会 pubkey 兼任(文件头注, Bettor 1354 裁定), 不为每笔下注新造。步骤B
-    // (register_append)留 Stage 3, 本端点目前只推进到"铸好stake筹码"这一步。
+    // §6/§9 已定案, 真实实现(账本1425/1438/1442/1446/1448 D-020): pending 行必须先于任何 IPC 存在
+    // (同 market_genesis 硬条件①, ensureBetIntent 自己的文档要求)——proto_bets(status='pending')
+    // + proto_bet_intents(step='append', status='pending') 两张表都在发命令之前落表。bettor_pk 不从
+    // 请求体读——复用本市场委员会 pubkey 兼任(文件头注, Bettor 1354 裁定), 不为每笔下注新造。
     let committeePubkeys;
     try { committeePubkeys = JSON.parse(market.committee_pubkeys_json); } catch { committeePubkeys = []; }
     const bettorPk = committeePubkeys[0];
@@ -220,14 +221,14 @@ export async function registerProtoRoutes(fastify) {
     `).run(betId, market.id, bettorPk, direction, stakeAmount, nowIso());
 
     const { ensureBetIntent, driveBetIntent } = await import('../lib/proto-bet-intent.mjs');
-    ensureBetIntent({ betId, step: 'mint' });
+    ensureBetIntent({ betId, step: 'append' });
 
     const { isProtoDriverEnabled } = await import('../services/proto-driver.mjs');
     if (!isProtoDriverEnabled()) {
       return reply.code(409).send({ ok: false, error: 'proto_driver_disabled', id: betId, status: 'pending' });
     }
 
-    const { buildBetMintStepAAndBroadcast, betMintStepATargetAddress } = await import('../lib/proto-broadcast-ops.mjs');
+    const { buildRegisterAppendAndBroadcast, registerAppendTargetAddress } = await import('../lib/proto-broadcast-ops.mjs');
     const { PROTO_RELAY_ID, assertProtoRelayHealthy } = await import('../lib/proto-relay-guard.mjs');
     const { protoSendCmd } = await import('../lib/proto-relay-ipc.mjs');
     const kaspa = await import('kaspa-wasm');
@@ -235,10 +236,10 @@ export async function registerProtoRoutes(fastify) {
     const bet = sqlite.prepare(`SELECT ${PUBLIC_BET_COLS} FROM proto_bets WHERE id = ?`).get(betId);
     try {
       const health = await assertProtoRelayHealthy();
-      const targetAddress = betMintStepATargetAddress({ kaspa, network, bet });
+      const targetAddress = registerAppendTargetAddress({ kaspa, network, market, bet });
       await driveBetIntent({
-        sendCmd: protoSendCmd, relayId: PROTO_RELAY_ID, betId, step: 'mint', targetAddress, maxAttempts: 1, origin: 'http',
-        buildAndBroadcast: () => buildBetMintStepAAndBroadcast({ kaspa, network, bet, sendCmd: protoSendCmd, relayId: PROTO_RELAY_ID, relayAddress: health.address }),
+        sendCmd: protoSendCmd, relayId: PROTO_RELAY_ID, betId, step: 'append', targetAddress, maxAttempts: 1, origin: 'http',
+        buildAndBroadcast: () => buildRegisterAppendAndBroadcast({ kaspa, network, market, bet, sendCmd: protoSendCmd, relayId: PROTO_RELAY_ID, relayAddress: health.address }),
       });
     } catch (e) {
       // 立即尝试失败/HOLD 都不阻塞响应——这只是"最好情况下立即有进展"的优化, 后台驱动会继续重试/恢复。

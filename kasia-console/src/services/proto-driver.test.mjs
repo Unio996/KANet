@@ -1,4 +1,6 @@
-// proto-driver.test.mjs — 后台驱动 Stage 1(只覆盖 market_genesis)离线向量(账本1438③)。
+// proto-driver.test.mjs — 后台驱动 market_genesis + bet_mint(register_append, D-020单笔交易,
+// 账本1446/1448)离线向量(账本1438③)。原 Stage 2(独立铸stake筹码步骤A)的推进/落地测试段已随
+// D-020取消步骤A一起删除。
 // 真 migration 临时库(DB_PATH) + 假 sendCmd + 真 kaspa-wasm 构造(通过 runProtoDriverTick→
 // buildMarketGenesisAndBroadcast 这条真实链路), 不起真 setInterval(测 driveOnce/runProtoDriverTick
 // 这两个可注入的纯函数, isProtoDriverEnabled()/startProtoDriver() 的环境变量分支单独测)。
@@ -137,41 +139,52 @@ await t('⑤重叠 tick 被跳过: 第一次 driveOnce 还在跑(慢 sendCmd 卡
   await p1; // 收尾, 避免未处理 promise 泄漏到下一个测试
 });
 
-// ══════════════ ⑥bet_mint步骤A(Stage 2): pending intent 被驱动推进 ══════════════
+// ══════════════ ⑥bet_mint(register_append单笔交易, D-020账本1446/1448): pending intent 被驱动推进 ══════════════
 const { ensureBetIntent, getBetIntent } = await import('../lib/proto-bet-intent.mjs');
 let betId1;
 // 🔴 共享 DB 里此时可能还留着前面测试(④/⑤)没推完的市场行(genesis_pending/genesis_submitted)——
 // cap 必须给够余量, sendCmd 必须能通用处理全部类型(不能像前几个测试那样窄范围throw), 否则会被
 // leftover 市场行的推进/落地检查抢走 cap 或撞上"不该走到这里"的窄范围假设。
-await t('⑥bet_mint 步骤A pending intent 经 runProtoDriverTick 真实推进到 submitted(真kaspa-wasm KTT genesis构造)', async () => {
+// market1 的 genesis 从没真的走到 check_utxo_landed=true 这一步(③故意测的是"未落地"分支)——
+// buildRegisterAppendAndBroadcast 的 deriveLeafOutpoint 在没有任何 landed append 时会回退到
+// proto_markets.shardleaf_txid/vout(genesis 的落链 outpoint), 手动补上模拟"genesis 已落链"。
+sqlite.prepare(`UPDATE proto_markets SET shardleaf_txid = ?, shardleaf_vout = 0 WHERE id = ?`).run(market1.genesis_prepared_txid || 'ac'.repeat(32), market1.id);
+const market1Row = getMarketRow(market1.id);
+await t('⑥bet_mint(register_append) pending intent 经 runProtoDriverTick 真实推进到 submitted(真kaspa-wasm构造, 三项fail-closed核对全过)', async () => {
   const { runProtoDriverTick } = await import('./proto-driver.mjs');
   betId1 = 'bet-driver-001';
-  sqlite.prepare(`INSERT INTO proto_bets (id, market_id, bettor_pk, side, stake, status, created_at) VALUES (?, ?, ?, 0, 20, 'pending', datetime('now'))`).run(betId1, market1.id, 'cc'.repeat(32));
-  ensureBetIntent({ betId: betId1, step: 'mint' });
-  const { sendCmd, calls } = makeSendCmd();
+  sqlite.prepare(`INSERT INTO proto_bets (id, market_id, bettor_pk, side, stake, status, created_at) VALUES (?, ?, ?, 0, 20, 'pending', datetime('now'))`).run(betId1, market1Row.id, 'cc'.repeat(32));
+  ensureBetIntent({ betId: betId1, step: 'append' });
+  const sendCmd = async (relayId, cmd) => {
+    if (cmd.type === 'get_address_utxos') {
+      return { ok: true, utxos: [{ outpoint: { transactionId: market1Row.shardleaf_txid, index: 0 }, amount: '10000000000' }] };
+    }
+    if (cmd.type === 'covenant_broadcast') return { ok: true, txId: cmd.expected_txid, intent_key: cmd.intent_key };
+    if (cmd.type === 'check_utxo_landed') return { ok: true, landed: false, depth: null };
+    throw new Error(`unexpected cmd ${cmd.type}`);
+  };
   const out = await runProtoDriverTick({ sendCmd, relayId: RELAY_ID, kaspa, network: 'mainnet', relayAddress: relayAddr, log: quiet, cap: 20 });
-  if (out.betMintAdvanced !== 1) throw new Error(`期望推进1条bet_mint, 实际 ${JSON.stringify(out)}`);
-  const intent = getBetIntent(`proto-bet:${betId1}:mint`);
+  if (out.betAppendAdvanced !== 1) throw new Error(`期望推进1条bet_mint, 实际 ${JSON.stringify(out)}`);
+  const intent = getBetIntent(`proto-bet:${betId1}:append`);
   if (intent.status !== 'submitted') throw new Error(`期望 submitted, 实际 ${intent.status}`);
-  if (!calls.some((c) => c.type === 'covenant_broadcast' && c.intent_key === `proto-bet:${betId1}:mint`)) throw new Error('没有真的为这个bet发出 covenant_broadcast');
 });
 
-// ══════════════ ⑦bet_mint步骤A landed后proto_bets记账 ══════════════
-await t('⑦bet_mint 步骤A submitted intent landed 后, proto_bets.mint_txid/status 被真实写回(两张表之间的桥)', async () => {
+// ══════════════ ⑦bet_mint(register_append) landed后proto_bets记账 ══════════════
+await t('⑦bet_mint(register_append) submitted intent landed 后, proto_bets.status 直接 pending→confirmed 被真实写回(两张表之间的桥, D-020: 无中间态)', async () => {
   const { runProtoDriverTick } = await import('./proto-driver.mjs');
-  const intentBefore = getBetIntent(`proto-bet:${betId1}:mint`);
+  const intentBefore = getBetIntent(`proto-bet:${betId1}:append`);
   const sendCmd = async (relayId, cmd) => {
-    if (cmd.type === 'get_address_utxos') return { ok: true, utxos: [{ outpoint: { transactionId: 'ab'.repeat(32), index: 0 }, amount: '10000000000' }] };
+    if (cmd.type === 'get_address_utxos') return { ok: true, utxos: [{ outpoint: { transactionId: market1Row.shardleaf_txid, index: 0 }, amount: '10000000000' }] };
     if (cmd.type === 'covenant_broadcast') return { ok: true, txId: cmd.expected_txid, intent_key: cmd.intent_key };
     if (cmd.type === 'check_utxo_landed') return { ok: true, landed: true, depth: 25 };
     throw new Error(`unexpected cmd ${cmd.type}`);
   };
   const out = await runProtoDriverTick({ sendCmd, relayId: RELAY_ID, kaspa, network: 'mainnet', relayAddress: relayAddr, log: quiet, cap: 20 });
-  if (out.betMintLanded !== 1) throw new Error(`期望判定1条landed, 实际 ${JSON.stringify(out)}`);
+  if (out.betAppendLanded !== 1) throw new Error(`期望判定1条landed, 实际 ${JSON.stringify(out)}`);
   const bet = sqlite.prepare('SELECT * FROM proto_bets WHERE id = ?').get(betId1);
-  if (bet.mint_txid !== intentBefore.submitted_txid) throw new Error(`proto_bets.mint_txid 应该等于 intent.submitted_txid(实际 ${bet.mint_txid} vs ${intentBefore.submitted_txid})`);
-  if (bet.status !== 'chip_minted_pending_stake') throw new Error(`proto_bets.status 应该推进, 实际 ${bet.status}`);
-  const intentAfter = getBetIntent(`proto-bet:${betId1}:mint`);
+  if (bet.status !== 'confirmed') throw new Error(`proto_bets.status 应该直接推进到 confirmed(D-020无中间态), 实际 ${bet.status}`);
+  if (bet.stake_tx_id !== intentBefore.submitted_txid) throw new Error(`proto_bets.stake_tx_id 应该等于 intent.submitted_txid(实际 ${bet.stake_tx_id} vs ${intentBefore.submitted_txid})`);
+  const intentAfter = getBetIntent(`proto-bet:${betId1}:append`);
   if (intentAfter.status !== 'landed') throw new Error(`intent 行也应该推进到 landed, 实际 ${intentAfter.status}`);
 });
 

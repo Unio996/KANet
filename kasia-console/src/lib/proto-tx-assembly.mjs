@@ -1,16 +1,18 @@
 // proto-tx-assembly.mjs — market_genesis/bet_mint tx 组装的构造层守卫(J2, 账本1425续, Bettor向量①③④)。
 //
-// 三条各自独立的构造层守卫, 都不是 relay 侧检查的"影子"(relay 拦的是签名前那一层, 这里拦的是"构造出
+// 两条各自独立的构造层守卫, 都不是 relay 侧检查的"影子"(relay 拦的是签名前那一层, 这里拦的是"构造出
 // 来的值/输入/费用本身对不对", 两者必须都存在——一条被绕过, 另一条仍能拦):
 //   ① assertFixedOutputValue: genesis/续约输出值必须是协议常量, 不允许算出来的近似值糊弄过去。
-//   ③ assertKttOutpointRecorded: KTT 输入 outpoint 必须来自 proto_bets 记录, 不许链上扫描后自由选。
 //   ④ computeRequiredFeeSompiOrThrow: mass 算不出来就是硬失败, 不许退化成估算值。
+// 🔴 D-020(账本1446/1448, a4878d7d): 原③ assertKttOutpointRecorded(守 bet_mint 步骤A铸出的独立
+// stake筹码输入)已随步骤A一起删除——register_append 改单笔交易, 不再有独立 stake 筹码输入需要校验
+// outpoint 来源。held 输入的 outpoint 来源仍由 proto-leaf-state.mjs 的 deriveHeldKttOutpoint/
+// assertHeldKttOutpointMatchesChain 守, 不受影响。
 //
 // 常量与 kasia-relay/src/lib/covenant-broadcast.mjs 的 GENESIS_OUTPUT_SOMPI/CONTINUATION_OUTPUT_SOMPI
 // 数值必须保持一致(KIP-9 storage mass U 形曲线全局最优点, 20,000,000 sompi)——console 侧独立持有一份
 // 而不是跨包 import relay 代码("Console 传导不碰链"角色分工铁律), 改动任一侧必须同步改另一侧。
 
-import { sqlite } from '../db/client.js';
 import { encodeRegisterAppendAction, combineActionAndRedeem as combineRegisterAppendActionAndRedeem } from './proto-register-append-witness.mjs';
 import { encodeKttTransferZeroOutAction, combineKttActionAndRedeem } from './proto-ktt-transfer-witness.mjs';
 import { encodeLeafStateBytes } from './proto-leaf-state.mjs';
@@ -35,24 +37,6 @@ export function assertFixedOutputValue(valueSompi, expectedSompi, label) {
   if (valueSompi !== expectedSompi) {
     throw new Error(`assertFixedOutputValue(${label}): 输出值 ${valueSompi} != 协议常量 ${expectedSompi}(v0 只允许固定值, 不接受算出来的近似值)`);
   }
-}
-
-/**
- * ③ 构造层守卫: bet_mint 步骤 B(register_append)要花的 KTT 输入 outpoint, 必须逐字段等于该 bet 在
- * proto_bets 表里记录的 mint_txid/mint_vout(= 步骤 A 铸筹码的产出)——绝不允许"按 owner 扫链找一个
- * 看起来对的 UTXO"式的自由选择(那样会选到别的市场/别的 bet 的筹码, 或者一个已经被花过的旧筹码)。
- */
-export function assertKttOutpointRecorded({ betId, txid, vout }) {
-  if (!betId) throw new Error('assertKttOutpointRecorded: betId required');
-  const row = sqlite.prepare('SELECT mint_txid, mint_vout FROM proto_bets WHERE id = ?').get(betId);
-  if (!row) throw new Error(`assertKttOutpointRecorded: proto_bets 找不到 bet_id=${betId}`);
-  if (!row.mint_txid || row.mint_vout === null || row.mint_vout === undefined) {
-    throw new Error(`assertKttOutpointRecorded: bet_id=${betId} 的铸筹码步骤(A)尚未记录 outpoint(mint_txid/mint_vout 为空)——不能在 A 落地前花它`);
-  }
-  if (row.mint_txid !== txid || row.mint_vout !== vout) {
-    throw new Error(`assertKttOutpointRecorded: 给定 outpoint ${txid}:${vout} 与 proto_bets 记录的 ${row.mint_txid}:${row.mint_vout} 不一致——拒绝使用未记录的 KTT 输入(反例: 按 owner 扫链选到的 UTXO)`);
-  }
-  return { txid: row.mint_txid, vout: row.mint_vout };
 }
 
 /**
@@ -237,86 +221,18 @@ export function buildMarketGenesisTxJson({ kaspa, network, feeUtxo, relayChangeS
 
   // shardLeafCovId: consensus 的 covenant_id(funding.outpoint, [outputIndices]) 是纯函数, 不需要上链
   // 确认——本地就能算出、且不受后续找零值影响(与哪个形状/找零值无关, 同一 outpoint+outIdx 恒定)。
-  // 🔴 订正(账本1435→1436, 撤销早前错误说法): 这个值只用于 register_append 的"合并奖池代币"
-  // (held/新genesis)的 owner 字段, 绝不能也用作 bet_mint 步骤A(每注新铸 stake 筹码)的 ownerCovIdHex——
-  // covenant_id(outpoint,[index,output]) 的真实公式吃的是输出的完整脚本字节(含 State), "某代币的
-  // owner=它自己的covenant_id"是自指不动点方程, 无解(rusty-kaspa consensus/core/src/hashing/
-  // covenant_id.rs:13-14 doc 原话+真实kaspa-wasm实测确认)。stake 筹码的 ownerCovIdHex 用
-  // STAKE_CHIP_OWNER_UNBOUND(见 proto-covenant-builder.mjs), 不是这个值。
+  // 🔴 订正(账本1435→1436, 撤销早前错误说法): covenant_id(outpoint,[index,output]) 的真实公式吃的
+  // 是输出的完整脚本字节(含 State), "某代币的 owner=它自己的covenant_id"是自指不动点方程, 无解
+  // (rusty-kaspa consensus/core/src/hashing/covenant_id.rs:13-14 doc 原话+真实kaspa-wasm实测确认)。
+  // 🔴 D-020(账本1446/1448): 原来这条注释还提到"这个值不能用作 bet_mint 步骤A stake 筹码的
+  // ownerCovIdHex, 那个用 STAKE_CHIP_OWNER_UNBOUND"——步骤A(独立 stake 筹码)已随 D-020 取消,
+  // STAKE_CHIP_OWNER_UNBOUND 连同该问题一并消失, 不再是这里需要提醒的坑。
   const shardLeafCovId = String(shape.tx.outputs[0].covenant.covenantId);
 
   return {
     txJson: shape.tx.serializeToSafeJSON(),
     expectedTxid: shape.tx.id,
     shardLeafCovId,
-    includeChange: shape.includeChange,
-    changeSompi: shape.changeSompi,
-    requiredFee: shape.requiredFee,
-    netLoss: shape.netLoss,
-    signInputIndices: [0],
-    genesisOutputIndices: [0],
-    continuationOutputIndices: [],
-  };
-}
-
-/**
- * bet_mint 步骤A(KTT genesis, 铸stake筹码)的 tx_json 组装(不签名——relay 侧签 fee 输入): 1 个
- * relay fee 输入 + 2 个输出 [KTT genesis(固定 GENESIS_OUTPUT_SOMPI, owner=STAKE_CHIP_OWNER_UNBOUND,
- * 由调用方通过 computeKttGenesisArtifact({amount, ownerCovIdHex:STAKE_CHIP_OWNER_UNBOUND}) 算好传入),
- * 找零回 relay]。结构与 buildMarketGenesisTxJson 完全对称(同样是"1 fee 输入 genesis 一个新 covenant
- * 实例"的形状), 唯一差异是 genesis 的是 KTT 而不是 ShardLeaf_direct, authorizing_input 恒为 0(唯一
- * 输入就是 fee 输入本身)。
- * @param {object} o
- * @param {*} o.kaspa
- * @param {string} o.network
- * @param {{txid:string, vout:number, value:bigint, scriptPublicKeyHex:string}} o.feeUtxo
- * @param {string} o.relayChangeScriptPublicKeyHex
- * @param {string} o.kttScriptPubKeyHex  computeKttGenesisArtifact({amount, ownerCovIdHex:STAKE_CHIP_OWNER_UNBOUND}).scriptPubKeyHex
- * @param {bigint} o.absFeeCapSompi  feeProfile.bet_mint_step_a.cap
- * @returns {{txJson:string, expectedTxid:string, stakeCovId:string, includeChange:boolean, changeSompi:bigint, requiredFee:bigint, netLoss:bigint, signInputIndices:number[], genesisOutputIndices:number[], continuationOutputIndices:number[]}}
- */
-export function buildKttGenesisTxJson({ kaspa, network, feeUtxo, relayChangeScriptPublicKeyHex, kttScriptPubKeyHex, absFeeCapSompi }) {
-  const { Transaction, TransactionOutput, GenesisCovenantGroup } = kaspa;
-  assertFixedOutputValue(GENESIS_OUTPUT_SOMPI, GENESIS_OUTPUT_SOMPI, 'bet_mint_step_a');
-  if (typeof absFeeCapSompi !== 'bigint') throw new Error('buildKttGenesisTxJson: absFeeCapSompi(bigint, feeProfile.bet_mint_step_a.cap) required');
-
-  const feeUtxoSpk = scriptPublicKeyFromHex(kaspa, feeUtxo.scriptPublicKeyHex);
-  const kttSpk = scriptPublicKeyFromHex(kaspa, kttScriptPubKeyHex);
-  const changeSpk = scriptPublicKeyFromHex(kaspa, relayChangeScriptPublicKeyHex);
-  const outpoint = { transactionId: feeUtxo.txid, index: feeUtxo.vout };
-
-  const mkInput = (sigScript) => ({
-    previousOutpoint: outpoint, signatureScript: sigScript, sequence: 0n, sigOpCount: 1, computeBudget: 0,
-    utxo: { outpoint, amount: feeUtxo.value, scriptPublicKey: feeUtxoSpk, blockDaaScore: 0n },
-  });
-  const mkOutputs = (changeSompi) => changeSompi === undefined
-    ? [new TransactionOutput(GENESIS_OUTPUT_SOMPI, kttSpk)]
-    : [new TransactionOutput(GENESIS_OUTPUT_SOMPI, kttSpk), new TransactionOutput(changeSompi, changeSpk)];
-  const mkTx = (changeSompi) => {
-    const t = new Transaction({
-      version: 1,
-      inputs: [mkInput(new Uint8Array(0))],
-      outputs: mkOutputs(changeSompi),
-      lockTime: 0n, subnetworkId: '0'.repeat(40), gas: 0n, payload: '',
-    });
-    t.populateGenesisCovenants([new GenesisCovenantGroup(0, [0])]);
-    return t;
-  };
-
-  const leftover = feeUtxo.value - GENESIS_OUTPUT_SOMPI;
-  const shape = selectChangeShape({
-    kaspa, network, leftoverSompi: leftover,
-    buildTxWithChange: (changeSompi) => mkTx(changeSompi),
-    buildTxNoChange: () => mkTx(undefined),
-    absFeeCapSompi,
-  });
-
-  const stakeCovId = String(shape.tx.outputs[0].covenant.covenantId);
-
-  return {
-    txJson: shape.tx.serializeToSafeJSON(),
-    expectedTxid: shape.tx.id,
-    stakeCovId,
     includeChange: shape.includeChange,
     changeSompi: shape.changeSompi,
     requiredFee: shape.requiredFee,
@@ -352,12 +268,14 @@ export function verifyShardLeafCovIdAgainstLandedTx({ kaspa, expectedCovId, land
 }
 
 /**
- * bet_mint 步骤B(register_append)的完整 tx_json 组装——不签名(relay 侧只签 fee 输入)。
- * 生产真实形状(账本1425/1434/1436 一路验证过的那个形状): 输入=[leaf, (held 可选), stake, fee],
- * 输出=[leaf续约(CovenantBinding到leaf自己), PoolSideTicket genesis, 合并KTT genesis(owner=leaf的
- * covenant_id, 真实kaspa.covenantId算出, authorizing_input=fee输入), fee找零]。
- * leaf/held/stake 三个 covenant 输入的 sigScript 全部本地确定性算出(不需要私钥, 同 AB11/binding=cov
- * 声明宏的既有性质), 只有 fee 输入留空待 relay 签。
+ * bet_mint(register_append)的完整 tx_json 组装——不签名(relay 侧只签 fee 输入)。
+ * 🔴 D-020(账本1446/1448, a4878d7d)单笔交易形状(取消独立 stake 筹码, 原方案是两步:
+ * 步骤A铸stake筹码→步骤B花它, 见 docs/provenance/2026-09-15-j2-d020-register-append-single-tx-
+ * verification/): 输入=[leaf, (held 可选), fee], 输出=[leaf续约(CovenantBinding到leaf自己),
+ * PoolSideTicket genesis, 合并KTT genesis(owner=leaf的covenant_id, 真实kaspa.covenantId算出,
+ * authorizing_input=fee输入, amount=pool_value+stake 纯 witness 值——不再从任何输入 state 读取
+ * stake 数量), fee找零]。leaf/held 两个 covenant 输入的 sigScript 全部本地确定性算出(不需要私钥,
+ * 同 AB11/binding=cov 声明宏的既有性质), 只有 fee 输入留空待 relay 签。
  *
  * @param {object} o
  * @param {*} o.kaspa
@@ -369,7 +287,6 @@ export function verifyShardLeafCovIdAgainstLandedTx({ kaspa, expectedCovId, land
  * @param {{local_yes:number,local_no:number,count:number,pool_value:number}} o.currentState  下注前的 state(deriveLeafState)
  * @param {{local_yes:number,local_no:number,count:number,pool_value:number}} o.newState  下注后的 state
  * @param {object|null} o.heldInput  首次下注为 null; 否则 {txid,vout,value,scriptPublicKeyHex,redeemScript(Buffer),covId,entryAbi,stateFieldCount}
- * @param {object} o.stakeInput  {txid,vout,value,scriptPublicKeyHex,redeemScript(Buffer),covId,entryAbi,stateFieldCount}
  * @param {object} o.feeUtxo  {txid,vout,value,scriptPublicKeyHex}
  * @param {string} o.relayChangeScriptPublicKeyHex
  * @param {object} o.registerAppendEntryAbi  compileSilV100(...)._raw.contracts.ShardLeaf_direct.entries.register_append(当前ctor下重新编译现读, 不跨市场复用)
@@ -381,43 +298,34 @@ export function verifyShardLeafCovIdAgainstLandedTx({ kaspa, expectedCovId, land
  */
 export function buildRegisterAppendTxJson({
   kaspa, network, leafRedeemScript, leafStateLayout, leafOutpoint, leafCovId, currentState, newState,
-  heldInput, stakeInput, feeUtxo, relayChangeScriptPublicKeyHex,
+  heldInput, feeUtxo, relayChangeScriptPublicKeyHex,
   registerAppendEntryAbi, registerAppendArgs, ticketScriptPubKeyHex, mergedKttScript, absFeeCapSompi,
 }) {
   const { Transaction, TransactionOutput, GenesisCovenantGroup } = kaspa;
   const mergedAmount = newState.pool_value; // = currentState.pool_value + registerAppendArgs.stake, 调用方已算好放进 newState
 
-  // ── 输入 index 布局: [0]leaf [1]held?(可选) [2 或 1]stake [最后]fee ──
+  // ── 输入 index 布局(D-020后): [0]leaf [1]held?(可选) [最后]fee ──
   const inputs = [];
   const leafOutpointObj = { transactionId: leafOutpoint.txid, index: leafOutpoint.vout };
   inputs.push({ kind: 'leaf' });
-  let heldIdx = -1, stakeIdx, feeIdx;
+  let heldIdx = -1, feeIdx;
   if (heldInput) {
     heldIdx = inputs.length; inputs.push({ kind: 'held' });
   }
-  stakeIdx = inputs.length; inputs.push({ kind: 'stake' });
   feeIdx = inputs.length; inputs.push({ kind: 'fee' });
 
   const leafSpk = scriptPublicKeyFromHex(kaspa, '0x' + p2shHexFromScript(kaspa, leafRedeemScript));
   const feeUtxoSpk = scriptPublicKeyFromHex(kaspa, feeUtxo.scriptPublicKeyHex);
-  const stakeSpk = scriptPublicKeyFromHex(kaspa, stakeInput.scriptPublicKeyHex);
   const heldSpk = heldInput ? scriptPublicKeyFromHex(kaspa, heldInput.scriptPublicKeyHex) : null;
 
   // leaf 自己的 register_append witness(不需要私钥, AB11 声明宏性质——见 proto-register-append-witness.mjs)。
+  // D-020: 10 参数, 不再有 stakeInIdx(无独立 stake 筹码输入)。
   const leafAction = encodeRegisterAppendAction(kaspa, registerAppendEntryAbi, {
     side: registerAppendArgs.side, stake: registerAppendArgs.stake, leafOutIdx: REGISTER_APPEND_LEAF_CONT_OUT_INDEX, psOutIdx: REGISTER_APPEND_TICKET_OUT_INDEX,
     bettorPk: registerAppendArgs.bettorPk, ps_prefix: registerAppendArgs.psPrefix, ps_suffix: registerAppendArgs.psSuffix,
-    stakeInIdx: stakeIdx, tok_out: REGISTER_APPEND_TOK_OUT_INDEX, tok_prefix: registerAppendArgs.tokPrefix, tok_suffix: registerAppendArgs.tokSuffix,
+    tok_out: REGISTER_APPEND_TOK_OUT_INDEX, tok_prefix: registerAppendArgs.tokPrefix, tok_suffix: registerAppendArgs.tokSuffix,
   });
   const leafSigScriptHex = combineRegisterAppendActionAndRedeem(kaspa, leafAction, leafRedeemScript);
-  // 🔴 账本1436订正(本笔发现并修复的真实bug): stake.owner=STAKE_CHIP_OWNER_UNBOUND(全零32字节),
-  // 在场证明要靠 OpInputCovenantId(owner_input_idx)==ZERO32 成立——这要求 owner_input_idx 指向一个
-  // 【非covenant】输入(P2PK 的 fee 输入, OpInputCovenantId 对它返回 ZERO_HASH)。指向 leaf(有真实非零
-  // covenant_id)是被 docs/provenance/2026-09-15-j2-stake-chip-owner-unbound-verification/ 向量②
-  // (②stake_transfer_owner_unbound_via_leaf_input_fail)明确证伪的写法——早前这里错写成 [0](leaf),
-  // 与 held 的 owner_input_idx=[0](owner=leaf的covenant_id, 用 leaf 自证)混淆了两种不同的 owner 语义。
-  const stakeAction = encodeKttTransferZeroOutAction(kaspa, stakeInput.entryAbi, stakeInput.stateFieldCount, [feeIdx]);
-  const stakeSigScriptHex = combineKttActionAndRedeem(kaspa, stakeAction, stakeInput.redeemScript);
   const heldSigScriptHex = heldInput
     ? combineKttActionAndRedeem(kaspa, encodeKttTransferZeroOutAction(kaspa, heldInput.entryAbi, heldInput.stateFieldCount, [0]), heldInput.redeemScript)
     : null;
@@ -441,7 +349,6 @@ export function buildRegisterAppendTxJson({
     const txInputs = [];
     txInputs[0] = mkInput(leafOutpointObj, currentStateUtxoValueOf(leafOutpoint), leafSpk, leafSigScriptHex);
     if (heldInput) txInputs[heldIdx] = mkInput({ transactionId: heldInput.txid, index: heldInput.vout }, heldInput.value, heldSpk, heldSigScriptHex);
-    txInputs[stakeIdx] = mkInput({ transactionId: stakeInput.txid, index: stakeInput.vout }, stakeInput.value, stakeSpk, stakeSigScriptHex);
     txInputs[feeIdx] = mkInput({ transactionId: feeUtxo.txid, index: feeUtxo.vout }, feeUtxo.value, feeUtxoSpk, feeInputSigScript);
 
     const t = new Transaction({

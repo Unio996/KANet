@@ -180,41 +180,19 @@ export async function computeMarketGenesisArtifacts({ marketId, minBet, deadline
   };
 }
 
-// 🔴 账本1435→1436订正: stake 新铸筹码(bet_mint 步骤A)的 owner 绝不能是"它自己的covenant_id"——
-// covenant_id 的真实公式(rusty-kaspa consensus/core/src/hashing/covenant_id.rs:13-14)把输出的完整
-// 脚本字节(含 State, 含 owner 本身)喂进哈希, "owner=自己的covenant_id"是自指不动点方程, 无解(真实
-// kaspa-wasm 实测确认: 换脚本/换 value, 算出的 covenant_id 就不同)。也不能是 leaf 的 covenant_id
-// (会被 ShardLeaf_direct.sil 的 scanOwnedTokenInputs 误计入奖池, 见 docs/provenance/2026-09-15-j2-
-// register-append-full-tx-three-execution/ 撞出的真实回归)。改用固定哨兵值:
-//   STAKE_CHIP_OWNER_UNBOUND = 全零32字节。
-// 依据(ShardLeaf_direct.sil/KanetTestToken.sil 源码逐字确认):
-//   ① ShardLeaf_direct.sil:140-141 对 stake 筹码只核模板形状和 amount, 不核 owner 字段——"合法在场
-//      不计入"这句头注的真实含义就是"owner 不等于 leaf, 因此 scanOwnedTokenInputs(:104, owner==leaf
-//      covenant_id)不会把它算进 pool_value"。ZERO32 显然 != leaf 的 covenant_id, 满足。
-//   ② KanetTestToken.sil 的"在场"检查是 require(OpInputCovenantId(owner_input_idx[i]) ==
-//      prev_states[i].owner)(transferPolicy:84, delegate:114)。非 covenant 输入(如 relay 的普通
-//      P2PK fee 输入)的 OpInputCovenantId 回退为 ZERO_HASH——bet_mint 步骤B 花这枚筹码时, 只要把
-//      owner_input_idx 指向 fee 输入(而不是 leaf), ZERO_HASH==ZERO32 自然成立, 不需要额外签名。
-//   ③ owner != ZERO32 的检查(KanetTestToken.sil:102)只作用于 next_states(transferPolicy 里"正在
-//      创建的输出"), 不作用于 genesis 阶段, 也不作用于 prev_states(正在花费的输入)——genesis 时把
-//      owner 写成 ZERO32 不会被合约自己拒绝。
-// 🔴 已知代价(账本1435/1436 明确接受, 并入 T-PROTO-BETTORPK-BINDING 同族的 T-ORPHAN-CHIP-RECOVERY-
-// ENTRY): 步骤A落链后、步骤B广播前这段窗口, 任何人都能用任意一个非covenant输入冒充"在场"把这枚
-// stake 筹码花掉, 导致这次下注的步骤B失败、筹码孤儿化——但攻击者拿到的东西和自己免费铸一份完全等价
-// (KTT genesis 本身就是任何人免费无限铸), 没有真实损失路径。**这条取舍只在"KTT是零价值测试币"这个
-// 前提下成立——如果未来 KTT 承载真实价值, 这个 owner=ZERO32 设计必须重做, 不能直接沿用。**
-// 构造层能做的缓解: 步骤A落链后尽快发步骤B, 不人为延迟(driveBetIntent 已有的两步链式依赖天然如此)。
-export const STAKE_CHIP_OWNER_UNBOUND = ZERO32.toString('hex');
+// 🔴 D-020(账本1446/1448, a4878d7d): bet_mint 步骤A(独立铸 stake 筹码)已取消, register_append
+// 改单笔交易。原先在这里的大段 STAKE_CHIP_OWNER_UNBOUND(全零32字节哨兵owner)推导 + 已知代价说明
+// 随步骤A一起作废——NWT 用真实 cli-debugger 证明了该设计的一个更严重问题(ZERO32-owner 的筹码连本带
+// 锁定的真实KAS一起可被任意第三方偷走, 见账本1446, 推翻账本1436"无损失"判断), 不只是"孤儿化"这个
+// 已接受的代价。account 层面, `computeKttGenesisArtifact` 本身不是 stake 专属函数, 继续用于构造
+// register_append 合并输出(owner=leaf 的 covenant_id)——只是不再需要 ZERO32 哨兵值这个调用形态了。
 
 /**
- * bet_mint 步骤 A: KanetTestToken genesis ctor(v0.3 方案C, 8 字段, 无 market_tmpl_suffix)。
+ * KanetTestToken genesis ctor(v0.3 方案C, 8 字段, 无 market_tmpl_suffix)。
  * @param {object} o
  * @param {number} o.amount  下注金额(代币内部计数值, 不是 KAS)
- * @param {string} o.ownerCovIdHex  32 字节 hex(无 0x)。**两种合法调用者, 不要混用**:
- *   (a) bet_mint 步骤A(新铸 stake 筹码) —— 传 `STAKE_CHIP_OWNER_UNBOUND`(全零), 不要传任何
- *       covenant id(自指不动点方程无解, 见上方大段注释); (b) register_append 构造"合并奖池代币"
- *       (held/新genesis, 不经过这个函数——那是 ShardLeaf_direct 自己 State 里的 owner 字段, 值是
- *       leaf 的 covenant_id, 走的是 register_append 自己的输出构造, 不是这个函数)。
+ * @param {string} o.ownerCovIdHex  32 字节 hex(无 0x)。register_append 构造"合并奖池代币"
+ *   (held/新genesis)时传 leaf 的 covenant_id(ShardLeaf_direct 自己 State 里的 owner 字段值)。
  * @returns {{script:Buffer, scriptPubKeyHex:string, templateHashHex:string}}
  */
 export function computeKttGenesisArtifact({ amount, ownerCovIdHex }) {

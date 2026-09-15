@@ -66,8 +66,8 @@ console.log('[test] ① PSK 鉴权(继承既有 /ingest/* preHandler): 缺 x-ing
 console.log('[test] ② relay_id 必须等于 PROTO_RELAY_ID(硬条件①):');
 {
   seedBet('bet1');
-  const key = betIntentKeyFor('bet1', 'mint');
-  ensureBetIntent({ betId: 'bet1', step: 'mint' });
+  const key = betIntentKeyFor('bet1', 'append');
+  ensureBetIntent({ betId: 'bet1', step: 'append' });
   const txid = 'aa'.repeat(32);
 
   const missingRelayId = await post({ intentKey: key, phase: 'prepared', txid });
@@ -86,7 +86,7 @@ console.log('[test] ③ PROTO_RELAY_ID 未配置时全部拒绝(fail-closed 方�
   const savedEnv = process.env.PROTO_RELAY_ID;
   delete process.env.PROTO_RELAY_ID;
   try {
-    const key = betIntentKeyFor('bet1', 'mint');
+    const key = betIntentKeyFor('bet1', 'append');
     const res = await post({ relay_id: 'anything-at-all', intentKey: key, phase: 'prepared', txid: 'bb'.repeat(32) });
     ok(res.statusCode === 403, `实际 ${res.statusCode}`);
   } finally {
@@ -106,13 +106,13 @@ console.log('[test] ④ 字段校验: intentKey/phase/txid 缺一 → 400:');
 
 console.log('[test] ⑤ 未知 intentKey → 409(同 /ingest/submit-intent 既有"relay 只对 console 先 INSERT 的意图回执"契约):');
 {
-  const res = await post({ relay_id: PROTO_RELAY_ID, intentKey: 'proto-bet:nonexistent:mint', phase: 'prepared', txid: 'dd'.repeat(32) });
+  const res = await post({ relay_id: PROTO_RELAY_ID, intentKey: 'proto-bet:nonexistent:append', phase: 'prepared', txid: 'dd'.repeat(32) });
   ok(res.statusCode === 409, `实际 ${res.statusCode}`);
 }
 
 console.log('[test] ⑥ 正常调用 phase=prepared → 201, proto_bet_intents 行落表(硬条件②的正路径):');
 {
-  const key = betIntentKeyFor('bet1', 'mint');
+  const key = betIntentKeyFor('bet1', 'append');
   const txid = 'ee'.repeat(32);
   const res = await post({ relay_id: PROTO_RELAY_ID, intentKey: key, phase: 'prepared', txid, txJson: JSON.stringify([{ id: txid }]) });
   ok(res.statusCode === 201, `实际 ${res.statusCode} ${res.body}`);
@@ -124,7 +124,7 @@ console.log('[test] ⑥ 正常调用 phase=prepared → 201, proto_bet_intents �
 
 console.log('[test] ⑦ 幂等: 重复调用同一 phase=prepared(同 txid) → 仍 201, 不报错不产生副作用(硬条件②):');
 {
-  const key = betIntentKeyFor('bet1', 'mint');
+  const key = betIntentKeyFor('bet1', 'append');
   const txid = 'ee'.repeat(32); // 与 ⑥ 相同
   const res = await post({ relay_id: PROTO_RELAY_ID, intentKey: key, phase: 'prepared', txid });
   ok(res.statusCode === 201, `重复调用仍 201(实际 ${res.statusCode})`);
@@ -134,7 +134,7 @@ console.log('[test] ⑦ 幂等: 重复调用同一 phase=prepared(同 txid) → 
 
 console.log('[test] ⑧ 推进到 submitted → 201, 落表:');
 {
-  const key = betIntentKeyFor('bet1', 'mint');
+  const key = betIntentKeyFor('bet1', 'append');
   const txid = 'ee'.repeat(32);
   const res = await post({ relay_id: PROTO_RELAY_ID, intentKey: key, phase: 'submitted', txid });
   ok(res.statusCode === 201, `实际 ${res.statusCode}`);
@@ -144,7 +144,7 @@ console.log('[test] ⑧ 推进到 submitted → 201, 落表:');
 
 console.log('[test] ⑨ 单调性: 已是 submitted 后, 再打一次 phase=prepared(模拟 relay 网络重试/乱序) → HTTP 层仍 201(不报错), 但底层状态不倒退(markBetIntent RANK 机制生效, 硬条件②):');
 {
-  const key = betIntentKeyFor('bet1', 'mint');
+  const key = betIntentKeyFor('bet1', 'append');
   const oldTxid = 'ff'.repeat(32); // 故意传一个不同的 txid, 验证不会覆盖 prepared_txid 也不会退状态
   const res = await post({ relay_id: PROTO_RELAY_ID, intentKey: key, phase: 'prepared', txid: oldTxid });
   ok(res.statusCode === 201, `实际 ${res.statusCode}(端点本身不因为"逻辑上是倒退"而报错, 是 markBetIntent 内部悄悄吃掉状态位的倒退请求)`);

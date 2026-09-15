@@ -27,13 +27,15 @@
 // entry-witness-abi-verification/)验证过逐字节一致(vector①)。
 
 /**
- * ShardLeaf_direct.register_append 的 11 个参数(声明顺序, 来自真实编译产物的 entries.register_append.
+ * ShardLeaf_direct.register_append 的 10 个参数(声明顺序, 来自真实编译产物的 entries.register_append.
  * params, 不是抄源码——每次用都从 compileSilV100() 的 `_raw.contracts[contractName].entries[entryName]`
  * 现读, 防止合约签名变了但这里没跟着改)。
+ * 🔴 D-020(账本1446/1448): stakeInIdx 参数已从合约签名里删除(不再消费 stake 筹码输入), 这里同步
+ * 去掉——11 参数变 10 参数。
  */
 export const REGISTER_APPEND_PARAM_ORDER = Object.freeze([
   'side', 'stake', 'leafOutIdx', 'psOutIdx', 'bettorPk', 'ps_prefix', 'ps_suffix',
-  'stakeInIdx', 'tok_out', 'tok_prefix', 'tok_suffix',
+  'tok_out', 'tok_prefix', 'tok_suffix',
 ]);
 
 function hexToBytes(h) {
@@ -46,9 +48,9 @@ function hexToBytes(h) {
  * @param {object} kaspa  kaspa-wasm 模块(注入)
  * @param {string} entryAbiJson  compileSilV100(...)._raw.contracts[contractName].entries['register_append']
  *   (含 dispatch_tag/params, 调用方保证是对应这份 redeem 脚本的真实编译产物, 不是硬编字面量)
- * @param {object} w  { side, stake, leafOutIdx, psOutIdx, bettorPk, ps_prefix, ps_suffix, stakeInIdx, tok_out, tok_prefix, tok_suffix }
+ * @param {object} w  { side, stake, leafOutIdx, psOutIdx, bettorPk, ps_prefix, ps_suffix, tok_out, tok_prefix, tok_suffix }
  *   每个字段: int 用 number/bigint, bytes 用 hex 字符串('0x...')/Buffer/number[]
- * @returns {string} action 的 hex(仅 11 参数 push + dispatch_tag push, 不含 redeem——同
+ * @returns {string} action 的 hex(仅 10 参数 push + dispatch_tag push, 不含 redeem——同
  *   debugger 的 active_sigscript 语义, combine 步骤见 combineActionAndRedeem)
  */
 export function encodeRegisterAppendAction(kaspa, entryAbi, w) {
@@ -61,7 +63,6 @@ export function encodeRegisterAppendAction(kaspa, entryAbi, w) {
   b.addData(hexToBytes(w.bettorPk));
   b.addData(hexToBytes(w.ps_prefix));
   b.addData(hexToBytes(w.ps_suffix));
-  b.addI64(BigInt(w.stakeInIdx));
   b.addI64(BigInt(w.tok_out));
   b.addData(hexToBytes(w.tok_prefix));
   b.addData(hexToBytes(w.tok_suffix));
@@ -76,7 +77,7 @@ export function combineActionAndRedeem(kaspa, actionHex, redeemScriptBytes) {
   return b.drain();
 }
 
-/** 一步到位: 11 参数 witness + redeem 揭示 → 完整 sigScript hex(真实广播用/真实 cli-debugger raw
+/** 一步到位: 10 参数 witness + redeem 揭示 → 完整 sigScript hex(真实广播用/真实 cli-debugger raw
  *  signature_script_hex 用同一个函数产出, 两处零分叉)。 */
 export function buildRegisterAppendSigScriptHex(kaspa, entryAbi, w, redeemScriptBytes) {
   const action = encodeRegisterAppendAction(kaspa, entryAbi, w);

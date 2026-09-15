@@ -1,18 +1,19 @@
-// proto-bet-intent.mjs — 原型 v0 下注复合动作(铸筹码/register_append 两步)的 NO-TX-NO-STATE 状态机。
+// proto-bet-intent.mjs — 原型 v0 下注(register_append 单笔交易)的 NO-TX-NO-STATE 状态机。
 // 设计: docs/2026-09-14-j2-proto-v0-backend-api-design-v0.1.md §2.3.1(NWT MUST-FIX, ledger 1336)。
+// 🔴 D-020(账本1446/1448, a4878d7d): 原两步(A铸stake筹码+B register_append)链式依赖机制已随步骤A
+// 取消而删除——下注只剩 register_append 一步, 不再需要 depends_on/checkDependencyLanded 这套"B 等
+// A landed"的闸(NWT 用真实 cli-debugger 证明步骤A的 ZERO32-owner 筹码设计本身有安全漏洞, 见
+// docs/provenance/2026-09-15-j2-d020-register-append-single-tx-verification/)。
 //
 // 照抄 lib/submit-intent.mjs 的哲学(prepared→submitted→landed 状态机、同字节重播、"查不到证据≠可以
-// 重建"), 但**不复用 submit_intents 表**——proto_bet_intents(v206)多一个 `depends_on` 字段做两步链式
-// 依赖(B 只能在 A 落地后才能从 pending 转 prepared), 且面向"任意签名交易"(target_address+txid, 同
-// submit-intent 的 landed 判据——P2SH covenant 输出照样有 bech32 地址表示, check_utxo_landed 不区分
-// 脚本类型), 不是围绕 relay `transfer` plain-address 语义硬编的形状。
+// 重建"), 但**不复用 submit_intents 表**——proto_bet_intents(v206, v208 收窄)面向"任意签名交易"
+// (target_address+txid, 同 submit-intent 的 landed 判据——P2SH covenant 输出照样有 bech32 地址表示,
+// check_utxo_landed 不区分脚本类型), 不是围绕 relay `transfer` plain-address 语义硬编的形状。
 //
-// 不变量(同 submit-intent.mjs 设计 §2, 移植到两步链场景):
+// 不变量(同 submit-intent.mjs 设计 §2):
 //   I1 submit accepted ≠ chain landed —— 只把"submitted"记成 submitted, landed 由 checkIntentLanded(minDepth) 单独判。
 //   I5 重试不得双付/双铸 —— attempt ≥ 2 的唯一前置 = 查 relay 侧权威源(mempool/utxo-landed/同字节重播), 永不读调用方自己的 metadata。
 //   F2-R 重启捡回 —— prepared 行只允许同字节重播; 有 txid 无字节 ⇒ 不发不建 + 告警。
-//   🔴 两步链新增: B(append)行只能在 A(mint)行状态为 landed 时才允许从 pending 转 prepared——
-//      在 A 未确认前构造/广播 B 是对着一个可能还不存在的 UTXO 花钱, 必然失败或双花风险, 直接拒绝。
 //
 // 🔴 M0a 门: 本文件不 import relay-manager(裸 import 差分门硬拒新通道)——调用方把 sendCommandAsync
 //   以 sendCmd 注入, 全部向量离线可测。
@@ -21,7 +22,7 @@ import { sqlite } from '../db/client.js';
 import { randomUUID } from 'node:crypto';
 import { PROTO_COVENANT_BROADCAST_TYPE } from './proto-relay-guard.mjs';
 
-export const BET_INTENT_STEPS = Object.freeze(['mint', 'append']);
+export const BET_INTENT_STEPS = Object.freeze(['append']);
 export const BET_INTENT_STATUS = Object.freeze({ PENDING: 'pending', PREPARED: 'prepared', SUBMITTED: 'submitted', LANDED: 'landed', AMBIGUOUS: 'ambiguous' });
 
 const nowIso = () => new Date().toISOString();
@@ -45,21 +46,17 @@ export function activeBetIntent(betId, step) {
   `).get(betId, step) || null;
 }
 
-/**
- * INSERT OR IGNORE 一行 pending(必须在任何 IPC 之前); 已有则原样返回(幂等)。
- * step='append' 时**必须**给 dependsOn(A 行的 intent_key)——这是链式依赖存在的唯一记录点。
- */
-export function ensureBetIntent({ betId, step, dependsOn = null, attempt = 1 }) {
+/** INSERT OR IGNORE 一行 pending(必须在任何 IPC 之前); 已有则原样返回(幂等)。 */
+export function ensureBetIntent({ betId, step, attempt = 1 }) {
   if (!BET_INTENT_STEPS.includes(step)) throw new Error(`ensureBetIntent: unknown step ${step}`);
   if (!betId) throw new Error('ensureBetIntent: betId required');
-  if (step === 'append' && !dependsOn) throw new Error('ensureBetIntent: append step requires dependsOn (the mint step intent_key)');
   const intentKey = betIntentKeyFor(betId, step, attempt);
   const ts = nowIso();
   sqlite.prepare(`
     INSERT OR IGNORE INTO proto_bet_intents
-      (intent_key, bet_id, step, depends_on, status, created_at, updated_at)
-    VALUES (?, ?, ?, ?, 'pending', ?, ?)
-  `).run(intentKey, betId, step, dependsOn, ts, ts);
+      (intent_key, bet_id, step, status, created_at, updated_at)
+    VALUES (?, ?, ?, 'pending', ?, ?)
+  `).run(intentKey, betId, step, ts, ts);
   return getBetIntent(intentKey);
 }
 
@@ -115,20 +112,6 @@ export function alertBetIntent(eventType, summary, payload = {}, level = 'warn')
 
 class BetIntentHoldError extends Error {
   constructor(msg, code) { super(msg); this.code = code; this.hold = true; }
-}
-
-/**
- * 🔴 链式依赖闸: step='append' 的 intent 若还 pending, 必须先确认 dependsOn(mint 行) 已 landed 才允许
- * 真正发起(转 prepared/submitted)——在 mint 未确认前构造 append 就是对着可能不存在的 UTXO 花钱。
- * @returns {{ok:true}|{ok:false,reason:string}}
- */
-export function checkDependencyLanded(intent) {
-  if (intent.step !== 'append') return { ok: true };
-  if (!intent.depends_on) return { ok: false, reason: 'append intent missing depends_on (data integrity bug, should be impossible per ensureBetIntent guard)' };
-  const dep = getBetIntent(intent.depends_on);
-  if (!dep) return { ok: false, reason: `depends_on intent ${intent.depends_on} not found` };
-  if (dep.status !== 'landed') return { ok: false, reason: `depends_on intent ${intent.depends_on} not landed yet (status=${dep.status})` };
-  return { ok: true };
 }
 
 /**
@@ -202,8 +185,7 @@ async function resolvePrepared({ sendCmd, relayId, row, targetAddress, origin, l
  * @param {Function} o.sendCmd  注入 relay-manager.sendCommandAsync(relayId, cmd, timeout, origin)
  * @param {string} o.relayId
  * @param {string} o.betId
- * @param {'mint'|'append'} o.step
- * @param {string} [o.dependsOn]  step='append' 时必填(mint 行的 intent_key)
+ * @param {'append'} o.step
  * @param {string} o.targetAddress  landed 判据用的地址(genesis 输出的 P2SH bech32 地址)
  * @param {Function} o.buildAndBroadcast  async ({attempt}) => {txId, txJson} | throws —— 真正构造+签名+广播
  *   一笔新交易(pending 态才会被调用; prepared 态走同字节重播, 不再调这个)
@@ -211,13 +193,13 @@ async function resolvePrepared({ sendCmd, relayId, row, targetAddress, origin, l
  * @returns {Promise<{txId, intent, reused?, replayed?}>}
  */
 export async function driveBetIntent({
-  sendCmd, relayId, betId, step, dependsOn = null, targetAddress, buildAndBroadcast, origin,
+  sendCmd, relayId, betId, step, targetAddress, buildAndBroadcast, origin,
   maxAttempts = 3, sleepMs = (attempt) => attempt * 5000, log = console,
 }) {
   if (typeof sendCmd !== 'function') throw new Error('driveBetIntent: sendCmd required');
   if (!relayId) throw new Error('driveBetIntent: relayId required');
   if (typeof buildAndBroadcast !== 'function') throw new Error('driveBetIntent: buildAndBroadcast required');
-  let row = activeBetIntent(betId, step) || ensureBetIntent({ betId, step, dependsOn });
+  let row = activeBetIntent(betId, step) || ensureBetIntent({ betId, step });
   let lastError = null;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     row = getBetIntent(row.intent_key);
@@ -232,12 +214,6 @@ export async function driveBetIntent({
       if (r.txId) return { txId: r.txId, intent: r.intent, replayed: !!r.replayed };
       row = r.intent;
       continue;
-    }
-    // pending ⇒ 链式依赖闸: append 必须等 mint landed。
-    const dep = checkDependencyLanded(row);
-    if (!dep.ok) {
-      log.log(`[proto-bet-intent] ${row.intent_key} blocked: ${dep.reason}`);
-      throw new BetIntentHoldError(`bet intent ${row.intent_key}: dependency not satisfied — ${dep.reason}`, 'dependency_not_landed');
     }
     // pending ⇒ fresh build+broadcast; buildAndBroadcast 内部应当在广播前调 recordBetIntentPhase(prepared)。
     try {
@@ -271,9 +247,8 @@ export async function checkBetIntentLanded({ sendCmd, relayId, intent, targetAdd
 
 /**
  * 重启捡回(F2-R, 同 submit-intent.mjs resumeStaleIntents 移植): prepared 且 updated_at 早于 olderThanMs
- * 的行 → resolvePrepared。调用方需提供 targetAddressFor(row) 把 intent_key 映回该步骤的 landed 判据地址
- * (mint 行 = 代币 genesis P2SH 地址; append 行 = 市场 leaf 续约 P2SH 地址——两者都是查 proto_bets/proto_markets
- * 得到, 本模块不碰这些表, 保持职责单一)。
+ * 的行 → resolvePrepared。调用方需提供 targetAddressFor(row) 把 intent_key 映回 append 行的 landed
+ * 判据地址(市场 leaf 续约 P2SH 地址——查 proto_bets/proto_markets 得到, 本模块不碰这些表, 保持职责单一)。
  */
 export async function resumeStaleBetIntents({ sendCmd, targetAddressFor, relayIdFor, olderThanMs = 2 * 60 * 1000, limit = 20, origin = 'internal', log = console }) {
   const cutoff = new Date(Date.now() - olderThanMs).toISOString();

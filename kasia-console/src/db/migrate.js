@@ -6131,5 +6131,159 @@ export function runMigrations() {
     }
   }
 
+  // ── v208 (2026-09-15, J2 · D-020, 账本1446/1448, Owner裁定 a4878d7d): 取消 bet_mint 步骤A(独立
+  //   铸stake筹码, NWT 用真实 cli-debugger 证明 ZERO32-owner 的筹码连本带锁定的真实KAS一起可被任意
+  //   第三方偷走, 推翻账本1436"无损失"判断), register_append 改单笔交易。
+  //   proto_bets: 删 mint_txid/mint_vout 列(步骤A产物, 步骤A已取消), CHECK 去掉
+  //   'chip_minted_pending_stake'(两步中间态)/'orphaned_chip'(步骤A/B之间的孤儿化终态,
+  //   T-ORPHAN-CHIP-RECOVERY-ENTRY 随之关闭——单步设计下这个场景结构性不可达, 不是"修好了"是"问题
+  //   消失了")——只剩 'pending'(下注已记账, 交易未落链)/'confirmed'(register_append 已落链)。
+  //   proto_bet_intents: step CHECK 收窄到只剩 'append'(唯一动作, 不再有 mint/append 两步区分),
+  //   删 depends_on 列(链式依赖机制随两步设计一起消失, 单步没有依赖对象)。
+  //   🔴 real-data guard(账本1426 规则: DB 迁移必须用真实数据测试, 不能只在空表上跑一遍就当过关):
+  //   迁移前先查是否存在任何卡在旧两步中间态的真实行(status='chip_minted_pending_stake' 或
+  //   step='mint')——这些行代表"还没走完旧两步流程"的真实下注, 本迁移不知道如何安全折叠它们(孤儿化?
+  //   回滚?需要人工判断哪种处置对), 若存在直接 throw 拒绝迁移(fail-closed, 不静默丢弃/不猜测转换)。
+  //   实测(本笔迁移前, 用 console.db 的真实副本核对): PROTO_DRIVER_ENABLED 全程未开, proto_bets/
+  //   proto_bet_intents 甚至从未在生产 console.db 上跑起来过(v206 建表都没跑到), 所以这条 guard
+  //   在真实数据上核对的结果是"表不存在或 0 命中, 直接放行"——但仍然写成硬检查而不是假设为真。
+  {
+    const betsInfo = sqlite.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='proto_bets'").get();
+    if (betsInfo) {
+      const stuckBets = sqlite.prepare("SELECT COUNT(*) AS c FROM proto_bets WHERE status = 'chip_minted_pending_stake'").get().c;
+      if (stuckBets > 0) {
+        throw new Error(`v208: proto_bets 有 ${stuckBets} 行卡在 status='chip_minted_pending_stake'(旧两步设计中间态) —— D-020 迁移拒绝在这种情况下自动进行, 需要人工判断这些下注如何处理(手动 confirmed / 手动 orphan / 回滚), 见 docs/DECISIONS.md D-020, 处理完再重跑迁移`);
+      }
+      const betsCheckMatch = betsInfo.sql.match(/CHECK\s*\(\s*status\s+IN\s*\(([^)]+)\)\s*\)/);
+      const betsHasOldStates = betsCheckMatch && /chip_minted_pending_stake|orphaned_chip/.test(betsCheckMatch[1]);
+      const betsHasMintCols = /mint_txid/.test(betsInfo.sql);
+      if (betsHasOldStates || betsHasMintCols) {
+        const rowCountBefore = sqlite.prepare('SELECT COUNT(*) AS cnt FROM proto_bets').get().cnt;
+        const indexes = sqlite.prepare(`SELECT name, sql FROM sqlite_master WHERE type='index' AND tbl_name='proto_bets' AND sql IS NOT NULL`).all();
+        const newSql = `
+          CREATE TABLE proto_bets_v208 (
+            id            TEXT PRIMARY KEY,
+            market_id     TEXT NOT NULL REFERENCES proto_markets(id),
+            bettor_pk     TEXT NOT NULL,
+            side          INTEGER NOT NULL,
+            stake         INTEGER NOT NULL,
+            ticket_txid   TEXT,
+            ticket_vout   INTEGER,
+            stake_tx_id   TEXT,
+            status        TEXT NOT NULL DEFAULT 'pending'
+                           CHECK (status IN ('pending','confirmed')),
+            created_at    TEXT NOT NULL,
+            confirmed_at  TEXT
+          )`;
+        const copyCols = 'id, market_id, bettor_pk, side, stake, ticket_txid, ticket_vout, stake_tx_id, status, created_at, confirmed_at';
+        sqlite.exec('PRAGMA foreign_keys = OFF');
+        try {
+          sqlite.exec('BEGIN TRANSACTION');
+          try {
+            sqlite.exec('DROP TABLE IF EXISTS proto_bets_v208');
+            sqlite.exec(newSql);
+            sqlite.exec(`INSERT INTO proto_bets_v208 (${copyCols}) SELECT ${copyCols} FROM proto_bets`);
+            const rowCountAfter = sqlite.prepare('SELECT COUNT(*) AS cnt FROM proto_bets_v208').get().cnt;
+            if (rowCountAfter !== rowCountBefore) {
+              throw new Error(`v208 proto_bets row count mismatch: before=${rowCountBefore} after=${rowCountAfter}`);
+            }
+            sqlite.exec('DROP TABLE proto_bets');
+            sqlite.exec('ALTER TABLE proto_bets_v208 RENAME TO proto_bets');
+            for (const idx of indexes) {
+              if (idx.sql) { try { sqlite.exec(idx.sql); } catch (ie) { console.warn(`[migrate] v208 index ${idx.name} recreate fail: ${ie.message}`); } }
+            }
+            sqlite.exec('COMMIT');
+            console.log(`[migrate] v208: proto_bets rebuilt (${rowCountBefore} rows preserved, ${indexes.length} indexes recreated, 删 mint_txid/mint_vout, CHECK 收窄到 pending/confirmed).`);
+          } catch (e) {
+            sqlite.exec('ROLLBACK');
+            throw e;
+          }
+          // 🔴 范围限定(账本1426真实数据测试撞出的教训, 与本笔一起修——v207 复制的写法
+          // sqlite.pragma('foreign_key_check')不带表名会检查【全库】, 在真实 console.db 副本上跑出
+          // 18979 条与 proto_* 毫不相关的既有 FK 违规(conversations→identities 等旧数据), 把这次
+          // rebuild 完全无关的历史脏数据当成本次迁移的失败——foreign_key_check(table) 检查的是
+          // "table 自己声明的 REFERENCES 是否指向存在的父行"(即 table 作为子表), 所以要分别查
+          // proto_bets 自己(→proto_markets)和 proto_bet_intents(→proto_bets, 会被这次 rebuild 的
+          // rename 短暂打断)两张真正相关的子表, 不查全库。
+          const fkViolations = [
+            ...sqlite.pragma('foreign_key_check(proto_bets)'),
+            ...sqlite.pragma('foreign_key_check(proto_bet_intents)'),
+          ];
+          if (fkViolations.length) {
+            throw new Error(`v208 foreign_key_check found ${fkViolations.length} violation(s) after proto_bets rebuild: ${JSON.stringify(fkViolations)}`);
+          }
+        } finally {
+          sqlite.exec('PRAGMA foreign_keys = ON');
+        }
+      } else {
+        console.log('[migrate] v208: proto_bets already collapsed to single-step schema (idempotent skip).');
+      }
+    }
+
+    const intentsInfo = sqlite.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='proto_bet_intents'").get();
+    if (intentsInfo) {
+      const stuckMint = sqlite.prepare("SELECT COUNT(*) AS c FROM proto_bet_intents WHERE step = 'mint'").get().c;
+      if (stuckMint > 0) {
+        throw new Error(`v208: proto_bet_intents 有 ${stuckMint} 行 step='mint'(旧两步设计的步骤A记录) —— D-020 迁移拒绝在这种情况下自动进行, 需要人工判断这些 intent 如何处理, 见 docs/DECISIONS.md D-020, 处理完再重跑迁移`);
+      }
+      const stepCheckMatch = intentsInfo.sql.match(/step\s+TEXT NOT NULL CHECK\s*\(\s*step\s+IN\s*\(([^)]+)\)\s*\)/);
+      const hasOldStep = stepCheckMatch && /'mint'/.test(stepCheckMatch[1]);
+      const hasDependsOn = /depends_on/.test(intentsInfo.sql);
+      if (hasOldStep || hasDependsOn) {
+        const rowCountBefore = sqlite.prepare('SELECT COUNT(*) AS cnt FROM proto_bet_intents').get().cnt;
+        const indexes = sqlite.prepare(`SELECT name, sql FROM sqlite_master WHERE type='index' AND tbl_name='proto_bet_intents' AND sql IS NOT NULL`).all();
+        const newSql = `
+          CREATE TABLE proto_bet_intents_v208 (
+            intent_key       TEXT PRIMARY KEY,
+            bet_id           TEXT NOT NULL REFERENCES proto_bets(id),
+            step             TEXT NOT NULL CHECK (step IN ('append')),
+            status           TEXT NOT NULL DEFAULT 'pending'
+                              CHECK (status IN ('pending','prepared','submitted','landed','ambiguous')),
+            prepared_txid    TEXT,
+            prepared_tx_json TEXT,
+            submitted_txid   TEXT,
+            landed_depth     INTEGER,
+            landed_at        TEXT,
+            last_error       TEXT,
+            created_at       TEXT NOT NULL,
+            updated_at       TEXT NOT NULL
+          )`;
+        const copyCols = 'intent_key, bet_id, step, status, prepared_txid, prepared_tx_json, submitted_txid, landed_depth, landed_at, last_error, created_at, updated_at';
+        sqlite.exec('PRAGMA foreign_keys = OFF');
+        try {
+          sqlite.exec('BEGIN TRANSACTION');
+          try {
+            sqlite.exec('DROP TABLE IF EXISTS proto_bet_intents_v208');
+            sqlite.exec(newSql);
+            sqlite.exec(`INSERT INTO proto_bet_intents_v208 (${copyCols}) SELECT ${copyCols} FROM proto_bet_intents`);
+            const rowCountAfter = sqlite.prepare('SELECT COUNT(*) AS cnt FROM proto_bet_intents_v208').get().cnt;
+            if (rowCountAfter !== rowCountBefore) {
+              throw new Error(`v208 proto_bet_intents row count mismatch: before=${rowCountBefore} after=${rowCountAfter}`);
+            }
+            sqlite.exec('DROP TABLE proto_bet_intents');
+            sqlite.exec('ALTER TABLE proto_bet_intents_v208 RENAME TO proto_bet_intents');
+            for (const idx of indexes) {
+              if (idx.sql) { try { sqlite.exec(idx.sql); } catch (ie) { console.warn(`[migrate] v208 index ${idx.name} recreate fail: ${ie.message}`); } }
+            }
+            sqlite.exec('COMMIT');
+            console.log(`[migrate] v208: proto_bet_intents rebuilt (${rowCountBefore} rows preserved, ${indexes.length} indexes recreated, 删 depends_on, step CHECK 收窄到只剩 'append').`);
+          } catch (e) {
+            sqlite.exec('ROLLBACK');
+            throw e;
+          }
+          // 同上(proto_bets 分支)的范围限定理由——只查 proto_bet_intents 自己(→proto_bets), 不查全库。
+          const fkViolations = sqlite.pragma('foreign_key_check(proto_bet_intents)');
+          if (fkViolations.length) {
+            throw new Error(`v208 foreign_key_check found ${fkViolations.length} violation(s) after proto_bet_intents rebuild: ${JSON.stringify(fkViolations)}`);
+          }
+        } finally {
+          sqlite.exec('PRAGMA foreign_keys = ON');
+        }
+      } else {
+        console.log('[migrate] v208: proto_bet_intents already collapsed to single-step schema (idempotent skip).');
+      }
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }

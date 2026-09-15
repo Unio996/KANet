@@ -1,19 +1,24 @@
 // proto-register-append-witness.test.mjs — 决定性验证(账本1425/1431, 关闭 T-PROTO-ENTRY-WITNESS-
-// ABI-UNVERIFIED 中 register_append 那部分)。
+// ABI-UNVERIFIED 中 register_append 那部分; D-020账本1446/1448 后为新 10 参数 ABI 重新决定性验证,
+// 不是复用旧签名的验证结果——ABI 形状变了(11参数→10参数, 去掉 stakeInIdx)就必须重验)。
+//
+// 🔴 fixture 来源已切换: 原 2026-09-15-j2-register-append-entry-witness-abi-verification/(11参数,
+// 旧两步设计)标记 SUPERSEDED-BY D-020, 本文件现在指向新的
+// 2026-09-15-j2-d020-register-append-single-tx-verification/(10参数, 单笔交易)。
 //
 // 向量①: encodeRegisterAppendAction(用真实 kaspa-wasm ScriptBuilder)产出的字节, 与真实 D-019 pin
 // (3ed973335b59269293564805cc2c58a14595ec03)的 cli-debugger 自己跑 function/args 模式内部构造出的
-// active_sigscript 逐字节完全一致——后者是一次性用临时加一行 eprintln(未改任何编码逻辑, 见
-// docs/provenance/2026-09-15-j2-register-append-entry-witness-abi-verification/debug-print.patch)
-// 捕获的真实值, 冻结在同目录 real_action_from_debugger.hex, 不需要每次重新编译调试版二进制。
+// active_sigscript 逐字节完全一致——后者是一次性用临时加一行 eprintln(未改任何编码逻辑, 见新
+// provenance 目录的 debug-print.patch)捕获的真实值, 冻结在同目录 real_action_from_debugger.hex,
+// 不需要每次重新编译调试版二进制。
 //
 // 向量②: 用同一套编码器构造完整 sigScript(action+redeem), 通过 combineActionAndRedeem, 与手工拼接
 // 结果一致(证明 fromScript 桥接语义符合预期)。
 //
-// 向量③(经 legitimate function/args 路径, 因为 cli-debugger 架构上无法测"raw signature_script_hex
-// 直接喂给 active input"——见 README"发现"一节): 故意改 witness 里的 stake 但不改对应输出, 真实
-// debugger 报 require 失败并给出精确行号/trace(fnargs_wrongstake.test.json 冻结在同目录)。这条不是
-// 本测试文件自动跑的(依赖外部 cli-debugger.exe), 结果已冻结进 README, 此处只留指针注释。
+// 向量③(负向精确失败行号, 经 legitimate function/args 路径): 见新 provenance 目录 README 里的
+// ①b/①c/②c 三条负向向量(合并amount错/owner错/held缺席), 真实 debugger 报 require 失败并给出精确
+// 行号/trace, 已冻结进该 README。这条不是本测试文件自动跑的(依赖外部 cli-debugger.exe), 此处只留
+// 指针注释。
 //
 // Run: cd kasia-console && node src/lib/proto-register-append-witness.test.mjs
 
@@ -26,12 +31,12 @@ const { compileSilV100 } = await import('./pool-bshard-artifacts.mjs');
 let pass = 0, fail = 0;
 const t = (n, f) => { try { f(); pass++; console.log('[PASS] ' + n); } catch (e) { fail++; console.log('[FAIL] ' + n + ' :: ' + e.message); } };
 
-const FIXTURE_DIR = '../docs/provenance/2026-09-15-j2-register-append-entry-witness-abi-verification';
+const FIXTURE_DIR = '../docs/provenance/2026-09-15-j2-d020-register-append-single-tx-verification';
 function hexToBytes(h) { return Buffer.from(h.startsWith('0x') ? h.slice(2) : h, 'hex'); }
 
 const args = JSON.parse(fs.readFileSync(`${FIXTURE_DIR}/V-register_append-1.args.json`, 'utf8'));
-const [side, stake, leafOutIdx, psOutIdx, bettorPk, ps_prefix, ps_suffix, stakeInIdx, tok_out, tok_prefix, tok_suffix] = args;
-const w = { side, stake, leafOutIdx, psOutIdx, bettorPk, ps_prefix, ps_suffix, stakeInIdx, tok_out, tok_prefix, tok_suffix };
+const [side, stake, leafOutIdx, psOutIdx, bettorPk, ps_prefix, ps_suffix, tok_out, tok_prefix, tok_suffix] = args;
+const w = { side, stake, leafOutIdx, psOutIdx, bettorPk, ps_prefix, ps_suffix, tok_out, tok_prefix, tok_suffix };
 
 const refCtor = JSON.parse(fs.readFileSync(`${FIXTURE_DIR}/ShardLeaf_direct.reference.ctor.json`, 'utf8'));
 const compiled = compileSilV100(`${FIXTURE_DIR}/ShardLeaf_direct.sil`, refCtor, 'ShardLeaf_direct');

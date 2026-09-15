@@ -50,7 +50,9 @@ export async function registerIngestRoutes(fastify) {
   //   (fail-closed: console 不可达 ⇒ 不广播); 广播后 POST phase='submitted'{txid}。
   //
   //   与 /ingest/submit-intent(TRANSFER 专属, 写 submit_intents 表)不共用一张表——proto_bet_intents
-  //   是独立表(proto-bet-intent.mjs 文件头原话"不复用 submit_intents 表", 多一个 depends_on 链式依赖字段)。
+  //   是独立表(proto-bet-intent.mjs 文件头原话"不复用 submit_intents 表")。🔴 D-020(账本1446/1448):
+  //   原来这里还提到"多一个 depends_on 链式依赖字段"(两步设计的产物)——步骤A已取消, depends_on 列
+  //   已随 v208 迁移删除, 现在是单步, 无链式依赖。
   //
   //   🔴 relay 身份限定(硬条件①): body 必须带 relay_id, 且必须等于 process.env.PROTO_RELAY_ID——
   //   不等(含 PROTO_RELAY_ID 未配置的情况, fail-closed 方向: 未配置 = 无人被授权, 不是全部放行)

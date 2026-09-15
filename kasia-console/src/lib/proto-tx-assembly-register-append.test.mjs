@@ -1,5 +1,5 @@
 // proto-tx-assembly-register-append.test.mjs — buildRegisterAppendTxJson 真实端到端组装验证
-// (账本1425/1434/1436, bet_mint 步骤B)。真 kaspa-wasm + 真编译, relay 真代码交叉核验, 零mock。
+// (账本1425/1434/1436, D-020账本1446/1448单笔交易改造)。真 kaspa-wasm + 真编译, relay 真代码交叉核验, 零mock。
 // Run: cd kasia-console && node src/lib/proto-tx-assembly-register-append.test.mjs
 
 import { execSync, spawnSync } from 'node:child_process';
@@ -23,7 +23,7 @@ const {
 } = await import('./proto-tx-assembly.mjs');
 const {
   computeMarketGenesisArtifacts, computeShardLeafRedeemScript, computeKttGenesisArtifact,
-  STAKE_CHIP_OWNER_UNBOUND, loadProtocolConstants,
+  loadProtocolConstants,
 } = await import('./proto-covenant-builder.mjs');
 const { compileSilV100 } = await import('./pool-bshard-artifacts.mjs');
 const { extractTxShape, validateFixedValueOutputs, signOnlyDeclaredInputs, assertFinalTxid } = await import('../../../kasia-relay/src/lib/covenant-broadcast.mjs');
@@ -56,8 +56,17 @@ function compileEntryAbi(silPath, ctor, contractName) {
 
 const SLD_PATH = new URL('./ShardLeaf_direct.sil', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
 const TICKET_PATH = new URL('./sil-v1/PoolSideTicket.sil', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
+const KTT_PATH = new URL('./sil-v1/KanetTestToken.sil', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
 
-// ── ②第一笔下注(无 held 输入, currentState 全0)──
+// D-020(账本1446/1448): 唯一编一次 KTT(纯为了拿 entries.transfer 的 entryAbi + runtime_state 字段数,
+// 结构性质不依赖 owner 值——不再需要 STAKE_CHIP_OWNER_UNBOUND 这个哨兵, 用任意占位 owner(ZERO32)即可),
+// held 输入(唯一还会消费的 KTT 实例)复用同一份 entryAbi/stateFieldCount。
+const kttCtorForAbi = [{ kind: 'int', value: 1 }, { kind: 'bytes', value: [...Buffer.alloc(32)] }, { kind: 'byte', value: 4 }, { kind: 'byte', value: 0 }, { kind: 'bytes', value: [...Buffer.alloc(32)] }, { kind: 'bytes', value: [...Buffer.alloc(32)] }, { kind: 'int', value: 3 }, { kind: 'int', value: 3 }];
+const kttCompiled = compileEntryAbi(KTT_PATH, kttCtorForAbi, 'KanetTestToken');
+const kttEntryAbi = kttCompiled._raw.contracts.KanetTestToken.entries.transfer;
+const kttStateFieldCount = kttCompiled._raw.contracts.KanetTestToken.runtime_state.fields.length;
+
+// ── ②第一笔下注(无 held 输入, currentState 全0, [leaf, fee] 两输入) ──
 {
   const SIDE = 0, STAKE = 20;
   const bettorPk = Buffer.alloc(32, 0x66).toString('hex');
@@ -66,7 +75,7 @@ const TICKET_PATH = new URL('./sil-v1/PoolSideTicket.sil', import.meta.url).path
 
   const leafRedeem = computeShardLeafRedeemScript({ marketId: MARKET_ID, minBet: MIN_BET, sealCount: SEAL_COUNT, rootcloseTmplHash: genesisArtifacts.rootCloseTmplHash, state: currentState });
 
-  // register_append 的真实 entryAbi(用当前 ctor 现编, 与 leafRedeem 同一份 ctor)
+  // register_append 的真实 entryAbi(用当前 ctor 现编, 与 leafRedeem 同一份 ctor)——D-020: 10 参数, 无 stakeInIdx。
   const { ctorBytes32V100, ctorIntV100 } = await import('./pool-bshard-artifacts.mjs');
   const sldCtor = [
     ctorBytes32V100(MARKET_ID), ctorBytes32V100(ps_tmpl_hash), ctorBytes32V100(MARKET_ID),
@@ -76,15 +85,7 @@ const TICKET_PATH = new URL('./sil-v1/PoolSideTicket.sil', import.meta.url).path
   const sldCompiled = compileEntryAbi(SLD_PATH, sldCtor, 'ShardLeaf_direct');
   const registerAppendEntryAbi = sldCompiled._raw.contracts.ShardLeaf_direct.entries.register_append;
 
-  // stake KTT genesis(owner=STAKE_CHIP_OWNER_UNBOUND, 步骤A产物)
-  const stakeArtifact = computeKttGenesisArtifact({ amount: STAKE, ownerCovIdHex: STAKE_CHIP_OWNER_UNBOUND });
-  const kttCtorForAbi = [{ kind: 'int', value: STAKE }, { kind: 'bytes', value: [...Buffer.from(STAKE_CHIP_OWNER_UNBOUND, 'hex')] }, { kind: 'byte', value: 4 }, { kind: 'byte', value: 0 }, { kind: 'bytes', value: [...Buffer.alloc(32)] }, { kind: 'bytes', value: [...Buffer.alloc(32)] }, { kind: 'int', value: 3 }, { kind: 'int', value: 3 }];
-  const KTT_PATH = new URL('./sil-v1/KanetTestToken.sil', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
-  const kttCompiled = compileEntryAbi(KTT_PATH, kttCtorForAbi, 'KanetTestToken');
-  const stakeEntryAbi = kttCompiled._raw.contracts.KanetTestToken.entries.transfer;
-  const stateFieldCount = kttCompiled._raw.contracts.KanetTestToken.runtime_state.fields.length;
-
-  // 合并 KTT genesis(owner=leafCovId)
+  // 合并 KTT genesis(owner=leafCovId, amount=pool_value+stake 纯witness值——不再从任何输入state读取)
   const mergedArtifact = computeKttGenesisArtifact({ amount: newState.pool_value, ownerCovIdHex: leafCovId });
 
   // ticket genesis
@@ -99,23 +100,22 @@ const TICKET_PATH = new URL('./sil-v1/PoolSideTicket.sil', import.meta.url).path
   const tokPrefixHex = '0x' + Buffer.from(extractTemplateArtifactV100(kttCompiled).templatePrefix).toString('hex');
   const tokSuffixHex = '0x' + Buffer.from(extractTemplateArtifactV100(kttCompiled).templateSuffix).toString('hex');
 
-  const stakeOutpoint = { txid: 'cc'.repeat(32), vout: 0 };
   const feeUtxo = { txid: 'dd'.repeat(32), vout: 0, value: 10_000_000_000n, scriptPublicKeyHex: relaySpkHex };
 
   let built;
-  t('①first_bet buildRegisterAppendTxJson 真实构造成功(无held输入)', () => {
+  t('①first_bet buildRegisterAppendTxJson 真实构造成功([leaf,fee]两输入, 无held无stake)', () => {
     built = buildRegisterAppendTxJson({
       kaspa, network: 'mainnet',
       leafRedeemScript: leafRedeem.script, leafStateLayout: leafRedeem.stateLayout,
       leafOutpoint, leafCovId, currentState, newState,
       heldInput: null,
-      stakeInput: { txid: stakeOutpoint.txid, vout: stakeOutpoint.vout, value: 20_000_000n, scriptPublicKeyHex: stakeArtifact.scriptPubKeyHex, redeemScript: stakeArtifact.script, entryAbi: stakeEntryAbi, stateFieldCount },
       feeUtxo, relayChangeScriptPublicKeyHex: relaySpkHex,
       registerAppendEntryAbi, registerAppendArgs: { side: SIDE, stake: STAKE, bettorPk, psPrefix: psPrefixHex, psSuffix: psSuffixHex, tokPrefix: tokPrefixHex, tokSuffix: tokSuffixHex },
       ticketScriptPubKeyHex: ticketSpkHex, mergedKttScript: mergedArtifact.script,
       absFeeCapSompi: 100_000_000n,
     });
     if (!built.txJson || !built.expectedTxid) throw new Error('返回形状不对');
+    if (built.signInputIndices.length !== 1 || built.signInputIndices[0] !== 1) throw new Error(`两输入形状下 fee 应该在 index=1, 实际 signInputIndices=${JSON.stringify(built.signInputIndices)}`);
   });
 
   t('②relay真代码能反序列化+extractTxShape+validateFixedValueOutputs通过', () => {
@@ -134,7 +134,7 @@ const TICKET_PATH = new URL('./sil-v1/PoolSideTicket.sil', import.meta.url).path
   });
 }
 
-// ── ④⑤⑥ 第二笔下注(有 held 输入, currentState.pool_value=第一笔下注后的值)──
+// ── ④⑤⑥ 第二笔下注(有 held 输入, currentState.pool_value=第一笔下注后的值, [leaf,held,fee] 三输入) ──
 {
   const SIDE = 1, STAKE = 30;
   const bettorPk = Buffer.alloc(32, 0x77).toString('hex');
@@ -153,13 +153,6 @@ const TICKET_PATH = new URL('./sil-v1/PoolSideTicket.sil', import.meta.url).path
   const registerAppendEntryAbi = sldCompiled._raw.contracts.ShardLeaf_direct.entries.register_append;
 
   const heldArtifact = computeKttGenesisArtifact({ amount: currentState.pool_value, ownerCovIdHex: leafCovId }); // 上一笔 register_append 产出的合并池代币(held)
-  const stakeArtifact = computeKttGenesisArtifact({ amount: STAKE, ownerCovIdHex: STAKE_CHIP_OWNER_UNBOUND });
-  const kttCtorForAbi = [{ kind: 'int', value: STAKE }, { kind: 'bytes', value: [...Buffer.from(STAKE_CHIP_OWNER_UNBOUND, 'hex')] }, { kind: 'byte', value: 4 }, { kind: 'byte', value: 0 }, { kind: 'bytes', value: [...Buffer.alloc(32)] }, { kind: 'bytes', value: [...Buffer.alloc(32)] }, { kind: 'int', value: 3 }, { kind: 'int', value: 3 }];
-  const KTT_PATH = new URL('./sil-v1/KanetTestToken.sil', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
-  const kttCompiled = compileEntryAbi(KTT_PATH, kttCtorForAbi, 'KanetTestToken');
-  const stakeEntryAbi = kttCompiled._raw.contracts.KanetTestToken.entries.transfer;
-  const stateFieldCount = kttCompiled._raw.contracts.KanetTestToken.runtime_state.fields.length;
-
   const mergedArtifact = computeKttGenesisArtifact({ amount: newState.pool_value, ownerCovIdHex: leafCovId });
 
   const ticketCtor = [{ kind: 'bytes', value: [...Buffer.from(bettorPk, 'hex')] }, { kind: 'int', value: SIDE }, { kind: 'int', value: STAKE }, { kind: 'bytes', value: [...Buffer.from(MARKET_ID, 'hex')] }];
@@ -174,23 +167,22 @@ const TICKET_PATH = new URL('./sil-v1/PoolSideTicket.sil', import.meta.url).path
   const tokSuffixHex = '0x' + Buffer.from(extractTemplateArtifactV100(kttCompiled).templateSuffix).toString('hex');
 
   const heldOutpoint = { txid: 'bb'.repeat(32), vout: 0 };
-  const stakeOutpoint = { txid: 'cc'.repeat(32), vout: 0 };
   const feeUtxo = { txid: 'dd'.repeat(32), vout: 0, value: 10_000_000_000n, scriptPublicKeyHex: relaySpkHex };
 
   let built;
-  t('④second_bet buildRegisterAppendTxJson 真实构造成功(有held输入)', () => {
+  t('④second_bet buildRegisterAppendTxJson 真实构造成功([leaf,held,fee]三输入, 无stake)', () => {
     built = buildRegisterAppendTxJson({
       kaspa, network: 'mainnet',
       leafRedeemScript: leafRedeem.script, leafStateLayout: leafRedeem.stateLayout,
       leafOutpoint, leafCovId, currentState, newState,
-      heldInput: { txid: heldOutpoint.txid, vout: heldOutpoint.vout, value: 20_000_000n, scriptPublicKeyHex: heldArtifact.scriptPubKeyHex, redeemScript: heldArtifact.script, entryAbi: stakeEntryAbi, stateFieldCount },
-      stakeInput: { txid: stakeOutpoint.txid, vout: stakeOutpoint.vout, value: 20_000_000n, scriptPublicKeyHex: stakeArtifact.scriptPubKeyHex, redeemScript: stakeArtifact.script, entryAbi: stakeEntryAbi, stateFieldCount },
+      heldInput: { txid: heldOutpoint.txid, vout: heldOutpoint.vout, value: 20_000_000n, scriptPublicKeyHex: heldArtifact.scriptPubKeyHex, redeemScript: heldArtifact.script, entryAbi: kttEntryAbi, stateFieldCount: kttStateFieldCount },
       feeUtxo, relayChangeScriptPublicKeyHex: relaySpkHex,
       registerAppendEntryAbi, registerAppendArgs: { side: SIDE, stake: STAKE, bettorPk, psPrefix: psPrefixHex, psSuffix: psSuffixHex, tokPrefix: tokPrefixHex, tokSuffix: tokSuffixHex },
       ticketScriptPubKeyHex: ticketSpkHex, mergedKttScript: mergedArtifact.script,
       absFeeCapSompi: 100_000_000n,
     });
     if (!built.txJson || !built.expectedTxid) throw new Error('返回形状不对');
+    if (built.signInputIndices.length !== 1 || built.signInputIndices[0] !== 2) throw new Error(`三输入形状下 fee 应该在 index=2, 实际 signInputIndices=${JSON.stringify(built.signInputIndices)}`);
   });
 
   t('⑤relay真代码能反序列化+extractTxShape+validateFixedValueOutputs通过(有held输入形状)', () => {

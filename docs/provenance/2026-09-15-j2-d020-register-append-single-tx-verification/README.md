@@ -120,4 +120,7 @@ pinned `cli-debugger.exe` 逐条单独跑，非 `--run-all` 混合合约批跑�
 - `debug-print.patch` — 临时调试补丁（过程记录，未实际留在 silverscript 仓库里）。
 - `real_action_from_debugger.hex` — 真实 cli-debugger 构造出的 `active_sigscript`（冻结证据）。
 - `verify-witness-encoding.mjs` — ③ 的独立编码器 + 逐字节比对脚本（过程记录）。
+- `V-register_append-1.args.json` / `ShardLeaf_direct.reference.ctor.json` —
+  `proto-register-append-witness.test.mjs`（生产代码回归测试，5/5 pass）复用的冻结输入，从
+  `①a_leaf_first_bet_no_held_no_stake_pass` 向量提取（不是另外手造的数据）。
 - `README.md` — 本文件。

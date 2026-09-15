@@ -1,6 +1,7 @@
 // proto-broadcast-ops.mjs — market_genesis/bet_mint 真正"构造+发 covenant_broadcast"的胶水层
-// (J2, 账本1425/1438, Stage 1 覆盖 market_genesis; Stage 2 本笔补 bet_mint 步骤A(铸stake筹码);
-// 步骤B(register_append, 需要 held 查找+同市场串行)留 Stage 3)。
+// (J2, 账本1425/1438, Stage 1 覆盖 market_genesis; bet_mint 原两步(步骤A铸stake筹码+步骤B
+// register_append)已被 D-020(账本1446/1448, a4878d7d)取消——register_append 现在是下注唯一的
+// 单笔交易, 步骤A(buildBetMintStepAAndBroadcast 等)已随之删除)。
 //
 // 职责分层: proto-market-intent.mjs/proto-bet-intent.mjs 只管状态机(pending→prepared→submitted→
 // landed), 不碰 kaspa-wasm; proto-tx-assembly.mjs/proto-covenant-builder.mjs 只管纯构造(不碰 IPC/DB
@@ -18,12 +19,12 @@
 
 import { sqlite } from '../db/client.js';
 import {
-  scriptPublicKeyFromHex, buildMarketGenesisTxJson, buildKttGenesisTxJson, buildRegisterAppendTxJson,
+  scriptPublicKeyFromHex, buildMarketGenesisTxJson, buildRegisterAppendTxJson,
   selectFeeUtxo, GENESIS_OUTPUT_SOMPI, CONTINUATION_OUTPUT_SOMPI, REGISTER_APPEND_TICKET_OUT_INDEX,
 } from './proto-tx-assembly.mjs';
 import {
   computeShardLeafRedeemScript, computeKttGenesisArtifact, computeTicketGenesisArtifact,
-  STAKE_CHIP_OWNER_UNBOUND, loadFeeProfileCap, loadProtocolConstants,
+  loadFeeProfileCap, loadProtocolConstants,
 } from './proto-covenant-builder.mjs';
 import { compileSilV100, ctorBytes32V100, ctorIntV100 } from './pool-bshard-artifacts.mjs';
 import { marketIntentKeyFor, markMarketStatus } from './proto-market-intent.mjs';
@@ -117,83 +118,8 @@ export function shardLeafTargetAddress({ kaspa, network, market }) {
 }
 
 /**
- * driveBetIntent(step='mint') 的 buildAndBroadcast({attempt}) 回调实体(Stage 2, bet_mint 步骤A:
- * 铸stake筹码, owner=STAKE_CHIP_OWNER_UNBOUND, 账本1436)。结构与 buildMarketGenesisAndBroadcast
- * 完全对称(同样是"1 fee 输入 genesis 一个新 covenant 实例"的形状), 无需像市场创世那样原子写
- * covenant_id(stake 筹码没有类似 shardleaf_cov_id 的落链校验需求, 账本1425/1436的裁定范围止步于
- * owner 值本身, 不延伸到额外落库校验)。
- * @param {object} o
- * @param {*} o.kaspa
- * @param {string} o.network
- * @param {object} o.bet  proto_bets 行(id/stake 必须已存在)
- * @param {Function} o.sendCmd
- * @param {string} o.relayId
- * @param {string} o.relayAddress
- * @returns {Promise<{txId:string}|{error:string}>}
- */
-export async function buildBetMintStepAAndBroadcast({ kaspa, network, bet, sendCmd, relayId, relayAddress }) {
-  const { Address } = kaspa;
-  const relaySpk = kaspa.payToAddressScript(new Address(relayAddress));
-  const relaySpkHex = '0x' + relaySpk.script;
-
-  const kttArtifact = computeKttGenesisArtifact({ amount: bet.stake, ownerCovIdHex: STAKE_CHIP_OWNER_UNBOUND });
-
-  const cap = loadFeeProfileCap('bet_mint_step_a');
-  const minRequired = GENESIS_OUTPUT_SOMPI + cap;
-  const utxoRes = await sendCmd(relayId, { type: 'get_address_utxos', address: relayAddress }, 15000, 'proto-driver');
-  if (!utxoRes?.ok) return { error: `get_address_utxos failed: ${utxoRes?.error || 'no response'}` };
-  const candidates = toFeeUtxoCandidates(utxoRes.utxos, relaySpk, relaySpkHex);
-  let feeUtxo;
-  try { feeUtxo = selectFeeUtxo(candidates, minRequired); }
-  catch (e) { return { error: e.message }; }
-
-  let built;
-  try {
-    built = buildKttGenesisTxJson({
-      kaspa, network, feeUtxo, relayChangeScriptPublicKeyHex: relaySpkHex,
-      kttScriptPubKeyHex: kttArtifact.scriptPubKeyHex, absFeeCapSompi: cap,
-    });
-  } catch (e) { return { error: `buildKttGenesisTxJson failed: ${e.message}` }; }
-
-  const rep = await sendCmd(relayId, {
-    type: PROTO_COVENANT_BROADCAST_TYPE,
-    intent_key: betIntentKeyFor(bet.id, 'mint'),
-    tx_json: built.txJson,
-    sign_input_indices: built.signInputIndices,
-    expected_txid: built.expectedTxid,
-    genesis_output_indices: built.genesisOutputIndices,
-    continuation_output_indices: built.continuationOutputIndices,
-  }, 30000, 'proto-driver');
-
-  if (rep?.ok && rep?.txId) return { txId: rep.txId };
-  return { error: rep?.error || `covenant_broadcast failed (code=${rep?.code || 'unknown'})` };
-}
-
-/** bet_mint 步骤A 落链判据用的地址(KTT genesis 输出的 P2SH bech32 地址)——从 bet.stake 确定性重算
- * (owner 恒为 STAKE_CHIP_OWNER_UNBOUND, 不依赖任何随机值)。 */
-export function betMintStepATargetAddress({ kaspa, network, bet }) {
-  const kttArtifact = computeKttGenesisArtifact({ amount: bet.stake, ownerCovIdHex: STAKE_CHIP_OWNER_UNBOUND });
-  const spk = scriptPublicKeyFromHex(kaspa, kttArtifact.scriptPubKeyHex);
-  return kaspa.addressFromScriptPublicKey(spk, network).toString();
-}
-
-/**
- * bet_mint 步骤A landed 后的 proto_bets 记账(driveBetIntent/checkBetIntentLanded 只更新
- * proto_bet_intents 表, 不知道 proto_bets 的存在——这条 UPDATE 是两张表之间唯一的桥, 单独成一个
- * 具名函数放在这个"胶水层"文件里, 不塞进 proto-bet-intent.mjs(该文件职责单一, 文件头注明确
- * "不碰 proto_bets 表")。WHERE status='pending' 做幂等(重复调用/并发 tick 不会二次改写或报错)。
- * genesisOutputIndices 恒为 [0](buildKttGenesisTxJson 的既定形状), vout 因此恒为 0。
- */
-export function markBetMintStepALanded({ betId, txid }) {
-  sqlite.prepare(`
-    UPDATE proto_bets SET mint_txid = ?, mint_vout = 0, status = 'chip_minted_pending_stake'
-    WHERE id = ? AND status = 'pending'
-  `).run(txid, betId);
-}
-
-/**
- * driveBetIntent(step='append') 的 buildAndBroadcast({attempt}) 回调实体(Stage 3, bet_mint 步骤B:
- * register_append, 账本1425/1429/1436/1439)。构造前的三项 fail-closed 核对(账本1429/1439, Bettor
+ * driveBetIntent(step='append') 的 buildAndBroadcast({attempt}) 回调实体(bet_mint 唯一步骤:
+ * register_append, 单笔交易, 账本1425/1429/1436/1439/1446/1448 D-020)。构造前的三项 fail-closed 核对(账本1429/1439, Bettor
  * 明确要求"放在构造B之前的同一个fail-closed步骤里完成", 不分散到多处):
  *   ① assertNoInFlightAppend: 同一市场 append 串行(调用方——proto-driver.mjs——已经在外层做过一次,
  *      这里再做一次是双重防线, 便宜的查询, 不怕重复)。
@@ -207,7 +133,7 @@ export function markBetMintStepALanded({ betId, txid }) {
  * @param {*} o.kaspa
  * @param {string} o.network
  * @param {object} o.market  proto_markets 行(需要 shardleaf_cov_id 已经写好, 即 genesis 已 landed)
- * @param {object} o.bet  这一笔要 append 的 proto_bets 行(id/side/stake/bettor_pk/mint_txid/mint_vout 必须已存在)
+ * @param {object} o.bet  这一笔要 append 的 proto_bets 行(id/side/stake/bettor_pk 必须已存在)
  * @param {Function} o.sendCmd
  * @param {string} o.relayId
  * @param {string} o.relayAddress
@@ -278,11 +204,6 @@ export async function buildRegisterAppendAndBroadcast({ kaspa, network, market, 
   const sldCompiled = compileSilV100(SHARD_LEAF_DIRECT_SIL, sldCtor, 'ShardLeaf_direct');
   const registerAppendEntryAbi = sldCompiled._raw.contracts.ShardLeaf_direct.entries.register_append;
 
-  const stakeArtifact = computeKttGenesisArtifact({ amount: bet.stake, ownerCovIdHex: STAKE_CHIP_OWNER_UNBOUND });
-  const stakeInput = {
-    txid: bet.mint_txid, vout: bet.mint_vout, value: GENESIS_OUTPUT_SOMPI, scriptPublicKeyHex: stakeArtifact.scriptPubKeyHex,
-    redeemScript: stakeArtifact.script, entryAbi: stakeArtifact.entryAbi, stateFieldCount: stakeArtifact.stateFieldCount,
-  };
   let heldInput = null;
   if (heldOutpointRaw) {
     heldInput = {
@@ -311,7 +232,7 @@ export async function buildRegisterAppendAndBroadcast({ kaspa, network, market, 
     built = buildRegisterAppendTxJson({
       kaspa, network,
       leafRedeemScript: leafRedeem.script, leafStateLayout: leafRedeem.stateLayout, leafOutpoint, leafCovId,
-      currentState, newState, heldInput, stakeInput, feeUtxo, relayChangeScriptPublicKeyHex: relaySpkHex,
+      currentState, newState, heldInput, feeUtxo, relayChangeScriptPublicKeyHex: relaySpkHex,
       registerAppendEntryAbi,
       registerAppendArgs: {
         side: bet.side, stake: bet.stake, bettorPk: '0x' + bet.bettor_pk,
@@ -353,14 +274,18 @@ export function registerAppendTargetAddress({ kaspa, network, market, bet }) {
 }
 
 /**
- * bet_mint 步骤B landed 后的 proto_bets 记账(两张表之间的桥, 同 markBetMintStepALanded 的既有模式):
+ * register_append landed 后的 proto_bets 记账(两张表之间的桥, proto-bet-intent.mjs 只更新
+ * proto_bet_intents 表, 不知道 proto_bets 的存在——这条 UPDATE 是唯一的桥, 单独成一个具名函数放在
+ * 这个"胶水层"文件里, 不塞进 proto-bet-intent.mjs 那边):
  * status 推进到 'confirmed'(deriveLeafState 的 SQL 查询就是靠这个状态筛选已确认下注, landed 后立即
  * 推进能让下一笔下注马上看到正确的 pool_value)、stake_tx_id/ticket_txid/ticket_vout 写入。
- * WHERE status='chip_minted_pending_stake' 做幂等。
+ * 🔴 D-020(账本1446/1448): WHERE 从 status='chip_minted_pending_stake'(旧两步中间态)改成
+ * status='pending'——下注不再有铸筹码中间态, register_append 是唯一的一步, 直接 pending→confirmed。
+ * WHERE status='pending' 做幂等(重复调用/并发 tick 不会二次改写或报错)。
  */
 export function markBetAppendLanded({ betId, txid }) {
   sqlite.prepare(`
     UPDATE proto_bets SET status = 'confirmed', confirmed_at = datetime('now'), stake_tx_id = ?, ticket_txid = ?, ticket_vout = ?
-    WHERE id = ? AND status = 'chip_minted_pending_stake'
+    WHERE id = ? AND status = 'pending'
   `).run(txid, txid, REGISTER_APPEND_TICKET_OUT_INDEX, betId);
 }
