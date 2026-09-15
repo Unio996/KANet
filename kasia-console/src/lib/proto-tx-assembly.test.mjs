@@ -163,6 +163,23 @@ t('dynamicNetLossCeiling: min(requiredFee×2, absFeeCapSompi, GLOBAL_ABS_FEE_CAP
   if (dynamicNetLossCeiling(999_999_999_999n, 999_999_999_999n) !== GLOBAL_ABS_FEE_CAP_SOMPI) throw new Error('应该被 GLOBAL 硬顶钳住(requiredFee×2 与 absFeeCapSompi 都故意设得很大)');
 });
 
+// 🔴 NWT 非阻断建议(2026-09-15): GLOBAL_ABS_FEE_CAP_SOMPI 在 console(本文件)与 relay
+// (kasia-relay/src/lib/covenant-broadcast.mjs)各自独立声明一份同名常量(角色分工铁律——Console 不
+// import relay 代码), 两边靠"人记得同步改"维持一致, 没有任何机制在数值漂移时报警。本测试从 relay
+// 源码文本里现读它自己声明的值(不 import relay 模块——那会违反"Console 传导不碰链"的角色分工;
+// 只读文件文本, 同 proto-bet-intent.test.mjs⑦对 PROTO_COVENANT_BROADCAST_TYPE 的既有手法), 与
+// console 侧的 GLOBAL_ABS_FEE_CAP_SOMPI 逐值比对——防止未来只改一边、另一边悄悄过期。
+t('GLOBAL_ABS_FEE_CAP_SOMPI 两侧不漂移: console侧常量与relay侧源码里声明的值逐字节相等', () => {
+  const relaySrcPath = new URL('../../../kasia-relay/src/lib/covenant-broadcast.mjs', import.meta.url);
+  const relaySrc = fs.readFileSync(relaySrcPath, 'utf8');
+  const m = relaySrc.match(/export const GLOBAL_ABS_FEE_CAP_SOMPI\s*=\s*([0-9_]+)n\s*;/);
+  if (!m) throw new Error('relay 源码里找不到 GLOBAL_ABS_FEE_CAP_SOMPI 的声明行(covenant-broadcast.mjs 的导出写法变了? 需要同步更新这条正则)');
+  const relayValue = BigInt(m[1].replace(/_/g, ''));
+  if (relayValue !== GLOBAL_ABS_FEE_CAP_SOMPI) {
+    throw new Error(`两侧漂移了: console侧=${GLOBAL_ABS_FEE_CAP_SOMPI}, relay侧(covenant-broadcast.mjs现读)=${relayValue}——改任一侧必须同步改另一侧`);
+  }
+});
+
 // ============ market_genesis tx_json 真实端到端组装(真 kaspa-wasm + 真编译 ShardLeaf_direct) ============
 // 目的: 证明 buildMarketGenesisTxJson 产出的 tx_json 不只是"格式对", 而是 relay 侧真代码
 // (Transaction.deserializeFromSafeJSON → extractTxShape → validateFixedValueOutputs → 签名 →

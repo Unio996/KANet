@@ -393,5 +393,34 @@ t('FVO-9 GENESIS_OUTPUT_SOMPI 与 CONTINUATION_OUTPUT_SOMPI 当前数值相等(s
   assert.strictEqual(GENESIS_OUTPUT_SOMPI, 20_000_000n);
 });
 
+// ── FVO+NL 协同(NWT 非阻断建议, 2026-09-15): 未声明输出的任意值不是 validateFixedValueOutputs 的
+// 空子——两道闸各管各的层, validateFixedValueOutputs 只核"声明过的 genesis/continuation 索引",
+// 一个既不在 genesisOutputIndices 也不在 continuationOutputIndices 里的第三个输出, 面值随便是多少
+// 它都不会去看; 但只要这个未声明输出没有付回 relay 自己, 它的全部面值就会被 validateNetLoss 算进
+// net_loss——真正的安全性质建立在两道闸的交集上, 不是 validateFixedValueOutputs 单独就要兜住所有值。
+t('FVO+NL-1 未声明的第三个输出(非常量任意值, 付到别处不是relay自己) ⇒ validateFixedValueOutputs 不管它(ok:true, 结构上就不检查未声明索引), 但 validateNetLoss 仍然把它算进net_loss并正确拒绝(两道闸各司其职, 不是漏洞)', () => {
+  const inputAmt = 100_000_000n; // 1 KAS, 覆盖全部三个输出
+  const undeclaredValue = 79_000_000n; // 任意非常量值, 刻意选得比 fee cap 大很多
+  const outputs = [
+    { valueSompi: GENESIS_OUTPUT_SOMPI, scriptPubKeyRaw: RELAY_SPK },       // [0] 声明的 genesis, 面值正确
+    { valueSompi: CONTINUATION_OUTPUT_SOMPI, scriptPubKeyRaw: RELAY_SPK },  // [1] 声明的 continuation, 面值正确
+    { valueSompi: undeclaredValue, scriptPubKeyRaw: OTHER_SPK },           // [2] 未声明, 任意值, 付给别人
+  ];
+  const fvo = validateFixedValueOutputs({ outputs, genesisOutputIndices: [0], continuationOutputIndices: [1] });
+  assert.strictEqual(fvo.ok, true, 'validateFixedValueOutputs 只核声明过的索引, 不检查[2], 结构上必然放行');
+
+  const requiredFee = 789_800n;
+  const nl = validateNetLoss({
+    inputs: [{ amountSompi: inputAmt, scriptPubKeyRaw: RELAY_SPK }],
+    outputs,
+    signInputIndices: [0], relayScriptPubKey: RELAY_SPK, requiredFeeSompi: requiredFee, absFeeCapSompi: TEST_KIND_CAP_SOMPI,
+  });
+  assert.strictEqual(nl.ok, false, '未声明输出的巨额面值必须仍被 validateNetLoss 拦下, 不因为它躲过了 validateFixedValueOutputs 就被放行');
+  // net_loss = input - Σ(付回relay的输出) = inputAmt - (GENESIS+CONTINUATION) = inputAmt - 40,000,000
+  const expectedNetLoss = inputAmt - GENESIS_OUTPUT_SOMPI - CONTINUATION_OUTPUT_SOMPI;
+  assert.strictEqual(nl.netLossSompi, expectedNetLoss, `net_loss 应该把未声明输出的全部面值算进"没回到relay"那一边, 实际 ${nl.netLossSompi}`);
+  assert.ok(nl.netLossSompi > nl.feeCeilingSompi, 'net_loss 应该远超上限, 证明这不是踩线的边界情况, 是真实必须拒绝的场景');
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
