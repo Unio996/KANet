@@ -21,7 +21,7 @@
 // relay 侧因此只做一层粗粒度、与 kind 无关的最终兜底(GLOBAL 硬顶)，per-kind 的精细校验在 console
 // 侧完成、relay 完全不信任、也不需要知道"这是哪个 kind"。
 import {
-  validateSignedInputCeiling, computeRequiredFeeSompi, validateNetLoss,
+  validateSignedInputCeiling, computeRequiredFeeSompi, validateNetLoss, validateImpliedMinerFee,
   extractTxShape, assertFinalTxid, signOnlyDeclaredInputs, GLOBAL_ABS_FEE_CAP_SOMPI,
   SIGNED_INPUT_CEILING_SOMPI, validateFixedValueOutputs,
 } from './covenant-broadcast.mjs';
@@ -169,6 +169,17 @@ export async function covenantBroadcastRelay({
   if (!nl.ok) {
     log(`COVENANT_BROADCAST ${key} REJECTED (net loss exceeds ceiling): ${nl.reason}`);
     return { ok: false, code: 'net_loss_exceeded', error: nl.reason, intent_key: key };
+  }
+
+  // 🔴 账本1455纵深防御(与 validateNetLoss 并列, 同一个 requiredFeeSompi, 同一处签名后/广播前的
+  // 位置): 独立核对整笔交易【真实隐含的矿工费】(Σ全部输入 − Σ全部输出, 不筛 signInputIndices)是否
+  // 合理——不依赖 console 侧的构造逻辑对不对, 万一某个 kind 的构造层将来又漏计了某个非签名输入的
+  // 真实面值(register_append 曾经真实犯过, 见该函数注释), 这里独立拦下, 不广播一笔静默多付矿工费
+  // 的交易。
+  const imf = validateImpliedMinerFee({ inputs: shape.inputs, outputs: shape.outputs, requiredFeeSompi });
+  if (!imf.ok) {
+    log(`COVENANT_BROADCAST ${key} REJECTED (implied miner fee exceeds ceiling): ${imf.reason}`);
+    return { ok: false, code: 'implied_fee_exceeded', error: imf.reason, intent_key: key };
   }
 
   const txid = tx.id;

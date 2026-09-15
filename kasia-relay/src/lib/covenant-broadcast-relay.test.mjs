@@ -266,6 +266,43 @@ await tAsync('FRESH-9(NWT 1387 复核要求) net_loss cap 与 SIGNED_INPUT_CEILI
   assert.strictEqual(rpc.calls.length, 0, '零广播');
 });
 
+await tAsync('FRESH-10(账本1455纵深防御) 交易含一个未签名的输入(如leaf/held这类covenant输入)但其面值凭空多算进"隐含手续费"里(足够大的漏计量级, 超过min(requiredFee×2,GLOBAL)容忍区间) ⇒ implied_fee_exceeded拒绝, 不签名前就已经反序列化+extractTxShape, 但拒绝发生在验证阶段而不是广播——不重复广播', async () => {
+  const kaspa = makeFakeKaspa();
+  const rpc = makeRpc();
+  // required_fee = 1000 mass × 100 = 100,000 sompi; ceiling = min(200,000, GLOBAL) = 200,000。
+  // 🔴 关键: 让 validateNetLoss 自己先看着"没问题"(signed relay 输入的净损耗恰好等于 requiredFee,
+  // 100,000 <= 200,000 放行)——这正是真实bug的形状: 只审"relay 自己签的那个输入"看不出问题, 因为
+  // 问题出在【另一个未签名的covenant输入】的面值没有被正确记入输出那一侧。
+  // 两个输入: [0]covenant输入(未签名, 2,000,000 sompi) [1]relay签名输入(10,000,000, 找零9,900,000
+  // 回relay自己, net_loss=100,000=requiredFee, validateNetLoss会放行)。
+  // 输出: covenant输出只给了1,000,000(比covenant输入少了1,000,000, 模拟"这部分没被正确传递到输出",
+  // 而是变成了multiplier隐含手续费的一部分) + 找零9,900,000。
+  // Σin=12,000,000, Σout=10,900,000, impliedFee=1,100,000, 远超ceiling(200,000)——
+  // 这不是在复现IMF-2a那个"落在容忍区间内"的真实bug精确量级, 是验证"validateNetLoss放行、但隐含
+  // 手续费仍然超标"这个真实bug的形状确实会被这道独立的闸拦下。
+  const tx = {
+    inputs: [
+      { previousOutpoint: { transactionId: 'bb'.repeat(32), index: 0 }, signatureScript: '', sequence: '0', sigOpCount: 1,
+        utxo: { amount: '2000000', scriptPublicKey: 'spk:some-covenant-in' } },
+      { previousOutpoint: { transactionId: 'aa'.repeat(32), index: 0 }, signatureScript: '', sequence: '0', sigOpCount: 1,
+        utxo: { amount: '10000000', scriptPublicKey: 'spk:relay-addr' } },
+    ],
+    outputs: [
+      { value: '1000000', scriptPublicKey: 'spk:some-covenant-out' },
+      { value: '9900000', scriptPublicKey: 'spk:relay-addr' },
+    ],
+  };
+  const cmd = { intent_key: 'proto-bet:f10:mint', tx_json: tx, sign_input_indices: [1], expected_txid: 'FINAL_TXID_DEFAULT' };
+  const ingest = makeIngestPhase();
+  const r = await covenantBroadcastRelay({ cmd, kaspa, rpc, wallet: makeWallet(), networkId: 'mainnet', senderAddress: 'relay-addr', log: () => {}, ingestPhase: ingest.fn });
+  assert.strictEqual(r.ok, false, JSON.stringify(r));
+  assert.strictEqual(r.code, 'implied_fee_exceeded', `本该在隐含手续费检查这一步被拒, 实际: ${JSON.stringify(r)}`);
+  assert.ok(/implied miner fee/.test(r.error) && /1100000/.test(r.error), `error应该带实际算出的隐含手续费数字(实际: ${r.error})`);
+  assert.strictEqual(kaspa.calls.createInputSignature.length, 1, '这条检查在签名之后才做(与validateNetLoss并列, 需要真实requiredFee), 所以已经签过名——但签名之后还没广播就被拦下');
+  assert.strictEqual(rpc.calls.length, 0, '零广播');
+  assert.strictEqual(ingest.calls.length, 0, '连prepared ingest都没打(比广播更早被拦, fail-closed)');
+});
+
 await tAsync('IDEMPOTENT-1 同一 intent_key 二次调用(进程内已完成) ⇒ reused, 不重新广播', async () => {
   const kaspa = makeFakeKaspa();
   const rpc = makeRpc();

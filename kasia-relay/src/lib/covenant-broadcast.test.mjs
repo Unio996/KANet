@@ -4,7 +4,7 @@
 
 import assert from 'node:assert';
 import {
-  validateSignedInputCeiling, validateNetLoss, computeRequiredFeeSompi, assertFinalTxid,
+  validateSignedInputCeiling, validateNetLoss, validateImpliedMinerFee, computeRequiredFeeSompi, assertFinalTxid,
   signOnlyDeclaredInputs, canonicalScriptHex, GLOBAL_ABS_FEE_CAP_SOMPI, SIGNED_INPUT_CEILING_SOMPI, SOMPI_PER_MASS,
   validateFixedValueOutputs, GENESIS_OUTPUT_SOMPI, CONTINUATION_OUTPUT_SOMPI,
 } from './covenant-broadcast.mjs';
@@ -216,6 +216,92 @@ t('NL-12 🔴 NWT 1376 非阻断建议落地(与 SIC-7 同款): signInputIndices
   });
   assert.strictEqual(r.ok, false);
   assert.ok(/duplicate index 0/.test(r.reason), `reason 应指明重复索引(实际: ${r.reason})`);
+});
+
+// ── validateImpliedMinerFee(账本1455纵深防御, NWT/Bettor诊断: register_append曾经真实漏计非签名
+//    输入面值, 每笔静默多付真实矿工费——见 kasia-console/src/lib/proto-tx-assembly.mjs 的修复与
+//    docs/provenance/2026-09-15-j2-d020-register-append-fee-formula-fix/) ──────────────────
+t('IMF-1 正常交易(隐含手续费=requiredFee的合理量级) ⇒ 放行', () => {
+  const r = validateImpliedMinerFee({
+    inputs: [{ amountSompi: 100_000_000n, scriptPubKeyRaw: RELAY_SPK }],
+    outputs: [{ valueSompi: 99_900_000n, scriptPubKeyRaw: RELAY_SPK }],
+    requiredFeeSompi: 100_000n,
+  });
+  assert.strictEqual(r.ok, true, r.reason);
+  assert.strictEqual(r.impliedFeeSompi, 100_000n);
+});
+t('IMF-2a 🔴 诚实记录账本1455真实bug的精确量级: 单独漏计leaf(0.2 KAS)在~0.44 KAS requiredFee上的真实overpay, 落在min(requiredFee×2, GLOBAL)容忍区间之内, 这条relay侧兜底并不会拒绝它——真正防住这个具体bug的是console侧leftover公式修复本身(逐字节相等的assertImpliedFeeMatches不变量), 这里只是如实记录relay侧这道闸的容忍边界, 不是声称它能挡住一切量级的overpay', () => {
+  const leafValue = 20_000_000n; // 0.2 KAS, 真实bug里被漏计的leaf续约输入(首笔下注, 无held)
+  const feeInputValue = 105_000_000n; // 1.05 KAS fee输入(账本1455修复前的真实探测值)
+  const requiredFee = 44_022_200n; // 真实register_append量级(账本1455修复前实测值, 见run.log)
+  const sumIn = leafValue + feeInputValue;
+  const sumOut = sumIn - (requiredFee + leafValue); // Σin−Σout = requiredFee+leafValue(真实bug产生的隐含手续费)
+  const r = validateImpliedMinerFee({
+    inputs: [
+      { amountSompi: leafValue, scriptPubKeyRaw: 'leaf-covenant-spk' },
+      { amountSompi: feeInputValue, scriptPubKeyRaw: RELAY_SPK },
+    ],
+    outputs: [{ valueSompi: sumOut, scriptPubKeyRaw: 'locked-and-change-combined-spk' }],
+    requiredFeeSompi: requiredFee,
+  });
+  assert.strictEqual(r.impliedFeeSompi, requiredFee + leafValue, `隐含手续费应该恰好是requiredFee多出leafValue(实际 ${r.impliedFeeSompi})`);
+  assert.strictEqual(r.ok, true, `这个具体量级(单独leaf, 无held)确实落在容忍区间内, 不应该被这道闸拒绝——真正的防线是console侧的公式修复, 见IMF-2b(实际 ok=${r.ok}, reason=${r.reason})`);
+});
+t('IMF-2b 更大量级的漏计(例如同时漏掉leaf+held, 或某个未来kind漏掉一个更大的输入)确实会被这道relay侧兜底拒绝——证明它对"足够大的构造错误"仍然有效, 不是完全没用的闸', () => {
+  const missingValue = 60_000_000n; // 假设漏计了0.6 KAS(比真实bug更严重的场景, 或requiredFee更小的kind)
+  const feeInputValue = 105_000_000n;
+  const requiredFee = 20_000_000n; // 假设这个kind的真实requiredFee只有0.2 KAS量级(market_genesis级别)
+  const sumIn = missingValue + feeInputValue;
+  const sumOut = sumIn - (requiredFee + missingValue);
+  const r = validateImpliedMinerFee({
+    inputs: [
+      { amountSompi: missingValue, scriptPubKeyRaw: 'some-covenant-input' },
+      { amountSompi: feeInputValue, scriptPubKeyRaw: RELAY_SPK },
+    ],
+    outputs: [{ valueSompi: sumOut, scriptPubKeyRaw: 'x' }],
+    requiredFeeSompi: requiredFee,
+  });
+  assert.strictEqual(r.ok, false, '更大量级/更小requiredFee组合下的漏计应该被拒绝');
+  assert.ok(/implied miner fee/.test(r.reason) && /exceeds ceiling/.test(r.reason), `reason应说明是隐含手续费超上限(实际: ${r.reason})`);
+});
+t('IMF-3 隐含手续费恰好等于 min(requiredFee×2, GLOBAL_ABS_FEE_CAP_SOMPI) ⇒ 放行(闭区间, 与validateNetLoss同款边界语义)', () => {
+  const requiredFee = 10_000_000n;
+  const ceiling = requiredFee * 2n; // 20,000,000 < GLOBAL(1.0 KAS), 动态上限生效
+  const r = validateImpliedMinerFee({
+    inputs: [{ amountSompi: 100_000_000n, scriptPubKeyRaw: 'x' }],
+    outputs: [{ valueSompi: 100_000_000n - ceiling, scriptPubKeyRaw: 'y' }],
+    requiredFeeSompi: requiredFee,
+  });
+  assert.strictEqual(r.ok, true, r.reason);
+  assert.strictEqual(r.impliedFeeSompi, ceiling);
+});
+t('IMF-4 隐含手续费为负(输出总额超过输入总额, 交易根本不平衡) ⇒ 拒绝, 明确说明"不平衡"而不是复用"超上限"的措辞', () => {
+  const r = validateImpliedMinerFee({
+    inputs: [{ amountSompi: 100n, scriptPubKeyRaw: 'x' }],
+    outputs: [{ valueSompi: 200n, scriptPubKeyRaw: 'y' }],
+    requiredFeeSompi: 10n,
+  });
+  assert.strictEqual(r.ok, false);
+  assert.ok(/negative/.test(r.reason) && /does not balance/.test(r.reason), `reason应说明不平衡(实际: ${r.reason})`);
+});
+t('IMF-5 requiredFeeSompi 非 bigint ⇒ 拒(不静默转型)', () => {
+  const r = validateImpliedMinerFee({ inputs: [{ amountSompi: 100n, scriptPubKeyRaw: 'x' }], outputs: [], requiredFeeSompi: 10 });
+  assert.strictEqual(r.ok, false);
+});
+t('IMF-6 inputs 是全部输入不筛signInputIndices(与validateNetLoss刻意不同的口径): 即使leaf/held这类未签名输入的面值也要计入Σinputs, 不能只看"relay自己签的那一个"', () => {
+  const r = validateImpliedMinerFee({
+    inputs: [
+      { amountSompi: 20_000_000n, scriptPubKeyRaw: 'leaf' }, // 未签名, 但仍要计入
+      { amountSompi: 20_000_000n, scriptPubKeyRaw: 'held' }, // 未签名, 但仍要计入
+      { amountSompi: 850_000_000n, scriptPubKeyRaw: RELAY_SPK }, // 唯一签名的输入
+    ],
+    outputs: [{ valueSompi: 850_000_000n, scriptPubKeyRaw: 'x' }],
+    requiredFeeSompi: 40_000_000n,
+  });
+  // Σin = 20M+20M+850M = 890M; Σout = 850M; impliedFee = 40M = requiredFee, 恰好平衡, 说明leaf/held
+  // 的面值确实被计入了Σin(否则Σin会算成850M, impliedFee变成0, 也会通过但数字不对——用下面这条精确断言排除这种巧合)。
+  assert.strictEqual(r.ok, true, r.reason);
+  assert.strictEqual(r.impliedFeeSompi, 40_000_000n, `应该精确等于40,000,000(证明leaf/held面值被计入Σin), 实际 ${r.impliedFeeSompi}`);
 });
 
 // ── canonicalScriptHex(2026-09-14 补: NWT 1355 假设订正后新加, Bettor 裁定"现在改不留给接线笔") ──
