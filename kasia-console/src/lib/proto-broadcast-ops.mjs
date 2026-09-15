@@ -70,6 +70,7 @@ export async function buildMarketGenesisAndBroadcast({ kaspa, network, market, s
   const leafRedeem = computeShardLeafRedeemScript({
     marketId: market.id, minBet: market.min_bet, sealCount: market.seal_count,
     rootcloseTmplHash: market.rootclose_tmpl_hash, state: { local_yes: 0, local_no: 0, count: 0, pool_value: 0 },
+    ownRedeemLen: market.shardleaf_own_redeem_len,
   });
 
   const cap = loadFeeProfileCap('market_genesis');
@@ -108,6 +109,7 @@ export function shardLeafTargetAddress({ kaspa, network, market }) {
   const leafRedeem = computeShardLeafRedeemScript({
     marketId: market.id, minBet: market.min_bet, sealCount: market.seal_count,
     rootcloseTmplHash: market.rootclose_tmpl_hash, state: { local_yes: 0, local_no: 0, count: 0, pool_value: 0 },
+    ownRedeemLen: market.shardleaf_own_redeem_len,
   });
   const spk = scriptPublicKeyFromHex(kaspa, leafRedeem.scriptPubKeyHex);
   return kaspa.addressFromScriptPublicKey(spk, network).toString();
@@ -154,6 +156,7 @@ export async function buildRegisterAppendAndBroadcast({ kaspa, network, market, 
 
   const leafRedeem = computeShardLeafRedeemScript({
     marketId, minBet: market.min_bet, sealCount: market.seal_count, rootcloseTmplHash: market.rootclose_tmpl_hash, state: currentState,
+    ownRedeemLen: market.shardleaf_own_redeem_len,
   });
   const leafSpk = scriptPublicKeyFromHex(kaspa, leafRedeem.scriptPubKeyHex);
   const leafAddress = kaspa.addressFromScriptPublicKey(leafSpk, network).toString();
@@ -196,6 +199,7 @@ export async function buildRegisterAppendAndBroadcast({ kaspa, network, market, 
     ctorBytes32V100(marketId), ctorBytes32V100(ps_tmpl_hash), ctorBytes32V100(marketId),
     ctorIntV100(market.seal_count), ctorIntV100(market.min_bet), ctorBytes32V100(market.rootclose_tmpl_hash), ctorBytes32V100('00'.repeat(32)),
     ctorBytes32V100(token_tmpl_hash), ctorIntV100(currentState.local_yes), ctorIntV100(currentState.local_no), ctorIntV100(currentState.count), ctorIntV100(currentState.pool_value),
+    ctorIntV100(market.shardleaf_own_redeem_len),
   ];
   const sldCompiled = compileSilV100(SHARD_LEAF_DIRECT_SIL, sldCtor, 'ShardLeaf_direct');
   const registerAppendEntryAbi = sldCompiled._raw.contracts.ShardLeaf_direct.entries.register_append;
@@ -263,6 +267,7 @@ export function registerAppendTargetAddress({ kaspa, network, market, bet }) {
   };
   const leafRedeem = computeShardLeafRedeemScript({
     marketId: market.id, minBet: market.min_bet, sealCount: market.seal_count, rootcloseTmplHash: market.rootclose_tmpl_hash, state: newState,
+    ownRedeemLen: market.shardleaf_own_redeem_len,
   });
   const spk = scriptPublicKeyFromHex(kaspa, leafRedeem.scriptPubKeyHex);
   return kaspa.addressFromScriptPublicKey(spk, network).toString();

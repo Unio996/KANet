@@ -56,7 +56,14 @@ contract ShardLeaf_direct(
     int      init_local_yes,
     int      init_local_no,
     int      init_count,
-    int      init_pool_value
+    int      init_pool_value,
+    // 🔴 账本1468/1469(Bettor裁定, 取代此前"硬编码constant"的第一版修复): 裸编译redeem脚本自身的字节
+    // 长度——不能是全局常量(账本1468矩阵实测: 会随seal_count/min_bet的magnitude变化, 硬编码值只对
+    // 特定市场配置成立)。改为ctor参数, 由JS侧genesis时按本市场自己的seal_count/min_bet做不动点收敛
+    // 算出后烤入(见proto-covenant-builder.mjs computeMarketGenesisArtifacts的收敛循环), register_append
+    // 重建时从proto_markets.shardleaf_own_redeem_len原样读回, 不重新猜。见下方register_append entry里
+    // 的用法与OWN_PREFIX_LEN/OWN_STATE_LEN注释。
+    int      own_redeem_len
 ) {
     int local_yes  = init_local_yes;
     int local_no   = init_local_no;
@@ -110,16 +117,23 @@ contract ShardLeaf_direct(
     //   V-register_append-1 测试用的是这份合约代币化改造前的旧夹具, 见 docs/provenance/2026-09-14-
     //   j2-t3-v03-shardleafdirect-tokenization/, 那份夹具的 action 见证极短, 巧合掩盖了这个偏移错误,
     //   D-020/代币化落地后真实 action 变长这个夹具从未跟着更新重跑)。
-    //   修复: redeem 脚本在 ownSig 里的真实起点 = ownLen − OWN_REDEEM_LEN(下方新增常量, 同样按本文件
-    //   *实际编译产物*量测得出——ctor 全部是定宽 byte[32]/int 字段, 不含变长参数, 编译产物字节数不随
-    //   ctor 具体取值变化, 是稳定常量, 手法同 OWN_PREFIX_LEN/OWN_STATE_LEN 已有先例), 再在这个起点上
-    //   加 OWN_PREFIX_LEN/OWN_STATE_LEN 定位 state 区——不再假设 action 见证长度为 0。
+    //   修复: redeem 脚本在 ownSig 里的真实起点 = ownLen − own_redeem_len, 再在这个起点上加
+    //   OWN_PREFIX_LEN/OWN_STATE_LEN 定位 state 区——不再假设 action 见证长度为 0。
     //   已用账本1468 真实捕获的失败交易字节独立验证: 按此修复后的偏移重算出的 hash 与真实交易里
     //   实际使用的续约输出 scriptPubKey 逐字节一致(即 JS 侧 buildRegisterAppendTxJson 原本就算对了,
     //   错的是合约自己这份自校验)。
+    // 🔴 账本1469订正(取代上一版把own_redeem_len写成本文件constant的第一版1468修复): 用cli-debugger
+    //   矩阵实测(seal_count/min_bet分别扫0/1/15/16/17/255/256/65535/65536/2^31/2^32/2^40/-1/
+    //   MAX_SAFE_INTEGER)证实"ctor全部是定宽字段, 编译产物字节数不随ctor取值变化"这条假设是错的——
+    //   local_yes/local_no/count/pool_value这4个state字段确实不影响长度(它们只进runtime的as byte[8]
+    //   定宽转型区), 但seal_count/min_bet这两个纯ctor常量(从不进state区, 直接被require()引用为字面量)
+    //   的minimal-push编码宽度会随magnitude跨界增长, 编译产物长度跟着变——同一份.sil源码换一个市场的
+    //   seal_count/min_bet组合, 真实redeem长度就不是同一个数, 硬编码单一constant只对量测时那组值成立。
+    //   改为ctor参数own_redeem_len(见上方contract签名新增字段), 不再是本文件内部的constant——由JS侧
+    //   genesis时对本市场自己的seal_count/min_bet做不动点收敛算出、烤入ctor, 每个市场各自持有自己的
+    //   正确值, 不假设"全市场共用一个数"。
     int constant OWN_PREFIX_LEN = 1;
     int constant OWN_STATE_LEN  = 36;
-    int constant OWN_REDEEM_LEN = 14746;
 
     // (A) v0.3 §2/§3 + 1151 P13 形: 输入侧扫描(同 ShardLeaf.sil/PayoutShard.sil/RootClose.sil 逐字节一致手法)。
     function scanOwnedTokenInputs(byte[] tok_prefix, byte[] tok_suffix) : int {
@@ -190,8 +204,10 @@ contract ShardLeaf_direct(
                           + byte[](8 as byte[1]) + byte[]((pool_value + stake) as byte[8]);
         byte[] ownSig = tx.inputs[this.activeInputIndex].sigScript;
         int ownLen = ownSig.length;
-        // 账本1468修复: redeem 脚本在完整 sigScript(ownSig)里的真实起点(见上方 OWN_REDEEM_LEN 注释)。
-        int ownRedeemStart = ownLen - OWN_REDEEM_LEN;
+        // 账本1468/1469修复: redeem 脚本在完整 sigScript(ownSig)里的真实起点(见上方 own_redeem_len ctor
+        // 参数注释)。own_redeem_len 直接引用 ctor 字段, 不重新猜——genesis 时已按本市场自己的
+        // seal_count/min_bet 做过不动点收敛烤入, 这里只读用, 手法同 seal_count/min_bet 本身被直接引用。
+        int ownRedeemStart = ownLen - own_redeem_len;
         byte[] ownPrefix = ownSig.slice(ownRedeemStart, ownRedeemStart + OWN_PREFIX_LEN);
         byte[] ownSuffix = ownSig.slice(ownRedeemStart + OWN_PREFIX_LEN + OWN_STATE_LEN, ownLen);
         byte[32] expectedHash = blake2b(ownPrefix + stateBytes + ownSuffix);

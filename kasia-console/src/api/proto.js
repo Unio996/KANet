@@ -50,7 +50,7 @@ async function buildAndBroadcast(kind, _params) {
 // *_enc/*privkey*/*mnemonic* 类敏感列, 放进公开列清单不违反上面的 MUST。
 const PUBLIC_MARKET_COLS = `
   m.id, m.token_def_id, m.question, m.deadline_ms, m.min_bet, m.seal_count,
-  m.committee_pubkeys_json, m.rootclose_tmpl_hash,
+  m.committee_pubkeys_json, m.rootclose_tmpl_hash, m.shardleaf_own_redeem_len,
   m.shardleaf_txid, m.shardleaf_vout, m.rootclose_txid, m.rootclose_vout, m.shardleaf_cov_id,
   m.status, m.winning_side, m.payout_root, m.created_at, m.updated_at
 `;
@@ -137,7 +137,7 @@ export async function registerProtoRoutes(fastify) {
     const market = ensureMarketPending({
       id: marketId, token_def_id: tokenId, question: title.trim(), deadline_ms: deadlineMs, min_bet: minBet, seal_count: sealCount,
       committee_pubkeys_json: JSON.stringify([artifacts.committeePubkeyHex]), committee_privkey_enc: artifacts.committeePrivkeyEnvelope,
-      rootclose_tmpl_hash: artifacts.rootCloseTmplHash,
+      rootclose_tmpl_hash: artifacts.rootCloseTmplHash, shardleaf_own_redeem_len: artifacts.shardLeafOwnRedeemLen,
     });
 
     const { isProtoDriverEnabled } = await import('../services/proto-driver.mjs');
