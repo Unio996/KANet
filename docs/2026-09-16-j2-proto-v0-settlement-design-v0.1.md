@@ -103,7 +103,7 @@ V-T-8，可以放心用内建函数，编译器在**编译期自己**做不动�
 | **`RootClaim.claim_draw`(payout==pool_value, 无续约分支)** | 无自续约, 只读ticket/token | **安全**——不经过下面的bug代码 | ✅ **真实cli-debugger PASS**（16参数全部真实ABI编码、真实协议常量尺寸、active input显式`signature_script_hex`——见§0.5①） |
 | **`RootClaim.claim_draw`(payout<pool_value, partial续约分支)** | `readInputStateWithTemplate`(读ticket+token) + **手写AB11自续约, `ownSig.slice(0, OWN_PREFIX_LEN)`** | **🔴 确认同账本1468同类defect, 真实cli-debugger复现**——诚实backend按"正确offset"（即`register_append`已修复的`ownLen-own_redeem_len`手法）构造出的续约输出，被合约自己的错误自检拒绝：`error: script ran, but verification failed` 精确命中`ownSig.slice(...)`那一行`require` | ✅ **真实cli-debugger FAIL（符合预期）**——见§0.5② |
 | `RefundClaim.refund_payout`(pool_value==stake, 无续约分支) | 无自续约 | 安全 | 源码逐行核对 |
-| **`RefundClaim.refund_payout`(pool_value≠stake, partial续约分支)** | `readInputStateWithTemplate`(读ticket+token) + **内建`validateOutputState`(自续约)** | 🟡 **未测的V-T-8组合风险**——这正是RootClaim.sil自己头注里说"含readInputStateWithTemplate+validateOutputState同函数共存组合的入口一律AB11+实测"那条纪律要求必须绕开的组合, 但`RefundClaim.refund_payout`**没有**绕开, 直接用了内建`validateOutputState`——要么这条纪律对这个具体组合不适用(V-T-8触发条件比"任意共存"更窄, 需要证实), 要么这里有一个从未被执行过的运行期崩溃地雷 | **未执行, 未知**——§0.5的工具问题已解决(通用夹具/编码器复用即可), 本条纯属本轮时间预算未覆盖, 不是技术障碍, 是本文档最大的开放问题, 见§0.6处置建议(NWT可直接复用`01_audit_rootclaim_claim_draw.mjs`同一套方法论改constructor/entry指向RefundClaim即可, 不需要重新解决任何工具问题) |
+| **`RefundClaim.refund_payout`(pool_value≠stake, partial续约分支)** | `readInputStateWithTemplate`(读ticket+token) + **内建`validateOutputState`(自续约)** | 🟡 **已真实执行, 两种debugger输入模式结论不一致**——"state"模式(debugger自己合成见证)PASS且无任何崩溃特征, 证明V-T-8不是这个组合必然触发的确定性崩溃; 但"raw"模式(同§0.5手工构造真实字节, 已独立排查过我方构造无误)FAIL(非崩溃, 正常验证失败)——两者理论上应该等价却不一致, 根因未查清, 见§0.9 | 🟡 **真实执行完成, 结论待NWT核实差异根因后才能定案**——两份完整日志+一键切换脚本(`AUDIT_STATE_MODE=1`)已留在scratch, 见§0.9 |
 | `KanetTokenClaim.spend` | 无自续约(终态, 头注明确"不受V-T-8影响") | 安全 | 源码+既有e2e向量(`docs/provenance/2026-09-14-j2-ktt-v03-planC-remove-h1b/`) |
 
 ### §0.5 独立复现`claim_draw`两个分支（工具问题已解决，真实执行完成）
@@ -172,8 +172,9 @@ resolve后唯一/全部赢家一次性`payout==pool_value`——**当前合约�
 **若该市场需要支持"两个不同`payout`值的赢家各自独立`claim_draw`"（depth-1上限恰好是2）**——**触发
 partial续约分支**，走(B)：先修`RootClaim.claim_draw`（§0.5已用真实cli-debugger确诊defect；同账本
 1469同款ctor烤入`own_redeem_len`+JS不动点收敛手法，§0.8给出具体设计），修复后需要真实cli-debugger
-PASS（§0.5的夹具/方法论已经现成，不是从零开始）；`RefundClaim.refund_payout`的V-T-8风险也必须在此
-之前解决（§0.6开放问题——这一条**尚未**真实执行过，走(B)前必须补齐）。**任何修改
+PASS（§0.5的夹具/方法论已经现成，不是从零开始）；`RefundClaim.refund_payout`的raw/state模式不一致
+疑点也必须在此之前查清（§0.9——已真实执行两种模式、无崩溃迹象，但根因未查清，走(B)前必须补齐）。
+**任何修改
 `RootClaim.sil`/`RefundClaim.sil`都会改变`claim_tmpl_hash`/`refundclaim_tmpl_hash`——这两个值已经
 烤进`a59c7b48`的`RootClose`（其`rootclose_tmpl_hash`又已经烤进`ShardLeaf_direct`本身）——`a59c7b48`
 这个市场的leaf P2SH地址绑死在旧字节上，修复不能救它**（同账本1471NWT独立证实的"合约改动与既有市场
@@ -215,27 +216,59 @@ P2SH脱钩"结论，机制完全一致）。**走(B)意味着`a59c7b48`必须放
 6. `RefundClaim.sil`若也确认有等价问题（partial分支用`validateOutputState`——见下方§0.9），走(B)时
    一并处理，同一次工程投入。
 
-### §0.9 `RefundClaim.refund_payout`的V-T-8开放问题——走(B)前必须先解决，不能假设"用了内建函数就安全"
+### §0.9 `RefundClaim.refund_payout`的V-T-8开放问题——已真实执行, 结论有条件正面但留一个未解释的方法论疑点
 
-`RefundClaim.refund_payout`partial分支**同时**调用`readInputStateWithTemplate`（读ticket+读token）
-**和**内建`validateOutputState`（自续约）——这正是RootClaim.sil自己头注写明"这个组合一律AB11+实测"
-的那条纪律要求回避的形状。但`RefundClaim.sil`**没有**回避，直接用了内建函数。两种可能：
+**Bettor 1476明确要求补跑，已完成**（`kasia-console/scratch/j2_settlement_audit/03_audit_refundclaim
+_refund_payout.mjs`，两种cli-debugger输入模式各跑一遍）：
 
-- **(i) 这个具体组合不触发V-T-8**（NWT此前3次实验已经证实V-T-8的触发条件比"任意共存"更窄、更难
-  预测，`docs/2026-09-14-nwt-redteam-refundclaim-tokenization-and-vt8-hypothesis-review-v0.1.md`
-  标题本身就点名了RefundClaim——说明NWT此前已经关注过这个具体文件，本文档没有找到那份review的最终
-  结论是否已经排除风险，**需要先去读那份文档，而不是重新猜**）。
-- **(ii) 这是一个从未被真实执行过的运行期崩溃地雷**——如果`a59c7b48`未来走cancel/refund路径且
-  pool_value≠单笔stake（即有多笔不同金额的下注、取消退款时触发partial分支），第一次真实退款尝试
-  会在链上崩溃（不是"验证失败"这种可预期的拒绝，是"脚本引擎自己挂了"这种更差的失败模式）。
+- **full分支（pool_value==stake，无续约）**：两种模式均 **✅ PASS**。
+- **partial分支（pool_value≠stake，`readInputStateWithTemplate`+内建`validateOutputState`同函数
+  共存）**：
+  - 用**"state"模式**（把active input的当前状态直接告诉cli-debugger，由它自己按`function`/`args`
+    合成完整sigScript，同`docs/provenance/2026-09-14-j2-t3-v03-rootclose-zero32-guard/`已有的
+    `RootClose.convert_to_claim`验证向量用的同一种模式）——**✅ PASS**。**没有任何崩溃迹象**（无
+    rust panic/`-N cannot be used as an array index`一类特征文本）——这是本次审计**最重要的正面
+    结果**：至少证明了V-T-8不是"这个组合必然触发"的确定性崩溃，`RefundClaim.sil`当前代码结构本身
+    没有硬编码的运行期地雷。
+  - 用**"raw"模式**（同§0.5对`RootClaim.claim_draw`用的方法——手工按真实ABI编码action witness、
+    手工拼`action++pushdata(redeem)`、显式给active input传`signature_script_hex`，绕开debugger自己
+    的见证合成）——**❌ FAIL**（`error: script ran, but verification failed`，非崩溃），且**独立验证
+    过我的构造本身没有错**：①`full`分支用**同一套**raw构造方法且PASS（证明action witness编码/redeem
+    revealing这部分是对的）；②续约输出`rootOutIdx`的期望值用"重新编译一次pool_value减掉stake之后的
+    RefundClaim、取其P2SH"这个标准手法算出，独立探针脚本
+    （`04_probe_refundclaim_length_stability.mjs`）确认这个手法产出的字节在state区之外与原编译产物
+    逐字节相同、state区正确反映新pool_value——构造本身找不出错误。
 
-**处置建议**：走(B)之前，NWT先去读`2026-09-14-nwt-redteam-refundclaim-tokenization-and-vt8-hypothesis
--review-v0.1.md`的既有结论；若该文档没有对**这个具体组合**给出确定结论，必须用真实cli-debugger补一条
-向量（构造`pool_value≠tk.stake`的partial场景，真执行，看是崩溃还是正常PASS/FAIL）——这条独立于
-`RootClaim`的own_redeem_len问题，**即使(A)路线成立，只要该市场未来允许cancel且有超过1笔不同金额的
-下注，这个风险依然存在**，不因为选了(A)就自动消失（区别在于：(A)路线下这是"尚未触发的既有风险"，
-不是本次要修的对象；(B)路线下如果要动`RootClaim.sil`，顺手把`RefundClaim.sil`这条也搞清楚是更划算
-的工程决策，见§0.8第6点）。
+**如实记录一个未解释清楚的疑点，不回避**：按理论分析（`validateOutputState`的codegen在**编译期**就
+确定"自己"的字节码长度，不依赖witness供给的长度，理应对raw/state两种输入模式产出等价结果——但实测
+两种模式给出了不同结论。本文档没能在本轮时间预算内查清这个差异的确切原因（候选：debugger自己合成
+witness时的某个实现细节与手工构造有一处未发现的字节差异；或`validateOutputState`在"active input显式
+给signature_script_hex"这一特定debugger调用形态下，自身的redeem定位逻辑与`readInputStateWithTemplate`
+用的定位逻辑不完全对称——这需要NWT有能力时读silverscript-lang对应的运行期codegen源码才能钉死，同
+既有V-T-8调查"猜测式排除法边际收益已经很低"的既有认知一致）。
+
+**处置建议（给Owner/NWT的判断依据，不是本文档替代结论）**：
+1. "state"模式PASS + 无崩溃，是走(A)"活市场用单赢家形状先完成主网闭环"这条路径**不需要等这个疑点
+   解决**的依据——(A)路线根本不触发partial分支，这个疑点与(A)无关。
+2. 若走(B)（`RefundClaim.sil`要真正用于生产的partial退款），**这个raw/state模式的不一致必须先查清
+   楚**——不能因为"state模式PASS"就直接判定安全：cli-debugger的"state"模式本质上是一种调试便利
+   （debugger自己合成"合理"的witness），而真实主网广播用的必然是"raw"等价物（backend自己构造的真实
+   字节）——如果raw模式的FAIL反映的是backend真实构造路径会遇到的问题（而不是我这次manual audit脚本
+   自己的构造疏漏，虽然已经排查过没找到），那"RefundClaim.sil当前代码可以安全用于partial退款"这个
+   结论就是错的、危险的。**这正是账本1468教训的核心**：不能相信debugger自己合成见证的PASS，必须
+   相信raw模式（真实字节）的结果——本条疑点因此不能被"state模式PASS了"轻易带过，需要NWT解释清楚
+   raw模式FAIL的根因（是我的audit脚本疏漏，还是真实构造路径会撞到的问题）才能真正关闭。
+3. 已把两次运行的完整日志留在scratch（`refundclaim-refund_payout-audit-run.log`=raw模式FAIL、
+   `refundclaim-refund_payout-audit-run-STATEMODE.log`=state模式PASS）供NWT对照复核，脚本本身支持
+   `AUDIT_STATE_MODE=1`环境变量一键切换两种模式复现。
+
+**补充**：NWT若有余力，仍建议对照`2026-09-14-nwt-redteam-refundclaim-tokenization-and-vt8-hypothesis
+-review-v0.1.md`的既有结论——那份文档是V-T-8这条纪律本身的出处，可能已经记录过与本次raw/state模式
+差异相关的线索（本文档没有去重读那份文档核对，只是引用其存在）。这条独立于`RootClaim`的
+`own_redeem_len`问题，**即使(A)路线成立，只要该市场未来允许cancel且有超过1笔不同金额的下注，这个
+风险依然存在**，不因为选了(A)就自动消失（区别在于：(A)路线下这是"尚未触发、已用state模式初步排除
+崩溃风险、raw模式疑点待查"的既有风险，不是本次要修的对象；(B)路线下如果要动`RootClaim.sil`，顺手把
+`RefundClaim.sil`这条也查清楚是更划算的工程决策，见§0.8第6点）。
 
 ---
 
@@ -428,8 +461,10 @@ cli-debugger真执行），本文档要求实现阶段新增一个**同构**脚�
 3. `claim_draw`：(A)路线场景（无续约）**必须**PASS；若走(B)，partial续约场景在§0.8修复落地后必须
    PASS，**且要覆盖"用正确offset构造 vs 用旧错误offset构造"两个向量**（同账本1469"传错误ownRedeemLen
    必须fail-closed throw"那条负向测试的精神，验证fail-closed断言真的会拦，不是只测正向路径）。
-4. `refund_payout`：(A)路线无续约场景PASS；若§0.9确认V-T-8真的触发，partial场景需要额外的修复
-   设计（本文档不预先给出，因为§0.9本身尚未有结论，给出修复设计为时过早）。
+4. `refund_payout`：(A)路线无续约场景已PASS；partial场景已用两种debugger模式真实执行(§0.9)，state
+   模式PASS/raw模式FAIL且根因未查清——走(B)前必须先用raw模式(真实字节, 不能只信state模式)重新确认，
+   查清差异根因后再判断是否需要修复设计（本文档不预先给出修复方案，因为还不确定"要不要修"这件事
+   本身）。
 5. `withdraw`（`KanetTokenClaim.spend`）：至少1个场景，虽然§0.4已判定安全，仍需要端到端形状验证
    （模拟从`claim_draw`产出的真实KanetTokenClaim实例，走完整的"领→提"链路，不是孤立测试`spend`）。
 6. **ctor矩阵**（若走(B)修`RootClaim.sil`）：同账本1469`convergeShardLeafOwnRedeemLen`矩阵测试的
@@ -481,8 +516,9 @@ fail-closed拒绝），理由：(B)路线下一旦发现`RootClaim.sil`/`RefundC
 - §0.7：(A)还是(B)？
 - §0.7括号内：v0业务规则是否要求"同一市场支持2个不同payout值的赢家各自claim"，还是"赢家通吃/份额
   加总一次性发放"就够？这直接决定(A)是否真的适用，不只是"能不能技术上跑通"的问题。
-- §0.9：走(B)时，`RefundClaim.refund_payout`的V-T-8开放问题是否必须在本轮一并解决，还是可以先只修
-  `RootClaim.sil`、`RefundClaim.sil`留到"真的需要partial退款"那一刻？
+- §0.9：`RefundClaim.refund_payout`已真实执行(state模式PASS、raw模式FAIL、根因未查清)——NWT有能力
+  查清raw/state差异根因后，再判断是否需要连同`RootClaim.sil`一起修，还是`RefundClaim.sil`当前代码
+  已经够用（取决于raw模式FAIL到底是我的audit脚本疏漏还是真实构造路径的问题）。
 
 ---
 
@@ -493,9 +529,19 @@ fail-closed拒绝），理由：(B)路线下一旦发现`RootClaim.sil`/`RefundC
 - `kasia-console/scratch/j2_settlement_audit/00_self_check_generic_encoder.mjs`：上述自检脚本。
 - `kasia-console/scratch/j2_settlement_audit/01_audit_rootclaim_claim_draw.mjs`：**完整可运行**的
   `claim_draw` full/partial(正确offset)/partial(bug offset)三场景真实执行夹具（§0.5①②③的产出脚本，
-  非半成品——NWT可直接复用改指向`RefundClaim.refund_payout`, 覆盖§0.6/§0.9开放问题）。
+  非半成品）。
+- `kasia-console/scratch/j2_settlement_audit/03_audit_refundclaim_refund_payout.mjs`：**完整可运行**
+  的`refund_payout` full/partial两场景真实执行夹具（§0.9产出脚本，支持`AUDIT_STATE_MODE=1`环境变量
+  一键切换raw/state两种debugger输入模式复现§0.9记录的不一致结果，NWT查根因直接用这个脚本）。
 - `kasia-console/scratch/j2_settlement_audit/02_probe_genesis_covid.mjs`：`WrongGenesisCovenantId`
   问题的探针脚本（问题已解决，根因见§0.5——genesis类输出的covenant_id必须用
   `kaspa.covenantId(prevOutpoint,[(idx,output)])`按输出各自独立重算，不能任意选值或多输出共享）。
-- `kasia-console/scratch/j2_settlement_audit/rootclaim-claim_draw-audit-run.log`：三场景真实运行
+- `kasia-console/scratch/j2_settlement_audit/04_probe_refundclaim_length_stability.mjs`：验证
+  `RefundClaim`编译产物长度/state区在不同`pool_value`间稳定（排除"是不是JS侧构造出了不同长度脚本"
+  这个候选解释）。
+- `kasia-console/scratch/j2_settlement_audit/rootclaim-claim_draw-audit-run.log`：`claim_draw`三场景真实运行
   记录（PASS/FAIL摘要）。
+- `kasia-console/scratch/j2_settlement_audit/refundclaim-refund_payout-audit-run.log`：`refund_payout`
+  raw模式运行记录（partial FAIL）。
+- `kasia-console/scratch/j2_settlement_audit/refundclaim-refund_payout-audit-run-STATEMODE.log`：
+  同上state模式运行记录（partial PASS）——两份对照即§0.9记录的不一致证据。

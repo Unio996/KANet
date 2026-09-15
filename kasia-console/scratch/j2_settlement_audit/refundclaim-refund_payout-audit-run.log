@@ -1,0 +1,25 @@
+=== RefundClaim.refund_payout 真实action witness cli-debugger审计(账本1473/1476 Bettor补跑要求) ===
+
+--- full_no_continuation --- wrote C:\Users\ADMIN\AppData\Local\Temp\j2-refundclaim-audit-jjxaEy\RefundClaim.full_no_continuation.test.json
+✅ PASS
+
+--- partial_with_continuation --- wrote C:\Users\ADMIN\AppData\Local\Temp\j2-refundclaim-audit-EFmdsn\RefundClaim.partial_with_continuation.test.json
+error: script ran, but verification failed
+    --> 143:13
+
+Error: "FAIL"
+❌ FAIL(正常验证失败, 不是崩溃)
+error: script ran, but verification failed
+    --> 143:13
+
+Error: "FAIL"
+Command failed: D:/silverscript/versioned-builds/cli-debugger-v100-3ed9733.exe D:/kanet-tn12/scratch/_j2_wt_proto_v0/kasia-console/src/lib/RefundClaim.sil --run --test-name AUDIT_refund_payout_partial_with_continuation --test-file C:\Users\ADMIN\AppData\Local\Temp\j2-refundclaim-audit-EFmdsn\RefundClaim.partial_with_continuation.test.json
+error: script ran, but verification failed
+    --> 143:13
+
+Error: "FAIL"
+
+
+=== 结论 ===
+① full(pool_value==stake, 无续约): PASS
+② partial(pool_value≠stake, readInputStateWithTemplate+内建validateOutputState共存): ❌ FAIL(正常验证失败, 非崩溃)——说明不是V-T-8问题, 是构造/逻辑本身有另一处不匹配, 需要进一步排查fixture或合约逻辑本身(不是self-splice offset类问题, 因为这条路径用的是内建validateOutputState不是手写slice)
