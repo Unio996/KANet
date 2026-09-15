@@ -75,27 +75,45 @@ const tTx = Transaction.deserializeFromSafeJSON(tampered); const embedded = tTx.
 ok(tampered !== json && embedded === idBefore && tTx.id !== idBefore, `(A) 改一字节: 不 finalize id 照旧(陷阱), finalize 后 id 变 (${tTx.id.slice(0, 12)})`);
 
 // ── 假 RPC + replay 向量 ──
-function fakeRpc({ mempool = new Set(), senderHas = [covOutpoint, feeOutpoint], targetLanded = false, submitThrows = false } = {}) {
+// 🔴 账本1468修复后改法: fee 输入(P2PK)活在 feeAddr, covenant 输入(leaf 等价物)活在它自己的 p2shAddr——
+// 两者是两个不同地址, fakeRpc 按 replayPreparedTransactions 新逻辑(每个外部输入按自己 utxo.scriptPublicKey
+// 派生地址分别查询)分别响应, 不再把两个 outpoint 硬塞进同一个 fee 地址的集合"模拟全部在"(那是修复前
+// 用来绕开"只查 senderAddress 一个地址"这个真实限制的测试变通, 账本1468 修复后不再需要, 也不该再这样测
+// ——真实还原两个地址各自独立的可花集, 才是这次修复要验证的东西)。
+function fakeRpc({ mempool = new Set(), feeHas = [feeOutpoint], covHas = [covOutpoint], targetLanded = false, submitThrows = false } = {}) {
   const R = { submitted: [], mempool };
   R.getMempoolEntry = async ({ transactionId }) => { if (R.mempool.has(transactionId)) return { entry: { transactionId } }; throw new Error('not found'); };
   R.getUtxosByAddresses = async ([addr]) => {
     const a = String(addr);
-    if (a === feeAddr.toString()) return { entries: senderHas.map(o => ({ outpoint: o })) };
-    if (a === String(p2shAddr) && targetLanded) return { entries: [{ outpoint: { transactionId: idBefore, index: 0 } }] };
+    if (a === feeAddr.toString()) return { entries: feeHas.map(o => ({ outpoint: o })) };
+    if (a === String(p2shAddr)) {
+      const entries = covHas.map(o => ({ outpoint: o }));
+      if (targetLanded) entries.push({ outpoint: { transactionId: idBefore, index: 0 } });
+      return { entries };
+    }
     return { entries: [] };
   };
   R.submitTransaction = async ({ transaction }) => { if (submitThrows) throw new Error('rejected (fake)'); R.submitted.push(transaction.id); R.mempool.add(transaction.id); return { transactionId: transaction.id }; };
   return R;
 }
-// 注: 发送方地址在本形里 = fee 地址(relay 自己的钱包); covenant 输入的 outpoint 也必须还在"发送方可花集"里——真 relay 里 covenant UTXO 属 P2SH 地址,
-//     replayPreparedTransactions 只查 senderAddress 一个地址 ⇒ covenant 输入会被判 inputs_spent。这是【本函数的已知边界】: 对多地址输入的交易, 调用方须传
-//     senderAddress = 含全部外部输入的地址集合(v2), 本向量把两个 outpoint 都放进 fee 地址的集合模拟"全部在"。
 const call = (rpc, over = {}) => replayPreparedTransactions({ txJsonList: [json], expectedTxId: idBefore, senderAddress: feeAddr.toString(), targetAddress: String(p2shAddr), rpcOverride: rpc, ...over });
-{ const rpc = fakeRpc(); const r = await call(rpc); ok(r.ok && r.replayed && r.txId === idBefore && rpc.submitted.length === 1 && rpc.submitted[0] === idBefore, 'replay covenant tx: 正常 → 同字节提交 1 笔, txId == 记录值'); }
+{ const rpc = fakeRpc(); const r = await call(rpc); ok(r.ok && r.replayed && r.txId === idBefore && rpc.submitted.length === 1 && rpc.submitted[0] === idBefore, 'replay covenant tx: 正常(fee 在 feeAddr、covenant 在它自己的 p2shAddr, 两者分别真实核对, 都在) → 同字节提交 1 笔, txId == 记录值'); }
 { const rpc = fakeRpc({ mempool: new Set([idBefore]) }); const r = await call(rpc); ok(r.ok && r.alreadyInMempool && rpc.submitted.length === 0, 'replay covenant tx: mempool 已有 → 幂等接受, 零提交'); }
 { const rpc = fakeRpc({ targetLanded: true }); const r = await call(rpc); ok(r.ok && r.alreadyLanded && rpc.submitted.length === 0, 'replay covenant tx: 续约输出已在 P2SH 地址 UTXO 集 → 幂等接受, 零提交'); }
 { const rpc = fakeRpc(); const r = await call(rpc, { txJsonList: [tampered] }); ok(!r.ok && r.code === 'replay_txid_mismatch' && rpc.submitted.length === 0, 'replay covenant tx: 改字节 → 拒(finalize 后 txid 不等), 零提交'); }
-{ const rpc = fakeRpc({ senderHas: [feeOutpoint] }); const r = await call(rpc); ok(!r.ok && r.code === 'inputs_spent' && rpc.submitted.length === 0, 'replay covenant tx: covenant 输入不在可花集 → inputs_spent, 零提交(console 才允许重建)'); }
+{ const rpc = fakeRpc({ feeHas: [] }); const r = await call(rpc); ok(!r.ok && r.code === 'inputs_spent' && rpc.submitted.length === 0, 'replay covenant tx: fee 输入不在它自己地址的可花集 → inputs_spent, 零提交(console 才允许重建)'); }
+{ const rpc = fakeRpc({ covHas: [] }); const r = await call(rpc); ok(!r.ok && r.code === 'inputs_spent' && rpc.submitted.length === 0, `账本1468回归·真阳性: covenant 输入真的不在它自己 P2SH 地址的可花集(真被花了) → 依然正确判 inputs_spent, 零提交——修复没有把这条真实检测能力弄丢`); }
+{
+  // 账本1468回归·真阴性(核心修复目标): covenant 输入不在 feeAddr(它本来就不该在那)、但在它自己的
+  // p2shAddr 里真实存在(从未被花) → 修复前会被误判 inputs_spent(旧逻辑只查 feeAddr 一个地址), 修复后
+  // 必须正确放行——这正是账本1468真实故障复现的最小形状(genesis 刚落链、leaf 从未被花, 却被判"不再在")。
+  const rpc = fakeRpc({ feeHas: [feeOutpoint], covHas: [covOutpoint] });
+  // 双重确认 fakeRpc 语义本身没有作弊: 直接查 feeAddr 应该查不到 covOutpoint。
+  const feeOnly = await rpc.getUtxosByAddresses([feeAddr.toString()]);
+  ok(!feeOnly.entries.some(e => e.outpoint.transactionId === covOutpoint.transactionId && e.outpoint.index === covOutpoint.index), '账本1468回归·前提核实: covOutpoint 确实不在 feeAddr 的 UTXO 集里(不是巧合通过)');
+  const r = await call(rpc);
+  ok(r.ok && r.replayed && rpc.submitted.length === 1, '账本1468回归·真阴性: covenant 输入只在它自己的 p2shAddr(不在 feeAddr)也能被正确核对为"仍未花" → 不再误判 inputs_spent, 正常重播');
+}
 { const rpc = fakeRpc(); const r = await call(rpc, { txJsonList: ['{"id":"zz"}'] }); ok(!r.ok && r.code === 'replay_bad_json' && rpc.submitted.length === 0, 'replay covenant tx: 往返失败(反序列化抛) → replay_bad_json, 零提交(console 侧 hold 人工)'); }
 { const rpc = fakeRpc({ submitThrows: true }); const r = await call(rpc); ok(!r.ok && r.code === 'replay_rejected' && rpc.submitted.length === 0, 'replay covenant tx: submit 抛错且 mempool 无 → replay_rejected(console 不重建)'); }
 // harness 翻转臂

@@ -330,15 +330,40 @@ export async function replayPreparedTransactions({ txJsonList, expectedTxId, sen
     } catch { /* 查不到收款地址 UTXO 集 ⇒ 不据此判定, 继续走输入检查 */ }
   }
   const internal = new Set(txs.map(t => t.id));
-  const { entries } = await rpc.getUtxosByAddresses([senderAddress]);
-  const have = new Set((entries || []).map(e => `${e.outpoint?.transactionId || e.entry?.outpoint?.transactionId}:${e.outpoint?.index ?? e.entry?.outpoint?.index}`));
+  // 🔴 账本1468修复(闸3重试-2 replay守卫误报根因): 原来无差别把每个"外部输入"(非本笔链内前一笔的输出)
+  // 都拿去查 senderAddress 一家的 UTXO 集——对纯钱包转账(所有外部输入本就来自 senderAddress 自己)成立,
+  // 但对 covenant 交易(leaf/held 输入活在它们各自的 P2SH covenant 地址, 从来就不是 senderAddress)是
+  // 系统性误判: 这类输入无论有没有被花过, 永远不会出现在 senderAddress 的 UTXO 集里, 每次重播检查都会被
+  // 误判 inputs_spent → ambiguous(账本1468实测复现: 市场genesis刚落链、leaf从未被花过, 却被判"no longer
+  // in sender UTXO set", 报文本身就在说一件不成立的事——它从来没在过, 不是"不再在")。
+  // 修法: 每个外部输入按它自己 utxo.scriptPublicKey 派生真实所在地址分别查询(covenant输入查它自己的
+  // P2SH地址, 普通输入查它自己的P2PK地址——两者可能不同, 也可能都恰好是senderAddress), 不再假设"所有
+  // 外部输入都来自同一个senderAddress"。派生失败或没有.utxo字段(旧调用方/纯转账场景可能没embed这个)时
+  // 退回原有senderAddress语义, 不改变既有行为、不引入新的fail-closed缺口。
+  const network = configuredNetwork();
+  const externalInputs = [];
   for (const t of txs) {
     for (const inp of t.inputs) {
       const po = inp.previousOutpoint;
       if (internal.has(po.transactionId)) continue;
-      const k = `${po.transactionId}:${po.index}`;
-      if (!have.has(k)) return { ok: false, code: 'inputs_spent', error: `input ${po.transactionId.slice(0, 12)}:${po.index} no longer in sender UTXO set — prepared tx ${expectedTxId.slice(0, 12)} can never land` };
+      let addr = senderAddress;
+      try {
+        if (inp.utxo?.scriptPublicKey) addr = kaspa.addressFromScriptPublicKey(inp.utxo.scriptPublicKey, network).toString();
+      } catch { /* 派生失败退回 senderAddress, 不因此崩(同原有"查不到就不据此判定"的保守方向) */ }
+      externalInputs.push({ po, addr });
     }
+  }
+  // 逐地址单独查询(不传多地址数组一次查)——同本文件/p2sh.mjs 其余所有 getUtxosByAddresses 调用点的既有
+  // 用法一致(全部单地址单元素数组), 不引入一个从未被真实节点验证过的"一次查多地址"新调用形态。
+  const distinctAddrs = [...new Set(externalInputs.map(x => x.addr))];
+  const have = new Set();
+  for (const addr of distinctAddrs) {
+    const { entries } = await rpc.getUtxosByAddresses([addr]);
+    for (const e of (entries || [])) have.add(`${e.outpoint?.transactionId || e.entry?.outpoint?.transactionId}:${e.outpoint?.index ?? e.entry?.outpoint?.index}`);
+  }
+  for (const { po } of externalInputs) {
+    const k = `${po.transactionId}:${po.index}`;
+    if (!have.has(k)) return { ok: false, code: 'inputs_spent', error: `input ${po.transactionId.slice(0, 12)}:${po.index} no longer in sender UTXO set — prepared tx ${expectedTxId.slice(0, 12)} can never land` };
   }
   for (const t of txs) {
     try {
