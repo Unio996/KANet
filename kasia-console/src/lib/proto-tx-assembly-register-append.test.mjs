@@ -20,6 +20,7 @@ const kaspa = await import('kaspa-wasm');
 const { randomBytes } = await import('node:crypto');
 const {
   buildMarketGenesisTxJson, buildRegisterAppendTxJson, scriptPublicKeyFromHex,
+  assertKaspadInputVersionRule, PROTO_V0_COMPUTE_BUDGET,
 } = await import('./proto-tx-assembly.mjs');
 const {
   computeMarketGenesisArtifacts, computeShardLeafRedeemScript, computeKttGenesisArtifact,
@@ -133,6 +134,15 @@ const kttStateFieldCount = kttCompiled._raw.contracts.KanetTestToken.runtime_sta
     if (!r.ok) throw new Error(`签名后txid=${r.actualTxid} != 预期${built.expectedTxid}`);
   });
 
+  t('③b(账本1465节点规则镜像) first_bet真实构造的[leaf,fee]两输入交易, 每个input满足v2.0.1 RPC层sigOpCount/computeBudget一致性规则', () => {
+    const tx = kaspa.Transaction.deserializeFromSafeJSON(built.txJson);
+    assertKaspadInputVersionRule(tx, 'register_append-first_bet-e2e');
+    for (let i = 0; i < tx.inputs.length; i++) {
+      if (Number(tx.inputs[i].sigOpCount) !== 0) throw new Error(`input[${i}].sigOpCount应该是0, 实际${tx.inputs[i].sigOpCount}`);
+      if (Number(tx.inputs[i].computeBudget) !== PROTO_V0_COMPUTE_BUDGET) throw new Error(`input[${i}].computeBudget应该是${PROTO_V0_COMPUTE_BUDGET}, 实际${tx.inputs[i].computeBudget}`);
+    }
+  });
+
   // ── ⑦⑧ 账本1455回归向量: leftover公式修复后, 首笔下注真实最小可行fee输入从~1.05 KAS降到~0.82 KAS
   //    (修复前leaf输入的0.2 KAS真实面值被漏计, 每笔都静默多付真实矿工费, 见proto-tx-assembly.mjs
   //    buildRegisterAppendTxJson内leftover公式的注释) ──
@@ -226,6 +236,16 @@ const kttStateFieldCount = kttCompiled._raw.contracts.KanetTestToken.runtime_sta
     tx.finalize();
     const r = assertFinalTxid(tx, built.expectedTxid);
     if (!r.ok) throw new Error(`签名后txid=${r.actualTxid} != 预期${built.expectedTxid}`);
+  });
+
+  t('⑥b(账本1465节点规则镜像) second_bet真实构造的[leaf,held,fee]三输入交易, 每个input满足v2.0.1 RPC层sigOpCount/computeBudget一致性规则', () => {
+    const tx = kaspa.Transaction.deserializeFromSafeJSON(built.txJson);
+    assertKaspadInputVersionRule(tx, 'register_append-second_bet-e2e');
+    if (tx.inputs.length !== 3) throw new Error(`前提假设是三输入(leaf+held+fee), 实际${tx.inputs.length}个——前提不成立需要重新检查`);
+    for (let i = 0; i < tx.inputs.length; i++) {
+      if (Number(tx.inputs[i].sigOpCount) !== 0) throw new Error(`input[${i}].sigOpCount应该是0, 实际${tx.inputs[i].sigOpCount}`);
+      if (Number(tx.inputs[i].computeBudget) !== PROTO_V0_COMPUTE_BUDGET) throw new Error(`input[${i}].computeBudget应该是${PROTO_V0_COMPUTE_BUDGET}, 实际${tx.inputs[i].computeBudget}`);
+    }
   });
 
   // ── ⑦⑧ 账本1455回归向量(第二笔下注/有held): 修复后真实最小可行fee输入从~1.05 KAS降到~0.58 KAS

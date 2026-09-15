@@ -19,7 +19,8 @@ if (!process.env._PROTO_TX_ASSEMBLY_TEST_BOOTSTRAPPED) {
 }
 
 const {
-  GENESIS_OUTPUT_SOMPI, CONTINUATION_OUTPUT_SOMPI, GLOBAL_ABS_FEE_CAP_SOMPI, SIGNED_INPUT_CEILING_SOMPI, assertFixedOutputValue,
+  GENESIS_OUTPUT_SOMPI, CONTINUATION_OUTPUT_SOMPI, GLOBAL_ABS_FEE_CAP_SOMPI, SIGNED_INPUT_CEILING_SOMPI, PROTO_V0_COMPUTE_BUDGET,
+  assertFixedOutputValue, assertKaspadInputVersionRule,
   computeRequiredFeeSompiOrThrow, selectFeeUtxo, selectFeeUtxoByConstruction, selectChangeShape, dynamicNetLossCeiling,
 } = await import('./proto-tx-assembly.mjs');
 
@@ -255,6 +256,28 @@ t('SIGNED_INPUT_CEILING_SOMPI 两侧不漂移: console侧常量与relay侧源码
   }
 });
 
+// ============ assertKaspadInputVersionRule(账本1465: 闸3两次中止根因——节点RPC层输入版本一致性规则) ============
+// 镜像 rusty-kaspa v2.0.1 的规则(rpc/core/src/convert/tx.rs:19-42 + consensus/core/src/tx.rs:91-96):
+// version>=1 交易每个input的sigOpCount必须恒为0(用computeBudget代替); version 0 反过来。
+function fakeTxV(version, inputs) { return { version, inputs }; }
+t('assertKaspadInputVersionRule: version=1 且全部input.sigOpCount=0 ⇒ 通过', () => {
+  assertKaspadInputVersionRule(fakeTxV(1, [{ sigOpCount: 0, computeBudget: 70 }, { sigOpCount: 0, computeBudget: 70 }]), 'test');
+});
+t('assertKaspadInputVersionRule: version=1 但某个input.sigOpCount!=0 ⇒ throw(这正是账本1465两次闸3中止的真实根因形状)', () => {
+  let threw = null;
+  try { assertKaspadInputVersionRule(fakeTxV(1, [{ sigOpCount: 0, computeBudget: 70 }, { sigOpCount: 1, computeBudget: 0 }]), 'test'); } catch (e) { threw = e; }
+  if (!threw || !/input\[1\]\.sigOpCount=1/.test(threw.message)) throw new Error(`应该指名是input[1]且报sigOpCount=1, 实际: ${threw && threw.message}`);
+  if (!/sig_op_count is inconsistent with transaction version/.test(threw.message)) throw new Error('报错信息应该引用真实节点端的错误原文, 方便对照日志');
+});
+t('assertKaspadInputVersionRule: version=0 且全部input.computeBudget=0 ⇒ 通过', () => {
+  assertKaspadInputVersionRule(fakeTxV(0, [{ sigOpCount: 1, computeBudget: 0 }]), 'test');
+});
+t('assertKaspadInputVersionRule: version=0 但某个input.computeBudget!=0 ⇒ throw', () => {
+  let threw = null;
+  try { assertKaspadInputVersionRule(fakeTxV(0, [{ sigOpCount: 1, computeBudget: 5 }]), 'test'); } catch (e) { threw = e; }
+  if (!threw || !/input\[0\]\.computeBudget=5/.test(threw.message)) throw new Error(`应该指名input[0]且报computeBudget=5, 实际: ${threw && threw.message}`);
+});
+
 // ============ market_genesis tx_json 真实端到端组装(真 kaspa-wasm + 真编译 ShardLeaf_direct) ============
 // 目的: 证明 buildMarketGenesisTxJson 产出的 tx_json 不只是"格式对", 而是 relay 侧真代码
 // (Transaction.deserializeFromSafeJSON → extractTxShape → validateFixedValueOutputs → 签名 →
@@ -287,6 +310,14 @@ if (!process.env.CONSOLE_ENCRYPTION_KEY) process.env.CONSOLE_ENCRYPTION_KEY = '1
     if (built.netLoss > FEE_PROFILE_MARKET_GENESIS_CAP) throw new Error(`netLoss=${built.netLoss} 不该超过 cap=${FEE_PROFILE_MARKET_GENESIS_CAP}`);
   });
 
+  t('genesis-e2e-1b(账本1465节点规则镜像) 真实构造的genesis交易反序列化后, 每个input的sigOpCount/computeBudget满足v2.0.1 RPC层规则(否则主网节点会拒收——这正是闸3两次中止的真实故障, 本地构造/签名/txid核对全过但真广播才被拒)', () => {
+    const tx = kaspa.Transaction.deserializeFromSafeJSON(built.txJson);
+    assertKaspadInputVersionRule(tx, 'market_genesis-e2e');
+    if (tx.version < 1) throw new Error(`这条测试的前提是version>=1(covenant交易恒为1), 实际version=${tx.version}——前提假设不成立, 需要重新检查`);
+    if (Number(tx.inputs[0].sigOpCount) !== 0) throw new Error(`真实构造出的fee input.sigOpCount应该是0, 实际${tx.inputs[0].sigOpCount}`);
+    if (Number(tx.inputs[0].computeBudget) !== PROTO_V0_COMPUTE_BUDGET) throw new Error(`真实构造出的fee input.computeBudget应该是PROTO_V0_COMPUTE_BUDGET(${PROTO_V0_COMPUTE_BUDGET}), 实际${tx.inputs[0].computeBudget}`);
+  });
+
   t('genesis-e2e-2 relay 侧真代码能反序列化 + extractTxShape + validateFixedValueOutputs 通过(未签名阶段), covenant_id 在序列化往返后不变(populateGenesisCovenants 声明真的被序列化保留, 不是本地对象独有的临时状态)', () => {
     const tx = kaspa.Transaction.deserializeFromSafeJSON(built.txJson);
     const shape = extractTxShape(tx);
@@ -311,7 +342,7 @@ if (!process.env.CONSOLE_ENCRYPTION_KEY) process.env.CONSOLE_ENCRYPTION_KEY = '1
     const genesisSpk2 = new kaspa.ScriptPublicKey(0, artifacts.shardLeafDirect.scriptPubKeyHex.slice(2));
     const tamperedTx = new kaspa.Transaction({
       version: 1,
-      inputs: [{ previousOutpoint: { transactionId: feeUtxo.txid, index: feeUtxo.vout }, signatureScript: new Uint8Array(0), sequence: 0n, sigOpCount: 1, computeBudget: 0, utxo: { outpoint: { transactionId: feeUtxo.txid, index: feeUtxo.vout }, amount: feeUtxo.value, scriptPublicKey: feeSpk2, blockDaaScore: 0n } }],
+      inputs: [{ previousOutpoint: { transactionId: feeUtxo.txid, index: feeUtxo.vout }, signatureScript: new Uint8Array(0), sequence: 0n, sigOpCount: 0, computeBudget: 70, utxo: { outpoint: { transactionId: feeUtxo.txid, index: feeUtxo.vout }, amount: feeUtxo.value, scriptPublicKey: feeSpk2, blockDaaScore: 0n } }],
       outputs: [
         new kaspa.TransactionOutput(GOS - 1n, genesisSpk2),
         new kaspa.TransactionOutput(feeUtxo.value - GOS - 100000n, feeSpk2),
