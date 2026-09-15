@@ -67,10 +67,20 @@ KAS)确实明显低于旧两步设计 step B 单独的估计值(`bet_mint_step_b
 | 合并后的 KanetTestToken genesis | 0.2 KAS | 首笔下注新增 |
 | **合计** | **0.6 KAS** | market_resolve/claim_draw/refund_payout 落地前无法取出 |
 
-若再下第二笔(有 held)：结构不变仍是 0.6 KAS——held 被完全消费(`next_states=[]`)，它原本锁着的
-0.2 KAS 转移进新的合并 KTT 输出里，不是额外叠加锁定。也就是说**这 0.6 KAS 是"稳态锁定额"，不会随
-下注笔数线性增长**(每次 register_append 都是消费上一次的 held、产出新的 merged KTT，同一份 0.2 KAS
-在滚动，只有 leaf 续约 + 当次新增的 ticket 才是持续存在的锁定项)。
+若再下第二笔(有 held)：held 被完全消费(`next_states=[]`)，它原本锁着的 0.2 KAS 转移进新的合并 KTT
+输出里，这一部分（leaf 续约 + 合并 KTT，合计 0.4 KAS）确实是稳态、不随下注笔数增长的滚动项。
+
+> 📌 **状态注记（2026-09-15 · J2 · Bettor 1456 复核纠正 · 不改上方原文）**：上一段"这 0.6 KAS 是
+> 稳态锁定额，不会随下注笔数线性增长"这个结论**是错的**——我自己在同一段里已经写出了正确的线索
+> （"只有 leaf 续约 + 当次新增的 ticket 才是持续存在的锁定项"）却在最后一步综合错了。`PoolSideTicket`
+> 是"spent-once"凭证（`ShardLeaf_direct.sil:146` 注释原话），每次 `register_append` 都新铸一个，只在
+> 该笔下注**自己**将来 `claim_draw`/`refund_payout` 时才会被消费——**它不会被下一笔 `register_append`
+> 合并或替换**，会跟着下注笔数一笔笔累积。正确公式：
+> **结算入口落地前取不回的金额 = 0.4 KAS(leaf 续约 + 合并 KTT，稳态) + 0.2 KAS × 下注笔数(ticket，
+> 累积)**。
+> 金丝雀只下 1 笔，代入 N=1：0.4 + 0.2×1 = **0.6 KAS**——这个具体数字与上面表格恰好一致（N=1 时两个
+> 公式给出同一个数），但"不会随笔数增长"这句定性结论是错的，若金丝雀下第 2 笔，取不回的金额会变成
+> 0.4+0.2×2=**0.8 KAS**，不是继续停在 0.6 KAS。
 
 ## 文件清单
 
