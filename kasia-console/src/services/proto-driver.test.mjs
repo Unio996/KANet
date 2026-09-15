@@ -43,7 +43,7 @@ async function makeMarket(tag) {
   return ensureMarketPending({
     id: marketId, token_def_id: 't1', question: 'q', deadline_ms: 1700000000000, min_bet: 5, seal_count: 2,
     committee_pubkeys_json: JSON.stringify([artifacts.committeePubkeyHex]), committee_privkey_enc: artifacts.committeePrivkeyEnvelope,
-    rootclose_tmpl_hash: artifacts.rootCloseTmplHash,
+    rootclose_tmpl_hash: artifacts.rootCloseTmplHash, shardleaf_own_redeem_len: artifacts.shardLeafOwnRedeemLen,
   });
 }
 

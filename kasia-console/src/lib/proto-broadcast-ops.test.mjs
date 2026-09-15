@@ -46,7 +46,7 @@ const artifacts = await computeMarketGenesisArtifacts({ marketId: MARKET_ID, min
 const market = ensureMarketPending({
   id: MARKET_ID, token_def_id: 't1', question: 'test market', deadline_ms: 1700000000000, min_bet: 5, seal_count: 2,
   committee_pubkeys_json: JSON.stringify([artifacts.committeePubkeyHex]), committee_privkey_enc: artifacts.committeePrivkeyEnvelope,
-  rootclose_tmpl_hash: artifacts.rootCloseTmplHash,
+  rootclose_tmpl_hash: artifacts.rootCloseTmplHash, shardleaf_own_redeem_len: artifacts.shardLeafOwnRedeemLen,
 });
 
 const FEE_UTXO_TXID = 'ab'.repeat(32);
@@ -140,7 +140,7 @@ await t('⑥covenant_broadcast 命令本身失败(relay 拒绝) ⇒ 返回 {erro
   const bet = sqlite.prepare('SELECT * FROM proto_bets WHERE id = ?').get(BET_ID);
 
   function leafAddressFor(state) {
-    const leafRedeem = computeShardLeafRedeemScript({ marketId: MARKET_ID, minBet: marketRow.min_bet, sealCount: marketRow.seal_count, rootcloseTmplHash: marketRow.rootclose_tmpl_hash, state });
+    const leafRedeem = computeShardLeafRedeemScript({ marketId: MARKET_ID, minBet: marketRow.min_bet, sealCount: marketRow.seal_count, rootcloseTmplHash: marketRow.rootclose_tmpl_hash, state, ownRedeemLen: marketRow.shardleaf_own_redeem_len });
     const spk = scriptPublicKeyFromHex(kaspa, leafRedeem.scriptPubKeyHex);
     return kaspa.addressFromScriptPublicKey(spk, 'mainnet').toString();
   }
@@ -255,7 +255,7 @@ await t('⑥covenant_broadcast 命令本身失败(relay 拒绝) ⇒ 返回 {erro
   const market2 = ensureMarketPending({
     id: MARKET_ID_2, token_def_id: 't1', question: 'seed-face-value market(账本1462)', deadline_ms: 1700000000000, min_bet: 5, seal_count: 2,
     committee_pubkeys_json: JSON.stringify([artifacts2.committeePubkeyHex]), committee_privkey_enc: artifacts2.committeePrivkeyEnvelope,
-    rootclose_tmpl_hash: artifacts2.rootCloseTmplHash,
+    rootclose_tmpl_hash: artifacts2.rootCloseTmplHash, shardleaf_own_redeem_len: artifacts2.shardLeafOwnRedeemLen,
   });
 
   const SEED_0_5 = 50_000_000n, SEED_0_95 = 95_000_000n;
@@ -293,7 +293,7 @@ await t('⑥covenant_broadcast 命令本身失败(relay 拒绝) ⇒ 返回 {erro
   const bet1462_1 = sqlite.prepare('SELECT * FROM proto_bets WHERE id = ?').get('bet-1462-001');
 
   function leafAddressFor2(state) {
-    const leafRedeem = computeShardLeafRedeemScript({ marketId: MARKET_ID_2, minBet: marketRow2.min_bet, sealCount: marketRow2.seal_count, rootcloseTmplHash: marketRow2.rootclose_tmpl_hash, state });
+    const leafRedeem = computeShardLeafRedeemScript({ marketId: MARKET_ID_2, minBet: marketRow2.min_bet, sealCount: marketRow2.seal_count, rootcloseTmplHash: marketRow2.rootclose_tmpl_hash, state, ownRedeemLen: marketRow2.shardleaf_own_redeem_len });
     const spk = scriptPublicKeyFromHex(kaspa, leafRedeem.scriptPubKeyHex);
     return kaspa.addressFromScriptPublicKey(spk, 'mainnet').toString();
   }

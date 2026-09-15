@@ -158,13 +158,12 @@ export async function computeMarketGenesisArtifacts({ marketId, minBet, deadline
   const rootCloseTmplHash = extractTemplateArtifactV100(rootCloseCompiled).templateHashHex;
 
   // ⑤ ShardLeaf_direct(依赖④, genesis 输出本身——seal_count=2 v0 固定, min_bet=USER, 4-field 全 0)。
-  const shardLeafCtor = [
-    ctorBytes32V100(marketId), ctorBytes32V100(ps_tmpl_hash), ctorBytes32V100(marketId),
-    ctorIntV100(2), ctorIntV100(minBet), ctorBytes32V100(rootCloseTmplHash), ctorBytes32V100(ZERO32.toString('hex')),
-    ctorBytes32V100(token_tmpl_hash), ctorIntV100(0), ctorIntV100(0), ctorIntV100(0), ctorIntV100(0),
-  ];
-  const shardLeafCompiled = compileSilV100(SHARD_LEAF_DIRECT_SIL, shardLeafCtor, 'ShardLeaf_direct');
-  const shardLeafArtifact = artifactOf(shardLeafCompiled);
+  // 🔴 账本1469/1470(Bettor裁定): own_redeem_len 用不动点收敛现算(见 convergeShardLeafOwnRedeemLen),
+  // 不能猜/不能是全局常量(账本1468矩阵实测证实会随seal_count/min_bet的minimal-push编码宽度门槛变化)。
+  const { ownRedeemLen: shardLeafOwnRedeemLen, artifact: shardLeafArtifact } = convergeShardLeafOwnRedeemLen({
+    marketId, psTmplHash: ps_tmpl_hash, sealCount: 2, minBet, rootCloseTmplHash, tokenTmplHash: token_tmpl_hash,
+    state: { local_yes: 0, local_no: 0, count: 0, pool_value: 0 },
+  });
 
   return {
     committeePubkeyHex: pubkeyHex,
@@ -173,12 +172,69 @@ export async function computeMarketGenesisArtifacts({ marketId, minBet, deadline
     rootClaimTmplHash,
     refundClaimTmplHash,
     rootCloseTmplHash,
+    shardLeafOwnRedeemLen,
     shardLeafDirect: {
       script: shardLeafArtifact.script,
       scriptPubKeyHex: '0x' + p2sh(shardLeafArtifact.script),
       templateHashHex: shardLeafArtifact.templateHashHex,
     },
   };
+}
+
+/**
+ * (账本1469, Bettor裁定①②③) 对给定 ctor 组合(marketId/psTmplHash/sealCount/minBet/rootCloseTmplHash/
+ * tokenTmplHash/state)不动点收敛出 own_redeem_len——ShardLeaf_direct 裸编译产物自身的字节长度, 烤入
+ * 该市场自己的 ctor(第13个字段), register_append 自续约切片要用。
+ *
+ * 收敛原理: own_redeem_len 本身作为一个 ctor int 字段, 也参与 minimal-push 编码(账本1468矩阵实测:
+ * seal_count/min_bet 跨编码宽度门槛时编译产物变长, own_redeem_len 同理), 所以"猜一个值编译→量出真实
+ * 长度→用真实长度再编"这个过程本身也可能因为 own_redeem_len 自己变宽而再长几个字节——直到某一轮"猜测值
+ * == 编译出的真实长度"为止(state 区四个 init_* 字段经验证不影响长度, 不参与收敛)。
+ *
+ * 只用于**genesis 时**(建出一个新市场)或**离线验证/矩阵测试**——不用于 register_append 重建(那里必须
+ * 从已存 ctor 原样读回, 见 computeShardLeafRedeemScript 的 fail-closed 断言, 不重新收敛)。
+ *
+ * @param {object} o
+ * @param {string} o.marketId  32字节hex(无0x)
+ * @param {string} o.psTmplHash  32字节hex(无0x), 协议常量
+ * @param {number} o.sealCount
+ * @param {number} o.minBet
+ * @param {string} o.rootCloseTmplHash  32字节hex(无0x)——矩阵/单测场景可传任意合法32字节hex占位
+ *   (编译只关心字节长度, 不校验该hash对应的RootClose是否真实存在)
+ * @param {string} o.tokenTmplHash  32字节hex(无0x), 协议常量
+ * @param {{local_yes:number, local_no:number, count:number, pool_value:number}} [o.state]  默认全0
+ * @param {number} [o.initialGuess]  收敛起始猜测值, 默认账本1468金丝雀市场实测值14746(只影响收敛快慢,
+ *   不影响最终结果)
+ * @param {number} [o.maxRounds]  收敛轮数上限, 默认4(超过即 throw, fail-loud)
+ * @returns {{ownRedeemLen:number, artifact:{script:Buffer, templateHashHex:string, stateLayout:object}}}
+ */
+export function convergeShardLeafOwnRedeemLen({
+  marketId, psTmplHash, sealCount, minBet, rootCloseTmplHash, tokenTmplHash,
+  state = { local_yes: 0, local_no: 0, count: 0, pool_value: 0 }, initialGuess = 14746, maxRounds = 4,
+}) {
+  const ctorFor = (ownRedeemLenGuess) => [
+    ctorBytes32V100(marketId), ctorBytes32V100(psTmplHash), ctorBytes32V100(marketId),
+    ctorIntV100(sealCount), ctorIntV100(minBet), ctorBytes32V100(rootCloseTmplHash), ctorBytes32V100(ZERO32.toString('hex')),
+    ctorBytes32V100(tokenTmplHash),
+    ctorIntV100(state.local_yes), ctorIntV100(state.local_no), ctorIntV100(state.count), ctorIntV100(state.pool_value),
+    ctorIntV100(ownRedeemLenGuess),
+  ];
+  let guess = initialGuess;
+  let compiled = null;
+  for (let round = 1; round <= maxRounds; round++) {
+    compiled = compileSilV100(SHARD_LEAF_DIRECT_SIL, ctorFor(guess), 'ShardLeaf_direct');
+    const actualLen = Buffer.from(compiled.script).length;
+    if (actualLen === guess) {
+      const artifact = artifactOf(compiled);
+      // fail-closed(Bettor③要求)双保险: 收敛循环已保证 actualLen===guess, 这里再断言一次不因为"循环写对了"就省略。
+      if (artifact.script.length !== guess) {
+        throw new Error(`convergeShardLeafOwnRedeemLen: fail-closed — 编译出的长度 ${artifact.script.length} != 收敛值 ${guess}`);
+      }
+      return { ownRedeemLen: guess, artifact };
+    }
+    guess = actualLen;
+  }
+  throw new Error(`convergeShardLeafOwnRedeemLen: own_redeem_len 不动点收敛失败(超过 ${maxRounds} 轮仍未稳定, 最后一次猜测=${guess})——拒绝, 不建出永远无法下注的市场`);
 }
 
 // 🔴 D-020(账本1446/1448, a4878d7d): bet_mint 步骤A(独立铸 stake 筹码)已取消, register_append
@@ -250,20 +306,32 @@ export function computeTicketGenesisArtifact({ bettorPk, direction, stake, shard
  * @param {string} o.rootcloseTmplHash  32字节hex(无0x), 来自 proto_markets.rootclose_tmpl_hash
  * @param {{local_yes:number, local_no:number, count:number, pool_value:number}} o.state
  *   当前 State(deriveLeafState 现算的值, 或 genesis 时的全 0)
+ * @param {number} o.ownRedeemLen  该市场 genesis 时不动点收敛烤入 ctor 的 own_redeem_len(读自
+ *   proto_markets.shardleaf_own_redeem_len)——**必填, 不重新猜/不重新收敛**(账本1469 Bettor③要求
+ *   "register_append 必须从市场已存 ctor 重建"): genesis 时的收敛结果是唯一真值来源, 同
+ *   rootcloseTmplHash 一类"一次性事实、之后不变"的字段, 这里只做一次编译 + fail-closed 校验。
  * @returns {{script:Buffer, scriptPubKeyHex:string, stateLayout:{start:number,len:number}}}
  */
-export function computeShardLeafRedeemScript({ marketId, minBet, sealCount, rootcloseTmplHash, state }) {
+export function computeShardLeafRedeemScript({ marketId, minBet, sealCount, rootcloseTmplHash, state, ownRedeemLen }) {
   if (!/^[0-9a-f]{64}$/.test(marketId)) throw new Error(`computeShardLeafRedeemScript: marketId must be 32-byte hex, got ${marketId}`);
   if (!/^[0-9a-f]{64}$/.test(rootcloseTmplHash)) throw new Error(`computeShardLeafRedeemScript: rootcloseTmplHash must be 32-byte hex, got ${rootcloseTmplHash}`);
+  if (!(Number.isInteger(ownRedeemLen) && ownRedeemLen > 0)) throw new Error(`computeShardLeafRedeemScript: ownRedeemLen must be a positive integer(读自 proto_markets.shardleaf_own_redeem_len), got ${ownRedeemLen}`);
   const { ps_tmpl_hash, token_tmpl_hash } = loadProtocolConstants();
   const ctor = [
     ctorBytes32V100(marketId), ctorBytes32V100(ps_tmpl_hash), ctorBytes32V100(marketId),
     ctorIntV100(sealCount), ctorIntV100(minBet), ctorBytes32V100(rootcloseTmplHash), ctorBytes32V100(ZERO32.toString('hex')),
     ctorBytes32V100(token_tmpl_hash),
     ctorIntV100(state.local_yes), ctorIntV100(state.local_no), ctorIntV100(state.count), ctorIntV100(state.pool_value),
+    ctorIntV100(ownRedeemLen),
   ];
   const compiled = compileSilV100(SHARD_LEAF_DIRECT_SIL, ctor, 'ShardLeaf_direct');
   const artifact = artifactOf(compiled);
+  // fail-closed(账本1469 Bettor③要求, register_append builder 一侧): 真实编译出的长度必须等于已存
+  // ctor 里的 own_redeem_len——不等即拒绝返回(说明该市场的 seal_count/min_bet/state 与落库的
+  // own_redeem_len 已经不自洽, 继续构造只会产出一笔链上必拒的交易, 不如提前 fail-loud)。
+  if (artifact.script.length !== ownRedeemLen) {
+    throw new Error(`computeShardLeafRedeemScript: fail-closed — 编译出的 ShardLeaf_direct 长度 ${artifact.script.length} != 已存 own_redeem_len ${ownRedeemLen}`);
+  }
   return { script: artifact.script, scriptPubKeyHex: '0x' + p2sh(artifact.script), stateLayout: artifact.stateLayout };
 }
 

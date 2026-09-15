@@ -1,0 +1,22 @@
+[db] path=C:\Users\ADMIN\AppData\Local\Temp\j2-sld-verify-drs9mz\console.db source=DB_PATH
+=== market_genesis + register_append 真实生产构造(3组ctor × 首笔/次笔) → cli-debugger 真执行验证(账本1465/1468/1469) ===
+
+--- ctor组合 sc2_mb1(seal_count=2, min_bet=1) 收敛 own_redeem_len=14746 ---
+[sc2_mb1_first_bet_no_held] own_redeem_len=14746 wrote C:\Users\ADMIN\AppData\Local\Temp\j2-sld-verify-testjson-8jZC70\ShardLeaf_direct.sc2_mb1_first_bet_no_held.test.json (ninputs=2, noutputs=4)
+  ✅ [sc2_mb1_first_bet_no_held] cli-debugger: PASS
+[sc2_mb1_second_bet_with_held] own_redeem_len=14746 wrote C:\Users\ADMIN\AppData\Local\Temp\j2-sld-verify-testjson-xNgf5g\ShardLeaf_direct.sc2_mb1_second_bet_with_held.test.json (ninputs=3, noutputs=4)
+  ✅ [sc2_mb1_second_bet_with_held] cli-debugger: PASS
+
+--- ctor组合 sc1000_mb100000(seal_count=1000, min_bet=100000) 收敛 own_redeem_len=14753 ---
+[sc1000_mb100000_first_bet_no_held] own_redeem_len=14753 wrote C:\Users\ADMIN\AppData\Local\Temp\j2-sld-verify-testjson-I5MCL9\ShardLeaf_direct.sc1000_mb100000_first_bet_no_held.test.json (ninputs=2, noutputs=4)
+  ✅ [sc1000_mb100000_first_bet_no_held] cli-debugger: PASS
+[sc1000_mb100000_second_bet_with_held] own_redeem_len=14753 wrote C:\Users\ADMIN\AppData\Local\Temp\j2-sld-verify-testjson-RzO9or\ShardLeaf_direct.sc1000_mb100000_second_bet_with_held.test.json (ninputs=3, noutputs=4)
+  ✅ [sc1000_mb100000_second_bet_with_held] cli-debugger: PASS
+
+--- ctor组合 sc2_mb2p40(seal_count=2, min_bet=1099511627776) 收敛 own_redeem_len=14752 ---
+[sc2_mb2p40_first_bet_no_held] own_redeem_len=14752 wrote C:\Users\ADMIN\AppData\Local\Temp\j2-sld-verify-testjson-l83Op8\ShardLeaf_direct.sc2_mb2p40_first_bet_no_held.test.json (ninputs=2, noutputs=4)
+  ✅ [sc2_mb2p40_first_bet_no_held] cli-debugger: PASS
+[sc2_mb2p40_second_bet_with_held] own_redeem_len=14752 wrote C:\Users\ADMIN\AppData\Local\Temp\j2-sld-verify-testjson-YALCEY\ShardLeaf_direct.sc2_mb2p40_second_bet_with_held.test.json (ninputs=3, noutputs=4)
+  ✅ [sc2_mb2p40_second_bet_with_held] cli-debugger: PASS
+
+✅✅ ALL PASS(真实cli-debugger执行, 3组ctor × 首笔/次笔 共 6 次)

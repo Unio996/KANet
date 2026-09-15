@@ -56,7 +56,14 @@ contract ShardLeaf_direct(
     int      init_local_yes,
     int      init_local_no,
     int      init_count,
-    int      init_pool_value
+    int      init_pool_value,
+    // 🔴 账本1468/1469(Bettor裁定, 取代此前"硬编码constant"的第一版修复): 裸编译redeem脚本自身的字节
+    // 长度——不能是全局常量(账本1468矩阵实测: 会随seal_count/min_bet的magnitude变化, 硬编码值只对
+    // 特定市场配置成立)。改为ctor参数, 由JS侧genesis时按本市场自己的seal_count/min_bet做不动点收敛
+    // 算出后烤入(见proto-covenant-builder.mjs computeMarketGenesisArtifacts的收敛循环), register_append
+    // 重建时从proto_markets.shardleaf_own_redeem_len原样读回, 不重新猜。见下方register_append entry里
+    // 的用法与OWN_PREFIX_LEN/OWN_STATE_LEN注释。
+    int      own_redeem_len
 ) {
     int local_yes  = init_local_yes;
     int local_no   = init_local_no;
@@ -96,6 +103,35 @@ contract ShardLeaf_direct(
     // ★ V-T-8 绕路(register_append 需要 readInputStateWithTemplate(经 scanOwnedTokenInputs)+ 本合约 self-
     //   continuation 共存, 同 ShardLeaf.sil 一致处置)。常量按本文件*实际编译产物*量测得出(与 ShardLeaf.sil
     //   结构相同但 ctor 不同, 不假设数值相同, 已重新量测, 见 provenance)。
+    // 🔴 账本1468修复(闸3重试-2首笔下注被节点脚本校验拒收, cli-debugger 3ed9733 真实执行逐字节实证):
+    //   OWN_PREFIX_LEN/OWN_STATE_LEN 原本描述的是【裸编译 redeem 脚本自身】内 state 区的偏移(与
+    //   compileSilV100 返回的 state_layout.start/len 完全一致, 已核对) —— 但下面 register_append 里
+    //   `ownSig = tx.inputs[this.activeInputIndex].sigScript` 读到的是【完整 sigScript】
+    //   (= action 见证字节 ++ redeem 脚本字节, 见 proto-register-append-witness.mjs 头注
+    //   "sigScript = action_bytes ++ pushdata(redeem_bytes)"), 原代码直接从 ownSig 的第 0 字节按
+    //   OWN_PREFIX_LEN/OWN_STATE_LEN 切——这只在 action 见证部分长度恰好为 0 时才是对的。真实
+    //   register_append 的 action 见证(ps_prefix/ps_suffix/tok_prefix/tok_suffix 等协议常量见证值,
+    //   尤其 tok_suffix 现已是几千字节的真实模板)长度远大于 0(账本1468 实测某市场 action=3164 字节),
+    //   导致从字节 0 切出来的"prefix"/"suffix"落在 action 见证内部, 跟 redeem 脚本真实的 state 区
+    //   毫无关系——链上校验 100% 必然失败, 从未真正跑通过(此前唯一一次 cli-debugger 通过的
+    //   V-register_append-1 测试用的是这份合约代币化改造前的旧夹具, 见 docs/provenance/2026-09-14-
+    //   j2-t3-v03-shardleafdirect-tokenization/, 那份夹具的 action 见证极短, 巧合掩盖了这个偏移错误,
+    //   D-020/代币化落地后真实 action 变长这个夹具从未跟着更新重跑)。
+    //   修复: redeem 脚本在 ownSig 里的真实起点 = ownLen − own_redeem_len, 再在这个起点上加
+    //   OWN_PREFIX_LEN/OWN_STATE_LEN 定位 state 区——不再假设 action 见证长度为 0。
+    //   已用账本1468 真实捕获的失败交易字节独立验证: 按此修复后的偏移重算出的 hash 与真实交易里
+    //   实际使用的续约输出 scriptPubKey 逐字节一致(即 JS 侧 buildRegisterAppendTxJson 原本就算对了,
+    //   错的是合约自己这份自校验)。
+    // 🔴 账本1469订正(取代上一版把own_redeem_len写成本文件constant的第一版1468修复): 用cli-debugger
+    //   矩阵实测(seal_count/min_bet分别扫0/1/15/16/17/255/256/65535/65536/2^31/2^32/2^40/-1/
+    //   MAX_SAFE_INTEGER)证实"ctor全部是定宽字段, 编译产物字节数不随ctor取值变化"这条假设是错的——
+    //   local_yes/local_no/count/pool_value这4个state字段确实不影响长度(它们只进runtime的as byte[8]
+    //   定宽转型区), 但seal_count/min_bet这两个纯ctor常量(从不进state区, 直接被require()引用为字面量)
+    //   的minimal-push编码宽度会随magnitude跨界增长, 编译产物长度跟着变——同一份.sil源码换一个市场的
+    //   seal_count/min_bet组合, 真实redeem长度就不是同一个数, 硬编码单一constant只对量测时那组值成立。
+    //   改为ctor参数own_redeem_len(见上方contract签名新增字段), 不再是本文件内部的constant——由JS侧
+    //   genesis时对本市场自己的seal_count/min_bet做不动点收敛算出、烤入ctor, 每个市场各自持有自己的
+    //   正确值, 不假设"全市场共用一个数"。
     int constant OWN_PREFIX_LEN = 1;
     int constant OWN_STATE_LEN  = 36;
 
@@ -168,8 +204,12 @@ contract ShardLeaf_direct(
                           + byte[](8 as byte[1]) + byte[]((pool_value + stake) as byte[8]);
         byte[] ownSig = tx.inputs[this.activeInputIndex].sigScript;
         int ownLen = ownSig.length;
-        byte[] ownPrefix = ownSig.slice(0, OWN_PREFIX_LEN);
-        byte[] ownSuffix = ownSig.slice(OWN_PREFIX_LEN + OWN_STATE_LEN, ownLen);
+        // 账本1468/1469修复: redeem 脚本在完整 sigScript(ownSig)里的真实起点(见上方 own_redeem_len ctor
+        // 参数注释)。own_redeem_len 直接引用 ctor 字段, 不重新猜——genesis 时已按本市场自己的
+        // seal_count/min_bet 做过不动点收敛烤入, 这里只读用, 手法同 seal_count/min_bet 本身被直接引用。
+        int ownRedeemStart = ownLen - own_redeem_len;
+        byte[] ownPrefix = ownSig.slice(ownRedeemStart, ownRedeemStart + OWN_PREFIX_LEN);
+        byte[] ownSuffix = ownSig.slice(ownRedeemStart + OWN_PREFIX_LEN + OWN_STATE_LEN, ownLen);
         byte[32] expectedHash = blake2b(ownPrefix + stateBytes + ownSuffix);
         byte[37] expectedSpk = new ScriptPubKeyP2SH(expectedHash);
         require(tx.outputs[leafOutIdx].scriptPubKey == byte[](expectedSpk));

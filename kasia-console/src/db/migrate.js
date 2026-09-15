@@ -6285,5 +6285,27 @@ export function runMigrations() {
     }
   }
 
+  // ── v209 (2026-09-15, J2 · 账本1468/1469, Bettor裁定): ShardLeaf_direct.sil的register_append
+  //   自续约偏移bug修复——OWN_REDEEM_LEN从.sil里的硬编码constant改成ctor参数own_redeem_len(账本1468
+  //   实测：该常量会随seal_count/min_bet的magnitude变化而变化，硬编码值只对特定市场配置成立，换一个
+  //   seal_count/min_bet组合就会错，重新触发同一类拒收——不能是全局常量，必须是每个市场genesis时按
+  //   自己的seal_count/min_bet不动点收敛算出、烤进那个市场自己的ctor)。proto_markets加一列存这个值，
+  //   register_append重建leaf redeem时必须从这里读（不能重新猜/重新收敛——Bettor 1469要求③"必须从
+  //   市场已存ctor重建，不能重新猜"）。
+  //   幂等: ADD COLUMN 用标准 table_info 存在性守卫(同 v205/v189 既有模式)。允许 NULL、无 DEFAULT
+  //   (同 v205 纪律: 缺列不该被看似无害的默认值掩盖, 消费方读到 NULL 必须 fail-loud 拒绝, 值只应该
+  //   来自genesis时真实收敛算出的写入)。
+  {
+    const pmCols = sqlite.pragma('table_info(proto_markets)').map(c => c.name);
+    if (pmCols.includes('shardleaf_own_redeem_len')) {
+      console.log('[migrate] v209: proto_markets.shardleaf_own_redeem_len 在, 记账通过');
+    } else {
+      try {
+        sqlite.exec(`ALTER TABLE proto_markets ADD COLUMN shardleaf_own_redeem_len INTEGER`);
+        console.log('[migrate] v209: proto_markets.shardleaf_own_redeem_len 列已加(ShardLeaf_direct.sil own_redeem_len ctor参数, genesis时不动点收敛算出后写入, register_append重建时原样读回不重新猜).');
+      } catch (e) { if (!/duplicate column/i.test(e.message)) console.warn(`[migrate] v209 proto_markets.shardleaf_own_redeem_len fail: ${e.message}`); }
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }

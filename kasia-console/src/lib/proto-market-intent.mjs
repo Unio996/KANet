@@ -59,10 +59,10 @@ export function ensureMarketPending(o) {
   sqlite.prepare(`
     INSERT INTO proto_markets
       (id, token_def_id, question, deadline_ms, min_bet, seal_count, committee_pubkeys_json,
-       committee_privkey_enc, rootclose_tmpl_hash, status, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'genesis_pending', ?, ?)
+       committee_privkey_enc, rootclose_tmpl_hash, shardleaf_own_redeem_len, status, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'genesis_pending', ?, ?)
   `).run(o.id, o.token_def_id, o.question ?? null, o.deadline_ms, o.min_bet, o.seal_count ?? 2,
-    o.committee_pubkeys_json, o.committee_privkey_enc, o.rootclose_tmpl_hash, ts, ts);
+    o.committee_pubkeys_json, o.committee_privkey_enc, o.rootclose_tmpl_hash, o.shardleaf_own_redeem_len ?? null, ts, ts);
   return getMarketRow(o.id);
 }
 
