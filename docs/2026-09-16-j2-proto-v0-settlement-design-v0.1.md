@@ -32,12 +32,12 @@ Bettor 1472已用它复核过账本1469的`own_redeem_len`修复，6/6 PASS）�
 逐输入显式构造真实形状的sigScript**（`action_bytes ++ pushdata(redeem_bytes)`，action部分用真实ABI
 编码——见§0.2，witness参数用真实协议常量而非短占位）。
 
-### §0.2 新增工具：通用entry witness ABI编码器（scratch，仅审计用，未进`src/lib`）
+### §0.2 新增工具：通用entry witness ABI编码器（`kasia-console/scripts/audit/`，仅审计用，未进`src/lib`）
 
 `register_append`已有专用编码器`proto-tx-assembly-witness.mjs`/`proto-register-append-witness.mjs`
 （账本1425/1431确认过与D-019 pin `silverscript-abi/src/lib.rs`的`encode_entry_sig_script`
 逐字节一致）。本轮为审计`close_commit`/`convert_to_claim`/`claim_draw`/`refund_payout`等新入口，写了
-一个**通用**版本（`kasia-console/scratch/j2_settlement_audit/generic-entry-witness.mjs`）：直接读
+一个**通用**版本（`kasia-console/scripts/audit/generic-entry-witness.mjs`）：直接读
 `compileSilV100(...)._raw.contracts[C].entries[E].params`（真实编译产物的参数类型声明），按
 D-019 pin源码`silverscript-abi/src/lib.rs:904-946 push_sig_arg`逐类型分派：
 
@@ -92,20 +92,38 @@ V-T-8，可以放心用内建函数，编译器在**编译期自己**做不动�
 `convert_to_refundclaim`只做外部模板校验（去往RootClose/RootClaim/RefundClaim，不是"自己"续约），
 同样不触发。
 
-### §0.4 逐入口结论表
+### §0.4 逐入口结论表（v0.2 更新：每条标注交易version/编码器commit/debugger sha256——账本1479 Bettor要求）
 
-| 入口 | 组合 | 结论 | 证据等级 |
+**公共基线**（除非表格里单独标注差异，每一行都是这个基线）：交易`version=1`；ABI编码器
+`kasia-console/scripts/audit/generic-entry-witness.mjs`修复后版本，commit `449745f4`（修复"drain()
+返回hex字符串被当UTF-8文本二次编码"这个bug之前的任何结果一律作废、不采信，见§0.9）；debugger二进制
+D-019 pin `3ed9733`，sha256 `b85bb524d22ae761150dcb80b070f0bf1beb95a1c6604470501883b4d0f552c6`。
+
+**分类（Bettor账本1479口径）**：PASS = `convert_to_rootclose`、`convert_to_claim`、
+`convert_to_refundclaim`、`claim_draw`(full分支)、`refund_flip`、`refund_payout`(full/partial分支)；
+FAIL（真实缺陷，非harness伪影）= `claim_draw`(partial分支)；待定 = `close_commit`、
+`KanetTokenClaim.spend`。
+
+| 入口 | 组合 | 结论 | 真实执行证据（version/编码器commit/debugger sha256均为公共基线，仅标注差异） |
 |---|---|---|---|
-| `ShardLeaf_direct.register_append` | readInputStateWithTemplate + 自续约(AB11) | **已修复**(账本1468/1469: ctor烤入`own_redeem_len`+JS不动点收敛) | 真实cli-debugger 6/6 PASS(账本1469④, `verify-run-1469-ctor-matrix.log`) |
-| `ShardLeaf_direct.convert_to_rootclose` | 只有`scanOwnedTokenInputs`(读, 无自续约) | 结构性安全 | 源码逐行核对+架构论证(§0.3); 未在本轮单独重跑, 建议实现前补1条向量 |
-| `RootClose.refund_flip` | 只有`noTokenInput`(不读state) + 内建`validateOutputState` + CLTV | ✅ **安全** | ✅ **真实cli-debugger PASS**——初次FAIL是harness用法错误(test.json的`lock_time`字段必须嵌在`tx`对象内部, 不是顶层, 见§0.10) |
-| `RootClose.close_commit` | 同上 + 5次`checkSig`(唯一涉及真实签名的入口) | 结构性看起来安全(require链逻辑清白) | 🟡 **真实执行未通过, 卡在`validSigs>=4`, 根因尚未100%钉死**——已排除多个候选(sig_op_count/computeBudget对version1 sighash零影响, 已读consensus源码逐行确认; kaspa-wasm的`createInputSignature`确认调用与debugger同一个`calc_schnorr_signature_hash`函数, 非独立实现), 详见§0.10 |
-| `RootClose.convert_to_claim`/`convert_to_refundclaim` | `scanOwnedTokenInputs`(读) + 外部模板(非自续约) | 结构性安全 | 同上 |
-| **`RootClaim.claim_draw`(payout==pool_value, 无续约分支)** | 无自续约, 只读ticket/token | **安全**——不经过下面的bug代码 | ✅ **真实cli-debugger PASS**（16参数全部真实ABI编码、真实协议常量尺寸、active input显式`signature_script_hex`——见§0.5①） |
-| **`RootClaim.claim_draw`(payout<pool_value, partial续约分支)** | `readInputStateWithTemplate`(读ticket+token) + **手写AB11自续约, `ownSig.slice(0, OWN_PREFIX_LEN)`** | **🔴 确认同账本1468同类defect, 真实cli-debugger复现**——诚实backend按"正确offset"（即`register_append`已修复的`ownLen-own_redeem_len`手法）构造出的续约输出，被合约自己的错误自检拒绝：`error: script ran, but verification failed` 精确命中`ownSig.slice(...)`那一行`require` | ✅ **真实cli-debugger FAIL（符合预期）**——见§0.5② |
-| `RefundClaim.refund_payout`(pool_value==stake, 无续约分支) | 无自续约 | 安全 | 源码逐行核对 |
-| **`RefundClaim.refund_payout`(pool_value≠stake, partial续约分支)** | `readInputStateWithTemplate`(读ticket+token) + **内建`validateOutputState`(自续约)** | ✅ **安全**——真实action witness构造PASS, 无崩溃迹象, RootClaim.sil头注的"一律AB11+实测"纪律对这个具体组合不适用 | ✅ **真实cli-debugger PASS**（首次报告曾误判raw/state模式不一致, 根因是审计脚本自身的双重hex编码bug, 已修复重跑确认, 见§0.9自我纠错记录） |
-| `KanetTokenClaim.spend` | 无自续约(终态, 头注明确"不受V-T-8影响") | 安全 | 源码+既有e2e向量(`docs/provenance/2026-09-14-j2-ktt-v03-planC-remove-h1b/`) |
+| `ShardLeaf_direct.register_append` | readInputStateWithTemplate + 自续约(AB11) | ✅ **已修复**(账本1468/1469: ctor烤入`own_redeem_len`+JS不动点收敛) | ✅ **PASS 6/6**（账本1469④，`verify-run-1469-ctor-matrix.log`；用的是`register_append`专用编码器`proto-register-append-witness.mjs`，不是本轮`generic-entry-witness.mjs`，该专用编码器从未有双重hex编码bug，不受449745f4影响） |
+| `ShardLeaf_direct.convert_to_rootclose` | 只有`scanOwnedTokenInputs`(读, 无自续约) | ✅ **安全** | ✅ **PASS**（NWT用`generic-entry-witness.mjs`测得——**编码器版本已由NWT自证为449745f4修复后版本**：她重跑后mass从113,105/61,777/60,473变为38,926/27,122/26,796，约减半，与"去掉双重编码后见证字节变回真实长度一半"的预期吻合；若仍是旧bug编码器，两次跑出的garbage字节长度会完全相同，不会系统性减半——这是比对时间戳更硬的证据，采信） |
+| `RootClose.refund_flip` | 只有`noTokenInput`(不读state) + 内建`validateOutputState` + CLTV | ✅ **安全** | ✅ **PASS**（`06_audit_rootclose_refund_flip.mjs`，我方跑，公共基线）——初次FAIL是harness用法错误(test.json的`lock_time`字段必须嵌在`tx`对象内部, 不是顶层, 见§0.10) |
+| `RootClose.close_commit` | 同上 + 5次`checkSig`(唯一涉及真实签名的入口) | 🟡 **待定** | ❌ **FAIL（卡在`validSigs>=4`），根因未100%钉死**——`07_audit_rootclose_close_commit.mjs`，公共基线。已排除sig_op_count/computeBudget（读consensus源码确认version>=1时该字段完全不参与sighash）与kaspa-wasm `createInputSignature`独立实现（确认调用同一`calc_schnorr_signature_hash`）两个候选。NWT用eprintln patch新查到：debugger内部实际验证用的`active_sigscript`只有**3,618字节**，我方构造喂给它的是**20,423字节**——量级差5.6倍，不像单一字段错位，更像main.rs:983那条重建路径对"5个sig类型参数+大redeem脚本"这种复杂entry整体没重建对，已报Bettor定夺是否精细patch定位还是先记harness缺陷。已交NWT接手（§0.10），本文档不再推进 |
+| `RootClose.convert_to_claim`/`convert_to_refundclaim` | `scanOwnedTokenInputs`(读) + 外部模板(非自续约) | ✅ **安全** | ✅ **PASS**（NWT测得，同convert_to_rootclose一行的编码器版本证据，采信） |
+| **`RootClaim.claim_draw`(payout==pool_value, 无续约分支)** | 无自续约, 只读ticket/token | ✅ **安全** | ✅ **PASS**（`01_audit_rootclaim_claim_draw.mjs`，公共基线，16参数全部真实ABI编码、真实协议常量尺寸、active input显式`signature_script_hex`，见§0.5①） |
+| **`RootClaim.claim_draw`(payout<pool_value, partial续约分支)** | `readInputStateWithTemplate`(读ticket+token) + **手写AB11自续约, `ownSig.slice(0, OWN_PREFIX_LEN)`** | 🔴 **确认真实缺陷**（同账本1468同类defect） | ❌ **FAIL（符合预期）**——`01_audit_rootclaim_claim_draw.mjs`，公共基线。诚实backend按"正确offset"（即`register_append`已修复的`ownLen-own_redeem_len`手法）构造出的续约输出，被合约自己的错误自检拒绝：`error: script ran, but verification failed`精确命中`ownSig.slice(...)`那一行`require`（§0.5②）。用449745f4修复后编码器复测，结论不变——不是编码bug的假象，是真实合约缺陷 |
+| `RefundClaim.refund_payout`(pool_value==stake, 无续约分支) | 无自续约 | ✅ **安全** | ✅ **PASS**（`03_audit_refundclaim_refund_payout.mjs`，公共基线） |
+| **`RefundClaim.refund_payout`(pool_value≠stake, partial续约分支)** | `readInputStateWithTemplate`(读ticket+token) + **内建`validateOutputState`(自续约)** | ✅ **安全** | ✅ **PASS**（`03_audit_refundclaim_refund_payout.mjs`，公共基线——首次报告曾误判raw/state模式不一致，根因是审计脚本自身的双重hex编码bug，已用449745f4修复重跑确认，见§0.9自我纠错记录） |
+| `KanetTokenClaim.spend` | 无自续约(终态, 头注明确"不受V-T-8影响") | 🟡 **待定** | ⚪ **本轮未真实执行**——现有证据（源码逐行核对+`docs/provenance/2026-09-14-j2-ktt-v03-planC-remove-h1b/`）是**代币化重写之前的旧版本合约**（§0.6已证：那份夹具的`claim_draw`只有9参数、无`tok_prefix`等4个v0.3才加的witness参数，与当前16参数活跃版本不是同一份合约），不能直接采信为当前版本的结论。需要补一条针对当前`KanetTokenClaim.sil`的真实cli-debugger向量，本文档不代为担保"安全" |
+
+**mass（真实KIP-9 storage mass，block限500,000，NWT用449745f4修复后编码器测得，公共基线，非估算）**：
+`claim_draw`(A路线full分支) ≈ **331,580**（margin约34%，比预想更紧，不是随便留出来的余量）；
+`convert_to_rootclose`/`convert_to_claim`/`convert_to_refundclaim` ≈ **38,926 / 27,122 / 26,796**
+（NWT重跑后的修复后数字，见上表证据栏说明）。其余入口（`close_commit`/`refund_flip`/
+`refund_payout`full+partial）的真实mass尚未测得，NWT`nwt_05_mass_check.mjs`此前撞到
+`kaspa.TransactionOutput`需要真实`ScriptPublicKey`实例（不能传plain object）这个构造错误，已告知修法，
+此处暂缺数字，不臆造。
 
 ### §0.5 独立复现`claim_draw`两个分支（工具问题已解决，真实执行完成）
 
@@ -136,8 +154,8 @@ V-T-8，可以放心用内建函数，编译器在**编译期自己**做不动�
    （不影响②的结论——②已经独立、充分地证明"正确构造被拒绝"这一核心事实，不需要额外证明"我们能精确
    猜中它内部算出的错误值是什么"）。
 
-运行记录：`kasia-console/scratch/j2_settlement_audit/rootclaim-claim_draw-audit-run.log`。夹具/工具
-留在scratch供NWT复核复用（`generic-entry-witness.mjs`已对`register_append`专用编码器逐字节自检过；
+运行记录：`kasia-console/scripts/audit/rootclaim-claim_draw-audit-run.log`。夹具/工具
+留在`kasia-console/scripts/audit/`供NWT复核复用（`generic-entry-witness.mjs`已对`register_append`专用编码器逐字节自检过；
 `01_audit_rootclaim_claim_draw.mjs`是完整可运行脚本，非半成品）。
 
 ### §0.6 一条独立的、不需要真执行就能确认的发现：既有"PASS"证据是过期夹具
@@ -158,29 +176,37 @@ ticketInIdx, ticket_prefix_len, ticket_suffix_len`），派彩目的地是裸`Sc
 partial分支已验证安全"的依据**——这个判断独立于§0.5的真实执行结果，是纯粹的文件对比事实（且两者
 结论一致：旧夹具证据过期 + 新真实执行确诊defect，双重印证同一个结论）。
 
-### §0.7 路线判断（A/B，二选一，由Owner定，本文档不擅自选）
+### §0.7 路线判断（A/B，二选一，由Owner定，本文档不擅自选；v0.2按Bettor账本1479校正）
 
 背景：市场`a59c7b48`已在主网betting，`count=1`（一笔下注），`seal_count=2`。
 
-**若该市场只再接受至多1笔额外下注（`count`最终=2，两笔下注押同一方）且不产生"部分领取"场景**——即
-resolve后唯一/全部赢家一次性`payout==pool_value`——**当前合约字节完全够用，走(A)**：`close_commit`/
-`convert_to_claim`/`claim_draw`(无续约分支)/`KanetTokenClaim.spend`全部结构性安全（§0.4表），不需要
-碰任何`.sil`文件。**约束**：resolve前必须先确认赢方只有一张有效`payout`值需要落地（即使有2笔下注，
-只要都下在同一方且账目上被当成一次性`payout=pool_value`发放给"该方"，也不触发partial分支——**这一点
-需要NWT在实现backend §1之前，明确"v0是否支持一个market里1笔claim覆盖同一方全部下注"这个业务规则**，
-本文档不代为决定，只指出这是(A)能否适用的关键前提）。
+**(A) 路线（救`a59c7b48`这个活市场）——第二笔下注必须押"另一方"（NO），不是同一方。** 这是对
+v0.1初版的**校正**：`claim_draw`按ticket领奖，若两笔下注押同一方，会产生两张赢票，每张各自
+`payout < pool_value`（pool按两张ticket的份额拆分），**必然触发partial续约分支**——这正是§0.5②
+确认的真实缺陷所在，(A)路线不能这样构造。可行的(A)构造是：第二笔押相反方（NO），委员裁决YES，
+形成"唯一赢家、一次性`payout==pool_value`"的full分支闭环——`close_commit`/`convert_to_claim`/
+`claim_draw`(无续约分支)/`KanetTokenClaim.spend`全部结构性安全（§0.4表），不需要碰任何`.sil`文件，
+不需要放弃`a59c7b48`。
 
-**若该市场需要支持"两个不同`payout`值的赢家各自独立`claim_draw`"（depth-1上限恰好是2）**——**触发
-partial续约分支**，走(B)：先修`RootClaim.claim_draw`（§0.5已用真实cli-debugger确诊defect；同账本
-1469同款ctor烤入`own_redeem_len`+JS不动点收敛手法，§0.8给出具体设计），修复后需要真实cli-debugger
-PASS（§0.5的夹具/方法论已经现成，不是从零开始）；`RefundClaim.refund_payout`已确认安全（§0.9，真实
-执行PASS，无崩溃迹象），走(B)时只需处理`RootClaim.sil`本身。**任何修改
+**(B) 路线（供新市场）**：用账本1469同款ctor烤入`own_redeem_len`+JS不动点收敛手法，修复
+`RootClaim.claim_draw`partial分支（§0.5已用真实cli-debugger确诊defect，§0.8给出具体设计），修复后
+需要真实cli-debugger PASS（§0.5的夹具/方法论已经现成）；`RefundClaim.refund_payout`已确认安全
+（§0.9，真实执行PASS，两个分支都过），走(B)时只需处理`RootClaim.sil`本身。**任何修改
 `RootClaim.sil`/`RefundClaim.sil`都会改变`claim_tmpl_hash`/`refundclaim_tmpl_hash`——这两个值已经
 烤进`a59c7b48`的`RootClose`（其`rootclose_tmpl_hash`又已经烤进`ShardLeaf_direct`本身）——`a59c7b48`
 这个市场的leaf P2SH地址绑死在旧字节上，修复不能救它**（同账本1471NWT独立证实的"合约改动与既有市场
 P2SH脱钩"结论，机制完全一致）。**走(B)意味着`a59c7b48`必须放弃，用修复后的代码重新genesis一个新
 市场**——0.2 KAS genesis fee + 已下注的部分本金（若走cancel/refund路径能拿回代币本身，但genesis fee
 与leaf dust不可回收，同账本1468④对旧市场的处置结论）。
+
+**(A)(B)不互斥**：(A)是救活既有市场`a59c7b48`的短期路径，(B)是修复合约供未来新市场用的长期路径，
+两者可以同时推进，不是二选一放弃另一个。
+
+**🔴 两条路线均依赖`close_commit`结论出来，在此之前都不能真正落地**：`close_commit`是resolve的
+必经环节（委员宣布结果），(A)需要它完成"裁决YES"这一步，(B)修复`RootClaim.claim_draw`后的新市场
+同样需要`close_commit`能正常工作才能走到claim那一步——§0.10/§0.4已确认`close_commit`真实签名验证
+**当前仍FAIL**，根因未钉死，已交NWT接手。**在NWT给出`close_commit`是"harness伪影"还是"真实合约
+缺陷"这个结论之前，(A)(B)两条路线都只是"设计已就绪、尚不能执行"的状态，不是"可以立即执行"**。
 
 **本文档建议（仅供参考，不代Owner决定）**：先问清楚v0的业务规则是否要求支持"同一市场2个不同payout
 赢家各自claim"——如果产品意图上v0本来就是"赢家通吃、一次性全额claim"（parimutuel常见简化：所有赢家
@@ -217,7 +243,7 @@ P2SH脱钩"结论，机制完全一致）。**走(B)意味着`a59c7b48`必须放
 
 ### §0.9 `RefundClaim.refund_payout`的V-T-8开放问题——已真实执行, 结论正面(自我纠错记录见下)
 
-**Bettor 1476明确要求补跑，已完成**（`kasia-console/scratch/j2_settlement_audit/03_audit_refundclaim
+**Bettor 1476明确要求补跑，已完成**（`kasia-console/scripts/audit/03_audit_refundclaim
 _refund_payout.mjs`）：
 
 - **full分支（pool_value==stake，无续约）**：**✅ PASS**。
@@ -330,7 +356,69 @@ tok_suffix)`不涉及签名（只有`noTokenInput`+内建`validateOutputState`+C
 `OpCheckSig`的具体实现是当前最大的未知，需要真正读`kaspa-txscript`（不是`kaspa-consensus-core`）
 对应的opcode执行代码。
 
----
+**账本1482更新（NWT eprintln转储新发现）**：debugger内部实际验证用的`active_sigscript`长度只有
+**3,618字节**，我方按真实ABI编码构造喂给它的是**20,423字节**——差5.6倍，量级上不像是某个单一字段
+偏移错位（偏移错位通常只差几字节到几十字节），更像main.rs:983那条"从`signature_script_hex`重建
+`active_sigscript`"的路径，对`close_commit`这种"5个`sig`类型参数+一份不小的redeem脚本"的复杂entry
+形状，整体没重建对（比如可能漏算了某个循环/漏拼了某一段）。NWT已把这个新发现报给Bettor，待定夺是否
+值得投入更细粒度的patch（分别dump redeem长度和witness长度两段来精确定位）还是先把这条计为
+harness缺陷、开issue追踪。**根因调查此后归NWT接手（她用本文档`07_audit_rootclose_close_commit.mjs`
+工具+账本1482新patch，从UTXO entries与sighash中间分量入手），本文档不再继续这条调查**。
+
+### §0.11 MUST：结算builder的三条硬约束（账本1479 Bettor要求，写入设计，供NWT实现§1时直接遵守）
+
+**MUST-1：`close_commit`/`refund_flip`的builder必须显式设置`lockTime`（毫秒时间戳），不能依赖
+默认值。** 依据：§0.10发现`refund_flip`初次真实执行FAIL（`Unsatisfied lock time`）的根因不是合约
+缺陷，而是test.json把`lock_time`字段写在了顶层（与`tx`同级）而不是`tx`对象内部，debugger读到的
+locktime因此静默变成0，CLTV检查必然失败——**这个坑对生产builder同样成立**：`kaspa.Transaction`
+构造函数的`lockTime`字段必须显式赋值为**毫秒时间戳**（不是DAA分数、不是秒），且必须放在
+`Transaction`构造对象本身（不是某个嵌套子对象），否则会静默变成0导致CLTV永远视为"已过期"或
+"从未过期"（取决于比较方向），这类静默默认值错误在生产环境里不会报错、只会让链上行为与预期不符
+（同类"字段位置错→静默取默认值→无报错"模式已作为ANTI-PATTERNS候选写入，见附录）。
+
+**MUST-2：封盘（`market_seal`/`convert_to_rootclose`）与`close_commit`必须背靠背提交，
+`close_commit`的输入UTXO必须从封盘广播时暂存的`prepared_tx_json`派生，不能查链。** 依据：账本1478
+已确认的路线A前提——"resolve前必须先确认赢方只有一张有效`payout`值需要落地"（§0.7）——要求封盘到
+resolve这两步之间不能有任何时间窗口被第三方抢先花费RootClose那笔UTXO或让另一笔下注插进来打乱
+`seal_count`/`count`的账目；即使没有恶意第三方，"广播后立即查链确认"这个动作本身在Kaspa的
+DAG确认延迟下也可能读到还未着陆的旧状态，构造出的`close_commit`输入引用一个还不存在于虚拟链上的
+UTXO会被拒绝或者引用错误的UTXO集合。正确做法：`market_seal`广播准备阶段已经产生的
+`prepared_tx_json`（见`§2`的`prepared_action`/`proto_settlement_intents`表设计，字段
+`prepared_txid`/`prepared_tx_json`）里已经包含了RootClose genesis输出的完整形状（scriptPubKey/
+amount/covenant_id），`close_commit`的builder应该直接从这份JSON反推出它需要花费的UTXO
+outpoint/amount/scriptPubKey，不经过任何RPC查询——这既避免了确认延迟的竞态，也避免了"链上查到的
+UTXO形状和我们自己构造时假设的形状不一致"这类不可控的外部依赖。
+
+**MUST-3：`refund_flip`不需要任何签名，deadline+2h后任何人都可以调用——这是设计已知的风险，
+必须在执行页/文档里写清楚，不是遗漏。** 依据：§0.10已确认`RootClose.refund_flip`的入口签名只有
+`noTokenInput`+内建`validateOutputState`+CLTV，**没有`checkSig`**——这意味着一旦CLTV设定的
+deadline+2h宽限期过去，任何持有网络访问权限的人（不需要是委员、不需要是bettor、不需要任何私钥）
+都可以构造一笔`refund_flip`交易并广播成功，把市场推进到"已退款"状态。这是**设计已知的风险**（`.sil`
+头注本身就是这样设计的，可能是为了防止委员失联导致资金永久锁死的兜底机制），但对Owner而言这是一条
+需要明确知道并接受的产品事实：**deadline+2h之后，市场的退款路径不再受任何权限控制**——具体
+deadline/宽限期时长该设多久，以及要不要在这条路径上补一层委员签名，是产品选择，见§0.12列给
+Owner的选项，本文档不代为决定。
+
+### §0.12 给Owner的产品选项（本文档只列选项与各自防的损失，不替Owner选）
+
+**选项组1：新市场的deadline / grace（宽限期）时长该设多久**
+
+| 选项 | 防住的损失 | 代价/风险 |
+|---|---|---|
+| 短deadline+短grace（如24h+2h，接近当前主网市场的量级） | 资金被套住的时间短，委员失联时更快进入"任何人可refund_flip"的兜底状态，避免用户资金长期锁死 | grace窗口短，委员一旦真的短暂离线（网络故障、维护），更容易被外部人抢先触发refund_flip，即使委员随后就恢复也来不及裁决 |
+| 长deadline+长grace（如7天+24h） | 给委员充分时间完成真实裁决，降低"委员只是暂时离线"却被外部人抢先refund的概率 | 用户资金被锁定的时间更长，如果委员真的永久失联（钥匙丢失/团队解散），用户要等更久才能拿回本金 |
+| 中间值+可配置（每个市场genesis时由创建方自己指定deadline/grace，不写死协议常量） | 不同风险偏好的市场（小额测试市场 vs 大额市场）可以各自选适合自己的窗口，不用一刀切 | 增加ctor参数和实现复杂度，需要在市场genesis页面给创建方解释这两个数字的含义，用户理解成本更高 |
+
+**选项组2：`refund_payout`是否需要委员签名**
+
+| 选项 | 防住的损失 | 代价/风险 |
+|---|---|---|
+| 维持现状（`refund_payout`无需委员签名，任何持有正确ticket的bettor可在refund_flip之后自行退款） | 委员失联时用户仍能自主拿回本金，不需要等待任何第三方动作——这是refund路径存在的本意（兜底） | 如果`refund_flip`本身被抢先触发（MUST-3的风险），市场会在委员还没来得及裁决真实结果时就被推进到"退款"状态，所有下注者只拿回本金、赢家拿不到应得的赔付——这对"确实有一方真实赢了"的市场是一种资金错配（虽然不是资金被盗，但赢家的合理预期落空） |
+| 加一层委员签名要求（`refund_payout`需要committee的`checkSig`，同`close_commit`的4-of-5模式） | 防止`refund_flip`被恶意/误触发后，资金立刻可以被任何人退款——即使`refund_flip`被抢先调用，真正的资金转移（`refund_payout`）仍需要委员参与，给委员一个"回来纠正"的窗口 | 需要修改`RefundClaim.sil`（新增签名校验逻辑），改变`refundclaim_tmpl_hash`，同(B)路线一样会让现有市场的P2SH地址脱钩，需要重新genesis；且如果委员是真的永久失联（不是暂时离线），加签名要求反而让用户连兜底退款都拿不到，退化成"资金永久锁死"，与refund路径设计初衷（防止委员失联导致资金永久锁死）自相矛盾 |
+
+以上两组选项相互独立（deadline/grace时长的选择不影响是否给refund_payout加签名，反之亦然），
+Owner可以分别决定；本文档不推荐任何一个具体选项，只列出已知的、真实执行验证过的技术事实
+（§0.10/MUST-3）所决定的取舍空间。
 
 ## §1 每步交易形状（inputs/outputs/签名输入/covenant绑定/mass/fee）
 
@@ -578,33 +666,46 @@ fail-closed拒绝），理由：(B)路线下一旦发现`RootClaim.sil`/`RefundC
 
 ---
 
-## 附：本次审计产出的工具（供NWT复核/复用，均在scratch，未进`src/lib`）
+## 附：本次审计产出的工具（v0.2：已从`kasia-console/scratch/j2_settlement_audit/`移到
+`kasia-console/scripts/audit/`——`scratch/`是gitignored目录，审计工具是长期可复用资产，不该待在
+一次性目录里；账本1479 Bettor要求，供NWT复核/复用，未进`src/lib`）
 
-- `kasia-console/scratch/j2_settlement_audit/generic-entry-witness.mjs`：通用entry witness ABI
+**方法论新增两条断言（账本1479要求，此后每次跑新入口的真实执行审计都必须显式检查，不能只看
+"PASS/FAIL"这一个信号）**：
+1. **debugger内部重建的`active_sigscript`必须与我方显式提供的`signature_script_hex`逐字节一致**——
+   §0.10发现`close_commit`的`active_sigscript`重建长度（3,618字节）与我方构造长度（20,423字节）
+   相差5.6倍，这类量级级别的不一致必须在跑完整逻辑判定之前先检查出来，不能等到`require`失败了才
+   回头查；PASS的结果如果没有做这条逐字节核对，也不能100%排除"侥幸凑巧的字节碰撞"（虽然概率极低，
+   但方法论上应该显式核过，不是省略）。
+2. **`lock_time`必须核实位于`test.json`的`tx`对象内部，不是顶层**——§0.10的`refund_flip`初次FAIL
+   就是这条坑（见MUST-1/ANTI-PATTERNS候选②），此后写任何新的test.json前先grep自己的脚本确认
+   `lock_time`的嵌套位置，不要等到CLTV报错才回头查字段位置。
+
+- `kasia-console/scripts/audit/generic-entry-witness.mjs`：通用entry witness ABI
   编码器，已对已验证的`register_append`专用编码器做过逐字节自检（PASS）。
-- `kasia-console/scratch/j2_settlement_audit/00_self_check_generic_encoder.mjs`：上述自检脚本。
-- `kasia-console/scratch/j2_settlement_audit/01_audit_rootclaim_claim_draw.mjs`：**完整可运行**的
+- `kasia-console/scripts/audit/00_self_check_generic_encoder.mjs`：上述自检脚本。
+- `kasia-console/scripts/audit/01_audit_rootclaim_claim_draw.mjs`：**完整可运行**的
   `claim_draw` full/partial(正确offset)/partial(bug offset)三场景真实执行夹具（§0.5①②③的产出脚本，
   非半成品）。
-- `kasia-console/scratch/j2_settlement_audit/03_audit_refundclaim_refund_payout.mjs`：**完整可运行**
+- `kasia-console/scripts/audit/03_audit_refundclaim_refund_payout.mjs`：**完整可运行**
   的`refund_payout` full/partial两场景真实执行夹具（§0.9产出脚本，两个场景均PASS）。
-- `kasia-console/scratch/j2_settlement_audit/02_probe_genesis_covid.mjs`：`WrongGenesisCovenantId`
+- `kasia-console/scripts/audit/02_probe_genesis_covid.mjs`：`WrongGenesisCovenantId`
   问题的探针脚本（问题已解决，根因见§0.5——genesis类输出的covenant_id必须用
   `kaspa.covenantId(prevOutpoint,[(idx,output)])`按输出各自独立重算，不能任意选值或多输出共享）。
-- `kasia-console/scratch/j2_settlement_audit/04_probe_refundclaim_length_stability.mjs`：验证
+- `kasia-console/scripts/audit/04_probe_refundclaim_length_stability.mjs`：验证
   `RefundClaim`编译产物长度/state区在不同`pool_value`间稳定（排除"是不是JS侧构造出了不同长度脚本"
   这个候选解释）。
-- `kasia-console/scratch/j2_settlement_audit/rootclaim-claim_draw-audit-run.log`：`claim_draw`三场景真实运行
+- `kasia-console/scripts/audit/rootclaim-claim_draw-audit-run.log`：`claim_draw`三场景真实运行
   记录（PASS/FAIL摘要）。
-- `kasia-console/scratch/j2_settlement_audit/refundclaim-refund_payout-audit-run.log`：`refund_payout`
+- `kasia-console/scripts/audit/refundclaim-refund_payout-audit-run.log`：`refund_payout`
   两场景真实运行记录（均PASS）。
-- `kasia-console/scratch/j2_settlement_audit/06_audit_rootclose_refund_flip.mjs`：**完整可运行**的
+- `kasia-console/scripts/audit/06_audit_rootclose_refund_flip.mjs`：**完整可运行**的
   `refund_flip`真实执行夹具（§0.10，PASS）。
-- `kasia-console/scratch/j2_settlement_audit/rootclose-refund_flip-audit-run.log`：对应运行记录。
-- `kasia-console/scratch/j2_settlement_audit/07_audit_rootclose_close_commit.mjs`：`close_commit`
+- `kasia-console/scripts/audit/rootclose-refund_flip-audit-run.log`：对应运行记录。
+- `kasia-console/scripts/audit/07_audit_rootclose_close_commit.mjs`：`close_commit`
   真实签名+真实执行夹具（§0.10，**当前仍FAIL**，留给NWT/后续会话接手排查，脚本内含"MY SIGNED TX
   DUMP"直接打印签名用tx的每个字段，配合下面的patch可直接逐字段比对）。
-- `kasia-console/scratch/j2_settlement_audit/rootclose-close_commit-audit-run.log`：对应运行记录。
+- `kasia-console/scripts/audit/rootclose-close_commit-audit-run.log`：对应运行记录。
 - **`/d/silverscript-debugger-3ed9733-eprintln`**（本机路径，未入库——不是本仓文件，是D-019 pin
   commit `3ed9733`的独立临时worktree，加了两处`eprintln!`：①`main.rs`~911行转储`active_sigscript`
   hex；②`main.rs`~941行转储完整`kas_tx`的version/lock_time/每个input的prevOutpoint+sequence+
