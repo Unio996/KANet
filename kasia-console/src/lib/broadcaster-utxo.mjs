@@ -48,7 +48,18 @@ function _broadcasterRelays() {
     const row = sqlite.prepare(`SELECT id FROM relay_nodes WHERE id = ? AND address IS NOT NULL`).get(maker);
     if (row) ids.push(row.id);
   }
-  return ids;
+  // 账本 1459(闸3阻断修复, 与 utxo-splitter.js autoSplitAll 同一条纪律): 原型 v0 relay 的 UTXO 形状由
+  // 执行页自己管理, 不该被任何通用"维持 N 个中等 UTXO"的后台 tick 碰——is_oracle=1 数据依赖(无法从代码
+  // 静态排除, 取决于这条 relay_nodes 行当时怎么建的), 保守起见同样过滤掉, 不指望它恰好不是 oracle。
+  const protoId = (process.env.PROTO_RELAY_ID || '').trim();
+  const rows = ids.length ? sqlite.prepare(`SELECT id, name FROM relay_nodes WHERE id IN (${ids.map(() => '?').join(',')})`).all(...ids) : [];
+  const byId = new Map(rows.map(r => [r.id, r]));
+  return ids.filter((id) => {
+    const row = byId.get(id);
+    const isProto = (protoId && id === protoId) || (row && typeof row.name === 'string' && row.name.startsWith('proto-'));
+    if (isProto) console.log(`[broadcaster-utxo] ${(row?.name || id).toString().slice(0, 24)}: excluded from broadcaster-UTXO maintenance (proto relay)`);
+    return !isProto;
+  });
 }
 
 // On-demand: rebalance one relay to N independent medium UTXOs (force = consolidate dust + split).
