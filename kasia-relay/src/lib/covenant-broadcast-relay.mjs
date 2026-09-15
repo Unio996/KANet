@@ -23,7 +23,7 @@
 import {
   validateSignedInputCeiling, computeRequiredFeeSompi, validateNetLoss,
   extractTxShape, assertFinalTxid, signOnlyDeclaredInputs, GLOBAL_ABS_FEE_CAP_SOMPI,
-  SIGNED_INPUT_CEILING_SOMPI,
+  SIGNED_INPUT_CEILING_SOMPI, validateFixedValueOutputs,
 } from './covenant-broadcast.mjs';
 import { ingestProtoBetIntentPhase } from '../ingest.mjs';
 
@@ -116,6 +116,20 @@ export async function covenantBroadcastRelay({
   }
 
   const shape = extractTxShape(tx); // 只提取一次——amountSompi/scriptPubKeyRaw 都不受后续签名影响
+
+  // 🔴 硬条件②(账本1425): genesis/续约输出面值必须恰好等于 GENESIS_OUTPUT_SOMPI/CONTINUATION_OUTPUT_SOMPI,
+  // 在任何签名动作之前校验——console 侧构造器"应该"传对, relay 侧"必须"独立验证, 不信任调用方。
+  // cmd 不声明这两个字段(空数组)时此检查是 no-op(不是所有 covenant_broadcast 调用都涉及 genesis/续约
+  // 输出, 例如纯 replay path 早就在上面 return 过了, 这里只有 fresh path 会走到)。
+  const fv = validateFixedValueOutputs({
+    outputs: shape.outputs,
+    genesisOutputIndices: Array.isArray(cmd.genesis_output_indices) ? cmd.genesis_output_indices : [],
+    continuationOutputIndices: Array.isArray(cmd.continuation_output_indices) ? cmd.continuation_output_indices : [],
+  });
+  if (!fv.ok) {
+    log(`COVENANT_BROADCAST ${key} REJECTED (fixed value output mismatch): ${fv.reason}`);
+    return { ok: false, code: 'fixed_value_output_mismatch', error: fv.reason, intent_key: key };
+  }
 
   const sic = validateSignedInputCeiling({ inputs: shape.inputs, signInputIndices: cmd.sign_input_indices, signedInputCeilingSompi });
   if (!sic.ok) {

@@ -5,6 +5,7 @@
   "declaredAt": "2026-09-14T18:30:00+07:00",
   "sourceLedgerRef": "COORD-LEDGER (1325)/(1327)/(1338)/(1408)/(1409)/(1410)/(1413)/(1415)",
   "_update20260915": "账本1408/1409/1410/1413/1415, f7342a32: Owner裁定撤销H1(b)+同病同治删除market_suffix_hash镜像字段, 7个文件源码sha256/bytes改动(KanetTestToken/KanetTokenClaim/PayoutShard/PayoutShardV2/RefundClaim/CloseZkV2/RootClaim), 逻辑/角色/path不变——只更新本文件里的sha256/bytes字段, templateHash类字段本文件从不存, 不受v1.0.0公式订正影响。",
+  "_update20260915b": "D-020(账本1446/1448, a4878d7d): register_append 取消 stake 筹码输入(单笔交易), ShardLeaf_direct.sil 唯一改动(11→10参数, dispatch_tag 4449f5ac, 见 docs/provenance/2026-09-15-j2-d020-register-append-single-tx-verification/)。其余10个文件sha256现场重算逐字节核对全部与本文件既有值一致, 未改动——只更新 ShardLeaf_direct 一条的 sha256/bytes。",
   "physicalCollectionStatus": "PENDING — 与 (1317) 目录改名/合并运维窗合并执行,不在原型期做(Bettor 裁,见 1327 回复)",
   "contracts": [
     {
@@ -74,8 +75,8 @@
       "name": "ShardLeaf_direct",
       "role": "T3 市场·单分片下注归集叶子(v0原型建议用这个)",
       "path": "src/lib/ShardLeaf_direct.sil",
-      "sha256": "572eb53dc41447e9dfa8b38153de90c1de9b2764efcfaceba2bac1d0abc7f641",
-      "bytes": 12705
+      "sha256": "57de871e14bb270a99350f8a5b62e915281c15e468614bbfce10c3d7982777e5",
+      "bytes": 14333
     },
     {
       "name": "PoolSideTicket",

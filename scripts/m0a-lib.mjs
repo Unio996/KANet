@@ -185,6 +185,19 @@ export const M0C3_HOTWALLET_MONITOR_CAP = 'm0c3-relay-hotwallet-monitor';
 export const M0C3_HOTWALLET_MONITOR_ALLOWLIST = new Set([
   'kasia-console/src/services/relay-hotwallet-monitor.js', // NWT 2-1 v0.2 驻留期热钱包监控, getStatus()枚举活着的relay + stopRelay()超限kill
 ]);
+
+// ── considered amendment #8(2026-09-15, Bettor 1440/1441 裁定)：窄 capability proto-v0-relay-funnel ──
+// 原型v0 market_genesis/bet_mint buildAndBroadcast 接线(proto.js/proto-driver.mjs)需要发 relay 命令
+// (covenant_broadcast/get_address_utxos/get_mempool_entry/check_utxo_landed), 但这两个文件是本轮
+// 新增的调用点——不适配 m0c-controlled-relay-endpoint(那是 HTTP 多层鉴权 funnel 的语义, 威胁模型不
+// 对口, 不稀释), 也不是热钱包准入/监控场景, 需要一个独立的窄 capability。威胁模型: 原型v0单一relay
+// 身份(PROTO_RELAY_ID 硬编码来源) + 命令白名单(读写标记表, 见 proto-relay-ipc.mjs) + 广播类命令受
+// PROTO_DRIVER_ENABLED 默认关闭闸控制——三条缺一不成立, 详见 lib/proto-relay-ipc.mjs 文件头注。
+export const PROTO_V0_RELAY_FUNNEL_CAP = 'proto-v0-relay-funnel';
+export const PROTO_V0_RELAY_FUNNEL_ALLOWLIST = new Set([
+  'kasia-console/src/lib/proto-relay-ipc.mjs', // 全仓唯一的 proto 受控出口(sendProtoCommand/protoSendCmd), proto.js/proto-driver.mjs 从这里注入 sendCmd, 不再各自裸 import
+]);
+
 const TEST_FRAMEWORK_PATH_PREFIX = 'kasia-console/test-framework/';
 const LIVE_CONSOLE_DB_PATH_LITERAL = /kasia-console\/data\/console\.db|kasia-console[\\/]data[\\/]console\.db/;
 
@@ -355,7 +368,7 @@ const MANIFEST_FIELDS = ['id', 'family', 'form', 'path', 'capability', 'justific
 // 七字段(MANIFEST_FIELDS)全必填对所有 capability 生效; content_digest 是"仅此 capability 附加必填"
 // (m0c-controlled-relay-endpoint), 单独校验(见 manifestChecks relay-manager 分支), 不并入 MANIFEST_FIELDS
 // —— 否则 db-readonly / test-fixture 存量条目会因缺新字段被全判挂(向后兼容, NWT 第4约束的兼容边界)。
-const CAPABILITIES = new Set(['db-readonly', 'test-fixture', CONTROLLED_RELAY_CAP, PROVISION_WRITER_CAP, PILOT_CUSTODIAL_WRITER_CAP, TEST_FIXTURE_WRITER_CAP, TEST_FIXTURE_RELAY_SINK_CAP, M0C2_HOTWALLET_ADMISSION_CAP, M0C3_HOTWALLET_MONITOR_CAP]);
+const CAPABILITIES = new Set(['db-readonly', 'test-fixture', CONTROLLED_RELAY_CAP, PROVISION_WRITER_CAP, PILOT_CUSTODIAL_WRITER_CAP, TEST_FIXTURE_WRITER_CAP, TEST_FIXTURE_RELAY_SINK_CAP, M0C2_HOTWALLET_ADMISSION_CAP, M0C3_HOTWALLET_MONITOR_CAP, PROTO_V0_RELAY_FUNNEL_CAP]);
 
 export function manifestChecks(root) {
   const violations = [];
@@ -521,12 +534,47 @@ export function manifestChecks(root) {
           // 全过: 合法驻留期监控消费者(白名单命中 + digest 匹配)。放行。
           continue;
         }
+        case PROTO_V0_RELAY_FUNNEL_CAP: {
+          // 约束①: 白名单有界、shrink-only——恰一项(proto-relay-ipc.mjs, 全仓唯一裸 import 点)。
+          if (!PROTO_V0_RELAY_FUNNEL_ALLOWLIST.has(e.path)) {
+            violations.push({ rule: 'R-M0A-MANIFEST-SCHEMA', file: MANIFEST_PATH,
+              msg: `manifest 条目 "${e.id}" capability=${PROTO_V0_RELAY_FUNNEL_CAP} 但 path ${e.path} 不在白名单 — 只有 {${[...PROTO_V0_RELAY_FUNNEL_ALLOWLIST].join(', ')}} 可用此 capability(白名单 shrink-only, 扩张走 NWT 审 + Owner 知情)。` });
+            continue;
+          }
+          // 约束②: 专属静态负面检查——该 import 语句必须真的含 sendCommandAsync 具名导出, 防这个窄
+          // 口子被挪用去掩护同一文件里其它跟 proto 命令白名单无关的新增 relay-manager 具名导出。
+          if (!String(e.form || '').includes('sendCommandAsync')) {
+            violations.push({ rule: 'R-M0A-MANIFEST-SCHEMA', file: MANIFEST_PATH,
+              msg: `manifest 条目 "${e.id}" capability=${PROTO_V0_RELAY_FUNNEL_CAP} 但 form "${e.form}" 不含 sendCommandAsync — 这条 capability 只为该具名导出开。` });
+            continue;
+          }
+          // 约束③: content_digest TOCTOU 锚, 核现文件内容 sha256 == 批准时 digest。
+          if (!('content_digest' in e) || e.content_digest === '' || e.content_digest == null) {
+            violations.push({ rule: 'R-M0A-MANIFEST-SCHEMA', file: MANIFEST_PATH,
+              msg: `manifest 条目 "${e.id}" capability=${PROTO_V0_RELAY_FUNNEL_CAP} 缺 content_digest — 该 capability 条目必填(批准时内容 sha256 hex, TOCTOU 防御)。` });
+            continue;
+          }
+          const funnelContent = readStagedContent(root, e.path);
+          if (funnelContent == null) {
+            violations.push({ rule: 'R-M0A-MANIFEST-SCHEMA', file: MANIFEST_PATH,
+              msg: `manifest 条目 "${e.id}" 指向的文件 ${e.path} 不存在于 index — path 锚定 fail-closed: 文件移动必须同步改 manifest。` });
+            continue;
+          }
+          const funnelDigest = sha256Hex(funnelContent);
+          if (funnelDigest !== e.content_digest) {
+            violations.push({ rule: 'R-M0A-MANIFEST-SCHEMA', file: MANIFEST_PATH,
+              msg: `文件 ${e.path} 内容变更(digest 失配: 现 ${funnelDigest.slice(0, 12)}… ≠ manifest ${String(e.content_digest).slice(0, 12)}…)需重新 NWT 审并更新 content_digest。` });
+            continue;
+          }
+          // 全过: 合法 proto v0 受控出口(白名单命中 + form 含 sendCommandAsync + digest 匹配)。放行。
+          continue;
+        }
         default: {
           // 🔴 default 分支是本次结构性根治的核心: 任何 family=relay-manager 的 capability 只要不是
-          // 上面四个已知 case 之一(含未来新增 capability 忘记补 case 的情形), 一律直接判违规——绝不
+          // 上面五个已知 case 之一(含未来新增 capability 忘记补 case 的情形), 一律直接判违规——绝不
           // 静默落到 switch 末尾放行(fail-closed: 未知 = 拒, 不是未知 = 过)。
           violations.push({ rule: 'R-M0A-MANIFEST-SCHEMA', file: MANIFEST_PATH,
-            msg: `manifest 条目 "${e.id}" family=relay-manager 只能经窄 capability {${CONTROLLED_RELAY_CAP}, ${TEST_FIXTURE_RELAY_SINK_CAP}, ${M0C2_HOTWALLET_ADMISSION_CAP}, ${M0C3_HOTWALLET_MONITOR_CAP}} 之一, 不开 db-readonly/test-fixture/writer 口 —— 其余 relay-manager import 一律正规审批走仓储层/API(设计 §5 + considered amendment #5/#6/#7)。若这是一个刚加的新 capability: 补一个 case 分支, 不要只在 CAPABILITIES 集合里加名字就以为够了。` });
+            msg: `manifest 条目 "${e.id}" family=relay-manager 只能经窄 capability {${CONTROLLED_RELAY_CAP}, ${TEST_FIXTURE_RELAY_SINK_CAP}, ${M0C2_HOTWALLET_ADMISSION_CAP}, ${M0C3_HOTWALLET_MONITOR_CAP}, ${PROTO_V0_RELAY_FUNNEL_CAP}} 之一, 不开 db-readonly/test-fixture/writer 口 —— 其余 relay-manager import 一律正规审批走仓储层/API(设计 §5 + considered amendment #5/#6/#7/#8)。若这是一个刚加的新 capability: 补一个 case 分支, 不要只在 CAPABILITIES 集合里加名字就以为够了。` });
           continue;
         }
       }

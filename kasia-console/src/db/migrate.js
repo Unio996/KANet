@@ -6040,5 +6040,250 @@ export function runMigrations() {
   `);
   console.log('[migrate] v206: proto_token_defs/proto_markets/proto_bets/proto_bet_intents/proto_claims 建表(原型 v0 隔离命名空间, pragma 守卫幂等).');
 
+  // ── v207 (2026-09-15, J2 · market_genesis 落码, 账本 1425 硬条件①): proto_markets 加 genesis 两阶段
+  //   状态机字段 ──
+  //   market_genesis 不进 proto_bet_intents(FK 是 bet_id, 市场创世没有 bet 行)——Bettor 裁定: 用
+  //   proto_markets.status 自己的状态机, 形状照抄 proto_bet_intents 的 pending→prepared→submitted→
+  //   landed/ambiguous, 只是没有 depends_on(单步, 不是两步链)。DEFAULT 从 'betting' 改成
+  //   'genesis_pending'——硬条件①要求"发 IPC 之前先 INSERT pending 行", 不再是"广播成功才 INSERT"。
+  //   'betting' 保留作为落链confirmed 后的终态(= 硬条件①说的"active"——market 可以开始接受下注,
+  //   复用既有语义, 不新造一个 'active' 值)。
+  {
+    const tableInfo = sqlite.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='proto_markets'").get();
+    const checkMatch = tableInfo?.sql?.match(/CHECK\s*\(\s*status\s+IN\s*\(([^)]+)\)\s*\)/);
+    const currentCheckStates = checkMatch ? checkMatch[1].split(',').map(s => s.trim().replace(/'/g, '')) : [];
+    const newStates = ['genesis_pending', 'genesis_prepared', 'genesis_submitted', 'genesis_ambiguous'];
+    const missingStates = newStates.filter(s => !currentCheckStates.includes(s));
+    const existingCols = tableInfo?.sql ? sqlite.prepare(`PRAGMA table_info(proto_markets)`).all().map(c => c.name) : [];
+    // 🔴 账本1429/1431: shardleaf_cov_id 是 genesis 时算一次、之后不变、库里没有其它数据能推算出来的
+    // 一次性事实(同 shardleaf_txid/shardleaf_vout 那一类, 不是可推算冗余——不属于1429否决的leaf运行态
+    // 那种)。v207 还没合并/没在任何生产库跑过, 并进这一版而不是另开一版(Bettor 1431 明确要求)。
+    const missingCols = ['shardleaf_cov_id'].filter(c => !existingCols.includes(c));
+    const missing = tableInfo?.sql && (missingStates.length || missingCols.length);
+    if (missing) {
+      const indexes = sqlite.prepare(`SELECT name, sql FROM sqlite_master WHERE type='index' AND tbl_name='proto_markets' AND sql IS NOT NULL`).all();
+      const rowCountBefore = sqlite.prepare(`SELECT COUNT(*) AS cnt FROM proto_markets`).get().cnt;
+      const colsList = existingCols;
+      const colsCsv = colsList.join(', ');
+      const allStates = [...currentCheckStates, ...missingStates];
+      const newCheckClause = `CHECK (status IN (${allStates.map(s => `'${s}'`).join(',')}))`;
+      let newSql = tableInfo.sql
+        .replace(/CREATE TABLE\s+"?proto_markets"?/, 'CREATE TABLE proto_markets_v207')
+        .replace(/CHECK\s*\(\s*status\s+IN\s*\([^)]+\)\s*\)/, newCheckClause)
+        .replace(/status\s+TEXT NOT NULL DEFAULT 'betting'/, "status TEXT NOT NULL DEFAULT 'genesis_pending'");
+      // 新增 genesis 两阶段回执列(同 proto_bet_intents 的 prepared_txid/prepared_tx_json/submitted_txid/
+      // landed_depth/landed_at/last_error 形状, 单数前缀 genesis_ 而不是表名前缀, 因为这张表本身就是
+      // proto_markets, 不需要再重复一次表名)。插在 status 那一行之后, 保持列顺序可读。
+      // shardleaf_cov_id(账本1429/1431批准, 并进本版而非另开v208): genesis 交易 input[0] outpoint 决定的
+      // covenant_id, 一次性事实, genesis_prepared 阶段与 genesis_prepared_txid 一起写入(见
+      // proto-market-intent.mjs recordMarketIntentPhase)。🔴 按 F2-R 规则 genesis 进入 ambiguous 后不
+      // 重建, 因此不存在"换输入后这一列过期"的路径——但如果未来任何代码路径重建了 genesis 交易, 必须
+      // 同时重写这一列, 否则落链校验(checkMarketGenesisLanded 的 fail-closed 重算比对)会永远不匹配。
+      newSql = newSql.replace(
+        /(status\s+TEXT NOT NULL DEFAULT 'genesis_pending'\s*\n\s*CHECK[^\n]*\n)/,
+        `$1                             genesis_prepared_txid    TEXT,\n                             genesis_prepared_tx_json TEXT,\n                             genesis_submitted_txid   TEXT,\n                             genesis_landed_depth     INTEGER,\n                             genesis_landed_at        TEXT,\n                             genesis_last_error       TEXT,\n                             shardleaf_cov_id         TEXT,\n`
+      );
+
+      // 🔴 外键风险修复(NWT 复核发现, 账本1425后续): proto_bets.market_id REFERENCES proto_markets(id)——
+      // 在 foreign_keys=ON(client.js:47 恒开)下直接 DROP TABLE proto_markets 会被 SQLite 硬拒
+      // (SQLITE_CONSTRAINT_FOREIGNKEY, 实测: 一个真实带数据——1 market+1 proto_bets+1 proto_bet_intents
+      // ——的库上直接崩, 不是理论风险)。同 v83(exchange_offers/retail_dex_orders 互相有 FK 那次)既有手法:
+      // PRAGMA foreign_keys=OFF 必须在事务外执行(SQLite 规定: 事务内改这个 pragma 是 no-op), 重建完成后
+      // 事务外再打开。RENAME 本身不改写子表(proto_bets)的 FK 目标名——sqlite_master 里 proto_bets 的
+      // CREATE TABLE 原文一直写的是字面量 "proto_markets", RENAME 只是把另一个表对象的名字换了, 不会去
+      // 改写 proto_bets 那行 DDL 文本里的引用, 实测已核对(见 provenance)。
+      sqlite.exec('PRAGMA foreign_keys = OFF');
+      try {
+        sqlite.exec('BEGIN TRANSACTION');
+        try {
+          sqlite.exec('DROP TABLE IF EXISTS proto_markets_v207');
+          sqlite.exec(newSql);
+          sqlite.exec(`INSERT INTO proto_markets_v207 (${colsCsv}) SELECT ${colsCsv} FROM proto_markets`);
+          const rowCountAfter = sqlite.prepare(`SELECT COUNT(*) AS cnt FROM proto_markets_v207`).get().cnt;
+          if (rowCountAfter !== rowCountBefore) {
+            throw new Error(`v207 row count mismatch: before=${rowCountBefore} after=${rowCountAfter}`);
+          }
+          sqlite.exec('DROP TABLE proto_markets');
+          sqlite.exec('ALTER TABLE proto_markets_v207 RENAME TO proto_markets');
+          for (const idx of indexes) {
+            if (idx.sql) {
+              try { sqlite.exec(idx.sql); }
+              catch (ie) { console.warn(`[migrate] v207 index ${idx.name} recreate fail: ${ie.message}`); }
+            }
+          }
+          sqlite.exec('COMMIT');
+          console.log(`[migrate] v207: proto_markets rebuilt (${rowCountBefore} rows preserved, ${indexes.length} indexes recreated, CHECK 加 genesis_pending/genesis_prepared/genesis_submitted/genesis_ambiguous, DEFAULT 改 genesis_pending, 加 6 个 genesis_* 回执列 + shardleaf_cov_id).`);
+        } catch (e) {
+          sqlite.exec('ROLLBACK');
+          throw e;
+        }
+        // 🔴 fk_check 必须在重新打开 foreign_keys 之前、在 proto_markets 已经是重建后新表的状态下跑——
+        // 确认 proto_bets/proto_bet_intents 对 proto_markets(id) 的引用全部仍然有效(没有留下悬空外键)。
+        const fkViolations = sqlite.pragma('foreign_key_check');
+        if (fkViolations.length) {
+          throw new Error(`v207 foreign_key_check found ${fkViolations.length} violation(s) after rebuild: ${JSON.stringify(fkViolations)}`);
+        }
+      } finally {
+        sqlite.exec('PRAGMA foreign_keys = ON');
+      }
+    } else {
+      console.log('[migrate] v207: proto_markets already has genesis intent columns/CHECK states (idempotent skip).');
+    }
+  }
+
+  // ── v208 (2026-09-15, J2 · D-020, 账本1446/1448, Owner裁定 a4878d7d): 取消 bet_mint 步骤A(独立
+  //   铸stake筹码, NWT 用真实 cli-debugger 证明 ZERO32-owner 的筹码连本带锁定的真实KAS一起可被任意
+  //   第三方偷走, 推翻账本1436"无损失"判断), register_append 改单笔交易。
+  //   proto_bets: 删 mint_txid/mint_vout 列(步骤A产物, 步骤A已取消), CHECK 去掉
+  //   'chip_minted_pending_stake'(两步中间态)/'orphaned_chip'(步骤A/B之间的孤儿化终态,
+  //   T-ORPHAN-CHIP-RECOVERY-ENTRY 随之关闭——单步设计下这个场景结构性不可达, 不是"修好了"是"问题
+  //   消失了")——只剩 'pending'(下注已记账, 交易未落链)/'confirmed'(register_append 已落链)。
+  //   proto_bet_intents: step CHECK 收窄到只剩 'append'(唯一动作, 不再有 mint/append 两步区分),
+  //   删 depends_on 列(链式依赖机制随两步设计一起消失, 单步没有依赖对象)。
+  //   🔴 real-data guard(账本1426 规则: DB 迁移必须用真实数据测试, 不能只在空表上跑一遍就当过关):
+  //   迁移前先查是否存在任何卡在旧两步中间态的真实行(status='chip_minted_pending_stake' 或
+  //   step='mint')——这些行代表"还没走完旧两步流程"的真实下注, 本迁移不知道如何安全折叠它们(孤儿化?
+  //   回滚?需要人工判断哪种处置对), 若存在直接 throw 拒绝迁移(fail-closed, 不静默丢弃/不猜测转换)。
+  //   实测(本笔迁移前, 用 console.db 的真实副本核对): PROTO_DRIVER_ENABLED 全程未开, proto_bets/
+  //   proto_bet_intents 甚至从未在生产 console.db 上跑起来过(v206 建表都没跑到), 所以这条 guard
+  //   在真实数据上核对的结果是"表不存在或 0 命中, 直接放行"——但仍然写成硬检查而不是假设为真。
+  {
+    const betsInfo = sqlite.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='proto_bets'").get();
+    if (betsInfo) {
+      const stuckBets = sqlite.prepare("SELECT COUNT(*) AS c FROM proto_bets WHERE status = 'chip_minted_pending_stake'").get().c;
+      if (stuckBets > 0) {
+        throw new Error(`v208: proto_bets 有 ${stuckBets} 行卡在 status='chip_minted_pending_stake'(旧两步设计中间态) —— D-020 迁移拒绝在这种情况下自动进行, 需要人工判断这些下注如何处理(手动 confirmed / 手动 orphan / 回滚), 见 docs/DECISIONS.md D-020, 处理完再重跑迁移`);
+      }
+      const betsCheckMatch = betsInfo.sql.match(/CHECK\s*\(\s*status\s+IN\s*\(([^)]+)\)\s*\)/);
+      const betsHasOldStates = betsCheckMatch && /chip_minted_pending_stake|orphaned_chip/.test(betsCheckMatch[1]);
+      const betsHasMintCols = /mint_txid/.test(betsInfo.sql);
+      if (betsHasOldStates || betsHasMintCols) {
+        const rowCountBefore = sqlite.prepare('SELECT COUNT(*) AS cnt FROM proto_bets').get().cnt;
+        const indexes = sqlite.prepare(`SELECT name, sql FROM sqlite_master WHERE type='index' AND tbl_name='proto_bets' AND sql IS NOT NULL`).all();
+        const newSql = `
+          CREATE TABLE proto_bets_v208 (
+            id            TEXT PRIMARY KEY,
+            market_id     TEXT NOT NULL REFERENCES proto_markets(id),
+            bettor_pk     TEXT NOT NULL,
+            side          INTEGER NOT NULL,
+            stake         INTEGER NOT NULL,
+            ticket_txid   TEXT,
+            ticket_vout   INTEGER,
+            stake_tx_id   TEXT,
+            status        TEXT NOT NULL DEFAULT 'pending'
+                           CHECK (status IN ('pending','confirmed')),
+            created_at    TEXT NOT NULL,
+            confirmed_at  TEXT
+          )`;
+        const copyCols = 'id, market_id, bettor_pk, side, stake, ticket_txid, ticket_vout, stake_tx_id, status, created_at, confirmed_at';
+        sqlite.exec('PRAGMA foreign_keys = OFF');
+        try {
+          sqlite.exec('BEGIN TRANSACTION');
+          try {
+            sqlite.exec('DROP TABLE IF EXISTS proto_bets_v208');
+            sqlite.exec(newSql);
+            sqlite.exec(`INSERT INTO proto_bets_v208 (${copyCols}) SELECT ${copyCols} FROM proto_bets`);
+            const rowCountAfter = sqlite.prepare('SELECT COUNT(*) AS cnt FROM proto_bets_v208').get().cnt;
+            if (rowCountAfter !== rowCountBefore) {
+              throw new Error(`v208 proto_bets row count mismatch: before=${rowCountBefore} after=${rowCountAfter}`);
+            }
+            sqlite.exec('DROP TABLE proto_bets');
+            sqlite.exec('ALTER TABLE proto_bets_v208 RENAME TO proto_bets');
+            for (const idx of indexes) {
+              if (idx.sql) { try { sqlite.exec(idx.sql); } catch (ie) { console.warn(`[migrate] v208 index ${idx.name} recreate fail: ${ie.message}`); } }
+            }
+            sqlite.exec('COMMIT');
+            console.log(`[migrate] v208: proto_bets rebuilt (${rowCountBefore} rows preserved, ${indexes.length} indexes recreated, 删 mint_txid/mint_vout, CHECK 收窄到 pending/confirmed).`);
+          } catch (e) {
+            sqlite.exec('ROLLBACK');
+            throw e;
+          }
+          // 🔴 范围限定(账本1426真实数据测试撞出的教训, 与本笔一起修——v207 复制的写法
+          // sqlite.pragma('foreign_key_check')不带表名会检查【全库】, 在真实 console.db 副本上跑出
+          // 18979 条与 proto_* 毫不相关的既有 FK 违规(conversations→identities 等旧数据), 把这次
+          // rebuild 完全无关的历史脏数据当成本次迁移的失败——foreign_key_check(table) 检查的是
+          // "table 自己声明的 REFERENCES 是否指向存在的父行"(即 table 作为子表), 所以要分别查
+          // proto_bets 自己(→proto_markets)和 proto_bet_intents(→proto_bets, 会被这次 rebuild 的
+          // rename 短暂打断)两张真正相关的子表, 不查全库。
+          const fkViolations = [
+            ...sqlite.pragma('foreign_key_check(proto_bets)'),
+            ...sqlite.pragma('foreign_key_check(proto_bet_intents)'),
+          ];
+          if (fkViolations.length) {
+            throw new Error(`v208 foreign_key_check found ${fkViolations.length} violation(s) after proto_bets rebuild: ${JSON.stringify(fkViolations)}`);
+          }
+        } finally {
+          sqlite.exec('PRAGMA foreign_keys = ON');
+        }
+      } else {
+        console.log('[migrate] v208: proto_bets already collapsed to single-step schema (idempotent skip).');
+      }
+    }
+
+    const intentsInfo = sqlite.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='proto_bet_intents'").get();
+    if (intentsInfo) {
+      const stuckMint = sqlite.prepare("SELECT COUNT(*) AS c FROM proto_bet_intents WHERE step = 'mint'").get().c;
+      if (stuckMint > 0) {
+        throw new Error(`v208: proto_bet_intents 有 ${stuckMint} 行 step='mint'(旧两步设计的步骤A记录) —— D-020 迁移拒绝在这种情况下自动进行, 需要人工判断这些 intent 如何处理, 见 docs/DECISIONS.md D-020, 处理完再重跑迁移`);
+      }
+      const stepCheckMatch = intentsInfo.sql.match(/step\s+TEXT NOT NULL CHECK\s*\(\s*step\s+IN\s*\(([^)]+)\)\s*\)/);
+      const hasOldStep = stepCheckMatch && /'mint'/.test(stepCheckMatch[1]);
+      const hasDependsOn = /depends_on/.test(intentsInfo.sql);
+      if (hasOldStep || hasDependsOn) {
+        const rowCountBefore = sqlite.prepare('SELECT COUNT(*) AS cnt FROM proto_bet_intents').get().cnt;
+        const indexes = sqlite.prepare(`SELECT name, sql FROM sqlite_master WHERE type='index' AND tbl_name='proto_bet_intents' AND sql IS NOT NULL`).all();
+        const newSql = `
+          CREATE TABLE proto_bet_intents_v208 (
+            intent_key       TEXT PRIMARY KEY,
+            bet_id           TEXT NOT NULL REFERENCES proto_bets(id),
+            step             TEXT NOT NULL CHECK (step IN ('append')),
+            status           TEXT NOT NULL DEFAULT 'pending'
+                              CHECK (status IN ('pending','prepared','submitted','landed','ambiguous')),
+            prepared_txid    TEXT,
+            prepared_tx_json TEXT,
+            submitted_txid   TEXT,
+            landed_depth     INTEGER,
+            landed_at        TEXT,
+            last_error       TEXT,
+            created_at       TEXT NOT NULL,
+            updated_at       TEXT NOT NULL
+          )`;
+        const copyCols = 'intent_key, bet_id, step, status, prepared_txid, prepared_tx_json, submitted_txid, landed_depth, landed_at, last_error, created_at, updated_at';
+        sqlite.exec('PRAGMA foreign_keys = OFF');
+        try {
+          sqlite.exec('BEGIN TRANSACTION');
+          try {
+            sqlite.exec('DROP TABLE IF EXISTS proto_bet_intents_v208');
+            sqlite.exec(newSql);
+            sqlite.exec(`INSERT INTO proto_bet_intents_v208 (${copyCols}) SELECT ${copyCols} FROM proto_bet_intents`);
+            const rowCountAfter = sqlite.prepare('SELECT COUNT(*) AS cnt FROM proto_bet_intents_v208').get().cnt;
+            if (rowCountAfter !== rowCountBefore) {
+              throw new Error(`v208 proto_bet_intents row count mismatch: before=${rowCountBefore} after=${rowCountAfter}`);
+            }
+            sqlite.exec('DROP TABLE proto_bet_intents');
+            sqlite.exec('ALTER TABLE proto_bet_intents_v208 RENAME TO proto_bet_intents');
+            for (const idx of indexes) {
+              if (idx.sql) { try { sqlite.exec(idx.sql); } catch (ie) { console.warn(`[migrate] v208 index ${idx.name} recreate fail: ${ie.message}`); } }
+            }
+            sqlite.exec('COMMIT');
+            console.log(`[migrate] v208: proto_bet_intents rebuilt (${rowCountBefore} rows preserved, ${indexes.length} indexes recreated, 删 depends_on, step CHECK 收窄到只剩 'append').`);
+          } catch (e) {
+            sqlite.exec('ROLLBACK');
+            throw e;
+          }
+          // 同上(proto_bets 分支)的范围限定理由——只查 proto_bet_intents 自己(→proto_bets), 不查全库。
+          const fkViolations = sqlite.pragma('foreign_key_check(proto_bet_intents)');
+          if (fkViolations.length) {
+            throw new Error(`v208 foreign_key_check found ${fkViolations.length} violation(s) after proto_bet_intents rebuild: ${JSON.stringify(fkViolations)}`);
+          }
+        } finally {
+          sqlite.exec('PRAGMA foreign_keys = ON');
+        }
+      } else {
+        console.log('[migrate] v208: proto_bet_intents already collapsed to single-step schema (idempotent skip).');
+      }
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }

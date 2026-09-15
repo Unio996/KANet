@@ -50,7 +50,9 @@ export async function registerIngestRoutes(fastify) {
   //   (fail-closed: console 不可达 ⇒ 不广播); 广播后 POST phase='submitted'{txid}。
   //
   //   与 /ingest/submit-intent(TRANSFER 专属, 写 submit_intents 表)不共用一张表——proto_bet_intents
-  //   是独立表(proto-bet-intent.mjs 文件头原话"不复用 submit_intents 表", 多一个 depends_on 链式依赖字段)。
+  //   是独立表(proto-bet-intent.mjs 文件头原话"不复用 submit_intents 表")。🔴 D-020(账本1446/1448):
+  //   原来这里还提到"多一个 depends_on 链式依赖字段"(两步设计的产物)——步骤A已取消, depends_on 列
+  //   已随 v208 迁移删除, 现在是单步, 无链式依赖。
   //
   //   🔴 relay 身份限定(硬条件①): body 必须带 relay_id, 且必须等于 process.env.PROTO_RELAY_ID——
   //   不等(含 PROTO_RELAY_ID 未配置的情况, fail-closed 方向: 未配置 = 无人被授权, 不是全部放行)
@@ -71,6 +73,17 @@ export async function registerIngestRoutes(fastify) {
       return reply.code(403).send({ ok: false, error: 'relay_id mismatch: only PROTO_RELAY_ID may call this endpoint' });
     }
     if (!intentKey || !phase || !txid) return reply.code(400).send({ ok: false, error: 'intentKey, phase, txid required' });
+    // 🔴 market_genesis 分派(账本1425硬条件①): market_genesis 不进 proto_bet_intents(FK 是
+    // bet_id, 市场创世没有 bet 行)——covenant_broadcast 命令本身与 kind 无关, 同一个端点靠
+    // intent_key 前缀区分该回执落进哪张表/哪个状态机模块, 不是新开一个端点。'genesis:' 前缀
+    // 见 marketIntentKeyFor(proto-market-intent.mjs); 其余(如 'proto-bet:') 走既有
+    // recordBetIntentPhase(proto-bet-intent.mjs)。
+    if (intentKey.startsWith('genesis:')) {
+      const { recordMarketIntentPhase } = await import('../lib/proto-market-intent.mjs');
+      const r = recordMarketIntentPhase({ intentKey, phase, txid, txJson });
+      if (!r.ok) return reply.code(409).send({ ok: false, error: r.error });
+      return reply.code(201).send({ ok: true, status: r.market.status });
+    }
     const { recordBetIntentPhase } = await import('../lib/proto-bet-intent.mjs');
     const r = recordBetIntentPhase({ intentKey, phase, txid, txJson });
     if (!r.ok) return reply.code(409).send({ ok: false, error: r.error });

@@ -6,6 +6,7 @@ import assert from 'node:assert';
 import {
   validateSignedInputCeiling, validateNetLoss, computeRequiredFeeSompi, assertFinalTxid,
   signOnlyDeclaredInputs, canonicalScriptHex, GLOBAL_ABS_FEE_CAP_SOMPI, SIGNED_INPUT_CEILING_SOMPI, SOMPI_PER_MASS,
+  validateFixedValueOutputs, GENESIS_OUTPUT_SOMPI, CONTINUATION_OUTPUT_SOMPI,
 } from './covenant-broadcast.mjs';
 
 let pass = 0, fail = 0;
@@ -345,6 +346,51 @@ t('AFT-2 txid 不符 ⇒ 拒, 带 actualTxid 供上层分类(replay_txid_mismatc
   const r = assertFinalTxid({ id: 'actual' }, 'expected');
   assert.strictEqual(r.ok, false);
   assert.strictEqual(r.actualTxid, 'actual');
+});
+
+// ── validateFixedValueOutputs(账本1425硬条件②) ──────────────────────────────
+const mkOut = (v) => ({ valueSompi: v, scriptPubKeyRaw: '{"script":"aa","version":0}' });
+t('FVO-1 空索引数组(两类都不声明) ⇒ no-op pass', () => {
+  const r = validateFixedValueOutputs({ outputs: [mkOut(1n), mkOut(2n)], genesisOutputIndices: [], continuationOutputIndices: [] });
+  assert.strictEqual(r.ok, true);
+});
+t('FVO-2 genesis 输出恰好等于 GENESIS_OUTPUT_SOMPI ⇒ pass', () => {
+  const r = validateFixedValueOutputs({ outputs: [mkOut(GENESIS_OUTPUT_SOMPI), mkOut(1n)], genesisOutputIndices: [0] });
+  assert.strictEqual(r.ok, true);
+});
+t('FVO-3 genesis 输出比常量少 1 sompi ⇒ fail(不接受"够接近")', () => {
+  const r = validateFixedValueOutputs({ outputs: [mkOut(GENESIS_OUTPUT_SOMPI - 1n)], genesisOutputIndices: [0] });
+  assert.strictEqual(r.ok, false);
+  assert.match(r.reason, /genesis output\[0\]/);
+});
+t('FVO-4 genesis 输出比常量多(比如误传了找零金额) ⇒ fail(不接受">=", 必须"恰好")', () => {
+  const r = validateFixedValueOutputs({ outputs: [mkOut(GENESIS_OUTPUT_SOMPI + 1n)], genesisOutputIndices: [0] });
+  assert.strictEqual(r.ok, false);
+});
+t('FVO-5 续约输出恰好等于 CONTINUATION_OUTPUT_SOMPI ⇒ pass', () => {
+  const r = validateFixedValueOutputs({ outputs: [mkOut(CONTINUATION_OUTPUT_SOMPI)], continuationOutputIndices: [0] });
+  assert.strictEqual(r.ok, true);
+});
+t('FVO-6 续约输出面值不对 ⇒ fail, reason 里带 "continuation" 标签(区分是哪一类不对)', () => {
+  const r = validateFixedValueOutputs({ outputs: [mkOut(1000n)], continuationOutputIndices: [0] });
+  assert.strictEqual(r.ok, false);
+  assert.match(r.reason, /continuation output\[0\]/);
+});
+t('FVO-7 genesis 与 continuation 混合声明, 各自用各自的常量核对(不是共用一个)', () => {
+  const r = validateFixedValueOutputs({
+    outputs: [mkOut(GENESIS_OUTPUT_SOMPI), mkOut(CONTINUATION_OUTPUT_SOMPI)],
+    genesisOutputIndices: [0], continuationOutputIndices: [1],
+  });
+  assert.strictEqual(r.ok, true);
+});
+t('FVO-8 越界索引 ⇒ fail-loud, 不静默跳过', () => {
+  const r = validateFixedValueOutputs({ outputs: [mkOut(1n)], genesisOutputIndices: [5] });
+  assert.strictEqual(r.ok, false);
+  assert.match(r.reason, /out of bounds/);
+});
+t('FVO-9 GENESIS_OUTPUT_SOMPI 与 CONTINUATION_OUTPUT_SOMPI 当前数值相等(spec §9.6 明文——语义分开但数值相同, 不是巧合)', () => {
+  assert.strictEqual(GENESIS_OUTPUT_SOMPI, CONTINUATION_OUTPUT_SOMPI);
+  assert.strictEqual(GENESIS_OUTPUT_SOMPI, 20_000_000n);
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

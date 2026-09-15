@@ -1,0 +1,17 @@
+=== ①leaf_register_append_pass (ShardLeaf_direct.sil, active_input_index=0) ===
+PASS
+
+=== ②held_transfer_zero_out_pass (KanetTestToken.sil, active_input_index=1) ===
+PASS
+
+=== ③stake_transfer_zero_out_pass (KanetTestToken.sil, active_input_index=2) ===
+PASS
+
+=== ④leaf_register_append_wrong_merged_amount_fail (expect fail) ===
+PASS (expected failure)
+
+=== ⑤held_transfer_zero_out_still_pass_when_leaf_output_wrong ===
+PASS
+
+=== ⑥stake_transfer_zero_out_still_pass_when_leaf_output_wrong ===
+PASS

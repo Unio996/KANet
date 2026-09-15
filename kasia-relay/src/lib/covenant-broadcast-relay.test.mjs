@@ -187,6 +187,56 @@ await tAsync('FRESH-7 validateNetLoss 失败(找零金额不够, net_loss 超出
   assert.strictEqual(rpc.calls.length, 0);
 });
 
+await tAsync('FRESH-7B(账本1425硬条件②) genesis 输出面值不等于 GENESIS_OUTPUT_SOMPI(20,000,000) ⇒ 签名前拒绝, 不广播', async () => {
+  const kaspa = makeFakeKaspa();
+  const rpc = makeRpc();
+  const ingest = makeIngestPhase();
+  // 两个输出: index0=声明为 genesis 但面值故意写错(19,999,999 而不是 20,000,000), index1=找零回 relay。
+  const tx = {
+    inputs: [{ previousOutpoint: { transactionId: 'aa'.repeat(32), index: 0 }, signatureScript: '', sequence: '0', sigOpCount: 1,
+      utxo: { amount: '30000000', scriptPublicKey: 'spk:relay-addr' } }],
+    outputs: [
+      { value: '19999999', scriptPublicKey: 'spk:some-covenant' },
+      { value: '9900000', scriptPublicKey: 'spk:relay-addr' },
+    ],
+  };
+  const cmd = { intent_key: 'proto-bet:f7b:mint', tx_json: tx, sign_input_indices: [0], expected_txid: 'FINAL_TXID_DEFAULT', genesis_output_indices: [0] };
+  const r = await covenantBroadcastRelay({ cmd, kaspa, rpc, wallet: makeWallet(), networkId: 'mainnet', senderAddress: 'relay-addr', log: () => {}, ingestPhase: ingest.fn });
+  assert.strictEqual(r.ok, false);
+  assert.strictEqual(r.code, 'fixed_value_output_mismatch');
+  assert.match(r.error, /genesis output\[0\]/);
+  assert.strictEqual(kaspa.calls.createInputSignature.length, 0, '签名前就被拦, 一次都没签(硬条件②要求在签名之前校验)');
+  assert.strictEqual(rpc.calls.length, 0, '没有广播');
+  assert.strictEqual(ingest.calls.length, 0, '连 prepared ingest 都没打(比签名更早被拦)');
+});
+
+await tAsync('FRESH-7C(账本1425硬条件②) genesis 输出面值恰好等于常量 ⇒ 该检查放行(其余检查仍各自独立生效)', async () => {
+  // 🔴 net_loss 数量级说明: genesisOutputValue(20,000,000) 本身离开 relay 自己的地址, 会被
+  // validateNetLoss 算进 net_loss(spec §2 原文"这里 genesisOutputValue 本身也会被算进 net_loss")——
+  // 真实生产场景里 ShardLeaf_direct 这类大脚本的真实 mass fee 本来就是千万级 sompi(见
+  // docs/provenance/2026-09-14-j2-proto-v0-genesis-mass-fee-estimate/), required_fee×2 动态上限
+  // 自然覆盖住 net_loss。这里用一个更大的假 mass(300,000, 而不是其余 FRESH 用例共用的 1000)让
+  // 动态上限(required_fee×2=60,000,000)同样能覆盖 net_loss(20,100,000)——只是让这条 genesis 专属
+  // 测试的算术自洽, 不代表 relay 侧对不同 kind 用不同 mass, mass 永远是真实 calculateTransactionMass
+  // 算出来的, 这里只是 fake kaspa 的返回值选大一点。
+  const kaspa = makeFakeKaspa();
+  kaspa.calculateTransactionMass = () => { kaspa.calls.calculateTransactionMass++; return 300_000n; };
+  const rpc = makeRpc();
+  const ingest = makeIngestPhase();
+  const tx = {
+    inputs: [{ previousOutpoint: { transactionId: 'aa'.repeat(32), index: 0 }, signatureScript: '', sequence: '0', sigOpCount: 1,
+      utxo: { amount: '40100000', scriptPublicKey: 'spk:relay-addr' } }],
+    outputs: [
+      { value: '20000000', scriptPublicKey: 'spk:some-covenant' },
+      { value: '20000000', scriptPublicKey: 'spk:relay-addr' },
+    ],
+  };
+  const cmd = { intent_key: 'proto-bet:f7c:mint', tx_json: tx, sign_input_indices: [0], expected_txid: 'FINAL_TXID_DEFAULT', genesis_output_indices: [0], continuation_output_indices: [1] };
+  const r = await covenantBroadcastRelay({ cmd, kaspa, rpc, wallet: makeWallet(), networkId: 'mainnet', senderAddress: 'relay-addr', log: () => {}, ingestPhase: ingest.fn });
+  assert.strictEqual(r.ok, true, r.error);
+  assert.strictEqual(kaspa.calls.createInputSignature.length, 1, '这次真的走到了签名步骤(证明 FRESH-7B 的拒绝确实是这条检查造成的, 不是巧合别的检查也会拒)');
+});
+
 await tAsync('FRESH-8 signOnlyDeclaredInputs 本身失败(如 wasm 抛错) ⇒ 拒绝, 不广播', async () => {
   const kaspa = makeFakeKaspa({ signThrows: true });
   const rpc = makeRpc();

@@ -1,0 +1,32 @@
+=== ①a_leaf_first_bet_no_held_no_stake_pass (ShardLeaf_direct.sil) ===
+PASS
+
+=== ①b_leaf_fail_merged_amount_off_by_1 (expect fail, ShardLeaf_direct.sil) ===
+PASS (expected failure)
+
+=== ①c_leaf_fail_merged_owner_wrong (expect fail, ShardLeaf_direct.sil) ===
+PASS (expected failure)
+
+=== ②a_leaf_second_bet_with_held_pass (ShardLeaf_direct.sil) ===
+PASS
+
+=== ②b_held_transfer_zero_out_pass (KanetTestToken.sil) ===
+PASS
+
+=== ②c_leaf_fail_held_missing_pool_value_positive (expect fail, ShardLeaf_direct.sil) ===
+PASS (expected failure)
+
+=== 逐字节 ABI 编码验证 (D-020 新 10 参数 register_append) ===
+方法: debug-print.patch 临时加进 D-019 pin 检出 (3ed973335b59269293564805cc2c58a14595ec03),
+只重编 cli-debugger 这一个 binary, 用 J2_DUMP_ACTIVE_SIGSCRIPT=1 跑 ①a_leaf_first_bet_no_held_no_stake_pass
+(function/args 模式, 让调试器自己按官方 v1.0.0 encode_contract_entry_sig_script 编码), 转储真实
+active_sigscript (冻结 real_action_from_debugger.hex, 6324 hex 字符)。
+用 kasia-console/src/lib/proto-register-append-witness.mjs 的 encodeRegisterAppendAction(D-020 后
+10 参数版本) 独立编码同一组 witness 值(取自 ①a 向量, entryAbi 从同一份 ctorArgs 重新编译现读,
+不硬编字面量), 逐字节比对:
+
+  mine length 6324 real length 6324
+  EQUAL: true
+
+验证完成后 git checkout -- debugger/cli/src/main.rs 还原源码, 重编回原始 cli-debugger.exe,
+git status --short 确认无残留改动。

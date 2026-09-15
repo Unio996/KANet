@@ -1,0 +1,28 @@
+{
+ "tests": [
+  {
+   "name": "a_fnargs_x1_pass",
+   "function": "f",
+   "args": [1],
+   "expect": "pass"
+  },
+  {
+   "name": "b_fnargs_x2_but_sigscript_hex_is_x1",
+   "function": "f",
+   "args": [2],
+   "expect": "pass",
+   "tx": {
+    "active_input_index": 0,
+    "inputs": [
+     {
+      "utxo_value": 1000,
+      "signature_script_hex": "0x5104b37a66a4187604b37a66a48763757682599f697576519c697551676a68"
+     }
+    ],
+    "outputs": [
+     { "value": 1000 }
+    ]
+   }
+  }
+ ]
+}

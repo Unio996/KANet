@@ -1,0 +1,44 @@
+// PoolSideTicket.sil — 主网集第 11 个合约: dust spent-once 票(J1 2026-06-15 原作 `PoolSide_v08_shard.sil`,
+//   本文件 = §7 v1.0.0 纯语法迁移, Bettor 派工·ledger 1338, 语义逐字不变)。
+//
+// M3 设计: PoolSide 从"持 stake-funds 的 per-bettor custody"退化成 **dust spent-once 票**(不再持注金; 注金真存进
+//   leaf-pool)。本票只剩两职:
+//   ① **spent-once 防双领/双退**: claim/refund 时此票被消费(UTXO 花掉)→ 同 bettor 不可既 claim 又 refund、不可重复 claim。
+//   ② **身份+额记录**: State{bettorPk, direction, stake, shardPoolId} 供 ShardLeaf(_direct)/RootClaim/RefundClaim 的
+//      readInputStateWithTemplate/validateOutputStateWithTemplate 读写(merkle leaf 用 bettorPk; refund 退 stake;
+//      shardPoolId 定位本 pool; direction 验赢向) —— ShardLeaf_direct.sil 的 `struct Tk` 逐字段对齐本文件 State。
+// custody 的 parallel-claim 收益 void(finding-5 串行强制), 但 spent-once O(1) 收益真→保留 dust 票比丢它(root O(N) bitmap/
+//   ordered-claim 活性险)更净(J1+J2+NWT 共识)。
+//
+// 🔴 迁移记录（2026-09-14, Bettor 1338 发现）：T3 主网集 provenance 里此前只出现过 PoolSideStub(2).sil —— 那是
+//   README 原话"替身实例"（`#[covenant.singleton] passthrough`，只允许原样续约，没有 authorize_spend），T3 全套
+//   向量验证的是"能读回 ticket 状态"，从未验过真票被 co-spend 消费。**这个缺口现在补上**：本文件是真正会被
+//   ShardLeaf(_direct).register_append 铸出、被 RootClaim.claim_draw / RefundClaim.refund_payout 通过
+//   authorize_spend(sig) 真实 co-spend 消费掉的票（见 §5 补的真票向量）。⇒ **主网集正确数目是 10+1=11 个**，
+//   `kasia-console/scripts/mainnet-sil-set.json` 已补第 11 条。
+//
+// 语法迁移（§7 v1.0.0，同 79fcfe1a RefundClaim.sil 先例）：`entrypoint function` → `entry`。本文件无 struct 字面量、
+// 无 byte[34] P2PK 用法，故只此一处改动；ctor 字段名/State 布局/require 逻辑逐字未动。
+
+pragma silverscript ^0.1.0;
+
+contract PoolSideTicket(
+    byte[32] init_bettorPk,
+    int      init_direction,        // 0=YES 1=NO
+    int      init_stake,            // 本注额 (refund 凭此退本金; claim merkle leaf 含此)
+    byte[32] init_shardPoolId       // 本 shard pool 身份 (= 所属市场的 shard_pool_id)
+) {
+    // —— 显式 State (4 字段; 市场合约 validateOutputStateWithTemplate/readInputStateWithTemplate 绑此布局) ——
+    byte[32] bettorPk = init_bettorPk;
+    int      direction = init_direction;
+    int      stake = init_stake;
+    byte[32] shardPoolId = init_shardPoolId;
+
+    // —— entry: authorize_spend (bettor 授权消费此票 = 触发 claim/refund 时的 spent-once 闸) ——
+    //   实际 payout/refund 金额逻辑在市场合约的 claim_draw/refund_payout(它 readInputStateWithTemplate 读本票 State)。
+    //   本票被花 = spent-once: 同票不可二次用(UTXO model) → claim XOR refund、防重复领。
+    //   payout 目的地由消费方(claim_draw/refund_payout)决定, 但要本人 sig 授权(防误花/非自愿)。
+    entry authorize_spend(sig bettorSig) {
+        require(checkSig(bettorSig, pubkey(bettorPk)));
+    }
+}
