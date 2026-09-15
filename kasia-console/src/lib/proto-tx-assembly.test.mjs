@@ -241,6 +241,20 @@ t('GLOBAL_ABS_FEE_CAP_SOMPI 两侧不漂移: console侧常量与relay侧源码�
   }
 });
 
+// 账本1464(NWT复核MUST项): SIGNED_INPUT_CEILING_SOMPI是账本1462新增的镜像常量(selectFeeUtxoByConstruction
+// 用它预筛候选——超过这个数即使构造成功relay侧validateSignedInputCeiling也会拒签), 同GLOBAL_ABS_FEE_CAP_SOMPI
+// 一样必须两侧不漂移, 用同一手法补上这条防漂移测试。
+t('SIGNED_INPUT_CEILING_SOMPI 两侧不漂移: console侧常量与relay侧源码里声明的值逐字节相等', () => {
+  const relaySrcPath = new URL('../../../kasia-relay/src/lib/covenant-broadcast.mjs', import.meta.url);
+  const relaySrc = fs.readFileSync(relaySrcPath, 'utf8');
+  const m = relaySrc.match(/export const SIGNED_INPUT_CEILING_SOMPI\s*=\s*([0-9_]+)n\s*;/);
+  if (!m) throw new Error('relay 源码里找不到 SIGNED_INPUT_CEILING_SOMPI 的声明行(covenant-broadcast.mjs 的导出写法变了? 需要同步更新这条正则)');
+  const relayValue = BigInt(m[1].replace(/_/g, ''));
+  if (relayValue !== SIGNED_INPUT_CEILING_SOMPI) {
+    throw new Error(`两侧漂移了: console侧=${SIGNED_INPUT_CEILING_SOMPI}, relay侧(covenant-broadcast.mjs现读)=${relayValue}——改任一侧必须同步改另一侧`);
+  }
+});
+
 // ============ market_genesis tx_json 真实端到端组装(真 kaspa-wasm + 真编译 ShardLeaf_direct) ============
 // 目的: 证明 buildMarketGenesisTxJson 产出的 tx_json 不只是"格式对", 而是 relay 侧真代码
 // (Transaction.deserializeFromSafeJSON → extractTxShape → validateFixedValueOutputs → 签名 →
