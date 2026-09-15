@@ -96,8 +96,30 @@ contract ShardLeaf_direct(
     // ★ V-T-8 绕路(register_append 需要 readInputStateWithTemplate(经 scanOwnedTokenInputs)+ 本合约 self-
     //   continuation 共存, 同 ShardLeaf.sil 一致处置)。常量按本文件*实际编译产物*量测得出(与 ShardLeaf.sil
     //   结构相同但 ctor 不同, 不假设数值相同, 已重新量测, 见 provenance)。
+    // 🔴 账本1468修复(闸3重试-2首笔下注被节点脚本校验拒收, cli-debugger 3ed9733 真实执行逐字节实证):
+    //   OWN_PREFIX_LEN/OWN_STATE_LEN 原本描述的是【裸编译 redeem 脚本自身】内 state 区的偏移(与
+    //   compileSilV100 返回的 state_layout.start/len 完全一致, 已核对) —— 但下面 register_append 里
+    //   `ownSig = tx.inputs[this.activeInputIndex].sigScript` 读到的是【完整 sigScript】
+    //   (= action 见证字节 ++ redeem 脚本字节, 见 proto-register-append-witness.mjs 头注
+    //   "sigScript = action_bytes ++ pushdata(redeem_bytes)"), 原代码直接从 ownSig 的第 0 字节按
+    //   OWN_PREFIX_LEN/OWN_STATE_LEN 切——这只在 action 见证部分长度恰好为 0 时才是对的。真实
+    //   register_append 的 action 见证(ps_prefix/ps_suffix/tok_prefix/tok_suffix 等协议常量见证值,
+    //   尤其 tok_suffix 现已是几千字节的真实模板)长度远大于 0(账本1468 实测某市场 action=3164 字节),
+    //   导致从字节 0 切出来的"prefix"/"suffix"落在 action 见证内部, 跟 redeem 脚本真实的 state 区
+    //   毫无关系——链上校验 100% 必然失败, 从未真正跑通过(此前唯一一次 cli-debugger 通过的
+    //   V-register_append-1 测试用的是这份合约代币化改造前的旧夹具, 见 docs/provenance/2026-09-14-
+    //   j2-t3-v03-shardleafdirect-tokenization/, 那份夹具的 action 见证极短, 巧合掩盖了这个偏移错误,
+    //   D-020/代币化落地后真实 action 变长这个夹具从未跟着更新重跑)。
+    //   修复: redeem 脚本在 ownSig 里的真实起点 = ownLen − OWN_REDEEM_LEN(下方新增常量, 同样按本文件
+    //   *实际编译产物*量测得出——ctor 全部是定宽 byte[32]/int 字段, 不含变长参数, 编译产物字节数不随
+    //   ctor 具体取值变化, 是稳定常量, 手法同 OWN_PREFIX_LEN/OWN_STATE_LEN 已有先例), 再在这个起点上
+    //   加 OWN_PREFIX_LEN/OWN_STATE_LEN 定位 state 区——不再假设 action 见证长度为 0。
+    //   已用账本1468 真实捕获的失败交易字节独立验证: 按此修复后的偏移重算出的 hash 与真实交易里
+    //   实际使用的续约输出 scriptPubKey 逐字节一致(即 JS 侧 buildRegisterAppendTxJson 原本就算对了,
+    //   错的是合约自己这份自校验)。
     int constant OWN_PREFIX_LEN = 1;
     int constant OWN_STATE_LEN  = 36;
+    int constant OWN_REDEEM_LEN = 14746;
 
     // (A) v0.3 §2/§3 + 1151 P13 形: 输入侧扫描(同 ShardLeaf.sil/PayoutShard.sil/RootClose.sil 逐字节一致手法)。
     function scanOwnedTokenInputs(byte[] tok_prefix, byte[] tok_suffix) : int {
@@ -168,8 +190,10 @@ contract ShardLeaf_direct(
                           + byte[](8 as byte[1]) + byte[]((pool_value + stake) as byte[8]);
         byte[] ownSig = tx.inputs[this.activeInputIndex].sigScript;
         int ownLen = ownSig.length;
-        byte[] ownPrefix = ownSig.slice(0, OWN_PREFIX_LEN);
-        byte[] ownSuffix = ownSig.slice(OWN_PREFIX_LEN + OWN_STATE_LEN, ownLen);
+        // 账本1468修复: redeem 脚本在完整 sigScript(ownSig)里的真实起点(见上方 OWN_REDEEM_LEN 注释)。
+        int ownRedeemStart = ownLen - OWN_REDEEM_LEN;
+        byte[] ownPrefix = ownSig.slice(ownRedeemStart, ownRedeemStart + OWN_PREFIX_LEN);
+        byte[] ownSuffix = ownSig.slice(ownRedeemStart + OWN_PREFIX_LEN + OWN_STATE_LEN, ownLen);
         byte[32] expectedHash = blake2b(ownPrefix + stateBytes + ownSuffix);
         byte[37] expectedSpk = new ScriptPubKeyP2SH(expectedHash);
         require(tx.outputs[leafOutIdx].scriptPubKey == byte[](expectedSpk));
