@@ -76,6 +76,45 @@ simnet 节点：**真实共识接受**，交易落链（txid 见上表，5 委�
 的其它边界条件），**不下"上游 silverscript 缺陷"结论**——待后续若能钉死 debugger 侧根因，再起草面向
 上游的中性 issue 草稿。
 
+## 追加验证：`RootClaim.sil:103 require(payout>=1000)` 是代币化前遗留字面量——结构性阻塞点
+
+Bettor 复核（账本1484）指出：本轮第一次因 `payout>=1000` FAIL 而把 `min_bet` 从 API 真实默认值 `1`
+（`src/api/proto.js:118`）临时改成 `1000` 才跑通全链——**这掩盖了一个真实的结构性阻塞**：`RootClaim.sil:103`
+的 `require(payout >= 1000)` 是代币化之前（KAS sompi 时代）遗留的字面量，**代币化后 `payout` 是 KTT 数量，
+不是 sompi**，两者量级完全不可比。后果：**任何 `min_bet=1`（API 真实默认值）的小额市场，只要赢家最终
+`payout < 1000` 枚代币，就永远无法 `claim_draw`**——不是"构造错误"，是合约本身对代币化后语义的一处
+真实待修点。
+
+**追加复现（同一份脚本，`WINNER_SIDE` 参数化后重跑，不需要新 builder）**：精确复刻 Bettor 点名的
+"活市场 `a59c7b48` 同形状"——`min_bet=1`，第一笔 `YES stake=1`，第二笔 `NO stake=999`
+（`pool_value=1000`），裁决 `winningSide=YES`（唯一赢票，全池 `payout=pool_value=1000`，**恰好卡在
+门槛上**），走 `claim_draw` full 分支 + `KanetTokenClaim.spend`：
+
+| # | 入口 | txid | mass | requiredFee(sompi) |
+|---|------|------|------|---------------------|
+| 1 | `market_genesis` | `72a6422eb282b4061623e8ececea5795fdda12b1a88546d6f76f6932635889e1` | 200,006 | 20,000,300 |
+| 2 | `register_append`#1（YES, stake=1） | `7119172f7309310cf34473fb621b83bdcd23377c0d8b47753ea5e44bf2cca0d0` | 448,870 | 44,886,300 |
+| 3 | `register_append`#2（NO, stake=999, held） | `958d14fe52edd31be097239a316ea57f17fc6bd59ffef13272f813f668175b70` | 446,880 | 44,687,300 |
+| 4 | `convert_to_rootclose` | `59c816b304961d5c2366df5786fc182d7d8782e096f72d5c3e001904ba94418c` | 396,794 | 39,678,700 |
+| 5 | `close_commit`（winningSide=YES） | `8740b94b5e93cd85f05f95e990ed09d0420d09f714d11a722dc3665ab1ad8d9a` | 198,771 | 19,876,700 |
+| 6 | `convert_to_claim` | `baca652593f3d9d805e96991cc96a8948ca927394e61a0c924263a82359f11ee` | 396,718 | 39,671,100 |
+| 7 | `claim_draw`（payout=1000, 恰在门槛上） | `baedb222f1a7652d3e7cc65674356b2ca404220a19ca7c1c9f5d25b98043b06d` | 393,781 | 39,377,400 |
+| 8 | `KanetTokenClaim.spend` | `849c01d9e52537dec7a31f9e619c82758c573c21efde5a1c139cb1ca162e7cfd` | 196,628 | 19,662,500 |
+
+**全部 8 步真实共识 ACCEPT**——确认 `payout==1000`（门槛值本身）可行；`market_id` 与前一轮无关
+（独立新市场，脚本对 `WINNER_SIDE` 做了泛化，close_commit/claim_draw/spend 现在都能选 bet1 或 bet2
+作为赢家，不再硬编码只支持 bet2 赢）。**未测试 `payout` 严格小于 1000 的情形**（例如 `payout=999`）
+——按 `.sil` 源码字面（`>=`，非 `>`），`999 < 1000` 会命中同一条 `require` 直接 FAIL，这条不需要
+再上链验证即可从源码确定，本报告不再重复消耗测试网资源去证实一个源码已经写死的边界。
+
+**RootClaim 待修清单（新增，供后续修改）**：
+- `RootClaim.sil:103 require(payout >= 1000)` —— 需要重新评估这条下限在代币化后的正确取值（是否
+  应删除、改成远小的值、还是改成与 `min_bet`/`pool_value` 关联的动态下限），**与 claim_draw partial
+  分支那次已知修改（账本记录的既有 partial-branch 待修项）放在同一次修改里一并处理**，避免重复改
+  `RootClaim.sil` 两次。
+- 影响面：API 默认 `min_bet=1`（`src/api/proto.js:118`）的现有/未来小额市场，赢家 `payout<1000`
+  时结构性无法领奖——这不是"边缘情况"，是**默认配置下的常见情况**（默认值本身就在这条门槛之下）。
+
 ## CLTV / 节点级 finality 规则（cli-debugger 完全测不出的真实节点约束）
 
 `close_commit` 与 `refund_flip` 都用 `require(tx.time >= temporal(deadline_ms[+7200000]))`，编译为
@@ -156,7 +195,10 @@ sigScript/witness 字节数的 compute mass"（由上面 4000 KAS 异常复现�
    `RootClaim.sil:103 require(payout >= 1000)` FAIL——**真实市场 stake 规模必须让 pool_value 舒适地
    超过 1000**，不是随便给个非零值就行。改用 `min_bet=1000, stake=2000/3000`（`pool_value=5000`）后通过。
    （此项由 cli-debugger 正确 localize——claim_draw 不在"debugger 结论不可信"范围内，只有 close_commit
-   本身的 checkSig 判定是本轮认定的例外。）
+   本身的 checkSig 判定是本轮认定的例外。）**此项当时只当"我的构造要跟着 stake 规模走"处理，未追问
+   `1000` 这个门槛本身是否合理——Bettor 复核（账本1484）指出它是代币化前的 KAS sompi 遗留字面量，
+   与 API 真实默认 `min_bet=1` 冲突，是结构性阻塞，非本轮构造问题。见下方"追加验证"一节与
+   RootClaim 待修清单。
 
 ⑥ `PoolSideTicket.sil` 唯一入口 `authorize_spend(sig bettorSig)` 要求票据持有人真实签名——早前
    register_append 步骤给两笔下注生成的 `bettorPk` 是纯随机 32 字节（无对应私钥），`claim_draw` 消费
