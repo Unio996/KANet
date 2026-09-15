@@ -1,0 +1,101 @@
+[db] path=D:\kanet-tn12\scratch\_j2_final_check_cache\canary_calc_unused.db source=DB_PATH
+[diag:step] proc.silverc.compile.bshard-artifacts ms=78 cmd=silverc ok=1 at=2026-09-15T08:16:29.999Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=52 cmd=silverc ok=1 at=2026-09-15T08:16:30.056Z
+
+=== ①market_genesis(种子0.5 KAS) ===
+  requiredFee     = 0.21333300 KAS (21333300 sompi)
+  netLoss         = 0.21333300 KAS (21333300 sompi)
+  includeChange   = true
+  changeSompi     = 0.08666700 KAS (8666700 sompi)
+  lockedIntoContractOutputs = 0.20000000 KAS (20000000 sompi)
+[diag:step] proc.silverc.compile.bshard-artifacts ms=29 cmd=silverc ok=1 at=2026-09-15T08:16:30.103Z
+
+=== ②a首笔下注register_append(无held, fee输入0.5 KAS) ===
+  FAILED: selectChangeShape: insufficient inputs(leftover=-10000000 < 0)
+
+=== ②b首笔下注register_append(无held, fee输入0.95 KAS) ===
+  FAILED: selectChangeShape: no_viable_change_shape — withChange(requiredFee=n/a(insufficient), netLoss=n/a, ceiling=n/a) noChange(requiredFee=41521800, netLoss=35000000, ceiling=83043600)
+
+=== ②c首笔下注register_append(无held, fee输入1.05 KAS——补充探测的真实可行值) ===
+  requiredFee     = 0.44022200 KAS (44022200 sompi)
+  netLoss         = 0.44022200 KAS (44022200 sompi)
+  includeChange   = true
+  changeSompi     = 0.00977800 KAS (977800 sompi)
+  lockedIntoContractOutputs = 0.60000000 KAS (60000000 sompi)
+[diag:step] proc.silverc.compile.bshard-artifacts ms=51 cmd=silverc ok=1 at=2026-09-15T08:16:30.180Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=28 cmd=silverc ok=1 at=2026-09-15T08:16:30.216Z
+
+=== ③a第二笔下注register_append(有held, fee输入0.95 KAS) ===
+  FAILED: selectChangeShape: no_viable_change_shape — withChange(requiredFee=n/a(insufficient), netLoss=n/a, ceiling=n/a) noChange(requiredFee=38333400, netLoss=35000000, ceiling=76666800)
+
+=== ③b第二笔下注register_append(有held, fee输入1.05 KAS——补充探测的真实可行值) ===
+  requiredFee     = 0.41015500 KAS (41015500 sompi)
+  netLoss         = 0.41015500 KAS (41015500 sompi)
+  includeChange   = true
+  changeSompi     = 0.03984500 KAS (3984500 sompi)
+  lockedIntoContractOutputs = 0.60000000 KAS (60000000 sompi)
+
+=== 金丝雀预算核算(种子面值 1.95 KAS = 195,000,000 sompi, 均为本次核算假设的测试面值) ===
+🔴 关键发现: ②a(0.5 KAS)与②b(0.95 KAS)两个被要求核算的fee输入面值, 对register_append首笔下注都真实构造失败(结构性/真实mass双重原因, 见上面②a②b的FAILED行与run.log)——不是脚本问题, 是这笔交易本身需要单个fee UTXO一次性垫付0.6 KAS的三个协议常量dust输出(leaf续约+ticket+合并KTT各0.2 KAS)加上真实mass费, 0.5/0.95都不够。已额外探测出真实可行的最小量级(约1.05 KAS, 见②c), 下面的预算核算改用这个真实可行值, 不是回避失败结果, 是给出"多少才够"的下一层答案。
+  种子总额: 1.95000000 KAS (195000000 sompi)
+  market_genesis(0.5 KAS输入) net_loss = 0.21333300 KAS (21333300 sompi)
+
+  真实可行方案(首笔下注): genesis用0.5 KAS输入 + 首笔下注用1.05 KAS输入(②c):
+    两笔fee UTXO面值合计消耗 = 1.55000000 KAS (155000000 sompi)
+    两笔net_loss合计(真正付给网络、一去不复返的部分) = 0.65355500 KAS (65355500 sompi)
+    找零(genesis) = 0.08666700 KAS (8666700 sompi), 找零(下注) = 0.00977800 KAS (977800 sompi)
+    1.95 KAS种子投入这两笔fee UTXO(0.5+1.05=1.55)后, 剩余未动用的种子 = 0.40000000 KAS (40000000 sompi)
+    relay侧最终可支配余额(剩余未动用种子 + 两笔找零) = 0.49644500 KAS (49644500 sompi)
+
+  结算入口(market_resolve/claim_draw/refund_payout)落地前取不回的金额(以首笔下注后的最终态计, 不重复计入被续约取代的旧genesis输出——leaf续约是genesis输出的延续, 同一份KAS滚动前进, 不是额外新增锁定):
+    leaf续约(继承自genesis, 同一份KAS滚动前进, 非新增锁定) = 0.20000000 KAS (20000000 sompi)
+    新增: PoolSideTicket dust票据                        = 0.20000000 KAS (20000000 sompi)
+    新增: 合并后的KanetTestToken genesis                 = 0.20000000 KAS (20000000 sompi)
+    合计(建1个市场+下1笔后, 此刻锁在covenant里、无回收入口前取不回的KAS) = 0.60000000 KAS (60000000 sompi)
+
+  若再下第二笔(有held, ③b真实可行值fee输入1.05 KAS): 结算前取不回的金额结构不变仍是leaf续约+ticket+合并KTT三项各0.2 KAS = 0.60000000 KAS (60000000 sompi)(held被完全消费, next_states=[], 它原本锁着的0.2 KAS转移进了新的merged KTT输出里, 不是额外叠加锁定)。
+
+
+JSON_RESULTS_BEGIN
+[
+ {
+  "label": "①market_genesis(种子0.5 KAS)",
+  "requiredFee": "21333300",
+  "netLoss": "21333300",
+  "includeChange": true,
+  "changeSompi": "8666700",
+  "lockedIntoContractOutputs": "20000000"
+ },
+ {
+  "label": "②a首笔下注register_append(无held, fee输入0.5 KAS)",
+  "failed": true,
+  "error": "selectChangeShape: insufficient inputs(leftover=-10000000 < 0)"
+ },
+ {
+  "label": "②b首笔下注register_append(无held, fee输入0.95 KAS)",
+  "failed": true,
+  "error": "selectChangeShape: no_viable_change_shape — withChange(requiredFee=n/a(insufficient), netLoss=n/a, ceiling=n/a) noChange(requiredFee=41521800, netLoss=35000000, ceiling=83043600)"
+ },
+ {
+  "label": "②c首笔下注register_append(无held, fee输入1.05 KAS——补充探测的真实可行值)",
+  "requiredFee": "44022200",
+  "netLoss": "44022200",
+  "includeChange": true,
+  "changeSompi": "977800",
+  "lockedIntoContractOutputs": "60000000"
+ },
+ {
+  "label": "③a第二笔下注register_append(有held, fee输入0.95 KAS)",
+  "failed": true,
+  "error": "selectChangeShape: no_viable_change_shape — withChange(requiredFee=n/a(insufficient), netLoss=n/a, ceiling=n/a) noChange(requiredFee=38333400, netLoss=35000000, ceiling=76666800)"
+ },
+ {
+  "label": "③b第二笔下注register_append(有held, fee输入1.05 KAS——补充探测的真实可行值)",
+  "requiredFee": "41015500",
+  "netLoss": "41015500",
+  "includeChange": true,
+  "changeSompi": "3984500",
+  "lockedIntoContractOutputs": "60000000"
+ }
+]
+JSON_RESULTS_END
