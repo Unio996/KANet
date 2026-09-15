@@ -22,6 +22,7 @@ SELECT id, status FROM proto_bets WHERE status != 'confirmed';
 
 - **三条查询结果必须全部为 0 行才允许继续**——本页闸 1（执行页 A）之后、本页 §1 之前，proto 表理应一直是空的（种子转账不写这几张表，代币定义/市场/下注创建全部待本页才发生），0 行是预期结果，不是需要特意制造的条件。
 - 若非 0 行：**停下来，不设 `PROTO_DRIVER_ENABLED`，SendMessage 报 Bettor**，附查询结果——这意味着上一次尝试（本页或别的什么操作）留下了未清理的残留状态，直接开驱动会让 `runProtoDriverTick` 把这些残留当新任务静默续发（见页首规则）。
+- **另一条前置条件（账本 1455/1456，真实成本核算）**：执行前 proto-v0-funds 上必须存在单个 **≥ 0.82 KAS** 的 UTXO（下注这一步真实最小可行值，见 §5 成本明细）——`buildRegisterAppendTxJson` 要求单个 fee 输入一次性垫付全部构造成本，选不到这么大面值的单个 UTXO 会在构造阶段直接失败，报错码 `no_suitable_fee_utxo`。种子转账 v0.7 第 3 笔（0.95 KAS）满足此条件，正常情况下不需要额外操作，此处只是写清楚这个隐性前提，供出现 `no_suitable_fee_utxo` 时排查用。
 - 三条全 0 行：`kanet.mainnet.env` 新增一行 `PROTO_DRIVER_ENABLED=1`（执行页 A 那次重启**特意没加**这一行，本页是它专属的重启窗）。
 - 走标准六步重启（同执行页 A §4）：NO-TX 检查 → 停旧 PID → 确认端口释放 → 起新进程 → 记新 PID。
 - 验收：stdout 应出现 `[proto-driver] enabled`（或等价的"已启动"日志，具体措辞以 `services/proto-driver.mjs` 实际打印为准，执行时对照源码确认，不猜字面）——**跟执行页 A §5b 的 `[proto-driver] disabled` 正好相反**，这是本页唯一预期会变化的读数，其余（资金路由 403、敏感路由 503、五屏 200 等）应保持执行页 A 验收过的状态不变。
@@ -60,12 +61,18 @@ SELECT id, status FROM proto_bets WHERE status != 'confirmed';
 
 🔴 **明确写给 Owner 看**：**resolve / claim / withdraw 三个端点目前仍是 501 未实现**（§6/§9 结算入口尚未定案）。这意味着本金丝雀锁进市场 covenant 的 KAS（下注那一笔的 stake，此时归属市场的 leaf/held 状态，不再是任何人钱包里的自由余额）**在结算入口真正落地之前，没有任何路径能取回**——这不是"暂时卡住等一下"，是"这条路径本身还没写"。金丝雀完成后，这笔资金会长期处于锁定态，直到未来某次独立的结算实现工作完成为止。
 
-**预计净损耗**（数量级判断，非精确承诺，最终以实际构造时 `calculateTransactionMass` 计算结果为准——同 GO-F v0.1 §4 一贯的口径）：**🟡 以下区间是 D-020 之前（步骤 A+B 两步设计）的实验数字，J2 正在按 D-020 单笔形状重算，算好后替换本节数字，本页当前先保留旧区间占位，不代表已核实的最终值。**
+**真实数字**（账本 1455/1456 修复后，J2 用主线 `c019a933`+修复提交的真实 builder + 真实 `calculateTransactionMass` 离线构造算出，不签名不广播；来源 `docs/provenance/2026-09-15-j2-d020-register-append-fee-formula-fix/` 分支 `coord/j2-register-append-fee-bug-fix` `75dc9263`，Bettor 已逐 sompi 验算核对；**修复前该分支另一版本数字已过期，不要用**）：
 
-- `market_genesis`：约 0.4 KAS（`GENESIS_OUTPUT_SOMPI` 硬编码 20,000,000 sompi + `required_fee` 约 20,000,000 sompi，见 (1402)）。种子转账第 1 笔（0.5 KAS）覆盖此项，留有余量。
-- 下注（`register_append` 单笔交易，含续约 ShardLeaf_direct + 新铸 ps ticket + 续约 KTT + relay 找零四个输出）：约 0.6–0.8 KAS 区间（(1400)/(1402)/(1404)/(1406) 多轮真实编译+mass 实验的收敛范围，成本大头是三个各自钉 20,000,000 sompi 的 covenant/genesis 输出的 KIP-9 storage mass，脚本大小只占小头）。种子转账第 3 笔（0.95 KAS，原为 D-020 之前的"步骤 B"预留）覆盖此项，留有余量。
-- 种子转账第 2 笔（0.5 KAS，原为 D-020 已取消的"步骤 A 铸筹码"预留）**本金丝雀用不上**——D-020 取消该步骤后不再需要，这笔资金闲置在 proto-v0-funds，不构成风险，也不需要额外处置，留给未来的第二次/后续金丝雀或直接留存。
-- 两笔真实花费合计预计 ≤1.2 KAS，proto-v0-funds 种子总额 1.95 KAS，覆盖充分；实际数字以广播时真实计算结果为准，写入 §7 证据清单。
+| 交易 | 用的种子 UTXO | required_fee | 找零回 relay | 锁进合约 |
+|---|---|---|---|---|
+| ①建市场（genesis） | 0.5 KAS | 0.21333300 KAS | 0.08666700 KAS | 0.2 KAS |
+| ②下第 1 笔（无 held） | 0.95 KAS | 0.43339900 KAS | 0.11660100 KAS | 0.6 KAS（累计） |
+
+- 两笔合计：动用种子 UTXO 面值 1.45 KAS，找零回 relay 0.20326800 KAS，**净消耗（真正付出去，一去不复返）= 1.24673200 KAS**——其中付给网络的手续费 0.64673200 KAS，锁进合约的 0.6 KAS。
+- proto-v0-funds 种子总额 1.95 KAS，本金丝雀只用掉 1.45 KAS（另一枚 0.5 KAS 种子 UTXO——原为 D-020 已取消的"步骤 A"预留——本次用不上，留在原地不构成风险，无需处置）；金丝雀跑完后 proto-v0-funds 应余 **0.70326800 KAS**（= 未动用的 0.5 + 找零 0.20326800）。
+- 实际数字以广播时真实计算结果为准（`assertImpliedFeeMatches` 会在构造层强制核对，不符即拒绝构造），写入 §7 证据清单。
+
+🔴 **结算入口落地前取不回的金额（账本 1456 追加纠正，非"稳态不变"，会随下注笔数累积）**：`0.4 KAS`（leaf 续约 + 合并 KanetTestToken genesis，这部分随每次 `register_append` 滚动前进、不新增）**+ `0.2 KAS × 已下注笔数`**（`PoolSideTicket` 是"spent-once"凭证，每笔下注各自新铸一个，只在该笔自己将来 `claim_draw`/`refund_payout` 时才会被消费，不会被后续下注合并或替换，会一笔笔累积）。**本金丝雀只下 1 笔，代入得 0.4 + 0.2×1 = 0.6 KAS**（与上表"锁进合约"累计列一致）——若未来在此基础上再下第 2 笔，取不回的金额会变成 0.4+0.2×2=0.8 KAS，不是继续停在 0.6 KAS。
 
 ## 6. 中止条件（任一触发 ⇒ 立即关闭驱动并上报，不重试）
 
