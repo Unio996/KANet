@@ -6307,5 +6307,42 @@ export function runMigrations() {
     }
   }
 
+  // ── v210 (2026-09-16, J2 · 结算实现批准, Owner D-022/账本1491, Bettor裁定): proto_settlement_intents
+  //   建表——覆盖market_seal/close_commit/convert_to_claim/claim_draw/withdraw/输家ticket自我回收
+  //   六步的prepared/submitted/landed/ambiguous状态机（设计文档§2/实现计划§3，同proto_bet_intents
+  //   既有哲学: 独立schema，不改proto_bet_intents/proto_markets既有表）。
+  //   intent_key统一'settle:<subject_type>:<subject_id>:<step>'格式（Bettor裁定⑤：relay侧复用
+  //   现有covenant_broadcast命令，不新增命令，靠这个统一前缀在/ingest/proto-bet-intent-phase端点
+  //   分派，同既有'genesis:'前缀分支同一模式）。
+  //   step CHECK只列本轮已批准的六步（seal/resolve/convert_to_claim/claim_draw/withdraw/reclaim），
+  //   不含refund相关值——Bettor裁定④"本轮只实现已批准的六个builder对应的step，不预留未实现分支的
+  //   死代码"，subject_type保留market/claim/ticket三种（表设计本身保持通用，未来可扩展）。
+  //   幂等: CREATE TABLE IF NOT EXISTS + CREATE INDEX IF NOT EXISTS（同v206既有模式，不涉及ALTER
+  //   既有表，风险最低的一类迁移）。
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS proto_settlement_intents (
+      intent_key       TEXT PRIMARY KEY,
+      subject_type     TEXT NOT NULL CHECK (subject_type IN ('market','claim','ticket')),
+      subject_id       TEXT NOT NULL,
+      step             TEXT NOT NULL CHECK (step IN (
+                         'seal','resolve','convert_to_claim','claim_draw','withdraw','reclaim'
+                       )),
+      depends_on       TEXT,
+      status           TEXT NOT NULL DEFAULT 'pending'
+                        CHECK (status IN ('pending','prepared','submitted','landed','ambiguous')),
+      prepared_txid    TEXT,
+      prepared_tx_json TEXT,
+      submitted_txid   TEXT,
+      landed_depth     INTEGER,
+      landed_at        TEXT,
+      last_error       TEXT,
+      created_at       TEXT NOT NULL,
+      updated_at       TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_proto_settlement_intents_subject ON proto_settlement_intents(subject_type, subject_id, step);
+    CREATE INDEX IF NOT EXISTS idx_proto_settlement_intents_status_updated ON proto_settlement_intents(status, updated_at);
+  `);
+  console.log('[migrate] v210: proto_settlement_intents 建表(六个结算builder的意图状态机, pragma守卫幂等).');
+
   console.log('[migrate] DB migrations complete.');
 }
