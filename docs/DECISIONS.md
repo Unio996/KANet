@@ -24,6 +24,13 @@
 
 ## 🔴 当前有效的战略决策 (CURRENT)
 
+### D-022 结算后半程：实现批准 + 活市场走路线 (A) + 两项"取最简洁"裁定 (2026-09-16 · Owner 本机终端原话「批准，派J2写结算后半程设计」→ 定稿后「按最简洁的方案走！」· Bettor 记账 · COORD-LEDGER 1476–1493 · 设计 `docs/2026-09-16-j2-proto-v0-settlement-design-v0.1.md` v0.8 @2bcc6c39 · simnet 真共识证据 @50019d4f)
+
+1. **批准实现**：六个结算 builder（market_seal / close_commit / convert_to_claim + convert_to_refundclaim / claim_draw + refund_payout / KanetTokenClaim.spend / 输家 ticket 回收）+ 意图状态机 + 驱动接线 + relay 漏斗命令。每个 builder 的**生产字节**须先在官方 kaspad 2.0.1 隔离 simnet 真实提交确认，方可合入主线；主网执行另走 Owner 闸门。
+2. **活市场 a59c7b48 走路线 (A)**：第二笔押 NO（stake 999）→ 裁决 YES → 单赢家 claim_draw（payout = pool_value = 1000，走 full 分支）→ spend → 回收输家 ticket。该精确形状已在 simnet 8 步全部被真共识接受。
+3. **`RootClaim.sil:103 require(payout >= 1000)` ⇒ 直接删除**（Owner「最简洁」）。理由：该 1000 是代币化前 sompi 时代遗留字面量，与 API 默认 min_bet = 1 冲突；payout = 0 的 claim 只浪费调用者自己的手续费，不造成他人损失，不值得为此保留一条门槛（同 D-017 铁令：约束先问"防的真实损失是什么"）。与 partial 多赢家自续约偏移修复（同 1469 ctor 烤入手法）**合并一次改动**，仅适用新市场；修后须在 simnet 用多赢家 partial 形状真跑。
+4. **refund_flip 触发规则与 grace ⇒ 维持现状**（Owner「最简洁」）：deadline + 2h 后任何人可触发、无需签名，不改 `RootClose.sil`、不加委员签名、不延长 grace。已知取舍：被抢先 flip 时赢家拿不到赔付、只退本金——原型期押注资产为零价值测试币，KAS 侧按退款路径退回，不构成真实资金损失。执行页以"封盘后立即背靠背提交 close_commit"缩小窗口（MUST-2）。
+
 ### D-021 仓库公开（有意）· 公开仓库写作规矩 (2026-09-15 · Owner 本机终端原话「公开源代码有利于整个kaspa生态。你立规矩建议不错，采纳。」· Bettor 记账 · COORD-LEDGER 1437 / 1448)
 1. **公开是 Owner 有意决定**：`Unio996/KANet` 保持 PUBLIC，代码、合约、设计与协调记录对 Kaspa 生态开放。不改可见性，不重写历史。
 2. **从今天起，所有进入仓库的文字（账本、DECISIONS、设计稿、provenance、commit message、代码注释）不得写**：
