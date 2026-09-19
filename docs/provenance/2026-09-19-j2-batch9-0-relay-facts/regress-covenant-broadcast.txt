@@ -1,0 +1,58 @@
+[PASS] SIC-1 单输入在上限内 ⇒ ok
+[PASS] SIC-2 恰好等于上限 ⇒ ok(闭区间)
+[PASS] SIC-3 超过上限 1 sompi ⇒ 拒
+[PASS] SIC-4 多个签名输入求和后超限 ⇒ 拒(不是逐笔各自判定)
+[PASS] SIC-5 signInputIndices 越界 ⇒ 拒(不是静默忽略)
+[PASS] SIC-6 未声明签名索引的输入不计入总额(只信声明,不猜)
+[PASS] SIC-7 🔴 NWT 1376 非阻断建议落地: signInputIndices 含重复索引 ⇒ 显式拒绝(不依赖"重复只会让总额变大更易拒"这条方向安全的隐性性质)
+[PASS] NL-1 🔴 NWT 1352 绕过构造: 1 KAS 输入, 0.00001 KAS 回自己 + 0.99999 KAS 转走 ⇒ 必须拒(旧"存在性"表述挡不住的场景; 注: 1 KAS 输入在真实管线里会先被 SignedInputCeiling(0.5 KAS)拦下, 这里单独测 validateNetLoss 自身的逻辑, 见 NL-1b 测两道闸协同的真实场景)
+[PASS] NL-1b 🔴 NWT 1355 真实管线场景: 签名输入 ≤ 0.5 KAS(不会先被 SignedInputCeiling 拦下)时同款绕过构造仍必须被 validateNetLoss 拒——两道闸协同, 不是只测函数单独逻辑
+[PASS] NL-2 正常 covenant 花费: net_loss 恰等于 required_fee ⇒ 放行(NWT 1353 边界要求)
+[PASS] NL-3 net_loss = required_fee×2 + 1 sompi ⇒ 拒(NWT 1353 边界要求)
+[PASS] NL-4 net_loss = required_fee×2 恰好等于动态上限 ⇒ 放行(闭区间)
+[PASS] NL-5 required_fee 很大时改用 kind cap(取 min): required_fee×2 > absFeeCapSompi ⇒ 上限是 absFeeCapSompi(Bettor 1386①: 按 kind 派生, 不再是全局 ABS_FEE_CAP)
+[PASS] NL-5b 🔴 Bettor 1386①: absFeeCapSompi 缺失/非 bigint ⇒ 拒(不静默落到任何默认值——旧全局 ABS_FEE_CAP_SOMPI 已废弃)
+[PASS] NL-5c 🔴 Bettor 1386①: GLOBAL_ABS_FEE_CAP_SOMPI(1.0 KAS)兜底——即使某个 kind 的 absFeeCapSompi 被(疏忽或恶意)设得比全局硬顶还大, feeCeilingSompi 仍然被全局硬顶钳制, 不会被 kind cap 突破
+[PASS] NL-6 scriptPubKeyRaw(纯 hex 形式)大小写不敏感比对(不因为大小写误判"没找到自己的找零")
+[PASS] NL-7 requiredFeeSompi 非 bigint(如误传 number) ⇒ 拒(不静默转型算出可能错误的值)
+[PASS] NL-9 🔴 Bettor 1364 自查: relayScriptPubKey 缺失(null/undefined/空字符串) ⇒ 早退拒绝, 绝不会走到匹配逻辑算出 net_loss=0
+[PASS] NL-10 🔴 Bettor 1364 自查核心场景: relayScriptPubKey 非空但归一化后是空字符串(畸形 JSON `{"script":"",...}`) ⇒ 必须拒, 不能跟 outputs 里缺失/畸形的 scriptPubKeyRaw(同样归一成空串)错误配成一对而把 net_loss 算小
+[PASS] NL-11 对照: relayScriptPubKey 正常非空时, outputs 里缺失/畸形的 scriptPubKeyRaw 不会被误判成"付回自己"(canonicalScriptHex(undefined)="" 不等于正常非空 relayKeyNorm)
+[PASS] NL-12 🔴 NWT 1376 非阻断建议落地(与 SIC-7 同款): signInputIndices 含重复索引 ⇒ 显式拒绝
+[PASS] IMF-1 正常交易(隐含手续费=requiredFee的合理量级) ⇒ 放行
+[PASS] IMF-2a 🔴 诚实记录账本1455真实bug的精确量级: 单独漏计leaf(0.2 KAS)在~0.44 KAS requiredFee上的真实overpay, 落在min(requiredFee×2, GLOBAL)容忍区间之内, 这条relay侧兜底并不会拒绝它——真正防住这个具体bug的是console侧leftover公式修复本身(逐字节相等的assertImpliedFeeMatches不变量), 这里只是如实记录relay侧这道闸的容忍边界, 不是声称它能挡住一切量级的overpay
+[PASS] IMF-2b 更大量级的漏计(例如同时漏掉leaf+held, 或某个未来kind漏掉一个更大的输入)确实会被这道relay侧兜底拒绝——证明它对"足够大的构造错误"仍然有效, 不是完全没用的闸
+[PASS] IMF-3 隐含手续费恰好等于 min(requiredFee×2, GLOBAL_ABS_FEE_CAP_SOMPI) ⇒ 放行(闭区间, 与validateNetLoss同款边界语义)
+[PASS] IMF-4 隐含手续费为负(输出总额超过输入总额, 交易根本不平衡) ⇒ 拒绝, 明确说明"不平衡"而不是复用"超上限"的措辞
+[PASS] IMF-5 requiredFeeSompi 非 bigint ⇒ 拒(不静默转型)
+[PASS] IMF-6 inputs 是全部输入不筛signInputIndices(与validateNetLoss刻意不同的口径): 即使leaf/held这类未签名输入的面值也要计入Σinputs, 不能只看"relay自己签的那一个"
+[PASS] CSH-1 JSON 字符串输入(真实 wasm .toString() 形状)⇒ 取出 .script 并转小写
+[PASS] CSH-2 纯 hex 字符串输入(非 JSON, 手写测试向量常见形状)⇒ JSON.parse 失败, 原样当 hex 用
+[PASS] CSH-3 大小写混合(JSON 内 script 字段大小写混合 + 纯 hex 大小写混合)都能归一到同一小写值
+[PASS] CSH-4 真实 wasm 对象形状(有 .toString() 而非字符串本身)⇒ 走同一条路径, 结果与直接传字符串相同
+[PASS] CSH-5 null/undefined ⇒ 空字符串, 不 throw(fail-closed 交给上层"比不出相等"处理, 不在这层报错)
+[PASS] NL-8 端到端: relayScriptPubKey 传"真实 wasm 对象"形状, outputs.scriptPubKeyRaw 传 extractTxShape() 会产出的 JSON 字符串形状——两种不同表示形式仍能正确匹配(这正是 canonicalScriptHex 存在的理由: 不要求调用方先手动统一格式)
+[PASS] CRF-1 正常调用: mass × SOMPI_PER_MASS
+[PASS] CRF-2 calculateTransactionMass 不存在 ⇒ throw(fail-loud, 无 fallback)
+[PASS] CRF-3 calculateTransactionMass 抛错(如 panic) ⇒ throw, 不吞掉不 fallback
+[PASS] CRF-4 缺 networkId ⇒ throw
+[PASS] SOD-1 只签声明的索引, 其余 input 的 signatureScript 原样保留(不被误动)
+[PASS] SOD-2 多个索引依次都被签, 调用参数(tx/idx/privateKey/sighashType)正确传递
+[PASS] SOD-3 signInputIndices 为空数组 ⇒ throw(不是静默不签)
+[PASS] SOD-4 signInputIndices 含越界索引 ⇒ fail-fast 全部拒签, 不留"签到一半"的半成品状态
+[PASS] SOD-5 kaspa.createInputSignature 不存在 ⇒ throw(fail-loud, 无 fallback, 同 computeRequiredFeeSompi CRF-2 既有纪律)
+[PASS] SOD-6 kaspa.createInputSignature 对某个索引抛错(如 wasm panic) ⇒ 直接抛出, 不吞掉不 fallback
+[PASS] AFT-1 txid 相符 ⇒ ok
+[PASS] AFT-2 txid 不符 ⇒ 拒, 带 actualTxid 供上层分类(replay_txid_mismatch)
+[PASS] FVO-1 空索引数组(两类都不声明) ⇒ no-op pass
+[PASS] FVO-2 genesis 输出恰好等于 GENESIS_OUTPUT_SOMPI ⇒ pass
+[PASS] FVO-3 genesis 输出比常量少 1 sompi ⇒ fail(不接受"够接近")
+[PASS] FVO-4 genesis 输出比常量多(比如误传了找零金额) ⇒ fail(不接受">=", 必须"恰好")
+[PASS] FVO-5 续约输出恰好等于 CONTINUATION_OUTPUT_SOMPI ⇒ pass
+[PASS] FVO-6 续约输出面值不对 ⇒ fail, reason 里带 "continuation" 标签(区分是哪一类不对)
+[PASS] FVO-7 genesis 与 continuation 混合声明, 各自用各自的常量核对(不是共用一个)
+[PASS] FVO-8 越界索引 ⇒ fail-loud, 不静默跳过
+[PASS] FVO-9 GENESIS_OUTPUT_SOMPI 与 CONTINUATION_OUTPUT_SOMPI 当前数值相等(spec §9.6 明文——语义分开但数值相同, 不是巧合)
+[PASS] FVO+NL-1 未声明的第三个输出(非常量任意值, 付到别处不是relay自己) ⇒ validateFixedValueOutputs 不管它(ok:true, 结构上就不检查未声明索引), 但 validateNetLoss 仍然把它算进net_loss并正确拒绝(两道闸各司其职, 不是漏洞)
+
+56 passed, 0 failed

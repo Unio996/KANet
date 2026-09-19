@@ -1,0 +1,9 @@
+== 基线(未变异): 旧测试 / 新测试
+  旧(dbfa5599): 33 passed, 0 failed
+  新          : 41 passed, 0 failed
+== 施加变异 NWT-e(形态 O 匹配键去掉 index)后:
+  旧(dbfa5599): 33 passed, 0 failed   ⇐ 变异【存活】(真缺口被复现)
+  新          : 39 passed, 2 failed   ⇐ 变异【被抓】
+     [FAIL] O5【N-T1, NWT 杀手向量】同一 txid 两个输出(index 0 = covenant, index 1 = 普通
+     [FAIL] O5b 同一 txid 两个输出同时请求(0 与 1): 各回各的(index 0 → covenant COV_A, ind
+[RESTORED] utxo-facts.mjs 已还原, sha256 88cacf3bbe8cd695… 一致

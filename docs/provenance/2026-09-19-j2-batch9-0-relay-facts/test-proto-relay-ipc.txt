@@ -1,0 +1,24 @@
+[db] path=%TEMP%\_j2_proto_relay_ipc_7488.db source=DB_PATH
+[PASS] ①非白名单命令类型被拒(throw, 不发出任何 IPC)
+[PASS] ②payload 携带 relay_id 字段(即使值为 undefined)一律被拒, 不生效
+[PASS] ②b payload 携带 relayId(驼峰) 同样被拒
+[PASS] ②c(账本1442①) payload 携带 type 字段被拒——防止已过检查的 type 参数被 payload.type 覆盖
+[PASS] ②d(账本1442①) payload.type 即使是白名单内的另一条命令也一样被拒——不能靠"同样在白名单里"放行
+[PASS] ②e(账本1442②) origin 恒为 internal(五值fail-closed闸认可的值, 不是自造的proto)——用注入的假 sendCommandAsync 断言真正收到的第4个实参(不管调用方怎么传都不生效)
+[PASS] ②f(账本1442②) protoSendCmd 的 origin 参数即使传入非法值也不影响 sendProtoCommand 收到的 opts(protoSendCmd 根本不转发它)
+[PASS] ③驱动关闭(PROTO_DRIVER_ENABLED 未设)时: covenant_broadcast(write) 被拒, 四条 read 命令全部放行到发送这一步(用 fail 的 sendCommandAsync 探测——到达说明没被闸拦, 不是真的发出成功)
+[PASS] ④白名单里标 write 的命令恰好只有 covenant_broadcast 一条(源码级断言, 防未来加写命令漏加闸)
+[PASS] ⑤protoSendCmd 适配旧签名 sendCmd(relayId, cmd, timeoutMs, origin)——relayId 参数被忽略(不影响锁死行为), type/payload 正确拆分透传
+[PASS] ⑥(账本1444, NWT复核抓到)8个Object.prototype自带属性名当type一律被拒(原型链洞), mock sendCommandAsync从未被调用
+[PASS] ⑥b(账本1444卫生项) payload 是数组时被拒
+[PASS] 批9-0-a PROTO_COMMAND_ALLOWLIST 对基线表做差分: 恰多一项, 且该项是 get_past_median_time:read; 原有四项的读写标记一字未变; 表仍是冻结的
+[PASS] 批9-0-b 登记面枚举: 白名单里每一条命令在 relay 侧齐全登记(read 命令六处齐全, write 命令不得进 READONLY_ALLOWLIST); 新命令 get_past_median_time 六处齐全
+[PASS] 批9-0-b2【枚举器自证】枚举器不是空判据: 一个只登记了一半的假命令必被逐处指出缺口(去掉 ⑤ 就会漏报 arm 后被静默拒的那一类)
+[PASS] 批9-0-c get_past_median_time 是 read: PROTO_DRIVER_ENABLED 未设时不被驱动闸挡(越过闸卡在"没有真 relay"这个无关下游), 与另外三条 read 同待遇
+[PASS] 批9-0-d facts 形态的 get_address_utxos 走同一个出口: payload(facts/outpoints/minAmount/maxAmount)原样透传、type 恒为显式参数、origin 恒 internal(出口不改写, 也不因这几个新字段放宽任何检查)
+
+17 passed, 0 failed
+
+[test] ⑦(独立子进程) PROTO_RELAY_ID 未配置 ⇒ sendProtoCommand 一律 throw(fail-closed):
+[db] path=%TEMP%\_j2_proto_relay_ipc_unconfigured_27768.db source=DB_PATH
+PASS

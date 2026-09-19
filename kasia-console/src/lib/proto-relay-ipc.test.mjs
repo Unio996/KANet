@@ -134,6 +134,76 @@ await t('⑥b(账本1444卫生项) payload 是数组时被拒', async () => {
   if (!threw || !/must not be an array/.test(threw.message)) throw new Error(`应该 throw 数组拒绝错误, 实际 ${threw && threw.message}`);
 });
 
+// ══ 批9 9-0(J2 2026-09-19, 设计 v0.3.1 §12.11⑨⑩)——白名单新增一条 read: get_past_median_time(R2) ══════════════
+// 以下四条是【新增用例】, 既有用例①–⑥b 一条未改(用例③④是 9-2a 出口分闸的红旗锚点, 见设计 §3.8)。
+const relayLib = (f) => import(new URL(`../../../kasia-relay/src/lib/${f}`, import.meta.url).href);
+const { COMMAND_TYPES, COMMAND_PAYLOAD_SCHEMA, COMMAND_FIELD_TYPES, isValidCommandType } = await relayLib('commands.mjs');
+const { READONLY_ALLOWLIST } = await relayLib('authorize.mjs');
+const RELAY_SRC = fs.readFileSync(new URL('../../../kasia-relay/src/relay.mjs', import.meta.url), 'utf8');
+const has = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+
+// 6f6f9901(9-0 基线)时的白名单原样——差分基准, 不可变
+const BASELINE_ALLOWLIST = Object.freeze({ covenant_broadcast: 'write', get_address_utxos: 'read', get_mempool_entry: 'read', check_utxo_landed: 'read' });
+
+await t('批9-0-a PROTO_COMMAND_ALLOWLIST 对基线表做差分: 恰多一项, 且该项是 get_past_median_time:read; 原有四项的读写标记一字未变; 表仍是冻结的', () => {
+  const now = Object.entries(PROTO_COMMAND_ALLOWLIST);
+  const added = now.filter(([k]) => !has(BASELINE_ALLOWLIST, k));
+  if (added.length !== 1 || added[0][0] !== 'get_past_median_time' || added[0][1] !== 'read') throw new Error(`期望恰多 [get_past_median_time, read], 实际多了 ${JSON.stringify(added)}`);
+  for (const [k, mode] of Object.entries(BASELINE_ALLOWLIST)) if (PROTO_COMMAND_ALLOWLIST[k] !== mode) throw new Error(`基线项 ${k} 的标记变了: ${mode} → ${PROTO_COMMAND_ALLOWLIST[k]}`);
+  if (now.length !== Object.keys(BASELINE_ALLOWLIST).length + 1) throw new Error(`条数不对: ${now.length}`);
+  if (!Object.isFrozen(PROTO_COMMAND_ALLOWLIST)) throw new Error('白名单必须是 Object.freeze 的');
+});
+
+// 登记面枚举: 一个 proto 允许命令要在 relay 侧齐全登记, 否则 arm 后被静默拒/被 validator 拒。read 命令共 6 处:
+//   ① console 允许表(本表)  ② commands.mjs COMMAND_TYPES  ③ COMMAND_PAYLOAD_SCHEMA  ④ COMMAND_FIELD_TYPES
+//   ⑤ authorize.mjs READONLY_ALLOWLIST  ⑥ relay.mjs 的 `case '<type>':` handler
+const registrationGaps = (type, mode, { table = PROTO_COMMAND_ALLOWLIST } = {}) => {
+  const gaps = [];
+  if (!has(table, type)) gaps.push('①console允许表');
+  if (!isValidCommandType(type)) gaps.push('②COMMAND_TYPES');
+  if (!has(COMMAND_PAYLOAD_SCHEMA, type)) gaps.push('③COMMAND_PAYLOAD_SCHEMA');
+  if (!has(COMMAND_FIELD_TYPES, type)) gaps.push('④COMMAND_FIELD_TYPES');
+  if (mode === 'read' && !READONLY_ALLOWLIST.has(type)) gaps.push('⑤READONLY_ALLOWLIST');
+  if (mode === 'write' && READONLY_ALLOWLIST.has(type)) gaps.push('⑤write命令不得进READONLY_ALLOWLIST(会豁免信封)');
+  if (!RELAY_SRC.includes(`case '${type}':`)) gaps.push('⑥relay.mjs handler');
+  return gaps;
+};
+await t('批9-0-b 登记面枚举: 白名单里每一条命令在 relay 侧齐全登记(read 命令六处齐全, write 命令不得进 READONLY_ALLOWLIST); 新命令 get_past_median_time 六处齐全', () => {
+  const bad = [];
+  for (const [type, mode] of Object.entries(PROTO_COMMAND_ALLOWLIST)) { const g = registrationGaps(type, mode); if (g.length) bad.push(`${type}: ${g.join(', ')}`); }
+  if (bad.length) throw new Error(`登记缺口: ${bad.join(' | ')}`);
+  if (COMMAND_TYPES.GET_PAST_MEDIAN_TIME !== 'get_past_median_time') throw new Error('COMMAND_TYPES.GET_PAST_MEDIAN_TIME 不对');
+});
+await t('批9-0-b2【枚举器自证】枚举器不是空判据: 一个只登记了一半的假命令必被逐处指出缺口(去掉 ⑤ 就会漏报 arm 后被静默拒的那一类)', () => {
+  const g = registrationGaps('not_a_registered_cmd', 'read', { table: { not_a_registered_cmd: 'read' } });
+  const want = ['②COMMAND_TYPES', '③COMMAND_PAYLOAD_SCHEMA', '④COMMAND_FIELD_TYPES', '⑤READONLY_ALLOWLIST', '⑥relay.mjs handler'];
+  if (JSON.stringify(g) !== JSON.stringify(want)) throw new Error(`期望 ${JSON.stringify(want)}, 实际 ${JSON.stringify(g)}`);
+  const g2 = registrationGaps('get_past_median_time', 'read', { table: {} });   // 换一张缺它的表 ⇒ ① 缺
+  if (JSON.stringify(g2) !== JSON.stringify(['①console允许表'])) throw new Error(`期望只缺①, 实际 ${JSON.stringify(g2)}`);
+});
+await t('批9-0-c get_past_median_time 是 read: PROTO_DRIVER_ENABLED 未设时不被驱动闸挡(越过闸卡在"没有真 relay"这个无关下游), 与另外三条 read 同待遇', async () => {
+  delete process.env.PROTO_DRIVER_ENABLED;
+  let threw = null;
+  try { await sendProtoCommand('get_past_median_time', {}); } catch (e) { threw = e; }
+  if (!threw || /proto_driver_disabled/.test(threw.message)) throw new Error(`不该被 proto_driver_disabled 挡住(实际: ${threw ? threw.message : '未抛错'})`);
+  if (!/Relay not running/.test(threw.message)) throw new Error(`应卡在真实 sendCommandAsync 的 Relay not running, 实际 ${threw.message}`);
+});
+await t('批9-0-d facts 形态的 get_address_utxos 走同一个出口: payload(facts/outpoints/minAmount/maxAmount)原样透传、type 恒为显式参数、origin 恒 internal(出口不改写, 也不因这几个新字段放宽任何检查)', async () => {
+  const seen = [];
+  const fake = (relayId, cmd, timeoutMs, origin) => { seen.push({ relayId, cmd, origin }); return Promise.resolve({ ok: true }); };
+  const payload = { address: 'kaspa:x', facts: true, outpoints: [{ transactionId: 'a'.repeat(64), index: 3 }] };
+  await sendProtoCommand('get_address_utxos', payload, { _sendCommandAsyncForTest: fake });
+  await sendProtoCommand('get_address_utxos', { address: 'kaspa:x', facts: true, minAmount: '1', maxAmount: '2' }, { _sendCommandAsyncForTest: fake });
+  if (seen.length !== 2) throw new Error(`应发出 2 次, 实际 ${seen.length}`);
+  if (JSON.stringify(seen[0].cmd) !== JSON.stringify({ ...payload, type: 'get_address_utxos' })) throw new Error(`payload 被改写: ${JSON.stringify(seen[0].cmd)}`);
+  if (seen[1].cmd.minAmount !== '1' || seen[1].cmd.maxAmount !== '2' || seen[1].cmd.facts !== true) throw new Error('list 形态字段丢失');
+  if (seen.some((s) => s.origin !== 'internal' || s.relayId !== 'ipc-test-relay')) throw new Error(`origin/relayId 被改: ${JSON.stringify(seen.map((s) => [s.relayId, s.origin]))}`);
+  // 出口对 payload 里夹带 type 的既有保护对这些新字段同样有效
+  let threw = null;
+  try { await sendProtoCommand('get_address_utxos', { address: 'x', facts: true, type: 'covenant_broadcast' }, { _sendCommandAsyncForTest: fake }); } catch (e) { threw = e; }
+  if (!threw || !/must not carry 'type'/.test(threw.message)) throw new Error(`payload 夹带 type 应被拒, 实际 ${threw && threw.message}`);
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail === 0) {
   console.log('\n[test] ⑦(独立子进程) PROTO_RELAY_ID 未配置 ⇒ sendProtoCommand 一律 throw(fail-closed):');
