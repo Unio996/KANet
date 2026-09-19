@@ -1,0 +1,35 @@
+[PASS] S1 utxo-facts.mjs 源码(去注释)不含 connectRpc / new RpcClient / kaspa-wasm import / p2sh.mjs import / process.env
+[PASS] S1-变异 扫描器本身有效: 往源码里塞 new RpcClient / connectRpc / process.env 后必红(否则 S1 是空判据)
+[PASS] S2 relay.mjs 的 get_address_utxos / get_past_median_time 两个 case 只注入 waitForRpc(FACTS_RPC_WAIT_MS), 不含 connectRpc / new RpcClient
+[PASS] S3 FACTS_LIST_MAX===200 / FACTS_OUTPOINTS_MAX===8 / FACTS_VERSION===1, 且源码无 env 读取(S1 已含 process.env 扫描)
+[PASS] B1 不带 facts: 结果 == { ok:true, utxos: <旧函数原样返回> }(深比较+同一对象引用), 旧函数以 (address, networkId) 调一次, 共享 RpcClient 从未被取
+[PASS] B2 facts:false / facts 非严格 true('true'、1)在 handler 层都走旧路径(严格 === true; validator 另拒, 见 R3)
+[PASS] B3 没带 facts 却带了 outpoints/minAmount/maxAmount ⇒ facts_params_without_facts(拒绝静默回一个没有 spk/covenantId 的正常回复, F18)
+[PASS] R1 outpoints 与 minAmount/maxAmount 互斥
+[PASS] R2 outpoints 形态校验: 空/超 8 项/非数组/坏 txid(大写、短、非 hex)/坏 index(负、小数、2^32、字符串)/重复 ⇒ 整条报错
+[PASS] R2b list 形态校验: min/max 只收十进制字符串(拒 number、'-1'、'1e3'、' 1'、'01'、>2^64-1), min>max ⇒ 报错
+[PASS] R3 validateCommandPayload(当前版): facts 只收 boolean(拒 'true'/1), minAmount/maxAmount 只收 string, outpoints 只收 array; 旧形状 {address} 仍合法; get_past_median_time 合法且无必填
+[PASS] R4【真实旧版】基线 6f6f9901 的 commands.mjs: 对 R2 回 unknown command type(旧 relay 天然 fail-closed); 对带 facts/outpoints 的 get_address_utxos 静默放行(F18 的实证, 不是我写的假验证器)
+[PASS] R5 authorize.mjs: get_past_median_time 与 get_address_utxos 都在 READONLY_ALLOWLIST(漏登记 ⇒ gate arm 后被静默拒)
+[PASS] O1 found/missing 划分 + 请求顺序输出 + 回声字段(facts:true/factsVersion:1/form)+ 无 truncated + 每项含 scriptHex 与 covenantId 键
+[PASS] O2 普通 P2PK 条目 ⇒ covenantId 键存在且为 null(不是缺键); covenant 条目 ⇒ 64 位小写 hex 字符串(Hash 已 String 化)
+[PASS] O3【N1】地址上有 >FACTS_LIST_MAX 个 dust 时, 形态 O 仍取到目标 outpoint、无 truncated(列表形态才有截断)
+[PASS] O4 已被花掉(不在集合里)⇒ 进 missing, 不是报错也不是取"第一个同面值的": 同 spk 同面值但 outpoint 不同的条目不会被当成目标
+[PASS] L1【O1】250 dust + 50 可用、无 minAmount: 窗口含全部 50 个可用且排在最前(降序), truncated=true; 升序会把可用全部挤出去
+[PASS] L2 输出对输入顺序不敏感: 同一批条目 20 种打乱顺序 ⇒ JSON 字节相同(含同额 tiebreak: txid 字节序升序, 再 index 升序)
+[PASS] L3 min/max 过滤在截断之前(用 BigInt 十进制字符串): min 去掉 dust 后 truncated=false; max 去掉大额; 边界值含等号
+[PASS] L4 truncated 边界: 恰 200 项 ⇒ false; 201 项 ⇒ true 且只回 200 项
+[PASS] L5 金额一律 BigInt: >2^53 的相邻值排序正确、输出字符串精确(Number 比较会错序/丢精度)
+[PASS] L6 列表形态的响应形状: 恒带 facts/factsVersion/form:list/truncated, 每项含 scriptHex 与 covenantId 键, 无 found/missing
+[PASS] M1-a 真实 wasm 条目上 covenantId 的实况: 顶层恒 undefined, entry 上是原型 getter, `in` 对 covenant 与普通条目都为真(夹具与 NWT 探针一致)
+[PASS] M1-b 旧 wasm(entry 上没有 covenantId 键) ⇒ 两种形态都整条报错 covenant_id_field_missing, 不回 null
+[PASS] M1-c【变异对照】手写夹具把 covenantId 放顶层(entry 上没有)⇒ 生产读取报错而不是回 null(防"手写夹具绿、生产恒 null")
+[PASS] M1-d 夹具约束: 普通对象夹具若在 entry 上显式写 covenantId: undefined(键存在)⇒ 视为无 covenant(null); 只省略键才会被哨兵拒
+[PASS] M1-e covenantId 形状异常(非 64 位 hex)⇒ covenant_id_malformed; spk/outpoint/amount 读不出 ⇒ facts_entry_malformed(fail-closed, 不静默丢项)
+[PASS] H1 facts:true: 只经注入的共享 rpc 调 getUtxosByAddresses([address]) 恰一次, 旧函数从未被调, 钱包 getNetworkId 从未被求值
+[PASS] H2 请求非法 ⇒ 在取共享 rpc 之前就失败(不占 RPC); 共享 rpc 取不到(超时/未连接)⇒ 错误原样上抛, 不回落旧路径
+[PASS] H3 getUtxosByAddresses 抛错 / 返回空 entries: 抛错上抛; 空集 ⇒ 形态 O 全部进 missing, 形态 L 回空 utxos(truncated=false)
+[PASS] P1 只回恰好三个字段 {ok, pastMedianTimeMs, observedAtMs}; observedAtMs 在读回之后取; 不带任何节点标识/URL/daaScore/sink
+[PASS] P2 pmt 不可用(0/负/NaN/undefined/字符串/小数/超安全整数)⇒ 抛 past_median_time_unavailable(fail-closed, 不回 ok:true); 共享 rpc 取不到 ⇒ 原样上抛
+
+33 passed, 0 failed

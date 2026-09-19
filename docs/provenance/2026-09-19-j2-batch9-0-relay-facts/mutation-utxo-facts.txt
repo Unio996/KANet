@@ -1,0 +1,18 @@
+[RED ] M-a 删掉能力哨兵(covenant_id 字段缺失不再报错)  →  2 条失败 «M1-b 旧 wasm(entry 上没有 covenantId» «M1-c【变异对照】手写夹具把 covenantId 放顶层(en»
+[RED ] M-b 读顶层 e.covenantId(v0.3 前的"归一化惯性"错误)  →  4 条失败 «O1 found/missing 划分 + 请求顺序输出 + 回声» «O2 普通 P2PK 条目 ⇒ covenantId 键存在且为» «O3【N1】地址上有 >FACTS_LIST_MAX 个 dust» «M1-e covenantId 形状异常(非 64 位 hex)⇒»
+[RED ] M-c 面值改升序(O1 的方向错误)  →  4 条失败 «L1【O1】250 dust + 50 可用、无 minAmoun» «L3 min/max 过滤在截断之前(用 BigInt 十进制字符» «L4 truncated 边界: 恰 200 项 ⇒ false;» «L5 金额一律 BigInt: >2^53 的相邻值排序正确、输出»
+[RED ] M-d 去掉全序 tiebreak(同额只靠输入顺序)  →  1 条失败 «L2 输出对输入顺序不敏感: 同一批条目 20 种打乱顺序 ⇒ J»
+[RED ] M-e facts 判据改成真值判断  →  1 条失败 «B2 facts:false / facts 非严格 true('»
+[RED ] M-f 响应去掉 factsVersion 回声  →  2 条失败 «O1 found/missing 划分 + 请求顺序输出 + 回声» «L6 列表形态的响应形状: 恒带 facts/factsVersi»
+[RED ] M-g 形态 O 也带 truncated  →  2 条失败 «O1 found/missing 划分 + 请求顺序输出 + 回声» «O3【N1】地址上有 >FACTS_LIST_MAX 个 dust»
+[RED ] M-h 旧路径多带一个字段(字节不再不变)  →  2 条失败 «B1 不带 facts: 结果 == { ok:true, utx» «B2 facts:false / facts 非严格 true('»
+[RED ] M-i 共享 rpc 取失败时回落旧路径(违背"不回落")  →  1 条失败 «H2 请求非法 ⇒ 在取共享 rpc 之前就失败(不占 RPC);»
+[RED ] M-j pmt 校验被拆掉  →  1 条失败 «P2 pmt 不可用(0/负/NaN/undefined/字符串/»
+[RED ] M-k observedAtMs 在读之前取  →  1 条失败 «P1 只回恰好三个字段 {ok, pastMedianTimeMs»
+[RED ] M-l 截断先于过滤(先切 200 再过滤 min/max)  →  4 条失败 «O3【N1】地址上有 >FACTS_LIST_MAX 个 dust» «L1【O1】250 dust + 50 可用、无 minAmoun» «L3 min/max 过滤在截断之前(用 BigInt 十进制字符» «L4 truncated 边界: 恰 200 项 ⇒ false;»
+[RED ] M-m 金额改用 Number 比较(丢精度)  →  1 条失败 «L5 金额一律 BigInt: >2^53 的相邻值排序正确、输出»
+[RED ] M-n 允许 outpoints 与 minAmount 同时给  →  1 条失败 «R1 outpoints 与 minAmount/maxAmoun»
+[RED ] M-o 塞入 new RpcClient(结构性扫描必须抓到)  →  1 条失败 «S1 utxo-facts.mjs 源码(去注释)不含 conne»
+[RESTORED] utxo-facts.mjs 已还原, sha256 4a2c8c5948aa90a7… 一致
+
+全部变异均被测试抓到
