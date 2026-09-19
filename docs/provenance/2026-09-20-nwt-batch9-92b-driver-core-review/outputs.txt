@@ -10,3 +10,17 @@ P2 control: success: outcome={"outcome":"submitted"} alerts=[]
 
 ## 2. 亲跑测试(单文件, 临时库)
 proto-settlement-driver-core 23/0; proto-tx-assembly-settlement 44/0; proto-tx-assembly-settlement-golden 12/0 (字节不变); proto-settlement-c1 45/0; chain-checks 51/0; pointers 27/0; proto-claim-draw 57/0; proto-relay-ipc 33/0
+
+## 3. 修正笔 e83df356 上重跑同一探针(含新增 P3 多 tick 段)
+P1 grader event names over 117 synthetic errors: distinct=[settlement_c1_programming_error]  OUTSIDE closed set: []
+P2 exit gate rejects the intent key (deterministic): outcome={"outcome":"failed","class":"settlement_step_unexpected_error","transient":false} alerts=[settlement_step_unexpected_error(error)]
+P2 exit gate: settlement switch off: outcome={"outcome":"failed","class":"settlement_step_unexpected_error","transient":false} alerts=[settlement_step_unexpected_error(error)]
+P2 relay replies ok:false code=invalid_tx: outcome={"outcome":"failed","class":"broadcast_failed","transient":true} alerts=[]
+P2 IPC timeout: outcome={"outcome":"failed","class":"broadcast_failed","transient":true} alerts=[]
+P2 control: success: outcome={"outcome":"submitted"} alerts=[]
+P3 exit-gate refusal x2 ticks: t1:failed/transient=false+ALERT t2:failed/transient=false+ALERT  alerts=[settlement_step_unexpected_error(error,code=proto_settlement_intent_key_invalid); settlement_step_unexpected_error(error,code=proto_settlement_intent_key_invalid)]
+P3 invalid_tx x5 ticks (want alert exactly once at t3): t1:failed t2:failed t3:failed+ALERT t4:failed t5:failed  alerts=[settlement_step_unexpected_error(error,code=invalid_tx)]
+P3 invalid_tx x2 then success then invalid_tx x2 (success clears; no alert): t1:failed t2:failed t3:submitted t4:failed t5:failed  alerts=[]
+P3 code changes each tick (recount; no alert): t1:failed t2:failed t3:failed t4:failed  alerts=[]
+P3 no-code timeouts x3 (same bucket; alert at t3): t1:failed t2:failed t3:failed+ALERT  alerts=[settlement_step_unexpected_error(error,code=unknown)]
+core test 25/0; golden 12/0 (e83df356)

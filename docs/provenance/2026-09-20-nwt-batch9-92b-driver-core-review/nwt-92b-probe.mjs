@@ -48,6 +48,27 @@ await driveWith(async () => { throw new Error('sendProtoCommand: proto_settlemen
 await driveWith(async () => ({ ok: false, code: 'invalid_tx', error: 'relay rejected tx' }), 'relay replies ok:false code=invalid_tx');
 await driveWith(async () => { throw new Error('IPC timeout 30000ms'); }, 'IPC timeout');
 await driveWith(async () => ({ ok: true, txId: 'ab'.repeat(32) }), 'control: success');
+// ── P3(修正笔核对): 多 tick 行为——同一个 driver 实例, 显式 tickId
+async function multi(label, replies, keyMarket = marketId) {
+  const alerts = []; let i = 0;
+  const deps = {
+    sendCmd: async () => { const r = replies[Math.min(i++, replies.length - 1)]; if (r instanceof Error) throw r; return r; }, relayId: 'r', alert: (n, s, p, l) => alerts.push(`${n}(${l},code=${p && p.code})`),
+    intents: { ensure: () => ({ status: 'pending', intent_key: 'k' }), active: () => null, get: () => ({}), mark: () => {} },
+    driveIntent: async ({ buildAndBroadcast }) => { let le; try { const r = await buildAndBroadcast({ attempt: 1, intentKey: 'k' }); if (r && r.txId) return { txId: r.txId }; } catch (e) { le = e.message; } throw new Error(`settlement intent k exhausted 1 attempts: ${le}`); },
+    pointers: () => ({}), prepare: async (s, o) => (o.phase === 'target' ? { targetAddress: 'kaspa:x' } : { expectedSpks: [], feeMinAmount: 1 }),
+    verifyOnChain: async () => ({ chainParents: [], fee: { candidates: [] }, events: [] }), build: async () => ({ txJson: '{}', expectedTxid: 'aa', signInputIndices: [0] }),
+    dependenciesLanded: async () => ({ ok: true }), checkLanded: async () => ({ landed: false }), markLanded: async () => {}, listWork: async () => ({}), minDepth: 10, now: () => Date.now(), log: { log() {} },
+  };
+  const d = core.createSettlementDriver(deps); const per = [];
+  for (let t = 1; t <= replies.length; t++) { const before = alerts.length; const r = await d.advanceStep({ step: 'seal', subjectId: keyMarket, marketId: keyMarket, tickId: t }); per.push(`t${t}:${r.outcome}${r.transient === false ? '/transient=false' : ''}${alerts.length > before ? '+ALERT' : ''}`); }
+  out.push(`P3 ${label}: ${per.join(' ')}  alerts=[${alerts.join('; ')}]`);
+}
+const inv = { ok: false, code: 'invalid_tx', error: 'x' }, ok = { ok: true, txId: 'cd'.repeat(32) };
+await multi('exit-gate refusal x2 ticks', [new Error('sendProtoCommand: proto_settlement_intent_key_invalid — refused'), new Error('sendProtoCommand: proto_settlement_intent_key_invalid — refused')]);
+await multi('invalid_tx x5 ticks (want alert exactly once at t3)', [inv, inv, inv, inv, inv]);
+await multi('invalid_tx x2 then success then invalid_tx x2 (success clears; no alert)', [inv, inv, ok, inv, inv]);
+await multi('code changes each tick (recount; no alert)', [{ ok: false, code: 'a' }, { ok: false, code: 'b' }, { ok: false, code: 'a' }, { ok: false, code: 'b' }]);
+await multi('no-code timeouts x3 (same bucket; alert at t3)', [new Error('IPC timeout'), new Error('IPC timeout'), new Error('IPC timeout')]);
 console.log(out.join('\n'));
 try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
 process.exit(0);

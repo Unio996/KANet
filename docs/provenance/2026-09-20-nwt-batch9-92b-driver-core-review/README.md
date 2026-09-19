@@ -19,3 +19,7 @@
 
 ## 没做
 - J2 自报的变异 25/25 未重跑；(iii)（真实端口 / 接线 / 8 态开关 / 启动日志）未到；`claim id` 的生成（`randomBytes(32).toString('hex')`）在 (iii) 的真实端口里，届时核。
+
+## 修正笔 `e83df356` —— 核完：**GREEN**（MUST-1 关闭）
+同一条探针在修正笔上重跑（`outputs.txt` §3）：出口闸拒绝（`proto_settlement_intent_key_invalid` / `proto_settlement_driver_disabled`）当 tick 报 `settlement_step_unexpected_error`（error 级）且 `transient:false`；`invalid_tx` 单 tick 不报，**连续第 3 个 tick 报一次、第 4/5 次不重复**；`invalid_tx ×2 → 成功 → ×2` 成功清零、不报；code 每 tick 变化重计、不报；无 code 的 IPC 超时同桶计数、第 3 个 tick 报；对照 `ok:true` 仍 `submitted`。core 25/0、golden 12/0（`e83df356`）。
+记票（非 MUST）：出口闸拒绝是"每个 tick 都报"（不幂等），若 tick 间隔短且报警端口不去重，会在 events 表里刷屏；接线时看一眼端口是否按 (intent_key, code) 去重。
