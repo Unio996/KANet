@@ -1,0 +1,12 @@
+serialized keys: tx id,version,inputs,outputs,subnetworkId,lockTime,gas,storageMass,payload | input transactionId,index,sequence,sigOpCount,computeBudget,signatureScript,utxo | output value,scriptPublicKey,covenant
+output[0]: {"value":"20000000","scriptPublicKey":"0000aa20eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee87","covenant":{"authorizingInput":0,"covenantId":"1111111111111111111111111111111111111111111111111111111111
+roundtrip unchanged: keptId==orig? true  finalizedId==orig? true
+output value +1                      id-without-finalize==orig: true | id-after-finalize==orig: false   (covered)
+covenant id flipped                  id-without-finalize==orig: true | id-after-finalize==orig: false   (covered)
+covenant authorizing input changed   id-without-finalize==orig: true | id-after-finalize==orig: false   (covered)
+input computeBudget changed          id-without-finalize==orig: true | id-after-finalize==orig: true   <== NOT COVERED by txid
+input sigOpCount changed             id-without-finalize==orig: true | id-after-finalize==orig: true   <== NOT COVERED by txid
+input signatureScript set            id-without-finalize==orig: true | id-after-finalize==orig: true   <== NOT COVERED by txid
+input sequence changed               id-without-finalize==orig: true | id-after-finalize==orig: false   (covered)
+tx payload set                       id-without-finalize==orig: true | id-after-finalize==orig: false   (covered)
+lockTime changed                     id-without-finalize==orig: true | id-after-finalize==orig: false   (covered)
