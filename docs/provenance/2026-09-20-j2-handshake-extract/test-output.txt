@@ -1,0 +1,27 @@
+[PASS] S1 主路径: 有 console, 关系未建 ⇒ 接受 + 两条入库: BEFORE 与 AFTER 的外部调用轨迹逐条相同
+[PASS] S2 同一 peer 第二次 ⇒ 内存去重(不再 fetch / 不再发): BEFORE 与 AFTER 的外部调用轨迹逐条相同
+[PASS] S3a DB 已 accepted ⇒ 跳过并记内存; 之后再来走内存去重: BEFORE 与 AFTER 的外部调用轨迹逐条相同
+[PASS] S3b DB 已 active ⇒ 跳过: BEFORE 与 AFTER 的外部调用轨迹逐条相同
+[PASS] S3c DB 已 confirmed ⇒ 跳过: BEFORE 与 AFTER 的外部调用轨迹逐条相同
+[PASS] S4 DB 状态 pending(不在跳过集合) ⇒ 照常接受: BEFORE 与 AFTER 的外部调用轨迹逐条相同
+[PASS] S5a fetch 抛错 ⇒ 吞掉, 继续接受: BEFORE 与 AFTER 的外部调用轨迹逐条相同
+[PASS] S5b json() 抛错 ⇒ 吞掉, 继续接受: BEFORE 与 AFTER 的外部调用轨迹逐条相同
+[PASS] S5c 响应体无 status 字段 ⇒ 不跳过: BEFORE 与 AFTER 的外部调用轨迹逐条相同
+[PASS] S6 无 console(CONSOLE_URL 空) ⇒ 不 fetch, 直接接受: BEFORE 与 AFTER 的外部调用轨迹逐条相同
+[PASS] S7a draft 为 null ⇒ "Accept draft failed", 不入内存(再来一次会重试): BEFORE 与 AFTER 的外部调用轨迹逐条相同
+[PASS] S7b draft 无 payload ⇒ 同上: BEFORE 与 AFTER 的外部调用轨迹逐条相同
+[PASS] S8 acceptHandshake 抛 ⇒ 错误行, 不发不入库; 再来重试: BEFORE 与 AFTER 的外部调用轨迹逐条相同
+[PASS] S9 sendKaspa 抛 ⇒ 错误行, 不入内存不入库(NO TX NO STATE); 再来重试: BEFORE 与 AFTER 的外部调用轨迹逐条相同
+[PASS] S10 sendKaspa 返回裸字符串(无 txId) ⇒ 日志打字符串, traceId 走 Date.now, ingestHandshake txid 为 undefined: BEFORE 与 AFTER 的外部调用轨迹逐条相同
+[PASS] S11 ingestHandshake 抛 ⇒ 被外层 try 捕获记错误行, 但此前已入内存(再来走内存去重), ingestTx 没调: BEFORE 与 AFTER 的外部调用轨迹逐条相同
+[PASS] S12 两个不同 peer 互不影响(去重按 peer): BEFORE 与 AFTER 的外部调用轨迹逐条相同
+[PASS] S13 首次失败后重试成功(sendKaspa 先抛后成): BEFORE 与 AFTER 的外部调用轨迹逐条相同
+[PASS] 对照臂: 关键行确实进了轨迹(S1: 两条入库参数完整; traceId 含 txid; amount 恒 0.2; localAddress 透传)
+[PASS] S10 的 traceId 用固定 Date.now(证明 Date.now 桩生效, 轨迹可比)
+[PASS] 工厂实例隔离: acceptor A 记住的 peer, acceptor B 仍会接受(去重 Set 在闭包里, 不是模块级)
+[PASS] 只搬不改: 模块函数体(去缩进两格, consoleUrl→CONSOLE_URL)与 BEFORE 原文里 doAcceptHandshake 逐字相同
+[PASS] 模块零 import(依赖全由注入; 不引入任何新副作用面)
+[PASS] relay.mjs: 恰一处工厂调用、恰一处 import; 原函数与 _acceptedPeers 已不在 relay.mjs; poll 仍调 doAcceptHandshake
+[PASS] 抽取前 relay.mjs 的 doAcceptHandshake 只有一个调用点(poll)——抽取不漏调用方(BEFORE 原文里只定义、不含调用)
+
+handshake-accept.test: 25 pass, 0 fail
