@@ -1,0 +1,54 @@
+# NWT 核 D-027 ① runbook(edbb7dfb)独立实测输出(独立检出 D:\kanet-nwt-cand; 全程只写临时库, 活库仅只读打开; 每次变异后还原并核 sha256)
+
+## 1. 哈希与作者自带测试
+sha256: autotake-off-exec.mjs 17ceb4b1dea6a48b... / autotake-off-exec.test.mjs ade0c6ab9021e771... / autotake-off-exec.mutations.mjs 6cd0bb201358b4b5...  == runbook §9 全部一致
+node --test autotake-off-exec.test.mjs: ℹ tests 21 ℹ pass 21 ℹ fail 0
+node autotake-off-exec.mutations.mjs: M1..M15 全部 KILLED, "ALL MUTANTS KILLED"
+
+## 2. 真实迁移建的临时库 vs 活库(只读)的结构对比(autotake-real-schema.mjs)
+migrations exit=0
+table config_entries: fresh-migrated 8 cols, live 8 cols, identical=true
+table events: fresh-migrated 14 cols, live 14 cols, identical=true        (逐列 名称:类型:notnull:默认值:pk 全等)
+triggers: fresh=2 live=2 on config_entries/events in live: 0
+CHECK constraints in DDL (events, config_entries) fresh=[0,0] live=[0,0]
+fresh-migrated seed rows: autotake_enabled='true' / autotake_min_discount_pct='0.5' / autotake_mode='auto' (is_sensitive=0)
+fresh journal_mode = wal
+
+## 3. 真实 schema 上跑工具(同脚本)
+read          exit=0  journal_mode=wal; READ 两行; EVENTS 0
+apply(no go)  exit=2 refusing to write: pass --go D-027 ...
+apply         exit=0  DONE apply: autotake_enabled 'true' -> 'false' committed at <ISO>; AFTER 两行(mode 仍 auto)
+apply again   exit=3  PRECONDITION FAILED: autotake_enabled is 'false', expected 'true' for apply
+mode row after apply: value_encrypted='auto', updated_at 未变(种子时间), category 未变
+events rows: [{event_scope:system, event_type:config_change, source:kanetui-d027-runbook, level:info}]
+rollback      exit=0  DONE rollback ...      rollback again exit=3 PRECONDITION FAILED ...
+并发: 另一进程持 BEGIN IMMEDIATE 2.5 s、工具超时 10 s  => exit=0 elapsed=2.6s (等到锁释放后成功)
+      另一进程持 BEGIN IMMEDIATE 6 s、工具 --timeout-ms 1500 => exit=5 elapsed=1.8s "ERROR at stage 'begin': SQLITE_BUSY database is locked -- rolled back, nothing written"; 之后 autotake_enabled 仍 true
+(该脚本里我最后写的"其他行未被改动 = 11"统计写错了(数的是迁移里本来就是 ISO 格式的既有行), 不作证据; 正确做法见 §4)
+
+## 4. 其余行逐格不变 + 表行数(autotake-other-rows.mjs; 真实 schema 临时库)
+tool exit=0
+other config_entries rows: before=13 after=13 cell-by-cell identical=true  sha256(before)=0e926f7bc1e8 sha256(after)=0e926f7bc1e8
+target row: columns that changed = ["value_encrypted","updated_at"]  (value_encrypted true -> false)
+tables whose row count changed = ["events: 1 -> 2"]
+
+## 5. "无需重启": 长驻连接在工具 COMMIT 前后读同一行(autotake-longlived-reader.mjs; getConfig 的原句查询)
+long-lived handle, before : autotake_enabled = true
+tool exit=0
+long-lived handle, after  : autotake_enabled = false   (same handle, no reopen, no restart)
+gate  enabled !== "true" => return  : true
+
+## 6. 我的 7 个额外变异(nwt-mutate-autotake.cjs; 跑作者的 21 项测试; 还原后 sha256 一致 17ceb4b1dea6a48b)
+SURVIVED NWT-a1 busy timeout option not passed to the connection (default 5 s)
+killed   NWT-a2 UPDATE drops is_sensitive=0 (precondition in same txn still checks)
+SURVIVED NWT-a3 no explicit ROLLBACK on precondition failure (process exit closes txn)      [等价: 进程退出即关连接, 未提交事务回滚]
+killed   NWT-a4 event payload previous_updated_at replaced by now
+killed   NWT-a5 event source/scope literal changed (breaks read-mode EVENTS lookup)
+killed   NWT-a6 rollback mode requires FROM=true (direction on the precondition side)
+killed   NWT-a7 exit code 0 even if post-read differs
+
+## 7. 活库只读读数(工具 --mode read; 我在 2026-09-20 跑)
+db=console.mainnet.db journal_mode=wal
+READ autotake_enabled: category=broker_autotake is_sensitive=0 value_encrypted="true" created_at/updated_at = 2026-09-13 15:33:53
+READ autotake_mode:    category=broker_autotake is_sensitive=0 value_encrypted="auto"  created_at/updated_at = 2026-09-13 15:33:53
+EVENTS 0        exit=0        主 .db 与 -shm 的 mtime 在读前后不变
