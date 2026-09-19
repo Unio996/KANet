@@ -70,7 +70,8 @@ const topLevelCovEntry = ({ txidHex, index = 0, amount = 20000000n }) => ({
 
 const lcg = (seed) => () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
 const shuffled = (arr, seed) => { const a = arr.slice(); const r = lcg(seed); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
-const stripComments = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`])\/\/.*$/gm, '$1');
+// 9-2b 清理(账本 1588): 这里原有一份简单正则版 stripComments(会在字符串含 // 等形态漏报, 见 F4-1)——改用共享状态机版(shared/test-fixtures/source-scan)。
+const { stripComments } = await import('../../../shared/test-fixtures/source-scan/scan-non-test-sources.mjs');
 const ADDR = 'kaspasim:qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq';
 
 // ══ 结构性证明: facts 路径没有 per-call RpcClient(取代 v0.3 的 spy 判据: connectRpc 是 p2sh.mjs 内部绑定, spy 永远绿) ══

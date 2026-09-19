@@ -407,7 +407,7 @@ t('B1f builder 层面的大小写对照(Bettor 提醒): builder 入参里 outpoi
   if (passed < 4) throw new Error(`能完整构造成功的只有 ${passed} 个(至少 4 个 fee)`);
   console.log(`   B1f: 大写 txid 完整构造成功 ${passed}/12 个输入角色; 其余 ${preexisting.length} 个(${preexisting.join(', ')})被【既有】的大小写敏感布局校验拒绝(与本断言无关)`);
 });
-const SCAN = await import('../../test-fixtures/source-scan/scan-non-test-sources.mjs');
+const SCAN = await import('../../../shared/test-fixtures/source-scan/scan-non-test-sources.mjs');
 t('B6 ▲ (NWT E-4 / F2-1) 夹具文件只准被测试 import: 共享扫描器(test-fixtures/source-scan)扫整个仓库的非测试源码——含 kasia-console/src/data、kasia-console/scripts、根 scripts、ts/mts/tsx 等, 排除只按仓库根相对路径; 任何 import / require / 字面量动态 import 它都算违规(动态拼接是文本扫描的已知边界, 见扫描器头注)', () => {
   const bad = SCAN.findReferencesInNonTestSources(/proto-chain-parents-fixtures/, { exceptRel: ['kasia-console/src/lib/proto-chain-parents-fixtures.mjs'] });
   if (bad.length) throw new Error(`非测试源码引用了仅测试用的夹具: ${bad.join(', ')}`);

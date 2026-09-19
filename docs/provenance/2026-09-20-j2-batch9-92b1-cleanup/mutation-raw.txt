@@ -1,0 +1,19 @@
+BASELINE
+  pointers: exit=0 27 passed, 0 failed
+  c1: exit=0 45 passed, 0 failed
+  cc: exit=0 51 passed, 0 failed
+  scan: exit=0 10 passed, 0 failed
+  uf: exit=0 42 passed, 0 failed
+Y1: KILLED [pointers:exit=1] :: F3-1: probe.free() 挪出 finally(只在 covenantId 成功后释放)
+Y2: KILLED [c1:exit=1] :: c1 模块又拖进 db/client(无 DB import 守卫)
+Y3: KILLED [cc:exit=1] :: chain-checks 模块又拖进 db/client
+Y4: KILLED [scan:exit=1] :: F5-1: 未闭合引号不在换行处重新同步(下一行注释里的引用被当成字符串保留)
+Y5: KILLED [scan:exit=1] :: F5-1: 字符串收不了尾(其后的行尾注释被吞进字符串态)
+Y6: KILLED [uf:exit=1] :: relay 测试的 stripComments 退化成恒等(注释里的 connectRpc 会被误报 ⇒ S1 应红)
+RESTORED
+  pointers: exit=0
+  c1: exit=0
+  cc: exit=0
+  scan: exit=0
+  uf: exit=0
+SUMMARY mutants=6 survivors=0 restored_green=true

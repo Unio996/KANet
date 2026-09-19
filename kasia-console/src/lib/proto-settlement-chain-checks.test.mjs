@@ -2,16 +2,17 @@
 // 面值常量来源: simnet 全链六笔真实交易的输出面值(docs/provenance/2026-09-19-j2-fullchain-simnet/raw-onchain-fullchain-node-records.json)——covenant 输出恒为 20,000,000。
 // 9-1 B 笔(v0.3.4 §19.3 步骤 4 / §19.6): M6 两个必填参数 expectedOutpoints / expectedCovenantIds + 类型化错误 SettlementChainCheckError(.code 闭集); 既有 16 处调用同笔更新(经 A() 补参), 消息正则未改。
 // Run: cd kasia-console && node src/lib/proto-settlement-chain-checks.test.mjs
-import { execSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 
-if (!process.env._PROTO_CHAIN_CHECKS_TEST_BOOTSTRAPPED) {
-  const tmpDb = `${process.env.TEMP || '/tmp'}/_j2_chain_checks_${process.pid}.db`;
-  try { fs.unlinkSync(tmpDb); } catch {}
-  execSync('node scripts/run-migrations.mjs', { cwd: process.cwd(), env: { ...process.env, DB_PATH: tmpDb }, stdio: 'pipe' });
-  const r = spawnSync(process.execPath, [process.argv[1]], { cwd: process.cwd(), stdio: 'inherit', env: { ...process.env, DB_PATH: tmpDb, _PROTO_CHAIN_CHECKS_TEST_BOOTSTRAPPED: '1' } });
-  try { fs.unlinkSync(tmpDb); } catch {}
-  process.exit(r.status ?? 1);
+// 9-2b 清理(账本 1574/1584): F3 拆出无 DB 依赖的纯函数后, 本文件测的模块不再需要"起临时 DB 只为过 import 链"的 bootstrap(此前整段 execSync run-migrations + 子进程重入已删)。
+// 下面这条守住它: 无 DB_PATH 的子进程里逐个真 import, 全部成功(将来谁又把 db/client 拖进这条 import 链, 这里立刻红)。
+{
+  const { spawnSync } = await import('node:child_process');
+  const env = { ...process.env }; delete env.DB_PATH;
+  for (const m of ["proto-settlement-chain-checks.mjs"]) {
+    const r = spawnSync(process.execPath, ['--input-type=module', '-e', `await import(${JSON.stringify(new URL('./' + m, import.meta.url).href)})`], { env, encoding: 'utf8' });
+    if (r.status !== 0) { console.error('[FAIL] 无 DB_PATH 时 import ' + m + ' 失败: ' + (r.stderr || '').split('\n')[0]); process.exit(1); }
+  }
 }
 const { assertSettlementInputValuesOnChain, EXPECTED_INPUT_VALUE_SOMPI, STEP_INPUT_ROLES, SettlementChainCheckError, chainCheckCodes } = await import('./proto-settlement-chain-checks.mjs');
 const REAL = JSON.parse(fs.readFileSync(new URL('../../../docs/provenance/2026-09-19-j2-fullchain-simnet/raw-onchain-fullchain-node-records.json', import.meta.url), 'utf8'));

@@ -354,6 +354,14 @@ await t('D-1 ▲ wasm 对象释放有测试守着: 每次装载的 Transaction �
     ok(st.outCreated > 0, `${step}: 应创建过 TransactionOutput(genesis 重算)`); eq(st.outFreed, st.outCreated, `${step}: TransactionOutput 创建数 == 释放数`);
   }
 });
+await t('F3-1 ▲ covenantId 本身抛错的路径: probe TransactionOutput 仍被释放(创建数 == 释放数), 报 pointer_covenant_inconsistent(genesisId=null)——变异"probe.free() 挪出 finally、只在 covenantId 成功后释放"必红', async () => {
+  const c = seed(); const { st, k } = trackedKaspa();
+  const kThrow = { ...k, covenantId: () => { throw new Error('boom: covenantId 抛错(注入)'); } };
+  rejP(() => resWith(kThrow, 'seal', c.M), 'pointer_covenant_inconsistent');
+  ok(st.outCreated > 0, '应创建过 probe TransactionOutput');
+  eq(st.outFreed, st.outCreated, 'covenantId 抛错路径: TransactionOutput 创建数 == 释放数');
+  eq(st.txFreed, st.txCreated, 'covenantId 抛错路径: Transaction 创建数 == 释放数');
+});
 await t('D-1 ▲ 错误路径同样释放: finalize() 抛错 ⇒ pointer_tx_malformed 且已释放; id 不符(篡改)⇒ pointer_txid_mismatch 且已释放; 谱系断开 / covenant 不一致 / 输出缺失 / 票不一致(此前已装载的交易全部释放)', async () => {
   { const c = seed(); const { st, k } = trackedKaspa({ failFinalize: true });
     rejP(() => resWith(k, 'seal', c.M), 'pointer_tx_malformed'); eq(st.txCreated, 1); eq(st.txFreed, 1, 'finalize 抛错路径'); }
