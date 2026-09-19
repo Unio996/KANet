@@ -1,0 +1,41 @@
+[
+ {
+  "step": 0,
+  "info": "using own mature 50 KAS UTXO",
+  "outpoint": "6c8aa15c068f:0"
+ },
+ {
+  "step": 1,
+  "what": "create poisoned output (covenant-bound, spk = my own P2PK)",
+  "txid": "4824aa19afcd02e3494b5fcee4254ebfbabd40700a24d879d72cd0cd16897e4f",
+  "out0CovenantId": "585add980b7e…"
+ },
+ {
+  "step": 1,
+  "result": "ACCEPTED",
+  "txid": "4824aa19afcd02e3494b5fcee4254ebfbabd40700a24d879d72cd0cd16897e4f"
+ },
+ {
+  "step": 1,
+  "poisonedUtxoOnNode": true,
+  "hasCovenantIdField": false,
+  "covenantIdFromNode": "",
+  "keys": [
+   "__wbg_ptr"
+  ]
+ },
+ {
+  "step": 2,
+  "what": "spend poisoned covenant-bound UTXO as a plain fee input, no covenant continuation",
+  "txid": "8e80a31d6b022b6c751d727c53165d0f50732d4a9853e584fc80faab8638a6b1",
+  "wasmLocalMass": "2500"
+ },
+ {
+  "step": 2,
+  "result": "ACCEPTED",
+  "txid": "8e80a31d6b022b6c751d727c53165d0f50732d4a9853e584fc80faab8638a6b1",
+  "nodeStorageMass": "0",
+  "nodeComputeMass": "7626",
+  "fee": "20000000"
+ }
+]

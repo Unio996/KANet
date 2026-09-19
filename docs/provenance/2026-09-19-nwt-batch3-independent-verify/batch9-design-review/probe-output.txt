@@ -1,0 +1,27 @@
+## 08_probe_utxo_entry_shape
+entries 2 wasm-kaspa exports version-ish: 2.0.0
+props: constructor,toJSON,toString,free,isCoinbase,blockDaaScore,scriptPublicKey,entry,amount,address,outpoint
+  amount => 20000000
+  scriptPublicKey => object:constructor|toJSON|toString|free|script|version
+  covenantId => undefined
+  covenant_id => undefined
+  blockDaaScore => 4335
+  isCoinbase => false
+  outpoint => object:constructor|toJSON|toString|free|transactionId|index|getId
+  entry => object:constructor|toJSON|toString|free|address|outpoint|amount|scriptPublicKey|blockDaaScore|isCoinbase|covenantId
+  utxoEntry => undefined
+JSON.stringify(e) keys: [
+  'isCoinbase',
+  'blockDaaScore',
+  'scriptPublicKey',
+  'entry',
+  'amount',
+  'address',
+  'outpoint'
+]
+toJSON? {"isCoinbase":false,"blockDaaScore":"4335","scriptPublicKey":{"script":"aa20eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee87","version":0},"entry":{"address":{"prefix":"kaspasim","payload":"prhwamhwamhwamhwamhwamhwamhwamhwamhwamhwamhwamhwamhwuwdy2frec","version":"ScriptHash"},"outpoint":{"transactionId":"39f4f2c6a0070b183fa7e5ffb241974b19db3b4346790ff4dfc1ab901c1ae508","index":1}
+
+## 09_probe_covenantid_values
+covenant-bound UTXO (withdraw dest) | top-level covenantId: undefined | entry.covenantId typeof: object | value: e479cf6497cc32d4… | ctor: Hash
+covenant-bound UTXO (withdraw dest) | top-level covenantId: undefined | entry.covenantId typeof: object | value: 9a5719c10ea67dfb… | ctor: Hash
+plain P2PK UTXO (my simnet address) | top-level covenantId: undefined | entry.covenantId typeof: undefined | value: undefined | ctor: undefined

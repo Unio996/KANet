@@ -1,0 +1,24 @@
+[
+ {
+  "step": 3,
+  "result": "ACCEPTED",
+  "txid": "6c0d4db3a27c32c4b1fbf90e8ab87c66f645efd2552b6d9b0e686b083003f20e"
+ },
+ {
+  "step": 4,
+  "what": "2-in(poisoned covenant-bound + plain) -> 5-out",
+  "txid": "a1da57fe9e64f28590c348f89a79984050c125caa0eea04143f95804dff0e185",
+  "wasmLocalMass": "191448",
+  "plurality_plain": "1",
+  "plurality_covenant": "2",
+  "myFormula_poison_counted_as_covenant": "165133",
+  "myFormula_poison_counted_as_plain": "191448"
+ },
+ {
+  "step": 4,
+  "result": "ACCEPTED",
+  "nodeStorageMass": "165133",
+  "nodeComputeMass": "16394",
+  "fee": "30000000"
+ }
+]
