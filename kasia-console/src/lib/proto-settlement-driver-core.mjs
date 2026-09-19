@@ -21,6 +21,10 @@ export const STEP_INTENT = Object.freeze({
 export const PREPARED_STALE_MS = 10 * 60_000;      // §9 S6: prepared 超过 10 分钟仍未 landed ⇒ 报警
 export const PMT_READ_FAIL_ALERT_AFTER = 3;        // §10: 连续 3 次读 pmt 失败 ⇒ 报警
 export const RELAY_FEE_REJECT_CODES = Object.freeze(['net_loss_exceeded', 'implied_fee_exceeded']);
+/** 出口分闸(9-2a)的四种确定性拒绝: 重试永远不会成功, 当 tick 立即报警(NWT e4039235 MUST——否则意图永远 pending、每 tick 静默重试、永不结算也永不报警)。 */
+export const EXIT_GATE_REFUSAL_CODES = Object.freeze(['proto_settlement_intent_key_invalid', 'proto_intent_key_not_string', 'proto_driver_disabled', 'proto_settlement_driver_disabled']);
+/** 其余广播失败(relay ok:false / IPC 超时 …)按 (intent_key, code) 连续这么多个【不同 tick】仍失败 ⇒ 同一报警(幂等, 成功清零)。 */
+export const BROADCAST_FAIL_ALERT_AFTER = 3;
 
 /** §10 报警闭集(名字 → 默认级别)。 */
 export const SETTLEMENT_ALERTS = Object.freeze({
@@ -93,6 +97,7 @@ export function createSettlementDriver(deps, { ticksToError = 3 } = {}) {
   const slaAlerted = new Set();         // `${intentKey}:${sla}` 已报警(幂等)
   const staleAlerted = new Set();       // `${intentKey}:${updated_at}` 已报警
   const flipAlerted = new Set();        // refund_flip_observed 已报警(幂等)
+  const bcastFail = new Map();          // intentKey → { code, count, lastTick, alerted }: 广播失败的连续计数(按 key 分开, 同 code 才累计)
   let tickSeq = 0;
 
   const keyOf = (step, subjectId) => `settle:${STEP_INTENT[step].subjectType}:${subjectId}:${STEP_INTENT[step].intentStep}`;
@@ -107,12 +112,27 @@ export function createSettlementDriver(deps, { ticksToError = 3 } = {}) {
   /** 步骤失败的报警分类: 指针 / C1 类交给 classifyC1Error(传输类走分级); builder 类按错误文本 / code 归到 §10 的专名; 广播类只记 last_error(driveIntent 已写), 不报"编程错误"。 */
   function classifyStepFailure(err, stage, step) {
     const msg = err && err.message ? String(err.message) : String(err);
-    if (stage === 'broadcast') return { report: false, eventType: 'broadcast_failed', code: err && err.code ? err.code : 'broadcast_failed', transient: true };
+    if (stage === 'broadcast') {
+      const gate = EXIT_GATE_REFUSAL_CODES.find((c) => msg.includes(c));
+      if (gate) return { report: true, eventType: 'settlement_step_unexpected_error', level: 'error', code: gate, transient: false };   // 确定性拒绝: 立即报警
+      return { report: false, eventType: 'broadcast_failed', code: err && err.code ? String(err.code) : 'unknown', transient: true, track: true };
+    }
     if (stage === 'build') {
       if (/^signing_key_mismatch\b/.test(msg)) return { report: true, eventType: 'settlement_signing_key_mismatch', level: 'error', code: 'signing_key_mismatch', transient: false };
       if (step === 'close_commit' && (/db_payout_root_drift/.test(msg) || (err && err.code === 'close_commit_args_not_from_db'))) return { report: true, eventType: 'settlement_close_commit_args_not_from_db', level: 'error', code: 'close_commit_args_not_from_db', transient: false };
     }
     return { report: true, viaGrader: true };
+  }
+
+  /** 广播失败的连续计数: 同 (key, code) 连续 BROADCAST_FAIL_ALERT_AFTER 个不同 tick ⇒ settlement_step_unexpected_error 一次(其后不重复, 直到成功清零); code 变了从 1 重计。 */
+  function trackBroadcastFailure(key, code, tickId) {
+    const st = bcastFail.get(key);
+    if (!st || st.code !== code) { bcastFail.set(key, { code, count: 1, lastTick: tickId, alerted: false }); return; }
+    if (tickId !== st.lastTick) { st.count += 1; st.lastTick = tickId; }
+    if (st.count >= BROADCAST_FAIL_ALERT_AFTER && !st.alerted) {
+      st.alerted = true;
+      alert('settlement_step_unexpected_error', `${key}: 广播连续 ${st.count} 个 tick 失败(code=${code}), 意图一直 pending`, { intent_key: key, code, stage: 'broadcast', consecutiveTicks: st.count }, 'error');
+    }
   }
 
   /** 一步推进(通用顺序 §5)。返回 { outcome: 'submitted'|'in_flight'|'waiting'|'held'|'failed'|'gated', ... }; 永不抛(除 DriverDepsError)。 */
@@ -170,7 +190,7 @@ export function createSettlementDriver(deps, { ticksToError = 3 } = {}) {
           } catch (e) { buildFail = { err: e, stage }; throw e; }
         },
       });
-      pmtFail.delete(key);
+      pmtFail.delete(key); bcastFail.delete(key);
       return { outcome: 'submitted', key, txId: res.txId, reused: !!res.reused, replayed: !!res.replayed };
     } catch (e) {
       if (e instanceof DriverDepsError) throw e;
@@ -192,7 +212,10 @@ export function createSettlementDriver(deps, { ticksToError = 3 } = {}) {
         }
       }
       const c = classifyStepFailure(orig, at, step);
-      if (!c.report) return { outcome: 'failed', key, class: c.eventType, code: c.code, transient: true, message };
+      if (!c.report) {
+        if (c.track) trackBroadcastFailure(key, c.code, tickId);
+        return { outcome: 'failed', key, class: c.eventType, code: c.code, transient: true, message };
+      }
       if (c.viaGrader) { const g = reportFailure(orig, tickId, key, { stage: at }); return { outcome: 'failed', key, class: g.eventType, code: g.code, transient: g.transient, message }; }
       alert(c.eventType, `${key}: ${message.slice(0, 300)}`, { intent_key: key, code: c.code, stage: at }, c.level);
       return { outcome: 'failed', key, class: c.eventType, code: c.code, transient: false, message };

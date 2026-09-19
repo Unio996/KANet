@@ -1,0 +1,1 @@
+proto-settlement-driver-core.test: 25 passed, 0 failed

@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 
 const HERE = fileURLToPath(new URL('.', import.meta.url));
 const C = await import('./proto-settlement-driver-core.mjs');
-const { createSettlementDriver, checkPmtGate, makeAlerter, SETTLEMENT_ALERTS, SETTLEMENT_DRIVER_STEPS, STEP_INTENT, STEP_OF_INTENT, DriverDepsError, PREPARED_STALE_MS, RELAY_FEE_REJECT_CODES } = C;
+const { createSettlementDriver, checkPmtGate, makeAlerter, SETTLEMENT_ALERTS, SETTLEMENT_DRIVER_STEPS, STEP_INTENT, STEP_OF_INTENT, DriverDepsError, PREPARED_STALE_MS, RELAY_FEE_REJECT_CODES, EXIT_GATE_REFUSAL_CODES } = C;
 const { FactsResponseError, FeeWindowError, classifyC1Error } = await import('./proto-settlement-c1.mjs');
 const { SettlementChainCheckError } = await import('./proto-settlement-chain-checks.mjs');
 const { stripComments } = await import('../../../shared/test-fixtures/source-scan/scan-non-test-sources.mjs');
@@ -207,6 +207,38 @@ await t('广播失败: 只记 last_error(意图不推进, NO TX NO STATE)、不�
   assert.equal(r.outcome, 'failed'); assert.equal(r.class, 'broadcast_failed'); assert.deepEqual(w.alerts, []); assert.equal([...w.rows.values()][0].status, 'pending'); assert.match([...w.rows.values()][0].last_error, /relay busy/);
   for (const code of RELAY_FEE_REJECT_CODES) { w = mkWorld({ broadcast: { ok: false, error: 'fee', code } }); r = await adv(w, 'claim_draw'); assert.deepEqual(w.alerts.map((a) => [a.eventType, a.level]), [['settlement_relay_fee_rejected', 'error']]); }
   w = mkWorld({ broadcast: { ok: true } }); r = await adv(w, 'seal'); assert.equal(r.outcome, 'failed');
+});
+
+await t('NWT e4039235 MUST ①: 出口分闸的四种确定性拒绝(broadcast 阶段, sendCmd 抛错) ⇒ 当 tick 立即报 settlement_step_unexpected_error(error), transient:false; 意图仍 pending', async () => {
+  for (const code of EXIT_GATE_REFUSAL_CODES) {
+    const w = mkWorld({ broadcast: () => { throw new Error(`sendProtoCommand: ${code} — 'covenant_broadcast' refused (...)`); } });
+    const r = await adv(w, 'seal');
+    assert.equal(r.outcome, 'failed', code); assert.equal(r.transient, false, code); assert.equal(r.code, code);
+    assert.deepEqual(w.alerts.map((a) => [a.eventType, a.level, a.payload.code]), [['settlement_step_unexpected_error', 'error', code]], code);
+    assert.equal([...w.rows.values()][0].status, 'pending');
+  }
+  assert.deepEqual([...EXIT_GATE_REFUSAL_CODES], ['proto_settlement_intent_key_invalid', 'proto_intent_key_not_string', 'proto_driver_disabled', 'proto_settlement_driver_disabled']);
+});
+await t('NWT e4039235 MUST ②: 其余广播失败(relay ok:false invalid_tx)按 (intent_key, code) 连续 3 个【不同 tick】后报警一次, 第 4 次不重复; 同一 tick 内重复不累计; code 变了重计; 成功清零后可再报; 两个 key 互不影响; 无 code 的 IPC 超时同样计数', async () => {
+  const w = mkWorld({ broadcast: { ok: false, error: 'invalid tx', code: 'invalid_tx' } }); const d = createSettlementDriver(w.deps); const i = ids();
+  const go = (tickId) => d.advanceStep({ step: 'seal', subjectId: i.subjectId, marketId: i.marketId, tickId });
+  await go(1); await go(1); await go(2); assert.deepEqual(w.alerts, [], '前 2 个不同 tick 不报(同 tick 重复不累计)');
+  await go(3); assert.deepEqual(w.alerts.map((a) => [a.eventType, a.level, a.payload.code, a.payload.consecutiveTicks]), [['settlement_step_unexpected_error', 'error', 'invalid_tx', 3]]);
+  await go(4); await go(5); assert.equal(w.alerts.length, 1, '第 4 次起不重复(幂等)');
+  // code 变了 ⇒ 重计
+  w.cfg.broadcast = { ok: false, error: 'busy', code: 'relay_busy' }; w.alerts.length = 0;
+  await go(6); await go(7); assert.deepEqual(w.alerts, []); await go(8); assert.equal(w.alerts.length, 1); assert.equal(w.alerts[0].payload.code, 'relay_busy');
+  // 成功清零: 之后再失败 3 个 tick 可再报
+  w.cfg.broadcast = { ok: true, txId: 'ab'.repeat(32) }; assert.equal((await go(9)).outcome, 'submitted');
+  w.rows.get(d._keyOf('seal', i.subjectId)).status = 'pending'; w.cfg.broadcast = { ok: false, error: 'x', code: 'relay_busy' }; w.alerts.length = 0;   // 同 code(relay_busy)——否则 code 变化本身就会重计, 掩盖"成功不清零"
+  await go(10); await go(11); assert.deepEqual(w.alerts, []); await go(12); assert.equal(w.alerts.length, 1, '成功清零后重新累计');
+  // 两个 key 互不影响
+  const j = ids(); w.alerts.length = 0;
+  await d.advanceStep({ step: 'seal', subjectId: j.subjectId, marketId: j.marketId, tickId: 13 }); assert.deepEqual(w.alerts, [], '另一个 key 从 1 开始');
+  // 无 code 的 IPC 超时(sendCmd 抛错、不含出口闸码)同样计数
+  const w2 = mkWorld({ broadcast: () => { throw new Error('IPC timeout after 30000ms'); } }); const d2 = createSettlementDriver(w2.deps); const k = ids();
+  for (const tickId of [1, 2, 3]) await d2.advanceStep({ step: 'claim_draw', subjectId: k.subjectId, marketId: k.marketId, tickId });
+  assert.deepEqual(w2.alerts.map((a) => a.payload.code), ['unknown']);
 });
 
 // ── close_commit 的 pmt 门(§8) ────────────────────────────────────────────────────────────────────────────────────

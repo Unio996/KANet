@@ -1,0 +1,12 @@
+BASELINE
+  exit=0 25 passed, 0 failed
+F1: KILLED exit=1 :: 不识别出口闸的确定性拒绝(仍当瞬时静默重试)
+F2: KILLED exit=1 :: 阈值 3 → 2
+F3: KILLED exit=1 :: 报警不幂等(第 4 次起重复)
+F4: KILLED exit=1 :: 同一 tick 内重复也累计
+F5: KILLED exit=1 :: code 变了不重计
+F6: SURVIVED exit=0 :: 成功不清零
+F7: KILLED exit=1 :: 广播失败不计数
+F8: KILLED exit=1 :: 确定性拒绝级别降成 warn
+RESTORED exit=0 25 passed, 0 failed
+SUMMARY mutants=8 survivors=1 restored_green=true
