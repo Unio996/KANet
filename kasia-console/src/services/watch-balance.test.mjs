@@ -110,6 +110,17 @@ test('A7 network mismatch (a testnet node) => unavailable/network_mismatch', asy
   const r = await readWatchBalances(rows, deps);
   assert.ok(r.every((x) => x.status === 'unavailable' && x.reason === 'network_mismatch'));
 });
+test('a HUNG rpc (getServerInfo / getBalancesByAddresses / getSharedRpc never settle) becomes unavailable within the timeout instead of hanging the caller', async () => {
+  const never = new Promise(() => {});
+  for (const hang of ['serverInfo', 'balances', 'sharedRpc']) {
+    const m = makeEnv({ balances: GOOD }); m.deps.timeoutMs = 30;
+    if (hang === 'sharedRpc') m.deps.getSharedRpc = () => never;
+    else { const orig = m.deps.getSharedRpc; m.deps.getSharedRpc = async (a) => { const rpc = await orig(a); return { getServerInfo: hang === 'serverInfo' ? () => never : rpc.getServerInfo, getBalancesByAddresses: hang === 'balances' ? () => never : rpc.getBalancesByAddresses }; }; }
+    const t0 = Date.now(); const r = await readWatchBalances(rows, m.deps);
+    assert.ok(Date.now() - t0 < 2000, `${hang}: returned in ${Date.now() - t0} ms`);
+    assert.ok(r.every((x) => x.status === 'unavailable' && x.balanceKas === null), hang);
+  }
+});
 test('never throws: a throwing getWorkingRpc / getBalancesByAddresses becomes unavailable, not an exception and not 0', async () => {
   let m = makeEnv({ balances: GOOD, throwOn: 'workingRpc' });
   let r = await readWatchBalances(rows, m.deps);

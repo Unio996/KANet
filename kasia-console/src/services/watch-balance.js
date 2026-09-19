@@ -18,6 +18,7 @@
 
 export const WATCH_STATUS = Object.freeze({ OK: 'ok', OK_PUBLIC: 'ok_public', UNAVAILABLE: 'unavailable' });
 const CACHE_TTL_MS = 30_000;
+const RPC_TIMEOUT_MS = 5000;   // 每次 RPC 调用(getWorkingRpc / getSharedRpc / getServerInfo / getBalancesByAddresses)的上限:卡住 ⇒ unavailable,不挂住页面请求
 const PUBLIC_REST_BASE = 'https://api.kaspa.org/addresses';
 const PUBLIC_REST_TIMEOUT_MS = 5000;
 const _cache = new Map();   // 规范化地址 -> { expiresAt, view: { status, balanceKas, source, readAt } }
@@ -33,6 +34,7 @@ export function sompiToKas(sompi) {
   return Number(b / 100000000n) + Number(b % 100000000n) / 1e8;
 }
 
+const withTimeout = (p, ms, tag) => Promise.race([Promise.resolve(p), new Promise((_, rej) => setTimeout(() => rej(new Error(`${tag} timeout ${ms}ms`)), ms))]);
 const unavailable = (reason) => ({ status: WATCH_STATUS.UNAVAILABLE, reason, balanceKas: null, source: null });
 
 // kaspa-wasm 的 Address 构造对非法输入是 wasm panic("unreachable"),而不是干净的异常——所以【先 validate 再构造】(与 watch-account-register.mjs 同)。
@@ -47,20 +49,20 @@ function canonicalOf(AddressCtor, a) {
 
 /** 本机节点路径。返回 Map(规范化地址 -> view)。任何异常都变成 unavailable,不外抛。 */
 async function readLocal(canons, hotCanons, deps) {
-  const { env, getWorkingRpc, getSharedRpc, AddressCtor, networkId } = deps;
+  const { env, getWorkingRpc, getSharedRpc, AddressCtor, networkId, timeoutMs } = deps;
   const all = (reason) => new Map(canons.map((c) => [c, unavailable(reason)]));
   try {
     let wr;
-    try { wr = await getWorkingRpc(); } catch (e) { return all('rpc_lookup_failed'); }
+    try { wr = await withTimeout(getWorkingRpc(), timeoutMs, 'getWorkingRpc'); } catch (e) { return all('rpc_lookup_failed'); }
     if (!wr || !wr.url) return all(env.KASPA_RPC_LOCAL_ONLY === '1' ? 'local_node_unavailable' : 'no_local_node');
     if (wr.isLocal !== true) return all('rpc_not_local');
-    const rpc = await getSharedRpc({ url: wr.url, networkId });
-    const synced = async () => { const info = await rpc.getServerInfo(); return info?.isSynced === true && String(info?.networkId || '').includes(networkId) ? true : (info?.isSynced === true ? 'network_mismatch' : false); };
+    const rpc = await withTimeout(getSharedRpc({ url: wr.url, networkId }), timeoutMs, 'getSharedRpc');
+    const synced = async () => { const info = await withTimeout(rpc.getServerInfo(), timeoutMs, 'getServerInfo'); return info?.isSynced === true && String(info?.networkId || '').includes(networkId) ? true : (info?.isSynced === true ? 'network_mismatch' : false); };
     const s1 = await synced();
     if (s1 !== true) return all(s1 === 'network_mismatch' ? 'network_mismatch' : 'node_not_synced');
     const hot = [...new Set(hotCanons)].filter((h) => !canons.includes(h));
     if (hot.length === 0) return all('no_positive_control');   // nothing to certify the batch with: fail closed
-    const res = await rpc.getBalancesByAddresses([...canons, ...hot].map((a) => new AddressCtor(a)));
+    const res = await withTimeout(rpc.getBalancesByAddresses([...canons, ...hot].map((a) => new AddressCtor(a))), timeoutMs, 'getBalancesByAddresses');
     const s2 = await synced();
     if (s2 !== true) return all(s2 === 'network_mismatch' ? 'network_mismatch' : 'node_not_synced');
     const got = new Map();
@@ -93,7 +95,7 @@ async function readPublic(canon, deps) {
  * @returns {Promise<Array<{id,name,address,custody,status,reason,balanceKas,source,readAt}>>} 与 rows 同序,永不抛
  */
 export async function readWatchBalances(rows, deps = {}) {
-  const d = { env: process.env, hotAddresses: [], fetchFn: globalThis.fetch, now: () => Date.now(), cache: _cache, networkId: 'mainnet', ...deps };
+  const d = { env: process.env, hotAddresses: [], fetchFn: globalThis.fetch, now: () => Date.now(), cache: _cache, networkId: 'mainnet', timeoutMs: RPC_TIMEOUT_MS, ...deps };
   const readAt = new Date(d.now()).toISOString();
   const views = new Map();   // row.id -> view
   const pending = [];        // { row, canon }
