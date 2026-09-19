@@ -1,8 +1,10 @@
-# 主网电报机器人接线 runbook v0.1（D-023 · 只写不执行）
+# 主网电报机器人接线 runbook v0.2（D-023 · 只写不执行）
 
 > **Status**: CURRENT
 >
 > 起草 KANet-UI · 2026-09-19 · 依据 `docs/DECISIONS.md` D-023、账本 1499 / 1500 · **草稿，待 Bettor 审，未执行**。
+>
+> **v0.2 变更（Bettor 对 v0.1（9f00bb57）的对等消息裁定，账本记录待补）**：OQ-1 → 走**路径 X**（DB 配置，不动 env 文件、不重启 console）；OQ-2 → 本次**不写 `OWNER_BOT_*`、不起 owner-bot**；OQ-3 → **另建 broker 身份，不复用 `Trader-A`**，不改角色、不充值、不分配 adapter，助记词只显示在操作者屏幕、**不指定备份介质**（身份无资金，丢了重建）；OQ-4 → 接受 CR-1 原地改、TN12 bot 路径失效；OQ-5 → 只读比哈希，**相同才轮换**（§3.6）；OQ-6 → CR-2 由 **Bettor 批 + NWT 审，不需 Owner**；CR-1/CR-2 批准做设计与实现，**在独立 worktree 里做，先出变更说明交 NWT 审**（见 `docs/2026-09-19-kanetui-cr1-cr2-tg-bot-mainnet-guards-change-spec-v0.1.md`）；**CR-3 归 Owner 批，本人不动**。新增：§3.6（token 是否加密 / 清除方式 / ingest_secret 比对判据）、§9（接线完成后 bot 在主网能做什么、不能做什么）。
 >
 > **执行门（页首必读，不得把"页写好了"读成"可以执行了"）**：
 > ① 本页 → Bettor 审 → 报 Owner 开闸；② **§2 起任何一步的执行**（写主网 env、建 broker 身份、充值、清 state、启 bot）都须 Owner 开闸后由 Bettor 指定的执行人做；③ **§0 四个阻断项在其变更请求落地并复验前，§3 之后一步都不得执行**；④ 自动下注与 seeder 保持关闭，打开需 Owner 另批；⑤ 结算后半程（D-022）未完成前，不接真实下注流。
@@ -26,11 +28,11 @@ D-023 把"复用身份"理解为"配几个 env 键 + 起 bot"。只读核代码�
 
 自查：`Select-String -Path D:\kanet-tn12\kasia-console\_launch_tg_bot.mjs -Pattern 'kanet\.env|3200|testnet-12|BROKER_RELAY_ID'` —— **现状有命中；变更请求落地后应为 0 命中**。同族 `_launch_owner_bot.mjs` 有同样写死（见 §3 OWNER 项）。
 
-**变更请求 CR-1（提请 Bettor 批；本页不执行）**：
+**变更请求 CR-1（Bettor 已批准做设计与实现——在独立 worktree 里，不在生产检出改码；先出变更说明交 NWT 审，过了再落码。本页不执行）**：
 - 文件：`kasia-console/_launch_tg_bot.mjs`（bot 启动器，非 `tg-bot/*.mjs`，不属 Owner 用户面清单，路径归 Bettor 批）。
 - 逻辑：删除读 `../kanet.env` 与对 `CONSOLE_ENCRYPTION_KEY` / `TELEGRAM_BOT_TOKEN` / `TELEGRAM_BOT_USERNAME` / `BROKER_RELAY_ID` / `CONSOLE_URL` / `KASPA_NETWORK` 的覆盖；改为**继承父进程环境**（fork 时已由 `tg-bot-manager.js:74` 注入 `{...process.env, TELEGRAM_BOT_TOKEN, TELEGRAM_BOT_USERNAME}`，且 console 启动时 `index.js:161` 已把 `INGEST_SECRET` 写进 `process.env`，无需再解库）。`CONSOLE_URL` 由 `http://127.0.0.1:${PORT}` 推导（console env 里已有 `PORT`）。
 - **fail-closed 断言**（防止再次静默回落到默认值）：启动器开头断言 `KASPA_NETWORK === 'mainnet'`、`PORT` 已设、`INGEST_SECRET` 非空，任一不满足 `process.exit(1)` 并打印**缺哪个键名**（不打值）。`tg-bot/config.mjs:8/19` 的 `:3200` 与 `testnet-12` 默认值本身**不动**（属 `tg-bot/*.mjs`，按铁律 0 须 Owner 批；有上面的断言兜底即不会静默落到默认值）。
-- 影响面：TN12 已按 D-017 退役，`kanet-start.sh` 的 TN12 bot 路径随之不可用，请 Bettor 确认接受（OQ-4）。
+- 影响面：TN12 已按 D-017 退役，`kanet-start.sh` 的 TN12 bot 路径随之不可用——**Bettor 已确认接受（OQ-4）**。
 - 验证：见 §7 Stage A（隔离实例演练）。
 
 ### B-2 🔴 托管钱包路由写死 `testnet-12`
@@ -41,7 +43,7 @@ D-023 把"复用身份"理解为"配几个 env 键 + 起 bot"。只读核代码�
 
 `/send`（转账）现状已 fail-closed：`CUSTODIAL_RELAY_ID` 未设 ⇒ 503（`tg-wallet.js:160-161`），本页保持它未设。
 
-**变更请求 CR-2（提请 Bettor 裁定路由与批准层级；本页不执行）**：文件 `kasia-console/src/api/tg-wallet.js`（托管钱包 = 钱路，按铁律 0 可能须 Owner 批）。最小方案：`/create` 与 `/:tg_user_id/send` 入口在 `process.env.KASPA_NETWORK !== NETWORK` 时返回 503 + 明确原因（fail-closed），**不**把 `NETWORK` 改成 env 驱动（那是"主网托管钱包"新功能，涉及助记词托管策略，另议）。**CR-2 落地前不启 bot**，因为 bot 的 `/wallet` 无法在 bot 侧单独屏蔽（那需改 `tg-bot/bot.mjs`，属用户面，须 Owner 批）。
+**变更请求 CR-2（Bettor 裁：fail-closed 收紧、不开放任何钱路能力 ⇒ Bettor 批 + NWT 审，不需 Owner；将来"启用托管钱包"才须 Owner 批。同 CR-1：独立 worktree、先出变更说明交 NWT 审。本页不执行）**：文件 `kasia-console/src/api/tg-wallet.js`。最小方案：`/create` 与 `/:tg_user_id/send` 入口在 `process.env.KASPA_NETWORK !== NETWORK` 时返回 503 + 明确原因（fail-closed），**不**把 `NETWORK` 改成 env 驱动（那是"主网托管钱包"新功能，涉及助记词托管策略，另议）。**CR-2 落地前不启 bot**，因为 bot 的 `/wallet` 无法在 bot 侧单独屏蔽（那需改 `tg-bot/bot.mjs`，属用户面，须 Owner 批）。
 
 ### B-4 🔴（功能阻断）bot 的 `/link` 只接受 `kaspatest:` 地址
 
@@ -49,7 +51,7 @@ D-023 把"复用身份"理解为"配几个 env 键 + 起 bot"。只读核代码�
 
 自查：`Select-String -Path D:\kanet-tn12\tg-bot\bot.mjs -Pattern 'kaspatest:'`。
 
-**变更请求 CR-3（用户面 `tg-bot/*.mjs` ⇒ 铁律 0 须 Owner 批；本页不执行）**：改 `bot.mjs:236` 的地址正则为接受主网前缀、拒绝 `kaspatest:`；具体 spec 与文案（`link_usage` 提示）由 Bettor 定后报 Owner。console 侧 `link.js:24` 是否同步收紧为按 `KASPA_NETWORK` 校验，起草人建议一并提（防 `kaspatest:` 行入主网库），由 Bettor 裁。**CR-3 落地前 bot 启起来也无法完成任何用户绑定**——是否仍先起 bot 做"只读演示"由 Bettor 定。
+**变更请求 CR-3（用户面 `tg-bot/*.mjs` ⇒ 铁律 0 须 Owner 批；Bettor 已裁"归 Owner，由 Bettor 去报，KANet-UI 不动"；本页不执行）**：改 `bot.mjs:236` 的地址正则为接受主网前缀、拒绝 `kaspatest:`；具体 spec 与文案（`link_usage` 提示）由 Bettor 定后报 Owner。console 侧 `link.js:24` 是否同步收紧为按 `KASPA_NETWORK` 校验，起草人建议一并提（防 `kaspatest:` 行入主网库），由 Bettor 裁。**CR-3 落地前 bot 启起来也无法完成任何用户绑定**——是否仍先起 bot 做"只读演示"由 Bettor 定。
 
 ### B-5 🟡 `POST /api/tg-bot/start` 会写 `tg_bot_enabled=1`，此后每次 console 重启自动拉起 bot
 
@@ -70,9 +72,10 @@ D-023 把"复用身份"理解为"配几个 env 键 + 起 bot"。只读核代码�
 | 1.7 | 无 pool 市场（bot `/bet` 读它） | `SELECT COUNT(*) FROM pool_markets` | 0（起草时实测 0；proto v0 市场在 `proto_*` 表，bot 未接线，见 §5） |
 | 1.8 | 主网 env 无禁项/无 bot 键 | 见 §3.4、§8 的断言块 | 全通过 |
 | 1.9 | 迁移版本（重启会带什么） | 命令见表下 `C1.9` | 起草时末块 = v209。**若执行时已 ≥ v210，则 console 重启会在主网库建 `proto_settlement_intents`——须 Bettor 知情**（走路径 X 则无重启，见 §3） |
-| 1.10 | **阻断项已闭合** | §0 四条自查命令 | B-1 自查 0 命中；B-2 的 CR-2、B-4 的 CR-3 已合入并复验；否则**停** |
+| 1.10 | **阻断项已闭合** | §0 四条自查命令 | B-1 自查 0 命中；B-2 的 CR-2 已合入**且运行中的主网 console 已重启加载它**（CR-2 是进程内模块，合入磁盘不等于生效；验证：主网 console 进程的 `CreationDate`（完整日期时间）晚于 CR-2 合入 commit 的提交时间；**不要**用探测性 `POST /api/tg-wallet/create` 去验——对尚未生效的版本它会真的建一行钱包），B-4 的 CR-3 已合入并复验；否则**停** |
 | 1.11 | 备份位存在且被忽略 | `Test-Path D:\kanet-tn12\docs-private`；`git -C D:\kanet-tn12 check-ignore docs-private/x` | True；命中 `.gitignore` |
 | 1.12 | 无未知在飞资金动作 | 主网 console 现无客户入口（无 bot、驱动开关全 0）；核 §5 的开关表 | 全关 |
+| 1.13 | 记 env 文件基线哈希（路径 X 要求它全程不变） | `(Get-FileHash D:\kanet-tn12\kanet.mainnet.env -Algorithm SHA256).Hash` | 记下；§7 B3 之后再比一次，必须相同 |
 
 ```powershell
 # C1.3  只读：列出 bot 相关 node 进程（期望无输出）
@@ -88,56 +91,73 @@ Select-String -Path D:\kanet-tn12\kasia-console\src\db\migrate.js -Pattern '// �
 
 ## 2. broker 身份创建与充值
 
-**背景**：bot 代表哪个 broker 由 DB 配置 `tg_bot_broker_relay_id` 决定（`config.mjs:37` 先查 DB，env `BROKER_RELAY_ID` 仅 fallback）；bot 本身 0-key / 0-custody，只用 broker 身份做**标识与市场过滤**（`GET /api/relay/:id`），不经手资金。主网库 `relay_nodes` 中**不存在** TN12 broker-1 那个 UUID（实测）。**但库里已有一行 `role=broker` 的 relay**（名称 `Trader-A`，UUID 前 8 位 `bf73cb1b`，无 adapter、有地址；只读实测）——D-023 §2 写的是"主网须新建"，该行的来历与用途本页**未核**：**是复用它、还是另建，待 Bettor 裁（OQ-3）**。复用则省 2.1–2.3，但须先核它的用途/是否承载资金；另建则走下表。不论哪种，`GET /api/config/tg-bot-broker` 的候选列表会同时列出它（`settings.js:143-145` 的筛选条件是 `role='broker'`）。
+**背景**：bot 代表哪个 broker 由 DB 配置 `tg_bot_broker_relay_id` 决定（`config.mjs:37` 先查 DB，env `BROKER_RELAY_ID` 仅 fallback）；bot 本身 0-key / 0-custody，只用 broker 身份做**标识与市场过滤**（`GET /api/relay/:id`），不经手资金。主网库 `relay_nodes` 中**不存在** TN12 broker-1 那个 UUID（实测）。**库里已有一行 `role=broker` 的 relay**（名称 `Trader-A`，UUID 前 8 位 `bf73cb1b`，无 adapter、有地址；只读实测）。**Bettor 裁定（OQ-3）：另建，不复用它**——依据 Bettor 查账本 1132 / 1168：它是 9/14 从主网账号源迁入的账号，无 adapter、未经 broker 审批，来历是迁移而非为电报建；复用会把一个可能承载迁移资金的身份绑到面向用户的 bot 上。另建走下表。`GET /api/config/tg-bot-broker` 的候选列表（`settings.js:143-145`，筛选 `role='broker'` 等）会同时列出 `Trader-A`，**下拉只影响展示，`POST` 回填只校验 relay 存在**（`settings.js:153-154`）——所以回填时务必核对提交的 UUID 是新建那一行，而不是下拉里的 `Trader-A`。
 
 | 步骤 | 做法 | 验收读数 |
 |---|---|---|
 | 2.1 创建 | 主网 console UI `/relays` 新建（`POST /relays`，`network` 缺省即 `mainnet`）。助记词走 `/relays/generate-mnemonic` 生成或由 Owner 提供 | 新行出现；`GET /api/relay/<新UUID>` 返回 `network=mainnet`。**记 UUID 入账本（UUID 可写；地址不写）** |
 | 2.2 热钱包准入 | 建行时若带地址，`relay.js:104` 会走 `checkHotwalletAdmission`（主网 env 已有 `RELAY_HOTWALLET_*` 三键）；冷清单命中 = 拒绝 | 未出现 `hotwallet_denied` |
 | 2.3 不启进程 | **不分配 adapter、不启 relay 进程**（`assign` 会自动起进程，`relay.js:193`）。bot 不需要该 relay 进程在线 | `relay_nodes` 中该行 adapter 为空 |
-| 2.4 角色 | 默认**不改角色**。是否需要 `role=broker`（`POST /api/relay/:id/role`，含 P2PK 与 oracle 互斥守门）——**待 Bettor 核（OQ-3）** | — |
+| 2.4 角色 | **不改角色**（Bettor 裁：`POST /api/config/tg-bot-broker` 只校验 relay 存在，不需要 `role=broker`） | 新行 `role` 保持默认，未调用 `/api/relay/:id/role` |
 | 2.5 回填 | `POST /api/config/tg-bot-broker {"broker_relay_id":"<UUID>"}`（`settings.js:149`；relay 不存在返回 404） | 返回 `ok:true`；`GET /api/config/tg-bot-broker` 回显同一 UUID |
-| 2.6 充值 | **默认不充值**（bot 不经手资金，broker 身份无需余额）。**若 Bettor 裁定需要（OQ-3）**：金额与来源由 Owner 定，须经热钱包准入门；**金额不写入本页**（D-021），执行前后余额只进 `docs-private/` | — |
+| 2.6 充值 | **不充值**（Bettor 裁：bot 不经手资金，broker 身份无需余额）。日后若充值另议，须经热钱包准入门，金额与前后余额只进 `docs-private/`，不写入 `docs/` | 该地址链上余额保持 0（读数只在执行时现读，不落文档） |
 
-**助记词 / 私钥纪律**：生成后仅显示在操作者本人屏幕，**不复制进任何文件、聊天、账本、日志、commit**；备份介质与位置由 Owner 定（OQ-3）。本页与执行记录里只出现 relay UUID。
+**助记词 / 私钥纪律**：生成后仅显示在操作者本人屏幕，**不复制进任何文件、聊天、账本、日志、commit**。**不指定备份介质**（Bettor 裁：身份不持有资金，丢了重建，没有要防的损失；日后充值时再议）。本页与执行记录里只出现 relay UUID。
 
-**中止条件**：`POST /relays` 后 `relay_nodes` 未新增、或 2.2 命中冷清单 ⇒ 停，回报，不重试。**回滚**：`POST /relays/:id/delete`（`relay.js:188`）删除该行；若已写 2.5，先把 `tg_bot_broker_relay_id` 清回空（`setConfig` 无删除端点，需 Bettor 指定方式）。
+**中止条件**：`POST /relays` 后 `relay_nodes` 未新增、或 2.2 命中冷清单 ⇒ 停，回报，不重试。**回滚**：`POST /relays/:id/delete`（`relay.js:188`）删除该行；若已写 2.5，`tg_bot_broker_relay_id` 无清除端点（`POST` 要求非空，`settings.js:151`；`deleteConfig` 全仓零调用），处置见 §7 回滚第 4 步。
 
 ## 3. env 键名清单（只写键名与处置，不写值）
 
-写入位置有两条路，**是否二选一待 Bettor 裁（OQ-1）**：
+**Bettor 裁定（OQ-1）：走路径 X。** 本节标题仍叫"env 键名清单"以对应账本 1499 的要求，但**主网 `kanet.mainnet.env` 本次一个字节都不改**：
 
-- **路径 Y（env）**：写进 `kanet.mainnet.env`（gitignored），需**重启 console** 才生效（`start-console-mainnet.ps1` 在起进程时注入）。与 D-023 字面一致。
-- **路径 X（DB 配置）**：token/username 走 `POST /api/config/tg-bot-token`（`settings.js:175`，加密入库，`tg-bot-manager.js:61-62` config 优先于 env）；配合 CR-1（启动器由 `PORT` 推导 `CONSOLE_URL`）则**无需改 env 文件、无需重启 console**。省掉一次重启的全部风险面（孤儿 relay 子进程、共享 RpcClient 在重启后的行为、迁移随重启落地）。起草人倾向 X，但决定权在 Bettor。
+- **路径 X（采用）**：token/username 走 `POST /api/config/tg-bot-token`（`settings.js:175`，token 加密入库，见 §3.6；`tg-bot-manager.js:61-62` config 优先于 env）；配合 CR-1（启动器继承环境、`CONSOLE_URL` 由 `PORT` 推导）**token/username 的配置本身无需改 env 文件、无需重启 console**——省掉重启的风险面（孤儿 relay 子进程、共享 RpcClient 重启后行为、迁移随重启落地）。⚠ **但 CR-2（`tg-wallet.js` 是进程内已加载模块）合入后须重启一次运行中的主网 console 才生效**（见变更说明 §4.4），且 bot 开闸必须晚于那次重启；这次重启由 Bettor 排进本来就要做的重启窗，**不是为 bot 配置而单开**。
+- 路径 Y（env 文件 + 重启）：**未采用**，§3.2b 仅留作对照。
+
+因此下表"处置"列里凡写"Y："的，本次不做。验证"env 文件没动"的方式见 §3.4 (e)。
 
 ### 3.1 键表
 
 | 键 | 作用（谁读） | 处置 | 值来源（不写值） |
 |---|---|---|---|
-| `TELEGRAM_BOT_TOKEN` | console 起 bot 时注入（`tg-bot-manager.js:61`） | **复用现有**（D-023 §1） | Owner 的现有 token。Y：从 TN12 `kanet.env` 对应行**不回显地**追加到 `kanet.mainnet.env`（§3.2 片段）；X：读入变量后 POST，命令行不出现值 |
-| `TELEGRAM_BOT_USERNAME` | 同上；bot 启动时 `getMe` 自校正（`config.mjs:98`） | 复用 | 同上；写错会被 `getMe` 真值覆盖并 LOUD warn |
-| `CONSOLE_URL` | bot 进程调 console | Y 且不做 CR-1 的推导时才需要，值 = 主网 console 本机地址；X + CR-1 **不需要** | 非密钥，指向 `:3202` |
+| `TELEGRAM_BOT_TOKEN` | console 起 bot 时注入（`tg-bot-manager.js:61`，DB 配置 `tg_bot_token` 优先于 env） | **复用现有**（D-023 §1）；**经 DB 配置写入，不写 env 文件** | Owner 的现有 token。§3.2：读入变量后 POST，命令行与输出都不出现值 |
+| `TELEGRAM_BOT_USERNAME` | 同上；bot 启动时 `getMe` 自校正（`config.mjs:98`） | 复用；DB 配置 `tg_bot_username` | 同上；写错会被 `getMe` 真值覆盖并 LOUD warn |
+| `CONSOLE_URL` | bot 进程调 console | **不写**：CR-1 后由启动器从 `PORT` 推导 | — |
 | `KASPA_NETWORK` | bot 的 `CONFIG.network` | **已有**（值 `mainnet`）；CR-1 使启动器不再覆盖它 | — |
-| `INGEST_SECRET` | bot→console 鉴权（`x-ingest-secret`） | **不写 env 文件**。console 首启时已生成并加密存 DB（`index.js:147-163`），并写入自身 `process.env`，fork 的 bot 继承 | 自动。实测 `logs/mainnet/*.log` 中"INGEST_SECRET generated"命中数 0（自查：`Select-String -Path D:\kanet-tn12\logs\mainnet\*.log -Pattern 'INGEST_SECRET generated' -List`）。是否轮换属 Bettor（OQ-5） |
+| `INGEST_SECRET` | bot→console 鉴权（`x-ingest-secret`） | **不写 env 文件**。console 首启时已生成并加密存 DB（`index.js:147-163`），并写入自身 `process.env`，fork 的 bot 继承 | 自动。实测 `logs/mainnet/*.log` 中"INGEST_SECRET generated"命中数 0（自查：`Select-String -Path D:\kanet-tn12\logs\mainnet\*.log -Pattern 'INGEST_SECRET generated' -List`）。**轮换判据（Bettor 裁 OQ-5）见 §3.6：只读比哈希，与 TN12 值相同才轮换，不同不动** |
 | `BROKER_RELAY_ID` | env fallback | **不写**（DB 配置优先；写了反而在 DB 空时静默落到陈值） | — |
 | `ADMIN_SECRET*` 全系列 | 各 tier 端点 | **一律新生成、禁沿用 TN12 值**（账本 1500）。**默认不新增**：本次 bot 接线无一处用它们（bot 只用 `x-ingest-secret`）；未设 ⇒ 对应端点 503 disabled（`admin-secret-tier.mjs:31-33`，fail-closed），主网默认最小面。`ADMIN_SECRET_FUNDS` 已是新生成（1500）。今后某个 tier 真要用时，按 §3.3 生成并把**键名**追加到本表 | 新生成 |
-| `OWNER_BOT_TOKEN` / `OWNER_CHAT_ID` | **owner-bot（独立进程，非 broker bot）** | ⚠ **与账本 1500 口径冲突，见 §3.5，待 Bettor 裁（OQ-2）。裁定前不写** | Owner；`OWNER_CHAT_ID` 是个人 ID，值进 `docs-private/` |
+| `OWNER_BOT_TOKEN` / `OWNER_CHAT_ID` | **owner-bot（独立进程，非 broker bot）** | **本次不写、不起 owner-bot**（Bettor 采纳 OQ-2，见 §3.5；账本 1500 那条"测试通知验收"由 Bettor 更正）。若 Owner 要"主网事件通知到他的电报"，是新需求，Bettor 另报 | 若日后要写：`OWNER_CHAT_ID` 是个人 ID，值进 `docs-private/` |
 | `PILOT_WALLET_ADDRESSES` | 旧 `/send` 路径的隔离 allowlist（`tg-wallet.js:183`） | **保持未设**；主网地址产生后回填，值进 `docs-private/`。此前 `/send` 已因 `CUSTODIAL_RELAY_ID` 未设而 503，不依赖它 | 主网地址产生后 |
 | `CUSTODIAL_RELAY_ID` / `FAUCET_RELAY_ID` | `/send` 出口 / `/faucet` 出口 | **保持未设**：`/send`→503、`/faucet`→"pending config"（`chat.js:659-661`）。这是**有意的关** | — |
 | `KANET_TESTNET_NO_LIMITS` | 绕过最小额/软顶守卫（`pool.js:686` 等） | **禁止出现**，见 §8 | — |
 | `TG_POLL_MS` `TG_SETTLE_POLL_MS` `TG_PENDING_BET_POLL_MS` `TG_BROKER_REFRESH_MS` `TG_TEST_BOT_USERS` | bot 轮询节奏 / 测试用户排除 | **不写**，用代码默认（`TG_TEST_BOT_USERS` 默认含两个合成 id，无影响） | — |
 
-### 3.2 追加 env 行（路径 Y 用；**不回显值**；执行时才跑）
+### 3.2 写入 token/username（路径 X·采用；**不回显值**；执行时才跑）
 
 ```powershell
-# 从 TN12 kanet.env 取一行追加到主网 env，命令输出只有 True/False，不含值
+# 取值只进变量；POST 响应含脱敏 hint（token 首4+末4位，见 §3.6），故整体丢弃、不打印
+$src = 'D:\kanet-tn12\kanet.env'
+function Get-EnvLine($k){ ((Select-String -Path $src -Pattern "^$k=" | Select-Object -First 1).Line -split '=',2)[1].Trim() }
+$tok = Get-EnvLine 'TELEGRAM_BOT_TOKEN'; $usr = Get-EnvLine 'TELEGRAM_BOT_USERNAME'
+if (-not $tok) { throw 'token 取值为空，停' }
+Invoke-RestMethod -Method Post -Uri http://127.0.0.1:3202/api/config/tg-bot-token `
+  -ContentType 'application/json' -Body (@{ token = $tok; username = $usr } | ConvertTo-Json -Compress) | Out-Null
+Remove-Variable tok, usr
+# 验收：只取布尔，不取 hint
+(Invoke-RestMethod http://127.0.0.1:3202/api/config/tg-bot-token).token_configured   # 期望 True
+```
+
+**前提**：TN12 `kanet.env` 仍在（D-017 §3 清理前）。若已删，则 token 由 Owner 从自己的 @BotFather 记录提供，读入变量的方式改为 Owner 在自己屏幕上输入，**不落文件、不进聊天**。
+
+#### 3.2b 路径 Y（未采用，仅留作对照）
+
+```powershell
+# 从 TN12 kanet.env 取一行追加到主网 env（需重启 console，且重复键后者静默覆盖前者）
 $src = 'D:\kanet-tn12\kanet.env'; $dst = 'D:\kanet-tn12\kanet.mainnet.env'
 $line = (Select-String -Path $src -Pattern '^TELEGRAM_BOT_TOKEN=' | Select-Object -First 1).Line
 [bool]$line
 [IO.File]::AppendAllText($dst, "`r`n" + $line, (New-Object Text.UTF8Encoding $false))
 ```
-
-追加后立刻做 §3.4 断言（含"键唯一"：`start-console-mainnet.ps1` 逐行注入，**重复键后者静默覆盖前者**）。改 env 与重启是**两个分开的工具调用**。
 
 ### 3.3 生成新密钥（`ADMIN_SECRET_<TIER>`，今后需要时才用；只打印长度）
 
@@ -171,14 +191,64 @@ Get-ChildItem Env: | ? { $_.Name -match '^(KANET_TESTNET_NO_LIMITS|ADMIN_SECRET|
 
 （d 项的理由：`start-console-mainnet.ps1` 只**追加**文件里的键，不清理继承环境；从曾用过 TN12 变量的 shell 起主网 console，`KANET_TESTNET_NO_LIMITS` 会随继承进主网进程而文件里查不到。）
 
-### 3.5 ⚠ OWNER_BOT_* 与账本 1500 口径的冲突（提请 Bettor 裁）
+```powershell
+# (e) 路径 X 下 env 文件必须一个字节没动：§1 前置检查先记，§7 B3 后再比（哈希只标识文件，不泄露内容）
+(Get-FileHash D:\kanet-tn12\kanet.mainnet.env -Algorithm SHA256).Hash    # 前后两次必须相同
+```
+
+### 3.5 OWNER_BOT_* 与账本 1500 口径的冲突（**已裁：本次不写、不起 owner-bot**；以下为依据）
 
 1500 定："`OWNER_BOT_TOKEN`/`OWNER_CHAT_ID` 复用现有值，验收加'发一条测试通知确认送达'"。核代码后：
 - `tg-bot/owner-bot.mjs` 是 **Owner ⇄ dev-coord 频道的桥**（Direction A：Owner 私聊 → 经 owner-voice relay 发 dev-coord；B：dev-coord → 私聊推送；C：用户反馈工单升级转发）。**它没有"给 Owner 发通知"的通用路径**，所以"发一条测试通知"没有代码可跑。
 - dev-coord 频道随 D-017 已退役；A / C 经 console `chat/send` 走 relay **链上广播**，在主网上意味着**真实花费**（仅当有地址被标为 `trust_level=owner` 时才会走到；主网库当前是否有，本页未核）。
 - 主网 console **不会**拉起 owner-bot（`tg-bot-manager.js` 只管 broker bot）；`_launch_owner_bot.mjs` 也写死 `kanet.env` / `:3200` / `testnet-12`。
 
-起草人建议：**(a) 本次不写 `OWNER_BOT_*`、不起 owner-bot**（D-023 只批 broker bot 身份复用）；若 Owner 要的是"主网事件通知到 Owner 的电报"，那是**新功能**，另立需求。选 (b)"写键但不起进程"无实际作用；选 (c)"起 owner-bot"须先过 CR-1 同型改造并单独审 A/C 的主网花费面。
+**裁定（Bettor，采纳起草人建议 (a)）**：本次不写 `OWNER_BOT_*`、不起 owner-bot（D-023 只批 broker bot 身份复用）；若 Owner 要的是"主网事件通知到 Owner 的电报"，那是**新需求**，由 Bettor 另报 Owner。账本 1500 的"测试通知验收"口径由 Bettor 更正，本 runbook 验收里**没有**这一项。
+
+### 3.6 token 存储、清除方式、ingest_secret 轮换判据（Bettor 要求补写；均读代码所得）
+
+**(1) token 存进 DB 后是否加密？——是，token 本体加密；但有一个脱敏 hint 明文入库。** `POST /api/config/tg-bot-token` 以 `isSensitive:true` 调 `setConfig`（`settings.js:180`），`setConfig` 对敏感值调 `encrypt()`（`configs.js:20-21`），`encrypt` 是 **AES-256-GCM**、随机 12 字节 IV、密钥取 `CONSOLE_ENCRYPTION_KEY`（`services/crypto.js:19-32`），信封 JSON 存 `value_encrypted`。**同时**把 `makeTokenHint(token)` = **token 首 4 位 + `****` + 末 4 位**（`crypto.js:53-57`）**明文**存进 `value_plain_hint`，并由 `GET`/`POST /api/config/tg-bot-token` 原样回显。⇒ ① token 主体在库里是密文；② 首尾各 4 位随 hint 明文可见，属现有设计、本 runbook 不改，故 §3.2 把 POST 响应整体丢弃、验收只取 `token_configured` 布尔；③ 主网库用**主网**密钥加密，与 TN12 不同密钥域，起 bot 时由 console 进程解密（`configs.js:9-10`，解密失败返回 null ⇒ 表现为 `no_token`，不会静默用错值）。`tg_bot_username` / `tg_bot_broker_relay_id` / `tg_bot_enabled` 是**非敏感项，明文**存于同一列（`configs.js:23-25`）。
+
+**(2) 回滚"清除 DB 配置行"——`POST /api/config/tg-bot-token` 传空值不能清除。** 代码：`token` 为空或空白 ⇒ **保留原值**（`settings.js:177-178` 注释即"blank token = keep existing"）；`username` 传 `''` 会写成空串（`settings.js:182-183`）。全仓没有删除配置的端点（`deleteConfig` 定义在 `configs.js:44`，**零调用**）。`tg_bot_broker_relay_id` 的 `POST` 要求非空（`settings.js:151`），同样清不掉。
+
+⇒ **回滚不需要清 token**：`POST /api/tg-bot/stop` 写 `tg_bot_enabled=0`（`settings.js:200`），`startTgBotIfConfigured` 见 `enabled≠'1'` 即不拉起（`tg-bot-manager.js:156-161`）；token 留在库里是密文、无进程使用。**若 Bettor 仍要求把 token 从库里拿掉**，提一条**备份后带守卫的 UPDATE**（交 Bettor 审，**不用 DELETE**）：
+
+```sql
+-- 前置（不可省）：把该行导出到 docs-private/（含密文与 hint，本身敏感），并核对导出行数=1
+-- 守卫：仅命中"敏感 + tg_bot 类别 + 指定键"的那一行；执行后 changes 必须 = 1，否则整体 ROLLBACK
+BEGIN;
+UPDATE config_entries
+   SET value_encrypted = '', value_plain_hint = NULL, updated_at = :now_iso
+ WHERE key = 'tg_bot_token' AND category = 'tg_bot' AND is_sensitive = 1;
+-- 断言 changes() = 1 → COMMIT，否则 ROLLBACK
+```
+
+效果核对（读代码）：置空后 `getConfig` 因 `value_encrypted` 为假而返回该空串（`configs.js:9,12`）⇒ `startTgBot` 的 `(await getConfig(...)) || process.env.TELEGRAM_BOT_TOKEN` 落到 env（主网 env 无此键）⇒ `!token` ⇒ `no_token` 不启动（`tg-bot-manager.js:61-66`）；`GET` 返回 `token_configured=false`。`tg_bot_broker_relay_id` 同理可用同型语句置 `''`（非敏感项，条件去掉 `is_sensitive`）。**这两条 UPDATE 本页只提案，未执行；执行须 console 运行中以单语句事务写、且先经 Bettor 审。**
+
+**(3) ingest_secret 轮换判据（Bettor 裁 OQ-5）：只读比哈希——主网值与 TN12 值的 SHA-256 相同才轮换，不同则不动；轮换需要重启窗，不为此单开重启。**
+
+比对脚本（写到 `scratch/`，一次性；**只读打开两个库、进程内解密、只打印 `same=True/False`，绝不打印任一值或哈希**）：
+
+```js
+// scratch/_ingest_cmp.cjs   （执行：node scratch/_ingest_cmp.cjs ，不带参数）
+const Database = require('D:/kanet-tn12/kasia-console/node_modules/better-sqlite3');
+const crypto = require('crypto'), fs = require('fs');
+const keyOf = (envPath) => fs.readFileSync(envPath, 'utf8').match(/^CONSOLE_ENCRYPTION_KEY=(.*)$/m)[1].trim();
+function ingestHash(dbPath, keyHex) {
+  const db = new Database(dbPath, { readonly: true, fileMustExist: true });
+  const { value_encrypted: env } = db.prepare("SELECT value_encrypted FROM config_entries WHERE key='ingest_secret'").get();
+  const { iv, tag, ciphertext } = JSON.parse(env);
+  const d = crypto.createDecipheriv('aes-256-gcm', Buffer.from(keyHex, 'hex'), Buffer.from(iv, 'base64'));
+  d.setAuthTag(Buffer.from(tag, 'base64'));
+  const pt = Buffer.concat([d.update(Buffer.from(ciphertext, 'base64')), d.final()]);
+  return crypto.createHash('sha256').update(pt).digest('hex');
+}
+const a = ingestHash('D:/kanet-tn12/kasia-console/data/console.mainnet.db', keyOf('D:/kanet-tn12/kanet.mainnet.env'));
+const b = ingestHash('D:/kanet-tn12/kasia-console/data/console.db',         keyOf('D:/kanet-tn12/kanet.env'));
+console.log('same=' + (a === b));
+```
+
+判据：`same=True` ⇒ 主网 ingest_secret 与 TN12 相同 = 跨网络复用，须在**下一次本来就要做的**重启窗里轮换（轮换手法由 Bettor 定，**不在本 runbook 执行**；注意 relay 与 adapter 进程是启动时从 DB 读 `ingest_secret` 注入自己的环境的——`relay-manager.js:225`、`adapter-launcher.js:40`——所以轮换必须连同它们的重启一起排）；`same=False` ⇒ 不动。**前提**：TN12 库与 `kanet.env` 仍在；若已被 D-017 §3 清理，则无法比对，此时以"主网 ingest_secret 由主网 console 首启生成（`index.js:147-163`，非从 TN12 复制）"为据，回报 Bettor 裁。脚本本页**只写不跑**。
 
 ## 4. `tg-bot/_state.json` 备份并清空
 
@@ -277,7 +347,7 @@ D-023 §4 已定"首次交互文案必须明示"。以下是**需要 Owner 决�
 | B0 | §1 全部前置检查通过；日志另存 | 全绿 |
 | B1 | §2：建 broker 身份 → 回填 `tg_bot_broker_relay_id` | §2 读数 |
 | B2 | §4：备份 → 清空 state | §4 读数 |
-| B3 | §3：路径 X 写 token/username（POST，无重启）；**或**路径 Y 追加 env 行 → §3.4 断言 →（**另一个调用**）console 六步重启：①另存日志 ②停旧 PID 并等子进程退出 ③确认端口释放、无残留 ④起新进程 ⑤记 PID ⑥核启动读数 | X：`GET /api/config/tg-bot-token` 只回 `token_configured=true` 与脱敏 hint；Y：§3.4 全过，启动读数含 `KASPA_NETWORK=mainnet PORT=3202` |
+| B3 | §3.2：路径 X 写 token/username（POST，**无重启、不动 env 文件**） | `token_configured=true`（只取布尔）；env 文件哈希与 1.13 相同；`GET /api/tg-bot/status` 仍 `running=false` |
 | B4 | `POST /api/tg-bot/start`（**非 kill**） | 返回 `ok:true` + pid；`GET /api/tg-bot/status` 为 `running=true`、`broker_relay_id` 为 B1 的 UUID |
 | B5 | 读 bot 日志启动行 | `getMe 校验通过 @<username>`；`[tg-bot] @<username> up (broker=<UUID>…`；**无** `no broker configured`、**无** `409 Conflict` |
 | B6 | Owner 用自己的账号发 `/start` `/help` | 收到回复；回复内容与 §6 Owner 已定的一致 |
@@ -285,7 +355,7 @@ D-023 §4 已定"首次交互文案必须明示"。以下是**需要 Owner 决�
 | B8 | Owner 试 `/wallet` `/faucet` `/send` | 均为"暂不可用"类回复，**且** `tg_custodial_wallets` 仍 0 行、无任何链上交易（读数：主网库该表计数 + 该 relay 无新 tx） |
 | B9 | 观察 30 分钟：console 与主网节点 | 无新错误簇；节点同步无异常 |
 
-**验收项本身无副作用核对**：B7 的 `/link` 会写本机 link 文件（用户自己的操作，非探测副作用）；B8 期望"无写入"本身就是读数。
+**验收项本身无副作用核对**：B7 的 `/link` 会写 DB `user_notification_prefs` 与 `_state.json`（Owner 自己的绑定操作，非探测副作用，B7 期望的"新增 1 行"正是它）；B8 期望"无写入"本身就是读数。B4 是唯一把 bot 拉起来的步骤，且会写 `tg_bot_enabled=1`（B-5）。
 
 ### 中止条件（任一触发 ⇒ 立即停止，不重试，回报 Bettor）
 
@@ -299,7 +369,7 @@ D-023 §4 已定"首次交互文案必须明示"。以下是**需要 Owner 决�
 1. `POST /api/tg-bot/stop`（写 `tg_bot_enabled=0`，supervisor 不再拉起）；**不要**直接 kill。
 2. 确认无 bot 进程（§1.3 命令）。
 3. `tg-bot/_state.json`：从 §4 备份 `Copy-Item` 回去（**须 bot 未运行**）。
-4. Y 路径：从 env 文件删 token/username 行 → `Select-String` 核实已删 → **另一个调用**再重启 console。X 路径：`tg_bot_token` 无删除端点，需 Bettor 指定方式（OQ-1）；`tg_bot_broker_relay_id` 同理。
+4. 路径 X 的 DB 配置：**默认不清**——第 1 步的 stop 已使 bot 不再启动，token 在库里是密文、无进程使用（§3.6 (2)）。`POST /api/config/tg-bot-token` 传空值**清不掉**（空 token = 保留原值）。**若 Bettor 要求清**：走 §3.6 (2) 的"备份 → 带守卫单行 UPDATE（`changes()=1` 否则 ROLLBACK）"提案，先交 Bettor 审，**不用 DELETE**。`tg_bot_broker_relay_id` 同理（`POST` 要求非空，也清不掉）。
 5. broker 身份：`POST /relays/:id/delete`（若无关联数据）。
 6. 记账本：停在哪一步、读数是什么。
 
@@ -315,13 +385,29 @@ D-023 §4 已定"首次交互文案必须明示"。以下是**需要 Owner 决�
 - **它绕过什么**（`pool.js:685-728, 927-946, 1293-1319`）：最小可花费额、最小下注额、软顶与 L4 最坏情况守卫——**恰是主网真钱环境该有的护栏**。
 - **中止条件**：任一断言非零/非空 ⇒ 不重启、不启 bot，回报 Bettor。
 
-## 附录 A. 待 Bettor 裁定的开放点（起草人的建议在括号内，决定权在 Bettor）
+## 附录 A. 开放点裁定记录（Bettor 2026-09-19 对等消息裁定；账本记录待补）
 
-| 编号 | 问题 |
+| 编号 | 问题 | 裁定 |
+|---|---|---|
+| OQ-1 | token 走 X（DB 配置）还是 Y（env + 重启） | **X**；补 §3.6 的加密与清除说明 |
+| OQ-2 | `OWNER_BOT_*` 是否写、owner-bot 是否起 | **都不做**；"主网事件通知 Owner 电报"是新需求，Bettor 另报 Owner |
+| OQ-3 | 复用 `Trader-A` 还是另建 | **另建**；不改角色、不充值、不分配 adapter；助记词只显示在操作者屏幕，不指定备份介质 |
+| OQ-4 | CR-1 原地改使 TN12 bot 路径失效 | **接受** |
+| OQ-5 | 主网 `ingest_secret` 是否轮换 | **只读比哈希，相同才轮换**，不同不动；轮换需重启窗，不单开（§3.6 (3)） |
+| OQ-6 | CR-2 批准层级 | **Bettor 批 + NWT 审，不需 Owner**；将来"启用托管钱包"才须 Owner 批 |
+| — | CR-1 / CR-2 实施方式 | **独立 worktree + 先出变更说明交 NWT 审，过了再落码**；不在生产检出改码 |
+| — | CR-3（bot `/link` 正则 + console `link.js` 前缀校验） | **归 Owner 批，由 Bettor 去报，KANet-UI 不动** |
+
+## 9. 接线完成后 bot 在主网能做什么、不能做什么（Bettor 要求补写，用于向 Owner 报"现在接线是否值得"）
+
+**前提**：本 runbook 假设 **bot 现阶段没有任何 proto v0 API 调用**（实核：`tg-bot/*.mjs` 里没有任何 `/api/proto` 请求路径；代码里出现的 `protocolVersion` / `protocol_version` 是**旧 pool 协议 v0.6/v0.7**，与 proto v0 无关，bot 走的是 `poolRegisterPrep` / `poolRegisterConfirm` 这条旧路。D-020 的单笔下注入口在 `kasia-console/src/api/proto.js`，bot 未接）。
+
+**一句话**：接线完成后（含 CR-1/2/3 全部落地）bot 在主网上只是一个"能应答、能绑定主网地址、能列出（目前为空的）旧 pool 市场"的**只读壳**——**不能下注、不能建钱包、不能转账、不能领水、也收不到结算通知**；它**看不到也参与不了**主网当前唯一的活市场（`proto_*` 表里的市场），因为下注与结算的入口在 proto v0 API，而 bot 一次都没调用它。
+
+| 能（预期，代码路径 + 表计数推断，未在主网实跑） | 不能 |
 |---|---|
-| OQ-1 | token/username 走路径 X（DB 配置，无需重启）还是 Y（env，需重启）？（建议 X；Y 时须把 §1.9 的迁移随重启问题一并裁。）X 路径下回滚"清除 DB 配置行"的方式由谁指定？ |
-| OQ-2 | §3.5：`OWNER_BOT_*` 本次是否写、owner-bot 是否起？（建议都不做；账本 1500 那条"测试通知验收"无代码路径可跑。） |
-| OQ-3 | broker 身份：复用库里已有的 `role=broker` 行（`Trader-A`，`bf73cb1b…`）还是另建？另建时是否需要 `role=broker`、是否充值、金额与来源、助记词备份介质？（建议：先核这一行的来历再定；另建则不改角色、不充值。） |
-| OQ-4 | CR-1 原地改 `_launch_tg_bot.mjs` 会使 `kanet-start.sh` 的 TN12 bot 路径失效——接受？ |
-| OQ-5 | 主网 `ingest_secret`：现有值是否轮换？（`x-ingest-secret` 是 bot→console 唯一鉴权，也保护 `tg-wallet` 三端点。） |
-| OQ-6 | CR-2 的批准层级：托管钱包路由属钱路，是否须 Owner 批？ |
+| `/start` `/help` `/lang` 应答（文案见 §6，待 Owner 定） | 下注：`/bet` 读 `pool_markets`（主网 0 行），bot 无 proto v0 调用 |
+| `/link` 绑定主网地址（**须 CR-3**）；`/mybets` `/record` 等读接口（结果为空） | 钱包：`/wallet`（CR-2 后 503）；转账：`/send`（`CUSTODIAL_RELAY_ID` 未设 ⇒ 503）；领水：`/faucet`（`FAUCET_RELAY_ID` 未设） |
+| `/broker` 系写 `broker_onboarding` 行（DB，无链上花费） | 结算/手续费通知：无下注 ⇒ 无事件可推 |
+
+**对"现在接线是否值得"的事实判断（决定权在 Bettor/Owner）**：接线本身**不带来任何主网下注能力**。要让用户通过电报参与主网市场，需要另一项"bot 接 proto v0 API（下注意图 / 状态 / 结算查询）"的开发——**不在 D-023 范围，也未立项**；且 D-022 结算后半程（simnet 验证 → 合入 → 主网另开闸）未完成前，本 runbook 明确不接真实下注流。所以现在接线换来的是：老用户看到一个"已迁到主网、暂时只读"的 bot，以及把 CR-1/2/3 这三处 TN12 硬编码提前清掉（后者无论 bot 何时接下注都得做）。
