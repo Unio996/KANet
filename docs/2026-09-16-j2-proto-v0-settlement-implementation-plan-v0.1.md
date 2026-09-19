@@ -1,6 +1,6 @@
 > **Status**: CURRENT
 
-# 原型 v0 结算实现计划 v0.8（六个结算builder + 意图状态机 + 驱动接线，复用covenant_broadcast）
+# 原型 v0 结算实现计划 v0.9（六个结算builder + 意图状态机 + 驱动接线，复用covenant_broadcast）
 
 出处：Owner 2026-09-16 批准实现（D-022，账本1491，Bettor转达"按最简洁的方案走"），在
 `docs/2026-09-16-j2-proto-v0-settlement-design-v0.1.md`（v0.8，下称"设计文档"，尤其§1/§2/§7）
@@ -38,6 +38,8 @@ storage/compute（consensus 源码移植，含 relaxed 分支），localMass 降
 （失效条件：仅对 seal_count=2 且布局 [leaf,held,fee] 成立，fee 规则一改必须重推）；`convert_to_claim.cap` 仍暂借 1.0 KAS，合入前需替换为节点实测值。
 ④ 批6（claim_draw）落码的**前置**：B4-4 的驱动层断言（payoutRoot/胜方由 DB 派生，Σ payouts == pool_value）先有测试；Codex MUST-PROVE（签名前公钥逐字节相等断言，
 正反两条回归）。
+
+**v0.9更新（2026-09-19，批6 claim_draw 离线 builder + 批9 验收清单草稿）**：① **批6 `buildClaimDrawTxJson` 已落码（仅 full 分支，离线 16/16，含 ticket 签名用 NWT 独立移植 sighash+schnorr 真验签、去 covenant 反向臂、签名前 `assertTicketSigningKey`、结构断言、索引哨兵；三条变异对照变红），未上 simnet**；新增 `computeKanetTokenClaimGenesisArtifact`、`proto-claim-draw-witness.mjs`、`proto-ticket-authorize-witness.mjs`（batch 8 复用）、`proto-payout-leaf.mjs`（纯函数，供 builder 与驱动派生共用）；`computeTicketGenesisArtifact` 纯加返回 `stateLayout`/`entries`。② 🔴 **route A 边界提醒（Bettor）：`pool_value=1000` 恰在 RootClaim.sil:103 `payout>=1000` 边界上，`999` 会被 `deriveCloseCommitInputs` 拒（否则池子锁死）**——任何改 min_bet/stake 的运营参数变更前必须先核这条。③ B4-4 三条附加 fail-closed（胜方恰 1 条 / payout>=1000 / 库内 payout_root 不得分裂）经 Bettor 确认保留。④ 批9 验收清单草稿见 `docs/2026-09-19-j2-proto-v0-batch9-driver-wiring-acceptance-checklist-v0.1.md`。
 
 D-021合规：本文档不写真实relay地址、真实账户余额、完整relay关联txid。
 
