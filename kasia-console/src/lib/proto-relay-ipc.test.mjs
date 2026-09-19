@@ -204,6 +204,195 @@ await t('批9-0-d facts 形态的 get_address_utxos 走同一个出口: payload(
   if (!threw || !/must not carry 'type'/.test(threw.message)) throw new Error(`payload 夹带 type 应被拒, 实际 ${threw && threw.message}`);
 });
 
+// ══ 批9 9-2a(J2 2026-09-20, 设计 §3.8 / §19.1)——出口按 intent_key 前缀分闸 ═════════════════════════════════════════════
+// 以下全是【新增用例】; 既有用例①–⑥b 与 9-0 五项一字未改, 其中③④仍是红旗锚点(旧开关行为不变)。
+const { isValidSettlementIntentKey, PROTO_SETTLEMENT_EXIT_STEP_SUBJECT } = await import('./proto-relay-ipc.mjs');
+// 真实 subject_id 形状: 64 位小写 hex(市场 id = api/proto.js randomBytes(32).toString('hex'); claim 行 id 同式, Bettor 裁定)
+const ID64 = '3f6c1a9e0b7d42c58e91a4f3d2b6c7e0' + '8a5f1d94c3b2e7a60918f4d5c2b3a1e7';
+const OLD_UUID_FORM = '0f8fad5b-d9cb-469f-a165-70867728950e';   // 首版(错误)假设的形状——现在必须落 B 类
+const PAIRS = [['seal', 'market'], ['resolve', 'market'], ['convert_to_claim', 'claim'], ['claim_draw', 'claim']];
+const K = (subject, step, suffix = '') => 'settle:' + subject + ':' + ID64 + ':' + step + suffix;
+const A_KEYS = PAIRS.flatMap(([step, subject]) => ['', '#2', '#10', '#99'].map((sfx) => K(subject, step, sfx)));
+const B_KEYS = [
+  K('claim', 'withdraw'), K('ticket', 'reclaim'), K('market', 'reclaim'), K('claim', 'reclaim'), K('ticket', 'seal'),     // 批9 排除的步骤 / 主体
+  K('market', 'convert_to_claim'), K('claim', 'seal'), K('market', 'claim_draw'), K('claim', 'resolve'),                 // 配对错
+  K('market', 'seal').replace(ID64, ID64.toUpperCase()), K('market', 'seal').replace(ID64, 'g'.repeat(64)), K('market', 'seal').replace(ID64, ''),
+  K('market', 'seal').replace(ID64, '{' + ID64 + '}'), K('market', 'seal').replace(ID64, ID64.slice(0, 63)), K('market', 'seal').replace(ID64, ID64 + '0'), K('market', 'seal').replace(ID64, ID64.slice(0, 32)),
+  K('market', 'seal').replace(ID64, OLD_UUID_FORM), K('claim', 'claim_draw').replace(ID64, OLD_UUID_FORM), K('market', 'seal').replace(ID64, OLD_UUID_FORM.toUpperCase()),   // 首版假设的 UUID 形状
+  K('market', 'seal', '#1'), K('market', 'seal', '#0'), K('market', 'seal', '#01'), K('market', 'seal', '#a'), K('market', 'seal', '#٢'), K('market', 'seal', '#2 '), K('market', 'seal', '#'), K('market', 'seal', '#2#3'), K('market', 'seal', '#-2'),
+  K('market', 'seal') + '\n', K('market', 'seal') + ' ', K('market', 'seal') + ':extra', K('market', 'seal') + '\u0000',
+  K('market', 'SEAL'), K('MARKET', 'seal'), 'settle:', 'settle:market', 'settle:market:' + ID64,
+];
+const C_KEYS = [undefined, 'genesis:' + ID64, 'genesis:' + ID64 + '#2', 'proto-bet:' + ID64 + ':append', 'xsettle:market:' + ID64 + ':seal', 'Settle:market:' + ID64 + ':seal', 'SETTLE:market:' + ID64 + ':seal', 'settle', ' ' + K('market', 'seal'), '', 'x'];
+const S9B_KEYS = [() => ({ toJSON() { return K('market', 'seal'); } }), () => new String(K('market', 'seal')), () => [K('market', 'seal')], () => 123, () => ({}), () => null, () => true, () => new String('genesis:' + ID64)];
+
+const setEnv = (pde, psde) => {
+  if (pde === undefined) delete process.env.PROTO_DRIVER_ENABLED; else process.env.PROTO_DRIVER_ENABLED = pde;
+  if (psde === undefined) delete process.env.PROTO_SETTLEMENT_DRIVER_ENABLED; else process.env.PROTO_SETTLEMENT_DRIVER_ENABLED = psde;
+};
+const CELLS = [['0', '0'], ['1', '0'], ['0', '1'], ['1', '1']];
+const attempt = async (type, payload) => {
+  const seen = [];
+  const fake = (relayId, cmd, timeoutMs, origin) => { seen.push(cmd); return Promise.resolve({ ok: true }); };
+  try { await sendProtoCommand(type, payload, { _sendCommandAsyncForTest: fake }); return { sent: seen[0] || null, err: null }; }
+  catch (e) { return { sent: null, err: e.message }; }
+};
+const attempt_ = attempt;
+const bcast = (key) => (key === undefined ? { tx_json: '{}', sign_input_indices: [0], expected_txid: 'a'.repeat(64) } : { tx_json: '{}', sign_input_indices: [0], expected_txid: 'a'.repeat(64), intent_key: key });
+const ERR = { A: /proto_settlement_driver_disabled/, B: /proto_settlement_intent_key_invalid/, C: /proto_driver_disabled/, S: /proto_intent_key_not_string/ };
+const label = (k) => (typeof k === 'string' ? JSON.stringify(k).slice(0, 70) : String(k));
+const savedEnv = { pde: process.env.PROTO_DRIVER_ENABLED, psde: process.env.PROTO_SETTLEMENT_DRIVER_ENABLED };
+
+await t('9-2a 三个拒绝串两两互不为子串(否则"两闸互换"的变异看不出); 也不含对方的名字', () => {
+  const names = ['proto_driver_disabled', 'proto_settlement_driver_disabled', 'proto_settlement_intent_key_invalid', 'proto_intent_key_not_string'];
+  for (const a of names) for (const b of names) if (a !== b && a.includes(b)) throw new Error(a + ' 含 ' + b);
+});
+await t('9-2a A 类(合法 settle: 键, ' + A_KEYS.length + ' 条) × 4 格: 仅 PSDE=1 放行(与 PDE 无关); 其余拒 proto_settlement_driver_disabled', async () => {
+  for (const key of A_KEYS) for (const [pde, psde] of CELLS) {
+    setEnv(pde, psde);
+    const r = await attempt('covenant_broadcast', bcast(key));
+    if (psde === '1') { if (r.err || !r.sent || r.sent.intent_key !== key) throw new Error('应放行且原样透传 ' + label(key) + ' cell=' + pde + psde + ' :: ' + r.err); }
+    else if (!r.err || !ERR.A.test(r.err) || ERR.C.test(r.err)) throw new Error('应拒 proto_settlement_driver_disabled ' + label(key) + ' cell=' + pde + psde + ' :: ' + r.err);
+  }
+});
+await t('9-2a B 类(settle: 开头但格式不合法, ' + B_KEYS.length + ' 条; 含批9排除的 withdraw/reclaim/ticket) × 4 格: 一律拒 proto_settlement_intent_key_invalid(不回落旧开关, 即使两开关全开)', async () => {
+  for (const key of B_KEYS) for (const [pde, psde] of CELLS) {
+    setEnv(pde, psde);
+    const r = await attempt('covenant_broadcast', bcast(key));
+    if (!r.err || !ERR.B.test(r.err) || r.sent) throw new Error('应拒 proto_settlement_intent_key_invalid ' + label(key) + ' cell=' + pde + psde + ' :: ' + (r.err || '放行了'));
+  }
+});
+await t('9-2a C 类(其它: 缺失 / genesis: / proto-bet: / xsettle: / Settle: / settle 无冒号 / 首部空白 …, ' + C_KEYS.length + ' 条) × 4 格: 仅 PDE=1 放行(与 PSDE 无关: PSDE=1 而 PDE=0 仍拒); 其余拒 proto_driver_disabled', async () => {
+  for (const key of C_KEYS) for (const [pde, psde] of CELLS) {
+    setEnv(pde, psde);
+    const r = await attempt('covenant_broadcast', bcast(key));
+    if (pde === '1') { if (r.err || !r.sent || r.sent.intent_key !== key) throw new Error('应放行 ' + label(key) + ' cell=' + pde + psde + ' :: ' + r.err); }
+    else if (!r.err || !ERR.C.test(r.err) || ERR.A.test(r.err)) throw new Error('应拒 proto_driver_disabled ' + label(key) + ' cell=' + pde + psde + ' :: ' + r.err);
+  }
+});
+await t('9-2a S9-b: 自有 intent_key 存在且不是原始 string(String 对象 / 数组 / 数字 / 对象 / null / true) ⇒ 4 格一律拒 proto_intent_key_not_string(不走旧开关)', async () => {
+  for (const mk of S9B_KEYS) for (const [pde, psde] of CELLS) {
+    setEnv(pde, psde);
+    const r = await attempt('covenant_broadcast', bcast(mk()));
+    if (!r.err || !ERR.S.test(r.err) || r.sent) throw new Error('应拒 proto_intent_key_not_string cell=' + pde + psde + ' :: ' + (r.err || '放行了'));
+  }
+});
+await t('9-2a read 命令 × 4 格: 全放行, 不受任何一把 write 闸约束(即使带一个非法 settle: 键)', async () => {
+  for (const [pde, psde] of CELLS) {
+    setEnv(pde, psde);
+    for (const type of ['get_address_utxos', 'get_mempool_entry', 'check_utxo_landed', 'get_past_median_time']) {
+      const r = await attempt(type, { address: 'kaspa:x', intent_key: K('claim', 'withdraw') });
+      if (r.err || !r.sent) throw new Error(type + ' 应放行 cell=' + pde + psde + ' :: ' + r.err);
+    }
+  }
+});
+await t('9-2a 开关只认字面 \'1\': PSDE / PDE 取 \'on\' \'true\' \'0\' \' 1\' \'\' 都等于关', async () => {
+  for (const v of ['on', 'true', '0', ' 1', '', '01']) {
+    setEnv('1', v); let r = await attempt('covenant_broadcast', bcast(K('market', 'seal')));
+    if (!r.err || !ERR.A.test(r.err)) throw new Error('PSDE=' + JSON.stringify(v) + ' 应等于关 :: ' + r.err);
+    setEnv(v, '1'); r = await attempt('covenant_broadcast', bcast('genesis:' + ID64));
+    if (!r.err || !ERR.C.test(r.err)) throw new Error('PDE=' + JSON.stringify(v) + ' 应等于关 :: ' + r.err);
+  }
+});
+await t('9-2a 每次调用读 env: 同一进程内 PSDE 0→1→0 立即生效', async () => {
+  setEnv('0', '0'); if (!(await attempt('covenant_broadcast', bcast(K('market', 'seal')))).err) throw new Error('0 应拒');
+  setEnv('0', '1'); if ((await attempt('covenant_broadcast', bcast(K('market', 'seal')))).err) throw new Error('1 应放行');
+  setEnv('0', '0'); if (!(await attempt('covenant_broadcast', bcast(K('market', 'seal')))).err) throw new Error('再 0 应拒');
+});
+await t('9-2a 快照(闸与发送同一份): 访问器 intent_key 每读换值 ⇒ 只被读 1 次, 闸判定的值 == 发出去的值(两个方向)', async () => {
+  const VA = K('market', 'seal');
+  // 方向 1: 第一次读是合法 settle:, 之后是 genesis: —— 闸按 A 类判(PSDE=1 PDE=0 放行), 发出去的必须也是 VA
+  setEnv('0', '1'); let n = 0;
+  let r = await attempt('covenant_broadcast', { tx_json: '{}', get intent_key() { return n++ === 0 ? VA : 'genesis:' + ID64; } });
+  if (r.err || r.sent.intent_key !== VA || n !== 1) throw new Error('方向1: sent=' + (r.sent && r.sent.intent_key) + ' reads=' + n + ' err=' + r.err);
+  // 方向 2: 第一次读是 genesis:, 之后是合法 settle: —— 闸按 C 类判(PDE=1 PSDE=0 放行), 发出去的必须也是 genesis:
+  setEnv('1', '0'); n = 0;
+  r = await attempt('covenant_broadcast', { tx_json: '{}', get intent_key() { return n++ === 0 ? 'genesis:' + ID64 : VA; } });
+  if (r.err || r.sent.intent_key !== 'genesis:' + ID64 || n !== 1) throw new Error('方向2: sent=' + (r.sent && r.sent.intent_key) + ' reads=' + n + ' err=' + r.err);
+  // 方向 3: 第一次读是合法 settle:、PSDE=0 ⇒ 必须拒(不能因第二次读到别的值而放行)
+  setEnv('1', '0'); n = 0;
+  r = await attempt('covenant_broadcast', { tx_json: '{}', get intent_key() { return n++ === 0 ? VA : 'genesis:' + ID64; } });
+  if (!r.err || !ERR.A.test(r.err)) throw new Error('方向3 应拒 A: ' + r.err);
+});
+await t('9-2a 快照: Proxy payload(get 陷阱每读换值)同样只读 1 次、判定值 == 发送值', async () => {
+  const VA = K('claim', 'claim_draw'); let reads = 0;
+  const p = new Proxy({}, {
+    ownKeys: () => ['tx_json', 'intent_key'],
+    getOwnPropertyDescriptor: (tg, k) => (k === 'tx_json' || k === 'intent_key' ? { enumerable: true, configurable: true, writable: true, value: undefined } : undefined),
+    get: (tg, k) => (k === 'intent_key' ? (reads++ === 0 ? VA : 'genesis:' + ID64) : k === 'tx_json' ? '{}' : undefined),
+  });
+  setEnv('0', '1');
+  const r = await attempt('covenant_broadcast', p);
+  if (r.err || r.sent.intent_key !== VA || reads !== 1) throw new Error('sent=' + (r.sent && r.sent.intent_key) + ' reads=' + reads + ' err=' + r.err);
+});
+await t('9-2a 快照: 原型链上继承的 intent_key 不会被复制进快照 ⇒ 按"缺失"(C 类)判, 且发送里也没有它', async () => {
+  const proto = { intent_key: K('market', 'seal') };
+  const payload = Object.assign(Object.create(proto), { tx_json: '{}' });
+  setEnv('0', '1'); let r = await attempt('covenant_broadcast', payload);
+  if (!r.err || !ERR.C.test(r.err)) throw new Error('PDE=0 PSDE=1 应按 C 类拒: ' + r.err);
+  setEnv('1', '0'); r = await attempt('covenant_broadcast', payload);
+  if (r.err || 'intent_key' in r.sent) throw new Error('应放行且不带 intent_key: ' + r.err + ' ' + JSON.stringify(r.sent));
+});
+await t('9-2a 源码结构: 快照恰一处 { ...payload, type }, 两处发送都用 out; 出口 import 仍只有 proto-relay-guard(零新 import)', () => {
+  const src = fs.readFileSync(new URL('./proto-relay-ipc.mjs', import.meta.url), 'utf8').replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
+  if ((src.match(/\{\s*\.\.\.payload,\s*type\s*\}/g) || []).length !== 1) throw new Error('快照应恰一处');
+  if ((src.match(/PROTO_RELAY_ID,\s*out,\s*timeoutMs,\s*'internal'/g) || []).length !== 2) throw new Error('两处发送都应用 out');
+  const imports = src.match(/^\s*import\s.*$/gm) || [];
+  if (imports.length !== 1 || !/proto-relay-guard\.mjs/.test(imports[0]) || /await import\(/.test(src.replace("await import('../services/relay-manager.js')", ''))) throw new Error('import 变了: ' + JSON.stringify(imports));
+});
+await t('9-2a 漂移测试: 出口的 S9 与 proto-settlement-intent 的键生成器一致——批9 四个配对产出的键(含 #2 / #10)全部通过; withdraw / reclaim / ticket 产出的键被拒; 出口配对表恰是批9 四步', async () => {
+  const SI = await import('./proto-settlement-intent.mjs');
+  const { randomBytes } = await import('node:crypto');
+  const ok = [], bad = [];
+  for (const subject of SI.SETTLEMENT_SUBJECT_TYPES) for (const step of SI.SETTLEMENT_STEPS) {
+    for (const attempt of [1, 2, 10]) {
+      let key; try { key = SI.settlementIntentKeyFor(subject, randomBytes(32).toString('hex'), step, attempt); } catch { continue; }   // 非法配对生成器自己就拒
+      (PROTO_SETTLEMENT_EXIT_STEP_SUBJECT[step] === subject ? ok : bad).push([key, subject, step]);
+    }
+  }
+  if (ok.length !== 12) throw new Error('批9 配对产出应 12 条(4 步 × 3 attempt), 实得 ' + ok.length);
+  for (const [key, subject, step] of ok) if (!isValidSettlementIntentKey(key)) throw new Error('批9 键应通过: ' + key);
+  const badSteps = new Set(bad.map(([, , step]) => step));
+  if (JSON.stringify([...badSteps].sort()) !== JSON.stringify(['reclaim', 'withdraw'])) throw new Error('被排除的步骤应恰为 withdraw / reclaim, 实得 ' + JSON.stringify([...badSteps]));
+  for (const [key] of bad) if (isValidSettlementIntentKey(key)) throw new Error('排除步骤的键不该通过: ' + key);
+  if (JSON.stringify(Object.keys(PROTO_SETTLEMENT_EXIT_STEP_SUBJECT).sort()) !== JSON.stringify(['claim_draw', 'convert_to_claim', 'resolve', 'seal'])) throw new Error('出口配对表应恰是批9 四步');
+  if (!Object.isFrozen(PROTO_SETTLEMENT_EXIT_STEP_SUBJECT)) throw new Error('配对表应冻结');
+});
+await t('9-2a 校验函数纯度: 非字符串输入 ⇒ false 不抛; 正则无状态(连续调用结果稳定)', () => {
+  for (const v of [undefined, null, 1, {}, [], new String(K('market', 'seal'))]) if (isValidSettlementIntentKey(v) !== false) throw new Error('非字符串应 false');
+  for (let i = 0; i < 5; i++) if (!isValidSettlementIntentKey(K('market', 'seal'))) throw new Error('第 ' + i + ' 次应稳定为 true');
+});
+await t('9-2a 生产者↔出口: 真实 settlementIntentKeyFor + 真实生成式 id(randomBytes(32).toString(hex), 与 api/proto.js 创建市场同式)产出的键, 四步 × attempt 1/2/10 全部是 A 类: PSDE=1 放行、PSDE=0 拒 proto_settlement_driver_disabled(不是 B)——手写串矩阵之外的对照', async () => {
+  const SI = await import('./proto-settlement-intent.mjs');
+  const { randomBytes } = await import('node:crypto');
+  const protoSrc = fs.readFileSync(new URL('../api/proto.js', import.meta.url), 'utf8');
+  if (!/const marketId = randomBytes\(32\)\.toString\('hex'\)/.test(protoSrc)) throw new Error('api/proto.js 创建市场的 id 生成式变了(应仍是 randomBytes(32).toString("hex"))——S9 的 subject_id 形状须同步');
+  let n = 0;
+  for (const [step, subject] of PAIRS) for (const attempt of [1, 2, 10]) {
+    const id = randomBytes(32).toString('hex');                    // 真实生成式(市场与 claim 同式)
+    const key = SI.settlementIntentKeyFor(subject, id, step, attempt);
+    setEnv('0', '1'); let r = await attempt_('covenant_broadcast', bcast(key));
+    if (r.err || !r.sent || r.sent.intent_key !== key) throw new Error('PSDE=1 应放行真实键 ' + key + ' :: ' + r.err);
+    setEnv('1', '0'); r = await attempt_('covenant_broadcast', bcast(key));
+    if (!r.err || !ERR.A.test(r.err) || ERR.B.test(r.err)) throw new Error('PSDE=0 应是 A 类拒(不是 B) ' + key + ' :: ' + r.err);
+    n++;
+  }
+  if (n !== 12) throw new Error('应覆盖 12 条, 实得 ' + n);
+});
+await t('9-2a S9-b 补: 带 toJSON() 返回 settle: 字面的对象 ——(a)确实是隐患: 序列化后变成原始 settle: 串; (b)出口按非字符串一律拒; undefined 值按缺失: 放行且发出的 out 序列化后该键不存在', async () => {
+  const evil = { toJSON() { return K('market', 'seal'); } };
+  if (JSON.parse(JSON.stringify({ intent_key: evil })).intent_key !== K('market', 'seal')) throw new Error('前提不成立: toJSON 对象序列化后应变成 settle: 原始串');
+  for (const [pde, psde] of CELLS) { setEnv(pde, psde); const r = await attempt_('covenant_broadcast', bcast(evil)); if (!r.err || !ERR.S.test(r.err) || r.sent) throw new Error('应拒 S9-b cell=' + pde + psde + ' :: ' + (r.err || '放行了')); }
+  setEnv('1', '0');
+  const r2 = await attempt_('covenant_broadcast', { tx_json: '{}', intent_key: undefined });
+  if (r2.err || !r2.sent) throw new Error('undefined 值应按缺失放行(PDE=1): ' + r2.err);
+  if ('intent_key' in JSON.parse(JSON.stringify(r2.sent))) throw new Error('发出的 out 序列化后不该有 intent_key');
+  setEnv('0', '1');
+  const r3 = await attempt_('covenant_broadcast', { tx_json: '{}', intent_key: undefined });
+  if (!r3.err || !ERR.C.test(r3.err)) throw new Error('undefined(缺失)在 PDE=0 应按 C 类拒: ' + r3.err);
+});
+setEnv(savedEnv.pde, savedEnv.psde);
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail === 0) {
   console.log('\n[test] ⑦(独立子进程) PROTO_RELAY_ID 未配置 ⇒ sendProtoCommand 一律 throw(fail-closed):');
