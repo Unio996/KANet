@@ -1,0 +1,39 @@
+# NWT F1 笔(11c30eb7)独立实测输出(独立检出 D:\kanet-nwt-cand, 独立 npm ci; 每次变异后还原, git status 空)
+
+## 1. 亲跑
+proto-settlement-c1 41/0    proto-settlement-chain-checks 51/0    proto-claim-draw 53/0      (与 J2/Bettor 自报一致)
+
+## 2. 我当初(C 笔审)的分级器掩盖场景, 改用新 API 复跑: 步骤 A 每 tick 瞬时失败, 步骤 B 每 tick 成功
+tick 1: A fails -> level=warn consecutiveTicks=1
+tick 2: A fails -> level=warn consecutiveTicks=2
+tick 3: A fails -> level=error consecutiveTicks=3
+tick 4: A fails -> level=error consecutiveTicks=4
+tick 5: A fails -> level=error consecutiveTicks=5
+tick 6: A fails -> level=error consecutiveTicks=6
+key omitted -> TypeError
+# (C 笔审时同一场景: 6 个 tick 全程 level=warn consecutiveTicks=1, 永不升 error)
+
+## 3. 我的 22 个变异(nwt-mutate-f1.cjs; 每个跑 proto-settlement-c1.test.mjs; 还原后 sha256 一致)
+killed   NWT-f1 role version!=0 check removed   RED(f=1,x=1)
+killed   NWT-f2 fee candidate version check removed   RED(f=1,x=1)
+killed   NWT-f3 fee lower bound exclusive (equal must pass)   RED(f=1,x=1)
+killed   NWT-f4 fee upper bound exclusive (equal must pass)   RED(f=1,x=1)
+killed   NWT-f5 fee upper bound not rechecked   RED(f=1,x=1)
+killed   NWT-f6 fee lower bound not rechecked   RED(f=1,x=1)
+killed   NWT-f7 out-of-range not counted toward saturated   RED(f=1,x=1)
+killed   NWT-f8 out-of-range event dropped   RED(f=1,x=1)
+killed   NWT-f9 grader onSuccess(key) clears ALL keys   RED(f=1,x=1)
+killed   NWT-f10 grader onFailure: key not required   RED(f=1,x=1)
+killed   NWT-f11 grader collapses to one shared key   RED(f=2,x=1)
+killed   NWT-f12 entry assertStepBudget removed   RED(f=2,x=1)
+killed   NWT-f13 entry assertFactsIpcTimeout removed   RED(f=1,x=1)
+killed   NWT-f14 ipcTimeoutMs finite check removed   RED(f=2,x=1)
+killed   NWT-f15 budget timer never cleared   RED(f=1,x=1)
+killed   NWT-f16 classify returns null again for unknown   RED(f=2,x=1)
+killed   NWT-f17 classify drops err.code   RED(f=1,x=1)
+killed   NWT-f18 role chainParents outpoint index forced 0   RED(f=2,x=1)
+killed   NWT-f19 fee chainParents outpoint index forced 0   RED(f=2,x=1)
+killed   NWT-f20 withFeeParent accepts malformed txid   RED(f=1,x=1)
+killed   NWT-f21 withFeeParent accepts negative vout   RED(f=1,x=1)
+SURVIVED NWT-f22 injected timers not validated   ok
+restored sha256 identical: true
