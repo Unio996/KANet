@@ -85,3 +85,28 @@ KANet-UI 只读核完（Bettor 转告，我没有独立核）：:3202 只监听 
 - 唯一能绕过 allowlist 又拿不到密钥的攻击形状是"本机通用代理转发（SSRF）"。它要转发自定义请求头才能过密钥这一关；这一步无法从静态证据排除，所以建议加两条几乎零成本的加固（SHOULD，不阻塞）：`/resolve` 这一档 ① 用 `request.socket.remoteAddress` 而不是 `request.ip` 做回环判断，并**拒绝任何带 `X-Forwarded-For` / `Forwarded` / `Via` 的请求**（这条路由只应被运维者从本机 shell 直连调用，没有任何合法的代理跳）；② 校验 `Host` 头必须是回环字面量（`127.0.0.1:<port>` / `localhost:<port>` / `[::1]:<port>`），挡 DNS rebinding 和保留原 Host 的转发。
 - SSH `-L` 那条我同意 KANet-UI 的判断：已认证 SSH 用户本身就是授权主体，转发过来的请求与运维者本机请求无法区分，也不需要区分；记为已接受的剩余风险。
 - 运维用法：调用 `/resolve` 的脚本必须从文件或环境变量读密钥，**不要放进命令行参数**（同一用户下的其他进程能读到进程命令行）；同一用户下的进程也读得到 console 进程的环境，所以"同用户恶意进程"不在本层的威胁模型内（它本来就能读 DB 与密钥信封）。
+
+## 复核（同日）：设计 v0.3（`13e377ba`）对 M1–M6 的落实 — NWT 判定
+
+我逐条读了 v0.2→v0.3 的全部 diff（74 增 22 删）与 §16 对照表。
+
+| 项 | 判定 | 备注 |
+|---|---|---|
+| M1 | ✅ 落实 | `e.entry.covenantId`、`'covenantId' in e.entry` 缺失 ⇒ 整条报 `covenant_id_field_missing`、真实 wasm 夹具、9-0 回归含"与节点直读逐字节一致" |
+| M2 | ✅ 落实 | `facts:true` 才走共享 RpcClient 且**无回退**；不带 `facts` 输出字节不变；R2 只回 `{ok, pastMedianTimeMs, observedAtMs}` |
+| M3 | ✅ 落实 | 六处登记（console 允许表、`commands.mjs` 三处、`authorize.mjs`、handler）+ 枚举验收 + `PROTO_COMMAND_ALLOWLIST` 对旧表差分只多一行 `read`（该行只有 R2 的新命令；R1 改的是既有命令，不新增登记） |
+| M4 | ✅ 落实 | 现场核实际 env + 启动日志 `[proto-settlement-driver] disabled` |
+| M5 | ✅ 设计落实 | §3.8 前缀分闸，放 9-2，2×2 矩阵在出口层，缺失 `intent_key` 按非 settle 走旧开关（正确的失败方向）。见下 S9 |
+| M6 | ✅ 落实 | §6.4 `expectedOutpoints` + `expectedCovenantIds`（相等；`null` = 必须无 covenant） |
+
+S1–S8、D3、哨兵私钥、9-4 全新库/全新 env 也都写进去了，没有发现漂移。**M1–M6：GREEN。**
+
+### 一条新的 MUST（N1），来自 v0.3 里 S2 的具体落法，需在 9-0 动手前写进设计（一句话的改动）
+v0.3 定了"R1 上限 N=200，超限返回 `truncated:true`，C1 对 covenant 父 UTXO 的缺失遇 `truncated` 一律 fail-closed"。这个语义本身安全，但它给第三方留了一条**活性攻击**：RootClose / RootClaim / leaf / held 的 P2SH 地址由市场状态确定性算出、是公开的，**任何人都可以往这些地址转入任意数量的 dust UTXO**。攻击者往某个市场的 covenant 地址撒 >200 个小额 UTXO，C1 用"按地址取列表"的方式就会永远看到 `truncated:true` 且期望的 outpoint 落在窗外 ⇒ 该步永久 fail-closed，市场卡死（不丢钱，但结算不能推进）。代价：按 KIP-9，每个输出的 storage mass 约为 10¹²/v，0.2 KAS 的输出约 5 万 mass，一笔交易只能带十来个，所以约 40 KAS 就能封死一个市场——对主网真实 KAS 的市场是可接受的成本。
+**改法**：`facts:true` 额外支持可选 `outpoints:[{txid,index}]`（1–8 项）；**服务端**在完整 RPC 结果里按 outpoint 过滤，只回这些项，且**不受 N=200 截断影响**（截断只作用于无 `outpoints` 的列表形态，用于 fee 输入选取）。C1 的全部 covenant 父 UTXO 检查（8 处）一律用 `outpoints` 形态：返回里没有该项 ⇒ 确实不在该地址的 UTXO 集（已花或未落链），语义清晰、可区分于"被截断"。列表形态的排序与过滤要在设计里写明：**先按 `minAmount/maxAmount` 过滤，再按面值降序取前 N，最后才算 `truncated`**。9-0 回归加两条：① 地址上有 >200 个 dust 时 `outpoints` 形态仍能取到目标；② 变异对照：把 C1 换回列表形态 ⇒ ① 必红。
+（现有不带 `facts` 的 `get_address_utxos` 仍是 per-call 新建 RpcClient、不截断；它的消费者在本批之外，不动。）
+
+### 给 9-2 / 9-3 的提醒（不阻塞 9-0）
+- **S9（9-2，M5 的出口分闸）**：出口只按 `intent_key` 前缀分闸，意味着"结算开关为 1"= 允许广播**任何**带 `settle:` 键的交易（relay 只校验固定面值/签名输入上限/fee 上限，不看交易种类）。建议出口对 `settle:` 键再做**严格格式校验** `^settle:(market|claim):[A-Za-z0-9_-]+:(seal|resolve|convert_to_claim|claim_draw)(#\d+)?$`，把 step 限定为批 9 的四步——这样 §11.1 的"withdraw / ticket_reclaim 不接线"在出口层多一道防线，不只靠源码扫描。
+- **9-3（`/resolve`）**：v0.3 采用 runtime-identity 模板（allowlist 同时核 `request.ip` 与 `socket.remoteAddress`）——同意，比我之前建议的更贴现有先例。请把我在 `52072a09` 增补里的两条也并进去：拒绝任何带 `X-Forwarded-For` / `Forwarded` / `Via` 的请求；`Host` 头必须是回环字面量。KANet-UI 的核查结论（主网机器上无反代/隧道，SSH `-L` 记为已接受的剩余风险）我已判定，见上一节增补。
+- `checkAdminSecretTier` 改 `timingSafeEqual`：我倾向**顺手做**（helper 只有一处比较，改动面小，所有档受益），审 9-3 diff 时一并验证不改变 503/403 语义。
