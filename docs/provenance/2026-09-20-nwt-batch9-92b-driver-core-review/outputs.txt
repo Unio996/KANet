@@ -1,0 +1,12 @@
+# NWT 9-2b(ii) 驱动核心审(5d4822af)实测输出; 桩依赖, 不连 relay/节点/库
+
+## 1. 我的探针
+P1 grader event names over 117 synthetic errors: distinct=[settlement_c1_programming_error]  OUTSIDE closed set: []
+P2 exit gate rejects the intent key (deterministic): outcome={"outcome":"failed","class":"broadcast_failed","transient":true} alerts=[]
+P2 exit gate: settlement switch off: outcome={"outcome":"failed","class":"broadcast_failed","transient":true} alerts=[]
+P2 relay replies ok:false code=invalid_tx: outcome={"outcome":"failed","class":"broadcast_failed","transient":true} alerts=[]
+P2 IPC timeout: outcome={"outcome":"failed","class":"broadcast_failed","transient":true} alerts=[]
+P2 control: success: outcome={"outcome":"submitted"} alerts=[]
+
+## 2. 亲跑测试(单文件, 临时库)
+proto-settlement-driver-core 23/0; proto-tx-assembly-settlement 44/0; proto-tx-assembly-settlement-golden 12/0 (字节不变); proto-settlement-c1 45/0; chain-checks 51/0; pointers 27/0; proto-claim-draw 57/0; proto-relay-ipc 33/0
