@@ -35,7 +35,7 @@ import {
 
 const DEFAULT_INTERVAL_MS = 20_000; // 账本1438③-6, 可用 PROTO_DRIVER_INTERVAL_MS 覆盖
 const DEFAULT_TICK_CAP = 5;         // 账本1438③-4, 可用 PROTO_DRIVER_TICK_CAP 覆盖
-const REORG_SAFE_MIN_DEPTH = 20;    // 同 pool-shard-register.mjs 既有具名常量的数值(实测校准值), 本文件独立持有一份避免多一层跨模块耦合——数值必须与 pool-shard-register.mjs 保持一致
+export const REORG_SAFE_MIN_DEPTH = 20;    // 同 pool-shard-register.mjs 既有具名常量的数值(实测校准值), 本文件独立持有一份避免多一层跨模块耦合——数值必须与 pool-shard-register.mjs 保持一致
 
 function _intervalMs() {
   const v = Number(process.env.PROTO_DRIVER_INTERVAL_MS);

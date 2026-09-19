@@ -219,6 +219,18 @@ await t('NWT e4039235 MUST ①: 出口分闸的四种确定性拒绝(broadcast �
   }
   assert.deepEqual([...EXIT_GATE_REFUSAL_CODES], ['proto_settlement_intent_key_invalid', 'proto_intent_key_not_string', 'proto_driver_disabled', 'proto_settlement_driver_disabled']);
 });
+await t('出口闸拒绝按 (intent_key, code) 去重(每 tick 重试会每 tick 撞同一个拒绝, 不能每 tick 刷 events): 同 key 同 code 连续 5 个 tick 只报 1 次; 换 code 再报; 换 key 再报; 成功清零后可再报', async () => {
+  const gateErr = (code) => () => { throw new Error(`sendProtoCommand: ${code} — 'covenant_broadcast' refused`); };
+  const w = mkWorld({ broadcast: gateErr('proto_settlement_driver_disabled') }); const d = createSettlementDriver(w.deps); const i = ids();
+  const go = (tickId) => d.advanceStep({ step: 'seal', subjectId: i.subjectId, marketId: i.marketId, tickId });
+  for (const tickId of [1, 2, 3, 4, 5]) { const r = await go(tickId); assert.equal(r.outcome, 'failed'); assert.equal(r.transient, false); }
+  assert.equal(w.alerts.length, 1, '5 个 tick 只报 1 次');
+  w.cfg.broadcast = gateErr('proto_driver_disabled'); await go(6); await go(7); assert.equal(w.alerts.length, 2, '换 code 再报一次'); assert.equal(w.alerts[1].payload.code, 'proto_driver_disabled');
+  const j = ids(); await d.advanceStep({ step: 'seal', subjectId: j.subjectId, marketId: j.marketId, tickId: 8 }); assert.equal(w.alerts.length, 3, '换 key 再报一次');
+  w.cfg.broadcast = { ok: true, txId: 'ab'.repeat(32) }; assert.equal((await go(9)).outcome, 'submitted');
+  w.rows.get(d._keyOf('seal', i.subjectId)).status = 'pending'; w.cfg.broadcast = gateErr('proto_driver_disabled'); await go(10);
+  assert.equal(w.alerts.length, 4, '成功清零后可再报');
+});
 await t('NWT e4039235 MUST ②: 其余广播失败(relay ok:false invalid_tx)按 (intent_key, code) 连续 3 个【不同 tick】后报警一次, 第 4 次不重复; 同一 tick 内重复不累计; code 变了重计; 成功清零后可再报; 两个 key 互不影响; 无 code 的 IPC 超时同样计数', async () => {
   const w = mkWorld({ broadcast: { ok: false, error: 'invalid tx', code: 'invalid_tx' } }); const d = createSettlementDriver(w.deps); const i = ids();
   const go = (tickId) => d.advanceStep({ step: 'seal', subjectId: i.subjectId, marketId: i.marketId, tickId });
