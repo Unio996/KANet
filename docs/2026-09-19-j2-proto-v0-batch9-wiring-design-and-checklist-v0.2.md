@@ -1,8 +1,8 @@
-> **Status**: CURRENT（草稿 v0.3.3，2026-09-19，J2；批9 接线设计 + 验收清单；v0.3.2 之上加 **§19：9-1 模块接口、错误码与测试矩阵**（只文档、待 NWT 审）；本文不含任何代码改动。v0.2→v0.3 见 §16，v0.3→v0.3.1 见 §17，v0.3.1→v0.3.2 见 §18，v0.3.2→v0.3.3 见 §19）
+> **Status**: CURRENT（草稿 v0.3.4，2026-09-20，J2；批9 接线设计 + 验收清单；**已落实 NWT 审 §18–§19（`680b8bb8`）的 4 条 MUST N91-1…4、5 条 SHOULD、§19.6 六问 verdict**；9-1 首批落码基线 = 主线 `c8089747`，NWT 审 diff 时对照本版；本文不含任何代码改动。v0.2→v0.3 见 §16，v0.3→v0.3.1 见 §17，v0.3.1→v0.3.2 见 §18，v0.3.2→v0.3.3 见 §19，v0.3.3→v0.3.4 见 §20）
 
-# 原型 v0 结算批9（驱动接线）设计与验收清单 v0.3.3
+# 原型 v0 结算批9（驱动接线）设计与验收清单 v0.3.4
 
-> 文件名沿用 `…-v0.2.md`（账本 1527/1528/1529 与 NWT 审稿均以此路径引用，改名会断引用）；**正文即 v0.3.3**，v0.2→v0.3 差异见 §16，v0.3→v0.3.1 见 §17，v0.3.1→v0.3.2 见 §18，v0.3.2→v0.3.3 见 §19。
+> 文件名沿用 `…-v0.2.md`（账本 1527/1528/1529 与 NWT 审稿均以此路径引用，改名会断引用）；**正文即 v0.3.4**，v0.2→v0.3 差异见 §16，v0.3→v0.3.1 见 §17，v0.3.1→v0.3.2 见 §18，v0.3.2→v0.3.3 见 §19，v0.3.3→v0.3.4 见 §20。
 
 取代 `2026-09-19-j2-proto-v0-batch9-driver-wiring-acceptance-checklist-v0.1.md` 中关于批9范围与接线的部分（v0.1 保留作历史，其 C1/C2/C3、pmt、SLA、NO-TX-NO-STATE 各条本文继承并细化）。
 依据：Bettor 账本 1494/1520/1523/1524 与本轮裁定 ③、Codex 对 C1 的接受条件、NWT 批3–7 审、代码现状盘点（§1，全部可 `grep` 复核）。D-021 合规：无真实地址/余额/私钥。
@@ -325,7 +325,9 @@ v0.1 的 §1–§7 各条本文均继承；差异：① 范围收窄为四步；
 
 依据：J2 读码（行号取自读码时的分支头：设计分支 `5bda9583` 侧代码；主线侧文件另注）、NWT 9-0 审 `4e34e9c9` 转来的 S-2/S-3/② 三条、Bettor 对"S10 来源表逐格核"的点头。**本节不含代码。**
 
-### 18.0 🔴 基线依赖（先于一切，9-1 落码前必须解）
+### 18.0 基线依赖（v0.3.4：🟢 已解；下文保留为当时的依据）
+
+🟢 **v0.3.4 更新**：Bettor 裁 (a) 后，候选（设计分支 `a07c2680`，代码内容 `577a4ebb`）经 NWT 合入审 GREEN（`147c7770`，在非 scratch 独立检出从零复跑，`tx-mass-ub` 实跑 35/0）已由 Bettor `--no-ff` 合入主线（merge `e2e91c6e`，主线头 `c8089747`）。**9-1 基线 = `c8089747`**；下文的依赖论证与选项 (a)/(b) 是当时的依据，保留不改。**遗留限定**：`804349e3`（批 8 v2 ticket_reclaim builder）随合入进了主线，但账本里**没有 NWT 对它字节层的逐笔复核记录**；它未接线、cap 占位、有 §11.1 扫描与 §3.8 出口双重挡着，**接线前须补字节层复核 + T-FEE-PRICING，9-1 不碰它**。
 
 **主线（`origin/bshard-m3-deploy`）不包含 9-1 需要的代码。** 读码事实（`git grep` / `git ls-tree` 可复核）：
 - 主线只有批 1–5（market_seal / close_commit / convert_to_claim 的 builder 与 `proto-settlement-inputs.mjs` / `proto-settlement-intent.mjs`）。`git grep CLAIM_DRAW_TICKET_IN_INDEX origin/bshard-m3-deploy -- kasia-console/src` **零命中**；`git diff --name-status origin/bshard-m3-deploy <设计分支> -- kasia-console/src` 显示这些文件**只在设计分支侧**：`proto-settlement-chain-checks.mjs`（C1 纯函数，含 `.test.mjs`）、`proto-claim-draw-witness.mjs`（含 `proto-claim-draw.test.mjs`）、`proto-ktt-claim-spend-witness.mjs`、`proto-payout-leaf.mjs`、`proto-ticket-authorize-witness.mjs`；claim_draw 的 builder 本体在 `proto-tx-assembly-settlement.mjs` 里（该文件主线也有，但主线版本不含 claim_draw/withdraw/ticket_reclaim）。
@@ -347,13 +349,13 @@ v0.1 的 §1–§7 各条本文均继承；差异：① 范围收窄为四步；
 | 5 | convert_to_claim·held | **seal** 结算意图 landed（close_commit 不花代币）：`MARKET_SEAL_TOKEN_OUT_INDEX`(1) | seal 输出[1] 的 `covenantId` | `:35`；`CONVERT_TO_CLAIM_HELD_IN_INDEX`=1 `:446` | ✅ |
 | 6 | claim_draw·rootClaim | convert_to_claim 意图 landed：`CONVERT_TO_CLAIM_CLAIM_OUT_INDEX`(0) | 该输出的 `covenantId`（= builder 入参 `rootClaimCovId` 的来源） | `:448`；builder 文档 `:653-678` | ✅ |
 | 7 | claim_draw·held | convert_to_claim 意图 landed：`CONVERT_TO_CLAIM_TOKEN_OUT_INDEX`(1) | 该输出的 `covenantId` | `:449` | ✅ |
-| 8 | claim_draw·ticket | **赢家那一条**下注的 `proto_bets.ticket_txid` + `ticket_vout`（= `REGISTER_APPEND_TICKET_OUT_INDEX`(1)，append 确认时由 `markBetAppendLanded` 写入） | **null**（输出[1]不在 genesis 组，普通 P2SH） | `proto-broadcast-ops.mjs:288`；`proto-tx-assembly.mjs:56,507`；builder 文档"赢家 ticket UTXO(register_append 输出1)" | ✅ |
+| 8 | claim_draw·ticket | **赢家那一条**下注（`winnerBetId`）的 **landed append 意图的 `prepared_tx_json`**（经 `finalize()` 绑定到 `submitted_txid`）的输出[`REGISTER_APPEND_TICKET_OUT_INDEX`(1)]；并**交叉核对** `proto_bets.ticket_txid === submitted_txid` 且 `ticket_vout === 1`、该输出 spk == 现算的 ticket spk（`computeTicketGenesisArtifact`）、无 covenant——任一不符 ⇒ `pointer_ticket_inconsistent` | **null**（输出[1]不在 genesis 组，普通 P2SH） | `proto-broadcast-ops.mjs:288`（`markBetAppendLanded` 写的原始列，仅作交叉核对）；`proto-tx-assembly.mjs:56,507`；builder 文档"赢家 ticket UTXO(register_append 输出1)" | ✅（v0.3.4 按 NWT N91-3 改：与其余 7 格同一信任模型） |
 
-**第 8 格补充（读码新发现，之前没想到）**：v0 里所有下注的 `bettor_pk` 是同一个委员公钥，可能有多张"赢家票"——用哪一张？`deriveCloseCommitInputs`（`proto-settlement-inputs.mjs:36-63`）要求**胜方恰 1 条已确认下注**，否则 fail-closed，并返回 `winnerBetId`；所以"赢家票" = 该 `winnerBetId` 那一行的 ticket 指针。`proto_claims` **没有** `bet_id` 列（已核 `migrate.js`），claim → 票的关联是**派生的、不是外键**：由 `market_id` + `winning_side` 经 `deriveCloseCommitInputs` 得出。P4 建 `proto_claims` 行时不得另存一份会漂移的 bet 指针。
+**第 8 格补充**：v0 里所有下注的 `bettor_pk` 是同一个委员公钥，可能有多张"赢家票"——用哪一张？`deriveCloseCommitInputs`（`proto-settlement-inputs.mjs:36-63`）要求**胜方恰 1 条已确认下注**，否则 fail-closed，并返回 `winnerBetId`；所以"赢家票" = 该 bet 的票。`proto_claims` **没有** `bet_id` 列（已核 `migrate.js`），claim → 票的关联是**派生的、不是外键**。**v0.3.4（NWT N91-3）**：票的指针**不**直接取 `proto_bets.ticket_txid/ticket_vout` 这两个原始列——它们由 `markBetAppendLanded` 写入、无任何验证，是 8 格里**唯一**不经 `prepared_tx_json` + `finalize()` 的来源，同一模块里两种信任模型不应并存。改为取该 `winnerBetId` 对应 bet 的 **landed append 意图**（`proto_bet_intents`，`step='append'`、`status='landed'`）的 `prepared_tx_json` 输出[1]，再用两个原始列与现算 spk 做**交叉核对**；三者（列、意图、现算 spk）任一不一致抛 `pointer_ticket_inconsistent`。P4 建 `proto_claims` 行时不得另存一份会漂移的 bet 指针。
 
 **指针模块必须满足的不变量**（9-1 测试逐条守）：
-1. **id 必须重算**：`kaspa-wasm` 的 `Transaction.deserializeFromSafeJSON` **沿用 JSON 自带的 id、不重算**——J2 在本仓 wasm（`kaspa_bg.wasm` sha256 前缀 `51cec45e`）上实测：篡改一个输出面值而不动 id 字段，反序列化后 `tx.id` 仍是旧值；`finalize()` 后才变。所以对 `prepared_tx_json` 必须 **`finalize()` 后再与 `submitted_txid` 比对**，否则"txid 一致"的断言是空判据。变异对照：去掉 `finalize()` ⇒ 篡改用例必红。
-2. **谱系交叉核对（SHOULD，与 DB 无关的一致性）**：每笔产出交易的输入必须花掉上一个指针（如 close_commit 交易的输入 0 == seal 的输出 0 outpoint；convert_to_claim 的输入 0/1 == close_commit 输出 0 / seal 输出 1）。seal 与 close_commit 的输入下标现为 builder 内的字面量，9-1 一并导出 `MARKET_SEAL_*_IN_INDEX` / `CLOSE_COMMIT_*_IN_INDEX`（P6 已要求导出 `*_INPUT_HAS_COVENANT`，同批做）。
+1. **id 必须重算，且只读被 txid 覆盖的字段（v0.3.4，NWT N91-2 实测）**：`kaspa-wasm` 的 `Transaction.deserializeFromSafeJSON` **沿用 JSON 自带的 id、不重算**——J2 与 NWT 在本仓 wasm（`kaspa_bg.wasm` sha256 前缀 `51cec45e`）上各自实测确认。所以对 `prepared_tx_json` 必须 **`finalize()` 后再与 `submitted_txid` 比对**，否则"txid 一致"的断言是空判据。**覆盖范围**（NWT `nwt-txid-coverage-probe`，`finalize()` 后 id 是否变）：**被覆盖**——输出面值、**covenant id**、**covenant authorizing input**、输入 sequence、tx payload、lockTime；**不被覆盖**——输入的 `computeBudget`、`sigOpCount`、`signatureScript`（改了 id 不变）。由此：指针模块**只从 `finalize()` 之后的交易对象读输出**（不得从原始 JSON 字符串读），且**只读被覆盖的字段**（输出的 `covenantId`/面值/下标、输入的 `previousOutpoint`），**明确禁止**读 `inputs[].utxo`、`signatureScript`、`computeBudget`、`sigOpCount`。变异对照：去掉 `finalize()` / 改成读原始 JSON ⇒ 篡改用例必红。**未量的**：`utxo` 子对象与 `storageMass` 字段是否入哈希（按"节点上下文、不是交易内容"处理）。
+2. **谱系交叉核对（SHOULD，与 DB 无关的一致性）**：每笔产出交易的输入必须花掉上一个指针（如 close_commit 交易的输入 0 == seal 的输出 0 outpoint；convert_to_claim 的输入 0/1 == close_commit 输出 0 / seal 输出 1）。**只读输入的 `previousOutpoint`**（transactionId/index，被 txid 覆盖，N91-2）；seal 与 close_commit 的输入下标现为 builder 内的字面量，9-1 一并导出 `MARKET_SEAL_*_IN_INDEX`/`CLOSE_COMMIT_*_IN_INDEX`（P6 已要求导出 `*_INPUT_HAS_COVENANT`，同批做）。
 3. **covenantId 双重一致**：第 3、4 格的 covenantId 必须相等（续约保持 id）；第 4 格对第 6 格 builder 入参 `rootClaimCovId` 的传递链同理。
 4. **指针只是"预期"**：是否真实存在、未花费、spk 与 covenantId 是否相等，由 C1 经形态 O 对链上取证并要求相等（M6）。DB 被本机写者改错，后果是 C1 报 `missing`/`outpoint_drift`/`covenant_class_mismatch` ⇒ 该步 fail-closed，不会花错 UTXO。
 
@@ -363,7 +365,7 @@ v0.1 的 §1–§7 各条本文均继承；差异：① 范围收窄为四步；
 
 1. **消费方 IPC 超时 ≥ 15000**（NWT 裁定②）：relay 侧总预算 = `FACTS_RPC_WAIT_MS`(8000) + `FACTS_RPC_CALL_MS`(5000) = 13000；console 侧读命令 IPC 超时必须 ≥ 15000。测试断言"消费方超时 > 两常量之和"。
 2. **S-2 消费方判定条件**：relay 的 `FactsError`/超时回执走外层 catch，形状是 `{error, phase:'execution'}`，**没有 `ok` 字段**。消费方成功判定必须是 **`ok === true` ∧ `facts === true` ∧ `factsVersion === 1` ∧ `form` 与请求相符 ∧ 条目级键齐全**（每项 `scriptPublicKey.scriptHex` 为 string 且 `covenantId` 键存在），**不得**用 `!result.error` 或 `result.ok !== false`（错误回执里 `ok` 是 `undefined`）。落成一个消费方纯函数 `assertFactsResponse(res, {form, requested})`：另断言 `found ∪ missing` 恰等于请求集合且无重复、`found` 的每个 outpoint 都在请求里。变异对照：拆掉任一条件、把 `ok===true` 换成 `!error` ⇒ 用真实错误回执形状的用例必红。
-3. **C1 调用形状与预算**：形态 O 一次请求 = 一个地址 + 1–8 个 outpoint；各角色的地址互不相同 ⇒ 一步最多 3 次形态 O + 1 次形态 L（取 fee 输入）；串行发出。最坏一步 4 × 13 s = 52 s，驱动层必须有**每步总预算**：超出 ⇒ 本 tick 放弃、不推进任何状态（NO TX NO STATE）、下一 tick 重评估；不得因为"等太久"而降级跳过 C1 的任一检查。
+3. **C1 调用形状、并发与预算（v0.3.4，NWT N91-4）**：形态 O 一次请求 = 一个地址 + 1–8 个 outpoint；各角色的地址互不相同 ⇒ 一步最多 3 次形态 O + 1 次形态 L（取 fee 输入）。这几次是**彼此独立的只读请求，一律并发发出**（同一个共享 RpcClient 上并发 `getUtxosByAddresses` 无问题），**不得串行**：串行最坏 4 × 13 s = 52 s，而"每步预算 = tick 间隔的一半"这类定法会让节点稍慢时该步**系统性超预算、永远放弃**——因为是 fail-closed，不会被发现为 bug，活性被自己的预算饿死。并发后最坏一步 ≈ 13 s + 余量。**两条硬约束**（9-1 只写这两条，具体数值 9-2b 定）：① 每步总预算 ≥ `FACTS_RPC_WAIT_MS`(8000) + `FACTS_RPC_CALL_MS`(5000) + 余量，即 **≥ 15 s**（不小于 console 读命令 IPC 超时）；② 预算**必须小于 tick 间隔**。**删掉**"取 tick 间隔的一半"的旧建议。超出预算 ⇒ 本 tick 放弃、不推进状态、下一 tick 重评估；**不得**因等得久而跳过任何一项检查。并发请求中**任一个失败 ⇒ 整步 fail-closed**、不推进状态。
 4. **S-3（写进 9-4 威胁说明，不阻塞 9-1）**：`getUtxosByAddresses` 把整个地址 UTXO 集读进 wasm 内存后才过滤；地址上撒到"不可读"量级时，kaspa-wasm 的 trap 是**整个 wasm 实例**级的，会波及同一 relay 进程里的签名——既有、与 9-0 无关的残余风险；9-4 后应看一次 relay 的 wasm 线性内存曲线。
 5. **毒化 fee 向量**（NWT 审 9-1 时起 simnet 补，§12.12）：第三方密钥创建"covenant 绑定 + spk = relay P2PK"的 UTXO，喂给**真实的 fee 选取函数**，断言被跳过且选中干净候选。
 6. **`landed_at` tiebreak 小改**（§18.1）与 **`finalize()` 重算 id** 的变异对照（§18.1 不变量 1）。
@@ -382,11 +384,11 @@ v0.1 的 §1–§7 各条本文均继承；差异：① 范围收窄为四步；
 
 **不动**：`utxo-facts.mjs`（9-0 已合入）、`relay.mjs`、`proto-relay-ipc.mjs`（**不改它 ⇒ M0a 摘要不变**）、迁移、env、驱动开关。9-1 仍**无运行时效果**（无任何调用方，驱动分支是 9-2b）。
 
-**仍开放（v0.3.2）**：§18.0 基线依赖（Bettor 裁）；驱动层"每步总预算"的具体数值（§18.2.3，建议 = tick 间隔的一半，9-2b 定）；第 2 格的 covenantId 从 `prepared_tx_json` 取还是用 `kaspa.covenantId(feeOutpoint, outputs)` 独立重算——两者都可，倾向**两者都做并要求相等**（多一个独立来源，成本≈0），待 NWT 审 9-1 时定。
+**仍开放（v0.3.2）⇒ v0.3.4 已全部关闭**：§18.0 基线依赖——已解（见 §18.0 更新）；驱动层每步预算——不取"tick 间隔的一半"，改为两条硬约束（§18.2.3，数值 9-2b 定）；第 2 格 covenantId 的双来源——**默认强制**（NWT 同意，理由是"校验 builder 的 genesis 派生"，不是防 DB 篡改，见 §19.2）。
 
 ## 19. v0.3.2 → v0.3.3：9-1 模块接口、错误码与测试矩阵（只文档）
 
-**前提**：建立在 §18；§18.0 已由 Bettor 裁 (a)，合入候选（设计分支 `a07c2680`，代码内容 `577a4ebb`）待 NWT 合入审——**9-1 落码基线 = 候选合入主线之后的主线**，在此之前只做设计与评审。本节的接口以候选里**现有**的 `proto-settlement-chain-checks.mjs`（已读码）为准，不凭记忆。**读码事实**：`assertSettlementInputValuesOnChain({step, chainUtxos, expectedSpks})` 现抛带标签的普通 `Error`（`<role>_value_drift` / `<role>_spk_drift`），`chainUtxos[role]` 形状是 `{value, spent?, scriptPublicKeyHex}`，**没有任何生产调用方**（只有它自己的模块与 16 处测试调用）——所以给它加必填参数不会破坏生产路径，只需同批更新测试。
+**前提**：建立在 §18；§18.0 已解——候选已由 Bettor `--no-ff` 合入主线（`e2e91c6e`，NWT 合入审 GREEN `147c7770`），**9-1 落码基线 = 主线 `c8089747`**。本节的接口以主线里**现有**的 `proto-settlement-chain-checks.mjs`（已读码）为准，不凭记忆。**读码事实**：`assertSettlementInputValuesOnChain({step, chainUtxos, expectedSpks})` 现抛带标签的普通 `Error`（`<role>_value_drift` / `<role>_spk_drift`），`chainUtxos[role]` 形状是 `{value, spent?, scriptPublicKeyHex}`，**没有任何生产调用方**（只有它自己的模块与 16 处测试调用）——所以给它加必填参数不会破坏生产路径，只需同批更新测试。
 
 ### 19.1 消费方响应校验 `assertFactsResponse`（S-2 / E1 的消费方一半）
 
@@ -400,8 +402,10 @@ v0.1 的 §1–§7 各条本文均继承；差异：① 范围收窄为四步；
 | 4 | `res.facts === true` 且 `res.factsVersion === 1`（旧 relay 静默忽略 `facts`，只回 `{ok:true, utxos:[{outpoint,amount}]}`，F18） | `facts_echo_missing` / `facts_version_mismatch` |
 | 5 | `res.form === form`（请求形态） | `facts_form_mismatch` |
 | 6 | 形态 O：`found`、`missing` 都是数组；**不得**带 `truncated`（带了说明对端不是 9-0 语义）。形态 L：`utxos` 是数组且 `typeof truncated === 'boolean'` | `facts_shape_invalid` |
-| 7 | 每个条目：`outpoint.transactionId` 64 位小写 hex、`outpoint.index` uint32、`amount` 十进制字符串、`scriptPublicKey.version` 整数、`scriptPublicKey.scriptHex` 偶数长度小写 hex 字符串、**`'covenantId' in item`** 且值为 `null` 或 64 位小写 hex | `facts_item_key_missing`（缺键）/ `facts_shape_invalid`（格式） |
+| 7 | 每个条目（v0.3.4 补范围，S91-3）：`outpoint.transactionId` 64 位**小写** hex、`outpoint.index` 为 0..4294967295 的整数、`amount` 十进制字符串且 ≤ 2^64−1、`scriptPublicKey.version` 为 0..65535 的整数、`scriptPublicKey.scriptHex` 偶数长度**小写** hex 字符串（relay 输出恒小写，大写即异常）、**`'covenantId' in item`** 且值为 `null` 或 64 位小写 hex | `facts_item_key_missing`（缺键）/ `facts_shape_invalid`（格式/范围） |
 | 8 | 形态 O：`found` 与 `missing` 的 outpoint 合并后**按 `txid:index` 精确**等于 `requested`（含 index）：无重复、无请求之外的项、无遗漏；`found` 每项的 outpoint 必须是请求里的某一个 | `facts_set_mismatch` |
+
+**传输层失败（v0.3.4，NWT N91-1，MUST）**：上表只定义了"收到一个对象之后怎么判"。`sendCommandAsync`（`relay-manager.js`，已读码核对）在 **console 侧超时**时 `reject(new Error('Relay command timeout after Ns'))`、relay 未运行时 `Promise.reject(new Error('Relay not running'))`——这两种是 **promise reject，`assertFactsResponse` 根本看不到**；只有 relay 回了消息才 resolve，且是 `resolve(msg.result || {})`（回执缺 `result` 时得到 `{}`，走 #3 ⇒ `facts_not_ok`）。所以 `verifyStepInputsOnChain`（§19.3）必须对 `requestFacts` 包 try/catch，reject ⇒ 独立码 **`facts_transport_error`**（`.detail` 带原 message）；它与 `facts_relay_error`（relay 侧 `facts_rpc_timeout` 等错误回执）一起归入 `settlement_facts_transport_error` 报警（分级见 §19.3 步骤 7）。另（S91-3）：`requested` 自身含重复是**调用方 bug**，抛编程错误 `facts_requested_invalid`，不是"恰好等于"。
 
 变异对照（§19.5 E 组）：拆掉 #2 换成 `!res.error` / `res.ok !== false` ⇒ 用**真实错误回执形状**的用例必红；拆掉 #4/#5/#7/#8 任一 ⇒ 对应用例必红；把 #8 的匹配键去掉 index ⇒ 同 txid 双输出用例必红（与 9-0 的 N-T1 同族）。
 
@@ -412,46 +416,81 @@ v0.1 的 §1–§7 各条本文均继承；差异：① 范围收窄为四步；
 | 失败码 | 触发 |
 |---|---|
 | `pointer_dependency_not_landed` | 前置意图（seal/close_commit/convert_to_claim，或所需的 append 意图）不是 `landed` |
-| `pointer_tx_missing` | 产出交易的 `prepared_tx_json` 为空 |
+| `pointer_tx_missing` | 产出交易的 `prepared_tx_json` 列为空 |
+| `pointer_tx_malformed` | `prepared_tx_json` 反序列化失败（JSON 损坏；与"列为空"分开，NWT N91-2） |
+| `pointer_ticket_inconsistent` | 第 8 格：`proto_bets.ticket_txid` ≠ landed append 意图的 `submitted_txid`，或 `ticket_vout` ≠ 1，或该输出 spk ≠ 现算 ticket spk，或该输出带 covenant（NWT N91-3） |
 | `pointer_txid_mismatch` | 反序列化后 **`finalize()` 重算的 id** ≠ `submitted_txid`（§18.1 不变量 1；`deserializeFromSafeJSON` 不重算 id，已实测） |
 | `pointer_output_missing` | 具名输出下标越界 |
 | `pointer_lineage_mismatch` | 谱系交叉核对失败：产出交易的输入没有花掉上一个指针（§18.1 不变量 2） |
 | `pointer_covenant_inconsistent` | close_commit·rootClose 与 convert_to_claim·rootClose 的 covenantId 不等（§18.1 格 3/4） |
 | `pointer_winner_ambiguous` | 胜方已确认下注 ≠ 1（复用 `deriveCloseCommitInputs` 的 fail-closed 语义与其 `winnerBetId`，**不另写一份**） |
 
-`expectedCovenantId` 的取法：产出交易对应输出的 `covenant.covenantId`；对 genesis 组输出（append 的 KTT、seal 的 RootClose 与代币等）**另用 `kaspa.covenantId(feeOutpoint, groups)` 独立重算并要求相等**（多一个独立来源，成本≈0；§18 末"仍开放"里我倾向"两者都做"，此处写成默认，NWT 可否决）。
+`expectedCovenantId` 的取法：**从 `finalize()` 之后的对象**读产出交易对应输出的 `covenant.covenantId`（covenant id 与其 authorizing input 都被 txid 覆盖，所以 `finalize()` 通过 ⇒ 它已被 `submitted_txid` 绑定，相对 `submitted_txid` 可信）；对 **genesis 组输出**（append 的 KTT、seal 的 RootClose 与代币等）**另用 `kaspa.covenantId(feeOutpoint, groups)` 独立重算并要求相等，默认强制**。**理由（NWT 纠正）**：这一步**不是防 DB 篡改**（txid 已经绑了），它的价值是**校验 builder 的 genesis 派生没有 bug**（多一个独立来源，成本≈0）；只适用于 genesis 组输出（续约输出的 covenantId 沿用、无派生）。
+
+**读取范围与测试（v0.3.4，N91-2）**：见 §18.1 不变量 1/2。测试除 P9 外加 P9b（改 **covenant id** ⇒ 同码 `pointer_txid_mismatch`）、P9c（改**不被覆盖**的字段 `computeBudget`/`sigOpCount`/`signatureScript`，含设成非法值 ⇒ 指针结果**逐字段不变**，即证明没有读取它们）、P9d（`prepared_tx_json` 不是合法 JSON ⇒ `pointer_tx_malformed`）。**给 9-2b 的一句**：`prepared_tx_json` 同时是 `resolvePrepared` 的**重播字节**，而上述三个不被 txid 覆盖的字段能被改而 id 不变，会让重播的交易失效或形状不同——这是既有路径的性质、不是 9-1 引入；9-2b 重播前建议对同样三个字段做 `finalize()` 之外的一致性检查（或直接重新序列化比较）。
 
 ### 19.3 C1 调用点模块 `proto-settlement-c1.mjs`
 
 `verifyStepInputsOnChain({ step, pointers, expectedSpks, network, requestFacts })`——`requestFacts(address, payload)` 由驱动**注入**（生产 = `protoSendCmd` 发 `get_address_utxos{address, facts:true, outpoints}`，IPC 超时 **≥ 15000**，§18.2.1），模块自身不 import 任何 relay 通道（M0a 门）。流程：
 
-1. 按 `STEP_INPUT_ROLES[step]` 取各角色的预期 spk（调用方现算）与指针；`kaspa.addressFromScriptPublicKey(spk, network)` 得到地址；**按地址分组**，每个地址一次形态 O 请求（一步最多 3 次）。
-2. 每次响应先过 `assertFactsResponse`（§19.1）。
-3. 组装 `chainUtxos[role]`：`found` 项 ⇒ `{ value: BigInt(amount), spent:false, scriptPublicKeyHex: scriptHex, covenantId, outpoint }`；`missing` ⇒ `null`（**"已花/未落链/被 reorg"都进 missing，一律中止**，方向安全）。
-4. 调用**扩展后**的 `assertSettlementInputValuesOnChain`（M6）：新增**必填**入参 `expectedOutpoints[role]`（来自 §19.2）与 `expectedCovenantIds[role]`（`null` = 必须无 covenant，如 ticket），相等断言；缺任一入参 ⇒ fail-closed（**没有默认值**——否则调用点写漏就静默通过）。现有三类错误保留原有标签文本（现有测试的正则不受影响），并统一抛带 `.code` 的类型化错误 `SettlementChainCheckError`，`.code ∈ {<role>_value_drift, <role>_spk_drift, <role>_outpoint_drift, <role>_covenant_class_mismatch}`。
+1. 按 `STEP_INPUT_ROLES[step]` 取各角色的预期 spk（调用方现算）与指针；`kaspa.addressFromScriptPublicKey(spk, network)` 得到地址；**按地址分组**，每个地址一次形态 O 请求（一步最多 3 次，与 fee 的 1 次形态 L **并发**发出，§18.2.3）。
+2. 每次 `requestFacts` 调用**包 try/catch**：reject（`Relay command timeout…` / `Relay not running`，N91-1）⇒ `facts_transport_error`；resolve 后先过 `assertFactsResponse`（§19.1，含 relay 回 `{}` ⇒ `facts_not_ok`）。
+3. 组装 `chainUtxos[role]`：`found` 项 ⇒ `{ value: BigInt(amount), spent:false, scriptPublicKeyHex: scriptHex, covenantId, outpoint }`；`missing` ⇒ `null`（**"已花/未落链/被 reorg"都进 missing，一律中止**，方向安全）。**注意 `spent:false` 的含义**：`found` = 该 outpoint 在**虚拟 UTXO 集**里，**mempool 里的花费不反映**；若同一 outpoint 已被在途交易花费，我们构造的新交易会被节点拒（双花）——方向安全，但**不是由这个断言保证的**，文档与测试都不得把它写成断言。
+4. 调用**扩展后**的 `assertSettlementInputValuesOnChain`（M6）：新增**必填**入参 `expectedOutpoints[role]`（来自 §19.2）与 `expectedCovenantIds[role]`（`null` = 必须无 covenant，如 ticket），相等断言；缺任一入参 ⇒ 抛 `SettlementChainCheckError`，`.code = 'chain_check_params_missing'`（**没有默认值**——否则调用点写漏就静默通过）。**全部**错误（新增的与现有的）统一抛带 `.code` 的类型化错误 `SettlementChainCheckError`，`.code` 取**闭集**：`<role>_value_drift`、`<role>_spk_drift`、`<role>_outpoint_drift`、`<role>_covenant_class_mismatch`、`chain_check_params_missing`、`chain_check_unknown_step`；**`.message` 保留原标签文本**（现有 16 处测试的正则不受影响，且测试断言"`.message` 仍含原标签"，防日后有人改文本破坏调用方的正则）。
 5. 产出 `chainParents`（§19.4）。
-6. **fee 输入**另走一次**形态 L**：`{facts:true, maxAmount: SIGNED_INPUT_CEILING_SOMPI}`（console 与 relay 两处都是 `100_000_000n`，1.0 KAS），返回后**跳过** `covenantId !== null` 或 `spk !== relay P2PK spk` 的候选（S1，跳过不是中止），再交 `selectFeeUtxoByConstruction`（`proto-tx-assembly.mjs:134`）。**C1 不使用形态 L 判定任何 covenant/ticket 输入的存在性**（N1）。
-7. **报警映射**（沿用 `alertSettlementIntent`）：`*_value_drift` / `*_spk_drift` / `*_outpoint_drift` / `*_covenant_class_mismatch` ⇒ `settlement_chain_fact_drift`（error）；`facts_relay_error`（含超时）/ `facts_echo_missing` ⇒ 新增 `settlement_facts_transport_error`（warn，**连续 3 次升 error**）——传输错误不是"链上事实漂移"，不得混报，也不得推进意图状态（NO TX NO STATE）。
-8. **每步总预算**：4 次串行请求最坏 4 × 13 s = 52 s；驱动层给每步一个总预算，超出 ⇒ 本 tick 放弃、不推进状态、下一 tick 重评估；**不得**因等得久而跳过任何一项检查。数值由 9-2b 定（建议 = tick 间隔的一半）。
+6. **fee 输入**另走一次**形态 L**，**两件事分开写**（NWT 纠正概念）：(a) 请求参数 `{facts:true, minAmount: <该步最低可行 fee 输入面值>, maxAmount: SIGNED_INPUT_CEILING_SOMPI}`——`maxAmount` 的作用是**排除超过 relay 签名输入上限的候选**（console `proto-tx-assembly.mjs:117` 与 relay `covenant-broadcast.mjs:55` 两处都是 `100_000_000n`，1.0 KAS，已核一致），**不是**用来跳过毒化候选；`minAmount` 避免窗口被"小到不够用"的 UTXO 占位。(b) 返回后由**消费方**跳过 `covenantId !== null` 或 `spk !== relay P2PK spk` 的候选（S1：**跳过不是中止，也不回落**到毒化候选——毒化 fee 输入在含其它 covenant 输出的结算交易里的共识行为未测，宁可跳过），再**排除**"由我方在途（未 landed）意图的 `submitted_txid` 产出的输出"（S91-4：避免在浅确认的父输出上构造、遇 reorg 卡住），最后交 `selectFeeUtxoByConstruction`（`proto-tx-assembly.mjs:134`）。**窗口饱和的活性残余（NWT，可接受但不是零）**：窗口是"过滤 → 面值降序 → 截断 200"，攻击者要挤掉全部干净候选须往 relay 地址撒 ≥200 个面值不低于合法 fee UTXO 且 ≤ `maxAmount` 的毒化 UTXO，量级 ≈ 200 × ~1 KAS ≈ 200 KAS（另付 storage mass 与手续费；捐给 relay、可人工整合回收）。配套：每次跳过毒化候选写 `fee_candidate_poisoned_skipped {count}` 事件（warn，让攻击**可见**）；形态 L 返回后无干净候选（含"全被跳过"）⇒ 专用报警 `settlement_fee_window_saturated`（error），区别于普通 `no_suitable_fee_utxo`；成本估算写进 9-4 威胁说明；彻底封死需 relay 侧形态 L 加 `excludeCovenant:true`（属 9-0 改动，走 9-0 同款审，**现在不做**）。**C1 不使用形态 L 判定任何 covenant/ticket 输入的存在性**（N1）。
+7. **报警映射与分级**（沿用 `alertSettlementIntent`）：`*_value_drift` / `*_spk_drift` / `*_outpoint_drift` / `*_covenant_class_mismatch` ⇒ `settlement_chain_fact_drift`（error）。传输类归入新增 `settlement_facts_transport_error`，**分两级**（NWT S91-5）：(a) **瞬时类**——超时 / relay 忙（`facts_transport_error`、`facts_relay_error`）：首次 warn，**连续 3 个不同 tick**（不是同一 tick 内的重试）升 error，成功一次清零；(b) **版本错位类**——`facts_echo_missing` / `facts_version_mismatch`：**不是瞬时**（说明 relay 与 console 版本错位，正是 E1 防的"旧 relay 孤儿子进程 + 新 console"场景），**首次即 error**，不等 3 次。所有传输类都不得推进意图状态（NO TX NO STATE），也不得混报成"链上事实漂移"。
+8. **并发与每步总预算**：见 §18.2.3（v0.3.4 改）——≤3 次形态 O + 1 次形态 L 并发发出；预算两条硬约束（≥ 15 s 且 < tick 间隔，**不取"tick 一半"**），数值 9-2b 定；并发请求中任一个失败 ⇒ 整步 fail-closed。
 
 ### 19.4 `chainParents` 与 builder 侧断言（P6 / §6.3 的具体形状）
 
 `chainParents = { [role]: { value: bigint, spkLen: number, hasCovenant: boolean } }`，全部来自步骤 3 里**经断言的链上事实**（`hasCovenant = covenantId !== null`）。四个 builder（seal / close_commit / convert_to_claim / claim_draw）新增**必填**入参 `chainParents`；在**调用 `assertMassWithinCeiling` / `selectChangeShape` 之前**：① 各步的具名常量向量 `*_INPUT_HAS_COVENANT`（与已有的 `WITHDRAW_INPUT_HAS_COVENANT`/`TICKET_RECLAIM_INPUT_HAS_COVENANT` 同型；seal 与 close_commit 的输入下标现为 builder 内字面量，同批导出 `MARKET_SEAL_*_IN_INDEX`/`CLOSE_COMMIT_*_IN_INDEX`）与 `roles.map(r => chainParents[r]?.hasCovenant ?? false)` 逐项相等；② `spkLen` 与现算 spk 字节长度相等；③ `value` 与 `EXPECTED_INPUT_VALUE_SOMPI[role]` 相等。不符抛 `chain_parents_mismatch`（`.code`，带角色名）。**理由**：mass 的 plurality 取决于父 UTXO 是不是 covenant / spk 多长，这必须是链上事实，常量只是被交叉核对的一方（Codex 条件③）。
 
+**fee 角色项（NWT 补，B1）**：`chainParents` 里 fee 角色那一项**同样来自形态 L 条目的事实**（`hasCovenant:false`，spk == relay P2PK spk），而不是常量。
+
 ### 19.5 9-1 测试矩阵（落码时逐条要有；标 ▲ 的必须配变异对照）
 
 | 组 | 用例与要点 |
 |---|---|
-| **E** assertFactsResponse | E1 两形态各一个 ok 路径；E2 ▲ 真实错误回执 `{error, phase:'execution'}`（无 `ok`）⇒ `facts_relay_error`；E3 ▲ `ok` 为 `undefined`/`1`/`'true'` 各拒；E4 ▲ 缺 `facts` / `factsVersion` 为 0、2、`'1'` ⇒ 各自码；E5 ▲ `form` 不符；E6 形态 O 带 `truncated` ⇒ 拒；E7 ▲ 条目缺 `covenantId` 键 / 缺 `scriptHex` / 格式坏；E8 ▲ `found∪missing` 缺一项 / 多一项 / 重复 / 同 txid 不同 index（N-T1 同族）；E9 **旧 relay 模拟**（忽略 `facts` 的假 relay 回 `{ok:true, utxos:[{outpoint,amount}]}`）⇒ `facts_echo_missing` |
-| **P** pointers | P1–P8 §18.1 八格各一个正向（含"seal·held 的 covenantId 来自 append 输出[2]"与"赢家票=`winnerBetId` 那一行"）；P9 ▲ 篡改 `prepared_tx_json` 的一个输出面值而不动 id 字段 ⇒ `pointer_txid_mismatch`（**去掉 `finalize()` 变异必红**）；P10 ▲ 谱系断开；P11 ▲ covenantId 不一致；P12 胜方 0/2 条；P13 前置意图未 landed；P14 `landed_at` 同毫秒的两笔 append ⇒ 取 `rowid` 大者（§18.1 tiebreak） |
-| **C** C1 | C1 **8 角色 × 4 类负向**（§7：缺失 / 面值偏低偏高 / 同 spk 同面值不同 outpoint / spk 或 covenant 分类错）= 32 用例，变异（拆掉对应闸）必红；C2 ▲ **C1 换成形态 L** ⇒ 地址上撒 >200 dust 用例必红（N1）；C3 传输错误（超时 / relay 错误）⇒ 不推进意图状态、报 `settlement_facts_transport_error` 而非 `chain_fact_drift`；C4 每步总预算超出 ⇒ 放弃本 tick；C5 fee 选取跳过毒化候选（形态 L 返回里混入 `covenantId != null` 的候选）；C6 `assertSettlementInputValuesOnChain` 缺 `expectedOutpoints`/`expectedCovenantIds` ⇒ fail-closed；C7 现有 16 处测试的正则仍绿（标签文本未变） |
+| **E** assertFactsResponse | E1 两形态各一个 ok 路径（**fixture 不手写**：由真实 9-0 handler（`kasia-relay/src/lib/utxo-facts.mjs` 的 `buildFactsResponse`）对真实 kaspa-wasm 条目现场生成——手写夹具绿、生产恒 null 正是 9-0 起就在防的，S91-2；见 §20 对"录制回执"的偏差说明）；E2 ▲ 真实错误回执 `{error, phase:'execution'}`（无 `ok`）⇒ `facts_relay_error`；E3 ▲ `ok` 为 `undefined`/`1`/`'true'` 各拒；E4 ▲ 缺 `facts` / `factsVersion` 为 0、2、`'1'` ⇒ 各自码；E5 ▲ `form` 不符；E6 形态 O 带 `truncated` ⇒ 拒；E7 ▲ 条目缺 `covenantId` 键 / 缺 `scriptHex` / 格式坏；E8 ▲ `found∪missing` 缺一项 / 多一项 / 重复 / 同 txid 不同 index（N-T1 同族）；E9 **旧 relay 模拟**（忽略 `facts` 的假 relay 回 `{ok:true, utxos:[{outpoint,amount}]}`）⇒ `facts_echo_missing`；**E10 ▲ `requestFacts` 抛 `Relay command timeout after 15s` / `Relay not running` 各一 ⇒ `facts_transport_error`（变异：去掉 try/catch ⇒ 异常逃出 C1 必红，N91-1）**；**E11 relay 回 `{}`（`msg.result` 缺失）⇒ `facts_not_ok`**；E12 条目格式范围（index 超 uint32、version 超 65535、amount 超 u64、hex 大写各拒，S91-3）；E13 `requested` 含重复 ⇒ `facts_requested_invalid`（编程错误） |
+| **P** pointers | P1–P8 §18.1 八格各一个正向（含"seal·held 的 covenantId 来自 append 输出[2]"与"赢家票=`winnerBetId` 那一行、票指针取自其 landed append 意图"）；P9 ▲ 篡改 `prepared_tx_json` 的一个输出面值而不动 id 字段 ⇒ `pointer_txid_mismatch`（**去掉 `finalize()` / 改读原始 JSON 的变异必红**）；**P9b ▲ 改 covenant id ⇒ 同码；P9c 改不被覆盖的字段（`computeBudget`/`sigOpCount`/`signatureScript`，含非法值）⇒ 指针结果逐字段不变（证明没读它们）；P9d `prepared_tx_json` 非法 JSON ⇒ `pointer_tx_malformed`（N91-2）**；P10 ▲ 谱系断开（只读 `previousOutpoint`）；P11 ▲ covenantId 不一致；P12 胜方 0/2 条；P13 前置意图未 landed；P14 `landed_at` 同毫秒的两笔 append ⇒ 取 `rowid` 大者（§18.1 tiebreak）；**P15 ▲ 票三者不一致（`proto_bets.ticket_txid` 与意图 `submitted_txid` 不等 / `ticket_vout`≠1 / 输出 spk≠现算 / 输出带 covenant）各 ⇒ `pointer_ticket_inconsistent`（N91-3）**；P16 genesis 组输出的 covenantId 与 `kaspa.covenantId(feeOutpoint, groups)` 独立重算不等 ⇒ 拒（校验 builder 派生，非防 DB 篡改） |
+| **C** C1 | C1 **8 角色 × 4 类负向**（§7：缺失 / 面值偏低偏高 / 同 spk 同面值不同 outpoint / spk 或 covenant 分类错）= 32 用例，变异（拆掉对应闸）必红；C2 ▲ **C1 换成形态 L** ⇒ 地址上撒 >200 dust 用例必红（N1）；C3 传输错误（超时 / relay 错误）⇒ 不推进意图状态、报 `settlement_facts_transport_error` 而非 `chain_fact_drift`；C4 每步总预算超出 ⇒ 放弃本 tick；C5 fee 选取跳过毒化候选（形态 L 返回里混入 `covenantId != null` 的候选）；C6 `assertSettlementInputValuesOnChain` 缺 `expectedOutpoints`/`expectedCovenantIds` ⇒ 抛 `SettlementChainCheckError`，`.code = 'chain_check_params_missing'`；C7 现有 16 处测试的正则仍绿，**且新增断言"`.message` 仍含原标签""抛出的每个错误都带闭集内的 `.code`"，现有三类错误（`value_drift`/`spk_drift`/缺失类）也带 `.code`**；**C8 ▲ 并发请求其中一个失败 ⇒ 整步 fail-closed、不推进状态（N91-4）；C9 fee 窗口：跳过毒化候选写 `fee_candidate_poisoned_skipped {count}`、全被跳过 ⇒ `settlement_fee_window_saturated`（error）、排除我方在途意图产出的输出、`minAmount` 生效（S91-1/4）；C10 传输错误分级：超时类首次 warn / 连续 3 个不同 tick 升 error / 成功清零；`facts_echo_missing`、`facts_version_mismatch` 首次即 error（S91-5）；C11 并发：三次形态 O + 一次形态 L 的发出是并发的（断言总耗时 ≈ 单次而非四次之和），预算 ≥15 s 且 < tick 的常量断言** |
 | **B** builders | B1 四个 builder 各：`chainParents` 缺失 / `hasCovenant` 与常量向量不符 / `spkLen` 不符 / `value` 不符 ⇒ `chain_parents_mismatch` 且**在 mass/fee 判定之前**（断言 `assertMassWithinCeiling` 未被调用）；B2 `*_INPUT_HAS_COVENANT` 与 `STEP_INPUT_ROLES` 的枚举一致；B3 close_commit 返回 `continuationOutputIndices:[0]` 且过 relay 真代码 `validateFixedValueOutputs`；B4 输入下标常量与 builder 实际布局逐项对（seal/close_commit 新导出） |
 | **M** 变异跑批 | 每个 ▲ 至少一个变异；跑批脚本沿用 9-0 的做法（每次 finally 还原并核 sha256）；**证据目录只增不删**（Bettor 2026-09-19 记账的教训：替换也要把旧件改名留存） |
 
-### 19.6 待 NWT 定夺的开放问题（我的倾向都写了，但不替 NWT 拍）
-1. M6 的两个新参数**必填 vs 可选**：倾向必填（无生产调用方，只改测试；可选会让"调用点写漏就静默通过"重现）。
-2. 类型化错误 `SettlementChainCheckError` 是否值得：倾向要（现有靠正则匹配消息文本，脆弱），但**保持原标签文本不变**以免动 16 处测试。
-3. `expectedCovenantId` 的**双来源**（输出的 `covenant.covenantId` 与 `kaspa.covenantId(...)` 独立重算）是否设为默认强制：倾向强制。
-4. `settlement_facts_transport_error` 是否需要"连续 3 次升 error"的阈值，还是首次即 error：倾向 3 次（relay 重启窗口内的瞬时超时不该吵醒人）。
-5. 每步总预算的具体数值（§19.3.8，倾向 9-2b 再定）。
-6. §18.0 的合入若被 NWT 要求拆开（例如把 withdraw/ticket_reclaim 排除在外），9-1 的 C1 表（`STEP_INPUT_ROLES` 已含 withdraw/ticket_reclaim 两行）要同步；倾向不拆——它们不接线，且已有 §11.1 扫描守着。
+### 19.6 六个开放问题的 verdict（NWT 审 `680b8bb8` 已裁，v0.3.4 全部采纳）
+
+| # | 问题 | 裁定 |
+|---|---|---|
+| 1 | M6 两个新参数必填 vs 可选 | **必填**；缺参 ⇒ 抛 `SettlementChainCheckError`，`.code = 'chain_check_params_missing'`（对应 C6） |
+| 2 | 类型化错误 `SettlementChainCheckError` | **要**：`.code` 取**闭集**且测试断言"抛出的每个错误都带闭集内的 code"；C7 加断言"`.message` 仍含原标签"；**现有三类错误也带 `.code`**，不只是新增两类 |
+| 3 | `expectedCovenantId` 双来源 | **默认强制**；理由改写为"校验 builder 的 genesis 派生"，不是防 DB 篡改（§19.2） |
+| 4 | 传输错误升级阈值 | **分级**（§19.3 步骤 7）：瞬时类首次 warn、连续 3 个不同 tick 升 error、成功清零；版本错位类首次即 error |
+| 5 | 每步总预算数值 | 9-1 **不定数值**，只写两条硬约束（§18.2.3）：并发；≥ 15 s 且 < tick 间隔，不取"tick 的一半" |
+| 6 | 合入拆不拆 | **已无意义**：候选已合入主线 `e2e91c6e`；同意不拆。**限定**：`804349e3`（批 8 v2 ticket_reclaim builder）字节层**未经 NWT 逐笔复核**，接线前须补字节层复核 + T-FEE-PRICING，9-1 不碰（§18.0） |
+
+## 20. v0.3.3 → v0.3.4：NWT 设计审 §18–§19（`680b8bb8`）逐条落实
+
+审稿：NWT 分支 `nwt/batch9-v03-review` 的 `docs/provenance/2026-09-20-nwt-batch9-1-design-v033-review/README.md`（含他在本仓 wasm 上做的 txid 覆盖范围实测 `nwt-txid-coverage-probe*`）。结论：**方向接受；4 条文字级 MUST + 5 条 SHOULD + §19.6 六问 verdict；不需再审设计文本**，J2 改完 v0.3.4 即可进 9-1，NWT 审 diff 时对照本版。J2 逐条核对了他引用的事实（`sendCommandAsync` 的 reject/resolve 语义、两处 `SIGNED_INPUT_CEILING_SOMPI`、C1 现文件），**全部属实**。
+
+| NWT 项 | 落实位置 | 状态 |
+|---|---|---|
+| **N91-1** 传输层失败（reject ≠ resolve） | §19.1"传输层失败"段、§19.3 步骤 2/7、§19.5 E10/E11 | 已写入（`facts_transport_error`） |
+| **N91-2** `finalize()` 覆盖范围与读取范围 | §18.1 不变量 1/2、§19.2（`pointer_tx_malformed`、读取范围段、给 9-2b 的一句）、§19.5 P9b/P9c/P9d | 已写入 |
+| **N91-3** 第 8 格票取自 append 意图 | §18.1 第 8 格与补充、§19.2 `pointer_ticket_inconsistent`、§19.5 P15 | 已写入 |
+| **N91-4** 并发与预算 | §18.2.3、§19.3 步骤 1/8、§19.5 C8/C11 | 已写入；**删掉**"tick 的一半" |
+| S91-1 fee 窗口（跳过计数事件、饱和专用报警、`minAmount`、9-4 成本估算、`excludeCovenant` 记 backlog） | §19.3 步骤 6、§19.5 C9 | 已写入 |
+| S91-2 E 组 fixture 真实 | §19.5 E1 | 已写入，**带一处偏差（见下）** |
+| S91-3 格式范围 / `requested` 重复 | §19.1 #7 与"传输层失败"段、§19.5 E12/E13 | 已写入 |
+| S91-4 fee 候选排除我方在途产出 | §19.3 步骤 6、§19.5 C9 | 已写入 |
+| S91-5 传输错误分级 | §19.3 步骤 7、§19.5 C10 | 已写入 |
+| §19.3 概念纠正（`maxAmount` 是排除超签名上限，毒化由消费方跳过） | §19.3 步骤 6 | 已写入 |
+| §19.3 `spent:false` 的含义（虚拟 UTXO 集、不含 mempool） | §19.3 步骤 3 | 已写入 |
+| §19.4 fee 角色 `chainParents` 来自形态 L 条目 | §19.4 | 已写入 |
+| §19.6 六问 | §19.6 | 已裁 |
+| `804349e3` 字节层未复核限定（Bettor 转达） | §18.0、§19.6 #6 | 已写入 |
+| 首批范围 = §19 落码 + 三条 SHOULD（S1 六个 cap 字面值测试、S2 `proto-tx-assembly-settlement.mjs:889` 过期注释、S3 测试前提 fail-loud） | 9-1 首批代码，不在本文 | 待落码 |
+
+**偏差说明（S91-2）**：NWT 写"`1e19027d` 证据里的 `facts-vs-node.json` 有 S1 的真实形状"。J2 核对：该 JSON 里 `S1_relay` 存的是我**规整后的条目**（`key/amount/version/scriptHex/covenantId`），**不是** relay 的原始回执（`ok/facts/factsVersion/form/found/missing` 都没有）。所以"取自该 JSON"这条路走不通。改法：E 组 fixture 由**真实 9-0 handler 对真实 kaspa-wasm 条目现场生成**（与 9-0 的 `utxo-facts.test.mjs` 同一手法，是真实 relay 代码的真实输出，不是手写），并在测试里与 `facts-vs-node.json` 的字段逐项对齐；若要"从真实节点录制原始回执"，需要再起一次 simnet，放 9-4。
+
+**仍开放**：毒化 fee 输入在**含其它 covenant 输出的结算交易**里的共识行为未测（NWT 审 9-1 diff 时起 simnet 补）；200 KAS 的窗口饱和成本是量级估算，未含 storage mass / 手续费精确值；`utxo` 子对象与 `storageMass` 是否入 txid 哈希未逐个量。
