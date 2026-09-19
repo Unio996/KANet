@@ -1,0 +1,16 @@
+# NWT 9-2b(iii-2)(383583eb)审实测输出(亲跑单文件, 临时库; 变异逐行抄录自 nwt-mutate-ops.cjs 该次运行)
+亲跑: proto-settlement-ops 6/0; proto-settlement-pointers 27/0; c1 45/0; tx-assembly-settlement-golden 12/0; tx-assembly-settlement 44/0; chain-checks 51/0; claim-draw 57/0
+
+## 我的 11 个 ops 变异(只改 proto-settlement-ops.mjs, 跑 ops 测试含整链离线端到端; 还原后 sha256 一致)
+SURVIVED o1 [钱] fee 上限放宽 100 倍(absFeeCapSompi)
+SURVIVED o2 [钱] 找零脚本换成错误脚本(relayChangeScriptPublicKeyHex)
+killed   o3 [钱] fee 面值下限降到 1(feeMinAmount)   (4 FAIL)
+killed   o4 [钱] close_commit pmt 门用的 deadline 推迟 1 小时(prepare.deadlineMs)   (3 FAIL)
+killed   o5 [钱] close_commit 的 newWinningSide 取反   (2 FAIL)
+killed   o6 [钱] claim_draw 的 ticket direction 取反(两处)   (1 FAIL)
+killed   o7 [钱] claim_draw 的 payout 用下注额而不是奖池   (1 FAIL)
+killed   o8 [钱] claim_draw 的 KanetTokenClaim 目标地址金额用下注额(landed 检查目标)   (1 FAIL)
+killed   o9 [钱] 找每个 fee 候选时不补 fee 父项(常量 chainParents)   (3 FAIL)
+SURVIVED o10 seal 的封盘下注数检查去掉
+killed   o11 [钱] 委员私钥信封取自 subject 而不是 market(claim 步骤用 claim id 查)   (2 FAIL)
+restored identical: true
