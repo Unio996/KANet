@@ -19,7 +19,8 @@
 [RED ] M-s【S-1】超时/成功后不清定时器(每次调用漏一个)  →  1 条失败 «T3 截止时间之前返回 ⇒ 正常结果, 且【每个】定时器都被清掉(»
 [RED ] M-t【S-1】超时错误码改名  →  4 条失败 «T1 getUtxosByAddresses 永不返回 ⇒ 在 r» «T2 getBlockDagInfo 永不返回 ⇒ R2 同样以» «T4 超时之后底层调用才晚到的 reject 不会变成 unhan» «T5 RPC 调用同步抛错 ⇒ 错误原样上抛(不是超时、不被吞);»
 [RED ] M-u【S-1】RPC 调用预算改成 50000(与 8000 之和 ≥ console 15000)  →  1 条失败 «S3 FACTS_LIST_MAX===200 / FACTS_O»
-[RED ] M-v【S-1】截止时间被设成 0(默认预算失效: 一切 rpc 都立刻超时)  →  1 条失败 «T6 默认预算(不注入 rpcCallMs)恰是 FACTS_RP»
+[RED ] M-v【S-1】R2(handleGetPastMedianTime)的默认截止时间被设成 0(一切 rpc 都立刻超时)  →  1 条失败 «T6 默认预算(不注入 rpcCallMs)恰是 FACTS_RP»
+[RED ] M-w【NWT S1-f, T6b】R1(handleGetAddressUtxos)的默认截止时间被设成 0——T6 只测了 R2 的默认值, 这个变异原先存活  →  1 条失败 «T6b 默认预算(不注入 rpcCallMs)对 handleGe»
 [RESTORED] utxo-facts.mjs 已还原, sha256 88cacf3bbe8cd695… 一致
 
 全部变异均被测试抓到

@@ -37,7 +37,8 @@ const mutations = [
   ['M-s【S-1】超时/成功后不清定时器(每次调用漏一个)', `.finally(() => clearTimeout(timer));`, `.finally(() => {});`],
   ['M-t【S-1】超时错误码改名', `new FactsError('facts_rpc_timeout',`, `new FactsError('rpc_timeout',`],
   ['M-u【S-1】RPC 调用预算改成 50000(与 8000 之和 ≥ console 15000)', `export const FACTS_RPC_CALL_MS = 5000;`, `export const FACTS_RPC_CALL_MS = 50000;`],
-  ['M-v【S-1】截止时间被设成 0(默认预算失效: 一切 rpc 都立刻超时)', `rpcCallMs = FACTS_RPC_CALL_MS }) {\n  const rpc = await getSharedRpc();`, `rpcCallMs = 0 }) {\n  const rpc = await getSharedRpc();`],
+  ['M-v【S-1】R2(handleGetPastMedianTime)的默认截止时间被设成 0(一切 rpc 都立刻超时)', `rpcCallMs = FACTS_RPC_CALL_MS }) {\n  const rpc = await getSharedRpc();`, `rpcCallMs = 0 }) {\n  const rpc = await getSharedRpc();`],
+  ['M-w【NWT S1-f, T6b】R1(handleGetAddressUtxos)的默认截止时间被设成 0——T6 只测了 R2 的默认值, 这个变异原先存活', `legacyGetAddressUtxos, getNetworkId, rpcCallMs = FACTS_RPC_CALL_MS }) {`, `legacyGetAddressUtxos, getNetworkId, rpcCallMs = 0 }) {`],
 ];
 
 let allRed = true;

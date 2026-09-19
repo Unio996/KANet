@@ -1,0 +1,8 @@
+== 基线(未变异): 主线旧测试 / 加了 T6b 的新测试
+  旧(HEAD): 41 passed, 0 failed
+  新       : 42 passed, 0 failed
+== 施加变异 S1-f(handleGetAddressUtxos 默认截止时间 = 0)后:
+  旧(HEAD): 41 passed, 0 failed   ⇐ 变异【存活】(NWT 报的缺口被复现)
+  新       : 41 passed, 1 failed   ⇐ 变异【被抓】
+     [FAIL] T6b 默认预算(不注入 rpcCallMs)对 handleGetAddressUtxos 同样是 FACTS_RPC_CALL_MS
+[RESTORED] utxo-facts.mjs 已还原, sha256 88cacf3bbe8cd695… 一致
