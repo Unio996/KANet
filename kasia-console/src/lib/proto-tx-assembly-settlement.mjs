@@ -318,6 +318,9 @@ export const CLOSE_COMMIT_INPUT_HAS_COVENANT = Object.freeze([true, false]);
  * 提交侧把NotFinalized归"可重试、无状态变更"(不进ambiguous)是驱动层(批9)的约束, 见实现计划§2.2。
  */
 export const CLOSE_COMMIT_DEADLINE_MARGIN_MS = 300_000;
+/** S5(设计 §8): pmtEvidence 只有 source==='relay' 且 readAtMs 距今 ≤ 此值才被接受(PMT_EVIDENCE_FUTURE_SLACK_MS 容忍 relay 与本机时钟的微小偏差), 否则忽略、回退到 300s 墙钟守卫。 */
+export const PMT_EVIDENCE_MAX_AGE_MS = 60_000;
+export const PMT_EVIDENCE_FUTURE_SLACK_MS = 5_000;
 /** B4-6: v0单操作员5槽同一把委员keypair重复5次——只证明"合约逻辑可执行", 不是4-of-5门限安全(账本1497 Codex复核)。 */
 export const COMMITTEE_MODE_SINGLE_OPERATOR_5X_SAME_KEY = 'single_operator_5x_same_key';
 
@@ -366,7 +369,7 @@ export const COMMITTEE_MODE_SINGLE_OPERATOR_5X_SAME_KEY = 'single_operator_5x_sa
  * @param {object} o.feeUtxo  {txid,vout,value,scriptPublicKeyHex}
  * @param {string} o.relayChangeScriptPublicKeyHex
  * @param {bigint} o.absFeeCapSompi  feeProfile.close_commit.cap
- * @param {{pastMedianTimeMs:number}} [o.pmtEvidence]  驱动层pmt闸放行时读到的节点pastMedianTime(毫秒); 传入则复核pmt判据并免除300s墙钟余量, 不传则保留300s墙钟守卫(第二层)
+ * @param {{pastMedianTimeMs:number, readAtMs:number, source:'relay'}} [o.pmtEvidence]  驱动层pmt闸放行时读到的节点pastMedianTime(毫秒); 传入则复核pmt判据并免除300s墙钟余量, 不传则保留300s墙钟守卫(第二层)
  * @returns {{txJson:string, expectedTxid:string, rootCloseContinuationCovId:string,
  *   includeChange:boolean, changeSompi:bigint, requiredFee:bigint, netLoss:bigint,
  *   signInputIndices:number[]}}
@@ -385,7 +388,10 @@ export function buildCloseCommitTxJson({
   //      有pmtEvidence时本处【复核同一个pmt判据】(不放行则fail-closed), 且只要求墙钟不早于deadline(基本合理性), 【不再施加300s墙钟余量】:
   //      主网墙钟-pmt≈133s, pmt刚放行时墙钟约deadline+163s, 若仍卡300s就会在pmt已放行后反卡约137s。
   //   ② 第二层(无pmtEvidence, 即绕过pmt闸直接调builder): 保留墙钟守卫 Date.now()>=deadline+300s(暂定值, 依据见CLOSE_COMMIT_DEADLINE_MARGIN_MS注释)。
-  if (pmtEvidence) {
+  // S5: 证据要新鲜且来自 relay(R2 的 get_past_median_time)——过期 / 来源不明的 pmtEvidence 不再被信任, 视同没传(第二层墙钟守卫接手)
+  const evidenceAgeMs = pmtEvidence ? Date.now() - Number(pmtEvidence.readAtMs) : NaN;
+  const pmtEvidenceTrusted = !!pmtEvidence && pmtEvidence.source === 'relay' && Number.isFinite(evidenceAgeMs) && evidenceAgeMs <= PMT_EVIDENCE_MAX_AGE_MS && evidenceAgeMs >= -PMT_EVIDENCE_FUTURE_SLACK_MS;
+  if (pmtEvidenceTrusted) {
     const tm = evaluateCloseCommitTiming({ pastMedianTimeMs: pmtEvidence.pastMedianTimeMs, deadlineMs });
     if (!tm.canSubmit) throw new Error(`buildCloseCommitTxJson: fail-closed — pmtEvidence未通过pmt判据: ${tm.reason}`);
     if (Date.now() < Number(deadlineMs)) throw new Error(`buildCloseCommitTxJson: fail-closed — Date.now()(${Date.now()}) < deadlineMs(${deadlineMs}), 墙钟不可能早于deadline(本机时钟严重偏差?), 拒绝构造`);

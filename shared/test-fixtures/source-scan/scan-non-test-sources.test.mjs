@@ -1,5 +1,5 @@
 // scan-non-test-sources.test.mjs — 共享源码扫描器的自测(9-1 F4 笔, NWT F2-1)。用临时目录树造真实文件做探针, 带对照臂: 应被发现的路径全部被发现, 应被排除的全部不被发现。
-// Run: cd kasia-console && node test-fixtures/source-scan/scan-non-test-sources.test.mjs
+// Run: node shared/test-fixtures/source-scan/scan-non-test-sources.test.mjs
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -129,6 +129,15 @@ t('F5 真实文件探针(三种形态各放一个文件, 走 findReferencesInNon
   } finally { fs.rmSync(root2, { recursive: true, force: true }); }
 });
 
+// ══ 9-2b(NWT F5-1): 两条"注释里的引用不算"对照 ═══════════════════════════════════════════════════════════════════════
+t('F5-1 ▲ 注释里的引用不报: 完整字符串之后的行尾注释 / 一行含未闭合引号、下一行是注释——两种形态里注释里的引用都不该被当成真引用', () => {
+  const REF = 'FIXTURE_ONLY_MODULE_TOKEN';
+  if (stripComments('const s = "a"; // ' + REF + '\n').includes(REF)) throw new Error('完整字符串之后的行尾注释里的引用不该保留');
+  if (stripComments('const s = "unterminated\n// ' + REF + '\nconst t = 1;\n').includes(REF)) throw new Error('未闭合引号的下一行注释里的引用不该保留');
+  // 对照: 真引用仍保留(不是把整行都吞了)
+  if (!stripComments('const s = "a"; ' + REF + '(1); // tail\n').includes(REF + '(1)')) throw new Error('同行的真引用必须保留');
+  if (!stripComments('const s = "unterminated\n' + REF + '(2);\n').includes(REF + '(2)')) throw new Error('未闭合引号的下一行的真引用必须保留(重新同步)');
+});
 fs.rmSync(tmp, { recursive: true, force: true });
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

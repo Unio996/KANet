@@ -7,16 +7,17 @@
 // 9-1 F1 笔(NWT C 笔审 C-1..C-5 / E 笔审 E-2 与 E-1 的 C 侧): version===0、分级器按 key 分计数、预算/IPC 超时结构性校验 + 可注入定时器、fee 区间复核、evidence/定时器断言、classify 永不返回 null、chainParents 条目带 outpoint。
 // 9-1 F4 笔(NWT F1 审 F1-1 / F1-2): requestFacts 收第三参 {timeoutMs: ipcTimeoutMs}(声明 == 交给被调方); timers 退出生产签名, 只在仅测试用的 verifyStepInputsOnChainWithTimers, 并有源码扫描。
 // Run: cd kasia-console && node src/lib/proto-settlement-c1.test.mjs
-import { execSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 
-if (!process.env._PROTO_C1_TEST_BOOTSTRAPPED) {
-  const tmpDb = `${process.env.TEMP || '/tmp'}/_j2_c1_${process.pid}.db`;
-  try { fs.unlinkSync(tmpDb); } catch {}
-  execSync('node scripts/run-migrations.mjs', { cwd: process.cwd(), env: { ...process.env, DB_PATH: tmpDb }, stdio: 'pipe' });
-  const r = spawnSync(process.execPath, [process.argv[1]], { cwd: process.cwd(), stdio: 'inherit', env: { ...process.env, DB_PATH: tmpDb, _PROTO_C1_TEST_BOOTSTRAPPED: '1' } });
-  try { fs.unlinkSync(tmpDb); } catch {}
-  process.exit(r.status ?? 1);
+// 9-2b 清理(账本 1574/1584): F3 拆出无 DB 依赖的纯函数后, 本文件测的模块不再需要"起临时 DB 只为过 import 链"的 bootstrap(此前整段 execSync run-migrations + 子进程重入已删)。
+// 下面这条守住它: 无 DB_PATH 的子进程里逐个真 import, 全部成功(将来谁又把 db/client 拖进这条 import 链, 这里立刻红)。
+{
+  const { spawnSync } = await import('node:child_process');
+  const env = { ...process.env }; delete env.DB_PATH;
+  for (const m of ["proto-settlement-c1.mjs","proto-settlement-chain-checks.mjs"]) {
+    const r = spawnSync(process.execPath, ['--input-type=module', '-e', `await import(${JSON.stringify(new URL('./' + m, import.meta.url).href)})`], { env, encoding: 'utf8' });
+    if (r.status !== 0) { console.error('[FAIL] 无 DB_PATH 时 import ' + m + ' 失败: ' + (r.stderr || '').split('\n')[0]); process.exit(1); }
+  }
 }
 const kaspa = await import('kaspa-wasm');
 const C1 = await import('./proto-settlement-c1.mjs');
@@ -613,7 +614,7 @@ await t('F1-2 ▲(NWT f22)仅测试用入口校验注入的 timers 形状: 缺 c
   eq(tm.log.set.length, 1, '注入的定时器必须被用到'); ok(tm.log.cleared.includes(tm.log.set[0].id));
 });
 await t('F1-2 ▲ 源码扫描(共享扫描器, NWT F2-1 修正版): 仅测试用的 verifyStepInputsOnChainWithTimers 只准被测试引用——整个仓库的非测试源码(含 src/data、scripts、ts/mts/tsx; 排除只按仓库根相对路径)里出现该标识符即违规(除定义它的 c1 模块自己); 动态拼接是文本扫描的已知边界', async () => {
-  const { findReferencesInNonTestSources } = await import('../../test-fixtures/source-scan/scan-non-test-sources.mjs');
+  const { findReferencesInNonTestSources } = await import('../../../shared/test-fixtures/source-scan/scan-non-test-sources.mjs');
   const bad = findReferencesInNonTestSources(/verifyStepInputsOnChainWithTimers/, { exceptRel: ['kasia-console/src/lib/proto-settlement-c1.mjs'] });
   if (bad.length) throw new Error(`非测试源码引用了仅测试用的入口: ${bad.join(', ')}`);
 });

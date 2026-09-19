@@ -1,0 +1,6 @@
+说明(诚实记录): 首轮变异输出(25 个变异, 2 个幸存)在补强测试后重跑时, 我把 mutation-raw.txt 改名到 mutation-raw-round1.txt 的动作执行了两次,
+第二次覆盖掉了第一次的原始文件(违反"旧输出只改名不覆盖"的规矩)。当前 mutation-raw-round1.txt 里是中间那次"基线不绿即中止"的输出, 不是首轮。
+首轮的两条幸存行(取自当时终端输出的转录, 非原始文件字节):
+  Z5: SURVIVED [core:exit=0] :: C1 通过不清传输计数        → 补强: 成功后【同 key】再失败必须从头计数(warn, warn), 不是直接 error
+  Z8: SURVIVED [core:exit=0] :: refund_flip 探测对任何错误都触发 → 补强: 非 rootClose_(value|outpoint|spk)_drift 的错误即使探测会说"翻了"也不得触发探测
+首轮其余 23 个 KILLED; 补强后重跑 SUMMARY mutants=25 survivors=0(见 mutation-raw.txt)。
