@@ -15,7 +15,7 @@ import { execFileSync } from 'node:child_process';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import * as kaspa from 'kaspa-wasm';
 import {
-  FACTS_LIST_MAX, FACTS_OUTPOINTS_MAX, FACTS_VERSION, FACTS_RPC_WAIT_MS, FactsError,
+  FACTS_LIST_MAX, FACTS_OUTPOINTS_MAX, FACTS_VERSION, FACTS_RPC_WAIT_MS, FACTS_RPC_CALL_MS, FactsError,
   parseFactsRequest, buildFactsResponse, handleGetAddressUtxos, handleGetPastMedianTime,
 } from './utxo-facts.mjs';
 import { COMMAND_TYPES, isValidCommandType, validateCommandPayload } from './commands.mjs';
@@ -104,6 +104,9 @@ await t('S3 FACTS_LIST_MAX===200 / FACTS_OUTPOINTS_MAX===8 / FACTS_VERSION===1, 
   assert.strictEqual(FACTS_LIST_MAX, 200);
   assert.strictEqual(FACTS_OUTPOINTS_MAX, 8);
   assert.strictEqual(FACTS_VERSION, 1);
+  // S-1: 总预算 = 等共享客户端(8s) + RPC 调用本身(5s) 必须小于 console 读命令 IPC 超时(15s)
+  assert.strictEqual(FACTS_RPC_CALL_MS, 5000);
+  assert.ok(FACTS_RPC_WAIT_MS + FACTS_RPC_CALL_MS < 15000, `${FACTS_RPC_WAIT_MS}+${FACTS_RPC_CALL_MS} 必须 < 15000`);
 });
 
 // ══ 旧路径字节不变 ═════════════════════════════════════════════════════════════════════════════
@@ -242,6 +245,33 @@ await t('O4 已被花掉(不在集合里)⇒ 进 missing, 不是报错也不是�
   const lookalike = realEntry({ txidHex: txid(0xd0), index: 0, amount: 20000000n, covenantIdHex: COV_A });
   const r = buildFactsResponse(parseFactsRequest({ outpoints: [{ transactionId: txid(0xd1), index: 0 }] }), [lookalike]);
   assert.strictEqual(r.found.length, 0); assert.deepStrictEqual(r.missing, [{ transactionId: txid(0xd1), index: 0 }]);
+});
+// 🔴 N-T1(NWT 9-0 审 4e34e9c9, 向量取自其 nwt-O5-killer-vector.txt): 形态 O 匹配键去掉 index(只按 txid)的变异在我原来的 33 项下【存活】——
+//   所有夹具每个 txid 只有一个输出, "请求错的 index"从未被测。这是我 9-0 回执里"22 个变异全被抓到"那句话的反例。
+await t('O5【N-T1, NWT 杀手向量】同一 txid 两个输出(index 0 = covenant, index 1 = 普通 P2PK): 请求 (txid,1) 必须回 index=1 那一项(covenantId null、spk = P2PK); 请求 (txid,2) 必须进 missing——outpoint 匹配必须含 index', () => {
+  const T = txid(0xc0);
+  const es = [
+    realEntry({ txidHex: T, index: 0, amount: 20000000n, covenantIdHex: COV_A }),
+    realEntry({ txidHex: T, index: 1, amount: 20000000n, spkHex: P2PK_HEX }),
+  ];
+  const r = buildFactsResponse(parseFactsRequest({ outpoints: [{ transactionId: T, index: 1 }, { transactionId: T, index: 2 }] }), es);
+  assert.strictEqual(r.found.length, 1);
+  assert.strictEqual(r.found[0].outpoint.index, 1);
+  assert.strictEqual(r.found[0].covenantId, null);
+  assert.strictEqual(r.found[0].scriptPublicKey.scriptHex, P2PK_HEX);
+  assert.deepStrictEqual(r.missing, [{ transactionId: T, index: 2 }]);
+});
+await t('O5b 同一 txid 两个输出同时请求(0 与 1): 各回各的(index 0 → covenant COV_A, index 1 → null), 按请求顺序; 请求顺序反过来结果顺序也跟着反(不是按条目顺序)', () => {
+  const T = txid(0xc1);
+  const es = [
+    realEntry({ txidHex: T, index: 1, amount: 20000000n, spkHex: P2PK_HEX }),
+    realEntry({ txidHex: T, index: 0, amount: 20000000n, covenantIdHex: COV_A }),
+  ];
+  const a = buildFactsResponse(parseFactsRequest({ outpoints: [{ transactionId: T, index: 0 }, { transactionId: T, index: 1 }] }), es);
+  assert.deepStrictEqual(a.found.map((x) => [x.outpoint.index, x.covenantId]), [[0, COV_A], [1, null]]);
+  const b = buildFactsResponse(parseFactsRequest({ outpoints: [{ transactionId: T, index: 1 }, { transactionId: T, index: 0 }] }), es);
+  assert.deepStrictEqual(b.found.map((x) => [x.outpoint.index, x.covenantId]), [[1, null], [0, COV_A]]);
+  assert.deepStrictEqual(a.missing, []);
 });
 
 // ══ 形态 L(list): fee 输入选取用 ════════════════════════════════════════════════════════════════
@@ -396,6 +426,71 @@ await t('P2 pmt 不可用(0/负/NaN/undefined/字符串/小数/超安全整数)�
   const boom = new Error('Shared RpcClient not ready after 8000ms');
   let err = null; try { await handleGetPastMedianTime({ getSharedRpc: async () => { throw boom; } }); } catch (e) { err = e; }
   assert.strictEqual(err, boom);
+});
+
+// ══ S-1(NWT 9-0 审): RPC 调用本身的截止时间 ═════════════════════════════════════════════════════════
+// 用可注入的 rpcCallMs 把 5000ms 压到几十毫秒。"挂死"用 hungGuard 兜住: 变异去掉截止时间后, 测试是【红】而不是把整个进程卡住。
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const HUNG = Symbol('hung');
+const hungGuard = async (p, ms = 1500) => { let tm; const g = new Promise((r) => { tm = setTimeout(() => r(HUNG), ms); }); try { return await Promise.race([p.then((v) => ({ v }), (e) => ({ e })), g]); } finally { clearTimeout(tm); } };
+const neverSettles = () => new Promise(() => {});
+const okCmd = { address: ADDR, facts: true };
+const noLegacy = async () => { throw new Error('facts 路径不该走旧函数'); };
+
+await t('T1 getUtxosByAddresses 永不返回 ⇒ 在 rpcCallMs 内以 facts_rpc_timeout 失败(不挂死); 耗时 ≈ 截止时间而不是 5s', async () => {
+  const t0 = Date.now();
+  const out = await hungGuard(handleGetAddressUtxos({ cmd: okCmd, getSharedRpc: async () => ({ getUtxosByAddresses: neverSettles }), legacyGetAddressUtxos: noLegacy, getNetworkId: () => 'x', rpcCallMs: 40 }));
+  assert.notStrictEqual(out, HUNG, '挂死: 没有截止时间');
+  assert.ok(out.e instanceof FactsError && out.e.code === 'facts_rpc_timeout', `期望 facts_rpc_timeout, 实际 ${out.e && out.e.code} ${out.e && out.e.message}`);
+  assert.match(out.e.message, /getUtxosByAddresses/);
+  const dt = Date.now() - t0;
+  assert.ok(dt >= 30 && dt < 700, `耗时 ${dt}ms 应约等于 40ms`);
+});
+await t('T2 getBlockDagInfo 永不返回 ⇒ R2 同样以 facts_rpc_timeout 失败(不挂死)', async () => {
+  const out = await hungGuard(handleGetPastMedianTime({ getSharedRpc: async () => ({ getBlockDagInfo: neverSettles }), rpcCallMs: 40 }));
+  assert.notStrictEqual(out, HUNG, '挂死: R2 没有截止时间');
+  assert.ok(out.e instanceof FactsError && out.e.code === 'facts_rpc_timeout', `期望 facts_rpc_timeout, 实际 ${out.e && out.e.code}`);
+  assert.match(out.e.message, /getBlockDagInfo/);
+});
+await t('T3 截止时间之前返回 ⇒ 正常结果, 且【每个】定时器都被清掉(成功路径与失败路径都不漏定时器)', async () => {
+  const realST = globalThis.setTimeout, realCT = globalThis.clearTimeout;
+  const live = new Set();
+  globalThis.setTimeout = (fn, ms, ...a) => { const id = realST(fn, ms, ...a); live.add(id); return id; };
+  globalThis.clearTimeout = (id) => { live.delete(id); return realCT(id); };
+  try {
+    const okRes = await handleGetAddressUtxos({ cmd: okCmd, getSharedRpc: async () => ({ getUtxosByAddresses: async () => ({ entries: mixedEntries() }) }), legacyGetAddressUtxos: noLegacy, getNetworkId: () => 'x', rpcCallMs: 60000 });
+    assert.strictEqual(okRes.form, 'list');
+    const pmt = await handleGetPastMedianTime({ getSharedRpc: async () => ({ getBlockDagInfo: async () => ({ pastMedianTime: 1758000000000 }) }), rpcCallMs: 60000 });
+    assert.strictEqual(pmt.ok, true);
+    let err = null;
+    try { await handleGetAddressUtxos({ cmd: okCmd, getSharedRpc: async () => ({ getUtxosByAddresses: async () => { throw new Error('rpc down'); } }), legacyGetAddressUtxos: noLegacy, getNetworkId: () => 'x', rpcCallMs: 60000 }); } catch (e) { err = e; }
+    assert.strictEqual(err && err.message, 'rpc down');
+    try { await handleGetAddressUtxos({ cmd: okCmd, getSharedRpc: async () => ({ getUtxosByAddresses: neverSettles }), legacyGetAddressUtxos: noLegacy, getNetworkId: () => 'x', rpcCallMs: 20 }); } catch {}
+  } finally { globalThis.setTimeout = realST; globalThis.clearTimeout = realCT; }
+  assert.strictEqual(live.size, 0, `有 ${live.size} 个定时器没被清掉`);
+});
+await t('T4 超时之后底层调用才晚到的 reject 不会变成 unhandledRejection(Promise.race 已订阅它)', async () => {
+  let unhandled = 0;
+  const h = () => { unhandled++; };
+  process.on('unhandledRejection', h);
+  try {
+    const rpc = { getUtxosByAddresses: () => new Promise((_, rej) => setTimeout(() => rej(new Error('late boom')), 90)) };
+    const out = await hungGuard(handleGetAddressUtxos({ cmd: okCmd, getSharedRpc: async () => rpc, legacyGetAddressUtxos: noLegacy, getNetworkId: () => 'x', rpcCallMs: 25 }));
+    assert.ok(out.e && out.e.code === 'facts_rpc_timeout', `期望先超时, 实际 ${out.e && out.e.message}`);
+    await sleep(250);                                   // 让那个晚到的 reject 真的发生
+  } finally { process.off('unhandledRejection', h); }
+  assert.strictEqual(unhandled, 0, `出现了 ${unhandled} 次 unhandledRejection`);
+});
+await t('T5 RPC 调用同步抛错 ⇒ 错误原样上抛(不是超时、不被吞); 超时错误是 FactsError, 其 message 带 facts_rpc_timeout 前缀(relay 外层 catch 回执 {error, phase:execution} 靠它)', async () => {
+  const boom = new Error('sync boom');
+  const out = await hungGuard(handleGetAddressUtxos({ cmd: okCmd, getSharedRpc: async () => ({ getUtxosByAddresses: () => { throw boom; } }), legacyGetAddressUtxos: noLegacy, getNetworkId: () => 'x', rpcCallMs: 40 }));
+  assert.strictEqual(out.e, boom);
+  const to = await hungGuard(handleGetAddressUtxos({ cmd: okCmd, getSharedRpc: async () => ({ getUtxosByAddresses: neverSettles }), legacyGetAddressUtxos: noLegacy, getNetworkId: () => 'x', rpcCallMs: 20 }));
+  assert.match(to.e.message, /^facts_rpc_timeout: /);
+});
+await t('T6 默认预算(不注入 rpcCallMs)恰是 FACTS_RPC_CALL_MS: 一个 30ms 内返回的 rpc 不受影响(默认值不是 0/负数)', async () => {
+  const r = await handleGetPastMedianTime({ getSharedRpc: async () => ({ getBlockDagInfo: async () => { await sleep(30); return { pastMedianTime: 1758000000000 }; } }) });
+  assert.strictEqual(r.pastMedianTimeMs, 1758000000000);
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

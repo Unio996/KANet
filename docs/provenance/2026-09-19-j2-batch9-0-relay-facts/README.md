@@ -8,17 +8,23 @@
 
 | 文件 | 内容 |
 |---|---|
-| `test-utxo-facts.txt` | `kasia-relay/src/lib/utxo-facts.test.mjs` 原始输出（33 项） |
+| `test-utxo-facts.txt` | `kasia-relay/src/lib/utxo-facts.test.mjs` 原始输出（**41 项**：dbfa5599 的 33 项 + N-T1 的 O5/O5b + S-1 的 T1–T6；由 NWT 审后补测的提交生成） |
 | `test-proto-relay-ipc.txt` | `kasia-console/src/lib/proto-relay-ipc.test.mjs` 原始输出（既有 ①–⑥b 未改 + 新增 批9-0-a/b/b2/c/d + ⑦ 子进程） |
 | `regress-*.txt` | 受波及的既有测试回归：proto-broadcast-ops / proto-leaf-state / proto-driver / covenant-broadcast-relay / covenant-broadcast |
-| `lint-kanet.txt` | `node scripts/lint-kanet.mjs <本提交的 .js/.mjs 文件>`，0 errors；535 条 warning 全是既有的（R-DOC-STATUS 530、R-COMMAND-REGISTRATION 3 条既有 `chain_get_*` 半截注册——**没有新增第 4 个**、R-NET-DEFAULT-DRIFT `relay.mjs:13` 既有行、R-LEDGER-SIZE） |
-| `mutation-utxo-facts.txt` | 对 `utxo-facts.mjs` 的 15 个变异（删哨兵 / 读顶层 covenantId / 面值升序 / 去 tiebreak / facts 真值判断 / 去回声 / 形态 O 带 truncated / 旧路径多字段 / 共享 rpc 失败回落旧路径 / pmt 校验拆掉 / observedAt 在读之前 / 截断先于过滤 / Number 比较 / 允许两形态并存 / 塞入 `new RpcClient`），**全部至少一条 FAIL**，末尾核对文件 sha256 已还原 |
+| `lint-kanet.txt` | `node scripts/lint-kanet.mjs <本提交的 .js/.mjs 文件>`，0 errors（本文件已随 N-T1/S-1 提交重生成：4 个文件、534 条 warning；`dbfa5599` 时是 7 个文件、535 条，多的那条是 `relay.mjs:13` 的 R-NET-DEFAULT-DRIFT）；warning 全是既有的（R-DOC-STATUS 530、R-COMMAND-REGISTRATION 3 条既有 `chain_get_*` 半截注册——**没有新增第 4 个**、R-NET-DEFAULT-DRIFT `relay.mjs:13` 既有行、R-LEDGER-SIZE） |
+| `mutation-utxo-facts.txt` | 对 `utxo-facts.mjs` 的 **22 个变异**（原 15 个 + NWT 审后新增 7 个：M-p 即 NWT-e「形态 O 匹配键去 index」、M-q/r 去 RPC 截止时间、M-s 不清定时器、M-t 超时错误码改名、M-u 预算改 50000、M-v 预算设 0；原 15 个为 删哨兵 / 读顶层 covenantId / 面值升序 / 去 tiebreak / facts 真值判断 / 去回声 / 形态 O 带 truncated / 旧路径多字段 / 共享 rpc 失败回落旧路径 / pmt 校验拆掉 / observedAt 在读之前 / 截断先于过滤 / Number 比较 / 允许两形态并存 / 塞入 `new RpcClient`），**全部至少一条 FAIL**，末尾核对文件 sha256 已还原 |
+| `mutation-N-T1-raw.txt` | **N-T1 的复现与修补对照**（`mutate-n-t1-demo.mjs`）：同一个 NWT-e 变异，对 `dbfa5599` 的旧 33 项测试**存活**（0 失败，真缺口被复现），对新 41 项测试变红（O5、O5b 失败） |
 | `mutation-registration.txt` | 对登记面与白名单的 7 个变异（authorize 漏登记 / commands 缺 FIELD_TYPES 或 PAYLOAD_SCHEMA / relay.mjs case 缺失 / 白名单多一项、标 write、删除），**全部变红**，四个文件 sha256 已还原 |
 | `m0a-digest-check.txt` | `proto-relay-ipc.mjs` 的 `content_digest`：基线 `1ca46d7c…` 与当前 `21230389…` 各自与各自提交里的 manifest MATCH；`review_ref` 仍是上次批准的 `4c693999`（**待 NWT 审本 diff 后更新，我不编新号**） |
 | `versions.txt` | node / npm / kaspa-wasm 版本与 `kaspa_bg.wasm` sha256、基线提交 |
 | `mutate-*.mjs`、`m0a-digest-check.mjs` | 上述证据的产生脚本（变异脚本每次 finally 还原并核 sha256） |
 
 复现（在 worktree 根）：`cd kasia-relay && node src/lib/utxo-facts.test.mjs`；`cd kasia-console && node src/lib/proto-relay-ipc.test.mjs`；变异 `node docs/provenance/2026-09-19-j2-batch9-0-relay-facts/mutate-registration.mjs <worktree 绝对路径>` 与在 `kasia-relay` 下 `node ../docs/provenance/.../mutate-utxo-facts.mjs <kasia-relay 绝对路径>`。
+
+## NWT 审后补的两处（N-T1 / S-1）与一处更正
+- **更正我上一版回执里的一句话**：我曾写"22 个变异（15+7）全部被抓到"。NWT 独立做了自己的 17 个变异，发现其中一个（NWT-e：形态 O 匹配键去掉 index、只按 txid 匹配）在我的 33 项下**存活**——因为我所有夹具每个 txid 只有一个输出，"请求了错的 index"从没被测过。**"全部被抓到"只对我当时选的变异集成立，不是"测试没有缺口"。** 已按 NWT 的杀手向量补 O5，并另加 O5b（同 txid 两输出同时请求、顺序反转）；`mutation-N-T1-raw.txt` 在我这台机器上独立复现了"旧测试存活 / 新测试变红"。
+- **S-1（RPC 调用本身加截止时间）**：`FACTS_RPC_CALL_MS = 5000`，`getUtxosByAddresses` 与 `getBlockDagInfo` 各包一层 `Promise.race`，超时抛 `facts_rpc_timeout`（走 relay 外层 catch ⇒ `{error, phase:'execution'}`，**无 `ok` 字段**）。8000 + 5000 = 13000 < console IPC 超时 15000。测试 T1–T6：永不返回不挂死、每个定时器都被清（成功与失败路径）、超时后底层晚到的 reject 不成 unhandledRejection、同步抛错原样上抛、默认预算生效；对应变异 M-q…M-v 全部变红。
+- 本目录里 `regress-*.txt`、`test-proto-relay-ipc.txt`、`mutation-registration.txt` 仍是 `dbfa5599` 时生成的输出：这两笔改动只碰 `utxo-facts.mjs` 与它的测试，那几份对应的文件没有变。
 
 ## 一次自己发现并修掉的测试盲点（留档，别当没发生）
 第一版 `L5`（金额 >2^53 的排序）夹具的 txid 顺序恰好让"Number 比较退化为平局 → txid 升序"得出与 BigInt 相同的顺序，变异 M-m（改用 Number 比较）**存活**。已把夹具改成"较小面值配较小 txid"，M-m 现在被抓。教训：全绿一次过不等于测试有效，必须有变异对照。

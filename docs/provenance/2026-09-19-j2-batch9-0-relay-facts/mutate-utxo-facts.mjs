@@ -23,19 +23,32 @@ const mutations = [
   ['M-h 旧路径多带一个字段(字节不再不变)', `return { ok: true, utxos: await legacyGetAddressUtxos(cmd.address, getNetworkId()) };`, `return { ok: true, utxos: await legacyGetAddressUtxos(cmd.address, getNetworkId()), facts: false };`],
   ['M-i 共享 rpc 取失败时回落旧路径(违背"不回落")', `const rpc = await getSharedRpc();                       // 超时/未连接 ⇒ 抛错原样上抛(fail-closed)`, `let rpc; try { rpc = await getSharedRpc(); } catch { return { ok: true, utxos: await legacyGetAddressUtxos(cmd.address, getNetworkId()) }; }`],
   ['M-j pmt 校验被拆掉', `if (!Number.isSafeInteger(pmt) || pmt <= 0) {`, `if (false) {`],
-  ['M-k observedAtMs 在读之前取', `const info = await rpc.getBlockDagInfo();\n  const observedAtMs = nowMs();`, `const observedAtMs = nowMs();\n  const info = await rpc.getBlockDagInfo();`],
+  ['M-k observedAtMs 在读之前取', `const info = await withDeadline(() => rpc.getBlockDagInfo(), rpcCallMs, 'getBlockDagInfo');\n  const observedAtMs = nowMs();`, `const observedAtMs = nowMs();\n  const info = await withDeadline(() => rpc.getBlockDagInfo(), rpcCallMs, 'getBlockDagInfo');`],
   ['M-l 截断先于过滤(先切 200 再过滤 min/max)', `keyed.sort((a, b) => cmpKey(a.key, b.key));\n  const truncated = keyed.length > FACTS_LIST_MAX;\n  const utxos = keyed.slice(0, FACTS_LIST_MAX)`, `keyed.sort((a, b) => cmpKey(a.key, b.key));\n  const truncated = keyed.length > FACTS_LIST_MAX + 1;\n  const utxos = keyed.slice(0, FACTS_LIST_MAX + 1)`],
   ['M-m 金额改用 Number 比较(丢精度)', `if (a.amount !== b.amount) return a.amount > b.amount ? -1 : 1;   // 面值降序(O1)`, `if (Number(a.amount) !== Number(b.amount)) return Number(a.amount) > Number(b.amount) ? -1 : 1;`],
   ['M-n 允许 outpoints 与 minAmount 同时给', `if (hasOutpoints && hasBound) throw`, `if (false) throw`],
   ['M-o 塞入 new RpcClient(结构性扫描必须抓到)', `export const FACTS_VERSION = 1;`, `export const FACTS_VERSION = 1;\nconst _leak = () => new RpcClient({});`],
+  // ── 9-0 NWT 审后新增(N-T1 / S-1)。find/repl 为数组 = 同时做多处替换(每处都必须恰好命中 1 次) ──
+  ['M-p【NWT-e, N-T1】形态 O 的匹配键去掉 index(只按 txid 匹配)——原 33 项下存活的那个真缺口',
+    [`const wanted = new Map(req.outpoints.map((o) => [\`\${o.transactionId}:\${o.index}\`, o]));`, `const k = \`\${key.txid}:\${key.index}\`;`, `const h = hit.get(\`\${o.transactionId}:\${o.index}\`);`],
+    [`const wanted = new Map(req.outpoints.map((o) => [\`\${o.transactionId}:\`, o]));`, `const k = \`\${key.txid}:\`;`, `const h = hit.get(\`\${o.transactionId}:\`);`]],
+  ['M-q【S-1】getUtxosByAddresses 调用去掉截止时间', `await withDeadline(() => rpc.getUtxosByAddresses([cmd.address]), rpcCallMs, 'getUtxosByAddresses');`, `await rpc.getUtxosByAddresses([cmd.address]);`],
+  ['M-r【S-1】getBlockDagInfo 调用去掉截止时间', `await withDeadline(() => rpc.getBlockDagInfo(), rpcCallMs, 'getBlockDagInfo');\n  const observedAtMs`, `await rpc.getBlockDagInfo();\n  const observedAtMs`],
+  ['M-s【S-1】超时/成功后不清定时器(每次调用漏一个)', `.finally(() => clearTimeout(timer));`, `.finally(() => {});`],
+  ['M-t【S-1】超时错误码改名', `new FactsError('facts_rpc_timeout',`, `new FactsError('rpc_timeout',`],
+  ['M-u【S-1】RPC 调用预算改成 50000(与 8000 之和 ≥ console 15000)', `export const FACTS_RPC_CALL_MS = 5000;`, `export const FACTS_RPC_CALL_MS = 50000;`],
+  ['M-v【S-1】截止时间被设成 0(默认预算失效: 一切 rpc 都立刻超时)', `rpcCallMs = FACTS_RPC_CALL_MS }) {\n  const rpc = await getSharedRpc();`, `rpcCallMs = 0 }) {\n  const rpc = await getSharedRpc();`],
 ];
 
 let allRed = true;
 try {
   for (const [name, find, repl] of mutations) {
-    const cnt = origText.split(find).length - 1;
-    if (cnt !== 1) { console.log(`[ERR ] ${name}: 变异锚点命中 ${cnt} 次(需要恰 1 次)——变异脚本与源码不同步`); allRed = false; continue; }
-    fs.writeFileSync(target, origText.replace(find, repl));
+    const finds = Array.isArray(find) ? find : [find], repls = Array.isArray(repl) ? repl : [repl];
+    const bad = finds.map((f, i) => [i, origText.split(f).length - 1]).filter(([, c]) => c !== 1);
+    if (bad.length) { console.log(`[ERR ] ${name}: 变异锚点命中次数不是恰 1 次(${bad.map(([i, c]) => `#${i}=${c}`).join(',')})——变异脚本与源码不同步`); allRed = false; continue; }
+    let mutated = origText;
+    finds.forEach((f, i) => { mutated = mutated.replace(f, repls[i]); });
+    fs.writeFileSync(target, mutated);
     const r = spawnSync(process.execPath, [test], { cwd: REL, encoding: 'utf8', timeout: 120000 });
     const fails = (r.stdout || '').split('\n').filter((l) => l.startsWith('[FAIL]')).map((l) => l.slice(7, 40).trim());
     const crashed = r.status !== 0 && fails.length === 0;

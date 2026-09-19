@@ -1,5 +1,5 @@
 [RED ] M-a 删掉能力哨兵(covenant_id 字段缺失不再报错)  →  2 条失败 «M1-b 旧 wasm(entry 上没有 covenantId» «M1-c【变异对照】手写夹具把 covenantId 放顶层(en»
-[RED ] M-b 读顶层 e.covenantId(v0.3 前的"归一化惯性"错误)  →  4 条失败 «O1 found/missing 划分 + 请求顺序输出 + 回声» «O2 普通 P2PK 条目 ⇒ covenantId 键存在且为» «O3【N1】地址上有 >FACTS_LIST_MAX 个 dust» «M1-e covenantId 形状异常(非 64 位 hex)⇒»
+[RED ] M-b 读顶层 e.covenantId(v0.3 前的"归一化惯性"错误)  →  5 条失败 «O1 found/missing 划分 + 请求顺序输出 + 回声» «O2 普通 P2PK 条目 ⇒ covenantId 键存在且为» «O3【N1】地址上有 >FACTS_LIST_MAX 个 dust» «O5b 同一 txid 两个输出同时请求(0 与 1): 各回各的»
 [RED ] M-c 面值改升序(O1 的方向错误)  →  4 条失败 «L1【O1】250 dust + 50 可用、无 minAmoun» «L3 min/max 过滤在截断之前(用 BigInt 十进制字符» «L4 truncated 边界: 恰 200 项 ⇒ false;» «L5 金额一律 BigInt: >2^53 的相邻值排序正确、输出»
 [RED ] M-d 去掉全序 tiebreak(同额只靠输入顺序)  →  1 条失败 «L2 输出对输入顺序不敏感: 同一批条目 20 种打乱顺序 ⇒ J»
 [RED ] M-e facts 判据改成真值判断  →  1 条失败 «B2 facts:false / facts 非严格 true('»
@@ -13,6 +13,13 @@
 [RED ] M-m 金额改用 Number 比较(丢精度)  →  1 条失败 «L5 金额一律 BigInt: >2^53 的相邻值排序正确、输出»
 [RED ] M-n 允许 outpoints 与 minAmount 同时给  →  1 条失败 «R1 outpoints 与 minAmount/maxAmoun»
 [RED ] M-o 塞入 new RpcClient(结构性扫描必须抓到)  →  1 条失败 «S1 utxo-facts.mjs 源码(去注释)不含 conne»
-[RESTORED] utxo-facts.mjs 已还原, sha256 4a2c8c5948aa90a7… 一致
+[RED ] M-p【NWT-e, N-T1】形态 O 的匹配键去掉 index(只按 txid 匹配)——原 33 项下存活的那个真缺口  →  2 条失败 «O5【N-T1, NWT 杀手向量】同一 txid 两个输出(in» «O5b 同一 txid 两个输出同时请求(0 与 1): 各回各的»
+[RED ] M-q【S-1】getUtxosByAddresses 调用去掉截止时间  →  1 条失败 «T1 getUtxosByAddresses 永不返回 ⇒ 在 r»
+[RED ] M-r【S-1】getBlockDagInfo 调用去掉截止时间  →  1 条失败 «T2 getBlockDagInfo 永不返回 ⇒ R2 同样以»
+[RED ] M-s【S-1】超时/成功后不清定时器(每次调用漏一个)  →  1 条失败 «T3 截止时间之前返回 ⇒ 正常结果, 且【每个】定时器都被清掉(»
+[RED ] M-t【S-1】超时错误码改名  →  4 条失败 «T1 getUtxosByAddresses 永不返回 ⇒ 在 r» «T2 getBlockDagInfo 永不返回 ⇒ R2 同样以» «T4 超时之后底层调用才晚到的 reject 不会变成 unhan» «T5 RPC 调用同步抛错 ⇒ 错误原样上抛(不是超时、不被吞);»
+[RED ] M-u【S-1】RPC 调用预算改成 50000(与 8000 之和 ≥ console 15000)  →  1 条失败 «S3 FACTS_LIST_MAX===200 / FACTS_O»
+[RED ] M-v【S-1】截止时间被设成 0(默认预算失效: 一切 rpc 都立刻超时)  →  1 条失败 «T6 默认预算(不注入 rpcCallMs)恰是 FACTS_RP»
+[RESTORED] utxo-facts.mjs 已还原, sha256 88cacf3bbe8cd695… 一致
 
 全部变异均被测试抓到

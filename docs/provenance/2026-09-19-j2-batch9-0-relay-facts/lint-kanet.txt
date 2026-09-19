@@ -1,10 +1,7 @@
-[lint-kanet] scanning 7 files...
+[lint-kanet] scanning 4 files...
 
-[lint-kanet] ⚠  535 warning(s) across 4 warn-rule(s) (non-blocking — fix as migration checklist):
+[lint-kanet] ⚠  534 warning(s) across 3 warn-rule(s) (non-blocking — fix as migration checklist):
 
-  R-NET-DEFAULT-DRIFT: 1 hit(s)
-    kasia-relay\src\relay.mjs:13
-      [R-NET-DEFAULT-DRIFT] 网络默认值 '|| mainnet/testnet-12' — env 一漏同进程两半各认一个网; 改 configuredNetwork()(无默认, 未设 throw)。转义: // lint-allow-net-default: <reason>
   R-COMMAND-REGISTRATION [WARN]: 3 hit(s)
     kasia-relay\src\lib\commands.mjs:0
       commands.mjs COMMAND_TYPES.CHAIN_GET_CURRENT_DAA_SCORE 没在 COMMAND_FIELD_TYPES 里注册对应 [COMMAND_TYPES.CHAIN_GET_CURRENT_DAA_SCORE] 条目 — 这个命令类型的字段类型完全不受校验(半截注册)。
@@ -29,4 +26,4 @@
     ... 525 more
 
   Warnings do NOT block commit. Migrate to suppress. See docs/ANTI-PATTERNS.md.
-[lint-kanet] ✓ 7 files — 0 errors (535 warning(s) above)
+[lint-kanet] ✓ 4 files — 0 errors (534 warning(s) above)

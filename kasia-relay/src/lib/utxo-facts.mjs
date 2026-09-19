@@ -30,6 +30,11 @@ export const FACTS_OUTPOINTS_MAX = 8;   // C1 一步最多 4 个链上固定面�
 // ⇒ 不收紧则 console 先超时、relay 侧还在等。8s < 15s。超时行为: waitForRpc 抛错原样上抛, relay 外层 catch 回
 // {error, phase:'execution'}; 不吞、不回落到 per-call 客户端。(J2 提议值, NWT 审 9-0 diff 时定。)
 export const FACTS_RPC_WAIT_MS = 8000;
+// S-1(NWT 9-0 审 4e34e9c9): 拿到共享客户端之后, RPC 调用本身(getUtxosByAddresses / getBlockDagInfo)也要有截止时间——
+// 共享客户端"连着但节点卡死"时, 否则 relay 侧永远不回执、也分不清"relay 卡住"与"relay 慢"。总预算 = 8000 + 5000 = 13000 < console
+// 读命令 IPC 超时 15000(9-1 消费方 IPC 超时须 ≥ 15000, 写进 9-1 清单)。超时回执 facts_rpc_timeout(走 relay 外层 catch ⇒
+// {error, phase:'execution'}, 注意无 ok 字段——9-1 消费方必须判 ok===true ∧ facts===true ∧ …, 不得用 !result.error, S-2)。
+export const FACTS_RPC_CALL_MS = 5000;
 
 const HEX64 = /^[0-9a-f]{64}$/;
 const HEX_EVEN = /^(?:[0-9a-f]{2})+$/;
@@ -142,6 +147,16 @@ function toFactsItem(e, key) {
   };
 }
 
+// 给一次 RPC 调用加截止时间。超时后底层调用无法取消, 我们只是不再等它; Promise.race 已订阅它, 所以它晚到的 reject
+// 不会变成 unhandledRejection。fn 同步抛错也走 reject 路径(Promise.resolve().then)。finally 里必清定时器(否则每次调用漏一个)。
+function withDeadline(fn, ms, what) {
+  let timer;
+  const deadline = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new FactsError('facts_rpc_timeout', `${what} 超过 ${ms}ms 未返回`)), ms);
+  });
+  return Promise.race([Promise.resolve().then(fn), deadline]).finally(() => clearTimeout(timer));
+}
+
 const cmpKey = (a, b) => {
   if (a.amount !== b.amount) return a.amount > b.amount ? -1 : 1;   // 面值降序(O1)
   if (a.txid !== b.txid) return a.txid < b.txid ? -1 : 1;           // 小写 hex 的字典序 == txid 字节序
@@ -197,7 +212,7 @@ export function buildFactsResponse(req, entries) {
  * @param {(address:string, networkId:string) => Promise<Array>} o.legacyGetAddressUtxos 注入: p2sh.mjs 的 getAddressUtxos
  * @param {() => string} o.getNetworkId 注入: 仅旧路径需要(facts 路径不依赖钱包)
  */
-export async function handleGetAddressUtxos({ cmd, getSharedRpc, legacyGetAddressUtxos, getNetworkId }) {
+export async function handleGetAddressUtxos({ cmd, getSharedRpc, legacyGetAddressUtxos, getNetworkId, rpcCallMs = FACTS_RPC_CALL_MS }) {
   // 严格 `=== true`: 真值判断会把 'true'/1 也放进新路径(validator 虽会先拒, 这里不依赖它)。
   if (cmd.facts !== true) {
     // 没有任何既有调用方会带这三个字段; 带了却没带 facts 只能是误用 ⇒ 大声拒绝, 而不是静默走旧路径回一个
@@ -210,7 +225,7 @@ export async function handleGetAddressUtxos({ cmd, getSharedRpc, legacyGetAddres
   }
   const req = parseFactsRequest(cmd);                     // 先校验(便宜、失败不占 RPC)
   const rpc = await getSharedRpc();                       // 超时/未连接 ⇒ 抛错原样上抛(fail-closed)
-  const res = await rpc.getUtxosByAddresses([cmd.address]);
+  const res = await withDeadline(() => rpc.getUtxosByAddresses([cmd.address]), rpcCallMs, 'getUtxosByAddresses');
   return buildFactsResponse(req, res?.entries || []);
 }
 
@@ -219,9 +234,9 @@ export async function handleGetAddressUtxos({ cmd, getSharedRpc, legacyGetAddres
  * 走与 covenant_broadcast 提交同一个共享 RpcClient ⇒ "读 pmt 的节点 == 提交的节点"无条件成立。
  * @param {{getSharedRpc: () => Promise<object>, nowMs?: () => number}} o
  */
-export async function handleGetPastMedianTime({ getSharedRpc, nowMs = () => Date.now() }) {
+export async function handleGetPastMedianTime({ getSharedRpc, nowMs = () => Date.now(), rpcCallMs = FACTS_RPC_CALL_MS }) {
   const rpc = await getSharedRpc();
-  const info = await rpc.getBlockDagInfo();
+  const info = await withDeadline(() => rpc.getBlockDagInfo(), rpcCallMs, 'getBlockDagInfo');
   const observedAtMs = nowMs();                           // 读回之后立刻取墙钟(供 pmtEvidence 新鲜度, §8 S5)
   const pmt = Number(info?.pastMedianTime);
   if (!Number.isSafeInteger(pmt) || pmt <= 0) {
