@@ -17,6 +17,17 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
+// 前提(NWT 合入审 S3 / J2 2026-09-20): 本测试用 node:test 的 mock.module, 它只在 `--experimental-test-module-mocks` 下存在。
+// 没带 flag 时下面第一次用到 mock.module 会得到裸的 `TypeError: mock.module is not a function`——上面 Run 行写了 flag, 但读的人不一定读到。
+// 所以在做任何有副作用的事(建临时目录、跑迁移)之前先检查: 缺前提就说明缺什么、怎么跑, exit 1。
+// ⟦PREREQ-CHECK-BEGIN⟧
+if (typeof mock.module !== 'function') {
+  console.error('[broadcaster-utxo.test] 前提不满足: node:test 的 mock.module 不可用——本测试必须带 --experimental-test-module-mocks 运行。');
+  console.error('  正确运行: cd kasia-console && node --experimental-test-module-mocks --test src/lib/broadcaster-utxo.test.mjs');
+  process.exit(1);
+}
+// ⟦PREREQ-CHECK-END⟧
+
 const tmpDir = mkdtempSync(join(tmpdir(), 'kanetui-broadcaster-utxo-test-'));
 const DB_PATH = join(tmpDir, 'console.db');
 process.env.DB_PATH = DB_PATH;

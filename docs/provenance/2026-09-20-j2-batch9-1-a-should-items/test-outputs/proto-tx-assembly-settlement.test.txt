@@ -1,0 +1,82 @@
+[db] path=%TEMP%\_j2_settlement_e2e_8012.db source=DB_PATH
+[diag:step] proc.silverc.compile.bshard-artifacts ms=75 cmd=silverc ok=1 at=2026-09-19T17:25:28.429Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=50 cmd=silverc ok=1 at=2026-09-19T17:25:28.486Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=28 cmd=silverc ok=1 at=2026-09-19T17:25:28.534Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=51 cmd=silverc ok=1 at=2026-09-19T17:25:28.596Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=27 cmd=silverc ok=1 at=2026-09-19T17:25:28.631Z
+[PASS] 前提检查: currentState.count(2) === SEAL_COUNT(2)
+[diag:step] proc.silverc.compile.bshard-artifacts ms=49 cmd=silverc ok=1 at=2026-09-19T17:25:28.688Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=73 cmd=silverc ok=1 at=2026-09-19T17:25:28.772Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=27 cmd=silverc ok=1 at=2026-09-19T17:25:28.805Z
+[PASS] ①market_seal buildMarketSealTxJson 真实构造成功([leaf,held,fee]三输入)
+[PASS] ②relay真代码能反序列化+extractTxShape+validateFixedValueOutputs通过
+[PASS] ③relay真签名(fee输入)后finalize, txid与expectedTxid一致
+[PASS] ③b(账本1465节点规则镜像) 三输入交易每个input满足v2.0.1 RPC层sigOpCount/computeBudget一致性规则
+[PASS] ④独立复算Σ真实inputs.utxo.amount − Σ真实outputs.value必须【恰好】等于built.netLoss(账本1455纪律)
+[PASS] ⑤真实tx算出的output covenant_id与builder返回的rootCloseCovId/tokenCovId一致(不只信手算)
+[PASS] ⑥fail-closed: 错误的rootCloseTmplHash必须被拒绝
+[diag:step] proc.silverc.compile.bshard-artifacts ms=73 cmd=silverc ok=1 at=2026-09-19T17:25:28.912Z
+[PASS] ①close_commit buildCloseCommitTxJson 真实构造成功([rootClose,fee]两输入, 委员5槽同签)
+[PASS] ②relay真代码能反序列化+extractTxShape+validateFixedValueOutputs通过(续约非genesis)
+[PASS] ③relay真签名(fee输入)后finalize, txid与expectedTxid一致
+[PASS] ③b(账本1465节点规则镜像) 两输入交易每个input满足v2.0.1 RPC层sigOpCount/computeBudget一致性规则
+[PASS] ④独立复算Σ真实inputs.utxo.amount − Σ真实outputs.value必须【恰好】等于built.netLoss(账本1455纪律)
+[PASS] ⑤真实tx算出的output covenant_id(RootClose续约)与builder返回的rootCloseContinuationCovId一致且等于sealBuilt.rootCloseCovId(covenant_id不变)
+[PASS] ⑥fail-closed: deadline_ms尚未过去(未来时间戳)必须被构造时拒绝, 不留prepared残留
+[PASS] ⑦委员私钥不进返回值(检查closeCommitBuilt的每个字段都不含明文私钥子串)
+[PASS] ①convert_to_claim buildConvertToClaimTxJson 真实构造成功([rootClose,held,fee]三输入, 三输出)
+[PASS] ②relay真代码能反序列化+extractTxShape+validateFixedValueOutputs通过(两个genesis输出)
+[PASS] ③relay真签名(fee输入)后finalize, txid与expectedTxid一致
+[PASS] ③b(账本1465节点规则镜像) 三输入交易每个input满足v2.0.1 RPC层sigOpCount/computeBudget一致性规则
+[PASS] ④独立复算Σ真实inputs.utxo.amount − Σ真实outputs.value必须【恰好】等于built.netLoss(账本1455纪律)
+[PASS] ⑤covenant_id独立复算: claim的covenant_id=kaspa.covenantId(fee outpoint,[claim输出]); 新代币输出spk=以【真实claim covid】为owner现算的KTT
+[PASS] ⑥RootClaim输出spk与独立"探针+手工splice+自算P2SH"构造逐字节一致(自检两侧不共用实现)
+[PASS] ⑦RootClose input见证里 claimOutIdx/tokenInIdx/tokenOutIdx 位置与交易真实结构一致(独立push解析器)
+[PASS] ⑧convertToClaimWitnessArgs映射: heldIdx=7(≠tokenOut=1)时 tokenInIdx=7、tokenOutIdx=CONVERT_TO_CLAIM_TOKEN_OUT_INDEX、claimOutIdx=CONVERT_TO_CLAIM_CLAIM_OUT_INDEX
+[PASS] ⑧b编码器: tokenIn=1/tokenOut=3 与 互换 得到不同字节
+[PASS] ⑨fail-closed: closedState.closed=0(尚未close_commit)
+[PASS] ⑨fail-closed: heldTokenOutpoint为空(没有持有代币输入)
+[PASS] ⑨fail-closed: 错误的rootCloseTmplHash
+[PASS] ⑨b B4-5 fail-closed: rootCloseUtxoScriptPublicKeyHex与现算的当前RootClose spk不一致
+[PASS] ⑨b B4-5 fail-closed: rootCloseUtxoScriptPublicKeyHex缺失
+[PASS] ⑩不含私钥/委员私钥信封解密值: builder返回值序列化后不含明文私钥
+[PASS] ⑤a B4-1: 5个委员签名对【最终tx】(含RootClose续约输出的covenant)的共识sighash全部验真(独立移植sighash+schnorr)
+[PASS] ⑤b B4-1 反向臂: 同一笔tx去掉output0的covenant后重算sighash, 5个签名必须全部验假(检查对covenant敏感, 签名确实承诺了covenant)
+[PASS] ⑤c 不同找零值(fee输入面值不同 → 找零 9.98B/24.2M/5.0M/2.97M sompi)各自重签: 每个最终tx的5个签名都验真(签名承诺全部输出值, 找零一变必须重签)
+[PASS] ⑤d B4-2: deadline在余量之内(now-60s, 已过deadline但未过300s余量)必须构造期fail-closed, 报文提到余量
+[diag:step] proc.silverc.compile.bshard-artifacts ms=74 cmd=silverc ok=1 at=2026-09-19T17:25:29.213Z
+[PASS] ⑤d2 B4-2 对照: deadline已过余量之外(now-1h)不因余量被拒(由此证明上一条的throw来自余量而非别的原因)
+[PASS] ⑤e B4-5: rootCloseUtxoScriptPublicKeyHex与现算的当前RootClose spk不一致 / 缺失 → fail-closed
+[PASS] ⑤f B4-6: 返回值带committeeMode标签(如实标注5槽同一把keypair, 非4-of-5门限)
+[PASS] ⑤g B4-7: builder构造过程中new的PrivateKey恰好被free()一次(且不随候选形状数量重复创建)
+[diag:step] proc.silverc.compile.bshard-artifacts ms=73 cmd=silverc ok=1 at=2026-09-19T17:25:29.334Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=48 cmd=silverc ok=1 at=2026-09-19T17:25:29.388Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=73 cmd=silverc ok=1 at=2026-09-19T17:25:29.471Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=71 cmd=silverc ok=1 at=2026-09-19T17:25:29.557Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=72 cmd=silverc ok=1 at=2026-09-19T17:25:29.640Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=48 cmd=silverc ok=1 at=2026-09-19T17:25:29.694Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=74 cmd=silverc ok=1 at=2026-09-19T17:25:29.778Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=72 cmd=silverc ok=1 at=2026-09-19T17:25:29.864Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=73 cmd=silverc ok=1 at=2026-09-19T17:25:29.948Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=50 cmd=silverc ok=1 at=2026-09-19T17:25:30.004Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=71 cmd=silverc ok=1 at=2026-09-19T17:25:30.085Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=71 cmd=silverc ok=1 at=2026-09-19T17:25:30.171Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=72 cmd=silverc ok=1 at=2026-09-19T17:25:30.255Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=52 cmd=silverc ok=1 at=2026-09-19T17:25:30.312Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=70 cmd=silverc ok=1 at=2026-09-19T17:25:30.392Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=71 cmd=silverc ok=1 at=2026-09-19T17:25:30.479Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=71 cmd=silverc ok=1 at=2026-09-19T17:25:30.560Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=49 cmd=silverc ok=1 at=2026-09-19T17:25:30.614Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=73 cmd=silverc ok=1 at=2026-09-19T17:25:30.697Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=71 cmd=silverc ok=1 at=2026-09-19T17:25:30.784Z
+[PASS] ⑥a C3: pmt 闸放行后, 墙钟滞后 L∈{0,60,120,133,140}s 时 builder 都不被 300s 墙钟守卫反卡(五个 deadline 现造的市场真构造成功)
+[diag:step] proc.silverc.compile.bshard-artifacts ms=73 cmd=silverc ok=1 at=2026-09-19T17:25:30.868Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=51 cmd=silverc ok=1 at=2026-09-19T17:25:30.924Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=73 cmd=silverc ok=1 at=2026-09-19T17:25:31.007Z
+[PASS] ⑥b C3 对照: 同一市场(墙钟滞后 133s, 即 deadline+164s)不传 pmtEvidence ⇒ 300s 墙钟守卫仍拦(第二层仍有效, 证明上一条放行来自 pmtEvidence 而非守卫被拆掉)
+[diag:step] proc.silverc.compile.bshard-artifacts ms=73 cmd=silverc ok=1 at=2026-09-19T17:25:31.090Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=50 cmd=silverc ok=1 at=2026-09-19T17:25:31.145Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=73 cmd=silverc ok=1 at=2026-09-19T17:25:31.227Z
+[PASS] ⑥c C3: pmtEvidence 自身未通过 pmt 判据(pmt 只领先 10s) ⇒ 构造期 fail-closed(builder 复核同一个判据); 墙钟早于 deadline(本机时钟严重偏差) ⇒ 拒绝
+
+43 passed, 0 failed

@@ -886,7 +886,7 @@ export function withdrawWitnessArgs({ sig65Hex, tokInIdx, tokOutIdx, destIdx, to
  * @param {string} o.tokSuffixHex
  * @param {object} o.feeUtxo
  * @param {string} o.relayChangeScriptPublicKeyHex
- * @param {bigint} o.absFeeCapSompi  feeProfile.withdraw.cap(暂借占位, 待NWT推数)
+ * @param {bigint} o.absFeeCapSompi  feeProfile.withdraw.cap(NWT 按 F3' 推的专属值 55,000,000; 来源与推导见 kasia-console/scripts/proto-v0-template-anchors.json 的 _source; 字面值由 proto-fee-profile-caps.test.mjs 钉死)
  */
 export function buildWithdrawTxJson({
   kaspa, network, marketCovId, claimCovId, winnerPkHex, amount, ktcOutpoint, ktcUtxoScriptPublicKeyHex, heldTokenOutpoint,
