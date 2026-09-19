@@ -1,0 +1,17 @@
+网络护栏通过: borsh.network=simnet json.network=simnet
+资金: relay 地址上 coinbase UTXO 数=119, 用最老的一枚(daa=7) 作 genesis fee 输入
+  提交尝试 1 被拒: RPC Server (remote error) -> Rejected transaction bc031ea940034fafd2933c8ef4bafff7223966a07fa99f8c90b466f194d1d4fa: one of the transaction inputs spends an imma
+  提交尝试 2 被拒: RPC Server (remote error) -> Rejected transaction bc031ea940034fafd2933c8ef4bafff7223966a07fa99f8c90b466f194d1d4fa: one of the transaction inputs spends an imma
+  提交尝试 3 被拒: RPC Server (remote error) -> Rejected transaction bc031ea940034fafd2933c8ef4bafff7223966a07fa99f8c90b466f194d1d4fa: one of the transaction inputs spends an imma
+  提交尝试 4 被拒: RPC Server (remote error) -> Rejected transaction bc031ea940034fafd2933c8ef4bafff7223966a07fa99f8c90b466f194d1d4fa: one of the transaction inputs spends an imma
+  提交尝试 5 被拒: RPC Server (remote error) -> Rejected transaction bc031ea940034fafd2933c8ef4bafff7223966a07fa99f8c90b466f194d1d4fa: one of the transaction inputs spends an imma
+  提交尝试 6 被拒: RPC Server (remote error) -> Rejected transaction bc031ea940034fafd2933c8ef4bafff7223966a07fa99f8c90b466f194d1d4fa: one of the transaction inputs spends an imma
+file:///D:/kanet-tn12/scratch/_j2_wt_batch9_0/docs/provenance/2026-09-19-j2-batch9-0-facts-vs-node/facts-vs-node.mjs:105
+if (!submitted) throw new Error('genesis 交易 6 次尝试均未被接受');
+                      ^
+
+Error: genesis 交易 6 次尝试均未被接受
+    at file:///D:/kanet-tn12/scratch/_j2_wt_batch9_0/docs/provenance/2026-09-19-j2-batch9-0-facts-vs-node/facts-vs-node.mjs:105:23
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+
+Node.js v24.14.1
