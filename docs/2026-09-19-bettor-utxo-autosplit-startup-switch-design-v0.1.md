@@ -71,7 +71,7 @@ Owner 原话是"主网默认关"。本页取"**所有网络默认关**"：① D-
 
 ## 4. 范围外但必须记下的两件事
 
-1. **broker-intake-watcher 的 5 分钟补零钱拆分**（`broker-intake-watcher.js:669` `_ensureBrokerUtxoSplit` → `splitUtxos(BROKER_RELAY_ID)`）是**第二条运行期自动花钱面**，与启动期无关，本页不动。它在主网是否实际运行、是否曾发生，Bettor 只读核的结果写在 COORD-LEDGER 本页对应条目；若在主网跑，另开票 `T-BROKER-UTXO-SPLIT-MAINNET` 走同款开关设计，NWT 审本页时一并给意见。
+1. **broker-intake-watcher 的 5 分钟补零钱拆分**（`broker-intake-watcher.js:669` `_ensureBrokerUtxoSplit` → `splitUtxos(BROKER_RELAY_ID)`）是**第二条运行期自动花钱面**，与启动期无关，本页不动。**Bettor 只读核（2026-09-19）**：该 watcher 只在 `index.js` 的 `if (process.env.BROKER_ENABLED === '1')` 块内动态 import 并启动（broker-optional，默认关，(1090)）；主网 console 本次启动后与死机前两份 stdout 里 `[broker-utxo-split]` 均 0 行 ⇒ **主网当前不跑**，不是活的花钱面。本页不动它；若将来打开 `BROKER_ENABLED`，须先给它同款开关（票 `T-BROKER-UTXO-SPLIT-MAINNET`，不排期），NWT 审本页时确认这个结论。
 2. **"目标 8 个 UTXO"判据在主网四个账户上不收敛**（来回 5→4→5）：成因未读，本页不改判据；关掉启动期拆分后该现象自然停止，若将来要开，先修判据再开。另开票 `T-UTXO-SPLIT-NONCONVERGENT`。
 
 ## 5. 上线

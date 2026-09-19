@@ -24,6 +24,14 @@
 
 ## 🔴 当前有效的战略决策 (CURRENT)
 
+### D-026 console 启动期 UTXO 自动拆分加开关，默认关（主网不写键 = 关）(2026-09-19 · Owner 本机终端原话「加开关，主网默认关。」· Bettor 记账 · COORD-LEDGER 1533–1535 / 1538 · 设计 `docs/2026-09-19-bettor-utxo-autosplit-startup-switch-design-v0.1.md`)
+
+1. **决定**：`autoSplitAll()`（console 每次启动对全部有钥 relay 跑 `split_utxo` 的那一步）加 env 闸 `UTXO_AUTOSPLIT_ON_START`，只有字面 `1` 才执行；默认关，**所有网络**默认关（D-017 后只剩主网，不按网络分支）；`kanet.mainnet.env` 不写该键。
+2. **依据**：NWT 部署后核实证 console 每次启动在主网真实烧费（两次各约 0.045 KAS，同四账户来回拆合，UTXO 数不收敛）；开机自启（P2）上线后这会成为无人值守必发生的链上交易。
+3. **范围**：只动 `autoSplitAll()` 入口 + 测试；手动接口 `/api/relay/:id/split-utxos`、broker 补零钱路径（主网未启用）、relay 端、拆分判据均不动。
+4. **上线**：走设计先行（Bettor 设计 → NWT 审 → 派实现 → NWT 审 diff → 合入），随下一次本来要做的 console 重启生效；**打开**该开关是另一次钱路决定，须 Owner 单独批。
+5. **不影响**：D-022 结算线、驱动开关（仍关）、批 9 排期。
+
 ### D-025 broker / 长尾分成金库走"真正底层去中心化、去索引器"结构：五条硬不变量为设计前置 (2026-09-19 · Owner 本机终端原话「我们走真正底层去中心化，尽量去索引器的结构。这个对我们自己 broker 设计太有吸引力了。」· J1 归纳五条、Bettor 采纳并补三条记账 · COORD-LEDGER 1509 / 1513)
 
 1. **决定**：kanet broker（长尾分成金库及其后继）的设计以 dotk 同款"一个合作 = 一个 covenant UTXO、归属由链强制、索引器只是便利"为骨架；下列五条是**设计前置**（不满足不进 NWT 审），每条须配可测验收判据。
