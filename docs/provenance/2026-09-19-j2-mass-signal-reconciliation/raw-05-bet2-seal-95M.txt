@@ -1,0 +1,2 @@
+bet2 fee=95M (node storageMass was 293116) PASS(<475000) signals={"localMass":411635,"handStorage":293116,"handCompute":22470}
+market_seal fee=95M (node storageMass was 231312) PASS(<475000) signals={"localMass":349831,"handStorage":231312,"handCompute":22100}

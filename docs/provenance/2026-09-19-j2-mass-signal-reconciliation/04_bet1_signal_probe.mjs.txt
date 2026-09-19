@@ -1,0 +1,54 @@
+// 只读探针: 复现 register_append#1(route A: min_bet=1, stake=1, 无held)在不同 fee UTXO 面值下,
+// assertMassWithinCeiling 三个信号(本地wasm/手算storage/手算compute)各是多少。不广播、不碰simnet。
+import { execSync, spawnSync } from 'node:child_process';
+import fs from 'node:fs';
+if (!process.env._PROBE_BOOT) {
+  const tmpDb = `${process.env.TEMP || '/tmp'}/_j2_probe_${process.pid}.db`;
+  try { fs.unlinkSync(tmpDb); } catch {}
+  execSync('node scripts/run-migrations.mjs', { cwd: process.cwd(), env: { ...process.env, DB_PATH: tmpDb }, stdio: 'pipe' });
+  const r = spawnSync(process.execPath, [process.argv[1]], { cwd: process.cwd(), stdio: 'inherit', env: { ...process.env, DB_PATH: tmpDb, _PROBE_BOOT: '1' } });
+  try { fs.unlinkSync(tmpDb); } catch {}
+  process.exit(r.status ?? 1);
+}
+if (!process.env.CONSOLE_ENCRYPTION_KEY) process.env.CONSOLE_ENCRYPTION_KEY = '1'.repeat(64);
+const kaspa = await import('kaspa-wasm');
+const { randomBytes } = await import('node:crypto');
+const { buildMarketGenesisTxJson, buildRegisterAppendTxJson } = await import('../../src/lib/proto-tx-assembly.mjs');
+const { computeMarketGenesisArtifacts, computeShardLeafRedeemScript, computeKttGenesisArtifact, loadProtocolConstants, p2sh } = await import('../../src/lib/proto-covenant-builder.mjs');
+const { compileSilV100, ctorBytes32V100, ctorIntV100 } = await import('../../src/lib/pool-bshard-artifacts.mjs');
+const { extractTemplateArtifactV100 } = await import('../../src/lib/pool-template-artifact.mjs');
+const priv = new kaspa.PrivateKey(randomBytes(32).toString('hex'));
+const relaySpkHex = '0x' + kaspa.payToAddressScript(priv.toPublicKey().toAddress('mainnet')).script;
+const MARKET_ID = 'ab'.repeat(32), MIN_BET = 1, DEADLINE_MS = Date.now() - 3600000, SEAL_COUNT = 2, STAKE = 1;
+const ga = await computeMarketGenesisArtifacts({ marketId: MARKET_ID, minBet: MIN_BET, deadlineMs: DEADLINE_MS });
+const gFee = { txid: 'ee'.repeat(32), vout: 0, value: 95_000_000n, scriptPublicKeyHex: relaySpkHex };
+const gb = buildMarketGenesisTxJson({ kaspa, network: 'mainnet', feeUtxo: gFee, relayChangeScriptPublicKeyHex: relaySpkHex, shardLeafScriptPubKeyHex: ga.shardLeafDirect.scriptPubKeyHex, absFeeCapSompi: 80_000_000n });
+const leafCovId = gb.shardLeafCovId, leafOutpoint = { txid: gb.expectedTxid, vout: 0 };
+const { ps_tmpl_hash, token_tmpl_hash } = loadProtocolConstants();
+const P = (f) => new URL(f, new URL('../../src/lib/', import.meta.url)).pathname.replace(/^\/([A-Za-z]:)/, '$1');
+const SLD = P('./ShardLeaf_direct.sil'), TICKET = P('./sil-v1/PoolSideTicket.sil');
+const sldCtor = [ctorBytes32V100(MARKET_ID), ctorBytes32V100(ps_tmpl_hash), ctorBytes32V100(MARKET_ID), ctorIntV100(SEAL_COUNT), ctorIntV100(MIN_BET), ctorBytes32V100(ga.rootCloseTmplHash), ctorBytes32V100('00'.repeat(32)), ctorBytes32V100(token_tmpl_hash), ctorIntV100(0), ctorIntV100(0), ctorIntV100(0), ctorIntV100(0), ctorIntV100(ga.shardLeafOwnRedeemLen)];
+const KTT = P('./sil-v1/KanetTestToken.sil');
+const kttCtorForAbi = [{ kind: 'int', value: 1 }, { kind: 'bytes', value: [...Buffer.alloc(32)] }, { kind: 'byte', value: 4 }, { kind: 'byte', value: 0 }, { kind: 'bytes', value: [...Buffer.alloc(32)] }, { kind: 'bytes', value: [...Buffer.alloc(32)] }, { kind: 'int', value: 3 }, { kind: 'int', value: 3 }];
+const kttC = compileSilV100(KTT, kttCtorForAbi, 'KanetTestToken');
+const tokPrefixHex = '0x' + Buffer.from(extractTemplateArtifactV100(kttC).templatePrefix).toString('hex');
+const tokSuffixHex = '0x' + Buffer.from(extractTemplateArtifactV100(kttC).templateSuffix).toString('hex');
+const currentState = { local_yes: 0, local_no: 0, count: 0, pool_value: 0 };
+const newState = { local_yes: STAKE, local_no: 0, count: 1, pool_value: STAKE };
+const leafRedeem = computeShardLeafRedeemScript({ marketId: MARKET_ID, minBet: MIN_BET, sealCount: SEAL_COUNT, rootcloseTmplHash: ga.rootCloseTmplHash, state: currentState, ownRedeemLen: ga.shardLeafOwnRedeemLen });
+const sldC = compileSilV100(SLD, sldCtor, 'ShardLeaf_direct');
+const abi = sldC._raw.contracts.ShardLeaf_direct.entries.register_append;
+const merged = computeKttGenesisArtifact({ amount: newState.pool_value, ownerCovIdHex: leafCovId });
+const bettorPk = Buffer.alloc(32, 0x66).toString('hex');
+const tCtor = [{ kind: 'bytes', value: [...Buffer.from(bettorPk, 'hex')] }, { kind: 'int', value: 0 }, { kind: 'int', value: STAKE }, { kind: 'bytes', value: [...Buffer.from(MARKET_ID, 'hex')] }];
+const tC = compileSilV100(TICKET, tCtor, 'PoolSideTicket');
+const ticketSpkHex = '0x' + p2sh(Buffer.from(tC.script));
+const tA = extractTemplateArtifactV100(tC);
+const psPrefix = '0x' + Buffer.from(tA.templatePrefix).toString('hex'), psSuffix = '0x' + Buffer.from(tA.templateSuffix).toString('hex');
+for (const fee of [85_000_000n, 90_000_000n, 95_000_000n, 100_000_000n]) {
+  const feeUtxo = { txid: 'dd'.repeat(32), vout: 0, value: fee, scriptPublicKeyHex: relaySpkHex };
+  try {
+    const b = buildRegisterAppendTxJson({ kaspa, network: 'mainnet', leafRedeemScript: leafRedeem.script, leafStateLayout: leafRedeem.stateLayout, leafOutpoint, leafCovId, currentState, newState, heldInput: null, feeUtxo, relayChangeScriptPublicKeyHex: relaySpkHex, registerAppendEntryAbi: abi, registerAppendArgs: { side: 0, stake: STAKE, bettorPk, psPrefix, psSuffix, tokPrefix: tokPrefixHex, tokSuffix: tokSuffixHex }, ticketScriptPubKeyHex: ticketSpkHex, mergedKttScript: merged.script, absFeeCapSompi: 100_000_000n });
+    console.log(`fee=${fee} PASS(<475000) includeChange=${b.includeChange} changeSompi=${b.changeSompi} requiredFee=${b.requiredFee}`);
+  } catch (e) { console.log(`fee=${fee} THROW: ${String(e.message).slice(0, 420)}`); }
+}
