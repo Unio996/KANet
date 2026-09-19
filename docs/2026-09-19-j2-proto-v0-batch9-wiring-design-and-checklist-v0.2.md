@@ -1,8 +1,8 @@
-> **Status**: CURRENT（草稿 v0.3.1，2026-09-19，J2；批9 接线设计 + 验收清单；**已落实 NWT v0.3 设计审（`82cd2fb9`，含死机前首提的 `99affacb`）的 N1/E1/O1 三条 MUST 与 S9/S10/S11；9-0 由 Bettor 放行后开工，NWT 审 9-0 diff 时对照本版**；本文不含任何代码改动。v0.2→v0.3 对照见 §16，v0.3→v0.3.1 对照见 §17）
+> **Status**: CURRENT（草稿 v0.3.2，2026-09-19，J2；批9 接线设计 + 验收清单；v0.3.1 之上加 **§18：9-1 设计细化**——S10 来源表逐格核对、NWT 9-0 审转来的 9-1 清单项、9-1 文件清单、以及一个**基线依赖**（§18.0）；本文不含任何代码改动。v0.2→v0.3 见 §16，v0.3→v0.3.1 见 §17，v0.3.1→v0.3.2 见 §18）
 
-# 原型 v0 结算批9（驱动接线）设计与验收清单 v0.3.1
+# 原型 v0 结算批9（驱动接线）设计与验收清单 v0.3.2
 
-> 文件名沿用 `…-v0.2.md`（账本 1527/1528/1529 与 NWT 审稿均以此路径引用，改名会断引用）；**正文即 v0.3.1**，v0.2→v0.3 差异见 §16，v0.3→v0.3.1 差异见 §17。
+> 文件名沿用 `…-v0.2.md`（账本 1527/1528/1529 与 NWT 审稿均以此路径引用，改名会断引用）；**正文即 v0.3.2**，v0.2→v0.3 差异见 §16，v0.3→v0.3.1 见 §17，v0.3.1→v0.3.2 见 §18。
 
 取代 `2026-09-19-j2-proto-v0-batch9-driver-wiring-acceptance-checklist-v0.1.md` 中关于批9范围与接线的部分（v0.1 保留作历史，其 C1/C2/C3、pmt、SLA、NO-TX-NO-STATE 各条本文继承并细化）。
 依据：Bettor 账本 1494/1520/1523/1524 与本轮裁定 ③、Codex 对 C1 的接受条件、NWT 批3–7 审、代码现状盘点（§1，全部可 `grep` 复核）。D-021 合规：无真实地址/余额/私钥。
@@ -84,8 +84,8 @@
 | claim_draw·held | convert_to_claim 意图 landed，`CONVERT_TO_CLAIM_TOKEN_OUT_INDEX`=1 | 结算 |
 | claim_draw·ticket | 赢家下注行 `proto_bets.ticket_txid/ticket_vout`（append 确认时由 `proto-broadcast-ops.mjs:288` 写入） | 下注 |
 
-  - `expectedCovenantIds` 的来源：结算域各行 = 产出该输出的那笔交易输出的 `covenant.covenantId`（P5）；leaf = `proto_markets.shardleaf_cov_id`；seal·held 的 covenantId 来源与 ticket（必须为 null）**由 9-1 列全**（此处未核，不写猜测）。
-  - 🟡 **9-1 须核的既有隐患**：`deriveLeafOutpoint`/`deriveHeldKttOutpoint` 用 `ORDER BY pbi.landed_at DESC LIMIT 1` 取"最新 landed append"，**无 tiebreak**；seal 要求全部下注 confirmed 且无在途 append，理论上无并发，但 `landed_at` 同值时结果不确定——9-1 要么证明不会同值，要么补 tiebreak（属既有代码小改，走审）。DB 指针只是"预期"，是否真实存在与未花费由 C1 经形态 O 取证并要求相等（M6）。
+  - `expectedCovenantIds` 的来源与"最新 landed append"取法的核实结论，**以 §18.1 为准**（v0.3.2 已逐格核对，此处不再保留会漂移的第二份）。
+  - `deriveLeafOutpoint`/`deriveHeldKttOutpoint` 的 `landed_at DESC LIMIT 1` 无 tiebreak：核实结论见 §18.1（**活性问题、不是安全问题**；修法一行，走审，放 9-1）。
 
 
 ## 3. 开关与启动（默认关闭）
@@ -250,7 +250,7 @@
 | 批 | 内容 | 门 |
 |---|---|---|
 | 9-0 | **R1/R2**（M1–M3/N1/E1/O1 形状：`get_address_utxos` 可选 `facts:true` 两形态〔`outpoints` 精确取证 / `list` 仅 fee 选取〕走共享 RpcClient、`entry.covenantId` 读取 + 能力哨兵、响应回声、`FACTS_LIST_MAX=200`、降序截断；`get_past_median_time` 只回 `{ok,pastMedianTimeMs,observedAtMs}`；六处登记；新建纯函数模块 `utxo-facts.mjs`）+ §12.11 全部回归 | NWT 审边界 + Bettor 批；D1 已裁；**v0.3.1 已含 N1/E1/O1，Bettor 放行后 J2 直接开工，NWT 审 9-0 diff 时对照 v0.3.1**；附条件：`case` 里严格 `cmd.facts === true`、`facts` 登记 `'boolean'`、`waitForRpc` 超时行为写在 diff 里；合入说明注明"新命令需 relay 重启才生效，主网 relay 重启另走闸，不在 9-0"；第 ① 项对照要起 simnet，先报 Bettor 放行 |
-| 9-1 | `proto-settlement-pointers.mjs`（P5 + **S10 来源表逐格核**）+ C1 调用点模块（含 `chainParents`，取证走形态 O）+ builder 小改（P6，含 close_commit 的 `continuationOutputIndices:[0]`）+ 全部负向回归（含 N1/E1 两类）+ 毒化 fee 向量 | NWT 审 |
+| 9-1 | `proto-settlement-pointers.mjs`（P5 + **S10 来源表**，§18.1）+ C1 调用点模块（含 `chainParents`，取证走形态 O，消费方响应校验 §18.2）+ builder 小改（P6，含 close_commit 的 `continuationOutputIndices:[0]` 与 seal/close_commit 的输入下标具名常量导出）+ 全部负向回归（含 N1/E1 两类）+ 毒化 fee 向量 + `landed_at` tiebreak 小改；文件清单见 §18.3 | NWT 审；**前置：§18.0 基线依赖——批 6–8 与 C1 纯函数尚未合主线，9-1 落码前须先合入** |
 | 9-2a | **出口分闸（M5/S9，§3.8）——单独一个 commit，先于任何驱动代码**；锚点：既有 `proto-relay-ipc.test.mjs` 用例③④原样通过 | NWT 单独审该 diff（含变异） |
 | 9-2b | 驱动分支 + 开关 + 启动日志 + `markSettlementLanded` + pmt 门接线（`pmtEvidence` 新鲜度）+ SLA 报警 + `prepared_stale` + 重启恢复（依赖 9-2a） | 9-2a 已审后 NWT 审 |
 | 9-3 | HTTP：`/resolve` 按 **§2 P2 唯一规范文本 A1–A6** 实现（write-once + `ADMIN_SECRET_SETTLEMENT` 专档 + 路由级准入 + 值撞档检查 + 常数时间比较 + 审计）、`/claim`（建 claim 行 + 意图）、`/bet` 上限校验（P3/D5：已确认+在途 ≥ seal_count ⇒ 409）、`/withdraw` 仍 501；`checkAdminSecretTier` 改常数时间（A3）若改 helper 须单列 commit 并附 `t-loopback-authz-funds-hotfix.test.mjs` 跑分 | Bettor 批（用户面/鉴权）+ NWT 审 |
@@ -312,7 +312,7 @@ v0.1 的 §1–§7 各条本文均继承；差异：① 范围收窄为四步；
 | M1 夹具约束：普通对象夹具非 covenant 条目须显式 `covenantId: undefined` | §2 P1 R1 取值位置 | 已写入 |
 | M2 验收④ 的 spy 是空判据（`connectRpc` 是模块内部绑定）⇒ 改"`utxo-facts.mjs` 源码扫描不含 `connectRpc`/`new RpcClient` + handler 只注入 `waitForRpc()`" | §2 P1 R1；§12.11④ | 已改 |
 | **S9** 出口对 `settle:` 键严格格式校验（格式不符直接拒、不回落旧开关；批9 排除的步骤/主体在出口拒） | §3.8；§12.13 | 已写入（9-2a） |
-| **S10** 8 角色预期 outpoint 来源表 | §2 P5 补 | 已列（J2 读码核；seal·held 与 ticket 的 covenantId 来源仍待 9-1 列全，并记录 `landed_at` 无 tiebreak 的既有隐患） |
+| **S10** 8 角色预期 outpoint 来源表 | §2 P5 补；**§18.1（v0.3.2 逐格核对，取代此行原先的"待列全"）** | 已核（8 格全部有代码依据；seal·held 与 ticket 的 covenantId 来源已补；`landed_at` 隐患定性为活性问题） |
 | **S11** `/resolve` 三处矛盾 ⇒ 收成一处；NWT R1–R6 作 9-3 规格（R2 = 启动时对所有 `ADMIN_SECRET_*` 两两比 SHA-256，撞值则保持 503） | §2 P2（A1–A6）；§13 9-3；§14 D2 | 已收成一处 |
 | `N=200` | §2 P1 R1（`FACTS_LIST_MAX`，具名常量、测试断言、不可 env 调） | 已写入 |
 | 毒化 fee UTXO 到他人 spk | §12.12 | NWT 裁：9-0 前不测（结论对设计不敏感），9-1 审时补 simnet 向量 |
@@ -320,3 +320,66 @@ v0.1 的 §1–§7 各条本文均继承；差异：① 范围收窄为四步；
 | 9-0 附条件：`case` 严格 `cmd.facts === true`、`facts` 登记 `'boolean'`、`waitForRpc` 超时行为写在 diff 里 | §2 P1 R1；§13 9-0 | 已写入（超时提议值 8 s 待 NWT 审 diff 时定，F19） |
 
 **仍开放（v0.3.1）**：`waitForRpc` 超时提议值 8 s 待 NWT 审 9-0 diff 时定；S9 严格格式的常量来源（`proto-settlement-intent.mjs` 导出）待 9-2a 落码时核；seal·held 与 ticket 的 `expectedCovenantIds` 来源待 9-1 列全；SQLite 触发器强化 write-once 为可选，待 Bettor 裁；`/resolve` 的 `dry-run` 为建议项。已定：`FACTS_LIST_MAX=200`（具名常量、不可 env 调）、M5 的 9-2a 锚点（既有用例③④原样通过）。
+
+## 18. v0.3.1 → v0.3.2：9-1 设计细化（只文档）
+
+依据：J2 读码（行号取自读码时的分支头：设计分支 `5bda9583` 侧代码；主线侧文件另注）、NWT 9-0 审 `4e34e9c9` 转来的 S-2/S-3/② 三条、Bettor 对"S10 来源表逐格核"的点头。**本节不含代码。**
+
+### 18.0 🔴 基线依赖（先于一切，9-1 落码前必须解）
+
+**主线（`origin/bshard-m3-deploy`）不包含 9-1 需要的代码。** 读码事实（`git grep` / `git ls-tree` 可复核）：
+- 主线只有批 1–5（market_seal / close_commit / convert_to_claim 的 builder 与 `proto-settlement-inputs.mjs` / `proto-settlement-intent.mjs`）。`git grep CLAIM_DRAW_TICKET_IN_INDEX origin/bshard-m3-deploy -- kasia-console/src` **零命中**；`git diff --name-status origin/bshard-m3-deploy <设计分支> -- kasia-console/src` 显示这些文件**只在设计分支侧**：`proto-settlement-chain-checks.mjs`（C1 纯函数，含 `.test.mjs`）、`proto-claim-draw-witness.mjs`（含 `proto-claim-draw.test.mjs`）、`proto-ktt-claim-spend-witness.mjs`、`proto-payout-leaf.mjs`、`proto-ticket-authorize-witness.mjs`；claim_draw 的 builder 本体在 `proto-tx-assembly-settlement.mjs` 里（该文件主线也有，但主线版本不含 claim_draw/withdraw/ticket_reclaim）。
+- 以下 **5 个代码提交只在设计分支侧**（比主线多 21 个提交，其余为文档）：`38e73130`（批 6 claim_draw builder）、`ef45f568`（结算接线前条件 C1/C2/C3 = `proto-settlement-chain-checks.mjs` 的 `assertSettlementInputValuesOnChain` + fee cap 替换）、`fd3bbbeb`（批 7 withdraw）、`5e62e24f` 与 `804349e3`（批 8 ticket_reclaim v1/v2）。
+- 9-1 要给 claim_draw 加 `chainParents` 与 C1 调用点、要给 C1 纯函数加 `expectedOutpoints`/`expectedCovenantIds`（M6）——这两样都不在主线。
+
+**因此 9-1 不能从主线现头起基线。** 选项（Bettor 裁）：**(a) 推荐**——先把设计分支的批 6–8 + C1/C2/C3 合入主线（沿用批 1–5 的 `--no-ff` 合入做法与 NWT 合入审；它们各自的 simnet 证据与 NWT/Codex 结论已在账本 1519–1526，是否需要补审由 Bettor/NWT 裁），再从合入后的主线切 9-1 分支；withdraw/ticket_reclaim builder 随之进主线但**不接线**，§11.1 的源码扫描（驱动/HTTP 不得 import 这两个 builder）与 §3.8 的出口拒绝保证它们不可达。(b) 不推荐——只 cherry-pick 批 6 与 C1 相关提交进 9-1 基线：产生与主线分叉的历史，且 ef45f568 同时改了 fee cap、与批 7/8 有交叠，拆不干净。
+
+### 18.1 S10 来源表：逐格核对结果
+
+预期 outpoint 与 covenantId 的来源（"结算域"= `proto_settlement_intents.prepared_tx_json`；"下注域"= `proto_bet_intents.prepared_tx_json` / `proto_bets`；两张意图表都有 `prepared_tx_json` 列，已核 `migrate.js`）。输出下标均为具名常量。
+
+| # | 步骤·角色 | 预期 outpoint | 期望 covenantId | 代码依据 | 状态 |
+|---|---|---|---|---|---|
+| 1 | seal·leaf | 最新 landed 的 append 意图：`submitted_txid` + `REGISTER_APPEND_LEAF_CONT_OUT_INDEX`(0)；无下注时退回 genesis 的 `proto_markets.shardleaf_txid/vout` | `proto_markets.shardleaf_cov_id`（leaf 续约输出带 `CovenantBinding(0, leafCovId)`，同一个 id） | `proto-leaf-state.mjs:42-54`；`proto-tx-assembly.mjs:55,505` | ✅ |
+| 2 | seal·held | 同一笔最新 landed append：`submitted_txid` + `REGISTER_APPEND_TOK_OUT_INDEX`(2) | 该 append 的 `prepared_tx_json` 的**输出[2].covenant.covenantId**（KTT 是 genesis 组，由该笔 append 的 fee 输入 outpoint 派生，**每笔 append 都不同**） | `proto-leaf-state.mjs:64-73`；`proto-tx-assembly.mjs:56-57,507` | ✅（原"待 9-1 列全"，已补） |
+| 3 | close_commit·rootClose | seal 结算意图 landed：`submitted_txid`（重算 id，见下）+ `MARKET_SEAL_ROOTCLOSE_OUT_INDEX`(0) | 该输出的 `covenant.covenantId` | `proto-tx-assembly-settlement.mjs:34` | ✅ |
+| 4 | convert_to_claim·rootClose | close_commit 结算意图 landed：`CLOSE_COMMIT_ROOTCLOSE_OUT_INDEX`(0) | 该输出的 `covenantId`——**必须与第 3 格相等**（续约保持 covenant id，第二个独立一致性检查） | `:234` | ✅ |
+| 5 | convert_to_claim·held | **seal** 结算意图 landed（close_commit 不花代币）：`MARKET_SEAL_TOKEN_OUT_INDEX`(1) | seal 输出[1] 的 `covenantId` | `:35`；`CONVERT_TO_CLAIM_HELD_IN_INDEX`=1 `:446` | ✅ |
+| 6 | claim_draw·rootClaim | convert_to_claim 意图 landed：`CONVERT_TO_CLAIM_CLAIM_OUT_INDEX`(0) | 该输出的 `covenantId`（= builder 入参 `rootClaimCovId` 的来源） | `:448`；builder 文档 `:653-678` | ✅ |
+| 7 | claim_draw·held | convert_to_claim 意图 landed：`CONVERT_TO_CLAIM_TOKEN_OUT_INDEX`(1) | 该输出的 `covenantId` | `:449` | ✅ |
+| 8 | claim_draw·ticket | **赢家那一条**下注的 `proto_bets.ticket_txid` + `ticket_vout`（= `REGISTER_APPEND_TICKET_OUT_INDEX`(1)，append 确认时由 `markBetAppendLanded` 写入） | **null**（输出[1]不在 genesis 组，普通 P2SH） | `proto-broadcast-ops.mjs:288`；`proto-tx-assembly.mjs:56,507`；builder 文档"赢家 ticket UTXO(register_append 输出1)" | ✅ |
+
+**第 8 格补充（读码新发现，之前没想到）**：v0 里所有下注的 `bettor_pk` 是同一个委员公钥，可能有多张"赢家票"——用哪一张？`deriveCloseCommitInputs`（`proto-settlement-inputs.mjs:36-63`）要求**胜方恰 1 条已确认下注**，否则 fail-closed，并返回 `winnerBetId`；所以"赢家票" = 该 `winnerBetId` 那一行的 ticket 指针。`proto_claims` **没有** `bet_id` 列（已核 `migrate.js`），claim → 票的关联是**派生的、不是外键**：由 `market_id` + `winning_side` 经 `deriveCloseCommitInputs` 得出。P4 建 `proto_claims` 行时不得另存一份会漂移的 bet 指针。
+
+**指针模块必须满足的不变量**（9-1 测试逐条守）：
+1. **id 必须重算**：`kaspa-wasm` 的 `Transaction.deserializeFromSafeJSON` **沿用 JSON 自带的 id、不重算**——J2 在本仓 wasm（`kaspa_bg.wasm` sha256 前缀 `51cec45e`）上实测：篡改一个输出面值而不动 id 字段，反序列化后 `tx.id` 仍是旧值；`finalize()` 后才变。所以对 `prepared_tx_json` 必须 **`finalize()` 后再与 `submitted_txid` 比对**，否则"txid 一致"的断言是空判据。变异对照：去掉 `finalize()` ⇒ 篡改用例必红。
+2. **谱系交叉核对（SHOULD，与 DB 无关的一致性）**：每笔产出交易的输入必须花掉上一个指针（如 close_commit 交易的输入 0 == seal 的输出 0 outpoint；convert_to_claim 的输入 0/1 == close_commit 输出 0 / seal 输出 1）。seal 与 close_commit 的输入下标现为 builder 内的字面量，9-1 一并导出 `MARKET_SEAL_*_IN_INDEX` / `CLOSE_COMMIT_*_IN_INDEX`（P6 已要求导出 `*_INPUT_HAS_COVENANT`，同批做）。
+3. **covenantId 双重一致**：第 3、4 格的 covenantId 必须相等（续约保持 id）；第 4 格对第 6 格 builder 入参 `rootClaimCovId` 的传递链同理。
+4. **指针只是"预期"**：是否真实存在、未花费、spk 与 covenantId 是否相等，由 C1 经形态 O 对链上取证并要求相等（M6）。DB 被本机写者改错，后果是 C1 报 `missing`/`outpoint_drift`/`covenant_class_mismatch` ⇒ 该步 fail-closed，不会花错 UTXO。
+
+**`landed_at` 无 tiebreak（Bettor 裁定放 9-1）的核实结论**：`landed_at` 由 `nowIso()` = `new Date().toISOString()`（**毫秒精度**）写入（`proto-bet-intent.mjs:28,242`）。平局需要两笔 append 在同一毫秒被记账；append 严格串行（`assertNoInFlightAppend`）且每笔要等 `REORG_SAFE_MIN_DEPTH` 确认才 landed，正常不会发生；simnet 快速出块 + 同一 tick 内连续记账时**理论上**可能。**后果是活性问题、不是安全问题**：选错指针 ⇒ C1 形态 O 回 `missing` 或 spk/covenantId 不符 ⇒ 该步 fail-closed 卡住，不会花错资金。修法（既有文件小改，走审）：`deriveLeafOutpoint`/`deriveHeldKttOutpoint` 两处 `ORDER BY pbi.landed_at DESC` 后加 `, pbi.rowid DESC`（append 串行 ⇒ 创建顺序 == 落链顺序）。
+
+### 18.2 9-1 清单补充项（NWT 9-0 审 `4e34e9c9` 转来 + J2 读码新增）
+
+1. **消费方 IPC 超时 ≥ 15000**（NWT 裁定②）：relay 侧总预算 = `FACTS_RPC_WAIT_MS`(8000) + `FACTS_RPC_CALL_MS`(5000) = 13000；console 侧读命令 IPC 超时必须 ≥ 15000。测试断言"消费方超时 > 两常量之和"。
+2. **S-2 消费方判定条件**：relay 的 `FactsError`/超时回执走外层 catch，形状是 `{error, phase:'execution'}`，**没有 `ok` 字段**。消费方成功判定必须是 **`ok === true` ∧ `facts === true` ∧ `factsVersion === 1` ∧ `form` 与请求相符 ∧ 条目级键齐全**（每项 `scriptPublicKey.scriptHex` 为 string 且 `covenantId` 键存在），**不得**用 `!result.error` 或 `result.ok !== false`（错误回执里 `ok` 是 `undefined`）。落成一个消费方纯函数 `assertFactsResponse(res, {form, requested})`：另断言 `found ∪ missing` 恰等于请求集合且无重复、`found` 的每个 outpoint 都在请求里。变异对照：拆掉任一条件、把 `ok===true` 换成 `!error` ⇒ 用真实错误回执形状的用例必红。
+3. **C1 调用形状与预算**：形态 O 一次请求 = 一个地址 + 1–8 个 outpoint；各角色的地址互不相同 ⇒ 一步最多 3 次形态 O + 1 次形态 L（取 fee 输入）；串行发出。最坏一步 4 × 13 s = 52 s，驱动层必须有**每步总预算**：超出 ⇒ 本 tick 放弃、不推进任何状态（NO TX NO STATE）、下一 tick 重评估；不得因为"等太久"而降级跳过 C1 的任一检查。
+4. **S-3（写进 9-4 威胁说明，不阻塞 9-1）**：`getUtxosByAddresses` 把整个地址 UTXO 集读进 wasm 内存后才过滤；地址上撒到"不可读"量级时，kaspa-wasm 的 trap 是**整个 wasm 实例**级的，会波及同一 relay 进程里的签名——既有、与 9-0 无关的残余风险；9-4 后应看一次 relay 的 wasm 线性内存曲线。
+5. **毒化 fee 向量**（NWT 审 9-1 时起 simnet 补，§12.12）：第三方密钥创建"covenant 绑定 + spk = relay P2PK"的 UTXO，喂给**真实的 fee 选取函数**，断言被跳过且选中干净候选。
+6. **`landed_at` tiebreak 小改**（§18.1）与 **`finalize()` 重算 id** 的变异对照（§18.1 不变量 1）。
+7. **9-0 已合入的部分不再回头改**：形态 O/L、回声、`FACTS_*` 常量与 T1–T6b 测试属 9-0，9-1 只消费；9-1 若发现需改 `utxo-facts.mjs`，走 9-0 同款审。
+
+### 18.3 9-1 落码文件清单与预期行数（无代码；±30%，**我上一批低估过新文件行数——新文件按"校验与注释比直觉多"估**）
+
+| 文件 | 性质 | 预期 | 说明 |
+|---|---|---|---|
+| `kasia-console/src/lib/proto-settlement-pointers.mjs` | 新 | ~220 | 纯函数：从两张意图表的 `prepared_tx_json` 取 8 格指针（§18.1），`finalize()` 重算 id，谱系核对 |
+| `kasia-console/src/lib/proto-settlement-c1.mjs` | 新 | ~260 | C1 调用点模块：每角色形态 O 取证 + `assertFactsResponse`（§18.2.2）+ 产出 `chainParents`；fee 选取走形态 L 并跳过毒化候选（S1） |
+| `kasia-console/src/lib/proto-settlement-chain-checks.mjs` | 改（基线合入后） | +40/−8 | M6：`assertSettlementInputValuesOnChain` 加 `expectedOutpoints`/`expectedCovenantIds`（相等），错误码 `<role>_outpoint_drift`/`<role>_covenant_class_mismatch` |
+| `kasia-console/src/lib/proto-tx-assembly-settlement.mjs` | 改 | +110/−12 | 四个 builder 加必填 `chainParents` 且在 mass/fee 前核对；导出 `*_INPUT_HAS_COVENANT` 与 seal/close_commit 的 `*_IN_INDEX`；close_commit 返回 `continuationOutputIndices:[0]`（P6） |
+| `kasia-console/src/lib/proto-leaf-state.mjs` | 改 | +2/−2 | 两处 `ORDER BY` 加 `, pbi.rowid DESC` |
+| 测试（pointers / c1 / builders 的 chainParents / chain-checks M6）+ 变异跑批 + 证据 README | 新/改 | ~900 | 8 角色 × 四类负向变异必红（≥32 用例）；`assertFactsResponse` 全条件与真实错误回执形状；`finalize()` 变异；谱系与 covenantId 双重一致 |
+
+**不动**：`utxo-facts.mjs`（9-0 已合入）、`relay.mjs`、`proto-relay-ipc.mjs`（**不改它 ⇒ M0a 摘要不变**）、迁移、env、驱动开关。9-1 仍**无运行时效果**（无任何调用方，驱动分支是 9-2b）。
+
+**仍开放（v0.3.2）**：§18.0 基线依赖（Bettor 裁）；驱动层"每步总预算"的具体数值（§18.2.3，建议 = tick 间隔的一半，9-2b 定）；第 2 格的 covenantId 从 `prepared_tx_json` 取还是用 `kaspa.covenantId(feeOutpoint, outputs)` 独立重算——两者都可，倾向**两者都做并要求相等**（多一个独立来源，成本≈0），待 NWT 审 9-1 时定。
