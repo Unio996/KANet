@@ -1,0 +1,24 @@
+# NWT F5 笔(92e1da1c)独立实测输出(独立检出 D:\kanet-nwt-cand @ 92e1da1c, 父主线 f027f947; 内存 >80% 期间只跑单文件测试; 每次变异/探针后还原/删除, git status 空)
+
+## 1. stripComments 与 f72b0cdb 的 v2.1 那份逐字相同(程序化抽取函数全文, 换行归一后比较)
+f72b0cdb (kasia-console/src/lib/broadcaster-utxo.test.mjs) stripComments: 2257 chars; F5 (test-fixtures/source-scan/scan-non-test-sources.mjs): 2257 chars
+byte-identical (function text incl. its body): true
+
+## 2. 亲跑
+scanner self-test: 9 passed, 0 failed     proto-claim-draw 57/0     proto-settlement-c1 45/0
+
+## 3. 真实探针文件(每个是一行【真实违规 import】, 走 proto-claim-draw 的 B6 扫描; 跑完即删, git status 空)
+want FAIL = 被抓:
+A-control src/services => FAIL          B src/data => FAIL          C kasia-console/scripts => FAIL          D root scripts/*.mts => FAIL
+E1 const p = "a//b"; import … => FAIL        E2 const s = "/*"; import … const t = "*/"; => FAIL        E3 const u = `x//y`; import … => FAIL
+E4 regex /[a-z]\/\/x/ ; import … => FAIL    E5 regex /[^/*]+/ ; import … => FAIL        E6 const s = '/* not a comment'; import … => FAIL
+want PASS = 真注释仍能藏住引用(不误报):
+K1 // import … (整行行注释) => PASS         K2 /* import … */ (块注释) => PASS
+
+## 4. 我的 8 个轻量变异(直接对扫描器自己的 9 项自测; 还原后 sha256 一致)
+killed   NWT-s1 regex literals never recognised (regexCanStart always false)   (1 FAIL)
+SURVIVED NWT-s2 string state never closes on its quote                          [over-keep 方向: 后果只是真注释里的标识符被当引用(误报), 不是漏报]
+killed   NWT-s3 line comment never ends at newline   (1 FAIL)
+killed   NWT-s4 escaped char in code state not consumed   (1 FAIL)
+killed   NWT-s5 block comment end does not return to code state   (1 FAIL)
+SURVIVED NWT-s6 unterminated single-line string does not resync at newline      [over-keep 方向, 同上]
