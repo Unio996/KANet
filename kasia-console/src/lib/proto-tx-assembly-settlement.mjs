@@ -28,11 +28,65 @@ import { evaluateCloseCommitTiming } from './proto-close-commit-gate.mjs';
 import { encodeKttTransferZeroOutAction, combineKttActionAndRedeem } from './proto-ktt-transfer-witness.mjs';
 import { assertMassWithinCeiling } from './proto-mass-ceiling.mjs';
 import { decryptCommitteePrivkey } from './proto-committee-key.mjs';
+import { STEP_INPUT_ROLES, EXPECTED_INPUT_VALUE_SOMPI } from './proto-settlement-chain-checks.mjs';
 
 // ── 输出 index 布局具名常量(同register_append既有模式, 账本1439"vout在builder里定义为具名常量,
 //   推算函数引用同一个常量"纪律——不在两处各自重复写字面量0/1/2)。 ──
 export const MARKET_SEAL_ROOTCLOSE_OUT_INDEX = 0; // RootClose genesis 输出
 export const MARKET_SEAL_TOKEN_OUT_INDEX = 1;     // 代币转出到RootClose 输出
+// 9-1 E 笔(设计 v0.3.4 §18.1 不变量 2 / §19.4): 输入下标与"哪些输入是 covenant"从 builder 内的字面量升格为具名常量并导出——
+// 指针模块(谱系交叉核对)与 chainParents 断言都引用同一份, 不各自重复写字面量。向量含 fee 槽(与 WITHDRAW_INPUT_HAS_COVENANT 同型)。
+export const MARKET_SEAL_LEAF_IN_INDEX = 0;       // ShardLeaf 续约输入(covenant)
+export const MARKET_SEAL_HELD_IN_INDEX = 1;       // 合并 KTT(covenant); seal 必有 held(见 buildMarketSealTxJson N2 守卫)
+export const MARKET_SEAL_FEE_IN_INDEX = 2;        // fee 输入
+export const MARKET_SEAL_INPUT_HAS_COVENANT = Object.freeze([true, true, false]);
+
+/**
+ * chainParents 与 builder 假设不符(设计 §19.4): 抛这个类型化错误, `.code` 恒为 'chain_parents_mismatch', 另带 `.step` / `.role`。
+ * mass 的 plurality 取决于父 UTXO 是不是 covenant / spk 多长——这必须是【链上事实】, builder 里的常量只是被交叉核对的一方(Codex 条件③)。
+ */
+export class ChainParentsError extends Error {
+  constructor(message, { step, role } = {}) {
+    super(message);
+    this.name = 'ChainParentsError';
+    this.code = 'chain_parents_mismatch';
+    this.step = step;
+    this.role = role;
+  }
+}
+
+const spkByteLen = (hex) => String(hex).replace(/^0x/i, '').length / 2;
+const isPlainObj = (x) => x !== null && typeof x === 'object' && !Array.isArray(x);
+
+/**
+ * 【必须在 selectChangeShape / assertMassWithinCeiling 之前调用】(§19.4): 逐输入核对 chainParents[role] = {value, spkLen, hasCovenant}——
+ *  ① hasCovenant 与该步的 `*_INPUT_HAS_COVENANT` 向量逐项相等(缺项不当 false: 先要求每个输入角色都有条目);
+ *  ② spkLen 与 builder 现算 spk 的字节长度相等;
+ *  ③ value 与 EXPECTED_INPUT_VALUE_SOMPI[role] 相等(fee 槽无此常量, 见④);
+ *  ④ 【超出设计文字】value 另与 builder 自己实际用于该输入的面值相等(seal 的 heldInput.value、fee 的 feeUtxo.value)——
+ *     否则 builder 按 A 面值算 leftover、chainParents 却证明了 B 面值, ③ 单独查不出;
+ *  另: chainParents 里出现该步输入角色之外的键 ⇒ 拒(调用方把别的步骤的 chainParents 传错了)。
+ * @param {{step:string, label:string, chainParents:*, inputHasCovenant:readonly boolean[], used:Record<string,{value:bigint, spkHex:string}>}} o
+ *   used[role]: builder 实际用于该输入的面值与 spk hex(role 含 'fee'; 顺序 = STEP_INPUT_ROLES[step] 之后接 'fee')
+ */
+export function assertChainParentsMatchBuilder({ step, label, chainParents, inputHasCovenant, used }) {
+  const roles = [...STEP_INPUT_ROLES[step], 'fee'];
+  const fail = (role, msg) => { throw new ChainParentsError(`${label}: chain_parents_mismatch — ${role ?? 'chainParents'}: ${msg}`, { step, role }); };
+  if (roles.length !== inputHasCovenant.length) throw new Error(`${label}: 内部错误 — 输入角色数(${roles.length}) != *_INPUT_HAS_COVENANT 长度(${inputHasCovenant.length})`);
+  if (!isPlainObj(chainParents)) fail(undefined, '入参缺失(必填: 必须来自 C1 经断言的链上事实, 不是常量)');
+  for (const k of Object.keys(chainParents)) if (!roles.includes(k)) fail(k, `不是 ${step} 的输入角色(${roles.join('/')})`);
+  roles.forEach((role, i) => {
+    const p = chainParents[role];
+    if (!isPlainObj(p)) fail(role, '缺失');
+    if (typeof p.value !== 'bigint' || !Number.isInteger(p.spkLen) || p.spkLen <= 0 || typeof p.hasCovenant !== 'boolean') fail(role, '形状不合法(须 {value:bigint, spkLen:正整数, hasCovenant:boolean})');
+    if (p.hasCovenant !== inputHasCovenant[i]) fail(role, `hasCovenant=${p.hasCovenant} != builder 假设的 ${inputHasCovenant[i]}(输入下标 ${i})`);
+    const u = used[role];
+    if (!u) throw new Error(`${label}: 内部错误 — used[${role}] 缺失`);
+    if (p.spkLen !== spkByteLen(u.spkHex)) fail(role, `spkLen=${p.spkLen} != builder 现算 spk 的字节长度 ${spkByteLen(u.spkHex)}`);
+    if (role !== 'fee' && p.value !== EXPECTED_INPUT_VALUE_SOMPI[role]) fail(role, `value=${p.value} != 期望面值常量 ${EXPECTED_INPUT_VALUE_SOMPI[role]}`);
+    if (p.value !== u.value) fail(role, `value=${p.value} != builder 实际用于该输入的面值 ${u.value}`);
+  });
+}
 
 /**
  * market_seal见证的具名参数映射(从buildMarketSealTxJson抽出的纯函数, 字节不变)——NWT批3独立验证N1:
@@ -104,7 +158,7 @@ export function buildMarketSealTxJson({
   kaspa, network, marketId, committeePubkeyHex, deadlineMs, rootCloseTmplHash,
   leafRedeemScript, leafOutpoint, leafCovId, heldInput, currentState,
   feeUtxo, relayChangeScriptPublicKeyHex, convertToRootcloseEntryAbi,
-  tokPrefixHex, tokSuffixHex, absFeeCapSompi,
+  tokPrefixHex, tokSuffixHex, absFeeCapSompi, chainParents,
 }) {
   if (currentState.count <= 0) throw new Error(`buildMarketSealTxJson: currentState.count(${currentState.count}) 必须>0`);
   // NWT批3独立验证N2(Bettor转达): heldInput为null时下面heldIdx会保持-1, 把tokenInIdx=-1编进
@@ -132,10 +186,23 @@ export function buildMarketSealTxJson({
   let heldIdx = -1, feeIdx;
   if (heldInput) { heldIdx = inputs.length; inputs.push({ kind: 'held' }); }
   feeIdx = inputs.length; inputs.push({ kind: 'fee' });
+  // 导出的输入下标常量必须与本 builder 实际布局一致(指针模块的谱系核对与 chainParents 断言都引用它们)
+  if (heldIdx !== MARKET_SEAL_HELD_IN_INDEX || feeIdx !== MARKET_SEAL_FEE_IN_INDEX) {
+    throw new Error(`buildMarketSealTxJson: 内部错误 — 输入布局(held=${heldIdx}, fee=${feeIdx}) 与导出常量(${MARKET_SEAL_HELD_IN_INDEX}/${MARKET_SEAL_FEE_IN_INDEX})不一致`);
+  }
 
   const leafSpk = scriptPublicKeyFromHex(kaspa, '0x' + p2sh(leafRedeemScript));
   const feeUtxoSpk = scriptPublicKeyFromHex(kaspa, feeUtxo.scriptPublicKeyHex);
   const heldSpk = heldInput ? scriptPublicKeyFromHex(kaspa, heldInput.scriptPublicKeyHex) : null;
+  // 9-1 E 笔(§19.4): chainParents(链上事实)必须先于 selectChangeShape / assertMassWithinCeiling 与 builder 假设逐项对上
+  assertChainParentsMatchBuilder({
+    step: 'seal', label: 'market_seal', chainParents, inputHasCovenant: MARKET_SEAL_INPUT_HAS_COVENANT,
+    used: {
+      leaf: { value: CONTINUATION_OUTPUT_SOMPI, spkHex: p2sh(leafRedeemScript) },
+      held: { value: heldInput.value, spkHex: heldInput.scriptPublicKeyHex },
+      fee: { value: feeUtxo.value, spkHex: feeUtxo.scriptPublicKeyHex },
+    },
+  });
 
   const mkInput = (outpoint, value, spk, sigScriptHex) => ({
     previousOutpoint: outpoint, signatureScript: sigScriptHex ?? new Uint8Array(0), sequence: 0n, sigOpCount: 0, computeBudget: PROTO_V0_COMPUTE_BUDGET,
@@ -163,7 +230,7 @@ export function buildMarketSealTxJson({
       : null;
 
     const txInputs = [];
-    txInputs[0] = mkInput(leafOutpointObj, CONTINUATION_OUTPUT_SOMPI, leafSpk, leafSigScript);
+    txInputs[MARKET_SEAL_LEAF_IN_INDEX] = mkInput(leafOutpointObj, CONTINUATION_OUTPUT_SOMPI, leafSpk, leafSigScript);
     if (heldInput) txInputs[heldIdx] = mkInput({ transactionId: heldInput.txid, index: heldInput.vout }, heldInput.value, heldSpk, heldSigScript);
     txInputs[feeIdx] = mkInput(feeOutpointObj, feeUtxo.value, feeUtxoSpk, new Uint8Array(0));
 
@@ -206,11 +273,10 @@ export function buildMarketSealTxJson({
   });
   {
     // 账本1497 Bettor MUST: 构造期mass上限fail-closed断言, 与register_append同一plurality判定
-    // 原则——leaf/held都是covenant续约输入(p=2), fee是普通输入(p=1), 用inputs[]的kind标记逐个映射,
-    // 不是猜的(与上面mkTx真实塞入txInputs的顺序严格一致)。
-    const inputHasCovenant = inputs.map((slot) => slot.kind !== 'fee');
+    // 原则——leaf/held都是covenant续约输入(p=2), fee是普通输入(p=1)。9-1 E 笔: 向量取自导出常量
+    // MARKET_SEAL_INPUT_HAS_COVENANT(值与原先 inputs.map(kind!=='fee') 相同, 字节不变), 并已在构造前与 chainParents(链上事实)逐项对过。
     assertMassWithinCeiling({
-      kaspa, network, tx: shape.tx, inputHasCovenant, feeUtxoValueSompi: feeUtxo.value, label: 'market_seal',
+      kaspa, network, tx: shape.tx, inputHasCovenant: [...MARKET_SEAL_INPUT_HAS_COVENANT], feeUtxoValueSompi: feeUtxo.value, label: 'market_seal',
     });
   }
 
@@ -232,6 +298,9 @@ export function buildMarketSealTxJson({
 
 // ── 输出 index 布局具名常量(同market_seal既有模式) ──
 export const CLOSE_COMMIT_ROOTCLOSE_OUT_INDEX = 0; // RootClose续约输出(closed:1)
+export const CLOSE_COMMIT_ROOTCLOSE_IN_INDEX = 0;  // RootClose(closed:0)输入(委员 5 槽签名的输入)
+export const CLOSE_COMMIT_FEE_IN_INDEX = 1;        // fee 输入(relay 签)
+export const CLOSE_COMMIT_INPUT_HAS_COVENANT = Object.freeze([true, false]);
 /**
  * B4-2(NWT批4离线审): 节点finality比较是 tx.lock_time < 区块头past-median-time(严格小于, 且pmt滞后墙钟),
  * 只校验 Date.now()>=deadlineMs 是单边代理: 在[deadline, deadline+pmt滞后+时钟偏差)内提交, 本地放行而节点以
@@ -298,7 +367,7 @@ export const COMMITTEE_MODE_SINGLE_OPERATOR_5X_SAME_KEY = 'single_operator_5x_sa
 export function buildCloseCommitTxJson({
   kaspa, network, marketId, committeePubkeyHex, committeePrivkeyEnvelope, deadlineMs, rootCloseTmplHash,
   rootCloseOutpoint, rootCloseUtxoScriptPublicKeyHex, rootCloseCovId, sealedState, newWinningSide, newPayoutRootHex,
-  tokPrefixHex, tokSuffixHex, feeUtxo, relayChangeScriptPublicKeyHex, absFeeCapSompi, pmtEvidence,
+  tokPrefixHex, tokSuffixHex, feeUtxo, relayChangeScriptPublicKeyHex, absFeeCapSompi, pmtEvidence, chainParents,
 }) {
   if (newWinningSide !== 0 && newWinningSide !== 1) throw new Error(`buildCloseCommitTxJson: newWinningSide必须是0或1, 实际${newWinningSide}`);
   if (!/^[0-9a-f]{64}$/.test(newPayoutRootHex)) throw new Error(`buildCloseCommitTxJson: newPayoutRootHex必须是32字节hex, 实际${newPayoutRootHex}`);
@@ -327,6 +396,15 @@ export function buildCloseCommitTxJson({
   if (typeof rootCloseUtxoScriptPublicKeyHex !== 'string' || String(rootCloseUtxoScriptPublicKeyHex).replace(/^0x/, '').toLowerCase() !== String(currentArtifact.scriptPubKeyHex).replace(/^0x/, '').toLowerCase()) {
     throw new Error(`buildCloseCommitTxJson: fail-closed — 现算的当前RootClose spk(${currentArtifact.scriptPubKeyHex}) != 调用方给的链上UTXO spk(${rootCloseUtxoScriptPublicKeyHex}); sealedState/deadline/committee与链上已不自洽`);
   }
+
+  // 9-1 E 笔(§19.4): chainParents(链上事实)先于【解密委员私钥】、selectChangeShape 与 assertMassWithinCeiling 与 builder 假设逐项对上
+  assertChainParentsMatchBuilder({
+    step: 'close_commit', label: 'close_commit', chainParents, inputHasCovenant: CLOSE_COMMIT_INPUT_HAS_COVENANT,
+    used: {
+      rootClose: { value: CONTINUATION_OUTPUT_SOMPI, spkHex: currentArtifact.scriptPubKeyHex },
+      fee: { value: feeUtxo.value, spkHex: feeUtxo.scriptPublicKeyHex },
+    },
+  });
 
   const rcOutpointObj = { transactionId: rootCloseOutpoint.txid, index: rootCloseOutpoint.vout };
   const feeOutpointObj = { transactionId: feeUtxo.txid, index: feeUtxo.vout };
@@ -369,7 +447,7 @@ export function buildCloseCommitTxJson({
       ],
       outputs, lockTime: BigInt(deadlineMs), subnetworkId: '0'.repeat(40), gas: 0n, payload: '',
     });
-    const rawSigHex = kaspa.createInputSignature(presignTx, 0, committeePrivObj, kaspa.SighashType.All);
+    const rawSigHex = kaspa.createInputSignature(presignTx, CLOSE_COMMIT_ROOTCLOSE_IN_INDEX, committeePrivObj, kaspa.SighashType.All);
     const sigNo0x = rawSigHex.startsWith('0x') ? rawSigHex.slice(2) : rawSigHex;
     // createInputSignature输出66字节(push-opcode 0x41 + 64字节签名 + 1字节sighash类型, 同kasia-relay/
     // p2sh.mjs unlockBshardCloseAttest文件头注确认的既有格式)——ABI的'sig'类型只要那65字节的真实
@@ -419,9 +497,9 @@ export function buildCloseCommitTxJson({
   assertImpliedFeeMatches(shape.tx, shape.netLoss, 'close_commit');
   assertKaspadInputVersionRule(shape.tx, 'close_commit');
   {
-    // 账本1497 Bettor MUST: RootClose输入是covenant续约(p=2), fee是普通输入(p=1)。
+    // 账本1497 Bettor MUST: RootClose输入是covenant续约(p=2), fee是普通输入(p=1)。向量取自导出常量(值不变), 已在构造前与 chainParents 对过。
     assertMassWithinCeiling({
-      kaspa, network, tx: shape.tx, inputHasCovenant: [true, false], feeUtxoValueSompi: feeUtxo.value, label: 'close_commit',
+      kaspa, network, tx: shape.tx, inputHasCovenant: [...CLOSE_COMMIT_INPUT_HAS_COVENANT], feeUtxoValueSompi: feeUtxo.value, label: 'close_commit',
     });
   }
 
@@ -435,7 +513,9 @@ export function buildCloseCommitTxJson({
     changeSompi: shape.changeSompi,
     requiredFee: shape.requiredFee,
     netLoss: shape.netLoss,
-    signInputIndices: [1],
+    signInputIndices: [CLOSE_COMMIT_FEE_IN_INDEX],
+    // 9-1 E 笔(P6): RootClose 续约输出不是 genesis、面值固定——与 register_append 的 leaf 续约同型, 由 relay validateFixedValueOutputs 按此下标核对
+    continuationOutputIndices: [CLOSE_COMMIT_ROOTCLOSE_OUT_INDEX],
     // B4-6: 如实标注——5槽同一把委员keypair, 不是4-of-5门限; 下游(意图记录/响应)必须带着这个标签。
     committeeMode: COMMITTEE_MODE_SINGLE_OPERATOR_5X_SAME_KEY,
   };
@@ -447,6 +527,7 @@ export const CONVERT_TO_CLAIM_HELD_IN_INDEX = 1;      // 合并KTT(owner=RootClo
 export const CONVERT_TO_CLAIM_FEE_IN_INDEX = 2;       // fee输入
 export const CONVERT_TO_CLAIM_CLAIM_OUT_INDEX = 0;    // RootClaim genesis 输出
 export const CONVERT_TO_CLAIM_TOKEN_OUT_INDEX = 1;    // 代币转出到RootClaim 输出
+export const CONVERT_TO_CLAIM_INPUT_HAS_COVENANT = Object.freeze([true, true, false]); // [rootClose, held, fee]
 
 /**
  * convert_to_claim见证的具名参数映射(纯函数, 同sealWitnessArgs的理由: 真实形状里held输入下标与token输出下标
@@ -498,7 +579,7 @@ export function convertToClaimWitnessArgs({ heldIdx, claimPrefixHex, claimSuffix
 export function buildConvertToClaimTxJson({
   kaspa, network, marketId, committeePubkeyHex, deadlineMs, rootCloseTmplHash,
   rootCloseOutpoint, rootCloseUtxoScriptPublicKeyHex, rootCloseCovId, closedState, heldTokenOutpoint,
-  tokPrefixHex, tokSuffixHex, feeUtxo, relayChangeScriptPublicKeyHex, absFeeCapSompi,
+  tokPrefixHex, tokSuffixHex, feeUtxo, relayChangeScriptPublicKeyHex, absFeeCapSompi, chainParents,
 }) {
   if (closedState.closed !== 1) throw new Error(`buildConvertToClaimTxJson: fail-closed — closedState.closed=${closedState.closed}, RootClose.convert_to_claim的require(closed==1)必然拒绝(尚未close_commit?)`);
   if (closedState.winningSide !== 0 && closedState.winningSide !== 1) throw new Error(`buildConvertToClaimTxJson: closedState.winningSide必须是0或1, 实际${closedState.winningSide}`);
@@ -533,6 +614,15 @@ export function buildConvertToClaimTxJson({
   const heldSpk = scriptPublicKeyFromHex(kaspa, heldArtifact.scriptPubKeyHex);
   const claimSpk = scriptPublicKeyFromHex(kaspa, claimArtifact.scriptPubKeyHex);
   const feeUtxoSpk = scriptPublicKeyFromHex(kaspa, feeUtxo.scriptPublicKeyHex);
+  // 9-1 E 笔(§19.4): chainParents(链上事实)先于 selectChangeShape / assertMassWithinCeiling 与 builder 假设逐项对上
+  assertChainParentsMatchBuilder({
+    step: 'convert_to_claim', label: 'convert_to_claim', chainParents, inputHasCovenant: CONVERT_TO_CLAIM_INPUT_HAS_COVENANT,
+    used: {
+      rootClose: { value: CONTINUATION_OUTPUT_SOMPI, spkHex: rcArtifact.scriptPubKeyHex },
+      held: { value: GENESIS_OUTPUT_SOMPI, spkHex: heldArtifact.scriptPubKeyHex },
+      fee: { value: feeUtxo.value, spkHex: feeUtxo.scriptPublicKeyHex },
+    },
+  });
 
   // 两个genesis输出的covenant_id都以fee输入outpoint派生(同market_seal既有约定, 账本1434③)。claim的covenant_id
   // 决定新代币输出的owner, 所以必须先于token输出算出(纯函数, 不查链)。
@@ -590,9 +680,9 @@ export function buildConvertToClaimTxJson({
     expectedTokenOutSpkHex: computeKttGenesisArtifact({ amount: closedState.pool_value, ownerCovIdHex: String(shape.tx.outputs[CONVERT_TO_CLAIM_CLAIM_OUT_INDEX].covenant.covenantId).toLowerCase() }).scriptPubKeyHex,
     primaryOutIdx: CONVERT_TO_CLAIM_CLAIM_OUT_INDEX, expectedPrimaryOutSpkHex: claimArtifact.scriptPubKeyHex,
   });
-  // 账本1497 Bettor MUST: RootClose与held代币都是covenant输入(p=2), fee是普通输入(p=1)。
+  // 账本1497 Bettor MUST: RootClose与held代币都是covenant输入(p=2), fee是普通输入(p=1)。向量取自导出常量(值不变), 已在构造前与 chainParents 对过。
   assertMassWithinCeiling({
-    kaspa, network, tx: shape.tx, inputHasCovenant: [true, true, false], feeUtxoValueSompi: feeUtxo.value, label: 'convert_to_claim',
+    kaspa, network, tx: shape.tx, inputHasCovenant: [...CONVERT_TO_CLAIM_INPUT_HAS_COVENANT], feeUtxoValueSompi: feeUtxo.value, label: 'convert_to_claim',
   });
 
   const claimCovId = String(shape.tx.outputs[CONVERT_TO_CLAIM_CLAIM_OUT_INDEX].covenant.covenantId);
@@ -623,6 +713,7 @@ export const CLAIM_DRAW_FEE_IN_INDEX = 3;       // fee 输入
 export const CLAIM_DRAW_CLAIM_OUT_INDEX = 0;    // KanetTokenClaim genesis 输出
 export const CLAIM_DRAW_TOKEN_OUT_INDEX = 1;    // 代币转给新 KanetTokenClaim 的输出
 export const CLAIM_DRAW_UNUSED_OUT_INDEX = 0;   // rootOutIdx/remainTokenOutIdx: 仅 partial 分支用, full 分支不读(RootClaim.sil 行172 if 内)
+export const CLAIM_DRAW_INPUT_HAS_COVENANT = Object.freeze([true, false, true, false]); // [rootClaim, ticket(普通P2SH), held, fee]
 
 /**
  * claim_draw 见证的具名参数映射(纯函数, 同 sealWitnessArgs/convertToClaimWitnessArgs 的理由): 抽出来用【所有索引参数两两不同】的哨兵输入单测,
@@ -679,7 +770,7 @@ export function claimDrawWitnessArgs({
 export function buildClaimDrawTxJson({
   kaspa, network, marketId, claimState, rootClaimOutpoint, rootClaimUtxoScriptPublicKeyHex, rootClaimCovId, heldTokenOutpoint,
   ticketOutpoint, ticketUtxoScriptPublicKeyHex, bet, committeePrivkeyEnvelope, payout,
-  tokPrefixHex, tokSuffixHex, feeUtxo, relayChangeScriptPublicKeyHex, absFeeCapSompi,
+  tokPrefixHex, tokSuffixHex, feeUtxo, relayChangeScriptPublicKeyHex, absFeeCapSompi, chainParents,
 }) {
   const who = 'buildClaimDrawTxJson';
   if (claimState.closed !== 1) throw new Error(`${who}: fail-closed — claimState.closed=${claimState.closed}, claim_draw 的 require(closed==1) 必然拒绝`);
@@ -702,6 +793,17 @@ export function buildClaimDrawTxJson({
   const ticketArtifact = computeTicketGenesisArtifact({ bettorPk, direction: Number(bet.side), stake: Number(bet.stake), shardPoolId: marketId });
   const ticketPrefixLen = ticketArtifact.stateLayout.start;
   const ticketSuffixLen = ticketArtifact.script.length - ticketArtifact.stateLayout.start - ticketArtifact.stateLayout.len;
+  const heldArtifact = computeKttGenesisArtifact({ amount: claimState.pool_value, ownerCovIdHex: String(rootClaimCovId).toLowerCase() }); // 9-1 E 笔: 从下方(私钥解密之后)上移, 供 chainParents 断言用; 纯函数, 值不变
+  // 9-1 E 笔(§19.4): chainParents(链上事实)先于【解密私钥】、selectChangeShape 与 assertMassWithinCeiling 与 builder 假设逐项对上
+  assertChainParentsMatchBuilder({
+    step: 'claim_draw', label: 'claim_draw', chainParents, inputHasCovenant: CLAIM_DRAW_INPUT_HAS_COVENANT,
+    used: {
+      rootClaim: { value: CONTINUATION_OUTPUT_SOMPI, spkHex: claimArtifact.scriptPubKeyHex },
+      ticket: { value: GENESIS_OUTPUT_SOMPI, spkHex: ticketArtifact.scriptPubKeyHex },
+      held: { value: GENESIS_OUTPUT_SOMPI, spkHex: heldArtifact.scriptPubKeyHex },
+      fee: { value: feeUtxo.value, spkHex: feeUtxo.scriptPublicKeyHex },
+    },
+  });
 
   // 🔴 签名前 MUST-PROVE: 私钥只以局部变量存在, 断言通过前不签名、不进入任何构造后续步骤。
   let committeePrivHex = decryptCommitteePrivkey(committeePrivkeyEnvelope);
@@ -709,7 +811,6 @@ export function buildClaimDrawTxJson({
   const bettorPrivObj = new kaspa.PrivateKey(committeePrivHex);
 
   const ktcArtifact = computeKanetTokenClaimGenesisArtifact({ marketCovIdHex: String(rootClaimCovId).toLowerCase(), winnerPkHex: bettorPk, amount: payout });
-  const heldArtifact = computeKttGenesisArtifact({ amount: claimState.pool_value, ownerCovIdHex: String(rootClaimCovId).toLowerCase() });
   const ktcPrefix = ktcArtifact.script.subarray(0, ktcArtifact.stateLayout.start);
   const ktcSuffix = ktcArtifact.script.subarray(ktcArtifact.stateLayout.start + ktcArtifact.stateLayout.len);
 
@@ -790,7 +891,7 @@ export function buildClaimDrawTxJson({
     expectedTokenOutSpkHex: computeKttGenesisArtifact({ amount: payout, ownerCovIdHex: String(shape.tx.outputs[CLAIM_DRAW_CLAIM_OUT_INDEX].covenant.covenantId).toLowerCase() }).scriptPubKeyHex,
   });
   // 账本1497 MUST: RootClaim(covenant) / ticket(普通P2SH, register_append 输出1 无 covenant, 节点记录已核) / held KTT(covenant) / fee(普通)
-  assertMassWithinCeiling({ kaspa, network, tx: shape.tx, inputHasCovenant: [true, false, true, false], feeUtxoValueSompi: feeUtxo.value, label: 'claim_draw' });
+  assertMassWithinCeiling({ kaspa, network, tx: shape.tx, inputHasCovenant: [...CLAIM_DRAW_INPUT_HAS_COVENANT], feeUtxoValueSompi: feeUtxo.value, label: 'claim_draw' });
 
   const ktcCovId = String(shape.tx.outputs[CLAIM_DRAW_CLAIM_OUT_INDEX].covenant.covenantId);
   if (ktcCovId.toLowerCase() !== ktcCovIdHex.toLowerCase()) throw new Error(`${who}: fail-closed — 真实tx output[${CLAIM_DRAW_CLAIM_OUT_INDEX}]的covenant_id(${ktcCovId}) != 预算值(${ktcCovIdHex}), 新代币输出的owner会指向错误的covenant`);
