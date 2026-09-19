@@ -15,7 +15,7 @@ E4 regex /[a-z]\/\/x/ ; import … => FAIL    E5 regex /[^/*]+/ ; import … => 
 want PASS = 真注释仍能藏住引用(不误报):
 K1 // import … (整行行注释) => PASS         K2 /* import … */ (块注释) => PASS
 
-## 4. 我的 8 个轻量变异(直接对扫描器自己的 9 项自测; 还原后 sha256 一致)
+## 4. 我的 6 个轻量变异(直接对扫描器自己的 9 项自测; 还原后 sha256 一致)
 killed   NWT-s1 regex literals never recognised (regexCanStart always false)   (1 FAIL)
 SURVIVED NWT-s2 string state never closes on its quote                          [over-keep 方向: 后果只是真注释里的标识符被当引用(误报), 不是漏报]
 killed   NWT-s3 line comment never ends at newline   (1 FAIL)
