@@ -1,0 +1,22 @@
+# NWT independent mutation run @ 9c86a049 (worktree scratch/_nwt_wt_b90, own npm ci; lockfile identical to installed)
+# baseline: node --experimental-test-module-mocks --test src/services/utxo-splitter.test.mjs => tests 18 pass 18 fail 0
+#           node --experimental-test-module-mocks --test src/lib/broadcaster-utxo.test.mjs   => tests 14 pass 14 fail 0
+killed   M1 delete early-return block  [fail=12]  (V1/V2) closed-value tests
+killed   M2 loose gate (!env)  [fail=10]  (V1/V2) 'true' ' 1' 'yes' '01' '１' '1\n' '"1"' 'TRUE' '1 '
+killed   M3 inverted gate  [fail=18]  A1 A2 A3 A4 V3 + V1/V2
+killed   M4 (env=1) delete _isProtoRelay skip block  [fail=3]  A1 A2 A4   (A3 stays green: it has no proto relay)
+killed   M5 move early return AFTER sqlite.prepare  [fail=12]  (V1/V2) prepare-spy
+killed   N1 _isProtoRelay: drop PROTO_RELAY_ID id-check (name prefix only)  [fail=2]  A1 A4
+killed   N2 _isProtoRelay: drop proto- prefix check (id only)  [fail=1]  A2
+killed   N3 disabled log drops raw=  [fail=12]
+killed   N4 disabled return lacks disabled:true  [fail=12]
+killed   N5 trim() accepted (" 1", "1 ", "1\n" would enable)  [fail=3]
+killed   N6 Number()===1 accepted ("01" would enable)  [fail=4]
+killed   N7 gate reads env at MODULE LOAD (const), not per call  [fail=6]
+killed   M6 delete early-return block (cron)  [fail=12]  (V8)
+killed   M7 loose gate (cron)  [fail=10]  (V8)
+killed   M8 inverted gate (cron)  [fail=13]  (V8) + V8-control
+killed   N8 gate AFTER timer registration (logs disabled, timers still registered)  [fail=12]  (V8)
+killed   N9 disabled log drops raw= (cron)  [fail=12]
+killed   N10 gate also blocks on-demand ensureBroadcasterUtxos  [fail=1]  V8-ondemand
+# 18/18 killed, 0 survived, 0 no-op. Both files restored after the run (git status clean).
