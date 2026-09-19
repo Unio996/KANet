@@ -62,17 +62,26 @@ t('正向: DB 派生 newWinningSide=1, payouts=[{NO 的 pk, 1000}], Σpayouts==p
   if (derived.payouts.reduce((s, p) => s + p.payout, 0) !== derived.poolValue) throw new Error('Σ payouts != pool_value');
 });
 t('正向: assertCloseCommitArgsFromDb 对与派生值相同的拟签值放行', () => {
-  assertCloseCommitArgsFromDb('m_ok', { newWinningSide: derived.newWinningSide, newPayoutRootHex: derived.newPayoutRootHex });
-  assertCloseCommitArgsFromDb('m_ok', { newWinningSide: 1, newPayoutRootHex: '0x' + derived.newPayoutRootHex.toUpperCase() }); // 0x/大小写按字节相等
+  assertCloseCommitArgsFromDb('m_ok', { newWinningSide: derived.newWinningSide, newPayoutRootHex: derived.newPayoutRootHex, expectedPoolValue: derived.poolValue });
+  assertCloseCommitArgsFromDb('m_ok', { newWinningSide: 1, newPayoutRootHex: '0x' + derived.newPayoutRootHex.toUpperCase(), expectedPoolValue: 1000 }); // 0x/大小写按字节相等
 });
 t('反向1: 拟签胜方与 DB 派生不符(签成 YES 赢) ⇒ close_commit_args_not_from_db(签名预言机被喂了别的结果)', () => {
-  throws(() => assertCloseCommitArgsFromDb('m_ok', { newWinningSide: 0, newPayoutRootHex: derived.newPayoutRootHex }), /close_commit_args_not_from_db.*newWinningSide/);
+  throws(() => assertCloseCommitArgsFromDb('m_ok', { newWinningSide: 0, newPayoutRootHex: derived.newPayoutRootHex, expectedPoolValue: 1000 }), /close_commit_args_not_from_db.*newWinningSide/);
 });
 t('反向2: 拟签 payoutRoot 与现算不符(占位值/别人的 pk 的 leaf/金额差 1) ⇒ close_commit_args_not_from_db', () => {
-  throws(() => assertCloseCommitArgsFromDb('m_ok', { newWinningSide: 1, newPayoutRootHex: 'cd'.repeat(32) }), /close_commit_args_not_from_db.*newPayoutRootHex/);
-  throws(() => assertCloseCommitArgsFromDb('m_ok', { newWinningSide: 1, newPayoutRootHex: payoutLeafHex(PK_YES, 1000) }), /close_commit_args_not_from_db/);
-  throws(() => assertCloseCommitArgsFromDb('m_ok', { newWinningSide: 1, newPayoutRootHex: payoutLeafHex(PK_NO, 999) }), /close_commit_args_not_from_db/);
-  throws(() => assertCloseCommitArgsFromDb('m_ok', { newWinningSide: 1, newPayoutRootHex: undefined }), /close_commit_args_not_from_db/);
+  throws(() => assertCloseCommitArgsFromDb('m_ok', { newWinningSide: 1, newPayoutRootHex: 'cd'.repeat(32), expectedPoolValue: 1000 }), /close_commit_args_not_from_db.*newPayoutRootHex/);
+  throws(() => assertCloseCommitArgsFromDb('m_ok', { newWinningSide: 1, newPayoutRootHex: payoutLeafHex(PK_YES, 1000), expectedPoolValue: 1000 }), /close_commit_args_not_from_db/);
+  throws(() => assertCloseCommitArgsFromDb('m_ok', { newWinningSide: 1, newPayoutRootHex: payoutLeafHex(PK_NO, 999), expectedPoolValue: 1000 }), /close_commit_args_not_from_db/);
+  throws(() => assertCloseCommitArgsFromDb('m_ok', { newWinningSide: 1, newPayoutRootHex: undefined, expectedPoolValue: 1000 }), /close_commit_args_not_from_db/);
+});
+
+t('C2 反向: expectedPoolValue 缺失 / 非整数 / 与 DB 派生的 pool_value 不等(spk 按别的池子证明) ⇒ close_commit_args_not_from_db', () => {
+  const ok = { newWinningSide: 1, newPayoutRootHex: derived.newPayoutRootHex };
+  throws(() => assertCloseCommitArgsFromDb('m_ok', ok), /expectedPoolValue.*缺失或非法/);
+  throws(() => assertCloseCommitArgsFromDb('m_ok', { ...ok, expectedPoolValue: '1000' }), /缺失或非法/);
+  throws(() => assertCloseCommitArgsFromDb('m_ok', { ...ok, expectedPoolValue: 999 }), /pool_value\(999\) != .*\(1000\)/);
+  throws(() => assertCloseCommitArgsFromDb('m_ok', { ...ok, expectedPoolValue: 1001 }), /pool_value\(1001\)/);
+  assertCloseCommitArgsFromDb('m_ok', { ...ok, expectedPoolValue: 1000 }); // 对照: 相等放行
 });
 
 // ── 各类 fail-closed ──

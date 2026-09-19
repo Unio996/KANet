@@ -36,10 +36,10 @@
 
 | 步骤 | 入口闸 |
 |---|---|
-| seal（market_seal） | 依赖：所有下注 `confirmed` 且 count == seal_count；held 存在（N2）；leaf/held 链上面值 == 20,000,000（N-1，`assertLeafStateMatchesChain` + held 同类）；fee cap = 52,000,000 |
-| resolve（close_commit） | ① **pmt 闸**：`checkCloseCommitTiming({rpc, deadlineMs})`，`canSubmit` 才提交，读不到 pmt 一律不放行（`proto-close-commit-gate.mjs`）；② **B4-4**：`assertCloseCommitArgsFromDb`（胜方/`payoutRoot` 由 DB 派生，Σpayouts==pool_value，胜方恰 1 条，payout≥1000，库内 `payout_root` 不得分裂）；③ 链上 RootClose spk 传入 `rootCloseUtxoScriptPublicKeyHex`（B4-5，取自 seal 交易的真实输出）；④ 与 seal **背靠背**（MUST-2）：seal 的 `prepared_tx_json` 落库后才构造；⑤ builder 的 300s 墙钟守卫保留为第二层 |
-| convert_to_claim | 依赖 close_commit `landed`；`rootCloseUtxoScriptPublicKeyHex`（B4-5，取自 close_commit 交易输出0）；held 代币 outpoint 取 seal 输出1；⚠ `feeProfile.convert_to_claim.cap` 暂借 1.0 KAS，**接线前必须替换为 NWT 按节点实测 requiredFee 推的专属值** |
-| claim_draw | ① **Codex MUST-PROVE**：签名前 `assertTicketSigningKey`（由 proto_bets + 链上 ticket spk 推导并证明应签公钥，与私钥公钥逐字节相等，不等在 IPC 与签名之前 fail-closed）；② full 分支闸（payout==pool_value，否则**中止不构造**，partial 另一支）；③ RootClaim/ticket/held 三个输入的链上面值 == 常量（N-1 同族，driver 层断言）；④ 链上 RootClaim spk 传入（取自 convert_to_claim 交易输出0）；⑤ 赢票方向 == winningSide、现算 leaf == payoutRoot（builder 已 fail-closed，driver 再核一次不冲突） |
+| seal（market_seal） | 依赖：所有下注 `confirmed` 且 count == seal_count；held 存在（N2）；**C1**：leaf/held 链上面值 == 20,000,000 且 spk == 现算 spk（`assertSettlementInputValuesOnChain` step=seal；leaf 另有 N-1 的 `assertLeafStateMatchesChain`）；fee cap = 52,000,000 |
+| resolve（close_commit） | **C1**：rootClose 链上面值+spk 断言；**C2**：`assertCloseCommitArgsFromDb(…, {expectedPoolValue})`——expectedPoolValue = 用于证明链上 RootClose spk 的 pool_value，必须等于 DB 派生值；① **pmt 闸**：`checkCloseCommitTiming({rpc, deadlineMs})`，`canSubmit` 才提交，读不到 pmt 一律不放行（`proto-close-commit-gate.mjs`）；② **B4-4**：`assertCloseCommitArgsFromDb`（胜方/`payoutRoot` 由 DB 派生，Σpayouts==pool_value，胜方恰 1 条，payout≥1000，库内 `payout_root` 不得分裂）；③ 链上 RootClose spk 传入 `rootCloseUtxoScriptPublicKeyHex`（B4-5，取自 seal 交易的真实输出）；④ 与 seal **背靠背**（MUST-2）：seal 的 `prepared_tx_json` 落库后才构造；⑤ **驱动把放行时读到的 pmt 作为 `pmtEvidence` 传给 builder**（builder 复核同一判据并免除 300s 墙钟余量，C3：pmt 已放行不得被墙钟守卫反卡）；不传则 300s 墙钟守卫作第二层 |
+| convert_to_claim | **C1 链上面值+spk 断言**（`assertSettlementInputValuesOnChain`：rootClose、held 的链上 UTXO 面值 == 20,000,000 且 spk == 按当前状态现算的 artifact spk）；依赖 close_commit `landed`；`rootCloseUtxoScriptPublicKeyHex`（B4-5，取自 close_commit 交易输出0）；held 代币 outpoint 取 seal 输出1；`feeProfile.convert_to_claim.cap` = 52,000,000、`close_commit.cap` = 30,000,000（NWT 照 F3' 推，失效条件写在 anchors `_source`）；⚠ `feeProfile.claim_draw.cap` 目前仍是**暂借 1.0 KAS 的占位**，接线/合入前必须由 NWT 按节点实测 requiredFee 推专属值 |
+| claim_draw | **C1**：rootClaim、ticket、held 三个 covenant/输入的链上面值 == 20,000,000 且 spk == 现算 spk（Codex 新不变量：喂给 mass 计算的每个输入必须等于所选父 UTXO 的真实 value+spk，不是调用方另给的平行值；断言过后 mass 只用这些经断言的值）；① **Codex MUST-PROVE**：签名前 `assertTicketSigningKey`（由 proto_bets + 链上 ticket spk 推导并证明应签公钥，与私钥公钥逐字节相等，不等在 IPC 与签名之前 fail-closed）；② full 分支闸（payout==pool_value，否则**中止不构造**，partial 另一支）；③ （已并入上面 C1）；④ 链上 RootClaim spk 传入（取自 convert_to_claim 交易输出0）；⑤ 赢票方向 == winningSide、现算 leaf == payoutRoot（builder 已 fail-closed，driver 再核一次不冲突） |
 | withdraw / ticket_reclaim | 批7/8 落码后补；ticket_reclaim 的 fee 计算陷阱（计划 §2.6）与同一个 `assertTicketSigningKey` |
 
 ## 4. NO TX NO STATE / 意图状态机（不许乐观写）
@@ -48,6 +48,7 @@
 - **NotFinalized**（节点 finality 拒）归"可重试、无状态变更"，**不得**进 `ambiguous`；`ambiguous` 只留给"广播结果不明"（超时/进程死）。需要单测：注入 NotFinalized 拒绝 ⇒ 意图状态不变、下一 tick 重试。
 - 同一意图重复 tick 幂等（不重复广播）；依赖未 `landed` 的下一步不启动。
 - 每笔上链交易入库：地址+txid 双锚点（CLAUDE.md 核心原则）；relay 关联 txid 不写进公开文档（D-021）。
+- **refund_flip_open 时的驱动行为（Bettor 2026-09-19）**：`evaluateCloseCommitTiming().sla=='refund_flip_open'` 时驱动按"**尽力抢先 + 对已翻成 closed=2 幂等**"处理——仍尝试提交 close_commit（若市场尚未被翻则可能抢在他人之前落链）；若链上 RootClose 已是 closed=2（被任何人翻成取消/退款），close_commit 必然被拒，驱动**不重试、不进 ambiguous**，把意图收敛为终态并转入取消/退款路径的对账（幂等：重复检测到 closed=2 不重复报警/不重复动作）。需单测：注入"已翻"状态 ⇒ 意图终态且无后续广播。
 
 ## 5. SLA / 报警
 
@@ -67,7 +68,7 @@
 
 ## 7. 已知未决 / 需裁定
 
-- `convert_to_claim` 专属 fee cap（等 NWT 推数）；`withdraw`/`ticket_reclaim` 的 cap 同理。
+- `claim_draw`（占位 1.0 KAS）、`withdraw`、`ticket_reclaim` 的专属 fee cap（等 NWT 推数）。
 - `committee_mode` 在意图表里放哪一列（`proto_settlement_intents` 现无该列；加列要走迁移，或放 `meta`/响应体）——需 Bettor 裁定。
 - N-1 真修（builder 用链上真实面值算 leftover）并入 D-018 重评估，另开票；本清单只要求入口拦截。
 - partial 分支（payout<pool_value）与 RootClaim 的 `payout>=1000` 修复归另一支，不在批9。

@@ -23,6 +23,7 @@ import { encodeClaimDrawAction } from './proto-claim-draw-witness.mjs';
 import { encodeAuthorizeSpendAction } from './proto-ticket-authorize-witness.mjs';
 import { payoutLeafHex } from './proto-payout-leaf.mjs';
 import { assertTicketSigningKey } from './proto-signing-key-binding.mjs';
+import { evaluateCloseCommitTiming } from './proto-close-commit-gate.mjs';
 import { encodeKttTransferZeroOutAction, combineKttActionAndRedeem } from './proto-ktt-transfer-witness.mjs';
 import { assertMassWithinCeiling } from './proto-mass-ceiling.mjs';
 import { decryptCommitteePrivkey } from './proto-committee-key.mjs';
@@ -288,6 +289,7 @@ export const COMMITTEE_MODE_SINGLE_OPERATOR_5X_SAME_KEY = 'single_operator_5x_sa
  * @param {object} o.feeUtxo  {txid,vout,value,scriptPublicKeyHex}
  * @param {string} o.relayChangeScriptPublicKeyHex
  * @param {bigint} o.absFeeCapSompi  feeProfile.close_commit.cap
+ * @param {{pastMedianTimeMs:number}} [o.pmtEvidence]  驱动层pmt闸放行时读到的节点pastMedianTime(毫秒); 传入则复核pmt判据并免除300s墙钟余量, 不传则保留300s墙钟守卫(第二层)
  * @returns {{txJson:string, expectedTxid:string, rootCloseContinuationCovId:string,
  *   includeChange:boolean, changeSompi:bigint, requiredFee:bigint, netLoss:bigint,
  *   signInputIndices:number[]}}
@@ -295,14 +297,23 @@ export const COMMITTEE_MODE_SINGLE_OPERATOR_5X_SAME_KEY = 'single_operator_5x_sa
 export function buildCloseCommitTxJson({
   kaspa, network, marketId, committeePubkeyHex, committeePrivkeyEnvelope, deadlineMs, rootCloseTmplHash,
   rootCloseOutpoint, rootCloseUtxoScriptPublicKeyHex, rootCloseCovId, sealedState, newWinningSide, newPayoutRootHex,
-  tokPrefixHex, tokSuffixHex, feeUtxo, relayChangeScriptPublicKeyHex, absFeeCapSompi,
+  tokPrefixHex, tokSuffixHex, feeUtxo, relayChangeScriptPublicKeyHex, absFeeCapSompi, pmtEvidence,
 }) {
   if (newWinningSide !== 0 && newWinningSide !== 1) throw new Error(`buildCloseCommitTxJson: newWinningSide必须是0或1, 实际${newWinningSide}`);
   if (!/^[0-9a-f]{64}$/.test(newPayoutRootHex)) throw new Error(`buildCloseCommitTxJson: newPayoutRootHex必须是32字节hex, 实际${newPayoutRootHex}`);
   // MUST-1构造侧代理(设计文档§1.2/实现计划v0.5): 提交时节点当前时间必须真实超过deadline_ms——
   // 本仓构造与提交是背靠背的同一逻辑单元(MUST-2), 构造时校验等价于提交时校验。
-  if (Date.now() < Number(deadlineMs) + CLOSE_COMMIT_DEADLINE_MARGIN_MS) {
-    throw new Error(`buildCloseCommitTxJson: fail-closed — Date.now()(${Date.now()}) < deadlineMs(${deadlineMs}) + 余量(${CLOSE_COMMIT_DEADLINE_MARGIN_MS}ms), RootClose.close_commit的require(tx.time>=temporal(deadline_ms))可能被节点以NotFinalized拒绝(节点用past-median-time严格小于比较, 滞后墙钟), 拒绝构造(避免留下prepared/ambiguous残留)`);
+  // 两层(Bettor 2026-09-19 C3, 不得互相反卡):
+  //   ① 主判据(驱动层): pmt闸(proto-close-commit-gate.mjs)读节点pastMedianTime, pmt>=deadline+30s才放行。驱动把放行时用的pmt作为pmtEvidence传入——
+  //      有pmtEvidence时本处【复核同一个pmt判据】(不放行则fail-closed), 且只要求墙钟不早于deadline(基本合理性), 【不再施加300s墙钟余量】:
+  //      主网墙钟-pmt≈133s, pmt刚放行时墙钟约deadline+163s, 若仍卡300s就会在pmt已放行后反卡约137s。
+  //   ② 第二层(无pmtEvidence, 即绕过pmt闸直接调builder): 保留墙钟守卫 Date.now()>=deadline+300s(暂定值, 依据见CLOSE_COMMIT_DEADLINE_MARGIN_MS注释)。
+  if (pmtEvidence) {
+    const tm = evaluateCloseCommitTiming({ pastMedianTimeMs: pmtEvidence.pastMedianTimeMs, deadlineMs });
+    if (!tm.canSubmit) throw new Error(`buildCloseCommitTxJson: fail-closed — pmtEvidence未通过pmt判据: ${tm.reason}`);
+    if (Date.now() < Number(deadlineMs)) throw new Error(`buildCloseCommitTxJson: fail-closed — Date.now()(${Date.now()}) < deadlineMs(${deadlineMs}), 墙钟不可能早于deadline(本机时钟严重偏差?), 拒绝构造`);
+  } else if (Date.now() < Number(deadlineMs) + CLOSE_COMMIT_DEADLINE_MARGIN_MS) {
+    throw new Error(`buildCloseCommitTxJson: fail-closed — Date.now()(${Date.now()}) < deadlineMs(${deadlineMs}) + 余量(${CLOSE_COMMIT_DEADLINE_MARGIN_MS}ms), RootClose.close_commit的require(tx.time>=temporal(deadline_ms))可能被节点以NotFinalized拒绝(节点用past-median-time严格小于比较, 滞后墙钟), 拒绝构造(避免留下prepared/ambiguous残留); 驱动层应先过pmt闸并传入pmtEvidence`);
   }
 
   const currentRcState = { local_yes: sealedState.local_yes, local_no: sealedState.local_no, count: sealedState.count, pool_value: sealedState.pool_value, closed: 0, winningSide: 0, payoutRoot: '00'.repeat(32) };

@@ -1,8 +1,6 @@
 // proto-payout-leaf.mjs — (A) 路线 depth-0 payout leaf: blake2b256(bettorPk(32B) ‖ le8(payout))(RootClaim.sil:112)。
 // 纯函数、无 DB 依赖: 被 proto-settlement-inputs.mjs(驱动层派生, 依赖 DB)与 proto-tx-assembly-settlement.mjs(builder, 不依赖 DB)共用。
-import { createRequire } from 'node:module';
-const require = createRequire(import.meta.url);
-const { blake2b } = require('../../node_modules/@noble/hashes/blake2b.js');
+import { blake2b } from '@noble/hashes/blake2b';
 
 const HEX64 = /^[0-9a-f]{64}$/;
 

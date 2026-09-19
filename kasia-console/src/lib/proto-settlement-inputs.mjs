@@ -56,8 +56,16 @@ export function deriveCloseCommitInputs(marketId, { db = sqlite } = {}) {
  * 驱动层闸: 调用 buildCloseCommitTxJson 之前, 断言要签的 newWinningSide/newPayoutRootHex 恰是由 DB 派生的值。
  * 不符 ⇒ throw(不调用 builder, 不签名)。返回派生结果供驱动直接用。
  */
-export function assertCloseCommitArgsFromDb(marketId, { newWinningSide, newPayoutRootHex }, opts = {}) {
+export function assertCloseCommitArgsFromDb(marketId, { newWinningSide, newPayoutRootHex, expectedPoolValue }, opts = {}) {
   const d = deriveCloseCommitInputs(marketId, opts);
+  // C2(Bettor 2026-09-19): expectedPoolValue = 驱动层用来【证明链上 RootClose spk】的 pool_value(B4-5 的 spk 断言只有在"现算 spk 用的 pool_value"与"要签的 payout 用的 pool_value"
+  // 是同一个数时才蕴含链上 pool_value); 缺失即 fail-closed, 不等即 fail-closed——防止 spk 是按 A 状态证明的、签名却按 B 状态派生的 payout。
+  if (!Number.isSafeInteger(expectedPoolValue) || expectedPoolValue <= 0) {
+    throw new Error(`close_commit_args_not_from_db: fail-closed — expectedPoolValue(${expectedPoolValue}) 缺失或非法: 必须传入由链上 RootClose spk 断言证明的 pool_value`);
+  }
+  if (expectedPoolValue !== d.poolValue) {
+    throw new Error(`close_commit_args_not_from_db: fail-closed — 由 spk 断言证明的链上 pool_value(${expectedPoolValue}) != 由 DB 派生的 pool_value(${d.poolValue}): 要签的 payout 与已证明的链上状态不是同一个池子`);
+  }
   if (newWinningSide !== d.newWinningSide) {
     throw new Error(`close_commit_args_not_from_db: fail-closed — 拟签的 newWinningSide(${newWinningSide}) != 由 DB 派生的 ${d.newWinningSide}`);
   }
