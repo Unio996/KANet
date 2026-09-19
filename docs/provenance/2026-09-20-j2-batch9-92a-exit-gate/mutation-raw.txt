@@ -1,24 +1,28 @@
 BASELINE
-  exit=0 31 passed, 0 failed
-X1: KILLED exit=1 fail=6 :: 判据只读旧开关(settle: 分支整体失效)
-X2: KILLED exit=1 fail=5 :: A 类读了旧开关(两个 env 名互换)
-X3: KILLED exit=1 fail=4 :: C 类读了结算开关(两个 env 名互换)
+  exit=0 33 passed, 0 failed
+X1: KILLED exit=1 fail=7 :: 判据只读旧开关(settle: 分支整体失效)
+X2: KILLED exit=1 fail=6 :: A 类读了旧开关(两个 env 名互换)
+X3: KILLED exit=1 fail=5 :: C 类读了结算开关(两个 env 名互换)
 X4: KILLED exit=1 fail=1 :: startsWith 改 includes
 X5: KILLED exit=1 fail=1 :: 前缀忽略大小写
 X6: KILLED exit=1 fail=3 :: 拆掉快照(闸另读一次 payload.intent_key)
 X7: KILLED exit=1 fail=3 :: 发送另做一份展开(闸与发送不同快照)
 X8: KILLED exit=1 fail=1 :: 去掉 S9 严格校验
 X9: KILLED exit=1 fail=1 :: B 类在 PDE=1 时回落放行
-X10: KILLED exit=1 fail=4 :: A 类也要求 PDE(AND)
+X10: KILLED exit=1 fail=5 :: A 类也要求 PDE(AND)
 X11: KILLED exit=1 fail=6 :: read 命令也被闸
-X12: KILLED exit=1 fail=3 :: A 类拒绝串换成旧串
+X12: KILLED exit=1 fail=4 :: A 类拒绝串换成旧串
 X13: KILLED exit=1 fail=1 :: 去掉 step/subject 配对
 X14: KILLED exit=1 fail=2 :: 放行 withdraw(正则 + 配对表)
 X15: KILLED exit=1 fail=1 :: #1 放行
 X16: KILLED exit=1 fail=1 :: #0 / #01 放行(前导零)
-X17: KILLED exit=1 fail=1 :: 大写 UUID 放行
-X18: KILLED exit=1 fail=1 :: 去掉 S9-b
-X19: KILLED exit=1 fail=3 :: S9-b 把缺失(undefined)也拒
+X17: KILLED exit=1 fail=1 :: 大写 hex id 放行
+X21: KILLED exit=1 fail=1 :: 首版假设的 UUID 形状放行(MUST-1 的反面)
+X22: KILLED exit=1 fail=1 :: id 长度放宽到 32–64
+X23: KILLED exit=1 fail=1 :: id 长度不设上限
+X24: KILLED exit=1 fail=9 :: 回到首版的 UUID 形状(生产者↔出口对照应红)
+X18: KILLED exit=1 fail=2 :: 去掉 S9-b
+X19: KILLED exit=1 fail=4 :: S9-b 把缺失(undefined)也拒
 X20: KILLED exit=1 fail=1 :: 正则加 m 标志(尾随换行放行)
-RESTORED exit=0 31 passed, 0 failed
-SUMMARY mutants=20 survivors=0 restored_green=true
+RESTORED exit=0 33 passed, 0 failed
+SUMMARY mutants=24 survivors=0 restored_green=true

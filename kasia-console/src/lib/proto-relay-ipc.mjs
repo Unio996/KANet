@@ -21,7 +21,7 @@
 // 🔴 批9 9-2a(设计 docs/2026-09-19-j2-proto-v0-batch9-wiring-design-and-checklist-v0.2.md §3.8 / §19.1, 出口按 intent_key 前缀分闸):
 //   write 命令的闸按 intent_key 分两把, 互相独立:
 //     A 合法 'settle:' 键(S9 严格格式)⇒ 需 PROTO_SETTLEMENT_DRIVER_ENABLED==='1', 否则 proto_settlement_driver_disabled(与 PROTO_DRIVER_ENABLED 无关);
-//     B 'settle:' 开头但格式不合法(含批9排除的 withdraw/reclaim/ticket、配对错、大写 UUID…)⇒ 一律 proto_settlement_intent_key_invalid, 不回落旧开关;
+//     B 'settle:' 开头但格式不合法(含批9排除的 withdraw/reclaim/ticket、配对错、非 64 位小写 hex 的 id…)⇒ 一律 proto_settlement_intent_key_invalid, 不回落旧开关;
 //     C 其余(缺失/genesis:/proto-bet:/xsettle:/Settle:/settle 无冒号…)⇒ 需 PROTO_DRIVER_ENABLED==='1', 否则 proto_driver_disabled(旧行为不变);
 //     S9-b: 自有 intent_key 存在且不是原始 string(String 对象/数组/数字/对象)⇒ 一律 proto_intent_key_not_string——IPC 走 fork 默认 JSON 序列化,
 //           String 对象会变成原始字符串而 relay 侧 intent_key:'string' 校验会通过, 出口若判"非字符串=C 类"就与线上值不一致。
@@ -34,8 +34,10 @@ import { PROTO_RELAY_ID } from './proto-relay-guard.mjs';
 
 /** 批9 出口允许的结算步骤与其主体归属(withdraw/reclaim/ticket 不在其内——批9 排除, 在出口拒)。 */
 export const PROTO_SETTLEMENT_EXIT_STEP_SUBJECT = Object.freeze({ seal: 'market', resolve: 'market', convert_to_claim: 'claim', claim_draw: 'claim' });
-// settle:<subject_type>:<小写 UUID>:<step>[#<n>], n ≥ 2 十进制无前导零。无 m/i 标志; JS 的 $ 不匹配末尾换行。
-const SETTLE_KEY_RE = /^settle:(market|claim):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}):(seal|resolve|convert_to_claim|claim_draw)(?:#([2-9]|[1-9][0-9]+))?$/;
+// settle:<subject_type>:<64 位小写 hex>:<step>[#<n>], n ≥ 2 十进制无前导零。无 m/i 标志; JS 的 $ 不匹配末尾换行。
+// 🔴 subject_id 形状 = 64 位小写十六进制(不是 UUID): 市场 id 由 api/proto.js 的 randomBytes(32).toString('hex') 生成(主网 proto_markets 三行实测均 64 位 hex);
+//   claim 行 id 由驱动同式生成(Bettor 裁定, 设计 P4)。首版按设计 §3.8 的字面写成 UUID ⇒ 真实结算命令全落 B 类被拒(NWT MUST-1 抓到)。
+const SETTLE_KEY_RE = /^settle:(market|claim):([0-9a-f]{64}):(seal|resolve|convert_to_claim|claim_draw)(?:#([2-9]|[1-9][0-9]+))?$/;
 /** S9 严格格式校验: 格式合法 ∧ step 与 subject_type 按 PROTO_SETTLEMENT_EXIT_STEP_SUBJECT 配对。 */
 export function isValidSettlementIntentKey(key) {
   if (typeof key !== 'string') return false;
