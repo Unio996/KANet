@@ -188,18 +188,23 @@ export function assertFactsIpcTimeout(timeoutMs) {
  *  - 跳过 covenantId !== null 或 spk ≠ relay P2PK spk 的候选("跳过不是中止, 也不回落到毒化候选": 毒化 fee 输入在含其它 covenant 输出的结算交易里的共识行为未测);
  *  - 再排除【我方在途(未 landed)意图产出】的输出(S91-4: 避免在浅确认的父输出上构造、遇 reorg 卡住);
  *  - maxAmount=SIGNED_INPUT_CEILING 是请求侧"排除超过 relay 签名输入上限的候选", 不是毒化过滤——这里不依赖它。
- * status: 'ok'(有干净候选) | 'saturated'(无干净候选, 且有毒化被跳过或窗口被截断) | 'none'(无干净候选, 且窗口里本来就没有——普通缺 fee)。
- * @returns {{status, candidates:Array<{txid,vout,value:bigint,scriptPublicKeyHex:string,spkLen:number,covenantId:null}>, skippedPoisoned:number, skippedInflight:number, truncated:boolean, events:Array}}
+ *  - (F1, NWT C-1) spk 的身份是 (version, script), 我们的 builder 只造 version 0 ⇒ version !== 0 的候选按毒化跳过;
+ *  - (F1, NWT C-4) 【消费方复核区间】feeMinAmount ≤ value ≤ SIGNED_INPUT_CEILING_SOMPI: relay 已按区间过滤, 但不信服务端过滤——越界者(行为异常的 relay 才会返回)跳过并计入 skippedOutOfRange 与事件。
+ * status: 'ok'(有干净候选) | 'saturated'(无干净候选, 且有毒化/越界被跳过或窗口被截断) | 'none'(无干净候选, 且窗口里本来就没有——普通缺 fee)。
+ * @returns {{status, candidates:Array<{txid,vout,value:bigint,scriptPublicKeyHex:string,spkLen:number,covenantId:null}>, skippedPoisoned:number, skippedOutOfRange:number, skippedInflight:number, truncated:boolean, events:Array}}
  */
-export function filterFeeCandidates({ utxos, truncated, relaySpkHex, inflightOutpoints = [] }) {
+export function filterFeeCandidates({ utxos, truncated, relaySpkHex, feeMinAmount, inflightOutpoints = [] }) {
   const relaySpk = normHex(relaySpkHex);
   if (!HEX_EVEN.test(relaySpk)) throw new TypeError('filterFeeCandidates: relaySpkHex 必填且为 hex');
+  if (typeof feeMinAmount !== 'bigint' || feeMinAmount < 0n) throw new TypeError('filterFeeCandidates: feeMinAmount 必须是非负 bigint(没有默认值: 消费方复核区间, 不信 relay 的过滤)');
   const inflight = new Set(inflightOutpoints.map((o) => opKey(String(o.transactionId).toLowerCase(), o.index)));
   const candidates = [];
   let skippedPoisoned = 0;
+  let skippedOutOfRange = 0;
   let skippedInflight = 0;
   for (const u of utxos) {
-    if (u.covenantId !== null || normHex(u.scriptPublicKey.scriptHex) !== relaySpk) { skippedPoisoned++; continue; }
+    if (u.covenantId !== null || u.scriptPublicKey.version !== 0 || normHex(u.scriptPublicKey.scriptHex) !== relaySpk) { skippedPoisoned++; continue; }
+    if (u.amount < feeMinAmount || u.amount > SIGNED_INPUT_CEILING_SOMPI) { skippedOutOfRange++; continue; }
     if (inflight.has(opKey(u.outpoint.transactionId, u.outpoint.index))) { skippedInflight++; continue; }
     candidates.push({
       txid: u.outpoint.transactionId, vout: u.outpoint.index, value: u.amount,
@@ -207,20 +212,25 @@ export function filterFeeCandidates({ utxos, truncated, relaySpkHex, inflightOut
       spkLen: u.scriptPublicKey.scriptHex.length / 2, covenantId: null,
     });
   }
-  const status = candidates.length > 0 ? 'ok' : (skippedPoisoned > 0 || truncated ? 'saturated' : 'none');
+  const status = candidates.length > 0 ? 'ok' : (skippedPoisoned > 0 || skippedOutOfRange > 0 || truncated ? 'saturated' : 'none');
   const events = [];
   if (skippedPoisoned > 0) events.push({ eventType: 'fee_candidate_poisoned_skipped', level: 'warn', payload: { count: skippedPoisoned } });    // 让攻击【可见】
-  if (status === 'saturated') events.push({ eventType: 'settlement_fee_window_saturated', level: 'error', payload: { skippedPoisoned, skippedInflight, truncated } });
-  return { status, candidates, skippedPoisoned, skippedInflight, truncated, events };
+  if (skippedOutOfRange > 0) events.push({ eventType: 'fee_candidate_out_of_range_skipped', level: 'warn', payload: { count: skippedOutOfRange } });   // relay 返回了区间外的候选 = relay 行为异常, 可见
+  if (status === 'saturated') events.push({ eventType: 'settlement_fee_window_saturated', level: 'error', payload: { skippedPoisoned, skippedOutOfRange, skippedInflight, truncated } });
+  return { status, candidates, skippedPoisoned, skippedOutOfRange, skippedInflight, truncated, events };
 }
 
-/** 给 chainParents 补上 fee 角色项——来自【形态 L 条目的事实】(hasCovenant 由条目的 covenantId 得出), 不是常量(§19.4 B1)。 */
+/**
+ * 给 chainParents 补上 fee 角色项——来自【形态 L 条目的事实】(hasCovenant 由条目的 covenantId 得出), 不是常量(§19.4 B1)。
+ * (F1, NWT E-1 的 C 侧) 条目带 outpoint {txid, index}: chainParents 是"某个 outpoint 的属性", 脱离 outpoint 就只是三个数——builder 侧(F2)逐项核对它与实际要花的输入。
+ */
 export function withFeeParent(chainParents, feeCandidate) {
   if (!isObj(chainParents)) throw new TypeError('withFeeParent: chainParents 必填');
-  if (!isObj(feeCandidate) || typeof feeCandidate.value !== 'bigint' || !Number.isInteger(feeCandidate.spkLen) || feeCandidate.covenantId === undefined) {
-    throw new TypeError('withFeeParent: feeCandidate 须来自 verifyStepInputsOnChain 的 fee.candidates(带 value/spkLen/covenantId)');
+  if (!isObj(feeCandidate) || typeof feeCandidate.value !== 'bigint' || !Number.isInteger(feeCandidate.spkLen) || feeCandidate.covenantId === undefined
+    || typeof feeCandidate.txid !== 'string' || !HEX64.test(feeCandidate.txid) || !Number.isInteger(feeCandidate.vout) || feeCandidate.vout < 0) {
+    throw new TypeError('withFeeParent: feeCandidate 须来自 verifyStepInputsOnChain 的 fee.candidates(带 value/spkLen/covenantId/txid/vout)');
   }
-  return { ...chainParents, fee: { value: feeCandidate.value, spkLen: feeCandidate.spkLen, hasCovenant: feeCandidate.covenantId !== null } };
+  return { ...chainParents, fee: { value: feeCandidate.value, spkLen: feeCandidate.spkLen, hasCovenant: feeCandidate.covenantId !== null, outpoint: { txid: feeCandidate.txid, index: feeCandidate.vout } } };
 }
 
 // ══ §19.3 verifyStepInputsOnChain ══════════════════════════════════════════════════════════════════════════════════
@@ -239,10 +249,13 @@ const paramsMissing = (step, role, msg) => new SettlementChainCheckError('chain_
  * @param {string} o.relaySpkHex  relay 自己的 P2PK spk(fee 输入所在地址)
  * @param {bigint} o.feeMinAmount  该步最低可行 fee 输入面值(避免窗口被"小到不够用"的 UTXO 占位)
  * @param {Array<{transactionId:string,index:number}>} [o.inflightOutpoints]  我方在途(未 landed)意图产出的输出
- * @param {number} o.budgetMs  本步总预算(见 assertStepBudget); 超出 ⇒ facts_step_budget_exceeded, 本 tick 放弃
+ * @param {number} o.budgetMs  本步总预算; 超出 ⇒ facts_step_budget_exceeded, 本 tick 放弃
+ * @param {number} o.tickIntervalMs  驱动的 tick 间隔——【必填】, 入口调 assertStepBudget(budgetMs, tickIntervalMs): 预算 ≥ 15 s 且 < tick 间隔(F1, NWT C-3: 漏传即拒, 不可能忘调)
+ * @param {number} o.ipcTimeoutMs  requestFacts 背后 IPC 命令的超时——【必填】, 入口调 assertFactsIpcTimeout(≥ 15000 且 > relay 侧 13000)
+ * @param {{setTimeout:Function, clearTimeout:Function}} [o.timers]  定时器(默认全局); 测试注入缩放/记录版, 生产不传
  * @returns {Promise<{chainUtxos, chainParents, fee, events, evidence}>}  任何失败都抛错(FactsResponseError / SettlementChainCheckError / FeeWindowError)
  */
-export async function verifyStepInputsOnChain({ step, pointers, expectedSpks, network, requestFacts, kaspa, relaySpkHex, feeMinAmount, inflightOutpoints = [], budgetMs }) {
+export async function verifyStepInputsOnChain({ step, pointers, expectedSpks, network, requestFacts, kaspa, relaySpkHex, feeMinAmount, inflightOutpoints = [], budgetMs, tickIntervalMs, ipcTimeoutMs, timers = { setTimeout, clearTimeout } }) {
   const roles = STEP_INPUT_ROLES[step];
   if (!roles) throw new SettlementChainCheckError('chain_check_unknown_step', `verifyStepInputsOnChain: 未知步骤 ${step}`, { step });
   if (typeof requestFacts !== 'function') throw new TypeError('verifyStepInputsOnChain: requestFacts 必填(驱动注入)');
@@ -250,6 +263,10 @@ export async function verifyStepInputsOnChain({ step, pointers, expectedSpks, ne
   if (typeof network !== 'string' || !network) throw new TypeError('verifyStepInputsOnChain: network 必填');
   if (typeof feeMinAmount !== 'bigint' || feeMinAmount < 0n) throw new TypeError('verifyStepInputsOnChain: feeMinAmount 必须是非负 bigint(没有默认值)');
   if (!Number.isFinite(budgetMs) || budgetMs <= 0) throw new TypeError('verifyStepInputsOnChain: budgetMs 必填(没有默认值: 漏传 = 无界等待)');
+  if (!Number.isFinite(ipcTimeoutMs)) throw new TypeError('verifyStepInputsOnChain: ipcTimeoutMs 必填(requestFacts 的 IPC 超时必须 > relay 侧总预算)');
+  assertStepBudget(budgetMs, tickIntervalMs);            // 每次调用都核: 预算 ≥ 15 s 且 < tick 间隔; tickIntervalMs 缺失/非有限数在这里抛 TypeError(必填)
+  assertFactsIpcTimeout(ipcTimeoutMs);                   // 每次调用都核: IPC 超时 ≥ 15000
+  if (!timers || typeof timers.setTimeout !== 'function' || typeof timers.clearTimeout !== 'function') throw new TypeError('verifyStepInputsOnChain: timers 须带 setTimeout / clearTimeout');
   if (!isObj(pointers) || !isObj(pointers.roles)) throw paramsMissing(step, undefined, 'pointers.roles 缺失');
   const addressOf = (spkHex) => {
     const a = kaspa.addressFromScriptPublicKey(new kaspa.ScriptPublicKey(0, spkHex), network);
@@ -294,9 +311,9 @@ export async function verifyStepInputsOnChain({ step, pointers, expectedSpks, ne
   // 并发 + 每步总预算: 任一失败 ⇒ 整步 fail-closed(Promise.all 快速失败; 其余 promise 已被它订阅, 不会 unhandledRejection);
   // 超预算 ⇒ 放弃本 tick、不推进状态、下一 tick 重评估——不得因等得久而跳过任何一项检查。
   let timer;
-  const deadline = new Promise((_, reject) => { timer = setTimeout(() => reject(F('facts_step_budget_exceeded', `本步总预算 ${budgetMs}ms 用尽`)), budgetMs); });
+  const deadline = new Promise((_, reject) => { timer = timers.setTimeout(() => reject(F('facts_step_budget_exceeded', `本步总预算 ${budgetMs}ms 用尽`)), budgetMs); });
   let results;
-  try { results = await Promise.race([Promise.all(tasks.map((t) => t.p)), deadline]); } finally { clearTimeout(timer); }
+  try { results = await Promise.race([Promise.all(tasks.map((t) => t.p)), deadline]); } finally { timers.clearTimeout(timer); }
 
   // 3) 组装 chainUtxos[role]: found ⇒ {value, spent:false, scriptPublicKeyHex, covenantId, outpoint}; missing ⇒ null(已花/未落链/被 reorg 一律中止)。
   //    🟡 spent:false 只表示"在虚拟 UTXO 集里", mempool 里的花费不反映——同一 outpoint 已被在途交易花费时我们构造的新交易会被节点拒(双花), 方向安全但【不是这个断言保证的】。
@@ -312,6 +329,10 @@ export async function verifyStepInputsOnChain({ step, pointers, expectedSpks, ne
     chainUtxos[role] = it
       ? { value: it.amount, spent: false, scriptPublicKeyHex: it.scriptPublicKey.scriptHex, covenantId: it.covenantId, outpoint: it.outpoint }
       : null;
+    // (F1, NWT C-1) spk 的身份是 (version, script), builder 只造 version 0: 同脚本 version≠0 的条目不是我们要花的那个 UTXO ⇒ <role>_spk_drift(M6 只比 script hex, 所以在这里先拒)
+    if (it && it.scriptPublicKey.version !== 0) {
+      throw new SettlementChainCheckError(`${role}_spk_drift`, `${role}_spk_drift — fail-closed: verifyStepInputsOnChain(${step}): ${role} 的链上 spk version=${it.scriptPublicKey.version} != 0(builder 只造 version 0 的 spk; spk 身份是 (version, script), 同脚本不同 version 不是同一个 UTXO 类)`, { step, role });
+    }
   }
 
   // 4) M6 断言(值 / spk / outpoint / covenantId 全等)——过了才有 chainParents
@@ -321,12 +342,13 @@ export async function verifyStepInputsOnChain({ step, pointers, expectedSpks, ne
   const chainParents = {};
   for (const role of roles) {
     const u = chainUtxos[role];
-    chainParents[role] = { value: u.value, spkLen: u.scriptPublicKeyHex.length / 2, hasCovenant: u.covenantId !== null };
+    // (F1, NWT E-1 的 C 侧) 带 outpoint {txid, index}(取自经 M6 断言的 u): chainParents 是某个 outpoint 的属性, builder 侧(F2)核对它与实际要花的输入是同一个
+    chainParents[role] = { value: u.value, spkLen: u.scriptPublicKeyHex.length / 2, hasCovenant: u.covenantId !== null, outpoint: { txid: u.outpoint.transactionId, index: u.outpoint.index } };
   }
 
   // 6) fee 候选(形态 L): 只做跳过/排除, 不判定任何 covenant/ticket 输入的存在性(N1: 形态 L 有 200 条窗口, 撒 dust 可挤掉目标)
-  const fee = filterFeeCandidates({ utxos: feeRes.utxos, truncated: feeRes.truncated, relaySpkHex, inflightOutpoints });
-  if (fee.status === 'saturated') throw new FeeWindowError('fee_window_saturated', `fee 窗口无干净候选(跳过毒化 ${fee.skippedPoisoned}, 在途 ${fee.skippedInflight}, truncated=${fee.truncated})`, { events: fee.events, fee });
+  const fee = filterFeeCandidates({ utxos: feeRes.utxos, truncated: feeRes.truncated, relaySpkHex, feeMinAmount, inflightOutpoints });
+  if (fee.status === 'saturated') throw new FeeWindowError('fee_window_saturated', `fee 窗口无干净候选(跳过毒化 ${fee.skippedPoisoned}, 越界 ${fee.skippedOutOfRange}, 在途 ${fee.skippedInflight}, truncated=${fee.truncated})`, { events: fee.events, fee });
   if (fee.status === 'none') throw new FeeWindowError('no_suitable_fee_utxo', `relay 地址上没有落在 [${feeMinAmount}, ${SIGNED_INPUT_CEILING_SOMPI}] 的 fee 候选(在途已排除 ${fee.skippedInflight})`, { events: fee.events, fee });
 
   const evidence = tasks.map((t, i) => (t.kind === 'O'
@@ -342,11 +364,13 @@ const TRANSIENT_CODES = new Set(['facts_transport_error', 'facts_relay_error', '
 const PROGRAMMING_CODES = new Set(['chain_check_params_missing', 'chain_check_unknown_step', 'facts_requested_invalid']);
 
 /**
- * 步骤失败 ⇒ 该发什么报警(纯函数; 发不发、写哪张表是驱动层的事)。返回 null = 未识别的错误(驱动按"未知/编程错误"处理, 不得吞掉)。
+ * 步骤失败 ⇒ 该发什么报警(纯函数; 发不发、写哪张表是驱动层的事)。【永不返回 null】(F1, NWT E-2): 无法识别的错误——TypeError / RangeError / wasm 异常 / builder 侧的
+ * chain_parents_mismatch 等——一律归 settlement_c1_programming_error(error 级、非瞬时)。返回 null 会让驱动把"接线 bug"当成"不是 C1 错误、照常重试"。
  *  - *_value_drift / *_spk_drift / *_outpoint_drift / *_covenant_class_mismatch ⇒ settlement_chain_fact_drift(error);
  *  - 传输类 ⇒ settlement_facts_transport_error, 【不得混报成链上事实漂移】; transient=true 的走分级, 其余(版本错位 facts_echo_missing / facts_version_mismatch 与其它协议违例)首次即 error;
  *  - fee 窗口 ⇒ settlement_fee_window_saturated(error) / no_suitable_fee_utxo(不发报警, 走既有路径);
- *  - 编程错误(缺参 / 未知步骤 / requested 非法)⇒ settlement_c1_programming_error(error)。【超出设计文字】: 设计只定义了前三类。
+ *  - 编程错误(缺参 / 未知步骤 / requested 非法 / builder 的 chain_parents_mismatch / 其它无法识别的错误)⇒ settlement_c1_programming_error(error)。【超出设计文字】: 设计只定义了前三类。
+ *    chain_parents_mismatch 按 err.code 识别, 不 import builder 模块(C 不该依赖 kaspa 产物构造链)。
  */
 export function classifyC1Error(err) {
   const code = err && err.code;
@@ -362,30 +386,34 @@ export function classifyC1Error(err) {
     if (code === 'fee_window_saturated') return { eventType: 'settlement_fee_window_saturated', transient: false, code };
     return { eventType: 'settlement_no_suitable_fee_utxo', transient: false, code };
   }
-  return null;
+  return { eventType: 'settlement_c1_programming_error', transient: false, code: code ?? 'unrecognized_error' };   // 含 chain_parents_mismatch(E-2)与一切无法识别的错误
 }
 
 /**
  * 传输错误分级(S91-5): 瞬时类首次 warn, 连续 N(=3) 个【不同 tick】升 error(同一 tick 内的重试不算), 成功一次清零;
- * 版本错位类与其它非瞬时类首次即 error, 不进计数。有状态(每个驱动一个实例), 但不碰任何外部存储。
+ * 版本错位类与其它非瞬时类首次即 error, 不进计数。有状态, 但不碰任何外部存储。
+ * 🔴 (F1, NWT C-2) 计数【按 key 分开】(key = 意图 key, 如 settle:market:<id>:seal): 全局单计数会被同一 tick 里别的步骤的成功清零——
+ *   NWT 实测步骤 A 每 tick 失败、步骤 B 每 tick 成功, 6 个 tick 全程 warn、永不升 error。key 必填。
  */
 export function createTransportAlertGrader({ ticksToError = 3 } = {}) {
   if (!Number.isInteger(ticksToError) || ticksToError < 1) throw new RangeError('ticksToError 必须是正整数');
-  let count = 0;
-  let lastTick;
+  const states = new Map();                                    // key → {count, lastTick}
+  const needKey = (key, who) => { if (typeof key !== 'string' || !key) throw new TypeError(`${who}: key 必填(意图 key; 计数按 key 分开, 全局单计数会被别的步骤的成功掩盖)`); };
   return {
-    /** @returns {{eventType, level, transient, code, consecutiveTicks?}|null} */
-    onFailure(err, tickId) {
+    /** @returns {{eventType, level, transient, code, consecutiveTicks?}} */
+    onFailure(err, tickId, key) {
       if (tickId === undefined || tickId === null) throw new TypeError('onFailure: tickId 必填(分级按"不同 tick"计数)');
+      needKey(key, 'onFailure');
       const c = classifyC1Error(err);
-      if (!c) return null;
       if (c.eventType !== 'settlement_facts_transport_error') return { ...c, level: 'error' };
       if (!c.transient) return { ...c, level: 'error' };
-      if (tickId !== lastTick) { count += 1; lastTick = tickId; }
-      return { ...c, level: count >= ticksToError ? 'error' : 'warn', consecutiveTicks: count };
+      const st = states.get(key) || { count: 0, lastTick: undefined };
+      if (tickId !== st.lastTick) { st.count += 1; st.lastTick = tickId; }
+      states.set(key, st);
+      return { ...c, level: st.count >= ticksToError ? 'error' : 'warn', consecutiveTicks: st.count };
     },
-    /** 该步成功验证一次 ⇒ 清零。 */
-    onSuccess() { count = 0; lastTick = undefined; },
-    get consecutiveTicks() { return count; },
+    /** 该 key 的步骤成功验证一次 ⇒ 只清该 key 的计数。 */
+    onSuccess(key) { needKey(key, 'onSuccess'); states.delete(key); },
+    consecutiveTicks(key) { return (states.get(key) || { count: 0 }).count; },
   };
 }
