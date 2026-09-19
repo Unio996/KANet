@@ -104,6 +104,58 @@ test('(V8-ondemand) ensureBroadcasterUtxos() is a caller-driven path and is NOT 
   setEnv(ENV_BEFORE_FILE);
 });
 
+// ── NWT D-026 SHOULD (de2ded3d review of 9c86a049): pin "the ONLY caller of ensureBroadcasterUtxos() is the same-file cron tick" ──
+// ensureBroadcasterUtxos() is exported but NOT covered by the BROADCASTER_UTXO_MAINTAIN switch (it is caller-driven). If a
+// future second caller appears — e.g. a pool-settle path "warming up" broadcasters — it would send `split_utxo force:true`
+// (consolidate + resplit, real fees) while everyone believes the switch keeps this module quiet. This scan makes that a
+// red test instead of a surprise. Non-test source only (tests legitimately call it); comment lines are ignored.
+import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, relative, sep } from 'node:path';   // `join` is already imported at the top of this file
+
+const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');   // kasia-console/src/lib → repo root
+const SKIP_DIRS = new Set(['node_modules', '.git', 'scratch', '.claude', 'logs', 'data', 'docs', 'dist', 'build']);
+function* walk(dir) {
+  for (const name of readdirSync(dir)) {
+    if (SKIP_DIRS.has(name)) continue;
+    const p = join(dir, name);
+    let st; try { st = statSync(p); } catch { continue; }
+    if (st.isDirectory()) yield* walk(p);
+    else if (/\.(mjs|cjs|js|ts)$/.test(name)) yield p;
+  }
+}
+function codeLinesMentioning(file, needle) {
+  const hits = [];
+  readFileSync(file, 'utf8').split(/\r?\n/).forEach((line, i) => {
+    const t = line.trim();
+    if (t.startsWith('//') || t.startsWith('*') || t.startsWith('/*')) return;   // comments do not count
+    if (line.includes(needle)) hits.push({ line: i + 1, text: t });
+  });
+  return hits;
+}
+
+test('(D26-scan) ensureBroadcasterUtxos has exactly one caller: broadcasterUtxoTick() in broadcaster-utxo.mjs itself; no other non-test source references it', () => {
+  const selfPath = join(REPO_ROOT, 'kasia-console', 'src', 'lib', 'broadcaster-utxo.mjs');
+  const others = [];
+  let scanned = 0;
+  for (const f of walk(REPO_ROOT)) {
+    scanned++;
+    if (f === selfPath) continue;
+    if (/\.test\.(mjs|cjs|js|ts)$/.test(f) || f.split(sep).includes('test') || f.split(sep).includes('test-framework')) continue;   // tests may call it
+    const h = codeLinesMentioning(f, 'ensureBroadcasterUtxos');
+    if (h.length) others.push(`${relative(REPO_ROOT, f)}:${h.map(x => x.line).join(',')}`);
+  }
+  assert.ok(scanned > 50, `the scan must actually have walked the repo (scanned ${scanned} files)`);
+  assert.deepStrictEqual(others, [], `ensureBroadcasterUtxos referenced outside broadcaster-utxo.mjs — it is NOT covered by the ${ENV} switch, so a new caller needs its own gate (D-026): ${others.join(' | ')}`);
+  // inside the module: the definition (export) + exactly one call, and the call sits inside broadcasterUtxoTick
+  const src = readFileSync(selfPath, 'utf8');
+  const hits = codeLinesMentioning(selfPath, 'ensureBroadcasterUtxos');
+  assert.strictEqual(hits.length, 2, `expected exactly 2 code references (the export + the tick call), got: ${JSON.stringify(hits)}`);
+  assert.ok(/export\s+async\s+function\s+ensureBroadcasterUtxos\s*\(/.test(src), 'the definition is the exported function');
+  const tickBody = src.slice(src.indexOf('export async function broadcasterUtxoTick'), src.indexOf('export function startBroadcasterUtxoMaintainerCron'));
+  assert.ok(/await\s+ensureBroadcasterUtxos\s*\(/.test(tickBody), 'the single call is inside broadcasterUtxoTick()');
+});
+
 test.after(() => {
   setEnv(ENV_BEFORE_FILE);
   try { sqlite.close(); } catch {}
