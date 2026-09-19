@@ -136,18 +136,29 @@ export function shouldSkipDir(parentRel, name) {
 }
 // pure: is this a test file (tests may legitimately call the guarded exports)?
 export function isTestPath(relPosix) {
-  return /\.test\.(mjs|cjs|js|ts)$/.test(relPosix) || relPosix.split('/').some(seg => seg === 'test' || seg === 'test-framework');
+  return /\.test\.(mjs|cjs|js|ts|mts|cts|jsx|tsx)$/.test(relPosix) || relPosix.split('/').some(seg => seg === 'test' || seg === 'test-framework');
 }
 // pure: remove // and /* */ comments while leaving string / template / char-escape contents intact
 export function stripComments(src) {
-  let out = '', i = 0, state = 'code', quote = '';
+  let out = '', i = 0, state = 'code', quote = '', inClass = false;
+  // regex literals (NWT N-4 / E1): `const re = /[^/*]+/; B.ensure…()` — the `/*` INSIDE the character class must not open a block comment (over-stripping
+  // real code is the unsafe direction). A `/` starts a regex literal when the previous significant character cannot end an expression.
+  const regexCanStart = () => { const t = out.replace(/\s+$/, ''); if (t === '') return true; const p = t[t.length - 1]; return '(,=:[!&|?{};+-*%<>~^'.includes(p) || /(^|[^\w$.])(return|typeof|case|in|of|delete|void|throw|new|else|do)$/.test(t); };
   while (i < src.length) {
     const c = src[i], n = src[i + 1];
     if (state === 'code') {
       if (c === '/' && n === '/') { state = 'line'; i += 2; continue; }
       if (c === '/' && n === '*') { state = 'block'; i += 2; continue; }
+      if (c === '/' && regexCanStart()) { state = 'regex'; inClass = false; out += c; i++; continue; }
       if (c === "'" || c === '"' || c === '`') { state = 'str'; quote = c; out += c; i++; continue; }
-      if (c === '\\') { out += c + (n ?? ''); i += 2; continue; }   // an escaped char in code (e.g. inside a regex literal) never opens a comment
+      if (c === '\\') { out += c + (n ?? ''); i += 2; continue; }   // an escaped char in code never opens a comment
+      out += c; i++; continue;
+    }
+    if (state === 'regex') {
+      if (c === '\\') { out += c + (n ?? ''); i += 2; continue; }
+      if (c === '[') inClass = true; else if (c === ']') inClass = false;
+      else if (c === '\n') { state = 'code'; }                       // no newline inside a regex literal: resync
+      else if (c === '/' && !inClass) { state = 'code'; }
       out += c; i++; continue;
     }
     if (state === 'line') { if (c === '\n') { state = 'code'; out += c; } i++; continue; }
@@ -175,7 +186,7 @@ function* walkRepo(dir, parentRel = '') {
     const p = join(dir, name);
     let st; try { st = statSync(p); } catch { continue; }
     if (st.isDirectory()) { if (shouldSkipDir(parentRel, name)) continue; yield* walkRepo(p, parentRel ? `${parentRel}/${name}` : name); }
-    else if (/\.(mjs|cjs|js|ts)$/.test(name)) yield { p, rel: (parentRel ? `${parentRel}/${name}` : name) };
+    else if (/\.(mjs|cjs|js|ts|mts|cts|jsx|tsx)$/.test(name)) yield { p, rel: (parentRel ? `${parentRel}/${name}` : name) };
   }
 }
 
@@ -217,6 +228,20 @@ test('(D26-scan-probe C) a real call on a line that starts with a block comment 
   assert.deepStrictEqual(findExternalReferences([{ rel: 'kasia-console/src/services/_c2.js', text: `/* B.ensureBroadcasterUtxos(x) */\n// broadcasterUtxoTick()\n/**\n * ensureBroadcasterUtxos usage doc\n */\nconst a = 1;` }]), [], 'names inside real comments (block, line) are not references');
   assert.deepStrictEqual(findExternalReferences([{ rel: 'kasia-console/src/services/_c3.js', text: "const u = 'http://x'; B.ensureBroadcasterUtxos(1); // trailing" }]), ['kasia-console/src/services/_c3.js:ensureBroadcasterUtxos'], '// inside a string literal must not eat the real call after it');
   assert.deepStrictEqual(findExternalReferences([{ rel: 'kasia-console/src/services/_c4.js', text: "const r = /https?:\\/\\//; B.ensureBroadcasterUtxos(1);" }]), ['kasia-console/src/services/_c4.js:ensureBroadcasterUtxos'], 'an escaped-slash regex must not open a line comment');
+});
+test('(D26-scan-probe E1) a regex literal containing "/*" must not swallow the real call after it (NWT N-4 over-stripping)', () => {
+  const T = (rel, text) => findExternalReferences([{ rel, text }]);
+  assert.deepStrictEqual(T('kasia-console/src/services/_e1.js', 'const re = /[^/*]+/; B.ensureBroadcasterUtxos(1);'), ['kasia-console/src/services/_e1.js:ensureBroadcasterUtxos'], 'E1: class with /*');
+  assert.deepStrictEqual(T('kasia-console/src/services/_e1b.js', 'const re = /a\\/\\*b/; B.ensureBroadcasterUtxos(1);'), ['kasia-console/src/services/_e1b.js:ensureBroadcasterUtxos'], 'escaped slash + star inside a regex');
+  assert.deepStrictEqual(T('kasia-console/src/services/_e1c.js', 'x = a.replace(/[/]/g, "-"); B.ensureBroadcasterUtxos(1);'), ['kasia-console/src/services/_e1c.js:ensureBroadcasterUtxos'], '/[/]/ after an opening paren');
+  assert.deepStrictEqual(T('kasia-console/src/services/_e1d.js', 'if (/^a\\/\\//.test(s)) { B.broadcasterUtxoTick(); }'), ['kasia-console/src/services/_e1d.js:broadcasterUtxoTick'], 'regex with an escaped // pair');
+  assert.deepStrictEqual(T('kasia-console/src/services/_e1e.js', 'const q = a / b; /* B.ensureBroadcasterUtxos(x) */ const r = c / d; // broadcasterUtxoTick()'), [], 'division is not a regex: the two comments after it are still comments');
+  assert.deepStrictEqual(T('kasia-console/src/services/_e1f.js', 'return /x*/.test(s) && B.ensureBroadcasterUtxos(1);'), ['kasia-console/src/services/_e1f.js:ensureBroadcasterUtxos'], 'regex after `return`');
+});
+test('(D26-scan-probe E3/E4) .mts .cts .jsx .tsx files are scanned too', () => {
+  for (const ext of ['mts', 'cts', 'jsx', 'tsx']) assert.strictEqual(isTestPath(`kasia-console/src/x.test.${ext}`), true, `.test.${ext} is a test path`);
+  const seen = []; for (const ext of ['mts', 'cts', 'jsx', 'tsx']) if (/\.(mjs|cjs|js|ts|mts|cts|jsx|tsx)$/.test(`x.${ext}`)) seen.push(ext);
+  assert.deepStrictEqual(seen, ['mts', 'cts', 'jsx', 'tsx']);
 });
 test('(D26-scan-probe D) an external call of the OTHER guarded export broadcasterUtxoTick() is detected', () => {
   assert.deepStrictEqual(findExternalReferences([{ rel: 'kasia-console/src/services/_d.js', text: 'await broadcasterUtxoTick();' }]), ['kasia-console/src/services/_d.js:broadcasterUtxoTick']);
