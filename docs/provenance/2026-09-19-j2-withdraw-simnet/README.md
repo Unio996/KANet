@@ -7,7 +7,7 @@ D-021 合规：只含 simnet 数据；委员私钥信封**未入库**（sanitize
 
 - 节点：PID 15972，官方 kaspad 2.0.1 simnet，只绑 127.0.0.1；`D:\rusty-kaspa-v201\kaspad.exe` sha256 `8afe6a6859067a859ac255c77946ca881cd5bbae4230a1906fff3841044c6e38`，`--version` = `kaspad 2.0.1`（与批3–6 同一二进制）。
 - builder/编码器 commit：`fd3bbbeb`（本批 withdraw builder；simnet 运行时工作树为 HEAD `cbcb773d` + 同一批未提交改动，运行后未再改 builder 代码，仅改了注释里的账本号与 anchors 文字）。所有交易 version = 1。
-- 提交前 NWT 会话不在线（ListAgents 无其行），已通过 Bettor 转知；节点无并发占用。
+- 提交前 NWT 会话不在线：直接发给 NWT 的通知**失败**（SendMessage 报 not reachable，ListAgents 无其行），只告知了 Bettor（未请其转达）；节点上当时无其他进程占用，随后由本文与 Bettor 转告 NWT。
 
 ## 结果
 
