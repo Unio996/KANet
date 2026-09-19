@@ -23,7 +23,9 @@
 | ③ | console 前置门 = `kaspad-rpc-probe.mjs` 回 `ALIVE`，不是只看 17110 监听 | 脚本 step 3：轮询探针，**只有退出码 0（`ALIVE`）才起 console**；`7 SYNCING` 继续等；`8 STALLED` 告警一次继续等；`2` 错网 / `6` 探针坏 ⇒ 拒起。探针已对活节点实跑：`ALIVE:network=mainnet`（需设 3 个环境变量，见 §2.4） |
 | ④ | 不依赖用户登录；失败不无限重试；写清重试次数与放弃后告警落点 | §2.2（S4U，无需登录）、§2.3（重试 = 计划任务 `RestartCount 3`、间隔 10 分钟，**只对"kaspad 就绪前"的失败**；就绪后脚本永不自行退出）、§2.5（告警落点：Windows 应用事件日志 + `boot-status.json` + `boot-history.log`） |
 
-**需要 Bettor 定的点**（默认值已写进本页，你改哪条我改哪条；这些是给你的，不是给 Owner 的菜单）：
+**Bettor 裁定记录（2026-09-19，对本页首版）**：D-A / D-B / D-C / D-D / D-E **全部采纳**。D-B 附加要求：分支不对时事件日志留明确原因——脚本 `Warn-Console 62` 已写事件 9062，message 含实际分支与期望分支。D-D 附：确定性失败多出 3 条事件可接受，**不为区分退出码加复杂度**。D-E 附："console 起来后灌 `events`"另批、不进本页。**D-F 改为下表新规则**。D-G 已在 Owner 手里，页首标法保留。**流程**：NWT 红队审本页（设计先行第②步）→ 通过才进 4.1 落码；**R1 等 NWT 审过脚本草案后再跑**（草案已出过一个真 bug，先审后跑）；R2 三条未证明面保留在 §7，不写成已证。下表保留首版默认值以便对照。
+
+**（原表）需要 Bettor 定的点**（默认值已写进本页）：
 
 | # | 点 | 默认 | 为什么要你定 |
 |---|---|---|---|
@@ -32,7 +34,7 @@
 | D-C | 等待上限 | 90 分钟仍未 `ALIVE` ⇒ 告警一次、**继续等**；24 小时 ⇒ 放弃（退出码 50） | 主网长时间离线后追块可能远超今晚的 2 分钟；kaspad 还在追块时把它杀掉重来没有意义 |
 | D-D | 重试 | 计划任务重启 3 次、间隔 10 分钟 | 见 §2.3。**注意**：重试只发生在退出码非 0 的早期失败；确定性失败（二进制哈希不符、错网）重试也会同样失败，只是多 3 条 Error 事件 |
 | D-E | 告警落点 | Windows 事件日志（Application / 源 `KANetBoot`）+ 状态文件 | 控制台没起来时 `events` 表根本写不了；事件日志与状态文件不依赖 console。是否再加"console 起来后把 boot-status 灌进 `events` 表"= 改 console 代码，**另批**（§6） |
-| D-F | 停 kaspad 的正规方法 | **未定（缺信息）** | 计划任务被"结束"或误 `Stop-Process` 都是 `TerminateProcess`；今晚死机时 kaspad 是被**系统关机通知**干净退出的（(1531)：`Kaspad has stopped`）。我不知道 Bettor 平时怎么优雅停它，**不猜**。§6 待议项把它列为需要一次实测的点 |
+| D-F | 停 kaspad 的正规方法 | **裁定（现阶段规则）：重启前只停 console 与 relay 子进程；kaspad 交给系统关机通知去停，不手动 `Stop-Process` 它** | 计划任务被"结束"或误 `Stop-Process` 都是 `TerminateProcess`；今晚死机时 kaspad 是被**系统关机通知**干净退出的（(1531)：`Kaspad has stopped`，今晚实证）。Bettor 也没有正规优雅停法，**不猜**。"Ctrl+C 事件能否送达隐藏窗口的进程"放 **R3 的隔离 simnet 节点**上实测，**证明后再改写 §4.5**；在那之前页内按上面的规则写 |
 | **D-G** | 🔴 **自启会让"无人值守烧费"变成每次开机必发生** | **建议在自启上线前，先由 Owner 定是否给启动期 `autoSplitAll` 加主网默认关的开关** | (1533)：console **每次启动**都在主网真实花费（今晚 22:21:34 合计约 0.045 KAS，四账户来回拆合），与驱动开关无关。手动重启时这是"Bettor 知情的一次"；自启后是"**任何一次断电/更新重启都会在没人在场时发一批链上交易**"。金额很小，但这是**钱路行为的性质变化**，属 Owner 域，本页不替他定 |
 
 ## 1. 现状实核（只读，2026-09-19 22:3x 本地时间，全部为原始读数的摘要）
@@ -166,14 +168,14 @@ console 没起来时，`events` 表（`disk-space-alert` 那一类的落点）**
 | 级 | 做什么 | 验收 | 风险 |
 |---|---|---|---|
 | **R0** | 语法解析 + `-SelfTest`（4.1 已含） | 0 错误、11 项 PASS | 无 |
-| **R1** | **认领演练（幂等）**：在 kaspad 与 console **都在跑**的现状下，手动运行一次 `mainnet-boot-sequence.ps1`（不带参数）。预期：`KASPAD_ADOPTED` → 探针 `ALIVE` → `CONSOLE_ADOPTED` → `BOOT_OK`，然后常驻；**不起任何进程、不轮转任何日志**。验完 `Get-Process -Name powershell` 里找到该脚本进程并结束它（文件锁随进程释放）。 | 进程表 kaspad / console 的 PID 与 `CreationDate` **不变**；`logs\mainnet\` 与 kaspad 日志目录**没有新增 `*.pre-boot-*` 文件**；`boot-status.json` 阶段序列如上 | 只写 `logs\mainnet\boot\` 下几个小文件。**这一步需要 Bettor 明说可以跑**（在生产上跑了脚本，虽然是只读路径） |
+| **R1** | **认领演练（幂等）**：在 kaspad 与 console **都在跑**的现状下，手动运行一次 `mainnet-boot-sequence.ps1`（不带参数）。预期：`KASPAD_ADOPTED` → 探针 `ALIVE` → `CONSOLE_ADOPTED` → `BOOT_OK`，然后常驻；**不起任何进程、不轮转任何日志**。验完 `Get-Process -Name powershell` 里找到该脚本进程并结束它（文件锁随进程释放）。 | 进程表 kaspad / console 的 PID 与 `CreationDate` **不变**；`logs\mainnet\` 与 kaspad 日志目录**没有新增 `*.pre-boot-*` 文件**；`boot-status.json` 阶段序列如上 | 只写 `logs\mainnet\boot\` 下几个小文件。**这一步需要 Bettor 明说可以跑，且必须在 NWT 审过脚本草案之后**（在生产上跑了脚本，虽然是只读路径） |
 | **R2** | **计划任务语义实测（无害动作）**：由 J1 注册一个**一次性的、临时的**演练任务 `\KANet\KANet-Boot-Rehearsal`，主体与 §2.2 完全相同（S4U、Limited），触发器改"手动"，动作是**无害脚本**：a) 用 `Start-Process` 起一个 `ping.exe -t 127.0.0.1` 子进程后**退出码 7 退出**（测：任务结束后子进程是否还活着；非 0 退出是否触发"失败重启"、重启几次后停）；b) 另一个变体：不退出、常驻 `Start-Sleep`（测：`node -v`、`git --version`、读一个非敏感的本地文件、写 `logs\mainnet\boot\` 下的文件在 S4U 令牌下是否都成功 = D-A 的实证）。演练完 `Unregister-ScheduledTask`。 | 记录：子进程存活与否（决定 §2.1 的"常驻"是必需还是可放宽）；重启次数 = 3；S4U 下 `node`/`git`/文件读写全部成功。**若 S4U 下有任何一项失败 ⇒ 回报 Bettor 换 D-A 备选，不硬上** | 只起 `ping`，不碰主网进程 |
 | **R3** | **起动路径演练（隔离，不碰主网）**：用脚本的参数覆盖（`-KaspadExe`/`-AppDir`/`-KaspadLogDir`/`-RpcPort`/`-ExpectNetwork`/`-ExtraKaspadArgs '--simnet'`/`-SkipConsole`）对一个 **simnet kaspad + 全新临时数据目录**（放 `scratch\`，端口避开 J2 正在用的 simnet 节点与主网 17110）跑一遍"起 → 轮转 → 门 → ALIVE"。**需先由 J2/Bettor 确认端口与 simnet 二进制没人占用**。 | `KASPAD_STARTED` → `KASPAD_ALIVE`；再跑第二遍 ⇒ `KASPAD_ADOPTED`，**且**首遍产生的日志被轮转成 `pre-boot-<ts>` 文件、内容与原文件一致；**故意**把 `-KaspadSha256` 改错一位再跑 ⇒ 退出码 21、**没有起进程** | 起一个 simnet kaspad（临时目录），事后结束并清目录。**探针对 simnet 的 `network` 字符串是否等于 `simnet` 我未验证**——R3 第一步先读，不符则只测起/轮转/认领，不测门 |
 
 ### 4.5 真重启验证（需要 Bettor GO；本机全部会话会被切断）
 
 **门**：4.3 已注册 + R0–R3 全过 + Bettor GO + Owner 知悉（同 9/14 先例：`docs/iteration/j1-inbox/2026-09-14T10-00Z-…` 的 §1–§4）。
-**前置**：按 9/14 先例：NO-TX 检查（console stdout 近 2 分钟无 `broadcast`/`submitTransaction`/`send_tx`）→ 停 console（PID 文件）→ 清 `relay.mjs` 遗留子进程 → 停 kaspad（**方法待 D-F**）→ 再 `shutdown /r /t 10`。**先停 console 再停 kaspad**（(1531) P4）。
+**前置**：按 9/14 先例：NO-TX 检查（console stdout 近 2 分钟无 `broadcast`/`submitTransaction`/`send_tx`）→ 停 console（PID 文件）→ 清 `relay.mjs` 遗留子进程 → **不手动停 kaspad**（D-F 裁定：交给系统关机通知，今晚实证干净退出 `Kaspad has stopped`）→ 再 `shutdown /r /t 10`。**先停 console 与 relay 子进程，再关机**（(1531) P4）。Ctrl+C 类手动优雅停法待 R3 隔离 simnet 实测证明后再改写本步。
 **动作**：`shutdown /r /t 10`。**此后没有人登录**；由 J1 经 SSH 读数（OpenSSH 是系统服务，开机即起；Tailscale 已 unattended）。
 **验收读数**（沿用 9/14 §3，并加本任务自己的读数；每项给期望值）：
 
@@ -215,14 +217,14 @@ console 没起来时，`events` 表（`disk-space-alert` 那一类的落点）**
 
 **回滚**（任何一步，最坏情形也只影响"开机自启"这一件新东西；kaspad 与 console 的手动起停做法不变）：
 1. 禁用：`Disable-ScheduledTask -TaskPath '\KANet\' -TaskName KANet-Mainnet-Boot`（提权）——下次开机不再触发。
-2. 若任务正在"运行"（常驻）而要撤：先按 **§4.5 前置的停机顺序**停 console → kaspad，**再**结束任务；**不要先结束任务**（结束任务 = `TerminateProcess` 杀掉全部子进程，非干净退出）。
+2. 若任务正在"运行"（常驻）而要撤：**不要在任务计划程序里"结束"它**（结束任务 = `TerminateProcess` 杀掉全部子进程，含 kaspad，非干净退出）。做法：先按 **§4.5 前置**停 console 与 relay 子进程，让 kaspad 随**系统关机通知**干净退出（即重启机器）；`Disable`/`Unregister` 本身会不会顺带结束正在运行的实例**未实测**（R2 一并测），测清之前不要指望它"温和"。
 3. 注销：`Unregister-ScheduledTask -TaskPath '\KANet\' -TaskName KANet-Mainnet-Boot -Confirm:$false`（提权）。事件源与 `logs\mainnet\boot\` 文件可留，无害。
 4. 手动起法 = 9/14 GO §2（本页上线前的现行做法）。
 
 **待议项（不在本页范围，列出以免被误以为已覆盖）**：
 - **运行期崩溃**没有任何自动处置；本任务只覆盖开机。`scripts\kaspad-watchdog.ps1` 是 TN12 链，**不可复用**。
 - console 起来后把 `boot-status.json` 灌进 `events` 表（让 UI/巡检能看到）= 改 console 代码，另批。
-- **停 kaspad 的优雅方法（D-F）**：需要一次实测（在 R3 的隔离 simnet 节点上试"Ctrl+C 事件"能否送达一个隐藏窗口的进程），才能把"§4.5 前置停机顺序"写成不猜的命令。
+- **停 kaspad 的优雅方法（D-F）**：现行规则 = 不手动停、交系统关机通知（§0 D-F 裁定）。**待测**：在 R3 的隔离 simnet 节点上试"Ctrl+C 事件"能否送达一个隐藏窗口的进程；证明后才能把 §4.5 前置改写成手动优雅停的命令。
 - **目录改名 `D:\kanet-tn12 → D:\kanet`**（改名 runbook 已过 NWT、未执行）：脚本、`start-console-mainnet.ps1`、计划任务动作里的路径全是硬编码，**改名与本任务必须同窗同步**，否则开机后 console 起不来（脚本会以 `62`/`63` 告警，kaspad 仍起）。
 - **kaspad 升级**：钉住值（sha256 + 版本串）要跟着换，走 Bettor；脚本按设计拒起未知二进制。
 - **休眠/快速启动**：`shutdown /s` 后按电源键（快速启动）与 `shutdown /r` 是否都会触发"系统启动"触发器，本页**未证明**；4.5 用 `/r`，冷启动（今晚这种硬复位后上电）是否等价，建议再补一次 `shutdown /s` + 上电验证。
