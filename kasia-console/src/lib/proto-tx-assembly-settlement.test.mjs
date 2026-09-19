@@ -273,6 +273,161 @@ t('⑤真实tx算出的output covenant_id与builder返回的rootCloseCovId/token
     const serialized = JSON.stringify(closeCommitBuilt, (_k, v) => (typeof v === 'bigint' ? v.toString() : v));
     if (serialized.includes(privHex)) throw new Error('committeePrivkeyEnvelope解密后的明文私钥出现在了builder返回值里');
   });
+
+  // ══════════ ④ convert_to_claim(批5): RootClose=close_commit产出的续约输出(closed:1), held=market_seal产出的代币输出 ══════════
+  const { buildConvertToClaimTxJson, convertToClaimWitnessArgs, CONVERT_TO_CLAIM_CLAIM_OUT_INDEX, CONVERT_TO_CLAIM_TOKEN_OUT_INDEX, CONVERT_TO_CLAIM_HELD_IN_INDEX } = await import('./proto-tx-assembly-settlement.mjs');
+  const { computeRootClaimGenesisArtifact } = await import('./proto-covenant-builder.mjs');
+  const { encodeConvertToClaimAction } = await import('./proto-convert-to-claim-witness.mjs');
+  const { blake2b } = (await import('node:module')).createRequire(import.meta.url)('../../node_modules/@noble/hashes/blake2b.js'); // 同proto-covenant-builder.mjs:27(package exports不放行子路径)
+  const closedState = { ...currentState, closed: 1, winningSide: NEW_WINNING_SIDE, payoutRoot: NEW_PAYOUT_ROOT_HEX };
+  const c2cRootCloseOutpoint = { txid: closeCommitBuilt.expectedTxid, vout: CLOSE_COMMIT_ROOTCLOSE_OUT_INDEX };
+  const c2cHeldOutpoint = { txid: sealBuilt.expectedTxid, vout: MARKET_SEAL_TOKEN_OUT_INDEX };
+  const c2cCap = loadFeeProfileCap('convert_to_claim');
+  const c2cFeeUtxo = { txid: 'ee'.repeat(32), vout: 2, value: 10_000_000_000n, scriptPublicKeyHex: relaySpkHex };
+  const c2cArgs = (over = {}) => ({
+    kaspa, network: 'mainnet',
+    marketId: MARKET_ID, committeePubkeyHex: genesisArtifacts.committeePubkeyHex, deadlineMs: DEADLINE_MS, rootCloseTmplHash: genesisArtifacts.rootCloseTmplHash,
+    rootCloseOutpoint: c2cRootCloseOutpoint, rootCloseCovId: sealBuilt.rootCloseCovId, closedState, heldTokenOutpoint: c2cHeldOutpoint,
+    tokPrefixHex, tokSuffixHex, feeUtxo: c2cFeeUtxo, relayChangeScriptPublicKeyHex: relaySpkHex, absFeeCapSompi: c2cCap,
+    ...over,
+  });
+
+
+  const { computeRootCloseGenesisArtifact } = await import('./proto-covenant-builder.mjs');
+  const compiledRootCloseAbi = () => computeRootCloseGenesisArtifact({ marketId: MARKET_ID, committeePubkeyHex: genesisArtifacts.committeePubkeyHex, deadlineMs: DEADLINE_MS, rootCloseTmplHash: genesisArtifacts.rootCloseTmplHash, state: closedState }).entries.convert_to_claim;
+  // 独立的push解析器(不复用编码器), 按ABI声明顺序读回具名参数
+  const parsePushesLocal = (hex) => {
+    const b = Buffer.from(hex, 'hex'); const out = []; let i = 0;
+    while (i < b.length) {
+      const op = b[i++];
+      if (op === 0x00) out.push(Buffer.alloc(0));
+      else if (op >= 0x01 && op <= 0x4b) { out.push(b.subarray(i, i + op)); i += op; }
+      else if (op === 0x4c) { const n = b[i++]; out.push(b.subarray(i, i + n)); i += n; }
+      else if (op === 0x4d) { const n = b.readUInt16LE(i); i += 2; out.push(b.subarray(i, i + n)); i += n; }
+      else if (op === 0x4e) { const n = b.readUInt32LE(i); i += 4; out.push(b.subarray(i, i + n)); i += n; }
+      else if (op === 0x4f) out.push(Buffer.from([0x81]));
+      else if (op >= 0x51 && op <= 0x60) out.push(Buffer.from([op - 0x50]));
+      else throw new Error('parsePushesLocal: 非push opcode 0x' + op.toString(16));
+    }
+    return out;
+  };
+  const decodeSmallIntLocal = (buf) => { if (buf.length === 0) return 0; if (buf.length === 1 && buf[0] === 0x81) return -1; let v = 0n; for (let k = buf.length - 1; k >= 0; k--) v = (v << 8n) | BigInt(buf[k]); return Number(v); };
+
+  let c2cBuilt;
+  t('①convert_to_claim buildConvertToClaimTxJson 真实构造成功([rootClose,held,fee]三输入, 三输出)', () => {
+    c2cBuilt = buildConvertToClaimTxJson(c2cArgs());
+    if (!c2cBuilt.txJson || !c2cBuilt.expectedTxid) throw new Error('返回形状不对');
+    if (JSON.stringify(c2cBuilt.signInputIndices) !== '[2]') throw new Error(`fee应该在index=2, 实际${JSON.stringify(c2cBuilt.signInputIndices)}`);
+    if (JSON.stringify(c2cBuilt.genesisOutputIndices) !== '[0,1]') throw new Error(`genesisOutputIndices不对: ${JSON.stringify(c2cBuilt.genesisOutputIndices)}`);
+  });
+
+  t('②relay真代码能反序列化+extractTxShape+validateFixedValueOutputs通过(两个genesis输出)', () => {
+    const tx = kaspa.Transaction.deserializeFromSafeJSON(c2cBuilt.txJson);
+    const shape = extractTxShape(tx);
+    const fv = validateFixedValueOutputs({ outputs: shape.outputs, genesisOutputIndices: c2cBuilt.genesisOutputIndices, continuationOutputIndices: [] });
+    if (!fv.ok) throw new Error(`relay真代码拒绝: ${fv.reason}`);
+  });
+
+  t('③relay真签名(fee输入)后finalize, txid与expectedTxid一致', () => {
+    const tx = kaspa.Transaction.deserializeFromSafeJSON(c2cBuilt.txJson);
+    signOnlyDeclaredInputs({ tx, signInputIndices: c2cBuilt.signInputIndices, privateKey: priv, kaspa });
+    tx.finalize();
+    const r = assertFinalTxid(tx, c2cBuilt.expectedTxid);
+    if (!r.ok) throw new Error(`签名后txid=${r.actualTxid} != 预期${c2cBuilt.expectedTxid}`);
+  });
+
+  t('③b(账本1465节点规则镜像) 三输入交易每个input满足v2.0.1 RPC层sigOpCount/computeBudget一致性规则', () => {
+    assertKaspadInputVersionRule(kaspa.Transaction.deserializeFromSafeJSON(c2cBuilt.txJson), 'convert_to_claim-e2e');
+  });
+
+  t('④独立复算Σ真实inputs.utxo.amount − Σ真实outputs.value必须【恰好】等于built.netLoss(账本1455纪律)', () => {
+    const tx = kaspa.Transaction.deserializeFromSafeJSON(c2cBuilt.txJson);
+    let sumIn = 0n; for (const inp of tx.inputs) sumIn += BigInt(inp.utxo.amount);
+    let sumOut = 0n; for (const out of tx.outputs) sumOut += BigInt(out.value);
+    if (sumIn - sumOut !== c2cBuilt.netLoss) throw new Error(`隐含手续费(${sumIn - sumOut})与built.netLoss(${c2cBuilt.netLoss})不一致`);
+  });
+
+  t('⑤covenant_id独立复算: claim的covenant_id=kaspa.covenantId(fee outpoint,[claim输出]); 新代币输出spk=以【真实claim covid】为owner现算的KTT', () => {
+    const tx = kaspa.Transaction.deserializeFromSafeJSON(c2cBuilt.txJson);
+    const feeOutpointObj = { transactionId: c2cFeeUtxo.txid, index: c2cFeeUtxo.vout };
+    const indep = String(kaspa.covenantId(feeOutpointObj, [{ index: CONVERT_TO_CLAIM_CLAIM_OUT_INDEX, output: new kaspa.TransactionOutput(tx.outputs[CONVERT_TO_CLAIM_CLAIM_OUT_INDEX].value, tx.outputs[CONVERT_TO_CLAIM_CLAIM_OUT_INDEX].scriptPublicKey) }]));
+    const realClaim = String(tx.outputs[CONVERT_TO_CLAIM_CLAIM_OUT_INDEX].covenant.covenantId);
+    if (indep.toLowerCase() !== realClaim.toLowerCase()) throw new Error(`claim covid: 独立复算=${indep} 真实tx=${realClaim}`);
+    if (realClaim.toLowerCase() !== c2cBuilt.claimCovId.toLowerCase()) throw new Error('返回的claimCovId与真实tx不一致');
+    const expectTok = computeKttGenesisArtifact({ amount: closedState.pool_value, ownerCovIdHex: realClaim.toLowerCase() });
+    if ('0x' + String(tx.outputs[CONVERT_TO_CLAIM_TOKEN_OUT_INDEX].scriptPublicKey.script) !== expectTok.scriptPubKeyHex) throw new Error('新代币输出的spk不是以真实claim covid为owner的KTT');
+    if (String(tx.outputs[CONVERT_TO_CLAIM_TOKEN_OUT_INDEX].covenant.covenantId).toLowerCase() !== c2cBuilt.tokenCovId.toLowerCase()) throw new Error('返回的tokenCovId与真实tx不一致');
+  });
+
+  // RootClaim genesis输出的独立构造(不共用computeRootClaimGenesisArtifact): 用state全0的探针编译拿prefix/suffix布局,
+  // 手工把8字段state(每字段=长度字节+小端/原始字节, 同NWT审计构造的fieldInt/fieldBytes32)拼进去, 再自己算P2SH。
+  t('⑥RootClaim输出spk与独立"探针+手工splice+自算P2SH"构造逐字节一致(自检两侧不共用实现)', () => {
+    const { ps_tmpl_hash, token_tmpl_hash, claim_tmpl_hash } = loadProtocolConstants();
+    const probeCtor = [
+      ctorBytes32V100(ps_tmpl_hash), ctorBytes32V100(MARKET_ID),
+      ctorIntV100(0), ctorIntV100(0), ctorIntV100(0), ctorIntV100(0), ctorIntV100(0), ctorIntV100(0), ctorBytes32V100('00'.repeat(32)), ctorIntV100(0),
+      ctorBytes32V100(token_tmpl_hash), ctorBytes32V100(claim_tmpl_hash),
+    ];
+    const probe = compileSilV100(new URL('./RootClaim.sil', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'), probeCtor, 'RootClaim');
+    const probeScript = Buffer.from(probe.script);
+    const { start, len } = probe.state_layout;
+    const fieldInt = (n) => { const b = Buffer.alloc(8); b.writeBigInt64LE(BigInt(n)); return Buffer.concat([Buffer.from([8]), b]); };
+    const fieldB32 = (b) => Buffer.concat([Buffer.from([32]), b]);
+    const stateBytes = Buffer.concat([
+      fieldInt(closedState.local_yes), fieldInt(closedState.local_no), fieldInt(closedState.count), fieldInt(closedState.pool_value),
+      fieldInt(closedState.closed), fieldInt(closedState.winningSide), fieldB32(Buffer.from(closedState.payoutRoot, 'hex')), fieldInt(0),
+    ]);
+    if (stateBytes.length !== len) throw new Error(`手工state字节长度${stateBytes.length} != 探针state_layout.len(${len})`);
+    const redeem = Buffer.concat([probeScript.subarray(0, start), stateBytes, probeScript.subarray(start + len)]);
+    const spkHex = 'aa20' + Buffer.from(blake2b(Uint8Array.from(redeem), { dkLen: 32 })).toString('hex') + '87';
+    const tx = kaspa.Transaction.deserializeFromSafeJSON(c2cBuilt.txJson);
+    const got = String(tx.outputs[CONVERT_TO_CLAIM_CLAIM_OUT_INDEX].scriptPublicKey.script);
+    if (got !== spkHex) throw new Error(`RootClaim输出spk不一致: builder=${got} 独立构造=${spkHex}`);
+    if (c2cBuilt.claimPrefixHex !== probeScript.subarray(0, start).toString('hex')) throw new Error('claimPrefix与探针不一致');
+    if (c2cBuilt.claimSuffixHex !== probeScript.subarray(start + len).toString('hex')) throw new Error('claimSuffix与探针不一致');
+  });
+
+  t('⑦RootClose input见证里 claimOutIdx/tokenInIdx/tokenOutIdx 位置与交易真实结构一致(独立push解析器)', () => {
+    const tx = kaspa.Transaction.deserializeFromSafeJSON(c2cBuilt.txJson);
+    const rcAbi = compiledRootCloseAbi();
+    const pushes = parsePushesLocal(String(tx.inputs[0].signatureScript).replace(/^0x/, ''));
+    const at = (name) => decodeSmallIntLocal(pushes[rcAbi.params.findIndex((p) => p.name === name)]);
+    const heldPos = tx.inputs.findIndex((i) => String(i.previousOutpoint.transactionId) === c2cHeldOutpoint.txid && Number(i.previousOutpoint.index) === c2cHeldOutpoint.vout);
+    if (heldPos !== CONVERT_TO_CLAIM_HELD_IN_INDEX) throw new Error(`held输入真实下标${heldPos} != ${CONVERT_TO_CLAIM_HELD_IN_INDEX}`);
+    if (at('claimOutIdx') !== CONVERT_TO_CLAIM_CLAIM_OUT_INDEX) throw new Error(`claimOutIdx读回${at('claimOutIdx')}`);
+    if (at('tokenInIdx') !== heldPos) throw new Error(`tokenInIdx读回${at('tokenInIdx')} != held真实下标${heldPos}`);
+    if (at('tokenOutIdx') !== CONVERT_TO_CLAIM_TOKEN_OUT_INDEX) throw new Error(`tokenOutIdx读回${at('tokenOutIdx')}`);
+  });
+
+  // 🔴 本条是tokenInIdx/tokenOutIdx换位的【唯一】守卫: 真实形状里held输入下标与token输出下标同为1, 共识/链上黄金
+  // 回归/上面⑦都看不出两者互换(批3 market_seal已负向对照证实同一件事)。不要因为"看起来冗余"删掉它。
+  t('⑧convertToClaimWitnessArgs映射: heldIdx=7(≠tokenOut=1)时 tokenInIdx=7、tokenOutIdx=CONVERT_TO_CLAIM_TOKEN_OUT_INDEX、claimOutIdx=CONVERT_TO_CLAIM_CLAIM_OUT_INDEX', () => {
+    if (7 === CONVERT_TO_CLAIM_TOKEN_OUT_INDEX) throw new Error('测试向量退化');
+    const a = convertToClaimWitnessArgs({ heldIdx: 7, claimPrefixHex: 'aa', claimSuffixHex: 'bb', tokPrefixHex: '0xcc', tokSuffixHex: '0xdd' });
+    if (a.tokenInIdx !== 7) throw new Error(`tokenInIdx=${a.tokenInIdx} != 7`);
+    if (a.tokenOutIdx !== CONVERT_TO_CLAIM_TOKEN_OUT_INDEX) throw new Error(`tokenOutIdx=${a.tokenOutIdx}`);
+    if (a.claimOutIdx !== CONVERT_TO_CLAIM_CLAIM_OUT_INDEX) throw new Error(`claimOutIdx=${a.claimOutIdx}`);
+    if (a.claim_prefix !== '0xaa' || a.claim_suffix !== '0xbb' || a.tok_prefix !== '0xcc' || a.tok_suffix !== '0xdd') throw new Error('prefix/suffix透传不对');
+  });
+  t('⑧b编码器: tokenIn=1/tokenOut=3 与 互换 得到不同字节', () => {
+    const abi = compiledRootCloseAbi();
+    const base = { claimOutIdx: 0, claim_prefix: '0xaa', claim_suffix: '0xbb', tok_prefix: '0xcc', tok_suffix: '0xdd' };
+    if (encodeConvertToClaimAction(kaspa, abi, { ...base, tokenInIdx: 1, tokenOutIdx: 3 }) === encodeConvertToClaimAction(kaspa, abi, { ...base, tokenInIdx: 3, tokenOutIdx: 1 })) throw new Error('互换后字节相同');
+  });
+
+  const expectFailClosed = (label, fn, pattern) => t(label, () => {
+    let threw = null; try { fn(); } catch (e) { threw = e; }
+    if (!threw) throw new Error('应该throw, 却成功返回了');
+    if (!pattern.test(threw.message)) throw new Error(`throw了但报文不对: ${threw.message}`);
+  });
+  expectFailClosed('⑨fail-closed: closedState.closed=0(尚未close_commit)', () => buildConvertToClaimTxJson(c2cArgs({ closedState: { ...closedState, closed: 0 } })), /fail-closed.*closed/);
+  expectFailClosed('⑨fail-closed: heldTokenOutpoint为空(没有持有代币输入)', () => buildConvertToClaimTxJson(c2cArgs({ heldTokenOutpoint: null })), /fail-closed.*heldTokenOutpoint/);
+  expectFailClosed('⑨fail-closed: 错误的rootCloseTmplHash', () => buildConvertToClaimTxJson(c2cArgs({ rootCloseTmplHash: 'ff'.repeat(32) })), /fail-closed/);
+
+  t('⑩不含私钥/委员私钥信封解密值: builder返回值序列化后不含明文私钥', () => {
+    const privHex = decryptCommitteePrivkey(genesisArtifacts.committeePrivkeyEnvelope);
+    if (JSON.stringify(c2cBuilt, (_k, v) => (typeof v === 'bigint' ? v.toString() : v)).includes(privHex)) throw new Error('明文私钥出现在了convert_to_claim返回值里');
+  });
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

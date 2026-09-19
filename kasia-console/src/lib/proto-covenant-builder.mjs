@@ -426,4 +426,43 @@ export function computeRootCloseGenesisArtifact({ marketId, committeePubkeyHex, 
   };
 }
 
+/**
+ * (实现计划v0.6 批5, convert_to_claim) RootClaim genesis 输出的完整 redeem 脚本推导——只算不签名不广播。
+ * 与 computeRootCloseGenesisArtifact 同手法: 把真实 8 字段 state 直接作为 ctor init_* 编译(不用
+ * "state全0探针+手工splice"), 但同样 fail-closed——编译出的模板 hash 必须等于
+ * computeRootClaimAndRefundClaimTmplHashes 现算的 rootClaimTmplHash(不等即 state 布局/ctor 顺序
+ * 与 RootClose.convert_to_claim 期望的 foreign-template 不一致, 链上必被 validateOutputStateWithTemplate
+ * 拒绝, 提前在构造期拦下)。
+ * @param {object} o
+ * @param {string} o.marketId  32字节hex(无0x)——RootClaim ctor 的 shard_pool_id
+ * @param {{local_yes:number,local_no:number,count:number,pool_value:number,closed:number,winningSide:number,payoutRoot:string,claimed_bitmap:number}} o.state
+ *   convert_to_claim 创建时 claimed_bitmap=0; payoutRoot 为32字节hex(无0x)
+ * @returns {{script:Buffer, scriptPubKeyHex:string, stateLayout:object, rootClaimTmplHash:string, entries:object}}
+ */
+export function computeRootClaimGenesisArtifact({ marketId, state }) {
+  if (!/^[0-9a-f]{64}$/.test(marketId)) throw new Error(`computeRootClaimGenesisArtifact: marketId must be 32-byte hex, got ${marketId}`);
+  if (!/^[0-9a-f]{64}$/.test(state?.payoutRoot || '')) throw new Error(`computeRootClaimGenesisArtifact: state.payoutRoot must be 32-byte hex, got ${state?.payoutRoot}`);
+  if (!Number.isInteger(state.claimed_bitmap)) throw new Error(`computeRootClaimGenesisArtifact: state.claimed_bitmap must be an integer, got ${state.claimed_bitmap}`);
+  const { ps_tmpl_hash, token_tmpl_hash, claim_tmpl_hash } = loadProtocolConstants();
+  const { rootClaimTmplHash } = computeRootClaimAndRefundClaimTmplHashes({ marketId });
+
+  const ctor = [
+    ctorBytes32V100(ps_tmpl_hash), ctorBytes32V100(marketId),
+    ctorIntV100(state.local_yes), ctorIntV100(state.local_no), ctorIntV100(state.count), ctorIntV100(state.pool_value),
+    ctorIntV100(state.closed), ctorIntV100(state.winningSide), ctorBytes32V100(state.payoutRoot), ctorIntV100(state.claimed_bitmap),
+    ctorBytes32V100(token_tmpl_hash), ctorBytes32V100(claim_tmpl_hash),
+  ];
+  const compiled = compileSilV100(ROOT_CLAIM_SIL, ctor, 'RootClaim');
+  const artifact = artifactOf(compiled);
+  if (artifact.templateHashHex !== rootClaimTmplHash) {
+    throw new Error(`computeRootClaimGenesisArtifact: fail-closed — 编译出的 RootClaim 模板hash(${artifact.templateHashHex}) != computeRootClaimAndRefundClaimTmplHashes现算值(${rootClaimTmplHash})`);
+  }
+  return {
+    script: artifact.script, scriptPubKeyHex: '0x' + p2sh(artifact.script), stateLayout: artifact.stateLayout,
+    rootClaimTmplHash,
+    // 同 computeRootCloseGenesisArtifact 的 entries 理由: claim_draw(批6)的 entryAbi 是同一次编译产物的另一切面。
+    entries: compiled._raw.contracts.RootClaim.entries,
+  };
+}
+
 export { p2sh, hex, ZERO32 };

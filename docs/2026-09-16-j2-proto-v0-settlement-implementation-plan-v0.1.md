@@ -1,6 +1,6 @@
 > **Status**: CURRENT
 
-# 原型 v0 结算实现计划 v0.6（六个结算builder + 意图状态机 + 驱动接线，复用covenant_broadcast）
+# 原型 v0 结算实现计划 v0.7（六个结算builder + 意图状态机 + 驱动接线，复用covenant_broadcast）
 
 出处：Owner 2026-09-16 批准实现（D-022，账本1491，Bettor转达"按最简洁的方案走"），在
 `docs/2026-09-16-j2-proto-v0-settlement-design-v0.1.md`（v0.8，下称"设计文档"，尤其§1/§2/§7）
@@ -20,7 +20,17 @@ MUST-PROVE签名前公钥断言仍要落实（当前相等是实现巧合非协�
 （批4close_commit builder落码+离线测试16/16 PASS，commit`51b5133a`；真实跑simnet验证链时
 撞见意外发现②）**：`register_append#1`(首笔下注)在`SIGNED_INPUT_CEILING_SOMPI`(1.0 KAS)约束内
 穷举全部候选fee UTXO面值(85M-100M)仍无一能满足95%阈值，比意外发现①更棘手(不是换UTXO能解决的
-问题)，已停下报Bettor，simnet验证链停在这一步，详见§6b与§8开放点10。
+问题)，已停下报Bettor，simnet验证链停在这一步，详见§6b与§8开放点10。**v0.7更新（2026-09-19，
+接手会话对账 + 批3收货补丁 + 批5离线builder）**：① **v0.6 的"意外发现②"前提不成立**——476,668 是
+`assertMassWithinCeiling` 三信号里 `localMass`（本地 wasm 估算）在 fee=100M 时的值，不是节点值；手算
+storage 在该面值只有 435,000，且在批3 三个形状上与节点权威 storageMass 逐位相等（457,504/293,116/
+231,312，`docs/provenance/2026-09-19-j2-mass-signal-reconciliation/`）。断言怎么改由 Bettor 设计草案+NWT
+红队裁定，**在 NWT verdict 前不动 `proto-mass-ceiling.mjs`**；开放点10 因此改为"待断言改造落码后关闭"。
+② 批3 收货补丁（NWT 独立验证 N1/N2，`cb5fd9e1`）：`heldInput=null` 构造期 fail-closed；见证具名参数映射抽成纯函数
+`sealWitnessArgs`；黄金回归取自 simnet 上真实上链 market_seal（`docs/provenance/2026-09-19-j2-batch3-golden-fixture/`）。
+③ **批5 convert_to_claim 离线 builder 落码**（`buildConvertToClaimTxJson`、`computeRootClaimGenesisArtifact`、
+`proto-convert-to-claim-witness.mjs`，`feeProfile.convert_to_claim.cap` 暂借 1.0 KAS 同 market_seal），离线测试 30/30，
+**尚未上 simnet**（simnet 验证链要先能通过 register_append#1 的断言，等断言改造）。
 
 D-021合规：本文档不写真实relay地址、真实账户余额、完整relay关联txid。
 
@@ -409,4 +419,5 @@ mass余量正常，但要等register_append#1这条路先通）。
     停在register_append#1这一步，close_commit本身尚未真实跑到。
 
 第1-2批（DB迁移+intent状态机）已完成落码。六个builder（第3-8批）全部不再受阻塞，按分批顺序
-（§7）继续推进，当前在做第3批（market_seal）。
+（§7）继续推进。（v0.7：第3批已过 simnet 全部 ACCEPT，第4批 close_commit 与第5批 convert_to_claim 离线 builder 已落码
+未上 simnet；第4-5批上 simnet 需等断言改造。）

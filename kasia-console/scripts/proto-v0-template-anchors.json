@@ -54,6 +54,10 @@
     "close_commit": {
       "cap": "100000000",
       "_source": "账本1497/实现计划v0.5批4 — close_commit只有[RootClose,fee]两输入、RootClose自身value不变(同market_seal/register_append同量级构造复杂度)，暂借同一个cap(1.0 KAS)，未来有独立的close_commit专属mass/fee估算provenance应替换为该文档的具体数字"
+    },
+    "convert_to_claim": {
+      "cap": "100000000",
+      "_source": "实现计划v0.6批5 — convert_to_claim三输入[RootClose,合并KTT,fee]、三输出[RootClaim genesis,代币genesis,找零], 与market_seal同形状同量级, 暂借同一个cap(1.0 KAS, 实际约束是selectChangeShape的2×requiredFee动态上限, 见Bettor转达NWT N3), 未有本步的节点实测requiredFee前是有界临时值, 合入主线前应替换为按节点实测数字定的convert_to_claim专属值"
     }
   }
 }

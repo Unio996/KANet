@@ -15,9 +15,10 @@ import {
   selectChangeShape, scriptPublicKeyFromHex, assertImpliedFeeMatches, assertKaspadInputVersionRule,
   GENESIS_OUTPUT_SOMPI, CONTINUATION_OUTPUT_SOMPI, PROTO_V0_COMPUTE_BUDGET,
 } from './proto-tx-assembly.mjs';
-import { computeRootCloseGenesisArtifact, computeKttGenesisArtifact, p2sh } from './proto-covenant-builder.mjs';
+import { computeRootCloseGenesisArtifact, computeRootClaimGenesisArtifact, computeKttGenesisArtifact, p2sh } from './proto-covenant-builder.mjs';
 import { encodeConvertToRootcloseAction, combineActionAndRedeem } from './proto-convert-to-rootclose-witness.mjs';
 import { encodeCloseCommitAction } from './proto-close-commit-witness.mjs';
+import { encodeConvertToClaimAction } from './proto-convert-to-claim-witness.mjs';
 import { encodeKttTransferZeroOutAction, combineKttActionAndRedeem } from './proto-ktt-transfer-witness.mjs';
 import { assertMassWithinCeiling } from './proto-mass-ceiling.mjs';
 import { decryptCommitteePrivkey } from './proto-committee-key.mjs';
@@ -357,5 +358,165 @@ export function buildCloseCommitTxJson({
     requiredFee: shape.requiredFee,
     netLoss: shape.netLoss,
     signInputIndices: [1],
+  };
+}
+
+// ── ③ convert_to_claim 的 index 布局具名常量 ──
+export const CONVERT_TO_CLAIM_ROOTCLOSE_IN_INDEX = 0; // RootClose(closed:1)输入
+export const CONVERT_TO_CLAIM_HELD_IN_INDEX = 1;      // 合并KTT(owner=RootClose covid)输入
+export const CONVERT_TO_CLAIM_FEE_IN_INDEX = 2;       // fee输入
+export const CONVERT_TO_CLAIM_CLAIM_OUT_INDEX = 0;    // RootClaim genesis 输出
+export const CONVERT_TO_CLAIM_TOKEN_OUT_INDEX = 1;    // 代币转出到RootClaim 输出
+
+/**
+ * convert_to_claim见证的具名参数映射(纯函数, 同sealWitnessArgs的理由: 真实形状里held输入下标与token输出下标
+ * 同为1, 共识与黄金回归都看不出tokenInIdx/tokenOutIdx换位, 抽出来用两者不同的向量单测)。
+ * @param {{heldIdx:number, claimPrefixHex:string, claimSuffixHex:string, tokPrefixHex:string, tokSuffixHex:string}} o
+ *   claimPrefixHex/claimSuffixHex 无0x; tokPrefixHex/tokSuffixHex 原样透传
+ */
+export function convertToClaimWitnessArgs({ heldIdx, claimPrefixHex, claimSuffixHex, tokPrefixHex, tokSuffixHex }) {
+  return {
+    claimOutIdx: CONVERT_TO_CLAIM_CLAIM_OUT_INDEX, claim_prefix: '0x' + claimPrefixHex, claim_suffix: '0x' + claimSuffixHex,
+    tokenInIdx: heldIdx, tokenOutIdx: CONVERT_TO_CLAIM_TOKEN_OUT_INDEX, tok_prefix: tokPrefixHex, tok_suffix: tokSuffixHex,
+  };
+}
+
+/**
+ * ③ convert_to_claim（`RootClose.convert_to_claim`）——设计文档§1.3/实现计划v0.6 §2.3批5。
+ *
+ * [RootClose(closed:1,CONT), 合并KTT(owner=RootClose covid,GENESIS), fee] →
+ * [RootClaim genesis(7字段照抄+claimed_bitmap:0,CONT), 代币转给RootClaim(owner=RootClaim covid,GENESIS), 找零]。
+ * RootClose/held两个输入的sigScript由本函数填(RootClose走convert_to_claim声明宏见证、held走KTT zero-out见证),
+ * 只有fee输入需要relay签(signInputIndices=[2])。无lockTime(该entry无CLTV), 无委员签名。
+ *
+ * MUST-4: 新建RootClaim genesis输出KAS值用CONTINUATION_OUTPUT_SOMPI(CONT), 代币输出用GENESIS_OUTPUT_SOMPI,
+ * 不取字面DUST_MIN(1000 sompi会让storage mass的p²/v项爆炸)。
+ *
+ * @param {object} o
+ * @param {*} o.kaspa
+ * @param {string} o.network
+ * @param {string} o.marketId  32字节hex(无0x)
+ * @param {string} o.committeePubkeyHex  32字节hex(无0x)
+ * @param {number} o.deadlineMs
+ * @param {string} o.rootCloseTmplHash  32字节hex(无0x), proto_markets.rootclose_tmpl_hash(fail-closed校验用)
+ * @param {{txid:string, vout:number}} o.rootCloseOutpoint  RootClose当前UTXO(close_commit产出的续约输出, closed:1)
+ * @param {string} o.rootCloseCovId  RootClose自己的covenant_id(不变, market_seal时已算出)
+ * @param {{local_yes:number,local_no:number,count:number,pool_value:number,closed:number,winningSide:number,payoutRoot:string}} o.closedState
+ *   RootClose当前(close_commit之后)的完整7字段state, closed必须是1
+ * @param {{txid:string, vout:number}} o.heldTokenOutpoint  必填: 合并KTT当前UTXO(market_seal产出的代币输出, 面值GENESIS_OUTPUT_SOMPI)
+ * @param {string} o.tokPrefixHex  KanetTestToken模板prefix(hex, 0x前缀形状同market_seal调用方传入)
+ * @param {string} o.tokSuffixHex  同上suffix
+ * @param {object} o.feeUtxo  {txid,vout,value,scriptPublicKeyHex}
+ * @param {string} o.relayChangeScriptPublicKeyHex
+ * @param {bigint} o.absFeeCapSompi  feeProfile.convert_to_claim.cap
+ * @returns {{txJson:string, expectedTxid:string, claimCovId:string, tokenCovId:string,
+ *   claimPrefixHex:string, claimSuffixHex:string, claimState:object,
+ *   includeChange:boolean, changeSompi:bigint, requiredFee:bigint, netLoss:bigint,
+ *   signInputIndices:number[], genesisOutputIndices:number[]}}
+ */
+export function buildConvertToClaimTxJson({
+  kaspa, network, marketId, committeePubkeyHex, deadlineMs, rootCloseTmplHash,
+  rootCloseOutpoint, rootCloseCovId, closedState, heldTokenOutpoint,
+  tokPrefixHex, tokSuffixHex, feeUtxo, relayChangeScriptPublicKeyHex, absFeeCapSompi,
+}) {
+  if (closedState.closed !== 1) throw new Error(`buildConvertToClaimTxJson: fail-closed — closedState.closed=${closedState.closed}, RootClose.convert_to_claim的require(closed==1)必然拒绝(尚未close_commit?)`);
+  if (closedState.winningSide !== 0 && closedState.winningSide !== 1) throw new Error(`buildConvertToClaimTxJson: closedState.winningSide必须是0或1, 实际${closedState.winningSide}`);
+  if (!(closedState.pool_value > 0)) throw new Error(`buildConvertToClaimTxJson: closedState.pool_value(${closedState.pool_value})必须>0(全池代币整体转出)`);
+  // 同market_seal的N2守卫: 没有持有代币输入时tokenInIdx无处可指, convert_to_claim的scanOwnedTokenInputs()==pool_value必然不成立。
+  if (!heldTokenOutpoint) throw new Error('buildConvertToClaimTxJson: fail-closed — heldTokenOutpoint为空; convert_to_claim要求全池代币作为输入整体转出, 没有持有代币输入必然被拒');
+
+  // RootClose当前(closed:1)redeem脚本: computeRootCloseGenesisArtifact自带fail-closed(模板hash必须等于已存rootCloseTmplHash)。
+  const rcArtifact = computeRootCloseGenesisArtifact({ marketId, committeePubkeyHex, deadlineMs, rootCloseTmplHash, state: closedState });
+  const convertToClaimEntryAbi = rcArtifact.entries.convert_to_claim;
+  // RootClaim genesis(8字段: 7字段照抄RootClose自身state, claimed_bitmap:0)。
+  const claimState = {
+    local_yes: closedState.local_yes, local_no: closedState.local_no, count: closedState.count, pool_value: closedState.pool_value,
+    closed: closedState.closed, winningSide: closedState.winningSide, payoutRoot: closedState.payoutRoot, claimed_bitmap: 0,
+  };
+  const claimArtifact = computeRootClaimGenesisArtifact({ marketId, state: claimState });
+  const claimPrefix = claimArtifact.script.subarray(0, claimArtifact.stateLayout.start);
+  const claimSuffix = claimArtifact.script.subarray(claimArtifact.stateLayout.start + claimArtifact.stateLayout.len);
+  // held代币: owner=RootClose自己的covenant_id, amount=pool_value(市场封盘时已铸的合并KTT)。
+  const heldArtifact = computeKttGenesisArtifact({ amount: closedState.pool_value, ownerCovIdHex: rootCloseCovId });
+
+  const rcOutpointObj = { transactionId: rootCloseOutpoint.txid, index: rootCloseOutpoint.vout };
+  const heldOutpointObj = { transactionId: heldTokenOutpoint.txid, index: heldTokenOutpoint.vout };
+  const feeOutpointObj = { transactionId: feeUtxo.txid, index: feeUtxo.vout };
+  const rcSpk = scriptPublicKeyFromHex(kaspa, rcArtifact.scriptPubKeyHex);
+  const heldSpk = scriptPublicKeyFromHex(kaspa, heldArtifact.scriptPubKeyHex);
+  const claimSpk = scriptPublicKeyFromHex(kaspa, claimArtifact.scriptPubKeyHex);
+  const feeUtxoSpk = scriptPublicKeyFromHex(kaspa, feeUtxo.scriptPublicKeyHex);
+
+  // 两个genesis输出的covenant_id都以fee输入outpoint派生(同market_seal既有约定, 账本1434③)。claim的covenant_id
+  // 决定新代币输出的owner, 所以必须先于token输出算出(纯函数, 不查链)。
+  const claimCovIdHex = String(kaspa.covenantId(feeOutpointObj, [{ index: CONVERT_TO_CLAIM_CLAIM_OUT_INDEX, output: new kaspa.TransactionOutput(CONTINUATION_OUTPUT_SOMPI, claimSpk) }]));
+  const newTokenArtifact = computeKttGenesisArtifact({ amount: closedState.pool_value, ownerCovIdHex: claimCovIdHex });
+  const newTokenSpk = scriptPublicKeyFromHex(kaspa, newTokenArtifact.scriptPubKeyHex);
+
+  const rcAction = encodeConvertToClaimAction(kaspa, convertToClaimEntryAbi, convertToClaimWitnessArgs({
+    heldIdx: CONVERT_TO_CLAIM_HELD_IN_INDEX, claimPrefixHex: claimPrefix.toString('hex'), claimSuffixHex: claimSuffix.toString('hex'), tokPrefixHex, tokSuffixHex,
+  }));
+  const rcSigScript = combineActionAndRedeem(kaspa, rcAction, rcArtifact.script);
+  const heldSigScript = combineKttActionAndRedeem(kaspa, encodeKttTransferZeroOutAction(kaspa, heldArtifact.entryAbi, heldArtifact.stateFieldCount, [0]), heldArtifact.script);
+
+  const mkInput = (outpoint, value, spk, sigScriptHex) => ({
+    previousOutpoint: outpoint, signatureScript: sigScriptHex ?? new Uint8Array(0), sequence: 0n, sigOpCount: 0, computeBudget: PROTO_V0_COMPUTE_BUDGET,
+    utxo: { outpoint, amount: value, scriptPublicKey: spk, blockDaaScore: 0n },
+  });
+
+  const mkTx = (feeChangeSompi) => {
+    const txInputs = [];
+    txInputs[CONVERT_TO_CLAIM_ROOTCLOSE_IN_INDEX] = mkInput(rcOutpointObj, CONTINUATION_OUTPUT_SOMPI, rcSpk, rcSigScript);
+    txInputs[CONVERT_TO_CLAIM_HELD_IN_INDEX] = mkInput(heldOutpointObj, GENESIS_OUTPUT_SOMPI, heldSpk, heldSigScript);
+    txInputs[CONVERT_TO_CLAIM_FEE_IN_INDEX] = mkInput(feeOutpointObj, feeUtxo.value, feeUtxoSpk, new Uint8Array(0));
+    const t = new kaspa.Transaction({
+      version: 1,
+      inputs: txInputs,
+      outputs: [
+        new kaspa.TransactionOutput(CONTINUATION_OUTPUT_SOMPI, claimSpk),
+        new kaspa.TransactionOutput(GENESIS_OUTPUT_SOMPI, newTokenSpk),
+        ...(feeChangeSompi === undefined ? [] : [new kaspa.TransactionOutput(feeChangeSompi, feeUtxoSpk)]),
+      ],
+      lockTime: 0n, subnetworkId: '0'.repeat(40), gas: 0n, payload: '',
+    });
+    // 每个genesis输出各自独立一个GenesisCovenantGroup(单-index数组), 同market_seal(设计文档§0.5 WrongGenesisCovenantId)。
+    t.populateGenesisCovenants([
+      new kaspa.GenesisCovenantGroup(CONVERT_TO_CLAIM_FEE_IN_INDEX, [CONVERT_TO_CLAIM_CLAIM_OUT_INDEX]),
+      new kaspa.GenesisCovenantGroup(CONVERT_TO_CLAIM_FEE_IN_INDEX, [CONVERT_TO_CLAIM_TOKEN_OUT_INDEX]),
+    ]);
+    return t;
+  };
+
+  // leftover: RootClose输入自带CONT抵扣claim输出的CONT, held输入自带GENESIS抵扣token输出的GENESIS, 只剩fee输入面值。
+  const leftover = feeUtxo.value + CONTINUATION_OUTPUT_SOMPI + GENESIS_OUTPUT_SOMPI - CONTINUATION_OUTPUT_SOMPI - GENESIS_OUTPUT_SOMPI;
+  const shape = selectChangeShape({
+    kaspa, network, leftoverSompi: leftover,
+    buildTxWithChange: (c) => mkTx(c), buildTxNoChange: () => mkTx(undefined),
+    absFeeCapSompi,
+  });
+  assertImpliedFeeMatches(shape.tx, shape.netLoss, 'convert_to_claim');
+  assertKaspadInputVersionRule(shape.tx, 'convert_to_claim');
+  // 账本1497 Bettor MUST: RootClose与held代币都是covenant输入(p=2), fee是普通输入(p=1)。
+  assertMassWithinCeiling({
+    kaspa, network, tx: shape.tx, inputPluralities: [2n, 2n, 1n], feeUtxoValueSompi: feeUtxo.value, label: 'convert_to_claim',
+  });
+
+  const claimCovId = String(shape.tx.outputs[CONVERT_TO_CLAIM_CLAIM_OUT_INDEX].covenant.covenantId);
+  const tokenCovId = String(shape.tx.outputs[CONVERT_TO_CLAIM_TOKEN_OUT_INDEX].covenant.covenantId);
+  if (claimCovId.toLowerCase() !== claimCovIdHex.toLowerCase()) {
+    throw new Error(`buildConvertToClaimTxJson: fail-closed — 真实tx output[${CONVERT_TO_CLAIM_CLAIM_OUT_INDEX}]的covenant_id(${claimCovId}) != 预算值(${claimCovIdHex}), 新代币输出的owner会指向错误的covenant`);
+  }
+
+  return {
+    txJson: shape.tx.serializeToSafeJSON(),
+    expectedTxid: shape.tx.id,
+    claimCovId, tokenCovId,
+    claimPrefixHex: claimPrefix.toString('hex'), claimSuffixHex: claimSuffix.toString('hex'), claimState,
+    includeChange: shape.includeChange,
+    changeSompi: shape.changeSompi,
+    requiredFee: shape.requiredFee,
+    netLoss: shape.netLoss,
+    signInputIndices: [CONVERT_TO_CLAIM_FEE_IN_INDEX],
+    genesisOutputIndices: [CONVERT_TO_CLAIM_CLAIM_OUT_INDEX, CONVERT_TO_CLAIM_TOKEN_OUT_INDEX],
   };
 }
