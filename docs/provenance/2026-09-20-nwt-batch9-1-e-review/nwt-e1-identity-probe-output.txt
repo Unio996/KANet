@@ -1,0 +1,7 @@
+# nwt-e1-identity-probe-builder.cjs 生成临时副本 src/lib/_nwt_e_probe.test.mjs(proto-tx-assembly-settlement.test.mjs + 一个探针块), 跑完即删; git status 空
+   PROBE-RESULT: builder ACCEPTED; fee outpoint B present in built tx=true; outpoint A present=true
+[PASS] NWT-E1 probe: chainParents attests outpoint A, builder is handed outpoint B (same value/spk length) -> ACCEPTED?
+   PROBE-CONTROL: rejected with code=chain_parents_mismatch role=fee
+[PASS] NWT-E1 control: same probe with value+1 on B -> must be rejected by the assertion (proves the assertion is live)
+45 passed, 0 failed
+# 注: "outpoint A present=true" 只表示 A 的 txid 字符串也出现在序列化结果里(夹具里别的输入可能共用同一 txid); 本探针据以下结论的只有 "B 出现在构造出的交易中"。

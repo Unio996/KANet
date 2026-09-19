@@ -1,0 +1,28 @@
+# NWT 独立变异(E 笔 a57db3d5), 脚本 nwt-mutate-e.cjs, 在 kasia-console/ 下跑; 每个变异跑 claim-draw + assembly + golden 三个文件
+killed   NWT-e1 spkByteLen: 0x prefix not stripped   claim-draw:RED(f=0,x=1) asm:RED(f=6,x=1) asm-golden:RED(f=7,x=1)
+killed   NWT-e2 (4) value-vs-builder check skipped for fee only   claim-draw:RED(f=1,x=1) asm:ok asm-golden:ok
+killed   NWT-e3 hasCovenant check skipped for fee only   claim-draw:RED(f=1,x=1) asm:ok asm-golden:ok
+killed   NWT-e4 spkLen check skipped for fee only   claim-draw:RED(f=1,x=1) asm:ok asm-golden:ok
+killed   NWT-e5 first role never checked   claim-draw:RED(f=2,x=1) asm:ok asm-golden:ok
+killed   NWT-e6 last role (fee) never checked   claim-draw:RED(f=1,x=1) asm:ok asm-golden:ok
+killed   NWT-e7 hasCovenant index off by one   claim-draw:RED(f=0,x=1) asm:RED(f=6,x=1) asm-golden:RED(f=7,x=1)
+killed   NWT-e8 extra-role keys tolerated   claim-draw:RED(f=1,x=1) asm:ok asm-golden:ok
+killed   NWT-e9 (3) constant-value check removed (all non-fee roles)   claim-draw:RED(f=1,x=1) asm:ok asm-golden:ok
+SURVIVED NWT-e10 claim_draw ticket expected value = CONTINUATION   claim-draw:ok asm:ok asm-golden:ok
+SURVIVED NWT-e11 claim_draw held expected value = CONTINUATION   claim-draw:ok asm:ok asm-golden:ok
+killed   NWT-e12 close_commit fee used-value = constant not feeUtxo.value   claim-draw:RED(f=0,x=1) asm:RED(f=7,x=1) asm-golden:ok
+killed   NWT-e13 seal used.held value = leaf constant (skips held (4))   claim-draw:RED(f=1,x=1) asm:ok asm-golden:ok
+SURVIVED NWT-e14 internal-layout guard in seal disabled (guards future drift only)   claim-draw:ok asm:ok asm-golden:ok
+SURVIVED NWT-e15 isPlainObj accepts arrays   claim-draw:ok asm:ok asm-golden:ok
+killed   NWT-e16 close_commit continuation index [1]   claim-draw:RED(f=1,x=1) asm:ok asm-golden:ok
+SURVIVED NWT-e17 spkLen lower bound <= 0 -> < 0   claim-draw:ok asm:ok asm-golden:ok
+restored sha256 identical: true 6b847aa9520e5708
+
+# J2 的六个"加载期崩溃"变异对三个测试文件的复跑(归因); 变异内容取自 J2 的 mutate-e.mjs 对应行
+M-09 roles w/o fee                     claim-draw:RED(named FAIL=0)  asm:RED(named FAIL=6)  asm+golden:RED(named FAIL=7)
+M-12 spkLen chars not bytes            claim-draw:RED(named FAIL=0)  asm:RED(named FAIL=6)  asm+golden:RED(named FAIL=7)
+M-21 seal held slot false              claim-draw:RED(named FAIL=0)  asm:RED(named FAIL=6)  asm+golden:RED(named FAIL=7)
+M-22 close_commit rootClose slot false claim-draw:RED(named FAIL=0)  asm:RED(named FAIL=7)  asm+golden:ok
+M-23 convert held slot false           claim-draw:RED(named FAIL=0)  asm:RED(named FAIL=9)  asm+golden:ok
+M-26 seal LEAF_IN_INDEX=1              claim-draw:RED(named FAIL=0)  asm:RED(named FAIL=6)  asm+golden:RED(named FAIL=7)
+restored identical: true
