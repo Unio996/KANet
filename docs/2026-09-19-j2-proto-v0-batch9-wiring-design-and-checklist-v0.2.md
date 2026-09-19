@@ -1,4 +1,4 @@
-> **Status**: CURRENT（草稿 v0.2，2026-09-19，J2；批9 接线设计 + 验收清单，**待 NWT 设计审，过审后才落码**；本文不含任何代码改动）
+> **Status**: CURRENT（草稿 v0.2，2026-09-19，J2；批9 接线设计 + 验收清单，**已转 NWT 设计审，NWT GREEN 后才落码**；Bettor 已裁定 D1–D6（§14）；本文不含任何代码改动）
 
 # 原型 v0 结算批9（驱动接线）设计与验收清单 v0.2
 
@@ -36,12 +36,13 @@
   - **R1** `get_address_utxos` 每项**追加** `scriptPublicKey`（hex）与 `covenantId`（无则 null）——纯加字段、只读，现有调用方只读 `outpoint/amount`，不受影响（需 grep 复核全部消费者）。
   - **R2** 新增只读命令 `get_past_median_time`（返回 relay 自己 RpcClient 的 `getBlockDagInfo().pastMedianTime`）——**同一个 relay 既读 pmt 又提交交易，天然满足 Bettor/NWT 的"同节点"要求**；同时在 `PROTO_COMMAND_ALLOWLIST` 加 `'read'` 一行。
   - 被否决的替代：console 用自己的共享 RpcClient 读 pmt——它与 relay 提交所用节点不保证同一个（console 共享 RpcClient 有回退公网的既往），违背"同节点"；不能只靠 `getMempoolEntry` 之类现有命令间接推断。
-  - **诚实边界**：R1/R2 不引入新的 write 面，但**改了 relay 的对外输出/白名单**（F7 说这本身是安全边界变更）；是否采纳、是否分成独立小批先落，需 Bettor 裁定。**若不采纳 R1/R2，批9 的 C1 covenant 分类与 pmt 同节点两条无法按 Codex/NWT 的要求证明，接线不得继续。**
-- **P2（`/resolve` 是"任意结果签名预言机"的入口）**：F4 + F12：`winning_side` 是 close_commit 5 个委员槽自动签名的输入。接线时 `/resolve` 必须：① **write-once**（`winning_side IS NULL` 才写，写后不可改；改需人工 SQL 且报警）；② 校验 `status==='sealed'` 且 market 的 seal intent 已 `landed`；③ **操作员鉴权**——现有 proto 路由无鉴权，主网暴露面上不能让任意请求决定结算结果。鉴权机制（沿用哪一套 operator 单点白名单/token）需 Bettor 指定；未指定前 `/resolve` 在主网 console 保持 501/禁用。
+  - **（Bettor 裁定 D1：采纳，作独立小批 9-0 先落；条件 = NWT 审过边界：只读、不开签名或广播路径、字段只加不改）**。9-0 自带回归：① relay 返回的 `scriptPublicKey` 与 `covenantId` 必须与节点直读**逐字节一致**（对着同一节点同一 UTXO 两条路径比对，含 covenant 与普通 P2PK 两类）；② `PROTO_COMMAND_ALLOWLIST` **只多一行 `read`**（对旧表做差分断言：新表 = 旧表 + 恰一项，且该项值为 `'read'`）；③ 现有 `get_address_utxos` 全部消费者不因新增字段而变（grep + 快照测试）。
+- **诚实边界**：R1/R2 不引入新的 write 面，但**改了 relay 的对外输出/白名单**（F7 说这本身是安全边界变更）。**若不采纳 R1/R2，批9 的 C1 covenant 分类与 pmt 同节点两条无法按 Codex/NWT 的要求证明，接线不得继续。**
+- **P2（`/resolve` 是"任意结果签名预言机"的入口）**：F4 + F12：`winning_side` 是 close_commit 5 个委员槽自动签名的输入。接线时 `/resolve` 必须：① **write-once**（`winning_side IS NULL` 才写，写后不可改；改需人工 SQL 且报警）；② 校验 `status==='sealed'` 且 market 的 seal intent 已 `landed`；③ **操作员鉴权**——现有 proto 路由无鉴权，主网暴露面上不能让任意请求决定结算结果。**（Bettor 裁定 D2）鉴权复用 admin-secret 分级机制，新开一档 `ADMIN_SECRET_SETTLEMENT`**（新生成；env 只写键名、值不入库/不入文档；loopback 规则同现有各档，现有档见 `ADMIN_SECRET_FUNDS`/`ADMIN_SECRET_OPERATOR_SETTLE` 等）；write-once 在任何环境强制；批 9-3 之前 `/resolve` 保持 501。
 - **P3（seal 触发与下注上限）**：F5：无 `sealing` 中间态（加 status 值要重建表，代价大）。设计：seal 触发条件 = `status='betting'` ∧ 已确认下注数 == `seal_count` ∧ 该市场**无** pending/prepared/submitted 的 append 意图（`assertNoInFlightAppend` 同款）；**seal 意图 landed 后**才 `markMarketStatus('sealed')`。为防第 `seal_count+1` 笔下注在链上被合约拒（卡死 append 意图），`/bet` 须在 `已确认+在途 ≥ seal_count` 时 409（现状**未见此校验**，须核并补——属 proto.js 小改）。
 - **P4（`proto_claims` 行创建时机）**：F6：`resolve` 意图 landed 后，驱动按 `deriveCloseCommitInputs` 的 payouts（v0 恰 1 条）**创建一行 `proto_claims`（side='win', amount=pool_value）**，其 id 作为 `convert_to_claim`/`claim_draw` 的 subject_id；创建走 `INSERT OR IGNORE`（按 market_id 唯一约束的等价查询保证只有一行），不引入迁移。
 - **P5（链上指针的存放）**：F13：**不加列、不迁移**——新增纯函数模块 `proto-settlement-pointers.mjs`，从已 `landed` 的结算意图的 `prepared_tx_json` 反序列化取：txid（**必须**等于 `submitted_txid`，否则 fail-closed）、输出下标（用 builder 导出的具名常量）、covenant_id（输出的 `covenant.covenantId`）。所有指针**仅作"预期 outpoint"**，是否真实存在与未花费由 C1 用链上事实证明（§6）。
-- **P6（builder 小改，接线批内做）**：close_commit 返回 `continuationOutputIndices:[0]`（F11）；四个 builder 新增**必填**入参 `chainParents`（§6.3），在 mass/fee 判定前交叉核对。
+- **P6（builder 小改，放批 9-1，Bettor 要求）**：close_commit 返回 `continuationOutputIndices:[0]`，使 relay 固定面值校验覆盖其 RootClose 续约输出（F11）；四个 builder 新增**必填**入参 `chainParents`（§6.3），在 mass/fee 判定前交叉核对。
 
 ## 3. 开关与启动（默认关闭）
 
@@ -188,23 +189,26 @@
 
 | 批 | 内容 | 门 |
 |---|---|---|
-| 9-0 | **R1/R2**（relay 只读扩展 + 白名单一行）+ 测试 | NWT 审 + Bettor 批（P1 的裁定先行） |
-| 9-1 | `proto-settlement-pointers.mjs`（P5）+ C1 调用点模块（含 `chainParents`）+ builder 小改（P6）+ 全部负向回归 | NWT 审 |
+| 9-0 | **R1/R2**（relay 只读扩展 + 白名单一行）+ 回归（节点直读逐字节一致 / 白名单只多一行 read / 消费者不变） | NWT 审边界（只读、不开签名或广播路径、字段只加不改）+ Bettor 批；D1 已裁 |
+| 9-1 | `proto-settlement-pointers.mjs`（P5）+ C1 调用点模块（含 `chainParents`）+ builder 小改（P6，含 close_commit 的 `continuationOutputIndices:[0]`）+ 全部负向回归 | NWT 审 |
 | 9-2 | 驱动分支 + 开关 + 启动日志 + `markSettlementLanded` + pmt 门接线 + SLA 报警 + 重启恢复 | NWT 审 |
-| 9-3 | HTTP：`/resolve`（write-once + 鉴权，P2）、`/claim`（建 claim 行 + 意图）、`/bet` 上限校验（P3）、`/withdraw` 仍 501 | Bettor 批（用户面/鉴权） |
-| 9-4 | 隔离 simnet console 端到端 + provenance | NWT 复核证据 |
+| 9-3 | HTTP：`/resolve`（write-once + `ADMIN_SECRET_SETTLEMENT` 鉴权，P2/D2）、`/claim`（建 claim 行 + 意图）、`/bet` 上限校验（P3/D5：已确认+在途 ≥ seal_count ⇒ 409）、`/withdraw` 仍 501 | Bettor 批（用户面/鉴权） |
+| 9-4 | 隔离 simnet console 端到端 + provenance；**用全新 DB 与全新 env 副本**（新建库、新 env 文件，不复用/不指向主网库与主网 env，`DB_PATH`/`CONSOLE_ENCRYPTION_KEY`/`PROTO_RELAY_ID` 均为一次性测试值；env 副本里 `KASPA_NETWORK=simnet`） | NWT 复核证据 |
 | 主网开闸 | D-022 另开闸，Owner 终端点 GO | 不在批9内 |
 
-## 14. 待裁定（不裁定则对应批不能开）
+## 14. 裁定记录（Bettor 2026-09-19，D1–D6 已裁）
 
-| # | 问题 | 我的倾向 |
+| # | 问题 | 裁定 |
 |---|---|---|
-| D1 | 采纳 R1（`get_address_utxos` 加 `scriptPublicKey`/`covenantId`）与 R2（`get_past_median_time`）？是否作为独立小批 9-0 先落？ | 采纳，独立先落；否则 C1 分类/pmt 同节点两条无法证明 |
-| D2 | `/resolve` 的操作员鉴权用哪一套机制？未指定前主网 console 是否直接禁用该路由？ | 未指定前禁用（501），write-once 在任何环境都强制 |
-| D3 | `committeeMode` 记在哪（加列迁移 / events payload / 响应体）？ | 不加迁移：写入 events payload + 响应体，意图表不动 |
-| D4 | refund_flip 已翻后的终态：意图置 `ambiguous` 转人工（本文方案）是否可接受，还是要新增终态值（需迁移）？ | ambiguous + 专用报警，不加终态 |
-| D5 | P3 的 `/bet` 上限校验（`已确认+在途 ≥ seal_count` ⇒ 409）是否由本批做？ | 做（防卡死 append） |
-| D6 | fee 输入是否要求"取自 relay 节点回报的 UTXO 且面值 ≤ 1 KAS"之外再加上限/下限断言？ | 沿用现有 `selectFeeUtxoByConstruction` 与 relay 侧 `SIGNED_INPUT_CEILING`，不新增 |
+| D1 | 采纳 R1/R2？ | **采纳**，独立小批 9-0 先落；条件 = NWT 审过边界（只读、不开签名或广播路径、字段只加不改）；9-0 自带回归：relay 返回的 spk/covenantId 与节点直读逐字节一致；白名单只多一行 read |
+| D2 | `/resolve` 鉴权 | 复用 admin-secret 分级机制，新开一档 `ADMIN_SECRET_SETTLEMENT`（新生成、env 只写键名、loopback 规则同现有档）；write-once 在任何环境强制；9-3 之前该路由保持 501 |
+| D3 | `committeeMode` 记哪 | events payload + 响应体，不加迁移 |
+| D4 | refund_flip 已翻的终态 | 意图 `ambiguous` + 专用报警，不加终态 |
+| D5 | `/bet` 上限校验 | 做：已确认 + 在途 ≥ seal_count 即 409 |
+| D6 | fee 输入额外断言 | 不新增 |
+| 附加① | close_commit builder 补 `continuationOutputIndices` | 放 9-1，让 relay 固定面值校验覆盖续约输出 |
+| 附加② | 9-4 端到端 | 全新 DB + 全新 env 副本，不碰主网库 |
+| 流程 | 落码顺序 | NWT 设计审 GREEN 后按 9-0 → 9-1 → 9-2 → 9-3 → 9-4，每批提交给 Bettor 推、NWT 审 |
 
 ## 15. 与 v0.1 清单的关系
 
