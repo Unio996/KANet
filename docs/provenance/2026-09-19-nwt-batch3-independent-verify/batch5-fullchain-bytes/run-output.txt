@@ -1,0 +1,98 @@
+## cc_decode
+
+== close_commit 9e3398a6b9d6 version 1 lockTime 1789806762435 ins 2 outs 2
+in[0] prev=78246e013e:0 seq=0 sigLen=20423
+   push[0] push len=32 55fbb2c5dd26b6fa0c3eef786bf272e78db10db3026c55499609897fc3a4205d
+   push[1] push len=32 55fbb2c5dd26b6fa0c3eef786bf272e78db10db3026c55499609897fc3a4205d
+   push[2] push len=32 55fbb2c5dd26b6fa0c3eef786bf272e78db10db3026c55499609897fc3a4205d
+   push[3] push len=32 55fbb2c5dd26b6fa0c3eef786bf272e78db10db3026c55499609897fc3a4205d
+   push[4] push len=32 55fbb2c5dd26b6fa0c3eef786bf272e78db10db3026c55499609897fc3a4205d
+   push[5] push len=65 8e1da886401d7baf…
+   push[6] push len=65 8e1da886401d7baf…
+   push[7] push len=65 8e1da886401d7baf…
+   push[8] push len=65 8e1da886401d7baf…
+   push[9] push len=65 8e1da886401d7baf…
+   push[10] OP_0 len=0 
+   push[11] OP_1 len=1 01
+   push[12] push len=32 cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd
+   push[13] push len=1 6b
+   push[14] PUSHDATA2 len=3078 6c760424a3e4a887…
+   push[15] push len=4 da3507a4
+   push[16] PUSHDATA2 len=16802 6b08010000000000…
+in[1] prev=6e1d38061c:5 seq=0 sigLen=66
+   push[0] push len=65 e74bbde7bf31953d…
+out[0] value=20000000 cov=0:0733664e spk=0000aa203b1f…
+out[1] value=77425600 cov=none spk=00002003a81c…
+
+== convert_to_claim 1b1133ebb096 version 1 lockTime 0 ins 3 outs 3
+in[0] prev=9e3398a6b9:0 seq=0 sigLen=22755
+   push[0] OP_0 len=0 
+   push[1] push len=1 6b
+   push[2] PUSHDATA2 len=2854 6c7604ed9a900387…
+   push[3] OP_1 len=1 01
+   push[4] OP_1 len=1 01
+   push[5] push len=1 6b
+   push[6] PUSHDATA2 len=3078 6c760424a3e4a887…
+   push[7] push len=4 51d04ce9
+   push[8] PUSHDATA2 len=16802 6b08010000000000…
+in[1] prev=78246e013e:1 seq=0 sigLen=3215
+   push[0] OP_0 len=0 
+   push[1] OP_0 len=0 
+   push[2] OP_0 len=0 
+   push[3] OP_0 len=0 
+   push[4] OP_0 len=0 
+   push[5] OP_0 len=0 
+   push[6] OP_0 len=0 
+   push[7] push len=8 0000000000000000
+   push[8] push len=4 24a3e4a8
+   push[9] PUSHDATA2 len=3191 6b08e80300000000…
+in[2] prev=53315c3c88:4 seq=0 sigLen=66
+out[0] value=20000000 cov=2:7b643046 spk=0000aa2018bc…
+out[1] value=20000000 cov=2:b5a9909e spk=0000aa20272a…
+out[2] value=57731200 cov=none spk=00002003a81c…
+
+## cc_recompile (pinned silverc)
+== close_commit(closed=0): redeem 16802B state ints=1,999,2,1000,0,0 root=00000000… committee_hash in redeem=true token_hash in redeem=true unknown32B=2
+   try order [claim,refund]=[791cf9d7,91614e64] len 16802 BYTE-EQUAL = true
+== convert_to_claim(closed=1): redeem 16802B state ints=1,999,2,1000,1,1 root=cdcdcdcd… committee_hash in redeem=true token_hash in redeem=true unknown32B=2
+   try order [claim,refund]=[791cf9d7,91614e64] len 16802 BYTE-EQUAL = true
+    "tag": "da3507a4",
+    "tag": "51d04ce9",
+    "tag": "37a5b2a7",
+    "tag": "caa36353",
+    "tag": "da3507a4",
+    "tag": "51d04ce9",
+
+## cc_upstream_check (patched cli-debugger = upstream encoder + VM)
+close_commit: upstream VM on REAL on-chain tx + REAL committee sigs => PASS PASS
+close_commit: upstream-encoded action == on-chain action ( 3618 B ) => true
+convert_to_claim: upstream-encoded action == on-chain action ( 5950 B ) => true
+
+## cl_out_check
+convert_to_claim out[0] P2SH recomputed = 18bc6f6d5038fd1f…  on-chain = 18bc6f6d5038fd1f…  MATCH = true
+close_commit on-chain committee sigs vs my sighash port: [true,true,true,true,true]  sig hashtype bytes = 1,1,1,1,1
+close_commit fee input(in[1]) sequence/lockTime: seq 0  tx.lockTime 1789806762435  (deadline baked = lockTime by builder)
+
+## fee_curves_cc_cl
+== close_commit
+┌─────────┬─────────────┬──────────┬───────────┬───────┬─────────────┐
+│ (index) │ v           │ wasmMass │ formulaP1 │ equal │ requiredFee │
+├─────────┼─────────────┼──────────┼───────────┼───────┼─────────────┤
+│ 0       │ '30000000'  │ '153333' │ '153333'  │ true  │ '15333300'  │
+│ 1       │ '40000000'  │ '158334' │ '158334'  │ true  │ '15833400'  │
+│ 2       │ '50000000'  │ '162858' │ '162858'  │ true  │ '16285800'  │
+│ 3       │ '70000000'  │ '169841' │ '169841'  │ true  │ '16984100'  │
+│ 4       │ '95000000'  │ '175744' │ '175744'  │ true  │ '17574400'  │
+│ 5       │ '100000000' │ '176668' │ '176668'  │ true  │ '17666800'  │
+└─────────┴─────────────┴──────────┴───────────┴───────┴─────────────┘
+== convert_to_claim
+┌─────────┬─────────────┬──────────┬───────────┬───────┬─────────────┐
+│ (index) │ v           │ wasmMass │ formulaP1 │ equal │ requiredFee │
+├─────────┼─────────────┼──────────┼───────────┼───────┼─────────────┤
+│ 0       │ '30000000'  │ '304762' │ '304762'  │ true  │ '30476200'  │
+│ 1       │ '40000000'  │ '312500' │ '312500'  │ true  │ '31250000'  │
+│ 2       │ '50000000'  │ '320001' │ '320001'  │ true  │ '32000100'  │
+│ 3       │ '70000000'  │ '332469' │ '332469'  │ true  │ '33246900'  │
+│ 4       │ '95000000'  │ '343860' │ '343860'  │ true  │ '34386000'  │
+│ 5       │ '100000000' │ '345716' │ '345716'  │ true  │ '34571600'  │
+└─────────┴─────────────┴──────────┴───────────┴───────┴─────────────┘
