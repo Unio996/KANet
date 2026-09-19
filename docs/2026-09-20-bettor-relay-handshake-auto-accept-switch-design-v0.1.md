@@ -1,6 +1,6 @@
-# 设计稿：relay 入站握手自动接受加开关（主网默认关）v0.3
+# 设计稿：relay 入站握手自动接受加开关（主网默认关）v0.4
 
-> 文件名沿用 `…-v0.1.md`（账本 1571 / NWT 审稿以此路径引用）；**正文即 v0.3**，v0.1→v0.2 差异在「v0.2 增补」、v0.2→v0.3 差异在「v0.3 增补」，与上文冲突处以该节为准。
+> 文件名沿用 `…-v0.1.md`（账本 1571 / NWT 审稿以此路径引用）；**正文即 v0.4**，逐版差异在末尾各「增补」节，后节覆盖前节，与上文冲突处以该节为准。
 
 > **Status**: CURRENT
 >
@@ -115,3 +115,25 @@
 
 ### 7.6 验收表最终版（覆盖 §3 / §6.4）
 V1 纯函数取值；V2 实时路径关闭态零 claim / 零 acceptHandshake / 零 sendKaspa / 零 markSeen、登记调用不变；V2b console 侧 pending 行钉住；V2c 落点 4 模块注入桩零调用 + 同 peer 3 tick 只 1 行；V2d（新，对应 7.2）`acceptHandshake` 关闭态返回 null，开启态草稿逐字节不变，变异"去掉 chokepoint 早退"⇒ 红；V3 追赶第 1 段零调用 + 汇总行 `handshakes: DISABLED`；V4 开启态逐字节不变（阳性对照 sendKaspa 恰 1 次）；V5 启动行在 relay.mjs 顶层带 RELAY_MODE；V6 部署后 DISABLED 行数 == relay 子进程数、HANDSHAKE ACCEPTED 0 行；V7 env 静态辅助；V8 lint 与原始输出；V9 可机检扫描 (a)–(d)；V10 汇总行；抽取 BEFORE / AFTER 行为对照。
+
+## 8. v0.4 增补（NWT 复审 `08f5ca91`，Bettor 全部采纳；与上文冲突处以本节为准）
+
+### 8.1 M3-1：V9(a) 白名单改为确切形状（消除与 §7.1 注入的矛盾）
+§7.1 抽取后 relay.mjs 必然出现一条 `import { …, acceptHandshake, … } from './lib/chain.mjs'` 与一处把 `acceptHandshake` 作为值传给 handshake-accept 模块的**注入引用**（非调用引用），抽出的模块里它是参数名 / 解构局部变量——按 §7.3 V9(a) 原写法，正确代码会红。**改为确切形状白名单**：
+1. `kasia-relay/src/lib/chain.mjs`：定义 `export async function acceptHandshake`（恰 1）。
+2. `kasia-relay/src/relay.mjs`：恰 1 条 import 含该标识符；恰 1 处注入，文本形态 `acceptHandshake,`（或 `acceptHandshake: acceptHandshake`）出现在传给 `createHandshakeAcceptor({ … })`（或同名工厂）的对象字面量内；其余出现 ⇒ 红。
+3. `kasia-relay/src/lib/handshake-accept.mjs`：函数体内 `deps.acceptHandshake(` 或解构后的 `acceptHandshake(` 恰 1 处调用，且同函数内守卫子句 `if (!handshakeAutoAcceptEnabled(…))` 在其之前。
+4. `kasia-relay/src/rpc-listener.mjs`：processHandshake 与 catchUpHistory 各恰 1 处调用，各自守卫子句在前。
+5. 其余任何出现（别名 import、别的文件、`const f = acceptHandshake`、传回调等）⇒ 红。
+对照臂追加："relay.mjs 里多一处第二次注入 ⇒ 红"；"handshake-accept.mjs 内第二处调用 ⇒ 红"。
+
+### 8.2 S3-1：V2d / V4 的"开启态逐字节不变"改为结构性等价
+acceptHandshake 的握手 JSON 含 `timestamp: Date.now()`，加密用每次新生成的临时 ECDH 密钥 + 随机 nonce（crypto.mjs:84-97；NWT 实测同明文同接收方两次密文不同，长度同 113）⇒ 逐字节不变永远红或变空判据。**改为**：断言 `{to, amount}` 相等；payload 以握手前缀开头且长度在预期范围；用接收方私钥解密（relay 已有 decrypt）后断言 type / version / isResponse / alias / theirAlias 与抽取前一致，timestamp 只断言为最近毫秒数；BEFORE / AFTER 对照比解密后字段而非密文字节。
+
+### 8.3 S3-2：§7.4 去重 Set 加上限
+对端地址数来自外部无界 ⇒ 去重 Set 上限 1000，满了停止新增并打一行 `suppressing further disabled-peer logs`；不复制既有 `_acceptedPeers` 的无界先例。
+
+### 8.4 补充规定
+- §7.1 抽取笔**只搬代码不改行为**（可单独 cherry-pick），BEFORE / AFTER 对照建立在它之上；开关逻辑另一笔。
+- §7.2 chokepoint 每次调用取当前 `process.env`；返回 null 时自己打一行带调用者标识的 `disabled (chokepoint, caller=<name>)` 日志（按 peer 去重、同 8.3 上限）——漏掉早退的调用点在日志里一眼可见。
+- §7.3(d) 依赖共享扫描器 ⇒ **F5（F4-1 状态机版 stripComments 单一实现）先于本页实现**；V9 是安全相关钉住测试，不建在已知会漏报的扫描器上。
