@@ -39,5 +39,6 @@
 [PASS] T4 超时之后底层调用才晚到的 reject 不会变成 unhandledRejection(Promise.race 已订阅它)
 [PASS] T5 RPC 调用同步抛错 ⇒ 错误原样上抛(不是超时、不被吞); 超时错误是 FactsError, 其 message 带 facts_rpc_timeout 前缀(relay 外层 catch 回执 {error, phase:execution} 靠它)
 [PASS] T6 默认预算(不注入 rpcCallMs)恰是 FACTS_RPC_CALL_MS: 一个 30ms 内返回的 rpc 不受影响(默认值不是 0/负数)
+[PASS] T6b 默认预算(不注入 rpcCallMs)对 handleGetAddressUtxos 同样是 FACTS_RPC_CALL_MS: 30ms 内返回的 rpc 在形态 L 与形态 O 都不受影响(默认值不是 0/负数)
 
-41 passed, 0 failed
+42 passed, 0 failed

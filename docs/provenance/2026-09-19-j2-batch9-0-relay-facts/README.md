@@ -8,11 +8,12 @@
 
 | 文件 | 内容 |
 |---|---|
-| `test-utxo-facts.txt` | `kasia-relay/src/lib/utxo-facts.test.mjs` 原始输出（**41 项**：dbfa5599 的 33 项 + N-T1 的 O5/O5b + S-1 的 T1–T6；由 NWT 审后补测的提交生成） |
+| `test-utxo-facts.txt` | `kasia-relay/src/lib/utxo-facts.test.mjs` 原始输出（**42 项**：dbfa5599 的 33 项 + N-T1 的 O5/O5b + S-1 的 T1–T6 + NWT 复核补的 T6b；由 NWT 审后补测的提交生成） |
 | `test-proto-relay-ipc.txt` | `kasia-console/src/lib/proto-relay-ipc.test.mjs` 原始输出（既有 ①–⑥b 未改 + 新增 批9-0-a/b/b2/c/d + ⑦ 子进程） |
 | `regress-*.txt` | 受波及的既有测试回归：proto-broadcast-ops / proto-leaf-state / proto-driver / covenant-broadcast-relay / covenant-broadcast |
 | `lint-kanet.txt` | `node scripts/lint-kanet.mjs <本提交的 .js/.mjs 文件>`，0 errors（本文件已随 N-T1/S-1 提交重生成：4 个文件、534 条 warning；`dbfa5599` 时是 7 个文件、535 条，多的那条是 `relay.mjs:13` 的 R-NET-DEFAULT-DRIFT）；warning 全是既有的（R-DOC-STATUS 530、R-COMMAND-REGISTRATION 3 条既有 `chain_get_*` 半截注册——**没有新增第 4 个**、R-NET-DEFAULT-DRIFT `relay.mjs:13` 既有行、R-LEDGER-SIZE） |
-| `mutation-utxo-facts.txt` | 对 `utxo-facts.mjs` 的 **22 个变异**（原 15 个 + NWT 审后新增 7 个：M-p 即 NWT-e「形态 O 匹配键去 index」、M-q/r 去 RPC 截止时间、M-s 不清定时器、M-t 超时错误码改名、M-u 预算改 50000、M-v 预算设 0；原 15 个为 删哨兵 / 读顶层 covenantId / 面值升序 / 去 tiebreak / facts 真值判断 / 去回声 / 形态 O 带 truncated / 旧路径多字段 / 共享 rpc 失败回落旧路径 / pmt 校验拆掉 / observedAt 在读之前 / 截断先于过滤 / Number 比较 / 允许两形态并存 / 塞入 `new RpcClient`），**全部至少一条 FAIL**，末尾核对文件 sha256 已还原 |
+| `mutation-utxo-facts.txt` | 对 `utxo-facts.mjs` 的 **23 个变异**（原 15 个 + NWT 审后新增 8 个，其中 M-w 是 T6b 的对照：M-p 即 NWT-e「形态 O 匹配键去 index」、M-q/r 去 RPC 截止时间、M-s 不清定时器、M-t 超时错误码改名、M-u 预算改 50000、M-v 预算设 0；原 15 个为 删哨兵 / 读顶层 covenantId / 面值升序 / 去 tiebreak / facts 真值判断 / 去回声 / 形态 O 带 truncated / 旧路径多字段 / 共享 rpc 失败回落旧路径 / pmt 校验拆掉 / observedAt 在读之前 / 截断先于过滤 / Number 比较 / 允许两形态并存 / 塞入 `new RpcClient`），**全部至少一条 FAIL**，末尾核对文件 sha256 已还原 |
+| `mutation-T6b-raw.txt` | **T6b 的复现与修补对照**（`mutate-t6b-demo.mjs`）：NWT 复核唯一存活的变异 S1-f（`handleGetAddressUtxos` 的默认截止时间被设成 0），对主线旧 41 项测试**存活**（0 失败），对加了 T6b 的 42 项变红 |
 | `mutation-N-T1-raw.txt` | **N-T1 的复现与修补对照**（`mutate-n-t1-demo.mjs`）：同一个 NWT-e 变异，对 `dbfa5599` 的旧 33 项测试**存活**（0 失败，真缺口被复现），对新 41 项测试变红（O5、O5b 失败） |
 | `mutation-registration.txt` | 对登记面与白名单的 7 个变异（authorize 漏登记 / commands 缺 FIELD_TYPES 或 PAYLOAD_SCHEMA / relay.mjs case 缺失 / 白名单多一项、标 write、删除），**全部变红**，四个文件 sha256 已还原 |
 | `m0a-digest-check.txt` | `proto-relay-ipc.mjs` 的 `content_digest`：基线 `1ca46d7c…` 与当前 `21230389…` 各自与各自提交里的 manifest MATCH；`review_ref` 仍是上次批准的 `4c693999`（**待 NWT 审本 diff 后更新，我不编新号**） |
@@ -44,3 +45,6 @@
 
 ## 唯一的脱敏
 `test-proto-relay-ipc.txt`、`regress-proto-broadcast-ops.txt`、`regress-proto-driver.txt`、`regress-proto-leaf-state.txt` 首行/子进程行的 `[db] path=` 里本机 OS 账户名所在的临时目录前缀已替换为 `%TEMP%`（仓库公开，D-021）；除此之外所有 `.txt` 均为未改动的原始输出。
+
+## 再补一处（NWT 9-0 复核，T6b）
+NWT 在自己做的 11 个变异里，唯一存活的是 S1-f：`handleGetAddressUtxos` 的**默认**截止时间被改成 0。原因是 T6 只测了 R2（`handleGetPastMedianTime`）的默认预算，而两个 handler 各有自己的默认值。已加 T6b（形态 L 与形态 O 各测一次：不注入 `rpcCallMs`、rpc 延迟 30 ms 仍应正常返回），变异跑批加 M-w；`mutation-T6b-raw.txt` 在我机器上复现了"主线旧 41 项存活 / 新 42 项变红"。
