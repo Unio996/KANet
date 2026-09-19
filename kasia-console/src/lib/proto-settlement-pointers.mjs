@@ -16,9 +16,11 @@
 //   目的是【校验 builder 的 genesis 派生没有 bug】(多一个独立来源, 成本≈0), 不是防 DB 篡改(txid 已经绑了)。续约输出(append 的 leaf、close_commit 的 RootClose)没有派生, 不做重算。
 //
 // 纯读: 只读 DB(db 注入)、不碰 RPC、不碰私钥、不写任何东西。kaspa 由调用方注入(本文件不 import kaspa-wasm)。9-1 仍无生产调用方。
+// 🟢 (F3, NWT D-2) import 本模块【不再打开默认库】: 导入图里没有 db/client.js(deriveWinnerBet 住在 proto-winner-bet.mjs、encodeLeafStateBytes 住在 proto-leaf-state-encode.mjs)——
+//   测试用子进程在【无 DB_PATH】下真 import 它来证明(而不是只扫本文件的 import 行)。
 
 import { computeTicketGenesisArtifact } from './proto-covenant-builder.mjs';
-import { deriveWinnerBet } from './proto-settlement-inputs.mjs';
+import { deriveWinnerBet } from './proto-winner-bet.mjs';   // 9-1 F3: 不碰 DB 的文件(原来经 proto-settlement-inputs.mjs 会带上 db/client.js)
 import { REGISTER_APPEND_LEAF_CONT_OUT_INDEX, REGISTER_APPEND_TICKET_OUT_INDEX, REGISTER_APPEND_TOK_OUT_INDEX } from './proto-tx-assembly.mjs';
 import {
   MARKET_SEAL_ROOTCLOSE_OUT_INDEX, MARKET_SEAL_TOKEN_OUT_INDEX, MARKET_SEAL_LEAF_IN_INDEX, MARKET_SEAL_HELD_IN_INDEX,
@@ -74,7 +76,9 @@ function loadProducedTx({ kaspa, row, label, ctx }) {
         authorizingInput = Number(cov.authorizingInput);
         const auth = inputs[authorizingInput];
         if (auth) {
-          try { genesisId = lc(kaspa.covenantId({ transactionId: auth.txid, index: auth.index }, [{ index: i, output: new kaspa.TransactionOutput(o.value, o.scriptPublicKey) }])); } catch { genesisId = null; }
+          // (F3, NWT D-1) 每个 covenant 输出造一个 TransactionOutput 用于独立重算——显式 free(不靠 GC / FinalizationRegistry; 控制台是长驻进程, wasm 线性内存是反复吃亏的资源)
+          const probe = new kaspa.TransactionOutput(o.value, o.scriptPublicKey);
+          try { genesisId = lc(kaspa.covenantId({ transactionId: auth.txid, index: auth.index }, [{ index: i, output: probe }])); } catch { genesisId = null; } finally { try { probe.free(); } catch { /* 已释放 */ } }
         }
       }
       return { value: o.value, spkHex: noPrefix(o.scriptPublicKey.script), covenantId, authorizingInput, genesisId };

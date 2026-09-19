@@ -10,6 +10,8 @@ import { sqlite } from '../db/client.js';
 import { createRequire } from 'node:module';
 import { REGISTER_APPEND_LEAF_CONT_OUT_INDEX, REGISTER_APPEND_TOK_OUT_INDEX, CONTINUATION_OUTPUT_SOMPI, scriptPublicKeyFromHex } from './proto-tx-assembly.mjs';
 import { computeKttGenesisArtifact } from './proto-covenant-builder.mjs';
+import { encodeLeafStateBytes } from './proto-leaf-state-encode.mjs';   // 9-1 F3: 纯函数拆到不碰 DB 的文件(tx-assembly 只为它 import 本文件、把整条链拖进 db/client.js)
+export { encodeLeafStateBytes };                                           // 既有 import 方不受影响
 const require = createRequire(import.meta.url);
 const { blake2b } = require('../../node_modules/@noble/hashes/blake2b.js');
 
@@ -136,17 +138,7 @@ export function assertNoInFlightAppend(marketId) {
   }
 }
 
-/** AB11 hand-encoding: 4 个 int 字段各自 [08][8字节小端], 与 ShardLeaf_direct.sil:151-154 自己的手写
- *  编码逐字节一致(已用真实 compileSilV100 重编两组不同 init 值验证过, 2026-09-15)。 */
-export function encodeLeafStateBytes({ local_yes, local_no, count, pool_value }) {
-  const buf = Buffer.alloc(36);
-  let off = 0;
-  for (const v of [local_yes, local_no, count, pool_value]) {
-    buf[off] = 0x08; off += 1;
-    buf.writeBigInt64LE(BigInt(v), off); off += 8;
-  }
-  return buf;
-}
+// encodeLeafStateBytes 已搬到 proto-leaf-state-encode.mjs(纯函数, 不碰 DB), 上面 re-export。
 
 /** 给定推算出的 state 和 ShardLeaf_direct 的完整 redeem 脚本(genesis artifacts 里的 script)+
  *  state_layout({start,len}), 算出这个 state 对应的 P2SH scriptPubKey('0x' + 'aa20'+hash+'87')。 */

@@ -170,5 +170,20 @@ t('pending / orphaned 等非 confirmed 的下注不计入(只信已确认): 胜�
 });
 void seqBefore;
 
+// ══ 9-1 F3 笔(NWT D-2): deriveWinnerBet 的纯读本体搬到 proto-winner-bet.mjs(不 import 任何 DB 客户端、db 必填); proto-settlement-inputs 保持原导出(默认库)并委托 ══
+const WB = await import('./proto-winner-bet.mjs');
+t('proto-winner-bet.deriveWinnerBet: db 必填(无默认库)——缺 db / db 不是句柄 ⇒ TypeError; 传入注入的库则与 proto-settlement-inputs 的同名导出结果逐字相同(委托, 同一份判定)', () => {
+  let e1 = null; try { WB.deriveWinnerBet('w_ok'); } catch (x) { e1 = x; } if (!(e1 instanceof TypeError) || !/db 必填/.test(e1.message)) throw new Error(`缺 db 应抛本函数的"db 必填" TypeError(不是 undefined.prepare 的自然错误): ${e1 && e1.message}`);
+  let e2 = null; try { WB.deriveWinnerBet('w_ok', { db: {} }); } catch (x) { e2 = x; } if (!(e2 instanceof TypeError) || !/db 必填/.test(e2.message)) throw new Error(`db 非句柄应抛"db 必填" TypeError: ${e2 && e2.message}`);
+  if (JSON.stringify(WB.deriveWinnerBet('w_ok', { db: sqlite })) !== JSON.stringify(deriveWinnerBet('w_ok'))) throw new Error('纯函数与委托的结果不一致');
+  for (const id of ['w_zero', 'w_two', 'w_noside', 'w_nopool', 'w_不存在']) {
+    const a = errOf(() => WB.deriveWinnerBet(id, { db: sqlite })), b = errOf(() => deriveWinnerBet(id));
+    if (a.code !== b.code || a.message !== b.message) throw new Error(`${id}: 纯函数与委托的错误不一致: ${a.code}/${b.code}`);
+  }
+});
+t('委托保持原行为: deriveWinnerBet(marketId) 不传 db 仍走默认库; { who } 前缀透传; deriveCloseCommitInputs 的报文前缀与顺序不变(既有反向用例已覆盖, 这里只钉 who 透传)', () => {
+  if (!errOf(() => deriveWinnerBet('w_zero', { who: 'CUSTOM' })).message.startsWith('CUSTOM: fail-closed — ')) throw new Error('who 前缀未透传');
+  if (!errOf(() => deriveWinnerBet('w_zero')).message.startsWith('deriveWinnerBet(w_zero): fail-closed — ')) throw new Error('默认前缀变了');
+});
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

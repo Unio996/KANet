@@ -25,6 +25,7 @@ const { computeTicketGenesisArtifact } = await import('./proto-covenant-builder.
 let pass = 0, fail = 0;
 const t = async (n, f) => { try { await f(); pass++; console.log('[PASS] ' + n); } catch (e) { fail++; console.log('[FAIL] ' + n + ' :: ' + (e.stack || e.message).split('\n').slice(0, 3).join(' | ')); } };
 const eq = (a, b, m) => { if (a !== b) throw new Error(`${m || 'eq'}: 期望 ${String(b)}, 实际 ${String(a)}`); };
+const ok = (c, m) => { if (!c) throw new Error(m || 'assertion failed'); };
 const jeq = (a, b, m) => { const x = JSON.stringify(a), y = JSON.stringify(b); if (x !== y) throw new Error(`${m || 'jeq'}:\n  ${x}\n  != ${y}`); };
 const CODES = pointerCodes();
 const seenCodes = new Set();
@@ -329,12 +330,62 @@ await t('调用方错误 ⇒ TypeError(未知步骤 / marketId 非 64 位小写 
     let e = null; try { A(o)(); } catch (x) { e = x; } if (!(e instanceof TypeError)) throw new Error(`${JSON.stringify(Object.keys(o))} 应 TypeError, 实际 ${e && e.constructor.name}`);
   }
 });
+// ══ 9-1 F3 笔(NWT D-1 / D-2) ═══════════════════════════════════════════════════════════════════════════════════════════
+function trackedKaspa({ failFinalize = false } = {}) {
+  const st = { txCreated: 0, txFreed: 0, outCreated: 0, outFreed: 0 };
+  class TrackedOut extends kaspa.TransactionOutput { constructor(...a) { super(...a); st.outCreated++; } free() { st.outFreed++; return super.free(); } }
+  const Transaction = {
+    deserializeFromSafeJSON: (j) => {
+      const tx = kaspa.Transaction.deserializeFromSafeJSON(j); st.txCreated++;
+      const origFree = tx.free.bind(tx); tx.free = () => { st.txFreed++; return origFree(); };
+      if (failFinalize) tx.finalize = () => { throw new Error('boom: finalize 失败(注入)'); };
+      return tx;
+    },
+  };
+  return { st, k: { ...kaspa, Transaction, TransactionOutput: TrackedOut } };
+}
+const resWith = (k, step, M) => resolveStepPointers({ step, marketId: M, db: sqlite, kaspa: k });
+await t('D-1 ▲ wasm 对象释放有测试守着: 每次装载的 Transaction 恰好释放一次(成功路径四步: 装载 1/2/3/5 笔, 创建数 == 释放数), 每个 covenant 输出的独立重算用的 TransactionOutput 也显式释放', async () => {
+  const c = seed();
+  const expectLoaded = { seal: 1, close_commit: 2, convert_to_claim: 3, claim_draw: 5 };            // A2 | +S | +CC | +V 与赢家 append(= A2 再载一次)
+  for (const step of ['seal', 'close_commit', 'convert_to_claim', 'claim_draw']) {
+    const { st, k } = trackedKaspa(); resWith(k, step, c.M);
+    eq(st.txCreated, expectLoaded[step], `${step}: 装载笔数`); eq(st.txFreed, st.txCreated, `${step}: Transaction 创建数 == 释放数`);
+    ok(st.outCreated > 0, `${step}: 应创建过 TransactionOutput(genesis 重算)`); eq(st.outFreed, st.outCreated, `${step}: TransactionOutput 创建数 == 释放数`);
+  }
+});
+await t('D-1 ▲ 错误路径同样释放: finalize() 抛错 ⇒ pointer_tx_malformed 且已释放; id 不符(篡改)⇒ pointer_txid_mismatch 且已释放; 谱系断开 / covenant 不一致 / 输出缺失 / 票不一致(此前已装载的交易全部释放)', async () => {
+  { const c = seed(); const { st, k } = trackedKaspa({ failFinalize: true });
+    rejP(() => resWith(k, 'seal', c.M), 'pointer_tx_malformed'); eq(st.txCreated, 1); eq(st.txFreed, 1, 'finalize 抛错路径'); }
+  { const c = seed(); setJson('proto_settlement_intents', c.keys.S, (j) => { j.outputs[0].value = String(BigInt(j.outputs[0].value) + 1n); });
+    const { st, k } = trackedKaspa(); rejP(() => resWith(k, 'close_commit', c.M), 'pointer_txid_mismatch'); ok(st.txCreated >= 2); eq(st.txFreed, st.txCreated, 'id 不符路径'); }
+  const paths = [
+    [{ S: (s) => { s.ins[0] = { txid: hex('elsewhere'), index: 0 }; return s; } }, 'close_commit', 'pointer_lineage_mismatch'],
+    [{ CC: (s) => { s.outs[0] = cont('rootclose-closed', BOGUS_COV, 0); return s; } }, 'convert_to_claim', 'pointer_covenant_inconsistent'],
+    [{ V: (s) => { s.outs = s.outs.slice(0, 1); return s; } }, 'claim_draw', 'pointer_output_missing'],
+    [{ bet2Ticket: () => ({ txid: hex('some-other-tx'), vout: 1 }) }, 'claim_draw', 'pointer_ticket_inconsistent'],
+  ];
+  for (const [mods, step, code] of paths) { const c = seed(mods); const { st, k } = trackedKaspa(); rejP(() => resWith(k, step, c.M), code); ok(st.txCreated > 0); eq(st.txFreed, st.txCreated, `${code} 路径`); eq(st.outFreed, st.outCreated, `${code} 路径的 TransactionOutput`); }
+});
+await t('D-2 ▲ import 指针模块不再打开默认库(真 import 图证明, 不是只扫本文件的 import 行): 子进程在【无 DB_PATH】下真 import 指针 / C1 / chain-checks / builder / winner-bet / leaf-state-encode 全部成功; 对照臂: 带 DB 客户端的 proto-settlement-inputs / proto-leaf-state 在同样条件下必被 M0a 拒(证明这个探测手段本身有效)', async () => {
+  const env = { ...process.env }; delete env.DB_PATH; delete env._PROTO_POINTERS_TEST_BOOTSTRAPPED;
+  const probe = (mod) => spawnSync(process.execPath, ['-e', `import('./src/lib/${mod}').then(() => console.log('IMPORT-OK')).catch((e) => { console.log('IMPORT-FAIL: ' + String(e.message).split('\\n')[0].slice(0, 120)); process.exitCode = 1; })`], { cwd: process.cwd(), env, encoding: 'utf8', timeout: 60000 });
+  for (const mod of ['proto-settlement-pointers.mjs', 'proto-settlement-c1.mjs', 'proto-settlement-chain-checks.mjs', 'proto-tx-assembly-settlement.mjs', 'proto-tx-assembly.mjs', 'proto-winner-bet.mjs', 'proto-leaf-state-encode.mjs']) {
+    const r = probe(mod); if (!/IMPORT-OK/.test(r.stdout || '')) throw new Error(`${mod} 在无 DB_PATH 下 import 失败: ${(r.stdout || '') + (r.stderr || '')}`.slice(0, 300));
+  }
+  for (const mod of ['proto-settlement-inputs.mjs', 'proto-leaf-state.mjs']) {
+    const r = probe(mod); if (!/IMPORT-FAIL: .*DB_PATH not set/.test(r.stdout || '')) throw new Error(`对照臂 ${mod} 应被 M0a 拒(否则探测手段无效): ${(r.stdout || '') + (r.stderr || '')}`.slice(0, 300));
+  }
+  // encodeLeafStateBytes 搬家后: 两处导出是同一个函数(re-export 保持既有 import 方不变)
+  const a = (await import('./proto-leaf-state.mjs')).encodeLeafStateBytes, b = (await import('./proto-leaf-state-encode.mjs')).encodeLeafStateBytes;
+  ok(a === b, 'proto-leaf-state 应 re-export 同一个 encodeLeafStateBytes');
+});
 await t('模块边界: 源码(去注释)不 import kaspa-wasm / relay 通道 / DB 客户端 / better-sqlite3, 不读 process.env; 不读不被 txid 覆盖的字段(utxo / signatureScript / computeBudget / sigOpCount); 只 import 既定的四个模块', async () => {
   const src = fs.readFileSync(new URL('./proto-settlement-pointers.mjs', import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`])\/\/.*$/gm, '$1');
   const bad = [/from\s+['"]kaspa-wasm['"]/, /import\s*\(\s*['"]kaspa-wasm/, /relay-manager/, /proto-relay-ipc/, /db\/client/, /better-sqlite3/, /\bprocess\.env\b/, /\bsendCommand/, /\.utxo\b/, /signatureScript/, /computeBudget/, /sigOpCount/, /\.run\(/, /\bINSERT\b|\bUPDATE\b|\bDELETE\b/];
   jeq(bad.filter((re) => re.test(src)).map(String), []);
   const imports = [...src.matchAll(/from\s+['"]([^'"]+)['"]/g)].map((m) => m[1]).sort();
-  jeq(imports, ['./proto-covenant-builder.mjs', './proto-settlement-inputs.mjs', './proto-tx-assembly-settlement.mjs', './proto-tx-assembly.mjs']);
+  jeq(imports, ['./proto-covenant-builder.mjs', './proto-tx-assembly-settlement.mjs', './proto-tx-assembly.mjs', './proto-winner-bet.mjs']);   // F3: 不再经 proto-settlement-inputs.mjs(带 db/client.js)
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

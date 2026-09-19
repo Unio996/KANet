@@ -11,6 +11,7 @@
 // (depth-0 merkle 验证)——在那之前它是"与合约源码逐行对照 + 已知答案向量(blake2b 标准向量)"级别的证据, 不是链上共识证据。
 
 import { sqlite } from '../db/client.js';
+import { deriveWinnerBet as deriveWinnerBetPure } from './proto-winner-bet.mjs';
 
 /** RootClaim.sil:103 require(payout >= 1000)。payout<1000 的市场 claim_draw 永远无法执行(结构性阻塞, 见账本1484), 签 close_commit 会把钱锁死。 */
 export const CLAIM_PAYOUT_MIN = 1000;
@@ -19,29 +20,12 @@ export { payoutLeafHex } from './proto-payout-leaf.mjs';
 import { payoutLeafHex } from './proto-payout-leaf.mjs';
 
 /**
- * 9-1 D 笔: 从 DB 取"赢家那一条已确认下注"——(A) 路线要求胜方恰好 1 条已确认下注, 否则 fail-closed(不自动挑一条)。
- * 【不含 proto_markets.status 闸】: close_commit 只在 sealed 时才允许(见 deriveCloseCommitInputs 自己的检查), 而 claim_draw 取赢家票指针时市场已是 resolved——
- * 所以 status 闸留在 close_commit 一侧, 这里只做"胜方是谁"。
- * 每个 fail-closed 错误带 `.code`: winner_market_missing / winner_side_unset / winner_pool_empty / winner_count。
- * @param {string} marketId
- * @param {{db?:object, who?:string}} [o] who: 报文前缀(deriveCloseCommitInputs 传自己的, 保持原报文逐字不变)
- * @returns {{market:{id:string,status:string,winning_side:number,payout_root:string|null}, bets:object[], poolValue:number, winner:{id:string,bettor_pk:string,side:number,stake:number}}}
+ * 9-1 D 笔抽出、9-1 F3 笔搬走: "赢家那一条已确认下注"的选取现在住在 proto-winner-bet.mjs(纯读、不 import 任何 DB 客户端、db 必填)——
+ * 指针模块直接从那里取(import 指针模块不再打开默认库); 这里保持原导出(既有调用方 / 测试 `deriveWinnerBet(marketId)` 不变), 仅补上默认库。
+ * close_commit 一侧(deriveCloseCommitInputs)与指针模块因此仍是【同一份】判定。
  */
-export function deriveWinnerBet(marketId, { db = sqlite, who = `deriveWinnerBet(${marketId})` } = {}) {
-  const E = (code, msg) => Object.assign(new Error(`${who}: fail-closed — ${msg}`), { code });
-  const market = db.prepare('SELECT id, status, winning_side, payout_root FROM proto_markets WHERE id = ?').get(marketId);
-  if (!market) throw E('winner_market_missing', '市场不存在');
-  if (market.winning_side !== 0 && market.winning_side !== 1) {
-    throw E('winner_side_unset', `proto_markets.winning_side=${market.winning_side}(必须是 0/1): 胜方必须由操作员的 resolve 裁决先写进 DB, 不接受调用方临时传入`);
-  }
-  const bets = db.prepare(`SELECT id, bettor_pk, side, stake FROM proto_bets WHERE market_id = ? AND status = 'confirmed'`).all(marketId);
-  const poolValue = bets.reduce((s, b) => s + b.stake, 0);
-  if (!(poolValue > 0)) throw E('winner_pool_empty', `已确认下注的 pool_value=${poolValue}, 没有可结算的池子`);
-  const winners = bets.filter((b) => b.side === market.winning_side);
-  if (winners.length !== 1) {
-    throw E('winner_count', `胜方(side=${market.winning_side})的已确认下注有 ${winners.length} 条, (A) 路线要求恰好 1 条(v0 single-operator assumption violated, refusing to auto-pick one)`);
-  }
-  return { market, bets, poolValue, winner: winners[0] };
+export function deriveWinnerBet(marketId, { db = sqlite, who } = {}) {
+  return deriveWinnerBetPure(marketId, { db, who });
 }
 
 /**
@@ -55,7 +39,7 @@ export function deriveCloseCommitInputs(marketId, { db = sqlite } = {}) {
   if (market0.status !== 'sealed') throw new Error(`${who}: fail-closed — 市场状态是 ${market0.status}, close_commit 只允许在 sealed(market_seal 已落链)之后`);
   // 9-1 D 笔: "胜方恰 1 条已确认下注"抽成 deriveWinnerBet, 与 proto-settlement-pointers.mjs(claim_draw 取赢家票指针)共用同一份——不各写一份再分叉。
   // 检查顺序与报文与抽取前完全一致(先 status, 再 winning_side, 再 pool_value, 再胜方条数)。
-  const { market, poolValue, winner } = deriveWinnerBet(marketId, { db, who });
+  const { market, poolValue, winner } = deriveWinnerBetPure(marketId, { db, who });
   // (A) 路线: 单一 payout 值覆盖全部 pool_value。
   const payouts = [{ bettorPk: String(winner.bettor_pk).toLowerCase(), payout: poolValue }];
   const sumPayouts = payouts.reduce((s, p) => s + p.payout, 0);
