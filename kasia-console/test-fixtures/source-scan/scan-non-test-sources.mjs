@@ -22,9 +22,44 @@ export function repoRootDir() {
   return path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 }
 
-/** 去掉块注释与行注释(保留 '://' 之类字符串里的双斜杠): 注释里提到标识符不算引用。 */
+/**
+ * 去注释的状态机(识别字符串 / 模板字面量 / 正则字面量): 注释里提到标识符不算引用, 而"字符串/模板/正则里长得像注释的文本"不会误吞后面的真引用。
+ * 🔴 来源: KANet-UI 的 D26-scan v2.1(f72b0cdb, NWT 三审 16899661 §四 N-4)——原样移入此处, D26-scan 与本扫描器应都从这一处导入, 不再各留一份。
+ * 🔴 为什么不是简单正则(NWT F4-1 真实探针证实): 简单正则版在三种形态会【漏报真实引用】——同行前有含 // 的字符串('a//b'; 后面的真调用被当成注释吞掉)、
+ *   一个字符串里含块注释起始符、另一个字符串里含块注释结束符(块注释被错误配对)、模板字面量含双斜杠。吞掉真代码是不安全的方向。
+ * 下面的实现除本头注外与 v2.1 逐字相同(移植脚本程序化提取)。
+ */
 export function stripComments(src) {
-  return src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`])\/\/.*$/gm, '$1');
+  let out = '', i = 0, state = 'code', quote = '', inClass = false;
+  // regex literals (NWT N-4 / E1): `const re = /[^/*]+/; B.ensure…()` — the `/*` INSIDE the character class must not open a block comment (over-stripping
+  // real code is the unsafe direction). A `/` starts a regex literal when the previous significant character cannot end an expression.
+  const regexCanStart = () => { const t = out.replace(/\s+$/, ''); if (t === '') return true; const p = t[t.length - 1]; return '(,=:[!&|?{};+-*%<>~^'.includes(p) || /(^|[^\w$.])(return|typeof|case|in|of|delete|void|throw|new|else|do)$/.test(t); };
+  while (i < src.length) {
+    const c = src[i], n = src[i + 1];
+    if (state === 'code') {
+      if (c === '/' && n === '/') { state = 'line'; i += 2; continue; }
+      if (c === '/' && n === '*') { state = 'block'; i += 2; continue; }
+      if (c === '/' && regexCanStart()) { state = 'regex'; inClass = false; out += c; i++; continue; }
+      if (c === "'" || c === '"' || c === '`') { state = 'str'; quote = c; out += c; i++; continue; }
+      if (c === '\\') { out += c + (n ?? ''); i += 2; continue; }   // an escaped char in code never opens a comment
+      out += c; i++; continue;
+    }
+    if (state === 'regex') {
+      if (c === '\\') { out += c + (n ?? ''); i += 2; continue; }
+      if (c === '[') inClass = true; else if (c === ']') inClass = false;
+      else if (c === '\n') { state = 'code'; }                       // no newline inside a regex literal: resync
+      else if (c === '/' && !inClass) { state = 'code'; }
+      out += c; i++; continue;
+    }
+    if (state === 'line') { if (c === '\n') { state = 'code'; out += c; } i++; continue; }
+    if (state === 'block') { if (c === '*' && n === '/') { state = 'code'; i += 2; out += ' '; } else { if (c === '\n') out += c; i++; } continue; }
+    // string / template: copy verbatim (template ${…} expressions stay visible = treated as code = safe direction)
+    if (c === '\\') { out += c + (n ?? ''); i += 2; continue; }
+    if (c === quote) { state = 'code'; out += c; i++; continue; }
+    if (c === '\n' && quote !== '`') { state = 'code'; }   // unterminated single-line string: resync at newline
+    out += c; i++;
+  }
+  return out;
 }
 
 /** 列出仓库里的非测试源码文件(绝对路径)。node_modules 任意深度跳过; 其余只按相对路径前缀排除。 */

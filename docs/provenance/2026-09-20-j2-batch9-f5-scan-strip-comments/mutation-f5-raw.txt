@@ -1,0 +1,14 @@
+基线(未变异) 扫描器自测: 9 passed, 0 failed exit=0
+[RED ] R-1 ▲ 整个退回旧的简单正则版(NWT F4-1 的三种漏报形态重现)  →  3 条 FAIL(首条: F5)
+[RED ] R-2 ▲ 不识别字符串(引号不进字符串态)  →  4 条 FAIL(首条: stripComments)
+[RED ] R-3 ▲ 模板字面量按单行处理(换行即退出字符串态)  →  1 条 FAIL(首条: F5)
+[RED ] R-4 ▲ 不识别正则字面量(regexCanStart 恒 false: 字符类里的 /* 吞掉后面的真调用)  →  1 条 FAIL(首条: F5)
+[RED ] R-5 除法当成正则(regexCanStart 恒 true)  →  1 条 FAIL(首条: F5)
+[RED ] R-6 ▲ 正则字符类不处理(类内的 / 提前结束正则)  →  1 条 FAIL(首条: F5)
+[RED ] R-7 ▲ 字符串态不处理转义(转义引号提前结束字符串)  →  1 条 FAIL(首条: F5)
+[RED ] R-8 块注释不识别(/* … */ 被当成代码保留)  →  5 条 FAIL(首条: 探针树里应被发现的)
+[RED ] R-9 行注释不识别(// … 被当成代码保留)  →  5 条 FAIL(首条: 探针树里应被发现的)
+[RED ] R-10 代码态的转义不处理(反斜杠后的 / 仍可开注释)  →  1 条 FAIL(首条: F5)
+[RESTORED] scan-non-test-sources.mjs 已还原, sha256 9804f387ff8a42d0… 一致
+
+全部变异均被测试抓到

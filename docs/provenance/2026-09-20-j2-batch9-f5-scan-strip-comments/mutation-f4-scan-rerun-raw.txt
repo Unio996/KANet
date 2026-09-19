@@ -1,0 +1,24 @@
+基线(无探针) src/lib/proto-claim-draw.test.mjs: 57 passed, 0 failed exit=0
+基线(无探针) src/lib/proto-settlement-c1.test.mjs: 45 passed, 0 failed exit=0
+[RED ] A-1 ▲ src/data/(曾被 skipDir 含 data 漏掉)引用夹具  →  1 条 FAIL(首条: B6)  探针已删=true
+[RED ] A-2 ▲ kasia-console/scripts/(曾不在扫描根内)引用夹具  →  1 条 FAIL(首条: B6)  探针已删=true
+[RED ] A-3 ▲ 根 scripts/ 的 .mts 引用夹具  →  1 条 FAIL(首条: B6)  探针已删=true
+[RED ] A-4 .tsx 引用夹具  →  1 条 FAIL(首条: B6)  探针已删=true
+[RED ] A-5 require 形态引用夹具  →  1 条 FAIL(首条: B6)  探针已删=true
+[RED ] A-6 ▲ src/data/ 引用仅测试用入口 verifyStepInputsOnChainWithTimers  →  1 条 FAIL(首条: F1-2)  探针已删=true
+[RED ] A-7 ▲ kasia-console/scripts/ 引用仅测试用入口  →  1 条 FAIL(首条: F1-2)  探针已删=true
+[RED ] A-8 根 scripts/ 的 .mts 引用仅测试用入口  →  1 条 FAIL(首条: F1-2)  探针已删=true
+基线(未变异) 扫描器自测: 9 passed, 0 failed exit=0
+[RED ] S-1 ▲ 按目录名在任意深度跳过 data(NWT F2-1 的原漏洞)  →  1 条 FAIL(首条: 探针树里应被发现的)
+[RED ] S-2 ▲ 按目录名跳过 scripts  →  3 条 FAIL(首条: 探针树里应被发现的)
+[RED ] S-3 ▲ 扩展名只认 mjs  →  1 条 FAIL(首条: 探针树里应被发现的)
+[RED ] S-4 不去注释(注释里的提及被算成引用)  →  2 条 FAIL(首条: 探针树里应被发现的)
+[RED ] S-5 不排除 .test/.spec 文件  →  2 条 FAIL(首条: 探针树里应被发现的)
+[RED ] S-6 node_modules 只在仓库根跳过(任意深度的依赖被扫描)  →  2 条 FAIL(首条: 探针树里应被发现的)
+[RED ] S-7 minFiles 下限失效  →  1 条 FAIL(首条: exceptRel)
+[RED ] S-8 exceptRel 不再放行定义者自己  →  1 条 FAIL(首条: exceptRel)
+[RED ] S-9 排除改成"路径里任意位置包含前缀"而非"仓库根相对前缀"  →  1 条 FAIL(首条: 排除只按仓库根的相对路径前缀)
+[RED ] S-10 排除清单缺 docs/(证据目录里的脚本被算成源码)  →  2 条 FAIL(首条: 探针树里应被发现的)
+[RESTORED] scan-non-test-sources.mjs 已还原, sha256 9804f387ff8a42d0… 一致
+
+全部探针与变异均被测试抓到
