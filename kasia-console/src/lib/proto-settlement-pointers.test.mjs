@@ -111,8 +111,13 @@ function seedChain(M, mods = {}) {
   else { insBetIntent(`bet:${b1}:append`, b1, A1, la1); insBetIntent(`bet:${b2}:append`, b2, A2, T1); }
   const insSettle = (step, tx) => sqlite.prepare(`INSERT INTO proto_settlement_intents (intent_key, subject_type, subject_id, step, status, prepared_txid, prepared_tx_json, submitted_txid, landed_at, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
     .run(`settle:market:${M}:${step}`, 'market', M, step, 'landed', tx.id, tx.json, tx.id, T1, now0, now0);
-  insSettle('seal', S); insSettle('resolve', CC); insSettle('convert_to_claim', V);
-  return { M, A1, A2, S, CC, V, b1, b2, keys: { A1: `bet:${b1}:append`, A2: `bet:${b2}:append`, S: `settle:market:${M}:seal`, CC: `settle:market:${M}:resolve`, V: `settle:market:${M}:convert_to_claim` } };
+  insSettle('seal', S); insSettle('resolve', CC);
+  // convert_to_claim 意图挂在 claim 主体下(intent 模块的 STEP_SUBJECT_TYPE; 原夹具插成 market 主体是造不出来的键)——9-2b 离线端到端暴露后改为真 claim 行 + claim 主体
+  const claimId = hex(`claim-${n}`);
+  sqlite.prepare("INSERT INTO proto_claims (id, market_id, bettor_pk, side, amount, created_at) VALUES (?,?,?,'win',?,?)").run(claimId, M, PK2, 990, now0);
+  sqlite.prepare(`INSERT INTO proto_settlement_intents (intent_key, subject_type, subject_id, step, status, prepared_txid, prepared_tx_json, submitted_txid, landed_at, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
+    .run(`settle:claim:${claimId}:convert_to_claim`, 'claim', claimId, 'convert_to_claim', 'landed', V.id, V.json, V.id, T1, now0, now0);
+  return { M, A1, A2, S, CC, V, b1, b2, claimId, keys: { A1: `bet:${b1}:append`, A2: `bet:${b2}:append`, S: `settle:market:${M}:seal`, CC: `settle:market:${M}:resolve`, V: `settle:claim:${claimId}:convert_to_claim` } };
 }
 const seed = (mods) => seedChain(newMarketId(), mods);
 const res = (step, M) => resolveStepPointers({ step, marketId: M, db: sqlite, kaspa });
