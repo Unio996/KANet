@@ -1,6 +1,8 @@
 > **Status**: CURRENT（草稿 v0.3，2026-09-19，J2；批9 接线设计 + 验收清单；**已落实 NWT 设计审（8554ef6e）M1–M6 与 S1–S8，Bettor 全采纳 MUST；NWT 核过 MUST 落实后 9-0 开工**；本文不含任何代码改动。v0.2→v0.3 的逐条对照见 §16）
 
-# 原型 v0 结算批9（驱动接线）设计与验收清单 v0.2
+# 原型 v0 结算批9（驱动接线）设计与验收清单 v0.3
+
+> 文件名沿用 `…-v0.2.md`（账本 1527/1528/1529 与 NWT 审稿均以此路径引用，改名会断引用）；**正文即 v0.3**，v0.2→v0.3 差异见 §16。
 
 取代 `2026-09-19-j2-proto-v0-batch9-driver-wiring-acceptance-checklist-v0.1.md` 中关于批9范围与接线的部分（v0.1 保留作历史，其 C1/C2/C3、pmt、SLA、NO-TX-NO-STATE 各条本文继承并细化）。
 依据：Bettor 账本 1494/1520/1523/1524 与本轮裁定 ③、Codex 对 C1 的接受条件、NWT 批3–7 审、代码现状盘点（§1，全部可 `grep` 复核）。D-021 合规：无真实地址/余额/私钥。
@@ -207,7 +209,9 @@
 7. **relay 真代码校验**：四步的成品交易全部通过 `validateFixedValueOutputs`/`validateSignedInputCeiling`/`validateNetLoss`/`validateImpliedMinerFee`（同批8 ㉖ 做法）。
 8. **端到端集成验证**：driver 开关在**隔离 simnet console**（KASPA_NETWORK=simnet，非主网 console）上开启，走一次完整 genesis→…→claim_draw（withdraw/reclaim 不走），每步记录：交易 version、编码器 commit、节点 sha256+`--version`、断言信号 vs 节点值（不等即停）、区块记录节点原始字段；证据入 `docs/provenance/<日期>-…`。
 9. 合入前全套 proto 测试 + lint 0 error；迁移编号接主线末块（本设计**默认不加迁移**；committeeMode 列若要加则单列）。
-10. 夹具真实性：所有 UTXO mock 的面值/spk/covenant 分类必须能追溯到一笔真实链上交易（ANTI-PATTERNS 候选：夹具与生产路径不一致族）。
+10. 夹具真实性：所有 UTXO mock 的面值/spk/covenant 分类必须能追溯到一笔真实链上交易（ANTI-PATTERNS 候选：夹具与生产路径不一致族）。**（M1）`covenantId` 相关夹具必须由真实 kaspa-wasm 条目生成（或逐字节复制自真实节点回复）**；变异对照：把测试夹具的 `covenantId` 从 `entry.covenantId` 挪到顶层 ⇒ 生产读取代码必须回"能力哨兵报错"而不是 null（防"手写夹具绿、生产恒 null"）。
+11. **9-0（R1/R2，M1–M3/S2）**：① 对同一节点同一 UTXO，relay `facts:true` 回的 `scriptPublicKey`/`covenantId` 与节点直读逐字节一致（含 covenant 与普通 P2PK 两类）；② `'covenantId' in entry` 为假 ⇒ 整条命令报错、不回 null；③ 不带 `facts` 时 `get_address_utxos` 输出与改前字节相同（快照）；④ `facts:true` 走共享 RpcClient——测试断言该路径**不调用** `connectRpc`/`new RpcClient`（对 `p2sh.mjs` 打 spy）；⑤ 返回量超上限 ⇒ `truncated:true`，且 C1 对 covenant 父 UTXO 的"缺失"判定遇 `truncated` 一律 fail-closed；⑥ R2 只回 `{ok,pastMedianTimeMs,observedAtMs}`，无 URL/节点标识/其他字段；⑦ 登记六处齐全（console 允许表、`commands.mjs` 三处、`authorize.mjs` `READONLY_ALLOWLIST`、`relay.mjs` handler）——枚举测试，且不新增第 4 个"半截注册"（`lint-kanet` R-COMMAND-REGISTRATION 不新增报告）；⑧ `PROTO_COMMAND_ALLOWLIST` 对旧表差分恰多一行 `read`。
+12. **9-2（M5，出口分闸，NWT 单独审该 diff）**：`sendProtoCommand` **出口层** 2×2 矩阵——`PROTO_DRIVER_ENABLED` 0/1 × `PROTO_SETTLEMENT_DRIVER_ENABLED` 0/1 × write 命令的 `intent_key`（`settle:…` / 非 `settle:` / 缺失 / 非字符串 / 前缀伪造如 `settle` 无冒号、`xsettle:`、`Settle:`），逐格断言放行/拒绝：`settle:` ⇒ 只认结算开关；其余（含缺失/非字符串/伪造）⇒ 只认旧开关；read 命令不受两开关影响。变异对照：把分闸判据改回只读旧开关 ⇒ 矩阵必红。
 
 ## 13. 落码分批建议（每批先审后动）
 
@@ -261,5 +265,6 @@ v0.1 的 §1–§7 各条本文均继承；差异：① 范围收窄为四步；
 | S8 GENESIS/CONTINUATION 常量相等耦合测试 | §6.4 | 已写入 |
 | D3 committeeMode 同事务、同放 `/resolve` 与 GET 响应 | §10 | 已写入 |
 | 私钥哨兵走真实信封解密路径 | §11.4 | 已写入 |
+| （本轮自查补）§12 验收清单补 11 / 12 两条 | §12.10 补 M1 夹具与变异对照；§12.11 9-0 的 R1/R2 八项回归；§12.12 M5 出口 2×2 矩阵与前缀伪造用例 | 已写入（此前这些只在 §3.8/§13 出现，清单里没有对应条目） |
 
 **仍开放**：S3b 已由 KANet-UI 核完（1530：无本机反代到 :3202；判定并入 D2，见 §2 P2）；毒化 UTXO 创建到他人 spk 的形状未测；R1 返回量上限 N=200 是 J2 提议值；M5 的出口改动会牵动现有 `proto-relay-ipc.test.mjs` 的写闸用例，需一并更新并单独审。
