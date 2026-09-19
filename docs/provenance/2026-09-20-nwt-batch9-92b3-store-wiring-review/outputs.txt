@@ -11,3 +11,20 @@ B3 tick1 (check landed OK, markLanded throws): results=["failed"] intent.status=
 B3 tick2 work items for that market: 0  (intent is 'landed' so it is no longer 'submitted'; market stays 'sealed' with a landed chain tx)
 
 亲跑: store 10/0, core 26/0, wiring 10/0, relay-ipc 33/0
+
+## 补笔 15ba85fa 上重跑(探针已改为隔离 B1/B2/B3 并加 B3 后续 tick)
+A named deps missing: []
+A buildProductionDriver(real ports + stub ops): constructed, methods=advanceStep,checkLandedAndApply,applyEffects,scanPreparedStale,runTick,_keyOf
+A relay-address network check: mainnet addr vs network=mainnet => ok ; vs simnet => REFUSED
+A stepBudgetFor(60000)=30000  stepBudgetFor(20000)=15000  stepBudgetFor(15000)=REFUSED
+C newClaimId shape=64-hex  keys accepted by exit S9: true/true
+B1 seal intent LANDED but market still 'betting' (aftermath not applied): listWork mentions it in 1 places  => recovered
+B2 resolve intent LANDED but market still 'sealed', no claim row: listWork mentions it in 1 places  => recovered
+B3 tick1 (check landed OK, markLanded throws): results=["failed"] intent.status=landed market.status=sealed alerts=[settlement_step_unexpected_error]
+B3 tick2 work items for that market (advances+landedChecks+effectsPending): 1
+B3 tick2: results=["failed"] new alerts=1 (want 1: persistent, not once)
+B3 tick3: results=["failed"] new alerts=1
+B3 tick4 after data fix: results=["effects_applied"] market.status=resolved winClaims=1 convert_to_claim intents=1 new alerts=0
+B3 tick5: results=[] new alerts=0 (want 0); effectsPending for that market=0
+B1/B2 after one tick with effectsPending: results=["effects_applied","effects_applied"] sealedMarket.status=sealed resolveMarket.status=resolved winClaims(resolveMarket)=1 new alerts=0
+亲跑: proto-settlement-store: 14 passed, 0 failed  ;proto-settlement-driver-core: 27 passed, 0 failed  ;proto-settlement-driver: 10 passed, 0 failed  ;

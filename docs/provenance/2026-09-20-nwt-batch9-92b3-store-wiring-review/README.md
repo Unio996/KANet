@@ -23,3 +23,6 @@
 
 ## 没做
 - J2 自报变异 26/26 未重跑；四步 builder 入参装配（ops）是 (iii-2)；毒化 fee 向量的 simnet 到 (iii-2) 再起（先问 Bettor 内存）。
+
+## 补笔 `15ba85fa` —— 核完：**GREEN**（MUST-1 关闭）
+我的 B1–B3 在补笔上重跑（`outputs.txt` 末段）：**B1** seal 意图 landed 而市场仍 `betting` ⇒ `listWork` 现在提到它（`effectsPending`），一 tick 后市场 `sealed`；**B2** resolve 意图 landed 而市场 `sealed`、无 claim ⇒ 同样被提到，一 tick 后 `resolved` + 恰 1 条 win claim + 无报警；**B3** `markLanded` 持续失败 ⇒ tick2、tick3 **各报警 1 次**（逐 tick 持续，不再只报一次）；补上两笔已确认下注后 tick4 `effects_applied`：市场 `resolved`、win claim 1 条、`convert_to_claim` 意图 1 条、**新报警 0**；tick5 无工作项、无报警、`effectsPending` 为空。store / core / wiring 测试亲跑见 `outputs.txt`。

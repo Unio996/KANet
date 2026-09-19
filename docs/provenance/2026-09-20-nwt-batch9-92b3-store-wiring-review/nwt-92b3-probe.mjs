@@ -55,8 +55,9 @@ const mkIntent = (st, id, step, status, txid = null) => { const key = SI.settlem
 const store = createSettlementStore({ claimDrawClaimOutIndex: CLAIM_DRAW_CLAIM_OUT_INDEX, now: () => T0 });
 const mSealed = mkMarket({ status: 'betting' }); mkIntent('market', mSealed, 'seal', 'landed', hex64());
 const mResolve = mkMarket({ status: 'sealed', winningSide: 0 }); mkIntent('market', mResolve, 'seal', 'landed', hex64()); mkIntent('market', mResolve, 'resolve', 'landed', hex64());
+for (const [sd, pk] of [[0, 'aa'.repeat(32)], [1, 'bb'.repeat(32)]]) sqlite.prepare('INSERT INTO proto_bets (id, market_id, bettor_pk, side, stake, status, created_at) VALUES (?,?,?,?,?,?,?)').run(hex64(), mResolve, pk, sd, 600, 'confirmed', T0);
 const w = store.listWork();
-const mentions = (id) => [...w.advances, ...w.landedChecks, ...w.preparedRows].filter((x) => (x.subjectId || x.subject_id || x.marketId) === id).length;
+const mentions = (id) => [...w.advances, ...w.landedChecks, ...w.preparedRows, ...(w.effectsPending || [])].filter((x) => (x.subjectId || x.subject_id || x.marketId) === id).length;
 out.push(`B1 seal intent LANDED but market still 'betting' (aftermath not applied): listWork mentions it in ${mentions(mSealed)} places  => ${mentions(mSealed) === 0 ? 'STRANDED (nothing will ever re-run markLanded)' : 'recovered'}`);
 out.push(`B2 resolve intent LANDED but market still 'sealed', no claim row: listWork mentions it in ${mentions(mResolve)} places  => ${mentions(mResolve) === 0 ? 'STRANDED' : 'recovered'}`);
 // 端到端: 真核心 + 真 store + 真意图表; check_utxo_landed 桩返回 landed; 市场没有下注 ⇒ deriveCloseCommitInputs 失败 ⇒ markLanded 抛错
@@ -64,13 +65,32 @@ const mFail = mkMarket({ status: 'sealed', winningSide: 0 }); mkIntent('market',
 const alerts = [];
 const deps = { sendCmd: async (rid, cmd) => (cmd.type === 'check_utxo_landed' ? { landed: true, depth: 99 } : { ok: true }), relayId: 'r', alert: (n) => alerts.push(n), intents: { ensure: SI.ensureSettlementIntent, active: SI.activeSettlementIntent, get: SI.getSettlementIntent, mark: SI.markSettlementIntent },
   driveIntent: SI.driveSettlementIntent, pointers: () => ({}), prepare: async () => ({ targetAddress: 'kaspa:x' }), verifyOnChain: async () => ({}), build: async () => ({}), dependenciesLanded: async () => ({ ok: true }),
-  checkLanded: SI.checkSettlementIntentLanded, markLanded: async (s, i) => store.markLanded(s, i), listWork: async () => ({ ...store.listWork(), advances: [] }), minDepth: 20, now: Date.now, log: { log() {} } };
+  checkLanded: SI.checkSettlementIntentLanded, markLanded: async (s, i) => store.markLanded(s, i), listWork: async () => { const w = store.listWork(); return { ...w, advances: [], landedChecks: w.landedChecks.filter((x) => x.subject_id === mFail), effectsPending: (w.effectsPending || []).filter((x) => x.subject_id === mFail) }; }, minDepth: 20, now: Date.now, log: { log() {} } };
 const drv = core.createSettlementDriver(deps);
 const t1 = await drv.runTick({ cap: 5 });
 const rowAfter = SI.getSettlementIntent(kFail); const mAfter = sqlite.prepare('SELECT status FROM proto_markets WHERE id = ?').get(mFail).status;
 out.push(`B3 tick1 (check landed OK, markLanded throws): results=${JSON.stringify(t1.results.map((r) => r.outcome))} intent.status=${rowAfter.status} market.status=${mAfter} alerts=[${alerts.join(',')}]`);
-const w2 = store.listWork(); const again = [...w2.advances, ...w2.landedChecks].filter((x) => (x.subjectId || x.subject_id) === mFail).length;
-out.push(`B3 tick2 work items for that market: ${again}  (intent is 'landed' so it is no longer 'submitted'; market stays '${mAfter}' with a landed chain tx)`);
+const w2 = store.listWork(); const again = [...w2.advances, ...w2.landedChecks, ...(w2.effectsPending || [])].filter((x) => (x.subjectId || x.subject_id) === mFail).length;
+out.push(`B3 tick2 work items for that market (advances+landedChecks+effectsPending): ${again}`);
+const nA = () => alerts.length;
+let a0 = nA(); const t2 = await drv.runTick({ cap: 5 }); out.push(`B3 tick2: results=${JSON.stringify(t2.results.map((r) => r.outcome))} new alerts=${nA() - a0} (want 1: persistent, not once)`);
+a0 = nA(); const t3 = await drv.runTick({ cap: 5 }); out.push(`B3 tick3: results=${JSON.stringify(t3.results.map((r) => r.outcome))} new alerts=${nA() - a0}`);
+// 修数据: 补两笔已确认下注(一边一个), 之后下一 tick 应自愈
+const mkBet = (side, pk) => sqlite.prepare('INSERT INTO proto_bets (id, market_id, bettor_pk, side, stake, status, created_at) VALUES (?,?,?,?,?,?,?)').run(hex64(), mFail, pk, side, 600, 'confirmed', T0);
+mkBet(0, 'aa'.repeat(32)); mkBet(1, 'bb'.repeat(32));
+a0 = nA(); const t4 = await drv.runTick({ cap: 5 });
+const mHeal = sqlite.prepare('SELECT status FROM proto_markets WHERE id = ?').get(mFail).status;
+const claims = sqlite.prepare("SELECT COUNT(*) c FROM proto_claims WHERE market_id = ? AND side = 'win'").get(mFail).c;
+const convIntent = sqlite.prepare("SELECT COUNT(*) c FROM proto_settlement_intents WHERE subject_type='claim' AND step='convert_to_claim' AND subject_id IN (SELECT id FROM proto_claims WHERE market_id = ?)").get(mFail).c;
+out.push(`B3 tick4 after data fix: results=${JSON.stringify(t4.results.map((r) => r.outcome))} market.status=${mHeal} winClaims=${claims} convert_to_claim intents=${convIntent} new alerts=${nA() - a0}`);
+a0 = nA(); const t5 = await drv.runTick({ cap: 5 });
+const w5 = store.listWork(); const left = [...(w5.effectsPending || [])].filter((x) => x.subject_id === mFail).length;
+out.push(`B3 tick5: results=${JSON.stringify(t5.results.map((r) => r.outcome))} new alerts=${nA() - a0} (want 0); effectsPending for that market=${left}`);
+// B1/B2 自愈: 直接用核心跑一 tick(桩 listWork 只给 effectsPending)
+const drv2 = core.createSettlementDriver({ ...deps, listWork: async () => { const w = store.listWork(); return { ...w, advances: [], landedChecks: [], effectsPending: (w.effectsPending || []).filter((x) => x.subject_id === mSealed || x.subject_id === mResolve) }; } });
+const aB = alerts.length; const tb = await drv2.runTick({ cap: 10 });
+const st = (id) => sqlite.prepare('SELECT status FROM proto_markets WHERE id = ?').get(id).status;
+out.push(`B1/B2 after one tick with effectsPending: results=${JSON.stringify(tb.results.map((r) => r.outcome))} sealedMarket.status=${st(mSealed)} resolveMarket.status=${st(mResolve)} winClaims(resolveMarket)=${sqlite.prepare("SELECT COUNT(*) c FROM proto_claims WHERE market_id = ? AND side='win'").get(mResolve).c} new alerts=${alerts.length - aB}`);
 console.log(out.join('\n'));
 try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
 process.exit(0);
