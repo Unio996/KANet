@@ -1,0 +1,24 @@
+sig66 hex length 132 value 41903207fe36de783ce0...
+sig65 hex length 130 (应为130=65*2)
+wrote C:\Users\ADMIN\AppData\Local\Temp\j2-rootclose-closecommit-GaIp46\RootClose.close_commit.test.json
+error: script ran, but verification failed
+    --> 152:9
+    ::: called from close_commit
+
+Error: "FAIL"
+❌ FAIL
+    ::: called from close_commit
+
+Error: "FAIL"
+Command failed: D:/silverscript/versioned-builds/cli-debugger-v100-3ed9733.exe D:/kanet-tn12/scratch/_j2_wt_proto_v0/kasia-console/src/lib/RootClose.sil --run --test-name AUDIT_close_commit_basic --test-file C:\Users\ADMIN\AppData\Local\Temp\j2-rootclose-closecommit-GaIp46\RootClose.close_commit.test.json
+error: script ran, but verification failed
+    --> 152:9
+    ::: called from close_commit
+
+Error: "FAIL"
+
+=== MY SIGNED TX DUMP (for manual diff against J2_TX_DEBUG) ===
+unsignedTx.version 1 lockTime 1700000001000n
+input[0] prevTxid=0000000000000000000000000000000000000000000000000000000000000000 prevIndex=0 sequence=0 sigOpCount=0 computeBudget=70
+output[0] value=10 spkVersion=0 spkScript=209516bd59ec20823667872291f7b6109b927b18b319dc06c2f5423ab01e8a29bfac
+output[1] value=1000 spkVersion=0 spkScript=aa20cc05c94af2ab5af0c0ba0227d30b6ef62eb27adfe7bc44bc596156a5293afe0c87

@@ -1,0 +1,47 @@
+// proto-close-commit-gate.mjs — B4-2 根治(Bettor 2026-09-19): 驱动层判"能否提交 close_commit"【不用墙钟】, 读节点
+// getBlockDagInfo 的 pastMedianTime: pmt > deadline(+30s 小余量)即可提交。builder 里的 300s 墙钟守卫保留为第二层。
+// 这样本机时钟没做 NTP 也不影响判断(节点 finality 本来比较的就是 lock_time < 区块头 past-median-time)。
+//
+// 同一个 pmt 也用来判 refund_flip SLA(B4-3): RootClose.refund_flip 要求 tx.time >= deadline+7,200,000ms, 同样按 pmt 判定 finality,
+// 所以"deadline+1h 报警 / deadline+2h 之后任何人可把 closed 0→2"也以 pmt 为准。
+//
+// 纯函数 + 一个注入 rpc 的读取器; 本文件不接线(驱动接线是批9), 只提供可测的判据。
+
+/** 节点 finality 是 lock_time < pmt(严格小于); 再留 30s 小余量。 */
+export const CLOSE_COMMIT_PMT_MARGIN_MS = 30_000;
+/** refund_flip 的合约常量: deadline_ms + 7,200,000(RootClose.sil refund_flip, NWT 批4 B4-3)。 */
+export const REFUND_FLIP_GRACE_MS = 7_200_000;
+/** deadline+1h 起报警。 */
+export const CLOSE_COMMIT_SLA_WARN_MS = 3_600_000;
+
+/** 从 rpc(kaspa-wasm RpcClient 形状)读 pastMedianTime(毫秒 number); 读不到/非法 ⇒ throw(调用方按"不能提交"处理, fail-closed)。 */
+export async function readPastMedianTimeMs(rpc) {
+  const info = await rpc.getBlockDagInfo();
+  const pmt = Number(info?.pastMedianTime);
+  if (!Number.isFinite(pmt) || pmt <= 0) throw new Error(`readPastMedianTimeMs: getBlockDagInfo.pastMedianTime 不可用(${info?.pastMedianTime}), 无法判定 close_commit 能否提交`);
+  return pmt;
+}
+
+/**
+ * @param {{pastMedianTimeMs:number, deadlineMs:number}} o
+ * @returns {{canSubmit:boolean, reason:string, pmtLeadMs:number, sla:'ok'|'warn'|'refund_flip_open'}}
+ *   pmtLeadMs = pmt − deadline(负数 = pmt 还没追上 deadline)。
+ *   sla: 以 pmt 计, deadline+1h ≤ pmt ⇒ 'warn'(应报警); pmt ≥ deadline+2h ⇒ 'refund_flip_open'(任何人可翻 closed 0→2, close_commit 有被抢先风险)。
+ */
+export function evaluateCloseCommitTiming({ pastMedianTimeMs, deadlineMs }) {
+  const pmt = Number(pastMedianTimeMs), dl = Number(deadlineMs);
+  if (!Number.isFinite(pmt) || !Number.isFinite(dl) || pmt <= 0 || dl <= 0) throw new Error(`evaluateCloseCommitTiming: pastMedianTimeMs(${pastMedianTimeMs})/deadlineMs(${deadlineMs}) 必须是正数`);
+  const lead = pmt - dl;
+  const sla = lead >= REFUND_FLIP_GRACE_MS ? 'refund_flip_open' : lead >= CLOSE_COMMIT_SLA_WARN_MS ? 'warn' : 'ok';
+  if (lead < CLOSE_COMMIT_PMT_MARGIN_MS) {
+    return { canSubmit: false, reason: `pmt(${pmt}) 尚未超过 deadline(${dl}) + ${CLOSE_COMMIT_PMT_MARGIN_MS}ms(领先 ${lead}ms): 节点会以 NotFinalized 拒绝(lock_time < pmt 严格小于), 稍后重试(无状态变更)`, pmtLeadMs: lead, sla };
+  }
+  return { canSubmit: true, reason: 'pmt 已超过 deadline + 余量', pmtLeadMs: lead, sla };
+}
+
+/** 读 pmt 并评估——rpc 读取失败 ⇒ canSubmit=false(fail-closed, 不因读不到就放行)。 */
+export async function checkCloseCommitTiming({ rpc, deadlineMs }) {
+  let pmt;
+  try { pmt = await readPastMedianTimeMs(rpc); } catch (e) { return { canSubmit: false, reason: `读 pastMedianTime 失败: ${e.message}`, pmtLeadMs: null, sla: 'ok' }; }
+  return { ...evaluateCloseCommitTiming({ pastMedianTimeMs: pmt, deadlineMs }), pastMedianTimeMs: pmt };
+}

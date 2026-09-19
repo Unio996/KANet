@@ -1,0 +1,9 @@
+{
+ "txid": "e2c45b328b9a47bf315f09dc3d7873e4278beb4fe5f46ce3bd9d839baa6924c8",
+ "version": 1,
+ "storageMass": "231312",
+ "mass": "231312",
+ "computeMass": "60422",
+ "inputs": 3,
+ "outputs": 3
+}

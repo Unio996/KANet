@@ -189,5 +189,15 @@ export function assertLeafStateMatchesChain({ marketId, shardLeafRedeemScript, s
   if (expectedSpk.toLowerCase() !== actualSpk) {
     throw new Error(`assertLeafStateMatchesChain: leaf_state_drift — 推算状态对应的 P2SH(${expectedSpk}) 与链上 UTXO 实际 scriptPubKey(${actualSpk}) 不一致(库与链状态不一致, 拒绝构造)`);
   }
+  // NWT N-1(Bettor转达, 2026-09-19): register_append无签名可调, 合约只要求leaf续约输出value>=DUST_MIN, 任何人可把leaf面值
+  // 定成>=1000 sompi的任意值, 而builder按CONTINUATION_OUTPUT_SOMPI常量算leftover(偏小卡死、偏大静默烧费并低估mass)。
+  // 与held那条(assertHeldKttOutpointMatchesChain)对称: 链上真实面值必须等于CONTINUATION_OUTPUT_SOMPI, 缺失/不等即fail-closed。
+  // 🟡 这只是入口拦截; 真修(builder用链上真实面值算leftover)并入D-018重评估, 另开票。
+  if (chainUtxo.value === undefined || chainUtxo.value === null) {
+    throw new Error(`assertLeafStateMatchesChain: leaf_value_drift — market ${marketId} 的链上 leaf UTXO 面值缺失(调用方必须传chainUtxo.value), 无法核对是否等于CONTINUATION_OUTPUT_SOMPI`);
+  }
+  if (BigInt(chainUtxo.value) !== CONTINUATION_OUTPUT_SOMPI) {
+    throw new Error(`assertLeafStateMatchesChain: leaf_value_drift — market ${marketId} 的链上 leaf UTXO 面值(${chainUtxo.value}) != CONTINUATION_OUTPUT_SOMPI(${CONTINUATION_OUTPUT_SOMPI}); builder按该常量算leftover, 面值不等会导致构造卡死或静默烧费并低估mass`);
+  }
   return { ok: true, state, expectedSpk };
 }

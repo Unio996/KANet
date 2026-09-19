@@ -1,0 +1,11 @@
+=== RefundClaim.refund_payout 真实action witness cli-debugger审计(账本1473/1476 Bettor补跑要求) ===
+
+--- full_no_continuation --- wrote C:\Users\ADMIN\AppData\Local\Temp\j2-refundclaim-audit-2pPpoc\RefundClaim.full_no_continuation.test.json
+✅ PASS
+
+--- partial_with_continuation --- wrote C:\Users\ADMIN\AppData\Local\Temp\j2-refundclaim-audit-tK0Fvl\RefundClaim.partial_with_continuation.test.json
+✅ PASS
+
+=== 结论 ===
+① full(pool_value==stake, 无续约): PASS
+② partial(pool_value≠stake, readInputStateWithTemplate+内建validateOutputState共存): ✅ PASS——这个具体组合不触发V-T-8, RootClaim.sil头注那条纪律对本组合不适用(或本组合恰好不踩中触发条件), RefundClaim.sil当前代码可以安全用于partial退款

@@ -16,6 +16,7 @@
 import { encodeRegisterAppendAction, combineActionAndRedeem as combineRegisterAppendActionAndRedeem } from './proto-register-append-witness.mjs';
 import { encodeKttTransferZeroOutAction, combineKttActionAndRedeem } from './proto-ktt-transfer-witness.mjs';
 import { encodeLeafStateBytes } from './proto-leaf-state.mjs';
+import { assertMassWithinCeiling } from './proto-mass-ceiling.mjs';
 
 export const GENESIS_OUTPUT_SOMPI = 20_000_000n;
 export const CONTINUATION_OUTPUT_SOMPI = 20_000_000n;
@@ -351,6 +352,10 @@ export function buildMarketGenesisTxJson({ kaspa, network, feeUtxo, relayChangeS
   // 1 个输入(fee 自己), leftover 公式本身没有"漏计其它输入"这个 bug 的作用面, 这里加断言是纵深防御
   // (万一未来改动引入新输入种类), 不是修复本函数自身的问题。
   assertKaspadInputVersionRule(shape.tx, 'market_genesis'); // 账本1465: 主网节点RPC层输入版本一致性规则
+  assertMassWithinCeiling({
+    kaspa, network, tx: shape.tx, inputHasCovenant: [false], // 唯一输入是普通P2PK fee UTXO, 无covenant
+    feeUtxoValueSompi: feeUtxo.value, label: 'market_genesis',
+  }); // 账本1497 Bettor MUST: 构造期mass上限fail-closed断言
 
   // shardLeafCovId: consensus 的 covenant_id(funding.outpoint, [outputIndices]) 是纯函数, 不需要上链
   // 确认——本地就能算出、且不受后续找零值影响(与哪个形状/找零值无关, 同一 outpoint+outIdx 恒定)。
@@ -525,6 +530,15 @@ export function buildRegisterAppendTxJson({
   });
   assertImpliedFeeMatches(shape.tx, shape.netLoss, 'register_append');
   assertKaspadInputVersionRule(shape.tx, 'register_append'); // 账本1465: 主网节点RPC层输入版本一致性规则
+  {
+    // 账本1497 Bettor MUST: 构造期mass上限fail-closed断言。inputHasCovenant与上面mkTx真实塞入
+    // txInputs的顺序(inputs数组标记的kind)一一对应——leaf/held是covenant续约输入(带covenant), fee是
+    // 普通输入, 与tx.inputs.length严格一致(plurality由断言按输入utxo的spk长度+此位现算, 不再传槽位常量)。
+    const inputHasCovenant = inputs.map((slot) => slot.kind !== 'fee');
+    assertMassWithinCeiling({
+      kaspa, network, tx: shape.tx, inputHasCovenant, feeUtxoValueSompi: feeUtxo.value, label: 'register_append',
+    });
+  }
 
   const mergedKttCovId = String(shape.tx.outputs[REGISTER_APPEND_TOK_OUT_INDEX].covenant.covenantId);
 

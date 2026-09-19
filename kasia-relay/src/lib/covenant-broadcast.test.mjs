@@ -232,7 +232,7 @@ t('IMF-1 正常交易(隐含手续费=requiredFee的合理量级) ⇒ 放行', (
 });
 t('IMF-2a 🔴 诚实记录账本1455真实bug的精确量级: 单独漏计leaf(0.2 KAS)在~0.44 KAS requiredFee上的真实overpay, 落在min(requiredFee×2, GLOBAL)容忍区间之内, 这条relay侧兜底并不会拒绝它——真正防住这个具体bug的是console侧leftover公式修复本身(逐字节相等的assertImpliedFeeMatches不变量), 这里只是如实记录relay侧这道闸的容忍边界, 不是声称它能挡住一切量级的overpay', () => {
   const leafValue = 20_000_000n; // 0.2 KAS, 真实bug里被漏计的leaf续约输入(首笔下注, 无held)
-  const feeInputValue = 105_000_000n; // 1.05 KAS fee输入(账本1455修复前的真实探测值)
+  const feeInputValue = 105_000_000n; // 1.05 KAS fee输入(账本1455修复前的探测值; 旧本地估算口径, 非共识门槛——2026-09-19订正)
   const requiredFee = 44_022_200n; // 真实register_append量级(账本1455修复前实测值, 见run.log)
   const sumIn = leafValue + feeInputValue;
   const sumOut = sumIn - (requiredFee + leafValue); // Σin−Σout = requiredFee+leafValue(真实bug产生的隐含手续费)

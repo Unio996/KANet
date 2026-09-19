@@ -39,6 +39,20 @@ const byteN = (n) => ({ kind: 'byte', value: n });
 const hex = (buf) => '0x' + Buffer.from(buf).toString('hex');
 const p2sh = (bc) => 'aa20' + Buffer.from(blake2b(Uint8Array.from(bc), { dkLen: 32 })).toString('hex') + '87';
 
+/**
+ * RootClose ctor的committee_hash(R8): blake2b(c0Pk‖c1Pk‖c2Pk‖c3Pk‖c4Pk) —— v0单操作员5槽同一把
+ * 公钥, 5次拼接同一个pubkeyHex(不是5把不同的委员公钥, 见RootClose.sil文件头R8注释)。原本在
+ * computeMarketGenesisArtifacts/computeRootCloseGenesisArtifact内联重复两遍(账本1497批4提取为
+ * 共享helper, 供close_commit builder做签名前fail-closed校验复用, 不重复这段计算)。
+ * @param {string} committeePubkeyHex 32字节hex(无0x)
+ * @returns {string} 32字节hex(无0x)
+ */
+export function computeCommitteeHash(committeePubkeyHex) {
+  const pubkeyBuf = Buffer.from(committeePubkeyHex, 'hex');
+  if (pubkeyBuf.length !== 32) throw new Error(`computeCommitteeHash: committee pubkey must be 32 bytes, got ${pubkeyBuf.length}`);
+  return Buffer.from(blake2b(Uint8Array.from(Buffer.concat([pubkeyBuf, pubkeyBuf, pubkeyBuf, pubkeyBuf, pubkeyBuf])), { dkLen: 32 })).toString('hex');
+}
+
 let _anchorsCache = null;
 /**
  * 读协议常量(一次性计算, 全市场复用)——不在这里重算, 只读 scripts/proto-v0-template-anchors.mjs
@@ -98,6 +112,43 @@ function artifactOf(compiled) {
 }
 
 /**
+ * RootClaim/RefundClaim 各自的模板 hash(逐市场变化——ctor 烤 shard_pool_id=marketId)。
+ * 🔴 只依赖 marketId + 协议常量(ps_tmpl_hash/token_tmpl_hash/claim_tmpl_hash), state 全 0 占位
+ * 不影响模板 hash(账本1468矩阵实测证实)——因此**这两个值任何时候都能从 marketId 现算，不需要
+ * 持久化存储**，与 rootCloseTmplHash(依赖随机生成的 committeeHash，genesis 时的唯一值，之后无法
+ * 重新推导，必须存 proto_markets.rootclose_tmpl_hash)性质不同。原为 computeMarketGenesisArtifacts
+ * 内联逻辑，账本1491 实现计划v0.2批3提取为共享 helper，供 computeRootCloseGenesisArtifact
+ * (market_seal 用)复用，不重复这段 ctor 构造。
+ * @param {object} o
+ * @param {string} o.marketId  32 字节 hex(无 0x)
+ * @returns {{rootClaimTmplHash:string, refundClaimTmplHash:string}}
+ */
+export function computeRootClaimAndRefundClaimTmplHashes({ marketId }) {
+  if (!/^[0-9a-f]{64}$/.test(marketId)) throw new Error(`computeRootClaimAndRefundClaimTmplHashes: marketId must be 32-byte hex, got ${marketId}`);
+  const { ps_tmpl_hash, token_tmpl_hash, claim_tmpl_hash } = loadProtocolConstants();
+
+  const rootClaimCtor = [
+    ctorBytes32V100(ps_tmpl_hash), ctorBytes32V100(marketId),
+    ctorIntV100(0), ctorIntV100(0), ctorIntV100(0), ctorIntV100(0), ctorIntV100(0), ctorIntV100(0),
+    ctorBytes32V100(ZERO32.toString('hex')), ctorIntV100(0),
+    ctorBytes32V100(token_tmpl_hash), ctorBytes32V100(claim_tmpl_hash),
+  ];
+  const rootClaimCompiled = compileSilV100(ROOT_CLAIM_SIL, rootClaimCtor, 'RootClaim');
+  const rootClaimTmplHash = extractTemplateArtifactV100(rootClaimCompiled).templateHashHex;
+
+  const refundClaimCtor = [
+    ctorBytes32V100(ps_tmpl_hash), ctorBytes32V100(marketId),
+    ctorIntV100(0), ctorIntV100(0), ctorIntV100(0), ctorIntV100(0), ctorIntV100(0), ctorIntV100(0),
+    ctorBytes32V100(ZERO32.toString('hex')),
+    ctorBytes32V100(token_tmpl_hash), ctorBytes32V100(claim_tmpl_hash),
+  ];
+  const refundClaimCompiled = compileSilV100(REFUND_CLAIM_SIL, refundClaimCtor, 'RefundClaim');
+  const refundClaimTmplHash = extractTemplateArtifactV100(refundClaimCompiled).templateHashHex;
+
+  return { rootClaimTmplHash, refundClaimTmplHash };
+}
+
+/**
  * market_genesis 的完整 ctor 推导链(§2 原文顺序)——只算, 不签名不广播。
  * @param {object} o
  * @param {string} o.marketId  32 字节 hex(无 0x), 后端 randomUUID() 转 32 字节的结果(调用方负责派生)
@@ -120,31 +171,14 @@ export async function computeMarketGenesisArtifacts({ marketId, minBet, deadline
   const { encryptCommitteePrivkey } = await import('./proto-committee-key.mjs');
   const { privKeyHex, pubkeyHex } = await gen();
   const committeePrivkeyEnvelope = encryptCommitteePrivkey(privKeyHex);
-  const pubkeyBuf = Buffer.from(pubkeyHex, 'hex');
-  if (pubkeyBuf.length !== 32) throw new Error(`computeMarketGenesisArtifacts: committee pubkey must be 32 bytes, got ${pubkeyBuf.length}`);
-  const committeeHashBuf = Buffer.from(blake2b(Uint8Array.from(Buffer.concat([pubkeyBuf, pubkeyBuf, pubkeyBuf, pubkeyBuf, pubkeyBuf])), { dkLen: 32 }));
-  const committeeHash = committeeHashBuf.toString('hex');
+  const committeeHash = computeCommitteeHash(pubkeyHex);
 
-  // ② RootClaim(逐市场——ctor 烤 shard_pool_id=marketId)。genesis State 全 0(实际由
-  //   RootClose.convert_to_claim 提供真实值, 这里只是为了拿 template_hash, 占位值不影响哈希)。
-  const rootClaimCtor = [
-    ctorBytes32V100(ps_tmpl_hash), ctorBytes32V100(marketId),
-    ctorIntV100(0), ctorIntV100(0), ctorIntV100(0), ctorIntV100(0), ctorIntV100(0), ctorIntV100(0),
-    ctorBytes32V100(ZERO32.toString('hex')), ctorIntV100(0),
-    ctorBytes32V100(token_tmpl_hash), ctorBytes32V100(claim_tmpl_hash),
-  ];
-  const rootClaimCompiled = compileSilV100(ROOT_CLAIM_SIL, rootClaimCtor, 'RootClaim');
-  const rootClaimTmplHash = extractTemplateArtifactV100(rootClaimCompiled).templateHashHex;
-
-  // ③ RefundClaim(同上, 逐市场, 11 ctor 字段——无 init_claimed_bitmap, RootClaim 专属字段)。
-  const refundClaimCtor = [
-    ctorBytes32V100(ps_tmpl_hash), ctorBytes32V100(marketId),
-    ctorIntV100(0), ctorIntV100(0), ctorIntV100(0), ctorIntV100(0), ctorIntV100(0), ctorIntV100(0),
-    ctorBytes32V100(ZERO32.toString('hex')),
-    ctorBytes32V100(token_tmpl_hash), ctorBytes32V100(claim_tmpl_hash),
-  ];
-  const refundClaimCompiled = compileSilV100(REFUND_CLAIM_SIL, refundClaimCtor, 'RefundClaim');
-  const refundClaimTmplHash = extractTemplateArtifactV100(refundClaimCompiled).templateHashHex;
+  // ②③ RootClaim/RefundClaim 模板 hash——提取为共享 helper(见下 computeRootClaimAndRefundClaimTmplHashes),
+  //   供 computeRootCloseGenesisArtifact(market_seal 用, 实现计划v0.2 §2.1)复用, 不重复这段 ctor
+  //   构造逻辑。两者都只依赖 marketId + 协议常量(全 0 占位 state 不影响模板 hash), 因此**不需要
+  //   持久化存储**——任何时候都能从 marketId 现算, 这与 rootCloseTmplHash(依赖随机生成的
+  //   committeeHash, 不可重新推导, 必须存 proto_markets.rootclose_tmpl_hash)性质不同。
+  const { rootClaimTmplHash, refundClaimTmplHash } = computeRootClaimAndRefundClaimTmplHashes({ marketId });
 
   // ④ RootClose(依赖②③, 逐市场——烤 committee_hash/claim_tmpl_hash=rootClaimTmplHash/
   //   refundclaim_tmpl_hash=refundClaimTmplHash)。genesis State 全 0(实际由 seal_to_root 提供)。
@@ -333,6 +367,102 @@ export function computeShardLeafRedeemScript({ marketId, minBet, sealCount, root
     throw new Error(`computeShardLeafRedeemScript: fail-closed — 编译出的 ShardLeaf_direct 长度 ${artifact.script.length} != 已存 own_redeem_len ${ownRedeemLen}`);
   }
   return { script: artifact.script, scriptPubKeyHex: '0x' + p2sh(artifact.script), stateLayout: artifact.stateLayout };
+}
+
+/**
+ * (账本1491, 实现计划v0.2 §2.1 market_seal builder用) 给定市场已存的 genesis 事实
+ * (committeePubkeyHex/deadlineMs/rootCloseTmplHash——均已存 proto_markets, 见 DATABASE.md)+ 新的
+ * RootClose State, 重新编译出完整 RootClose redeem 脚本。同 computeShardLeafRedeemScript 的"直接
+ * 用真实 state 值重新编译"手法(不是先用全 0 探针编译再手工拼接 state 字节——两者数学等价, 因为
+ * template_hash 定义上就是抽象掉 state payload 的结构哈希, 直接编译更简单, 不需要额外的 prefix/
+ * suffix 手工切片步骤), 而不是 NWT 审计脚本(`nwt_04_audit_convert_to_rootclose.mjs`/
+ * `run-full-chain.mjs`步骤4)里"probe 编译+手工splice"那种审计构造手法——生产代码采用已经在
+ * register_append 生产路径验证过的更简单模式。
+ * fail-closed(同 computeShardLeafRedeemScript 纪律): 真实编译出的模板 hash 必须等于已存的
+ * rootCloseTmplHash——不等即拒绝返回, 说明 committeePubkeyHex/deadlineMs 与落库的
+ * rootclose_tmpl_hash 已经不自洽, 不静默用错的 ctor 构造一笔链上必拒(或更糟——covenant_id 算错)
+ * 的交易。
+ * @param {object} o
+ * @param {string} o.marketId  32字节hex(无0x)——RootClaim/RefundClaim tmpl hash 现算要用
+ * @param {string} o.committeePubkeyHex  32字节hex(无0x), 即 proto_markets.committee_pubkeys_json[0]
+ * @param {number} o.deadlineMs
+ * @param {string} o.rootCloseTmplHash  32字节hex(无0x), 已存 proto_markets.rootclose_tmpl_hash,
+ *   本函数只用来做 fail-closed 校验, 不是输入构造的一部分
+ * @param {{local_yes:number,local_no:number,count:number,pool_value:number,closed:number,winningSide:number,payoutRoot:string}} o.state
+ *   payoutRoot 为32字节hex(无0x); market_seal 时全 0(实际值由 close_commit 提供)
+ * @returns {{script:Buffer, scriptPubKeyHex:string, stateLayout:object, rootClaimTmplHash:string, refundClaimTmplHash:string}}
+ */
+export function computeRootCloseGenesisArtifact({ marketId, committeePubkeyHex, deadlineMs, rootCloseTmplHash, state }) {
+  if (!/^[0-9a-f]{64}$/.test(marketId)) throw new Error(`computeRootCloseGenesisArtifact: marketId must be 32-byte hex, got ${marketId}`);
+  if (!/^[0-9a-f]{64}$/.test(committeePubkeyHex)) throw new Error(`computeRootCloseGenesisArtifact: committeePubkeyHex must be 32-byte hex, got ${committeePubkeyHex}`);
+  if (!/^[0-9a-f]{64}$/.test(rootCloseTmplHash)) throw new Error(`computeRootCloseGenesisArtifact: rootCloseTmplHash must be 32-byte hex, got ${rootCloseTmplHash}`);
+  if (!/^[0-9a-f]{64}$/.test(state?.payoutRoot || '')) throw new Error(`computeRootCloseGenesisArtifact: state.payoutRoot must be 32-byte hex, got ${state?.payoutRoot}`);
+  if (!(Number(deadlineMs) > 0)) throw new Error('computeRootCloseGenesisArtifact: deadlineMs must be > 0');
+  const { token_tmpl_hash } = loadProtocolConstants();
+  const { rootClaimTmplHash, refundClaimTmplHash } = computeRootClaimAndRefundClaimTmplHashes({ marketId });
+
+  const committeeHash = computeCommitteeHash(committeePubkeyHex);
+
+  const ctor = [
+    ctorBytes32V100(committeeHash), ctorIntV100(deadlineMs),
+    ctorBytes32V100(rootClaimTmplHash), ctorBytes32V100(refundClaimTmplHash), ctorBytes32V100(token_tmpl_hash),
+    ctorIntV100(state.local_yes), ctorIntV100(state.local_no), ctorIntV100(state.count), ctorIntV100(state.pool_value),
+    ctorIntV100(state.closed), ctorIntV100(state.winningSide), ctorBytes32V100(state.payoutRoot),
+  ];
+  const compiled = compileSilV100(ROOT_CLOSE_SIL, ctor, 'RootClose');
+  const artifact = artifactOf(compiled);
+  if (artifact.templateHashHex !== rootCloseTmplHash) {
+    throw new Error(`computeRootCloseGenesisArtifact: fail-closed — 编译出的 RootClose 模板hash(${artifact.templateHashHex}) != 已存 rootCloseTmplHash(${rootCloseTmplHash})——committeePubkeyHex/deadlineMs/marketId 与落库值已不自洽`);
+  }
+  return {
+    script: artifact.script, scriptPubKeyHex: '0x' + p2sh(artifact.script), stateLayout: artifact.stateLayout,
+    rootClaimTmplHash, refundClaimTmplHash, committeeHash,
+    // 账本1497批4(close_commit): 与computeKttGenesisArtifact同理(账本1439)——entries是这次编译产物
+    // 的另一个切面, 不该让调用方(buildCloseCommitTxJson)为了拿到close_commit的entryAbi用手写ctor
+    // 再编译一次(容易两次ctor不一致)。close_commit/refund_flip/convert_to_claim/convert_to_refundclaim
+    // 四个entry的ABI不依赖state(只依赖ctor早期字段committee_hash/deadline_ms/两个tmplHash/token_tmpl_hash),
+    // 用current/new任一次调用返回的entries都一样。
+    entries: compiled._raw.contracts.RootClose.entries,
+  };
+}
+
+/**
+ * (实现计划v0.6 批5, convert_to_claim) RootClaim genesis 输出的完整 redeem 脚本推导——只算不签名不广播。
+ * 与 computeRootCloseGenesisArtifact 同手法: 把真实 8 字段 state 直接作为 ctor init_* 编译(不用
+ * "state全0探针+手工splice"), 但同样 fail-closed——编译出的模板 hash 必须等于
+ * computeRootClaimAndRefundClaimTmplHashes 现算的 rootClaimTmplHash(不等即 state 布局/ctor 顺序
+ * 与 RootClose.convert_to_claim 期望的 foreign-template 不一致, 链上必被 validateOutputStateWithTemplate
+ * 拒绝, 提前在构造期拦下)。
+ * @param {object} o
+ * @param {string} o.marketId  32字节hex(无0x)——RootClaim ctor 的 shard_pool_id
+ * @param {{local_yes:number,local_no:number,count:number,pool_value:number,closed:number,winningSide:number,payoutRoot:string,claimed_bitmap:number}} o.state
+ *   convert_to_claim 创建时 claimed_bitmap=0; payoutRoot 为32字节hex(无0x)
+ * @returns {{script:Buffer, scriptPubKeyHex:string, stateLayout:object, rootClaimTmplHash:string, entries:object}}
+ */
+export function computeRootClaimGenesisArtifact({ marketId, state }) {
+  if (!/^[0-9a-f]{64}$/.test(marketId)) throw new Error(`computeRootClaimGenesisArtifact: marketId must be 32-byte hex, got ${marketId}`);
+  if (!/^[0-9a-f]{64}$/.test(state?.payoutRoot || '')) throw new Error(`computeRootClaimGenesisArtifact: state.payoutRoot must be 32-byte hex, got ${state?.payoutRoot}`);
+  if (!Number.isInteger(state.claimed_bitmap)) throw new Error(`computeRootClaimGenesisArtifact: state.claimed_bitmap must be an integer, got ${state.claimed_bitmap}`);
+  const { ps_tmpl_hash, token_tmpl_hash, claim_tmpl_hash } = loadProtocolConstants();
+  const { rootClaimTmplHash } = computeRootClaimAndRefundClaimTmplHashes({ marketId });
+
+  const ctor = [
+    ctorBytes32V100(ps_tmpl_hash), ctorBytes32V100(marketId),
+    ctorIntV100(state.local_yes), ctorIntV100(state.local_no), ctorIntV100(state.count), ctorIntV100(state.pool_value),
+    ctorIntV100(state.closed), ctorIntV100(state.winningSide), ctorBytes32V100(state.payoutRoot), ctorIntV100(state.claimed_bitmap),
+    ctorBytes32V100(token_tmpl_hash), ctorBytes32V100(claim_tmpl_hash),
+  ];
+  const compiled = compileSilV100(ROOT_CLAIM_SIL, ctor, 'RootClaim');
+  const artifact = artifactOf(compiled);
+  if (artifact.templateHashHex !== rootClaimTmplHash) {
+    throw new Error(`computeRootClaimGenesisArtifact: fail-closed — 编译出的 RootClaim 模板hash(${artifact.templateHashHex}) != computeRootClaimAndRefundClaimTmplHashes现算值(${rootClaimTmplHash})`);
+  }
+  return {
+    script: artifact.script, scriptPubKeyHex: '0x' + p2sh(artifact.script), stateLayout: artifact.stateLayout,
+    rootClaimTmplHash,
+    // 同 computeRootCloseGenesisArtifact 的 entries 理由: claim_draw(批6)的 entryAbi 是同一次编译产物的另一切面。
+    entries: compiled._raw.contracts.RootClaim.entries,
+  };
 }
 
 export { p2sh, hex, ZERO32 };

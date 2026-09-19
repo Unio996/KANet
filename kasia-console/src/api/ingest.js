@@ -84,6 +84,17 @@ export async function registerIngestRoutes(fastify) {
       if (!r.ok) return reply.code(409).send({ ok: false, error: r.error });
       return reply.code(201).send({ ok: true, status: r.market.status });
     }
+    // 🔴 结算六步分派(账本1491, Owner D-022批准, Bettor裁定⑤): market_seal/close_commit/
+    // convert_to_claim/claim_draw/withdraw/输家ticket自我回收——同上一条 'genesis:' 分支同一模式
+    // (relay侧仍是同一个covenant_broadcast命令, 不新增命令), 落进独立的 proto_settlement_intents
+    // 表(见 proto-settlement-intent.mjs), 不是 proto_bet_intents(FK 是 bet_id, 语义不匹配)。
+    // 'settle:' 前缀见 settlementIntentKeyFor(proto-settlement-intent.mjs)。
+    if (intentKey.startsWith('settle:')) {
+      const { recordSettlementIntentPhase } = await import('../lib/proto-settlement-intent.mjs');
+      const r = recordSettlementIntentPhase({ intentKey, phase, txid, txJson });
+      if (!r.ok) return reply.code(409).send({ ok: false, error: r.error });
+      return reply.code(201).send({ ok: true, status: r.intent.status });
+    }
     const { recordBetIntentPhase } = await import('../lib/proto-bet-intent.mjs');
     const r = recordBetIntentPhase({ intentKey, phase, txid, txJson });
     if (!r.ok) return reply.code(409).send({ ok: false, error: r.error });

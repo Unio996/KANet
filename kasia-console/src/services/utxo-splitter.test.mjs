@@ -3,7 +3,7 @@
 // proto-v0 canary manages its own UTXO shape via the execution page (see docs/provenance/2026-09-15-j2-
 // d020-register-append-fee-formula-fix/recompute-fixed-cost.mjs for the real minimum-viable fee-input
 // thresholds this shape depends on). Splitting it to TARGET_UTXO_COUNT=8 would leave every UTXO too
-// small for any real bet's fee input (~0.56-0.82 KAS minimum), permanently breaking the canary and
+// small for any real bet's fee input (first-bet minimum ~0.925-0.93 KAS under the exact mass gate -- corrected 2026-09-19; the original "~0.56-0.82 KAS" came from an older local estimate), permanently breaking the canary and
 // wasting a split fee, and it is guaranteed to fire because gate-3 (opening PROTO_DRIVER_ENABLED)
 // requires a console restart, which is exactly when autoSplitAll() runs.
 //

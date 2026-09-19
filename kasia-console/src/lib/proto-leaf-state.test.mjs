@@ -131,7 +131,7 @@ mkBet({ id: 'b_drift_ok', marketId: 'm_drift_ok', side: 0, stake: 42, status: 'c
 const okState = { local_yes: 42, local_no: 0, count: 1, pool_value: 42 };
 const okSpk = computeExpectedLeafScriptPubKey({ shardLeafRedeemScript: fakeRedeem, stateLayout: fakeLayout, state: okState });
 t('assertLeafStateMatchesChain-1: 推算状态与链上 UTXO 的 scriptPubKey 一致 + 未花费 ⇒ 通过', () => {
-  const r = assertLeafStateMatchesChain({ marketId: 'm_drift_ok', shardLeafRedeemScript: fakeRedeem, stateLayout: fakeLayout, chainUtxo: { scriptPublicKeyHex: okSpk, spent: false } });
+  const r = assertLeafStateMatchesChain({ marketId: 'm_drift_ok', shardLeafRedeemScript: fakeRedeem, stateLayout: fakeLayout, chainUtxo: { scriptPublicKeyHex: okSpk, spent: false, value: 20_000_000n } }); // N-1: 必须带真实面值(=CONTINUATION_OUTPUT_SOMPI)
   if (!r.ok) throw new Error('应该通过');
 });
 
@@ -156,6 +156,20 @@ t('assertLeafStateMatchesChain-4: chainUtxo 为 null(查不到, 指针错误或�
   catch (e) { threw = e; }
   if (!threw || !/leaf_state_drift/.test(threw.message)) throw new Error('应该拒绝并报 leaf_state_drift');
 });
+
+// ── NWT N-1(2026-09-19): leaf UTXO链上真实面值必须==CONTINUATION_OUTPUT_SOMPI(与held那条对称), 正反向量 ──
+{
+  const { CONTINUATION_OUTPUT_SOMPI: CONT } = await import('./proto-tx-assembly.mjs');
+  const callWith = (value) => assertLeafStateMatchesChain({ marketId: 'm_drift_ok', shardLeafRedeemScript: fakeRedeem, stateLayout: fakeLayout, chainUtxo: { scriptPublicKeyHex: okSpk, spent: false, ...(value === undefined ? {} : { value }) } });
+  const mustDrift = (value, re) => { let e = null; try { callWith(value); } catch (x) { e = x; } if (!e || !re.test(e.message)) throw new Error(`应该以${re}拒绝, 实际: ${e ? e.message : '放行了'}`); };
+  t('assertLeafStateMatchesChain-5(N-1正向): 面值==CONTINUATION_OUTPUT_SOMPI(20,000,000, 批3 simnet三个leaf输入的链上真实面值) ⇒ 通过', () => {
+    if (!callWith(CONT).ok) throw new Error('应该通过');
+    if (!callWith(String(CONT)).ok) throw new Error('字符串形式的同值也应通过(get_address_utxos的amount是字符串)');
+  });
+  t('assertLeafStateMatchesChain-6(N-1反向): 面值偏小(1000 sompi, 合约只要求>=DUST_MIN, 任何人可这样续约) ⇒ leaf_value_drift', () => { mustDrift(1000n, /leaf_value_drift/); });
+  t('assertLeafStateMatchesChain-7(N-1反向): 面值偏大(CONT+1) ⇒ leaf_value_drift(偏大会静默烧费并低估mass)', () => { mustDrift(CONT + 1n, /leaf_value_drift/); });
+  t('assertLeafStateMatchesChain-8(N-1): 调用方没传chainUtxo.value ⇒ leaf_value_drift(缺失即fail-closed, 不静默放行)', () => { mustDrift(undefined, /leaf_value_drift.*缺失/); });
+}
 
 // ============ T4 对照: computeExpectedLeafScriptPubKey 用真实 ShardLeaf_direct 编译产物,
 // 与"把推算出的 state 当 ctor init_* 独立重编"两条路径算出同一个 P2SH ============

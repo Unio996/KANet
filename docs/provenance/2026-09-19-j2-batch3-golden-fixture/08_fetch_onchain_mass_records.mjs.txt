@@ -1,0 +1,44 @@
+// 只读: 扫simnet节点区块, 取回批3四笔交易(genesis/register_append#1/#2/market_seal)的节点侧原始mass记录与区块位置。
+// 不提交任何交易。输出的JSON去掉了超长字段(签名脚本只留长度与sha256)。
+import fs from 'node:fs';
+import crypto from 'node:crypto';
+const kaspa = await import('kaspa-wasm');
+const WANT = {
+  market_genesis: '8c119539e065d713558132cf4e518cb950af28313c2a071ef55611b35f3fb0f8',
+  'register_append#1': 'aed39af62d9524e06a07569a11399b4395e0666d00187ddb5509fea2ee4a6f68',
+  'register_append#2': 'a5d664e46a8e2c617bf2b5d4e66601f1b7534284d4f94c550faa215dde34dbb6',
+  market_seal: 'e2c45b328b9a47bf315f09dc3d7873e4278beb4fe5f46ce3bd9d839baa6924c8',
+};
+const byId = Object.fromEntries(Object.entries(WANT).map(([k, v]) => [v, k]));
+const rpc = new kaspa.RpcClient({ url: 'ws://127.0.0.1:18510', networkId: 'simnet' });
+await rpc.connect();
+const dag = await rpc.getBlockDagInfo();
+const out = { retrievedVia: 'RPC getBlocks(includeTransactions:true) 只读扫块, 读取区块内交易记录自带的节点侧 storageMass/mass/verboseData.computeMass 字段', node: { network: 'simnet', blockCount: String(dag.blockCount), virtualDaaScore: String(dag.virtualDaaScore) }, txs: {} };
+let low = undefined, scanned = 0;
+for (let page = 0; page < 200 && Object.keys(out.txs).length < 4; page++) {
+  const r = await rpc.getBlocks({ lowHash: low, includeBlocks: true, includeTransactions: true });
+  const blocks = r.blocks || [];
+  if (!blocks.length) break;
+  for (const b of blocks) {
+    scanned++;
+    for (const tx of (b.transactions || [])) {
+      const id = tx.verboseData?.transactionId;
+      if (!byId[id]) continue;
+      const j = JSON.parse(JSON.stringify(tx, (k, v) => (typeof v === 'bigint' ? v.toString() : v)));
+      out.txs[byId[id]] = {
+        txid: id, version: j.version, lockTime: j.lockTime, storageMass: j.storageMass, mass: j.mass,
+        computeMass: j.verboseData.computeMass, verboseData: { ...j.verboseData },
+        inputCount: j.inputs.length, outputCount: j.outputs.length,
+        inputSigScriptBytes: j.inputs.map((i) => ({ bytes: String(i.signatureScript).length / 2, sha256: crypto.createHash('sha256').update(Buffer.from(String(i.signatureScript), 'hex')).digest('hex').slice(0, 16), computeBudget: i.computeBudget, sigOpCount: i.sigOpCount })),
+        block: { hash: b.header?.hash ?? j.verboseData.blockHash, daaScore: String(b.header?.daaScore ?? ''), timestamp: String(b.header?.timestamp ?? '') },
+      };
+    }
+  }
+  const hashes = r.blockHashes || []; const next = hashes[hashes.length - 1];
+  if (!next || next === low || blocks.length < 2) break; low = next;
+}
+out.scannedBlocks = scanned;
+fs.writeFileSync(process.argv[2], JSON.stringify(out, null, 1));
+console.log('scanned', scanned, 'found', Object.keys(out.txs).join(','));
+for (const [k, v] of Object.entries(out.txs)) console.log(k, 'v' + v.version, 'storageMass', v.storageMass, 'mass', v.mass, 'computeMass', v.computeMass, 'daa', v.block.daaScore);
+await rpc.disconnect(); process.exit(0);

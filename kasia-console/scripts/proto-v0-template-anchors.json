@@ -46,6 +46,18 @@
       "requiredFeeEstimate": "59900000",
       "cap": "100000000",
       "_source": "docs/provenance/2026-09-14-j2-bet-mint-stepB-register-append-mass-fee-estimate/README.md + Bettor 种子面值核算(2026-09-14)——注意 requiredFee 会随 fee input 实际面值/找零大小小幅浮动(迭代收敛值，非固定常数)，witness 精确编码/tok_prefix-suffix 长度未最终定案，见该 provenance 已知限制"
+    },
+    "market_seal": {
+      "cap": "52000000",
+      "_source": "2026-09-19 Bettor裁定按NWT批3独立验证F3'推导(docs/provenance/2026-09-19-nwt-batch3-independent-verify/batch4/README.md): market_seal节点实付34,386,000 sompi; 本地wasm calculateTransactionMass=输入plurality恒1的storage公式(已对wasm函数直接验, v=50M/70M/95M/100M四点逐位相等), requiredFee只随fee UTXO面值v单调增, v<=1.0 KAS时最大34,571,600, x1.5取整=52,000,000(0.52 KAS)。🔴失效条件: 仅对seal_count=2且布局[leaf,held,fee]成立; fee规则(computeRequiredFeeSompiOrThrow/本地wasm mass口径)一改必须重推。relay侧SIGNED_INPUT_CEILING_SOMPI(1.0 KAS)硬顶不动。原借用register_append的1.0 KAS cap已替换。"
+    },
+    "close_commit": {
+      "cap": "100000000",
+      "_source": "账本1497/实现计划v0.5批4 — close_commit只有[RootClose,fee]两输入、RootClose自身value不变(同market_seal/register_append同量级构造复杂度)，暂借同一个cap(1.0 KAS)，未来有独立的close_commit专属mass/fee估算provenance应替换为该文档的具体数字"
+    },
+    "convert_to_claim": {
+      "cap": "100000000",
+      "_source": "实现计划v0.6批5 — convert_to_claim三输入[RootClose,合并KTT,fee]、三输出[RootClaim genesis,代币genesis,找零], 与market_seal同形状同量级, 暂借同一个cap(1.0 KAS, 实际约束是selectChangeShape的2×requiredFee动态上限, 见Bettor转达NWT N3), 未有本步的节点实测requiredFee前是有界临时值, 合入主线前应替换为按节点实测数字定的convert_to_claim专属值"
     }
   }
 }

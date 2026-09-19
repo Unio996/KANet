@@ -3253,3 +3253,43 @@ WHERE id IN (...) AND protocol_status IN ('verifying', 'pending_bettors')
   4. **provenance 文档只记路径+hash+来源，绝不复制/内嵌实际的备份文件本身**——文档本身要进 git（这是它的价值所在），它引用的证据文件不能跟着一起进 git，这条本身就是"文档"和"它指向的原始材料"该分开存放的直接推论，同 GO-系列 provenance 惯例（大日志文件本身也从不 `git add -f` 塞进仓库，只在文档里描述）。
 - 🔧 **机制建议（本次只记账，未落码）**：`lint-kanet.mjs` 可以加一条启发式规则——扫 `docs/provenance/**` 下的文件，命中常见备份/数据库扩展名或体积异常大的二进制（如 `*.db`、`*.db-*`、`*.sqlite*`、`*.bak`、单文件 >1MB 的非 `.log`/`.md`），WARN 提示"provenance 目录里出现疑似数据库/备份文件，确认这不是含密钥材料的实际备份而只是引用性证据"——warn 不 block（避免误伤真正该留档的大日志），留给下一个接手这条规则的人评估是否值得做。
 - **同族**：规则 81（worktree junction 穿透删除）同一类"机制存在但没接线/没养成条件反射"的病——那条是"删除动作前没有强制核对"，本条是"落盘动作前没有强制核对"，两条合起来是"任何跟仓库边界打交道的动作（删/写）都需要先问一句'这个操作的目标/位置是否跨越了安全边界'"，不能靠操作者每次自己记得。
+
+## 规则 84（候选）—— `kaspa.ScriptBuilder.drain()` 返回的是 hex **字符串**，不是字节；`Buffer.from(hexString)` 把它当 UTF-8 文本二次编码，产出双倍长度 garbage，且**两份同样错的实现互相自检会假阳性 PASS**（2026-09-16 · J2 结算审计自我纠错 · 账本1473）
+
+- ❌ **错误**：新写的通用entry witness ABI编码器（`generic-entry-witness.mjs`）里，`encodeEntryActionGeneric`结尾写`return Buffer.from(b.drain())`；`combineActionAndRedeem`同样把这个返回值当字节传给`kaspa.ScriptBuilder.fromScript(bytesOrHex, ...)`。
+- 💥 **后果**：`drain()`实际返回值是十六进制**字符串**（如`"55"`），`Buffer.from("55")`按UTF-8把这两个字符编码成`[0x35, 0x35]`，而不是解码成`[0x55]`——产出的字节数组长度是正确值的**2倍**，内容是garbage。**自检脚本`00_self_check_generic_encoder.mjs`比对的是"通用编码器"与"`register_append`专用编码器"两份独立实现，但两份都用了同一个`Buffer.from(drain())`错误写法，同样的garbage逻辑跑两次结果一样，比对出"完全相同"的假阳性PASS**，掩盖了bug一整轮审计（直到`RefundClaim.refund_payout`真实执行给出一个无法用其它候选解释的raw/state不一致，倒查回来才发现）。
+- 🧠 **为什么会犯**：`ScriptBuilder`系列API里有的方法返回字节、有的返回hex字符串，命名上不作区分（都是`XxxScript`/`drain`这类通用名），只能靠`typeof`实测或读WASM绑定源码才能确定，仅凭方法名或"看起来像是应该返回字节的地方"猜测方向就会猜错；而自检脚本比较两份"独立"实现时，如果两份实现共享同一个上游封装函数的bug，比对结果毫无信息量，"两份实现一致"不等于"两份都对"。
+- 🔨 **怎么做才对**：调用任何返回值类型不确定的kaspa-wasm API后，先`typeof result`或打印一个短样例实测确认是字符串还是`Uint8Array`/`Buffer`，不要凭函数名猜测；自检/回归测试如果比较的是"两份自己写的实现"而不是"跟一份独立可信来源（如上游debugger自己的内部构造）比对"，PASS只能排除"两份实现互相不一致"，不能证明"两份都对"——需要额外一次跟第三方权威实现的比对才能真正验证。
+- **同族**：规则 77（`isScriptPayToScriptHash`传错类型静默假阴性）同属kaspa-wasm API类型契约不透明导致的静默错误，那条是传参类型错，这条是返回值类型理解错，都不会在调用点报错，只会在后续逻辑里产出看似合理实则错误的结果。
+
+## 规则 85（候选）—— cli-debugger的`test.json`里`lock_time`/`version`必须嵌在`tx`对象内部，写在顶层会静默取默认值`lock_time=0`，报错信息（`Unsatisfied lock time`）本身不指向字段位置错误（2026-09-16 · J2/NWT 结算审计 · 账本1479）
+
+- ❌ **错误**：构造`refund_flip`/`close_commit`真实执行夹具时，`test.json`把`lock_time: LOCK_TIME`和`version: 1`写在测试对象顶层（与`tx`同级），而不是`tx: { lock_time: LOCK_TIME, version: 1, ... }`这样嵌在`tx`对象内部。
+- 💥 **后果**：debugger读不到顶层的`lock_time`，静默按schema默认值取`0`，CLTV相关的`require`检查因此必然当作"锁尚未到期"失败，报错`Unsatisfied lock time: mismatched locktime types`——这条报错信息完全没有提示"字段位置写错了"，第一直觉是去查CLTV计算逻辑本身或时间戳数值对不对，实际根因是纯粹的JSON嵌套层级错误。J2撞上；NWT同期`refund_flip`失败是否同因未确认。
+- 🧠 **为什么会犯**：`test.json`的schema里`tx`是一个嵌套对象，装的是"这笔交易本身的字段"（version/lock_time/inputs/outputs），但手写测试夹具时容易把"看起来像是顶层交易属性"的字段（尤其是`lock_time`这种在很多其它上下文里确实是顶层字段的量）习惯性提到外层；且debugger对未知/多余的顶层字段没有报警（不是`Unknown field`报错，是"缺失预期字段→取schema默认值"这种更隐蔽的静默失败）。
+- 🔨 **怎么做才对**：写任何新的cli-debugger `test.json`前，先对照一份已知能跑通的既有夹具（如`register_append`的），逐字段核对嵌套层级，不要凭记忆或凭"看起来应该在哪一层"重写结构；遇到CLTV/locktime类报错时，第一步就该`grep`确认自己的`lock_time`到底写在了JSON的哪一层，而不是先去怀疑数值或业务逻辑。
+- **同族**：本条是规则66（"字段列在表里≠字段被读出来"）在测试夹具schema上的具体发生——字段"写了"不等于"写在了被读取的位置"。
+
+## 规则 86（候选）—— `kaspa.ScriptPublicKey`/`kaspa.TransactionOutput`等WASM构造函数要求真实WASM class实例，传plain JS object（`{version, script}`）不会做隐式转换，直接抛`expected instance of ScriptPublicKey`（2026-09-16 · J2 结算审计 · 账本1479）
+
+- ❌ **错误**：构造`close_commit`真实签名测试用的`kaspa.Transaction`时，给UTXO的`scriptPublicKey`字段和`TransactionOutput`的对应参数传了一个手写的plain object `{version: 0, script: hexString}`，而不是`new kaspa.ScriptPublicKey(0, hexString)`真实实例。
+- 💥 **后果**：立即抛出`Error: expected instance of ScriptPublicKey`，报错本身是清楚的，但排查耗时来自"以为WASM绑定层会像很多JS库那样接受duck-typed的plain object"这个错误假设——kaspa-wasm的Rust端绑定按具体class做类型检查，不做鸭子类型兼容。
+- 🧠 **为什么会犯**：JS里传"形状对的plain object"代替某个class实例是常见且通常有效的模式（很多纯JS库靠属性存在与否判断，不检查原型链），但WASM绑定的边界检查行为不同，且没有统一的文档在一处列出"哪些参数位置必须是真实class实例、哪些接受plain object"，只能踩一次记一次。
+- 🔨 **怎么做才对**：任何`kaspa.*`构造函数/方法的参数如果报"expected instance of X"，直接用`new kaspa.X(...)`构造真实实例，不要尝试传等价plain object；写新的WASM交互代码前，优先照抄生产代码里已验证过的构造模式（如`proto-tx-assembly.mjs`的`mkInput`），不要凭JS直觉重新设计参数形状。
+- **同族**：规则 77 同属kaspa-wasm类型契约问题，那条是运行时静默假阴性（不报错），这条是运行时显式报错——同一类"边界处类型契约不透明"的问题，报错与否取决于具体API的实现方式，不能一概而论"kaspa-wasm不报类型错"。
+
+## 规则 87（候选）—— `kaspa.ScriptPublicKey.script`（及`payToAddressScript(...).script`等同类accessor）返回hex字符串，`Buffer.from(hexString)`（缺`'hex'`编码参数）产出同规则84的双倍长度garbage，同一个bug的第二个发生位置（2026-09-16 · J2 结算审计 · 账本1479）
+
+- ❌ **错误**：构造`close_commit`测试用的test.json输出字段时，写了`asHex(Buffer.from(placeholderOutSpk.script))`，其中`placeholderOutSpk`来自`kaspa.payToAddressScript(...)`，其`.script`属性本身已经是hex字符串。
+- 💥 **后果**：与规则84同一种错误的第二次独立发生，只是发生在"读一个WASM对象的字符串属性"而不是"读一个方法的返回值"这个不同的代码位置——通过eprintln转储debugger内部重建的`output[0].scriptPubKey`发现是garbage ASCII文本（字面上是hex字符串本身的ASCII字节），才定位到这第二处。修复后确认`output[0]`与签名交易一致，但没有解决`close_commit`本身的checkSig失败（说明这条bug虽然真实存在且已修，但不是close_commit FAIL的唯一/根本原因）。
+- 🧠 **为什么会犯**：与规则84同一根因——kaspa-wasm的API表面上"字节 vs hex字符串"没有统一命名约定或类型系统区分，同一类错误会在多个独立代码位置各自发生一次，即使团队已经在别处踩过同一个坑，如果没有一份集中的"这些API返回hex字符串"清单，下一次调用不同的API/属性仍会重犯。
+- 🔨 **怎么做才对**：见规则84——任何从kaspa-wasm拿到的"看起来像是可以直接Buffer化"的值，先`typeof`确认；本条额外建议：**团队应该维护一份"已确认返回hex字符串 vs 已确认返回字节"的kaspa-wasm API清单**（`ScriptBuilder.drain()`、`ScriptPublicKey.script`、`payToAddressScript(...).script`已确认是hex字符串），供下一次写新交互代码时直接查表，不必每次重新用`typeof`探测已经探测过的API。
+- **同族**：规则84（同一个bug的第一个发生位置）、规则77（同一类kaspa-wasm类型契约不透明问题的另一种表现）。
+
+## 规则 88（候选）—— 自检/回归比对若两侧都是"自己写的实现"，PASS 只证明两者互相一致，不证明两者都对；至少一侧必须换成独立可信来源（2026-09-16 · J2 结算审计自我纠错 · 账本1473/1480 · Bettor 1482 追加）
+
+- ❌ **错误**：`generic-entry-witness.mjs`的自检脚本`00_self_check_generic_encoder.mjs`把新写的"通用entry witness编码器"与既有已验证过的"`register_append`专用编码器"这两份**都由本项目自己实现**的代码互相比对字节输出，比对结果"完全一致"就判定新编码器写对了。
+- 💥 **后果**：两份实现共享同一个上游封装函数`kaspa.ScriptBuilder.drain()`的调用方式，都写成了`Buffer.from(b.drain())`——而`drain()`实际返回hex字符串，这个`Buffer.from()`调用把它当UTF-8文本二次编码成双倍长度garbage。因为两份实现犯的是**同一个**错误，比对结果"完全相同"，自检显示PASS，这个假阳性掩盖了双重hex编码bug一整轮审计，直到`RefundClaim.refund_payout`真实执行给出一个无法用其它候选解释的raw/state不一致，倒查回来才发现。真正定位到bug靠的是用eprintln转储**debugger自己内部**实际构造的`active_sigscript`长度做比对——这是一个独立于我方两份JS实现的第三方来源，长度只有我方计算值的一半，矛盾立刻显形。
+- 🧠 **为什么会犯**：自检/回归测试的直觉写法是"拿一个新实现去对一个旧的/已知的实现"，如果这两者事实上共享同一段有问题的公共代码路径（同一个上游API的同一种错误调用方式），"比对一致"这个信号完全没有区分力——它检测的是"两份实现是否分叉"，不是"实现是否正确"，这两个问题在报告里长得一模一样（都是绿色的PASS），但回答的是完全不同的问题。
+- 🔨 **怎么做才对**：设计自检/回归比对时，先问一句"这两侧的实现是否可能共享同一个底层依赖/同一种调用错误"——如果答案是"有可能"（比如都调用了同一个第三方库的同一个函数），必须至少让**一侧**换成不依赖我方实现逻辑的独立来源：debugger/节点自己内部的真实构造状态（eprintln转储、日志）、真实链上广播结果（simnet/主网，见本文档`§0.13`同族实践）、或者第三方已发布的官方测试向量。两份"我方自己写的代码"互相比对，只能当作"没有互相矛盾"的弱信号，不能当作"正确性已验证"的证据。
+- **同族**：规则84-87（同一轮审计里连续发生的kaspa-wasm类型契约问题）；本条是这几条能够被自我纠错纠出来的**方法论根因**——没有这条纪律，规则84的bug会一直被自检的假阳性掩盖下去。
