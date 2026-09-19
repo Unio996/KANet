@@ -1,22 +1,36 @@
-# runbook：主网 kaspad + console 开机自启（Windows 计划任务）v0.3 草稿
+# runbook：主网 kaspad + console 开机自启（Windows 计划任务）v0.4 草稿
 
 > **Status**: CURRENT
 >
-> 起草 KANet-UI · 2026-09-19/20 · 文件名沿用 `…-v0.1.md`（账本 (1535)/(1537)/(1539)/(1544) 已按此路径引用），**正文即 v0.3**；v0.1→v0.2→v0.3 的差异全部列在下面，与更早读者记忆冲突处以本页为准。依据账本 **(1531)**（死机复盘 P2）、**(1532)**、**(1533)**、**(1539)**（NWT 红队审 `ba660ae0` 全采纳）、**(1542)**、Bettor 转派的 **NWT 复审 `9b2e7943`**（`docs/provenance/2026-09-19-nwt-p2p3-v02-review/README.md`，下称"NWT 复审"，**读的是原文**）；`docs/iteration/j1-inbox/2026-09-14T10-00Z-bettor-GO-unattended-reboot-verify-with-conditions.md`（9/14 无人登录重启验证读数口径）。
+> 起草 KANet-UI · 2026-09-19/20 · 文件名沿用 `…-v0.1.md`（账本 (1535)/(1537)/(1539)/(1544) 已按此路径引用），**正文即 v0.4**；v0.1→v0.2→v0.3→v0.4 的差异全部列在下面，与更早读者记忆冲突处以本页为准。依据账本 **(1531)**（死机复盘 P2）、**(1532)**、**(1533)**、**(1539)**（NWT 红队审 `ba660ae0` 全采纳）、**(1542)**、Bettor 转派的 **NWT 复审 `9b2e7943`** 与 **NWT 三审 `16899661`**（`docs/provenance/2026-09-20-nwt-p2p3-v03-third-review/`，下称"NWT 三审"，同样读的是原文）（`docs/provenance/2026-09-19-nwt-p2p3-v02-review/README.md`，下称"NWT 复审"，**读的是原文**）；`docs/iteration/j1-inbox/2026-09-14T10-00Z-bettor-GO-unattended-reboot-verify-with-conditions.md`（9/14 无人登录重启验证读数口径）。
 >
-> **执行门（页首必读；"页写好了"≠"可以执行了"）**：**只写不执行**。① 本页 → NWT 再审本页与附录 A/C 的脚本草案（**NWT 已两次裁"脚本草案不许落码"，v0.3 需第三次审**）→ ② 新增 `scripts/mainnet-boot-sequence.ps1`、`scripts/boot-outbound-check.mjs`、`scripts/boot-guard-check.mjs` 是**代码**，铁律 0：**落码须 Bettor 批** → ③ **注册门（v0.3 再收紧，见 §4.3）**：D-026 开关**已上线并被运行中 console 的启动日志证明**（V6）∧ **主网 `autotake` 已被 Owner/Bettor 置关**（一个 `config_entries` 写入，不是代码，**不是我动**）∧ 守卫工具已落地并对活库跑绿 → ④ 提权注册计划任务 = **J1 EXECUTE 单**（本机 KANet-UI 会话非提权）→ ⑤ 预演 R0–R3 逐级过（R1 等 NWT 审过脚本后）→ ⑥ 真重启验证 = **Bettor GO + 本机全部会话被切断的窗口**。任何一步未过，不进下一步。
+> **执行门（页首必读；"页写好了"≠"可以执行了"）**：**只写不执行**。① 本页 → NWT 再审本页与附录 A/C 的脚本草案（**NWT 已三次裁"脚本草案不许落码"，v0.4 需第四次审**）→ ② 新增 `scripts/mainnet-boot-sequence.ps1`、`scripts/boot-outbound-check.mjs`、`scripts/boot-guard-check.mjs` 是**代码**，铁律 0：**落码须 Bettor 批** → ③ **注册门（v0.3 再收紧，见 §4.3）**：D-026 开关**已上线并被运行中 console 的启动日志证明**（V6）∧ **主网 `autotake` 已被 Owner/Bettor 置关**（一个 `config_entries` 写入，不是代码，**不是我动**）∧ 守卫工具已落地并对活库跑绿 → ④ 提权注册计划任务 = **J1 EXECUTE 单**（本机 KANet-UI 会话非提权）→ ⑤ 预演 R0–R3 逐级过（R1 等 NWT 审过脚本后）→ ⑥ 真重启验证 = **Bettor GO + 本机全部会话被切断的窗口**。任何一步未过，不进下一步。
 >
 > **写作依 D-021**：不写密钥值；不写任何余额、地址与持有人的对应；**不写未修复漏洞的利用细节**（§2.6 只写类别与状态；这类细节写本机 `docs-private/`，页内只留指针）。本页出现的路径、端口、`kaspad` 二进制 sha256（公开发布物的哈希）、进程名、relay **名字**（不含地址）都是运维坐标。
 >
 > **本页没有动任何东西**：v0.3 期间只做了只读——进程表、计划任务定义、性能计数器、日志目录、探针一次、主网 DB `readonly` 计数与 `config_entries` 非敏感开关行、对 18 个 relay 地址的 outpoint 快照（节点只读 RPC）、只读代码审计（一个子 agent，只读）；没起没停任何进程，没注册任何任务，没往生产检出写任何文件。脚本草案的 `-SelfTest` 与 `-WatchOnly` 都在**系统临时目录**跑（`-SelfTest` 现在**强制断言所有路径在临时目录内**，见 §7-9 的"事故教训"）。
 
-## v0.3 改动（对照 NWT 复审 `9b2e7943` 逐条）
+## v0.4 改动（对照 NWT 三审 `16899661` 逐条；三审已独立实测确认我上轮 M-A/M-B/M-C 的落点方向都对，这次的三条 MUST 是**新代码/新工具自己的缺口**）
+
+| NWT 三审条目 | 处置 | 落点 |
+|---|---|---|
+| **N-1（MUST）** 门等待期间内存检测是**关着的**，而 v0.3 心跳把它伪装成"活着"：`Invoke-MemoryWatchTick` 只在哨兵循环里调，哨兵要等 `Invoke-PhaseB` 整体返回；`Wait-KaspadAlive` 最长 24 h（追块/RocksDB 恢复、内存最吃紧的时段）、t0 快照重试、console 300 s 校验期间都不检测；"没告警 + 心跳新鲜"被读成"内存正常"。NWT 用我的夹具加向量实测：kaspad 一直 SYNCING + CRIT 样本 ⇒ 9302 **不发** | **采纳，已修并测**：抽出**哨兵一拍 `Invoke-SentinelBeat`**（写脚本心跳 + 死亡检查 + 出站 diff + 内存锁重试 + 节流后的内存 tick，每项独立 try/catch，永不抛），在**三个等待循环每轮调用**（ALIVE 门、t0 快照重试、console 校验）+ 哨兵循环每 tick 调用。**心跳拆成两个文件**：`sentinel-heartbeat` = 脚本还活着；**`memwatch-heartbeat` = 内存检测确实产出了样本（只在采样成功后才更新）**——P3 的存活判据改看后者。NWT 的向量原样加进 SelfTest（F14：SYNCING + CRIT ⇒ 门等待期间 9302 且内存心跳新鲜；F14b 对照：正常样本不报警但仍刷新内存心跳；F15：采样失败时内存心跳**不**刷新；F17/F17b：**真** `Start-ConsolePhase` 校验循环与**真** `Invoke-OutboundSnap` 重试循环里同样触发 CRIT 报警）。变异对照 4 个各被对应测试抓红（门里去掉一拍 ⇒ F13/F14/F14b 红；内存心跳提前写 ⇒ F15 红；console 循环去掉一拍 ⇒ F17 红；快照循环去掉一拍 ⇒ F17b 红） | 附录 A、§2.1、§5、P3 页 |
+| **N-2（MUST）** 守卫漏"缺省即开型"：页面 §2.6 T10 写守卫核 ZK_*/AUTO_BET/POOL_SEEDER 等，工具没核；最要紧 `MINING_CONSOLIDATE_ENABLED` 源码缺省即开且链上状态驱动，主网靠 env 一行 `=false` 挡着，守卫不核这行也不核 `MINING_RELAY_ID` 缺席；另有五个 ZK tick、`POOL_SEEDER_ENABLED`、`PREDICTION_AGENT_ENABLED`/`_PEERS`、`pool-auto-better` | **采纳，已修并测**：守卫加**第二类"缺省即开必须显式为关"**（`MINING_CONSOLIDATE_ENABLED` 必须显式 `false`、缺席即 MISMATCH；`AUTO_BET_TICK_MS` 必须 `0` 或 `DEMO_AUTOBETTER_OFF=1`），"不得为 1"补入五个 ZK tick + `POOL_SEEDER_ENABLED` + `PREDICTION_AGENT_ENABLED`，id 键补入 `MINING_RELAY_ID`、`PREDICTION_AGENT_ENABLED_PEERS`，另加 `market_seeder_config(enabled=1)`；**29 → 41 项**。**清单完整性测试**：`CRON_REGISTRY` 登记 index.js 启动期调用的全部 63 个 start-like 调用，测试从真实 index.js 自动发现并**双向对账**——新增 cron 不登记 ⇒ 红、删除调用留 STALE ⇒ 红、登记项点名的门控/表不在守卫清单 ⇒ 红、启动模块里的 `*_ENABLED`/`*_OFF` 名不在清单也不在 `ignoreGates` ⇒ 红；**并诚实标出 20 个调用只是 audit-only(15)/not-audited(5)——可见但没有运行期守卫** | 附录 C.3/C.4、§2.6 |
+| **N-3（MUST，小）** 守卫与启动器是两套 env 解析器（`KEY =1` 启动器读成开、守卫报 key absent ⇒ 假 OK）；守卫只看文件，真实环境 = 继承 ∪ 文件 | **采纳，已修并测**：守卫**逐字用启动器的解析规则**（`^([^=]+)=(.*)$`、键 Trim、值原样、空值 = 删除、空名 = 启动器抛错、大小写不敏感、去 BOM、CRLF/LF/单独 CR 分行）；有效环境 = **继承 ∪ 文件（文件覆盖）**；**差分测试**：17 种行形态（含混合行尾、BOM、重复键、空值、继承变量被空值删除）与**真实 PowerShell 启动器循环**逐项比对，另单测空名情形 | 附录 C.3/C.4 |
+| SHOULD：D26-scan 边角 E1/E3/E4 | **采纳并已实测**：剥注释器识别**正则字面量**（`/[^/*]+/` 里的 `/*` 不再吞掉后面的真调用；除法不是正则；`return /x*/` 是正则），扫描扩展名放宽到 `.mts/.cts/.jsx/.tsx`；用真实文件各放一次（E1/E3/E4 + 旧 A/C）全红，基线 22/22 | 测试文件 |
+| SHOULD：SelfTest 递归删除加固（N-6） | **采纳**：`Assert-UnderTmp`：`$tmp` 必须在 `GetTempPath()` 之下、叶名 `boot-selftest-*`、路径比较带分隔符边界；**每次递归删除前再断言一次**（`Reset-Sim` 里与末尾各一处）。**诚实**：这条防御性断言**没有对应的变异测试**（变异"去掉末尾那次断言"没被任何测试抓到——断言只在 `$tmp` 被弄坏时才会触发，而我没有构造那种场景） | 附录 A |
+| SHOULD：哨兵最外层 catch 无测试注入（N-7） | **采纳**：`-InjectFault sentinel`（异常逃出 `Invoke-SentinelLoop`，走 `Invoke-BootMain` 最外层 catch）+ 流程测试 F16；变异（最外层 catch 改为 `throw`）⇒ F16 红；R3 新增真机向量 ⑧' | 附录 A、§4.4 |
+| 观察①：console 没起时仍发 9401 "no relay outpoint was spent" | **采纳**：出站 diff **只在 console 已起/认领时才排期**（`$Script:Con` 非空）；console 没起就没有"启动窗口"可归因，不发 9401 | 附录 A |
+| 观察②：出站检查已知限制写 §7 | **采纳**：§7-13/16 | §7 |
+| 观察③：流程测试桩里 `checks=24` 是桩文本 | **采纳**：桩改成与真实工具同量级的数字，仅为免误导 | 附录 A |
+
+## v0.3 改动（对照 NWT 复审 `9b2e7943` 逐条；已并入下文）
 
 | NWT 复审条目 | 处置 | 落点 |
 |---|---|---|
-| **M-A** 起后仍有两条 exit/终止路径：① Phase A 里 `Start-Process` 后紧接 `Set-Content kaspad.pid` 抛错 → 最外层 catch → `exit 99`；② `Invoke-PhaseB` 无 try/catch，"永不结束"安全网只在正常返回时可达 | **采纳，且已用控制流测试证明**：Phase A 在 kaspad 已知的**同一时刻**发布 `$Script:Ctx`，其后的一切（写 pid 文件、取 StartTime、写状态）各自 `try/catch`；`Invoke-BootMain` 的外层 catch **只在 `$Script:Ctx` 为空（什么都没起）时才 `Stop-Boot 99`**，否则告警 9099 并继续；`Invoke-PhaseB` 被 try/catch 包住（异常 ⇒ 9098 + 落入常驻哨兵，**不重入启动逻辑**）；哨兵循环每项职责各自 try/catch。**新增 `-InjectFault`（仅预演）与 15 条控制流测试**（真 `Invoke-BootMain` 跑在伪造原语之上）：pid 写失败 / Phase A 晚期异常（走外层 catch）/ Phase B 未捕获异常 / 探针每次抛错 ⇒ **Stop-Boot 一次都没被调用、kaspad 上下文已发布、哨兵仍在跑**；变异对照 7 个，每个都被对应流程测试抓红（含 v0.2 的 bug 本身） | 附录 A、§2.1、§4.4 R3 |
+| **M-A** 起后仍有两条 exit/终止路径：① Phase A 里 `Start-Process` 后紧接 `Set-Content kaspad.pid` 抛错 → 最外层 catch → `exit 99`；② `Invoke-PhaseB` 无 try/catch，"永不结束"安全网只在正常返回时可达 | **采纳，且已用控制流测试证明**：Phase A 在 kaspad 已知的**同一时刻**发布 `$Script:Ctx`，其后的一切（写 pid 文件、取 StartTime、写状态）各自 `try/catch`；`Invoke-BootMain` 的外层 catch **只在 `$Script:Ctx` 为空（什么都没起）时才 `Stop-Boot 99`**，否则告警 9099 并继续；`Invoke-PhaseB` 被 try/catch 包住（异常 ⇒ 9098 + 落入常驻哨兵，**不重入启动逻辑**）；哨兵循环每项职责各自 try/catch。**新增 `-InjectFault`（仅预演）与 22 条控制流测试**（真 `Invoke-BootMain` 跑在伪造原语之上）：pid 写失败 / Phase A 晚期异常（走外层 catch）/ Phase B 未捕获异常 / 探针每次抛错 ⇒ **Stop-Boot 一次都没被调用、kaspad 上下文已发布、哨兵仍在跑**；变异对照 7 个，每个都被对应流程测试抓红（含 v0.2 的 bug 本身） | 附录 A、§2.1、§4.4 R3 |
 | **M-B** 附录 C 的 t0 时序错位：t0 定在 console 稳定后，但启动期拆分在 console 起后几秒就发，早于 t0，diff 抓不到它要抓的那笔；"多出任何一笔"会被外部入账误报 | **采纳**：t0 由**哨兵在 `KASPAD_ALIVE` 与起 console 之间自动取**；`+30 min` 自动 diff；判定改为 **`spent_outpoints == 0`**（出站证据；外部入账只增 `new`，无害）；**每次开机自动执行**，结果落 `boot-status.json` + 事件 9401/9402/9403/9404；快照要求**两次读数一致**（utxoindex 追平的稳定性读数，NWT 补充限制），不一致重试 ≤3 次，仍不行 ⇒ 9403 警告、**本次不做检查**（console 照起，可用性优先，且明说）。工具改为**独立小脚本 `scripts/boot-outbound-check.mjs`，不 import 任何 console 库**（NWT §四-4） | 附录 A/C、§4.5 #10 |
-| **M-C** §2.6 表不足以作自启门；第 10 行安全论据"无 Mind 大脑"对 autoTaker 不成立（`autotake_enabled=true`+`mode=auto` 已上膛，靠 `agent_wallets` 空表挡着，而它不在空表清单里）；14 个转账调用点要逐个分类；要每次开机的自动守卫 | **采纳全部**：① **`autotake` 置关 = 注册门的显式前提**（Owner/Bettor 定，**不是我动**；在此之前守卫会因它 MISMATCH 而**永不自启 console**——这是设计，是逼出这个决定的机制）；② **§2.6 重写为代码级**：转账/花费调用点逐个分类（定时 / 入站消息 / HTTP / 手动），每个入站触发的配主网阳性证据；**第 10 行原论据作废并更正**；③ **`scripts/boot-guard-check.mjs`（29 项守卫）+ 哨兵在起 console 前跑它**：与"预期为零"不符（或表缺失/无法读）⇒ **不起 console（kaspad 照起）、Warning 9065、等人**。守卫覆盖 `agent_wallets`、`exchange_offers`、`pool_markets`、`pool_bettor_sides`、`oracle_registry`、`oracle_stake_enrollments`、`retail_dex_buy_publications`、`mm_orders`、`submit_intents(prepared)`、`worldcup_schedule(pending_teams)`、`zk_prove_jobs(pending)`、`chain_events(bettor_refund_available)`、`is_oracle=1` relay、`autotake_*`、`scanner_enabled`、10 个 env 开关键、4 个 env id 键。活库实跑：29 项中恰 1 项 MISMATCH（`autotake`），与 NWT 所述一致；12+8 个合成场景全过 | §2.6、附录 C、§4.3 |
+| **M-C** §2.6 表不足以作自启门；第 10 行安全论据"无 Mind 大脑"对 autoTaker 不成立（`autotake_enabled=true`+`mode=auto` 已上膛，靠 `agent_wallets` 空表挡着，而它不在空表清单里）；14 个转账调用点要逐个分类；要每次开机的自动守卫 | **采纳全部**：① **`autotake` 置关 = 注册门的显式前提**（Owner/Bettor 定，**不是我动**；在此之前守卫会因它 MISMATCH 而**永不自启 console**——这是设计，是逼出这个决定的机制）；② **§2.6 重写为代码级**：转账/花费调用点逐个分类（定时 / 入站消息 / HTTP / 手动），每个入站触发的配主网阳性证据；**第 10 行原论据作废并更正**；③ **`scripts/boot-guard-check.mjs`（41 项守卫）+ 哨兵在起 console 前跑它**：与"预期为零"不符（或表缺失/无法读）⇒ **不起 console（kaspad 照起）、Warning 9065、等人**。守卫覆盖 `agent_wallets`、`exchange_offers`、`pool_markets`、`pool_bettor_sides`、`oracle_registry`、`oracle_stake_enrollments`、`retail_dex_buy_publications`、`mm_orders`、`submit_intents(prepared)`、`worldcup_schedule(pending_teams)`、`zk_prove_jobs(pending)`、`chain_events(bettor_refund_available)`、`is_oracle=1` relay、`autotake_*`、`scanner_enabled`、10 个 env 开关键、4 个 env id 键。活库实跑：41 项中恰 1 项 MISMATCH（`autotake`），与 NWT 所述一致；12+8 个合成场景全过 | §2.6、附录 C、§4.3 |
 | S-A 单次探针异常中止整个门 | **采纳**：循环内 try/catch，异常 = 一次失败读数（`streak=0; consecErr++`，≥5 次走既有告警），流程测试 F4 证明 | 附录 A |
 | S-B git 属主 / tracked 源码干净 | **采纳**：`Test-TreeClean` 加 `git status --porcelain -- kasia-console/src kasia-relay/src` 必须为空，且四个脚本文件 `diff --quiet HEAD`；git 在 S4U 下失败（含 dubious ownership）⇒ fail-closed 且**把 git 原话写进原因**；**R2(b) 改测 `git -C D:\kanet-tn12 branch --show-current` 与 `git diff --quiet HEAD -- <脚本>`**；若撞属主检查，注册前需 `git config --system --add safe.directory`（提权，J1） | 附录 A、§4.3、§4.4 R2 |
 | S-C 树外副本定案 | **Bettor 已采纳 `C:\KANetBoot\`**（脚本 + 两个工具的部署副本，sha256 记 provenance）；页内已在 4.1 前定稿。**这是本页唯一需要 Bettor 拍的路径决定**；**已知边界**：副本仍要从生产检出读探针/启动脚本/工具（树检查已覆盖它们）；副本只解决"脚本自身随检出分支漂移" | §0、§4.1 |
@@ -29,7 +43,7 @@
 
 ## 0. 结论与需要 Bettor 定的点
 
-**做法**：一个计划任务 `KANetKANet-Mainnet-Boot`，触发器"系统启动 + 延迟 2 分钟"，**不依赖任何人登录**，动作 = 一个编排脚本，按序：树检查 → 核 kaspad 二进制 → 前次停机检查 → 轮转日志 → 起/认领 kaspad → **连续 ≥3 次探针 ALIVE** → **守卫（29 项"今天为零"事实重新核）** → **t0 出站快照** → 轮转 console 日志 → 起/认领 console → 验证 → **常驻做哨兵（死亡哨兵 + 出站检查 + 提交内存检测，只告警不重启）**。
+**做法**：一个计划任务 `\KANet\KANet-Mainnet-Boot`，触发器"系统启动 + 延迟 2 分钟"，**不依赖任何人登录**，动作 = 一个编排脚本，按序：树检查 → 核 kaspad 二进制 → 前次停机检查 → 轮转日志 → 起/认领 kaspad → **连续 ≥3 次探针 ALIVE** → **守卫（41 项"今天为零"事实重新核）** → **t0 出站快照** → 轮转 console 日志 → 起/认领 console → 验证 → **常驻做哨兵（死亡哨兵 + 出站检查 + 提交内存检测，只告警不重启）**。
 
 **Bettor 四点硬要求 → 本页落点**（v0.1 已答，v0.2 补 NWT 收紧后的形状）：
 
@@ -90,7 +104,7 @@ PHASE B —— 永无 exit、永无未捕获异常。`Invoke-PhaseB` 整体被 t
         0 ⇒ 计数+1 │ 7/8/3/4/5/9/其它 ⇒ 计数清零（8：事件 9201 一次；其它/抛错连续 5 次 ⇒ 告警 45）
         2 错网 ⇒ 告警 43 │ 6 探针依赖坏 ⇒ 告警 44 │ kaspad 进程没了 ⇒ 告警 46 │ 24 h 仍未稳定 ALIVE ⇒ 告警 50
         以上 = 记状态 + Warning 事件 + **不起 console，kaspad 与哨兵继续活**；软阈值 90 min（前次停机不干净则 180 min）未过 ⇒ 事件 9250 一次
-  5  **守卫（M-C③）**：跑 scripts\boot-guard-check.mjs（29 项"今天为零"事实重新核一遍）
+  5  **守卫（M-C③）**：跑 scripts\boot-guard-check.mjs（41 项"今天为零"事实重新核一遍）
         全 OK ⇒ 继续；任何 MISMATCH / 表缺失 / 工具出错 ⇒ **不起 console（fail-closed）、Warning 9065（列出不符项名）、等人**
   6  **t0 快照（M-B）**：scripts\boot-outbound-check.mjs snap（18 个 relay 地址各读两次、相隔 10 s，两次须一致；不一致重试 ≤3 次，间隔 15 s）
         成功 ⇒ 记 t0；仍不稳 ⇒ 事件 9403"本次不做出站检查"，**继续起 console**
@@ -99,7 +113,7 @@ PHASE B —— 永无 exit、永无未捕获异常。`Invoke-PhaseB` 整体被 t
         没有 ⇒ 轮转 console 日志（失败 ⇒ 告警 31）→ 调 start-console-mainnet.ps1（退出码≠0 ⇒ 告警 63）→ 读 console-mainnet.pid，须是**新起的 node.exe 且命令行含生产路径**（S5）
         验证：进程活 + :3202 在听 + GET /api/system/rpc-overview 应答，最长 300 s ⇒ BOOT_OK（事件 9101）；否则告警 64，**不杀不重起**
         记 outbound 到期时刻 = 现在 + 30 min（仅当 t0 成功）
-  8  常驻哨兵，每 30 s（默认），**每项独立 try/catch**，且每轮先写 `sentinel-heartbeat`（**心跳覆盖整个脚本生命周期**：ALIVE 门循环、t0 快照重试、console 验证循环里也各写一次——门可能等几个小时，哨兵循环还没开始；F13 测试 + 变异证明）：
+  8  常驻哨兵，每 30 s（默认）：每 tick 调 **哨兵一拍 Invoke-SentinelBeat**（**同一个函数也在 ALIVE 门 / t0 快照重试 / console 校验三个等待循环里每轮调用，N-1**）——一拍 = 写 `sentinel-heartbeat`（脚本活着）+ 死亡检查 + 出站 diff（到期）+ 内存锁重试 + **节流的内存 tick**（成功采样才写 `memwatch-heartbeat`），每项独立 try/catch，永不抛：
         · kaspad / console 判死 = PID 不在 ∨ 启动时间变了（S6）⇒ 记状态 + Error 事件 9203 / 9204，一次，不重起
         · S3：kaspad 活着而 stdout >10 min 未写 ⇒ 事件 9206 一次（启发式）
         · **出站检查（M-B）**：到期后自动跑 diff ⇒ `spent_outpoints==0` 且全部可读 ⇒ 9401(Info)；`spent>0` ⇒ **9402(Warning，带逐 relay 行)**；有 relay 不可读 ⇒ 9404；工具出错 ⇒ 9403
@@ -169,7 +183,7 @@ console 没起来时 `events` 表写不了，所以三处都**不依赖 console*
 | T8 | `exchange.expireTick`（`index.js:310`，30 s） | `send_broadcast`（协议消息的手续费） | `exchange_offers` 超时行 | 0 offers | 数据依赖，仅费 |
 | T9 | `agent-mind/src/mind.mjs:988`（`mind-manager` 主动调度） | `SEND_KAS`（HTTP 自调 `transfer`） | `minds[name]` 必须存在且有 `runProactive` | 日志 "No relay nodes with adapters, skipping Mind init"（`minds` 空）；`adapter-launcher 0/0` | 今天为零（无 Mind 实例） |
 | T10 | 结算守护/ZK/bshard 族：`settle-daemon` + 4 个 ZK tick、`zk-prove-worker`、`bshard-close-voter`/`-v2`、`bshard-close-submit-v2`、`proto-driver`、`pool-auto-better`、`pool-market-seeder` | 各类 covenant/settle/bet | 各自 env 开关（`SETTLE_DAEMON_ENABLED`、`ZK_*`、`BSHARD_*`、`PROTO_DRIVER_ENABLED`、`AUTO_BET_TICK_MS=0`、`POOL_SEEDER_ENABLED=0`） | 日志逐行 `disabled (…!=1)` / `NOT started`；`[proto-driver] disabled` | **否（开关关，日志阳性证据）**；守卫核这些 env 键不为 `1` |
-| T11 | `mining-consolidate`、`faucet-health`、`bot-autofund` | `consolidate_utxo`/`transfer` | env 开关 / relay id 配置 | `MINING_CONSOLIDATE_ENABLED=false — cron not started`；后两者 `… not set — cron not started` | **否**；守卫核 id 键 |
+| T11 | `mining-consolidate`、`faucet-health`、`bot-autofund` | `consolidate_utxo`/`transfer` | env 开关 / relay id 配置 | `MINING_CONSOLIDATE_ENABLED=false — cron not started`；后两者 `… not set — cron not started` | **否（但 `MINING_CONSOLIDATE_ENABLED` 是缺省即开型：主网现在只靠 env 里一行 `=false` 挡着；v0.4 守卫要求它显式为 `false`、缺席即 MISMATCH，并核 `MINING_RELAY_ID` 缺席）** |
 | T12 | broker 族（`broker-intake-watcher`、`broker-action-queue` 等，含 5 分钟补零钱拆分） | `transfer`（退款/发币）、`split_utxo` | 只在 `if (BROKER_ENABLED==='1')` 块内加载（`index.js:904`）；模块顶层无 `BROKER_RELAY_ID` 即抛错 | 日志 `[broker] disabled (BROKER_ENABLED!=1)`；`BROKER_ENABLED` 键不存在；`[broker-utxo-split]` 0 行 | **否**；守卫核 `BROKER_ENABLED` |
 
 **B. 入站触发类（外部消息驱动，无人在场也会执行）**
@@ -215,9 +229,9 @@ console 没起来时 `events` 表写不了，所以三处都**不依赖 console*
 **动作**：把附录 A 与附录 C 原样落为三个文件（ps1 **仅 ASCII**）；`node scripts\lint-kanet.mjs <三个文件>`；采纳 S-C 则另出树外副本并记 sha256。
 **验收读数**：
 1. `[System.Management.Automation.Language.Parser]::ParseFile` 无错误；
-2. `powershell.exe -NoProfile -File scripts\mainnet-boot-sequence.ps1 -SelfTest` ⇒ **全 `PASS`、`SELFTEST failures=0`、退出码 0**（v0.3 草案已跑：**75 项 PASS**——伪造进程夹具、15 条状态机向量 + 12 条变异、采样失败路径、HRESULT 数值匹配、`Get-LogTail` 真读 >8 KB 文件、2026-09-19 23:20 真实读数向量、**15 条控制流测试**）。`-SelfTest` **不起任何真实进程**，且**开头强制断言所有可能被触碰的路径都在临时目录内**（见 §7-9 的事故教训）；
+2. `powershell.exe -NoProfile -File scripts\mainnet-boot-sequence.ps1 -SelfTest` ⇒ **全 `PASS`、`SELFTEST failures=0`、退出码 0**（v0.3 草案已跑：**82 项 PASS**——伪造进程夹具、15 条状态机向量 + 12 条变异、采样失败路径、HRESULT 数值匹配、`Get-LogTail` 真读 >8 KB 文件、2026-09-19 23:20 真实读数向量、**22 条控制流测试**）。`-SelfTest` **不起任何真实进程**，且**开头强制断言所有可能被触碰的路径都在临时目录内**（见 §7-9 的事故教训）；
 3. **控制流测试的证明力**（NWT 要求"不能拿 PASS 条数当证据"，所以**用变异证明它们在守东西**）：真 `Invoke-BootMain` 跑在伪造原语之上，覆盖 F1 正常顺序（起 kaspad→守卫→t0 快照→console）、F2/F2b/F3/F4 四种注入（pid 写失败 / Phase A 晚期异常走外层 catch / Phase B 未捕获异常 / 探针每次抛错）⇒ **`Stop-Boot` 一次都没被调用、kaspad 上下文已发布、哨兵仍在跑**、F5 二进制哈希不符（起前失败：**Stop-Boot 21 且什么都没起**）、F6 守卫不符（不起 console、无快照、9065）、F7 t0 不稳（9403，console 仍起）、F8 树不干净（**真** `Start-ConsolePhase` 返回 null、9062）、F9–F11 出站 diff 自动跑在 console 之后且 `spent>0`⇒9402、不可读⇒9404 而非 9401、F12 内存锁被占后重试接管。**7 个脚本变异各自被对应流程测试抓红**：外层 catch 恒 exit（v0.2 的 bug 本身）⇒ F2b 红；Phase B 异常不包裹 ⇒ F3 红；探针异常中止门 ⇒ F4 红；t0 挪到 console 之后 ⇒ F1/F9 红；守卫结果被忽略 ⇒ F6 红；不可读 relay 报成 clean ⇒ F11 红；内存锁不重试 ⇒ F12 红。
-4. 工具测试：`boot-guard-check.mjs` 对活库实跑 **29 项中恰 1 项 MISMATCH（`autotake`）**，另对**合成 DB/env 的 20 个场景**全过（全清、autotake 各组合、任一空表有行、缺表 ⇒ UNKNOWN fail-closed、env 开关/id 键各组合、被注释的行不算、scanner 开/关、各 prepared/pending 状态）；`boot-outbound-check.mjs` 对活节点 snap→diff = 0 变化，三个合成变异（删一个真 outpoint ⇒ exit 3；只多出一个 outpoint = 入账 ⇒ **exit 0 不误报**；某 relay 不可读 ⇒ exit 4）。
+4. 工具测试（v0.4）：**`boot-guard-check.test.mjs` 93 项全过**（每张空表/每个开关/两个默认开开关/id 键/继承与文件覆盖/大小写/`KEY =1`；**17 种行形态与真实 PowerShell 启动器逐项差分**；清单钉住；**启动 cron 登记表与真实 index.js 双向对账**）+ **9 个变异各被抓红**；对活库实跑 **41 项中恰 1 项 MISMATCH（`autotake`）**。`boot-outbound-check.mjs` 对活节点 snap→diff = 0 变化，三个合成变异（删一个真 outpoint ⇒ exit 3；只多出一个（入账）⇒ exit 0 不误报；某 relay 不可读 ⇒ exit 4）。
 
 **中止/回滚**：任一失败 ⇒ 不合入。回滚 = 不合入/`git revert`，无运行时效果（脚本没被任何东西调用）。
 
@@ -231,7 +245,7 @@ console 没起来时 `events` 表写不了，所以三处都**不依赖 console*
 1. 4.2 通过；**预演 R2 通过**（含 git 属主实测，见 R2(b)）；
 2. **D-026 开关已合入主线、已部署，并且运行中的主网 console 自己的 stdout 出现**：`[utxo-splitter] disabled (UTXO_AUTOSPLIT_ON_START!=1, raw=undefined)` 恰 1 行、`[utxo-splitter] … → … UTXOs` 0 行、`accounts split` 0 行、`[broadcaster-utxo] disabled (BROADCASTER_UTXO_MAINTAIN!=1, raw=undefined)` 恰 1 行、无 `[broadcaster-utxo] … rebalanced`。**这是 V6，是权威；静态 grep env 文件（V5）只是辅助**——console 子进程继承启动者 shell 的环境，`start-console-mainnet.ps1` 只往进程环境里加值、不清除继承变量。**（状态（Bettor (1542)）：已合入主线 `4e16ce39`，NWT 审 diff `99195212` GREEN、18 个变异 0 存活；合入不生效，V6 待下一次 console 重启核——所以本门此刻仍未过。）**
 3. **主网 `autotake` 已被 Owner/Bettor 置关**（`autotake_enabled=false` 或 `autotake_mode=approval`——**一个 `config_entries` 写入，不是代码；Owner/Bettor 定，我不动**）。**此刻它是 `true`/`auto`**，而 `boot-guard-check.mjs` 会因它 MISMATCH ⇒ **哨兵永不自启 console**。所以这一条**既是前提，也是被机制强制的**：不做这个决定，自启在功能上就不会拉起 console。**（NWT M-C①）**
-4. **守卫工具已落地并对活库跑绿**（29 项全 OK，即上一条完成后）；I7（relay 内建入站握手自动接受）**已有 Bettor/NWT 的处置结论**（加开关或明确接受为已知有界面）——它不在守卫覆盖内（§2.6-I7）；
+4. **守卫工具已落地并对活库跑绿**（41 项全 OK，即上一条完成后）；I7（relay 内建入站握手自动接受）**已有 Bettor/NWT 的处置结论**（加开关或明确接受为已知有界面）——它不在守卫覆盖内（§2.6-I7）；
 5. Bettor 出 EXECUTE 单。
 > 原门"D-G 已有 Owner 决定"**作废**：那句话无法区分"决定不加开关"与"开关还没做"。
 
@@ -247,7 +261,7 @@ console 没起来时 `events` 表写不了，所以三处都**不依赖 console*
 | **R0** | 语法解析 + `-SelfTest`（4.1 已含）；另可在**普通用户会话**跑 `-WatchOnly`（**只做内存检测、不起任何进程**）：先用**临时 `-KanetRoot`** 与调低的阈值验证告警路径（已跑过：`STATE enter-warn`、第二实例被文件锁拒绝退出码 10、未起任何进程），再以真实阈值挂在生产上；**并让它跑 ≥ 数小时，看 `SAMPLE` 行里 `sentinel_ws=` 与 `handles=` 不单调增长**（NWT P3 SHOULD-3——一个内存检测器不该成为内存增长者） | 见 P3 页 | `-WatchOnly` 在生产上跑会往 `logs\mainnet\boot\` 写日志与锁文件——**需 Bettor 明说** |
 | **R1** | **认领演练（幂等）**：kaspad 与 console 都在跑的现状下，手动运行一次脚本。预期：`KASPAD_ADOPTED` → 连续 3 次 ALIVE → **守卫 ⇒ 现状 `autotake` 仍 MISMATCH ⇒ 9065、不认领 console**（这本身就是对守卫的一次真机演练）→ 常驻；**不起任何进程、不轮转任何日志**。验完结束该脚本进程 | 进程表 kaspad/console 的 PID 与 `CreationDate` **不变**；没有新增 `*.pre-boot-*`；simnet 验证节点或隔离 console 在跑时判据**不受影响** | **需 Bettor 明说，且必须在 NWT 审过脚本草案之后** |
 | **R2** | **计划任务语义实测（无害动作）**，由 J1 注册一次性演练任务 `\KANet\KANet-Boot-Rehearsal`，主体与 §2.2 相同（S4U、Limited）、触发器"手动"：<br>**a) 起法与存活性（NWT M-A/S-D；第一优先）**：**先测 WMI `Win32_Process.Create` 起 `ping.exe -t 127.0.0.1`（是否脱离任务 Job、任务实例结束后是否存活）**；再测 `Start-Process` 起法（脚本以退出码 7 退出：子进程是否还活着；非 0 退出是否触发"失败重启"、几次后停）。**若 WMI 起法成立，直接改脚本起法（§2.1 末段），常驻包装不再承重**<br>**b) 令牌能力（NWT S-B）**：常驻变体下测 `node -v`、**`git -C D:\kanet-tn12 branch --show-current`**、**`git -C D:\kanet-tn12 diff --quiet HEAD -- scripts/start-console-mainnet.ps1`**（S4U 令牌可能撞 git 的 dubious-ownership 检查——只测 `git --version` 不够）、读非敏感本地文件、写 `logs\mainnet\boot\` 下文件<br>**c) 跨会话可管理性（NWT S4）**：任务起的 `ping -t`，从**交互式非提权会话**读其 `CommandLine`、`Stop-Process` 它 | a) 子进程存活与否、重启次数 = 3；b) 全部成功（git 失败 ⇒ 按 4.3 前置加 `safe.directory` 后重测）；**c) 读得到命令行且停得掉；若不成立 ⇒ 回报 Bettor 换 D-A 备选，不硬上**。演练完 `Unregister-ScheduledTask` | 只起 `ping`，不碰主网进程 |
-| **R3** | **起动路径演练（隔离，不碰主网）**：用脚本参数覆盖对一个 **simnet kaspad + 全新临时数据目录**（`scratch\`，端口避开 J2 的 simnet 与主网 17110，先确认没人占用）跑。**必须用与真实路径相同的起法**（S4U 任务 → 真实起法 → 重定向）。**`-SkipConsole` 打开**。向量：<br>① `KASPAD_STARTED` → 连续 3 次 `ALIVE` → `KASPAD_ALIVE`；再跑一遍 ⇒ `KASPAD_ADOPTED`，首遍日志被轮转成 `pre-boot-<ts>`；<br>② 故意把 `-KaspadSha256` 改错一位 ⇒ 退出码 21、**没有起进程**；<br>③ **（NWT M-A，真机版）`-InjectFault probe`** ⇒ **kaspad PID 不变、脚本仍常驻、事件 9045**；<br>④ **（新）`-InjectFault pidfile`** ⇒ **kaspad PID 不变、脚本进程不变、boot-history.log 有 pid 写失败一行、无 exit**；<br>⑤ **（新）`-InjectFault phasea-late`**（走外层 catch）⇒ **kaspad PID 与脚本都不变、事件 9099**；<br>⑥ **（新）`-InjectFault phaseb`**（Phase B 未捕获异常）⇒ **kaspad PID 与脚本都不变、事件 9098、哨兵心跳文件持续更新**；<br>⑦ **Ctrl+C / 关机通知（NWT H1/H4）**：测"`GenerateConsoleCtrlEvent` 能否送达该真实起法的隐藏进程"（预期：`-WindowStyle Hidden` 有隐藏控制台可能可达，`CREATE_NO_WINDOW` 无控制台不可达）；**这测的是 Ctrl+C，不是系统关机通知，两条路径不同、不能互相代替**；<br>⑧ 前次停机检查：构造"末行非 `Kaspad has stopped`"的内部日志夹具 ⇒ 事件 9205、软阈值×2 | 逐向量记录；**③–⑥ 是 NWT 点名的真机注入向量，`-SelfTest` 的伪造原语测试只是它的预演，不能代替**；探针对 simnet 的 `network` 字符串未验证——先读，不符则只测起/轮转/认领，不测门 | 起一个 simnet kaspad（临时目录），事后结束并清目录 |
+| **R3** | **起动路径演练（隔离，不碰主网）**：用脚本参数覆盖对一个 **simnet kaspad + 全新临时数据目录**（`scratch\`，端口避开 J2 的 simnet 与主网 17110，先确认没人占用）跑。**必须用与真实路径相同的起法**（S4U 任务 → 真实起法 → 重定向）。**`-SkipConsole` 打开**。向量：<br>① `KASPAD_STARTED` → 连续 3 次 `ALIVE` → `KASPAD_ALIVE`；再跑一遍 ⇒ `KASPAD_ADOPTED`，首遍日志被轮转成 `pre-boot-<ts>`；<br>② 故意把 `-KaspadSha256` 改错一位 ⇒ 退出码 21、**没有起进程**；<br>③ **（NWT M-A，真机版）`-InjectFault probe`** ⇒ **kaspad PID 不变、脚本仍常驻、事件 9045**；<br>④ **（新）`-InjectFault pidfile`** ⇒ **kaspad PID 不变、脚本进程不变、boot-history.log 有 pid 写失败一行、无 exit**；<br>⑤ **（新）`-InjectFault phasea-late`**（走外层 catch）⇒ **kaspad PID 与脚本都不变、事件 9099**；<br>⑥ **（新）`-InjectFault phaseb`**（Phase B 未捕获异常）⇒ **kaspad PID 与脚本都不变、事件 9098、哨兵心跳文件持续更新**；<br>⑦ **Ctrl+C / 关机通知（NWT H1/H4）**：测"`GenerateConsoleCtrlEvent` 能否送达该真实起法的隐藏进程"（预期：`-WindowStyle Hidden` 有隐藏控制台可能可达，`CREATE_NO_WINDOW` 无控制台不可达）；**这测的是 Ctrl+C，不是系统关机通知，两条路径不同、不能互相代替**；<br>⑧' **（v0.4，NWT N-7）`-InjectFault sentinel`**（异常逃出哨兵循环、走最外层 catch）⇒ **kaspad PID 与脚本都不变、`boot-history.log` 有 `sentinel loop threw` 一行、心跳持续更新**；<br>⑧ 前次停机检查：构造"末行非 `Kaspad has stopped`"的内部日志夹具 ⇒ 事件 9205、软阈值×2 | 逐向量记录；**③–⑥ 是 NWT 点名的真机注入向量，`-SelfTest` 的伪造原语测试只是它的预演，不能代替**；探针对 simnet 的 `network` 字符串未验证——先读，不符则只测起/轮转/认领，不测门 | 起一个 simnet kaspad（临时目录），事后结束并清目录 |
 
 ### 4.5 真重启验证（需要 Bettor GO；本机全部会话会被切断）
 
@@ -268,7 +282,7 @@ console 没起来时 `events` 表写不了，所以三处都**不依赖 console*
 | 8 | 四条敏感路由 | 均 503 |
 | 9 | 时间 | 关机 → `BOOT_OK` 的总时长 |
 | **10（v0.3：自动、链上侧、判据 `spent==0`）** | **不再人手做。** 哨兵在**起 console 之前**自动取 t0（两次读数一致的快照），console 起来 **+30 分钟自动 diff**，结果落 `boot-status.json` 与事件日志：**9401 = `spent_outpoints==0` 且 18 个 relay 全部可读（通过）**；**9402 = `spent>0`（失败，带逐 relay 行：名字、spent/new 数、新增 txid 前缀）**；9404 = 无花费但有 relay 不可读（**不算通过**）；9403 = 快照不稳定或工具出错（**本次开机没有做出站检查——要人补做**）。**外部入账只增加 `new_outpoints`，不算失败** | 9401；无 9402/9403/9404。**9402 时逐笔对 §2.6 表解释**（预期集在 D-026 上线且 `autotake` 置关后 = **空**）；**这一步现在是每次开机自动执行，不只是"首次真重启"** |
-| 11 | 内存哨兵在岗 | `memory-watch.log` 有 `started in boot sentinel` 行与周期 `SAMPLE` 行（含 `sentinel_ws=`/`handles=`）；`sentinel-heartbeat` 文件 mtime 不超过 2 个 tick |
+| 11 | 内存哨兵在岗 | `memory-watch.log` 有 `started in boot sentinel` 行与周期 `SAMPLE` 行（含 `sentinel_ws=`/`handles=`）；**`memwatch-heartbeat`**（**只在内存检测真的产出样本后才更新**）与 `sentinel-heartbeat`（脚本还活着）mtime 都不超过 2 个 tick；**两个心跳含义不同：前者新鲜才代表"内存检测在工作"，后者新鲜而前者过期 = 脚本在但内存检测没在产出（例如 CIM 采样一直失败）** |
 
 **已知限制（NWT M-B 补充）**：快照完整性依赖 `--utxoindex` 在 t0 时已追平；已用"两次读数一致"做稳定性读数，仍不一致则放弃本次检查（9403）而不是给出可能漏报的结论。**`kaspa_tx_log` 只登记"输出含我们某个 relay 地址"的交易，看不见"纯外付、无找零回自己"的出站**（见附录 C 的实测事实）——所以判据的**主信号是 outpoint 差分**，`kaspa_tx_log` 只作登记覆盖度自检。
 
@@ -295,7 +309,7 @@ console 没起来时 `events` 表写不了，所以三处都**不依赖 console*
 | 9203 / 9204 | 运行期 kaspad / console 消失（PID 不在或启动时间变了） | 事件日志前后文、系统事件日志（内存耗尽 2004？） | **nothing restarts it automatically**：kaspad 重启后 console 必须一起重启；先 quiesce 再重启 |
 | 9098 / 9099 | **Phase B 整体异常（落入哨兵）/ Phase A 在 kaspad 已知后的异常（继续）**；Phase A 起前异常是退出码 99 | 状态文件 / `boot-history.log` message | 报 Bettor；kaspad 未被动 |
 | **9401 / 9402 / 9403 / 9404** | **出站检查**：9401 通过（`spent==0` 且全可读）/ **9402 检出花费（Warning，带逐 relay 行）** / 9403 本次没有做出站检查（t0 不稳或工具出错）/ 9404 无花费但有 relay 不可读（不算通过） | 事件 message；`logs\mainnet\boot\outbound-t0.json`（只含 txid:index，无地址无金额）；手动 `node scripts\boot-outbound-check.mjs diff <t0文件>`（只读） | 9402：逐笔对 §2.6 解释；无法解释 ⇒ 立即报 Bettor（有人在无人时花了钱）；9403/9404：人补做 |
-| 9301–9305、9310–9313 | 内存检测（见 P3 页） | `memory-watch.log`；**`sentinel-heartbeat` mtime 过旧 = 哨兵自己挂了** | 见 P3 页 |
+| 9301–9305、9310–9313 | 内存检测（见 P3 页） | `memory-watch.log`；**`memwatch-heartbeat` mtime 过旧 = 内存检测没在产出（P3 存活判据）；`sentinel-heartbeat` 过旧 = 脚本自己挂了/没起来** | 见 P3 页 |
 
 ## 6. 回滚与待议项
 
@@ -333,10 +347,15 @@ console 没起来时 `events` 表写不了，所以三处都**不依赖 console*
 14. **守卫的可用性代价**：守卫是 fail-closed——任何表出现一行合法数据（例如将来真有 `pool_markets`）都会让 console 不自启，需要人核后手动起。这是有意的，但意味着"自启"的可用性依赖数据保持"今天为零"。
 15. 提交内存字段口径以本机实测为准（en-US；脚本用 `Win32_OperatingSystem` 属性，不受区域影响）。
 
-## 附录 A. `scripts/mainnet-boot-sequence.ps1` v0.3 草案全文（**未落码、未在真启动上运行**；ASCII-only；落码须 Bettor 批 + NWT 再审）
+16. **哨兵一拍在等待循环里的节流**：内存 tick 按 `SentinelTickSec`（默认 30 s）节流，等待循环每 10–15 s 一拍，所以内存采样节奏不变；等待循环里**不重复报 kaspad 死亡**（门自己报 9046）。**门/快照/校验三个循环之外的长阻塞**（例如 `Get-CimInstance` 卡住不返回）由 `-OperationTimeoutSec 10` 限制；`Invoke-NodeTool` 拉起的 node 子进程**没有超时**——若它挂住，一拍就被它拖住（探针自带 8 s 超时，快照/守卫工具没有）。**这是已知缺口，未修**。
+17. **出站检查的已知限制（NWT 观察②）**：只看得到 **t0 时已存在**的 outpoint 被花掉；窗口内"入账后立即又被花掉"的 UTXO，差分看不见（每笔花费都需要 relay 的 fee 输入，所以实际上多半仍会带出一个 t0 outpoint，但这是推论，**未证**）。console **没起**时不排期、不发 9401（v0.4）。
+18. **守卫登记表的可见但未守卫部分**：`CRON_REGISTRY` 里 20 个调用是 `audit-only`/`not-audited`，登记只保证"新增的不会悄悄绕过"，不保证"已有的都被运行期守卫"；其中 `startAllRelays`（`infra`）内含 I7（relay 内建入站握手自动接受）这个**开放项**。
+19. **`Invoke-SentinelBeat` 的死亡检查在门里不含 kaspad**（避免与门的 9046 重复）；门失败返回后，由哨兵循环第一拍补报 9203。
+
+## 附录 A. `scripts/mainnet-boot-sequence.ps1` v0.4 草案全文（**未落码、未在真启动上运行**；ASCII-only；落码须 Bettor 批 + NWT 再审）
 
 ```powershell
-# mainnet-boot-sequence.ps1 v0.3 -- DRAFT, not landed, not run on a real boot. KANet-UI 2026-09-19.
+# mainnet-boot-sequence.ps1 v0.4 -- DRAFT, not landed, not run on a real boot. KANet-UI 2026-09-19.
 # Boot-time orchestration for the mainnet node + console, plus a resident sentinel (death watch, boot-window outbound-spend check,
 # system commit-memory watch). BOOT-ONLY: it never restarts anything that died after boot (a console restart after a kaspad
 # restart has money-path side effects and must be a human decision).
@@ -375,7 +394,7 @@ param(
   [double]  $MemEscalatePp   = 5,
   [int]     $SentinelTickSec = 30,
   [string[]]$ExtraKaspadArgs = @(),
-  [string]  $InjectFault     = '',      # REHEARSAL ONLY: '' | pidfile | phasea-late | phaseb | probe
+  [string]  $InjectFault     = '',      # REHEARSAL ONLY: '' | pidfile | phasea-late | phaseb | probe | sentinel
   [switch]  $SkipConsole,
   [switch]  $WatchOnly,
   [switch]  $SelfTest
@@ -385,7 +404,8 @@ $BootDir = Join-Path $KanetRoot 'logs\mainnet\boot'
 $StatusFile = Join-Path $BootDir 'boot-status.json'
 $HistoryFile = Join-Path $BootDir 'boot-history.log'
 $MemLogFile = Join-Path $BootDir 'memory-watch.log'
-$HeartbeatFile = Join-Path $BootDir 'sentinel-heartbeat'
+$HeartbeatFile = Join-Path $BootDir 'sentinel-heartbeat'          # "the script is alive"
+$MemHeartbeatFile = Join-Path $BootDir 'memwatch-heartbeat'        # "the memory detector produced a sample" (NWT N-1): the liveness criterion for P3
 $Stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $ScriptStart = Get-Date
 $ExpectedConsoleScript = Join-Path $KanetRoot 'kasia-console\src\index.js'
@@ -642,6 +662,7 @@ function Invoke-MemoryWatchTick {
     if ($Script:MemFailAlerted) { Send-BootEvent 9312 'Information' ("memory watch: sampling recovered after {0} ms blind" -f $blind) }
     $Script:MemFails = 0; $Script:MemFailAlerted = $false; $Script:MemExhaustAlerted = $false
   }
+  Set-MemHeartbeat
   $Script:MemTicks++
   if ($Script:MemTicks % 10 -eq 1) { Write-MemLine ("SAMPLE commit={0}% used={1}GB limit={2}GB physFree={3}GB top={4} sentinel_ws={5}MB handles={6}" -f $s.pct, $s.usedGB, $s.limitGB, $s.physFreeGB, $s.top, $s.selfMB, $s.selfHandles) }
   $t = Get-MemoryTransition $Script:MemState $s.pct $now $cfg
@@ -662,8 +683,13 @@ function Enter-MemoryLock {
   try { $Script:MemLock = [System.IO.File]::Open((Join-Path $BootDir 'memory-watch.lock'), 'OpenOrCreate', 'ReadWrite', 'None'); return $true } catch { return $false }
 }
 function Set-Heartbeat {
-  # NWT P3 SHOULD-1: "no alert" and "sentinel dead/hung" must be distinguishable. A consumer alarms when this file's mtime is stale.
+  # "the script is alive" (NWT P3 SHOULD-1). NOT proof that memory detection is running -- see Set-MemHeartbeat.
   try { Set-Content -LiteralPath $HeartbeatFile -Value ((Get-Date).ToString('o')) -Encoding ASCII } catch { }
+}
+function Set-MemHeartbeat {
+  # NWT N-1: written ONLY when a memory sample was actually taken and evaluated. A consumer that wants "memory detection is alive" must
+  # read THIS file; a fresh sentinel-heartbeat with a stale memwatch-heartbeat means the script is up but memory detection is not.
+  try { Set-Content -LiteralPath $MemHeartbeatFile -Value ((Get-Date).ToString('o')) -Encoding ASCII } catch { }
 }
 
 # ---------------------------------------------------------------- boot phases
@@ -717,7 +743,7 @@ function Wait-KaspadAlive($Ctx) {
   $soft = if ($Ctx.PrevUnclean) { $GateSoftSec * 2 } else { $GateSoftSec }
   $t0 = $Script:Mono.Elapsed.TotalSeconds; $streak = 0; $consecErr = 0; $stalledAlerted = $false; $softAlerted = $false; $lastNote = $t0
   while ($true) {
-    Set-Heartbeat   # the heartbeat must cover the WHOLE script lifetime (the gate can wait for hours before the sentinel loop starts)
+    Invoke-SentinelBeat $Ctx -InGate   # NWT N-1: the memory detector + death watch must run DURING the gate wait (up to 24 h), not only after it
     if (-not (Get-Process -Id $Ctx.Pid -ErrorAction SilentlyContinue)) { Warn-Kaspad 46 'KASPAD_GATE' "kaspad pid $($Ctx.Pid) exited while waiting for ALIVE"; return $false }
     # NWT S-A: a probe that cannot even run (node spawn failure under memory pressure) is a FAILED READING, not a reason to abort the gate
     try { $p = Invoke-Probe } catch { $p = [pscustomobject]@{ Code = 1; Line = ("probe threw: {0}" -f $_.Exception.Message) } }
@@ -754,7 +780,7 @@ function Invoke-OutboundSnap {
   # NWT M-B: t0 is taken HERE -- after kaspad is stably ALIVE and BEFORE the console starts -- because the startup-time spending path
   # fires within seconds of the console starting. Two reads must agree (utxoindex caught up); retried a few times; failure only warns.
   for ($i = 1; $i -le 3; $i++) {
-    Set-Heartbeat
+    Invoke-SentinelBeat $Script:Ctx
     $r = Invoke-NodeTool 'scripts\boot-outbound-check.mjs' @('snap', (Join-Path $BootDir 'outbound-t0.json'), '--settle-sec', '10')
     if ($r.Code -eq 0) { $Script:OutboundT0Ok = $true; Set-BootStatus 'OUTBOUND_T0' @{ attempt = $i; result = $r.Text }; return }
     Write-History ("outbound snap attempt {0} exit {1}: {2}" -f $i, $r.Code, $r.Text)
@@ -801,7 +827,7 @@ function Start-ConsolePhase($Ctx) {
   # verify: process alive, port listening, HTTP answering. A failure here warns; it never kills or restarts the console.
   $t0 = $Script:Mono.Elapsed.TotalSeconds; $ok = $false
   while (($Script:Mono.Elapsed.TotalSeconds - $t0) -lt 300) {
-    Set-Heartbeat
+    Invoke-SentinelBeat $Script:Ctx
     if ((Get-Process -Id $cPid -ErrorAction SilentlyContinue) -and (Test-Listening $ConsolePort)) {
       try {
         $sum = (Invoke-RestMethod -Uri "http://127.0.0.1:$ConsolePort/api/system/rpc-overview" -TimeoutSec 10).summary
@@ -833,35 +859,50 @@ function Invoke-PhaseB($Ctx) {
   try { Invoke-OutboundSnap } catch { Send-BootEvent 9403 'Warning' ("outbound snap threw: {0}" -f $_.Exception.Message) }
   try {
     $Script:Con = Start-ConsolePhase $Ctx
-    if ($Script:OutboundT0Ok) { $Script:OutboundDueMs = [double]$Script:Mono.ElapsedMilliseconds + ($OutboundDelaySec * 1000.0) }
+    if ($Script:OutboundT0Ok -and $Script:Con) { $Script:OutboundDueMs = [double]$Script:Mono.ElapsedMilliseconds + ($OutboundDelaySec * 1000.0) }
   } catch { Warn-Console 97 'CONSOLE_START' ("unexpected: {0}" -f $_.Exception.Message) }
 }
 
+$Script:Beat = @{ HaveMem = $false; MemTried = $false; KDead = $false; CDead = $false; Stale = $false; LastMemMs = -1e12; CfgWarned = $false }
+$Script:SentinelFaulted = $false
+
+function Invoke-SentinelBeat($Ctx, [switch]$InGate) {
+  # ONE sentinel beat = the duties that must never stop while this script lives (NWT N-1). Called on every tick of the sentinel loop AND on
+  # every iteration of the three waiting loops that precede it (ALIVE gate up to 24 h, t0-snapshot retries, console verification), so the
+  # memory detector and the death watch are never off. Every duty is individually try/catch'd; this function never throws.
+  if ($null -eq $Ctx) { $Ctx = $Script:Ctx }
+  Set-Heartbeat
+  try {
+    if ($Script:MemCfgErr -and -not $Script:Beat.CfgWarned) { $Script:Beat.CfgWarned = $true; Send-BootEvent 9313 'Error' ("memory watch DISABLED: invalid config: {0}" -f $Script:MemCfgErr) }
+    # kaspad death is reported by the gate itself (Warn-Kaspad 46) while InGate; afterwards by this watch
+    if ($Ctx -and -not $InGate -and -not $Script:Beat.KDead -and -not (Test-SameProcess $Ctx.Pid $Ctx.StartTicks)) { $Script:Beat.KDead = $true; Set-BootStatus 'KASPAD_DIED_AFTER_BOOT' @{ kaspadPid = $Ctx.Pid }; Send-BootEvent 9203 'Error' "kaspad pid $($Ctx.Pid) is gone after boot; nothing restarts it automatically" }
+    if ($Script:Con -and -not $Script:Beat.CDead -and -not (Test-SameProcess $Script:Con.Pid $Script:Con.StartTicks)) { $Script:Beat.CDead = $true; Set-BootStatus 'CONSOLE_DIED_AFTER_BOOT' @{ consolePid = $Script:Con.Pid }; Send-BootEvent 9204 'Error' "console pid $($Script:Con.Pid) is gone after boot; nothing restarts it automatically" }
+    # S3 (heuristic): kaspad alive but its redirected stdout has not been written for >10 min
+    if ($Ctx -and -not $Script:Beat.KDead -and -not $Script:Beat.Stale -and $Ctx.StdoutPath -and (Test-Path -LiteralPath $Ctx.StdoutPath)) {
+      if (((Get-Date) - (Get-Item -LiteralPath $Ctx.StdoutPath).LastWriteTime).TotalMinutes -gt 10) { $Script:Beat.Stale = $true; Send-BootEvent 9206 'Warning' 'stdout_capture_stale: kaspad is alive but kaspad-stdout.log has not been written for >10 min; the internal log is the authority' }
+    }
+  } catch { Write-History ("sentinel death-watch exception: {0}" -f $_.Exception.Message) }
+  try {   # NWT M-B: the boot-window outbound diff runs by itself, every boot (only scheduled when a console exists)
+    if ($Script:OutboundT0Ok -and -not $Script:OutboundDone -and $Script:OutboundDueMs -gt 0 -and [double]$Script:Mono.ElapsedMilliseconds -ge $Script:OutboundDueMs) { Invoke-OutboundDiff }
+  } catch { Write-History ("outbound diff exception: {0}" -f $_.Exception.Message) }
+  try {   # NWT P3 SHOULD-4: (re)try the memory lock on EVERY beat until we hold it; the sample itself is throttled to one per SentinelTickSec
+    if (-not $Script:Beat.HaveMem -and -not $Script:MemCfgErr -and (Enter-MemoryLock)) {
+      $Script:Beat.HaveMem = $true
+      Write-MemLine ($(if ($Script:Beat.MemTried) { 'MEMWATCH-TAKEOVER: boot sentinel now holds the memory watch ' } else { 'started in boot sentinel ' }) + ("warn={0} crit={1} clear={2} critClear={3} tick={4}s (detection only)" -f $MemWarnPct, $MemCritPct, $MemClearPct, $MemCritClearPct, $SentinelTickSec))
+    } elseif (-not $Script:Beat.HaveMem -and -not $Script:MemCfgErr -and -not $Script:Beat.MemTried) { $Script:Beat.MemTried = $true; Write-History 'memory-watch.lock held by another watcher; will retry every beat' }
+    if ($Script:Beat.HaveMem -and (([double]$Script:Mono.ElapsedMilliseconds - $Script:Beat.LastMemMs) -ge ($SentinelTickSec * 1000.0))) {
+      $Script:Beat.LastMemMs = [double]$Script:Mono.ElapsedMilliseconds
+      Invoke-MemoryWatchTick
+    }
+  } catch { Write-History ("memory tick exception: {0}" -f $_.Exception.Message) }
+}
+
 function Invoke-SentinelLoop($Ctx) {
-  # Resident sentinel. Every duty is individually try/catch'd; nothing here can end the script (production never returns).
-  $haveMem = $false; $memTried = $false
-  if ($Script:MemCfgErr) { Send-BootEvent 9313 'Error' ("memory watch DISABLED: invalid config: {0}" -f $Script:MemCfgErr) }
-  $kSeenDead = $false; $cSeenDead = $false; $staleAlerted = $false; $ticks = 0
+  # Resident sentinel. Every duty lives in Invoke-SentinelBeat (individually try/catch'd); nothing here can end the script (production never returns).
+  if ($InjectFault -eq 'sentinel' -and -not $Script:SentinelFaulted) { $Script:SentinelFaulted = $true; throw 'injected sentinel-loop exception (rehearsal only)' }   # exercises the outermost catch in Invoke-BootMain
+  $ticks = 0
   while ($true) {
-    Set-Heartbeat
-    try {
-      if (-not $kSeenDead -and -not (Test-SameProcess $Ctx.Pid $Ctx.StartTicks)) { $kSeenDead = $true; Set-BootStatus 'KASPAD_DIED_AFTER_BOOT' @{ kaspadPid = $Ctx.Pid }; Send-BootEvent 9203 'Error' "kaspad pid $($Ctx.Pid) is gone after boot; nothing restarts it automatically" }
-      if ($Script:Con -and -not $cSeenDead -and -not (Test-SameProcess $Script:Con.Pid $Script:Con.StartTicks)) { $cSeenDead = $true; Set-BootStatus 'CONSOLE_DIED_AFTER_BOOT' @{ consolePid = $Script:Con.Pid }; Send-BootEvent 9204 'Error' "console pid $($Script:Con.Pid) is gone after boot; nothing restarts it automatically" }
-      # S3 (heuristic): kaspad alive but its redirected stdout has not been written for >10 min
-      if (-not $kSeenDead -and -not $staleAlerted -and $Ctx.StdoutPath -and (Test-Path -LiteralPath $Ctx.StdoutPath)) {
-        if (((Get-Date) - (Get-Item -LiteralPath $Ctx.StdoutPath).LastWriteTime).TotalMinutes -gt 10) { $staleAlerted = $true; Send-BootEvent 9206 'Warning' 'stdout_capture_stale: kaspad is alive but kaspad-stdout.log has not been written for >10 min; the internal log is the authority' }
-      }
-    } catch { Write-History ("sentinel death-watch exception: {0}" -f $_.Exception.Message) }
-    try {   # NWT M-B: the boot-window outbound diff runs by itself, every boot
-      if ($Script:OutboundT0Ok -and -not $Script:OutboundDone -and [double]$Script:Mono.ElapsedMilliseconds -ge $Script:OutboundDueMs) { Invoke-OutboundDiff }
-    } catch { Write-History ("outbound diff exception: {0}" -f $_.Exception.Message) }
-    try {   # NWT P3 SHOULD-4: (re)try the memory lock EVERY tick until we hold it (a -WatchOnly session may have held it at boot)
-      if (-not $haveMem -and -not $Script:MemCfgErr -and (Enter-MemoryLock)) {
-        $haveMem = $true
-        Write-MemLine ($(if ($memTried) { 'MEMWATCH-TAKEOVER: boot sentinel now holds the memory watch ' } else { 'started in boot sentinel ' }) + ("warn={0} crit={1} clear={2} critClear={3} tick={4}s (detection only)" -f $MemWarnPct, $MemCritPct, $MemClearPct, $MemCritClearPct, $SentinelTickSec))
-      } elseif (-not $haveMem -and -not $memTried) { $memTried = $true; Write-History 'memory-watch.lock held by another watcher; will retry every tick' }
-      if ($haveMem) { Invoke-MemoryWatchTick }
-    } catch { Write-History ("memory tick exception: {0}" -f $_.Exception.Message) }
+    Invoke-SentinelBeat $Ctx
     $ticks++
     if ($Script:MaxSentinelTicks -gt 0 -and $ticks -ge $Script:MaxSentinelTicks) { return }   # test hook only; production value is 0
     Start-Sleep -Seconds $SentinelTickSec
@@ -896,14 +937,21 @@ if ($SelfTest) {
   # Helper / vector / control-flow checks only. Uses a temp dir; starts NO real process, touches no production path.
   $tmp = Join-Path $env:TEMP ('boot-selftest-' + $Stamp); New-Item -ItemType Directory -Force -Path $tmp | Out-Null
   $KanetRoot = $tmp; $BootDir = Join-Path $tmp 'logs\mainnet\boot'; New-Item -ItemType Directory -Force -Path $BootDir | Out-Null
-  $StatusFile = Join-Path $BootDir 'boot-status.json'; $HistoryFile = Join-Path $BootDir 'boot-history.log'; $MemLogFile = Join-Path $BootDir 'memory-watch.log'; $HeartbeatFile = Join-Path $BootDir 'sentinel-heartbeat'
+  $StatusFile = Join-Path $BootDir 'boot-status.json'; $HistoryFile = Join-Path $BootDir 'boot-history.log'; $MemLogFile = Join-Path $BootDir 'memory-watch.log'; $HeartbeatFile = Join-Path $BootDir 'sentinel-heartbeat'; $MemHeartbeatFile = Join-Path $BootDir 'memwatch-heartbeat'
   # SELFTEST SAFETY: every path a flow test could touch is redirected into the temp dir (an earlier draft left $KaspadLogDir on the
   # production path; the live kaspad's open log file happened to make the rotation fail instead of renaming it).
   $KaspadLogDir = Join-Path $tmp 'kaspad-logs'; New-Item -ItemType Directory -Force -Path $KaspadLogDir | Out-Null
   $KaspadInternalLog = Join-Path $tmp 'rusty-kaspa.log'; $AppDir = Join-Path $tmp 'kaspa-data'
   $KaspadExe = Join-Path $tmp 'fake-kaspad.exe'; New-Item -ItemType File -Force -Path $KaspadExe | Out-Null
   $ExpectedConsoleScript = Join-Path $tmp 'kasia-consolesrcindex.js'
-  foreach ($pathVar in $KanetRoot, $BootDir, $StatusFile, $HistoryFile, $MemLogFile, $HeartbeatFile, $KaspadLogDir, $KaspadInternalLog, $KaspadExe, $AppDir) { if (-not $pathVar.StartsWith($tmp)) { throw "SELFTEST SAFETY: path outside the temp dir: $pathVar" } }
+  # NWT N-6: the safety assertion is (a) about the temp dir itself and (b) re-run before EVERY recursive delete, with a path-separator boundary
+  function Assert-UnderTmp([string]$p) {
+    $tempRoot = [System.IO.Path]::GetTempPath().TrimEnd('\')
+    $leaf = Split-Path -Leaf $tmp
+    if (-not ($tmp.StartsWith($tempRoot + '\') -and $leaf -like 'boot-selftest-*')) { throw "SELFTEST SAFETY: temp root is not a boot-selftest-* dir under GetTempPath(): $tmp" }
+    if (-not ($p -eq $tmp -or $p.StartsWith($tmp + '\'))) { throw "SELFTEST SAFETY: path outside the temp dir: $p" }
+  }
+  foreach ($pathVar in $KanetRoot, $BootDir, $StatusFile, $HistoryFile, $MemLogFile, $HeartbeatFile, $MemHeartbeatFile, $KaspadLogDir, $KaspadInternalLog, $KaspadExe, $AppDir, $ExpectedConsoleScript) { Assert-UnderTmp $pathVar }
   $fail = 0
   function Check([string]$Name, [bool]$Ok) { if ($Ok) { "PASS $Name" } else { "FAIL $Name"; $Script:fail++ } }
   # --- log rotation
@@ -1064,12 +1112,13 @@ if ($SelfTest) {
 
   # ================= CONTROL-FLOW TESTS under stubs (NWT M-A / M-B / M-C / S-A): the real Invoke-BootMain runs; every
   # process-touching primitive is replaced by a stub that records calls. Nothing real is started; Start-Sleep is a no-op. =========
-  $Script:Sim = @{}
+  $Script:Sim = @{}; $Script:GuardChecksStub = 41   # stub text only; the real tool prints its own count
   function Dispose-Locks { foreach ($lk in 'LockStream', 'MemLock') { try { $v = Get-Variable -Scope Script -Name $lk -ValueOnly -ErrorAction SilentlyContinue; if ($v) { $v.Dispose(); Set-Variable -Scope Script -Name $lk -Value $null } } catch { } } }
   function Reset-Sim([hashtable]$over = @{}) {
     Dispose-Locks
-    Remove-Item -Recurse -Force (Join-Path $KanetRoot 'logs\mainnet\boot\*') -ErrorAction SilentlyContinue
-    $Script:OnSleepAt = 0; $Script:OnSleep = $null; $Script:Sim = @{ Sleeps = 0; StopBoot = @(); Started = 0; Console = 0; Order = @(); Ev = @(); ProbeCode = 0; Sha = $KaspadSha256; GuardCode = 0; SnapCode = 0; DiffCode = 0; TreeOk = $true }
+    Assert-UnderTmp $BootDir; Assert-UnderTmp $KanetRoot   # re-asserted immediately before the recursive delete (NWT N-6)
+    Remove-Item -Recurse -Force (Join-Path $BootDir '*') -ErrorAction SilentlyContinue
+    $Script:OnSleepAt = 0; $Script:OnSleep = $null; $Script:SentinelFaulted = $false; $Script:Beat = @{ HaveMem = $false; MemTried = $false; KDead = $false; CDead = $false; LastMemMs = -1e12; Stale = $false; CfgWarned = $false }; $Script:MemCfgErr = $null; $Script:Sim = @{ NodeProcs = @(); Listeners = @(); RestCalls = 0; RestFailFirst = 0; Sleeps = 0; StopBoot = @(); Started = 0; Console = 0; Order = @(); Ev = @(); ProbeCode = 0; Sha = $KaspadSha256; GuardCode = 0; SnapCode = 0; DiffCode = 0; TreeOk = $true }
     foreach ($k in $over.Keys) { $Script:Sim[$k] = $over[$k] }
     $Script:Ctx = $null; $Script:Con = $null; $Script:OutboundT0Ok = $false; $Script:OutboundDone = $false; $Script:OutboundDueMs = 0
     $Script:MemState = @{ Level = 'OK'; LastMs = 0; LastPct = 0 }; $Script:MemTicks = 0; $Script:MemFails = 0
@@ -1087,11 +1136,14 @@ if ($SelfTest) {
   function Start-Process { param($FilePath, $ArgumentList, $RedirectStandardOutput, $RedirectStandardError, $WindowStyle, [switch]$PassThru) $Script:Sim.Started++; $Script:Sim.Order += 'start-kaspad'; [pscustomobject]@{ Id = $PID } }
   function Invoke-Probe { if ($InjectFault -eq 'probe') { throw 'injected probe failure' }; [pscustomobject]@{ Code = $Script:Sim.ProbeCode; Line = 'stub probe' } }
   function Invoke-NodeTool([string]$ScriptRel, [string[]]$ToolArgs) {
-    if ($ScriptRel -like '*guard*') { $Script:Sim.Order += 'guard'; return [pscustomobject]@{ Code = $Script:Sim.GuardCode; Text = $(if ($Script:Sim.GuardCode -eq 0) { "GUARD-RESULT checks=24 not_ok=0" } else { "GUARD config:autotake MISMATCH armed`nGUARD-RESULT checks=24 not_ok=1" }) } }
+    if ($ScriptRel -like '*guard*') { $Script:Sim.Order += 'guard'; return [pscustomobject]@{ Code = $Script:Sim.GuardCode; Text = $(if ($Script:Sim.GuardCode -eq 0) { "GUARD-RESULT checks=$($Script:GuardChecksStub) not_ok=0" } else { "GUARD config:autotake MISMATCH armed`nGUARD-RESULT checks=$($Script:GuardChecksStub) not_ok=1" }) } }
     if ($ToolArgs[0] -eq 'snap') { $Script:Sim.Order += 'snap'; return [pscustomobject]@{ Code = $Script:Sim.SnapCode; Text = 'SNAP-OK stub' } }
     $Script:Sim.Order += 'diff'; [pscustomobject]@{ Code = $Script:Sim.DiffCode; Text = 'RESULT stub' }
   }
   $RealStartConsole = (Get-Command Start-ConsolePhase).ScriptBlock
+  function Get-NodeProcs { @($Script:Sim.NodeProcs) }
+  function Get-ListenerPids([int]$Port) { @($Script:Sim.Listeners) }
+  function Invoke-RestMethod { param($Uri, $TimeoutSec) $Script:Sim.RestCalls++; if ($Script:Sim.RestCalls -le $Script:Sim.RestFailFirst) { throw 'stub: console not answering yet' }; [pscustomobject]@{ summary = 'stub 18/18' } }
   function Start-ConsolePhase($Ctx) { $Script:Sim.Console++; $Script:Sim.Order += 'console'; @{ Pid = $PID; StartTicks = $null } }
   $SkipConsole = [switch]$false
   function Run-Flow {
@@ -1129,6 +1181,39 @@ if ($SelfTest) {
   Reset-Sim; $tc = & $RealStartConsole @{ Tree = @{ ok = $false; reason = 'dirty tree (fixture)' } }
   Check 'flow-F8-dirty-tree: real Start-ConsolePhase returns null, raises 9062, and never reaches the start-console script' (($null -eq $tc) -and ($Script:Sim.Ev -contains 9062) -and ($Script:Sim.Console -eq 0))
 
+  # F17: the REAL Start-ConsolePhase (adopt path) verification loop must also run the sentinel beat (memory detector) every iteration.
+  # Fixture: a fabricated production console (this process's own PID, so Get-Process works), listening, pid file agreeing; the HTTP check
+  # fails twice before answering, so the loop iterates. A CRIT sample must be alerted from INSIDE that loop.
+  Reset-Sim @{ RestFailFirst = 2 }; $Script:Fake = @{ pct = 95.0; usedGB = 85.0; limitGB = 89.6; physFreeGB = 1.0; top = 'x:1:1'; selfMB = 40.0; selfHandles = 500 }
+  $consoleDir = Join-Path $KanetRoot 'logs\mainnet'; New-Item -ItemType Directory -Force -Path $consoleDir | Out-Null; Set-Content -LiteralPath (Join-Path $consoleDir 'console-mainnet.pid') -Value $PID -Encoding ASCII
+  $Script:Sim.NodeProcs = @([pscustomobject]@{ ProcessId = $PID; Name = 'node.exe'; CommandLine = ('"node.exe" ' + $ExpectedConsoleScript) }); $Script:Sim.Listeners = @($PID)
+  $Script:Ctx = @{ Pid = $PID; StartTicks = $null; Tree = @{ ok = $true; reason = '' }; PrevUnclean = $false }
+  $con17 = & $RealStartConsole $Script:Ctx
+  Check 'flow-F17-real-console-verification-loop-runs-the-memory-detector (CRIT alerted from inside the console-wait loop; console adopted)' (($null -ne $con17) -and ($Script:Sim.Ev -contains 9302) -and ($Script:Sim.Ev -contains 9101))
+  # F17b: the t0-snapshot retry loop too (real Invoke-OutboundSnap; the snapshot tool never settles)
+  Reset-Sim @{ SnapCode = 5 }; $Script:Fake = @{ pct = 95.0; usedGB = 85.0; limitGB = 89.6; physFreeGB = 1.0; top = 'x:1:1'; selfMB = 40.0; selfHandles = 500 }; $Script:Ctx = @{ Pid = $PID; StartTicks = $null }
+  Invoke-OutboundSnap
+  Check 'flow-F17b-t0-snapshot-retry-loop-runs-the-memory-detector (CRIT alerted while the snapshot keeps failing)' (($Script:Sim.Ev -contains 9302) -and ($Script:Sim.Ev -contains 9403))
+
+  # NWT N-1 (their vector, on our fixture): kaspad SYNCING for a long time + a CRIT commit sample. The memory detector must fire 9302 DURING
+  # the ALIVE gate wait and must produce a fresh memwatch-heartbeat, without waiting for the sentinel loop.
+  Reset-Sim @{ ProbeCode = 7 }; $Script:Fake = @{ pct = 95.0; usedGB = 85.0; limitGB = 89.6; physFreeGB = 1.0; top = 'x:1:1'; selfMB = 40.0; selfHandles = 500 }
+  $Script:OnSleepAt = 6; $Script:OnSleep = { $Script:Sim.ProbeCode = 0 }
+  $Script:Ctx = @{ Pid = $PID; StartTicks = $null; PrevUnclean = $false }; $null = Wait-KaspadAlive $Script:Ctx; $Script:OnSleepAt = 0
+  Check 'flow-F14-NWT-N1: CRIT commit sample during a long ALIVE-gate wait (kaspad SYNCING) raises 9302 BEFORE the sentinel loop exists' (($Script:Sim.Ev -contains 9302) -and (Test-Path $MemHeartbeatFile))
+  Reset-Sim @{ ProbeCode = 7 }; $Script:Fake = $good
+  $Script:OnSleepAt = 6; $Script:OnSleep = { $Script:Sim.ProbeCode = 0 }
+  $Script:Ctx = @{ Pid = $PID; StartTicks = $null; PrevUnclean = $false }; $null = Wait-KaspadAlive $Script:Ctx; $Script:OnSleepAt = 0
+  Check 'flow-F14b-control: a NORMAL sample during the gate wait raises no memory alert but still refreshes memwatch-heartbeat' (($Script:Sim.Ev -notcontains 9302) -and ($Script:Sim.Ev -notcontains 9301) -and (Test-Path $MemHeartbeatFile))
+  Reset-Sim; $Script:Fake = 'some generic wmi failure'; $Script:Ctx = @{ Pid = $PID; StartTicks = $null; PrevUnclean = $false }
+  Invoke-SentinelBeat $Script:Ctx
+  Check 'flow-F15-memwatch-heartbeat-is-NOT-refreshed-when-sampling-fails (fresh sentinel-heartbeat + stale memwatch-heartbeat = script up, memory detection not producing)' ((Test-Path $HeartbeatFile) -and -not (Test-Path $MemHeartbeatFile))
+  $Script:Beat.LastMemMs = -1e12; $Script:Fake = $good; Invoke-SentinelBeat $Script:Ctx
+  Check 'flow-F15b: once a sample succeeds again memwatch-heartbeat appears' (Test-Path $MemHeartbeatFile)
+  $InjectFault = 'sentinel'; Reset-Sim; Run-Flow
+  Check 'flow-F16-inject-exception-that-escapes-the-sentinel-loop (outermost catch, NWT m5): script survives, loop restarts, kaspad untouched, no Stop-Boot' (($Script:Sim.StopBoot.Count -eq 0) -and ($Script:Sim.Started -eq 1) -and (@($Script:Sim.Ev | Where-Object { "$_" -like 'UNCAUGHT*' }).Count -eq 0) -and ((Get-Content $HistoryFile -Raw) -match 'sentinel loop threw'))
+  $InjectFault = ''
+
   # heartbeat covers the gate too: with no sentinel loop running yet, a long ALIVE wait must still leave a fresh heartbeat
   Reset-Sim @{ ProbeCode = 7 }; Remove-Item $HeartbeatFile -ErrorAction SilentlyContinue
   $Script:OnSleepAt = 2; $Script:OnSleep = { $Script:Sim.ProbeCode = 0 }
@@ -1151,6 +1236,7 @@ if ($SelfTest) {
   Check 'flow-F12-memory-lock-held-by-another-watcher-is-retried-and-taken-over-with-MEMWATCH-TAKEOVER' (($ml -match 'MEMWATCH-TAKEOVER') -and ($ml -notmatch 'started in boot sentinel'))
 
   Dispose-Locks
+  Assert-UnderTmp $tmp
   Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
   "SELFTEST failures=$fail"; exit ([int]($fail -gt 0))
 }
@@ -1314,35 +1400,43 @@ finally { try { await rpc.disconnect(); } catch { /* ignore */ } }
 setTimeout(() => process.exit(process.exitCode ?? 0), 300);
 ```
 
-### C.3 `scripts/boot-guard-check.mjs`（M-C③；哨兵在起 console 前调用）
+### C.3 `scripts/boot-guard-check.mjs` v0.4（M-C③ + NWT N-2/N-3；哨兵在起 console 前调用）
 
-- 退出 **0 = 29 项全 OK；3 = 至少一项 MISMATCH 或 UNKNOWN（fail-closed）；2 = 工具出错**。只打印守卫名、计数与 env **键名**；**不打印任何 env 值、任何未被明确允许读的配置值、地址或余额**；`config_entries` 只读 `is_sensitive=0` 的行。
-- **活库实跑（只读）**：29 项中**恰 1 项 MISMATCH**：`config:autotake  autotake_enabled=true and autotake_mode=auto (armed…)`；其余全 OK（含 `config:scanner_enabled OK absent (= off)`）。
-- **合成场景 20 个全过**（全清 ⇒ 0；`autotake` 为 `true`+`approval` ⇒ 0；`true`+`auto` ⇒ 3；`autotake` 行缺失 ⇒ 3（UNKNOWN）；`agent_wallets`/`exchange_offers` 任一有行 ⇒ 3；`is_oracle=1` 且有地址 ⇒ 3；缺表 ⇒ 3（UNKNOWN）；`UTXO_AUTOSPLIT_ON_START=1` ⇒ 3；`=0` ⇒ 0；`POOL_SEEDER_MAKER_RELAY` 存在 ⇒ 3；被注释的开关行 ⇒ 0；`scanner_enabled=true` ⇒ 3、`=false` ⇒ 0；`submit_intents` prepared ⇒ 3、其它状态 ⇒ 0；`worldcup_schedule` pending_teams ⇒ 3；`zk_prove_jobs` pending ⇒ 3；`chain_events` `bettor_refund_available` ⇒ 3、其它事件 ⇒ 0）。
-- **`scanner_enabled` 守卫是 Bettor 可拿掉的判断**：scanner 打开 = 入站协议路径活了，我把它当"需要人在开机前明确决定"处理（MISMATCH）；若将来 Owner 决定要 scanner 常开，去掉这一项即可（届时 I1 的另外两层保护——`agent_wallets` 空表、`autotake` 置关——必须仍在）。
+- 退出 **0 = 41 项全 OK；3 = 至少一项 MISMATCH 或 UNKNOWN（fail-closed）；2 = 工具出错**。只打印守卫名、计数与 env **键名**；**不打印任何 env 值、任何未被明确允许读的配置值、地址或余额**；`config_entries` 只读 `is_sensitive=0` 的行。另有 `--print-lists`（把全部清单与"启动 cron 登记表"打成 JSON，不碰任何东西）与 `--print-env-parse <文件>`（打印该文件按启动器规则的解析结果）两个只读模式，供测试使用。
+- **41 项 = 14 项表/查询（空表类，含 v0.4 新增 `market_seeder_config(enabled=1)`）+ 2 项配置（`autotake`、`scanner_enabled`）+ 17 项"默认关、不得为 `1`"的 env 开关（v0.4 新增：五个 ZK tick、`POOL_SEEDER_ENABLED`、`PREDICTION_AGENT_ENABLED`）+ 2 项"默认开、必须显式为关"（**N-2 第二类**）+ 6 项"必须缺席/为空"的 id 键（v0.4 新增：`MINING_RELAY_ID`、`PREDICTION_AGENT_ENABLED_PEERS`）**。
+- **N-2 第二类"缺省即开必须显式为关"**：`MINING_CONSOLIDATE_ENABLED` 源码是 `(env || 'true').trim().toLowerCase() !== 'false'`，**缺省即开**（发 `consolidate_utxo`，链上状态驱动，空表守卫覆盖不到）——守卫要求它**显式为 `false`**（trim+小写，与源码一致），**缺席 = MISMATCH**；`AUTO_BET_TICK_MS`（`pool-auto-better` 缺省即 tick）要求**显式 `0` 或 `DEMO_AUTOBETTER_OFF=1`**。
+- **N-3 有效环境 = 继承环境 ∪ 文件**：守卫在启动脚本进程里跑，其继承环境就是 console 将继承的；文件按**启动器的规则逐字**解析（`^([^=]+)=(.*)$`、键 `Trim()`、值原样、后写覆盖先写、**空值 = 删除该变量**、空名 = 启动器会抛错、按大小写不敏感比较、去 BOM、按 CRLF/LF/**单独 CR** 分行）。v0.3 的解析器要求键紧贴 `=`，`KEY =1` 被启动器读成开、守卫报"键不存在"（NWT 实测）——**已修**。
+- **启动 cron 登记表（N-2 ②，清单完整性）**：`CRON_REGISTRY` 登记了 index.js 启动期调用的 **63 个** start-like 调用（switch 13 / default-on 2 / id 2 / data 10 / no-spend 15 / infra 1 / **audit-only 15 / not-audited 5**），每条写明保护类型与证据。**测试从真实 `index.js` 自动发现启动调用，与登记表双向对账**：新增一个 cron 而不登记 ⇒ 红；删掉一个调用而登记表还留着 ⇒ 红（STALE）；登记表里点名的门控 env 不在任何守卫清单 / 点名的表守卫不在表清单 ⇒ 红；启动模块里所有 `*_ENABLED`/`*_OFF` 形状的 env 名必须在守卫清单里或被登记项显式 `ignoreGates`（如 `HOTWALLET_MONITOR_OFF`）⇒ 否则红。**诚实说明**：登记表把 20 个调用标为 `audit-only`（15）或 `not-audited`（5）——它们**没有运行期守卫**，只是**可见**；"登记"保证的是"新增的不会悄悄绕过"，不是"已有的都被守卫住"。
+- **活库实跑（只读）**：**41 项中恰 1 项 MISMATCH**：`config:autotake`（已上膛）；其余全 OK（含 `config:scanner_enabled OK absent (= off)`）；现行 `kanet.mainnet.env` 里 `MINING_CONSOLIDATE_ENABLED=false`、`AUTO_BET_TICK_MS=0` 都是显式安全值，所以第二类守卫在主网现状下是 OK——**它保护的是"有人删掉这两行"**。
+- **测试 `boot-guard-check.test.mjs`：93 项全过**（夹具库/夹具 env 都在 `mkdtemp` 临时目录，写之前**断言目录在临时根下**）：每张空表单独一行 ⇒ 3；每个默认关开关 `=1` ⇒ 3、`=0` ⇒ 0；两个默认开开关的缺席/错值/合法写法；id 键存在/为空；继承环境单独就能武装开关；文件覆盖继承；空值删除继承；**大小写不敏感（继承与文件两侧）**；`KEY =1`、`KEY<TAB>=1` ⇒ MISMATCH；**17 种行形态 + 混合 CRLF/LF/单独 CR + BOM + 重复键 + 空值 + 继承 `ZZT_R=9` 与真实 PowerShell 启动器循环逐项差分**，另单测"空名 ` =1` 使真启动器抛错而守卫不当作设置"；清单**钉住** NWT 点名的每个名字（防"清单缩短、逐项循环随之缩短"而全绿）；登记表完整性 4 个测试（含新增未登记 cron / 删除调用留下 STALE / 未守卫的门控名 / 未守卫的表 四个变异对照）。
+- **变异对照 9 个（每个都被抓红）**：解析器退回 v0.3 规则（4 个测试红）；去掉 `MINING_CONSOLIDATE_ENABLED` 默认开条目（39 个红）；从"不得为 1"里去掉 `ZK_HANDOFF_TICK_ENABLED`（2 个红）；忽略继承环境（3 红）；空值不再删除继承（2 红）；名字大小写敏感（1 红：文件里小写键）；`PREDICTION_AGENT_ENABLED_PEERS` 从 id 键去掉（1 红：钉住测试）；登记表里删掉 `startMiningConsolidateCron`（1 红）；不按单独 CR 分行（1 红）。首次跑这 9 个变异时 G6/G7 **没被抓住**，我补了"文件里小写键"场景与"清单钉住"测试后才抓红。
+- **`scanner_enabled` 一项是 Bettor 可拿掉的判断**（Bettor 已裁"宁多一项"，保留）。
 
 ```js
-// boot-guard-check.mjs -- READ-ONLY pre-console guard for an UNATTENDED mainnet boot (P2 runbook 2.6 / NWT 9b2e7943 M-C(3)).
+// boot-guard-check.mjs v0.4 -- READ-ONLY pre-console guard for an UNATTENDED mainnet boot (P2 runbook 2.6 / NWT M-C(3), N-2, N-3).
 // Verifies, before the sentinel starts the console, that every "today it cannot spend because a table is empty / a switch is off"
 // fact in the runbook's spending-path table STILL holds on this boot. Any mismatch => the sentinel does NOT start the console
 // (kaspad stays up), raises a Warning event and waits for a human. It turns "zero today" into "verified zero on every boot".
 //   node scripts/boot-guard-check.mjs [--db <console.mainnet.db>] [--env <kanet.mainnet.env>] [--root <repo root>]
+//   node scripts/boot-guard-check.mjs --print-lists                (JSON: every list + the boot-cron registry; touches nothing)
+//   node scripts/boot-guard-check.mjs --print-env-parse <file>     (the launcher-faithful parse of one env file; touches nothing)
 //   exit 0 = every guard OK; 3 = at least one MISMATCH/UNKNOWN (fail-closed); 2 = tool error.
 // Prints guard names, counts and env KEY NAMES only. It never prints an env value, a config value it was not explicitly allowed
 // to read, an address or a balance (D-021). It opens the DB readonly and only reads config_entries rows flagged is_sensitive=0.
+//
+// ENV SEMANTICS (NWT N-3): the console's real environment = INHERITED environment of the process that starts it, overlaid by the lines of
+// kanet.mainnet.env exactly as scripts/start-console-mainnet.ps1 loads them:
+//     skip  ^\s*#  and blank lines;   match  ^([^=]+)=(.*)$;   name = $matches[1].Trim();   value = $matches[2] verbatim (quotes, spaces kept);
+//     [Environment]::SetEnvironmentVariable(name, value, 'Process')  -- later lines win; an EMPTY value REMOVES the variable; an empty name throws.
+// Windows environment names are case-insensitive, so names are compared upper-cased. This file's parser is that loader, byte for byte in
+// behaviour, and boot-guard-check.test.mjs diffs it against the REAL PowerShell loader on 17 line shapes.
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const argv = process.argv.slice(2);
-const opt = (k, d) => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : d; };
-const root = path.resolve(opt('--root', path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')));
-const DB = opt('--db', path.join(root, 'kasia-console', 'data', 'console.mainnet.db'));
-const ENVF = opt('--env', path.join(root, 'kanet.mainnet.env'));
-const req = createRequire(path.join(root, 'kasia-console', 'package.json'));
-
-// tables whose emptiness is what keeps an unattended spending path from having anything to act on (runbook 2.6 rows 3-6, autoTaker)
+// ------------------------------------------------------------------------------------------------ the lists (exported via --print-lists)
+// A. tables / queries whose emptiness keeps an unattended spending path from having anything to act on (data-driven paths).
 const EMPTY_TABLES = [
   ['agent_wallets', 'SELECT COUNT(*) c FROM agent_wallets'],                       // autoTaker (auto-accept + USDT pay) needs a default bnb wallet row
   ['exchange_offers', 'SELECT COUNT(*) c FROM exchange_offers'],
@@ -1356,60 +1450,418 @@ const EMPTY_TABLES = [
   ['worldcup_schedule(status=pending_teams)', "SELECT COUNT(*) c FROM worldcup_schedule WHERE status = 'pending_teams'"],   // worldcup-schedule-cron creates markets (100 KAS maker stake)
   ['zk_prove_jobs(status=pending)', "SELECT COUNT(*) c FROM zk_prove_jobs WHERE status = 'pending'"],
   ['chain_events(bettor_refund_available)', "SELECT COUNT(*) c FROM chain_events WHERE event_type = 'bettor_refund_available'"],   // bettor-refund-claim-auto's real candidate signal
+  ['market_seeder_config(enabled=1)', "SELECT COUNT(*) c FROM market_seeder_config WHERE enabled = 1"],   // market seeder master row (default 0)
   ['relay_nodes(is_oracle=1,address)', 'SELECT COUNT(*) c FROM relay_nodes WHERE is_oracle = 1 AND address IS NOT NULL'],   // broadcaster-utxo targets
 ];
-// env switches that must NOT be exactly '1' (value never printed) and env keys that must be ABSENT/empty (only the key name is printed)
-const SWITCH_KEYS_MUST_NOT_BE_1 = ['UTXO_AUTOSPLIT_ON_START', 'BROADCASTER_UTXO_MAINTAIN', 'PROTO_DRIVER_ENABLED', 'PROTO_SETTLEMENT_DRIVER_ENABLED', 'BROKER_ENABLED', 'SETTLE_DAEMON_ENABLED', 'ZK_PROVE_WORKER_ENABLED', 'BSHARD_CLOSE_VOTER_ENABLED', 'BSHARD_CLOSE_VOTER_V2_ENABLED', 'BSHARD_CLOSE_SUBMIT_V2_ENABLED'];
-const ID_KEYS_MUST_BE_ABSENT = ['POOL_SEEDER_MAKER_RELAY', 'BROADCASTER_RELAY_IDS', 'BOT_AUTOFUND_SOURCE_RELAY_ID', 'FAUCET_RELAY_ID'];
+// B. default-OFF switches: MISMATCH when the effective value is exactly '1' (all read as `=== '1'` in source; NWT verified 7 of them, the rest are cited in the registry)
+const SWITCH_NOT_1 = [
+  'UTXO_AUTOSPLIT_ON_START', 'BROADCASTER_UTXO_MAINTAIN', 'PROTO_DRIVER_ENABLED', 'PROTO_SETTLEMENT_DRIVER_ENABLED', 'BROKER_ENABLED',
+  'SETTLE_DAEMON_ENABLED', 'ZK_PROVE_WORKER_ENABLED', 'BSHARD_CLOSE_VOTER_ENABLED', 'BSHARD_CLOSE_VOTER_V2_ENABLED', 'BSHARD_CLOSE_SUBMIT_V2_ENABLED',
+  // N-2: the five ZK tick switches (index.js starts each cron unconditionally; each gates itself with === '1'), the pool seeder, the prediction agent
+  'ZK_CLOSE_TICK_ENABLED', 'ZK_CLOSE_TICK_V2_ENABLED', 'ZK_CLAIM_TICK_ENABLED', 'ZK_HANDOFF_TICK_ENABLED', 'ZK_JUDGE_PROPOSE_TICK_ENABLED',
+  'POOL_SEEDER_ENABLED', 'PREDICTION_AGENT_ENABLED',
+];
+// C. default-ON switches (N-2 second class): the code ENABLES the path when the variable is absent, so "absent" is a MISMATCH and the safe
+// value must be written explicitly.
+const DEFAULT_ON = [
+  { key: 'MINING_CONSOLIDATE_ENABLED', safe: (v) => v !== undefined && v.trim().toLowerCase() === 'false', rule: "must be explicitly 'false' (source: (env || 'true').trim().toLowerCase() !== 'false' => absent = ON)" },
+  { key: 'AUTO_BET_TICK_MS', safe: (v, get) => v === '0' || get('DEMO_AUTOBETTER_OFF') === '1', rule: "must be '0', or DEMO_AUTOBETTER_OFF must be '1' (source: pool-auto-better ticks by default; explicit 0 disables)" },
+];
+// D. id / list keys that must be ABSENT or empty (their presence configures a spending relay)
+const ID_ABSENT = [
+  'POOL_SEEDER_MAKER_RELAY', 'BROADCASTER_RELAY_IDS', 'BOT_AUTOFUND_SOURCE_RELAY_ID', 'FAUCET_RELAY_ID',
+  'MINING_RELAY_ID',                     // N-2: without it the (default-on) mining consolidate cron does not start
+  'PREDICTION_AGENT_ENABLED_PEERS',      // N-2: any non-empty value ENABLES the prediction agent for those peers
+];
+// E. names that gate a non-cron path but are still part of the guarded surface
+const NON_CRON_GATES = ['PREDICTION_AGENT_ENABLED', 'PREDICTION_AGENT_ENABLED_PEERS', 'DEMO_AUTOBETTER_OFF'];
 
-const results = [];
-const add = (name, status, detail = '') => results.push({ name, status, detail });
-let db;
-try {
-  const Database = req('better-sqlite3');
-  db = new Database(DB, { readonly: true, fileMustExist: true });
-} catch (e) { console.log(`ERROR opening db: ${e.message}`); process.exit(2); }
+// F. THE BOOT-CRON REGISTRY (NWT N-2 completeness): every start-like call index.js makes at boot must be registered here with the kind of
+// protection it has. The test (boot-guard-check.test.mjs) discovers the calls in index.js and goes RED when one is unregistered, when a gate it
+// names is not in the lists above, or when a table it names is not guarded. kinds:
+//   switch      default-off, gated by env names in `gates` (all in SWITCH_NOT_1)
+//   default-on  default-on, gated by env names in `gates` (all in DEFAULT_ON)
+//   id          inert without the env id keys in `gates` (all in ID_ABSENT)
+//   data        default-on but inert while the `tables` (names in EMPTY_TABLES) are empty
+//   no-spend    read-only / monitoring / local processes; `why` cites the evidence (runbook 2.6 audit)
+//   infra       starts infrastructure (relays, adapters); spending inside is an OPEN item, named in `why`
+//   audit-only  covered by the 2.6 audit but NOT by a runtime guard (visible on purpose: tighten or accept)
+//   not-audited NOT looked at in the 2.6 audit (visible on purpose)
+const CRON_REGISTRY = {
+  autoSplitAll: { kind: 'switch', gates: ['UTXO_AUTOSPLIT_ON_START'], why: 'D-026' },
+  startBroadcasterUtxoMaintainerCron: { kind: 'switch', gates: ['BROADCASTER_UTXO_MAINTAIN'], tables: ['relay_nodes(is_oracle=1,address)'], why: 'D-026 M1' },
+  startMiningConsolidateCron: { kind: 'default-on', gates: ['MINING_CONSOLIDATE_ENABLED', 'MINING_RELAY_ID'], why: 'default ON; chain-state driven (consolidate_utxo)', ignoreGates: [] },
+  startAutoBetterCron: { kind: 'default-on', gates: ['AUTO_BET_TICK_MS', 'DEMO_AUTOBETTER_OFF'], why: 'default ticks; explicit 0 / DEMO_AUTOBETTER_OFF=1 disables' },
+  startZkProveWorkerCron: { kind: 'switch', gates: ['ZK_PROVE_WORKER_ENABLED'], why: 'zk-prove-worker.mjs' },
+  startBshardCloseVoterCron: { kind: 'switch', gates: ['BSHARD_CLOSE_VOTER_ENABLED'], why: 'bshard-close-voter.js' },
+  startBshardCloseVoterV2Cron: { kind: 'switch', gates: ['BSHARD_CLOSE_VOTER_V2_ENABLED'], why: 'bshard-close-voter.js' },
+  startBshardCloseSubmitV2Cron: { kind: 'switch', gates: ['BSHARD_CLOSE_SUBMIT_V2_ENABLED'], why: 'bshard-close-voter.js' },
+  startSettleDaemonCron: { kind: 'switch', gates: ['SETTLE_DAEMON_ENABLED', 'ZK_CLOSE_TICK_ENABLED'], why: 'bshard-settle-daemon.mjs :66/:68' },
+  startZkCloseTickV2Cron: { kind: 'switch', gates: ['ZK_CLOSE_TICK_V2_ENABLED'], why: 'bshard-settle-daemon.mjs :1058' },
+  startClaimAutonomousTickCron: { kind: 'switch', gates: ['ZK_CLAIM_TICK_ENABLED'], why: 'bshard-settle-daemon.mjs :1059' },
+  startZkHandoffAutonomousTickCron: { kind: 'switch', gates: ['ZK_HANDOFF_TICK_ENABLED'], why: 'bshard-settle-daemon.mjs :1123' },
+  startZkJudgeProposeAutonomousTickCron: { kind: 'switch', gates: ['ZK_JUDGE_PROPOSE_TICK_ENABLED'], why: 'bshard-settle-daemon.mjs :1147' },
+  startProtoDriver: { kind: 'switch', gates: ['PROTO_DRIVER_ENABLED', 'PROTO_SETTLEMENT_DRIVER_ENABLED'], why: 'proto-driver.mjs (settlement switch has no reader yet: 9-2b)' },
+  startPoolMarketSeeder: { kind: 'switch', gates: ['POOL_SEEDER_ENABLED', 'POOL_SEEDER_MAKER_RELAY'], why: 'pool-market-seeder.js' },
+  startBotAutofundCron: { kind: 'id', gates: ['BOT_AUTOFUND_SOURCE_RELAY_ID'], why: 'pool-bot-autofund.js: source relay id unset = cron not started' },
+  startFaucetHealthCron: { kind: 'id', gates: ['FAUCET_RELAY_ID'], why: 'faucet-utxo-health.mjs: read-only health; id unset = cron not started' },
+  startPredictionSettlerCron: { kind: 'data', tables: ['exchange_offers', 'submit_intents(status=prepared)'], why: 'bettor-prediction-settler.js + submit-intent resume' },
+  startPredictionVoterCron: { kind: 'data', tables: ['relay_nodes(is_oracle=1,address)'], why: 'scans is_oracle=1 relays' },
+  startPoolMarketSettlerCron: { kind: 'data', tables: ['pool_markets'], why: 'pool-market-settler.js' },
+  startBettorRefundClaimAutoCron: { kind: 'data', tables: ['pool_bettor_sides', 'chain_events(bettor_refund_available)'], why: 'bettor-refund-claim-auto.mjs' },
+  startHouseAgentCron: { kind: 'data', tables: ['pool_markets'], why: 'needs a relay named HouseAgent AND pool_markets rows' },
+  startOraclePoolRenewalCron: { kind: 'data', tables: ['oracle_stake_enrollments'], why: 'oracle-pool-renewal-cron.mjs (transfer)' },
+  startWorldcupScheduleCron: { kind: 'data', tables: ['worldcup_schedule(status=pending_teams)'], why: 'worldcup-schedule-cron.mjs (also blocked by a wrong console base URL default: accidental)' },
+  startMarketSeeder: { kind: 'data', tables: ['market_seeder_config(enabled=1)'], why: 'market-seeder.js: config enabled=0' },
+  startSeederDepositWatcher: { kind: 'data', tables: ['retail_dex_buy_publications'], why: 'market-seeder.js' },
+  startSeederRefundWorker: { kind: 'data', tables: ['retail_dex_buy_publications'], why: 'market-seeder.js (EVM USDT refunds)' },
+  startPeriodicIngest: { kind: 'no-spend', why: 'pair-ingestor.mjs: ingest only (not audited beyond the name/no env keys)' },
+  startAllAdapters: { kind: 'no-spend', why: 'spawns local adapter processes; 0/0 started on mainnet' },
+  startRefreshWorker: { kind: 'no-spend', why: 'connection-manager refresh worker' },
+  startEventLoopLagHeartbeat: { kind: 'no-spend', why: 'diagnostics' },
+  startRelayHealthMonitorCron: { kind: 'no-spend', why: 'restarts relays (max 3/h); no spend command' },
+  startRelayHotwalletMonitorCron: { kind: 'no-spend', why: 'may stop a relay; no spend command', ignoreGates: ['HOTWALLET_MONITOR_OFF'] },
+  startSettleFailedAlertCron: { kind: 'no-spend', why: 'read-only alert' },
+  startDiskSpaceAlertCron: { kind: 'no-spend', why: 'read-only alert' },
+  startRpcHealthDegradationAlertCron: { kind: 'no-spend', why: 'read-only alert; self-restart default OFF' },
+  startZkProveJobStuckAlertCron: { kind: 'no-spend', why: 'read-only alert' },
+  startSpcDaaIndexStaleCheck: { kind: 'no-spend', why: 'read-only monitor (audit: no spend commands)' },
+  startTxLandedReconciler: { kind: 'no-spend', why: 'reconciler (audit: no spend commands)' },
+  startPrepruneCaptureWorker: { kind: 'no-spend', why: 'capture worker (audit: no spend commands)' },
+  startBrokerFeeEmitCron: { kind: 'no-spend', why: 'broker fee emit (audit: no spend commands); broker family is BROKER_ENABLED-gated elsewhere' },
+  startOraclePoolScannerCron: { kind: 'no-spend', why: 'startup log: scan + derive chain_view' },
+  startAllRelays: { kind: 'infra', why: 'starts relay processes; OPEN ITEM: relay-internal inbound-handshake auto-accept is not covered by any guard (runbook 2.6 I7)' },
+  initMinds: { kind: 'audit-only', why: 'no minds on mainnet (runbook 2.6 T9)' },
+  startScheduler: { kind: 'audit-only', why: 'mind scheduler; minds empty (runbook 2.6 T9)' },
+  startTgBotIfConfigured: { kind: 'audit-only', why: 'TELEGRAM_BOT_TOKEN unset on mainnet; bot not auto-started' },
+  startBrokerBotManager: { kind: 'audit-only', why: 'boot reconcile 0 bots; broker family disabled' },
+  startReconcileCron: { kind: 'audit-only', why: 'broker-state-machine; needs BROKER_RELAY_ID (module throws without it)' },
+  startStateReconciler: { kind: 'audit-only', why: 'broker-state-reconciler; needs BROKER_RELAY_ID' },
+  startScavengerCron: { kind: 'audit-only', why: 'bettor_* family: bettor_real_config.enabled=0, positions 0 (runbook 2.6)' },
+  startBettorResolver: { kind: 'audit-only', why: 'bettor_* family' },
+  startBettorTracker: { kind: 'audit-only', why: 'bettor_* family' },
+  startBettorReactor: { kind: 'audit-only', why: 'bettor_* family' },
+  startBettorAutoValve: { kind: 'audit-only', why: 'bettor_* family (valve A redeem etc.): positions 0' },
+  startBettorPositionProtector: { kind: 'audit-only', why: 'alert-only skeleton per its startup line' },
+  startPositionWatcherCron: { kind: 'audit-only', why: 'alert-only per its startup line' },
+  startFossaStableScannerCron: { kind: 'audit-only', why: 'no auto-fire per its startup line' },
+  startBettorVariantExpander: { kind: 'audit-only', why: 'stub per its startup line' },
+  startOracleVoterHealthMonitorCron: { kind: 'not-audited', why: 'monitor by name' },
+  startBshardCoherenceObservabilityMonitor: { kind: 'not-audited', why: 'observability monitor by name' },
+  startPrepruneCaptureStaleCheck: { kind: 'not-audited', why: 'stale check by name' },
+  startZkProveServer: { kind: 'not-audited', why: 'zk-prove HTTP server (ZK_PROVE_SERVER_* keys)' },
+  startExternalGateway: { kind: 'not-audited', why: 'needs KANET_EXTERNAL_GATEWAY_HOST/PORT to start' },
+};
 
-for (const [name, sql] of EMPTY_TABLES) {
-  try { const c = db.prepare(sql).get().c; add(`rows:${name}`, c === 0 ? 'OK' : 'MISMATCH', `count=${c} expected=0`); }
-  catch (e) { add(`rows:${name}`, 'UNKNOWN', `query failed: ${String(e.message).slice(0, 60)}`); }   // a missing table is UNKNOWN, fail-closed
+const argv = process.argv.slice(2);
+const opt = (k, d) => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : d; };
+
+// ------------------------------------------------------------------------------------------------ launcher-faithful env parse
+export function parseLauncherEnvText(text) {
+  // scripts/start-console-mainnet.ps1: Get-Content (BOM stripped, splits on CRLF / LF / lone CR), then the two -match lines, then SetEnvironmentVariable
+  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+  const out = new Map(); let emptyNameLines = 0;
+  for (const line of text.split(/\r\n|\r|\n/)) {
+    if (/^\s*#/.test(line) || /^\s*$/.test(line)) continue;
+    const m = /^([^=]+)=(.*)$/.exec(line);
+    if (!m) continue;
+    const name = m[1].trim();
+    if (name === '') { emptyNameLines++; continue; }         // the launcher's SetEnvironmentVariable('') THROWS here (script aborts); we never treat it as a setting
+    const key = name.toUpperCase();
+    if (m[2] === '') out.set(key, null); else out.set(key, m[2]);   // an empty value REMOVES the variable
+  }
+  return { vars: out, emptyNameLines };
 }
-// autoTaker: config_entries autotake_enabled / autotake_mode (non-sensitive flags stored plain in value_encrypted). Safe = NOT (enabled=='true' AND mode=='auto').
-function flag(key) {
+export function effectiveEnv(inherited, fileVars) {
+  const eff = new Map();
+  for (const [k, v] of Object.entries(inherited)) if (v !== undefined && v !== '') eff.set(k.toUpperCase(), v);
+  for (const [k, v] of fileVars) { if (v === null) eff.delete(k); else eff.set(k, v); }
+  return eff;
+}
+
+const isMain = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
+if (isMain) {
+  if (argv.includes('--print-lists')) {
+    console.log(JSON.stringify({ tables: EMPTY_TABLES.map((r) => r[0]), switchNotOne: SWITCH_NOT_1, defaultOn: DEFAULT_ON.map((d) => d.key), idAbsent: ID_ABSENT, nonCronGates: NON_CRON_GATES, cronRegistry: CRON_REGISTRY }, null, 1));
+    process.exit(0);
+  }
+  if (argv.includes('--print-env-parse')) {
+    const f = opt('--print-env-parse');
+    const { vars, emptyNameLines } = parseLauncherEnvText(fs.readFileSync(f).toString('utf8'));
+    for (const [k, v] of [...vars].sort()) console.log(`${k}=[${v === null ? '<removed>' : v}]`);
+    console.log(`emptyNameLines=${emptyNameLines}`);
+    process.exit(0);
+  }
+  await runGuard();
+}
+
+async function runGuard() {
+  const root = path.resolve(opt('--root', path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')));
+  const DB = opt('--db', path.join(root, 'kasia-console', 'data', 'console.mainnet.db'));
+  const ENVF = opt('--env', path.join(root, 'kanet.mainnet.env'));
+  const req = createRequire(path.join(root, 'kasia-console', 'package.json'));
+  const results = [];
+  const add = (name, status, detail = '') => results.push({ name, status, detail });
+  let db;
   try {
-    const r = db.prepare('SELECT is_sensitive, value_encrypted v FROM config_entries WHERE key = ?').get(key);
-    if (!r) return { state: 'absent' };
-    if (r.is_sensitive !== 0) return { state: 'sensitive' };   // refuse to read a sensitive row
-    return { state: 'ok', v: String(r.v) };
-  } catch { return { state: 'error' }; }
-}
-{
-  const en = flag('autotake_enabled'), mode = flag('autotake_mode');
-  if (en.state !== 'ok' || mode.state !== 'ok') add('config:autotake', 'UNKNOWN', `enabled=${en.state} mode=${mode.state}`);
-  else if (en.v === 'true' && mode.v === 'auto') add('config:autotake', 'MISMATCH', 'autotake_enabled=true and autotake_mode=auto (armed: auto-accepts inbound offers when a bnb agent wallet exists)');
-  else add('config:autotake', 'OK', `enabled=${en.v} mode=${mode.v}`);
-}
-// scanner_enabled: the master switch of the INBOUND protocol path (scout -> /api/chat/ingest -> trade-protocol-filter). Absent or 'false' = off.
-{
-  const sc = flag('scanner_enabled');
-  if (sc.state === 'absent') add('config:scanner_enabled', 'OK', 'absent (= off)');
-  else if (sc.state !== 'ok') add('config:scanner_enabled', 'UNKNOWN', `state=${sc.state}`);
-  else add('config:scanner_enabled', sc.v === 'false' ? 'OK' : 'MISMATCH', `value=${sc.v} (inbound protocol path ${sc.v === 'false' ? 'off' : 'ON: needs a human decision before an unattended boot'})`);
-}
-db.close();
+    const Database = req('better-sqlite3');
+    db = new Database(DB, { readonly: true, fileMustExist: true });
+  } catch (e) { console.log(`ERROR opening db: ${e.message}`); process.exit(2); }
 
-let envText = null;
-try { envText = fs.readFileSync(ENVF, 'utf8'); } catch (e) { add('env:file', 'UNKNOWN', `cannot read env file: ${e.code || e.message}`); }
-if (envText !== null) {
-  const kv = new Map();
-  for (const line of envText.split(/\r?\n/)) { const m = /^\s*([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(line); if (m && !/^\s*#/.test(line)) kv.set(m[1], m[2]); }
-  for (const k of SWITCH_KEYS_MUST_NOT_BE_1) add(`env-switch:${k}`, kv.get(k) === '1' ? 'MISMATCH' : 'OK', kv.has(k) ? 'key present (value not printed)' : 'key absent');
-  for (const k of ID_KEYS_MUST_BE_ABSENT) add(`env-id:${k}`, kv.has(k) && kv.get(k).trim() !== '' ? 'MISMATCH' : 'OK', kv.has(k) && kv.get(k).trim() !== '' ? 'key present and non-empty (value not printed)' : 'absent/empty');
-}
+  for (const [name, sql] of EMPTY_TABLES) {
+    try { const c = db.prepare(sql).get().c; add(`rows:${name}`, c === 0 ? 'OK' : 'MISMATCH', `count=${c} expected=0`); }
+    catch (e) { add(`rows:${name}`, 'UNKNOWN', `query failed: ${String(e.message).slice(0, 60)}`); }   // a missing table is UNKNOWN, fail-closed
+  }
+  function flag(key) {
+    try {
+      const r = db.prepare('SELECT is_sensitive, value_encrypted v FROM config_entries WHERE key = ?').get(key);
+      if (!r) return { state: 'absent' };
+      if (r.is_sensitive !== 0) return { state: 'sensitive' };   // refuse to read a sensitive row
+      return { state: 'ok', v: String(r.v) };
+    } catch { return { state: 'error' }; }
+  }
+  {   // autoTaker: safe = NOT (enabled=='true' AND mode=='auto')
+    const en = flag('autotake_enabled'), mode = flag('autotake_mode');
+    if (en.state !== 'ok' || mode.state !== 'ok') add('config:autotake', 'UNKNOWN', `enabled=${en.state} mode=${mode.state}`);
+    else if (en.v === 'true' && mode.v === 'auto') add('config:autotake', 'MISMATCH', 'autotake_enabled=true and autotake_mode=auto (armed: auto-accepts inbound offers when a bnb agent wallet exists)');
+    else add('config:autotake', 'OK', `enabled=${en.v} mode=${mode.v}`);
+  }
+  {   // scanner_enabled: master switch of the INBOUND protocol path. Absent or 'false' = off.
+    const sc = flag('scanner_enabled');
+    if (sc.state === 'absent') add('config:scanner_enabled', 'OK', 'absent (= off)');
+    else if (sc.state !== 'ok') add('config:scanner_enabled', 'UNKNOWN', `state=${sc.state}`);
+    else add('config:scanner_enabled', sc.v === 'false' ? 'OK' : 'MISMATCH', `value=${sc.v} (inbound protocol path ${sc.v === 'false' ? 'off' : 'ON: needs a human decision before an unattended boot'})`);
+  }
+  db.close();
 
-let bad = 0;
-for (const r of results) { if (r.status !== 'OK') bad++; console.log(`GUARD ${r.name} ${r.status}${r.detail ? ' ' + r.detail : ''}`); }
-console.log(`GUARD-RESULT checks=${results.length} not_ok=${bad}`);
-process.exit(bad ? 3 : 0);
+  // ---- effective environment = inherited (the process that runs this guard is the boot script, i.e. what the console would inherit) + file overlay
+  let fileVars = null;
+  try { fileVars = parseLauncherEnvText(fs.readFileSync(ENVF).toString('utf8')).vars; } catch (e) { add('env:file', 'UNKNOWN', `cannot read env file: ${e.code || e.message}`); }
+  if (fileVars !== null) {
+    const eff = effectiveEnv(process.env, fileVars);
+    const get = (k) => (eff.has(k) ? eff.get(k) : undefined);
+    const src = (k) => (fileVars.has(k) ? 'file' : 'inherited environment');
+    for (const k of SWITCH_NOT_1) add(`env-switch:${k}`, get(k) === '1' ? 'MISMATCH' : 'OK', eff.has(k) ? `set in ${src(k)} (value not printed)` : 'absent');
+    for (const d of DEFAULT_ON) {
+      const v = get(d.key); const ok = d.safe(v, get);
+      if (ok) add(`env-default-on:${d.key}`, 'OK', v === undefined ? 'absent, but the alternative switch is explicitly safe' : `explicitly safe in ${src(d.key)} (value not printed)`);
+      else add(`env-default-on:${d.key}`, 'MISMATCH', v === undefined ? `absent => the path is ON by default; ${d.rule}` : `set in ${src(d.key)} but not the safe value; ${d.rule}`);
+    }
+    for (const k of ID_ABSENT) { const v = get(k); const present = v !== undefined && v.trim() !== ''; add(`env-id:${k}`, present ? 'MISMATCH' : 'OK', present ? `present and non-empty in ${src(k)} (value not printed)` : 'absent/empty'); }
+  }
+  let bad = 0;
+  for (const r of results) { if (r.status !== 'OK') bad++; console.log(`GUARD ${r.name} ${r.status}${r.detail ? ' ' + r.detail : ''}`); }
+  console.log(`GUARD-RESULT checks=${results.length} not_ok=${bad}`);
+  process.exit(bad ? 3 : 0);
+}
+```
+
+### C.4 `scripts/boot-guard-check.test.mjs`（上述 93 项测试全文）
+
+```js
+// boot-guard-check.test.mjs -- tests for scripts/boot-guard-check.mjs (NWT N-2 completeness, N-3 parser parity, guard scenarios).
+// Run: node --test scripts/boot-guard-check.test.mjs     (env BOOT_GUARD_ROOT overrides the repo root, for rehearsal in a worktree)
+// SAFETY: everything that writes (fixture DBs / env files) lives in a mkdtemp directory under os.tmpdir(); before the first write the test
+// asserts that directory is under the temp root and never touches the repo's data dir or kanet.mainnet.env.
+import { test } from 'node:test';
+import assert from 'node:assert';
+import { spawnSync } from 'node:child_process';
+import { createRequire } from 'node:module';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const TOOL = path.join(here, 'boot-guard-check.mjs');
+const ROOT = path.resolve(process.env.BOOT_GUARD_ROOT || path.join(here, '..'));
+const req = createRequire(path.join(ROOT, 'kasia-console', 'package.json'));
+const Database = req('better-sqlite3');
+const { parseLauncherEnvText, effectiveEnv } = await import('file:///' + TOOL.replace(/\\/g, '/'));
+
+const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'boot-guard-test-'));
+assert.ok(TMP.startsWith(os.tmpdir() + path.sep) && path.basename(TMP).startsWith('boot-guard-test-'), 'SAFETY: test dir must be a boot-guard-test-* dir under the temp root');
+const safe = (p) => { assert.ok(p === TMP || p.startsWith(TMP + path.sep), `SAFETY: path outside the temp dir: ${p}`); return p; };
+test.after(() => { assert.ok(TMP.startsWith(os.tmpdir() + path.sep)); fs.rmSync(TMP, { recursive: true, force: true }); });
+
+const LISTS = JSON.parse(spawnSync(process.execPath, [TOOL, '--print-lists'], { encoding: 'utf8' }).stdout);
+
+// ------------------------------------------------------------------------------------------------ 1. guard scenarios (fixture DB + fixture env, CLI)
+function mk(name, { rows = {}, autotake = ['false', 'auto'], skipTable = null, envText = '', scanner = null, extra = [] } = {}) {
+  const safeName = name.replace(/[^A-Za-z0-9]+/g, '_').slice(0, 40);
+  const dbp = safe(path.join(TMP, `g-${safeName}.db`)); try { fs.unlinkSync(dbp); } catch { /* fresh */ }
+  const db = new Database(dbp);
+  db.exec('CREATE TABLE relay_nodes (id TEXT, name TEXT, address TEXT, is_oracle INTEGER DEFAULT 0)');
+  for (const t of ['submit_intents', 'worldcup_schedule', 'zk_prove_jobs']) db.exec(`CREATE TABLE ${t} (status TEXT)`);
+  db.exec('CREATE TABLE chain_events (event_type TEXT)'); db.exec('CREATE TABLE market_seeder_config (id TEXT, enabled INTEGER)');
+  for (const t of ['agent_wallets', 'exchange_offers', 'pool_markets', 'pool_bettor_sides', 'oracle_registry', 'oracle_stake_enrollments', 'retail_dex_buy_publications', 'mm_orders']) if (t !== skipTable) db.exec(`CREATE TABLE ${t} (id INTEGER)`);
+  db.exec('CREATE TABLE config_entries (key TEXT, is_sensitive INTEGER, value_encrypted TEXT)');
+  if (autotake) { db.prepare("INSERT INTO config_entries VALUES ('autotake_enabled',0,?)").run(autotake[0]); db.prepare("INSERT INTO config_entries VALUES ('autotake_mode',0,?)").run(autotake[1]); }
+  if (scanner !== null) db.prepare("INSERT INTO config_entries VALUES ('scanner_enabled',0,?)").run(scanner);
+  for (const sqlx of extra) db.exec(sqlx);
+  for (const [t, n] of Object.entries(rows)) { if (t === 'oracle') db.prepare("INSERT INTO relay_nodes VALUES ('i','n','addr-x',1)").run(); else for (let i = 0; i < n; i++) db.exec(`INSERT INTO ${t} VALUES (1)`); }
+  db.close();
+  const envp = safe(path.join(TMP, `g-${safeName}.env`)); fs.writeFileSync(envp, envText);
+  return { dbp, envp };
+}
+// a CLEAN effective environment: every default-on switch explicitly safe, so scenarios only vary what they mean to
+const CLEAN_ENV = 'MINING_CONSOLIDATE_ENABLED=false\nAUTO_BET_TICK_MS=0\n';
+function run(label, spec, want, { inherited = {}, expectNotOk } = {}) {
+  test(`(guard) ${label}`, () => {
+    const { dbp, envp } = mk(label, { ...spec, envText: (spec.noClean ? '' : CLEAN_ENV) + (spec.envText || '') });
+    const env = { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, ...inherited };   // NOT the caller's environment: a clean, controlled base
+    const r = spawnSync(process.execPath, [TOOL, '--db', dbp, '--env', envp, '--root', ROOT], { encoding: 'utf8', env });
+    const notOk = r.stdout.split('\n').filter((l) => /^GUARD (?!RESULT)/.test(l) && !/ OK( |$)/.test(l)).map((l) => l.split(' ')[1]);
+    assert.strictEqual(r.status, want, `exit ${r.status} want ${want}; not_ok=${notOk.join(',')}\n${r.stdout.slice(-400)}`);
+    if (expectNotOk) assert.ok(notOk.includes(expectNotOk), `expected ${expectNotOk} among not-OK: ${notOk.join(',')}`);
+  });
+}
+run('all clear', {}, 0);
+run('autotake true+approval is safe', { autotake: ['true', 'approval'] }, 0);
+run('autotake true+auto (the real mainnet state) -> MISMATCH', { autotake: ['true', 'auto'] }, 3, { expectNotOk: 'config:autotake' });
+run('autotake rows absent -> UNKNOWN (fail-closed)', { autotake: null }, 3, { expectNotOk: 'config:autotake' });
+for (const t of ['agent_wallets', 'exchange_offers', 'pool_markets', 'pool_bettor_sides', 'oracle_registry', 'oracle_stake_enrollments', 'retail_dex_buy_publications', 'mm_orders']) run(`table ${t} has a row -> MISMATCH`, { rows: { [t]: 1 } }, 3, { expectNotOk: `rows:${t}` });
+run('an is_oracle=1 relay with an address -> MISMATCH', { rows: { oracle: 1 } }, 3);
+run('missing table -> UNKNOWN (fail-closed)', { skipTable: 'oracle_registry' }, 3, { expectNotOk: 'rows:oracle_registry' });
+run('scanner_enabled=true -> MISMATCH', { scanner: 'true' }, 3, { expectNotOk: 'config:scanner_enabled' });
+run('scanner_enabled=false is fine', { scanner: 'false' }, 0);
+run('a prepared submit_intent -> MISMATCH', { extra: ["INSERT INTO submit_intents VALUES ('prepared')"] }, 3);
+run('a submit_intent in another status is fine', { extra: ["INSERT INTO submit_intents VALUES ('done')"] }, 0);
+run('worldcup_schedule pending_teams -> MISMATCH', { extra: ["INSERT INTO worldcup_schedule VALUES ('pending_teams')"] }, 3);
+run('zk_prove_jobs pending -> MISMATCH', { extra: ["INSERT INTO zk_prove_jobs VALUES ('pending')"] }, 3);
+run('bettor_refund_available event -> MISMATCH', { extra: ["INSERT INTO chain_events VALUES ('bettor_refund_available')"] }, 3);
+run('other chain_events are fine', { extra: ["INSERT INTO chain_events VALUES ('x')"] }, 0);
+run('market_seeder_config enabled=1 -> MISMATCH', { extra: ["INSERT INTO market_seeder_config VALUES ('default',1)"] }, 3, { expectNotOk: 'rows:market_seeder_config(enabled=1)' });
+run('market_seeder_config enabled=0 is fine', { extra: ["INSERT INTO market_seeder_config VALUES ('default',0)"] }, 0);
+// N-2: every default-OFF switch, one by one (each must be a MISMATCH at exactly '1' and fine at '0')
+for (const k of LISTS.switchNotOne) { run(`switch ${k}=1 -> MISMATCH`, { envText: `${k}=1\n` }, 3, { expectNotOk: `env-switch:${k}` }); run(`switch ${k}=0 is fine`, { envText: `${k}=0\n` }, 0); }
+// N-2: default-ON second class
+run('MINING_CONSOLIDATE_ENABLED ABSENT (default-on!) -> MISMATCH', { noClean: true, envText: 'AUTO_BET_TICK_MS=0\n' }, 3, { expectNotOk: 'env-default-on:MINING_CONSOLIDATE_ENABLED' });
+run('MINING_CONSOLIDATE_ENABLED=true -> MISMATCH', { noClean: true, envText: 'MINING_CONSOLIDATE_ENABLED=true\nAUTO_BET_TICK_MS=0\n' }, 3);
+run("MINING_CONSOLIDATE_ENABLED=' FALSE ' (trim+lower, as the source does) is safe", { noClean: true, envText: 'MINING_CONSOLIDATE_ENABLED= FALSE \nAUTO_BET_TICK_MS=0\n' }, 0);
+run('AUTO_BET_TICK_MS ABSENT (default-on!) -> MISMATCH', { noClean: true, envText: 'MINING_CONSOLIDATE_ENABLED=false\n' }, 3, { expectNotOk: 'env-default-on:AUTO_BET_TICK_MS' });
+run('AUTO_BET_TICK_MS=60000 -> MISMATCH', { noClean: true, envText: 'MINING_CONSOLIDATE_ENABLED=false\nAUTO_BET_TICK_MS=60000\n' }, 3);
+run('AUTO_BET_TICK_MS absent but DEMO_AUTOBETTER_OFF=1 is safe', { noClean: true, envText: 'MINING_CONSOLIDATE_ENABLED=false\nDEMO_AUTOBETTER_OFF=1\n' }, 0);
+for (const k of LISTS.idAbsent) { run(`id key ${k} present -> MISMATCH`, { envText: `${k}=abc\n` }, 3, { expectNotOk: `env-id:${k}` }); run(`id key ${k} empty is fine`, { envText: `${k}=\n` }, 0); }
+run('PREDICTION_AGENT_ENABLED_PEERS whitespace-only is empty (source trims and filters) -> fine', { envText: 'PREDICTION_AGENT_ENABLED_PEERS= \n' }, 0);
+run('a commented-out switch line is ignored', { envText: '# UTXO_AUTOSPLIT_ON_START=1\n' }, 0);
+// N-3 inheritance: the effective environment is inherited UNION file
+run('INHERITED environment alone can arm a switch (file has no key) -> MISMATCH', {}, 3, { inherited: { UTXO_AUTOSPLIT_ON_START: '1' }, expectNotOk: 'env-switch:UTXO_AUTOSPLIT_ON_START' });
+run('inherited safe value is enough for a default-on key', { noClean: true, envText: '' }, 0, { inherited: { MINING_CONSOLIDATE_ENABLED: 'false', AUTO_BET_TICK_MS: '0' } });
+run('file overrides inherited (file says 0, inherited says 1) -> fine', { envText: 'UTXO_AUTOSPLIT_ON_START=0\n' }, 0, { inherited: { UTXO_AUTOSPLIT_ON_START: '1' } });
+run('an EMPTY file value REMOVES an inherited one (launcher semantics) -> fine', { envText: 'UTXO_AUTOSPLIT_ON_START=\n' }, 0, { inherited: { UTXO_AUTOSPLIT_ON_START: '1' } });
+run('env names are case-insensitive (Windows): inherited lower-case key still counts -> MISMATCH', {}, 3, { inherited: { utxo_autosplit_on_start: '1' } });
+// N-3 the two bugs NWT found: `KEY =1` must now be seen as SET (launcher reads it as KEY=1)
+run('KEY =1 (space before =) is read as SET by the launcher -> MISMATCH (v0.3 said "absent")', { envText: 'UTXO_AUTOSPLIT_ON_START =1\n' }, 3, { expectNotOk: 'env-switch:UTXO_AUTOSPLIT_ON_START' });
+run('KEY<TAB>=1 -> MISMATCH', { envText: 'UTXO_AUTOSPLIT_ON_START\t=1\n' }, 3);
+run('a lower-case KEY in the FILE is the same Windows variable -> MISMATCH', { envText: 'utxo_autosplit_on_start=1\n' }, 3, { expectNotOk: 'env-switch:UTXO_AUTOSPLIT_ON_START' });
+// the lists themselves are PINNED to NWT's findings (a mutation that silently shortens a list must not pass just because the per-item loops shrink with it)
+test('(N-2 pin) the guard lists contain everything NWT named', () => {
+  for (const k of ['ZK_CLOSE_TICK_ENABLED', 'ZK_CLOSE_TICK_V2_ENABLED', 'ZK_CLAIM_TICK_ENABLED', 'ZK_HANDOFF_TICK_ENABLED', 'ZK_JUDGE_PROPOSE_TICK_ENABLED', 'POOL_SEEDER_ENABLED', 'PREDICTION_AGENT_ENABLED', 'UTXO_AUTOSPLIT_ON_START', 'BROADCASTER_UTXO_MAINTAIN', 'BROKER_ENABLED', 'SETTLE_DAEMON_ENABLED', 'PROTO_DRIVER_ENABLED']) assert.ok(LISTS.switchNotOne.includes(k), `switch list must contain ${k}`);
+  for (const k of ['MINING_CONSOLIDATE_ENABLED', 'AUTO_BET_TICK_MS']) assert.ok(LISTS.defaultOn.includes(k), `default-on list must contain ${k}`);
+  for (const k of ['MINING_RELAY_ID', 'PREDICTION_AGENT_ENABLED_PEERS', 'POOL_SEEDER_MAKER_RELAY', 'BROADCASTER_RELAY_IDS', 'BOT_AUTOFUND_SOURCE_RELAY_ID', 'FAUCET_RELAY_ID']) assert.ok(LISTS.idAbsent.includes(k), `id-absent list must contain ${k}`);
+  for (const k of ['agent_wallets', 'exchange_offers', 'pool_markets', 'pool_bettor_sides', 'oracle_registry', 'oracle_stake_enrollments', 'retail_dex_buy_publications', 'mm_orders', 'relay_nodes(is_oracle=1,address)']) assert.ok(LISTS.tables.includes(k), `table list must contain ${k}`);
+});
+
+// ------------------------------------------------------------------------------------------------ 2. N-3: guard parser == the REAL PowerShell loader on 17 line shapes
+test('(N-3) the guard parses kanet.mainnet.env exactly like start-console-mainnet.ps1 (17 line shapes, mixed CRLF / LF / lone CR, BOM, duplicates, empty value) vs a real powershell.exe run of the launcher loop', () => {
+  const lines = [
+    ['﻿ZZT_A=1', '\r\n'], ['ZZT_B =1', '\n'], ['ZZT_C\t=1', '\r\n'], [' ZZT_D=1', '\n'], ['ZZT_E= 1', '\r\n'], ['ZZT_F=1 ', '\n'],
+    ['ZZT_G="1"', '\r\n'], ["ZZT_H='1'", '\n'], ['export ZZT_I=1', '\r\n'], ['# ZZT_J=1', '\n'], ['   # ZZT_K=1', '\r\n'],
+    ['ZZT_L=1', '\n'], ['ZZT_L=2', '\r'], ['ZZT_M=', '\n'], ['ZZT_N=a=b', '\r\n'], ['\tZZT_P=1', '\n'], ['ZZT_Q=1', '\r'], ['ZZT_R=', '\n'],
+  ];
+  const buf = Buffer.from(lines.map(([l, e]) => l + e).join(''), 'utf8');
+  const f = safe(path.join(TMP, 'shapes.env')); fs.writeFileSync(f, buf);
+  const ps = `$env:ZZT_R='9'; $f='${f.replace(/'/g, "''")}'; $log=@()
+Get-Content $f | ForEach-Object { if ($_ -match '^\\s*#' -or $_ -match '^\\s*$') { return }; if ($_ -match '^([^=]+)=(.*)$') { try { [Environment]::SetEnvironmentVariable($matches[1].Trim(), $matches[2], 'Process') } catch { $log += 'THROW' } } }
+Get-ChildItem Env: | Where-Object { $_.Name -like 'ZZT_*' } | Sort-Object Name | ForEach-Object { '{0}=[{1}]' -f $_.Name.ToUpper(), $_.Value }
+'log=' + ($log -join ',')`;
+  const r = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps], { encoding: 'utf8' });
+  assert.strictEqual(r.status, 0, r.stderr);
+  const psOut = r.stdout.split(/\r?\n/).filter((l) => /^ZZT_/.test(l));
+  // guard side: parse + overlay on the same inherited ZZT_R=9
+  const { vars } = parseLauncherEnvText(buf.toString('utf8'));
+  const eff = effectiveEnv({ ZZT_R: '9' }, vars);
+  const mine = [...eff].filter(([k]) => k.startsWith('ZZT_')).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([k, v]) => `${k}=[${v}]`);
+  assert.deepStrictEqual(mine, psOut, `guard parse differs from the real loader.\nguard: ${mine.join(' ')}\nps   : ${psOut.join(' ')}`);
+  // spot-check the interesting outcomes so a wrong-but-equal pair cannot pass silently
+  assert.ok(psOut.includes('ZZT_B=[1]') && psOut.includes('ZZT_C=[1]'), '`KEY =1` and `KEY<TAB>=1` ARE set by the launcher (the v0.3 guard said absent)');
+  assert.ok(psOut.includes('ZZT_L=[2]') && !psOut.some((l) => l.startsWith('ZZT_M=')) && !psOut.some((l) => l.startsWith('ZZT_R=')), 'last duplicate wins; empty value removes/keeps unset, including an inherited value');
+  assert.ok(psOut.includes('ZZT_G=["1"]') && psOut.includes('ZZT_F=[1 ]') && psOut.includes('ZZT_E=[ 1]'), 'quotes and surrounding spaces in the VALUE are kept verbatim');
+  assert.ok(!psOut.some((l) => l.startsWith('ZZT_I=')) && !psOut.some((l) => l.startsWith('ZZT_J=') || l.startsWith('ZZT_K=')), '`export KEY=1` sets a variable named "export ZZT_I", comments are skipped');
+  assert.ok(psOut.includes('ZZT_A=[1]'), 'a leading UTF-8 BOM is stripped by Get-Content');
+});
+test('(N-3) an empty NAME (` =1`) makes the REAL launcher throw; the guard never treats it as a setting', () => {
+  const f = safe(path.join(TMP, 'emptyname.env')); fs.writeFileSync(f, ' =1\nZZT_S=1\n');
+  const ps = `$f='${f.replace(/'/g, "''")}'; $log=@(); Get-Content $f | ForEach-Object { if ($_ -match '^\\s*#' -or $_ -match '^\\s*$') { return }; if ($_ -match '^([^=]+)=(.*)$') { try { [Environment]::SetEnvironmentVariable($matches[1].Trim(), $matches[2], 'Process') } catch { $log += 'THROW' } } }; 'log=' + ($log -join ',')`;
+  const r = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps], { encoding: 'utf8' });
+  assert.match(r.stdout, /log=THROW/, 'the launcher throws on an empty name (its $ErrorActionPreference=Stop would abort it)');
+  const { vars, emptyNameLines } = parseLauncherEnvText(fs.readFileSync(f).toString('utf8'));
+  assert.strictEqual(emptyNameLines, 1); assert.ok(!vars.has('') && vars.get('ZZT_S') === '1');
+});
+
+// ------------------------------------------------------------------------------------------------ 3. N-2: boot-cron registry completeness
+function stripComments(src) { return src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, ''); }
+export function discoverStartCalls(indexText) {
+  const code = stripComments(indexText);
+  const imports = new Map();
+  for (const m of code.matchAll(/import\s*\{([^}]+)\}\s*from\s*['"](\.[^'"]+)['"]/g)) for (const n of m[1].split(',')) { const nm = n.trim().split(/\s+as\s+/).pop(); if (nm) imports.set(nm, m[2]); }
+  for (const m of code.matchAll(/import\s+(\w+)\s+from\s*['"](\.[^'"]+)['"]/g)) imports.set(m[1], m[2]);
+  const called = new Set([...code.matchAll(/\b(start\w*|init\w*|autoSplitAll)\s*\(/g)].map((m) => m[1]));
+  return [...called].filter((n) => imports.has(n)).map((n) => ({ name: n, module: imports.get(n) })).sort((a, b) => a.name.localeCompare(b.name));
+}
+export function checkRegistry(discovered, lists) {
+  const problems = [];
+  const reg = lists.cronRegistry, all = new Set([...lists.switchNotOne, ...lists.defaultOn, ...lists.idAbsent, ...lists.nonCronGates]);
+  for (const d of discovered) if (!reg[d.name]) problems.push(`UNREGISTERED boot cron/start call: ${d.name} (${d.module}) -- classify it in CRON_REGISTRY (switch/default-on/id/data/no-spend/infra/audit-only/not-audited) and, if it can spend, guard it`);
+  for (const k of Object.keys(reg)) if (!discovered.some((d) => d.name === k)) problems.push(`STALE registry entry (no such start call in index.js any more): ${k}`);
+  for (const [k, e] of Object.entries(reg)) {
+    for (const g of e.gates || []) if (!all.has(g)) problems.push(`${k}: gate env ${g} is not in any guard list`);
+    for (const t of e.tables || []) if (!lists.tables.includes(t)) problems.push(`${k}: table guard ${t} is not in the guard's table list`);
+    if (e.kind === 'switch' && !(e.gates || []).length) problems.push(`${k}: kind switch needs gates`);
+    if (e.kind === 'data' && !(e.tables || []).length) problems.push(`${k}: kind data needs tables`);
+    if (!['switch', 'default-on', 'id', 'data', 'no-spend', 'infra', 'audit-only', 'not-audited'].includes(e.kind)) problems.push(`${k}: unknown kind ${e.kind}`);
+    if (!e.why) problems.push(`${k}: missing why (evidence)`);
+  }
+  return problems;
+}
+test('(N-2) every start-like call index.js makes at boot is registered; every gate/table it names is guarded', () => {
+  const indexText = fs.readFileSync(path.join(ROOT, 'kasia-console', 'src', 'index.js'), 'utf8');
+  const discovered = discoverStartCalls(indexText);
+  assert.ok(discovered.length >= 50, `the discovery must actually find the boot calls (found ${discovered.length})`);
+  const problems = checkRegistry(discovered, LISTS);
+  assert.deepStrictEqual(problems, [], problems.join('\n'));
+  // visibility: how much of the boot surface is only audited / not audited (printed, not failed)
+  const kinds = {}; for (const e of Object.values(LISTS.cronRegistry)) kinds[e.kind] = (kinds[e.kind] || 0) + 1;
+  console.log('boot-cron registry by kind:', JSON.stringify(kinds));
+});
+test('(N-2) gate-like env names (*_ENABLED / *_OFF) in the modules index.js starts are all guarded or explicitly ignored with a reason', () => {
+  const indexText = fs.readFileSync(path.join(ROOT, 'kasia-console', 'src', 'index.js'), 'utf8');
+  const src = path.join(ROOT, 'kasia-console', 'src');
+  const guarded = new Set([...LISTS.switchNotOne, ...LISTS.defaultOn, ...LISTS.idAbsent, ...LISTS.nonCronGates]);
+  const ignored = new Set(Object.values(LISTS.cronRegistry).flatMap((e) => e.ignoreGates || []));
+  const found = new Map();
+  for (const d of discoverStartCalls(indexText)) {
+    const p = path.resolve(src, d.module); if (!fs.existsSync(p)) continue;
+    for (const m of stripComments(fs.readFileSync(p, 'utf8')).matchAll(/process\.env\.([A-Z0-9_]+)/g)) if (/_ENABLED$|_OFF$/.test(m[1])) found.set(m[1], d.name);
+  }
+  const unguarded = [...found].filter(([n]) => !guarded.has(n) && !ignored.has(n)).map(([n, c]) => `${n} (read by ${c})`);
+  assert.deepStrictEqual(unguarded, [], `gate-like env names not in the guard lists (add them, or list them in the registry entry's ignoreGates with a reason): ${unguarded.join(', ')}`);
+});
+// mutation controls for the completeness test itself
+test('(N-2 control) a NEW unregistered start*Cron() in index.js turns the completeness check RED', () => {
+  const real = fs.readFileSync(path.join(ROOT, 'kasia-console', 'src', 'index.js'), 'utf8');
+  const mutated = real + "\nimport { startBrandNewSpenderCron } from './services/brand-new-spender.mjs';\nstartBrandNewSpenderCron();\n";
+  const problems = checkRegistry(discoverStartCalls(mutated), LISTS);
+  assert.ok(problems.some((p) => p.includes('UNREGISTERED') && p.includes('startBrandNewSpenderCron')), problems.join('\n'));
+});
+test('(N-2 control) removing a call from index.js leaves a STALE entry; naming a gate that is in no list is caught', () => {
+  const real = fs.readFileSync(path.join(ROOT, 'kasia-console', 'src', 'index.js'), 'utf8');
+  const noMining = discoverStartCalls(real).filter((d) => d.name !== 'startMiningConsolidateCron');
+  assert.ok(checkRegistry(noMining, LISTS).some((p) => p.includes('STALE') && p.includes('startMiningConsolidateCron')));
+  const bad = JSON.parse(JSON.stringify(LISTS)); bad.cronRegistry.startProtoDriver.gates.push('NOT_A_GUARDED_NAME'); bad.cronRegistry.startPoolMarketSettlerCron.tables = ['no_such_table_guard'];
+  const pr = checkRegistry(discoverStartCalls(real), bad);
+  assert.ok(pr.some((p) => p.includes('NOT_A_GUARDED_NAME')) && pr.some((p) => p.includes('no_such_table_guard')), pr.join('\n'));
+});
 ```
 

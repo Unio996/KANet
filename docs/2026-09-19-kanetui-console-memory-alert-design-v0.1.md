@@ -1,12 +1,18 @@
-# 设计稿：系统提交内存检测（memory-watch）v0.3 —— 宿主 = P2 常驻哨兵，不再是 console 模块
+# 设计稿：系统提交内存检测（memory-watch）v0.4 —— 宿主 = P2 常驻哨兵，不再是 console 模块
 
 > **Status**: CURRENT
 >
-> 起草 KANet-UI · 2026-09-19 · 文件名沿用 `…console-memory-alert-design-v0.1.md`（账本已按此路径引用），**正文即 v0.3**；v0.1（console 内模块）→ v0.2（改宿主）→ v0.3（NWT 复审 `9b2e7943`：P3 设计与状态机 GREEN + 4 条 SHOULD）的差异见下表。依据账本 **(1531)**（死机复盘 P3）、**(1532)**、**(1539)**（NWT 红队审全采纳）、**(1543)**（Bettor 已升 Owner、装 80/85/92% 监视）；NWT 红队审原文 `docs/provenance/2026-09-19-nwt-p2-p3-redteam/README.md`（`ba660ae0`）§四。实现草案**就是 P2 runbook 附录 A 脚本的一部分**（`docs/2026-09-19-kanetui-mainnet-boot-autostart-scheduled-task-runbook-v0.1.md`，正文即 v0.3），本页只写设计与验收判据。
+> 起草 KANet-UI · 2026-09-19 · 文件名沿用 `…console-memory-alert-design-v0.1.md`（账本已按此路径引用），**正文即 v0.4**；v0.1（console 内模块）→ v0.2（改宿主）→ v0.3（NWT 复审 `9b2e7943`：P3 设计与状态机 GREEN + 4 条 SHOULD）→ v0.4（NWT 三审 `16899661`：**N-1 心跳伪装** + P3 v0.3 GREEN）的差异见下表。依据账本 **(1531)**（死机复盘 P3）、**(1532)**、**(1539)**（NWT 红队审全采纳）、**(1543)**（Bettor 已升 Owner、装 80/85/92% 监视）；NWT 红队审原文 `docs/provenance/2026-09-19-nwt-p2-p3-redteam/README.md`（`ba660ae0`）§四。实现草案**就是 P2 runbook 附录 A 脚本的一部分**（`docs/2026-09-19-kanetui-mainnet-boot-autostart-scheduled-task-runbook-v0.1.md`，正文即 v0.3），本页只写设计与验收判据。
 >
 > **执行门**：**只写设计**。落码 = P2 脚本 `scripts/mainnet-boot-sequence.ps1` 的 4.1（Bettor 批 → NWT 审 diff）——**不改 console 一行，不需要 console 重启**，所以不再受"并入下一次 console 重启"（原 M-5）约束。脚本的 `-WatchOnly` 模式使它**在计划任务注册前**就能在普通用户会话里跑起来（只检测告警、不起任何进程）——**在生产检出上跑需要 Bettor 明说**（会往 `logs\mainnet\boot\` 写日志与锁文件）。
 >
 > **写作依 D-021**：不含密钥、余额、地址；payload/日志里的进程只带**名字、PID、私有内存 GB**，**不带命令行**。
+
+## v0.4 相对 v0.3 的改动（NWT 三审 N-1：**这条直接改了 P3 的存活判据**）
+
+| NWT 三审条目 | 处置 |
+|---|---|
+| N-1：v0.3 的内存检测只在哨兵循环里调，哨兵要等 `Invoke-PhaseB` 整体返回；ALIVE 门最长 24 h（追块/RocksDB 恢复、内存最吃紧）、t0 快照重试、console 300 s 校验期间**内存检测是关着的**，而 v0.3 的心跳"覆盖全生命周期"，于是"没告警 + 心跳新鲜"被读成"内存正常"——恰是"失败值与合法取不到不可分"。NWT 用我的夹具加向量（kaspad 一直 SYNCING + CRIT 样本）实测 9302 不发 | **采纳并已修**：内存 tick 与死亡检查抽成**哨兵一拍**，**每个等待循环每轮调用**；**心跳拆成两个文件**——`sentinel-heartbeat`（脚本还活着）与 **`memwatch-heartbeat`（只在一次内存采样成功后才更新）**。**P3 存活判据改看 `memwatch-heartbeat`**：它新鲜 = 内存检测在产出；`sentinel-heartbeat` 新鲜而它过期 = 脚本在、内存检测没在产出（例如 CIM 采样持续失败——此时 9310/9311 也会报，但**以心跳为准，不依赖事件日志**）。NWT 的向量原样进了 SelfTest（F14/F14b/F15/F17/F17b），4 个变异各被抓红（P2 页 v0.4 表） |
 
 ## v0.3 相对 v0.2 的改动（NWT 复审 `9b2e7943` §六：**P3 设计与状态机 GREEN，四条 SHOULD 全部采纳并已实现、已测**）
 
@@ -183,7 +189,9 @@
    与 `Get-Content D:\kanet-tn12\logs\mainnet\boot\memory-watch.log -Tail 20`（后者不依赖事件源）。
 2. **Bettor 会话侧 Monitor**（本机会话可做，不改 console）：周期读 `memory-watch.log` 的 `STATE`/`SAMPLE-FAILED` 行，或订阅上面的事件查询；据 (1543) Bettor 已装 80/85/92% 监视——**本页的检测与它是两条独立信号**，谁先响都行。
 3. `events` 表**不再是消费点**（本设计不写库）。
-4. **哨兵存活判据（v0.3，SHOULD-1）**：`(Get-Date) - (Get-Item D:\kanet-tn12\logs\mainnet\boot\sentinel-heartbeat).LastWriteTime` 超过 **150 s**（2 个 tick = 60 s + CIM 10 s 超时 + 余量）⇒ 哨兵已死、已挂或还没起来（**文件不存在也按此处理**）；**心跳覆盖整个脚本生命周期**（ALIVE 门可能等几个小时，那期间哨兵循环还没开始，所以门循环里也写）————此时"没有告警"**不再等于"没事"**。这一条写进 Bettor 的读数清单与会话侧 Monitor（Monitor 应对"心跳过期"也报警，而不只对 `STATE` 行）。
+4. **内存检测存活判据（v0.4 改，NWT N-1）**：**看 `memwatch-heartbeat`，不是 `sentinel-heartbeat`**——前者只在内存采样成功后才更新；`sentinel-heartbeat` 只说明脚本活着（门等待期间它是新鲜的，而 v0.3 里那时内存检测是关的）。原 v0.3 判据（下）里的文件名请换成 `memwatch-heartbeat`；`sentinel-heartbeat` 保留为"脚本活着"的辅助读数：
+   `$h='D:\kanet-tn12\logs\mainnet\boot\memwatch-heartbeat'; if (-not (Test-Path $h) -or ((Get-Date)-(Get-Item $h).LastWriteTime).TotalSeconds -gt 150) { 'MEMORY DETECTION NOT PRODUCING (dead/hung/failing/not started)' } else { 'memory detection alive' }`
+   原 v0.3 描述（保留供对照）：`(Get-Date) - (Get-Item D:\kanet-tn12\logs\mainnet\boot\sentinel-heartbeat).LastWriteTime` 超过 **150 s**（2 个 tick = 60 s + CIM 10 s 超时 + 余量）⇒ 哨兵已死、已挂或还没起来（**文件不存在也按此处理**）；**心跳覆盖整个脚本生命周期**（ALIVE 门可能等几个小时，那期间哨兵循环还没开始，所以门循环里也写）————此时"没有告警"**不再等于"没事"**。这一条写进 Bettor 的读数清单与会话侧 Monitor（Monitor 应对"心跳过期"也报警，而不只对 `STATE` 行）。
 
 ## 6. 开放项 / 风险
 - **P1 未解**：本页只缩短发现时间。**别把"有了 memory-watch"读成"不会再发生"**。
