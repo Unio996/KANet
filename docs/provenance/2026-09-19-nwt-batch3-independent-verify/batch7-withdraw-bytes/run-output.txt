@@ -1,0 +1,77 @@
+## wd_decode
+version 1 lockTime 0 ins 3 outs 3 storage 219598 compute 30371
+in[0] prev=0c1d966659:0 parentVal=20000000 parentCov=e00196ad sigLen=4508
+   push[0] push len=65 e138bc915bba…
+   push[1] OP_1 len=1 01
+   push[2] OP_0 len=0 
+   push[3] OP_0 len=0 
+   push[4] OP_1 len=1 01
+   push[5] push len=1 6b
+   push[6] PUSHDATA2 len=3078 6c760424a3e4…
+   push[7] push len=4 86d6cb9e
+   push[8] PUSHDATA2 len=1347 6b205ba466b2…
+in[1] prev=0c1d966659:1 parentVal=20000000 parentCov=d8d2afed sigLen=3215
+   push[0] OP_0 len=0 
+   push[1] OP_0 len=0 
+   push[2] OP_0 len=0 
+   push[3] OP_0 len=0 
+   push[4] OP_0 len=0 
+   push[5] OP_0 len=0 
+   push[6] OP_0 len=0 
+   push[7] push len=8 0000000000000000
+   push[8] push len=4 24a3e4a8
+   push[9] PUSHDATA2 len=3191 6b08e8030000…
+in[2] prev=53315c3c88:6 parentVal=85000000 parentCov=none sigLen=66
+out[0] value=20000000 cov=2:659ec205 spk=0000aa202bef926e0a507f4efdb50b8845da81a3c264492bb84587146e2222dababdcd0b87
+out[1] value=20000000 cov=2:9a5719c1 spk=0000aa20eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee87
+out[2] value=51023600 cov=none spk=00002003a81c86c03c9c668c1d7c4c6119dcf73e1c6bd7378086af30d993429071b000ac
+
+## wd_recompile (pinned silverc-v100 + blake2b256 P2SH)
+KTC redeem 1347 B  market_cov_id 5ba466b2… winner_pk e929dde5… amount 1000 token_tmpl_hash 225ebcde…
+  KTC recompile len 1347 BYTE-EQUAL = true
+  ABI spend: tag=86d6cb9e params=s:sig, tok_in_idx:int, tok_out_idx:int, to_market_input:bool, dest_idx:int, tok_prefix:bytes, tok_suffix:bytes  on-chain tag push 86d6cb9e
+  blake2b256(redeem) P2SH == claim_draw output0 spk (parent, independent of node acceptance) => true
+  KTC.market_cov_id == claim_draw.RootClaim input covenant id? (parent cov of RootClaim not in this fetch) mkt= 5ba466b21adc468b9412166750c9b7c855838cb67002fe9e26f8937c078ed61d
+  winner_pk == PoolSideTicket bettorPk of batch-6 ticket (e929dde5…)?  true
+
+held KTT redeem 3191 B amount 1000 owner e00196ad…  owner == KTC(input0) covenant_id => true
+  held KTT recompile len 3191 BYTE-EQUAL = true
+  ABI transfer: tag=24a3e4a8 params=next_states:dynamic_array, witness:bytes, owner_input_idx:dynamic_array  on-chain tag push 24a3e4a8
+  blake2b256(redeem) P2SH == claim_draw output1 spk => true
+
+new token out[0]: recompile KTT(amount=1000, owner=out[1].covenant_id 9a5719c1…) P2SH == out[0].spk => true
+  control (owner = old KTC covenant_id instead) P2SH == out[0].spk => false
+  out[0].covenant genesis auth 2  out[1].covenant genesis auth 2  (fee input idx 2; distinct covenant ids: true )
+  destination out[1] spk = aa20eeee…eeee87  (aa20 + 32x ee + 87: hash with no known preimage => UNSPENDABLE test destination)
+
+## wd_upstream (patched cli-debugger encoder+VM; my sighash port)
+decoded: tok_in_idx 1 tok_out_idx 0 to_market_input false dest_idx 1 tok_prefix 1 B tok_suffix 3078 B
+KTC.spend: upstream-encoded action == on-chain action ( 3158 B ) => true
+KTC.spend: upstream VM on REAL tx => PASS PASS 
+  NEG1 signature 1 bit flipped => VM FAIL (expected) | error: script ran, but verification failed | 106 |         require(checkSig(s, pubkey(winner_pk))); |     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ ver
+  NEG2 dest_idx=0 (points at token output, owner would be its own covenant id) => VM FAIL (expected) | error: script ran, but verification failed |    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ verification failed here
+  NEG3 to_market_input=true (owner := OpInputCovenantId(1) = held KTT covenant) => VM FAIL (expected) | error: script ran, but verification failed |    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ verification failed here
+  NEG4 tok_in_idx=2 (fee input is not a token) => VM FAIL (expected) | error: -3125 cannot be used as an array index |    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+held KTT.transfer(next_states=[], witness=0x, owner_input_idx=[0]): upstream action == on-chain action ( 21 B ) => true
+held KTT.transfer: upstream VM on REAL tx => PASS PASS 
+  NEG owner_input_idx=[2] (fee input, no covenant id) => VM FAIL (expected) | error: script ran, but verification failed | 83 |             require(prev_states[i].borrow_scheme == BORROW_DISABLED);                // H3 花费侧 | 84 |         
+
+KTC sig (hashtype byte 0x1) vs my sighash port (input 0) with winner_pk: true
+reverse arm (out[0] covenant stripped): false
+reverse arm (destination out[1] spk altered): false
+KTC.market_cov_id == RootClaim covenant_id spent by claim_draw (batch 6) => true 5ba466b2…
+
+## fee_curve_withdraw
+真实 withdraw tx: 输入 plurality 2,2,1  输出 plurality 2,2,1 => 我的公式 storage 219598  节点区块记录 storage 219598
+  compute mass: MINE 30371 (size 8271) | NODE computeMass 30371
+┌─────────┬─────────────┬──────────┬───────────┬───────┬─────────────┐
+│ (index) │ v           │ wasmMass │ formulaP1 │ equal │ requiredFee │
+├─────────┼─────────────┼──────────┼───────────┼───────┼─────────────┤
+│ 0       │ '50000000'  │ '320001' │ '320001'  │ true  │ '32000100'  │
+│ 1       │ '60000000'  │ '326666' │ '326666'  │ true  │ '32666600'  │
+│ 2       │ '70000000'  │ '332469' │ '332469'  │ true  │ '33246900'  │
+│ 3       │ '85000000'  │ '339764' │ '339764'  │ true  │ '33976400'  │
+│ 4       │ '100000000' │ '345716' │ '345716'  │ true  │ '34571600'  │
+└─────────┴─────────────┴──────────┴───────────┴───────┴─────────────┘
+J2 实付 fee (fee input 85M) = 33,976,400 => wasm draft mass 339,764; 表内 v=85M 行 requiredFee 应为 33,976,400
