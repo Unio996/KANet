@@ -21,13 +21,16 @@
 import { PROTO_RELAY_ID } from './proto-relay-guard.mjs';
 
 /** 命令白名单(读写标记表, 账本1441)——covenant_broadcast(relay.mjs:529, 真签名+真广播, 见
- * covenant-broadcast-relay.mjs)是这张表里唯一的 write, 其余三条对应的 relay.mjs handler 全部
- * 只读(见上方文件头注逐行标注), 加/改这张表本身就是安全边界变更, 必须走 NWT 审。 */
+ * covenant-broadcast-relay.mjs)是这张表里唯一的 write, 其余四条对应的 relay.mjs handler 全部
+ * 只读(见上方文件头注逐行标注), 加/改这张表本身就是安全边界变更, 必须走 NWT 审。
+ * 批9 9-0(J2 2026-09-19, 设计 v0.3.1 R2)新增第四条 read: get_past_median_time(relay.mjs, 走共享 RpcClient,
+ * 只调 getBlockDagInfo, 只回 pastMedianTimeMs/observedAtMs, 不签不广播不写钱包)——对旧表差分恰多这一行。 */
 export const PROTO_COMMAND_ALLOWLIST = Object.freeze({
   covenant_broadcast: 'write',
   get_address_utxos: 'read',
   get_mempool_entry: 'read',
   check_utxo_landed: 'read',
+  get_past_median_time: 'read',
 });
 
 /**
