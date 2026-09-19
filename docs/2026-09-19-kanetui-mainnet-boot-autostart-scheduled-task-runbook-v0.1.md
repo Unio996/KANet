@@ -194,7 +194,7 @@ console 没起来时 `events` 表写不了，所以三处都**不依赖 console*
 
 **门（v0.2 收紧，NWT ②-1 / P2-M3）**：
 1. 4.2 通过；**预演 R2 通过**；
-2. **D-026 开关已合入主线、已部署，并且运行中的主网 console 自己的 stdout 出现**：`[utxo-splitter] disabled (UTXO_AUTOSPLIT_ON_START!=1, raw=undefined)` 恰 1 行、`[utxo-splitter] … → … UTXOs` 0 行、`accounts split` 0 行、`[broadcaster-utxo] disabled (BROADCASTER_UTXO_MAINTAIN!=1, raw=undefined)` 恰 1 行、无 `[broadcaster-utxo] … rebalanced`。**这是 V6，是权威；静态 grep env 文件（V5）只是辅助**——因为 console 子进程继承启动者 shell 的环境，`start-console-mainnet.ps1` 只往进程环境里加值、不清除继承变量；
+2. **D-026 开关已合入主线、已部署，并且运行中的主网 console 自己的 stdout 出现**（**状态（Bettor (1542)）：已合入主线 `4e16ce39`，NWT 审 diff `99195212` GREEN、18 个变异 0 存活；合入不生效，V6 待下一次 console 重启时核——所以本门此刻仍未过**；同一批还加了 `(D26-scan)` 源码扫描测试与 `kanet.env.example` 两个注释掉的键行）：`[utxo-splitter] disabled (UTXO_AUTOSPLIT_ON_START!=1, raw=undefined)` 恰 1 行、`[utxo-splitter] … → … UTXOs` 0 行、`accounts split` 0 行、`[broadcaster-utxo] disabled (BROADCASTER_UTXO_MAINTAIN!=1, raw=undefined)` 恰 1 行、无 `[broadcaster-utxo] … rebalanced`。**这是 V6，是权威；静态 grep env 文件（V5）只是辅助**——因为 console 子进程继承启动者 shell 的环境，`start-console-mainnet.ps1` 只往进程环境里加值、不清除继承变量；
 3. Bettor 出 EXECUTE 单。
 > 原门"D-G 已有 Owner 决定"**作废**：那句话无法区分"决定不加开关"与"开关还没做"，第一次无人值守开机就会烧。
 
