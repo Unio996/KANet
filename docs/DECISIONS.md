@@ -24,6 +24,14 @@
 
 ## 🔴 当前有效的战略决策 (CURRENT)
 
+### D-023 主网电报机器人 = 复用现有 bot 身份 (2026-09-19 · Owner 本机终端原话「复用现有的！这个应该最快。」· Bettor 记账 · COORD-LEDGER 1499)
+
+1. **决定**：主网不另开机器人，复用现有 `TELEGRAM_BOT_TOKEN` / `TELEGRAM_BOT_USERNAME` 身份，把它指向主网 console `:3202`。
+2. **实核依据（Bettor 2026-09-19）**：`tg-bot/config.mjs:8` 的 `consoleUrl` 默认 `http://127.0.0.1:3200`（TN12，已随 D-017 下线），由 env `CONSOLE_URL` 覆盖；bot 代表的 broker 身份优先从 **DB 配置**解析（`config.mjs:7/37/116`，env `BROKER_RELAY_ID` 仅 fallback）⇒ 主网需新建 broker relay 身份并回填，不是改 env 了事；`kanet.mainnet.env` 当前无 telegram 两项。"复用"省下的只有申请身份的步骤，其余配置量与另开一致。
+3. **必办的副作用处置**：`tg-bot/_state.json` 存有 TN12 时代未完成会话（指向主网库不存在的市场 id）⇒ 备份后清空，否则老用户回话即撞"市场不存在"。
+4. **已知取舍（Owner 已知情）**：老用户对原 bot 的预期是 TN12 时代的玩法，主网押注资产是**零价值 KCC-20 测试币**（D-017）⇒ 首次交互文案必须明示，文案交 Owner 过目。
+5. **范围限制**：本条只批"复用身份"这一决定。电报接线的执行（env 写入、身份创建、充值、开关）走 KANet-UI runbook → Bettor 审 → Owner 开闸；自动下注与 seeder 保持关闭，打开需 Owner 单独批；`KANET_TESTNET_NO_LIMITS` 绝不进主网 env；结算后半程未完成前不接真实下注流。
+
 ### D-022 结算后半程：实现批准 + 活市场走路线 (A) + 两项"取最简洁"裁定 (2026-09-16 · Owner 本机终端原话「批准，派J2写结算后半程设计」→ 定稿后「按最简洁的方案走！」· Bettor 记账 · COORD-LEDGER 1476–1493 · 设计 `docs/2026-09-16-j2-proto-v0-settlement-design-v0.1.md` v0.8 @2bcc6c39 · simnet 真共识证据 @50019d4f)
 
 1. **批准实现**：六个结算 builder（market_seal / close_commit / convert_to_claim + convert_to_refundclaim / claim_draw + refund_payout / KanetTokenClaim.spend / 输家 ticket 回收）+ 意图状态机 + 驱动接线 + relay 漏斗命令。每个 builder 的**生产字节**须先在官方 kaspad 2.0.1 隔离 simnet 真实提交确认，方可合入主线；主网执行另走 Owner 闸门。
