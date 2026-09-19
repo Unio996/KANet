@@ -1,0 +1,33 @@
+# NWT F2 笔(34bd831a)独立实测输出(独立检出 D:\kanet-nwt-cand, 独立 npm ci; 每次变异/探针后还原, git status 空)
+
+## 1. 亲跑
+proto-claim-draw 57/0   proto-tx-assembly-settlement 43/0   proto-tx-assembly-settlement-golden 12/0   proto-settlement-c1 41/0   proto-settlement-chain-checks 51/0   proto-settlement-pointers 23/0
+kasia-relay/src/drain-finality-safe-blocks.test.mjs: KASPA_NETWORK=simnet -> ALL PASS; =mainnet -> ALL PASS(本测试不连接任何节点); =bogus -> LOUD "前提不满足"; 未设 -> LOUD "前提不满足"
+
+## 2. 端到端接线探针(nwt-f2-wiring-probe-builder.cjs 生成 _nwt_f2_probe.test.mjs = proto-claim-draw.test.mjs + 探针块, 跑完即删): 真实 builder 整链, 4 builder x 12 输入角色
+每个角色三条: (i) 构造出的交易里该输入位置的 previousOutpoint == 声明的 outpoint(接线); (ii) 证据 A、实花 B(同面值同 spk, 只换 outpoint) => ChainParentsError 且 .role == 该角色; (iii) 对照臂: chainParents 也按 B => 构造成功且交易输入 == B
+   SUMMARY roles=12 wiringOk=12 rejectOk=12 controlOk=12 controlRejectedByPreexistingCheck=0
+94 passed, 0 failed  (=57 原有 + 37 探针)
+
+## 3. B6 夹具 import 扫描的真实探针文件(node src/lib/proto-claim-draw.test.mjs; 每次删除探针, git status 空)
+C-control  kasia-console/src/services/_x.js (import 夹具)                 => FAIL B6 (被抓)
+R-require  kasia-console/src/services/_x.cjs (require 夹具)               => FAIL B6 (被抓)
+D-src-data-dir  kasia-console/src/data/_x/d.js (import 夹具)              => PASS B6 (漏)
+S-scripts-dir   kasia-console/scripts/_x.mjs (import 夹具)                => PASS B6 (漏; 不在扫描根内)
+T-dyn-template  动态拼接模块名 import('../lib/' + n + '.mjs')             => PASS B6 (漏; 文本扫描的固有边界)
+M-mts           kasia-console/src/services/_x.mts                         => PASS B6 (漏; 扩展名不在 mjs|js|cjs 内)
+
+## 4. 我的 12 个变异(nwt-mutate-f2.cjs; 每个跑 claim-draw + assembly + golden; 还原后 sha256 一致)
+killed   NWT-h1 outpoint index not compared   claim-draw:RED(f=3) asm:ok asm-golden:ok
+killed   NWT-h2 outpoint txid compared case-sensitively   claim-draw:RED(f=2) asm:ok asm-golden:ok
+killed   NWT-h3 wrong field for index (u.outpoint.index)   claim-draw:RED(f=0) asm:RED(f=6) asm-golden:RED(f=7)
+killed   NWT-h4 shape: txid pattern accepts anything   claim-draw:RED(f=1) asm:ok asm-golden:ok
+killed   NWT-h5 shape: negative index accepted   claim-draw:RED(f=1) asm:ok asm-golden:ok
+killed   NWT-h6 seal: fee used-outpoint mis-wired to leafOutpoint   claim-draw:RED(f=0) asm:RED(f=6) asm-golden:RED(f=7)
+killed   NWT-h7 close_commit: fee used-outpoint mis-wired to rootCloseOutpoint   claim-draw:RED(f=0) asm:RED(f=7) asm-golden:ok
+killed   NWT-h8 convert: held used-outpoint mis-wired to rootCloseOutpoint   claim-draw:RED(f=0) asm:RED(f=9) asm-golden:ok
+killed   NWT-h9 claim_draw: ticket used-outpoint mis-wired to rootClaimOutpoint   claim-draw:RED(f=18) asm:ok asm-golden:ok
+killed   NWT-h10 claim_draw: held used-outpoint mis-wired to ticketOutpoint   claim-draw:RED(f=18) asm:ok asm-golden:ok
+killed   NWT-h11 whole outpoint identity check removed (= E behaviour)   claim-draw:RED(f=3) asm:ok asm-golden:ok
+killed   NWT-h12 internal guard !u.outpoint removed   claim-draw:RED(f=1) asm:ok asm-golden:ok
+restored sha256 identical: true
