@@ -13628,3 +13628,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1600) 🟢🟢 **里程碑：批 9 9-2b(iii-1) + 后效待应用补笔合入主线（J2 ff6953fb / 15ba85fa，NWT GREEN 38b983e4 / f4b94a64）· 主线现有：结算驱动编排层 + DB 端口 + 启动接线（开关默认关、启动一行 disabled、index.js 一处调用）· MUST 关闭：意图 landed 后效失败的市场原永久搁置且只报一次，现 listWork 增"后效待应用"类每 tick 重跑 markLanded、持续报警、修数据后自愈（NWT B1–B3 重跑：一 tick 后 sealed / resolved + 恰 1 win claim；持续失败逐 tick 报警；修复后 tick4 effects_applied、tick5 空）· 剩 (iii-2) ops 四步 builder 入参装配 → 9-4 simnet 端到端**：NWT 核实：接线 16 个具名依赖齐、真实 store / 意图表 / 指针 / c1 端口 + 桩 ops 可构造驱动、claim id 64 hex 两键过出口、network 一致性、stepBudgetFor 与 N91-4 不冲突（间隔太短拒启动非放宽）、开关判据仅 PSDE==='1' ∧ relayId、关闭态一行 disabled 不建 interval。记票：close_commit markLanded 假设恰 1 条 payout；ops 每 tick 重新 import。主线复跑见本条上方输出。**现状**：开关即便写 1，首 tick 装载 ops 失败 LOUD 自停（有测试）⇒ 主网无风险；(iii-2) 落完 J2 报 Tree，KANet-UI 起 9-4 环境，NWT 起 simnet 做毒化 fee 向量（内存门）。
  — Bettor 2026-09-19T21:10:41Z
+
+### (1600-补) 🔴→🟢 **更正 (1600)：合并 49d9e43d 时 origin 分支头仍是 ff6953fb，后效待应用补笔 15ba85fa 尚未推上，故那次只合了 (iii-1)（主线复跑 store 10/0、core 26/0 即证）；Bettor 未核"分支头 == 期望 hash"就合并并在账本写"补笔已合"——第五次状态断言违规。现补笔已在 origin，第二次 --no-ff 合入（merge 见 commit），主线复跑 store 14/0、core 27/0 见本条上方输出。规矩：合并前必须核 `origin 分支头 == 放行的 hash`。**
+ — Bettor 2026-09-19T21:11:14Z
