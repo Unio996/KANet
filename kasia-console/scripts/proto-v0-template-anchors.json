@@ -63,9 +63,13 @@
       "cap": "50000000",
       "_source": "NWT 按 F3' 推的专属值(账本1521, NWT 分支 nwt/batch3-independent-verify 74394972, docs/provenance/2026-09-19-nwt-batch3-independent-verify/batch6-claim-draw-bytes/): wasm mass 等于 p=1 公式(5/5 点), v=95M 行 = simnet 实付 30,547,100; v≤1 KAS 时最大 requiredFee 30,833,300, ×1.5=46.25M 向上取整到 5M ⇒ 50,000,000。失效条件: 只对固定布局 [rootClaim,ticket,held,fee] 与常量输出成立, 布局或 fee 规则一变必须重推; n=1, depth-0 之外分支未验。"
     },
+    "ticket_reclaim": {
+      "cap": "2000000",
+      "_source": "⚠ 暂借 2,000,000 sompi(批8 ticket_reclaim: 已过simnet, 节点值 storage=3,087/compute=7,750/精确需求775,000/实付1,163,000, 见 docs/provenance/2026-09-19-j2-ticket-reclaim-simnet/, 但专属cap尚未由NWT推出): 账本1491 NWT simnet 回收用的【保守固定值】, 不是生产算法——builder 的 fee 由精确 mass 公式现算(100×max(storage,compute,transient)×3/2, 向上取整到 1000), 此 cap 只作有界上限(dynamicNetLossCeiling=min(2×required, cap, 1 KAS)); 批9 接线/合入前必须替换为 NWT 按节点实测推的专属值(F3')。"
+    },
     "withdraw": {
-      "cap": "100000000",
-      "_source": "⚠ 暂借1.0 KAS(批7 withdraw: 已过simnet, 节点值 storage=219,598/compute=30,371/实付33,976,400 sompi(fee输入85,000,000), 见 docs/provenance/2026-09-19-j2-withdraw-simnet/, 但专属cap尚未由NWT按F3'推出): 有界临时值, 实际约束是selectChangeShape的2×requiredFee动态上限; 批9接线/合入前必须替换为NWT按节点实测推的专属值(同claim_draw的F3'做法)。注: 批9 已排除 withdraw(主网 withdraw 目的地允许清单为空, Bettor 1520)——本条仅服务 simnet 证据。"
+      "cap": "55000000",
+      "_source": "NWT 按 F3' 推的专属值(账本外消息, NWT 分支 nwt/batch3-independent-verify 22c03299, docs/provenance/2026-09-19-nwt-batch3-independent-verify/batch7-withdraw-bytes/): wasm mass == p=1 公式(5/5 点), v=85M 行 = simnet 实付 33,976,400; v≤1 KAS 最大 requiredFee 34,571,600, ×1.5 = 51.86M 向上取整到 5M ⇒ 55,000,000。失效条件: 只对固定布局 [KanetTokenClaim, held, fee] 与常量输出成立, 布局或 fee 规则一变必须重推; n=1, 仅路径(ii)。注: 批9 已排除 withdraw(主网目的地允许清单 v0 为空), 此 cap 仅服务 simnet 证据。"
     }
   }
 }

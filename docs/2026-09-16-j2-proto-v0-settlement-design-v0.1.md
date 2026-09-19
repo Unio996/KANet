@@ -809,6 +809,8 @@ kaspa-wasm数字**更低**（低2,824-12,800不等）；但第9步（单covenant
 （同NWT这次的2,000,000做法），要么（b）在合入生产代码前，同样用`getMempoolEntry`对这个具体
 新tx形状做一次真实mass核实，不能假设"这个helper函数对其它入口好用、对这个新形状也一样好用"。
 
+> **2026-09-19 订正（J2，批8 simnet 实测，`docs/provenance/2026-09-19-j2-ticket-reclaim-simnet/`）**：上文的"本地 814 / 低估约 9.5 倍"**不要再引**——批8 生产 builder 构造的同形状交易，本地 kaspa-wasm mass 实为 **3,087**（恰等于节点 storage mass，漏 compute 维度），低估约 2.5 倍；814 对应 NWT 当时另一种构造（差别未追）。**结论不变**：复用 `computeRequiredFeeSompiOrThrow` 只付 308,700，被真实节点拒（"transaction has 308700 fees which is under the required amount of 775000 for compute mass 7750"）；生产 builder 改用精确 mass 现算（100×max(storage,compute,transient)×3/2），不复用该 helper。
+
 ## §1 每步交易形状（inputs/outputs/签名输入/covenant绑定/mass/fee）
 
 沿用`covenant-construction-spec-v0.1.md`§1.4通则（fee input覆盖mass费+dust垫底、找零≥
