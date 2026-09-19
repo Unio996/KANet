@@ -1,6 +1,6 @@
 > **Status**: CURRENT
 
-# 原型 v0 结算实现计划 v0.5（六个结算builder + 意图状态机 + 驱动接线，复用covenant_broadcast）
+# 原型 v0 结算实现计划 v0.6（六个结算builder + 意图状态机 + 驱动接线，复用covenant_broadcast）
 
 出处：Owner 2026-09-16 批准实现（D-022，账本1491，Bettor转达"按最简洁的方案走"），在
 `docs/2026-09-16-j2-proto-v0-settlement-design-v0.1.md`（v0.8，下称"设计文档"，尤其§1/§2/§7）
@@ -16,7 +16,11 @@ MUST-PROVE签名前公钥断言仍要落实（当前相等是实现巧合非协�
 批3收货后新增MUST：构造期mass上限fail-closed断言）**：新增§6b记录`proto-mass-ceiling.mjs`的
 实现与接入范围；接入既有`buildRegisterAppendTxJson`时意外测出一个**既有生产代码**(`selectChangeShape`,
 账本1427/1455/1462)的真实风险——找零选择逻辑不检查找零值是否小到让storage mass超过节点500,000
-硬顶，已停下报Bettor（不自己改既有money-path函数），详见§6b与§8开放点9。
+硬顶，已停下报Bettor（不自己改既有money-path函数），详见§6b与§8开放点9。**v0.6更新
+（批4close_commit builder落码+离线测试16/16 PASS，commit`51b5133a`；真实跑simnet验证链时
+撞见意外发现②）**：`register_append#1`(首笔下注)在`SIGNED_INPUT_CEILING_SOMPI`(1.0 KAS)约束内
+穷举全部候选fee UTXO面值(85M-100M)仍无一能满足95%阈值，比意外发现①更棘手(不是换UTXO能解决的
+问题)，已停下报Bettor，simnet验证链停在这一步，详见§6b与§8开放点10。
 
 D-021合规：本文档不写真实relay地址、真实账户余额、完整relay关联txid。
 
@@ -340,6 +344,20 @@ sompi(远低于`CONTINUATION_OUTPUT_SOMPI`=20M)，喂进KIP-9公式`C·p²/amoun
 不同，广播前必须用生产builder算出两维度mass并记录（走`assertMassWithinCeiling`即可，不需要另外
 手动算），超95%阈值即中止换面值，不要等节点拒收才知道。
 
+**🔴 意外发现②（比①更棘手，未修，已停下报Bettor 2026-09-19）**：接入`buildRegisterAppendTxJson`
+后真实跑simnet(批4验证链genesis→bet1→...)，`register_append#1`(市场首笔下注，无held输入)在
+`SIGNED_INPUT_CEILING_SOMPI=100,000,000`(既有relay侧签名面值硬顶)约束内，**穷举85M-100M全部
+候选fee UTXO面值，无一能让mass降到95%阈值(475,000)以下**——即使用满ceiling上限100,000,000，
+mass仍是476,668(95.33%)，只比阈值高0.33个百分点。规律：fee面值越大→找零越大→storage mass
+越低(找零值是`C·p²/amount`的分母)，但在100M这个硬顶处已经是能做到的最好成绩，仍不达标。这不是
+"换UTXO能解决"的问题(意外发现①的候选修法"mass超限就换面值"在这里穷举全部候选后仍无解)——
+是register_append#1这个形状在现有ceiling约束下的可行区间与95%阈值本身没有交集。详见对Bettor的
+汇报(2026-09-19)。候选方向(未定案，等Bettor裁定): (a)该步骤/该量级下调阈值(如97-98%，代价是margin
+变窄); (b)提高`SIGNED_INPUT_CEILING_SOMPI`(需评估relay侧签名面值上限背后的安全考量); (c)认定
+register_append当前witness/state编码的mass天花板本来就这么高，需要找降mass的构造改动(未深挖);
+(d)其它。simnet验证链已停在这一步，close_commit本身尚未真实跑到（[RootClose,fee]两输入形状目测
+mass余量正常，但要等register_append#1这条路先通）。
+
 ---
 
 ## 7. 分批提交顺序（v0.2：relay命令批次删除，其余不变；Bettor批准第1批立即开工）
@@ -363,7 +381,7 @@ sompi(远低于`CONTINUATION_OUTPUT_SOMPI`=20M)，喂进KIP-9公式`C·p²/amoun
 
 ---
 
-## 8. 剩余开放点（v0.5：新增开放点9，等Bettor裁定；其余5个此前均已裁定）
+## 8. 剩余开放点（v0.6：新增开放点10，等Bettor裁定；其余此前均已裁定或待裁定中）
 
 1. ~~新文件组织~~——**已裁定**：批准新文件，import复用不复制粘贴（§1.1）。
 2. ~~claim_draw是否需要ticket签名~~——**已裁定**：需要，源码+simnet实证定案（§2.4）。
@@ -382,6 +400,13 @@ sompi(远低于`CONTINUATION_OUTPUT_SOMPI`=20M)，喂进KIP-9公式`C·p²/amoun
    形状(b)(不留找零，剩余全部并入fee)——不恢复账本1427已废弃的字面值dust门槛，改用真实mass判据。
    影响面：`buildRegisterAppendTxJson`/`buildMarketGenesisTxJson`两个既有生产路径共用
    `selectChangeShape`，改动前需要Bettor审(铁律0，既有money-path函数)。
+10. **🔴 待裁定（v0.6新增，账本1497衍生发现②）**：`register_append#1`(首笔下注，无held输入)在
+    `SIGNED_INPUT_CEILING_SOMPI`(1.0 KAS硬顶)约束内，穷举85M-100M全部候选fee UTXO面值实测——
+    即使用满ceiling上限100,000,000，mass仍是476,668(95.33%)，比95%阈值(475,000)高0.33个百分点，
+    无一候选达标，详见§6b。已停下报Bettor(2026-09-19)，未自行修改阈值/ceiling常量/构造逻辑。
+    候选方向：(a)该步骤/量级下调阈值；(b)提高`SIGNED_INPUT_CEILING_SOMPI`；(c)找降mass的
+    witness/state编码改动；(d)其它。simnet验证链(genesis→bet1→bet2→market_seal→close_commit)
+    停在register_append#1这一步，close_commit本身尚未真实跑到。
 
 第1-2批（DB迁移+intent状态机）已完成落码。六个builder（第3-8批）全部不再受阻塞，按分批顺序
 （§7）继续推进，当前在做第3批（market_seal）。
