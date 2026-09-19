@@ -1,0 +1,70 @@
+## cd_decode
+version 1 lockTime 0 ins 4 outs 3 storage 179586 compute 40407
+in[0] prev=515c73e232:0 parentVal=20000000 parentCov=true sigLen=7300
+   push[0] OP_0 len=0 
+   push[1] OP_0 len=0 
+   push[2] OP_2 len=1 02
+   push[3] OP_1 len=1 01
+   push[4] OP_0 len=0 
+   push[5] push len=2 e803
+   push[6] OP_0 len=0 
+   push[7] OP_0 len=0 
+   push[8] OP_0 len=0 
+   push[9] OP_1 len=1 01
+   push[10] OP_1 len=1 01
+   push[11] push len=1 20
+   push[12] push len=1 6b
+   push[13] PUSHDATA2 len=3078 6c760424a3e4…
+   push[14] push len=1 6b
+   push[15] PUSHDATA2 len=1238 6c760486d6cb…
+   push[16] push len=4 ed9a9003
+   push[17] PUSHDATA2 len=2951 6b0801000000…
+in[1] prev=608994952d:1 parentVal=20000000 parentCov=false sigLen=190
+   push[0] push len=65 f1b57d5333c3…
+   push[1] push len=4 8c1c0eeb
+   push[2] PUSHDATA1 len=117 6b20e929dde5…
+in[2] prev=515c73e232:1 parentVal=20000000 parentCov=true sigLen=3215
+   push[0] OP_0 len=0 
+   push[1] OP_0 len=0 
+   push[2] OP_0 len=0 
+   push[3] OP_0 len=0 
+   push[4] OP_0 len=0 
+   push[5] OP_0 len=0 
+   push[6] OP_0 len=0 
+   push[7] push len=8 0000000000000000
+   push[8] push len=4 24a3e4a8
+   push[9] PUSHDATA2 len=3191 6b08e8030000…
+in[3] prev=0140969183:3 parentVal=95000000 parentCov=false sigLen=66
+out[0] value=20000000 cov=3 spk=0000aa20660750…
+out[1] value=20000000 cov=3 spk=0000aa204c5d98…
+out[2] value=84452900 cov=none spk=00002003a81c86…
+
+## cd_recompile (pinned silverc)
+RootClaim redeem 2951 B state ints 1,999,2,1000,1,1 bitmap 0 unknown 32B consts 2
+  try [shard_pool_id=c4c4c4c4, claim_tmpl=395949e1] len 2951 BYTE-EQUAL = true
+  ABI claim_draw: tag=ed9a9003 params=rootOutIdx:int, claimOutIdx:int, tokenInIdx:int, tokenOutIdx:int, remainTokenOutIdx:int, payout:int, merkle_index:int, tree_depth:int, siblings:dynamic_array, ticketInIdx:int, ticket_prefix_len:int, ticket_suffix_len:int, tok_prefix:bytes, tok_suffix:bytes, claim_prefix:bytes, claim_suffix:bytes
+  on-chain tag push ed9a9003
+
+Ticket redeem 117 B bettorPk e929dde5… direction 1 stake 999 shardPoolId==RootClaim.shard_pool_id true
+  ticket recompile len 117 BYTE-EQUAL = true
+  ABI authorize_spend: tag=8c1c0eeb params=bettorSig:sig  on-chain tag push 8c1c0eeb
+
+## cd_upstream (patched cli-debugger: encoder+VM; my sighash port)
+ticket authorize_spend: upstream VM on REAL tx + REAL bettor sig => PASS PASS 
+ticket authorize_spend: upstream action == on-chain action ( 71 B ) => true
+ticket sig vs my sighash port (input 1): true
+reverse arm (output0 covenant stripped): false
+RootClaim claim_draw: upstream-encoded action == on-chain action ( 4346 B ) => true
+RootClaim claim_draw: upstream VM on REAL tx => PASS PASS 
+
+## fee_curve_claim_draw
+┌─────────┬─────────────┬──────────┬───────────┬───────┬─────────────┐
+│ (index) │ v           │ wasmMass │ formulaP1 │ equal │ requiredFee │
+├─────────┼─────────────┼──────────┼───────────┼───────┼─────────────┤
+│ 0       │ '50000000'  │ '268833' │ '268833'  │ true  │ '26883300'  │
+│ 1       │ '60000000'  │ '279168' │ '279168'  │ true  │ '27916800'  │
+│ 2       │ '70000000'  │ '288035' │ '288035'  │ true  │ '28803500'  │
+│ 3       │ '95000000'  │ '305471' │ '305471'  │ true  │ '30547100'  │
+│ 4       │ '100000000' │ '308333' │ '308333'  │ true  │ '30833300'  │
+└─────────┴─────────────┴──────────┴───────────┴───────┴─────────────┘
+J2 实付 fee (fee input 95M) = 30,547,100 => draft wasm mass 305,471 ; 表内 v=95M 行应为 requiredFee 30,547,100
