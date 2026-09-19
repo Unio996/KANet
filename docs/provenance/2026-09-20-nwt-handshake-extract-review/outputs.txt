@@ -1,0 +1,22 @@
+# NWT 握手笔一(a08e755f, 基线 338f2496)独立实测输出 — 独立检出 D:\kanet-nwt-cand; 内存限令下只跑单文件脚本
+
+## 1. 原文/夹具/模块函数体三方逐字比较(我自己从 git 抽 338f2496:relay.mjs, 不信 J2 夹具)
+orig span chars 1501  fixture chars 1501
+fixture === original span (trim end): true
+module body === original span: true
+doAcceptHandshake occurrences in original relay.mjs: 2
+
+## 2. 抽取前函数运行时真实查找的外部标识符(with+Proxy 录, 4 条路径 x 2 次调用)对照工厂注入的 8 名
+looked-up external names: CONSOLE_URL, Set, acceptHandshake, encodeURIComponent, fetch, ingestHandshake, ingestTx, localAddress, log, sendKaspa
+looked up but NOT injected (should be empty): []
+injected but never looked up: []
+
+## 3. 我的 7 个 relay.mjs 接线变异(单文件测试 handshake-accept.test.mjs 25 项; 还原后 sha256 一致)
+SURVIVED h1 sendKaspa 换成 custodialSendKaspa(另一个花钱函数, 已导入)
+SURVIVED h2 ingestHandshake / ingestTx 互换
+SURVIVED h3 每次调用新建 acceptor(内存去重 Set 每次清空)
+SURVIVED h4 localAddress 换成 CONSOLE_URL
+killed   h5 consoleUrl 写死空串(静默关掉 DB 去重)   (1 FAIL)
+SURVIVED h6 log 换成 console.log(丢时间戳前缀)
+SURVIVED h7 acceptHandshake 换成 sendMessage 的别名(同文件已导入的另一函数)
+restored identical: true
