@@ -195,7 +195,7 @@
 | 9-0 | **R1/R2**（relay 只读扩展 + 白名单一行）+ 回归（节点直读逐字节一致 / 白名单只多一行 read / 消费者不变） | NWT 审边界（只读、不开签名或广播路径、字段只加不改）+ Bettor 批；D1 已裁 |
 | 9-1 | `proto-settlement-pointers.mjs`（P5）+ C1 调用点模块（含 `chainParents`）+ builder 小改（P6，含 close_commit 的 `continuationOutputIndices:[0]`）+ 全部负向回归 | NWT 审 |
 | 9-2 | 驱动分支 + 开关 + 启动日志 + `markSettlementLanded` + pmt 门接线 + SLA 报警 + 重启恢复 | NWT 审 |
-| 9-3 | HTTP：`/resolve`（write-once + `ADMIN_SECRET_SETTLEMENT` 鉴权，P2/D2）、`/claim`（建 claim 行 + 意图）、`/bet` 上限校验（P3/D5：已确认+在途 ≥ seal_count ⇒ 409）、`/withdraw` 仍 501 | Bettor 批（用户面/鉴权） |
+| 9-3 | HTTP：`/resolve`（write-once + `ADMIN_SECRET_SETTLEMENT` 鉴权，P2/D2）、`/claim`（建 claim 行 + 意图）、`/bet` 上限校验（P3/D5：已确认+在途 ≥ seal_count ⇒ 409）、`/withdraw` 仍 501；`/resolve` 以 `health.js` runtime-identity 为模板（allowlist 同时核 `request.ip` 与 `socket.remoteAddress` + `ADMIN_SECRET_SETTLEMENT` + write-once，Bettor 已确认带 allowlist）；**9-3 后续项**：`checkAdminSecretTier` 现为 `!==` 非常量时间比较（既有实现，本批不改）——改 `crypto.timingSafeEqual`（先比长度、长度不等直接拒且不泄露）并加测试，是否顺手做由 NWT 审时判定 | Bettor 批（用户面/鉴权） |
 | 9-4 | 隔离 simnet console 端到端 + provenance；**用全新 DB 与全新 env 副本**（新建库、新 env 文件，不复用/不指向主网库与主网 env，`DB_PATH`/`CONSOLE_ENCRYPTION_KEY`/`PROTO_RELAY_ID` 均为一次性测试值；env 副本里 `KASPA_NETWORK=simnet`） | NWT 复核证据 |
 | 主网开闸 | D-022 另开闸，Owner 终端点 GO | 不在批9内 |
 
@@ -204,7 +204,7 @@
 | # | 问题 | 裁定 |
 |---|---|---|
 | D1 | 采纳 R1/R2？ | **采纳**，独立小批 9-0 先落；条件 = NWT 审过边界（只读、不开签名或广播路径、字段只加不改）；9-0 自带回归：relay 返回的 spk/covenantId 与节点直读逐字节一致；白名单只多一行 read |
-| D2 | `/resolve` 鉴权 | 复用 admin-secret 分级机制，新开一档 `ADMIN_SECRET_SETTLEMENT`（新生成、env 只写键名）；write-once 在任何环境强制；9-3 之前该路由保持 501。**J2 读码后补：tier 检查本身无 loopback 判断，loopback 规则以 `health.js` runtime-identity 的"allowlist 同时核 request.ip 与 socket.remoteAddress + 专属 tier"为模板（见 §2 P2），待 Bettor 确认是否带 allowlist** |
+| D2 | `/resolve` 鉴权（Bettor 已确认：以 runtime-identity 为模板、带 allowlist；原话"loopback 规则同现有档"已更正，tier 检查本身无 IP 判断） | 复用 admin-secret 分级机制，新开一档 `ADMIN_SECRET_SETTLEMENT`（新生成、env 只写键名）；write-once 在任何环境强制；9-3 之前该路由保持 501。**J2 读码后补：tier 检查本身无 loopback 判断，loopback 规则以 `health.js` runtime-identity 的"allowlist 同时核 request.ip 与 socket.remoteAddress + 专属 tier"为模板（见 §2 P2），待 Bettor 确认是否带 allowlist** |
 | D3 | `committeeMode` 记哪 | events payload + 响应体，不加迁移 |
 | D4 | refund_flip 已翻的终态 | 意图 `ambiguous` + 专用报警，不加终态 |
 | D5 | `/bet` 上限校验 | 做：已确认 + 在途 ≥ seal_count 即 409 |
