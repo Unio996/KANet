@@ -74,6 +74,61 @@ t('真实仓库树的健全检查: 默认根扫描到 ≥ 500 个非测试源码
   if (!Array.isArray(DEFAULT_EXCLUDED_PREFIXES) && !Object.isFrozen(DEFAULT_EXCLUDED_PREFIXES)) throw new Error('排除清单应是冻结数组');
 });
 
+// ══ 9-1 F5(NWT F4-1): stripComments 换成状态机版(识别字符串 / 模板 / 正则) ══════════════════════════════════════════════
+// 旧的简单正则版(9-1 F4 前的实现)在下面三种形态会【漏报真实引用】; 对照臂 oldStrip 就是那个旧实现——证明这三条探针是真的会漏的形态, 不是纸面上的。
+const oldStrip = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`])\/\/.*$/gm, '$1');
+const CALL = 'REAL_CALL_TOKEN(1);';
+const FORMS = {
+  // 形态 1: 同行前有含 // 的字符串, 后面的真调用被旧正则当成注释吞掉
+  '字符串含 // 后接真调用': "const u = 'a//b'; " + CALL + " // 尾注释",
+  // 形态 2: 一个字符串里含块注释起始符、另一个字符串里含块注释结束符, 旧正则把两者之间的真调用当成块注释吞掉
+  '字符串含块注释起止符夹着真调用': "const a = '/*';\n" + CALL + "\nconst b = '*/';\n",
+  // 形态 3: 模板字面量含 //
+  '模板字面量含 // 后接真调用': "const t = `x // y`; " + CALL + "\n",
+};
+t('F5 ▲ 三种形态: 旧简单正则版会漏掉真调用(对照臂), 状态机版保留它; 真注释里的同名仍被去掉', () => {
+  for (const [name, src] of Object.entries(FORMS)) {
+    if (oldStrip(src).includes(CALL)) throw new Error(`(对照臂失效) 旧实现本应漏掉这条形态: ${name}`);
+    if (!stripComments(src).includes(CALL)) throw new Error(`状态机版漏掉了真调用: ${name}`);
+  }
+  const doc = "/* REAL_CALL_TOKEN(1) */\n// REAL_CALL_TOKEN(2)\n/**\n * REAL_CALL_TOKEN(3)\n */\nconst a = 1;";
+  if (/REAL_CALL_TOKEN/.test(stripComments(doc))) throw new Error('真注释里的同名没被去掉');
+});
+t('F5 v2.1 向量: 正则字面量里的 /* 不吞后面的真调用(字符类 / 转义斜杠 / /[/]/ / 转义 // 对 / return 之后); 除法不是正则(其后两个注释仍是注释); 转义字符与模板 ${} 表达式保持可见', () => {
+  const has = (src) => stripComments(src).includes(CALL);
+  const cases = [
+    ['E1 字符类含 /*', 'const re = /[^/*]+/; ' + CALL],
+    ['E1b 转义斜杠+星', 'const re = /a\\/\\*b/; ' + CALL],
+    ['E1c 括号后的 /[/]/', 'x = a.replace(/[/]/g, "-"); ' + CALL],
+    ['E1d 转义 // 对', 'if (/^a\\/\\//.test(s)) { ' + CALL + ' }'],
+    ['E1f return 之后的正则', 'return /x*/.test(s) && ' + CALL],
+    ['c4 转义斜杠正则', 'const r = /https?:\\/\\//; ' + CALL],
+    ['c3 字符串里的 :// 之后', "const u = 'http://x'; " + CALL + " // trailing"],
+    ['模板 ${} 表达式可见', 'const t = `a ${' + CALL + '} b`;'],
+    ['多行模板里含 // 与 /*, 闭合之后的真调用', 'const t = `a\n// not a comment\n/* nor this\n`; ' + CALL],
+    ['正则字符类里的 //(其后紧跟 *): 类内的 / 不结束正则, 否则会拼出块注释起始符吞掉真调用', 'const re = /[//*]/; ' + CALL],
+    ['代码态的转义斜杠: 括号之后的 /a\\//(按除法处理)里 \\/ 是转义对, 不能拼出行注释起始符', 'if (x) /a\\//.test(s); ' + CALL],
+    ['字符串里的转义引号不提前结束字符串(其后的 // 仍在字符串内, 之后的真调用保留)', "const s = 'it\\'s //x'; " + CALL],
+  ];
+  for (const [n, src] of cases) if (!has(src)) throw new Error(`${n}: 真调用被吞了`);
+  if (has('const q = a / b; /* REAL_CALL_TOKEN(1); */ const r = c / d; // REAL_CALL_TOKEN(1);')) throw new Error('除法后的两个注释应仍是注释(被当成正则了?)');
+});
+t('F5 真实文件探针(三种形态各放一个文件, 走 findReferencesInNonTestSources 全链路): 状态机版全部发现; 同一批文件在旧实现下会被漏掉', () => {
+  const root2 = fs.mkdtempSync(path.join(os.tmpdir(), 'scan-f5-'));
+  try {
+    const NEEDLE2 = 'F5_MARKER_MODULE';
+    const forms = {
+      'kasia-console/src/lib/f5-str.mjs': "const u = 'a//b'; const m = require('./" + NEEDLE2 + ".mjs'); // tail\n",
+      'kasia-console/src/lib/f5-block.mjs': "const a = '/*';\nconst m = require('./" + NEEDLE2 + ".mjs');\nconst b = '*/';\n",
+      'kasia-console/src/lib/f5-tpl.mjs': "const t = `x // y`; const m = require('./" + NEEDLE2 + ".mjs');\n",
+    };
+    for (const [rel, body] of Object.entries(forms)) { const p = path.join(root2, rel); fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, body); }
+    const hits = findReferencesInNonTestSources(new RegExp(NEEDLE2), { rootDir: root2, minFiles: 1 }).sort();
+    eq(hits, Object.keys(forms).sort());
+    for (const body of Object.values(forms)) if (oldStrip(body).includes(NEEDLE2)) throw new Error('(对照臂失效) 旧实现本应漏掉');
+  } finally { fs.rmSync(root2, { recursive: true, force: true }); }
+});
+
 fs.rmSync(tmp, { recursive: true, force: true });
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
