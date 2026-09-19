@@ -1,0 +1,104 @@
+{
+ "retrievedVia": "RPC getBlocks(includeTransactions:true) 只读扫块; 读区块内交易记录自带的节点侧storageMass/mass/verboseData.computeMass",
+ "txs": {
+  "register_append_1": {
+   "txid": "56b70960cb2b21b1f73f0ce7dd6689e7dcc0dba2687e8e8332ec948641126f4d",
+   "version": 1,
+   "lockTime": "0",
+   "storageMass": "457504",
+   "mass": "457504",
+   "computeMass": "33927",
+   "block": {
+    "hash": "84f407c7a0331fb6267e5bb460cb4bd0a2db37eb804d1a7d4fd2ff6203927cc8",
+    "daaScore": "4328",
+    "timestamp": "1789819983799"
+   },
+   "inputs": [
+    {
+     "previousOutpoint": {
+      "transactionId": "d409e5a0012f62fa09c2cb8c5dda74cceb84b93d68bae055743d0311ae7fb03d",
+      "index": 0
+     },
+     "sigScriptBytes": 17910,
+     "sigScriptSha256_16": "b4b66fff51b2f155",
+     "sequence": "0",
+     "computeBudget": 70,
+     "sigOpCount": 0
+    },
+    {
+     "previousOutpoint": {
+      "transactionId": "01409691833426ee4737e8459596febacf93608e36ef47b43f000dc026ce2b09",
+      "index": 5
+     },
+     "sigScriptBytes": 66,
+     "sigScriptSha256_16": "cc8aeeb69137b1f4",
+     "sequence": "0",
+     "computeBudget": 70,
+     "sigOpCount": 0
+    }
+   ],
+   "outputs": [
+    {
+     "value": "20000000",
+     "covenant": {
+      "authorizingInput": 0,
+      "covenantId": "9ae9ccab910d8333ec2c63d970740381a30404bda86bb775292864b0bc17fc4d"
+     },
+     "scriptPublicKey": "0000aa200ddb5f29834fc697614d035036035b9c2b7eba4eaee3a98b0c883060d30635a587"
+    },
+    {
+     "value": "20000000",
+     "covenant": null,
+     "scriptPublicKey": "0000aa20389c2dfbfadfa0bec6f7cebca2e6be6baeff90965b6c0a26727546653aebc84787"
+    },
+    {
+     "value": "20000000",
+     "covenant": {
+      "authorizingInput": 1,
+      "covenantId": "480fe391e334e64acb3eff7620ef53352c3d7e6049540b89fedd181c793f1830"
+     },
+     "scriptPublicKey": "0000aa203b10407ce994210a4d584a96ba05e19f84f74b555c10d757d13b21fe5401d50a87"
+    },
+    {
+     "value": "11660100",
+     "covenant": null,
+     "scriptPublicKey": "00002003a81c86c03c9c668c1d7c4c6119dcf73e1c6bd7378086af30d993429071b000ac"
+    }
+   ]
+  },
+  "ticket_reclaim": {
+   "txid": "7138c83a452964bc50f076353ca1577bbd21aceee7575cf00200b94b902a6621",
+   "version": 1,
+   "lockTime": "0",
+   "storageMass": "3087",
+   "mass": "3087",
+   "computeMass": "7750",
+   "block": {
+    "hash": "9498034c724b1fd401970dc0c58a3ab134756f9a5be4943efc1bb2b7446c935e",
+    "daaScore": "4335",
+    "timestamp": "1789822330899"
+   },
+   "inputs": [
+    {
+     "previousOutpoint": {
+      "transactionId": "56b70960cb2b21b1f73f0ce7dd6689e7dcc0dba2687e8e8332ec948641126f4d",
+      "index": 1
+     },
+     "sigScriptBytes": 190,
+     "sigScriptSha256_16": "745f92276b1c484c",
+     "sequence": "0",
+     "computeBudget": 70,
+     "sigOpCount": 0
+    }
+   ],
+   "outputs": [
+    {
+     "value": "18837000",
+     "covenant": null,
+     "scriptPublicKey": "00002003a81c86c03c9c668c1d7c4c6119dcf73e1c6bd7378086af30d993429071b000ac"
+    }
+   ]
+  }
+ },
+ "scannedBlocks": 4354
+}
