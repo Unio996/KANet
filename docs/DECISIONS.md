@@ -24,6 +24,30 @@
 
 ## 🔴 当前有效的战略决策 (CURRENT)
 
+### D-024 暂停 D-023 电报接线的执行，等"bot 接 proto v0 API"立项 (2026-09-19 · Owner 本机终端原话「暂停电报接线，等 v0 API 立项」· Bettor 记账 · COORD-LEDGER 1507 / 1509)
+
+1. **决定**：D-023 "复用现有 bot 身份"这一决定本身不变，但其**执行整体暂停**（env 写入、broker 身份创建、CR-1 / CR-2 / CR-3、开闸），直到"bot 接 proto v0 API"立项。
+2. **依据（KANet-UI 2026-09-19 只读实核，Bettor 抽核属实）**：`tg-bot` 代码里没有任何 `/api/proto` 调用（出现的 `protocolVersion` 是旧 pool 协议 v0.6 / v0.7），主网 `pool_markets` 为 0 ⇒ 接线（含 CR-1 / 2 / 3）全部完成后，bot 在主网只是"能应答、能绑定主网地址"的只读壳，不能下注、不能建钱包、不能领水、收不到结算通知、看不到主网唯一的活市场（`proto_*` 表）。此事实与 D-023 作出时的前提不同。
+3. **暂停范围**：不落 CR-1 / CR-2 代码，CR-3（用户面）不批，不动主网 env、bot、`tg_bot_*` 配置。已提交的 runbook v0.2 与 CR-1 / CR-2 变更说明（`6d11e831`）保留为**搁置参照**——复启时须对着当时的代码重核，不得直接照做。
+4. **复启条件**：Owner 立项"bot 接 proto v0 API"。届时把 B-1 ~ B-5 阻断项、CR-1 / 2 / 3 与 v0 API 接入**合并规划**（用户面代码一次设计、一次 Owner 批），不再单独接线。
+5. **不受影响**：主网 console 现状、驱动开关（保持关闭）、结算实现线（J2 / NWT）。
+
+### D-023 主网电报机器人 = 复用现有 bot 身份 (2026-09-19 · Owner 本机终端原话「复用现有的！这个应该最快。」· Bettor 记账 · COORD-LEDGER 1499)
+
+1. **决定**：主网不另开机器人，复用现有 `TELEGRAM_BOT_TOKEN` / `TELEGRAM_BOT_USERNAME` 身份，把它指向主网 console `:3202`。
+2. **实核依据（Bettor 2026-09-19）**：`tg-bot/config.mjs:8` 的 `consoleUrl` 默认 `http://127.0.0.1:3200`（TN12，已随 D-017 下线），由 env `CONSOLE_URL` 覆盖；bot 代表的 broker 身份优先从 **DB 配置**解析（`config.mjs:7/37/116`，env `BROKER_RELAY_ID` 仅 fallback）⇒ 主网需新建 broker relay 身份并回填，不是改 env 了事；`kanet.mainnet.env` 当前无 telegram 两项。"复用"省下的只有申请身份的步骤，其余配置量与另开一致。
+3. **必办的副作用处置**：`tg-bot/_state.json` 存有 TN12 时代未完成会话（指向主网库不存在的市场 id）⇒ 备份后清空，否则老用户回话即撞"市场不存在"。
+4. **已知取舍（Owner 已知情）**：老用户对原 bot 的预期是 TN12 时代的玩法，主网押注资产是**零价值 KCC-20 测试币**（D-017）⇒ 首次交互文案必须明示，文案交 Owner 过目。
+5. **范围限制**：本条只批"复用身份"这一决定。电报接线的执行（env 写入、身份创建、充值、开关）走 KANet-UI runbook → Bettor 审 → Owner 开闸；自动下注与 seeder 保持关闭，打开需 Owner 单独批；`KANET_TESTNET_NO_LIMITS` 绝不进主网 env；结算后半程未完成前不接真实下注流。
+6. **状态（2026-09-19 晚）**：🔵 **执行已暂停，见 D-024**；本条"复用身份"的决定不变，但 2~5 各项动作（新建 broker 身份、备份 `_state.json`、env / 开关）均未执行，且暂不执行。
+
+### D-022 结算后半程：实现批准 + 活市场走路线 (A) + 两项"取最简洁"裁定 (2026-09-16 · Owner 本机终端原话「批准，派J2写结算后半程设计」→ 定稿后「按最简洁的方案走！」· Bettor 记账 · COORD-LEDGER 1476–1493 · 设计 `docs/2026-09-16-j2-proto-v0-settlement-design-v0.1.md` v0.8 @2bcc6c39 · simnet 真共识证据 @50019d4f)
+
+1. **批准实现**：六个结算 builder（market_seal / close_commit / convert_to_claim + convert_to_refundclaim / claim_draw + refund_payout / KanetTokenClaim.spend / 输家 ticket 回收）+ 意图状态机 + 驱动接线 + relay 漏斗命令。每个 builder 的**生产字节**须先在官方 kaspad 2.0.1 隔离 simnet 真实提交确认，方可合入主线；主网执行另走 Owner 闸门。
+2. **活市场 a59c7b48 走路线 (A)**：第二笔押 NO（stake 999）→ 裁决 YES → 单赢家 claim_draw（payout = pool_value = 1000，走 full 分支）→ spend → 回收输家 ticket。该精确形状已在 simnet 8 步全部被真共识接受。
+3. **`RootClaim.sil:103 require(payout >= 1000)` ⇒ 直接删除**（Owner「最简洁」）。理由：该 1000 是代币化前 sompi 时代遗留字面量，与 API 默认 min_bet = 1 冲突；payout = 0 的 claim 只浪费调用者自己的手续费，不造成他人损失，不值得为此保留一条门槛（同 D-017 铁令：约束先问"防的真实损失是什么"）。与 partial 多赢家自续约偏移修复（同 1469 ctor 烤入手法）**合并一次改动**，仅适用新市场；修后须在 simnet 用多赢家 partial 形状真跑。
+4. **refund_flip 触发规则与 grace ⇒ 维持现状**（Owner「最简洁」）：deadline + 2h 后任何人可触发、无需签名，不改 `RootClose.sil`、不加委员签名、不延长 grace。已知取舍：被抢先 flip 时赢家拿不到赔付、只退本金——原型期押注资产为零价值测试币，KAS 侧按退款路径退回，不构成真实资金损失。执行页以"封盘后立即背靠背提交 close_commit"缩小窗口（MUST-2）。
+
 ### D-021 仓库公开（有意）· 公开仓库写作规矩 (2026-09-15 · Owner 本机终端原话「公开源代码有利于整个kaspa生态。你立规矩建议不错，采纳。」· Bettor 记账 · COORD-LEDGER 1437 / 1448)
 1. **公开是 Owner 有意决定**：`Unio996/KANet` 保持 PUBLIC，代码、合约、设计与协调记录对 Kaspa 生态开放。不改可见性，不重写历史。
 2. **从今天起，所有进入仓库的文字（账本、DECISIONS、设计稿、provenance、commit message、代码注释）不得写**：
