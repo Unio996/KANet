@@ -1,0 +1,61 @@
+# NWT 三审 50de05aa —— 各项实测的原始输出(逐行取自我当时的终端读数; 不含 relay 名/地址/余额)
+# 附录 A 脚本抽取: sed -n 339,1171p docs/2026-09-19-kanetui-mainnet-boot-autostart-scheduled-task-runbook-v0.1.md  (833 行, sha256 前缀 6d6bf1e0…)
+
+## 1. SelfTest 变异(nwt-run-variants.ps1; 每次 -SelfTest, 路径参数全指向私有临时目录)
+v00-baseline                       exit=0 pass=75 fail=0
+v01-N1-vector                      exit=1 pass=76 fail=1
+    FAIL NWT-N1: memory CRIT (9302) is raised DURING the ALIVE gate wait
+m1-no-try-around-PhaseB            exit=1 pass=74 fail=1
+    FAIL flow-F3-inject-uncaught-Phase-B-exception: NO Stop-Boot, no uncaught exception, kaspad untouched, sentinel still ran, console NOT started
+m2-outer-catch-always-StopBoot     exit=1 pass=74 fail=1
+    FAIL flow-F2b-inject-exception-late-in-Phase-A-after-kaspad-known (reaches the OUTER catch): NO Stop-Boot, 9099 raised, boot continues to console
+m3-pidfile-catch-rethrows          exit=0 pass=75 fail=0
+m4-Ctx-published-after-Set-BootStatus exit=1 pass=74 fail=1
+    FAIL flow-F2b-inject-exception-late-in-Phase-A-after-kaspad-known (reaches the OUTER catch): NO Stop-Boot, 9099 raised, boot continues to console
+m5-sentinel-loop-no-outer-catch    exit=0 pass=75 fail=0
+m6-probe-throw-aborts-gate         exit=1 pass=74 fail=1
+    FAIL flow-F4-probe-throws-every-time (S-A): warn 45 after 5 failed readings, console NOT started, NO Stop-Boot, kaspad untouched
+# (v01 的阳性对照 "NWT-N1-control: sentinel raises 9302 on a CRIT sample" 在 76 个 PASS 之内)
+
+## 2. SelfTest 安全断言变异(nwt-run-guard-mutant.ps1)
+m7 exit=1  PASS=0  FAIL=0
+safety assertion tripped: True
+SELFTEST SAFETY: path outside the temp dir: <私有临时目录>\kl
+
+## 3. 生产侧不变核对(SelfTest 基线跑前后)
+生产 kaspad 日志目录: 5 项, 名称/大小/修改时间跑前跑后逐项相同(Compare-Object 无差异); D:\kanet-tn12\logs\mainnet\boot 未被创建。
+
+## 4. 守卫 boot-guard-check.mjs 对真实主网库(只读) + 合成 env(只含 KASPA_NETWORK 与 MINING_CONSOLIDATE_ENABLED=false)
+13 张表 GUARD rows:* 全 OK count=0; GUARD config:autotake MISMATCH(autotake_enabled=true 且 autotake_mode=auto); GUARD config:scanner_enabled OK absent;
+10 个 env-switch 全 OK key absent; 4 个 env-id 全 OK absent/empty;
+GUARD-RESULT checks=29 not_ok=1     工具退出码 = 3
+# 空格差异(用守卫工具本体, 合成 env 文件):
+规范写法 UTXO_AUTOSPLIT_ON_START=1   -> GUARD env-switch:UTXO_AUTOSPLIT_ON_START MISMATCH key present (value not printed)
+写法     UTXO_AUTOSPLIT_ON_START =1  -> GUARD env-switch:UTXO_AUTOSPLIT_ON_START OK key absent
+# 真实 PowerShell 对启动器正则求值(未设置任何环境变量):
+UTXO_AUTOSPLIT_ON_START =1       -> name=[UTXO_AUTOSPLIT_ON_START] value=[1]
+UTXO_AUTOSPLIT_ON_START<TAB>=1   -> name=[UTXO_AUTOSPLIT_ON_START] value=[1]
+UTXO_AUTOSPLIT_ON_START=1        -> name=[UTXO_AUTOSPLIT_ON_START] value=[1]
+UTXO_AUTOSPLIT_ON_START= 1       -> name=[UTXO_AUTOSPLIT_ON_START] value=[ 1]
+# 机器/用户级环境变量: none of the 25 guarded/related names is set at Machine or User level
+
+## 5. 出站工具 boot-outbound-check.mjs 对真实节点(只读, 18 个 relay)
+snap(settle 5s):  SNAP-OK relays=18 unreadable=0 settle_ms=5000                       exit=0
+diff(新 t0):      RESULT relays=18 unreadable=0 spent_outpoints=0 new_outpoints=0 new_txids_not_in_kaspa_tx_log=0   exit=0
+合成(A) 删一个真 outpoint+加一个假的: RESULT ... spent_outpoints=1 new_outpoints=1 ...                              exit=3
+合成: t0 缺一个 relay:               RESULT ... unreadable=1 spent_outpoints=0 ...                                   exit=4
+连接不可达:        ERROR connect: timeout:connect:30000ms                                                            exit=2
+
+## 6. D26-scan v2 真实探针文件(走真实遍历; 每次删除探针文件, git status 空)  node --experimental-test-module-mocks --test src/lib/broadcaster-utxo.test.mjs
+基线 20/20 通过
+B-control (src/services/_nwt_b.js 里 ensureBroadcasterUtxos)      fail=1 (被抓)
+A-data    (src/data/_nwt_probe/a.js)                              fail=1 (被抓)
+C-blockline (/* warm */ 同行真实调用)                              fail=1 (被抓)
+D-tick    (broadcasterUtxoTick 外部调用)                           fail=1 (被抓)
+E1-regex-overstrip (const re = /[^/*]+/; 后跟真实调用)             fail=0 (漏)
+E2-str-slashes ('http://x' 后同行真实调用)                         fail=1 (被抓)
+E3-mts (.mts 文件)                                                fail=0 (漏)
+E4-jsx (.jsx 文件)                                                fail=0 (漏)
+E5-nested-tpl (嵌套模板字面量后真实调用)                            fail=1 (被抓)
+E6-agent-mind (agent-mind/ 下)                                    fail=1 (被抓)
+E7-relay-dir (kasia-relay/src/ 下 broadcasterUtxoTick)             fail=1 (被抓)
