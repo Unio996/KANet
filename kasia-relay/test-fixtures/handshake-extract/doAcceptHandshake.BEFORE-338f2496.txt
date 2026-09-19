@@ -1,0 +1,33 @@
+const _acceptedPeers = new Set(); // dedup: only accept handshake from each address once
+
+async function doAcceptHandshake(peer) {
+  // DEDUP 1: in-memory check
+  if (_acceptedPeers.has(peer)) {
+    log("HANDSHAKE from", peer.slice(-12), "→ already accepted (memory), skipping");
+    return;
+  }
+  // DEDUP 2: check Console relation_states (persists across restarts)
+  if (CONSOLE_URL) {
+    try {
+      const rs = await fetch(`${CONSOLE_URL}/api/relation/status?local=${encodeURIComponent(localAddress)}&peer=${encodeURIComponent(peer)}`).then(r => r.json());
+      if (rs.status === 'accepted' || rs.status === 'active' || rs.status === 'confirmed') {
+        log("HANDSHAKE from", peer.slice(-12), "→ already", rs.status, "in DB, skipping");
+        _acceptedPeers.add(peer);
+        return;
+      }
+    } catch {}
+  }
+  log("HANDSHAKE from", peer, "→ accepting...");
+  try {
+    const draft = await acceptHandshake({ address: peer });
+    if (!draft?.payload) { log("Accept draft failed:", draft); return; }
+    const sent = await sendKaspa({ to: draft.to, amount: draft.amount, payload: draft.payload });
+    log("HANDSHAKE ACCEPTED TX:", sent?.txId || sent);
+    _acceptedPeers.add(peer);
+    ingestHandshake({ localAddress, remoteAddress: peer, txid: sent?.txId });
+    ingestTx({ traceId: `handshake:${sent?.txId || Date.now()}`, txid: sent?.txId, direction: "outbound", amount: '0.2', fee: sent?.fee, localAddress });
+  } catch (e) {
+    log("HANDSHAKE ACCEPT ERROR:", e?.message || e);
+  }
+}
+

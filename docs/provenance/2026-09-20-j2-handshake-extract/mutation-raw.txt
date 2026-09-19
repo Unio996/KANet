@@ -1,0 +1,18 @@
+BASELINE exit=0 :: handshake-accept.test: 25 pass, 0 fail
+M1: KILLED exit=1 fail=7 :: 删内存去重 ⇒ 同 peer 重复接受
+M2: KILLED exit=1 fail=2 :: DB 命中后不记内存 ⇒ 之后每次都再 fetch
+M3: KILLED exit=1 fail=2 :: DB 跳过集合去掉 confirmed
+M4: KILLED exit=1 fail=3 :: 乐观写入: 发送前先记内存(NO TX NO STATE 违反)
+M5: KILLED exit=1 fail=11 :: ingestTx 金额改动
+M6: KILLED exit=1 fail=9 :: 去掉 consoleUrl 空值保护 ⇒ 无 console 也 fetch
+M7: KILLED exit=1 fail=21 :: 去重 Set 移出工厂(模块级共享)
+M8: KILLED exit=1 fail=12 :: 换 ingest 顺序(先 ingestTx 后 ingestHandshake)
+M9: KILLED exit=1 fail=5 :: 改错误日志文案
+M10: KILLED exit=1 fail=6 :: 日志里 peer 截断位数改动
+M11: KILLED exit=1 fail=3 :: draft 失败后不 return(继续发送)
+M12: KILLED exit=1 fail=12 :: fetch URL 里 local 参数写错
+M13: KILLED exit=1 fail=1 :: relay.mjs 注入漏 localAddress
+M14: KILLED exit=1 fail=1 :: relay.mjs 注入漏 ingestTx
+M15: KILLED exit=1 fail=1 :: relay.mjs 残留旧去重 Set
+RESTORED baseline exit=0 :: handshake-accept.test: 25 pass, 0 fail
+SUMMARY mutants=15 survivors=0

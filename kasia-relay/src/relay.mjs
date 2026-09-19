@@ -5,6 +5,7 @@ import { getConversations, getMessages, sendMessage, acceptHandshake, sendKaspa,
 import { getWallet } from "./lib/wallet.mjs";
 import { isValidKaspaAddress } from "./lib/crypto.mjs";
 import { ingestMessage, ingestReply, ingestTx, ingestHandshake } from "./ingest.mjs";
+import { createHandshakeAcceptor } from './lib/handshake-accept.mjs';
 import { assertAddressOnNetwork } from './lib/kaspa-network.mjs';   // (b) 网络单一源 (设计 v0.2 §3): 前缀只对照 env KASPA_NETWORK, 不从地址推网络
 
 const RELAY_MODE = process.env.RELAY_MODE || "indexer";
@@ -232,38 +233,8 @@ async function handleActiveConversation(peer) {
   }
 }
 
-const _acceptedPeers = new Set(); // dedup: only accept handshake from each address once
-
-async function doAcceptHandshake(peer) {
-  // DEDUP 1: in-memory check
-  if (_acceptedPeers.has(peer)) {
-    log("HANDSHAKE from", peer.slice(-12), "→ already accepted (memory), skipping");
-    return;
-  }
-  // DEDUP 2: check Console relation_states (persists across restarts)
-  if (CONSOLE_URL) {
-    try {
-      const rs = await fetch(`${CONSOLE_URL}/api/relation/status?local=${encodeURIComponent(localAddress)}&peer=${encodeURIComponent(peer)}`).then(r => r.json());
-      if (rs.status === 'accepted' || rs.status === 'active' || rs.status === 'confirmed') {
-        log("HANDSHAKE from", peer.slice(-12), "→ already", rs.status, "in DB, skipping");
-        _acceptedPeers.add(peer);
-        return;
-      }
-    } catch {}
-  }
-  log("HANDSHAKE from", peer, "→ accepting...");
-  try {
-    const draft = await acceptHandshake({ address: peer });
-    if (!draft?.payload) { log("Accept draft failed:", draft); return; }
-    const sent = await sendKaspa({ to: draft.to, amount: draft.amount, payload: draft.payload });
-    log("HANDSHAKE ACCEPTED TX:", sent?.txId || sent);
-    _acceptedPeers.add(peer);
-    ingestHandshake({ localAddress, remoteAddress: peer, txid: sent?.txId });
-    ingestTx({ traceId: `handshake:${sent?.txId || Date.now()}`, txid: sent?.txId, direction: "outbound", amount: '0.2', fee: sent?.fee, localAddress });
-  } catch (e) {
-    log("HANDSHAKE ACCEPT ERROR:", e?.message || e);
-  }
-}
+// 入站握手接受(索引器 / 回落模式的 poll 路径)已抽到 lib/handshake-accept.mjs(只搬不改行为; 依赖注入); 这里只留一处工厂调用。
+const doAcceptHandshake = createHandshakeAcceptor({ acceptHandshake, sendKaspa, fetch, log, ingestHandshake, ingestTx, consoleUrl: CONSOLE_URL, localAddress });
 
 async function poll() {
   if (polling) { log("SKIP poll: previous still running"); return; }
