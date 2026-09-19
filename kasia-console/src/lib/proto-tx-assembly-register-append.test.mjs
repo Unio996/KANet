@@ -279,7 +279,7 @@ const kttStateFieldCount = kttCompiled._raw.contracts.KanetTestToken.runtime_sta
   //    避开storage mass), 而0.60 KAS(storage=866,666)与0.62 KAS(495,400)被拒, 0.65 KAS通过(带找零6,349,100, storage<475,000)。
   //    所以不存在"精确的最小可行值", 本向量取0.65 KAS(带找零形状, 用于⑧核对netLoss==requiredFee)。 ──
   let builtMin;
-  t('⑦second_bet 账本1455回归: fee输入0.65 KAS(舒适地高于真实最小可行值~0.58 KAS, 远低于修复前的~1.05 KAS门槛)构造成功——held自身的续约价值也被credit回预算', () => {
+  t('⑦second_bet 账本1455回归: fee输入0.65 KAS(带找零形状, 通过精确mass门控; 修复前公式在此面值构造失败)构造成功——held自身的续约价值也被credit回预算', () => {
     builtMin = buildRegisterAppendTxJson({
       kaspa, network: 'mainnet',
       leafRedeemScript: leafRedeem.script, leafStateLayout: leafRedeem.stateLayout,
