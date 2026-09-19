@@ -1,0 +1,46 @@
+# NWT 独立实测输出(D 笔 de0e7862; 独立检出 D:\kanet-nwt-cand, 独立 npm ci; 每次变异/探针后还原, git status 空)
+
+## 1. 基线(亲跑)
+proto-settlement-pointers 23/0   proto-settlement-inputs 21/0   proto-leaf-state 33/0   proto-broadcast-ops 16/0   proto-claim-draw 53/0   proto-settlement-c1 32/0
+
+## 2. 真实 builder 整条链 -> 临时库 -> 真实 resolveStepPointers(nwt-d-real-chain-probe-builder.cjs 生成 _nwt_d_probe.test.mjs = proto-claim-draw.test.mjs + 一个探针块, 跑完即删)
+两笔真实 register_append(bet1/bet2) -> 真实 seal -> 真实 close_commit -> 真实 convert_to_claim, 写入与 J2 夹具同结构的表(proto_markets / proto_bets / proto_bet_intents / proto_settlement_intents)
+   REAL seal: leaf=5751c5e9:0/cov=41a57724/src=append  held=5751c5e9:2/cov=f0e60e7e/src=append
+[PASS] NWT-D REAL-CHAIN seal: resolveStepPointers accepts real builder output
+   REAL close_commit: rootClose=b7912cff:0/cov=e29fa40f/src=settlement
+[PASS] NWT-D REAL-CHAIN close_commit: resolveStepPointers accepts real builder output
+   REAL convert_to_claim: rootClose=41c6bc5e:0/cov=e29fa40f/src=settlement  held=b7912cff:1/cov=4bb51a7b/src=settlement
+[PASS] NWT-D REAL-CHAIN convert_to_claim: resolveStepPointers accepts real builder output
+   REAL claim_draw: rootClaim=08cdbddc:0/cov=d81e15a4/src=settlement  ticket=5751c5e9:1/cov=null/src=bet  held=08cdbddc:1/cov=e4524b6d/src=settlement
+[PASS] NWT-D REAL-CHAIN claim_draw: resolveStepPointers accepts real builder output
+   MATCH    seal.leaf outpoint == bet2 append out0
+   MATCH    seal.held outpoint == bet2 append out2
+   MATCH    close_commit.rootClose == seal out0, cov == seal.rootCloseCovId
+   MATCH    convert.rootClose == close_commit out0 (cov unchanged)
+   MATCH    convert.held == seal out1
+   MATCH    claim_draw.rootClaim == convert out0, cov == convertToClaim.claimCovId
+   MATCH    claim_draw.held == convert out1
+   MATCH    claim_draw.ticket == bet2 append out1 (winner bet), no covenant
+[PASS] NWT-D REAL-CHAIN cross-check vs the builders own outpoints / covenant ids
+58 passed, 0 failed
+
+## 3. 我的 18 个变异(nwt-mutate-d.cjs; 每个跑 pointers + inputs 两个测试文件; 还原后 sha256 一致)
+killed   NWT-d1 finalize() removed (id kept from JSON)   pointers:RED(f=3) inputs:ok
+killed   NWT-d2 id != submitted_txid check removed   pointers:RED(f=3) inputs:ok
+killed   NWT-d3 genesis recompute compare removed   pointers:RED(f=1) inputs:ok
+killed   NWT-d4 genesis recompute uses output index 0 not i   pointers:RED(f=20) inputs:ok
+killed   NWT-d5 spends() compares txid only (index ignored)   pointers:RED(f=1) inputs:ok
+killed   NWT-d6 convert lineage: held input (seal token) not checked   pointers:RED(f=1) inputs:ok
+killed   NWT-d7 seal lineage: held input not checked   pointers:RED(f=1) inputs:ok
+killed   NWT-d8 ticket spk recompute check removed   pointers:RED(f=1) inputs:ok
+killed   NWT-d9 ticket: proto_bets.ticket_txid cross-check removed   pointers:RED(f=2) inputs:ok
+killed   NWT-d10 ticket: proto_bets.ticket_vout cross-check removed   pointers:RED(f=1) inputs:ok
+killed   NWT-d11 ticket: covenant-free check removed   pointers:RED(f=1) inputs:ok
+killed   NWT-d12 pointer own latest-append ORDER BY loses rowid tiebreak   pointers:RED(f=1) inputs:ok
+killed   NWT-d13 leaf covenant vs shardleaf_cov_id check removed   pointers:RED(f=1) inputs:ok
+killed   NWT-d14 close_commit continuation covenant equality removed   pointers:RED(f=1) inputs:ok
+SURVIVED NWT-d15 tx.free() never called (resource hygiene)   pointers:ok inputs:ok
+killed   NWT-d16 append query drops status=landed filter   pointers:RED(f=1) inputs:ok
+killed   NWT-d17 winner ticket taken from latest append (not winner bet)   pointers:RED(f=2) inputs:ok
+killed   NWT-d18 winner derive failure not mapped (raw error escapes)   pointers:RED(f=2) inputs:ok
+restored identical: true
