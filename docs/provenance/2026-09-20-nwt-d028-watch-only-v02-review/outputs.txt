@@ -1,0 +1,6 @@
+# NWT D-028 设计 v0.2 复审(aac5e011) —— 只读实测(只报计数; 不含地址/余额/账号名)
+## 阳性对照规则的现状读数(d028-control-count.mjs; 活节点只读 RPC + 活库只读 relay_nodes)
+isSynced=true hot addresses=18 entries returned=18  -> missing=0 zero=0 positive=18
+literal rule "ANY control item is 0/missing => whole batch unavailable" would say: ok
+rule "AT LEAST ONE control item > 0" would say: ok
+(今天两种写法都通过; 区别只在将来某个热 relay 余额为 0 时: 字面规则会让冷存永久显示"—")
