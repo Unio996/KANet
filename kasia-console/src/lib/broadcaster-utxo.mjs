@@ -102,7 +102,18 @@ export async function broadcasterUtxoTick() {
   }
 }
 
+// D-026 M1 (NWT de2ded3d / design v0.2 §7.1): this cron used to start unconditionally and, once any relay_nodes row has
+// is_oracle=1 (or POOL_SEEDER_MAKER_RELAY / BROADCASTER_RELAY_IDS is set), force-rebalance it to 30 UTXOs every 3 minutes with
+// nobody watching. Same convention as UTXO_AUTOSPLIT_ON_START: only the literal string '1' enables it; default OFF.
+// The on-demand export ensureBroadcasterUtxos() is a different caller-driven path and is NOT gated here.
+export const BROADCASTER_UTXO_MAINTAIN_ENV = 'BROADCASTER_UTXO_MAINTAIN';
+
 export function startBroadcasterUtxoMaintainerCron() {
+  // Gate FIRST — registers no timer, touches no DB, sends no IPC when off.
+  if (process.env[BROADCASTER_UTXO_MAINTAIN_ENV] !== '1') {
+    console.log(`[broadcaster-utxo] disabled (${BROADCASTER_UTXO_MAINTAIN_ENV}!=1, raw=${JSON.stringify(process.env[BROADCASTER_UTXO_MAINTAIN_ENV])})`);
+    return;
+  }
   if (timer) return;
   console.log(`[broadcaster-utxo] started — tick=${TICK_INTERVAL_MS}ms target=${TARGET_UTXOS} UTXOs/broadcaster (design-v2 B, pairs with parallel-broadcast A)`);
   setTimeout(() => { broadcasterUtxoTick().catch(e => console.error('[broadcaster-utxo] startup tick:', e.message)); }, STARTUP_GRACE_MS);
