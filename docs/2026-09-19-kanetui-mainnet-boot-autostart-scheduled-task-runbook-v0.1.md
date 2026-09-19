@@ -14,12 +14,12 @@
 
 | NWT 复审条目 | 处置 | 落点 |
 |---|---|---|
-| **M-A** 起后仍有两条 exit/终止路径：① Phase A 里 `Start-Process` 后紧接 `Set-Content kaspad.pid` 抛错 → 最外层 catch → `exit 99`；② `Invoke-PhaseB` 无 try/catch，"永不结束"安全网只在正常返回时可达 | **采纳，且已用控制流测试证明**：Phase A 在 kaspad 已知的**同一时刻**发布 `$Script:Ctx`，其后的一切（写 pid 文件、取 StartTime、写状态）各自 `try/catch`；`Invoke-BootMain` 的外层 catch **只在 `$Script:Ctx` 为空（什么都没起）时才 `Stop-Boot 99`**，否则告警 9099 并继续；`Invoke-PhaseB` 被 try/catch 包住（异常 ⇒ 9098 + 落入常驻哨兵，**不重入启动逻辑**）；哨兵循环每项职责各自 try/catch。**新增 `-InjectFault`（仅预演）与 14 条控制流测试**（真 `Invoke-BootMain` 跑在伪造原语之上）：pid 写失败 / Phase A 晚期异常（走外层 catch）/ Phase B 未捕获异常 / 探针每次抛错 ⇒ **Stop-Boot 一次都没被调用、kaspad 上下文已发布、哨兵仍在跑**；变异对照 7 个，每个都被对应流程测试抓红（含 v0.2 的 bug 本身） | 附录 A、§2.1、§4.4 R3 |
+| **M-A** 起后仍有两条 exit/终止路径：① Phase A 里 `Start-Process` 后紧接 `Set-Content kaspad.pid` 抛错 → 最外层 catch → `exit 99`；② `Invoke-PhaseB` 无 try/catch，"永不结束"安全网只在正常返回时可达 | **采纳，且已用控制流测试证明**：Phase A 在 kaspad 已知的**同一时刻**发布 `$Script:Ctx`，其后的一切（写 pid 文件、取 StartTime、写状态）各自 `try/catch`；`Invoke-BootMain` 的外层 catch **只在 `$Script:Ctx` 为空（什么都没起）时才 `Stop-Boot 99`**，否则告警 9099 并继续；`Invoke-PhaseB` 被 try/catch 包住（异常 ⇒ 9098 + 落入常驻哨兵，**不重入启动逻辑**）；哨兵循环每项职责各自 try/catch。**新增 `-InjectFault`（仅预演）与 15 条控制流测试**（真 `Invoke-BootMain` 跑在伪造原语之上）：pid 写失败 / Phase A 晚期异常（走外层 catch）/ Phase B 未捕获异常 / 探针每次抛错 ⇒ **Stop-Boot 一次都没被调用、kaspad 上下文已发布、哨兵仍在跑**；变异对照 7 个，每个都被对应流程测试抓红（含 v0.2 的 bug 本身） | 附录 A、§2.1、§4.4 R3 |
 | **M-B** 附录 C 的 t0 时序错位：t0 定在 console 稳定后，但启动期拆分在 console 起后几秒就发，早于 t0，diff 抓不到它要抓的那笔；"多出任何一笔"会被外部入账误报 | **采纳**：t0 由**哨兵在 `KASPAD_ALIVE` 与起 console 之间自动取**；`+30 min` 自动 diff；判定改为 **`spent_outpoints == 0`**（出站证据；外部入账只增 `new`，无害）；**每次开机自动执行**，结果落 `boot-status.json` + 事件 9401/9402/9403/9404；快照要求**两次读数一致**（utxoindex 追平的稳定性读数，NWT 补充限制），不一致重试 ≤3 次，仍不行 ⇒ 9403 警告、**本次不做检查**（console 照起，可用性优先，且明说）。工具改为**独立小脚本 `scripts/boot-outbound-check.mjs`，不 import 任何 console 库**（NWT §四-4） | 附录 A/C、§4.5 #10 |
 | **M-C** §2.6 表不足以作自启门；第 10 行安全论据"无 Mind 大脑"对 autoTaker 不成立（`autotake_enabled=true`+`mode=auto` 已上膛，靠 `agent_wallets` 空表挡着，而它不在空表清单里）；14 个转账调用点要逐个分类；要每次开机的自动守卫 | **采纳全部**：① **`autotake` 置关 = 注册门的显式前提**（Owner/Bettor 定，**不是我动**；在此之前守卫会因它 MISMATCH 而**永不自启 console**——这是设计，是逼出这个决定的机制）；② **§2.6 重写为代码级**：转账/花费调用点逐个分类（定时 / 入站消息 / HTTP / 手动），每个入站触发的配主网阳性证据；**第 10 行原论据作废并更正**；③ **`scripts/boot-guard-check.mjs`（29 项守卫）+ 哨兵在起 console 前跑它**：与"预期为零"不符（或表缺失/无法读）⇒ **不起 console（kaspad 照起）、Warning 9065、等人**。守卫覆盖 `agent_wallets`、`exchange_offers`、`pool_markets`、`pool_bettor_sides`、`oracle_registry`、`oracle_stake_enrollments`、`retail_dex_buy_publications`、`mm_orders`、`submit_intents(prepared)`、`worldcup_schedule(pending_teams)`、`zk_prove_jobs(pending)`、`chain_events(bettor_refund_available)`、`is_oracle=1` relay、`autotake_*`、`scanner_enabled`、10 个 env 开关键、4 个 env id 键。活库实跑：29 项中恰 1 项 MISMATCH（`autotake`），与 NWT 所述一致；12+8 个合成场景全过 | §2.6、附录 C、§4.3 |
 | S-A 单次探针异常中止整个门 | **采纳**：循环内 try/catch，异常 = 一次失败读数（`streak=0; consecErr++`，≥5 次走既有告警），流程测试 F4 证明 | 附录 A |
 | S-B git 属主 / tracked 源码干净 | **采纳**：`Test-TreeClean` 加 `git status --porcelain -- kasia-console/src kasia-relay/src` 必须为空，且四个脚本文件 `diff --quiet HEAD`；git 在 S4U 下失败（含 dubious ownership）⇒ fail-closed 且**把 git 原话写进原因**；**R2(b) 改测 `git -C D:\kanet-tn12 branch --show-current` 与 `git diff --quiet HEAD -- <脚本>`**；若撞属主检查，注册前需 `git config --system --add safe.directory`（提权，J1） | 附录 A、§4.3、§4.4 R2 |
-| S-C 树外副本定案 | **在 4.1 前定**：建议 `C:\KANetBoot\`（脚本与两个工具的部署副本，sha256 记 provenance）。**这是本页唯一需要 Bettor 拍的路径决定**；**已知边界**：副本仍要从生产检出读探针/启动脚本/工具（树检查已覆盖它们）；副本只解决"脚本自身随检出分支漂移" | §0、§4.1 |
+| S-C 树外副本定案 | **Bettor 已采纳 `C:\KANetBoot\`**（脚本 + 两个工具的部署副本，sha256 记 provenance）；页内已在 4.1 前定稿。**这是本页唯一需要 Bettor 拍的路径决定**；**已知边界**：副本仍要从生产检出读探针/启动脚本/工具（树检查已覆盖它们）；副本只解决"脚本自身随检出分支漂移" | §0、§4.1 |
 | S-D 优先测 WMI 脱 Job 起法 | **采纳**：R2 把 WMI `Win32_Process.Create` 起法列在**第一优先**；若证实可行，**直接把起法改成它**（常驻包装不再承重，M-A 风险面整体消失）——写成条件设计，不实现 | §4.4 R2、§2.1 |
 | S-E `Get-LogTail` 真读 | **采纳**：`-SelfTest` 对 >8 KB 的真实样本文件跑 `Get-LogTail`（返回尾部、含标记、缺文件返回 null） | 附录 A |
 | P3 SHOULD-1…4 | **采纳并已实现**（见 P3 页）：CIM `-OperationTimeoutSec 10` + 每 tick 写 `sentinel-heartbeat`；耗尽类错误加 HRESULT 数值匹配；`SAMPLE` 行带哨兵自身内存与句柄；内存锁失败**每 tick 重试**并写 `MEMWATCH-TAKEOVER` | 附录 A、P3 页 |
@@ -47,7 +47,7 @@
 | # | 点 | 默认 | 备注 |
 |---|---|---|---|
 | D-F | 停 kaspad | 现阶段规则不变：重启前只停 console 与 relay 子进程，kaspad 交系统关机通知，不手动 `Stop-Process` | **依据是 n=1（今晚一次干净退出，1.7 s，低负载、非追块、交互式会话起的进程）**；P2 把 kaspad 挪进 S4U 会话，**关机通知能否送达那个会话未证**。零风险测量：脚本每次起 kaspad 前读内部日志尾行（S2），第一次自启后的**第二次**关机—开机就是直接读数；在那之前一律按"可能不干净"对待（不要在第一次自启后立刻做依赖干净停机的操作）。**H4 缺口**：不手动杀 ⇒ **kaspad 单独重启（换二进制、只需重启节点的运维）没有已知干净路径**，只能整机重启；R3 用真实起法测 Ctrl+C，**预期"没有干净手动停法"**，若证实就把"只有关机通知一条干净路径"写进 runbook，不再继续找 |
-| 脚本部署位置（S1） | 建议树外固定目录副本 | 目录与谁来部署待定；副本 sha256 记 provenance |
+| 脚本部署位置（S1/S-C） | **已裁定：树外固定目录 `C:\KANetBoot\`**（脚本 + `boot-outbound-check.mjs` + `boot-guard-check.mjs` 三个副本） | sha256 记 provenance；谁来部署由 4.1 的落码人（Bettor 派）负责；**已知边界**：副本仍要从生产检出读探针/启动脚本/`better-sqlite3`，树检查覆盖前者 |
 | 采样阈值等 | 见 P3 页（M-1…M-5 已采纳） | — |
 
 ## 1. 现状实核（只读，2026-09-19 22:3x–23:2x 本地时间；摘要）
@@ -99,7 +99,7 @@ PHASE B —— 永无 exit、永无未捕获异常。`Invoke-PhaseB` 整体被 t
         没有 ⇒ 轮转 console 日志（失败 ⇒ 告警 31）→ 调 start-console-mainnet.ps1（退出码≠0 ⇒ 告警 63）→ 读 console-mainnet.pid，须是**新起的 node.exe 且命令行含生产路径**（S5）
         验证：进程活 + :3202 在听 + GET /api/system/rpc-overview 应答，最长 300 s ⇒ BOOT_OK（事件 9101）；否则告警 64，**不杀不重起**
         记 outbound 到期时刻 = 现在 + 30 min（仅当 t0 成功）
-  8  常驻哨兵，每 30 s（默认），**每项独立 try/catch**，且每轮先写 `sentinel-heartbeat`：
+  8  常驻哨兵，每 30 s（默认），**每项独立 try/catch**，且每轮先写 `sentinel-heartbeat`（**心跳覆盖整个脚本生命周期**：ALIVE 门循环、t0 快照重试、console 验证循环里也各写一次——门可能等几个小时，哨兵循环还没开始；F13 测试 + 变异证明）：
         · kaspad / console 判死 = PID 不在 ∨ 启动时间变了（S6）⇒ 记状态 + Error 事件 9203 / 9204，一次，不重起
         · S3：kaspad 活着而 stdout >10 min 未写 ⇒ 事件 9206 一次（启发式）
         · **出站检查（M-B）**：到期后自动跑 diff ⇒ `spent_outpoints==0` 且全部可读 ⇒ 9401(Info)；`spent>0` ⇒ **9402(Warning，带逐 relay 行)**；有 relay 不可读 ⇒ 9404；工具出错 ⇒ 9403
@@ -140,7 +140,7 @@ console 没起来时 `events` 表写不了，所以三处都**不依赖 console*
 
 | 落点 | 内容 | 读法 |
 |---|---|---|
-| Windows 事件日志 · Application · 源 `KANetBoot` | 9100 开始 / 9101 正常；**9000+退出码**（Phase A 失败 Error；Phase B 的 43/44/45/46/50/97/98 是 Warning）；console 告警 9031/9061/9062/9063/9064；9201 kaspad 卡同步；9205 前次停机不干净/未知；9206 stdout 停写；9250 90 分钟未稳定；9203/9204 运行期死亡；**内存 9301–9305、9310–9313（见 P3 页）** | `Get-WinEvent -FilterHashtable @{LogName='Application';ProviderName='KANetBoot'} -MaxEvents 30`。**源要先由提权会话注册一次**（§4.2）；**没注册时脚本只写文件日志，不报错**（`-WatchOnly` 在普通用户会话里就是这种情形，已实测：事件写失败被记进 `boot-history.log`，文件日志照常） |
+| Windows 事件日志 · Application · 源 `KANetBoot` | 9100 开始 / 9101 正常；**9000+退出码**（Phase A 失败 Error；Phase B 的 43/44/45/46/50/97/98 是 Warning）；console 告警 9031/9061/9062/9063/9064；9201 kaspad 卡同步；9205 前次停机不干净/未知；9206 stdout 停写；9250 90 分钟未稳定；9203/9204 运行期死亡；**内存 9301–9305、9310–9313（见 P3 页）** | `try { Get-WinEvent -FilterHashtable @{LogName='Application';ProviderName='KANetBoot'} -MaxEvents 30 -ErrorAction Stop } catch { 'no KANetBoot events (source not registered yet, or none written)' }`（**源未注册时 `Get-WinEvent` 会抛错而不是返回空**，所以要包 try/catch）。**源要先由提权会话注册一次**（§4.2）；**没注册时脚本只写文件日志，不报错**（`-WatchOnly` 在普通用户会话里就是这种情形，已实测：事件写失败被记进 `boot-history.log`，文件日志照常） |
 | `logs\mainnet\boot\boot-status.json` | 最新阶段 + 时间 + 细节 | `Get-Content` |
 | `logs\mainnet\boot\boot-history.log`、`memory-watch.log` | 阶段序列；内存采样与状态跳变（**第一落点，先于事件日志**） | 追加文本 |
 
@@ -210,12 +210,12 @@ console 没起来时 `events` 表写不了，所以三处都**不依赖 console*
 
 ### 4.1 落码：`scripts/mainnet-boot-sequence.ps1`、`scripts/boot-outbound-check.mjs`、`scripts/boot-guard-check.mjs`
 
-**门**：NWT 再审本页（含附录 A/C）→ Bettor 批（铁律 0）→ **Bettor 拍"树外部署副本目录"**（NWT S-C：这是 S1 的核心；建议 `C:\KANetBoot\`，脚本 + 两个工具的副本，sha256 记 provenance；**不定则脚本自身仍随检出分支漂移**）。
+**门**：NWT 再审本页（含附录 A/C）→ Bettor 批（铁律 0）。**树外部署副本目录已裁定 = `C:\KANetBoot\`**（NWT S-C：这是 S1 的核心，否则脚本自身仍随检出分支漂移）：把脚本与两个工具原样部署到该目录、**sha256 记 provenance**，计划任务动作（附录 B）指向该副本；副本内 `-KanetRoot` 仍指向生产检出读探针/启动脚本/工具依赖。
 **前置**：在 `scratch\_kanetui_wt_<name>` 独立 worktree 里做，**不动生产检出**；不 junction 活 node_modules（脚本不需要；两个工具的 `better-sqlite3` 只从生产 console 树 `readonly` 读——**这是对 console 树依赖的唯一一处，工具不 import console 的任何库代码**）。
 **动作**：把附录 A 与附录 C 原样落为三个文件（ps1 **仅 ASCII**）；`node scripts\lint-kanet.mjs <三个文件>`；采纳 S-C 则另出树外副本并记 sha256。
 **验收读数**：
 1. `[System.Management.Automation.Language.Parser]::ParseFile` 无错误；
-2. `powershell.exe -NoProfile -File scripts\mainnet-boot-sequence.ps1 -SelfTest` ⇒ **全 `PASS`、`SELFTEST failures=0`、退出码 0**（v0.3 草案已跑：**74 项 PASS**——伪造进程夹具、15 条状态机向量 + 12 条变异、采样失败路径、HRESULT 数值匹配、`Get-LogTail` 真读 >8 KB 文件、2026-09-19 23:20 真实读数向量、**14 条控制流测试**）。`-SelfTest` **不起任何真实进程**，且**开头强制断言所有可能被触碰的路径都在临时目录内**（见 §7-9 的事故教训）；
+2. `powershell.exe -NoProfile -File scripts\mainnet-boot-sequence.ps1 -SelfTest` ⇒ **全 `PASS`、`SELFTEST failures=0`、退出码 0**（v0.3 草案已跑：**75 项 PASS**——伪造进程夹具、15 条状态机向量 + 12 条变异、采样失败路径、HRESULT 数值匹配、`Get-LogTail` 真读 >8 KB 文件、2026-09-19 23:20 真实读数向量、**15 条控制流测试**）。`-SelfTest` **不起任何真实进程**，且**开头强制断言所有可能被触碰的路径都在临时目录内**（见 §7-9 的事故教训）；
 3. **控制流测试的证明力**（NWT 要求"不能拿 PASS 条数当证据"，所以**用变异证明它们在守东西**）：真 `Invoke-BootMain` 跑在伪造原语之上，覆盖 F1 正常顺序（起 kaspad→守卫→t0 快照→console）、F2/F2b/F3/F4 四种注入（pid 写失败 / Phase A 晚期异常走外层 catch / Phase B 未捕获异常 / 探针每次抛错）⇒ **`Stop-Boot` 一次都没被调用、kaspad 上下文已发布、哨兵仍在跑**、F5 二进制哈希不符（起前失败：**Stop-Boot 21 且什么都没起**）、F6 守卫不符（不起 console、无快照、9065）、F7 t0 不稳（9403，console 仍起）、F8 树不干净（**真** `Start-ConsolePhase` 返回 null、9062）、F9–F11 出站 diff 自动跑在 console 之后且 `spent>0`⇒9402、不可读⇒9404 而非 9401、F12 内存锁被占后重试接管。**7 个脚本变异各自被对应流程测试抓红**：外层 catch 恒 exit（v0.2 的 bug 本身）⇒ F2b 红；Phase B 异常不包裹 ⇒ F3 红；探针异常中止门 ⇒ F4 红；t0 挪到 console 之后 ⇒ F1/F9 红；守卫结果被忽略 ⇒ F6 红；不可读 relay 报成 clean ⇒ F11 红；内存锁不重试 ⇒ F12 红。
 4. 工具测试：`boot-guard-check.mjs` 对活库实跑 **29 项中恰 1 项 MISMATCH（`autotake`）**，另对**合成 DB/env 的 20 个场景**全过（全清、autotake 各组合、任一空表有行、缺表 ⇒ UNKNOWN fail-closed、env 开关/id 键各组合、被注释的行不算、scanner 开/关、各 prepared/pending 状态）；`boot-outbound-check.mjs` 对活节点 snap→diff = 0 变化，三个合成变异（删一个真 outpoint ⇒ exit 3；只多出一个 outpoint = 入账 ⇒ **exit 0 不误报**；某 relay 不可读 ⇒ exit 4）。
 
@@ -717,6 +717,7 @@ function Wait-KaspadAlive($Ctx) {
   $soft = if ($Ctx.PrevUnclean) { $GateSoftSec * 2 } else { $GateSoftSec }
   $t0 = $Script:Mono.Elapsed.TotalSeconds; $streak = 0; $consecErr = 0; $stalledAlerted = $false; $softAlerted = $false; $lastNote = $t0
   while ($true) {
+    Set-Heartbeat   # the heartbeat must cover the WHOLE script lifetime (the gate can wait for hours before the sentinel loop starts)
     if (-not (Get-Process -Id $Ctx.Pid -ErrorAction SilentlyContinue)) { Warn-Kaspad 46 'KASPAD_GATE' "kaspad pid $($Ctx.Pid) exited while waiting for ALIVE"; return $false }
     # NWT S-A: a probe that cannot even run (node spawn failure under memory pressure) is a FAILED READING, not a reason to abort the gate
     try { $p = Invoke-Probe } catch { $p = [pscustomobject]@{ Code = 1; Line = ("probe threw: {0}" -f $_.Exception.Message) } }
@@ -753,6 +754,7 @@ function Invoke-OutboundSnap {
   # NWT M-B: t0 is taken HERE -- after kaspad is stably ALIVE and BEFORE the console starts -- because the startup-time spending path
   # fires within seconds of the console starting. Two reads must agree (utxoindex caught up); retried a few times; failure only warns.
   for ($i = 1; $i -le 3; $i++) {
+    Set-Heartbeat
     $r = Invoke-NodeTool 'scripts\boot-outbound-check.mjs' @('snap', (Join-Path $BootDir 'outbound-t0.json'), '--settle-sec', '10')
     if ($r.Code -eq 0) { $Script:OutboundT0Ok = $true; Set-BootStatus 'OUTBOUND_T0' @{ attempt = $i; result = $r.Text }; return }
     Write-History ("outbound snap attempt {0} exit {1}: {2}" -f $i, $r.Code, $r.Text)
@@ -799,6 +801,7 @@ function Start-ConsolePhase($Ctx) {
   # verify: process alive, port listening, HTTP answering. A failure here warns; it never kills or restarts the console.
   $t0 = $Script:Mono.Elapsed.TotalSeconds; $ok = $false
   while (($Script:Mono.Elapsed.TotalSeconds - $t0) -lt 300) {
+    Set-Heartbeat
     if ((Get-Process -Id $cPid -ErrorAction SilentlyContinue) -and (Test-Listening $ConsolePort)) {
       try {
         $sum = (Invoke-RestMethod -Uri "http://127.0.0.1:$ConsolePort/api/system/rpc-overview" -TimeoutSec 10).summary
@@ -1126,6 +1129,12 @@ if ($SelfTest) {
   Reset-Sim; $tc = & $RealStartConsole @{ Tree = @{ ok = $false; reason = 'dirty tree (fixture)' } }
   Check 'flow-F8-dirty-tree: real Start-ConsolePhase returns null, raises 9062, and never reaches the start-console script' (($null -eq $tc) -and ($Script:Sim.Ev -contains 9062) -and ($Script:Sim.Console -eq 0))
 
+  # heartbeat covers the gate too: with no sentinel loop running yet, a long ALIVE wait must still leave a fresh heartbeat
+  Reset-Sim @{ ProbeCode = 7 }; Remove-Item $HeartbeatFile -ErrorAction SilentlyContinue
+  $Script:OnSleepAt = 2; $Script:OnSleep = { $Script:Sim.ProbeCode = 0 }
+  $Script:Ctx = @{ Pid = $PID; StartTicks = $null; PrevUnclean = $false }; $null = Wait-KaspadAlive $Script:Ctx; $Script:OnSleepAt = 0
+  Check 'flow-F13-heartbeat-is-written-by-the-ALIVE-gate-loop-not-only-by-the-sentinel' (Test-Path $HeartbeatFile)
+
   # M-B timing: the diff must run AFTER the console phase and only after the delay, driven by the sentinel
   Reset-Sim; $Script:MaxSentinelTicks = 3; $OutboundDelaySec = 0; Run-Flow; $OutboundDelaySec = 1800
   Check 'flow-F9-outbound-diff-runs-by-itself-after-console (t0 before console, diff after)' (($Script:Sim.Order -join ',') -eq 'start-kaspad,guard,snap,console,diff' -and ($Script:Sim.Ev -contains 9401))
@@ -1167,7 +1176,7 @@ Invoke-BootMain
 ```powershell
 # 前置: 4.1 脚本已落码; 4.2 事件源已注册; R2 已过; D-026 开关已合入并被运行中 console 的启动日志证明 (V6)
 $user   = "$env:COMPUTERNAME\ADMIN"
-$script = 'D:\kanet-tn12\scripts\mainnet-boot-sequence.ps1'   # 建议(S1)改为树外部署副本路径, 例 C:\KANetBoot\mainnet-boot-sequence.ps1 (目录待 Bettor 定), sha256 记 provenance
+$script = 'C:\KANetBoot\mainnet-boot-sequence.ps1'   # 树外部署副本 (S-C, Bettor 已裁定); sha256 记 provenance; 副本内 -KanetRoot 默认仍指向 D:\kanet-tn12
 $act  = New-ScheduledTaskAction -Execute 'powershell.exe' `
           -Argument ('-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}"' -f $script) `
           -WorkingDirectory 'D:\kanet-tn12'

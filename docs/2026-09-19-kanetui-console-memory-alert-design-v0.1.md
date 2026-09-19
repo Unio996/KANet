@@ -179,11 +179,11 @@
 ## 5. M-6 具名消费者（NWT：至少一个）
 
 1. **Bettor 接位读数清单**加一条（文档改动，不改 console）：
-   `Get-WinEvent -FilterHashtable @{LogName='Application';ProviderName='KANetBoot'} -MaxEvents 30 | Where-Object { $_.Id -ge 9301 -and $_.Id -le 9313 }`
+   `try { Get-WinEvent -FilterHashtable @{LogName='Application';ProviderName='KANetBoot'} -MaxEvents 30 -ErrorAction Stop | Where-Object { $_.Id -ge 9301 -and $_.Id -le 9313 } | Select-Object TimeCreated,Id,LevelDisplayName,Message } catch { 'no KANetBoot events (source not registered yet, or none written)' }`（**源未注册时 `Get-WinEvent` 抛错而非返回空，必须包 try/catch**；已在本机对"源不存在"情形跑过，输出 `There is not an event provider … "KANetBoot"` 被 catch 成一行提示）
    与 `Get-Content D:\kanet-tn12\logs\mainnet\boot\memory-watch.log -Tail 20`（后者不依赖事件源）。
 2. **Bettor 会话侧 Monitor**（本机会话可做，不改 console）：周期读 `memory-watch.log` 的 `STATE`/`SAMPLE-FAILED` 行，或订阅上面的事件查询；据 (1543) Bettor 已装 80/85/92% 监视——**本页的检测与它是两条独立信号**，谁先响都行。
 3. `events` 表**不再是消费点**（本设计不写库）。
-4. **哨兵存活判据（v0.3，SHOULD-1）**：`(Get-Date) - (Get-Item D:\kanet-tn12\logs\mainnet\boot\sentinel-heartbeat).LastWriteTime` 超过 **2 个 tick（默认 60 s）+ 余量** ⇒ 哨兵已死或已挂——此时"没有告警"**不再等于"没事"**。这一条写进 Bettor 的读数清单与会话侧 Monitor（Monitor 应对"心跳过期"也报警，而不只对 `STATE` 行）。
+4. **哨兵存活判据（v0.3，SHOULD-1）**：`(Get-Date) - (Get-Item D:\kanet-tn12\logs\mainnet\boot\sentinel-heartbeat).LastWriteTime` 超过 **150 s**（2 个 tick = 60 s + CIM 10 s 超时 + 余量）⇒ 哨兵已死、已挂或还没起来（**文件不存在也按此处理**）；**心跳覆盖整个脚本生命周期**（ALIVE 门可能等几个小时，那期间哨兵循环还没开始，所以门循环里也写）————此时"没有告警"**不再等于"没事"**。这一条写进 Bettor 的读数清单与会话侧 Monitor（Monitor 应对"心跳过期"也报警，而不只对 `STATE` 行）。
 
 ## 6. 开放项 / 风险
 - **P1 未解**：本页只缩短发现时间。**别把"有了 memory-watch"读成"不会再发生"**。
