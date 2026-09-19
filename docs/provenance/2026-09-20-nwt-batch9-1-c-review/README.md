@@ -10,12 +10,17 @@
 | **MUST（小）** | **C-2** | **`createTransportAlertGrader` 是全局单计数，会被同 tick 里别的步骤的成功清零，从而永远不升级**——我实测（`nwt-grader-masking-probe.mjs`）：步骤 A 每个 tick 都瞬时失败、步骤 B 每个 tick 成功，6 个 tick 全程 `level=warn consecutiveTicks=1`，**永不升 error**。J2 的说明"每个驱动一个实例"意味着驱动里所有市场 / 步骤共用一个计数——多市场并行时一个持续失败的步骤会被其它成功步骤永久掩盖在 warn。修法：`onFailure(err, tickId, key)` / `onSuccess(key)` 按 key（建议 = 意图 key `settle:<subject>:<id>:<step>`）分别计数，`key` 必填；测试加"A 持续失败 + B 每 tick 成功 ⇒ A 在第 3 个 tick 升 error"。 |
 | SHOULD | C-3 | 预算 / IPC 超时约束靠"9-2b 必须调 `assertStepBudget` / `assertFactsIpcTimeout`"——把它变成**结构性**：`verifyStepInputsOnChain` 要求一个只能由工厂造出的**已校验配置对象**（工厂内部调这两个断言，返回值登记进模块私有 `WeakSet`，`verify` 收到未登记的对象就拒）。注意别用 `Object.isFrozen` 当凭证（它是状态不是出处——团队既往教训）。 |
 | SHOULD | C-4 | fee 候选**消费方复核区间**：relay 已按 `[minAmount, maxAmount]` 过滤，但消费方不该"信服务端过滤"——`filterFeeCandidates` 里对 `value` 加 `feeMinAmount ≤ value ≤ SIGNED_INPUT_CEILING` 复核，越界者按"可疑"跳过并计入事件（防一个行为异常的 relay 把超过签名输入上限的候选交给 builder）。 |
-| SHOULD | C-5 | `evidence` 对象（found/missing/listed/truncated 计数）没有任何测试守着（我的变异 c19 存活）；它进 provenance，请加一条断言。 |
+| SHOULD | C-5 | `evidence` 对象（found/missing/listed/truncated 计数）没有任何测试守着（变异 c19 存活），且"总预算定时器在步骤成功后被清除"也没有断言（变异 c22 存活）；请各加一条。 |
 
 ## 一、我亲跑与变异
 - 亲跑 `proto-settlement-c1.test.mjs` **32/0**（与 J2 一致）。
-- 我另做 **19 个变异**（毒化过滤删任一条件、在途 key 不小写、saturated 判据去掉任一半、分级器同 tick 重复计数 / onSuccess 不清零 / 阈值差一、预算下界与相等边界、重复 outpoint 容忍、瞬时码归类改动、fee 的 `hasCovenant` 写死、`readItem` 的 version / amount 范围、`requested` 上限）：**17 被抓，2 存活，均无害**：c11（`assertFactsIpcTimeout` 的 `<=` 边界）是**等价变异**——前一个条件 `timeoutMs < 15000` 已经先拒掉 ≤13000 的取值，后一个条件冗余；c19 见 C-5。（另 c20 的补丁模式没匹配上，未运行。）
-- J2 的 50 个变异 + 我的 19 个，合起来对该模块的判定分支覆盖是够的；"全被抓只覆盖选定的变异"这句自陈我认同。
+- 我另做 **22 个变异**：`nwt-mutate-c1.cjs` 里 c1–c19 跑了；其 c20 的补丁模式首次没匹配上（未运行），在 `nwt-mutate-c1-part2.cjs` 用真实代码重写并加 c21 / c22。覆盖：毒化过滤删任一条件、在途 key 不小写、saturated 判据去掉任一半、分级器同 tick 重复计数 / onSuccess 不清零 / 阈值差一、预算下界与相等边界、总预算定时器（提前 / 永不触发 / 不清除）、重复 outpoint 容忍、瞬时码归类改动、fee 的 `hasCovenant` 写死、`readItem` 的 version / amount 范围、`requested` 上限。每个变异后源文件还原，`git status` 干净（检出停在 `7294aedd`；脚本须在 `kasia-console/` 目录下跑）。
+  **结果：19 被抓，3 存活，均无安全影响**：
+  - c11（`assertFactsIpcTimeout` 的 `<=` 边界）——**等价变异**：前一个条件 `timeoutMs < 15000` 已先拒掉 ≤13000 的取值，后一个条件冗余。
+  - c19（`evidence.found` 计数）——见 C-5。
+  - c22（`finally` 里不 `clearTimeout`）——**资源卫生**：步骤正常完成后定时器仍挂到 `budgetMs`（< tick 间隔，有界；`Promise.race` 已订阅 deadline，无 unhandledRejection），无正确性 / 安全影响；见 C-5。
+  - 更正：我先前的口头小结把本次记成"20 个 / 18 被抓"，是数错了，以本节为准（脚本可重跑）。
+- J2 的 50 个变异 + 我的 22 个，合起来对该模块的判定分支覆盖是够的；"全被抓只覆盖选定的变异"这句自陈我认同。
 
 ## 二、Bettor 六点
 1. **第 11 个错误码 `facts_step_budget_exceeded`**：**接受**。C4 要求"超预算 ⇒ 放弃本 tick"，需要一个码；归入瞬时类（首次 warn、连续 3 个不同 tick 升 error）合理。
