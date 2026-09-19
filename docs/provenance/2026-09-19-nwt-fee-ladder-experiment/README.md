@@ -27,3 +27,24 @@ Bettor 批准并设条件：J2 全链跑完后再上、用我自己的独立 UTX
 
 ## 可复现
 `01_setup.mjs`（身份 + 挖块 + 拆 UTXO）、`02_ladder.mjs`（两个形状的阶梯）、`ladder_log.json`（每次提交的 fee、结果、节点回复原文、节点 mass）。脚本里的路径指向我的 review worktree（`scratch/_nwt_wt_j2_7f1e339b`，检出 `f71e8b4c`）；需要 simnet 节点在 `ws://127.0.0.1:18510`。state 文件与临时 DB 不入库。
+
+## 增补（同日）：链式未确认交易与 RBF 的实测（回答 dotk M4-7 与 M1 的开放点）
+
+同一节点（官方 2.0.1，我的身份，`03/04/05_*.mjs`）。**这些实验只涉及 mempool 行为，不涉及打包排序。**
+
+| 实验 | 结果 |
+|---|---|
+| 链式未确认（普通 P2PK）：child 花 parent 的**未确认**找零输出 | **ACCEPTED** |
+| 链式未确认（**covenant**）：`register_append#1`（bet1）花**未确认**的 `market_genesis` leaf 输出，两笔之间不挖块 | **ACCEPTED** |
+| `submitTransaction`（RPC 默认）提交与 mempool 里某笔**花同一输入**的第二笔，不论 fee 更高/相同/更低 | **全部 REJECTED**：`output … already spent by transaction …`（`flow_context.rs:690` `RbfPolicy::Forbidden`） |
+| `submitTransactionReplacement`（RPC，`RbfPolicy::Mandatory`，`flow_context.rs:715`）：更低 / 相同 fee | REJECTED：`fee rate per contextual mass gram is not greater than the fee rate of the replaced transaction` |
+| `submitTransactionReplacement`：**更高 fee** | **ACCEPTED**，旧交易被移出 mempool（`replaced=yes`） |
+
+- **P2P 中继路径的策略是 `RbfPolicy::Allowed`**（`protocol/flows/src/v7/txrelay/flow.rs:223`）：从对等节点收到的、花同一输入且 feerate 更高的交易**会替换**本地 mempool 里的旧交易。所以 RBF 在网络层是真实存在的，攻击者不必有我们的 RPC。
+- **替换判据用的 feerate = `fee / normalized_max(compute, transient, storage 三维 mass)`**（`consensus/core/src/tx.rs:662` `calculated_feerate`，日志里的 "contextual mass gram"）。也就是说，**storage mass 计入 feerate**。
+
+### 对结论的影响（我之前说法的订正）
+1. **"fee 定价偏高"的框架要收敛**：mempool **最低费**确实比 builder 实付低 11.7×/25.1×（实验证实），但 mempool 与区块模板的**优先级 feerate 以 contextual mass 为分母**：bet1 在最低费时 feerate ≈ 3,691,400 / 391,231 ≈ **9.4 sompi/gram**，而 builder 实付时 ≈ 43,339,900 / 457,504 ≈ **94.7 sompi/gram**，后者与普通交易（compute≈contextual，≥100 sompi/gram）同一量级。拥堵时刚过最低线的 bet1 会比普通交易的优先级低约 10 倍。所以现行"100 × 本地 wasm mass"作为**优先级定价**并不离谱；真正需要修的是它**用的是偏高的 wasm mass（输入 plurality 恒 1）且基于 draft 而非最终 tx**，以及 fee 与 storage mass 的耦合。合理的后续（T-FEE-PRICING 的设计输入）：`fee = 市场 feerate（`getFeeEstimate`）× 精确 contextual mass（已合入的精确公式）× 安全系数`，且先在主网取打包时延证据。
+2. **dotk M4-7（链式未确认）已有答案**：节点接受未确认父交易的子交易，包括 covenant 链 ⇒ **reveal 可以在 commit 提交后立即提交，不必等确认**（dotk 自己的 covenant 未直接测，机制是通用 mempool 行为；J1 的空跑仍应在其真实形状上复核一次）。
+3. **dotk M1/M3/runbook §3.4 的"第二份更高 feerate reveal 替换"必须改**：SDK 的 `submit` 走 `submitTransaction`（Forbidden），**它无法完成替换**。替换只能经 `submitTransactionReplacement`，要求新交易 feerate（contextual mass 基）**严格高于**旧交易。所以：(a) 门面的 RPC 白名单要多一个方法 `submitTransactionReplacement`（共 5 个），且同样只放行垫片已批准并签过的 txid；(b) "第二份 reveal"必须预先算好其 feerate 严格高于第一份，并由垫片而非 SDK 提交；(c) 如果第一份 reveal 已被 mempool 接受但迟迟不被打包，才用替换；如果第一份被拒/丢弃，直接普通提交第二份即可。
+4. **M1 的抢注窗口的攻击面因此是真的**：攻击者用更高 feerate 的同 gap 输入 commit，经 P2P（Allowed）或自己的 `submitTransactionReplacement` 就能替换我们尚未确认的 commit。缓解方向 = 我们的 commit 自己用**高得多的 feerate**（提高其替换门槛；SDK fee 上限 5 KAS 内可到 ~10× 常规），并且 commit 后立刻提交 reveal 让链条更早确认。残余风险仍接受。

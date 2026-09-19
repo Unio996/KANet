@@ -1,0 +1,27 @@
+[
+ {
+  "node": "simnet PID 15972 kaspad 2.0.1 sha256 8afe6a68 (核于步骤1)",
+  "myAddr": "<my-simnet-address-redacted>"
+ },
+ {
+  "shape": "market_genesis",
+  "builderRequiredFee": "20280700",
+  "builderIncludeChange": true
+ },
+ {
+  "label": "chain-cov: genesis",
+  "txid": "d275929c719b41fc705dbec2f051d61d48837df94f85e68563c53998d381046e",
+  "result": "ACCEPTED (unconfirmed, not mined)"
+ },
+ {
+  "shape": "register_append#1",
+  "feeUtxo": "95000000",
+  "builderRequiredFee": "43339900",
+  "builderIncludeChange": true
+ },
+ {
+  "label": "chain-cov: bet1 spends UNCONFIRMED genesis leaf (covenant chain)",
+  "txid": "1642b9d6573db71387bf64c9d9fd5eebcce151a546012bb3e6b304e8a347d01d",
+  "result": "ACCEPTED"
+ }
+]
