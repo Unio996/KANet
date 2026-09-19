@@ -1,0 +1,30 @@
+# NWT D-028 实现审(c1eec6bf, 已合主线 32b4bee4)独立实测输出; 只读; 不含地址/金额/名字
+
+## 1. 真实依赖端到端(真 kaspa-wasm + 真 getSharedRpc + 活库 relay_nodes 地址做阳性对照 + 本机主网节点)
+relay_nodes address prefixes (counts only): {"kaspa":18}
+[rpc-shared] build ws://127.0.0.1:17110|mainnet (pool size 1) — one instance per key, never per-call
+E1 fresh unused address: {"status":"ok","reason":null,"balanceIsZero":true,"source":"local_node"} (37 ms)
+E2 known-balance address as a watch row: {"status":"ok","reason":null,"equalsDirectRead":true,"source":"local_node"}
+E3 batch [unused, known]: [{"id":"a","status":"ok","isZero":true,"isPositive":false},{"id":"b","status":"ok","isZero":false,"isPositive":true}] sum.watchUnreadable= 0
+E4 no hot control: {"status":"unavailable","reason":"no_positive_control","balanceKas":null}
+[rpc-shared] build ws://127.0.0.1:1|mainnet (pool size 2) — one instance per key, never per-call
+E5 dead rpc url: {"status":"unavailable","reason":"read_failed:getSharedRpc timeout 5000ms","balanceKas":null} (5003 ms)
+
+## 2. 真实 Fastify 路由枚举 + 写方法探测
+routes registered by registerWatchAccountRoutes: ["GET /api/watch-accounts","HEAD /api/watch-accounts","GET /api/watch-accounts/:id","HEAD /api/watch-accounts/:id"]
+POST /api/watch-accounts -> 404
+POST /api/watch-accounts/x -> 404
+PUT /api/watch-accounts -> 404
+PUT /api/watch-accounts/x -> 404
+PATCH /api/watch-accounts -> 404
+PATCH /api/watch-accounts/x -> 404
+DELETE /api/watch-accounts -> 404
+DELETE /api/watch-accounts/x -> 404
+GET /api/watch-accounts (empty table / no db) -> 200 ["ok","accounts","watchKas","watchUnreadable","asOf"]
+
+## 3. 他们的五份测试(单文件, 临时库)
+watch-accounts.static.test.mjs: ℹ tests 9 ℹ pass 9 ℹ fail 0 
+watch-balance.test.mjs: ℹ tests 24 ℹ pass 24 ℹ fail 0 
+watch-account-register.test.mjs: ℹ tests 15 ℹ pass 15 ℹ fail 0 
+watch-accounts.test.mjs: ℹ tests 9 ℹ pass 9 ℹ fail 0 
+watch-accounts-isolation.test.mjs (需 --experimental-test-module-mocks): ℹ tests 3 ℹ pass 3 ℹ fail 0 
