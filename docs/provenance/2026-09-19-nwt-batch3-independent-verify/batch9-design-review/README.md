@@ -75,3 +75,13 @@
 
 ## 复现
 `06_poisoned_fee_utxo.mjs`、`07_poisoned_mass.mjs`（simnet，我自己的身份；输出 `poisoned_fee_log.json`、`poisoned_mass_log.json`）、`08_/09_probe_*`（只读，输出 `probe-output.txt`）。脚本里的路径指向我的 review worktree；需要 simnet 节点在 `ws://127.0.0.1:18510`；state 文件（含 simnet 测试私钥）不入库。
+
+## 增补（同日）：S3b 的核实结果与 NWT 裁判
+
+KANet-UI 只读核完（Bettor 转告，我没有独立核）：:3202 只监听 127.0.0.1（主网 console 的 node）；已建立连接的对端全是回环且都属 node；没有 nginx/caddy/IIS/haproxy/cloudflared/ngrok/frpc/stunnel 之类，netsh portproxy 与 tailscale serve/funnel 无配置；external-gateway 未起。两条保留：① sshd 在跑且默认允许 TCP 转发，已认证 SSH 用户可 `-L` 到 :3202，console 看到的是回环且无 XFF；② 四个 0.0.0.0 监听的 python 与 llama-server 命令行读不到，静态上排除不了其中有通用代理，当前无指向 :3202 的连接，未做 HTTP 探测。
+
+**NWT 判断：够，但 IP allowlist 不算防线，防线是专档密钥 + write-once + 输入校验。** 理由：
+- console 只绑回环，allowlist 只挡得住"非回环源"，而这类源本来就进不来；本机任何进程（包括上面那些读不到命令行的）都天然满足 allowlist。所以 D2 的实际强度 = `ADMIN_SECRET_SETTLEMENT` 的保密性 + write-once + confirm 回显，三层里 allowlist 是装饰性叠加层，评估时不要给它计分。
+- 唯一能绕过 allowlist 又拿不到密钥的攻击形状是"本机通用代理转发（SSRF）"。它要转发自定义请求头才能过密钥这一关；这一步无法从静态证据排除，所以建议加两条几乎零成本的加固（SHOULD，不阻塞）：`/resolve` 这一档 ① 用 `request.socket.remoteAddress` 而不是 `request.ip` 做回环判断，并**拒绝任何带 `X-Forwarded-For` / `Forwarded` / `Via` 的请求**（这条路由只应被运维者从本机 shell 直连调用，没有任何合法的代理跳）；② 校验 `Host` 头必须是回环字面量（`127.0.0.1:<port>` / `localhost:<port>` / `[::1]:<port>`），挡 DNS rebinding 和保留原 Host 的转发。
+- SSH `-L` 那条我同意 KANet-UI 的判断：已认证 SSH 用户本身就是授权主体，转发过来的请求与运维者本机请求无法区分，也不需要区分；记为已接受的剩余风险。
+- 运维用法：调用 `/resolve` 的脚本必须从文件或环境变量读密钥，**不要放进命令行参数**（同一用户下的其他进程能读到进程命令行）；同一用户下的进程也读得到 console 进程的环境，所以"同用户恶意进程"不在本层的威胁模型内（它本来就能读 DB 与密钥信封）。
