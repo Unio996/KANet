@@ -1,0 +1,38 @@
+# NWT F3 笔(9c2f4dc2)独立实测输出(独立检出 D:\kanet-nwt-cand, 独立 npm ci; 每次变异后还原, git status 空)
+
+## 1. D-2 导入图: 无 DB_PATH 下逐个模块在【新子进程】里真 import(我自己的测量, 同一条命令在 F2 与 F3 上各跑一遍)
+=== 34bd831a (F2) ===
+REJECTED    proto-tx-assembly.mjs                 if (!isConsoleEntry) throw new Error(DB_PATH_REFUSE_MSG);
+REJECTED    proto-tx-assembly-settlement.mjs      (同上)
+REJECTED    proto-settlement-chain-checks.mjs     (同上)
+REJECTED    proto-settlement-c1.mjs               (同上)
+REJECTED    proto-settlement-pointers.mjs         (同上)
+REJECTED    proto-leaf-state.mjs                  (同上)
+REJECTED    proto-settlement-inputs.mjs           (同上)
+=== 9c2f4dc2 (F3) ===
+IMPORT-OK   proto-tx-assembly.mjs
+IMPORT-OK   proto-tx-assembly-settlement.mjs
+IMPORT-OK   proto-settlement-chain-checks.mjs
+IMPORT-OK   proto-settlement-c1.mjs
+IMPORT-OK   proto-settlement-pointers.mjs
+REJECTED    proto-leaf-state.mjs                  (本就带 DB 客户端; 对照臂)
+REJECTED    proto-settlement-inputs.mjs           (本就带 DB 客户端; 对照臂)
+IMPORT-OK   proto-winner-bet.mjs
+IMPORT-OK   proto-leaf-state-encode.mjs
+
+## 2. 亲跑回归(F3, 独立检出)
+pointers 26/0  inputs 23/0  leaf-state 33/0  broadcast-ops 16/0  claim-draw 57/0  tx-assembly-settlement 43/0  golden 12/0  c1 41/0  chain-checks 51/0
+非测试代码里 encodeLeafStateBytes 的引用: proto-tx-assembly.mjs(从 encode 文件取)、proto-leaf-state.mjs(import + export { encodeLeafStateBytes }); deriveWinnerBet: proto-winner-bet.mjs(本体)、proto-settlement-inputs.mjs(带默认库的薄委托)、proto-settlement-pointers.mjs(从 winner-bet 取)
+
+## 3. 我的 10 个变异(nwt-mutate-f3.cjs; 每个跑 pointers + inputs + leaf-state; 还原后 sha256 一致)
+killed   NWT-i1 pointers takes deriveWinnerBet via inputs again (D-2 regression)   pointers:RED(f=2)
+killed   NWT-i2 tx-assembly imports encodeLeafStateBytes from leaf-state again   pointers:RED(f=1)
+killed   NWT-i3 winner-bet imports the DB client   pointers:RED(f=1)
+killed   NWT-i4 leaf-state stops re-exporting encodeLeafStateBytes   pointers:RED(f=1) leaf-state:RED(f=1)
+killed   NWT-i5 winner-bet: default who prefix removed (message prefix undefined)   inputs:RED(f=2)
+killed   NWT-i6 inputs delegation drops the who pass-through   inputs:RED(f=1)
+killed   NWT-i7 genesis-recompute probe TransactionOutput never freed   pointers:RED(f=2)
+killed   NWT-i8 Transaction never freed (finally free removed)   pointers:RED(f=2)
+SURVIVED NWT-i9 probe freed only on the success path (not in finally)   pointers:ok inputs:ok leaf-state:ok
+killed   NWT-i10 Transaction freed twice   pointers:RED(f=2)
+restored identical: true
