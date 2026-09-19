@@ -492,6 +492,17 @@ await t('T6 默认预算(不注入 rpcCallMs)恰是 FACTS_RPC_CALL_MS: 一个 30
   const r = await handleGetPastMedianTime({ getSharedRpc: async () => ({ getBlockDagInfo: async () => { await sleep(30); return { pastMedianTime: 1758000000000 }; } }) });
   assert.strictEqual(r.pastMedianTimeMs, 1758000000000);
 });
+// T6b(NWT 9-0 复核补测): T6 只测了 R2(handleGetPastMedianTime)的默认预算; handleGetAddressUtxos 的默认预算被改成 0 的变异
+//   (NWT 的 S1-f)因此存活。两个 handler 各有自己的默认值, 必须各测一次(形态 O 与形态 L 都走同一条 withDeadline 调用, 各测一次更稳)。
+await t('T6b 默认预算(不注入 rpcCallMs)对 handleGetAddressUtxos 同样是 FACTS_RPC_CALL_MS: 30ms 内返回的 rpc 在形态 L 与形态 O 都不受影响(默认值不是 0/负数)', async () => {
+  const slow = { getUtxosByAddresses: async () => { await sleep(30); return { entries: mixedEntries() }; } };
+  const l = await handleGetAddressUtxos({ cmd: okCmd, getSharedRpc: async () => slow, legacyGetAddressUtxos: noLegacy, getNetworkId: () => 'x' });
+  assert.strictEqual(l.form, 'list');
+  assert.strictEqual(l.utxos.length, 3);
+  const o = await handleGetAddressUtxos({ cmd: { address: ADDR, facts: true, outpoints: [{ transactionId: txid(0xa1), index: 0 }] }, getSharedRpc: async () => slow, legacyGetAddressUtxos: noLegacy, getNetworkId: () => 'x' });
+  assert.strictEqual(o.form, 'outpoints');
+  assert.strictEqual(o.found.length, 1);
+});
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
