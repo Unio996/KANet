@@ -18,7 +18,30 @@
 // 两者都不签名不广播不写钱包, 确认只读——PROTO_DRIVER_ENABLED 闸因此只作用于标记 write 的命令,
 // 读命令在驱动关闭时照常放行(状态机在关闭状态下也要能查询/对账, 这不该被同一把闸挡住)。
 
+// 🔴 批9 9-2a(设计 docs/2026-09-19-j2-proto-v0-batch9-wiring-design-and-checklist-v0.2.md §3.8 / §19.1, 出口按 intent_key 前缀分闸):
+//   write 命令的闸按 intent_key 分两把, 互相独立:
+//     A 合法 'settle:' 键(S9 严格格式)⇒ 需 PROTO_SETTLEMENT_DRIVER_ENABLED==='1', 否则 proto_settlement_driver_disabled(与 PROTO_DRIVER_ENABLED 无关);
+//     B 'settle:' 开头但格式不合法(含批9排除的 withdraw/reclaim/ticket、配对错、大写 UUID…)⇒ 一律 proto_settlement_intent_key_invalid, 不回落旧开关;
+//     C 其余(缺失/genesis:/proto-bet:/xsettle:/Settle:/settle 无冒号…)⇒ 需 PROTO_DRIVER_ENABLED==='1', 否则 proto_driver_disabled(旧行为不变);
+//     S9-b: 自有 intent_key 存在且不是原始 string(String 对象/数组/数字/对象)⇒ 一律 proto_intent_key_not_string——IPC 走 fork 默认 JSON 序列化,
+//           String 对象会变成原始字符串而 relay 侧 intent_key:'string' 校验会通过, 出口若判"非字符串=C 类"就与线上值不一致。
+//   闸与发送作用于同一份快照 out = { ...payload, type }(访问器/Proxy 只读一次)。read 不受约束。
+//   诚实边界: 这是【按标签】的闸不是按内容的闸——PROTO_DRIVER_ENABLED=1 时标成 'proto-bet:…' 的结算形状交易仍放行;
+//   防线 = 我方驱动是唯一调用方 + 本处 S9 + 源码扫描。S9 常量与校验【内联在本文件】(受 M0a content_digest 覆盖), 不从 proto-settlement-intent.mjs 导入
+//   (那里的常量表不受摘要保护, 且含批9排除的 withdraw/reclaim/ticket); 漂移由 proto-relay-ipc.test.mjs 对 settlementIntentKeyFor 的产出核对。
+
 import { PROTO_RELAY_ID } from './proto-relay-guard.mjs';
+
+/** 批9 出口允许的结算步骤与其主体归属(withdraw/reclaim/ticket 不在其内——批9 排除, 在出口拒)。 */
+export const PROTO_SETTLEMENT_EXIT_STEP_SUBJECT = Object.freeze({ seal: 'market', resolve: 'market', convert_to_claim: 'claim', claim_draw: 'claim' });
+// settle:<subject_type>:<小写 UUID>:<step>[#<n>], n ≥ 2 十进制无前导零。无 m/i 标志; JS 的 $ 不匹配末尾换行。
+const SETTLE_KEY_RE = /^settle:(market|claim):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}):(seal|resolve|convert_to_claim|claim_draw)(?:#([2-9]|[1-9][0-9]+))?$/;
+/** S9 严格格式校验: 格式合法 ∧ step 与 subject_type 按 PROTO_SETTLEMENT_EXIT_STEP_SUBJECT 配对。 */
+export function isValidSettlementIntentKey(key) {
+  if (typeof key !== 'string') return false;
+  const m = SETTLE_KEY_RE.exec(key);
+  return !!m && PROTO_SETTLEMENT_EXIT_STEP_SUBJECT[m[3]] === m[1];
+}
 
 /** 命令白名单(读写标记表, 账本1441)——covenant_broadcast(relay.mjs:529, 真签名+真广播, 见
  * covenant-broadcast-relay.mjs)是这张表里唯一的 write, 其余四条对应的 relay.mjs handler 全部
@@ -87,14 +110,29 @@ export async function sendProtoCommand(type, payload = {}, { timeoutMs, _sendCom
   if (!PROTO_RELAY_ID) {
     throw new Error('sendProtoCommand: PROTO_RELAY_ID not configured — refusing (fail-closed)');
   }
-  if (mode === 'write' && process.env.PROTO_DRIVER_ENABLED !== '1') {
-    throw new Error(`sendProtoCommand: proto_driver_disabled — '${type}' refused (write command, PROTO_DRIVER_ENABLED != 1; read commands are not affected by this gate)`);
+  // 闸与发送作用于同一份快照(访问器/Proxy 只在这里被读一次, 闸判的值 == 发出去的值)。
+  const out = { ...payload, type };
+  if (mode === 'write') {
+    const key = out.intent_key;
+    if (key !== undefined && typeof key !== 'string') {
+      throw new Error(`sendProtoCommand: proto_intent_key_not_string — '${type}' refused (intent_key must be a primitive string when present, got ${Array.isArray(key) ? 'array' : typeof key})`);
+    }
+    if (typeof key === 'string' && key.startsWith('settle:')) {
+      if (!isValidSettlementIntentKey(key)) {
+        throw new Error(`sendProtoCommand: proto_settlement_intent_key_invalid — '${type}' refused (settle: intent_key fails strict format; not falling back to the legacy switch)`);
+      }
+      if (process.env.PROTO_SETTLEMENT_DRIVER_ENABLED !== '1') {
+        throw new Error(`sendProtoCommand: proto_settlement_driver_disabled — '${type}' refused (settle: intent, PROTO_SETTLEMENT_DRIVER_ENABLED != 1; independent of PROTO_DRIVER_ENABLED)`);
+      }
+    } else if (process.env.PROTO_DRIVER_ENABLED !== '1') {
+      throw new Error(`sendProtoCommand: proto_driver_disabled — '${type}' refused (write command, PROTO_DRIVER_ENABLED != 1; read commands are not affected by this gate)`);
+    }
   }
   if (_sendCommandAsyncForTest) {
-    return _sendCommandAsyncForTest(PROTO_RELAY_ID, { ...payload, type }, timeoutMs, 'internal');
+    return _sendCommandAsyncForTest(PROTO_RELAY_ID, out, timeoutMs, 'internal');
   }
   const { sendCommandAsync } = await import('../services/relay-manager.js');
-  return sendCommandAsync(PROTO_RELAY_ID, { ...payload, type }, timeoutMs, 'internal');
+  return sendCommandAsync(PROTO_RELAY_ID, out, timeoutMs, 'internal');
 }
 
 /**
