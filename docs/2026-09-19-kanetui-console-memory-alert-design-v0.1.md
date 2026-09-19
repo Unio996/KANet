@@ -52,6 +52,7 @@
 ### 1.2 一条真实向量（2026-09-19 23:20，本页写作时读到）
 提交内存 **74.9%**（已用 67.1 / 上限 89.6 GB，物理空闲 32 GB）；前 5 占用：`llama-server` 16.6 GB、`python`（PID 21928）8.8 GB、`python`（PID 24876）7.7 GB、`vmmemWSL` 6.0 GB、`kaspad` 3.3 GB。22:3x 时同一口径读数是 44–47%——约 40 分钟内涨了近 30 个百分点。**Bettor 复核（(1543)）**：这两个 `python` 是 `KANet-TranslateGen2` / `KANet-VoiceService` 两个计划任务 23:08:15 起的（state=Running）。
 - 这条读数在**默认阈值下应当静默**（74.9 < 85）——已作为 `-SelfTest` 向量固化（`real-reading-74.9-default-thresholds-is-silent`），并且**同一读数在 `warn=70` 下应进入 WARN**（`…-with-warn-70-enters-warn`）。
+- **第二条真实读数（2026-09-20 02:50 +07；Bettor 通知本机提交内存于 02:47 跨过 80%，要求记入）**：我自己读到 **77.4%**（已用 69.3 / 上限 89.6 GB，物理空闲 32.4 GB）；工作集前几名：`kaspad` 3.3 GB、`vmmemWSL` 2.1 GB、NordVPN 0.8 GB、三个 `claude` 各约 0.65–0.7 GB。**对默认阈值仍应静默**（77.4 < 85），`warn=75` 时应进入 WARN——已固化为 `-SelfTest` 三条向量（`real-reading-77.4-default-thresholds-is-silent` / `…-with-warn-75-enters-warn`，另有一条**明确标为合成**的 80.5 向量：Bettor 只报"跨过 80%"，数值我没读到，所以不当作真实读数）。读数说明：① 这条读数时工作集前排里**没有** `llama-server` / `python`（23:20 时它们是 16.6 / 8.8 / 7.7 GB 的前排）——**只是观察，不据此下任何因果结论**；② 提交内存 ≠ 工作集：本页 `top` 字段按**工作集**排序，只用于取证参考，**不能当作"是谁造成了提交内存"的结论**（提交由私有页面 / 页面文件承诺量决定）；③ 提交内存在几小时内 44% → 74.9% → 76.0% → 77.4%，且 Bettor 观察到跨 80%：**这正是本页要在无人值守时抓的曲线形状**，也说明 85/92 的默认阈值在这台机器上离"已经开始挤"只差不到 8 个百分点，值得 Owner 在落码前再看一眼阈值（本页不改）。
 - 我还用**降低阈值**（`-MemWarnPct 40 -MemCritPct 99 -MemClearPct 30 -MemCritClearPct 90`）真跑过一次 `-WatchOnly`（`-KanetRoot` 指向系统临时目录，未碰生产），实得日志（节选）：
 ```
 [memory-watch] WATCH-ONLY started warn=40 crit=99 clear=30 critClear=90 tick=4s (detection only; starts nothing)
