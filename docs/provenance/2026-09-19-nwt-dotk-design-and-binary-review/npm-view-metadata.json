@@ -1,0 +1,228 @@
+{
+  "_id": "@dotk/sdk-tx@1.2.0",
+  "_rev": "3-980374b98a557a94f8e09f7ee0561213",
+  "name": "@dotk/sdk-tx",
+  "dist-tags": {
+    "latest": "1.2.0"
+  },
+  "versions": [
+    "1.0.0",
+    "1.1.0",
+    "1.2.0"
+  ],
+  "time": {
+    "created": "2026-09-13T18:07:53.300Z",
+    "modified": "2026-09-18T12:55:33.759Z",
+    "1.0.0": "2026-09-13T18:07:53.638Z",
+    "1.1.0": "2026-09-15T22:28:58.734Z",
+    "1.2.0": "2026-09-18T12:55:33.586Z"
+  },
+  "bugs": {
+    "url": "https://github.com/supertypo/dotk/issues"
+  },
+  "license": "MIT",
+  "homepage": "https://dotk.name",
+  "keywords": [
+    "kaspa",
+    "dotk",
+    "name-service",
+    "covenant",
+    "wallet",
+    "transaction"
+  ],
+  "repository": {
+    "url": "git+https://github.com/supertypo/dotk.git",
+    "type": "git",
+    "directory": "packages/sdk-tx"
+  },
+  "description": "Register, transfer and release .k names on Kaspa: build, sign and submit dotk registry transactions",
+  "maintainers": [
+    "supertypo <suprtypo@pm.me>"
+  ],
+  "readmeFilename": "README.md",
+  "_contentLength": 25274,
+  "dist": {
+    "shasum": "21a99a96681b899efe74b9357e40c4059917592b",
+    "tarball": "https://registry.npmjs.org/@dotk/sdk-tx/-/sdk-tx-1.2.0.tgz",
+    "fileCount": 80,
+    "integrity": "sha512-8LIon+AyCeLnRiZkGRYMsoJaWyW4vqQYdx8KOJy+xBsZuaT92rS6blbg5XkIdVqRV8/1gMqm8f5145/rUy5g9w==",
+    "signatures": [
+      {
+        "sig": "MEUCIQD/731b99oj9pJCw+pdPePASOs0Nlg+C+Yfo3Zg42vqoQIgOhw/aJn+7NndiC7EBWXqKATPNWUUSx+sv1XIvyhJV+Q=",
+        "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U"
+      },
+      {
+        "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+        "sig": "MEUCIQDtRYWOFVzbdMnxOKczfYKQUViMh2Omlwly4lz/d88L9AIgfUgp/CSaxawbk4l0xK6ZRMV0lQOHSqmGtf/vLchwqFQ="
+      }
+    ],
+    "unpackedSize": 323890
+  },
+  "main": "./dist/index.js",
+  "type": "module",
+  "types": "./dist/index.d.ts",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "gitHead": "05139e3711b377628c87e4d9be6531bbe5a35b02",
+  "scripts": {
+    "lint": "eslint .",
+    "test": "vitest run",
+    "build": "rm -rf dist && tsc --build tsconfig.build.json",
+    "format": "prettier --write .",
+    "prepack": "npm run build",
+    "lint:fix": "eslint . --fix",
+    "typecheck": "tsc --noEmit",
+    "test:watch": "vitest",
+    "format:check": "prettier --check ."
+  },
+  "version": "1.2.0",
+  "_npmUser": "supertypo <suprtypo@pm.me>",
+  "_npmVersion": "10.9.8",
+  "directories": {},
+  "sideEffects": false,
+  "_nodeVersion": "22.23.2",
+  "dependencies": {
+    "@noble/curves": "^2.0.1",
+    "@noble/hashes": "^2.4.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "_hasShrinkwrap": false,
+  "devDependencies": {
+    "eslint": "^10.9.1",
+    "vitest": "^4.1.11",
+    "prettier": "^3.9.6",
+    "@dotk/sdk": "^1.2.0",
+    "@eslint/js": "^10.0.1",
+    "typescript": "^5.9.3",
+    "@types/node": "^26.4.1",
+    "typescript-eslint": "^8.69.0"
+  },
+  "peerDependencies": {
+    "@dotk/sdk": "^1.2.0"
+  },
+  "_npmOperationalInternal": {
+    "host": "s3://npm-registry-packages-npm-production",
+    "tmp": "tmp/sdk-tx_1.2.0_1789736133491_0.05556411226465929"
+  }
+}
+{
+  "_id": "@dotk/sdk@1.2.0",
+  "_rev": "3-0e631c0992eede2abd9cc0017b06515c",
+  "name": "@dotk/sdk",
+  "dist-tags": {
+    "latest": "1.2.0"
+  },
+  "versions": [
+    "1.0.0",
+    "1.1.0",
+    "1.2.0"
+  ],
+  "time": {
+    "created": "2026-09-13T18:04:56.821Z",
+    "modified": "2026-09-18T12:56:22.685Z",
+    "1.0.0": "2026-09-13T18:04:57.103Z",
+    "1.1.0": "2026-09-15T22:28:31.143Z",
+    "1.2.0": "2026-09-18T12:56:22.498Z"
+  },
+  "bugs": {
+    "url": "https://github.com/supertypo/dotk/issues"
+  },
+  "license": "MIT",
+  "homepage": "https://dotk.name",
+  "keywords": [
+    "kaspa",
+    "dotk",
+    "name-service",
+    "naming",
+    "covenant",
+    "wallet",
+    "web3"
+  ],
+  "repository": {
+    "url": "git+https://github.com/supertypo/dotk.git",
+    "type": "git",
+    "directory": "packages/sdk"
+  },
+  "description": "Read-only client for the dotk name registry on Kaspa: resolve, reverse-look-up, price and verify .k names",
+  "maintainers": [
+    "supertypo <suprtypo@pm.me>"
+  ],
+  "readmeFilename": "README.md",
+  "_contentLength": 21007,
+  "dist": {
+    "shasum": "f7fa2e0065e2e50c049b355b8e8c98373364eaee",
+    "tarball": "https://registry.npmjs.org/@dotk/sdk/-/sdk-1.2.0.tgz",
+    "fileCount": 42,
+    "integrity": "sha512-IqbuWHFETYQ1NkfyeNBSLP0YaKEAjyOE0p2FNVt3X08l6yvAzl2fH355IRShZ5y+iTIhzaPCiwKwb4mNnn1Uow==",
+    "signatures": [
+      {
+        "sig": "MEUCIQC7yNAdcCKZ7DjUm2CGjI9YqE+vdeOQD8iQD83gYVAvhQIgKKrU2R2APC2xB7KPcMA7/Vh4R/0bkK8X2tI647p9aNU=",
+        "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U"
+      },
+      {
+        "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+        "sig": "MEYCIQC1/X1vfmCv7SV2fSz4SV9htggOXq/G2uwX8Sw+QqHKTgIhALlG2/jBg0Cr9V1mwBonqhQMxaaXzwRpovWMJpBI1r1J"
+      }
+    ],
+    "unpackedSize": 344711
+  },
+  "main": "./dist/index.js",
+  "type": "module",
+  "types": "./dist/index.d.ts",
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "gitHead": "05139e3711b377628c87e4d9be6531bbe5a35b02",
+  "scripts": {
+    "lint": "eslint .",
+    "test": "vitest run",
+    "build": "rm -rf dist && tsc --build tsconfig.build.json",
+    "format": "prettier --write .",
+    "prepack": "node tools/check-release.mjs && npm run build",
+    "lint:fix": "eslint . --fix",
+    "typecheck": "tsc --noEmit",
+    "test:watch": "vitest",
+    "format:check": "prettier --check ."
+  },
+  "version": "1.2.0",
+  "_npmUser": "supertypo <suprtypo@pm.me>",
+  "_npmVersion": "10.9.8",
+  "directories": {},
+  "sideEffects": false,
+  "_nodeVersion": "22.23.2",
+  "dependencies": {
+    "@noble/hashes": "^2.4.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "_hasShrinkwrap": false,
+  "devDependencies": {
+    "eslint": "^10.9.1",
+    "vitest": "^4.1.11",
+    "prettier": "^3.9.6",
+    "@eslint/js": "^10.0.1",
+    "typescript": "^5.9.3",
+    "@types/node": "^26.4.1",
+    "typescript-eslint": "^8.69.0"
+  },
+  "_npmOperationalInternal": {
+    "host": "s3://npm-registry-packages-npm-production",
+    "tmp": "tmp/sdk_1.2.0_1789736182405_0.8110231529237037"
+  }
+}

@@ -1,0 +1,8 @@
+S1 单 UTXO 100 KAS                            txs= 1 fees(KAS)= 0.032036 stages= undefined tx detail= [{"inputs":1,"outputs":2,"mass":"2036","fee":"3203600"}]
+S2 单 UTXO 78 KAS (≥ 1.65×S 规则下限)             txs= 1 fees(KAS)= 0.032036 stages= undefined tx detail= [{"inputs":1,"outputs":2,"mass":"2036","fee":"3203600"}]
+S3 单 UTXO 60 KAS (change 13)                 txs= 1 fees(KAS)= 0.032036 stages= undefined tx detail= [{"inputs":1,"outputs":2,"mass":"2036","fee":"3203600"}]
+S4 单 UTXO 47.05 KAS (change ≈0.05, 小找零)      ERROR Storage mass exceeds maximum
+S5 单 UTXO 47.5 KAS (change ≈0.5)             txs= 1 fees(KAS)= 0.032036 stages= undefined tx detail= [{"inputs":1,"outputs":2,"mass":"21371","fee":"3203600"}]
+S6 20 个 5 KAS                                txs= 1 fees(KAS)= 0.042098 stages= undefined tx detail= [{"inputs":10,"outputs":2,"mass":"12098","fee":"4209800"}]
+S7 120 个 0.5 KAS (总 60)                      txs= 3 fees(KAS)= 0.140988 stages= undefined tx detail= [{"inputs":88,"outputs":1,"mass":"98990","fee":"9940200"},{"inputs":7,"outputs":1,"mass":"8432","fee":"843200"},{"inputs":2,"outputs":2,"mass":"24975","fee":"3315400"}]
+S8 400 个 0.2 KAS (总 80)                      ERROR Mass calculation error

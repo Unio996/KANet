@@ -1,0 +1,4 @@
+devfund address (from package manifest spk): kaspa:qplwskhu4qnnm9rnjqm70dx8xm70e8sj6hzx3m49eeacjxqmfyuxkglynam4w
+node hasUtxoIndex= true isSynced= true network= mainnet
+UTXO count at devfund address: 3496
+amount histogram (sompi:count): [["3800000000",2979],["24800000000",299],["99800000000",145],["399800000000",36],["199800000000",35],["3600000000",2]]
