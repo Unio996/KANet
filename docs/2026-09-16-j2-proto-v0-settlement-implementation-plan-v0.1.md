@@ -1,6 +1,6 @@
 > **Status**: CURRENT
 
-# 原型 v0 结算实现计划 v0.4（六个结算builder + 意图状态机 + 驱动接线，复用covenant_broadcast）
+# 原型 v0 结算实现计划 v0.5（六个结算builder + 意图状态机 + 驱动接线，复用covenant_broadcast）
 
 出处：Owner 2026-09-16 批准实现（D-022，账本1491，Bettor转达"按最简洁的方案走"），在
 `docs/2026-09-16-j2-proto-v0-settlement-design-v0.1.md`（v0.8，下称"设计文档"，尤其§1/§2/§7）
@@ -12,7 +12,11 @@
 代码`proto.js:212-215`+主网真实数据）**：v0.3的判断本身是误判——我当时验证时查了测试夹具
 （`register_append`独立随机生成bettorPk的行为）而不是生产API（生产API固定复用委员pubkey兼任
 bettorPk），阻塞解除，不需要改`proto_bets`表结构，六个builder全部按原计划推进；Codex的
-MUST-PROVE签名前公钥断言仍要落实（当前相等是实现巧合非协议保证）。
+MUST-PROVE签名前公钥断言仍要落实（当前相等是实现巧合非协议保证）。**v0.5更新（账本1497，Bettor
+批3收货后新增MUST：构造期mass上限fail-closed断言）**：新增§6b记录`proto-mass-ceiling.mjs`的
+实现与接入范围；接入既有`buildRegisterAppendTxJson`时意外测出一个**既有生产代码**(`selectChangeShape`,
+账本1427/1455/1462)的真实风险——找零选择逻辑不检查找零值是否小到让storage mass超过节点500,000
+硬顶，已停下报Bettor（不自己改既有money-path函数），详见§6b与§8开放点9。
 
 D-021合规：本文档不写真实relay地址、真实账户余额、完整relay关联txid。
 
@@ -298,6 +302,46 @@ committee签名（`close_commit`）与bettor签名（`claim_draw`/`withdraw`/`ti
 
 ---
 
+## 6b. 构造期mass上限fail-closed断言（v0.5新增，账本1497 Bettor MUST）
+
+**背景**：批3(market_seal)simnet真跑，register_append#1的storageMass=457,504(约91.5%)，与NWT
+此前同名步骤445,518(89.10%)相比浮动约1.2万——"设计里算过一次没超"不构成运行期保证，每一次真实
+构造都必须重新核一遍两个维度的mass。
+
+**实现**：新文件`kasia-console/src/lib/proto-mass-ceiling.mjs`，导出`assertMassWithinCeiling`——
+取①本地`kaspa.calculateTransactionMass`、②按v2.0.1真实consensus公式(`consensus/core/src/mass/
+mod.rs::calc_storage_mass`)手算的storage mass、③同源手算的compute mass，三者较大值，
+`≥MASS_CEILING_THRESHOLD`(=500,000×0.95=475,000，具名常量+注释解释95%留边理由)即throw，
+在任何IPC/广播之前拦下。错误文案带三个信号的测量值+所选fee UTXO面值(便于换面值重试)。
+
+**已接入**：`buildMarketGenesisTxJson`、`buildRegisterAppendTxJson`(`proto-tx-assembly.mjs`)、
+`buildMarketSealTxJson`(`proto-tx-assembly-settlement.mjs`)。input侧plurality由调用方显式传入
+(kaspa-wasm的TransactionInput/utxo对象不暴露covenant标志，无法从已构造的Transaction对象自动推断，
+调用方构造时本来就知道哪些输入是covenant续约/genesis输入)。
+
+**单测**：`proto-mass-ceiling.test.mjs`，7/7 PASS，含"极小面值输出必然throw"与"正常形状放行"两条
+Bettor要求的向量。
+
+**🔴 意外发现（既有生产代码风险，未修，已停下报Bettor 2026-09-19）**：接入
+`buildRegisterAppendTxJson`后，既有回归测试`proto-tx-assembly-register-append.test.mjs`账本1455
+向量⑦⑧(0.85 KAS fee输入场景)从PASS变FAIL——`selectChangeShape`(既有函数，非本批新写)的"形状(a)
+带找零"分支只检查费用合理性，不检查找零值是否小到让storage mass爆炸。该向量选中的找零≈1-4M
+sompi(远低于`CONTINUATION_OUTPUT_SOMPI`=20M)，喂进KIP-9公式`C·p²/amount`直接把storage mass
+推到1,041,946(本地`kaspa.calculateTransactionMass`直接算出，非手算公式偏差)，超500,000硬顶2倍多。
+这与账本1427(Bettor当时去掉"找零必须0或≥20M"dust门槛，改按fee经济性二选一)时间线吻合——去掉门槛
+解决了0.95 KAS步骤B场景被误伤的问题，但重新打开了小额dust找零这个口子，只是当时没有mass断言去
+暴露它。`buildRegisterAppendTxJson`是每笔真实下注都会走的既有生产路径，理论上存在真实风险面。
+**未修复，等Bettor裁定**——详见§8开放点9。register_append的mass断言wiring本身已完成且逻辑正确
+(断言按预期fail-closed拦下了这笔真实会被节点拒收的交易)，问题在`selectChangeShape`本身，不在
+新断言。
+
+**主网执行前的额外要求（Bettor MUST第4点，需要在§7"11.主网执行"落地时执行，本节先记录要求）**：
+路线(A)第二笔下注在主网的真实形状（fee UTXO是真实0.95 KAS那枚，leaf是a59c7b48链上输出）与simnet
+不同，广播前必须用生产builder算出两维度mass并记录（走`assertMassWithinCeiling`即可，不需要另外
+手动算），超95%阈值即中止换面值，不要等节点拒收才知道。
+
+---
+
 ## 7. 分批提交顺序（v0.2：relay命令批次删除，其余不变；Bettor批准第1批立即开工）
 
 1. **DB迁移**（v210，§3）——最先做，风险最低，后续所有builder都依赖这张表存在。**批准立即开工**。
@@ -319,7 +363,7 @@ committee签名（`close_commit`）与bettor签名（`claim_draw`/`withdraw`/`ti
 
 ---
 
-## 8. 剩余开放点（v0.4：3已解除阻塞并定案，全部5个开放点均已裁定）
+## 8. 剩余开放点（v0.5：新增开放点9，等Bettor裁定；其余5个此前均已裁定）
 
 1. ~~新文件组织~~——**已裁定**：批准新文件，import复用不复制粘贴（§1.1）。
 2. ~~claim_draw是否需要ticket签名~~——**已裁定**：需要，源码+simnet实证定案（§2.4）。
@@ -331,6 +375,13 @@ committee签名（`close_commit`）与bettor签名（`claim_draw`/`withdraw`/`ti
 4. ~~`subject_type='ticket'`~~——**已裁定**：批准，且v0.2进一步明确`intent_key`统一
    `settle:`前缀格式（§3/§5）。
 5. ~~relay命令~~——**已裁定**：否决新命令，复用`covenant_broadcast`+ingest端点前缀分派（§5）。
+9. **🔴 待裁定（v0.5新增，账本1497衍生发现）**：`selectChangeShape`(既有生产函数)"形状(a)带找零"
+   分支不检查找零值是否会让storage mass超过节点500,000硬顶，account-1455回归向量⑦⑧实测触发
+   1,041,946(超2倍)，详见§6b。已停下报Bettor(2026-09-19)，未自行修改。候选方案(仅供参考，未定案)：
+   让形状(a)分支在判`okA`时也过一遍`assertMassWithinCeiling`的手算部分，超限则`okA=false`退回
+   形状(b)(不留找零，剩余全部并入fee)——不恢复账本1427已废弃的字面值dust门槛，改用真实mass判据。
+   影响面：`buildRegisterAppendTxJson`/`buildMarketGenesisTxJson`两个既有生产路径共用
+   `selectChangeShape`，改动前需要Bettor审(铁律0，既有money-path函数)。
 
 第1-2批（DB迁移+intent状态机）已完成落码。六个builder（第3-8批）全部不再受阻塞，按分批顺序
 （§7）继续推进，当前在做第3批（market_seal）。

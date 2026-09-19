@@ -18,6 +18,7 @@ import {
 import { computeRootCloseGenesisArtifact, computeKttGenesisArtifact, p2sh } from './proto-covenant-builder.mjs';
 import { encodeConvertToRootcloseAction, combineActionAndRedeem } from './proto-convert-to-rootclose-witness.mjs';
 import { encodeKttTransferZeroOutAction, combineKttActionAndRedeem } from './proto-ktt-transfer-witness.mjs';
+import { assertMassWithinCeiling } from './proto-mass-ceiling.mjs';
 
 // ── 输出 index 布局具名常量(同register_append既有模式, 账本1439"vout在builder里定义为具名常量,
 //   推算函数引用同一个常量"纪律——不在两处各自重复写字面量0/1/2)。 ──
@@ -144,6 +145,15 @@ export function buildMarketSealTxJson({
   });
   assertImpliedFeeMatches(shape.tx, shape.netLoss, 'market_seal');
   assertKaspadInputVersionRule(shape.tx, 'market_seal');
+  {
+    // 账本1497 Bettor MUST: 构造期mass上限fail-closed断言, 与register_append同一plurality判定
+    // 原则——leaf/held都是covenant续约输入(p=2), fee是普通输入(p=1), 用inputs[]的kind标记逐个映射,
+    // 不是猜的(与上面mkTx真实塞入txInputs的顺序严格一致)。
+    const inputPluralities = inputs.map((slot) => (slot.kind === 'fee' ? 1n : 2n));
+    assertMassWithinCeiling({
+      kaspa, network, tx: shape.tx, inputPluralities, feeUtxoValueSompi: feeUtxo.value, label: 'market_seal',
+    });
+  }
 
   const rootCloseCovId = String(shape.tx.outputs[MARKET_SEAL_ROOTCLOSE_OUT_INDEX].covenant.covenantId);
   const tokenCovId = String(shape.tx.outputs[MARKET_SEAL_TOKEN_OUT_INDEX].covenant.covenantId);
