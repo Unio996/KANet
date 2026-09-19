@@ -18,6 +18,7 @@ if (!process.env._PROTO_CLAIM_DRAW_TEST_BOOTSTRAPPED) {
 if (!process.env.CONSOLE_ENCRYPTION_KEY) process.env.CONSOLE_ENCRYPTION_KEY = '1'.repeat(64);
 
 const kaspa = await import('kaspa-wasm');
+const { withParents } = await import('./proto-chain-parents-fixtures.mjs'); // 9-1 E 笔: 四个 builder 的 chainParents 必填, 夹具见该文件头注
 const { randomBytes } = await import('node:crypto');
 const { buildMarketGenesisTxJson, buildRegisterAppendTxJson, assertKaspadInputVersionRule } = await import('./proto-tx-assembly.mjs');
 const S = await import('./proto-tx-assembly-settlement.mjs');
@@ -88,30 +89,33 @@ const heldOf = (r) => ({ txid: r.built.expectedTxid, vout: 2, value: 20_000_000n
 const bet2 = doRegisterAppend({ side: 1, stake: 999, currentState: bet1.newState, heldInput: heldOf(bet1), leafOutpoint: { txid: bet1.built.expectedTxid, vout: 0 }, feeN: 3 });
 const sealState = bet2.newState; // {1,999,2,1000}
 const sldAtSeal = compileSilV100(SLD_PATH, sldCtor(), 'ShardLeaf_direct')._raw.contracts.ShardLeaf_direct.entries.convert_to_rootclose;
-const seal = buildMarketSealTxJson({
+const sealArgs = (over = {}) => withParents('seal', {
   kaspa, network: 'mainnet', marketId: MARKET_ID, committeePubkeyHex: COMMITTEE_PK, deadlineMs: DEADLINE_MS, rootCloseTmplHash: ga.rootCloseTmplHash,
   leafRedeemScript: computeShardLeafRedeemScript({ marketId: MARKET_ID, minBet: MIN_BET, sealCount: SEAL_COUNT, rootcloseTmplHash: ga.rootCloseTmplHash, state: sealState, ownRedeemLen: ga.shardLeafOwnRedeemLen }).script,
   leafOutpoint: { txid: bet2.built.expectedTxid, vout: 0 }, leafCovId, heldInput: heldOf(bet2), currentState: sealState, feeUtxo: bigFee(4), relayChangeScriptPublicKeyHex: relaySpkHex,
-  convertToRootcloseEntryAbi: sldAtSeal, tokPrefixHex, tokSuffixHex, absFeeCapSompi: loadFeeProfileCap('market_seal'),
+  convertToRootcloseEntryAbi: sldAtSeal, tokPrefixHex, tokSuffixHex, absFeeCapSompi: loadFeeProfileCap('market_seal'), ...over,
 });
+const seal = buildMarketSealTxJson(sealArgs());
 const WIN_SIDE = 1, PAYOUT_ROOT = payoutLeafHex(COMMITTEE_PK, 1000);
-const closeCommit = buildCloseCommitTxJson({
+const closeCommitArgs = (over = {}) => withParents('close_commit', {
   kaspa, network: 'mainnet', marketId: MARKET_ID, committeePubkeyHex: COMMITTEE_PK, committeePrivkeyEnvelope: ga.committeePrivkeyEnvelope, deadlineMs: DEADLINE_MS, rootCloseTmplHash: ga.rootCloseTmplHash,
   rootCloseOutpoint: { txid: seal.expectedTxid, vout: MARKET_SEAL_ROOTCLOSE_OUT_INDEX }, rootCloseUtxoScriptPublicKeyHex: spkOf(seal.txJson, MARKET_SEAL_ROOTCLOSE_OUT_INDEX), rootCloseCovId: seal.rootCloseCovId, sealedState: sealState,
-  newWinningSide: WIN_SIDE, newPayoutRootHex: PAYOUT_ROOT, tokPrefixHex, tokSuffixHex, feeUtxo: bigFee(5), relayChangeScriptPublicKeyHex: relaySpkHex, absFeeCapSompi: loadFeeProfileCap('close_commit'),
+  newWinningSide: WIN_SIDE, newPayoutRootHex: PAYOUT_ROOT, tokPrefixHex, tokSuffixHex, feeUtxo: bigFee(5), relayChangeScriptPublicKeyHex: relaySpkHex, absFeeCapSompi: loadFeeProfileCap('close_commit'), ...over,
 });
+const closeCommit = buildCloseCommitTxJson(closeCommitArgs());
 const closedState = { ...sealState, closed: 1, winningSide: WIN_SIDE, payoutRoot: PAYOUT_ROOT };
-const convertToClaim = buildConvertToClaimTxJson({
+const convertArgs = (over = {}) => withParents('convert_to_claim', {
   kaspa, network: 'mainnet', marketId: MARKET_ID, committeePubkeyHex: COMMITTEE_PK, deadlineMs: DEADLINE_MS, rootCloseTmplHash: ga.rootCloseTmplHash,
   rootCloseOutpoint: { txid: closeCommit.expectedTxid, vout: CLOSE_COMMIT_ROOTCLOSE_OUT_INDEX }, rootCloseUtxoScriptPublicKeyHex: spkOf(closeCommit.txJson, CLOSE_COMMIT_ROOTCLOSE_OUT_INDEX),
   rootCloseCovId: seal.rootCloseCovId, closedState, heldTokenOutpoint: { txid: seal.expectedTxid, vout: MARKET_SEAL_TOKEN_OUT_INDEX },
-  tokPrefixHex, tokSuffixHex, feeUtxo: bigFee(6), relayChangeScriptPublicKeyHex: relaySpkHex, absFeeCapSompi: loadFeeProfileCap('convert_to_claim'),
+  tokPrefixHex, tokSuffixHex, feeUtxo: bigFee(6), relayChangeScriptPublicKeyHex: relaySpkHex, absFeeCapSompi: loadFeeProfileCap('convert_to_claim'), ...over,
 });
+const convertToClaim = buildConvertToClaimTxJson(convertArgs());
 
 // ── claim_draw 入参 ──
 const claimState = { ...closedState, claimed_bitmap: 0 };
 const BET = { bettor_pk: COMMITTEE_PK, side: 1, stake: 999 };
-const args = (over = {}) => ({
+const args = (over = {}) => withParents('claim_draw', {
   kaspa, network: 'mainnet', marketId: MARKET_ID, claimState,
   rootClaimOutpoint: { txid: convertToClaim.expectedTxid, vout: CONVERT_TO_CLAIM_CLAIM_OUT_INDEX }, rootClaimUtxoScriptPublicKeyHex: spkOf(convertToClaim.txJson, CONVERT_TO_CLAIM_CLAIM_OUT_INDEX),
   rootClaimCovId: convertToClaim.claimCovId, heldTokenOutpoint: { txid: convertToClaim.expectedTxid, vout: CONVERT_TO_CLAIM_TOKEN_OUT_INDEX },
@@ -276,6 +280,178 @@ t('⑪ 私钥不进返回值; 构造过程中 new 的 PrivateKey 全部 free(cre
   if (created < 1 || created !== freed) throw new Error(`PrivateKey created=${created} freed=${freed}`);
 });
 
+// ══════════ 9-1 E 笔: chainParents 与 builder 侧断言(设计 v0.3.4 §19.4 / §19.5 B 组) ══════════
+// 四个 builder(seal / close_commit / convert_to_claim / claim_draw)新增【必填】chainParents = {[role]:{value:bigint, spkLen, hasCovenant}}, 生产里来自 C1 经断言的链上事实;
+// 在 selectChangeShape / assertMassWithinCeiling【之前】与 builder 假设逐项对: 缺失 / hasCovenant / spkLen / value 任一不符 ⇒ ChainParentsError(.code='chain_parents_mismatch', 带角色名)。
+const CHK = await import('./proto-settlement-chain-checks.mjs');
+const { goodChainParents, withSwappedOutpoint } = await import('./proto-chain-parents-fixtures.mjs');
+const B_STEPS = [
+  { step: 'seal', mk: (o) => sealArgs(o), build: buildMarketSealTxJson, vec: 'MARKET_SEAL_INPUT_HAS_COVENANT' },
+  { step: 'close_commit', mk: (o) => closeCommitArgs(o), build: buildCloseCommitTxJson, vec: 'CLOSE_COMMIT_INPUT_HAS_COVENANT' },
+  { step: 'convert_to_claim', mk: (o) => convertArgs(o), build: buildConvertToClaimTxJson, vec: 'CONVERT_TO_CLAIM_INPUT_HAS_COVENANT' },
+  { step: 'claim_draw', mk: (o) => args(o), build: buildClaimDrawTxJson, vec: 'CLAIM_DRAW_INPUT_HAS_COVENANT' },
+];
+const cpRoles = (step) => [...CHK.STEP_INPUT_ROLES[step], 'fee'];
+const capture = (fn) => { let e = null; try { fn(); } catch (x) { e = x; } return e; };
+const expectCP = (fn, role, label) => {
+  const e = capture(fn);
+  if (!e) throw new Error(`${label}: 应该抛 ChainParentsError, 却成功返回了`);
+  if (!(e instanceof S.ChainParentsError)) throw new Error(`${label}: 不是 ChainParentsError: ${e.constructor && e.constructor.name}: ${e.message}`);
+  if (e.code !== 'chain_parents_mismatch') throw new Error(`${label}: code=${e.code}`);
+  if (e.role !== role) throw new Error(`${label}: role=${e.role}, 期望 ${role}`);
+  if (role !== undefined && !e.message.includes(role)) throw new Error(`${label}: 消息里没有角色名: ${e.message}`);
+  return e;
+};
+
+t('B1 ▲ 四个 builder × 每个输入角色(含 fee)× 变异: chainParents 缺失 / 条目为 null / hasCovenant 翻转 / spkLen ±1 / value ±1 / value 非 bigint / spkLen 非整数 ⇒ chain_parents_mismatch(带角色名)', () => {
+  let n = 0;
+  for (const { step, mk, build } of B_STEPS) {
+    const base = mk();
+    expectCP(() => build({ ...base, chainParents: undefined }), undefined, `${step}/入参缺失`); n++;
+    for (const role of cpRoles(step)) {
+      const mut = (f) => { const cp = goodChainParents(step, base); f(cp[role], cp); return { ...base, chainParents: cp }; };
+      const cases = [
+        ['缺条目', (p, cp) => { delete cp[role]; }],
+        ['条目为 null', (p, cp) => { cp[role] = null; }],
+        ['hasCovenant 翻转', (p) => { p.hasCovenant = !p.hasCovenant; }],
+        ['spkLen+1', (p) => { p.spkLen += 1; }],
+        ['spkLen-1', (p) => { p.spkLen -= 1; }],
+        ['value+1', (p) => { p.value += 1n; }],
+        ['value-1', (p) => { p.value -= 1n; }],
+        ['value 非 bigint', (p) => { p.value = Number(p.value); }, true],
+        ['spkLen 非整数', (p) => { p.spkLen = '35'; }, true],
+        ['hasCovenant 非 boolean', (p) => { p.hasCovenant = 1; }, true],
+        // F2(NWT E-1): chainParents 必须绑定到它证明的那个 outpoint
+        ['outpoint 缺失', (p) => { delete p.outpoint; }, true],
+        ['outpoint 不是对象', (p) => { p.outpoint = 'x'; }, true],
+        ['outpoint.txid 大写(非小写 hex; 用确定含大写字母的值——夹具里有全数字 txid, toUpperCase 对它是空操作)', (p) => { p.outpoint.txid = 'AB'.repeat(32); }, true],
+        ['outpoint.txid 太短', (p) => { p.outpoint.txid = p.outpoint.txid.slice(2); }, true],
+        ['outpoint.index 为负', (p) => { p.outpoint.index = -1; }, true],
+        ['outpoint.index 是字符串', (p) => { p.outpoint.index = String(p.outpoint.index); }, true],
+        ['outpoint.txid 换成另一个', (p) => { p.outpoint.txid = 'dd'.repeat(32); }, false, /builder 实际要花的 outpoint/],
+        ['outpoint.txid 只差最后一位', (p) => { p.outpoint.txid = p.outpoint.txid.slice(0, -1) + (p.outpoint.txid.endsWith('0') ? '1' : '0'); }, false, /builder 实际要花的 outpoint/],
+        ['outpoint.index+1(同 txid 另一个输出——N-T1 同族)', (p) => { p.outpoint.index += 1; }, false, /builder 实际要花的 outpoint/],
+      ];
+      for (const [name, f, isShape, msgRe] of cases) {
+        const e = expectCP(() => build(mut(f)), role, `${step}/${role}/${name}`); n++;
+        if (msgRe && !msgRe.test(e.message)) throw new Error(`${step}/${role}/${name}: 报文应指明 outpoint 不符: ${e.message}`);
+        // 形状畸形须报'形状不合法'(后面的严格相等比较碰巧也会拒, 但那是另一条报文——这里钉死形状校验本身在起作用)
+        if (isShape && !e.message.includes('形状不合法')) throw new Error(`${step}/${role}/${name}: 报文不是形状校验: ${e.message}`);
+      }
+    }
+    { const cp = goodChainParents(step, base); cp.bogus = { value: 1n, spkLen: 35, hasCovenant: false }; expectCP(() => build({ ...base, chainParents: cp }), 'bogus', `${step}/多余角色`); n++; }
+  }
+  if (n !== 236) throw new Error(`用例数 ${n} != 236(每步 1 + 角色数×19 + 1, 四步合计)`);
+});
+t('B1b ▲ seal 的 held: value 有两道独立的核对——(a)chainParents.held.value 与 builder 实际用的 heldInput.value 不等(期望常量相等)⇒拒; (b)两者相等但都不是期望常量 ⇒ 拒', () => {
+  const base = sealArgs();
+  expectCP(() => buildMarketSealTxJson({ ...base, heldInput: { ...base.heldInput, value: 30_000_000n } }), 'held', 'seal/held ④: chainParents=20M, heldInput=30M');
+  const cp = goodChainParents('seal', base); cp.held.value = 30_000_000n;
+  expectCP(() => buildMarketSealTxJson({ ...base, heldInput: { ...base.heldInput, value: 30_000_000n }, chainParents: cp }), 'held', 'seal/held ③: 两者都是 30M 但期望常量是 20M');
+});
+t('B1c ▲ 断言先于 mass/fee 与私钥: 用会让 selectChangeShape 抛"超过绝对费率上限"的 absFeeCapSompi=1n——坏 chainParents 仍是 chain_parents_mismatch(证明断言在前), 且 close_commit / claim_draw 没有 new 过任何 PrivateKey; 对照: 好 chainParents 在同一上限下抛的是别的错误', () => {
+  for (const { step, mk, build } of B_STEPS) {
+    let created = 0;
+    class Tracked extends kaspa.PrivateKey { constructor(...a) { super(...a); created++; } }
+    const base = { ...mk(), kaspa: { ...kaspa, PrivateKey: Tracked }, absFeeCapSompi: 1n };
+    const bad = goodChainParents(step, base); const role = cpRoles(step)[0]; bad[role].hasCovenant = !bad[role].hasCovenant;
+    expectCP(() => build({ ...base, chainParents: bad }), role, `${step}/坏 chainParents 应先于 mass/fee`);
+    if (created !== 0) throw new Error(`${step}: 断言失败时已 new 了 ${created} 个 PrivateKey(私钥不该在断言前被解出)`);
+    const ctl = capture(() => build(base));
+    if (!ctl) throw new Error(`${step}: 对照失败——absFeeCapSompi=1n 本应让构造失败(否则本用例不证明顺序)`);
+    if (ctl instanceof S.ChainParentsError) throw new Error(`${step}: 好 chainParents 不该抛 ChainParentsError: ${ctl.message}`);
+  }
+});
+t('B1d ▲ NWT E-1 探针回归(chainParents 绑定 outpoint): 证据按 outpoint A 取、builder 实际被交给同面值同 spk 的 outpoint B ⇒ chain_parents_mismatch(带角色名, 报文指明 outpoint); 四个 builder × 每个输入角色(含 fee) × {换 txid, 同 txid 换 index}; 对照臂: chainParents 也按 B 重算 ⇒ 构造成功(证明拒绝的是"身份不符", 换 outpoint 本身合法)', () => {
+  let n = 0;
+  for (const { step, mk, build } of B_STEPS) {
+    for (const role of cpRoles(step)) {
+      const base = mk(); const orig = goodChainParents(step, base);
+      const A = orig[role].outpoint;
+      for (const [label, B] of [['换 txid', { txid: 'dd'.repeat(32), vout: A.index }], ['同 txid 换 index', { txid: A.txid, vout: A.index + 7 }]]) {
+        const swapped = withSwappedOutpoint(step, base, role, B);
+        const e = expectCP(() => build({ ...swapped, chainParents: orig }), role, `${step}/${role}/${label}: 证据 A、实花 B`);
+        if (!/builder 实际要花的 outpoint/.test(e.message)) throw new Error(`${step}/${role}/${label}: 报文应指明 outpoint 不符: ${e.message}`);
+        const ok2 = build({ ...swapped, chainParents: goodChainParents(step, swapped) });
+        if (!ok2.txJson) throw new Error(`${step}/${role}/${label}: 对照臂应构造成功`);
+        n++;
+      }
+    }
+  }
+  if (n !== 24) throw new Error(`用例数 ${n} != 24(12 个输入角色 × 2 种换法)`);
+});
+t('B1e 直接测导出的断言函数: chainParents 的 outpoint.txid(恒小写)与 used 的 txid 比较大小写不敏感、index 数值比较(used.vout 是数字); 大写写法的同一个 outpoint ⇒ 通过, 不同 outpoint ⇒ 拒。(经 builder 测不了: 既有的 assertWitnessIndexLayout 等布局校验对 txid 大小写敏感, builder 入参本就须小写)', () => {
+  const T = 'ab'.repeat(32);
+  const cp = () => ({ rootClose: { value: 20_000_000n, spkLen: 35, hasCovenant: true, outpoint: { txid: T, index: 3 } }, fee: { value: 5n, spkLen: 34, hasCovenant: false, outpoint: { txid: 'cd'.repeat(32), index: 0 } } });
+  const used = (rcTxid, rcVout) => ({ rootClose: { value: 20_000_000n, spkHex: 'aa20' + '11'.repeat(32) + '87', outpoint: { txid: rcTxid, vout: rcVout } }, fee: { value: 5n, spkHex: '20' + 'cd'.repeat(32) + 'ac', outpoint: { txid: 'CD'.repeat(32), vout: 0 } } });
+  const run = (u) => S.assertChainParentsMatchBuilder({ step: 'close_commit', label: 'unit', chainParents: cp(), inputHasCovenant: S.CLOSE_COMMIT_INPUT_HAS_COVENANT, used: u });
+  run(used(T.toUpperCase(), 3));                                                                       // 大写写法(rootClose 与 fee 都是): 通过
+  expectCP(() => run(used(T, 4)), 'rootClose', '同 txid 另一个 index');
+  expectCP(() => run(used('ef'.repeat(32), 3)), 'rootClose', '另一个 txid');
+  // 内部不变量: builder 忘了在 used[role] 里给 outpoint ⇒ 是 builder 自己的 bug, 抛普通 Error(带"内部错误"), 不是 ChainParentsError(不能被当成"调用方给的事实不符")
+  { const u = used(T, 3); delete u.fee.outpoint; const e = capture(() => run(u));
+    if (!e || e instanceof S.ChainParentsError || !/内部错误/.test(e.message)) throw new Error(`应抛普通内部错误, 实际: ${e && e.constructor.name}: ${e && e.message}`); }
+});
+t('B1f builder 层面的大小写对照(Bettor 提醒): builder 入参里 outpoint.txid 是大写写法(DB / 调用方不保证小写)⇒ chainParents 断言【绝不误拒】(若构造失败, 只能是既有布局校验的错、不能是 ChainParentsError); 至少 fee 角色(四个 builder)能完整构造成功; 对照: 换成别的 outpoint ⇒ 拒(见 B1d)', () => {
+  let passed = 0; const preexisting = [];
+  for (const { step, mk, build } of B_STEPS) {
+    for (const role of cpRoles(step)) {
+      const base = mk(); const orig = goodChainParents(step, base); const A = orig[role].outpoint;
+      const upper = withSwappedOutpoint(step, base, role, { txid: A.txid.toUpperCase(), vout: A.index });
+      let e = null; try { build({ ...upper, chainParents: orig }); passed++; } catch (x) { e = x; }
+      if (e instanceof S.ChainParentsError) throw new Error(`${step}/${role}: 大写 txid 被 chainParents 断言误拒: ${e.message}`);
+      if (e) preexisting.push(`${step}/${role}`);
+      if (role === 'fee' && e) throw new Error(`${step}/fee: 大写 txid 的 fee 应能完整构造成功, 实际: ${e.message}`);
+    }
+  }
+  if (passed < 4) throw new Error(`能完整构造成功的只有 ${passed} 个(至少 4 个 fee)`);
+  console.log(`   B1f: 大写 txid 完整构造成功 ${passed}/12 个输入角色; 其余 ${preexisting.length} 个(${preexisting.join(', ')})被【既有】的大小写敏感布局校验拒绝(与本断言无关)`);
+});
+const SCAN = await import('../../test-fixtures/source-scan/scan-non-test-sources.mjs');
+t('B6 ▲ (NWT E-4 / F2-1) 夹具文件只准被测试 import: 共享扫描器(test-fixtures/source-scan)扫整个仓库的非测试源码——含 kasia-console/src/data、kasia-console/scripts、根 scripts、ts/mts/tsx 等, 排除只按仓库根相对路径; 任何 import / require / 字面量动态 import 它都算违规(动态拼接是文本扫描的已知边界, 见扫描器头注)', () => {
+  const bad = SCAN.findReferencesInNonTestSources(/proto-chain-parents-fixtures/, { exceptRel: ['kasia-console/src/lib/proto-chain-parents-fixtures.mjs'] });
+  if (bad.length) throw new Error(`非测试源码引用了仅测试用的夹具: ${bad.join(', ')}`);
+});
+t('B2 输入 covenant 向量与 STEP_INPUT_ROLES 逐项一致(fee 槽恒 false), 且与夹具里独立写出的字面值一致', () => {
+  for (const { step, vec, mk } of B_STEPS) {
+    const v = S[vec]; const roles = cpRoles(step);
+    if (!Object.isFrozen(v)) throw new Error(`${vec} 必须冻结`);
+    if (v.length !== roles.length) throw new Error(`${vec} 长度 ${v.length} != 输入角色数 ${roles.length}`);
+    if (v[v.length - 1] !== false) throw new Error(`${vec} 最后一格(fee)必须是 false`);
+    const fx = goodChainParents(step, mk());
+    roles.forEach((r, i) => { if (v[i] !== fx[r].hasCovenant) throw new Error(`${vec}[${i}](${r}) = ${v[i]} != 夹具 ${fx[r].hasCovenant}`); });
+  }
+});
+t('B3 close_commit 返回 continuationOutputIndices:[0] 且过 relay 真代码 validateFixedValueOutputs(P6)', () => {
+  if (JSON.stringify(closeCommit.continuationOutputIndices) !== JSON.stringify([CLOSE_COMMIT_ROOTCLOSE_OUT_INDEX])) throw new Error(`continuationOutputIndices=${JSON.stringify(closeCommit.continuationOutputIndices)}`);
+  const shape = extractTxShape(kaspa.Transaction.deserializeFromSafeJSON(closeCommit.txJson));
+  const fv = validateFixedValueOutputs({ outputs: shape.outputs, genesisOutputIndices: [], continuationOutputIndices: closeCommit.continuationOutputIndices });
+  if (!fv.ok) throw new Error(`relay 真代码拒绝: ${fv.reason}`);
+  if (JSON.stringify(closeCommit.signInputIndices) !== JSON.stringify([S.CLOSE_COMMIT_FEE_IN_INDEX])) throw new Error(`signInputIndices=${JSON.stringify(closeCommit.signInputIndices)}`);
+});
+t('B4 导出的输入下标常量与 builder 实际布局逐项对上: 产出交易的 inputs[常量下标].previousOutpoint 就是该角色的入参 outpoint; 且 STEP_INPUT_ROLES 的角色顺序 == 下标顺序', () => {
+  const opOf = (tx, i) => `${tx.inputs[i].previousOutpoint.transactionId}:${Number(tx.inputs[i].previousOutpoint.index)}`;
+  const k = (o) => `${o.txid}:${o.vout}`;
+  const de = (b) => kaspa.Transaction.deserializeFromSafeJSON(b.txJson);
+  { const a = sealArgs(); const tx = de(seal);
+    const idx = { leaf: S.MARKET_SEAL_LEAF_IN_INDEX, held: S.MARKET_SEAL_HELD_IN_INDEX, fee: S.MARKET_SEAL_FEE_IN_INDEX };
+    if (opOf(tx, idx.leaf) !== k(a.leafOutpoint) || opOf(tx, idx.held) !== k(a.heldInput) || opOf(tx, idx.fee) !== k(a.feeUtxo)) throw new Error('seal 输入布局与常量不符');
+    if (JSON.stringify(cpRoles('seal').map((r) => idx[r])) !== JSON.stringify([0, 1, 2])) throw new Error('seal 角色顺序 != 下标顺序');
+    if (tx.inputs.length !== 3 || JSON.stringify(seal.signInputIndices) !== JSON.stringify([idx.fee])) throw new Error('seal 输入数或 signInputIndices 不符'); }
+  { const a = closeCommitArgs(); const tx = de(closeCommit);
+    const idx = { rootClose: S.CLOSE_COMMIT_ROOTCLOSE_IN_INDEX, fee: S.CLOSE_COMMIT_FEE_IN_INDEX };
+    if (opOf(tx, idx.rootClose) !== k(a.rootCloseOutpoint) || opOf(tx, idx.fee) !== k(a.feeUtxo)) throw new Error('close_commit 输入布局与常量不符');
+    if (JSON.stringify(cpRoles('close_commit').map((r) => idx[r])) !== JSON.stringify([0, 1])) throw new Error('close_commit 角色顺序 != 下标顺序');
+    if (tx.inputs.length !== 2) throw new Error('close_commit 输入数不符'); }
+  { const a = convertArgs(); const tx = de(convertToClaim);
+    const idx = { rootClose: S.CONVERT_TO_CLAIM_ROOTCLOSE_IN_INDEX, held: S.CONVERT_TO_CLAIM_HELD_IN_INDEX, fee: S.CONVERT_TO_CLAIM_FEE_IN_INDEX };
+    if (opOf(tx, idx.rootClose) !== k(a.rootCloseOutpoint) || opOf(tx, idx.held) !== k(a.heldTokenOutpoint) || opOf(tx, idx.fee) !== k(a.feeUtxo)) throw new Error('convert_to_claim 输入布局与常量不符');
+    if (JSON.stringify(cpRoles('convert_to_claim').map((r) => idx[r])) !== JSON.stringify([0, 1, 2])) throw new Error('convert_to_claim 角色顺序 != 下标顺序'); }
+  { const a = args(); const tx = de(built);
+    const idx = { rootClaim: S.CLAIM_DRAW_ROOTCLAIM_IN_INDEX, ticket: S.CLAIM_DRAW_TICKET_IN_INDEX, held: S.CLAIM_DRAW_HELD_IN_INDEX, fee: S.CLAIM_DRAW_FEE_IN_INDEX };
+    if (opOf(tx, idx.rootClaim) !== k(a.rootClaimOutpoint) || opOf(tx, idx.ticket) !== k(a.ticketOutpoint) || opOf(tx, idx.held) !== k(a.heldTokenOutpoint) || opOf(tx, idx.fee) !== k(a.feeUtxo)) throw new Error('claim_draw 输入布局与常量不符');
+    if (JSON.stringify(cpRoles('claim_draw').map((r) => idx[r])) !== JSON.stringify([0, 1, 2, 3])) throw new Error('claim_draw 角色顺序 != 下标顺序'); }
+});
 // ══════════ 批7 withdraw(KanetTokenClaim.spend, 路径 (ii)) ══════════
 // 链: …→claim_draw(built)→withdraw。KanetTokenClaim UTXO = claim_draw 输出0(covenant), 持有的代币 = claim_draw 输出1(covenant); 赢家 = 委员公钥(v0 映射)。
 const {

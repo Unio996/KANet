@@ -1,0 +1,24 @@
+基线(未变异): 51 passed, 0 failed exit=0
+[RED ] M-1  outpoint 比较整个拆掉  →  12 条 FAIL
+[RED ] M-2  ▲ outpoint 只比 txid(漏 index——N-T1 同族: 同 txid 另一个 index 会被当成目标)  →  11 条 FAIL
+[RED ] M-3  outpoint 只比 index(漏 txid)  →  11 条 FAIL
+[RED ] M-4  outpoint txid 比较区分大小写  →  11 条 FAIL
+[RED ] M-5  ▲ covenant 只比"有/无"、不比 id 相等  →  9 条 FAIL
+[RED ] M-6  covenant 比较整个拆掉  →  12 条 FAIL
+[RED ] M-7  期望"无 covenant"(ticket)时不检查链上是否真无  →  2 条 FAIL
+[RED ] M-8  链上缺 covenantId 键不再 fail-closed(缺键被当成"无 covenant")  →  11 条 FAIL
+[RED ] M-9  ▲ expectedOutpoints 变成可选(缺参不再是 chain_check_params_missing)  →  1 条 FAIL
+[RED ] M-10 expectedCovenantIds 变成可选  →  1 条 FAIL
+[RED ] M-11 预期 outpoint 的形状校验拆掉  →  1 条 FAIL
+[RED ] M-12 链上条目缺 outpoint 不再 fail-closed  →  11 条 FAIL
+[RED ] M-13 ▲ 类型化错误退化成普通 Error(丢 .code)  →  40 条 FAIL
+[RED ] M-14 outpoint 漂移的 .code 串成 value_drift  →  12 条 FAIL
+[RED ] M-15 ▲ 消息里的原标签被改(value_drift → value_mismatch)——破坏调用方正则(C7)  →  14 条 FAIL
+[RED ] M-16 错误对象不再带 step/role  →  1 条 FAIL
+[RED ] M-17 闭集缺一类(去掉 covenant_class_mismatch)  →  13 条 FAIL
+[RED ] M-18 缺 builder 假设 spk 的 .code 串成 spk_drift  →  1 条 FAIL
+[RED ] M-19 未知步骤的 .code 串成 params_missing  →  1 条 FAIL
+[RED ] M-20 ▲ 面值 BigInt 解析异常不再包成类型化错误(裸 SyntaxError 逃出闭集)  →  1 条 FAIL
+[RESTORED] proto-settlement-chain-checks.mjs 已还原, sha256 72dc901a3fd04f71… 一致
+
+全部变异均被测试抓到

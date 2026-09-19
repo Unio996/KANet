@@ -1,0 +1,15 @@
+[db] path=%TEMP%\_j2_settlement_golden_25392.db source=DB_PATH
+[PASS] ①黄金回归: 用批3参数重建 market_seal 成功(与链上同一形状)
+[PASS] ①黄金回归: 无见证 txid 与链上真实交易 txid 相同(txid 不含 witness, 覆盖 outpoints/outputs/covenant 绑定/值/version)
+[PASS] ①黄金回归: leaf(input0) 与 held(input1) 的签名脚本逐字节等于链上真实字节(见证编码器 + 新增 heldInput 守卫不改变合法路径)
+[PASS] ①黄金回归: 三个输出的 value/spk/covenantId/authorizingInput 与链上一致
+[PASS] ①e 断言信号(storage/compute)与节点原始mass字段逐位相等(231,312 / 60,422)
+[PASS] ④结构断言: 正确的布局放行; tokenInIdx指错输入 / tokenOutIdx指错输出 / 主输出下标错 各自必拒
+[PASS] ⑤哨兵: sealWitnessArgs 的 rcOutIdx/tokenInIdx/tokenOutIdx 三个索引参数在哨兵输入下两两不同
+[PASS] ②N2: heldInput=null 必须 fail-closed throw 且报文写明原因
+[PASS] ③N1: 编码器把 tokenInIdx/tokenOutIdx 各自放在 ABI 声明的位置(向量 tokenIn=1, tokenOut=3)
+[PASS] ③N1: 互换 tokenIn/tokenOut 得到不同字节(证明测试向量能区分换位)
+[PASS] ③a builder 映射 sealWitnessArgs: heldIdx=5(≠tokenOut=1) 时 tokenInIdx=5、tokenOutIdx=MARKET_SEAL_TOKEN_OUT_INDEX、rcOutIdx=MARKET_SEAL_ROOTCLOSE_OUT_INDEX
+[PASS] ③b builder 见证里 tokenInIdx == tx 中 held 输入的真实下标, tokenOutIdx == token 输出的真实下标
+
+12 passed, 0 failed

@@ -1,0 +1,26 @@
+[db] path=%TEMP%\_j2_settle_inputs_18364.db source=DB_PATH
+[PASS] blake2b-256 标准已知答案向量(空串)= 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8(先证明库本身对)
+[PASS] payoutLeafHex 与独立组合(用 writeUInt32LE 拆高低位, 不走 writeBigUInt64LE)逐位相等: payout=1000 与 payout=2^32+5
+[PASS] 正向: DB 派生 newWinningSide=1, payouts=[{NO 的 pk, 1000}], Σpayouts==pool_value(1000), payoutRoot==leaf(NO 的 pk, 1000)
+[PASS] 正向: assertCloseCommitArgsFromDb 对与派生值相同的拟签值放行
+[PASS] 反向1: 拟签胜方与 DB 派生不符(签成 YES 赢) ⇒ close_commit_args_not_from_db(签名预言机被喂了别的结果)
+[PASS] 反向2: 拟签 payoutRoot 与现算不符(占位值/别人的 pk 的 leaf/金额差 1) ⇒ close_commit_args_not_from_db
+[PASS] C2 反向: expectedPoolValue 缺失 / 非整数 / 与 DB 派生的 pool_value 不等(spk 按别的池子证明) ⇒ close_commit_args_not_from_db
+[PASS] 反向3: winning_side 未写入 DB(操作员还没裁决) ⇒ fail-closed(不接受调用方临时传入胜方)
+[PASS] 反向4: 市场状态不是 sealed(market_seal 未落链) ⇒ fail-closed
+[PASS] 反向5: 胜方有 2 条已确认下注((A) 路线要求恰好 1 条) ⇒ fail-closed, 不自动挑一个
+[PASS] 反向6: 胜方没有任何已确认下注 ⇒ fail-closed
+[PASS] 正向: pending/未落链的下注不计入(只信 confirmed): 池=1000, 胜方仍恰好 1 条
+[PASS] 反向7: payout(999) < 1000(RootClaim.sil:103 require(payout>=1000) 永远无法满足) ⇒ fail-closed, 不签会把池子锁死的 close_commit
+[PASS] 反向8: proto_markets.payout_root 已落库但与现算不一致 ⇒ db_payout_root_drift(库里记一个值、要签另一个值的分裂)
+[PASS] 正向: payout_root 已落库且与现算一致 ⇒ 通过(对照上一条, 证明 drift 拒绝不是别的原因)
+[PASS] deriveWinnerBet 胜方恰 1 条 ⇒ 返回赢家那一行 + pool_value + market; 【不带 status 闸】(resolved 市场也可取)
+[PASS] status 闸留在 close_commit 一侧: 同一个 resolved 市场, deriveCloseCommitInputs 仍拒(报文含 sealed), deriveWinnerBet 不拒
+[PASS] deriveCloseCommitInputs 的 winnerBetId 就是 deriveWinnerBet 的 winner.id(同一份逻辑, 不是两份各自算)
+[PASS] 胜方 0 条 / 2 条 ⇒ 同样的 fail-closed(.code=winner_count), 报文正文与 deriveCloseCommitInputs 的逐字一致
+[PASS] 其余 fail-closed 各带 .code: winning_side 未写 ⇒ winner_side_unset; 没有已确认下注 ⇒ winner_pool_empty; 市场不存在 ⇒ winner_market_missing; 默认报文前缀 deriveWinnerBet(<id>), deriveCloseCommitInputs 传自己的前缀
+[PASS] pending / orphaned 等非 confirmed 的下注不计入(只信已确认): 胜方那条是 pending ⇒ 0 条 ⇒ winner_count
+[PASS] proto-winner-bet.deriveWinnerBet: db 必填(无默认库)——缺 db / db 不是句柄 ⇒ TypeError; 传入注入的库则与 proto-settlement-inputs 的同名导出结果逐字相同(委托, 同一份判定)
+[PASS] 委托保持原行为: deriveWinnerBet(marketId) 不传 db 仍走默认库; { who } 前缀透传; deriveCloseCommitInputs 的报文前缀与顺序不变(既有反向用例已覆盖, 这里只钉 who 透传)
+
+23 passed, 0 failed

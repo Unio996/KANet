@@ -1,0 +1,23 @@
+$ KASPA_NETWORK=simnet node src/drain-finality-safe-blocks.test.mjs
+  ✓ tip=1046 still within reorg window, not drained
+  ✓ tip=1047 still within reorg window, not drained
+  ✓ tip=1048 still within reorg window, not drained
+  ✓ tip=1049 still within reorg window, not drained
+
+[drain-finality-safe-blocks.test] ALL PASS
+exit=0
+
+$ (KASPA_NETWORK 未设置)
+[drain-finality-safe-blocks.test] 前提不满足: 环境变量 KASPA_NETWORK 未设置或不在 {mainnet, testnet-12, devnet, simnet} 内(当前: undefined)。
+  rpc-listener.mjs 顶层读它、未设即抛泛泛的错。本测试不连接任何节点, 用 simnet 即可。
+  正确运行: cd kasia-relay && KASPA_NETWORK=simnet node src/drain-finality-safe-blocks.test.mjs
+exit=1
+
+$ KASPA_NETWORK=bogus
+[drain-finality-safe-blocks.test] 前提不满足: 环境变量 KASPA_NETWORK 未设置或不在 {mainnet, testnet-12, devnet, simnet} 内(当前: "bogus")。
+  rpc-listener.mjs 顶层读它、未设即抛泛泛的错。本测试不连接任何节点, 用 simnet 即可。
+  正确运行: cd kasia-relay && KASPA_NETWORK=simnet node src/drain-finality-safe-blocks.test.mjs
+exit=1
+
+$ 各 NETWORKS 键(shared)
+mainnet, testnet-12, devnet, simnet

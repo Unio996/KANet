@@ -1,0 +1,104 @@
+// mutate-f2.mjs — 9-1 F2 笔(NWT E-1 MUST: chainParents 绑定 outpoint; builder 侧 assertChainParentsMatchBuilder 核 used[role].outpoint)的变异对照(J2 2026-09-20)。
+// 由 E 笔的 mutate-e.mjs 演化而来: 因 F2 改了 used 形状而失配/失效的旧变异已更新(自证变异现在连 outpoint 也一并自证; M-28 锚点更新), F2 新增的变异编号 F-xx。
+// 逐个破坏 kasia-console/src/lib/proto-tx-assembly-settlement.mjs, 跑 proto-claim-draw.test.mjs(内含 B 组, 且覆盖 seal / close_commit / convert_to_claim / claim_draw 四个 builder),
+// 期望每个变异至少一条 [FAIL](或进程异常退出)。每个变异的每个锚点必须恰好命中 1 次(否则 [ERR ]: 变异脚本与源码不同步); 每次 finally 还原并核对 sha256。
+// 一个变异可含多个 [find, repl] 对(用于"把断言挪到 mass/fee 之后"这类要改两处的变异)。
+// 运行: node docs/provenance/2026-09-20-j2-batch9-1-e-chain-parents/mutate-e.mjs <worktree 根绝对路径>
+import fs from 'node:fs';
+import crypto from 'node:crypto';
+import { spawnSync } from 'node:child_process';
+
+const ROOT = process.argv[2];
+const target = `${ROOT}/kasia-console/src/lib/proto-tx-assembly-settlement.mjs`;
+const sha = (b) => crypto.createHash('sha256').update(b).digest('hex');
+const orig = fs.readFileSync(target), origSha = sha(orig), text = orig.toString('utf8');
+const runTest = () => spawnSync(process.execPath, ['src/lib/proto-claim-draw.test.mjs'], { cwd: `${ROOT}/kasia-console`, encoding: 'utf8', timeout: 480000 });
+
+// 让某一步的断言"只在 selectChangeShape 之后才跑"(顺序错误): 断言块改成闭包, 在 assertImpliedFeeMatches / assertClaimDrawLayout 前调用。
+const defer = (stepName, afterAnchor) => [
+  [`  assertChainParentsMatchBuilder({\n    step: '${stepName}'`, `  const _deferred = () => assertChainParentsMatchBuilder({\n    step: '${stepName}'`],
+  [afterAnchor, `_deferred();\n  ${afterAnchor}`],
+];
+// 让某一步的 builder 忽略入参 chainParents、自证(用与夹具相同的字面值自己造一个)——"assertion 被架空"的变异。
+const selfCertify = (stepName, label, vecName, roles) => [[
+  `step: '${stepName}', label: '${label}', chainParents, inputHasCovenant: ${vecName},`,
+  `step: '${stepName}', label: '${label}', chainParents: { ${roles.map(([r, cov, ob]) => `${r}: { value: 20000000n, spkLen: 35, hasCovenant: ${cov}, outpoint: { txid: ${ob}.txid, index: ${ob}.vout } }`).join(', ')}, fee: { value: feeUtxo.value, spkLen: 34, hasCovenant: false, outpoint: { txid: feeUtxo.txid, index: feeUtxo.vout } } }, inputHasCovenant: ${vecName},`,
+]];
+
+const muts = [
+  // ── assertChainParentsMatchBuilder 自身 ──
+  ['M-01 ▲ 不再核 hasCovenant(mass plurality 取常量)', [["if (p.hasCovenant !== inputHasCovenant[i]) fail(", 'if (false) fail(']]],
+  ['M-02 ▲ 不再核 spkLen', [['if (p.spkLen !== spkByteLen(u.spkHex)) fail(', 'if (false) fail(']]],
+  ['M-03 ▲ 不再核 value 与期望面值常量(③)', [["if (role !== 'fee' && p.value !== EXPECTED_INPUT_VALUE_SOMPI[role]) fail(", 'if (false) fail(']]],
+  ['M-04 ▲ 不再核 value 与 builder 实际用的面值(④, 超出设计文字的一道)', [['if (p.value !== u.value) fail(', 'if (false) fail(']]],
+  ['M-05 ▲ 缺条目被静默跳过(而不是拒)——"缺项当 false"的同族', [["if (!isPlainObj(p)) fail(role, '缺失');", 'if (!isPlainObj(p)) return;']]],
+  ['M-06 条目形状校验拆掉(bigint / 整数 / boolean)', [["if (typeof p.value !== 'bigint' || !Number.isInteger(p.spkLen) || p.spkLen <= 0 || typeof p.hasCovenant !== 'boolean') fail(", 'if (false) fail(']]],
+  ['M-07 多余角色键不再拒', [['for (const k of Object.keys(chainParents)) if (!roles.includes(k)) fail(', 'for (const k of []) if (!roles.includes(k)) fail(']]],
+  ['M-08 入参缺失不再拒(chainParents 变可选)', [['if (!isPlainObj(chainParents)) fail(undefined,', 'if (false) fail(undefined,']]],
+  ['M-09 输入角色表不含 fee 槽', [["const roles = [...STEP_INPUT_ROLES[step], 'fee'];", 'const roles = [...STEP_INPUT_ROLES[step]];']]],
+  ['M-10 ▲ 错误 .code 改名', [["this.code = 'chain_parents_mismatch';", "this.code = 'chain_parents_bad';"]]],
+  ['M-11 错误不再带 .role', [['this.step = step;\n    this.role = role;', 'this.step = step;']]],
+  ['M-12 spkLen 取字符数而非字节数', [["const spkByteLen = (hex) => String(hex).replace(/^0x/i, '').length / 2;", "const spkByteLen = (hex) => String(hex).replace(/^0x/i, '').length;"]]],
+  // ── 四个 builder 忽略入参、自证(断言被架空) ──
+  ['M-13 ▲ seal 忽略入参 chainParents 自证', selfCertify('seal', 'market_seal', 'MARKET_SEAL_INPUT_HAS_COVENANT', [['leaf', true, 'leafOutpoint'], ['held', true, 'heldInput']])],
+  ['M-14 ▲ close_commit 忽略入参 chainParents 自证', selfCertify('close_commit', 'close_commit', 'CLOSE_COMMIT_INPUT_HAS_COVENANT', [['rootClose', true, 'rootCloseOutpoint']])],
+  ['M-15 ▲ convert_to_claim 忽略入参 chainParents 自证', selfCertify('convert_to_claim', 'convert_to_claim', 'CONVERT_TO_CLAIM_INPUT_HAS_COVENANT', [['rootClose', true, 'rootCloseOutpoint'], ['held', true, 'heldTokenOutpoint']])],
+  ['M-16 ▲ claim_draw 忽略入参 chainParents 自证', selfCertify('claim_draw', 'claim_draw', 'CLAIM_DRAW_INPUT_HAS_COVENANT', [['rootClaim', true, 'rootClaimOutpoint'], ['ticket', false, 'ticketOutpoint'], ['held', true, 'heldTokenOutpoint']])],
+  // ── 顺序: 断言挪到 selectChangeShape 之后 ──
+  ['M-17 ▲ seal 的断言挪到 selectChangeShape 之后(在 mass/fee 之后才核)', defer('seal', "assertImpliedFeeMatches(shape.tx, shape.netLoss, 'market_seal');")],
+  ['M-18 ▲ close_commit 的断言挪到 selectChangeShape 之后(且在私钥解出之后)', defer('close_commit', "assertImpliedFeeMatches(shape.tx, shape.netLoss, 'close_commit');")],
+  ['M-19 ▲ convert_to_claim 的断言挪到 selectChangeShape 之后', defer('convert_to_claim', "assertImpliedFeeMatches(shape.tx, shape.netLoss, 'convert_to_claim');")],
+  ['M-20 ▲ claim_draw 的断言挪到 selectChangeShape 之后(且在私钥解出之后)', defer('claim_draw', "assertImpliedFeeMatches(shape.tx, shape.netLoss, 'claim_draw');")],
+  // ── 导出常量 ──
+  ['M-21 ▲ MARKET_SEAL_INPUT_HAS_COVENANT 的 held 槽改 false', [['export const MARKET_SEAL_INPUT_HAS_COVENANT = Object.freeze([true, true, false]);', 'export const MARKET_SEAL_INPUT_HAS_COVENANT = Object.freeze([true, false, false]);']]],
+  ['M-22 ▲ CLOSE_COMMIT_INPUT_HAS_COVENANT 的 rootClose 槽改 false', [['export const CLOSE_COMMIT_INPUT_HAS_COVENANT = Object.freeze([true, false]);', 'export const CLOSE_COMMIT_INPUT_HAS_COVENANT = Object.freeze([false, false]);']]],
+  ['M-23 ▲ CONVERT_TO_CLAIM_INPUT_HAS_COVENANT 的 held 槽改 false', [['export const CONVERT_TO_CLAIM_INPUT_HAS_COVENANT = Object.freeze([true, true, false]);', 'export const CONVERT_TO_CLAIM_INPUT_HAS_COVENANT = Object.freeze([true, false, false]);']]],
+  ['M-24 ▲ CLAIM_DRAW_INPUT_HAS_COVENANT 的 ticket 槽改 true(ticket 是普通 P2SH, 无 covenant)', [['export const CLAIM_DRAW_INPUT_HAS_COVENANT = Object.freeze([true, false, true, false]);', 'export const CLAIM_DRAW_INPUT_HAS_COVENANT = Object.freeze([true, true, true, false]);']]],
+  ['M-25 CLOSE_COMMIT_FEE_IN_INDEX 改 0(signInputIndices 与实际布局不符)', [['export const CLOSE_COMMIT_FEE_IN_INDEX = 1;', 'export const CLOSE_COMMIT_FEE_IN_INDEX = 0;']]],
+  ['M-26 MARKET_SEAL_LEAF_IN_INDEX 改 1(与实际布局不符)', [['export const MARKET_SEAL_LEAF_IN_INDEX = 0;', 'export const MARKET_SEAL_LEAF_IN_INDEX = 1;']]],
+  ['M-27 ▲ close_commit 不再返回 continuationOutputIndices(P6)', [['continuationOutputIndices: [CLOSE_COMMIT_ROOTCLOSE_OUT_INDEX],', 'continuationOutputIndices: [],']]],
+  ['M-28 seal 的 used.held.value 取常量而非 heldInput.value(④ 被架空)', [['held: { value: heldInput.value, spkHex: heldInput.scriptPublicKeyHex, outpoint: heldInput },', 'held: { value: GENESIS_OUTPUT_SOMPI, spkHex: heldInput.scriptPublicKeyHex, outpoint: heldInput },']]],
+  // ══ F2 新增(E-1 outpoint 绑定 / E-4 扫描) ══
+  ['F-01 outpoint 形状校验拆掉', [["if (!isPlainObj(p.outpoint) || typeof p.outpoint.txid !== 'string' || !/^[0-9a-f]{64}$/.test(p.outpoint.txid) || !Number.isInteger(p.outpoint.index) || p.outpoint.index < 0) fail(", 'if (false) fail(']]],
+  ['F-02 ▲ outpoint 逐项相等检查整个拆掉(NWT 探针: 证据 A、实花 B 被放行)', [['if (p.outpoint.txid !== String(u.outpoint.txid).toLowerCase() || p.outpoint.index !== Number(u.outpoint.vout)) {', 'if (false) {']]],
+  ['F-03 ▲ outpoint 只比 txid、不比 index(同 txid 另一个输出被放行——N-T1 同族)', [['if (p.outpoint.txid !== String(u.outpoint.txid).toLowerCase() || p.outpoint.index !== Number(u.outpoint.vout)) {', 'if (p.outpoint.txid !== String(u.outpoint.txid).toLowerCase()) {']]],
+  ['F-04 ▲ outpoint 只比 index、不比 txid', [['if (p.outpoint.txid !== String(u.outpoint.txid).toLowerCase() || p.outpoint.index !== Number(u.outpoint.vout)) {', 'if (p.outpoint.index !== Number(u.outpoint.vout)) {']]],
+  ['F-05 ▲ txid 比较区分大小写(builder 入参带大写的合法 outpoint 被误拒)', [['p.outpoint.txid !== String(u.outpoint.txid).toLowerCase()', 'p.outpoint.txid !== String(u.outpoint.txid)']]],
+  ['F-06 内部守卫: used[role] 缺 outpoint 不再报内部错误', [['if (!u || !u.outpoint) throw new Error(', 'if (!u) throw new Error(']]],
+  ['F-07 ▲ seal 的 fee 的 used.outpoint 取成 leafOutpoint(接线错位)', [['outpoint: heldInput },\n      fee: { value: feeUtxo.value, spkHex: feeUtxo.scriptPublicKeyHex, outpoint: feeUtxo },', 'outpoint: heldInput },\n      fee: { value: feeUtxo.value, spkHex: feeUtxo.scriptPublicKeyHex, outpoint: leafOutpoint },']]],
+  ['F-08 ▲ close_commit 的 rootClose 的 used.outpoint 取成 feeUtxo(接线错位)', [['spkHex: currentArtifact.scriptPubKeyHex, outpoint: rootCloseOutpoint },', 'spkHex: currentArtifact.scriptPubKeyHex, outpoint: feeUtxo },']]],
+  ['F-09 ▲ convert_to_claim 的 rootClose 的 used.outpoint 取成 heldTokenOutpoint(接线错位)', [['spkHex: rcArtifact.scriptPubKeyHex, outpoint: rootCloseOutpoint },', 'spkHex: rcArtifact.scriptPubKeyHex, outpoint: heldTokenOutpoint },']]],
+  ['F-10 ▲ claim_draw 的 ticket 的 used.outpoint 取成 heldTokenOutpoint(接线错位)', [['spkHex: ticketArtifact.scriptPubKeyHex, outpoint: ticketOutpoint },', 'spkHex: ticketArtifact.scriptPubKeyHex, outpoint: heldTokenOutpoint },']]],
+  ['F-11 ▲ E-4 生产代码 import 了仅测试用的夹具(B6 源码扫描必须抓到)', [["import { STEP_INPUT_ROLES, EXPECTED_INPUT_VALUE_SOMPI } from './proto-settlement-chain-checks.mjs';", "import { STEP_INPUT_ROLES, EXPECTED_INPUT_VALUE_SOMPI } from './proto-settlement-chain-checks.mjs';\nimport './proto-chain-parents-fixtures.mjs';"]]],
+];
+
+let allRed = true;
+try {
+  const t0 = Date.now();
+  const base = runTest();
+  console.log('基线(未变异):', (base.stdout || '').split('\n').filter((l) => /passed, \d+ failed/.test(l)).pop(), `exit=${base.status}`, `(${Math.round((Date.now() - t0) / 1000)}s/次)`);
+  if (base.status !== 0) allRed = false;
+  for (const [name, edits] of muts) {
+    let cur = text, bad = false;
+    for (const [find, repl] of edits) {
+      const c = cur.split(find).length - 1;
+      if (c !== 1) { console.log(`[ERR ] ${name}: 变异锚点命中 ${c} 次(需要恰 1 次): ${find.slice(0, 70).replace(/\n/g, '\\n')}`); bad = true; break; }
+      cur = cur.replace(find, repl);
+    }
+    if (bad) { allRed = false; continue; }
+    fs.writeFileSync(target, cur);
+    const r = runTest();
+    const out = `${r.stdout || ''}${r.stderr || ''}`;
+    const failed = out.split('\n').filter((l) => l.startsWith('[FAIL]'));
+    const red = failed.length > 0 || r.status !== 0;
+    if (!red) allRed = false;
+    const firstName = failed[0] ? failed[0].replace(/^\[FAIL\]\s*/, '').split(/[ ⇒:]/)[0] : '';
+    console.log(`${red ? '[RED ]' : '[GREEN⚠ 变异存活!]'} ${name}  →  ${failed.length} 条 FAIL${failed.length ? `(首条: ${firstName})` : ''}${failed.length === 0 && r.status !== 0 ? `(进程异常退出 exit=${r.status})` : ''}`);
+    fs.writeFileSync(target, orig);
+  }
+} finally {
+  fs.writeFileSync(target, orig);
+  console.log(sha(fs.readFileSync(target)) === origSha ? `[RESTORED] proto-tx-assembly-settlement.mjs 已还原, sha256 ${origSha.slice(0, 16)}… 一致` : '[!!! 还原失败 !!!]');
+}
+console.log(allRed ? '\n全部变异均被测试抓到' : '\n⚠ 有变异存活或锚点失配, 见上');
+process.exit(allRed ? 0 : 1);

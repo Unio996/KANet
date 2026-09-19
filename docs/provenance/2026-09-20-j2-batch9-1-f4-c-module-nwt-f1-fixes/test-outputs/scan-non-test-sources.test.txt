@@ -1,0 +1,8 @@
+[PASS] 探针树里应被发现的 7 个路径全部被发现(深层 src/data、kasia-console/scripts、根 scripts、.mts/.tsx/.ts/.cjs、require)——含曾经漏掉的 src/data 与 scripts
+[PASS] 应被排除的一律不出现: docs/scratch/logs、测试夹具与测试框架、kasia-console/data、任意深度 node_modules、.test/.spec 文件、非源码扩展名; 注释里提到不算; 动态拼接看不见(已知边界, 头注已写)
+[PASS] exceptRel 放行定义者自己; minFiles 下限: 扫描范围小于下限即抛错(防扫描根失效成空判据)
+[PASS] 排除只按仓库根的相对路径前缀: 非根位置的同名目录(kasia-console/src/data、scripts/docs 里的 docs/ 不是根 docs/)不被排除
+[PASS] stripComments: 块注释与行注释被去掉, 字符串里的 :// 保留
+[PASS] 真实仓库树的健全检查: 默认根扫描到 ≥ 500 个非测试源码、且包含 kasia-console/src/data 与 kasia-console/scripts 下的文件(若这两处没有源码则该断言不适用——按存在性检查)
+
+6 passed, 0 failed

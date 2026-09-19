@@ -1,0 +1,72 @@
+[db] path=%TEMP%\_j2_claim_draw_15756.db source=DB_PATH
+[diag:step] proc.silverc.compile.bshard-artifacts ms=76 cmd=silverc ok=1 at=2026-09-19T17:31:59.790Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=54 cmd=silverc ok=1 at=2026-09-19T17:31:59.851Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=28 cmd=silverc ok=1 at=2026-09-19T17:31:59.898Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=12 cmd=silverc ok=1 at=2026-09-19T17:31:59.915Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=52 cmd=silverc ok=1 at=2026-09-19T17:31:59.975Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=28 cmd=silverc ok=1 at=2026-09-19T17:32:00.010Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=13 cmd=silverc ok=1 at=2026-09-19T17:32:00.030Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=50 cmd=silverc ok=1 at=2026-09-19T17:32:00.088Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=74 cmd=silverc ok=1 at=2026-09-19T17:32:00.173Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=27 cmd=silverc ok=1 at=2026-09-19T17:32:00.207Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=74 cmd=silverc ok=1 at=2026-09-19T17:32:00.306Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=32 cmd=silverc ok=1 at=2026-09-19T17:32:00.359Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=27 cmd=silverc ok=1 at=2026-09-19T17:32:00.392Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=19 cmd=silverc ok=1 at=2026-09-19T17:32:00.430Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=28 cmd=silverc ok=1 at=2026-09-19T17:32:00.465Z
+[PASS] ①claim_draw buildClaimDrawTxJson 真实构造成功([RootClaim,ticket,heldKTT,fee]四输入, 三输出)
+[PASS] ②relay 真代码: 反序列化+extractTxShape+validateFixedValueOutputs 通过; relay 真签 fee 输入后 finalize, txid==expectedTxid
+[PASS] ③独立复算 Σin−Σout 恰等于 netLoss; covenant_id 用 kaspa.covenantId 独立复算
+[PASS] ④a 【真验签】ticket 的 bettorSig 对【最终tx】的共识 sighash 有效(独立移植 sighash + schnorr; 私钥=委员私钥, 公钥=bettor_pk)
+[PASS] ④b 反向臂: 同一笔tx去掉 output0/1 的 covenant 后重算 sighash, ticket 签名必须验假(检查对 covenant 敏感 + 签名确实承诺了 covenant)
+[PASS] ④c 换 fee 面值(不同找零候选)各自重签: 每个最终tx的 ticket 签名都验真
+[PASS] ⑤ KanetTokenClaim 输出 spk 与独立"探针+手工splice+自算P2SH"逐字节一致(state: market_cov_id/winner_pk/amount/token_tmpl_hash)
+[PASS] ⑥ RootClaim input 见证里各索引/数值位置与交易真实结构一致(独立 push 解析器): claimOutIdx=0 tokenOutIdx=1 ticketInIdx=1 tokenInIdx=2 payout=1000 merkle_index=0 tree_depth=0 siblings 空
+[PASS] ⑦哨兵 claimDrawWitnessArgs: 6 个索引参数在哨兵输入(0..5 两两不同)下各落在自己具名的字段, 且输出里两两不同
+[PASS] ⑧结构断言 assertClaimDrawLayout: 正确布局放行; ticket/held outpoint 互换、KanetTokenClaim/代币输出下标错 各自必拒
+[diag:step] proc.silverc.compile.bshard-artifacts ms=71 cmd=silverc ok=1 at=2026-09-19T17:32:00.639Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=52 cmd=silverc ok=1 at=2026-09-19T17:32:00.696Z
+[PASS] ⑨a Codex 反向①: 只有【别的市场的委员私钥】可用(bettorPk != 该私钥的公钥) ⇒ signing_key_mismatch, 在任何签名之前 fail-closed, 不静默顶替, 错误信息不含私钥
+[PASS] ⑨b Codex 正向②: 推导出的应签公钥与私钥的公钥逐字节相等才放行(①已证正向)——DB 里 bettor_pk 大写 hex 同一把公钥也放行
+[PASS] ⑨c DB 里 bettor_pk 被换成别人的公钥(与链上 ticket 不是同一张票) ⇒ ticket_pk_underivable
+[PASS] ⑨d 签名前断言在【任何 PrivateKey 用于签名之前】执行: 断言失败时 createInputSignature 一次都没被调用
+[PASS] ⑩ fail-closed: partial(payout != pool_value) / payout<1000 / 票方向!=winningSide / payoutRoot 对不上 / claimed_bitmap!=0 / closed!=1 / 链上 RootClaim spk 不符 / outpoint 缺失
+[PASS] ⑪ 私钥不进返回值; 构造过程中 new 的 PrivateKey 全部 free(created == freed)
+[PASS] ⑫withdraw buildWithdrawTxJson 真实构造成功([KanetTokenClaim,heldKTT,fee]三输入, 目的地 covenant 输出 + 代币输出 + 找零)
+[PASS] ⑬relay 真代码: 反序列化+extractTxShape+validateFixedValueOutputs 通过; 真签 fee 输入后 finalize, txid==expectedTxid
+[PASS] ⑭独立复算: Σin−Σout==netLoss; 目的地/代币两个 covenant_id 各自用 kaspa.covenantId 独立复算; 代币输出 owner 随目的地 covenant_id 变(换 fee outpoint ⇒ 代币 spk 变)
+[PASS] ⑮a 【真验签】KanetTokenClaim 的 s 对【最终tx】的共识 sighash 有效(独立移植 sighash + schnorr; 公钥=winner_pk)
+[PASS] ⑮b 反向臂: 同一笔tx去掉 output0/1 的 covenant 后重算 sighash, KTC 签名必须验假(检查对 covenant 敏感 + 签名确实承诺了 covenant)
+[PASS] ⑮c 换 fee 面值(不同找零候选)各自重签: 每个最终tx的 KTC 签名都验真
+[PASS] ⑯KanetTokenClaim 见证里各索引/标志位置与交易真实结构一致: tok_in_idx→held outpoint, tok_out_idx→代币输出, dest_idx→目的地 covenant 输出, to_market_input=false, 前后缀=调用方给的代币模板
+[PASS] ⑰哨兵 withdrawWitnessArgs: tok_in_idx/tok_out_idx/dest_idx 在哨兵输入(5/6/7 两两不同)下各落在自己具名的字段; to_market_input 恒 false
+[PASS] ⑱结构断言 assertWithdrawLayout: 正确布局放行; KTC/held outpoint 互换、代币输出/目的地输出 spk 错、目的地无 covenant 各自必拒
+[PASS] ⑲inputHasCovenant 钉死: withdraw 的输入0(KanetTokenClaim)/输入1(held KTT)在上一笔 claim_draw 里确是带 covenant 的输出, fee 输入无; 断言信号 == 独立 NWT 移植的 storage mass(按真实布局 [true,true,false]); 错向量 [true,false,false] 结果必不同
+[PASS] ⑳a 私钥不是 winner_pk 的那一把(别的市场的委员私钥) ⇒ signing_key_mismatch, 在任何签名之前 fail-closed, 错误信息不含私钥
+[diag:step] proc.silverc.compile.bshard-artifacts ms=19 cmd=silverc ok=1 at=2026-09-19T17:32:00.864Z
+[PASS] ⑳b winner_pk 是别人(且给的链上 spk 与之自洽) 而手上是本委员私钥 ⇒ signing_key_mismatch(隔离出"公钥逐字节相等"这一层, 不被 spk 自洽检查抢先)
+[diag:step] proc.silverc.compile.bshard-artifacts ms=18 cmd=silverc ok=1 at=2026-09-19T17:32:00.901Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=19 cmd=silverc ok=1 at=2026-09-19T17:32:00.925Z
+[PASS] ⑳c 正向: winner_pk 用大写 hex(同一把)也放行; winner_pk/amount 与链上 KanetTokenClaim spk 不自洽 ⇒ fail-closed(现算 spk != 链上 spk)
+[PASS] ⑳d 签名前断言在【任何 createInputSignature 之前】执行: 断言失败时一次都没被调用
+[PASS] ㉑目的地闸: 允许清单 v0 为空且冻结; 主网(即使 allowUnlistedTestDestination:true)一律拒; 非主网无显式声明拒; 非主网+显式声明放行; 清单命中放行; 形状不对拒
+[PASS] ㉒目的地闸先于解密与签名: 私钥信封是垃圾、目的地被拒时, 报的是目的地错而不是解密错; createInputSignature 零调用
+[PASS] ㉓ fail-closed: amount<=0 / outpoint 缺失 / 链上 KanetTokenClaim spk 不符 / spk 缺失
+[PASS] ㉔ 私钥不进返回值; 构造过程中 new 的 PrivateKey 全部 free(created == freed)
+[PASS] ㉕ticket_reclaim buildTicketReclaimTxJson 真实构造成功: [ticket, fee]→[P2PK 全额 20,000,000, 找零]; ticket 由 builder 现签, fee 输入留给 relay 签(signInputIndices=[1])
+   [info] relay 本地 wasm requiredFee=141000 ⇒ 天花板=282000; 节点精确最低费=1528200; builder 实付=2292300
+[PASS] ㉖【relay 现状表征——批9 阻塞项 #2】relay 真代码全流程: fixed_value / signed_input_ceiling / 签 fee 输入 / txid 均放行, 但 validateNetLoss 与 validateImpliedMinerFee 必拒: relay 本地 wasm 估算费远低于节点精确最低费 ⇒ 其天花板(2×估算)低于节点要求, 任何 fee 都无法同时满足两边; 仅当 requiredFee 换成精确值时才放行(证明唯一原因是 relay 的 fee 估算器)。relay 修复后本条会变红, 提醒同步清单
+[PASS] ㉗a 【真验签】ticket 的 bettorSig 对【relay 签完的最终tx】共识 sighash 有效(独立移植 sighash+schnorr; 公钥=bettor_pk)——ticket 签名不受 fee 输入后签的影响
+[PASS] ㉗b 反向臂: 改找零值 1 sompi / 改收款脚本后重算 sighash, 签名必须验假(签名承诺全部输出); 换 fee 面值(不同找零候选)各自重签仍验真
+   [info] 本地 wasm 估算费=141000 精确最低费=1528200 builder 实付=2292300
+[PASS] ㉘ fee 陷阱对拍: builder 的 massSignal 与 NWT 独立移植的 storage/compute 逐位相等; 净损失 ≥ 100×max(compute,storage)(节点最低费); 若复用 computeRequiredFeeSompiOrThrow 会少付(本地 wasm 估算 < 精确需求)
+[PASS] ㉙inputHasCovenant 钉死 [false,false]: 常量冻结; ticket 输入=register_append#1 输出1 真实【无 covenant】, fee 输入=普通; builder 的 massSignal 与错向量 [true,false] 的结果必不同; C1 角色表 ticket_reclaim 与输入下标对应
+[PASS] ㉚可回收闸: 赢票(side==winningSide) / 市场未结算(closed=0) / 已取消(closed=2) / marketState 缺失 各自必拒; 输家票+closed=1 放行
+[PASS] ㉛可回收闸/目的地闸先于解密与签名: 私钥信封是垃圾时, 报的是闸的错而不是解密错; createInputSignature 零调用
+[PASS] ㉜MUST-PROVE: 别的市场的委员私钥 ⇒ signing_key_mismatch(签名前, 零签名调用, 不含私钥); DB bettor_pk 被换 ⇒ ticket_pk_underivable; 大写 bettor_pk 同一把放行
+[PASS] ㉝收款脚本闸: 缺失 / P2SH / P2PKH / 长度不对 各自必拒(只接受 34 字节 P2PK)
+[PASS] ㉞fee 界与输入闸: cap 过小 ⇒ no_viable_change_shape; ticketOutpoint 缺失 ⇒ fail-closed; fee 输入面值不足以付费 ⇒ fail-closed
+[PASS] ㉟结构断言 assertTicketReclaimLayout: 正确放行; ticket/fee 输入互换、收款脚本错、收款面值不是 20,000,000、回收输出带 covenant、找零脚本错 各自必拒
+[PASS] ㊱ 私钥不进返回值; 构造过程中 new 的 PrivateKey 全部 free(created == freed)
+
+47 passed, 0 failed

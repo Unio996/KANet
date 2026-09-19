@@ -1,0 +1,35 @@
+[db] path=%TEMP%\_j2_c1_30012.db source=DB_PATH
+[PASS] E1 形态 O 与形态 L 各一个 ok 路径(回执由真实 9-0 handler 对真实 wasm 条目产出): 规整后字段正确, covenantId 键齐全
+[PASS] E1b 与真实节点观察对齐: 9-0 验收 facts-vs-node.json 的 4 条真实节点 UTXO 重放进真实 handler, 经消费方规整后逐字段等于当时记录的 S1_relay
+[PASS] E2 ▲ 真实错误回执 {error, phase:"execution"}(无 ok 字段, 由真实 handler 对非法请求产出)⇒ facts_relay_error, 原文原样保留
+[PASS] E3 ▲ ok 必须严格 === true: undefined / 1 / "true" / false 各拒 ⇒ facts_not_ok
+[PASS] E4 ▲ 回声: facts 缺失/不是 true ⇒ facts_echo_missing; factsVersion 为 0 / 2 / "1" / 缺失 ⇒ facts_version_mismatch
+[PASS] E5 ▲ form 与请求不符 ⇒ facts_form_mismatch(O 回执配 L 请求, L 回执配 O 请求)
+[PASS] E6 形态 O 带 truncated(哪怕 false)/ found 非数组 / missing 非数组; 形态 L 的 truncated 非 boolean / utxos 非数组 ⇒ facts_shape_invalid
+[PASS] E7 ▲ 条目缺键 ⇒ facts_item_key_missing(缺 covenantId 键 / 缺 scriptHex / 缺 scriptPublicKey / 缺 outpoint / 缺 amount); 两种形态都查
+[PASS] E12 条目格式范围 ⇒ facts_shape_invalid(index 超 uint32 / 负 / 小数; version 超 65535; amount 超 u64 / 非十进制 / 是 number; hex 大写 / 奇数长度; covenantId 大写 / 63 位 / undefined 值)
+[PASS] E8 ▲ found∪missing 必须按 txid:index 精确等于请求 ⇒ facts_set_mismatch(缺一项 / 多一项 / 重复 / 同 txid 不同 index[N-T1 同族] / 同时在 found 与 missing)
+[PASS] E9 旧 relay 模拟(真实 handler 的旧路径: 忽略 facts, 只回 {ok:true, utxos:[{outpoint,amount}]})⇒ facts_echo_missing
+[PASS] E11 relay 回 {}(sendCommandAsync 在回执缺 result 时 resolve {})⇒ facts_not_ok
+[PASS] E13 requested 自身有问题是调用方 bug ⇒ facts_requested_invalid, 且先于回执判定(回执是垃圾也一样)
+[PASS] 闭集: factsResponseCodes() = 设计 §19.1 的 10 个 + facts_step_budget_exceeded(超出设计文字); 冻结; 抛出的每个 FactsResponseError 的 code 都在其中
+[PASS] C1 正向: 每个步骤(6 个)全过; 每个角色地址恰一次形态 O(带精确 outpoints)+ 一次形态 L(fee, minAmount/maxAmount 为十进制字符串); chainParents 来自经断言的链上事实
+[PASS] C1 ▲ 8 个 S10 格 × 负向(缺失 / 面值偏低 / 偏高 / 只有同 spk 同面值同 txid 的诱饵 outpoint / spk 错 / covenant 分类错)= 逐格断言精确 code, 全部 fail-closed
+[PASS] C2 ▲ 角色输入必须走形态 O(按 outpoint 精确), 不走形态 L: 地址上撒 250 个面值更高的 dust(形态 L 的 200 条窗口会把目标挤出去)仍能取到目标; 形态 L 只发给 relay 的 fee 地址
+[PASS] C3 传输/relay 错误 ⇒ verify 抛错(不返回任何半成品 ⇒ 驱动不推进意图状态); 分类为 settlement_facts_transport_error, 不混报成 settlement_chain_fact_drift
+[PASS] E10 ▲ requestFacts 抛 "Relay command timeout after 15s" / "Relay not running"(reject, 含同步 throw)⇒ facts_transport_error, .detail 带原 message; 不是裸 Error 逃出
+[PASS] C4 每步总预算超出 ⇒ facts_step_budget_exceeded(本 tick 放弃、不返回), 且计时器已清、晚到的回执不产生 unhandledRejection; 预算内正常完成不受影响
+[PASS] C5 fee 选取跳过毒化候选: 形态 L 返回里混入 covenantId != null 的 relay-P2PK UTXO 与外来 spk 的条目 ⇒ 被跳过(不是中止、不回落), 事件 fee_candidate_poisoned_skipped {count}
+[PASS] C8 ▲ 并发请求中任一个失败 ⇒ 整步 fail-closed(claim_draw 的 3 个形态 O 与 1 个形态 L 各失败一次, 每次都必须抛、不返回)
+[PASS] C9 fee 窗口: 全被毒化跳过 ⇒ FeeWindowError(fee_window_saturated)带 error 级 settlement_fee_window_saturated 与 warn 级 fee_candidate_poisoned_skipped; 空窗口 ⇒ no_suitable_fee_utxo(无饱和报警); 我方在途产出被排除; minAmount 生效
+[PASS] C11 ▲ 并发: claim_draw 的 3 次形态 O + 1 次形态 L 同时发出——每次 250ms, 总耗时 < 600ms(串行 ≥ 1000ms); 预算/超时常量断言
+[PASS] 镜像常量与 relay 侧(9-0)逐项相等: FACTS_VERSION / FACTS_OUTPOINTS_MAX / FACTS_RPC_WAIT_MS / FACTS_RPC_CALL_MS; SIGNED_INPUT_CEILING 与 maxAmount 请求值一致
+[PASS] C10 ▲ 传输错误分级: 瞬时类首次 warn、连续 3 个【不同 tick】升 error(同一 tick 内重试不算)、成功清零; facts_echo_missing / facts_version_mismatch 首次即 error(不进计数); 漂移永远 error 且事件类型不同
+[PASS] chainParents 的 fee 项来自形态 L 条目的事实(不是常量): withFeeParent 补 {value, spkLen, hasCovenant}; 缺字段 ⇒ TypeError
+[PASS] 调用方错误全部类型化且不发请求: 未知步骤 / 指针缺角色 / 预期 spk 缺失 / 两个角色预期 outpoint 相同 / requestFacts 非函数 / budgetMs·feeMinAmount 缺失(无默认值)
+[PASS] 指针缺 expectedCovenantId 键(undefined)⇒ 走到 M6 层被拒为 chain_check_params_missing(没有默认值, 不会静默当"无 covenant")
+[PASS] filterFeeCandidates 纯函数: 三种 status(ok / saturated / none)与事件; relaySpkHex 缺失 ⇒ TypeError
+[PASS] 模块边界(M0a 精神): 源码(去注释)不 import 任何 relay 通道 / DB / kaspa-wasm、不读 process.env、不含 sendCommand; 只 import chain-checks 与 tx-assembly
+[PASS] 全程无 unhandledRejection(超时放弃 / 并发快速失败后其余请求晚到)
+
+32 passed, 0 failed

@@ -1,0 +1,5 @@
+   PROBE-RESULT: builder ACCEPTED; fee outpoint B present in built tx=true; outpoint A present=true
+[PASS] NWT-E1 probe: chainParents attests outpoint A, builder is handed outpoint B (same value/spk length) -> ACCEPTED?
+   PROBE-CONTROL: rejected with code=chain_parents_mismatch role=fee
+[PASS] NWT-E1 control: same probe with value+1 on B -> must be rejected by the assertion (proves the assertion is live)
+45 passed, 0 failed
