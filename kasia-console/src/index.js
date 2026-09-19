@@ -100,6 +100,7 @@ import { registerExchangeRoutes } from './api/exchange.js';
 import { registerAuditPredictionRoutes } from './api/audit-prediction.js';
 import { registerDefiRoutes } from './api/defi.js';
 import { registerPortfolioRoutes } from './api/portfolio.js';
+import { registerWatchAccountRoutes } from './api/watch-accounts.js';   // D-028: 冷存(只读)账户,只 GET
 import { registerBackupRoutes } from './api/backup.js';
 import { registerBudgetRoutes } from './api/budget.js';
 import { registerAdminRoutes } from './api/admin.js';
@@ -289,6 +290,7 @@ await registerOraclePoolRoutes(fastify);
 await registerTestOracleRoutes(fastify);
 await registerDefiRoutes(fastify);
 await registerPortfolioRoutes(fastify);
+await registerWatchAccountRoutes(fastify);   // D-028
 await registerBackupRoutes(fastify);
 await registerBudgetRoutes(fastify);
 await registerAdminRoutes(fastify);

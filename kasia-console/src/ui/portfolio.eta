@@ -282,6 +282,12 @@
         <div class="text-xs text-ink-500 mt-2" x-text="!hasPrice ? '暂无 KAS 报价源, 按原生 KAS 显示' : (unit === 'kas' ? '≈ $' + (data?.totals?.grandTotalUsd || 0).toFixed(2) + ' USD + ' + (data?.totals?.kas || 0).toFixed(2) + ' 原生 KAS' : '稳定币 + 其他资产 + DeFi + 永续 + KAS 等值')"></div>
       </div>
 
+      <!-- D-028: 总计分解 = 热钱包 + 冷存(冷存有读不到的账户时明示"总计不完整",不静默漏算) -->
+      <div class="text-[11px] text-ink-500 -mt-3" x-show="(data?.watchAccounts || []).length > 0" data-watch-headline>
+        <span x-text="'= 热钱包 ' + Math.round(hotHeadlineKas()).toLocaleString() + ' KAS + 冷存 ' + Math.round(data?.totals?.watchKas || 0).toLocaleString() + ' KAS（均以 KAS 计）'"></span>
+        <span class="text-amber-600" x-show="(data?.totals?.watchUnreadable || 0) > 0" x-text="'（含 ' + (data?.totals?.watchUnreadable || 0) + ' 个冷存账户无法读取，总计不完整）'"></span>
+      </div>
+
       <!-- ─── 4 sub-stat row (= KAS / Stable / Other / Open) ─── -->
       <div class="grid grid-cols-4 gap-3">
         <div class="pf-card-editorial p-4">
@@ -550,6 +556,34 @@
         </div>
       </template>
 
+      <!-- ─── 冷存(只读)账户 (D-028: 所有资产必须在 console 可见; console 不持钥, 区块内没有任何操作按钮) ─── -->
+      <template x-if="(data?.watchAccounts || []).length > 0">
+        <div data-watch-block>
+          <div class="pf-stat-label mb-2">冷存（只读）</div>
+          <template x-for="w in (data?.watchAccounts || [])" :key="w.id">
+            <div class="pf-card-editorial overflow-hidden p-4 mb-3" data-watch-account>
+              <div class="flex items-center justify-between">
+                <div class="pf-display text-base text-ink-800" x-text="w.name"></div>
+                <span class="text-[10px] px-2 py-0.5 rounded bg-warm-100 text-ink-500 border border-warm-200">冷存 · 只读 · 不可花</span>
+              </div>
+              <div class="flex items-center gap-2 mt-2">
+                <code class="text-[11px] text-ink-500 break-all" x-text="w.address"></code>
+                <button type="button" @click="copyAddr(w.address, $event)" class="px-2 py-1 rounded text-[10px] bg-warm-100 text-ink-500 hover:text-ink-800 border border-warm-200">复制</button>
+              </div>
+              <div class="mt-2">
+                <template x-if="w.status === 'ok' || w.status === 'ok_public'">
+                  <div class="pf-display text-2xl text-ink-800 tabular-nums"><span x-text="(w.balanceKas || 0).toLocaleString(undefined, { maximumFractionDigits: 8 })"></span> KAS</div>
+                </template>
+                <template x-if="w.status !== 'ok' && w.status !== 'ok_public'">
+                  <div class="pf-display text-2xl text-ink-400" x-text="'—（无法读取）'"></div>
+                </template>
+                <div class="text-[10px] text-ink-400 mt-1" x-text="(w.status === 'ok' ? '来源：本机节点' : (w.status === 'ok_public' ? '来源：公网 REST（Owner 已批）' : '原因：' + (w.reason || '未知'))) + (w.readAt ? ' · 读于 ' + new Date(w.readAt).toLocaleTimeString() : '')"></div>
+              </div>
+            </div>
+          </template>
+        </div>
+      </template>
+
       <!-- ─── Oracle Earnings (Oracle v0.3 sub #7 §10 D5 透明审计, Editorial 风格) ─── -->
       <div class="pf-card-editorial pf-accent-gold-border-t p-5 mb-3">
         <div class="flex items-center justify-between mb-4">
@@ -725,9 +759,15 @@ function portfolioApp() {
     // else 分支把 nativeKas(已经是 KAS 单位, 换算无关) 乘以 0 价格归零, 导致真实持有几十万 KAS
     // 却显示"总资产 $0.00"——nativeKas 本身不需要价格就能在 KAS 模式下显示, 只有把 USD 计价的
     // 子资产(稳定币/DeFi/永续)折算成 KAS 才需要价格, 价格缺失时那部分按 0 贡献而非拖累整体清零。
+    // D-028: headline 分解 = 热钱包(含 USD 资产折 KAS) + 冷存,均以 KAS 计
+    hotHeadlineKas() {
+      const usd = this.data?.totals?.grandTotalUsd || 0;
+      return (this.data?.totals?.kas || 0) + (this.hasPrice ? (usd / this.kasPriceUsd) : 0);
+    },
     grandTotal() {
       const usd = this.data?.totals?.grandTotalUsd || 0;
-      const nativeKas = this.data?.totals?.kas || 0;
+      // D-028: 冷存(只读)账户的 KAS 并入 headline(totals.watchKas 只累加读得到的账户;读不到的不当 0,见 watchUnreadable 提示)
+      const nativeKas = (this.data?.totals?.kas || 0) + (this.data?.totals?.watchKas || 0);
       if (this.unit === 'kas' || !this.hasPrice) {
         const usdAsKas = this.hasPrice ? (usd / this.kasPriceUsd) : 0;
         const total = nativeKas + usdAsKas;
