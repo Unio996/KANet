@@ -1,4 +1,6 @@
-# 设计稿：console 启动期 UTXO 自动拆分加开关（主网默认关）v0.1
+# 设计稿：console 启动期 UTXO 自动拆分加开关（主网默认关）v0.2
+
+> 文件名沿用 `…-v0.1.md`（账本 1538 / NWT 审稿以此路径引用）；**正文即 v0.2**，v0.1→v0.2 差异全部在末节「v0.2 增补」，与上文冲突处以该节为准。
 
 > **Status**: CURRENT
 >
@@ -85,3 +87,28 @@ Owner 原话是"主网默认关"。本页取"**所有网络默认关**"：① D-
 - 2.3 不按网络分支的取舍。
 - §4-1 broker 补零钱路径在主网的实际状态与是否同款处理。
 - 是否有任何路径把"启动期拆分"当作活性前提（Round 1 风暴防护是 broker 高频场景，主网当前无 broker 流量，Bettor 判无）。
+
+## 7. v0.2 增补（NWT 设计审 `de2ded3d`，Bettor 全部采纳；与上文冲突处以本节为准）
+
+### 7.1 D26-M1：第二条无人值守花钱面 —— `broadcaster-utxo` cron 同批加同款开关（取 NWT 选项 (i)）
+- **事实（NWT 只读核 + Bettor 复核）**：`index.js:814-815` 无条件 `startBroadcasterUtxoMaintainerCron()`，无任何 env 闸；启动 90 s 后首 tick、之后每 180 s，对目标集发 `split_utxo targetCount=30 force:true`（`broadcaster-utxo.mjs:70`，force = 整合 + 重拆，不是"够了就跳过"）；目标集 = `relay_nodes.is_oracle = 1 AND address IS NOT NULL` ∪ `POOL_SEEDER_MAKER_RELAY` ∪ `BROADCASTER_RELAY_IDS`（proto 已排除）。主网**今天为零**：库中 is_oracle=1 且有地址行 = 0、两个 env 键不存在、两份 stdout 只有 started 无 rebalanced / tick 行。**但花不花钱取决于库数据不取决于代码**：任何流程把某 relay 的 is_oracle 置 1，下一个 tick 起就每 3 分钟无人值守强制重平衡。
+- **设计**：新开关 `BROADCASTER_UTXO_MAINTAIN`，与 §2 同款：只认字面 `'1'`；闸放 `startBroadcasterUtxoMaintainerCron()` 入口第一行，关闭态打**恰一行** `[broadcaster-utxo] disabled (BROADCASTER_UTXO_MAINTAIN!=1, raw=<JSON.stringify 原始值>)` 并返回，不注册任何 timer、零 DB 零 IPC；开启态行为逐字节不变（含现有 `started — tick=…` 行）。`index.js:815` 调用点不动。主网 env 不写该键。**打开**它同样是另一次钱路决定，须 Owner 单独批。
+- **对 Owner 的口径**：本页落地后，主网 console 启动后无人干预的链上花费 = "今天为零，由两个默认关的开关保证"；**不是**"启动期不再花钱"——入口触发型路径由 P2 枚举表（(1539) ②-2）另行登记。
+
+### 7.2 D26-M2：V3 是空判据，重写测试结构
+- 既有四条测试里第 1、2 条（`utxo-splitter.test.mjs:47-64`，(1459) 的 proto 跳过守卫）只断言"proto 中继零调用"——若实现者只给第 3、4 条设 env=1，第 1、2 条在闸关闭时照样绿，`_isProtoRelay` 守卫被闸静默吞掉。
+- **要求**：env 在测试文件作用域统一设 `'1'`（try / finally 还原，防泄漏到别的测试文件）；关闭态另写独立用例；第 1、2 条各加**阳性对照**（同 tick 加一个普通中继并断言它收到恰 1 条，证明闸开着）；**新增变异：env=1 下删掉 `_isProtoRelay` 早退 ⇒ 第 1 / 2 / 4 条必红**（这条才证明守卫没被闸吞掉）。V3 以本条为准。
+
+### 7.3 其余采纳项
+- **关闭态日志带原始值**：`start-console-mainnet.ps1` 注入 env 用 `^([^=]+)=(.*)$`，不 trim 不去引号，写成 `=1 `（尾空格）或 `="1"` 会得 `' 1'` / `'"1"'` ⇒ 闸保持关（方向安全）但运维者会以为"明明开了"。两处 disabled 日志都带 `raw=<JSON.stringify(process.env[KEY])>`（未设时为 `undefined`）。
+- **V2 取值扩充**：在 `'0'` / `'true'` / `' 1'` / `'yes'` 之外再加 `''`、`'01'`、全角 `'１'`、`'1
+'`，全部视为关。
+- **V5 只是静态判据，权威是 V6**：console 子进程继承启动者 shell 环境，启动脚本只往进程环境加文件值、不清继承变量——启动者 shell 若恰有该变量 =1，env 文件无键也是开。P2 自启注册门以 **V6（运行中 console 自己 stdout 的 disabled 行）**为准，V5 保留为辅助。
+- **V8（对应 7.1）**：env 未设 ⇒ `startBroadcasterUtxoMaintainerCron()` 不注册 timer、`sendCommandAsync` 0 次、stdout 恰一行 `[broadcaster-utxo] disabled`；env=`'1'` ⇒ `started — tick=180000ms target=30` 行原样出现且既有行为不变；变异：删早退 ⇒ 未设用例必红。
+- **隔离 simnet console（9-4 等）**从此也默认关：需要多 UTXO 的验证在其 env 副本里显式写 `=1`；NWT 未发现现有流程隐式依赖。
+- **§2.4 措辞更正**：手动接口 `POST /api/relay/:id/split-utxos`（`api/relay.js:517-531`）**无任何鉴权**且接受 force 与任意 targetCount，任何本机进程可触发烧费重平衡（只烧费不盗币），属 T-LOOPBACK-AUTHZ 家族 —— 另开票 `T-SPLIT-UTXOS-API-AUTHZ`，本页不改；上文"操作员显式触发"成立、"受控入口"的暗示不成立。
+- **§6-④ 结论范围**：没有代码 / 监控把启动期拆分当活性前提（git grep `accounts split|[utxo-splitter]` 排除文档与本文件零命中；proto 从未依赖；发送路径串行，单大 UTXO 只是吞吐非活性；旧"结算分块并行广播"目标集主网今天为零）。**未审**：所有选币调用者对 UTXO 数的隐含假设。
+- **§5 补句**：合入前任何手动 / 意外重启仍跑旧代码的启动拆分（约 0.045 KAS / 次，已知）。
+
+### 7.4 派实现
+实现交 KANet-UI（NWT 无异议）：两个早退分支 + 测试；NWT 审 diff。改动文件预期：`utxo-splitter.js`、`broadcaster-utxo.mjs`、`utxo-splitter.test.mjs`、新增 `broadcaster-utxo.test.mjs`（或并入既有测试文件，实现者定并说明）；`index.js` diff 必须为空。
