@@ -1,0 +1,36 @@
+// 只读: 从simnet节点扫块找批3 market_seal真实上链交易, 抽出各input的签名脚本/outpoint与outputs, 存fixture。不提交任何交易。
+import fs from 'node:fs';
+const kaspa = await import('kaspa-wasm');
+const TARGET = 'e2c45b328b9a47bf315f09dc3d7873e4278beb4fe5f46ce3bd9d839baa6924c8';
+const rpc = new kaspa.RpcClient({ url: 'ws://127.0.0.1:18510', networkId: 'simnet' });
+await rpc.connect();
+const dag = await rpc.getBlockDagInfo();
+console.log('blockCount', String(dag.blockCount), 'daa', String(dag.virtualDaaScore));
+let low = undefined, found = null, scanned = 0;
+for (let page = 0; page < 200 && !found; page++) {
+  const r = await rpc.getBlocks({ lowHash: low, includeBlocks: true, includeTransactions: true });
+  const blocks = r.blocks || [];
+  if (!blocks.length) break;
+  for (const b of blocks) {
+    scanned++;
+    for (const tx of (b.transactions || [])) {
+      const id = tx.verboseData?.transactionId;
+      if (id === TARGET) { found = tx; }
+    }
+  }
+  const hashes = r.blockHashes || [];
+  const next = hashes[hashes.length - 1];
+  if (!next || next === low) break;
+  low = next;
+  if (blocks.length < 2) break;
+}
+console.log('scanned', scanned, 'found', !!found);
+if (found) {
+  const j = JSON.parse(JSON.stringify(found, (k, v) => (typeof v === 'bigint' ? v.toString() : v)));
+  fs.writeFileSync('scratch/_j2_simnet/_onchain_market_seal_tx.json', JSON.stringify(j, null, 1));
+  console.log('inputs', j.inputs.length, 'outputs', j.outputs.length, 'version', j.version, 'lockTime', j.lockTime);
+  j.inputs.forEach((i, n) => console.log(n, 'outpoint', i.previousOutpoint.transactionId.slice(0, 12), i.previousOutpoint.index, 'sigScriptHexLen', String(i.signatureScript).length, 'seq', i.sequence, 'sigOp', i.sigOpCount, 'cb', i.computeBudget));
+  j.outputs.forEach((o, n) => console.log(n, 'value', o.value, 'spkLen', String(o.scriptPublicKey.script ?? o.scriptPublicKey).length, 'cov', JSON.stringify(o.covenant)));
+}
+await rpc.disconnect();
+process.exit(0);

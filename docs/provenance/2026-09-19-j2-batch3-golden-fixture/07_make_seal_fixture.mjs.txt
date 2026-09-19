@@ -1,0 +1,33 @@
+// 由 simnet 真实上链交易(批3 market_seal, 读自节点)+批3 chain 记录 生成回归夹具。只读。
+import fs from 'node:fs';
+const bak = JSON.parse(fs.readFileSync('scratch/_j2_simnet/_j2_simnet_chain.json.bak-nopkenv', 'utf8'));
+const on = JSON.parse(fs.readFileSync('scratch/_j2_simnet/_onchain_market_seal_tx.json', 'utf8'));
+const g = bak.genesis;
+const spk = (o) => String(o.scriptPublicKey).slice(4);
+const fx = {
+  _doc: '批3 market_seal(simnet真实共识ACCEPT, 30d7e951 provenance)的独立黄金夹具: 参数取自批3 chain记录, 期望字节取自simnet节点上的真实上链交易(读自getBlocks), 不是builder自己的输出。',
+  _source: { onchainTxid: on.verboseData.transactionId, node: 'kaspad 2.0.1 simnet PID15972 (sha256 8afe6a68...)', nodeStorageMass: on.storageMass ?? null, nodeMass: on.mass ?? null, nodeComputeMass: on.verboseData.computeMass ?? null },
+  params: {
+    marketId: g.marketId, minBet: g.minBet, deadlineMs: g.deadlineMs, sealCount: g.sealCount,
+    committeePubkeyHex: g.committeePubkeyHex, rootCloseTmplHash: g.rootCloseTmplHash, shardLeafOwnRedeemLen: g.shardLeafOwnRedeemLen,
+    leafCovId: g.shardLeafCovId,
+    stateAtSeal: bak.bet2.newState,
+    leafOutpoint: { txid: on.inputs[0].previousOutpoint.transactionId, vout: on.inputs[0].previousOutpoint.index },
+    heldOutpoint: { txid: on.inputs[1].previousOutpoint.transactionId, vout: on.inputs[1].previousOutpoint.index },
+    feeOutpoint: { txid: on.inputs[2].previousOutpoint.transactionId, vout: on.inputs[2].previousOutpoint.index },
+    feeValueSompi: String(BigInt(on.outputs[2].value) + BigInt(bak.marketSeal.requiredFee)),
+    relaySpkScriptHex: spk(on.outputs[2]),
+  },
+  expected: {
+    version: on.version, lockTime: on.lockTime,
+    inputs: on.inputs.map((i) => ({ txid: i.previousOutpoint.transactionId, vout: i.previousOutpoint.index, sequence: i.sequence, sigOpCount: i.sigOpCount, computeBudget: i.computeBudget, signatureScriptHex: i.signatureScript })),
+    outputs: on.outputs.map((o) => ({ value: o.value, spkScriptHex: spk(o), covenantId: o.covenant?.covenantId ?? null, authorizingInput: o.covenant?.authorizingInput ?? null })),
+    unsignedTxidNoWitness: on.verboseData.transactionId,
+  },
+};
+// fee输入(index2)的签名脚本由relay签, 不是builder产物: 夹具里清空, 免得误当成builder输出
+fx.expected.inputs[2].signatureScriptHex = null;
+fs.mkdirSync('test-fixtures', { recursive: true });
+fs.writeFileSync('test-fixtures/proto-batch3-market-seal-onchain.json', JSON.stringify(fx));
+console.log('written', fs.statSync('test-fixtures/proto-batch3-market-seal-onchain.json').size, 'bytes');
+console.log(JSON.stringify(fx._source), fx.params.feeValueSompi, JSON.stringify(fx.params.stateAtSeal));

@@ -28,6 +28,21 @@ export const MARKET_SEAL_ROOTCLOSE_OUT_INDEX = 0; // RootClose genesis 输出
 export const MARKET_SEAL_TOKEN_OUT_INDEX = 1;     // 代币转出到RootClose 输出
 
 /**
+ * market_seal见证的具名参数映射(从buildMarketSealTxJson抽出的纯函数, 字节不变)——NWT批3独立验证N1:
+ * 真实封盘形状里held输入下标与token输出下标恒相等(都是1), 共识看不出tokenInIdx/tokenOutIdx互换, 所以把
+ * 映射抽成可单测的纯函数, 用两者不同的向量证明: tokenInIdx来自held输入的真实下标, tokenOutIdx来自
+ * MARKET_SEAL_TOKEN_OUT_INDEX, rcOutIdx来自MARKET_SEAL_ROOTCLOSE_OUT_INDEX, 各归各位。
+ * @param {{heldIdx:number, rcPrefixHex:string, rcSuffixHex:string, tokPrefixHex:string, tokSuffixHex:string}} o
+ *   rcPrefixHex/rcSuffixHex 无0x; tokPrefixHex/tokSuffixHex 与调用方传入形状一致(原样透传)
+ */
+export function sealWitnessArgs({ heldIdx, rcPrefixHex, rcSuffixHex, tokPrefixHex, tokSuffixHex }) {
+  return {
+    rcOutIdx: MARKET_SEAL_ROOTCLOSE_OUT_INDEX, rc_prefix: '0x' + rcPrefixHex, rc_suffix: '0x' + rcSuffixHex,
+    tokenInIdx: heldIdx, tokenOutIdx: MARKET_SEAL_TOKEN_OUT_INDEX, tok_prefix: tokPrefixHex, tok_suffix: tokSuffixHex,
+  };
+}
+
+/**
  * ① market_seal（`ShardLeaf_direct.convert_to_rootclose`）——设计文档§1.1/实现计划v0.4§2.1。
  * @param {object} o
  * @param {*} o.kaspa  kaspa-wasm模块(注入)
@@ -41,7 +56,7 @@ export const MARKET_SEAL_TOKEN_OUT_INDEX = 1;     // 代币转出到RootClose �
  *   computeShardLeafRedeemScript(proto-covenant-builder.mjs)按当前state现算得到
  * @param {{txid:string, vout:number}} o.leafOutpoint  leaf当前UTXO(proto_markets.shardleaf_txid/vout)
  * @param {string} o.leafCovId  leaf自己的covenant_id(proto_markets.shardleaf_cov_id)
- * @param {object|null} o.heldInput  count>1时非null: {txid,vout,value,scriptPublicKeyHex,
+ * @param {object} o.heldInput  必填(为null则构造期fail-closed, 见函数体N2注释): {txid,vout,value,scriptPublicKeyHex,
  *   redeemScript(Buffer),entryAbi,stateFieldCount}(合并KTT, 同register_append的heldInput同一形状)
  * @param {{local_yes:number,local_no:number,count:number,pool_value:number}} o.currentState  封盘时
  *   leaf的真实state(deriveLeafState现算, 必须等于sealCount)
@@ -63,6 +78,13 @@ export function buildMarketSealTxJson({
   tokPrefixHex, tokSuffixHex, absFeeCapSompi,
 }) {
   if (currentState.count <= 0) throw new Error(`buildMarketSealTxJson: currentState.count(${currentState.count}) 必须>0`);
+  // NWT批3独立验证N2(Bettor转达): heldInput为null时下面heldIdx会保持-1, 把tokenInIdx=-1编进
+  // convert_to_rootclose见证——共识必拒(不丢钱)但应该构造期fail-closed。v0每笔register_append都会产出一枚
+  // 合并KTT(count>=1即存在held代币, 封盘时pool_value>0且全池代币必须整体转出), 因此任何合法封盘下
+  // heldInput都必须存在。
+  if (!heldInput) {
+    throw new Error(`buildMarketSealTxJson: fail-closed — heldInput为null(count=${currentState.count}, pool_value=${currentState.pool_value}); 封盘必须转出合并KTT(convert_to_rootclose要求tokenInIdx指向真实held输入), 不能把tokenInIdx=-1编进见证`);
+  }
 
   // RootClose genesis的完整state(7字段): 沿用leaf当前state的4个下注字段, closed/winningSide/
   // payoutRoot全0(实际值由close_commit提供, 设计文档§1.2)。
@@ -103,10 +125,9 @@ export function buildMarketSealTxJson({
 
     const rcPrefix = rcArtifact.script.subarray(0, rcArtifact.stateLayout.start);
     const rcSuffix = rcArtifact.script.subarray(rcArtifact.stateLayout.start + rcArtifact.stateLayout.len);
-    const leafAction = encodeConvertToRootcloseAction(kaspa, convertToRootcloseEntryAbi, {
-      rcOutIdx: MARKET_SEAL_ROOTCLOSE_OUT_INDEX, rc_prefix: '0x' + rcPrefix.toString('hex'), rc_suffix: '0x' + rcSuffix.toString('hex'),
-      tokenInIdx: heldIdx, tokenOutIdx: MARKET_SEAL_TOKEN_OUT_INDEX, tok_prefix: tokPrefixHex, tok_suffix: tokSuffixHex,
-    });
+    const leafAction = encodeConvertToRootcloseAction(kaspa, convertToRootcloseEntryAbi, sealWitnessArgs({
+      heldIdx, rcPrefixHex: rcPrefix.toString('hex'), rcSuffixHex: rcSuffix.toString('hex'), tokPrefixHex, tokSuffixHex,
+    }));
     const leafSigScript = combineActionAndRedeem(kaspa, leafAction, leafRedeemScript);
     const heldSigScript = heldInput
       ? combineKttActionAndRedeem(kaspa, encodeKttTransferZeroOutAction(kaspa, heldInput.entryAbi, heldInput.stateFieldCount, [0]), heldInput.redeemScript)
