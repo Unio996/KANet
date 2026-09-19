@@ -1,4 +1,4 @@
-> **Status**: CURRENT（草稿 v0.2，2026-09-19，J2；批9 接线设计 + 验收清单，**已转 NWT 设计审，NWT GREEN 后才落码**；Bettor 已裁定 D1–D6（§14）；本文不含任何代码改动）
+> **Status**: CURRENT（草稿 v0.3，2026-09-19，J2；批9 接线设计 + 验收清单；**已落实 NWT 设计审（8554ef6e）M1–M6 与 S1–S8，Bettor 全采纳 MUST；NWT 核过 MUST 落实后 9-0 开工**；本文不含任何代码改动。v0.2→v0.3 的逐条对照见 §16）
 
 # 原型 v0 结算批9（驱动接线）设计与验收清单 v0.2
 
@@ -29,20 +29,27 @@
 | F11 | 六个 builder 中 market_seal/convert_to_claim/claim_draw 返回 `genesisOutputIndices`；**close_commit 不返回 `continuationOutputIndices`**（其 RootClose 续约输出 0 因此没被 relay 的固定面值校验覆盖）；relay `validateFixedValueOutputs` 在两组索引都空时是 no-op | `proto-tx-assembly-settlement.mjs`、`covenant-broadcast-relay.mjs` |
 | F12 | 「胜方由 DB 派生」：`deriveCloseCommitInputs` 要求 `proto_markets.winning_side` **已由操作员的 resolve 裁决写入**；现在无人写它（F4） | `proto-settlement-inputs.mjs` |
 | F13 | 各步骤之间的链上指针（seal 的 RootClose outpoint/covenant_id、held 代币 outpoint 等）**没有落库列**；`proto_markets` 只有旧的 `rootclose_txid/vout`（无写入方） | schema |
+| F14 | 🔴（NWT E3，已复核其探针）`covenantId` **不在** kaspa-wasm UTXO 条目顶层：顶层读出恒 `undefined`（covenant 与普通 UTXO 都是），真实位置是 **`entry.covenantId`（`Hash` 对象）**，普通 UTXO 该处也是 `undefined`。生产 relay 与 console 的 kaspa-wasm 二进制相同 | NWT `batch9-design-review/probe-output.txt` |
+| F15 | 🔴（NWT E4）relay 的提交路径 `covenant_broadcast` 用**共享** RpcClient（`waitForRpc()`）；现有 `getAddressUtxos` 每次调用 **new 一个 RpcClient**（`connectRpc`，URL 取自 `KASPA_RPC_URL`）——不保证与提交同一节点（Resolver 分支），且每个 `new RpcClient` 永久占用 wasm 线性内存（11–18 KB/个不回收，4 GiB 顶崩溃而 HTTP 仍 200） | `relay.mjs:529-535` vs `p2sh.mjs:191-200,1613-1627` |
+| F16 | （NWT S1 实验，simnet）"带 covenant 绑定、spk 仍是普通 P2PK"的**毒化 fee UTXO**可被凭空创建（genesis 免权限）；当普通 fee 输入花掉（不续约）**节点接受**；同一笔 2 入 5 出交易节点 storage mass 165,133 = 毒化输入按 p=2 的公式值，wasm 本地估算（p 恒 1）191,448。covenant 输入使真实 mass 更低 ⇒ 本地偏高、不会被拒；后果仅是"断言信号 == 节点值"三源相等失配。创建到他人 spk 的形状是推断，未测 | NWT `06/07` 实验 |
+| F17 | 🔴（NWT M5，已复核）`sendProtoCommand` 对 write 命令的闸**只读 `PROTO_DRIVER_ENABLED`**：与 3.1 的"独立开关"矛盾（结算开关=1 而旧开关=0 ⇒ 出口挡下结算广播；旧开关=1 而结算开关=0 ⇒ 出口不挡结算广播，全靠驱动/HTTP 自己查，违背账本1444"出口自身是唯一强制点"） | `proto-relay-ipc.mjs` `sendProtoCommand` |
 
 ## 2. 前置阻塞与需要先裁定的设计点（不裁定，后面的接线就无法成立）
 
 - **P1（relay 只读扩展，须 NWT 审 + Bettor 批）**：F8 + F9 决定了 C1 的"spk/covenant 分类是链上事实"与"pmt 同节点门"在现有 relay 接口下**做不到**。最小方案：
-  - **R1** `get_address_utxos` 每项**追加** `scriptPublicKey`（hex）与 `covenantId`（无则 null）——纯加字段、只读，现有调用方只读 `outpoint/amount`，不受影响（需 grep 复核全部消费者）。
-  - **R2** 新增只读命令 `get_past_median_time`（返回 relay 自己 RpcClient 的 `getBlockDagInfo().pastMedianTime`）——**同一个 relay 既读 pmt 又提交交易，天然满足 Bettor/NWT 的"同节点"要求**；同时在 `PROTO_COMMAND_ALLOWLIST` 加 `'read'` 一行。
+  - **R1（v0.3，M1/M2/S2）** `get_address_utxos` 加**可选布尔字段 `facts:true`**（在 relay `COMMAND_FIELD_TYPES` 登记为可选布尔）：**仅当 `facts` 为真**才走 relay 的**共享 RpcClient（`waitForRpc()`，即 `covenant_broadcast` 提交所用的那一个）——没有回退到 per-call `new RpcClient` 的路径**，并每项返回 `{outpoint, amount, scriptPublicKey:{version, scriptHex}, covenantId|null}`；**不带 `facts` 时输出与现状字节不变**（现有消费者零回归，NWT E5 已核）。**取值位置（M1）**：`covenantId` 必须读 **`e.entry.covenantId`**（`Hash`→hex 字符串），**不得**按现有归一化 `e.amount ?? e.utxoEntry?.amount ?? e.entry?.amount` 的惯性读 `e.covenantId`（那会对所有 UTXO 恒为 null，使 ticket 行"期望无 covenant"空判通过）；**能力哨兵**：`'covenantId' in e.entry` 为假 ⇒ **整条命令报错**（`covenant_id_field_missing`），**不得**回 null（区分"该 wasm 版本无此字段"与"此 UTXO 无 covenant"）。测试夹具必须由**真实 wasm 条目**（或逐字节复制自真实节点回复）生成；手写 JSON 把 `covenantId` 放顶层会让测试绿、生产恒 null。**返回量上限（S2）**：relay 地址是公开地址，任何人可撒 dust；`facts:true` 时服务端上限 N=200 项并支持可选 `minAmount/maxAmount` 面值过滤（fee 选取只要 ≤ `SIGNED_INPUT_CEILING` 的那部分）；**超上限 ⇒ 返回 `truncated:true`**——fee 选取可用已返回部分，但 **C1 对 covenant 父 UTXO 的"缺失"判定遇 `truncated` 一律 fail-closed（无法证明不存在）**。N 的具体数字由本设计提议为 200，NWT 复核。
+  - **R2（v0.3，M2）** 新增只读命令 `get_past_median_time`，走**共享 RpcClient**（同 R1），**只回 `{ok, pastMedianTimeMs:number, observedAtMs:number}`**（`observedAtMs` = relay 读取时的墙钟，供 §8 的 `pmtEvidence` 带新鲜度）；**不**返回 RPC URL/节点标识，**不**顺带返回 `virtualDaaScore`/`sink` 等用不上的字段。同一个 relay 既读 pmt 又用同一共享连接提交交易，"同节点"**无条件**成立（不依赖 `KASPA_RPC_URL` 与共享客户端解析到同一节点）。
+  - **登记面（M3）**：新只读命令与新字段要登记的位置**不止"白名单一行"**——① console 侧 `PROTO_COMMAND_ALLOWLIST`（加 `get_past_median_time: 'read'`）；② relay `commands.mjs` 三处：`COMMAND_TYPES`、`COMMAND_PAYLOAD_SCHEMA`、`COMMAND_FIELD_TYPES`（含 `facts`/`minAmount`/`maxAmount` 的可选类型）；③ relay `authorize.mjs` 的 `READONLY_ALLOWLIST`；④ `relay.mjs` 的 handler。漏 ③ 的后果：现在（gate 未 arm）只打 warn，将来 arm 后该命令被当"需信封类"静默拒绝——pmt 门与 C1 永远读不到的隐蔽故障。现状已有 3 个"半截注册"的 `chain_get_*`（`lint-kanet` 的 R-COMMAND-REGISTRATION 每次提交都报），**不得再添第 4 个**。9-0 验收测试：枚举 `COMMAND_TYPES` ∩ console 允许表 ∩ relay `READONLY_ALLOWLIST`，新命令**六个位置（①、②三处、③、④）齐全**；`PROTO_COMMAND_ALLOWLIST` 对旧表做差分只多一行 `read`。
   - 被否决的替代：console 用自己的共享 RpcClient 读 pmt——它与 relay 提交所用节点不保证同一个（console 共享 RpcClient 有回退公网的既往），违背"同节点"；不能只靠 `getMempoolEntry` 之类现有命令间接推断。
   - **（Bettor 裁定 D1：采纳，作独立小批 9-0 先落；条件 = NWT 审过边界：只读、不开签名或广播路径、字段只加不改）**。9-0 自带回归：① relay 返回的 `scriptPublicKey` 与 `covenantId` 必须与节点直读**逐字节一致**（对着同一节点同一 UTXO 两条路径比对，含 covenant 与普通 P2PK 两类）；② `PROTO_COMMAND_ALLOWLIST` **只多一行 `read`**（对旧表做差分断言：新表 = 旧表 + 恰一项，且该项值为 `'read'`）；③ 现有 `get_address_utxos` 全部消费者不因新增字段而变（grep + 快照测试）。
 - **诚实边界**：R1/R2 不引入新的 write 面，但**改了 relay 的对外输出/白名单**（F7 说这本身是安全边界变更）。**若不采纳 R1/R2，批9 的 C1 covenant 分类与 pmt 同节点两条无法按 Codex/NWT 的要求证明，接线不得继续。**
 - **P2（`/resolve` 是"任意结果签名预言机"的入口）**：F4 + F12：`winning_side` 是 close_commit 5 个委员槽自动签名的输入。接线时 `/resolve` 必须：① **write-once**（`winning_side IS NULL` 才写，写后不可改；改需人工 SQL 且报警）；② 校验 `status==='sealed'` 且 market 的 seal intent 已 `landed`；③ **操作员鉴权**——现有 proto 路由无鉴权，主网暴露面上不能让任意请求决定结算结果。**（Bettor 裁定 D2）鉴权复用 admin-secret 分级机制，新开一档 `ADMIN_SECRET_SETTLEMENT`**（新生成；env 只写键名、值不入库/不入文档）；write-once 在任何环境强制；批 9-3 之前 `/resolve` 保持 501。
+  - **NWT 条件（S3a–d）**：**S3a** 新档用 `crypto.timingSafeEqual`（先比长度、长度不等直接拒且不泄露），是否顺手改 `checkAdminSecretTier` helper（对所有档只有收益）由 NWT 审 9-3 diff 时判，测试必加。**S3b** IP allowlist 依赖 `request.ip`，而 console 是 `trustProxy:'127.0.0.1'`：若主网机器上有**本机反代/隧道且不带 X-Forwarded-For**，外部请求的 `request.ip` 是 `127.0.0.1`，allowlist 形同虚设（对现有 `operator-settle` 档同样适用，非新问题）——**运营核对项**：请 KANet-UI 现场核主网机器上有无此类进程并写进证据（我不在那台机器上，未核）。**S3c** write-once 必须是**单条原子语句**：`UPDATE proto_markets SET winning_side=? WHERE id=? AND winning_side IS NULL AND status='sealed'`，断言 `changes===1`；并发测试（`Promise.all` 两个不同 outcome ⇒ 恰一个成功、另一个 409）。**S3d** 写一条 `events` 审计（时间、市场 id、outcome、来源 IP；**不写密钥**）；请求体要求带 `confirm:"<market_id>:<outcome>"` 回显防手误（write-once + 自动签名 ⇒ 录错不可撤销）；冷静期留给 Bettor 裁定。
   - **读码核对（2026-09-19，只读，`src/lib/admin-secret-tier.mjs`、`src/api/health.js`、`src/index.js`）——D2 里"loopback 规则同现有档"需要更正措辞**：`checkAdminSecretTier(request, envVarName)` **本身不含任何 loopback/IP 判断**，只做：env 未设 ⇒ 503（fail-closed）；`x-kanet-admin-secret` 头缺失或 `!==` 不等 ⇒ 403（字符串直接比较，**非常量时间**，既有实现，不在本批改）。各 tier 的定义散在调用点（如 `ADMIN_SECRET_FUNDS` 在 `bettor.js`/`chat.js`，不在该文件；该文件文档只列 ZK_CLOSE_BROADCAST/STATUS_SIGN/ZK_STATE_PREP/READONLY 四档 + KEY_EXPORT）。
   - Console 默认绑 `HOST || 127.0.0.1`，但 fastify 带 `trustProxy:'127.0.0.1'`：直连对端是 127.0.0.1 时 `request.ip` 会改读 `X-Forwarded-For`，**单查 `request.ip` 不是 TCP 层的 loopback**（`health.js` runtime-identity 注释里 NWT/Bettor 已定案）；且 T-LOOPBACK-AUTHZ 热修的前提就是"本机任意进程能连 loopback ⇒ loopback 不是授权"。
   - ⇒ `/resolve` 建议以 **`health.js` 的 `/api/system/runtime-identity` 为模板**（现有最强形态）：① IP allowlist（`ADMIN_IP_ALLOWLIST`，默认 `127.0.0.1,::1,::ffff:127.0.0.1`），**同时核 `request.ip` 与 `request.socket.remoteAddress`**；② `checkAdminSecretTier(request,'ADMIN_SECRET_SETTLEMENT')`；③ write-once。若 Bettor 认为只要 tier 密钥即可、不要 IP allowlist，需明示（本文默认带 allowlist，更保守）。测试：无头/错头/未设 env/allowlist 外 IP/XFF 伪造（`request.ip` 在 allowlist 但 TCP 对端不在）各自必拒；tier 之间不互通（拿 `ADMIN_SECRET_FUNDS` 打 `/resolve` ⇒ 403）。
 - **P3（seal 触发与下注上限）**：F5：无 `sealing` 中间态（加 status 值要重建表，代价大）。设计：seal 触发条件 = `status='betting'` ∧ 已确认下注数 == `seal_count` ∧ 该市场**无** pending/prepared/submitted 的 append 意图（`assertNoInFlightAppend` 同款）；**seal 意图 landed 后**才 `markMarketStatus('sealed')`。为防第 `seal_count+1` 笔下注在链上被合约拒（卡死 append 意图），`/bet` 须在 `已确认+在途 ≥ seal_count` 时 409（现状**未见此校验**，须核并补——属 proto.js 小改）。
+  - **NWT 条件（S4，D5）**：① 计数把 `ambiguous` 以及"失败但未证不在链上"的下注**算作在途**（保守；否则会放进第 `seal_count+1` 笔，被合约拒后卡死 append 意图）；② **检查与 `INSERT` 在同一同步块内、之间无 `await`**（better-sqlite3 同步，才原子），并加并发测试；③ 现状 `/bet` 只校验 `stake >= min_bet`，`Number(amount)` 可为非整数/超大值而状态字段是 int64 ⇒ 顺带要求 `Number.isSafeInteger(amount)`（读代码时顺带看到，不在原设计范围，Bettor 已纳入）。
 - **P4（`proto_claims` 行创建时机）**：F6：`resolve` 意图 landed 后，驱动按 `deriveCloseCommitInputs` 的 payouts（v0 恰 1 条）**创建一行 `proto_claims`（side='win', amount=pool_value）**，其 id 作为 `convert_to_claim`/`claim_draw` 的 subject_id；创建走 `INSERT OR IGNORE`（按 market_id 唯一约束的等价查询保证只有一行），不引入迁移。
 - **P5（链上指针的存放）**：F13：**不加列、不迁移**——新增纯函数模块 `proto-settlement-pointers.mjs`，从已 `landed` 的结算意图的 `prepared_tx_json` 反序列化取：txid（**必须**等于 `submitted_txid`，否则 fail-closed）、输出下标（用 builder 导出的具名常量）、covenant_id（输出的 `covenant.covenantId`）。所有指针**仅作"预期 outpoint"**，是否真实存在与未花费由 C1 用链上事实证明（§6）。
 - **P6（builder 小改，放批 9-1，Bettor 要求）**：close_commit 返回 `continuationOutputIndices:[0]`，使 relay 固定面值校验覆盖其 RootClose 续约输出（F11）；四个 builder 新增**必填**入参 `chainParents`（§6.3），在 mass/fee 判定前交叉核对。
@@ -54,10 +61,11 @@
 | 3.1 | 新开关 `PROTO_SETTLEMENT_DRIVER_ENABLED`，**独立于** `PROTO_DRIVER_ENABLED`；`isProtoSettlementDriverEnabled()` = 该开关==='1' ∧ `!!PROTO_RELAY_ID`（`startProtoSettlementDriver` 与 HTTP 共用同一判据，同 F1 形状） | 单测：两开关 × PROTO_RELAY_ID 的 2×2×2 共 8 态，仅"结算开关真 ∧ relay 已配置"启动，其余全不启动；两开关互不影响 |
 | 3.2 | 关闭：打 `[proto-settlement-driver] disabled`；启动：打 `[proto-settlement-driver] started (tick …ms, cap …/tick, network=…)`（同 F1 日志风格，`network` 显式打印，simnet 时 LOUD） | 单测捕获 console：两种形状各一 |
 | 3.3 | 关闭态**零 IPC**：不启动 interval，不发任何 `sendCmd`；HTTP 在关闭态只建 pending 行并回 409 `proto_settlement_driver_disabled`（同 bet 端点先例） | 单测：注入 spy sendCmd，关闭态调用次数 = 0 |
-| 3.4 | 主网 `kanet.mainnet.env` **不含**新开关行；合入不带运行时效果 | `git grep PROTO_SETTLEMENT_DRIVER_ENABLED -- kanet*.env*` 零命中（新开关只出现在 `.env.example`/文档，默认 0） |
+| 3.4 | **（M4，替换 v0.2 的空判据）** 主网**实际生效**的 env 文件（`kanet.env`/`kanet.mainnet.env` 被 `.gitignore`，`git grep` 只搜被跟踪文件，无论开没开都零命中）**不含**新开关行；合入不带运行时效果 | ① 由 KANet-UI/运营者**现场核**实际生效的 env 文件，报文件路径与"该键不存在"的结论（不贴内容）；② 合入后主网 console **首次启动日志必须出现 `[proto-settlement-driver] disabled`**（运行时证据，不是静态搜索）；静态上仍检查 `kanet.env.example`/`.template` 里该键默认 0 |
 | 3.5 | 单飞（in-flight 标志）+ 每 tick cap；重入 tick 直接跳过（同 F1） | 单测：并发两个 `driveOnce` 只有一个进入 |
 | 3.6 | 与现有驱动共用 `assertProtoRelayHealthy()`（余额硬顶、relay 存活）；unhealthy ⇒ 跳过整 tick，不发命令 | 单测：注入 unhealthy ⇒ 无 IPC |
-| 3.7 | `network` 一致性断言（NWT 审计项 ②的启动侧）：`network` 取自 `KASPA_NETWORK`（默认 mainnet），**必须与 relay 收款地址前缀一致**（`kaspa:`↔mainnet，`kaspasim:`↔simnet …），不一致 ⇒ 拒绝启动并 LOUD | 单测：network=simnet 而 relay 地址为 mainnet 前缀 ⇒ 不启动 |
+| 3.7 | `network` 一致性断言（NWT 审计项 ②的启动侧）：`network` 取自 `KASPA_NETWORK`（默认 mainnet），**必须与 relay 收款地址前缀一致**（`kaspa:`↔mainnet，`kaspasim:`↔simnet …；**S7：按冒号前的整段前缀精确比较** `kaspa`/`kaspasim`/`kaspatest`/`kaspadev`，**不得** `startsWith('kaspa')`——`kaspasim:` 会误判成 mainnet；relay 地址来自 `assertProtoRelayHealthy()` 的 `health.address`（relay 上报，非 console 配置），所以比的是两个独立来源，测试用真实 health 形状），不一致 ⇒ 拒绝启动并 LOUD | 单测：network=simnet 而 relay 地址为 mainnet 前缀 ⇒ 不启动 |
+| 3.8 | **（M5，出口分闸）** `sendProtoCommand` 的 write 闸改为按 payload 的 `intent_key` 前缀分闸：`covenant_broadcast` 且 `intent_key` 以 `settle:` 开头 ⇒ 需要 `PROTO_SETTLEMENT_DRIVER_ENABLED==='1'`；其余 write ⇒ 需要 `PROTO_DRIVER_ENABLED==='1'`；read 不受约束（账本1441 既定）。这样两开关**真正独立**且**出口自身是唯一强制点**（账本1444）。这是对"M0a 唯一受控出口"的改动，**放 9-2，NWT 单独审那个 diff** | **出口层** 2×2 矩阵（两开关各 0/1 × `settle:` 与非 `settle:` 的 write）逐格断言放行/拒绝；`intent_key` 缺失/非字符串的 write 一律按"非 settle"处理并需旧开关（fail-closed 方向：不能靠伪造缺失字段绕到较宽的闸）——见 §16 |
 
 ## 4. 意图与状态迁移
 
@@ -86,6 +94,7 @@
 | claim_draw | convert_to_claim landed | convert_to_claim landed | rootClaim、ticket、held | KanetTokenClaim 地址（winner_pk/amount 现算） | `proto_claims.claim_txid/vout/claimed_at` 记账；终态（withdraw 不接线） |
 
 - fee 输入：从 `get_address_utxos(relayAddress)` 取，`selectFeeUtxoByConstruction`（沿用 F1 已有做法，按真实构造逐个试，过滤 `> SIGNED_INPUT_CEILING_SOMPI`）；cap 用 `feeProfile.<kind>.cap`（seal 52M / close_commit 30M / convert_to_claim 52M / claim_draw 50M，均已是 NWT 推数）。
+- **fee 输入选取阶段过滤（S1，NWT 建议；D6 仍不加中止型断言）**：R1 落地后，选取阶段**跳过**（不是中止）`covenantId != null` 或 `scriptPublicKey != relay P2PK spk` 的候选——避免"毒化 fee UTXO"（F16）造成三源相等失配与不必要的 fee 抬高；同时对 relay 地址 dust 数量靠 R1 的 `maxAmount`/上限（S2）兜底。
 - 🔴 relay 的 `validateNetLoss`/`validateImpliedMinerFee` 天花板 = 2×relay 本地 wasm 估算：这四步都是 storage 占优、本地估算高估，simnet 全链已证 fee 落在天花板内；**接线离线测试须用 relay 真代码跑这两个校验**（同批8 ㉖ 的做法）覆盖四步，防止将来 builder/fee 变化后静默被 relay 拒。
 
 ## 6. C1 完整角色表与调用点覆盖（Codex 条件①③）
@@ -119,6 +128,13 @@
 - 四个 builder 新增必填入参 `chainParents`；builder 在**调用 `assertMassWithinCeiling`/`selectChangeShape` 之前**断言：各步导出的具名常量向量（落码时新增，与已有的 `WITHDRAW_INPUT_HAS_COVENANT`/`TICKET_RECLAIM_INPUT_HAS_COVENANT` 同型，如 `CLAIM_DRAW_INPUT_HAS_COVENANT=[true,false,true,false]`，四步现为 builder 内的字面量向量）与 `roles.map(r => chainParents[r]?.hasCovenant ?? false)` 逐项相等，且 `spkLen` 与现算 spk 长度相等。不符 ⇒ fail-closed，**在任何 mass/fee 计算前中止**。
 - 目的：mass 的 plurality 取决于"该输入的父 UTXO 是不是 covenant/spk 多长"，这必须是**链上事实**，不能是 builder 里自己声明的常量（常量只是被交叉核对的一方）。
 
+### 6.4 C1 纯函数补全（M6）
+
+- 现有 `assertSettlementInputValuesOnChain` 只比 `value` 与 `scriptPublicKeyHex`，**函数本身不知道预期 outpoint**——§7 ③"同 spk 同面值但 outpoint 不同 ⇒ 不得退化成取第一个匹配"现在只能靠调用方自己按 outpoint 取来保证，任何调用点写错就静默通过。
+- 改为入参加 **`expectedOutpoints[role]`** 与 **`expectedCovenantIds[role]`**（`null` 表示"必须无 covenant"，如 ticket），纯函数内断言 `u.outpoint == expected`、`u.covenantId == expected`——**相等，不只是有/无**（P5 指针里本来就有每个输出的 `covenantId`，链上事实与指针相等才算闭合）。错误码沿用 `<role>_outpoint_drift` / `<role>_covenant_class_mismatch`；文件头"fee 输入不在此列"的旧说明随之更新。变异对照：拆掉这两条 ⇒ §7 ③④ 必红。
+- 枚举测试（§6.2）**以 builder 导出的具名常量为准**（`*_INPUT_HAS_COVENANT`、`STEP_INPUT_ROLES`），四步现为 builder 内字面量，P6 一并导出。
+- **S8**：`convert_to_claim`/`claim_draw` 的 builder 把 CONT 面值输出（RootClaim/KanetTokenClaim）放在 `genesisOutputIndices` 里，靠 `GENESIS_OUTPUT_SOMPI == CONTINUATION_OUTPUT_SOMPI == 20,000,000` 才过 relay 的 `validateFixedValueOutputs`（`covenant-broadcast.mjs:68-69`）——现在相等所以没问题，但是隐含耦合：加测试"两常量相等，或 builder 按角色拆分 index 集合"。
+
 ## 7. 每个调用点的负向回归（Codex 条件②）
 
 对 seal / close_commit / convert_to_claim / claim_draw 每一步、对其**每个 covenant/ticket 输入角色**，都要有下列四类反向用例，**变异对照必红**（拆掉对应闸 ⇒ 测试变红）：
@@ -137,6 +153,7 @@
 - **同节点**：pmt 由 **R2 的 `get_past_median_time`（relay 自己的 RpcClient）**读出；提交交易的也是同一个 relay ⇒ 判据与 finality 检查同源。读不到/非法一律 `canSubmit=false`（fail-closed）。
 - 判据沿用 `evaluateCloseCommitTiming({pastMedianTimeMs, deadlineMs})`（pmt 领先 deadline ≥ 30s 才放行）；驱动把**放行时读到的 pmt** 作为 `pmtEvidence` 传给 builder（builder 复核同一判据并免除 300s 墙钟余量，C3）；不传则 300s 墙钟守卫作第二层。
 - **不用本地墙钟**判断能否提交（B4-2 根治）；墙钟只出现在 builder 的第二层守卫。
+- **`pmtEvidence` 新鲜度（S5）**：R2 的 `observedAtMs` 让驱动能带上 `readAtMs` 与 `source:'relay'`；builder 只接受 **`source==='relay'` 且 `readAtMs` 距今 ≤ 60 s** 的 `pmtEvidence`，否则忽略（回退到 300 s 墙钟守卫）。风险本就有界（节点侧 lock_time 检查会拒、无资金损失、可重试），此条是收紧。
 - SLA（以 pmt 计）：`≥ deadline+1h` ⇒ `warn` 报警；`≥ deadline+2h` ⇒ `refund_flip_open`（任何人可无签名把 `closed 0→2`，此后 close_commit 永不可入）。
 - **`refund_flip_open` 时驱动行为**（Bettor 2026-09-19，本文落细）：仍尽力提交 close_commit（抢先）；若 C1 发现 RootClose 输入已不在预期 outpoint，则**额外**探测 `closed=2` 形态的 RootClose 地址（按同 state 现算 spk）是否有 UTXO：有 ⇒ 已被翻——意图置 `ambiguous`（`last_error='refund_flip_observed'`）+ 报警 `error`，**不重试、不重建**；取消/退款路径 v0 未实现（Bettor 裁定④），转人工。重复检测幂等（不重复报警）。
 - **NotFinalized**（节点因 lock_time ≥ pmt 拒）：属"可重试、无状态变更"——走现有 prepared 行的**同字节重播**路径（`resolvePrepared` 的 replay），**不得**进 `ambiguous`（`ambiguous` 只留给 `inputs_spent` 且无正向证据）。需单测：注入 NotFinalized 拒绝 ⇒ 意图仍 `prepared`、下一 tick 重播同一字节。
@@ -149,6 +166,7 @@
 - `inputs_spent` 无正向证据 ⇒ `ambiguous`，人工，不自动放弃、不重建。
 - 每 tick cap；同一 intent 单飞；`maxAttempts=1`（重试交给下一 tick，避免单 tick 被 sleep 阻塞）。
 - 重启恢复：启动时跑 `resumeStaleSettlementIntents`（F3 已有）；`targetAddressFor(row)` 与 `relayIdFor(row)` 由驱动提供（本模块不碰业务表）。
+- **`prepared_stale` 报警（S6，四步都加，不只 close_commit 的 SLA）**：任一步意图停在 `prepared` 超过 10 分钟仍未 landed ⇒ 报警 `settlement_prepared_stale`（warn；含 intent_key、prepared_txid 前缀、停留时长）。理由：同字节重播救不了"fee 低于节点最低费"的 prepared 行（批 8 ticket_reclaim 就是这个形状）；四步现为 storage 占优、估费偏高所以现不触发，但这是通用兜底。
 
 ## 10. 报警（沿用 `alertSettlementIntent` → `events` 表）
 
@@ -164,13 +182,14 @@
 | `settlement_pmt_read_failed` | warn | 连续 3 次读 pmt 失败 |
 | `settlement_relay_fee_rejected` | error | relay 返回 `net_loss_exceeded`/`implied_fee_exceeded`（fee 与 relay 天花板背离的早期信号） |
 - `committeeMode='single_operator_5x_same_key'` **必须**写入意图记录/响应（B4-6，放 `last_error` 之外的位置：`proto_settlement_intents` 现无该列，**待裁定**：加列走迁移，或放 `prepared_tx_json` 旁的 events payload/响应体），不得把 close_commit 成功读成 4-of-5 门限安全。
+- **D3 补（NWT）**：`committeeMode` 同时放进 `/resolve` 与 `GET /api/proto-markets/:id` 的响应，且与意图状态更新在**同一事务**里写（避免"响应体有、events 无"）。
 
 ## 11. 审计项（无绕过）
 
 1. **withdraw/ticket_reclaim 不接线**：驱动模块、意图创建入口、HTTP 处理器**均不得 import** `buildWithdrawTxJson`/`buildTicketReclaimTxJson`；`/api/proto-markets/:id/withdraw` 保持 501 并在报文里写明"批9排除（目的地允许清单空 / T-FEE-PRICING）"。测试：扫描驱动/HTTP 源文件，出现这两个标识符 ⇒ 红。
 2. **目的地闸**：任何将来接入 withdraw 的调用点**不得绕过** `assertWithdrawDestinationAllowed`，不得传 `destinationAllowlistSpkHex` 造出主网可用目的地（本批不接，此条防后人）。
 3. **network 闸**：`network` 只取自配置（`KASPA_NETWORK`），**不得取自请求体/意图行/调用方**；`allowUnlistedTestDestination` 只在 `network !== 'mainnet'` 时生效，驱动**永不传**该标志。启动侧断言见 §3.7。测试：`git grep allowUnlistedTestDestination -- src/services src/api` 零命中。
-4. **签名闸**：驱动层**永不接触私钥**（只传 `committeePrivkeyEnvelope`/让 builder 自取信封）；私钥值不出现在日志/events/响应/`prepared_tx_json`/意图列；`PrivateKey.free()` 在 builder 内（已测）。测试：以哨兵私钥跑全流程，扫描 stdout/events/DB 全文不含该值。
+4. **签名闸**：驱动层**永不接触私钥**（只传 `committeePrivkeyEnvelope`/让 builder 自取信封）；私钥值不出现在日志/events/响应/`prepared_tx_json`/意图列；`PrivateKey.free()` 在 builder 内（已测）。测试：以哨兵私钥跑全流程，扫描 stdout/events/DB 全文不含该值。；**哨兵私钥必须由真实信封解密路径产生**（不是绕过解密直接注入），否则扫的是一条不经过生产解密的假路径（NWT）。
 5. **DB 派生不可被入参覆盖**：close_commit 的 `newWinningSide/newPayoutRootHex` 不接受调用方传入，`/resolve` 只写 `winning_side`（write-once，P2），`payout_root` 由现算写入并与库内值交叉（`db_payout_root_drift`）。
 6. **relay 边界不放宽**：驱动不新增 write 命令；R1/R2 只读；`covenant_broadcast` 仍要求非空 `signInputIndices`（四步都有 relay 签的 fee 输入，成立）。
 7. **M0a 门**：驱动新文件不 bare-import `relay-manager`，只经 `protoSendCmd`（`lint-kanet` 的 M0a 差分门在 staged diff 上会验）。
@@ -192,9 +211,9 @@
 
 | 批 | 内容 | 门 |
 |---|---|---|
-| 9-0 | **R1/R2**（relay 只读扩展 + 白名单一行）+ 回归（节点直读逐字节一致 / 白名单只多一行 read / 消费者不变） | NWT 审边界（只读、不开签名或广播路径、字段只加不改）+ Bettor 批；D1 已裁 |
+| 9-0 | **R1/R2**（M1–M3/S2 形状：`get_address_utxos` 可选 `facts:true` 走共享 RpcClient、`entry.covenantId` 读取 + 能力哨兵、返回量上限；`get_past_median_time` 只回 `{ok,pastMedianTimeMs,observedAtMs}`；六处登记）+ 回归（relay 返回的 spk/covenantId 与节点直读逐字节一致（夹具取真实 wasm 条目）/ 缺 `covenantId` 字段整条报错不回 null / 不带 `facts` 输出字节不变 / 登记六处齐全 / `PROTO_COMMAND_ALLOWLIST` 只多一行 `read` / 消费者不变 / `truncated` 语义） | NWT 审边界 + Bettor 批；D1 已裁；**NWT 核过 v0.3 的 MUST 落实后开工** |
 | 9-1 | `proto-settlement-pointers.mjs`（P5）+ C1 调用点模块（含 `chainParents`）+ builder 小改（P6，含 close_commit 的 `continuationOutputIndices:[0]`）+ 全部负向回归 | NWT 审 |
-| 9-2 | 驱动分支 + 开关 + 启动日志 + `markSettlementLanded` + pmt 门接线 + SLA 报警 + 重启恢复 | NWT 审 |
+| 9-2 | 驱动分支 + 开关 + 启动日志 + `markSettlementLanded` + pmt 门接线（`pmtEvidence` 新鲜度）+ SLA 报警 + `prepared_stale` + 重启恢复 + **出口按 `intent_key` 前缀分闸（M5，改 M0a 唯一出口，NWT 单独审该 diff）** | NWT 审 |
 | 9-3 | HTTP：`/resolve`（write-once + `ADMIN_SECRET_SETTLEMENT` 鉴权，P2/D2）、`/claim`（建 claim 行 + 意图）、`/bet` 上限校验（P3/D5：已确认+在途 ≥ seal_count ⇒ 409）、`/withdraw` 仍 501；`/resolve` 以 `health.js` runtime-identity 为模板（allowlist 同时核 `request.ip` 与 `socket.remoteAddress` + `ADMIN_SECRET_SETTLEMENT` + write-once，Bettor 已确认带 allowlist）；**9-3 后续项**：`checkAdminSecretTier` 现为 `!==` 非常量时间比较（既有实现，本批不改）——改 `crypto.timingSafeEqual`（先比长度、长度不等直接拒且不泄露）并加测试，是否顺手做由 NWT 审时判定 | Bettor 批（用户面/鉴权） |
 | 9-4 | 隔离 simnet console 端到端 + provenance；**用全新 DB 与全新 env 副本**（新建库、新 env 文件，不复用/不指向主网库与主网 env，`DB_PATH`/`CONSOLE_ENCRYPTION_KEY`/`PROTO_RELAY_ID` 均为一次性测试值；env 副本里 `KASPA_NETWORK=simnet`） | NWT 复核证据 |
 | 主网开闸 | D-022 另开闸，Owner 终端点 GO | 不在批9内 |
@@ -216,3 +235,29 @@
 ## 15. 与 v0.1 清单的关系
 
 v0.1 的 §1–§7 各条本文均继承；差异：① 范围收窄为四步；② C1 从"面值+spk"升级为"面值+spk+covenant 分类（链上事实）"并要求 `chainParents` 在 mass/fee 前核对；③ 明确 P1（R1/R2）为前置阻塞；④ pmt 同节点由"提醒"变成有具体通路（R2）；⑤ withdraw/ticket_reclaim 从"待补"改为"排除并有审计项"；⑥ 新增 P2–P5 的设计点（原 v0.1 未发现 F4/F6/F9/F13 这些现状缺口）。
+
+
+## 16. v0.2 → v0.3：NWT 设计审（8554ef6e）逐条落实
+
+全文见 NWT 分支 `nwt/batch3-independent-verify` 的 `docs/provenance/2026-09-19-nwt-batch3-independent-verify/batch9-design-review/README.md`。J2 已逐条复核其事实（F14–F17 为其中我能在本树复核的；毒化 fee UTXO 实验为 NWT 的 simnet 实测，我未复跑）。
+
+| NWT 项 | 落实位置 | 状态 |
+|---|---|---|
+| M1 `entry.covenantId` 读取位置 + `'covenantId' in entry` 能力哨兵 + 真实 wasm 夹具 | §2 P1 R1；§13 9-0 回归 | 已写入设计 |
+| M2 共享 RpcClient、`facts:true` 可选、R2 只回 `{ok,pastMedianTimeMs,observedAtMs}` | §2 P1 R1/R2 | 已写入设计 |
+| M3 登记面（console 允许表 + `commands.mjs` 三处 + `authorize.mjs` + handler）+ 枚举验收 | §2 P1 登记面；§13 9-0 | 已写入设计 |
+| M4 3.4 空判据 ⇒ 现场核 env + 启动日志 | §3 3.4 | 已改 |
+| M5 出口按 `intent_key` 前缀分闸 + 出口层 2×2 矩阵 | §1 F17；§3 3.8；§13 9-2 | 已写入设计（改 M0a 出口，另审） |
+| M6 C1 加 `expectedOutpoints`/`expectedCovenantIds`（相等） | §6.4 | 已写入设计 |
+| S1 fee 选取阶段跳过毒化候选（不中止） | §1 F16；§5 | 已写入 |
+| S2 R1 返回量上限 | §2 P1 R1（N=200 + `truncated` 语义） | 已写入（N 待 NWT 复核） |
+| S3a–d `/resolve`：timingSafeEqual、allowlist/反代运营核对、原子 UPDATE + 并发测试、events 审计 + `confirm` 回显 | §2 P2；§13 9-3 | 已写入 |
+| S4 D5：ambiguous 算在途、检查与 INSERT 同步块、`isSafeInteger` | §2 P3 | 已写入 |
+| S5 `pmtEvidence` 新鲜度（`source==='relay'` 且 ≤ 60 s） | §8 | 已写入 |
+| S6 四步 `prepared_stale` 报警（10 分钟） | §9 | 已写入 |
+| S7 §3.7 前缀整段精确比较 | §3 3.7 | 已写入 |
+| S8 GENESIS/CONTINUATION 常量相等耦合测试 | §6.4 | 已写入 |
+| D3 committeeMode 同事务、同放 `/resolve` 与 GET 响应 | §10 | 已写入 |
+| 私钥哨兵走真实信封解密路径 | §11.4 | 已写入 |
+
+**仍开放**：S3b（主网机器有无不带 XFF 的本机反代/隧道）需 KANet-UI 现场核；毒化 UTXO 创建到他人 spk 的形状未测；R1 返回量上限 N=200 是 J2 提议值；M5 的出口改动会牵动现有 `proto-relay-ipc.test.mjs` 的写闸用例，需一并更新并单独审。
