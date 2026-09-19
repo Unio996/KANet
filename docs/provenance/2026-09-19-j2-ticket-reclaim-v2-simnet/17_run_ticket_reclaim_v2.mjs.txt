@@ -1,0 +1,506 @@
+// 17_run_ticket_reclaim_v2.mjs(由 15 派生: 新市场 chain4 完整 1-9 步, 步骤9 换成 v2 形状) — 15 说明: 15_run_ticket_reclaim.mjs(由 13 派生: 步骤1-8 已在 chain3 完成而跳过, 追加步骤9 ticket_reclaim) — 13 说明: 13_run_withdraw.mjs(由 11 派生: 步骤1-7 已在 chain3 完成而跳过, 追加步骤8 withdraw) — 原11说明: J2 simnet 全链真实共识验证 v2(2026-09-19, Bettor派工: 补 claim_draw):
+// genesis → register_append#1 → #2 → market_seal → close_commit → convert_to_claim → claim_draw。
+// 与 09 的差别: ①生产映射 bettorPk=委员公钥(claim_draw 需要 ticket 私钥); ②payoutRoot 由 blake2b256(pk‖le8(1000)) 现算(非占位); ③close_commit 走驱动层 pmt 闸(evaluateCloseCommitTiming)并传 pmtEvidence;
+// ④每步构造前用【节点上的真实 UTXO】做 C1 断言(面值+spk), 并把链上 spk 作为 builder 的入参; ⑤convert_to_claim/claim_draw 传 B4-5 的链上 spk。
+// (原09说明:)
+// 全部走【生产builder】(不是审计构造), 复用现成活simnet(PID 15972, 官方kaspad 2.0.1, 只绑127.0.0.1)。
+// 独立于NWT: 用自己的simnet测试身份/自己的DB/自己的chain记录, 不碰NWT的worktree与state文件。
+// 私钥值不打印: 本脚本只打印地址/txid/mass; relay私钥只在state文件里(simnet无价值), 委员私钥只以加密信封形式持久化。
+// 每步记录: 交易version、编码器commit、断言信号(storage/compute)、getMempoolEntry节点值、上链后区块记录里的节点值。
+import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { randomBytes, createHash } from 'node:crypto';
+import { execSync } from 'node:child_process';
+
+process.env.DB_PATH = process.env.DB_PATH || 'D:/kanet-tn12/scratch/_j2_wt_proto_v0/kasia-console/scratch/_j2_simnet/_j2_simnet_console3.db';
+if (!process.env.CONSOLE_ENCRYPTION_KEY) process.env.CONSOLE_ENCRYPTION_KEY = '3'.repeat(64);
+
+const kaspa = await import('kaspa-wasm');
+try { execSync('node scripts/run-migrations.mjs', { env: process.env, stdio: 'pipe' }); } catch (e) { console.log('migrate warn:', e.message.slice(0, 200)); }
+
+const { buildMarketGenesisTxJson, buildRegisterAppendTxJson } = await import('../../src/lib/proto-tx-assembly.mjs');
+const {
+  buildMarketSealTxJson, buildCloseCommitTxJson, buildConvertToClaimTxJson,
+  MARKET_SEAL_ROOTCLOSE_OUT_INDEX, MARKET_SEAL_TOKEN_OUT_INDEX, CLOSE_COMMIT_ROOTCLOSE_OUT_INDEX,
+  CONVERT_TO_CLAIM_CLAIM_OUT_INDEX, CONVERT_TO_CLAIM_TOKEN_OUT_INDEX,
+} = await import('../../src/lib/proto-tx-assembly-settlement.mjs');
+const {
+  computeMarketGenesisArtifacts, computeShardLeafRedeemScript, computeKttGenesisArtifact,
+  loadProtocolConstants, loadFeeProfileCap, p2sh,
+} = await import('../../src/lib/proto-covenant-builder.mjs');
+const { compileSilV100, ctorBytes32V100, ctorIntV100 } = await import('../../src/lib/pool-bshard-artifacts.mjs');
+const { extractTemplateArtifactV100 } = await import('../../src/lib/pool-template-artifact.mjs');
+const { signOnlyDeclaredInputs, assertFinalTxid } = await import('../../../kasia-relay/src/lib/covenant-broadcast.mjs');
+const { assertMassWithinCeiling } = await import('../../src/lib/proto-mass-ceiling.mjs');
+const { payoutLeafHex } = await import('../../src/lib/proto-payout-leaf.mjs');
+const { evaluateCloseCommitTiming } = await import('../../src/lib/proto-close-commit-gate.mjs');
+const { assertSettlementInputValuesOnChain } = await import('../../src/lib/proto-settlement-chain-checks.mjs');
+const { buildClaimDrawTxJson, buildWithdrawTxJson, WITHDRAW_INPUT_HAS_COVENANT, WITHDRAW_KTC_IN_INDEX, WITHDRAW_TOKEN_OUT_INDEX, WITHDRAW_DEST_OUT_INDEX } = await import('../../src/lib/proto-tx-assembly-settlement.mjs');
+const { computeKanetTokenClaimGenesisArtifact } = await import('../../src/lib/proto-covenant-builder.mjs');
+const { buildTicketReclaimTxJson, TICKET_RECLAIM_INPUT_HAS_COVENANT } = await import('../../src/lib/proto-tx-assembly-settlement.mjs');
+const { decryptCommitteePrivkey } = await import('../../src/lib/proto-committee-key.mjs');
+const { encodeAuthorizeSpendAction } = await import('../../src/lib/proto-ticket-authorize-witness.mjs');
+const { combineActionAndRedeem } = await import('../../src/lib/proto-convert-to-rootclose-witness.mjs');
+const { computeRequiredFeeSompiOrThrow } = await import('../../src/lib/proto-tx-assembly.mjs');
+const { computeRootCloseGenesisArtifact, computeRootClaimGenesisArtifact, computeTicketGenesisArtifact } = await import('../../src/lib/proto-covenant-builder.mjs');
+
+const NETWORK = 'simnet';
+const RPC_URL = 'ws://127.0.0.1:18510';
+const HERE = new URL('.', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
+const STATE_PATH = HERE + '_j2_simnet_state.json';
+const CHAIN_PATH = HERE + '_j2_simnet_chain4.json';
+
+const rpc = new kaspa.RpcClient({ url: RPC_URL, networkId: NETWORK });
+await rpc.connect();
+console.log('connected to', RPC_URL);
+
+const jsonSafe = (k, v) => (typeof v === 'bigint' ? v.toString() : v);
+async function getUtxos(addr) {
+  const res = await rpc.getUtxosByAddresses({ addresses: [addr] });
+  return (res.entries || []).map((e) => ({ txid: e.outpoint.transactionId, vout: e.outpoint.index, value: BigInt(e.amount), scriptPublicKeyHex: '0x' + e.scriptPublicKey.script, daaScore: BigInt(e.blockDaaScore ?? 0) }));
+}
+async function mineOne(payAddress) {
+  const { block } = await rpc.getBlockTemplate({ payAddress });
+  return rpc.submitBlock({ block, allowNonDAABlocks: true });
+}
+async function pmtSnapshot(label) {
+  const d = await rpc.getBlockDagInfo();
+  const s = { label, pastMedianTimeMs: String(d.pastMedianTime), nowMs: Date.now(), lagSeconds: (Date.now() - Number(d.pastMedianTime)) / 1000, virtualDaaScore: String(d.virtualDaaScore) };
+  console.log(`[pmt] ${label}: pastMedianTime=${s.pastMedianTimeMs} lag=${s.lagSeconds.toFixed(1)}s daa=${s.virtualDaaScore}`);
+  return s;
+}
+/** 提交前的节点权威值: getMempoolEntry原始返回(去掉超长sigScript, 只留长度+sha256前16位)。 */
+async function mempoolRaw(txid) {
+  try {
+    const entry = await rpc.getMempoolEntry({ transactionId: txid, includeOrphanPool: true, filterTransactionPool: false });
+    const j = JSON.parse(JSON.stringify(entry, jsonSafe));
+    const me = j.mempoolEntry ?? j.entry ?? j;
+    const tx = me.transaction ?? {};
+    if (Array.isArray(tx.inputs)) tx.inputs = tx.inputs.map((i) => ({ ...i, signatureScript: undefined, signatureScriptBytes: String(i.signatureScript ?? '').length / 2, signatureScriptSha256_16: createHash('sha256').update(Buffer.from(String(i.signatureScript ?? ''), 'hex')).digest('hex').slice(0, 16) }));
+    return { storageMass: String(me.mass ?? tx.mass ?? ''), computeMass: String(tx.verboseData?.computeMass ?? me.verboseData?.computeMass ?? ''), raw: j };
+  } catch (e) { return { error: e.message }; }
+}
+async function submitAndConfirm(tx, label, minerAddr, signals) {
+  console.log(`\n--- 提交 ${label}: txid=${tx.id} version=${tx.version} 断言信号=${JSON.stringify(signals)} 本地wasm(诊断)=${(() => { try { return kaspa.calculateTransactionMass(NETWORK, tx); } catch { return 'n/a'; } })()} ---`);
+  let res;
+  try { res = await rpc.submitTransaction({ transaction: tx, allowOrphan: false }); } catch (e) { console.log(`${label} submitTransaction被拒: ${e.message}`); throw e; }
+  console.log(`${label} submit result:`, JSON.stringify(res, jsonSafe));
+  const mp = await mempoolRaw(tx.id);
+  console.log(`${label} 节点getMempoolEntry: storageMass=${mp.storageMass} computeMass=${mp.computeMass}${mp.error ? ' ERR=' + mp.error : ''}`);
+  await mineOne(minerAddr);
+  console.log(`已挖1块确认 ${label}`);
+  // Bettor纪律: 断言信号与节点值不等即停, 不带着不等继续往下跑(回头修公式)。
+  if (String(signals.storageMass) !== String(mp.storageMass) || String(signals.computeMass) !== String(mp.computeMass)) {
+    chain[`STOP_mismatch_${label}`] = { txid: tx.id, assertion: signals, node: { storageMass: mp.storageMass, computeMass: mp.computeMass } };
+    saveChain();
+    throw new Error(`STOP: ${label} 断言信号(storage=${signals.storageMass}, compute=${signals.computeMass}) != 节点getMempoolEntry(storage=${mp.storageMass}, compute=${mp.computeMass}) — 停下, 回头修公式`);
+  }
+  console.log(`  ✓ ${label}: 断言信号 == 节点值 (storage=${mp.storageMass}, compute=${mp.computeMass})`);
+  return { mp, signals };
+}
+const signalsFor = (tx, inputHasCovenant) => assertMassWithinCeiling({ kaspa, network: NETWORK, tx, inputHasCovenant, feeUtxoValueSompi: 0n, label: 'signals' });
+
+/** 节点上的真实 UTXO(ground truth): 按 spk 转地址, 用 getUtxosByAddresses 找 outpoint。找不到=null。 */
+async function chainUtxoAt(spkHex, txid, vout) {
+  const addr = kaspa.addressFromScriptPublicKey(new kaspa.ScriptPublicKey(0, String(spkHex).replace(/^0x/, '')), NETWORK).toString();
+  const res = await rpc.getUtxosByAddresses({ addresses: [addr] });
+  const hit = (res.entries || []).find((e) => e.outpoint.transactionId === txid && Number(e.outpoint.index) === Number(vout));
+  return hit ? { value: BigInt(hit.amount), spent: false, scriptPublicKeyHex: '0x' + hit.scriptPublicKey.script } : null;
+}
+/** C1: 用节点真实 UTXO 断言各 covenant 输入的 面值 与 spk == builder 假设(现算 spk); 返回节点上的真实 UTXO(供作 builder 的链上 spk 入参)。 */
+async function c1Check(step, roles) {
+  const chainUtxos = {}, expectedSpks = {};
+  for (const [role, { txid, vout, expectedSpk }] of Object.entries(roles)) { chainUtxos[role] = await chainUtxoAt(expectedSpk, txid, vout); expectedSpks[role] = expectedSpk; }
+  const r = assertSettlementInputValuesOnChain({ step, chainUtxos, expectedSpks });
+  console.log(`  ✓ C1(${step}): ${r.checked.map((k) => `${k}=${chainUtxos[k].value}`).join(' ')} 与 builder 假设一致(值+spk)`);
+  return { chainUtxos, checked: r.checked.map((k) => ({ role: k, value: String(chainUtxos[k].value), spkPrefix: chainUtxos[k].scriptPublicKeyHex.slice(0, 16) })) };
+}
+
+const state = JSON.parse(readFileSync(STATE_PATH, 'utf8'));
+const relayPriv = new kaspa.PrivateKey(state.relayPrivHex);
+const relayAddr = state.relayAddr;
+const minerAddr = relayAddr;
+console.log('relay地址(simnet测试身份):', relayAddr);
+
+let chain = existsSync(CHAIN_PATH) ? JSON.parse(readFileSync(CHAIN_PATH, 'utf8')) : {};
+const saveChain = () => writeFileSync(CHAIN_PATH, JSON.stringify(chain, jsonSafe, 2));
+const relaySpkHex = '0x' + kaspa.payToAddressScript(new kaspa.Address(relayAddr)).script;
+
+async function pickFeeUtxoCandidates(maxValue = 100_000_000n) {
+  const utxos = await getUtxos(relayAddr);
+  return utxos.filter((u) => u.value <= maxValue).sort((a, b) => (a.value < b.value ? 1 : -1));
+}
+async function tryWithFeeUtxoRetry(buildOnce) {
+  const candidates = await pickFeeUtxoCandidates();
+  if (!candidates.length) throw new Error('没有<=1.0KAS的候选fee UTXO了');
+  let lastErr;
+  for (const feeUtxo of candidates) {
+    try { return await buildOnce(feeUtxo); } catch (e) {
+      if (!/assertMassWithinCeiling|no_viable_change_shape/.test(e.message)) throw e;
+      console.log(`  [换面值重试] fee=${feeUtxo.value} 被拒: ${e.message.slice(0, 160)}`);
+      lastErr = e;
+    }
+  }
+  throw new Error(`tryWithFeeUtxoRetry: 全部${candidates.length}个候选都不可行, 最后一次: ${lastErr.message}`);
+}
+function signAndCheck(built, label) {
+  const tx = kaspa.Transaction.deserializeFromSafeJSON(built.txJson);
+  signOnlyDeclaredInputs({ tx, signInputIndices: built.signInputIndices, privateKey: relayPriv, kaspa });
+  tx.finalize();
+  const idCheck = assertFinalTxid(tx, built.expectedTxid);
+  if (!idCheck.ok) throw new Error(`${label}签名后txid不一致: ${idCheck.actualTxid} != ${built.expectedTxid}`);
+  return tx;
+}
+
+// ═════════ 步骤0: 元数据 + 补挖块让past-median-time追上deadline ═════════
+if (!chain.meta) {
+  const encoderCommit = execSync('git rev-parse HEAD', { cwd: HERE + '../../..', encoding: 'utf8' }).trim();
+  const before = await pmtSnapshot('补挖前');
+  const N = parseInt(process.env.MINE_BLOCKS || '50', 10);
+  const mineT0 = Date.now();
+  for (let i = 0; i < N; i++) await mineOne(minerAddr);
+  const mineElapsedMs = Date.now() - mineT0;
+  const after = await pmtSnapshot(`补挖${N}块后`);
+  chain.meta = { encoderCommit, txVersionExpected: 1, network: NETWORK, pmt: [before, after], mining: { blocks: N, elapsedMs: mineElapsedMs, msPerBlock: mineElapsedMs / N }, startedAt: new Date().toISOString() };
+  saveChain();
+}
+
+const MARKET_ID = 'c5'.repeat(32);
+const MIN_BET = 1, SEAL_COUNT = 2;
+const DEADLINE_MS = chain.genesis?.deadlineMs ?? (Date.now() - 3 * 3600_000);
+const { ps_tmpl_hash, token_tmpl_hash } = loadProtocolConstants();
+const libPath = (rel) => new URL('../../src/lib/' + rel, import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
+const SLD_PATH = libPath('ShardLeaf_direct.sil'), TICKET_PATH = libPath('sil-v1/PoolSideTicket.sil'), KTT_PATH = libPath('sil-v1/KanetTestToken.sil');
+
+// ═════════ 步骤1: market_genesis ═════════
+if (!chain.genesis) {
+  const ga = await computeMarketGenesisArtifacts({ marketId: MARKET_ID, minBet: MIN_BET, deadlineMs: DEADLINE_MS });
+  const { tx, built, signals } = await tryWithFeeUtxoRetry(async (feeUtxo) => {
+    console.log('genesis 尝试fee输入面值:', feeUtxo.value.toString());
+    const built = buildMarketGenesisTxJson({ kaspa, network: NETWORK, feeUtxo, relayChangeScriptPublicKeyHex: relaySpkHex, shardLeafScriptPubKeyHex: ga.shardLeafDirect.scriptPubKeyHex, absFeeCapSompi: loadFeeProfileCap('market_genesis') });
+    const tx = signAndCheck(built, 'genesis');
+    return { tx, built, signals: signalsFor(tx, [false]) };
+  });
+  const r = await submitAndConfirm(tx, 'market_genesis', minerAddr, signals);
+  chain.genesis = {
+    marketId: MARKET_ID, minBet: MIN_BET, deadlineMs: DEADLINE_MS, sealCount: SEAL_COUNT,
+    committeePubkeyHex: ga.committeePubkeyHex, committeePrivkeyEnvelope: ga.committeePrivkeyEnvelope, // 加密信封(simnet测试用), 不是明文私钥
+    rootCloseTmplHash: ga.rootCloseTmplHash, shardLeafOwnRedeemLen: ga.shardLeafOwnRedeemLen, shardLeafCovId: built.shardLeafCovId,
+    leafOutpoint: { txid: tx.id, vout: 0 }, txid: tx.id, node: r.mp, assertion: r.signals, requiredFee: String(built.requiredFee),
+  };
+  saveChain();
+  console.log('=== 步骤1(market_genesis)完成, txid=', tx.id, '===');
+} else console.log('=== 步骤1(market_genesis)已完成, 跳过 ===', chain.genesis.txid);
+
+const kttCompiled = compileSilV100(KTT_PATH, [ctorIntV100(1), ctorBytes32V100('00'.repeat(32)), { kind: 'byte', value: 4 }, { kind: 'byte', value: 0 }, ctorBytes32V100('00'.repeat(32)), ctorBytes32V100('00'.repeat(32)), ctorIntV100(3), ctorIntV100(3)], 'KanetTestToken');
+const kttEntryAbi = kttCompiled._raw.contracts.KanetTestToken.entries.transfer;
+const kttStateFieldCount = kttCompiled._raw.contracts.KanetTestToken.runtime_state.fields.length;
+const tokPrefixHex = '0x' + Buffer.from(extractTemplateArtifactV100(kttCompiled).templatePrefix).toString('hex');
+const tokSuffixHex = '0x' + Buffer.from(extractTemplateArtifactV100(kttCompiled).templateSuffix).toString('hex');
+const sldCtorFor = () => [
+  ctorBytes32V100(chain.genesis.marketId), ctorBytes32V100(ps_tmpl_hash), ctorBytes32V100(chain.genesis.marketId),
+  ctorIntV100(chain.genesis.sealCount), ctorIntV100(chain.genesis.minBet), ctorBytes32V100(chain.genesis.rootCloseTmplHash), ctorBytes32V100('00'.repeat(32)),
+  ctorBytes32V100(token_tmpl_hash), ctorIntV100(0), ctorIntV100(0), ctorIntV100(0), ctorIntV100(0), ctorIntV100(chain.genesis.shardLeafOwnRedeemLen),
+];
+const leafRedeemFor = (state) => computeShardLeafRedeemScript({ marketId: chain.genesis.marketId, minBet: chain.genesis.minBet, sealCount: chain.genesis.sealCount, rootcloseTmplHash: chain.genesis.rootCloseTmplHash, state, ownRedeemLen: chain.genesis.shardLeafOwnRedeemLen });
+
+async function doRegisterAppend({ stepKey, currentState, heldInput, side, stake, bettorPk, leafOutpoint }) {
+  const leafRedeem = leafRedeemFor(currentState);
+  const registerAppendEntryAbi = compileSilV100(SLD_PATH, sldCtorFor(), 'ShardLeaf_direct')._raw.contracts.ShardLeaf_direct.entries.register_append;
+  const newState = { local_yes: currentState.local_yes + (side === 0 ? stake : 0), local_no: currentState.local_no + (side === 1 ? stake : 0), count: currentState.count + 1, pool_value: currentState.pool_value + stake };
+  const mergedArtifact = computeKttGenesisArtifact({ amount: newState.pool_value, ownerCovIdHex: chain.genesis.shardLeafCovId });
+  const ticketCompiled = compileSilV100(TICKET_PATH, [ctorBytes32V100(bettorPk), ctorIntV100(side), ctorIntV100(stake), ctorBytes32V100(chain.genesis.marketId)], 'PoolSideTicket');
+  const tArt = extractTemplateArtifactV100(ticketCompiled);
+  const { tx, built, signals } = await tryWithFeeUtxoRetry(async (feeUtxo) => {
+    console.log(`${stepKey} 尝试fee输入面值:`, feeUtxo.value.toString());
+    const built = buildRegisterAppendTxJson({
+      kaspa, network: NETWORK, leafRedeemScript: leafRedeem.script, leafStateLayout: leafRedeem.stateLayout,
+      leafOutpoint, leafCovId: chain.genesis.shardLeafCovId, currentState, newState, heldInput,
+      feeUtxo, relayChangeScriptPublicKeyHex: relaySpkHex,
+      registerAppendEntryAbi, registerAppendArgs: { side, stake, bettorPk, psPrefix: '0x' + Buffer.from(tArt.templatePrefix).toString('hex'), psSuffix: '0x' + Buffer.from(tArt.templateSuffix).toString('hex'), tokPrefix: tokPrefixHex, tokSuffix: tokSuffixHex },
+      ticketScriptPubKeyHex: '0x' + p2sh(Buffer.from(ticketCompiled.script)), mergedKttScript: mergedArtifact.script,
+      absFeeCapSompi: loadFeeProfileCap('register_append'),
+    });
+    const tx = signAndCheck(built, stepKey);
+    return { tx, built, signals: signalsFor(tx, heldInput ? [true, true, false] : [true, false]) };
+  });
+  const r = await submitAndConfirm(tx, stepKey, minerAddr, signals);
+  return { txid: tx.id, newState, mp: r.mp, signals: r.signals, requiredFee: String(built.requiredFee) };
+}
+
+if (!chain.bet1) {
+  const bettorPk1 = chain.genesis.committeePubkeyHex; // 生产映射: v0 里 bettor_pk === 委员公钥(proto.js:212-215)
+  const r = await doRegisterAppend({ stepKey: 'register_append#1', currentState: { local_yes: 0, local_no: 0, count: 0, pool_value: 0 }, heldInput: null, side: 0, stake: 1, bettorPk: bettorPk1, leafOutpoint: chain.genesis.leafOutpoint });
+  chain.bet1 = { txid: r.txid, newState: r.newState, mergedKttOutpoint: { txid: r.txid, vout: 2 }, node: r.mp, assertion: r.signals, requiredFee: r.requiredFee };
+  saveChain(); console.log('=== 步骤2(register_append#1)完成 txid=', r.txid);
+} else console.log('=== 步骤2已完成, 跳过 ===', chain.bet1.txid);
+
+if (!chain.bet2) {
+  const bettorPk2 = chain.genesis.committeePubkeyHex;
+  const held = computeKttGenesisArtifact({ amount: chain.bet1.newState.pool_value, ownerCovIdHex: chain.genesis.shardLeafCovId });
+  const heldInput = { txid: chain.bet1.mergedKttOutpoint.txid, vout: chain.bet1.mergedKttOutpoint.vout, value: 20_000_000n, scriptPublicKeyHex: held.scriptPubKeyHex, redeemScript: held.script, entryAbi: kttEntryAbi, stateFieldCount: kttStateFieldCount };
+  const r = await doRegisterAppend({ stepKey: 'register_append#2', currentState: chain.bet1.newState, heldInput, side: 1, stake: 999, bettorPk: bettorPk2, leafOutpoint: { txid: chain.bet1.txid, vout: 0 } });
+  chain.bet2 = { txid: r.txid, newState: r.newState, mergedKttOutpoint: { txid: r.txid, vout: 2 }, node: r.mp, assertion: r.signals, requiredFee: r.requiredFee };
+  saveChain(); console.log('=== 步骤3(register_append#2)完成 txid=', r.txid);
+} else console.log('=== 步骤3已完成, 跳过 ===', chain.bet2.txid);
+
+if (!chain.marketSeal) {
+  const currentState = chain.bet2.newState;
+  if (currentState.count !== chain.genesis.sealCount) throw new Error(`count(${currentState.count}) != sealCount(${chain.genesis.sealCount})`);
+  const convertToRootcloseEntryAbi = compileSilV100(SLD_PATH, sldCtorFor(), 'ShardLeaf_direct')._raw.contracts.ShardLeaf_direct.entries.convert_to_rootclose;
+  const held = computeKttGenesisArtifact({ amount: chain.bet2.newState.pool_value, ownerCovIdHex: chain.genesis.shardLeafCovId });
+  const heldAtSeal = { txid: chain.bet2.mergedKttOutpoint.txid, vout: chain.bet2.mergedKttOutpoint.vout, value: 20_000_000n, scriptPublicKeyHex: held.scriptPubKeyHex, redeemScript: held.script, entryAbi: kttEntryAbi, stateFieldCount: kttStateFieldCount };
+  const c1seal = await c1Check('seal', { leaf: { txid: chain.bet2.txid, vout: 0, expectedSpk: '0x' + p2sh(leafRedeemFor(currentState).script) }, held: { txid: chain.bet2.mergedKttOutpoint.txid, vout: chain.bet2.mergedKttOutpoint.vout, expectedSpk: held.scriptPubKeyHex } });
+  const { tx, built, signals } = await tryWithFeeUtxoRetry(async (feeUtxo) => {
+    console.log('market_seal 尝试fee输入面值:', feeUtxo.value.toString());
+    const built = buildMarketSealTxJson({
+      kaspa, network: NETWORK, marketId: chain.genesis.marketId, committeePubkeyHex: chain.genesis.committeePubkeyHex, deadlineMs: chain.genesis.deadlineMs, rootCloseTmplHash: chain.genesis.rootCloseTmplHash,
+      leafRedeemScript: leafRedeemFor(currentState).script, leafOutpoint: { txid: chain.bet2.txid, vout: 0 }, leafCovId: chain.genesis.shardLeafCovId,
+      heldInput: heldAtSeal, currentState, feeUtxo, relayChangeScriptPublicKeyHex: relaySpkHex,
+      convertToRootcloseEntryAbi, tokPrefixHex, tokSuffixHex, absFeeCapSompi: loadFeeProfileCap('market_seal'),
+    });
+    const tx = signAndCheck(built, 'market_seal');
+    return { tx, built, signals: signalsFor(tx, [true, true, false]) };
+  });
+  const r = await submitAndConfirm(tx, 'market_seal', minerAddr, signals);
+  chain.marketSeal = {
+    txid: tx.id, rootCloseCovId: built.rootCloseCovId, tokenCovId: built.tokenCovId, node: r.mp, assertion: r.signals, requiredFee: String(built.requiredFee), c1: c1seal.checked,
+    rootCloseUtxoScriptPublicKeyHex: '0x' + String(tx.outputs[MARKET_SEAL_ROOTCLOSE_OUT_INDEX].scriptPublicKey.script), // 链上UTXO的spk, 取自产出它的真实交易输出(B4-5)
+  };
+  saveChain(); console.log('=== 步骤4(market_seal)完成 txid=', tx.id);
+} else console.log('=== 步骤4已完成, 跳过 ===', chain.marketSeal.txid);
+
+// ═════════ 步骤5: close_commit(修复后的builder: 先挂covenant再签, 委员5槽同一keypair) ═════════
+if (!chain.closeCommit) {
+  const NEW_WINNING_SIDE = 1; // NO赢(route A: 第二笔押NO stake=999占多数)
+  const NEW_PAYOUT_ROOT_HEX = payoutLeafHex(chain.genesis.committeePubkeyHex, chain.bet2.newState.pool_value); // (A)路线 depth-0: payoutRoot = blake2b256(winnerPk‖le8(pool_value)); v0 里赢家 pk = 委员公钥
+  // 🟡 B4-2实测: simnet的past-median-time窗口=263个采样(每10块采1个, 覆盖约2630块), 稀疏挖矿历史下pmt远落后墙钟。要让
+  // lock_time(=deadline) < pmt(节点finality判据), 必须让窗口中位数的一半以上是新块——分批补挖直到pmt>deadline(块时间戳≈now)。
+  let pmtNow = await pmtSnapshot('close_commit构造前(补挖前)');
+  const pmtMining = { chunks: 0, blocks: 0, elapsedMs: 0 };
+  while (!evaluateCloseCommitTiming({ pastMedianTimeMs: Number(pmtNow.pastMedianTimeMs), deadlineMs: chain.genesis.deadlineMs }).canSubmit && pmtMining.blocks < 4000) { // 驱动层 pmt 闸(不用墙钟)
+    const t0 = Date.now(); for (let i = 0; i < 200; i++) await mineOne(minerAddr);
+    pmtMining.chunks++; pmtMining.blocks += 200; pmtMining.elapsedMs += Date.now() - t0;
+    pmtNow = await pmtSnapshot('补挖' + pmtMining.blocks + '块后');
+  }
+  chain.pmtCatchUp = { deadlineMs: chain.genesis.deadlineMs, mining: pmtMining, final: pmtNow, gate: evaluateCloseCommitTiming({ pastMedianTimeMs: Number(pmtNow.pastMedianTimeMs), deadlineMs: chain.genesis.deadlineMs }) };
+  saveChain();
+  console.log('  pmt 闸:', JSON.stringify(chain.pmtCatchUp.gate));
+  const rcArt0 = computeRootCloseGenesisArtifact({ marketId: chain.genesis.marketId, committeePubkeyHex: chain.genesis.committeePubkeyHex, deadlineMs: chain.genesis.deadlineMs, rootCloseTmplHash: chain.genesis.rootCloseTmplHash, state: { ...chain.bet2.newState, closed: 0, winningSide: 0, payoutRoot: '00'.repeat(32) } });
+  const c1cc = await c1Check('close_commit', { rootClose: { txid: chain.marketSeal.txid, vout: MARKET_SEAL_ROOTCLOSE_OUT_INDEX, expectedSpk: rcArt0.scriptPubKeyHex } });
+
+  const { tx, built, signals } = await tryWithFeeUtxoRetry(async (feeUtxo) => {
+    console.log('close_commit 尝试fee输入面值:', feeUtxo.value.toString());
+    const built = buildCloseCommitTxJson({
+      kaspa, network: NETWORK, marketId: chain.genesis.marketId, committeePubkeyHex: chain.genesis.committeePubkeyHex, committeePrivkeyEnvelope: chain.genesis.committeePrivkeyEnvelope,
+      deadlineMs: chain.genesis.deadlineMs, rootCloseTmplHash: chain.genesis.rootCloseTmplHash,
+      rootCloseOutpoint: { txid: chain.marketSeal.txid, vout: MARKET_SEAL_ROOTCLOSE_OUT_INDEX }, rootCloseUtxoScriptPublicKeyHex: c1cc.chainUtxos.rootClose.scriptPublicKeyHex, // 节点上的真实 spk
+      rootCloseCovId: chain.marketSeal.rootCloseCovId, sealedState: chain.bet2.newState, newWinningSide: NEW_WINNING_SIDE, newPayoutRootHex: NEW_PAYOUT_ROOT_HEX,
+      pmtEvidence: { pastMedianTimeMs: Number(pmtNow.pastMedianTimeMs) },
+      tokPrefixHex, tokSuffixHex, feeUtxo, relayChangeScriptPublicKeyHex: relaySpkHex, absFeeCapSompi: loadFeeProfileCap('close_commit'),
+    });
+    const tx = signAndCheck(built, 'close_commit');
+    return { tx, built, signals: signalsFor(tx, [true, false]) };
+  });
+  let r;
+  try { r = await submitAndConfirm(tx, 'close_commit', minerAddr, signals); } catch (e) {
+    chain.closeCommitFirstAttemptError = { message: e.message, pmtBefore: pmtNow };
+    saveChain();
+    throw e;
+  }
+  chain.closeCommit = {
+    txid: tx.id, rootCloseContinuationCovId: built.rootCloseContinuationCovId, node: r.mp, assertion: r.signals, requiredFee: String(built.requiredFee),
+    newWinningSide: NEW_WINNING_SIDE, newPayoutRoot: NEW_PAYOUT_ROOT_HEX, committeeMode: built.committeeMode, pmtBefore: pmtNow, lockTime: String(tx.lockTime), c1: c1cc.checked,
+    rootCloseUtxoScriptPublicKeyHex: '0x' + String(tx.outputs[CLOSE_COMMIT_ROOTCLOSE_OUT_INDEX].scriptPublicKey.script),
+  };
+  saveChain(); console.log('=== 步骤5(close_commit)完成 txid=', tx.id, 'committeeMode=', built.committeeMode);
+} else console.log('=== 步骤5已完成, 跳过 ===', chain.closeCommit.txid);
+
+// ═════════ 步骤6: convert_to_claim(批5) ═════════
+if (!chain.convertToClaim) {
+  const closedState = { ...chain.bet2.newState, closed: 1, winningSide: chain.closeCommit.newWinningSide, payoutRoot: chain.closeCommit.newPayoutRoot };
+  const rcArt1 = computeRootCloseGenesisArtifact({ marketId: chain.genesis.marketId, committeePubkeyHex: chain.genesis.committeePubkeyHex, deadlineMs: chain.genesis.deadlineMs, rootCloseTmplHash: chain.genesis.rootCloseTmplHash, state: closedState });
+  const heldKtt1 = computeKttGenesisArtifact({ amount: closedState.pool_value, ownerCovIdHex: chain.marketSeal.rootCloseCovId });
+  const c1c2c = await c1Check('convert_to_claim', { rootClose: { txid: chain.closeCommit.txid, vout: CLOSE_COMMIT_ROOTCLOSE_OUT_INDEX, expectedSpk: rcArt1.scriptPubKeyHex }, held: { txid: chain.marketSeal.txid, vout: MARKET_SEAL_TOKEN_OUT_INDEX, expectedSpk: heldKtt1.scriptPubKeyHex } });
+  const { tx, built, signals } = await tryWithFeeUtxoRetry(async (feeUtxo) => {
+    console.log('convert_to_claim 尝试fee输入面值:', feeUtxo.value.toString());
+    const built = buildConvertToClaimTxJson({
+      kaspa, network: NETWORK, marketId: chain.genesis.marketId, committeePubkeyHex: chain.genesis.committeePubkeyHex, deadlineMs: chain.genesis.deadlineMs, rootCloseTmplHash: chain.genesis.rootCloseTmplHash,
+      rootCloseOutpoint: { txid: chain.closeCommit.txid, vout: CLOSE_COMMIT_ROOTCLOSE_OUT_INDEX }, rootCloseUtxoScriptPublicKeyHex: c1c2c.chainUtxos.rootClose.scriptPublicKeyHex, rootCloseCovId: chain.marketSeal.rootCloseCovId, closedState,
+      heldTokenOutpoint: { txid: chain.marketSeal.txid, vout: MARKET_SEAL_TOKEN_OUT_INDEX },
+      tokPrefixHex, tokSuffixHex, feeUtxo, relayChangeScriptPublicKeyHex: relaySpkHex, absFeeCapSompi: loadFeeProfileCap('convert_to_claim'),
+    });
+    const tx = signAndCheck(built, 'convert_to_claim');
+    return { tx, built, signals: signalsFor(tx, [true, true, false]) };
+  });
+  const r = await submitAndConfirm(tx, 'convert_to_claim', minerAddr, signals);
+  chain.convertToClaim = { txid: tx.id, claimCovId: built.claimCovId, tokenCovId: built.tokenCovId, node: r.mp, assertion: r.signals, requiredFee: String(built.requiredFee), claimOutpoint: { txid: tx.id, vout: CONVERT_TO_CLAIM_CLAIM_OUT_INDEX }, tokenOutpoint: { txid: tx.id, vout: CONVERT_TO_CLAIM_TOKEN_OUT_INDEX } };
+  saveChain(); console.log('=== 步骤6(convert_to_claim)完成 txid=', tx.id);
+} else console.log('=== 步骤6已完成, 跳过 ===', chain.convertToClaim.txid);
+
+// ═════════ 步骤7: claim_draw(批6, full分支; ticket 签名由 builder 用委员私钥现签, 签名前 assertTicketSigningKey) ═════════
+if (!chain.claimDraw) {
+  const claimState = { ...chain.bet2.newState, closed: 1, winningSide: chain.closeCommit.newWinningSide, payoutRoot: chain.closeCommit.newPayoutRoot, claimed_bitmap: 0 };
+  const BET = { bettor_pk: chain.genesis.committeePubkeyHex, side: 1, stake: 999 };
+  const rcArt = computeRootClaimGenesisArtifact({ marketId: chain.genesis.marketId, state: claimState });
+  const ticketArt = computeTicketGenesisArtifact({ bettorPk: BET.bettor_pk, direction: BET.side, stake: BET.stake, shardPoolId: chain.genesis.marketId });
+  const heldKtt2 = computeKttGenesisArtifact({ amount: claimState.pool_value, ownerCovIdHex: chain.convertToClaim.claimCovId });
+  const ticketOutpoint = { txid: chain.bet2.txid, vout: 1 };
+  const c1cd = await c1Check('claim_draw', {
+    rootClaim: { txid: chain.convertToClaim.txid, vout: 0, expectedSpk: rcArt.scriptPubKeyHex },
+    ticket: { txid: ticketOutpoint.txid, vout: ticketOutpoint.vout, expectedSpk: ticketArt.scriptPubKeyHex },
+    held: { txid: chain.convertToClaim.txid, vout: 1, expectedSpk: heldKtt2.scriptPubKeyHex },
+  });
+  const { tx, built, signals } = await tryWithFeeUtxoRetry(async (feeUtxo) => {
+    console.log('claim_draw 尝试fee输入面值:', feeUtxo.value.toString());
+    const built = buildClaimDrawTxJson({
+      kaspa, network: NETWORK, marketId: chain.genesis.marketId, claimState,
+      rootClaimOutpoint: { txid: chain.convertToClaim.txid, vout: 0 }, rootClaimUtxoScriptPublicKeyHex: c1cd.chainUtxos.rootClaim.scriptPublicKeyHex, rootClaimCovId: chain.convertToClaim.claimCovId,
+      heldTokenOutpoint: { txid: chain.convertToClaim.txid, vout: 1 }, ticketOutpoint, ticketUtxoScriptPublicKeyHex: c1cd.chainUtxos.ticket.scriptPublicKeyHex,
+      bet: BET, committeePrivkeyEnvelope: chain.genesis.committeePrivkeyEnvelope, payout: claimState.pool_value,
+      tokPrefixHex, tokSuffixHex, feeUtxo, relayChangeScriptPublicKeyHex: relaySpkHex, absFeeCapSompi: loadFeeProfileCap('claim_draw'),
+    });
+    const tx = signAndCheck(built, 'claim_draw');
+    return { tx, built, signals: signalsFor(tx, [true, false, true, false]) };
+  });
+  const r = await submitAndConfirm(tx, 'claim_draw', minerAddr, signals);
+  chain.claimDraw = { txid: tx.id, claimCovId: built.claimCovId, tokenCovId: built.tokenCovId, node: r.mp, assertion: r.signals, requiredFee: String(built.requiredFee), c1: c1cd.checked, ticketPrefixLen: built.ticketPrefixLen, ticketSuffixLen: built.ticketSuffixLen };
+  saveChain(); console.log('=== 步骤7(claim_draw)完成 txid=', tx.id);
+} else console.log('=== 步骤7已完成, 跳过 ===', chain.claimDraw.txid);
+
+// ═════════ 步骤8: withdraw(批7, KanetTokenClaim.spend 路径(ii)): 目的地 = 测试用、不可再花的 covenant 输出 ═════════
+if (!chain.withdraw) {
+  const WINNER_PK = chain.genesis.committeePubkeyHex, AMOUNT = 1000;
+  const marketCovId = chain.convertToClaim.claimCovId; // = RootClaim covenant_id = KanetTokenClaim 的 market_cov_id
+  const ktcArt = computeKanetTokenClaimGenesisArtifact({ marketCovIdHex: marketCovId, winnerPkHex: WINNER_PK, amount: AMOUNT });
+  const heldKtt3 = computeKttGenesisArtifact({ amount: AMOUNT, ownerCovIdHex: chain.claimDraw.claimCovId });
+  const c1wd = await c1Check('withdraw', {
+    claim: { txid: chain.claimDraw.txid, vout: 0, expectedSpk: ktcArt.scriptPubKeyHex },
+    held: { txid: chain.claimDraw.txid, vout: 1, expectedSpk: heldKtt3.scriptPubKeyHex },
+  });
+  const DEST_SPK = '0xaa20' + 'ee'.repeat(32) + '87'; // 测试用、不可再花: 32 字节随手脚本哈希, 无人持有对应脚本(Bettor 1522: v0 不承诺赢家可再花)
+  const { tx, built, signals } = await tryWithFeeUtxoRetry(async (feeUtxo) => {
+    console.log('withdraw 尝试fee输入面值:', feeUtxo.value.toString());
+    const built = buildWithdrawTxJson({
+      kaspa, network: NETWORK, marketCovId, claimCovId: chain.claimDraw.claimCovId, winnerPkHex: WINNER_PK, amount: AMOUNT,
+      ktcOutpoint: { txid: chain.claimDraw.txid, vout: 0 }, ktcUtxoScriptPublicKeyHex: c1wd.chainUtxos.claim.scriptPublicKeyHex, heldTokenOutpoint: { txid: chain.claimDraw.txid, vout: 1 },
+      committeePrivkeyEnvelope: chain.genesis.committeePrivkeyEnvelope, destinationScriptPublicKeyHex: DEST_SPK, allowUnlistedTestDestination: true,
+      tokPrefixHex, tokSuffixHex, feeUtxo, relayChangeScriptPublicKeyHex: relaySpkHex, absFeeCapSompi: loadFeeProfileCap('withdraw'),
+    });
+    const tx = signAndCheck(built, 'withdraw');
+    return { tx, built, signals: signalsFor(tx, [...WITHDRAW_INPUT_HAS_COVENANT]) };
+  });
+  // builder 自己的信号 == 独立再算的信号(向量不漂移)
+  if (String(built.massSignal.storageMass) !== String(signals.storageMass) || String(built.massSignal.computeMass) !== String(signals.computeMass)) throw new Error('builder.massSignal != 脚本层重算信号');
+  // 🔴 负向臂(真实共识): 篡改 KanetTokenClaim 输入里的 checkSig 签名 1 字节 ⇒ 节点必须拒(证明 H4 赢家签名确被共识校验; 被拒不消耗任何 UTXO)
+  {
+    const bad = kaspa.Transaction.deserializeFromSafeJSON(built.txJson);
+    signOnlyDeclaredInputs({ tx: bad, signInputIndices: built.signInputIndices, privateKey: relayPriv, kaspa });
+    const sigScriptHex = String(bad.inputs[WITHDRAW_KTC_IN_INDEX].signatureScript).replace(/^0x/, '');
+    if (sigScriptHex.slice(0, 2) !== '41') throw new Error('KTC sigScript 首个 push 不是 65 字节签名(0x41), 篡改点假设不成立: ' + sigScriptHex.slice(0, 4));
+    const flipped = sigScriptHex.slice(0, 4) + ((parseInt(sigScriptHex.slice(4, 6), 16) ^ 0x01).toString(16).padStart(2, '0')) + sigScriptHex.slice(6);
+    bad.inputs[WITHDRAW_KTC_IN_INDEX].signatureScript = flipped;
+    let rejected = null;
+    try { await rpc.submitTransaction({ transaction: bad, allowOrphan: false }); } catch (e) { rejected = e.message; }
+    if (!rejected) throw new Error('STOP: 篡改签名的 withdraw 竟被节点接受——H4 签名没被共识校验?');
+    console.log('  ✓ 负向臂: 篡改 KTC 签名的 withdraw 被节点拒:', rejected.slice(0, 200));
+    chain.withdrawNegativeTamperedSig = { rejectedByNode: true, message: rejected.slice(0, 400) };
+    saveChain();
+  }
+  const r = await submitAndConfirm(tx, 'withdraw', minerAddr, signals);
+  // 上链后: 代币输出/目的地输出真实存在, 且都带 covenant
+  const outSpk = (i) => '0x' + String(tx.outputs[i].scriptPublicKey.script);
+  const tokUtxo = await chainUtxoAt(outSpk(WITHDRAW_TOKEN_OUT_INDEX), tx.id, WITHDRAW_TOKEN_OUT_INDEX);
+  const destUtxo = await chainUtxoAt(outSpk(WITHDRAW_DEST_OUT_INDEX), tx.id, WITHDRAW_DEST_OUT_INDEX);
+  if (!tokUtxo || !destUtxo) throw new Error('withdraw 上链后代币输出/目的地输出在节点上查不到');
+  // 旧的 KanetTokenClaim / held 已被花掉(终态: 无 claim 续约)
+  const oldKtc = await chainUtxoAt(ktcArt.scriptPubKeyHex, chain.claimDraw.txid, 0), oldHeld = await chainUtxoAt(heldKtt3.scriptPubKeyHex, chain.claimDraw.txid, 1);
+  if (oldKtc || oldHeld) throw new Error('withdraw 上链后旧 KanetTokenClaim/held 仍未花费');
+  chain.withdraw = {
+    txid: tx.id, destCovId: built.destCovId, tokenCovId: built.tokenCovId, destSpkHex: DEST_SPK, destGate: built.destGate, node: r.mp, assertion: r.signals, requiredFee: String(built.requiredFee), c1: c1wd.checked,
+    tokenOut: { value: String(tokUtxo.value) }, destOut: { value: String(destUtxo.value) }, oldClaimSpent: true, oldHeldSpent: true,
+  };
+  saveChain(); console.log('=== 步骤8(withdraw)完成 txid=', tx.id);
+} else console.log('=== 步骤8已完成, 跳过 ===', chain.withdraw.txid);
+
+// ═════════ 步骤9: ticket_reclaim v2(批8, Bettor 1524 裁定②): [输家 bet1 ticket, relay fee 输入] → [bettor 自己的 P2PK 20,000,000, 找零] ═════════
+if (!chain.ticketReclaim) {
+  const LOSER_BET = { bettor_pk: chain.genesis.committeePubkeyHex, side: 0, stake: 1 };
+  const MARKET_STATE = { closed: 1, winningSide: chain.closeCommit.newWinningSide };
+  const ticketOutpoint = { txid: chain.bet1.txid, vout: 1 };
+  const ticketArt = computeTicketGenesisArtifact({ bettorPk: LOSER_BET.bettor_pk, direction: LOSER_BET.side, stake: LOSER_BET.stake, shardPoolId: chain.genesis.marketId });
+  const c1tr = await c1Check('ticket_reclaim', { ticket: { txid: ticketOutpoint.txid, vout: ticketOutpoint.vout, expectedSpk: ticketArt.scriptPubKeyHex } });
+  const DEST = '0x20' + chain.genesis.committeePubkeyHex + 'ac'; // bettor 自己指定的收款脚本: v0 bettor = 委员 keypair 的 P2PK
+  const { tx, built, signals } = await tryWithFeeUtxoRetry(async (feeUtxo) => {
+    console.log('ticket_reclaim 尝试fee输入面值:', feeUtxo.value.toString());
+    const built = buildTicketReclaimTxJson({
+      kaspa, network: NETWORK, marketId: chain.genesis.marketId, bet: LOSER_BET, marketState: MARKET_STATE, ticketOutpoint, ticketUtxoScriptPublicKeyHex: c1tr.chainUtxos.ticket.scriptPublicKeyHex,
+      committeePrivkeyEnvelope: chain.genesis.committeePrivkeyEnvelope, destinationScriptPublicKeyHex: DEST, feeUtxo, relayChangeScriptPublicKeyHex: relaySpkHex, absFeeCapSompi: loadFeeProfileCap('ticket_reclaim'),
+    });
+    const tx = signAndCheck(built, 'ticket_reclaim');
+    return { tx, built, signals: signalsFor(tx, [...TICKET_RECLAIM_INPUT_HAS_COVENANT]) };
+  });
+  if (String(built.massSignal.storageMass) !== String(signals.storageMass) || String(built.massSignal.computeMass) !== String(signals.computeMass)) console.log('  (info) builder.massSignal(fee 输入 66B 留量口径) 与签后重算信号不同: ' + JSON.stringify({ builder: built.massSignal.storageMass + '/' + built.massSignal.computeMass, signed: signals.storageMass + '/' + signals.computeMass }));
+  const localFee = computeRequiredFeeSompiOrThrow(kaspa, NETWORK, tx);
+  const relayCeiling = 2n * localFee;
+  console.log('  builder fee=' + built.netLoss + ' requiredFee(精确×3/2)=' + built.requiredFee + ' 本地wasm估算费(relay 口径)=' + localFee + ' ⇒ relay 天花板=' + relayCeiling);
+  chain.ticketReclaimNegatives = {};
+
+  // 🔴 负向臂 N1(真实共识): 篡改 ticket 的 authorize_spend 签名 1 bit ⇒ 节点必须拒
+  {
+    const bad = kaspa.Transaction.deserializeFromSafeJSON(tx.serializeToSafeJSON());
+    const sigScriptHex = String(bad.inputs[0].signatureScript).replace(/^0x/, '');
+    if (sigScriptHex.slice(0, 2) !== '41') throw new Error('ticket sigScript 首个 push 不是 65 字节签名(0x41): ' + sigScriptHex.slice(0, 4));
+    bad.inputs[0].signatureScript = sigScriptHex.slice(0, 4) + ((parseInt(sigScriptHex.slice(4, 6), 16) ^ 0x01).toString(16).padStart(2, '0')) + sigScriptHex.slice(6);
+    let rejected = null;
+    try { await rpc.submitTransaction({ transaction: bad, allowOrphan: false }); } catch (e) { rejected = e.message; }
+    if (!rejected) throw new Error('STOP: 篡改签名的 ticket_reclaim 竟被节点接受');
+    console.log('  ✓ 负向臂N1: 篡改 ticket 签名被节点拒:', rejected.slice(0, 220));
+    chain.ticketReclaimNegatives.tamperedSig = { rejectedByNode: true, message: rejected.slice(0, 500) };
+  }
+  // 🔴 负向臂 N2(relay 天花板与节点最低费的死结, 真实节点证据): 同一形状, fee 取 relay 允许的最大值(2×relay 本地估算 = relayCeiling)。relay 会放行这个 fee, 但节点必须因费不足拒。
+  {
+    const priv = new kaspa.PrivateKey(decryptCommitteePrivkey(chain.genesis.committeePrivkeyEnvelope));
+    try {
+      const feeIn = tx.inputs[1];
+      const feeOutpoint = { transactionId: String(feeIn.previousOutpoint.transactionId), index: Number(feeIn.previousOutpoint.index) };
+      const feeAmount = BigInt(feeIn.utxo.amount), feeSpk = new kaspa.ScriptPublicKey(0, String(feeIn.utxo.scriptPublicKey.script));
+      const tOutpoint = { transactionId: ticketOutpoint.txid, index: ticketOutpoint.vout };
+      const tSpk = new kaspa.ScriptPublicKey(0, ticketArt.scriptPubKeyHex.replace(/^0x/, ''));
+      const mk = (sigScript) => new kaspa.Transaction({
+        version: 1, lockTime: 0n, subnetworkId: '0'.repeat(40), gas: 0n, payload: '',
+        inputs: [
+          { previousOutpoint: tOutpoint, signatureScript: sigScript, sequence: 0n, sigOpCount: 0, computeBudget: 70, utxo: { outpoint: tOutpoint, amount: 20_000_000n, scriptPublicKey: tSpk, blockDaaScore: 0n } },
+          { previousOutpoint: feeOutpoint, signatureScript: new Uint8Array(0), sequence: 0n, sigOpCount: 0, computeBudget: 70, utxo: { outpoint: feeOutpoint, amount: feeAmount, scriptPublicKey: feeSpk, blockDaaScore: 0n } },
+        ],
+        outputs: [new kaspa.TransactionOutput(20_000_000n, new kaspa.ScriptPublicKey(0, DEST.replace(/^0x/, ''))), new kaspa.TransactionOutput(feeAmount - relayCeiling, new kaspa.ScriptPublicKey(0, relaySpkHex.replace(/^0x/, '')))],
+      });
+      const sigScriptFor = (sig65) => combineActionAndRedeem(kaspa, encodeAuthorizeSpendAction(kaspa, ticketArt.entries.authorize_spend, { bettorSig: '0x' + sig65 }), ticketArt.script);
+      const draft = mk(sigScriptFor('00'.repeat(65)));
+      const raw = kaspa.createInputSignature(draft, 0, priv, kaspa.SighashType.All); const sig = (raw.startsWith('0x') ? raw.slice(2) : raw).slice(2);
+      const lowFee = mk(sigScriptFor(sig));
+      signOnlyDeclaredInputs({ tx: lowFee, signInputIndices: [1], privateKey: relayPriv, kaspa });
+      lowFee.finalize();
+      let rejected = null;
+      try { await rpc.submitTransaction({ transaction: lowFee, allowOrphan: false }); } catch (e) { rejected = e.message; }
+      chain.ticketReclaimNegatives.relayCeilingFee = { fee: String(relayCeiling), localWasmFeeRelayCaliber: String(localFee), builderFee: String(built.netLoss), rejectedByNode: !!rejected, message: rejected ? rejected.slice(0, 500) : null, lowFeeTxid: lowFee.id };
+      if (!rejected) throw new Error('STOP: 按 relay 天花板 fee 构造的回收竟被节点接受(死结假设需重新核实; 该票已被花)');
+      console.log('  ✓ 负向臂N2: fee=relay 天花板(' + relayCeiling + ')的回收被节点拒:', rejected.slice(0, 300));
+    } finally { priv.free(); }
+  }
+  saveChain();
+  const r = await submitAndConfirm(tx, 'ticket_reclaim', minerAddr, signals);
+  const destUtxo = await chainUtxoAt(DEST, tx.id, 0);
+  if (!destUtxo) throw new Error('ticket_reclaim 上链后收款输出在节点上查不到');
+  const oldTicket = await chainUtxoAt(ticketArt.scriptPubKeyHex, ticketOutpoint.txid, ticketOutpoint.vout);
+  if (oldTicket) throw new Error('ticket_reclaim 上链后旧 ticket 仍未花费');
+  chain.ticketReclaim = { txid: tx.id, node: r.mp, assertion: r.signals, fee: String(built.netLoss), requiredFeeWithMargin: String(built.requiredFee), includeChange: built.includeChange, changeSompi: String(built.changeSompi), c1: c1tr.checked, receivedValue: String(destUtxo.value), oldTicketSpent: true, localWasmFeeRelayCaliber: String(localFee) };
+  saveChain(); console.log('=== 步骤9(ticket_reclaim v2)完成 txid=', tx.id);
+} else console.log('=== 步骤9已完成, 跳过 ===', chain.ticketReclaim.txid);
+
+console.log('\n========== 全部完成, 各步 断言信号 vs 节点getMempoolEntry值 ==========');
+for (const k of ['genesis', 'bet1', 'bet2', 'marketSeal', 'closeCommit', 'convertToClaim', 'claimDraw', 'withdraw', 'ticketReclaim']) {
+  const s = chain[k]; if (!s) continue;
+  console.log(`${k.padEnd(15)} txid=${s.txid.slice(0, 12)}…  断言 storage=${s.assertion?.storageMass} compute=${s.assertion?.computeMass}  |  节点 storage=${s.node?.storageMass} compute=${s.node?.computeMass}`);
+}
+await rpc.disconnect();
+process.exit(0);

@@ -1,0 +1,1099 @@
+{
+  "meta": {
+    "encoderCommit": "c092de3afd4b25e13f29048ab0e850010f63a789",
+    "txVersionExpected": 1,
+    "network": "simnet",
+    "pmt": [
+      {
+        "label": "补挖前",
+        "pastMedianTimeMs": "1789818232824",
+        "nowMs": 1789823037496,
+        "lagSeconds": 4804.672,
+        "virtualDaaScore": "4336"
+      },
+      {
+        "label": "补挖50块后",
+        "pastMedianTimeMs": "1789818232824",
+        "nowMs": 1789823037546,
+        "lagSeconds": 4804.722,
+        "virtualDaaScore": "4386"
+      }
+    ],
+    "mining": {
+      "blocks": 50,
+      "elapsedMs": 50,
+      "msPerBlock": 1
+    },
+    "startedAt": "2026-09-19T13:03:57.546Z"
+  },
+  "genesis": {
+    "marketId": "c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5",
+    "minBet": 1,
+    "deadlineMs": 1789812237547,
+    "sealCount": 2,
+    "committeePubkeyHex": "3415c96b70d5af8011d8b607dac5185862586cb138a3cb1abf0c71bef9ffc11a",
+    "committeePrivkeyEnvelope": "<omitted: encrypted committee key envelope, not committed (D-021)>",
+    "rootCloseTmplHash": "f36955f3888a959a2da26f69b9e0a154f2b1718fa5bc48e86301c1230b6b84d2",
+    "shardLeafOwnRedeemLen": 14746,
+    "shardLeafCovId": "c148e7978cca79646af6da50e5749a4eae174e2f80227fa978b6b0cadf93bc30",
+    "leafOutpoint": {
+      "txid": "906c309a8fed312f48d11658a1c26415ca4d9da6c08ff4a7894f82c360dfe28c",
+      "vout": 0
+    },
+    "txid": "906c309a8fed312f48d11658a1c26415ca4d9da6c08ff4a7894f82c360dfe28c",
+    "node": {
+      "storageMass": "210843",
+      "computeMass": "8083",
+      "raw": {
+        "mempoolEntry": {
+          "fee": "20367500",
+          "transaction": {
+            "version": 1,
+            "inputs": [
+              {
+                "previousOutpoint": {
+                  "transactionId": "0c1d966659fbb7cbc388a42a15ac05429f2ffdf4ae8088b39eeb324295c8c06f",
+                  "index": 2
+                },
+                "sequence": "0",
+                "sigOpCount": 0,
+                "computeBudget": 70,
+                "signatureScriptBytes": 66,
+                "signatureScriptSha256_16": "2ba1821ff5ee8fb0"
+              }
+            ],
+            "outputs": [
+              {
+                "value": "20000000",
+                "scriptPublicKey": "0000aa203b01d77f2c2ce0803e84c90d52bd1c7b621f5d5041b6fc4ce53ca7aa8e8ff68487",
+                "verboseData": {
+                  "scriptPublicKeyType": "ScriptHash",
+                  "scriptPublicKeyAddress": "kaspasim:pqasr4ml9skwpqp7snys654ar3aky86a2pqmdlzvu572025w3lmggtayh0gkr"
+                },
+                "covenant": {
+                  "authorizingInput": 0,
+                  "covenantId": "c148e7978cca79646af6da50e5749a4eae174e2f80227fa978b6b0cadf93bc30"
+                }
+              },
+              {
+                "value": "44085400",
+                "scriptPublicKey": "00002003a81c86c03c9c668c1d7c4c6119dcf73e1c6bd7378086af30d993429071b000ac",
+                "verboseData": {
+                  "scriptPublicKeyType": "PubKey",
+                  "scriptPublicKeyAddress": "kaspasim:qqp6s8yxcq7fce5vr47yccgemnmnu8rt6umcpp40xrvexs5swxcqqv3x7j64w"
+                }
+              }
+            ],
+            "lockTime": "0",
+            "subnetworkId": "0000000000000000000000000000000000000000",
+            "gas": "0",
+            "payload": "",
+            "storageMass": "210843",
+            "mass": "210843",
+            "verboseData": {
+              "transactionId": "906c309a8fed312f48d11658a1c26415ca4d9da6c08ff4a7894f82c360dfe28c",
+              "hash": "16fad56fc9bc829c3766d2b94484d5e9ae66e1742f93fe7ab01845c8073e0e07",
+              "computeMass": "8083",
+              "blockHash": "0000000000000000000000000000000000000000000000000000000000000000",
+              "blockTime": "0"
+            }
+          },
+          "is_orphan": false
+        }
+      }
+    },
+    "assertion": {
+      "storageMass": 210843,
+      "storagePath": "relaxed",
+      "computeMass": 8083,
+      "transientMass": 1412,
+      "sizeBytes": 353,
+      "localMassDiagnostic": 210843
+    },
+    "requiredFee": "20367500"
+  },
+  "bet1": {
+    "txid": "10752368381443ce9da1090242184336e7d10b01d710eb7e15bf4a0aa201d8fb",
+    "newState": {
+      "local_yes": 1,
+      "local_no": 0,
+      "count": 1,
+      "pool_value": 1
+    },
+    "mergedKttOutpoint": {
+      "txid": "10752368381443ce9da1090242184336e7d10b01d710eb7e15bf4a0aa201d8fb",
+      "vout": 2
+    },
+    "node": {
+      "storageMass": "457504",
+      "computeMass": "33927",
+      "raw": {
+        "mempoolEntry": {
+          "fee": "43339900",
+          "transaction": {
+            "version": 1,
+            "inputs": [
+              {
+                "previousOutpoint": {
+                  "transactionId": "906c309a8fed312f48d11658a1c26415ca4d9da6c08ff4a7894f82c360dfe28c",
+                  "index": 0
+                },
+                "sequence": "0",
+                "sigOpCount": 0,
+                "computeBudget": 70,
+                "signatureScriptBytes": 17910,
+                "signatureScriptSha256_16": "ff77f32e46c0efa9"
+              },
+              {
+                "previousOutpoint": {
+                  "transactionId": "90ae574d36d8add01e79df94737e0f8a8cf2b57ddf0ab26779ab6f7f4f9a1bb9",
+                  "index": 4
+                },
+                "sequence": "0",
+                "sigOpCount": 0,
+                "computeBudget": 70,
+                "signatureScriptBytes": 66,
+                "signatureScriptSha256_16": "ebaca454c5ac57ab"
+              }
+            ],
+            "outputs": [
+              {
+                "value": "20000000",
+                "scriptPublicKey": "0000aa2021450c6536ddedd30eda8a11347b2099ced4fc3f52f865f91867fe17bb28cec087",
+                "verboseData": {
+                  "scriptPublicKeyType": "ScriptHash",
+                  "scriptPublicKeyAddress": "kaspasim:pqs52rr9xmw7m5cwm29pzdrmyzvua48u8af0se0erpnlu9am9r8vqqp7xv6uz"
+                },
+                "covenant": {
+                  "authorizingInput": 0,
+                  "covenantId": "c148e7978cca79646af6da50e5749a4eae174e2f80227fa978b6b0cadf93bc30"
+                }
+              },
+              {
+                "value": "20000000",
+                "scriptPublicKey": "0000aa20d906fcb0d3abeafff2070755fd8fb0cac441dee1541d00da8d450ff79e36821c87",
+                "verboseData": {
+                  "scriptPublicKeyType": "ScriptHash",
+                  "scriptPublicKeyAddress": "kaspasim:prvsdl9s6w474lljqur4tlv0kr9vgsw7u92p6qx634zslau7x6ppcu7enqqjy"
+                }
+              },
+              {
+                "value": "20000000",
+                "scriptPublicKey": "0000aa207ccbd24cd400a9c50defa15a7c0370c23e53b22713d3da9eaed8c781b54034bc87",
+                "verboseData": {
+                  "scriptPublicKeyType": "ScriptHash",
+                  "scriptPublicKeyAddress": "kaspasim:pp7vh5jv6sq2n3gda7s45lqrwrpru5ajyufa8k574mvv0qd4gq6tc00q5adlg"
+                },
+                "covenant": {
+                  "authorizingInput": 1,
+                  "covenantId": "8828f354f8988abe8465181a1e2ff0a7c61588e73c347e132508578ac1dd73de"
+                }
+              },
+              {
+                "value": "11660100",
+                "scriptPublicKey": "00002003a81c86c03c9c668c1d7c4c6119dcf73e1c6bd7378086af30d993429071b000ac",
+                "verboseData": {
+                  "scriptPublicKeyType": "PubKey",
+                  "scriptPublicKeyAddress": "kaspasim:qqp6s8yxcq7fce5vr47yccgemnmnu8rt6umcpp40xrvexs5swxcqqv3x7j64w"
+                }
+              }
+            ],
+            "lockTime": "0",
+            "subnetworkId": "0000000000000000000000000000000000000000",
+            "gas": "0",
+            "payload": "",
+            "storageMass": "457504",
+            "mass": "457504",
+            "verboseData": {
+              "transactionId": "10752368381443ce9da1090242184336e7d10b01d710eb7e15bf4a0aa201d8fb",
+              "hash": "477070bb0c7061274e0f3dc2bab665eece8689177b5d78848b07343bcea1b027",
+              "computeMass": "33927",
+              "blockHash": "0000000000000000000000000000000000000000000000000000000000000000",
+              "blockTime": "0"
+            }
+          },
+          "is_orphan": false
+        }
+      }
+    },
+    "assertion": {
+      "storageMass": 457504,
+      "storagePath": "arithmetic",
+      "computeMass": 33927,
+      "transientMass": 73828,
+      "sizeBytes": 18457,
+      "localMassDiagnostic": 500980
+    },
+    "requiredFee": "43339900"
+  },
+  "bet2": {
+    "txid": "e354bbb8317e9937f69021c717c9dc83fb3cf6e840aec7d1e8c66b690b152b5e",
+    "newState": {
+      "local_yes": 1,
+      "local_no": 999,
+      "count": 2,
+      "pool_value": 1000
+    },
+    "mergedKttOutpoint": {
+      "txid": "e354bbb8317e9937f69021c717c9dc83fb3cf6e840aec7d1e8c66b690b152b5e",
+      "vout": 2
+    },
+    "node": {
+      "storageMass": "293116",
+      "computeMass": "44198",
+      "raw": {
+        "mempoolEntry": {
+          "fee": "39666700",
+          "transaction": {
+            "version": 1,
+            "inputs": [
+              {
+                "previousOutpoint": {
+                  "transactionId": "10752368381443ce9da1090242184336e7d10b01d710eb7e15bf4a0aa201d8fb",
+                  "index": 0
+                },
+                "sequence": "0",
+                "sigOpCount": 0,
+                "computeBudget": 70,
+                "signatureScriptBytes": 17912,
+                "signatureScriptSha256_16": "c002930c7fcf97a4"
+              },
+              {
+                "previousOutpoint": {
+                  "transactionId": "10752368381443ce9da1090242184336e7d10b01d710eb7e15bf4a0aa201d8fb",
+                  "index": 2
+                },
+                "sequence": "0",
+                "sigOpCount": 0,
+                "computeBudget": 70,
+                "signatureScriptBytes": 3215,
+                "signatureScriptSha256_16": "ab7c07f21d10f171"
+              },
+              {
+                "previousOutpoint": {
+                  "transactionId": "c84de9784e645d11922378f9fc700b998fae038b411e56bb279d54f575141532",
+                  "index": 1
+                },
+                "sequence": "0",
+                "sigOpCount": 0,
+                "computeBudget": 70,
+                "signatureScriptBytes": 66,
+                "signatureScriptSha256_16": "35736a8a5ab62391"
+              }
+            ],
+            "outputs": [
+              {
+                "value": "20000000",
+                "scriptPublicKey": "0000aa204c9b93966c28bdf13ffc8b36c2d4671094e10c27c916cee35b3e7d65b0bed40687",
+                "verboseData": {
+                  "scriptPublicKeyType": "ScriptHash",
+                  "scriptPublicKeyAddress": "kaspasim:ppxfhyukds5tmufllj9ndsk5vugffcgvyly3dnhrtvl86edshm2qvxhd2hac4"
+                },
+                "covenant": {
+                  "authorizingInput": 0,
+                  "covenantId": "c148e7978cca79646af6da50e5749a4eae174e2f80227fa978b6b0cadf93bc30"
+                }
+              },
+              {
+                "value": "20000000",
+                "scriptPublicKey": "0000aa20515dceff29b8d0e91a7d3016a3f5db537b48bd243c0c1a74710ae3982eaa008487",
+                "verboseData": {
+                  "scriptPublicKeyType": "ScriptHash",
+                  "scriptPublicKeyAddress": "kaspasim:ppg4mnhl9xudp6g605cpdgl4mdfhkj9ays7qcxn5wy9w8xpw4gqggaefvj8tj"
+                }
+              },
+              {
+                "value": "20000000",
+                "scriptPublicKey": "0000aa205b2931920912146dea77e5c8ba46afb5d949328352837d00145b955af5b61bf187",
+                "verboseData": {
+                  "scriptPublicKeyType": "ScriptHash",
+                  "scriptPublicKeyAddress": "kaspasim:ppdjjvvjpyfpgm02wlju3wjx476ajjfjsdfgxlgqz3de2kh4kcdlzjcp9ry8g"
+                },
+                "covenant": {
+                  "authorizingInput": 2,
+                  "covenantId": "0597ca4155ec44a52be5edea7a6504e3d3a51fb17658dd78646ed4f6342bbc42"
+                }
+              },
+              {
+                "value": "35333300",
+                "scriptPublicKey": "00002003a81c86c03c9c668c1d7c4c6119dcf73e1c6bd7378086af30d993429071b000ac",
+                "verboseData": {
+                  "scriptPublicKeyType": "PubKey",
+                  "scriptPublicKeyAddress": "kaspasim:qqp6s8yxcq7fce5vr47yccgemnmnu8rt6umcpp40xrvexs5swxcqqv3x7j64w"
+                }
+              }
+            ],
+            "lockTime": "0",
+            "subnetworkId": "0000000000000000000000000000000000000000",
+            "gas": "0",
+            "payload": "",
+            "storageMass": "293116",
+            "mass": "293116",
+            "verboseData": {
+              "transactionId": "e354bbb8317e9937f69021c717c9dc83fb3cf6e840aec7d1e8c66b690b152b5e",
+              "hash": "61dd1ef36101b7051491635eb50ea5a0f23486168dbea2c9a857df2c269510d3",
+              "computeMass": "44198",
+              "blockHash": "0000000000000000000000000000000000000000000000000000000000000000",
+              "blockTime": "0"
+            }
+          },
+          "is_orphan": false
+        }
+      }
+    },
+    "assertion": {
+      "storageMass": 293116,
+      "storagePath": "arithmetic",
+      "computeMass": 44198,
+      "transientMass": 86912,
+      "sizeBytes": 21728,
+      "localMassDiagnostic": 411635
+    },
+    "requiredFee": "39666700"
+  },
+  "marketSeal": {
+    "txid": "2481b953d5dba6843f9148a04aa241b10da9319d726a67d0c3a3c68f5588ea7a",
+    "rootCloseCovId": "e5d18fe60a1499ebfbfb11576fe070c97d2249f23a8dabbc50cf137dcd14c583",
+    "tokenCovId": "54cae7b16efc9e78f798327cbed8bc5acf23ea6176015189e600ed9aa0f743f1",
+    "node": {
+      "storageMass": "231312",
+      "computeMass": "60422",
+      "raw": {
+        "mempoolEntry": {
+          "fee": "34386000",
+          "transaction": {
+            "version": 1,
+            "inputs": [
+              {
+                "previousOutpoint": {
+                  "transactionId": "e354bbb8317e9937f69021c717c9dc83fb3cf6e840aec7d1e8c66b690b152b5e",
+                  "index": 0
+                },
+                "sequence": "0",
+                "sigOpCount": 0,
+                "computeBudget": 70,
+                "signatureScriptBytes": 34559,
+                "signatureScriptSha256_16": "a34dc76626746408"
+              },
+              {
+                "previousOutpoint": {
+                  "transactionId": "e354bbb8317e9937f69021c717c9dc83fb3cf6e840aec7d1e8c66b690b152b5e",
+                  "index": 2
+                },
+                "sequence": "0",
+                "sigOpCount": 0,
+                "computeBudget": 70,
+                "signatureScriptBytes": 3215,
+                "signatureScriptSha256_16": "3ce439d0d28729e8"
+              },
+              {
+                "previousOutpoint": {
+                  "transactionId": "90ae574d36d8add01e79df94737e0f8a8cf2b57ddf0ab26779ab6f7f4f9a1bb9",
+                  "index": 3
+                },
+                "sequence": "0",
+                "sigOpCount": 0,
+                "computeBudget": 70,
+                "signatureScriptBytes": 66,
+                "signatureScriptSha256_16": "792fcb71d9670541"
+              }
+            ],
+            "outputs": [
+              {
+                "value": "20000000",
+                "scriptPublicKey": "0000aa202204e460c85d22a342792d5ebafe9bec767821007aebb9e9416d1485e4efe27f87",
+                "verboseData": {
+                  "scriptPublicKeyType": "ScriptHash",
+                  "scriptPublicKeyAddress": "kaspasim:pq3qferqepwj9g6z0yk4awh7n0k8v7ppqpawhw0fg9k3fp0yal387u52p3uul"
+                },
+                "covenant": {
+                  "authorizingInput": 2,
+                  "covenantId": "e5d18fe60a1499ebfbfb11576fe070c97d2249f23a8dabbc50cf137dcd14c583"
+                }
+              },
+              {
+                "value": "20000000",
+                "scriptPublicKey": "0000aa20dd83a2c7b6926722d498c2d20d3e509a384d32d968d076d3b62f4c77ff5e1ea587",
+                "verboseData": {
+                  "scriptPublicKeyType": "ScriptHash",
+                  "scriptPublicKeyAddress": "kaspasim:prwc8gk8k6fxwgk5nrpdyrf72zdrsnfjm95dqaknkch5calltc022pfrxn339"
+                },
+                "covenant": {
+                  "authorizingInput": 2,
+                  "covenantId": "54cae7b16efc9e78f798327cbed8bc5acf23ea6176015189e600ed9aa0f743f1"
+                }
+              },
+              {
+                "value": "60614000",
+                "scriptPublicKey": "00002003a81c86c03c9c668c1d7c4c6119dcf73e1c6bd7378086af30d993429071b000ac",
+                "verboseData": {
+                  "scriptPublicKeyType": "PubKey",
+                  "scriptPublicKeyAddress": "kaspasim:qqp6s8yxcq7fce5vr47yccgemnmnu8rt6umcpp40xrvexs5swxcqqv3x7j64w"
+                }
+              }
+            ],
+            "lockTime": "0",
+            "subnetworkId": "0000000000000000000000000000000000000000",
+            "gas": "0",
+            "payload": "",
+            "storageMass": "231312",
+            "mass": "231312",
+            "verboseData": {
+              "transactionId": "2481b953d5dba6843f9148a04aa241b10da9319d726a67d0c3a3c68f5588ea7a",
+              "hash": "0a7296557d5bf90d712159cee35b11c63ae13f1becfeb7e3f4a6e0f8ccc7740b",
+              "computeMass": "60422",
+              "blockHash": "0000000000000000000000000000000000000000000000000000000000000000",
+              "blockTime": "0"
+            }
+          },
+          "is_orphan": false
+        }
+      }
+    },
+    "assertion": {
+      "storageMass": 231312,
+      "storagePath": "arithmetic",
+      "computeMass": 60422,
+      "transientMass": 153288,
+      "sizeBytes": 38322,
+      "localMassDiagnostic": 349831
+    },
+    "requiredFee": "34386000",
+    "c1": [
+      {
+        "role": "leaf",
+        "value": "20000000",
+        "spkPrefix": "0xaa204c9b93966c"
+      },
+      {
+        "role": "held",
+        "value": "20000000",
+        "spkPrefix": "0xaa205b29319209"
+      }
+    ],
+    "rootCloseUtxoScriptPublicKeyHex": "0xaa202204e460c85d22a342792d5ebafe9bec767821007aebb9e9416d1485e4efe27f87"
+  },
+  "pmtCatchUp": {
+    "deadlineMs": 1789812237547,
+    "mining": {
+      "chunks": 0,
+      "blocks": 0,
+      "elapsedMs": 0
+    },
+    "final": {
+      "label": "close_commit构造前(补挖前)",
+      "pastMedianTimeMs": "1789818232824",
+      "nowMs": 1789823060084,
+      "lagSeconds": 4827.26,
+      "virtualDaaScore": "4392"
+    },
+    "gate": {
+      "canSubmit": true,
+      "reason": "pmt 已超过 deadline + 余量",
+      "pmtLeadMs": 5995277,
+      "sla": "warn"
+    }
+  },
+  "closeCommit": {
+    "txid": "a86ac307a1595fc9bb303ecd23ec8910077e8a6b3f103354fd09011f364ed09b",
+    "rootCloseContinuationCovId": "e5d18fe60a1499ebfbfb11576fe070c97d2249f23a8dabbc50cf137dcd14c583",
+    "node": {
+      "storageMass": "134657",
+      "computeMass": "35560",
+      "raw": {
+        "mempoolEntry": {
+          "fee": "17574400",
+          "transaction": {
+            "version": 1,
+            "inputs": [
+              {
+                "previousOutpoint": {
+                  "transactionId": "2481b953d5dba6843f9148a04aa241b10da9319d726a67d0c3a3c68f5588ea7a",
+                  "index": 0
+                },
+                "sequence": "0",
+                "sigOpCount": 0,
+                "computeBudget": 70,
+                "signatureScriptBytes": 20423,
+                "signatureScriptSha256_16": "5f9cb35d61176ee8"
+              },
+              {
+                "previousOutpoint": {
+                  "transactionId": "c84de9784e645d11922378f9fc700b998fae038b411e56bb279d54f575141532",
+                  "index": 0
+                },
+                "sequence": "0",
+                "sigOpCount": 0,
+                "computeBudget": 70,
+                "signatureScriptBytes": 66,
+                "signatureScriptSha256_16": "d8eb6000a2a469b2"
+              }
+            ],
+            "outputs": [
+              {
+                "value": "20000000",
+                "scriptPublicKey": "0000aa20aee04de245b5899db53ff744024dec76da3c279f7039b73554da9ec43e35de1c87",
+                "verboseData": {
+                  "scriptPublicKeyType": "ScriptHash",
+                  "scriptPublicKeyAddress": "kaspasim:pzhwqn0zgk6cn8d48lm5gqjda3md50p8nacrnde42ndfa3p7xh0pcgxzdt7vq"
+                },
+                "covenant": {
+                  "authorizingInput": 0,
+                  "covenantId": "e5d18fe60a1499ebfbfb11576fe070c97d2249f23a8dabbc50cf137dcd14c583"
+                }
+              },
+              {
+                "value": "77425600",
+                "scriptPublicKey": "00002003a81c86c03c9c668c1d7c4c6119dcf73e1c6bd7378086af30d993429071b000ac",
+                "verboseData": {
+                  "scriptPublicKeyType": "PubKey",
+                  "scriptPublicKeyAddress": "kaspasim:qqp6s8yxcq7fce5vr47yccgemnmnu8rt6umcpp40xrvexs5swxcqqv3x7j64w"
+                }
+              }
+            ],
+            "lockTime": "1789812237547",
+            "subnetworkId": "0000000000000000000000000000000000000000",
+            "gas": "0",
+            "payload": "",
+            "storageMass": "134657",
+            "mass": "134657",
+            "verboseData": {
+              "transactionId": "a86ac307a1595fc9bb303ecd23ec8910077e8a6b3f103354fd09011f364ed09b",
+              "hash": "e862bcf8ef6f9877a9a92340d8ac46b73d2967c1573603e78b9e5330c9434fbd",
+              "computeMass": "35560",
+              "blockHash": "0000000000000000000000000000000000000000000000000000000000000000",
+              "blockTime": "0"
+            }
+          },
+          "is_orphan": false
+        }
+      }
+    },
+    "assertion": {
+      "storageMass": 134657,
+      "storagePath": "arithmetic",
+      "computeMass": 35560,
+      "transientMass": 83320,
+      "sizeBytes": 20830,
+      "localMassDiagnostic": 178133
+    },
+    "requiredFee": "17574400",
+    "newWinningSide": 1,
+    "newPayoutRoot": "b8ad589b12de66aed93cfacc71b80818340f32f33dd6240ab06cc56b81acea54",
+    "committeeMode": "single_operator_5x_same_key",
+    "pmtBefore": {
+      "label": "close_commit构造前(补挖前)",
+      "pastMedianTimeMs": "1789818232824",
+      "nowMs": 1789823060084,
+      "lagSeconds": 4827.26,
+      "virtualDaaScore": "4392"
+    },
+    "lockTime": "1789812237547",
+    "c1": [
+      {
+        "role": "rootClose",
+        "value": "20000000",
+        "spkPrefix": "0xaa202204e460c8"
+      }
+    ],
+    "rootCloseUtxoScriptPublicKeyHex": "0xaa20aee04de245b5899db53ff744024dec76da3c279f7039b73554da9ec43e35de1c87"
+  },
+  "convertToClaim": {
+    "txid": "c71d3fa8c85b1b06413adf88389e2539e1250e5e1ebb26ff35481e048e8062b0",
+    "claimCovId": "8609c16f5c1a5c1c6b5b3b73d18bce6800917ff202bb42f661405f4adb1c790c",
+    "tokenCovId": "1926ba4865e293644de1babb8aa6867a64c31d282450abff4a8fcaefddc6df76",
+    "node": {
+      "storageMass": "231312",
+      "computeMass": "48618",
+      "raw": {
+        "mempoolEntry": {
+          "fee": "34386000",
+          "transaction": {
+            "version": 1,
+            "inputs": [
+              {
+                "previousOutpoint": {
+                  "transactionId": "a86ac307a1595fc9bb303ecd23ec8910077e8a6b3f103354fd09011f364ed09b",
+                  "index": 0
+                },
+                "sequence": "0",
+                "sigOpCount": 0,
+                "computeBudget": 70,
+                "signatureScriptBytes": 22755,
+                "signatureScriptSha256_16": "a73cd20fb50cb854"
+              },
+              {
+                "previousOutpoint": {
+                  "transactionId": "2481b953d5dba6843f9148a04aa241b10da9319d726a67d0c3a3c68f5588ea7a",
+                  "index": 1
+                },
+                "sequence": "0",
+                "sigOpCount": 0,
+                "computeBudget": 70,
+                "signatureScriptBytes": 3215,
+                "signatureScriptSha256_16": "e0ba683e42e330c1"
+              },
+              {
+                "previousOutpoint": {
+                  "transactionId": "90ae574d36d8add01e79df94737e0f8a8cf2b57ddf0ab26779ab6f7f4f9a1bb9",
+                  "index": 5
+                },
+                "sequence": "0",
+                "sigOpCount": 0,
+                "computeBudget": 70,
+                "signatureScriptBytes": 66,
+                "signatureScriptSha256_16": "4a8b7c6c8ea3e56d"
+              }
+            ],
+            "outputs": [
+              {
+                "value": "20000000",
+                "scriptPublicKey": "0000aa20fe7535121ec1d1a5c25a5243670956e1006a4aa0466335256d5bc5c29cb042c387",
+                "verboseData": {
+                  "scriptPublicKeyType": "ScriptHash",
+                  "scriptPublicKeyAddress": "kaspasim:prl82dgjrmqarfwztffyxecf2mssq6j25prxxdf9d4duts5ukppvx9vssk92p"
+                },
+                "covenant": {
+                  "authorizingInput": 2,
+                  "covenantId": "8609c16f5c1a5c1c6b5b3b73d18bce6800917ff202bb42f661405f4adb1c790c"
+                }
+              },
+              {
+                "value": "20000000",
+                "scriptPublicKey": "0000aa200c6afbd18f5a51a11e006366c4c470874f5f32d4684226079b0842ee0ffc2bdd87",
+                "verboseData": {
+                  "scriptPublicKeyType": "ScriptHash",
+                  "scriptPublicKeyAddress": "kaspasim:pqxx47733ad9rgg7qp3kd3xywzr57hej635yyfs8nvyy9ms0ls4a66mks696h"
+                },
+                "covenant": {
+                  "authorizingInput": 2,
+                  "covenantId": "1926ba4865e293644de1babb8aa6867a64c31d282450abff4a8fcaefddc6df76"
+                }
+              },
+              {
+                "value": "60614000",
+                "scriptPublicKey": "00002003a81c86c03c9c668c1d7c4c6119dcf73e1c6bd7378086af30d993429071b000ac",
+                "verboseData": {
+                  "scriptPublicKeyType": "PubKey",
+                  "scriptPublicKeyAddress": "kaspasim:qqp6s8yxcq7fce5vr47yccgemnmnu8rt6umcpp40xrvexs5swxcqqv3x7j64w"
+                }
+              }
+            ],
+            "lockTime": "0",
+            "subnetworkId": "0000000000000000000000000000000000000000",
+            "gas": "0",
+            "payload": "",
+            "storageMass": "231312",
+            "mass": "231312",
+            "verboseData": {
+              "transactionId": "c71d3fa8c85b1b06413adf88389e2539e1250e5e1ebb26ff35481e048e8062b0",
+              "hash": "26b6890c1997aaec5f9c71fce5a96418a54112aa59b4902f17079c64325a0e76",
+              "computeMass": "48618",
+              "blockHash": "0000000000000000000000000000000000000000000000000000000000000000",
+              "blockTime": "0"
+            }
+          },
+          "is_orphan": false
+        }
+      }
+    },
+    "assertion": {
+      "storageMass": 231312,
+      "storagePath": "arithmetic",
+      "computeMass": 48618,
+      "transientMass": 106072,
+      "sizeBytes": 26518,
+      "localMassDiagnostic": 349831
+    },
+    "requiredFee": "34386000",
+    "claimOutpoint": {
+      "txid": "c71d3fa8c85b1b06413adf88389e2539e1250e5e1ebb26ff35481e048e8062b0",
+      "vout": 0
+    },
+    "tokenOutpoint": {
+      "txid": "c71d3fa8c85b1b06413adf88389e2539e1250e5e1ebb26ff35481e048e8062b0",
+      "vout": 1
+    }
+  },
+  "claimDraw": {
+    "txid": "ccfc359e9f22729d7695745e813027e0c574e6398a49bb782827f5ccf34fdeab",
+    "claimCovId": "eabea09c2a2bbdfcc74f049680c3be6047409dd6a3b8e3225b973dd228596094",
+    "tokenCovId": "5d1dec350dfa3a9254298528a6eaf91e2fba1ad3f665e04e76db7f5d13c5b06c",
+    "node": {
+      "storageMass": "179586",
+      "computeMass": "40407",
+      "raw": {
+        "mempoolEntry": {
+          "fee": "30547100",
+          "transaction": {
+            "version": 1,
+            "inputs": [
+              {
+                "previousOutpoint": {
+                  "transactionId": "c71d3fa8c85b1b06413adf88389e2539e1250e5e1ebb26ff35481e048e8062b0",
+                  "index": 0
+                },
+                "sequence": "0",
+                "sigOpCount": 0,
+                "computeBudget": 70,
+                "signatureScriptBytes": 7300,
+                "signatureScriptSha256_16": "28dc71e7cbbb2e70"
+              },
+              {
+                "previousOutpoint": {
+                  "transactionId": "e354bbb8317e9937f69021c717c9dc83fb3cf6e840aec7d1e8c66b690b152b5e",
+                  "index": 1
+                },
+                "sequence": "0",
+                "sigOpCount": 0,
+                "computeBudget": 70,
+                "signatureScriptBytes": 190,
+                "signatureScriptSha256_16": "9fd9dd78313c62e0"
+              },
+              {
+                "previousOutpoint": {
+                  "transactionId": "c71d3fa8c85b1b06413adf88389e2539e1250e5e1ebb26ff35481e048e8062b0",
+                  "index": 1
+                },
+                "sequence": "0",
+                "sigOpCount": 0,
+                "computeBudget": 70,
+                "signatureScriptBytes": 3215,
+                "signatureScriptSha256_16": "7706a2e58f258119"
+              },
+              {
+                "previousOutpoint": {
+                  "transactionId": "c84de9784e645d11922378f9fc700b998fae038b411e56bb279d54f575141532",
+                  "index": 5
+                },
+                "sequence": "0",
+                "sigOpCount": 0,
+                "computeBudget": 70,
+                "signatureScriptBytes": 66,
+                "signatureScriptSha256_16": "0c20f8c9eb3250ca"
+              }
+            ],
+            "outputs": [
+              {
+                "value": "20000000",
+                "scriptPublicKey": "0000aa20951765453fabcccf150707b80f340f0ba7f980fe4a5911c427c6b7bbe8335ea187",
+                "verboseData": {
+                  "scriptPublicKeyType": "ScriptHash",
+                  "scriptPublicKeyAddress": "kaspasim:pz23we29874uenc4qurmsre5pu9607vqle99jywyylrt0wlgxd02zgu04vm4r"
+                },
+                "covenant": {
+                  "authorizingInput": 3,
+                  "covenantId": "eabea09c2a2bbdfcc74f049680c3be6047409dd6a3b8e3225b973dd228596094"
+                }
+              },
+              {
+                "value": "20000000",
+                "scriptPublicKey": "0000aa20fd3ff15c71e2608d7923e3c25f7c011bd4e5c414c8f0b59b87bfee27d596d61687",
+                "verboseData": {
+                  "scriptPublicKeyType": "ScriptHash",
+                  "scriptPublicKeyAddress": "kaspasim:pr7nlu2uw83xprtey03uyhmuqydafewyzny0pdvms7l7uf74jmtpvel7af234"
+                },
+                "covenant": {
+                  "authorizingInput": 3,
+                  "covenantId": "5d1dec350dfa3a9254298528a6eaf91e2fba1ad3f665e04e76db7f5d13c5b06c"
+                }
+              },
+              {
+                "value": "84452900",
+                "scriptPublicKey": "00002003a81c86c03c9c668c1d7c4c6119dcf73e1c6bd7378086af30d993429071b000ac",
+                "verboseData": {
+                  "scriptPublicKeyType": "PubKey",
+                  "scriptPublicKeyAddress": "kaspasim:qqp6s8yxcq7fce5vr47yccgemnmnu8rt6umcpp40xrvexs5swxcqqv3x7j64w"
+                }
+              }
+            ],
+            "lockTime": "0",
+            "subnetworkId": "0000000000000000000000000000000000000000",
+            "gas": "0",
+            "payload": "",
+            "storageMass": "179586",
+            "mass": "179586",
+            "verboseData": {
+              "transactionId": "ccfc359e9f22729d7695745e813027e0c574e6398a49bb782827f5ccf34fdeab",
+              "hash": "d02334b78e108b998419b878649423a19ff14a04ae02d320b4f154d8f61e1651",
+              "computeMass": "40407",
+              "blockHash": "0000000000000000000000000000000000000000000000000000000000000000",
+              "blockTime": "0"
+            }
+          },
+          "is_orphan": false
+        }
+      }
+    },
+    "assertion": {
+      "storageMass": 179586,
+      "storagePath": "arithmetic",
+      "computeMass": 40407,
+      "transientMass": 45228,
+      "sizeBytes": 11307,
+      "localMassDiagnostic": 308616
+    },
+    "requiredFee": "30547100",
+    "c1": [
+      {
+        "role": "rootClaim",
+        "value": "20000000",
+        "spkPrefix": "0xaa20fe7535121e"
+      },
+      {
+        "role": "ticket",
+        "value": "20000000",
+        "spkPrefix": "0xaa20515dceff29"
+      },
+      {
+        "role": "held",
+        "value": "20000000",
+        "spkPrefix": "0xaa200c6afbd18f"
+      }
+    ],
+    "ticketPrefixLen": 1,
+    "ticketSuffixLen": 32
+  },
+  "withdrawNegativeTamperedSig": {
+    "rejectedByNode": true,
+    "message": "RPC Server (remote error) -> Rejected transaction ad04359346c84f74f1d3786bd1cac6fdb867f870dca3d9ffab21fef86803044d: failed to verify the signature script: script ran, but verification failed"
+  },
+  "withdraw": {
+    "txid": "ad04359346c84f74f1d3786bd1cac6fdb867f870dca3d9ffab21fef86803044d",
+    "destCovId": "e479cf6497cc32d424428b59e55e9e78745ddc5ff5f28e9d0a74b91d50773505",
+    "tokenCovId": "df3309e6a849d743664292357ae1f2d96403decd700222daa7919f78ed99625e",
+    "destSpkHex": "0xaa20eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee87",
+    "destGate": "unlisted_test_destination",
+    "node": {
+      "storageMass": "231312",
+      "computeMass": "30371",
+      "raw": {
+        "mempoolEntry": {
+          "fee": "34386000",
+          "transaction": {
+            "version": 1,
+            "inputs": [
+              {
+                "previousOutpoint": {
+                  "transactionId": "ccfc359e9f22729d7695745e813027e0c574e6398a49bb782827f5ccf34fdeab",
+                  "index": 0
+                },
+                "sequence": "0",
+                "sigOpCount": 0,
+                "computeBudget": 70,
+                "signatureScriptBytes": 4508,
+                "signatureScriptSha256_16": "881a3e7a18a816f8"
+              },
+              {
+                "previousOutpoint": {
+                  "transactionId": "ccfc359e9f22729d7695745e813027e0c574e6398a49bb782827f5ccf34fdeab",
+                  "index": 1
+                },
+                "sequence": "0",
+                "sigOpCount": 0,
+                "computeBudget": 70,
+                "signatureScriptBytes": 3215,
+                "signatureScriptSha256_16": "9e7d82e5f7d7be37"
+              },
+              {
+                "previousOutpoint": {
+                  "transactionId": "c84de9784e645d11922378f9fc700b998fae038b411e56bb279d54f575141532",
+                  "index": 2
+                },
+                "sequence": "0",
+                "sigOpCount": 0,
+                "computeBudget": 70,
+                "signatureScriptBytes": 66,
+                "signatureScriptSha256_16": "edb5b56bc30d6fd1"
+              }
+            ],
+            "outputs": [
+              {
+                "value": "20000000",
+                "scriptPublicKey": "0000aa20a1711ad517d244fb916862c6f4636778a932dbd018924719c71ff19d044a791087",
+                "verboseData": {
+                  "scriptPublicKeyType": "ScriptHash",
+                  "scriptPublicKeyAddress": "kaspasim:pzshzxk4zlfyf7u3dp3vdarrvau2jvkm6qvfy3cecu0lr8gyffu3qpghx9jxa"
+                },
+                "covenant": {
+                  "authorizingInput": 2,
+                  "covenantId": "df3309e6a849d743664292357ae1f2d96403decd700222daa7919f78ed99625e"
+                }
+              },
+              {
+                "value": "20000000",
+                "scriptPublicKey": "0000aa20eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee87",
+                "verboseData": {
+                  "scriptPublicKeyType": "ScriptHash",
+                  "scriptPublicKeyAddress": "kaspasim:prhwamhwamhwamhwamhwamhwamhwamhwamhwamhwamhwamhwamhwuwdy2frec"
+                },
+                "covenant": {
+                  "authorizingInput": 2,
+                  "covenantId": "e479cf6497cc32d424428b59e55e9e78745ddc5ff5f28e9d0a74b91d50773505"
+                }
+              },
+              {
+                "value": "60614000",
+                "scriptPublicKey": "00002003a81c86c03c9c668c1d7c4c6119dcf73e1c6bd7378086af30d993429071b000ac",
+                "verboseData": {
+                  "scriptPublicKeyType": "PubKey",
+                  "scriptPublicKeyAddress": "kaspasim:qqp6s8yxcq7fce5vr47yccgemnmnu8rt6umcpp40xrvexs5swxcqqv3x7j64w"
+                }
+              }
+            ],
+            "lockTime": "0",
+            "subnetworkId": "0000000000000000000000000000000000000000",
+            "gas": "0",
+            "payload": "",
+            "storageMass": "231312",
+            "mass": "231312",
+            "verboseData": {
+              "transactionId": "ad04359346c84f74f1d3786bd1cac6fdb867f870dca3d9ffab21fef86803044d",
+              "hash": "45f32ea6231e44a2f2dea360337d6246eb579df9f717ddf7eba8fcf75683f907",
+              "computeMass": "30371",
+              "blockHash": "0000000000000000000000000000000000000000000000000000000000000000",
+              "blockTime": "0"
+            }
+          },
+          "is_orphan": false
+        }
+      }
+    },
+    "assertion": {
+      "storageMass": 231312,
+      "storagePath": "arithmetic",
+      "computeMass": 30371,
+      "transientMass": 33084,
+      "sizeBytes": 8271,
+      "localMassDiagnostic": 349831
+    },
+    "requiredFee": "34386000",
+    "c1": [
+      {
+        "role": "claim",
+        "value": "20000000",
+        "spkPrefix": "0xaa20951765453f"
+      },
+      {
+        "role": "held",
+        "value": "20000000",
+        "spkPrefix": "0xaa20fd3ff15c71"
+      }
+    ],
+    "tokenOut": {
+      "value": "20000000"
+    },
+    "destOut": {
+      "value": "20000000"
+    },
+    "oldClaimSpent": true,
+    "oldHeldSpent": true
+  },
+  "ticketReclaimNegatives": {
+    "tamperedSig": {
+      "rejectedByNode": true,
+      "message": "RPC Server (remote error) -> Rejected transaction 08c88ca97c05f58294ab7bc51adfa618c2cc5aabcf72718dd5ef4c20cb5a8185: failed to verify the signature script: script ran, but verification failed"
+    },
+    "relayCeilingFee": {
+      "fee": "282000",
+      "localWasmFeeRelayCaliber": "141000",
+      "builderFee": "2292300",
+      "rejectedByNode": true,
+      "message": "RPC Server (remote error) -> Rejected transaction f785420a6100fc9d09eaa5d1252fa43858c9e5960bf2f862c19e89ef7b4f3e79: transaction f785420a6100fc9d09eaa5d1252fa43858c9e5960bf2f862c19e89ef7b4f3e79 is not standard: transaction has 282000 fees which is under the required amount of 1528200 for compute mass 15282",
+      "lowFeeTxid": "f785420a6100fc9d09eaa5d1252fa43858c9e5960bf2f862c19e89ef7b4f3e79"
+    }
+  },
+  "ticketReclaim": {
+    "txid": "08c88ca97c05f58294ab7bc51adfa618c2cc5aabcf72718dd5ef4c20cb5a8185",
+    "node": {
+      "storageMass": "260",
+      "computeMass": "15282",
+      "raw": {
+        "mempoolEntry": {
+          "fee": "2292300",
+          "transaction": {
+            "version": 1,
+            "inputs": [
+              {
+                "previousOutpoint": {
+                  "transactionId": "10752368381443ce9da1090242184336e7d10b01d710eb7e15bf4a0aa201d8fb",
+                  "index": 1
+                },
+                "sequence": "0",
+                "sigOpCount": 0,
+                "computeBudget": 70,
+                "signatureScriptBytes": 190,
+                "signatureScriptSha256_16": "6689ec19db3df912"
+              },
+              {
+                "previousOutpoint": {
+                  "transactionId": "90ae574d36d8add01e79df94737e0f8a8cf2b57ddf0ab26779ab6f7f4f9a1bb9",
+                  "index": 2
+                },
+                "sequence": "0",
+                "sigOpCount": 0,
+                "computeBudget": 70,
+                "signatureScriptBytes": 66,
+                "signatureScriptSha256_16": "94a172ea0e143373"
+              }
+            ],
+            "outputs": [
+              {
+                "value": "20000000",
+                "scriptPublicKey": "0000203415c96b70d5af8011d8b607dac5185862586cb138a3cb1abf0c71bef9ffc11aac",
+                "verboseData": {
+                  "scriptPublicKeyType": "PubKey",
+                  "scriptPublicKeyAddress": "kaspasim:qq6ptjttwr26lqq3mzmq0kk9rpvxykrvkyu28jc6hux8r0hellq35gsemsyt3"
+                }
+              },
+              {
+                "value": "92707700",
+                "scriptPublicKey": "00002003a81c86c03c9c668c1d7c4c6119dcf73e1c6bd7378086af30d993429071b000ac",
+                "verboseData": {
+                  "scriptPublicKeyType": "PubKey",
+                  "scriptPublicKeyAddress": "kaspasim:qqp6s8yxcq7fce5vr47yccgemnmnu8rt6umcpp40xrvexs5swxcqqv3x7j64w"
+                }
+              }
+            ],
+            "lockTime": "0",
+            "subnetworkId": "0000000000000000000000000000000000000000",
+            "gas": "0",
+            "payload": "",
+            "storageMass": "260",
+            "mass": "260",
+            "verboseData": {
+              "transactionId": "08c88ca97c05f58294ab7bc51adfa618c2cc5aabcf72718dd5ef4c20cb5a8185",
+              "hash": "1f1c4dddd8fcf7995b270133e0ab6bee39bf4e07a0cc50fed8322c59f9d95259",
+              "computeMass": "15282",
+              "blockHash": "0000000000000000000000000000000000000000000000000000000000000000",
+              "blockTime": "0"
+            }
+          },
+          "is_orphan": false
+        }
+      }
+    },
+    "assertion": {
+      "storageMass": 260,
+      "storagePath": "relaxed",
+      "computeMass": 15282,
+      "transientMass": 2248,
+      "sizeBytes": 562,
+      "localMassDiagnostic": 1410
+    },
+    "fee": "2292300",
+    "requiredFeeWithMargin": "2292300",
+    "includeChange": true,
+    "changeSompi": "92707700",
+    "c1": [
+      {
+        "role": "ticket",
+        "value": "20000000",
+        "spkPrefix": "0xaa20d906fcb0d3"
+      }
+    ],
+    "receivedValue": "20000000",
+    "oldTicketSpent": true,
+    "localWasmFeeRelayCaliber": "141000"
+  }
+}

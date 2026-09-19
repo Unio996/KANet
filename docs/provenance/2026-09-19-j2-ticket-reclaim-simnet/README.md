@@ -1,5 +1,8 @@
 # 2026-09-19 J2 — simnet：ticket_reclaim（批8，输家 ticket 自我回收，`PoolSideTicket.authorize_spend`）真实共识 ACCEPT + 两条负向臂被拒
 
+> **STATUS-NOTE（2026-09-19，J2；本文其余内容一字未改）**：本目录记录的是批8 **v1 形状**（单输入、builder 已完整签名，提交 `5e62e24f`）。Bettor 账本 1524 裁定②改形状后已被 `2026-09-19-j2-ticket-reclaim-v2-simnet/` 取代。本目录仍有效的证据：单输入形状本身的共识 ACCEPT、篡改签名负向臂、"本地 wasm 低估费被节点拒"的实测。**失效的结论**：本文"批9 接线阻塞项"一节只讲了空 `signInputIndices`，实际更深的阻塞是 relay fee 估算器与节点最低费之间无可行 fee，见 v2 目录；本文写的 `feeProfile.ticket_reclaim.cap` 2,000,000 占位随形状变更作废。
+
+
 Bettor 放行批8（账本 1491 输家自签回收已在 simnet ACCEPT；回收 2,000,000 sompi 是当时的保守固定值，**不当生产算法**）。在批6/7 的同一条 simnet 链（chain3）上追加第九步：回收**输家 bet1** 的 ticket。
 D-021 合规：只含 simnet 数据；委员私钥信封**未入库**（sanitized 记录里已置换为占位说明）。
 
