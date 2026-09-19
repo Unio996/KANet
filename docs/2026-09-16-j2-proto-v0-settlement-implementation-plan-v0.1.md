@@ -1,6 +1,6 @@
 > **Status**: CURRENT
 
-# 原型 v0 结算实现计划 v0.3（六个结算builder + 意图状态机 + 驱动接线，复用covenant_broadcast）
+# 原型 v0 结算实现计划 v0.4（六个结算builder + 意图状态机 + 驱动接线，复用covenant_broadcast）
 
 出处：Owner 2026-09-16 批准实现（D-022，账本1491，Bettor转达"按最简洁的方案走"），在
 `docs/2026-09-16-j2-proto-v0-settlement-design-v0.1.md`（v0.8，下称"设计文档"，尤其§1/§2/§7）
@@ -8,10 +8,11 @@
 分批提交顺序。**v0.2更新**：Bettor审v0.1（`eb361933`）批准落码，5个开放点逐条裁定，批准开始
 第1批（DB迁移）落码。**v0.3更新（账本1495，Codex复核`origin/coord/codex-bridge@6a5016dd`发现，
 2026-09-19交接期间转达）**：v0.2"claim_draw/withdraw/ticket_reclaim用委员keypair代替bettor
-签名"这条裁定的依据不成立，已推翻——`bettorPk`是`proto_bets`每笔下注独立字段，不是委员pubkey，
-且v0当前无任何机制恢复bettor私钥，三个builder暂缓实现，升级为阻塞项报新Bettor定夺（见§2.4-2.6
-前的"🔴阻塞"节）。第3批（market_seal）/第4批（close_commit）/第5批（convert_to_claim）不受影响，
-继续推进。
+签名"这条裁定一度被判定依据不成立，三个builder暂缓实现。**v0.4更新（账本1495，Bettor实核生产
+代码`proto.js:212-215`+主网真实数据）**：v0.3的判断本身是误判——我当时验证时查了测试夹具
+（`register_append`独立随机生成bettorPk的行为）而不是生产API（生产API固定复用委员pubkey兼任
+bettorPk），阻塞解除，不需要改`proto_bets`表结构，六个builder全部按原计划推进；Codex的
+MUST-PROVE签名前公钥断言仍要落实（当前相等是实现巧合非协议保证）。
 
 D-021合规：本文档不写真实relay地址、真实账户余额、完整relay关联txid。
 
@@ -112,68 +113,59 @@ relay侧**复用现有`covenant_broadcast`命令**（v0.2更新，见§5）。
   **covenant-construction-spec原文"ticketInIdx需要bettor签名"与`RootClaim.sil`读到的实际require
   链之间的既有分歧，到此以"源码+simnet实证"为准正式关闭**（v0.1曾标记"待NWT核实"，v0.2按此定案，
   不再是开放点）。
-- **bettorSig来源——🔴 v0.3更正（Codex复核`origin/coord/codex-bridge@6a5016dd`发现，MUST-PROVE，
-  账本1495转达）：v0.2"用委员keypair"这条裁定的依据不成立，本节作废，claim_draw暂缓实现**。
-  错在哪：v0.2把"v0是单操作员"直接当成"ticket的`bettorPk`就是`committee_pubkeys_json[0]`"的证明——
-  **这一步跳跃没有验证过**。真实数据模型`bettorPk`是独立字段：`proto_bets.bettor_pk`每笔下注各自
-  一份，**不是**`proto_markets.committee_pubkeys_json`；直接读`register_append`的真实测试构造
-  （`proto-tx-assembly-register-append.test.mjs`/`run-full-chain.mjs`）确认`bettorPk`来自
-  `new kaspa.PrivateKey(randomBytes(32)...)`**独立随机生成**，与委员keypair无关。且
-  `proto_bets`表**没有任何私钥列**（只有`bettor_pk`公钥，见`docs/DATABASE.md`）——v0当前**没有
-  任何机制能在事后恢复某个bettor的私钥**，"用委员key代替"是我凭"单操作员"这个前提想当然接上去的
-  错误捷径，从未被证明。**claim_draw的ticket输入签名问题至此仍未解决，本批次暂缓实现这一步**，
-  见下"🔴 阻塞：bettor私钥custody"。
+- **bettorSig来源——🔴 v0.4定案（Bettor实核生产代码+主网真实数据推翻v0.3的阻塞判断，账本1495）**：
+  v0.3基于**测试夹具**（`proto-tx-assembly-register-append.test.mjs`/`run-full-chain.mjs`用
+  `new kaspa.PrivateKey(randomBytes(32)...)`独立随机生成bettorPk）得出"bettorPk与委员keypair
+  无关"，**这是夹具行为，不是生产路径**——真实生产API`kasia-console/src/api/proto.js:212-215`
+  **不从请求体读bettor_pk**，直接取`JSON.parse(market.committee_pubkeys_json)[0]`（文件头注引
+  账本1354裁定"复用本市场委员会pubkey兼任"）；`proto-broadcast-ops.mjs:215/237`
+  `computeTicketGenesisArtifact({bettorPk: bet.bettor_pk,...})`确认链上ticket烤进去的就是这个
+  值。Bettor实核主网库：活市场`a59c7b48`两笔下注`bettor_pk===committee_pubkeys_json[0]`均为
+  true，`committee_privkey_enc`存在——**ticket私钥可恢复（`decryptCommitteePrivkey`），阻塞
+  解除，不需要给`proto_bets`加私钥列，不改任何既有表结构**。
+  **v0.3的方向本身没有错**（v0确实需要独立核实这个假设，不能想当然），**错在验证时看错了代码
+  ——查了测试夹具当成生产路径**，这条已写入下方"实现纪律新增"作为ANTI-PATTERNS候选，防止同类
+  错误再发生。
+- **Codex的MUST-PROVE仍然要做（Bettor v0.4确认，理由更新）**：当前`bettorPk==committeePk[0]`
+  是**实现决定的巧合，不是协议保证**——真实多用户下注场景一旦落地（每个bettor有自己独立身份）
+  就会分叉，这条防御性断言是那一天的第一道拦截，不是当前场景下多余的代码。**任何签名前，必须
+  从该ticket/claim自身的落库状态推导应签的公钥，并断言"手上这把私钥的公钥 == 该ticket承诺的
+  bettorPk"，不等即fail-closed，在任何IPC/签名之前拦下**。回归至少两条：①`bettorPk !=
+  committeePk[0]`且只有委员key可用时必须失败（不能静默用委员key顶替）；②推导出的公钥与ticket
+  的`bettorPk`完全相等时才放行。解出的私钥不进日志、不进夹具文件（同既有委员私钥处理纪律）。
 - **中止条件**：若实际场景`payout<pool_value`（partial），**立即停止，不构造**——partial分支的
   修复归属另一支（本文档§0已声明范围外）。
 
-### 2.5 `buildWithdrawTxJson`（⑤ `KanetTokenClaim.spend`）—— 🔴 v0.3更正：签名对象搞错了，暂缓实现
+### 2.5 `buildWithdrawTxJson`（⑤ `KanetTokenClaim.spend`）—— v0.4：阻塞解除，按原计划实现
 
 - **输入**：`[KanetTokenClaim(当前UTXO,CONT), 代币输入(owner=本claim covid,CONT), fee]`
 - **输出**：`[代币转出到目的地(to_market_input=false，普通新genesis输出，owner=witness指定的任意
   值，CONT), fee找零]`
-- **签名输入**：`sig s`——**v0.3更正**：直接读`KanetTokenClaim.sil:106`
-  `require(checkSig(s, pubkey(winner_pk)))`，验证对象是**`winner_pk`**（赢家自己的pubkey，来自
-  claim_draw构造时"winner_pk=ticket里的bettorPk"这条链，即赢家自己的下注身份），**不是委员的
-  pubkey**——v0.2写的"委员keypair对winner_pk的签名"这句话本身自相矛盾（委员key签名验证不可能通过
-  `pubkey(winner_pk)`这个require，除非winner_pk恰好等于委员pubkey，而这正是未经验证的假设）。
-  同2.4一样卡在"赢家/bettor私钥去哪拿"这个问题上，**本批次暂缓实现**。
+- **签名输入**：`sig s`——`KanetTokenClaim.sil:106 require(checkSig(s, pubkey(winner_pk)))`，
+  验证对象是`winner_pk`（赢家自己的pubkey，来自claim_draw构造时"winner_pk=ticket里的bettorPk"
+  这条链）。**v0.4：`winner_pk`同样是`committee_pubkeys_json[0]`**（同2.4的验证结论——生产
+  register_append从来只用委员pubkey兼任bettorPk，claim_draw把这个值原样搬进`winner_pk`，不是
+  独立身份），签名用同一把委员私钥，console侧解密即用即弃，**MUST-PROVE同2.4：签名前断言推导出
+  的公钥与claim记录里的`winner_pk`相等**。
 - **无续约**（`.sil`头注"花后不续约,不受V-T-8影响"）
 
-### 🔴 阻塞：claim_draw(2.4)/withdraw(2.5)/ticket_reclaim(2.6) 三个builder的bettor私钥custody
-问题——v0.3新增，Codex复核发现，报告新Bettor，暂不擅自决定
+### 实现纪律新增（v0.4，本轮自己的教训，ANTI-PATTERNS候选）：验证"生产路径用哪个值"必须读
+生产API/生产builder的真实代码，不能读测试夹具的构造逻辑当生产行为——两者可能因为"夹具为了测试
+方便走了独立随机生成"而分叉（本例：`register_append`的测试夹具用随机私钥模拟"任意bettor"这个
+泛化场景，方便测多个不同bettorPk的情况；生产API为了v0单操作员简化，实际固定复用委员pubkey）。
+下次类似"这个值从哪来"的问题，先grep生产API handler（`src/api/*.js`）与生产builder调用点
+（`proto-broadcast-ops.mjs`一类），而不是先读`*.test.mjs`——测试夹具的构造选择是"够测试用即可"，
+不代表生产约束。
 
-**问题本质**：`claim_draw`（消费ticket）、`withdraw`（`checkSig(s,pubkey(winner_pk))`）、
-`ticket_reclaim`（`authorize_spend`）三个builder都需要**某个bettor自己的私钥**签名，而不是委员
-私钥——`proto_bets.bettor_pk`是每笔下注独立生成的公钥，对应私钥**当前完全没有任何持久化custody
-机制**（`register_append`构造时私钥只在内存里用一次就丢弃，`proto_bets`表没有私钥列）。这意味着
-**v0现状根本不具备"事后代表某个bettor签名"的能力**——不是"用哪把已有的key"这个选择题，是
-"这把key现在压根不存在于任何可恢复的地方"这个更根本的问题。
+**本批次全部6个builder均不再受阻塞，按原计划实现**：①market_seal②close_commit③convert_to_claim
+④claim_draw⑤withdraw⑥ticket_reclaim。
 
-**必须先做的防御（Codex MUST-PROVE，不管最终私钥custody方案是什么，这条都要有）**：
-**任何签名前，必须从该ticket自身的状态/下注来源推导出应签的公钥，并断言"手上这把私钥的公钥 ==
-该ticket承诺的bettorPk"，不等即fail-closed，在任何IPC/签名之前拦下**——不能默认"反正只有一把
-可用的key就是对的"。回归至少两条：①`bettorPk != committeePk[0]`且只有委员key可用时必须失败
-（不能静默用委员key顶替）；②推导出的公钥与ticket的`bettorPk`完全相等时才放行。解出的私钥不进
-日志、不进夹具文件（同既有委员私钥处理纪律）。
+### 2.6 `buildTicketReclaimTxJson`（⑥ 输家ticket自我回收，`PoolSideTicket.authorize_spend`）——
+v0.4：阻塞解除，按原计划实现
 
-**真正的解法需要新Bettor/Owner拍板，本文档不擅自决定**（触碰"动既有proto表结构"这条停下条件，
-账本1495交接通知明确列过）——候选方向（仅供参考，不预设选哪个）：
-- 新增`proto_bets`加密私钥列（同`committee_privkey_enc`模式），register_append时生成即加密存入，
-  claim_draw/withdraw/ticket_reclaim时解密即用即弃——最直接，但改变了"私钥从不落库"这条v0原有的
-  更保守姿态（哪怕加密），且是本轮明确的"动既有proto表结构"停下条件。
-- v0保持"bettorPk就是无实际身份意义的占位值"这个既有认知（`T-PROTO-BETTORPK-BINDING`观察票原文
-  "无签名绑定的witness值"）——但这与`PoolSideTicket.sil`/`KanetTokenClaim.sil`两处**真实存在**
-  的`checkSig`要求矛盾，说明这条旧观察票的适用范围本身需要重新核实（它可能只对`register_append`
-  本身成立，不能不加验证地扩大到消费ticket/spend这两个后续动作）。
-- 三个builder继续暂缓，(A)路线只做到`convert_to_claim`（③），claim_draw/withdraw/ticket_reclaim
-  的具体解法留给这条阻塞项解决之后再排期。
-
-**本批次范围内不受影响、可以继续**：①market_seal②close_commit（委员签名，key custody机制已存在、
-已验证）③convert_to_claim（无需bettor/委员签名）。
-
-### 2.6 `buildTicketReclaimTxJson`（⑥ 输家ticket自我回收，`PoolSideTicket.authorize_spend`）—— 🔴
-同上"阻塞"节，本批次暂缓实现
-
+- **签名同2.4的bettorSig来源+MUST-PROVE**：该ticket的`authorize_spend`用同一把委员私钥（其
+  `bettorPk`同样是`committee_pubkeys_json[0]`），签名前同样要断言推导出的公钥与该ticket的
+  `bettor_pk`相等。
 - **输入**：`[该ticket UTXO(CONT)]`——**单covenant输入，无独立fee input**（NWT的真实构造是
   单输入+单输出，票本身的0.2 KAS减掉fee直接就是输出金额，见设计文档§0.14b"追加验证②"）
 - **输出**：`[代币/KAS转给bettor自己指定的地址]`
@@ -327,18 +319,18 @@ committee签名（`close_commit`）与bettor签名（`claim_draw`/`withdraw`/`ti
 
 ---
 
-## 8. 剩余开放点（v0.3更新：3还原为未解决，且升级为阻塞项，见上"🔴阻塞"节）
+## 8. 剩余开放点（v0.4：3已解除阻塞并定案，全部5个开放点均已裁定）
 
 1. ~~新文件组织~~——**已裁定**：批准新文件，import复用不复制粘贴（§1.1）。
 2. ~~claim_draw是否需要ticket签名~~——**已裁定**：需要，源码+simnet实证定案（§2.4）。
-3. **🔴 bettorSig如何获取真实私钥——v0.3：v0.2"用委员keypair"的裁定被Codex复核推翻，问题重新
-   打开且升级为阻塞项**（见§2.4/§2.5/§2.6前的"🔴阻塞"节）——不是产品问题，是v0当前**没有任何
-   机制**能恢复bettor私钥这个更根本的技术缺口，直接阻塞claim_draw/withdraw/ticket_reclaim三个
-   builder，需要新Bettor/Owner拍板解法（候选方向见阻塞节），本文档不擅自决定。
+3. ~~bettorSig如何获取真实私钥~~——**v0.4已定案**：v0.3的阻塞判断本身是误判（查了测试夹具当生产
+   路径）——Bettor实核生产API(`proto.js:212-215`)+主网真实数据确认`bettorPk`就是
+   `committee_pubkeys_json[0]`，委员私钥可解密复用，不需要改`proto_bets`表结构。Codex的
+   MUST-PROVE签名前公钥断言仍要做（当前相等是实现巧合非协议保证）。`T-PROTO-BETTORPK-BINDING`
+   观察票范围收窄为"真实多用户场景下bettorPk与委员身份分离后的密钥来源"。
 4. ~~`subject_type='ticket'`~~——**已裁定**：批准，且v0.2进一步明确`intent_key`统一
    `settle:`前缀格式（§3/§5）。
 5. ~~relay命令~~——**已裁定**：否决新命令，复用`covenant_broadcast`+ingest端点前缀分派（§5）。
 
-第1-2批（DB迁移+intent状态机）已完成落码。第3批（market_seal）不受本次阻塞影响，继续推进；
-第4批（close_commit）、第5批（convert_to_claim）同样不受影响；第6-8批（claim_draw/withdraw/
-ticket_reclaim）暂缓，等阻塞项解决后再排期。
+第1-2批（DB迁移+intent状态机）已完成落码。六个builder（第3-8批）全部不再受阻塞，按分批顺序
+（§7）继续推进，当前在做第3批（market_seal）。
