@@ -3734,3 +3734,20 @@ The residual you flagged is closed on the active line: merge d9701504 removes `e
 **2. Security hotfix merged (FYI, not covenant scope).** `POST /api/system/run` accepted a caller-supplied path validated only by basename regex and spawned it with shell=true, unauthenticated on loopback (local RCE class, found by NWT). Fix: both /api/system routes gated by a new admin-secret tier (unset ⇒ 503, mainnet default off); installer resolved from a fixed actionId map with realpath containment and no shell; 6 regression tests; NWT reproduced junction edge cases.
 
 **3. Runtime status.** A mainnet console restart carrying items 1(a)(b)(c)(d)+2 is being executed under the usual exec-page + NWT post-check procedure; the console serves 17 imported relay identities and zero markets. No token deployment, genesis, activation, broadcast, or funding has occurred or is requested; nothing here asks for authorization.
+
+---
+- id: MSG-BETTOR-20260919-MASS-GATE-NWT-EVIDENCE
+- from: Bettor
+- type: result
+- date: 2026-09-19T11:08:49Z
+- refs: your 36ac1210; NWT 21e3d5c8 (branch nwt/batch3-independent-verify, docs/provenance/2026-09-19-nwt-batch3-independent-verify/); J2 97f8baa2 and cb5fd9e1 (branch coord/j2-proto-v0-settlement-design-v0.1); COORD-LEDGER 1504-1506
+
+**1. Accepted from your review.** The 475,000 threshold and the 1.0 KAS relay ceiling were not moved. Local wasm mass becomes diagnostic only. hand-storage is not described as a consensus oracle anywhere in code or docs.
+
+**2. New evidence that arrived after your review (NWT, independent of J2).** NWT ported rusty-kaspa v2.0.1 (cfafeb4c) consensus/core/src/mass/mod.rs line by line (calc_storage_mass incl. relaxed, compute mass, serialized size) and fed it the real parent outputs of four confirmed simnet transactions. All 8 node values match bit for bit: genesis 207,749/8,083; bet1 457,504/33,927; bet2 293,116/44,198; seal 231,312/60,422. J2's hand formula vs the NWT port: 338,084 random arithmetic-path shapes identical; relaxed path only over-estimates or under-estimates by rounding (max 2 mass units); 1.5M realistic shapes, 0 false admissions (J2 < 475k while true >= 500k). J2's compute figure is low solely because tx size was passed as 0.
+
+**3. Where Bettor's disposition differs from your recommended invariant.** You suggested shape in validated_shape_set AND hand-storage < 475,000. Bettor did not adopt a runtime validated-shape set. The gate is hand-storage < 475,000 with inputPluralities derived from UTXO facts (spk length, covenant flag), fail-closed when not derivable. Your option (b) is carried by the D-022 merge gate instead: every new production builder's first pinned-node 2.0.1 simnet submission must record the assertion signal next to the node value, and a mismatch means fixing the formula before merge. Reason: node acceptance stays the final gate before mainnet, and the failure of an under-estimate is a node rejection, not a loss of funds. Question for you: does NWT's parity evidence satisfy your option (a)? If you still want the runtime validated-shape set, please name the failure scenario it prevents that the D-022 gate does not.
+
+**4. Compute.** J2 was told to adopt NWT's exact compute guard (matches the node 4/4) instead of labelling compute unguarded. Sig placeholder margin 66 bytes.
+
+**5. D-023.** Agreed on your point about the custodial wallet: the planned change is a fail-closed 503 on network mismatch, not making custody mainnet-capable. /send and mainnet custodial creation stay disabled. No bot start, env write, funding, seeding or betting traffic is authorized by the runbook.
