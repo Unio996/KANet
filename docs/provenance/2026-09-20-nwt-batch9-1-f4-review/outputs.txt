@@ -1,0 +1,31 @@
+# NWT F4 笔(fa72891e)独立实测输出(独立检出 D:\kanet-nwt-cand, 独立 npm ci; 每次变异/探针后还原/删除, git status 空)
+
+## 1. 亲跑
+proto-settlement-c1 45/0   proto-claim-draw 57/0   proto-settlement-chain-checks 51/0   proto-settlement-pointers 26/0
+scan-non-test-sources.test.mjs(直接运行): 6 passed, 0 failed
+共享扫描器对真实仓库树: files=1234 ms=9
+
+## 2. 共享扫描器的真实探针文件(每个探针是一行【真实的违规 import】; 走 proto-claim-draw.test.mjs 的 B6 扫描 proto-chain-parents-fixtures)
+A-control-src/services                                  => B6 FAIL (被抓)
+B-src/data      (kasia-console/src/data/_x/b.js)         => B6 FAIL (被抓)    [F2 审时是绿]
+C-kasia-console/scripts (…/scripts/_x.mjs)               => B6 FAIL (被抓)    [F2 审时是绿]
+D-root-scripts-mts (scripts/_x.mts)                      => B6 FAIL (被抓)    [F2 审时是绿]
+E1-string-with-double-slash-same-line  const p = "a//b"; import {…} from '../lib/proto-chain-parents-fixtures.mjs';                   => B6 PASS (漏)
+E2-string-opens-block-comment          const s = "/*"; import {…} from '…fixtures.mjs'; const t = "*/";                                => B6 PASS (漏)
+E3-template-with-double-slash          const u = `x//y`; import {…} from "…fixtures.mjs";                                              => B6 PASS (漏)
+E4-regex-with-double-slash-class       const re = /[a-z]\/\/x/; import {…} from '…fixtures.mjs';                                       => B6 FAIL (被抓)
+同一守卫对 verifyStepInputsOnChainWithTimers(c1 测试的 F1-2 引用扫描):
+W1-control src/services 引用   => 44 passed, 1 failed (被抓)
+W2 src/data 引用               => 44 passed, 1 failed (被抓)
+W3 前面有含 // 字符串的同行引用  => 45 passed, 0 failed (漏)
+
+## 3. 我的 8 个 C 模块变异(nwt-mutate-f4.cjs; 每个跑 c1 测试; 还原后 sha256 一致)
+killed   NWT-k1 third arg to requestFacts dropped   RED(f=1)
+killed   NWT-k2 third arg carries budgetMs instead of ipcTimeoutMs   RED(f=1)
+killed   NWT-k3 third arg hard-coded 15000   RED(f=1)
+killed   NWT-k4 production entry no longer rejects a timers key   RED(f=1)
+killed   NWT-k5 production entry rejects only a defined timers value (misses {timers: undefined})   RED(f=1)
+killed   NWT-k6 test-only entry: clearTimeout not validated (f22)   RED(f=1)
+SURVIVED NWT-k7 production entry passes an injectable holder (uses opts.timers when present, AND no key check)   [等价: 键检查在同一入口更早抛出, 第二层不可达]
+killed   NWT-k8 verifyCore budget timer cleared with the global clearTimeout, not the injected one   RED(f=2)
+restored identical: true
