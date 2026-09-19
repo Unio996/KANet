@@ -1,0 +1,20 @@
+# NWT 9-2a 出口分闸审: 我的探针(真导出函数+桩发送)对 ed6bb165
+REAL-ID producer key market/64-hex/seal: isValidSettlementIntentKey=true  exit(PSDE=1)=PASS
+REAL-ID producer key market/64-hex/resolve: isValidSettlementIntentKey=true  exit(PSDE=1)=PASS
+REAL-ID producer key claim/64-hex/convert_to_claim: isValidSettlementIntentKey=true  exit(PSDE=1)=PASS
+REAL-ID producer key claim/64-hex/claim_draw: isValidSettlementIntentKey=true  exit(PSDE=1)=PASS
+uuid-id control  market/uuid/seal: isValid=false  exit(PSDE=1)=REJECT
+MATRIX A settle(valid,uuid)   PDE0/PSDE0=settlement_driver_dis  PDE1/PSDE0=settlement_driver_dis  PDE0/PSDE1=pass  PDE1/PSDE1=pass
+MATRIX B settle(invalid)      PDE0/PSDE0=settlement_intent_key_invalid  PDE1/PSDE0=settlement_intent_key_invalid  PDE0/PSDE1=settlement_intent_key_invalid  PDE1/PSDE1=settlement_intent_key_invalid
+MATRIX C genesis:             PDE0/PSDE0=driver_dis  PDE1/PSDE0=pass  PDE0/PSDE1=driver_dis  PDE1/PSDE1=pass
+MATRIX C absent               PDE0/PSDE0=driver_dis  PDE1/PSDE0=pass  PDE0/PSDE1=driver_dis  PDE1/PSDE1=pass
+S9b String object       => {"ok":false,"err":"proto_intent_key_not_string"}
+S9b object with toJSON  => {"ok":false,"err":"proto_intent_key_not_string"}
+S9b number / array / null => ["proto_intent_key_not_string","proto_intent_key_not_string","proto_intent_key_not_string"]
+undefined-valued own key  => {"ok":true,"sent":1} ; wire JSON of the sent snapshot has intent_key? false
+getter changing value per read (1st=genesis, later=settle): result={"ok":true,"sent":1}  reads=1  sent intent_key prefix=genesis:
+Proxy changing value per read: result={"ok":true,"sent":1} sent prefix=genesis: (gate and wire agree? C-class passed and sent value is genesis)
+READ get_address_utxos (both switches off, even with a non-string intent_key field) => pass
+READ get_mempool_entry (both switches off, even with a non-string intent_key field) => pass
+READ check_utxo_landed (both switches off, even with a non-string intent_key field) => pass
+READ get_past_median_time (both switches off, even with a non-string intent_key field) => pass
