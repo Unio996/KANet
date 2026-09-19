@@ -1,0 +1,79 @@
+﻿# NWT 五审(P2 runbook v0.5 @ 8bc77a12)独立实测输出 -- 独立检出 D:\kanet-nwt-cand; 代码块按行号从 runbook 抽到 scratch; 内存限令期间只跑单文件/小脚本
+
+## 1. 守卫测试 126 项(BOOT_GUARD_ROOT 指向我的独立检出)
+ℹ tests 126
+ℹ suites 0
+ℹ pass 126
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 12191.9497
+
+## 2. N4-1 对抗探针(真实 index.js 上追加/插入新形状, 走守卫自己的对账)
+P0 control (real index.js): problems=0 uses=147 timers=3 unparsed=0
+RED   (expected red) C1 control: 追加带调用的动态起动 (const {startX}=await import; startX())  :: UNDECLARED use of startRogue (from ./services/rogue.js, dynamic-destructure, line 1030) -- declare it in CRON_
+RED   (expected red) C2 control: 裸 await import(...) 无绑定  :: UNPARSED shape at line 1030: dynamic import() in a shape the analyzer cannot classify :: '; await startExterna
+RED   (expected red) C3 control: 孤立的 setInterval 追加在文件尾  :: UNDECLARED timer/process start setInterval( in index.js (line 1030) -- declare it in INDEX_TIMERS with a kind 
+GREEN (expected hole?) U1 静态命名导入,【从不使用】
+GREEN (expected hole?) U2 静态默认导入,【从不使用】
+GREEN (expected hole?) U3 静态命名空间导入,【从不使用】
+GREEN (expected hole?) R1 export * from 相对模块(再导出也会执行该模块顶层)
+GREEN (expected hole?) R2 export { x } from 相对模块
+GREEN (expected hole?) T1 新 setInterval 紧挨在已声明的 exchange.expireTick 定时器【之前】(窗口 before=2)
+GREEN (expected hole?) T2 新 setInterval 紧挨在已声明的 console.heartbeatFile 定时器【之前】
+GREEN (expected hole?) T3 新 setInterval 在已声明定时器【之后 1 行】(窗口 after=1): 插在 exchange.expireTick 行之后
+GREEN (expected hole?) T4 别名: const si = setInterval; si(fn, 5)
+RED   (expected red) T5 globalThis.setInterval(...)(孤立处)  :: UNDECLARED timer/process start .setInterval( in index.js (line 1030) -- declare it in INDEX_TIMERS with a kind
+
+## 3. 真实 index.js: 导入但从未引用的相对导入
+relative static import bindings: 144; counted as used: 141; NOT counted (imported, never referenced): 3
+  unused: detectStopRequest from ./services/anti-spam.js
+  unused: startMonitor from ./services/monitor-service.js
+  unused: stopMonitor from ./services/monitor-service.js
+distinct relative modules imported statically: 115
+
+## 4. 取消注释重新启用被禁用的 startMonitor()
+control (real file): problems = 0
+startMonitor() uncommented: problems = 1 :: UNDECLARED use of startMonitor (from ./services/monitor-service.js, named, line 1002) -- declare it in CRON_REGISTRY (a boot starter: kind +
+
+## 5. index.js 静态/动态导入的相对模块里, 模块顶层(列0)的定时器/子进程启动
+relative modules named in index.js: 121; read: 121; missing: 0
+column-0 timer/process starts found in those modules: 0
+
+## 6. N4-2 Invoke-BoundedProcess 自有向量(抽出函数原文)
+extracted lines 183..213 (2652 chars)
+a busy-loop 2s cap: Code=-2 TimedOut=True elapsed=2.1s beats=2 beatsWithDiff=0 killedPid=29104 childAlive=False bystanderAlive=True
+b exit code + both streams: Code=7 TimedOut=False Text='OUT-LINEERR-LINE'
+c argv fidelity: sent: ["a b","q\"uote","C:\\some dir\\","","--x=1 2","plain"]
+c argv fidelity: received: Code=0 Text=["a b","q\"uote","C:\\some dir\"  --x=1","2 plain "]
+d grandchild: Code=-2 TimedOut=True grandchildPid=30588 grandchildAliveAfterParentKilled=False
+e 64MB stdout: Code=0 returnedTextChars=67108864 (no cap on returned text)
+tmp dir removed: True
+
+## 7. N4-2 孙进程: 心跳文件判存亡
+parent result: Code=-2 TimedOut=True elapsed=4.1s  grandchildPid=23752
+beats seen during the wait (heartbeat value the grandchild wrote):
+  beat: hb=1789848713958
+  beat: hb=1789848714985
+  beat: hb=1789848716011
+  beat: hb=1789848717044
+after the parent was killed: heartbeat before=1789848717044 after 1.5s=1789848717044  => grandchild still running: False
+grandchild process exists: False
+tmp dir removed: True
+
+## 8. N4-3 换种子 + 扩编码/空白集 500 文件 vs 真实启动器(Win32 环境块 oracle, 名字十六进制+值配对)
+cases=500 identical=500 guardUNKNOWN=0 DIFFER=0
+by encoding: {"utf8bom":{"n":203,"same":203,"diff":0,"unknown":0},"utf16le":{"n":76,"same":76,"diff":0,"unknown":0},"utf8nobom":{"n":141,"same":141,"diff":0,"unknown":0},"utf16be":{"n":80,"same":80,"diff":0,"unknown":0}}
+
+## 8b. 阴性对照: 朴素 JS 解析对同一 oracle
+NAIVE JS parse vs the same oracle: identical=260 DIFFER=240  (must be clearly > 0 for the 500/500 result to mean anything)
+
+## 8c. 旧 oracle(字典按名字为键)的 11 处"分歧"= oracle 折叠零宽名字的伪影, 已被 8 取代(此段是旧 oracle 的原输出摘要)
+cases=500 identical=489 DIFFER=11 (旧 oracle: PowerShell [ordered] 字典按变量名为键, U+FEFF/U+200B/U+2060 名字被折叠); 换 Win32 环境块后 500/500 一致
+
+
+
+## 9. mainnet-boot-sequence.ps1 -SelfTest (路径全在临时目录; 非提权)
+lines starting PASS = 105 ; lines starting FAIL = 0 ; SELFTEST failures=0
+
