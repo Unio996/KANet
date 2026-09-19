@@ -544,7 +544,7 @@ t('⑤真实tx算出的output covenant_id与builder返回的rootCloseCovId/token
       kaspa, network: 'mainnet', marketId: MARKET_ID, committeePubkeyHex: g.committeePubkeyHex, committeePrivkeyEnvelope: g.committeePrivkeyEnvelope, deadlineMs: deadline, rootCloseTmplHash: g.rootCloseTmplHash,
       rootCloseOutpoint: { txid: 'ab'.repeat(32), vout: 0 }, rootCloseUtxoScriptPublicKeyHex: spk, rootCloseCovId: 'cd'.repeat(32), sealedState: currentState,
       newWinningSide: NEW_WINNING_SIDE, newPayoutRootHex: NEW_PAYOUT_ROOT_HEX, tokPrefixHex, tokSuffixHex, feeUtxo: closeCommitFeeUtxo, relayChangeScriptPublicKeyHex: relaySpkHex, absFeeCapSompi: closeCommitCap,
-      ...(withEvidence ? { pmtEvidence: { pastMedianTimeMs: Date.now() - lagSec * 1000 } } : {}),
+      ...(withEvidence ? { pmtEvidence: { pastMedianTimeMs: Date.now() - lagSec * 1000, readAtMs: Date.now(), source: 'relay' } } : {}),
     });
   };
   const c3Results = [];
@@ -563,8 +563,23 @@ t('⑤真实tx算出的output covenant_id与builder返回的rootCloseCovId/token
   const c3Ev = await c3Args(133, { withEvidence: true });
   t('⑥c C3: pmtEvidence 自身未通过 pmt 判据(pmt 只领先 10s) ⇒ 构造期 fail-closed(builder 复核同一个判据); 墙钟早于 deadline(本机时钟严重偏差) ⇒ 拒绝', () => {
     const a = c3Ev;
-    throws(() => buildCloseCommitTxJson({ ...a, pmtEvidence: { pastMedianTimeMs: a.deadlineMs + 10_000 } }), /pmtEvidence未通过pmt判据/);
-    throws(() => buildCloseCommitTxJson({ ...a, deadlineMs: Date.now() + 3_600_000, pmtEvidence: { pastMedianTimeMs: Date.now() + 3_700_000 } }), /墙钟不可能早于deadline/);
+    throws(() => buildCloseCommitTxJson({ ...a, pmtEvidence: { pastMedianTimeMs: a.deadlineMs + 10_000, readAtMs: Date.now(), source: 'relay' } }), /pmtEvidence未通过pmt判据/);
+    throws(() => buildCloseCommitTxJson({ ...a, deadlineMs: Date.now() + 3_600_000, pmtEvidence: { pastMedianTimeMs: Date.now() + 3_700_000, readAtMs: Date.now(), source: 'relay' } }), /墙钟不可能早于deadline/);
+  });
+  t('⑥d S5(9-2b): pmtEvidence 新鲜度——source 缺失 / 非 relay / readAtMs 缺失或过期(>60s)/ 远在未来 ⇒ 证据被忽略, 回退 300s 墙钟守卫(墙钟滞后 133s 的市场仍被拦); 新鲜的 relay 证据 ⇒ 放行', () => {
+    const a = c3Ev;                                                    // 墙钟滞后 133s(deadline+164s): 无可信证据时必被 300s 守卫拦
+    const pmt = a.pmtEvidence.pastMedianTimeMs;
+    const ignored = [
+      { pastMedianTimeMs: pmt },                                                                  // 无 source / readAtMs(旧形状)
+      { pastMedianTimeMs: pmt, readAtMs: Date.now(), source: 'local' },                            // 来源不是 relay
+      { pastMedianTimeMs: pmt, source: 'relay' },                                                  // 无 readAtMs
+      { pastMedianTimeMs: pmt, readAtMs: Date.now() - 61_000, source: 'relay' },                   // 过期 61s
+      { pastMedianTimeMs: pmt, readAtMs: Date.now() + 60_000, source: 'relay' },                   // 远在未来
+      { pastMedianTimeMs: pmt, readAtMs: 'now', source: 'relay' },                                 // 非数字
+    ];
+    for (const ev of ignored) throws(() => buildCloseCommitTxJson({ ...a, pmtEvidence: ev }), /fail-closed.*余量/);
+    const okNow = buildCloseCommitTxJson({ ...a, pmtEvidence: { pastMedianTimeMs: pmt, readAtMs: Date.now() - 59_000, source: 'relay' } });   // 59s 内仍新鲜
+    if (!okNow.txJson) throw new Error('新鲜的 relay 证据应放行');
   });
 }
 

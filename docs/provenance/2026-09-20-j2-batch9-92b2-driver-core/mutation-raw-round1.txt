@@ -1,0 +1,3 @@
+BASELINE
+  core: exit=1 22 passed, 1 failed
+BASELINE 不绿, 中止

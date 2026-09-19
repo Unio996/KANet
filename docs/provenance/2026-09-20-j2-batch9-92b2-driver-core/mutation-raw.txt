@@ -1,0 +1,32 @@
+BASELINE
+  core: exit=0 23 passed, 0 failed
+  asm: exit=0 44 passed, 0 failed
+Z1: KILLED [core:exit=1] :: 不检查依赖已 landed
+Z2: KILLED [core:exit=1] :: pmt 门不放行也继续构造
+Z3: KILLED [core:exit=1] :: pmtEvidence 不传给 builder
+Z4: KILLED [core:exit=1] :: 不留原始错误(传输错被 driveIntent 包装后误分类)
+Z5: KILLED [core:exit=1] :: C1 通过不清传输计数
+Z6: KILLED [core:exit=1] :: 广播失败也报编程错误
+Z7: KILLED [core:exit=1] :: refund_flip 探测到了但不置 ambiguous
+Z8: KILLED [core:exit=1] :: refund_flip 探测对任何错误都触发
+Z9: KILLED [core:exit=1] :: 没 landed 也记账
+Z10: KILLED [core:exit=1] :: minDepth 写死
+Z11: KILLED [core:exit=1] :: cap 不生效
+Z12: KILLED [core:exit=1] :: prepared_stale 不幂等
+Z13: KILLED [core:exit=1] :: SLA 报警不幂等
+Z14: KILLED [core:exit=1] :: 报警名不校验闭集
+Z15: KILLED [core:exit=1] :: submitted / landed 也再走构造
+Z16: KILLED [core:exit=1] :: prepared 行也检查依赖(应只同字节重播)
+Z17: KILLED [core:exit=1] :: 广播的 intent_key 写错
+Z18: KILLED [core:exit=1] :: relay fee 拒绝不报警
+Z19: KILLED [core:exit=1] :: close_commit 的意图 step 名写错
+Z20: KILLED [core:exit=1] :: pmt 读抛错不算读失败
+Z21: KILLED [core:exit=1] :: pmt 读失败每次都报(不止第 3 次)
+Z22: KILLED [core:exit=1] :: 核心又拖进 db/client
+Z23: KILLED [asm:exit=1] :: S5: builder 不校验证据来源
+Z24: KILLED [asm:exit=1] :: S5: builder 不校验证据新鲜度
+Z25: KILLED [asm:exit=1] :: S5: 新鲜度阈值放宽到 10 分钟
+RESTORED
+  core: exit=0 23 passed, 0 failed
+  asm: exit=0 44 passed, 0 failed
+SUMMARY mutants=25 survivors=0 restored_green=true
