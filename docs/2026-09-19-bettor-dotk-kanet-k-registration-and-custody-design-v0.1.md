@@ -74,5 +74,5 @@
 
 ## 5. 未定 / 下一页
 
-- `kanet.k` 收款地址是否即持有公钥地址、记录（网址 / 头像）存在哪一层——J1 侦察回答后补 §1。
+- ~~`kanet.k` 收款地址是否即持有公钥地址、记录（网址 / 头像）存在哪一层~~ **J1 侦察已答（`…T12-05Z-j1-DONE-dotk-recon-a-to-e-source-read.md`）**：① 付款方与持有方分离**不用改 SDK 任何一行**（`Account { address, ownerType, owner }`，`registrar.js:348/381/606-620`）；② **注册的 reveal 不带任何签名**（`registrar.d.ts:238-240`："knowing the claim's preimage is its whole authorization"）⇒ 持有钥匙从头到尾不进 SDK、不进垫片、不在这台机器上出现，只以 x-only 公钥出现在 `Account.owner`；③ `addressFor` = `resolve()` 后取 `resolved.address`，`proven === false` 即抛 `RefutedError`；`deedAddress(name, address)` 纯本地推导（`dotk.js:167-171`）；④ **记录（url / avatar / github）在链上**——随转让铸出的 card 输出（`registrar.js:289` `cardMint`），API 只负责列出、节点按规则证否；本页 v0.1 "怀疑在索引器"的猜测**更正**；⑤ SDK 零 `process.env` / `fs` / `child_process`，出口只有可注入的 `fetch` 与我们传 URL 的 WebSocket，节点方法恰四个，`submitTransaction` 恒 `allowOrphan: false`；⑥ 垫片规则：`ownerSigInputs` 非空即 throw，`supportsOwnerScheme` 只对持有者的 ownerType 回 true。
 - J1 同日 NOTE 页（dotk 手法搬到长尾分成金库）：**另起设计票，不并入本页**，排在结算后半程之后。
