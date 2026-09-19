@@ -38,7 +38,7 @@ D-021 合规：仅 simnet 数据，无真实地址、无私钥。
 可以用只读 RPC 事后取回原始值，**不需要重新提交**。本笔 market_seal 的原始记录见
 `raw-onchain-market-seal-node-record.txt`：storageMass=231,312、mass=231,312、computeMass=60,422，
 与批3 provenance 表一致，且是节点原始字段而非解析后转述。
-（register_append#1/#2 同样可以这样取回；未做，因非本次范围。）
+（register_append#1/#2 与 genesis 同样取回了，见文末"补充"。）
 
 ## 没有证明的
 
