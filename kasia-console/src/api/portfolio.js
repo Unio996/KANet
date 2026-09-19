@@ -15,8 +15,10 @@
 
 import { sqlite } from '../db/client.js';
 import { decrypt } from '../services/crypto.js';
+import { loadWatchAccountsView } from './watch-accounts.js';   // D-028: 冷存(只读)账户,只在"全部 agents"视图并入
 
-export async function registerPortfolioRoutes(fastify) {
+// loadWatch: 测试注入点(默认 = 生产的 loadWatchAccountsView)
+export async function registerPortfolioRoutes(fastify, { loadWatch = loadWatchAccountsView } = {}) {
 
   // ── GET /portfolio — the page ──
   fastify.get('/portfolio', async (request, reply) => {
@@ -72,9 +74,22 @@ export async function registerPortfolioRoutes(fastify) {
       ? totalKas + (grandTotalUsd / kasPriceUsd)
       : totalKas;
 
+    // D-028 (设计 v0.2 §2.3, NWT O4-1): 冷存(只读)账户【只在"全部 agents"视图(无 relayId)】并入——单个 agent 视图不含冷存(冷存不属于任何 agent)。
+    // totals.kas / grandTotalKas 的既有含义不变(仅热钱包);冷存另列 watchKas,页面 headline 用 grandTotalKasWithWatch = grandTotalKas + watchKas。
+    // 读不到 ⇒ 该冷存账户 status='unavailable'(不计入 watchKas,watchUnreadable 计数),绝不当 0。
+    let watch = null;
+    if (!relayId) { try { watch = await loadWatch(); } catch { watch = null; } }
+    const watchTotals = watch ? {
+      watchKas: watch.watchKas,
+      kasAll: totalKas + watch.watchKas,                                   // 纯 KAS 口径(热 KAS + 冷 KAS)
+      grandTotalKasWithWatch: grandTotalKas + watch.watchKas,              // 页面 headline 口径(含 USD 资产折 KAS)
+      watchUnreadable: watch.watchUnreadable,
+    } : {};
+
     return reply.send({
       ok: true,
       agents: agentSummaries,
+      ...(watch ? { watchAccounts: watch.accounts } : {}),
       totals: {
         kas: totalKas,
         stableUsd: totalUsdStable,
@@ -84,6 +99,7 @@ export async function registerPortfolioRoutes(fastify) {
         grandTotalUsd,
         grandTotalKas,
         openPositionCount,
+        ...watchTotals,
       },
       kasPriceUsd,
       timestamp: new Date().toISOString(),

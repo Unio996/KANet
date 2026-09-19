@@ -6344,5 +6344,29 @@ export function runMigrations() {
   `);
   console.log('[migrate] v210: proto_settlement_intents 建表(六个结算builder的意图状态机, pragma守卫幂等).');
 
+  // ── v211 (2026-09-20, KANet-UI · D-028 Owner 铁令"所有资产必须在主网 console 全部可见", 设计 docs/2026-09-20-kanetui-d028-watch-only-accounts-design-v0.2.md,
+  //   NWT 设计审 60420ed4 / a74c7a6a GREEN): watch_accounts —— 只读(冷存)账户注册表。
+  //   🔴 结构性保证 = 这张表【没有任何密钥列】(无 mnemonic/privkey/hint), custody 用 CHECK 钉成唯一取值 'cold_no_key':
+  //      将来有人想复用它存有钥账户, 必须改迁移(会红)。它【不进 relay_nodes】: relay_nodes 有约 50 处"这是本地 agent"语义的消费者
+  //      (anti-spam isSibling / autoTaker 自接单跳过 / 交易任务遍历 / exchange 候选执行 agent ...), 无钥行插进去默认被卷入; 独立表 = 默认不可见。
+  //   写入方: 只有一次性登记脚本 kasia-console/scripts/watch-account-register.mjs(默认 dry-run, --apply 才写; 不开 HTTP 写口)。
+  //   读取方: src/services/watch-balance.js 与 src/api/watch-accounts.js / portfolio.js(只 GET)。
+  //   address 入库前统一成 kaspa-wasm Address.toString() 规范形式(UNIQUE 是原文唯一, 规范化在脚本里做)。
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS watch_accounts (
+      id          TEXT PRIMARY KEY,
+      name        TEXT NOT NULL,
+      chain       TEXT NOT NULL DEFAULT 'kaspa',
+      network     TEXT NOT NULL DEFAULT 'mainnet',
+      address     TEXT NOT NULL,
+      custody     TEXT NOT NULL DEFAULT 'cold_no_key' CHECK (custody = 'cold_no_key'),
+      note        TEXT,
+      created_at  TEXT NOT NULL,
+      updated_at  TEXT NOT NULL,
+      UNIQUE (chain, network, address)
+    );
+  `);
+  console.log('[migrate] v211: watch_accounts 建表(只读/冷存账户注册表, 无密钥列, CHECK custody=cold_no_key; D-028).');
+
   console.log('[migrate] DB migrations complete.');
 }

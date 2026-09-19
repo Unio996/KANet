@@ -889,6 +889,16 @@ M0c-1 app provision grant registry（2026-07-23, 设计 `docs/2026-07-23-m0c-1-a
   > - 详见 `docs/provenance/2026-09-15-j2-d020-register-append-single-tx-verification/`（6条真实构造交易向量 + witness 编码逐字节验证）与 `docs/DECISIONS.md` D-020。
 > 📌 **状态注记（2026-09-15 · J2）**：KAS 侧资金/签名来源那句"待 Owner 定"已过期——**已裁定 (B′)**：专属 `proto-` 前缀 relay 身份（`PROTO_RELAY_ID` env 钉死+`name` 前缀/余额上限双重 fail-closed 断言）+ 既有 relay IPC 通道（`sendCommand`/`sendCommandAsync`）+ 新 relay 命令 `covenant_broadcast`（`kasia-relay/src/lib/covenant-broadcast.mjs`/`covenant-broadcast-relay.mjs`，含 `GENESIS_OUTPUT_SOMPI`/`CONTINUATION_OUTPUT_SOMPI`=20,000,000 sompi 签名前强制校验），不新造密钥存储/不违反 Console-不碰链。见 `docs/2026-09-14-j2-proto-v0-backend-api-design-v0.1.md` §6/§9。
 
+### watch_accounts（v211, 0 条, 登记前）
+只读/冷存账户注册表（2026-09-20，KANet-UI，D-028 Owner 铁令"所有资产必须在主网 console 全部可见"；设计 `docs/2026-09-20-kanetui-d028-watch-only-accounts-design-v0.2.md`，NWT 设计审 `60420ed4`/`a74c7a6a` GREEN）。
+- **用途**：让"console 不持钥的地址"也出现在资产页——例如 9/14 迁移被冷名单拒导入的两个冷存账号。**它不是账户，是"要看的地址"**。
+- **字段**：`id`（PK，uuid）/`name`（保留原名）/`chain`（默认 `kaspa`）/`network`（默认 `mainnet`）/`address`（入库前统一成 `kaspa-wasm` `Address.toString()` 规范形式）/`custody`（**CHECK 只允许 `'cold_no_key'`**）/`note`（一句话来历，不含金额）/`created_at`/`updated_at`；`UNIQUE(chain, network, address)`（原文唯一，规范化由登记脚本做）。
+- **🔴 没有任何密钥列**（无 mnemonic/privkey/hint）——"不持钥"由 schema 承担，不是约定。将来有人想复用此表存有钥账户，必须改迁移（会红）。
+- **🔴 它不是 `relay_nodes`**：`relay_nodes` 有约 50 处"这是本地 agent"语义的消费者（anti-spam `isSibling`、autoTaker 自接单跳过、交易任务遍历、exchange 候选执行 agent、Mind 调度 …），无钥行插进去默认被卷入；独立表 = 默认不可见。**新增读取这张表的代码只许出现在白名单文件**（迁移 `src/db/migrate.js`、`src/api/watch-accounts.js`、`src/lib/watch-account-register.mjs`、`kasia-console/scripts/watch-account-register.mjs`、测试；余额读取模块 `src/services/watch-balance.js` 与 `src/api/portfolio.js` 不出现该标识符，经 `watch-accounts.js` 取行），由 `src/services/watch-accounts.static.test.mjs` 的静态扫描守（用共享扫描器 `test-fixtures/source-scan/`，扫描根含 `kasia-console/scripts`）。
+- **写入方**：只有一次性登记脚本 `kasia-console/scripts/watch-account-register.mjs`（默认 dry-run，`--apply` 才写；输入走 `--from-file`/stdin，不接受命令行地址/名字；**不开 HTTP 写口**，`api/backup.js` **不含**此表）。
+- **读取方**：`GET /api/watch-accounts[/:id]`、`GET /api/portfolio/unified`（无 `relayId` 时并入 `watchAccounts` 与 `totals.watchKas/kasAll/grandTotalKasWithWatch`）。余额读取见 `src/services/watch-balance.js`（`KASPA_RPC_LOCAL_ONLY=1` 时零 REST 外发；不可读 ⇒ `unavailable`，**绝不显示 0**）。
+- **陷阱**：登记脚本拒绝已存在于 `relay_nodes`/`agent_wallets`/`watch_accounts` 的地址（规范化后比，防"热+冷"重复计入总额）；"改成可花" ≠ 改这张表——需走正规 relay 导入并另获 Owner 钱路批准（D-028 §4）。
+
 ---
 
 ## 索引规范
@@ -917,6 +927,8 @@ M0c-1 app provision grant registry（2026-07-23, 设计 `docs/2026-07-23-m0c-1-a
 > 注：v125–v156 尚未在本表逐条回填（r281 scope 外）；新增 migration 接 v157 之后。v176-v183、v185-v186 未逐条回填（各自设计稿/COORD-LEDGER 有账），本行版本号以 migrate.js 实际为准。
 
 ## 版本历史（近期）
+
+- **v211 (2026-09-20, KANet-UI · D-028 只读账户可见)**: 新表 `watch_accounts`（只读/冷存账户注册表，**无任何密钥列**，`custody` CHECK 只允许 `'cold_no_key'`，`UNIQUE(chain,network,address)`）。用途：让 console 不持钥的地址（9/14 迁移被冷名单拒导入的两个冷存账号）也出现在资产页。前提确认：新表，不改任何既有表，无存量数据，迁移幂等（`CREATE TABLE IF NOT EXISTS`）。写入方：一次性登记脚本 `kasia-console/scripts/watch-account-register.mjs`（默认 dry-run；不开 HTTP 写口）。读取方：`GET /api/watch-accounts[/:id]` 与 `GET /api/portfolio/unified`（无 `relayId` 时）。设计 `docs/2026-09-20-kanetui-d028-watch-only-accounts-design-v0.2.md`（NWT 设计审 `60420ed4`/`a74c7a6a` GREEN）。
 
 - **v205 (2026-09-14 D-019 迁移第 5a 笔·PayoutShard/ShardLeaf 代币化 ctor-only 列)**: `payout_shards` 加
   `token_tmpl_hash`/`claim_tmpl_hash`/`market_suffix_hash`（TEXT，允许 NULL）+ `market_shards` 加
