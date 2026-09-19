@@ -1,0 +1,28 @@
+# NWT D-028 设计审(0df8b5ea) —— 只读实测与读码证据。不含任何地址/余额/账号名; 只有形状、布尔、计数。
+# 独立检出 D:\kanet-nwt-cand @ 0df8b5ea; 活节点只读 RPC(一个短命客户端); 活库只读打开; 真实迁移临时库。
+
+## 1. d028-readonly-probes.mjs 的输出
+(b) relay_nodes.address  {"rows":18,"withKaspaPrefix":18,"allLowercase":18,"distinct":18}
+(b) agent_wallets rows=0 by chain={}
+(b) agent_wallets(kaspa) {"rows":0,"withKaspaPrefix":0,"allLowercase":0,"distinct":0}
+(a) getServerInfo: isSynced=true hasUtxoIndex=true networkId=mainnet
+(a) known hot address : entries.length=1 entry[0] keys=address,balance typeof balance=bigint balance>0=true
+(a) never-used address : entries.length=1 entry[0]=present typeof balance=bigint value===0n:true
+(a) batch [hot, unused]: entries.length=2 (order preserved? first is hot: true)
+(a) getKasBalance-style expression Math.round(Number(entries?.[0]?.balance || 0n)/1e8*1000)/1000 on the never-used address = 0  (a synced node and an unsynced/empty response are indistinguishable here)
+(c) tables=122 address-like columns=64
+(c) columns whose name suggests OUR own / local address: address_balances.address, agent_wallets.address, identities.address, oracle_pool_membership.relay_address, oracle_stake_enrollments.relay_address, pending_actions.local_address, relation_states.local_address, relay_nodes.address, reputation_summary.address, scout_checkpoint.address, tx_records.local_address, whale_watchlist.address
+(注: "never-used address" 由固定的全 0x07 私钥推出的合法地址, 不是任何真实账号地址)
+
+## 2. 主网 env 键核查(只核存在与是否恰为 1; 未读其它值)
+KASPA_RPC_LOCAL_ONLY: present=1 equals1=1
+rpc-health.js:27  const LOCAL_ONLY = process.env.KASPA_RPC_LOCAL_ONLY === '1';   // G2-1: TN12 生产 = 1 ⇒ 不做 Resolver 发现(fail-closed 到 null)
+rpc-health.js getWorkingRpc(): LOCAL_ONLY 分支本机失败 ⇒ return { url: null, isLocal: false }(fail-closed)
+
+## 3. 现有读码事实
+api/relay.js:704-726 getKasBalance: RPC 路径 Math.round(Number(entries?.[0]?.balance || 0n)/1e8*1000)/1000 (空/未同步 => 静默 0, 不看 isSynced); RPC 失败后无条件 fetch https://api.kaspa.org/addresses/<addr>/balance (不受 KASPA_RPC_LOCAL_ONLY 约束)
+services/preprune-capture-worker.mjs _readNodeSynced: 读 env.KASPA_RPC_URL 那台节点的 getServerInfo.isSynced(=== true 才 synced; 网络不符/读不到 fail-closed); isNodeSyncedCached 30 s TTL
+api/portfolio.js:34-35 relay_nodes WHERE address IS NOT NULL; totals: totalKas / grandTotalUsd / grandTotalKas(=totalKas + grandTotalUsd/kasPriceUsd)
+api/backup.js: export/import 备份 identities / relation_states(分类信任) / relay_nodes mind 配置; fastify.post('/api/backup/import') 是写路径
+全仓(非迁移/非测试)无"遍历所有表"的重置/导出/清理: sqlite_master 只出现在按名字的存在性检查与索引检查(pool.js:3603, u1-*, *-index-v199/v200/v201 ...)
+address_balances: 巨鲸/交易所余额历史追踪(api/chain-data.js:179-241), 与冷存读取无关
