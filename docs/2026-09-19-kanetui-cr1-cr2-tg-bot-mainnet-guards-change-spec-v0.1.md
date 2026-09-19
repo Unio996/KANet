@@ -2,6 +2,8 @@
 
 > **Status**: CURRENT
 >
+> 🔴 **状态注记（2026-09-19 · KANet-UI · 出处 `docs/DECISIONS.md` D-024）：搁置——Owner 裁定"暂停电报接线，等 v0 API 立项"。CR-1 / CR-2 / CR-3 均不落码、不建 worktree。复启须对着当时代码重核，不能直接照做。** 正文未改，保留为搁置参照；其中行号为 2026-09-19 当时值。
+>
 > 起草 KANet-UI · 2026-09-19 · 出处：Bettor 对 `docs/2026-09-19-kanetui-mainnet-tg-bot-wiring-runbook-v0.1.md`（下称 runbook）§0 B-1 / B-2 的裁定（对等消息，账本记录待补）。
 >
 > **执行门**：① 本页 → **NWT 审** → GREEN 后才落码；② 落码**只在独立 worktree**（`scratch/_kanetui_wt_tgbot-cr`，基于生产检出当前 HEAD 的侧分支），**不在生产检出 `D:\kanet-tn12` 改任何文件**；③ 合入主线与推送由 Bettor 执行；④ 主网上启动 bot 仍须 runbook 的 Owner 开闸，本页与之无关。

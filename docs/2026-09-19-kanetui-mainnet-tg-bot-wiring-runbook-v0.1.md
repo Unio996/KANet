@@ -2,6 +2,8 @@
 
 > **Status**: CURRENT
 >
+> 🔴 **状态注记（2026-09-19 · KANet-UI · 出处 `docs/DECISIONS.md` D-024）：搁置——Owner 裁定"暂停电报接线，等 v0 API 立项"。复启须对着当时代码重核，不能直接照做。** 复启条件是 Owner 立项"bot 接 proto v0 API"，届时 B-1 至 B-5、CR-1/2/3 与 v0 API 接入合并规划，一次设计、一次 Owner 批。下面正文未改，保留为搁置参照；其中行号、"起草时实测"读数（表行数、进程、迁移末块版本等）均为 2026-09-19 当时值。
+>
 > 起草 KANet-UI · 2026-09-19 · 依据 `docs/DECISIONS.md` D-023、账本 1499 / 1500 · **草稿，待 Bettor 审，未执行**。
 >
 > **v0.2 变更（Bettor 对 v0.1（9f00bb57）的对等消息裁定，账本记录待补）**：OQ-1 → 走**路径 X**（DB 配置，不动 env 文件、不重启 console）；OQ-2 → 本次**不写 `OWNER_BOT_*`、不起 owner-bot**；OQ-3 → **另建 broker 身份，不复用 `Trader-A`**，不改角色、不充值、不分配 adapter，助记词只显示在操作者屏幕、**不指定备份介质**（身份无资金，丢了重建）；OQ-4 → 接受 CR-1 原地改、TN12 bot 路径失效；OQ-5 → 只读比哈希，**相同才轮换**（§3.6）；OQ-6 → CR-2 由 **Bettor 批 + NWT 审，不需 Owner**；CR-1/CR-2 批准做设计与实现，**在独立 worktree 里做，先出变更说明交 NWT 审**（见 `docs/2026-09-19-kanetui-cr1-cr2-tg-bot-mainnet-guards-change-spec-v0.1.md`）；**CR-3 归 Owner 批，本人不动**。新增：§3.6（token 是否加密 / 清除方式 / ingest_secret 比对判据）、§9（接线完成后 bot 在主网能做什么、不能做什么）。
