@@ -9,7 +9,10 @@
 // 之所以用动态 import: 静态 import 会被提升到检查之前, 前提不满足时 rpc-listener 的顶层 throw 会先抛出泛泛的错。
 
 // ⟦PREREQ-CHECK-BEGIN⟧
-const _KNOWN_NETWORKS = ['mainnet', 'testnet-12', 'devnet', 'simnet'];
+// 网络名清单取自 shared 的 NETWORKS(与 rpc-listener 顶层的 configuredNetwork 同一份单一来源), 不在测试里手写副本(NWT A 笔审 SHOULD, 9-1 F2)。
+// shared/lib/kaspa-network.mjs 是纯逻辑(不 import kaspa-wasm), 动态 import 它不会触发 rpc-listener 的顶层 throw。
+const { NETWORKS: _NETWORKS } = await import('../../shared/lib/kaspa-network.mjs');
+const _KNOWN_NETWORKS = Object.keys(_NETWORKS);
 if (!_KNOWN_NETWORKS.includes(process.env.KASPA_NETWORK)) {
   console.error(`[drain-finality-safe-blocks.test] 前提不满足: 环境变量 KASPA_NETWORK 未设置或不在 {${_KNOWN_NETWORKS.join(', ')}} 内(当前: ${JSON.stringify(process.env.KASPA_NETWORK)})。`);
   console.error('  rpc-listener.mjs 顶层读它、未设即抛泛泛的错。本测试不连接任何节点, 用 simnet 即可。');

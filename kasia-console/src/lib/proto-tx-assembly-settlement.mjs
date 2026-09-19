@@ -65,9 +65,12 @@ const isPlainObj = (x) => x !== null && typeof x === 'object' && !Array.isArray(
  *  ③ value 与 EXPECTED_INPUT_VALUE_SOMPI[role] 相等(fee 槽无此常量, 见④);
  *  ④ 【超出设计文字】value 另与 builder 自己实际用于该输入的面值相等(seal 的 heldInput.value、fee 的 feeUtxo.value)——
  *     否则 builder 按 A 面值算 leftover、chainParents 却证明了 B 面值, ③ 单独查不出;
- *  另: chainParents 里出现该步输入角色之外的键 ⇒ 拒(调用方把别的步骤的 chainParents 传错了)。
- * @param {{step:string, label:string, chainParents:*, inputHasCovenant:readonly boolean[], used:Record<string,{value:bigint, spkHex:string}>}} o
- *   used[role]: builder 实际用于该输入的面值与 spk hex(role 含 'fee'; 顺序 = STEP_INPUT_ROLES[step] 之后接 'fee')
+ *  另: chainParents 里出现该步输入角色之外的键 ⇒ 拒(调用方把别的步骤的 chainParents 传错了);
+ *  ⑤ (F2, NWT E-1 MUST) 【身份绑定】chainParents[role].outpoint {txid,index} 必须等于 builder 这一输入实际要花的 outpoint: {value,spkLen,hasCovenant} 是"某个 outpoint 的属性",
+ *     脱离 outpoint 就只是三个数——NWT 实测(close_commit): chainParents 按 outpoint A 取证、feeUtxo 换成同面值同 spk 的 outpoint B ⇒ 旧断言放行、构造出花 B 的交易;
+ *     毒化 fee UTXO 恰是"同面值同 spk、只差 covenant 位"的另一个 outpoint。txid 大小写不敏感(统一小写), index 数值比较。
+ * @param {{step:string, label:string, chainParents:*, inputHasCovenant:readonly boolean[], used:Record<string,{value:bigint, spkHex:string, outpoint:{txid:string, vout:number}}>}} o
+ *   used[role]: builder 实际用于该输入的面值 / spk hex / outpoint(role 含 'fee'; 顺序 = STEP_INPUT_ROLES[step] 之后接 'fee')
  */
 export function assertChainParentsMatchBuilder({ step, label, chainParents, inputHasCovenant, used }) {
   const roles = [...STEP_INPUT_ROLES[step], 'fee'];
@@ -78,10 +81,14 @@ export function assertChainParentsMatchBuilder({ step, label, chainParents, inpu
   roles.forEach((role, i) => {
     const p = chainParents[role];
     if (!isPlainObj(p)) fail(role, '缺失');
-    if (typeof p.value !== 'bigint' || !Number.isInteger(p.spkLen) || p.spkLen <= 0 || typeof p.hasCovenant !== 'boolean') fail(role, '形状不合法(须 {value:bigint, spkLen:正整数, hasCovenant:boolean})');
+    if (typeof p.value !== 'bigint' || !Number.isInteger(p.spkLen) || p.spkLen <= 0 || typeof p.hasCovenant !== 'boolean') fail(role, '形状不合法(须 {value:bigint, spkLen:正整数, hasCovenant:boolean, outpoint})');
+    if (!isPlainObj(p.outpoint) || typeof p.outpoint.txid !== 'string' || !/^[0-9a-f]{64}$/.test(p.outpoint.txid) || !Number.isInteger(p.outpoint.index) || p.outpoint.index < 0) fail(role, '形状不合法(outpoint 须 {txid:64 位小写 hex, index:非负整数}——chainParents 必须绑定到它证明的那个 outpoint)');
     if (p.hasCovenant !== inputHasCovenant[i]) fail(role, `hasCovenant=${p.hasCovenant} != builder 假设的 ${inputHasCovenant[i]}(输入下标 ${i})`);
     const u = used[role];
-    if (!u) throw new Error(`${label}: 内部错误 — used[${role}] 缺失`);
+    if (!u || !u.outpoint) throw new Error(`${label}: 内部错误 — used[${role}](含 outpoint)缺失`);
+    if (p.outpoint.txid !== String(u.outpoint.txid).toLowerCase() || p.outpoint.index !== Number(u.outpoint.vout)) {
+      fail(role, `chainParents 证明的 outpoint(${p.outpoint.txid.slice(0, 12)}…:${p.outpoint.index}) != builder 实际要花的 outpoint(${String(u.outpoint.txid).slice(0, 12)}…:${u.outpoint.vout}): 被证明的链上事实必须就是被花的那个 UTXO`);
+    }
     if (p.spkLen !== spkByteLen(u.spkHex)) fail(role, `spkLen=${p.spkLen} != builder 现算 spk 的字节长度 ${spkByteLen(u.spkHex)}`);
     if (role !== 'fee' && p.value !== EXPECTED_INPUT_VALUE_SOMPI[role]) fail(role, `value=${p.value} != 期望面值常量 ${EXPECTED_INPUT_VALUE_SOMPI[role]}`);
     if (p.value !== u.value) fail(role, `value=${p.value} != builder 实际用于该输入的面值 ${u.value}`);
@@ -198,9 +205,9 @@ export function buildMarketSealTxJson({
   assertChainParentsMatchBuilder({
     step: 'seal', label: 'market_seal', chainParents, inputHasCovenant: MARKET_SEAL_INPUT_HAS_COVENANT,
     used: {
-      leaf: { value: CONTINUATION_OUTPUT_SOMPI, spkHex: p2sh(leafRedeemScript) },
-      held: { value: heldInput.value, spkHex: heldInput.scriptPublicKeyHex },
-      fee: { value: feeUtxo.value, spkHex: feeUtxo.scriptPublicKeyHex },
+      leaf: { value: CONTINUATION_OUTPUT_SOMPI, spkHex: p2sh(leafRedeemScript), outpoint: leafOutpoint },
+      held: { value: heldInput.value, spkHex: heldInput.scriptPublicKeyHex, outpoint: heldInput },
+      fee: { value: feeUtxo.value, spkHex: feeUtxo.scriptPublicKeyHex, outpoint: feeUtxo },
     },
   });
 
@@ -401,8 +408,8 @@ export function buildCloseCommitTxJson({
   assertChainParentsMatchBuilder({
     step: 'close_commit', label: 'close_commit', chainParents, inputHasCovenant: CLOSE_COMMIT_INPUT_HAS_COVENANT,
     used: {
-      rootClose: { value: CONTINUATION_OUTPUT_SOMPI, spkHex: currentArtifact.scriptPubKeyHex },
-      fee: { value: feeUtxo.value, spkHex: feeUtxo.scriptPublicKeyHex },
+      rootClose: { value: CONTINUATION_OUTPUT_SOMPI, spkHex: currentArtifact.scriptPubKeyHex, outpoint: rootCloseOutpoint },
+      fee: { value: feeUtxo.value, spkHex: feeUtxo.scriptPublicKeyHex, outpoint: feeUtxo },
     },
   });
 
@@ -618,9 +625,9 @@ export function buildConvertToClaimTxJson({
   assertChainParentsMatchBuilder({
     step: 'convert_to_claim', label: 'convert_to_claim', chainParents, inputHasCovenant: CONVERT_TO_CLAIM_INPUT_HAS_COVENANT,
     used: {
-      rootClose: { value: CONTINUATION_OUTPUT_SOMPI, spkHex: rcArtifact.scriptPubKeyHex },
-      held: { value: GENESIS_OUTPUT_SOMPI, spkHex: heldArtifact.scriptPubKeyHex },
-      fee: { value: feeUtxo.value, spkHex: feeUtxo.scriptPublicKeyHex },
+      rootClose: { value: CONTINUATION_OUTPUT_SOMPI, spkHex: rcArtifact.scriptPubKeyHex, outpoint: rootCloseOutpoint },
+      held: { value: GENESIS_OUTPUT_SOMPI, spkHex: heldArtifact.scriptPubKeyHex, outpoint: heldTokenOutpoint },
+      fee: { value: feeUtxo.value, spkHex: feeUtxo.scriptPublicKeyHex, outpoint: feeUtxo },
     },
   });
 
@@ -798,10 +805,10 @@ export function buildClaimDrawTxJson({
   assertChainParentsMatchBuilder({
     step: 'claim_draw', label: 'claim_draw', chainParents, inputHasCovenant: CLAIM_DRAW_INPUT_HAS_COVENANT,
     used: {
-      rootClaim: { value: CONTINUATION_OUTPUT_SOMPI, spkHex: claimArtifact.scriptPubKeyHex },
-      ticket: { value: GENESIS_OUTPUT_SOMPI, spkHex: ticketArtifact.scriptPubKeyHex },
-      held: { value: GENESIS_OUTPUT_SOMPI, spkHex: heldArtifact.scriptPubKeyHex },
-      fee: { value: feeUtxo.value, spkHex: feeUtxo.scriptPublicKeyHex },
+      rootClaim: { value: CONTINUATION_OUTPUT_SOMPI, spkHex: claimArtifact.scriptPubKeyHex, outpoint: rootClaimOutpoint },
+      ticket: { value: GENESIS_OUTPUT_SOMPI, spkHex: ticketArtifact.scriptPubKeyHex, outpoint: ticketOutpoint },
+      held: { value: GENESIS_OUTPUT_SOMPI, spkHex: heldArtifact.scriptPubKeyHex, outpoint: heldTokenOutpoint },
+      fee: { value: feeUtxo.value, spkHex: feeUtxo.scriptPublicKeyHex, outpoint: feeUtxo },
     },
   });
 

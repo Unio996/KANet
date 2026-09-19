@@ -1,0 +1,32 @@
+[lint-kanet] scanning 5 files...
+
+[lint-kanet] ⚠  535 warning(s) across 4 warn-rule(s) (non-blocking — fix as migration checklist):
+
+  R-BYTE-CENSUS-PREDICATE: 1 hit(s)
+    kasia-console\src\lib\proto-claim-draw.test.mjs:167
+      redeem/covenant 字节相等谓词(疑似凭记忆/注释猜的常量, 未见 census/实测引用)——同族已撞两次(0x51 vs 真 0x6b; buf[0] vs marker 真在 buf[1]), 根因都是"点状修复没传播"。落码前跑 `node scripts/tn12-redeem-prefix-census.cjs`(20s, 只读)核对真实制品分布, 核完在附近加一行引用(如
+  R-COMMAND-REGISTRATION [WARN]: 3 hit(s)
+    kasia-relay\src\lib\commands.mjs:0
+      commands.mjs COMMAND_TYPES.CHAIN_GET_CURRENT_DAA_SCORE 没在 COMMAND_FIELD_TYPES 里注册对应 [COMMAND_TYPES.CHAIN_GET_CURRENT_DAA_SCORE] 条目 — 这个命令类型的字段类型完全不受校验(半截注册)。
+    kasia-relay\src\lib\commands.mjs:0
+      commands.mjs COMMAND_TYPES.CHAIN_GET_BLOCKS_FROM_DAA_SCORE 没在 COMMAND_FIELD_TYPES 里注册对应 [COMMAND_TYPES.CHAIN_GET_BLOCKS_FROM_DAA_SCORE] 条目 — 这个命令类型的字段类型完全不受校验(半截注册)。
+    kasia-relay\src\lib\commands.mjs:0
+      commands.mjs COMMAND_TYPES.CHAIN_GET_BLOCK_AT_DAA 没在 COMMAND_FIELD_TYPES 里注册对应 [COMMAND_TYPES.CHAIN_GET_BLOCK_AT_DAA] 条目 — 这个命令类型的字段类型完全不受校验(半截注册)。
+  R-LEDGER-SIZE: 1 hit(s)
+    docs\iteration\COORD-LEDGER.md:0
+      COORD-LEDGER.md 现 4155KB > 100KB 阈值 — 建议按月切档到 docs/iteration/archive/COORD-LEDGER-YYYY-MM.md (活跃文件只留当月内容+归档索引). 见 D-010 §2.3.
+  R-DOC-STATUS: 530 hit(s)
+    docs\2026-05-30-oracle-economic-security-v0.6-spec.md:0
+      设计文档 "2026-05-30-oracle-economic-security-v0.6-spec.md" 缺 Status 头(> **Status**: CURRENT|SUPERSEDED|ARCHIVED,标题下方几行内). 接位者翻 docs/ 时无法一眼判断这篇还作不作数. 加一行, 见任意近期文档示例.
+    docs\2026-05-31-oracle-v06-committee-bond-decision.md:0
+      设计文档 "2026-05-31-oracle-v06-committee-bond-decision.md" 缺 Status 头(> **Status**: CURRENT|SUPERSEDED|ARCHIVED,标题下方几行内). 接位者翻 docs/ 时无法一眼判断这篇还作不作数. 加一行, 见任意近期文档示例.
+    docs\2026-06-01-change-landmine-depth20-selfclaim-audit.md:0
+      设计文档 "2026-06-01-change-landmine-depth20-selfclaim-audit.md" 缺 Status 头(> **Status**: CURRENT|SUPERSEDED|ARCHIVED,标题下方几行内). 接位者翻 docs/ 时无法一眼判断这篇还作不作数. 加一行, 见任意近期文档示例.
+    docs\2026-06-01-min-pot-thin-market-refund-decision.md:0
+      设计文档 "2026-06-01-min-pot-thin-market-refund-decision.md" 缺 Status 头(> **Status**: CURRENT|SUPERSEDED|ARCHIVED,标题下方几行内). 接位者翻 docs/ 时无法一眼判断这篇还作不作数. 加一行, 见任意近期文档示例.
+    docs\2026-06-01-onchain-stake-oracle-pool-DECISION.md:0
+      设计文档 "2026-06-01-onchain-stake-oracle-pool-DECISION.md" 缺 Status 头(> **Status**: CURRENT|SUPERSEDED|ARCHIVED,标题下方几行内). 接位者翻 docs/ 时无法一眼判断这篇还作不作数. 加一行, 见任意近期文档示例.
+    ... 525 more
+
+  Warnings do NOT block commit. Migrate to suppress. See docs/ANTI-PATTERNS.md.
+[lint-kanet] ✓ 5 files — 0 errors (535 warning(s) above)

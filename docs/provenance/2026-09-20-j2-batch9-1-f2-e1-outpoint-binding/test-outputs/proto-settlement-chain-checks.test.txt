@@ -1,0 +1,54 @@
+[db] path=%TEMP%\_j2_chain_checks_26488.db source=DB_PATH
+[PASS] 常量可追溯到真实链上交易: 全链六笔里所有带 covenant 的输出面值恒为 20,000,000, 与 EXPECTED_INPUT_VALUE_SOMPI 一致
+[PASS] seal: 输入角色(leaf/held)面值==20,000,000 且 spk==builder 假设值 ⇒ 通过; 字符串/BigInt/number 形态、0x 前缀/大写 spk 都通过
+[PASS] seal/leaf: 面值偏小(1000)/偏大(+1)/缺失/已花费/面值缺失 ⇒ leaf_value_drift; spk 不符/链上 spk 缺失/假设 spk 缺失 ⇒ leaf_spk_drift 或 fail-closed
+[PASS] seal/held: 面值偏小(1000)/偏大(+1)/缺失/已花费/面值缺失 ⇒ held_value_drift; spk 不符/链上 spk 缺失/假设 spk 缺失 ⇒ held_spk_drift 或 fail-closed
+[PASS] close_commit: 输入角色(rootClose)面值==20,000,000 且 spk==builder 假设值 ⇒ 通过; 字符串/BigInt/number 形态、0x 前缀/大写 spk 都通过
+[PASS] close_commit/rootClose: 面值偏小(1000)/偏大(+1)/缺失/已花费/面值缺失 ⇒ rootClose_value_drift; spk 不符/链上 spk 缺失/假设 spk 缺失 ⇒ rootClose_spk_drift 或 fail-closed
+[PASS] convert_to_claim: 输入角色(rootClose/held)面值==20,000,000 且 spk==builder 假设值 ⇒ 通过; 字符串/BigInt/number 形态、0x 前缀/大写 spk 都通过
+[PASS] convert_to_claim/rootClose: 面值偏小(1000)/偏大(+1)/缺失/已花费/面值缺失 ⇒ rootClose_value_drift; spk 不符/链上 spk 缺失/假设 spk 缺失 ⇒ rootClose_spk_drift 或 fail-closed
+[PASS] convert_to_claim/held: 面值偏小(1000)/偏大(+1)/缺失/已花费/面值缺失 ⇒ held_value_drift; spk 不符/链上 spk 缺失/假设 spk 缺失 ⇒ held_spk_drift 或 fail-closed
+[PASS] claim_draw: 输入角色(rootClaim/ticket/held)面值==20,000,000 且 spk==builder 假设值 ⇒ 通过; 字符串/BigInt/number 形态、0x 前缀/大写 spk 都通过
+[PASS] claim_draw/rootClaim: 面值偏小(1000)/偏大(+1)/缺失/已花费/面值缺失 ⇒ rootClaim_value_drift; spk 不符/链上 spk 缺失/假设 spk 缺失 ⇒ rootClaim_spk_drift 或 fail-closed
+[PASS] claim_draw/ticket: 面值偏小(1000)/偏大(+1)/缺失/已花费/面值缺失 ⇒ ticket_value_drift; spk 不符/链上 spk 缺失/假设 spk 缺失 ⇒ ticket_spk_drift 或 fail-closed
+[PASS] claim_draw/held: 面值偏小(1000)/偏大(+1)/缺失/已花费/面值缺失 ⇒ held_value_drift; spk 不符/链上 spk 缺失/假设 spk 缺失 ⇒ held_spk_drift 或 fail-closed
+[PASS] withdraw: 输入角色(claim/held)面值==20,000,000 且 spk==builder 假设值 ⇒ 通过; 字符串/BigInt/number 形态、0x 前缀/大写 spk 都通过
+[PASS] withdraw/claim: 面值偏小(1000)/偏大(+1)/缺失/已花费/面值缺失 ⇒ claim_value_drift; spk 不符/链上 spk 缺失/假设 spk 缺失 ⇒ claim_spk_drift 或 fail-closed
+[PASS] withdraw/held: 面值偏小(1000)/偏大(+1)/缺失/已花费/面值缺失 ⇒ held_value_drift; spk 不符/链上 spk 缺失/假设 spk 缺失 ⇒ held_spk_drift 或 fail-closed
+[PASS] ticket_reclaim: 输入角色(ticket)面值==20,000,000 且 spk==builder 假设值 ⇒ 通过; 字符串/BigInt/number 形态、0x 前缀/大写 spk 都通过
+[PASS] ticket_reclaim/ticket: 面值偏小(1000)/偏大(+1)/缺失/已花费/面值缺失 ⇒ ticket_value_drift; spk 不符/链上 spk 缺失/假设 spk 缺失 ⇒ ticket_spk_drift 或 fail-closed
+[PASS] 未知步骤 / chainUtxos 缺失 / expectedSpks 缺失 ⇒ 拒绝
+[PASS] 只核该步骤需要的角色: close_commit 不因 leaf/ticket 异常而拒(它们不是该步输入)
+[PASS] 覆盖范围(Bettor 转 Codex): close_commit/convert_to_claim/claim_draw/withdraw/ticket_reclaim 的每个 covenant 输入角色都在断言表里
+[PASS] 闭集: chainCheckCodes() = 每个角色 4 类(value_drift/spk_drift/outpoint_drift/covenant_class_mismatch) + chain_check_params_missing + chain_check_unknown_step
+[PASS] C6 ▲ M6 两个新参数必填、没有默认值: 缺 expectedOutpoints / 缺 expectedCovenantIds / 两个都缺(旧调用形状)⇒ SettlementChainCheckError(chain_check_params_missing)
+[PASS] C6b 预期 outpoint 逐角色缺失/格式不合法 ⇒ chain_check_params_missing(不是静默跳过这个角色)
+[PASS] C6c 预期 covenant id 逐角色缺键/格式不合法 ⇒ chain_check_params_missing(null 是合法的"必须无 covenant", undefined/缺键不是)
+[PASS] seal/leaf: outpoint 不等 ⇒ leaf_outpoint_drift(txid 不同 / index 不同 / 同 txid 不同 index[N-T1 同族] / 链上缺 outpoint); 大小写不敏感地相等则通过
+[PASS] seal/leaf: covenant 不符 ⇒ leaf_covenant_class_mismatch(id 不同 / 期望有却无 / 期望无却有 / 链上缺 covenantId 键 / 链上 covenantId 格式坏); 相等(含大小写差异)则通过
+[PASS] seal/held: outpoint 不等 ⇒ held_outpoint_drift(txid 不同 / index 不同 / 同 txid 不同 index[N-T1 同族] / 链上缺 outpoint); 大小写不敏感地相等则通过
+[PASS] seal/held: covenant 不符 ⇒ held_covenant_class_mismatch(id 不同 / 期望有却无 / 期望无却有 / 链上缺 covenantId 键 / 链上 covenantId 格式坏); 相等(含大小写差异)则通过
+[PASS] close_commit/rootClose: outpoint 不等 ⇒ rootClose_outpoint_drift(txid 不同 / index 不同 / 同 txid 不同 index[N-T1 同族] / 链上缺 outpoint); 大小写不敏感地相等则通过
+[PASS] close_commit/rootClose: covenant 不符 ⇒ rootClose_covenant_class_mismatch(id 不同 / 期望有却无 / 期望无却有 / 链上缺 covenantId 键 / 链上 covenantId 格式坏); 相等(含大小写差异)则通过
+[PASS] convert_to_claim/rootClose: outpoint 不等 ⇒ rootClose_outpoint_drift(txid 不同 / index 不同 / 同 txid 不同 index[N-T1 同族] / 链上缺 outpoint); 大小写不敏感地相等则通过
+[PASS] convert_to_claim/rootClose: covenant 不符 ⇒ rootClose_covenant_class_mismatch(id 不同 / 期望有却无 / 期望无却有 / 链上缺 covenantId 键 / 链上 covenantId 格式坏); 相等(含大小写差异)则通过
+[PASS] convert_to_claim/held: outpoint 不等 ⇒ held_outpoint_drift(txid 不同 / index 不同 / 同 txid 不同 index[N-T1 同族] / 链上缺 outpoint); 大小写不敏感地相等则通过
+[PASS] convert_to_claim/held: covenant 不符 ⇒ held_covenant_class_mismatch(id 不同 / 期望有却无 / 期望无却有 / 链上缺 covenantId 键 / 链上 covenantId 格式坏); 相等(含大小写差异)则通过
+[PASS] claim_draw/rootClaim: outpoint 不等 ⇒ rootClaim_outpoint_drift(txid 不同 / index 不同 / 同 txid 不同 index[N-T1 同族] / 链上缺 outpoint); 大小写不敏感地相等则通过
+[PASS] claim_draw/rootClaim: covenant 不符 ⇒ rootClaim_covenant_class_mismatch(id 不同 / 期望有却无 / 期望无却有 / 链上缺 covenantId 键 / 链上 covenantId 格式坏); 相等(含大小写差异)则通过
+[PASS] claim_draw/ticket: outpoint 不等 ⇒ ticket_outpoint_drift(txid 不同 / index 不同 / 同 txid 不同 index[N-T1 同族] / 链上缺 outpoint); 大小写不敏感地相等则通过
+[PASS] claim_draw/ticket: covenant 不符 ⇒ ticket_covenant_class_mismatch(id 不同 / 期望有却无 / 期望无却有 / 链上缺 covenantId 键 / 链上 covenantId 格式坏); 相等(含大小写差异)则通过
+[PASS] claim_draw/held: outpoint 不等 ⇒ held_outpoint_drift(txid 不同 / index 不同 / 同 txid 不同 index[N-T1 同族] / 链上缺 outpoint); 大小写不敏感地相等则通过
+[PASS] claim_draw/held: covenant 不符 ⇒ held_covenant_class_mismatch(id 不同 / 期望有却无 / 期望无却有 / 链上缺 covenantId 键 / 链上 covenantId 格式坏); 相等(含大小写差异)则通过
+[PASS] withdraw/claim: outpoint 不等 ⇒ claim_outpoint_drift(txid 不同 / index 不同 / 同 txid 不同 index[N-T1 同族] / 链上缺 outpoint); 大小写不敏感地相等则通过
+[PASS] withdraw/claim: covenant 不符 ⇒ claim_covenant_class_mismatch(id 不同 / 期望有却无 / 期望无却有 / 链上缺 covenantId 键 / 链上 covenantId 格式坏); 相等(含大小写差异)则通过
+[PASS] withdraw/held: outpoint 不等 ⇒ held_outpoint_drift(txid 不同 / index 不同 / 同 txid 不同 index[N-T1 同族] / 链上缺 outpoint); 大小写不敏感地相等则通过
+[PASS] withdraw/held: covenant 不符 ⇒ held_covenant_class_mismatch(id 不同 / 期望有却无 / 期望无却有 / 链上缺 covenantId 键 / 链上 covenantId 格式坏); 相等(含大小写差异)则通过
+[PASS] ticket_reclaim/ticket: outpoint 不等 ⇒ ticket_outpoint_drift(txid 不同 / index 不同 / 同 txid 不同 index[N-T1 同族] / 链上缺 outpoint); 大小写不敏感地相等则通过
+[PASS] ticket_reclaim/ticket: covenant 不符 ⇒ ticket_covenant_class_mismatch(id 不同 / 期望有却无 / 期望无却有 / 链上缺 covenantId 键 / 链上 covenantId 格式坏); 相等(含大小写差异)则通过
+[PASS] 面值不是整数(BigInt 无法解析)⇒ 类型化的 <role>_value_drift, 不是裸 SyntaxError 逃出闭集
+[PASS] 缺 builder 假设的 spk ⇒ code=chain_check_params_missing, 而消息仍含原标签 <role>_value_drift(C7: 文本不变, 机器标识在 .code)
+[PASS] C7 ▲ 每个抛出的错误都是 SettlementChainCheckError 且 .code ∈ 闭集, 携带 step/role; 消息仍含原标签(现有三类 + 新增两类都带 .code)
+[PASS] 成功返回形状不变: { ok:true, checked:[该步角色…] }; 只核该步需要的角色(新参数里多给的别的角色被忽略)
+
+51 passed, 0 failed
