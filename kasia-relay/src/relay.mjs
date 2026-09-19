@@ -1272,11 +1272,34 @@ if (process.send) {
           // 2026-07-18 J1tn (kr5l4 consolidate DB-lag 自愈): 返回地址活 UTXO 列表(outpoint+amount),
           //   供 console 侧 buildProposeCloseRequestV2→autoDetectConsolidateResume 探测 consolidate 真实
           //   tip(DB payout_ps_outpoint 陈旧时从链上真实位置续)。纯只读, 不签不广播不动钱。
+          // 批9 9-0 (J2 2026-09-19, R1): 加可选 `facts:true`——严格 `cmd.facts === true` 才走新路径(共享 RpcClient +
+          //   spk/covenantId 事实, 两形态 outpoints/list, 见 lib/utxo-facts.mjs); 不带 facts 时旧路径原样、输出字节不变。
+          //   getNetworkId 用闭包只在旧路径求值(facts 路径不依赖钱包)。超时/未连接: waitForRpc 抛错 ⇒ 下方外层 catch
+          //   回 {error, phase:'execution'}, 不吞、不回落到 per-call RpcClient。
           const { getAddressUtxos } = await import('./lib/p2sh.mjs');
-          const wallet = getWallet();
-          const utxos = await getAddressUtxos(cmd.address, wallet.getNetworkId());
+          const { handleGetAddressUtxos, FACTS_RPC_WAIT_MS } = await import('./lib/utxo-facts.mjs');
+          const { waitForRpc } = await import('./rpc-listener.mjs');
+          const result = await handleGetAddressUtxos({
+            cmd,
+            getSharedRpc: () => waitForRpc(FACTS_RPC_WAIT_MS),
+            legacyGetAddressUtxos: getAddressUtxos,
+            getNetworkId: () => getWallet().getNetworkId(),
+          });
           if (cmd.requestId && process.send) {
-            process.send({ requestId: cmd.requestId, result: { ok: true, utxos } });
+            process.send({ requestId: cmd.requestId, result });
+          }
+          return;
+        }
+
+        case 'get_past_median_time': {
+          // 批9 9-0 (J2 2026-09-19, R2): 只读——close_commit 的同节点 pmt 门。走与 covenant_broadcast 提交同一个共享
+          //   RpcClient ⇒ "读 pmt 的节点 == 提交的节点"无条件成立。只回 {ok, pastMedianTimeMs, observedAtMs}(不带节点标识)。
+          //   不签不广播不动钱。超时/未连接同上, 抛错走外层 catch。
+          const { handleGetPastMedianTime, FACTS_RPC_WAIT_MS } = await import('./lib/utxo-facts.mjs');
+          const { waitForRpc } = await import('./rpc-listener.mjs');
+          const result = await handleGetPastMedianTime({ getSharedRpc: () => waitForRpc(FACTS_RPC_WAIT_MS) });
+          if (cmd.requestId && process.send) {
+            process.send({ requestId: cmd.requestId, result });
           }
           return;
         }

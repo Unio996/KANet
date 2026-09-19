@@ -1,0 +1,184 @@
+{
+  "startedAt": "2026-09-19T16:18:22.976Z",
+  "rows": [
+    {
+      "form": "outpoints",
+      "key": "c5c39c0a4f59ddb5a2e6355fe642836a7d1ddf4fd348c1dbbed559d12684c86d:0",
+      "label": "covenant#1 (P2SH 形状, 带 covenant 绑定)",
+      "S1_relay": {
+        "key": "c5c39c0a4f59ddb5a2e6355fe642836a7d1ddf4fd348c1dbbed559d12684c86d:0",
+        "amount": "100000000",
+        "version": 0,
+        "scriptHex": "aa2022027db563b3e1285d89e2d82f224dfeed2a7b25cb892e3bbe0a3ba100fd6b7e87",
+        "covenantId": "035c0a157b8f5cfe86e73b9b6081d367fd48894de9eb5c4a8f47abac5b2e641c"
+      },
+      "S2_node_json": {
+        "key": "c5c39c0a4f59ddb5a2e6355fe642836a7d1ddf4fd348c1dbbed559d12684c86d:0",
+        "amount": "100000000",
+        "version": 0,
+        "scriptHex": "aa2022027db563b3e1285d89e2d82f224dfeed2a7b25cb892e3bbe0a3ba100fd6b7e87",
+        "covenantId": "035c0a157b8f5cfe86e73b9b6081d367fd48894de9eb5c4a8f47abac5b2e641c"
+      },
+      "S3_constructed": {
+        "amount": "100000000",
+        "version": 0,
+        "scriptHex": "aa2022027db563b3e1285d89e2d82f224dfeed2a7b25cb892e3bbe0a3ba100fd6b7e87",
+        "covenantId": "035c0a157b8f5cfe86e73b9b6081d367fd48894de9eb5c4a8f47abac5b2e641c"
+      }
+    },
+    {
+      "form": "outpoints",
+      "key": "c5c39c0a4f59ddb5a2e6355fe642836a7d1ddf4fd348c1dbbed559d12684c86d:1",
+      "label": "covenant#2 (P2SH 形状, 带 covenant 绑定)",
+      "S1_relay": {
+        "key": "c5c39c0a4f59ddb5a2e6355fe642836a7d1ddf4fd348c1dbbed559d12684c86d:1",
+        "amount": "100000000",
+        "version": 0,
+        "scriptHex": "aa20ad9666b6f160b8af09b32994b38b114f431b3a9aed5e22c763e24dd5af5e773b87",
+        "covenantId": "472dfd88e815a29be0e01daccef7c0ee399b87abd99df8bff9dc32e3280005f6"
+      },
+      "S2_node_json": {
+        "key": "c5c39c0a4f59ddb5a2e6355fe642836a7d1ddf4fd348c1dbbed559d12684c86d:1",
+        "amount": "100000000",
+        "version": 0,
+        "scriptHex": "aa20ad9666b6f160b8af09b32994b38b114f431b3a9aed5e22c763e24dd5af5e773b87",
+        "covenantId": "472dfd88e815a29be0e01daccef7c0ee399b87abd99df8bff9dc32e3280005f6"
+      },
+      "S3_constructed": {
+        "amount": "100000000",
+        "version": 0,
+        "scriptHex": "aa20ad9666b6f160b8af09b32994b38b114f431b3a9aed5e22c763e24dd5af5e773b87",
+        "covenantId": "472dfd88e815a29be0e01daccef7c0ee399b87abd99df8bff9dc32e3280005f6"
+      }
+    },
+    {
+      "form": "outpoints",
+      "key": "c5c39c0a4f59ddb5a2e6355fe642836a7d1ddf4fd348c1dbbed559d12684c86d:2",
+      "label": "普通 P2SH(无 covenant, ticket 形状)",
+      "S1_relay": {
+        "key": "c5c39c0a4f59ddb5a2e6355fe642836a7d1ddf4fd348c1dbbed559d12684c86d:2",
+        "amount": "100000000",
+        "version": 0,
+        "scriptHex": "aa20657082cd36c38c4c02be38f78638ad5c02cb08cb911e8f4296328fdf2e4e1fef87",
+        "covenantId": null
+      },
+      "S2_node_json": {
+        "key": "c5c39c0a4f59ddb5a2e6355fe642836a7d1ddf4fd348c1dbbed559d12684c86d:2",
+        "amount": "100000000",
+        "version": 0,
+        "scriptHex": "aa20657082cd36c38c4c02be38f78638ad5c02cb08cb911e8f4296328fdf2e4e1fef87",
+        "covenantId": null
+      },
+      "S3_constructed": {
+        "amount": "100000000",
+        "version": 0,
+        "scriptHex": "aa20657082cd36c38c4c02be38f78638ad5c02cb08cb911e8f4296328fdf2e4e1fef87",
+        "covenantId": null
+      }
+    },
+    {
+      "form": "outpoints",
+      "key": "c5c39c0a4f59ddb5a2e6355fe642836a7d1ddf4fd348c1dbbed559d12684c86d:3",
+      "label": "找零 P2PK(relay fee 输入形状)",
+      "S1_relay": {
+        "key": "c5c39c0a4f59ddb5a2e6355fe642836a7d1ddf4fd348c1dbbed559d12684c86d:3",
+        "amount": "4697000000",
+        "version": 0,
+        "scriptHex": "20c4c3c4cb3f65c6afd972a7f760bc55b35c12622f42920dd7cfe505ae94ce7336ac",
+        "covenantId": null
+      },
+      "S2_node_json": {
+        "key": "c5c39c0a4f59ddb5a2e6355fe642836a7d1ddf4fd348c1dbbed559d12684c86d:3",
+        "amount": "4697000000",
+        "version": 0,
+        "scriptHex": "20c4c3c4cb3f65c6afd972a7f760bc55b35c12622f42920dd7cfe505ae94ce7336ac",
+        "covenantId": null
+      },
+      "S3_constructed": {
+        "amount": "4697000000",
+        "version": 0,
+        "scriptHex": "20c4c3c4cb3f65c6afd972a7f760bc55b35c12622f42920dd7cfe505ae94ce7336ac",
+        "covenantId": null
+      }
+    }
+  ],
+  "checks": [
+    {
+      "name": "S3 两个 covenant 的期望 covenantId 互不相同且是 64 位 hex",
+      "ok": true
+    },
+    {
+      "name": "O 形态响应带回声 facts:true/factsVersion:1/form:outpoints 且无 truncated (covenant#1 (P2SH 形状, 带 covenant 绑定))",
+      "ok": true
+    },
+    {
+      "name": "O covenant#1 (P2SH 形状, 带 covenant 绑定) c5c39c0a4f…:0  S1==S2==S3 (amount/version/scriptHex/covenantId)",
+      "ok": true,
+      "detail": "covenantId=035c0a157b8f5cfe… scriptHex=aa2022027db5…"
+    },
+    {
+      "name": "O 形态响应带回声 facts:true/factsVersion:1/form:outpoints 且无 truncated (covenant#2 (P2SH 形状, 带 covenant 绑定))",
+      "ok": true
+    },
+    {
+      "name": "O covenant#2 (P2SH 形状, 带 covenant 绑定) c5c39c0a4f…:1  S1==S2==S3 (amount/version/scriptHex/covenantId)",
+      "ok": true,
+      "detail": "covenantId=472dfd88e815a29b… scriptHex=aa20ad9666b6…"
+    },
+    {
+      "name": "O 形态响应带回声 facts:true/factsVersion:1/form:outpoints 且无 truncated (普通 P2SH(无 covenant, ticket 形状))",
+      "ok": true
+    },
+    {
+      "name": "O 普通 P2SH(无 covenant, ticket 形状) c5c39c0a4f…:2  S1==S2==S3 (amount/version/scriptHex/covenantId)",
+      "ok": true,
+      "detail": "covenantId=null scriptHex=aa20657082cd…"
+    },
+    {
+      "name": "O 形态响应带回声 facts:true/factsVersion:1/form:outpoints 且无 truncated (找零 P2PK(relay fee 输入形状))",
+      "ok": true
+    },
+    {
+      "name": "O 找零 P2PK(relay fee 输入形状) c5c39c0a4f…:3  S1==S2==S3 (amount/version/scriptHex/covenantId)",
+      "ok": true,
+      "detail": "covenantId=null scriptHex=20c4c3c4cb3f…"
+    },
+    {
+      "name": "L 形态: relay 地址节点共 1100 个 UTXO, relay 回 200 个(上限 200), truncated=true; 返回的每一项与节点直读逐字段一致",
+      "ok": true
+    },
+    {
+      "name": "L 形态: relay 返回的 200 项顺序 == 对节点原始数据独立排序后的前 200 项(逐项完全一致; 含 大量同面值 的 tiebreak)",
+      "ok": true
+    },
+    {
+      "name": "L 形态: 找零(4.7e9 < coinbase 5e9)因面值较小被降序窗口正确排在 200 之外(truncated=true 时), 而不是被\"dust 优先\"挤进或随机取舍",
+      "ok": true
+    },
+    {
+      "name": "L 形态: maxAmount 过滤生效(去掉 50 KAS 的 coinbase 后只剩找零)",
+      "ok": true
+    },
+    {
+      "name": "O 形态 missing: 已被花掉的 outpoint 与从未存在的 outpoint 都在 missing, 存在的找零在 found(节点侧确认已花: 也不在直读集合里)",
+      "ok": true
+    },
+    {
+      "name": "红灯对照: 翻 1 个 nibble(scriptHex / covenantId)、金额+1、covenantId 抹成 null 四种破坏, 比较器全部判为不一致; 未破坏的判一致",
+      "ok": true
+    },
+    {
+      "name": "R2 pastMedianTimeMs(1789834692126) == 节点原始 JSON 直读(1789834692126) == borsh(1789834692126)",
+      "ok": true
+    },
+    {
+      "name": "R2 只回三个字段 {ok,pastMedianTimeMs,observedAtMs}, observedAtMs 落在调用前后墙钟之间",
+      "ok": true
+    }
+  ],
+  "finishedAt": "2026-09-19T16:18:24.116Z",
+  "summary": {
+    "passed": 17,
+    "failed": 0
+  }
+}

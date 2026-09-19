@@ -1,0 +1,22 @@
+网络护栏通过: borsh.network=simnet json.network=simnet
+资金: relay 地址上 coinbase UTXO 数=1099, 用最老的一枚(daa=727) 作 genesis fee 输入
+genesis 交易已上链: txid=c5c39c0a4f59ddb5a2e6355fe642836a7d1ddf4fd348c1dbbed559d12684c86d fee=3000000 sompi
+[PASS] S3 两个 covenant 的期望 covenantId 互不相同且是 64 位 hex
+[PASS] O 形态响应带回声 facts:true/factsVersion:1/form:outpoints 且无 truncated (covenant#1 (P2SH 形状, 带 covenant 绑定))
+[PASS] O covenant#1 (P2SH 形状, 带 covenant 绑定) c5c39c0a4f…:0  S1==S2==S3 (amount/version/scriptHex/covenantId)  covenantId=035c0a157b8f5cfe… scriptHex=aa2022027db5…
+[PASS] O 形态响应带回声 facts:true/factsVersion:1/form:outpoints 且无 truncated (covenant#2 (P2SH 形状, 带 covenant 绑定))
+[PASS] O covenant#2 (P2SH 形状, 带 covenant 绑定) c5c39c0a4f…:1  S1==S2==S3 (amount/version/scriptHex/covenantId)  covenantId=472dfd88e815a29b… scriptHex=aa20ad9666b6…
+[PASS] O 形态响应带回声 facts:true/factsVersion:1/form:outpoints 且无 truncated (普通 P2SH(无 covenant, ticket 形状))
+[PASS] O 普通 P2SH(无 covenant, ticket 形状) c5c39c0a4f…:2  S1==S2==S3 (amount/version/scriptHex/covenantId)  covenantId=null scriptHex=aa20657082cd…
+[PASS] O 形态响应带回声 facts:true/factsVersion:1/form:outpoints 且无 truncated (找零 P2PK(relay fee 输入形状))
+[PASS] O 找零 P2PK(relay fee 输入形状) c5c39c0a4f…:3  S1==S2==S3 (amount/version/scriptHex/covenantId)  covenantId=null scriptHex=20c4c3c4cb3f…
+[PASS] L 形态: relay 地址节点共 1100 个 UTXO, relay 回 200 个(上限 200), truncated=true; 返回的每一项与节点直读逐字段一致
+[PASS] L 形态: relay 返回的 200 项顺序 == 对节点原始数据独立排序后的前 200 项(逐项完全一致; 含 大量同面值 的 tiebreak)
+[PASS] L 形态: 找零(4.7e9 < coinbase 5e9)因面值较小被降序窗口正确排在 200 之外(truncated=true 时), 而不是被"dust 优先"挤进或随机取舍
+[PASS] L 形态: maxAmount 过滤生效(去掉 50 KAS 的 coinbase 后只剩找零)
+[PASS] O 形态 missing: 已被花掉的 outpoint 与从未存在的 outpoint 都在 missing, 存在的找零在 found(节点侧确认已花: 也不在直读集合里)
+[PASS] 红灯对照: 翻 1 个 nibble(scriptHex / covenantId)、金额+1、covenantId 抹成 null 四种破坏, 比较器全部判为不一致; 未破坏的判一致
+[PASS] R2 pastMedianTimeMs(1789834692126) == 节点原始 JSON 直读(1789834692126) == borsh(1789834692126)
+[PASS] R2 只回三个字段 {ok,pastMedianTimeMs,observedAtMs}, observedAtMs 落在调用前后墙钟之间
+
+17 passed, 0 failed  (明细 facts-vs-node.json)

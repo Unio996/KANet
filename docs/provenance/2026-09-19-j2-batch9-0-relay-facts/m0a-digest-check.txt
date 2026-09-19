@@ -1,0 +1,7 @@
+基线 6f6f9901: 文件重算 1ca46d7c49a2a7a682b8afe4af762877d554e9affbc32fc12cd1ecadde2c6f06
+             manifest  1ca46d7c49a2a7a682b8afe4af762877d554e9affbc32fc12cd1ecadde2c6f06   review_ref=4c693999   ✅ MATCH
+当前 HEAD: 文件重算 212303895bbca47377ed9c999bc284df67eabc0fed91a6edd6450244ade81b8b
+         manifest  212303895bbca47377ed9c999bc284df67eabc0fed91a6edd6450244ade81b8b   review_ref=4c693999   ✅ MATCH
+
+文件内容是否变化: 是(白名单多一行 read + 注释)——故 manifest digest 必须随之更新
+review_ref 未改(仍是上次批准的提交, 待 NWT 审本 diff 后更新): 是

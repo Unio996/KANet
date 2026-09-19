@@ -1,0 +1,40 @@
+[db] path=%TEMP%\_j2_proto_leaf_state_28852.db source=DB_PATH
+[PASS] deriveLeafState-1: 0 注 ⇒ 全 0
+[PASS] deriveLeafState-2: 1 注(side=0, stake=50) ⇒ local_yes=50, local_no=0, count=1, pool_value=50
+[PASS] deriveLeafState-3: 3 注混合两边(30@0, 70@1, 20@0) ⇒ local_yes=50, local_no=70, count=3, pool_value=120
+[PASS] deriveLeafState-4: 未落链(pending)的下注不计入累加(只信已确认)
+[PASS] assertNoInFlightAppend-1: 没有任何 in-flight append intent ⇒ 通过(不 throw)
+[PASS] assertNoInFlightAppend-2: 存在 prepared 状态的 append intent ⇒ 拒绝(market_append_in_flight)
+[PASS] assertNoInFlightAppend-3: submitted 状态同样拒绝
+[PASS] assertNoInFlightAppend-4: 已 landed 的 append intent 不算 in-flight ⇒ 通过
+[PASS] encodeLeafStateBytes: 4 个 int 各自 [08]+8字节小端, 总长 36 字节
+[PASS] computeExpectedLeafScriptPubKey: 不同 state 产出不同 P2SH(证明真的把 state 编码进去参与哈希, 不是忽略它)
+[PASS] assertLeafStateMatchesChain-1: 推算状态与链上 UTXO 的 scriptPubKey 一致 + 未花费 ⇒ 通过
+[PASS] assertLeafStateMatchesChain-2: 库推算出的状态与链上实际 P2SH 差 1 sompi(某个字段改错) ⇒ leaf_state_drift
+[PASS] assertLeafStateMatchesChain-3: 指针 UTXO 已被花费 ⇒ leaf_state_drift(即使 scriptPubKey 恰好还对得上)
+[PASS] assertLeafStateMatchesChain-4: chainUtxo 为 null(查不到, 指针错误或已花到未追踪的输出) ⇒ leaf_state_drift
+[PASS] assertLeafStateMatchesChain-5(N-1正向): 面值==CONTINUATION_OUTPUT_SOMPI(20,000,000, 批3 simnet三个leaf输入的链上真实面值) ⇒ 通过
+[PASS] assertLeafStateMatchesChain-6(N-1反向): 面值偏小(1000 sompi, 合约只要求>=DUST_MIN, 任何人可这样续约) ⇒ leaf_value_drift
+[PASS] assertLeafStateMatchesChain-7(N-1反向): 面值偏大(CONT+1) ⇒ leaf_value_drift(偏大会静默烧费并低估mass)
+[PASS] assertLeafStateMatchesChain-8(N-1): 调用方没传chainUtxo.value ⇒ leaf_value_drift(缺失即fail-closed, 不静默放行)
+[diag:step] proc.silverc.compile.bshard-artifacts ms=74 cmd=silverc ok=1 at=2026-09-19T16:05:57.056Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=51 cmd=silverc ok=1 at=2026-09-19T16:05:57.112Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=52 cmd=silverc ok=1 at=2026-09-19T16:05:57.169Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=51 cmd=silverc ok=1 at=2026-09-19T16:05:57.228Z
+[PASS] T4 对照: computeExpectedLeafScriptPubKey(基于 genesis 编译产物+推算 state) 与独立用推算 state 当 ctor 重编 ShardLeaf_direct 算出的 P2SH 逐字节一致
+[PASS] deriveLeafOutpoint-0笔landed: 退回genesis的shardleaf_txid/vout
+[PASS] deriveHeldKttOutpoint-0笔landed: 返回null(第一笔下注形状)
+[PASS] deriveLeafOutpoint-1笔landed: 用该intent的submitted_txid+续约输出索引0
+[PASS] deriveHeldKttOutpoint-1笔landed: 用该intent的submitted_txid+合并KTT输出索引2
+[PASS] deriveLeafOutpoint-2笔landed: 取landed_at最新的那一条, 不是随便一条
+[PASS] deriveLeafOutpoint-submitted(未landed)的append不计入, 仍取上一笔已landed的
+[PASS] assertHeldKttOutpointMatchesChain-1: scriptPubKey+value+未花费全对 ⇒ 通过
+[PASS] assertHeldKttOutpointMatchesChain-2: 已花费 ⇒ held_ktt_drift
+[PASS] assertHeldKttOutpointMatchesChain-3: scriptPubKey不符(例如amount对不上) ⇒ held_ktt_drift
+[PASS] assertHeldKttOutpointMatchesChain-4: value不等于CONTINUATION_OUTPUT_SOMPI ⇒ held_ktt_drift
+[PASS] assertHeldKttOutpointMatchesChain-5: chainUtxo为null(查不到) ⇒ held_ktt_drift
+[PASS] assertLeafAndHeldConsistent-1: pool_value=0 且 held=null(第一笔下注前) ⇒ 一致, 通过
+[PASS] assertLeafAndHeldConsistent-2: pool_value>0 且 held存在(已有landed append) ⇒ 一致, 通过
+[PASS] assertLeafAndHeldConsistent-3: pool_value>0 但没有任何landed append(构造矛盾场景) ⇒ pool_state_inconsistent
+
+33 passed, 0 failed

@@ -50,10 +50,23 @@ function _isProtoRelay(a) {
   return false;
 }
 
+// D-026 (Owner 2026-09-19「加开关，主网默认关。」): every console start used to run this unconditionally and burn real mainnet
+// fees (~0.045 KAS per start on 4 accounts whose UTXO count oscillates 5→4→5). Only the literal string '1' enables it; every
+// other value (unset, '0', 'true', ' 1', '"1"', '01', full-width '１', '1\n', ...) leaves it OFF — the same convention as
+// PROTO_DRIVER_ENABLED. Design: docs/2026-09-19-bettor-utxo-autosplit-startup-switch-design-v0.1.md (v0.2 body + §7).
+export const UTXO_AUTOSPLIT_ON_START_ENV = 'UTXO_AUTOSPLIT_ON_START';
+
 /**
  * Auto-split all relay accounts. Called after relays are started.
  */
 export async function autoSplitAll() {
+  // Gate FIRST — before any DB access or relay IPC. start-console-mainnet.ps1 injects env values verbatim (no trim, no
+  // unquoting), so the log carries the raw value: an operator who wrote `KEY=1 ` or `KEY="1"` sees why it is still off.
+  if (process.env[UTXO_AUTOSPLIT_ON_START_ENV] !== '1') {
+    console.log(`[utxo-splitter] disabled (${UTXO_AUTOSPLIT_ON_START_ENV}!=1, raw=${JSON.stringify(process.env[UTXO_AUTOSPLIT_ON_START_ENV])})`);
+    return { ok: true, disabled: true, split: 0, total: 0 };
+  }
+  console.log(`[utxo-splitter] startup autosplit enabled (${UTXO_AUTOSPLIT_ON_START_ENV}=1)`);
   const accounts = sqlite.prepare(
     `SELECT id, name FROM relay_nodes WHERE address IS NOT NULL AND mnemonic_encrypted IS NOT NULL`
   ).all();
@@ -80,4 +93,5 @@ export async function autoSplitAll() {
   }
 
   console.log(`[utxo-splitter] ${splitCount}/${accounts.length} accounts split`);
+  return { ok: true, disabled: false, split: splitCount, total: accounts.length };   // for tests only; the index.js call site does not use it
 }
