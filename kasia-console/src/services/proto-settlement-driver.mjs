@@ -71,7 +71,7 @@ export async function driveSettlementOnce({ assertHealthyFn = assertProtoRelayHe
 
 /**
  * 生产端口装配(每 tick 一次): 真实意图表 / 指针 / C1 / store + 步骤端口(ops: prepare / build / probeRefundFlip)。
- * ops 模块是四步 builder 的入参装配(9-2b iii-2); 它不可用时【拒绝启动】(LOUD), 绝不带着半截端口跑钱路。
+ * ops 模块(lib/proto-settlement-ops.mjs)是四步 builder 的入参装配; 它不可用时【拒绝启动】(LOUD), 绝不带着半截端口跑钱路。
  */
 export async function buildProductionDriver({ health, network, ops, kaspa, sendCmd, relayId, tickIntervalMs }) {
   const store = createSettlementStore({ claimDrawClaimOutIndex: CLAIM_DRAW_CLAIM_OUT_INDEX });
@@ -95,7 +95,7 @@ export async function buildProductionDriver({ health, network, ops, kaspa, sendC
   });
 }
 
-/** 默认的 ops 装载器: 四步 builder 入参装配模块。(iii-2 落地前不存在 ⇒ 装载失败 ⇒ 拒绝启动。) */
+/** 默认的 ops 装载器: 四步 builder 入参装配模块(lib/proto-settlement-ops.mjs)。装载失败 ⇒ 拒绝启动并自停, 绝不带着半截端口跑钱路。 */
 async function defaultLoadOps() { return import('../lib/proto-settlement-ops.mjs'); }
 
 /** tick 体(setInterval 回调): ops 装载失败 ⇒ LOUD 拒绝并自停; 网络与 relay 前缀不符 ⇒ 自停(不是瞬时故障)。deps(kaspa / sendCmd / assertHealthyFn)可注入。 */

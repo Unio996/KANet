@@ -1,0 +1,14 @@
+BASELINE
+  exit=0 6 passed, 0 failed
+O1: KILLED exit=1 :: seal 的预期 spk 角色互换(C1 应报 spk 漂移)
+O2: KILLED exit=1 :: close_commit 的 expectedPoolValue 与 DB 派生不符
+O3: KILLED exit=1 :: close_commit 不传 pmtEvidence(builder 回退 300 s 墙钟守卫; deadline 刚过 200 s ⇒ 拒)
+O4: KILLED exit=1 :: fee 最低面值超过签名输入上限(无候选)
+O5: KILLED exit=1 :: convert_to_claim 的 landed 目标地址写成 RootClose
+O6: KILLED exit=1 :: claim_draw payout != pool_value
+O7: KILLED exit=1 :: seal 的 landed 目标地址按 closed:1 算
+O8: KILLED exit=1 :: seal 的 chainParents 不含 fee 项(不是 withFeeParent 结果)
+O9: KILLED exit=1 :: claim_draw 的 landed 目标地址用错赢家公钥
+O10: KILLED exit=1 :: close_commit 拟签的 newWinningSide 与 DB 不符
+RESTORED exit=0 6 passed, 0 failed
+SUMMARY mutants=10 survivors=0 restored_green=true
