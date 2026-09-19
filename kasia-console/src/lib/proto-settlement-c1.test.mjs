@@ -5,6 +5,7 @@
 //   simnet, 放 9-4); 与真实节点观察的对齐由 E1b 承担——把 9-0 验收(facts-vs-node.json)里 4 条真实节点观察值重放进 handler, 经 C1 消费方规整后逐字段相等。
 // 不做的事: 不连节点、不起 RpcClient、不碰 DB(本文件的临时库只为 import 链, 与 proto-settlement-chain-checks.test.mjs 同款)、零链上副作用。
 // 9-1 F1 笔(NWT C 笔审 C-1..C-5 / E 笔审 E-2 与 E-1 的 C 侧): version===0、分级器按 key 分计数、预算/IPC 超时结构性校验 + 可注入定时器、fee 区间复核、evidence/定时器断言、classify 永不返回 null、chainParents 条目带 outpoint。
+// 9-1 F4 笔(NWT F1 审 F1-1 / F1-2): requestFacts 收第三参 {timeoutMs: ipcTimeoutMs}(声明 == 交给被调方); timers 退出生产签名, 只在仅测试用的 verifyStepInputsOnChainWithTimers, 并有源码扫描。
 // Run: cd kasia-console && node src/lib/proto-settlement-c1.test.mjs
 import { execSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -19,7 +20,7 @@ if (!process.env._PROTO_C1_TEST_BOOTSTRAPPED) {
 }
 const kaspa = await import('kaspa-wasm');
 const C1 = await import('./proto-settlement-c1.mjs');
-const { assertFactsResponse, verifyStepInputsOnChain, filterFeeCandidates, withFeeParent, classifyC1Error, createTransportAlertGrader,
+const { assertFactsResponse, verifyStepInputsOnChain, verifyStepInputsOnChainWithTimers, filterFeeCandidates, withFeeParent, classifyC1Error, createTransportAlertGrader,
   assertStepBudget, assertFactsIpcTimeout, factsResponseCodes, FactsResponseError, FeeWindowError,
   MIN_STEP_BUDGET_MS, MIN_FACTS_IPC_TIMEOUT_MS } = C1;
 const { STEP_INPUT_ROLES, EXPECTED_INPUT_VALUE_SOMPI, SettlementChainCheckError } = await import('./proto-settlement-chain-checks.mjs');
@@ -79,8 +80,8 @@ function realEntry({ txidHex, index = 0, amount = 20000000n, spkHex, covenantIdH
 // 假 relay: 请求经【真实 9-0 handler】; handler 抛的 FactsError 经 relay 外层 catch 变成 {error, phase:'execution'}(无 ok)。
 function makeRelay(byAddr, { delayMs = 0, override } = {}) {
   const calls = [];
-  const requestFacts = async (address, payload) => {
-    calls.push({ address, payload, t: Date.now() });
+  const requestFacts = async (address, payload, opts) => {
+    calls.push({ address, payload, opts, t: Date.now() });
     if (override) { const o = await override(address, payload, calls.length); if (o !== undefined) return o.res; }
     if (delayMs) await sleep(delayMs);
     try {
@@ -129,7 +130,9 @@ const argsOf = (sc, relay, over = {}) => ({
   step: sc.step, pointers: sc.pointers, expectedSpks: sc.expectedSpks, network: NET, requestFacts: relay.requestFacts, kaspa,
   relaySpkHex: RELAY_SPK, feeMinAmount: FEE_MIN, inflightOutpoints: [], budgetMs: 20000, tickIntervalMs: 60000, ipcTimeoutMs: 20000, ...over,
 });
-const run = (step, { relayOpts, over, scOpts } = {}) => { const sc = scenario(step, scOpts); const relay = makeRelay(sc.byAddr, relayOpts); return { sc, relay, p: () => verifyStepInputsOnChain(argsOf(sc, relay, over)) }; };
+// F4: timers 不能经生产入口传入——带 timers 的调用走仅测试用的 verifyStepInputsOnChainWithTimers
+const callVerify = (a) => { const { timers, ...rest } = a; return timers ? verifyStepInputsOnChainWithTimers(rest, timers) : verifyStepInputsOnChain(rest); };
+const run = (step, { relayOpts, over, scOpts } = {}) => { const sc = scenario(step, scOpts); const relay = makeRelay(sc.byAddr, relayOpts); return { sc, relay, p: () => callVerify(argsOf(sc, relay, over)) }; };
 const withEntry = (sc, role, entry) => { const { addr, idx } = sc.where[role]; const byAddr = { ...sc.byAddr, [addr]: sc.byAddr[addr].slice() }; if (entry === null) byAddr[addr].splice(idx, 1); else byAddr[addr][idx] = entry; return { ...sc, byAddr }; };
 const targetEntry = (sc, role, over = {}) => { const p = sc.pointers.roles[role]; return realEntry({ txidHex: p.outpoint.transactionId, index: p.outpoint.index, amount: EXPECTED_INPUT_VALUE_SOMPI[role], spkHex: spkOf(role), covenantIdHex: p.expectedCovenantId, ...over }); };
 
@@ -552,7 +555,6 @@ await t('C-3 ▲ 预算 / IPC 超时的约束是结构性的(入口每次都校�
   }
   eq(relay.calls.length, 0, '校验先于任何请求');
   await A({ budgetMs: 15000, tickIntervalMs: 15001, ipcTimeoutMs: 15000 })();                                     // 恰在边界内: 通过
-  let te = null; try { await verifyStepInputsOnChain(argsOf(sc, relay, { timers: { setTimeout: 5 } })); } catch (x) { te = x; } ok(te instanceof TypeError, 'timers 须带 setTimeout/clearTimeout');
 });
 await t('E-2 classifyC1Error 永不返回 null: builder 侧的 chain_parents_mismatch(按 err.code 识别, 不 import builder)与一切无法识别的错误(TypeError / RangeError / 普通 Error / 非 Error)都归 settlement_c1_programming_error(error 级、非瞬时)——驱动不得把它当瞬时故障重试', async () => {
   const cp = Object.assign(new Error('close_commit: chain_parents_mismatch — fee: ...'), { code: 'chain_parents_mismatch', step: 'close_commit', role: 'fee' });
@@ -580,6 +582,40 @@ await t('E-1(C 侧) ▲ chainParents 的每个条目带 outpoint {txid,index}: �
   for (const bad of [{ ...cand, txid: undefined }, { ...cand, txid: 'ABC' }, { ...cand, txid: cand.txid.toUpperCase() }, { ...cand, vout: undefined }, { ...cand, vout: -1 }, { ...cand, vout: 1.5 }]) {
     let e = null; try { withFeeParent(r.chainParents, bad); } catch (x) { e = x; } ok(e instanceof TypeError, `坏候选应 TypeError: ${JSON.stringify({ txid: bad.txid, vout: bad.vout })}`);
   }
+});
+// ══ 9-1 F4 笔(NWT F1 审 F1-1 / F1-2) ═══════════════════════════════════════════════════════════════════════════════════
+await t('F1-1 ▲ 校验过的 IPC 超时交给被调方: 每个 requestFacts 调用(形态 O 与形态 L)收到第三参 {timeoutMs: ipcTimeoutMs}, 值 == 驱动声明的数(换几个不同的声明值都跟着变); 缺它的话"声明 ≠ 实际"无从核对', async () => {
+  for (const ipc of [15000, 20000, 17123]) {
+    for (const step of ALL_STEPS) {
+      const { relay, p } = run(step, { over: { ipcTimeoutMs: ipc } }); await p();
+      ok(relay.calls.length >= 2, `${step}: 应至少 1 次 O + 1 次 L`);
+      for (const c of relay.calls) jeq(c.opts, { timeoutMs: ipc }, `${step}/${c.payload.outpoints ? 'O' : 'L'}: 第三参`);
+    }
+  }
+});
+await t('F1-2 ▲ 生产入口不接受 timers(一个永不触发的 setTimeout 就能让每步总预算失效): 带 timers 键(任何值, 含 undefined 与"永不触发"版)⇒ TypeError 且不发请求; 不带则正常', async () => {
+  const sc = scenario('seal'); const relay = makeRelay(sc.byAddr);
+  const neverFires = { setTimeout: () => 0, clearTimeout: () => {} };
+  for (const tm of [neverFires, { setTimeout, clearTimeout }, undefined, null, 5]) {
+    let e = null; try { await verifyStepInputsOnChain({ ...argsOf(sc, relay), timers: tm }); } catch (x) { e = x; }
+    ok(e instanceof TypeError && /生产入口不接受 timers/.test(e.message), `timers=${String(tm && Object.keys(tm))} 应被生产入口拒: ${e && e.message}`);
+  }
+  eq(relay.calls.length, 0, '拒绝先于任何请求');
+  await verifyStepInputsOnChain(argsOf(sc, relay));                                                        // 不带 timers: 正常
+});
+await t('F1-2 ▲(NWT f22)仅测试用入口校验注入的 timers 形状: 缺 clearTimeout / 缺 setTimeout / 非对象 / null ⇒ TypeError(且先于任何请求); 形状对则正常, 定时器真被用到', async () => {
+  const sc = scenario('seal'); const relay = makeRelay(sc.byAddr); const base = argsOf(sc, relay);
+  for (const bad of [{ setTimeout }, { clearTimeout }, {}, null, undefined, 5, { setTimeout: 1, clearTimeout: 2 }]) {
+    let e = null; try { await verifyStepInputsOnChainWithTimers(base, bad); } catch (x) { e = x; } ok(e instanceof TypeError && /timers 须带/.test(e.message), `timers=${JSON.stringify(bad === undefined ? 'undefined' : bad)} 应 TypeError: ${e && e.message}`);
+  }
+  eq(relay.calls.length, 0);
+  const tm = recTimers(1); await verifyStepInputsOnChainWithTimers(base, tm);
+  eq(tm.log.set.length, 1, '注入的定时器必须被用到'); ok(tm.log.cleared.includes(tm.log.set[0].id));
+});
+await t('F1-2 ▲ 源码扫描(共享扫描器, NWT F2-1 修正版): 仅测试用的 verifyStepInputsOnChainWithTimers 只准被测试引用——整个仓库的非测试源码(含 src/data、scripts、ts/mts/tsx; 排除只按仓库根相对路径)里出现该标识符即违规(除定义它的 c1 模块自己); 动态拼接是文本扫描的已知边界', async () => {
+  const { findReferencesInNonTestSources } = await import('../../test-fixtures/source-scan/scan-non-test-sources.mjs');
+  const bad = findReferencesInNonTestSources(/verifyStepInputsOnChainWithTimers/, { exceptRel: ['kasia-console/src/lib/proto-settlement-c1.mjs'] });
+  if (bad.length) throw new Error(`非测试源码引用了仅测试用的入口: ${bad.join(', ')}`);
 });
 await t('模块边界(M0a 精神): 源码(去注释)不 import 任何 relay 通道 / DB / kaspa-wasm、不读 process.env、不含 sendCommand; 只 import chain-checks 与 tx-assembly', async () => {
   const src = fs.readFileSync(new URL('./proto-settlement-c1.mjs', import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`])\/\/.*$/gm, '$1');

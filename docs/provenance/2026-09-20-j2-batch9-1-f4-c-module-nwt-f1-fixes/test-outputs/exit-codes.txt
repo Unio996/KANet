@@ -1,0 +1,5 @@
+proto-settlement-c1.test exit=0
+proto-claim-draw.test exit=0
+scan-non-test-sources.test exit=0
+proto-settlement-chain-checks.test exit=0
+proto-settlement-pointers.test exit=0

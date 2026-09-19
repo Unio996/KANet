@@ -244,18 +244,36 @@ const paramsMissing = (step, role, msg) => new SettlementChainCheckError('chain_
  * @param {{roles: Record<string,{outpoint:{transactionId:string,index:number}, expectedCovenantId:string|null}>}} o.pointers  proto-settlement-pointers 的产出(§19.2)
  * @param {Record<string,string>} o.expectedSpks  各角色 builder 假设的 spk(调用方按当前状态现算)
  * @param {string} o.network  addressFromScriptPublicKey 的网络前缀
- * @param {(address:string, payload:object) => Promise<object>} o.requestFacts  驱动注入(生产 = protoSendCmd 发 get_address_utxos, IPC 超时 ≥ 15000)
+ * @param {(address:string, payload:object, opts:{timeoutMs:number}) => Promise<object>} o.requestFacts  驱动注入(生产 = protoSendCmd 发 get_address_utxos)。
+ *   🔴 (F4, NWT F1-1) 第三参 `{timeoutMs: ipcTimeoutMs}` 把【校验过的 IPC 超时】交给被调方: 真实 wrapper 必须用它作为 IPC 命令的超时(9-2b 验收: wrapper 发出的超时 == 收到的 timeoutMs)——
+ *   否则驱动可以声明 15000、注入一个实际只等 5000 ms 的 requestFacts 而入口断言照样过(声明 ≠ 实际)。
  * @param {{ScriptPublicKey:Function, addressFromScriptPublicKey:Function}} o.kaspa  kaspa-wasm(注入)
  * @param {string} o.relaySpkHex  relay 自己的 P2PK spk(fee 输入所在地址)
  * @param {bigint} o.feeMinAmount  该步最低可行 fee 输入面值(避免窗口被"小到不够用"的 UTXO 占位)
  * @param {Array<{transactionId:string,index:number}>} [o.inflightOutpoints]  我方在途(未 landed)意图产出的输出
  * @param {number} o.budgetMs  本步总预算; 超出 ⇒ facts_step_budget_exceeded, 本 tick 放弃
  * @param {number} o.tickIntervalMs  驱动的 tick 间隔——【必填】, 入口调 assertStepBudget(budgetMs, tickIntervalMs): 预算 ≥ 15 s 且 < tick 间隔(F1, NWT C-3: 漏传即拒, 不可能忘调)
- * @param {number} o.ipcTimeoutMs  requestFacts 背后 IPC 命令的超时——【必填】, 入口调 assertFactsIpcTimeout(≥ 15000 且 > relay 侧 13000)
- * @param {{setTimeout:Function, clearTimeout:Function}} [o.timers]  定时器(默认全局); 测试注入缩放/记录版, 生产不传
+ * @param {number} o.ipcTimeoutMs  requestFacts 背后 IPC 命令的超时——【必填】, 入口调 assertFactsIpcTimeout(≥ 15000 且 > relay 侧 13000), 并原样作为 requestFacts 的第三参 timeoutMs 交出
+ * 🔴 (F4, NWT F1-2) 生产入口【不接受 timers】(传了就 TypeError)——一个永不触发的 setTimeout 就能让"每步总预算"失效; 定时器注入只存在于仅测试用的 verifyStepInputsOnChainWithTimers, 并有源码扫描守着它不被生产代码引用。
  * @returns {Promise<{chainUtxos, chainParents, fee, events, evidence}>}  任何失败都抛错(FactsResponseError / SettlementChainCheckError / FeeWindowError)
  */
-export async function verifyStepInputsOnChain({ step, pointers, expectedSpks, network, requestFacts, kaspa, relaySpkHex, feeMinAmount, inflightOutpoints = [], budgetMs, tickIntervalMs, ipcTimeoutMs, timers = { setTimeout, clearTimeout } }) {
+export async function verifyStepInputsOnChain(opts) {
+  if (opts && typeof opts === 'object' && Object.prototype.hasOwnProperty.call(opts, 'timers')) {
+    throw new TypeError('verifyStepInputsOnChain: 生产入口不接受 timers(否则一个永不触发的 setTimeout 就让每步总预算失效); 测试用 verifyStepInputsOnChainWithTimers');
+  }
+  return verifyCore(opts, { setTimeout, clearTimeout });
+}
+
+/**
+ * 【仅测试用】同 verifyStepInputsOnChain, 但注入定时器(缩放 / 记录版, 让"超预算"用例不必真等 20 秒、并能断言定时器被清)。
+ * 生产代码不得引用它——测试里的源码扫描(非测试源码出现该标识符即违规)守着。timers 缺 setTimeout / clearTimeout ⇒ TypeError。
+ */
+export async function verifyStepInputsOnChainWithTimers(opts, timers) {
+  if (!timers || typeof timers.setTimeout !== 'function' || typeof timers.clearTimeout !== 'function') throw new TypeError('verifyStepInputsOnChainWithTimers: timers 须带 setTimeout / clearTimeout');
+  return verifyCore(opts, timers);
+}
+
+async function verifyCore({ step, pointers, expectedSpks, network, requestFacts, kaspa, relaySpkHex, feeMinAmount, inflightOutpoints = [], budgetMs, tickIntervalMs, ipcTimeoutMs } = {}, timers) {
   const roles = STEP_INPUT_ROLES[step];
   if (!roles) throw new SettlementChainCheckError('chain_check_unknown_step', `verifyStepInputsOnChain: 未知步骤 ${step}`, { step });
   if (typeof requestFacts !== 'function') throw new TypeError('verifyStepInputsOnChain: requestFacts 必填(驱动注入)');
@@ -266,7 +284,6 @@ export async function verifyStepInputsOnChain({ step, pointers, expectedSpks, ne
   if (!Number.isFinite(ipcTimeoutMs)) throw new TypeError('verifyStepInputsOnChain: ipcTimeoutMs 必填(requestFacts 的 IPC 超时必须 > relay 侧总预算)');
   assertStepBudget(budgetMs, tickIntervalMs);            // 每次调用都核: 预算 ≥ 15 s 且 < tick 间隔; tickIntervalMs 缺失/非有限数在这里抛 TypeError(必填)
   assertFactsIpcTimeout(ipcTimeoutMs);                   // 每次调用都核: IPC 超时 ≥ 15000
-  if (!timers || typeof timers.setTimeout !== 'function' || typeof timers.clearTimeout !== 'function') throw new TypeError('verifyStepInputsOnChain: timers 须带 setTimeout / clearTimeout');
   if (!isObj(pointers) || !isObj(pointers.roles)) throw paramsMissing(step, undefined, 'pointers.roles 缺失');
   const addressOf = (spkHex) => {
     const a = kaspa.addressFromScriptPublicKey(new kaspa.ScriptPublicKey(0, spkHex), network);
@@ -298,7 +315,7 @@ export async function verifyStepInputsOnChain({ step, pointers, expectedSpks, ne
 
   // 2) 每次 requestFacts 包 try/catch(N91-1: sendCommandAsync 的超时/无 relay 是 promise reject, assertFactsResponse 根本看不到)
   const ask = (address, payload, req) => Promise.resolve()
-    .then(() => requestFacts(address, payload))
+    .then(() => requestFacts(address, payload, { timeoutMs: ipcTimeoutMs }))     // F4(NWT F1-1): 把校验过的 IPC 超时交给被调方
     .catch((e) => { throw F('facts_transport_error', e?.message ?? String(e), { cause: e }); })
     .then((res) => assertFactsResponse(res, req));
   const tasks = [];
