@@ -1,0 +1,566 @@
+// proto-tx-assembly-settlement.test.mjs — buildMarketSealTxJson真实端到端组装验证(J2 2026-09-19,
+// 实现计划v0.4 §2.1/§7批3)。真kaspa-wasm+真编译+relay真代码交叉核验, 零mock——同
+// proto-tx-assembly-register-append.test.mjs手法, 延伸genesis→bet1→bet2→market_seal完整链路。
+// Run: cd kasia-console && node src/lib/proto-tx-assembly-settlement.test.mjs
+
+import { execSync, spawnSync } from 'node:child_process';
+import fs from 'node:fs';
+import { createRequire } from 'node:module';
+import { parsePushes as nwtParsePushes } from 'file:///D:/kanet-tn12/scratch/_nwt_wt_batch3_review/kasia-console/scratch/_nwt_batch3/decode_pushes.mjs';
+import { sighashAll as nwtSighash, verify as nwtVerify } from 'file:///D:/kanet-tn12/scratch/_nwt_wt_batch3_review/kasia-console/scratch/_nwt_batch3/sighash_port.mjs';
+import { computeRootCloseGenesisArtifact as nwtComputeRC } from './proto-covenant-builder.mjs';
+const require0 = createRequire(import.meta.url);
+
+if (!process.env._PROTO_TX_ASSEMBLY_SETTLEMENT_TEST_BOOTSTRAPPED) {
+  const tmpDb = `${process.env.TEMP || '/tmp'}/_j2_settlement_e2e_${process.pid}.db`;
+  try { fs.unlinkSync(tmpDb); } catch {}
+  execSync('node scripts/run-migrations.mjs', { cwd: process.cwd(), env: { ...process.env, DB_PATH: tmpDb }, stdio: 'pipe' });
+  const r = spawnSync(process.execPath, [process.argv[1]], { cwd: process.cwd(), stdio: 'inherit', env: { ...process.env, DB_PATH: tmpDb, _PROTO_TX_ASSEMBLY_SETTLEMENT_TEST_BOOTSTRAPPED: '1' } });
+  try { fs.unlinkSync(tmpDb); } catch {}
+  process.exit(r.status ?? 1);
+}
+
+if (!process.env.CONSOLE_ENCRYPTION_KEY) process.env.CONSOLE_ENCRYPTION_KEY = '1'.repeat(64);
+
+const kaspa = await import('kaspa-wasm');
+const { randomBytes } = await import('node:crypto');
+const {
+  buildMarketGenesisTxJson, buildRegisterAppendTxJson, scriptPublicKeyFromHex, assertKaspadInputVersionRule,
+} = await import('./proto-tx-assembly.mjs');
+const {
+  buildMarketSealTxJson, MARKET_SEAL_ROOTCLOSE_OUT_INDEX, MARKET_SEAL_TOKEN_OUT_INDEX,
+  buildCloseCommitTxJson, CLOSE_COMMIT_ROOTCLOSE_OUT_INDEX,
+} = await import('./proto-tx-assembly-settlement.mjs');
+const {
+  computeMarketGenesisArtifacts, computeShardLeafRedeemScript, computeKttGenesisArtifact,
+  loadProtocolConstants, loadFeeProfileCap, p2sh,
+} = await import('./proto-covenant-builder.mjs');
+const { compileSilV100, ctorBytes32V100, ctorIntV100 } = await import('./pool-bshard-artifacts.mjs');
+const { extractTemplateArtifactV100 } = await import('./pool-template-artifact.mjs');
+const { extractTxShape, validateFixedValueOutputs, signOnlyDeclaredInputs, assertFinalTxid } = await import('../../../kasia-relay/src/lib/covenant-broadcast.mjs');
+
+let pass = 0, fail = 0;
+const t = (n, f) => { try { f(); pass++; console.log('[PASS] ' + n); } catch (e) { fail++; console.log('[FAIL] ' + n + ' :: ' + e.message + '\n' + e.stack); } };
+
+const priv = new kaspa.PrivateKey(randomBytes(32).toString('hex'));
+const relayAddr = priv.toPublicKey().toAddress('mainnet');
+const relaySpk = kaspa.payToAddressScript(relayAddr);
+const relaySpkHex = '0x' + relaySpk.script;
+
+// ── ①先真实构造genesis, 拿到真实leafCovId + committeePubkeyHex(市场级事实, market_seal要用) ──
+const MARKET_ID = 'ab'.repeat(32), MIN_BET = 5, DEADLINE_MS = 1700000000000, SEAL_COUNT = 2;
+const genesisArtifacts = await computeMarketGenesisArtifacts({ marketId: MARKET_ID, minBet: MIN_BET, deadlineMs: DEADLINE_MS });
+const genesisFeeUtxo = { txid: 'ee'.repeat(32), vout: 0, value: 10_000_000_000n, scriptPublicKeyHex: relaySpkHex };
+const genesisBuilt = buildMarketGenesisTxJson({
+  kaspa, network: 'mainnet', feeUtxo: genesisFeeUtxo, relayChangeScriptPublicKeyHex: relaySpkHex,
+  shardLeafScriptPubKeyHex: genesisArtifacts.shardLeafDirect.scriptPubKeyHex, absFeeCapSompi: 80_000_000n,
+});
+const leafCovId = genesisBuilt.shardLeafCovId;
+const leafOutpoint = { txid: genesisBuilt.expectedTxid, vout: 0 };
+
+const { ps_tmpl_hash, token_tmpl_hash } = loadProtocolConstants();
+
+const SLD_PATH = new URL('./ShardLeaf_direct.sil', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
+const TICKET_PATH = new URL('./sil-v1/PoolSideTicket.sil', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
+const KTT_PATH = new URL('./sil-v1/KanetTestToken.sil', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
+const ROOT_CLOSE_PATH = new URL('./RootClose.sil', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
+
+function sldCtorFor() {
+  return [
+    ctorBytes32V100(MARKET_ID), ctorBytes32V100(ps_tmpl_hash), ctorBytes32V100(MARKET_ID),
+    ctorIntV100(SEAL_COUNT), ctorIntV100(MIN_BET), ctorBytes32V100(genesisArtifacts.rootCloseTmplHash), ctorBytes32V100('00'.repeat(32)),
+    ctorBytes32V100(token_tmpl_hash), ctorIntV100(0), ctorIntV100(0), ctorIntV100(0), ctorIntV100(0),
+    ctorIntV100(genesisArtifacts.shardLeafOwnRedeemLen),
+  ];
+}
+const kttCtorForAbi = [{ kind: 'int', value: 1 }, { kind: 'bytes', value: [...Buffer.alloc(32)] }, { kind: 'byte', value: 4 }, { kind: 'byte', value: 0 }, { kind: 'bytes', value: [...Buffer.alloc(32)] }, { kind: 'bytes', value: [...Buffer.alloc(32)] }, { kind: 'int', value: 3 }, { kind: 'int', value: 3 }];
+const kttCompiled = compileSilV100(KTT_PATH, kttCtorForAbi, 'KanetTestToken');
+const kttEntryAbi = kttCompiled._raw.contracts.KanetTestToken.entries.transfer;
+const kttStateFieldCount = kttCompiled._raw.contracts.KanetTestToken.runtime_state.fields.length;
+const tokPrefixHex = '0x' + Buffer.from(extractTemplateArtifactV100(kttCompiled).templatePrefix).toString('hex');
+const tokSuffixHex = '0x' + Buffer.from(extractTemplateArtifactV100(kttCompiled).templateSuffix).toString('hex');
+
+function doRegisterAppend({ side, stake, currentState, heldInput, bettorPkByte }) {
+  const bettorPk = Buffer.alloc(32, bettorPkByte).toString('hex');
+  const newState = { local_yes: currentState.local_yes + (side === 0 ? stake : 0), local_no: currentState.local_no + (side === 1 ? stake : 0), count: currentState.count + 1, pool_value: currentState.pool_value + stake };
+  const leafRedeem = computeShardLeafRedeemScript({ marketId: MARKET_ID, minBet: MIN_BET, sealCount: SEAL_COUNT, rootcloseTmplHash: genesisArtifacts.rootCloseTmplHash, state: currentState, ownRedeemLen: genesisArtifacts.shardLeafOwnRedeemLen });
+  const sldCompiled = compileSilV100(SLD_PATH, sldCtorFor(), 'ShardLeaf_direct');
+  const registerAppendEntryAbi = sldCompiled._raw.contracts.ShardLeaf_direct.entries.register_append;
+  const mergedArtifact = computeKttGenesisArtifact({ amount: newState.pool_value, ownerCovIdHex: leafCovId });
+  const ticketCtor = [{ kind: 'bytes', value: [...Buffer.from(bettorPk, 'hex')] }, { kind: 'int', value: side }, { kind: 'int', value: stake }, { kind: 'bytes', value: [...Buffer.from(MARKET_ID, 'hex')] }];
+  const ticketCompiled = compileSilV100(TICKET_PATH, ticketCtor, 'PoolSideTicket');
+  const ticketSpkHex = '0x' + p2sh(Buffer.from(ticketCompiled.script));
+  const ticketTemplateArtifact = extractTemplateArtifactV100(ticketCompiled);
+  const psPrefixHex = '0x' + Buffer.from(ticketTemplateArtifact.templatePrefix).toString('hex');
+  const psSuffixHex = '0x' + Buffer.from(ticketTemplateArtifact.templateSuffix).toString('hex');
+  const feeUtxo = { txid: 'dd'.repeat(32), vout: 0, value: 10_000_000_000n, scriptPublicKeyHex: relaySpkHex };
+  const built = buildRegisterAppendTxJson({
+    kaspa, network: 'mainnet',
+    leafRedeemScript: leafRedeem.script, leafStateLayout: leafRedeem.stateLayout,
+    leafOutpoint, leafCovId, currentState, newState, heldInput,
+    feeUtxo, relayChangeScriptPublicKeyHex: relaySpkHex,
+    registerAppendEntryAbi, registerAppendArgs: { side, stake, bettorPk, psPrefix: psPrefixHex, psSuffix: psSuffixHex, tokPrefix: tokPrefixHex, tokSuffix: tokSuffixHex },
+    ticketScriptPubKeyHex: ticketSpkHex, mergedKttScript: mergedArtifact.script,
+    absFeeCapSompi: 100_000_000n,
+  });
+  return { built, newState, mergedArtifact };
+}
+
+// bet1(无held), bet2(有held=bet1的合并KTT) —— 只需要真实构造出tx对象拿mergedKttScript/covId, 不需要
+// 真实广播(same手法同register_append测试: 只测construct+sign+finalize, 不接simnet)。
+const bet1 = doRegisterAppend({ side: 0, stake: 20, currentState: { local_yes: 0, local_no: 0, count: 0, pool_value: 0 }, heldInput: null, bettorPkByte: 0x66 });
+const bet2 = doRegisterAppend({
+  side: 1, stake: 30, currentState: bet1.newState,
+  heldInput: { txid: bet1.built.expectedTxid, vout: 2, value: 20_000_000n, scriptPublicKeyHex: bet1.mergedArtifact.scriptPubKeyHex, redeemScript: bet1.mergedArtifact.script, entryAbi: kttEntryAbi, stateFieldCount: kttStateFieldCount },
+  bettorPkByte: 0x77,
+});
+
+// ── ② market_seal: leaf state = bet2.newState(count=2=SEAL_COUNT), held = bet2产出的合并KTT ──
+const currentState = bet2.newState;
+t('前提检查: currentState.count(2) === SEAL_COUNT(2)', () => {
+  if (currentState.count !== SEAL_COUNT) throw new Error(`count=${currentState.count} != SEAL_COUNT=${SEAL_COUNT}`);
+});
+
+const leafRedeemAtSeal = computeShardLeafRedeemScript({ marketId: MARKET_ID, minBet: MIN_BET, sealCount: SEAL_COUNT, rootcloseTmplHash: genesisArtifacts.rootCloseTmplHash, state: currentState, ownRedeemLen: genesisArtifacts.shardLeafOwnRedeemLen });
+const sldCompiledAtSeal = compileSilV100(SLD_PATH, sldCtorFor(), 'ShardLeaf_direct');
+const convertToRootcloseEntryAbi = sldCompiledAtSeal._raw.contracts.ShardLeaf_direct.entries.convert_to_rootclose;
+const heldAtSeal = { txid: bet2.built.expectedTxid, vout: 2, value: 20_000_000n, scriptPublicKeyHex: bet2.mergedArtifact.scriptPubKeyHex, redeemScript: bet2.mergedArtifact.script, entryAbi: kttEntryAbi, stateFieldCount: kttStateFieldCount };
+const sealFeeUtxo = { txid: 'ff'.repeat(32), vout: 0, value: 10_000_000_000n, scriptPublicKeyHex: relaySpkHex };
+const marketSealCap = loadFeeProfileCap('market_seal');
+
+let sealBuilt;
+t('①market_seal buildMarketSealTxJson 真实构造成功([leaf,held,fee]三输入)', () => {
+  sealBuilt = buildMarketSealTxJson({
+    kaspa, network: 'mainnet',
+    marketId: MARKET_ID, committeePubkeyHex: genesisArtifacts.committeePubkeyHex, deadlineMs: DEADLINE_MS, rootCloseTmplHash: genesisArtifacts.rootCloseTmplHash,
+    leafRedeemScript: leafRedeemAtSeal.script, leafOutpoint, leafCovId, heldInput: heldAtSeal, currentState,
+    feeUtxo: sealFeeUtxo, relayChangeScriptPublicKeyHex: relaySpkHex,
+    convertToRootcloseEntryAbi, tokPrefixHex, tokSuffixHex, absFeeCapSompi: marketSealCap,
+  });
+  if (!sealBuilt.txJson || !sealBuilt.expectedTxid) throw new Error('返回形状不对');
+  if (sealBuilt.signInputIndices.length !== 1 || sealBuilt.signInputIndices[0] !== 2) throw new Error(`三输入形状下fee应该在index=2, 实际signInputIndices=${JSON.stringify(sealBuilt.signInputIndices)}`);
+  if (JSON.stringify(sealBuilt.genesisOutputIndices) !== JSON.stringify([MARKET_SEAL_ROOTCLOSE_OUT_INDEX, MARKET_SEAL_TOKEN_OUT_INDEX])) throw new Error(`genesisOutputIndices不对: ${JSON.stringify(sealBuilt.genesisOutputIndices)}`);
+});
+
+t('②relay真代码能反序列化+extractTxShape+validateFixedValueOutputs通过', () => {
+  const tx = kaspa.Transaction.deserializeFromSafeJSON(sealBuilt.txJson);
+  const shape = extractTxShape(tx);
+  const fv = validateFixedValueOutputs({ outputs: shape.outputs, genesisOutputIndices: sealBuilt.genesisOutputIndices, continuationOutputIndices: [] });
+  if (!fv.ok) throw new Error(`relay真代码拒绝: ${fv.reason}`);
+});
+
+t('③relay真签名(fee输入)后finalize, txid与expectedTxid一致', () => {
+  const tx = kaspa.Transaction.deserializeFromSafeJSON(sealBuilt.txJson);
+  signOnlyDeclaredInputs({ tx, signInputIndices: sealBuilt.signInputIndices, privateKey: priv, kaspa });
+  tx.finalize();
+  const r = assertFinalTxid(tx, sealBuilt.expectedTxid);
+  if (!r.ok) throw new Error(`签名后txid=${r.actualTxid} != 预期${sealBuilt.expectedTxid}`);
+});
+
+t('③b(账本1465节点规则镜像) 三输入交易每个input满足v2.0.1 RPC层sigOpCount/computeBudget一致性规则', () => {
+  const tx = kaspa.Transaction.deserializeFromSafeJSON(sealBuilt.txJson);
+  assertKaspadInputVersionRule(tx, 'market_seal-e2e');
+});
+
+t('④独立复算Σ真实inputs.utxo.amount − Σ真实outputs.value必须【恰好】等于built.netLoss(账本1455纪律)', () => {
+  const tx = kaspa.Transaction.deserializeFromSafeJSON(sealBuilt.txJson);
+  let sumIn = 0n; for (const inp of tx.inputs) sumIn += BigInt(inp.utxo.amount);
+  let sumOut = 0n; for (const out of tx.outputs) sumOut += BigInt(out.value);
+  const impliedFee = sumIn - sumOut;
+  if (impliedFee !== sealBuilt.netLoss) throw new Error(`隐含手续费(Σin-Σout=${impliedFee})与built.netLoss(${sealBuilt.netLoss})不一致`);
+});
+
+t('⑤真实tx算出的output covenant_id与builder返回的rootCloseCovId/tokenCovId一致(不只信手算)', () => {
+  const tx = kaspa.Transaction.deserializeFromSafeJSON(sealBuilt.txJson);
+  const realRcCovId = String(tx.outputs[MARKET_SEAL_ROOTCLOSE_OUT_INDEX].covenant.covenantId);
+  const realTokenCovId = String(tx.outputs[MARKET_SEAL_TOKEN_OUT_INDEX].covenant.covenantId);
+  if (realRcCovId.toLowerCase() !== sealBuilt.rootCloseCovId.toLowerCase()) throw new Error(`RootClose covenant_id不一致: 真实=${realRcCovId} 返回=${sealBuilt.rootCloseCovId}`);
+  if (realTokenCovId.toLowerCase() !== sealBuilt.tokenCovId.toLowerCase()) throw new Error(`token covenant_id不一致: 真实=${realTokenCovId} 返回=${sealBuilt.tokenCovId}`);
+});
+
+{
+  const { computeRootCloseGenesisArtifact } = await import('./proto-covenant-builder.mjs');
+  t('⑥fail-closed: 错误的rootCloseTmplHash必须被拒绝', () => {
+    let threw = null;
+    try {
+      computeRootCloseGenesisArtifact({
+        marketId: MARKET_ID, committeePubkeyHex: genesisArtifacts.committeePubkeyHex, deadlineMs: DEADLINE_MS,
+        rootCloseTmplHash: 'ff'.repeat(32), // 故意错的
+        state: { local_yes: 0, local_no: 0, count: 0, pool_value: 0, closed: 0, winningSide: 0, payoutRoot: '00'.repeat(32) },
+      });
+    } catch (e) { threw = e; }
+    if (!threw) throw new Error('应该fail-closed throw, 却成功返回了');
+    if (!/fail-closed/.test(threw.message)) throw new Error(`throw了但不是fail-closed错误: ${threw.message}`);
+  });
+}
+
+// ── ③ close_commit: RootClose当前UTXO=market_seal产出的genesis输出, sealedState=bet2.newState ──
+{
+  const rootCloseOutpoint = { txid: sealBuilt.expectedTxid, vout: MARKET_SEAL_ROOTCLOSE_OUT_INDEX };
+  // B4-5: 链上UTXO的spk取自产出该UTXO的market_seal交易的真实输出(独立于builder现算的RootClose spk)
+  const rootCloseUtxoScriptPublicKeyHex = '0x' + String(kaspa.Transaction.deserializeFromSafeJSON(sealBuilt.txJson).outputs[MARKET_SEAL_ROOTCLOSE_OUT_INDEX].scriptPublicKey.script);
+  const NEW_WINNING_SIDE = 0; // YES赢(测试用值, D-021合规: 非真实市场结果)
+  const NEW_PAYOUT_ROOT_HEX = 'ab'.repeat(32); // 测试夹具占位值, 非真实off-chain算出的merkle root
+  const closeCommitCap = loadFeeProfileCap('close_commit');
+  const closeCommitFeeUtxo = { txid: 'ee'.repeat(32), vout: 1, value: 10_000_000_000n, scriptPublicKeyHex: relaySpkHex };
+
+  let closeCommitBuilt;
+  t('①close_commit buildCloseCommitTxJson 真实构造成功([rootClose,fee]两输入, 委员5槽同签)', () => {
+    closeCommitBuilt = buildCloseCommitTxJson({
+      kaspa, network: 'mainnet',
+      marketId: MARKET_ID, committeePubkeyHex: genesisArtifacts.committeePubkeyHex,
+      committeePrivkeyEnvelope: genesisArtifacts.committeePrivkeyEnvelope,
+      deadlineMs: DEADLINE_MS, rootCloseTmplHash: genesisArtifacts.rootCloseTmplHash,
+      rootCloseOutpoint, rootCloseUtxoScriptPublicKeyHex, rootCloseCovId: sealBuilt.rootCloseCovId, sealedState: currentState,
+      newWinningSide: NEW_WINNING_SIDE, newPayoutRootHex: NEW_PAYOUT_ROOT_HEX,
+      tokPrefixHex, tokSuffixHex, feeUtxo: closeCommitFeeUtxo, relayChangeScriptPublicKeyHex: relaySpkHex,
+      absFeeCapSompi: closeCommitCap,
+    });
+    if (!closeCommitBuilt.txJson || !closeCommitBuilt.expectedTxid) throw new Error('返回形状不对');
+    if (closeCommitBuilt.signInputIndices.length !== 1 || closeCommitBuilt.signInputIndices[0] !== 1) throw new Error(`两输入形状下fee应该在index=1, 实际signInputIndices=${JSON.stringify(closeCommitBuilt.signInputIndices)}`);
+  });
+
+  t('NWT-VM-PROBE 修后 builder 真实输出的委员签名: 上游 VM(patched cli-debugger)与自移植 sighash 双重验', () => {
+    const NB = 'file:///D:/kanet-tn12/scratch/_nwt_wt_batch3_review/kasia-console/scratch/_nwt_batch3/';
+    const tx = kaspa.Transaction.deserializeFromSafeJSON(closeCommitBuilt.txJson);
+    const toHex = (b) => '0x' + Buffer.from(b).toString('hex');
+    const ps = nwtParsePushes(Buffer.from(tx.inputs[0].signatureScript, 'hex').toString('hex'));
+    const num = (p) => Number(BigInt(p.kind === 'OP_0' ? 0 : (p.small ?? 0)));
+    const pk = ps.slice(0, 5).map((p) => toHex(p.data)); const sigs = ps.slice(5, 10).map((p) => toHex(p.data));
+    const args = [...pk, ...sigs, num(ps[10]), num(ps[11]), toHex(ps[12].data), toHex(ps[13].data), toHex(ps[14].data)];
+    const cs = { local_yes: currentState.local_yes, local_no: currentState.local_no, count: currentState.count, pool_value: currentState.pool_value };
+    const art = nwtComputeRC({ marketId: MARKET_ID, committeePubkeyHex: genesisArtifacts.committeePubkeyHex, deadlineMs: DEADLINE_MS, rootCloseTmplHash: genesisArtifacts.rootCloseTmplHash, state: { ...cs, closed: 0, winningSide: 0, payoutRoot: '00'.repeat(32) } });
+    const ctor = (closed, win, root) => [toHex(Buffer.from(art.committeeHash, 'hex')), DEADLINE_MS, toHex(Buffer.from(art.rootClaimTmplHash, 'hex')), toHex(Buffer.from(art.refundClaimTmplHash, 'hex')), toHex(Buffer.from(token_tmpl_hash, 'hex')), cs.local_yes, cs.local_no, cs.count, cs.pool_value, closed, win, toHex(Buffer.from(root, 'hex'))];
+    const rcCov = String(tx.outputs[0].covenant.covenantId);
+    const mkFx = (withCov) => ({ tests: [{ name: 'nwt_fixed', function: 'close_commit', constructor_args: ctor(0, 0, '00'.repeat(32)), args, expect: 'pass',
+      tx: { version: 1, lock_time: Number(tx.lockTime), active_input_index: 0,
+        inputs: tx.inputs.map((i, k) => ({ prev_txid: String(i.previousOutpoint.transactionId), prev_index: Number(i.previousOutpoint.index), sequence: 0, utxo_value: Number(i.utxo.amount), ...(k === 0 ? { covenant_id: rcCov } : {}) })),
+        outputs: tx.outputs.map((o, k) => (k === 0 ? { value: Number(o.value), ...(withCov ? { covenant_id: rcCov, authorizing_input: 0 } : {}), constructor_args: ctor(1, NEW_WINNING_SIDE, NEW_PAYOUT_ROOT_HEX) } : { value: Number(o.value), script_hex: String(o.scriptPublicKey.script) })) } }] });
+    const run = (fx, name) => { const p = require0('node:path'); const f = require0('node:os').tmpdir() + '/_nwt_vm_' + name + '.json'; fs.writeFileSync(f, JSON.stringify(fx)); const r = spawnSync('D:/silverscript-debugger-3ed9733-eprintln/target/release/cli-debugger.exe', ['D:/kanet-tn12/scratch/_nwt_wt_j2_7f1e339b/kasia-console/src/lib/RootClose.sil', '--test-file', f, '--test-name', 'nwt_fixed', '--run'], { maxBuffer: 1 << 26 }); return { status: r.status, out: r.stdout.toString().split(String.fromCharCode(10))[0].slice(0, 120), err: r.stderr.toString().split(String.fromCharCode(10)).filter((l) => /verification failed|error:/.test(l)).slice(0, 2).join(' | ').slice(0, 160) }; };
+    const A = run(mkFx(true), 'A'); const B = run(mkFx(false), 'B');
+    console.log('NWT-VM-PROBE upstream VM, real builder tx + real committee sigs, output0 covenant PRESENT  => exit=' + A.status + ' ' + A.out + ' ' + A.err);
+    console.log('NWT-VM-PROBE upstream VM, same sigs, output0 covenant STRIPPED (reverse arm)               => exit=' + B.status + ' ' + B.out + ' ' + B.err);
+    const d = { version: Number(tx.version), lockTime: BigInt(tx.lockTime), inputs: tx.inputs.map((i) => ({ txid: String(i.previousOutpoint.transactionId), index: Number(i.previousOutpoint.index), sequence: BigInt(i.sequence), spkHex: String(i.utxo.scriptPublicKey.script), amount: BigInt(i.utxo.amount) })), outputs: tx.outputs.map((o) => ({ value: BigInt(o.value), spkHex: String(o.scriptPublicKey.script), covenant: o.covenant ? { auth: Number(o.covenant.authorizingInput), id: String(o.covenant.covenantId) } : null })) };
+    const okFinal = sigs.map((sg) => nwtVerify(sg.slice(2, 2 + 128), nwtSighash(d, 0), genesisArtifacts.committeePubkeyHex));
+    const d2 = { ...d, outputs: d.outputs.map((o, k) => (k === 0 ? { ...o, covenant: null } : o)) };
+    const okStrip = sigs.map((sg) => nwtVerify(sg.slice(2, 2 + 128), nwtSighash(d2, 0), genesisArtifacts.committeePubkeyHex));
+    console.log('NWT-VM-PROBE own sighash port: final tx sigs=' + JSON.stringify(okFinal) + ' | covenant-stripped sigs=' + JSON.stringify(okStrip));
+    if (A.status !== 0) throw new Error('上游 VM 对修后 builder 真实输出 FAIL: ' + A.out + ' ' + A.err);
+    if (B.status === 0) throw new Error('反向臂应失败却通过(签名没有绑定 covenant?)');
+  });
+
+  t('②relay真代码能反序列化+extractTxShape+validateFixedValueOutputs通过(续约非genesis)', () => {
+    const tx = kaspa.Transaction.deserializeFromSafeJSON(closeCommitBuilt.txJson);
+    const shape = extractTxShape(tx);
+    const fv = validateFixedValueOutputs({ outputs: shape.outputs, genesisOutputIndices: [], continuationOutputIndices: [CLOSE_COMMIT_ROOTCLOSE_OUT_INDEX] });
+    if (!fv.ok) throw new Error(`relay真代码拒绝: ${fv.reason}`);
+  });
+
+  t('③relay真签名(fee输入)后finalize, txid与expectedTxid一致', () => {
+    const tx = kaspa.Transaction.deserializeFromSafeJSON(closeCommitBuilt.txJson);
+    signOnlyDeclaredInputs({ tx, signInputIndices: closeCommitBuilt.signInputIndices, privateKey: priv, kaspa });
+    tx.finalize();
+    const r = assertFinalTxid(tx, closeCommitBuilt.expectedTxid);
+    if (!r.ok) throw new Error(`签名后txid=${r.actualTxid} != 预期${closeCommitBuilt.expectedTxid}`);
+  });
+
+  t('③b(账本1465节点规则镜像) 两输入交易每个input满足v2.0.1 RPC层sigOpCount/computeBudget一致性规则', () => {
+    const tx = kaspa.Transaction.deserializeFromSafeJSON(closeCommitBuilt.txJson);
+    assertKaspadInputVersionRule(tx, 'close_commit-e2e');
+  });
+
+  t('④独立复算Σ真实inputs.utxo.amount − Σ真实outputs.value必须【恰好】等于built.netLoss(账本1455纪律)', () => {
+    const tx = kaspa.Transaction.deserializeFromSafeJSON(closeCommitBuilt.txJson);
+    let sumIn = 0n; for (const inp of tx.inputs) sumIn += BigInt(inp.utxo.amount);
+    let sumOut = 0n; for (const out of tx.outputs) sumOut += BigInt(out.value);
+    const impliedFee = sumIn - sumOut;
+    if (impliedFee !== closeCommitBuilt.netLoss) throw new Error(`隐含手续费(Σin-Σout=${impliedFee})与built.netLoss(${closeCommitBuilt.netLoss})不一致`);
+  });
+
+  t('⑤真实tx算出的output covenant_id(RootClose续约)与builder返回的rootCloseContinuationCovId一致且等于sealBuilt.rootCloseCovId(covenant_id不变)', () => {
+    const tx = kaspa.Transaction.deserializeFromSafeJSON(closeCommitBuilt.txJson);
+    const realCovId = String(tx.outputs[CLOSE_COMMIT_ROOTCLOSE_OUT_INDEX].covenant.covenantId);
+    if (realCovId.toLowerCase() !== closeCommitBuilt.rootCloseContinuationCovId.toLowerCase()) throw new Error(`covenant_id不一致: 真实=${realCovId} 返回=${closeCommitBuilt.rootCloseContinuationCovId}`);
+    if (realCovId.toLowerCase() !== sealBuilt.rootCloseCovId.toLowerCase()) throw new Error(`close_commit不应该改变RootClose自己的covenant_id: 续约后=${realCovId} market_seal时=${sealBuilt.rootCloseCovId}`);
+  });
+
+  t('⑥fail-closed: deadline_ms尚未过去(未来时间戳)必须被构造时拒绝, 不留prepared残留', () => {
+    let threw = null;
+    try {
+      buildCloseCommitTxJson({
+        kaspa, network: 'mainnet',
+        marketId: MARKET_ID, committeePubkeyHex: genesisArtifacts.committeePubkeyHex,
+        committeePrivkeyEnvelope: genesisArtifacts.committeePrivkeyEnvelope,
+        deadlineMs: Date.now() + 3600_000, // 故意未来时间戳
+        rootCloseTmplHash: genesisArtifacts.rootCloseTmplHash,
+        rootCloseOutpoint, rootCloseUtxoScriptPublicKeyHex, rootCloseCovId: sealBuilt.rootCloseCovId, sealedState: currentState,
+        newWinningSide: NEW_WINNING_SIDE, newPayoutRootHex: NEW_PAYOUT_ROOT_HEX,
+        tokPrefixHex, tokSuffixHex, feeUtxo: closeCommitFeeUtxo, relayChangeScriptPublicKeyHex: relaySpkHex,
+        absFeeCapSompi: closeCommitCap,
+      });
+    } catch (e) { threw = e; }
+    if (!threw) throw new Error('deadline未过去时应该fail-closed throw, 却成功返回了');
+    if (!/fail-closed/.test(threw.message)) throw new Error(`throw了但不是fail-closed错误: ${threw.message}`);
+  });
+
+  const { decryptCommitteePrivkey } = await import('./proto-committee-key.mjs');
+  t('⑦委员私钥不进返回值(检查closeCommitBuilt的每个字段都不含明文私钥子串)', () => {
+    const privHex = decryptCommitteePrivkey(genesisArtifacts.committeePrivkeyEnvelope);
+    const serialized = JSON.stringify(closeCommitBuilt, (_k, v) => (typeof v === 'bigint' ? v.toString() : v));
+    if (serialized.includes(privHex)) throw new Error('committeePrivkeyEnvelope解密后的明文私钥出现在了builder返回值里');
+  });
+
+  // ══════════ ④ convert_to_claim(批5): RootClose=close_commit产出的续约输出(closed:1), held=market_seal产出的代币输出 ══════════
+  const { buildConvertToClaimTxJson, convertToClaimWitnessArgs, CONVERT_TO_CLAIM_CLAIM_OUT_INDEX, CONVERT_TO_CLAIM_TOKEN_OUT_INDEX, CONVERT_TO_CLAIM_HELD_IN_INDEX } = await import('./proto-tx-assembly-settlement.mjs');
+  const { computeRootClaimGenesisArtifact } = await import('./proto-covenant-builder.mjs');
+  const { encodeConvertToClaimAction } = await import('./proto-convert-to-claim-witness.mjs');
+  const { blake2b } = (await import('node:module')).createRequire(import.meta.url)('../../node_modules/@noble/hashes/blake2b.js'); // 同proto-covenant-builder.mjs:27(package exports不放行子路径)
+  const closedState = { ...currentState, closed: 1, winningSide: NEW_WINNING_SIDE, payoutRoot: NEW_PAYOUT_ROOT_HEX };
+  const c2cRootCloseOutpoint = { txid: closeCommitBuilt.expectedTxid, vout: CLOSE_COMMIT_ROOTCLOSE_OUT_INDEX };
+  const c2cHeldOutpoint = { txid: sealBuilt.expectedTxid, vout: MARKET_SEAL_TOKEN_OUT_INDEX };
+  const c2cCap = loadFeeProfileCap('convert_to_claim');
+  const c2cFeeUtxo = { txid: 'ee'.repeat(32), vout: 2, value: 10_000_000_000n, scriptPublicKeyHex: relaySpkHex };
+  const c2cArgs = (over = {}) => ({
+    kaspa, network: 'mainnet',
+    marketId: MARKET_ID, committeePubkeyHex: genesisArtifacts.committeePubkeyHex, deadlineMs: DEADLINE_MS, rootCloseTmplHash: genesisArtifacts.rootCloseTmplHash,
+    rootCloseOutpoint: c2cRootCloseOutpoint, rootCloseCovId: sealBuilt.rootCloseCovId, closedState, heldTokenOutpoint: c2cHeldOutpoint,
+    tokPrefixHex, tokSuffixHex, feeUtxo: c2cFeeUtxo, relayChangeScriptPublicKeyHex: relaySpkHex, absFeeCapSompi: c2cCap,
+    ...over,
+  });
+
+
+  const { computeRootCloseGenesisArtifact } = await import('./proto-covenant-builder.mjs');
+  const compiledRootCloseAbi = () => computeRootCloseGenesisArtifact({ marketId: MARKET_ID, committeePubkeyHex: genesisArtifacts.committeePubkeyHex, deadlineMs: DEADLINE_MS, rootCloseTmplHash: genesisArtifacts.rootCloseTmplHash, state: closedState }).entries.convert_to_claim;
+  // 独立的push解析器(不复用编码器), 按ABI声明顺序读回具名参数
+  const parsePushesLocal = (hex) => {
+    const b = Buffer.from(hex, 'hex'); const out = []; let i = 0;
+    while (i < b.length) {
+      const op = b[i++];
+      if (op === 0x00) out.push(Buffer.alloc(0));
+      else if (op >= 0x01 && op <= 0x4b) { out.push(b.subarray(i, i + op)); i += op; }
+      else if (op === 0x4c) { const n = b[i++]; out.push(b.subarray(i, i + n)); i += n; }
+      else if (op === 0x4d) { const n = b.readUInt16LE(i); i += 2; out.push(b.subarray(i, i + n)); i += n; }
+      else if (op === 0x4e) { const n = b.readUInt32LE(i); i += 4; out.push(b.subarray(i, i + n)); i += n; }
+      else if (op === 0x4f) out.push(Buffer.from([0x81]));
+      else if (op >= 0x51 && op <= 0x60) out.push(Buffer.from([op - 0x50]));
+      else throw new Error('parsePushesLocal: 非push opcode 0x' + op.toString(16));
+    }
+    return out;
+  };
+  const decodeSmallIntLocal = (buf) => { if (buf.length === 0) return 0; if (buf.length === 1 && buf[0] === 0x81) return -1; let v = 0n; for (let k = buf.length - 1; k >= 0; k--) v = (v << 8n) | BigInt(buf[k]); return Number(v); };
+
+  let c2cBuilt;
+  t('①convert_to_claim buildConvertToClaimTxJson 真实构造成功([rootClose,held,fee]三输入, 三输出)', () => {
+    c2cBuilt = buildConvertToClaimTxJson(c2cArgs());
+    if (!c2cBuilt.txJson || !c2cBuilt.expectedTxid) throw new Error('返回形状不对');
+    if (JSON.stringify(c2cBuilt.signInputIndices) !== '[2]') throw new Error(`fee应该在index=2, 实际${JSON.stringify(c2cBuilt.signInputIndices)}`);
+    if (JSON.stringify(c2cBuilt.genesisOutputIndices) !== '[0,1]') throw new Error(`genesisOutputIndices不对: ${JSON.stringify(c2cBuilt.genesisOutputIndices)}`);
+  });
+
+  t('②relay真代码能反序列化+extractTxShape+validateFixedValueOutputs通过(两个genesis输出)', () => {
+    const tx = kaspa.Transaction.deserializeFromSafeJSON(c2cBuilt.txJson);
+    const shape = extractTxShape(tx);
+    const fv = validateFixedValueOutputs({ outputs: shape.outputs, genesisOutputIndices: c2cBuilt.genesisOutputIndices, continuationOutputIndices: [] });
+    if (!fv.ok) throw new Error(`relay真代码拒绝: ${fv.reason}`);
+  });
+
+  t('③relay真签名(fee输入)后finalize, txid与expectedTxid一致', () => {
+    const tx = kaspa.Transaction.deserializeFromSafeJSON(c2cBuilt.txJson);
+    signOnlyDeclaredInputs({ tx, signInputIndices: c2cBuilt.signInputIndices, privateKey: priv, kaspa });
+    tx.finalize();
+    const r = assertFinalTxid(tx, c2cBuilt.expectedTxid);
+    if (!r.ok) throw new Error(`签名后txid=${r.actualTxid} != 预期${c2cBuilt.expectedTxid}`);
+  });
+
+  t('③b(账本1465节点规则镜像) 三输入交易每个input满足v2.0.1 RPC层sigOpCount/computeBudget一致性规则', () => {
+    assertKaspadInputVersionRule(kaspa.Transaction.deserializeFromSafeJSON(c2cBuilt.txJson), 'convert_to_claim-e2e');
+  });
+
+  t('④独立复算Σ真实inputs.utxo.amount − Σ真实outputs.value必须【恰好】等于built.netLoss(账本1455纪律)', () => {
+    const tx = kaspa.Transaction.deserializeFromSafeJSON(c2cBuilt.txJson);
+    let sumIn = 0n; for (const inp of tx.inputs) sumIn += BigInt(inp.utxo.amount);
+    let sumOut = 0n; for (const out of tx.outputs) sumOut += BigInt(out.value);
+    if (sumIn - sumOut !== c2cBuilt.netLoss) throw new Error(`隐含手续费(${sumIn - sumOut})与built.netLoss(${c2cBuilt.netLoss})不一致`);
+  });
+
+  t('⑤covenant_id独立复算: claim的covenant_id=kaspa.covenantId(fee outpoint,[claim输出]); 新代币输出spk=以【真实claim covid】为owner现算的KTT', () => {
+    const tx = kaspa.Transaction.deserializeFromSafeJSON(c2cBuilt.txJson);
+    const feeOutpointObj = { transactionId: c2cFeeUtxo.txid, index: c2cFeeUtxo.vout };
+    const indep = String(kaspa.covenantId(feeOutpointObj, [{ index: CONVERT_TO_CLAIM_CLAIM_OUT_INDEX, output: new kaspa.TransactionOutput(tx.outputs[CONVERT_TO_CLAIM_CLAIM_OUT_INDEX].value, tx.outputs[CONVERT_TO_CLAIM_CLAIM_OUT_INDEX].scriptPublicKey) }]));
+    const realClaim = String(tx.outputs[CONVERT_TO_CLAIM_CLAIM_OUT_INDEX].covenant.covenantId);
+    if (indep.toLowerCase() !== realClaim.toLowerCase()) throw new Error(`claim covid: 独立复算=${indep} 真实tx=${realClaim}`);
+    if (realClaim.toLowerCase() !== c2cBuilt.claimCovId.toLowerCase()) throw new Error('返回的claimCovId与真实tx不一致');
+    const expectTok = computeKttGenesisArtifact({ amount: closedState.pool_value, ownerCovIdHex: realClaim.toLowerCase() });
+    if ('0x' + String(tx.outputs[CONVERT_TO_CLAIM_TOKEN_OUT_INDEX].scriptPublicKey.script) !== expectTok.scriptPubKeyHex) throw new Error('新代币输出的spk不是以真实claim covid为owner的KTT');
+    if (String(tx.outputs[CONVERT_TO_CLAIM_TOKEN_OUT_INDEX].covenant.covenantId).toLowerCase() !== c2cBuilt.tokenCovId.toLowerCase()) throw new Error('返回的tokenCovId与真实tx不一致');
+  });
+
+  // RootClaim genesis输出的独立构造(不共用computeRootClaimGenesisArtifact): 用state全0的探针编译拿prefix/suffix布局,
+  // 手工把8字段state(每字段=长度字节+小端/原始字节, 同NWT审计构造的fieldInt/fieldBytes32)拼进去, 再自己算P2SH。
+  t('⑥RootClaim输出spk与独立"探针+手工splice+自算P2SH"构造逐字节一致(自检两侧不共用实现)', () => {
+    const { ps_tmpl_hash, token_tmpl_hash, claim_tmpl_hash } = loadProtocolConstants();
+    const probeCtor = [
+      ctorBytes32V100(ps_tmpl_hash), ctorBytes32V100(MARKET_ID),
+      ctorIntV100(0), ctorIntV100(0), ctorIntV100(0), ctorIntV100(0), ctorIntV100(0), ctorIntV100(0), ctorBytes32V100('00'.repeat(32)), ctorIntV100(0),
+      ctorBytes32V100(token_tmpl_hash), ctorBytes32V100(claim_tmpl_hash),
+    ];
+    const probe = compileSilV100(new URL('./RootClaim.sil', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'), probeCtor, 'RootClaim');
+    const probeScript = Buffer.from(probe.script);
+    const { start, len } = probe.state_layout;
+    const fieldInt = (n) => { const b = Buffer.alloc(8); b.writeBigInt64LE(BigInt(n)); return Buffer.concat([Buffer.from([8]), b]); };
+    const fieldB32 = (b) => Buffer.concat([Buffer.from([32]), b]);
+    const stateBytes = Buffer.concat([
+      fieldInt(closedState.local_yes), fieldInt(closedState.local_no), fieldInt(closedState.count), fieldInt(closedState.pool_value),
+      fieldInt(closedState.closed), fieldInt(closedState.winningSide), fieldB32(Buffer.from(closedState.payoutRoot, 'hex')), fieldInt(0),
+    ]);
+    if (stateBytes.length !== len) throw new Error(`手工state字节长度${stateBytes.length} != 探针state_layout.len(${len})`);
+    const redeem = Buffer.concat([probeScript.subarray(0, start), stateBytes, probeScript.subarray(start + len)]);
+    const spkHex = 'aa20' + Buffer.from(blake2b(Uint8Array.from(redeem), { dkLen: 32 })).toString('hex') + '87';
+    const tx = kaspa.Transaction.deserializeFromSafeJSON(c2cBuilt.txJson);
+    const got = String(tx.outputs[CONVERT_TO_CLAIM_CLAIM_OUT_INDEX].scriptPublicKey.script);
+    if (got !== spkHex) throw new Error(`RootClaim输出spk不一致: builder=${got} 独立构造=${spkHex}`);
+    if (c2cBuilt.claimPrefixHex !== probeScript.subarray(0, start).toString('hex')) throw new Error('claimPrefix与探针不一致');
+    if (c2cBuilt.claimSuffixHex !== probeScript.subarray(start + len).toString('hex')) throw new Error('claimSuffix与探针不一致');
+  });
+
+  t('⑦RootClose input见证里 claimOutIdx/tokenInIdx/tokenOutIdx 位置与交易真实结构一致(独立push解析器)', () => {
+    const tx = kaspa.Transaction.deserializeFromSafeJSON(c2cBuilt.txJson);
+    const rcAbi = compiledRootCloseAbi();
+    const pushes = parsePushesLocal(String(tx.inputs[0].signatureScript).replace(/^0x/, ''));
+    const at = (name) => decodeSmallIntLocal(pushes[rcAbi.params.findIndex((p) => p.name === name)]);
+    const heldPos = tx.inputs.findIndex((i) => String(i.previousOutpoint.transactionId) === c2cHeldOutpoint.txid && Number(i.previousOutpoint.index) === c2cHeldOutpoint.vout);
+    if (heldPos !== CONVERT_TO_CLAIM_HELD_IN_INDEX) throw new Error(`held输入真实下标${heldPos} != ${CONVERT_TO_CLAIM_HELD_IN_INDEX}`);
+    if (at('claimOutIdx') !== CONVERT_TO_CLAIM_CLAIM_OUT_INDEX) throw new Error(`claimOutIdx读回${at('claimOutIdx')}`);
+    if (at('tokenInIdx') !== heldPos) throw new Error(`tokenInIdx读回${at('tokenInIdx')} != held真实下标${heldPos}`);
+    if (at('tokenOutIdx') !== CONVERT_TO_CLAIM_TOKEN_OUT_INDEX) throw new Error(`tokenOutIdx读回${at('tokenOutIdx')}`);
+  });
+
+  // 🔴 本条是tokenInIdx/tokenOutIdx换位的【唯一】守卫: 真实形状里held输入下标与token输出下标同为1, 共识/链上黄金
+  // 回归/上面⑦都看不出两者互换(批3 market_seal已负向对照证实同一件事)。不要因为"看起来冗余"删掉它。
+  t('⑧convertToClaimWitnessArgs映射: heldIdx=7(≠tokenOut=1)时 tokenInIdx=7、tokenOutIdx=CONVERT_TO_CLAIM_TOKEN_OUT_INDEX、claimOutIdx=CONVERT_TO_CLAIM_CLAIM_OUT_INDEX', () => {
+    if (7 === CONVERT_TO_CLAIM_TOKEN_OUT_INDEX) throw new Error('测试向量退化');
+    const a = convertToClaimWitnessArgs({ heldIdx: 7, claimPrefixHex: 'aa', claimSuffixHex: 'bb', tokPrefixHex: '0xcc', tokSuffixHex: '0xdd' });
+    if (a.tokenInIdx !== 7) throw new Error(`tokenInIdx=${a.tokenInIdx} != 7`);
+    if (a.tokenOutIdx !== CONVERT_TO_CLAIM_TOKEN_OUT_INDEX) throw new Error(`tokenOutIdx=${a.tokenOutIdx}`);
+    if (a.claimOutIdx !== CONVERT_TO_CLAIM_CLAIM_OUT_INDEX) throw new Error(`claimOutIdx=${a.claimOutIdx}`);
+    if (a.claim_prefix !== '0xaa' || a.claim_suffix !== '0xbb' || a.tok_prefix !== '0xcc' || a.tok_suffix !== '0xdd') throw new Error('prefix/suffix透传不对');
+    // 哨兵(Bettor采纳NWT): 所有索引参数在哨兵输入下两两不同
+    const idx = [a.claimOutIdx, a.tokenInIdx, a.tokenOutIdx];
+    if (new Set(idx).size !== idx.length) throw new Error(`索引参数在哨兵输入下不是两两不同: ${JSON.stringify(idx)}`);
+  });
+  t('⑧b编码器: tokenIn=1/tokenOut=3 与 互换 得到不同字节', () => {
+    const abi = compiledRootCloseAbi();
+    const base = { claimOutIdx: 0, claim_prefix: '0xaa', claim_suffix: '0xbb', tok_prefix: '0xcc', tok_suffix: '0xdd' };
+    if (encodeConvertToClaimAction(kaspa, abi, { ...base, tokenInIdx: 1, tokenOutIdx: 3 }) === encodeConvertToClaimAction(kaspa, abi, { ...base, tokenInIdx: 3, tokenOutIdx: 1 })) throw new Error('互换后字节相同');
+  });
+
+  const expectFailClosed = (label, fn, pattern) => t(label, () => {
+    let threw = null; try { fn(); } catch (e) { threw = e; }
+    if (!threw) throw new Error('应该throw, 却成功返回了');
+    if (!pattern.test(threw.message)) throw new Error(`throw了但报文不对: ${threw.message}`);
+  });
+  expectFailClosed('⑨fail-closed: closedState.closed=0(尚未close_commit)', () => buildConvertToClaimTxJson(c2cArgs({ closedState: { ...closedState, closed: 0 } })), /fail-closed.*closed/);
+  expectFailClosed('⑨fail-closed: heldTokenOutpoint为空(没有持有代币输入)', () => buildConvertToClaimTxJson(c2cArgs({ heldTokenOutpoint: null })), /fail-closed.*heldTokenOutpoint/);
+  expectFailClosed('⑨fail-closed: 错误的rootCloseTmplHash', () => buildConvertToClaimTxJson(c2cArgs({ rootCloseTmplHash: 'ff'.repeat(32) })), /fail-closed/);
+
+  t('⑩不含私钥/委员私钥信封解密值: builder返回值序列化后不含明文私钥', () => {
+    const privHex = decryptCommitteePrivkey(genesisArtifacts.committeePrivkeyEnvelope);
+    if (JSON.stringify(c2cBuilt, (_k, v) => (typeof v === 'bigint' ? v.toString() : v)).includes(privHex)) throw new Error('明文私钥出现在了convert_to_claim返回值里');
+  });
+
+  const { CLOSE_COMMIT_DEADLINE_MARGIN_MS, COMMITTEE_MODE_SINGLE_OPERATOR_5X_SAME_KEY } = await import('./proto-tx-assembly-settlement.mjs');
+  const throws = (fn, re) => { let e = null; try { fn(); } catch (x) { e = x; } if (!e) throw new Error('应该throw, 却成功返回了'); if (!re.test(e.message)) throw new Error('throw了但报文不对: ' + e.message); };
+  const closeArgs = (over = {}) => ({
+    kaspa, network: 'mainnet',
+    marketId: MARKET_ID, committeePubkeyHex: genesisArtifacts.committeePubkeyHex, committeePrivkeyEnvelope: genesisArtifacts.committeePrivkeyEnvelope,
+    deadlineMs: DEADLINE_MS, rootCloseTmplHash: genesisArtifacts.rootCloseTmplHash,
+    rootCloseOutpoint, rootCloseUtxoScriptPublicKeyHex, rootCloseCovId: sealBuilt.rootCloseCovId, sealedState: currentState,
+    newWinningSide: NEW_WINNING_SIDE, newPayoutRootHex: NEW_PAYOUT_ROOT_HEX,
+    tokPrefixHex, tokSuffixHex, feeUtxo: closeCommitFeeUtxo, relayChangeScriptPublicKeyHex: relaySpkHex, absFeeCapSompi: closeCommitCap,
+    ...over,
+  });
+
+  // ══════════ ⑤ close_commit 修复回归(NWT批4离线审 B4-1/2/5/6/7) ══════════
+  // 🔴 B4-1: 委员签名必须对【最终tx】的sighash有效。txid不含witness, 所以只比txid测不出"先签后挂covenant"的时序错误;
+  // 这里用NWT按consensus sighash.rs(v2.0.1 cfafeb4c, SIG_HASH_ALL, version>=1)独立移植的sighashAll + @noble schnorr验签
+  // (test-fixtures/proto-close-commit/sighash_port.mjs, 来源: origin nwt/batch3-independent-verify @ ffef0e45,
+  // docs/provenance/2026-09-19-nwt-batch3-independent-verify/scripts/sighash_port.mjs, 未改一个字节)——验签一侧不是本仓实现,
+  // 也不是wasm自签自验。带反向臂: 同一笔tx去掉output0的covenant后, 5个签名必须全部验假(证明检查对covenant敏感, 且证明签名
+  // 确实承诺了covenant)。
+  const { sighashAll, verify: schnorrVerify } = await import('../../test-fixtures/proto-close-commit/sighash_port.mjs');
+  const sighashInput = (tx) => ({
+    version: Number(tx.version), lockTime: BigInt(tx.lockTime),
+    inputs: tx.inputs.map((i) => ({ txid: String(i.previousOutpoint.transactionId), index: Number(i.previousOutpoint.index), sequence: BigInt(i.sequence), spkHex: String(i.utxo.scriptPublicKey.script), amount: BigInt(i.utxo.amount) })),
+    outputs: tx.outputs.map((o) => ({ value: BigInt(o.value), spkHex: String(o.scriptPublicKey.script), covenant: o.covenant ? { auth: Number(o.covenant.authorizingInput), id: String(o.covenant.covenantId) } : null })),
+  });
+  const committeeSigsOf = (tx) => {
+    const abi = computeRootCloseGenesisArtifact({ marketId: MARKET_ID, committeePubkeyHex: genesisArtifacts.committeePubkeyHex, deadlineMs: DEADLINE_MS, rootCloseTmplHash: genesisArtifacts.rootCloseTmplHash, state: { ...currentState, closed: 0, winningSide: 0, payoutRoot: '00'.repeat(32) } }).entries.close_commit;
+    const pushes = parsePushesLocal(String(tx.inputs[0].signatureScript).replace(/^0x/, ''));
+    return ['c0Sig', 'c1Sig', 'c2Sig', 'c3Sig', 'c4Sig'].map((n) => pushes[abi.params.findIndex((p) => p.name === n)]);
+  };
+  t('⑤a B4-1: 5个委员签名对【最终tx】(含RootClose续约输出的covenant)的共识sighash全部验真(独立移植sighash+schnorr)', () => {
+    const tx = kaspa.Transaction.deserializeFromSafeJSON(closeCommitBuilt.txJson);
+    if (!tx.outputs[CLOSE_COMMIT_ROOTCLOSE_OUT_INDEX].covenant) throw new Error('前提: 最终tx的RootClose续约输出应带covenant');
+    const h = sighashAll(sighashInput(tx), 0);
+    const sigs = committeeSigsOf(tx);
+    if (sigs.some((s) => !s || s.length !== 65)) throw new Error(`签名push长度异常: ${sigs.map((s) => s?.length)}`);
+    const res = sigs.map((s) => schnorrVerify(s.subarray(0, 64).toString('hex'), h, genesisArtifacts.committeePubkeyHex));
+    if (!res.every(Boolean)) throw new Error(`委员签名对最终tx验签结果=${JSON.stringify(res)}(期望全true)`);
+  });
+  t('⑤b B4-1 反向臂: 同一笔tx去掉output0的covenant后重算sighash, 5个签名必须全部验假(检查对covenant敏感, 签名确实承诺了covenant)', () => {
+    const tx = kaspa.Transaction.deserializeFromSafeJSON(closeCommitBuilt.txJson);
+    const d = sighashInput(tx);
+    const stripped = { ...d, outputs: d.outputs.map((o, k) => (k === CLOSE_COMMIT_ROOTCLOSE_OUT_INDEX ? { ...o, covenant: null } : o)) };
+    const h = sighashAll(stripped, 0);
+    const res = committeeSigsOf(tx).map((s) => schnorrVerify(s.subarray(0, 64).toString('hex'), h, genesisArtifacts.committeePubkeyHex));
+    if (res.some(Boolean)) throw new Error(`去掉covenant后签名仍有验真的: ${JSON.stringify(res)}——检查对covenant不敏感, ⑤a无意义`);
+  });
+  t('⑤c 不同找零值(fee输入面值不同 → 找零 9.98B/24.2M/5.0M/2.97M sompi)各自重签: 每个最终tx的5个签名都验真(签名承诺全部输出值, 找零一变必须重签)', () => {
+    let verified = 0;
+    for (const feeValue of [10_000_000_000n, 40_000_000n, 20_000_000n, 18_000_000n]) { // 探测过: 这几档都带找零且过mass门控(17M起storage超阈值被拒; 该范围内未走到无找零形状)
+      let b;
+      try { b = buildCloseCommitTxJson(closeArgs({ feeUtxo: { ...closeCommitFeeUtxo, value: feeValue } })); } catch (e) { if (/no_viable_change_shape|mass超过|insufficient/.test(e.message)) continue; throw e; }
+      const tx = kaspa.Transaction.deserializeFromSafeJSON(b.txJson);
+      const h = sighashAll(sighashInput(tx), 0);
+      const res = committeeSigsOf(tx).map((s) => schnorrVerify(s.subarray(0, 64).toString('hex'), h, genesisArtifacts.committeePubkeyHex));
+      if (!res.every(Boolean)) throw new Error(`fee=${feeValue} includeChange=${b.includeChange}: 签名对最终tx验签=${JSON.stringify(res)}`);
+      verified++;
+    }
+    if (verified < 3) throw new Error(`只有${verified}个面值真正构造并验签了, 覆盖不足`);
+  });
+
+  // B4-2: deadline守卫加余量
+  t('⑤d B4-2: deadline在余量之内(now-60s, 已过deadline但未过120s余量)必须构造期fail-closed, 报文提到余量', () => {
+    throws(() => buildCloseCommitTxJson(closeArgs({ deadlineMs: Date.now() - 60_000 })), /fail-closed.*余量/);
+  });
+  t('⑤d2 B4-2 对照: deadline已过余量之外(now-1h)不因余量被拒(由此证明上一条的throw来自余量而非别的原因)', () => {
+    if (CLOSE_COMMIT_DEADLINE_MARGIN_MS !== 120_000) throw new Error(`余量常量=${CLOSE_COMMIT_DEADLINE_MARGIN_MS}, 期望暂定值120000`);
+    // 用真实市场的DEADLINE_MS(远在过去)构造成功即可(closeCommitBuilt已证); 这里再确认余量边界: now-121s 时到达artifact校验(模板hash不符→另一种fail-closed), 而不是余量错误
+    let e = null; try { buildCloseCommitTxJson(closeArgs({ deadlineMs: Date.now() - 121_000 })); } catch (x) { e = x; }
+    if (!e) throw new Error('now-121s的deadline与市场模板hash不一致, 应被(模板hash)fail-closed拒绝');
+    if (/余量/.test(e.message)) throw new Error(`now-121s已超过余量, 不应再报余量错误: ${e.message}`);
+  });
+
+  // B4-5: 现算spk必须等于链上UTXO spk
+  t('⑤e B4-5: rootCloseUtxoScriptPublicKeyHex与现算的当前RootClose spk不一致 / 缺失 → fail-closed', () => {
+    throws(() => buildCloseCommitTxJson(closeArgs({ rootCloseUtxoScriptPublicKeyHex: '0x' + 'aa20' + '11'.repeat(32) + '87' })), /fail-closed.*链上UTXO spk/);
+    throws(() => buildCloseCommitTxJson(closeArgs({ rootCloseUtxoScriptPublicKeyHex: undefined })), /fail-closed.*链上UTXO spk/);
+  });
+
+  // B4-6: committee_mode标签
+  t('⑤f B4-6: 返回值带committeeMode标签(如实标注5槽同一把keypair, 非4-of-5门限)', () => {
+    if (closeCommitBuilt.committeeMode !== COMMITTEE_MODE_SINGLE_OPERATOR_5X_SAME_KEY || COMMITTEE_MODE_SINGLE_OPERATOR_5X_SAME_KEY !== 'single_operator_5x_same_key') throw new Error(`committeeMode=${closeCommitBuilt.committeeMode}`);
+  });
+
+  // B4-7: PrivateKey用后free()
+  t('⑤g B4-7: builder构造过程中new的PrivateKey恰好被free()一次(且不随候选形状数量重复创建)', () => {
+    let created = 0, freed = 0;
+    class TrackedPrivateKey extends kaspa.PrivateKey { constructor(...a) { super(...a); created++; } free() { freed++; return super.free(); } }
+    const kaspaTracked = { ...kaspa, PrivateKey: TrackedPrivateKey };
+    buildCloseCommitTxJson(closeArgs({ kaspa: kaspaTracked }));
+    if (created !== 1 || freed !== 1) throw new Error(`PrivateKey created=${created} freed=${freed}(期望各1)`);
+  });
+}
+
+console.log(`\n${pass} passed, ${fail} failed`);
+process.exit(fail === 0 ? 0 : 1);

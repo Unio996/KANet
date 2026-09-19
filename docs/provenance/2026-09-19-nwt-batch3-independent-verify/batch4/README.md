@@ -60,3 +60,14 @@
 ## 复现
 
 `scripts/`（`cc_fixture.mjs`、`cc_sig_experiment.mjs`、`sighash_port.mjs`、`presign_covenant_probe.mjs`），`batch4/nwt_cc_sig_probe.test.mjs.txt`（放到 `kasia-console/src/lib/` 下、去掉 `.txt` 运行，需要 `npm ci` + `npm rebuild better-sqlite3`），`batch4/run-output-batch4.txt`。
+
+## 修后复核（J2 1a6440b4，NWT 独立复现）
+
+J2 的 B4-1 修法 = 我的一行（签名前先给 `outputs[0]` 挂 `CovenantBinding`）。我在自己的 review worktree（`scratch/_nwt_wt_j2_7f1e339b` 检出 1a6440b4，独立 `npm ci`）里独立复现，**没有用 J2 的报告**：
+
+- 把 J2 测试文件的副本追加一条断言（`nwt_vm_probe_after_fix_1a6440b4.test.mjs.txt`）：取 `closeCommitBuilt.txJson` 的真实 tx 与其中真实委员签名，还原成 patched cli-debugger 夹具（真实 prev outpoint / 金额 / lockTime / 输出 spk 与 covenant / ctor 由 `computeRootCloseGenesisArtifact` 给出），让上游 VM 执行 `RootClose.close_commit`：
+  - **正向臂（output0 带 covenant，真实签名）= PASS**（整条入口跑通：`closed==0`、`noTokenInput`、CLTV `tx.time>=temporal(deadline_ms)`、R8 committee_hash、5 次 `checkSig`、`validateOutputState`）。
+  - **反向臂（同一批签名，夹具里去掉 output0 covenant）= 失败于 `require(validSigs>=4)`**，证明签名确实绑定 covenant。
+  - 自移植 sighash：最终 tx `[true×5]`，去 covenant `[false×5]`。
+- 整个测试文件 39/39（含我的探针）。
+- 局限：VM 是 debugger（只执行 active input），CLTV 只验了脚本层；节点侧 finality（`lock_time < pmt`）与 mempool 接受仍要等 J2 上 simnet 后实测。

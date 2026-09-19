@@ -1,0 +1,5 @@
+NWT-VM-PROBE upstream VM, real builder tx + real committee sigs, output0 covenant PRESENT  => exit=0 PASS 
+NWT-VM-PROBE upstream VM, same sigs, output0 covenant STRIPPED (reverse arm)               => exit=1  error: script ran, but verification failed |     |         ^^^^^^^^^^^^^^^^^^^^^^^^ verification failed here
+NWT-VM-PROBE own sighash port: final tx sigs=[true,true,true,true,true] | covenant-stripped sigs=[false,false,false,false,false]
+[PASS] NWT-VM-PROBE 修后 builder 真实输出的委员签名: 上游 VM(patched cli-debugger)与自移植 sighash 双重验
+39 passed, 0 failed
