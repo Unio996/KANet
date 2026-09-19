@@ -13,7 +13,7 @@ if (!process.env._PROTO_SETTLEMENT_INPUTS_TEST_BOOTSTRAPPED) {
   process.exit(r.status ?? 1);
 }
 const { sqlite } = await import('../db/client.js');
-const { payoutLeafHex, deriveCloseCommitInputs, assertCloseCommitArgsFromDb, CLAIM_PAYOUT_MIN } = await import('./proto-settlement-inputs.mjs');
+const { payoutLeafHex, deriveCloseCommitInputs, deriveWinnerBet, assertCloseCommitArgsFromDb, CLAIM_PAYOUT_MIN } = await import('./proto-settlement-inputs.mjs');
 const { createRequire } = await import('node:module');
 const { blake2b } = createRequire(import.meta.url)('../../node_modules/@noble/hashes/blake2b.js');
 
@@ -115,6 +115,60 @@ t('反向8: proto_markets.payout_root 已落库但与现算不一致 ⇒ db_payo
 mkMarket('m_dbok', { winning_side: 1, payout_root: payoutLeafHex(PK_NO, 1000) });
 mkBet({ marketId: 'm_dbok', pk: PK_YES, side: 0, stake: 1 }); mkBet({ marketId: 'm_dbok', pk: PK_NO, side: 1, stake: 999 });
 t('正向: payout_root 已落库且与现算一致 ⇒ 通过(对照上一条, 证明 drift 拒绝不是别的原因)', () => { deriveCloseCommitInputs('m_dbok'); });
+
+// ══ 9-1 D 笔: deriveWinnerBet(从 deriveCloseCommitInputs 抽出的"胜方恰 1 条已确认下注", 与 proto-settlement-pointers.mjs 的 claim_draw 取赢家票共用) ══
+// 既有 15 条用例一字未改(它们是"抽出后 deriveCloseCommitInputs 的行为与报文不变"的证据); 以下是新增用例。
+const errOf = (fn) => { let e = null; try { fn(); } catch (x) { e = x; } if (!e) throw new Error('应该throw, 却成功返回了'); return e; };
+const bodyOf = (e) => e.message.replace(/^[^:]+: /, '');            // 去掉 "who: " 前缀, 比较报文正文
+const seqBefore = () => betSeq;
+mkMarket('w_ok', { status: 'resolved', winning_side: 1 });          // resolved: claim_draw 取赢家票指针时市场已不是 sealed
+mkBet({ marketId: 'w_ok', pk: PK_YES, side: 0, stake: 1 }); mkBet({ marketId: 'w_ok', pk: PK_NO, side: 1, stake: 999 });
+const w_ok_winnerId = `b${betSeq}`;
+t('deriveWinnerBet 胜方恰 1 条 ⇒ 返回赢家那一行 + pool_value + market; 【不带 status 闸】(resolved 市场也可取)', () => {
+  const r = deriveWinnerBet('w_ok');
+  if (r.winner.id !== w_ok_winnerId || r.winner.side !== 1 || r.winner.stake !== 999 || r.winner.bettor_pk !== PK_NO) throw new Error(JSON.stringify(r.winner));
+  if (r.poolValue !== 1000 || r.bets.length !== 2 || r.market.status !== 'resolved' || r.market.winning_side !== 1) throw new Error(JSON.stringify({ p: r.poolValue, n: r.bets.length, m: r.market }));
+});
+t('status 闸留在 close_commit 一侧: 同一个 resolved 市场, deriveCloseCommitInputs 仍拒(报文含 sealed), deriveWinnerBet 不拒', () => {
+  throws(() => deriveCloseCommitInputs('w_ok'), /close_commit 只允许在 sealed/);
+  deriveWinnerBet('w_ok');
+});
+mkMarket('w_sealed', { status: 'sealed', winning_side: 1 });
+mkBet({ marketId: 'w_sealed', pk: PK_YES, side: 0, stake: 1 }); mkBet({ marketId: 'w_sealed', pk: PK_NO, side: 1, stake: 999 });
+t('deriveCloseCommitInputs 的 winnerBetId 就是 deriveWinnerBet 的 winner.id(同一份逻辑, 不是两份各自算)', () => {
+  if (deriveCloseCommitInputs('w_sealed').winnerBetId !== deriveWinnerBet('w_sealed').winner.id) throw new Error('两处选出的赢家不一致');
+});
+mkMarket('w_zero', { status: 'sealed', winning_side: 1 });
+mkBet({ marketId: 'w_zero', pk: PK_YES, side: 0, stake: 1 }); mkBet({ marketId: 'w_zero', pk: PK_YES, side: 0, stake: 5 });
+mkMarket('w_two', { status: 'sealed', winning_side: 1 });
+mkBet({ marketId: 'w_two', pk: PK_NO, side: 1, stake: 3 }); mkBet({ marketId: 'w_two', pk: PK_NO, side: 1, stake: 4 });
+t('胜方 0 条 / 2 条 ⇒ 同样的 fail-closed(.code=winner_count), 报文正文与 deriveCloseCommitInputs 的逐字一致', () => {
+  for (const id of ['w_zero', 'w_two']) {
+    const a = errOf(() => deriveWinnerBet(id)), b = errOf(() => deriveCloseCommitInputs(id));
+    if (a.code !== 'winner_count') throw new Error(`${id}: code=${a.code}`);
+    if (!/恰好 1 条/.test(a.message) || !/refusing to auto-pick one/.test(a.message)) throw new Error(a.message);
+    if (bodyOf(a) !== bodyOf(b)) throw new Error(`${id}: 报文正文不一致:\n  ${bodyOf(a)}\n  ${bodyOf(b)}`);
+  }
+  if (!/有 0 条/.test(errOf(() => deriveWinnerBet('w_zero')).message) || !/有 2 条/.test(errOf(() => deriveWinnerBet('w_two')).message)) throw new Error('条数应写进报文');
+});
+mkMarket('w_noside', { status: 'sealed', winning_side: null });
+mkBet({ marketId: 'w_noside', pk: PK_NO, side: 1, stake: 9 });
+mkMarket('w_nopool', { status: 'sealed', winning_side: 1 });
+t('其余 fail-closed 各带 .code: winning_side 未写 ⇒ winner_side_unset; 没有已确认下注 ⇒ winner_pool_empty; 市场不存在 ⇒ winner_market_missing; 默认报文前缀 deriveWinnerBet(<id>), deriveCloseCommitInputs 传自己的前缀', () => {
+  const cases = [['w_noside', 'winner_side_unset'], ['w_nopool', 'winner_pool_empty'], ['w_不存在', 'winner_market_missing']];
+  for (const [id, code] of cases) {
+    const e = errOf(() => deriveWinnerBet(id));
+    if (e.code !== code) throw new Error(`${id}: code=${e.code}`);
+    if (!e.message.startsWith(`deriveWinnerBet(${id}): fail-closed — `)) throw new Error(e.message);
+  }
+  if (!errOf(() => deriveCloseCommitInputs('w_noside')).message.startsWith('deriveCloseCommitInputs(w_noside): fail-closed — ')) throw new Error('deriveCloseCommitInputs 的报文前缀变了');
+});
+t('pending / orphaned 等非 confirmed 的下注不计入(只信已确认): 胜方那条是 pending ⇒ 0 条 ⇒ winner_count', () => {
+  mkMarket('w_pend', { status: 'sealed', winning_side: 1 });
+  mkBet({ marketId: 'w_pend', pk: PK_YES, side: 0, stake: 1 }); mkBet({ marketId: 'w_pend', pk: PK_NO, side: 1, stake: 999, status: 'pending' });
+  if (errOf(() => deriveWinnerBet('w_pend')).code !== 'winner_count') throw new Error('应为 winner_count');
+});
+void seqBefore;
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

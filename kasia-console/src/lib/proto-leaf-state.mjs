@@ -44,7 +44,7 @@ export function deriveLeafOutpoint(marketId) {
     SELECT pbi.submitted_txid FROM proto_bet_intents pbi
     JOIN proto_bets pb ON pb.id = pbi.bet_id
     WHERE pb.market_id = ? AND pbi.step = 'append' AND pbi.status = 'landed'
-    ORDER BY pbi.landed_at DESC LIMIT 1
+    ORDER BY pbi.landed_at DESC, pbi.rowid DESC LIMIT 1
   `).get(marketId);
   if (row) return { txid: row.submitted_txid, vout: REGISTER_APPEND_LEAF_CONT_OUT_INDEX };
   const market = sqlite.prepare('SELECT shardleaf_txid, shardleaf_vout FROM proto_markets WHERE id = ?').get(marketId);
@@ -66,7 +66,7 @@ export function deriveHeldKttOutpoint(marketId) {
     SELECT pbi.submitted_txid FROM proto_bet_intents pbi
     JOIN proto_bets pb ON pb.id = pbi.bet_id
     WHERE pb.market_id = ? AND pbi.step = 'append' AND pbi.status = 'landed'
-    ORDER BY pbi.landed_at DESC LIMIT 1
+    ORDER BY pbi.landed_at DESC, pbi.rowid DESC LIMIT 1
   `).get(marketId);
   if (!row) return null;
   return { txid: row.submitted_txid, vout: REGISTER_APPEND_TOK_OUT_INDEX };
