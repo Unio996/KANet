@@ -1,0 +1,78 @@
+## recompile_leaf
+silverc sha256 OK 4378ba6557f7b7b088d6ad7a400422acb51a7ffd04f86ed974055c4177ef8643
+rootclose_tmpl_hash (读自链上 redeem 烘焙位 [14157,14189), 非自算 blake2b) = dabe50f5ad996aae4dca992abcea9d27d7793860a4ec6f41b83fbb4e6d6c7945
+recompiled len 14746 on-chain redeem len 14746 BYTE-EQUAL = true
+entries: [ 'convert_to_rootclose', 'register_append' ]
+convert_to_rootclose dispatch_tag ea68d205 params: rcOutIdx:{"kind":"int"} | rc_prefix:{"kind":"bytes"} | rc_suffix:{"kind":"bytes"} | tokenInIdx:{"kind":"int"} | tokenOutIdx:{"kind":"int"} | tok_prefix:{"kind":"bytes"} | tok_suffix:{"kind":"bytes"}
+on-chain tag push ea68d205
+diff byte count 0 first [] last []
+
+## compare_upstream
+upstream action len 19810 on-chain action len 19810 BYTE-EQUAL = true
+redeem push header on-chain 4d9a39 (expect 4d 9a 39 = PUSHDATA2 len 14746)
+
+## verify_rootclose_out
+recomputed RootClose P2SH hash 9d3be0fcf0fe54b0f4d50765abab5e56b60af98b0b5c6b021e23a585fe8db9f5
+on-chain out[0] spk            0000aa209d3be0fcf0fe54b0f4d50765abab5e56b60af98b0b5c6b021e23a585fe8db9f587
+MATCH = true
+
+## port_mass
+
+market_genesis 8c119539e065…  ins=1(p=1) outs=2(p=2,1)  fee=20280700 sompi
+  MINE storage=207749 via relaxed(harmonic ins)  | NODE storageMass=207749 mass=207749
+  MINE compute=8083 (size 353)  | NODE computeMass=8083  transientMass(node)=n/a
+  node verboseData keys: transactionId,hash,computeMass,blockHash,blockTime
+
+register_append#1 aed39af62d95…  ins=2(p=2,1) outs=4(p=2,1,2,1)  fee=43339900 sompi
+  MINE storage=457504 via arithmetic(mean ins)  | NODE storageMass=457504 mass=457504
+  MINE compute=33927 (size 18457)  | NODE computeMass=33927  transientMass(node)=n/a
+  node verboseData keys: transactionId,hash,computeMass,blockHash,blockTime
+
+register_append#2 a5d664e46a8e…  ins=3(p=2,2,1) outs=4(p=2,1,2,1)  fee=39666700 sompi
+  MINE storage=293116 via arithmetic(mean ins)  | NODE storageMass=293116 mass=293116
+  MINE compute=44198 (size 21728)  | NODE computeMass=44198  transientMass(node)=n/a
+  node verboseData keys: transactionId,hash,computeMass,blockHash,blockTime
+
+market_seal e2c45b328b9a…  ins=3(p=2,2,1) outs=3(p=2,2,1)  fee=34386000 sompi
+  MINE storage=231312 via arithmetic(mean ins)  | NODE storageMass=231312 mass=231312
+  MINE compute=60422 (size 38322)  | NODE computeMass=60422  transientMass(node)=n/a
+  node verboseData keys: transactionId,hash,computeMass,blockHash,blockTime
+
+## j2_vs_node_4tx
+market_genesis     J2.handStorage=  207749  node.storage=  207749 | J2.handCompute(size=0)=   7730  node.compute= 8083
+register_append#1  J2.handStorage=  457504  node.storage=  457504 | J2.handCompute(size=0)=  15470  node.compute= 33927
+register_append#2  J2.handStorage=  293116  node.storage=  293116 | J2.handCompute(size=0)=  22470  node.compute= 44198
+market_seal        J2.handStorage=  231312  node.storage=  231312 | J2.handCompute(size=0)=  22100  node.compute= 60422
+
+## fuzz_j2_vs_exact
+{
+  n: 400000,
+  under: 224,
+  over: 14222,
+  equal: 385554,
+  worstUnder: '951351'
+}
+by path [under, over, equal]: {"relaxed":[224,14222,47470],"arith":[0,0,338084]}
+worst under-estimate shape: {"ins":[{"p":"2","a":"2051"}],"outs":[{"p":"2","a":"1082"}],"exact":"1746589509","j2":"1745638158","path":"relaxed(harmonic ins)"}
+
+## fuzz2
+{
+  n: 1500000,
+  under: 74,
+  nearUnder_exactLE2M: 73,
+  maxUnderWhenExactLE2M: '2',
+  falsePass_j2LT475k_exactGE500k: 0
+}
+max under (exact<=2M): {"ins":[{"p":"2","a":"1741741"}],"outs":[{"p":"2","a":"1287746"}],"exact":"809650","j2":"809648"}
+## sentinel_order
+J2 encoder : 5302aa0103bb0202555702cc0304dd04040404ea68d205
+upstream   : 5302aa0103bb0202555702cc0304dd04040404ea68d205
+BYTE-EQUAL = true
+decoded pushes (ABI order rcOutIdx,rc_prefix,rc_suffix,tokenInIdx,tokenOutIdx,tok_prefix,tok_suffix,tag): ["OP_3","aa01","bb0202","OP_5","OP_7","cc03","dd040404","ea68d205"]
+
+## whatif_bet1_fee
+95M fee=actual 43,339,900 : { fee: 43339900, change: 11660100, storage: '457504' }
+95M fee=relay-min≈3,691,400: { fee: 3691400, change: 51308600, storage: '391231' }
+85M fee≈43.4M : { fee: 43400000, change: 1600000, storage: '989287' }
+90M fee≈43.36M: { fee: 43360000, change: 6640000, storage: '518786' }
+100M fee≈43.3M: { fee: 43300000, change: 16700000, storage: '434880' }
