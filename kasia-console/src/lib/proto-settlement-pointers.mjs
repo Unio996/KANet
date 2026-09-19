@@ -114,6 +114,15 @@ const landedAppendOfBet = (db, betId) => db.prepare(`
   SELECT intent_key, status, submitted_txid, prepared_tx_json FROM proto_bet_intents
   WHERE bet_id = ? AND step = 'append' AND status = 'landed'
   ORDER BY landed_at DESC, rowid DESC LIMIT 1`).get(betId);
+// convert_to_claim / claim_draw 的意图挂在 claim 主体下(intent 模块的 STEP_SUBJECT_TYPE), 不是 market——按 market 找赢 claim 行再按 ('claim', claimId) 找意图(9-2b 离线端到端暴露: 原先按 ('market', marketId) 找, 永远找不到)。
+const landedClaimSettlement = (db, marketId, step) => {
+  const claim = db.prepare("SELECT id FROM proto_claims WHERE market_id = ? AND side = 'win' ORDER BY rowid DESC LIMIT 1").get(marketId);
+  if (!claim) return undefined;
+  return db.prepare(`
+    SELECT intent_key, status, submitted_txid, prepared_tx_json FROM proto_settlement_intents
+    WHERE subject_type = 'claim' AND subject_id = ? AND step = ? AND status = 'landed'
+    ORDER BY rowid DESC LIMIT 1`).get(claim.id, step);
+};
 const landedSettlement = (db, marketId, step) => db.prepare(`
   SELECT intent_key, status, submitted_txid, prepared_tx_json FROM proto_settlement_intents
   WHERE subject_type = 'market' AND subject_id = ? AND step = ? AND status = 'landed'
@@ -189,7 +198,7 @@ export function resolveStepPointers({ step, marketId, db, kaspa }) {
   if (step === 'convert_to_claim') return { roles: { rootClose: cell4, held: cell5 } };
 
   // ── 格 6 / 7: convert_to_claim 意图 landed; 谱系 = 输入 0 花掉 close_commit 输出 0、输入 1 花掉 seal 输出 1 ──
-  const v = landedSettlement(db, marketId, 'convert_to_claim');
+  const v = landedClaimSettlement(db, marketId, 'convert_to_claim');
   const V = loadProducedTx({ kaspa, row: v, label: 'convert_to_claim 意图', ctx: ctx('rootClaim') });
   if (!spends(V, CONVERT_TO_CLAIM_ROOTCLOSE_IN_INDEX, cell4.outpoint) || !spends(V, CONVERT_TO_CLAIM_HELD_IN_INDEX, cell5.outpoint)) {
     throw P('pointer_lineage_mismatch', `convert_to_claim 交易的输入[${CONVERT_TO_CLAIM_ROOTCLOSE_IN_INDEX}]/[${CONVERT_TO_CLAIM_HELD_IN_INDEX}] 没有花掉 close_commit 输出(${fmt(cell4.outpoint)}) / seal 代币输出(${fmt(cell5.outpoint)})`, ctx('rootClaim'));

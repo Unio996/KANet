@@ -1,0 +1,10 @@
+src/lib/proto-settlement-ops.test.mjs: proto-settlement-ops.test: 6 passed, 0 failed
+src/lib/proto-settlement-driver-core.test.mjs: proto-settlement-driver-core.test: 27 passed, 0 failed
+src/lib/proto-settlement-store.test.mjs: proto-settlement-store.test: 14 passed, 0 failed
+src/services/proto-settlement-driver.test.mjs: proto-settlement-driver.test: 10 passed, 0 failed
+src/lib/proto-settlement-pointers.test.mjs: 27 passed, 0 failed
+src/lib/proto-settlement-c1.test.mjs: 45 passed, 0 failed
+src/lib/proto-settlement-chain-checks.test.mjs: 51 passed, 0 failed
+src/lib/proto-tx-assembly-settlement.test.mjs: 44 passed, 0 failed
+src/lib/proto-claim-draw.test.mjs: 57 passed, 0 failed
+src/lib/proto-relay-ipc.test.mjs: 33 passed, 0 failed
