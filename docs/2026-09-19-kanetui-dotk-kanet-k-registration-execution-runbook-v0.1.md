@@ -99,7 +99,7 @@ $pct = [math]::Round(100 * ($limitKB - $freeKB) / $limitKB, 1)
 Get-Process | Sort-Object PrivateMemorySize64 -Descending | Select-Object -First 5 Name, Id, @{n='PrivateGB';e={[math]::Round($_.PrivateMemorySize64/1GB,1)}}
 ```
 
-（1.16 的三行读数只读；`FreeVirtualMemory` 与性能计数器口径可能差几个百分点，以 Bettor 定的口径为准。若 `ge_85= True` ⇒ 不进 §3.2 出资、不进 §3.3；先回报 Bettor。）
+（1.16 的三行读数只读。**本机 2026-09-19 22:3x 实测对过两种口径**：`Win32_OperatingSystem` 口径 46.7%（提交上限 89.6 GB）vs 性能计数器 `% Committed Bytes In Use` 47.5%，差约 1 个百分点；本机区域 en-US，`Get-Counter` 计数器名会随系统语言本地化，换机器时以 CIM 口径为准。阈值与口径以 Bettor 定的为准。若 `ge_85= True` ⇒ 不进 §3.2 出资、不进 §3.3；先回报 Bettor。）
 
 （1.8 的 400 来自 `relay.js:544` 的收款地址必填校验，早于任何转账逻辑，**零副作用**——同 2026-09-14 种子转账执行页 v0.3 的正向探针。）
 
