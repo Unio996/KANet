@@ -469,68 +469,106 @@ t('㉔ 私钥不进返回值; 构造过程中 new 的 PrivateKey 全部 free(cre
   if (created < 1 || created !== freed) throw new Error(`PrivateKey created=${created} freed=${freed}`);
 });
 
-// ══════════ 批8 ticket_reclaim(输家 ticket 自我回收, PoolSideTicket.authorize_spend) ══════════
+// ══════════ 批8 ticket_reclaim v2(输家 ticket 自我回收, PoolSideTicket.authorize_spend; Bettor 1524 裁定②: 带 relay fee 输入, 不改 relay) ══════════
 // 输家票 = bet1(side 0, stake 1, bettorPk=委员公钥, register_append#1 输出1); 市场已结算 closed=1, winningSide=1(NO 赢)。
 const {
-  buildTicketReclaimTxJson, assertTicketReclaimable, assertTicketReclaimLayout, TICKET_RECLAIM_INPUT_HAS_COVENANT, TICKET_RECLAIM_TICKET_IN_INDEX,
+  buildTicketReclaimTxJson, assertTicketReclaimable, assertTicketReclaimLayout, TICKET_RECLAIM_INPUT_HAS_COVENANT, TICKET_RECLAIM_TICKET_IN_INDEX, TICKET_RECLAIM_FEE_IN_INDEX, TICKET_RECLAIM_OUT_INDEX,
 } = S;
 const { computeRequiredFeeSompiOrThrow } = await import('./proto-tx-assembly.mjs');
+const RB = await import('../../../kasia-relay/src/lib/covenant-broadcast.mjs');
 const LOSER_BET = { bettor_pk: COMMITTEE_PK, side: 0, stake: 1 };
 const LOSER_OP = { txid: bet1.built.expectedTxid, vout: 1 };
 const MARKET_STATE = { closed: 1, winningSide: 1 };
+const DEST_P2PK = '0x20' + 'ab'.repeat(32) + 'ac'; // bettor 自己指定的收款脚本(测试夹具, 非 relay 地址)
 const rArgs = (over = {}) => ({
   kaspa, network: 'mainnet', marketId: MARKET_ID, bet: LOSER_BET, marketState: MARKET_STATE, ticketOutpoint: LOSER_OP, ticketUtxoScriptPublicKeyHex: spkOf(bet1.built.txJson, 1),
-  committeePrivkeyEnvelope: ga.committeePrivkeyEnvelope, destinationScriptPublicKeyHex: relaySpkHex, absFeeCapSompi: loadFeeProfileCap('ticket_reclaim'), ...over,
+  committeePrivkeyEnvelope: ga.committeePrivkeyEnvelope, destinationScriptPublicKeyHex: DEST_P2PK, feeUtxo: { ...bigFee(9), value: 95_000_000n }, relayChangeScriptPublicKeyHex: relaySpkHex,
+  absFeeCapSompi: loadFeeProfileCap('ticket_reclaim'), ...over,
 });
 let rc;
-t('㉕ticket_reclaim buildTicketReclaimTxJson 真实构造成功: 单输入(输家 ticket)单输出(P2PK), 已完整签名(signInputIndices 空), 输出=20,000,000−fee', () => {
+t('㉕ticket_reclaim buildTicketReclaimTxJson 真实构造成功: [ticket, fee]→[P2PK 全额 20,000,000, 找零]; ticket 由 builder 现签, fee 输入留给 relay 签(signInputIndices=[1])', () => {
   rc = buildTicketReclaimTxJson(rArgs());
   const tx = kaspa.Transaction.deserializeFromSafeJSON(rc.txJson);
-  if (tx.inputs.length !== 1 || tx.outputs.length !== 1) throw new Error('应为单入单出');
-  if (JSON.stringify(rc.signInputIndices) !== '[]' || rc.fullySigned !== true) throw new Error('应为已完整签名、无需 relay 签名');
-  if (BigInt(tx.outputs[0].value) !== 20_000_000n - rc.netLoss || BigInt(tx.inputs[0].utxo.amount) - BigInt(tx.outputs[0].value) !== rc.netLoss) throw new Error('输出值/隐含费不自洽');
-  if (tx.id !== rc.expectedTxid) throw new Error('txid 不一致');
-  if (tx.outputs[0].covenant) throw new Error('回收输出不应带 covenant');
+  if (tx.inputs.length !== 2 || tx.outputs.length !== 2) throw new Error('应为 2 入 2 出');
+  if (JSON.stringify(rc.signInputIndices) !== '[1]' || JSON.stringify(rc.genesisOutputIndices) !== '[]') throw new Error('签名/genesis 下标不对');
+  if (BigInt(tx.outputs[TICKET_RECLAIM_OUT_INDEX].value) !== 20_000_000n) throw new Error('输出0 必须是 ticket 全额 20,000,000');
+  const feeSs = tx.inputs[TICKET_RECLAIM_FEE_IN_INDEX].signatureScript; // 空 sigScript 反序列化为 undefined
+  if (feeSs !== undefined && String(feeSs).replace(/^0x/, '') !== '') throw new Error('fee 输入应留空待 relay 签');
+  let sIn = 0n, sOut = 0n; for (const i of tx.inputs) sIn += BigInt(i.utxo.amount); for (const o of tx.outputs) sOut += BigInt(o.value);
+  if (sIn - sOut !== rc.netLoss) throw new Error(`隐含费 ${sIn - sOut} != netLoss ${rc.netLoss}`);
+  if (tx.outputs.some((o) => o.covenant)) throw new Error('回收/找零输出都不应带 covenant');
 });
-const rcSig = (tx) => parsePushes(String(tx.inputs[0].signatureScript).replace(/^0x/, ''))[0];
-t('㉖a 【真验签】ticket 的 bettorSig 对【最终tx】共识 sighash 有效(独立移植 sighash+schnorr; 公钥=bettor_pk)', () => {
+t('㉖【relay 现状表征——批9 阻塞项 #2】relay 真代码全流程: fixed_value / signed_input_ceiling / 签 fee 输入 / txid 均放行, 但 validateNetLoss 与 validateImpliedMinerFee 必拒: relay 本地 wasm 估算费远低于节点精确最低费 ⇒ 其天花板(2×估算)低于节点要求, 任何 fee 都无法同时满足两边; 仅当 requiredFee 换成精确值时才放行(证明唯一原因是 relay 的 fee 估算器)。relay 修复后本条会变红, 提醒同步清单', () => {
   const tx = kaspa.Transaction.deserializeFromSafeJSON(rc.txJson);
-  const sig = rcSig(tx);
+  const shape = RB.extractTxShape(tx);
+  const fv = RB.validateFixedValueOutputs({ outputs: shape.outputs, genesisOutputIndices: [], continuationOutputIndices: [] }); if (!fv.ok) throw new Error(`fixed_value: ${fv.reason}`);
+  const sic = RB.validateSignedInputCeiling({ inputs: shape.inputs, signInputIndices: rc.signInputIndices }); if (!sic.ok) throw new Error(`signed_input_ceiling: ${sic.reason}`);
+  RB.signOnlyDeclaredInputs({ tx, signInputIndices: rc.signInputIndices, privateKey: relayPriv, kaspa });
+  tx.finalize();
+  const r = RB.assertFinalTxid(tx, rc.expectedTxid); if (!r.ok) throw new Error(`签名后txid=${r.actualTxid} != ${rc.expectedTxid}`);
+  const relayRequired = RB.computeRequiredFeeSompi({ kaspa, networkId: 'mainnet', signedTx: tx });
+  const relaySpk = kaspa.payToAddressScript(relayPriv.toPublicKey().toAddress('mainnet'));
+  const exactNeed = 100n * BigInt(Math.max(rc.massSignal.storageMass, rc.massSignal.computeMass, rc.massSignal.transientMass)); // 节点最低费(不含余量)
+  const nlRelay = RB.validateNetLoss({ inputs: shape.inputs, outputs: shape.outputs, signInputIndices: rc.signInputIndices, relayScriptPubKey: relaySpk, requiredFeeSompi: relayRequired, absFeeCapSompi: RB.GLOBAL_ABS_FEE_CAP_SOMPI });
+  const imfRelay = RB.validateImpliedMinerFee({ inputs: shape.inputs, outputs: shape.outputs, requiredFeeSompi: relayRequired });
+  console.log(`   [info] relay 本地 wasm requiredFee=${relayRequired} ⇒ 天花板=${relayRequired * 2n}; 节点精确最低费=${exactNeed}; builder 实付=${rc.netLoss}`);
+  if (nlRelay.ok || imfRelay.ok) throw new Error('relay 现在放行了这笔交易——阻塞项已解除? 请核实并同步批9 清单/计划/provenance, 再更新本条');
+  if (!(relayRequired * 2n < exactNeed)) throw new Error(`relay 天花板 ${relayRequired * 2n} 不低于节点最低费 ${exactNeed}, 拒绝原因与"估算器低估"不符, 需重新诊断`);
+  // 对照臂: 只把 requiredFee 换成精确值, 同一笔交易同一批 relay 校验即放行 ⇒ 唯一原因是 relay 的 fee 估算器(本地 wasm)
+  const nlExact = RB.validateNetLoss({ inputs: shape.inputs, outputs: shape.outputs, signInputIndices: rc.signInputIndices, relayScriptPubKey: relaySpk, requiredFeeSompi: exactNeed, absFeeCapSompi: RB.GLOBAL_ABS_FEE_CAP_SOMPI });
+  const imfExact = RB.validateImpliedMinerFee({ inputs: shape.inputs, outputs: shape.outputs, requiredFeeSompi: exactNeed });
+  if (!nlExact.ok || !imfExact.ok) throw new Error(`对照臂: 换成精确 requiredFee 后 relay 校验仍拒: ${nlExact.reason ?? imfExact.reason}`);
+  if (nlRelay.netLossSompi !== rc.netLoss && nlExact.netLossSompi !== rc.netLoss) throw new Error(`relay 算的净损失与 builder netLoss ${rc.netLoss} 不一致`);
+});
+const ticketSigOf = (tx) => parsePushes(String(tx.inputs[TICKET_RECLAIM_TICKET_IN_INDEX].signatureScript).replace(/^0x/, ''))[0];
+t('㉗a 【真验签】ticket 的 bettorSig 对【relay 签完的最终tx】共识 sighash 有效(独立移植 sighash+schnorr; 公钥=bettor_pk)——ticket 签名不受 fee 输入后签的影响', () => {
+  const tx = kaspa.Transaction.deserializeFromSafeJSON(rc.txJson);
+  RB.signOnlyDeclaredInputs({ tx, signInputIndices: rc.signInputIndices, privateKey: relayPriv, kaspa }); tx.finalize();
+  const sig = ticketSigOf(tx);
   if (!sig || sig.length !== 65) throw new Error(`签名 push 长度=${sig?.length}`);
-  if (!schnorrVerify(sig.subarray(0, 64).toString('hex'), sighashAll(sighashInput(tx), 0), COMMITTEE_PK)) throw new Error('验签失败');
+  if (!schnorrVerify(sig.subarray(0, 64).toString('hex'), sighashAll(sighashInput(tx), TICKET_RECLAIM_TICKET_IN_INDEX), COMMITTEE_PK)) throw new Error('验签失败');
 });
-t('㉖b 反向臂: 输出值改 1 sompi 后重算 sighash, 签名必须验假(签名确实承诺了输出); 换 fee 迭代(不同 cap 上限)各自重签仍验真', () => {
+t('㉗b 反向臂: 改找零值 1 sompi / 改收款脚本后重算 sighash, 签名必须验假(签名承诺全部输出); 换 fee 面值(不同找零候选)各自重签仍验真', () => {
   const tx = kaspa.Transaction.deserializeFromSafeJSON(rc.txJson);
-  const d = sighashInput(tx);
-  const bumped = { ...d, outputs: d.outputs.map((o, k) => (k === 0 ? { ...o, value: o.value - 1n } : o)) };
-  if (schnorrVerify(rcSig(tx).subarray(0, 64).toString('hex'), sighashAll(bumped, 0), COMMITTEE_PK)) throw new Error('改输出值后签名仍验真——签名不承诺输出?');
-  const other = buildTicketReclaimTxJson(rArgs({ destinationScriptPublicKeyHex: '0x20' + 'ab'.repeat(32) + 'ac' }));
-  const tx2 = kaspa.Transaction.deserializeFromSafeJSON(other.txJson);
-  if (!schnorrVerify(rcSig(tx2).subarray(0, 64).toString('hex'), sighashAll(sighashInput(tx2), 0), COMMITTEE_PK)) throw new Error('换收款脚本后的最终tx 验签失败');
+  const d = sighashInput(tx); const sigHex = ticketSigOf(tx).subarray(0, 64).toString('hex');
+  const chg = { ...d, outputs: d.outputs.map((o, k) => (k === 1 ? { ...o, value: o.value - 1n } : o)) };
+  if (schnorrVerify(sigHex, sighashAll(chg, 0), COMMITTEE_PK)) throw new Error('改找零值后签名仍验真——签名不承诺找零输出?');
+  const dst = { ...d, outputs: d.outputs.map((o, k) => (k === 0 ? { ...o, spkHex: '20' + 'cd'.repeat(32) + 'ac' } : o)) };
+  if (schnorrVerify(sigHex, sighashAll(dst, 0), COMMITTEE_PK)) throw new Error('改收款脚本后签名仍验真');
+  let verified = 0;
+  for (const value of [10_000_000_000n, 95_000_000n, 60_000_000n]) {
+    let b; try { b = buildTicketReclaimTxJson(rArgs({ feeUtxo: { ...bigFee(9), value } })); } catch (e) { if (/no_viable_change_shape|insufficient|mass超过/.test(e.message)) continue; throw e; }
+    const t2 = kaspa.Transaction.deserializeFromSafeJSON(b.txJson);
+    if (!schnorrVerify(ticketSigOf(t2).subarray(0, 64).toString('hex'), sighashAll(sighashInput(t2), 0), COMMITTEE_PK)) throw new Error(`fee=${value} includeChange=${b.includeChange}: 验签失败`);
+    verified++;
+  }
+  if (verified < 2) throw new Error(`只验了${verified}个面值`);
 });
-t('㉗ fee 陷阱: 本地 wasm mass 对该形状严重低估 ⇒ computeRequiredFeeSompiOrThrow 会少付; builder 的 fee 按精确 mass 现算, ≥ 100×NWT 独立移植的 max(compute,storage), compute 与 NWT 移植逐位相等', () => {
+t('㉘ fee 陷阱对拍: builder 的 massSignal 与 NWT 独立移植的 storage/compute 逐位相等; 净损失 ≥ 100×max(compute,storage)(节点最低费); 若复用 computeRequiredFeeSompiOrThrow 会少付(本地 wasm 估算 < 精确需求)', () => {
   const tx = kaspa.Transaction.deserializeFromSafeJSON(rc.txJson);
+  RB.signOnlyDeclaredInputs({ tx, signInputIndices: rc.signInputIndices, privateKey: relayPriv, kaspa }); tx.finalize();
   const nodeShaped = { version: Number(tx.version), payload: '', inputs: tx.inputs.map((i) => ({ signatureScript: String(i.signatureScript).replace(/^0x/, ''), computeBudget: Number(i.computeBudget) })), outputs: tx.outputs.map((o) => ({ scriptPublicKey: { script: String(o.scriptPublicKey.script) }, covenant: null })) };
   const nwtCompute = NWTM.computeMass(nodeShaped).compute;
-  if (String(rc.massSignal.computeMass) !== String(nwtCompute)) throw new Error(`compute 信号 ${rc.massSignal.computeMass} != NWT 独立移植 ${nwtCompute}`);
   const cell = (spkHex, amount) => ({ p: NWTM.utxoPlurality(BigInt(String(spkHex).length / 2), false), a: BigInt(amount) });
   const nwtStorage = NWTM.calcStorageMass(tx.inputs.map((i) => cell(i.utxo.scriptPublicKey.script, i.utxo.amount)), tx.outputs.map((o) => cell(o.scriptPublicKey.script, o.value))).mass;
+  if (String(rc.massSignal.computeMass) !== String(nwtCompute)) throw new Error(`compute 信号 ${rc.massSignal.computeMass} != NWT 独立移植 ${nwtCompute}`);
   if (String(rc.massSignal.storageMass) !== String(nwtStorage)) throw new Error(`storage 信号 ${rc.massSignal.storageMass} != NWT 独立移植 ${nwtStorage}`);
   const need = 100n * (nwtCompute > nwtStorage ? nwtCompute : nwtStorage);
   if (rc.netLoss < need) throw new Error(`fee ${rc.netLoss} < 100×max(compute,storage)=${need}`);
   const localFee = computeRequiredFeeSompiOrThrow(kaspa, 'mainnet', tx);
-  if (!(localFee < need)) throw new Error(`本地 wasm 估算费 ${localFee} 不低于精确需求 ${need}——陷阱在本 wasm 版本不成立? 需重新核实, 不能默认假设`);
+  console.log(`   [info] 本地 wasm 估算费=${localFee} 精确最低费=${need} builder 实付=${rc.netLoss}`);
+  if (!(localFee < need)) throw new Error(`本地 wasm 估算费 ${localFee} 不低于精确需求 ${need}——陷阱在本 wasm 版本/本形状不成立? 需重新核实, 不能默认假设`);
 });
-t('㉘inputHasCovenant 钉死: 常量 [false] 且冻结; 与 register_append#1 输出1(ticket)在真实交易里【无 covenant】一致; builder 的 massSignal 与 NWT 按 [false] 布局的独立值相等(见㉗)', () => {
+t('㉙inputHasCovenant 钉死 [false,false]: 常量冻结; ticket 输入=register_append#1 输出1 真实【无 covenant】, fee 输入=普通; builder 的 massSignal 与错向量 [true,false] 的结果必不同; C1 角色表 ticket_reclaim 与输入下标对应', () => {
   const ra = kaspa.Transaction.deserializeFromSafeJSON(bet1.built.txJson);
-  const derived = [!!ra.outputs[LOSER_OP.vout].covenant];
+  const derived = [!!ra.outputs[LOSER_OP.vout].covenant, false];
   if (JSON.stringify(TICKET_RECLAIM_INPUT_HAS_COVENANT) !== JSON.stringify(derived) || !Object.isFrozen(TICKET_RECLAIM_INPUT_HAS_COVENANT)) throw new Error(`常量 ${JSON.stringify(TICKET_RECLAIM_INPUT_HAS_COVENANT)} != 真实布局推导 ${JSON.stringify(derived)}`);
-  if (STEP_INPUT_ROLES.ticket_reclaim.length !== 1 || STEP_INPUT_ROLES.ticket_reclaim[TICKET_RECLAIM_TICKET_IN_INDEX] !== 'ticket') throw new Error('C1 角色表 ticket_reclaim 与输入布局不符');
+  if (STEP_INPUT_ROLES.ticket_reclaim.length !== TICKET_RECLAIM_FEE_IN_INDEX || STEP_INPUT_ROLES.ticket_reclaim[TICKET_RECLAIM_TICKET_IN_INDEX] !== 'ticket') throw new Error(`C1 角色表 ${JSON.stringify(STEP_INPUT_ROLES.ticket_reclaim)} 与输入布局不符(输入0=ticket, 输入1=fee 不在表内)`);
   const tx = kaspa.Transaction.deserializeFromSafeJSON(rc.txJson);
-  const wrong = assertMassWithinCeiling({ kaspa, network: 'mainnet', tx, inputHasCovenant: [true], feeUtxoValueSompi: 0n, label: 'wrong' });
-  if (wrong.storageMass === rc.massSignal.storageMass) throw new Error('错向量 [true] 给出相同 storage——无法证明向量被钉住');
+  const wrong = assertMassWithinCeiling({ kaspa, network: 'mainnet', tx, inputHasCovenant: [true, false], feeUtxoValueSompi: 0n, label: 'wrong' });
+  if (wrong.storageMass === rc.massSignal.storageMass) throw new Error('错向量给出相同 storage——无法证明向量被钉住');
 });
-t('㉙可回收闸: 赢票(side==winningSide) / 市场未结算(closed=0) / 已取消(closed=2) / marketState 缺失 各自必拒; 输家票+closed=1 放行', () => {
+t('㉚可回收闸: 赢票(side==winningSide) / 市场未结算(closed=0) / 已取消(closed=2) / marketState 缺失 各自必拒; 输家票+closed=1 放行', () => {
   assertTicketReclaimable({ marketState: MARKET_STATE, bet: LOSER_BET });
   throws(() => buildTicketReclaimTxJson(rArgs({ bet: BET, ticketOutpoint: { txid: bet2.built.expectedTxid, vout: 1 }, ticketUtxoScriptPublicKeyHex: spkOf(bet2.built.txJson, 1) })), /赢票.*claim_draw/);
   throws(() => buildTicketReclaimTxJson(rArgs({ marketState: { closed: 0, winningSide: 1 } })), /尚未结算/);
@@ -538,14 +576,14 @@ t('㉙可回收闸: 赢票(side==winningSide) / 市场未结算(closed=0) / 已�
   throws(() => buildTicketReclaimTxJson(rArgs({ marketState: undefined })), /marketState/);
   throws(() => buildTicketReclaimTxJson(rArgs({ marketState: { closed: 1, winningSide: '1' } })), /marketState/);
 });
-t('㉚可回收闸/目的地闸先于解密与签名: 私钥信封是垃圾时, 报的是闸的错而不是解密错; createInputSignature 零调用', () => {
+t('㉛可回收闸/目的地闸先于解密与签名: 私钥信封是垃圾时, 报的是闸的错而不是解密错; createInputSignature 零调用', () => {
   let signCalls = 0;
   const wrapped = { ...kaspa, createInputSignature: (...a) => { signCalls++; return kaspa.createInputSignature(...a); } };
   throws(() => buildTicketReclaimTxJson(rArgs({ kaspa: wrapped, marketState: { closed: 0, winningSide: 1 }, committeePrivkeyEnvelope: 'not-an-envelope' })), /尚未结算/);
   throws(() => buildTicketReclaimTxJson(rArgs({ kaspa: wrapped, destinationScriptPublicKeyHex: undefined, committeePrivkeyEnvelope: 'not-an-envelope' })), /34 字节 P2PK/);
   if (signCalls !== 0) throw new Error(`闸拒绝后 createInputSignature 仍被调用了 ${signCalls} 次`);
 });
-t('㉛MUST-PROVE: 别的市场的委员私钥 ⇒ signing_key_mismatch(签名前, 零签名调用, 不含私钥); DB bettor_pk 被换 ⇒ ticket_pk_underivable; 大写 bettor_pk 同一把放行', () => {
+t('㉜MUST-PROVE: 别的市场的委员私钥 ⇒ signing_key_mismatch(签名前, 零签名调用, 不含私钥); DB bettor_pk 被换 ⇒ ticket_pk_underivable; 大写 bettor_pk 同一把放行', () => {
   let signCalls = 0;
   const wrapped = { ...kaspa, createInputSignature: (...a) => { signCalls++; return kaspa.createInputSignature(...a); } };
   const otherPriv = decryptCommitteePrivkey(otherGa.committeePrivkeyEnvelope);
@@ -554,24 +592,30 @@ t('㉛MUST-PROVE: 别的市场的委员私钥 ⇒ signing_key_mismatch(签名前
   throws(() => buildTicketReclaimTxJson(rArgs({ bet: { ...LOSER_BET, bettor_pk: '11'.repeat(32) } })), /ticket_pk_underivable|fail-closed/);
   buildTicketReclaimTxJson(rArgs({ bet: { ...LOSER_BET, bettor_pk: COMMITTEE_PK.toUpperCase() } }));
 });
-t('㉜收款脚本闸: 缺失 / P2SH / P2PKH / 长度不对 各自必拒(只接受 34 字节 P2PK)', () => {
+t('㉝收款脚本闸: 缺失 / P2SH / P2PKH / 长度不对 各自必拒(只接受 34 字节 P2PK)', () => {
   for (const bad of [undefined, '0xaa20' + 'ee'.repeat(32) + '87', '0x76a914' + '00'.repeat(20) + '88ac', '0x20' + 'ab'.repeat(31) + 'ac']) throws(() => buildTicketReclaimTxJson(rArgs({ destinationScriptPublicKeyHex: bad })), /34 字节 P2PK/);
 });
-t('㉝fee 界: cap 过小(不够 required) ⇒ fail-closed; ticketOutpoint 缺失 ⇒ fail-closed; 输出仍严格 = 20,000,000 − fee', () => {
-  throws(() => buildTicketReclaimTxJson(rArgs({ absFeeCapSompi: 100_000n })), /fee=\d+ 不在 \[required=/);
+t('㉞fee 界与输入闸: cap 过小 ⇒ no_viable_change_shape; ticketOutpoint 缺失 ⇒ fail-closed; fee 输入面值不足以付费 ⇒ fail-closed', () => {
+  throws(() => buildTicketReclaimTxJson(rArgs({ absFeeCapSompi: 100_000n })), /no_viable_change_shape/);
   throws(() => buildTicketReclaimTxJson(rArgs({ ticketOutpoint: null })), /ticketOutpoint 必填/);
+  throws(() => buildTicketReclaimTxJson(rArgs({ feeUtxo: { ...bigFee(9), value: 100_000n } })), /no_viable_change_shape|insufficient/);
 });
-t('㉞结构断言 assertTicketReclaimLayout: 正确放行; 输入不是 ticket / 输出不是指定脚本 / 输出带 covenant / 多输出 各自必拒', () => {
+t('㉟结构断言 assertTicketReclaimLayout: 正确放行; ticket/fee 输入互换、收款脚本错、收款面值不是 20,000,000、回收输出带 covenant、找零脚本错 各自必拒', () => {
   const tx = kaspa.Transaction.deserializeFromSafeJSON(rc.txJson);
-  const ok = { tx, ticketOutpoint: LOSER_OP, expectedDestSpkHex: relaySpkHex };
+  const feeOutpoint = { txid: bigFee(9).txid, vout: 0 };
+  const ok = { tx, ticketOutpoint: LOSER_OP, feeOutpoint, expectedDestSpkHex: DEST_P2PK, expectedChangeSpkHex: relaySpkHex };
   assertTicketReclaimLayout(ok);
-  throws(() => assertTicketReclaimLayout({ ...ok, ticketOutpoint: { ...LOSER_OP, vout: 0 } }), /不是 ticket outpoint/);
-  throws(() => assertTicketReclaimLayout({ ...ok, expectedDestSpkHex: '0x20' + 'cd'.repeat(32) + 'ac' }), /不是 bettor 指定的收款脚本/);
-  throws(() => assertTicketReclaimLayout({ ...ok, tx: { inputs: tx.inputs, outputs: [tx.outputs[0], tx.outputs[0]] } }), /单输入单输出/);
-  const withCov = { inputs: tx.inputs, outputs: [{ scriptPublicKey: tx.outputs[0].scriptPublicKey, covenant: { covenantId: 'aa' } }] };
+  throws(() => assertTicketReclaimLayout({ ...ok, ticketOutpoint: feeOutpoint, feeOutpoint: LOSER_OP }), /inputs\[0\] 不是 ticket/);
+  throws(() => assertTicketReclaimLayout({ ...ok, feeOutpoint: { ...feeOutpoint, vout: 3 } }), /inputs\[1\] 不是 fee/);
+  throws(() => assertTicketReclaimLayout({ ...ok, expectedDestSpkHex: '0x20' + 'cd'.repeat(32) + 'ac' }), /outputs\[0\] 不是 bettor 指定/);
+  throws(() => assertTicketReclaimLayout({ ...ok, expectedChangeSpkHex: '0x20' + 'cd'.repeat(32) + 'ac' }), /outputs\[1\] 不是回 relay 的找零/);
+  throws(() => assertTicketReclaimLayout({ ...ok, expectedChangeSpkHex: null }), /应为 1 个输出/);
+  const lowVal = { inputs: tx.inputs, outputs: [{ value: 19_999_999n, scriptPublicKey: tx.outputs[0].scriptPublicKey, covenant: null }, tx.outputs[1]] };
+  throws(() => assertTicketReclaimLayout({ ...ok, tx: lowVal }), /面值.*ticket 全额/);
+  const withCov = { inputs: tx.inputs, outputs: [{ value: tx.outputs[0].value, scriptPublicKey: tx.outputs[0].scriptPublicKey, covenant: { covenantId: 'aa' } }, tx.outputs[1]] };
   throws(() => assertTicketReclaimLayout({ ...ok, tx: withCov }), /不应带 covenant/);
 });
-t('㉟ 私钥不进返回值; 构造过程中 new 的 PrivateKey 全部 free(created == freed)', () => {
+t('㊱ 私钥不进返回值; 构造过程中 new 的 PrivateKey 全部 free(created == freed)', () => {
   const priv = decryptCommitteePrivkey(ga.committeePrivkeyEnvelope);
   if (JSON.stringify(rc, (k, v) => (typeof v === 'bigint' ? v.toString() : v)).includes(priv)) throw new Error('明文私钥出现在返回值里');
   let created = 0, freed = 0;

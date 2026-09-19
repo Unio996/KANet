@@ -64,8 +64,8 @@
       "_source": "NWT 按 F3' 推的专属值(账本1521, NWT 分支 nwt/batch3-independent-verify 74394972, docs/provenance/2026-09-19-nwt-batch3-independent-verify/batch6-claim-draw-bytes/): wasm mass 等于 p=1 公式(5/5 点), v=95M 行 = simnet 实付 30,547,100; v≤1 KAS 时最大 requiredFee 30,833,300, ×1.5=46.25M 向上取整到 5M ⇒ 50,000,000。失效条件: 只对固定布局 [rootClaim,ticket,held,fee] 与常量输出成立, 布局或 fee 规则一变必须重推; n=1, depth-0 之外分支未验。"
     },
     "ticket_reclaim": {
-      "cap": "2000000",
-      "_source": "⚠ 暂借 2,000,000 sompi(批8 ticket_reclaim: 已过simnet, 节点值 storage=3,087/compute=7,750/精确需求775,000/实付1,163,000, 见 docs/provenance/2026-09-19-j2-ticket-reclaim-simnet/, 但专属cap尚未由NWT推出): 账本1491 NWT simnet 回收用的【保守固定值】, 不是生产算法——builder 的 fee 由精确 mass 公式现算(100×max(storage,compute,transient)×3/2, 向上取整到 1000), 此 cap 只作有界上限(dynamicNetLossCeiling=min(2×required, cap, 1 KAS)); 批9 接线/合入前必须替换为 NWT 按节点实测推的专属值(F3')。"
+      "cap": "100000000",
+      "_source": "⚠ 暂借1.0 KAS(批8 ticket_reclaim v2, Bettor 1524 裁定②: 形状改为 [ticket, fee]→[P2PK 20M, 找零], relay 签 fee 输入): 有界临时值, 实际约束是 selectChangeShape 的 2×requiredFee 动态上限(builder 的 requiredFee = 精确 mass×3/2, 见 proto-tx-assembly-settlement.mjs TICKET_RECLAIM_FEE_*); 批9 接线/合入前必须替换为 NWT 按节点实测推的专属值(F3')。旧的 2,000,000 占位(账本1491 单输入形状的保守值)随形状变更作废。"
     },
     "withdraw": {
       "cap": "55000000",
