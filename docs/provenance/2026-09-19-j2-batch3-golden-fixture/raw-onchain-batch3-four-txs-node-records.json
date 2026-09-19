@@ -1,0 +1,161 @@
+{
+ "retrievedVia": "RPC getBlocks(includeTransactions:true) 只读扫块, 读取区块内交易记录自带的节点侧 storageMass/mass/verboseData.computeMass 字段",
+ "node": {
+  "network": "simnet",
+  "blockCount": "2461",
+  "virtualDaaScore": "2461"
+ },
+ "txs": {
+  "market_genesis": {
+   "txid": "8c119539e065d713558132cf4e518cb950af28313c2a071ef55611b35f3fb0f8",
+   "version": 1,
+   "lockTime": "0",
+   "storageMass": "207749",
+   "mass": "207749",
+   "computeMass": "8083",
+   "verboseData": {
+    "transactionId": "8c119539e065d713558132cf4e518cb950af28313c2a071ef55611b35f3fb0f8",
+    "hash": "c7b4d80696e0a39d678906265624fc02554ded7308cd797b96bf915c050a2cbf",
+    "computeMass": "8083",
+    "blockHash": "69b5eb8e81dad095ce206eb57ef254baa10fd385faba8b797617987cdf02c8fa",
+    "blockTime": "1789810923048"
+   },
+   "inputCount": 1,
+   "outputCount": 2,
+   "inputSigScriptBytes": [
+    {
+     "bytes": 66,
+     "sha256": "b6c04220db460ef1",
+     "computeBudget": 70,
+     "sigOpCount": 0
+    }
+   ],
+   "block": {
+    "hash": "69b5eb8e81dad095ce206eb57ef254baa10fd385faba8b797617987cdf02c8fa",
+    "daaScore": "2455",
+    "timestamp": "1789810923048"
+   }
+  },
+  "register_append#1": {
+   "txid": "aed39af62d9524e06a07569a11399b4395e0666d00187ddb5509fea2ee4a6f68",
+   "version": 1,
+   "lockTime": "0",
+   "storageMass": "457504",
+   "mass": "457504",
+   "computeMass": "33927",
+   "verboseData": {
+    "transactionId": "aed39af62d9524e06a07569a11399b4395e0666d00187ddb5509fea2ee4a6f68",
+    "hash": "bb846a2e5a8680ff325811564a8afa2f5288c297331b56f598edee14ba6374f0",
+    "computeMass": "33927",
+    "blockHash": "cd33ebc55b975b147752997da72ff863ac12f76d56c1de9f232975844786a543",
+    "blockTime": "1789810923123"
+   },
+   "inputCount": 2,
+   "outputCount": 4,
+   "inputSigScriptBytes": [
+    {
+     "bytes": 17910,
+     "sha256": "d414d3a5d56bcd79",
+     "computeBudget": 70,
+     "sigOpCount": 0
+    },
+    {
+     "bytes": 66,
+     "sha256": "94b570ce9e69370f",
+     "computeBudget": 70,
+     "sigOpCount": 0
+    }
+   ],
+   "block": {
+    "hash": "cd33ebc55b975b147752997da72ff863ac12f76d56c1de9f232975844786a543",
+    "daaScore": "2456",
+    "timestamp": "1789810923123"
+   }
+  },
+  "register_append#2": {
+   "txid": "a5d664e46a8e2c617bf2b5d4e66601f1b7534284d4f94c550faa215dde34dbb6",
+   "version": 1,
+   "lockTime": "0",
+   "storageMass": "293116",
+   "mass": "293116",
+   "computeMass": "44198",
+   "verboseData": {
+    "transactionId": "a5d664e46a8e2c617bf2b5d4e66601f1b7534284d4f94c550faa215dde34dbb6",
+    "hash": "d3bb1b0d72582b1553acc8c7e63158c7f142d641306873b82ec3f9545bbbafb6",
+    "computeMass": "44198",
+    "blockHash": "36138563bdf6772a38a59aad9a9bccf792b96991139b0de4860c5f7ff6d62f83",
+    "blockTime": "1789811009967"
+   },
+   "inputCount": 3,
+   "outputCount": 4,
+   "inputSigScriptBytes": [
+    {
+     "bytes": 17912,
+     "sha256": "f5b259411e1d301b",
+     "computeBudget": 70,
+     "sigOpCount": 0
+    },
+    {
+     "bytes": 3215,
+     "sha256": "cc7e3fdfce4c0795",
+     "computeBudget": 70,
+     "sigOpCount": 0
+    },
+    {
+     "bytes": 66,
+     "sha256": "452ae1da785ce4ec",
+     "computeBudget": 70,
+     "sigOpCount": 0
+    }
+   ],
+   "block": {
+    "hash": "36138563bdf6772a38a59aad9a9bccf792b96991139b0de4860c5f7ff6d62f83",
+    "daaScore": "2457",
+    "timestamp": "1789811009967"
+   }
+  },
+  "market_seal": {
+   "txid": "e2c45b328b9a47bf315f09dc3d7873e4278beb4fe5f46ce3bd9d839baa6924c8",
+   "version": 1,
+   "lockTime": "0",
+   "storageMass": "231312",
+   "mass": "231312",
+   "computeMass": "60422",
+   "verboseData": {
+    "transactionId": "e2c45b328b9a47bf315f09dc3d7873e4278beb4fe5f46ce3bd9d839baa6924c8",
+    "hash": "a843520811cee76f72804a2c2d99d632f19e2c23b96acea23d4d3952e63dd288",
+    "computeMass": "60422",
+    "blockHash": "fea2c9be6cd46c1a04171b69d79772ea5b66a8c97d33067f2c08060dee8cd4ef",
+    "blockTime": "1789811010167"
+   },
+   "inputCount": 3,
+   "outputCount": 3,
+   "inputSigScriptBytes": [
+    {
+     "bytes": 34559,
+     "sha256": "4fe65cbf238f1d3a",
+     "computeBudget": 70,
+     "sigOpCount": 0
+    },
+    {
+     "bytes": 3215,
+     "sha256": "c7b76a2f29fc3908",
+     "computeBudget": 70,
+     "sigOpCount": 0
+    },
+    {
+     "bytes": 66,
+     "sha256": "fa7838d649c896a9",
+     "computeBudget": 70,
+     "sigOpCount": 0
+    }
+   ],
+   "block": {
+    "hash": "fea2c9be6cd46c1a04171b69d79772ea5b66a8c97d33067f2c08060dee8cd4ef",
+    "daaScore": "2458",
+    "timestamp": "1789811010167"
+   }
+  }
+ },
+ "scannedBlocks": 2471
+}

@@ -145,6 +145,8 @@ t('③N1: 互换 tokenIn/tokenOut 得到不同字节(证明测试向量能区分
 
 // ── ③a: builder 的具名映射(sealWitnessArgs)用 heldIdx≠MARKET_SEAL_TOKEN_OUT_INDEX 的向量——若 builder
 // 把 tokenInIdx/tokenOutIdx 换位, 这条会红(真实形状里两者同为 1, 换位不会被共识或黄金回归发现) ──
+// 🔴 本条是 builder 层 tokenInIdx/tokenOutIdx 换位的【唯一】守卫(2026-09-19 负向对照实测: 在 builder 副本里
+// 把两者互换, 黄金回归 4 条、编码器向量、③b 全部仍绿, 只有本条变红)。不要因为"看起来冗余"删掉它。
 t('③a builder 映射 sealWitnessArgs: heldIdx=5(≠tokenOut=1) 时 tokenInIdx=5、tokenOutIdx=MARKET_SEAL_TOKEN_OUT_INDEX、rcOutIdx=MARKET_SEAL_ROOTCLOSE_OUT_INDEX', () => {
   const a = sealWitnessArgs({ heldIdx: 5, rcPrefixHex: 'aa', rcSuffixHex: 'bb', tokPrefixHex: '0xcc', tokSuffixHex: '0xdd' });
   if (5 === MARKET_SEAL_TOKEN_OUT_INDEX) throw new Error('测试向量退化: heldIdx 等于 token 输出下标, 无法区分换位');

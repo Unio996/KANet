@@ -45,3 +45,21 @@ D-021 合规：仅 simnet 数据，无真实地址、无私钥。
 - 黄金回归只覆盖**批3 那一个形状**（route A 参数、fee 95,000,000、count=2）；其它 state/面值的字节没有链上黄金。
 - ③N1 的编码器向量证明"编码器按 ABI 声明顺序放置具名参数"，不证明 ABI 声明顺序与共识读取顺序一致——
   后者只由真实共识 ACCEPT（批3 simnet）证明，且 NWT 已用三个独立来源逐字节验证过该形状的见证。
+
+## 补充（Bettor 要求）：批3 四笔交易的节点原始 mass 记录（只读取回）
+
+`raw-onchain-batch3-four-txs-node-records.json`，由 `08_fetch_onchain_mass_records.mjs.txt` 只读取回
+（`getBlocks(includeTransactions:true)` 扫 simnet 区块，共扫 2,471 个块；读的是区块内交易记录自带的
+节点侧 `storageMass` / `mass` / `verboseData.computeMass` 字段，以及所在区块的 hash 与 daaScore）。
+签名脚本只留字节数与 sha256 前 16 位，未存全文。全部四笔 version=1：
+
+| 步骤 | storageMass | mass | computeMass | 区块 daaScore |
+|---|---|---|---|---|
+| market_genesis | 207,749 | 207,749 | 8,083 | 2455 |
+| register_append#1 | 457,504 | 457,504 | 33,927 | 2456 |
+| register_append#2 | 293,116 | 293,116 | 44,198 | 2457 |
+| market_seal | 231,312 | 231,312 | 60,422 | 2458 |
+
+与批3 provenance 表逐项一致；这一次的数字是**节点原始字段**（不是当时 getMempoolEntry 输出的解析转述）。
+注意 `mass` 字段等于 storageMass、不是 max(compute, storage)——两个维度必须分别核对。
+**局限**：这是"已上链交易的节点记录"，不是"提交前的 getMempoolEntry 原始 JSON"；对没提交过的形状（如 fee=100M）仍取不到。
