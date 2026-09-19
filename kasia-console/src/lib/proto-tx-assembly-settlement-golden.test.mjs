@@ -20,11 +20,12 @@ if (!process.env._PROTO_SETTLEMENT_GOLDEN_BOOTSTRAPPED) {
 if (!process.env.CONSOLE_ENCRYPTION_KEY) process.env.CONSOLE_ENCRYPTION_KEY = '1'.repeat(64);
 
 const kaspa = await import('kaspa-wasm');
-const { buildMarketSealTxJson, sealWitnessArgs, MARKET_SEAL_ROOTCLOSE_OUT_INDEX, MARKET_SEAL_TOKEN_OUT_INDEX } = await import('./proto-tx-assembly-settlement.mjs');
+const { buildMarketSealTxJson, sealWitnessArgs, assertWitnessIndexLayout, MARKET_SEAL_ROOTCLOSE_OUT_INDEX, MARKET_SEAL_TOKEN_OUT_INDEX } = await import('./proto-tx-assembly-settlement.mjs');
 const { computeShardLeafRedeemScript, computeKttGenesisArtifact, loadProtocolConstants, loadFeeProfileCap } = await import('./proto-covenant-builder.mjs');
 const { compileSilV100, ctorBytes32V100, ctorIntV100 } = await import('./pool-bshard-artifacts.mjs');
 const { extractTemplateArtifactV100 } = await import('./pool-template-artifact.mjs');
 const { encodeConvertToRootcloseAction } = await import('./proto-convert-to-rootclose-witness.mjs');
+const { assertMassWithinCeiling } = await import('./proto-mass-ceiling.mjs');
 
 let pass = 0, fail = 0;
 const t = (n, f) => { try { f(); pass++; console.log('[PASS] ' + n); } catch (e) { fail++; console.log('[FAIL] ' + n + ' :: ' + e.message + '\n' + e.stack); } };
@@ -95,6 +96,38 @@ t('①黄金回归: 三个输出的 value/spk/covenantId/authorizingInput 与链
       if (Number(o.covenant.authorizingInput) !== want.authorizingInput) throw new Error(`output${i} authorizingInput 不一致`);
     }
   });
+});
+
+// ── ①e: 断言信号 vs 节点原始值——对批3那个 market_seal 形状, assertMassWithinCeiling 给出的 storage/compute 信号必须
+// 与节点侧原始字段(读自链上交易记录, 231,312 / 60,422)逐位相等。compute 的 60,422 含未签名 fee 输入的 66B 签名留量。 ──
+t('①e 断言信号(storage/compute)与节点原始mass字段逐位相等(231,312 / 60,422)', () => {
+  const tx = kaspa.Transaction.deserializeFromSafeJSON(built.txJson);
+  const sig = assertMassWithinCeiling({ kaspa, network: 'simnet', tx, inputHasCovenant: [true, true, false], feeUtxoValueSompi: feeUtxo.value, label: 'golden-seal' });
+  if (String(sig.storageMass) !== String(FX._source.nodeStorageMass)) throw new Error(`storage信号=${sig.storageMass} != 节点${FX._source.nodeStorageMass}`);
+  if (String(sig.computeMass) !== String(FX._source.nodeComputeMass)) throw new Error(`compute信号=${sig.computeMass} != 节点${FX._source.nodeComputeMass}`);
+});
+
+// ── ④ 结构断言 assertWitnessIndexLayout(NWT F2(c)): 见证索引与交易真实布局不一致必须大声失败 ──
+t('④结构断言: 正确的布局放行; tokenInIdx指错输入 / tokenOutIdx指错输出 / 主输出下标错 各自必拒', () => {
+  const tx = kaspa.Transaction.deserializeFromSafeJSON(built.txJson);
+  const held = { txid: heldInput.txid, vout: heldInput.vout };
+  const tokSpk = '0x' + String(tx.outputs[MARKET_SEAL_TOKEN_OUT_INDEX].scriptPublicKey.script);
+  const rcSpk = '0x' + String(tx.outputs[MARKET_SEAL_ROOTCLOSE_OUT_INDEX].scriptPublicKey.script);
+  const ok = { tx, label: 'layout', tokenInIdx: 1, heldOutpoint: held, tokenOutIdx: MARKET_SEAL_TOKEN_OUT_INDEX, expectedTokenOutSpkHex: tokSpk, primaryOutIdx: MARKET_SEAL_ROOTCLOSE_OUT_INDEX, expectedPrimaryOutSpkHex: rcSpk };
+  assertWitnessIndexLayout(ok); // 对照: 正确布局放行(证明下面的throw不是因为别的原因)
+  const must = (over, re) => { let e = null; try { assertWitnessIndexLayout({ ...ok, ...over }); } catch (x) { e = x; } if (!e || !re.test(e.message)) throw new Error(`应该以${re}拒绝, 实际: ${e ? e.message : '放行了'}`); };
+  must({ tokenInIdx: 0 }, /tokenInIdx/);           // 指向leaf输入而不是held
+  must({ tokenInIdx: 2 }, /tokenInIdx/);           // 指向fee输入
+  must({ tokenOutIdx: 0 }, /tokenOutIdx/);         // 指向RootClose输出而不是代币输出
+  must({ tokenOutIdx: 2 }, /tokenOutIdx/);         // 指向找零输出
+  must({ primaryOutIdx: 1 }, /主输出下标/);        // RootClose输出下标错
+});
+
+// ── ⑤ 哨兵: 所有索引参数两两不同(Bettor采纳NWT: 每个witness映射配一条) ──
+t('⑤哨兵: sealWitnessArgs 的 rcOutIdx/tokenInIdx/tokenOutIdx 三个索引参数在哨兵输入下两两不同', () => {
+  const a = sealWitnessArgs({ heldIdx: 5, rcPrefixHex: 'aa', rcSuffixHex: 'bb', tokPrefixHex: '0xcc', tokSuffixHex: '0xdd' });
+  const idx = [a.rcOutIdx, a.tokenInIdx, a.tokenOutIdx];
+  if (new Set(idx).size !== idx.length) throw new Error(`索引参数在哨兵输入下不是两两不同: ${JSON.stringify(idx)}`);
 });
 
 // ── ②N2: heldInput 为 null 必须构造期 fail-closed(不能把 tokenInIdx=-1 编进见证) ──

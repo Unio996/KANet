@@ -408,6 +408,9 @@ t('⑤真实tx算出的output covenant_id与builder返回的rootCloseCovId/token
     if (a.tokenOutIdx !== CONVERT_TO_CLAIM_TOKEN_OUT_INDEX) throw new Error(`tokenOutIdx=${a.tokenOutIdx}`);
     if (a.claimOutIdx !== CONVERT_TO_CLAIM_CLAIM_OUT_INDEX) throw new Error(`claimOutIdx=${a.claimOutIdx}`);
     if (a.claim_prefix !== '0xaa' || a.claim_suffix !== '0xbb' || a.tok_prefix !== '0xcc' || a.tok_suffix !== '0xdd') throw new Error('prefix/suffix透传不对');
+    // 哨兵(Bettor采纳NWT): 所有索引参数在哨兵输入下两两不同
+    const idx = [a.claimOutIdx, a.tokenInIdx, a.tokenOutIdx];
+    if (new Set(idx).size !== idx.length) throw new Error(`索引参数在哨兵输入下不是两两不同: ${JSON.stringify(idx)}`);
   });
   t('⑧b编码器: tokenIn=1/tokenOut=3 与 互换 得到不同字节', () => {
     const abi = compiledRootCloseAbi();

@@ -353,7 +353,7 @@ export function buildMarketGenesisTxJson({ kaspa, network, feeUtxo, relayChangeS
   // (万一未来改动引入新输入种类), 不是修复本函数自身的问题。
   assertKaspadInputVersionRule(shape.tx, 'market_genesis'); // 账本1465: 主网节点RPC层输入版本一致性规则
   assertMassWithinCeiling({
-    kaspa, network, tx: shape.tx, inputPluralities: [1n], // 唯一输入是普通P2PK fee UTXO, 无covenant, p=1
+    kaspa, network, tx: shape.tx, inputHasCovenant: [false], // 唯一输入是普通P2PK fee UTXO, 无covenant
     feeUtxoValueSompi: feeUtxo.value, label: 'market_genesis',
   }); // 账本1497 Bettor MUST: 构造期mass上限fail-closed断言
 
@@ -531,12 +531,12 @@ export function buildRegisterAppendTxJson({
   assertImpliedFeeMatches(shape.tx, shape.netLoss, 'register_append');
   assertKaspadInputVersionRule(shape.tx, 'register_append'); // 账本1465: 主网节点RPC层输入版本一致性规则
   {
-    // 账本1497 Bettor MUST: 构造期mass上限fail-closed断言。inputPluralities与上面mkTx真实塞入
-    // txInputs的顺序(inputs数组标记的kind)一一对应——leaf/held都是covenant续约输入(p=2), fee是
-    // 普通输入(p=1), 与tx.inputs.length严格一致(顺序由inputs[]的kind标记决定, 不是猜的)。
-    const inputPluralities = inputs.map((slot) => (slot.kind === 'fee' ? 1n : 2n));
+    // 账本1497 Bettor MUST: 构造期mass上限fail-closed断言。inputHasCovenant与上面mkTx真实塞入
+    // txInputs的顺序(inputs数组标记的kind)一一对应——leaf/held是covenant续约输入(带covenant), fee是
+    // 普通输入, 与tx.inputs.length严格一致(plurality由断言按输入utxo的spk长度+此位现算, 不再传槽位常量)。
+    const inputHasCovenant = inputs.map((slot) => slot.kind !== 'fee');
     assertMassWithinCeiling({
-      kaspa, network, tx: shape.tx, inputPluralities, feeUtxoValueSompi: feeUtxo.value, label: 'register_append',
+      kaspa, network, tx: shape.tx, inputHasCovenant, feeUtxoValueSompi: feeUtxo.value, label: 'register_append',
     });
   }
 

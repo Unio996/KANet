@@ -144,24 +144,47 @@ const kttStateFieldCount = kttCompiled._raw.contracts.KanetTestToken.runtime_sta
     }
   });
 
-  // ── ⑦⑧ 账本1455回归向量: leftover公式修复后, 首笔下注真实最小可行fee输入从~1.05 KAS降到~0.82 KAS
-  //    (修复前leaf输入的0.2 KAS真实面值被漏计, 每笔都静默多付真实矿工费, 见proto-tx-assembly.mjs
-  //    buildRegisterAppendTxJson内leftover公式的注释) ──
+  // ── ⑦⑧ 账本1455回归向量: leftover公式修复(修复前leaf输入的0.2 KAS真实面值被漏计, 每笔都静默多付真实矿工费,
+  //    见proto-tx-assembly.mjs buildRegisterAppendTxJson内leftover公式的注释)。
+  //    🔴 2026-09-19订正(Bettor裁定, 账本1455原文里"修复后真实最小可行~0.82 KAS / 修复前~1.05 KAS门槛"这两个数来自当时
+  //    的【本地估算】, 不是共识值): 精确storage门控(按consensus源码移植, 与节点值逐位吻合)下, 首笔下注(无held)
+  //    的fee输入0.85 KAS对应storage=994,327、是节点500,000硬顶的2倍, 节点必拒, 所以旧向量"0.85 KAS构造成功"在共识上从来
+  //    不合法(非localMass偏高所致)。精确门控下首笔下注的最小可行fee输入落在0.925~0.93 KAS区间内(扫描粒度0.5M sompi:
+  //    0.925 KAS storage=479,283被拒, 0.93 KAS通过), 此向量改用0.95 KAS(storage=457,504, 批3 simnet真实ACCEPT过的面值)。
+  //    仍能区分修复前后: 1455记录里修复前0.5与0.95 KAS都构造失败, 修复后0.95成功。 ──
   let builtMin;
-  t('⑦first_bet 账本1455回归: fee输入0.85 KAS(舒适地高于真实最小可行值~0.82 KAS, 但远低于修复前的~1.05 KAS门槛)构造成功——证明leftover公式确实把leaf自身的续约价值credit回预算, 不再要求fee输入单独垫付全部0.6 KAS dust', () => {
+  t('⑦first_bet 账本1455回归: fee输入0.95 KAS(storage=457,504, 通过精确mass门控; 修复前公式在此面值构造失败)构造成功——证明leftover公式确实把leaf自身的续约价值credit回预算, 不再要求fee输入单独垫付全部0.6 KAS dust', () => {
     builtMin = buildRegisterAppendTxJson({
       kaspa, network: 'mainnet',
       leafRedeemScript: leafRedeem.script, leafStateLayout: leafRedeem.stateLayout,
       leafOutpoint, leafCovId, currentState, newState,
       heldInput: null,
-      feeUtxo: { txid: 'dd'.repeat(32), vout: 0, value: 85_000_000n, scriptPublicKeyHex: relaySpkHex }, // 0.85 KAS
+      feeUtxo: { txid: 'dd'.repeat(32), vout: 0, value: 95_000_000n, scriptPublicKeyHex: relaySpkHex }, // 0.95 KAS
       relayChangeScriptPublicKeyHex: relaySpkHex,
       registerAppendEntryAbi, registerAppendArgs: { side: SIDE, stake: STAKE, bettorPk, psPrefix: psPrefixHex, psSuffix: psSuffixHex, tokPrefix: tokPrefixHex, tokSuffix: tokSuffixHex },
       ticketScriptPubKeyHex: ticketSpkHex, mergedKttScript: mergedArtifact.script,
       absFeeCapSompi: 100_000_000n,
     });
-    if (!builtMin.txJson) throw new Error('0.85 KAS fee输入本该构造成功(账本1455修复后的真实可行值), 却失败了——回归了');
+    if (!builtMin.txJson) throw new Error('0.95 KAS fee输入本该构造成功(账本1455修复+精确mass门控下的可行值), 却失败了——回归了');
     if (builtMin.requiredFee > 50_000_000n) throw new Error(`requiredFee应该在~0.41-0.44 KAS量级, 实际 ${builtMin.requiredFee}(过大, 可能公式又漂移了)`);
+  });
+  t('⑦b first_bet 负向: 原账本1455向量fee输入0.85 KAS必须被精确mass门控拒绝, 报文含精确storage数994327(≥475,000; 节点500,000硬顶的2倍)——同时充当"85M必拒"回归', () => {
+    let threw = null;
+    try {
+      buildRegisterAppendTxJson({
+        kaspa, network: 'mainnet',
+        leafRedeemScript: leafRedeem.script, leafStateLayout: leafRedeem.stateLayout,
+        leafOutpoint, leafCovId, currentState, newState,
+        heldInput: null,
+        feeUtxo: { txid: 'dd'.repeat(32), vout: 0, value: 85_000_000n, scriptPublicKeyHex: relaySpkHex }, // 0.85 KAS
+        relayChangeScriptPublicKeyHex: relaySpkHex,
+        registerAppendEntryAbi, registerAppendArgs: { side: SIDE, stake: STAKE, bettorPk, psPrefix: psPrefixHex, psSuffix: psSuffixHex, tokPrefix: tokPrefixHex, tokSuffix: tokSuffixHex },
+        ticketScriptPubKeyHex: ticketSpkHex, mergedKttScript: mergedArtifact.script,
+        absFeeCapSompi: 100_000_000n,
+      });
+    } catch (e) { threw = e; }
+    if (!threw) throw new Error('0.85 KAS应该被精确mass门控拒绝, 却构造成功了');
+    if (!/storage=994327\(arithmetic\)/.test(threw.message)) throw new Error(`被拒但报文不含精确storage 994327: ${threw.message}`);
   });
   t('⑧独立复算Σ真实inputs.utxo.amount − Σ真实outputs.value必须【恰好】等于built.netLoss(不只信内部assertImpliedFeeMatches没抛错, 从反序列化出的真实tx对象外部独立复核一遍——账本1455的核心不变量)', () => {
     const tx = kaspa.Transaction.deserializeFromSafeJSON(builtMin.txJson);
@@ -250,8 +273,11 @@ const kttStateFieldCount = kttCompiled._raw.contracts.KanetTestToken.runtime_sta
     }
   });
 
-  // ── ⑦⑧ 账本1455回归向量(第二笔下注/有held): 修复后真实最小可行fee输入从~1.05 KAS降到~0.58 KAS
-  //    (修复前leaf+held两个输入合计0.4 KAS真实面值被漏计) ──
+  // ── ⑦⑧ 账本1455回归向量(第二笔下注/有held)(修复前leaf+held两个输入合计0.4 KAS真实面值被漏计)。
+  //    🔴 2026-09-19订正: 账本1455原文里"最小可行~0.58 KAS"来自旧本地估算。精确门控下可行区【不是单调区间】(扫描实测):
+  //    fee输入0.58 KAS通过(走的是【无找零】形状, netLoss=38,000,000 超付requiredFee 35,816,400 约2.18M sompi, 靠不留找零
+  //    避开storage mass), 而0.60 KAS(storage=866,666)与0.62 KAS(495,400)被拒, 0.65 KAS通过(带找零6,349,100, storage<475,000)。
+  //    所以不存在"精确的最小可行值", 本向量取0.65 KAS(带找零形状, 用于⑧核对netLoss==requiredFee)。 ──
   let builtMin;
   t('⑦second_bet 账本1455回归: fee输入0.65 KAS(舒适地高于真实最小可行值~0.58 KAS, 远低于修复前的~1.05 KAS门槛)构造成功——held自身的续约价值也被credit回预算', () => {
     builtMin = buildRegisterAppendTxJson({

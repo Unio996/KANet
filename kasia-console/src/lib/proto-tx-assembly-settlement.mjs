@@ -44,6 +44,28 @@ export function sealWitnessArgs({ heldIdx, rcPrefixHex, rcSuffixHex, tokPrefixHe
 }
 
 /**
+ * 见证索引与交易真实布局的结构断言(NWT批3独立验证F2(c), Bettor采纳): 见证里的tokenInIdx必须真的指向花掉held
+ * 代币outpoint的输入、tokenOutIdx必须真的是以新owner covenant现算出的代币输出、主输出(RootClose/RootClaim)
+ * 必须真的在primaryOutIdx——固定布局下这些恒等式是惰性的, 布局一变(多held/换序)就大声失败而不是把错位索引
+ * 编进见证。只读tx对象, 不改字节。
+ */
+export function assertWitnessIndexLayout({ tx, label, tokenInIdx, heldOutpoint, tokenOutIdx, expectedTokenOutSpkHex, primaryOutIdx, expectedPrimaryOutSpkHex }) {
+  const noPrefix = (h) => String(h).replace(/^0x/, '').toLowerCase();
+  const held = tx.inputs[tokenInIdx];
+  if (!held || String(held.previousOutpoint.transactionId) !== String(heldOutpoint.txid) || Number(held.previousOutpoint.index) !== Number(heldOutpoint.vout)) {
+    throw new Error(`${label}: fail-closed — 见证tokenInIdx(${tokenInIdx})指向的输入不是held代币outpoint(${heldOutpoint.txid}:${heldOutpoint.vout}), 输入布局与见证映射已不一致`);
+  }
+  const tokOut = tx.outputs[tokenOutIdx];
+  if (!tokOut || noPrefix(tokOut.scriptPublicKey.script) !== noPrefix(expectedTokenOutSpkHex)) {
+    throw new Error(`${label}: fail-closed — 见证tokenOutIdx(${tokenOutIdx})指向的输出spk不是预期的代币输出, 输出布局与见证映射已不一致`);
+  }
+  const primary = tx.outputs[primaryOutIdx];
+  if (!primary || noPrefix(primary.scriptPublicKey.script) !== noPrefix(expectedPrimaryOutSpkHex)) {
+    throw new Error(`${label}: fail-closed — 见证主输出下标(${primaryOutIdx})指向的输出spk不是预期的genesis输出, 输出布局与见证映射已不一致`);
+  }
+}
+
+/**
  * ① market_seal（`ShardLeaf_direct.convert_to_rootclose`）——设计文档§1.1/实现计划v0.4§2.1。
  * @param {object} o
  * @param {*} o.kaspa  kaspa-wasm模块(注入)
@@ -169,13 +191,20 @@ export function buildMarketSealTxJson({
   });
   assertImpliedFeeMatches(shape.tx, shape.netLoss, 'market_seal');
   assertKaspadInputVersionRule(shape.tx, 'market_seal');
+  assertWitnessIndexLayout({
+    tx: shape.tx, label: 'market_seal',
+    tokenInIdx: heldIdx, heldOutpoint: { txid: heldInput.txid, vout: heldInput.vout },
+    tokenOutIdx: MARKET_SEAL_TOKEN_OUT_INDEX,
+    expectedTokenOutSpkHex: computeKttGenesisArtifact({ amount: currentState.pool_value, ownerCovIdHex: String(shape.tx.outputs[MARKET_SEAL_ROOTCLOSE_OUT_INDEX].covenant.covenantId).toLowerCase() }).scriptPubKeyHex,
+    primaryOutIdx: MARKET_SEAL_ROOTCLOSE_OUT_INDEX, expectedPrimaryOutSpkHex: rcArtifact.scriptPubKeyHex,
+  });
   {
     // 账本1497 Bettor MUST: 构造期mass上限fail-closed断言, 与register_append同一plurality判定
     // 原则——leaf/held都是covenant续约输入(p=2), fee是普通输入(p=1), 用inputs[]的kind标记逐个映射,
     // 不是猜的(与上面mkTx真实塞入txInputs的顺序严格一致)。
-    const inputPluralities = inputs.map((slot) => (slot.kind === 'fee' ? 1n : 2n));
+    const inputHasCovenant = inputs.map((slot) => slot.kind !== 'fee');
     assertMassWithinCeiling({
-      kaspa, network, tx: shape.tx, inputPluralities, feeUtxoValueSompi: feeUtxo.value, label: 'market_seal',
+      kaspa, network, tx: shape.tx, inputHasCovenant, feeUtxoValueSompi: feeUtxo.value, label: 'market_seal',
     });
   }
 
@@ -343,7 +372,7 @@ export function buildCloseCommitTxJson({
   {
     // 账本1497 Bettor MUST: RootClose输入是covenant续约(p=2), fee是普通输入(p=1)。
     assertMassWithinCeiling({
-      kaspa, network, tx: shape.tx, inputPluralities: [2n, 1n], feeUtxoValueSompi: feeUtxo.value, label: 'close_commit',
+      kaspa, network, tx: shape.tx, inputHasCovenant: [true, false], feeUtxoValueSompi: feeUtxo.value, label: 'close_commit',
     });
   }
 
@@ -496,9 +525,16 @@ export function buildConvertToClaimTxJson({
   });
   assertImpliedFeeMatches(shape.tx, shape.netLoss, 'convert_to_claim');
   assertKaspadInputVersionRule(shape.tx, 'convert_to_claim');
+  assertWitnessIndexLayout({
+    tx: shape.tx, label: 'convert_to_claim',
+    tokenInIdx: CONVERT_TO_CLAIM_HELD_IN_INDEX, heldOutpoint: heldTokenOutpoint,
+    tokenOutIdx: CONVERT_TO_CLAIM_TOKEN_OUT_INDEX,
+    expectedTokenOutSpkHex: computeKttGenesisArtifact({ amount: closedState.pool_value, ownerCovIdHex: String(shape.tx.outputs[CONVERT_TO_CLAIM_CLAIM_OUT_INDEX].covenant.covenantId).toLowerCase() }).scriptPubKeyHex,
+    primaryOutIdx: CONVERT_TO_CLAIM_CLAIM_OUT_INDEX, expectedPrimaryOutSpkHex: claimArtifact.scriptPubKeyHex,
+  });
   // 账本1497 Bettor MUST: RootClose与held代币都是covenant输入(p=2), fee是普通输入(p=1)。
   assertMassWithinCeiling({
-    kaspa, network, tx: shape.tx, inputPluralities: [2n, 2n, 1n], feeUtxoValueSompi: feeUtxo.value, label: 'convert_to_claim',
+    kaspa, network, tx: shape.tx, inputHasCovenant: [true, true, false], feeUtxoValueSompi: feeUtxo.value, label: 'convert_to_claim',
   });
 
   const claimCovId = String(shape.tx.outputs[CONVERT_TO_CLAIM_CLAIM_OUT_INDEX].covenant.covenantId);
