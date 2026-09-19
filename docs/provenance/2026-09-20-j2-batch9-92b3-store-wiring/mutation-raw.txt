@@ -1,0 +1,35 @@
+BASELINE
+  core: exit=0 26 passed, 0 failed
+  store: exit=0 10 passed, 0 failed
+  wire: exit=0 10 passed, 0 failed
+G1: KILLED [core:exit=1] :: 出口闸拒绝报警不去重(每 tick 刷 events)
+G2: KILLED [core:exit=1] :: 成功不清出口闸报警去重
+S1: KILLED [store:exit=1] :: seal 触发不排除 pending 下注
+S2: KILLED [store:exit=1] :: seal 触发只挡 ambiguous append(在途 append 不挡)
+S3: KILLED [store:exit=1] :: 确认数 ≥ seal_count 就触发
+S4: KILLED [store:exit=1] :: seal landed 记账不带前态谓词
+S5: KILLED [store:exit=1] :: claim_draw 记账可覆盖已领取
+S6: KILLED [store:exit=1] :: claim_vout 写死 1
+S7: KILLED [store:exit=1] :: convert_to_claim 不检查 market 的 resolve landed(跨 subject_type)
+S8: KILLED [store:exit=1] :: prepared 行不进 advances(重启恢复失效)
+S9: KILLED [store:exit=1] :: advances 不去重
+S10: KILLED [store:exit=1] :: claim id 只有 32 位 hex(过不了出口 S9)
+S11: KILLED [store:exit=1] :: landedChecks 混入 prepared
+S12: KILLED [store:exit=1] :: 批 9 意图谓词放进 withdraw
+W1: KILLED [wire:exit=1] :: 结算开关还要求旧开关
+W2: KILLED [wire:exit=1] :: 不要求 relay 已配置
+W3: KILLED [wire:exit=1] :: 单飞失效
+W4: KILLED [wire:exit=1] :: 异常后单飞标志不复位
+W5: KILLED [wire:exit=1] :: 前缀用 startsWith(kaspasim 会被当成 kaspa)
+W6: KILLED [wire:exit=1] :: 网络不符不自停
+W7: KILLED [wire:exit=1] :: ops 不可用不自停
+W8: KILLED [wire:exit=1] :: 每步预算不是间隔的一半
+W9: KILLED [wire:exit=1] :: network 未设时回落 mainnet 默认
+W10: KILLED [wire:exit=1] :: 启动日志不带 network
+W11: KILLED [wire:exit=1] :: index.js 没有接线调用
+W12: KILLED [wire:exit=1] :: 关闭态日志文案变了
+RESTORED
+  core: exit=0 26 passed, 0 failed
+  store: exit=0 10 passed, 0 failed
+  wire: exit=0 10 passed, 0 failed
+SUMMARY mutants=26 survivors=0 restored_green=true

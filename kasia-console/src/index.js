@@ -948,6 +948,9 @@ startTxLandedReconciler();
 //   market_genesis, bet_mint 两步在后续 Stage 补齐(services/proto-driver.mjs 文件头注)。
 import { startProtoDriver } from './services/proto-driver.mjs';
 startProtoDriver();
+// 批9 9-2b: 结算驱动(默认关闭——PROTO_SETTLEMENT_DRIVER_ENABLED 不写 = 关, 只打一行 disabled 日志; 与 PROTO_DRIVER_ENABLED 互相独立)。
+import { startProtoSettlementDriver } from './services/proto-settlement-driver.mjs';
+startProtoSettlementDriver();
 
 // J1tn 2026-07-16 (docs/2026-07-08-backward-walk-daa-index-design.md §2.2 note①, Bettor 方向审
 // GREEN + NWT 攻击面终审 GREEN #o0056j): spc_daa_index 完整性巡检 — 9ez2u 同族根因防线。

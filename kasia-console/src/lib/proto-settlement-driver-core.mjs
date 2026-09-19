@@ -97,6 +97,7 @@ export function createSettlementDriver(deps, { ticksToError = 3 } = {}) {
   const slaAlerted = new Set();         // `${intentKey}:${sla}` 已报警(幂等)
   const staleAlerted = new Set();       // `${intentKey}:${updated_at}` 已报警
   const flipAlerted = new Set();        // refund_flip_observed 已报警(幂等)
+  const gateAlerted = new Set();        // `${intentKey}:${code}` 出口分闸确定性拒绝已报警(每 tick 重试会每 tick 撞同一个拒绝——去重, 否则每 tick 刷 events; 成功清零)
   const bcastFail = new Map();          // intentKey → { code, count, lastTick, alerted }: 广播失败的连续计数(按 key 分开, 同 code 才累计)
   let tickSeq = 0;
 
@@ -114,7 +115,7 @@ export function createSettlementDriver(deps, { ticksToError = 3 } = {}) {
     const msg = err && err.message ? String(err.message) : String(err);
     if (stage === 'broadcast') {
       const gate = EXIT_GATE_REFUSAL_CODES.find((c) => msg.includes(c));
-      if (gate) return { report: true, eventType: 'settlement_step_unexpected_error', level: 'error', code: gate, transient: false };   // 确定性拒绝: 立即报警
+      if (gate) return { report: true, gate: true, eventType: 'settlement_step_unexpected_error', level: 'error', code: gate, transient: false };   // 确定性拒绝: 立即报警
       return { report: false, eventType: 'broadcast_failed', code: err && err.code ? String(err.code) : 'unknown', transient: true, track: true };
     }
     if (stage === 'build') {
@@ -191,6 +192,7 @@ export function createSettlementDriver(deps, { ticksToError = 3 } = {}) {
         },
       });
       pmtFail.delete(key); bcastFail.delete(key);
+      for (const gk of [...gateAlerted]) if (gk.startsWith(`${key}:`)) gateAlerted.delete(gk);
       return { outcome: 'submitted', key, txId: res.txId, reused: !!res.reused, replayed: !!res.replayed };
     } catch (e) {
       if (e instanceof DriverDepsError) throw e;
@@ -217,6 +219,11 @@ export function createSettlementDriver(deps, { ticksToError = 3 } = {}) {
         return { outcome: 'failed', key, class: c.eventType, code: c.code, transient: true, message };
       }
       if (c.viaGrader) { const g = reportFailure(orig, tickId, key, { stage: at }); return { outcome: 'failed', key, class: g.eventType, code: g.code, transient: g.transient, message }; }
+      if (c.gate) {                                                   // 出口分闸确定性拒绝: 同 (key, code) 只报一次
+        const gk = `${key}:${c.code}`;
+        if (gateAlerted.has(gk)) return { outcome: 'failed', key, class: c.eventType, code: c.code, transient: false, message, deduped: true };
+        gateAlerted.add(gk);
+      }
       alert(c.eventType, `${key}: ${message.slice(0, 300)}`, { intent_key: key, code: c.code, stage: at }, c.level);
       return { outcome: 'failed', key, class: c.eventType, code: c.code, transient: false, message };
     }
