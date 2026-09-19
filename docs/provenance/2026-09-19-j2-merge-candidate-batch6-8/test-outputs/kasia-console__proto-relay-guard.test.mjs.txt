@@ -1,0 +1,26 @@
+[db] path=%TEMP%\_j2_proto_relay_guard_16520.db source=DB_PATH
+[test] ① PROTO_RELAY_ID 未配置 ⇒ 启动断言 throw(fail-closed: 未配置=无人被授权):
+  ✅ 实际: PROTO_RELAY_ID not configured — proto v0 money path refuses to start (fail-closed: unconfigured means no relay is authorized, not "any relay is allowed")
+[test] ② PROTO_RELAY_ID 配置了但 relay_nodes 表里找不到这一行 ⇒ throw:
+  ✅ 实际: PROTO_RELAY_ID=does-not-exist-id not found in relay_nodes table
+[test] ③ name 不含 proto- 前缀 ⇒ throw(名前缀是人眼可见的 tripwire, 硬条件):
+  ✅ 实际: PROTO_RELAY_ID relay name 'production-relay-1' does not start with 'proto-' — refusing (name-prefix convention is the human-visible tripwire that this is the sacrificial proto relay, not a production one being accidentally wired in)
+[test] ④ 余额查询返回 null(两条路径都失败) ⇒ fail-closed throw(不假设余额安全):
+  ✅ 实际: could not determine on-chain balance for PROTO_RELAY_ID relay address kaspa:qtest2 — fail-closed (cannot verify the <5 KAS invariant, so refusing rather than assuming it holds)
+[test] ⑤ 余额 >= 5 KAS 上限 ⇒ throw(硬顶, 不是"建议"):
+  ✅ PROTO_MAX_BALANCE_KAS 常量 = 5(实际 5)
+  ✅ 恰好等于上限被拒(实际: PROTO_RELAY_ID relay balance 5 KAS >= 5 KAS ceiling — refusing (this relay is supposed to hold only prototype-scale funds; a large balance means either it is not the sacrificial relay it claims to be, or it needs to be drained back down before proto features may run))
+[test] ⑥ 余额 < 5 KAS 且其余条件都满足 ⇒ 通过, 返回正确字段:
+  ✅ ok:true(实际 {"ok":true,"name":"proto-v0-funds-c","address":"kaspa:qtest4","balanceKas":4.999})
+  ✅ name 正确(实际 proto-v0-funds-c)
+  ✅ address 正确(实际 kaspa:qtest4)
+  ✅ balanceKas 正确(实际 4.999)
+[test] ⑦ rejectRelayIdInBody: 请求体带 relay_id 字段(任意值, 含 undefined/null)一律拒绝:
+  ✅ 字符串值 → 拒绝
+  ✅ undefined 值也拒绝(字段存在本身就是信号, 不看值)
+  ✅ null 值也拒绝
+  ✅ 不含 relay_id 字段 → 放行(null)
+  ✅ body 本身是 null(无请求体) → 放行
+  ✅ body 本身是 undefined → 放行
+
+✅✅ ALL PASS — PROTO_RELAY_ID 基础设施(启动断言 6 分支 + 请求体拒绝 6 分支) 全绿

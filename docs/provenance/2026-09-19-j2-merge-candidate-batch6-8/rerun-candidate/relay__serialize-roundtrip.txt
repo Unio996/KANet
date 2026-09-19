@@ -1,0 +1,23 @@
+  ✅ Q6: txid 签名前后 + 序列化往返不变 (36532b118278)
+  ✅ Q6-陷阱: deserializeFromSafeJSON 信 JSON 里的 id(改了字节 id 照旧) — 不 finalize 的断言是空的
+  ✅ Q6: finalize() 从字节重算 ⇒ 改一字节 txid 变 (debedbb74f83); 未改的重算 == 原 id
+  ✅ replay: prepared_txid ≠ bytes txid → 拒, 零提交
+  ✅ replay: 被改过的字节 → txid 不等 → 拒(F2-R-弱注入 b relay 半边)
+  ✅ replay: mempool 已有 → 不再广播
+  ✅ replay: 收款地址已落 → 不再广播
+  ✅ replay: 外部输入不在发送方 UTXO 集 → inputs_spent, 零提交(F2-R-3 relay 半边)
+  ✅ replay: 正常 → 同字节提交 1 笔, txId == prepared
+  ✅ replay: submit 抛错但 mempool 有它 → ok(活性判定, 不解析报错串)
+  ✅ replay: submit 抛错且 mempool 无 → replay_rejected(console 侧不重建)
+  ✅ replay: 坏 JSON → replay_bad_json
+  ✅ intent fresh: prepared 回执失败 → 零广播(fail-closed)
+  ✅ intent fresh: prepared 在广播前(计数 0)、submitted 在广播后(计数 1)
+  ✅ intent 进程内幂等: 同 key 二次 → reused, 零广播
+  ✅ intent replay: 走 replayFn, 不走 sendKaspa
+  ✅ intent replay: 坏 JSON → replay_bad_json
+  ✅ harness flip arm went red as required
+
+✅ all relay round-trip / replay / intent vectors passed
+
+[stderr]
+  ❌ harness-flip (expect FAIL)

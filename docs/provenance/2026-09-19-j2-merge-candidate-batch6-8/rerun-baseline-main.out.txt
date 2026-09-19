@@ -1,0 +1,13 @@
+ROOT=D:/kanet-tn12
+console__broadcaster-utxo: exit=0 0.5s
+    关键行: (无)
+relay__drain-finality-safe-blocks: exit=0 0.1s
+    关键行: [drain-finality-safe-blocks.test] ALL PASS
+relay__wallet: exit=3221226505 0.1s
+    关键行: [wallet.test] ALL PASS | Assertion failed: !(handle->flags & UV_HANDLE_CLOSING), file src\win\async.c, line 76
+relay__serialize-roundtrip: exit=0 0.1s
+    关键行: ✅ all relay round-trip / replay / intent vectors passed
+relay__tx-mass-ub: exit=0 0.1s
+    关键行: ✅ tx-mass-ub: 35 PASS / 0 FAIL
+relay__utxo-facts: exit=0 0.7s
+    关键行: 42 passed, 0 failed

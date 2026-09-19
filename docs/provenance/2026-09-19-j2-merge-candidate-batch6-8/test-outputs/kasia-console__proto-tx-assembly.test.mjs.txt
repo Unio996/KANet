@@ -1,0 +1,38 @@
+[db] path=%TEMP%\_j2_proto_tx_assembly_19176.db source=DB_PATH
+[PASS] ①-1 精确等于协议常量 ⇒ 通过
+[PASS] ①-2 用"种子减法"算出的近似值(例如 seedValue - feeEstimate 凑出来的 19,999,999) ⇒ 拒绝
+[PASS] ①-3 续约输出同理: 差 1 sompi 也必须拒绝(不是只查"大致相等")
+[PASS] ①-4 非 bigint 类型直接拒绝(防止 Number 精度静默出错)
+[PASS] ④-1 kaspa 对象完全没有 calculateTransactionMass 方法 ⇒ 立即 throw, 不回退估算值
+[PASS] ④-2 calculateTransactionMass 抛错(例如 v1 covenant tx panic) ⇒ 原样冒泡, 不吞掉不估算
+[PASS] ④-3 calculateTransactionMass 返回 null ⇒ 视为不可用, 不当 0 处理
+[PASS] ④-4 calculateTransactionMass 正常返回 ⇒ fee = mass * 100(SOMPI_PER_MASS)
+[PASS] fee-UTXO: 有单个够用的 UTXO ⇒ 选中它
+[PASS] fee-UTXO: 没有任何单个 UTXO 够用 ⇒ no_suitable_fee_utxo, 不自动拆分
+[PASS] selectFeeUtxoByConstruction: 按面值升序逐个真实调用tryBuild, 第一个成功的即选中(不是选面值最大的)
+[PASS] selectFeeUtxoByConstruction: 面值超过SIGNED_INPUT_CEILING_SOMPI的候选被预先过滤, 不会去尝试构造它(relay侧反正会拒签)
+[PASS] selectFeeUtxoByConstruction: 全部候选真实构造都失败 ⇒ throw no_suitable_fee_utxo, 报文附带每个候选的面值+失败原因
+[PASS] selectFeeUtxoByConstruction: 没有任何候选面值 <= 上限(全部被过滤) ⇒ throw, 报文说明被排除的候选数, 不假装尝试过
+[PASS] selectFeeUtxoByConstruction: 真实种子面值场景(0.5/0.5/0.95 KAS)——用一个"minRequired 阈值判定"的假tryBuild模拟真实构造对每个面值的接受/拒绝, 验证不再被保守下界一刀切拒绝
+[PASS] selectChangeShape-1: leftover=0 ⇒ 只走无找零形状, requiredFee<=0 时通过
+[PASS] selectChangeShape-2: 0.95 KAS 种子步骤B真实形状(找零约15,000,000) ⇒ 带找零形状通过, 不再被硬门槛拒绝
+[PASS] selectChangeShape-3: 找零很小(1,000 sompi)时选中"并入手续费"形状, 不构造 dust 找零输出
+[PASS] selectChangeShape-4: 两种形状的 net_loss 都超过 ceiling ⇒ throw no_viable_change_shape, 报文带两种形状的数字
+[PASS] selectChangeShape-5: 20M 边界上下各一个点各自选中的形状(不再是硬门槛, 只是观察真实选择结果)
+[PASS] dynamicNetLossCeiling: min(requiredFee×2, absFeeCapSompi, GLOBAL_ABS_FEE_CAP_SOMPI) 三者取最小(与 relay 侧 validateNetLoss 公式一致)
+[PASS] GLOBAL_ABS_FEE_CAP_SOMPI 两侧不漂移: console侧常量与relay侧源码里声明的值逐字节相等
+[PASS] SIGNED_INPUT_CEILING_SOMPI 两侧不漂移: console侧常量与relay侧源码里声明的值逐字节相等
+[PASS] assertKaspadInputVersionRule: version=1 且全部input.sigOpCount=0 ⇒ 通过
+[PASS] assertKaspadInputVersionRule: version=1 但某个input.sigOpCount!=0 ⇒ throw(这正是账本1465两次闸3中止的真实根因形状)
+[PASS] assertKaspadInputVersionRule: version=0 且全部input.computeBudget=0 ⇒ 通过
+[PASS] assertKaspadInputVersionRule: version=0 但某个input.computeBudget!=0 ⇒ throw
+[diag:step] proc.silverc.compile.bshard-artifacts ms=77 cmd=silverc ok=1 at=2026-09-19T16:49:50.004Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=53 cmd=silverc ok=1 at=2026-09-19T16:49:50.064Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=50 cmd=silverc ok=1 at=2026-09-19T16:49:50.119Z
+[PASS] genesis-e2e-1 buildMarketGenesisTxJson 真实构造成功(真 mass 计算, 真实 per-kind cap 下选中带找零形状, 返回 shardLeafCovId)
+[PASS] genesis-e2e-1b(账本1465节点规则镜像) 真实构造的genesis交易反序列化后, 每个input的sigOpCount/computeBudget满足v2.0.1 RPC层规则(否则主网节点会拒收——这正是闸3两次中止的真实故障, 本地构造/签名/txid核对全过但真广播才被拒)
+[PASS] genesis-e2e-2 relay 侧真代码能反序列化 + extractTxShape + validateFixedValueOutputs 通过(未签名阶段), covenant_id 在序列化往返后不变(populateGenesisCovenants 声明真的被序列化保留, 不是本地对象独有的临时状态)
+[PASS] genesis-e2e-3 relay 真签名(signOnlyDeclaredInputs)后 finalize, txid 与 console 预期的 expectedTxid 一致(txid 不含 witness)
+[PASS] genesis-e2e-4 篡改 genesis 输出值后(模拟构造层被绕过), relay 真代码 validateFixedValueOutputs 必须拦下
+
+32 passed, 0 failed

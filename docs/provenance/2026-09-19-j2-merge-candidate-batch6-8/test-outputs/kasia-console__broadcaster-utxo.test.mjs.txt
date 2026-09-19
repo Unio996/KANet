@@ -1,0 +1,28 @@
+[db] path=%TEMP%\kanetui-broadcaster-utxo-test-M2la7Q\console.db source=DB_PATH
+(node:3900) ExperimentalWarning: Module mocking is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ (V8) gate closed for UNSET: no timer, zero IPC, zero DB access, exactly one disabled line with raw= (8.1514ms)
+✔ (V8) gate closed for "0": no timer, zero IPC, zero DB access, exactly one disabled line with raw= (7.8259ms)
+✔ (V8) gate closed for "true": no timer, zero IPC, zero DB access, exactly one disabled line with raw= (0.75ms)
+✔ (V8) gate closed for " 1": no timer, zero IPC, zero DB access, exactly one disabled line with raw= (0.4854ms)
+✔ (V8) gate closed for "yes": no timer, zero IPC, zero DB access, exactly one disabled line with raw= (0.4656ms)
+✔ (V8) gate closed for "": no timer, zero IPC, zero DB access, exactly one disabled line with raw= (0.4179ms)
+✔ (V8) gate closed for "01": no timer, zero IPC, zero DB access, exactly one disabled line with raw= (1.1155ms)
+✔ (V8) gate closed for "１": no timer, zero IPC, zero DB access, exactly one disabled line with raw= (0.4015ms)
+✔ (V8) gate closed for "1\n": no timer, zero IPC, zero DB access, exactly one disabled line with raw= (0.3369ms)
+✔ (V8) gate closed for "\"1\"": no timer, zero IPC, zero DB access, exactly one disabled line with raw= (0.4634ms)
+✔ (V8) gate closed for "TRUE": no timer, zero IPC, zero DB access, exactly one disabled line with raw= (0.3489ms)
+[broadcaster-utxo] cfa24444 rebalanced 1→30 (target 30) tx=deadbeefdead
+[broadcaster-utxo] tick: 1 relays, rebalanced=1 skipped=0 failed=0
+✔ (V8) gate closed for "1 ": no timer, zero IPC, zero DB access, exactly one disabled line with raw= (0.2771ms)
+[broadcaster-utxo] 17a0123d rebalanced 1→30 (target 30) tx=deadbeefdead
+✔ (V8-control) env='1': started line appears unchanged, timers are registered, and the first tick after 90 s forces split_utxo target 30 on the is_oracle relay (0.8353ms)
+✔ (V8-ondemand) ensureBroadcasterUtxos() is a caller-driven path and is NOT affected by the cron switch (0.1255ms)
+ℹ tests 14
+ℹ suites 0
+ℹ pass 14
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 482.5669

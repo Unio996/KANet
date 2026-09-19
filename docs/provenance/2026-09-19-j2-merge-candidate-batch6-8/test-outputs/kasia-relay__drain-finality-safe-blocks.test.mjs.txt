@@ -1,0 +1,59 @@
+[drain-finality-safe-blocks.test] spc_daa_index finality gate
+  ✓ tip block not yet finality-safe
+  ✓ queue untouched
+  ✓ depth 49 still unsafe
+  ✓ depth 50 exactly is safe (>= not >)
+  ✓ queue drained
+  ✓ two of three finalized (a,b)
+  ✓ c stays queued (only 2 deep)
+  ✓ tip=1001 still within reorg window, not drained
+  ✓ tip=1002 still within reorg window, not drained
+  ✓ tip=1003 still within reorg window, not drained
+  ✓ tip=1004 still within reorg window, not drained
+  ✓ tip=1005 still within reorg window, not drained
+  ✓ tip=1006 still within reorg window, not drained
+  ✓ tip=1007 still within reorg window, not drained
+  ✓ tip=1008 still within reorg window, not drained
+  ✓ tip=1009 still within reorg window, not drained
+  ✓ tip=1010 still within reorg window, not drained
+  ✓ tip=1011 still within reorg window, not drained
+  ✓ tip=1012 still within reorg window, not drained
+  ✓ tip=1013 still within reorg window, not drained
+  ✓ tip=1014 still within reorg window, not drained
+  ✓ tip=1015 still within reorg window, not drained
+  ✓ tip=1016 still within reorg window, not drained
+  ✓ tip=1017 still within reorg window, not drained
+  ✓ tip=1018 still within reorg window, not drained
+  ✓ tip=1019 still within reorg window, not drained
+  ✓ tip=1020 still within reorg window, not drained
+  ✓ tip=1021 still within reorg window, not drained
+  ✓ tip=1022 still within reorg window, not drained
+  ✓ tip=1023 still within reorg window, not drained
+  ✓ tip=1024 still within reorg window, not drained
+  ✓ tip=1025 still within reorg window, not drained
+  ✓ tip=1026 still within reorg window, not drained
+  ✓ tip=1027 still within reorg window, not drained
+  ✓ tip=1028 still within reorg window, not drained
+  ✓ tip=1029 still within reorg window, not drained
+  ✓ tip=1030 still within reorg window, not drained
+  ✓ tip=1031 still within reorg window, not drained
+  ✓ tip=1032 still within reorg window, not drained
+  ✓ tip=1033 still within reorg window, not drained
+  ✓ tip=1034 still within reorg window, not drained
+  ✓ tip=1035 still within reorg window, not drained
+  ✓ tip=1036 still within reorg window, not drained
+  ✓ tip=1037 still within reorg window, not drained
+  ✓ tip=1038 still within reorg window, not drained
+  ✓ tip=1039 still within reorg window, not drained
+  ✓ tip=1040 still within reorg window, not drained
+  ✓ tip=1041 still within reorg window, not drained
+  ✓ tip=1042 still within reorg window, not drained
+  ✓ tip=1043 still within reorg window, not drained
+  ✓ tip=1044 still within reorg window, not drained
+  ✓ tip=1045 still within reorg window, not drained
+  ✓ tip=1046 still within reorg window, not drained
+  ✓ tip=1047 still within reorg window, not drained
+  ✓ tip=1048 still within reorg window, not drained
+  ✓ tip=1049 still within reorg window, not drained
+
+[drain-finality-safe-blocks.test] ALL PASS

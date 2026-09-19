@@ -1,0 +1,21 @@
+[db] path=%TEMP%\_j2_regappend_e2e_20084.db source=DB_PATH
+[diag:step] proc.silverc.compile.bshard-artifacts ms=73 cmd=silverc ok=1 at=2026-09-19T16:49:45.061Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=49 cmd=silverc ok=1 at=2026-09-19T16:49:45.117Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=28 cmd=silverc ok=1 at=2026-09-19T16:49:45.164Z
+[PASS] ①first_bet buildRegisterAppendTxJson 真实构造成功([leaf,fee]两输入, 无held无stake)
+[PASS] ②relay真代码能反序列化+extractTxShape+validateFixedValueOutputs通过
+[PASS] ③relay真签名(fee输入)后finalize, txid与expectedTxid一致
+[PASS] ③b(账本1465节点规则镜像) first_bet真实构造的[leaf,fee]两输入交易, 每个input满足v2.0.1 RPC层sigOpCount/computeBudget一致性规则
+[PASS] ⑦first_bet 账本1455回归: fee输入0.95 KAS(storage=457,504, 通过精确mass门控; 修复前公式在此面值构造失败)构造成功——证明leftover公式确实把leaf自身的续约价值credit回预算, 不再要求fee输入单独垫付全部0.6 KAS dust
+[PASS] ⑦b first_bet 负向: 原账本1455向量fee输入0.85 KAS必须被精确mass门控拒绝, 报文含精确storage数994327(≥475,000; 节点500,000硬顶的2倍)——同时充当"85M必拒"回归
+[PASS] ⑧独立复算Σ真实inputs.utxo.amount − Σ真实outputs.value必须【恰好】等于built.netLoss(不只信内部assertImpliedFeeMatches没抛错, 从反序列化出的真实tx对象外部独立复核一遍——账本1455的核心不变量)
+[diag:step] proc.silverc.compile.bshard-artifacts ms=51 cmd=silverc ok=1 at=2026-09-19T16:49:45.232Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=30 cmd=silverc ok=1 at=2026-09-19T16:49:45.272Z
+[PASS] ④second_bet buildRegisterAppendTxJson 真实构造成功([leaf,held,fee]三输入, 无stake)
+[PASS] ⑤relay真代码能反序列化+extractTxShape+validateFixedValueOutputs通过(有held输入形状)
+[PASS] ⑥relay真签名(fee输入)后finalize, txid与expectedTxid一致(有held输入形状)
+[PASS] ⑥b(账本1465节点规则镜像) second_bet真实构造的[leaf,held,fee]三输入交易, 每个input满足v2.0.1 RPC层sigOpCount/computeBudget一致性规则
+[PASS] ⑦second_bet 账本1455回归: fee输入0.65 KAS(带找零形状, 通过精确mass门控; 修复前公式在此面值构造失败)构造成功——held自身的续约价值也被credit回预算
+[PASS] ⑧独立复算Σ真实inputs.utxo.amount(含leaf+held两个非fee输入) − Σ真实outputs.value必须【恰好】等于built.netLoss
+
+13 passed, 0 failed

@@ -1,0 +1,49 @@
+[PASS] V1 v0 1-in/2-out: storage === wasm-TN10(15101) 机械相等; mass ≥ wasm
+[PASS] V2 v0 1-in/1-out: storage === wasm-TN10(5000)
+   wasm-TN10(旧 KIP-9)=3286 非 oracle
+[PASS] V2b 2-in(150M,50M)/2-out(100M,99M) relaxed: 手算 20101−26666 ⇒ 0(wasm 旧实现 3286 只记录)
+   wasm-TN10(旧 KIP-9)=4882 非 oracle
+[PASS] V2c 3-in(70,70,60M)/3-out(60,70,69M) 一般式: 45443 − 3×floor(1e12/66,666,666)=45000 ⇒ 443(wasm 4882 只记录)
+[PASS] V3 compute 分量: 签名 +100B ⇒ size/compute +100; budget +1 ⇒ compute +100(GRAMS_PER_COMPUTE_BUDGET_UNIT); v0 sigop +1 ⇒ +1000
+[PASS] V3b v1 input 缺 computeBudget ⇒ throw(fail-loud, 不静默算低)
+[PASS] V4 covenant 输出: size +34(2+32), covenant 判据 = output.covenant 非空
+[PASS] V5 必红向量: wasm 在 testnet-12 下 panic 为真; 本地估算器仍返数值; 把估算器换成 throw 版则整条红
+   consolidate: mass=22758 compute=22758 storage=0 transient=4152 minFee=2275800
+[PASS] V6 bshard consolidate 真形(3-in v1 budget=70 两 224B redeem, 2-out): minFee=mass×100 ≤ 生产 fee 3×0.01KAS(不会误拒)
+[PASS] V7 边界 fail-loud: 输入 spk 10,100B ⇒ p=102 > max_plurality(101) ⇒ PLURALITY_OUT_OF_RANGE; spk 101B ⇒ p=2 正常算; 零值输出 ⇒ throw
+[PASS] P0 utxoPlurality: 35B P2PK p=1; 同 spk + covenant ⇒ (63+35+32)/100 ⇒ p=2; 37B+cov ⇒ 2; 出处 mod.rs:83-99
+[PASS] P-src 夹具来源自检(R7-A): 路径由 import.meta.url 相对解析、落在仓内 docs/provenance、不含 scratch 段、文件存在(clean checkout 也在)
+[PASS] P-G1-plain-to-covenant-same-value: storage === 手算 30000 (relaxed(ins_pl==1)); 输入 cov 取自 matched entry.covenantId; 强制 p=1 ⇒ 旧值 0(必红对照)
+[PASS] P-G2-covenant-to-plain: storage === 手算 0 (relaxed(outs_pl==1)); 输入 cov 取自 matched entry.covenantId; 强制 p=1 ⇒ 旧值 0(必红对照)
+[PASS] P-G3-covenant-to-covenant: storage === 手算 0 (relaxed(outs_pl==2 ∧ ins_pl==2)); 输入 cov 取自 matched entry.covenantId; 强制 p=1 ⇒ 旧值 0(必红对照)
+[PASS] P-G4-mixed-2in-2out-general-branch: storage === 手算 5404 (general(outs_pl≠1 ∧ ins_pl≠1 ∧ ¬(2,2))); 输入 cov 取自 matched entry.covenantId; 强制 p=1 ⇒ 旧值 0(relaxed 20101−26666)(必红对照)
+[PASS] P-G5-one-plain-in-two-covenant-outs: storage === 手算 75404 (relaxed(ins_pl==1)); 输入 cov 取自 matched entry.covenantId; 强制 p=1 ⇒ 旧值 15101(必红对照)
+[PASS] P-NWT oracle 三形(NWT 从源独立给数): cov→cov 200M→100M = 20000; cov→2plain 200M→(100M,99M) = 101; plain→cov 100M = 30000
+[PASS] P-input-cov-source: 输入 covenant 只从 matched entry 取——同一 tx 花费一个"看起来像 covenant"的 P2SH 但 entry 无 covenantId ⇒ p=1; entry 有 ⇒ p=2
+   genesis: storage p=45101 (p1 15101) mass=45101
+   consolidate: storage p=0 (p1 0) compute=22792 mass=22792 minFee=2279200
+[PASS] P-prod-shapes: genesis(plain in → cov out + change) 与 consolidate(cov in ×2 + fee in → cov out + change) 的 storage 用 p 算且 ≥ p=1 值
+[PASS] V8a observe · 正常费(3-in consolidate 形, fee 3M ≥ minFee 2.28M): 不 throw, 日志 [mass-floor:observe] would_reject=false 含 compute/storage/transient/mass_ub/minFee/actualFee
+[PASS] V8b observe · 低费(fee 100k < minFee): 【不 throw】(observe 只 warn), 日志 would_reject=true
+[PASS] V8c 对照 · 不传 networkId(legacy caller) ⇒ 无 mass 检查、无 observe 行(行为与改前一致)
+[PASS] D1 compute 主导: v1 budget=70 ×3 输入(21000 grams) > storage(0) > transient
+[PASS] D2 storage 主导: 1 KAS 拆 8 个 0.001 KAS 小输出(每个 C/v = 1e7) ⇒ storage 8e7 − 1e4 ≫ compute
+[PASS] D3 transient 主导: v0 sigop=0 + 6KB 签名脚本 + 单大额输出 ⇒ transient(size×4) > compute(size + 370)
+[PASS] D4 sigop 敏感(v0): sigop 0→5 ⇒ compute +5000; 其它分量不变
+[PASS] D5 budget 敏感(v1): budget 0→70 ⇒ compute +7000; v1 size 比 v0 多 2B/输入
+[PASS] V9a 权威 mass ≤ 本地上界 ⇒ 日志 ub_ok=true; > ⇒ ub_ok=false 计 violation; 无 mass ⇒ inconclusive 计数(不算通过)
+[PASS] V9b hook 不改 submit 语义: 返回值原样; getMempoolEntry 抛错 ⇒ inconclusive 且 submit 仍成功返回
+[PASS] V10a submit 抛错(网络/mempool 拒) ⇒ Map 条目被 finally 清, size 不增
+[PASS] V10b cap: 连续 300 条不 submit 的记录 ⇒ Map 上限 256, 逐出最旧且 evicted 计数
+[PASS] V11a parseRejectMass: live 真文本 ⇒ {minFeeAuth 1636200, authoritativeMass 16362}(M/K=100 = MIN_SOMPI_PER_MASS); 非拒费文本 ⇒ null
+[PASS] V11b submit 抛拒费文本 ⇒ 记 source=reject authoritative_mass=K ub_ok 照算(auth_from_reject +1), 原错误原样重抛, Map 仍清; 抛非拒费文本 ⇒ inconclusive +1
+[PASS] 常量表 = 7b1e18cc 值且冻结
+
+✅ tx-mass-ub: 35 PASS / 0 FAIL
+
+[stderr]
+[mass-floor:observe:auth] site=V10a txid=f672fdec8f9f4cf72fb69cf7eb1965e776ea3a8188875d7630c24d4794f0e494 source=reject authoritative_mass=null ub_ok=inconclusive mass_ub=22758 reason=reject text has no mass: mempool reject inconclusive_total=2
+[mass-floor:observe:auth] site=V10a txid=f672fdec8f9f4cf72fb69cf7eb1965e776ea3a8188875d7630c24d4794f0e494 source=reject authoritative_mass=null ub_ok=inconclusive mass_ub=22758 reason=reject text has no mass: mempool reject inconclusive_total=3
+[mass-floor:observe:auth] site=V10a txid=f672fdec8f9f4cf72fb69cf7eb1965e776ea3a8188875d7630c24d4794f0e494 source=reject authoritative_mass=null ub_ok=inconclusive mass_ub=22758 reason=reject text has no mass: mempool reject inconclusive_total=4
+[mass-floor:observe:auth] site=V10a txid=f672fdec8f9f4cf72fb69cf7eb1965e776ea3a8188875d7630c24d4794f0e494 source=reject authoritative_mass=null ub_ok=inconclusive mass_ub=22758 reason=reject text has no mass: mempool reject inconclusive_total=5
+[mass-floor:observe:auth] site=V10a txid=f672fdec8f9f4cf72fb69cf7eb1965e776ea3a8188875d7630c24d4794f0e494 source=reject authoritative_mass=null ub_ok=inconclusive mass_ub=22758 reason=reject text has no mass: mempool reject inconclusive_total=6

@@ -1,0 +1,22 @@
+  ✅ covenant tx built: id a42fb7101e97, out[0] CovenantBinding covId == c0c0c0c0
+  ✅ (A) 往返 id_before === id_after (a42fb7101e97)
+  ✅ (A) 往返后 out[0] CovenantBinding(0, covId) 仍在
+  ✅ (A) 往返后两输入 scriptSig 原样(covenant no-sig 押 redeem + P2PK 真签)
+  ✅ (A) safe JSON 带输入 utxo 上下文(含 covenantId)——同字节重播不丢 covenant 上下文
+  ✅ (A) 改一字节: 不 finalize id 照旧(陷阱), finalize 后 id 变 (3c0a414d3de0)
+  ✅ replay covenant tx: 正常(fee 在 feeAddr、covenant 在它自己的 p2shAddr, 两者分别真实核对, 都在) → 同字节提交 1 笔, txId == 记录值
+  ✅ replay covenant tx: mempool 已有 → 幂等接受, 零提交
+  ✅ replay covenant tx: 续约输出已在 P2SH 地址 UTXO 集 → 幂等接受, 零提交
+  ✅ replay covenant tx: 改字节 → 拒(finalize 后 txid 不等), 零提交
+  ✅ replay covenant tx: fee 输入不在它自己地址的可花集 → inputs_spent, 零提交(console 才允许重建)
+  ✅ 账本1468回归·真阳性: covenant 输入真的不在它自己 P2SH 地址的可花集(真被花了) → 依然正确判 inputs_spent, 零提交——修复没有把这条真实检测能力弄丢
+  ✅ 账本1468回归·前提核实: covOutpoint 确实不在 feeAddr 的 UTXO 集里(不是巧合通过)
+  ✅ 账本1468回归·真阴性: covenant 输入只在它自己的 p2shAddr(不在 feeAddr)也能被正确核对为"仍未花" → 不再误判 inputs_spent, 正常重播
+  ✅ replay covenant tx: 往返失败(反序列化抛) → replay_bad_json, 零提交(console 侧 hold 人工)
+  ✅ replay covenant tx: submit 抛错且 mempool 无 → replay_rejected(console 不重建)
+  ✅ harness flip arm went red as required
+
+✅ all covenant round-trip / replay vectors passed
+
+[stderr]
+  ❌ harness-flip (expect FAIL)

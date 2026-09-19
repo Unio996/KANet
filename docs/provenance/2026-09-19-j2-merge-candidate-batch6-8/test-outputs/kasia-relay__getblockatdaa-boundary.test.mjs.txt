@@ -1,0 +1,15 @@
+=== (a) getBlockAtDaa boundary (resolved-flag + throw) ===
+  ✓ Δ=49999 → return endBlock(daa==deadline)
+  ✓ Δ=50000 → throw CAP_NO_CROSS
+  ✓ Δ=30000 (窗口内) → return 正确 crossing
+  ✓ genesis 市场(deadline 老于链) → return 最老块 不 throw
+  ✓ future deadline → throw FUTURE(链没到)
+
+=== (b) settler guard race-margin (Δ > MAX_WALK − MARGIN → refund) ===
+  ✓ Δ=49901 → guard refund (>49900)
+  ✓ Δ=50000 → guard refund (边界带退)
+  ✓ Δ=49900 → 不退(==阈值, 走采样)
+  ✓ Δ=30000 → 不退(安全, 走采样)
+  ✓ 双封不漏: guard 阈值 49900 < getBlockAtDaa 安全上限 49999 (有重叠余量)
+
+=== boundary 测: 10 PASS / 0 FAIL ===
