@@ -1,4 +1,5 @@
 > **Status**: CURRENT（草稿 v0.1，2026-09-19，J2；批9 落码前的验收清单，供 Bettor/NWT 审；不是实现）
+> **SUPERSEDED-NOTE（2026-09-19）**：批9 范围（四步）、C1 升级、接线设计以 `2026-09-19-j2-proto-v0-batch9-wiring-design-and-checklist-v0.2.md` 为准；本文保留作历史，其各条已被 v0.2 继承/细化。
 
 # 原型 v0 结算批9（驱动接线）验收清单草稿 v0.1
 
