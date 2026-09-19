@@ -1,8 +1,8 @@
-> **Status**: CURRENT（草稿 v0.3.2，2026-09-19，J2；批9 接线设计 + 验收清单；v0.3.1 之上加 **§18：9-1 设计细化**——S10 来源表逐格核对、NWT 9-0 审转来的 9-1 清单项、9-1 文件清单、以及一个**基线依赖**（§18.0）；本文不含任何代码改动。v0.2→v0.3 见 §16，v0.3→v0.3.1 见 §17，v0.3.1→v0.3.2 见 §18）
+> **Status**: CURRENT（草稿 v0.3.3，2026-09-20，J2；**v0.3.2 之上加 §19：9-2 设计细化**（9-2a 出口分闸的判据矩阵 / 锚点 / commit 形状 / 变异，两处对 §3.8 的修正提案；9-2b 清单汇总与落码三笔拆法）；此前 v0.3.2：批9 接线设计 + 验收清单；v0.3.1 之上加 **§18：9-1 设计细化**——S10 来源表逐格核对、NWT 9-0 审转来的 9-1 清单项、9-1 文件清单、以及一个**基线依赖**（§18.0）；本文不含任何代码改动。v0.2→v0.3 见 §16，v0.3→v0.3.1 见 §17，v0.3.1→v0.3.2 见 §18）
 
-# 原型 v0 结算批9（驱动接线）设计与验收清单 v0.3.2
+# 原型 v0 结算批9（驱动接线）设计与验收清单 v0.3.3
 
-> 文件名沿用 `…-v0.2.md`（账本 1527/1528/1529 与 NWT 审稿均以此路径引用，改名会断引用）；**正文即 v0.3.2**，v0.2→v0.3 差异见 §16，v0.3→v0.3.1 见 §17，v0.3.1→v0.3.2 见 §18。
+> 文件名沿用 `…-v0.2.md`（账本 1527/1528/1529 与 NWT 审稿均以此路径引用，改名会断引用）；**正文即 v0.3.3**，v0.2→v0.3 差异见 §16，v0.3→v0.3.1 见 §17，v0.3.1→v0.3.2 见 §18，v0.3.2→v0.3.3 见 §19。
 
 取代 `2026-09-19-j2-proto-v0-batch9-driver-wiring-acceptance-checklist-v0.1.md` 中关于批9范围与接线的部分（v0.1 保留作历史，其 C1/C2/C3、pmt、SLA、NO-TX-NO-STATE 各条本文继承并细化）。
 依据：Bettor 账本 1494/1520/1523/1524 与本轮裁定 ③、Codex 对 C1 的接受条件、NWT 批3–7 审、代码现状盘点（§1，全部可 `grep` 复核）。D-021 合规：无真实地址/余额/私钥。
@@ -383,3 +383,65 @@ v0.1 的 §1–§7 各条本文均继承；差异：① 范围收窄为四步；
 **不动**：`utxo-facts.mjs`（9-0 已合入）、`relay.mjs`、`proto-relay-ipc.mjs`（**不改它 ⇒ M0a 摘要不变**）、迁移、env、驱动开关。9-1 仍**无运行时效果**（无任何调用方，驱动分支是 9-2b）。
 
 **仍开放（v0.3.2）**：§18.0 基线依赖（Bettor 裁）；驱动层"每步总预算"的具体数值（§18.2.3，建议 = tick 间隔的一半，9-2b 定）；第 2 格的 covenantId 从 `prepared_tx_json` 取还是用 `kaspa.covenantId(feeOutpoint, outputs)` 独立重算——两者都可，倾向**两者都做并要求相等**（多一个独立来源，成本≈0），待 NWT 审 9-1 时定。
+
+## 19. v0.3.2 → v0.3.3：9-2 设计细化（只文档；Bettor 2026-09-20 流程：NWT 一轮只报 MUST，SHOULD 记票）
+
+依据：J2 读码（行号取自主线 `ff86ce89` 的 `proto-relay-ipc.mjs` / `proto-relay-ipc.test.mjs`）、账本 1563/1566/1567/1568/1572/1574/1576/1584/1585/1588/1589。**本节不含代码。** 9-0、9-1、F5 已在主线；§18.0 基线依赖已解（批 6–8 + C1/C2/C3 已在主线，9-1 已合入）。§18.3 两个"仍开放"：第 2 格 covenantId 双来源——**9-1 D 笔已两者都做并要求相等**（`proto-settlement-pointers.mjs` 用 `kaspa.covenantId` 独立重算），关闭；每步总预算——见 19.3。
+
+### 19.1 9-2a：出口分闸（单独一个 commit，先于任何驱动代码）
+
+**现状锚点**：`sendProtoCommand`（`proto-relay-ipc.mjs:69-98`）现闸在第 90 行 `mode === 'write' && PROTO_DRIVER_ENABLED !== '1'` ⇒ 抛 `proto_driver_disabled`；发送在第 94/97 行 `{ ...payload, type }`。既有用例：③（`proto-relay-ipc.test.mjs:81`，无 `intent_key` 的 write 在旧开关未设时抛 `proto_driver_disabled`、三条 read 不被挡）与 ④（`:104`，write 恰只有 `covenant_broadcast`）是**红旗锚点**，9-2a 后须原样通过、**一字不改**。
+
+**判据（覆盖 §3.8 文字，矩阵为准）**——write 命令，先取快照 `const out = { ...payload, type }`，闸只判 `out.intent_key`，发送的也是 `out`：
+
+| `out.intent_key` 类别 | PDE=0 PSDE=0 | PDE=1 PSDE=0 | PDE=0 PSDE=1 | PDE=1 PSDE=1 |
+|---|---|---|---|---|
+| A 合法 `settle:` 键（S9 严格格式） | 拒 `proto_settlement_driver_disabled` | 拒 `proto_settlement_driver_disabled` | **放行** | **放行** |
+| B `settle:` 开头但格式不合法（含 withdraw / reclaim / ticket 主体、配对错、大写 UUID…） | 拒 `proto_settlement_intent_key_invalid` | 同左 | 同左 | 同左 |
+| C 其它（缺失 / `genesis:…` / `proto-bet:…` / `xsettle:` / `Settle:` / `settle` 无冒号 / 首部空白…） | 拒 `proto_driver_disabled` | **放行** | 拒 `proto_driver_disabled` | **放行** |
+
+read 命令四格全放行（账本 1441）。PDE = `PROTO_DRIVER_ENABLED`，PSDE = `PROTO_SETTLEMENT_DRIVER_ENABLED`，均只认字面 `'1'`、每次调用读 `process.env`（同握手开关约定）。三个拒绝串互不为子串（测试按 `assert` 精确匹配，防"两闸互换"看不出）。
+
+**S9 严格格式**（在出口内联，见发现 1）：`^settle:(market|claim):<小写 UUID>:<step>(#<n>)?$`；`step` 与 `subject_type` 配对 = `seal|resolve`⇒`market`，`convert_to_claim|claim_draw`⇒`claim`；`<n>` ≥ 2、十进制、无前导零；无 `m` 标志（JS `$` 不匹配末尾换行，加 `…\n` 向量守）。
+
+**发现 1（修正 §3.8 一句话，MUST 请核）——S9 常量不要从 `proto-settlement-intent.mjs` 导入。** ① `STEP_SUBJECT_TYPE` 在该文件是未导出的 `const`（`:33`）；② 已导出的 `SETTLEMENT_SUBJECT_TYPES` / `SETTLEMENT_STEPS` 含 `ticket` / `withdraw` / `reclaim`，批 9 要在出口拒它们，所以必须再取子集；③ 更要紧：`proto-relay-ipc.mjs` 是 M0a `content_digest` 钉住的 TCB，把判据绑到一个**不受摘要保护、可独立改动**的模块 = 改那个常量表就静默改了出口判据而摘要不变。（实测：无 `DB_PATH` 时 `proto-relay-ipc` 与 `proto-settlement-intent` 都因 `db/client.js` 被拒——**出口本来就经 `proto-relay-guard` 拖着 DB 客户端，所以这不是"新增开默认库风险"，不夸大。）**修法**：常量与校验函数**内联进 `proto-relay-ipc.mjs`**（摘要覆盖、零新 import），再加**漂移测试**对 `proto-settlement-intent` 的导出核对：`settlementIntentKeyFor` 对批 9 四个（主体, 步骤）配对产出的键（含 `#2`/`#10`）全部通过出口校验；`withdraw` / `reclaim` / `ticket` 产出的键被拒。
+
+**发现 2（SHOULD，S9-b，NWT 裁）——非字符串 `intent_key` 出口应一律拒，不走旧开关。** 出口按 `typeof === 'string'` 判类别，`new String('settle:market:…')`（§3.8 列为"走旧开关"）在 IPC 上经 `fork` 默认 JSON 序列化（`relay-manager.js` 未设 `serialization`）变成**原始字符串**，而 relay 侧 `commands.mjs` 的 `intent_key: 'string'` 类型校验会通过——即"出口判为 C 类、线上却是 A 类字面"，PDE=1、PSDE=0 时可发出一个未过 S9 的 `settle:` 标签。修法（3 行）：write 命令 `out` 含自有 `intent_key` 且非原始 string ⇒ 拒（新串 `proto_intent_key_not_string`，四开关格同）。影响面：现有 producer（`genesis:` / `proto-bet:` / `settle:`，见 `marketIntentKeyFor` / `betIntentKeyFor` / `settlementIntentKeyFor`）全传原始 string ⇒ 无行为变化；§3.8 里"数组 / String 对象"两行由"走旧开关"改为"无条件拒"。**若 NWT 不采纳，退路**：按 `String(key)` 判类别（与线上值一致）。
+
+**commit 形状（单一 commit，不含任何驱动代码 / 调用方）**：`proto-relay-ipc.mjs`（闸 + 校验，无新 import）；`scripts/m0a-exception-manifest.json` 的 `PVF-proto-relay-ipc-funnel.content_digest` 同步（`review_ref` 仍 `4e34e9c9`，NWT 审后另开 `chore(m0a)` 单独更新，同 `812f56ee` 先例）；`proto-relay-ipc.test.mjs` 只**追加**（既有 ①–⑥b 与 9-0 的 5 项一字不改，`git diff` 旧行无 `-`）；`kanet.env.example` 加一行注释掉的 `PROTO_SETTLEMENT_DRIVER_ENABLED`（不写 = 关）。**不动**：`relay.mjs` / `commands.mjs`（relay 侧无改动 ⇒ 无需重启 relay）、迁移、任何 env 文件、驱动。
+
+**测试**：矩阵 3 类 × 4 格 × 向量（A：四个批 9 配对 ×（无后缀 / `#2` / `#10`）；B：`withdraw`、`reclaim`、`ticket` 主体、配对错、大写 UUID、非 UUID、`#1` / `#0` / `#01` / `#a` / `#٢`、尾随 `\n`、空 id、裸 `settle:`、多冒号；C：缺失、`genesis:` / `proto-bet:`、`xsettle:`、`Settle:`、`settle`、首部空白、空串）；快照三向量（getter 每读换值 / Proxy 每读换值 / 原型继承的 `intent_key` 不被复制）断言"闸判定值 == `_sendCommandAsyncForTest` 收到的值"；read 四格；S9-b 向量（String 对象 / 数组 / 数字 / 对象）；漂移测试；`m0a-lint` 全套通过。
+
+**变异（J2 自做 ≥14；NWT 自己 worktree 再做）**：判据只读旧开关 / PDE↔PSDE 互换 / `startsWith` 改 `includes` 或忽略大小写 / 拆掉快照（闸另读一次 `payload.intent_key`）/ 去掉 S9 校验 / B 类回落旧开关 / A 类也要求 PDE（AND）/ read 被闸挡 / 三个拒绝串两两互换 / 配对表去掉 / 放行 `withdraw` / `#1` 或前导零放行 / 大写 UUID 放行 / 去掉 S9-b。
+
+**诚实边界（沿用 §3.8）**：按标签不按内容——PDE=1 时标成 `proto-bet:…` 的结算形状交易仍放行；防线 = 驱动是唯一调用方 + S9 + §11.1 源码扫描。
+
+### 19.2 9-2b 清单（账本汇总；重复出现的合并；"J2 9 项 + Bettor 1 项"的精确切分我无法从账本复原，全部列出，请 Bettor 核有无漏）
+
+| # | 项 | 来源 | 验收 |
+|---|---|---|---|
+| 1 | F3-1：`covenantId` 抛错路径的 probe `TransactionOutput` 释放 | 1584 | 注入会抛的 `covenantId`，断言创建数 == 释放数、报 `pointer_covenant_inconsistent`、`genesisId=null`（变异 i9 红） |
+| 2 | 大写 txid：pointers → C1 → withFeeParent → builder 边界统一 `toLowerCase`（一处） | 1572/1576 | DB 大写 txid ⇒ 规范化后通过或大声失败，不静默错花 |
+| 3 | IPC 超时一致性：真实 wrapper 发出的命令超时 == 声明的 `ipcTimeoutMs`（≥15000） | 1568 | 抓真实 wrapper 的发送实参 |
+| 4 | `unrecognized_error` 报警带 `err.name` / 消息前缀 | 1568 | 报警负载断言 |
+| 5 | 意图终态清分级器 key（失败后被放弃 / 取消的 key 不常驻） | 1568 | 终态后 `states` 无该 key |
+| 6 | E-3：四个 builder 调用点的 `chainParents` 只能来自 `verifyStepInputsOnChain` / `withFeeParent` 结果，禁字面量；`withFeeParent` 可要求候选 ∈ `fee.candidates` | 1563 | 共享扫描器 + 变异（字面量 `chainParents` ⇒ 红） |
+| 7 | D-3：`pointer_covenant_inconsistent` 承担三种语义，报警别只按 `code` 分处理（给 `.kind` 枚举或按 `.detail`） | 1566 | 三语义各一报警断言 |
+| 8 | 登记事件名 `fee_candidate_out_of_range_skipped` | 1567 | 事件表 / 文档登记 |
+| 9 | 驱动是 F1-2 / E-4 守卫的**第一个真实调用方**：非测试源码不得引用 `verifyStepInputsOnChainWithTimers` 与夹具模块的扫描须仍绿 | 1568/1563 | 扫描随接线跑 |
+| 10 | 临时 DB bootstrap 清理：既有 c1 / chain-checks 测试里"起临时 DB 只为过 import 链"已多余（F3 后可无 DB 直接 import） | 1574/1584 | 删后测试仍绿 + 无 `DB_PATH` 子进程 import 断言 |
+| 11 | 共享扫描器提到两包可引用位置（如 `shared/test-fixtures/`），relay `utxo-facts.test.mjs:73` 那份简单正则版改 import | 1588 | relay 测试 import 共享版且原断言仍红 / 绿 |
+| 12 | F5-1：扫描器自测补两条对照——`const s = "a"; // <引用>` 不报、"一行含未闭合引号、下一行 `// <引用>`" 不报 | 1589 | 两条向量 |
+| 13 | wasm：getter 隐式包装（`tx.inputs` / `outputs` 元素、`previousOutpoint`、`covenant`、`scriptPublicKey`）靠 `FinalizationRegistry`，接线后盯 `wasmBytes` | 1584 | 见 19.3(b) |
+| 14 | 驱动按 `classifyC1Error` 的类处理；`chain_parents_mismatch` ⇒ `programming_error` 不重试（E-2 已在 F1 落）；`unrecognized_error` 不当瞬时故障 | 1563/1568 | 每类一个驱动行为断言 |
+
+### 19.3 9-2b 补充决定（两条，其余按 §3–§12 原设计）
+
+(a) **每步总预算**：取 **tick 间隔的一半**（§18.3 建议），且不低于单次形态 O 的 13 s；超出 ⇒ 本 tick 放弃、零状态推进（NO TX NO STATE）、下一 tick 重评估，**绝不降级跳过 C1 任一检查**。具体毫秒值在 9-2b 落码时按 `startProtoSettlementDriver` 的 tick 常量定，写进测试。
+(b) **wasm 观察的可验收化**：9-4 simnet 端到端每步前后记 `wasmBytes`（console 现有的 wasm 线性内存采样口径：盯 wasm 线性内存而非进程私有内存），证据入 provenance；先出基线再定阈值，**不在设计里编一个数**。9-2b 代码侧：驱动内每个 `new Transaction` / `new TransactionOutput` 必须在 `finally` 释放，沿用 F3 D-1 的"创建数 == 释放数"计数夹具。
+
+### 19.4 落码顺序与门（更新 §13）
+
+9-2a（单 commit）→ NWT 审（一轮，只报 MUST）→ `chore(m0a)` 更新 `review_ref` → 9-2b 分三笔提交给 Bettor 推：**(i)** 清理 + F3-1（清单 1、10、11、12：纯测试 / 小改，无运行时效果）；**(ii)** 驱动核心（纯函数 + 注入 `sendCmd`：每步顺序 1–9、失败策略、`markSettlementLanded`、`pmtEvidence`、SLA / `prepared_stale`、重启恢复、清单 2–9、14；**关闭态零 IPC**）；**(iii)** 接线（`startProtoSettlementDriver` + `isProtoSettlementDriverEnabled` 8 态 + 启动 / 关闭日志 + env 示例）。(ii)(iii) 依赖 9-2a 已合。预期新文件行数按 §18.3 的教训偏大估（驱动核心 ~450，测试 ~1200）。**均无运行时效果，不改 relay，不启用任何开关。**
+
+**仍开放**：S9-b 是否采纳（19.1 发现 2，NWT 裁）；每步总预算毫秒值（9-2b 定）；`wasmBytes` 阈值（9-4 基线后定）。
