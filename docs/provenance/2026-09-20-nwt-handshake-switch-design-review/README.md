@@ -4,13 +4,13 @@
 
 方法：独立检出（`D:\kanet-nwt-cand`，`52f6133d`）逐处核设计稿 §1 的每一条"现状"与 §2.2 的三个落点；对 relay（`kasia-relay/src`）与 console（`kasia-console/src`）、`agent-mind` 全仓枚举与"握手接受"相关的调用点与消费者；不改任何代码、不碰任何生产进程。D-021：本页只写开关设计层面的事实（调用点、位置、语义、测试），不写攻击路径与量级。
 
-## 结论：**方向 GREEN；有 1 条 MUST（设计稿漏了第四个调用点）+ 4 条 SHOULD，出 v0.2 后再审。**
+## 结论：**方向 GREEN；有 1 条 MUST（设计稿漏了第三个调用点）+ 4 条 SHOULD，出 v0.2 后再审。**
 
-设计稿 §1 表里我核过的几条现状——实时路径的 step 结构、追赶路径第 1 段、`KANET_CATCHUP_COMM` 先例、`relay_mode` 取值——**都成立**（我没有逐个核行号；relay-manager 的 env 透传与主网 `HANDSHAKE ACCEPTED` 0 行两条我没有重核，沿用 Bettor 的读数）。闸的位置与"漏洞 #6 fix"语义**一致**。问题是**落点不完整**：relay 里有**第四条**会自动接受入站握手的代码路径，三个落点都不覆盖它——开关落地后这条路径仍然开着。
+设计稿 §1 表里我核过的几条现状——实时路径的 step 结构、追赶路径第 1 段、`KANET_CATCHUP_COMM` 先例、`relay_mode` 取值——**都成立**（我没有逐个核行号；relay-manager 的 env 透传与主网 `HANDSHAKE ACCEPTED` 0 行两条我没有重核，沿用 Bettor 的读数）。闸的位置与"漏洞 #6 fix"语义**一致**。问题是**落点不完整**：relay 里有**第三条**会自动接受入站握手的代码路径（另两条是实时与追赶），设计稿的三个落点（启动行 / 实时 / 追赶）都不覆盖它——开关落地后这条路径仍然开着。
 
 ## 一、MUST
 
-### M-H1（MUST）`relay.mjs` 的 `doAcceptHandshake` 是第四个自动接受路径，设计稿没有覆盖
+### M-H1（MUST）`relay.mjs` 的 `doAcceptHandshake` 是第三个自动接受调用点，设计稿没有覆盖
 `acceptHandshake` 在 relay 里有**三个调用点**，设计稿只列了 rpc-listener 里的两个：
 
 | # | 位置 | 触发 | 设计稿是否覆盖 |
@@ -21,7 +21,7 @@
 
 `poll()` 什么时候在跑：`relay.mjs:300-311`——`RELAY_MODE === "rpc"` 时调 `startRpcListener()`，**它失败（`.catch`）就回落到 `setInterval(poll, POLL_MS)`**（"Falling back to indexer mode..."）；非 rpc 模式则**一直**是 `poll`。`RELAY_MODE` 的取值：relay 进程内默认 `"indexer"`（`relay.mjs:10`）；console 拉起 relay 时取 `getConfig('relay_mode') || process.env.RELAY_MODE || 'rpc'`（`relay-manager.js:224`）——所以主网默认 rpc，但**两种情形下 `poll()` 会跑**：① rpc 监听器启动失败的回落（例如节点在 relay 启动时不可达——恰是无人值守开机的一种常见时序）；② `config_entries.relay_mode` 被设成 `indexer`。`poll()` 走 `getConversations()`（Kasia 索引器）取会话，对 `pending_incoming` 的对端调 `doAcceptHandshake`：**自带 in-memory 与 console 状态两级去重、自己 `sendKaspa`，与新开关无关联**。
 **后果**：开关落地后，只要 relay 处于回落 / 索引器模式，入站握手照样被自动接受——而且设计稿的验收 V6（"DISABLED 行数 == relay 子进程数"）**恰好发现不了它**：启动行如果打在 `rpc-listener.mjs`（"protocol support 那行附近"），走回落 / 索引器模式的 relay 根本不会打这一行，`grep -c` 反而变少——变成"少了几个 relay"而不是"哪条路径没关"。
-**修法（v0.2）**：① 第 4 个落点：`doAcceptHandshake` 入口用同一个纯函数判定，关闭态打一行 `HANDSHAKE auto-accept disabled (indexer/poll path) — left pending for <last12>` 并 return（不去重、不 `sendKaspa`、不写 `_acceptedPeers`）；② **启动行改打在 `relay.mjs`（所有模式的共同入口）**，而不是只在 `rpc-listener.mjs`，使 V6 的计数对每个 relay 进程都成立（回落 / 索引器模式也有一行）；③ **加一条源码扫描测试**（同 D26-scan / E-4 的思路，用 F2-1 的共享扫描器）：`kasia-relay/src` 下**每一处** `acceptHandshake(` 调用都必须位于经判定函数保护的函数里，否则红——这样**第五个**调用点不会再悄悄出现（前四个是我现在人工枚举的，不是机器保证的）；④ V 表加 V2c：`RELAY_MODE=indexer` 或 rpc 回落时关闭态 `poll()` 零 `acceptHandshake` / 零 `sendKaspa`。
+**修法（v0.2）**：① 第 4 个落点：`doAcceptHandshake` 入口用同一个纯函数判定，关闭态打一行 `HANDSHAKE auto-accept disabled (indexer/poll path) — left pending for <last12>` 并 return（不去重、不 `sendKaspa`、不写 `_acceptedPeers`）；② **启动行改打在 `relay.mjs`（所有模式的共同入口）**，而不是只在 `rpc-listener.mjs`，使 V6 的计数对每个 relay 进程都成立（回落 / 索引器模式也有一行）；③ **加一条源码扫描测试**（同 D26-scan / E-4 的思路，用 F2-1 的共享扫描器）：`kasia-relay/src` 下**每一处** `acceptHandshake(` 调用都必须位于经判定函数保护的函数里，否则红——这样**第五个**调用点不会再悄悄出现（现有三个调用点是我人工枚举的，不是机器保证的）；④ V 表加 V2c：`RELAY_MODE=indexer` 或 rpc 回落时关闭态 `poll()` 零 `acceptHandshake` / 零 `sendKaspa`。
 
 ## 二、你的五个审点
 
