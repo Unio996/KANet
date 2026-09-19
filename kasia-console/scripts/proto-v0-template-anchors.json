@@ -48,8 +48,8 @@
       "_source": "docs/provenance/2026-09-14-j2-bet-mint-stepB-register-append-mass-fee-estimate/README.md + Bettor 种子面值核算(2026-09-14)——注意 requiredFee 会随 fee input 实际面值/找零大小小幅浮动(迭代收敛值，非固定常数)，witness 精确编码/tok_prefix-suffix 长度未最终定案，见该 provenance 已知限制"
     },
     "market_seal": {
-      "cap": "100000000",
-      "_source": "账本1491/实现计划v0.4(docs/2026-09-16-j2-proto-v0-settlement-implementation-plan-v0.1.md) — 沿用register_append同量级cap(1.0 KAS)：NWT simnet真实测得convert_to_rootclose(封盘)的requiredFee约39,678,700 sompi(设计文档§0.4)、节点侧storageMass约385,410(§0.14b)，与register_append同数量级，暂借同一个cap，未来若有独立的market_seal专属mass/fee估算provenance应替换为该文档的具体数字"
+      "cap": "52000000",
+      "_source": "2026-09-19 Bettor裁定按NWT批3独立验证F3'推导(docs/provenance/2026-09-19-nwt-batch3-independent-verify/batch4/README.md): market_seal节点实付34,386,000 sompi; 本地wasm calculateTransactionMass=输入plurality恒1的storage公式(已对wasm函数直接验, v=50M/70M/95M/100M四点逐位相等), requiredFee只随fee UTXO面值v单调增, v<=1.0 KAS时最大34,571,600, x1.5取整=52,000,000(0.52 KAS)。🔴失效条件: 仅对seal_count=2且布局[leaf,held,fee]成立; fee规则(computeRequiredFeeSompiOrThrow/本地wasm mass口径)一改必须重推。relay侧SIGNED_INPUT_CEILING_SOMPI(1.0 KAS)硬顶不动。原借用register_append的1.0 KAS cap已替换。"
     },
     "close_commit": {
       "cap": "100000000",

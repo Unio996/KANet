@@ -159,7 +159,7 @@ await t('⑥bet_mint(register_append) pending intent 经 runProtoDriverTick 真�
   ensureBetIntent({ betId: betId1, step: 'append' });
   const sendCmd = async (relayId, cmd) => {
     if (cmd.type === 'get_address_utxos') {
-      return { ok: true, utxos: [{ outpoint: { transactionId: market1Row.shardleaf_txid, index: 0 }, amount: '95000000' }] }; // 账本1462: 0.95 KAS, 覆盖首笔下注≈0.82 KAS最小可行门槛(原100 KAS假面值已超SIGNED_INPUT_CEILING_SOMPI被过滤)
+      return { ok: true, utxos: [{ outpoint: { transactionId: market1Row.shardleaf_txid, index: 0 }, amount: '95000000' }] }; // 账本1462: 0.95 KAS, 高于首笔下注最小可行区间(约0.925~0.93 KAS, 2026-09-19精确mass门控订正; 原≈0.82 KAS来自旧本地估算)(原100 KAS假面值已超SIGNED_INPUT_CEILING_SOMPI被过滤)
     }
     if (cmd.type === 'covenant_broadcast') return { ok: true, txId: cmd.expected_txid, intent_key: cmd.intent_key };
     if (cmd.type === 'check_utxo_landed') return { ok: true, landed: false, depth: null };
@@ -176,7 +176,7 @@ await t('⑦bet_mint(register_append) submitted intent landed 后, proto_bets.st
   const { runProtoDriverTick } = await import('./proto-driver.mjs');
   const intentBefore = getBetIntent(`proto-bet:${betId1}:append`);
   const sendCmd = async (relayId, cmd) => {
-    if (cmd.type === 'get_address_utxos') return { ok: true, utxos: [{ outpoint: { transactionId: market1Row.shardleaf_txid, index: 0 }, amount: '95000000' }] }; // 账本1462: 0.95 KAS, 覆盖首笔下注≈0.82 KAS最小可行门槛(原100 KAS假面值已超SIGNED_INPUT_CEILING_SOMPI被过滤)
+    if (cmd.type === 'get_address_utxos') return { ok: true, utxos: [{ outpoint: { transactionId: market1Row.shardleaf_txid, index: 0 }, amount: '95000000' }] }; // 账本1462: 0.95 KAS, 高于首笔下注最小可行区间(约0.925~0.93 KAS, 2026-09-19精确mass门控订正; 原≈0.82 KAS来自旧本地估算)(原100 KAS假面值已超SIGNED_INPUT_CEILING_SOMPI被过滤)
     if (cmd.type === 'covenant_broadcast') return { ok: true, txId: cmd.expected_txid, intent_key: cmd.intent_key };
     if (cmd.type === 'check_utxo_landed') return { ok: true, landed: true, depth: 25 };
     throw new Error(`unexpected cmd ${cmd.type}`);

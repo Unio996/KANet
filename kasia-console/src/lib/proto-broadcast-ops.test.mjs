@@ -166,7 +166,7 @@ await t('⑥covenant_broadcast 命令本身失败(relay 拒绝) ⇒ 返回 {erro
           return { ok: true, utxos: [{ outpoint: { transactionId: heldOutpoint.txid, index: 2 }, amount: '20000000' }] };
         }
         // 账本1462修复后 SIGNED_INPUT_CEILING_SOMPI(1.0 KAS)会预先过滤面值过大的候选——原100 KAS巨额假
-        // 面值已不再可用, 改用0.95 KAS(真实种子面值, 覆盖首笔下注≈0.82 KAS的最小可行门槛留有余量)。
+        // 面值已不再可用, 改用0.95 KAS(真实种子面值, 高于首笔下注在精确mass门控下的最小可行区间(约0.925~0.93 KAS, 2026-09-19订正; 原"≈0.82 KAS"来自旧本地估算))。
         if (cmd.address === relayAddr) return { ok: true, utxos: [{ outpoint: { transactionId: FEE_UTXO_TXID, index: 0 }, amount: '95000000' }] };
         return { ok: true, utxos: [] };
       }
@@ -335,7 +335,7 @@ await t('⑥covenant_broadcast 命令本身失败(relay 拒绝) ⇒ 返回 {erro
   }
 
   let firstBetTxid2, firstBetFeeValue;
-  await t('⑬账本1462 首笔下注(无held)真实种子候选[0.5,0.95] KAS ⇒ 0.5太小构造不出可行找零形状(真实首笔最小可行≈0.82 KAS), 逐个真实尝试后选中0.95且构造成功', async () => {
+  await t('⑬账本1462 首笔下注(无held)真实种子候选[0.5,0.95] KAS ⇒ 0.5太小构造不出可行找零形状(首笔最小可行落在约0.925~0.93 KAS区间, 2026-09-19精确mass门控订正; 原"≈0.82 KAS"来自旧本地估算), 逐个真实尝试后选中0.95且构造成功', async () => {
     const { sendCmd, calls } = makeRealFeeSendCmd({ feeCandidates: [SEED_0_5, SEED_0_95] });
     const res = await buildRegisterAppendAndBroadcast({ kaspa, network: 'mainnet', market: marketRow2, bet: bet1462_1, sendCmd, relayId: 'relay-B', relayAddress: relayAddr });
     if (!res.txId) throw new Error(`应该最终用0.95 KAS构造成功, 实际: ${JSON.stringify(res)}`);

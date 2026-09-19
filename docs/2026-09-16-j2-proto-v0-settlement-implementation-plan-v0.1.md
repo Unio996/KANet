@@ -1,6 +1,6 @@
 > **Status**: CURRENT
 
-# 原型 v0 结算实现计划 v0.7（六个结算builder + 意图状态机 + 驱动接线，复用covenant_broadcast）
+# 原型 v0 结算实现计划 v0.8（六个结算builder + 意图状态机 + 驱动接线，复用covenant_broadcast）
 
 出处：Owner 2026-09-16 批准实现（D-022，账本1491，Bettor转达"按最简洁的方案走"），在
 `docs/2026-09-16-j2-proto-v0-settlement-design-v0.1.md`（v0.8，下称"设计文档"，尤其§1/§2/§7）
@@ -31,6 +31,13 @@ storage 在该面值只有 435,000，且在批3 三个形状上与节点权威 s
 ③ **批5 convert_to_claim 离线 builder 落码**（`buildConvertToClaimTxJson`、`computeRootClaimGenesisArtifact`、
 `proto-convert-to-claim-witness.mjs`，`feeProfile.convert_to_claim.cap` 暂借 1.0 KAS 同 market_seal），离线测试 30/30，
 **尚未上 simnet**（simnet 验证链要先能通过 register_append#1 的断言，等断言改造）。
+
+**v0.8更新（2026-09-19，NWT独立验证 + mass断言改造 + close_commit阻断修复）**：① mass 断言按 NWT D1–D5 改造（提交 `7fcf0469`）：门控只用精确
+storage/compute（consensus 源码移植，含 relaxed 分支），localMass 降为诊断项，阈值与 relay 1.0 KAS 硬顶不动，§6b 的"意外发现②"作废（前提不成立）。
+② NWT 批4 离线审 B4-1（阻断）等 7 条，处置见 §2.2。③ `feeProfile.market_seal.cap` 由借用的 1.0 KAS 改为 NWT 推导的 **52,000,000 sompi**
+（失效条件：仅对 seal_count=2 且布局 [leaf,held,fee] 成立，fee 规则一改必须重推）；`convert_to_claim.cap` 仍暂借 1.0 KAS，合入前需替换为节点实测值。
+④ 批6（claim_draw）落码的**前置**：B4-4 的驱动层断言（payoutRoot/胜方由 DB 派生，Σ payouts == pool_value）先有测试；Codex MUST-PROVE（签名前公钥逐字节相等断言，
+正反两条回归）。
 
 D-021合规：本文档不写真实relay地址、真实账户余额、完整relay关联txid。
 
@@ -106,6 +113,23 @@ relay侧**复用现有`covenant_broadcast`命令**（v0.2更新，见§5）。
 - **MUST-1**：`lockTime=deadline_ms`（毫秒时间戳，`tx`对象内部，不是顶层）；committee-签名input
   的`sequence`取普通值`0`；**提交时节点当前时间必须已经真实超过`deadline_ms`**
 - **MUST-2**：与①背靠背提交，是同一个逻辑单元，中间不能被别的操作打断
+- **v0.8 订正/新增（NWT批4离线审，Bettor 2026-09-19 裁定）**：
+  - 🔴 **B4-1（已修，提交见账本）**：委员签名必须在给 RootClose 续约输出挂好 `CovenantBinding` **之后**才签——共识 sighash（`sighash.rs:233-235`，
+    version>=1）承诺 `output.covenant`，先签后挂则签名对最终 tx 无效（validSigs=0<4）。txid 不含 witness，只比 txid 测不出；回归必须真验签
+    （用 NWT 独立移植的 sighash + schnorr，带"去 covenant 必须验假"反向臂）。教训：**签名时序只有真验签或真共识才抓得到**。
+  - **B4-2 deadline 余量（已落，暂定值）**：构造守卫改为 `Date.now() >= deadlineMs + 120s`（`CLOSE_COMMIT_DEADLINE_MARGIN_MS`）；节点 finality 是
+    `lock_time < past-median-time`（严格小于且滞后墙钟）。120s 是 NWT 下限建议，**具体值等 simnet 实测 pmt 滞后后定**。
+    **驱动层约束（批9，不在 builder）**：提交侧把 `NotFinalized` 归类为"可重试、无状态变更"，**不得进 ambiguous**。
+  - **B4-3 SLA（驱动设计约束，不落码）**：`RootClose.refund_flip` 无需任何签名，`deadline+2h`（7,200,000 ms）后**任何人**可把市场 `closed 0→2`
+    （取消/退款路径，账本1478 已记），且此后 close_commit 再也进不来（write-once 锁）。⇒ 结算驱动必须在 **deadline+2h 之前**让 close_commit 落链，
+    **deadline+1h 报警**。这是设计属性，不是 builder 缺陷。
+  - **B4-4 驱动层 MUST（不落码，批6 前置）**：`buildCloseCommitTxJson` 是"任意结果的签名预言机"——它对 `newWinningSide`/`newPayoutRootHex` **不核对**。
+    调用方（意图状态机/ingest）**必须**：① 从 DB（`proto_bets` 与裁决结果）派生这两个值；② 断言 `Σ payouts == pool_value`；③ `payoutRoot` 由 merkle 现算而非调用方传入；
+    任一不符拒绝调用 builder。批6（claim_draw）落码前必须先有这条断言的测试。
+  - **B4-5（已落）**：入口断言 `p2sh(现算当前 RootClose artifact) == 调用方给的链上 UTXO spk`（新增必填参数 `rootCloseUtxoScriptPublicKeyHex`）。
+  - **B4-6（已落）**：返回值带 `committeeMode: 'single_operator_5x_same_key'`——5 槽同一把委员 keypair，**不是 4-of-5 门限**；下游意图记录/响应必须带这个标签，
+    不得把 close_commit 成功读成门限安全。
+  - **B4-7（已落）**：`PrivateKey` 整个 builder 只建一次，`finally` 里 `free()` 并丢掉 hex 引用。
 
 ### 2.3 `buildConvertToClaimTxJson`（③ `RootClose.convert_to_claim`）
 
@@ -354,7 +378,7 @@ sompi(远低于`CONTINUATION_OUTPUT_SOMPI`=20M)，喂进KIP-9公式`C·p²/amoun
 不同，广播前必须用生产builder算出两维度mass并记录（走`assertMassWithinCeiling`即可，不需要另外
 手动算），超95%阈值即中止换面值，不要等节点拒收才知道。
 
-**🔴 意外发现②（比①更棘手，未修，已停下报Bettor 2026-09-19）**：接入`buildRegisterAppendTxJson`
+**🔴 [v0.8 作废：前提不成立——476,668 是本地 wasm 估算值而非节点值，见 docs/provenance/2026-09-19-j2-mass-signal-reconciliation/；断言已按精确 storage/compute 改造，提交 7fcf0469，下文保留为历史] 意外发现②（比①更棘手，未修，已停下报Bettor 2026-09-19）**：接入`buildRegisterAppendTxJson`
 后真实跑simnet(批4验证链genesis→bet1→...)，`register_append#1`(市场首笔下注，无held输入)在
 `SIGNED_INPUT_CEILING_SOMPI=100,000,000`(既有relay侧签名面值硬顶)约束内，**穷举85M-100M全部
 候选fee UTXO面值，无一能让mass降到95%阈值(475,000)以下**——即使用满ceiling上限100,000,000，
@@ -410,7 +434,7 @@ mass余量正常，但要等register_append#1这条路先通）。
    形状(b)(不留找零，剩余全部并入fee)——不恢复账本1427已废弃的字面值dust门槛，改用真实mass判据。
    影响面：`buildRegisterAppendTxJson`/`buildMarketGenesisTxJson`两个既有生产路径共用
    `selectChangeShape`，改动前需要Bettor审(铁律0，既有money-path函数)。
-10. **🔴 待裁定（v0.6新增，账本1497衍生发现②）**：`register_append#1`(首笔下注，无held输入)在
+10. ~~**🔴 待裁定（v0.6新增，账本1497衍生发现②）**~~ **[v0.8 已关闭：前提不成立，断言改造 7fcf0469]**：`register_append#1`(首笔下注，无held输入)在
     `SIGNED_INPUT_CEILING_SOMPI`(1.0 KAS硬顶)约束内，穷举85M-100M全部候选fee UTXO面值实测——
     即使用满ceiling上限100,000,000，mass仍是476,668(95.33%)，比95%阈值(475,000)高0.33个百分点，
     无一候选达标，详见§6b。已停下报Bettor(2026-09-19)，未自行修改阈值/ceiling常量/构造逻辑。

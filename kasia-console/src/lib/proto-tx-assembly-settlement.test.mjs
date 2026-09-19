@@ -192,6 +192,8 @@ t('⑤真实tx算出的output covenant_id与builder返回的rootCloseCovId/token
 // ── ③ close_commit: RootClose当前UTXO=market_seal产出的genesis输出, sealedState=bet2.newState ──
 {
   const rootCloseOutpoint = { txid: sealBuilt.expectedTxid, vout: MARKET_SEAL_ROOTCLOSE_OUT_INDEX };
+  // B4-5: 链上UTXO的spk取自产出该UTXO的market_seal交易的真实输出(独立于builder现算的RootClose spk)
+  const rootCloseUtxoScriptPublicKeyHex = '0x' + String(kaspa.Transaction.deserializeFromSafeJSON(sealBuilt.txJson).outputs[MARKET_SEAL_ROOTCLOSE_OUT_INDEX].scriptPublicKey.script);
   const NEW_WINNING_SIDE = 0; // YES赢(测试用值, D-021合规: 非真实市场结果)
   const NEW_PAYOUT_ROOT_HEX = 'ab'.repeat(32); // 测试夹具占位值, 非真实off-chain算出的merkle root
   const closeCommitCap = loadFeeProfileCap('close_commit');
@@ -204,7 +206,7 @@ t('⑤真实tx算出的output covenant_id与builder返回的rootCloseCovId/token
       marketId: MARKET_ID, committeePubkeyHex: genesisArtifacts.committeePubkeyHex,
       committeePrivkeyEnvelope: genesisArtifacts.committeePrivkeyEnvelope,
       deadlineMs: DEADLINE_MS, rootCloseTmplHash: genesisArtifacts.rootCloseTmplHash,
-      rootCloseOutpoint, rootCloseCovId: sealBuilt.rootCloseCovId, sealedState: currentState,
+      rootCloseOutpoint, rootCloseUtxoScriptPublicKeyHex, rootCloseCovId: sealBuilt.rootCloseCovId, sealedState: currentState,
       newWinningSide: NEW_WINNING_SIDE, newPayoutRootHex: NEW_PAYOUT_ROOT_HEX,
       tokPrefixHex, tokSuffixHex, feeUtxo: closeCommitFeeUtxo, relayChangeScriptPublicKeyHex: relaySpkHex,
       absFeeCapSompi: closeCommitCap,
@@ -257,7 +259,7 @@ t('⑤真实tx算出的output covenant_id与builder返回的rootCloseCovId/token
         committeePrivkeyEnvelope: genesisArtifacts.committeePrivkeyEnvelope,
         deadlineMs: Date.now() + 3600_000, // 故意未来时间戳
         rootCloseTmplHash: genesisArtifacts.rootCloseTmplHash,
-        rootCloseOutpoint, rootCloseCovId: sealBuilt.rootCloseCovId, sealedState: currentState,
+        rootCloseOutpoint, rootCloseUtxoScriptPublicKeyHex, rootCloseCovId: sealBuilt.rootCloseCovId, sealedState: currentState,
         newWinningSide: NEW_WINNING_SIDE, newPayoutRootHex: NEW_PAYOUT_ROOT_HEX,
         tokPrefixHex, tokSuffixHex, feeUtxo: closeCommitFeeUtxo, relayChangeScriptPublicKeyHex: relaySpkHex,
         absFeeCapSompi: closeCommitCap,
@@ -430,6 +432,99 @@ t('⑤真实tx算出的output covenant_id与builder返回的rootCloseCovId/token
   t('⑩不含私钥/委员私钥信封解密值: builder返回值序列化后不含明文私钥', () => {
     const privHex = decryptCommitteePrivkey(genesisArtifacts.committeePrivkeyEnvelope);
     if (JSON.stringify(c2cBuilt, (_k, v) => (typeof v === 'bigint' ? v.toString() : v)).includes(privHex)) throw new Error('明文私钥出现在了convert_to_claim返回值里');
+  });
+
+  const { CLOSE_COMMIT_DEADLINE_MARGIN_MS, COMMITTEE_MODE_SINGLE_OPERATOR_5X_SAME_KEY } = await import('./proto-tx-assembly-settlement.mjs');
+  const throws = (fn, re) => { let e = null; try { fn(); } catch (x) { e = x; } if (!e) throw new Error('应该throw, 却成功返回了'); if (!re.test(e.message)) throw new Error('throw了但报文不对: ' + e.message); };
+  const closeArgs = (over = {}) => ({
+    kaspa, network: 'mainnet',
+    marketId: MARKET_ID, committeePubkeyHex: genesisArtifacts.committeePubkeyHex, committeePrivkeyEnvelope: genesisArtifacts.committeePrivkeyEnvelope,
+    deadlineMs: DEADLINE_MS, rootCloseTmplHash: genesisArtifacts.rootCloseTmplHash,
+    rootCloseOutpoint, rootCloseUtxoScriptPublicKeyHex, rootCloseCovId: sealBuilt.rootCloseCovId, sealedState: currentState,
+    newWinningSide: NEW_WINNING_SIDE, newPayoutRootHex: NEW_PAYOUT_ROOT_HEX,
+    tokPrefixHex, tokSuffixHex, feeUtxo: closeCommitFeeUtxo, relayChangeScriptPublicKeyHex: relaySpkHex, absFeeCapSompi: closeCommitCap,
+    ...over,
+  });
+
+  // ══════════ ⑤ close_commit 修复回归(NWT批4离线审 B4-1/2/5/6/7) ══════════
+  // 🔴 B4-1: 委员签名必须对【最终tx】的sighash有效。txid不含witness, 所以只比txid测不出"先签后挂covenant"的时序错误;
+  // 这里用NWT按consensus sighash.rs(v2.0.1 cfafeb4c, SIG_HASH_ALL, version>=1)独立移植的sighashAll + @noble schnorr验签
+  // (test-fixtures/proto-close-commit/sighash_port.mjs, 来源: origin nwt/batch3-independent-verify @ ffef0e45,
+  // docs/provenance/2026-09-19-nwt-batch3-independent-verify/scripts/sighash_port.mjs, 未改一个字节)——验签一侧不是本仓实现,
+  // 也不是wasm自签自验。带反向臂: 同一笔tx去掉output0的covenant后, 5个签名必须全部验假(证明检查对covenant敏感, 且证明签名
+  // 确实承诺了covenant)。
+  const { sighashAll, verify: schnorrVerify } = await import('../../test-fixtures/proto-close-commit/sighash_port.mjs');
+  const sighashInput = (tx) => ({
+    version: Number(tx.version), lockTime: BigInt(tx.lockTime),
+    inputs: tx.inputs.map((i) => ({ txid: String(i.previousOutpoint.transactionId), index: Number(i.previousOutpoint.index), sequence: BigInt(i.sequence), spkHex: String(i.utxo.scriptPublicKey.script), amount: BigInt(i.utxo.amount) })),
+    outputs: tx.outputs.map((o) => ({ value: BigInt(o.value), spkHex: String(o.scriptPublicKey.script), covenant: o.covenant ? { auth: Number(o.covenant.authorizingInput), id: String(o.covenant.covenantId) } : null })),
+  });
+  const committeeSigsOf = (tx) => {
+    const abi = computeRootCloseGenesisArtifact({ marketId: MARKET_ID, committeePubkeyHex: genesisArtifacts.committeePubkeyHex, deadlineMs: DEADLINE_MS, rootCloseTmplHash: genesisArtifacts.rootCloseTmplHash, state: { ...currentState, closed: 0, winningSide: 0, payoutRoot: '00'.repeat(32) } }).entries.close_commit;
+    const pushes = parsePushesLocal(String(tx.inputs[0].signatureScript).replace(/^0x/, ''));
+    return ['c0Sig', 'c1Sig', 'c2Sig', 'c3Sig', 'c4Sig'].map((n) => pushes[abi.params.findIndex((p) => p.name === n)]);
+  };
+  t('⑤a B4-1: 5个委员签名对【最终tx】(含RootClose续约输出的covenant)的共识sighash全部验真(独立移植sighash+schnorr)', () => {
+    const tx = kaspa.Transaction.deserializeFromSafeJSON(closeCommitBuilt.txJson);
+    if (!tx.outputs[CLOSE_COMMIT_ROOTCLOSE_OUT_INDEX].covenant) throw new Error('前提: 最终tx的RootClose续约输出应带covenant');
+    const h = sighashAll(sighashInput(tx), 0);
+    const sigs = committeeSigsOf(tx);
+    if (sigs.some((s) => !s || s.length !== 65)) throw new Error(`签名push长度异常: ${sigs.map((s) => s?.length)}`);
+    const res = sigs.map((s) => schnorrVerify(s.subarray(0, 64).toString('hex'), h, genesisArtifacts.committeePubkeyHex));
+    if (!res.every(Boolean)) throw new Error(`委员签名对最终tx验签结果=${JSON.stringify(res)}(期望全true)`);
+  });
+  t('⑤b B4-1 反向臂: 同一笔tx去掉output0的covenant后重算sighash, 5个签名必须全部验假(检查对covenant敏感, 签名确实承诺了covenant)', () => {
+    const tx = kaspa.Transaction.deserializeFromSafeJSON(closeCommitBuilt.txJson);
+    const d = sighashInput(tx);
+    const stripped = { ...d, outputs: d.outputs.map((o, k) => (k === CLOSE_COMMIT_ROOTCLOSE_OUT_INDEX ? { ...o, covenant: null } : o)) };
+    const h = sighashAll(stripped, 0);
+    const res = committeeSigsOf(tx).map((s) => schnorrVerify(s.subarray(0, 64).toString('hex'), h, genesisArtifacts.committeePubkeyHex));
+    if (res.some(Boolean)) throw new Error(`去掉covenant后签名仍有验真的: ${JSON.stringify(res)}——检查对covenant不敏感, ⑤a无意义`);
+  });
+  t('⑤c 不同找零值(fee输入面值不同 → 找零 9.98B/24.2M/5.0M/2.97M sompi)各自重签: 每个最终tx的5个签名都验真(签名承诺全部输出值, 找零一变必须重签)', () => {
+    let verified = 0;
+    for (const feeValue of [10_000_000_000n, 40_000_000n, 20_000_000n, 18_000_000n]) { // 探测过: 这几档都带找零且过mass门控(17M起storage超阈值被拒; 该范围内未走到无找零形状)
+      let b;
+      try { b = buildCloseCommitTxJson(closeArgs({ feeUtxo: { ...closeCommitFeeUtxo, value: feeValue } })); } catch (e) { if (/no_viable_change_shape|mass超过|insufficient/.test(e.message)) continue; throw e; }
+      const tx = kaspa.Transaction.deserializeFromSafeJSON(b.txJson);
+      const h = sighashAll(sighashInput(tx), 0);
+      const res = committeeSigsOf(tx).map((s) => schnorrVerify(s.subarray(0, 64).toString('hex'), h, genesisArtifacts.committeePubkeyHex));
+      if (!res.every(Boolean)) throw new Error(`fee=${feeValue} includeChange=${b.includeChange}: 签名对最终tx验签=${JSON.stringify(res)}`);
+      verified++;
+    }
+    if (verified < 3) throw new Error(`只有${verified}个面值真正构造并验签了, 覆盖不足`);
+  });
+
+  // B4-2: deadline守卫加余量
+  t('⑤d B4-2: deadline在余量之内(now-60s, 已过deadline但未过120s余量)必须构造期fail-closed, 报文提到余量', () => {
+    throws(() => buildCloseCommitTxJson(closeArgs({ deadlineMs: Date.now() - 60_000 })), /fail-closed.*余量/);
+  });
+  t('⑤d2 B4-2 对照: deadline已过余量之外(now-1h)不因余量被拒(由此证明上一条的throw来自余量而非别的原因)', () => {
+    if (CLOSE_COMMIT_DEADLINE_MARGIN_MS !== 120_000) throw new Error(`余量常量=${CLOSE_COMMIT_DEADLINE_MARGIN_MS}, 期望暂定值120000`);
+    // 用真实市场的DEADLINE_MS(远在过去)构造成功即可(closeCommitBuilt已证); 这里再确认余量边界: now-121s 时到达artifact校验(模板hash不符→另一种fail-closed), 而不是余量错误
+    let e = null; try { buildCloseCommitTxJson(closeArgs({ deadlineMs: Date.now() - 121_000 })); } catch (x) { e = x; }
+    if (!e) throw new Error('now-121s的deadline与市场模板hash不一致, 应被(模板hash)fail-closed拒绝');
+    if (/余量/.test(e.message)) throw new Error(`now-121s已超过余量, 不应再报余量错误: ${e.message}`);
+  });
+
+  // B4-5: 现算spk必须等于链上UTXO spk
+  t('⑤e B4-5: rootCloseUtxoScriptPublicKeyHex与现算的当前RootClose spk不一致 / 缺失 → fail-closed', () => {
+    throws(() => buildCloseCommitTxJson(closeArgs({ rootCloseUtxoScriptPublicKeyHex: '0x' + 'aa20' + '11'.repeat(32) + '87' })), /fail-closed.*链上UTXO spk/);
+    throws(() => buildCloseCommitTxJson(closeArgs({ rootCloseUtxoScriptPublicKeyHex: undefined })), /fail-closed.*链上UTXO spk/);
+  });
+
+  // B4-6: committee_mode标签
+  t('⑤f B4-6: 返回值带committeeMode标签(如实标注5槽同一把keypair, 非4-of-5门限)', () => {
+    if (closeCommitBuilt.committeeMode !== COMMITTEE_MODE_SINGLE_OPERATOR_5X_SAME_KEY || COMMITTEE_MODE_SINGLE_OPERATOR_5X_SAME_KEY !== 'single_operator_5x_same_key') throw new Error(`committeeMode=${closeCommitBuilt.committeeMode}`);
+  });
+
+  // B4-7: PrivateKey用后free()
+  t('⑤g B4-7: builder构造过程中new的PrivateKey恰好被free()一次(且不随候选形状数量重复创建)', () => {
+    let created = 0, freed = 0;
+    class TrackedPrivateKey extends kaspa.PrivateKey { constructor(...a) { super(...a); created++; } free() { freed++; return super.free(); } }
+    const kaspaTracked = { ...kaspa, PrivateKey: TrackedPrivateKey };
+    buildCloseCommitTxJson(closeArgs({ kaspa: kaspaTracked }));
+    if (created !== 1 || freed !== 1) throw new Error(`PrivateKey created=${created} freed=${freed}(期望各1)`);
   });
 }
 

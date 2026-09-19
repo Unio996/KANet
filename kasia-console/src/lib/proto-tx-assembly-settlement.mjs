@@ -226,6 +226,15 @@ export function buildMarketSealTxJson({
 
 // ── 输出 index 布局具名常量(同market_seal既有模式) ──
 export const CLOSE_COMMIT_ROOTCLOSE_OUT_INDEX = 0; // RootClose续约输出(closed:1)
+/**
+ * B4-2(NWT批4离线审): 节点finality比较是 tx.lock_time < 区块头past-median-time(严格小于, 且pmt滞后墙钟),
+ * 只校验 Date.now()>=deadlineMs 是单边代理: 在[deadline, deadline+pmt滞后+时钟偏差)内提交, 本地放行而节点以
+ * NotFinalized拒。构造守卫加固定余量。🟡 120s是NWT的下限建议, 【暂定值】——具体值等simnet实测pmt滞后后定;
+ * 提交侧把NotFinalized归"可重试、无状态变更"(不进ambiguous)是驱动层(批9)的约束, 见实现计划§2.2。
+ */
+export const CLOSE_COMMIT_DEADLINE_MARGIN_MS = 120_000;
+/** B4-6: v0单操作员5槽同一把委员keypair重复5次——只证明"合约逻辑可执行", 不是4-of-5门限安全(账本1497 Codex复核)。 */
+export const COMMITTEE_MODE_SINGLE_OPERATOR_5X_SAME_KEY = 'single_operator_5x_same_key';
 
 /**
  * ② close_commit（`RootClose.close_commit`）——设计文档§1.2/实现计划v0.5 §2.2批4。
@@ -259,6 +268,8 @@ export const CLOSE_COMMIT_ROOTCLOSE_OUT_INDEX = 0; // RootClose续约输出(clos
  * @param {{txid:string, vout:number}} o.rootCloseOutpoint  RootClose当前UTXO(market_seal产出的
  *   RootClose genesis输出, 或更早一次close_commit的续约输出——本builder不关心是哪一种, 只要是
  *   closed==0的那一个)
+ * @param {string} o.rootCloseUtxoScriptPublicKeyHex  必填(B4-5): 该UTXO在链上的spk(调用方从UTXO快照/产出它的交易
+ *   输出取), 入口断言必须等于本函数按sealedState现算的当前RootClose spk
  * @param {string} o.rootCloseCovId  RootClose自己的covenant_id(不变, market_seal时已算出)
  * @param {{local_yes:number,local_no:number,count:number,pool_value:number}} o.sealedState
  *   market_seal之后不再变化的4个下注字段(closed/winningSide/payoutRoot由本函数用0/newWinningSide/
@@ -276,15 +287,15 @@ export const CLOSE_COMMIT_ROOTCLOSE_OUT_INDEX = 0; // RootClose续约输出(clos
  */
 export function buildCloseCommitTxJson({
   kaspa, network, marketId, committeePubkeyHex, committeePrivkeyEnvelope, deadlineMs, rootCloseTmplHash,
-  rootCloseOutpoint, rootCloseCovId, sealedState, newWinningSide, newPayoutRootHex,
+  rootCloseOutpoint, rootCloseUtxoScriptPublicKeyHex, rootCloseCovId, sealedState, newWinningSide, newPayoutRootHex,
   tokPrefixHex, tokSuffixHex, feeUtxo, relayChangeScriptPublicKeyHex, absFeeCapSompi,
 }) {
   if (newWinningSide !== 0 && newWinningSide !== 1) throw new Error(`buildCloseCommitTxJson: newWinningSide必须是0或1, 实际${newWinningSide}`);
   if (!/^[0-9a-f]{64}$/.test(newPayoutRootHex)) throw new Error(`buildCloseCommitTxJson: newPayoutRootHex必须是32字节hex, 实际${newPayoutRootHex}`);
   // MUST-1构造侧代理(设计文档§1.2/实现计划v0.5): 提交时节点当前时间必须真实超过deadline_ms——
   // 本仓构造与提交是背靠背的同一逻辑单元(MUST-2), 构造时校验等价于提交时校验。
-  if (Date.now() < Number(deadlineMs)) {
-    throw new Error(`buildCloseCommitTxJson: fail-closed — Date.now()(${Date.now()}) < deadlineMs(${deadlineMs}), RootClose.close_commit的require(tx.time>=temporal(deadline_ms))必然被节点拒绝, 拒绝构造(避免留下prepared/ambiguous残留)`);
+  if (Date.now() < Number(deadlineMs) + CLOSE_COMMIT_DEADLINE_MARGIN_MS) {
+    throw new Error(`buildCloseCommitTxJson: fail-closed — Date.now()(${Date.now()}) < deadlineMs(${deadlineMs}) + 余量(${CLOSE_COMMIT_DEADLINE_MARGIN_MS}ms), RootClose.close_commit的require(tx.time>=temporal(deadline_ms))可能被节点以NotFinalized拒绝(节点用past-median-time严格小于比较, 滞后墙钟), 拒绝构造(避免留下prepared/ambiguous残留)`);
   }
 
   const currentRcState = { local_yes: sealedState.local_yes, local_no: sealedState.local_no, count: sealedState.count, pool_value: sealedState.pool_value, closed: 0, winningSide: 0, payoutRoot: '00'.repeat(32) };
@@ -292,6 +303,11 @@ export function buildCloseCommitTxJson({
   const currentArtifact = computeRootCloseGenesisArtifact({ marketId, committeePubkeyHex, deadlineMs, rootCloseTmplHash, state: currentRcState });
   const newArtifact = computeRootCloseGenesisArtifact({ marketId, committeePubkeyHex, deadlineMs, rootCloseTmplHash, state: newRcState });
   const closeCommitEntryAbi = currentArtifact.entries.close_commit;
+  // B4-5(NWT批4): 现算的当前RootClose spk必须等于调用方给的链上UTXO spk——sealedState与链上不符时节点会以P2SH不匹配拒收
+  // (不丢钱), 但这里入口就大声失败, 不等节点拒。链上spk由调用方从UTXO快照/产出该UTXO的交易输出取, 不是本函数现算的。
+  if (typeof rootCloseUtxoScriptPublicKeyHex !== 'string' || String(rootCloseUtxoScriptPublicKeyHex).replace(/^0x/, '').toLowerCase() !== String(currentArtifact.scriptPubKeyHex).replace(/^0x/, '').toLowerCase()) {
+    throw new Error(`buildCloseCommitTxJson: fail-closed — 现算的当前RootClose spk(${currentArtifact.scriptPubKeyHex}) != 调用方给的链上UTXO spk(${rootCloseUtxoScriptPublicKeyHex}); sealedState/deadline/committee与链上已不自洽`);
+  }
 
   const rcOutpointObj = { transactionId: rootCloseOutpoint.txid, index: rootCloseOutpoint.vout };
   const feeOutpointObj = { transactionId: feeUtxo.txid, index: feeUtxo.vout };
@@ -302,7 +318,9 @@ export function buildCloseCommitTxJson({
   // 委员私钥解密-即用-即弃: 只存本函数作用域内, mkTx闭包内多次使用(selectChangeShape会调用
   // buildTxWithChange/buildTxNoChange最多3次, 每次找零候选值不同都要重新签一次, 见函数头注),
   // 函数返回后这个局部变量随作用域一起失去引用——不log、不进返回值。
-  const committeePrivHex = decryptCommitteePrivkey(committeePrivkeyEnvelope);
+  // B4-7(NWT批4): PrivateKey对象整个函数只建一次, finally里free()并丢掉hex引用(不落盘不入日志, 这里只缩短驻留)。
+  let committeePrivHex = decryptCommitteePrivkey(committeePrivkeyEnvelope);
+  const committeePrivObj = new kaspa.PrivateKey(committeePrivHex);
 
   const mkInput = (outpoint, value, spk, sigScriptHex) => ({
     previousOutpoint: outpoint, signatureScript: sigScriptHex ?? new Uint8Array(0), sequence: 0n, sigOpCount: 0, computeBudget: PROTO_V0_COMPUTE_BUDGET,
@@ -314,6 +332,11 @@ export function buildCloseCommitTxJson({
       new kaspa.TransactionOutput(CONTINUATION_OUTPUT_SOMPI, rcSpkNew),
       ...(feeChangeSompi === undefined ? [] : [new kaspa.TransactionOutput(feeChangeSompi, feeUtxoSpk)]),
     ];
+    // 🔴 B4-1(NWT批4, HIGH阻断): 必须【先】给RootClose续约输出挂CovenantBinding、【再】让委员签名。共识sighash
+    // (consensus/core/src/hashing/sighash.rs:233-235, tx.version>=1)把output.covenant(有无+authorizing_input+
+    // covenant_id)写进outputs hash; 先签后挂则签名承诺的是"无covenant"版tx, 对最终tx无效(validSigs=0<4, 节点拒)。
+    // txid不含witness, 所以只比txid的测试测不出这个时序——回归必须真验签(见settlement测试的sighash_port验签)。
+    outputs[CLOSE_COMMIT_ROOTCLOSE_OUT_INDEX].covenant = new kaspa.CovenantBinding(0, new kaspa.Hash(rootCloseCovId));
     // 先建一版RootClose输入sigScript为空的skeleton, 供委员对**本次候选tx**签名(SighashType.All
     // 承诺全部outputs, 找零值一变签名就必须重算——sighash的计算天然忽略被签名输入自己的sigScript
     // 内容, 同fee输入既有签名时序, 不需要先填好committee witness再签)。
@@ -325,7 +348,6 @@ export function buildCloseCommitTxJson({
       ],
       outputs, lockTime: BigInt(deadlineMs), subnetworkId: '0'.repeat(40), gas: 0n, payload: '',
     });
-    const committeePrivObj = new kaspa.PrivateKey(committeePrivHex);
     const rawSigHex = kaspa.createInputSignature(presignTx, 0, committeePrivObj, kaspa.SighashType.All);
     const sigNo0x = rawSigHex.startsWith('0x') ? rawSigHex.slice(2) : rawSigHex;
     // createInputSignature输出66字节(push-opcode 0x41 + 64字节签名 + 1字节sighash类型, 同kasia-relay/
@@ -362,11 +384,17 @@ export function buildCloseCommitTxJson({
   // 恰好抵消——leftover只剩fee输入自己的面值(比register_append/market_seal更简单, 因为这里只有
   // 一个非fee输入且它的输出值不变)。
   const leftover = feeUtxo.value;
-  const shape = selectChangeShape({
-    kaspa, network, leftoverSompi: leftover,
-    buildTxWithChange: (c) => mkTx(c), buildTxNoChange: () => mkTx(undefined),
-    absFeeCapSompi,
-  });
+  let shape;
+  try {
+    shape = selectChangeShape({
+      kaspa, network, leftoverSompi: leftover,
+      buildTxWithChange: (c) => mkTx(c), buildTxNoChange: () => mkTx(undefined),
+      absFeeCapSompi,
+    });
+  } finally {
+    committeePrivObj.free();
+    committeePrivHex = null;
+  }
   assertImpliedFeeMatches(shape.tx, shape.netLoss, 'close_commit');
   assertKaspadInputVersionRule(shape.tx, 'close_commit');
   {
@@ -387,6 +415,8 @@ export function buildCloseCommitTxJson({
     requiredFee: shape.requiredFee,
     netLoss: shape.netLoss,
     signInputIndices: [1],
+    // B4-6: 如实标注——5槽同一把委员keypair, 不是4-of-5门限; 下游(意图记录/响应)必须带着这个标签。
+    committeeMode: COMMITTEE_MODE_SINGLE_OPERATOR_5X_SAME_KEY,
   };
 }
 
