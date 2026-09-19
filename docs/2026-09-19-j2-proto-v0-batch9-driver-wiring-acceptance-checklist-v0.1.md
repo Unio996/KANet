@@ -8,7 +8,7 @@
 ## 0. 前提与硬线
 
 - 批9 接线的前提：六个 builder（批3–8）各自**先过 simnet**（D-022 生产字节闸）。当前状态：批3/4/5 已过 simnet（全链六笔 ACCEPT，见 `docs/provenance/2026-09-19-j2-fullchain-simnet/`）；
-  **批6 claim_draw 仅离线（16/16，含真验签），未上 simnet**；批7 withdraw、批8 ticket_reclaim 未落码。批9 不得在批6–8 缺 simnet 证据时宣称"六步闭环"。
+  **批6 claim_draw 已过 simnet（全链 v2 七笔 ACCEPT，`docs/provenance/2026-09-19-j2-claim-draw-simnet/`；n=1、同一把 keypair）**；批7 withdraw、批8 ticket_reclaim 未落码。批9 不得在批6–8 缺 simnet 证据时宣称"六步闭环"。
 - 硬线（不因接线而放宽）：不发起任何主网链上花费；不启用任何驱动开关（含 simnet 之外的环境）；主网开闸走 D-022 另开闸、Owner 终端点 GO；合入主线不带运行时效果，
   主网 console 不为此重启。
 - 🟡 route A 边界提醒：`pool_value=1000` 恰在 `payout >= 1000`（RootClaim.sil:103）边界上，`999` 会被 `deriveCloseCommitInputs` 拒（否则池子锁死）；任何改动 min_bet/stake 的运营参数变更都要先核这条。
@@ -41,6 +41,13 @@
 | convert_to_claim | **C1 链上面值+spk 断言**（`assertSettlementInputValuesOnChain`：rootClose、held 的链上 UTXO 面值 == 20,000,000 且 spk == 按当前状态现算的 artifact spk）；依赖 close_commit `landed`；`rootCloseUtxoScriptPublicKeyHex`（B4-5，取自 close_commit 交易输出0）；held 代币 outpoint 取 seal 输出1；`feeProfile.convert_to_claim.cap` = 52,000,000、`close_commit.cap` = 30,000,000（NWT 照 F3' 推，失效条件写在 anchors `_source`）；⚠ `feeProfile.claim_draw.cap` 目前仍是**暂借 1.0 KAS 的占位**，接线/合入前必须由 NWT 按节点实测 requiredFee 推专属值 |
 | claim_draw | **C1**：rootClaim、ticket、held 三个 covenant/输入的链上面值 == 20,000,000 且 spk == 现算 spk（Codex 新不变量：喂给 mass 计算的每个输入必须等于所选父 UTXO 的真实 value+spk，不是调用方另给的平行值；断言过后 mass 只用这些经断言的值）；① **Codex MUST-PROVE**：签名前 `assertTicketSigningKey`（由 proto_bets + 链上 ticket spk 推导并证明应签公钥，与私钥公钥逐字节相等，不等在 IPC 与签名之前 fail-closed）；② full 分支闸（payout==pool_value，否则**中止不构造**，partial 另一支）；③ （已并入上面 C1）；④ 链上 RootClaim spk 传入（取自 convert_to_claim 交易输出0）；⑤ 赢票方向 == winningSide、现算 leaf == payoutRoot（builder 已 fail-closed，driver 再核一次不冲突） |
 | withdraw / ticket_reclaim | 批7/8 落码后补；ticket_reclaim 的 fee 计算陷阱（计划 §2.6）与同一个 `assertTicketSigningKey` |
+
+### 3.1 接线要求补充（Bettor/NWT 2026-09-19）
+
+- **C1 的 `chainUtxos` 必须由驱动从节点取**（relay UTXO 快照 / `getUtxosByAddresses`），不得取本地库推算值；**读 pmt 的节点必须就是最终提交交易所用的节点**（否则 pmt 闸放行的判断与提交处的 finality 不同源）。simnet 全链 v2 的脚本层已按此做（`docs/provenance/2026-09-19-j2-claim-draw-simnet/`）。
+- **withdraw / ticket_reclaim 落码时**：`STEP_INPUT_ROLES` 里预置的角色表要按其真实输入布局复核，并对每个输入逐个 pin `inputHasCovenant`（ticket=false、KanetTokenClaim/held/RootClose/RootClaim=true）与 `EXPECTED_INPUT_VALUE_SOMPI`。
+- **节点 mempool 事实（NWT 实测，`docs/provenance/2026-09-19-nwt-fee-ladder-experiment/`）**：① 链式未确认交易（含 covenant 链）节点接受——seal→close_commit 背靠背可不等确认，但每步仍须按 NO TX NO STATE 以 `check_utxo_landed` 推进意图；② `submitTransaction` 对**同一输入的第二笔一律拒**，替换必须走 `submitTransactionReplacement` 且新交易 feerate（fee / normalized_max，含 storage mass）**严格更高**；驱动的重发/加价策略据此设计，不得盲重发同输入的另一版本。
+- claim_draw 已有链上证据（simnet 全链 v2，七笔 ACCEPT，claim_draw storage=179,586 / compute=40,407 / 实付 30,547,100）；`feeProfile.claim_draw.cap` 待 NWT 按 F3' 推数后替换。
 
 ## 4. NO TX NO STATE / 意图状态机（不许乐观写）
 
