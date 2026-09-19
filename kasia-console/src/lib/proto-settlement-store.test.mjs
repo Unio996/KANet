@@ -20,6 +20,7 @@ const { createSettlementStore, newClaimId } = await import('./proto-settlement-s
 const SI = await import('./proto-settlement-intent.mjs');
 const { isValidSettlementIntentKey } = await import('./proto-relay-ipc.mjs');
 const { CLAIM_DRAW_CLAIM_OUT_INDEX } = await import('./proto-tx-assembly-settlement.mjs');
+const { createSettlementDriver } = await import('./proto-settlement-driver-core.mjs');
 
 let pass = 0, fail = 0;
 const t = async (n, f) => { try { await f(); pass++; console.log('[PASS] ' + n); } catch (e) { fail++; console.log('[FAIL] ' + n + ' :: ' + (e.stack || e.message).split('\n').slice(0, 3).join(' | ')); } };
@@ -168,6 +169,60 @@ await t('构造与 id: claimDrawClaimOutIndex 必填(无默认); newClaimId = ra
   assert.throws(() => createSettlementStore({}), /claimDrawClaimOutIndex/); assert.throws(() => createSettlementStore({ claimDrawClaimOutIndex: -1 }), /claimDrawClaimOutIndex/);
   const a = newClaimId(), b = newClaimId(); assert.match(a, /^[0-9a-f]{64}$/); assert.notEqual(a, b);
   assert.equal(CLAIM_DRAW_CLAIM_OUT_INDEX, 0);
+});
+
+// ── NWT 38b983e4 MUST: 后效待应用(landed 意图的 markLanded 没成功/进程死在两步之间, 不能永远无人再捞) ──
+const pendingKeys = () => store.listWork().effectsPending.map((r) => r.intent_key);
+await t('B1 seal 已 landed 但市场仍 betting ⇒ 进 effectsPending(此前: landedChecks 只取 submitted、seal 触发带 NOT EXISTS landed ⇒ 0 工作项); markLanded 后消失', () => {
+  const m = mkMarket(); mkBet(m, { side: 0 }); mkBet(m, { side: 1 });
+  const key = mkIntent('market', m, 'seal', 'landed');
+  const w = store.listWork(); assert.ok(w.effectsPending.some((r) => r.intent_key === key), '应在 effectsPending');
+  assert.ok(!adv(w, 'seal').some((a) => a.subjectId === m), '(复现 NWT B1) 它不在 seal 触发清单里'); assert.ok(!w.landedChecks.some((r) => r.intent_key === key), '(复现)也不在 landedChecks');
+  store.markLanded('seal', SI.getSettlementIntent(key));
+  assert.ok(!pendingKeys().includes(key), '后效应用后不再挂起');
+});
+await t('B2 resolve 已 landed 但市场仍 sealed / 无 win claim / claim 无 convert_to_claim 意图 ⇒ 各自进 effectsPending; 全部应用后消失; claim_draw 已 landed 但 claim_txid 为空 ⇒ 进; convert 已 landed 但无 claim_draw 意图 ⇒ 进', () => {
+  const a = sealedMarketWithBets(); const ka = mkIntent('market', a, 'resolve', 'landed'); assert.ok(pendingKeys().includes(ka), '市场仍 sealed');
+  const b = mkMarket({ status: 'resolved', winningSide: 0 }); const kb = mkIntent('market', b, 'resolve', 'landed'); assert.ok(pendingKeys().includes(kb), '无 win claim');
+  const c = mkMarket({ status: 'resolved', winningSide: 0 }); const kc = mkIntent('market', c, 'resolve', 'landed'); const cid = hex64();
+  sqlite.prepare("INSERT INTO proto_claims (id, market_id, bettor_pk, side, amount, created_at) VALUES (?,?,?,'win',?,?)").run(cid, c, PK_A, 1200, T0);
+  assert.ok(pendingKeys().includes(kc), 'claim 无 convert_to_claim 意图');
+  SI.ensureSettlementIntent({ subjectType: 'claim', subjectId: cid, step: 'convert_to_claim' }); assert.ok(!pendingKeys().includes(kc), '意图建好后不再挂起');
+  const kv = SI.settlementIntentKeyFor('claim', cid, 'convert_to_claim'); sqlite.prepare("UPDATE proto_settlement_intents SET status = 'landed' WHERE intent_key = ?").run(kv);
+  assert.ok(pendingKeys().includes(kv), 'convert 已 landed 但没有 claim_draw 意图');
+  SI.ensureSettlementIntent({ subjectType: 'claim', subjectId: cid, step: 'claim_draw' }); assert.ok(!pendingKeys().includes(kv));
+  const kd = SI.settlementIntentKeyFor('claim', cid, 'claim_draw'); sqlite.prepare("UPDATE proto_settlement_intents SET status = 'landed', submitted_txid = ? WHERE intent_key = ?").run(hex64(), kd);
+  assert.ok(pendingKeys().includes(kd), 'claim_draw 已 landed 但 claim_txid 为空'); store.markLanded('claim_draw', SI.getSettlementIntent(kd)); assert.ok(!pendingKeys().includes(kd));
+  store.markLanded('close_commit', SI.getSettlementIntent(ka)); assert.ok(!pendingKeys().includes(ka), 'close_commit 后效应用后消失');
+  // 市场仍 sealed 本身就足以挂起(即便 win claim 与 convert 意图都在): 状态推进是 markLanded 的核心后效, 不能只看"claim / 意图是否齐"
+  const e = mkMarket({ status: 'sealed', winningSide: 0 }); const ce = hex64(); sqlite.prepare("INSERT INTO proto_claims (id, market_id, bettor_pk, side, amount, created_at) VALUES (?,?,?,'win',?,?)").run(ce, e, PK_A, 1200, T0);
+  SI.ensureSettlementIntent({ subjectType: 'claim', subjectId: ce, step: 'convert_to_claim' }); const ke = mkIntent('market', e, 'resolve', 'landed'); assert.ok(pendingKeys().includes(ke), '市场仍 sealed(claim 与 convert 意图都在)仍应挂起');
+});
+await t('B2b 已 resolved 却缺 win claim 行(人工改库 / 旧版本遗留)⇒ markLanded 用同一份赢家判定补建(不留永远挂起), 幂等', () => {
+  const m = mkMarket({ status: 'resolved', winningSide: 1 }); mkBet(m, { side: 0, stake: 600 }); mkBet(m, { side: 1, stake: 700 });
+  const key = mkIntent('market', m, 'resolve', 'landed'); assert.ok(pendingKeys().includes(key));
+  const r = store.markLanded('close_commit', SI.getSettlementIntent(key)); assert.equal(r.claimCreated, 1); assert.equal(r.resolved, 0);
+  const c = sqlite.prepare("SELECT * FROM proto_claims WHERE market_id = ?").all(m); assert.equal(c.length, 1); assert.equal(c[0].bettor_pk, PK_B); assert.equal(c[0].amount, 1300); assert.match(c[0].id, /^[0-9a-f]{64}$/);
+  assert.ok(!pendingKeys().includes(key)); assert.equal(store.markLanded('close_commit', SI.getSettlementIntent(key)).claimCreated, 0);
+});
+await t('B3 端到端(真实 store + 真实核心): resolve 已 landed 但 deriveCloseCommitInputs 失败 ⇒ 每 tick 都报警(不是报一次就沉默), 市场保持 sealed; 数据修好后下一 tick 自愈(resolved + win claim(64 位 hex)+ convert 意图), 之后不再报警不再挂起', async () => {
+  const m = mkMarket({ status: 'sealed', winningSide: 0 }); mkBet(m, { side: 1 }); mkBet(m, { side: 1 });        // 胜方 side=0 没有已确认下注 ⇒ 派生失败
+  const key = mkIntent('market', m, 'resolve', 'landed');
+  const alerts = []; const noop = async () => { throw new Error('不该被调用'); };
+  const d = createSettlementDriver({
+    sendCmd: noop, relayId: 'r', minDepth: 20, now: Date.now, log: { log() {} }, alert: (ev, s, p, lv) => alerts.push({ ev, lv, key: p && p.intent_key }),
+    intents: { ensure: SI.ensureSettlementIntent, active: SI.activeSettlementIntent, get: SI.getSettlementIntent, mark: SI.markSettlementIntent }, driveIntent: noop, checkLanded: noop,
+    pointers: noop, prepare: noop, verifyOnChain: noop, build: noop, dependenciesLanded: noop,
+    markLanded: async (info, row) => store.markLanded(info, row), listWork: async () => store.listWork({ limit: 200 }),
+  });
+  const mine = () => alerts.filter((a) => a.key === key);
+  let out = await d.runTick({ cap: 200 }); assert.equal(mine().length, 1, '第 1 tick 报警'); assert.equal(store._marketOf(m).status, 'sealed');
+  out = await d.runTick({ cap: 200 }); assert.equal(mine().length, 2, '第 2 tick 继续报警(持续, 不沉默)'); assert.deepEqual(mine().map((a) => [a.ev, a.lv]), [['settlement_step_unexpected_error', 'error'], ['settlement_step_unexpected_error', 'error']]);
+  mkBet(m, { side: 0, stake: 700 });                                                                            // 修数据: 现在胜方恰 1 条
+  out = await d.runTick({ cap: 200 }); assert.equal(mine().length, 2, '自愈的那个 tick 不再报警'); assert.ok(out.effectsApplied >= 1);
+  assert.equal(store._marketOf(m).status, 'resolved'); const claims = sqlite.prepare('SELECT * FROM proto_claims WHERE market_id = ?').all(m); assert.equal(claims.length, 1); assert.match(claims[0].id, /^[0-9a-f]{64}$/);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) c FROM proto_settlement_intents WHERE subject_type = 'claim' AND subject_id = ? AND step = 'convert_to_claim'").get(claims[0].id).c, 1);
+  assert.ok(!pendingKeys().includes(key)); out = await d.runTick({ cap: 200 }); assert.equal(mine().length, 2, '自愈后不再报警');   // (共享库里别的用例遗留的待应用项不影响本 key)
 });
 
 console.log(`\nproto-settlement-store.test: ${pass} passed, ${fail} failed`);

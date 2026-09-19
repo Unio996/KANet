@@ -1,0 +1,3 @@
+proto-settlement-driver-core.test: 27 passed, 0 failed
+proto-settlement-store.test: 14 passed, 0 failed
+proto-settlement-driver.test: 10 passed, 0 failed

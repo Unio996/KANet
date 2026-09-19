@@ -1,0 +1,16 @@
+BASELINE
+  core: exit=0 27 passed, 0 failed
+  store: exit=0 14 passed, 0 failed
+E1: KILLED [store:exit=1] :: seal landed 后效待应用不列出
+E2: SURVIVED [store:exit=0] :: resolve landed 但市场仍 sealed 不列出
+E3: KILLED [store:exit=1] :: claim_draw landed 但未记 claim_txid 不列出
+E4: KILLED [store:exit=1] :: convert landed 但无 claim_draw 意图不列出
+E5: KILLED [store:exit=1 core:exit=0] :: listWork 不返回 effectsPending
+E6: KILLED [store:exit=1] :: 已 resolved 缺 claim 行不补建(永远挂起)
+E7: KILLED [core:exit=1 store:exit=1] :: runTick 不处理 effectsPending
+E8: KILLED [core:exit=1 store:exit=1] :: 后效应用失败不报警
+E9: SURVIVED [core:exit=0] :: effectsPending 排在 landed 检查之后(有 landedChecks 时被饿死)
+RESTORED
+  core: exit=0 27 passed, 0 failed
+  store: exit=0 14 passed, 0 failed
+SUMMARY mutants=9 survivors=2 restored_green=true
