@@ -1,0 +1,63 @@
+[
+ {
+  "node": "simnet PID 15972 kaspad 2.0.1 sha256 8afe6a68 (核于步骤1)",
+  "myAddr": "<my-simnet-address-redacted>"
+ },
+ {
+  "shape": "market_genesis",
+  "builderRequiredFee": "20280700",
+  "builderIncludeChange": true
+ },
+ {
+  "label": "genesis",
+  "targetFee": "1000",
+  "builderFee": "20280700",
+  "result": "REJECTED",
+  "nodeMessage": "RPC Server (remote error) -> Rejected transaction edd2dc07df087b5e97e5af6f821b1bc8b9eb3235add7481aafb67cb7237fd3d1: transaction edd2dc07df087b5e97e5af6f821b1bc8b9eb3235add7481aafb67cb7237fd3d1 is not standard: transaction has 1000 fees which is under the required amount of 808300 for compute mass 8083"
+ },
+ {
+  "label": "genesis",
+  "targetFee": "808300",
+  "builderFee": "20280700",
+  "result": "ACCEPTED",
+  "txid": "c0c89091431fb5197c54829564c23def08380770de29af5e41025db26ab78ab0",
+  "nodeMass": {
+   "storageMass": "202952",
+   "computeMass": "8083",
+   "fee": "808300"
+  }
+ },
+ {
+  "label": "genesis",
+  "mined": "confirmed 1 block"
+ },
+ {
+  "shape": "register_append#1",
+  "feeUtxo": "95000000",
+  "builderRequiredFee": "43339900",
+  "builderIncludeChange": true
+ },
+ {
+  "label": "bet1",
+  "targetFee": "1000",
+  "builderFee": "43339900",
+  "result": "REJECTED",
+  "nodeMessage": "RPC Server (remote error) -> Rejected transaction d519789574082b6be42abf6862ab915c2e722faec2b14b1d8355b0537f4bbc35: transaction d519789574082b6be42abf6862ab915c2e722faec2b14b1d8355b0537f4bbc35 is not standard: transaction has 1000 fees which is under the required amount of 3691400 for normalized transient mass 36914 (proportional to transaction byte size)"
+ },
+ {
+  "label": "bet1",
+  "targetFee": "3691400",
+  "builderFee": "43339900",
+  "result": "ACCEPTED",
+  "txid": "85cfdbefceb366c3ee5aeff798444581171075fd304d86224353ad5fc40d6ff1",
+  "nodeMass": {
+   "storageMass": "391231",
+   "computeMass": "33927",
+   "fee": "3691400"
+  }
+ },
+ {
+  "label": "bet1",
+  "mined": "confirmed 1 block"
+ }
+]
