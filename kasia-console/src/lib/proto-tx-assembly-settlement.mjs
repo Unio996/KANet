@@ -22,7 +22,8 @@ import { encodeConvertToClaimAction } from './proto-convert-to-claim-witness.mjs
 import { encodeClaimDrawAction } from './proto-claim-draw-witness.mjs';
 import { encodeAuthorizeSpendAction } from './proto-ticket-authorize-witness.mjs';
 import { payoutLeafHex } from './proto-payout-leaf.mjs';
-import { assertTicketSigningKey } from './proto-signing-key-binding.mjs';
+import { assertTicketSigningKey, assertClaimWinnerSigningKey } from './proto-signing-key-binding.mjs';
+import { encodeKtcSpendAction } from './proto-ktt-claim-spend-witness.mjs';
 import { evaluateCloseCommitTiming } from './proto-close-commit-gate.mjs';
 import { encodeKttTransferZeroOutAction, combineKttActionAndRedeem } from './proto-ktt-transfer-witness.mjs';
 import { assertMassWithinCeiling } from './proto-mass-ceiling.mjs';
@@ -812,4 +813,186 @@ export function assertClaimDrawLayout({ tx, rootClaimOutpoint, ticketOutpoint, h
   const claimOut = tx.outputs[CLAIM_DRAW_CLAIM_OUT_INDEX], tokOut = tx.outputs[CLAIM_DRAW_TOKEN_OUT_INDEX];
   if (!claimOut || noPrefix(claimOut.scriptPublicKey.script) !== noPrefix(expectedKtcSpkHex)) throw new Error(`claim_draw: fail-closed — 见证 claimOutIdx(${CLAIM_DRAW_CLAIM_OUT_INDEX}) 指向的输出不是预期的 KanetTokenClaim genesis 输出`);
   if (!tokOut || noPrefix(tokOut.scriptPublicKey.script) !== noPrefix(expectedTokenOutSpkHex)) throw new Error(`claim_draw: fail-closed — 见证 tokenOutIdx(${CLAIM_DRAW_TOKEN_OUT_INDEX}) 指向的输出不是预期的代币输出`);
+}
+
+// ══════════ ⑤ withdraw(批7, KanetTokenClaim.spend, 路径 (ii) to_market_input=false) ══════════
+export const WITHDRAW_KTC_IN_INDEX = 0;    // KanetTokenClaim(claim_draw 产出, CONT)输入 —— 唯一需要赢家签名的输入
+export const WITHDRAW_HELD_IN_INDEX = 1;   // 代币输入(owner=本 claim covenant_id, GENESIS)
+export const WITHDRAW_FEE_IN_INDEX = 2;    // fee 输入
+export const WITHDRAW_TOKEN_OUT_INDEX = 0; // 代币转出输出(owner = 目的地输出的 covenant_id)
+export const WITHDRAW_DEST_OUT_INDEX = 1;  // 目的地 covenant genesis 输出(spk 由调用方显式指定)
+export const WITHDRAW_DEST_OUTPUT_SOMPI = GENESIS_OUTPUT_SOMPI; // Bettor 1520 裁定: 目的地 covenant 输出用 GENESIS 面值
+// 账本1497 MUST + NWT 1521: 逐 builder 钉死"每个输入是不是 covenant UTXO"——[KanetTokenClaim(claim_draw 输出0, covenant), held KTT(claim_draw 输出1, covenant), fee(普通)]。
+// 测试从上一笔 claim_draw 的真实输出推导并逐项比对此常量(改常量/改布局其一即红)。
+export const WITHDRAW_INPUT_HAS_COVENANT = Object.freeze([true, true, false]);
+
+/**
+ * 🔴 Bettor 1520 裁定(2): 主网 withdraw 的目的地 spk 允许清单(35 字节 P2SH spk hex, 无 0x, 小写)。v0 **为空** ⇒ 主网 withdraw 不可构造(批9 排除 withdraw),
+ * 直到最小钱包 covenant(设计票 T-TOKEN-WALLET-COVENANT, checkSig 即花、代币可持有可转出)存在, 届时把它的 spk 形状加进来。
+ * 冻结数组: 不给调用点"顺手 push 一个进去"的口子。
+ */
+export const WITHDRAW_DESTINATION_ALLOWLIST_SPK_HEX = Object.freeze([]);
+
+/**
+ * withdraw 目的地闸(纯函数, 可单测): 目的地 spk 必须在允许清单里; 唯一例外是非主网 + 调用方显式声明"测试用、不可再花"(allowUnlistedTestDestination)。
+ * 主网(network==='mainnet')上 allowUnlistedTestDestination 一律不生效——清单为空则一律拒绝。
+ * @returns {'allowlisted'|'unlisted_test_destination'}
+ */
+export function assertWithdrawDestinationAllowed({ network, destSpkHex, allowlistSpkHex = WITHDRAW_DESTINATION_ALLOWLIST_SPK_HEX, allowUnlistedTestDestination = false }) {
+  const d = String(destSpkHex ?? '').replace(/^0x/i, '').toLowerCase();
+  if (!/^aa20[0-9a-f]{64}87$/.test(d)) {
+    throw new Error(`withdraw: fail-closed — 目的地 spk 必须是 35 字节 P2SH(aa20…87), 实际=${d.slice(0, 20)}…: 目的地必须由运营明确指定, 不设默认值`);
+  }
+  const list = (allowlistSpkHex ?? []).map((h) => String(h).replace(/^0x/i, '').toLowerCase());
+  if (list.includes(d)) return 'allowlisted';
+  if (network !== 'mainnet' && allowUnlistedTestDestination === true) return 'unlisted_test_destination';
+  throw new Error(`withdraw: fail-closed — 目的地 spk(${d.slice(0, 12)}…)不在允许清单(共 ${list.length} 项)内` +
+    (network === 'mainnet' ? '; 主网 withdraw 在最小钱包 covenant(T-TOKEN-WALLET-COVENANT)存在前不接线, allowUnlistedTestDestination 在主网不生效' : '; 非主网需显式 allowUnlistedTestDestination:true 才可用"测试用、不可再花"的目的地'));
+}
+
+/**
+ * withdraw 见证的具名参数映射(纯函数, 同 claimDrawWitnessArgs 的理由): 索引参数用哨兵输入单测。
+ * to_market_input 恒为 false(路径 (ii): owner = OpOutputCovenantId(dest_idx), dest_idx 指向目的地 covenant 输出)。
+ */
+export function withdrawWitnessArgs({ sig65Hex, tokInIdx, tokOutIdx, destIdx, tokPrefixHex, tokSuffixHex }) {
+  return { s: '0x' + sig65Hex, tok_in_idx: tokInIdx, tok_out_idx: tokOutIdx, to_market_input: false, dest_idx: destIdx, tok_prefix: tokPrefixHex, tok_suffix: tokSuffixHex };
+}
+
+/**
+ * ⑤ withdraw（`KanetTokenClaim.spend`）——实现计划v0.9 §2.5批7。
+ * [KanetTokenClaim(CONT), 代币(owner=claim covid, GENESIS), fee] → [代币转出(owner=目的地输出的 covenant_id, GENESIS), 目的地 covenant genesis 输出(CONT), 找零]。
+ * 无 claim 续约(终态)。只有 KanetTokenClaim 输入需要赢家 bettor 签名(checkSig(s, pubkey(winner_pk))), 由本函数用委员私钥现签(v0: winner_pk===委员公钥)。
+ *
+ * 🔴 目的地语义(Bettor 1520 裁定①): 合约里 target_owner 只能是【本 tx 某个输入/输出的 covenant_id】, 不是任意值。本 builder 走路径(ii): 新增一个
+ * 目的地 covenant 输出(GENESIS 面值), spk 由调用方 destinationScriptPublicKeyHex 显式指定(必须 35 字节 P2SH, 无默认值)。NWT 审计构造用路径(i)指回被花掉的
+ * KanetTokenClaim 自身 = 代币锁死, 不采用。三条边界: ① v0 **不承诺赢家可再花**(押注资产是零价值测试币 D-017, 仓里没有 checkSig 即花的持币 covenant, 不为它造新合约);
+ * ② 目的地 spk 除形状外须在显式允许清单里(WITHDRAW_DESTINATION_ALLOWLIST_SPK_HEX, v0 为空 ⇒ 主网 withdraw 不接线; 仅非主网 + allowUnlistedTestDestination 可用"测试用、不可再花"
+ * 的目的地); ③ 最小钱包 covenant 另开设计票 T-TOKEN-WALLET-COVENANT, 届时其 spk 形状加入允许清单。
+ *
+ * 🔴 签名前 MUST-PROVE: 由 (market_cov_id, winner_pk, amount) 重算 KanetTokenClaim P2SH, 必须等于链上 claim UTXO spk(证明 winner_pk 是烤进该 claim 的那一把),
+ * 再断言与私钥公钥逐字节相等(assertClaimWinnerSigningKey), 不等 fail-closed。🔴 签名时序(B4-1 教训): 在 populateGenesisCovenants 之后对每个找零候选现签。
+ *
+ * @param {object} o
+ * @param {string} o.marketCovId  KanetTokenClaim 的 market_cov_id(= RootClaim 的 covenant_id), 32字节hex
+ * @param {string} o.claimCovId  本 KanetTokenClaim 自己的 covenant_id(claim_draw 输出0 的 covenant_id); 被消费代币的 owner
+ * @param {string} o.winnerPkHex  claim 的 winner_pk(32字节hex)
+ * @param {number} o.amount  claim 的 amount(= claim_draw 的 payout)
+ * @param {{txid:string,vout:number}} o.ktcOutpoint  KanetTokenClaim 当前 UTXO(claim_draw 输出0)
+ * @param {string} o.ktcUtxoScriptPublicKeyHex  该 UTXO 的链上 spk(取自产出它的 claim_draw 交易输出)
+ * @param {{txid:string,vout:number}} o.heldTokenOutpoint  被消费的代币 UTXO(claim_draw 输出1)
+ * @param {string} o.committeePrivkeyEnvelope
+ * @param {string} o.destinationScriptPublicKeyHex  目的地 covenant 输出的 spk(35字节P2SH, 必填, 无默认)
+ * @param {string} o.tokPrefixHex
+ * @param {string} o.tokSuffixHex
+ * @param {object} o.feeUtxo
+ * @param {string} o.relayChangeScriptPublicKeyHex
+ * @param {bigint} o.absFeeCapSompi  feeProfile.withdraw.cap(暂借占位, 待NWT推数)
+ */
+export function buildWithdrawTxJson({
+  kaspa, network, marketCovId, claimCovId, winnerPkHex, amount, ktcOutpoint, ktcUtxoScriptPublicKeyHex, heldTokenOutpoint,
+  committeePrivkeyEnvelope, destinationScriptPublicKeyHex, tokPrefixHex, tokSuffixHex, feeUtxo, relayChangeScriptPublicKeyHex, absFeeCapSompi,
+  destinationAllowlistSpkHex = WITHDRAW_DESTINATION_ALLOWLIST_SPK_HEX, allowUnlistedTestDestination = false,
+}) {
+  const who = 'buildWithdrawTxJson';
+  if (!Number.isSafeInteger(amount) || amount <= 0) throw new Error(`${who}: fail-closed — amount 必须是正整数, 实际 ${amount}`);
+  if (!ktcOutpoint || !heldTokenOutpoint) throw new Error(`${who}: fail-closed — ktcOutpoint / heldTokenOutpoint 必填`);
+  // 🔴 Bettor 1520: 目的地闸先于任何解密/签名(形状 + 允许清单; 主网清单为空 ⇒ 一律拒绝)
+  const destGate = assertWithdrawDestinationAllowed({ network, destSpkHex: destinationScriptPublicKeyHex, allowlistSpkHex: destinationAllowlistSpkHex, allowUnlistedTestDestination });
+  const destHex = String(destinationScriptPublicKeyHex).replace(/^0x/i, '').toLowerCase();
+  const ktcArtifact = computeKanetTokenClaimGenesisArtifact({ marketCovIdHex: String(marketCovId).toLowerCase(), winnerPkHex: String(winnerPkHex).toLowerCase(), amount });
+  if (String(ktcUtxoScriptPublicKeyHex ?? '').replace(/^0x/i, '').toLowerCase() !== ktcArtifact.scriptPubKeyHex.replace(/^0x/, '')) {
+    throw new Error(`${who}: fail-closed — 现算的 KanetTokenClaim spk(${ktcArtifact.scriptPubKeyHex}) != 调用方给的链上 UTXO spk(${ktcUtxoScriptPublicKeyHex}); (market_cov_id, winner_pk, amount) 与链上 claim 已不自洽`);
+  }
+
+  // 🔴 签名前 MUST-PROVE: 私钥只以局部变量存在, 断言通过前不签名。
+  let committeePrivHex = decryptCommitteePrivkey(committeePrivkeyEnvelope);
+  assertClaimWinnerSigningKey({ kaspa, privKeyHex: committeePrivHex, marketCovIdHex: marketCovId, winnerPkHex, amount, claimUtxoSpkHex: ktcUtxoScriptPublicKeyHex, label: 'withdraw claim' });
+  const winnerPrivObj = new kaspa.PrivateKey(committeePrivHex);
+
+  const heldArtifact = computeKttGenesisArtifact({ amount, ownerCovIdHex: String(claimCovId).toLowerCase() });
+  const ktcOutpointObj = { transactionId: ktcOutpoint.txid, index: ktcOutpoint.vout };
+  const heldOutpointObj = { transactionId: heldTokenOutpoint.txid, index: heldTokenOutpoint.vout };
+  const feeOutpointObj = { transactionId: feeUtxo.txid, index: feeUtxo.vout };
+  const ktcSpk = scriptPublicKeyFromHex(kaspa, ktcArtifact.scriptPubKeyHex);
+  const heldSpk = scriptPublicKeyFromHex(kaspa, heldArtifact.scriptPubKeyHex);
+  const destSpk = scriptPublicKeyFromHex(kaspa, '0x' + destHex);
+  const feeUtxoSpk = scriptPublicKeyFromHex(kaspa, feeUtxo.scriptPublicKeyHex);
+
+  // 目的地 covenant_id 先于代币输出算出(fee 输入 outpoint 派生, 与 token 输出的 spk 无循环: 目的地输出 spk 由调用方给定, 与 owner 无关)。
+  const destCovIdHex = String(kaspa.covenantId(feeOutpointObj, [{ index: WITHDRAW_DEST_OUT_INDEX, output: new kaspa.TransactionOutput(WITHDRAW_DEST_OUTPUT_SOMPI, destSpk) }]));
+  const newTokenArtifact = computeKttGenesisArtifact({ amount, ownerCovIdHex: destCovIdHex });
+  const newTokenSpk = scriptPublicKeyFromHex(kaspa, newTokenArtifact.scriptPubKeyHex);
+
+  const heldSigScript = combineKttActionAndRedeem(kaspa, encodeKttTransferZeroOutAction(kaspa, heldArtifact.entryAbi, heldArtifact.stateFieldCount, [0]), heldArtifact.script);
+  const ktcSigScriptFor = (sig65Hex) => combineActionAndRedeem(kaspa, encodeKtcSpendAction(kaspa, ktcArtifact.entries.spend, withdrawWitnessArgs({
+    sig65Hex, tokInIdx: WITHDRAW_HELD_IN_INDEX, tokOutIdx: WITHDRAW_TOKEN_OUT_INDEX, destIdx: WITHDRAW_DEST_OUT_INDEX, tokPrefixHex, tokSuffixHex,
+  })), ktcArtifact.script);
+  const DUMMY_SIG65 = '00'.repeat(65);
+  const mkInput = (outpoint, value, spk, sigScript) => ({
+    previousOutpoint: outpoint, signatureScript: sigScript ?? new Uint8Array(0), sequence: 0n, sigOpCount: 0, computeBudget: PROTO_V0_COMPUTE_BUDGET,
+    utxo: { outpoint, amount: value, scriptPublicKey: spk, blockDaaScore: 0n },
+  });
+  const buildTx = (feeChangeSompi, ktcSigScript) => {
+    const txInputs = [];
+    txInputs[WITHDRAW_KTC_IN_INDEX] = mkInput(ktcOutpointObj, CONTINUATION_OUTPUT_SOMPI, ktcSpk, ktcSigScript);
+    txInputs[WITHDRAW_HELD_IN_INDEX] = mkInput(heldOutpointObj, GENESIS_OUTPUT_SOMPI, heldSpk, heldSigScript);
+    txInputs[WITHDRAW_FEE_IN_INDEX] = mkInput(feeOutpointObj, feeUtxo.value, feeUtxoSpk, new Uint8Array(0));
+    const outs = [];
+    outs[WITHDRAW_TOKEN_OUT_INDEX] = new kaspa.TransactionOutput(GENESIS_OUTPUT_SOMPI, newTokenSpk);
+    outs[WITHDRAW_DEST_OUT_INDEX] = new kaspa.TransactionOutput(WITHDRAW_DEST_OUTPUT_SOMPI, destSpk);
+    if (feeChangeSompi !== undefined) outs.push(new kaspa.TransactionOutput(feeChangeSompi, feeUtxoSpk));
+    const t = new kaspa.Transaction({ version: 1, inputs: txInputs, outputs: outs, lockTime: 0n, subnetworkId: '0'.repeat(40), gas: 0n, payload: '' });
+    t.populateGenesisCovenants([
+      new kaspa.GenesisCovenantGroup(WITHDRAW_FEE_IN_INDEX, [WITHDRAW_TOKEN_OUT_INDEX]),
+      new kaspa.GenesisCovenantGroup(WITHDRAW_FEE_IN_INDEX, [WITHDRAW_DEST_OUT_INDEX]),
+    ]);
+    return t;
+  };
+  // 🔴 B4-1 教训: 先建出 covenant 已就位的候选 tx, 再对它现签, 再用真实签名重建最终 tx。
+  const mkTx = (feeChangeSompi) => {
+    const draft = buildTx(feeChangeSompi, ktcSigScriptFor(DUMMY_SIG65));
+    const raw = kaspa.createInputSignature(draft, WITHDRAW_KTC_IN_INDEX, winnerPrivObj, kaspa.SighashType.All);
+    const noPrefix = raw.startsWith('0x') ? raw.slice(2) : raw;
+    if (noPrefix.length !== 132) throw new Error(`${who}: createInputSignature 长度异常, 期望66字节(132 hex), 实际${noPrefix.length / 2}字节`);
+    return buildTx(feeChangeSompi, ktcSigScriptFor(noPrefix.slice(2)));
+  };
+
+  // leftover: KanetTokenClaim 的 CONT + held 的 GENESIS 进来; 代币输出 GENESIS + 目的地输出 CONT 出去。
+  const leftover = feeUtxo.value + CONTINUATION_OUTPUT_SOMPI + GENESIS_OUTPUT_SOMPI - GENESIS_OUTPUT_SOMPI - WITHDRAW_DEST_OUTPUT_SOMPI;
+  let shape;
+  try {
+    shape = selectChangeShape({ kaspa, network, leftoverSompi: leftover, buildTxWithChange: (c) => mkTx(c), buildTxNoChange: () => mkTx(undefined), absFeeCapSompi });
+  } finally {
+    winnerPrivObj.free();
+    committeePrivHex = null; // 🟡 hex 字符串仍待 GC(已知边界, 同 close_commit/claim_draw)
+  }
+  assertImpliedFeeMatches(shape.tx, shape.netLoss, 'withdraw');
+  assertKaspadInputVersionRule(shape.tx, 'withdraw');
+  assertWithdrawLayout({
+    tx: shape.tx, ktcOutpoint, heldTokenOutpoint, expectedDestSpkHex: '0x' + destHex,
+    expectedTokenOutSpkHex: computeKttGenesisArtifact({ amount, ownerCovIdHex: String(shape.tx.outputs[WITHDRAW_DEST_OUT_INDEX].covenant.covenantId).toLowerCase() }).scriptPubKeyHex,
+  });
+  // 账本1497 MUST: KanetTokenClaim(covenant) / held KTT(covenant) / fee(普通)
+  const massSignal = assertMassWithinCeiling({ kaspa, network, tx: shape.tx, inputHasCovenant: [...WITHDRAW_INPUT_HAS_COVENANT], feeUtxoValueSompi: feeUtxo.value, label: 'withdraw' });
+
+  const realDestCovId = String(shape.tx.outputs[WITHDRAW_DEST_OUT_INDEX].covenant.covenantId);
+  if (realDestCovId.toLowerCase() !== destCovIdHex.toLowerCase()) throw new Error(`${who}: fail-closed — 真实tx目的地输出的covenant_id(${realDestCovId}) != 预算值(${destCovIdHex}), 代币输出的owner会指向错误的covenant`);
+  return {
+    txJson: shape.tx.serializeToSafeJSON(), expectedTxid: shape.tx.id,
+    massSignal, destGate, destCovId: realDestCovId, tokenCovId: String(shape.tx.outputs[WITHDRAW_TOKEN_OUT_INDEX].covenant.covenantId),
+    includeChange: shape.includeChange, changeSompi: shape.changeSompi, requiredFee: shape.requiredFee, netLoss: shape.netLoss,
+    signInputIndices: [WITHDRAW_FEE_IN_INDEX], genesisOutputIndices: [WITHDRAW_TOKEN_OUT_INDEX, WITHDRAW_DEST_OUT_INDEX],
+  };
+}
+
+/** withdraw 见证索引与交易真实布局的结构断言: tok_in_idx 指向 held 代币输入, tok_out_idx 指向代币输出, dest_idx 指向目的地 covenant 输出。 */
+export function assertWithdrawLayout({ tx, ktcOutpoint, heldTokenOutpoint, expectedTokenOutSpkHex, expectedDestSpkHex }) {
+  const noPrefix = (h) => String(h).replace(/^0x/, '').toLowerCase();
+  const same = (inp, op) => inp && String(inp.previousOutpoint.transactionId) === String(op.txid) && Number(inp.previousOutpoint.index) === Number(op.vout);
+  if (!same(tx.inputs[WITHDRAW_KTC_IN_INDEX], ktcOutpoint)) throw new Error('withdraw: fail-closed — inputs[0] 不是 KanetTokenClaim outpoint, 输入布局与见证映射已不一致');
+  if (!same(tx.inputs[WITHDRAW_HELD_IN_INDEX], heldTokenOutpoint)) throw new Error(`withdraw: fail-closed — 见证 tok_in_idx(${WITHDRAW_HELD_IN_INDEX}) 指向的输入不是 held 代币 outpoint, 输入布局与见证映射已不一致`);
+  const tokOut = tx.outputs[WITHDRAW_TOKEN_OUT_INDEX], destOut = tx.outputs[WITHDRAW_DEST_OUT_INDEX];
+  if (!tokOut || noPrefix(tokOut.scriptPublicKey.script) !== noPrefix(expectedTokenOutSpkHex)) throw new Error(`withdraw: fail-closed — 见证 tok_out_idx(${WITHDRAW_TOKEN_OUT_INDEX}) 指向的输出不是预期的代币输出(owner=目的地 covenant_id)`);
+  if (!destOut || noPrefix(destOut.scriptPublicKey.script) !== noPrefix(expectedDestSpkHex)) throw new Error(`withdraw: fail-closed — 见证 dest_idx(${WITHDRAW_DEST_OUT_INDEX}) 指向的输出不是调用方指定的目的地 covenant 输出`);
+  if (!destOut.covenant) throw new Error('withdraw: fail-closed — 目的地输出没有 covenant 绑定(OpOutputCovenantId 会回退 ZERO32, 合约必拒)');
 }

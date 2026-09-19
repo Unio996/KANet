@@ -491,7 +491,8 @@ export function computeKanetTokenClaimGenesisArtifact({ marketCovIdHex, winnerPk
   if (artifact.templateHashHex !== claim_tmpl_hash) {
     throw new Error(`computeKanetTokenClaimGenesisArtifact: fail-closed — 编译出的 KanetTokenClaim 模板hash(${artifact.templateHashHex}) != 协议常量claim_tmpl_hash(${claim_tmpl_hash})`);
   }
-  return { script: artifact.script, scriptPubKeyHex: '0x' + p2sh(artifact.script), stateLayout: artifact.stateLayout, templateHashHex: artifact.templateHashHex };
+  // 批7(withdraw): spend 入口的 entryAbi 是同一次编译产物的另一切面(同 computeRootCloseGenesisArtifact.entries 先例); 纯加字段。
+  return { script: artifact.script, scriptPubKeyHex: '0x' + p2sh(artifact.script), stateLayout: artifact.stateLayout, templateHashHex: artifact.templateHashHex, entries: compiled._raw.contracts.KanetTokenClaim.entries };
 }
 
 export { p2sh, hex, ZERO32 };

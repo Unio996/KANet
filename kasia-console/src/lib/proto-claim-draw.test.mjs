@@ -276,5 +276,198 @@ t('⑪ 私钥不进返回值; 构造过程中 new 的 PrivateKey 全部 free(cre
   if (created < 1 || created !== freed) throw new Error(`PrivateKey created=${created} freed=${freed}`);
 });
 
+// ══════════ 批7 withdraw(KanetTokenClaim.spend, 路径 (ii)) ══════════
+// 链: …→claim_draw(built)→withdraw。KanetTokenClaim UTXO = claim_draw 输出0(covenant), 持有的代币 = claim_draw 输出1(covenant); 赢家 = 委员公钥(v0 映射)。
+const {
+  buildWithdrawTxJson, withdrawWitnessArgs, assertWithdrawLayout, assertWithdrawDestinationAllowed, WITHDRAW_DESTINATION_ALLOWLIST_SPK_HEX,
+  WITHDRAW_KTC_IN_INDEX, WITHDRAW_HELD_IN_INDEX, WITHDRAW_FEE_IN_INDEX, WITHDRAW_TOKEN_OUT_INDEX, WITHDRAW_DEST_OUT_INDEX,
+} = S;
+const { computeKanetTokenClaimGenesisArtifact } = await import('./proto-covenant-builder.mjs');
+const NWTM = await import('../../test-fixtures/proto-mass/nwt-port_mass.mjs');
+const { assertMassWithinCeiling } = await import('./proto-mass-ceiling.mjs');
+const { STEP_INPUT_ROLES } = await import('./proto-settlement-chain-checks.mjs');
+const WITHDRAW_KTC_OUTPOINT_VOUT = () => KTC_OP.vout, WITHDRAW_HELD_OUTPOINT_VOUT = () => HELD_OP.vout;
+const KTC_OP = { txid: built.expectedTxid, vout: CLAIM_DRAW_CLAIM_OUT_INDEX }, HELD_OP = { txid: built.expectedTxid, vout: CLAIM_DRAW_TOKEN_OUT_INDEX };
+const DEST_SPK = '0xaa20' + 'ee'.repeat(32) + '87'; // 测试用、不可再花(随手一个 32 字节脚本哈希, 无人持有对应脚本)
+const wArgs = (over = {}) => ({
+  kaspa, network: 'simnet', marketCovId: convertToClaim.claimCovId, claimCovId: built.claimCovId, winnerPkHex: COMMITTEE_PK, amount: 1000,
+  ktcOutpoint: KTC_OP, ktcUtxoScriptPublicKeyHex: spkOf(built.txJson, CLAIM_DRAW_CLAIM_OUT_INDEX), heldTokenOutpoint: HELD_OP,
+  committeePrivkeyEnvelope: ga.committeePrivkeyEnvelope, destinationScriptPublicKeyHex: DEST_SPK, allowUnlistedTestDestination: true,
+  tokPrefixHex, tokSuffixHex, feeUtxo: bigFee(8), relayChangeScriptPublicKeyHex: relaySpkHex, absFeeCapSompi: loadFeeProfileCap('withdraw'), ...over,
+});
+let wd;
+t('⑫withdraw buildWithdrawTxJson 真实构造成功([KanetTokenClaim,heldKTT,fee]三输入, 目的地 covenant 输出 + 代币输出 + 找零)', () => {
+  wd = buildWithdrawTxJson(wArgs());
+  const tx = kaspa.Transaction.deserializeFromSafeJSON(wd.txJson);
+  if (JSON.stringify(wd.signInputIndices) !== '[2]' || JSON.stringify(wd.genesisOutputIndices) !== '[0,1]') throw new Error('签名/genesis 下标不对');
+  if (tx.inputs.length !== 3 || tx.outputs.length < 2) throw new Error('输入/输出数不对');
+  if (wd.destGate !== 'unlisted_test_destination') throw new Error(`destGate=${wd.destGate}`);
+  if (!tx.outputs[WITHDRAW_TOKEN_OUT_INDEX].covenant || !tx.outputs[WITHDRAW_DEST_OUT_INDEX].covenant) throw new Error('代币输出/目的地输出必须带 covenant 绑定');
+  if (BigInt(tx.outputs[WITHDRAW_DEST_OUT_INDEX].value) !== 20_000_000n) throw new Error('目的地输出应为 GENESIS 面值');
+});
+t('⑬relay 真代码: 反序列化+extractTxShape+validateFixedValueOutputs 通过; 真签 fee 输入后 finalize, txid==expectedTxid', () => {
+  const tx = kaspa.Transaction.deserializeFromSafeJSON(wd.txJson);
+  const fv = validateFixedValueOutputs({ outputs: extractTxShape(tx).outputs, genesisOutputIndices: wd.genesisOutputIndices, continuationOutputIndices: [] });
+  if (!fv.ok) throw new Error(`relay真代码拒绝: ${fv.reason}`);
+  signOnlyDeclaredInputs({ tx, signInputIndices: wd.signInputIndices, privateKey: relayPriv, kaspa });
+  tx.finalize();
+  const r = assertFinalTxid(tx, wd.expectedTxid); if (!r.ok) throw new Error(`签名后txid=${r.actualTxid} != ${wd.expectedTxid}`);
+});
+t('⑭独立复算: Σin−Σout==netLoss; 目的地/代币两个 covenant_id 各自用 kaspa.covenantId 独立复算; 代币输出 owner 随目的地 covenant_id 变(换 fee outpoint ⇒ 代币 spk 变)', () => {
+  const tx = kaspa.Transaction.deserializeFromSafeJSON(wd.txJson);
+  let sIn = 0n, sOut = 0n; for (const i of tx.inputs) sIn += BigInt(i.utxo.amount); for (const o of tx.outputs) sOut += BigInt(o.value);
+  if (sIn - sOut !== wd.netLoss) throw new Error(`隐含费 ${sIn - sOut} != netLoss ${wd.netLoss}`);
+  const feeOp = { transactionId: String(tx.inputs[WITHDRAW_FEE_IN_INDEX].previousOutpoint.transactionId), index: Number(tx.inputs[WITHDRAW_FEE_IN_INDEX].previousOutpoint.index) };
+  for (const idx of [WITHDRAW_TOKEN_OUT_INDEX, WITHDRAW_DEST_OUT_INDEX]) {
+    const indep = String(kaspa.covenantId(feeOp, [{ index: idx, output: new kaspa.TransactionOutput(tx.outputs[idx].value, tx.outputs[idx].scriptPublicKey) }]));
+    if (indep.toLowerCase() !== String(tx.outputs[idx].covenant.covenantId).toLowerCase()) throw new Error(`output[${idx}] covenant_id 与独立复算不一致`);
+  }
+  const wd2 = buildWithdrawTxJson(wArgs({ feeUtxo: bigFee(9) }));
+  if (spkOf(wd2.txJson, WITHDRAW_TOKEN_OUT_INDEX) === spkOf(wd.txJson, WITHDRAW_TOKEN_OUT_INDEX)) throw new Error('目的地 covenant_id 变了, 代币输出 spk(owner)却没变——owner 没绑定目的地');
+  if (wd2.destCovId === wd.destCovId) throw new Error('不同 fee outpoint 应给出不同 covenant_id');
+});
+
+// 🔴 KanetTokenClaim 输入签名真验签(独立移植 sighash + schnorr; 私钥=委员私钥, 公钥=claim 的 winner_pk)
+const ktcAbiSpend = () => computeKanetTokenClaimGenesisArtifact({ marketCovIdHex: convertToClaim.claimCovId, winnerPkHex: COMMITTEE_PK, amount: 1000 }).entries.spend;
+const ktcSig = (tx) => parsePushes(String(tx.inputs[WITHDRAW_KTC_IN_INDEX].signatureScript).replace(/^0x/, ''))[ktcAbiSpend().params.findIndex((p) => p.name === 's')];
+t('⑮a 【真验签】KanetTokenClaim 的 s 对【最终tx】的共识 sighash 有效(独立移植 sighash + schnorr; 公钥=winner_pk)', () => {
+  const tx = kaspa.Transaction.deserializeFromSafeJSON(wd.txJson);
+  const sig = ktcSig(tx);
+  if (!sig || sig.length !== 65) throw new Error(`KTC 签名 push 长度=${sig?.length}`);
+  if (!schnorrVerify(sig.subarray(0, 64).toString('hex'), sighashAll(sighashInput(tx), WITHDRAW_KTC_IN_INDEX), COMMITTEE_PK)) throw new Error('KTC 签名对最终tx验签失败');
+});
+t('⑮b 反向臂: 同一笔tx去掉 output0/1 的 covenant 后重算 sighash, KTC 签名必须验假(检查对 covenant 敏感 + 签名确实承诺了 covenant)', () => {
+  const tx = kaspa.Transaction.deserializeFromSafeJSON(wd.txJson);
+  const d = sighashInput(tx);
+  const stripped = { ...d, outputs: d.outputs.map((o, k) => (k <= 1 ? { ...o, covenant: null } : o)) };
+  if (schnorrVerify(ktcSig(tx).subarray(0, 64).toString('hex'), sighashAll(stripped, WITHDRAW_KTC_IN_INDEX), COMMITTEE_PK)) throw new Error('去掉 covenant 后签名仍验真——检查对 covenant 不敏感');
+});
+t('⑮c 换 fee 面值(不同找零候选)各自重签: 每个最终tx的 KTC 签名都验真', () => {
+  let verified = 0;
+  for (const value of [10_000_000_000n, 95_000_000n, 60_000_000n]) {
+    let b; try { b = buildWithdrawTxJson(wArgs({ feeUtxo: { ...bigFee(8), value } })); } catch (e) { if (/mass超过|no_viable_change_shape|insufficient/.test(e.message)) continue; throw e; }
+    const tx = kaspa.Transaction.deserializeFromSafeJSON(b.txJson);
+    if (!schnorrVerify(ktcSig(tx).subarray(0, 64).toString('hex'), sighashAll(sighashInput(tx), WITHDRAW_KTC_IN_INDEX), COMMITTEE_PK)) throw new Error(`fee=${value} includeChange=${b.includeChange}: 验签失败`);
+    verified++;
+  }
+  if (verified < 2) throw new Error(`只验了${verified}个面值`);
+});
+
+// 见证映射(独立 push 解析器)
+t('⑯KanetTokenClaim 见证里各索引/标志位置与交易真实结构一致: tok_in_idx→held outpoint, tok_out_idx→代币输出, dest_idx→目的地 covenant 输出, to_market_input=false, 前后缀=调用方给的代币模板', () => {
+  const tx = kaspa.Transaction.deserializeFromSafeJSON(wd.txJson);
+  const abi = ktcAbiSpend(); const pushes = parsePushes(String(tx.inputs[WITHDRAW_KTC_IN_INDEX].signatureScript).replace(/^0x/, ''));
+  const at = (n) => pushes[abi.params.findIndex((p) => p.name === n)];
+  const v = (n) => decodeInt(at(n));
+  const opOf = (i) => `${tx.inputs[i].previousOutpoint.transactionId}:${tx.inputs[i].previousOutpoint.index}`;
+  if (opOf(v('tok_in_idx')) !== `${HELD_OP.txid}:${HELD_OP.vout}`) throw new Error('tok_in_idx 指向的输入不是 held 代币 outpoint');
+  if (v('tok_out_idx') !== WITHDRAW_TOKEN_OUT_INDEX || v('dest_idx') !== WITHDRAW_DEST_OUT_INDEX) throw new Error('tok_out_idx/dest_idx 不对');
+  if (String(tx.outputs[v('dest_idx')].scriptPublicKey.script) !== DEST_SPK.slice(2)) throw new Error('dest_idx 指向的输出不是调用方指定的目的地');
+  if (v('to_market_input') !== 0) throw new Error('to_market_input 必须为 false(路径 ii)');
+  if (at('tok_prefix').toString('hex') !== tokPrefixHex.slice(2) || at('tok_suffix').toString('hex') !== tokSuffixHex.slice(2)) throw new Error('tok_prefix/tok_suffix 不是调用方给的代币模板字节');
+});
+t('⑰哨兵 withdrawWitnessArgs: tok_in_idx/tok_out_idx/dest_idx 在哨兵输入(5/6/7 两两不同)下各落在自己具名的字段; to_market_input 恒 false', () => {
+  const a = withdrawWitnessArgs({ sig65Hex: 'ab'.repeat(65), tokInIdx: 5, tokOutIdx: 6, destIdx: 7, tokPrefixHex: '0xcc', tokSuffixHex: '0xdd' });
+  if (a.tok_in_idx !== 5 || a.tok_out_idx !== 6 || a.dest_idx !== 7) throw new Error(`映射不对: ${JSON.stringify(a)}`);
+  if (a.to_market_input !== false || a.s !== '0x' + 'ab'.repeat(65) || a.tok_prefix !== '0xcc' || a.tok_suffix !== '0xdd') throw new Error('标志/签名/前后缀映射不对');
+  if (WITHDRAW_TOKEN_OUT_INDEX === WITHDRAW_DEST_OUT_INDEX) throw new Error('测试退化: 代币输出与目的地输出下标相同');
+  // 注: 真实布局里 tok_in_idx(held=输入1) 与 dest_idx(输出1) 数值相同(输入/输出是两个下标空间), 共识与本 tx 都看不出这两个参数被互换——
+  // 只有本哨兵测试守这条映射; 布局一变 assertWithdrawLayout 会大声失败。
+});
+t('⑱结构断言 assertWithdrawLayout: 正确布局放行; KTC/held outpoint 互换、代币输出/目的地输出 spk 错、目的地无 covenant 各自必拒', () => {
+  const tx = kaspa.Transaction.deserializeFromSafeJSON(wd.txJson);
+  const ok = { tx, ktcOutpoint: KTC_OP, heldTokenOutpoint: HELD_OP, expectedTokenOutSpkHex: '0x' + tx.outputs[0].scriptPublicKey.script, expectedDestSpkHex: DEST_SPK };
+  assertWithdrawLayout(ok);
+  throws(() => assertWithdrawLayout({ ...ok, ktcOutpoint: HELD_OP, heldTokenOutpoint: KTC_OP }), /inputs\[0\]/);
+  throws(() => assertWithdrawLayout({ ...ok, heldTokenOutpoint: { ...HELD_OP, vout: 5 } }), /tok_in_idx/);
+  throws(() => assertWithdrawLayout({ ...ok, expectedTokenOutSpkHex: DEST_SPK }), /tok_out_idx/);
+  throws(() => assertWithdrawLayout({ ...ok, expectedDestSpkHex: ok.expectedTokenOutSpkHex }), /dest_idx/);
+  const noCov = kaspa.Transaction.deserializeFromSafeJSON(wd.txJson);
+  noCov.outputs = noCov.outputs.map((o, k) => (k === WITHDRAW_DEST_OUT_INDEX ? new kaspa.TransactionOutput(o.value, o.scriptPublicKey) : o));
+  throws(() => assertWithdrawLayout({ ...ok, tx: noCov }), /没有 covenant 绑定/);
+});
+
+// ── mass 向量 pin(账本1497 C1 + NWT 要求逐 builder 钉死 inputHasCovenant) ──
+t('⑲inputHasCovenant 钉死: withdraw 的输入0(KanetTokenClaim)/输入1(held KTT)在上一笔 claim_draw 里确是带 covenant 的输出, fee 输入无; 断言信号 == 独立 NWT 移植的 storage mass(按真实布局 [true,true,false]); 错向量 [true,false,false] 结果必不同', () => {
+  const prev = kaspa.Transaction.deserializeFromSafeJSON(built.txJson);
+  if (!prev.outputs[CLAIM_DRAW_CLAIM_OUT_INDEX].covenant || !prev.outputs[CLAIM_DRAW_TOKEN_OUT_INDEX].covenant) throw new Error('前置: claim_draw 输出0/1 应带 covenant');
+  // 常量必须与"真实输入布局推导出的向量"逐项相等(输入0/1 来自 claim_draw 输出0/1 的 covenant 有无, 输入2 是 relay 普通 fee UTXO)
+  const derived = [!!prev.outputs[WITHDRAW_KTC_OUTPOINT_VOUT()].covenant, !!prev.outputs[WITHDRAW_HELD_OUTPOINT_VOUT()].covenant, false];
+  if (JSON.stringify(S.WITHDRAW_INPUT_HAS_COVENANT) !== JSON.stringify(derived)) throw new Error(`WITHDRAW_INPUT_HAS_COVENANT=${JSON.stringify(S.WITHDRAW_INPUT_HAS_COVENANT)} != 真实布局推导 ${JSON.stringify(derived)}`);
+  if (!Object.isFrozen(S.WITHDRAW_INPUT_HAS_COVENANT)) throw new Error('向量常量必须冻结');
+  // C1 角色表与输入下标一一对应(输入0=claim, 输入1=held, 其余为 fee 不在表内)
+  if (STEP_INPUT_ROLES.withdraw[WITHDRAW_KTC_IN_INDEX] !== 'claim' || STEP_INPUT_ROLES.withdraw[WITHDRAW_HELD_IN_INDEX] !== 'held' || STEP_INPUT_ROLES.withdraw.length !== WITHDRAW_FEE_IN_INDEX) throw new Error(`C1 withdraw 角色表 ${JSON.stringify(STEP_INPUT_ROLES.withdraw)} 与输入布局不符`);
+  const tx = kaspa.Transaction.deserializeFromSafeJSON(wd.txJson);
+  const feeVal = 10_000_000_000n; // wArgs 默认 bigFee(8)
+  const sig = wd.massSignal; // builder 自己用的向量算出的信号(变异 builder 的向量 ⇒ 此值变 ⇒ 下面与 NWT 独立移植对拍变红)
+  if (!sig || sig.storageMass === undefined) throw new Error('builder 未返回 massSignal');
+  const cell = (spkHex, amount, cov) => ({ p: NWTM.utxoPlurality(BigInt(String(spkHex).replace(/^0x/, '').length / 2), cov), a: BigInt(amount) });
+  const ins = tx.inputs.map((i, k) => cell(i.utxo.scriptPublicKey.script, i.utxo.amount, k < 2));
+  const outs = tx.outputs.map((o) => cell(o.scriptPublicKey.script, o.value, !!o.covenant));
+  const nwt = NWTM.calcStorageMass(ins, outs);
+  if (String(sig.storageMass) !== String(nwt.mass)) throw new Error(`断言信号 storage=${sig.storageMass} != NWT 独立移植 ${nwt.mass}`);
+  const wrong = assertMassWithinCeiling({ kaspa, network: 'simnet', tx, inputHasCovenant: [true, false, false], feeUtxoValueSompi: feeVal, label: 'withdraw-wrong-vector' });
+  if (wrong.storageMass === sig.storageMass) throw new Error('错向量给出了相同 storage mass——本测试无法证明向量被钉住');
+  if (String(nwt.mass) === String(wrong.storageMass)) throw new Error('NWT 独立值与错向量相同——对拍失去区分力');
+});
+
+// ── 🔴 MUST-PROVE: 签名前断言(winner_pk) ──
+t('⑳a 私钥不是 winner_pk 的那一把(别的市场的委员私钥) ⇒ signing_key_mismatch, 在任何签名之前 fail-closed, 错误信息不含私钥', () => {
+  const otherPriv = decryptCommitteePrivkey(otherGa.committeePrivkeyEnvelope);
+  throws(() => buildWithdrawTxJson(wArgs({ committeePrivkeyEnvelope: otherGa.committeePrivkeyEnvelope })), /signing_key_mismatch.*fail-closed/, [otherPriv]);
+});
+t('⑳b winner_pk 是别人(且给的链上 spk 与之自洽) 而手上是本委员私钥 ⇒ signing_key_mismatch(隔离出"公钥逐字节相等"这一层, 不被 spk 自洽检查抢先)', () => {
+  const otherArt = computeKanetTokenClaimGenesisArtifact({ marketCovIdHex: convertToClaim.claimCovId, winnerPkHex: otherGa.committeePubkeyHex, amount: 1000 });
+  throws(() => buildWithdrawTxJson(wArgs({ winnerPkHex: otherGa.committeePubkeyHex, ktcUtxoScriptPublicKeyHex: otherArt.scriptPubKeyHex })), /signing_key_mismatch.*fail-closed/);
+});
+t('⑳c 正向: winner_pk 用大写 hex(同一把)也放行; winner_pk/amount 与链上 KanetTokenClaim spk 不自洽 ⇒ fail-closed(现算 spk != 链上 spk)', () => {
+  buildWithdrawTxJson(wArgs({ winnerPkHex: COMMITTEE_PK.toUpperCase() }));
+  throws(() => buildWithdrawTxJson(wArgs({ winnerPkHex: '11'.repeat(32) })), /现算的 KanetTokenClaim spk.*链上 UTXO spk/);
+  throws(() => buildWithdrawTxJson(wArgs({ amount: 999 })), /现算的 KanetTokenClaim spk.*链上 UTXO spk/);
+});
+t('⑳d 签名前断言在【任何 createInputSignature 之前】执行: 断言失败时一次都没被调用', () => {
+  let signCalls = 0;
+  const wrapped = { ...kaspa, createInputSignature: (...a) => { signCalls++; return kaspa.createInputSignature(...a); } };
+  const otherPriv = decryptCommitteePrivkey(otherGa.committeePrivkeyEnvelope);
+  throws(() => buildWithdrawTxJson(wArgs({ kaspa: wrapped, committeePrivkeyEnvelope: otherGa.committeePrivkeyEnvelope })), /signing_key_mismatch/, [otherPriv]);
+  if (signCalls !== 0) throw new Error(`签名前断言失败后 createInputSignature 仍被调用了 ${signCalls} 次`);
+});
+
+// ── 🔴 目的地闸(Bettor 1520 裁定②) ──
+t('㉑目的地闸: 允许清单 v0 为空且冻结; 主网(即使 allowUnlistedTestDestination:true)一律拒; 非主网无显式声明拒; 非主网+显式声明放行; 清单命中放行; 形状不对拒', () => {
+  if (WITHDRAW_DESTINATION_ALLOWLIST_SPK_HEX.length !== 0 || !Object.isFrozen(WITHDRAW_DESTINATION_ALLOWLIST_SPK_HEX)) throw new Error('v0 允许清单必须为空且冻结');
+  throws(() => buildWithdrawTxJson(wArgs({ network: 'mainnet' })), /不在允许清单.*主网 withdraw 在最小钱包 covenant/);
+  throws(() => buildWithdrawTxJson(wArgs({ allowUnlistedTestDestination: false })), /不在允许清单.*allowUnlistedTestDestination/);
+  buildWithdrawTxJson(wArgs()); // simnet + 显式声明
+  const listed = buildWithdrawTxJson(wArgs({ network: 'mainnet', destinationAllowlistSpkHex: [DEST_SPK.toUpperCase().replace('0X', '0x')], allowUnlistedTestDestination: false }));
+  if (listed.destGate !== 'allowlisted') throw new Error(`destGate=${listed.destGate}`);
+  throws(() => buildWithdrawTxJson(wArgs({ destinationScriptPublicKeyHex: undefined })), /35 字节 P2SH/);
+  throws(() => buildWithdrawTxJson(wArgs({ destinationScriptPublicKeyHex: '0x76a914' + '00'.repeat(20) + '88ac' })), /35 字节 P2SH/);
+  throws(() => assertWithdrawDestinationAllowed({ network: 'mainnet', destSpkHex: DEST_SPK, allowlistSpkHex: [], allowUnlistedTestDestination: true }), /不在允许清单/);
+});
+t('㉒目的地闸先于解密与签名: 私钥信封是垃圾、目的地被拒时, 报的是目的地错而不是解密错; createInputSignature 零调用', () => {
+  let signCalls = 0;
+  const wrapped = { ...kaspa, createInputSignature: (...a) => { signCalls++; return kaspa.createInputSignature(...a); } };
+  throws(() => buildWithdrawTxJson(wArgs({ kaspa: wrapped, network: 'mainnet', committeePrivkeyEnvelope: 'not-an-envelope' })), /不在允许清单/);
+  if (signCalls !== 0) throw new Error(`目的地被拒后 createInputSignature 仍被调用了 ${signCalls} 次`);
+});
+
+// ── fail-closed / 私钥卫生 ──
+t('㉓ fail-closed: amount<=0 / outpoint 缺失 / 链上 KanetTokenClaim spk 不符 / spk 缺失', () => {
+  throws(() => buildWithdrawTxJson(wArgs({ amount: 0 })), /amount 必须是正整数/);
+  throws(() => buildWithdrawTxJson(wArgs({ heldTokenOutpoint: null })), /必填/);
+  throws(() => buildWithdrawTxJson(wArgs({ ktcOutpoint: null })), /必填/);
+  throws(() => buildWithdrawTxJson(wArgs({ ktcUtxoScriptPublicKeyHex: '0xaa20' + '11'.repeat(32) + '87' })), /链上 UTXO spk/);
+  throws(() => buildWithdrawTxJson(wArgs({ ktcUtxoScriptPublicKeyHex: undefined })), /链上 UTXO spk/);
+});
+t('㉔ 私钥不进返回值; 构造过程中 new 的 PrivateKey 全部 free(created == freed)', () => {
+  const priv = decryptCommitteePrivkey(ga.committeePrivkeyEnvelope);
+  if (JSON.stringify(wd, (k, v) => (typeof v === 'bigint' ? v.toString() : v)).includes(priv)) throw new Error('明文私钥出现在返回值里');
+  let created = 0, freed = 0;
+  class Tracked extends kaspa.PrivateKey { constructor(...a) { super(...a); created++; } free() { freed++; return super.free(); } }
+  buildWithdrawTxJson(wArgs({ kaspa: { ...kaspa, PrivateKey: Tracked } }));
+  if (created < 1 || created !== freed) throw new Error(`PrivateKey created=${created} freed=${freed}`);
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

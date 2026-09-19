@@ -18,8 +18,8 @@ if (!process.env.CONSOLE_ENCRYPTION_KEY) process.env.CONSOLE_ENCRYPTION_KEY = '1
 
 const kaspa = await import('kaspa-wasm');
 const { randomBytes } = await import('node:crypto');
-const { normalizePubkeyHex, pubkeyHexOfPrivkey, deriveTicketBettorPk, assertSigningKeyMatchesBinding, assertTicketSigningKey } = await import('./proto-signing-key-binding.mjs');
-const { p2sh, computeMarketGenesisArtifacts } = await import('./proto-covenant-builder.mjs');
+const { normalizePubkeyHex, pubkeyHexOfPrivkey, deriveTicketBettorPk, assertSigningKeyMatchesBinding, assertTicketSigningKey, deriveClaimWinnerPk, assertClaimWinnerSigningKey } = await import('./proto-signing-key-binding.mjs');
+const { p2sh, computeMarketGenesisArtifacts, loadProtocolConstants } = await import('./proto-covenant-builder.mjs');
 const { compileSilV100 } = await import('./pool-bshard-artifacts.mjs');
 const { decryptCommitteePrivkey } = await import('./proto-committee-key.mjs');
 
@@ -80,6 +80,28 @@ t('正向(生产路径 v0): 委员私钥解密后其公钥逐字节 == 本市场
 t('反向(生产路径 v0): 取了【另一个市场】的委员私钥 ⇒ signing_key_mismatch(这正是"取错私钥"的实际场景)', () => {
   const privB = decryptCommitteePrivkey(gaB.committeePrivkeyEnvelope);
   throws(() => assertSigningKeyMatchesBinding({ kaspa, privKeyHex: privB, expectedPubkeyHex: gaA.committeePubkeyHex, label: 'v0 committee=bettor' }), /signing_key_mismatch/, [privB]);
+});
+
+// ── 批7 withdraw: KanetTokenClaim winner_pk 推导 + 签名前断言(期望 spk 由测试自己按 ctor 直接编译+P2SH, 不经 computeKanetTokenClaimGenesisArtifact) ──
+const KTC_PATH = new URL('./KanetTokenClaim.sil', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
+const { token_tmpl_hash: TOKEN_TMPL_HASH } = loadProtocolConstants();
+const MARKET_COV = 'ef'.repeat(32);
+const ktcSpk = ({ pk, amount }) => '0x' + p2sh(Buffer.from(compileSilV100(KTC_PATH, [{ kind: 'bytes', value: [...Buffer.from(MARKET_COV, 'hex')] }, { kind: 'bytes', value: [...Buffer.from(pk, 'hex')] }, { kind: 'int', value: amount }, { kind: 'bytes', value: [...Buffer.from(TOKEN_TMPL_HASH, 'hex')] }], 'KanetTokenClaim').script));
+const kW = newKey(), kX = newKey();
+t('withdraw 正向: winner_pk 与 (market_cov_id, amount) 重算的 KanetTokenClaim P2SH == 链上 spk ⇒ 推导出 winner_pk; 私钥公钥逐字节相等 ⇒ 放行(大写 hex 同一把也放行)', () => {
+  const spk = ktcSpk({ pk: kW.pk, amount: 1000 });
+  if (deriveClaimWinnerPk({ marketCovIdHex: MARKET_COV, winnerPkHex: kW.pk, amount: 1000, claimUtxoSpkHex: spk }) !== kW.pk) throw new Error('推导值不对');
+  assertClaimWinnerSigningKey({ kaspa, privKeyHex: kW.priv, marketCovIdHex: MARKET_COV, winnerPkHex: kW.pk.toUpperCase(), amount: 1000, claimUtxoSpkHex: spk });
+});
+t('withdraw 反向①: 私钥是别人的(winner_pk 与链上 spk 自洽, 但私钥公钥不同) ⇒ signing_key_mismatch, 错误信息不含私钥', () => {
+  throws(() => assertClaimWinnerSigningKey({ kaspa, privKeyHex: kX.priv, marketCovIdHex: MARKET_COV, winnerPkHex: kW.pk, amount: 1000, claimUtxoSpkHex: ktcSpk({ pk: kW.pk, amount: 1000 }) }), /signing_key_mismatch/, [kX.priv]);
+});
+t('withdraw 反向②: winner_pk / amount / market_cov_id 与链上 claim spk 不是同一个 ⇒ claim_pk_underivable(不据不自洽的输入推导应签公钥)', () => {
+  const spk = ktcSpk({ pk: kW.pk, amount: 1000 });
+  throws(() => deriveClaimWinnerPk({ marketCovIdHex: MARKET_COV, winnerPkHex: kX.pk, amount: 1000, claimUtxoSpkHex: spk }), /claim_pk_underivable/);
+  throws(() => deriveClaimWinnerPk({ marketCovIdHex: MARKET_COV, winnerPkHex: kW.pk, amount: 999, claimUtxoSpkHex: spk }), /claim_pk_underivable/);
+  throws(() => deriveClaimWinnerPk({ marketCovIdHex: '00'.repeat(32), winnerPkHex: kW.pk, amount: 1000, claimUtxoSpkHex: spk }), /claim_pk_underivable/);
+  throws(() => deriveClaimWinnerPk({ marketCovIdHex: MARKET_COV, winnerPkHex: 'zz', amount: 1000, claimUtxoSpkHex: spk }), /32 字节 hex/);
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

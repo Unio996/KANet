@@ -20,7 +20,7 @@ export const EXPECTED_INPUT_VALUE_SOMPI = Object.freeze({
   rootClaim: CONTINUATION_OUTPUT_SOMPI, // convert_to_claim 产出的 RootClaim genesis
   held: GENESIS_OUTPUT_SOMPI,           // 合并 KTT(register_append/market_seal/convert_to_claim 产出的代币输出)
   ticket: GENESIS_OUTPUT_SOMPI,         // register_append 产出的 PoolSideTicket 输出
-  claim: CONTINUATION_OUTPUT_SOMPI,     // claim_draw 产出的 KanetTokenClaim genesis 输出(预置, 批7)
+  claim: CONTINUATION_OUTPUT_SOMPI,     // claim_draw 产出的 KanetTokenClaim genesis 输出(批7 withdraw 的输入0)
 });
 
 /** 每个步骤需要核对的输入角色(与各 builder 的输入布局一一对应)。 */
@@ -29,7 +29,8 @@ export const STEP_INPUT_ROLES = Object.freeze({
   close_commit: ['rootClose'],
   convert_to_claim: ['rootClose', 'held'],
   claim_draw: ['rootClaim', 'ticket', 'held'],
-  // 预置(批7/8 落码时按其真实输入布局复核): withdraw 消费 KanetTokenClaim + 其持有的代币; ticket_reclaim 消费输家 ticket。
+  // withdraw(批7 已按真实输入布局复核并由 proto-claim-draw.test.mjs ⑲ 钉死): 输入0=KanetTokenClaim(claim), 输入1=其持有的代币(held), 输入2=fee(不在表内);
+  // ticket_reclaim(批8 落码时按其真实输入布局复核): 消费输家 ticket。
   withdraw: ['claim', 'held'],
   ticket_reclaim: ['ticket'],
 });
