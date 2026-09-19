@@ -24,6 +24,14 @@
 
 ## 🔴 当前有效的战略决策 (CURRENT)
 
+### D-027 主网自动接单置 false + relay 入站握手自动接受加开关（主网默认关）(2026-09-20 · Owner 本机终端原话「自动接单置 false，握手也加开关，主网默认关。」· Bettor 记账 · COORD-LEDGER 1550 / 1554 / 1557 / 1570)
+
+1. **决定 ①**：主网 `config_entries` 的 `autotake_enabled` 由 `true` 置为 `false`（v88 迁移播种值，非任何人决定）。一条 DB 写；执行走 KANet-UI runbook（精确 SQL、前后读数、回滚、确认运行中 console 每次读库）→ NWT 核 → 执行 → Bettor 事后核。`autotake_mode` 不动。
+2. **决定 ②**：relay 进程内建的"入站握手自动接受"（收到新对端握手即发一笔接受交易）加 env 开关，只认字面 `1`，**所有网络默认关**（同 D-026 约定），主网 env 不写键；关闭态入站握手照常登记为 pending、不发任何交易、启动打恰一行 disabled 日志。走设计先行：Bettor 缓解设计稿 → NWT 审设计（不是漏洞评估）→ 派实现 → NWT 审 diff → 合入 → 随下一次 console 重启（relay 子进程重启）生效。
+3. **口径**：主网 console 启动后无人干预的链上花费 = "今天为零，由三个默认关的开关 + autotake=false + 守卫清单保证"；不说"不再花钱"。**打开**任一开关或恢复 autotake 须 Owner 单独批。
+4. **不入库**：两项的利用细节按 D-021 不进公开仓库（NWT 评估草稿已按分类器拦停删除，(1557)）。
+5. **不影响**：D-022 结算线、批 9 排期、驱动开关（仍关）。
+
 ### D-026 console 启动期 UTXO 自动拆分加开关，默认关（主网不写键 = 关）(2026-09-19 · Owner 本机终端原话「加开关，主网默认关。」· Bettor 记账 · COORD-LEDGER 1533–1535 / 1538 · 设计 `docs/2026-09-19-bettor-utxo-autosplit-startup-switch-design-v0.1.md`)
 
 1. **决定**：`autoSplitAll()`（console 每次启动对全部有钥 relay 跑 `split_utxo` 的那一步）加 env 闸 `UTXO_AUTOSPLIT_ON_START`，只有字面 `1` 才执行；默认关，**所有网络**默认关（D-017 后只剩主网，不按网络分支）；`kanet.mainnet.env` 不写该键。
