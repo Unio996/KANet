@@ -1,4 +1,6 @@
-# 设计稿：relay 入站握手自动接受加开关（主网默认关）v0.1
+# 设计稿：relay 入站握手自动接受加开关（主网默认关）v0.2
+
+> 文件名沿用 `…-v0.1.md`（账本 1571 / NWT 审稿以此路径引用）；**正文即 v0.2**，v0.1→v0.2 差异全部在末节「v0.2 增补」，与上文冲突处以该节为准。
 
 > **Status**: CURRENT
 >
@@ -66,3 +68,29 @@
 - 追赶路径关闭后 `catch-up done` 汇总行仍打印、计数为 0，是否会被别的监控误读为"正常追赶完成"。
 - 2.3 不做对端白名单：你判是否需要在本页之外另开票。
 - V2 的"ingestMessage 1 次"是否足以证明登记不变，还是要断言 pending_actions 行真被建出（需 console 侧参与）。
+
+## 6. v0.2 增补（NWT 设计审 `77e34e01`，Bettor 全部采纳；与上文冲突处以本节为准）
+
+### 6.1 M-H1：第四个落点——`relay.mjs` 的 `doAcceptHandshake`（索引器 / 回落模式）
+- **事实（NWT 读码 + Bettor 复核）**：relay 里 `acceptHandshake(` 调用点共三处：`rpc-listener.mjs:986`（实时，落点 2）、`rpc-listener.mjs:582`（追赶第 1 段，落点 3）、**`relay.mjs:256` `doAcceptHandshake`（v0.1 漏）**。后者由 `relay.mjs` 的 `poll()` 在会话 pending_incoming 时调用，自带去重、自己 sendKaspa。`poll()` 在两种情形下跑：① `RELAY_MODE=rpc` 时 `startRpcListener()` 失败 `.catch` 回落 `setInterval(poll)`（`relay.mjs:300-311`，例如节点在 relay 启动时不可达——无人值守开机的一种真实时序）；② `config_entries.relay_mode` 或 env `RELAY_MODE` 为 indexer（`relay-manager.js:224` 取 getConfig('relay_mode') || env || 'rpc'）。主网现状（Bettor 只读核）：config 无 relay_mode 行、env 无 RELAY_MODE 键 ⇒ 默认 rpc；当前 stdout 未匹配到回落字样（历史是否发生过无数据，定为**设计缺口**非已发生事故）。
+- **设计**：落点 4 = `doAcceptHandshake` 入口同一纯函数判定，关闭态一行 `HANDSHAKE auto-accept disabled (poll) — left pending for <last12>` 并 return，不 sendKaspa；**启动日志改打在 `relay.mjs`（所有模式的共同入口）**，不打在 rpc-listener（否则回落 / 索引器模式的 relay 不打这行，V6 计数变少会被读成"少了几个 relay"）；**加源码扫描测试**（复用 F2-1 的共享扫描器 `kasia-console/test-fixtures/source-scan/scan-non-test-sources.mjs`）：`kasia-relay/src` 内每处 `acceptHandshake(` 调用必须位于经 `handshakeAutoAcceptEnabled` 保护的函数体内，防第四个再悄悄出现；V 表加 **V2c**：indexer / 回落模式下 `acceptHandshake` 0 次、`sendKaspa` 0 次。
+
+### 6.2 五个审点的 verdict（采纳）
+- ① 闸位置与"漏洞 #6 fix"语义一致：step 4 的 ingestMessage 在 console 侧（`ingest-service.js:86-140`）确会 INSERT handshake_accept / pending（已 active 跳过、旧行 failed / expired 重置），step 5 的 create_and_claim 是 INSERT OR IGNORE 后立即 claim，闸放其前正好不 claim。**堆积**：全仓无按时间的过期机制（仅 failPendingAction 超 max_retries 置 expired），pending 唯一消费者是 relay 追赶第 1 段（agent-mind 的 create_and_claim 是出站 handshake_init，由 autoHandshake 默认关另闸）⇒ 关闭期间每个（本地 relay, 对端）留一行永不过期，无害（小行、无消费者、getPendingHandshakes LIMIT 100），但见 6.3。
+- ② **改为每次调用读**：四个落点每次调 `handshakeAutoAcceptEnabled(env = process.env)`，测试传 env 即可切换，不必重载有网络副作用的 rpc-listener 顶层模块；启动行读一次。§2.1"进程级常量"作废。
+- ③ 关闭态 `catch-up done` 汇总行写 `handshakes: DISABLED` 不写 0（与 `KANET_CATCHUP_COMM` 关闭态先例一致，`rpc-listener.mjs:659-670`；:725 注释自陈"19551 次 catch-up done 全是 0/0/0"证明 0 会被忽视）。无程序消费该行。
+- ④ 对端白名单 / 速率预算 / 每日上限 = **策略层，另开票、另一次钱路决定、须 Owner 批**；接口写明：策略层落在 `handshakeAutoAcceptEnabled` 之后、`acceptHandshake` 之前。
+- ⑤ V2 保留 relay 侧调用次数断言，**加 V2b**（console 侧现状钉住）：真实迁移建临时库调真实 ingestMessage inbound handshake，断言恰一行 handshake_accept / pending，覆盖已 active 不入队、旧行 failed 重置。
+
+### 6.3 S-H1：打开开关前的积压处置（写进 §4）
+设计有意"不 markSeen 不 claim，保留将来打开后由追赶接手"——代价：关闭期间累积的 pending 行，在开关写成 1 后下一次 relay 启动的追赶第 1 段里，最老的（至多 100 条 / relay）会被逐个自动接受。**§4 补**：打开前 Owner 先决定积压处置——(a) 有意接受；(b) 经审的一次性 SQL 置 expired、保留审计行；(c) 先出策略层——并把"当前 pending 的 handshake_accept 行数"列为打开前必读读数。
+
+### 6.4 验收表更新
+- V2c（新）：indexer / 回落模式零 acceptHandshake 零 sendKaspa（变异：删落点 4 ⇒ 红）。
+- V2b（新）：console 侧 pending 行现状钉住。
+- V5：启动行在 `relay.mjs`，回落 / 索引器模式同样打；V6 计数口径不变（== relay 子进程数）。
+- V9（新）：源码扫描——`kasia-relay/src` 每处 `acceptHandshake(` 都在受保护函数内（变异：在任意文件新增一处裸调用 ⇒ 红）。
+- V10（新）：`catch-up done` 关闭态汇总行含 `handshakes: DISABLED`。
+
+### 6.5 未证（沿用 NWT）
+未在回落 / 索引器模式实跑（不动生产 relay）；`lib/indexer.mjs` 主网指向未核；回落在主网是否发生过无历史数据。
