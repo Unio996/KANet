@@ -19,7 +19,7 @@
 | S1 树检查 | `Test-TreeClean` | ✅ / ⚠ | 分支 + 两个脚本 `diff --quiet HEAD` ✔，只阻断 console；见 S-B（tracked 源码是否干净、git 在 S4U 下的目录属主检查） |
 | S2 前次停机干净否 | `Get-LogTail` / `Test-CleanStopMarker` 读**内部日志** | ✅ | 与我读到的 `rusty-kaspa.log` 收尾行 `Kaspad has stopped...` 形状一致；日志不存在按 unknown 也告警 |
 | S3 stdout 停写自检 | 哨兵比 mtime | ✅ | 启发式已标 |
-| S4 S4U 跨会话可管理 | R2(c) | ✅ | 见 S-C（R2(b) 只测 `git --version`） |
+| S4 S4U 跨会话可管理 | R2(c) | ✅ | R2(c) 落实；另见 S-B（R2(b) 只测 `git --version`，未测仓库访问） |
 | S5 PID 陈旧 | `Start-ConsolePhase` fresh 检查 | ✅ | `node.exe` ∧ 精确路径 ∧ `CreationDate ≥ 开始−5 s` |
 | S6 PID 复用 | `Test-SameProcess`（存活 ∧ 启动时间不变） | ✅ | |
 
