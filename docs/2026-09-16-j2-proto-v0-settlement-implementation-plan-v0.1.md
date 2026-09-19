@@ -122,12 +122,19 @@ relay侧**复用现有`covenant_broadcast`命令**（v0.2更新，见§5）。
     （10 秒内 6 个样本，均值约 132.5s，与共识常量 `TIMESTAMP_DEVIATION_TOLERANCE=132` 吻合）——**120s 低于该滞后，主网上会 NotFinalized**；改为 300s（≈2.2 倍）。样本窗口短且本机时钟未做 NTP 校准，
     仍需更长时间/多次采样确认。simnet 上 NotFinalized 已真实复现并在 pmt 追上后 ACCEPT，见 `docs/provenance/2026-09-19-j2-fullchain-simnet/`。
     **驱动层约束（批9，不在 builder）**：提交侧把 `NotFinalized` 归类为"可重试、无状态变更"，**不得进 ambiguous**。
+    **根治（Bettor 2026-09-19 裁定，判据已落 `proto-close-commit-gate.mjs` + 测试）**：驱动层判"能否提交 close_commit"**不用墙钟**，读节点
+    `getBlockDagInfo.pastMedianTime`：`pmt >= deadline + 30s` 才可提交（节点是 `lock_time < pmt` 严格小于）；读不到 pmt ⇒ 不提交（fail-closed）。builder 里的 300s 墙钟守卫保留为第二层。
+    本机时钟有无 NTP 都不影响。同一 pmt 也判 B4-3 SLA（≥deadline+1h 报警，≥+2h `refund_flip_open`）。测试向量取自 simnet 全链真实的被拒/被收两组 pmt。接线是批9。
   - **B4-3 SLA（驱动设计约束，不落码）**：`RootClose.refund_flip` 无需任何签名，`deadline+2h`（7,200,000 ms）后**任何人**可把市场 `closed 0→2`
     （取消/退款路径，账本1478 已记），且此后 close_commit 再也进不来（write-once 锁）。⇒ 结算驱动必须在 **deadline+2h 之前**让 close_commit 落链，
     **deadline+1h 报警**。这是设计属性，不是 builder 缺陷。
-  - **B4-4 驱动层 MUST（不落码，批6 前置）**：`buildCloseCommitTxJson` 是"任意结果的签名预言机"——它对 `newWinningSide`/`newPayoutRootHex` **不核对**。
+  - **B4-4 驱动层 MUST（判据与先行测试已落 `proto-settlement-inputs.mjs`，接线是批9；批6 前置）**：`buildCloseCommitTxJson` 是"任意结果的签名预言机"——它对 `newWinningSide`/`newPayoutRootHex` **不核对**。
     调用方（意图状态机/ingest）**必须**：① 从 DB（`proto_bets` 与裁决结果）派生这两个值；② 断言 `Σ payouts == pool_value`；③ `payoutRoot` 由 merkle 现算而非调用方传入；
-    任一不符拒绝调用 builder。批6（claim_draw）落码前必须先有这条断言的测试。
+    任一不符拒绝调用 builder。批6（claim_draw）落码前必须先有这条断言的测试——**已有**（`proto-settlement-inputs.test.mjs` 14 条：正向 + 8 类反向 + 3 条变异对照）。
+    附带三条我加的 fail-closed：胜方已确认下注必须**恰好 1 条**（(A) 路线，Bettor 1354）；`payout >= 1000`（RootClaim.sil:103，否则 claim_draw 永远无法执行、签 close_commit 会锁死池子，账本1484）；
+    `proto_markets.payout_root` 若已落库必须等于现算值（防库/链分裂）。🟡 leaf 公式 `blake2b256(pk‖le8(payout))` 按 RootClaim.sil:112 手工对照，链上认可要等批6 simnet。
+  - **Codex MUST-PROVE（已落 `proto-signing-key-binding.mjs` + 8 条正反回归）**：签名前由 proto_bets+链上 ticket spk 推导并证明应签公钥（重算 PoolSideTicket P2SH 必须等于链上 spk），
+    再断言与私钥的公钥**按字节**相等（大小写不同视为相等）；不等在 IPC 与签名之前 fail-closed。批6/7/8 的 builder/驱动必须在签名前调用 `assertTicketSigningKey`。
   - **B4-5（已落，close_commit 与 convert_to_claim 都加）**：入口断言 `p2sh(现算当前 RootClose artifact) == 调用方给的链上 UTXO spk`（新增必填参数 `rootCloseUtxoScriptPublicKeyHex`）。
   - **N-1（NWT，已落入口拦截）**：`register_append` 无签名可调，合约只要求 leaf 续约输出 value ≥ DUST_MIN，任何人可把 leaf 面值定成任意值，而 builder 按 `CONTINUATION_OUTPUT_SOMPI` 常量算 leftover。
     已在 `assertLeafStateMatchesChain` 加 `chainUtxo.value == CONTINUATION_OUTPUT_SOMPI` 的 fail-closed（缺失/不等即拒，与 held 那条对称，正反向量已配），`proto-broadcast-ops` 调用点传真实面值。
