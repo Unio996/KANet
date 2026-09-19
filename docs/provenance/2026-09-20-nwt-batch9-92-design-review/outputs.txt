@@ -1,0 +1,26 @@
+# NWT 批9 9-2 设计审(coord/j2-batch9-92-design-v0 头 7878b509)实测输出; 只读; 不含地址/金额/名字
+
+## 1. 活库 proto_markets / proto_claims 的 id 是否满足设计 S9 的小写 UUID(只打印计数)
+proto_markets: rows=3 lowercaseUuid=0 nonConforming=3
+proto_claims: rows=0 lowercaseUuid=0 nonConforming=0
+proto_settlement_intents rows=0
+
+## 2. 活库 proto_markets id 形状(长度/字符类, 不打印值)
+proto_markets columns: id,token_def_id,question,deadline_ms,min_bet,seal_count,committee_pubkeys_json,committee_privkey_enc,rootclose_tmpl_hash,shardleaf_txid,shardleaf_vout,rootclose_txid,rootclose_vout,status,genesis_prepared_txid,genesis_prepared_tx_json,genesis_submitted_txid,genesis_landed_depth,genesis_landed_at,genesis_last_error,shardleaf_cov_id,winning_side,payout_root,created_at,updated_at,shardleaf_own_redeem_len
+status=cancelled len=64 hasHyphen=false hasUpper=false isHex=true
+status=cancelled len=64 hasHyphen=false hasUpper=false isHex=true
+status=betting len=64 hasHyphen=false hasUpper=false isHex=true
+
+## 3. fork 默认序列化 + 设计里的 S9 正则对真实生产者输出的判定
+E-S9b fork default serialization: String object arrives as {"typeofIntentKey":"string","value":"settle:market:x:seal","typeofToJson":"string"} (typeof at the gate for a String object would be "object")
+E-S9b gate view typeof(new String(..)) = object ; typeof object-with-toJSON = object
+producer key for market/64-hex id/seal: S9(design) accepts=false
+producer key for market/64-hex id/resolve: S9(design) accepts=false
+producer key for claim/64-hex id/convert_to_claim: S9(design) accepts=false
+producer key for claim/64-hex id/claim_draw: S9(design) accepts=false
+producer key for market/uuid id/seal: S9(design) accepts=true
+
+## 4. 市场 id 的真实生成式(源码)
+128:    const marketId = randomBytes(32).toString('hex');
+86:    const id = randomUUID();
+(:86 是 tokens/create 的代币定义 id, :128 是市场 id)
