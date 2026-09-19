@@ -27,6 +27,7 @@ const require = createRequire(import.meta.url);
 const { blake2b } = require('../../node_modules/@noble/hashes/blake2b.js');
 
 const ROOT_CLAIM_SIL = new URL('./RootClaim.sil', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
+const KANET_TOKEN_CLAIM_SIL = new URL('./KanetTokenClaim.sil', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
 const REFUND_CLAIM_SIL = new URL('./RefundClaim.sil', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
 const ROOT_CLOSE_SIL = new URL('./RootClose.sil', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
 const SHARD_LEAF_DIRECT_SIL = new URL('./ShardLeaf_direct.sil', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
@@ -322,7 +323,12 @@ export function computeTicketGenesisArtifact({ bettorPk, direction, stake, shard
   const ctor = [ctorBytes32V100(bettorPk), ctorIntV100(direction), ctorIntV100(stake), ctorBytes32V100(shardPoolId)];
   const compiled = compileSilV100(POOL_SIDE_TICKET_SIL, ctor, 'PoolSideTicket');
   const artifact = artifactOf(compiled);
-  return { script: artifact.script, scriptPubKeyHex: '0x' + p2sh(artifact.script), templateHashHex: artifact.templateHashHex };
+  // 批6(claim_draw): ticket输入的见证要ticket_prefix_len/ticket_suffix_len(由stateLayout得)与authorize_spend的entryAbi——同一次编译产物的另外两个切面,
+  // 不让调用方为此重编(同computeRootCloseGenesisArtifact.entries先例); 纯加字段, 不改既有三个字段。
+  return {
+    script: artifact.script, scriptPubKeyHex: '0x' + p2sh(artifact.script), templateHashHex: artifact.templateHashHex,
+    stateLayout: artifact.stateLayout, entries: compiled._raw.contracts.PoolSideTicket.entries,
+  };
 }
 
 /**
@@ -463,6 +469,29 @@ export function computeRootClaimGenesisArtifact({ marketId, state }) {
     // 同 computeRootCloseGenesisArtifact 的 entries 理由: claim_draw(批6)的 entryAbi 是同一次编译产物的另一切面。
     entries: compiled._raw.contracts.RootClaim.entries,
   };
+}
+
+/**
+ * (实现计划v0.8 批6, claim_draw) KanetTokenClaim genesis 输出的完整 redeem 脚本推导——只算不签名不广播。
+ * ctor 四字段即 State 四字段(market_cov_id/winner_pk/amount/token_tmpl_hash); 真实值直接作 ctor 编译, fail-closed:
+ * 编译出的模板 hash 必须等于协议常量 claim_tmpl_hash(不等即 ctor 顺序/布局与 RootClaim.claim_draw 期望的 foreign-template 不一致)。
+ * @param {object} o
+ * @param {string} o.marketCovIdHex  32字节hex(无0x): RootClaim 自己的 covenant_id(claim_draw 里 OpInputCovenantId(activeInput))
+ * @param {string} o.winnerPkHex  32字节hex(无0x): 票面 bettorPk
+ * @param {number|bigint} o.amount  payout
+ * @returns {{script:Buffer, scriptPubKeyHex:string, stateLayout:object, templateHashHex:string}}
+ */
+export function computeKanetTokenClaimGenesisArtifact({ marketCovIdHex, winnerPkHex, amount }) {
+  if (!/^[0-9a-f]{64}$/.test(marketCovIdHex)) throw new Error(`computeKanetTokenClaimGenesisArtifact: marketCovIdHex must be 32-byte hex, got ${marketCovIdHex}`);
+  if (!/^[0-9a-f]{64}$/.test(winnerPkHex)) throw new Error(`computeKanetTokenClaimGenesisArtifact: winnerPkHex must be 32-byte hex, got ${winnerPkHex}`);
+  const { token_tmpl_hash, claim_tmpl_hash } = loadProtocolConstants();
+  const ctor = [ctorBytes32V100(marketCovIdHex), ctorBytes32V100(winnerPkHex), ctorIntV100(amount), ctorBytes32V100(token_tmpl_hash)];
+  const compiled = compileSilV100(KANET_TOKEN_CLAIM_SIL, ctor, 'KanetTokenClaim');
+  const artifact = artifactOf(compiled);
+  if (artifact.templateHashHex !== claim_tmpl_hash) {
+    throw new Error(`computeKanetTokenClaimGenesisArtifact: fail-closed — 编译出的 KanetTokenClaim 模板hash(${artifact.templateHashHex}) != 协议常量claim_tmpl_hash(${claim_tmpl_hash})`);
+  }
+  return { script: artifact.script, scriptPubKeyHex: '0x' + p2sh(artifact.script), stateLayout: artifact.stateLayout, templateHashHex: artifact.templateHashHex };
 }
 
 export { p2sh, hex, ZERO32 };
