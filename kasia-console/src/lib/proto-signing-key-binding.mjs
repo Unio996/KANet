@@ -14,7 +14,7 @@
 //
 // 错误信息不含私钥值、不含推导出的私钥材料(只含公钥/spk 的短前缀)。
 
-import { computeTicketGenesisArtifact } from './proto-covenant-builder.mjs';
+import { computeTicketGenesisArtifact, computeKanetTokenClaimGenesisArtifact } from './proto-covenant-builder.mjs';
 
 const HEX64 = /^[0-9a-fA-F]{64}$/;
 const noPrefixLower = (h) => String(h).replace(/^0x/i, '').toLowerCase();
@@ -68,5 +68,26 @@ export function assertSigningKeyMatchesBinding({ kaspa, privKeyHex, expectedPubk
 /** 组合入口: 推导并证明应签公钥, 再断言与私钥逐字节相等。builder/驱动在【任何 IPC 与签名之前】调用。 */
 export function assertTicketSigningKey({ kaspa, privKeyHex, bet, marketId, ticketUtxoSpkHex, label = 'ticket' }) {
   const expectedPubkeyHex = deriveTicketBettorPk({ bet, marketId, ticketUtxoSpkHex });
+  return assertSigningKeyMatchesBinding({ kaspa, privKeyHex, expectedPubkeyHex, label });
+}
+
+/**
+ * (批7 withdraw) 从 KanetTokenClaim 自身状态推导并【证明】应签公钥 winner_pk: 按 (market_cov_id, winner_pk, amount) 重算 KanetTokenClaim 的 P2SH,
+ * 必须等于链上 claim UTXO 的 spk(P2SH 是脚本哈希, 证明这个 winner_pk 确实是烤进该 claim 的那一把)。
+ * @returns {string} 应签公钥(小写 hex)
+ */
+export function deriveClaimWinnerPk({ marketCovIdHex, winnerPkHex, amount, claimUtxoSpkHex }) {
+  const winnerPk = normalizePubkeyHex(winnerPkHex, 'KanetTokenClaim.winner_pk');
+  const art = computeKanetTokenClaimGenesisArtifact({ marketCovIdHex: noPrefixLower(marketCovIdHex), winnerPkHex: winnerPk, amount });
+  const want = noPrefixLower(art.scriptPubKeyHex), got = noPrefixLower(claimUtxoSpkHex ?? '');
+  if (want !== got) {
+    throw new Error(`claim_pk_underivable: fail-closed — 按 (market_cov_id=${noPrefixLower(marketCovIdHex).slice(0, 8)}…, winner_pk=${winnerPk.slice(0, 8)}…, amount=${amount}) 重算的 KanetTokenClaim P2SH(${want.slice(0, 12)}…) != 链上 claim UTXO spk(${got.slice(0, 12)}…): 传入的 winner_pk/amount/market_cov_id 与链上 claim 不是同一个, 不能据此推导应签公钥`);
+  }
+  return winnerPk;
+}
+
+/** 组合入口(withdraw 签名前): 推导并证明 winner_pk, 再断言与私钥公钥逐字节相等; 不等在 IPC 与签名之前 fail-closed。 */
+export function assertClaimWinnerSigningKey({ kaspa, privKeyHex, marketCovIdHex, winnerPkHex, amount, claimUtxoSpkHex, label = 'withdraw claim' }) {
+  const expectedPubkeyHex = deriveClaimWinnerPk({ marketCovIdHex, winnerPkHex, amount, claimUtxoSpkHex });
   return assertSigningKeyMatchesBinding({ kaspa, privKeyHex, expectedPubkeyHex, label });
 }

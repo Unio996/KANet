@@ -13,12 +13,18 @@
 
 import {
   selectChangeShape, scriptPublicKeyFromHex, assertImpliedFeeMatches, assertKaspadInputVersionRule,
-  GENESIS_OUTPUT_SOMPI, CONTINUATION_OUTPUT_SOMPI, PROTO_V0_COMPUTE_BUDGET,
+  GENESIS_OUTPUT_SOMPI, CONTINUATION_OUTPUT_SOMPI, PROTO_V0_COMPUTE_BUDGET, SOMPI_PER_MASS, dynamicNetLossCeiling,
 } from './proto-tx-assembly.mjs';
-import { computeRootCloseGenesisArtifact, computeRootClaimGenesisArtifact, computeKttGenesisArtifact, p2sh } from './proto-covenant-builder.mjs';
+import { computeRootCloseGenesisArtifact, computeRootClaimGenesisArtifact, computeTicketGenesisArtifact, computeKanetTokenClaimGenesisArtifact, computeKttGenesisArtifact, p2sh } from './proto-covenant-builder.mjs';
 import { encodeConvertToRootcloseAction, combineActionAndRedeem } from './proto-convert-to-rootclose-witness.mjs';
 import { encodeCloseCommitAction } from './proto-close-commit-witness.mjs';
 import { encodeConvertToClaimAction } from './proto-convert-to-claim-witness.mjs';
+import { encodeClaimDrawAction } from './proto-claim-draw-witness.mjs';
+import { encodeAuthorizeSpendAction } from './proto-ticket-authorize-witness.mjs';
+import { payoutLeafHex } from './proto-payout-leaf.mjs';
+import { assertTicketSigningKey, assertClaimWinnerSigningKey } from './proto-signing-key-binding.mjs';
+import { encodeKtcSpendAction } from './proto-ktt-claim-spend-witness.mjs';
+import { evaluateCloseCommitTiming } from './proto-close-commit-gate.mjs';
 import { encodeKttTransferZeroOutAction, combineKttActionAndRedeem } from './proto-ktt-transfer-witness.mjs';
 import { assertMassWithinCeiling } from './proto-mass-ceiling.mjs';
 import { decryptCommitteePrivkey } from './proto-committee-key.mjs';
@@ -284,6 +290,7 @@ export const COMMITTEE_MODE_SINGLE_OPERATOR_5X_SAME_KEY = 'single_operator_5x_sa
  * @param {object} o.feeUtxo  {txid,vout,value,scriptPublicKeyHex}
  * @param {string} o.relayChangeScriptPublicKeyHex
  * @param {bigint} o.absFeeCapSompi  feeProfile.close_commit.cap
+ * @param {{pastMedianTimeMs:number}} [o.pmtEvidence]  驱动层pmt闸放行时读到的节点pastMedianTime(毫秒); 传入则复核pmt判据并免除300s墙钟余量, 不传则保留300s墙钟守卫(第二层)
  * @returns {{txJson:string, expectedTxid:string, rootCloseContinuationCovId:string,
  *   includeChange:boolean, changeSompi:bigint, requiredFee:bigint, netLoss:bigint,
  *   signInputIndices:number[]}}
@@ -291,14 +298,23 @@ export const COMMITTEE_MODE_SINGLE_OPERATOR_5X_SAME_KEY = 'single_operator_5x_sa
 export function buildCloseCommitTxJson({
   kaspa, network, marketId, committeePubkeyHex, committeePrivkeyEnvelope, deadlineMs, rootCloseTmplHash,
   rootCloseOutpoint, rootCloseUtxoScriptPublicKeyHex, rootCloseCovId, sealedState, newWinningSide, newPayoutRootHex,
-  tokPrefixHex, tokSuffixHex, feeUtxo, relayChangeScriptPublicKeyHex, absFeeCapSompi,
+  tokPrefixHex, tokSuffixHex, feeUtxo, relayChangeScriptPublicKeyHex, absFeeCapSompi, pmtEvidence,
 }) {
   if (newWinningSide !== 0 && newWinningSide !== 1) throw new Error(`buildCloseCommitTxJson: newWinningSide必须是0或1, 实际${newWinningSide}`);
   if (!/^[0-9a-f]{64}$/.test(newPayoutRootHex)) throw new Error(`buildCloseCommitTxJson: newPayoutRootHex必须是32字节hex, 实际${newPayoutRootHex}`);
   // MUST-1构造侧代理(设计文档§1.2/实现计划v0.5): 提交时节点当前时间必须真实超过deadline_ms——
   // 本仓构造与提交是背靠背的同一逻辑单元(MUST-2), 构造时校验等价于提交时校验。
-  if (Date.now() < Number(deadlineMs) + CLOSE_COMMIT_DEADLINE_MARGIN_MS) {
-    throw new Error(`buildCloseCommitTxJson: fail-closed — Date.now()(${Date.now()}) < deadlineMs(${deadlineMs}) + 余量(${CLOSE_COMMIT_DEADLINE_MARGIN_MS}ms), RootClose.close_commit的require(tx.time>=temporal(deadline_ms))可能被节点以NotFinalized拒绝(节点用past-median-time严格小于比较, 滞后墙钟), 拒绝构造(避免留下prepared/ambiguous残留)`);
+  // 两层(Bettor 2026-09-19 C3, 不得互相反卡):
+  //   ① 主判据(驱动层): pmt闸(proto-close-commit-gate.mjs)读节点pastMedianTime, pmt>=deadline+30s才放行。驱动把放行时用的pmt作为pmtEvidence传入——
+  //      有pmtEvidence时本处【复核同一个pmt判据】(不放行则fail-closed), 且只要求墙钟不早于deadline(基本合理性), 【不再施加300s墙钟余量】:
+  //      主网墙钟-pmt≈133s, pmt刚放行时墙钟约deadline+163s, 若仍卡300s就会在pmt已放行后反卡约137s。
+  //   ② 第二层(无pmtEvidence, 即绕过pmt闸直接调builder): 保留墙钟守卫 Date.now()>=deadline+300s(暂定值, 依据见CLOSE_COMMIT_DEADLINE_MARGIN_MS注释)。
+  if (pmtEvidence) {
+    const tm = evaluateCloseCommitTiming({ pastMedianTimeMs: pmtEvidence.pastMedianTimeMs, deadlineMs });
+    if (!tm.canSubmit) throw new Error(`buildCloseCommitTxJson: fail-closed — pmtEvidence未通过pmt判据: ${tm.reason}`);
+    if (Date.now() < Number(deadlineMs)) throw new Error(`buildCloseCommitTxJson: fail-closed — Date.now()(${Date.now()}) < deadlineMs(${deadlineMs}), 墙钟不可能早于deadline(本机时钟严重偏差?), 拒绝构造`);
+  } else if (Date.now() < Number(deadlineMs) + CLOSE_COMMIT_DEADLINE_MARGIN_MS) {
+    throw new Error(`buildCloseCommitTxJson: fail-closed — Date.now()(${Date.now()}) < deadlineMs(${deadlineMs}) + 余量(${CLOSE_COMMIT_DEADLINE_MARGIN_MS}ms), RootClose.close_commit的require(tx.time>=temporal(deadline_ms))可能被节点以NotFinalized拒绝(节点用past-median-time严格小于比较, 滞后墙钟), 拒绝构造(避免留下prepared/ambiguous残留); 驱动层应先过pmt闸并传入pmtEvidence`);
   }
 
   const currentRcState = { local_yes: sealedState.local_yes, local_no: sealedState.local_no, count: sealedState.count, pool_value: sealedState.pool_value, closed: 0, winningSide: 0, payoutRoot: '00'.repeat(32) };
@@ -597,4 +613,531 @@ export function buildConvertToClaimTxJson({
     signInputIndices: [CONVERT_TO_CLAIM_FEE_IN_INDEX],
     genesisOutputIndices: [CONVERT_TO_CLAIM_CLAIM_OUT_INDEX, CONVERT_TO_CLAIM_TOKEN_OUT_INDEX],
   };
+}
+
+// ══════════ ④ claim_draw(批6, RootClaim.claim_draw, 仅 full 分支: payout == pool_value) ══════════
+export const CLAIM_DRAW_ROOTCLAIM_IN_INDEX = 0; // RootClaim(closed:1, claimed_bitmap:0)输入
+export const CLAIM_DRAW_TICKET_IN_INDEX = 1;    // 赢家 ticket 输入(authorize_spend 需 bettor 签名)
+export const CLAIM_DRAW_HELD_IN_INDEX = 2;      // 合并 KTT(owner=RootClaim covid)输入
+export const CLAIM_DRAW_FEE_IN_INDEX = 3;       // fee 输入
+export const CLAIM_DRAW_CLAIM_OUT_INDEX = 0;    // KanetTokenClaim genesis 输出
+export const CLAIM_DRAW_TOKEN_OUT_INDEX = 1;    // 代币转给新 KanetTokenClaim 的输出
+export const CLAIM_DRAW_UNUSED_OUT_INDEX = 0;   // rootOutIdx/remainTokenOutIdx: 仅 partial 分支用, full 分支不读(RootClaim.sil 行172 if 内)
+
+/**
+ * claim_draw 见证的具名参数映射(纯函数, 同 sealWitnessArgs/convertToClaimWitnessArgs 的理由): 抽出来用【所有索引参数两两不同】的哨兵输入单测,
+ * 证明每个索引落在它自己具名的字段上。键名 = entryAbi.params 里的真实参数名。
+ */
+export function claimDrawWitnessArgs({
+  rootOutIdx, claimOutIdx, tokenInIdx, tokenOutIdx, remainTokenOutIdx, ticketInIdx,
+  payout, merkleIndex, treeDepth, siblings, ticketPrefixLen, ticketSuffixLen,
+  tokPrefixHex, tokSuffixHex, claimPrefixHex, claimSuffixHex,
+}) {
+  return {
+    rootOutIdx, claimOutIdx, tokenInIdx, tokenOutIdx, remainTokenOutIdx,
+    payout, merkle_index: merkleIndex, tree_depth: treeDepth, siblings,
+    ticketInIdx, ticket_prefix_len: ticketPrefixLen, ticket_suffix_len: ticketSuffixLen,
+    tok_prefix: tokPrefixHex, tok_suffix: tokSuffixHex,
+    claim_prefix: '0x' + claimPrefixHex, claim_suffix: '0x' + claimSuffixHex,
+  };
+}
+
+/**
+ * ④ claim_draw（`RootClaim.claim_draw`）——设计文档§1.4/§4、实现计划v0.8 §2.4批6。**只做 full 分支**(payout == pool_value, 无 RootClaim 续约输出):
+ * [RootClaim(closed:1,CONT), 赢家ticket(GENESIS, 普通P2SH无covenant), 合并KTT(owner=RootClaim covid,GENESIS), fee] →
+ * [KanetTokenClaim genesis(market_cov_id=RootClaim covid, winner_pk=票面bettorPk, amount=payout, CONT), 代币转给新KanetTokenClaim(GENESIS), 找零]。
+ * 签名输入: fee(relay 签) + ticket(bettor 签, authorize_spend)——bettorSig 由本函数现签(用 committee_privkey_enc 解密, v0 bettor_pk===委员公钥)。
+ *
+ * 🔴 签名前 MUST-PROVE(Codex, 前置①): 在任何签名之前, 由 proto_bets + 链上 ticket spk 推导并证明应签公钥, 断言与手上私钥的公钥逐字节相等
+ * (assertTicketSigningKey), 不等 fail-closed。🔴 签名时序(B4-1 教训): ticket 签名承诺全部输出含 covenant——必须在 populateGenesisCovenants 之后、
+ * 对本次候选 tx 现签(每个找零候选各签一次), 并用 sighash 独立移植真验签(见测试)。
+ *
+ * 中止条件(fail-closed, 不构造): payout != pool_value(partial 分支不在本轮范围); payout < 1000(RootClaim.sil:103); 票面方向 != winningSide;
+ * 现算 leaf(depth-0)!= claimState.payoutRoot; claimed_bitmap != 0(v0 单赢家只会领一次); 链上 RootClaim spk != 现算(B4-5 同款)。
+ *
+ * @param {object} o
+ * @param {*} o.kaspa
+ * @param {string} o.network
+ * @param {string} o.marketId  32字节hex(无0x)
+ * @param {{local_yes:number,local_no:number,count:number,pool_value:number,closed:number,winningSide:number,payoutRoot:string,claimed_bitmap:number}} o.claimState
+ *   RootClaim 当前 8 字段 state(convert_to_claim 刚建时 claimed_bitmap=0)
+ * @param {{txid:string,vout:number}} o.rootClaimOutpoint  RootClaim 当前 UTXO(convert_to_claim 输出0)
+ * @param {string} o.rootClaimUtxoScriptPublicKeyHex  必填: 该 UTXO 的链上 spk(取自产出它的 convert_to_claim 交易输出), 入口断言 == 现算
+ * @param {string} o.rootClaimCovId  RootClaim 自己的 covenant_id(convert_to_claim 输出0 的 covenant_id)
+ * @param {{txid:string,vout:number}} o.heldTokenOutpoint  合并 KTT(owner=RootClaim covid)当前 UTXO(convert_to_claim 输出1)
+ * @param {{txid:string,vout:number}} o.ticketOutpoint  赢家 ticket UTXO(register_append 输出1)
+ * @param {string} o.ticketUtxoScriptPublicKeyHex  该 ticket 的链上 spk(取自产出它的 register_append 交易输出)
+ * @param {{bettor_pk:string, side:number, stake:number}} o.bet  赢家那条 proto_bets 行(推导应签公钥用)
+ * @param {string} o.committeePrivkeyEnvelope  committee_privkey_enc(v0: bettor_pk===committee 公钥, 用它签 ticket)
+ * @param {number} o.payout
+ * @param {string} o.tokPrefixHex 同 market_seal 调用方形状(0x 前缀 hex)
+ * @param {string} o.tokSuffixHex
+ * @param {object} o.feeUtxo  {txid,vout,value,scriptPublicKeyHex}
+ * @param {string} o.relayChangeScriptPublicKeyHex
+ * @param {bigint} o.absFeeCapSompi
+ */
+export function buildClaimDrawTxJson({
+  kaspa, network, marketId, claimState, rootClaimOutpoint, rootClaimUtxoScriptPublicKeyHex, rootClaimCovId, heldTokenOutpoint,
+  ticketOutpoint, ticketUtxoScriptPublicKeyHex, bet, committeePrivkeyEnvelope, payout,
+  tokPrefixHex, tokSuffixHex, feeUtxo, relayChangeScriptPublicKeyHex, absFeeCapSompi,
+}) {
+  const who = 'buildClaimDrawTxJson';
+  if (claimState.closed !== 1) throw new Error(`${who}: fail-closed — claimState.closed=${claimState.closed}, claim_draw 的 require(closed==1) 必然拒绝`);
+  if (payout !== claimState.pool_value) throw new Error(`${who}: fail-closed — payout(${payout}) != pool_value(${claimState.pool_value}): 只实现 full 分支(无 RootClaim 续约), partial 分支不在本轮范围, 立即停止不构造`);
+  if (!(payout >= 1000)) throw new Error(`${who}: fail-closed — payout(${payout}) < 1000, RootClaim.sil:103 require(payout>=1000) 必然拒绝`);
+  if (claimState.claimed_bitmap !== 0) throw new Error(`${who}: fail-closed — claimed_bitmap(${claimState.claimed_bitmap}) != 0: v0 单赢家只领一次, slot 已被占用`);
+  if (!heldTokenOutpoint || !ticketOutpoint) throw new Error(`${who}: fail-closed — heldTokenOutpoint / ticketOutpoint 必填`);
+  if (Number(bet.side) !== claimState.winningSide) throw new Error(`${who}: fail-closed — 票面方向(side=${bet.side}) != claimState.winningSide(${claimState.winningSide}): require(tk.direction==winningSide) 必然拒绝(这张不是赢票)`);
+  // (A) 路线 depth-0: payoutRoot 必须等于 leaf = blake2b256(bettorPk‖le8(payout))(RootClaim.sil:112)
+  const bettorPk = String(bet.bettor_pk).toLowerCase();
+  if (payoutLeafHex(bettorPk, payout) !== String(claimState.payoutRoot).toLowerCase()) {
+    throw new Error(`${who}: fail-closed — 现算 leaf(depth-0, bettorPk=${bettorPk.slice(0, 8)}…, payout=${payout}) != claimState.payoutRoot: 这张票/这个 payout 不在 payoutRoot 里, merkle 证明必然失败`);
+  }
+
+  const claimArtifact = computeRootClaimGenesisArtifact({ marketId, state: claimState });
+  // B4-5 同款: 现算的当前 RootClaim spk 必须等于调用方给的链上 UTXO spk
+  if (typeof rootClaimUtxoScriptPublicKeyHex !== 'string' || String(rootClaimUtxoScriptPublicKeyHex).replace(/^0x/, '').toLowerCase() !== String(claimArtifact.scriptPubKeyHex).replace(/^0x/, '').toLowerCase()) {
+    throw new Error(`${who}: fail-closed — 现算的当前RootClaim spk(${claimArtifact.scriptPubKeyHex}) != 调用方给的链上UTXO spk(${rootClaimUtxoScriptPublicKeyHex}); claimState/marketId 与链上已不自洽`);
+  }
+  const ticketArtifact = computeTicketGenesisArtifact({ bettorPk, direction: Number(bet.side), stake: Number(bet.stake), shardPoolId: marketId });
+  const ticketPrefixLen = ticketArtifact.stateLayout.start;
+  const ticketSuffixLen = ticketArtifact.script.length - ticketArtifact.stateLayout.start - ticketArtifact.stateLayout.len;
+
+  // 🔴 签名前 MUST-PROVE: 私钥只以局部变量存在, 断言通过前不签名、不进入任何构造后续步骤。
+  let committeePrivHex = decryptCommitteePrivkey(committeePrivkeyEnvelope);
+  assertTicketSigningKey({ kaspa, privKeyHex: committeePrivHex, bet, marketId, ticketUtxoSpkHex: ticketUtxoScriptPublicKeyHex, label: 'claim_draw ticket' });
+  const bettorPrivObj = new kaspa.PrivateKey(committeePrivHex);
+
+  const ktcArtifact = computeKanetTokenClaimGenesisArtifact({ marketCovIdHex: String(rootClaimCovId).toLowerCase(), winnerPkHex: bettorPk, amount: payout });
+  const heldArtifact = computeKttGenesisArtifact({ amount: claimState.pool_value, ownerCovIdHex: String(rootClaimCovId).toLowerCase() });
+  const ktcPrefix = ktcArtifact.script.subarray(0, ktcArtifact.stateLayout.start);
+  const ktcSuffix = ktcArtifact.script.subarray(ktcArtifact.stateLayout.start + ktcArtifact.stateLayout.len);
+
+  const rcOutpointObj = { transactionId: rootClaimOutpoint.txid, index: rootClaimOutpoint.vout };
+  const ticketOutpointObj = { transactionId: ticketOutpoint.txid, index: ticketOutpoint.vout };
+  const heldOutpointObj = { transactionId: heldTokenOutpoint.txid, index: heldTokenOutpoint.vout };
+  const feeOutpointObj = { transactionId: feeUtxo.txid, index: feeUtxo.vout };
+  const rcSpk = scriptPublicKeyFromHex(kaspa, claimArtifact.scriptPubKeyHex);
+  const ticketSpk = scriptPublicKeyFromHex(kaspa, ticketArtifact.scriptPubKeyHex);
+  const heldSpk = scriptPublicKeyFromHex(kaspa, heldArtifact.scriptPubKeyHex);
+  const ktcSpk = scriptPublicKeyFromHex(kaspa, ktcArtifact.scriptPubKeyHex);
+  const feeUtxoSpk = scriptPublicKeyFromHex(kaspa, feeUtxo.scriptPublicKeyHex);
+
+  // 新 KanetTokenClaim 的 covenant_id(fee 输入 outpoint 派生, 同 market_seal/convert_to_claim 约定)先于 token 输出算出。
+  const ktcCovIdHex = String(kaspa.covenantId(feeOutpointObj, [{ index: CLAIM_DRAW_CLAIM_OUT_INDEX, output: new kaspa.TransactionOutput(CONTINUATION_OUTPUT_SOMPI, ktcSpk) }]));
+  const newTokenArtifact = computeKttGenesisArtifact({ amount: payout, ownerCovIdHex: ktcCovIdHex });
+  const newTokenSpk = scriptPublicKeyFromHex(kaspa, newTokenArtifact.scriptPubKeyHex);
+
+  const claimAction = encodeClaimDrawAction(kaspa, claimArtifact.entries.claim_draw, claimDrawWitnessArgs({
+    rootOutIdx: CLAIM_DRAW_UNUSED_OUT_INDEX, claimOutIdx: CLAIM_DRAW_CLAIM_OUT_INDEX, tokenInIdx: CLAIM_DRAW_HELD_IN_INDEX, tokenOutIdx: CLAIM_DRAW_TOKEN_OUT_INDEX,
+    remainTokenOutIdx: CLAIM_DRAW_UNUSED_OUT_INDEX, ticketInIdx: CLAIM_DRAW_TICKET_IN_INDEX,
+    payout, merkleIndex: 0, treeDepth: 0, siblings: [], ticketPrefixLen, ticketSuffixLen,
+    tokPrefixHex, tokSuffixHex, claimPrefixHex: ktcPrefix.toString('hex'), claimSuffixHex: ktcSuffix.toString('hex'),
+  }));
+  const rcSigScript = combineActionAndRedeem(kaspa, claimAction, claimArtifact.script);
+  const heldSigScript = combineKttActionAndRedeem(kaspa, encodeKttTransferZeroOutAction(kaspa, heldArtifact.entryAbi, heldArtifact.stateFieldCount, [0]), heldArtifact.script);
+  const ticketSigScriptFor = (sig65Hex) => combineActionAndRedeem(kaspa, encodeAuthorizeSpendAction(kaspa, ticketArtifact.entries.authorize_spend, { bettorSig: '0x' + sig65Hex }), ticketArtifact.script);
+  const DUMMY_SIG65 = '00'.repeat(65);
+
+  const mkInput = (outpoint, value, spk, sigScript) => ({
+    previousOutpoint: outpoint, signatureScript: sigScript ?? new Uint8Array(0), sequence: 0n, sigOpCount: 0, computeBudget: PROTO_V0_COMPUTE_BUDGET,
+    utxo: { outpoint, amount: value, scriptPublicKey: spk, blockDaaScore: 0n },
+  });
+  const buildTx = (feeChangeSompi, ticketSigScript) => {
+    const txInputs = [];
+    txInputs[CLAIM_DRAW_ROOTCLAIM_IN_INDEX] = mkInput(rcOutpointObj, CONTINUATION_OUTPUT_SOMPI, rcSpk, rcSigScript);
+    txInputs[CLAIM_DRAW_TICKET_IN_INDEX] = mkInput(ticketOutpointObj, GENESIS_OUTPUT_SOMPI, ticketSpk, ticketSigScript);
+    txInputs[CLAIM_DRAW_HELD_IN_INDEX] = mkInput(heldOutpointObj, GENESIS_OUTPUT_SOMPI, heldSpk, heldSigScript);
+    txInputs[CLAIM_DRAW_FEE_IN_INDEX] = mkInput(feeOutpointObj, feeUtxo.value, feeUtxoSpk, new Uint8Array(0));
+    const t = new kaspa.Transaction({
+      version: 1, inputs: txInputs,
+      outputs: [
+        new kaspa.TransactionOutput(CONTINUATION_OUTPUT_SOMPI, ktcSpk),
+        new kaspa.TransactionOutput(GENESIS_OUTPUT_SOMPI, newTokenSpk),
+        ...(feeChangeSompi === undefined ? [] : [new kaspa.TransactionOutput(feeChangeSompi, feeUtxoSpk)]),
+      ],
+      lockTime: 0n, subnetworkId: '0'.repeat(40), gas: 0n, payload: '',
+    });
+    t.populateGenesisCovenants([
+      new kaspa.GenesisCovenantGroup(CLAIM_DRAW_FEE_IN_INDEX, [CLAIM_DRAW_CLAIM_OUT_INDEX]),
+      new kaspa.GenesisCovenantGroup(CLAIM_DRAW_FEE_IN_INDEX, [CLAIM_DRAW_TOKEN_OUT_INDEX]),
+    ]);
+    return t;
+  };
+  // 🔴 B4-1 教训: ticket 签名承诺全部输出(含 covenant)——先建出 covenant 已就位的候选 tx, 再对它现签, 再用真实签名重建最终 tx(sighash 不含输入自己的 sigScript)。
+  const mkTx = (feeChangeSompi) => {
+    const draft = buildTx(feeChangeSompi, ticketSigScriptFor(DUMMY_SIG65));
+    const raw = kaspa.createInputSignature(draft, CLAIM_DRAW_TICKET_IN_INDEX, bettorPrivObj, kaspa.SighashType.All);
+    const noPrefix = raw.startsWith('0x') ? raw.slice(2) : raw;
+    if (noPrefix.length !== 132) throw new Error(`${who}: ticket createInputSignature 长度异常, 期望66字节(132 hex), 实际${noPrefix.length / 2}字节`);
+    return buildTx(feeChangeSompi, ticketSigScriptFor(noPrefix.slice(2)));
+  };
+
+  // leftover: RootClaim 自带 CONT 抵扣 claim 输出 CONT; held 自带 GENESIS 抵扣 token 输出 GENESIS; ticket 的 GENESIS 面值回到 fee/找零。
+  const leftover = feeUtxo.value + CONTINUATION_OUTPUT_SOMPI + GENESIS_OUTPUT_SOMPI + GENESIS_OUTPUT_SOMPI - CONTINUATION_OUTPUT_SOMPI - GENESIS_OUTPUT_SOMPI;
+  let shape;
+  try {
+    shape = selectChangeShape({ kaspa, network, leftoverSompi: leftover, buildTxWithChange: (c) => mkTx(c), buildTxNoChange: () => mkTx(undefined), absFeeCapSompi });
+  } finally {
+    bettorPrivObj.free();
+    committeePrivHex = null; // 🟡 hex 字符串仍待 GC(已知边界, 同 close_commit)
+  }
+  assertImpliedFeeMatches(shape.tx, shape.netLoss, 'claim_draw');
+  assertKaspadInputVersionRule(shape.tx, 'claim_draw');
+  assertClaimDrawLayout({
+    tx: shape.tx, rootClaimOutpoint, ticketOutpoint, heldTokenOutpoint,
+    expectedKtcSpkHex: ktcArtifact.scriptPubKeyHex,
+    expectedTokenOutSpkHex: computeKttGenesisArtifact({ amount: payout, ownerCovIdHex: String(shape.tx.outputs[CLAIM_DRAW_CLAIM_OUT_INDEX].covenant.covenantId).toLowerCase() }).scriptPubKeyHex,
+  });
+  // 账本1497 MUST: RootClaim(covenant) / ticket(普通P2SH, register_append 输出1 无 covenant, 节点记录已核) / held KTT(covenant) / fee(普通)
+  assertMassWithinCeiling({ kaspa, network, tx: shape.tx, inputHasCovenant: [true, false, true, false], feeUtxoValueSompi: feeUtxo.value, label: 'claim_draw' });
+
+  const ktcCovId = String(shape.tx.outputs[CLAIM_DRAW_CLAIM_OUT_INDEX].covenant.covenantId);
+  if (ktcCovId.toLowerCase() !== ktcCovIdHex.toLowerCase()) throw new Error(`${who}: fail-closed — 真实tx output[${CLAIM_DRAW_CLAIM_OUT_INDEX}]的covenant_id(${ktcCovId}) != 预算值(${ktcCovIdHex}), 新代币输出的owner会指向错误的covenant`);
+  return {
+    txJson: shape.tx.serializeToSafeJSON(), expectedTxid: shape.tx.id,
+    claimCovId: ktcCovId, tokenCovId: String(shape.tx.outputs[CLAIM_DRAW_TOKEN_OUT_INDEX].covenant.covenantId),
+    includeChange: shape.includeChange, changeSompi: shape.changeSompi, requiredFee: shape.requiredFee, netLoss: shape.netLoss,
+    signInputIndices: [CLAIM_DRAW_FEE_IN_INDEX], genesisOutputIndices: [CLAIM_DRAW_CLAIM_OUT_INDEX, CLAIM_DRAW_TOKEN_OUT_INDEX],
+    ticketPrefixLen, ticketSuffixLen,
+  };
+}
+
+/** claim_draw 见证索引与交易真实布局的结构断言(同 assertWitnessIndexLayout 的理由; claim_draw 的 ticketInIdx/tokenInIdx 在真实形状里是 1/2, 互换可被发现)。 */
+export function assertClaimDrawLayout({ tx, rootClaimOutpoint, ticketOutpoint, heldTokenOutpoint, expectedKtcSpkHex, expectedTokenOutSpkHex }) {
+  const noPrefix = (h) => String(h).replace(/^0x/, '').toLowerCase();
+  const same = (inp, op) => inp && String(inp.previousOutpoint.transactionId) === String(op.txid) && Number(inp.previousOutpoint.index) === Number(op.vout);
+  if (!same(tx.inputs[CLAIM_DRAW_ROOTCLAIM_IN_INDEX], rootClaimOutpoint)) throw new Error('claim_draw: fail-closed — inputs[0] 不是 RootClaim outpoint, 输入布局与见证映射已不一致');
+  if (!same(tx.inputs[CLAIM_DRAW_TICKET_IN_INDEX], ticketOutpoint)) throw new Error(`claim_draw: fail-closed — 见证 ticketInIdx(${CLAIM_DRAW_TICKET_IN_INDEX}) 指向的输入不是 ticket outpoint, 输入布局与见证映射已不一致`);
+  if (!same(tx.inputs[CLAIM_DRAW_HELD_IN_INDEX], heldTokenOutpoint)) throw new Error(`claim_draw: fail-closed — 见证 tokenInIdx(${CLAIM_DRAW_HELD_IN_INDEX}) 指向的输入不是 held 代币 outpoint, 输入布局与见证映射已不一致`);
+  const claimOut = tx.outputs[CLAIM_DRAW_CLAIM_OUT_INDEX], tokOut = tx.outputs[CLAIM_DRAW_TOKEN_OUT_INDEX];
+  if (!claimOut || noPrefix(claimOut.scriptPublicKey.script) !== noPrefix(expectedKtcSpkHex)) throw new Error(`claim_draw: fail-closed — 见证 claimOutIdx(${CLAIM_DRAW_CLAIM_OUT_INDEX}) 指向的输出不是预期的 KanetTokenClaim genesis 输出`);
+  if (!tokOut || noPrefix(tokOut.scriptPublicKey.script) !== noPrefix(expectedTokenOutSpkHex)) throw new Error(`claim_draw: fail-closed — 见证 tokenOutIdx(${CLAIM_DRAW_TOKEN_OUT_INDEX}) 指向的输出不是预期的代币输出`);
+}
+
+// ══════════ ⑤ withdraw(批7, KanetTokenClaim.spend, 路径 (ii) to_market_input=false) ══════════
+export const WITHDRAW_KTC_IN_INDEX = 0;    // KanetTokenClaim(claim_draw 产出, CONT)输入 —— 唯一需要赢家签名的输入
+export const WITHDRAW_HELD_IN_INDEX = 1;   // 代币输入(owner=本 claim covenant_id, GENESIS)
+export const WITHDRAW_FEE_IN_INDEX = 2;    // fee 输入
+export const WITHDRAW_TOKEN_OUT_INDEX = 0; // 代币转出输出(owner = 目的地输出的 covenant_id)
+export const WITHDRAW_DEST_OUT_INDEX = 1;  // 目的地 covenant genesis 输出(spk 由调用方显式指定)
+export const WITHDRAW_DEST_OUTPUT_SOMPI = GENESIS_OUTPUT_SOMPI; // Bettor 1520 裁定: 目的地 covenant 输出用 GENESIS 面值
+// 账本1497 MUST + NWT 1521: 逐 builder 钉死"每个输入是不是 covenant UTXO"——[KanetTokenClaim(claim_draw 输出0, covenant), held KTT(claim_draw 输出1, covenant), fee(普通)]。
+// 测试从上一笔 claim_draw 的真实输出推导并逐项比对此常量(改常量/改布局其一即红)。
+export const WITHDRAW_INPUT_HAS_COVENANT = Object.freeze([true, true, false]);
+
+/**
+ * 🔴 Bettor 1520 裁定(2): 主网 withdraw 的目的地 spk 允许清单(35 字节 P2SH spk hex, 无 0x, 小写)。v0 **为空** ⇒ 主网 withdraw 不可构造(批9 排除 withdraw),
+ * 直到最小钱包 covenant(设计票 T-TOKEN-WALLET-COVENANT, checkSig 即花、代币可持有可转出)存在, 届时把它的 spk 形状加进来。
+ * 冻结数组: 不给调用点"顺手 push 一个进去"的口子。
+ */
+export const WITHDRAW_DESTINATION_ALLOWLIST_SPK_HEX = Object.freeze([]);
+
+/**
+ * withdraw 目的地闸(纯函数, 可单测): 目的地 spk 必须在允许清单里; 唯一例外是非主网 + 调用方显式声明"测试用、不可再花"(allowUnlistedTestDestination)。
+ * 主网(network==='mainnet')上 allowUnlistedTestDestination 一律不生效——清单为空则一律拒绝。
+ * @returns {'allowlisted'|'unlisted_test_destination'}
+ */
+export function assertWithdrawDestinationAllowed({ network, destSpkHex, allowlistSpkHex = WITHDRAW_DESTINATION_ALLOWLIST_SPK_HEX, allowUnlistedTestDestination = false }) {
+  const d = String(destSpkHex ?? '').replace(/^0x/i, '').toLowerCase();
+  if (!/^aa20[0-9a-f]{64}87$/.test(d)) {
+    throw new Error(`withdraw: fail-closed — 目的地 spk 必须是 35 字节 P2SH(aa20…87), 实际=${d.slice(0, 20)}…: 目的地必须由运营明确指定, 不设默认值`);
+  }
+  const list = (allowlistSpkHex ?? []).map((h) => String(h).replace(/^0x/i, '').toLowerCase());
+  if (list.includes(d)) return 'allowlisted';
+  if (network !== 'mainnet' && allowUnlistedTestDestination === true) return 'unlisted_test_destination';
+  throw new Error(`withdraw: fail-closed — 目的地 spk(${d.slice(0, 12)}…)不在允许清单(共 ${list.length} 项)内` +
+    (network === 'mainnet' ? '; 主网 withdraw 在最小钱包 covenant(T-TOKEN-WALLET-COVENANT)存在前不接线, allowUnlistedTestDestination 在主网不生效' : '; 非主网需显式 allowUnlistedTestDestination:true 才可用"测试用、不可再花"的目的地'));
+}
+
+/**
+ * withdraw 见证的具名参数映射(纯函数, 同 claimDrawWitnessArgs 的理由): 索引参数用哨兵输入单测。
+ * to_market_input 恒为 false(路径 (ii): owner = OpOutputCovenantId(dest_idx), dest_idx 指向目的地 covenant 输出)。
+ */
+export function withdrawWitnessArgs({ sig65Hex, tokInIdx, tokOutIdx, destIdx, tokPrefixHex, tokSuffixHex }) {
+  return { s: '0x' + sig65Hex, tok_in_idx: tokInIdx, tok_out_idx: tokOutIdx, to_market_input: false, dest_idx: destIdx, tok_prefix: tokPrefixHex, tok_suffix: tokSuffixHex };
+}
+
+/**
+ * ⑤ withdraw（`KanetTokenClaim.spend`）——实现计划v0.9 §2.5批7。
+ * [KanetTokenClaim(CONT), 代币(owner=claim covid, GENESIS), fee] → [代币转出(owner=目的地输出的 covenant_id, GENESIS), 目的地 covenant genesis 输出(CONT), 找零]。
+ * 无 claim 续约(终态)。只有 KanetTokenClaim 输入需要赢家 bettor 签名(checkSig(s, pubkey(winner_pk))), 由本函数用委员私钥现签(v0: winner_pk===委员公钥)。
+ *
+ * 🔴 目的地语义(Bettor 1520 裁定①): 合约里 target_owner 只能是【本 tx 某个输入/输出的 covenant_id】, 不是任意值。本 builder 走路径(ii): 新增一个
+ * 目的地 covenant 输出(GENESIS 面值), spk 由调用方 destinationScriptPublicKeyHex 显式指定(必须 35 字节 P2SH, 无默认值)。NWT 审计构造用路径(i)指回被花掉的
+ * KanetTokenClaim 自身 = 代币锁死, 不采用。三条边界: ① v0 **不承诺赢家可再花**(押注资产是零价值测试币 D-017, 仓里没有 checkSig 即花的持币 covenant, 不为它造新合约);
+ * ② 目的地 spk 除形状外须在显式允许清单里(WITHDRAW_DESTINATION_ALLOWLIST_SPK_HEX, v0 为空 ⇒ 主网 withdraw 不接线; 仅非主网 + allowUnlistedTestDestination 可用"测试用、不可再花"
+ * 的目的地); ③ 最小钱包 covenant 另开设计票 T-TOKEN-WALLET-COVENANT, 届时其 spk 形状加入允许清单。
+ *
+ * 🔴 签名前 MUST-PROVE: 由 (market_cov_id, winner_pk, amount) 重算 KanetTokenClaim P2SH, 必须等于链上 claim UTXO spk(证明 winner_pk 是烤进该 claim 的那一把),
+ * 再断言与私钥公钥逐字节相等(assertClaimWinnerSigningKey), 不等 fail-closed。🔴 签名时序(B4-1 教训): 在 populateGenesisCovenants 之后对每个找零候选现签。
+ *
+ * @param {object} o
+ * @param {string} o.marketCovId  KanetTokenClaim 的 market_cov_id(= RootClaim 的 covenant_id), 32字节hex
+ * @param {string} o.claimCovId  本 KanetTokenClaim 自己的 covenant_id(claim_draw 输出0 的 covenant_id); 被消费代币的 owner
+ * @param {string} o.winnerPkHex  claim 的 winner_pk(32字节hex)
+ * @param {number} o.amount  claim 的 amount(= claim_draw 的 payout)
+ * @param {{txid:string,vout:number}} o.ktcOutpoint  KanetTokenClaim 当前 UTXO(claim_draw 输出0)
+ * @param {string} o.ktcUtxoScriptPublicKeyHex  该 UTXO 的链上 spk(取自产出它的 claim_draw 交易输出)
+ * @param {{txid:string,vout:number}} o.heldTokenOutpoint  被消费的代币 UTXO(claim_draw 输出1)
+ * @param {string} o.committeePrivkeyEnvelope
+ * @param {string} o.destinationScriptPublicKeyHex  目的地 covenant 输出的 spk(35字节P2SH, 必填, 无默认)
+ * @param {string} o.tokPrefixHex
+ * @param {string} o.tokSuffixHex
+ * @param {object} o.feeUtxo
+ * @param {string} o.relayChangeScriptPublicKeyHex
+ * @param {bigint} o.absFeeCapSompi  feeProfile.withdraw.cap(暂借占位, 待NWT推数)
+ */
+export function buildWithdrawTxJson({
+  kaspa, network, marketCovId, claimCovId, winnerPkHex, amount, ktcOutpoint, ktcUtxoScriptPublicKeyHex, heldTokenOutpoint,
+  committeePrivkeyEnvelope, destinationScriptPublicKeyHex, tokPrefixHex, tokSuffixHex, feeUtxo, relayChangeScriptPublicKeyHex, absFeeCapSompi,
+  destinationAllowlistSpkHex = WITHDRAW_DESTINATION_ALLOWLIST_SPK_HEX, allowUnlistedTestDestination = false,
+}) {
+  const who = 'buildWithdrawTxJson';
+  if (!Number.isSafeInteger(amount) || amount <= 0) throw new Error(`${who}: fail-closed — amount 必须是正整数, 实际 ${amount}`);
+  if (!ktcOutpoint || !heldTokenOutpoint) throw new Error(`${who}: fail-closed — ktcOutpoint / heldTokenOutpoint 必填`);
+  // 🔴 Bettor 1520: 目的地闸先于任何解密/签名(形状 + 允许清单; 主网清单为空 ⇒ 一律拒绝)
+  const destGate = assertWithdrawDestinationAllowed({ network, destSpkHex: destinationScriptPublicKeyHex, allowlistSpkHex: destinationAllowlistSpkHex, allowUnlistedTestDestination });
+  const destHex = String(destinationScriptPublicKeyHex).replace(/^0x/i, '').toLowerCase();
+  const ktcArtifact = computeKanetTokenClaimGenesisArtifact({ marketCovIdHex: String(marketCovId).toLowerCase(), winnerPkHex: String(winnerPkHex).toLowerCase(), amount });
+  if (String(ktcUtxoScriptPublicKeyHex ?? '').replace(/^0x/i, '').toLowerCase() !== ktcArtifact.scriptPubKeyHex.replace(/^0x/, '')) {
+    throw new Error(`${who}: fail-closed — 现算的 KanetTokenClaim spk(${ktcArtifact.scriptPubKeyHex}) != 调用方给的链上 UTXO spk(${ktcUtxoScriptPublicKeyHex}); (market_cov_id, winner_pk, amount) 与链上 claim 已不自洽`);
+  }
+
+  // 🔴 签名前 MUST-PROVE: 私钥只以局部变量存在, 断言通过前不签名。
+  let committeePrivHex = decryptCommitteePrivkey(committeePrivkeyEnvelope);
+  assertClaimWinnerSigningKey({ kaspa, privKeyHex: committeePrivHex, marketCovIdHex: marketCovId, winnerPkHex, amount, claimUtxoSpkHex: ktcUtxoScriptPublicKeyHex, label: 'withdraw claim' });
+  const winnerPrivObj = new kaspa.PrivateKey(committeePrivHex);
+
+  const heldArtifact = computeKttGenesisArtifact({ amount, ownerCovIdHex: String(claimCovId).toLowerCase() });
+  const ktcOutpointObj = { transactionId: ktcOutpoint.txid, index: ktcOutpoint.vout };
+  const heldOutpointObj = { transactionId: heldTokenOutpoint.txid, index: heldTokenOutpoint.vout };
+  const feeOutpointObj = { transactionId: feeUtxo.txid, index: feeUtxo.vout };
+  const ktcSpk = scriptPublicKeyFromHex(kaspa, ktcArtifact.scriptPubKeyHex);
+  const heldSpk = scriptPublicKeyFromHex(kaspa, heldArtifact.scriptPubKeyHex);
+  const destSpk = scriptPublicKeyFromHex(kaspa, '0x' + destHex);
+  const feeUtxoSpk = scriptPublicKeyFromHex(kaspa, feeUtxo.scriptPublicKeyHex);
+
+  // 目的地 covenant_id 先于代币输出算出(fee 输入 outpoint 派生, 与 token 输出的 spk 无循环: 目的地输出 spk 由调用方给定, 与 owner 无关)。
+  const destCovIdHex = String(kaspa.covenantId(feeOutpointObj, [{ index: WITHDRAW_DEST_OUT_INDEX, output: new kaspa.TransactionOutput(WITHDRAW_DEST_OUTPUT_SOMPI, destSpk) }]));
+  const newTokenArtifact = computeKttGenesisArtifact({ amount, ownerCovIdHex: destCovIdHex });
+  const newTokenSpk = scriptPublicKeyFromHex(kaspa, newTokenArtifact.scriptPubKeyHex);
+
+  const heldSigScript = combineKttActionAndRedeem(kaspa, encodeKttTransferZeroOutAction(kaspa, heldArtifact.entryAbi, heldArtifact.stateFieldCount, [0]), heldArtifact.script);
+  const ktcSigScriptFor = (sig65Hex) => combineActionAndRedeem(kaspa, encodeKtcSpendAction(kaspa, ktcArtifact.entries.spend, withdrawWitnessArgs({
+    sig65Hex, tokInIdx: WITHDRAW_HELD_IN_INDEX, tokOutIdx: WITHDRAW_TOKEN_OUT_INDEX, destIdx: WITHDRAW_DEST_OUT_INDEX, tokPrefixHex, tokSuffixHex,
+  })), ktcArtifact.script);
+  const DUMMY_SIG65 = '00'.repeat(65);
+  const mkInput = (outpoint, value, spk, sigScript) => ({
+    previousOutpoint: outpoint, signatureScript: sigScript ?? new Uint8Array(0), sequence: 0n, sigOpCount: 0, computeBudget: PROTO_V0_COMPUTE_BUDGET,
+    utxo: { outpoint, amount: value, scriptPublicKey: spk, blockDaaScore: 0n },
+  });
+  const buildTx = (feeChangeSompi, ktcSigScript) => {
+    const txInputs = [];
+    txInputs[WITHDRAW_KTC_IN_INDEX] = mkInput(ktcOutpointObj, CONTINUATION_OUTPUT_SOMPI, ktcSpk, ktcSigScript);
+    txInputs[WITHDRAW_HELD_IN_INDEX] = mkInput(heldOutpointObj, GENESIS_OUTPUT_SOMPI, heldSpk, heldSigScript);
+    txInputs[WITHDRAW_FEE_IN_INDEX] = mkInput(feeOutpointObj, feeUtxo.value, feeUtxoSpk, new Uint8Array(0));
+    const outs = [];
+    outs[WITHDRAW_TOKEN_OUT_INDEX] = new kaspa.TransactionOutput(GENESIS_OUTPUT_SOMPI, newTokenSpk);
+    outs[WITHDRAW_DEST_OUT_INDEX] = new kaspa.TransactionOutput(WITHDRAW_DEST_OUTPUT_SOMPI, destSpk);
+    if (feeChangeSompi !== undefined) outs.push(new kaspa.TransactionOutput(feeChangeSompi, feeUtxoSpk));
+    const t = new kaspa.Transaction({ version: 1, inputs: txInputs, outputs: outs, lockTime: 0n, subnetworkId: '0'.repeat(40), gas: 0n, payload: '' });
+    t.populateGenesisCovenants([
+      new kaspa.GenesisCovenantGroup(WITHDRAW_FEE_IN_INDEX, [WITHDRAW_TOKEN_OUT_INDEX]),
+      new kaspa.GenesisCovenantGroup(WITHDRAW_FEE_IN_INDEX, [WITHDRAW_DEST_OUT_INDEX]),
+    ]);
+    return t;
+  };
+  // 🔴 B4-1 教训: 先建出 covenant 已就位的候选 tx, 再对它现签, 再用真实签名重建最终 tx。
+  const mkTx = (feeChangeSompi) => {
+    const draft = buildTx(feeChangeSompi, ktcSigScriptFor(DUMMY_SIG65));
+    const raw = kaspa.createInputSignature(draft, WITHDRAW_KTC_IN_INDEX, winnerPrivObj, kaspa.SighashType.All);
+    const noPrefix = raw.startsWith('0x') ? raw.slice(2) : raw;
+    if (noPrefix.length !== 132) throw new Error(`${who}: createInputSignature 长度异常, 期望66字节(132 hex), 实际${noPrefix.length / 2}字节`);
+    return buildTx(feeChangeSompi, ktcSigScriptFor(noPrefix.slice(2)));
+  };
+
+  // leftover: KanetTokenClaim 的 CONT + held 的 GENESIS 进来; 代币输出 GENESIS + 目的地输出 CONT 出去。
+  const leftover = feeUtxo.value + CONTINUATION_OUTPUT_SOMPI + GENESIS_OUTPUT_SOMPI - GENESIS_OUTPUT_SOMPI - WITHDRAW_DEST_OUTPUT_SOMPI;
+  let shape;
+  try {
+    shape = selectChangeShape({ kaspa, network, leftoverSompi: leftover, buildTxWithChange: (c) => mkTx(c), buildTxNoChange: () => mkTx(undefined), absFeeCapSompi });
+  } finally {
+    winnerPrivObj.free();
+    committeePrivHex = null; // 🟡 hex 字符串仍待 GC(已知边界, 同 close_commit/claim_draw)
+  }
+  assertImpliedFeeMatches(shape.tx, shape.netLoss, 'withdraw');
+  assertKaspadInputVersionRule(shape.tx, 'withdraw');
+  assertWithdrawLayout({
+    tx: shape.tx, ktcOutpoint, heldTokenOutpoint, expectedDestSpkHex: '0x' + destHex,
+    expectedTokenOutSpkHex: computeKttGenesisArtifact({ amount, ownerCovIdHex: String(shape.tx.outputs[WITHDRAW_DEST_OUT_INDEX].covenant.covenantId).toLowerCase() }).scriptPubKeyHex,
+  });
+  // 账本1497 MUST: KanetTokenClaim(covenant) / held KTT(covenant) / fee(普通)
+  const massSignal = assertMassWithinCeiling({ kaspa, network, tx: shape.tx, inputHasCovenant: [...WITHDRAW_INPUT_HAS_COVENANT], feeUtxoValueSompi: feeUtxo.value, label: 'withdraw' });
+
+  const realDestCovId = String(shape.tx.outputs[WITHDRAW_DEST_OUT_INDEX].covenant.covenantId);
+  if (realDestCovId.toLowerCase() !== destCovIdHex.toLowerCase()) throw new Error(`${who}: fail-closed — 真实tx目的地输出的covenant_id(${realDestCovId}) != 预算值(${destCovIdHex}), 代币输出的owner会指向错误的covenant`);
+  return {
+    txJson: shape.tx.serializeToSafeJSON(), expectedTxid: shape.tx.id,
+    massSignal, destGate, destCovId: realDestCovId, tokenCovId: String(shape.tx.outputs[WITHDRAW_TOKEN_OUT_INDEX].covenant.covenantId),
+    includeChange: shape.includeChange, changeSompi: shape.changeSompi, requiredFee: shape.requiredFee, netLoss: shape.netLoss,
+    signInputIndices: [WITHDRAW_FEE_IN_INDEX], genesisOutputIndices: [WITHDRAW_TOKEN_OUT_INDEX, WITHDRAW_DEST_OUT_INDEX],
+  };
+}
+
+/** withdraw 见证索引与交易真实布局的结构断言: tok_in_idx 指向 held 代币输入, tok_out_idx 指向代币输出, dest_idx 指向目的地 covenant 输出。 */
+export function assertWithdrawLayout({ tx, ktcOutpoint, heldTokenOutpoint, expectedTokenOutSpkHex, expectedDestSpkHex }) {
+  const noPrefix = (h) => String(h).replace(/^0x/, '').toLowerCase();
+  const same = (inp, op) => inp && String(inp.previousOutpoint.transactionId) === String(op.txid) && Number(inp.previousOutpoint.index) === Number(op.vout);
+  if (!same(tx.inputs[WITHDRAW_KTC_IN_INDEX], ktcOutpoint)) throw new Error('withdraw: fail-closed — inputs[0] 不是 KanetTokenClaim outpoint, 输入布局与见证映射已不一致');
+  if (!same(tx.inputs[WITHDRAW_HELD_IN_INDEX], heldTokenOutpoint)) throw new Error(`withdraw: fail-closed — 见证 tok_in_idx(${WITHDRAW_HELD_IN_INDEX}) 指向的输入不是 held 代币 outpoint, 输入布局与见证映射已不一致`);
+  const tokOut = tx.outputs[WITHDRAW_TOKEN_OUT_INDEX], destOut = tx.outputs[WITHDRAW_DEST_OUT_INDEX];
+  if (!tokOut || noPrefix(tokOut.scriptPublicKey.script) !== noPrefix(expectedTokenOutSpkHex)) throw new Error(`withdraw: fail-closed — 见证 tok_out_idx(${WITHDRAW_TOKEN_OUT_INDEX}) 指向的输出不是预期的代币输出(owner=目的地 covenant_id)`);
+  if (!destOut || noPrefix(destOut.scriptPublicKey.script) !== noPrefix(expectedDestSpkHex)) throw new Error(`withdraw: fail-closed — 见证 dest_idx(${WITHDRAW_DEST_OUT_INDEX}) 指向的输出不是调用方指定的目的地 covenant 输出`);
+  if (!destOut.covenant) throw new Error('withdraw: fail-closed — 目的地输出没有 covenant 绑定(OpOutputCovenantId 会回退 ZERO32, 合约必拒)');
+}
+
+// ══════════ ⑥ ticket_reclaim(批8 v2, 输家 ticket 自我回收, PoolSideTicket.authorize_spend; Bettor 1524 裁定②: 带 relay fee 输入, 不改 relay) ══════════
+export const TICKET_RECLAIM_TICKET_IN_INDEX = 0; // 输家 ticket(普通 P2SH, register_append 输出1 无 covenant)——唯一需要 bettor 签名的输入
+export const TICKET_RECLAIM_FEE_IN_INDEX = 1;    // relay fee 输入(relay 签)
+export const TICKET_RECLAIM_OUT_INDEX = 0;       // ticket 全额回到 bettor 指定的 P2PK
+export const TICKET_RECLAIM_DEST_SOMPI = GENESIS_OUTPUT_SOMPI; // 输家 ticket 全额 20,000,000 回 P2PK; 矿工费由 relay fee 输入付
+// 账本1497 MUST + NWT 1521: 逐 builder 钉死 inputHasCovenant——[ticket(普通 P2SH, 节点记录已核无 covenant), fee(relay P2PK)]。
+export const TICKET_RECLAIM_INPUT_HAS_COVENANT = Object.freeze([false, false]);
+// 🔴 fee 陷阱(计划 §2.6 / 账本1491, simnet 已实证): kaspa-wasm 本地 calculateTransactionMass 对回收这类极简形状低估(只见 storage、漏 compute), 复用 computeRequiredFeeSompiOrThrow 会少付被节点拒。
+// 本 builder 把 selectChangeShape 的"所需费"换成精确 mass(proto-mass-ceiling.mjs, 与节点值逐位对账过)×安全余量: 节点 mempool 最低费=100×max(compute, transient)(NWT fee 阶梯实验), storage 一并纳入取 max(保守)。
+export const TICKET_RECLAIM_FEE_MARGIN_NUM = 3n;
+export const TICKET_RECLAIM_FEE_MARGIN_DEN = 2n;
+
+/**
+ * 输家 ticket 回收的"这张票现在可以被回收吗"闸(纯函数, 可单测)。
+ * 🔴 ticket 被花 = 放弃本人资格(claim_draw 与 refund_payout 都要消费它): 只有【市场已结算(closed==1)且这张票是输家(side != winningSide)】才允许;
+ * 赢家自花 = 永久放弃应得 payout; 市场未结算(closed==0)或已取消(closed==2)时票还要用于领取/退款。
+ * marketState 必须来自【链上已验证】的 RootClose/RootClaim 状态(驱动接线时由 C1 同款断言证明), 不是本地库推算。
+ */
+export function assertTicketReclaimable({ marketState, bet }) {
+  if (!marketState || !Number.isInteger(marketState.closed) || !Number.isInteger(marketState.winningSide)) throw new Error('ticket_reclaim: fail-closed — marketState({closed,winningSide}) 缺失或非整数');
+  if (marketState.closed === 0) throw new Error('ticket_reclaim: fail-closed — 市场尚未结算(closed=0): 这张票之后还要用于 claim_draw/refund_payout, 现在自花会放弃资格');
+  if (marketState.closed === 2) throw new Error('ticket_reclaim: fail-closed — 市场已取消(closed=2): 票用于 refund_payout 退本金, 自花会放弃退款资格');
+  if (marketState.closed !== 1) throw new Error(`ticket_reclaim: fail-closed — 未知 closed 值 ${marketState.closed}`);
+  if (Number(bet?.side) === marketState.winningSide) throw new Error(`ticket_reclaim: fail-closed — 这张票(side=${bet?.side})是赢票(winningSide=${marketState.winningSide}): 自花 = 永久放弃应得 payout, 请走 claim_draw`);
+}
+
+/**
+ * ⑥ ticket_reclaim（`PoolSideTicket.authorize_spend`）——实现计划v0.9 §2.6批8, Bettor 1524 裁定②改形状。
+ * [输家 ticket(普通 P2SH, 20,000,000), relay fee 输入] → [bettor 指定的 P2PK(20,000,000 全额), 找零(回 relay)]。
+ * 签名输入: ticket(bettor 签, builder 现签: v0 委员 keypair, decrypt-use-discard) + fee(relay 签, signInputIndices=[1])——与其他 builder 一致, 不改 relay。
+ *
+ * 🔴 签名前 MUST-PROVE: assertTicketSigningKey(与 claim_draw 同一个); 🔴 可回收闸 assertTicketReclaimable 先于任何解密/签名;
+ * 🔴 签名时序: ticket 签名承诺全部输出(含找零值), 每个找零候选各自对最终输出现签(同 claim_draw);
+ * 🔴 fee: 精确 mass×3/2 现算(见文件内 TICKET_RECLAIM_FEE_* 注释), 经 selectChangeShape 选找零形状; leftover = fee 输入面值(ticket 20M 进、20M 出, 恰好抵消, 同其他 builder 的 leftover 公式);
+ * 🔴 目的地: destinationScriptPublicKeyHex 必填, 必须是 34 字节 P2PK(20<32B>ac), 无默认值——bettor 自己的收款脚本, 不是 covenant。
+ *
+ * @param {object} o
+ * @param {*} o.kaspa
+ * @param {string} o.network
+ * @param {string} o.marketId 32字节hex
+ * @param {{bettor_pk:string, side:number, stake:number}} o.bet 这张输家票的 proto_bets 行
+ * @param {{closed:number, winningSide:number}} o.marketState 链上已验证的市场状态
+ * @param {{txid:string,vout:number}} o.ticketOutpoint
+ * @param {string} o.ticketUtxoScriptPublicKeyHex 该 ticket 的链上 spk(取自产出它的 register_append 交易输出)
+ * @param {string} o.committeePrivkeyEnvelope
+ * @param {string} o.destinationScriptPublicKeyHex
+ * @param {object} o.feeUtxo {txid,vout,value,scriptPublicKeyHex}
+ * @param {string} o.relayChangeScriptPublicKeyHex
+ * @param {bigint} o.absFeeCapSompi feeProfile.ticket_reclaim.cap(暂借 1.0 KAS 占位, 待 NWT 推数)
+ */
+export function buildTicketReclaimTxJson({
+  kaspa, network, marketId, bet, marketState, ticketOutpoint, ticketUtxoScriptPublicKeyHex, committeePrivkeyEnvelope, destinationScriptPublicKeyHex,
+  feeUtxo, relayChangeScriptPublicKeyHex, absFeeCapSompi,
+}) {
+  const who = 'buildTicketReclaimTxJson';
+  if (!ticketOutpoint) throw new Error(`${who}: fail-closed — ticketOutpoint 必填`);
+  const destHex = String(destinationScriptPublicKeyHex ?? '').replace(/^0x/i, '').toLowerCase();
+  if (!/^20[0-9a-f]{64}ac$/.test(destHex)) throw new Error(`${who}: fail-closed — destinationScriptPublicKeyHex 必填且必须是 34 字节 P2PK(20…ac), 实际=${destHex.slice(0, 12)}…: 收款脚本必须由 bettor 明确指定, 不设默认值`);
+  assertTicketReclaimable({ marketState, bet });
+  const bettorPk = String(bet.bettor_pk).toLowerCase();
+  const ticketArtifact = computeTicketGenesisArtifact({ bettorPk, direction: Number(bet.side), stake: Number(bet.stake), shardPoolId: marketId });
+
+  // 🔴 签名前 MUST-PROVE: 私钥只以局部变量存在, 断言通过前不签名。
+  let committeePrivHex = decryptCommitteePrivkey(committeePrivkeyEnvelope);
+  assertTicketSigningKey({ kaspa, privKeyHex: committeePrivHex, bet, marketId, ticketUtxoSpkHex: ticketUtxoScriptPublicKeyHex, label: 'ticket_reclaim ticket' });
+  const bettorPrivObj = new kaspa.PrivateKey(committeePrivHex);
+
+  const ticketOutpointObj = { transactionId: ticketOutpoint.txid, index: ticketOutpoint.vout };
+  const feeOutpointObj = { transactionId: feeUtxo.txid, index: feeUtxo.vout };
+  const ticketSpk = scriptPublicKeyFromHex(kaspa, ticketArtifact.scriptPubKeyHex);
+  const destSpk = scriptPublicKeyFromHex(kaspa, '0x' + destHex);
+  const feeUtxoSpk = scriptPublicKeyFromHex(kaspa, feeUtxo.scriptPublicKeyHex);
+  const changeSpk = scriptPublicKeyFromHex(kaspa, relayChangeScriptPublicKeyHex);
+  const sigScriptFor = (sig65Hex) => combineActionAndRedeem(kaspa, encodeAuthorizeSpendAction(kaspa, ticketArtifact.entries.authorize_spend, { bettorSig: '0x' + sig65Hex }), ticketArtifact.script);
+  const DUMMY_SIG65 = '00'.repeat(65);
+  const mkInput = (outpoint, value, spk, sigScript) => ({
+    previousOutpoint: outpoint, signatureScript: sigScript ?? new Uint8Array(0), sequence: 0n, sigOpCount: 0, computeBudget: PROTO_V0_COMPUTE_BUDGET,
+    utxo: { outpoint, amount: value, scriptPublicKey: spk, blockDaaScore: 0n },
+  });
+  const buildTx = (feeChangeSompi, ticketSigScript) => {
+    const inputs = [];
+    inputs[TICKET_RECLAIM_TICKET_IN_INDEX] = mkInput(ticketOutpointObj, GENESIS_OUTPUT_SOMPI, ticketSpk, ticketSigScript);
+    inputs[TICKET_RECLAIM_FEE_IN_INDEX] = mkInput(feeOutpointObj, feeUtxo.value, feeUtxoSpk, new Uint8Array(0));
+    return new kaspa.Transaction({
+      version: 1, inputs,
+      outputs: [new kaspa.TransactionOutput(TICKET_RECLAIM_DEST_SOMPI, destSpk), ...(feeChangeSompi === undefined ? [] : [new kaspa.TransactionOutput(feeChangeSompi, changeSpk)])],
+      lockTime: 0n, subnetworkId: '0'.repeat(40), gas: 0n, payload: '',
+    });
+  };
+  // 🔴 ticket 签名承诺全部输出(含找零值): 每个找零候选对【最终输出】各自现签, 再用真实签名重建(sighash 不含输入自己的 sigScript, 也不含 fee 输入的 sigScript)。
+  const mkTx = (feeChangeSompi) => {
+    const draft = buildTx(feeChangeSompi, sigScriptFor(DUMMY_SIG65));
+    const raw = kaspa.createInputSignature(draft, TICKET_RECLAIM_TICKET_IN_INDEX, bettorPrivObj, kaspa.SighashType.All);
+    const noPrefix = raw.startsWith('0x') ? raw.slice(2) : raw;
+    if (noPrefix.length !== 132) throw new Error(`${who}: createInputSignature 长度异常, 期望66字节(132 hex), 实际${noPrefix.length / 2}字节`);
+    return buildTx(feeChangeSompi, sigScriptFor(noPrefix.slice(2)));
+  };
+
+  // selectChangeShape 用 kaspa.calculateTransactionMass 算"所需费": 换成精确 mass×3/2(fee 输入尚未签名的 66B 留量由 assertMassWithinCeiling 计入)。
+  const exactMassKaspa = {
+    ...kaspa,
+    calculateTransactionMass: (net, tx) => {
+      const sig = assertMassWithinCeiling({ kaspa, network: net, tx, inputHasCovenant: [...TICKET_RECLAIM_INPUT_HAS_COVENANT], feeUtxoValueSompi: feeUtxo.value, label: 'ticket_reclaim' });
+      const m = BigInt(Math.max(sig.storageMass, sig.computeMass, sig.transientMass));
+      return (m * TICKET_RECLAIM_FEE_MARGIN_NUM + TICKET_RECLAIM_FEE_MARGIN_DEN - 1n) / TICKET_RECLAIM_FEE_MARGIN_DEN;
+    },
+  };
+  let shape;
+  try {
+    shape = selectChangeShape({ kaspa: exactMassKaspa, network, leftoverSompi: feeUtxo.value, buildTxWithChange: (c) => mkTx(c), buildTxNoChange: () => mkTx(undefined), absFeeCapSompi });
+  } finally {
+    bettorPrivObj.free();
+    committeePrivHex = null; // 🟡 hex 字符串仍待 GC(已知边界, 同 close_commit/claim_draw)
+  }
+  assertImpliedFeeMatches(shape.tx, shape.netLoss, 'ticket_reclaim');
+  assertKaspadInputVersionRule(shape.tx, 'ticket_reclaim');
+  assertTicketReclaimLayout({ tx: shape.tx, ticketOutpoint, feeOutpoint: feeUtxo, expectedDestSpkHex: '0x' + destHex, expectedChangeSpkHex: shape.includeChange ? relayChangeScriptPublicKeyHex : null });
+  const massSignal = assertMassWithinCeiling({ kaspa, network, tx: shape.tx, inputHasCovenant: [...TICKET_RECLAIM_INPUT_HAS_COVENANT], feeUtxoValueSompi: feeUtxo.value, label: 'ticket_reclaim' });
+  return {
+    txJson: shape.tx.serializeToSafeJSON(), expectedTxid: shape.tx.id,
+    massSignal, includeChange: shape.includeChange, changeSompi: shape.changeSompi, requiredFee: shape.requiredFee, netLoss: shape.netLoss,
+    signInputIndices: [TICKET_RECLAIM_FEE_IN_INDEX], genesisOutputIndices: [],
+  };
+}
+
+/** ticket_reclaim 结构断言: 输入0=ticket、输入1=fee; 输出0=bettor 指定 P2PK 且恰为 20,000,000 且不带 covenant; 若有输出1 必须是回 relay 的找零。 */
+export function assertTicketReclaimLayout({ tx, ticketOutpoint, feeOutpoint, expectedDestSpkHex, expectedChangeSpkHex }) {
+  const noPrefix = (h) => String(h).replace(/^0x/, '').toLowerCase();
+  const same = (inp, op) => inp && String(inp.previousOutpoint.transactionId) === String(op.txid) && Number(inp.previousOutpoint.index) === Number(op.vout);
+  if (tx.inputs.length !== 2) throw new Error(`ticket_reclaim: fail-closed — 应为 2 个输入([ticket, fee]), 实际 ${tx.inputs.length}`);
+  if (!same(tx.inputs[TICKET_RECLAIM_TICKET_IN_INDEX], ticketOutpoint)) throw new Error('ticket_reclaim: fail-closed — inputs[0] 不是 ticket outpoint');
+  if (!same(tx.inputs[TICKET_RECLAIM_FEE_IN_INDEX], feeOutpoint)) throw new Error('ticket_reclaim: fail-closed — inputs[1] 不是 fee outpoint');
+  const wantOuts = expectedChangeSpkHex ? 2 : 1;
+  if (tx.outputs.length !== wantOuts) throw new Error(`ticket_reclaim: fail-closed — 应为 ${wantOuts} 个输出, 实际 ${tx.outputs.length}`);
+  const dest = tx.outputs[TICKET_RECLAIM_OUT_INDEX];
+  if (noPrefix(dest.scriptPublicKey.script) !== noPrefix(expectedDestSpkHex)) throw new Error('ticket_reclaim: fail-closed — outputs[0] 不是 bettor 指定的收款脚本');
+  if (BigInt(dest.value) !== TICKET_RECLAIM_DEST_SOMPI) throw new Error(`ticket_reclaim: fail-closed — outputs[0] 面值 ${dest.value} != ticket 全额 ${TICKET_RECLAIM_DEST_SOMPI}`);
+  if (dest.covenant) throw new Error('ticket_reclaim: fail-closed — 回收输出不应带 covenant 绑定');
+  if (expectedChangeSpkHex) {
+    const chg = tx.outputs[1];
+    if (noPrefix(chg.scriptPublicKey.script) !== noPrefix(expectedChangeSpkHex)) throw new Error('ticket_reclaim: fail-closed — outputs[1] 不是回 relay 的找零');
+    if (chg.covenant) throw new Error('ticket_reclaim: fail-closed — 找零不应带 covenant 绑定');
+  }
 }

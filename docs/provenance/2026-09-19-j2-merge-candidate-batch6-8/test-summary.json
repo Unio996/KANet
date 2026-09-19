@@ -1,0 +1,298 @@
+[
+  {
+    "file": "kasia-console/src/lib/broadcaster-utxo.test.mjs",
+    "exit": 0,
+    "signal": null,
+    "ms": 517,
+    "fail_lines": 0,
+    "last": "ℹ fail 0"
+  },
+  {
+    "file": "kasia-console/src/lib/proto-bet-intent.test.mjs",
+    "exit": 0,
+    "signal": null,
+    "ms": 499,
+    "fail_lines": 0,
+    "last": "✅✅ ALL PASS — proto-bet-intent 单步状态机(幂等/单调/恢复/inputs_spent 歧义终态) 全绿"
+  },
+  {
+    "file": "kasia-console/src/lib/proto-broadcast-ops.test.mjs",
+    "exit": 0,
+    "signal": null,
+    "ms": 1239,
+    "fail_lines": 0,
+    "last": "16 passed, 0 failed"
+  },
+  {
+    "file": "kasia-console/src/lib/proto-claim-draw.test.mjs",
+    "exit": 0,
+    "signal": null,
+    "ms": 1899,
+    "fail_lines": 0,
+    "last": "47 passed, 0 failed"
+  },
+  {
+    "file": "kasia-console/src/lib/proto-close-commit-gate.test.mjs",
+    "exit": 0,
+    "signal": null,
+    "ms": 36,
+    "fail_lines": 0,
+    "last": "7 passed, 0 failed"
+  },
+  {
+    "file": "kasia-console/src/lib/proto-committee-key.test.mjs",
+    "exit": 0,
+    "signal": null,
+    "ms": 68,
+    "fail_lines": 0,
+    "last": "✅✅ ALL PASS — proto-committee-key(生成+加密存储+往返正确+随机IV+零log) 全绿"
+  },
+  {
+    "file": "kasia-console/src/lib/proto-covenant-builder.test.mjs",
+    "exit": 0,
+    "signal": null,
+    "ms": 496,
+    "fail_lines": 0,
+    "last": "16 passed, 0 failed"
+  },
+  {
+    "file": "kasia-console/src/lib/proto-ktt-transfer-witness.test.mjs",
+    "exit": 0,
+    "signal": null,
+    "ms": 80,
+    "fail_lines": 0,
+    "last": "6 passed, 0 failed"
+  },
+  {
+    "file": "kasia-console/src/lib/proto-leaf-state.test.mjs",
+    "exit": 0,
+    "signal": null,
+    "ms": 809,
+    "fail_lines": 0,
+    "last": "33 passed, 0 failed"
+  },
+  {
+    "file": "kasia-console/src/lib/proto-market-intent.test.mjs",
+    "exit": 0,
+    "signal": null,
+    "ms": 534,
+    "fail_lines": 0,
+    "last": "✅✅ ALL PASS"
+  },
+  {
+    "file": "kasia-console/src/lib/proto-mass-ceiling.test.mjs",
+    "exit": 0,
+    "signal": null,
+    "ms": 788,
+    "fail_lines": 0,
+    "last": "16 passed, 0 failed"
+  },
+  {
+    "file": "kasia-console/src/lib/proto-register-append-witness.test.mjs",
+    "exit": 0,
+    "signal": null,
+    "ms": 83,
+    "fail_lines": 0,
+    "last": "5 passed, 0 failed"
+  },
+  {
+    "file": "kasia-console/src/lib/proto-relay-guard.test.mjs",
+    "exit": 0,
+    "signal": null,
+    "ms": 494,
+    "fail_lines": 0,
+    "last": "✅✅ ALL PASS — PROTO_RELAY_ID 基础设施(启动断言 6 分支 + 请求体拒绝 6 分支) 全绿"
+  },
+  {
+    "file": "kasia-console/src/lib/proto-relay-ipc.test.mjs",
+    "exit": 0,
+    "signal": null,
+    "ms": 1026,
+    "fail_lines": 0,
+    "last": "PASS"
+  },
+  {
+    "file": "kasia-console/src/lib/proto-settlement-chain-checks.test.mjs",
+    "exit": 0,
+    "signal": null,
+    "ms": 502,
+    "fail_lines": 0,
+    "last": "21 passed, 0 failed"
+  },
+  {
+    "file": "kasia-console/src/lib/proto-settlement-inputs.test.mjs",
+    "exit": 0,
+    "signal": null,
+    "ms": 505,
+    "fail_lines": 0,
+    "last": "15 passed, 0 failed"
+  },
+  {
+    "file": "kasia-console/src/lib/proto-settlement-intent.test.mjs",
+    "exit": 0,
+    "signal": null,
+    "ms": 496,
+    "fail_lines": 0,
+    "last": "✅✅ ALL PASS — proto-settlement-intent 六步状态机(幂等/单调/依赖/恢复/inputs_spent 歧义终态) 全绿"
+  },
+  {
+    "file": "kasia-console/src/lib/proto-signing-key-binding.test.mjs",
+    "exit": 0,
+    "signal": null,
+    "ms": 880,
+    "fail_lines": 0,
+    "last": "11 passed, 0 failed"
+  },
+  {
+    "file": "kasia-console/src/lib/proto-single-operator-guard.test.mjs",
+    "exit": 0,
+    "signal": null,
+    "ms": 36,
+    "fail_lines": 0,
+    "last": "✅✅ ALL PASS"
+  },
+  {
+    "file": "kasia-console/src/lib/proto-tx-assembly-register-append.test.mjs",
+    "exit": 0,
+    "signal": null,
+    "ms": 848,
+    "fail_lines": 0,
+    "last": "13 passed, 0 failed"
+  },
+  {
+    "file": "kasia-console/src/lib/proto-tx-assembly-settlement-golden.test.mjs",
+    "exit": 0,
+    "signal": null,
+    "ms": 592,
+    "fail_lines": 0,
+    "last": "12 passed, 0 failed"
+  },
+  {
+    "file": "kasia-console/src/lib/proto-tx-assembly-settlement.test.mjs",
+    "exit": 0,
+    "signal": null,
+    "ms": 3482,
+    "fail_lines": 0,
+    "last": "43 passed, 0 failed"
+  },
+  {
+    "file": "kasia-console/src/lib/proto-tx-assembly.test.mjs",
+    "exit": 0,
+    "signal": null,
+    "ms": 767,
+    "fail_lines": 0,
+    "last": "32 passed, 0 failed"
+  },
+  {
+    "file": "kasia-console/src/lib/settle-safe-json.test.mjs",
+    "exit": 0,
+    "signal": null,
+    "ms": 148,
+    "fail_lines": 0,
+    "last": "✅ ALL PASS (15)"
+  },
+  {
+    "file": "kasia-console/src/services/proto-driver.test.mjs",
+    "exit": 0,
+    "signal": null,
+    "ms": 1388,
+    "fail_lines": 0,
+    "last": "8 passed, 0 failed"
+  },
+  {
+    "file": "kasia-relay/src/lib/cltv-locktime.test.mjs",
+    "exit": 0,
+    "signal": null,
+    "ms": 38,
+    "fail_lines": 0,
+    "last": "cltv-locktime: 17 PASS / 0 FAIL"
+  },
+  {
+    "file": "kasia-relay/src/lib/covenant-broadcast-relay.test.mjs",
+    "exit": 0,
+    "signal": null,
+    "ms": 40,
+    "fail_lines": 0,
+    "last": "22 passed, 0 failed"
+  },
+  {
+    "file": "kasia-relay/src/lib/covenant-broadcast.test.mjs",
+    "exit": 0,
+    "signal": null,
+    "ms": 39,
+    "fail_lines": 0,
+    "last": "56 passed, 0 failed"
+  },
+  {
+    "file": "kasia-relay/src/lib/covenant-roundtrip.test.mjs",
+    "exit": 0,
+    "signal": null,
+    "ms": 136,
+    "fail_lines": 0,
+    "last": "  ❌ harness-flip (expect FAIL)"
+  },
+  {
+    "file": "kasia-relay/src/lib/recovery-lock-builder.test.mjs",
+    "exit": 0,
+    "signal": null,
+    "ms": 126783,
+    "fail_lines": 0,
+    "last": "recovery-lock-builder: 16 PASS / 0 FAIL"
+  },
+  {
+    "file": "kasia-relay/src/lib/serialize-roundtrip.test.mjs",
+    "exit": 0,
+    "signal": null,
+    "ms": 122,
+    "fail_lines": 0,
+    "last": "  ❌ harness-flip (expect FAIL)"
+  },
+  {
+    "file": "kasia-relay/src/lib/tx-mass-ub.test.mjs",
+    "exit": 1,
+    "signal": null,
+    "ms": 118,
+    "fail_lines": 1,
+    "last": "[mass-floor:observe:auth] site=V10a txid=f672fdec8f9f4cf72fb69cf7eb1965e776ea3a8188875d7630c24d4794f0e494 source=reject authoritative_mass=null ub_ok=inconclusi"
+  },
+  {
+    "file": "kasia-relay/src/lib/utxo-facts.test.mjs",
+    "exit": 0,
+    "signal": null,
+    "ms": 688,
+    "fail_lines": 0,
+    "last": "42 passed, 0 failed"
+  },
+  {
+    "file": "kasia-relay/src/lib/wallet.test.mjs",
+    "exit": 3221226505,
+    "signal": null,
+    "ms": 150,
+    "fail_lines": 0,
+    "last": "Assertion failed: !(handle->flags & UV_HANDLE_CLOSING), file src\\win\\async.c, line 76"
+  },
+  {
+    "file": "kasia-relay/src/drain-finality-safe-blocks.test.mjs",
+    "exit": 0,
+    "signal": null,
+    "ms": 73,
+    "fail_lines": 0,
+    "last": "[drain-finality-safe-blocks.test] ALL PASS"
+  },
+  {
+    "file": "kasia-relay/test/getblockatdaa-boundary.test.mjs",
+    "exit": 0,
+    "signal": null,
+    "ms": 72,
+    "fail_lines": 0,
+    "last": "=== boundary 测: 10 PASS / 0 FAIL ==="
+  },
+  {
+    "file": "scripts/m0a-lint.test.mjs",
+    "exit": 0,
+    "signal": null,
+    "ms": 9734,
+    "fail_lines": 0,
+    "last": "[m0a-lint.test] 32 passed, 0 failed"
+  }
+]

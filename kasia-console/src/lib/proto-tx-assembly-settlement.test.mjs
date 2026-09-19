@@ -530,6 +530,41 @@ t('⑤真实tx算出的output covenant_id与builder返回的rootCloseCovId/token
     buildCloseCommitTxJson(closeArgs({ kaspa: kaspaTracked }));
     if (created !== 1 || freed !== 1) throw new Error(`PrivateKey created=${created} freed=${freed}(期望各1)`);
   });
+
+  // ── C3(Bettor 2026-09-19): pmt 闸已放行时, builder 的 300s 墙钟守卫【不得反卡】; 无 pmtEvidence 时它仍是第二层 ──
+  // 主网墙钟−pmt≈133s(实测 128.8~136.7s), pmt 刚满足 >=deadline+30s 时墙钟约 deadline+163s < deadline+300s: 若仍施加 300s 墙钟余量就会在 pmt 已放行后再反卡约 137s。
+  // 每个滞后 L 用一个【deadline 相对当前时间现造】的市场(RootClose 模板 hash 随 deadline 变, 必须同源), 真构造 close_commit。
+  const { computeRootCloseGenesisArtifact: rcArtifactOf } = await import('./proto-covenant-builder.mjs');
+  const c3Args = async (lagSec, { withEvidence }) => {
+    const deadline = Date.now() - lagSec * 1000 - 31_000; // 使 pmt(=now−lag) − deadline = 31s >= 30s 放行线
+    const g = await computeMarketGenesisArtifacts({ marketId: MARKET_ID, minBet: MIN_BET, deadlineMs: deadline });
+    const spk = rcArtifactOf({ marketId: MARKET_ID, committeePubkeyHex: g.committeePubkeyHex, deadlineMs: deadline, rootCloseTmplHash: g.rootCloseTmplHash, state: { ...currentState, closed: 0, winningSide: 0, payoutRoot: '00'.repeat(32) } }).scriptPubKeyHex;
+    return {
+      kaspa, network: 'mainnet', marketId: MARKET_ID, committeePubkeyHex: g.committeePubkeyHex, committeePrivkeyEnvelope: g.committeePrivkeyEnvelope, deadlineMs: deadline, rootCloseTmplHash: g.rootCloseTmplHash,
+      rootCloseOutpoint: { txid: 'ab'.repeat(32), vout: 0 }, rootCloseUtxoScriptPublicKeyHex: spk, rootCloseCovId: 'cd'.repeat(32), sealedState: currentState,
+      newWinningSide: NEW_WINNING_SIDE, newPayoutRootHex: NEW_PAYOUT_ROOT_HEX, tokPrefixHex, tokSuffixHex, feeUtxo: closeCommitFeeUtxo, relayChangeScriptPublicKeyHex: relaySpkHex, absFeeCapSompi: closeCommitCap,
+      ...(withEvidence ? { pmtEvidence: { pastMedianTimeMs: Date.now() - lagSec * 1000 } } : {}),
+    };
+  };
+  const c3Results = [];
+  for (const lag of [0, 60, 120, 133, 140]) {
+    const a = await c3Args(lag, { withEvidence: true });
+    try { const b = buildCloseCommitTxJson(a); c3Results.push({ lag, ok: !!b.txJson }); } catch (e) { c3Results.push({ lag, ok: false, err: e.message.slice(0, 200) }); }
+  }
+  t('⑥a C3: pmt 闸放行后, 墙钟滞后 L∈{0,60,120,133,140}s 时 builder 都不被 300s 墙钟守卫反卡(五个 deadline 现造的市场真构造成功)', () => {
+    const bad = c3Results.filter((r) => !r.ok);
+    if (bad.length) throw new Error(`被反卡/构造失败: ${JSON.stringify(bad)}`);
+  });
+  const c3NoEvidence = await c3Args(133, { withEvidence: false });
+  t('⑥b C3 对照: 同一市场(墙钟滞后 133s, 即 deadline+164s)不传 pmtEvidence ⇒ 300s 墙钟守卫仍拦(第二层仍有效, 证明上一条放行来自 pmtEvidence 而非守卫被拆掉)', () => {
+    throws(() => buildCloseCommitTxJson(c3NoEvidence), /fail-closed.*余量/);
+  });
+  const c3Ev = await c3Args(133, { withEvidence: true });
+  t('⑥c C3: pmtEvidence 自身未通过 pmt 判据(pmt 只领先 10s) ⇒ 构造期 fail-closed(builder 复核同一个判据); 墙钟早于 deadline(本机时钟严重偏差) ⇒ 拒绝', () => {
+    const a = c3Ev;
+    throws(() => buildCloseCommitTxJson({ ...a, pmtEvidence: { pastMedianTimeMs: a.deadlineMs + 10_000 } }), /pmtEvidence未通过pmt判据/);
+    throws(() => buildCloseCommitTxJson({ ...a, deadlineMs: Date.now() + 3_600_000, pmtEvidence: { pastMedianTimeMs: Date.now() + 3_700_000 } }), /墙钟不可能早于deadline/);
+  });
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

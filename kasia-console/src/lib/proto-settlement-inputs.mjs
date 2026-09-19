@@ -11,23 +11,12 @@
 // (depth-0 merkle 验证)——在那之前它是"与合约源码逐行对照 + 已知答案向量(blake2b 标准向量)"级别的证据, 不是链上共识证据。
 
 import { sqlite } from '../db/client.js';
-import { createRequire } from 'node:module';
-const require = createRequire(import.meta.url);
-const { blake2b } = require('../../node_modules/@noble/hashes/blake2b.js');
 
 /** RootClaim.sil:103 require(payout >= 1000)。payout<1000 的市场 claim_draw 永远无法执行(结构性阻塞, 见账本1484), 签 close_commit 会把钱锁死。 */
 export const CLAIM_PAYOUT_MIN = 1000;
 
-const HEX64 = /^[0-9a-f]{64}$/;
-
-/** leaf = blake2b256(pk(32B) ‖ le8(payout)) —— RootClaim.sil:112。 */
-export function payoutLeafHex(bettorPkHex, payout) {
-  const pk = String(bettorPkHex ?? '').replace(/^0x/i, '').toLowerCase();
-  if (!HEX64.test(pk)) throw new Error(`payoutLeafHex: bettorPk 必须是 32 字节 hex, 实际长度=${pk.length}`);
-  if (!Number.isSafeInteger(payout) || payout <= 0) throw new Error(`payoutLeafHex: payout 必须是正的安全整数, 实际=${payout}`);
-  const le8 = Buffer.alloc(8); le8.writeBigUInt64LE(BigInt(payout));
-  return Buffer.from(blake2b(Uint8Array.from(Buffer.concat([Buffer.from(pk, 'hex'), le8])), { dkLen: 32 })).toString('hex');
-}
+export { payoutLeafHex } from './proto-payout-leaf.mjs';
+import { payoutLeafHex } from './proto-payout-leaf.mjs';
 
 /**
  * 从 DB 派生 close_commit 的两个签名内容值 + 断言。
@@ -67,8 +56,16 @@ export function deriveCloseCommitInputs(marketId, { db = sqlite } = {}) {
  * 驱动层闸: 调用 buildCloseCommitTxJson 之前, 断言要签的 newWinningSide/newPayoutRootHex 恰是由 DB 派生的值。
  * 不符 ⇒ throw(不调用 builder, 不签名)。返回派生结果供驱动直接用。
  */
-export function assertCloseCommitArgsFromDb(marketId, { newWinningSide, newPayoutRootHex }, opts = {}) {
+export function assertCloseCommitArgsFromDb(marketId, { newWinningSide, newPayoutRootHex, expectedPoolValue }, opts = {}) {
   const d = deriveCloseCommitInputs(marketId, opts);
+  // C2(Bettor 2026-09-19): expectedPoolValue = 驱动层用来【证明链上 RootClose spk】的 pool_value(B4-5 的 spk 断言只有在"现算 spk 用的 pool_value"与"要签的 payout 用的 pool_value"
+  // 是同一个数时才蕴含链上 pool_value); 缺失即 fail-closed, 不等即 fail-closed——防止 spk 是按 A 状态证明的、签名却按 B 状态派生的 payout。
+  if (!Number.isSafeInteger(expectedPoolValue) || expectedPoolValue <= 0) {
+    throw new Error(`close_commit_args_not_from_db: fail-closed — expectedPoolValue(${expectedPoolValue}) 缺失或非法: 必须传入由链上 RootClose spk 断言证明的 pool_value`);
+  }
+  if (expectedPoolValue !== d.poolValue) {
+    throw new Error(`close_commit_args_not_from_db: fail-closed — 由 spk 断言证明的链上 pool_value(${expectedPoolValue}) != 由 DB 派生的 pool_value(${d.poolValue}): 要签的 payout 与已证明的链上状态不是同一个池子`);
+  }
   if (newWinningSide !== d.newWinningSide) {
     throw new Error(`close_commit_args_not_from_db: fail-closed — 拟签的 newWinningSide(${newWinningSide}) != 由 DB 派生的 ${d.newWinningSide}`);
   }

@@ -1,0 +1,7 @@
+[PASS] ①(决定性)encodeRegisterAppendAction 与真实 cli-debugger 内部构造的 active_sigscript 逐字节一致
+[PASS] ② dispatch_tag 来自真实编译产物(不是硬编字面量), 且非空 4 字节 hex
+[PASS] ③ combineActionAndRedeem(fromScript 桥接) 与"手工拼接 action+单独 addData(redeem)"结果一致
+[PASS] ④ buildRegisterAppendSigScriptHex(一步到位) 与分步调用(encode+combine)结果一致
+[PASS] ⑤ 参数改变(stake+1) ⇒ 产出字节确实不同(防"改了参数但编码器没反应"这种更隐蔽的错)
+
+5 passed, 0 failed

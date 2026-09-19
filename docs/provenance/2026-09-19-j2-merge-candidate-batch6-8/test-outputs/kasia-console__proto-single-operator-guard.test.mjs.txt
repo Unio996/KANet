@@ -1,0 +1,17 @@
+[test] rejectExternalMarketIdentityInBody:
+  ✅ 正常请求体(无禁用字段) ⇒ 放行(null)
+  ✅ body 为 undefined ⇒ 放行(不 throw)
+  ✅ body 为 null ⇒ 放行(不 throw)
+  ✅ 空对象 ⇒ 放行
+  ✅ 请求体含 covenant_id ⇒ 拒绝且错误信息点名该字段(实际: "covenant_id must not be provided in the request body — proto v0 single-operator mode only recognizes market/bettor identity via server-side proto_markets records (path param market id), not caller-supplied identity fields")
+  ✅ 请求体含 market_covenant_id ⇒ 拒绝且错误信息点名该字段(实际: "market_covenant_id must not be provided in the request body — proto v0 single-operator mode only recognizes market/bettor identity via server-side proto_markets records (path param market id), not caller-supplied identity fields")
+  ✅ 请求体含 shardleaf_txid ⇒ 拒绝且错误信息点名该字段(实际: "shardleaf_txid must not be provided in the request body — proto v0 single-operator mode only recognizes market/bettor identity via server-side proto_markets records (path param market id), not caller-supplied identity fields")
+  ✅ 请求体含 shardleaf_vout ⇒ 拒绝且错误信息点名该字段(实际: "shardleaf_vout must not be provided in the request body — proto v0 single-operator mode only recognizes market/bettor identity via server-side proto_markets records (path param market id), not caller-supplied identity fields")
+  ✅ 请求体含 bettor_pk ⇒ 拒绝且错误信息点名该字段(实际: "bettor_pk must not be provided in the request body — proto v0 single-operator mode only recognizes market/bettor identity via server-side proto_markets records (path param market id), not caller-supplied identity fields")
+  ✅ 请求体含 bettor_pubkey ⇒ 拒绝且错误信息点名该字段(实际: "bettor_pubkey must not be provided in the request body — proto v0 single-operator mode only recognizes market/bettor identity via server-side proto_markets records (path param market id), not caller-supplied identity fields")
+  ✅ 请求体含 bettor_privkey ⇒ 拒绝且错误信息点名该字段(实际: "bettor_privkey must not be provided in the request body — proto v0 single-operator mode only recognizes market/bettor identity via server-side proto_markets records (path param market id), not caller-supplied identity fields")
+  ✅ 字段存在但值为空字符串 ⇒ 仍拒绝(hasOwnProperty 语义, 不是真值判断)
+  ✅ 字段存在但值为 null ⇒ 仍拒绝
+  ✅ 混合正常字段(direction)与禁用字段(covenant_id) ⇒ 仍拒绝
+
+✅✅ ALL PASS

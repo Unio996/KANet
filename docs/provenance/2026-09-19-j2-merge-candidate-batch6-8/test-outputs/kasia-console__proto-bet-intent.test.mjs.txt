@@ -1,0 +1,37 @@
+[db] path=%TEMP%\_j2_proto_bet_intent_25428.db source=DB_PATH
+[test] ① 下注唯一步骤(append): pending → 首次 build 成功 → submitted:
+  ✅ append 拿到 txId
+  ✅ append intent status=submitted (实际 submitted)
+[test] ② 幂等: 再调一次 driveBetIntent(同 betId/step) → reused, 不重新构造:
+  ✅ append 第二次调用 reused=true
+  ✅ buildAndBroadcast 未被再次调用(实际调用 0 次)
+[test] ③ markBetIntent 单调性: 不能从 landed 退回 pending:
+  ✅ checkBetIntentLanded 判定已 landed
+  ✅ intent 行更新为 landed(实际 landed)
+  ✅ 尝试退回 pending 被拒, 仍是 landed(实际 landed)
+[test] ④ resolvePrepared: prepared 行且 txid 已在 mempool → submitted, 不重新构造:
+  ✅ resolvePrepared 从 mempool 确认恢复出正确 txid(实际 deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef)
+  ✅ buildAndBroadcast 未被调用(实际 0 次) —— prepared 态走恢复不走重建
+[test] ⑤ resumeStaleBetIntents: 扫到陈旧 prepared 行并恢复:
+  ✅ 扫到 1 条陈旧 prepared 行(实际 1)
+  ✅ 成功恢复 1 条(实际 1)
+  ✅ 恢复后状态为 submitted(实际 submitted)
+[test] ⑥a resolvePrepared: 同字节重播遇 inputs_spent 但 kaspa_tx_log 有正向落地证据 → submitted(不重建):
+  ✅ 没有 throw(实际 null)
+  ✅ resolvePrepared 靠 kaspa_tx_log 正向证据确认 submitted, txid 不变(实际 a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1)
+  ✅ intent 行落为 submitted, 不是 ambiguous(实际 submitted)
+[test] ⑥b resolvePrepared: inputs_spent 且 kaspa_tx_log 查无正向证据 → ambiguous 终态, HOLD 不重建不放弃:
+  ✅ driveBetIntent throw 了 HoldError(不是普通异常, 调用方能区分"需要人工"vs"程序错误")
+  ✅ hold code 正确(实际 ambiguous_inputs_spent)
+  ✅ buildAndBroadcast 未被调用(实际 0 次) —— 没有在歧义态悄悄重建双花
+  ✅ intent 行落为 ambiguous 终态(实际 ambiguous)
+[test] ⑥c ambiguous 是终态: markBetIntent 不能把它改回任何非 ambiguous 状态, 后续 driveBetIntent 直接 HOLD 不再碰 sendCmd:
+  ✅ 尝试把 ambiguous 改回 prepared 被拒(实际 ambiguous) —— 终态只能人工清
+  ✅ ambiguous 行再次 driveBetIntent 立即 HOLD(不重试, 不轮询)
+  ✅ 第二次调用完全没碰 sendCmd(实际 0 次) —— activeBetIntent 排除 ambiguous 行会造一条新 pending 行, 若命中说明依赖 activeBetIntent 的排除逻辑有洞
+[test] ⑦(账本1438①) proto-bet-intent 与 proto-market-intent 的 resolvePrepared 用同一个命令类型字符串(源码级断言, 防止各自手打字面量再次漂移):
+  ✅ proto-bet-intent.mjs 用共享常量, 不再把 broadcast_raw_tx 当实际命令类型值(纯文字提及历史命名不算)
+  ✅ proto-market-intent.mjs 也用同一个共享常量
+  ✅ 共享常量值就是真实命令名(实际 covenant_broadcast)
+
+✅✅ ALL PASS — proto-bet-intent 单步状态机(幂等/单调/恢复/inputs_spent 歧义终态) 全绿

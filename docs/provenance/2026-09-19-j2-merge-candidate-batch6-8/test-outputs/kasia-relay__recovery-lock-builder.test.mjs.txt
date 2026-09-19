@@ -1,0 +1,17 @@
+[PASS] G0 源级: 不含 _cltvLockTimeAllowZeroForTests; loadRecoveryConfig 内调 assertPositiveDelay
+[PASS] C1 loadRecoveryConfig: n=100 ok(bigint, frozen, entry 3); 字符串 "100" ok
+[PASS] C2 loadRecoveryConfig 拒: 0 / −1 / 缺 / null / 1e7(sane-max) / 5e11 / 非整数 / entry 非法
+[PASS] C3 (Codex A) raw 含 entry ⇒ 拒 CLTV_CONFIG_OVERRIDE_FORBIDDEN, 哪怕是另一个合法整数 2 / 等于默认的 3 / null; 且分支不变: 合法 cfg 的 entry 恒 = RECOVERY_DAA_ENTRY(3)
+[PASS] C4 (Codex B) raw 含 max ⇒ 拒 CLTV_CONFIG_OVERRIDE_FORBIDDEN: {n:5e8, max:1e9} 不能放过 (n=5e8 ≥ 1e7); {n:100, max:1e9} 也拒(有 key 即拒); 单独 n=5e8 ⇒ DOMAIN_MIXED
+[PASS] C5 test-only _loadRecoveryConfigWithMaxForTests(raw, 1000): 999 ok / 1000 拒; 它同样拒 raw 里的 max/entry; 生产 loadRecoveryConfig 源里不调它
+[PASS] P1 planRecoveryDaa 镜像探针 P: d=80,000,000, n=100 ⇒ E=lockTime=80,000,100 (<5e11), sequence 0n, sigPushes [0,3], earliest tip = E+1
+[PASS] P2 planRecoveryDaa 拒: 手造 cfg(非 frozen) / cfg.nDelayDaa 非 bigint / successorDaa 缺 / 负 / ≥5e11 / 非整数 / sequence MAX / selfInputIndex 非法
+[PASS] P2-brand (NWT fix-up ①) 出处品牌: (a) 手造 frozen {nDelayDaa:0n, entry:3} ⇒ 拒 (绕过 assertPositiveDelay 的零延迟); (b) {...realCfg} spread 拷贝 ⇒ 拒 (WeakSet 认引用, Symbol 标记会被 spread 带走); (c) 真 cfg 本身 ⇒ 过
+[PASS] P3 域边界: d = 5e11−101, n=100 ⇒ E = 5e11−1 ok; d = 5e11−100 ⇒ E = 5e11 ⇒ DOMAIN_MIXED (溢出到时间域, 不静默)
+[PASS] S1 canSubmitRecovery (N8): tip == E ⇒ false; tip == E+1 ⇒ true; tip < E ⇒ false
+[PASS] T1 assertRecoveryTxShape: 正形 ok (bigint 与 string 字段皆可)
+[PASS] T2 assertRecoveryTxShape 拒 N6/N7/N9/续 covenant/空输出: lockTime E−1 / 时间量级 / sequence MAX / outputs 带 covenant / outputs []
+[PASS] G1 import-surface guard: spawn lint R-TESTONLY-EXPORT-IN-PROD — 两生产文件 + kasia-console/src/lib 生产 .mjs = 0 命中; 10 条对照 (具名 import 1 / 生产定义 1 / import * as 1 / 动态 import() 1 / export * from 1 / test-context 同样 import+定义 0 / fixture 引 testonly 0 / prod import .fixture 1 / 符号只在字符串+行尾注释 0 / 真定义+真调用 2), 各报行列, 跑完删
+[PASS] G2 (Codex 2ce3f1a9 TG-3) 仓级不变量: 无参 lint 默认 walk 必须盖 kasia-relay/src — 在未列的 relay 子目录临时建生产文件 import testonly ⇒ 无参跑 lint 逮到 (R-TESTONLY ≥1 且报该文件); 跑完删
+[PASS] G3 (v6, Bettor 8/29) 无参默认范围 = git tracked: 未 tracked 的临时违例文件 ⇒ 无参 lint 0 命中; `git add -N` 后 ⇒ ≥1; 跑完 reset + 删
+recovery-lock-builder: 16 PASS / 0 FAIL

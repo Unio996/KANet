@@ -1,0 +1,40 @@
+// 只读: 从 simnet 节点区块记录取回 register_append#1(ticket 出处, 对照)与 ticket_reclaim 的节点侧 mass 字段/区块位置, 并把 ticket_reclaim 完整交易(含见证字节)落盘。
+// 用法: node scratch/_j2_simnet/14_fetch_withdraw_records.mjs <输出目录>
+import fs from 'node:fs';
+import crypto from 'node:crypto';
+const kaspa = await import('kaspa-wasm');
+const chain = JSON.parse(fs.readFileSync(new URL('./_j2_simnet_chain4.json', import.meta.url), 'utf8'));
+const WANT = { register_append_1: chain.bet1.txid, claim_draw: chain.claimDraw.txid, withdraw: chain.withdraw.txid, ticket_reclaim: chain.ticketReclaim.txid };
+const byId = Object.fromEntries(Object.entries(WANT).map(([k, v]) => [v, k]));
+const rpc = new kaspa.RpcClient({ url: 'ws://127.0.0.1:18510', networkId: 'simnet' });
+await rpc.connect();
+const out = { retrievedVia: 'RPC getBlocks(includeTransactions:true) 只读扫块; 读区块内交易记录自带的节点侧storageMass/mass/verboseData.computeMass', txs: {} };
+const full = {};
+let low; let scanned = 0;
+for (let page = 0; page < 400 && Object.keys(out.txs).length < 4; page++) {
+  const r = await rpc.getBlocks({ lowHash: low, includeBlocks: true, includeTransactions: true });
+  const blocks = r.blocks || []; if (!blocks.length) break;
+  for (const b of blocks) {
+    scanned++;
+    for (const tx of (b.transactions || [])) {
+      const id = tx.verboseData?.transactionId; if (!byId[id]) continue;
+      const j = JSON.parse(JSON.stringify(tx, (k, v) => (typeof v === 'bigint' ? v.toString() : v)));
+      const name = byId[id];
+      out.txs[name] = {
+        txid: id, version: j.version, lockTime: j.lockTime, storageMass: j.storageMass, mass: j.mass, computeMass: j.verboseData.computeMass,
+        block: { hash: b.header?.hash ?? j.verboseData.blockHash, daaScore: String(b.header?.daaScore ?? ''), timestamp: String(b.header?.timestamp ?? '') },
+        inputs: j.inputs.map((i) => ({ previousOutpoint: i.previousOutpoint, sigScriptBytes: String(i.signatureScript).length / 2, sigScriptSha256_16: crypto.createHash('sha256').update(Buffer.from(String(i.signatureScript), 'hex')).digest('hex').slice(0, 16), sequence: i.sequence, computeBudget: i.computeBudget, sigOpCount: i.sigOpCount })),
+        outputs: j.outputs.map((o) => ({ value: o.value, covenant: o.covenant ?? null, scriptPublicKey: o.scriptPublicKey })),
+      };
+      if (name === 'ticket_reclaim' || name === 'withdraw') full[name] = j;
+    }
+  }
+  const hashes = r.blockHashes || []; const next = hashes[hashes.length - 1];
+  if (!next || next === low || blocks.length < 2) break; low = next;
+}
+out.scannedBlocks = scanned;
+fs.writeFileSync(process.argv[2] + '/raw-onchain-ticket-reclaim-node-records.json', JSON.stringify(out, null, 1));
+for (const [k, v] of Object.entries(full)) fs.writeFileSync(`${process.argv[2]}/${k}_full_tx.json`, JSON.stringify(v));
+console.log('scanned', scanned, 'found', Object.keys(out.txs).join(','));
+for (const [k, v] of Object.entries(out.txs)) console.log(k.padEnd(12), 'v' + v.version, 'storage', v.storageMass, 'mass', v.mass, 'compute', v.computeMass, 'daa', v.block.daaScore);
+await rpc.disconnect(); process.exit(0);

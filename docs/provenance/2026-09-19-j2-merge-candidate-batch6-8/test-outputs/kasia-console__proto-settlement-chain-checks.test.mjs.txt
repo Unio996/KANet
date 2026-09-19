@@ -1,0 +1,24 @@
+[db] path=%TEMP%\_j2_chain_checks_25664.db source=DB_PATH
+[PASS] 常量可追溯到真实链上交易: 全链六笔里所有带 covenant 的输出面值恒为 20,000,000, 与 EXPECTED_INPUT_VALUE_SOMPI 一致
+[PASS] seal: 输入角色(leaf/held)面值==20,000,000 且 spk==builder 假设值 ⇒ 通过; 字符串/BigInt/number 形态、0x 前缀/大写 spk 都通过
+[PASS] seal/leaf: 面值偏小(1000)/偏大(+1)/缺失/已花费/面值缺失 ⇒ leaf_value_drift; spk 不符/链上 spk 缺失/假设 spk 缺失 ⇒ leaf_spk_drift 或 fail-closed
+[PASS] seal/held: 面值偏小(1000)/偏大(+1)/缺失/已花费/面值缺失 ⇒ held_value_drift; spk 不符/链上 spk 缺失/假设 spk 缺失 ⇒ held_spk_drift 或 fail-closed
+[PASS] close_commit: 输入角色(rootClose)面值==20,000,000 且 spk==builder 假设值 ⇒ 通过; 字符串/BigInt/number 形态、0x 前缀/大写 spk 都通过
+[PASS] close_commit/rootClose: 面值偏小(1000)/偏大(+1)/缺失/已花费/面值缺失 ⇒ rootClose_value_drift; spk 不符/链上 spk 缺失/假设 spk 缺失 ⇒ rootClose_spk_drift 或 fail-closed
+[PASS] convert_to_claim: 输入角色(rootClose/held)面值==20,000,000 且 spk==builder 假设值 ⇒ 通过; 字符串/BigInt/number 形态、0x 前缀/大写 spk 都通过
+[PASS] convert_to_claim/rootClose: 面值偏小(1000)/偏大(+1)/缺失/已花费/面值缺失 ⇒ rootClose_value_drift; spk 不符/链上 spk 缺失/假设 spk 缺失 ⇒ rootClose_spk_drift 或 fail-closed
+[PASS] convert_to_claim/held: 面值偏小(1000)/偏大(+1)/缺失/已花费/面值缺失 ⇒ held_value_drift; spk 不符/链上 spk 缺失/假设 spk 缺失 ⇒ held_spk_drift 或 fail-closed
+[PASS] claim_draw: 输入角色(rootClaim/ticket/held)面值==20,000,000 且 spk==builder 假设值 ⇒ 通过; 字符串/BigInt/number 形态、0x 前缀/大写 spk 都通过
+[PASS] claim_draw/rootClaim: 面值偏小(1000)/偏大(+1)/缺失/已花费/面值缺失 ⇒ rootClaim_value_drift; spk 不符/链上 spk 缺失/假设 spk 缺失 ⇒ rootClaim_spk_drift 或 fail-closed
+[PASS] claim_draw/ticket: 面值偏小(1000)/偏大(+1)/缺失/已花费/面值缺失 ⇒ ticket_value_drift; spk 不符/链上 spk 缺失/假设 spk 缺失 ⇒ ticket_spk_drift 或 fail-closed
+[PASS] claim_draw/held: 面值偏小(1000)/偏大(+1)/缺失/已花费/面值缺失 ⇒ held_value_drift; spk 不符/链上 spk 缺失/假设 spk 缺失 ⇒ held_spk_drift 或 fail-closed
+[PASS] withdraw: 输入角色(claim/held)面值==20,000,000 且 spk==builder 假设值 ⇒ 通过; 字符串/BigInt/number 形态、0x 前缀/大写 spk 都通过
+[PASS] withdraw/claim: 面值偏小(1000)/偏大(+1)/缺失/已花费/面值缺失 ⇒ claim_value_drift; spk 不符/链上 spk 缺失/假设 spk 缺失 ⇒ claim_spk_drift 或 fail-closed
+[PASS] withdraw/held: 面值偏小(1000)/偏大(+1)/缺失/已花费/面值缺失 ⇒ held_value_drift; spk 不符/链上 spk 缺失/假设 spk 缺失 ⇒ held_spk_drift 或 fail-closed
+[PASS] ticket_reclaim: 输入角色(ticket)面值==20,000,000 且 spk==builder 假设值 ⇒ 通过; 字符串/BigInt/number 形态、0x 前缀/大写 spk 都通过
+[PASS] ticket_reclaim/ticket: 面值偏小(1000)/偏大(+1)/缺失/已花费/面值缺失 ⇒ ticket_value_drift; spk 不符/链上 spk 缺失/假设 spk 缺失 ⇒ ticket_spk_drift 或 fail-closed
+[PASS] 未知步骤 / chainUtxos 缺失 / expectedSpks 缺失 ⇒ 拒绝
+[PASS] 只核该步骤需要的角色: close_commit 不因 leaf/ticket 异常而拒(它们不是该步输入)
+[PASS] 覆盖范围(Bettor 转 Codex): close_commit/convert_to_claim/claim_draw/withdraw/ticket_reclaim 的每个 covenant 输入角色都在断言表里
+
+21 passed, 0 failed

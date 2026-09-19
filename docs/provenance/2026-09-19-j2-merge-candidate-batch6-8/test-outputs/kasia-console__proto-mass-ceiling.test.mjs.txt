@@ -1,0 +1,22 @@
+[PASS] 阈值不变: 500000×0.95=475000; 签名后sigScript留量=66字节
+[PASS] utxoPlurality: 标准P2PK(33B)=1, 35字节P2SH=1, 带covenant的P2SH=2(=ceil((63+35+32)/100))
+[PASS] ①market_genesis: 精确storage与compute逐位等于节点值(输入facts取自父交易输出), 路径=relaxed
+[PASS] ①register_append#1: 精确storage与compute逐位等于节点值(输入facts取自父交易输出), 路径=arithmetic
+[PASS] ①register_append#2: 精确storage与compute逐位等于节点值(输入facts取自父交易输出), 路径=arithmetic
+[PASS] ①market_seal: 精确storage与compute逐位等于节点值(输入facts取自父交易输出), 路径=arithmetic
+[PASS] ②随机形状对拍: 30,000个随机形状, 本仓calcStorageMassExact与NWT独立移植逐位相等(mass与relaxed/arithmetic路径)
+[db] path=%TEMP%\_j2_mass_ceiling_26408.db source=DB_PATH
+[diag:step] proc.silverc.compile.bshard-artifacts ms=74 cmd=silverc ok=1 at=2026-09-19T16:49:40.299Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=50 cmd=silverc ok=1 at=2026-09-19T16:49:40.355Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=28 cmd=silverc ok=1 at=2026-09-19T16:49:40.404Z
+[PASS] ③register_append#1 fee=85000000: 必拒(精确storage=994327 ≥ 475,000)
+[PASS] ③register_append#1 fee=90000000: 必拒(精确storage=518872 ≥ 475,000)
+[PASS] ③register_append#1 fee=95000000: 必过, 断言信号storage=457504
+[PASS] ③register_append#1 fee=100000000: 必过, 断言信号storage=435000
+[PASS] ③95M: 断言给出的信号与批3节点原始值逐位相等(storage 457,504 / compute 33,927), 且localMass诊断值>阈值却不门控
+[PASS] fail-closed: inputHasCovenant缺失/长度不符/非boolean 都必须拒绝
+[PASS] fail-closed: 声明带covenant但spk不是35字节P2SH → 拒绝(builder声明与spk形状交叉核对)
+[PASS] compute独立守卫: sigScript 480,000字节 → compute超475,000必拒(storage本身很小)
+[PASS] compute留量: 未签名输入(sigScript为空)按签名后66字节计, 与已含66字节的同一交易compute相等
+
+16 passed, 0 failed

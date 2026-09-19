@@ -1,0 +1,34 @@
+  ok #1 新文件同form裸import → ERROR
+  ok #2 既有文件count+1 → ERROR
+  ok #3 纯移动+refresh → 零报
+  ok #4 纯移动无refresh → ERROR+提示
+  ok #5 删真加假净count不变 → 新文件仍ERROR
+  ok #6a 燃尽未落账 → ERROR(提示 --prune)
+  ok #6b 燃尽+prune同commit → 零报
+  ok #7 大改移动降级D+A → ERROR
+  ok #8a baseline count+1 → EDIT-GUARD ERROR
+  ok #8b 伪造path改写(无rename对) → EDIT-GUARD ERROR
+  ok #9a manifest只读诊断(readonly:true) → 零报
+  ok #9b 缺readonly:true → ERROR
+  ok #9c 只读例外带relay import → ERROR
+  ok #10a 自助只读测试道 → 零报
+  ok #10b 自助道文件不在测试路径 → ERROR
+  ok #11 shadow-module → ERROR
+  ok #12 计算opts → fail-closed ERROR
+  ok #14a from双空格 → ERROR
+  ok #14b require括号后空格 → ERROR
+  ok #14c from后tab → ERROR
+  ok #14d relay动态import括号后空格 → ERROR
+  ok #15 受控funnel(白名单+cap+digest匹配) → 零报
+  ok #16 非白名单文件用此cap → 拒(block非warn)
+  ok #17 digest失配(文件改过) → 拒(block非warn)
+  ok #18 relay-manager用db-readonly → 仍拒(block非warn)
+  ok #19 provision writer(白名单+digest+负面净) → 零报
+  ok #20 非白名单writer → 拒(block)
+  ok #21 writer digest失配 → 拒(block)
+  ok #22 writer含fetch网络面 → 拒(digest对也拒)
+  ok #23 writer cap错族(relay-manager) → 拒
+  ok #13 真仓全量 570ms < 3000ms
+  ok #13b 真仓当前镜像零违规
+
+[m0a-lint.test] 32 passed, 0 failed

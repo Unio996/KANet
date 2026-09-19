@@ -1,0 +1,24 @@
+[PASS] RELAY-1 非 PROTO_RELAY_ID 的 relay 收到命令 ⇒ 拒绝, 不碰任何签名/广播/ingest 逻辑
+[PASS] RELAY-2 PROTO_RELAY_ID 未配置 ⇒ 全部拒绝(fail-closed: 未配置=无人被授权)
+[PASS] FRESH-1 正常全流程: prepared ingest 成功 → 广播成功 → submitted ingest 成功 → ok:true
+[PASS] FRESH-2 prepared ingest 失败 ⇒ 不广播(fail-closed, §9.5③), 不调用 submitTransaction
+[PASS] FRESH-3 submitted ingest 失败 ⇒ 已广播的事实不可撤, 仍 ok:true+txId, 带 code 供调用方兜底
+[PASS] FRESH-4 validateSignedInputCeiling 失败(签名前) ⇒ 不签名不广播
+[PASS] FRESH-5 expected_txid 与真实 finalize 后 txid 不符 ⇒ 拒绝, 不广播
+[PASS] FRESH-6 computeRequiredFeeSompi 失败(mass calc panic) ⇒ fail-loud 拒绝, 不广播
+[PASS] FRESH-7 validateNetLoss 失败(找零金额不够, net_loss 超出手续费上限) ⇒ 拒绝, 不广播
+[PASS] FRESH-7B(账本1425硬条件②) genesis 输出面值不等于 GENESIS_OUTPUT_SOMPI(20,000,000) ⇒ 签名前拒绝, 不广播
+[PASS] FRESH-7C(账本1425硬条件②) genesis 输出面值恰好等于常量 ⇒ 该检查放行(其余检查仍各自独立生效)
+[PASS] FRESH-8 signOnlyDeclaredInputs 本身失败(如 wasm 抛错) ⇒ 拒绝, 不广播
+[PASS] FRESH-9(NWT 1387 复核要求) net_loss cap 与 SIGNED_INPUT_CEILING 解耦验证: 临时把 SIGNED_INPUT_CEILING 注入抬高到 2.0 KAS(解除"两值当前恰好相等"这个巧合遮蔽), cmd 里贴一个恶意/意外的假 abs_fee_cap_sompi=5 KAS(relay 从不读这个字段, 但仍显式放进 cmd 模拟"如果被读了会怎样"), 签名输入 1.5 KAS(远低于注入后的 2.0 KAS 输入闸, 不会被那道闸先挡住) ⇒ 仍应在 validateNetLoss 这一步被硬编码的 GLOBAL_ABS_FEE_CAP_SOMPI(1.0 KAS)拒绝, 且错误信息里引用的是 1 亿(GLOBAL)不是 5 亿(cmd 假 cap)——证明"relay 不读 cmd 的 cap"这条性质是真的独立生效, 不是被 SIGNED_INPUT_CEILING 顺带挡住的巧合
+[PASS] FRESH-10(账本1455纵深防御) 交易含一个未签名的输入(如leaf/held这类covenant输入)但其面值凭空多算进"隐含手续费"里(足够大的漏计量级, 超过min(requiredFee×2,GLOBAL)容忍区间) ⇒ implied_fee_exceeded拒绝, 不签名前就已经反序列化+extractTxShape, 但拒绝发生在验证阶段而不是广播——不重复广播
+[PASS] IDEMPOTENT-1 同一 intent_key 二次调用(进程内已完成) ⇒ reused, 不重新广播
+[PASS] REPLAY-1 replay_tx_json 路径: 复用注入的 replayFn, 成功后调 submitted ingest
+[PASS] REPLAY-2 replay 路径 submitted ingest 失败 ⇒ ok:true 但带 ingest_after_broadcast_failed
+[PASS] REPLAY-3 replay 路径缺 prepared_txid ⇒ 拒绝(既有 TRANSFER 同款契约)
+[PASS] FIELD-2 缺 tx_json ⇒ error 提示 tx_json required
+[PASS] FIELD-3 缺 sign_input_indices ⇒ error 提示非空数组
+[PASS] FIELD-4 缺 expected_txid ⇒ error 提示
+[PASS] FIELD-5 缺 intent_key ⇒ error 提示(最外层第一道检查)
+
+22 passed, 0 failed

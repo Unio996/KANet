@@ -1,0 +1,50 @@
+[db] path=%TEMP%\_j2_proto_market_intent_15276.db source=DB_PATH
+[test] ① marketIntentKeyFor/marketIdFromIntentKey 往返:
+  ✅ attempt=1 无后缀
+  ✅ attempt=2 加 #2 后缀
+  ✅ 反解 attempt=1
+  ✅ 反解 attempt=2 去掉后缀
+  ✅ 非 genesis: 前缀返回 null(不误吃 bet intent key)
+[test] ② 硬条件①: ensureMarketPending 必须先于任何 IPC 建 pending 行, driveMarketGenesis 找不到行必须 throw:
+  ✅ driveMarketGenesis 对未 ensure 过的 marketId 拒绝(不会隐式建行)
+  ✅ 拒绝发生在任何 IPC 调用之前
+[test] ③ genesis_pending → 首次 build 成功 → genesis_submitted:
+  ✅ ensureMarketPending 落表状态是 genesis_pending(实际 genesis_pending)
+  ✅ genesis 拿到 txId
+  ✅ market status=genesis_submitted(实际 genesis_submitted)
+  ✅ genesis_submitted_txid 记录一致
+[test] ④ 幂等: 再调一次 driveMarketGenesis(同 marketId) → reused, 不重新构造:
+  ✅ 第二次调用 reused=true
+  ✅ buildAndBroadcast 未被再次调用(实际 0 次)
+[test] ⑤ checkMarketGenesisLanded: landed 深度不够 → 仍是 genesis_submitted; 深度够 → status 推进到 betting(=active) + 写 shardleaf_txid/vout:
+  ✅ 深度 5 < minDepth 20 ⇒ landed=false(实际 false)
+  ✅ 未落链确认前状态保持 genesis_submitted
+  ✅ 深度 25 >= minDepth 20 ⇒ landed=true(实际 true)
+  ✅ 落链确认后 status=betting(=active)(实际 betting)
+  ✅ shardleaf_txid 从 genesis_submitted_txid 写入
+  ✅ shardleaf_vout 写入
+  ✅ genesis_landed_depth 记录
+[test] ⑥ minDepth 缺失/非正数 ⇒ throw(不是静默用 0):
+  ✅ minDepth 缺失时 throw
+[test] ⑦ genesis_prepared 态但无签名字节(F2-R) → hold, 不重发不重建:
+  ✅ prepared 无字节 ⇒ HoldError
+  ✅ hold code 正确(实际 prepared_without_bytes)
+[test] ⑧ genesis_ambiguous 终态: 一旦置位, markMarketStatus 不能覆盖 status, driveMarketGenesis 直接 throw hold 不重试:
+  ✅ ambiguous 后 status 不可被覆盖(实际 genesis_ambiguous)
+  ✅ ambiguous market ⇒ driveMarketGenesis 直接 throw hold
+  ✅ 没有对 ambiguous 市场发起任何新 IPC(不重建不重试)
+[test] ⑨ resumeStaleMarketIntents(F2-R 重启捡回): genesis_prepared 且 updated_at 早于 cutoff 的行被扫到并 resolvePrepared:
+  ✅ 扫到 1 条陈旧 prepared 行(实际 1)
+  ✅ 成功 resolve 1 条(实际 1)
+  ✅ m4 状态推进到 genesis_submitted(实际 genesis_submitted)
+[test] ⑩ shardleaf_cov_id(账本1429/1431): prepared 阶段写入 + 落链 fail-closed 重算比对:
+  ✅ prepared 阶段 shardleaf_cov_id 写入成功
+  -- ⑩a 落链交易真实 input[0] outpoint 与存的值一致 ⇒ 通过, 推进到 betting --
+  ✅ 一致时 landed=true(实际 true)
+  ✅ 一致时状态推进到 betting(实际 betting)
+[test] ⑪ 伪造落链交易的 input outpoint 不同 ⇒ 拒绝推进, genesis_ambiguous, 不自动重建:
+  ✅ 不一致时 throw MarketIntentHoldError(covid_mismatch)(实际 covid_mismatch)
+  ✅ 状态推进到 genesis_ambiguous, 不是 betting(实际 genesis_ambiguous)
+  ✅ genesis_last_error 记录了不一致原因
+
+✅✅ ALL PASS

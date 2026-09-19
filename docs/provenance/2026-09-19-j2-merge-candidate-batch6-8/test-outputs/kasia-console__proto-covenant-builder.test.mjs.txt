@@ -1,0 +1,23 @@
+[PASS] ①(T4-lite 前提)协议常量文件存在且三项都非空
+[diag:step] proc.silverc.compile.bshard-artifacts ms=78 cmd=silverc ok=1 at=2026-09-19T16:49:37.902Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=53 cmd=silverc ok=1 at=2026-09-19T16:49:37.960Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=53 cmd=silverc ok=1 at=2026-09-19T16:49:38.018Z
+[PASS] ② 完整 market_genesis 推导链真实编译成功(committee keypair→RootClaim→RefundClaim→RootClose→ShardLeaf_direct)
+[PASS] ③ rootClaimTmplHash != refundClaimTmplHash(不同合约, 不应该恰好撞同一个值)
+[PASS] ④(T4-lite 硬要求, spec §2 T4 清单第 3 条)独立重编译 RootClose(同一套真实 ctor 值)与 builder 算出的 rootCloseTmplHash 逐字节一致——防"编译了两次但用错了哪一次的产物"
+[PASS] ⑤(硬条件④要求的 T4 对照, 账本1425向量⑤) 独立用 V100 helper 重编 ShardLeaf_direct(同一套真实 ctor)算出的 P2SH 与 builder 返回值逐字节一致
+[PASS] ⑥ marketId 格式校验: 非 32 字节 hex 直接 throw, 不静默截断/填充
+[PASS] ⑦ minBet/deadlineMs 非正数 ⇒ throw
+[PASS] ⑧ bet_mint 步骤A: KTT genesis ctor 真实编译, token_tmpl_hash 与协议常量逐字节一致(证明 owner 值不同不影响模板哈希, invariance 在真实流水线里成立)
+[PASS] ⑨ computeKttGenesisArtifact: ownerCovIdHex 格式错误 ⇒ throw
+[PASS] ⑩ computeShardLeafRedeemScript(genesis state 全0, 从已存 own_redeem_len 重建) 与 computeMarketGenesisArtifacts 算出的 shardLeafDirect 逐字节一致(确定性重算, 不依赖随机委员会密钥, 不重新收敛)
+[diag:step] proc.silverc.compile.bshard-artifacts ms=51 cmd=silverc ok=1 at=2026-09-19T16:49:38.092Z
+[PASS] ⑪ computeShardLeafRedeemScript 换一组非零 state ⇒ 产出不同的 scriptPubKey(证明真的把 state 编码进去参与了哈希), own_redeem_len 不受影响
+[PASS] ⑭(账本1469 Bettor④) ctor 取值矩阵: seal_count/min_bet 跨 minimal-push 编码宽度门槛, 不动点收敛必须成功(≤4轮), 且每组收敛结果通过 fail-closed 断言
+[diag:step] proc.silverc.compile.bshard-artifacts ms=51 cmd=silverc ok=1 at=2026-09-19T16:49:38.222Z
+[PASS] ⑮(账本1469 Bettor③) fail-closed 断言真的会拦: 传一个错误的 ownRedeemLen 给 computeShardLeafRedeemScript 必须 throw, 不能静默放行
+[PASS] ⑯ computeShardLeafRedeemScript: ownRedeemLen 缺失/非正整数 ⇒ throw(不静默当0/undefined处理)
+[PASS] ⑫(账本1439) computeTicketGenesisArtifact: PoolSideTicket genesis ctor 真实编译, 不同 bettorPk/stake 产出不同脚本
+[PASS] ⑬ computeTicketGenesisArtifact: bettorPk 格式错误 ⇒ throw
+
+16 passed, 0 failed
