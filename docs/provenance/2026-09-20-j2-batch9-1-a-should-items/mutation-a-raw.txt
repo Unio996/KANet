@@ -1,0 +1,64 @@
+══ S1: proto-fee-profile-caps.test.mjs 对 anchors JSON 的变异 ══
+基线(未变异): exit=0  10 passed, 0 failed
+  ✅ 基线通过
+  ✅ 变异「market_seal.cap +1 sompi」⇒ 1 条 FAIL (exit 1)
+  ✅ 变异「close_commit.cap +1 sompi」⇒ 1 条 FAIL (exit 1)
+  ✅ 变异「convert_to_claim.cap +1 sompi」⇒ 1 条 FAIL (exit 1)
+  ✅ 变异「claim_draw.cap +1 sompi」⇒ 1 条 FAIL (exit 1)
+  ✅ 变异「withdraw.cap +1 sompi」⇒ 1 条 FAIL (exit 1)
+  ✅ 变异「ticket_reclaim.cap +1 sompi」⇒ 1 条 FAIL (exit 1)
+  ✅ 变异「market_seal.cap -1 sompi」⇒ 1 条 FAIL (exit 1)
+  ✅ 变异「close_commit.cap -1 sompi」⇒ 1 条 FAIL (exit 1)
+  ✅ 变异「convert_to_claim.cap -1 sompi」⇒ 1 条 FAIL (exit 1)
+  ✅ 变异「claim_draw.cap -1 sompi」⇒ 1 条 FAIL (exit 1)
+  ✅ 变异「withdraw.cap -1 sompi」⇒ 1 条 FAIL (exit 1)
+  ✅ 变异「ticket_reclaim.cap -1 sompi」⇒ 1 条 FAIL (exit 1)
+  ✅ 变异「withdraw.cap 超过全局硬顶(200,000,000)」⇒ 1 条 FAIL (exit 1)
+  ✅ 变异「删掉 close_commit 的 _source」⇒ 1 条 FAIL (exit 1)
+  ✅ 变异「删掉 claim_draw 整个 feeProfile 条目」⇒ 3 条 FAIL (exit 1)
+[RESTORED] anchors JSON 已还原, sha256 95bc919f4f740b3d… 一致
+
+══ S3: 测试前提 fail-loud(有检查 / 去掉检查的变异 / 前提满足) ══
+
+── drain-finality-safe-blocks.test.mjs
+① 缺前提 + 有检查: exit=1
+    | [drain-finality-safe-blocks.test] 前提不满足: 环境变量 KASPA_NETWORK 未设置或不在 {mainnet, testnet-12, devnet, simnet} 内(当前: undefined)。
+    |   rpc-listener.mjs 顶层读它、未设即抛泛泛的错。本测试不连接任何节点, 用 simnet 即可。
+    |   正确运行: cd kasia-relay && KASPA_NETWORK=simnet node src/drain-finality-safe-blocks.test.mjs
+  ✅ 给出明确的"前提不满足"说明(缺什么 + 正确运行命令)且 exit 1
+② 缺前提 + 去掉检查(变异): exit=1
+    | file:///D:/kanet-tn12/scratch/_j2_wt_batch9_1/shared/lib/kaspa-network.mjs:40
+    |     throw new Error(`KASPA_NETWORK not set or unknown: ${JSON.stringify(net)} (allowed: ${Object.keys(NETWORKS).join(', ')})`);
+    |           ^
+    | Error: KASPA_NETWORK not set or unknown: undefined (allowed: mainnet, testnet-12, devnet, simnet)
+    |     at configuredNetwork (file:///D:/kanet-tn12/scratch/_j2_wt_batch9_1/shared/lib/kaspa-network.mjs:40:11)
+    |     at file:///D:/kanet-tn12/scratch/_j2_wt_batch9_1/kasia-relay/src/rpc-listener.mjs:31:23
+    |     at ModuleJob.run (node:internal/modules/esm/module_job:430:25)
+    |     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:661:26)
+    |     at async file:///D:/kanet-tn12/scratch/_j2_wt_batch9_1/kasia-relay/src/drain-finality-safe-blocks.test.mjs:13:37
+  ✅ 变异后不再有明确说明, 退回裸/泛泛异常(证明明确说明确实是检查产生的)
+③ 前提满足: exit=0  [drain-finality-safe-blocks.test] ALL PASS
+  ✅ 前提满足时正常通过
+[RESTORED] drain-finality-safe-blocks.test.mjs 已还原, sha256 d38e7637b9c925d3… 一致
+
+── broadcaster-utxo.test.mjs
+① 缺前提 + 有检查: exit=1
+    | [broadcaster-utxo.test] 前提不满足: node:test 的 mock.module 不可用——本测试必须带 --experimental-test-module-mocks 运行。
+    |   正确运行: cd kasia-console && node --experimental-test-module-mocks --test src/lib/broadcaster-utxo.test.mjs
+  ✅ 给出明确的"前提不满足"说明(缺什么 + 正确运行命令)且 exit 1
+② 缺前提 + 去掉检查(变异): exit=1
+    | file:///D:/kanet-tn12/scratch/_j2_wt_batch9_1/kasia-console/src/lib/broadcaster-utxo.test.mjs:37
+    | mock.module('../services/relay-manager.js', { namedExports: { sendCommandAsync: mockSendCommandAsync } });
+    |      ^
+    | TypeError: mock.module is not a function
+    |     at file:///D:/kanet-tn12/scratch/_j2_wt_batch9_1/kasia-console/src/lib/broadcaster-utxo.test.mjs:37:6
+    |     at ModuleJob.run (node:internal/modules/esm/module_job:430:25)
+    |     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:661:26)
+    |     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+    | Node.js v24.14.1
+  ✅ 变异后不再有明确说明, 退回裸/泛泛异常(证明明确说明确实是检查产生的)
+③ 前提满足: exit=0  ℹ tests 14 | ℹ pass 14 | ℹ fail 0
+  ✅ 前提满足时正常通过
+[RESTORED] broadcaster-utxo.test.mjs 已还原, sha256 f90e63e49e936a37… 一致
+
+全部对照符合预期 ✅

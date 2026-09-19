@@ -11,22 +11,21 @@
 // (depth-0 merkle 验证)——在那之前它是"与合约源码逐行对照 + 已知答案向量(blake2b 标准向量)"级别的证据, 不是链上共识证据。
 
 import { sqlite } from '../db/client.js';
-import { createRequire } from 'node:module';
-const require = createRequire(import.meta.url);
-const { blake2b } = require('../../node_modules/@noble/hashes/blake2b.js');
+import { deriveWinnerBet as deriveWinnerBetPure } from './proto-winner-bet.mjs';
 
 /** RootClaim.sil:103 require(payout >= 1000)。payout<1000 的市场 claim_draw 永远无法执行(结构性阻塞, 见账本1484), 签 close_commit 会把钱锁死。 */
 export const CLAIM_PAYOUT_MIN = 1000;
 
-const HEX64 = /^[0-9a-f]{64}$/;
+export { payoutLeafHex } from './proto-payout-leaf.mjs';
+import { payoutLeafHex } from './proto-payout-leaf.mjs';
 
-/** leaf = blake2b256(pk(32B) ‖ le8(payout)) —— RootClaim.sil:112。 */
-export function payoutLeafHex(bettorPkHex, payout) {
-  const pk = String(bettorPkHex ?? '').replace(/^0x/i, '').toLowerCase();
-  if (!HEX64.test(pk)) throw new Error(`payoutLeafHex: bettorPk 必须是 32 字节 hex, 实际长度=${pk.length}`);
-  if (!Number.isSafeInteger(payout) || payout <= 0) throw new Error(`payoutLeafHex: payout 必须是正的安全整数, 实际=${payout}`);
-  const le8 = Buffer.alloc(8); le8.writeBigUInt64LE(BigInt(payout));
-  return Buffer.from(blake2b(Uint8Array.from(Buffer.concat([Buffer.from(pk, 'hex'), le8])), { dkLen: 32 })).toString('hex');
+/**
+ * 9-1 D 笔抽出、9-1 F3 笔搬走: "赢家那一条已确认下注"的选取现在住在 proto-winner-bet.mjs(纯读、不 import 任何 DB 客户端、db 必填)——
+ * 指针模块直接从那里取(import 指针模块不再打开默认库); 这里保持原导出(既有调用方 / 测试 `deriveWinnerBet(marketId)` 不变), 仅补上默认库。
+ * close_commit 一侧(deriveCloseCommitInputs)与指针模块因此仍是【同一份】判定。
+ */
+export function deriveWinnerBet(marketId, { db = sqlite, who } = {}) {
+  return deriveWinnerBetPure(marketId, { db, who });
 }
 
 /**
@@ -35,20 +34,12 @@ export function payoutLeafHex(bettorPkHex, payout) {
  */
 export function deriveCloseCommitInputs(marketId, { db = sqlite } = {}) {
   const who = `deriveCloseCommitInputs(${marketId})`;
-  const market = db.prepare('SELECT id, status, winning_side, payout_root FROM proto_markets WHERE id = ?').get(marketId);
-  if (!market) throw new Error(`${who}: fail-closed — 市场不存在`);
-  if (market.status !== 'sealed') throw new Error(`${who}: fail-closed — 市场状态是 ${market.status}, close_commit 只允许在 sealed(market_seal 已落链)之后`);
-  if (market.winning_side !== 0 && market.winning_side !== 1) {
-    throw new Error(`${who}: fail-closed — proto_markets.winning_side=${market.winning_side}(必须是 0/1): 胜方必须由操作员的 resolve 裁决先写进 DB, 不接受调用方临时传入`);
-  }
-  const bets = db.prepare(`SELECT id, bettor_pk, side, stake FROM proto_bets WHERE market_id = ? AND status = 'confirmed'`).all(marketId);
-  const poolValue = bets.reduce((s, b) => s + b.stake, 0);
-  if (!(poolValue > 0)) throw new Error(`${who}: fail-closed — 已确认下注的 pool_value=${poolValue}, 没有可结算的池子`);
-  const winners = bets.filter((b) => b.side === market.winning_side);
-  if (winners.length !== 1) {
-    throw new Error(`${who}: fail-closed — 胜方(side=${market.winning_side})的已确认下注有 ${winners.length} 条, (A) 路线要求恰好 1 条(v0 single-operator assumption violated, refusing to auto-pick one)`);
-  }
-  const winner = winners[0];
+  const market0 = db.prepare('SELECT id, status FROM proto_markets WHERE id = ?').get(marketId);
+  if (!market0) throw new Error(`${who}: fail-closed — 市场不存在`);
+  if (market0.status !== 'sealed') throw new Error(`${who}: fail-closed — 市场状态是 ${market0.status}, close_commit 只允许在 sealed(market_seal 已落链)之后`);
+  // 9-1 D 笔: "胜方恰 1 条已确认下注"抽成 deriveWinnerBet, 与 proto-settlement-pointers.mjs(claim_draw 取赢家票指针)共用同一份——不各写一份再分叉。
+  // 检查顺序与报文与抽取前完全一致(先 status, 再 winning_side, 再 pool_value, 再胜方条数)。
+  const { market, poolValue, winner } = deriveWinnerBetPure(marketId, { db, who });
   // (A) 路线: 单一 payout 值覆盖全部 pool_value。
   const payouts = [{ bettorPk: String(winner.bettor_pk).toLowerCase(), payout: poolValue }];
   const sumPayouts = payouts.reduce((s, p) => s + p.payout, 0);
@@ -67,8 +58,16 @@ export function deriveCloseCommitInputs(marketId, { db = sqlite } = {}) {
  * 驱动层闸: 调用 buildCloseCommitTxJson 之前, 断言要签的 newWinningSide/newPayoutRootHex 恰是由 DB 派生的值。
  * 不符 ⇒ throw(不调用 builder, 不签名)。返回派生结果供驱动直接用。
  */
-export function assertCloseCommitArgsFromDb(marketId, { newWinningSide, newPayoutRootHex }, opts = {}) {
+export function assertCloseCommitArgsFromDb(marketId, { newWinningSide, newPayoutRootHex, expectedPoolValue }, opts = {}) {
   const d = deriveCloseCommitInputs(marketId, opts);
+  // C2(Bettor 2026-09-19): expectedPoolValue = 驱动层用来【证明链上 RootClose spk】的 pool_value(B4-5 的 spk 断言只有在"现算 spk 用的 pool_value"与"要签的 payout 用的 pool_value"
+  // 是同一个数时才蕴含链上 pool_value); 缺失即 fail-closed, 不等即 fail-closed——防止 spk 是按 A 状态证明的、签名却按 B 状态派生的 payout。
+  if (!Number.isSafeInteger(expectedPoolValue) || expectedPoolValue <= 0) {
+    throw new Error(`close_commit_args_not_from_db: fail-closed — expectedPoolValue(${expectedPoolValue}) 缺失或非法: 必须传入由链上 RootClose spk 断言证明的 pool_value`);
+  }
+  if (expectedPoolValue !== d.poolValue) {
+    throw new Error(`close_commit_args_not_from_db: fail-closed — 由 spk 断言证明的链上 pool_value(${expectedPoolValue}) != 由 DB 派生的 pool_value(${d.poolValue}): 要签的 payout 与已证明的链上状态不是同一个池子`);
+  }
   if (newWinningSide !== d.newWinningSide) {
     throw new Error(`close_commit_args_not_from_db: fail-closed — 拟签的 newWinningSide(${newWinningSide}) != 由 DB 派生的 ${d.newWinningSide}`);
   }

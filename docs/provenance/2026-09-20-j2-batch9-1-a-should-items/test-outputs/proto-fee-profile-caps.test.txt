@@ -1,0 +1,13 @@
+[db] path=%TEMP%\kanet-fee-caps-test-ApVOn6\console.db source=DB_PATH
+[PASS] cap market_seal == 52000000 sompi(0.52 KAS)——经生产读取函数 loadFeeProfileCap
+[PASS] cap close_commit == 30000000 sompi(0.3 KAS)——经生产读取函数 loadFeeProfileCap
+[PASS] cap convert_to_claim == 52000000 sompi(0.52 KAS)——经生产读取函数 loadFeeProfileCap
+[PASS] cap claim_draw == 50000000 sompi(0.5 KAS)——经生产读取函数 loadFeeProfileCap
+[PASS] cap withdraw == 55000000 sompi(0.55 KAS)——经生产读取函数 loadFeeProfileCap
+[PASS] cap ticket_reclaim == 100000000 sompi(1 KAS)——经生产读取函数 loadFeeProfileCap
+[PASS] 六个 kind 在 anchors JSON 里都存在(缺键 fail-loud, 不是读出 undefined 再被当成 0)
+[PASS] 每个 kind 都带非空 _source(cap 的来源/推导不能丢, 否则日后没人知道 52M 是怎么来的)
+[PASS] 六个 cap 都不超过全局硬顶 GLOBAL_ABS_FEE_CAP_SOMPI(1.0 KAS)
+[PASS] 未知 kind ⇒ loadFeeProfileCap 抛错(不返回 undefined/0)
+
+10 passed, 0 failed

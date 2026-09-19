@@ -1,0 +1,10 @@
+[RED ] authorize 里删掉 get_past_median_time(READONLY_ALLOWLIST 漏登记)  →  2 条失败 «批9-0-b 登记面枚举: 白名单里每一条命令» «批9-0-b2【枚举器自证】枚举器不是空判据:»
+[RED ] commands 里删掉 FIELD_TYPES 一行  →  2 条失败 «批9-0-b 登记面枚举: 白名单里每一条命令» «批9-0-b2【枚举器自证】枚举器不是空判据:»
+[RED ] commands 里删掉 PAYLOAD_SCHEMA 一行  →  2 条失败 «批9-0-b 登记面枚举: 白名单里每一条命令» «批9-0-b2【枚举器自证】枚举器不是空判据:»
+[RED ] relay.mjs 里 case 改名(handler 缺失)  →  2 条失败 «批9-0-b 登记面枚举: 白名单里每一条命令» «批9-0-b2【枚举器自证】枚举器不是空判据:»
+[RED ] console 白名单多夹带一条 read  →  2 条失败 «批9-0-a PROTO_COMMAND_AL» «批9-0-b 登记面枚举: 白名单里每一条命令»
+[RED ] console 白名单把新命令标成 write(会被④与a同时抓)  →  4 条失败 «④白名单里标 write 的命令恰好只有 co» «批9-0-a PROTO_COMMAND_AL» «批9-0-b 登记面枚举: 白名单里每一条命令» «批9-0-c get_past_median_»
+[RED ] console 白名单删掉新命令  →  2 条失败 «批9-0-a PROTO_COMMAND_AL» «批9-0-c get_past_median_»
+[RESTORED] 四个文件均已还原, sha256 一致
+
+全部变异均被抓到

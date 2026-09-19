@@ -1,0 +1,20 @@
+[test] ① generateCommitteeKeypair(): 格式正确, 私钥/公钥都是十六进制字符串:
+  ✅ privKeyHex 是 64-hex(32字节)(实际长度 64)
+  ✅ pubkeyHex 是十六进制字符串(实际 157cce5872f5a0ab5b77...)
+[test] ② 两次生成产生不同的密钥(不是硬编码/确定性占位值):
+  ✅ 两次 privKeyHex 不同
+  ✅ 两次 pubkeyHex 不同
+[test] ③ encrypt→decrypt 往返正确恢复原始明文(真调 crypto.js, 不是自己发明的方案):
+  ✅ 解密恢复的明文与原始 privKeyHex 一致(实际 true)
+[test] ④ 加密信封是 crypto.js 既有标准格式(v1/aes-256-gcm/iv/tag/ciphertext), 不是自造的临时方案:
+  ✅ v === 1(实际 1)
+  ✅ alg 正确(实际 aes-256-gcm)
+  ✅ iv/tag/ciphertext 三字段齐全
+  ✅ 密文信封里不包含明文私钥本身(base64 编码后不可能字面匹配, 双重确认)
+[test] ⑤ 同一明文两次加密产生不同密文(AES-GCM 随机 IV, 不是确定性加密——防止密文本身泄露"是否是同一把私钥"这种侧信道):
+  ✅ 两次加密同一明文, 密文信封不同(随机 IV 生效)
+  ✅ 尽管密文不同, 两者都能正确解密回同一明文
+[test] ⑥ 静态自审: 本文件源码里不含任何 log 语句(无明文暂存纪律的"文件级别"体现——不能有任何 console.log(privKeyHex) 这类代码路径, 从源头杜绝):
+  ✅ proto-committee-key.mjs 源码不含任何 console.* 调用(实际检查通过: true)
+
+✅✅ ALL PASS — proto-committee-key(生成+加密存储+往返正确+随机IV+零log) 全绿

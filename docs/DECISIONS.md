@@ -24,6 +24,22 @@
 
 ## 🔴 当前有效的战略决策 (CURRENT)
 
+### D-028 所有资产必须在主网 console 全部可见；冷存账号进资产页（只读）；资产总清单入 docs-private (2026-09-20 · Owner 本机终端原话「看来不要把资产放所谓冷库，你自己都不知道在哪里，如果我不多一嘴，这个资产就永远消失了。」「从新规划。必须要全部显示出来。安排好！」· Bettor 记账 · COORD-LEDGER 1573–1575)
+
+1. **事实**：9/14 迁移（(1316)(1320)）把两个大额账号以"冷名单拒导入"方式留在源库，主网 console 不持钥、资产页不显示；账本有记录但无清单、无界面、接位文件未写，Owner 2026-09-20 自查资产页才发现。金额按 D-021 不写本文，见 `docs-private/ASSET-INVENTORY.md`（gitignored）。
+2. **决定**：① **任何持有资产的账户都必须在主网 console 资产页可见**，只读也算可见，不可见视为未处置；② 冷存两账号以**只读账户**形式进资产页（地址 + 链上余额 + "冷存 · 不可花"标注），console 不持其密钥；③ 建立并维护资产总清单 `docs-private/ASSET-INVENTORY.md`，Bettor 接位文件加固定段，接位第一眼读；④ 此后任何"不导入 / 冷存 / 暂存别处"的资产处置须同时写清单并在 console 可见。
+3. **执行**：设计先行——KANet-UI 出"只读账户可见"设计稿（资产页与 /api/relay/:id/wallets 对无钥行改直读链上余额、不起 relay、不进 relay 计数 / 拆分 / 守卫的"有钥"集合）→ NWT 审 → 实现 → NWT 审 diff → 合入 → 随下一次 console 重启上线。
+4. **另待 Owner**：冷存两账号是否改为 console 可花（需改 per-relay 800 / total 1000 上限，另一次钱路决定）；是否做硬件级离线。
+5. **不影响**：D-022 结算线、批 9 排期、驱动开关、D-026 / D-027。
+
+### D-027 主网自动接单置 false + relay 入站握手自动接受加开关（主网默认关）(2026-09-20 · Owner 本机终端原话「自动接单置 false，握手也加开关，主网默认关。」· Bettor 记账 · COORD-LEDGER 1550 / 1554 / 1557 / 1570)
+
+1. **决定 ①**：主网 `config_entries` 的 `autotake_enabled` 由 `true` 置为 `false`（v88 迁移播种值，非任何人决定）。一条 DB 写；执行走 KANet-UI runbook（精确 SQL、前后读数、回滚、确认运行中 console 每次读库）→ NWT 核 → 执行 → Bettor 事后核。`autotake_mode` 不动。
+2. **决定 ②**：relay 进程内建的"入站握手自动接受"（收到新对端握手即发一笔接受交易）加 env 开关，只认字面 `1`，**所有网络默认关**（同 D-026 约定），主网 env 不写键；关闭态入站握手照常登记为 pending、不发任何交易、启动打恰一行 disabled 日志。走设计先行：Bettor 缓解设计稿 → NWT 审设计（不是漏洞评估）→ 派实现 → NWT 审 diff → 合入 → 随下一次 console 重启（relay 子进程重启）生效。
+3. **口径**：主网 console 启动后无人干预的链上花费 = "今天为零，由三个默认关的开关 + autotake=false + 守卫清单保证"；不说"不再花钱"。**打开**任一开关或恢复 autotake 须 Owner 单独批。
+4. **不入库**：两项的利用细节按 D-021 不进公开仓库（NWT 评估草稿已按分类器拦停删除，(1557)）。
+5. **不影响**：D-022 结算线、批 9 排期、驱动开关（仍关）。
+
 ### D-026 console 启动期 UTXO 自动拆分加开关，默认关（主网不写键 = 关）(2026-09-19 · Owner 本机终端原话「加开关，主网默认关。」· Bettor 记账 · COORD-LEDGER 1533–1535 / 1538 · 设计 `docs/2026-09-19-bettor-utxo-autosplit-startup-switch-design-v0.1.md`)
 
 1. **决定**：`autoSplitAll()`（console 每次启动对全部有钥 relay 跑 `split_utxo` 的那一步）加 env 闸 `UTXO_AUTOSPLIT_ON_START`，只有字面 `1` 才执行；默认关，**所有网络**默认关（D-017 后只剩主网，不按网络分支）；`kanet.mainnet.env` 不写该键。

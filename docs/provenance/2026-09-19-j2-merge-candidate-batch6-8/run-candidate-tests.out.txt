@@ -1,0 +1,77 @@
+OK   exit=0 fail_lines=0 0.5s  kasia-console/src/lib/broadcaster-utxo.test.mjs
+       末行: ℹ fail 0
+OK   exit=0 fail_lines=0 0.5s  kasia-console/src/lib/proto-bet-intent.test.mjs
+       末行: ✅✅ ALL PASS — proto-bet-intent 单步状态机(幂等/单调/恢复/inputs_spent 歧义终态) 全绿
+OK   exit=0 fail_lines=0 1.2s  kasia-console/src/lib/proto-broadcast-ops.test.mjs
+       末行: 16 passed, 0 failed
+OK   exit=0 fail_lines=0 1.9s  kasia-console/src/lib/proto-claim-draw.test.mjs
+       末行: 47 passed, 0 failed
+OK   exit=0 fail_lines=0 0.0s  kasia-console/src/lib/proto-close-commit-gate.test.mjs
+       末行: 7 passed, 0 failed
+OK   exit=0 fail_lines=0 0.1s  kasia-console/src/lib/proto-committee-key.test.mjs
+       末行: ✅✅ ALL PASS — proto-committee-key(生成+加密存储+往返正确+随机IV+零log) 全绿
+OK   exit=0 fail_lines=0 0.5s  kasia-console/src/lib/proto-covenant-builder.test.mjs
+       末行: 16 passed, 0 failed
+OK   exit=0 fail_lines=0 0.1s  kasia-console/src/lib/proto-ktt-transfer-witness.test.mjs
+       末行: 6 passed, 0 failed
+OK   exit=0 fail_lines=0 0.8s  kasia-console/src/lib/proto-leaf-state.test.mjs
+       末行: 33 passed, 0 failed
+OK   exit=0 fail_lines=0 0.5s  kasia-console/src/lib/proto-market-intent.test.mjs
+       末行: ✅✅ ALL PASS
+OK   exit=0 fail_lines=0 0.8s  kasia-console/src/lib/proto-mass-ceiling.test.mjs
+       末行: 16 passed, 0 failed
+OK   exit=0 fail_lines=0 0.1s  kasia-console/src/lib/proto-register-append-witness.test.mjs
+       末行: 5 passed, 0 failed
+OK   exit=0 fail_lines=0 0.5s  kasia-console/src/lib/proto-relay-guard.test.mjs
+       末行: ✅✅ ALL PASS — PROTO_RELAY_ID 基础设施(启动断言 6 分支 + 请求体拒绝 6 分支) 全绿
+OK   exit=0 fail_lines=0 1.0s  kasia-console/src/lib/proto-relay-ipc.test.mjs
+       末行: PASS
+OK   exit=0 fail_lines=0 0.5s  kasia-console/src/lib/proto-settlement-chain-checks.test.mjs
+       末行: 21 passed, 0 failed
+OK   exit=0 fail_lines=0 0.5s  kasia-console/src/lib/proto-settlement-inputs.test.mjs
+       末行: 15 passed, 0 failed
+OK   exit=0 fail_lines=0 0.5s  kasia-console/src/lib/proto-settlement-intent.test.mjs
+       末行: ✅✅ ALL PASS — proto-settlement-intent 六步状态机(幂等/单调/依赖/恢复/inputs_spent 歧义终态) 全绿
+OK   exit=0 fail_lines=0 0.9s  kasia-console/src/lib/proto-signing-key-binding.test.mjs
+       末行: 11 passed, 0 failed
+OK   exit=0 fail_lines=0 0.0s  kasia-console/src/lib/proto-single-operator-guard.test.mjs
+       末行: ✅✅ ALL PASS
+OK   exit=0 fail_lines=0 0.8s  kasia-console/src/lib/proto-tx-assembly-register-append.test.mjs
+       末行: 13 passed, 0 failed
+OK   exit=0 fail_lines=0 0.6s  kasia-console/src/lib/proto-tx-assembly-settlement-golden.test.mjs
+       末行: 12 passed, 0 failed
+OK   exit=0 fail_lines=0 3.5s  kasia-console/src/lib/proto-tx-assembly-settlement.test.mjs
+       末行: 43 passed, 0 failed
+OK   exit=0 fail_lines=0 0.8s  kasia-console/src/lib/proto-tx-assembly.test.mjs
+       末行: 32 passed, 0 failed
+OK   exit=0 fail_lines=0 0.1s  kasia-console/src/lib/settle-safe-json.test.mjs
+       末行: ✅ ALL PASS (15)
+OK   exit=0 fail_lines=0 1.4s  kasia-console/src/services/proto-driver.test.mjs
+       末行: 8 passed, 0 failed
+OK   exit=0 fail_lines=0 0.0s  kasia-relay/src/lib/cltv-locktime.test.mjs
+       末行: cltv-locktime: 17 PASS / 0 FAIL
+OK   exit=0 fail_lines=0 0.0s  kasia-relay/src/lib/covenant-broadcast-relay.test.mjs
+       末行: 22 passed, 0 failed
+OK   exit=0 fail_lines=0 0.0s  kasia-relay/src/lib/covenant-broadcast.test.mjs
+       末行: 56 passed, 0 failed
+OK   exit=0 fail_lines=0 0.1s  kasia-relay/src/lib/covenant-roundtrip.test.mjs
+       末行:   ❌ harness-flip (expect FAIL)
+OK   exit=0 fail_lines=0 126.8s  kasia-relay/src/lib/recovery-lock-builder.test.mjs
+       末行: recovery-lock-builder: 16 PASS / 0 FAIL
+OK   exit=0 fail_lines=0 0.1s  kasia-relay/src/lib/serialize-roundtrip.test.mjs
+       末行:   ❌ harness-flip (expect FAIL)
+BAD  exit=1 fail_lines=1 0.1s  kasia-relay/src/lib/tx-mass-ub.test.mjs
+       末行: [mass-floor:observe:auth] site=V10a txid=f672fdec8f9f4cf72fb69cf7eb1965e776ea3a8188875d7630c24d4794f0e494 source=reject authoritative_mass=null ub_ok=inconclusi
+OK   exit=0 fail_lines=0 0.7s  kasia-relay/src/lib/utxo-facts.test.mjs
+       末行: 42 passed, 0 failed
+BAD  exit=3221226505 fail_lines=0 0.1s  kasia-relay/src/lib/wallet.test.mjs
+       末行: Assertion failed: !(handle->flags & UV_HANDLE_CLOSING), file src\win\async.c, line 76
+OK   exit=0 fail_lines=0 0.1s  kasia-relay/src/drain-finality-safe-blocks.test.mjs
+       末行: [drain-finality-safe-blocks.test] ALL PASS
+OK   exit=0 fail_lines=0 0.1s  kasia-relay/test/getblockatdaa-boundary.test.mjs
+       末行: === boundary 测: 10 PASS / 0 FAIL ===
+OK   exit=0 fail_lines=0 9.7s  scripts/m0a-lint.test.mjs
+       末行: [m0a-lint.test] 32 passed, 0 failed
+
+共 37 个文件, 异常 2 个: kasia-relay/src/lib/tx-mass-ub.test.mjs, kasia-relay/src/lib/wallet.test.mjs
+runner exit=1

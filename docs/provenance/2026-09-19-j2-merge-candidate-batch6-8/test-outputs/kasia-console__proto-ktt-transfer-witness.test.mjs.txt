@@ -1,0 +1,8 @@
+[PASS] ①(决定性)encodeKttTransferZeroOutAction 与真实 cli-debugger 内部构造的 active_sigscript 逐字节一致
+[PASS] ② State runtime_state.fields.length 真实读到 6(amount/owner/owner_scheme/borrow_scheme/borrow_guard/extension_commitment), 不是硬编字面量
+[PASS] ③ dispatch_tag 来自真实编译产物, 非空4字节hex
+[PASS] ④ combineKttActionAndRedeem(fromScript桥接) 与手工拼接一致
+[PASS] ⑤ buildKttTransferZeroOutSigScriptHex(一步到位) 与分步调用结果一致
+[PASS] ⑥ ownerInputIdx 改变(如 [0] 而非 [3]) ⇒ 产出字节确实不同
+
+6 passed, 0 failed

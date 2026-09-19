@@ -15,7 +15,7 @@
 
 import { encodeRegisterAppendAction, combineActionAndRedeem as combineRegisterAppendActionAndRedeem } from './proto-register-append-witness.mjs';
 import { encodeKttTransferZeroOutAction, combineKttActionAndRedeem } from './proto-ktt-transfer-witness.mjs';
-import { encodeLeafStateBytes } from './proto-leaf-state.mjs';
+import { encodeLeafStateBytes } from './proto-leaf-state-encode.mjs';   // 9-1 F3: 原来 import proto-leaf-state.mjs(带 db/client.js)只为这一个纯函数
 import { assertMassWithinCeiling } from './proto-mass-ceiling.mjs';
 
 export const GENESIS_OUTPUT_SOMPI = 20_000_000n;

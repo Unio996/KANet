@@ -1,0 +1,38 @@
+基线(未变异) proto-settlement-pointers.test.mjs: 26 passed, 0 failed exit=0 (2s/次)
+基线(未变异) proto-settlement-inputs.test.mjs: 23 passed, 0 failed exit=0 
+基线(未变异) proto-leaf-state.test.mjs: 33 passed, 0 failed exit=0 
+[RED ] M-02 ▲ 不再比对 finalize 后的 id 与 submitted_txid  →  4 条 FAIL(首条: pointers:P9)
+[RED ] M-04 反序列化失败的码串成 tx_missing  →  2 条 FAIL(首条: pointers:P9d)
+[RED ] M-05b ▲ 最新 append 的查询去掉 status='landed' 过滤(未落链的 append 被当成最新)  →  1 条 FAIL(首条: pointers:P13)
+[RED ] M-06 submitted_txid 缺失/非法不再拒  →  1 条 FAIL(首条: pointers:P9e)
+[RED ] M-08 ▲ 不再比对 genesis 组输出的独立重算 covenantId(builder 派生 bug 无人发现)  →  1 条 FAIL(首条: pointers:P16)
+[RED ] M-10 ▲ append leaf 续约输出的 covenantId 不再与 proto_markets.shardleaf_cov_id 比对  →  1 条 FAIL(首条: pointers:P11)
+[RED ] M-12 seal 的谱系只查 held 输入、不查 leaf 输入  →  2 条 FAIL(首条: pointers:P10)
+[RED ] M-14 ▲ close_commit 的谱系检查整个拆掉  →  1 条 FAIL(首条: pointers:P10)
+[RED ] M-16 convert_to_claim 的谱系只查 rootClose 输入  →  1 条 FAIL(首条: pointers:P10)
+[RED ] M-18 格 7(claim_draw·held)取了 convert_to_claim 的输出 0 而不是输出 1  →  4 条 FAIL(首条: pointers:P6/P7/P8)
+[RED ] M-20 输出下标越界不再报 output_missing(读 undefined)  →  3 条 FAIL(首条: pointers:P17)
+[RED ] M-22 ▲ 赢家不是 1 条时 deriveWinnerBet 的原错误直接逃出(不映射成 pointer_winner_ambiguous)  →  2 条 FAIL(首条: pointers:P12)
+[RED ] M-24 ▲ 票交叉核对: 不再核 ticket_vout == 1  →  1 条 FAIL(首条: pointers:P15)
+[RED ] M-26 ▲ 票交叉核对: 不再核输出 spk == 现算 ticket spk  →  1 条 FAIL(首条: pointers:P15)
+[RED ] M-28 ▲ proto-leaf-state.deriveLeafOutpoint 去掉 rowid tiebreak  →  1 条 FAIL(首条: pointers:P14)
+[RED ] M-30 闭集少一个码  →  3 条 FAIL(首条: pointers:P15)
+[RED ] M-32 模块边界: 引入对 process.env 的读取  →  1 条 FAIL(首条: pointers:模块边界)
+[RED ] M-34 调用方错误: marketId 大写也放行  →  1 条 FAIL(首条: pointers:调用方错误)
+[RED ] M-36 ▲ deriveCloseCommitInputs 自己重写但保留全部检查, 只是 winnerBetId 取错(取第一条下注)——"选出的赢家"分叉  →  1 条 FAIL(首条: inputs:deriveCloseCommitInputs)
+[RED ] M-38 deriveWinnerBet 不再要求 winning_side 已写  →  2 条 FAIL(首条: inputs:反向3)
+[RED ] M-40 deriveWinnerBet 的错误不再带 .code  →  3 条 FAIL(首条: inputs:胜方)
+[RED ] M-42 deriveWinnerBet 不再只算 confirmed 的下注  →  4 条 FAIL(首条: inputs:正向)
+[RED ] F-02 ▲ D-1 genesis 重算用的 TransactionOutput 从不 free  →  2 条 FAIL(首条: pointers:D-1)
+[RED ] F-04 D-1 同一个 Transaction free 两次  →  2 条 FAIL(首条: pointers:D-1)
+[RED ] F-06 ▲ D-2 指针模块直接 import DB 客户端  →  2 条 FAIL(首条: pointers:D-2)
+[RED ] F-08 ▲ D-2 proto-leaf-state 不再 re-export encodeLeafStateBytes(既有 import 方断)  →  2 条 FAIL(首条: pointers:D-2)
+[RED ] F-10 D-2 inputs 的委托丢了默认库(deriveWinnerBet(marketId) 无 db 即抛)  →  8 条 FAIL(首条: inputs:deriveWinnerBet)
+[RED ] F-12 D-2 winner-bet 的默认报文前缀被改  →  2 条 FAIL(首条: inputs:其余)
+[RESTORED] proto-settlement-pointers.mjs sha256 bcb7b010d429878e… 一致
+[RESTORED] proto-settlement-inputs.mjs sha256 2340b6ced384190b… 一致
+[RESTORED] proto-leaf-state.mjs sha256 0ccecf67775da86f… 一致
+[RESTORED] proto-winner-bet.mjs sha256 7ceb1272e553a101… 一致
+[RESTORED] proto-tx-assembly.mjs sha256 40ca2ac85f0496ac… 一致
+
+全部变异均被测试抓到

@@ -20,6 +20,7 @@ if (!process.env._PROTO_SETTLEMENT_GOLDEN_BOOTSTRAPPED) {
 if (!process.env.CONSOLE_ENCRYPTION_KEY) process.env.CONSOLE_ENCRYPTION_KEY = '1'.repeat(64);
 
 const kaspa = await import('kaspa-wasm');
+const { withParents } = await import('./proto-chain-parents-fixtures.mjs'); // 9-1 E 笔: 四个 builder 的 chainParents 必填, 夹具见该文件头注
 const { buildMarketSealTxJson, sealWitnessArgs, assertWitnessIndexLayout, MARKET_SEAL_ROOTCLOSE_OUT_INDEX, MARKET_SEAL_TOKEN_OUT_INDEX } = await import('./proto-tx-assembly-settlement.mjs');
 const { computeShardLeafRedeemScript, computeKttGenesisArtifact, loadProtocolConstants, loadFeeProfileCap } = await import('./proto-covenant-builder.mjs');
 const { compileSilV100, ctorBytes32V100, ctorIntV100 } = await import('./pool-bshard-artifacts.mjs');
@@ -58,14 +59,14 @@ const heldInput = {
 };
 const feeUtxo = { txid: P.feeOutpoint.txid, vout: P.feeOutpoint.vout, value: BigInt(P.feeValueSompi), scriptPublicKeyHex: relaySpkHex };
 
-const buildSeal = (overrides = {}) => buildMarketSealTxJson({
+const buildSeal = (overrides = {}) => buildMarketSealTxJson(withParents('seal', {
   kaspa, network: 'simnet',
   marketId: P.marketId, committeePubkeyHex: P.committeePubkeyHex, deadlineMs: P.deadlineMs, rootCloseTmplHash: P.rootCloseTmplHash,
   leafRedeemScript: leafRedeem.script, leafOutpoint: P.leafOutpoint, leafCovId: P.leafCovId, heldInput, currentState: P.stateAtSeal,
   feeUtxo, relayChangeScriptPublicKeyHex: relaySpkHex,
   convertToRootcloseEntryAbi, tokPrefixHex, tokSuffixHex, absFeeCapSompi: loadFeeProfileCap('market_seal'),
   ...overrides,
-});
+}));
 
 // ── ①黄金回归: 对批3那个形状, builder 产物必须与 simnet 上真实上链的字节逐字节相同 ──
 let built = null;

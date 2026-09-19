@@ -1,0 +1,25 @@
+[diag:step] proc.silverc.compile.bshard-artifacts ms=15 cmd=silverc ok=1 at=2026-09-19T16:49:43.978Z
+[PASS] 正向: 私钥的公钥 == 由 ticket 自身状态(proto_bets+链上spk)推导并证明的应签公钥 ⇒ 通过并返回公钥
+[PASS] 正向: proto_bets.bettor_pk 是大写 hex(同一把公钥)按字节相等 ⇒ 通过(不做字符串大小写敏感比较)
+[PASS] 反向1: 手上是【别的私钥】(取错市场/取错 bettor 的私钥) ⇒ signing_key_mismatch, 在签名前 fail-closed, 错误信息不含私钥值
+[diag:step] proc.silverc.compile.bshard-artifacts ms=13 cmd=silverc ok=1 at=2026-09-19T16:49:44.004Z
+[PASS] 反向2: DB 里 bettor_pk 被换成别人的公钥(与链上 ticket 不是同一张票) ⇒ ticket_pk_underivable(推导不出, 不据此签名)
+[diag:step] proc.silverc.compile.bshard-artifacts ms=12 cmd=silverc ok=1 at=2026-09-19T16:49:44.021Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=12 cmd=silverc ok=1 at=2026-09-19T16:49:44.037Z
+[PASS] 反向3: DB 里 stake/side 与链上 ticket 不符(998 vs 999 / side 0 vs 1) ⇒ ticket_pk_underivable
+[PASS] 反向4: 链上 ticket spk 缺失/畸形 ⇒ 拒绝; bettor_pk 不是 32 字节 hex ⇒ 拒绝
+[diag:step] proc.silverc.compile.bshard-artifacts ms=71 cmd=silverc ok=1 at=2026-09-19T16:49:44.120Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=50 cmd=silverc ok=1 at=2026-09-19T16:49:44.177Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=71 cmd=silverc ok=1 at=2026-09-19T16:49:44.260Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=50 cmd=silverc ok=1 at=2026-09-19T16:49:44.316Z
+[PASS] 正向(生产路径 v0): 委员私钥解密后其公钥逐字节 == 本市场 committee 公钥(即 v0 里的 bettor_pk)
+[PASS] 反向(生产路径 v0): 取了【另一个市场】的委员私钥 ⇒ signing_key_mismatch(这正是"取错私钥"的实际场景)
+[diag:step] proc.silverc.compile.bshard-artifacts ms=18 cmd=silverc ok=1 at=2026-09-19T16:49:44.341Z
+[PASS] withdraw 正向: winner_pk 与 (market_cov_id, amount) 重算的 KanetTokenClaim P2SH == 链上 spk ⇒ 推导出 winner_pk; 私钥公钥逐字节相等 ⇒ 放行(大写 hex 同一把也放行)
+[PASS] withdraw 反向①: 私钥是别人的(winner_pk 与链上 spk 自洽, 但私钥公钥不同) ⇒ signing_key_mismatch, 错误信息不含私钥
+[diag:step] proc.silverc.compile.bshard-artifacts ms=17 cmd=silverc ok=1 at=2026-09-19T16:49:44.373Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=19 cmd=silverc ok=1 at=2026-09-19T16:49:44.396Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=17 cmd=silverc ok=1 at=2026-09-19T16:49:44.418Z
+[PASS] withdraw 反向②: winner_pk / amount / market_cov_id 与链上 claim spk 不是同一个 ⇒ claim_pk_underivable(不据不自洽的输入推导应签公钥)
+
+11 passed, 0 failed

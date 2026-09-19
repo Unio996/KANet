@@ -1,0 +1,11 @@
+# AFTER(本笔): 无 DB_PATH 下逐个真 import 各模块(cwd=kasia-console)
+proto-tx-assembly                  OK
+proto-tx-assembly-settlement       OK
+proto-settlement-chain-checks      OK
+proto-covenant-builder             OK
+proto-leaf-state                   FAIL: [db] DB_PATH not set and this is not the console entry — refusing to default to 
+proto-settlement-inputs            FAIL: [db] DB_PATH not set and this is not the console entry — refusing to default to 
+proto-settlement-pointers          OK
+proto-settlement-c1                OK
+proto-winner-bet                   OK
+proto-leaf-state-encode            OK

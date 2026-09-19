@@ -1,0 +1,37 @@
+2026-09-19 23:13:57.003+07:00 [INFO ] kaspad v2.0.1
+2026-09-19 23:13:57.004+07:00 [INFO ] Application directory: D:\kanet-tn12\scratch\_j2_simnet_b9_0_data
+2026-09-19 23:13:57.004+07:00 [INFO ] Data directory: D:\kanet-tn12\scratch\_j2_simnet_b9_0_data\kaspa-simnet\datadir
+2026-09-19 23:13:57.004+07:00 [INFO ] Logs directory: D:\kanet-tn12\scratch\_j2_simnet_b9_0_data\kaspa-simnet\logs
+2026-09-19 23:13:57.004+07:00 [INFO ] Utxoindex Data directory D:\kanet-tn12\scratch\_j2_simnet_b9_0_data\kaspa-simnet\datadir\utxoindex
+2026-09-19 23:13:57.042+07:00 [INFO ] Resyncing the utxoindex...
+2026-09-19 23:13:57.043+07:00 [INFO ] [UPnP] Attempting to register upnp... (to disable run the node with --disable-upnp)
+2026-09-19 23:14:07.044+07:00 [WARN ] [UPnP] Error adding port mapping: IO error: 由于连接方在一段时间后没有正确答复或连接的主机没有反应，连接尝试失败。 (os error 10060)
+2026-09-19 23:14:07.047+07:00 [INFO ] GRPC Server starting on: 127.0.0.1:16610
+2026-09-19 23:14:07.047+07:00 [INFO ] P2P Server starting on: 127.0.0.1:16510
+2026-09-19 23:14:07.047+07:00 [INFO ] WRPC Server starting on: 127.0.0.1:18510
+2026-09-19 23:14:07.048+07:00 [INFO ] WRPC Server starting on: 127.0.0.1:18511
+2026-09-19 23:15:20.655+07:00 [INFO ] Accepted 5 blocks ...c953875dccd292cfec6b787411340d5bbf7bc84fc11c606b82a3d4e49ca20719 via submit block
+2026-09-19 23:15:27.093+07:00 [INFO ] Processed 5 blocks and 5 headers in the last 10.01s (5 transactions; 5 UTXO-validated blocks; 1.00 parents; 1.00 mergeset; 1.00 TPB; mass: 0.0s/0.0c/0.0t; 1.0 lanes/mergeset)
+2026-09-19 23:17:41.585+07:00 [INFO ] Accepted 100 blocks ...b4bfeeed6396a6c5524109ad4e5dee5c06996c197aff1c138124127ff1ea943b via submit block
+2026-09-19 23:17:41.685+07:00 [INFO ] Accepted 100 blocks ...b0fd06a5100551d3d9f1ad72f49b1ac7641ebd1c8dbe5164bacba18726231eed via submit block
+2026-09-19 23:17:41.778+07:00 [INFO ] Accepted 100 blocks ...4eb65aa22b667ea68c6736bb8be9dabf077d886c2537f84f0bd269383e8a7c46 via submit block
+2026-09-19 23:17:41.864+07:00 [INFO ] Accepted 100 blocks ...e6b77b6d5be7158365da21b0b678ce5e868d8a5ff8c0edba8028d7122430320c via submit block
+2026-09-19 23:17:41.955+07:00 [INFO ] Accepted 100 blocks ...8109586df0eb24fb4facc547741be5b0f4e8eae303ea7f771aa8b8078365254e via submit block
+2026-09-19 23:17:42.058+07:00 [INFO ] Accepted 100 blocks ...84c9bde8c7a2936b64f78f088e5159f5579bee584201efa35a42f78cc623c936 via submit block
+2026-09-19 23:17:42.152+07:00 [INFO ] Accepted 100 blocks ...3a8ba8194312429c7f5cb75b9c4b8f3eb4500b10950280bd50a4f45d232b879d via submit block
+2026-09-19 23:17:43.174+07:00 [INFO ] Accepted 20 blocks ...05746d5deec9da11baf152300aed1a64df16f626656ba52d32f33c57cf6d04a2 via submit block
+2026-09-19 23:17:47.201+07:00 [INFO ] Processed 720 blocks and 720 headers in the last 10.01s (720 transactions; 720 UTXO-validated blocks; 1.00 parents; 1.00 mergeset; 1.00 TPB; mass: 0.0s/0.0c/0.0t; 1.0 lanes/mergeset)
+2026-09-19 23:18:23.112+07:00 [INFO ] Accepted 100 blocks ...8cabbebec53fe1243ad4b1852a7d559fa4be0afdcdb3963e3f050f7c78c15342 via submit block
+2026-09-19 23:18:23.198+07:00 [INFO ] Accepted 100 blocks ...357cdce7aa094d6a1a7cced5e9afef286e778aae271f29a7766a260ee1040674 via submit block
+2026-09-19 23:18:23.283+07:00 [INFO ] Accepted 100 blocks ...f044852d5dc2b326fadd643a0785d0f2c89b5d559069bafa62d243190d370b2c via submit block
+2026-09-19 23:18:23.375+07:00 [INFO ] Accepted 100 blocks ...321590a54ada9c819edb5fa2dafdecc77bc4d2f9b51397f68dcb6cba2b4f2693 via submit block
+2026-09-19 23:18:23.475+07:00 [INFO ] Accepted 100 blocks ...f831efa6dca5e3517c6f54bb218fc716cac391480efa170e6187eb50ae173675 via submit block
+2026-09-19 23:18:23.571+07:00 [INFO ] Accepted 100 blocks ...be477d0675fdf49a09d9947a85643b24d0624767fbe77cf55997c86fc03c3a6b via submit block
+2026-09-19 23:18:23.662+07:00 [INFO ] Accepted 100 blocks ...1714b27fcdafa27cebaac1689e6aa7f4ebca463b266cda89fe368078c5f77afc via submit block
+2026-09-19 23:18:23.758+07:00 [INFO ] Accepted 100 blocks ...b55cf345d88e63dfc81137dd9417112975263a6924ac9924923cca0bd592dc11 via submit block
+2026-09-19 23:18:23.849+07:00 [INFO ] Accepted 100 blocks ...b172c7a720fbe89aa9746d7b1634d5ff0fef030487c682a7b3f02819ff496fd4 via submit block
+2026-09-19 23:18:23.939+07:00 [INFO ] Accepted 100 blocks ...9e790f7d606e94c0f181b850d82793e388163fd916b9015c07cb0b3bcabee777 via submit block
+2026-09-19 23:18:24.046+07:00 [INFO ] Accepted 100 blocks ...7d426e64f3ab0d0dedeb3acf5ee73c04b64544df918b7bb57c9f250bc7782f65 via submit block
+2026-09-19 23:18:25.086+07:00 [INFO ] Accepted block ab0a319d5c1178dac3e29e4c33a565a841ba616b8770810656b24562ae1c5407 via submit block
+2026-09-19 23:18:27.231+07:00 [INFO ] Processed 1101 blocks and 1101 headers in the last 10.01s (1102 transactions; 1101 UTXO-validated blocks; 1.00 parents; 1.00 mergeset; 1.00 TPB; mass: 81.8s/8.1c/1.8t; 1.0 lanes/mergeset)
+2026-09-19 23:18:27.232+07:00 [INFO ] Tx throughput stats: 0.10 u-tps, 100.00% e-tps (in: 1 via RPC, 0 via P2P, out: 1 via accepted blocks)

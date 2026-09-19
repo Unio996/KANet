@@ -1,0 +1,17 @@
+✅ 枚举层: 至少发现 4 个已知生产者文件(voter/filter/bshard-voter/settler)
+✅ 枚举层: services/bettor-prediction-settler.js 豁免登记有原因
+✅ 枚举层: services/bettor-prediction-voter.js 走 safe_json 形态(helper 或字面 flag)
+✅ 枚举层: services/bettor-prediction-voter.js 无裸 JSON.stringify 直喂 tx_hex
+✅ 枚举层: services/bshard-auto-settler.mjs 走 safe_json 形态(helper 或字面 flag)
+✅ 枚举层: services/bshard-auto-settler.mjs 无裸 JSON.stringify 直喂 tx_hex
+✅ 枚举层: services/bshard-close-voter.js 走 safe_json 形态(helper 或字面 flag)
+✅ 枚举层: services/bshard-close-voter.js 无裸 JSON.stringify 直喂 tx_hex
+✅ 枚举层: services/trade-protocol-filter.js 走 safe_json 形态(helper 或字面 flag)
+✅ 枚举层: services/trade-protocol-filter.js 无裸 JSON.stringify 直喂 tx_hex
+✅ 行为层: helper 对真 spk fixture 产出非空 safe_json
+✅ 行为层: deserializeFromSafeJSON 逆转换成功
+✅ 行为层: 输出 spk round-trip 保留(flat-hex 含 script 主体)
+✅ 行为层: 输出 value round-trip 无损
+✅ 行为层: lockTime round-trip 无损
+
+✅ ALL PASS (15)

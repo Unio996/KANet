@@ -1,0 +1,13 @@
+ROOT=D:/kanet-tn12/scratch/_j2_wt_proto_v0
+console__broadcaster-utxo: exit=0 0.5s
+    关键行: (无)
+relay__drain-finality-safe-blocks: exit=0 0.1s
+    关键行: [drain-finality-safe-blocks.test] ALL PASS
+relay__wallet: exit=3221226505 0.1s
+    关键行: [wallet.test] ALL PASS | Assertion failed: !(handle->flags & UV_HANDLE_CLOSING), file src\win\async.c, line 76
+relay__serialize-roundtrip: exit=0 0.1s
+    关键行: ✅ all relay round-trip / replay / intent vectors passed
+relay__tx-mass-ub: exit=1 0.1s
+    关键行: 🔴 tx-mass-ub: 34 PASS / 1 FAIL | [FAIL] P-src 夹具来源自检(R7-A): 路径由 import.meta.url 相对解析、落在仓内 docs/provenance、不含 scratch 段、文件存在(clean checkout 也在) :: 夹具路径不得指向 scratch: D:\kanet-tn12\scratch\_j2_wt_proto_v0\docs\provenance\2026-08-28-redline7-
+relay__utxo-facts: exit=0 0.7s
+    关键行: 42 passed, 0 failed
