@@ -1,6 +1,6 @@
-# 设计稿：relay 入站握手自动接受加开关（主网默认关）v0.2
+# 设计稿：relay 入站握手自动接受加开关（主网默认关）v0.3
 
-> 文件名沿用 `…-v0.1.md`（账本 1571 / NWT 审稿以此路径引用）；**正文即 v0.2**，v0.1→v0.2 差异全部在末节「v0.2 增补」，与上文冲突处以该节为准。
+> 文件名沿用 `…-v0.1.md`（账本 1571 / NWT 审稿以此路径引用）；**正文即 v0.3**，v0.1→v0.2 差异在「v0.2 增补」、v0.2→v0.3 差异在「v0.3 增补」，与上文冲突处以该节为准。
 
 > **Status**: CURRENT
 >
@@ -94,3 +94,24 @@
 
 ### 6.5 未证（沿用 NWT）
 未在回落 / 索引器模式实跑（不动生产 relay）；`lib/indexer.mjs` 主网指向未核；回落在主网是否发生过无历史数据。
+
+## 7. v0.3 增补（NWT 复审 `336bc3a9`，Bettor 全部采纳；与上文冲突处以本节为准）
+
+### 7.1 M2-1：落点 4 须先抽成可 import 模块，V2c 才可执行
+`relay.mjs` 无任何 export，顶层直接读钱包 / 索引器并按模式起 startRpcListener() / setInterval(poll)（:300-311）——import 它就真的启动 relay，`doAcceptHandshake`（脚本内非导出函数）无法被测试驱动，V2c "删落点 4 ⇒ 红" 不可执行。**设计**：把 `doAcceptHandshake`（连同 `_acceptedPeers` 与两级去重）抽到 `kasia-relay/src/lib/handshake-accept.mjs`，`acceptHandshake / sendKaspa / fetch / log` 由参数注入；`relay.mjs` 只留一行调用；`handshakeAutoAcceptEnabled` 独立成 `kasia-relay/src/lib/handshake-switch.mjs`。V2c = 注入桩驱动该模块，关闭态桩零调用（acceptHandshake 0、sendKaspa 0）。这是对 relay.mjs 的结构性小改，实现 diff 须逐字比对抽取前后行为（同 F3 拆 leaf-state-encode 的做法：BEFORE / AFTER 对照）。
+
+### 7.2 S2-1（采纳为设计主体）：闸下沉到 `acceptHandshake` 本身做 chokepoint
+`chain.mjs:136-146` 的 `acceptHandshake` 只构造草稿 {to, amount, payload}（isResponse:true 的握手载荷），不花钱；花钱在调用点的 sendKaspa，而三个调用点都是"有 payload 才发"（rpc:986 `if (draft?.payload)`、relay.mjs:256 `if (!draft?.payload) { log; return }`、rpc:582 `if (draft?.payload)`）。**让 `acceptHandshake` 在关闭态返回 null（3 行早退，读 handshakeAutoAcceptEnabled）**，三个现有调用点与将来任何第 N 个调用点自动不花钱——结构性保护，不依赖有人记得加闸（M-H1 恰证明逐个列举会漏）。四个调用点各自的早退**保留**（语义清晰、日志明确），chokepoint 兜底。残余"绕过 acceptHandshake 自己拼 isResponse:true 载荷"由 7.3 (c) 覆盖。**注意**：console 侧 `relation-state.js` 另有同名 `acceptHandshake`（数据库状态推进，不发交易），实现者勿混淆、扫描范围只在 kasia-relay/src。
+
+### 7.3 S2-2：V9 规格改为可机检
+文本扫描证明的是"名字出现在哪"不是"闸支配调用"（守卫可在字符串 / 注释里或调用之后；`import {acceptHandshake as ah}` 别名绕过；`const f = acceptHandshake` / 传回调等非调用引用绕过）。**规格**：(a) 标识符 `acceptHandshake` 在 kasia-relay/src 每处出现（去注释去字符串）除 chain.mjs 定义外必须落在白名单确切 3 个 (文件, 函数)，其它出现含别名 / 非调用引用 ⇒ 红；(b) 白名单调用点所在函数须有守卫子句 `if (!handshakeAutoAcceptEnabled(…)) … return` 且位置在 `acceptHandshake(` 之前；(c) 另扫 `isResponse: true`，除 chain.mjs:acceptHandshake 外出现即红；(d) 用 F2-1 共享扫描器并带对照臂（无守卫红 / 守卫在调用后红 / 别名红 / 守卫只在字符串或注释里红）。有 7.2 之后 V9 是清单钉住，不是保护本身。
+
+### 7.4 S2-3：poll 路径关闭态日志去重
+`relay.mjs` POLL_MS 默认 2000 ms；indexer / 回落模式下 pending_incoming 会话永不被接受，每 tick 都再命中落点 4 ⇒ 关闭态日志每 2 s 每会话一行永不停。**要求**：每 peer 每进程生命周期只打一次（Set 去重）；V2c 加"同一 peer 连续 3 个 tick 只 1 行"。
+
+### 7.5 S2-4：启动日志与只读读数
+- 启动行放 `relay.mjs` 模块顶层读一次（RELAY_MODE 分支之前），带 `RELAY_MODE=<值>`：`handshake auto-accept: DISABLED (RELAY_HANDSHAKE_AUTO_ACCEPT!=1, raw=…, RELAY_MODE=rpc)`。
+- §6.3 "打开前必读读数"的只读 SQL：`SELECT COUNT(*) FROM pending_actions WHERE action_type='handshake_accept' AND status='pending'`（主网库 readonly 打开）。
+
+### 7.6 验收表最终版（覆盖 §3 / §6.4）
+V1 纯函数取值；V2 实时路径关闭态零 claim / 零 acceptHandshake / 零 sendKaspa / 零 markSeen、登记调用不变；V2b console 侧 pending 行钉住；V2c 落点 4 模块注入桩零调用 + 同 peer 3 tick 只 1 行；V2d（新，对应 7.2）`acceptHandshake` 关闭态返回 null，开启态草稿逐字节不变，变异"去掉 chokepoint 早退"⇒ 红；V3 追赶第 1 段零调用 + 汇总行 `handshakes: DISABLED`；V4 开启态逐字节不变（阳性对照 sendKaspa 恰 1 次）；V5 启动行在 relay.mjs 顶层带 RELAY_MODE；V6 部署后 DISABLED 行数 == relay 子进程数、HANDSHAKE ACCEPTED 0 行；V7 env 静态辅助；V8 lint 与原始输出；V9 可机检扫描 (a)–(d)；V10 汇总行；抽取 BEFORE / AFTER 行为对照。
