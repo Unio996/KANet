@@ -1,0 +1,51 @@
+## presign_covenant_probe
+before: presign.outputs[0].covenant = undefined | t.outputs[0].covenant = undefined
+after setting on t: t cov = abababab | presign cov = abababab | shared outputs[0] cov = set
+presign.outputs===t.outputs objects identical? false
+
+## sighash_port self-check
+self-check same tx (covenant present)      => verify = true (expect true)
+self-check covenant stripped from tx        => verify = false (expect false)
+
+## cc_sig_experiment (upstream VM = patched cli-debugger)
+A_control_nocov_tx_sig_nocov       exit=0  PASS | 
+B_J2order_cov_tx_sig_nocov         exit=1  
+C_fixed_cov_tx_sig_cov             exit=0  PASS | 
+
+## J2 test + NWT-PROBE on J2 real builder output (BEFORE fix)
+NWT-PROBE final tx: outputs[0].covenant present = true | 5 committee sigs valid vs final-tx sighash = [false,false,false,false,false] | sig lens = 65,65,65,65,65
+NWT-PROBE same tx with output0 covenant stripped: sigs valid = [true,true,true,true,true]
+17 passed, 0 failed
+## same probe AFTER one-line fix (local uncommitted experiment, reverted): final tx: 5 sigs valid=[true,true,true,true,true]; covenant-stripped: [false x5]
+
+## local_mass_hypothesis
+register_append#1 storage with input-p forced 1 = 500980  actual fee/100 = 433399
+register_append#2 storage with input-p forced 1 = 411635  actual fee/100 = 396667
+market_seal storage with input-p forced 1 = 349831  actual fee/100 = 343860
+
+## wasm_local_mass_check
+v=50000000  wasm.calculateTransactionMass=320001  mine(storage,input p=1)=320001  equal=true  requiredFee=32000100
+v=70000000  wasm.calculateTransactionMass=332469  mine(storage,input p=1)=332469  equal=true  requiredFee=33246900
+v=95000000  wasm.calculateTransactionMass=343860  mine(storage,input p=1)=343860  equal=true  requiredFee=34386000
+v=100000000  wasm.calculateTransactionMass=345716  mine(storage,input p=1)=345716  equal=true  requiredFee=34571600
+
+## seal_fee_curve
+┌─────────┬─────────────┬────────────┬──────────────────────────┬─────────────┬────────────┬──────────────────┬─────────┬────────────┐
+│ (index) │ v           │ fee        │ note                     │ requiredFee │ change     │ trueStorageFinal │ pct     │ ceiling    │
+├─────────┼─────────────┼────────────┼──────────────────────────┼─────────────┼────────────┼──────────────────┼─────────┼────────────┤
+│ 0       │ '30000000'  │ '30476200' │ 'infeasible (change<=0)' │             │            │                  │         │            │
+│ 1       │ '35000000'  │            │                          │ '30857100'  │ '4142900'  │ '308046'         │ '61.6%' │ '61714200' │
+│ 2       │ '40000000'  │            │                          │ '31250000'  │ '8750000'  │ '201785'         │ '40.4%' │ '62500000' │
+│ 3       │ '45000000'  │            │                          │ '31634000'  │ '13366000' │ '180701'         │ '36.1%' │ '63268000' │
+│ 4       │ '50000000'  │            │                          │ '32000100'  │ '17999900' │ '177780'         │ '35.6%' │ '64000200' │
+│ 5       │ '55000000'  │            │                          │ '32344700'  │ '22655300' │ '180984'         │ '36.2%' │ '64689400' │
+│ 6       │ '60000000'  │            │                          │ '32666600'  │ '27333400' │ '186585'         │ '37.3%' │ '65333200' │
+│ 7       │ '65000000'  │            │                          │ '32967100'  │ '32032900' │ '193122'         │ '38.6%' │ '65934200' │
+│ 8       │ '70000000'  │            │                          │ '33246900'  │ '36753100' │ '199938'         │ '40.0%' │ '66493800' │
+│ 9       │ '75000000'  │            │                          │ '33507500'  │ '41492500' │ '206710'         │ '41.3%' │ '67015000' │
+│ 10      │ '80000000'  │            │                          │ '33750000'  │ '46250000' │ '213291'         │ '42.7%' │ '67500000' │
+│ 11      │ '85000000'  │            │                          │ '33976400'  │ '51023600' │ '219598'         │ '43.9%' │ '67952800' │
+│ 12      │ '90000000'  │            │                          │ '34188300'  │ '55811700' │ '225612'         │ '45.1%' │ '68376600' │
+│ 13      │ '95000000'  │            │                          │ '34386000'  │ '60614000' │ '231312'         │ '46.3%' │ '68772000' │
+│ 14      │ '100000000' │            │                          │ '34571600'  │ '65428400' │ '236713'         │ '47.3%' │ '69143200' │
+└─────────┴─────────────┴────────────┴──────────────────────────┴─────────────┴────────────┴──────────────────┴─────────┴────────────┘

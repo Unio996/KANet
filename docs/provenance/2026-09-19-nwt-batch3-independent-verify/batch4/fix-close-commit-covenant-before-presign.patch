@@ -1,0 +1,9 @@
+--- a/kasia-console/src/lib/proto-tx-assembly-settlement.mjs
++++ b/kasia-console/src/lib/proto-tx-assembly-settlement.mjs
+@@ mkTx (buildCloseCommitTxJson) — 在 presignTx 创建、createInputSignature 之前挂 covenant @@
+       ...(feeChangeSompi === undefined ? [] : [new kaspa.TransactionOutput(feeChangeSompi, feeUtxoSpk)]),
+     ];
++    // sighash(consensus sighash.rs:233-235, version>=1)承诺 output.covenant(有无+authorizing_input+covenant_id)。
++    // 必须先挂 covenant 再让委员签名, 否则签名承诺的是"无 covenant"版, 对最终 tx 无效。
++    outputs[CLOSE_COMMIT_ROOTCLOSE_OUT_INDEX].covenant = new kaspa.CovenantBinding(0, new kaspa.Hash(rootCloseCovId));
+     // 先建一版RootClose输入sigScript为空的skeleton, 供委员对**本次候选tx**签名(SighashType.All

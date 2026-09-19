@@ -64,6 +64,11 @@ D-021：本文只含 simnet 数据与公开工具标识，无密钥值。
 
 且多付的 fee 直接缩小 change 输出，storage mass 的调和项 ∝ C/change：bet1 若 fee 取最低费附近，change ≈51.3M，storage ≈ 391,231（78.2%，`scripts/whatif_bet1_fee.mjs`），而非 457,504（91.5%）。**这是"mass 卡点"的一个根因线索：不是形状本身逼近上限，而是 fee 定价用了偏高的本地 mass。** 但矿工按 feerate 选块是否把 storage mass 计入优先级、最低费之上要留多少余量，我没有在节点上验证，**只作假设提交，未验证，不得直接落码**；需要 simnet 上的 fee 阶梯实验（提交前先通知 J2）。
 
+### 2.3 本地 wasm mass 偏高的根因（已验证，取代 §2.2 里"未验证"的那半句）
+
+- **kaspa-wasm `calculateTransactionMass` = 我的 storage 公式在"所有输入 plurality 恒为 1"下的值**（wasm 的输入 UtxoEntry 没有 covenant 标志，plurality 只能按 1 算，输入信用因此偏小、mass 偏大）。证据：(1) `scripts/local_mass_hypothesis.mjs`：强制输入 p=1 后算得 500,980 / 411,635 / 349,831，与 J2 记录的 localMass 三处逐位相等；(2) `scripts/wasm_local_mass_check.mjs`：直接调 wasm `calculateTransactionMass`，用链上 market_seal 的真 sigScript/真 outputs，只改 fee UTXO 面值 v（draft change=v）：v=50M/70M/95M/100M 得 320,001 / 332,469 / 343,860 / 345,716，与公式 4/4 逐位相等；`requiredFee = 100 × 该值`，v=95M 时 = 34,386,000，恰是链上实付。⇒ 现行 fee 规则的全部行为已被公式精确解释，"本地 mass 偏高 9.5%/40.4%/51.2%"不是随机偏差，而是"少数了 covenant 输入的 plurality"。
+- fee 用的是 **draft**（change=leftover）的本地 mass，不是最终 tx 的（F5）。
+
 ## 3. 对 mass 断言改法 D1–D5 的 verdict
 
 - **D1 门控只用手算 storage、阈值 475,000 不变 — PASS，附 3 个条件**：① 补 relaxed 分支（约 10 行，我的 `calcStorageMass` 可直接作参照实现），使其**精确**而非"保守近似"；② 回归夹具用链上 4 笔真实交易（`onchain_txs_with_parents.simnet.json` 是从节点取回的父交易+本交易，测试里由输入端 UTXO 现算 plurality/amount，而不是手填）；③ 每个新 kind 的 `inputPluralities` 必须来自 UTXO 事实（spk 长度 + 是否带 covenant），不是槽位常量硬编码。
@@ -78,6 +83,13 @@ D-021：本文只含 simnet 数据与公开工具标识，无密钥值。
 - **F1（已由 J2 落码）** `heldInput=null` ⇒ `tokenInIdx=-1` 编进见证（原 `proto-tx-assembly-settlement.mjs:73-74,108`）。共识必拒不丢钱，应构造期 fail-closed。`cb5fd9e1` 已修（throw）。
 - **F2（已由 J2 落码，覆盖度我判"当前够，长期不够"）** `sealWitnessArgs` 纯函数 + `tokenIn≠tokenOut` 向量。三层覆盖：(a) 编码器位置映射——我的哨兵实验证明与上游逐字节相等；(b) `sealWitnessArgs` 内部映射——J2 的单测；(c) 调用点 `heldIdx: heldIdx` 的来源——**当前无任何测试或共识能区分**，但在固定布局 `[leaf, held, fee]` 下 `heldIdx≡1≡MARKET_SEAL_TOKEN_OUT_INDEX`，行为上惰性。风险在布局改变（多 held / 换序）之后：建议在 builder 里加结构断言——`inputs[tokenInIdx]` 必须花的是 `heldInput` 的 outpoint、`outputs[tokenOutIdx]` 的 spk 必须是 token 输出——让布局一变就大声失败，而不是靠"两者恰好都是 1"。后续批次（close_commit 等）的每个 witness-arg 映射都应该配一条"全部索引参数两两不同"的哨兵测试。
 - **F3 fee 上限 1.0 KAS（Codex #2 / Bettor 点名）——判：可接受为有界临时值，附条件。** 事实：`dynamicNetLossCeiling = min(2×requiredFee, 该 kind cap, GLOBAL 1.0 KAS)`（`proto-tx-assembly.mjs:161-166`），所以借用来的 1.0 KAS 不是起作用的约束，起作用的是 `2×requiredFee`；1.0 KAS 只是背板，另有 relay 侧 `SIGNED_INPUT_CEILING_SOMPI` 与 GLOBAL 硬顶。实测 market_seal 实付 34,386,000（0.344 KAS），上限约 0.69 KAS。条件：(1) 合入主线前 `feeProfile.market_seal.cap` 换成按节点实测的专属数字（≈ 上述 fee 阶梯实验后的结论）；(2) relay 侧硬顶不动；(3) 必须知道 `requiredFee` 本身来自偏高的本地 wasm mass，所以 `2×requiredFee` 是个偏松的动态上限。主网 relay 仅约 4.09 KAS，每步 ≈0.34–0.43 KAS 的实付对 5+ 步结算是可见成本（见 §2.2）。
+- **F3' market_seal 专属 fee cap（Bettor 要求，J2 照此替换 `feeProfile.market_seal.cap`）：52,000,000 sompi（0.52 KAS）。**
+  推导（`scripts/seal_fee_curve.mjs`、`wasm_local_mass_check.mjs`，全部可复跑）：
+  1. `requiredFee(v) = 100 × wasmLocalMass(draft)`（§2.3，直接对 wasm 函数验过）。对固定形状 `[leaf 20M, held 20M, fee v]` → `[RootClose 20M, token 20M, change]`，outputs 全是协议常量，所以 requiredFee **只依赖 fee UTXO 面值 v**，与见证字节/市场参数无关（compute 远小于 storage，不进 wasm 数）。
+  2. v 的可行范围：下限 ≈35 M（v=30 M 时 change<0）；上限 = `SIGNED_INPUT_CEILING_SOMPI` = 100,000,000（1.0 KAS）。requiredFee 随 v 单调增：v=35M→30,857,100，v=50M→32,000,100，v=95M→34,386,000（**链上实付，节点已接受**），v=100M→**34,571,600（全域最大）**。
+  3. cap = 1.5 × 全域最大 = 51,857,400 → 向上取整到 5M：**52,000,000**。交叉核对：J2 实跑 34,386,000 = cap 的 66%；NWT 早先审计构造（设计文档 §0.4，不同 UTXO/见证形状）的 39,678,700 = cap 的 76%，仍在内。
+  4. 效果：`dynamicNetLossCeiling = min(2×requiredFee, cap, 1.0 KAS)`，对整条 v 曲线 2×requiredFee ≥ 61.7M > 52M，所以 **52M 变成真正起作用的上限**（原借用的 1.0 KAS 不起作用），每次 market_seal 最坏净损从"≈0.69 KAS"降到 0.52 KAS。
+  5. 适用范围/失效条件：仅 `seal_count=2`、固定输入布局 `[leaf, held, fee]`；fee 计算规则一改（例如改成按节点 relay 最低费定价，见 §2.2）就必须重新推导——届时数字会低一个数量级，不能沿用。cap 是"损失上界"，不是 fee 预测值。
 - **F4** `assertMassWithinCeiling` 在 fee 输入签名之前执行（sigScript 空），compute 少算 66 B（`proto-tx-assembly-settlement.mjs`，`inputs[feeIdx]` 的 `new Uint8Array(0)`）。目前无实际影响（compute 占比 12%），随 D3 精确化时顺手计入。
 - **F5** `selectChangeShape` 注释 "先占位建一次量 mass（与找零【值】无关，只与结构有关）"（`proto-tx-assembly.mjs:195-197`）对 storage mass 不成立（storage ∝ C/change）：fee 是用 change=leftover 的 draft 算的，最终 change 更小，最终 tx 的本地 mass 更高（bet1：实付 fee 对应 draft mass 433,399，最终本地 mass 500,980）。这解释了为何 fee 与最终 mass 不匹配；不是安全问题，是注释/推理不成立。
 - **F6 Codex 同意点**：`bettorPk=committeePubkeys[0]` 属实（`src/api/proto.js:214`），MUST-PROVE 公钥相等断言仍须落在 claim_draw/withdraw/ticket_reclaim 之前；本审未涉及该批（尚未落码），无新意见。
@@ -104,3 +116,9 @@ D-021：本文只含 simnet 数据与公开工具标识，无密钥值。
 ## 7. 复现
 
 所有脚本在 `scripts/`，输出在 `run-output.txt`，节点取回的原始交易在 `onchain_txs_with_parents.simnet.json`。脚本里有绝对路径（`D:/kanet-tn12/scratch/_nwt_wt_batch3_review/kasia-console/scratch/_nwt_batch3/`），需要 `npm ci --ignore-scripts` 后的 kaspa-wasm 与 `@noble/hashes`；节点取回脚本需 simnet 节点在 `ws://127.0.0.1:18510` 运行。
+
+## 8. 增补（同日，Bettor 追加派工）
+
+- §2.3 与 F3'：本地 wasm mass 的根因已验证；market_seal 专属 fee cap = 52,000,000 sompi 及推导。
+- `batch4/README.md`：批 4 `close_commit` 离线审（B4-1 阻断：委员签名对最终 tx 无效，一行可修）。
+- fee 阶梯实验：Bettor 已批准，**等 J2 全链 simnet 跑完并通知我后再上**；实验只回答"节点 mempool 最低费是否接受"，不回答主网矿工按什么排序打包，实验结果本身不构成降 fee 的依据（Bettor 条件）。
