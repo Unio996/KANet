@@ -1,0 +1,159 @@
+{
+ "retrievedVia": "RPC getBlocks(includeTransactions:true) 只读扫块; 读区块内交易记录自带的节点侧storageMass/mass/verboseData.computeMass",
+ "txs": {
+  "claim_draw": {
+   "txid": "0c1d966659fbb7cbc388a42a15ac05429f2ffdf4ae8088b39eeb324295c8c06f",
+   "version": 1,
+   "lockTime": "0",
+   "storageMass": "179586",
+   "mass": "179586",
+   "computeMass": "40407",
+   "block": {
+    "hash": "9186d2b5492da1aa1c2ea5eaf347a11b025e9323a0370e554d1696cc71959bf1",
+    "daaScore": "4333",
+    "timestamp": "1789819984454"
+   },
+   "inputs": [
+    {
+     "previousOutpoint": {
+      "transactionId": "515c73e23220c58d583cd18192bb65147e3f34bd36656812a8ab700cfb5afe64",
+      "index": 0
+     },
+     "sigScriptBytes": 7300,
+     "sigScriptSha256_16": "7b953559cecb68d5",
+     "sequence": "0",
+     "computeBudget": 70,
+     "sigOpCount": 0
+    },
+    {
+     "previousOutpoint": {
+      "transactionId": "608994952dbd26e8a698ba6ff7b1ef3a948869a144e3b14d43a69bc2e95a7ad4",
+      "index": 1
+     },
+     "sigScriptBytes": 190,
+     "sigScriptSha256_16": "0b98ab17830149d5",
+     "sequence": "0",
+     "computeBudget": 70,
+     "sigOpCount": 0
+    },
+    {
+     "previousOutpoint": {
+      "transactionId": "515c73e23220c58d583cd18192bb65147e3f34bd36656812a8ab700cfb5afe64",
+      "index": 1
+     },
+     "sigScriptBytes": 3215,
+     "sigScriptSha256_16": "5c0242f85f4551e4",
+     "sequence": "0",
+     "computeBudget": 70,
+     "sigOpCount": 0
+    },
+    {
+     "previousOutpoint": {
+      "transactionId": "01409691833426ee4737e8459596febacf93608e36ef47b43f000dc026ce2b09",
+      "index": 3
+     },
+     "sigScriptBytes": 66,
+     "sigScriptSha256_16": "4e394b497905e086",
+     "sequence": "0",
+     "computeBudget": 70,
+     "sigOpCount": 0
+    }
+   ],
+   "outputs": [
+    {
+     "value": "20000000",
+     "covenant": {
+      "authorizingInput": 3,
+      "covenantId": "e00196ad2636b4a21df4ec7450e1b6a30d1cc13c4904800d42a088ba7b93c257"
+     },
+     "scriptPublicKey": "0000aa206607503d4528a31da6ef22e2f33cef0e79acbac4ab9f6e7afcd858cee62c82ef87"
+    },
+    {
+     "value": "20000000",
+     "covenant": {
+      "authorizingInput": 3,
+      "covenantId": "d8d2afed33b06c38c47dd6702e4985b0a43eaec9d2f406b7e480d7474315c73c"
+     },
+     "scriptPublicKey": "0000aa204c5d98f15546c63038ab4d31f4b1694770a392149697332b14a560ff89c7e34387"
+    },
+    {
+     "value": "84452900",
+     "covenant": null,
+     "scriptPublicKey": "00002003a81c86c03c9c668c1d7c4c6119dcf73e1c6bd7378086af30d993429071b000ac"
+    }
+   ]
+  },
+  "withdraw": {
+   "txid": "39f4f2c6a0070b183fa7e5ffb241974b19db3b4346790ff4dfc1ab901c1ae508",
+   "version": 1,
+   "lockTime": "0",
+   "storageMass": "219598",
+   "mass": "219598",
+   "computeMass": "30371",
+   "block": {
+    "hash": "fbb9f68ed210c47841508633442f003f20a076662a3f918f4b538604321f104e",
+    "daaScore": "4334",
+    "timestamp": "1789821705942"
+   },
+   "inputs": [
+    {
+     "previousOutpoint": {
+      "transactionId": "0c1d966659fbb7cbc388a42a15ac05429f2ffdf4ae8088b39eeb324295c8c06f",
+      "index": 0
+     },
+     "sigScriptBytes": 4508,
+     "sigScriptSha256_16": "0504f8b89451132d",
+     "sequence": "0",
+     "computeBudget": 70,
+     "sigOpCount": 0
+    },
+    {
+     "previousOutpoint": {
+      "transactionId": "0c1d966659fbb7cbc388a42a15ac05429f2ffdf4ae8088b39eeb324295c8c06f",
+      "index": 1
+     },
+     "sigScriptBytes": 3215,
+     "sigScriptSha256_16": "cae87f0cf0c6cd59",
+     "sequence": "0",
+     "computeBudget": 70,
+     "sigOpCount": 0
+    },
+    {
+     "previousOutpoint": {
+      "transactionId": "53315c3c881a4000eb32d77a7b871fa590086f867537f0b19046e133636edb35",
+      "index": 6
+     },
+     "sigScriptBytes": 66,
+     "sigScriptSha256_16": "da8d0db3467ac65b",
+     "sequence": "0",
+     "computeBudget": 70,
+     "sigOpCount": 0
+    }
+   ],
+   "outputs": [
+    {
+     "value": "20000000",
+     "covenant": {
+      "authorizingInput": 2,
+      "covenantId": "659ec2050126ed9949bc5c07cb415dcae9f1affb829fe33da0d4c64fc07c7bab"
+     },
+     "scriptPublicKey": "0000aa202bef926e0a507f4efdb50b8845da81a3c264492bb84587146e2222dababdcd0b87"
+    },
+    {
+     "value": "20000000",
+     "covenant": {
+      "authorizingInput": 2,
+      "covenantId": "9a5719c10ea67dfb29b402eb3e44540a82e9b99830f44ccf0075462a8130269b"
+     },
+     "scriptPublicKey": "0000aa20eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee87"
+    },
+    {
+     "value": "51023600",
+     "covenant": null,
+     "scriptPublicKey": "00002003a81c86c03c9c668c1d7c4c6119dcf73e1c6bd7378086af30d993429071b000ac"
+    }
+   ]
+  }
+ },
+ "scannedBlocks": 4353
+}
