@@ -5,6 +5,7 @@
 import { randomBytes } from 'node:crypto';
 import { sqlite } from '../db/client.js';
 import { deriveCloseCommitInputs } from './proto-settlement-inputs.mjs';
+import { deriveWinnerBet } from './proto-winner-bet.mjs';
 import { ensureSettlementIntent } from './proto-settlement-intent.mjs';
 
 const BATCH9_INTENT_PREDICATE = `((subject_type = 'market' AND step IN ('seal', 'resolve')) OR (subject_type = 'claim' AND step IN ('convert_to_claim', 'claim_draw')))`;
@@ -63,9 +64,28 @@ export function createSettlementStore({ db = sqlite, claimIdFn = newClaimId, ens
         AND EXISTS (SELECT 1 FROM proto_settlement_intents s WHERE s.subject_type = 'claim' AND s.subject_id = c.id AND s.step = 'convert_to_claim' AND s.status = 'landed')
         AND NOT EXISTS (SELECT 1 FROM proto_settlement_intents s WHERE s.subject_type = 'claim' AND s.subject_id = c.id AND s.step = 'claim_draw' AND s.status IN ('landed', 'ambiguous'))
       ORDER BY c.created_at ASC LIMIT ?`).all(limit)) advances.push({ step: 'claim_draw', subjectId: r.claim_id, marketId: r.market_id });
+    // 后效待应用(NWT 38b983e4 MUST): 意图已 landed 但 markLanded 的后效谓词未满足——checkSettlementIntentLanded 先把行置 landed、核心随后才 markLanded, 两步之间失败 / 进程死,
+    // 该行就不会再出现在 landedChecks(只取 submitted)、市场也因 NOT EXISTS(landed) 不再出现在触发清单 ⇒ 永远无人再捞。这里把"landed 且后效缺失"单列一类, 核心每 tick 重跑(markLanded 幂等)。
+    const effectsPending = db.prepare(`
+      SELECT s.* FROM proto_settlement_intents s JOIN proto_markets m ON m.id = s.subject_id
+      WHERE s.subject_type = 'market' AND s.step = 'seal' AND s.status = 'landed' AND m.status = 'betting'
+      UNION ALL
+      SELECT s.* FROM proto_settlement_intents s JOIN proto_markets m ON m.id = s.subject_id
+      WHERE s.subject_type = 'market' AND s.step = 'resolve' AND s.status = 'landed'
+        AND (m.status = 'sealed'
+             OR NOT EXISTS (SELECT 1 FROM proto_claims c WHERE c.market_id = m.id AND c.side = 'win')
+             OR NOT EXISTS (SELECT 1 FROM proto_claims c JOIN proto_settlement_intents i ON i.subject_type = 'claim' AND i.subject_id = c.id AND i.step = 'convert_to_claim' WHERE c.market_id = m.id AND c.side = 'win'))
+      UNION ALL
+      SELECT s.* FROM proto_settlement_intents s
+      WHERE s.subject_type = 'claim' AND s.step = 'convert_to_claim' AND s.status = 'landed'
+        AND NOT EXISTS (SELECT 1 FROM proto_settlement_intents i WHERE i.subject_type = 'claim' AND i.subject_id = s.subject_id AND i.step = 'claim_draw')
+      UNION ALL
+      SELECT s.* FROM proto_settlement_intents s JOIN proto_claims c ON c.id = s.subject_id
+      WHERE s.subject_type = 'claim' AND s.step = 'claim_draw' AND s.status = 'landed' AND c.claim_txid IS NULL
+      LIMIT ?`).all(limit);
     const seen = new Set();
     const deduped = advances.filter((a) => { const k = `${a.step}:${a.subjectId}`; if (seen.has(k)) return false; seen.add(k); return true; });
-    return { landedChecks, preparedRows, advances: deduped };
+    return { landedChecks, preparedRows, advances: deduped, effectsPending };
   }
 
   /** 依赖已 landed(§4, 含跨 subject_type 的额外检查)。返回 {ok, reason}。 */
@@ -100,10 +120,13 @@ export function createSettlementStore({ db = sqlite, claimIdFn = newClaimId, ens
         const m = marketOf(marketId);
         const existing = db.prepare("SELECT id FROM proto_claims WHERE market_id = ? AND side = 'win' LIMIT 1").get(marketId);
         let claimId = existing ? existing.id : null, created = 0;
-        if (!claimId && m && m.status === 'sealed') {
-          const d = deriveCloseCommitInputs(marketId, { db });                    // 必须在把 status 推到 resolved 之前(它只允许 sealed)
+        if (!claimId && m) {
+          // sealed: 走带全部 fail-closed 检查的 deriveCloseCommitInputs(必须在把 status 推到 resolved 之前); 已 resolved 却缺 claim 行(人工改库 / 旧版本遗留)⇒ 由同一份赢家判定补建, 不留"永远挂起"
+          let bettorPk, amount;
+          if (m.status === 'sealed') { const d = deriveCloseCommitInputs(marketId, { db }); bettorPk = d.payouts[0].bettorPk; amount = d.poolValue; }
+          else { const w = deriveWinnerBet(marketId, { db, who: `markLanded(close_commit) 补建 claim(${marketId.slice(0, 12)}…)` }); bettorPk = String(w.winner.bettor_pk).toLowerCase(); amount = w.poolValue; }
           claimId = claimIdFn();
-          created = db.prepare("INSERT OR IGNORE INTO proto_claims (id, market_id, bettor_pk, side, amount, created_at) VALUES (?, ?, ?, 'win', ?, ?)").run(claimId, marketId, d.payouts[0].bettorPk, d.poolValue, t).changes;
+          created = db.prepare("INSERT OR IGNORE INTO proto_claims (id, market_id, bettor_pk, side, amount, created_at) VALUES (?, ?, ?, 'win', ?, ?)").run(claimId, marketId, bettorPk, amount, t).changes;
         }
         const resolved = db.prepare("UPDATE proto_markets SET status = 'resolved', updated_at = ? WHERE id = ? AND status = 'sealed'").run(t, marketId).changes;
         if (claimId) ensureIntent({ subjectType: 'claim', subjectId: claimId, step: 'convert_to_claim' });   // 幂等(活跃行复用)

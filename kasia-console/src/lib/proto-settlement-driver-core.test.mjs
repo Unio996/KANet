@@ -334,6 +334,23 @@ await t('prepared_stale(四步都扫): prepared 停留 ≥10 分钟 ⇒ 报警�
   rows[0].updated_at = new Date(NOW - 20 * 60_000).toISOString(); assert.equal(d.scanPreparedStale(rows), 1);
   assert.equal(PREPARED_STALE_MS, 600000);
 });
+await t('后效待应用: runTick 最先处理 effectsPending(占 cap, 排在 landed 检查与推进之前); markLanded 失败 ⇒ settlement_step_unexpected_error(error)逐 tick 报警不去重, 成功后停; 批 9 之外的意图忽略', async () => {
+  const row = { intent_key: `settle:market:${hex64()}:seal`, subject_type: 'market', subject_id: hex64(), step: 'seal', status: 'landed' };
+  const w = mkWorld({ work: { effectsPending: [row], advances: [{ step: 'seal', ...ids() }], preparedRows: [] } });
+  w.rows.set(row.intent_key, row);
+  let fails = 2; const realMarkLanded = w.deps.markLanded; w.deps.markLanded = async (info, r) => { if (fails-- > 0) throw new Error('deriveCloseCommitInputs: 派生失败(注入)'); return realMarkLanded(info, r); };
+  const d = createSettlementDriver(w.deps);
+  let out = await d.runTick({ cap: 1 });
+  assert.equal(out.actioned, 1); assert.equal(out.failed, 1); assert.equal(w.log.filter((l) => l.startsWith('intents.ensure')).length, 0, 'cap=1 被后效占满, 新触发没机会先跑');
+  assert.deepEqual(w.alerts.map((a) => [a.eventType, a.level, a.payload.stage]), [['settlement_step_unexpected_error', 'error', 'effects']]);
+  out = await d.runTick({ cap: 1 }); assert.equal(w.alerts.length, 2, '第 2 tick 继续报警(不去重)');
+  out = await d.runTick({ cap: 5 }); assert.equal(out.effectsApplied, 1); assert.equal(w.alerts.length, 2, '成功后不再报警'); assert.deepEqual(w.markLandedCalls.map((c) => c[0]), ['seal']);
+  const r = await d.applyEffects({ intent_key: 'settle:claim:x:withdraw', subject_type: 'claim', step: 'withdraw' }); assert.equal(r.outcome, 'ignored');
+  // 与 landedChecks 并存时也排在最前(cap=1 ⇒ 只做后效, 不做 landed 检查)
+  const w2 = mkWorld({ landed: { landed: true, depth: 30 }, work: { effectsPending: [row], landedChecks: [{ intent_key: `settle:market:${hex64()}:seal`, subject_type: 'market', subject_id: hex64(), step: 'seal', status: 'submitted' }], advances: [], preparedRows: [] } });
+  w2.rows.set(row.intent_key, row); const d2 = createSettlementDriver(w2.deps); const o2 = await d2.runTick({ cap: 1 });
+  assert.equal(o2.effectsApplied, 1); assert.equal(w2.log.includes('checkLanded'), false, '后效排在 landed 检查之前, cap=1 时 landed 检查没机会');
+});
 await t('runTick: 先 landed 检查再推进; cap 限制总动作数; 一个条目失败不拖垮后面的条目; 汇总计数正确; cap 非法 ⇒ RangeError', async () => {
   const i1 = ids(), i2 = ids(), i3 = ids();
   const landedRow = { intent_key: `settle:market:${hex64()}:seal`, subject_type: 'market', subject_id: hex64(), step: 'seal', status: 'submitted' };

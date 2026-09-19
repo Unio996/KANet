@@ -259,6 +259,19 @@ export function createSettlementDriver(deps, { ticksToError = 3 } = {}) {
     }
   }
 
+  /** 后效待应用(NWT 38b983e4): landed 意图的 markLanded 没成功(失败 / 进程死在两步之间)⇒ 每 tick 重跑(markLanded 幂等); 失败逐 tick 报警(不去重——这是"已上链但状态没推进"的持续故障)。 */
+  async function applyEffects(intent) {
+    const info = STEP_OF_INTENT[`${intent.subject_type}:${intent.step}`];
+    if (!info) return { outcome: 'ignored', key: intent.intent_key, reason: 'not_a_batch9_step' };
+    try { await deps.markLanded(info, deps.intents.get(intent.intent_key) || intent); return { outcome: 'effects_applied', key: intent.intent_key }; }
+    catch (e) {
+      if (e instanceof DriverDepsError) throw e;
+      const message = e && e.message ? e.message : String(e);
+      alert('settlement_step_unexpected_error', `${intent.intent_key}: 已 landed 但后效应用失败(将逐 tick 重试): ${message.slice(0, 300)}`, { intent_key: intent.intent_key, stage: 'effects' }, 'error');
+      return { outcome: 'failed', key: intent.intent_key, message };
+    }
+  }
+
   /** prepared 停留过久 ⇒ settlement_prepared_stale(四步都有, 不只 close_commit 的 SLA); 同 (key, updated_at) 幂等。 */
   function scanPreparedStale(rows, { olderThanMs = PREPARED_STALE_MS } = {}) {
     const nowMs = deps.now(); let n = 0;
@@ -282,6 +295,11 @@ export function createSettlementDriver(deps, { ticksToError = 3 } = {}) {
     const out = { tickId, actioned: 0, landed: 0, submitted: 0, waiting: 0, gated: 0, held: 0, failed: 0, staleAlerts: 0, results: [] };
     out.staleAlerts = scanPreparedStale(work.preparedRows || []);
     const budget = () => out.actioned < cap;
+    out.effectsApplied = 0;
+    for (const it of (work.effectsPending || [])) {           // 最先: 已上链但状态没推进的不能排在新触发后面饿死
+      if (!budget()) break; out.actioned++;
+      const r = await applyEffects(it); out.results.push(r); if (r.outcome === 'effects_applied') out.effectsApplied++; else if (r.outcome === 'failed') out.failed++;
+    }
     for (const it of (work.landedChecks || [])) {                // 先对账(便宜、且推进后续意图)
       if (!budget()) break; out.actioned++;
       const r = await checkLandedAndApply(it); out.results.push(r); if (r.outcome === 'landed') out.landed++; else if (r.outcome === 'failed') out.failed++;
@@ -294,7 +312,7 @@ export function createSettlementDriver(deps, { ticksToError = 3 } = {}) {
     return out;
   }
 
-  return { advanceStep, checkLandedAndApply, scanPreparedStale, runTick, _keyOf: keyOf };
+  return { advanceStep, checkLandedAndApply, applyEffects, scanPreparedStale, runTick, _keyOf: keyOf };
 }
 
 /** (subject_type:step) → 驱动步骤名(landed 检查用)。 */
