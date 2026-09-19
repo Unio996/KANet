@@ -1,0 +1,82 @@
+# NWT 四审 f0c45290 —— 各项实测原始输出(逐行取自我当时的终端读数; 不含 relay 名/地址/余额)
+# 抽取: 附录 A 脚本 sed -n 358,1257p / C.2 出站工具 1303,1400 / C.3 守卫 1416,1656 / C.4 守卫测试 1662,1865  of docs/2026-09-19-kanetui-mainnet-boot-autostart-scheduled-task-runbook-v0.1.md @ f0c45290
+# 附录 A 脚本 900 行, sha256 前缀 e3e6f326…; 全 ASCII 之外的检查因 grep -P 在该环境不可用未做(SelfTest 能被 PS 5.1 正常解析并跑通)。
+
+## 1. 亲跑 -SelfTest(全部路径参数指向私有临时目录, 非提权)
+exit=0 elapsed=2s   PASS count: 82   FAIL count: 0   SELFTEST failures=0
+跑前后生产 kaspad 日志目录: before=5 after=5 diffs=0; D:\kanet-tn12\logs\mainnet\boot 未被创建。
+F14/F14b/F15/F15b/F16/F17/F17b 全 PASS。
+
+## 2. N-1 变异(nwt-run-variants-v04.ps1; 对它自己的 SelfTest)
+base     v00-baseline                             exit=0 pass=82 fail=0
+killed   n1a-no-beat-in-ALIVE-gate                exit=1 pass=79 fail=3   (F14, F14b, F13)
+killed   n1b-no-beat-in-t0-snapshot-loop          exit=1 pass=81 fail=1   (F17b)
+killed   n1c-no-beat-in-console-verify-loop       exit=1 pass=81 fail=1   (F17)
+killed   n1d-memhb-written-before-sampling        exit=1 pass=81 fail=1   (F15)
+killed   n1e-memhb-written-on-sample-FAILURE      exit=1 pass=81 fail=1   (F15)
+killed   n1f-memory-tick-skipped-while-InGate     exit=1 pass=80 fail=2   (F14, F14b)
+SURVIVED n1g-throttle-never-refires               exit=0 pass=82 fail=0
+SURVIVED n1h-throttle-removed-samples-every-beat  exit=0 pass=82 fail=0
+killed   n1i-script-heartbeat-not-written-by-beat exit=1 pass=78 fail=4
+SURVIVED n1j-memory-tick-exception-escapes-beat   exit=0 pass=82 fail=0
+SURVIVED n1k-outbound-diff-not-gated-on-console   exit=0 pass=82 fail=0
+
+## 3. 真实时间节流向量(nwt-run-throttle-v04.ps1): SentinelTickSec=2, 每 0.7 s 一拍共 7 s, 期望 3..5 次采样
+v01-throttle-vector-on-baseline    exit=0 pass=83 fail=0
+    PASS NWT-throttle-realtime: samples over 7 s at a 2 s tick = 4 (want 3..5)
+v02-throttle-vector-on-n1g         exit=1 pass=82 fail=1
+    FAIL NWT-throttle-realtime: samples over 7 s at a 2 s tick = 1 (want 3..5)
+
+## 4. Assert-UnderTmp(nwt-run-asserttmp-v04.ps1)
+第一轮向量(1-4):
+a00-unit-tests-on-baseline                     exit=0 pass=86 fail=0
+a01-unit-tests-on-mutant-no-leaf-check         exit=0 pass=86 fail=0      (向量重叠, 未分辨)
+a02-unit-tests-on-mutant-no-temproot-check     exit=0 pass=86 fail=0      (向量重叠, 未分辨)
+a03-unit-tests-on-mutant-no-separator-boundary exit=1 pass=85 fail=1  FAIL NWT-asserttmp-3
+a11-author-suite-on-mutant-no-leaf-check       exit=0 pass=82 fail=0      (作者自己的套件, 看不见)
+a12-author-suite-on-mutant-no-temproot-check   exit=0 pass=82 fail=0
+a13-author-suite-on-mutant-no-separator-boundary exit=0 pass=82 fail=0
+补两条各只由一个检查负责的向量(5: <TEMP>\other-dir; 6: C:\Windows\boot-selftest-x)后:
+a00-unit-tests-on-baseline                     exit=0 pass=88 fail=0
+a01-unit-tests-on-mutant-no-leaf-check         exit=1 pass=87 fail=1  FAIL NWT-asserttmp-5
+a02-unit-tests-on-mutant-no-temproot-check     exit=1 pass=87 fail=1  FAIL NWT-asserttmp-6
+
+## 5. Invoke-NodeTool 无外部超时(nwt-nodetool-hang.ps1; 真实函数用 AST 从脚本逐字抽出)
+子进程自带 1 s hard timer(setTimeout(()=>process.exit(2),1000)), 但事件循环被 CPU 占住 20 s:
+Invoke-NodeTool definitions found: 2 (lines: 180,781)  -> using the first (script level)
+Invoke-NodeTool returned after: 20.1s code=2 text=[finished busy loop]
+
+## 6. 守卫工具(C.3)与其测试(C.4)
+node --test boot-guard-check.test.mjs (BOOT_GUARD_ROOT=我的独立检出):  ℹ tests 93  ℹ pass 93  ℹ fail 0  ℹ skipped 0    (临时目录无遗留)
+守卫对真实主网库(只读) + 合成 env(仅 KASPA_NETWORK / MINING_CONSOLIDATE_ENABLED=false / AUTO_BET_TICK_MS=0):
+tool exit=3   41 项 GUARD 行   唯一非 OK: GUARD config:autotake MISMATCH(autotake_enabled=true 且 autotake_mode=auto)   GUARD-RESULT checks=41 not_ok=1
+
+## 7. N-3 差分: 守卫 parseLauncherEnvText vs 真实 PowerShell 加载器(fuzz-gen/oracle/compare/classify; 600 个随机 env 文件, 固定种子)
+cases=600 identical=408 DIFFER=192
+diffs WITHOUT any of U+0085/U+FEFF(interior)/U+2028/U+2029 : 0
+diffs involving them, by char set: {"U+2028(LS)":46,"U+0085(NEL)+U+2028(LS)":18,"U+0085(NEL)":39,"U+FEFF(interior)":40,"U+0085(NEL)+U+FEFF(interior)":26,"U+2028(LS)+U+FEFF(interior)":17,"U+0085(NEL)+U+2028(LS)+U+FEFF(interior)":6}
+cases where the launcher ends with a variable === "1" that the guard does not see as "1" (guard would say OK, launcher arms): 6
+守卫工具本体(真实库 + 合成 env):
+  UTXO_AUTOSPLIT_ON_START=1                   -> GUARD env-switch:UTXO_AUTOSPLIT_ON_START MISMATCH set in file (value not printed)
+  UTXO_AUTOSPLIT_ON_START<U+0085>=1           -> GUARD env-switch:UTXO_AUTOSPLIT_ON_START OK absent
+真实 PowerShell 启动器正则+Trim(): UTXO_AUTOSPLIT_ON_START<U+0085>=1 -> name=[UTXO_AUTOSPLIT_ON_START] value=[1] (name is exactly UTXO_AUTOSPLIT_ON_START after .Trim(): True)
+编码(同内容 UTF-8 vs UTF-16LE 带 BOM):
+  守卫 UTF-8:      GUARD env-switch:UTXO_AUTOSPLIT_ON_START MISMATCH set in file
+  守卫 UTF-16LE:   GUARD env-switch:UTXO_AUTOSPLIT_ON_START OK absent
+  真实启动器循环 UTF-8:      UTXO_AUTOSPLIT_ON_START = [1]
+  真实启动器循环 UTF-16LE:   UTXO_AUTOSPLIT_ON_START = [1]
+
+## 8. CRON_REGISTRY 对账盲区(nwt-registry-blindspot-probe.mjs; discoverStartCalls/checkRegistry 逐字移植; 目标 = f0c45290 的真实 index.js)
+真实 index.js 上: 规则发现 63 个; 导入且被调用但规则发现不了 72 个(其中 register*Routes/i18n/getConfig 等非启动项占多数); 裸副作用导入 0; 直接 setInterval/setTimeout 2 个; 动态 import() 10 个
+其中启动期相关的、未登记的: index.js:308-312(exchange expireStale/checkStaleDisputes/cleanupStaleOrphanAccepts/timeoutVerifying, 启动一次+30s 定时器), :874 autoStartIfEnabled(), :906/:912/:974/:988 broker 家族的 4 个动态导入 starter
+green F baseline: real index.js as is
+RED   A control: import { startBrandNewCron } + startBrandNewCron()  -> UNREGISTERED startBrandNewCron
+green B static import, verb "launch": launchPayoutSweeper()
+green C dynamic import destructure: const { startDynCron } = await import(...)
+green D namespace import: ns.startNsCron()
+green E direct timer in index.js: setInterval(() => sendMoney(), 1000)
+green G bare side-effect import (module starts a timer at import): import "./services/x.js"
+
+## 9. D26-scan v2.1(真实探针文件, 走真实遍历; 每次删除探针, git status 空)
+baseline ℹ tests 22 ℹ pass 22 ℹ fail 0
+B-control / A-data / C-blockline / D-tick / E1-regex-class / E3-mts / E4-jsx / E8-regex-star-return / E9-division / E10-regex-with-quote / E11-tpl-nested-regex : 全部 ℹ pass 21 ℹ fail 1 (被抓)
