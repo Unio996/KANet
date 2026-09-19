@@ -22,7 +22,10 @@ const { randomBytes } = await import('node:crypto');
 const {
   buildMarketGenesisTxJson, buildRegisterAppendTxJson, scriptPublicKeyFromHex, assertKaspadInputVersionRule,
 } = await import('./proto-tx-assembly.mjs');
-const { buildMarketSealTxJson, MARKET_SEAL_ROOTCLOSE_OUT_INDEX, MARKET_SEAL_TOKEN_OUT_INDEX } = await import('./proto-tx-assembly-settlement.mjs');
+const {
+  buildMarketSealTxJson, MARKET_SEAL_ROOTCLOSE_OUT_INDEX, MARKET_SEAL_TOKEN_OUT_INDEX,
+  buildCloseCommitTxJson, CLOSE_COMMIT_ROOTCLOSE_OUT_INDEX,
+} = await import('./proto-tx-assembly-settlement.mjs');
 const {
   computeMarketGenesisArtifacts, computeShardLeafRedeemScript, computeKttGenesisArtifact,
   loadProtocolConstants, loadFeeProfileCap, p2sh,
@@ -183,6 +186,92 @@ t('⑤真实tx算出的output covenant_id与builder返回的rootCloseCovId/token
     } catch (e) { threw = e; }
     if (!threw) throw new Error('应该fail-closed throw, 却成功返回了');
     if (!/fail-closed/.test(threw.message)) throw new Error(`throw了但不是fail-closed错误: ${threw.message}`);
+  });
+}
+
+// ── ③ close_commit: RootClose当前UTXO=market_seal产出的genesis输出, sealedState=bet2.newState ──
+{
+  const rootCloseOutpoint = { txid: sealBuilt.expectedTxid, vout: MARKET_SEAL_ROOTCLOSE_OUT_INDEX };
+  const NEW_WINNING_SIDE = 0; // YES赢(测试用值, D-021合规: 非真实市场结果)
+  const NEW_PAYOUT_ROOT_HEX = 'ab'.repeat(32); // 测试夹具占位值, 非真实off-chain算出的merkle root
+  const closeCommitCap = loadFeeProfileCap('close_commit');
+  const closeCommitFeeUtxo = { txid: 'ee'.repeat(32), vout: 1, value: 10_000_000_000n, scriptPublicKeyHex: relaySpkHex };
+
+  let closeCommitBuilt;
+  t('①close_commit buildCloseCommitTxJson 真实构造成功([rootClose,fee]两输入, 委员5槽同签)', () => {
+    closeCommitBuilt = buildCloseCommitTxJson({
+      kaspa, network: 'mainnet',
+      marketId: MARKET_ID, committeePubkeyHex: genesisArtifacts.committeePubkeyHex,
+      committeePrivkeyEnvelope: genesisArtifacts.committeePrivkeyEnvelope,
+      deadlineMs: DEADLINE_MS, rootCloseTmplHash: genesisArtifacts.rootCloseTmplHash,
+      rootCloseOutpoint, rootCloseCovId: sealBuilt.rootCloseCovId, sealedState: currentState,
+      newWinningSide: NEW_WINNING_SIDE, newPayoutRootHex: NEW_PAYOUT_ROOT_HEX,
+      tokPrefixHex, tokSuffixHex, feeUtxo: closeCommitFeeUtxo, relayChangeScriptPublicKeyHex: relaySpkHex,
+      absFeeCapSompi: closeCommitCap,
+    });
+    if (!closeCommitBuilt.txJson || !closeCommitBuilt.expectedTxid) throw new Error('返回形状不对');
+    if (closeCommitBuilt.signInputIndices.length !== 1 || closeCommitBuilt.signInputIndices[0] !== 1) throw new Error(`两输入形状下fee应该在index=1, 实际signInputIndices=${JSON.stringify(closeCommitBuilt.signInputIndices)}`);
+  });
+
+  t('②relay真代码能反序列化+extractTxShape+validateFixedValueOutputs通过(续约非genesis)', () => {
+    const tx = kaspa.Transaction.deserializeFromSafeJSON(closeCommitBuilt.txJson);
+    const shape = extractTxShape(tx);
+    const fv = validateFixedValueOutputs({ outputs: shape.outputs, genesisOutputIndices: [], continuationOutputIndices: [CLOSE_COMMIT_ROOTCLOSE_OUT_INDEX] });
+    if (!fv.ok) throw new Error(`relay真代码拒绝: ${fv.reason}`);
+  });
+
+  t('③relay真签名(fee输入)后finalize, txid与expectedTxid一致', () => {
+    const tx = kaspa.Transaction.deserializeFromSafeJSON(closeCommitBuilt.txJson);
+    signOnlyDeclaredInputs({ tx, signInputIndices: closeCommitBuilt.signInputIndices, privateKey: priv, kaspa });
+    tx.finalize();
+    const r = assertFinalTxid(tx, closeCommitBuilt.expectedTxid);
+    if (!r.ok) throw new Error(`签名后txid=${r.actualTxid} != 预期${closeCommitBuilt.expectedTxid}`);
+  });
+
+  t('③b(账本1465节点规则镜像) 两输入交易每个input满足v2.0.1 RPC层sigOpCount/computeBudget一致性规则', () => {
+    const tx = kaspa.Transaction.deserializeFromSafeJSON(closeCommitBuilt.txJson);
+    assertKaspadInputVersionRule(tx, 'close_commit-e2e');
+  });
+
+  t('④独立复算Σ真实inputs.utxo.amount − Σ真实outputs.value必须【恰好】等于built.netLoss(账本1455纪律)', () => {
+    const tx = kaspa.Transaction.deserializeFromSafeJSON(closeCommitBuilt.txJson);
+    let sumIn = 0n; for (const inp of tx.inputs) sumIn += BigInt(inp.utxo.amount);
+    let sumOut = 0n; for (const out of tx.outputs) sumOut += BigInt(out.value);
+    const impliedFee = sumIn - sumOut;
+    if (impliedFee !== closeCommitBuilt.netLoss) throw new Error(`隐含手续费(Σin-Σout=${impliedFee})与built.netLoss(${closeCommitBuilt.netLoss})不一致`);
+  });
+
+  t('⑤真实tx算出的output covenant_id(RootClose续约)与builder返回的rootCloseContinuationCovId一致且等于sealBuilt.rootCloseCovId(covenant_id不变)', () => {
+    const tx = kaspa.Transaction.deserializeFromSafeJSON(closeCommitBuilt.txJson);
+    const realCovId = String(tx.outputs[CLOSE_COMMIT_ROOTCLOSE_OUT_INDEX].covenant.covenantId);
+    if (realCovId.toLowerCase() !== closeCommitBuilt.rootCloseContinuationCovId.toLowerCase()) throw new Error(`covenant_id不一致: 真实=${realCovId} 返回=${closeCommitBuilt.rootCloseContinuationCovId}`);
+    if (realCovId.toLowerCase() !== sealBuilt.rootCloseCovId.toLowerCase()) throw new Error(`close_commit不应该改变RootClose自己的covenant_id: 续约后=${realCovId} market_seal时=${sealBuilt.rootCloseCovId}`);
+  });
+
+  t('⑥fail-closed: deadline_ms尚未过去(未来时间戳)必须被构造时拒绝, 不留prepared残留', () => {
+    let threw = null;
+    try {
+      buildCloseCommitTxJson({
+        kaspa, network: 'mainnet',
+        marketId: MARKET_ID, committeePubkeyHex: genesisArtifacts.committeePubkeyHex,
+        committeePrivkeyEnvelope: genesisArtifacts.committeePrivkeyEnvelope,
+        deadlineMs: Date.now() + 3600_000, // 故意未来时间戳
+        rootCloseTmplHash: genesisArtifacts.rootCloseTmplHash,
+        rootCloseOutpoint, rootCloseCovId: sealBuilt.rootCloseCovId, sealedState: currentState,
+        newWinningSide: NEW_WINNING_SIDE, newPayoutRootHex: NEW_PAYOUT_ROOT_HEX,
+        tokPrefixHex, tokSuffixHex, feeUtxo: closeCommitFeeUtxo, relayChangeScriptPublicKeyHex: relaySpkHex,
+        absFeeCapSompi: closeCommitCap,
+      });
+    } catch (e) { threw = e; }
+    if (!threw) throw new Error('deadline未过去时应该fail-closed throw, 却成功返回了');
+    if (!/fail-closed/.test(threw.message)) throw new Error(`throw了但不是fail-closed错误: ${threw.message}`);
+  });
+
+  const { decryptCommitteePrivkey } = await import('./proto-committee-key.mjs');
+  t('⑦委员私钥不进返回值(检查closeCommitBuilt的每个字段都不含明文私钥子串)', () => {
+    const privHex = decryptCommitteePrivkey(genesisArtifacts.committeePrivkeyEnvelope);
+    const serialized = JSON.stringify(closeCommitBuilt, (_k, v) => (typeof v === 'bigint' ? v.toString() : v));
+    if (serialized.includes(privHex)) throw new Error('committeePrivkeyEnvelope解密后的明文私钥出现在了builder返回值里');
   });
 }
 

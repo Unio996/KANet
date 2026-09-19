@@ -39,6 +39,20 @@ const byteN = (n) => ({ kind: 'byte', value: n });
 const hex = (buf) => '0x' + Buffer.from(buf).toString('hex');
 const p2sh = (bc) => 'aa20' + Buffer.from(blake2b(Uint8Array.from(bc), { dkLen: 32 })).toString('hex') + '87';
 
+/**
+ * RootClose ctor的committee_hash(R8): blake2b(c0Pk‖c1Pk‖c2Pk‖c3Pk‖c4Pk) —— v0单操作员5槽同一把
+ * 公钥, 5次拼接同一个pubkeyHex(不是5把不同的委员公钥, 见RootClose.sil文件头R8注释)。原本在
+ * computeMarketGenesisArtifacts/computeRootCloseGenesisArtifact内联重复两遍(账本1497批4提取为
+ * 共享helper, 供close_commit builder做签名前fail-closed校验复用, 不重复这段计算)。
+ * @param {string} committeePubkeyHex 32字节hex(无0x)
+ * @returns {string} 32字节hex(无0x)
+ */
+export function computeCommitteeHash(committeePubkeyHex) {
+  const pubkeyBuf = Buffer.from(committeePubkeyHex, 'hex');
+  if (pubkeyBuf.length !== 32) throw new Error(`computeCommitteeHash: committee pubkey must be 32 bytes, got ${pubkeyBuf.length}`);
+  return Buffer.from(blake2b(Uint8Array.from(Buffer.concat([pubkeyBuf, pubkeyBuf, pubkeyBuf, pubkeyBuf, pubkeyBuf])), { dkLen: 32 })).toString('hex');
+}
+
 let _anchorsCache = null;
 /**
  * 读协议常量(一次性计算, 全市场复用)——不在这里重算, 只读 scripts/proto-v0-template-anchors.mjs
@@ -157,10 +171,7 @@ export async function computeMarketGenesisArtifacts({ marketId, minBet, deadline
   const { encryptCommitteePrivkey } = await import('./proto-committee-key.mjs');
   const { privKeyHex, pubkeyHex } = await gen();
   const committeePrivkeyEnvelope = encryptCommitteePrivkey(privKeyHex);
-  const pubkeyBuf = Buffer.from(pubkeyHex, 'hex');
-  if (pubkeyBuf.length !== 32) throw new Error(`computeMarketGenesisArtifacts: committee pubkey must be 32 bytes, got ${pubkeyBuf.length}`);
-  const committeeHashBuf = Buffer.from(blake2b(Uint8Array.from(Buffer.concat([pubkeyBuf, pubkeyBuf, pubkeyBuf, pubkeyBuf, pubkeyBuf])), { dkLen: 32 }));
-  const committeeHash = committeeHashBuf.toString('hex');
+  const committeeHash = computeCommitteeHash(pubkeyHex);
 
   // ②③ RootClaim/RefundClaim 模板 hash——提取为共享 helper(见下 computeRootClaimAndRefundClaimTmplHashes),
   //   供 computeRootCloseGenesisArtifact(market_seal 用, 实现计划v0.2 §2.1)复用, 不重复这段 ctor
@@ -390,8 +401,7 @@ export function computeRootCloseGenesisArtifact({ marketId, committeePubkeyHex, 
   const { token_tmpl_hash } = loadProtocolConstants();
   const { rootClaimTmplHash, refundClaimTmplHash } = computeRootClaimAndRefundClaimTmplHashes({ marketId });
 
-  const pubkeyBuf = Buffer.from(committeePubkeyHex, 'hex');
-  const committeeHash = Buffer.from(blake2b(Uint8Array.from(Buffer.concat([pubkeyBuf, pubkeyBuf, pubkeyBuf, pubkeyBuf, pubkeyBuf])), { dkLen: 32 })).toString('hex');
+  const committeeHash = computeCommitteeHash(committeePubkeyHex);
 
   const ctor = [
     ctorBytes32V100(committeeHash), ctorIntV100(deadlineMs),
@@ -404,7 +414,16 @@ export function computeRootCloseGenesisArtifact({ marketId, committeePubkeyHex, 
   if (artifact.templateHashHex !== rootCloseTmplHash) {
     throw new Error(`computeRootCloseGenesisArtifact: fail-closed — 编译出的 RootClose 模板hash(${artifact.templateHashHex}) != 已存 rootCloseTmplHash(${rootCloseTmplHash})——committeePubkeyHex/deadlineMs/marketId 与落库值已不自洽`);
   }
-  return { script: artifact.script, scriptPubKeyHex: '0x' + p2sh(artifact.script), stateLayout: artifact.stateLayout, rootClaimTmplHash, refundClaimTmplHash };
+  return {
+    script: artifact.script, scriptPubKeyHex: '0x' + p2sh(artifact.script), stateLayout: artifact.stateLayout,
+    rootClaimTmplHash, refundClaimTmplHash, committeeHash,
+    // 账本1497批4(close_commit): 与computeKttGenesisArtifact同理(账本1439)——entries是这次编译产物
+    // 的另一个切面, 不该让调用方(buildCloseCommitTxJson)为了拿到close_commit的entryAbi用手写ctor
+    // 再编译一次(容易两次ctor不一致)。close_commit/refund_flip/convert_to_claim/convert_to_refundclaim
+    // 四个entry的ABI不依赖state(只依赖ctor早期字段committee_hash/deadline_ms/两个tmplHash/token_tmpl_hash),
+    // 用current/new任一次调用返回的entries都一样。
+    entries: compiled._raw.contracts.RootClose.entries,
+  };
 }
 
 export { p2sh, hex, ZERO32 };

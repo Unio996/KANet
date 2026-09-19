@@ -50,6 +50,10 @@
     "market_seal": {
       "cap": "100000000",
       "_source": "账本1491/实现计划v0.4(docs/2026-09-16-j2-proto-v0-settlement-implementation-plan-v0.1.md) — 沿用register_append同量级cap(1.0 KAS)：NWT simnet真实测得convert_to_rootclose(封盘)的requiredFee约39,678,700 sompi(设计文档§0.4)、节点侧storageMass约385,410(§0.14b)，与register_append同数量级，暂借同一个cap，未来若有独立的market_seal专属mass/fee估算provenance应替换为该文档的具体数字"
+    },
+    "close_commit": {
+      "cap": "100000000",
+      "_source": "账本1497/实现计划v0.5批4 — close_commit只有[RootClose,fee]两输入、RootClose自身value不变(同market_seal/register_append同量级构造复杂度)，暂借同一个cap(1.0 KAS)，未来有独立的close_commit专属mass/fee估算provenance应替换为该文档的具体数字"
     }
   }
 }
