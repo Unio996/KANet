@@ -9,6 +9,8 @@
 #   * driver switches ON in this env only (PROTO_DRIVER_ENABLED / PROTO_SETTLEMENT_DRIVER_ENABLED); PROTO_RELAY_ID is added AFTER the proto- relay exists
 #     (edit the env file, then `restart`: it keeps the DB);
 #   * stop = by recorded PID after the command line is verified; the console's relay children are stopped by parent PID; never by name.
+# RUN IT WITH ITS OUTPUT REDIRECTED TO A FILE (`... *> out.txt`), never through a pipe (`| cut`): the node and the console it starts inherit the pipe and the reader
+#   then waits for EOF until they exit (found on the first real run).
 # Memory gate: node-up refuses at commit memory >= 80% (report first, then -SkipMemoryGate only if Bettor says so).
 [CmdletBinding()]
 param(
@@ -43,7 +45,7 @@ function Node-Up {
   if ($other.Count) { Die 2 "a simnet kaspad is already running (pid $($other[0].ProcessId)); not starting a second" }
   foreach ($p in $P2P, $GRPC, $BORSH, $JSONP) { if ((Get-Listener $p).Count) { Die 2 "simnet port $p is already in use" } }
   New-Item -ItemType Directory -Force -Path $NodeDir | Out-Null
-  $a = @('--simnet', "--appdir=$NodeDir", '--utxoindex', '--enable-unsynced-mining', "--listen=127.0.0.1:$P2P", "--rpclisten=127.0.0.1:$GRPC", "--rpclisten-borsh=127.0.0.1:$BORSH", "--rpclisten-json=127.0.0.1:$JSONP")
+  $a = @('--simnet', "--appdir=$NodeDir", '--utxoindex', '--enable-unsynced-mining', '--disable-upnp', "--listen=127.0.0.1:$P2P", "--rpclisten=127.0.0.1:$GRPC", "--rpclisten-borsh=127.0.0.1:$BORSH", "--rpclisten-json=127.0.0.1:$JSONP")
   $pr = Start-Process -FilePath $KaspadExe -ArgumentList $a -PassThru -WindowStyle Hidden -RedirectStandardOutput (Join-Path $Root 'node-stdout.log') -RedirectStandardError (Join-Path $Root 'node-stderr.log')
   $pr.Id | Out-File $NodePid -Encoding ascii
   for ($i = 0; $i -lt 60 -and -not (Get-Listener $BORSH).Count; $i++) { Start-Sleep -Seconds 1 }
