@@ -18,7 +18,9 @@ param(
   [string]$Tree = '',
   [int]$ConsolePort = 3299,
   [string]$Root = 'D:\kanet-tn12\scratch\_simnet_console',
-  [switch]$WithNode, [switch]$DryRun, [switch]$SkipMemoryGate
+  [switch]$WithNode, [switch]$DryRun, [switch]$SkipMemoryGate,
+  [switch]$WithProtoRelay,          # after the console is up: create the throw-away simnet proto- relay, set PROTO_RELAY_ID, restart, wait for the settlement-driver start line
+  [string]$ExpectHead = ''          # refuse unless `git -C <Tree> rev-parse HEAD` starts with this
 )
 $ErrorActionPreference = 'Stop'
 $ProdRoot = 'D:\kanet-tn12'; $KaspadExe = 'D:\rusty-kaspa-v201\kaspad.exe'
@@ -63,6 +65,7 @@ function Console-Start([string]$run, [string]$treeFull) {
   # scrub anything inherited from the launching shell that could point the console at real money paths; the env file below sets what is wanted
   foreach ($n in 'PROTO_RELAY_ID', 'BROKER_ENABLED', 'BROKER_RELAY_ID', 'UTXO_AUTOSPLIT_ON_START', 'BROADCASTER_UTXO_MAINTAIN', 'TELEGRAM_BOT_TOKEN', 'KANET_CONSOLE_ENTRY', 'ADMIN_SECRET_FUNDS', 'ADMIN_SECRET_SYSTEM_ACTIONS', 'FAUCET_RELAY_ID', 'POOL_SEEDER_MAKER_RELAY', 'MINING_RELAY_ID') { [Environment]::SetEnvironmentVariable($n, $null, 'Process') }
   Get-Content (Join-Path $run 'kanet.simnet.env') | ForEach-Object { if ($_ -match '^\s*#' -or $_ -match '^\s*$') { return }; if ($_ -match '^([^=]+)=(.*)$') { [Environment]::SetEnvironmentVariable($matches[1].Trim(), $matches[2], 'Process') } }
+  foreach ($f in 'console-stdout.log', 'console-stderr.log') { $lp = Join-Path $run $f; if (Test-Path $lp) { Move-Item -LiteralPath $lp -Destination ($lp -replace '\.log$', ('.prev-' + (Get-Date -Format 'HHmmss') + '.log')) } }
   $pr = Start-Process -FilePath node.exe -ArgumentList @((Join-Path $treeFull 'kasia-console\src\index.js')) -WorkingDirectory $treeFull -PassThru -WindowStyle Hidden `
     -RedirectStandardOutput (Join-Path $run 'console-stdout.log') -RedirectStandardError (Join-Path $run 'console-stderr.log')
   $pr.Id | Out-File (Join-Path $run 'console.pid') -Encoding ascii
@@ -92,6 +95,7 @@ $treeFull = [IO.Path]::GetFullPath($Tree).TrimEnd('\')
 if ($treeFull -eq $ProdRoot -or $treeFull -like "$ProdRoot\kasia-console*") { Die 2 'Tree must not be the mainnet checkout' }
 if (-not (Test-Path (Join-Path $treeFull 'kasia-console\src\index.js'))) { Die 2 "Tree has no kasia-console\src\index.js: $treeFull" }
 if (-not (Test-Path (Join-Path $treeFull 'kasia-console\node_modules'))) { Die 2 "Tree has no kasia-console\node_modules (no junction, no copy: use a tree that already has its own): $treeFull" }
+if ($ExpectHead) { $h = (& git -C $treeFull rev-parse HEAD).Trim(); if (-not $h.StartsWith($ExpectHead)) { Die 2 "Tree HEAD $h does not start with expected $ExpectHead" }; if ((& git -C $treeFull status --porcelain | Measure-Object).Count -gt 0) { Die 2 'Tree has uncommitted changes (the code under test must be exactly the expected commit)' } }
 if ((Get-Listener $ConsolePort).Count) { Die 2 "console port $ConsolePort is already in use" }
 $run = Join-Path $rootFull ('run-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
 $hex = { $b = New-Object byte[] 32; $g = [Security.Cryptography.RandomNumberGenerator]::Create(); $g.GetBytes($b); $g.Dispose(); -join ($b | ForEach-Object { '{0:x2}' -f $_ }) }
@@ -112,5 +116,16 @@ $net = Check-Network (Join-Path $treeFull 'kasia-console')
 $dbLine = if (Test-Path "$run\console-stdout.log") { (Select-String -LiteralPath "$run\console-stdout.log" -Pattern '^\[db\] path=' -List | Select-Object -First 1).Line } else { '' }
 $dbOk = $dbLine -like "*$(($run -replace '\\','\'))\console.simnet.db*"
 Write-Host "console pid=$id listening=$ok network-simnet=$net db-line-is-fresh-run-db=$dbOk"
-if ($ok -and $net -and $dbOk) { Write-Host "SIMNET-ENV-OK run=$run port=$ConsolePort env=$run\kanet.simnet.env"; exit 0 }
+if ($ok -and $net -and $dbOk) {
+  Write-Host "SIMNET-ENV-OK run=$run port=$ConsolePort env=$run\kanet.simnet.env"
+  if ($WithProtoRelay) {
+    Push-Location $treeFull; try { $ErrorActionPreference = 'Continue'; $mk = & node.exe (Join-Path $PSScriptRoot 'simnet-make-proto-relay.mjs') $run 2>&1 | Out-String; $mkc = $LASTEXITCODE } finally { Pop-Location }
+    Write-Host ($mk.Trim()); if ($mkc -ne 0) { Write-Host 'PROTO-RELAY-FAIL: stopping the console'; Console-Down $run; exit 3 }
+    Console-Down $run; $id2 = Console-Start $run $treeFull
+    $drv = $null; for ($i = 0; $i -lt 60 -and -not $drv; $i++) { Start-Sleep -Seconds 1; if (Test-Path "$run\console-stdout.log") { $drv = Select-String -LiteralPath "$run\console-stdout.log" -Pattern '\[proto-settlement-driver\] started' -List | Select-Object -First 1 } }
+    if ($drv) { Write-Host "DRIVER-LINE $($drv.Line)" } else { Write-Host 'DRIVER-LINE-MISSING: no [proto-settlement-driver] started line within 60 s (console left running; read console-stdout.log)' }
+    Write-Host "console restarted pid=$id2 listening=$((Get-Listener $ConsolePort).Count -gt 0)"
+  }
+  exit 0
+}
 Write-Host 'SIMNET-ENV-FAIL: stopping the console I just started'; Console-Down $run; exit 3
