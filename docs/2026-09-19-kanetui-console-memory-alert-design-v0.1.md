@@ -1,14 +1,23 @@
-# 设计稿：系统提交内存检测（memory-watch）v0.2 —— 宿主 = P2 常驻哨兵，不再是 console 模块
+# 设计稿：系统提交内存检测（memory-watch）v0.3 —— 宿主 = P2 常驻哨兵，不再是 console 模块
 
 > **Status**: CURRENT
 >
-> 起草 KANet-UI · 2026-09-19 · 文件名沿用 `…console-memory-alert-design-v0.1.md`（账本已按此路径引用），**正文即 v0.2**；v0.1（console 内模块）的差异见下表。依据账本 **(1531)**（死机复盘 P3）、**(1532)**、**(1539)**（NWT 红队审全采纳）、**(1543)**（Bettor 已升 Owner、装 80/85/92% 监视）；NWT 红队审原文 `docs/provenance/2026-09-19-nwt-p2-p3-redteam/README.md`（`ba660ae0`）§四。实现草案**就是 P2 runbook 附录 A 脚本的一部分**（`docs/2026-09-19-kanetui-mainnet-boot-autostart-scheduled-task-runbook-v0.1.md`，正文即 v0.2），本页只写设计与验收判据。
+> 起草 KANet-UI · 2026-09-19 · 文件名沿用 `…console-memory-alert-design-v0.1.md`（账本已按此路径引用），**正文即 v0.3**；v0.1（console 内模块）→ v0.2（改宿主）→ v0.3（NWT 复审 `9b2e7943`：P3 设计与状态机 GREEN + 4 条 SHOULD）的差异见下表。依据账本 **(1531)**（死机复盘 P3）、**(1532)**、**(1539)**（NWT 红队审全采纳）、**(1543)**（Bettor 已升 Owner、装 80/85/92% 监视）；NWT 红队审原文 `docs/provenance/2026-09-19-nwt-p2-p3-redteam/README.md`（`ba660ae0`）§四。实现草案**就是 P2 runbook 附录 A 脚本的一部分**（`docs/2026-09-19-kanetui-mainnet-boot-autostart-scheduled-task-runbook-v0.1.md`，正文即 v0.3），本页只写设计与验收判据。
 >
 > **执行门**：**只写设计**。落码 = P2 脚本 `scripts/mainnet-boot-sequence.ps1` 的 4.1（Bettor 批 → NWT 审 diff）——**不改 console 一行，不需要 console 重启**，所以不再受"并入下一次 console 重启"（原 M-5）约束。脚本的 `-WatchOnly` 模式使它**在计划任务注册前**就能在普通用户会话里跑起来（只检测告警、不起任何进程）——**在生产检出上跑需要 Bettor 明说**（会往 `logs\mainnet\boot\` 写日志与锁文件）。
 >
 > **写作依 D-021**：不含密钥、余额、地址；payload/日志里的进程只带**名字、PID、私有内存 GB**，**不带命令行**。
 
-## v0.2 相对 v0.1 的改动（对照 NWT 红队审 §四）
+## v0.3 相对 v0.2 的改动（NWT 复审 `9b2e7943` §六：**P3 设计与状态机 GREEN，四条 SHOULD 全部采纳并已实现、已测**）
+
+| NWT 复审条目 | 处置 | 测试 |
+|---|---|---|
+| SHOULD-1 CIM 没有操作超时：内存耗尽时 WMI 可能**挂住而不报错**，30 s 循环卡在采样上，**同一循环里的死亡哨兵一起失明**；"没有告警"与"哨兵已死"不可分 | `Get-CimInstance -OperationTimeoutSec 10`；**每个哨兵 tick 开头先写 `sentinel-heartbeat`**（看文件 mtime；先于采样与所有职责），M-6 的消费者据其新旧判断哨兵是否还活着（§5）；死亡检查在采样之前做（互不阻塞） | 控制流测试 F1b（心跳文件被哨兵写出）、`heartbeat-file-written` |
+| SHOULD-2 耗尽类错误匹配依赖英文文案 | **加 HRESULT 数值匹配**：沿异常链（含 `InnerException`）匹配 `E_OUTOFMEMORY 0x8007000E`、`0x800705AF`（页面文件太小）、`0x80070008`（存储不足）、`0x800705AA`（系统资源不足），另匹配 `OutOfMemoryException`、Win32 错误码 1455/8/1450 与英文文案；**区域无关** | `exhaustion-by-HRESULT-0x8007000E-with-foreign-message`（消息是西班牙语、仍判耗尽）、另三个 HRESULT、`inner-exception-chain`、`not-triggered-by-unrelated-error`、`sample-fail-exhaustion-class-by-HRESULT-alerts-9310` |
+| SHOULD-3 哨兵自身内存占用没测：一个 5.1 常驻 PowerShell 每 30 s 做 CIM + `Get-Process \| Sort`，2880 次/天，句柄/内存缓增有前科；"一个内存检测器不该成为内存增长者" | **`SAMPLE` 行带哨兵自己的 `sentinel_ws=…MB handles=…`**；R0 要求 `-WatchOnly` 挂 ≥ 数小时，验收"不单调增长"（P2 页 4.4 R0）。**这条我只做了度量，"长时间不增长"本身还没测**（§6） | `memory-sample-sane`（含 selfMB/selfHandles）、`memory-tick-smoke…with-sentinel-self-footprint` |
+| SHOULD-4 内存锁失败后不重试：`-WatchOnly` 会话之后结束，启动哨兵**永久没有内存检测**且不告警 | **每个哨兵 tick 重试取锁**（几乎零成本），取到写一行 `MEMWATCH-TAKEOVER: boot sentinel now holds the memory watch …` | 控制流测试 F12（外部持锁、第 3 次 sleep 后释放 ⇒ 日志出现 `MEMWATCH-TAKEOVER` 且此前没有 `started in boot sentinel`）；**变异"锁永不重试"被 F12 抓红** |
+
+## v0.2 相对 v0.1 的改动（对照 NWT 红队审 §四；已并入下文）
 
 | NWT 条目 | 处置 |
 |---|---|
@@ -58,13 +67,14 @@
 ### 2.1 宿主与接线
 - **宿主**：P2 脚本 `mainnet-boot-sequence.ps1` 的常驻哨兵循环（Phase B 末尾），每 tick 在 `try/catch` 内调 `Invoke-MemoryWatchTick`；**单次异常永不使循环退出**。
 - **`-WatchOnly` 模式**：只跑内存检测，**不做任何启动动作**，可在**普通用户会话**运行、不需要计划任务/提权（事件源没注册时只写文件日志）。用法：`powershell -File scripts\mainnet-boot-sequence.ps1 -WatchOnly`。
-- **单实例**：独占文件锁 `logs\mainnet\boot\memory-watch.lock`：同一时刻只有一个检测器（启动哨兵**或**一个 `-WatchOnly` 会话）；拿不到锁的一方——`-WatchOnly` 退出 10；启动哨兵则跳过内存检测、记 `boot-history.log`（不重复告警）。
+- **单实例**：独占文件锁 `logs\mainnet\boot\memory-watch.lock`：同一时刻只有一个检测器（启动哨兵**或**一个 `-WatchOnly` 会话）；拿不到锁的一方——`-WatchOnly` 退出 10；启动哨兵**每个 tick 重试取锁**（v0.3，SHOULD-4），取到写 `MEMWATCH-TAKEOVER`；重试期间不重复告警。
+- **心跳（v0.3，SHOULD-1）**：哨兵每 tick **先**写 `logs\mainnet\boot\sentinel-heartbeat`（内容为时间戳，看 mtime）；`-WatchOnly` 循环同样写。
 - **不碰 console、不碰 DB、不 spawn 子进程、不动主网 env**。
 
 ### 2.2 采样（in-process）
-- `Get-CimInstance Win32_OperatingSystem`：提交上限 = `TotalVirtualMemorySize`（KB）；已提交 ≈ 上限 − `FreeVirtualMemory`；占比 = 已提交/上限。
+- `Get-CimInstance -ClassName Win32_OperatingSystem -OperationTimeoutSec 10`（**v0.3：带 10 s 操作超时**，防 WMI 在耗尽时挂住）：提交上限 = `TotalVirtualMemorySize`（KB）；已提交 ≈ 上限 − `FreeVirtualMemory`；占比 = 已提交/上限。
 - **口径已实测对过**（2026-09-19）：CIM **46.7%**（上限 89.6 GB）vs 性能计数器 `\Memory\% Committed Bytes In Use` **47.5%**，差约 1 个百分点，对 85% 线无影响；`Win32_OperatingSystem` 属性名与区域无关（性能计数器名随系统语言本地化）。不用 `wmic`（Win11 新版本已移除）。
-- 前 5 名：`Get-Process | Sort PrivateMemorySize64 -Desc | Select -First 5`，**只取名字、PID、私有内存 GB**。
+- 前 5 名：`Get-Process | Sort PrivateMemorySize64 -Desc | Select -First 5`，**只取名字、PID、私有内存 GB**；另取**哨兵自己**的 `PrivateMemorySize64` 与 `HandleCount`（v0.3）。
 - 校验：上限 > 0、占比 ∈ (0,100]，否则当作采样失败（**不写占比、不用 0 冒充读数**）。
 
 ### 2.3 状态机（补全后的转移表；纯函数 `Get-MemoryTransition`）
@@ -91,7 +101,7 @@
 - 状态只在进程内存里：检测器重启后重新武装（若重启时仍高位会再报一次——想要的行为）。
 
 ### 2.4 采样失败也是信号
-- **内存耗尽类错误**（`OutOfMemory`、`1455`、`not enough memory`、`not enough storage`、`insufficient system resources`）**首次**出现 ⇒ Error 事件 9310（按 CRIT 处理），不等 3 次；
+- **内存耗尽类错误**首次出现 ⇒ Error 事件 9310（按 CRIT 处理），不等 3 次。**判定（v0.3）沿异常链同时匹配：`OutOfMemoryException`；数值 HRESULT `0x8007000E`/`0x800705AF`/`0x80070008`/`0x800705AA`；Win32 码 1455/8/1450；英文文案 `OutOfMemory|1455|not enough memory|not enough storage|insufficient system resources`**——数值匹配使它**不依赖系统语言**；
 - 其它失败连续 **3** 次 ⇒ Warning 9311（每段失败期只报一次）；恢复 ⇒ Information 9312（含 `blindMs`）；
 - 每次失败写一行 `SAMPLE-FAILED n=…: <错误>` 到 `memory-watch.log`。
 
@@ -110,7 +120,7 @@
 | 9312 | Information | 采样恢复（带 `blindMs`） |
 | 9313 | Error | 配置非法，检测被禁用 |
 
-每 10 个 tick（默认 5 分钟）一行 `SAMPLE commit=…% used=…GB limit=…GB physFree=…GB top=name:pid:GB,…`（**给复盘留曲线**；一天约 288 行）。
+每 10 个 tick（默认 5 分钟）一行 `SAMPLE commit=…% used=…GB limit=…GB physFree=…GB top=name:pid:GB,… sentinel_ws=…MB handles=…`（**给复盘留曲线**；一天约 288 行）。
 
 ### 2.6 配置（脚本参数，全部有默认；只写键名，不动主网 env）
 `-MemWarnPct 85`、`-MemCritPct 92`、`-MemClearPct 80`、`-MemCritClearPct 88`、`-MemRepeatSec 1800`、`-MemEscalatePp 5`、`-SentinelTickSec 30`。
@@ -173,11 +183,12 @@
    与 `Get-Content D:\kanet-tn12\logs\mainnet\boot\memory-watch.log -Tail 20`（后者不依赖事件源）。
 2. **Bettor 会话侧 Monitor**（本机会话可做，不改 console）：周期读 `memory-watch.log` 的 `STATE`/`SAMPLE-FAILED` 行，或订阅上面的事件查询；据 (1543) Bettor 已装 80/85/92% 监视——**本页的检测与它是两条独立信号**，谁先响都行。
 3. `events` 表**不再是消费点**（本设计不写库）。
+4. **哨兵存活判据（v0.3，SHOULD-1）**：`(Get-Date) - (Get-Item D:\kanet-tn12\logs\mainnet\boot\sentinel-heartbeat).LastWriteTime` 超过 **2 个 tick（默认 60 s）+ 余量** ⇒ 哨兵已死或已挂——此时"没有告警"**不再等于"没事"**。这一条写进 Bettor 的读数清单与会话侧 Monitor（Monitor 应对"心跳过期"也报警，而不只对 `STATE` 行）。
 
 ## 6. 开放项 / 风险
 - **P1 未解**：本页只缩短发现时间。**别把"有了 memory-watch"读成"不会再发生"**。
 - **`-WatchOnly` 在生产检出上跑**需要 Bettor 明说（写 `logs\mainnet\boot\`）。
 - **事件日志那一层依赖提权注册事件源**（P2 4.2）；没注册时只有文件日志。
-- **长时间运行的资源占用未测**（§4-D⑥）。
+- **长时间运行的资源占用未测**（§4-D⑥）：v0.3 只加了度量（`sentinel_ws`/`handles`），"不单调增长"要靠 R0 挂几个小时后读 `SAMPLE` 行来判——我没做。
 - **口径漂移**：CIM 与性能计数器差 ~1 pp；换机器/区域时以 CIM 为准。
 - **并发**：与 P2 哨兵的其它职责同循环、各自独立 `try/catch`；互不依赖。
