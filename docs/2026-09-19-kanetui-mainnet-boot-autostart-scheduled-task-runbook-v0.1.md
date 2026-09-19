@@ -246,7 +246,7 @@ console 没起来时 `events` 表写不了，所以三处都**不依赖 console*
 1. `[System.Management.Automation.Language.Parser]::ParseFile` 无错误；
 2. `powershell.exe -NoProfile -File scripts\mainnet-boot-sequence.ps1 -SelfTest` ⇒ **全 `PASS`、`SELFTEST failures=0`、退出码 0**（v0.5 草案已跑：**105 项 PASS**（v0.4 为 82；v0.5 新增 23 项：6 条真 node 子进程的父侧超时测试、N4-2 四条流程、N4-4 三条 + 一条真实时间节流向量、`Assert-UnderTmp` 七条直测、第二条真实内存读数向量 3 条——见 P3 页 1.2）——伪造进程夹具、15 条状态机向量 + 12 条变异、采样失败路径、HRESULT 数值匹配、`Get-LogTail` 真读 >8 KB 文件、2026-09-19 23:20 真实读数向量、**22 条控制流测试**）。`-SelfTest` **不起 kaspad / console 等业务进程**（v0.5 起会起**测试自己创建的**几个 node 子进程——含一个故意占 20 s 的忙循环，用来证明父侧超时——且只杀它们自己），且**开头强制断言所有可能被触碰的路径都在临时目录内**（见 §7-9 的事故教训）；
 3. **控制流测试的证明力**（NWT 要求"不能拿 PASS 条数当证据"，所以**用变异证明它们在守东西**）：真 `Invoke-BootMain` 跑在伪造原语之上，覆盖 F1 正常顺序（起 kaspad→守卫→t0 快照→console）、F2/F2b/F3/F4 四种注入（pid 写失败 / Phase A 晚期异常走外层 catch / Phase B 未捕获异常 / 探针每次抛错）⇒ **`Stop-Boot` 一次都没被调用、kaspad 上下文已发布、哨兵仍在跑**、F5 二进制哈希不符（起前失败：**Stop-Boot 21 且什么都没起**）、F6 守卫不符（不起 console、无快照、9065）、F7 t0 不稳（9403，console 仍起）、F8 树不干净（**真** `Start-ConsolePhase` 返回 null、9062）、F9–F11 出站 diff 自动跑在 console 之后且 `spent>0`⇒9402、不可读⇒9404 而非 9401、F12 内存锁被占后重试接管。**7 个脚本变异各自被对应流程测试抓红**：外层 catch 恒 exit（v0.2 的 bug 本身）⇒ F2b 红；Phase B 异常不包裹 ⇒ F3 红；探针异常中止门 ⇒ F4 红；t0 挪到 console 之后 ⇒ F1/F9 红；守卫结果被忽略 ⇒ F6 红；不可读 relay 报成 clean ⇒ F11 红；内存锁不重试 ⇒ F12 红。
-4. 工具测试（v0.5）：**`boot-guard-check.test.mjs` 125 项全过**（每张空表/每个开关/两个默认开开关/id 键/继承与文件覆盖/大小写/`KEY =1`；**17 种行形态与真实 PowerShell 启动器逐项差分**；清单钉住；**index.js 全部相对模块标识符 / 定时器 / 裸导入与声明面的反转对账（v0.5）**）+ **27 个变异各被抓红**；对活库实跑（D-027 置 false 之后）**42 项全 OK、退出码 0**（此前 41 项中恰 1 项 MISMATCH = `autotake`）。`boot-outbound-check.mjs` 对活节点 snap→diff = 0 变化，三个合成变异（删一个真 outpoint ⇒ exit 3；只多出一个（入账）⇒ exit 0 不误报；某 relay 不可读 ⇒ exit 4）。
+4. 工具测试（v0.5）：**`boot-guard-check.test.mjs` 126 项全过**（每张空表/每个开关/两个默认开开关/id 键/继承与文件覆盖/大小写/`KEY =1`；**17 种行形态与真实 PowerShell 启动器逐项差分**；清单钉住；**index.js 全部相对模块标识符 / 定时器 / 裸导入与声明面的反转对账（v0.5）**）+ **27 个变异各被抓红**；对活库实跑（D-027 置 false 之后）**42 项全 OK、退出码 0**（此前 41 项中恰 1 项 MISMATCH = `autotake`）。`boot-outbound-check.mjs` 对活节点 snap→diff = 0 变化，三个合成变异（删一个真 outpoint ⇒ exit 3；只多出一个（入账）⇒ exit 0 不误报；某 relay 不可读 ⇒ exit 4）。
 
 **中止/回滚**：任一失败 ⇒ 不合入。回滚 = 不合入/`git revert`，无运行时效果（脚本没被任何东西调用）。
 
@@ -1540,7 +1540,7 @@ setTimeout(() => process.exit(process.exitCode ?? 0), 300);
 - **N-2 第二类"缺省即开必须显式为关"**：`MINING_CONSOLIDATE_ENABLED` 源码是 `(env || 'true').trim().toLowerCase() !== 'false'`，**缺省即开**——守卫要求它**显式为 `false`**，缺席 = MISMATCH；`AUTO_BET_TICK_MS` 要求**显式 `0` 或 `DEMO_AUTOBETTER_OFF=1`**。
 - **N-3 / N4-3 有效环境 = 继承环境 ∪ 文件**：守卫在启动脚本进程里跑，其继承环境就是 console 将继承的；文件按**启动器的规则**解析：`^([^=]+)=(.*)$`、键 **.NET 意义上的 `Trim()`**（空白集 = `\t\n\v\f\r` + 空格 + U+0085 U+00A0 U+1680 U+2000–200A U+2028 U+2029 U+202F U+205F U+3000；**注意 JS 的 `trim()` 集不同：JS 有 U+FEFF 无 U+0085**）、值原样（`.` = 除 \n 外任意字符）、后写覆盖先写、空值 = 删除该变量、空名 = 启动器会抛错、名字大小写不敏感、CRLF / LF / **单独 CR** 分行。**文件解码**：按 BOM 认 UTF-8 / UTF-16 LE / UTF-16 BE（只消耗一个 BOM）；**无 BOM 且含 NUL ⇒ UNKNOWN；无 BOM 且设置行"名字"含非 ASCII ⇒ UNKNOWN**（见 §7-24）。
 - **活库实跑（只读，D-027 之后，2026-09-19 19:47Z）**：`checks=42 not_ok=0`、退出码 0（此前 41 项中恰 1 项 MISMATCH = `config:autotake`）；耗时 <1 s。
-- **测试 `boot-guard-check.test.mjs`：125 项全过**（夹具库/夹具 env 都在 `mkdtemp` 临时目录，写之前**断言目录在临时根下**）：v0.4 的 93 项中沿用的全部 + 声明一致性（gates / tables / configs / kinds / 证据）+ 真实 index.js 全量对账 + 真实模块里 `*_ENABLED`/`*_OFF` 名字全被守卫 + **15 种追加形状转红（NWT 的 A–G + 我的 H–P）** + 字符串/注释不误报 + 两个 STALE 方向 + **运行期**（真文件 OK / 未声明使用与 UNPARSED ⇒ 退出 3 / 读不到 ⇒ UNKNOWN）+ **N4-3：300 个种子固定的随机 env 文件对真实 PowerShell 启动器循环零分歧** + 4 条 U+0085 / U+2028 / U+FEFF 场景 + 7 条编码场景（UTF-16 LE/BE 带 BOM、无 BOM 的 NUL、非 ASCII 名字 / 注释 / 值、第二个 U+FEFF 是数据）。
+- **测试 `boot-guard-check.test.mjs`：126 项全过**（夹具库/夹具 env 都在 `mkdtemp` 临时目录，写之前**断言目录在临时根下**）：v0.4 的 93 项中沿用的全部 + 声明一致性（gates / tables / configs / kinds / 证据）+ 真实 index.js 全量对账 + 真实模块里 `*_ENABLED`/`*_OFF` 名字全被守卫 + **15 种追加形状转红（NWT 的 A–G + 我的 H–P）** + 字符串/注释不误报 + 两个 STALE 方向 + **运行期**（真文件 OK / 未声明使用与 UNPARSED ⇒ 退出 3 / 读不到 ⇒ UNKNOWN）+ **N4-3：300 个种子固定的随机 env 文件对真实 PowerShell 启动器循环零分歧** + 4 条 U+0085 / U+2028 / U+FEFF 场景 + 7 条编码场景（UTF-16 LE/BE 带 BOM、无 BOM 的 NUL、非 ASCII 名字 / 注释 / 值、第二个 U+FEFF 是数据）。
 - **变异对照 27 个（每个都被抓红）**：v0.4 沿用的 8 个（解析器退回 v0.3 规则 / 去掉默认开条目 / 去掉一个开关 / 忽略继承 / 空值不再删除继承 / 名字大小写敏感 / 去掉一个 id 键 / 不按单独 CR 分行）+ N4-1 的 13 个（定时器 / 裸导入 / `.then` / 命名空间成员 / UNPARSED / STALE 各不对账；`NON_START` 路由模式放宽成匹配任意标识符；只算"被调用"不算"被当值引用"；字符串不去内容；运行期不对账；读不到 index.js 报 OK；两个登记项被删）+ N4-3 的 6 个（`.NET Trim` 换成 JS `trim` / UTF-16 LE·BE 的 BOM 不认 / NUL 不再 UNKNOWN / 非 ASCII 名字不再 UNKNOWN / 值的正则退回 JS `.`）。
 
 ```js
@@ -1992,7 +1992,7 @@ async function runGuard() {
 }
 ```
 
-### C.4 `scripts/boot-guard-check.test.mjs`（上述 125 项测试全文）
+### C.4 `scripts/boot-guard-check.test.mjs`（上述 126 项测试全文）
 
 ```js
 // boot-guard-check.test.mjs -- tests for scripts/boot-guard-check.mjs (NWT N-2 completeness, N-3 parser parity, guard scenarios).
@@ -2313,6 +2313,13 @@ runBuf('non-ASCII in a COMMENT or in a VALUE of a BOM-less file is fine (all cle
 test('(N4-3 encoding) decodeEnvFile unit: a second U+FEFF after the BOM is DATA (Get-Content consumes one BOM only)', () => {
   const d = decodeEnvFile(Buffer.from([0xEF, 0xBB, 0xBF, 0xEF, 0xBB, 0xBF, 0x41, 0x3D, 0x31]));   // BOM, U+FEFF, "A=1"
   assert.strictEqual(d.text, '\uFEFFA=1'); assert.ok(!parseLauncherEnvText(d.text).vars.has('A'), 'name is U+FEFF+A, not A');
+});
+test('(N4-1) the guard\'s own stripComments behaves exactly like the shared scanner\'s (J2 F5) on index.js and on tricky snippets -- the guard must stay self-contained, so it keeps a copy, and this test keeps the copy honest', async () => {
+  const shared = path.join(ROOT, 'kasia-console', 'test-fixtures', 'source-scan', 'scan-non-test-sources.mjs');
+  if (!fs.existsSync(shared)) return;   // an older tree without the shared scanner: nothing to compare against
+  const { stripComments: theirs } = await import('file:///' + shared.replace(/\\/g, '/'));
+  const corpus = [REAL_INDEX, "const re = /[^/*]+/; x(); // c\n/* b */ y();", "const s = 'a // not a comment'; const t = `t ${ x /* c */ } `;", "a = b / c; // d\ne = f / g;", "return /x*/.test(s);\n/* m\nl */ z();", "const q = \"/* in a string */\";"];
+  for (const c of corpus) assert.strictEqual(stripComments(c), theirs(c));
 });
 ```
 

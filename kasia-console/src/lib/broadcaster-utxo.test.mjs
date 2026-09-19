@@ -133,6 +133,8 @@ test('(V8-ondemand) ensureBroadcasterUtxos() is a caller-driven path and is NOT 
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, relative, sep } from 'node:path';   // `join` is already imported at the top of this file
+// single implementation (Bettor, 2026-09-20): the state-machine stripComments lives in the shared scanner (J2 F5, mainline d14781f8); this file no longer carries a copy
+import { stripComments } from '../../test-fixtures/source-scan/scan-non-test-sources.mjs';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');   // kasia-console/src/lib → repo root
 const SELF_REL = 'kasia-console/src/lib/broadcaster-utxo.mjs';
@@ -148,39 +150,6 @@ export function shouldSkipDir(parentRel, name) {
 // pure: is this a test file (tests may legitimately call the guarded exports)?
 export function isTestPath(relPosix) {
   return /\.test\.(mjs|cjs|js|ts|mts|cts|jsx|tsx)$/.test(relPosix) || relPosix.split('/').some(seg => seg === 'test' || seg === 'test-framework');
-}
-// pure: remove // and /* */ comments while leaving string / template / char-escape contents intact
-export function stripComments(src) {
-  let out = '', i = 0, state = 'code', quote = '', inClass = false;
-  // regex literals (NWT N-4 / E1): `const re = /[^/*]+/; B.ensure…()` — the `/*` INSIDE the character class must not open a block comment (over-stripping
-  // real code is the unsafe direction). A `/` starts a regex literal when the previous significant character cannot end an expression.
-  const regexCanStart = () => { const t = out.replace(/\s+$/, ''); if (t === '') return true; const p = t[t.length - 1]; return '(,=:[!&|?{};+-*%<>~^'.includes(p) || /(^|[^\w$.])(return|typeof|case|in|of|delete|void|throw|new|else|do)$/.test(t); };
-  while (i < src.length) {
-    const c = src[i], n = src[i + 1];
-    if (state === 'code') {
-      if (c === '/' && n === '/') { state = 'line'; i += 2; continue; }
-      if (c === '/' && n === '*') { state = 'block'; i += 2; continue; }
-      if (c === '/' && regexCanStart()) { state = 'regex'; inClass = false; out += c; i++; continue; }
-      if (c === "'" || c === '"' || c === '`') { state = 'str'; quote = c; out += c; i++; continue; }
-      if (c === '\\') { out += c + (n ?? ''); i += 2; continue; }   // an escaped char in code never opens a comment
-      out += c; i++; continue;
-    }
-    if (state === 'regex') {
-      if (c === '\\') { out += c + (n ?? ''); i += 2; continue; }
-      if (c === '[') inClass = true; else if (c === ']') inClass = false;
-      else if (c === '\n') { state = 'code'; }                       // no newline inside a regex literal: resync
-      else if (c === '/' && !inClass) { state = 'code'; }
-      out += c; i++; continue;
-    }
-    if (state === 'line') { if (c === '\n') { state = 'code'; out += c; } i++; continue; }
-    if (state === 'block') { if (c === '*' && n === '/') { state = 'code'; i += 2; out += ' '; } else { if (c === '\n') out += c; i++; } continue; }
-    // string / template: copy verbatim (template ${…} expressions stay visible = treated as code = safe direction)
-    if (c === '\\') { out += c + (n ?? ''); i += 2; continue; }
-    if (c === quote) { state = 'code'; out += c; i++; continue; }
-    if (c === '\n' && quote !== '`') { state = 'code'; }   // unterminated single-line string: resync at newline
-    out += c; i++;
-  }
-  return out;
 }
 // pure: which entries reference a guarded name outside the module itself? entries = [{ rel: posix path, text }]
 export function findExternalReferences(entries) {
