@@ -1,0 +1,20 @@
+# NWT independent mutation run against kasia-relay/src/lib/utxo-facts.mjs @ dbfa5599 (worktree scratch/_nwt_wt_b90, own npm ci, kaspa_bg.wasm sha256 prefix 51cec45e7f21dd79)
+# baseline: node src/lib/utxo-facts.test.mjs => 33 passed, 0 failed ; node src/lib/proto-relay-ipc.test.mjs => 17 passed, 0 failed (+ subprocess PASS)
+killed   NWT-a sort ascending (O1 direction)  -> L1,L3,L4,L5
+killed   NWT-b drop covenantId sentinel  -> M1-b,M1-c
+killed   NWT-c drop echo facts:true  -> O1,L6
+killed   NWT-d drop factsVersion echo  -> O1,L6
+SURVIVED NWT-e outpoints form ignores index (txid-only match)          <== REAL TEST GAP (killed by nwt-O5-killer-vector.txt)
+SURVIVED NWT-f outpoints form: no prefilter (wanted.has removed)      <== equivalent mutant (output loop reads only requested keys), not a gap
+killed   NWT-g Number instead of BigInt for amount  -> L5
+killed   NWT-h drop facts_params_without_facts  -> B3
+killed   NWT-i truncate BEFORE filter (list)  -> O3,L1,L3,L4
+killed   NWT-j outpoints form falls to list form  -> O1,O2,O3,O4,H1,H3
+killed   NWT-k facts !== true -> !cmd.facts (truthy)  -> B2
+killed   NWT-l pmt accept <=0  -> P2
+killed   NWT-m observedAtMs before read  -> P1
+killed   NWT-n drop tiebreak index  -> L2
+killed   NWT-o covenantId missing => null (M1 revert)  -> M1-b,M1-c
+killed   NWT-p drop `missing`  -> O1,O3,O4,H3
+killed   NWT-q FACTS_RPC_WAIT_MS=20000  -> S2
+# with the extra vector appended to a temp copy of the test file: original 14/14 pass; mutant NWT-e => [FAIL] NWT-O5 (13 passed, 1 failed)

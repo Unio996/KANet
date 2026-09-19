@@ -1,0 +1,15 @@
+await t('NWT-O5 same txid, two outputs (index 0 = covenant, index 1 = plain P2PK): request (txid,1) must return the index-1 item (covenantId null); request (txid,2) must be missing -- outpoint match must include index', () => {
+  const T = txid(0xc0);
+  const es = [
+    realEntry({ txidHex: T, index: 0, amount: 20000000n, covenantIdHex: COV_A }),
+    realEntry({ txidHex: T, index: 1, amount: 20000000n, spkHex: P2PK_HEX }),
+  ];
+  const r = buildFactsResponse(parseFactsRequest({ outpoints: [{ transactionId: T, index: 1 }, { transactionId: T, index: 2 }] }), es);
+  assert.strictEqual(r.found.length, 1);
+  assert.strictEqual(r.found[0].outpoint.index, 1);
+  assert.strictEqual(r.found[0].covenantId, null);
+  assert.strictEqual(r.found[0].scriptPublicKey.scriptHex, P2PK_HEX);
+  assert.deepStrictEqual(r.missing, [{ transactionId: T, index: 2 }]);
+});
+console.log(pass + ' passed, ' + fail + ' failed');
+process.exit(fail === 0 ? 0 : 1);
