@@ -1,0 +1,44 @@
+BASELINE
+  sw: exit=0 fails=0
+  scan: exit=0 fails=0
+  acc: exit=0 fails=0
+  gate: exit=0 fails=0
+  choke: exit=0 fails=0
+  pend: exit=0 fails=0
+S1: KILLED [sw:exit=1/fail=3] :: 开关变宽松(on / true 也开)
+S2: KILLED [sw:exit=1/fail=7 acc:exit=1/fail=31] :: 开关写反
+S3: KILLED [sw:exit=1/fail=5] :: 缓存成模块常量(不再每次调用读)
+S4: KILLED [sw:exit=1/fail=3] :: 启动行 raw 不再 JSON 化
+S5: KILLED [sw:exit=1/fail=2 acc:exit=1/fail=1] :: 去重器上限差一
+S6: KILLED [sw:exit=1/fail=2 acc:exit=1/fail=1] :: 去重器不去重
+S7: KILLED [sw:exit=1/fail=2 acc:exit=1/fail=1] :: 抑制提示每次都打
+K1: KILLED [choke:exit=1/fail=11 scan:exit=1/fail=4] :: 去掉 chokepoint
+K2: KILLED [choke:exit=1/fail=9 scan:exit=1/fail=3] :: chokepoint 返回 undefined 而非 null
+K3: KILLED [choke:exit=1/fail=1] :: chokepoint 日志不去重
+K4: KILLED [choke:exit=1/fail=1] :: 调用者标识取错栈帧
+K5: KILLED [choke:exit=1/fail=1] :: 缺参数时抛错(不容错)
+A1: KILLED [acc:exit=1/fail=11 scan:exit=1/fail=4] :: 落点 4 守卫删掉
+A2: KILLED [acc:exit=1/fail=32] :: 落点 4 守卫写反
+A3: KILLED [acc:exit=1/fail=3] :: 落点 4 日志不去重(每 tick 一行)
+A4: KILLED [acc:exit=1/fail=11] :: 落点 4 守卫打了日志但不 return
+R1: KILLED [gate:exit=1/fail=13 scan:exit=1/fail=7] :: 落点 2 守卫删掉
+R2: KILLED [gate:exit=1/fail=15 scan:exit=1/fail=3] :: 落点 2 守卫挪到 step 4 之前(登记也没了)
+R3: KILLED [gate:exit=1/fail=19] :: 落点 2 守卫写反
+R4: KILLED [gate:exit=1/fail=12] :: 落点 2 守卫打了日志但不 return
+R5: KILLED [gate:exit=1/fail=9 scan:exit=1/fail=3] :: 落点 3 守卫删掉
+R6: KILLED [gate:exit=1/fail=6] :: 汇总行不写 DISABLED(打 0)
+R7: KILLED [gate:exit=1/fail=7] :: 落点 3 只打日志、pending 查询与 claim 照跑
+R8: KILLED [gate:exit=1/fail=6] :: 汇总行标志位不置(关闭态汇总行仍打 0)
+M1: KILLED [scan:exit=1/fail=2] :: 启动行删掉
+C1: KILLED [pend:exit=1/fail=2] :: console: 已 active 也入队
+C2: KILLED [pend:exit=1/fail=6] :: console: 首次不入队
+C3: KILLED [pend:exit=1/fail=1] :: console: expired 不重置
+C4: SURVIVED [pend:exit=0/fail=0] :: console: 已有 pending 也再插一行(幂等键冲突/重复入队)
+RESTORED BASELINE
+  sw: exit=0 fails=0
+  scan: exit=0 fails=0
+  acc: exit=0 fails=0
+  gate: exit=0 fails=0
+  choke: exit=0 fails=0
+  pend: exit=0 fails=0
+SUMMARY mutants=29 survivors=1 restored_baseline_green=true

@@ -6,6 +6,7 @@ import { deriveAliases } from './lib/alias.mjs';
 import { encodeHandshakePayload, encodeCommPayload, encodeCardPayload, payloadToTransactionHex } from './lib/protocol.mjs';
 import { getIndexer } from './lib/indexer.mjs';
 import { sendKaspa, sendKaspaByAmount, custodialSendKaspa, KASIA_MIN_AMOUNT } from './lib/transaction.mjs';
+import { handshakeAutoAcceptEnabled, createOncePerKeyLogger } from './lib/handshake-switch.mjs';
 
 // ── getConversations ────────────────────────────────────────────────────────
 
@@ -133,7 +134,22 @@ export async function sendMessage(params) {
 
 // ── acceptHandshake ──────────────────────────────────────────────────────────
 
+// chokepoint(设计 v0.4 §7.2 / §8.4): 关闭态返回 null——所有调用点都是"有 payload 才发", 所以现有与将来任何第 N 个调用点自动不花钱, 不依赖有人记得加闸。
+// 每次调用读当前 process.env; 返回 null 时自己打一行带调用者标识的日志(按 peer 去重, Set 有上限)——漏掉早退的调用点在日志里一眼可见。
+// (console 侧 relation-state.js 另有同名 acceptHandshake 是数据库状态推进、不发交易, 与本函数无关。)
+const logChokepointOnce = createOncePerKeyLogger((...a) => console.log(new Date().toISOString(), '[chain]', ...a));
+function callerLabel() {
+  const frame = (new Error().stack || '').split('\n')[3] || '';   // [0]=Error [1]=callerLabel [2]=acceptHandshake [3]=调用者(acceptHandshake 早退在同步段, 调用者帧一定在栈上)
+  const m = frame.match(/at\s+(?:async\s+)?(.*?)\s*\(?[^\s()]*[\\/]([^\\/\s():]+):(\d+):\d+\)?\s*$/);
+  return m ? `${m[1] || '<anonymous>'}@${m[2]}:${m[3]}` : (frame.trim() || 'unknown');
+}
+
 export async function acceptHandshake(params) {
+  if (!handshakeAutoAcceptEnabled()) {
+    const peer = String(params?.address ?? '<no-address>');
+    logChokepointOnce(peer, `HANDSHAKE auto-accept disabled (chokepoint, caller=${callerLabel()}) — no draft built for ${peer.slice(-12)}`);
+    return null;
+  }
   const wallet = getWallet();
   const myPrivateKeyHex = wallet.getPrivateKey().toString();
   const { myAlias, theirAlias } = await deriveAliases(myPrivateKeyHex, params.address);

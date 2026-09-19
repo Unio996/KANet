@@ -1,0 +1,12 @@
+export async function acceptHandshake(params) {
+  const wallet = getWallet();
+  const myPrivateKeyHex = wallet.getPrivateKey().toString();
+  const { myAlias, theirAlias } = await deriveAliases(myPrivateKeyHex, params.address);
+  const handshake = {
+    type: 'handshake', alias: myAlias, theirAlias,
+    timestamp: Date.now(), version: 1, isResponse: true,
+  };
+  const encrypted = await encrypt(JSON.stringify(handshake), params.address);
+  const payload = encodeHandshakePayload(encrypted.toString('hex'));
+  return { to: params.address, amount: KASIA_MIN_AMOUNT, payload };
+}

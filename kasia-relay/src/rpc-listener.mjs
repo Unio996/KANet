@@ -16,6 +16,7 @@ import { decrypt, isValidKaspaAddress } from './lib/crypto.mjs';
 import { deriveAliases } from './lib/alias.mjs';
 import { classifyPayload, PREFIX_HEX, PREFIX } from './lib/protocol.mjs';
 import { acceptHandshake, sendKaspa, sendMessage } from './chain.mjs';
+import { handshakeAutoAcceptEnabled } from './lib/handshake-switch.mjs';
 import { getAIReply } from './ai.mjs';
 import { routeMessage } from './router.mjs';
 import { loadSeen, saveSeen } from './state.mjs';
@@ -546,7 +547,13 @@ async function catchUpHistory() {
   let handshakeCount = 0, messageCount = 0;
 
   // 1. Pending handshakes — consume from pending_actions queue
-  try {
+  // 开关(设计 v0.4 §2.2-3): 关闭态整段跳过(连 pending 查询也不做), 留一行; 汇总行写 'handshakes: DISABLED' 而不是 0(0 在"关了"与"全失败了"两种情况下逐字相同, 见下方 catch-up comm 先例)。
+  // 开启态下面的整段 try 一字未动(else 分支)。
+  let handshakesDisabled = false;
+  if (!handshakeAutoAcceptEnabled()) {
+    handshakesDisabled = true;
+    log('catch-up handshakes: DISABLED (RELAY_HANDSHAKE_AUTO_ACCEPT!=1) — pending handshakes left in console queue, not claimed');
+  } else try {
     const hsParams = new URLSearchParams({ network: KASPA_NETWORK });
     if (_myAddress) hsParams.set('address', _myAddress);
     const res = await fetch(
@@ -725,7 +732,7 @@ async function catchUpHistory() {
   //   (它坏着的时候打的也是 0 —— 19551 次 catch-up done 全是 0/0/0)。
   //   而"上面还打过一行 DISABLED"救不了它: 两行相隔 55 行代码, 而日志里是 32 个
   //   relay 交错输出 ⇒ 实际日志中它们几乎不可能相邻出现。
-  log(`catch-up done: ${handshakeCount} handshakes accepted, ${messageCount} messages replied, ${catchupCommEnabled ? `${commCount} processed / ${commAttempted} attempted` : 'DISABLED'} historical comms`);
+  log(`catch-up done: ${handshakesDisabled ? 'handshakes: DISABLED' : `${handshakeCount} handshakes accepted`}, ${messageCount} messages replied, ${catchupCommEnabled ? `${commCount} processed / ${commAttempted} attempted` : 'DISABLED'} historical comms`);
 }
 
 async function _connect(wallet) {
@@ -951,6 +958,13 @@ async function processHandshake(txId, payloadHex, senderAddress) {
       theirAlias,
     });
     log('HANDSHAKE step 4 ingestMessage ok');
+
+    // 开关(设计 v0.4 §2.2-2): 关闭态止于登记——上面 step 4 已把入站握手登记进 console(pending 行保留人工处理的可能); 这里不 claim、不 acceptHandshake、
+    // 不 sendKaspa、不发问候、不 markSeen(不 markSeen = 将来打开开关后由追赶第 1 段接手, 与下面"漏洞 #6 fix"的语义一致)。
+    if (!handshakeAutoAcceptEnabled()) {
+      log('HANDSHAKE auto-accept disabled — left pending for', senderAddress.slice(-12));
+      return;
+    }
 
     // Atomic create + claim: write pending_action and lock it before spending KAS
     // If claim fails, catch-up already took this one — skip sendKaspa

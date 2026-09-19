@@ -1,0 +1,11 @@
+[migrate] v118: bettor_recommendations 加 pass_due_diligence 列 (LLM audit pass flag).
+  ✅ ① 入站握手 ⇒ 恰一行 pending_actions(handshake_accept / pending / inbound / source=ingest, trigger_txid=该 txid, 幂等键固定形状); messages 里登记一条 handshake
+  ✅ ② 同一对端再来握手(新 txid / 新 traceId) ⇒ 不重复入队, 仍恰一行(pending 行不被本路径清掉、不被覆盖)
+  ✅ ③ 已 active ⇒ 不入队(relation_states 已 active 的对端来握手只是 ACK)
+  ✅ ③b 已接受过(handshake_accepted_at 非空)但 status 不是 active ⇒ 同样不入队
+  ✅ ④ 旧行 failed ⇒ 重置为 pending(retry_count=0, error 清空, trigger_txid 更新), 仍恰一行
+  ✅ ④ 旧行 expired ⇒ 重置为 pending(retry_count=0, error 清空, trigger_txid 更新), 仍恰一行
+  ✅ ④b 旧行 executing ⇒ 静默跳过(不重置、不新增)
+  ✅ ④b 旧行 done ⇒ 静默跳过(不重置、不新增)
+  ✅ ⑤ 出站握手(direction=outbound)不入队 handshake_accept(由 action-executor 写)
+ingest-handshake-pending.test: 9 pass, 0 fail

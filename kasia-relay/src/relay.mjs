@@ -6,6 +6,7 @@ import { getWallet } from "./lib/wallet.mjs";
 import { isValidKaspaAddress } from "./lib/crypto.mjs";
 import { ingestMessage, ingestReply, ingestTx, ingestHandshake } from "./ingest.mjs";
 import { createHandshakeAcceptor } from './lib/handshake-accept.mjs';
+import { handshakeStartupLine } from './lib/handshake-switch.mjs';
 import { assertAddressOnNetwork } from './lib/kaspa-network.mjs';   // (b) 网络单一源 (设计 v0.2 §3): 前缀只对照 env KASPA_NETWORK, 不从地址推网络
 
 const RELAY_MODE = process.env.RELAY_MODE || "indexer";
@@ -267,6 +268,9 @@ async function poll() {
 }
 
 // --- Start ---
+
+// 启动行(设计 v0.4 §7.5): 顶层读一次、RELAY_MODE 分支之【前】——回落 / 索引器模式同样打, 部署后 DISABLED 行数才恰等于 relay 子进程数。
+log(handshakeStartupLine(process.env, RELAY_MODE));
 
 if (RELAY_MODE === "rpc") {
   log("Kasia Relay started (RPC mode — local node subscription).");

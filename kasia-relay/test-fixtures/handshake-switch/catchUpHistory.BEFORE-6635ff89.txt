@@ -1,0 +1,188 @@
+async function catchUpHistory() {
+  if (!CONSOLE_URL) { log('catch-up: no CONSOLE_URL, skipping'); return; }
+
+  log('catching up from Console DB...');
+  let handshakeCount = 0, messageCount = 0;
+
+  // 1. Pending handshakes — consume from pending_actions queue
+  try {
+    const hsParams = new URLSearchParams({ network: KASPA_NETWORK });
+    if (_myAddress) hsParams.set('address', _myAddress);
+    const res = await fetch(
+      `${CONSOLE_URL}/ingest/pending-handshakes?${hsParams}`,
+      { headers: { 'x-ingest-secret': process.env.INGEST_SECRET || '' }, signal: AbortSignal.timeout(5000) },
+    );
+    if (res.ok) {
+      const { handshakes } = await res.json();
+      for (const hs of handshakes) {
+        if (!hs.remoteAddress || _blocklist.has(hs.remoteAddress)) continue;
+
+        // Optimistic lock: claim via Console API (GET with claim=true atomically sets status='executing')
+        // If no id, it's from old code path — skip (shouldn't happen after migration)
+        if (!hs.id) { log('catch-up: skipping handshake without id'); continue; }
+
+        try {
+          const claimRes = await fetch(
+            `${CONSOLE_URL}/ingest/pending-handshakes?claim=${hs.id}`,
+            { headers: { 'x-ingest-secret': process.env.INGEST_SECRET || '' }, signal: AbortSignal.timeout(3000) },
+          );
+          const claimData = await claimRes.json();
+          if (!claimData.claimed) {
+            log('catch-up: handshake', hs.id.slice(0, 8), 'already claimed — skipping');
+            continue;
+          }
+        } catch {
+          log('catch-up: claim failed for', hs.id.slice(0, 8), '— skipping');
+          continue;
+        }
+
+        try {
+          log('catch-up: accepting handshake from', hs.remoteAddress.slice(-12));
+          const draft = await acceptHandshake({ address: hs.remoteAddress });
+          if (draft?.payload) {
+            const sent = await sendKaspa({ to: draft.to, amount: draft.amount, payload: draft.payload });
+            log('catch-up: HANDSHAKE ACCEPTED TX:', sent?.txId || sent, 'fee:', sent?.fee);
+            ingestTx({ traceId: hs.traceId, txid: sent?.txId, direction: 'outbound', amount: '0.2', fee: sent?.fee, localAddress: _myAddress });
+            ingestHandshake({ localAddress: _myAddress, remoteAddress: hs.remoteAddress, txid: sent?.txId, theirAlias: hs.theirAlias || null });
+            if (hs.txid) markSeen(hs.txid);
+            handshakeCount++;
+            // completePendingAction happens on Console side when ingestHandshake(outbound) arrives
+          }
+        } catch (err) {
+          log('catch-up: handshake accept failed:', err?.message || err);
+          // Report failure to Console via ingest event
+          try {
+            await fetch(`${CONSOLE_URL}/ingest/event`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'x-ingest-secret': process.env.INGEST_SECRET || '' },
+              body: JSON.stringify({ traceId: `catchup-fail:${hs.id}`, eventScope: 'relay', eventType: 'catchup_handshake_failed', source: 'relay', summary: err?.message || 'unknown error' }),
+              signal: AbortSignal.timeout(3000),
+            });
+          } catch {}
+        }
+      }
+    }
+  } catch (err) {
+    log('catch-up: handshake query failed:', err?.message || err);
+  }
+
+  // 2. Unreplied messages — generate AI reply and send
+  try {
+    const res = await fetch(
+      `${CONSOLE_URL}/ingest/unreplied-messages?network=${KASPA_NETWORK}&limit=20`,
+      { headers: { 'x-ingest-secret': process.env.INGEST_SECRET || '' }, signal: AbortSignal.timeout(5000) },
+    );
+    if (res.ok) {
+      const { messages } = await res.json();
+      for (const msg of messages) {
+        if (!msg.remoteAddress || !msg.message || _blocklist.has(msg.remoteAddress)) continue;
+        // Strict bech32 check — the old startsWith('kaspa:') guard let test
+        // fixtures like `kaspa:qqtrustedintro<ts>aaa` through, which then
+        // crashed encrypt() and burned brain inference + RPC every restart.
+        if (!isValidKaspaAddress(msg.remoteAddress)) {
+          log(`catch-up: skip invalid kaspa address ${msg.remoteAddress.slice(0, 30)}…`);
+          if (msg.txid) markSeen(msg.txid); // permanent skip, do not poll again
+          continue;
+        }
+        try {
+          // Skip if already processed (prevents replay after restart)
+          if (msg.txid && _seen.has(msg.txid)) {
+            log('catch-up: already seen', msg.txid.slice(0, 12));
+            continue;
+          }
+          log('catch-up: replying to', msg.remoteAddress.slice(-12), msg.message.slice(0, 40));
+          await replyToMessage(msg.traceId || msg.txid, msg.remoteAddress, msg.message);
+          if (msg.txid) markSeen(msg.txid);
+          messageCount++;
+        } catch (err) {
+          log('catch-up: reply failed:', err?.message || err);
+          // Mark as seen even on failure to prevent infinite retry loop
+          if (msg.txid) markSeen(msg.txid);
+        }
+      }
+    }
+  } catch (err) {
+    log('catch-up: message query failed:', err?.message || err);
+  }
+
+  // 3. Historical comm messages — 从 kanet_message_index 取未处理的历史 comm TX
+  //    按 txid 从链上取 payload → 调 processComm（和实时完全相同的路径）
+  //
+  // 🔴 2026-07-28 止血（J2 落码 · Bettor 21:18 审过放行）：本段默认【关闭】。
+  //   病因：下面那个 fetch 拿 TN12 的 txid 去问 api.kaspa.org（主网公共 API）
+  //         ⇒ 结构上永远 404 ⇒ 而失败路径不写 processed 标记 ⇒ 无限重试。
+  //   实测：console.log 267 万行里 228 万行是这一条在打转，且已把对方打到 429。
+  //   为什么停它零风险：实时收信【不经过这里】—— block-added 事件自带 payload
+  //         （handleBlock 直接读 tx.payload），所以"从现在起能不能收到"不受影响。
+  //   代价（明说）：历史那批继续留在 unprocessed —— 不丢，只是不再尝试。
+  //   回退：设 KANET_CATCHUP_COMM=on 即恢复原行为。无 schema 改动、无数据迁移。
+  //   根因修复另议（候选：有 block_hash ⇒ getBlock(includeTransactions:true) 取回 payload）。
+  const catchupCommEnabled = process.env.KANET_CATCHUP_COMM === 'on';
+  let commCount = 0;
+  // 🔴 只报成功数的计数器, 在【全部失败】与【无事可做】两种情形下输出相同。
+  //   实证: 功能开着、每分钟失败几十次时, 这行汇总打的是 "0 historical comms
+  //   processed" —— 与"确实没有待处理"逐字一致, 而它已经这样打了 66,017 次。
+  //   ⇒ 同时报【尝试数】: 0/0 = 真的没事做; 0/67452 = 一眼就是坏的。
+  let commAttempted = 0;
+  if (!catchupCommEnabled) {
+    // 打一行说明它是【被关掉的】，否则下一个人看到不重试会以为它已经好了
+    log('catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed');
+  } else try {
+    const res = await fetch(
+      `${CONSOLE_URL}/api/discovery/message-index?type=comm&unprocessed=true`,
+      { headers: { 'x-ingest-secret': process.env.INGEST_SECRET || '' }, signal: AbortSignal.timeout(10000) },
+    );
+    if (res.ok) {
+      const pendingComms = await res.json();
+      if (pendingComms.length > 0) {
+        log(`catch-up: ${pendingComms.length} pending historical comm TX`);
+      }
+      for (const record of pendingComms) {
+        commAttempted++;   // 在 try 之前 —— 任何失败路径都已经计入
+        try {
+          // 请求间隔 150ms，避免 public API 限流
+          await new Promise(r => setTimeout(r, 150));
+          // 从链上按 txid 取完整 TX（链是真相源）
+          const txRes = await fetch(
+            `https://api.kaspa.org/transactions/${record.txid}`,
+            { signal: AbortSignal.timeout(10000) },
+          );
+          if (!txRes.ok) {
+            log(`catch-up comm: API ${txRes.status} for ${record.txid.slice(0, 16)}, skipping`);
+            // 429 限流：中止本轮，等下次 catch-up 再试
+            if (txRes.status === 429) break;
+            continue;
+          }
+          const txData = await txRes.json();
+          if (!txData?.payload) {
+            log(`catch-up comm: no payload for ${record.txid.slice(0, 16)}, skipping`);
+            continue;
+          }
+
+          // 走和实时完全相同的路径：processComm(txId, payloadHex, null)
+          // senderAddress 传 null — processComm 内部用 findAddressByAlias 查 relation_states
+          await processComm(record.txid, txData.payload, null);
+
+          // 标记已处理（幂等保护）
+          await fetch(
+            `${CONSOLE_URL}/api/discovery/message-index/${record.txid}/processed`,
+            { method: 'POST', headers: { 'x-ingest-secret': process.env.INGEST_SECRET || '' }, signal: AbortSignal.timeout(5000) },
+          ).catch(() => {});
+
+          commCount++;
+        } catch (err) {
+          log(`catch-up comm: error ${record.txid.slice(0, 16)}: ${err.message}`);
+        }
+      }
+    }
+  } catch (err) {
+    log('catch-up: historical comm query failed:', err?.message || err);
+  }
+
+  // 🔴 这一句必须【自己】说清它的前提: 关闭时打 DISABLED 而不是 0。
+  //   否则 "0 historical comms" 在【关掉了】与【全都失败了】两种情况下逐字相同
+  //   (它坏着的时候打的也是 0 —— 19551 次 catch-up done 全是 0/0/0)。
+  //   而"上面还打过一行 DISABLED"救不了它: 两行相隔 55 行代码, 而日志里是 32 个
+  //   relay 交错输出 ⇒ 实际日志中它们几乎不可能相邻出现。
+  log(`catch-up done: ${handshakeCount} handshakes accepted, ${messageCount} messages replied, ${catchupCommEnabled ? `${commCount} processed / ${commAttempted} attempted` : 'DISABLED'} historical comms`);
+}

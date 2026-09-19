@@ -5,6 +5,7 @@
 //        用 new Function 在同样的桩下求值; AFTER = createHandshakeAcceptor。两边跑同一组场景, 逐条比对【全部外部调用轨迹】
 //        (log 行 / fetch URL / acceptHandshake / sendKaspa / ingestHandshake / ingestTx 的参数与顺序 + 每次调用的返回或抛出)——
 //        轨迹不同 = 行为变了。另加一条机械断言: 模块函数体经"缩进两格 + consoleUrl→CONSOLE_URL"还原后与 BEFORE 原文逐字相同(只搬没改)。
+// 笔二追加: 入口开关(默认关)。BEFORE/AFTER 对照证明的是【开启态】行为不变——所以对照段先把 RELAY_HANDSHAKE_AUTO_ACCEPT 置 '1'; 关闭态另有 V2c 段(末尾)。
 // 单文件跑: node src/lib/handshake-accept.test.mjs (不读钱包、不连节点、不碰网络; 全部依赖是桩)。
 import assert from 'node:assert';
 import fs from 'node:fs';
@@ -18,6 +19,8 @@ const BEFORE_TXT = fs.readFileSync(path.join(RELAY_ROOT, 'test-fixtures', 'hands
 const MODULE_SRC = fs.readFileSync(path.join(HERE, 'handshake-accept.mjs'), 'utf8');
 const RELAY_SRC = fs.readFileSync(path.join(RELAY_ROOT, 'src', 'relay.mjs'), 'utf8');
 
+const SAVED_ENV = process.env.RELAY_HANDSHAKE_AUTO_ACCEPT;
+process.env.RELAY_HANDSHAKE_AUTO_ACCEPT = '1';   // 对照段 = 开启态
 let pass = 0, fail = 0;
 const t = async (n, f) => { try { await f(); pass++; console.log('[PASS] ' + n); } catch (e) { fail++; console.log('[FAIL] ' + n + ' :: ' + e.message); } };
 
@@ -149,11 +152,18 @@ await t('工厂实例隔离: acceptor A 记住的 peer, acceptor B 仍会接受(
 });
 
 // ── 机械"只搬不改"断言 ────────────────────────────────────────────────────────────────────────────────────────────
-await t('只搬不改: 模块函数体(去缩进两格, consoleUrl→CONSOLE_URL)与 BEFORE 原文里 doAcceptHandshake 逐字相同', () => {
+await t('只搬不改(笔二后): 去掉入口守卫块后, 模块函数体(去缩进两格, consoleUrl→CONSOLE_URL)与 BEFORE 原文里 doAcceptHandshake 逐字相同——除守卫外一字未动', () => {
   const start = MODULE_SRC.indexOf('  return async function doAcceptHandshake(peer) {');
   const end = MODULE_SRC.lastIndexOf('  };\n}');
   assert.ok(start > 0 && end > start, '模块结构锚点');
-  const bodyM = MODULE_SRC.slice(start, end + '  }'.length).split('\n').map((l) => l.replace(/^ {2}/, '')).join('\n')
+  const GUARD = "    // 开关(落点 4): poll() 每 tick 都会再命中同一 pending_incoming 会话, 所以日志按 peer 去重; 关闭态不查 console 去重、不 acceptHandshake、不 sendKaspa。\n"
+    + '    if (!handshakeAutoAcceptEnabled()) {\n'
+    + '      logDisabledOnce(peer, `HANDSHAKE auto-accept disabled (poll) — left pending for ${peer.slice(-12)}`);\n'
+    + '      return;\n'
+    + '    }\n';
+  const fnSrc = MODULE_SRC.slice(start, end + '  }'.length);
+  assert.strictEqual(fnSrc.split(GUARD).length - 1, 1, '守卫块应恰一处且形状固定');
+  const bodyM = fnSrc.replace(GUARD, '').split('\n').map((l) => l.replace(/^ {2}/, '')).join('\n')
     .replace('return async function doAcceptHandshake(peer) {', 'async function doAcceptHandshake(peer) {')
     .replace(/consoleUrl/g, 'CONSOLE_URL');
   const fnStart = BEFORE_TXT.indexOf('async function doAcceptHandshake(peer) {');
@@ -163,9 +173,11 @@ await t('只搬不改: 模块函数体(去缩进两格, consoleUrl→CONSOLE_URL
   assert.ok(MODULE_SRC.includes('const _acceptedPeers = new Set(); // dedup: only accept handshake from each address once'));
   assert.ok(BEFORE_TXT.includes('const _acceptedPeers = new Set(); // dedup: only accept handshake from each address once'));
 });
-await t('模块零 import(依赖全由注入; 不引入任何新副作用面)', () => {
-  assert.ok(!/^\s*import\s/m.test(MODULE_SRC), '模块里出现 import 语句');
-  assert.ok(!/\bprocess\.env\b/.test(MODULE_SRC.replace(/\/\/.*$/gm, '')), '笔一没有任何开关/env 读取');
+await t('模块只 import 纯函数模块 handshake-switch.mjs(依赖仍全由注入; 不直接读 process.env)', () => {
+  const imports = MODULE_SRC.match(/^\s*import\s.*$/gm) || [];
+  assert.strictEqual(imports.length, 1, 'import 条数: ' + imports.length);
+  assert.ok(/from\s+'\.\/handshake-switch\.mjs'/.test(imports[0]), '唯一 import 应是 ./handshake-switch.mjs');
+  assert.ok(!/\bprocess\.env\b/.test(MODULE_SRC.replace(/\/\/.*$/gm, '')), '模块不直接读 env(读取集中在 handshake-switch.mjs)');
 });
 await t('relay.mjs: 恰一处工厂调用、恰一处 import; 原函数与 _acceptedPeers 已不在 relay.mjs; poll 仍调 doAcceptHandshake', () => {
   const code = RELAY_SRC.replace(/\/\/.*$/gm, '');
@@ -182,5 +194,62 @@ await t('抽取前 relay.mjs 的 doAcceptHandshake 只有一个调用点(poll)�
   assert.ok(!/await\s+doAcceptHandshake\(/.test(BEFORE_TXT), 'BEFORE 夹具区间里不该含调用点');
 });
 
+// ══ V2c(设计 v0.4 §6.1 / §7.4 / §8.3): 关闭态——零调用 + 每 peer 一行 + 日志上限 ═══════════════════════════════════════════════
+const OPEN_SCRIPT = { fetch: [{ json: { status: 'none' } }], acceptHandshake: [{ ret: { to: P1, amount: '0.2', payload: 'PAY' } }], sendKaspa: [{ ret: OK_TX }] };
+const withEnv = async (val, fn) => {
+  const prev = process.env.RELAY_HANDSHAKE_AUTO_ACCEPT;
+  if (val === undefined) delete process.env.RELAY_HANDSHAKE_AUTO_ACCEPT; else process.env.RELAY_HANDSHAKE_AUTO_ACCEPT = val;
+  try { return await fn(); } finally { if (prev === undefined) delete process.env.RELAY_HANDSHAKE_AUTO_ACCEPT; else process.env.RELAY_HANDSHAKE_AUTO_ACCEPT = prev; }
+};
+const externalCalls = (trace) => trace.filter((l) => /^(fetch|acceptHandshake|sendKaspa|ingestHandshake|ingestTx) /.test(l));
+const logLines = (trace) => trace.filter((l) => l.startsWith('log '));
+
+for (const [label, val] of [['未设', undefined], ["'0'", '0'], ["'on'", 'on'], ["'true'", 'true'], ["' 1'", ' 1'], ["'1\\n'", '1\n'], ["''", '']]) {
+  await t(`V2c 关闭态(${label}): doAcceptHandshake 零 fetch / 零 acceptHandshake / 零 sendKaspa / 零 ingest; 恰一行 "HANDSHAKE auto-accept disabled (poll)"`, async () => {
+    await withEnv(val, async () => {
+      const { trace, deps } = makeStubs(OPEN_SCRIPT, 'http://console.local');
+      const acc = buildAfter(deps);
+      await acc(P1);
+      assert.deepStrictEqual(externalCalls(trace), [], '关闭态出现外部调用: ' + externalCalls(trace).join(' | '));
+      const logs = logLines(trace);
+      assert.strictEqual(logs.length, 1, '日志行数 ' + logs.length);
+      assert.ok(logs[0].includes('HANDSHAKE auto-accept disabled (poll) — left pending for ' + P1.slice(-12)), logs[0]);
+    });
+  });
+}
+await t('V2c 同一 peer 连续 3 个 tick ⇒ 只 1 行(每 peer 每进程一次); 换 peer 各得 1 行; 全程零外部调用', async () => {
+  await withEnv(undefined, async () => {
+    const { trace, deps } = makeStubs(OPEN_SCRIPT, 'http://console.local');
+    const acc = buildAfter(deps);
+    await acc(P1); await acc(P1); await acc(P1);
+    assert.strictEqual(logLines(trace).length, 1, '3 tick 应 1 行, 实得 ' + logLines(trace).length);
+    await acc(P2); await acc(P2);
+    assert.strictEqual(logLines(trace).length, 2, '第二个 peer 再 1 行');
+    assert.deepStrictEqual(externalCalls(trace), []);
+  });
+});
+await t('V2c 日志上限(§8.3): 1000 个不同 peer 各 1 行; 第 1001 个起恰一行 "suppressing further disabled-peer logs" 后静默; 上限只限日志, 不影响"零调用"', async () => {
+  await withEnv(undefined, async () => {
+    const { trace, deps } = makeStubs(OPEN_SCRIPT, 'http://console.local');
+    const acc = buildAfter(deps);
+    for (let i = 0; i < 1005; i++) await acc('kaspatest:qpeer' + String(i).padStart(6, '0') + 'x'.repeat(40));
+    const logs = logLines(trace);
+    assert.strictEqual(logs.filter((l) => l.includes('left pending for')).length, 1000, '前 1000 个 peer 各 1 行');
+    assert.strictEqual(logs.filter((l) => l.includes('suppressing further disabled-peer logs')).length, 1, '上限提示恰一行');
+    assert.strictEqual(logs.length, 1001, '总日志行 = 1000 + 1(其后静默)');
+    assert.deepStrictEqual(externalCalls(trace), []);
+  });
+});
+await t('V2c 阳性对照 + 每次调用读: 同一 acceptor 关闭态被拒后, env 置 \'1\' 即接受(不记内存: 关闭期间没有把 peer 记成"已接受"); sendKaspa 恰 1 次', async () => {
+  const { trace, deps } = makeStubs(OPEN_SCRIPT, 'http://console.local');
+  const acc = buildAfter(deps);
+  await withEnv(undefined, () => acc(P1));
+  assert.deepStrictEqual(externalCalls(trace), []);
+  await withEnv('1', () => acc(P1));
+  assert.strictEqual(trace.filter((l) => l.startsWith('sendKaspa ')).length, 1, '开启后应恰发 1 次');
+  assert.strictEqual(trace.filter((l) => l.startsWith('acceptHandshake ')).length, 1);
+});
+
+if (SAVED_ENV === undefined) delete process.env.RELAY_HANDSHAKE_AUTO_ACCEPT; else process.env.RELAY_HANDSHAKE_AUTO_ACCEPT = SAVED_ENV;
 console.log(`\nhandshake-accept.test: ${pass} pass, ${fail} fail`);
 process.exitCode = fail ? 1 : 0;

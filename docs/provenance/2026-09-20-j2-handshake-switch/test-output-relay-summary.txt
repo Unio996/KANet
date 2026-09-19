@@ -1,0 +1,15 @@
+== src/lib/handshake-switch.test.mjs
+
+handshake-switch.test: 13 pass, 0 fail
+== src/lib/handshake-switch-scan.test.mjs
+
+handshake-switch-scan.test: 31 pass, 0 fail
+== src/lib/handshake-accept.test.mjs
+
+handshake-accept.test: 35 pass, 0 fail
+== src/rpc-handshake-gate.test.mjs
+
+rpc-handshake-gate.test: 46 pass, 0 fail
+== src/handshake-chokepoint.test.mjs
+
+handshake-chokepoint.test: 14 pass, 0 fail
