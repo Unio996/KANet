@@ -46,6 +46,10 @@
       "requiredFeeEstimate": "59900000",
       "cap": "100000000",
       "_source": "docs/provenance/2026-09-14-j2-bet-mint-stepB-register-append-mass-fee-estimate/README.md + Bettor 种子面值核算(2026-09-14)——注意 requiredFee 会随 fee input 实际面值/找零大小小幅浮动(迭代收敛值，非固定常数)，witness 精确编码/tok_prefix-suffix 长度未最终定案，见该 provenance 已知限制"
+    },
+    "market_seal": {
+      "cap": "100000000",
+      "_source": "账本1491/实现计划v0.4(docs/2026-09-16-j2-proto-v0-settlement-implementation-plan-v0.1.md) — 沿用register_append同量级cap(1.0 KAS)：NWT simnet真实测得convert_to_rootclose(封盘)的requiredFee约39,678,700 sompi(设计文档§0.4)、节点侧storageMass约385,410(§0.14b)，与register_append同数量级，暂借同一个cap，未来若有独立的market_seal专属mass/fee估算provenance应替换为该文档的具体数字"
     }
   }
 }
