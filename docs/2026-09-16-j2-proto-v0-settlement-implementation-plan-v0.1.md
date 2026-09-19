@@ -117,8 +117,10 @@ relay侧**复用现有`covenant_broadcast`命令**（v0.2更新，见§5）。
   - 🔴 **B4-1（已修，提交见账本）**：委员签名必须在给 RootClose 续约输出挂好 `CovenantBinding` **之后**才签——共识 sighash（`sighash.rs:233-235`，
     version>=1）承诺 `output.covenant`，先签后挂则签名对最终 tx 无效（validSigs=0<4）。txid 不含 witness，只比 txid 测不出；回归必须真验签
     （用 NWT 独立移植的 sighash + schnorr，带"去 covenant 必须验假"反向臂）。教训：**签名时序只有真验签或真共识才抓得到**。
-  - **B4-2 deadline 余量（已落，暂定值）**：构造守卫改为 `Date.now() >= deadlineMs + 120s`（`CLOSE_COMMIT_DEADLINE_MARGIN_MS`）；节点 finality 是
-    `lock_time < past-median-time`（严格小于且滞后墙钟）。120s 是 NWT 下限建议，**具体值等 simnet 实测 pmt 滞后后定**。
+  - **B4-2 deadline 余量（已落，暂定值 300s）**：构造守卫为 `Date.now() >= deadlineMs + 300s`（`CLOSE_COMMIT_DEADLINE_MARGIN_MS`）；节点 finality 是
+    `lock_time < past-median-time`（严格小于且滞后墙钟）。NWT 建议下限 120s，但 2026-09-19 只读实测本机主网节点（官方 2.0.1，已同步）墙钟−pastMedianTime = 128.8~136.7s
+    （10 秒内 6 个样本，均值约 132.5s，与共识常量 `TIMESTAMP_DEVIATION_TOLERANCE=132` 吻合）——**120s 低于该滞后，主网上会 NotFinalized**；改为 300s（≈2.2 倍）。样本窗口短且本机时钟未做 NTP 校准，
+    仍需更长时间/多次采样确认。simnet 上 NotFinalized 已真实复现并在 pmt 追上后 ACCEPT，见 `docs/provenance/2026-09-19-j2-fullchain-simnet/`。
     **驱动层约束（批9，不在 builder）**：提交侧把 `NotFinalized` 归类为"可重试、无状态变更"，**不得进 ambiguous**。
   - **B4-3 SLA（驱动设计约束，不落码）**：`RootClose.refund_flip` 无需任何签名，`deadline+2h`（7,200,000 ms）后**任何人**可把市场 `closed 0→2`
     （取消/退款路径，账本1478 已记），且此后 close_commit 再也进不来（write-once 锁）。⇒ 结算驱动必须在 **deadline+2h 之前**让 close_commit 落链，
@@ -126,7 +128,11 @@ relay侧**复用现有`covenant_broadcast`命令**（v0.2更新，见§5）。
   - **B4-4 驱动层 MUST（不落码，批6 前置）**：`buildCloseCommitTxJson` 是"任意结果的签名预言机"——它对 `newWinningSide`/`newPayoutRootHex` **不核对**。
     调用方（意图状态机/ingest）**必须**：① 从 DB（`proto_bets` 与裁决结果）派生这两个值；② 断言 `Σ payouts == pool_value`；③ `payoutRoot` 由 merkle 现算而非调用方传入；
     任一不符拒绝调用 builder。批6（claim_draw）落码前必须先有这条断言的测试。
-  - **B4-5（已落）**：入口断言 `p2sh(现算当前 RootClose artifact) == 调用方给的链上 UTXO spk`（新增必填参数 `rootCloseUtxoScriptPublicKeyHex`）。
+  - **B4-5（已落，close_commit 与 convert_to_claim 都加）**：入口断言 `p2sh(现算当前 RootClose artifact) == 调用方给的链上 UTXO spk`（新增必填参数 `rootCloseUtxoScriptPublicKeyHex`）。
+  - **N-1（NWT，已落入口拦截）**：`register_append` 无签名可调，合约只要求 leaf 续约输出 value ≥ DUST_MIN，任何人可把 leaf 面值定成任意值，而 builder 按 `CONTINUATION_OUTPUT_SOMPI` 常量算 leftover。
+    已在 `assertLeafStateMatchesChain` 加 `chainUtxo.value == CONTINUATION_OUTPUT_SOMPI` 的 fail-closed（缺失/不等即拒，与 held 那条对称，正反向量已配），`proto-broadcast-ops` 调用点传真实面值。
+    **真修（builder 用链上真实面值算 leftover）并入 D-018 重评估，另开票，现在不做。**
+    附带：`proto-driver.test.mjs`/`proto-broadcast-ops.test.mjs` 里原先把 leaf UTXO mock 成 95M/1000 sompi（同一 outpoint 既当 leaf 又当 fee，不真实），已改为 20,000,000 并与 fee UTXO 分开。
   - **B4-6（已落）**：返回值带 `committeeMode: 'single_operator_5x_same_key'`——5 槽同一把委员 keypair，**不是 4-of-5 门限**；下游意图记录/响应必须带这个标签，
     不得把 close_commit 成功读成门限安全。
   - **B4-7（已落）**：`PrivateKey` 整个 builder 只建一次，`finally` 里 `free()` 并丢掉 hex 引用。

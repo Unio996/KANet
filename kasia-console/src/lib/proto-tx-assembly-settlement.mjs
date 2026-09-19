@@ -229,10 +229,13 @@ export const CLOSE_COMMIT_ROOTCLOSE_OUT_INDEX = 0; // RootClose续约输出(clos
 /**
  * B4-2(NWT批4离线审): 节点finality比较是 tx.lock_time < 区块头past-median-time(严格小于, 且pmt滞后墙钟),
  * 只校验 Date.now()>=deadlineMs 是单边代理: 在[deadline, deadline+pmt滞后+时钟偏差)内提交, 本地放行而节点以
- * NotFinalized拒。构造守卫加固定余量。🟡 120s是NWT的下限建议, 【暂定值】——具体值等simnet实测pmt滞后后定;
+ * NotFinalized拒。构造守卫加固定余量。🟡 【暂定值300s】: NWT建议下限120s, 但2026-09-19只读实测本机主网节点(官方2.0.1, isSynced=true)
+ * 墙钟−pastMedianTime=128.8~136.7s(10秒内6个样本, 均值约132.5s, 与共识常量TIMESTAMP_DEVIATION_TOLERANCE=132吻合), 120s低于该滞后、
+ * 主网上会NotFinalized; 300s≈2.2倍。样本窗口很短且本机时钟未做NTP校准, 仍需更长时间/多次采样确认。simnet实测见
+ * docs/provenance/2026-09-19-j2-fullchain-simnet/;
  * 提交侧把NotFinalized归"可重试、无状态变更"(不进ambiguous)是驱动层(批9)的约束, 见实现计划§2.2。
  */
-export const CLOSE_COMMIT_DEADLINE_MARGIN_MS = 120_000;
+export const CLOSE_COMMIT_DEADLINE_MARGIN_MS = 300_000;
 /** B4-6: v0单操作员5槽同一把委员keypair重复5次——只证明"合约逻辑可执行", 不是4-of-5门限安全(账本1497 Codex复核)。 */
 export const COMMITTEE_MODE_SINGLE_OPERATOR_5X_SAME_KEY = 'single_operator_5x_same_key';
 
@@ -319,6 +322,8 @@ export function buildCloseCommitTxJson({
   // buildTxWithChange/buildTxNoChange最多3次, 每次找零候选值不同都要重新签一次, 见函数头注),
   // 函数返回后这个局部变量随作用域一起失去引用——不log、不进返回值。
   // B4-7(NWT批4): PrivateKey对象整个函数只建一次, finally里free()并丢掉hex引用(不落盘不入日志, 这里只缩短驻留)。
+  // 🟡 已知边界(如实标注, NWT终审确认): decryptCommitteePrivkey返回的hex字符串在JS堆里仍要等GC才回收, 置null只是去掉本函数对它的引用,
+  // 不能保证立即清除内存; JS没有可靠的字符串清零手段。
   let committeePrivHex = decryptCommitteePrivkey(committeePrivkeyEnvelope);
   const committeePrivObj = new kaspa.PrivateKey(committeePrivHex);
 
@@ -459,6 +464,7 @@ export function convertToClaimWitnessArgs({ heldIdx, claimPrefixHex, claimSuffix
  * @param {number} o.deadlineMs
  * @param {string} o.rootCloseTmplHash  32字节hex(无0x), proto_markets.rootclose_tmpl_hash(fail-closed校验用)
  * @param {{txid:string, vout:number}} o.rootCloseOutpoint  RootClose当前UTXO(close_commit产出的续约输出, closed:1)
+ * @param {string} o.rootCloseUtxoScriptPublicKeyHex  必填(B4-5): 该UTXO在链上的spk(取自产出它的close_commit交易输出), 入口断言必须等于现算的当前RootClose spk
  * @param {string} o.rootCloseCovId  RootClose自己的covenant_id(不变, market_seal时已算出)
  * @param {{local_yes:number,local_no:number,count:number,pool_value:number,closed:number,winningSide:number,payoutRoot:string}} o.closedState
  *   RootClose当前(close_commit之后)的完整7字段state, closed必须是1
@@ -475,7 +481,7 @@ export function convertToClaimWitnessArgs({ heldIdx, claimPrefixHex, claimSuffix
  */
 export function buildConvertToClaimTxJson({
   kaspa, network, marketId, committeePubkeyHex, deadlineMs, rootCloseTmplHash,
-  rootCloseOutpoint, rootCloseCovId, closedState, heldTokenOutpoint,
+  rootCloseOutpoint, rootCloseUtxoScriptPublicKeyHex, rootCloseCovId, closedState, heldTokenOutpoint,
   tokPrefixHex, tokSuffixHex, feeUtxo, relayChangeScriptPublicKeyHex, absFeeCapSompi,
 }) {
   if (closedState.closed !== 1) throw new Error(`buildConvertToClaimTxJson: fail-closed — closedState.closed=${closedState.closed}, RootClose.convert_to_claim的require(closed==1)必然拒绝(尚未close_commit?)`);
@@ -487,6 +493,12 @@ export function buildConvertToClaimTxJson({
   // RootClose当前(closed:1)redeem脚本: computeRootCloseGenesisArtifact自带fail-closed(模板hash必须等于已存rootCloseTmplHash)。
   const rcArtifact = computeRootCloseGenesisArtifact({ marketId, committeePubkeyHex, deadlineMs, rootCloseTmplHash, state: closedState });
   const convertToClaimEntryAbi = rcArtifact.entries.convert_to_claim;
+  // B4-5(NWT批4, Bettor/NWT裁定同样加到convert_to_claim): 现算的当前RootClose(closed:1) spk必须等于调用方给的链上UTXO spk
+  // (调用方从UTXO快照/产出该UTXO的close_commit交易输出取, 不是本函数现算的)——closedState与链上不符时节点会以P2SH不匹配拒收
+  // (不丢钱), 这里入口就大声失败。
+  if (typeof rootCloseUtxoScriptPublicKeyHex !== 'string' || String(rootCloseUtxoScriptPublicKeyHex).replace(/^0x/, '').toLowerCase() !== String(rcArtifact.scriptPubKeyHex).replace(/^0x/, '').toLowerCase()) {
+    throw new Error(`buildConvertToClaimTxJson: fail-closed — 现算的当前RootClose spk(${rcArtifact.scriptPubKeyHex}) != 调用方给的链上UTXO spk(${rootCloseUtxoScriptPublicKeyHex}); closedState/deadline/committee与链上已不自洽`);
+  }
   // RootClaim genesis(8字段: 7字段照抄RootClose自身state, claimed_bitmap:0)。
   const claimState = {
     local_yes: closedState.local_yes, local_no: closedState.local_no, count: closedState.count, pool_value: closedState.pool_value,

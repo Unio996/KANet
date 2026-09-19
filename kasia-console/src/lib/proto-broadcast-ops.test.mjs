@@ -160,7 +160,7 @@ await t('⑥covenant_broadcast 命令本身失败(relay 拒绝) ⇒ 返回 {erro
       if (cmd.type === 'get_address_utxos') {
         if (cmd.address === leafAddress) {
           const txid = heldOutpoint ? heldOutpoint.leafTxid : leafOutpointTxid;
-          return { ok: true, utxos: [{ outpoint: { transactionId: txid, index: 0 }, amount: '1000' }] };
+          return { ok: true, utxos: [{ outpoint: { transactionId: txid, index: 0 }, amount: '20000000' }] };
         }
         if (heldOutpoint && cmd.address === heldAddressFor(currentState.pool_value)) {
           return { ok: true, utxos: [{ outpoint: { transactionId: heldOutpoint.txid, index: 2 }, amount: '20000000' }] };
@@ -314,7 +314,7 @@ await t('⑥covenant_broadcast 命令本身失败(relay 拒绝) ⇒ 返回 {erro
       if (cmd.type === 'get_address_utxos') {
         if (cmd.address === leafAddress) {
           const txid = heldOutpoint ? heldOutpoint.leafTxid : leafOutpointTxid;
-          return { ok: true, utxos: [{ outpoint: { transactionId: txid, index: 0 }, amount: '1000' }] };
+          return { ok: true, utxos: [{ outpoint: { transactionId: txid, index: 0 }, amount: '20000000' }] };
         }
         if (heldOutpoint && cmd.address === heldAddressFor2(currentState.pool_value)) {
           return { ok: true, utxos: [{ outpoint: { transactionId: heldOutpoint.txid, index: 2 }, amount: '20000000' }] };

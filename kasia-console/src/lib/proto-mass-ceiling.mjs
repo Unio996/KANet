@@ -154,6 +154,12 @@ export function assertMassWithinCeiling({ kaspa, network, tx, inputHasCovenant, 
     insStorage.push({ plurality: utxoPlurality(scriptByteLen(spkHex), inputHasCovenant[i]), amountSompi: amount });
     const sigHex = scriptHexNoPrefix(inp.signatureScript ?? '');
     // 断言在relay签名之前执行: sigScript为空的输入将由relay签名, 签名后sigScript恰为66字节, 计入留量。
+    // 🔴 66B留量的两个前提(NWT终审要求写明):
+    //   ①【适用范围】对【所有】sigScript为空的输入都按66B计——前提是这类输入一定是relay单签名P2PK fee输入
+    //     (签名后sigScript=push(65B: 64B schnorr签名+1B sighash类型)=66B)。所有covenant输入的见证必须在本断言之前已填好;
+    //     若某builder留下"需要更大见证(如多签/merkle证明)的空sigScript输入", 本断言会【低估】compute——届时必须改为显式声明。
+    //   ②【方向】已含sigScript的输入按其实长计、不重复加留量; 对同一fee输入, 66B恰等于签名后的真实长度(节点值8/8逐位吻合
+    //     含此留量), 不是"过计更安全"的拍脑袋余量——若前提①失效(更长见证), 方向反而是低估。
     computeIns.push({ sigScriptBytes: sigHex.length === 0 ? SIGNED_INPUT_SIGSCRIPT_BYTES : sigHex.length / 2, computeBudget: Number(inp.computeBudget ?? 0) });
   }
   const outsStorage = [];

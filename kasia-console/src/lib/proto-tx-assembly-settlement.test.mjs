@@ -284,12 +284,14 @@ t('⑤真实tx算出的output covenant_id与builder返回的rootCloseCovId/token
   const closedState = { ...currentState, closed: 1, winningSide: NEW_WINNING_SIDE, payoutRoot: NEW_PAYOUT_ROOT_HEX };
   const c2cRootCloseOutpoint = { txid: closeCommitBuilt.expectedTxid, vout: CLOSE_COMMIT_ROOTCLOSE_OUT_INDEX };
   const c2cHeldOutpoint = { txid: sealBuilt.expectedTxid, vout: MARKET_SEAL_TOKEN_OUT_INDEX };
+  // B4-5: 链上RootClose(closed:1) UTXO的spk取自产出它的close_commit交易的真实输出(独立于builder现算的spk)
+  const c2cRootCloseUtxoSpk = '0x' + String(kaspa.Transaction.deserializeFromSafeJSON(closeCommitBuilt.txJson).outputs[CLOSE_COMMIT_ROOTCLOSE_OUT_INDEX].scriptPublicKey.script);
   const c2cCap = loadFeeProfileCap('convert_to_claim');
   const c2cFeeUtxo = { txid: 'ee'.repeat(32), vout: 2, value: 10_000_000_000n, scriptPublicKeyHex: relaySpkHex };
   const c2cArgs = (over = {}) => ({
     kaspa, network: 'mainnet',
     marketId: MARKET_ID, committeePubkeyHex: genesisArtifacts.committeePubkeyHex, deadlineMs: DEADLINE_MS, rootCloseTmplHash: genesisArtifacts.rootCloseTmplHash,
-    rootCloseOutpoint: c2cRootCloseOutpoint, rootCloseCovId: sealBuilt.rootCloseCovId, closedState, heldTokenOutpoint: c2cHeldOutpoint,
+    rootCloseOutpoint: c2cRootCloseOutpoint, rootCloseUtxoScriptPublicKeyHex: c2cRootCloseUtxoSpk, rootCloseCovId: sealBuilt.rootCloseCovId, closedState, heldTokenOutpoint: c2cHeldOutpoint,
     tokPrefixHex, tokSuffixHex, feeUtxo: c2cFeeUtxo, relayChangeScriptPublicKeyHex: relaySpkHex, absFeeCapSompi: c2cCap,
     ...over,
   });
@@ -428,6 +430,8 @@ t('⑤真实tx算出的output covenant_id与builder返回的rootCloseCovId/token
   expectFailClosed('⑨fail-closed: closedState.closed=0(尚未close_commit)', () => buildConvertToClaimTxJson(c2cArgs({ closedState: { ...closedState, closed: 0 } })), /fail-closed.*closed/);
   expectFailClosed('⑨fail-closed: heldTokenOutpoint为空(没有持有代币输入)', () => buildConvertToClaimTxJson(c2cArgs({ heldTokenOutpoint: null })), /fail-closed.*heldTokenOutpoint/);
   expectFailClosed('⑨fail-closed: 错误的rootCloseTmplHash', () => buildConvertToClaimTxJson(c2cArgs({ rootCloseTmplHash: 'ff'.repeat(32) })), /fail-closed/);
+  expectFailClosed('⑨b B4-5 fail-closed: rootCloseUtxoScriptPublicKeyHex与现算的当前RootClose spk不一致', () => buildConvertToClaimTxJson(c2cArgs({ rootCloseUtxoScriptPublicKeyHex: '0x' + 'aa20' + '11'.repeat(32) + '87' })), /fail-closed.*链上UTXO spk/);
+  expectFailClosed('⑨b B4-5 fail-closed: rootCloseUtxoScriptPublicKeyHex缺失', () => buildConvertToClaimTxJson(c2cArgs({ rootCloseUtxoScriptPublicKeyHex: undefined })), /fail-closed.*链上UTXO spk/);
 
   t('⑩不含私钥/委员私钥信封解密值: builder返回值序列化后不含明文私钥', () => {
     const privHex = decryptCommitteePrivkey(genesisArtifacts.committeePrivkeyEnvelope);
@@ -496,15 +500,15 @@ t('⑤真实tx算出的output covenant_id与builder返回的rootCloseCovId/token
   });
 
   // B4-2: deadline守卫加余量
-  t('⑤d B4-2: deadline在余量之内(now-60s, 已过deadline但未过120s余量)必须构造期fail-closed, 报文提到余量', () => {
+  t('⑤d B4-2: deadline在余量之内(now-60s, 已过deadline但未过300s余量)必须构造期fail-closed, 报文提到余量', () => {
     throws(() => buildCloseCommitTxJson(closeArgs({ deadlineMs: Date.now() - 60_000 })), /fail-closed.*余量/);
   });
   t('⑤d2 B4-2 对照: deadline已过余量之外(now-1h)不因余量被拒(由此证明上一条的throw来自余量而非别的原因)', () => {
-    if (CLOSE_COMMIT_DEADLINE_MARGIN_MS !== 120_000) throw new Error(`余量常量=${CLOSE_COMMIT_DEADLINE_MARGIN_MS}, 期望暂定值120000`);
-    // 用真实市场的DEADLINE_MS(远在过去)构造成功即可(closeCommitBuilt已证); 这里再确认余量边界: now-121s 时到达artifact校验(模板hash不符→另一种fail-closed), 而不是余量错误
-    let e = null; try { buildCloseCommitTxJson(closeArgs({ deadlineMs: Date.now() - 121_000 })); } catch (x) { e = x; }
-    if (!e) throw new Error('now-121s的deadline与市场模板hash不一致, 应被(模板hash)fail-closed拒绝');
-    if (/余量/.test(e.message)) throw new Error(`now-121s已超过余量, 不应再报余量错误: ${e.message}`);
+    if (CLOSE_COMMIT_DEADLINE_MARGIN_MS !== 300_000) throw new Error(`余量常量=${CLOSE_COMMIT_DEADLINE_MARGIN_MS}, 期望暂定值300000`);
+    // 用真实市场的DEADLINE_MS(远在过去)构造成功即可(closeCommitBuilt已证); 这里再确认余量边界: now-301s 时到达artifact校验(模板hash不符→另一种fail-closed), 而不是余量错误
+    let e = null; try { buildCloseCommitTxJson(closeArgs({ deadlineMs: Date.now() - 301_000 })); } catch (x) { e = x; }
+    if (!e) throw new Error('now-301s的deadline与市场模板hash不一致, 应被(模板hash)fail-closed拒绝');
+    if (/余量/.test(e.message)) throw new Error(`now-301s已超过余量, 不应再报余量错误: ${e.message}`);
   });
 
   // B4-5: 现算spk必须等于链上UTXO spk

@@ -166,7 +166,7 @@ export async function buildRegisterAppendAndBroadcast({ kaspa, network, market, 
   try {
     assertLeafStateMatchesChain({
       marketId, shardLeafRedeemScript: leafRedeem.script, stateLayout: leafRedeem.stateLayout,
-      chainUtxo: leafValue === null ? null : { scriptPublicKeyHex: leafRedeem.scriptPubKeyHex, spent: false },
+      chainUtxo: leafValue === null ? null : { scriptPublicKeyHex: leafRedeem.scriptPubKeyHex, spent: false, value: leafValue }, // N-1: 传真实面值, assertLeafStateMatchesChain核对==CONTINUATION_OUTPUT_SOMPI
     });
   } catch (e) { return { error: e.message }; }
 
