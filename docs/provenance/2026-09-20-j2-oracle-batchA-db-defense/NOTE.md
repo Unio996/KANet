@@ -22,3 +22,6 @@
 
 ## 诚实边界
 触发器防应用 / 运维失误与手写 SQL, **不防能 DROP TRIGGER / 伪造 verdict 行的机器写权**(设计 §10 R1 末句); `human` 写入口须经带鉴权接口 + 审计(批 B 之后)。verdict 行的真实性(是不是真由抽取器 / UMA 产生)不在本批保证范围。
+
+## 在真库副本上的验证(未碰活库)
+用 better-sqlite3 backup API 从只读连接拷出主网 console 库与 9-4 simnet console 库的副本, 对副本跑本迁移: 两库都迁移成功、16 个触发器全装上、市场行数与 (id, status, winning_side) 迁移前后逐行一致; 遗留行(主网首轮 a59c: winning_side 已有值、审计列 NULL)照常——尝试改值被拒、`updated_at` 之类无关更新放行、DELETE 被拒。活库未动; 主网应用仍等 Owner 批准的下次重启。
