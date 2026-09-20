@@ -1,4 +1,4 @@
-> **Status**: CURRENT (v0.1 · 待 NWT 红队)
+> **Status**: CURRENT (v0.2 · 2026-09-20 据 NWT 红队 9b14187e 并入 B1–B7 见 §10 · 待 NWT MUST-only 复核第 2 轮)
 
 # oracle 整合 批 B 设计 v0.1：adapter — 扫市场 → deriveVote → 写 verdicts → 经批 D 门 promote
 
@@ -57,3 +57,16 @@
 - 与批 A/D 门/触发器逐一自洽(promote 只经 guarded UPDATE、冻结只经批 D 路径、write-once)。
 - N5b 落地机制(怎么在代码/配置上保证"有价值市场不上主网",不只靠文档)。
 - 创建入口扩字段对既有 proto 建市场流的影响面。
+
+## 10. v0.2 据 NWT 红队(9b14187e)并入 B1–B7（设计审第 2 轮前定稿,待 NWT MUST-only 复核）
+> Status 升 v0.2。B1–B7 是批 B 实现验收硬项。
+
+- **B1 source_kind 单一贴标(最重)**:批 A/D 全靠此标签,若"命中已知抽取器⇒extractor"贴标,LLM 结果会以 extractor 进赞成集、门拦不住。**单一纯函数 classifySourceKind**:仅 `extractor_kind_used==='judgeline-deterministic'`(有 resolution_predicate 的确定性算术)⇒ **extractor**;仅 `derivePolymarketVote` 且 `ok:true`(过 UMA 定稿窗)⇒ **uma**;**其余一切有 outcome 的结果 + 未知/新增 extractor_kind_used ⇒ llm**(证据由抽取器抽、判定交 Qwen 的都算 llm 决策)。用真 deriveKanetNativeVote 各返回形态(含未知值)测,变异"LLM 路径改标 extractor"必红。**UMA_FINALIZATION_WINDOW_MS 的 env 覆盖:proto 路径拒 <24h**(否则未定稿 UMA 被贴 uma)。
+- **B2 ABSTAIN 暂态 vs 实质**(verdict 只增不删、NULL 即冻结):**暂态**(赛果未 final / 抽取器 null / 取数失败 / 超时 / pmt 无效)⇒ **不写、下 tick 重试到 cutoff**;**实质**(源已 final 但字段不足 / judgeline-abstain / LLM 低置信 / 明确争议)⇒ **写 NULL**。给 `extractor_kind_used → 暂态/实质` 枚举表,**未知值按暂态**。**同 (市场,source_kind,证据哈希) 至多一条 verdict**;**LLM 每市场在抽取器 final 后只问一次**(防非确定性写出相反两行冻死市场)。
+- **B3 outcome↔side 映射**(写值不可改、错一位赢家侧反):规格显式带 `side_map`,**创建时校验 + 存入不可改列**(批 A R4 锁);三来源各过同一 `toSide()`;UMA 走 polymarket outcome_side 极性。用真生产者输出(三路径各一份 YES/NO)测 + 极性反对照臂。
+- **B4 pmt 无效对异议 fail-open**(同批 D M1):**赞成 ⇒ pmt 无效不写;实质异议 / 实质 ABSTAIN ⇒ pmt 无效也写(pmt_at=NULL,批 D M1 正为这种行设计)**。与 B2 合成一张表:{暂态:不写}{实质异议:必写}{赞成:pmt 有效才写}。
+- **B5 N5b 一个谓词、三处强制、默认关**:新 env **`PROTO_ORACLE_ADAPTER_ENABLED`(默认关,driver 开关同级,翻开须 Owner)** + **`PROTO_ORACLE_VALUELESS_TOKEN_IDS`(主网唯一允许判定题的 token 白名单)**;共享谓词 **`judgedMarketAllowedHere({network,tokenDefId})`** 在 ①创建入口(主网+非白名单⇒拒建判定题)②受理门(纵深)③adapter 扫描+promote 三处调用;启动 LOUD 打印生效值;测试/lint 钉"三处调同一谓词"。非主网不受限。
+- **B6 创建入口(最大输入面)**:(a) **data_source_canonical 只接受 findExtractor(url) 命中的白名单源**,拒 free-text / 任意 http(s) / 本机内网(deriveKanetNativeVote 会在判已知源前 fetch(url) 且把 localhost 改写成本机 console 端口=SSRF 面),adapter 复核同一注册表;(b) **自动 promote 需"有 resolution_predicate 的确定性抽取器源"∧"polymarket/UMA 条件"两条都在**,缺一 ⇒ 创建时拒或标"仅人工/退款"(否则只会 cutoff 冻结→退款);(c) `deadline_ms ≥ outcome_end_ms + 各来源真实时延`,**UMA 默认 48h 定稿窗必算进 §7 预算**;(d) **不从请求体收 relay id 类字段**(复用 rejectRelayIdInBody),outcome_oracle_relay_ids 服务端定;ensureMarketPending 同一 INSERT 写全判定题列;不复制"收 resolutionNote 却丢弃"的形态;(e) **字段全可选,缺省行为与今天逐字节相同 + 回归测试**。
+- **B7 promote 原子再守异议**:批 D PROMOTE_UPDATE_SQL 谓词只带 sealed∧winning_side NULL∧frozen NULL,R2/异议检查在 JS、与写值不原子;adapter 是第一个真调用方 + 写值不可改 ⇒ **把 `NOT EXISTS(SELECT 1 FROM proto_market_verdicts v WHERE v.market_id=? AND (v.outcome IS NULL OR v.outcome<>?))` 加进同一条 UPDATE 的 WHERE**(或包 BEGIN IMMEDIATE);测"异议行在检查后插入⇒changes==0"。
+- **NWT ①–⑥ 采纳**:① R2 独立性=**运营方选源的机制独立(确定性抽取器 vs UMA 人投预言机),不含问题等价性证明**(predicate 与 polymarket 条件都建市场者填、无校验),复用现有 parallel judgment 的"假并行"守卫(独立源不得都是 polymarket/gamma);② **llm verdict 走本地 Qwen(deriveKanetNativeVote 的 LLM 路)还是 TypeSafe——设计明确:TypeSafe 用作主观题的 llm proposal,Qwen 路同归 llm 类**;"能冻"是 grief 杠杆(控证据页者可诱导异议)⇒虚假冻结率监控要真接线(SHOULD);③ 见 B2+B4;④ promote 只经 guarded UPDATE(+B7)、冻结只经批 D freezeMarket、write-once ✅;**人工冻结/human verdict 无写入路径 ⇒ SHOULD:带鉴权+审计的最小管理入口作应急刹车**;⑤ 见 B5;⑥ 见 B6。
+- **SHOULD 记票**:人工冻结/human verdict 鉴权入口;同 (市场,来源) verdict 写入事务内查重;TypeSafe 只送标题/公开证据+长度上限+key 不入日志;resolution_rule_spec 5 必填复用 bettor.js;simnet 端到端补"UMA 未定稿⇒ABSTAIN 不冻结 / 定稿后 promote"、"LLM 诱导异议⇒冻结"。
