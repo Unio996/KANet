@@ -33,8 +33,13 @@ sqlite.prepare('INSERT INTO proto_token_defs (id,name,ticker,created_at) VALUES 
 const PK_A = 'aa'.repeat(32), PK_B = 'bb'.repeat(32);
 function mkMarket({ status = 'betting', sealCount = 2, winningSide = null, shardleafTxid = hex64() } = {}) {
   const id = hex64();
-  sqlite.prepare(`INSERT INTO proto_markets (id, token_def_id, question, deadline_ms, min_bet, seal_count, committee_pubkeys_json, committee_privkey_enc, rootclose_tmpl_hash, shardleaf_txid, shardleaf_vout, status, winning_side, created_at, updated_at)
-    VALUES (?, 'tok1', 'q', 1000, 600, ?, '[]', 'enc', ?, ?, 0, ?, ?, ?, ?)`).run(id, sealCount, hex64(), shardleafTxid, status, winningSide, T0, T0);
+// v212 R1 触发器之后: winning_side 只能在 sealed 市场上带 source+set_at 写一次, 夹具不再能 INSERT 带值 / 在非 sealed 状态直写
+  sqlite.prepare(`INSERT INTO proto_markets (id, token_def_id, question, deadline_ms, min_bet, seal_count, committee_pubkeys_json, committee_privkey_enc, rootclose_tmpl_hash, shardleaf_txid, shardleaf_vout, status, created_at, updated_at)
+    VALUES (?, 'tok1', 'q', 1000, 600, ?, '[]', 'enc', ?, ?, 0, ?, ?, ?)`).run(id, sealCount, hex64(), shardleafTxid, winningSide == null ? status : 'sealed', T0, T0);
+  if (winningSide != null) {
+    sqlite.prepare("UPDATE proto_markets SET winning_side = ?, winning_side_source = 'operator', winning_side_set_at = ? WHERE id = ?").run(winningSide, T0, id);
+    if (status !== 'sealed') sqlite.prepare('UPDATE proto_markets SET status = ? WHERE id = ?').run(status, id);
+  }
   return id;
 }
 function mkBet(marketId, { side, stake = 600, status = 'confirmed', pk } = {}) {

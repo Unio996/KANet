@@ -85,7 +85,7 @@ const plain = (spk) => ({ spk, mode: 'plain' });
 const ticketSpk = (pk, side, stake, M) => noPrefix(computeTicketGenesisArtifact({ bettorPk: pk, direction: side, stake, shardPoolId: M }).scriptPubKeyHex);
 
 let chainSeq = 0;
-/** 造一条完整链并写库。mods: {A1,A2,S,CC,V: spec=>spec 改交易布局; winningSide; bet2Ticket:(A2)=>({txid,vout}); swapAppendOrder; sameLandedAt} */
+/** 造一条完整链并写库。mods: {A1,A2,S,CC,V: spec=>spec 改交易布局; winningSide; noWinner(不写 winning_side); bet2Ticket:(A2)=>({txid,vout}); swapAppendOrder; sameLandedAt} */
 function seedChain(M, mods = {}) {
   const n = ++chainSeq;
   const genesisTxid = hex(`genesis-${n}`);
@@ -99,7 +99,10 @@ function seedChain(M, mods = {}) {
 
   sqlite.prepare(`INSERT INTO proto_markets (id, token_def_id, question, deadline_ms, min_bet, seal_count, committee_pubkeys_json, committee_privkey_enc, rootclose_tmpl_hash, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
     .run(M, 'tok1', 'q?', 1700000000000, 1, 2, '[]', 'enc', 'aa'.repeat(32), now0, now0);
-  sqlite.prepare('UPDATE proto_markets SET status = ?, winning_side = ?, shardleaf_txid = ?, shardleaf_vout = ?, shardleaf_cov_id = ? WHERE id = ?').run('resolved', mods.winningSide ?? 1, genesisTxid, 0, LEAFCOV, M);
+// v212 R1 触发器之后: winning_side 只能在 sealed 市场上带 source+set_at 写一次, 夹具不再能 INSERT 带值 / 在非 sealed 状态直写
+  sqlite.prepare('UPDATE proto_markets SET status = ?, shardleaf_txid = ?, shardleaf_vout = ?, shardleaf_cov_id = ? WHERE id = ?').run('sealed', genesisTxid, 0, LEAFCOV, M);
+  if (!mods.noWinner) sqlite.prepare("UPDATE proto_markets SET winning_side = ?, winning_side_source = 'operator', winning_side_set_at = ? WHERE id = ?").run(mods.winningSide ?? 1, now0, M);
+  sqlite.prepare("UPDATE proto_markets SET status = 'resolved' WHERE id = ?").run(M);
   const b1 = `bet${n}-1`, b2 = `bet${n}-2`;
   const tk2 = mods.bet2Ticket ? mods.bet2Ticket(A2) : { txid: A2.id, vout: 1 };
   const insBet = (id, pk, side, stake, tx, vout) => sqlite.prepare(`INSERT INTO proto_bets (id, market_id, bettor_pk, side, stake, status, ticket_txid, ticket_vout, created_at) VALUES (?,?,?,?,?,?,?,?,?)`).run(id, M, pk, side, stake, 'confirmed', tx, vout, now0);
@@ -290,7 +293,7 @@ await t('P12 胜方已确认下注 ≠ 1(0 条 / 2 条 / winning_side 未写)⇒
   const c2 = seed(); sqlite.prepare(`INSERT INTO proto_bets (id, market_id, bettor_pk, side, stake, status, created_at) VALUES (?,?,?,?,?,?,?)`).run(`${c2.b1}-extra`, c2.M, PK1, 1, 5, 'confirmed', now0);
   const e = rejP(() => res('claim_draw', c2.M), 'pointer_winner_ambiguous');
   if (!/恰好 1 条/.test(e.detail)) throw new Error(`应带 deriveWinnerBet 的原报文: ${e.detail}`);
-  const cn = seed(); sqlite.prepare('UPDATE proto_markets SET winning_side = NULL WHERE id = ?').run(cn.M);
+  const cn = seed({ noWinner: true });                                                                   // winning_side 为 NULL 的市场(v212 之后 winning_side 不能写回 NULL, 改为造链时就不写)
   rejP(() => res('claim_draw', cn.M), 'pointer_winner_ambiguous');
   res('convert_to_claim', cn.M);                                                                        // 更早的步骤不取赢家, 不受影响
 });

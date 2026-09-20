@@ -41,8 +41,9 @@ const quiet = { log: () => {}, error: () => {} };
 function seedBet(betId, marketId = 'm1', tokenDefId = 't1') {
   const now = new Date().toISOString();
   sqlite.prepare(`INSERT OR IGNORE INTO proto_token_defs (id,name,ticker,created_at) VALUES (?,?,?,?)`).run(tokenDefId, 'Test', 'TST', now);
-  sqlite.prepare(`INSERT OR IGNORE INTO proto_markets (id,token_def_id,deadline_ms,min_bet,committee_pubkeys_json,committee_privkey_enc,rootclose_tmpl_hash,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)`)
-    .run(marketId, tokenDefId, 1700000000000, 100, '[]', 'enc', 'aa'.repeat(32), now, now);
+  // v212 R1: 对已存在 id 的任何 INSERT 变体(含 OR IGNORE)都会被触发器 ABORT ⇒ 改成"不存在才插"
+  sqlite.prepare(`INSERT INTO proto_markets (id,token_def_id,deadline_ms,min_bet,committee_pubkeys_json,committee_privkey_enc,rootclose_tmpl_hash,created_at,updated_at) SELECT ?,?,?,?,?,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM proto_markets WHERE id = ?)`)
+    .run(marketId, tokenDefId, 1700000000000, 100, '[]', 'enc', 'aa'.repeat(32), now, now, marketId);
   sqlite.prepare(`INSERT OR IGNORE INTO proto_bets (id,market_id,bettor_pk,side,stake,status,created_at) VALUES (?,?,?,?,?,?,?)`)
     .run(betId, marketId, 'bb'.repeat(32), 0, 1000, 'pending', now);
 }

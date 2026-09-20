@@ -151,8 +151,11 @@ console.log('[test] ⑦ claim: 候选数量必须恰好1条(Bettor 1354裁定, �
 {
   const marketId = 'm-test-7-zero';
   const now = new Date().toISOString();
-  sqlite.prepare(`INSERT INTO proto_markets (id,token_def_id,deadline_ms,min_bet,committee_pubkeys_json,committee_privkey_enc,rootclose_tmpl_hash,status,winning_side,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
-    .run(marketId, tokenDefId, Date.now() + 100000, 10, '[]', 'enc', 'aa'.repeat(32), 'resolved', 0, now, now);
+// v212 R1 触发器之后: winning_side 只能在 sealed 市场上带 source+set_at 写一次, 夹具不再能 INSERT 带值 / 在非 sealed 状态直写
+  sqlite.prepare(`INSERT INTO proto_markets (id,token_def_id,deadline_ms,min_bet,committee_pubkeys_json,committee_privkey_enc,rootclose_tmpl_hash,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)`)
+    .run(marketId, tokenDefId, Date.now() + 100000, 10, '[]', 'enc', 'aa'.repeat(32), 'sealed', now, now);
+  sqlite.prepare("UPDATE proto_markets SET winning_side = 0, winning_side_source = 'operator', winning_side_set_at = ? WHERE id = ?").run(now, marketId);
+  sqlite.prepare("UPDATE proto_markets SET status = 'resolved' WHERE id = ?").run(marketId);
 
   const zeroCandidate = await app.inject({ method: 'POST', url: `/api/proto-markets/${marketId}/claim` });
   ok(zeroCandidate.statusCode === 404, `0条候选 → 404(实际 ${zeroCandidate.statusCode})`);

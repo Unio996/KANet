@@ -6368,5 +6368,84 @@ export function runMigrations() {
   `);
   console.log('[migrate] v211: watch_accounts 建表(只读/冷存账户注册表, 无密钥列, CHECK custody=cold_no_key; D-028).');
 
+  // ── v212 (2026-09-20, J2 · oracle→winning_side 整合批 A, 设计 docs/2026-09-20-bettor-oracle-to-proto-winning-side-integration-design-v0.1.md
+  //   §3.1 / §7-A / §10 R1·R4, NWT 复核 GREEN dff2d8ba): proto_markets.winning_side 的【DB 层防御】——纯 schema, 不含 adapter, 不动驱动 / relay / builder。
+  //   ① 追加表 proto_market_verdicts(append-only: UPDATE / DELETE 触发器拒)——winning_side 的可引用判定记录。
+  //   ② proto_markets 加审计列 winning_side_source / winning_side_set_at / winning_side_verdict_id + 判定题列(题面; 全可空, 老市场全 NULL = "无判定题")。
+  //   ③ R1 触发器: winning_side 写一次即终局(INSERT 必 NULL / 已存在 id 拒重插=堵 INSERT OR REPLACE / UPDATE 时 OLD 非空拒 + 值∈{0,1} + OLD·NEW.status 均 sealed /
+  //      必带 source + set_at / operator 禁写判定题市场 / extractor·uma·human 须引用同市场同值同类的 verdict / DELETE 有值或有下注·意图·claim·判定的市场拒)。
+  //   ④ R4 触发器: 题面列(question + 4 个判定题列 + outcome_end_ms)在 genesis 广播后 / 首笔下注后一律拒改。
+  //   🔴 operator 受控写路径(主网首轮那种)从此必须同时写 winning_side_source='operator' + winning_side_set_at; 有判定题的市场 operator 直写被拒。
+  //   🟡 诚实边界: 触发器防的是【应用 / 运维失误与手写 SQL】, 不防能 DROP TRIGGER / 伪造 verdict 行的机器写权(设计 §10 R1 末句)。
+  //   🟡 SQLite: BEFORE INSERT 触发器先于 OR IGNORE / OR REPLACE / upsert 的冲突处理触发, 且 RAISE(ABORT) 不被外层 OR IGNORE 覆盖 ⇒ 对已存在 id 的任何 INSERT 变体一律 ABORT
+  //      (本仓生产代码无此类调用; 只有 4 个测试文件用 INSERT OR IGNORE 播种, 已同笔改)。recursive_triggers 默认关, DELETE 触发器不会被 REPLACE 隐式触发, 所以必须在 INSERT 侧堵。
+  {
+    const cols = new Set(sqlite.prepare('PRAGMA table_info(proto_markets)').all().map((c) => c.name));
+    const addCol = (name, ddl) => { if (!cols.has(name)) sqlite.exec(`ALTER TABLE proto_markets ADD COLUMN ${name} ${ddl}`); };
+    // 判定题里"这市场有判定题"的判据(fail-safe 取宽: 任一判定题列非 NULL 即算——含空串, 让"清空字段假装无判定题"走不通)
+    const JUDGED = (r) => `(${r}.resolution_rule_spec IS NOT NULL OR ${r}.outcome_market_source IS NOT NULL OR ${r}.outcome_condition_id IS NOT NULL OR ${r}.outcome_oracle_relay_ids IS NOT NULL)`;
+    // 题面已锁: genesis 已广播(status 出了 pending/prepared) 或已有 genesis 广播 txid / 落链 leaf txid, 或已有任一下注行
+    const LOCKED = `(OLD.status NOT IN ('genesis_pending','genesis_prepared') OR OLD.genesis_submitted_txid IS NOT NULL OR OLD.shardleaf_txid IS NOT NULL OR EXISTS (SELECT 1 FROM proto_bets WHERE market_id = OLD.id))`;
+    const TRIG = (name, timing, event, table, when, msg) => `DROP TRIGGER IF EXISTS ${name};\n    CREATE TRIGGER ${name} ${timing} ${event} ON ${table}${when ? ` WHEN ${when}` : ''}\n    BEGIN SELECT RAISE(ABORT, '${String(msg).replace(/'/g, "''")}'); END;`;   // 报文里的单引号转义(SQL 字面量)
+    const tx = sqlite.transaction(() => {
+      sqlite.exec(`
+        CREATE TABLE IF NOT EXISTS proto_market_verdicts (
+          id            INTEGER PRIMARY KEY AUTOINCREMENT,
+          market_id     TEXT NOT NULL REFERENCES proto_markets(id),
+          source_kind   TEXT NOT NULL CHECK (source_kind IN ('extractor','uma','llm','human')),
+          relay_id      TEXT,
+          outcome       INTEGER NOT NULL CHECK (outcome IN (0,1)),
+          confidence    REAL CHECK (confidence IS NULL OR (confidence >= 0 AND confidence <= 1)),
+          evidence_ref  TEXT NOT NULL CHECK (length(trim(evidence_ref)) > 0),
+          created_at    TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_proto_market_verdicts_market ON proto_market_verdicts(market_id);
+      `);
+      // 审计列(引用的 verdict 表须先建); ALTER ADD COLUMN 的 CHECK / REFERENCES 只对新写入生效, 老行全 NULL 合法
+      addCol('winning_side_source', "TEXT CHECK (winning_side_source IS NULL OR winning_side_source IN ('operator','extractor','uma','human'))");
+      addCol('winning_side_set_at', 'TEXT');
+      addCol('winning_side_verdict_id', 'INTEGER REFERENCES proto_market_verdicts(id)');
+      // 判定题 / 题面列(设计 §3.1; 全可空)
+      addCol('outcome_oracle_relay_ids', 'TEXT');
+      addCol('resolution_rule_spec', 'TEXT');
+      addCol('outcome_market_source', 'TEXT');
+      addCol('outcome_condition_id', 'TEXT');
+      addCol('outcome_end_ms', 'INTEGER');
+
+      const T = [];
+      // ── verdicts: append-only ──
+      T.push(TRIG('trg_pmv_append_only_update', 'BEFORE', 'UPDATE', 'proto_market_verdicts', null, 'proto_market_verdicts: append-only (UPDATE forbidden)'));
+      T.push(TRIG('trg_pmv_append_only_delete', 'BEFORE', 'DELETE', 'proto_market_verdicts', null, 'proto_market_verdicts: append-only (DELETE forbidden)'));
+      // ── R1: INSERT ──
+      T.push(TRIG('trg_pm_ws_r1_insert_existing_id', 'BEFORE', 'INSERT', 'proto_markets', 'EXISTS (SELECT 1 FROM proto_markets WHERE id = NEW.id)', 'proto_markets: INSERT onto an existing id is forbidden (INSERT OR REPLACE would wipe winning_side)'));
+      T.push(TRIG('trg_pm_ws_r1_insert_null', 'BEFORE', 'INSERT', 'proto_markets', 'NEW.winning_side IS NOT NULL OR NEW.winning_side_source IS NOT NULL OR NEW.winning_side_set_at IS NOT NULL OR NEW.winning_side_verdict_id IS NOT NULL', 'proto_markets: winning_side and its audit columns must be NULL at INSERT (write-once via sealed-market UPDATE only)'));
+      // ── R1: UPDATE winning_side ──
+      T.push(TRIG('trg_pm_ws_r1_write_once', 'BEFORE', 'UPDATE OF winning_side', 'proto_markets', 'OLD.winning_side IS NOT NULL', 'proto_markets: winning_side is write-once (already set; never changed or cleared)'));
+      T.push(TRIG('trg_pm_ws_r1_value_domain', 'BEFORE', 'UPDATE OF winning_side', 'proto_markets', 'NEW.winning_side IS NOT NULL AND NEW.winning_side NOT IN (0,1)', 'proto_markets: winning_side must be integer 0 or 1'));
+      T.push(TRIG('trg_pm_ws_r1_status_sealed', 'BEFORE', 'UPDATE OF winning_side', 'proto_markets', "NEW.winning_side IS NOT NULL AND (OLD.status <> 'sealed' OR NEW.status <> 'sealed')", "proto_markets: winning_side may only be written while status='sealed' (and the same UPDATE must not change status)"));
+      T.push(TRIG('trg_pm_ws_r1_source_required', 'BEFORE', 'UPDATE OF winning_side', 'proto_markets', "NEW.winning_side IS NOT NULL AND (NEW.winning_side_source IS NULL OR NEW.winning_side_source NOT IN ('operator','extractor','uma','human'))", 'proto_markets: winning_side_source is required (operator|extractor|uma|human) when writing winning_side'));
+      T.push(TRIG('trg_pm_ws_r1_set_at_required', 'BEFORE', 'UPDATE OF winning_side', 'proto_markets', "NEW.winning_side IS NOT NULL AND (NEW.winning_side_set_at IS NULL OR length(trim(NEW.winning_side_set_at)) = 0)", 'proto_markets: winning_side_set_at is required when writing winning_side'));
+      T.push(TRIG('trg_pm_ws_r1_operator_no_judged', 'BEFORE', 'UPDATE OF winning_side', 'proto_markets', `NEW.winning_side IS NOT NULL AND NEW.winning_side_source = 'operator' AND ${JUDGED('NEW')}`, "proto_markets: source='operator' is forbidden on a market with a resolution question (oracle path only)"));
+      T.push(TRIG('trg_pm_ws_r1_operator_no_verdict', 'BEFORE', 'UPDATE OF winning_side', 'proto_markets', "NEW.winning_side IS NOT NULL AND NEW.winning_side_source = 'operator' AND NEW.winning_side_verdict_id IS NOT NULL", "proto_markets: source='operator' must not carry a verdict reference"));
+      T.push(TRIG('trg_pm_ws_r1_verdict_ref', 'BEFORE', 'UPDATE OF winning_side', 'proto_markets',
+        "NEW.winning_side IS NOT NULL AND NEW.winning_side_source IN ('extractor','uma','human') AND NOT EXISTS (SELECT 1 FROM proto_market_verdicts v WHERE v.id = NEW.winning_side_verdict_id AND v.market_id = NEW.id AND v.outcome = NEW.winning_side AND v.source_kind = NEW.winning_side_source)",
+        'proto_markets: source extractor|uma|human requires winning_side_verdict_id referencing a verdict of the same market, same outcome, same source_kind (llm verdicts can never promote)'));
+      // ── R1: audit columns ──
+      T.push(TRIG('trg_pm_ws_r1_audit_needs_value', 'BEFORE', 'UPDATE', 'proto_markets', 'NEW.winning_side IS NULL AND (NEW.winning_side_source IS NOT NULL OR NEW.winning_side_set_at IS NOT NULL OR NEW.winning_side_verdict_id IS NOT NULL)', 'proto_markets: winning_side audit columns cannot be set without winning_side'));
+      T.push(TRIG('trg_pm_ws_r1_audit_immutable', 'BEFORE', 'UPDATE', 'proto_markets', 'OLD.winning_side IS NOT NULL AND (NEW.winning_side_source IS NOT OLD.winning_side_source OR NEW.winning_side_set_at IS NOT OLD.winning_side_set_at OR NEW.winning_side_verdict_id IS NOT OLD.winning_side_verdict_id)', 'proto_markets: winning_side and its audit columns are immutable once written'));   // winning_side 本身的改动由 write_once 拦(改 winning_side 必列在 SET 里 ⇒ OF winning_side 必触发), 这里只管审计列
+      // ── R1: DELETE ──
+      T.push(TRIG('trg_pm_ws_r1_delete_guard', 'BEFORE', 'DELETE', 'proto_markets',
+        "OLD.winning_side IS NOT NULL OR OLD.shardleaf_txid IS NOT NULL OR OLD.genesis_submitted_txid IS NOT NULL OR EXISTS (SELECT 1 FROM proto_bets WHERE market_id = OLD.id) OR EXISTS (SELECT 1 FROM proto_claims WHERE market_id = OLD.id) OR EXISTS (SELECT 1 FROM proto_settlement_intents WHERE subject_type = 'market' AND subject_id = OLD.id) OR EXISTS (SELECT 1 FROM proto_market_verdicts WHERE market_id = OLD.id) OR EXISTS (SELECT 1 FROM submit_intents WHERE intent_key = 'genesis:' || OLD.id)",
+        'proto_markets: DELETE forbidden for a market that has a winning_side, an on-chain/broadcast genesis, bets, claims, settlement intents or verdicts'));
+      // ── R4: 题面不可改 ──
+      T.push(TRIG('trg_pm_r4_question_immutable', 'BEFORE', 'UPDATE OF question, outcome_oracle_relay_ids, resolution_rule_spec, outcome_market_source, outcome_condition_id, outcome_end_ms', 'proto_markets',
+        `(NEW.question IS NOT OLD.question OR NEW.outcome_oracle_relay_ids IS NOT OLD.outcome_oracle_relay_ids OR NEW.resolution_rule_spec IS NOT OLD.resolution_rule_spec OR NEW.outcome_market_source IS NOT OLD.outcome_market_source OR NEW.outcome_condition_id IS NOT OLD.outcome_condition_id OR NEW.outcome_end_ms IS NOT OLD.outcome_end_ms) AND ${LOCKED}`,
+        'proto_markets: question / resolution-question columns are immutable after genesis broadcast or the first bet'));
+      for (const stmt of T) sqlite.exec(stmt);
+    });
+    tx();
+  }
+  console.log('[migrate] v212: proto_market_verdicts 追加表 + proto_markets 审计列/判定题列 + winning_side 写一次触发器(R1) + 题面不可改触发器(R4); 纯 schema, 不含 adapter(oracle 整合批 A).');
+
   console.log('[migrate] DB migrations complete.');
 }
