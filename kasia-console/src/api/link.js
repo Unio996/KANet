@@ -14,14 +14,26 @@
 
 import { sqlite } from '../db/client.js';
 import { verifyIngestRequest } from '../services/ingest-auth.js';
+import { configuredNetwork, checkAddressOnNetwork } from '../lib/kaspa-network.mjs';
 
 export async function registerLinkRoutes(fastify) {
   // POST /api/link/bind {address, telegram_user_id}
   // 替代 nonce+verify 旧路径. 直接 INSERT user_notification_prefs default subscribed=1 notify.
   fastify.post('/api/link/bind', { preHandler: async (request, reply) => { await verifyIngestRequest(request, reply); } }, async (request, reply) => {
     const { address, telegram_user_id } = request.body || {};
-    if (!address || typeof address !== 'string' || !address.startsWith('kaspa')) {
-      return reply.code(400).send({ ok: false, error: 'address required (kaspa: prefix)' });
+    if (!address || typeof address !== 'string') {
+      return reply.code(400).send({ ok: false, error: 'address required', code: 'empty' });
+    }
+    // CR-3 (Owner 批 2026-09-20; 变更说明 docs/2026-09-20-kanetui-tg-bot-mainnet-relaunch-and-proto-v0-repoint-change-note-v0.1.md §2): 绑定属"身份路", 地址必须是【本 console 配置网络】的合法地址——
+    // 复用既有网络单一源 lib/kaspa-network.mjs(先 Address.validate 校验和, 再比前缀; 设计 J2 2026-09-13 v0.2 I2/I3), 不新造前缀判断。
+    // 之前只校验 startsWith('kaspa'): 主网库里 kaspatest: 地址反而能绑成功(kaspatest 以 kaspa 开头), 且不验校验和。
+    // KASPA_NETWORK 未设/未知 ⇒ fail-closed 503(configuredNetwork 无默认值)。错误只回机器码 code + expected_prefix, 用户可见文案由 bot 按 code 渲染。
+    let network;
+    try { network = configuredNetwork(); }
+    catch { return reply.code(503).send({ ok: false, error: 'network not configured', code: 'network-unset' }); }
+    const chk = checkAddressOnNetwork(address, { network, who: 'link.js:bind' });
+    if (!chk.ok) {
+      return reply.code(400).send({ ok: false, error: `address must be a valid ${network} address (${chk.expectedPrefix}: prefix)`, code: chk.code, expected_prefix: chk.expectedPrefix });
     }
     if (!telegram_user_id || typeof telegram_user_id !== 'string') {
       return reply.code(400).send({ ok: false, error: 'telegram_user_id required' });
