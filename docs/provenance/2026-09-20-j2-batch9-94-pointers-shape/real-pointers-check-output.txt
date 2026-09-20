@@ -1,0 +1,28 @@
+{
+ "roles": {
+  "leaf": {
+   "outpoint": {
+    "transactionId": "c50959a00af1246444f882365f99586f548306f64ab883615f2e98685b6477ff",
+    "index": 0
+   },
+   "expectedCovenantId": "7db9a1e43b6bc731b4646bde2edac2e0aadba2d0942772f356a3d7d3236419ce",
+   "source": "append",
+   "producedBy": {
+    "table": "proto_bet_intents",
+    "key": "proto-bet:a6b306f8-0fdb-49de-99f7-c24e1f948efc:append"
+   }
+  },
+  "held": {
+   "outpoint": {
+    "transactionId": "c50959a00af1246444f882365f99586f548306f64ab883615f2e98685b6477ff",
+    "index": 2
+   },
+   "expectedCovenantId": "514bfc260d09e249b0ef7a926a5c3267bef1c0a44e2eeb3b417a685d49e14000",
+   "source": "append",
+   "producedBy": {
+    "table": "proto_bet_intents",
+    "key": "proto-bet:a6b306f8-0fdb-49de-99f7-c24e1f948efc:append"
+   }
+  }
+ }
+}

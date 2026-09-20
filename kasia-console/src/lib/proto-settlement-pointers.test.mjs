@@ -74,7 +74,8 @@ function buildTx(spec) {
   tx.finalize();
   const outs = tx.outputs;
   const covIds = outs.map((o) => (o.covenant ? String(o.covenant.covenantId).toLowerCase() : null));
-  const res = { id: String(tx.id).toLowerCase(), json: tx.serializeToSafeJSON(), covIds, spec };
+  // 真写入方形状(relay covenant-broadcast-relay.mjs ingestPhase: JSON.stringify([txJson])): 只含 1 个 safe-JSON 字符串的数组(9-4 simnet 实测; 此前夹具存裸串, 与真写入方不一致)
+  const res = { id: String(tx.id).toLowerCase(), json: JSON.stringify([tx.serializeToSafeJSON()]), covIds, spec };
   tx.free();
   return res;
 }
@@ -124,8 +125,9 @@ const res = (step, M) => resolveStepPointers({ step, marketId: M, db: sqlite, ka
 const snapAll = (M) => JSON.stringify(['seal', 'close_commit', 'convert_to_claim', 'claim_draw'].map((s) => res(s, M)));
 const setJson = (table, key, fn) => {
   const row = sqlite.prepare(`SELECT prepared_tx_json FROM ${table} WHERE intent_key = ?`).get(key);
-  const j = JSON.parse(row.prepared_tx_json); fn(j);
-  sqlite.prepare(`UPDATE ${table} SET prepared_tx_json = ? WHERE intent_key = ?`).run(JSON.stringify(j), key);
+  const outer = JSON.parse(row.prepared_tx_json);                                       // 真写入方形状 = [ "<safe-JSON 字符串>" ]; 篡改内层交易后按同形状写回
+  const wrapped = Array.isArray(outer); const j = JSON.parse(wrapped ? outer[0] : row.prepared_tx_json); fn(j);
+  sqlite.prepare(`UPDATE ${table} SET prepared_tx_json = ? WHERE intent_key = ?`).run(wrapped ? JSON.stringify([JSON.stringify(j)]) : JSON.stringify(j), key);
 };
 const setCol = (table, key, col, v) => sqlite.prepare(`UPDATE ${table} SET ${col} = ? WHERE intent_key = ?`).run(v, key);
 const op = (txid, index) => ({ transactionId: txid, index });
@@ -206,6 +208,18 @@ await t('P9d prepared_tx_json 不是合法 JSON / 不是交易 ⇒ pointer_tx_ma
   for (const bad of ['{not json', '{"x":1}', '[]', '42']) {
     const c = seed(); setCol('proto_settlement_intents', c.keys.S, 'prepared_tx_json', bad);
     rejP(() => res('close_commit', c.M), 'pointer_tx_malformed', { step: 'close_commit' });
+  }
+});
+await t('P9f ▲ prepared_tx_json 形状(9-4 simnet 实测缺口): 真写入方形状 [ "<safe-JSON 串>" ] 与裸串给出【逐字段相同】的指针; 数组 0 元素 / 2 元素 / 元素非字符串 / 嵌套数组 ⇒ pointer_tx_malformed(不猜取哪一笔)——去掉解包的变异必红', async () => {
+  const unwrap = (table, key) => { const r = sqlite.prepare(`SELECT prepared_tx_json FROM ${table} WHERE intent_key = ?`).get(key); const o = JSON.parse(r.prepared_tx_json); ok(Array.isArray(o) && o.length === 1 && typeof o[0] === 'string', '夹具应是真写入方形状'); return o[0]; };
+  const c = seed(); const wrappedSnap = snapAll(c.M);
+  for (const [key, table] of [[c.keys.A1, 'proto_bet_intents'], [c.keys.A2, 'proto_bet_intents'], [c.keys.S, 'proto_settlement_intents'], [c.keys.CC, 'proto_settlement_intents'], [c.keys.V, 'proto_settlement_intents']]) setCol(table, key, 'prepared_tx_json', unwrap(table, key));
+  eq(snapAll(c.M), wrappedSnap, '裸串形状与数组形状的指针结果应逐字段相同');
+  const inner = (() => { const d = seed(); return { d, s: unwrap('proto_settlement_intents', d.keys.S) }; })();
+  for (const bad of [[], [inner.s, inner.s], [JSON.parse(inner.s)], [[inner.s]], [null]]) {
+    const d = seed(); setCol('proto_settlement_intents', d.keys.S, 'prepared_tx_json', JSON.stringify(bad));
+    const e = rejP(() => res('close_commit', d.M), 'pointer_tx_malformed', { step: 'close_commit' });
+    if (!/恰 1 个 safe-JSON 字符串/.test(e.detail)) throw new Error(`报文应指明数组形状不合格(而不是落到下游 wasm 的泛化错误): ${e.detail}`);
   }
 });
 await t('P9e prepared_tx_json 为 NULL / 空串 / 纯空白 ⇒ pointer_tx_missing; landed 行的 submitted_txid 为空或非法 ⇒ pointer_txid_mismatch', async () => {

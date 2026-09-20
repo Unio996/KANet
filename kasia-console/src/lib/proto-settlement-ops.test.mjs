@@ -73,7 +73,7 @@ const fakeSendCmd = async (relayId, cmd) => {
   if (cmd.type === 'covenant_broadcast') {
     const tx = kaspa.Transaction.deserializeFromSafeJSON(cmd.tx_json); tx.finalize(); const id = String(tx.id).toLowerCase(); tx.free();
     if (id !== cmd.expected_txid) return { ok: false, error: `expected_txid mismatch ${id} != ${cmd.expected_txid}`, code: 'txid_mismatch' };
-    SI.recordSettlementIntentPhase({ intentKey: cmd.intent_key, phase: 'prepared', txid: id, txJson: cmd.tx_json });     // 真 relay 在广播前把 prepared 回执落 console(现有机制)
+    SI.recordSettlementIntentPhase({ intentKey: cmd.intent_key, phase: 'prepared', txid: id, txJson: JSON.stringify([cmd.tx_json]) });     // 真 relay 在广播前把 prepared 回执落 console(现有机制); 形状与 relay covenant-broadcast-relay.mjs ingestPhase 逐字一致: JSON.stringify([txJson])(9-4 simnet 实测: 此前这里存裸串, 与真写入方不一致 ⇒ 离线端到端没抓到 pointers 的形状 bug)
     broadcasts.push({ intentKey: cmd.intent_key, txid: id, cmd });
     applyTx(cmd.tx_json);
     return { ok: true, txId: id };
@@ -135,7 +135,7 @@ for (const [b, side, stake, n] of [[bet1, 0, 600, 1], [bet2, 1, 700, 2]]) {
   const betId = randomBytes(32).toString('hex');
   sqlite.prepare("INSERT INTO proto_bets (id, market_id, bettor_pk, side, stake, ticket_txid, ticket_vout, status, created_at, confirmed_at) VALUES (?,?,?,?,?,?,?, 'confirmed', ?, ?)").run(betId, MARKET_ID, COMMITTEE_PK, side, stake, b.built.expectedTxid, 1, T0, `2026-09-20T00:00:0${n}.000Z`);
   sqlite.prepare("INSERT INTO proto_bet_intents (intent_key, bet_id, step, status, prepared_txid, prepared_tx_json, submitted_txid, landed_at, created_at, updated_at) VALUES (?,?,'append','landed',?,?,?,?,?,?)")
-    .run(`proto-bet:${betId}:append`, betId, b.built.expectedTxid, b.built.txJson, b.built.expectedTxid, `2026-09-20T00:00:0${n}.000Z`, T0, T0);
+    .run(`proto-bet:${betId}:append`, betId, b.built.expectedTxid, JSON.stringify([b.built.txJson]), b.built.expectedTxid, `2026-09-20T00:00:0${n}.000Z`, T0, T0);
 }
 for (const tx of [genesisBuilt.txJson, bet1.built.txJson, bet2.built.txJson]) applyTx(tx);
 chain.set(`${'f1'.repeat(32)}:0`, { amount: 90_000_000n, scriptHex: relaySpkHex.slice(2).toLowerCase(), covenantId: null });     // relay 的 fee UTXO(≤ 1 KAS 签名输入上限, ≥ 各步 fee 上限)

@@ -61,8 +61,16 @@ function loadProducedTx({ kaspa, row, label, ctx }) {
   if (typeof row.prepared_tx_json !== 'string' || !row.prepared_tx_json.trim()) throw P('pointer_tx_missing', `${label}: prepared_tx_json 为空`, ctx);
   const sub = lc(row.submitted_txid);
   if (!HEX64.test(sub)) throw P('pointer_txid_mismatch', `${label}: submitted_txid 缺失或不是 64 位 hex(landed 行必须有)`, ctx);
+  // 真写入方形状(9-4 simnet 实测 + relay covenant-broadcast-relay.mjs ingestPhase 的 `txJson: JSON.stringify([txJson])`): prepared_tx_json = 只含【1 个 safe-JSON 字符串】的数组,
+  //   不是裸交易对象串。裸对象串(手写夹具/旧形)照旧接受; 数组则必须恰 1 个字符串元素——covenant 广播恒为单笔, 多笔/空/非串一律 malformed(不猜取哪一笔)。
+  let txText = row.prepared_tx_json;
+  let outer; try { outer = JSON.parse(txText); } catch { outer = undefined; }             // 非 JSON ⇒ 留给下面 deserialize 报 malformed(保持"不是合法 JSON"语义)
+  if (Array.isArray(outer)) {
+    if (outer.length !== 1 || typeof outer[0] !== 'string') throw P('pointer_tx_malformed', `${label}: prepared_tx_json 是数组但不是"恰 1 个 safe-JSON 字符串"(长度 ${outer.length}, 元素类型 ${outer.map((x) => typeof x).join(',') || '无'})`, ctx);
+    txText = outer[0];
+  }
   let tx;
-  try { tx = kaspa.Transaction.deserializeFromSafeJSON(row.prepared_tx_json); } catch (e) { throw P('pointer_tx_malformed', `${label}: prepared_tx_json 反序列化失败: ${e && e.message ? e.message : e}`, ctx); }
+  try { tx = kaspa.Transaction.deserializeFromSafeJSON(txText); } catch (e) { throw P('pointer_tx_malformed', `${label}: prepared_tx_json 反序列化失败: ${e && e.message ? e.message : e}`, ctx); }
   try {
     try { tx.finalize(); } catch (e) { throw P('pointer_tx_malformed', `${label}: finalize() 失败: ${e && e.message ? e.message : e}`, ctx); }
     const id = lc(tx.id);
