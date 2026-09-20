@@ -65,7 +65,7 @@ export function marketLine(m, lang, { t = realT, nowMs = Date.now(), qMax = 56 }
   const q = truncate(m.question, qMax);
   if (m.state === 'open') {
     const h = hoursLeft(m.deadlineSec, nowMs);
-    const when = h == null ? '' : (h > 0 ? t(lang, 'deadline_hours', { h }) : t(lang, 'deadline_expired'));
+    const when = h == null ? '' : (h > 0 ? t(lang, 'ro_when_hours', { h }) : t(lang, 'ro_when_expired'));
     return t(lang, 'ro_line_open', { q, when });
   }
   if (m.state === 'sealed') return t(lang, 'ro_line_sealed', { q });
@@ -87,7 +87,7 @@ export function formatMarketDetail(m, lang, { t = realT, nowMs = Date.now() } = 
   if (!m) return { text: t(lang, 'ro_detail_not_found'), keyboard: null };
   const h = hoursLeft(m.deadlineSec, nowMs);
   const lines = [t(lang, 'ro_detail_title', { q: m.question }), t(lang, `ro_state_${m.state}`, { result: m.result || '?' })];
-  if (m.state === 'open') lines.push(t(lang, 'ro_detail_deadline', { when: h == null ? '?' : (h > 0 ? t(lang, 'deadline_hours', { h }) : t(lang, 'deadline_expired')) }));
+  if (m.state === 'open') lines.push(t(lang, 'ro_detail_deadline', { when: h == null ? '?' : (h > 0 ? t(lang, 'ro_when_hours', { h }) : t(lang, 'ro_when_expired')) }));
   if (m.minBet != null) lines.push(t(lang, 'ro_detail_min_bet', { n: m.minBet, ticker: m.tokenTicker || m.tokenName || '' }));
   lines.push(t(lang, 'ro_detail_no_bet'));
   return { text: lines.join('\n'), keyboard: null };

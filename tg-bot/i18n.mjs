@@ -239,13 +239,13 @@ export const LANGS = {
     faucet_ok: '✅ Sent {amt} testnet KAS to {addr}\ntx {tx}… (~10 sec to arrive)\nNext: /bet to place bets.',
 
     // /verify (deprecated)
-    verify_redirect: 'Use /link <your kaspatest address> to bind. Then /bet to start betting.',
+    verify_redirect: 'Use /link <your mainnet address> to bind. Then /bet to view markets.',
 
     // /discover
     discover_text: 'Browse:\n· /bet — Place bets on prediction markets (full menu)\n· /hot — Top 5 trending markets (activity+fund weighted)\n· /swap — Exchange KAS ↔ USDT (via broker)\n· /mybets — View your bets + status',
 
     // /earnings inline
-    earnings_no_link: 'First /link <your kaspatest address> (= your broker receive address), then /earnings.',
+    earnings_no_link: 'First /link <your mainnet address> (= your broker receive address), then /earnings.',
     earnings_fail: 'Earnings query failed: {error}',
 
     // /broker_apply inline
@@ -268,7 +268,7 @@ export const LANGS = {
     broker_role_fees: '· Value split (protocol constant): Winner 97% / oracle 1% / broker 1.6% / introducer 0.2% / node 0.2%',
     broker_role_no_custody: '· broker never holds user funds — users lock+pay on-chain themselves, you match+earn (fees go to your address)',
     broker_role_apply_steps: '👉 Apply to be a broker (3 steps):',
-    broker_role_step1_noaddr: '① First /link <your kaspatest address> — this address is your broker receive address (fees go here)',
+    broker_role_step1_noaddr: '① First /link <your mainnet address> — this address is your broker receive address (fees go here)',
     broker_role_step2: '② Get a bot token from @BotFather with /newbot',
     broker_role_step3: '③ /broker_apply <your bot token> — submit application',
     broker_role_approved: '✅ You are an approved broker (address {addr})',
@@ -282,7 +282,7 @@ export const LANGS = {
     broker_role_apply_has_addr: '👉 Apply to be a broker (you have address {addr}):',
     broker_role_apply_step1_hasaddr: '① Get a bot token from @BotFather with /newbot',
     broker_role_apply_step2_hasaddr: '② /broker_apply <your bot token> — submit, activates instantly',
-    broker_role_warn: 'ℹ testnet: permissionless, activates instantly. Your bot token is encrypted and never shown.',
+    broker_role_warn: 'ℹ permissionless, activates instantly. Your bot token is encrypted and never shown.',
 
     // brokerEarnings function (messages.mjs)
     earnings_title: '💰 Your broker earnings',
@@ -298,14 +298,14 @@ export const LANGS = {
     earnings_node_total: '  Total: {kas} KAS ({n} markets, chain-verified)',
     earnings_node_pending: '  ⏳ {n} tx(s) pending index (refresh soon)',
     earnings_node_note: '  Note: queried by receive address pk.',
-    earnings_testnet_note: 'ℹ testnet KAS only — not real money, not investment advice.',
+    earnings_testnet_note: 'ℹ test tokens only — not real money, not investment advice.',
 
     // brokerFeeDmText function (messages.mjs)
     fee_dm_title: '💰 Fee received',
     fee_dm_body: 'Your market "{title}" has settled',
     fee_dm_amount: 'This payment: +{kas} KAS',
     fee_dm_link: '▸ /earnings for details',
-    fee_dm_testnet_note: 'ℹ testnet KAS only — not real money, not investment advice.',
+    fee_dm_testnet_note: 'ℹ test tokens only — not real money, not investment advice.',
 
     // notifyLine function (messages.mjs)
     notify_settle: '🎉 Your prediction market bet settled! If you won, KAS is at your /link address.\ntx {tx}… — /mybets to see how much you won.',
@@ -382,6 +382,38 @@ export const LANGS = {
     // ZH 加"人"(数字后缀习惯)。hotMarkets/sportsCardBlock 用, 别再裸写 '人'。
     people_unit: '',
     markets_unit: 'markets',
+
+    // ── 主网只读壳(readonly-shell.mjs / readonly-handlers.mjs; 仅 KASPA_NETWORK=mainnet 时使用)——Owner 2026-09-20 批准的样图定稿
+    //    (docs/2026-09-20-kanetui-tg-bot-user-copy-samples-v0.1.md); 标 † 的是样图里没有逐字给出的少量补充句, 已随交付单列出请 Owner 过目。
+    ro_start_notice: "ℹ️ The KANet Telegram bot has moved to mainnet (read-only)\n· Markets here use zero-value test tokens, not real money\n· Unlike the old testnet: you can't place bets from Telegram for now — you can view markets & results and link your mainnet address\n· Your old link and sessions were reset — please link again: /link <your mainnet address>\n· To take part in betting, contact the operator",
+    ro_start_commands: '/bet Markets · /hot Trending · /link Link address · /help',
+    ro_help: "KANet mainnet bot (read-only)\n/start Start · /link Link mainnet address · /bet Markets · /hot Trending\n/mybets, /record: unavailable for now (see notes) · /broker /earnings: operator features · /lang Language · /support Feedback\n\nStake assets are zero-value test tokens; this bot holds no funds and no private keys.\nOpen source · not investment advice",
+    ro_link_usage: 'Usage: /link <your mainnet address (starts with kaspa:)>',
+    ro_link_wrong_network: "That's a testnet address (kaspatest:). Please send a mainnet address (starts with kaspa:).",
+    ro_link_invalid: "That address isn't valid (checksum failed). Please check it and send a mainnet address (starts with kaspa:).",
+    ro_link_ok: "✅ Linked: {addr}. Note: betting from Telegram isn't available yet; linking lets you view info.",
+    ro_list_title: '📊 Mainnet markets (read-only) — tap a button below for details:',
+    ro_hot_title: '🔥 Trending markets Top {n} (read-only) — tap a button below for details:',
+    ro_list_empty: 'No open markets right now, check back later.',
+    ro_list_footer: "(Betting from Telegram isn't available yet)",
+    ro_line_open: '{q} · Open · {when}',
+    ro_line_sealed: '{q} · Sealed · Awaiting result',
+    ro_line_settled: '{q} · Settled · Result {result}',
+    ro_when_hours: '{h}h left',
+    ro_when_expired: 'Deadline passed',
+    ro_detail_title: '📌 {q}',
+    ro_state_open: 'Status: Open',
+    ro_state_sealed: 'Status: Sealed · awaiting result',
+    ro_state_settled: 'Status: Settled · Result {result}',
+    ro_state_cancelled: 'Status: Cancelled',
+    ro_detail_deadline: 'Deadline: {when}',
+    ro_detail_min_bet: 'Min stake: {n} {ticker} (zero-value test token)',
+    ro_detail_no_bet: "🔒 Betting from Telegram isn't available yet. Contact the operator to take part.",
+    ro_detail_not_found: 'Market not found (it may have been removed). See current markets with /bet.',
+    ro_mybets_unavailable: "ℹ️ Not available yet: mainnet markets don't record who placed a bet, so bets and records can't be listed per address. This will open once that capability ships.",
+    ro_discover: 'Browse:\n· /bet — View mainnet markets (read-only)\n· /hot — Top 5 trending markets\n· /link — Link a mainnet address\n· /help — All commands',
+    ro_champions_ended: 'ℹ️ This topic has ended. See current markets with /bet.',
+    ro_unavailable: "ℹ️ This feature isn't available on mainnet for now.",
   },
 
   zh: {
@@ -618,13 +650,13 @@ export const LANGS = {
     faucet_ok: '✅ 已发 {amt} 测试网 KAS 到 {addr}\ntx {tx}…（约 10 秒到账）\n下一步：/bet 开始押注。',
 
     // /verify (deprecated)
-    verify_redirect: '用 /link <你的 kaspatest 地址> 绑定即可。/bet 开始押注。',
+    verify_redirect: '用 /link <你的主网地址> 绑定即可。/bet 看市场。',
 
     // /discover
     discover_text: '浏览:\n· /bet — 押注预测市场 (全菜单选品类/市场)\n· /hot — 热门市场 Top5 (活跃度+资金加权)\n· /swap — 兑换 KAS ↔ USDT (经 broker)\n· /mybets — 看自己的押注 + 状态',
 
     // /earnings inline
-    earnings_no_link: '先 /link <你的 kaspatest 地址> 绑定 (= 你的 broker 收款地址), 再 /earnings 看收益。',
+    earnings_no_link: '先 /link <你的主网地址> 绑定 (= 你的 broker 收款地址), 再 /earnings 看收益。',
     earnings_fail: '收益查询失败: {error}',
 
     // /broker_apply inline
@@ -647,7 +679,7 @@ export const LANGS = {
     broker_role_fees: '· 价值分成(协议常量): 赢家 97% / oracle 1% / broker 1.6% / introducer 0.2% / node 0.2%',
     broker_role_no_custody: '· broker 不碰用户资金 —— 用户全程自己链上锁仓+付款, 你只撮合+收佣 (佣金进你地址)',
     broker_role_apply_steps: '👉 申请当 broker (3 步):',
-    broker_role_step1_noaddr: '① 先 /link <你的 kaspatest 地址> — 这地址就是你的 broker 收款地址(佣金落这)',
+    broker_role_step1_noaddr: '① 先 /link <你的主网地址> — 这地址就是你的 broker 收款地址(佣金落这)',
     broker_role_step2: '② 去 @BotFather /newbot 拿一个你自己的 bot token',
     broker_role_step3: '③ /broker_apply <你的 bot token> — 提交申请',
     broker_role_approved: '✅ 你已是 approved broker (地址 {addr})',
@@ -661,7 +693,7 @@ export const LANGS = {
     broker_role_apply_has_addr: '👉 申请当 broker (你已绑地址 {addr}):',
     broker_role_apply_step1_hasaddr: '① 去 @BotFather /newbot 拿一个你自己的 bot token',
     broker_role_apply_step2_hasaddr: '② /broker_apply <你的 bot token> — 提交即激活',
-    broker_role_warn: 'ℹ 测试网无许可·提交即激活。你的 bot token 加密存储、绝不外显。',
+    broker_role_warn: 'ℹ 无许可·提交即激活。你的 bot token 加密存储、绝不外显。',
 
     // brokerEarnings function
     earnings_title: '💰 你的 broker 收益',
@@ -677,14 +709,14 @@ export const LANGS = {
     earnings_node_total: '  累计: {kas} KAS ({n} 个市场, 链验)',
     earnings_node_pending: '  ⏳ {n} 笔待索引 (稍后刷新)',
     earnings_node_note: '  注: 均用收款地址 pk 查询。',
-    earnings_testnet_note: 'ℹ 仅测试网 KAS · 非真钱 · 非投资建议。',
+    earnings_testnet_note: 'ℹ 仅测试币 · 非真钱 · 非投资建议。',
 
     // brokerFeeDmText
     fee_dm_title: '💰 收益到账',
     fee_dm_body: '你经手的市场「{title}」已结算',
     fee_dm_amount: '本笔 +{kas} KAS',
     fee_dm_link: '▸ /earnings 看明细',
-    fee_dm_testnet_note: 'ℹ 仅测试网 KAS · 非真钱 · 非投资建议。',
+    fee_dm_testnet_note: 'ℹ 仅测试币 · 非真钱 · 非投资建议。',
 
     // notifyLine
     notify_settle: '🎉 你押注的预测市场结算了! 押中的话 KAS 已到你 /link 地址。\ntx {tx}… — 回 /mybets 看你赢了多少。',
@@ -759,6 +791,37 @@ export const LANGS = {
 
     people_unit: '人',
     markets_unit: '盘',
+
+    // ── 主网只读壳(同 en 段说明; Owner 2026-09-20 批准的样图定稿, † = 样图未逐字给出的补充句)
+    ro_start_notice: 'ℹ️ KANet 电报机器人已迁到主网（只读版）\n· 这里的市场用的是零价值测试代币，不是真钱\n· 和之前测试网不同：暂时不能在电报里自助下注——可以查看市场与结果、绑定你的主网地址\n· 旧的绑定与会话已重置，请重新绑定：/link <你的主网地址>\n· 想参与下注请联系运营者',
+    ro_start_commands: '/bet 看市场 · /hot 热门 · /link 绑定地址 · /help',
+    ro_help: 'KANet 主网机器人（只读）\n/start 开始 · /link 绑定主网地址 · /bet 看市场 · /hot 热门市场\n/mybets、/record：暂不可用（见说明）· /broker /earnings：运营者功能 · /lang 切换语言 · /support 反馈\n\n押注资产为零价值测试代币；本机器人不托管资金、不持有你的私钥。\n开源 · 非投资建议',
+    ro_link_usage: '用法：/link <你的主网地址（kaspa: 开头）>',
+    ro_link_wrong_network: '这是测试网地址（kaspatest:）。请提供主网地址（kaspa: 开头）。',
+    ro_link_invalid: '这个地址无效（校验失败）。请检查后重新发送主网地址（kaspa: 开头）。',
+    ro_link_ok: '✅ 已绑定：{addr}。注意：目前电报里不能自助下注，绑定后可用于查看信息。',
+    ro_list_title: '📊 主网市场（只读）— 点下方按钮看详情：',
+    ro_hot_title: '🔥 热门市场 Top {n}（只读）— 点下方按钮看详情：',
+    ro_list_empty: '现在没有进行中的市场，稍后再来。',
+    ro_list_footer: '（暂不能在电报里下注）',
+    ro_line_open: '{q} · 进行中 · {when}',
+    ro_line_sealed: '{q} · 已封盘 · 等待结果',
+    ro_line_settled: '{q} · 已结算 · 结果 {result}',
+    ro_when_hours: '还剩 {h} 小时',
+    ro_when_expired: '已过截止',
+    ro_detail_title: '📌 {q}',
+    ro_state_open: '状态：进行中',
+    ro_state_sealed: '状态：已封盘 · 等待结果',
+    ro_state_settled: '状态：已结算 · 结果 {result}',
+    ro_state_cancelled: '状态：已取消',
+    ro_detail_deadline: '截止：{when}',
+    ro_detail_min_bet: '最小下注：{n} {ticker}（零价值测试代币）',
+    ro_detail_no_bet: '🔒 电报里暂不能下注。想参与请联系运营者。',
+    ro_detail_not_found: '没找到这个市场（可能已下架）。用 /bet 看当前市场。',
+    ro_mybets_unavailable: 'ℹ️ 暂不可用：主网市场目前不区分"是谁下的注"，所以无法按你的地址列出下注或战绩。等这项能力上线后会开放。',
+    ro_discover: '浏览：\n· /bet — 查看主网市场（只读）\n· /hot — 热门市场 Top5\n· /link — 绑定主网地址\n· /help — 全部命令',
+    ro_champions_ended: 'ℹ️ 该专题已结束。看当前市场请用 /bet。',
+    ro_unavailable: 'ℹ️ 该功能在主网期暂不开放。',
   },
 };
 

@@ -71,12 +71,12 @@ T('8 visibleMarkets: cancelled 与 genesis_* 不进列表; 进行中→已封盘
   assert.deepEqual(visibleMarkets([row({ status: 'cancelled' })]), []);
 });
 
-T('9 marketLine: 进行中用既有 deadline_hours(h=5, 不是几万小时); 过期用 deadline_expired; sealed/settled 用各自键', () => {
+T('9 marketLine: 进行中用既有 ro_when_hours(h=5, 不是几万小时); 过期用 ro_when_expired; sealed/settled 用各自键', () => {
   const open = toBotMarket(row({ deadline_ms: NOW + 5 * 3600000 }));
   const dl = marketLine(open, 'zh', { t, nowMs: NOW });
-  assert.ok(dl.startsWith('ro_line_open|') && dl.includes('deadline_hours') && /h\\?":5\b/.test(dl) && !/h\\?":\d{3,}/.test(dl), dl);
+  assert.ok(dl.startsWith('ro_line_open|') && dl.includes('ro_when_hours') && /h\\?":5\b/.test(dl) && !/h\\?":\d{3,}/.test(dl), dl);
   const exp = marketLine(toBotMarket(row({ deadline_ms: NOW - 3600000 })), 'zh', { t, nowMs: NOW });
-  assert.ok(exp.includes('deadline_expired'), exp);
+  assert.ok(exp.includes('ro_when_expired'), exp);
   assert.ok(marketLine(toBotMarket(row({ status: 'sealed' })), 'en', { t, nowMs: NOW }).startsWith('ro_line_sealed|'));
   const st = marketLine(toBotMarket(row({ status: 'resolved', winning_side: 1 })), 'en', { t, nowMs: NOW });
   assert.ok(st.startsWith('ro_line_settled|') && st.includes('"result":"NO"'), st);
