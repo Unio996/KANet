@@ -13646,3 +13646,22 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **剩**:simnet 端到端(建判定题市场→adapter 判定→promote→close_commit→convert→claim happy 臂 + 注入异议/ABSTAIN→冻结→退款终局臂)→ 主网上线 Owner GO。全程只合不部署,主网 live 未动(仍 D-029 主网首轮 a59c 那次部署,批 A/D/B 要下次 Owner 批的重启才生效)。
 - 后续票:coingecko 等确定性源加 predicate;带鉴权人工冻结入口;refund 执行接线;UMA closedTime 晚到 runbook;展示层冻结市场隐 winning_side。
  — Bettor 2026-09-20T13:23:23Z
+
+### (1604) 🟢 **能力/资产总清单建成入库(e032b7ff)——Owner「我不知道你们还漏了多少东西」的结构性根治** (2026-09-20 · Bettor)
+- 全仓只读扫描,整理成权威对照文档 `docs/2026-09-20-kanet-capability-asset-inventory-v0.1.md`(D-021 抹资金数额,明细在 gitignored docs-private/ASSET-INVENTORY.md)。两个后台清点分支合流、无矛盾,此为最终版。
+- **=D-031 的结构性对照物**:设计/动手前第一件事对着它查"是不是已经有了"。memory:kanet-capability-asset-inventory-doc。
+- **最该记住的"已建成易漏"**:①电报 bot(约24命令,不在五大系统)+②第二个 owner-bot.mjs 桥;③oracle A/D/B 已合未开(差一 env);④冷存 watch_accounts 已接 portfolio 待重启(D-028);⑤真 ZK 轨道 zk-payout-guest(+JS 侧 zk-close-builder/zk-prove-worker,跨语言 grep 扫不到);⑥kas-market-maker 独立 OTC bot(孤儿无脚本引);⑦wizard.eta 死代码;⑧真外部金融集成 IBKR/Alpaca/Tradier/Tiger/Polymarket/Aave(顶层文档没写);⑨console-supervisor.sh 独立生命周期别当野进程杀;⑩worldcup-teams.mjs 硬编码决赛后 2 月陈旧,静默过滤 /champions·/bet。三条结算轨道并存:老 pool_markets(主网 0 行)/新 proto-v0(live)/ZK 承诺轨道。
+- 约定:会过期,谁发现新漏/状态变化就补对应节。
+
+### (1605) 🟢 **CR-1/CR-2 电报 bot 主网守卫合入主线(merge 12375b7d,只合不部署)——NWT 字节级 GREEN 0 MUST** (2026-09-20 · Bettor)
+- **CR-1**(7049b3ff):`_launch_tg_bot.mjs` 不再读 TN12 env/不写死 :3200·testnet-12·broker-1,改继承环境+fail-closed 断言(resolveBotLaunchEnv 纯函数)+scrub 黑名单。fork 读盘即生效。
+- **CR-2**(6d34974f):`tg-wallet.js` create/查询/send 三路由 KASPA_NETWORK≠testnet-12(含未设/simnet)⇒503,守卫在 ingest 鉴权后、任何 DB 写/RPC/助记词前。**需下次主网重启生效,bot 开闸晚于它**。
+- **NWT 验收**(head 4cdb0c1b,docs/provenance/2026-09-20-nwt-tgbot-cr12-review/):git archive 取 5 blob 到独立检出原样跑(生产零触碰)、自写 22 变异(19 杀 3 活均测试缺口非代码缺陷)、独立喂 50+ 边界值证 fail-closed 真实、字节级确认守卫位置。CR-1 测试 59/59、CR-2 31/31、pilot-isolation 重跑 25/0。D-031 判据:两者都只收紧+复用现有(继承环境/既有 AUTH),无重造。**harness 少改一行是对的**(pilot-isolation harness:39 自设 testnet-12)。
+- **5 个 SHOULD 记票(不迭代当前版本,另出跟进):**
+  - **S3(优先·潜伏 secret 泄漏)**:同型 bug 未修——`_launch_broker_bot.mjs`(CONSOLE_URL||:3200、KASPA_NETWORK||testnet-12)在 broker 入驻时会把主网 ingest secret 发给退役 TN12 端口 :3200;`_launch_owner_bot.mjs` 读 ../kanet.env(TN12)+写死 TN12。主网现 broker_onboarding 0 行/无 OWNER_BOT_TOKEN 故未触发。**D-031 要求把 CR-1 的 resolveBotLaunchEnv 复用到这两个启动器(或明确退役)**——另开一笔,交 KANet-UI。
+  - S1:scrub 大小写不对称(Win32),主网 env 全大写不触发,建议 toUpperCase() 统一+补测试。
+  - S2:测试缺口——补 startsWith 变异(mainnet-2/testnet-11/"testnet-12 ")必拒。
+  - S4:纵深——`api/capability.js` deriveCustodialExecFields 也按地址取助记词 JIT 解密签名(开关默认关/主网 0 行),建议同样对网络≠testnet-12 拒绝防将来旁路。
+  - S5:文档——console 用默认端口(3100)时 bot 会拒启,排障文档补"需显式设 PORT"。
+- CR-3 + P1 读侧 + 文案 已合成 Owner 单(KANet-UI df75252d,Bettor 上报中),待 Owner 批 4 点。
+ — Bettor 2026-09-20T14:05:42Z
