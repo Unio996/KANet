@@ -5,19 +5,20 @@ import { JUDGED_COLUMNS } from '../db/proto-judged.mjs';
 import { intakeNeedsPmt, evaluateBetIntakeGate } from './proto-settlement-budget.mjs';
 
 /**
- * @param {{db: object, marketId: string, readPmt: () => Promise<{valid:boolean, pmtMs?:number, reason?:string}>}} o
+ * @param {{db: object, marketId: string, readPmt: () => Promise<{valid:boolean, pmtMs?:number, reason?:string}>, nowMs?: () => number}} o
  * @returns {Promise<{accept: boolean, code?: string, http?: number, detail?: string}>}
- *   readPmt 只在【判定题 ∧ outcome_end 有限】时才被调用; 它抛错 ⇒ 按 pmt 无效(fail-closed)。
+ *   readPmt 只在【判定题 ∧ outcome_end 有限 ∧ 墙钟尚未过 outcome_end】时才被调用; 它抛错 ⇒ 按 pmt 无效(fail-closed)。
  */
-export async function checkBetIntake({ db, marketId, readPmt }) {
+export async function checkBetIntake({ db, marketId, readPmt, nowMs = Date.now }) {
   if (!db || typeof db.prepare !== 'function') throw new TypeError('checkBetIntake: db 必填');
   if (typeof readPmt !== 'function') throw new TypeError('checkBetIntake: readPmt 必填');
   const row = db.prepare(`SELECT ${JUDGED_COLUMNS.join(', ')}, outcome_end_ms FROM proto_markets WHERE id = ?`).get(marketId);
   if (!row) return { accept: false, code: 'market_not_found', http: 404, detail: 'market not found' };
+  const wallMs = nowMs();                       // M2: 门取 max(墙钟, pmt); 墙钟已过 outcome_end 时不必再读 pmt
   let pmt = null;
-  if (intakeNeedsPmt(row)) {
+  if (intakeNeedsPmt(row, wallMs)) {
     try { pmt = await readPmt(); }
     catch (e) { pmt = { valid: false, reason: `read_pmt_threw: ${e && e.message ? e.message : e}` }; }
   }
-  return evaluateBetIntakeGate({ market: row, pmt });
+  return evaluateBetIntakeGate({ market: row, pmt, wallMs });
 }

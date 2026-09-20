@@ -44,8 +44,8 @@ S('B25', B, 'if (upperMs < cfg.graceMinMs) return { action: \'freeze\', reason: 
 S('B26', B, 'const effectiveGraceMs = Math.min(cfg.graceMs, upperMs);', 'const effectiveGraceMs = cfg.graceMs;', 'budget', 'effective_grace 不受 upper 限制(N6)');
 S('B27', B, 'if (now < consistencyMetAt + effectiveGraceMs) return', 'if (now <= consistencyMetAt + effectiveGraceMs) return', 'budget', '宽限窗边界(恰满不放行)');
 S('B28', B, 'if (kinds.size >= 2)', 'if (kinds.size >= 1)', 'budget', '单源即算一致(R2)');
-S('B29', B, 'if (outcomes.size > 1) return', 'if (outcomes.size > 2) return', 'budget', '不一致不冻');
-S('B30', B, "if (eligible.some((v) => v.outcome === null || v.outcome === undefined)) return", 'if (false) return', 'budget', '弃权 / 异议不冻');
+S('B29', B, 'if (new Set(allVerdicts.map((v) => v.outcome)).size > 1) return', 'if (new Set(allVerdicts.map((v) => v.outcome)).size > 2) return', 'budget', '不一致不冻');
+S('B30', B, 'if (allVerdicts.some((v) => v.outcome !== 0 && v.outcome !== 1)) return', 'if (false) return', 'budget', '弃权 / 异议不冻');
 S('B31', B, 'if (winnerBets.length !== 1 || !(pool > 0))', 'if (winnerBets.length < 1 || !(pool > 0))', 'budget', 'R5: 胜方多条也放行');
 S('B32', B, 'if (winnerBets.length !== 1 || !(pool > 0))', 'if (winnerBets.length !== 1)', 'budget', 'R5: 不查奖池 > 0');
 S('B33', B, "if (market.settlement_frozen_at !== null && market.settlement_frozen_at !== undefined) return { action: 'stop', reason: 'already_frozen' };", '', 'budget', 'promote 门不检查已冻结');
@@ -75,7 +75,7 @@ S('K02', CO, 'catch (fe) { frozen = true;', 'catch (fe) { frozen = false;', 'cor
 S('K03', CO, 'frozen = await deps.isSettlementFrozen(marketId);', 'frozen = false;', 'core', '入口③不读冻结端口');
 // K04(已移除): 从 REQUIRED_DEPS 列表里删 isSettlementFrozen 是等价变异——第二处类型检查列表(必须是函数)仍会因缺该依赖抛 DriverDepsError, 核心构造照样拒。
 // ── intake / route / service / judged / relay ──
-S('N01', IN, 'if (intakeNeedsPmt(row)) {', 'if (true) {', 'intake', '无判定题也读 pmt');
+S('N01', IN, 'if (intakeNeedsPmt(row, wallMs)) {', 'if (true) {', 'intake', '无判定题也读 pmt');
 S('N02', IN, "catch (e) { pmt = { valid: false, reason: `read_pmt_threw: ${e && e.message ? e.message : e}` }; }", 'catch (e) { pmt = { valid: true, pmtMs: 1 }; }', 'intake', 'readPmt 抛错 fail-open');
 S('N03', IN, "if (!row) return { accept: false, code: 'market_not_found', http: 404, detail: 'market not found' };", '', 'intake', '市场不存在不返回 404');
 S('R01', RT, 'if (!gate.accept) return reply.code(gate.http).send({ ok: false, error: gate.code, detail: gate.detail });', 'if (false) return reply.code(gate.http).send({ ok: false, error: gate.code, detail: gate.detail });', 'route', '路由不执行受理门拒绝');
@@ -86,7 +86,37 @@ S('V03', SV, "catch (e) { log.error(`[proto-settlement-driver] REFUSED to start:
 S('V04', SV, "for (const w of r.warnings) log.error(`[proto-settlement-driver] BUDGET CONFIG (LOUD): ${w}`);", '', 'service', '非法 env 回默认但不 LOUD');
 S('J01', JD, "export const JUDGED_COLUMNS = Object.freeze(['resolution_rule_spec', 'outcome_market_source', 'outcome_condition_id', 'outcome_oracle_relay_ids']);", "export const JUDGED_COLUMNS = Object.freeze(['resolution_rule_spec', 'outcome_market_source', 'outcome_condition_id']);", 'budget', '判定题定义少一列(单一来源)');
 S('L01', RL, "return { ok: true, pastMedianTimeMs: pmt, observedAtMs, isSynced };", "return { ok: true, pastMedianTimeMs: pmt, observedAtMs };", 'relay', 'relay 不回 isSynced');
-S('L02', RL, "if (typeof si?.isSynced === 'boolean') isSynced = si.isSynced;", 'isSynced = si?.isSynced;', 'relay', 'relay 不校验 isSynced 类型');
+S('L02', RL, "const isSynced = typeof serverInfo?.isSynced === 'boolean' ? serverInfo.isSynced : null;", 'const isSynced = serverInfo?.isSynced;', 'relay', 'relay 不校验 isSynced 类型');
+
+// ── M1(冻结集 = 所有 verdict)/ M2(受理门取 max(墙钟, pmt))/ relay 并行 / ⑤(b)(c)回归 ──
+const ABSTAIN = 'if (allVerdicts.some((v) => v.outcome !== 0 && v.outcome !== 1)) return', DISSENT = 'if (new Set(allVerdicts.map((v) => v.outcome)).size > 1) return';
+const ELIG = "allVerdicts.filter((v) => AUTO_KINDS.includes(v.source_kind) && Number.isSafeInteger(v.pmt_at) && v.pmt_at >= oe)";
+S('M101', B, ABSTAIN, 'if (' + ELIG + '.some((v) => v.outcome !== 0 && v.outcome !== 1)) return', 'budget', 'M1: 弃权 / 异议只看赞成集(pmt_at NULL / 过早的异议被无视 = fail-open)');
+S('M102', B, DISSENT, 'if (new Set(' + ELIG + '.map((v) => v.outcome)).size > 1) return', 'budget', 'M1: 不一致只看赞成集');
+S('M103', B, 'allVerdicts.some((v) => v.outcome !== 0 && v.outcome !== 1)', "allVerdicts.filter((v) => v.source_kind !== 'llm').some((v) => v.outcome !== 0 && v.outcome !== 1)", 'budget', 'M1: llm 的弃权 / 异议不进冻结集');
+S('M104', B, 'allVerdicts.some((v) => v.outcome !== 0 && v.outcome !== 1)', "allVerdicts.filter((v) => v.source_kind !== 'human').some((v) => v.outcome !== 0 && v.outcome !== 1)", 'budget', 'M1: human 的弃权 / 异议不进冻结集');
+S('M105', B, 'new Set(allVerdicts.map((v) => v.outcome)).size > 1', "new Set(allVerdicts.filter((v) => v.source_kind !== 'llm').map((v) => v.outcome)).size > 1", 'budget', 'M1: llm 的异议不进冻结集');
+S('M106', B, 'new Set(allVerdicts.map((v) => v.outcome)).size > 1', "new Set(allVerdicts.filter((v) => v.source_kind !== 'human').map((v) => v.outcome)).size > 1", 'budget', 'M1: human 的异议不进冻结集');
+S('M107', B, 'allVerdicts.some((v) => v.outcome !== 0 && v.outcome !== 1)', 'allVerdicts.filter((v) => v.pmt_at != null).some((v) => v.outcome !== 0 && v.outcome !== 1)', 'budget', 'M1: NULL pmt_at 的弃权被无视');
+S('M108', B, 'new Set(allVerdicts.map((v) => v.outcome)).size > 1', 'new Set(allVerdicts.filter((v) => v.pmt_at != null).map((v) => v.outcome)).size > 1', 'budget', 'M1: NULL pmt_at 的异议被无视');
+S('M109', B, 'new Set(allVerdicts.map((v) => v.outcome)).size > 1', 'new Set(allVerdicts.filter((v) => !(Number.isSafeInteger(v.pmt_at) && v.pmt_at < oe)).map((v) => v.outcome)).size > 1', 'budget', 'M1: 早于 outcome_end 的异议被无视');
+S('M110', B, 'allVerdicts.some((v) => v.outcome !== 0 && v.outcome !== 1)', 'allVerdicts.some((v) => v.outcome == null)', 'budget', 'M1: outcome 为 2 / "1" / NaN 等非法值不按弃权冻结');
+S('M111', B, "const allVerdicts = verdicts || [];", "const allVerdicts = (verdicts || []).filter((v) => AUTO_KINDS.includes(v.source_kind));", 'budget', 'M1: 冻结集只含 extractor / uma(human / llm 全被无视)');
+S('M201', B, 'if (Number.isFinite(wallMs) && wallMs >= market.outcome_end_ms) return { accept: false', 'if (Number.isFinite(wallMs) && wallMs > market.outcome_end_ms) return { accept: false', 'budget', 'M2: 墙钟恰 = outcome_end 仍受理(边界)');
+S('M202', B, 'if (Number.isFinite(wallMs) && wallMs >= market.outcome_end_ms) return { accept: false', 'if (false) return { accept: false', 'budget', 'M2: 不看墙钟(旧逻辑: pmt 落后窗内继续收注)');
+S('M203', B, '&& !(Number.isFinite(wallMs) && wallMs >= market.outcome_end_ms); }', '; }', 'budget', 'M2: 墙钟已过仍去读 pmt');
+S('M204', IN, 'const wallMs = nowMs();', 'const wallMs = null;', 'intake', 'M2: 装配层不取墙钟');
+S('M205', IN, 'return evaluateBetIntakeGate({ market: row, pmt, wallMs });', 'return evaluateBetIntakeGate({ market: row, pmt });', 'intake', 'M2: 装配层不把墙钟传给门');
+S('L03', RL, "withDeadline(() => rpc.getServerInfo(), rpcCallMs, 'getServerInfo').catch(() => null),", "await withDeadline(() => rpc.getServerInfo(), rpcCallMs, 'getServerInfo').catch(() => null),", 'relay', 'SHOULD: getServerInfo 与 getBlockDagInfo 改回串行');
+S('L04', RL, "withDeadline(() => rpc.getServerInfo(), rpcCallMs, 'getServerInfo').catch(() => null),", "withDeadline(() => rpc.getServerInfo(), rpcCallMs, 'getServerInfo'),", 'relay', 'SHOULD: getServerInfo 失败会拖垮 pmt 主读数');
+S('P01', ST, "      WHERE c.side = 'win' AND m.status = 'resolved'\n", "      WHERE c.side = 'win' AND m.status = 'resolved' AND m.settlement_frozen_at IS NULL\n", 'store', '⑤(c): convert_to_claim 发现误加冻结检查');
+S('P02', ST, "      WHERE c.side = 'win' AND c.claim_txid IS NULL\n", "      WHERE c.side = 'win' AND c.claim_txid IS NULL AND NOT EXISTS (SELECT 1 FROM proto_markets mm WHERE mm.id = c.market_id AND mm.settlement_frozen_at IS NOT NULL)\n", 'store', '⑤(c): claim_draw 发现误加冻结检查');
+S('P03', ST, "      if (!c || !m || m.status !== 'resolved') return { ok: false, reason: 'market_not_resolved' };", "      if (m && m.settlement_frozen_at != null) return { ok: false, reason: 'settlement_frozen' };\n      if (!c || !m || m.status !== 'resolved') return { ok: false, reason: 'market_not_resolved' };", 'store', '⑤(c): dependenciesLanded(convert_to_claim) 误加冻结检查');
+S('P04', ST, "    if (step === 'claim_draw') return landed('claim'", "    if (step === 'claim_draw') { const cc = claimOf(subjectId); const mm = cc && marketOf(cc.market_id); if (mm && mm.settlement_frozen_at != null) return { ok: false, reason: 'settlement_frozen' }; }\n    if (step === 'claim_draw') return landed('claim'", 'store', '⑤(c): dependenciesLanded(claim_draw) 误加冻结检查');
+S('P05', ST, "WHERE status = 'prepared' AND ${BATCH9_INTENT_PREDICATE} ORDER BY", "WHERE status = 'prepared' AND ${BATCH9_INTENT_PREDICATE} AND NOT EXISTS (SELECT 1 FROM proto_markets mm WHERE mm.id = subject_id AND mm.settlement_frozen_at IS NOT NULL) ORDER BY", 'store', '⑤(b): 冻结市场的 prepared 意图被排除出 preparedRows');
+S('P06', ST, "WHERE status = 'submitted' AND ${BATCH9_INTENT_PREDICATE} ORDER BY", "WHERE status = 'submitted' AND ${BATCH9_INTENT_PREDICATE} AND NOT EXISTS (SELECT 1 FROM proto_markets mm WHERE mm.id = subject_id AND mm.settlement_frozen_at IS NOT NULL) ORDER BY", 'store', '⑤(b): 冻结市场的 submitted 意图被排除出 landedChecks');
+S('P07', ST, "WHERE id = ? AND status = 'sealed'\").run(t, marketId).changes;", "WHERE id = ? AND status = 'sealed' AND settlement_frozen_at IS NULL\").run(t, marketId).changes;", 'store', '⑤(b): 冻结市场的 close_commit landed 后不推进到 resolved');
+S('P08', CO, "            if (step === 'close_commit') {\n              stage = 'gate';\n              // 批 D D1", "            if (true) {\n              stage = 'gate';\n              // 批 D D1", 'core', '⑤(c): 冻结 / pmt 门对所有步生效(convert / claim / seal 也被冻结拦)');
 // ── 触发器级(freeze 测试的 MUT_* 钩子) ──
 for (const n of ['trg_pm_d_frozen_insert_null', 'trg_pm_d_frozen_domain', 'trg_pm_d_frozen_one_way', 'trg_pm_d_frozen_reason_required', 'trg_pm_d_reason_needs_frozen', 'trg_pm_d_frozen_no_winning_side', 'trg_pmv_d_pmt_at_domain', 'trg_pm_ws_r1_verdict_ref']) TR(`D_${n}`, n, null, '__DROP__', `删掉整个触发器 ${n}`);
 TR('X01', 'trg_pm_d_frozen_insert_null', 'NEW.settlement_frozen_at IS NOT NULL OR ', '', 'INSERT 检查少 frozen_at');

@@ -133,15 +133,18 @@ export function evaluateLateSeal({ deadlineMs, decisionMs, cfg }) {
 // ── §6 受理点 outcome_end 门(D6 + N3 + N4) ──
 const isFiniteNum = (x) => typeof x === 'number' && Number.isFinite(x);
 /** 受理前是否需要读 pmt: 只有【判定题 ∧ outcome_end 有限】才需要; 无判定题(operator 市场)豁免、判定题∧outcome_end 空直接拒(不读 pmt)。 */
-export function intakeNeedsPmt(market) { return isJudgedMarket(market) && isFiniteNum(market.outcome_end_ms); }
+export function intakeNeedsPmt(market, wallMs) { return isJudgedMarket(market) && isFiniteNum(market.outcome_end_ms) && !(Number.isFinite(wallMs) && wallMs >= market.outcome_end_ms); }
 /**
  * 受理点门(HTTP bet 路由, 受理时刻 pmt)——不是驱动对已受理注的 append(N4: 已受理未上链的注必须仍能上链, 否则永不 seal)。
- * @param {{market: object, pmt?: {valid:boolean, pmtMs?:number, reason?:string}|null}} o  market 须含四个判定题列 + outcome_end_ms; pmt = readValidatedPmt 的结果(仅 intakeNeedsPmt 为真时才需要)
+ * @param {{market: object, pmt?: {valid:boolean, pmtMs?:number, reason?:string}|null, wallMs?: number|null}} o  market 须含四个判定题列 + outcome_end_ms; pmt = readValidatedPmt 的结果(仅 intakeNeedsPmt 为真时才需要)
  * @returns {{accept: boolean, code?: string, http?: number, detail?: string}}
  */
-export function evaluateBetIntakeGate({ market, pmt = null }) {
+export function evaluateBetIntakeGate({ market, pmt = null, wallMs = null }) {
   if (!isJudgedMarket(market)) return { accept: true, code: 'not_judged_exempt' };
   if (!isFiniteNum(market.outcome_end_ms)) return { accept: false, code: 'outcome_end_missing', http: 409, detail: '判定题市场必须有有限的 outcome_end_ms(N3), 否则拒受理下注' };
+  // M2(NWT 批 D 复核, Bettor 拍): pmt 落后墙钟 2.3–10 min ⇒ 墙钟已过 outcome_end 而 pmt 还没过的这段窗内, 只看 pmt 会继续收下注。取 max(墙钟, pmt): 偏差只会多拒、不会多收。
+  //   墙钟已过即拒(不依赖 pmt 是否有效——结果已可知是墙钟就能确定的事实, 也就不需要再读 pmt)。
+  if (Number.isFinite(wallMs) && wallMs >= market.outcome_end_ms) return { accept: false, code: 'outcome_end_passed', http: 409, detail: `墙钟(${wallMs}) ≥ outcome_end_ms(${market.outcome_end_ms}): 结果已可知, 拒受理下注(取 max(墙钟, pmt))` };
   if (!pmt || pmt.valid !== true) return { accept: false, code: 'pmt_unavailable_fail_closed', http: 503, detail: `判定题受理时 pmt 无效 / 读不到 ⇒ 拒受理(N4 fail-closed): ${pmt && pmt.reason ? pmt.reason : 'no_pmt'}` };
   if (pmt.pmtMs >= market.outcome_end_ms) return { accept: false, code: 'outcome_end_passed', http: 409, detail: `pmt(${pmt.pmtMs}) ≥ outcome_end_ms(${market.outcome_end_ms}): 结果已可知, 拒受理下注` };
   return { accept: true, code: 'ok' };
@@ -183,12 +186,14 @@ export function evaluatePromoteGate({ market, verdicts, bets, pmt, wallMs, cfg, 
   const now = pmt.pmtMs;
   if (now >= cutoff) return { action: 'freeze', reason: 'past_cutoff', cutoffPmt: cutoff };       // §1.3: 过 cutoff 一律冻结
   if (now < oe) return { action: 'wait', reason: 'outcome_not_known' };                            // §1.2: pmt ≥ outcome_end_ms
-  // N1: 仅 pmt_at 非 NULL 且 ≥ outcome_end_ms 的 extractor / uma verdict 计入一致性与被引用(NULL / 结果可知之前算的都排除)
-  const eligible = (verdicts || []).filter((v) => AUTO_KINDS.includes(v.source_kind) && Number.isSafeInteger(v.pmt_at) && v.pmt_at >= oe)
+  // M1(NWT 批 D 复核, Bettor 拍): 【冻结集】= 该市场所有 verdict——extractor / uma / human / llm, 不论 pmt_at 是否为 NULL、不论早晚(adapter 读 pmt 失败时写下的异议 pmt_at 为 NULL, 不能被无视 = fail-open)。
+  //   冻结集里出现 outcome 非 0/1(NULL 弃权 / 异议)或彼此不一致(即与将要获批的胜方不同)⇒ freeze。AI(llm)能提异议冻结、不能批准(批准集不含 llm)——fail-safe。SHOULD 票: 监控 llm 噪声致虚假冻结率。
+  const allVerdicts = verdicts || [];
+  if (allVerdicts.some((v) => v.outcome !== 0 && v.outcome !== 1)) return { action: 'freeze', reason: 'abstain_or_dispute' };
+  if (new Set(allVerdicts.map((v) => v.outcome)).size > 1) return { action: 'freeze', reason: 'inconsistent_verdicts' };
+  // 赞成集(不变, N1): 仅 pmt_at 为安全整数且 ≥ outcome_end_ms 的 extractor / uma verdict 计入一致性与被引用
+  const eligible = allVerdicts.filter((v) => AUTO_KINDS.includes(v.source_kind) && Number.isSafeInteger(v.pmt_at) && v.pmt_at >= oe)
     .sort((a, b) => (a.pmt_at - b.pmt_at) || (a.id - b.id));
-  if (eligible.some((v) => v.outcome === null || v.outcome === undefined)) return { action: 'freeze', reason: 'abstain_or_dispute' };   // §1.5: 弃权 / 异议 ⇒ 冻结
-  const outcomes = new Set(eligible.map((v) => v.outcome));
-  if (outcomes.size > 1) return { action: 'freeze', reason: 'inconsistent_verdicts' };             // §1.5: 窗内不一致 ⇒ 冻结
   const kinds = new Set();
   let consistencyMetAt = null, metVerdict = null;
   for (const v of eligible) { kinds.add(v.source_kind); if (kinds.size >= 2) { consistencyMetAt = v.pmt_at; metVerdict = v; break; } }   // N1: 行推, 不存列

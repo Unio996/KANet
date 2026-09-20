@@ -24,7 +24,7 @@
 
 ## 测试 / 变异
 - 新增: `db/proto-settlement-freeze-v213.test.mjs` 13 例、`lib/proto-settlement-budget.test.mjs` 19 例、`lib/proto-bet-intake.test.mjs` 5 例、`api/proto-bet-intake-route.test.mjs` 9 断言(路由接线); 扩展: core 测试(+3 例 30 全绿)、store 测试(+3 例 17 全绿)、service 测试(+1 例 11 全绿)、relay `utxo-facts.test`(P1 改 + P1b, 43 全绿)、批 A 夹具默认 pmt_at(24 全绿)。db / proto 家族 / fresh-db-boot / proto-relay-ipc 全绿。
-- 变异 `mutate-batchD.mjs`: **89 变异(源码级 74 + 触发器级 15)88 杀 + 1 等价(X10)**; 首轮 87/90(B24 缺测→补字符串数字/小数 pmt_at 用例、K04 等价移除、X10 等价)已保留 `mutation-raw-round1.keep.txt`。覆盖 N1(pmt_at 计入/排除/引用)、N2(SAFETY 区间 ±1 与动态下界恰等/差 1/拒启)、N3(isFinite / 判定题定义单一来源)、N4(读 pmt 仅判定题 / fail-closed / 不碰 bets)、N5(冻结时钟 pmt vs wall / reason 非空 / 单向 / D2)、N6(upper=GRACE_MIN−1 / =GRACE_MIN / 之间 / 之上)、cutoff / outcome_end / 宽限窗 / 一致性 / 冻结三入口 / 晚 seal / pmt 无效 / frozen 单向 / 受理门 各边界。
+- 变异 `mutate-batchD.mjs`(初版 ffe95ffa): **89 变异(源码级 74 + 触发器级 15)88 杀 + 1 等价(X10)**; 复核 delta 后 **115 变异 114 杀 + 1 等价(X10)**(见文末 delta 节); 首轮 87/90(B24 缺测→补字符串数字/小数 pmt_at 用例、K04 等价移除、X10 等价)已保留 `mutation-raw-round1.keep.txt`。覆盖 N1(pmt_at 计入/排除/引用)、N2(SAFETY 区间 ±1 与动态下界恰等/差 1/拒启)、N3(isFinite / 判定题定义单一来源)、N4(读 pmt 仅判定题 / fail-closed / 不碰 bets)、N5(冻结时钟 pmt vs wall / reason 非空 / 单向 / D2)、N6(upper=GRACE_MIN−1 / =GRACE_MIN / 之间 / 之上)、cutoff / outcome_end / 宽限窗 / 一致性 / 冻结三入口 / 晚 seal / pmt 无效 / frozen 单向 / 受理门 各边界。
 
 ## 记票(不在本笔)
 - **停摆告警(§5 X/Y/N)**: (a) promote 后 X 分钟未 close_commit landed 且距 refund_flip<Y ⇒ 报警; (b) promote 窗内 pmt 连续读失败 > N tick ⇒ 报警——需 promote 有调用方后才有意义, 随批 B; X/Y/N 进 runbook。
@@ -34,3 +34,10 @@
 
 ## 诚实边界
 触发器防应用 / 运维失误与手写 SQL, **不防能 DROP TRIGGER 的机器写权**; 冻结 = 只走 refund(N5b), **refund 执行(refund_flip 广播 + 逐票 reclaim)未接线前, 判定题 / 有价值市场不得上主网**(本批不解决); 本批无 promote 调用方 ⇒ 生产上冻结只会由晚 seal 守卫触发。
+
+## NWT 批 D 复核 delta(2 MUST + SHOULD + ⑤ 回归)
+- **M1(冻结 fail-open)**: promote 门的冻结集 = 该市场【所有】verdict(extractor / uma / human / llm, 不论 pmt_at 是否 NULL、不论早晚): outcome 非 0/1(NULL 弃权 / 异议, 以及 2 / "1" / NaN 等非法值)或彼此不一致 ⇒ freeze; **赞成集不变**(仅 pmt_at 为安全整数且 ≥ outcome_end 的 extractor / uma 计入; llm / human 永不批准)。冻结集判定在"结果已知"之后、"赞成/宽限"之前; 过 cutoff 仍先于它。原 G5/G6 里"不合格 verdict 不触发冻结 / llm·human 异议不影响"两条断言随之改写(那正是 fail-open)。新增 G11(A: pmt_at NULL 的弃权 ×4 来源; A2: pmt_at NULL 的明确异议 ×4; B: 早于 outcome_end 的异议 ×4; B2: llm 能冻结不能批准; C: human 异议; D: 无赞成时单条异议也立刻冻; E: 非法 outcome 值; F: 全体一致但含 NULL / 过早 pmt_at ⇒ 不冻且不计入赞成)。**记票(SHOULD)**: 监控 llm 噪声致虚假冻结率, 后续精化。
+- **M2(受理门时钟偏差窗)**: 门改 `max(墙钟, pmt) ≥ outcome_end_ms` 即拒(409, 墙钟已过时不依赖 pmt 是否有效、也不再读 pmt); `checkBetIntake` 增可注入 `nowMs`(默认 Date.now)。新增 G12 / X6: pmt = oe−140s ∧ 墙钟 = oe+1ms ⇒ 必拒(旧逻辑会收); 墙钟恰 = oe 拒 / = oe−1 且 pmt 落后 ⇒ 收 / pmt 超前仍拒 / 墙钟已过且 pmt 无效仍是 409 而非 503 / 不传墙钟退回只看 pmt / 无判定题仍豁免且不读 pmt。intake 既有测试改为注入固定 nowMs(不依赖真实时钟)。
+- **SHOULD(relay)**: `handleGetPastMedianTime` 的 getServerInfo 与 getBlockDagInfo 改 `Promise.all` 并行(串行最坏 ≈ 2×rpcCallMs + waitForRpc 会顶到 console 15 s IPC 超时——这条路径同时是既有 close_commit 的 pmt 门); getServerInfo 失败 / 挂死 ⇒ isSynced=null(其自身 deadline 内返回), 不拖垮 pmt 主读数; getBlockDagInfo 挂死才是硬失败。新增 P1c(并发起跑 / 总耗时≈max / getServerInfo 挂死不拖慢 / getBlockDagInfo 挂死仍抛)。relay.mjs 陈旧的"只回三字段"注释改为四字段。
+- **⑤ 回归(b)(c)**(生产代码零改动, 纯测试 + 变异): store 测试——冻结的 sealed 市场上 prepared 的 close_commit 仍在 preparedRows、submitted 仍在 landedChecks、close_commit landed 的 markLanded 照常 sealed→resolved + 建 win claim + convert 意图; 冻结的 resolved 市场上 convert_to_claim / claim_draw 仍被发现且 dependenciesLanded 放行。core 测试——冻结端口恒 true 时 seal / convert_to_claim / claim_draw 照常 submitted 且根本不读冻结端口; 已提交 close_commit 的 landed 检查 + markLanded 不读冻结。
+- **变异(delta 后 115 = 89 + 26)**: M1 十一个(冻结集只看赞成集 / 弃权只看赞成集 / 排除 llm·human 各 2 / 排除 NULL·过早 pmt_at 各 2 / 非法 outcome 值 / 冻结集只含 extractor·uma)、M2 五个(边界 / 去掉墙钟 / 仍读 pmt / 装配层不取·不传墙钟)、relay 两个(串行 / getServerInfo 失败拖垮)、⑤ 八个(convert / claim 发现·依赖误加冻结检查、preparedRows / landedChecks 排除冻结、resolve 后效被冻结拦、核心冻结闸扩到所有步); 全部杀死(除记录在案的等价 X10)。过程留档: mutation-raw-round2.txt(初版终态 88/89)、mutation-raw-round3-stale-anchors.txt(delta 首跑, 2 个脚本锚点过期 ERROR, 已修)。

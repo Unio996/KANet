@@ -102,6 +102,31 @@ await t('批 D D1: 已 prepared 的 close_commit 意图不受冻结影响——�
   await assert.rejects(() => store.isSettlementFrozen('no-such-market'), /不存在/);
 });
 
+// ── 批 D ⑤ 回归(b)(c): 冻结只属于 close_commit 的三入口; 已广播的结算(prepared / submitted / landed 之后的 convert / claim)不被冻结拦, 冻结不 strand 它们 ──
+const winClaim = (market) => sqlite.prepare("SELECT id FROM proto_claims WHERE market_id = ? AND side = 'win'").get(market)?.id;
+await t('批 D ⑤(b): 冻结的 sealed 市场上, 已 prepared 的 close_commit 意图仍在 preparedRows、已 submitted 的仍在 landedChecks(同字节重播 / landed 检查不看冻结); 其 markLanded(close_commit) 照常 sealed→resolved 并建 win claim + convert 意图', () => {
+  const p = sealedMarketWithBets(); mkIntent('market', p, 'seal', 'landed'); const pk = mkIntent('market', p, 'resolve', 'prepared'); freezeRaw(p);
+  assert.ok(store.listWork({ limit: 500 }).preparedRows.some((r) => r.intent_key === pk), 'prepared 行不受冻结影响');
+  const s = sealedMarketWithBets(); mkIntent('market', s, 'seal', 'landed'); const sk = mkIntent('market', s, 'resolve', 'submitted'); freezeRaw(s);
+  assert.ok(store.listWork({ limit: 500 }).landedChecks.some((r) => r.intent_key === sk), 'submitted 行不受冻结影响');
+  const l = sealedMarketWithBets(); mkIntent('market', l, 'seal', 'landed'); const lk = mkIntent('market', l, 'resolve', 'landed'); freezeRaw(l);
+  assert.equal(store._marketOf(l).status, 'sealed');
+  store.markLanded('close_commit', sqlite.prepare('SELECT * FROM proto_settlement_intents WHERE intent_key = ?').get(lk));
+  assert.equal(store._marketOf(l).status, 'resolved', '冻结的市场 close_commit landed 后照常 resolved'); assert.ok(winClaim(l), 'win claim 已建');
+  assert.ok(sqlite.prepare("SELECT 1 FROM proto_settlement_intents WHERE subject_type = 'claim' AND subject_id = ? AND step = 'convert_to_claim'").get(winClaim(l)), 'convert 意图已建');
+});
+await t('批 D ⑤(c): 冻结的 resolved 市场——win claim 仍出现在 convert_to_claim 的 advances(resolve landed 时); dependenciesLanded(convert_to_claim) 放行; convert landed 后 claim_draw 同样出现且放行(convert / claim 全程不读冻结)', () => {
+  const m = sealedMarketWithBets(); mkIntent('market', m, 'seal', 'landed'); const rk = mkIntent('market', m, 'resolve', 'landed');
+  store.markLanded('close_commit', sqlite.prepare('SELECT * FROM proto_settlement_intents WHERE intent_key = ?').get(rk));
+  const cid = winClaim(m); assert.ok(cid); freezeRaw(m);                                   // 结算已广播 / 落链之后才冻结
+  const w1 = store.listWork({ limit: 500 });
+  assert.ok(w1.advances.some((a) => a.step === 'convert_to_claim' && a.subjectId === cid), '冻结的 resolved 市场: convert_to_claim 仍被发现(或作为已建 pending 意图的推进)') ;
+  assert.deepEqual(store.dependenciesLanded('convert_to_claim', { subjectId: cid, marketId: m }), { ok: true });
+  const ck = `settle:claim:${cid}:convert_to_claim`; sqlite.prepare("UPDATE proto_settlement_intents SET status = 'landed' WHERE intent_key = ?").run(ck);
+  const w2 = store.listWork({ limit: 500 }); assert.ok(w2.advances.some((a) => a.step === 'claim_draw' && a.subjectId === cid), '冻结市场: claim_draw 仍被发现');
+  assert.deepEqual(store.dependenciesLanded('claim_draw', { subjectId: cid, marketId: m }), { ok: true });
+});
+
 // ── close_commit / convert_to_claim / claim_draw 发现 ──
 await t('close_commit: sealed ∧ winning_side 已写 ∧ resolve 意图未 landed / ambiguous ⇒ 出现; winning_side 为空 / 已 landed 不出现', () => {
   const m = sealedMarketWithBets(); const noSide = sealedMarketWithBets({ winningSide: null }); const done = sealedMarketWithBets(); mkIntent('market', done, 'resolve', 'landed');

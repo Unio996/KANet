@@ -62,7 +62,7 @@ T03: KILLED exit=1 18 passed, 1 failed :: 冻结端口恒 false
 K01: KILLED exit=1 30 passed, 1 failed :: 入口③非严格 fail-closed(只拦 true)
 K02: KILLED exit=1 30 passed, 1 failed :: 冻结读失败按未冻(fail-open)
 K03: KILLED exit=1 29 passed, 2 failed :: 入口③不读冻结端口
-N01: KILLED exit=1 3 passed, 3 failed :: 无判定题也读 pmt
+N01: ERROR 片段命中 0 次: if (intakeNeedsPmt(row)) { :: 无判定题也读 pmt
 N02: KILLED exit=1 5 passed, 1 failed :: readPmt 抛错 fail-open
 N03: KILLED exit=1 5 passed, 1 failed :: 市场不存在不返回 404
 R01: KILLED exit=1 ? :: 路由不执行受理门拒绝
@@ -73,7 +73,7 @@ V03: KILLED exit=1 10 passed, 1 failed :: 预算校验失败仍启动
 V04: KILLED exit=1 10 passed, 1 failed :: 非法 env 回默认但不 LOUD
 J01: KILLED exit=1 20 passed, 1 failed :: 判定题定义少一列(单一来源)
 L01: KILLED exit=1 41 passed, 3 failed :: relay 不回 isSynced
-L02: KILLED exit=1 42 passed, 2 failed :: relay 不校验 isSynced 类型
+L02: ERROR 片段命中 0 次: if (typeof si?.isSynced === 'boolean') isSynced = si.isSynced; :: relay 不校验 isSynced 类型
 M101: KILLED exit=1 20 passed, 1 failed :: M1: 弃权 / 异议只看赞成集(pmt_at NULL / 过早的异议被无视 = fail-open)
 M102: KILLED exit=1 20 passed, 1 failed :: M1: 不一致只看赞成集
 M103: KILLED exit=1 20 passed, 1 failed :: M1: llm 的弃权 / 异议不进冻结集
@@ -131,4 +131,4 @@ RESTORED baseline:
   route: exit=0 ALL PASS
   service: exit=0 11 passed, 0 failed
   relay: exit=0 44 passed, 0 failed
-SUMMARY mutants=115 killed=114 survivors=1 errors=0
+SUMMARY mutants=115 killed=112 survivors=1 errors=2

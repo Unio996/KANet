@@ -159,7 +159,7 @@ await t('G5 ▲ 前置 2 结果已知(N1): pmt < outcome_end ⇒ wait(outcome_no
   assert.deepEqual([gate({ verdicts: stale }).action, gate({ verdicts: stale }).reason], ['wait', 'awaiting_second_source'], 'pmt_at = outcome_end−1 的一致 verdict 不计入');
   for (const bad of [null, undefined, 1.5, '9', NaN, String(CMA_OK), CMA_OK + 0.5]) assert.equal(gate({ verdicts: [V(1, 'extractor', 1, CMA_OK - 1000), V(2, 'uma', 1, bad)] }).reason, 'awaiting_second_source', 'pmt_at=' + String(bad) + ' 不计入(含字符串数字 / 非整数——须是安全整数才算)');
   assert.equal(gate({ verdicts: [V(1, 'extractor', 1, OE), V(2, 'uma', 1, OE)] }).consistencyMetAt, OE, 'pmt_at = outcome_end 计入(边界含等号)');
-  assert.equal(gate({ verdicts: [V(1, 'extractor', 1, CMA_OK - 1000), V(2, 'uma', 0, OE - 1), V(3, 'uma', null, null)] }).reason, 'awaiting_second_source', '不合格 verdict(哪怕不一致 / 弃权)不触发冻结, 也不计一致');
+  assert.equal(gate({ verdicts: [V(1, 'extractor', 1, CMA_OK - 1000), V(2, 'uma', 1, OE - 1), V(3, 'uma', 1, null)] }).reason, 'awaiting_second_source', '不合格(过早 / NULL pmt_at)但【一致】的 verdict: 不冻结, 也不计入赞成集(M1: 赞成集不变)');
 });
 await t('G6 ▲ 前置 5 R2 一致: 单源 ⇒ wait; 同类型两条(extractor+extractor)不算独立来源 ⇒ wait; extractor+uma 一致 ⇒ 通过; 任一不一致 ⇒ freeze(inconsistent_verdicts); 任一 outcome NULL(弃权 / 异议)⇒ freeze(abstain_or_dispute); llm / human 不计入自动路径', () => {
   assert.equal(gate({ verdicts: [V(1, 'extractor', 1, CMA_OK)] }).reason, 'awaiting_second_source');
@@ -168,8 +168,42 @@ await t('G6 ▲ 前置 5 R2 一致: 单源 ⇒ wait; 同类型两条(extractor+e
   assert.equal(gate({ verdicts: [V(1, 'extractor', 1, CMA_OK - 1), V(2, 'extractor', 0, CMA_OK), V(3, 'uma', 1, CMA_OK + 1)] }).reason, 'inconsistent_verdicts', '两源一致之外还有不一致的第三条 ⇒ 仍冻结("全部 extractor/uma 类一致")');
   assert.equal(gate({ verdicts: [...GOOD, V(3, 'uma', null, CMA_OK + 5)] }).reason, 'abstain_or_dispute');
   assert.equal(gate({ verdicts: [V(1, 'extractor', null, CMA_OK)] }).reason, 'abstain_or_dispute', '第二源未到时的弃权也立刻冻结');
-  assert.equal(gate({ verdicts: [...GOOD, V(9, 'llm', 0, CMA_OK), V(10, 'human', 0, CMA_OK)] }).action, 'promote', 'llm / human 的不同意见不影响自动路径');
+  assert.equal(gate({ verdicts: [...GOOD, V(9, 'llm', 1, CMA_OK), V(10, 'human', 1, CMA_OK)] }).action, 'promote', 'llm / human 与赞成集一致 ⇒ 不影响(也不被引用: 引用的仍是 extractor)');
+  assert.equal(gate({ verdicts: [...GOOD, V(9, 'llm', 1, CMA_OK), V(10, 'human', 1, CMA_OK)] }).verdictId, 1);
   assert.equal(gate({ verdicts: [V(9, 'llm', 1, CMA_OK), V(10, 'human', 1, CMA_OK)] }).reason, 'awaiting_second_source', 'llm / human 不构成 ≥2 独立来源');
+});
+await t('G11 ▲ M1 冻结集 = 该市场所有 verdict(extractor / uma / human / llm; 不论 pmt_at 空否 / 早晚): 弃权 / 异议(outcome NULL)或与赞成集不一致 ⇒ freeze(不是被无视); 赞成集不变', () => {
+  const KINDS = ['extractor', 'uma', 'human', 'llm'];
+  // A: pmt_at = NULL 的弃权 / 异议(adapter 读 pmt 失败时写下的)——四种来源都冻结
+  for (const k of KINDS) { const r = gate({ verdicts: [...GOOD, V(50, k, null, null)] }); assert.deepEqual([r.action, r.reason], ['freeze', 'abstain_or_dispute'], 'A ' + k); }
+  // A2: pmt_at = NULL 且与赞成集不同的明确异议(outcome 0 vs 赞成 1)
+  for (const k of KINDS) { const r = gate({ verdicts: [...GOOD, V(51, k, 0, null)] }); assert.deepEqual([r.action, r.reason], ['freeze', 'inconsistent_verdicts'], 'A2 ' + k); }
+  // B: 早于 outcome_end 的异议(pmt_at < outcome_end)同样冻结(不论早晚)
+  for (const k of KINDS) { const r = gate({ verdicts: [...GOOD, V(52, k, 0, OE - 1)] }); assert.deepEqual([r.action, r.reason], ['freeze', 'inconsistent_verdicts'], 'B ' + k); const n = gate({ verdicts: [...GOOD, V(53, k, null, OE - 1)] }); assert.equal(n.reason, 'abstain_or_dispute', 'B(NULL outcome) ' + k); }
+  // B2: llm 能提异议冻结、不能批准: llm 与赞成集一致不改变任何东西; 只有 llm 的一致票不构成第二源
+  assert.equal(gate({ verdicts: [...GOOD, V(54, 'llm', 1, CMA_OK)] }).verdictId, 1); assert.equal(gate({ verdicts: [V(1, 'extractor', 1, CMA_OK), V(2, 'llm', 1, CMA_OK)] }).reason, 'awaiting_second_source', 'llm 不能批准');
+  // C: human 异议冻结; human 一致不影响
+  assert.equal(gate({ verdicts: [...GOOD, V(55, 'human', 0, CMA_OK + 1)] }).reason, 'inconsistent_verdicts'); assert.equal(gate({ verdicts: [...GOOD, V(56, 'human', 1, CMA_OK + 1)] }).action, 'promote');
+  // D: 还没有任何赞成时, 单独一条异议 / 弃权也立刻冻结(不是 wait)
+  assert.equal(gate({ verdicts: [V(60, 'uma', null, null)] }).reason, 'abstain_or_dispute'); assert.equal(gate({ verdicts: [V(61, 'llm', 0, null), V(62, 'llm', 1, null)] }).reason, 'inconsistent_verdicts', '冻结集内部互相不一致本身就冻');
+  // E: outcome 非 0/1 的任何值(2 / "1" / NaN / undefined)一律按弃权 / 异议冻结(fail-safe)
+  for (const bad of [2, -1, '1', NaN, undefined, 0.5]) assert.equal(gate({ verdicts: [...GOOD, V(70, 'llm', bad, null)] }).reason, 'abstain_or_dispute', String(bad));
+  // F: 全体一致但含 NULL pmt_at / 过早 pmt_at 的 verdict ⇒ 不冻; 它们不计入赞成集(不能替代第二源)
+  assert.equal(gate({ verdicts: [V(1, 'extractor', 1, CMA_OK), V(2, 'uma', 1, null), V(3, 'uma', 1, OE - 1)] }).reason, 'awaiting_second_source');
+  // 顺序: 过 cutoff 仍先于冻结集判定(同为 freeze, reason 保持 past_cutoff)
+  assert.equal(gate({ verdicts: [...GOOD, V(80, 'llm', null, null)], pmt: pm(CUTOFF) }).reason, 'past_cutoff');
+});
+await t('G12 ▲ M2 受理门取 max(墙钟, pmt): pmt = oe−140s ∧ 墙钟 = oe+1ms ⇒ 必拒(旧逻辑会收); 墙钟恰 = oe 拒 / = oe−1 且 pmt 落后 ⇒ 收; pmt 超前墙钟(pmt ≥ oe ∧ 墙钟 < oe)仍拒; 墙钟已过 ⇒ 409 且不依赖 pmt 是否有效; 不传墙钟 ⇒ 退回只看 pmt', () => {
+  const m = mkMarket(); const lagged = { valid: true, pmtMs: OE - 140_000 };
+  const g = (wallMs, pmt = lagged) => evaluateBetIntakeGate({ market: m, pmt, wallMs });
+  let r = g(OE + 1); assert.deepEqual([r.accept, r.code, r.http], [false, 'outcome_end_passed', 409], 'pmt=oe−140s ∧ wall=oe+1ms 必拒');
+  assert.equal(g(OE).accept, false, '墙钟恰等于 oe 拒'); assert.equal(g(OE - 1).accept, true, '墙钟 oe−1 且 pmt 落后 ⇒ 收(两者都没过)');
+  assert.equal(g(OE - 1, { valid: true, pmtMs: OE }).accept, false, 'pmt 超前(pmt ≥ oe)仍拒');
+  for (const bad of [null, { valid: false, reason: 'not_synced' }]) { r = g(OE + 5, bad); assert.deepEqual([r.accept, r.code, r.http], [false, 'outcome_end_passed', 409], '墙钟已过即 409, 不因 pmt 无效改成 503'); }
+  assert.equal(g(OE - 10, null).code, 'pmt_unavailable_fail_closed', '墙钟没过 ∧ pmt 无效 ⇒ 仍 503');
+  for (const w of [undefined, null, NaN]) assert.equal(g(w).accept, true, '不传 / 非法墙钟 ⇒ 退回只看 pmt(lagged pmt 收)');
+  assert.equal(intakeNeedsPmt(m, OE - 1), true); assert.equal(intakeNeedsPmt(m, OE), false, '墙钟已过 outcome_end ⇒ 不需要读 pmt'); assert.equal(intakeNeedsPmt(m), true, '不传墙钟 ⇒ 仍需要读 pmt');
+  assert.equal(evaluateBetIntakeGate({ market: plain(), pmt: null, wallMs: OE + 10 }).accept, true, '无判定题仍豁免(墙钟再晚也收)');
 });
 await t('G7 ▲ N6 宽限窗边界: consistency_met_at + effective_grace ≤ pmt < cutoff; pmt = 该和 −1 ⇒ wait(in_grace); = 该和 ⇒ 通过; effective_upper = GRACE_MIN−1 ⇒ freeze(late_seal); = GRACE_MIN ⇒ 不冻(eg=GRACE_MIN); 之间 ⇒ eg=upper(< GRACE_MS 时被 upper 限住); 之上 ⇒ eg=GRACE_MS', () => {
   const at = (cma, extra = {}) => ({ verdicts: [V(1, 'extractor', 1, cma - 1), V(2, 'uma', 1, cma)], ...extra });

@@ -182,6 +182,15 @@ await t('批 D D1: 已 prepared 的 close_commit 意图(字节已落库)不受�
   assert.equal(r.outcome, 'submitted'); assert.equal(r.replayed, true); assert.equal(idx(w.log, 'isSettlementFrozen'), -1);
 });
 
+await t('批 D ⑤(c): 冻结只属于 close_commit——即使冻结端口恒返回 true, convert_to_claim / claim_draw / seal 照常 submitted 且【根本不读冻结端口】; 已 landed 的 close_commit 走 landed 检查 + markLanded 也不看冻结', async () => {
+  for (const step of ['seal', 'convert_to_claim', 'claim_draw']) { const w = mkWorld({ frozen: true }); const r = await adv(w, step); assert.equal(r.outcome, 'submitted', step); assert.equal(idx(w.log, 'isSettlementFrozen'), -1, step + ' 不读冻结端口'); }
+  const i = ids(); const k = `settle:market:${i.subjectId}:resolve`;
+  const w2 = mkWorld({ frozen: true, landed: { landed: true, depth: 25 }, work: { landedChecks: [{ intent_key: k, subject_type: 'market', subject_id: i.subjectId, step: 'resolve', status: 'submitted', submitted_txid: 'ab'.repeat(32) }], advances: [], preparedRows: [], effectsPending: [] } });
+  w2.rows.set(k, { intent_key: k, subject_type: 'market', subject_id: i.subjectId, step: 'resolve', status: 'submitted', submitted_txid: 'ab'.repeat(32) });
+  const t2 = await createSettlementDriver(w2.deps).runTick({ cap: 5 });
+  assert.equal(w2.markLandedCalls.length, 1, '冻结市场的已提交 close_commit landed ⇒ markLanded 照常调用'); assert.equal(idx(w2.log, 'isSettlementFrozen'), -1, 'landed 检查 / 后效不读冻结端口'); assert.ok(t2 && t2.landed === 1, JSON.stringify(t2));
+});
+
 // ── 失败分类与报警 ─────────────────────────────────────────────────────────────────────────────────────────────────
 await t('C1 事实漂移 ⇒ failed + settlement_chain_fact_drift(error); 不构造、不广播; 意图仍 pending(NO TX NO STATE)', async () => {
   const w = mkWorld({ verifyThrow: new SettlementChainCheckError('rootClose_value_drift', '面值漂移', { step: 'close_commit', role: 'rootClose' }) });

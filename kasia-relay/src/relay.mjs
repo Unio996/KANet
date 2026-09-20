@@ -1264,7 +1264,7 @@ if (process.send) {
 
         case 'get_past_median_time': {
           // 批9 9-0 (J2 2026-09-19, R2): 只读——close_commit 的同节点 pmt 门。走与 covenant_broadcast 提交同一个共享
-          //   RpcClient ⇒ "读 pmt 的节点 == 提交的节点"无条件成立。只回 {ok, pastMedianTimeMs, observedAtMs}(不带节点标识)。
+          //   RpcClient ⇒ "读 pmt 的节点 == 提交的节点"无条件成立。只回四个字段 {ok, pastMedianTimeMs, observedAtMs, isSynced}(isSynced 为批 D 新增的布尔或 null; 不带节点标识)。
           //   不签不广播不动钱。超时/未连接同上, 抛错走外层 catch。
           const { handleGetPastMedianTime, FACTS_RPC_WAIT_MS } = await import('./lib/utxo-facts.mjs');
           const { waitForRpc } = await import('./rpc-listener.mjs');
