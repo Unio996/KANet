@@ -1,0 +1,6 @@
+BASELINE (2 test files)
+  green B src/lib/proto-settlement-budget.test.mjs 21p/0f
+  green C src/lib/proto-oracle-adapter-core.test.mjs 19p/0f
+mb3 killed [B:RED(20p/1f) C:green(19p/0f)] — 批 D 留尾: 赞成集含 human(human 一致即凑够第二源)
+
+SUMMARY: total=1 killed=1 survived=0 anchor_errors=0

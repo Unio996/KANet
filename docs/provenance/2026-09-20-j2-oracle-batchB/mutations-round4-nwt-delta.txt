@@ -1,0 +1,18 @@
+BASELINE (5 test files)
+  green V src/lib/proto-oracle-verdict.test.mjs 12p/0f
+  green C src/lib/proto-oracle-adapter-core.test.mjs 22p/0f
+  green SV src/services/proto-oracle-adapter.test.mjs 7p/0f
+  green S src/lib/proto-oracle-spec.test.mjs 12p/0f
+  green R2 src/api/proto-oracle-create-route.test.mjs ALL PASS
+md1 killed [V:RED(11p/1f) C:RED(21p/1f)] — M1 批准票在 pmt<outcome_end 时也写(pmt_at<oe 永久失格 ⇒ 必冻结退款)
+md2 killed [V:RED(10p/2f) C:RED(20p/2f)] — M1 越界: 实质 ABSTAIN 也被 outcome_end 限制(B4 要求任何时候都写)
+md3 killed [C:RED(20p/2f)] — M2 候选不按到期过滤(远期旧市场占满 LIMIT 饿死可判市场)
+md4 killed [C:RED(21p/1f)] — M2 候选不按 outcome_end 升序
+md5 killed [C:RED(20p/2f)] — M2 spec 坏的市场不冻结(永远占名额)
+md6 killed [C:RED(21p/1f)] — M2 数据源未登记的市场不冻结(永远占名额)
+md7 killed [SV:RED(6p/1f)] — SHOULD① voter 导入失败抛出(拖垮 console 顶层启动)
+md8 killed [S:RED(11p/1f) R2:RED(❌ 7 项失败)] — SHOULD② 未识别的判定题形键被静默丢弃
+md9 killed [R2:RED(❌ 7 项失败)] — SHOULD② 路由不拒未识别键
+md10 killed [S:RED(11p/1f) R2:RED(❌ 2 项失败)] — SHOULD② 误伤既有 resolutionNote 字段(旧流程被破坏)
+
+SUMMARY: total=10 killed=10 survived=0 anchor_errors=0

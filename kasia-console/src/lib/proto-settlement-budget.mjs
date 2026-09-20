@@ -144,6 +144,8 @@ export function evaluateBetIntakeGate({ market, pmt = null, wallMs = null }) {
   if (!isFiniteNum(market.outcome_end_ms)) return { accept: false, code: 'outcome_end_missing', http: 409, detail: '判定题市场必须有有限的 outcome_end_ms(N3), 否则拒受理下注' };
   // M2(NWT 批 D 复核, Bettor 拍): pmt 落后墙钟 2.3–10 min ⇒ 墙钟已过 outcome_end 而 pmt 还没过的这段窗内, 只看 pmt 会继续收下注。取 max(墙钟, pmt): 偏差只会多拒、不会多收。
   //   墙钟已过即拒(不依赖 pmt 是否有效——结果已可知是墙钟就能确定的事实, 也就不需要再读 pmt)。
+  // 批 B(批 D 留尾): 墙钟读数不是有限数 ⇒ 无法确认"结果尚不可知" ⇒ fail-closed(此前 null 会悄悄退化成只看 pmt = 恰是 M2 要堵的缺口)
+  if (!Number.isFinite(wallMs)) return { accept: false, code: 'wall_clock_unavailable_fail_closed', http: 503, detail: `墙钟读数不是有限数(${String(wallMs)}): 无法确认 outcome_end 未过 ⇒ 拒受理(fail-closed)` };
   if (Number.isFinite(wallMs) && wallMs >= market.outcome_end_ms) return { accept: false, code: 'outcome_end_passed', http: 409, detail: `墙钟(${wallMs}) ≥ outcome_end_ms(${market.outcome_end_ms}): 结果已可知, 拒受理下注(取 max(墙钟, pmt))` };
   if (!pmt || pmt.valid !== true) return { accept: false, code: 'pmt_unavailable_fail_closed', http: 503, detail: `判定题受理时 pmt 无效 / 读不到 ⇒ 拒受理(N4 fail-closed): ${pmt && pmt.reason ? pmt.reason : 'no_pmt'}` };
   if (pmt.pmtMs >= market.outcome_end_ms) return { accept: false, code: 'outcome_end_passed', http: 409, detail: `pmt(${pmt.pmtMs}) ≥ outcome_end_ms(${market.outcome_end_ms}): 结果已可知, 拒受理下注` };
@@ -213,4 +215,7 @@ export function evaluatePromoteGate({ market, verdicts, bets, pmt, wallMs, cfg, 
 }
 
 /** promote 的 UPDATE 语句(批 B 用): 谓词与触发器双保险——sealed ∧ 未判 ∧ 未冻结同语句校验(D2); changes==0 ⇒ 已判 / 已冻 / 非 sealed, 停。 */
-export const PROMOTE_UPDATE_SQL = "UPDATE proto_markets SET winning_side = ?, winning_side_source = ?, winning_side_set_at = ?, winning_side_verdict_id = ?, updated_at = ? WHERE id = ? AND status = 'sealed' AND winning_side IS NULL AND settlement_frozen_at IS NULL";
+// 批 B B7(NWT 红队): R2 / 异议检查在 JS、与写值不原子——adapter 是第一个真调用方且写值不可改, 所以把"不存在异议 verdict"放进【同一条 UPDATE 的 WHERE】:
+//   NOT EXISTS(该市场任一 verdict 的 outcome 为 NULL 或 ≠ 拟写值)——与批 D M1 的冻结集(所有 verdict, 不论 kind / pmt_at)同口径; 异议行在 gate 判定之后、写值之前插入 ⇒ changes==0。
+// 占位符共 8 个: winning_side, source, set_at, verdict_id, updated_at, id, [子查询] market_id, [子查询] winning_side。
+export const PROMOTE_UPDATE_SQL = "UPDATE proto_markets SET winning_side = ?, winning_side_source = ?, winning_side_set_at = ?, winning_side_verdict_id = ?, updated_at = ? WHERE id = ? AND status = 'sealed' AND winning_side IS NULL AND settlement_frozen_at IS NULL AND NOT EXISTS (SELECT 1 FROM proto_market_verdicts v WHERE v.market_id = ? AND (v.outcome IS NULL OR v.outcome <> ?))";

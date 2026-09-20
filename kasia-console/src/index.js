@@ -951,6 +951,9 @@ startProtoDriver();
 // 批9 9-2b: 结算驱动(默认关闭——PROTO_SETTLEMENT_DRIVER_ENABLED 不写 = 关, 只打一行 disabled 日志; 与 PROTO_DRIVER_ENABLED 互相独立)。
 import { startProtoSettlementDriver } from './services/proto-settlement-driver.mjs';
 startProtoSettlementDriver();
+// 批 B(oracle 整合): adapter——扫 sealed 判定题市场 → derive → 写 verdicts → 经批 D 门 promote / 冻结。默认关闭(PROTO_ORACLE_ADAPTER_ENABLED 不写 = 关, 只打一行 disabled 日志; 翻开须 Owner); 主网只允许零价值白名单代币的判定题(N5b)。
+import { startProtoOracleAdapter } from './services/proto-oracle-adapter.mjs';
+await startProtoOracleAdapter();
 
 // J1tn 2026-07-16 (docs/2026-07-08-backward-walk-daa-index-design.md §2.2 note①, Bettor 方向审
 // GREEN + NWT 攻击面终审 GREEN #o0056j): spc_daa_index 完整性巡检 — 9ez2u 同族根因防线。

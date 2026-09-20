@@ -59,10 +59,13 @@ export function ensureMarketPending(o) {
   sqlite.prepare(`
     INSERT INTO proto_markets
       (id, token_def_id, question, deadline_ms, min_bet, seal_count, committee_pubkeys_json,
-       committee_privkey_enc, rootclose_tmpl_hash, shardleaf_own_redeem_len, status, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'genesis_pending', ?, ?)
+       committee_privkey_enc, rootclose_tmpl_hash, shardleaf_own_redeem_len, status, created_at, updated_at,
+       resolution_rule_spec, outcome_market_source, outcome_condition_id, outcome_oracle_relay_ids, outcome_end_ms)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'genesis_pending', ?, ?, ?, ?, ?, ?, ?)
   `).run(o.id, o.token_def_id, o.question ?? null, o.deadline_ms, o.min_bet, o.seal_count ?? 2,
-    o.committee_pubkeys_json, o.committee_privkey_enc, o.rootclose_tmpl_hash, o.shardleaf_own_redeem_len ?? null, ts, ts);
+    o.committee_pubkeys_json, o.committee_privkey_enc, o.rootclose_tmpl_hash, o.shardleaf_own_redeem_len ?? null, ts, ts,
+    // 批 B B6(d): 判定题列与市场壳在【同一条 INSERT】写全(批 A R4 触发器锁的是 genesis 广播之后的 UPDATE, INSERT 不受限); 缺省 = NULL ⇒ 行与今天逐字节相同
+    o.resolution_rule_spec ?? null, o.outcome_market_source ?? null, o.outcome_condition_id ?? null, o.outcome_oracle_relay_ids ?? null, o.outcome_end_ms ?? null);
   return getMarketRow(o.id);
 }
 
