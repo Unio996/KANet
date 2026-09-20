@@ -96,3 +96,12 @@ harness / 预加载 / 演练脚本存档于 `docs/provenance/2026-09-20-j2-oracl
 2. **T 臂的 uma 侧独立成票**: ESPN 还在 in-progress 时, extractor 侧暂态无行, 但 uma 侧一旦成票就单独写入(两路互不牵连); 热切 final 后 extractor 才写, **宽限窗从"第二源写入时刻 pT"起算**(不是从 uma 那条起算)。取证判据据此: T 臂的 promote 时刻 = pT + 宽限窗。
 3. **演练脚本自身一个坑**: 父 / 子进程各按各的 pid 算场景文件路径 ⇒ 预加载读不到 ⇒ 上游全 503 ⇒ 全暂态(此时 adapter 表现正确: scanned>0、verdict 0、无 error、无冻结——暂态不冻结)。真 simnet 上场景文件路径须由 KANet-UI 固定(env `E2E_SCENARIO_FILE` 绝对路径), 别按 pid 算。
 **仍未验(只有 simnet 能验)**: `isSynced`(P0)、真 relay pmt 读取、真矿工节奏下的 pmt 落后 / 停顿、bet 受理门的活体、seal 的"注数==seal_count"真触发、close_commit / convert / claim 真广播、console 里 adapter service 的真 interval / 单飞。
+
+## 10. 复用核查(D-031「不轻易新造轮子」, 2026-09-20 补记)
+
+新造的只有 `upstream-mock.mjs`(进程级、按 host 拦截、场景文件可热切换的受控上游)。动手前查过仓库,**没有能直接复用的现成物**:
+- `kasia-console/scripts/gateE-*.mjs`、`gateC-*.mjs`、`_bettor-*.mjs` 引用 ESPN / gamma 的都是**直连真网**(如 `gateE-wire-test.mjs` 直接 fetch 真 ESPN)或做离线准确率评测, 不是可控上游。
+- `scripts/j1-trackb-frozen-evidence-test.mjs` / `bshard-close-enforce.mjs` 用的是**注入 `fetchImpl` + 单文件 ESPN fixture**——参数注入式, 进不了一个已在跑的 console 进程。
+- 单测里的 fetch 桩(含我自己的 `proto-oracle-verdict.test.mjs`)是每个测试文件各自的 `globalThis.fetch` 替换, 没有热切换 / 场景文件 / 拦截日志。
+- `test-framework/`(lib / personas / cases / fixtures)面向 broker / seeker / agent 的业务级测试, 没有 proto 判定题 / 上游预言机的替身。
+其余全部复用现有: `validateJudgedMarketInput` / `computeMarketGenesisArtifacts` / `ensureMarketPending` / `createSettlementStore` / `runOracleAdapterTick`(含真 `deriveKanetNativeVote` / `derivePolymarketVote`)。**真 simnet 那一步: 矿工、simnet 节点 / relay 起停、`actions.jsonl` 取证格式, 复用 9-4(`2026-09-20-j2-batch9-94-simnet-clean-round`)与 KANet-UI 既有 simnet 工具, 不另造。**
