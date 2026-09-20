@@ -74,6 +74,10 @@ export function poolMarkets({ status, category, limit = 50, offset = 0, broker_r
   q.set('offset', String(offset));
   return req('GET', `/api/pool/markets?${q.toString()}`);
 }
+// 主网只读壳(变更说明 §2 P1): proto-v0 市场列表(公开 GET, 无鉴权、只读)。返回行含委员会公钥/txid 等内部字段——渲染层 readonly-shell.mjs 只取白名单字段。
+export function protoMarkets() {
+  return req('GET', '/api/proto-markets');
+}
 export function poolMarket(id) {
   return req('GET', `/api/pool/market/${encodeURIComponent(id)}`);
 }

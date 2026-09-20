@@ -7,6 +7,8 @@ import * as api from './console-api.mjs';
 import * as M from './messages.mjs';
 import * as PM from './prediction-menu.mjs';
 import { t, detectLang, SUPPORTED_LANGS } from './i18n.mjs';
+import { isReadonlyShell } from './readonly-shell.mjs';
+import { registerReadonlyShell } from './readonly-handlers.mjs';
 
 const missing = missingConfig();
 if (missing.length) { console.error('[tg-bot] missing env:', missing.join(', ')); process.exit(1); }
@@ -92,6 +94,10 @@ async function _fetchHomeMarketData() {
 
 // KANet-UI 2026-06-22 (Owner 实测派修 ②): /start 查 /link 绑定 — 已绑显地址+下一步, 未绑走三步引导。
 // T1 (2026-06-27): 解析 ctx.match payload — t.me/<bot>?start=<market_id> 深链直跳市场详情。
+// 主网只读壳(变更说明 docs/2026-09-20-kanetui-tg-bot-mainnet-relaunch-and-proto-v0-repoint-change-note-v0.1.md): 仅 KASPA_NETWORK=mainnet 时启用, 且在下面原有 handler 之前注册——
+// 它接管的命令/回调不会走到原 handler(原 handler 一个字节没动, TN12 行为原样保留)。只读: 看主网 proto 市场与结果 + /link 绑主网地址, 无下注/钱包/转账/领水入口。
+if (isReadonlyShell(CONFIG)) registerReadonlyShell(bot, { api, PM, CONFIG, linked, t, getLang, initLang });
+
 bot.command('start', async (ctx) => {
   const tgUser = String(ctx.from.id);
   initLang(ctx);
