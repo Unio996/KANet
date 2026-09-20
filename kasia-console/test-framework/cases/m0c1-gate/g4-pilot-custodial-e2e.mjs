@@ -57,6 +57,7 @@ process.env.DB_PATH = DB;
 process.env.CONSOLE_ENCRYPTION_KEY = randomBytes(32).toString('hex'); // throwaway, 64-hex 符合 crypto.js 要求
 process.env.KASPA_RPC_URL = 'ws://127.0.0.1:1'; // 死端口, 零真链接触(同 relay-gate-driver.mjs 隔离铁律)
 process.env.CUSTODIAL_RELAY_ID = RELAY_ID;
+process.env.KASPA_NETWORK = 'testnet-12'; // S4: capability.js deriveCustodialExecFields 现按 KASPA_NETWORK 严格相等 testnet-12 才放行(同 tg-wallet.js CR-2 守卫); 本 harness 的钱包/grant 都是 testnet-12, 必须显式设(否则 LAND 用例被新守卫挡成 401)
 process.env.ADMIN_CAPABILITY_GATEWAY_ENABLED = '1'; // 只在本进程 env 生效, 不碰 live console
 process.env.ADMIN_M0C1_GATE_ARMED = '1';
 // 🔴 relay-manager.js RELAY_DIR 依赖 KANET_ROOT(正常由启动脚本设置), 本脚本独立跑(非经 launcher)
