@@ -212,5 +212,20 @@ T('21 F2 pruneStateForMainnet: 只留 kaspa 前缀绑定; kaspatest/缺地址/�
   assert.equal(pruneStateForMainnet({ linkedAddrs: [['1', { address: 'kaspatest:qq' }]] }, 'kaspa').linkedAddrs.length, 0);   // 整段比较, 不是 startsWith
 });
 
+T('21b S3·SHOULD-2 prune 保留判据=整段形态 ^kaspa:[a-z0-9]+$: 空载荷/畸形/大写/多冒号/控制符/注入串全丢; 合法小写地址留; wantPrefix 空/非串 ⇒ 全丢(fail-closed)', () => {
+  const good = ['kaspa:qqb', 'kaspa:qz0abc9xyz', 'kaspa:' + 'q'.repeat(60) + '0123456789'];
+  const bad = ['kaspa:', 'kaspa:qq b', 'kaspa:qq\n', 'kaspa:qq​', 'kaspa:QQB', 'kaspa:qq:qq', 'kaspa:qq-b', 'kaspa:<script>', 'kaspa:qq\u0000', ' kaspa:qq', 'kaspa:qq ', 'KASPA:qq', 'kaspa::qq', 'kaspa:qqb\nkaspatest:qq',
+    'kaspaxqq', 'kaspa-qq', 'kaspatestqq', 'kaspa'];   // 无冒号: 前缀相等(第一个冒号的位置)不是 startsWith——否则 'kaspaxqq' 的尾巴 'qq' 会通过形态检查
+  const pr = (addrs, ...rest) => pruneStateForMainnet({ linkedAddrs: addrs.map((a, i) => [String(i), { address: a }]) }, rest.length ? rest[0] : 'kaspa').linkedAddrs.map((e) => e[1].address);   // rest 而非默认参数: 显式传 undefined 必须真传 undefined
+  assert.deepEqual(pr(good), good);                              // 正向对照臂: 合法地址不误杀
+  for (const b of bad) assert.deepEqual(pr([b]), [], JSON.stringify(b));
+  assert.deepEqual(pr([...good, ...bad]), good);                 // 混合: 只留合法且保序
+  assert.deepEqual(pr(['kaspatest:qqa', 'kaspa:qqb'], 'kaspatest'), ['kaspatest:qqa']);   // 判据随 wantPrefix, 不写死 kaspa
+  for (const wp of ['', undefined, null, 5, {}, 'kasp']) assert.deepEqual(pr(good, wp), [], `wantPrefix=${JSON.stringify(wp)}`);
+  assert.deepEqual(pr(['xqq', 'aspa', 'kaspaqq', ':qq', ''], ''), []);   // wantPrefix='' 时"无冒号串"的 addressPrefix 也是 '', 不能因此被留(非空守卫)
+  assert.deepEqual(pr(['undefined:qq', 'null:qq', ':qq'], undefined), []);   // 不把 undefined 拼成 "undefined:" 前缀去匹配
+  assert.equal(pruneStateForMainnet({ linkedAddrs: [['1', { address: 'kaspa:' }], ['2', { address: 'kaspa:ok' }]] }, 'kaspa').droppedLinks, 1);   // 统计随之变
+});
+
 console.log(`\n${n - fail} PASS / ${fail} FAIL`);
 process.exit(fail ? 1 : 0);

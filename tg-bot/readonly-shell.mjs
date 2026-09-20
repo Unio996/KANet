@@ -138,17 +138,21 @@ export function linkRejectKey(code) {
 
 /**
  * F2(NWT 审后修): 主网只读壳启动清理的【纯函数】——让 /start 那句"旧的绑定与会话已重置"名副其实。
- *  · linkedAddrs(条目 [tgUser, {address,...}]): 只保留地址前缀 == wantPrefix(主网 kaspa)的绑定; 前缀不符(TN12 时代的 kaspatest 等)或缺地址的丢弃。
+ *  · linkedAddrs(条目 [tgUser, {address,...}]): 只保留地址整段形态 ^<wantPrefix>:[a-z0-9]+$(主网 kaspa)的绑定; 前缀不符(TN12 时代的 kaspatest 等)、缺地址、载荷畸形的丢弃。
  *  · sessions: 全部清空(TN12 时代残留的下注会话; 只读壳没有会话流程)。
  *  · pendingPayments: 【不改】——它是"等待链上付款"的监控队列, 清掉 = 丢监控; 只回报数量, 调用方 LOUD 提示(上线前应为 0)。
  * 返回新的 { linkedAddrs, sessions } 与统计。不做任何 I/O。
  */
+// S3·SHOULD-2: 保留判据从"前缀相等"收紧为整段形态 ^<wantPrefix>:[a-z0-9]+$(空载荷 'kaspa:'/含空白·控制符·标点的畸形串/大写一律丢; bech32 地址本就是小写字母数字)。
+// 不用 RegExp 拼 wantPrefix(免转义与注入); wantPrefix 非空字符串是前提, 否则一律不保留(fail-closed, 与旧行为一致)。
+const retainableAddress = (addr, wantPrefix) => typeof addr === 'string' && typeof wantPrefix === 'string' && wantPrefix !== ''
+  && addressPrefix(addr) === wantPrefix && /^[a-z0-9]+$/.test(addr.slice(wantPrefix.length + 1));
 export function pruneStateForMainnet({ linkedAddrs = [], sessions = [], pendingPayments = [] } = {}, wantPrefix) {
   const keep = [];
   let droppedLinks = 0;
   for (const e of Array.isArray(linkedAddrs) ? linkedAddrs : []) {
     const addr = e && e[1] && typeof e[1] === 'object' ? e[1].address : null;
-    if (typeof addr === 'string' && addressPrefix(addr) === wantPrefix) keep.push(e); else droppedLinks++;
+    if (retainableAddress(addr, wantPrefix)) keep.push(e); else droppedLinks++;
   }
   return { linkedAddrs: keep, sessions: [], droppedLinks, clearedSessions: Array.isArray(sessions) ? sessions.length : 0, pendingPayments: Array.isArray(pendingPayments) ? pendingPayments.length : 0 };
 }
