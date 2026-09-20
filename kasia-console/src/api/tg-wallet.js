@@ -25,6 +25,17 @@ import { isLegacySendAllowed, isDiagnoseAllowed } from '../lib/pilot-wallet-poli
 const AUTH = { preHandler: [async (req, rep) => { await verifyIngestRequest(req, rep); }] };
 
 const NETWORK = 'testnet-12';
+// CR-2 (docs/2026-09-19-kanetui-cr1-cr2-tg-bot-mainnet-guards-change-spec-v0.1.md §2, Bettor 批 + NWT 审): 本模块只支持 NETWORK(testnet-12)。console 网络与它不符
+// (含 KASPA_NETWORK 未设)时, create / 查询 / send 三条路由返回 503——守卫在 ingest 鉴权【之后】(未鉴权仍先得 401)、在任何 DB 读写 / RPC / 助记词生成【之前】,
+// 所以 503 时不会新增托管钱包行、不会生成或展示助记词。判据严格相等(fail-closed)。仅收紧: 不新增能力、不把 NETWORK 改成 env 驱动(那是"启用主网托管钱包", 须 Owner 批)。
+// /diagnose 不动(它另有 ADMIN_DIAGNOSE_ENABLED + tier 密钥 + IP allowlist 三重门)。
+const NETWORK_GUARD = async (_req, rep) => {
+  const actual = process.env.KASPA_NETWORK;
+  if (actual !== NETWORK) {
+    return rep.code(503).send({ ok: false, error: `托管钱包暂不可用：本模块仅支持 ${NETWORK}，当前 KASPA_NETWORK=${actual || '(未设)'}` });
+  }
+};
+const GUARDED = { preHandler: [...AUTH.preHandler, NETWORK_GUARD] };
 // Path C (Bettor 拍): /send 经 relay 唯一链上出口转账。
 // 🔴 Codex MSG-124 真相校正 (K-13 一并了): 曾经 `|| process.env.FAUCET_RELAY_ID` 隐式 fallback
 // 到 faucet relay (身份完全不同的 relay) — 同款 capability.js:30/relay.js:75 footgun 家族，
@@ -54,7 +65,7 @@ async function balanceKasForAddress(address) {
 export async function registerTgWalletRoutes(fastify) {
   // POST /api/tg-wallet/create { tg_user_id } — generate custodial wallet if none; return address +
   //   mnemonic ONCE (display-once). Idempotent: if wallet exists, returns address only (never re-reveals mnemonic).
-  fastify.post('/api/tg-wallet/create', AUTH, async (request, reply) => {
+  fastify.post('/api/tg-wallet/create', GUARDED, async (request, reply) => {
     const tgUser = String(request.body?.tg_user_id || '').trim();
     if (!tgUser) return reply.code(400).send({ ok: false, error: 'tg_user_id required' });
 
@@ -83,7 +94,7 @@ export async function registerTgWalletRoutes(fastify) {
   });
 
   // GET /api/tg-wallet/:tg_user_id — wallet address + balance (NEVER mnemonic).
-  fastify.get('/api/tg-wallet/:tg_user_id', AUTH, async (request, reply) => {
+  fastify.get('/api/tg-wallet/:tg_user_id', GUARDED, async (request, reply) => {
     const tgUser = String(request.params.tg_user_id || '').trim();
     const w = sqlite.prepare('SELECT kaspa_address, network, created_at FROM tg_custodial_wallets WHERE tg_user_id = ?').get(tgUser);
     if (!w) return reply.send({ ok: true, exists: false });
@@ -149,7 +160,7 @@ export async function registerTgWalletRoutes(fastify) {
   //   ONLY chain exit and reuses transaction.mjs (KIP-9/broadcast/ledger). privkey 用完即弃, 绝不 log/回传。
   // Auth: the bot calls with tg_user_id = ctx.from.id (the Telegram-authenticated caller), and we only
   //   ever load THAT tg_user's wallet → a user can only send from their own wallet (Bettor a 属主授权).
-  fastify.post('/api/tg-wallet/:tg_user_id/send', AUTH, async (request, reply) => {
+  fastify.post('/api/tg-wallet/:tg_user_id/send', GUARDED, async (request, reply) => {
     const tgUser = String(request.params.tg_user_id || '').trim();
     const to = String(request.body?.to || '').trim();
     const amountKas = Number(request.body?.amount_kas);
