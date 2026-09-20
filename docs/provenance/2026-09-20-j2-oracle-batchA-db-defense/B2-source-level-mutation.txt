@@ -1,0 +1,3 @@
+[FAIL] V1 ▲ 伪造 / 错配 verdict ⇒ ABORT: 无 verdict_id / 指向不存在 id / 指向别的市场 / outcome 不一致 / source_kind 与 source 不一致
+[FAIL] D2 verdicts 列约束: outcome∉{0,1,NULL} / source_kind 非法 / confidence 越界 / evidence_ref 空白或 NULL / market_id 不存在 ⇒ 拒; outcome
+proto-winning-side-triggers-v212.test: 22 passed, 2 failed

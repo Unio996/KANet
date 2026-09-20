@@ -172,7 +172,7 @@ await t('E2E-1 seal: 一个 tick 真构造 + 广播(intent_key 过出口 S9); �
 });
 await t('E2E-2 close_commit: 操作员未写 winning_side ⇒ 不触发; 写入后 ⇒ pmt 门放行(读 relay 的 pmt)、真构造、广播; 对账后 sealed → resolved + win claim 行(64 位 hex, 过出口)+ convert_to_claim 意图', async () => {
   const idle = await driver.runTick({ cap: 5 }); assert.equal(idle.actioned, 0, '无 winning_side 不触发任何动作');
-  sqlite.prepare('UPDATE proto_markets SET winning_side = 0 WHERE id = ? AND winning_side IS NULL').run(MARKET_ID);
+  sqlite.prepare("UPDATE proto_markets SET winning_side = 0, winning_side_source = 'operator', winning_side_set_at = ? WHERE id = ? AND winning_side IS NULL").run(new Date().toISOString(), MARKET_ID);   // v212 R1: 受控写必须带 source + set_at
   await tickUntil(() => broadcasts.some((b) => b.intentKey === `settle:market:${MARKET_ID}:resolve`), 2);
   const cc = broadcasts.find((b) => b.intentKey === `settle:market:${MARKET_ID}:resolve`); assert.deepEqual(cc.cmd.continuation_output_indices, [0]); assert.ok(isValidSettlementIntentKey(cc.intentKey));
   await tickUntil(() => state().status === 'resolved', 3);
