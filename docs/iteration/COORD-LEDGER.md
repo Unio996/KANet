@@ -13721,3 +13721,12 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **零触碰主网**(3202 pid/主网 DB/主网 relay 一概不碰;主网现 live 带 bot)。
 - **验收**:J2 自跑自验出 provenance→NWT 独立复验+毒化 fee 向量(排 NWT 的 S3/S4 审 + go-live 漂移复核之后,不阻塞 J2 起跑)。
  — Bettor 2026-09-20T16:30:16Z
+
+### (1612) 🟢 **S3+S4 合入主线(merge 5eef61a9,只合不部署)——潜伏 secret 泄漏修复 + 能力网关网络守卫,NWT 两轮字节 GREEN** (2026-09-20 · Bettor)
+- **S3**(堵潜伏泄漏 + 只读壳加固):L1 _launch_broker_bot / L2 _launch_owner_bot 复用 resolveBotLaunchEnv(删 :3200/testnet-12 回落)——堵"broker 入驻把主网 ingest secret 发往退役 TN12 端口 :3200"(L2 复用不退役,Bettor 裁);S1 scrub 大小写不敏感;S2 CR-2 严格相等变异;SHOULD-1 cleanText \p{Cf}+先剥不可见再剥 URL(堵零宽切开拼回活链接)+i 标志(大写协议);SHOULD-2 prune 整段形态 ^<prefix>:[a-z0-9]+$ fail-closed;NWT 缺口:L1/L2 exit(1) 两层变异覆盖(A 真裁决+B 桩裁决+C 正向对照,单探针杀不掉因删 exit 会 TypeError 碰巧 exit1);S5 排障文档。
+- **S4**:capability.js deriveCustodialExecFields 网络守卫(DB 读前+行 network 解密前,严格相等 fail-closed)+ custodial-network.mjs;M0a manifest content_digest=cd7b58f05b06…ef473 同笔原子;tg-wallet.js 未动;两处 'testnet-12' 测试钉相等。
+- **NWT 两轮字节 GREEN**:S3/S4 review 67ba15dd + 增量 recheck c5bdd130(0 MUST);digest 三路确认(基线/干净副本 diff/仓库 lint 均 cd7b58f0,揪出 autocrlf 假象);g4 带依赖树三态重跑(加 env+S4=27PASS/0FAIL,负向翻 mainnet⇒LAND① 401 守卫文案);exit(1) 两层亲手删验杀变异;lint 0 error、m0a-lint 32/32。NWT 两轮各自主动更正上轮不准描述(console 重启拼接、mtime≠迁移、exit(1) 机理)——co-verify 模范。
+- **只合不部署**:下次主网 console 重启才生效;broker_onboarding 现 0 行、无 OWNER_BOT_TOKEN ⇒ 潜伏未触发,无紧迫重启需求。
+- **记票不改**(NWT SHOULD):\p{Cf} 把 ZWJ 组合表情拆开(观感);S4 返 401 vs CR-2 返 503(都 fail-closed,不为此动受控文件调用方);tg/broker 启动器对称清 OWNER_BOT_TOKEN(主网 env 现无该变量,纯防御)。
+- **队列**:oracle simnet J2 基础轮(happy+冻结臂)在跑;NWT 毒化 fee 向量 co-verify(V1=3×0.31KAS covenant-bound+1×0.31 spk-v1 输出到 relay 保持总额<5;V2'=余额上限触发/恢复可见性,不洪泛/不新建 relay/不改上限)排 J2 基础轮之后 + KANet-UI 核 relay 余额/内存 + 单矿工协调,Bettor 到时明确解除暂停。
+ — Bettor 2026-09-20T16:45:59Z
