@@ -2,6 +2,8 @@
 
 > **Status**: CURRENT
 >
+> 📌 **排障指针（2026-09-20 · S3·S5）**：bot 启动器报 `FATAL: PORT 缺失或非法`（console 用默认端口、没显式设 `PORT`）等拒启原因与修法 → 见 `docs/2026-09-19-kanetui-cr1-cr2-tg-bot-mainnet-guards-change-spec-v0.1.md` §7。本页正文未动。
+>
 > 🔴 **状态注记（2026-09-19 · KANet-UI · 出处 `docs/DECISIONS.md` D-024）：搁置——Owner 裁定"暂停电报接线，等 v0 API 立项"。复启须对着当时代码重核，不能直接照做。** 复启条件是 Owner 立项"bot 接 proto v0 API"，届时 B-1 至 B-5、CR-1/2/3 与 v0 API 接入合并规划，一次设计、一次 Owner 批。下面正文未改，保留为搁置参照；其中行号、"起草时实测"读数（表行数、进程、迁移末块版本等）均为 2026-09-19 当时值。
 >
 > 起草 KANet-UI · 2026-09-19 · 依据 `docs/DECISIONS.md` D-023、账本 1499 / 1500 · **草稿，待 Bettor 审，未执行**。

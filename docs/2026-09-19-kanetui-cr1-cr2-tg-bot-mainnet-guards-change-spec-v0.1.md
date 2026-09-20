@@ -160,3 +160,24 @@ const GUARDED = { preHandler: [...AUTH.preHandler, NETWORK_GUARD] };
 1. `scrub` 黑名单是否漏了 bot 不该持有的键（除 `CONSOLE_ENCRYPTION_KEY`、`ADMIN_SECRET*`、`RELAY_KEY_EXPORT_ENABLED_UNTIL` 外，`fork` 继承的还有 `INGEST_SECRET`——bot **需要**它，保留）。
 2. 断言 c（`CONSOLE_URL` 必须等于按 `PORT` 推导值）是否过严：它拒绝任何"bot 指向非本机 console"的配置，本页认为在主网上这正是想要的。
 3. 断言 f（运行时检测 `KANET_TESTNET_NO_LIMITS`）放在 bot 启动器里是否合适——它是 runbook §8 shell 侧断言的第二道，但 bot 本身并不读这个键。
+
+## 7. 排障：bot 拒绝启动——日志里是 `FATAL: PORT 缺失或非法`（S3·S5，NWT 审 S3 提，2026-09-20 追加）
+
+**现象**：`_launch_tg_bot.mjs`（以及 S3 同判据的 `_launch_broker_bot.mjs` / `_launch_owner_bot.mjs`，日志前缀分别是 `[launch]` / `[broker-bot launch]` / `[owner-bot launch]`）打一行 `FATAL: …` 后 `exit 1`，bot 没起来。
+
+**最常见的一种：console 没显式设 `PORT`。** console 在 `PORT` 未设时默认监听 3100（`kasia-console/src/index.js` 的 `process.env.PORT || '3100'`），而 bot 启动器**只认显式的 `PORT`** 来推导 `CONSOLE_URL`（`http://127.0.0.1:<PORT>`）——它不猜端口。所以"console 用默认端口 + 不设 `PORT`"⇒ 启动器报 `PORT 缺失或非法` 拒启。
+
+**这是 fail-closed 的设计，不是 bug，不要"修"启动器去回落默认端口。** 历史上正是"回落到 `:3200`"把主网 ingest secret 发往了一个退役的 TN12 端口（CR-1 要堵的就是这个）。宁可不启，也不猜。
+
+同族的另外两条 FATAL（读键名即可判别，日志只写键名不写值）：
+| FATAL 里的关键词 | 含义 | 修法 |
+|---|---|---|
+| `PORT 缺失或非法` | console 进程环境里没有合法的 `PORT`（1–65535、无前导零） | 在**主网 console 的 env 文件**里显式写 `PORT=<主网端口>`，重启 console（重启须按既有执行门拿 GO；主网 console 端口以 env 文件为准，不以本文为准） |
+| `CONSOLE_URL 与本机 console 端口不一致` | 继承来一个陈旧的 `CONSOLE_URL`（典型：旧 TN12 的 `:3200`） | 从 console 的 env 里删掉那条陈旧的 `CONSOLE_URL`；**不要**改成"刚好等于"来蒙混——推导值才是权威 |
+| `KASPA_NETWORK 必须为 mainnet(实际: …)` / `KANET_TESTNET_NO_LIMITS 不得出现在主网环境` | console 不是主网 console | 这个 bot 就不该在这个 console 上起 |
+| `INGEST_SECRET 缺失` / `TELEGRAM_BOT_TOKEN 缺失`（owner-bot 是 `OWNER_BOT_TOKEN 缺失`） | console 没传下 ingest secret，或 bot token 没配 | 按 runbook 的配置步骤补；日志只写键名，不写值 |
+
+**修的位置永远是 console 的 env，然后重启 console；不是 bot 启动器，也不是给 bot 单独塞 `CONSOLE_URL`。** 因为启动器读的是 console `fork` 时传下来的环境——console 自己的环境不对，bot 就不该起。
+
+**一秒自查（只看键、不打印任何密钥值）**：在主网 console 的 env 文件里 `grep -n "^PORT=" <env 文件>`，并核对该端口确有 console 在监听。
+**runbook 关系**：`docs/2026-09-19-kanetui-mainnet-tg-bot-wiring-runbook-v0.1.md` 正文不动，仅在页首加一行指向本节。

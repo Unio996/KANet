@@ -25,6 +25,7 @@ import { sqlite } from '../db/client.js';
 import { decrypt } from '../services/crypto.js';
 import { privKeyHexFromMnemonic } from '../services/wallet.js';
 import { sendCommandAsync } from '../services/relay-manager.js';
+import { custodialNetworkAllowed, custodialRowAllowed, custodialNetworkError } from '../lib/custodial-network.mjs';
 
 const GATEWAY_ENABLED = () => process.env.ADMIN_CAPABILITY_GATEWAY_ENABLED === '1';
 // Codex pre-activation C 项修正(2026-07-24)：原来 CUSTODIAL_RELAY_ID 未设时静默 fallback 到
@@ -192,8 +193,13 @@ async function checkRelayArmed(relayId) {
  * 网关自己造，不是从 body 里读出来的（verify-value-source：值来自权威查询非 caller 输入）。
  */
 function deriveCustodialExecFields(fromAddress) {
+  // S4(NWT 审 S3): 网络守卫在【任何 DB 读 / 解密之前】——console 网络≠托管钱包所属网络(含 KASPA_NETWORK 未设)⇒ 拒绝, 与 tg-wallet.js CR-2 守卫同判据同文案;
+  // 防将来主网 console 上出现托管行时, 能力网关成为绕过 CR-2 的旁路。判据/常量见 lib/custodial-network.mjs(与 tg-wallet.js 的 NETWORK 由测试钉相等)。
+  if (!custodialNetworkAllowed()) return { ok: false, error: custodialNetworkError() };
   const w = sqlite.prepare('SELECT kaspa_address, mnemonic_encrypted, network FROM tg_custodial_wallets WHERE kaspa_address = ?').get(fromAddress);
   if (!w) return { ok: false, error: '托管钱包不存在（fromAddress 未注册）' };
+  // 行自带的 network 列也必须属于托管网络(I4 同型: 行值≠配置 ⇒ 不进 live 路径, 不重映射); 放在解密之前
+  if (!custodialRowAllowed(w)) return { ok: false, error: '托管钱包所属网络与当前不符（拒绝）' };
   let privkeyHex;
   try {
     const mnemonic = decrypt(w.mnemonic_encrypted); // fail-loud if CONSOLE_ENCRYPTION_KEY missing

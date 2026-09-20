@@ -139,5 +139,42 @@ console.log('[test] 启动器进程级(spawnSync; 必然失败的组合, 不会�
   }
 }
 
+console.log('[test] S2 网络值严格相等(startsWith/trim/大小写变异必拒):');
+for (const v of ['mainnet-2', 'mainnet ', ' mainnet', 'mainnetx', 'xmainnet', 'MAINNET', 'mainnet\n', 'main', 'mainnet\u0000']) {
+  const r = resolveBotLaunchEnv({ ...good(), KASPA_NETWORK: v });
+  ok(`KASPA_NETWORK=${JSON.stringify(v)} → ok:false`, has(r, 'KASPA_NETWORK'), JSON.stringify(r));
+}
+
+console.log('[test] S1 scrub 键名大小写不敏感(Windows env 名大小写不敏感), 输出的是 env 里真实的键名:');
+{
+  const e = { ...good(), console_encryption_key: 'x', Admin_Secret_Funds: 'y', ADMIN_SECRET_ZK: 'z', relay_key_export_enabled_until: '1', admin_secret: 'w', SystemRoot: 'C:\\Windows', Path: 'p' };
+  const r = resolveBotLaunchEnv(e);
+  ok('ok:true', r.ok === true, JSON.stringify(r));
+  ok('scrub 含各种大小写形态的敏感键(原样键名)', ['console_encryption_key', 'Admin_Secret_Funds', 'ADMIN_SECRET_ZK', 'relay_key_export_enabled_until', 'admin_secret'].every((k) => r.scrub.includes(k)), JSON.stringify(r.scrub));
+  ok('scrub 仍不含 PORT / INGEST_SECRET / TELEGRAM_BOT_TOKEN / SystemRoot / Path', ['PORT', 'KASPA_NETWORK', 'INGEST_SECRET', 'TELEGRAM_BOT_TOKEN', 'SystemRoot', 'Path'].every((k) => !r.scrub.includes(k)), JSON.stringify(r.scrub));
+  ok('scrub 恰 5 个(不多不少)', r.scrub.length === 5, JSON.stringify(r.scrub));
+  const lower = resolveBotLaunchEnv({ ...good(), kanet_testnet_no_limits: '1' });
+  ok('KANET_TESTNET_NO_LIMITS 小写键名同样被拒', has(lower, 'KANET_TESTNET_NO_LIMITS'), JSON.stringify(lower));
+}
+
+console.log('[test] L0 tokenKey / scrubExtra(owner-bot 复用同一判定):');
+{
+  const OWNER_SENT = 'SENTINEL-OWNERTOKEN-' + 'abcdef123456';
+  const base = { KASPA_NETWORK: 'mainnet', PORT: '3202', INGEST_SECRET: SENTINEL_INGEST };
+  const missing = resolveBotLaunchEnv({ ...base, TELEGRAM_BOT_TOKEN: SENTINEL_TOKEN }, { tokenKey: 'OWNER_BOT_TOKEN' });
+  ok('tokenKey=OWNER_BOT_TOKEN 缺失 ⇒ ok:false 且点名 OWNER_BOT_TOKEN(不是 TELEGRAM_BOT_TOKEN)', has(missing, 'OWNER_BOT_TOKEN') && !missing.problems.some((p) => p.includes('TELEGRAM_BOT_TOKEN')) && noLeak(missing), JSON.stringify(missing));
+  const okOwner = resolveBotLaunchEnv({ ...base, OWNER_BOT_TOKEN: OWNER_SENT }, { tokenKey: 'OWNER_BOT_TOKEN' });
+  ok('OWNER_BOT_TOKEN 在、无 TELEGRAM_BOT_TOKEN ⇒ ok:true(正向对照臂)', okOwner.ok === true && okOwner.consoleUrl === 'http://127.0.0.1:3202', JSON.stringify(okOwner));
+  const dflt = resolveBotLaunchEnv({ ...base, OWNER_BOT_TOKEN: OWNER_SENT });
+  ok('默认 tokenKey 仍是 TELEGRAM_BOT_TOKEN(与 CR-1 逐字节同行为)', has(dflt, 'TELEGRAM_BOT_TOKEN'), JSON.stringify(dflt));
+  const extra = resolveBotLaunchEnv({ ...base, OWNER_BOT_TOKEN: OWNER_SENT, TELEGRAM_BOT_TOKEN: SENTINEL_TOKEN, telegram_bot_token_x: 'k' }, { tokenKey: 'OWNER_BOT_TOKEN', scrubExtra: ['telegram_bot_token'] });
+  ok('scrubExtra 让 owner-bot 不持有 broker bot 的 token(大小写不敏感)', extra.ok && extra.scrub.includes('TELEGRAM_BOT_TOKEN') && !extra.scrub.includes('OWNER_BOT_TOKEN') && !extra.scrub.includes('telegram_bot_token_x'), JSON.stringify(extra));
+  for (const bad of ['owner_bot_token', 'OWNER BOT', '', 'X-Y', undefined, null, 5]) {
+    let threw = false; try { resolveBotLaunchEnv(base, { tokenKey: bad }); } catch (err) { threw = err instanceof TypeError; }
+    ok(`非法 tokenKey ${JSON.stringify(bad)} ⇒ 抛 TypeError`, bad === undefined ? !threw : threw);
+  }
+  ok('tokenKey 缺失文案不回显任何 token 值', noLeak(resolveBotLaunchEnv({ ...base, TELEGRAM_BOT_TOKEN: SENTINEL_TOKEN }, { tokenKey: 'OWNER_BOT_TOKEN' })));
+}
+
 console.log(`\n[tg-bot-launch-env.test] ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

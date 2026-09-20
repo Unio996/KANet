@@ -182,6 +182,35 @@ T('20 SHOULD#2 文本: 去双向控制符/零宽字符; 详情题干设上限; �
   assert.ok(marketLine(toBotMarket(row({ question: long })), 'en', { t, nowMs: NOW }).length < 200);
 });
 
+T('20b S3·SHOULD cleanText: 整个 Unicode Cf 类(软连字符/阿拉伯格式符/tag 字符)被剥; 被不可见字符切开的 URL 不会拼回活链接', () => {
+  assert.equal(truncate('a\u00ADb', 10), 'ab');                  // U+00AD 软连字符(Cf, 不在原显式段内)
+  assert.equal(truncate('x\u0600y', 10), 'xy');                  // U+0600 阿拉伯数字符号(Cf)
+  assert.equal(truncate('t\u{E0041}z', 10), 'tz');               // U+E0041 tag 字符(Cf, 代理对)
+  assert.equal(truncate('a\u180Eb', 10), 'ab');                  // U+180E 蒙古文元音分隔符(Cf)
+  assert.equal(truncate('a\uFFF9b', 10), 'ab');                  // U+FFF9 行间注释锚(Cf)
+  // 顺序: 先剥不可见再剥 URL —— 否则 "ht<ZWSP>tp://…" 躲过 URL 剥离、ZWSP 被删后拼回 "http://…"
+  for (const u of ['ht\u200Btp://evil.example/x', 'ht\u00ADtp://evil.example/x', 'http\u200D://evil.example/x', 'https:/\u2060/evil.example', 'ht\u{E0041}tps://evil.example']) {
+    const out = truncate(u, 200);
+    assert.ok(!/https?:/i.test(out) && !out.includes('evil.example'), `${JSON.stringify(u)} => ${JSON.stringify(out)}`);
+  }
+  assert.equal(truncate('see ht\u200Btp://evil.example/x now', 200), 'see now');   // 零宽切开的 URL 与明文 URL 同结果(只剥 URL 本体, 两侧文字保留)
+  assert.equal(truncate('see http://evil.example/x now', 200), 'see now');          // 对照臂: 明文 URL 的既有行为不变
+  assert.equal(truncate('a b\tc  d', 200), 'a b c d');           // 对照臂: 普通空白折叠不变
+  assert.equal(toBotMarket(row({ question: 'q\u00AD?\u200B' })).question, 'q?');
+});
+
+T('20c S3·SHOULD-1(i 标志): URL 剥离大小写不敏感——HTTP:// / Https:// / hTtP:// 不会原样留下; 与零宽切开叠加也剥; 不含 :// 的 http 字样不误伤', () => {
+  for (const u of ['HTTP://EVIL.example/x', 'HTTPS://EVIL.example/x', 'Https://evil.example', 'hTtP://evil.example/x', 'HtTpS://Evil.Example/x?y=1', 'HT​TP://EVIL.example/x', 'HTTP­://EVIL.example']) {
+    const out = truncate(u, 200);
+    assert.ok(!/https?:/i.test(out) && !/evil/i.test(out), `${JSON.stringify(u)} => ${JSON.stringify(out)}`);
+  }
+  assert.equal(truncate('see HTTP://EVIL.example/x now', 200), 'see now');            // 两侧文字保留, 只剥 URL 本体(与小写同结果)
+  assert.equal(truncate('see http://evil.example/x now', 200), 'see now');            // 对照臂: 小写既有行为不变
+  assert.equal(truncate('a HTTP://x.example b http://y.example c Https://z.example d', 200), 'a b c d');   // 多个 URL 都剥(全局标志; 只剥第一个会留下后面的活链接)
+  assert.equal(truncate('the HTTP protocol and https are fine', 200), 'the HTTP protocol and https are fine');   // 对照臂: 没有 "://" 的 http 字样不被误剥
+  assert.equal(toBotMarket(row({ question: 'Will HTTPS://X.example win?' })).question, 'Will win?');
+});
+
 T('21 F2 pruneStateForMainnet: 只留 kaspa 前缀绑定; kaspatest/缺地址/畸形条目全丢; sessions 全清; pendingPayments 不动只回报数', () => {
   const st = { linkedAddrs: [['1', { address: 'kaspatest:qqa' }], ['2', { address: 'kaspa:qqb' }], ['3', { address: 'kaspasim:qqc' }], ['4', { address: '' }], ['5', {}], ['6', null], ['7', { address: 5 }], ['8', { address: 'kaspa:qqd' }], null, ['9', { address: 'nokaspa' }]],
     sessions: [['1', {}], ['2', {}], ['3', {}], ['4', {}]], pendingPayments: [['1', { x: 1 }], ['2', { x: 2 }]] };
@@ -193,6 +222,21 @@ T('21 F2 pruneStateForMainnet: 只留 kaspa 前缀绑定; kaspatest/缺地址/�
   assert.deepEqual(pruneStateForMainnet(undefined, 'kaspa').linkedAddrs, []);
   assert.deepEqual(pruneStateForMainnet({ linkedAddrs: [['1', { address: 'kaspatest:qqa' }], ['2', { address: 'kaspa:qqb' }]] }, 'kaspatest').linkedAddrs.map((e) => e[0]), ['1']);   // 判据是前缀相等, 不是写死 kaspa
   assert.equal(pruneStateForMainnet({ linkedAddrs: [['1', { address: 'kaspatest:qq' }]] }, 'kaspa').linkedAddrs.length, 0);   // 整段比较, 不是 startsWith
+});
+
+T('21b S3·SHOULD-2 prune 保留判据=整段形态 ^kaspa:[a-z0-9]+$: 空载荷/畸形/大写/多冒号/控制符/注入串全丢; 合法小写地址留; wantPrefix 空/非串 ⇒ 全丢(fail-closed)', () => {
+  const good = ['kaspa:qqb', 'kaspa:qz0abc9xyz', 'kaspa:' + 'q'.repeat(60) + '0123456789'];
+  const bad = ['kaspa:', 'kaspa:qq b', 'kaspa:qq\n', 'kaspa:qq​', 'kaspa:QQB', 'kaspa:qq:qq', 'kaspa:qq-b', 'kaspa:<script>', 'kaspa:qq\u0000', ' kaspa:qq', 'kaspa:qq ', 'KASPA:qq', 'kaspa::qq', 'kaspa:qqb\nkaspatest:qq',
+    'kaspaxqq', 'kaspa-qq', 'kaspatestqq', 'kaspa'];   // 无冒号: 前缀相等(第一个冒号的位置)不是 startsWith——否则 'kaspaxqq' 的尾巴 'qq' 会通过形态检查
+  const pr = (addrs, ...rest) => pruneStateForMainnet({ linkedAddrs: addrs.map((a, i) => [String(i), { address: a }]) }, rest.length ? rest[0] : 'kaspa').linkedAddrs.map((e) => e[1].address);   // rest 而非默认参数: 显式传 undefined 必须真传 undefined
+  assert.deepEqual(pr(good), good);                              // 正向对照臂: 合法地址不误杀
+  for (const b of bad) assert.deepEqual(pr([b]), [], JSON.stringify(b));
+  assert.deepEqual(pr([...good, ...bad]), good);                 // 混合: 只留合法且保序
+  assert.deepEqual(pr(['kaspatest:qqa', 'kaspa:qqb'], 'kaspatest'), ['kaspatest:qqa']);   // 判据随 wantPrefix, 不写死 kaspa
+  for (const wp of ['', undefined, null, 5, {}, 'kasp']) assert.deepEqual(pr(good, wp), [], `wantPrefix=${JSON.stringify(wp)}`);
+  assert.deepEqual(pr(['xqq', 'aspa', 'kaspaqq', ':qq', ''], ''), []);   // wantPrefix='' 时"无冒号串"的 addressPrefix 也是 '', 不能因此被留(非空守卫)
+  assert.deepEqual(pr(['undefined:qq', 'null:qq', ':qq'], undefined), []);   // 不把 undefined 拼成 "undefined:" 前缀去匹配
+  assert.equal(pruneStateForMainnet({ linkedAddrs: [['1', { address: 'kaspa:' }], ['2', { address: 'kaspa:ok' }]] }, 'kaspa').droppedLinks, 1);   // 统计随之变
 });
 
 console.log(`\n${n - fail} PASS / ${fail} FAIL`);
