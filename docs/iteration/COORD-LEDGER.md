@@ -13691,3 +13691,14 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
   - 并入 SHOULD#1(Math.ceil 时钟:29 分误显"已过截止")、#2(去 bidi U+202E/零宽+详情上限)、#4 收紧(自由文本→ro_unavailable 不落工单;/broker /earnings /verify 保留)。#3(i18n 全局改也影响 TN12,D-017 已退役)/#5 记票不改。
 - **Owner 亲测**:隔离实例加载真实 _state.json 拷贝,让 Owner 亲眼验 F2 清理生效。门控:修完 NWT 审增量→Owner 拿测试 token 亲测→开闸 Owner 点头。Owner token(@BotFather 测试 bot)+3 偏差点头 在等。
  — Bettor 2026-09-20T14:59:53Z
+
+### (1609) 🟢 **电报只读壳 A+B+修一轮合入主线(merge 4b6e5462,只合不部署)——NWT 两轮字节 GREEN,放行 Owner 亲测** (2026-09-20 · Bettor)
+- 合入:a1b6f9e6 A1(CR-3 服务端 link.js 复用 kaspa-network 先校验和后前缀,主网不绑 kaspatest)、6e210c9c A2(readonly-shell 白名单纯函数)、1edb5afd A3(接线,bot.mjs +6/−0、壳先注册、原 handler 零改、隐藏钱/托管入口)、61d5f588 B(Owner 批样图定稿字 en/zh 各 30 ro_* 键)、1b284671 修一轮(F2 启动清理+F1 判定题+#1 时钟+#2 文本+#4 自由文本)。
+- **NWT 两轮字节 GREEN**:A+B(54d5871e)+ 增量(53046566,RECHECK-delta-1b284671.md)。F2 五点(壳内清理不动原 handler、整段前缀相等不误删合法主网绑定、残留会话清空、pendingPayments 只报数、TG_BOT_STATE_FILE seam 无外部可利用面、清理早于 pollLoop)、F1(judged.side_map 换算、缺失不显方向)、#1 Math.ceil、#2 去 \p{Cf} 主要类+详情 300 上限、#4 自由文本→ro_unavailable 不落工单——全字节验+变异全杀。
+- **Owner 已批**:CR-3+P1+文案样图 4 点(1606/1607)+3 偏差(inline 按钮/补 3 句提示/多藏 4 从属命令)。
+- **Stage A 已用真 bot 进程验**(KANet-UI 34/34):启动日志实证 F2 清理(dropped 4 non-mainnet binding + cleared 4 stale session),bot 写只 POST /api/link/bind,主网 console 3202 零触碰。
+- **Owner 亲测**:复用测试网 bot token(kanet.env,@KANET_Broker_bot,getMe 验活),隔离实例(harness console+真市场快照+2 DEMO 行+真 _state.json 副本),ExpectHead 4b6e5462。放行 KANet-UI 起实例→Owner 三步走亲测→满意→开闸 Owner 点头。
+- **上线硬前置(NWT#3)**:真开闸前先备份生产 tg-bot/_state.json 再首启(首次主网模式不可逆清 4 绑定+4 会话)。**SHOULD 记票**:NWT#1 cleanText 补 \p{Cf}/U+3164 等、#2 prune 载荷 ^kaspa:[a-z0-9]+$ → 并入 S3 跟进票批,不阻塞。
+- 生效面:link.js 随下次主网 console 重启;bot 侧随下次拉起(CR-2 同次重启带上)。bot 真开闸=最后一步须 Owner 点头。
+- 队列:Owner 亲测→开闸;S3 跟进票(broker-bot/owner-bot 复用+#1/#2)排其后;oracle simnet 排电报全部之后。
+ — Bettor 2026-09-20T15:34:51Z
