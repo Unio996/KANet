@@ -1,0 +1,60 @@
+[proto-driver] started (tick 20000ms, cap 5/tick)
+[proto-settlement-driver] started (tick 60000ms, cap 3/tick, network=simnet)
+[relay:proto-simnet-2] 9/20/2026, 15:50:05 Kasia Relay started (RPC mode — local node subscription).
+[relay:proto-simnet-1] 9/20/2026, 15:50:05 Kasia Relay started (RPC mode — local node subscription).
+[relay:proto-simnet-2] 2026-09-20T08:50:05.773Z [rpc] connecting to ws://127.0.0.1:18510
+[relay:proto-simnet-1] 2026-09-20T08:50:05.773Z [rpc] connecting to ws://127.0.0.1:18510
+[relay:proto-simnet-1] 2026-09-20T08:50:05.791Z [rpc] node is synced
+[relay:proto-simnet-2] 2026-09-20T08:50:05.791Z [rpc] node is synced
+[relay:proto-simnet-1] 2026-09-20T08:50:05.792Z [rpc] subscribed to new blocks
+[relay:proto-simnet-2] 2026-09-20T08:50:05.792Z [rpc] subscribed to new blocks
+[relay:proto-simnet-2] 2026-09-20T08:50:05.792Z [rpc] watching address: kaspasim:qrwk8jxhmat...csq0cv3c
+[relay:proto-simnet-2] 2026-09-20T08:50:05.792Z [rpc] protocol support: handshake, comm, payment
+[relay:proto-simnet-1] 2026-09-20T08:50:05.792Z [rpc] watching address: kaspasim:qq492p38kuv...zzndddkk
+[relay:proto-simnet-1] 2026-09-20T08:50:05.792Z [rpc] protocol support: handshake, comm, payment
+[relay:proto-simnet-2] 2026-09-20T08:50:05.811Z [rpc] indexer: watching 2 addresses
+[relay:proto-simnet-2] 2026-09-20T08:50:05.812Z [rpc] listening...
+[relay:proto-simnet-1] 2026-09-20T08:50:05.812Z [rpc] indexer: watching 2 addresses
+[relay:proto-simnet-1] 2026-09-20T08:50:05.812Z [rpc] listening...
+[relay:proto-simnet-1] 2026-09-20T08:50:09.366Z [rpc] block #1 (attempted: 0)
+[relay:proto-simnet-2] 2026-09-20T08:50:09.367Z [rpc] block #1 (attempted: 0)
+[relay:proto-simnet-2] 2026-09-20T08:50:14.374Z [rpc] block #2 (attempted: 0)
+[relay:proto-simnet-1] 2026-09-20T08:50:14.375Z [rpc] block #2 (attempted: 0)
+[relay:proto-simnet-2] 2026-09-20T08:50:19.381Z [rpc] block #3 (attempted: 0)
+[relay:proto-simnet-1] 2026-09-20T08:50:19.381Z [rpc] block #3 (attempted: 0)
+[relay:proto-simnet-2] 9/20/2026, 15:51:05 COVENANT_BROADCAST settle:market:da980ff45fa060a7f63ebf81de520bc604fab376843b581f67f951f8108b9f79:seal prepared txid c768cdaecc6a (bytes persisted at console) → broadcasting
+[relay:proto-simnet-2] 9/20/2026, 15:51:05 COVENANT_BROADCAST(intent settle:market:da980ff45fa060a7f63ebf81de520bc604fab376843b581f67f951f8108b9f79:seal) TX: c768cdaecc6a5ca0695951505b09342cd853fbc883947b8b850124549798ec85
+[proto-settlement-driver] tick 1: {"actioned":1,"landed":0,"submitted":1,"waiting":0,"gated":0,"held":0,"failed":0}
+[proto-settlement-driver] tick 2: {"actioned":2,"landed":0,"submitted":0,"waiting":0,"gated":0,"held":0,"failed":0}
+[proto-settlement-driver] tick 3: {"actioned":2,"landed":1,"submitted":0,"waiting":0,"gated":0,"held":0,"failed":0}
+[proto-settlement-intent] settle:market:da980ff45fa060a7f63ebf81de520bc604fab376843b581f67f951f8108b9f79:resolve attempt 1/1 fail: close_commit_pmt_not_ready: pmt(1789857066744) 尚未超过 deadline(1789893666000) + 30000ms(领先 -36599256ms): 节点会以 NotFinalized 拒绝(lock_time < pmt 严格小于), 稍后重试(无状态变更)
+[proto-settlement-driver] tick 5: {"actioned":1,"landed":0,"submitted":0,"waiting":0,"gated":1,"held":0,"failed":0}
+[proto-settlement-intent] settle:market:da980ff45fa060a7f63ebf81de520bc604fab376843b581f67f951f8108b9f79:resolve attempt 1/1 fail: close_commit_pmt_not_ready: pmt(1789857066744) 尚未超过 deadline(1789893666000) + 30000ms(领先 -36599256ms): 节点会以 NotFinalized 拒绝(lock_time < pmt 严格小于), 稍后重试(无状态变更)
+[proto-settlement-driver] tick 6: {"actioned":1,"landed":0,"submitted":0,"waiting":0,"gated":1,"held":0,"failed":0}
+[proto-settlement-intent] settle:market:da980ff45fa060a7f63ebf81de520bc604fab376843b581f67f951f8108b9f79:resolve attempt 1/1 fail: close_commit_pmt_not_ready: pmt(1789864415377) 尚未超过 deadline(1789893666000) + 30000ms(领先 -29250623ms): 节点会以 NotFinalized 拒绝(lock_time < pmt 严格小于), 稍后重试(无状态变更)
+[proto-settlement-driver] tick 7: {"actioned":1,"landed":0,"submitted":0,"waiting":0,"gated":1,"held":0,"failed":0}
+[proto-settlement-intent] settle:market:da980ff45fa060a7f63ebf81de520bc604fab376843b581f67f951f8108b9f79:resolve attempt 1/1 fail: close_commit_pmt_not_ready: pmt(1789868152676) 尚未超过 deadline(1789893666000) + 30000ms(领先 -25513324ms): 节点会以 NotFinalized 拒绝(lock_time < pmt 严格小于), 稍后重试(无状态变更)
+[proto-settlement-driver] tick 8: {"actioned":1,"landed":0,"submitted":0,"waiting":0,"gated":1,"held":0,"failed":0}
+[proto-settlement-intent] settle:market:da980ff45fa060a7f63ebf81de520bc604fab376843b581f67f951f8108b9f79:resolve attempt 1/1 fail: close_commit_pmt_not_ready: pmt(1789875632840) 尚未超过 deadline(1789893666000) + 30000ms(领先 -18033160ms): 节点会以 NotFinalized 拒绝(lock_time < pmt 严格小于), 稍后重试(无状态变更)
+[proto-settlement-driver] tick 9: {"actioned":1,"landed":0,"submitted":0,"waiting":0,"gated":1,"held":0,"failed":0}
+[relay:proto-simnet-1] 2026-09-20T08:59:28.898Z [rpc] block #1000 (attempted: 0)
+[relay:proto-simnet-2] 2026-09-20T08:59:28.898Z [rpc] block #1000 (attempted: 0)
+[proto-settlement-intent] settle:market:da980ff45fa060a7f63ebf81de520bc604fab376843b581f67f951f8108b9f79:resolve attempt 1/1 fail: close_commit_pmt_not_ready: pmt(1789879375700) 尚未超过 deadline(1789893666000) + 30000ms(领先 -14290300ms): 节点会以 NotFinalized 拒绝(lock_time < pmt 严格小于), 稍后重试(无状态变更)
+[proto-settlement-driver] tick 10: {"actioned":1,"landed":0,"submitted":0,"waiting":0,"gated":1,"held":0,"failed":0}
+[proto-settlement-intent] settle:market:da980ff45fa060a7f63ebf81de520bc604fab376843b581f67f951f8108b9f79:resolve attempt 1/1 fail: close_commit_pmt_not_ready: pmt(1789886866978) 尚未超过 deadline(1789893666000) + 30000ms(领先 -6799022ms): 节点会以 NotFinalized 拒绝(lock_time < pmt 严格小于), 稍后重试(无状态变更)
+[proto-settlement-driver] tick 11: {"actioned":1,"landed":0,"submitted":0,"waiting":0,"gated":1,"held":0,"failed":0}
+[relay:proto-simnet-2] 9/20/2026, 16:02:05 COVENANT_BROADCAST settle:market:da980ff45fa060a7f63ebf81de520bc604fab376843b581f67f951f8108b9f79:resolve prepared txid 9a0249166ed9 (bytes persisted at console) → broadcasting
+[relay:proto-simnet-2] 9/20/2026, 16:02:05 COVENANT_BROADCAST(intent settle:market:da980ff45fa060a7f63ebf81de520bc604fab376843b581f67f951f8108b9f79:resolve) TX: 9a0249166ed9516d52e18b9194bbcb30604201038fa07851ace03d90be5ccc65
+[proto-settlement-driver] tick 12: {"actioned":1,"landed":0,"submitted":1,"waiting":0,"gated":0,"held":0,"failed":0}
+[proto-settlement-driver] tick 13: {"actioned":2,"landed":0,"submitted":0,"waiting":0,"gated":0,"held":0,"failed":0}
+[proto-settlement-driver] tick 14: {"actioned":2,"landed":1,"submitted":0,"waiting":0,"gated":0,"held":0,"failed":0}
+[relay:proto-simnet-2] 9/20/2026, 16:05:05 COVENANT_BROADCAST settle:claim:10760f995990d5dc7ba1403bc45d069c74d0277da4d9e94b6146913eeb88081b:convert_to_claim prepared txid a888cc23bb02 (bytes persisted at console) → broadcasting
+[relay:proto-simnet-2] 9/20/2026, 16:05:05 COVENANT_BROADCAST(intent settle:claim:10760f995990d5dc7ba1403bc45d069c74d0277da4d9e94b6146913eeb88081b:convert_to_claim) TX: a888cc23bb023e23a31f42cbccfebb618e395cf715f705ebf2e26bf50cdb22d9
+[proto-settlement-driver] tick 15: {"actioned":1,"landed":0,"submitted":1,"waiting":0,"gated":0,"held":0,"failed":0}
+[proto-settlement-driver] tick 16: {"actioned":2,"landed":0,"submitted":0,"waiting":0,"gated":0,"held":0,"failed":0}
+[proto-settlement-driver] tick 17: {"actioned":2,"landed":1,"submitted":0,"waiting":0,"gated":0,"held":0,"failed":0}
+[relay:proto-simnet-2] 9/20/2026, 16:08:05 COVENANT_BROADCAST settle:claim:10760f995990d5dc7ba1403bc45d069c74d0277da4d9e94b6146913eeb88081b:claim_draw prepared txid 5a9d13094f34 (bytes persisted at console) → broadcasting
+[relay:proto-simnet-2] 9/20/2026, 16:08:05 COVENANT_BROADCAST(intent settle:claim:10760f995990d5dc7ba1403bc45d069c74d0277da4d9e94b6146913eeb88081b:claim_draw) TX: 5a9d13094f34a02526e55d06cd25d9aeb9e602ec151d916c584a49a0c32a3d80
+[proto-settlement-driver] tick 18: {"actioned":1,"landed":0,"submitted":1,"waiting":0,"gated":0,"held":0,"failed":0}
+[proto-settlement-driver] tick 19: {"actioned":2,"landed":0,"submitted":0,"waiting":0,"gated":0,"held":0,"failed":0}
+[proto-settlement-driver] tick 20: {"actioned":2,"landed":1,"submitted":0,"waiting":0,"gated":0,"held":0,"failed":0}
