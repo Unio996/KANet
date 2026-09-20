@@ -41,7 +41,7 @@ export function resultLabel(winningSide, judged) {
 }
 
 // \u987A\u5E8F load-bearing(S3\u00B7SHOULD): \u5148\u5265\u4E0D\u53EF\u89C1/\u683C\u5F0F\u5B57\u7B26(\u663E\u5F0F\u6BB5 + \u6574\u4E2A Unicode Cf \u7C7B: \u8F6F\u8FDE\u5B57\u7B26/\u963F\u62C9\u4F2F\u683C\u5F0F\u7B26/tag \u5B57\u7B26\u2026)\u3001\u518D\u5265 URL\u2014\u2014\u5426\u5219 "ht\u200Btp://x" \u8FD9\u7C7B\u88AB\u96F6\u5BBD\u5B57\u7B26\u5207\u5F00\u7684\u94FE\u63A5\u8EB2\u8FC7 URL \u5265\u79BB\u3001\u968F\u540E\u4E0D\u53EF\u89C1\u5B57\u7B26\u88AB\u5220\u53C8\u62FC\u56DE\u6D3B\u94FE\u63A5\u3002
-const cleanText = (s) => String(s == null ? '' : s).replace(/[\u202A-\u202E\u2066-\u2069\u200B-\u200F\u2060\uFEFF]/g, '').replace(/\p{Cf}/gu, '').replace(/https?:\/\/\S+/g, '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim();
+const cleanText = (s) => String(s == null ? '' : s).replace(/[\u202A-\u202E\u2066-\u2069\u200B-\u200F\u2060\uFEFF]/g, '').replace(/\p{Cf}/gu, '').replace(/https?:\/\/\S+/gi, '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim();
 export const QUESTION_MAX_DETAIL = 300;
 export const truncate = (s, n) => { const x = cleanText(s); return x.length > n ? x.slice(0, n - 1) + '…' : x; };
 

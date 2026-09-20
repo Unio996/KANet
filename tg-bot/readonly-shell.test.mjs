@@ -199,6 +199,18 @@ T('20b S3·SHOULD cleanText: 整个 Unicode Cf 类(软连字符/阿拉伯格式�
   assert.equal(toBotMarket(row({ question: 'q\u00AD?\u200B' })).question, 'q?');
 });
 
+T('20c S3·SHOULD-1(i 标志): URL 剥离大小写不敏感——HTTP:// / Https:// / hTtP:// 不会原样留下; 与零宽切开叠加也剥; 不含 :// 的 http 字样不误伤', () => {
+  for (const u of ['HTTP://EVIL.example/x', 'HTTPS://EVIL.example/x', 'Https://evil.example', 'hTtP://evil.example/x', 'HtTpS://Evil.Example/x?y=1', 'HT​TP://EVIL.example/x', 'HTTP­://EVIL.example']) {
+    const out = truncate(u, 200);
+    assert.ok(!/https?:/i.test(out) && !/evil/i.test(out), `${JSON.stringify(u)} => ${JSON.stringify(out)}`);
+  }
+  assert.equal(truncate('see HTTP://EVIL.example/x now', 200), 'see now');            // 两侧文字保留, 只剥 URL 本体(与小写同结果)
+  assert.equal(truncate('see http://evil.example/x now', 200), 'see now');            // 对照臂: 小写既有行为不变
+  assert.equal(truncate('a HTTP://x.example b http://y.example c Https://z.example d', 200), 'a b c d');   // 多个 URL 都剥(全局标志; 只剥第一个会留下后面的活链接)
+  assert.equal(truncate('the HTTP protocol and https are fine', 200), 'the HTTP protocol and https are fine');   // 对照臂: 没有 "://" 的 http 字样不被误剥
+  assert.equal(toBotMarket(row({ question: 'Will HTTPS://X.example win?' })).question, 'Will win?');
+});
+
 T('21 F2 pruneStateForMainnet: 只留 kaspa 前缀绑定; kaspatest/缺地址/畸形条目全丢; sessions 全清; pendingPayments 不动只回报数', () => {
   const st = { linkedAddrs: [['1', { address: 'kaspatest:qqa' }], ['2', { address: 'kaspa:qqb' }], ['3', { address: 'kaspasim:qqc' }], ['4', { address: '' }], ['5', {}], ['6', null], ['7', { address: 5 }], ['8', { address: 'kaspa:qqd' }], null, ['9', { address: 'nokaspa' }]],
     sessions: [['1', {}], ['2', {}], ['3', {}], ['4', {}]], pendingPayments: [['1', { x: 1 }], ['2', { x: 2 }]] };
