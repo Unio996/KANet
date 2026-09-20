@@ -43,6 +43,9 @@ T('6 真 t 渲染整套屏幕: 无未替换占位符、无 [ro_ 回落; 详情/�
       formatMarketList(ms, l, { nowMs: NOW }).text, formatMarketList(ms, l, { nowMs: NOW, titleKey: 'ro_hot_title' }).text, formatMarketList([], l).text,
       ...['betting', 'sealed', 'resolved', 'cancelled'].map((s) => formatMarketDetail(toBotMarket(mk({ status: s, winning_side: 1 })), l, { nowMs: NOW }).text),
       formatMarketDetail(null, l).text, t(l, 'ro_start_notice'), t(l, 'ro_help'), t(l, 'ro_link_ok', { addr: 'kaspa:qqexample' }),
+      // 修复轮新增屏幕: 判定题 side_map 缺失的已结算(不显结果)、不足 1 小时按分钟、已过截止
+      formatMarketDetail(toBotMarket(mk({ status: 'resolved', winning_side: 0, judged: { side_map: null } })), l, { nowMs: NOW }).text,
+      formatMarketList(visibleMarkets([mk({ id: '4'.repeat(64), deadline_ms: NOW + 29 * 60000 }), mk({ id: '5'.repeat(64), deadline_ms: NOW - 1000 }), mk({ id: '6'.repeat(64), status: 'resolved', winning_side: 1, judged: { side_map: { yes: 1, no: 0 } } })]), l, { nowMs: NOW }).text,
     ];
     for (const s of screens) { assert.ok(!/\{\w+\}/.test(s), `${l} 未替换占位符: ${s.slice(0, 80)}`); assert.ok(!/\[ro_/.test(s), `${l} 回落: ${s.slice(0, 80)}`); }
     assert.equal(formatMarketList(ms, l, { nowMs: NOW }).keyboard.inline_keyboard.flat().every((b) => b.callback_data.startsWith('ro:m:')), true);

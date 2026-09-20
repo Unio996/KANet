@@ -10,9 +10,9 @@ const NOW = Date.UTC(2026, 8, 20, 12, 0, 0);
 const HEX = (c) => c.repeat(64);
 const mrow = (o = {}) => ({ id: HEX('a'), question: 'Will X happen?', status: 'betting', deadline_ms: NOW + 5 * 3600000, min_bet: 1, token_name: 'Test Token', token_ticker: 'KTT', winning_side: null, committee_pubkeys_json: '["pk"]', ...o });
 
-function makeEnv({ rows = [], protoResp, linkResp, network = 'mainnet' } = {}) {
-  const commands = new Map(); const callbacks = [];
-  const bot = { command: (name, fn) => { if (!commands.has(name)) commands.set(name, fn); }, callbackQuery: (pat, fn) => callbacks.push({ pat, fn }) };
+function makeEnv({ rows = [], protoResp, linkResp, network = 'mainnet', prune = { droppedLinks: 4, clearedSessions: 4, pendingPayments: 0 }, noPrune = false } = {}) {
+  const commands = new Map(); const callbacks = []; const textHandlers = []; const pruneCalls = []; const logs = { log: [], warn: [] };
+  const bot = { command: (name, fn) => { if (!commands.has(name)) commands.set(name, fn); }, callbackQuery: (pat, fn) => callbacks.push({ pat, fn }), on: (filter, fn) => { if (filter === 'message:text') textHandlers.push(fn); } };
   const apiCalls = [];
   const realApi = {
     isTransportFailure: (r) => r.status === 0,
@@ -24,10 +24,11 @@ function makeEnv({ rows = [], protoResp, linkResp, network = 'mainnet' } = {}) {
   const PM = {
     getUserLang: (u) => langs.get(u) || 'en', setUserLang: (u, l) => langs.set(u, l), maybeSetLang: (u, l) => { if (!langs.has(u)) langs.set(u, l); },
     setLinkedAddr: (u, a) => linkedAddrs.set(u, a), exitBetFlow: (u) => exits.push(u),
+    ...(noPrune ? {} : { pruneForReadonlyShell: (pfx) => { pruneCalls.push(pfx); return prune; } }),
   };
   const linked = new Map();
   const getLang = (ctx) => PM.getUserLang(String(ctx.from.id)); const initLang = (ctx) => PM.maybeSetLang(String(ctx.from.id), ctx.from.language_code === 'zh' ? 'zh' : 'en');
-  registerReadonlyShell(bot, { api, PM, CONFIG: { network }, linked, t, getLang, initLang, now: () => NOW });
+  registerReadonlyShell(bot, { api, PM, CONFIG: { network }, linked, t, getLang, initLang, now: () => NOW, log: { log: (m) => logs.log.push(m), warn: (m) => logs.warn.push(m) } });
   const mkCtx = (over = {}) => {
     const out = { replies: [], answered: 0, edits: [] };
     const ctx = { from: { id: 42, language_code: 'en' }, match: '', reply: async (text, opts) => { out.replies.push({ text, opts }); }, answerCallbackQuery: async () => { out.answered++; },
@@ -35,7 +36,8 @@ function makeEnv({ rows = [], protoResp, linkResp, network = 'mainnet' } = {}) {
     return { ctx, out };
   };
   const cb = (data) => { for (const { pat, fn } of callbacks) { const m = typeof pat === 'string' ? (pat === data ? [data] : null) : data.match(pat); if (m) return { fn, m }; } return null; };
-  return { commands, callbacks, apiCalls, PM, langs, linkedAddrs, linked, exits, mkCtx, cb };
+  const text = async (txt, ctxOver = {}) => { const { ctx, out } = mkCtx({ message: { text: txt }, ...ctxOver }); let nexted = 0; await textHandlers[0](ctx, async () => { nexted++; }); out.nexted = nexted; return out; };
+  return { commands, callbacks, apiCalls, PM, langs, linkedAddrs, linked, exits, mkCtx, cb, textHandlers, pruneCalls, logs, text };
 }
 const run = async (env, cmd, matchStr = '') => { const { ctx, out } = env.mkCtx({ match: matchStr }); await env.commands.get(cmd)(ctx); return out; };
 const runCb = async (env, data) => { const h = env.cb(data); assert.ok(h, `无 handler 命中回调 ${data}`); const { ctx, out } = env.mkCtx({ match: h.m }); await h.fn(ctx); return out; };
@@ -157,6 +159,23 @@ await T('15 全局: 整个测试期间 api 只被调过 protoMarkets / linkBind,
     assert.ok(!e.apiCalls.some((c) => c.startsWith('FORBIDDEN')));
     assert.equal(e.apiCalls.filter((c) => c.startsWith('linkBind:')).length, 1);
   })();
+});
+
+await T('16 F2 启动清理: 注册时调用一次 PM.pruneForReadonlyShell(主网前缀 kaspa)并打统计日志; pendingPayments>0 ⇒ LOUD warn; 无该函数不抛', () => {
+  const e = makeEnv(); assert.deepEqual(e.pruneCalls, ['kaspa']);
+  assert.ok(e.logs.log.some((m) => /dropped 4 non-mainnet binding\(s\), cleared 4 stale session\(s\), pendingPayments=0/.test(m)), JSON.stringify(e.logs));
+  assert.deepEqual(e.logs.warn, []);
+  const w = makeEnv({ prune: { droppedLinks: 0, clearedSessions: 0, pendingPayments: 3 } }); assert.ok(w.logs.warn.some((m) => /3 pendingPayments/.test(m)), JSON.stringify(w.logs));
+  const none = makeEnv({ noPrune: true }); assert.deepEqual(none.pruneCalls, []); assert.deepEqual(none.logs.warn, []);
+  assert.deepEqual(e.apiCalls, [], '清理不调用任何 console api');
+});
+
+await T('17 自由文本(NWT#4): 非命令文本 ⇒ ro_unavailable, 不调任何 api(不转反馈 agent、不落工单、不进旧下注会话); 命令文本交还 next()', async () => {
+  const e = makeEnv();
+  for (const txt of ['hello', '1', '我要下注', 'kaspa:qqabc', ' /start', '']) { const o = await e.text(txt); assert.ok(o.replies[0]?.text.startsWith('ro_unavailable'), JSON.stringify(txt)); assert.equal(o.nexted, 0, JSON.stringify(txt)); }
+  for (const txt of ['/broker', '/earnings', '/lang zh', '/support', '/verify', '/somethingelse']) { const o = await e.text(txt); assert.equal(o.replies.length, 0, txt); assert.equal(o.nexted, 1, txt); }
+  const o2 = await e.text(undefined, { message: {} }); assert.ok(o2.replies[0].text.startsWith('ro_unavailable'));
+  assert.equal(e.textHandlers.length, 1); assert.deepEqual(e.apiCalls, []);
 });
 
 console.log(`\n${n - fail} PASS / ${fail} FAIL`);

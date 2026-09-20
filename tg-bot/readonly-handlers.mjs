@@ -7,11 +7,19 @@
 import {
   visibleMarkets, toBotMarket, formatMarketList, formatMarketDetail, findByIdPrefix, classifyLinkInput, linkRejectKey,
 } from './readonly-shell.mjs';
+import { prefixForNetwork } from '../shared/lib/kaspa-network.mjs';
 
 /** 主网期隐藏的命令(Owner 已批: /wallet /send /faucet; /swap 无兑换; /broker_apply 建议隐藏, Owner 待定——改这一处即可)。 */
 export const RO_HIDDEN_COMMANDS = ['wallet', 'balance', 'receive', 'send', 'confirm', 'cancel', 'faucet', 'swap', 'broker_apply'];
 
-export function registerReadonlyShell(bot, { api, PM, CONFIG, linked, t, getLang, initLang, now = Date.now }) {
+export function registerReadonlyShell(bot, { api, PM, CONFIG, linked, t, getLang, initLang, now = Date.now, log = console }) {
+  // F2(NWT 审后修): 启动清理——丢弃地址前缀≠主网的旧绑定(TN12 时代 kaspatest)+清空残留下注会话, 让 /start 那句"旧的绑定与会话已重置"名副其实; 同时堵住
+  // pollLoop 拿旧地址查事件、老用户打字掉进旧下注流的口子。pendingPayments 不动(监控队列), 只 LOUD 报数量。清理在原 handler 之前、注册时执行一次。
+  if (typeof PM.pruneForReadonlyShell === 'function') {
+    const s = PM.pruneForReadonlyShell(prefixForNetwork(CONFIG.network));
+    log.log(`[readonly-shell] startup cleanup: dropped ${s.droppedLinks} non-mainnet binding(s), cleared ${s.clearedSessions} stale session(s), pendingPayments=${s.pendingPayments}`);
+    if (s.pendingPayments > 0) log.warn(`[readonly-shell] 🔴 ${s.pendingPayments} pendingPayments left in state (in-flight payment monitors are NOT cleared) — expected 0 before go-live`);
+  }
   const reply = (ctx, r) => (r.keyboard ? ctx.reply(r.text, { reply_markup: r.keyboard }) : ctx.reply(r.text));
 
   /** 取 proto 市场行。返回 { rows } | { busy:true } | { fail:true }。 */
@@ -98,6 +106,11 @@ export function registerReadonlyShell(bot, { api, PM, CONFIG, linked, t, getLang
 
   // 隐藏入口: 手打统一回"暂不开放"; 老消息里残留的旧按钮(TN12 时代的 inline keyboard)也同样拦下, 不进旧的下注/钱包流程
   for (const c of RO_HIDDEN_COMMANDS) bot.command(c, unavailable);
+  // 自由文本/非命令(NWT#4): 只读壳不产生反馈工单、也不进旧下注会话流程——统一回"暂不开放"; 以 / 开头的交还给后面(/broker /earnings /lang /support /verify 等原 handler)
+  bot.on('message:text', async (ctx, next) => {
+    if (String(ctx.message?.text || '').startsWith('/')) return next();
+    initLang(ctx); return ctx.reply(t(getLang(ctx), 'ro_unavailable'));
+  });
   for (const pat of [/^bet:market:(.+)$/, /^bet:side:(1|2)$/, /^mybet:addmore:(.+)$/, 'nav:faucet']) {
     bot.callbackQuery(pat, async (ctx) => { await ctx.answerCallbackQuery(); return unavailable(ctx); });
   }

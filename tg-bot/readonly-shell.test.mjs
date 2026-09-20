@@ -1,6 +1,6 @@
 // readonly-shell.test.mjs — 只读壳纯函数测试(零链零 DB 零网络; 假 t 只断言"用了哪个键+变量", 不依赖最终措辞)。Run: cd tg-bot && node readonly-shell.test.mjs
 import assert from 'node:assert/strict';
-import { isReadonlyShell, protoStateOf, resultLabel, toBotMarket, visibleMarkets, marketLine, formatMarketList, formatMarketDetail, findByIdPrefix, classifyLinkInput, linkRejectKey, truncate } from './readonly-shell.mjs';
+import { isReadonlyShell, protoStateOf, resultLabel, toBotMarket, visibleMarkets, marketLine, formatMarketList, formatMarketDetail, findByIdPrefix, classifyLinkInput, linkRejectKey, truncate, pruneStateForMainnet, QUESTION_MAX_DETAIL } from './readonly-shell.mjs';
 
 let n = 0, fail = 0;
 const T = (name, fn) => { n++; try { fn(); console.log(`  ✅ ${name}`); } catch (e) { fail++; console.log(`  ❌ ${name}: ${e.message}`); } };
@@ -137,6 +137,62 @@ T('15 linkRejectKey: 已知码映射键, 未知码 ⇒ null(走既有 link_fail)
 
 T('16 truncate: 超长截断带省略号; 不超长原样(去 URL 后)', () => {
   assert.equal(truncate('abcdef', 4), 'abc…'); assert.equal(truncate('abc', 4), 'abc'); assert.equal(truncate(null, 4), '');
+});
+
+T('17 F1 判定题赢家换算: 按 judged.side_map(label→side)——{yes:1,no:0} 时 winning_side=1 是 YES(不能套 0=YES)', () => {
+  const smA = { side_map: { yes: 0, no: 1 } }, smB = { side_map: { yes: 1, no: 0 } };
+  assert.equal(resultLabel(0, smA), 'YES'); assert.equal(resultLabel(1, smA), 'NO');
+  assert.equal(resultLabel(1, smB), 'YES'); assert.equal(resultLabel(0, smB), 'NO');
+  assert.equal(toBotMarket(row({ status: 'resolved', winning_side: 1, judged: smB })).result, 'YES');
+  assert.equal(toBotMarket(row({ status: 'resolved', winning_side: 1 })).result, 'NO');   // 非判定题维持 0=YES/1=NO
+});
+
+T('18 F1 判定题 side_map 缺失/非法 ⇒ 不显 YES/NO(不猜); winning_side 非 0/1 ⇒ null', () => {
+  for (const j of [{}, { side_map: null }, { side_map: 'x' }, { side_map: { yes: 0, no: 0 } }, { side_map: { yes: 2, no: 1 } }, { side_map: { yes: 0 } }, { side_map: { yes: '0', no: '1' } }, 'judged', 5]) assert.equal(resultLabel(0, j), null, JSON.stringify(j));
+  for (const w of [null, undefined, 2, -1, '0']) assert.equal(resultLabel(w, { side_map: { yes: 0, no: 1 } }), null, String(w));
+  const m = toBotMarket(row({ status: 'resolved', winning_side: 0, judged: { side_map: null } }));
+  assert.equal(m.result, null);
+  assert.ok(marketLine(m, 'en', { t, nowMs: NOW }).startsWith('ro_line_settled_noresult|'));
+  const d = formatMarketDetail(m, 'en', { t, nowMs: NOW }); assert.ok(d.text.includes('ro_state_settled_noresult') && !d.text.includes('YES') && !d.text.includes('"NO"'), d.text);
+  const m2 = toBotMarket(row({ status: 'resolved', winning_side: null })); assert.ok(marketLine(m2, 'en', { t, nowMs: NOW }).startsWith('ro_line_settled_noresult|'));   // 已结算但 winning_side 缺失(非判定题)同样不显结果
+});
+
+// 时钟用例的假 t: 把三个"还剩多久"键换成短记号, 避免嵌套 JSON 转义
+const tw = (l, k, v = {}) => (k === 'ro_when_hours' ? `H${v.h}` : k === 'ro_when_minutes' ? `M${v.m}` : k === 'ro_when_expired' ? 'EXP' : t(l, k, v));
+const whenAt = (leftMs, over = {}) => { const s = marketLine(toBotMarket(row({ deadline_ms: NOW + leftMs, ...over })), 'zh', { t: tw, nowMs: NOW }); const m = /"when":"([^"]*)"/.exec(s); return m ? m[1] : null; };
+
+T('19 SHOULD#1 时钟: 不足 1 小时按分钟(向上取整, 至少 1); 已到/已过 ⇒ 已过截止; ≥1 小时向上取整', () => {
+  assert.equal(whenAt(29 * 60000), 'M29');   // 旧 Math.round 会显"已过截止"
+  assert.equal(whenAt(31 * 60000), 'M31'); assert.equal(whenAt(59 * 60000), 'M59'); assert.equal(whenAt(1 * 60000), 'M1'); assert.equal(whenAt(1000), 'M1'); assert.equal(whenAt(59 * 60000 + 1000), 'M60');
+  assert.equal(whenAt(3600000), 'H1'); assert.equal(whenAt(61 * 60000), 'H2'); assert.equal(whenAt(89 * 60000), 'H2');   // 旧 Math.round 把 31–89 分都显成"1 小时"
+  assert.equal(whenAt(5 * 3600000), 'H5'); assert.equal(whenAt(5 * 3600000 + 1000), 'H6');
+  assert.equal(whenAt(0), 'EXP'); assert.equal(whenAt(-1000), 'EXP'); assert.equal(whenAt(-5 * 3600000), 'EXP');
+  assert.equal(whenAt(0, { deadline_ms: undefined }), '', '无截止 ⇒ when 为空(不显 ?)');
+  const det = formatMarketDetail(toBotMarket(row({ deadline_ms: NOW + 29 * 60000 })), 'en', { t: tw, nowMs: NOW }); assert.ok(det.text.includes('M29') && !det.text.includes('EXP'), det.text);
+});
+
+T('20 SHOULD#2 文本: 去双向控制符/零宽字符; 详情题干设上限; 列表仍 56', () => {
+  const nasty = 'a‮b‪c⁦d⁩e​f‍g‏h⁠i﻿j';
+  assert.equal(toBotMarket(row({ question: nasty })).question, 'abcdefghij');
+  assert.equal(truncate('x‮y', 10), 'xy');
+  const long = 'q'.repeat(1000);
+  const d = formatMarketDetail(toBotMarket(row({ question: long })), 'en', { t, nowMs: NOW });
+  const title = d.text.split('\n')[0]; assert.ok(title.length < QUESTION_MAX_DETAIL + 60 && title.includes('…'), `详情标题长度 ${title.length}`);
+  assert.equal(QUESTION_MAX_DETAIL, 300);
+  assert.ok(marketLine(toBotMarket(row({ question: long })), 'en', { t, nowMs: NOW }).length < 200);
+});
+
+T('21 F2 pruneStateForMainnet: 只留 kaspa 前缀绑定; kaspatest/缺地址/畸形条目全丢; sessions 全清; pendingPayments 不动只回报数', () => {
+  const st = { linkedAddrs: [['1', { address: 'kaspatest:qqa' }], ['2', { address: 'kaspa:qqb' }], ['3', { address: 'kaspasim:qqc' }], ['4', { address: '' }], ['5', {}], ['6', null], ['7', { address: 5 }], ['8', { address: 'kaspa:qqd' }], null, ['9', { address: 'nokaspa' }]],
+    sessions: [['1', {}], ['2', {}], ['3', {}], ['4', {}]], pendingPayments: [['1', { x: 1 }], ['2', { x: 2 }]] };
+  const r = pruneStateForMainnet(st, 'kaspa');
+  assert.deepEqual(r.linkedAddrs.map((e) => e[0]), ['2', '8']); assert.equal(r.droppedLinks, 8);
+  assert.deepEqual(r.sessions, []); assert.equal(r.clearedSessions, 4); assert.equal(r.pendingPayments, 2);
+  assert.equal(st.linkedAddrs.length, 10, '不就地修改入参');
+  assert.deepEqual(pruneStateForMainnet({}, 'kaspa'), { linkedAddrs: [], sessions: [], droppedLinks: 0, clearedSessions: 0, pendingPayments: 0 });
+  assert.deepEqual(pruneStateForMainnet(undefined, 'kaspa').linkedAddrs, []);
+  assert.deepEqual(pruneStateForMainnet({ linkedAddrs: [['1', { address: 'kaspatest:qqa' }], ['2', { address: 'kaspa:qqb' }]] }, 'kaspatest').linkedAddrs.map((e) => e[0]), ['1']);   // 判据是前缀相等, 不是写死 kaspa
+  assert.equal(pruneStateForMainnet({ linkedAddrs: [['1', { address: 'kaspatest:qq' }]] }, 'kaspa').linkedAddrs.length, 0);   // 整段比较, 不是 startsWith
 });
 
 console.log(`\n${n - fail} PASS / ${fail} FAIL`);

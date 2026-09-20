@@ -23,14 +23,25 @@ export function protoStateOf(status) {
   }
 }
 
-/** winning_side: 0=YES / 1=NO; 其它(null/undefined/2…)⇒ null(不猜)。 */
-export function resultLabel(winningSide) {
-  if (winningSide === 0) return 'YES';
-  if (winningSide === 1) return 'NO';
-  return null;
+/**
+ * winning_side → 'YES'|'NO'|null。
+ *  · 非判定题(无 judged): 0=YES / 1=NO(operator 市场的下注方向编码, 见 api/proto.js:242)。
+ *  · 判定题(有 judged): 按 judged.side_map({"yes":0|1,"no":1|0}, label→side 双射)换算——side_map 可能是 {yes:1,no:0}, 直接套 0=YES 会显反赢家;
+ *    side_map 缺失/非法 ⇒ null(不猜, 由渲染层显"已结算"不带结果)。
+ *  其它(null/undefined/2…)⇒ null。
+ */
+export function resultLabel(winningSide, judged) {
+  if (winningSide !== 0 && winningSide !== 1) return null;
+  if (judged == null) return winningSide === 0 ? 'YES' : 'NO';
+  const sm = judged && typeof judged === 'object' ? judged.side_map : null;
+  if (!sm || typeof sm !== 'object') return null;
+  const y = sm.yes, n = sm.no;
+  if (!((y === 0 || y === 1) && (n === 0 || n === 1) && y !== n)) return null;
+  return y === winningSide ? 'YES' : 'NO';
 }
 
-const cleanText = (s) => String(s == null ? '' : s).replace(/https?:\/\/\S+/g, '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim();
+const cleanText = (s) => String(s == null ? '' : s).replace(/https?:\/\/\S+/g, '').replace(/[\u202A-\u202E\u2066-\u2069\u200B-\u200F\u2060\uFEFF]/g, '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim();
+export const QUESTION_MAX_DETAIL = 300;
 export const truncate = (s, n) => { const x = cleanText(s); return x.length > n ? x.slice(0, n - 1) + '…' : x; };
 
 /** 白名单映射: 一行 proto 市场 → bot 渲染用的最小对象(deadline 已转秒)。id 缺失/非字符串 ⇒ null。 */
@@ -45,7 +56,7 @@ export function toBotMarket(row) {
     minBet: Number.isFinite(Number(row.min_bet)) ? Number(row.min_bet) : null,
     tokenTicker: cleanText(row.token_ticker),
     tokenName: cleanText(row.token_name),
-    result: protoStateOf(row.status) === 'settled' ? resultLabel(row.winning_side) : null,
+    result: protoStateOf(row.status) === 'settled' ? resultLabel(row.winning_side, row.judged) : null,
   };
   return out;
 }
@@ -58,18 +69,23 @@ export function visibleMarkets(rows, { limit = 8 } = {}) {
   return ms.slice(0, Math.max(0, limit));
 }
 
-const hoursLeft = (deadlineSec, nowMs) => (deadlineSec == null ? null : Math.round((deadlineSec * 1000 - nowMs) / 3600000));
+/** 距截止还有多久 → 文案: null(无截止)/ 已过 / 不足 1 小时按分钟(向上取整, 至少 1 分钟)/ 否则按小时(向上取整)。之前 Math.round: 还剩 29 分显"已过截止"、31–89 分显"1 小时"。 */
+function whenText(t, lang, deadlineSec, nowMs) {
+  if (deadlineSec == null) return null;
+  const left = deadlineSec * 1000 - nowMs;
+  if (left <= 0) return t(lang, 'ro_when_expired');
+  if (left < 3600000) return t(lang, 'ro_when_minutes', { m: Math.max(1, Math.ceil(left / 60000)) });
+  return t(lang, 'ro_when_hours', { h: Math.ceil(left / 3600000) });
+}
 
 /** 一行摘要(列表/热门用): 键与变量只由状态决定。 */
 export function marketLine(m, lang, { t = realT, nowMs = Date.now(), qMax = 56 } = {}) {
   const q = truncate(m.question, qMax);
   if (m.state === 'open') {
-    const h = hoursLeft(m.deadlineSec, nowMs);
-    const when = h == null ? '' : (h > 0 ? t(lang, 'ro_when_hours', { h }) : t(lang, 'ro_when_expired'));
-    return t(lang, 'ro_line_open', { q, when });
+    return t(lang, 'ro_line_open', { q, when: whenText(t, lang, m.deadlineSec, nowMs) ?? '' });
   }
   if (m.state === 'sealed') return t(lang, 'ro_line_sealed', { q });
-  return t(lang, 'ro_line_settled', { q, result: m.result || '?' });
+  return m.result ? t(lang, 'ro_line_settled', { q, result: m.result }) : t(lang, 'ro_line_settled_noresult', { q });
 }
 
 /** /bet 列表: 文本 + 每个市场一个详情按钮(callback_data 只带 id 前缀 16 位——Telegram 限 64 字节, 完整 64 位 id 放不下)。 */
@@ -85,9 +101,9 @@ export function formatMarketList(markets, lang, { t = realT, nowMs = Date.now(),
 /** 详情页: 无任何下注按钮/入口。 */
 export function formatMarketDetail(m, lang, { t = realT, nowMs = Date.now() } = {}) {
   if (!m) return { text: t(lang, 'ro_detail_not_found'), keyboard: null };
-  const h = hoursLeft(m.deadlineSec, nowMs);
-  const lines = [t(lang, 'ro_detail_title', { q: m.question }), t(lang, `ro_state_${m.state}`, { result: m.result || '?' })];
-  if (m.state === 'open') lines.push(t(lang, 'ro_detail_deadline', { when: h == null ? '?' : (h > 0 ? t(lang, 'ro_when_hours', { h }) : t(lang, 'ro_when_expired')) }));
+  const stateKey = m.state === 'settled' && !m.result ? 'ro_state_settled_noresult' : `ro_state_${m.state}`;
+  const lines = [t(lang, 'ro_detail_title', { q: truncate(m.question, QUESTION_MAX_DETAIL) }), t(lang, stateKey, { result: m.result || '' })];   // 题干设上限(SHOULD #2): 详情页不无限回显
+  if (m.state === 'open') lines.push(t(lang, 'ro_detail_deadline', { when: whenText(t, lang, m.deadlineSec, nowMs) ?? '?' }));
   if (m.minBet != null) lines.push(t(lang, 'ro_detail_min_bet', { n: m.minBet, ticker: m.tokenTicker || m.tokenName || '' }));
   lines.push(t(lang, 'ro_detail_no_bet'));
   return { text: lines.join('\n'), keyboard: null };
@@ -117,4 +133,21 @@ export function linkRejectKey(code) {
   if (code === 'prefix-mismatch') return 'ro_link_wrong_network';
   if (code === 'invalid-checksum') return 'ro_link_invalid';
   return null;
+}
+
+/**
+ * F2(NWT 审后修): 主网只读壳启动清理的【纯函数】——让 /start 那句"旧的绑定与会话已重置"名副其实。
+ *  · linkedAddrs(条目 [tgUser, {address,...}]): 只保留地址前缀 == wantPrefix(主网 kaspa)的绑定; 前缀不符(TN12 时代的 kaspatest 等)或缺地址的丢弃。
+ *  · sessions: 全部清空(TN12 时代残留的下注会话; 只读壳没有会话流程)。
+ *  · pendingPayments: 【不改】——它是"等待链上付款"的监控队列, 清掉 = 丢监控; 只回报数量, 调用方 LOUD 提示(上线前应为 0)。
+ * 返回新的 { linkedAddrs, sessions } 与统计。不做任何 I/O。
+ */
+export function pruneStateForMainnet({ linkedAddrs = [], sessions = [], pendingPayments = [] } = {}, wantPrefix) {
+  const keep = [];
+  let droppedLinks = 0;
+  for (const e of Array.isArray(linkedAddrs) ? linkedAddrs : []) {
+    const addr = e && e[1] && typeof e[1] === 'object' ? e[1].address : null;
+    if (typeof addr === 'string' && addressPrefix(addr) === wantPrefix) keep.push(e); else droppedLinks++;
+  }
+  return { linkedAddrs: keep, sessions: [], droppedLinks, clearedSessions: Array.isArray(sessions) ? sessions.length : 0, pendingPayments: Array.isArray(pendingPayments) ? pendingPayments.length : 0 };
 }

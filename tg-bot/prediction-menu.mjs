@@ -10,9 +10,11 @@ import { readFileSync, writeFileSync, existsSync, renameSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { isDecidedWorldCupMarket } from './worldcup-teams.mjs';
+import { pruneStateForMainnet } from './readonly-shell.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const STATE_FILE = join(__dirname, '_state.json');
+// TG_BOT_STATE_FILE: 测试/隔离演练用的状态文件路径覆盖(默认不变 = 本目录 _state.json)。Stage A 用它加载一份 _state.json 的【拷贝】而不碰真文件。
+const STATE_FILE = process.env.TG_BOT_STATE_FILE || join(__dirname, '_state.json');
 
 // Bettor r8 P0 (Owner 14h 后回「确认」→ bot 已重启状态丢 → 走丢): sessions + pendingPayments
 // 落盘 _state.json, bot 重启即 reload 续单. awaiting-confirm 与 stage5 付款监控跨重启不丢.
@@ -544,6 +546,18 @@ export async function startBetFromMarket(tgUser, marketId) {
   }
   lines.push('', t(lang, 'bet_detail_oracle'), t(lang, 'bet_detail_warn'), t(lang, 'bet_detail_question'));
   return { text: lines.join('\n'), keyboard: _detailKeyboard(market.id, lang) };
+}
+
+/**
+ * 主网只读壳启动清理(F2, readonly-handlers.mjs 在注册时调用一次): 丢弃地址前缀 ≠ wantPrefix 的旧绑定(TN12 时代的 kaspatest)、清空残留下注会话;
+ * pendingPayments 不动(等待链上付款的监控队列, 清掉=丢监控), 只回报数量。纯逻辑在 readonly-shell.mjs pruneStateForMainnet。返回统计。
+ */
+export function pruneForReadonlyShell(wantPrefix) {
+  const r = pruneStateForMainnet({ linkedAddrs: [...linkedAddrs.entries()], sessions: [...sessions.entries()], pendingPayments: [...pendingPayments.entries()] }, wantPrefix);
+  linkedAddrs.clear(); for (const [k, v] of r.linkedAddrs) linkedAddrs.set(k, v);
+  sessions.clear();
+  if (r.droppedLinks || r.clearedSessions) persistNow();
+  return { droppedLinks: r.droppedLinks, clearedSessions: r.clearedSessions, pendingPayments: r.pendingPayments };
 }
 
 export function inBetFlow(tgUser) { return sessions.has(tgUser) || pendingPayments.has(tgUser); }
