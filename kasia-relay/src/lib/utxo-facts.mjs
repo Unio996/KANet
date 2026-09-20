@@ -230,17 +230,23 @@ export async function handleGetAddressUtxos({ cmd, getSharedRpc, legacyGetAddres
 }
 
 /**
- * relay.mjs 的 `get_past_median_time` case 委托到这里(R2)。只回三个字段: 不带 RPC URL/节点标识/DAA score/sink。
+ * relay.mjs 的 `get_past_median_time` case 委托到这里(R2)。只回四个字段 {ok, pastMedianTimeMs, observedAtMs, isSynced}(isSynced 为批 D 新增的布尔或 null): 不带 RPC URL/节点标识/DAA score/sink。
  * 走与 covenant_broadcast 提交同一个共享 RpcClient ⇒ "读 pmt 的节点 == 提交的节点"无条件成立。
  * @param {{getSharedRpc: () => Promise<object>, nowMs?: () => number}} o
  */
 export async function handleGetPastMedianTime({ getSharedRpc, nowMs = () => Date.now(), rpcCallMs = FACTS_RPC_CALL_MS }) {
   const rpc = await getSharedRpc();
-  const info = await withDeadline(() => rpc.getBlockDagInfo(), rpcCallMs, 'getBlockDagInfo');
+  // 批 D(oracle 整合, §5): pmt 有效性要求 isSynced===true。同一个共享 RpcClient 顺带读一次 getServerInfo().isSynced(只读; 读不到 ⇒ null, 消费方按"缺 isSynced"fail-closed, 不影响既有 close_commit 门——它只用 pastMedianTimeMs / observedAtMs)。
+  //   两个 RPC【并行】(Promise.all): 串行时最坏 ≈ 2×rpcCallMs + waitForRpc, 会顶到 console 侧 15 s IPC 超时——这条路径同时是既有 close_commit 的 pmt 门, 不能被 isSynced 这个附带读拖慢。getServerInfo 失败 ⇒ isSynced=null(不拖垮 pmt 主读数)。
+  const [serverInfo, info] = await Promise.all([
+    withDeadline(() => rpc.getServerInfo(), rpcCallMs, 'getServerInfo').catch(() => null),
+    withDeadline(() => rpc.getBlockDagInfo(), rpcCallMs, 'getBlockDagInfo'),
+  ]);
+  const isSynced = typeof serverInfo?.isSynced === 'boolean' ? serverInfo.isSynced : null;
   const observedAtMs = nowMs();                           // 读回之后立刻取墙钟(供 pmtEvidence 新鲜度, §8 S5)
   const pmt = Number(info?.pastMedianTime);
   if (!Number.isSafeInteger(pmt) || pmt <= 0) {
     throw new FactsError('past_median_time_unavailable', `getBlockDagInfo.pastMedianTime 不可用(${info?.pastMedianTime})`);
   }
-  return { ok: true, pastMedianTimeMs: pmt, observedAtMs };
+  return { ok: true, pastMedianTimeMs: pmt, observedAtMs, isSynced };
 }

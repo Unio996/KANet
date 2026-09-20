@@ -53,6 +53,15 @@ await t('拒绝启动(LOUD): KASPA_NETWORK 未设 / 未知 ⇒ 不启动; tick �
     assert.equal(_settlementDriverTestState().started, false); assert.equal(L.lines.length, 1); assert.match(L.lines[0], /^error \[proto-settlement-driver\] REFUSED to start/);
   }
 });
+await t('批 D N2 启动校验: 预算常量自相矛盾(tick 拉到 10 分钟, 默认 SAFETY 压不住 LAG_MAX+MARGIN+tick)⇒ REFUSED to start(不起 interval); 非法 env 值 ⇒ 回默认并 LOUD(error 级日志)仍启动; 无 env 覆盖 ⇒ 无预算日志', () => {
+  const base = { PROTO_SETTLEMENT_DRIVER_ENABLED: '1', KASPA_NETWORK: 'mainnet' };
+  { const L = mkLog(); startProtoSettlementDriver({ env: { ...base, PROTO_SETTLEMENT_DRIVER_INTERVAL_MS: '600000' }, relayId: 'r1', loadOps: async () => ({}), log: L });
+    assert.equal(_settlementDriverTestState().started, false); assert.ok(L.lines.some((l) => l.startsWith('error [proto-settlement-driver] REFUSED to start: 预算自相矛盾')), L.lines.join(' | ')); stopProtoSettlementDriver(); }
+  { const L = mkLog(); startProtoSettlementDriver({ env: { ...base, PROTO_GRACE_MS: 'abc', PROTO_PROMOTION_SAFETY_MS: '1000' }, relayId: 'r1', loadOps: async () => ({}), log: L });
+    assert.equal(_settlementDriverTestState().started, true); const loud = L.lines.filter((l) => l.startsWith('error [proto-settlement-driver] BUDGET CONFIG (LOUD)')); assert.equal(loud.length, 2, L.lines.join(' | ')); stopProtoSettlementDriver(); }
+  { const L = mkLog(); startProtoSettlementDriver({ env: base, relayId: 'r1', loadOps: async () => ({}), log: L });
+    assert.equal(_settlementDriverTestState().started, true); assert.equal(L.lines.filter((l) => /BUDGET/.test(l)).length, 0); stopProtoSettlementDriver(); }
+});
 await t('每步预算(§19.3a): = tick 间隔的一半, 下限 15000, 且必须小于间隔(否则 RangeError); 间隔 / cap 取自 env 正整数, 否则默认 60000 / 3', () => {
   assert.equal(stepBudgetFor(60000), 30000); assert.equal(stepBudgetFor(30000), 15000); assert.equal(stepBudgetFor(20000), 15000); assert.throws(() => stepBudgetFor(15000), RangeError); assert.throws(() => stepBudgetFor(1000), RangeError);
   assert.equal(settlementIntervalMs({}), 60000); assert.equal(settlementIntervalMs({ PROTO_SETTLEMENT_DRIVER_INTERVAL_MS: 'abc' }), 60000); assert.equal(settlementIntervalMs({ PROTO_SETTLEMENT_DRIVER_INTERVAL_MS: '45000' }), 45000);

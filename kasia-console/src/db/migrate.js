@@ -6,6 +6,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { encrypt } from '../services/crypto.js';
 import { categorizeMarket } from '../lib/market-category.js';
 import { classifyPayoutShardFamily } from '../lib/bshard-payout-family-coherence.mjs';
+import { judgedSqlPredicate } from './proto-judged.mjs';   // v212/v213: "有判定题"的唯一定义(批 D 受理门 / promote 门 / 晚 seal 守卫共用)
 import { M0C1_GRANT_TABLE, M0C1_GRANT_DDL } from './m0c1-grant-registry-schema.js';
 import { ensureKaspaTxLogToAddrObservedIndex } from './heavy-index-v199.mjs';   // v199 (Phase-1 ②): 记账式复合索引迁移
 import { ensurePhase2IndexesV200 } from './phase2-indexes-v200.mjs';   // v200 (Phase-2 A 包): P2-5 + P2-1 A′ 索引, boot 内建
@@ -6383,7 +6384,7 @@ export function runMigrations() {
     const cols = new Set(sqlite.prepare('PRAGMA table_info(proto_markets)').all().map((c) => c.name));
     const addCol = (name, ddl) => { if (!cols.has(name)) sqlite.exec(`ALTER TABLE proto_markets ADD COLUMN ${name} ${ddl}`); };
     // 判定题里"这市场有判定题"的判据(fail-safe 取宽: 任一判定题列非 NULL 即算——含空串, 让"清空字段假装无判定题"走不通)
-    const JUDGED = (r) => `(${r}.resolution_rule_spec IS NOT NULL OR ${r}.outcome_market_source IS NOT NULL OR ${r}.outcome_condition_id IS NOT NULL OR ${r}.outcome_oracle_relay_ids IS NOT NULL)`;
+    const JUDGED = judgedSqlPredicate;   // 唯一定义在 ./proto-judged.mjs(生成文本与批 A 原文逐字相同)
     // 题面已锁: genesis 已广播(status 出了 pending/prepared) 或已有 genesis 广播 txid / 落链 leaf txid, 或已有任一下注行
     const LOCKED = `(OLD.status NOT IN ('genesis_pending','genesis_prepared') OR OLD.genesis_submitted_txid IS NOT NULL OR OLD.shardleaf_txid IS NOT NULL OR EXISTS (SELECT 1 FROM proto_bets WHERE market_id = OLD.id))`;
     const TRIG = (name, timing, event, table, when, msg) => `DROP TRIGGER IF EXISTS ${name};\n    CREATE TRIGGER ${name} ${timing} ${event} ON ${table}${when ? ` WHEN ${when}` : ''}\n    BEGIN SELECT RAISE(ABORT, '${String(msg).replace(/'/g, "''")}'); END;`;   // 报文里的单引号转义(SQL 字面量)
@@ -6448,6 +6449,38 @@ export function runMigrations() {
     tx();
   }
   console.log('[migrate] v212: proto_market_verdicts 追加表 + proto_markets 审计列/判定题列 + winning_side 写一次触发器(R1) + 题面不可改触发器(R4); 纯 schema, 不含 adapter(oracle 整合批 A).');
+
+  // ── v213 (2026-09-20, J2 · oracle 整合批 D, 设计 docs/2026-09-20-bettor-oracle-batchD-grace-refundflip-budget-design-v0.1.md v0.3 §3/§7/§8 N1·N5): 冻结列 + verdicts.pmt_at。
+  //   ① proto_markets.settlement_frozen_at INTEGER + frozen_reason TEXT: 冻结 = 该市场结算不再前进(close_commit 三入口 fail-closed, 见 store / core), 单向不可撤;
+  //      冻结时刻取 pmt, pmt 无效退墙钟毫秒并在 frozen_reason 里标 clock=wall(N5a); frozen_reason 冻结时必非空且不可改。
+  //   ② proto_market_verdicts.pmt_at INTEGER(N1): verdict 写入时刻的 pmt(毫秒); INSERT 写、批 A 的 append-only 触发器保写后不可改; NULL 的 verdict 不计一致性、不可被 winning_side 引用。
+  //   ③ 触发器(批 A 同级): 冻结列 INSERT 必 NULL / 域(正整数) / 单向 / reason 必填且不脱离冻结 / 冻结市场(或同语句冻结)禁写 winning_side(D2); pmt_at 域; 重建 verdict_ref 触发器加 pmt_at 非空。
+  //   🟡 诚实边界: 同批 A——触发器防应用 / 运维失误与手写 SQL, 不防能 DROP TRIGGER 的机器写权。冻结后 winning_side 永不可写 ⇒ 判定题市场唯一出口 = 自然 refund_flip(N5b, refund 执行批未接线前有价值市场不得上主网)。
+  {
+    const trig = (name, timing, event, table, when, msg) => `DROP TRIGGER IF EXISTS ${name};\n    CREATE TRIGGER ${name} ${timing} ${event} ON ${table}${when ? ` WHEN ${when}` : ''}\n    BEGIN SELECT RAISE(ABORT, '${String(msg).replace(/'/g, "''")}'); END;`;
+    const mcols = new Set(sqlite.prepare('PRAGMA table_info(proto_markets)').all().map((c) => c.name));
+    const vcols = new Set(sqlite.prepare('PRAGMA table_info(proto_market_verdicts)').all().map((c) => c.name));
+    const tx = sqlite.transaction(() => {
+      if (!mcols.has('settlement_frozen_at')) sqlite.exec('ALTER TABLE proto_markets ADD COLUMN settlement_frozen_at INTEGER');
+      if (!mcols.has('frozen_reason')) sqlite.exec('ALTER TABLE proto_markets ADD COLUMN frozen_reason TEXT');
+      if (!vcols.has('pmt_at')) sqlite.exec('ALTER TABLE proto_market_verdicts ADD COLUMN pmt_at INTEGER');
+      const T = [];
+      T.push(trig('trg_pm_d_frozen_insert_null', 'BEFORE', 'INSERT', 'proto_markets', 'NEW.settlement_frozen_at IS NOT NULL OR NEW.frozen_reason IS NOT NULL', 'proto_markets: settlement_frozen_at / frozen_reason must be NULL at INSERT (freeze is a later, one-way UPDATE)'));
+      T.push(trig('trg_pm_d_frozen_domain', 'BEFORE', 'UPDATE OF settlement_frozen_at', 'proto_markets', "NEW.settlement_frozen_at IS NOT NULL AND (typeof(NEW.settlement_frozen_at) <> 'integer' OR NEW.settlement_frozen_at <= 0)", 'proto_markets: settlement_frozen_at must be a positive integer (ms)'));
+      T.push(trig('trg_pm_d_frozen_one_way', 'BEFORE', 'UPDATE', 'proto_markets', 'OLD.settlement_frozen_at IS NOT NULL AND (NEW.settlement_frozen_at IS NOT OLD.settlement_frozen_at OR NEW.frozen_reason IS NOT OLD.frozen_reason)', 'proto_markets: settlement freeze is one-way (cannot be cleared or changed, nor can frozen_reason)'));
+      T.push(trig('trg_pm_d_frozen_reason_required', 'BEFORE', 'UPDATE', 'proto_markets', 'NEW.settlement_frozen_at IS NOT NULL AND (NEW.frozen_reason IS NULL OR length(trim(NEW.frozen_reason)) = 0)', 'proto_markets: frozen_reason is required (non-blank) when freezing'));
+      T.push(trig('trg_pm_d_reason_needs_frozen', 'BEFORE', 'UPDATE', 'proto_markets', 'NEW.settlement_frozen_at IS NULL AND NEW.frozen_reason IS NOT NULL', 'proto_markets: frozen_reason cannot be set without settlement_frozen_at'));
+      T.push(trig('trg_pm_d_frozen_no_winning_side', 'BEFORE', 'UPDATE OF winning_side', 'proto_markets', 'NEW.winning_side IS NOT NULL AND (OLD.settlement_frozen_at IS NOT NULL OR NEW.settlement_frozen_at IS NOT NULL)', 'proto_markets: winning_side cannot be written on a frozen market (nor in the same statement that freezes it)'));
+      T.push(trig('trg_pmv_d_pmt_at_domain', 'BEFORE', 'INSERT', 'proto_market_verdicts', "NEW.pmt_at IS NOT NULL AND (typeof(NEW.pmt_at) <> 'integer' OR NEW.pmt_at <= 0)", 'proto_market_verdicts: pmt_at must be a positive integer (ms) or NULL'));
+      // verdict_ref 重建: 在批 A 条件上加 v.pmt_at IS NOT NULL(N1: pmt_at 为 NULL 的 verdict 不可被引用)
+      T.push(trig('trg_pm_ws_r1_verdict_ref', 'BEFORE', 'UPDATE OF winning_side', 'proto_markets',
+        "NEW.winning_side IS NOT NULL AND NEW.winning_side_source IN ('extractor','uma','human') AND NOT EXISTS (SELECT 1 FROM proto_market_verdicts v WHERE v.id = NEW.winning_side_verdict_id AND v.market_id = NEW.id AND v.outcome = NEW.winning_side AND v.source_kind = NEW.winning_side_source AND v.pmt_at IS NOT NULL)",
+        'proto_markets: source extractor|uma|human requires winning_side_verdict_id referencing a verdict of the same market, same outcome, same source_kind, with pmt_at set (llm verdicts can never promote)'));
+      for (const stmt of T) sqlite.exec(stmt);
+    });
+    tx();
+  }
+  console.log('[migrate] v213: proto_markets.settlement_frozen_at/frozen_reason + proto_market_verdicts.pmt_at + 冻结/pmt_at 触发器 + verdict_ref 加 pmt_at 非空(oracle 整合批 D).');
 
   console.log('[migrate] DB migrations complete.');
 }

@@ -7,6 +7,7 @@ import { sqlite } from '../db/client.js';
 import { deriveCloseCommitInputs } from './proto-settlement-inputs.mjs';
 import { deriveWinnerBet } from './proto-winner-bet.mjs';
 import { ensureSettlementIntent } from './proto-settlement-intent.mjs';
+import { isMarketFrozen } from './proto-settlement-freeze.mjs';
 
 const BATCH9_INTENT_PREDICATE = `((subject_type = 'market' AND step IN ('seal', 'resolve')) OR (subject_type = 'claim' AND step IN ('convert_to_claim', 'claim_draw')))`;
 const nowIso = () => new Date().toISOString();
@@ -50,6 +51,7 @@ export function createSettlementStore({ db = sqlite, claimIdFn = newClaimId, ens
     for (const r of db.prepare(`
       SELECT m.id FROM proto_markets m
       WHERE m.status = 'sealed' AND m.winning_side IS NOT NULL
+        AND m.settlement_frozen_at IS NULL   -- 批 D D1 入口①: 冻结市场不进 close_commit 选行(已 prepared 的意图走上面 preparedRows, 不受冻结影响)
         AND NOT EXISTS (SELECT 1 FROM proto_settlement_intents s WHERE s.subject_type = 'market' AND s.subject_id = m.id AND s.step = 'resolve' AND s.status IN ('landed', 'ambiguous'))
       ORDER BY m.created_at ASC LIMIT ?`).all(limit)) advances.push({ step: 'close_commit', subjectId: r.id, marketId: r.id });
     for (const r of db.prepare(`
@@ -94,6 +96,7 @@ export function createSettlementStore({ db = sqlite, claimIdFn = newClaimId, ens
     if (step === 'close_commit') {
       const m = marketOf(marketId);
       if (!m || m.status !== 'sealed') return { ok: false, reason: 'market_not_sealed' };
+      if (m.settlement_frozen_at !== null && m.settlement_frozen_at !== undefined) return { ok: false, reason: 'settlement_frozen' };   // 批 D D1 入口②: 重读冻结列(listWork 选行与这里之间可能已冻)
       if (m.winning_side !== 0 && m.winning_side !== 1) return { ok: false, reason: 'winning_side_not_set' };
       return landed('market', marketId, 'seal') ? { ok: true } : { ok: false, reason: 'seal_not_landed' };
     }
@@ -145,5 +148,8 @@ export function createSettlementStore({ db = sqlite, claimIdFn = newClaimId, ens
     return tx();
   }
 
-  return { listWork, dependenciesLanded, markLanded, sealReady, _claimOf: claimOf, _marketOf: marketOf };
+  /** 批 D D1 入口③的数据源(核心广播前闸调用): 读失败 / 市场不存在 ⇒ 抛(核心按冻结处理, fail-closed)。 */
+  const isSettlementFrozen = async (marketId) => isMarketFrozen(db, marketId);
+
+  return { listWork, dependenciesLanded, markLanded, sealReady, isSettlementFrozen, _claimOf: claimOf, _marketOf: marketOf };
 }

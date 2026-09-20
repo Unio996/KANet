@@ -887,6 +887,15 @@ M0c-1 app provision grant registry（2026-07-23, 设计 `docs/2026-07-23-m0c-1-a
   - 🟡 **诚实边界**：触发器防应用/运维失误与手写 SQL，**不防能 DROP TRIGGER / 伪造 verdict 行的机器写权**（设计 §10 R1 末句）。已存在的老行（如主网首轮市场 a59c，winning_side 已有值而审计列 NULL）照常运转：值不可再改、不可删、status 照常推进；**其审计列（source/set_at/verdict_id）因"有值后审计列不可改"而永远停在 NULL，不可补写——runbook 已知事项，不是缺陷**。
   - **测试/变异**：`kasia-console/src/db/proto-winning-side-triggers-v212.test.mjs`（22 例）+ `docs/provenance/2026-09-20-j2-oracle-batchA-db-defense/`（65 个变异全杀）。同笔改的 6 个测试夹具（winning_side 写法 / INSERT OR IGNORE 重复播种）见该目录 NOTE。
 
+- **v213（2026-09-20，J2 · oracle 整合批 D，设计 `docs/2026-09-20-bettor-oracle-batchD-grace-refundflip-budget-design-v0.1.md` v0.3 §3/§7/§8 N1·N5，NWT 设计审两轮 GREEN）——冻结列 + verdicts.pmt_at + 触发器**：
+  - **`proto_markets.settlement_frozen_at INTEGER` + `frozen_reason TEXT`**（可空，老行 NULL）：冻结 = 该市场结算不再前进（close_commit 三入口 fail-closed：`listWork` 选行 / `dependenciesLanded` 重读 / 核心广播前闸重读；已 prepared 的意图不受影响）。冻结时刻取 pmt，pmt 无效退墙钟毫秒；`frozen_reason` 恒为 `<reason>|clock=<pmt|wall>`（非空、不可改）。**单向不可撤**；冻结后 `winning_side` 永不可写 ⇒ 判定题市场唯一出口 = 自然 refund_flip（N5b，refund 执行批未接线前有价值市场不得上主网）。
+  - **`proto_market_verdicts.pmt_at INTEGER`**（N1）：verdict 写入时刻的 pmt（毫秒，INSERT 写，批 A append-only 保写后不可改）；**NULL 的 verdict 不计一致性、不可被 `winning_side_verdict_id` 引用**（`trg_pm_ws_r1_verdict_ref` 在 v213 重建，加 `v.pmt_at IS NOT NULL`）。
+  - **触发器（7 个新 + 1 个重建）**：`trg_pm_d_frozen_insert_null`（INSERT 必 NULL）/ `_frozen_domain`（正整数）/ `_frozen_one_way`（不可改不可清，reason 同）/ `_frozen_reason_required`（冻结必带非空白 reason）/ `_reason_needs_frozen`（reason 不脱离冻结）/ `_frozen_no_winning_side`（D2：冻结市场——或同一语句冻结——禁写 winning_side）/ `trg_pmv_d_pmt_at_domain`（pmt_at 正整数或 NULL）。🟡 冻结可发生在 winning_side 已写之后（应急停 close_commit，不撤已写值）——批 D 不禁；D2 只禁"冻结之后写 winning_side"。
+  - **写入方 / 读取方**：`lib/proto-settlement-freeze.mjs`（freezeMarket / applyLateSealGuard / promoteWinningSide，db 注入）；读：store.listWork / dependenciesLanded、核心广播前闸、批 B adapter（未来）。`lib/proto-settlement-budget.mjs` 是纯逻辑（预算常量 / pmt 有效性 / promote 门 / 晚 seal / 受理门）。"有判定题"的唯一定义在 `db/proto-judged.mjs`（批 A 触发器 SQL 与批 D JS 判据共用）。
+  - **受理点门**：HTTP bet 路由受理时刻，判定题 ∧ outcome_end 有限 ∧ **max(墙钟, pmt) ≥ outcome_end ⇒ 拒（409）**（pmt 落后墙钟 2.3–10 分钟，只看 pmt 会在墙钟已过 outcome_end 后继续收注；偏差只多拒不多收）；判定题 ∧ outcome_end 空 ⇒ 拒（409）；判定题受理时 pmt 无效 / 读不到 ⇒ 拒（503，fail-closed）；无判定题豁免且不读 pmt。**不在驱动**：已受理注的 append 不受影响（N4）。
+  - **运行时依赖**：pmt 有效性要 relay 的 `get_past_median_time` 回 `isSynced`（批 D 在 relay 侧加了这一个布尔字段）——**relay 未升级时判定题受理一律 fail-closed（`is_synced_missing`），无判定题市场与既有 close_commit 门不受影响**。
+  - **测试/变异**：`db/proto-settlement-freeze-v213.test.mjs`（13 例）、`lib/proto-settlement-budget.test.mjs`（19 例）、`lib/proto-bet-intake.test.mjs`（5）、`api/proto-bet-intake-route.test.mjs`（路由接线）+ 扩展 core / store / service / relay 测试；`docs/provenance/2026-09-20-j2-oracle-batchD/`（115 变异 114 杀 + 1 个记录在案的等价变异）。
+
 **已知限制（不得漂成"已处理"，任何引用本条目须原样带走）**：① T-PROTO-BETTORPK-BINDING——`register_append` 的 `bettorPk` witness 参数与被消费的代币输入之间无签名绑定，v0 单操作员场景接受，**任何第二方参与前必须先修**；② T-ORPHAN-CHIP-RECOVERY-ENTRY——见上 `proto_bets` 说明，合约层缺口非本轮范围。
   > 📌 **状态注记（2026-09-15 · J2 · 账本1435/1436 bet_mint 步骤A落码 · 并入②不改原文）**：bet_mint 步骤A新铸 stake 筹码的 `owner` 字段裁定为 `STAKE_CHIP_OWNER_UNBOUND`（全零32字节，见 `kasia-console/src/lib/proto-covenant-builder.mjs`）——起因是"owner=它自己的covenant_id(自持有)"被证明是自指不动点方程无解（真实 rusty-kaspa `consensus/core/src/hashing/covenant_id.rs` 把输出完整脚本字节喂进哈希，含 owner 自身，见 `docs/provenance/2026-09-15-j2-stake-chip-owner-unbound-verification/`）。代价：步骤A落链后、步骤B广播前的窗口，任何人可用任意非covenant输入冒充在场把这枚筹码花掉，导致孤儿化——但攻击者所得与自己免费铸一份等价，无真实损失路径，**并入本条 T-ORPHAN-CHIP-RECOVERY-ENTRY**，v0 接受。🔴 该取舍只在"KTT是零价值测试币"前提下成立，KTT 若承载真实价值必须重做。
   > 📌 **状态注记（2026-09-15 · J2 · D-020 账本1446/1448/a4878d7d · v208 · 上面①③④段大量内容因此过期，不改原文，补此条）**：上面 ① `proto_bets`/② `proto_bet_intents` 两段描述的"铸筹码 genesis + `register_append` spend 两步复合动作"、③段的 `STAKE_CHIP_OWNER_UNBOUND` 设计、以及紧邻上方的孤儿化代价说明，**全部被 D-020 取代**——NWT 用真实 cli-debugger 证明 `STAKE_CHIP_OWNER_UNBOUND`（ZERO32）owner 的筹码不只是"能被孤儿化"，而是**能被任意第三方连本带锁定的真实 KAS 一起偷走**（推翻账本1436"无损失"判断，见 `docs/provenance/2026-09-15-j2-d020-register-append-single-tx-verification/`），Owner 裁定取消步骤A、下注改单笔交易（v208 迁移）：
@@ -936,6 +945,8 @@ M0c-1 app provision grant registry（2026-07-23, 设计 `docs/2026-07-23-m0c-1-a
 > 注：v125–v156 尚未在本表逐条回填（r281 scope 外）；新增 migration 接 v157 之后。v176-v183、v185-v186 未逐条回填（各自设计稿/COORD-LEDGER 有账），本行版本号以 migrate.js 实际为准。
 
 ## 版本历史（近期）
+
+- **v213 (2026-09-20, J2 · oracle 整合批 D)**: `proto_markets` 加 `settlement_frozen_at` / `frozen_reason`，`proto_market_verdicts` 加 `pmt_at`；冻结单向 / D2（冻结禁写 winning_side）/ pmt_at 域 触发器 7 个 + 重建 verdict_ref（加 pmt_at 非空）。纯 schema + 冻结三入口 + 受理点门，无 promote 调用方（批 B）。
 
 - **v212 (2026-09-20, J2 · oracle 整合批 A)**: 新表 `proto_market_verdicts`（append-only）+ `proto_markets` 加审计列 3 + 判定题列 5 + winning_side 写一次 / operator 禁写判定题 / verdict 引用 / DELETE 守卫 / 题面不可改 触发器 17 个（详见上文 proto 段 v212 条目）。纯 schema，无写入方、无 adapter。
 

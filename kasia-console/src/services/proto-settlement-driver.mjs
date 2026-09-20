@@ -16,6 +16,8 @@ import { CLAIM_DRAW_CLAIM_OUT_INDEX } from '../lib/proto-tx-assembly-settlement.
 import { configuredNetwork, prefixForNetwork, addressPrefix } from '../../../shared/lib/kaspa-network.mjs';
 import { sqlite } from '../db/client.js';
 import { REORG_SAFE_MIN_DEPTH } from './proto-driver.mjs';
+import { resolveBudgetConfig, sharedPmtValidator, readValidatedPmt } from '../lib/proto-settlement-budget.mjs';
+import { applyLateSealGuard } from '../lib/proto-settlement-freeze.mjs';
 
 const DEFAULT_INTERVAL_MS = 60_000;      // tick 间隔; 每步总预算 = 间隔的一半(§19.3a), 且 ≥ MIN_STEP_BUDGET_MS(15 s)、< 间隔
 const DEFAULT_TICK_CAP = 3;
@@ -70,10 +72,21 @@ export async function driveSettlementOnce({ assertHealthyFn = assertProtoRelayHe
 }
 
 /**
+ * landed 记账端口(批 D §4): store.markLanded 之后, 若是 seal 且配了预算 ⇒ 跑晚 seal 守卫(含 effectsPending 重跑, 守卫幂等)——只对有判定题的市场生效; 守卫永不抛、失败不阻塞 seal 记账(promote 门会再判)。
+ */
+export function makeMarkLanded({ store, budget, sendCmd, relayId, db = sqlite, log = console }) {
+  return async (step, intent) => {
+    const r = store.markLanded(step, intent);
+    if (step === 'seal' && budget) await applyLateSealGuard({ db, marketId: intent.subject_id, readPmt: () => readValidatedPmt({ sendCmd, relayId, validator: sharedPmtValidator(budget.lagMaxMs) }), cfg: budget, log });
+    return r;
+  };
+}
+
+/**
  * 生产端口装配(每 tick 一次): 真实意图表 / 指针 / C1 / store + 步骤端口(ops: prepare / build / probeRefundFlip)。
  * ops 模块(lib/proto-settlement-ops.mjs)是四步 builder 的入参装配; 它不可用时【拒绝启动】(LOUD), 绝不带着半截端口跑钱路。
  */
-export async function buildProductionDriver({ health, network, ops, kaspa, sendCmd, relayId, tickIntervalMs }) {
+export async function buildProductionDriver({ health, network, ops, kaspa, sendCmd, relayId, tickIntervalMs, budget }) {
   const store = createSettlementStore({ claimDrawClaimOutIndex: CLAIM_DRAW_CLAIM_OUT_INDEX });
   const { Address } = kaspa;
   const relaySpkHex = '0x' + kaspa.payToAddressScript(new Address(health.address)).script;
@@ -87,7 +100,8 @@ export async function buildProductionDriver({ health, network, ops, kaspa, sendC
     pointers: (step, marketId) => resolveStepPointers({ step, marketId, db: sqlite, kaspa }),
     verifyOnChain: (o) => verifyStepInputsOnChain({ ...o, network, requestFacts, kaspa, relaySpkHex, budgetMs, tickIntervalMs, ipcTimeoutMs: MIN_FACTS_IPC_TIMEOUT_MS }),
     dependenciesLanded: async (step, ctx) => store.dependenciesLanded(step, ctx),
-    markLanded: async (step, intent) => store.markLanded(step, intent),
+    markLanded: makeMarkLanded({ store, budget, sendCmd, relayId }),
+    isSettlementFrozen: (marketId) => store.isSettlementFrozen(marketId),
     listWork: async () => store.listWork(),
     prepare: (step, ctx) => ops.prepare(step, { ...ctx, kaspa, network, relayAddress: health.address, relaySpkHex }),
     build: (step, ctx) => ops.build(step, { ...ctx, kaspa, network, relayAddress: health.address, relaySpkHex }),
@@ -99,7 +113,7 @@ export async function buildProductionDriver({ health, network, ops, kaspa, sendC
 async function defaultLoadOps() { return import('../lib/proto-settlement-ops.mjs'); }
 
 /** tick 体(setInterval 回调): ops 装载失败 ⇒ LOUD 拒绝并自停; 网络与 relay 前缀不符 ⇒ 自停(不是瞬时故障)。deps(kaspa / sendCmd / assertHealthyFn)可注入。 */
-export async function settlementTickBody({ relayId, loadOps, log, network, cap, intervalMs, kaspa, sendCmd, assertHealthyFn }) {
+export async function settlementTickBody({ relayId, loadOps, log, network, cap, intervalMs, budget, kaspa, sendCmd, assertHealthyFn }) {
   let ops;
   try { ops = await loadOps(); }
   catch (e) { log.error(`[proto-settlement-driver] REFUSED: 步骤端口(ops)不可用: ${e.message} — 驱动自停`); stopProtoSettlementDriver(); return { skipped: true, reason: 'ops_unavailable' }; }
@@ -107,7 +121,7 @@ export async function settlementTickBody({ relayId, loadOps, log, network, cap, 
   const send = sendCmd || (await import('../lib/proto-relay-ipc.mjs')).protoSendCmd;
   const r = await driveSettlementOnce({
     network, cap, log, ...(assertHealthyFn ? { assertHealthyFn } : {}),
-    buildDeps: ({ health }) => buildProductionDriver({ health, network, ops, kaspa: wasm, sendCmd: send, relayId, tickIntervalMs: intervalMs }),
+    buildDeps: ({ health }) => buildProductionDriver({ health, network, ops, kaspa: wasm, sendCmd: send, relayId, tickIntervalMs: intervalMs, budget }),
   });
   if (r && r.reason === 'network_mismatch') stopProtoSettlementDriver();
   return r;
@@ -122,9 +136,13 @@ export function startProtoSettlementDriver({ env = process.env, relayId = PROTO_
   let intervalMs;
   try { intervalMs = settlementIntervalMs(env); stepBudgetFor(intervalMs); }
   catch (e) { log.error(`[proto-settlement-driver] REFUSED to start: ${e.message}`); return; }
+  // 批 D N2: 预算常量校验——非法 env 回默认并 LOUD; 默认值自身与 tick 自相矛盾 ⇒ 拒启动
+  let budget;
+  try { const r = resolveBudgetConfig(env, { tickMs: intervalMs }); for (const w of r.warnings) log.error(`[proto-settlement-driver] BUDGET CONFIG (LOUD): ${w}`); budget = r.config; }
+  catch (e) { log.error(`[proto-settlement-driver] REFUSED to start: ${e.message}`); return; }
   _started = true;
   const cap = settlementTickCap(env);
-  _interval = setInterval(wrapTick('proto-settlement-driver.tick', () => settlementTickBody({ relayId, loadOps, log, network, cap, intervalMs, ...(deps || {}) }).catch((e) => log.error('[proto-settlement-driver] tick error:', e.message))), intervalMs);
+  _interval = setInterval(wrapTick('proto-settlement-driver.tick', () => settlementTickBody({ relayId, loadOps, log, network, cap, intervalMs, budget, ...(deps || {}) }).catch((e) => log.error('[proto-settlement-driver] tick error:', e.message))), intervalMs);
   log.log(`[proto-settlement-driver] started (tick ${intervalMs}ms, cap ${cap}/tick, network=${network})`);
   if (network !== 'mainnet') log.warn?.(`[proto-settlement-driver] NON-MAINNET network=${network}`);
 }

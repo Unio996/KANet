@@ -411,13 +411,35 @@ await t('H3 getUtxosByAddresses 抛错 / 返回空 entries: 抛错上抛; 空集
 });
 
 // ══ R2 get_past_median_time ═════════════════════════════════════════════════════════════════════
-await t('P1 只回恰好三个字段 {ok, pastMedianTimeMs, observedAtMs}; observedAtMs 在读回之后取; 不带任何节点标识/URL/daaScore/sink', async () => {
+await t('P1 只回恰好四个字段 {ok, pastMedianTimeMs, observedAtMs, isSynced}(批 D 新增 isSynced: 布尔或 null); observedAtMs 在读回之后取; 不带任何节点标识/URL/daaScore/sink', async () => {
   const order = [];
-  const rpc = { getBlockDagInfo: async () => { order.push('read'); return { pastMedianTime: 1758000000000, virtualDaaScore: '123', sink: 'ab'.repeat(32), networkName: 'simnet', url: 'ws://secret' }; } };
+  const rpc = { getServerInfo: async () => ({ isSynced: true, networkId: 'leak-me-not', url: 'ws://secret' }), getBlockDagInfo: async () => { order.push('read'); return { pastMedianTime: 1758000000000, virtualDaaScore: '123', sink: 'ab'.repeat(32), networkName: 'simnet', url: 'ws://secret' }; } };
   const r = await handleGetPastMedianTime({ getSharedRpc: async () => rpc, nowMs: () => { order.push('now'); return 1758000000123; } });
-  assert.deepStrictEqual(r, { ok: true, pastMedianTimeMs: 1758000000000, observedAtMs: 1758000000123 });
-  assert.deepStrictEqual(Object.keys(r), ['ok', 'pastMedianTimeMs', 'observedAtMs']);
+  assert.deepStrictEqual(r, { ok: true, pastMedianTimeMs: 1758000000000, observedAtMs: 1758000000123, isSynced: true });
+  assert.deepStrictEqual(Object.keys(r), ['ok', 'pastMedianTimeMs', 'observedAtMs', 'isSynced']);
   assert.deepStrictEqual(order, ['read', 'now']);
+});
+await t('P1b(批 D) isSynced 三态: 节点报 false ⇒ false; getServerInfo 抛错 / 缺方法 / 非布尔 ⇒ null(消费方 fail-closed); 任何一种都不影响 pastMedianTimeMs / observedAtMs 主读数(既有 close_commit 门不受影响)', async () => {
+  const mk = (serverInfo) => ({ getBlockDagInfo: async () => ({ pastMedianTime: 1758000000000 }), ...(serverInfo ? { getServerInfo: serverInfo } : {}) });
+  const run = (rpc) => handleGetPastMedianTime({ getSharedRpc: async () => rpc, nowMs: () => 1758000000123 });
+  assert.strictEqual((await run(mk(async () => ({ isSynced: false })))).isSynced, false);
+  assert.strictEqual((await run(mk(async () => { throw new Error('boom'); }))).isSynced, null);
+  assert.strictEqual((await run(mk(null))).isSynced, null);
+  assert.strictEqual((await run(mk(async () => ({ isSynced: 'yes' })))).isSynced, null);
+  assert.strictEqual((await run(mk(async () => ({})))).isSynced, null);
+  const r = await run(mk(async () => { throw new Error('boom'); })); assert.strictEqual(r.ok, true); assert.strictEqual(r.pastMedianTimeMs, 1758000000000); assert.strictEqual(r.observedAtMs, 1758000000123);
+});
+await t('P1c(批 D SHOULD) getServerInfo 与 getBlockDagInfo【并行】发起: 两个调用都在任一返回之前开始; 总耗时 ≈ max 而非 sum; getServerInfo 挂死(永不返回)只在其自身 deadline 到期后变 isSynced=null, 不拖慢 / 不拖垮 pmt 主读数', async () => {
+  const events = []; const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const rpc = { getServerInfo: async () => { events.push('si:start'); await sleep(60); events.push('si:end'); return { isSynced: true }; }, getBlockDagInfo: async () => { events.push('dag:start'); await sleep(60); events.push('dag:end'); return { pastMedianTime: 1758000000000 }; } };
+  const t0 = Date.now(); const r = await handleGetPastMedianTime({ getSharedRpc: async () => rpc, nowMs: () => 1758000000123 }); const dt = Date.now() - t0;
+  assert.strictEqual(r.isSynced, true); assert.deepStrictEqual(events.slice(0, 2), ['si:start', 'dag:start'], '两个调用应在任一返回前都已开始: ' + events.join(','));
+  assert.ok(dt < 110, '并行总耗时应≈60ms 而非≈120ms: ' + dt + 'ms');
+  const hung = { getServerInfo: () => new Promise(() => {}), getBlockDagInfo: async () => ({ pastMedianTime: 1758000000000 }) };
+  const t1 = Date.now(); const r2 = await handleGetPastMedianTime({ getSharedRpc: async () => hung, nowMs: () => 1758000000123, rpcCallMs: 50 }); const dt2 = Date.now() - t1;
+  assert.strictEqual(r2.ok, true); assert.strictEqual(r2.isSynced, null); assert.strictEqual(r2.pastMedianTimeMs, 1758000000000); assert.ok(dt2 >= 40 && dt2 < 400, 'getServerInfo 挂死 ⇒ 在其 deadline 内返回: ' + dt2 + 'ms');
+  // getBlockDagInfo 挂死才是硬失败(pmt 主读数拿不到 ⇒ 抛), getServerInfo 快速返回也救不了它
+  await assert.rejects(() => handleGetPastMedianTime({ getSharedRpc: async () => ({ getServerInfo: async () => ({ isSynced: true }), getBlockDagInfo: () => new Promise(() => {}) }), rpcCallMs: 40 }), /getBlockDagInfo|timeout|deadline/i);
 });
 await t('P2 pmt 不可用(0/负/NaN/undefined/字符串/小数/超安全整数)⇒ 抛 past_median_time_unavailable(fail-closed, 不回 ok:true); 共享 rpc 取不到 ⇒ 原样上抛', async () => {
   for (const bad of [0, -5, NaN, undefined, null, 'x', 1.5, 2 ** 60]) {

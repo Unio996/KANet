@@ -49,14 +49,14 @@ export const SETTLEMENT_ALERTS = Object.freeze({
   settlement_step_unexpected_error: 'error',
 });
 
-const REQUIRED_DEPS = ['sendCmd', 'relayId', 'alert', 'intents', 'driveIntent', 'pointers', 'prepare', 'verifyOnChain', 'build', 'dependenciesLanded', 'checkLanded', 'markLanded', 'listWork', 'minDepth', 'now'];
+const REQUIRED_DEPS = ['sendCmd', 'relayId', 'alert', 'intents', 'driveIntent', 'pointers', 'prepare', 'verifyOnChain', 'build', 'dependenciesLanded', 'checkLanded', 'markLanded', 'listWork', 'isSettlementFrozen', 'minDepth', 'now'];
 
 export class DriverDepsError extends TypeError {}
 function assertDeps(deps) {
   if (!deps || typeof deps !== 'object') throw new DriverDepsError('driver core: deps 必填');
   const missing = REQUIRED_DEPS.filter((k) => deps[k] === undefined || deps[k] === null);
   if (missing.length) throw new DriverDepsError(`driver core: deps 缺 ${missing.join(', ')}`);
-  for (const k of ['sendCmd', 'alert', 'driveIntent', 'pointers', 'prepare', 'verifyOnChain', 'build', 'dependenciesLanded', 'checkLanded', 'markLanded', 'listWork', 'now']) if (typeof deps[k] !== 'function') throw new DriverDepsError(`driver core: deps.${k} 必须是函数`);
+  for (const k of ['sendCmd', 'alert', 'driveIntent', 'pointers', 'prepare', 'verifyOnChain', 'build', 'dependenciesLanded', 'checkLanded', 'markLanded', 'listWork', 'isSettlementFrozen', 'now']) if (typeof deps[k] !== 'function') throw new DriverDepsError(`driver core: deps.${k} 必须是函数`);
   for (const k of ['ensure', 'active', 'get']) if (!deps.intents || typeof deps.intents[k] !== 'function') throw new DriverDepsError(`driver core: deps.intents.${k} 必须是函数`);
   if (!Number.isInteger(deps.minDepth) || deps.minDepth <= 0) throw new DriverDepsError('driver core: deps.minDepth 必须是正整数(没有默认值: 与 REORG_SAFE_MIN_DEPTH 同源, 由接线传入)');
 }
@@ -169,6 +169,9 @@ export function createSettlementDriver(deps, { ticksToError = 3 } = {}) {
             let pmtEvidence;
             if (step === 'close_commit') {
               stage = 'gate';
+              // 批 D D1 入口③: 广播前闸重读冻结列(在 pmt 门之前)。严格 fail-closed: 只有端口明确返回 false 才放行; true / 非布尔 / 抛错 / 市场不存在一律按冻结。
+              let frozen; try { frozen = await deps.isSettlementFrozen(marketId); } catch (fe) { frozen = true; log.log && log.log(`[settlement-driver] 冻结列读取失败(按冻结处理, fail-closed): ${fe && fe.message}`); }
+              if (frozen !== false) { const e = new Error(`close_commit_settlement_frozen: 市场 ${marketId} 已冻结(或冻结状态读不到)——结算不再前进, 唯一出口=自然 refund_flip`); e.code = 'close_commit_settlement_frozen'; throw e; }
               const gate = await checkPmtGate({ sendCmd: deps.sendCmd, relayId: deps.relayId, deadlineMs: prep.deadlineMs });
               pmtSla(key, gate);
               if (!gate.canSubmit) { const e = new Error(`close_commit_pmt_not_ready: ${gate.reason}`); e.code = 'close_commit_pmt_not_ready'; throw e; }
