@@ -1,0 +1,8 @@
+BASELINE
+wallet-simnet.test: 6 passed, 0 fail
+M-drop: wallet-simnet.test: 3 passed, 3 fail
+M-wrong: wallet-simnet.test: 5 passed, 1 fail
+M-mainnet: wallet-simnet.test: 4 passed, 2 fail
+M-loose: wallet-simnet.test: 4 passed, 2 fail
+RESTORED
+wallet-simnet.test: 6 passed, 0 fail

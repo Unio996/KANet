@@ -9,6 +9,7 @@ function getNetworkType(network) {
     case 'testnet-10':
     case 'testnet-11':
     case 'testnet-12': return NetworkType.Testnet;  // Phase 3a SS testnet (Bettor r193 5/19)
+    case 'simnet': return NetworkType.Simnet;        // 批9 9-4 隔离 simnet 端到端: relay 起不来(getAddress 抛 Unsupported network type: simnet)的唯一缺口; kaspa-wasm NetworkType.Simnet=3, 地址前缀 kaspasim
     default: throw new Error(`Unsupported network type: ${network}`);
   }
 }
