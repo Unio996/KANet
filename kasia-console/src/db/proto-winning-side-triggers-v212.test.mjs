@@ -56,13 +56,13 @@ const setWS = (id, side, source, { verdictId = null, setAt = NOW } = {}) =>
   sqlite.prepare('UPDATE proto_markets SET winning_side = ?, winning_side_source = ?, winning_side_set_at = ?, winning_side_verdict_id = ? WHERE id = ?').run(side, source, setAt, verdictId, id);
 const mkVerdict = (marketId, kind, outcome, extra = {}) => sqlite.prepare('INSERT INTO proto_market_verdicts (market_id, source_kind, relay_id, outcome, confidence, evidence_ref, created_at) VALUES (?,?,?,?,?,?,?)')
   .run(marketId, kind, extra.relay ?? null, outcome, extra.conf ?? null, extra.ev ?? 'ev:1', NOW).lastInsertRowid;
-const TRIGGERS = ['trg_pmv_append_only_update', 'trg_pmv_append_only_delete', 'trg_pm_ws_r1_insert_existing_id', 'trg_pm_ws_r1_insert_null', 'trg_pm_ws_r1_write_once', 'trg_pm_ws_r1_value_domain',
+const TRIGGERS = ['trg_pmv_append_only_update', 'trg_pmv_append_only_delete', 'trg_pmv_insert_existing_id', 'trg_pm_ws_r1_insert_existing_id', 'trg_pm_ws_r1_insert_null', 'trg_pm_ws_r1_write_once', 'trg_pm_ws_r1_value_domain',
   'trg_pm_ws_r1_status_sealed', 'trg_pm_ws_r1_source_required', 'trg_pm_ws_r1_set_at_required', 'trg_pm_ws_r1_operator_no_judged', 'trg_pm_ws_r1_operator_no_verdict', 'trg_pm_ws_r1_verdict_ref',
   'trg_pm_ws_r1_audit_needs_value', 'trg_pm_ws_r1_audit_immutable', 'trg_pm_ws_r1_delete_guard', 'trg_pm_r4_question_immutable'];
 const JUDGED_COLS = [['resolution_rule_spec', '{"rule":1}'], ['outcome_market_source', 'polymarket'], ['outcome_condition_id', '0xabc'], ['outcome_oracle_relay_ids', '["r1","r2"]']];
 
 // ══ S 系列: 结构 ═══════════════════════════════════════════════════════════════════════════════════
-await t('S1 结构: verdicts 表 + 9 个新列 + 16 个触发器全在; 迁移幂等(同库再跑一次不抛、触发器数不变)', async () => {
+await t('S1 结构: verdicts 表 + 8 个新列 + 17 个触发器全在; 迁移幂等(同库再跑一次不抛、触发器数不变)', async () => {
   const cols = sqlite.prepare('PRAGMA table_info(proto_markets)').all().map((c) => c.name);
   for (const c of ['winning_side_source', 'winning_side_set_at', 'winning_side_verdict_id', 'outcome_oracle_relay_ids', 'resolution_rule_spec', 'outcome_market_source', 'outcome_condition_id', 'outcome_end_ms']) ok(cols.includes(c), c);
   const vcols = sqlite.prepare('PRAGMA table_info(proto_market_verdicts)').all().map((c) => c.name);
@@ -167,6 +167,11 @@ await t('V1 ▲ 伪造 / 错配 verdict ⇒ ABORT: 无 verdict_id / 指向不存
     aborts(() => setWS(id, 1, src, { verdictId: mkVerdict(id, 'llm', 1) }), /requires winning_side_verdict_id/, `${src} 引用 llm 判定`);
     eq(row(id).winning_side, null, src);
   }
+  // B2: outcome=NULL(弃权 / 异议)的 verdict 永远不能被引用提升(NULL 不等于任何值)
+  for (const src of ['extractor', 'uma', 'human']) for (const side of [0, 1]) {
+    const id = mkMarket({ status: 'sealed', resolution_rule_spec: 'r' }); const nv = mkVerdict(id, src, null, { ev: 'abstain' });
+    aborts(() => setWS(id, side, src, { verdictId: nv }), /requires winning_side_verdict_id/, `${src}/${side} 引用 NULL 判定`); eq(row(id).winning_side, null);
+  }
 });
 await t('V2 合法提升: extractor / uma / human 各引用同市场同值同类 verdict ⇒ 成功(判定题市场也行), 落审计列', async () => {
   for (const [src, side] of [['extractor', 1], ['uma', 0], ['human', 1]]) {
@@ -181,13 +186,18 @@ await t('V2 合法提升: extractor / uma / human 各引用同市场同值同类
 });
 
 // ══ D 系列: verdicts 表本身 ═══════════════════════════════════════════════════════════════════════
+await t('V3 🟡 已知边界(设计 §10 R1 末句, 明写不是缺陷): 触发器只查 verdict 的结构(同市场 / 同值 / 同类), 不验其真实性——有机器写权的人可先伪造一条 source_kind=human 的 verdict 行再引用它写 winning_side; 这条测试把该边界钉成文字, 不是声称防住了它', async () => {
+  const id = mkMarket({ status: 'sealed', resolution_rule_spec: 'r' });
+  const forged = mkVerdict(id, 'human', 1, { ev: 'forged-by-anyone-with-write-access' });
+  eq(setWS(id, 1, 'human', { verdictId: forged }).changes, 1, '伪造的 human verdict 能被引用——真实性由(批 B 之后)带鉴权的 human 入口 + 审计负责, 不在批 A');
+});
 await t('D1 verdicts append-only: UPDATE / DELETE 一律 ABORT; 行不变', async () => {
   const id = mkMarket({ status: 'sealed' }); const v = mkVerdict(id, 'llm', 1);
   aborts(() => sqlite.prepare('UPDATE proto_market_verdicts SET outcome = 0 WHERE id = ?').run(v), /append-only/, 'UPDATE');
   aborts(() => sqlite.prepare('DELETE FROM proto_market_verdicts WHERE id = ?').run(v), /append-only/, 'DELETE');
   eq(sqlite.prepare('SELECT outcome FROM proto_market_verdicts WHERE id = ?').get(v).outcome, 1);
 });
-await t('D2 verdicts 列约束: outcome∉{0,1} / source_kind 非法 / confidence 越界 / evidence_ref 空白或 NULL / market_id 不存在 ⇒ 拒', async () => {
+await t('D2 verdicts 列约束: outcome∉{0,1,NULL} / source_kind 非法 / confidence 越界 / evidence_ref 空白或 NULL / market_id 不存在 ⇒ 拒; outcome=NULL(弃权 / 异议)合法且 evidence_ref 仍必填', async () => {
   const id = mkMarket({ status: 'sealed' });
   const ins = (kind, outcome, conf, ev, mid = id) => sqlite.prepare('INSERT INTO proto_market_verdicts (market_id, source_kind, outcome, confidence, evidence_ref, created_at) VALUES (?,?,?,?,?,?)').run(mid, kind, outcome, conf, ev, NOW);
   aborts(() => ins('extractor', 2, null, 'e'), /CHECK/, 'outcome=2'); aborts(() => ins('bogus', 1, null, 'e'), /CHECK/, 'kind');
@@ -195,6 +205,21 @@ await t('D2 verdicts 列约束: outcome∉{0,1} / source_kind 非法 / confidenc
   aborts(() => ins('llm', 1, null, '   '), /CHECK/, 'ev 空白'); aborts(() => ins('llm', 1, null, null), /NOT NULL|CHECK/, 'ev NULL');
   aborts(() => ins('llm', 1, null, 'e', 'no-such-market'), /FOREIGN KEY/, '不存在的市场');
   ins('llm', 1, 0.5, 'ok');   // 合法对照
+  ins('extractor', null, null, 'abstain: 源未定稿'); ins('llm', null, 0.2, 'dispute: 委员异议');   // B2: NULL = 弃权 / 异议
+  aborts(() => ins('extractor', null, null, '  '), /CHECK/, 'NULL outcome 也必须带 evidence_ref');
+});
+
+await t('D3 ▲ B1 verdicts 对已存在 id 的任何 INSERT 变体 ABORT(普通 / OR IGNORE / OR REPLACE / REPLACE INTO / upsert DO UPDATE / DO NOTHING), 被引用的判定行分毫不动(outcome / 证据 / 类别)', async () => {
+  const id = mkMarket({ status: 'sealed', resolution_rule_spec: 'r' }); const vid = Number(mkVerdict(id, 'extractor', 1, { ev: 'ev:original' }));
+  setWS(id, 1, 'extractor', { verdictId: vid });   // 该 verdict 已被 winning_side_verdict_id 引用
+  const snap = JSON.stringify(sqlite.prepare('SELECT * FROM proto_market_verdicts WHERE id = ?').get(vid));
+  const ins = (verb, tail = '') => sqlite.prepare(`${verb} proto_market_verdicts (id, market_id, source_kind, outcome, evidence_ref, created_at) VALUES (?,?,?,?,?,?) ${tail}`).run(vid, id, 'human', 0, 'ev:forged', NOW);
+  for (const [name, fn] of [['INSERT', () => ins('INSERT INTO')], ['INSERT OR IGNORE', () => ins('INSERT OR IGNORE INTO')], ['INSERT OR REPLACE', () => ins('INSERT OR REPLACE INTO')], ['REPLACE INTO', () => ins('REPLACE INTO')],
+    ['upsert DO UPDATE', () => ins('INSERT INTO', 'ON CONFLICT(id) DO UPDATE SET outcome = excluded.outcome, evidence_ref = excluded.evidence_ref')], ['upsert DO NOTHING', () => ins('INSERT INTO', 'ON CONFLICT(id) DO NOTHING')]]) {
+    aborts(fn, /INSERT onto an existing id/, name);
+    eq(JSON.stringify(sqlite.prepare('SELECT * FROM proto_market_verdicts WHERE id = ?').get(vid)), snap, `${name} 后 verdict 行应逐字段不变`);
+  }
+  eq(Number(row(id).winning_side_verdict_id), vid);
 });
 
 // ══ X 系列: DELETE 守卫 ═══════════════════════════════════════════════════════════════════════════
@@ -232,9 +257,12 @@ await t('Q2 ▲ 锁后一律拒改(六列 × 各锁因): status 出了 pending/p
     const id = mk(); aborts(() => sqlite.prepare(`UPDATE proto_markets SET ${c} = ? WHERE id = ?`).run(v, id), /immutable after genesis/, `${why}:${c}`);
   }
 });
-await t('Q3 ▲ 锁后 NULL→值 / 值→NULL 也拒(不能事后给市场加判定题, 也不能事后摘掉); 锁后其它列(updated_at / status 推进)照常更新', async () => {
-  const a = mkMarket({ status: 'betting' }); aborts(() => sqlite.prepare("UPDATE proto_markets SET resolution_rule_spec = 'late' WHERE id = ?").run(a), /immutable after genesis/, 'NULL→值');
-  const b = mkMarket({ status: 'betting', resolution_rule_spec: 'r' }); aborts(() => sqlite.prepare('UPDATE proto_markets SET resolution_rule_spec = NULL WHERE id = ?').run(b), /immutable after genesis/, '值→NULL');
+await t('Q3 ▲ 锁后 NULL→值 / 值→NULL 也拒, 六列逐个(不能事后给市场加题面 / 判定题, 也不能事后摘掉); 锁后其它列(updated_at / status 推进)照常更新', async () => {
+  for (const [c, v] of QCOLS) {
+    const a = mkMarket({ status: 'betting', ...(c === 'question' ? { question: null } : {}) }); aborts(() => sqlite.prepare(`UPDATE proto_markets SET ${c} = ? WHERE id = ?`).run(v, a), /immutable after genesis/, `${c} NULL→值`);
+    const b = mkMarket({ status: 'betting', [c]: v }); aborts(() => sqlite.prepare(`UPDATE proto_markets SET ${c} = NULL WHERE id = ?`).run(b), /immutable after genesis/, `${c} 值→NULL`);
+  }
+  const b = mkMarket({ status: 'betting', resolution_rule_spec: 'r' });
   eq(sqlite.prepare("UPDATE proto_markets SET updated_at = ?, status = 'sealed' WHERE id = ?").run(NOW, b).changes, 1);
 });
 await t('Q4 ▲ "改题面后再写值"链路: 锁后无法先把判定题摘掉再让 operator 写 winning_side(摘除被 R4 拒 ⇒ operator 写仍被 R1 拒)', async () => {

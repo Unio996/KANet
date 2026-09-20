@@ -6394,7 +6394,7 @@ export function runMigrations() {
           market_id     TEXT NOT NULL REFERENCES proto_markets(id),
           source_kind   TEXT NOT NULL CHECK (source_kind IN ('extractor','uma','llm','human')),
           relay_id      TEXT,
-          outcome       INTEGER NOT NULL CHECK (outcome IN (0,1)),
+          outcome       INTEGER CHECK (outcome IS NULL OR outcome IN (0,1)),   -- NULL = 弃权 / 异议(设计 M5·R2 的一等公民); 提升触发器 v.outcome = NEW.winning_side 对 NULL 永不成立 ⇒ NULL 判定永远不能被引用提升
           confidence    REAL CHECK (confidence IS NULL OR (confidence >= 0 AND confidence <= 1)),
           evidence_ref  TEXT NOT NULL CHECK (length(trim(evidence_ref)) > 0),
           created_at    TEXT NOT NULL
@@ -6416,6 +6416,8 @@ export function runMigrations() {
       // ── verdicts: append-only ──
       T.push(TRIG('trg_pmv_append_only_update', 'BEFORE', 'UPDATE', 'proto_market_verdicts', null, 'proto_market_verdicts: append-only (UPDATE forbidden)'));
       T.push(TRIG('trg_pmv_append_only_delete', 'BEFORE', 'DELETE', 'proto_market_verdicts', null, 'proto_market_verdicts: append-only (DELETE forbidden)'));
+      // B1(NWT 审批 A): REPLACE 会隐式删旧行而不触发 DELETE 触发器(recursive_triggers 默认关) ⇒ 在 INSERT 侧堵: 对已存在 id 的任何 INSERT 变体(OR REPLACE / REPLACE INTO / upsert)一律 ABORT
+      T.push(TRIG('trg_pmv_insert_existing_id', 'BEFORE', 'INSERT', 'proto_market_verdicts', 'EXISTS (SELECT 1 FROM proto_market_verdicts WHERE id = NEW.id)', 'proto_market_verdicts: append-only (INSERT onto an existing id is forbidden; REPLACE would rewrite a referenced verdict)'));
       // ── R1: INSERT ──
       T.push(TRIG('trg_pm_ws_r1_insert_existing_id', 'BEFORE', 'INSERT', 'proto_markets', 'EXISTS (SELECT 1 FROM proto_markets WHERE id = NEW.id)', 'proto_markets: INSERT onto an existing id is forbidden (INSERT OR REPLACE would wipe winning_side)'));
       T.push(TRIG('trg_pm_ws_r1_insert_null', 'BEFORE', 'INSERT', 'proto_markets', 'NEW.winning_side IS NOT NULL OR NEW.winning_side_source IS NOT NULL OR NEW.winning_side_set_at IS NOT NULL OR NEW.winning_side_verdict_id IS NOT NULL', 'proto_markets: winning_side and its audit columns must be NULL at INSERT (write-once via sealed-market UPDATE only)'));
