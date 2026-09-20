@@ -1,0 +1,80 @@
+{
+ "market": {
+  "id": "a59c7b483caafddadd0dae5f6811129396cda49415405bbc1c984a9ff1882a79",
+  "status": "resolved",
+  "winning_side": 1,
+  "seal_count": 2,
+  "min_bet": 1,
+  "deadline_ms": 1789500897806
+ },
+ "bets": [
+  {
+   "id": "3aa68511",
+   "side": 0,
+   "stake": 1,
+   "status": "confirmed",
+   "ticket_txid": "57439ad46dd84573e593a064d7924c31dceb4973a404291a211d9f3b0d29491b"
+  },
+  {
+   "id": "1da0f4c9",
+   "side": 1,
+   "stake": 1000,
+   "status": "confirmed",
+   "ticket_txid": "04553cfdd2d9641738864d6c3d09eff21d64494c83d0c8554c6e1ef7b4fd83f9"
+  }
+ ],
+ "intents": [
+  {
+   "intent_key": "settle:market:a59c7b483caafddadd0dae5f6811129396cda49415405bbc1c984a9ff1882a79:seal",
+   "status": "landed",
+   "submitted_txid": "18a01701ec633fa62e1f75e7728e9c2a77deb3d855f8e1db38cf8355d6be284e",
+   "landed_at": "2026-09-20T09:49:52.919Z",
+   "last_error": null
+  },
+  {
+   "intent_key": "settle:market:a59c7b483caafddadd0dae5f6811129396cda49415405bbc1c984a9ff1882a79:resolve",
+   "status": "landed",
+   "submitted_txid": "c832e532aefea360a1177b5e9a67a98abf60e1193a035036249640dc414c8f42",
+   "landed_at": "2026-09-20T09:51:12.960Z",
+   "last_error": null
+  },
+  {
+   "intent_key": "settle:claim:c864077f7ac328b38c399fb80176f9f5f9c816c631c30ebba2f005b6bcc28d9a:convert_to_claim",
+   "status": "landed",
+   "submitted_txid": "da109e35ff795d24c54903d529f466969754c42bbca307183fa0c78bf2d24a70",
+   "landed_at": "2026-09-20T09:51:52.980Z",
+   "last_error": null
+  },
+  {
+   "intent_key": "settle:claim:c864077f7ac328b38c399fb80176f9f5f9c816c631c30ebba2f005b6bcc28d9a:claim_draw",
+   "status": "landed",
+   "submitted_txid": "1608804e5264cf50b6b674dd69a87f7520ea82d6f62a31a86cb84963b84ffe18",
+   "landed_at": "2026-09-20T09:52:32.993Z",
+   "last_error": null
+  }
+ ],
+ "betIntents": [
+  {
+   "intent_key": "proto-bet:1da0f4c9-7303-45ab-a113-3f3573355930:append",
+   "status": "landed",
+   "submitted_txid": "04553cfdd2d9641738864d6c3d09eff21d64494c83d0c8554c6e1ef7b4fd83f9",
+   "landed_at": "2026-09-20T09:49:12.904Z"
+  }
+ ],
+ "claims": [
+  {
+   "id": "c864077f7ac328b38c399fb80176f9f5f9c816c631c30ebba2f005b6bcc28d9a",
+   "market_id": "a59c7b483caafddadd0dae5f6811129396cda49415405bbc1c984a9ff1882a79",
+   "amount": 1001,
+   "claim_txid": "1608804e5264cf50b6b674dd69a87f7520ea82d6f62a31a86cb84963b84ffe18",
+   "claimed_at": "2026-09-20T09:52:32.993Z"
+  }
+ ],
+ "errorsSince0948": [
+  {
+   "created_at": "2026-09-20T09:50:53.050Z",
+   "event_type": "settlement_close_commit_refund_flip_open",
+   "summary": "settle:market:a59c7b483caafddadd0dae5f6811129396cda49415405bbc1c984a9ff1882a79:resolve: pmt 领先 deadline 396817582ms"
+  }
+ ]
+}

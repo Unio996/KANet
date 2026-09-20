@@ -1,0 +1,78 @@
+{
+ "listeners": [
+  "127.0.0.1"
+ ],
+ "routeStatus": 200,
+ "market": [
+  {
+   "id": "a59c7b483caafddadd0dae5f6811129396cda49415405bbc1c984a9ff1882a79",
+   "status": "resolved",
+   "winning_side": 1,
+   "seal_count": 2,
+   "min_bet": 1
+  }
+ ],
+ "bets": [
+  {
+   "id": "3aa68511",
+   "side": 0,
+   "stake": 1,
+   "status": "confirmed"
+  },
+  {
+   "id": "1da0f4c9",
+   "side": 1,
+   "stake": 1000,
+   "status": "confirmed"
+  }
+ ],
+ "settlementIntents": [
+  {
+   "k": "settle:market:a59c7b483caafddadd0dae5f6811129396cda49415405b",
+   "status": "landed",
+   "last_error": null
+  },
+  {
+   "k": "settle:market:a59c7b483caafddadd0dae5f6811129396cda49415405b",
+   "status": "landed",
+   "last_error": null
+  },
+  {
+   "k": "settle:claim:c864077f7ac328b38c399fb80176f9f5f9c816c631c30eb",
+   "status": "landed",
+   "last_error": null
+  },
+  {
+   "k": "settle:claim:c864077f7ac328b38c399fb80176f9f5f9c816c631c30eb",
+   "status": "landed",
+   "last_error": null
+  }
+ ],
+ "recentErrors": [
+  {
+   "created_at": "2026-09-20T09:50:53.050Z",
+   "event_type": "settlement_close_commit_refund_flip_open"
+  },
+  {
+   "created_at": "2026-09-15T15:23:18.710Z",
+   "event_type": "bet_intent_ambiguous_inputs_spent"
+  }
+ ],
+ "node": {
+  "networkId": "mainnet",
+  "isSynced": true
+ },
+ "relay": {
+  "utxoCount": 7,
+  "totalKAS": 2.5609,
+  "KAS": [
+   0.95,
+   0.8445,
+   0.2791,
+   0.1973,
+   0.1166,
+   0.0867,
+   0.0867
+  ]
+ }
+}

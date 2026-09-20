@@ -1,0 +1,21 @@
+[proto-driver] started (tick 20000ms, cap 5/tick)
+[proto-settlement-driver] started (tick 20000ms, cap 3/tick, network=mainnet)
+[relay:proto-v0-funds] 9/20/2026, 16:49:04 COVENANT_BROADCAST proto-bet:1da0f4c9-7303-45ab-a113-3f3573355930:append prepared txid 04553cfdd2d9 (bytes persisted at console) → broadcasting
+[relay:proto-v0-funds] 9/20/2026, 16:49:04 COVENANT_BROADCAST(intent proto-bet:1da0f4c9-7303-45ab-a113-3f3573355930:append) TX: 04553cfdd2d9641738864d6c3d09eff21d64494c83d0c8554c6e1ef7b4fd83f9
+[proto-driver] tick 2: {"actioned":1,"genesisAdvanced":0,"genesisLandedChecked":0,"genesisLanded":0,"betAppendAdvanced":0,"betAppendLandedChecked":1,"betAppendLanded":1,"errored":0,"held":0}
+[relay:proto-v0-funds] 9/20/2026, 16:49:33 COVENANT_BROADCAST settle:market:a59c7b483caafddadd0dae5f6811129396cda49415405bbc1c984a9ff1882a79:seal prepared txid 18a01701ec63 (bytes persisted at console) → broadcasting
+[relay:proto-v0-funds] 9/20/2026, 16:49:33 COVENANT_BROADCAST(intent settle:market:a59c7b483caafddadd0dae5f6811129396cda49415405bbc1c984a9ff1882a79:seal) TX: 18a01701ec633fa62e1f75e7728e9c2a77deb3d855f8e1db38cf8355d6be284e
+[proto-settlement-driver] tick 3: {"actioned":1,"landed":0,"submitted":1,"waiting":0,"gated":0,"held":0,"failed":0}
+[proto-settlement-driver] tick 4: {"actioned":2,"landed":1,"submitted":0,"waiting":0,"gated":0,"held":0,"failed":0}
+[relay:proto-v0-funds] 9/20/2026, 16:50:53 COVENANT_BROADCAST settle:market:a59c7b483caafddadd0dae5f6811129396cda49415405bbc1c984a9ff1882a79:resolve prepared txid c832e532aefe (bytes persisted at console) → broadcasting
+[relay:proto-v0-funds] 9/20/2026, 16:50:53 COVENANT_BROADCAST(intent settle:market:a59c7b483caafddadd0dae5f6811129396cda49415405bbc1c984a9ff1882a79:resolve) TX: c832e532aefea360a1177b5e9a67a98abf60e1193a035036249640dc414c8f42
+[proto-settlement-driver] tick 7: {"actioned":1,"landed":0,"submitted":1,"waiting":0,"gated":0,"held":0,"failed":0}
+[proto-settlement-driver] tick 8: {"actioned":2,"landed":1,"submitted":0,"waiting":0,"gated":0,"held":0,"failed":0}
+[relay:proto-v0-funds] 9/20/2026, 16:51:33 COVENANT_BROADCAST settle:claim:c864077f7ac328b38c399fb80176f9f5f9c816c631c30ebba2f005b6bcc28d9a:convert_to_claim prepared txid da109e35ff79 (bytes persisted at console) → broadcasting
+[relay:proto-v0-funds] 9/20/2026, 16:51:33 COVENANT_BROADCAST(intent settle:claim:c864077f7ac328b38c399fb80176f9f5f9c816c631c30ebba2f005b6bcc28d9a:convert_to_claim) TX: da109e35ff795d24c54903d529f466969754c42bbca307183fa0c78bf2d24a70
+[proto-settlement-driver] tick 9: {"actioned":1,"landed":0,"submitted":1,"waiting":0,"gated":0,"held":0,"failed":0}
+[proto-settlement-driver] tick 10: {"actioned":2,"landed":1,"submitted":0,"waiting":0,"gated":0,"held":0,"failed":0}
+[relay:proto-v0-funds] 9/20/2026, 16:52:13 COVENANT_BROADCAST settle:claim:c864077f7ac328b38c399fb80176f9f5f9c816c631c30ebba2f005b6bcc28d9a:claim_draw prepared txid 1608804e5264 (bytes persisted at console) → broadcasting
+[relay:proto-v0-funds] 9/20/2026, 16:52:13 COVENANT_BROADCAST(intent settle:claim:c864077f7ac328b38c399fb80176f9f5f9c816c631c30ebba2f005b6bcc28d9a:claim_draw) TX: 1608804e5264cf50b6b674dd69a87f7520ea82d6f62a31a86cb84963b84ffe18
+[proto-settlement-driver] tick 11: {"actioned":1,"landed":0,"submitted":1,"waiting":0,"gated":0,"held":0,"failed":0}
+[proto-settlement-driver] tick 12: {"actioned":2,"landed":1,"submitted":0,"waiting":0,"gated":0,"held":0,"failed":0}
