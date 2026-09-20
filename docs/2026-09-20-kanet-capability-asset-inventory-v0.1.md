@@ -34,7 +34,7 @@
 | Relay | `kasia-relay/` | 每身份一子进程、持密钥 | **在跑** · 90 文件，今天动过 |
 | Scout | `kaspa-scout/` | Console 拉起的单子进程 | **在跑（稳定）** · 23 文件，7-21 后无改动（长跑件，非陈旧） |
 | Mind | `agent-mind/` | Console 按 agent 加载的库 | **在跑** · 155 文件，9-14 动过 |
-| Adapter | `agent-adapter/` | 每 agent 一进程 | **部分/稳定陈旧** · 28 文件，核心 6/7 月起未动，一堆旧 `debug*.mjs` |
+| Adapter | `agent-adapter/` | 每 agent 一进程，**由 Console 拉起（`services/adapter-launcher.js` 管其生命周期）**，Mind 再经 HTTP 调它 | **部分/稳定陈旧** · 28 文件，核心 6/7 月起未动，一堆旧 `debug*.mjs` |
 
 ### 不在五大系统里（"易漏"清单）
 | 模块 | 路径 | 用途 | 状态 |
@@ -89,7 +89,7 @@
 
 - **老系统**（`exchange_offers`/`pool_markets`+oracle voter/settler）：仍在维护、tg-bot 仍只讲这个协议(v0.6/0.7)，但 D-024 下**主网 `pool_markets`=0 行**。含 CLAUDE.md「Exchange 协议 v2.1」那套 16 笔真 E2E 战绩（真验证过的、曾 live 的系统）。
 - **新 proto-v0**（`proto_markets`+batch-9+oracle A/D/B）：**当前 live 主网系统**，今天完成主网首结算轮 + 一轮干净 simnet 轮。Oracle A/D/B 已合**未开**。已知开口（自记未藏）：无正式 `/resolve` HTTP 路径（主网那轮用受控手工 SQL 写）、多赢家/并发/主网全新创生未测、`probeRefundFlip` 未实现、proto 路由无鉴权（靠回环绑定）、`T-PROTO-BETTORPK-BINDING`/`T-ORPHAN-CHIP-RECOVERY-ENTRY` 已受债。
-- **ZK 承诺轨道**（更老、并行）：`zk-payout-guest/`+`CloseZkV2.sil`+`bshard-settle-daemon` 的 ZK 子 cron，"已建成、已上链、生产 armed" on TN12（底层 Groth16 上游标 Experimental、未审 mainnet）。铁律 0.5 的 committed 结算目标，与今天 live 的 proto-v0 轨道不同。
+- **ZK 承诺轨道**（更老、并行）：Rust 侧 `zk-payout-guest/`（RISC0 电路，真证明）+ **JS 侧调用方 `lib/zk-close-builder.mjs`+`services/zk-prove-worker.mjs`**（链下编排+证明生成，与 guest 配对，两端对上）+`CloseZkV2.sil`+`bshard-settle-daemon` 的 ZK 子 cron，"已建成、已上链、生产 armed" on TN12（底层 Groth16 上游标 Experimental、未审 mainnet）。铁律 0.5 的 committed 结算目标，与今天 live 的 proto-v0 轨道不同。
 
 ---
 
