@@ -33,3 +33,6 @@ relay 现有 UTXO 为 4×0.95 KAS + 3 个小额; 各步 fee 窗口 seal≥0.52 /
 - db-final-state-readonly.json —— 主网 console 库终态只读读数(市场 / 注 / 意图 / claim / 09:48Z 后 error 事件)
 - postround-readonly-state.json —— 只读预检脚本在回合结束后的输出(监听地址 / 路由 / relay UTXO 形状 / 节点同步)
 - 上游: 主线 b6f744b5(pointers 形状修)及 docs/provenance/2026-09-20-j2-batch9-94-simnet-clean-round/(simnet 干净轮)。
+
+## 补档: winning_side 受控 write-once 的读数(Bettor 提供, 账本 1602)
+BEFORE status=sealed / winning_side=NULL → UPDATE ... WHERE status='sealed' AND winning_side IS NULL → CHANGES=1 → AFTER winning_side=1。执行于 09:50:42Z, Bettor 本机 better-sqlite3、busy_timeout 8s、双守卫。(J2 侧独立读到 09:50:42Z 起 w=1, 与之吻合。)
