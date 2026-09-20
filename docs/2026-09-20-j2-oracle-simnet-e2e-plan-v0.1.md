@@ -105,3 +105,10 @@ harness / 预加载 / 演练脚本存档于 `docs/provenance/2026-09-20-j2-oracl
 - 单测里的 fetch 桩(含我自己的 `proto-oracle-verdict.test.mjs`)是每个测试文件各自的 `globalThis.fetch` 替换, 没有热切换 / 场景文件 / 拦截日志。
 - `test-framework/`(lib / personas / cases / fixtures)面向 broker / seeker / agent 的业务级测试, 没有 proto 判定题 / 上游预言机的替身。
 其余全部复用现有: `validateJudgedMarketInput` / `computeMarketGenesisArtifacts` / `ensureMarketPending` / `createSettlementStore` / `runOracleAdapterTick`(含真 `deriveKanetNativeVote` / `derivePolymarketVote`)。**真 simnet 那一步: 矿工、simnet 节点 / relay 起停、`actions.jsonl` 取证格式, 复用 9-4(`2026-09-20-j2-batch9-94-simnet-clean-round`)与 KANet-UI 既有 simnet 工具, 不另造。**
+
+## 11. 验收检查器(本地已备, 2026-09-20)
+
+`verify-arms.mjs`(§5 判据的**只读**检查器: H/T 的 winning_side*/verdict 引用/pmt_at≥oe/一致性, D/P 的冲突冻结, A 的 ABSTAIN 冻结, F 的"已判且冻结", L 的 late_seal 且 verdict 0, S 的哨兵未被处理, 全局不变量, `--chain` 时加链上意图 / claim 判据, `--scenario` 时复算 uma 行 evidence_ref 哈希)。**观察窗不够 ⇒ 标 VACUOUS 而非 PASS**(`close_commit 意图=0` 只有 pmt-now > deadline+30s+5 个 driver tick 才有信息量; NWT 不得把 VACUOUS 当证据)。对真 simnet 库**只在拷贝上跑**(不读写打开证据原件)。
+对演练库拷贝: **55 项 0 失败 0 VACUOUS**(`verify-arms-on-rehearsal-run.txt`); 自检 `verify-selfcheck.mjs` **10/10**——调换臂映射 / 篡改批准票 pmt_at / D 臂解冻 / A 臂 outcome 改值 / L 臂混入 verdict / F 臂伪造 close_commit 意图 / 制造重复 evidence 行 / 改场景 ⇒ 全部变红, 观察窗不足 ⇒ VACUOUS(`verify-selfcheck-run.txt`)。
+🟡 诚实边界: 演练库里没有 driver, 所以 D/A/P/L 臂"close_commit 意图=0"在演练里是**平凡成立**(winning_side 为空本来就不会被选行); 它在真 simnet 上(driver 在跑)才有分量, 其中**唯一非平凡的是 F 臂**(winning_side 已写却被冻结)。
+真 simnet 时另需(等 Bettor 给 HEAD / env / 矿工脚本路径后再写, 不预先造): 下注 / 读 pmt / 应急冻结的操作脚本(沿用 9-4 `actions.jsonl` 格式)。

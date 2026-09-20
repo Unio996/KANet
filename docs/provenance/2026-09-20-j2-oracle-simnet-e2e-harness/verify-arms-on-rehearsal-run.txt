@@ -1,0 +1,57 @@
+PASS    [H] 是判定题市场(判定题列非空)
+PASS    [H] winning_side ∈ {0,1}
+PASS    [H] winning_side_source=extractor
+PASS    [H] winning_side_set_at 有值
+PASS    [H] verdict_id 指向本市场 extractor 行且 outcome=winning_side ∧ pmt_at≥oe
+PASS    [H] 恰 1 条 extractor + 1 条 uma 且都与 winning_side 一致 ∧ pmt_at≥oe
+PASS    [H] 未冻结
+PASS    [H] uma evidence_ref 哈希 = sha256(场景原文)
+PASS    [D] 是判定题市场(判定题列非空)
+PASS    [D] 已冻结
+PASS    [D] frozen_reason ~ /^inconsistent_verdicts\|clock=(pmt|wall)$/
+PASS    [D] winning_side 为空
+PASS    [D] extractor 与 uma 各一条且 outcome 相反
+PASS    [D] close_commit 意图=0(pmt-now 已越过 deadline+30s+5tick)
+PASS    [D] uma evidence_ref 哈希 = sha256(场景原文)
+PASS    [A] 是判定题市场(判定题列非空)
+PASS    [A] 已冻结
+PASS    [A] frozen_reason ~ /^abstain_or_dispute\|clock=(pmt|wall)$/
+PASS    [A] winning_side 为空
+PASS    [A] extractor 行 outcome=NULL(实质 ABSTAIN)
+PASS    [A] close_commit 意图=0(pmt-now 已越过 deadline+30s+5tick)
+PASS    [A] uma evidence_ref 哈希 = sha256(场景原文)
+PASS    [T] 是判定题市场(判定题列非空)
+PASS    [T] winning_side ∈ {0,1}
+PASS    [T] winning_side_source=extractor
+PASS    [T] winning_side_set_at 有值
+PASS    [T] verdict_id 指向本市场 extractor 行且 outcome=winning_side ∧ pmt_at≥oe
+PASS    [T] 恰 1 条 extractor + 1 条 uma 且都与 winning_side 一致 ∧ pmt_at≥oe
+PASS    [T] 未冻结
+PASS    [T] T: extractor 晚于 uma 写入(暂态期 uma 先成票, 热切 final 后 extractor 才写)
+PASS    [T] uma evidence_ref 哈希 = sha256(场景原文)
+PASS    [F] 是判定题市场(判定题列非空)
+PASS    [F] winning_side 已写(promote 成功)
+PASS    [F] 已冻结
+PASS    [F] frozen_reason ~ /^[a-z0-9_]+\|clock=(pmt|wall)$/
+PASS    [F] close_commit 意图=0(pmt-now 已越过 deadline+30s+5tick)
+PASS    [F] uma evidence_ref 哈希 = sha256(场景原文)
+PASS    [P] 是判定题市场(判定题列非空)
+PASS    [P] 已冻结
+PASS    [P] frozen_reason ~ /^inconsistent_verdicts\|clock=(pmt|wall)$/
+PASS    [P] winning_side 为空
+PASS    [P] extractor 与 uma 各一条且 outcome 相反
+PASS    [P] P: 两条异议行 pmt_at=NULL(pmt 失效期写入, B4)
+PASS    [P] close_commit 意图=0(pmt-now 已越过 deadline+30s+5tick)
+PASS    [P] uma evidence_ref 哈希 = sha256(场景原文)
+PASS    [L] 是判定题市场(判定题列非空)
+PASS    [L] 已冻结
+PASS    [L] frozen_reason ~ /^late_seal\|clock=(pmt|wall)$/
+PASS    [L] winning_side 为空
+PASS    [L] verdict 行 0(冻结后不再是候选)
+PASS    [L] close_commit 意图=0(pmt-now 已越过 deadline+30s+5tick)
+PASS    [*] 被 winning_side 引用的 verdict 都有 pmt_at≥oe
+PASS    [*] 无重复 (market, source_kind, evidence_ref)
+PASS    [*] 所有 verdict 的 evidence_ref 非空且带 #sha256:
+PASS    [*] 所有冻结行 frozen_reason 带 |clock=
+
+VERIFY: checks=55 pass=55 fail=0 vacuous=0

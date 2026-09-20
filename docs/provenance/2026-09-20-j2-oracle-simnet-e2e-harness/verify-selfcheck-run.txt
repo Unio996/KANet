@@ -1,0 +1,12 @@
+[PASS] S0 基线: 未破坏的拷贝 ⇒ 全绿(exit 0, fail=0)
+[PASS] S1 臂映射被调换(H↔D 的 id)⇒ 必红
+[PASS] S2 pmt-now 早于 deadline+30s(观察窗不够)⇒ "close_commit 意图=0" 标 VACUOUS 而非 PASS
+[PASS] S3 场景被改(uma 价格翻转)⇒ evidence_ref 哈希复算对不上 ⇒ 必红
+[PASS] S4 H 的批准票 pmt_at 改成早于 oe ⇒ 必红
+[PASS] S5 D 臂解冻 ⇒ 必红
+[PASS] S6 A 臂的 extractor 行 outcome 改成 1(不再是 ABSTAIN)⇒ 必红
+[PASS] S7 L 臂混进一条 verdict ⇒ 必红
+[PASS] S8 F 臂出现 close_commit(resolve)意图 ⇒ 必红
+[PASS] S9 全局: 制造重复 (market, source_kind, evidence_ref) 行 ⇒ 必红
+
+verify-selfcheck: 10 passed, 0 failed

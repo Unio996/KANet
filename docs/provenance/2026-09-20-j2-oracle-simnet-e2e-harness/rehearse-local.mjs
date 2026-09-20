@@ -134,6 +134,11 @@ await t('E9 全局不变量: 无批准票 pmt_at<oe; 无重复 (market, source_k
   assert.ok(u.startsWith(`https://gamma-api.polymarket.com/markets?condition_ids=${condOf(9001)}&closed=true#sha256:`), 'evidence_url 指向被拦截的 gamma 查询'); assert.equal(u.split('#sha256:')[1], createHash('sha256').update(raw).digest('hex'), 'evidence_ref 哈希 = sha256(场景原文)——可由场景文件独立复算');
   assert.ok(mockLines.length > 10, '预加载留下了拦截日志: ' + mockLines.length + ' 行');
 });
+if (process.env.E2E_KEEP) {   // 留下 DB 拷贝 + 臂映射 + 场景, 供 verify-arms.mjs 在拷贝上做只读验收(演练本身不依赖)
+  fs.mkdirSync(process.env.E2E_KEEP, { recursive: true }); sqlite.pragma('wal_checkpoint(TRUNCATE)');
+  fs.copyFileSync(process.env.DB_PATH, path.join(process.env.E2E_KEEP, 'rehearsal.db')); fs.copyFileSync(SCEN, path.join(process.env.E2E_KEEP, 'scenario.json'));
+  fs.writeFileSync(path.join(process.env.E2E_KEEP, 'arms.json'), JSON.stringify(ids, null, 1)); fs.writeFileSync(path.join(process.env.E2E_KEEP, 'pmt-now.txt'), String(clock.pmt));
+}
 realLog(`\ne2e local rehearsal: ${pass} passed, ${fail} failed`);
 realLog('--- 各臂终态 ---'); for (const [arm, id] of Object.entries(ids)) { const m = M(id); realLog(`${arm}: status=${m.status} winning_side=${m.winning_side} src=${m.winning_side_source} frozen=${m.frozen_reason || '-'} verdicts=${JSON.stringify(V(id).map((v) => [v.source_kind, v.outcome, v.pmt_at === null ? null : v.pmt_at - t0]))}`); }
 process.exit(fail ? 1 : 0);
