@@ -6,6 +6,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { makeImportProbe } from './launcher-import-probe.mjs';
 
 let pass = 0, fail = 0;
 const ok = (name, cond, detail = '') => { if (cond) { pass++; console.log(`  ✅ ${name}`); } else { fail++; console.error(`  ❌ ${name} ${detail}`); } };
@@ -43,6 +44,42 @@ console.log('[test] ② 有 token 但环境不对 ⇒ exit 1, FATAL 只含键名
   }
 }
 
+console.log('[test] ②b exit(1) 语义(NWT 审出的缺口): FATAL 之后启动器必须【立刻退出】——owner-bot.mjs 从未被 import、没有启动行、stderr 恰好一行 FATAL(没有崩溃栈):');
+// 与 broker-bot-launcher.test.mjs ①b 同构(理由见那里): 失败裁决里没有 scrub, 删掉 exit(1) 后会被 r.scrub 的 TypeError"碰巧"截断而仍 exit 1。
+const probe = makeImportProbe();
+const runP = (env, stub) => spawnSync(process.execPath, [...probe.nodeArgs(), launcher], { cwd: CONSOLE_DIR, env: { ...baseEnv, ...env, ...probe.env(stub) }, encoding: 'utf8', timeout: 30000 });
+const errLines = (p) => (p.stderr || '').split('\n').map((l) => l.trim()).filter(Boolean);
+const waitImport = (env, stub) => new Promise((resolve) => {
+  probe.reset();
+  const child = spawn(process.execPath, [...probe.nodeArgs(), launcher], { cwd: CONSOLE_DIR, env: { ...baseEnv, ...env, ...probe.env(stub) }, stdio: ['ignore', 'pipe', 'pipe'] });
+  let out = '', done = false;
+  const finish = () => { if (done) return; done = true; clearInterval(iv); try { child.kill(); } catch { /* */ } resolve({ imports: probe.imports(), out }); };
+  child.stdout.on('data', (d) => { out += d; });
+  const iv = setInterval(() => { if (probe.imports().length) finish(); }, 40);
+  child.on('exit', finish);
+  setTimeout(finish, 20000);
+});
+{
+  probe.reset();
+  const a = runP({ ...good(), KASPA_NETWORK: 'testnet-12', TELEGRAM_BOT_TOKEN: S_BRK });   // 配置齐全(owner token/ingest secret/PORT 都在), 只有网络不对
+  ok('A 配置齐全但 KASPA_NETWORK=testnet-12 → exit 1', a.status === 1, `status=${a.status}`);
+  ok('  stderr 恰好一行且是 FATAL(没有 TypeError / 栈——那是"碰巧崩"不是"显式退出")', errLines(a).length === 1 && /^\[owner-bot launch\] FATAL: /.test(errLines(a)[0]), (a.stderr || '').slice(0, 300));
+  ok('  owner-bot.mjs 从未被 import', probe.imports().length === 0, JSON.stringify(probe.imports()));
+  ok('  stdout 没有启动行', !/network=mainnet console=/.test(a.stdout || ''), a.stdout);
+
+  probe.reset();
+  const b = runP({ ...good(), TELEGRAM_BOT_TOKEN: S_BRK }, 'fail');   // 桩: 失败裁决 + 带齐 consoleUrl/scrub(即使环境本身是合法主网)
+  ok('B 桩失败裁决(带 consoleUrl/scrub) → exit 1', b.status === 1, `status=${b.status} err=${(b.stderr || '').slice(0, 200)}`);
+  ok('  stderr 恰好一行 FATAL 且含桩的问题串(证明桩真被用上)', errLines(b).length === 1 && /^\[owner-bot launch\] FATAL: STUB-FAIL$/.test(errLines(b)[0]), (b.stderr || '').slice(0, 300));
+  ok('  owner-bot.mjs 从未被 import; stdout 没有启动行', probe.imports().length === 0 && !/network=mainnet console=/.test(b.stdout || ''), JSON.stringify(probe.imports()) + (b.stdout || ''));
+
+  // 正向对照臂: 探针与桩在成功路径上真的会记下 import(否则上面的"从未 import"是空话)
+  const c = await waitImport({ ...good(), TELEGRAM_BOT_TOKEN: S_BRK }, undefined);
+  ok('C1 对照: 合法主网环境(真裁决) ⇒ 探针记到 owner-bot.mjs 被 import', c.imports.length === 1 && /tg-bot[\\/]owner-bot\.mjs$/.test(c.imports[0]), JSON.stringify(c.imports));
+  const d = await waitImport({ ...good(), TELEGRAM_BOT_TOKEN: S_BRK }, 'ok');
+  ok('C2 对照: 桩成功裁决 ⇒ 探针记到 owner-bot.mjs 被 import(桩机制在工作)', d.imports.length === 1 && /tg-bot[\\/]owner-bot\.mjs$/.test(d.imports[0]), JSON.stringify(d.imports));
+}
+
 console.log('[test] ③ 静态: 旧 TN12 写死的字面证据已不在启动器代码行里:');
 {
   const src = readFileSync(launcher, 'utf8');
@@ -72,5 +109,6 @@ await new Promise((resolve) => {
   setTimeout(() => finish(null), 20000);
 });
 
+probe.cleanup();
 console.log(`\n[owner-bot-launcher.test] ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

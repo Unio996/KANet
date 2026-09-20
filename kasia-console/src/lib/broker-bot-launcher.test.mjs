@@ -8,6 +8,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { makeImportProbe } from './launcher-import-probe.mjs';
 
 let pass = 0, fail = 0;
 const ok = (name, cond, detail = '') => { if (cond) { pass++; console.log(`  ✅ ${name}`); } else { fail++; console.error(`  ❌ ${name} ${detail}`); } };
@@ -40,6 +41,43 @@ console.log('[test] ① 必然失败的环境 ⇒ exit 1, FATAL 只含键名, �
   }
 }
 
+console.log('[test] ①b exit(1) 语义(NWT 审出的缺口): FATAL 之后启动器必须【立刻退出】——bot.mjs 从未被 import、没有启动行、stderr 恰好一行 FATAL(没有崩溃栈):');
+// 为什么需要它: 失败裁决里没有 scrub, 删掉 process.exit(1) 后 `for (const k of r.scrub)` 会抛 TypeError, 进程"碰巧"仍 exit 1 ⇒ 只断言 exit code 的老测试照绿。
+// 所以: (A) 真裁决用例额外断言 stderr 干净(无 TypeError/栈); (B) 桩裁决用例——失败裁决但带齐 consoleUrl/scrub——让"失败后继续往下走"不被碰巧的 TypeError 截断, 此时只有显式 exit(1) 能拦住 import。
+const probe = makeImportProbe();
+const runP = (env, stub) => spawnSync(process.execPath, [...probe.nodeArgs(), launcher], { cwd: CONSOLE_DIR, env: { ...baseEnv, ...env, ...probe.env(stub) }, encoding: 'utf8', timeout: 30000 });
+const errLines = (p) => (p.stderr || '').split('\n').map((l) => l.trim()).filter(Boolean);
+const waitImport = (env, stub) => new Promise((resolve) => {
+  probe.reset();
+  const child = spawn(process.execPath, [...probe.nodeArgs(), launcher], { cwd: CONSOLE_DIR, env: { ...baseEnv, ...env, ...probe.env(stub) }, stdio: ['ignore', 'pipe', 'pipe'] });
+  let out = '', done = false;
+  const finish = () => { if (done) return; done = true; clearInterval(iv); try { child.kill(); } catch { /* */ } resolve({ imports: probe.imports(), out }); };
+  child.stdout.on('data', (d) => { out += d; });
+  const iv = setInterval(() => { if (probe.imports().length) finish(); }, 40);
+  child.on('exit', finish);
+  setTimeout(finish, 20000);
+});
+{
+  probe.reset();
+  const a = runP({ ...good(), KASPA_NETWORK: 'testnet-12' });   // 配置齐全(secret/token/PORT 都在), 只有网络不对
+  ok('A 配置齐全但 KASPA_NETWORK=testnet-12 → exit 1', a.status === 1, `status=${a.status}`);
+  ok('  stderr 恰好一行且是 FATAL(没有 TypeError / 栈——那是"碰巧崩"不是"显式退出")', errLines(a).length === 1 && /^\[broker-bot launch\] FATAL: /.test(errLines(a)[0]), (a.stderr || '').slice(0, 300));
+  ok('  bot.mjs 从未被 import', probe.imports().length === 0, JSON.stringify(probe.imports()));
+  ok('  stdout 没有启动行', !/network=mainnet console=|broker=/.test(a.stdout || ''), a.stdout);
+
+  probe.reset();
+  const b = runP(good(), 'fail');   // 桩: 失败裁决 + 带齐 consoleUrl/scrub(即使环境本身是合法主网)
+  ok('B 桩失败裁决(带 consoleUrl/scrub) → exit 1', b.status === 1, `status=${b.status} err=${(b.stderr || '').slice(0, 200)}`);
+  ok('  stderr 恰好一行 FATAL 且含桩的问题串(证明桩真被用上)', errLines(b).length === 1 && /^\[broker-bot launch\] FATAL: STUB-FAIL$/.test(errLines(b)[0]), (b.stderr || '').slice(0, 300));
+  ok('  bot.mjs 从未被 import; stdout 没有启动行', probe.imports().length === 0 && !/network=mainnet console=|broker=/.test(b.stdout || ''), JSON.stringify(probe.imports()) + (b.stdout || ''));
+
+  // 正向对照臂: 探针与桩在成功路径上真的会记下 import(否则上面的"从未 import"是空话)
+  const c = await waitImport(good(), undefined);
+  ok('C1 对照: 合法主网环境(真裁决) ⇒ 探针记到 bot.mjs 被 import', c.imports.length === 1 && /tg-bot[\\/]bot\.mjs$/.test(c.imports[0]), JSON.stringify(c.imports));
+  const d = await waitImport(good(), 'ok');
+  ok('C2 对照: 桩成功裁决 ⇒ 探针记到 bot.mjs 被 import(桩机制在工作)', d.imports.length === 1 && /tg-bot[\\/]bot\.mjs$/.test(d.imports[0]), JSON.stringify(d.imports));
+}
+
 console.log('[test] ② 静态: 旧 S3 泄漏的字面证据已不在启动器源码里:');
 {
   const src = readFileSync(launcher, 'utf8');
@@ -70,5 +108,6 @@ await new Promise((resolve) => {
   setTimeout(() => finish(null), 20000);
 });
 
+probe.cleanup();
 console.log(`\n[broker-bot-launcher.test] ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
