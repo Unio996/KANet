@@ -13702,3 +13702,13 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - 生效面:link.js 随下次主网 console 重启;bot 侧随下次拉起(CR-2 同次重启带上)。bot 真开闸=最后一步须 Owner 点头。
 - 队列:Owner 亲测→开闸;S3 跟进票(broker-bot/owner-bot 复用+#1/#2)排其后;oracle simnet 排电报全部之后。
  — Bettor 2026-09-20T15:34:51Z
+
+### (1610) 🟢🟢🟢 **里程碑:电报只读壳主网开闸上线——Owner 亲测通过点头 + NWT 生产部署独立 GREEN(六项)** (2026-09-20 · Bettor 记 · Owner 批开闸 · KANet-UI 执行 · NWT co-verify)
+- **Owner 亲测**:手机 @KANET_Broker_bot 走 /start /link /mybets 等,截图确认只读文案/绑定/暂不可用说明正确,原话"测好了,没问题,可以开闸"。
+- **执行(KANet-UI,四步无一不符)**:①停测试实例(3298 停、主网 3202 pid 4744 未变)②cp 备份真 _state.json→tg-bot/_state.json.pre-mainnet-20260920(sha fb109aab95e00535…,原件逐位同)+ .backup 生产库(scratch/_mainnet_golive_backup_20260920T155455Z,sha 90c832ac…)③主网 console 重启 4744→22832 到 6c872812(=4b6e5462+仅 docs)④bot 起 pid 24524。
+- **NWT 生产 co-verify GREEN**(head 7a5f820a,docs/provenance/2026-09-20-nwt-tgbot-mainnet-golive-coverify/,重启后 15:57–16:02Z 只读):①暴露面无新增(console 22832 仅 127.0.0.1:3202;bot 24524 无监听、仅出站 Telegram+回环;无 portproxy/tunnel/tailscale funnel;非回环监听集重启前后逐项同)②oracle 关(adapter=disabled、env 无 PROTO_ORACLE_*、verdicts=0、a59c winning_side 仍 1、无 promote/frozen、7 分钟全表同基线)③迁移干净+驱动正常(v212/v213 无错、settlement-driver started、20+ tick 无新结算动作)④bot 写面只 POST /api/link/bind(余写方法在隐藏命令/已清会话/已拦文本后;局限:代码+状态证据,无请求日志)⑤F2 生效(清理日志 dropped 4/cleared 4;真 _state.json 就地重写 sha 8514eff8,linkedAddrs 0/sessions 0/userLangs 9 保留;备份 fb109aab 可原样恢复)⑥CR-3(无 secret 核 401+GET proto-markets 键集不变+部署码含 CR-3;带鉴权活体是 KANet-UI 读数,库状态一致)。CR-1 生效(scrubbed=2:CONSOLE_ENCRYPTION_KEY+ADMIN_SECRET_FUNDS)、单 poller(409=0)。
+- **迁移时间线争议已收敛**:NWT 撤回"迁移先于重启/计划外库改动"两处误判(主库 mtime=WAL checkpoint 非迁移时刻;独立开 90c832ac 快照证重启前无 v212/v213);结论=boot 首次应用,无库外迁移。**对抗式 sha 对账收敛,模范。**
+- **口径限定**:NWT 只看重启后 7 分钟窗;下个心跳顺手复核 verdicts/intents 是否仍不变。回滚=POST /api/tg-bot/stop(写 tg_bot_enabled=0)+ 需要时还原备份;bot 无资金动作。tg_bot_enabled=1 ⇒ 以后 console 重启自动拉 bot(预期)。
+- **生效范围**:电报口子 = 只读壳(看主网真实市场与结果、绑主网地址、运营者代下);用户暂不能自助下注(等 proto-v0 逐用户身份开发)。同次重启顺带激活 watch_accounts(D-028)显示、CR-2 托管钱包守卫。
+- **队列**:S3 跟进票(broker-bot/owner-bot 复用 resolveBotLaunchEnv 修潜伏 secret 泄漏 + \p{Cf}/prune 载荷)KANet-UI 已开工(独立 worktree,报计划→Bettor 批→NWT 审);oracle simnet e2e 排其后;CC-Bridge :9100 对外可达=待 Owner 确认是否有意(与本次无关,NWT 另报)。
+ — Bettor 2026-09-20T16:05:28Z
