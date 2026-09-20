@@ -13730,3 +13730,14 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **记票不改**(NWT SHOULD):\p{Cf} 把 ZWJ 组合表情拆开(观感);S4 返 401 vs CR-2 返 503(都 fail-closed,不为此动受控文件调用方);tg/broker 启动器对称清 OWNER_BOT_TOKEN(主网 env 现无该变量,纯防御)。
 - **队列**:oracle simnet J2 基础轮(happy+冻结臂)在跑;NWT 毒化 fee 向量 co-verify(V1=3×0.31KAS covenant-bound+1×0.31 spk-v1 输出到 relay 保持总额<5;V2'=余额上限触发/恢复可见性,不洪泛/不新建 relay/不改上限)排 J2 基础轮之后 + KANet-UI 核 relay 余额/内存 + 单矿工协调,Bettor 到时明确解除暂停。
  — Bettor 2026-09-20T16:45:59Z
+
+### (1613) 🔁 **Bettor 接位(会话 claude-37)——地面核对:J2 oracle simnet e2e 基础轮 H 臂全落地 / D 臂冻结一小时未到 refund / A 臂并发创世 fee UTXO 冲突放弃;J2+NWT 重起** (2026-09-20 · Bettor)
+- **地面核(本任亲手,原始输出)**:`git status` 干净、HEAD=8d2289ad=origin/bshard-m3-deploy;主网 console pid 22832 仍在 :3202、bot pid 24524 在、kaspad 2.0.1 pid 16464 在;`claude.exe` 只有本会话一个 ⇒ 上一任 Bettor/J2/NWT/KANet-UI 会话全部不在座,账本止于 1612(16:45Z)。Codex 桥新提交 b4f2cacf(Codex 只记 1611 放行为"授权非证据",三条 open MUST 不变:① 已备未播 close 须被后到冻结在最终 send/replay 边界拦住 ② GRACE_MS+CLOSE_PIPELINE_MARGIN 装不下就冻结/退款不压缩 ③ 同 tick 结算 fee-outpoint 预留/排除),无待 ACK 的 OWNER-DIRECTIVE。
+- **J2 simnet e2e 现场(基础设施全活:simnet kaspad pid 2692、miner 11928、console 3298 pid 23416、relay 30860;库直读 `scratch/_j2_e2e_run/arm-status.mjs`)**:
+  - H 臂 376ede4b:resolved,ws=1 src=extractor,verdicts extractor=1/uma=1,intents seal/resolve/convert_to_claim/claim_draw **全 landed**(happy 臂到底,待 J2 出 provenance、NWT 复验后才算数)。
+  - D 臂 41bbd231:sealed,verdicts extractor=1/uma=0 ⇒ **FROZEN inconsistent_verdicts|clock=pmt**(17:22:53Z),intents 只 seal:landed;截止 17:32Z 已过,冻结后一小时**未走到 refund 终局**——是等待未到/驱动卡住/缺陷,待 J2 查(drive-D.log 末尾有 libuv `UV_HANDLE_CLOSING` 断言,是驱动脚本退出时崩,与结算无关待证)。
+  - A 臂 ca062606:**genesis_ambiguous 放弃**——D 与 A 同 tick 并发创世,fee-UTXO 选择器(升序取首个可构造)选中同一 UTXO 96cd7d79..:3,D 先落地,A 的已备 tx 永不能落(inputs_spent)⇒ 驱动 HOLD。J2 自记发现:单 relay 多市场并发创世撞 fee UTXO;缓解=串行创世+创世前 split-utxos 清 fee UTXO。**与 Codex MUST③ 同族(创世侧而非结算侧)**,进 NWT 复验口径。
+  - actions.jsonl 12 条到 17:20Z;J2 未出 provenance 即掉线。
+- **拉起**:J2+NWT(Sonnet,修正 seed 副本,supervisor.log 18:22Z 两行);KANet-UI 暂不起(D-029 砍面,毒化向量轮要 relay 余额/内存核时再起)。J2 任务=查 D 臂为何未 refund_flip→推到终局→A 臂发现对照 Codex 三 MUST→出 provenance;NWT=只读预读 harness+准备毒化 fee 向量方案一页(不跑)+按班审起人记录。
+- **主网库**:3 市场(2 cancelled + a59c resolved)、3 bets 不变;驱动开关 2 项在;主网零触碰。
+ — Bettor 2026-09-20T18:23:24Z
