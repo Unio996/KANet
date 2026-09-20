@@ -61,6 +61,27 @@ runbook §5.2/§9 当时写"bot 没有 proto v0 调用，且**不得**在结算�
 
 `tg-bot/worldcup-teams.mjs` 头注释自称"**TEMPORARY 决赛夜专用**"：`WC_SURVIVING_TEAMS` 是硬编码的当时决赛两队，决赛（2026-07-19）后本已过期。它被 `prediction-menu.mjs:12`（`/bet` 世界杯专题）与 `messages.mjs:4`（首页赛事区 fallback）用 `isDecidedWorldCupMarket` 静默过滤市场。⇒ P1 若让市场列表仍经这两条路径渲染，**会静默滤掉/误标内容**。落码前逐一决定：P1 的 proto 市场列表**不走**世界杯专题与该过滤（首选，最小），或该过滤在 proto 数据上显式旁路。此项进 P1 的"待核字段对照"清单，不在本页展开设计。另：`owner-bot.mjs`（第二个电报桥，Owner ⇄ 频道）本次不起（runbook §3.5 已裁），不受影响。
 
+### 3.2 P1 字段逐项对照（Owner 单 4 点已批，2026-09-20；读 `api/proto.js` + bot 渲染代码所得，proto 侧字段以 `GET /api/proto-markets` 实测键为准）
+
+bot 现在渲染的"市场"来自 `console-api.mjs` 的 pool 系列（`availableMarkets`/`poolMarkets`/`championMarkets`/`trendingMarkets`/`myPositions`），落到 `prediction-menu.mjs` / `messages.mjs`。读侧指向 = 这些读函数的数据源换成 `GET /api/proto-markets`、`/api/proto-markets/:id`（不新造入口、不动 bot 的命令面）。逐项：
+
+| bot 现在用的（pool） | proto 侧对应 | 差异 / 陷阱 |
+|---|---|---|
+| 题干 `specTitle(resolution_rule_spec)` | `question`（纯字符串） | 无 JSON spec，不要再走 `specIsUsable`（要求 title+resolution_criteria+data_source，proto 市场恒不满足 ⇒ 会被全部滤掉）；判定题另有 `judged.{side_map,outcome_end_ms,data_source_canonical}` |
+| 截止 `deadline`（**秒**）→ `fmtDeadline` | `deadline_ms`（**毫秒**） | 单位差 1000 倍，直接喂给 `fmtDeadline` 会显示成几万年后 |
+| 押注额单位 **KAS**（`stakeKas`、`min` 文案） | `min_bet` 单位是**代币**（`token_ticker`，如测试代币） | 文案里的 "KAS" 全部不能沿用 |
+| 方向 YES/NO = **1 / 2**（`bet:side:1|2`） | `direction`/`winning_side` = **0(YES) / 1(NO)** | **编码不同**；渲染结果时 `winning_side=0` 是 YES。写侧本次不做，但读侧显示"结果"必须按 0/1 |
+| `bettor_count`、`maker_name`/`maker_relay_id` | 无（列表路由不含下注数；单操作员无 maker 概念） | 列表里去掉这两列；下注数只在详情路由 `bets[]` 里可得，本次不显示 |
+| `category` 分组、世界杯专题、`?q=` 搜索、`card_group` | 无 | 不做分组/搜索，单一列表；世界杯专题与 `worldcup-teams.mjs` 过滤在 proto 数据上**整体旁路**（§3.1） |
+| `protocol_version` ∈ v0.6/v0.7 过滤 | 无 | 去掉该过滤 |
+| 状态 `pending_bettors` 等 | `status` ∈ betting / sealed / resolved / cancelled（另有 genesis_* 内部态） | 用户面只映射四态：betting=进行中、sealed=已封盘·等结果、resolved=已结算·结果 YES/NO、cancelled=已取消；**genesis_* 一律不展示** |
+| `/mybets` `/record`（`myPositions(linkedAddr)`） | **无**：proto-v0 不记下注人（§3 第 1 条） | 这两条命令没有数据可读 ⇒ 改成说明文案，不调用 pool 接口 |
+| `/champions`（`?tag=champions`）`/discover`（静态文案） | 无对应 | `/champions` 从 `/help`/菜单撤下；`/discover` 文案按新命令面重写（样图里给） |
+| 结算/手续费 DM 轮询（`pickFreshSettlements`、`brokerFeeDmEvents`） | 读 pool 事件；主网 pool 无数据 | 保持不动（0 行，无害），本次不接 proto |
+| **不得显示**的 proto 字段 | `committee_pubkeys_json`、`rootclose_*`、`shardleaf_*`、`payout_root`、`*_txid` | 公开路由会返回它们，bot 渲染只取白名单字段：`id/question/status/deadline_ms/min_bet/token_name/token_ticker/winning_side`（+`judged.*` 判定题） |
+
+落码位置（最小）：`console-api.mjs` 增 `protoMarkets()` / `protoMarket(id)` 两个读函数；`prediction-menu.mjs` 的 `startBet`/`startBetFromMarket` 与 `messages.mjs` 的 `hotMarkets`/首页热门改读它们并只渲染上表白名单字段；**不改** `/link`、结算 DM、owner-bot、命令注册以外的任何东西。所有可见字符串等 Owner 过样图后才写入（样图页：`docs/2026-09-20-kanetui-tg-bot-user-copy-samples-v0.1.md`）。
+
 ## 4. 执行顺序（沿用 runbook §7，只标出与现状的差）
 
 1. 本页 → Bettor 审 → CR-1/2 出正式 worktree 实现（沿 CR 页 §4 流程；**不在生产检出改文件**）→ NWT 审 → Bettor 合入。
