@@ -13681,3 +13681,13 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **仍只落码不部署**。A+B 写完一起交 NWT 审(bot.mjs 用户面+tg-wallet 相邻,byte/渲染核)→Bettor 合。**部署前按铁律 ⑦ 出真实渲染对比给 Owner 过最终样→Stage B 开闸须 Owner 点头**(前置 Stage A 隔离演练)。
 - 队列:S3 跟进票(broker-bot/owner-bot 复用 resolveBotLaunchEnv + S1/S2/S4/S5)排 A/B 之后;oracle simnet 真跑排电报全部之后。
  — Bettor 2026-09-20T14:37:00Z
+
+### (1608) 🟢→🔧 **电报只读壳 A+B NWT 字节/渲染 GREEN(0 安全 MUST)——开 Owner 亲测前一轮小修(F2 必做/F1 顺手/2 SHOULD)** (2026-09-20 · Bettor 裁 · NWT 审)
+- **A+B**(coord/kanetui-tgbot-p1-cr3 @ 61d5f588):A1 link.js CR-3 服务端(复用 kaspa-network.mjs 先校验和后前缀,主网不再绑 kaspatest)、A2 readonly-shell.mjs 白名单纯函数、A3 接线(bot.mjs +6/−0、grammY 壳先注册、原 handler 零改、隐藏钱/托管命令)、B 定稿字 i18n。
+- **NWT GREEN**(head 54d5871e,docs/provenance/2026-09-20-nwt-tgbot-readonly-shell-review/):哨兵串扫 7 状态×中英×列表/详情/callback 证委员会公钥/rootclose/shardleaf/payout_root/txid/judged 不进渲染层(命中 0);方向 0=YES/1=NO 对照 proto-market-detail.eta:84,sealed 即使有值不提前显;原 handler +6/−0 字节确认、壳先于全部原 handler、钱/托管命令全隐藏;CR-3 服务端真库真鉴权逐码跑(主网绑 kaspatest⇒400 不落库、网络未设⇒503、鉴权先于网络);分支测试 58 复跑绿+NWT 17 变异全杀。
+- **开闸前一轮修(Bettor 裁,KANet-UI 做,NWT 审增量)**:
+  - **F2 必做**:/start 文案"旧绑定与会话已重置"与代码不符(无重置逻辑);生产 _state.json 有 4 条旧 kaspatest 绑定+4 残留会话。采纳 NWT 推荐"壳内启动清理"(主网模式丢非 kaspa 绑定+清残留会话+测),不用手动移文件兜底。同堵 SHOULD#4 pollLoop/老用户掉 TN12 下注流。
+  - **F1 顺手**(潜伏现网不可达):判定题壳一律 0=YES 不看 judged.side_map⇒显反赢家;主网现无判定题,同文件修(side_map 换算或判定题不显方向+测),不留票。
+  - 并入 SHOULD#1(Math.ceil 时钟:29 分误显"已过截止")、#2(去 bidi U+202E/零宽+详情上限)、#4 收紧(自由文本→ro_unavailable 不落工单;/broker /earnings /verify 保留)。#3(i18n 全局改也影响 TN12,D-017 已退役)/#5 记票不改。
+- **Owner 亲测**:隔离实例加载真实 _state.json 拷贝,让 Owner 亲眼验 F2 清理生效。门控:修完 NWT 审增量→Owner 拿测试 token 亲测→开闸 Owner 点头。Owner token(@BotFather 测试 bot)+3 偏差点头 在等。
+ — Bettor 2026-09-20T14:59:53Z
