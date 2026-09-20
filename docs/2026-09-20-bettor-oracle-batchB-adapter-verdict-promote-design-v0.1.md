@@ -1,4 +1,4 @@
-> **Status**: CURRENT (v0.2 · 2026-09-20 据 NWT 红队 9b14187e 并入 B1–B7 见 §10 · 待 NWT MUST-only 复核第 2 轮)
+> **Status**: CURRENT (v0.3 · 2026-09-20 据 NWT 两轮红队(9b14187e→2d4c2ded)并入 B1–B7+C1–C2 见 §10-11 · 设计审两轮满转 J2 实现)
 
 # oracle 整合 批 B 设计 v0.1：adapter — 扫市场 → deriveVote → 写 verdicts → 经批 D 门 promote
 
@@ -69,4 +69,10 @@
 - **B6 创建入口(最大输入面)**:(a) **data_source_canonical 只接受 findExtractor(url) 命中的白名单源**,拒 free-text / 任意 http(s) / 本机内网(deriveKanetNativeVote 会在判已知源前 fetch(url) 且把 localhost 改写成本机 console 端口=SSRF 面),adapter 复核同一注册表;(b) **自动 promote 需"有 resolution_predicate 的确定性抽取器源"∧"polymarket/UMA 条件"两条都在**,缺一 ⇒ 创建时拒或标"仅人工/退款"(否则只会 cutoff 冻结→退款);(c) `deadline_ms ≥ outcome_end_ms + 各来源真实时延`,**UMA 默认 48h 定稿窗必算进 §7 预算**;(d) **不从请求体收 relay id 类字段**(复用 rejectRelayIdInBody),outcome_oracle_relay_ids 服务端定;ensureMarketPending 同一 INSERT 写全判定题列;不复制"收 resolutionNote 却丢弃"的形态;(e) **字段全可选,缺省行为与今天逐字节相同 + 回归测试**。
 - **B7 promote 原子再守异议**:批 D PROMOTE_UPDATE_SQL 谓词只带 sealed∧winning_side NULL∧frozen NULL,R2/异议检查在 JS、与写值不原子;adapter 是第一个真调用方 + 写值不可改 ⇒ **把 `NOT EXISTS(SELECT 1 FROM proto_market_verdicts v WHERE v.market_id=? AND (v.outcome IS NULL OR v.outcome<>?))` 加进同一条 UPDATE 的 WHERE**(或包 BEGIN IMMEDIATE);测"异议行在检查后插入⇒changes==0"。
 - **NWT ①–⑥ 采纳**:① R2 独立性=**运营方选源的机制独立(确定性抽取器 vs UMA 人投预言机),不含问题等价性证明**(predicate 与 polymarket 条件都建市场者填、无校验),复用现有 parallel judgment 的"假并行"守卫(独立源不得都是 polymarket/gamma);② **llm verdict 走本地 Qwen(deriveKanetNativeVote 的 LLM 路)还是 TypeSafe——设计明确:TypeSafe 用作主观题的 llm proposal,Qwen 路同归 llm 类**;"能冻"是 grief 杠杆(控证据页者可诱导异议)⇒虚假冻结率监控要真接线(SHOULD);③ 见 B2+B4;④ promote 只经 guarded UPDATE(+B7)、冻结只经批 D freezeMarket、write-once ✅;**人工冻结/human verdict 无写入路径 ⇒ SHOULD:带鉴权+审计的最小管理入口作应急刹车**;⑤ 见 B5;⑥ 见 B6。
-- **SHOULD 记票**:人工冻结/human verdict 鉴权入口;同 (市场,来源) verdict 写入事务内查重;TypeSafe 只送标题/公开证据+长度上限+key 不入日志;resolution_rule_spec 5 必填复用 bettor.js;simnet 端到端补"UMA 未定稿⇒ABSTAIN 不冻结 / 定稿后 promote"、"LLM 诱导异议⇒冻结"。
+- **SHOULD 记票**:人工冻结/human verdict 鉴权入口;同 (市场,来源) verdict 写入事务内查重;resolution_rule_spec 5 必填复用 bettor.js;simnet 端到端补"UMA 未定稿⇒ABSTAIN 不冻结 / 定稿后 promote"、"LLM 诱导异议⇒冻结"。
+
+## 11. v0.3 据 NWT 第 2 轮(2d4c2ded)并入 C1–C2 + SHOULD（设计审两轮满,转 J2 验收,NWT 实现复核逐条查）
+- **C1 side_map 存放 + 下注者可见/防点错侧**:(a) **side_map 放进 `resolution_rule_spec` JSON 内**(已被批 A R4 锁列 + JUDGED 覆盖,不新增列、不改 R4 触发器);(b) 判定题**公开读带出 side_map/outcome_end_ms/data_source_canonical**(PUBLIC_MARKET_COLS 加列,仅判定题非空);**判定题下注请求必须带显式 `side_label:'yes'|'no'`,与 side_map 换算的 side 不一致 ⇒ 400**——把"下注方向反"挡在受理点(与 B3"判定方向反"同根)。
+- **C2 无自动 promote 条件的判定题只能"创建时拒"**:批 A 禁 operator 写判定题 + 批 D 冻结市场 winning_side 永不可写 + human 只能冻 ⇒ **判定题无任何人工 resolve 出口,唯一出口=refund(未接线,N5b)**。所以缺"确定性抽取器源(带 resolution_predicate)"或缺"UMA 条件"的判定题 = 下注即死胡同 ⇒ **只保留创建时拒**(删 v0.2 "标仅人工/退款"措辞);simnet 端到端要造此类市场测退款终局时,用**非主网 + 显式测试开关**(主网不生效)。另**创建时对 resolution_predicate 干跑**(合成字段喂 judgeLine,返回 ABSTAIN 即拒建)——非法 predicate 运行时=实质 ABSTAIN⇒写 NULL⇒冻结,等于放进必然退款的市场。
+- **SHOULD 采纳**:① `UMA_FINALIZATION_WINDOW_MS` 是 voter 导入时常量(未导出)⇒实现"proto 拒 <24h"须**导出生效值再断言**,不另处解析 env;② **v0 先不接 TypeSafe**——B6 令无已知源的主观题建不出来 ⇒ TypeSafe 调用面 v0 为空却多一条外发面(D-021);Qwen 路同归 llm 已够;**TypeSafe 留给别处 advisory 面(不违 D-030,只是批 B v0 无适用点);将来若有"已知源+主观判定"市场再对已 final 市场只问一次**;③ judgedMarketAllowedHere 的**受理门那处从市场行取 token_def_id**(现受理门只 SELECT 判定题列+outcome_end,要补)。
+- **findExtractor 复用(NWT 核过)**:host 锚定 + 仅 https + 拒私网/回环,15 个恶意 URL 形态全不匹配 ⇒ B6(a) **直接复用 findExtractor,不另写第二份**。
