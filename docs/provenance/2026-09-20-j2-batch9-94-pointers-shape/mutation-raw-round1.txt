@@ -1,0 +1,9 @@
+BASELINE
+  exit=0 28 passed, 0 failed
+S1: KILLED exit=1 5 passed, 23 failed :: 去掉数组解包(回到修复前的行为: 数组串直接喂 deserialize)
+S2: KILLED exit=1 27 passed, 1 failed :: 放开长度限制(2 元素数组也接受, 取第 0 个)
+S3: SURVIVED exit=0 28 passed, 0 failed :: 数组取最后一个元素而非唯一元素(与 S2 组合才有区分; 单独跑应仍绿——记为等价对照)
+S4: SURVIVED exit=0 28 passed, 0 failed :: 不检查元素是否为字符串
+S5: KILLED exit=1 27 passed, 1 failed :: 非 JSON 不再走 malformed 路径而是抛原始 SyntaxError
+RESTORED exit=0 28 passed, 0 failed
+SUMMARY mutants=5 survivors=2 restored_green=true
