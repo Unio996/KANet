@@ -59,3 +59,11 @@ LLM 路径主观题用 TypeSafe（Noul/Choice+confidence）**只产 proto_market
 
 ## 9. 不影响
 D-029 主网首轮(已跑通)、批 9 结算机制、驱动开关、主网 live 状态。
+
+## 10. v0.2 复核采纳（NWT GREEN 带条件 dff2d8ba）：R1–R5 验收条件 + §4-5 补
+- **R1（批 A）触发器覆盖面 + 列定义**：write-once 触发器须 **BEFORE INSERT**(NEW.winning_side 必 NULL) + **BEFORE UPDATE**(OLD 非空 ABORT、值∈{0,1}、status=sealed) + **BEFORE DELETE**(有值 / 有下注或意图的市场拒删)，堵 INSERT OR REPLACE 绕过。审计列：`winning_side_source`∈{operator,extractor,uma,human}、`winning_side_set_at`、`winning_side_verdict_id`。**operator 禁写与 verdict 引用落进触发器**（非 adapter——手写 SQL 不经 adapter）：source='operator' ∧ 市场有判定题 ⇒ ABORT；source∈{extractor,uma,human} 须有 verdict_id 指向同市场同值判定行。诚实：触发器防应用 / 运维失误，**不防能 DROP TRIGGER / 伪造 verdict 的机器写权**；human 写入口须经带鉴权接口 + 审计。
+- **R2（B-promote）多源 / 多数**：自动提升前提 = **≥2 独立来源抽取一致 ∧ 全部 extractor/uma 类 verdict 一致**，否则不提升、进人工 / 退款（恢复 v0.1 canonical+secondary 交叉，单源一次故障不得自动动钱）。
+- **R3（批 D）两个数 + 冻结列**：`promotion_cutoff ≤ deadline + 7,200,000 − 宽限窗 − close_commit 落链余量`，晚于此不提升（防 winning_side 已写而市场已被翻退款的不一致态）；宽限窗给公式 / 取值；冻结态存 `settlement_frozen_at`（或 dispute 表），listWork 的 close_commit 触发条件检查它。
+- **R4（批 A）题面不可改触发器**：`outcome_oracle_relay_ids / resolution_rule_spec / outcome_market_source / outcome_condition_id / outcome_end_ms / question` 在首笔下注或 genesis 落链后一律拒 UPDATE。
+- **R5（B-promote 上线前置）refund_flip 非自动**：自然 refund_flip 需有人广播 + 逐票 reclaim，批 9 只探测不执行 ⇒ **退款执行批落地前，oracle 判定路径仅允许零价值 / simnet 市场**；真值市场以该批为前置；runbook 写明弃权 / 争议终局 = 人工执行 refund_flip + reclaim。
+- **§4-5 补（SHOULD）**：winning_side 写入路径与 close_commit 参数派生（`proto-winner-bet.mjs` 读 winning_side）不循环——但"独立"**仅指**"驱动入参 == `assertCloseCommitArgsFromDb` 的 DB 派生值"这道核对，**不验证 winning_side 判定值本身**，不能当判定值的第二道防线。
