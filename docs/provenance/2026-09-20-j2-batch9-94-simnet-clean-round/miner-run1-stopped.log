@@ -1,0 +1,5 @@
+[miner] connected ws://127.0.0.1:18510 networkId=simnet isSynced=true virtualDaaScore=1321 payTo=<throwaway kaspasim:qqz…> interval=5000ms
+[miner] 2026-09-20T08:33:20.030Z mined=1 report="success" daa=1321
+[miner] 2026-09-20T08:33:25.026Z mined=2 report="success" daa=1322
+[miner] 2026-09-20T08:33:30.039Z mined=3 report="success" daa=1323
+[miner] 2026-09-20T08:33:35.041Z mined=4 report="success" daa=1324
