@@ -14,6 +14,7 @@ const TICK = 20_000;
 const cfg = resolveBudgetConfig({}, { tickMs: TICK }).config;
 const D = 10_000_000_000_000;                                 // covenant deadline_ms
 const CUTOFF = D + REFUND_FLIP_GRACE_MS - cfg.promotionSafetyMs;   // = D + 6,000,000
+const W0 = D - 3_600_000 - 1_000_000;   // 受理门用例的默认墙钟: 早于 outcome_end
 const OE = D - 3_600_000;                                     // outcome_end_ms
 
 // ══ C 系列: 常量 + 启动校验(N2) ═══════════════════════════════════════════════════════════════
@@ -115,11 +116,16 @@ await t('I2 ▲ 受理门矩阵: 无判定题 ⇒ 豁免(pmt 缺失也放行, �
   assert.equal(evaluateBetIntakeGate({ market: plain({ outcome_end_ms: null }) }).accept, true, '无判定题 ∧ outcome_end 空也豁免');
   for (const bad of [null, undefined, NaN, Infinity, '123', {}]) { const m = mkMarket({ outcome_end_ms: bad }); const g = evaluateBetIntakeGate({ market: m, pmt: { valid: true, pmtMs: 1 } }); assert.deepEqual([g.accept, g.code, g.http], [false, 'outcome_end_missing', 409], String(bad)); assert.equal(intakeNeedsPmt(m), false); }
   assert.equal(intakeNeedsPmt(mkMarket()), true);
-  for (const pmt of [null, undefined, { valid: false, reason: 'not_synced' }, { valid: false }, {}, { pmtMs: 1 }]) { const g = evaluateBetIntakeGate({ market: mkMarket(), pmt }); assert.deepEqual([g.accept, g.code, g.http], [false, 'pmt_unavailable_fail_closed', 503], JSON.stringify(pmt)); }
-  const g1 = evaluateBetIntakeGate({ market: mkMarket(), pmt: { valid: true, pmtMs: OE } }); assert.deepEqual([g1.accept, g1.code, g1.http], [false, 'outcome_end_passed', 409]);
-  assert.equal(evaluateBetIntakeGate({ market: mkMarket(), pmt: { valid: true, pmtMs: OE + 1 } }).accept, false);
-  assert.deepEqual(evaluateBetIntakeGate({ market: mkMarket(), pmt: { valid: true, pmtMs: OE - 1 } }), { accept: true, code: 'ok' });
-  for (const c of JUDGED_COLUMNS) assert.equal(evaluateBetIntakeGate({ market: plain({ [c]: 'x' }), pmt: { valid: true, pmtMs: OE } }).accept, false, c + ' 单独即判定题');
+  for (const pmt of [null, undefined, { valid: false, reason: 'not_synced' }, { valid: false }, {}, { pmtMs: 1 }]) { const g = evaluateBetIntakeGate({ market: mkMarket(), wallMs: W0, pmt }); assert.deepEqual([g.accept, g.code, g.http], [false, 'pmt_unavailable_fail_closed', 503], JSON.stringify(pmt)); }
+  const g1 = evaluateBetIntakeGate({ market: mkMarket(), wallMs: W0, pmt: { valid: true, pmtMs: OE } }); assert.deepEqual([g1.accept, g1.code, g1.http], [false, 'outcome_end_passed', 409]);
+  assert.equal(evaluateBetIntakeGate({ market: mkMarket(), wallMs: W0, pmt: { valid: true, pmtMs: OE + 1 } }).accept, false);
+  assert.deepEqual(evaluateBetIntakeGate({ market: mkMarket(), wallMs: W0, pmt: { valid: true, pmtMs: OE - 1 } }), { accept: true, code: 'ok' });
+  for (const c of JUDGED_COLUMNS) assert.equal(evaluateBetIntakeGate({ market: plain({ [c]: 'x' }), wallMs: W0, pmt: { valid: true, pmtMs: OE } }).accept, false, c + ' 单独即判定题');
+  // 批 D 留尾 ▲: wallMs 非有限数(缺省 null / undefined / NaN / Infinity / 字符串)⇒ 503 fail-closed, 即使 pmt 有效且未过——不得悄悄退化成只看 pmt
+  for (const bad of [null, undefined, NaN, Infinity, -Infinity, '5', {}]) { const g = evaluateBetIntakeGate({ market: mkMarket(), wallMs: bad, pmt: { valid: true, pmtMs: OE - 1 } }); assert.deepEqual([g.accept, g.code, g.http], [false, 'wall_clock_unavailable_fail_closed', 503], String(bad)); }
+  assert.deepEqual([evaluateBetIntakeGate({ market: mkMarket(), pmt: { valid: true, pmtMs: OE - 1 } }).accept], [false], '省略 wallMs 同样拒');
+  assert.equal(evaluateBetIntakeGate({ market: plain(), wallMs: NaN }).accept, true, '无判定题仍豁免(不看墙钟)');
+  assert.equal(evaluateBetIntakeGate({ market: mkMarket({ outcome_end_ms: null }), wallMs: NaN }).code, 'outcome_end_missing', 'outcome_end 缺失仍先判');
 });
 
 // ══ G 系列: promote 门(§1 六前置 + N1/N3/N6) ═════════════════════════════════════════════════
@@ -171,6 +177,8 @@ await t('G6 ▲ 前置 5 R2 一致: 单源 ⇒ wait; 同类型两条(extractor+e
   assert.equal(gate({ verdicts: [...GOOD, V(9, 'llm', 1, CMA_OK), V(10, 'human', 1, CMA_OK)] }).action, 'promote', 'llm / human 与赞成集一致 ⇒ 不影响(也不被引用: 引用的仍是 extractor)');
   assert.equal(gate({ verdicts: [...GOOD, V(9, 'llm', 1, CMA_OK), V(10, 'human', 1, CMA_OK)] }).verdictId, 1);
   assert.equal(gate({ verdicts: [V(9, 'llm', 1, CMA_OK), V(10, 'human', 1, CMA_OK)] }).reason, 'awaiting_second_source', 'llm / human 不构成 ≥2 独立来源');
+  // 批 D 留尾(NWT 复核 nit, 批 B 补): 一个自动源 + 一个非赞成集来源一致 ⇒ 仍 wait(赞成集只含 extractor / uma; human / llm 只能触发冻结, 不能凑够第二源)
+  for (const [name, vs] of [['extractor + human', [V(1, 'extractor', 1, CMA_OK - 1000), V(2, 'human', 1, CMA_OK)]], ['uma + human', [V(1, 'uma', 1, CMA_OK - 1000), V(2, 'human', 1, CMA_OK)]], ['extractor + llm', [V(1, 'extractor', 1, CMA_OK - 1000), V(2, 'llm', 1, CMA_OK)]]]) { const g = gate({ verdicts: vs }); assert.deepEqual([g.action, g.reason], ['wait', 'awaiting_second_source'], name + ' 一致 ⇒ 仍 wait'); }
 });
 await t('G11 ▲ M1 冻结集 = 该市场所有 verdict(extractor / uma / human / llm; 不论 pmt_at 空否 / 早晚): 弃权 / 异议(outcome NULL)或与赞成集不一致 ⇒ freeze(不是被无视); 赞成集不变', () => {
   const KINDS = ['extractor', 'uma', 'human', 'llm'];
@@ -193,7 +201,7 @@ await t('G11 ▲ M1 冻结集 = 该市场所有 verdict(extractor / uma / human 
   // 顺序: 过 cutoff 仍先于冻结集判定(同为 freeze, reason 保持 past_cutoff)
   assert.equal(gate({ verdicts: [...GOOD, V(80, 'llm', null, null)], pmt: pm(CUTOFF) }).reason, 'past_cutoff');
 });
-await t('G12 ▲ M2 受理门取 max(墙钟, pmt): pmt = oe−140s ∧ 墙钟 = oe+1ms ⇒ 必拒(旧逻辑会收); 墙钟恰 = oe 拒 / = oe−1 且 pmt 落后 ⇒ 收; pmt 超前墙钟(pmt ≥ oe ∧ 墙钟 < oe)仍拒; 墙钟已过 ⇒ 409 且不依赖 pmt 是否有效; 不传墙钟 ⇒ 退回只看 pmt', () => {
+await t('G12 ▲ M2 受理门取 max(墙钟, pmt): pmt = oe−140s ∧ 墙钟 = oe+1ms ⇒ 必拒(旧逻辑会收); 墙钟恰 = oe 拒 / = oe−1 且 pmt 落后 ⇒ 收; pmt 超前墙钟(pmt ≥ oe ∧ 墙钟 < oe)仍拒; 墙钟已过 ⇒ 409 且不依赖 pmt 是否有效; 不传 / 非法墙钟 ⇒ fail-closed 拒(批 B 起)', () => {
   const m = mkMarket(); const lagged = { valid: true, pmtMs: OE - 140_000 };
   const g = (wallMs, pmt = lagged) => evaluateBetIntakeGate({ market: m, pmt, wallMs });
   let r = g(OE + 1); assert.deepEqual([r.accept, r.code, r.http], [false, 'outcome_end_passed', 409], 'pmt=oe−140s ∧ wall=oe+1ms 必拒');
@@ -201,7 +209,7 @@ await t('G12 ▲ M2 受理门取 max(墙钟, pmt): pmt = oe−140s ∧ 墙钟 = 
   assert.equal(g(OE - 1, { valid: true, pmtMs: OE }).accept, false, 'pmt 超前(pmt ≥ oe)仍拒');
   for (const bad of [null, { valid: false, reason: 'not_synced' }]) { r = g(OE + 5, bad); assert.deepEqual([r.accept, r.code, r.http], [false, 'outcome_end_passed', 409], '墙钟已过即 409, 不因 pmt 无效改成 503'); }
   assert.equal(g(OE - 10, null).code, 'pmt_unavailable_fail_closed', '墙钟没过 ∧ pmt 无效 ⇒ 仍 503');
-  for (const w of [undefined, null, NaN]) assert.equal(g(w).accept, true, '不传 / 非法墙钟 ⇒ 退回只看 pmt(lagged pmt 收)');
+  for (const w of [undefined, null, NaN]) { const r = g(w); assert.deepEqual([r.accept, r.code, r.http], [false, 'wall_clock_unavailable_fail_closed', 503], '不传 / 非法墙钟 ⇒ fail-closed 拒(批 B 起; 此前退回只看 pmt = 悄悄放行)'); }
   assert.equal(intakeNeedsPmt(m, OE - 1), true); assert.equal(intakeNeedsPmt(m, OE), false, '墙钟已过 outcome_end ⇒ 不需要读 pmt'); assert.equal(intakeNeedsPmt(m), true, '不传墙钟 ⇒ 仍需要读 pmt');
   assert.equal(evaluateBetIntakeGate({ market: plain(), pmt: null, wallMs: OE + 10 }).accept, true, '无判定题仍豁免(墙钟再晚也收)');
 });
@@ -245,7 +253,9 @@ await t('G9 ▲ pmt 无效(D5): 未过 cutoff ⇒ wait(pmt_invalid, promote 推�
 });
 await t('G10 PROMOTE_UPDATE_SQL: 谓词同语句带 status=sealed ∧ winning_side IS NULL ∧ settlement_frozen_at IS NULL(D2); 六个占位符', () => {
   for (const frag of ["status = 'sealed'", 'winning_side IS NULL', 'settlement_frozen_at IS NULL', 'winning_side_source = ?', 'winning_side_set_at = ?', 'winning_side_verdict_id = ?']) assert.ok(PROMOTE_UPDATE_SQL.includes(frag), frag);
-  assert.equal((PROMOTE_UPDATE_SQL.match(/\?/g) || []).length, 6);
+  // B7: 同一条 UPDATE 的 WHERE 里逐字带 NOT EXISTS(异议 verdict)——与设计 §10 B7 的谓词一致
+  assert.ok(PROMOTE_UPDATE_SQL.includes('AND NOT EXISTS (SELECT 1 FROM proto_market_verdicts v WHERE v.market_id = ? AND (v.outcome IS NULL OR v.outcome <> ?))'), 'B7 NOT EXISTS 谓词');
+  assert.equal((PROMOTE_UPDATE_SQL.match(/\?/g) || []).length, 8);
 });
 
 console.log(`\nproto-settlement-budget.test: ${pass} passed, ${fail} failed`);

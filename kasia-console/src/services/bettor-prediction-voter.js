@@ -789,7 +789,8 @@ export async function deriveVote(offer) {
 // 在 UMA challenge 期 reverse 可能 → KANet 已 settle 错 + 付款不可逆.
 // Conservative gate: gamma closedTime + UMA_FINALIZATION_WINDOW_MS 才 ok:true (= 真 finalized).
 // Env override UMA_FINALIZATION_WINDOW_MS for testnet (default 48h prod, 0 testnet disable).
-const UMA_FINALIZATION_WINDOW_MS = process.env.UMA_FINALIZATION_WINDOW_MS !== undefined
+// 批 B(oracle 整合, SHOULD①): 导出【生效值】供 proto 路径断言(拒 <24h / 非有限)——不另处解析 env。注意: parseInt 得 NaN 时下面的 `UMA_FINALIZATION_WINDOW_MS > 0` 为假 ⇒ 定稿窗被静默关闭。
+export const UMA_FINALIZATION_WINDOW_MS = process.env.UMA_FINALIZATION_WINDOW_MS !== undefined
   ? parseInt(process.env.UMA_FINALIZATION_WINDOW_MS, 10)
   : 48 * 60 * 60 * 1000;  // 48h default
 

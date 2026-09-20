@@ -1,0 +1,11 @@
+BASELINE (1 test files)
+  green S src/lib/proto-oracle-spec.test.mjs 11p/0f
+ms4 killed [S:RED(10p/1f)] — C2 predicate 干跑全 ABSTAIN 仍可建
+
+SUMMARY: total=1 killed=1 survived=0 anchor_errors=0
+BASELINE (2 test files)
+  green V src/lib/proto-oracle-verdict.test.mjs 10p/0f
+  green C src/lib/proto-oracle-adapter-core.test.mjs 19p/0f
+mv5 killed [V:RED(9p/1f) C:RED(18p/1f)] — B2 冲突不写异议(冻结集漏一方)
+
+SUMMARY: total=1 killed=1 survived=0 anchor_errors=0

@@ -76,6 +76,12 @@ export async function registerProtoRoutes(fastify) {
   // 🔴 index.js 的 Fastify 实例是 `logger: false`(fastify.log.* 是 no-op)——用 console.log 直写
   // stdout, 不经过 fastify 的日志器, 否则这行 LOUD 日志会静默消失(同既有 index.js 启动日志惯例)。
   logProtoSingleOperatorMode(console.log);
+  // 批 B B5: 启动 LOUD 打印判定题策略生效值(网络 / 零价值代币白名单 / adapter 开关)
+  {
+    const { resolveOraclePolicy, logOraclePolicy } = await import('../lib/proto-oracle-policy.mjs');
+    let net = null; try { net = (await import('../../../shared/lib/kaspa-network.mjs')).configuredNetwork(); } catch { net = null; }
+    logOraclePolicy(console, resolveOraclePolicy({ env: process.env, network: net }));
+  }
   // ══════════════════════════════════════════════════════════════════════
   // 代币定义 —— 纯 DB, 不上链, 不产生任何可花费余额(Owner"代币属性配置需要界面互动"落这一层)。
   // ══════════════════════════════════════════════════════════════════════
@@ -105,7 +111,7 @@ export async function registerProtoRoutes(fastify) {
     if (relayIdRejection) return reply.code(400).send({ ok: false, error: relayIdRejection });
     const externalIdentityRejection = rejectExternalMarketIdentityInBody(request.body);
     if (externalIdentityRejection) return reply.code(400).send({ ok: false, error: externalIdentityRejection });
-    const { tokenId, title, deadline, resolutionNote } = request.body || {};
+    const { tokenId, title, deadline, resolutionNote, resolutionRuleSpec, outcomeEnd, outcomeConditionId } = request.body || {};
     if (!tokenId) return reply.code(400).send({ ok: false, error: 'tokenId required' });
     const tokenDef = sqlite.prepare(`SELECT ${PUBLIC_TOKEN_DEF_COLS} FROM proto_token_defs WHERE id = ?`).get(tokenId);
     if (!tokenDef) return reply.code(404).send({ ok: false, error: 'token definition not found' });
@@ -114,6 +120,32 @@ export async function registerProtoRoutes(fastify) {
     const deadlineMs = Date.parse(deadline);
     if (!Number.isFinite(deadlineMs) || deadlineMs <= Date.now()) {
       return reply.code(400).send({ ok: false, error: 'deadline must be a valid future datetime' });
+    }
+    // ── 批 B B6/C2 判定题创建入口: 三个新字段全可选——【全缺省 = 今天的旧流程(逐字节不变)】; 任一出现 ⇒ 全套判定题校验(半套 400) ──
+    let judgedCols = null;
+    {
+      const { hasJudgedInput, findRelayKeyInBody, validateJudgedMarketInput } = await import('../lib/proto-oracle-spec.mjs');
+      if (hasJudgedInput(request.body)) {
+        const relayKey = findRelayKeyInBody(request.body);
+        if (relayKey) return reply.code(400).send({ ok: false, error: `${relayKey} must not be provided in the request body — outcome_oracle_relay_ids is decided server-side` });
+        // B5 三处强制谓词之①: 主网 + 非零价值白名单代币 ⇒ 拒建判定题(N5b); network 未配 ⇒ fail-closed
+        const { judgedMarketAllowedHere } = await import('../lib/proto-oracle-policy.mjs');
+        let net = null; try { net = (await import('../../../shared/lib/kaspa-network.mjs')).configuredNetwork(); } catch { net = null; }
+        const allowed = judgedMarketAllowedHere({ network: net, tokenDefId: tokenId });
+        if (!allowed.allowed) return reply.code(403).send({ ok: false, error: 'judged_market_not_allowed_here', detail: allowed.reason });
+        let outcomeEndMs = outcomeEnd;
+        if (typeof outcomeEnd === 'string' && outcomeEnd.trim()) { const p = Date.parse(outcomeEnd); outcomeEndMs = Number.isFinite(p) ? p : outcomeEnd; }
+        const { resolveBudgetConfig } = await import('../lib/proto-settlement-budget.mjs');
+        const { settlementIntervalMs } = await import('../services/proto-settlement-driver.mjs');
+        const { oracleAdapterIntervalMs } = await import('../services/proto-oracle-adapter.mjs');
+        const { UMA_FINALIZATION_WINDOW_MS } = await import('../services/bettor-prediction-voter.js');
+        let budgetCfg;
+        try { budgetCfg = resolveBudgetConfig(process.env, { tickMs: settlementIntervalMs(process.env) }).config; }
+        catch (e) { return reply.code(503).send({ ok: false, error: 'budget_config_invalid', detail: e.message }); }
+        const v = validateJudgedMarketInput({ title, deadlineMs, resolutionRuleSpec, outcomeEndMs, outcomeConditionId, budgetCfg, umaWindowMs: UMA_FINALIZATION_WINDOW_MS, adapterTickMs: oracleAdapterIntervalMs(process.env) });
+        if (!v.ok) return reply.code(400).send({ ok: false, error: v.code, detail: v.error });
+        judgedCols = v.normalized;
+      }
     }
     const minBet = 1; // v0 不在创建表单上暴露，后端给个不挡门槛的默认值(设计稿 §2 最少字段清单)
     const sealCount = 2; // v0 固定(depth-1 payoutRoot merkle cap, 设计稿 §2.2/§5)，不接受调用方覆盖
@@ -138,6 +170,7 @@ export async function registerProtoRoutes(fastify) {
       id: marketId, token_def_id: tokenId, question: title.trim(), deadline_ms: deadlineMs, min_bet: minBet, seal_count: sealCount,
       committee_pubkeys_json: JSON.stringify([artifacts.committeePubkeyHex]), committee_privkey_enc: artifacts.committeePrivkeyEnvelope,
       rootclose_tmpl_hash: artifacts.rootCloseTmplHash, shardleaf_own_redeem_len: artifacts.shardLeafOwnRedeemLen,
+      ...(judgedCols ? { resolution_rule_spec: judgedCols.resolution_rule_spec, outcome_market_source: judgedCols.outcome_market_source, outcome_condition_id: judgedCols.outcome_condition_id, outcome_oracle_relay_ids: judgedCols.outcome_oracle_relay_ids, outcome_end_ms: judgedCols.outcome_end_ms } : {}),
     });
 
     const { isProtoDriverEnabled } = await import('../services/proto-driver.mjs');
@@ -167,21 +200,24 @@ export async function registerProtoRoutes(fastify) {
   });
 
   fastify.get('/api/proto-markets', async (request, reply) => {
+    const { presentProtoMarket, JUDGED_PRESENTATION_COLS } = await import('../lib/proto-oracle-spec.mjs');
     const rows = sqlite.prepare(`
-      SELECT ${PUBLIC_MARKET_COLS}, t.name AS token_name, t.ticker AS token_ticker
+      SELECT ${PUBLIC_MARKET_COLS}, t.name AS token_name, t.ticker AS token_ticker, ${JUDGED_PRESENTATION_COLS}
       FROM proto_markets m JOIN proto_token_defs t ON t.id = m.token_def_id
       ORDER BY m.created_at DESC
     `).all();
-    return reply.send({ ok: true, markets: rows });
+    return reply.send({ ok: true, markets: rows.map(presentProtoMarket) });
   });
 
   fastify.get('/api/proto-markets/:id', async (request, reply) => {
-    const market = sqlite.prepare(`
-      SELECT ${PUBLIC_MARKET_COLS}, t.name AS token_name, t.ticker AS token_ticker
+    const { presentProtoMarket, JUDGED_PRESENTATION_COLS } = await import('../lib/proto-oracle-spec.mjs');
+    const rawMarket = sqlite.prepare(`
+      SELECT ${PUBLIC_MARKET_COLS}, t.name AS token_name, t.ticker AS token_ticker, ${JUDGED_PRESENTATION_COLS}
       FROM proto_markets m JOIN proto_token_defs t ON t.id = m.token_def_id
       WHERE m.id = ?
     `).get(request.params.id);
-    if (!market) return reply.code(404).send({ ok: false, error: 'market not found' });
+    if (!rawMarket) return reply.code(404).send({ ok: false, error: 'market not found' });
+    const market = presentProtoMarket(rawMarket);    // 批 B C1: 判定题公开读带出 side_map / outcome_end / data_source; 非判定题响应与今天逐字节相同
     const bets = sqlite.prepare(`SELECT ${PUBLIC_BET_COLS} FROM proto_bets WHERE market_id = ? ORDER BY created_at ASC`).all(market.id);
     const claims = sqlite.prepare(`SELECT ${PUBLIC_CLAIM_COLS} FROM proto_claims WHERE market_id = ? ORDER BY created_at ASC`).all(market.id);
     return reply.send({ ok: true, market, bets, claims });
@@ -211,7 +247,7 @@ export async function registerProtoRoutes(fastify) {
     {
       const { checkBetIntake } = await import('../lib/proto-bet-intake.mjs');
       const gate = await checkBetIntake({
-        db: sqlite, marketId: market.id,
+        db: sqlite, marketId: market.id, betRequest: { direction, sideLabel: request.body?.side_label },
         readPmt: async () => {   // 只在判定题 ∧ outcome_end 有限时才被调用; 配置非法 / relay 不可达 ⇒ 抛 ⇒ 按 pmt 无效拒受理(fail-closed)
           const { resolveBudgetConfig, readValidatedPmt, sharedPmtValidator } = await import('../lib/proto-settlement-budget.mjs');
           const { settlementIntervalMs } = await import('../services/proto-settlement-driver.mjs');

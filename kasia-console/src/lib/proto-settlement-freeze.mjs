@@ -60,5 +60,5 @@ export async function applyLateSealGuard({ db, marketId, readPmt, cfg, wallMs = 
 export function promoteWinningSide({ db, marketId, decision, setAtIso = new Date().toISOString(), nowIso = () => new Date().toISOString() }) {
   if (!isDb(db)) throw new TypeError('promoteWinningSide: db 必填');
   if (!decision || decision.action !== 'promote') throw new TypeError('promoteWinningSide: decision 必须是 evaluatePromoteGate 的 promote 结果');
-  return db.prepare(PROMOTE_UPDATE_SQL).run(decision.winningSide, decision.source, setAtIso, decision.verdictId, nowIso(), marketId);
+  return db.prepare(PROMOTE_UPDATE_SQL).run(decision.winningSide, decision.source, setAtIso, decision.verdictId, nowIso(), marketId, marketId, decision.winningSide);
 }
