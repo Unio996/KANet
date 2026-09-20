@@ -13712,3 +13712,12 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **生效范围**:电报口子 = 只读壳(看主网真实市场与结果、绑主网地址、运营者代下);用户暂不能自助下注(等 proto-v0 逐用户身份开发)。同次重启顺带激活 watch_accounts(D-028)显示、CR-2 托管钱包守卫。
 - **队列**:S3 跟进票(broker-bot/owner-bot 复用 resolveBotLaunchEnv 修潜伏 secret 泄漏 + \p{Cf}/prune 载荷)KANet-UI 已开工(独立 worktree,报计划→Bettor 批→NWT 审);oracle simnet e2e 排其后;CC-Bridge :9100 对外可达=待 Owner 确认是否有意(与本次无关,NWT 另报)。
  — Bettor 2026-09-20T16:05:28Z
+
+### (1611) 🟢 **oracle simnet e2e green-light(Owner 放行,排电报口子之后)——J2 真跑** (2026-09-20 · Bettor 派 · Owner 批)
+- Owner 放行:电报口子已 live 稳,oracle 自动判定的 simnet 实测现在可跑。
+- **给 J2 的确切参数**:HEAD=主线 c2352d91(冻结 worktree;含 oracle A/D/B+批9结算+pointers 修+A① simnet wallet;电报只读壳 simnet 不触发无影响)。隔离 env 复用 9-4:KASPA_NETWORK=simnet、节点 --enable-unsynced-mining 无 PoW、console 独立端口(3299)、独立 DB、内存门、新起干净 relay 4×0.99 KAS。PROTO_DRIVER/SETTLEMENT=1、INTERVAL=20000。**oracle(本轮重点,SIMNET-ONLY)**:PROTO_ORACLE_ADAPTER_ENABLED=1、PROTO_PROMOTION_SAFETY_MS=3600000、valueless_token_ids=本轮判定题测试代币——**只在 simnet 实例设,绝不碰主网 env(主网 adapter 保持未设,NWT 已验关)**。出块=J2 一次性币基;pmt 闸沿用 9-4 突发挖块手法(真满足非绕过);actions.jsonl 复用;P0=isSynced 探针先行绝不绕生产同步闸。
+- **§8 五点契约**:real derive+受控 upstream 预载 / harness 造结算臂只 S 臂走真路由 / P0 探针 / L 臂 harness-only / PROMOTION_SAFETY 3600000 simnet-only。
+- **与 9-4 关键差别**:winning_side 不再受控 SQL 写,改 adapter 真 derive→verdict→promote 自动写(happy 臂)+ 注入 dispute/ABSTAIN→冻结→refund 终局臂;verify-arms.mjs 取判据(VACUOUS≠PASS,F 臂唯一非平凡)。
+- **零触碰主网**(3202 pid/主网 DB/主网 relay 一概不碰;主网现 live 带 bot)。
+- **验收**:J2 自跑自验出 provenance→NWT 独立复验+毒化 fee 向量(排 NWT 的 S3/S4 审 + go-live 漂移复核之后,不阻塞 J2 起跑)。
+ — Bettor 2026-09-20T16:30:16Z
