@@ -61,7 +61,10 @@ async function main() {
     ['POST /:id/send', () => call('POST', `/api/tg-wallet/${u}/send`, { payload: SEND_BODY }), () => call('POST', `/api/tg-wallet/${u}/send`, { secret: null, payload: SEND_BODY })],
   ];
 
-  for (const [label, net] of [['KASPA_NETWORK=mainnet', 'mainnet'], ['KASPA_NETWORK 未设', undefined], ['KASPA_NETWORK=simnet', 'simnet']]) {
+  // S2(NWT 审 S3): 网络值必须【严格相等】——近似值(前缀/大小写/首尾空白/空串/邻近网络)全部 503。变异体 startsWith / includes / trim / toLowerCase 都会被下面几个值杀掉。
+  for (const [label, net] of [['KASPA_NETWORK=mainnet', 'mainnet'], ['KASPA_NETWORK 未设', undefined], ['KASPA_NETWORK=simnet', 'simnet'],
+    ['KASPA_NETWORK=testnet-11(邻近网络)', 'testnet-11'], ['KASPA_NETWORK=testnet-12 (尾随空格)', 'testnet-12 '], ['KASPA_NETWORK= testnet-12(前导空格)', ' testnet-12'],
+    ['KASPA_NETWORK=testnet-120(以 testnet-12 为前缀)', 'testnet-120'], ['KASPA_NETWORK=Testnet-12(大小写)', 'Testnet-12'], ['KASPA_NETWORK=空串', '']]) {
     console.log(`[test] ${label}: 带正确 ingest secret 的三条路由 → 503(守卫), 不建钱包、不出助记词:`);
     if (net === undefined) delete process.env.KASPA_NETWORK; else process.env.KASPA_NETWORK = net;
     const before = rows();
