@@ -86,3 +86,13 @@ Bettor 建议"受控/mock verdict 源"。我建议再往下一层: **不注入 d
 3. **P0 探针放第一步**, 且不通过时**不**靠改生产 `isSynced` 判据绕过(改为加 peer)——同意?
 4. L 臂的 `oe > cutoff` 非典型排布只用于 harness(生产创建路由不会产生), 接受?
 5. `PROTO_PROMOTION_SAFETY_MS=3600000` 只设在 simnet console, 与主网默认(20min)不同——接受?
+
+## 9. 本地演练结果(2026-09-20, J2; Bettor 许可先做本地、不占 simnet)
+
+harness / 预加载 / 演练脚本存档于 `docs/provenance/2026-09-20-j2-oracle-simnet-e2e-harness/`(`upstream-mock.mjs` / `harness-lib.mjs` / `rehearse-local.mjs` / `rehearsal-run.txt`)。演练 = 临时库 + **真 derive 代码跑在预加载的受控上游上** + 模拟时钟 / pmt(落后 4.4min)+ 真 `createJudgedMarket`(真校验 + 真 genesis artifacts + `ensureMarketPending`);链上 bet / seal / close_commit / convert / claim 的真广播**不在演练里**(那是 simnet 才有的部分)。
+**10 项全过**: X0 建 8 个市场 / E1 未到期不被扫且不 fetch / E2 pmt<oe 批准票延后·异议 ABSTAIN 照写(M1+B4)/ E3 P 臂 pmt 无效仍写 NULL pmt_at / E4 pmt≥oe 写批准票进宽限 + D·A·P 冻结 / E5 T 臂热切 / E6 宽限后 promote(审计列齐)/ E7 F 臂 D1 入口①② / E8 L 臂晚 seal 冻结 / E9 全局不变量(evidence_ref 哈希 = sha256(场景原文),可独立复算)。
+**演练暴露、已折进方案的三点**:
+1. **创建校验只允许"半线"的 margin/total 谓词**(整数线 push 会 stranded, 护栏 6)——A 臂的 ABSTAIN 谓词须用 `operand:55, scale:1`(=5.5), 整数线在创建时就被拒。这也说明 harness 走的确实是真校验。
+2. **T 臂的 uma 侧独立成票**: ESPN 还在 in-progress 时, extractor 侧暂态无行, 但 uma 侧一旦成票就单独写入(两路互不牵连); 热切 final 后 extractor 才写, **宽限窗从"第二源写入时刻 pT"起算**(不是从 uma 那条起算)。取证判据据此: T 臂的 promote 时刻 = pT + 宽限窗。
+3. **演练脚本自身一个坑**: 父 / 子进程各按各的 pid 算场景文件路径 ⇒ 预加载读不到 ⇒ 上游全 503 ⇒ 全暂态(此时 adapter 表现正确: scanned>0、verdict 0、无 error、无冻结——暂态不冻结)。真 simnet 上场景文件路径须由 KANet-UI 固定(env `E2E_SCENARIO_FILE` 绝对路径), 别按 pid 算。
+**仍未验(只有 simnet 能验)**: `isSynced`(P0)、真 relay pmt 读取、真矿工节奏下的 pmt 落后 / 停顿、bet 受理门的活体、seal 的"注数==seal_count"真触发、close_commit / convert / claim 真广播、console 里 adapter service 的真 interval / 单飞。

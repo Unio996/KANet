@@ -1,0 +1,20 @@
+[PASS] X0 harness 建 8 个判定题市场(H D A T F P L + 哨兵前置): 真 validateJudgedMarketInput + genesis artifacts + ensureMarketPending; judged 列落库、status 由本地替身推到 sealed
+[PASS] E1 wall<oe: 无候选(未到期不被扫)
+[PASS] E2 ▲ wall=oe+1min, pmt 有效但 pmt<oe(落后 4.4min): H/F 批准票延后(M1: 不写); T ESPN in-progress ⇒ 暂态不写; D / A 异议 / ABSTAIN 照写(带 pmt_at<oe)
+[PASS] E3 ▲ P 臂: wall=oe+4min, pmt 无效(矿工停顿)⇒ P 的冲突票仍写(pmt_at=NULL); H/F 批准票仍不写
+[PASS] E4 ▲ pmt 恢复且 ≥ oe: H/F 批准票写入(pmt_at≥oe)进宽限窗; D/A/P 被门冻结(inconsistent_verdicts / abstain_or_dispute); T 仍 in-progress ⇒ 无行
+[PASS] E5 ▲ T 臂热切换: 场景改 final ⇒ 下 tick 写 T 的两票并进宽限窗(暂态不冻结 + 热切换)
+[PASS] E6 ▲ 宽限窗后 promote: H / F / T 写 winning_side(source=extractor, verdict_id 指 extractor 行, set_at 有值); 冻结的 D/A/P 不动
+[PASS] E7 ▲ F 臂(D1 三入口): promote 后、pmt 越过 D+30s 之前应急冻结 ⇒ 之后 close_commit 选行不含 F(入口①), dependenciesLanded 拒 settlement_frozen(入口②); H / T 正常在选行里
+[PASS] E8 ▲ L 臂(晚 seal): seal 落地时 cutoff−pmt−margin < graceMin ⇒ applyLateSealGuard 冻结 late_seal(clock=pmt); 对照: 早 seal(pmt 距 cutoff 远)不冻
+[PASS] E9 全局不变量: 无批准票 pmt_at<oe; 无重复 (market, source_kind, evidence_ref); evidence_ref 与上游场景原文哈希吻合(uma 行可复算)
+
+e2e local rehearsal: 10 passed, 0 failed
+--- 各臂终态 ---
+H: status=sealed winning_side=1 src=extractor frozen=- verdicts=[["extractor",1,996000],["uma",1,996000]]
+D: status=sealed winning_side=null src=null frozen=inconsistent_verdicts|clock=pmt verdicts=[["extractor",1,516000],["uma",0,516000]]
+A: status=sealed winning_side=null src=null frozen=abstain_or_dispute|clock=pmt verdicts=[["extractor",null,516000],["uma",1,996000]]
+T: status=sealed winning_side=1 src=extractor frozen=- verdicts=[["uma",1,996000],["extractor",1,1056000]]
+F: status=sealed winning_side=1 src=extractor frozen=operator_emergency_stop|clock=pmt verdicts=[["extractor",1,996000],["uma",1,996000]]
+P: status=sealed winning_side=null src=null frozen=inconsistent_verdicts|clock=pmt verdicts=[["extractor",1,null],["uma",0,null]]
+L: status=sealed winning_side=null src=null frozen=late_seal|clock=pmt verdicts=[]
