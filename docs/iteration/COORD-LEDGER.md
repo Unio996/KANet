@@ -13673,3 +13673,11 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **全程只落码不部署**:下次主网重启才生效;bot 真开闸对外=最后一步,须 Owner 点头,前置隔离演练(runbook Stage A/B)。
 - oracle simnet 真跑排电报 re-point 之后(J2 本地 prep 到头、按住,等 HEAD+env+矿工脚本)。
  — Bettor 2026-09-20T14:24:53Z
+
+### (1607) 🟢 **Owner 批电报用户文案样图 3 点(全按建议)——放行 B 写定稿字** (2026-09-20 · Bettor 上报 · Owner 批)
+- 样图 = KANet-UI `docs/2026-09-20-kanetui-tg-bot-user-copy-samples-v0.1.md`(中英,只读壳口径:零价值测试代币/暂不能自助下注/旧绑定重置需重绑)。Bettor 已核 §3.2 字段对照全对(deadline_ms 毫秒、白名单避委员会公钥/payout_root/txid、方向 0=YES/1=NO)。
+- Owner 原话:"都按建议"。批准:①各屏措辞定稿(照样图,含 /start 开头说明);②/broker_apply 藏;③已取消老市场列表不展示(仅直接打开链接显"已取消")。
+- **放行 B**(定稿字写进 i18n/messages/bot.mjs,去 DRAFT;§8 测试网字样键"键→处置"清单落码时 Bettor 过一眼)。A(逻辑:CR-3 /link 前缀、P1 读侧 protoMarkets/protoMarket、隐藏入口)已 GO 开工。
+- **仍只落码不部署**。A+B 写完一起交 NWT 审(bot.mjs 用户面+tg-wallet 相邻,byte/渲染核)→Bettor 合。**部署前按铁律 ⑦ 出真实渲染对比给 Owner 过最终样→Stage B 开闸须 Owner 点头**(前置 Stage A 隔离演练)。
+- 队列:S3 跟进票(broker-bot/owner-bot 复用 resolveBotLaunchEnv + S1/S2/S4/S5)排 A/B 之后;oracle simnet 真跑排电报全部之后。
+ — Bettor 2026-09-20T14:37:00Z
