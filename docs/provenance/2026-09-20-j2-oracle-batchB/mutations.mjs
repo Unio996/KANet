@@ -30,7 +30,7 @@ const M = [
   ['mv9', 'verdict', 'if (windowMs < UMA_MIN_FINALIZATION_WINDOW_MS)', 'if (windowMs < 0)', ['V', 'C', 'SV', 'S'], 'B1 UMA 窗 <24h 不被拒'],
   ['mc1', 'core', "if (!allowed.allowed) { skip(`not_allowed_here:${allowed.reason.split('(')[0]}`, m.id); continue; }", '', ['C'], 'B5 站点③(扫描)谓词结果被忽略'],
   ['mc2', 'core', 'const again = judgedMarketAllowedHere({ network, tokenDefId: m.token_def_id, env });', 'const again = { allowed: true };', ['P'], 'B5 站点③(promote 前)谓词调用被删(源码钉)'],
-  ['mc3', 'core', "if (!(wall >= m.outcome_end_ms || (pmtOk && pmt.pmtMs >= m.outcome_end_ms))) { skip('outcome_not_known', m.id); continue; }", '', ['C'], '结果未知也扫描 / derive'],
+  // mc3(结果未知也扫描)已移除: M2 把该判定下推到候选 SQL 后循环内检查成死代码(round5 存活即证), 等价覆盖由 md3 承担
   ['mc4', 'core', "if (!ent || ent.kind !== 'espn') {", 'if (false) {', ['C'], 'B6(a) adapter 不复核数据源注册表(SSRF 二道闸)'],
   ['mc5', 'core', "const doExtractor = !kinds.has('extractor') && !kinds.has('llm');", "const doExtractor = !kinds.has('extractor');", ['C'], 'B2 LLM 每 tick 重复询问'],
   ['mc6', 'core', 'if (dup.get(m.id, w.source_kind, w.evidence_ref)) continue;', '', ['C'], 'B2/B4 同证据重复写行'],
@@ -61,6 +61,16 @@ const M = [
   ['mr1', 'route', "if (!allowed.allowed) return reply.code(403).send({ ok: false, error: 'judged_market_not_allowed_here'", "if (false) return reply.code(403).send({ ok: false, error: 'judged_market_not_allowed_here'", ['R2'], 'B5 站点①(创建入口)谓词被忽略'],
   ['mr2', 'route', 'betRequest: { direction, sideLabel: request.body?.side_label },', "betRequest: { direction, sideLabel: (direction === 1 ? 'yes' : 'no') },", ['R2'], 'C1 路由替客户端合成 side_label(校验被架空)'],
   ['mr3', 'route', '...(judgedCols ? { resolution_rule_spec:', '...(false ? { resolution_rule_spec:', ['R2'], 'B6 判定题列没写进 INSERT'],
+  ['md1', 'verdict', 'if (pmtAt < outcomeEndMs) { skipped.push(', 'if (false) { skipped.push(', ['V', 'C'], 'M1 批准票在 pmt<outcome_end 时也写(pmt_at<oe 永久失格 ⇒ 必冻结退款)'],
+  ['md2', 'verdict', "if (it.cls === 'substantive_abstain') { writes.push(", "if (it.cls === 'substantive_abstain') { if (!(pmtAt >= outcomeEndMs)) { skipped.push({ branch: it.branch, why: 'x' }); continue; } writes.push(", ['V', 'C'], 'M1 越界: 实质 ABSTAIN 也被 outcome_end 限制(B4 要求任何时候都写)'],
+  ['md3', 'core', 'AND m.outcome_end_ms IS NOT NULL AND m.outcome_end_ms <= ?', 'AND m.outcome_end_ms IS NOT NULL AND ? IS NOT NULL', ['C'], 'M2 候选不按到期过滤(远期旧市场占满 LIMIT 饿死可判市场)'],
+  ['md4', 'core', 'ORDER BY m.outcome_end_ms ASC, m.created_at ASC LIMIT ?', 'ORDER BY m.created_at ASC LIMIT ?', ['C'], 'M2 候选不按 outcome_end 升序'],
+  ['md5', 'core', "permanentFreeze('spec_invalid', m); continue;", "summary.errors++; skip('spec_invalid', m.id); continue;", ['C'], 'M2 spec 坏的市场不冻结(永远占名额)'],
+  ['md6', 'core', "permanentFreeze('source_not_registered', m); continue;", "summary.errors++; skip('source_not_registered', m.id); continue;", ['C'], 'M2 数据源未登记的市场不冻结(永远占名额)'],
+  ['md7', 'svc', "`); return; }\n  const uma = assertUmaWindowSafe(voter &&", "`); throw e; }\n  const uma = assertUmaWindowSafe(voter &&", ['SV'], 'SHOULD① voter 导入失败抛出(拖垮 console 顶层启动)'],
+  ['md8', 'spec', 'if (/^(resolution|outcome)/i.test(k) && !RECOGNIZED_RESOLUTION_OUTCOME_KEYS.includes(k)) return k;', 'if (false) return k;', ['S', 'R2'], 'SHOULD② 未识别的判定题形键被静默丢弃'],
+  ['md9', 'route', 'if (strayKey) return reply.code(400)', 'if (false) return reply.code(400)', ['R2'], 'SHOULD② 路由不拒未识别键'],
+  ['md10', 'spec', "'outcomeConditionId', 'resolutionNote'])", "'outcomeConditionId'])", ['S', 'R2'], 'SHOULD② 误伤既有 resolutionNote 字段(旧流程被破坏)'],
 ];
 
 const only = (process.argv.find((a) => a.startsWith('--only=')) || '').slice(7);

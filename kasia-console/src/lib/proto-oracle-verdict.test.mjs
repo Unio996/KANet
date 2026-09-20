@@ -128,33 +128,48 @@ await t('B3 ▲ 端到端极性(真生产者): 同一场比赛 LAL 赢——extr
 const it_ = (o) => ({ branch: 'extractor', cls: 'vote', kind: 'extractor', side: 0, evidenceRef: 'u#sha256:a', confidence: null, ...o });
 const P = (n) => ({ valid: true, pmtMs: n }), BAD = { valid: false, reason: 'not_synced' };
 await t('B2/B4 ▲ 决策表: 暂态 ⇒ 不写(pmt 有效无效都不写); 实质 ABSTAIN ⇒ 写 NULL(pmt 有效 ⇒ pmt_at; 无效 ⇒ pmt_at=NULL 也写); 赞成 ⇒ pmt 有效才写(无效 ⇒ 推迟); 无冲突', () => {
-  let r = V.planVerdictWrites({ items: [it_({ cls: 'transient', kind: null })], existing: [], pmt: P(5) }); assert.equal(r.writes.length, 0);
-  r = V.planVerdictWrites({ items: [it_({ cls: 'transient', kind: null })], existing: [], pmt: BAD }); assert.equal(r.writes.length, 0);
-  r = V.planVerdictWrites({ items: [it_({ cls: 'substantive_abstain', side: undefined })], existing: [], pmt: P(7) }); assert.deepEqual([r.writes.length, r.writes[0].outcome, r.writes[0].pmt_at, r.writes[0].why], [1, null, 7, 'substantive_abstain']);
-  r = V.planVerdictWrites({ items: [it_({ cls: 'substantive_abstain', side: undefined })], existing: [], pmt: BAD }); assert.deepEqual([r.writes.length, r.writes[0].outcome, r.writes[0].pmt_at], [1, null, null], 'B4: 实质 ABSTAIN 在 pmt 无效时也写, pmt_at=NULL');
-  r = V.planVerdictWrites({ items: [it_({ side: 1 })], existing: [], pmt: P(9) }); assert.deepEqual([r.writes.length, r.writes[0].outcome, r.writes[0].pmt_at, r.writes[0].why], [1, 1, 9, 'approval']);
-  r = V.planVerdictWrites({ items: [it_({ side: 1 })], existing: [], pmt: BAD }); assert.deepEqual([r.writes.length, r.skipped[0].why], [0, 'approval_deferred_pmt_invalid'], '赞成 ⇒ pmt 无效不写(否则乱写 NULL 误冻)');
-  for (const bad of [null, undefined, { valid: true }, { valid: true, pmtMs: 1.5 }, { valid: true, pmtMs: 0 }]) assert.equal(V.planVerdictWrites({ items: [it_({ side: 1 })], existing: [], pmt: bad }).writes.length, 0, JSON.stringify(bad));
+  let r = V.planVerdictWrites({ outcomeEndMs: 1, items: [it_({ cls: 'transient', kind: null })], existing: [], pmt: P(5) }); assert.equal(r.writes.length, 0);
+  r = V.planVerdictWrites({ outcomeEndMs: 1, items: [it_({ cls: 'transient', kind: null })], existing: [], pmt: BAD }); assert.equal(r.writes.length, 0);
+  r = V.planVerdictWrites({ outcomeEndMs: 1, items: [it_({ cls: 'substantive_abstain', side: undefined })], existing: [], pmt: P(7) }); assert.deepEqual([r.writes.length, r.writes[0].outcome, r.writes[0].pmt_at, r.writes[0].why], [1, null, 7, 'substantive_abstain']);
+  r = V.planVerdictWrites({ outcomeEndMs: 1, items: [it_({ cls: 'substantive_abstain', side: undefined })], existing: [], pmt: BAD }); assert.deepEqual([r.writes.length, r.writes[0].outcome, r.writes[0].pmt_at], [1, null, null], 'B4: 实质 ABSTAIN 在 pmt 无效时也写, pmt_at=NULL');
+  r = V.planVerdictWrites({ outcomeEndMs: 1, items: [it_({ side: 1 })], existing: [], pmt: P(9) }); assert.deepEqual([r.writes.length, r.writes[0].outcome, r.writes[0].pmt_at, r.writes[0].why], [1, 1, 9, 'approval']);
+  r = V.planVerdictWrites({ outcomeEndMs: 1, items: [it_({ side: 1 })], existing: [], pmt: BAD }); assert.deepEqual([r.writes.length, r.skipped[0].why], [0, 'approval_deferred_pmt_invalid'], '赞成 ⇒ pmt 无效不写(否则乱写 NULL 误冻)');
+  for (const bad of [null, undefined, { valid: true }, { valid: true, pmtMs: 1.5 }, { valid: true, pmtMs: 0 }]) assert.equal(V.planVerdictWrites({ outcomeEndMs: 1, items: [it_({ side: 1 })], existing: [], pmt: bad }).writes.length, 0, JSON.stringify(bad));
 });
 await t('B4 ▲ 实质异议 ⇒ pmt 无效也必写: 本次的票与已有行 / 本 tick 其它票冲突 ⇒ 冲突双方都写(pmt 有效写 pmt_at, 无效写 NULL); 与已有一致 ⇒ 仍算赞成(pmt 无效不写)', () => {
   const ex = { source_kind: 'extractor', outcome: 1, evidence_ref: 'e#sha256:1', pmt_at: 5 };
-  let r = V.planVerdictWrites({ items: [it_({ branch: 'uma', kind: 'uma', side: 0, evidenceRef: 'g#sha256:2' })], existing: [ex], pmt: BAD }); assert.deepEqual([r.writes.length, r.writes[0].outcome, r.writes[0].pmt_at, r.writes[0].why], [1, 0, null, 'dissent(conflict)'], '与已有 extractor 相反 ⇒ 异议, pmt 无效也写 pmt_at=NULL');
-  r = V.planVerdictWrites({ items: [it_({ branch: 'uma', kind: 'uma', side: 0, evidenceRef: 'g#sha256:2' })], existing: [ex], pmt: P(11) }); assert.equal(r.writes[0].pmt_at, 11);
-  r = V.planVerdictWrites({ items: [it_({ branch: 'uma', kind: 'uma', side: 1, evidenceRef: 'g#sha256:2' })], existing: [ex], pmt: BAD }); assert.equal(r.writes.length, 0, '与已有一致 ⇒ 赞成 ⇒ pmt 无效推迟');
-  r = V.planVerdictWrites({ items: [it_({ side: 1 }), it_({ branch: 'uma', kind: 'uma', side: 0, evidenceRef: 'g#sha256:2' })], existing: [], pmt: BAD }); assert.deepEqual(r.writes.map((w) => [w.source_kind, w.outcome, w.pmt_at]), [['extractor', 1, null], ['uma', 0, null]], '同 tick 两源互相冲突 ⇒ 两条都写(冻结集不能漏冲突任一方)');
-  r = V.planVerdictWrites({ items: [it_({ side: 1 }), it_({ branch: 'uma', kind: 'uma', side: 1, evidenceRef: 'g#sha256:2' })], existing: [], pmt: BAD }); assert.equal(r.writes.length, 0, '同 tick 两源一致 ⇒ 都是赞成 ⇒ 推迟');
-  r = V.planVerdictWrites({ items: [it_({ side: 1 })], existing: [{ source_kind: 'llm', outcome: 0, evidence_ref: 'l#sha256:3', pmt_at: null }], pmt: BAD }); assert.equal(r.writes[0].why, 'dissent(conflict)', '与已有 llm 行冲突也算异议(冻结集含 llm)');
-  r = V.planVerdictWrites({ items: [it_({ side: 1 })], existing: [{ source_kind: 'extractor', outcome: null, evidence_ref: 'z', pmt_at: null }], pmt: BAD }); assert.equal(r.writes.length, 0, '已有 NULL 行不参与"冲突"判定(NULL 本身就会冻结)——本次赞成仍按 pmt 无效推迟');
+  let r = V.planVerdictWrites({ outcomeEndMs: 1, items: [it_({ branch: 'uma', kind: 'uma', side: 0, evidenceRef: 'g#sha256:2' })], existing: [ex], pmt: BAD }); assert.deepEqual([r.writes.length, r.writes[0].outcome, r.writes[0].pmt_at, r.writes[0].why], [1, 0, null, 'dissent(conflict)'], '与已有 extractor 相反 ⇒ 异议, pmt 无效也写 pmt_at=NULL');
+  r = V.planVerdictWrites({ outcomeEndMs: 1, items: [it_({ branch: 'uma', kind: 'uma', side: 0, evidenceRef: 'g#sha256:2' })], existing: [ex], pmt: P(11) }); assert.equal(r.writes[0].pmt_at, 11);
+  r = V.planVerdictWrites({ outcomeEndMs: 1, items: [it_({ branch: 'uma', kind: 'uma', side: 1, evidenceRef: 'g#sha256:2' })], existing: [ex], pmt: BAD }); assert.equal(r.writes.length, 0, '与已有一致 ⇒ 赞成 ⇒ pmt 无效推迟');
+  r = V.planVerdictWrites({ outcomeEndMs: 1, items: [it_({ side: 1 }), it_({ branch: 'uma', kind: 'uma', side: 0, evidenceRef: 'g#sha256:2' })], existing: [], pmt: BAD }); assert.deepEqual(r.writes.map((w) => [w.source_kind, w.outcome, w.pmt_at]), [['extractor', 1, null], ['uma', 0, null]], '同 tick 两源互相冲突 ⇒ 两条都写(冻结集不能漏冲突任一方)');
+  r = V.planVerdictWrites({ outcomeEndMs: 1, items: [it_({ side: 1 }), it_({ branch: 'uma', kind: 'uma', side: 1, evidenceRef: 'g#sha256:2' })], existing: [], pmt: BAD }); assert.equal(r.writes.length, 0, '同 tick 两源一致 ⇒ 都是赞成 ⇒ 推迟');
+  r = V.planVerdictWrites({ outcomeEndMs: 1, items: [it_({ side: 1 })], existing: [{ source_kind: 'llm', outcome: 0, evidence_ref: 'l#sha256:3', pmt_at: null }], pmt: BAD }); assert.equal(r.writes[0].why, 'dissent(conflict)', '与已有 llm 行冲突也算异议(冻结集含 llm)');
+  r = V.planVerdictWrites({ outcomeEndMs: 1, items: [it_({ side: 1 })], existing: [{ source_kind: 'extractor', outcome: null, evidence_ref: 'z', pmt_at: null }], pmt: BAD }); assert.equal(r.writes.length, 0, '已有 NULL 行不参与"冲突"判定(NULL 本身就会冻结)——本次赞成仍按 pmt 无效推迟');
 });
 await t('B2 去重: 同 (source_kind, evidence_ref) 已存在 ⇒ 不重写(skipped duplicate_evidence); 不同证据哈希 ⇒ 允许; evidenceRefOf 稳定 + 非空 + 有票取 evidence_raw / 弃权取 kind|reason', () => {
   const ex = { source_kind: 'extractor', outcome: 1, evidence_ref: 'u#sha256:a', pmt_at: 5 };
-  let r = V.planVerdictWrites({ items: [it_({ side: 1 })], existing: [ex], pmt: P(9) }); assert.deepEqual([r.writes.length, r.skipped[0].why], [0, 'duplicate_evidence']);
-  r = V.planVerdictWrites({ items: [it_({ side: 1, evidenceRef: 'u#sha256:b' })], existing: [ex], pmt: P(9) }); assert.equal(r.writes.length, 1);
-  r = V.planVerdictWrites({ items: [it_({ side: 1, kind: 'llm', evidenceRef: 'u#sha256:a' })], existing: [ex], pmt: P(9) }); assert.equal(r.writes.length, 1, '不同 source_kind 同哈希不算重复');
+  let r = V.planVerdictWrites({ outcomeEndMs: 1, items: [it_({ side: 1 })], existing: [ex], pmt: P(9) }); assert.deepEqual([r.writes.length, r.skipped[0].why], [0, 'duplicate_evidence']);
+  r = V.planVerdictWrites({ outcomeEndMs: 1, items: [it_({ side: 1, evidenceRef: 'u#sha256:b' })], existing: [ex], pmt: P(9) }); assert.equal(r.writes.length, 1);
+  r = V.planVerdictWrites({ outcomeEndMs: 1, items: [it_({ side: 1, kind: 'llm', evidenceRef: 'u#sha256:a' })], existing: [ex], pmt: P(9) }); assert.equal(r.writes.length, 1, '不同 source_kind 同哈希不算重复');
   const a = V.evidenceRefOf({ result: { evidence_url: 'https://x', evidence_raw: 'RAW' }, cls: 'vote' }), b = V.evidenceRefOf({ result: { evidence_url: 'https://x', evidence_raw: 'RAW' }, cls: 'vote' });
   assert.equal(a, b); assert.match(a, /^https:\/\/x#sha256:[0-9a-f]{64}$/); assert.notEqual(a, V.evidenceRefOf({ result: { evidence_url: 'https://x', evidence_raw: 'RAW2' }, cls: 'vote' }));
   const ab = V.evidenceRefOf({ result: { extractor_kind_used: 'judgeline-abstain', reason: 'r' }, cls: 'substantive_abstain' }); assert.match(ab, /^-#sha256:[0-9a-f]{64}$/);
-  for (const bad of [{ cls: 'vote', kind: 'extractor', side: 1, evidenceRef: '' }, { cls: 'vote', kind: 'extractor', side: 1, evidenceRef: '   ' }, { cls: 'vote', kind: null, side: 1, evidenceRef: 'x' }, { cls: 'vote', kind: 'extractor', side: undefined, evidenceRef: 'x' }, { cls: 'vote', kind: 'extractor', side: 2, evidenceRef: 'x' }]) assert.equal(V.planVerdictWrites({ items: [it_(bad)], existing: [], pmt: P(1) }).writes.length, 0, JSON.stringify(bad));
+  for (const bad of [{ cls: 'vote', kind: 'extractor', side: 1, evidenceRef: '' }, { cls: 'vote', kind: 'extractor', side: 1, evidenceRef: '   ' }, { cls: 'vote', kind: null, side: 1, evidenceRef: 'x' }, { cls: 'vote', kind: 'extractor', side: undefined, evidenceRef: 'x' }, { cls: 'vote', kind: 'extractor', side: 2, evidenceRef: 'x' }]) assert.equal(V.planVerdictWrites({ outcomeEndMs: 1, items: [it_(bad)], existing: [], pmt: P(1) }).writes.length, 0, JSON.stringify(bad));
+});
+
+await t('B1c ▲ ok:false 且带 outcome(YES/NO)的结果不是票: uma 路 {ok:false,outcome:"YES"} ⇒ 暂态 / kanet 路同 ⇒ 暂态(不得因 outcome 字段存在就当 uma / extractor 票); 对照 ok:true 才是票', () => {
+  for (const branch of ['uma', 'extractor']) for (const out of ['YES', 'NO']) { const c = V.classifyDerivation({ branch, result: { ok: false, outcome: out, reason: 'gamma not finalized', extractor_kind_used: 'judgeline-deterministic' } }); assert.equal(c.cls, 'transient', branch + '/' + out); assert.equal(c.kind, null); }
+  assert.equal(V.classifyDerivation({ branch: 'uma', result: { ok: true, outcome: 'YES' } }).kind, 'uma');
+});
+await t('M1 ▲ 批准票只在 pmt 有效 ∧ pmt >= outcomeEndMs 才写: pmt = oe−1 ⇒ 推迟(approval_deferred_pmt_before_outcome_end); = oe ⇒ 写(pmt_at=oe); > oe ⇒ 写; 异议 / 实质 ABSTAIN / 冲突各方不受此限(pmt<oe 也写); outcomeEndMs 缺 / 非法 ⇒ 抛(不静默放宽)', () => {
+  const OE1 = 1000;
+  let r = V.planVerdictWrites({ outcomeEndMs: OE1, items: [it_({ side: 1 })], existing: [], pmt: P(OE1 - 1) }); assert.deepEqual([r.writes.length, r.skipped[0].why], [0, 'approval_deferred_pmt_before_outcome_end']);
+  r = V.planVerdictWrites({ outcomeEndMs: OE1, items: [it_({ side: 1 })], existing: [], pmt: P(OE1) }); assert.deepEqual([r.writes.length, r.writes[0].pmt_at, r.writes[0].why], [1, OE1, 'approval']);
+  r = V.planVerdictWrites({ outcomeEndMs: OE1, items: [it_({ side: 1 })], existing: [], pmt: P(OE1 + 5) }); assert.equal(r.writes[0].pmt_at, OE1 + 5);
+  r = V.planVerdictWrites({ outcomeEndMs: OE1, items: [it_({ cls: 'substantive_abstain', side: undefined })], existing: [], pmt: P(OE1 - 500) }); assert.deepEqual([r.writes.length, r.writes[0].outcome, r.writes[0].pmt_at], [1, null, OE1 - 500], '实质 ABSTAIN 不受 oe 限制');
+  r = V.planVerdictWrites({ outcomeEndMs: OE1, items: [it_({ side: 1 }), it_({ branch: 'uma', kind: 'uma', side: 0, evidenceRef: 'g#sha256:2' })], existing: [], pmt: P(OE1 - 500) }); assert.deepEqual(r.writes.map((w) => [w.source_kind, w.outcome, w.why]), [['extractor', 1, 'dissent(conflict)'], ['uma', 0, 'dissent(conflict)']], '冲突各方 pmt<oe 也写');
+  r = V.planVerdictWrites({ outcomeEndMs: OE1, items: [it_({ side: 0 })], existing: [{ source_kind: 'uma', outcome: 1, evidence_ref: 'g', pmt_at: OE1 }], pmt: P(OE1 - 500) }); assert.equal(r.writes[0].why, 'dissent(conflict)', '与已有票冲突 ⇒ 异议, 不受 oe 限制');
+  for (const bad of [undefined, null, 0, -1, 1.5, '1000', NaN]) assert.throws(() => V.planVerdictWrites({ outcomeEndMs: bad, items: [], existing: [], pmt: P(5) }), TypeError, String(bad));
 });
 
 globalThis.fetch = realFetch;

@@ -69,6 +69,11 @@ let legacyId, judgedId;
   for (const [name, over, code] of bads) { const rr3 = await create(judged(over)); ok(rr3.statusCode === 400 && body(rr3).error === code, `拒建: ${name} ⇒ 400 ${code}(实际 ${rr3.statusCode} ${body(rr3).error})`); }
   ok(count() === c0, '全部拒建路径都发生在任何 DB 写之前');
 
+  // SHOULD②: 未识别的 resolution* / outcome* 键(蛇形等)⇒ 400, 不静默丢弃后建成普通市场; resolutionNote(既有占位字段)仍照旧接受
+  for (const k of ['resolution_rule_spec', 'outcome_end', 'outcome_condition_id', 'outcomeMarketSource', 'resolutionPredicate']) { const rs = await create({ ...legacy(), [k]: 'x' }); ok(rs.statusCode === 400 && body(rs).error === 'unrecognized_judged_field', `未识别键 ${k} ⇒ 400 unrecognized_judged_field(实际 ${rs.statusCode} ${body(rs).error})`); }
+  const rs2 = await create({ ...judged(), outcome_end: 'x' }); ok(rs2.statusCode === 400 && body(rs2).error === 'unrecognized_judged_field', '合法判定题 + 多带一个蛇形键 ⇒ 仍 400(不悄悄丢弃)');
+  const rn = await create({ ...legacy(), resolutionNote: 'note' }); ok(rn.statusCode === 409 && body(rn).error === 'proto_driver_disabled', `resolutionNote(既有字段)照旧接受(实际 ${rn.statusCode})`);
+  ok(count() === c0 + 1, '未识别键拒建: 未写行(仅 resolutionNote 那一个旧流程行)');
   const okr = await create(judged()); const ob = body(okr); judgedId = ob.id;
   ok(okr.statusCode === 409 && ob.error === 'proto_driver_disabled' && judgedId, `合法判定题创建: 写行后走既有终点(实际 ${okr.statusCode} ${ob.error})`);
   const jr = row(judgedId);

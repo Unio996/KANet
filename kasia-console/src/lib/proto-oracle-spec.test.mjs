@@ -1,7 +1,7 @@
 // proto-oracle-spec.test.mjs — oracle 整合批 B / B3·B6·C1·C2: 判定题创建入口校验 + 下注 side_label 校验 + 公开读呈现。纯函数, 无 DB / 无网络(finder 用真 findExtractor: 纯 URL 解析)。
 // Run: cd kasia-console && node src/lib/proto-oracle-spec.test.mjs
 import assert from 'node:assert/strict';
-import { validateJudgedMarketInput, dryRunPredicate, checkSideLabel, presentProtoMarket, findRelayKeyInBody, hasJudgedInput, parseStoredSpec, CONDITION_ID_RE, JUDGED_PRESENTATION_COLS } from './proto-oracle-spec.mjs';
+import { findUnrecognizedJudgedShapedKey, validateJudgedMarketInput, dryRunPredicate, checkSideLabel, presentProtoMarket, findRelayKeyInBody, hasJudgedInput, parseStoredSpec, CONDITION_ID_RE, JUDGED_PRESENTATION_COLS } from './proto-oracle-spec.mjs';
 import { resolveBudgetConfig } from './proto-settlement-budget.mjs';
 
 let pass = 0, fail = 0;
@@ -74,6 +74,11 @@ await t('S8 ▲ B6(c) 时间预算: deadline ≥ outcomeEnd + UMA 窗 + 宽限�
 await t('S9 ▲ 请求体不得含 relay 类字段(键名含 relay 不分大小写, 服务端定 outcome_oracle_relay_ids)', () => {
   for (const k of ['relayId', 'outcomeOracleRelayIds', 'outcome_oracle_relay_ids', 'RELAY', 'x_relay_y']) assert.equal(findRelayKeyInBody({ [k]: 1, title: 'x' }), k);
   assert.equal(findRelayKeyInBody({ title: 'x', outcomeEnd: 1 }), null); assert.equal(findRelayKeyInBody(null), null); assert.equal(findRelayKeyInBody([]), null);
+});
+await t('S9b ▲ SHOULD② 未识别的 resolution* / outcome* 形键(蛇形 / 大小写变体 / 其它)⇒ 命中; 已识别键与无关键 ⇒ 不命中', () => {
+  for (const k of ['resolution_rule_spec', 'outcome_end', 'outcome_condition_id', 'outcomeMarketSource', 'resolutionPredicate', 'Resolution_Rule_Spec', 'OUTCOME_END', 'outcomeoracleRelayIds', 'resolution', 'outcome', 'resolutionrulespec']) assert.equal(findUnrecognizedJudgedShapedKey({ title: 'x', [k]: 1 }), k, k);
+  for (const k of ['resolutionRuleSpec', 'outcomeEnd', 'outcomeConditionId', 'resolutionNote', 'title', 'deadline', 'tokenId', 'myoutcome', 'x_resolution']) assert.equal(findUnrecognizedJudgedShapedKey({ [k]: 1 }), null, k);
+  assert.equal(findUnrecognizedJudgedShapedKey(null), null); assert.equal(findUnrecognizedJudgedShapedKey([]), null);
 });
 await t('S10 ▲ C1 下注 side_label: 判定题下注必须带 side_label 且与 direction 按 side_map 一致; 缺 / 非 yes|no / 不一致 ⇒ 400; side_map 缺失或非法 ⇒ 500(拒受理); 两种 side_map 排列 × 两个 label 全表', () => {
   for (const [sm, rows] of [[{ yes: 1, no: 0 }, [['yes', 1, true], ['yes', 0, false], ['no', 0, true], ['no', 1, false]]], [{ yes: 0, no: 1 }, [['yes', 0, true], ['yes', 1, false], ['no', 1, true], ['no', 0, false]]]]) {

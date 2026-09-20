@@ -124,7 +124,10 @@ export async function registerProtoRoutes(fastify) {
     // ── 批 B B6/C2 判定题创建入口: 三个新字段全可选——【全缺省 = 今天的旧流程(逐字节不变)】; 任一出现 ⇒ 全套判定题校验(半套 400) ──
     let judgedCols = null;
     {
-      const { hasJudgedInput, findRelayKeyInBody, validateJudgedMarketInput } = await import('../lib/proto-oracle-spec.mjs');
+      const { hasJudgedInput, findRelayKeyInBody, validateJudgedMarketInput, findUnrecognizedJudgedShapedKey } = await import('../lib/proto-oracle-spec.mjs');
+      // SHOULD②: 未识别的 resolution* / outcome* 键(蛇形等)⇒ 400, 不静默丢弃后建成普通市场
+      const strayKey = findUnrecognizedJudgedShapedKey(request.body);
+      if (strayKey) return reply.code(400).send({ ok: false, error: 'unrecognized_judged_field', detail: `${strayKey} is not a recognized field (judged-market fields are camelCase: resolutionRuleSpec / outcomeEnd / outcomeConditionId); refusing to silently drop it` });
       if (hasJudgedInput(request.body)) {
         const relayKey = findRelayKeyInBody(request.body);
         if (relayKey) return reply.code(400).send({ ok: false, error: `${relayKey} must not be provided in the request body — outcome_oracle_relay_ids is decided server-side` });

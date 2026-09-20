@@ -24,6 +24,16 @@ export function findRelayKeyInBody(body) {
   for (const k of Object.keys(body)) if (/relay/i.test(k)) return k;
   return null;
 }
+/**
+ * SHOULD②(NWT 复核): 请求体里任何以 resolution / outcome 开头(不分大小写, 含蛇形 resolution_rule_spec / outcome_end / outcomeMarketSource 等)却不是已识别键的字段 ⇒ 返回该键(路由 400)。
+ * 否则这类键会被静默丢弃、建成普通市场(="接受却丢弃")。已识别 = 判定题三键 + 既有的 resolutionNote(既有占位字段, 接受但目前无处存, 见路由注释)。
+ */
+export const RECOGNIZED_RESOLUTION_OUTCOME_KEYS = Object.freeze(['resolutionRuleSpec', 'outcomeEnd', 'outcomeConditionId', 'resolutionNote']);
+export function findUnrecognizedJudgedShapedKey(body) {
+  if (!isPlainObject(body)) return null;
+  for (const k of Object.keys(body)) if (/^(resolution|outcome)/i.test(k) && !RECOGNIZED_RESOLUTION_OUTCOME_KEYS.includes(k)) return k;
+  return null;
+}
 /** 创建请求是否带了任一判定题字段(半套 = 400, 全缺省 = 今天的旧流程)。 */
 export function hasJudgedInput(body) { return !!isPlainObject(body) && JUDGED_BODY_KEYS.some((k) => body[k] !== undefined); }
 

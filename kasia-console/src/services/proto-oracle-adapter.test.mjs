@@ -62,6 +62,11 @@ await t('V5 tick 本体: 单飞(在飞时第二次调用 ⇒ skipped in_flight, 
   const r3 = await svc.oracleAdapterTickBody({ ...base, deps }); assert.equal(r3.aborted, null);
   const r4 = await svc.oracleAdapterTickBody({ ...base, deps: { ...deps, voter: voter(NaN) } }); assert.equal(r4.aborted, 'uma_window_unsafe');
 });
+await t('V3b ▲ SHOULD① voter 导入失败 ⇒ LOUD 拒启动(不抛、不启动、不建 interval): 顶层 await startProtoOracleAdapter 不会因此拖垮 console 启动', async () => {
+  const log = mkLog(); await svc.startProtoOracleAdapter({ env: ON, relayId: 'r1', log, deps: { importVoter: async () => { throw new Error('Cannot find module x'); } } });
+  assert.equal(svc.oracleAdapterState().started, false); assert.ok(log.has('error', /REFUSED to start.*bettor-prediction-voter.*Cannot find module x/), JSON.stringify(log.lines));
+  const log2 = mkLog(); await svc.startProtoOracleAdapter({ env: ON, relayId: 'r1', log: log2, deps: { importVoter: () => { throw new Error('sync boom'); } } }); assert.equal(svc.oracleAdapterState().started, false); assert.ok(log2.has('error', /sync boom/));
+});
 await t('V6 接线钉(源码): index.js 在 startProtoSettlementDriver 之后启动 adapter; 服务默认关(读 PROTO_ORACLE_ADAPTER_ENABLED === "1"); 独立 interval, 不碰旧 voter 的 tick; 生产端口装配 readPmt 走批 D readValidatedPmt(共享校验器)', () => {
   const idx = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8'); const a = idx.indexOf('startProtoSettlementDriver()'), b = idx.indexOf('startProtoOracleAdapter()');
   assert.ok(a > 0 && b > a, 'adapter 启动在 settlement driver 之后'); assert.ok(/import \{ startProtoOracleAdapter \}/.test(idx));

@@ -18,8 +18,10 @@ const CANDIDATE_SQL = `
          ${JUDGED_COLUMNS.map((c) => `m.${c}`).join(', ')}
   FROM proto_markets m
   WHERE m.status = 'sealed' AND m.winning_side IS NULL AND m.settlement_frozen_at IS NULL
-    AND ${judgedSqlPredicate('m')} AND m.outcome_end_ms IS NOT NULL
-  ORDER BY m.created_at ASC LIMIT ?`;
+    AND ${judgedSqlPredicate('m')} AND m.outcome_end_ms IS NOT NULL AND m.outcome_end_ms <= ?
+  ORDER BY m.outcome_end_ms ASC, m.created_at ASC LIMIT ?`;
+// M2(NWT 复核): 只取【结果已可知】的市场(墙钟 >= outcome_end; 墙钟 >= pmt, 所以这是 pmt 可判集的超集)并按 outcome_end 升序——
+//   远期未到期的旧市场不再每 tick 占满 LIMIT 名额饿死可判的新市场; 永久不可处理的(spec_invalid / source_not_registered)直接冻结让它离开候选集。
 
 /**
  * @param {object} o
@@ -35,13 +37,18 @@ const CANDIDATE_SQL = `
 export async function runOracleAdapterTick({ db, readPmt, deriveExtractor, deriveUma, cfg, network, umaWindowMs, env = process.env, nowMs = Date.now, log = console, limit = 20, findExtractorFn = findExtractor }) {
   const summary = { scanned: 0, skipped: {}, verdictsWritten: 0, promoted: [], frozen: [], waited: 0, errors: 0, aborted: null };
   const skip = (why, id) => { summary.skipped[why] = (summary.skipped[why] || 0) + 1; log.log?.(`[proto-oracle-adapter] skip market=${String(id).slice(0, 12)} why=${why}`); };
+  // 永久不可处理(spec 坏 / 数据源不在注册表): 重试不会好 ⇒ 冻结(单向 fail-safe: 该市场唯一出口 = refund)并离开候选集, 不再占名额(M2)
+  const permanentFreeze = (why, m) => {
+    summary.errors++; skip(why, m.id);
+    const f = freezeMarket({ db, marketId: m.id, reason: why, pmt: null, wallMs: nowMs(), log });
+    summary.frozen.push({ id: m.id, reason: why, clock: f.clock, changes: f.changes });
+  };
   const uma = assertUmaWindowSafe(umaWindowMs);
   if (!uma.ok) { summary.aborted = 'uma_window_unsafe'; log.error?.(`[proto-oracle-adapter] REFUSED tick: ${uma.reason}`); return summary; }
-  const candidates = db.prepare(CANDIDATE_SQL).all(limit);
+  const candidates = db.prepare(CANDIDATE_SQL).all(nowMs(), limit);
   if (!candidates.length) return summary;
   let pmt = null;
   try { pmt = await readPmt(); } catch (e) { pmt = { valid: false, reason: `read_pmt_threw: ${e && e.message ? e.message : e}` }; }
-  const pmtOk = !!(pmt && pmt.valid === true && Number.isSafeInteger(pmt.pmtMs));
 
   for (const m of candidates) {
     summary.scanned++;
@@ -49,15 +56,14 @@ export async function runOracleAdapterTick({ db, readPmt, deriveExtractor, deriv
       // 三处强制谓词之③(扫描)
       const allowed = judgedMarketAllowedHere({ network, tokenDefId: m.token_def_id, env });
       if (!allowed.allowed) { skip(`not_allowed_here:${allowed.reason.split('(')[0]}`, m.id); continue; }
-      // 结果可知: max(墙钟, pmt) ≥ outcome_end(墙钟已过即可扫——pmt 无效时仍要能写实质异议, B4)
-      const wall = nowMs();
-      if (!(wall >= m.outcome_end_ms || (pmtOk && pmt.pmtMs >= m.outcome_end_ms))) { skip('outcome_not_known', m.id); continue; }
+      // 结果可知的判定已下推到候选 SQL(outcome_end_ms <= 墙钟; 墙钟 >= pmt ⇒ 是 pmt 可判集的超集, M2)——循环内不再重复判(重复判恒真 = 死代码, 变异 mc3 因此存活并被移除)
+      // 墙钟已过而 pmt 无效时仍扫: 为写实质异议(B4); 批准票另由 planVerdictWrites 要求 pmt>=outcome_end(M1)
       const spec = parseStoredSpec(m.resolution_rule_spec);
       const sideMap = spec ? normalizeSideMap(spec.side_map) : null;
-      if (!spec || !sideMap || (spec.polymarket_outcome_side !== 'YES' && spec.polymarket_outcome_side !== 'NO')) { skip('spec_invalid', m.id); summary.errors++; continue; }
+      if (!spec || !sideMap || (spec.polymarket_outcome_side !== 'YES' && spec.polymarket_outcome_side !== 'NO')) { permanentFreeze('spec_invalid', m); continue; }
       // B6(a): adapter 复核同一注册表(直接写库 / 旧数据的 data_source 也不 fetch); v0 只支持 ESPN 确定性源
       const ent = findExtractorFn(spec.data_source_canonical);
-      if (!ent || ent.kind !== 'espn') { skip('source_not_registered', m.id); summary.errors++; continue; }
+      if (!ent || ent.kind !== 'espn') { permanentFreeze('source_not_registered', m); continue; }
 
       const existing = db.prepare('SELECT id, source_kind, outcome, evidence_ref, pmt_at FROM proto_market_verdicts WHERE market_id = ?').all(m.id);
       const kinds = new Set(existing.map((v) => v.source_kind));
@@ -79,7 +85,7 @@ export async function runOracleAdapterTick({ db, readPmt, deriveExtractor, deriv
       if (doExtractor) await run('extractor', () => deriveExtractor({ id: m.id, outcome_market_source: 'kanet_native', outcome_condition_id: null, outcome_token_id: null, outcome_side: null, resolution_rule_spec: m.resolution_rule_spec, outcome_oracle_relay_id: null }, spec));
       if (doUma) await run('uma', () => deriveUma({ id: m.id, outcome_market_source: 'polymarket', outcome_condition_id: m.outcome_condition_id, outcome_token_id: null, resolution_rule_spec: null }));
 
-      const plan = planVerdictWrites({ items, existing, pmt });
+      const plan = planVerdictWrites({ items, existing, pmt, outcomeEndMs: m.outcome_end_ms });
       if (plan.writes.length) {
         const dup = db.prepare('SELECT 1 FROM proto_market_verdicts WHERE market_id = ? AND source_kind = ? AND evidence_ref = ? LIMIT 1');
         const ins = db.prepare('INSERT INTO proto_market_verdicts (market_id, source_kind, relay_id, outcome, confidence, evidence_ref, created_at, pmt_at) VALUES (?, ?, NULL, ?, ?, ?, ?, ?)');

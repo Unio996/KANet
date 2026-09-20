@@ -1,0 +1,11 @@
+BASELINE (2 test files)
+  green C src/lib/proto-oracle-adapter-core.test.mjs 22p/0f
+  green P src/lib/proto-oracle-policy.test.mjs 5p/0f
+mc1 killed [C:RED(21p/1f)] — B5 站点③(扫描)谓词结果被忽略
+mc2 killed [P:RED(4p/1f)] — B5 站点③(promote 前)谓词调用被删(源码钉)
+mc4 killed [C:RED(21p/1f)] — B6(a) adapter 不复核数据源注册表(SSRF 二道闸)
+mc5 killed [C:RED(21p/1f)] — B2 LLM 每 tick 重复询问
+mc6 killed [C:RED(21p/1f)] — B2/B4 同证据重复写行
+mc7 killed [C:RED(13p/9f)] — 门判冻结时 adapter 不执行冻结
+
+SUMMARY: total=6 killed=6 survived=0 anchor_errors=0

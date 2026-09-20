@@ -48,3 +48,33 @@
 - adapter 停摆告警(批 D 记票: promote 后 X 分钟未 close_commit landed / promote 窗内 pmt 连续读失败 > N tick)现在有调用方了, 待 runbook 定 X / Y / N。
 - refund 执行(refund_flip 广播 + 逐票 reclaim)仍未接线 ⇒ N5b 限制持续有效。
 - 若 Bettor / Owner 指定 TypeSafe 的建议性用法(非结算路径 / 仅合成或公开输入 / 置信度阈值 / 低置信升人), 另出小改。
+
+---
+
+# NWT 复核 delta(2026-09-20, J2)—— 2 MUST + 小项
+
+## M1 误拒(活性): 批准票只在 `pmt 有效 ∧ pmt >= outcome_end` 才写
+- 根因: 批准票盖当前 pmt 的 pmt_at; [outcome_end, +~2.3min) 窗内 pmt 仍 < outcome_end ⇒ 该票 pmt_at < oe 永久失格于赞成集(批 D N1 要 pmt_at >= oe)⇒ 市场必走 cutoff 冻结 → 退款(ESPN 赛果在 oe 前后已 final 时几乎必犯)。
+- 修: `planVerdictWrites` 新增必填参数 `outcomeEndMs`(缺 / 非正安全整数 ⇒ 抛 TypeError, 不静默放宽); 批准票 pmt < oe ⇒ 本 tick 不写(skipped `approval_deferred_pmt_before_outcome_end`), 下 tick 再 derive / 写。**异议 / 实质 ABSTAIN / 冲突各方不受此限**(B4: 任何时候都写, pmt<oe 也带 pmt_at 写入)。
+- 测: verdict M1 单元(pmt=oe−1 推迟 / =oe 写 / >oe 写 / 异议·ABSTAIN·冲突不受限 / outcomeEndMs 缺失抛); adapter-core A20(wall=oe+60s ∧ pmt=oe−80s ⇒ 不写; 下 tick pmt>=oe ⇒ 重 derive 写且 pmt_at>=oe; 宽限窗后 promote——修前必冻结; 边界 oe−1 / oe; 异议与实质 ABSTAIN 在 pmt<oe 照写)。变异 md1(放宽为只判 pmt 有效)⇒ V + C 红; md2(把 ABSTAIN 也限制)⇒ V + C 红。
+- 已知代价(如实): 批准票被推迟的那几个 tick 内, LLM 类票会被重复询问(kanet 路已有 extractor / llm 行才停止 derive); 推迟窗至多 ~2.3min ≈ 1 个 adapter tick。
+
+## M2 活性: 候选不被远期旧市场饿死
+- 根因: 候选按 created_at 升序 LIMIT 20、无时间过滤 ⇒ 远期未到期的旧市场每 tick 占满名额, 饿死可判的新市场。
+- 修: `CANDIDATE_SQL` 加 `AND m.outcome_end_ms <= ?`(绑当前墙钟; 墙钟 >= pmt ⇒ 是 pmt 可判集的超集)+ `ORDER BY m.outcome_end_ms ASC, m.created_at ASC`; **永久不可处理的(spec_invalid / source_not_registered)⇒ 直接 `freezeMarket(reason)`**(单向 fail-safe: 唯一出口 = refund)离开候选集。
+- 测: A21(20 个未到期先创建 + 1 个已到期, limit=20 ⇒ 已到期者被处理; 多个已到期按 outcome_end 升序取)、A22(20 个 spec 坏的先冻结, 好市场下一 tick 被处理)、A13(坏 spec / 未登记源 ⇒ 冻结 + 不再候选)。变异 md3(去掉到期过滤)/ md4(去掉排序)/ md5、md6(不冻结)全红。
+- **删死代码**: 到期判定下推 SQL 后, 循环内原有的"墙钟 / pmt >= outcome_end"检查恒真, 已删(round5 变异 mc3 因此存活——等价变异; 该条从变异集移除, 等价覆盖由 md3 承担)。同批删除随之无用的 `pmtOk`。
+- 🟡 未处理(如实): 主网上"不被允许"(`not_allowed_here`)的判定题市场(只可能来自直接写库 / 旧数据, 创建入口已拒)仍不冻结、仍占候选名额——白名单会变, 不该永久冻结; 若成问题再单独出票。
+
+## 小项
+- **B1c**: 补测 `{ok:false, outcome:'YES'|'NO'}`(uma / extractor 两路)⇒ 暂态, 不是票。
+- **SHOULD①**: `startProtoOracleAdapter` 对 `bettor-prediction-voter` 的导入包 try/catch(可注入 `deps.importVoter`), 失败 ⇒ LOUD `REFUSED to start` 并返回(不抛、不启动 = 默认关闭同态), 不拖垮 console 顶层启动。测 V3b; 变异 md7(重新抛出)红。
+- **SHOULD②**: 创建路由对任何以 `resolution` / `outcome` 开头(不分大小写, 含蛇形)却不在已识别集 `{resolutionRuleSpec, outcomeEnd, outcomeConditionId, resolutionNote}` 的键 ⇒ 400 `unrecognized_judged_field`, 不静默丢弃后建成普通市场。`resolutionNote`(既有占位字段)照旧接受, 有断言。测 S9b + create-route; 变异 md8 / md9 / md10(误伤 resolutionNote)红。
+
+## 记票(不做, 照派单)
+UMA closedTime 晚到撞 cutoff(方向安全, 进 runbook); 带鉴权人工冻结入口(已在票)。
+
+## delta 验证
+- adapter-core 22(+A20/A21/A22)、verdict 12(+B1c/M1)、spec 12(+S9b)、service 7(+V3b)、create-route ALL PASS。
+- 全量回归 `regression-sweep-after-delta.txt`: **55 文件 0 失败**。
+- 变异: round4 delta 10/10 杀; round5 全集重跑(delta 后)52 中 51 杀 + mc3 存活(等价, 已删死代码并移除该条); round6(`--only=mc`)删死代码后 6/6 杀。**现行变异集 51 条, 全杀**(原始输出 round1–round6 全留存, 未覆盖)。

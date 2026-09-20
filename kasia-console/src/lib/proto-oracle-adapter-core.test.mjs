@@ -52,9 +52,9 @@ const notReady = async () => ({ ok: false, reason: 'polymarket market not resolv
 const pmtOf = (ms) => ({ valid: true, pmtMs: ms });
 const PMT_BAD = { valid: false, reason: 'lag_exceeded' };
 /** 跑一个 tick; 只处理指定市场(其它市场已被前面的用例弄成非候选或无害——每个用例用独立市场且默认关闭其余候选: 见 isolate) */
-async function tick({ pmt = pmtOf(T1), wall = T1, derive = {}, network = 'simnet', env = {}, umaWindowMs = UMA_OK, db = sqlite, calls = { ex: 0, uma: 0 } } = {}) {
+async function tick({ pmt = pmtOf(T1), wall = T1, derive = {}, network = 'simnet', env = {}, umaWindowMs = UMA_OK, db = sqlite, calls = { ex: 0, uma: 0 }, limit = 500 } = {}) {
   const s = await runOracleAdapterTick({
-    db, cfg, network, umaWindowMs, env, log: silent, nowMs: () => wall, limit: 500,
+    db, cfg, network, umaWindowMs, env, log: silent, nowMs: () => wall, limit,
     readPmt: async () => pmt,
     deriveExtractor: async (o, sp) => { calls.ex++; return (derive.ex || notReady)(o, sp); },
     deriveUma: async (o) => { calls.uma++; return (derive.uma || notReady)(o); },
@@ -138,11 +138,11 @@ await t('A10 B5/N5b 三档网络: 主网 + 非白名单 ⇒ 不 derive 不写任
   for (const net of ['simnet', 'testnet-12']) { isolate(); const c = mk({ token: 'tok1' }); await tick({ network: net, derive: { ex: extractorVote('YES'), uma: umaVote('YES') } }); assert.equal(V(c).length, 2, net); }
   void r3;
 });
-await t('A11 结果尚不可知 ⇒ 跳过(max(墙钟, pmt) < outcome_end 不 derive); 墙钟已过而 pmt 无效 ⇒ 仍扫(为写实质异议, B4); pmt 已过而墙钟未过 ⇒ 也扫', async () => {
+await t('A11 结果尚不可知 ⇒ 不是候选(M2: 候选 SQL 按墙钟 >= outcome_end 过滤; 不 derive); 墙钟已过而 pmt 无效 ⇒ 仍扫(为写实质异议, B4); 墙钟未过而 pmt 已过(现实中 pmt 不领先墙钟)⇒ 也不是候选', async () => {
   isolate(); const id = mk(); const calls = { ex: 0, uma: 0 };
-  const r = await tick({ pmt: pmtOf(OE - 1), wall: OE - 1, derive: { ex: extractorVote('YES') }, calls }); assert.equal(calls.ex, 0); assert.equal(r.s.skipped.outcome_not_known, 1);
+  const r = await tick({ pmt: pmtOf(OE - 1), wall: OE - 1, derive: { ex: extractorVote('YES') }, calls }); assert.equal(calls.ex, 0); assert.equal(r.s.scanned, 0, '未到期 ⇒ 不在候选集(不占名额)');
   await tick({ pmt: PMT_BAD, wall: OE, derive: { ex: extractorVote('YES') }, calls }); assert.equal(calls.ex, 1, '墙钟到点即扫');
-  isolate(); const id2 = mk(); await tick({ pmt: pmtOf(OE), wall: OE - 5000, derive: { ex: extractorVote('YES') }, calls }); assert.equal(calls.ex, 2, 'pmt 到点也扫');
+  isolate(); const id2 = mk(); const r2 = await tick({ pmt: pmtOf(OE), wall: OE - 5000, derive: { ex: extractorVote('YES') }, calls }); assert.equal(calls.ex, 1, '墙钟未到 ⇒ 不扫(pmt 不可能领先墙钟; 候选集取墙钟超集)'); assert.equal(r2.s.scanned, 0);
   void id; void id2;
 });
 await t('A12 非候选全跳过(不 derive / 不写): 非 sealed(betting)/ 已冻结 / 非判定题 / outcome_end 为 NULL / 已判', async () => {
@@ -151,11 +151,12 @@ await t('A12 非候选全跳过(不 derive / 不写): 非 sealed(betting)/ 已�
   const r = await tick({ derive: { ex: extractorVote('YES'), uma: umaVote('YES') }, calls }); assert.equal(r.s.scanned, 0); assert.equal(calls.ex + calls.uma, 0);
   for (const id of [o, p, q, f]) assert.equal(V(id).length, 0);
 });
-await t('A13 坏 spec / 未登记数据源 ⇒ 跳过并计 errors, 不 derive(SSRF 二道闸: 直接写库的 data_source 也不 fetch): 非 JSON / 缺 side_map / side_map 非双射 / 缺 polymarket_outcome_side / 非 ESPN 域 / 内网地址', async () => {
+await t('A13 坏 spec / 未登记数据源 ⇒ 计 errors、不 derive(SSRF 二道闸: 直接写库的 data_source 也不 fetch)且【冻结】离开候选集(M2: 永久不可处理不再占名额): 非 JSON / 缺 side_map / side_map 非双射 / 缺 polymarket_outcome_side / 非 ESPN 域 / 内网地址', async () => {
   isolate(); const calls = { ex: 0, uma: 0 };
   const bad = [mk({ spec: 'not-json' }), mk({ spec: specJson({ side_map: undefined }) }), mk({ spec: specJson({ side_map: { yes: 1, no: 1 } }) }), mk({ spec: specJson({ polymarket_outcome_side: undefined }) }), mk({ spec: specJson({ data_source_canonical: 'https://evil.example/a?event=1' }) }), mk({ spec: specJson({ data_source_canonical: 'http://127.0.0.1:3200/admin' }) })];
   const r = await tick({ derive: { ex: extractorVote('YES'), uma: umaVote('YES') }, calls });
-  assert.equal(calls.ex + calls.uma, 0); assert.equal(r.s.errors, bad.length); for (const id of bad) assert.equal(V(id).length, 0);
+  assert.equal(calls.ex + calls.uma, 0); assert.equal(r.s.errors, bad.length); for (const id of bad) { assert.equal(V(id).length, 0); assert.match(M(id).frozen_reason, /^(spec_invalid|source_not_registered)\|clock=/); assert.notEqual(M(id).settlement_frozen_at, null); assert.equal(M(id).winning_side, null); }
+  assert.equal(r.s.frozen.length, bad.length); const r2 = await tick({ derive: { ex: extractorVote('YES'), uma: umaVote('YES') }, calls }); assert.equal(r2.s.scanned, 0, '冻结后不再是候选');
 });
 await t('A14 UMA 定稿窗不安全(NaN / <24h / undefined)⇒ 整个 tick 中止, 不读候选不 derive 不写(SHOULD①)', async () => {
   isolate(); const id = mk(); const calls = { ex: 0, uma: 0 };
@@ -204,6 +205,34 @@ await t('A19 ▲ B2/B4 冲突且 pmt 无效: 两边的票仍都写(pmt_at=NULL �
   assert.deepEqual(V(id).map((v) => [v.source_kind, v.outcome, v.pmt_at]), [['extractor', 1, null], ['uma', 0, null]]); assert.equal(r1.s.waited, 1); assert.equal(M(id).settlement_frozen_at, null);
   const r2 = await tick({ pmt: pmtOf(T1), wall: T1, derive: { ex: extractorVote('YES'), uma: umaVote('NO') }, calls }); assert.equal(calls.ex, 1); assert.equal(calls.uma, 1); assert.match(M(id).frozen_reason, /inconsistent_verdicts/); assert.equal(r2.s.frozen.length, 1);
   const id2 = mk(); await tick({ pmt: PMT_BAD, wall: OE + H, derive: { ex: extractorVote('YES'), uma: umaVote('YES') } }); assert.equal(V(id2).length, 0, '无冲突 + pmt 无效 ⇒ 赞成延后, 不写');
+});
+
+await t('A20 ▲ M1 批准票只在 pmt 有效 ∧ pmt >= outcome_end 才写: wall=oe+60s ∧ pmt=oe−80s ⇒ 不写批准票(否则 pmt_at<oe 永久失格 ⇒ 必走 cutoff 冻结 → 退款), 下 tick pmt>=oe ⇒ 重 derive 写 pmt_at>=oe, 再过宽限窗 promote; 异议 / 实质 ABSTAIN 不受此限', async () => {
+  isolate(); const id = mk(); const calls = { ex: 0, uma: 0 }; const yes = { ex: extractorVote('YES'), uma: umaVote('YES') };
+  const r1 = await tick({ pmt: pmtOf(OE - 80_000), wall: OE + 60_000, derive: yes, calls }); assert.equal(V(id).length, 0, 'pmt<oe ⇒ 批准票不写'); assert.equal(r1.s.waited, 1); assert.equal(calls.ex, 1);
+  const r2 = await tick({ pmt: pmtOf(OE + 10_000), wall: OE + 200_000, derive: yes, calls }); assert.equal(calls.ex, 2, '下 tick 重 derive'); assert.deepEqual(V(id).map((v) => [v.source_kind, v.outcome, v.pmt_at]), [['extractor', 1, OE + 10_000], ['uma', 1, OE + 10_000]]); assert.ok(V(id).every((v) => v.pmt_at >= OE)); void r2;
+  const g = OE + 10_000 + cfg.graceMs; await tick({ pmt: pmtOf(g), wall: g + 100_000, derive: yes, calls }); assert.equal(M(id).winning_side, 1, 'pmt_at>=oe 的批准票 ⇒ 宽限窗后可 promote(修前: 必冻结)');
+  // 边界: pmt 恰 = oe 写; oe−1 不写
+  isolate(); const b1 = mk(); await tick({ pmt: pmtOf(OE - 1), wall: OE + 5000, derive: yes }); assert.equal(V(b1).length, 0); await tick({ pmt: pmtOf(OE), wall: OE + 5000, derive: yes }); assert.equal(V(b1).length, 2);
+  // 异议 / 实质 ABSTAIN 不受限: pmt<oe 仍写(带 pmt_at)
+  isolate(); const d1 = mk(); await tick({ pmt: pmtOf(OE - 80_000), wall: OE + 60_000, derive: { ex: extractorVote('YES'), uma: umaVote('NO') } });
+  assert.deepEqual(V(d1).map((v) => [v.source_kind, v.outcome, v.pmt_at]), [['extractor', 1, OE - 80_000], ['uma', 0, OE - 80_000]], '冲突各方 pmt<oe 也写'); assert.equal(M(d1).settlement_frozen_at, null, 'pmt<oe: 门 wait(outcome_not_known); pmt>=oe 后冻结');
+  await tick({ pmt: pmtOf(OE + 1000), wall: OE + 100_000 }); assert.match(M(d1).frozen_reason, /inconsistent_verdicts/);
+  isolate(); const a1 = mk(); await tick({ pmt: pmtOf(OE - 80_000), wall: OE + 60_000, derive: { ex: async () => ({ ok: true, outcome: 'ABSTAIN', extractor_kind_used: 'judgeline-abstain', evidence_url: ESPN(1), reason: 'x' }) } });
+  assert.deepEqual(V(a1).map((v) => [v.source_kind, v.outcome, v.pmt_at]), [['extractor', null, OE - 80_000]], '实质 ABSTAIN pmt<oe 也写');
+});
+await t('A21 ▲ M2 候选不被远期旧市场饿死: 21 个市场(20 个未到期、先创建 + 1 个已到期)limit=20 ⇒ 已到期者被扫; 多个已到期按 outcome_end 升序取', async () => {
+  isolate(); const far = []; for (let i = 0; i < 20; i++) far.push(mk({ oe: T1 + 10 * H + i, bets: false }));
+  const due = mk(); const calls = { ex: 0, uma: 0 };
+  const r = await tick({ derive: { ex: extractorVote('YES'), uma: umaVote('YES') }, calls, limit: 20 });
+  assert.equal(r.s.scanned, 1, '只扫已到期的'); assert.equal(V(due).length, 2, '已到期者被处理(修前: 20 个远期旧市场占满 LIMIT ⇒ 饿死)'); for (const id of far) assert.equal(V(id).length, 0);
+  isolate(); const later = mk({ oe: OE + 2000 }), earlier = mk({ oe: OE + 1000 }); const c2 = { ex: 0, uma: 0 };
+  await tick({ derive: { ex: extractorVote('YES'), uma: umaVote('YES') }, calls: c2, limit: 1 }); assert.equal(V(earlier).length, 2, 'outcome_end 更早者先'); assert.equal(V(later).length, 0);
+});
+await t('A22 ▲ M2 永久不可处理者冻结后不再占名额: 20 个 spec 坏的已到期市场(oe 更早)+ 1 个好市场, limit=20 ⇒ tick1 冻结 20 个、好市场未扫; tick2 好市场被处理', async () => {
+  isolate(); const bad = []; for (let i = 0; i < 20; i++) bad.push(mk({ spec: 'not-json', oe: OE - 5000 - i, bets: false })); const good = mk({ oe: OE });
+  const r1 = await tick({ derive: { ex: extractorVote('YES'), uma: umaVote('YES') }, limit: 20 }); assert.equal(r1.s.frozen.length, 20); assert.equal(V(good).length, 0); for (const id of bad) assert.notEqual(M(id).settlement_frozen_at, null);
+  const r2 = await tick({ derive: { ex: extractorVote('YES'), uma: umaVote('YES') }, limit: 20 }); assert.equal(r2.s.scanned, 1); assert.equal(V(good).length, 2);
 });
 
 console.log(`\nproto-oracle-adapter-core.test: ${pass} passed, ${fail} failed`);

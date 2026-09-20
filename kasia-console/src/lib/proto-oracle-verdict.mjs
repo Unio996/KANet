@@ -100,13 +100,16 @@ export function evidenceRefOf({ result, cls }) {
 // ── B2 / B4 写入决策表 ──
 /**
  * 把本 tick 各路的分类结果 + 已有 verdict 行 + pmt 状态 ⇒ 要写的 verdict 行清单(只增)。
- * 表: {暂态: 不写, 下 tick 重试到 cutoff} {实质异议 / 实质 ABSTAIN: 必写 NULL, pmt 无效也写 pmt_at=NULL(B4)} {赞成: pmt 有效才写}。
+ * 表: {暂态: 不写, 下 tick 重试到 cutoff} {实质异议 / 实质 ABSTAIN: 必写 NULL, pmt 无效也写 pmt_at=NULL(B4), 不受 outcome_end 限制} {赞成: pmt 有效 ∧ pmt >= outcome_end 才写(M1)}。
+ * 🔴 M1(NWT 复核): 批准票的 pmt_at 必须 >= outcome_end 才有资格进赞成集(批 D N1); [outcome_end, +~2.3min) 窗内 pmt 仍 < outcome_end, 这时写下的批准票 pmt_at < oe 永久失格 ⇒ 市场必走 cutoff 冻结 → 退款。
+ *    所以批准票 pmt < oe 时本 tick 不写(skipped approval_deferred_pmt_before_outcome_end), 下 tick 再 derive / 写; 异议 / 实质 ABSTAIN 不受此限(B4: 任何时候都写)。
  * "实质异议" = 本次的票与【已有行 ∪ 本 tick 其它票】里某个非 NULL outcome 相反(冲突里的每一方都写: 任何一方缺失都会让冻结集漏掉冲突)。
  * 同 (市场, source_kind, evidence_ref) 已存在 ⇒ 不重写; 同 (市场, kind) 已有行 ⇒ 该路本 tick 不该再 derive(由调用方先用 alreadyHas 过滤)。
- * @param {{items: {branch, cls, kind, side?: 0|1, evidenceRef: string, confidence?: number}[], existing: {source_kind, outcome, evidence_ref}[], pmt: {valid: boolean, pmtMs?: number}|null}} o
+ * @param {{items: {branch, cls, kind, side?: 0|1, evidenceRef: string, confidence?: number}[], existing: {source_kind, outcome, evidence_ref}[], pmt: {valid: boolean, pmtMs?: number}|null, outcomeEndMs: number}} o   outcomeEndMs 必填(安全整数; 缺 ⇒ 抛, 不静默放宽批准票门)
  * @returns {{writes: {source_kind, outcome: 0|1|null, pmt_at: number|null, evidence_ref: string, confidence: number|null, why: string}[], skipped: {branch, why}[]}}
  */
-export function planVerdictWrites({ items, existing = [], pmt }) {
+export function planVerdictWrites({ items, existing = [], pmt, outcomeEndMs }) {
+  if (!Number.isSafeInteger(outcomeEndMs) || outcomeEndMs <= 0) throw new TypeError('planVerdictWrites: outcomeEndMs 必填(正安全整数): 批准票要 pmt >= outcome_end 才写(M1)');
   const pmtOk = !!(pmt && pmt.valid === true && Number.isSafeInteger(pmt.pmtMs) && pmt.pmtMs > 0);
   const pmtAt = pmtOk ? pmt.pmtMs : null;
   const outcomesSeen = new Set(existing.filter((v) => v.outcome === 0 || v.outcome === 1).map((v) => v.outcome));
@@ -123,6 +126,7 @@ export function planVerdictWrites({ items, existing = [], pmt }) {
     if (!(it.side === 0 || it.side === 1)) { skipped.push({ branch: it.branch, why: 'vote_without_side' }); continue; }
     if (conflict) { writes.push({ source_kind: it.kind, outcome: it.side, pmt_at: pmtAt, evidence_ref: it.evidenceRef, confidence: it.confidence ?? null, why: 'dissent(conflict)' }); continue; }
     if (!pmtOk) { skipped.push({ branch: it.branch, why: 'approval_deferred_pmt_invalid' }); continue; }
+    if (pmtAt < outcomeEndMs) { skipped.push({ branch: it.branch, why: 'approval_deferred_pmt_before_outcome_end' }); continue; }   // M1: 盖 pmt_at < oe 的批准票永久失格于赞成集 ⇒ 不写, 下 tick 再判
     writes.push({ source_kind: it.kind, outcome: it.side, pmt_at: pmtAt, evidence_ref: it.evidenceRef, confidence: it.confidence ?? null, why: 'approval' });
   }
   return { writes, skipped };

@@ -1,0 +1,57 @@
+OK   src/lib/proto-bet-intake.test.mjs 8p/0f 1s
+OK   src/lib/proto-bet-intent.test.mjs ALL PASS 0s
+OK   src/lib/proto-broadcast-ops.test.mjs 16p/0f 1s
+OK   src/lib/proto-claim-draw.test.mjs 57p/0f 5s
+OK   src/lib/proto-close-commit-gate.test.mjs 7p/0f 0s
+OK   src/lib/proto-committee-key.test.mjs ALL PASS 0s
+OK   src/lib/proto-covenant-builder.test.mjs 16p/0f 0s
+OK   src/lib/proto-fee-profile-caps.test.mjs 10p/0f 0s
+OK   src/lib/proto-ktt-transfer-witness.test.mjs 6p/0f 0s
+OK   src/lib/proto-leaf-state.test.mjs 33p/0f 1s
+OK   src/lib/proto-market-intent.test.mjs ALL PASS 1s
+OK   src/lib/proto-mass-ceiling.test.mjs 16p/0f 1s
+OK   src/lib/proto-oracle-adapter-core.test.mjs 22p/0f 1s
+OK   src/lib/proto-oracle-policy.test.mjs 5p/0f 0s
+OK   src/lib/proto-oracle-spec.test.mjs 12p/0f 0s
+OK   src/lib/proto-oracle-verdict.test.mjs 12p/0f 1s
+OK   src/lib/proto-register-append-witness.test.mjs 5p/0f 0s
+OK   src/lib/proto-relay-guard.test.mjs ALL PASS 0s
+OK   src/lib/proto-relay-ipc.test.mjs 33p/0f 1s
+OK   src/lib/proto-settlement-budget.test.mjs 21p/0f 0s
+OK   src/lib/proto-settlement-c1.test.mjs 45p/0f 2s
+OK   src/lib/proto-settlement-chain-checks.test.mjs 51p/0f 0s
+OK   src/lib/proto-settlement-driver-core.test.mjs 31p/0f 0s
+OK   src/lib/proto-settlement-inputs.test.mjs 23p/0f 1s
+OK   src/lib/proto-settlement-intent.test.mjs ALL PASS 0s
+OK   src/lib/proto-settlement-ops.test.mjs 6p/0f 2s
+OK   src/lib/proto-settlement-pointers.test.mjs 28p/0f 2s
+OK   src/lib/proto-settlement-store.test.mjs 19p/0f 1s
+OK   src/lib/proto-signing-key-binding.test.mjs 11p/0f 1s
+OK   src/lib/proto-single-operator-guard.test.mjs ALL PASS 0s
+OK   src/lib/proto-tx-assembly-register-append.test.mjs 13p/0f 1s
+OK   src/lib/proto-tx-assembly-settlement-golden.test.mjs 12p/0f 0s
+OK   src/lib/proto-tx-assembly-settlement.test.mjs 44p/0f 3s
+OK   src/lib/proto-tx-assembly.test.mjs 32p/0f 1s
+OK   src/api/proto-bet-intake-route.test.mjs ALL PASS 1s
+OK   src/api/proto-bet-intent-phase-ingest.test.mjs ALL PASS 1s
+OK   src/api/proto-oracle-create-route.test.mjs ALL PASS 2s
+OK   src/api/proto.test.mjs ALL PASS 1s
+OK   src/api/proto.wiring.test.mjs ALL PASS 13s
+OK   src/services/proto-driver.test.mjs 8p/0f 1s
+OK   src/services/proto-oracle-adapter.test.mjs 7p/0f 1s
+OK   src/services/proto-settlement-driver.test.mjs 11p/0f 1s
+OK   src/db/client.default-path.test.mjs (no summary) 1s
+OK   src/db/events-type-index-v201.test.mjs (no summary) 0s
+OK   src/db/heavy-index-v199.test.mjs (no summary) 0s
+OK   src/db/migrate-v83-glob.test.mjs (no summary) 0s
+OK   src/db/phase2-claim-queries.test.mjs (no summary) 0s
+OK   src/db/phase2-handoff-candidates.test.mjs (no summary) 0s
+OK   src/db/phase2-indexes-v200.test.mjs (no summary) 0s
+OK   src/db/phase2-refund-queries.test.mjs (no summary) 0s
+OK   src/db/phase2-shadow.test.mjs (no summary) 0s
+OK   src/db/proto-settlement-freeze-v213.test.mjs 13p/0f 1s
+OK   src/db/proto-winning-side-triggers-v212.test.mjs 24p/0f 1s
+OK   src/db/slow-sql-observe.test.mjs (no summary) 1s
+OK   scripts/test-v133-fresh-boot.mjs (no summary) 0s
+
+SWEEP: files=55 failed=0

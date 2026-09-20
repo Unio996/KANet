@@ -45,8 +45,11 @@ export async function startProtoOracleAdapter({ env = process.env, relayId = PRO
   let cfg;
   try { const r = resolveBudgetConfig(env, { tickMs: settlementIntervalMs(env) }); for (const w of r.warnings) log.error(`[proto-oracle-adapter] BUDGET CONFIG (LOUD): ${w}`); cfg = r.config; }
   catch (e) { log.error(`[proto-oracle-adapter] REFUSED to start: ${e.message}`); return; }
-  const voter = (deps && deps.voter) || await import('./bettor-prediction-voter.js');
-  const uma = assertUmaWindowSafe(voter.UMA_FINALIZATION_WINDOW_MS);
+  // SHOULD①(NWT 复核): voter 模块导入失败(依赖缺失 / 语法错 / 环境)不得拖垮 console 顶层启动 ⇒ LOUD 拒启动(adapter 不启动 = 默认关闭同态, 安全)
+  let voter;
+  try { voter = (deps && deps.voter) || await (deps && deps.importVoter ? deps.importVoter() : import('./bettor-prediction-voter.js')); }
+  catch (e) { log.error(`[proto-oracle-adapter] REFUSED to start: 无法导入 bettor-prediction-voter(UMA 定稿窗 / derive 引擎来源): ${e && e.message ? e.message : e}`); return; }
+  const uma = assertUmaWindowSafe(voter && voter.UMA_FINALIZATION_WINDOW_MS);
   if (!uma.ok) { log.error(`[proto-oracle-adapter] REFUSED to start: ${uma.reason}`); return; }
   const intervalMs = oracleAdapterIntervalMs(env);
   _started = true;
