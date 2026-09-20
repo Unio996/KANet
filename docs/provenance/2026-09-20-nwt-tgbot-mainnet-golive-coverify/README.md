@@ -1,0 +1,24 @@
+> **Status**: CURRENT（2026-09-20，NWT；对象 = 主网 console 重启到 `4b6e5462`（生产检出 HEAD `6c872812`）+ 电报只读壳 bot 上线的**生产部署独立复验**；全部只读；D-021：不含密钥值/用户身份）
+
+# 电报只读壳主网上线 —— NWT 独立复验
+
+## 结论：**GREEN。** 六项全部独立核实成立；另有 **2 处我自己的更正**（见末节，已撤回）。
+时点：新 console `PID 22832` 启动 15:55:21Z、bot `PID 24524`（其子进程，15:57:16Z）；我的复验读数取自 15:57–16:02Z（重启后 2–7 分钟）。
+
+## 六项
+**1 暴露面——无新增。** ① console 22832 **只监听 `127.0.0.1:3202`**（`Get-NetTCPConnection -State Listen`）；② bot 24524 **无任何监听**，连接只有两条到 `149.154.166.110:443`（Telegram）和一条到 `127.0.0.1:3202`；③ `netsh interface portproxy show all` 为空；④ 无 cloudflared/ngrok/frp 等隧道进程，`tailscale serve status` / `funnel status` 均 `No serve config`；⑤ **非回环监听集合重启前后逐项相同**（我在重启前 15:57 钉了基线 `scratch/_nwt_deploy/listeners-pre-restart.txt`，重启后 diff 无差）；⑥ `[external-gateway] 未配置 … 不启动(fail-closed)`（日志）。范围限定：这是"KANet console + bot 无新增暴露面"；本机另有与本次无关的 `::9100`（计划任务 `CC-Bridge-9100`，命中一条 node.exe 全端口入站放行规则）已另报，不在本次结论内。
+**2 oracle 判定确实关。** 日志 `[proto-oracle-adapter] disabled`、`[proto-oracle] judged-market policy: adapter=disabled(default) network=mainnet valueless_token_ids=[]`；`kanet.mainnet.env` 的变量名里没有任何 `PROTO_ORACLE_*`；`proto_market_verdicts` 行数 = 0，`proto_markets` 无 `settlement_frozen_at`、`winning_side` 与 `a59c` 一致（`1`，未变）；重启后 7 分钟复查全库与重启前基线逐表相同。
+**3 迁移干净、结算驱动无异常。** 启动日志 `[migrate] v212 … v213 … DB migrations complete.` 无错误；`[proto-settlement-driver] started (tick 20000ms, cap 3/tick, network=mainnet)`；`proto_settlement_intents`（4 条全 landed，最大 `updated_at` 09:52:32Z）、`proto_markets`（3 行）、`proto_bets`、`proto_claims`、`user_notification_prefs`(0)、`tg_custodial_wallets`(0) 与重启前基线**逐表相同**（重启后已过 20 多个驱动 tick，无任何新结算动作）。stderr 里的 `v199 idx_kaspa_tx_log_to_addr_observed 缺失` 是既有警告，与本次无关。
+**4 bot 写面。** 我把 `console-api.mjs` 里 10 个带写方法的函数逐个对到部署版调用点：`linkBind` 只被**壳的 `/link`** 调用（原 `/link` 在壳之后永不触达）；`tgWalletCreate/Send`、`faucetRequest`、`brokerOnboardApply` 只挂在已隐藏的命令下；`poolRegisterPrep/Confirm` 与 `tgWalletSend`（下注流付款）只在原下注会话里，而会话已清空、原 `message:text` 已被壳拦截；`feedbackReply` 只在原 `message:text`（已拦截）；`subscribe` 与 `postOwnerMessageToDevCoord` 无 bot 调用点。所以 bot→console 的写只有 `POST /api/link/bind`，其余是 GET 读。运行态佐证：`user_notification_prefs`/`tg_custodial_wallets` 无新增行。⚠ 局限：console 没有请求访问日志，我无法用"日志里没有别的 POST"来反证，这一项是**代码 + 状态**的证据。
+**5 F2 生产生效。** 启动日志：`[prediction-menu] state loaded: 4 sessions, 0 pending payments, 4 linked addrs` → `[readonly-shell] startup cleanup: dropped 4 non-mainnet binding(s), cleared 4 stale session(s), pendingPayments=0`。真 `tg-bot/_state.json` 在 15:57:16Z 就地重写（255 字节，sha256 前 16 位 `8514eff810d3fca6`）：`linkedAddrs 0 / sessions 0 / pendingPayments 0 / userLangs 9`，与备份逐键比对 `userLangs`、`brokerFeeTs`、`pendingPayments` **完全相等**。备份：`scratch/_j2_tgbot_state_backup_2026-09-05T09-19Z.json`，sha256 前 16 位 `fb109aab95e00535`，**等于我在重启前钉下的真文件基线值**，内容含 4 条 `kaspatest:` 绑定与 4 个会话，可原样恢复。（KANet-UI 称的"新 cp 备份"我在 `scratch/` 里没找到别的同 sha 文件；若另有路径请补充，现有这份内容已等价。）
+**6 CR-3。** 无 ingest 密钥我无法在生产上复现带鉴权的绑定（也不去取它）。我能独立核的：`POST /api/link/bind` 无 secret ⇒ **401**，`POST /api/tg-wallet/create` 无 secret ⇒ **401**（鉴权先于网络判定）；`GET /api/proto-markets` ⇒ 200，键集与旧版**完全一致**（无 `judged` / `outcome_*` / `resolution_rule_spec`，批 B 的公开呈现对非判定题零新增）；部署代码含 CR-3（预审已在真 Fastify+真库上跑过 400 prefix-mismatch / 503 network-unset）。KANet-UI 报的带鉴权活体结果（kaspatest→400、坏校验和→400、缺地址→400、合法主网→200 写 1 行即删）与我看到的库状态一致（`user_notification_prefs` 仍为 0），但**带鉴权那几条是它的读数，不是我独立复现**。
+补充读数：bot `getMe` 校验通过（`@KANET_Broker_bot`）、`broker=UNSET`（只读壳不需要 broker）、日志里 `409`/`Conflict` 命中 0（单 poller）；启动时有一次 `POST /api/tg-bot/start` 空 body 的 400（第一次请求格式问题，之后成功拉起，无害）。启动器 `scrubbed=2`（`CONSOLE_ENCRYPTION_KEY` + `ADMIN_SECRET_FUNDS`）与 `kanet.mainnet.env` 里的变量名吻合，CR-1 在生产生效。
+
+## 我自己的两处更正（已撤回先前的中间报告）
+我 15:57Z 给你的中间报告写了"console 还没重启"和"迁移先于重启（DB 15:21:37Z 已带 v212/v213）"，**两处都错**：
+1. **"console 还没重启"**：依据是 **15:54:25Z** 的一次进程列表（`Get-CimInstance Win32_Process`，PID 4744，本地 16:48:31 = 09:48Z 起）；而重启发生在 **15:55:21Z**。我随后那次 DB 读取是在重启**之后**（`ls -l` 显示 `-shm` 22:55:23、`-wal` 22:55:31 本地 = 15:55:23Z / 15:55:31Z，即新 console 起来后 2–10 秒），我却把它和重启前的进程列表拼在了一起。
+2. **"DB 15:21:37Z 已带 v212/v213"**：我把主库文件 `console.mainnet.db` 的 mtime（22:21:37 本地）当成了迁移时间；WAL 模式下**主文件 mtime 只是上一次 checkpoint 的时刻**，迁移写入在 WAL 里（mtime 15:55:31Z，正好在新 console 启动后 10 秒）；重启后 15:58:30Z 又做了一次 checkpoint 才把主文件刷新。
+**对账结论**：我独立打开了 KANet-UI 重启前 15:54:55Z 的快照 `scratch/_mainnet_golive_backup_20260920T155455Z/console.mainnet.db.bak`（sha256 `90c832ac9712cb193e192cf235b903c2e71315788e88524771926dfe5a97924b`，6807552 字节，与其报告一致）：**`proto_market_verdicts` 不存在、`proto_markets` 无 `settlement_frozen_at / frozen_reason / outcome_end_ms / winning_side_source`、`trg_pm_*` 触发器 0 条，仅有 v210 `proto_settlement_intents`**。所以 **v212/v213 是这次重启 boot 时应用的，不是先于重启**，没有"库外迁移"，我撤回"计划外生产库改动"的关切。旁证：旧 console 的整段启动日志里没有 v212/v213 行（其代码里本就没有）；生产检出上 `migrate.js` 的 v213 代码 19:08 本地就已在盘上，但老进程内存里跑的是旧代码，不会自己迁移。
+
+## 我没做
+未在生产上做带鉴权的 `/link` 复现（不持有也不去取 ingest 密钥）；未启动/停止任何进程；全部读数为只读（进程表、监听表、防火墙/portproxy、日志、只读打开的 DB 与快照副本、只读 HTTP GET 与无 secret 的 401 探针）。
