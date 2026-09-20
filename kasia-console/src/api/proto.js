@@ -205,6 +205,24 @@ export async function registerProtoRoutes(fastify) {
     if (!Number.isFinite(stakeAmount) || stakeAmount < market.min_bet) {
       return reply.code(400).send({ ok: false, error: `amount must be a number >= min_bet(${market.min_bet})` });
     }
+    // 批 D §6 受理点 outcome_end 门(D6 + N3 + N4): 判定题市场在【受理时刻】pmt ≥ outcome_end_ms(结果已可知)⇒ 拒受理; 判定题受理时 pmt 无效 / 读不到 ⇒ 拒受理(fail-closed);
+    //   判定题 ∧ outcome_end 空 ⇒ 拒受理。无判定题(operator 市场)豁免且【不读 pmt】。门在受理点, 不在驱动: 已受理的注的 append 不受影响(N4, 否则已受理未上链的注永上不了链 → 永不 seal → 只能退款)。
+    //   所有拒绝发生在任何 DB 写 / IPC 之前(NO STATE 先于门)。
+    {
+      const { checkBetIntake } = await import('../lib/proto-bet-intake.mjs');
+      const gate = await checkBetIntake({
+        db: sqlite, marketId: market.id,
+        readPmt: async () => {   // 只在判定题 ∧ outcome_end 有限时才被调用; 配置非法 / relay 不可达 ⇒ 抛 ⇒ 按 pmt 无效拒受理(fail-closed)
+          const { resolveBudgetConfig, readValidatedPmt, sharedPmtValidator } = await import('../lib/proto-settlement-budget.mjs');
+          const { settlementIntervalMs } = await import('../services/proto-settlement-driver.mjs');
+          const cfg = resolveBudgetConfig(process.env, { tickMs: settlementIntervalMs(process.env) }).config;
+          const { PROTO_RELAY_ID: relayId } = await import('../lib/proto-relay-guard.mjs');
+          const { protoSendCmd } = await import('../lib/proto-relay-ipc.mjs');
+          return readValidatedPmt({ sendCmd: protoSendCmd, relayId, validator: sharedPmtValidator(cfg.lagMaxMs) });
+        },
+      });
+      if (!gate.accept) return reply.code(gate.http).send({ ok: false, error: gate.code, detail: gate.detail });
+    }
     // §6/§9 已定案, 真实实现(账本1425/1438/1442/1446/1448 D-020): pending 行必须先于任何 IPC 存在
     // (同 market_genesis 硬条件①, ensureBetIntent 自己的文档要求)——proto_bets(status='pending')
     // + proto_bet_intents(step='append', status='pending') 两张表都在发命令之前落表。bettor_pk 不从

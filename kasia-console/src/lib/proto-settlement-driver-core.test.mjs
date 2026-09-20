@@ -66,6 +66,8 @@ function mkWorld(o = {}) {
     checkLanded: async (a) => { log.push('checkLanded'); world.lastCheckLanded = a; if (cfg.checkThrow) throw cfg.checkThrow; return cfg.landed || { landed: false, depth: 3 }; },
     markLanded: async (info, row) => { log.push('markLanded:' + info); world.markLandedCalls.push([info, row && row.intent_key]); },
     listWork: async () => { log.push('listWork'); return cfg.work || {}; },
+    // 批 D D1 入口③的端口: 默认未冻结(false); cfg.frozen 可设任意值(测严格 fail-closed), cfg.frozenThrow 抛错
+    isSettlementFrozen: async (marketId) => { log.push('isSettlementFrozen'); if (cfg.frozenThrow) throw cfg.frozenThrow; return Object.prototype.hasOwnProperty.call(cfg, 'frozen') ? cfg.frozen : false; },
     probeRefundFlip: cfg.probeRefundFlip,
     log: { log: () => {} },
   };
@@ -96,7 +98,7 @@ await t('报警闭集: 未登记的名字直接抛错; c1 分类器可能产出�
 });
 await t('deps 校验: 缺任何端口 / minDepth 非正整数 / intents 缺函数 ⇒ DriverDepsError(没有默认值); 构造驱动本身零副作用(不调 listWork / sendCmd)', () => {
   const w = mkWorld();
-  for (const k of ['sendCmd', 'relayId', 'alert', 'intents', 'driveIntent', 'pointers', 'prepare', 'verifyOnChain', 'build', 'dependenciesLanded', 'checkLanded', 'markLanded', 'listWork', 'minDepth', 'now']) {
+  for (const k of ['sendCmd', 'relayId', 'alert', 'intents', 'driveIntent', 'pointers', 'prepare', 'verifyOnChain', 'build', 'dependenciesLanded', 'checkLanded', 'markLanded', 'listWork', 'isSettlementFrozen', 'minDepth', 'now']) {
     const d = { ...w.deps }; delete d[k];
     assert.throws(() => createSettlementDriver(d), (e) => e instanceof DriverDepsError && e.message.includes(k), '缺 ' + k);
   }
@@ -153,6 +155,31 @@ await t('意图状态: submitted / landed ⇒ in_flight(不重复构造); ambigu
     const r = await d.advanceStep({ step: 'seal', subjectId: i.subjectId, marketId: i.marketId });
     assert.equal(r.outcome, 'submitted'); assert.equal(r.replayed, true); assert.equal(r.txId, 'ef'.repeat(32));
     assert.deepEqual(w.log.filter((l) => /^(build|pointers|verifyOnChain|dependenciesLanded)/.test(l)), [], 'prepared 行不得重建 / 重新取证'); }
+});
+
+// ── 批 D D1 入口③: 冻结 ──────────────────────────────────────────────────────────────────────────────────────
+await t('批 D D1 入口③: close_commit 广播前闸重读冻结列(在 pmt 门之前): 冻结 ⇒ gated(close_commit_settlement_frozen), 不读 pmt / 不建 / 不广播; 严格 fail-closed——只有端口明确返回 false 才放行(true / undefined / null / 0 / "false" / 1 / {} / 抛错 一律拦)', async () => {
+  for (const frozen of [true, undefined, null, 0, 'false', 1, {}]) {
+    const w = mkWorld({ frozen }); const r = await adv(w, 'close_commit');
+    assert.equal(r.outcome, 'gated', JSON.stringify(frozen)); assert.equal(r.reason, 'close_commit_settlement_frozen', JSON.stringify(frozen));
+    assert.ok(idx(w.log, 'isSettlementFrozen') >= 0);
+    assert.deepEqual(w.log.filter((l) => l === 'sendCmd:get_past_median_time' || /^build/.test(l) || l === 'sendCmd:covenant_broadcast'), [], 'frozen=' + JSON.stringify(frozen) + ': 不得读 pmt / 建 / 广播: ' + w.log.join(' > '));
+  }
+  const w = mkWorld({ frozenThrow: new Error('db locked') }); const r = await adv(w, 'close_commit');
+  assert.equal(r.outcome, 'gated'); assert.equal(r.reason, 'close_commit_settlement_frozen'); assert.deepEqual(w.log.filter((l) => l === 'sendCmd:covenant_broadcast'), []);
+});
+await t('批 D D1 入口③: 未冻结(端口返回 false)⇒ 冻结读发生在 pmt 门之前并放行; 冻结只管 close_commit(seal 即使端口返回 true 也照发, 且根本不读冻结列)', async () => {
+  const w = mkWorld({ frozen: false }); const r = await adv(w, 'close_commit');
+  assert.equal(r.outcome, 'submitted');
+  assert.ok(idx(w.log, 'isSettlementFrozen') >= 0 && idx(w.log, 'isSettlementFrozen') < idx(w.log, 'sendCmd:get_past_median_time'), '冻结读应在 pmt 门之前: ' + w.log.join(' > '));
+  const w2 = mkWorld({ frozen: true }); const r2 = await adv(w2, 'seal');
+  assert.equal(r2.outcome, 'submitted'); assert.equal(idx(w2.log, 'isSettlementFrozen'), -1, 'seal 不读冻结列');
+});
+await t('批 D D1: 已 prepared 的 close_commit 意图(字节已落库)不受冻结影响——同字节重播, 不读冻结列(冻结必须早于该市场第一个进 close_commit 的 tick)', async () => {
+  const w = mkWorld({ frozen: true }); const i = ids(); const d = createSettlementDriver(w.deps);
+  const k = `settle:market:${i.subjectId}:resolve`; w.rows.set(k, { intent_key: k, subject_type: 'market', subject_id: i.subjectId, step: 'resolve', status: 'prepared', prepared_txid: 'ef'.repeat(32) });
+  const r = await d.advanceStep({ step: 'close_commit', subjectId: i.subjectId, marketId: i.marketId });
+  assert.equal(r.outcome, 'submitted'); assert.equal(r.replayed, true); assert.equal(idx(w.log, 'isSettlementFrozen'), -1);
 });
 
 // ── 失败分类与报警 ─────────────────────────────────────────────────────────────────────────────────────────────────

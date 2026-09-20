@@ -74,6 +74,34 @@ await t('seal 触发: betting ∧ 已确认下注 == seal_count ∧ 无未确认
   const noGenesis = mkMarket({ shardleafTxid: null }); mkBet(noGenesis, { side: 0 }); mkBet(noGenesis, { side: 1 }); assert.ok(!has(noGenesis), '创世未落链(无 shardleaf_txid)');
 });
 
+// ── 批 D D1: 冻结的三入口里属于 store 的两个(listWork / dependenciesLanded)+ 端口 ──
+const freezeRaw = (id, reason = 'test_freeze|clock=wall') => sqlite.prepare('UPDATE proto_markets SET settlement_frozen_at = ?, frozen_reason = ? WHERE id = ?').run(1_790_000_000_000, reason, id);
+await t('批 D D1 入口①: 冻结市场不进 listWork 的 close_commit 选行(同形未冻结市场照常出现); 冻结不影响 seal 触发 / 其它步的发现', () => {
+  const live = sealedMarketWithBets(); const frozen = sealedMarketWithBets(); freezeRaw(frozen);
+  const w = store.listWork(); const cc = adv(w, 'close_commit').map((a) => a.marketId);
+  assert.ok(cc.includes(live), '未冻结应出现'); assert.ok(!cc.includes(frozen), '冻结不得出现');
+  const b = mkMarket(); mkBet(b, { side: 0 }); mkBet(b, { side: 1 }); freezeRaw(b);
+  assert.ok(adv(store.listWork(), 'seal').some((a) => a.marketId === b), 'seal 触发不看冻结(冻结只挡 close_commit; 判定题的晚 seal 冻结发生在 seal landed 之后)');
+});
+await t('批 D D1 入口②: dependenciesLanded(close_commit) 重读冻结列 ⇒ {ok:false, reason:settlement_frozen}(即使 sealed ∧ winning_side 已写 ∧ seal landed); 未冻结同形 ⇒ ok', () => {
+  const live = sealedMarketWithBets(); mkIntent('market', live, 'seal', 'landed');
+  const frozen = sealedMarketWithBets(); mkIntent('market', frozen, 'seal', 'landed');
+  assert.deepEqual(store.dependenciesLanded('close_commit', { subjectId: live, marketId: live }), { ok: true });
+  freezeRaw(frozen);
+  assert.deepEqual(store.dependenciesLanded('close_commit', { subjectId: frozen, marketId: frozen }), { ok: false, reason: 'settlement_frozen' });
+  // TOCTOU: 先选进清单、之后才冻结 ⇒ 依赖重读拦住
+  const late = sealedMarketWithBets(); mkIntent('market', late, 'seal', 'landed');
+  assert.ok(adv(store.listWork(), 'close_commit').some((a) => a.marketId === late)); freezeRaw(late);
+  assert.equal(store.dependenciesLanded('close_commit', { subjectId: late, marketId: late }).reason, 'settlement_frozen');
+});
+await t('批 D D1: 已 prepared 的 close_commit 意图不受冻结影响——仍在 preparedRows(同字节重播); isSettlementFrozen 端口: 未冻 false / 冻 true / 市场不存在抛(核心按冻结处理)', async () => {
+  const m = sealedMarketWithBets(); mkIntent('market', m, 'seal', 'landed'); const key = mkIntent('market', m, 'resolve', 'prepared'); freezeRaw(m);
+  assert.ok(store.listWork().preparedRows.some((r) => r.intent_key === key), 'prepared 行仍在清单');
+  assert.equal(await store.isSettlementFrozen(m), true);
+  assert.equal(await store.isSettlementFrozen(sealedMarketWithBets()), false);
+  await assert.rejects(() => store.isSettlementFrozen('no-such-market'), /不存在/);
+});
+
 // ── close_commit / convert_to_claim / claim_draw 发现 ──
 await t('close_commit: sealed ∧ winning_side 已写 ∧ resolve 意图未 landed / ambiguous ⇒ 出现; winning_side 为空 / 已 landed 不出现', () => {
   const m = sealedMarketWithBets(); const noSide = sealedMarketWithBets({ winningSide: null }); const done = sealedMarketWithBets(); mkIntent('market', done, 'resolve', 'landed');
@@ -218,7 +246,7 @@ await t('B3 端到端(真实 store + 真实核心): resolve 已 landed 但 deriv
     sendCmd: noop, relayId: 'r', minDepth: 20, now: Date.now, log: { log() {} }, alert: (ev, s, p, lv) => alerts.push({ ev, lv, key: p && p.intent_key }),
     intents: { ensure: SI.ensureSettlementIntent, active: SI.activeSettlementIntent, get: SI.getSettlementIntent, mark: SI.markSettlementIntent }, driveIntent: noop, checkLanded: noop,
     pointers: noop, prepare: noop, verifyOnChain: noop, build: noop, dependenciesLanded: noop,
-    markLanded: async (info, row) => store.markLanded(info, row), listWork: async () => store.listWork({ limit: 200 }),
+    markLanded: async (info, row) => store.markLanded(info, row), listWork: async () => store.listWork({ limit: 200 }), isSettlementFrozen: async (id) => store.isSettlementFrozen(id),
   });
   const mine = () => alerts.filter((a) => a.key === key);
   let out = await d.runTick({ cap: 200 }); assert.equal(mine().length, 1, '第 1 tick 报警'); assert.equal(store._marketOf(m).status, 'sealed');

@@ -411,13 +411,23 @@ await t('H3 getUtxosByAddresses 抛错 / 返回空 entries: 抛错上抛; 空集
 });
 
 // ══ R2 get_past_median_time ═════════════════════════════════════════════════════════════════════
-await t('P1 只回恰好三个字段 {ok, pastMedianTimeMs, observedAtMs}; observedAtMs 在读回之后取; 不带任何节点标识/URL/daaScore/sink', async () => {
+await t('P1 只回恰好四个字段 {ok, pastMedianTimeMs, observedAtMs, isSynced}(批 D 新增 isSynced: 布尔或 null); observedAtMs 在读回之后取; 不带任何节点标识/URL/daaScore/sink', async () => {
   const order = [];
-  const rpc = { getBlockDagInfo: async () => { order.push('read'); return { pastMedianTime: 1758000000000, virtualDaaScore: '123', sink: 'ab'.repeat(32), networkName: 'simnet', url: 'ws://secret' }; } };
+  const rpc = { getServerInfo: async () => ({ isSynced: true, networkId: 'leak-me-not', url: 'ws://secret' }), getBlockDagInfo: async () => { order.push('read'); return { pastMedianTime: 1758000000000, virtualDaaScore: '123', sink: 'ab'.repeat(32), networkName: 'simnet', url: 'ws://secret' }; } };
   const r = await handleGetPastMedianTime({ getSharedRpc: async () => rpc, nowMs: () => { order.push('now'); return 1758000000123; } });
-  assert.deepStrictEqual(r, { ok: true, pastMedianTimeMs: 1758000000000, observedAtMs: 1758000000123 });
-  assert.deepStrictEqual(Object.keys(r), ['ok', 'pastMedianTimeMs', 'observedAtMs']);
+  assert.deepStrictEqual(r, { ok: true, pastMedianTimeMs: 1758000000000, observedAtMs: 1758000000123, isSynced: true });
+  assert.deepStrictEqual(Object.keys(r), ['ok', 'pastMedianTimeMs', 'observedAtMs', 'isSynced']);
   assert.deepStrictEqual(order, ['read', 'now']);
+});
+await t('P1b(批 D) isSynced 三态: 节点报 false ⇒ false; getServerInfo 抛错 / 缺方法 / 非布尔 ⇒ null(消费方 fail-closed); 任何一种都不影响 pastMedianTimeMs / observedAtMs 主读数(既有 close_commit 门不受影响)', async () => {
+  const mk = (serverInfo) => ({ getBlockDagInfo: async () => ({ pastMedianTime: 1758000000000 }), ...(serverInfo ? { getServerInfo: serverInfo } : {}) });
+  const run = (rpc) => handleGetPastMedianTime({ getSharedRpc: async () => rpc, nowMs: () => 1758000000123 });
+  assert.strictEqual((await run(mk(async () => ({ isSynced: false })))).isSynced, false);
+  assert.strictEqual((await run(mk(async () => { throw new Error('boom'); }))).isSynced, null);
+  assert.strictEqual((await run(mk(null))).isSynced, null);
+  assert.strictEqual((await run(mk(async () => ({ isSynced: 'yes' })))).isSynced, null);
+  assert.strictEqual((await run(mk(async () => ({})))).isSynced, null);
+  const r = await run(mk(async () => { throw new Error('boom'); })); assert.strictEqual(r.ok, true); assert.strictEqual(r.pastMedianTimeMs, 1758000000000); assert.strictEqual(r.observedAtMs, 1758000000123);
 });
 await t('P2 pmt 不可用(0/负/NaN/undefined/字符串/小数/超安全整数)⇒ 抛 past_median_time_unavailable(fail-closed, 不回 ok:true); 共享 rpc 取不到 ⇒ 原样上抛', async () => {
   for (const bad of [0, -5, NaN, undefined, null, 'x', 1.5, 2 ** 60]) {

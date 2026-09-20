@@ -54,8 +54,9 @@ function mkMarket({ id = nid(), status = 'genesis_pending', ...extra } = {}) {
 const row = (id) => sqlite.prepare('SELECT * FROM proto_markets WHERE id = ?').get(id);
 const setWS = (id, side, source, { verdictId = null, setAt = NOW } = {}) =>
   sqlite.prepare('UPDATE proto_markets SET winning_side = ?, winning_side_source = ?, winning_side_set_at = ?, winning_side_verdict_id = ? WHERE id = ?').run(side, source, setAt, verdictId, id);
-const mkVerdict = (marketId, kind, outcome, extra = {}) => sqlite.prepare('INSERT INTO proto_market_verdicts (market_id, source_kind, relay_id, outcome, confidence, evidence_ref, created_at) VALUES (?,?,?,?,?,?,?)')
-  .run(marketId, kind, extra.relay ?? null, outcome, extra.conf ?? null, extra.ev ?? 'ev:1', NOW).lastInsertRowid;
+// v213(批 D N1): verdict 可被引用须 pmt_at 非 NULL ⇒ 夹具默认给一个 pmt_at(extra.pmtAt === null 时显式写 NULL, 用于"NULL pmt_at 不可被引用"的对照)
+const mkVerdict = (marketId, kind, outcome, extra = {}) => sqlite.prepare('INSERT INTO proto_market_verdicts (market_id, source_kind, relay_id, outcome, confidence, evidence_ref, created_at, pmt_at) VALUES (?,?,?,?,?,?,?,?)')
+  .run(marketId, kind, extra.relay ?? null, outcome, extra.conf ?? null, extra.ev ?? 'ev:1', NOW, extra.pmtAt === undefined ? 1_790_000_000_000 : extra.pmtAt).lastInsertRowid;
 const TRIGGERS = ['trg_pmv_append_only_update', 'trg_pmv_append_only_delete', 'trg_pmv_insert_existing_id', 'trg_pm_ws_r1_insert_existing_id', 'trg_pm_ws_r1_insert_null', 'trg_pm_ws_r1_write_once', 'trg_pm_ws_r1_value_domain',
   'trg_pm_ws_r1_status_sealed', 'trg_pm_ws_r1_source_required', 'trg_pm_ws_r1_set_at_required', 'trg_pm_ws_r1_operator_no_judged', 'trg_pm_ws_r1_operator_no_verdict', 'trg_pm_ws_r1_verdict_ref',
   'trg_pm_ws_r1_audit_needs_value', 'trg_pm_ws_r1_audit_immutable', 'trg_pm_ws_r1_delete_guard', 'trg_pm_r4_question_immutable'];
