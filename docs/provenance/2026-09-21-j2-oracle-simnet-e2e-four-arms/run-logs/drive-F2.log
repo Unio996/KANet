@@ -1,0 +1,4 @@
+2026-09-20T18:42:30.881Z bet0 confirmed? confirmed
+2026-09-20T18:42:31.351Z {"status":202,"json":{"ok":true,"id":"bfcb6b45-b456-46e5-9dd8-feb4d818dbcb","status":"pending"}}
+
+2026-09-20T18:43:31.618Z sealed sealed {"isSynced":true,"virtualDaaScore":"36101","pmtMs":1789929544108,"wallMs":1789929811606,"wallMinusPmtMin":"4.46","pmtIso":"2026-09-20T18:39:04.108Z"}

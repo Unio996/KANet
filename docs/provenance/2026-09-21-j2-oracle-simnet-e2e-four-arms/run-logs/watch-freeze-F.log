@@ -1,0 +1,6 @@
+2026-09-20T18:52:29.743Z promoted ws=1 status=sealed -> freezing
+[proto-settlement-freeze] market d7d21bee2a04d897bd504d1de926f3f29c1692df12e93c8d8f4f0ae2ce489b1a FROZEN (operator_emergency_stop|clock=pmt, at=1789930078295) — 结算不再前进, 唯一出口=自然 refund_flip
+[db] path=D:\kanet-tn12\scratch\_j2_e2e_run\console.simnet.db source=DB_PATH
+{"before":{"id":"d7d21bee2a04d897bd504d1de926f3f29c1692df12e93c8d8f4f0ae2ce489b1a","status":"sealed","winning_side":1,"settlement_frozen_at":null,"frozen_reason":null,"deadline_ms":1789930524358},"after":{"id":"d7d21bee2a04d897bd504d1de926f3f29c1692df12e93c8d8f4f0ae2ce489b1a","status":"sealed","winning_side":1,"settlement_frozen_at":1789930078295,"frozen_reason":"operator_emergency_stop|clock=pmt"},"changes":1,"pmtMinusDeadlineMs":-446063}
+
+watch done 2026-09-20T18:52:29.944Z

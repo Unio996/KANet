@@ -1,0 +1,2 @@
+{"arm":"D","id":"41bbd2319aa2738e9b7eaf7fd7bf059556b212544b15d0427f5fbdf57bf73ac9","sealed":true,"pmtIso":"2026-09-20T17:08:53.525Z"}
+Assertion failed: !(handle->flags & UV_HANDLE_CLOSING), file src\win\async.c, line 76
