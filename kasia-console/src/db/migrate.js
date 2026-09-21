@@ -6482,5 +6482,64 @@ export function runMigrations() {
   }
   console.log('[migrate] v213: proto_markets.settlement_frozen_at/frozen_reason + proto_market_verdicts.pmt_at + 冻结/pmt_at 触发器 + verdict_ref 加 pmt_at 非空(oracle 整合批 D).');
 
+  // ── v214 (2026-09-21, J2 · R-a 驱动退款路, 设计 docs/2026-09-21-j2-driver-refund-path-design-v0.2.md §3.2 / NWT M2): proto_settlement_intents.step 的 CHECK 放入退款路三个 step。
+  //   'refund_flip'(R-a 接线)+ 'convert_to_refundclaim' / 'refund_payout'(R-b / R-c 才接线, CHECK 位一次放入——重建是主网启动路径上的高风险动作, 一次做完好过三次)。
+  //   SQLite 不能改 CHECK ⇒ 表重建。🔴 v207 的"建 _vN → INSERT SELECT → DROP 旧 → RENAME"配方在这里【会失败】(NWT 实测): v212 起 proto_markets 上的触发器
+  //   (如 trg_pm_ws_r1_delete_guard)在 EXISTS 子查询里引用 proto_settlement_intents, RENAME 时 SQLite(legacy_alter_table=0)校验全库触发器引用 ⇒
+  //   "error in trigger …: no such table: main.proto_settlement_intents"。修法(同一事务内): 先【枚举】所有引用该表的触发器(sqlite_master, 不手写清单)并记原文 → DROP → 重建表 → 重建索引 →
+  //   按原文重建触发器。重建前后核对: 触发器集合(名+sql)/ 索引集合 / 行数 / foreign_key_check / integrity_check 一致, 不一致 ⇒ 回滚并抛(LOUD 拒启动)。幂等: CHECK 已含 refund_flip ⇒ 跳过。
+  {
+    const tbl = sqlite.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'proto_settlement_intents'").get();
+    if (tbl && !/'refund_flip'/.test(tbl.sql)) {
+      const OLD_TAIL = "'withdraw','reclaim'";
+      if (!tbl.sql.includes(OLD_TAIL) || !/CREATE TABLE\s+"?proto_settlement_intents"?\s*\(/.test(tbl.sql)) throw new Error('v214: proto_settlement_intents 的 DDL 形状与预期不符(找不到 step CHECK 尾部 / 表名), 拒绝重建');
+      const newSql = tbl.sql.replace(OLD_TAIL, "'withdraw','reclaim','refund_flip','convert_to_refundclaim','refund_payout'").replace(/CREATE TABLE\s+"?proto_settlement_intents"?\s*\(/, 'CREATE TABLE proto_settlement_intents_v214 (');
+      const cols = sqlite.prepare('PRAGMA table_info(proto_settlement_intents)').all().map((c) => c.name);
+      const colsCsv = cols.join(', ');
+      const trigs = sqlite.prepare("SELECT name, sql FROM sqlite_master WHERE type = 'trigger' AND (tbl_name = 'proto_settlement_intents' OR sql LIKE '%proto_settlement_intents%') ORDER BY name").all();
+      const idxs = sqlite.prepare("SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'proto_settlement_intents' AND sql IS NOT NULL ORDER BY name").all();
+      const snapshot = () => ({
+        rows: sqlite.prepare('SELECT COUNT(*) AS n FROM proto_settlement_intents').get().n,
+        trigs: JSON.stringify(sqlite.prepare("SELECT name, sql FROM sqlite_master WHERE type = 'trigger' ORDER BY name").all()),
+        idxs: JSON.stringify(sqlite.prepare("SELECT name, sql FROM sqlite_master WHERE type = 'index' AND sql IS NOT NULL ORDER BY name").all()),
+      });
+      const before = snapshot();
+      // foreign_keys 开关必须在事务外(SQLite 规定: 事务内是 no-op; 同 v207)。本表自身无 FK, 但别的表(proto_bets 等)对 proto_markets 的 FK 不受影响; 保守起见与 v207 同样关掉再核。
+      sqlite.exec('PRAGMA foreign_keys = OFF');
+      try {
+        sqlite.exec('BEGIN TRANSACTION');
+        try {
+          for (const t of trigs) sqlite.exec(`DROP TRIGGER IF EXISTS "${t.name}"`);
+          sqlite.exec('DROP TABLE IF EXISTS proto_settlement_intents_v214');
+          sqlite.exec(newSql);
+          sqlite.exec(`INSERT INTO proto_settlement_intents_v214 (${colsCsv}) SELECT ${colsCsv} FROM proto_settlement_intents`);
+          const after = sqlite.prepare('SELECT COUNT(*) AS n FROM proto_settlement_intents_v214').get().n;
+          if (after !== before.rows) throw new Error(`v214 row count mismatch: before=${before.rows} after=${after}`);
+          sqlite.exec('DROP TABLE proto_settlement_intents');
+          sqlite.exec('ALTER TABLE proto_settlement_intents_v214 RENAME TO proto_settlement_intents');
+          for (const i of idxs) sqlite.exec(i.sql);
+          for (const t of trigs) sqlite.exec(t.sql);
+          const now = snapshot();
+          if (now.rows !== before.rows) throw new Error(`v214 行数核对失败: ${before.rows} → ${now.rows}`);
+          if (now.trigs !== before.trigs) throw new Error('v214 触发器集合(名+sql)重建后与重建前不一致');
+          if (now.idxs !== before.idxs) throw new Error('v214 索引集合(名+sql)重建后与重建前不一致');
+          sqlite.exec('COMMIT');
+        } catch (e) {
+          try { sqlite.exec('ROLLBACK'); } catch {}
+          throw e;
+        }
+        const fk = sqlite.pragma('foreign_key_check');
+        if (fk.length) throw new Error(`v214 foreign_key_check found ${fk.length} violation(s) after rebuild: ${JSON.stringify(fk).slice(0, 300)}`);
+        const ic = sqlite.pragma('integrity_check');
+        if (!(Array.isArray(ic) && ic.length === 1 && ic[0].integrity_check === 'ok')) throw new Error(`v214 integrity_check 不为 ok: ${JSON.stringify(ic).slice(0, 300)}`);
+      } finally {
+        sqlite.exec('PRAGMA foreign_keys = ON');
+      }
+      console.log(`[migrate] v214: proto_settlement_intents 重建(${before.rows} 行保真, ${trigs.length} 个引用它的触发器 / ${idxs.length} 个索引按原文重建, step CHECK 加 refund_flip/convert_to_refundclaim/refund_payout).`);
+    } else {
+      console.log('[migrate] v214: proto_settlement_intents step CHECK 已含 refund_flip(或表不存在)(idempotent skip).');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }

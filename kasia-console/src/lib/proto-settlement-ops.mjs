@@ -12,7 +12,8 @@ import {
 } from './proto-covenant-builder.mjs';
 import { compileSilV100, ctorBytes32V100, ctorIntV100 } from './pool-bshard-artifacts.mjs';
 import { selectFeeUtxoByConstruction, CONTINUATION_OUTPUT_SOMPI } from './proto-tx-assembly.mjs';
-import { buildMarketSealTxJson, buildCloseCommitTxJson, buildConvertToClaimTxJson, buildClaimDrawTxJson } from './proto-tx-assembly-settlement.mjs';
+import { buildMarketSealTxJson, buildCloseCommitTxJson, buildRefundFlipTxJson, buildConvertToClaimTxJson, buildClaimDrawTxJson } from './proto-tx-assembly-settlement.mjs';
+import { assertFactsResponse, MIN_FACTS_IPC_TIMEOUT_MS } from './proto-settlement-c1.mjs';
 import { assertCloseCommitArgsFromDb } from './proto-settlement-inputs.mjs';
 import { payoutLeafHex } from './proto-payout-leaf.mjs';
 import { deriveWinnerBet } from './proto-winner-bet.mjs';
@@ -20,7 +21,7 @@ import { deriveLeafState } from './proto-leaf-state.mjs';
 import { resolveStepPointers } from './proto-settlement-pointers.mjs';
 
 const SHARD_LEAF_DIRECT_SIL = new URL('./ShardLeaf_direct.sil', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
-const FEE_PROFILE_KIND = Object.freeze({ seal: 'market_seal', close_commit: 'close_commit', convert_to_claim: 'convert_to_claim', claim_draw: 'claim_draw' });
+const FEE_PROFILE_KIND = Object.freeze({ seal: 'market_seal', close_commit: 'close_commit', refund_flip: 'refund_flip', convert_to_claim: 'convert_to_claim', claim_draw: 'claim_draw' });
 const MARKET_COLS = 'id, deadline_ms, min_bet, seal_count, committee_pubkeys_json, rootclose_tmpl_hash, shardleaf_txid, shardleaf_vout, shardleaf_cov_id, shardleaf_own_redeem_len, status, winning_side, payout_root';
 
 const lc = (h) => String(h ?? '').replace(/^0x/i, '').toLowerCase();
@@ -80,6 +81,11 @@ export async function prepare(step, ctx) {
     const { closed } = closedStateOf(db, marketId, m);
     out.expectedSpks = { rootClose: rootCloseArtifact(m, marketId, OPEN_ROOTCLOSE(s)).scriptPubKeyHex };
     out.targetAddress = spkAddress(kaspa, network, rootCloseArtifact(m, marketId, closed).scriptPubKeyHex);            // close_commit 输出0 = RootClose(closed:1) 续约
+  } else if (step === 'refund_flip') {
+    // R-a: 输入 = RootClose(closed:0)(与 close_commit 同一预期 spk); 输出 0 = RootClose(closed:2) 续约(winningSide / payoutRoot 保持 0)
+    const s = sealedStateOf(db, marketId, m);
+    out.expectedSpks = { rootClose: rootCloseArtifact(m, marketId, OPEN_ROOTCLOSE(s)).scriptPubKeyHex };
+    out.targetAddress = spkAddress(kaspa, network, rootCloseArtifact(m, marketId, { ...OPEN_ROOTCLOSE(s), closed: 2 }).scriptPubKeyHex);
   } else if (step === 'convert_to_claim') {
     const { closed } = closedStateOf(db, marketId, m);
     const held = computeKttGenesisArtifact({ amount: closed.pool_value, ownerCovIdHex: pointerCovId(ctx, db, kaspa, step, marketId, 'rootClose') });   // 合并 KTT 的 owner = RootClose covenant id(seal 产出, 续约保持)
@@ -157,6 +163,14 @@ export async function build(step, ctx) {
       rootCloseOutpoint: opOf(chainParents.rootClose.outpoint), rootCloseUtxoScriptPublicKeyHex: rc.scriptPubKeyHex, rootCloseCovId: pointerCovId({ pointers }, db, kaspa, step, marketId, 'rootClose'),
       sealedState: s, newWinningSide: derived.newWinningSide, newPayoutRootHex: derived.newPayoutRootHex, feeUtxo, pmtEvidence: ctx.pmtEvidence, chainParents: parents,
     })).built;
+  } else if (step === 'refund_flip') {
+    const s = sealedStateOf(db, marketId, m);
+    const rc = rootCloseArtifact(m, marketId, OPEN_ROOTCLOSE(s));
+    built = tryEach((feeUtxo, parents) => buildRefundFlipTxJson({
+      ...base, committeePubkeyHex: m.committeePubkeyHex, deadlineMs: Number(m.deadline_ms), rootCloseTmplHash: lc(m.rootclose_tmpl_hash),
+      rootCloseOutpoint: opOf(chainParents.rootClose.outpoint), rootCloseUtxoScriptPublicKeyHex: rc.scriptPubKeyHex, rootCloseCovId: pointerCovId({ pointers }, db, kaspa, step, marketId, 'rootClose'),
+      sealedState: s, feeUtxo, pmtEvidence: ctx.pmtEvidence, chainParents: parents,
+    })).built;
   } else if (step === 'convert_to_claim') {
     const { closed } = closedStateOf(db, marketId, m);
     const rcClosed = rootCloseArtifact(m, marketId, closed);
@@ -180,4 +194,54 @@ export async function build(step, ctx) {
   if (built.genesisOutputIndices) r.genesisOutputIndices = built.genesisOutputIndices;
   if (built.continuationOutputIndices) r.continuationOutputIndices = built.continuationOutputIndices;
   return r;
+}
+
+/**
+ * R-a / M5 的纯决策(无 IO, 可单测): 给定 facts 形态 L 在 closed=2 地址上的读回(listRes)与形态 O 在 closed=0 地址上对旧 outpoint 的读回(oldRes),
+ * 判 ① 后继(covenantId ∧ spk version 0 ∧ scriptHex ∧ 面值)与 ② 旧 outpoint 已花。任何一条不满足 ⇒ { flipped:false, reason }。地址级(只看"这个地址上有没有 UTXO")一律不算数。
+ * @param {{listRes:{utxos:Array,truncated:boolean}, oldRes:{found:Array,missing:Array}, covId:string, flippedSpkHex:string, contValue:bigint}} o
+ */
+export function decideRefundFlipFromFacts({ listRes, oldRes, covId, flippedSpkHex, contValue }) {
+  const succ = listRes.utxos.find((u) => u.covenantId === covId && u.scriptPublicKey.version === 0 && lc(u.scriptPublicKey.scriptHex) === lc(flippedSpkHex) && u.amount === contValue);
+  if (!succ) return { flipped: false, reason: listRes.truncated ? 'no_matching_successor_window_truncated' : 'no_matching_successor' };
+  if (oldRes.found.length > 0 || oldRes.missing.length !== 1) return { flipped: false, reason: 'old_outpoint_still_unspent' };
+  return { flipped: true, successor: succ };
+}
+
+/**
+ * R-a / M5: 只读探测"该市场的 RootClose 是否已被(任何人)翻成 closed=2"。fail-closed 到"未翻": 任何一步读不到 / 不合法 ⇒ { flipped: false }(调用方不据此动状态)。
+ * 🔴 判据【三缺一不可】,不得地址级——closed=2 的 P2SH 地址公开可算,任何人可向它撒 dust:
+ *   ① facts 形态 L 在 closed=2 spk 的地址上(面值精确 = CONTINUATION_OUTPUT_SOMPI)读到一个条目,其 covenantId == 该市场 RootClose 的 covenant id(seal 意图输出 0 的 covenantId,来自指针)∧ spk(version 0 + scriptHex)== 现算的 closed=2 spk;
+ *      covenantId 不可伪造(covenant 续约输出只有花掉同一 covenant 输入的交易才能造出), 所以 truncated / 被挤掉只会造成假阴性, 不会假阳性;
+ *   ② 旧 RootClose outpoint(seal 输出 0)已被花: facts 形态 O 在 closed=0 spk 的地址上按该 outpoint 查, 落在 missing 里;
+ *   ③ 后继输出所在交易已 landed 且深度 ≥ minDepth: check_utxo_landed(closed=2 地址, 后继 txid, minDepth)——与 own-flip 落地判据同一原语(NO TX NO STATE / 抗 reorg)。
+ * 后继 txid 来源 = ① 里 facts 读回的后继 outpoint.transactionId(NWT 落点 ①); 花费交易 == 该 txid 的依据 = covenant 连续性(该 covenant 只有一个存活 UTXO, ② 证明旧 outpoint 已被花, ① 证明后继带同一 covenantId)。
+ *   ⚠ 白名单 read 集(proto-relay-ipc)里没有"按 outpoint 查花费交易"的命令, 加它 = 新增 IPC 面, 本批不做; 已如实写入批说明。
+ * @returns {Promise<{flipped:boolean, reason?:string, txid?:string, outpoint?:{transactionId:string,index:number}, depth?:number|null, spenderVerified?:'covenant_continuity'}>}
+ */
+export async function probeRefundFlip({ marketId, kaspa, network, requestFacts, sendCmd, relayId, minDepth, db = sqlite, ipcTimeoutMs = MIN_FACTS_IPC_TIMEOUT_MS }) {
+  if (typeof requestFacts !== 'function' || typeof sendCmd !== 'function') throw new TypeError('probeRefundFlip: requestFacts / sendCmd 必填');
+  if (!Number.isInteger(minDepth) || minDepth <= 0) throw new TypeError('probeRefundFlip: minDepth 必须是正整数');
+  const m = marketRow(db, marketId);
+  const s = sealedStateOf(db, marketId, m);
+  const pointers = resolveStepPointers({ step: 'refund_flip', marketId, db, kaspa });
+  const oldRc = pointers.roles.rootClose; const covId = lc(oldRc.expectedCovenantId);
+  if (!/^[0-9a-f]{64}$/.test(covId)) return { flipped: false, reason: 'no_expected_covenant_id' };
+  const openSpk = lc(rootCloseArtifact(m, marketId, OPEN_ROOTCLOSE(s)).scriptPubKeyHex);
+  const flippedSpk = lc(rootCloseArtifact(m, marketId, { ...OPEN_ROOTCLOSE(s), closed: 2 }).scriptPubKeyHex);
+  const openAddr = spkAddress(kaspa, network, openSpk), flippedAddr = spkAddress(kaspa, network, flippedSpk);
+  const cont = CONTINUATION_OUTPUT_SOMPI.toString();
+  // ① 后继(带 covenantId ∧ spk)
+  const listRes = assertFactsResponse(await requestFacts(flippedAddr, { facts: true, minAmount: cont, maxAmount: cont }, { timeoutMs: ipcTimeoutMs }), { form: 'list' });
+  // ② 旧 outpoint 已花(missing)
+  const requested = [{ transactionId: lc(oldRc.outpoint.transactionId), index: Number(oldRc.outpoint.index) }];
+  const oRes = assertFactsResponse(await requestFacts(openAddr, { facts: true, outpoints: requested }, { timeoutMs: ipcTimeoutMs }), { form: 'outpoints', requested });
+  const dec = decideRefundFlipFromFacts({ listRes, oldRes: oRes, covId, flippedSpkHex: flippedSpk, contValue: CONTINUATION_OUTPUT_SOMPI });
+  if (!dec.flipped) return { flipped: false, reason: dec.reason };
+  const succ = dec.successor;
+  // ③ 后继交易已 landed 且深度足够
+  const txid = succ.outpoint.transactionId;
+  const landed = await sendCmd(relayId, { type: 'check_utxo_landed', address: flippedAddr, txid, minDepth }, 15000, 'internal');
+  if (!(landed && landed.landed === true)) return { flipped: false, reason: 'successor_not_deep_enough', txid, depth: landed && landed.depth != null ? landed.depth : null };
+  return { flipped: true, txid, outpoint: succ.outpoint, depth: landed.depth ?? null, spenderVerified: 'covenant_continuity' };
 }

@@ -25,7 +25,7 @@ const {
 } = await import('./proto-tx-assembly.mjs');
 const {
   buildMarketSealTxJson, MARKET_SEAL_ROOTCLOSE_OUT_INDEX, MARKET_SEAL_TOKEN_OUT_INDEX,
-  buildCloseCommitTxJson, CLOSE_COMMIT_ROOTCLOSE_OUT_INDEX,
+  buildCloseCommitTxJson, CLOSE_COMMIT_ROOTCLOSE_OUT_INDEX, buildRefundFlipTxJson, REFUND_FLIP_ROOTCLOSE_OUT_INDEX,
 } = await import('./proto-tx-assembly-settlement.mjs');
 const {
   computeMarketGenesisArtifacts, computeShardLeafRedeemScript, computeKttGenesisArtifact,
@@ -580,6 +580,73 @@ t('⑤真实tx算出的output covenant_id与builder返回的rootCloseCovId/token
     for (const ev of ignored) throws(() => buildCloseCommitTxJson({ ...a, pmtEvidence: ev }), /fail-closed.*余量/);
     const okNow = buildCloseCommitTxJson({ ...a, pmtEvidence: { pastMedianTimeMs: pmt, readAtMs: Date.now() - 59_000, source: 'relay' } });   // 59s 内仍新鲜
     if (!okNow.txJson) throw new Error('新鲜的 relay 证据应放行');
+  });
+
+  // ══════════ ⑥ refund_flip(R-a, 设计 v0.2 §3.6): RootClose(closed:0)→closed:2, 零签名, lockTime=deadline+2h, pmtEvidence 必填 ══════════
+  const { REFUND_FLIP_GRACE_MS } = await import('./proto-close-commit-gate.mjs');
+  const rfCap = loadFeeProfileCap('refund_flip');
+  const freshEv = (over = {}) => ({ pastMedianTimeMs: Date.now() - 1_000, readAtMs: Date.now() - 500, source: 'relay', ...over });
+  const refundArgs = (over = {}) => withParents('refund_flip', {
+    kaspa, network: 'mainnet', marketId: MARKET_ID, committeePubkeyHex: genesisArtifacts.committeePubkeyHex,
+    deadlineMs: DEADLINE_MS, rootCloseTmplHash: genesisArtifacts.rootCloseTmplHash,
+    rootCloseOutpoint, rootCloseUtxoScriptPublicKeyHex, rootCloseCovId: sealBuilt.rootCloseCovId, sealedState: currentState,
+    tokPrefixHex, tokSuffixHex, feeUtxo: closeCommitFeeUtxo, relayChangeScriptPublicKeyHex: relaySpkHex, absFeeCapSompi: rfCap, pmtEvidence: freshEv(),
+    ...over,
+  });
+  let rfBuilt;
+  t('⑥a refund_flip 真实构造成功([rootClose,fee]两输入; RootClose 输入零签名; 只有 fee 输入待 relay 签)', () => {
+    rfBuilt = buildRefundFlipTxJson(refundArgs());
+    if (!rfBuilt.txJson || !rfBuilt.expectedTxid) throw new Error('返回形状不对');
+    if (JSON.stringify(rfBuilt.signInputIndices) !== '[1]') throw new Error(`signInputIndices 应为 [1], 实际 ${JSON.stringify(rfBuilt.signInputIndices)}`);
+    if (JSON.stringify(rfBuilt.continuationOutputIndices) !== '[0]') throw new Error('continuationOutputIndices 应为 [0]');
+    const tx = kaspa.Transaction.deserializeFromSafeJSON(rfBuilt.txJson);
+    if (tx.inputs.length !== 2) throw new Error(`应为两输入, 实际 ${tx.inputs.length}`);
+    if (String(tx.inputs[1].signatureScript || '').replace(/^0x/, '') !== '') throw new Error('fee 输入在 builder 里必须未签(relay 签)');
+    if (String(tx.inputs[0].signatureScript || '').replace(/^0x/, '').length === 0) throw new Error('RootClose 输入应带 witness+redeem(即使零签名)');
+  });
+  t('⑥b lockTime = deadline+7,200,000; 输入 sequence 均为 0(CLTV 规则: sequence < MAX)', () => {
+    const tx = kaspa.Transaction.deserializeFromSafeJSON(rfBuilt.txJson);
+    if (BigInt(tx.lockTime) !== BigInt(DEADLINE_MS + REFUND_FLIP_GRACE_MS)) throw new Error(`lockTime=${tx.lockTime} != ${DEADLINE_MS + REFUND_FLIP_GRACE_MS}`);
+    for (const [i, inp] of tx.inputs.entries()) if (BigInt(inp.sequence) !== 0n) throw new Error(`input ${i} sequence=${inp.sequence} != 0`);
+  });
+  t('⑥c 输出0 = closed:2 的 RootClose spk(独立现算)且 covenant id 不变; 反向臂: 不等于 closed:1 的 spk', () => {
+    const tx = kaspa.Transaction.deserializeFromSafeJSON(rfBuilt.txJson);
+    const openState = { ...currentState, closed: 0, winningSide: 0, payoutRoot: '00'.repeat(32) };
+    const art = (st) => computeRootCloseGenesisArtifact({ marketId: MARKET_ID, committeePubkeyHex: genesisArtifacts.committeePubkeyHex, deadlineMs: DEADLINE_MS, rootCloseTmplHash: genesisArtifacts.rootCloseTmplHash, state: st });
+    const want2 = String(art({ ...openState, closed: 2 }).scriptPubKeyHex).replace(/^0x/, '').toLowerCase();
+    const want1 = String(art({ ...openState, closed: 1 }).scriptPubKeyHex).replace(/^0x/, '').toLowerCase();
+    const got = String(tx.outputs[REFUND_FLIP_ROOTCLOSE_OUT_INDEX].scriptPublicKey.script).toLowerCase();
+    if (got !== want2) throw new Error('输出0 spk != closed:2 的 RootClose spk');
+    if (want1 === want2) throw new Error('closed:1 与 closed:2 的 spk 竟相同(反向臂失效, 本条无意义)');
+    if (String(tx.outputs[REFUND_FLIP_ROOTCLOSE_OUT_INDEX].covenant.covenantId).toLowerCase() !== sealBuilt.rootCloseCovId.toLowerCase()) throw new Error('refund_flip 不应改变 covenant id');
+  });
+  t('⑥d relay 真代码: validateFixedValueOutputs(续约[0])通过; 只签 fee 输入后 finalize, txid == expectedTxid; 节点 v2.0.1 输入规则; Σin−Σout == netLoss', () => {
+    const tx = kaspa.Transaction.deserializeFromSafeJSON(rfBuilt.txJson);
+    const fv = validateFixedValueOutputs({ outputs: extractTxShape(tx).outputs, genesisOutputIndices: [], continuationOutputIndices: [REFUND_FLIP_ROOTCLOSE_OUT_INDEX] });
+    if (!fv.ok) throw new Error(`relay 真代码拒绝: ${fv.reason}`);
+    assertKaspadInputVersionRule(tx, 'refund_flip-e2e');
+    let sumIn = 0n; for (const i of tx.inputs) sumIn += BigInt(i.utxo.amount);
+    let sumOut = 0n; for (const o of tx.outputs) sumOut += BigInt(o.value);
+    if (sumIn - sumOut !== rfBuilt.netLoss) throw new Error(`隐含 fee ${sumIn - sumOut} != netLoss ${rfBuilt.netLoss}`);
+    signOnlyDeclaredInputs({ tx, signInputIndices: rfBuilt.signInputIndices, privateKey: priv, kaspa });
+    tx.finalize();
+    const r = assertFinalTxid(tx, rfBuilt.expectedTxid); if (!r.ok) throw new Error(`签名后 txid=${r.actualTxid} != ${rfBuilt.expectedTxid}`);
+  });
+  t('⑥e fail-closed: pmtEvidence 缺 / 来源不明 / 过期 / 远未来 / 非数字 ⇒ 拒(refund_flip 不可逆, 不设墙钟退路)——deadline 早已过去也一样', () => {
+    for (const ev of [undefined, null, freshEv({ source: 'local' }), freshEv({ readAtMs: Date.now() - 61_000 }), freshEv({ readAtMs: Date.now() + 60_000 }), freshEv({ readAtMs: 'now' })]) {
+      throws(() => buildRefundFlipTxJson(refundArgs({ pmtEvidence: ev })), /fail-closed.*pmtEvidence/);
+    }
+  });
+  t('⑥f fail-closed: pmt 未越过 deadline+2h+30s ⇒ 拒(close 的 30s 闸会放行的读数也被拒: 不复用 close 闸); 恰 lock+30s 放行(对照)', () => {
+    const lock = DEADLINE_MS + REFUND_FLIP_GRACE_MS;
+    throws(() => buildRefundFlipTxJson(refundArgs({ pmtEvidence: freshEv({ pastMedianTimeMs: DEADLINE_MS + 60_000 }) })), /refund_flip 时间判据/);
+    throws(() => buildRefundFlipTxJson(refundArgs({ pmtEvidence: freshEv({ pastMedianTimeMs: lock + 29_999 }) })), /refund_flip 时间判据/);
+    const ok = buildRefundFlipTxJson(refundArgs({ pmtEvidence: freshEv({ pastMedianTimeMs: lock + 30_000 }) }));
+    if (!ok.txJson) throw new Error('恰好 lock+30s 应放行');
+  });
+  t('⑥g fail-closed: RootClose UTXO spk 与现算不符 / chainParents 与 builder 假设不符 ⇒ 拒', () => {
+    throws(() => buildRefundFlipTxJson(refundArgs({ rootCloseUtxoScriptPublicKeyHex: '0x' + 'aa20' + '11'.repeat(32) + '87' })), /fail-closed.*链上 UTXO spk/);
+    throws(() => buildRefundFlipTxJson(refundArgs({ chainParents: { rootClose: { value: 20_000_000n, spkLen: 35, hasCovenant: false, outpoint: { txid: rootCloseOutpoint.txid, index: rootCloseOutpoint.vout } }, fee: { value: closeCommitFeeUtxo.value, spkLen: 34, hasCovenant: false, outpoint: { txid: closeCommitFeeUtxo.txid, index: closeCommitFeeUtxo.vout } } } })), /chain_parents_mismatch/);
   });
 }
 

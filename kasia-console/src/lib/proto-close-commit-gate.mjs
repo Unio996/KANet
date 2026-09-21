@@ -45,3 +45,20 @@ export async function checkCloseCommitTiming({ rpc, deadlineMs }) {
   try { pmt = await readPastMedianTimeMs(rpc); } catch (e) { return { canSubmit: false, reason: `读 pastMedianTime 失败: ${e.message}`, pmtLeadMs: null, sla: 'ok' }; }
   return { ...evaluateCloseCommitTiming({ pastMedianTimeMs: pmt, deadlineMs }), pastMedianTimeMs: pmt };
 }
+
+/**
+ * R-a: refund_flip 的提交闸(pmt 域)。RootClose.refund_flip 要求 tx.time ≥ deadline+7,200,000(lockTime = deadline+REFUND_FLIP_GRACE_MS),
+ * 节点 finality 是 lock_time < pmt(严格小于) ⇒ 需要 pmt > lockTime; 再留同一个 30s 余量(与 close_commit 的闸同值、同理由)。
+ * 🔴 不复用 evaluateCloseCommitTiming: 它 lead ≥ 30s 就 canSubmit(那是 close 的闸), 拿来判 refund_flip 会在 deadline+30s 就构造广播、被节点 NotFinalized 拒。
+ * @param {{pastMedianTimeMs:number, deadlineMs:number}} o
+ * @returns {{canSubmit:boolean, reason:string, pmtLeadMs:number, lockTimeMs:number}}
+ */
+export function evaluateRefundFlipTiming({ pastMedianTimeMs, deadlineMs }) {
+  const pmt = Number(pastMedianTimeMs), dl = Number(deadlineMs);
+  if (!Number.isFinite(pmt) || !Number.isFinite(dl) || pmt <= 0 || dl <= 0) throw new Error(`evaluateRefundFlipTiming: pastMedianTimeMs(${pastMedianTimeMs})/deadlineMs(${deadlineMs}) 必须是正数`);
+  const lockTimeMs = dl + REFUND_FLIP_GRACE_MS, lead = pmt - dl;
+  if (pmt < lockTimeMs + CLOSE_COMMIT_PMT_MARGIN_MS) {
+    return { canSubmit: false, reason: `pmt(${pmt}) 尚未超过 deadline(${dl}) + ${REFUND_FLIP_GRACE_MS}ms + ${CLOSE_COMMIT_PMT_MARGIN_MS}ms 余量(差 ${lockTimeMs + CLOSE_COMMIT_PMT_MARGIN_MS - pmt}ms): refund_flip 的 lock_time 尚未 finalized, 节点会以 NotFinalized 拒绝`, pmtLeadMs: lead, lockTimeMs };
+  }
+  return { canSubmit: true, reason: 'pmt 已超过 deadline + 2h + 余量', pmtLeadMs: lead, lockTimeMs };
+}

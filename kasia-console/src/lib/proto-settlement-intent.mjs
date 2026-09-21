@@ -26,7 +26,7 @@ import { PROTO_COVENANT_BROADCAST_TYPE } from './proto-relay-guard.mjs';
 import { isMarketFrozen } from './proto-settlement-freeze.mjs';
 
 export const SETTLEMENT_SUBJECT_TYPES = Object.freeze(['market', 'claim', 'ticket']);
-export const SETTLEMENT_STEPS = Object.freeze(['seal', 'resolve', 'convert_to_claim', 'claim_draw', 'withdraw', 'reclaim']);
+export const SETTLEMENT_STEPS = Object.freeze(['seal', 'resolve', 'convert_to_claim', 'claim_draw', 'withdraw', 'reclaim', 'refund_flip', 'convert_to_refundclaim', 'refund_payout']);   // 后三个=退款路(R-a 只接线 refund_flip; 另两个的 CHECK 位随 v214 一次放入, 避免 R-b/R-c 再各重建一次表)
 export const SETTLEMENT_INTENT_STATUS = Object.freeze({ PENDING: 'pending', PREPARED: 'prepared', SUBMITTED: 'submitted', LANDED: 'landed', AMBIGUOUS: 'ambiguous' });
 
 // step → subject_type 的既定归属(供 ensureSettlementIntent 校验调用方没传错组合，不是 CHECK 之外
@@ -35,6 +35,7 @@ const STEP_SUBJECT_TYPE = Object.freeze({
   seal: 'market', resolve: 'market',
   convert_to_claim: 'claim', claim_draw: 'claim', withdraw: 'claim',
   reclaim: 'ticket',
+  refund_flip: 'market', convert_to_refundclaim: 'market', refund_payout: 'claim',
 });
 
 // step → 依赖的前置 step(同 subject_type 内)；null = 无依赖。
@@ -42,6 +43,7 @@ const STEP_DEPENDS_ON = Object.freeze({
   seal: null, resolve: 'seal',
   convert_to_claim: null, claim_draw: 'convert_to_claim', withdraw: 'claim_draw',
   reclaim: null,
+  refund_flip: 'seal', convert_to_refundclaim: 'refund_flip', refund_payout: null,   // refund_payout 依赖 convert_to_refundclaim(跨 subject_type: market→claim)+ 上一笔 payout, 由 store 额外检查(同 convert_to_claim)
 });
 
 const nowIso = () => new Date().toISOString();

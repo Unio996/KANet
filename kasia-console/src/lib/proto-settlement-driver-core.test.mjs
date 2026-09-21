@@ -19,6 +19,7 @@ let pass = 0, fail = 0;
 const t = async (n, f) => { try { await f(); pass++; console.log('[PASS] ' + n); } catch (e) { fail++; console.log('[FAIL] ' + n + ' :: ' + (e.stack || e.message).split('\n').slice(0, 3).join(' | ')); } };
 const hex64 = () => crypto.randomBytes(32).toString('hex');
 const NOW = Date.parse('2026-09-20T12:00:00.000Z');
+const RF_GRACE = 7_200_000;   // REFUND_FLIP_GRACE_MS(合约常量 deadline+2h)
 
 // ── 假端口 ────────────────────────────────────────────────────────────────────────────────────────────────────────
 function mkWorld(o = {}) {
@@ -69,6 +70,7 @@ function mkWorld(o = {}) {
     // 批 D D1 入口③的端口: 默认未冻结(false); cfg.frozen 可设任意值(测严格 fail-closed), cfg.frozenThrow 抛错
     isSettlementFrozen: async (marketId) => { log.push('isSettlementFrozen'); if (cfg.frozenThrow) throw cfg.frozenThrow; return Object.prototype.hasOwnProperty.call(cfg, 'frozen') ? cfg.frozen : false; },
     probeRefundFlip: cfg.probeRefundFlip,
+    recordObservedRefundFlip: cfg.recordObservedRefundFlip,
     log: { log: () => {} },
   };
   const world = { log, rows, alerts, deps, cfg, markLandedCalls: [], lastBroadcast: null, lastBuildCtx: null, lastCheckLanded: null };
@@ -79,12 +81,13 @@ const adv = (w, step, { tickId } = {}) => { const d = createSettlementDriver(w.d
 const idx = (log, prefix) => log.findIndex((l) => l.startsWith(prefix));
 
 // ── 常量与闭集 ────────────────────────────────────────────────────────────────────────────────────────────────────
-await t('步骤计划: 恰四步(seal / close_commit / convert_to_claim / claim_draw); close_commit 的意图 step 名是 resolve; 无 withdraw / reclaim / ticket; STEP_OF_INTENT 是它的逆', () => {
-  assert.deepEqual([...SETTLEMENT_DRIVER_STEPS], ['seal', 'close_commit', 'convert_to_claim', 'claim_draw']);
+await t('步骤计划: 恰五步(seal / close_commit / refund_flip / convert_to_claim / claim_draw; R-a 加 refund_flip); close_commit 的意图 step 名是 resolve; 无 withdraw / reclaim / ticket / convert_to_refundclaim / refund_payout(R-b/R-c 才接线); STEP_OF_INTENT 是它的逆', () => {
+  assert.deepEqual([...SETTLEMENT_DRIVER_STEPS], ['seal', 'close_commit', 'refund_flip', 'convert_to_claim', 'claim_draw']);
+  assert.deepEqual(STEP_INTENT.refund_flip, { subjectType: 'market', intentStep: 'refund_flip' });
   assert.deepEqual(STEP_INTENT.close_commit, { subjectType: 'market', intentStep: 'resolve' });
-  assert.deepEqual(Object.values(STEP_INTENT).map((p) => p.subjectType).sort(), ['claim', 'claim', 'market', 'market']);
+  assert.deepEqual(Object.values(STEP_INTENT).map((p) => p.subjectType).sort(), ['claim', 'claim', 'market', 'market', 'market']);
   for (const [step, p] of Object.entries(STEP_INTENT)) assert.equal(STEP_OF_INTENT[`${p.subjectType}:${p.intentStep}`], step);
-  for (const bad of ['claim:withdraw', 'ticket:reclaim', 'market:withdraw']) assert.equal(STEP_OF_INTENT[bad], undefined);
+  for (const bad of ['claim:withdraw', 'ticket:reclaim', 'market:withdraw', 'market:convert_to_refundclaim', 'claim:refund_payout']) assert.equal(STEP_OF_INTENT[bad], undefined);
   assert.ok(Object.isFrozen(STEP_INTENT) && Object.isFrozen(SETTLEMENT_ALERTS));
 });
 await t('报警闭集: 未登记的名字直接抛错; c1 分类器可能产出的每个 eventType 与 c1 事件名都已登记(drift 守卫); 含 fee_candidate_out_of_range_skipped(9-2b 清单 #8)', () => {
@@ -122,14 +125,14 @@ await t('四步各自的 covenant_broadcast 载荷: intent_key = settle:<主体>
   const m = src.match(/const SETTLE_KEY_RE = (\/.*\/);/); assert.ok(m, '取不到出口 S9 正则');
   const EXIT_RE = new RegExp(m[1].slice(1, -1));
   for (const step of SETTLEMENT_DRIVER_STEPS) {
-    const w = mkWorld({ genesis: step === 'seal' ? [0, 1] : undefined, cont: step === 'close_commit' ? [0] : undefined });
+    const w = mkWorld({ genesis: step === 'seal' ? [0, 1] : undefined, cont: (step === 'close_commit' || step === 'refund_flip') ? [0] : undefined, ...(step === 'refund_flip' ? { frozen: true, deadlineMs: NOW - RF_GRACE - 60_000 } : {}) });
     const i = ids(); const d = createSettlementDriver(w.deps);
     const r = await d.advanceStep({ step, subjectId: i.subjectId, marketId: i.marketId });
     assert.equal(r.outcome, 'submitted'); const cmd = w.lastBroadcast;
     const want = `settle:${STEP_INTENT[step].subjectType}:${i.subjectId}:${STEP_INTENT[step].intentStep}`;
     assert.equal(cmd.intent_key, want); assert.ok(EXIT_RE.test(cmd.intent_key), '过不了出口 S9: ' + cmd.intent_key);
     assert.deepEqual(cmd.sign_input_indices, [2]); assert.equal(cmd.type, 'covenant_broadcast'); assert.equal(typeof cmd.tx_json, 'string'); assert.equal(cmd.expected_txid, 'ab'.repeat(32));
-    assert.equal('genesis_output_indices' in cmd, step === 'seal'); assert.equal('continuation_output_indices' in cmd, step === 'close_commit');
+    assert.equal('genesis_output_indices' in cmd, step === 'seal'); assert.equal('continuation_output_indices' in cmd, step === 'close_commit' || step === 'refund_flip');
   }
 });
 await t('依赖未 landed ⇒ waiting: 意图仍建(pending)、零 IPC、不指针 / 不取证 / 不构造 / 不广播', async () => {
@@ -413,6 +416,58 @@ await t('结构: 无 DB_PATH 的子进程里核心可直接 import(证明它不�
   const env = { ...process.env }; delete env.DB_PATH;
   const r = spawnSync(process.execPath, ['--input-type=module', '-e', `await import(${JSON.stringify(new URL('./proto-settlement-driver-core.mjs', import.meta.url).href)})`], { env, encoding: 'utf8' });
   assert.equal(r.status, 0, (r.stderr || '').split('\n')[0]);
+});
+
+// ══ R-a: refund_flip step(设计 docs/2026-09-21-j2-driver-refund-path-design-v0.2.md §3.6 / M5) ══════════════════════════════════════════════════
+await t('R-a refund_flip 广播前闸①: 只翻【已冻结】市场——未冻结(false / undefined / null / 0 / "true" / 抛错)一律 gated(refund_flip_market_not_frozen), 不读 pmt / 不建 / 不广播(与 close_commit 的冻结闸方向相反且同样严格 fail-closed)', async () => {
+  for (const frozen of [false, undefined, null, 0, 'true', 1, {}]) {
+    const w = mkWorld({ frozen, deadlineMs: NOW - RF_GRACE - 60_000 }); const r = await adv(w, 'refund_flip');
+    assert.equal(r.outcome, 'gated', String(frozen)); assert.equal(r.reason, 'refund_flip_market_not_frozen');
+    assert.deepEqual(w.log.filter((l) => /^(sendCmd|build)/.test(l)), [], `未冻结时不得读 pmt / 建 / 广播: ${String(frozen)}`);
+  }
+  const w2 = mkWorld({ frozenThrow: new Error('db down'), deadlineMs: NOW - RF_GRACE - 60_000 }); const r2 = await adv(w2, 'refund_flip');
+  assert.equal(r2.outcome, 'gated'); assert.equal(r2.reason, 'refund_flip_market_not_frozen'); assert.deepEqual(w2.log.filter((l) => /^(sendCmd|build)/.test(l)), []);
+});
+await t('R-a refund_flip 广播前闸②: pmt 门用 evaluateRefundFlipTiming(deadline+2h+30s), 不是 close 的 30s 闸——deadline+60s 的读数(close 会放行)对 refund_flip 必须 gated; pmt 读不到 ⇒ gated; 都不建不广播', async () => {
+  let w = mkWorld({ frozen: true, deadlineMs: NOW - 60_000 });                                  // pmt=NOW ⇒ 领先 deadline 60s: close 闸放行, refund_flip 必拒
+  let r = await adv(w, 'refund_flip'); assert.equal(r.outcome, 'gated'); assert.equal(r.reason, 'refund_flip_pmt_not_ready');
+  assert.ok(!w.log.includes('build:refund_flip') && !w.log.includes('sendCmd:covenant_broadcast'), '不建、不广播');
+  w = mkWorld({ frozen: true, deadlineMs: NOW - RF_GRACE - 29_999 }); r = await adv(w, 'refund_flip'); assert.equal(r.reason, 'refund_flip_pmt_not_ready', '差 1ms 余量不放行');
+  w = mkWorld({ frozen: true, deadlineMs: NOW - RF_GRACE - 30_000 }); r = await adv(w, 'refund_flip'); assert.equal(r.outcome, 'submitted', '恰好 deadline+2h+30s 放行(对照: 上面的 gated 来自时间)');
+  w = mkWorld({ frozen: true, deadlineMs: NOW - RF_GRACE - 60_000, pmt: new Error('rpc timeout') }); r = await adv(w, 'refund_flip'); assert.equal(r.outcome, 'gated'); assert.ok(!w.log.includes('build:refund_flip'));
+});
+await t('R-a refund_flip 放行路径: builder 收到 relay 来源的 pmtEvidence(readAtMs=relay 的 observedAtMs); 广播载荷带 continuation_output_indices; 意图 key = settle:market:<id>:refund_flip', async () => {
+  const w = mkWorld({ frozen: true, cont: [0], deadlineMs: NOW - RF_GRACE - 60_000 }); const i = ids(); const d = createSettlementDriver(w.deps);
+  const r = await d.advanceStep({ step: 'refund_flip', subjectId: i.subjectId, marketId: i.marketId }); assert.equal(r.outcome, 'submitted');
+  assert.equal(r.key, `settle:market:${i.subjectId}:refund_flip`);
+  assert.equal(w.lastBuildCtx.pmtEvidence.source, 'relay'); assert.equal(w.lastBuildCtx.pmtEvidence.pastMedianTimeMs, NOW); assert.equal(w.lastBuildCtx.pmtEvidence.readAtMs, NOW - 1000);
+  assert.deepEqual(w.lastBroadcast.continuation_output_indices, [0]);
+});
+await t('R-a / M5: refund_flip 的 inputs 阶段 RootClose drift + 探针返回 {flipped:true,…} ⇒ 调 recordObservedRefundFlip({marketId, probe}) ⇒ held(refund_flip_observed), 报警一次; 探针 false / 抛错 / 旧式 true 的行为', async () => {
+  const drift = () => new SettlementChainCheckError('rootClose_outpoint_drift', 'outpoint 漂移', { step: 'refund_flip', role: 'rootClose' });
+  const probe = { flipped: true, txid: 'cd'.repeat(32), depth: 9 }; const recorded = [];
+  let w = mkWorld({ frozen: true, deadlineMs: NOW - RF_GRACE - 60_000, verifyThrow: drift, probeRefundFlip: async () => probe, recordObservedRefundFlip: (a) => recorded.push(a) });
+  const d = createSettlementDriver(w.deps); const i = ids();
+  let r = await d.advanceStep({ step: 'refund_flip', subjectId: i.subjectId, marketId: i.marketId, tickId: 1 });
+  assert.equal(r.outcome, 'held'); assert.equal(r.reason, 'refund_flip_observed');
+  assert.deepEqual(recorded, [{ marketId: i.marketId, probe }], '探针结果原样交给记账端口');
+  assert.deepEqual(w.alerts.map((a) => a.eventType), ['settlement_refund_flip_observed']);
+  r = await d.advanceStep({ step: 'refund_flip', subjectId: i.subjectId, marketId: i.marketId, tickId: 2 }); assert.equal(w.alerts.length, 1, '不重复报警');
+  const rec2 = []; w = mkWorld({ frozen: true, deadlineMs: NOW - RF_GRACE - 60_000, verifyThrow: drift, probeRefundFlip: async () => ({ flipped: false, reason: 'no_matching_successor' }), recordObservedRefundFlip: (a) => rec2.push(a) });
+  r = await adv(w, 'refund_flip'); assert.equal(r.outcome, 'failed'); assert.equal(rec2.length, 0, '探针说没翻 ⇒ 不记账');
+  const rec3 = []; w = mkWorld({ frozen: true, deadlineMs: NOW - RF_GRACE - 60_000, verifyThrow: drift, probeRefundFlip: async () => { throw new Error('rpc'); }, recordObservedRefundFlip: (a) => rec3.push(a) });
+  r = await adv(w, 'refund_flip'); assert.equal(r.outcome, 'failed'); assert.equal(rec3.length, 0, '探针抛错 ⇒ 按未翻, 不记账');
+  const rec4 = []; w = mkWorld({ frozen: true, deadlineMs: NOW - RF_GRACE - 60_000, verifyThrow: drift, probeRefundFlip: async () => true, recordObservedRefundFlip: (a) => rec4.push(a) });
+  r = await adv(w, 'refund_flip'); assert.equal(r.outcome, 'held'); assert.equal(rec4.length, 0, '旧式 true(无 txid)不足以记 landed: 只 held, 不记账');
+  const rec5 = []; w = mkWorld({ frozen: true, deadlineMs: NOW - RF_GRACE - 60_000, verifyThrow: new SettlementChainCheckError('fee_value_drift', 'x'), probeRefundFlip: async () => probe, recordObservedRefundFlip: (a) => rec5.push(a) });
+  r = await adv(w, 'refund_flip'); assert.equal(rec5.length, 0, '非 RootClose 输入漂移 ⇒ 不探测不记账');
+});
+await t('R-a / M5: close_commit 的 RootClose drift + 探针 {flipped:true} ⇒ 既有行为(resolve 意图 ambiguous + 报警)之外, 还记 refund_flip landed + 冻结(recordObservedRefundFlip 被调)', async () => {
+  const drift = new SettlementChainCheckError('rootClose_spk_drift', 'spk 漂移', { step: 'close_commit', role: 'rootClose' }); const probe = { flipped: true, txid: 'ef'.repeat(32), depth: 6 }; const recorded = [];
+  const w = mkWorld({ verifyThrow: drift, probeRefundFlip: async () => probe, recordObservedRefundFlip: (a) => recorded.push(a) }); const d = createSettlementDriver(w.deps); const i = ids();
+  const r = await d.advanceStep({ step: 'close_commit', subjectId: i.subjectId, marketId: i.marketId, tickId: 1 });
+  assert.equal(r.outcome, 'held'); assert.equal(w.rows.get(d._keyOf('close_commit', i.subjectId)).status, 'ambiguous');
+  assert.deepEqual(recorded, [{ marketId: i.marketId, probe }]);
 });
 
 console.log(`\nproto-settlement-driver-core.test: ${pass} passed, ${fail} failed`);

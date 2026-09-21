@@ -105,7 +105,9 @@ export async function buildProductionDriver({ health, network, ops, kaspa, sendC
     listWork: async () => store.listWork(),
     prepare: (step, ctx) => ops.prepare(step, { ...ctx, kaspa, network, relayAddress: health.address, relaySpkHex }),
     build: (step, ctx) => ops.build(step, { ...ctx, kaspa, network, relayAddress: health.address, relaySpkHex }),
-    probeRefundFlip: ops.probeRefundFlip ? (a) => ops.probeRefundFlip({ ...a, kaspa, network }) : undefined,
+    // R-a / M5: 探针走 facts(covenantId ∧ spk ∧ 旧 outpoint 已花 ∧ 后继 landed 深度, 不得地址级), 与结算 C1 同一个 requestFacts 端口; 观察到别人翻牌 ⇒ store 一个事务记 landed + 冻结
+    probeRefundFlip: ops.probeRefundFlip ? (a) => ops.probeRefundFlip({ ...a, kaspa, network, requestFacts, sendCmd, relayId, minDepth: REORG_SAFE_MIN_DEPTH }) : undefined,
+    recordObservedRefundFlip: (a) => store.recordObservedRefundFlip({ ...a, log: console }),
   });
 }
 

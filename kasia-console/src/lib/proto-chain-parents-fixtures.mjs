@@ -13,6 +13,7 @@ const P2SH_SPK_BYTES = 35;
 const TABLE = {
   seal: [['leaf', true, CONT], ['held', true, GEN]],
   close_commit: [['rootClose', true, CONT]],
+  refund_flip: [['rootClose', true, CONT]],
   convert_to_claim: [['rootClose', true, CONT], ['held', true, GEN]],
   claim_draw: [['rootClaim', true, CONT], ['ticket', false, GEN], ['held', true, GEN]],
 };
@@ -22,6 +23,7 @@ const TABLE = {
 const OUTPOINT_FIELD = {
   seal: { leaf: 'leafOutpoint', held: 'heldInput', fee: 'feeUtxo' },
   close_commit: { rootClose: 'rootCloseOutpoint', fee: 'feeUtxo' },
+  refund_flip: { rootClose: 'rootCloseOutpoint', fee: 'feeUtxo' },
   convert_to_claim: { rootClose: 'rootCloseOutpoint', held: 'heldTokenOutpoint', fee: 'feeUtxo' },
   claim_draw: { rootClaim: 'rootClaimOutpoint', ticket: 'ticketOutpoint', held: 'heldTokenOutpoint', fee: 'feeUtxo' },
 };
