@@ -1,0 +1,160 @@
+[
+ {
+  "id": "B1",
+  "desc": "lateSeal uses graceMinMs",
+  "killed": true,
+  "res": [
+   {
+    "test": "proto-settlement-budget.test.mjs",
+    "exit": 1,
+    "redCount": 1,
+    "groups": [],
+    "sample": [
+     "[FAIL] L1 ▲ N6 晚 seal 边界(F2: 判据 GRACE 不压缩): effective_upper = cutoff − 决策时刻 − MARGIN; upper = GRACE−1 ⇒ late; = GRACE ⇒ 不 late; 之上不 late; [GRACE_MIN, "
+    ]
+   },
+   {
+    "test": "proto-settlement-freeze-v213.test.mjs",
+    "exit": 1,
+    "redCount": 1,
+    "groups": [],
+    "sample": [
+     "[FAIL] Z10 ▲ 晚 seal 守卫(§4): 只对判定题市场; upper < GRACE ⇒ 冻结(F2: 原 GRACE_MIN, 宽限不压缩)(late_seal, pmt 有效 clock=pmt / 无效 clock=wall / readPmt 抛 clock=wall); u"
+    ]
+   }
+  ]
+ },
+ {
+  "id": "B2",
+  "desc": "promote gate freeze criterion uses graceMinMs",
+  "killed": true,
+  "res": [
+   {
+    "test": "proto-settlement-budget.test.mjs",
+    "exit": 1,
+    "redCount": 1,
+    "groups": [],
+    "sample": [
+     "[FAIL] G7 ▲ N6 宽限窗边界(F2: 不压缩): consistency_met_at + GRACE ≤ pmt < cutoff; pmt = 该和 −1 ⇒ wait(in_grace); = 该和 ⇒ 通过; effective_upper < GRACE ⇒ freeze(la"
+    ]
+   },
+   {
+    "test": "proto-settlement-freeze-v213.test.mjs",
+    "exit": 0,
+    "redCount": 0,
+    "groups": [],
+    "sample": []
+   }
+  ]
+ },
+ {
+  "id": "B2b",
+  "desc": "promote gate criterion uses graceMinMs AND compress restored",
+  "killed": false,
+  "res": [
+   {
+    "test": "proto-settlement-budget.test.mjs",
+    "exit": 0,
+    "redCount": 0,
+    "groups": [],
+    "sample": []
+   },
+   {
+    "test": "proto-settlement-freeze-v213.test.mjs",
+    "exit": 0,
+    "redCount": 0,
+    "groups": [],
+    "sample": []
+   }
+  ]
+ },
+ {
+  "id": "B3",
+  "desc": "lateSeal boundary <=",
+  "killed": true,
+  "res": [
+   {
+    "test": "proto-settlement-budget.test.mjs",
+    "exit": 1,
+    "redCount": 1,
+    "groups": [],
+    "sample": [
+     "[FAIL] L1 ▲ N6 晚 seal 边界(F2: 判据 GRACE 不压缩): effective_upper = cutoff − 决策时刻 − MARGIN; upper = GRACE−1 ⇒ late; = GRACE ⇒ 不 late; 之上不 late; [GRACE_MIN, "
+    ]
+   },
+   {
+    "test": "proto-settlement-freeze-v213.test.mjs",
+    "exit": 1,
+    "redCount": 1,
+    "groups": [],
+    "sample": [
+     "[FAIL] Z10 ▲ 晚 seal 守卫(§4): 只对判定题市场; upper < GRACE ⇒ 冻结(F2: 原 GRACE_MIN, 宽限不压缩)(late_seal, pmt 有效 clock=pmt / 无效 clock=wall / readPmt 抛 clock=wall); u"
+    ]
+   }
+  ]
+ },
+ {
+  "id": "B4",
+  "desc": "promote gate boundary <=",
+  "killed": true,
+  "res": [
+   {
+    "test": "proto-settlement-budget.test.mjs",
+    "exit": 1,
+    "redCount": 1,
+    "groups": [],
+    "sample": [
+     "[FAIL] G7 ▲ N6 宽限窗边界(F2: 不压缩): consistency_met_at + GRACE ≤ pmt < cutoff; pmt = 该和 −1 ⇒ wait(in_grace); = 该和 ⇒ 通过; effective_upper < GRACE ⇒ freeze(la"
+    ]
+   },
+   {
+    "test": "proto-settlement-freeze-v213.test.mjs",
+    "exit": 0,
+    "redCount": 0,
+    "groups": [],
+    "sample": []
+   }
+  ]
+ },
+ {
+  "id": "B5",
+  "desc": "GRACE_MIN<=GRACE config validation dropped",
+  "killed": true,
+  "res": [
+   {
+    "test": "proto-settlement-budget.test.mjs",
+    "exit": 1,
+    "redCount": 1,
+    "groups": [],
+    "sample": [
+     "[FAIL] C2 env 覆盖: 合法值生效; 非正整数 / 越区间 ⇒ 回默认 + LOUD warning(不静默) :: AssertionError [ERR_ASSERTION]: Expected values to be strictly equal: | + actual - ex"
+    ]
+   }
+  ]
+ },
+ {
+  "id": "B6",
+  "desc": "default GRACE_MS 30min->5min",
+  "killed": true,
+  "res": [
+   {
+    "test": "proto-settlement-budget.test.mjs",
+    "exit": 1,
+    "redCount": 3,
+    "groups": [],
+    "sample": [
+     "[FAIL] C1 默认值 = 设计 §2(SAFETY 20min / GRACE 30min / GRACE_MIN 5min / LAG_MAX 10min / MARGIN 2min); cutoff = deadline + 7,200,000 − SAFETY(= deadline + ",
+     "[FAIL] L1 ▲ N6 晚 seal 边界(F2: 判据 GRACE 不压缩): effective_upper = cutoff − 决策时刻 − MARGIN; upper = GRACE−1 ⇒ late; = GRACE ⇒ 不 late; 之上不 late; [GRACE_MIN, ",
+     "[FAIL] G7 ▲ N6 宽限窗边界(F2: 不压缩): consistency_met_at + GRACE ≤ pmt < cutoff; pmt = 该和 −1 ⇒ wait(in_grace); = 该和 ⇒ 通过; effective_upper < GRACE ⇒ freeze(la"
+    ]
+   },
+   {
+    "test": "proto-settlement-freeze-v213.test.mjs",
+    "exit": 0,
+    "redCount": 0,
+    "groups": [],
+    "sample": []
+   }
+  ]
+ }
+]

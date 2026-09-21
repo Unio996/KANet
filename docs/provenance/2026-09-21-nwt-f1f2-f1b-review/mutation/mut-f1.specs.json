@@ -1,0 +1,11 @@
+[
+ {"id":"I1","desc":"F1 gate disabled","file":"src/lib/proto-settlement-intent.mjs","tests":"src/lib/proto-settlement-intent.test.mjs","from":"if (row.subject_type === 'market' && row.step === 'resolve') {","to":"if (false && row.subject_type === 'market' && row.step === 'resolve') {"},
+ {"id":"I2","desc":"scope widened to all market steps","file":"src/lib/proto-settlement-intent.mjs","tests":"src/lib/proto-settlement-intent.test.mjs","from":"if (row.subject_type === 'market' && row.step === 'resolve') {","to":"if (row.subject_type === 'market') {"},
+ {"id":"I3","desc":"fail-open on freeze-read error","file":"src/lib/proto-settlement-intent.mjs","tests":"src/lib/proto-settlement-intent.test.mjs","from":"catch (e) { frozen = true; log.log(","to":"catch (e) { frozen = false; log.log("},
+ {"id":"I4","desc":"alert dedup removed","file":"src/lib/proto-settlement-intent.mjs","tests":"src/lib/proto-settlement-intent.test.mjs","from":"if (row.last_error !== FROZEN_HOLD_MARK) {","to":"if (true) {"},
+ {"id":"I5","desc":"marker never written","file":"src/lib/proto-settlement-intent.mjs","tests":"src/lib/proto-settlement-intent.test.mjs","from":"markSettlementIntent(key, { last_error: FROZEN_HOLD_MARK });","to":""},
+ {"id":"I6","desc":"reads freeze by wrong id (over-block)","file":"src/lib/proto-settlement-intent.mjs","tests":"src/lib/proto-settlement-intent.test.mjs","from":"isMarketFrozen(sqlite, row.subject_id)","to":"isMarketFrozen(sqlite, key)"},
+ {"id":"I7","desc":"gate moved before mempool/landed checks","file":"src/lib/proto-settlement-intent.mjs","tests":"src/lib/proto-settlement-intent.test.mjs","transform":"move-gate-before-mempool"},
+ {"id":"I8","desc":"hold does not throw (falls through to replay)","file":"src/lib/proto-settlement-intent.mjs","tests":"src/lib/proto-settlement-intent.test.mjs","from":"      throw new SettlementIntentHoldError(`settlement intent ${key}: market frozen — prepared close_commit not replayed (hold; exit = natural refund_flip)`, 'settlement_frozen');","to":"      log.log('mut');"},
+ {"id":"I9","desc":"hold code renamed","file":"src/lib/proto-settlement-intent.mjs","tests":"src/lib/proto-settlement-intent.test.mjs","from":"'settlement_frozen');","to":"'prepared_without_bytes');"}
+]
