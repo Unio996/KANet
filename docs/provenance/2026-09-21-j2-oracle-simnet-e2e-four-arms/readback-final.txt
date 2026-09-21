@@ -1,0 +1,31 @@
+
+=== H market 376ede4b ===
+{"id":"376ede4b25f62141671098ffae70a7abf70e0029e8c4bd77a68651df4d3f1d5d","status":"resolved","winning_side":1,"winning_side_source":"extractor","settlement_frozen_at":null,"frozen_reason":null,"deadline_ms":1789924782266,"outcome_end_ms":1789924182266,"settlement_frozen_at_iso":null,"deadline_iso":"2026-09-20T17:19:42.266Z"}
+intent {"intent_key":"settle:market:376ede4b25f62141671098ffae70a7abf70e0029e8c4bd77a68651df4d3f1d5d:seal","step":"seal","status":"landed","prepared_txid":"7016d236c2d2867af7cb25eac1f4c87989e17c622c1e75bbbdf586c63c0ec097","submitted_txid":"7016d236c2d2867af7cb25eac1f4c87989e17c622c1e75bbbdf586c63c0ec097","last_error":null,"created_at":"2026-09-20T16:56:06.187Z","updated_at":"2026-09-20T16:56:26.214Z"}
+intent {"intent_key":"settle:market:376ede4b25f62141671098ffae70a7abf70e0029e8c4bd77a68651df4d3f1d5d:resolve","step":"resolve","status":"landed","prepared_txid":"1728bba7d5cf6ae1c8493293e9699a8d2ca51e4c5b8840ae30da29bda4839380","submitted_txid":"1728bba7d5cf6ae1c8493293e9699a8d2ca51e4c5b8840ae30da29bda4839380","last_error":null,"created_at":"2026-09-20T17:16:26.673Z","updated_at":"2026-09-20T17:25:26.922Z"}
+intent {"intent_key":"settle:claim:d677b28b93c8f10c8720b3fb21ef8778ec538403e6d925a36fde086466bab9f7:convert_to_claim","step":"convert_to_claim","status":"landed","prepared_txid":"0ff423db4ea5cea4eb7ff6167df903355b097022d9107a071b25673120e9edb2","submitted_txid":"0ff423db4ea5cea4eb7ff6167df903355b097022d9107a071b25673120e9edb2","last_error":null,"created_at":"2026-09-20T17:25:26.923Z","updated_at":"2026-09-20T17:26:06.941Z"}
+intent {"intent_key":"settle:claim:d677b28b93c8f10c8720b3fb21ef8778ec538403e6d925a36fde086466bab9f7:claim_draw","step":"claim_draw","status":"landed","prepared_txid":"63fc6c8d4cf32a3e07b638cf50c74b5ee603102933fb8b915be9c4f13e503be5","submitted_txid":"63fc6c8d4cf32a3e07b638cf50c74b5ee603102933fb8b915be9c4f13e503be5","last_error":null,"created_at":"2026-09-20T17:26:06.941Z","updated_at":"2026-09-20T17:27:26.984Z"}
+verdict {"id":1,"source_kind":"extractor","outcome":1,"pmt_at":1789924195089}
+verdict {"id":2,"source_kind":"uma","outcome":1,"pmt_at":1789924195089}
+
+=== D market 41bbd231 ===
+{"id":"41bbd2319aa2738e9b7eaf7fd7bf059556b212544b15d0427f5fbdf57bf73ac9","status":"sealed","winning_side":null,"winning_side_source":null,"settlement_frozen_at":1789924973539,"frozen_reason":"inconsistent_verdicts|clock=pmt","deadline_ms":1789925541948,"outcome_end_ms":1789924941948,"settlement_frozen_at_iso":"2026-09-20T17:22:53.539Z","deadline_iso":"2026-09-20T17:32:21.948Z"}
+intent {"intent_key":"settle:market:41bbd2319aa2738e9b7eaf7fd7bf059556b212544b15d0427f5fbdf57bf73ac9:seal","step":"seal","status":"landed","prepared_txid":"a01b18e17d212f0a92d1f3bbe6bbe70a1b4144b9da482252e417b9f20ca32c28","submitted_txid":"a01b18e17d212f0a92d1f3bbe6bbe70a1b4144b9da482252e417b9f20ca32c28","last_error":null,"created_at":"2026-09-20T17:13:06.591Z","updated_at":"2026-09-20T17:13:26.606Z"}
+verdict {"id":3,"source_kind":"extractor","outcome":1,"pmt_at":1789924666193}
+verdict {"id":4,"source_kind":"uma","outcome":0,"pmt_at":1789924666193}
+
+=== F market d7d21bee ===
+{"id":"d7d21bee2a04d897bd504d1de926f3f29c1692df12e93c8d8f4f0ae2ce489b1a","status":"resolved","winning_side":1,"winning_side_source":"extractor","settlement_frozen_at":1789930078295,"frozen_reason":"operator_emergency_stop|clock=pmt","deadline_ms":1789930524358,"outcome_end_ms":1789929924358,"settlement_frozen_at_iso":"2026-09-20T18:47:58.295Z","deadline_iso":"2026-09-20T18:55:24.358Z"}
+intent {"intent_key":"settle:market:d7d21bee2a04d897bd504d1de926f3f29c1692df12e93c8d8f4f0ae2ce489b1a:seal","step":"seal","status":"landed","prepared_txid":"590ec1282291b84e1447f7005baf0fa72aea4287083de2be79af27f5aa3bcebc","submitted_txid":"590ec1282291b84e1447f7005baf0fa72aea4287083de2be79af27f5aa3bcebc","last_error":null,"created_at":"2026-09-20T18:43:08.789Z","updated_at":"2026-09-20T18:43:28.811Z"}
+intent {"intent_key":"settle:market:d7d21bee2a04d897bd504d1de926f3f29c1692df12e93c8d8f4f0ae2ce489b1a:resolve","step":"resolve","status":"landed","prepared_txid":"eb5273995534d5339c8a2b4bd93d430af06812147bdca799a6c5955a26acaa8c","submitted_txid":"eb5273995534d5339c8a2b4bd93d430af06812147bdca799a6c5955a26acaa8c","last_error":null,"created_at":"2026-09-20T18:52:28.989Z","updated_at":"2026-09-20T19:03:49.255Z"}
+intent {"intent_key":"settle:claim:5883453d6b41316e4a7c22ca800de7d2db9902240a0ab0e18ea604deb377772f:convert_to_claim","step":"convert_to_claim","status":"landed","prepared_txid":"6c4fbb0d4a3dde99a9a6307f1c8d3310f2620c7bf4f40bcd2918cf6aef4a0a75","submitted_txid":"6c4fbb0d4a3dde99a9a6307f1c8d3310f2620c7bf4f40bcd2918cf6aef4a0a75","last_error":null,"created_at":"2026-09-20T19:03:49.255Z","updated_at":"2026-09-20T19:04:29.280Z"}
+intent {"intent_key":"settle:claim:5883453d6b41316e4a7c22ca800de7d2db9902240a0ab0e18ea604deb377772f:claim_draw","step":"claim_draw","status":"landed","prepared_txid":"57603214c4b38cb9d085cce058d17137f975934308247f08162356076ce290cd","submitted_txid":"57603214c4b38cb9d085cce058d17137f975934308247f08162356076ce290cd","last_error":null,"created_at":"2026-09-20T19:04:29.280Z","updated_at":"2026-09-20T19:05:49.309Z"}
+verdict {"id":5,"source_kind":"extractor","outcome":1,"pmt_at":1789929955119}
+verdict {"id":6,"source_kind":"uma","outcome":1,"pmt_at":1789929955119}
+
+=== A market ca062606 ===
+{"id":"ca06260604bc6414da189f96a2890612f89659c8a0961cbffd2c809e6646b45d","status":"genesis_ambiguous","winning_side":null,"winning_side_source":null,"settlement_frozen_at":null,"frozen_reason":null,"deadline_ms":1789925759484,"outcome_end_ms":1789925159484,"settlement_frozen_at_iso":null,"deadline_iso":"2026-09-20T17:35:59.484Z"}
+
+=== node ===
+{"networkId":"simnet","isSynced":false,"pmtMs":1789932938047,"daa":"52628"}
+F1 resolve prepared_txid eb5273995534d5339c8a2b4bd93d430af06812147bdca799a6c5955a26acaa8c inMempool=false unspentOutputsFoundOnNode=[{"idx":1,"amount":"77425600","daa":"41930"}]

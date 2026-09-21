@@ -1,0 +1,9 @@
+file:///D:/kanet-tn12/scratch/_j2_e2e_run/sim-actions.mjs:83
+  const waitFor = async (what, fn, timeoutMs) => { const t0 = Date.now(); while (Date.now() - t0 < timeoutMs) { const d = ro(); let v; try { v = fn(d); } finally { d.close(); } if (v) return v; await sleep(4000); } throw new Error(`timeout waiting for ${what}`); };
+                                                                                                                                                                                                                             ^
+
+Error: timeout waiting for status=betting
+    at waitFor (file:///D:/kanet-tn12/scratch/_j2_e2e_run/sim-actions.mjs:83:222)
+    at async file:///D:/kanet-tn12/scratch/_j2_e2e_run/sim-actions.mjs:87:3
+
+Node.js v24.14.1
