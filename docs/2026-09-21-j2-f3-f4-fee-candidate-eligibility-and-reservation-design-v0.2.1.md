@@ -1,7 +1,9 @@
-> **Status**: DRAFT v0.2 (2026-09-21 · J2 · 已并入 NWT 设计审 a7572843 的 4 条 MUST(M1–M4);F3 通过,F4 §3.2 补齐后通过;只文档,未改任何代码;设计第一条=复用,见 §1)
+> **Status**: DRAFT v0.2.1 (2026-09-21 · J2 · NWT 第二轮 f5815523:M2/M3/M4 落实,M1 补一句+一突变、M4 补一句精度修正——本版即补这两处,视为通过;只文档;设计第一条=复用,见 §1)
 
 # F3 / F4 设计稿:fee 候选资格函数(F3)+ fee 输入预留(F4)
 
+> **v0.2.1 变更(NWT round2 @f5815523)**:① M1 补——DB 派生集必须在选择同步段内**现读**(`reserved` 形参是读取句柄,不是预算好的 Set),加一条突变与测试形状(§3.2-A、§3.5-2);② M4 精度——"被预留/被拒过"两维只对三条 console 路径要求一致,relay split 只对其余五个维度(§3.3)。
+>
 > **v0.2 变更(NWT `origin/nwt/f3f4-design-review-20260921` @a7572843)**:第一问答案(复用)与方向不变,F3 通过。**F4 §3.2 重写**——M1 check+reserve 收进一个共享同步函数并补 HTTP 入口;M2 内存预留对"结果不确定"的释放规则;M3 DB 派生层遇坏行 fail-closed;M4 §3.3 parity 的对象重新定义(只对安全资格维度,面值下界作每路径显式参数)。非 MUST 项各写一句,见 §3.7。
 
 - 依据:账本 1614(F3/F4 裁)、1615(采 Codex df07b0ec 口径)、1616(c:F3 = 把资格维度收进一个函数,**不是新造**;A 臂 net_loss_exceeded 只作活性死锁旁证)。
@@ -68,6 +70,7 @@
 **A. 形状(M1)**——预留不散在各调用点的接线里(漏一处 = 该处无保护),而是收进**一个**函数:
 - `selectAndReserveFeeUtxo({ candidates(已过资格函数), reserved, tryBuild, … })`,**包住 E3 `selectFeeUtxoByConstruction`**。**调用点 = 全部入口**:创世 `proto-broadcast-ops.mjs:83`、下注 `:231`、结算 `proto-settlement-ops.mjs:130`(`tryEach`);**HTTP 入口**(`api/proto.js:194-197`、`:297-300`,见 E8)经 `build*AndBroadcast` 汇入同一处,所以三个调用点走包装函数即自动覆盖;**T-race 仍须有 HTTP 形状**(§3.5)。
 - **原子性**:取数是 `await`(IPC),返回即过期。**"检查预留集 → 选中 → 把所选 outpoint 记入预留集"必须在最后一个 await 之后、同一个同步段内完成**(JS 单线程,同步段内无交错)。两个调用方各自取到同一份列表、先后进入这一段时,第二个会看到第一个刚记入的预留。
+- **DB 派生集在同步段内现读(v0.2.1,NWT round2)**:`selectAndReserveFeeUtxo` 的 `reserved` 形参是**活的读取句柄**(如 `() => reservedFeeOutpoints({db})`,或传入 db 由函数内调用),**在上面那个同步段内**现读 DB 派生集,**不接受调用方预先算好的 Set/快照**。原因:结算路径的 `inflightOutpoints` 现在是在 `prepare('inputs')` 里算的,**早于**随后的取数 await(`verifyStepInputsOnChain`)——若沿用,会留一个窗口:①A 在 t0 算出 DB 派生集(此时 D 尚无 prepared 行)→ 进入取数 await;②D 在 A 等待期间选中同一 UTXO、写 prepared 回执(DB 已有字节),随即按 M2 规则从内存层移除(DB 层接管);③A 醒来:手里是 t0 的旧快照(无 D)+ 内存层(D 已移除)⇒ 选中 D 的 UTXO ⇒ 复现 A 臂 `inputs_spent`。**故 F4 落地时结算路径的 `prepare` 不再负责产出预留集**(`inflightOutpoints` 里"输入侧预留"这一半改由包装函数在同步段内读;`prepare` 仍可产出"在途意图产出"那一半)。better-sqlite3 是同步读,同步段内现读可行。
 - **lint**(与 `R-FEE-CANDIDATE-SHARED` 并列):`R-FEE-SELECT-ONLY-VIA-WRAPPER`——`selectFeeUtxoByConstruction(` 除包装函数自身外出现即失败(生产代码;测试豁免)。
 
 **B. 两层预留,各治一个窗口**:
@@ -84,7 +87,7 @@
 - **与 Codex 的差异(如实标)**:Codex 写 tick-local;这里是**进程级 + DB 派生 + 同步原子 + 不确定结果的对账释放**。NWT 指出 v0.1 在四处弱于 Codex(缺原子性、缺 HTTP 入口、缺不确定释放、缺坏行 fail-closed),v0.2 逐条补上,语义上才是 Codex 的超集。
 
 ### 3.3 F3 parity 测试(共享向量表)(M4 重新定义对象)
-- **一致性的对象 = 安全资格维度,不含面值下界**:`covenantId` 绑定 / spk `version` / spk ≠ relay / unknown facts(缺字段)/ **被预留** / **被 relay 拒过** / **超 `SIGNED_INPUT_CEILING`**。对这些维度,**四条路径对同一向量必须给出同一个"是否合格"判定**。
+- **一致性的对象 = 安全资格维度,不含面值下界**(**v0.2.1 精度**:七个维度里,**"被预留"、"被 relay 拒过"只对三条 console 路径(结算/创世/下注)要求一致**——第四条 relay split 在 relay 包内,**看不到** console 的预留集与拒绝表,这两维对它无定义、向量期望里不写;**split 只对 covenant 绑定 / spk 版本 / spk≠relay / unknown facts / 超 ceiling 五维要求一致**):`covenantId` 绑定 / spk `version` / spk ≠ relay / unknown facts(缺字段)/ **被预留** / **被 relay 拒过** / **超 `SIGNED_INPUT_CEILING`**。对这些维度,**四条路径对同一向量必须给出同一个"是否合格"判定**。
 - **面值下界 `feeMinAmount` 不参与一致判定**:结算路径 `feeMin=cap`(`proto-settlement-ops.mjs:57`)、创世/下注 `feeMin=0n`(取舍 A,1462)——同一 0.3 KAS 普通 UTXO 在两条路径上**本来就该得到不同结果**。向量表里**每条路径显式声明自己的 `feeMin` 参数**,期望值按"安全维度一致 ∧ 面值维度按该路径声明的 feeMin"分别写。**禁止**为让测试变绿而把 feeMin 拉齐——那正是复活 1462。
 - **向量文件**(`kasia-console/test-fixtures/` JSON):每条 = 一组 UTXO(普通 / covenant 绑定 / spk version 1 / spk 非 relay / 面值越界 / 缺 `covenantId` / 缺 `version` / 被预留 / 被拒过)+ 每路径的 feeMin + 期望可选集合。
 - **四条路径各喂同一份**:①结算(`verifyStepInputsOnChain` + 假 `requestFacts`);②创世(`buildMarketGenesisAndBroadcast` + 假 `sendCmd`);③下注(`buildRegisterAppendAndBroadcast`);④relay split 输入过滤(relay 包内读同一 JSON)。
@@ -96,14 +99,14 @@
 
 ### 3.5 F4 测试清单(v0.2)
 1. **T-race-sequential**(A 臂形状):两市场创世,D 已 prepared(字节入库、未落链),A 取数含同一 UTXO ⇒ A 另选或 `no_suitable_fee_utxo`。**不变量**:任意时刻,库里所有非终态 prepared 交易的输入 outpoint 两两不相交。
-2. **T-race-interleave(M1)**:在 `sendCmd` 的 await 点可控交错——**必须含 HTTP 入口 × driver tick 的形状**(`api/proto.js` 立即创世/append 与 driver 同时取数),另含 driver × driver、结算 × 下注;第二个必须另选 / HOLD。**突变**:把"检查+记入"拆成两个 await 段 ⇒ 该测试红。
+2. **T-race-interleave(M1)**:在 `sendCmd` 的 await 点可控交错——**必须含 HTTP 入口 × driver tick 的形状**(`api/proto.js` 立即创世/append 与 driver 同时取数),另含 driver × driver、结算 × 下注;第二个必须另选 / HOLD。**形状必须能测到 v0.2.1 的窗口**:除"D 停在选中未 prepared"外,**还要有让 D 在 A 的取数 await 期间*完成 prepared 落库并释放内存层*的形状**(driver×driver 与 HTTP×driver 两种都要)——只测前者测不到"A 用了 await 前的旧 DB 快照"。**突变(两条)**:①把"检查+记入"拆成两个 await 段 ⇒ 红;②**把 DB 派生集改用 await 之前的快照(如 prepare 阶段预算好的 Set)⇒ 上述两种形状的 T-race-interleave 均红**。
 3. **T-restart**:模块状态清零 + 库里留 prepared 行 ⇒ 新进程选择仍排除其输入。
 4. **T-timeout-late-prepared / T-timeout-never-written(M2)**:IPC 超时后两种结局——(a) relay **晚到写 prepared**:预留保持,到期对账发现 DB 已有字节 ⇒ 转 DB 层,期间后来者**不**选同一 UTXO;(b) relay **从未写**:到期对账无痕迹 ⇒ 释放,之后可再选。**突变**:超时立即释放 ⇒ (a) 红;永不释放 ⇒ (b) 红。
 5. **T-leak-telemetry(M2)**:预留数 / 最老年龄超阈值 ⇒ 报警。
 6. **T-corrupt-row(M3)**:注入坏字节 / 缺字节的非终态行 ⇒ 选择 HOLD + 报警;**突变**:HOLD→跳过 ⇒ 红。
 7. **T-release**:构造抛错 / F1b 409 ⇒ 内存预留立即释放;frozen HOLD 行**仅当其 RootClose 输入已被花**才释放其 fee 输入(不是看标记);`landed` 不入集。
 8. **T-liveness**(拒后跳选,A 臂):候选 [0.392 无找零, 0.94],relay 桩对 0.392 回 `net_loss_exceeded` ⇒ 下一次选 0.94;对照:去掉 `rejectedOutpoints` ⇒ 每次都选 0.392。
-9. **突变汇总**:删预留检查 ⇒ T-race 红;删内存层 ⇒ interleave 红;删 DB 层 ⇒ restart 红;删拒后跳选 ⇒ liveness 红;以及上面各条各自的突变。
+9. **突变汇总**:删预留检查 ⇒ T-race 红;DB 派生集改 await 前快照 ⇒ interleave 红(v0.2.1);删内存层 ⇒ interleave 红;删 DB 层 ⇒ restart 红;删拒后跳选 ⇒ liveness 红;以及上面各条各自的突变。
 10. **活体 corroboration(最后)**:simnet 重放 A 臂;毒化向量按 NWT 方案 V0/V1/V1c——均在确定性测试全绿之后。
 
 ### 3.6 分批与回滚(建议,请 Bettor 裁)
