@@ -13788,3 +13788,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **Bettor 裁定**:① v1 只自动翻**冻结**市场(J2 建议,NWT 同意"发翻"一半);② 采 M5:观察到他人翻牌 ⇒ 幂等记 refund_flip landed + 自动冻结(reason refund_flip_observed,单向),使"只处理冻结市场"自然覆盖接续;③ 七条 MUST 全采,J2 出 v0.2(第二轮即最后一轮);④ R-a 实现在 v0.2 过后派,准入 = simnet 真共识(M7);⑤ F3/F4 实现仍排退款路之后。
 - **对 Owner**:退款路第一版终态是"每张票拿到一张可提取的退款凭证",用户真正取回还差 withdraw 一步(未接线,需逐用户身份),届时如实报,不写"已退款"。
  — Bettor 2026-09-21T16:20:00Z
+
+### (1619) 🟢 **两份设计稿 NWT 二轮 PASS 合入主线(只文档)——驱动退款路 v0.2(a546a517,七 MUST + Bettor 两裁定全落实,3e187bc2 PASS)/ F3/F4 v0.2.1(NWT round2 f5815523 两处补完即过);派 J2 R-a 实现(refund_flip 端到端,含 probeRefundFlip 端口与 v214 迁移),准入 = simnet 真共识** (2026-09-21 · Bettor)
+- **退款路 v0.2**(`docs/2026-09-21-j2-driver-refund-path-design-v0.2.md`):M1 三步以"refund_flip 意图 landed ∧ 链上事实"触发、不看 status、markLanded 前态 sealed、主网形状夹具零动作;M2 v214 同事务 sqlite_master 枚举引用触发器 DROP→重建→原文重建,前后核触发器/索引/行数/fk/integrity,主网库 .backup 副本验+备份+回退;M3 claim id = sha256(market‖ticket_txid‖vout‖'refund'),TEXT PK 幂等,Σ守恒断言;M4 每市场一个在途 payout、输入取上笔后继;M5 三缺一判据、dust 判未翻、自动冻结走既有 freezeMarket、新增扫 HOLD 行入口;M6 终态 = 每票一个 KanetTokenClaim,不含 withdraw;M7 验收线六条 + R-b/R-c 条款。
+- **F3/F4 v0.2.1**(`docs/2026-09-21-j2-f3-f4-fee-candidate-eligibility-and-reservation-design-v0.2.1.md`):M1 补活读取句柄+同步段现读+快照突变;M4 精度(被预留/被拒过只对三条 console 路径一致)。实现排 R-a 之后。
+- **派 J2 R-a**:refund_flip 端到端(冻结市场自动翻 + 观察第三方翻牌自动冻结)+ probeRefundFlip 端口实现 + v214 迁移;批说明写"无预留、争用时 HOLD 非丢钱",F4 落地后迁调用点。NWT 实现审两个落点:① 幂等记 landed 的 txid 来源 = facts 读回 closed=2 后继 outpoint.transactionId 并与旧 outpoint 花费交易核同一 txid;② 退款 claim 创建时 ticket_txid/vout 非空,缺则 HOLD 不得空值入哈希。**准入 = 在 J2 现有 simnet(scratch/_j2_e2e_run)真共识落地**,矿工重起 simnet-only、J2 先报再起;主网零触碰。
+- **对 Owner 口径(M6)**:R-a~R-c 做完的终态是每张票一张可提取的退款凭证;用户取回还需 withdraw,尚未接线。
+ — Bettor 2026-09-21T16:50:00Z
