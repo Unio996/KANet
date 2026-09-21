@@ -136,14 +136,14 @@ await t('Z9 promoteWinningSide(批 B 用, 本批不接调用方): 正常 ⇒ cha
   const b = mkMarket({ status: 'betting', resolution_rule_spec: 'r' }); const vb = mkVerdict(b, 'extractor', 1); eq(promoteWinningSide({ db: sqlite, marketId: b, decision: { ...decision, verdictId: Number(vb) } }).changes, 0, '非 sealed ⇒ 0');
   aborts(() => promoteWinningSide({ db: sqlite, marketId: m, decision: { action: 'freeze' } }), null); aborts(() => promoteWinningSide({ db: sqlite, marketId: m, decision: null }), null);
 });
-await t('Z10 ▲ 晚 seal 守卫(§4): 只对判定题市场; upper < GRACE_MIN ⇒ 冻结(late_seal, pmt 有效 clock=pmt / 无效 clock=wall / readPmt 抛 clock=wall); upper = GRACE_MIN ⇒ 不冻; 无判定题(如主网首轮 a59c 形)即使已过 cutoff 也不冻; 已冻 / 已判 / 市场缺失 ⇒ noop; 永不抛', async () => {
+await t('Z10 ▲ 晚 seal 守卫(§4): 只对判定题市场; upper < GRACE ⇒ 冻结(F2: 原 GRACE_MIN, 宽限不压缩)(late_seal, pmt 有效 clock=pmt / 无效 clock=wall / readPmt 抛 clock=wall); upper = GRACE ⇒ 不冻; 无判定题(如主网首轮 a59c 形)即使已过 cutoff 也不冻; 已冻 / 已判 / 市场缺失 ⇒ noop; 永不抛', async () => {
   const D = 1_790_000_000_000, cutoff = D + 7_200_000 - cfg.promotionSafetyMs;
   const at = (upper) => cutoff - cfg.closePipelineMarginMs - upper;
-  const run = (marketId, decisionPmt, extra = {}) => applyLateSealGuard({ db: sqlite, marketId, readPmt: async () => (decisionPmt === null ? { valid: false, reason: 'not_synced' } : { valid: true, pmtMs: decisionPmt }), cfg, wallMs: () => at(cfg.graceMinMs + 5), log: silent, ...extra });
+  const run = (marketId, decisionPmt, extra = {}) => applyLateSealGuard({ db: sqlite, marketId, readPmt: async () => (decisionPmt === null ? { valid: false, reason: 'not_synced' } : { valid: true, pmtMs: decisionPmt }), cfg, wallMs: () => at(cfg.graceMs + 5), log: silent, ...extra });
   const late = mkMarket({ status: 'sealed', deadline_ms: D, resolution_rule_spec: 'r' });
-  let r = await run(late, at(cfg.graceMinMs - 1)); eq(r.applied, true); eq(r.reason, 'late_seal'); eq(row(late).frozen_reason, 'late_seal|clock=pmt'); eq(row(late).settlement_frozen_at, at(cfg.graceMinMs - 1));
-  const edge = mkMarket({ status: 'sealed', deadline_ms: D, resolution_rule_spec: 'r' }); r = await run(edge, at(cfg.graceMinMs)); eq(r.applied, false); eq(r.reason, 'not_late'); eq(row(edge).settlement_frozen_at, null);
-  const w1 = mkMarket({ status: 'sealed', deadline_ms: D, outcome_condition_id: 'c' }); r = await run(w1, null, { wallMs: () => at(cfg.graceMinMs - 1) }); eq(r.applied, true); eq(row(w1).frozen_reason, 'late_seal|clock=wall', 'pmt 无效 ⇒ 决策与冻结都退墙钟'); eq(row(w1).settlement_frozen_at, at(cfg.graceMinMs - 1));
+  let r = await run(late, at(cfg.graceMs - 1)); eq(r.applied, true); eq(r.reason, 'late_seal'); eq(row(late).frozen_reason, 'late_seal|clock=pmt'); eq(row(late).settlement_frozen_at, at(cfg.graceMs - 1));
+  const edge = mkMarket({ status: 'sealed', deadline_ms: D, resolution_rule_spec: 'r' }); r = await run(edge, at(cfg.graceMs)); eq(r.applied, false); eq(r.reason, 'not_late'); eq(row(edge).settlement_frozen_at, null);
+  const w1 = mkMarket({ status: 'sealed', deadline_ms: D, outcome_condition_id: 'c' }); r = await run(w1, null, { wallMs: () => at(cfg.graceMs - 1) }); eq(r.applied, true); eq(row(w1).frozen_reason, 'late_seal|clock=wall', 'pmt 无效 ⇒ 决策与冻结都退墙钟'); eq(row(w1).settlement_frozen_at, at(cfg.graceMs - 1));
   const w2 = mkMarket({ status: 'sealed', deadline_ms: D, outcome_oracle_relay_ids: '["r1"]' }); r = await applyLateSealGuard({ db: sqlite, marketId: w2, readPmt: async () => { throw new Error('ipc down'); }, cfg, wallMs: () => cutoff + 1, log: silent }); eq(r.applied, true); eq(row(w2).frozen_reason, 'late_seal|clock=wall');
   const a59c = mkMarket({ status: 'sealed', deadline_ms: D }); r = await run(a59c, cutoff + 10_000_000); eq(r.applied, false); eq(r.reason, 'not_judged'); eq(row(a59c).settlement_frozen_at, null, '无判定题的 operator 市场不因晚 seal 冻结');
   r = await run(late, at(0)); eq(r.applied, false); eq(r.reason, 'already_frozen');

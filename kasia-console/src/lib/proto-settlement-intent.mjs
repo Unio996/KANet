@@ -23,6 +23,7 @@
 import { sqlite } from '../db/client.js';
 import { randomUUID } from 'node:crypto';
 import { PROTO_COVENANT_BROADCAST_TYPE } from './proto-relay-guard.mjs';
+import { isMarketFrozen } from './proto-settlement-freeze.mjs';
 
 export const SETTLEMENT_SUBJECT_TYPES = Object.freeze(['market', 'claim', 'ticket']);
 export const SETTLEMENT_STEPS = Object.freeze(['seal', 'resolve', 'convert_to_claim', 'claim_draw', 'withdraw', 'reclaim']);
@@ -114,6 +115,19 @@ export function recordSettlementIntentPhase({ intentKey, phase, txid, txJson = n
   if (!cur) return { ok: false, error: `unknown intent_key ${intentKey}` };
   if (!txid) return { ok: false, error: 'txid required' };
   if (phase === 'prepared') {
+    // F1b(Bettor GO 1617 / Codex "最终 send 边界"的 first-send 一半): relay 在广播【之前】把 prepared 回执打到这里, 且 relay 侧"prepared 落库失败即不广播"
+    //   (covenant-broadcast-relay.mjs prepared_ingest_failed; relay ingest 遇非 2xx 会 throw; ingest.js 把 !ok 映成 409)——所以这里是首发前唯一的、最靠近广播的 console 侧否决点。
+    //   driver-core 在构造之前读的那次冻结与这里之间有 build + IPC 的窗口, 冻结可能恰好落在窗口里: 此处再读一次, 冻结 ⇒ 不落 prepared(行保持 pending、无字节)⇒ 409 ⇒ relay 不广播。
+    //   只否决 prepared; submitted 回执永不否决(已广播的事实必须记, NO TX NO STATE)。范围同 F1: 只 close_commit(market:resolve); 只在行 pending/prepared 时(已 submitted/landed 的行是既成事实, 不动)。
+    if (cur.subject_type === 'market' && cur.step === 'resolve' && (cur.status === 'pending' || cur.status === 'prepared')) {
+      let frozen;
+      try { frozen = isMarketFrozen(sqlite, cur.subject_id); }
+      catch (e) { frozen = true; console.warn(`[proto-settlement-intent] ${intentKey} 冻结列读取失败(按冻结处理, fail-closed): ${e && e.message}`); }
+      if (frozen !== false) {
+        alertSettlementIntent('settlement_intent_frozen_prepared_hold', `settlement intent ${intentKey}: prepared receipt REFUSED on a FROZEN market (freeze landed between driver gate and relay persist) — relay must not broadcast`, { intent_key: intentKey, prepared_txid: txid, market_id: cur.subject_id, stage: 'prepared_receipt_refused' }, 'error');
+        return { ok: false, code: 'settlement_frozen', error: `market ${cur.subject_id} is frozen — prepared close_commit not recorded, do not broadcast` };
+      }
+    }
     const patch = { prepared_txid: txid };
     if (txJson) patch.prepared_tx_json = typeof txJson === 'string' ? txJson : JSON.stringify(txJson);
     if (cur.status === 'pending') patch.status = 'prepared';
@@ -138,6 +152,8 @@ export function alertSettlementIntent(eventType, summary, payload = {}, level = 
   }
 }
 
+const FROZEN_HOLD_MARK = 'settlement_frozen_prepared_hold';
+
 class SettlementIntentHoldError extends Error {
   constructor(msg, code) { super(msg); this.code = code; this.hold = true; }
 }
@@ -146,8 +162,10 @@ class SettlementIntentHoldError extends Error {
  * prepared 行的唯一处理路径(同 proto-bet-intent.mjs resolvePrepared 移植, 语义完全一致):
  *   ① get_mempool_entry(prepared_txid) 有 ⇒ submitted, 不重发
  *   ② check_utxo_landed(target, prepared_txid, 0) 落了 ⇒ submitted, 不重发
- *   ③ 无字节 ⇒ 不发不建, 告警, hold
- *   ④ 同字节重播: relay 断言 txid == prepared_txid
+ *   ③ 【F1·Codex MUST① / Bettor 1614】close_commit(market:resolve)行: 重读冻结列, 冻结(或读不到)⇒ hold, 不重播不重建不弃行
+ *      (位置 = ①② 之后: 已在池/已落链是事实, 冻结否定不了, 照常记 submitted; 在 ④ 重播之前: 重播是最终 send 边界)
+ *   ④ 无字节 ⇒ 不发不建, 告警, hold
+ *   ⑤ 同字节重播: relay 断言 txid == prepared_txid
  *        ok ⇒ submitted; code inputs_spent ⇒ 查 kaspa_tx_log 正向证据, 有则 submitted, 无则 ambiguous/hold; 其他 ⇒ throw
  */
 async function resolvePrepared({ sendCmd, relayId, row, targetAddress, origin, log }) {
@@ -165,6 +183,23 @@ async function resolvePrepared({ sendCmd, relayId, row, targetAddress, origin, l
   if (landed?.landed) {
     log.log(`[proto-settlement-intent] ${key} prepared txid ${txid.slice(0, 12)} already landed → submitted (no resend)`);
     return { txId: txid, intent: markSettlementIntent(key, { status: 'submitted', submitted_txid: txid }) };
+  }
+  // F1: 唯一路径——driveSettlementIntent(prepared 分支 / driver 每 tick 的 preparedRows)与 resumeStaleSettlementIntents 都经本函数, 所以闸放这里而不是各调用方
+  //   (2026-09-20 simnet 红证: 冻结后 prepared close_commit 仍被 driver 同字节重播并落地; 冻结重读原先只在 driver-core 的 buildAndBroadcast 闭包 = 仅 pending 路径)。
+  //   范围只限 close_commit: 冻结语义 = "close_commit 三入口 fail-closed"(见 proto-settlement-freeze.mjs 头注), seal/claim 类不在冻结范围。
+  //   严格 fail-closed(同 driver-core 入口③): 只有 isMarketFrozen 明确返回 false 才放行; true / 抛错(市场不存在等)一律按冻结。
+  if (row.subject_type === 'market' && row.step === 'resolve') {
+    let frozen;
+    try { frozen = isMarketFrozen(sqlite, row.subject_id); }
+    catch (e) { frozen = true; log.log(`[proto-settlement-intent] ${key} 冻结列读取失败(按冻结处理, fail-closed): ${e && e.message}`); }
+    if (frozen !== false) {
+      // 每 tick 都会回到这里(行永远停在 prepared): 只在首次(last_error 还不是这个标记)落标记 + 报警, 之后静默 hold, 不刷 events、不刷 updated_at(否则 prepared_stale 的去重键会被反复重置)。
+      if (row.last_error !== FROZEN_HOLD_MARK) {
+        markSettlementIntent(key, { last_error: FROZEN_HOLD_MARK });
+        alertSettlementIntent('settlement_intent_frozen_prepared_hold', `settlement intent ${key} prepared txid ${txid.slice(0, 12)} on a FROZEN market — replay refused, HOLD (no replay, no rebuild, no abandon)`, { intent_key: key, prepared_txid: txid, market_id: row.subject_id }, 'error');
+      }
+      throw new SettlementIntentHoldError(`settlement intent ${key}: market frozen — prepared close_commit not replayed (hold; exit = natural refund_flip)`, 'settlement_frozen');
+    }
   }
   if (!row.prepared_tx_json) {
     alertSettlementIntent('settlement_intent_prepared_without_bytes', `settlement intent ${key} prepared txid ${txid.slice(0, 12)} has no signed bytes — manual review`, { intent_key: key, prepared_txid: txid });

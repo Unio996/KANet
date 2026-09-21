@@ -1,0 +1,23 @@
+[PASS] C1 默认值 = 设计 §2(SAFETY 20min / GRACE 30min / GRACE_MIN 5min / LAG_MAX 10min / MARGIN 2min); cutoff = deadline + 7,200,000 − SAFETY(= deadline + 100min)
+[PASS] C2 env 覆盖: 合法值生效; 非正整数 / 越区间 ⇒ 回默认 + LOUD warning(不静默)
+[PASS] C3 ▲ N2 SAFETY 边界: 区间 [15min, 60min] 两端各 ±1; 动态下界 SAFETY ≥ LAG_MAX + MARGIN + tick(恰等接受 / 差 1 拒); 违则回默认 + warning; 默认也过不了 ⇒ 抛(拒启动)
+[PASS] P1 pmt 有效 ⇔ isSynced===true ∧ |读取墙钟 − pmt| ≤ LAG_MAX ∧ 单调不减: 三个条件各自破坏; 边界 skew == LAG_MAX 有效 / +1 无效(落后与超前两个方向)
+[PASS] P2 readValidatedPmt: 缺 isSynced(旧 relay)⇒ is_synced_missing(fail-closed); relay 抛错 / ok:false ⇒ read_failed; 永不抛; 有效读数过校验器; 共享单例首次按 lagMax 建
+[PASS] F1 ▲ N5a 冻结写入不依赖 pmt 有效: pmt 有效写 pmt(clock=pmt); 无效 / null / 读失败 一律退墙钟(clock=wall); frozen_reason 恒非空且带 clock 标; 墙钟也非法才抛
+[PASS] L1 ▲ N6 晚 seal 边界(F2: 判据 GRACE 不压缩): effective_upper = cutoff − 决策时刻 − MARGIN; upper = GRACE−1 ⇒ late; = GRACE ⇒ 不 late; 之上不 late; [GRACE_MIN, GRACE) 区间一律 late(原先被压缩放行); 决策时刻越过 cutoff ⇒ upper 为负 ⇒ late; GRACE_MIN 不再是运行时输入
+[PASS] I1 判定题定义唯一来源(N3): 四个判定题列任一非 NULL(含空串)即判定题; 全 NULL / 仅 outcome_end_ms 不算; 缺列 ⇒ 抛; SQL 谓词文本与 JS 判据一致
+[PASS] I2 ▲ 受理门矩阵: 无判定题 ⇒ 豁免(pmt 缺失也放行, 且 intakeNeedsPmt=false); 判定题 ∧ outcome_end 空 / NaN / 字符串 ⇒ 409 outcome_end_missing(不需要 pmt); 判定题 ∧ pmt 无效 / 缺失 ⇒ 503 fail-closed; pmt ≥ outcome_end ⇒ 409(恰等于也拒); pmt = outcome_end−1 ⇒ 受理
+[PASS] G1 快乐路径: 六前置全过 ⇒ promote{winningSide, source(extractor 优先), verdictId, consistencyMetAt, effectiveGraceMs=GRACE_MS}
+[PASS] G2 前置 1: 已冻 / 已判 / 无判定题 ⇒ stop; 非 sealed ⇒ wait; 各自优先于其余检查(冻结优先于已判)
+[PASS] G3 ▲ N3 outcome_end: 判定题 ∧ 空 / 非有限 / 非数字 ⇒ reject(拒 promote + 记因, 不冻结); deadline 非法 ⇒ reject
+[PASS] G4 ▲ 前置 3 cutoff 边界(N2): pmt = cutoff−1 ⇒ 仍可 promote; pmt = cutoff ⇒ freeze(past_cutoff); pmt > cutoff ⇒ freeze——且过 cutoff 优先于 结果未知 / 不一致 / 缺第二源(一律冻结, 方向安全)
+[PASS] G5 ▲ 前置 2 结果已知(N1): pmt < outcome_end ⇒ wait(outcome_not_known); pmt = outcome_end 起可继续; verdict.pmt_at < outcome_end / NULL / 非整数 ⇒ 不计入(既不构成一致, 也不触发不一致 / 弃权冻结)
+[PASS] G6 ▲ 前置 5 R2 一致: 单源 ⇒ wait; 同类型两条(extractor+extractor)不算独立来源 ⇒ wait; extractor+uma 一致 ⇒ 通过; 任一不一致 ⇒ freeze(inconsistent_verdicts); 任一 outcome NULL(弃权 / 异议)⇒ freeze(abstain_or_dispute); llm / human 不计入自动路径
+[PASS] G11 ▲ M1 冻结集 = 该市场所有 verdict(extractor / uma / human / llm; 不论 pmt_at 空否 / 早晚): 弃权 / 异议(outcome NULL)或与赞成集不一致 ⇒ freeze(不是被无视); 赞成集不变
+[PASS] G12 ▲ M2 受理门取 max(墙钟, pmt): pmt = oe−140s ∧ 墙钟 = oe+1ms ⇒ 必拒(旧逻辑会收); 墙钟恰 = oe 拒 / = oe−1 且 pmt 落后 ⇒ 收; pmt 超前墙钟(pmt ≥ oe ∧ 墙钟 < oe)仍拒; 墙钟已过 ⇒ 409 且不依赖 pmt 是否有效; 不传 / 非法墙钟 ⇒ fail-closed 拒(批 B 起)
+[PASS] G7 ▲ N6 宽限窗边界(F2: 不压缩): consistency_met_at + GRACE ≤ pmt < cutoff; pmt = 该和 −1 ⇒ wait(in_grace); = 该和 ⇒ 通过; effective_upper < GRACE ⇒ freeze(late_seal, 含 [GRACE_MIN, GRACE) 区间); = GRACE ⇒ 不冻(eg=GRACE); 之上 ⇒ eg=GRACE; GRACE_MIN 不再是运行时输入
+[PASS] G8 前置 6 R5 预检: 胜方侧确认注数 0 / ≥2 / pending 不计 / 奖池 ≤ 0 ⇒ freeze(r5_precheck_failed); 恰 1 且奖池 > 0 ⇒ 通过; 胜方按 verdict 的 outcome 定(side 匹配)
+[PASS] G9 ▲ pmt 无效(D5): 未过 cutoff ⇒ wait(pmt_invalid, promote 推迟); 墙钟(≥ pmt)已过 cutoff ⇒ freeze(pmt_invalid_past_cutoff, 方向安全); 墙钟缺失按未过
+[PASS] G10 PROMOTE_UPDATE_SQL: 谓词同语句带 status=sealed ∧ winning_side IS NULL ∧ settlement_frozen_at IS NULL(D2); 六个占位符
+
+proto-settlement-budget.test: 21 passed, 0 failed

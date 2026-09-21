@@ -1,0 +1,10 @@
+[db] path=C:\Users\ADMIN\AppData\Local\Temp\_j2_pmoa_svc_22572.db source=DB_PATH
+[PASS] V1 tick 间隔: 默认 300000; 非整数 / <30000 / 非数字 ⇒ 默认; 合法值原样
+[PASS] V2 ▲ 默认关闭: 开关缺省 / 非字面 "1" / 缺 relay ⇒ disabled, 不启动、不打策略行、不建 interval
+[PASS] V3 ▲ 拒启动(LOUD): 网络未配置 / 网络未知 / UMA 定稿窗 NaN / <24h / undefined ⇒ error 行含 REFUSED 且不启动
+[PASS] V4 ▲ 合法启动: LOUD 打印策略生效值(adapter=ENABLED / network / 白名单)+ started 行(含 uma_window_ms); stop 复位; 重复 start 幂等; 主网另带 N5b 提示
+[PASS] V5 tick 本体: 单飞(在飞时第二次调用 ⇒ skipped in_flight, 不重入); 抛错后状态复位; UMA 窗不安全 ⇒ tick 中止(aborted)
+[PASS] V3b ▲ SHOULD① voter 导入失败 ⇒ LOUD 拒启动(不抛、不启动、不建 interval): 顶层 await startProtoOracleAdapter 不会因此拖垮 console 启动
+[PASS] V6 接线钉(源码): index.js 在 startProtoSettlementDriver 之后启动 adapter; 服务默认关(读 PROTO_ORACLE_ADAPTER_ENABLED === "1"); 独立 interval, 不碰旧 voter 的 tick; 生产端口装配 readPmt 走批 D readValidatedPmt(共享校验器)
+
+proto-oracle-adapter.test: 7 passed, 0 failed

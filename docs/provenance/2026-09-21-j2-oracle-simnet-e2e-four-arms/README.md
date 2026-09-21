@@ -1,5 +1,13 @@
 # oracle simnet e2e 基础轮 provenance —— 四臂 H / D / F / A(J2 · 2026-09-21)
 
+> ## 🔴 更正记录(2026-09-21 · NWT 复核 b804c805 / 账本 1616 三处更正采纳;原文保留、此处与行内已改;原始 evidence 文件一字未动)
+> ① **时钟**:§3 及下文凡写"冻结 18:47:58Z"处,那是 `settlement_frozen_at` 存的 **pmt 读数**(`frozen_reason` 的 `clock=pmt`),**墙钟写入时刻 = 18:52:29.9Z**(`actions.jsonl` `emergency_freeze_harness`,pmt 落后墙钟约 4.5 分钟)。`readback-final.txt` 里 `settlement_frozen_at_iso` 字段名易误读为墙钟——它是 pmt 域毫秒的 ISO 换算。
+> ② **节点侧读回的 idx1**:§3.2 `unspentOutputsFoundOnNode=[{"idx":1,"amount":"77425600"…}]` 是 close 交易的 **fee 找零(P2PK)**,**不是** close 的 covenant 后继 out0。它证明"该交易被节点接受(其输出在 UTXO 集)",不证"covenant 后继落在哪"。out0 已被后续已知意图(convert_to_claim)的字节花掉——新 verify-arms 判据读出 `spent_by_known_tx`。
+> ③ **verify-arms F 判据**:旧判据"close_commit 意图=0"在自然竞态下会字面 FAIL(driver 冻结前 1 s 内自然建过一条 pending resolve 行,§3.1 已记),是判据太粗。新判据(`scripts/verify-arms.mjs`,并同步到 J2 scratch 工具)= **意图侧**无 submitted/landed/ambiguous 的 resolve 意图(pending 不算;prepared 本身不判红,F1 修复后 HOLD 态恰是 prepared)+ **节点侧**无该 close txid 痕迹(mempool / 输出仍未花 / 输出已被别的已知意图字节花掉;需 `--rpc … --network simnet`,先断言 networkId,只读 get*)。用新判据重跑(**旧 json 保留,新增 `-v2`**):
+> - `verify-arms-pre-seed-v2.json`(F-pre-seed 快照,自然竞态态):**31/31 PASS**——旧判据的那条字面 FAIL 消失(证明它是判据粗,不是缺陷)。
+> - `verify-arms-final-v2.json`(终态快照 + 节点):**29 PASS / 2 FAIL / 0 VACUOUS**,两条 FAIL 都在 F 臂且**都是预期的红**:意图侧 `resolve 意图状态=["landed"]`;节点侧 `eb5273995534… 痕迹=["unspent_out1","spent_by_known_tx"]`。
+> - 因此本文首段"最终 30 项 = 29 PASS / 1 FAIL"是**旧判据**口径;新口径 = 31 项(F 臂由 1 项拆成 2 项)。
+
 > **范围与口径(先读)**:simnet-only,主网零触碰(主网 console / 库 / env / relay 未读未写)。代码 = 冻结 worktree `c2352d91`(主线,含 oracle A/D/B + 批9结算 + pointers 修 + A① simnet wallet)。
 > **本文件 = 证据汇编,不是新结论**:每条断言配原始输出(`actions.jsonl` 原始行 / 库快照读回 / 节点读回 / 驱动日志原行);推断另标"推断"。
 > 🔴 **口径限定**(Bettor 1614/1615 · Codex 845ccf6f/df07b0ec):
@@ -116,7 +124,7 @@ verdict {"id":6,"source_kind":"uma","outcome":1,"pmt_at":1789929955119}
 ```
 F1 resolve prepared_txid eb5273995534d5339c8a2b4bd93d430af06812147bdca799a6c5955a26acaa8c inMempool=false unspentOutputsFoundOnNode=[{"idx":1,"amount":"77425600","daa":"41930"}]
 ```
-- ⇒ **MUST① 缺陷实证为红(节点侧)**:冻结(18:47:58Z)之后,prepared resolve(eb527399…)被 driver `replayed same bytes → submitted`,节点 UTXO 读回该 txid 输出(idx1,77425600,daa 41930),意图 / 市场最终 landed / resolved。**冻结只拦了 pending 路径的重读,prepared 行的重播不经过冻结检查**,与 1614 F1 读码结论一致(`proto-settlement-intent.mjs:236-237 resolvePrepared → :176`;`proto-settlement-store.mjs:54` 注释明写 prepared 不受冻结影响)。
+- ⇒ **MUST① 缺陷实证为红(节点侧)**:冻结(**墙钟 18:52:29.9Z**;`settlement_frozen_at=1789930078295` 存的是 pmt 读数 = 18:47:58Z、`clock=pmt`,见文首更正 ①)之后,prepared resolve(eb527399…)被 driver `replayed same bytes → submitted`,节点侧读回该 txid 有痕迹:**idx1 = 77425600 是 fee 找零(P2PK)**,不是 close 的 covenant 后继(见更正 ②);covenant 后继 out0 已被后续已知意图字节花掉(`readback` 之外由 verify-arms 新判据 `spent_by_known_tx` 读出),意图 / 市场最终 landed / resolved。**冻结只拦了 pending 路径的重读,prepared 行的重播不经过冻结检查**,与 1614 F1 读码结论一致(`proto-settlement-intent.mjs:236-237 resolvePrepared → :176`;`proto-settlement-store.mjs:54` 注释明写 prepared 不受冻结影响)。
 - 🔵 **附带观察(不下断言)**:该市场冻结后,后续 `convert_to_claim` / `claim_draw` 也 landed(见上 intent 行 19:04:29 / 19:05:49)——冻结后 resolved 市场的 claim 路径未被冻结拦。是否属设计意图待 F1 补丁设计时读码定,**此处只记事实**。
 - ⚠ **局限**:prepared 行是 SQL 人造的,证的是"只要有 prepared 行,冻结拦不住重播",不证"自然竞态一定发生"。自然窗口读码依据:relay 先落 prepared(`covenant-broadcast-relay.mjs:189`)后 submit(:197),submit 失败即停 prepared 等下一 tick replay(1614 已述)。
 - ⚠ **对照缺口(诚实)**:没有跑"未冻结的同构 prepared 行"正对照(会同样 landed,信息量低);也没有"节点拒收的 tx"对照——tx 在节点上真入块本身即"tx 合法"的证明。

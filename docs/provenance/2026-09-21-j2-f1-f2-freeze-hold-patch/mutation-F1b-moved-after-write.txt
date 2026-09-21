@@ -1,0 +1,93 @@
+[db] path=C:\Users\ADMIN\AppData\Local\Temp\_j2_proto_settlement_intent_24308.db source=DB_PATH
+[test] ① market:seal（无依赖）: pending → build 成功 → submitted:
+  ✅ seal 拿到 txId
+  ✅ seal intent status=submitted (实际 submitted)
+  ✅ seal 无依赖, depends_on 为 null(实际 null)
+[test] ② 幂等: 再调一次 driveSettlementIntent(同 subject/step) → reused, 不重新构造:
+  ✅ seal 第二次调用 reused=true
+  ✅ buildAndBroadcast 未被再次调用(实际调用 0 次)
+[test] ③ markSettlementIntent 单调性: 不能从 landed 退回 pending:
+  ✅ checkSettlementIntentLanded 判定已 landed
+  ✅ intent 行更新为 landed(实际 landed)
+  ✅ 尝试退回 pending 被拒, 仍是 landed(实际 landed)
+[test] ④(本模块特有) depends_on 真实生效: resolve 依赖 seal, seal landed 前后 isDependencyLanded 结果不同:
+  ✅ seal 本身无依赖, isDependencyLanded 恒 true
+  ✅ m2 的 seal 还没 landed 时, resolve 的依赖判定为 false
+  ✅ resolve 行的 depends_on 正确指向 seal 的 intent_key(实际 settle:market:m2:seal)
+  ✅ m2 的 seal landed 后, resolve 的依赖判定变为 true
+[test] ⑤ claim 归属(convert_to_claim/claim_draw/withdraw)与错误组合被拒:
+  ✅ intent_key 格式正确(实际 settle:claim:c1:convert_to_claim)
+  ✅ step 与 subject_type 不匹配(convert_to_claim 属于 claim, 不是 market)被拒
+[test] ⑥ resolvePrepared: prepared 行且 txid 已在 mempool → submitted, 不重新构造:
+  ✅ resolvePrepared 从 mempool 确认恢复出正确 txid(实际 deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef)
+  ✅ buildAndBroadcast 未被调用(实际 0 次) —— prepared 态走恢复不走重建
+[test] ⑦ resumeStaleSettlementIntents: 扫到陈旧 prepared 行并恢复:
+  ✅ 扫到 1 条陈旧 prepared 行(实际 1)
+  ✅ 成功恢复 1 条(实际 1)
+  ✅ 恢复后状态为 submitted(实际 submitted)
+[test] ⑧a resolvePrepared: 同字节重播遇 inputs_spent 但 kaspa_tx_log 有正向落地证据 → submitted(不重建):
+  ✅ 没有 throw(实际 null)
+  ✅ resolvePrepared 靠 kaspa_tx_log 正向证据确认 submitted, txid 不变(实际 a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1)
+  ✅ intent 行落为 submitted, 不是 ambiguous(实际 submitted)
+[test] ⑧b resolvePrepared: inputs_spent 且 kaspa_tx_log 查无正向证据 → ambiguous 终态, HOLD 不重建不放弃:
+  ✅ driveSettlementIntent throw 了 HoldError
+  ✅ hold code 正确(实际 ambiguous_inputs_spent)
+  ✅ buildAndBroadcast 未被调用(实际 0 次)
+  ✅ intent 行落为 ambiguous 终态(实际 ambiguous)
+  ✅ 尝试把 ambiguous 改回 prepared 被拒(实际 ambiguous)
+[test] ⑨-a F1 first-send-after-prepare: fresh 路径 prepared 已落库、首发失败 → 冻结后到 → 下一次驱动 ⇒ HOLD, 不重播, 行留 prepared:
+  ✅ 首发失败: 本次驱动以 exhausted 收场(实际 settlement intent settle:market:f1a:resolve exhausted 1 attempts: broadcast_failed: simulated first-send failure)
+  ✅ 首发失败后行停在 prepared 且字节已落库(= F1 的危险窗口)
+  ✅ 冻结后再驱动 ⇒ HoldError(settlement_frozen)(实际 settlement_frozen)
+  ✅ 零广播: 未发出任何 covenant_broadcast(实际 0 条)
+  ✅ 不弃行不重建: 行仍是 prepared, txid 与字节原样
+  ✅ 首次 HOLD 落标记 + 报警恰 1 条(events=1)
+  ✅ 第二次驱动同样 HOLD 且零广播
+  ✅ 不刷 events、不刷 updated_at(每 tick 回到这里也不制造噪声 / 不重置 prepared_stale 去重键)
+[test] ⑨-b F1 crash-recovery replay: 上一进程留下的 prepared 行 + 市场已冻结 ⇒ resumeStaleSettlementIntents 不重播:
+  ✅ resume 汇总: scanned=1 held=1 resolved=0 errored=0(实际 {"scanned":1,"resolved":0,"held":1,"errored":0})
+  ✅ 零广播(实际 0 条)
+  ✅ 行仍是 prepared
+  ✅ 同一行走 driveSettlementIntent 的 prepared 分支同样 HOLD、零广播
+[test] ⑨-c F1 正对照(单字段差异): 同构 prepared 行 + 未冻结 ⇒ 确实会同字节重播并 submitted(证明冻结组的"零广播"不是夹具本身发不出去):
+  ✅ 未冻结: 重播发生(实际 {"txId":"f1c3f1c3f1c3f1c3f1c3f1c3f1c3f1c3f1c3f1c3f1c3f1c3f1c3f1c3f1c3f1c3","replayed":true})
+  ✅ 恰 1 条 covenant_broadcast(实际 1)
+  ✅ 行转 submitted
+  ✅ resume 路径未冻结同样会重播(resolved=1, 广播=1)
+[test] ⑨-d F1 顺序: 冻结不否定已发生的事实——已在 mempool / 已落链 ⇒ 照常记 submitted(不 hold、不重播):
+  ✅ 冻结 ∧ 已在 mempool ⇒ submitted, 零广播(实际 ok)
+  ✅ 冻结 ∧ 已落链 ⇒ submitted, 零广播(实际 ok)
+  ✅ 这两条不触发 frozen hold 报警
+[test] ⑨-e F1 范围钉死: 只限 close_commit(market:resolve); seal 行在冻结市场上仍照常重播(冻结语义 = close_commit 三入口, 见 proto-settlement-freeze.mjs 头注):
+  ✅ seal 不受冻结影响(实际 ok)
+[test] ⑨-f F1 fail-closed: 冻结状态读不到(该 subject 的市场行不存在, isMarketFrozen 抛错)⇒ 按冻结 HOLD, 不重播:
+  ✅ 读不到冻结列 ⇒ HOLD(实际 settlement_frozen)
+  ✅ 零广播, 行仍 prepared
+[test] ⑨-g F1b(first send 一半): relay 广播前的 prepared 回执在冻结市场上被拒(不落 prepared / 无字节), 正对照未冻结正常落; submitted 回执永不被否决:
+  ✅ 冻结市场的 prepared 回执被拒(实际 {"ok":false,"code":"settlement_frozen","error":"MUTANT: frozen read moved after prepared write"})
+  ❌ 行保持 pending、无 txid / 无字节(实际 prepared/b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1/[{"id":"x"}]): false
+  ❌ 拒绝时报警恰 1 条(events=0): false
+  ✅ 未冻结: prepared 回执正常落库(正对照)
+  ✅ 冻结后 submitted 回执仍被记录(已广播的事实, 实际 true/submitted)
+  ✅ seal 的 prepared 回执不受冻结影响(范围 = close_commit)
+  ❌ 冻结列读不到 ⇒ 拒(fail-closed)(实际 {"ok":false,"code":"settlement_frozen","error":"MUTANT: frozen read moved after prepared write"}): false
+
+❌ 3 assertions failed
+[db] path=C:\Users\ADMIN\AppData\Local\Temp\_j2_ingest_settle_frozen_veto_7900.db source=DB_PATH
+[test] ① 正对照(未冻结): 真 driver-core → 真 relay fresh 路径 → 真 HTTP → 真 console ⇒ prepared 落库 → 广播 1 次 → submitted:
+  ✅ driver-core 入口③ 读冻结 = false ⇒ 放行
+  ✅ advanceStep = submitted(实际 {"outcome":"submitted","key":"settle:market:fv-ctrl:resolve","txId":"FINAL_TXID_DEFAULT","reused":false,"replayed":false})
+  ✅ 广播恰 1 次(实际 1)
+  ✅ console 行 = submitted 且带 prepared 字节(实际 submitted)——证明整条真链路(含 core / relay / HTTP / 鉴权 / 分派)是通的, 下面的"零广播"不是链路本身坏了
+[test] ② F1b 回归(NWT 验收线): driver-core 读冻结返回 false【之后】冻结才落地, 在 prepared 回执落库之前 ⇒ 409 ⇒ relay prepared_ingest_failed ⇒ 零广播:
+  ✅ (T0)driver-core 入口③ 确实读到了 false(闸放行了构造)
+  ✅ (T1)此后冻结已落地(在 build / IPC 窗口内)
+  ✅ 零广播: submitTransaction 调用 0 次(此前唯一挡不住的窗口)
+  ✅ core 视为广播失败(relay 回 prepared_ingest_failed; 实际 failed: proto bet intent prepared not recorded by console: HTTP 409 {"ok":false,"error":"MUTANT: frozen read moved after prepared write"})
+  ❌ console 行保持 pending、无 txid / 无字节(实际 prepared/FINAL_TXID_DEFAULT/["{\"inputs\":[{\"previousOutpoint\":{\"transactionId\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"index\":0},\"signatureScript\":\"sig-0\",\"sequence\":\"0\",\"sigOpCount\":1,\"utxo\":{\"amount\":\"10000000\",\"scriptPublicKey\":\"spk:relay-addr\"}}],\"outputs\":[{\"value\":\"9900000\",\"scriptPublicKey\":\"spk:relay-addr\"}],\"id\":\"FINAL_TXID_DEFAULT\"}"]): false
+  ❌ 下一 tick 被入口③挡下(gated), 仍零广播(实际 held/settlement_frozen/广播 0): false
+[test] ③ relay 侧非 2xx 即 throw(现有行为用测试钉住, 不只靠读码): ingestProtoBetIntentPhase 对 409 reject、对 2xx resolve:
+  ✅ 冻结 ⇒ 409 ⇒ 客户端 throw(实际 proto bet intent prepared not recorded by console: HTTP 409 {"ok":false,"error":"MUTANT: frozen read moved after prepared write"})
+  ✅ 未冻结 ⇒ 2xx ⇒ resolve(true)
+
+❌ 2 assertions failed

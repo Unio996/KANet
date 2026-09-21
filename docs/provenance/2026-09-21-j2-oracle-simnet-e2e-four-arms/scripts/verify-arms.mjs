@@ -3,6 +3,7 @@
 //   DB_PATH=<db 拷贝> node verify-arms.mjs --arms arms.json [--pmt-now <ms>] [--scenario <场景文件>] [--chain] [--json out.json]
 // arms.json: { "H": "<market id>", "D": ..., "A": ..., "T": ..., "F": ..., "P": ..., "L": ..., "S": ... }(缺的臂跳过)
 // --pmt-now: 观察时刻的 pmt(毫秒)。F / D / A / P / L 臂的"close_commit 意图=0"只有在 pmt 已越过 deadline+30s+余量之后才有信息量(否则空转)——不满足则该项标 VACUOUS 而非 PASS。
+// --rpc <ws url> --network simnet: F 臂节点侧核对(只读 get*; 先断言 getServerInfo.networkId == --network, 不符即拒): resolve 意图涉及的 close txid 在节点上有无痕迹(mempool / 未花输出 / 已被别的已知意图字节花掉)。
 // --chain: 还要求 H / T 臂的链上部分(resolve / convert_to_claim / claim_draw 意图 landed + proto_claims 行 + 市场 resolved)。
 // --scenario: 用场景文件复算 uma 行的 evidence_ref 哈希(场景在跑的中途被热切换过则该项可能对不上, 属预期, 以日志为准)。
 // 退出码: 有任一 FAIL ⇒ 1; VACUOUS 不算失败但会在汇总里单列(NWT 不得把 VACUOUS 当证据)。
@@ -10,6 +11,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
+import { createRequire } from 'node:module';
 
 const args = process.argv.slice(2); const opt = (k) => { const i = args.indexOf(k); return i >= 0 ? args[i + 1] : undefined; }; const flag = (k) => args.includes(k);
 const KC = process.env.E2E_REPO_KC || 'D:/kanet-tn12/scratch/_j2_wt_pointers_shape/kasia-console';
@@ -19,6 +21,7 @@ const arms = JSON.parse(fs.readFileSync(armsFile, 'utf8'));
 const pmtNow = opt('--pmt-now') !== undefined ? Number(opt('--pmt-now')) : null;
 const scenario = opt('--scenario') ? JSON.parse(fs.readFileSync(opt('--scenario'), 'utf8')) : null;
 const chain = flag('--chain');
+const rpcUrl = opt('--rpc'); const rpcNetwork = opt('--network');
 const { sqlite } = await import(pathToFileURL(path.join(KC, 'src/db/client.js')).href);
 
 const rows = [];  // {arm, check, status: PASS|FAIL|VACUOUS, detail}
@@ -32,6 +35,32 @@ const noResolveIntent = (arm, m) => {
   const n = intents(m.id, 'resolve').length;
   if (pmtNow === null || !(pmtNow > m.deadline_ms + SETTLE_MARGIN_MS)) rec(arm, 'close_commit 意图=0', 'VACUOUS', `pmt-now ${pmtNow} 未越过 deadline+30s+5tick(${m.deadline_ms + SETTLE_MARGIN_MS}) ⇒ 此项无信息量(不得当证据)`);
   else ck(arm, `close_commit 意图=0(pmt-now 已越过 deadline+30s+5tick)`, n === 0, `resolve 意图 ${n} 条`);
+};
+// F 臂判据(2026-09-21 更正, Bettor 1616 采 NWT ③): 旧判据 "close_commit 意图=0" 在自然竞态下会字面 FAIL——driver 在冻结前 1s 内已自然建过一条 pending resolve 行(无字节、从未 prepared/submitted), 那不是缺陷。
+//   新判据 = 缺陷的实质: 冻结市场上的 close 【没有被广播/落地】。判红看两条: ① 无 submitted/landed/ambiguous 的 resolve 意图(pending 不算; prepared 本身也不判红——F1 修复后 HOLD 态恰是 prepared);
+//   ② 节点侧无该 close txid 的痕迹(mempool / 其输出仍未花 / 其输出已被别的已知意图字节花掉)。② 需要 --rpc; 有 prepared/submitted/landed 行却没给 --rpc ⇒ 该项 VACUOUS(不得当证据)。没有任何带 txid 的 resolve 行 ⇒ 无 txid 可查 ⇒ PASS(未曾备字节)。
+const frozenNoClose = async (arm, m) => {
+  const rows2 = sqlite.prepare("SELECT status, prepared_txid, submitted_txid, prepared_tx_json FROM proto_settlement_intents WHERE subject_type = 'market' AND subject_id = ? AND step = 'resolve'").all(m.id);
+  const badStatus = rows2.filter((r) => ['submitted', 'landed', 'ambiguous'].includes(r.status));
+  if (pmtNow === null || !(pmtNow > m.deadline_ms + SETTLE_MARGIN_MS)) { rec(arm, '冻结市场无 close 被广播/落地(意图侧)', 'VACUOUS', `pmt-now ${pmtNow} 未越过 deadline+30s+5tick ⇒ 无信息量(不得当证据)`); return; }
+  ck(arm, '冻结市场无 close 被广播/落地(意图侧: 无 submitted/landed/ambiguous 的 resolve 意图; pending/prepared 不判红)', badStatus.length === 0, `resolve 意图状态=${JSON.stringify(rows2.map((r) => r.status))}`);
+  const withTx = rows2.filter((r) => r.prepared_txid || r.submitted_txid);
+  if (withTx.length === 0) { rec(arm, '冻结市场 close 节点侧无痕迹', 'PASS', '无带 txid 的 resolve 意图(未曾备字节), 无 txid 可查'); return; }
+  if (!rpcUrl) { rec(arm, '冻结市场 close 节点侧无痕迹', 'VACUOUS', '有带 txid 的 resolve 行但未给 --rpc ⇒ 节点侧未核(不得当证据)'); return; }
+  const kaspa = createRequire(path.join(KC, '..', 'kasia-relay') + path.sep)('kaspa-wasm'); const { RpcClient, Encoding, Address } = kaspa;
+  const rpc = new RpcClient({ url: rpcUrl, encoding: Encoding.Borsh, networkId: rpcNetwork || 'simnet' }); await rpc.connect({});
+  try {
+    const si = await rpc.getServerInfo(); if (!rpcNetwork || si.networkId !== rpcNetwork) { rec(arm, '冻结市场 close 节点侧无痕迹', 'FAIL', `networkId=${si.networkId} 与 --network=${rpcNetwork} 不符(或未给 --network), 拒绝查询`); return; }
+    const allTx = sqlite.prepare('SELECT prepared_tx_json FROM proto_settlement_intents WHERE prepared_tx_json IS NOT NULL').all().flatMap((r) => { try { return JSON.parse(r.prepared_tx_json).map((j) => kaspa.Transaction.deserializeFromSafeJSON(j)); } catch { return []; } });
+    for (const r of withTx) {
+      const txid = String(r.submitted_txid || r.prepared_txid); const traces = [];
+      if (await rpc.getMempoolEntry({ transactionId: txid, includeOrphanPool: true, filterTransactionPool: false }).then(() => true).catch(() => false)) traces.push('mempool');
+      let tx = null; try { tx = kaspa.Transaction.deserializeFromSafeJSON(JSON.parse(r.prepared_tx_json)[0]); } catch {}
+      if (tx) for (let i = 0; i < tx.outputs.length; i++) { const o = tx.outputs[i]; const addr = kaspa.addressFromScriptPublicKey(new kaspa.ScriptPublicKey(0, String(o.scriptPublicKey.script ?? o.scriptPublicKey).toLowerCase()), rpcNetwork).toString(); const es = (await rpc.getUtxosByAddresses([new Address(addr)])).entries || []; if (es.some((e) => String(e.outpoint.transactionId) === txid && Number(e.outpoint.index) === i)) traces.push(`unspent_out${i}`); }
+      for (const t2 of allTx) if (t2.inputs.some((inp) => String(inp.previousOutpoint.transactionId) === txid)) { traces.push('spent_by_known_tx'); break; }
+      ck(arm, `冻结市场 close ${txid.slice(0, 12)}… 节点侧无痕迹`, traces.length === 0, `节点侧痕迹=${JSON.stringify(traces)}(=该 close 已被广播并被节点接受)`);
+    }
+  } finally { await rpc.disconnect().catch(() => {}); }
 };
 const frozenWith = (arm, m, re) => { ck(arm, '已冻结', m.settlement_frozen_at != null, 'settlement_frozen_at 为空'); ck(arm, `frozen_reason ~ ${re}`, re.test(String(m.frozen_reason)), `frozen_reason=${m.frozen_reason}`); };
 const sha = (s) => createHash('sha256').update(s).digest('hex');
@@ -66,7 +95,7 @@ for (const [arm, id] of Object.entries(arms)) {
     noResolveIntent(arm, m);
   } else if (arm === 'F') {
     ck(arm, 'winning_side 已写(promote 成功)', m.winning_side === 0 || m.winning_side === 1); frozenWith(arm, m, /^[a-z0-9_]+\|clock=(pmt|wall)$/);
-    noResolveIntent(arm, m);
+    await frozenNoClose(arm, m);
   } else if (arm === 'L') {
     frozenWith(arm, m, /^late_seal\|clock=(pmt|wall)$/); ck(arm, 'winning_side 为空', m.winning_side == null); ck(arm, 'verdict 行 0(冻结后不再是候选)', vs.length === 0, `verdicts=${vs.length}`);
     noResolveIntent(arm, m);

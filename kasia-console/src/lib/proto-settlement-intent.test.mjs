@@ -228,6 +228,165 @@ console.log('[test] ⑧b resolvePrepared: inputs_spent 且 kaspa_tx_log 查无�
   ok(afterPatch.status === 'ambiguous', `尝试把 ambiguous 改回 prepared 被拒(实际 ${afterPatch.status})`);
 }
 
+// ═══ F1(Codex MUST① / Bettor 1614 / df07b0ec): 冻结后到的 prepared close_commit 不得被重播 ═══════════════════
+// 2026-09-20 simnet 红证(docs/provenance/2026-09-21-j2-oracle-simnet-e2e-four-arms): 冻结后 prepared 的 resolve 行仍被 driver 同字节重播并落地。
+// 弱注入臂(单字段): 正对照(⑨-c)与冻结组(⑨-a/b)的 prepared 行、relay 桩、调用路径完全相同, 唯一差别 = proto_markets.settlement_frozen_at 一列。
+const { freezeMarket } = await import('./proto-settlement-freeze.mjs');
+const freezeIt = (marketId) => freezeMarket({ db: sqlite, marketId, reason: 'operator_emergency_stop', pmt: null, wallMs: Date.now(), log: quiet });
+const eventCount = (key) => sqlite.prepare(`SELECT COUNT(*) AS n FROM events WHERE event_type = 'settlement_intent_frozen_prepared_hold' AND payload_json LIKE ?`).get(`%${key}%`).n;
+const BROADCAST_CALLS = (R) => R.calls.filter((c) => c.type === PROTO_COVENANT_BROADCAST_TYPE);
+/** relay 桩: 不在池 / 未落链; 收到 covenant_broadcast 重播 ⇒ 记录并回 {txId=prepared_txid}(=能广播的世界: 若闸失守, 测试会看到广播)。 */
+function makeReplayRelay({ inMempool = false, landed = false } = {}) {
+  const R = { calls: [] };
+  R.sendCmd = async (relayId, cmd) => {
+    R.calls.push(cmd);
+    if (cmd.type === 'get_mempool_entry') return { ok: true, found: inMempool };
+    if (cmd.type === 'check_utxo_landed') return { ok: true, landed, depth: landed ? 10 : null };
+    if (cmd.type === PROTO_COVENANT_BROADCAST_TYPE) return { ok: true, txId: cmd.prepared_txid };
+    throw new Error(`unexpected cmd ${cmd.type}`);
+  };
+  return R;
+}
+/** 备一条带字节的 prepared 行(= 上一进程 / 上一 tick 已落库、未确认广播的状态)。 */
+function seedPrepared(marketId, step, txidSeed) {
+  seedMarket(marketId);
+  const key = settlementIntentKeyFor('market', marketId, step);
+  ensureSettlementIntent({ subjectType: 'market', subjectId: marketId, step });
+  const txid = txidSeed.repeat(8);
+  recordSettlementIntentPhase({ intentKey: key, phase: 'prepared', txid, txJson: JSON.stringify([{ id: txid }]) });
+  return { key, txid };
+}
+const driveOnce = (R, subjectId, step, extra = {}) => driveSettlementIntent({
+  sendCmd: R.sendCmd, relayId: 'relay-A', subjectType: 'market', subjectId, step, targetAddress: 'kaspatest:rootclose-f1',
+  buildAndBroadcast: async () => { throw new Error('should-not-be-called: prepared 态不重建'); }, log: quiet, ...extra,
+});
+const settle = async (p) => { try { return { res: await p, err: null }; } catch (e) { return { res: null, err: e }; } };
+
+console.log('[test] ⑨-a F1 first-send-after-prepare: fresh 路径 prepared 已落库、首发失败 → 冻结后到 → 下一次驱动 ⇒ HOLD, 不重播, 行留 prepared:');
+{
+  seedMarket('f1a');
+  const key = settlementIntentKeyFor('market', 'f1a', 'resolve');
+  const txid = 'f1a1f1a1'.repeat(8);
+  const R0 = makeReplayRelay();
+  const first = await settle(driveSettlementIntent({
+    sendCmd: R0.sendCmd, relayId: 'relay-A', subjectType: 'market', subjectId: 'f1a', step: 'resolve', targetAddress: 'kaspatest:rootclose-f1', maxAttempts: 1, sleepMs: () => 0, log: quiet,
+    buildAndBroadcast: async ({ intentKey }) => { recordSettlementIntentPhase({ intentKey, phase: 'prepared', txid, txJson: JSON.stringify([{ id: txid }]) }); throw new Error('broadcast_failed: simulated first-send failure'); },
+  }));
+  ok(first.err && /exhausted/.test(first.err.message), `首发失败: 本次驱动以 exhausted 收场(实际 ${first.err && first.err.message})`);
+  ok(getSettlementIntent(key).status === 'prepared' && !!getSettlementIntent(key).prepared_tx_json, '首发失败后行停在 prepared 且字节已落库(= F1 的危险窗口)');
+  freezeIt('f1a');
+  const R = makeReplayRelay();
+  const s1 = await settle(driveOnce(R, 'f1a', 'resolve'));
+  ok(s1.err && s1.err.hold === true && s1.err.code === 'settlement_frozen', `冻结后再驱动 ⇒ HoldError(settlement_frozen)(实际 ${s1.err && (s1.err.code || s1.err.message)})`);
+  ok(BROADCAST_CALLS(R).length === 0, `零广播: 未发出任何 covenant_broadcast(实际 ${BROADCAST_CALLS(R).length} 条)`);
+  const row1 = getSettlementIntent(key);
+  ok(row1.status === 'prepared' && row1.prepared_txid === txid && !!row1.prepared_tx_json, '不弃行不重建: 行仍是 prepared, txid 与字节原样');
+  ok(row1.last_error === 'settlement_frozen_prepared_hold' && eventCount(key) === 1, `首次 HOLD 落标记 + 报警恰 1 条(events=${eventCount(key)})`);
+  const upd = row1.updated_at;
+  const s2 = await settle(driveOnce(R, 'f1a', 'resolve'));
+  ok(s2.err && s2.err.code === 'settlement_frozen' && BROADCAST_CALLS(R).length === 0, '第二次驱动同样 HOLD 且零广播');
+  ok(eventCount(key) === 1 && getSettlementIntent(key).updated_at === upd, '不刷 events、不刷 updated_at(每 tick 回到这里也不制造噪声 / 不重置 prepared_stale 去重键)');
+}
+
+console.log('[test] ⑨-b F1 crash-recovery replay: 上一进程留下的 prepared 行 + 市场已冻结 ⇒ resumeStaleSettlementIntents 不重播:');
+{
+  const { key } = seedPrepared('f1b', 'resolve', 'f1b2f1b2');
+  freezeIt('f1b');
+  sqlite.prepare(`UPDATE proto_settlement_intents SET updated_at = datetime('now', '-10 minutes') WHERE intent_key = ?`).run(key);
+  const R = makeReplayRelay();
+  const out = await resumeStaleSettlementIntents({ sendCmd: R.sendCmd, targetAddressFor: () => 'kaspatest:rootclose-f1', relayIdFor: () => 'relay-A', olderThanMs: 5 * 60 * 1000, log: quiet });
+  ok(out.scanned === 1 && out.held === 1 && out.resolved === 0 && out.errored === 0, `resume 汇总: scanned=1 held=1 resolved=0 errored=0(实际 ${JSON.stringify(out)})`);
+  ok(BROADCAST_CALLS(R).length === 0, `零广播(实际 ${BROADCAST_CALLS(R).length} 条)`);
+  ok(getSettlementIntent(key).status === 'prepared', '行仍是 prepared');
+  // 同一行经 driver 的 prepared 分支(listWork preparedRows → advanceStep → driveSettlementIntent)也 HOLD
+  const s = await settle(driveOnce(R, 'f1b', 'resolve'));
+  ok(s.err && s.err.code === 'settlement_frozen' && BROADCAST_CALLS(R).length === 0, '同一行走 driveSettlementIntent 的 prepared 分支同样 HOLD、零广播');
+}
+
+console.log('[test] ⑨-c F1 正对照(单字段差异): 同构 prepared 行 + 未冻结 ⇒ 确实会同字节重播并 submitted(证明冻结组的"零广播"不是夹具本身发不出去):');
+{
+  const { key, txid } = seedPrepared('f1c', 'resolve', 'f1c3f1c3');
+  const R = makeReplayRelay();
+  const s = await settle(driveOnce(R, 'f1c', 'resolve'));
+  ok(s.res && s.res.txId === txid && s.res.replayed === true, `未冻结: 重播发生(实际 ${s.err ? s.err.message : JSON.stringify(s.res && { txId: s.res.txId, replayed: s.res.replayed })})`);
+  ok(BROADCAST_CALLS(R).length === 1, `恰 1 条 covenant_broadcast(实际 ${BROADCAST_CALLS(R).length})`);
+  ok(getSettlementIntent(key).status === 'submitted', '行转 submitted');
+  const { key: k2 } = seedPrepared('f1c2', 'resolve', 'f1c4f1c4');
+  sqlite.prepare(`UPDATE proto_settlement_intents SET updated_at = datetime('now', '-10 minutes') WHERE intent_key = ?`).run(k2);
+  const R2 = makeReplayRelay();
+  const out = await resumeStaleSettlementIntents({ sendCmd: R2.sendCmd, targetAddressFor: () => 'kaspatest:rootclose-f1', relayIdFor: () => 'relay-A', olderThanMs: 5 * 60 * 1000, log: quiet });
+  ok(out.resolved >= 1 && BROADCAST_CALLS(R2).length >= 1, `resume 路径未冻结同样会重播(resolved=${out.resolved}, 广播=${BROADCAST_CALLS(R2).length})`);
+}
+
+console.log('[test] ⑨-d F1 顺序: 冻结不否定已发生的事实——已在 mempool / 已落链 ⇒ 照常记 submitted(不 hold、不重播):');
+{
+  const a = seedPrepared('f1d1', 'resolve', 'f1d1f1d1'); freezeIt('f1d1');
+  const R1 = makeReplayRelay({ inMempool: true });
+  const s1 = await settle(driveOnce(R1, 'f1d1', 'resolve'));
+  ok(s1.res && s1.res.txId === a.txid && BROADCAST_CALLS(R1).length === 0 && getSettlementIntent(a.key).status === 'submitted', `冻结 ∧ 已在 mempool ⇒ submitted, 零广播(实际 ${s1.err ? s1.err.message : 'ok'})`);
+  const b = seedPrepared('f1d2', 'resolve', 'f1d2f1d2'); freezeIt('f1d2');
+  const R2 = makeReplayRelay({ landed: true });
+  const s2 = await settle(driveOnce(R2, 'f1d2', 'resolve'));
+  ok(s2.res && s2.res.txId === b.txid && BROADCAST_CALLS(R2).length === 0 && getSettlementIntent(b.key).status === 'submitted', `冻结 ∧ 已落链 ⇒ submitted, 零广播(实际 ${s2.err ? s2.err.message : 'ok'})`);
+  ok(eventCount(a.key) === 0 && eventCount(b.key) === 0, '这两条不触发 frozen hold 报警');
+}
+
+console.log('[test] ⑨-e F1 范围钉死: 只限 close_commit(market:resolve); seal 行在冻结市场上仍照常重播(冻结语义 = close_commit 三入口, 见 proto-settlement-freeze.mjs 头注):');
+{
+  const { key, txid } = seedPrepared('f1e', 'seal', 'f1e5f1e5'); freezeIt('f1e');
+  const R = makeReplayRelay();
+  const s = await settle(driveOnce(R, 'f1e', 'seal'));
+  ok(s.res && s.res.txId === txid && BROADCAST_CALLS(R).length === 1 && getSettlementIntent(key).status === 'submitted', `seal 不受冻结影响(实际 ${s.err ? s.err.message : 'ok'})`);
+}
+
+console.log('[test] ⑨-f F1 fail-closed: 冻结状态读不到(该 subject 的市场行不存在, isMarketFrozen 抛错)⇒ 按冻结 HOLD, 不重播:');
+{
+  // 市场行有结算意图 / 判定等引用时 DELETE 被触发器禁(设计如此), 所以反向造: FK 关掉, 直接插一条指向不存在市场的 prepared 行(= "冻结列读不到"的最小夹具)。
+  const key = settlementIntentKeyFor('market', 'f1f-nomarket', 'resolve'); const txid = 'f1f6f1f6'.repeat(8); const now = new Date().toISOString();
+  sqlite.pragma('foreign_keys = OFF');
+  try {
+    sqlite.prepare(`INSERT INTO proto_settlement_intents (intent_key, subject_type, subject_id, step, depends_on, status, prepared_txid, prepared_tx_json, created_at, updated_at) VALUES (?, 'market', 'f1f-nomarket', 'resolve', NULL, 'prepared', ?, ?, ?, ?)`).run(key, txid, JSON.stringify([{ id: txid }]), now, now);
+    const R = makeReplayRelay();
+    const s = await settle(driveOnce(R, 'f1f-nomarket', 'resolve'));
+    ok(s.err && s.err.hold === true && s.err.code === 'settlement_frozen', `读不到冻结列 ⇒ HOLD(实际 ${s.err && (s.err.code || s.err.message)})`);
+    ok(BROADCAST_CALLS(R).length === 0 && getSettlementIntent(key).status === 'prepared', '零广播, 行仍 prepared');
+  } finally { sqlite.pragma('foreign_keys = ON'); }
+}
+
+console.log('[test] ⑨-g F1b(first send 一半): relay 广播前的 prepared 回执在冻结市场上被拒(不落 prepared / 无字节), 正对照未冻结正常落; submitted 回执永不被否决:');
+{
+  const mkPending = (id, step = 'resolve') => { seedMarket(id); ensureSettlementIntent({ subjectType: 'market', subjectId: id, step }); return settlementIntentKeyFor('market', id, step); };
+  const tx = (seed) => seed.repeat(8);
+  // 冻结组
+  const kF = mkPending('f1bg1'); freezeIt('f1bg1');
+  const rF = recordSettlementIntentPhase({ intentKey: kF, phase: 'prepared', txid: tx('b1b1b1b1'), txJson: JSON.stringify([{ id: 'x' }]) });
+  const rowF = getSettlementIntent(kF);
+  ok(rF.ok === false && rF.code === 'settlement_frozen', `冻结市场的 prepared 回执被拒(实际 ${JSON.stringify(rF)})`);
+  ok(rowF.status === 'pending' && rowF.prepared_txid === null && rowF.prepared_tx_json === null, `行保持 pending、无 txid / 无字节(实际 ${rowF.status}/${rowF.prepared_txid}/${rowF.prepared_tx_json})`);
+  ok(eventCount(kF) === 1, `拒绝时报警恰 1 条(events=${eventCount(kF)})`);
+  // 正对照: 同一形状、未冻结 ⇒ 正常落 prepared(单字段差异)
+  const kC = mkPending('f1bg2');
+  const rC = recordSettlementIntentPhase({ intentKey: kC, phase: 'prepared', txid: tx('b2b2b2b2'), txJson: JSON.stringify([{ id: 'x' }]) });
+  ok(rC.ok === true && getSettlementIntent(kC).status === 'prepared' && !!getSettlementIntent(kC).prepared_tx_json, '未冻结: prepared 回执正常落库(正对照)');
+  // submitted 永不否决: 冻结前已 prepared 的行, 冻结后 relay 回 submitted(它已经广播了) ⇒ 必须记
+  const kS = mkPending('f1bg3');
+  recordSettlementIntentPhase({ intentKey: kS, phase: 'prepared', txid: tx('b3b3b3b3'), txJson: JSON.stringify([{ id: 'x' }]) });
+  freezeIt('f1bg3');
+  const rS = recordSettlementIntentPhase({ intentKey: kS, phase: 'submitted', txid: tx('b3b3b3b3') });
+  ok(rS.ok === true && getSettlementIntent(kS).status === 'submitted', `冻结后 submitted 回执仍被记录(已广播的事实, 实际 ${JSON.stringify(rS.ok)}/${getSettlementIntent(kS).status})`);
+  // 范围钉死: 只 close_commit; seal 的 prepared 回执在冻结市场上照常落
+  const kSeal = mkPending('f1bg4', 'seal'); freezeIt('f1bg4');
+  ok(recordSettlementIntentPhase({ intentKey: kSeal, phase: 'prepared', txid: tx('b4b4b4b4'), txJson: JSON.stringify([{ id: 'x' }]) }).ok === true, 'seal 的 prepared 回执不受冻结影响(范围 = close_commit)');
+  // fail-closed: 冻结列读不到(该 subject 无市场行)⇒ 拒
+  const kN = settlementIntentKeyFor('market', 'f1bg5-nomarket', 'resolve'); const now2 = new Date().toISOString();
+  sqlite.pragma('foreign_keys = OFF');
+  try {
+    sqlite.prepare(`INSERT INTO proto_settlement_intents (intent_key, subject_type, subject_id, step, depends_on, status, created_at, updated_at) VALUES (?, 'market', 'f1bg5-nomarket', 'resolve', NULL, 'pending', ?, ?)`).run(kN, now2, now2);
+    const rN = recordSettlementIntentPhase({ intentKey: kN, phase: 'prepared', txid: tx('b5b5b5b5'), txJson: JSON.stringify([{ id: 'x' }]) });
+    ok(rN.ok === false && rN.code === 'settlement_frozen' && getSettlementIntent(kN).status === 'pending', `冻结列读不到 ⇒ 拒(fail-closed)(实际 ${JSON.stringify(rN)})`);
+  } finally { sqlite.pragma('foreign_keys = ON'); }
+}
+
 console.log(fails === 0
   ? '\n✅✅ ALL PASS — proto-settlement-intent 六步状态机(幂等/单调/依赖/恢复/inputs_spent 歧义终态) 全绿'
   : `\n❌ ${fails} assertions failed`);

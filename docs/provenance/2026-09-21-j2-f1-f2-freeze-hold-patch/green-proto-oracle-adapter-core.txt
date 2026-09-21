@@ -1,0 +1,25 @@
+[db] path=C:\Users\ADMIN\AppData\Local\Temp\_j2_pmoac_21540.db source=DB_PATH
+[PASS] A1 ▲ happy path: 两源(extractor + uma)一致 ⇒ tick1 写两条带 pmt_at 的 verdict 后在宽限窗 wait, 宽限窗后 tick2 promote; 审计列 / 来源 / verdict_id 落库, 且引用 extractor 那条
+[PASS] A2 B3 side_map + UMA 极性: side_map {yes:0,no:1}, polymarket_outcome_side=NO ⇒ extractor YES→0; uma(Polymarket)NO ⇒ 反极性=YES→0, 两源同侧 ⇒ promote 胜方 0; 极性对照臂: 同数据但 outcome_side=YES ⇒ uma NO→1 与 extractor 冲突 ⇒ 冻结
+[PASS] A3 单源: 只有 extractor 出票、uma 暂态 ⇒ 写 extractor 一条, wait(awaiting_second_source), 永不 promote; 下 tick uma 才出票才继续(extractor 不重 derive)
+[PASS] A4 冲突 ⇒ 两边都写(冻结集不漏任何一方)并冻结 reason=inconsistent_verdicts
+[PASS] A5 B2/B4 实质 ABSTAIN(judgeline-abstain, pmt 有效)⇒ 写 extractor NULL(带 pmt_at)⇒ 冻结 abstain_or_dispute; 该 kind 不再 derive
+[PASS] A6 B4 ▲ 实质 ABSTAIN 且 pmt 无效: 仍写 NULL 行(pmt_at=NULL), 不能因 pmt 无效被跳过 = fail-open; 当 tick 门 wait(pmt_invalid); pmt 恢复后同一行让门冻结, 不重 derive
+[PASS] A7 暂态(取数失败 / known-source-not-final / 抛异常 / 未知 abstain kind)⇒ 不写任何行, 下 tick 重试; 状态不变
+[PASS] A8 赞成延后: 出票但 pmt 无效 ⇒ 不写(赞成集不含 pmt_at=NULL 的行也不该有); pmt 恢复后才写; 无 pmt_at=NULL 的赞成行
+[PASS] A9 llm 类(extractor_kind_used 非 judgeline-deterministic)⇒ 贴 llm, 有 outcome 写入但永不入赞成集(即使 uma 也一致 ⇒ 仍 awaiting_second_source); LLM 只问一次; 与 extractor 冲突时 llm 异议冻结
+[PASS] A10 B5/N5b 三档网络: 主网 + 非白名单 ⇒ 不 derive 不写任何行(skipped not_allowed_here); 主网 + 白名单代币 ⇒ 处理; simnet / testnet-12 ⇒ 处理; 网络缺失 ⇒ fail-closed 跳过
+[PASS] A11 结果尚不可知 ⇒ 不是候选(M2: 候选 SQL 按墙钟 >= outcome_end 过滤; 不 derive); 墙钟已过而 pmt 无效 ⇒ 仍扫(为写实质异议, B4); 墙钟未过而 pmt 已过(现实中 pmt 不领先墙钟)⇒ 也不是候选
+[PASS] A12 非候选全跳过(不 derive / 不写): 非 sealed(betting)/ 已冻结 / 非判定题 / outcome_end 为 NULL / 已判
+[PASS] A13 坏 spec / 未登记数据源 ⇒ 计 errors、不 derive(SSRF 二道闸: 直接写库的 data_source 也不 fetch)且【冻结】离开候选集(M2: 永久不可处理不再占名额): 非 JSON / 缺 side_map / side_map 非双射 / 缺 polymarket_outcome_side / 非 ESPN 域 / 内网地址
+[PASS] A14 UMA 定稿窗不安全(NaN / <24h / undefined)⇒ 整个 tick 中止, 不读候选不 derive 不写(SHOULD①)
+[PASS] A15 B7 ▲ gate 判 promote 之后、写值之前插入异议 ⇒ PROMOTE_UPDATE 的 NOT EXISTS 让 changes==0(NULL 异议 / 早于 outcome_end 的相反票 / pmt_at=NULL 的 llm 异议 / human 异议各一); 一致的 llm 票不拦(对照臂)
+[PASS] A16 B7 端到端(adapter 内): 在 promote UPDATE 前一刻插入异议 ⇒ skipped promote_guard_changes_0, winning_side 仍 NULL; 下 tick 门看到异议 ⇒ 冻结
+[PASS] A17 门后逐 verdict 抗重复: 同 tick 重复进入(evidence_ref 相同)不写第二条; R5 预检失败(胜方侧无确认下注)⇒ 冻结 r5_precheck_failed
+[PASS] A18 事务内 dedupe: derive 期间另一 tick 已写入同 (市场, source_kind, 证据哈希) 的行 ⇒ 本 tick 不再写第二条(同证据至多一条); 不同证据哈希仍写
+[PASS] A19 ▲ B2/B4 冲突且 pmt 无效: 两边的票仍都写(pmt_at=NULL 的异议行, 冻结集不漏任何一方); 当 tick 门 wait(pmt_invalid); pmt 恢复后同样的行让门冻结 inconsistent_verdicts, 不重 derive; 对照: 同数据无冲突 + pmt 无效 ⇒ 什么都不写
+[PASS] A20 ▲ M1 批准票只在 pmt 有效 ∧ pmt >= outcome_end 才写: wall=oe+60s ∧ pmt=oe−80s ⇒ 不写批准票(否则 pmt_at<oe 永久失格 ⇒ 必走 cutoff 冻结 → 退款), 下 tick pmt>=oe ⇒ 重 derive 写 pmt_at>=oe, 再过宽限窗 promote; 异议 / 实质 ABSTAIN 不受此限
+[PASS] A21 ▲ M2 候选不被远期旧市场饿死: 21 个市场(20 个未到期、先创建 + 1 个已到期)limit=20 ⇒ 已到期者被扫; 多个已到期按 outcome_end 升序取
+[PASS] A22 ▲ M2 永久不可处理者冻结后不再占名额: 20 个 spec 坏的已到期市场(oe 更早)+ 1 个好市场, limit=20 ⇒ tick1 冻结 20 个、好市场未扫; tick2 好市场被处理
+
+proto-oracle-adapter-core.test: 22 passed, 0 failed
