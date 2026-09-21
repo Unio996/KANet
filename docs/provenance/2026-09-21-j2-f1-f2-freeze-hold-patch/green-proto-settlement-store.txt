@@ -1,0 +1,22 @@
+[db] path=C:\Users\ADMIN\AppData\Local\Temp\_j2_settle_store_29700.db source=DB_PATH
+[PASS] seal 触发: betting ∧ 已确认下注 == seal_count ∧ 无未确认下注 ∧ 无在途 append 意图 ∧ seal 意图未 landed ⇒ 出现在 advances; 每个条件单独破坏都不出现
+[PASS] 批 D D1 入口①: 冻结市场不进 listWork 的 close_commit 选行(同形未冻结市场照常出现); 冻结不影响 seal 触发 / 其它步的发现
+[PASS] 批 D D1 入口②: dependenciesLanded(close_commit) 重读冻结列 ⇒ {ok:false, reason:settlement_frozen}(即使 sealed ∧ winning_side 已写 ∧ seal landed); 未冻结同形 ⇒ ok
+[PASS] 批 D D1: 已 prepared 的 close_commit 意图不受冻结影响——仍在 preparedRows(同字节重播); isSettlementFrozen 端口: 未冻 false / 冻 true / 市场不存在抛(核心按冻结处理)
+[PASS] 批 D ⑤(b): 冻结的 sealed 市场上, 已 prepared 的 close_commit 意图仍在 preparedRows、已 submitted 的仍在 landedChecks(同字节重播 / landed 检查不看冻结); 其 markLanded(close_commit) 照常 sealed→resolved 并建 win claim + convert 意图
+[PASS] 批 D ⑤(c): 冻结的 resolved 市场——win claim 仍出现在 convert_to_claim 的 advances(resolve landed 时); dependenciesLanded(convert_to_claim) 放行; convert landed 后 claim_draw 同样出现且放行(convert / claim 全程不读冻结)
+[PASS] close_commit: sealed ∧ winning_side 已写 ∧ resolve 意图未 landed / ambiguous ⇒ 出现; winning_side 为空 / 已 landed 不出现
+[PASS] convert_to_claim / claim_draw 发现: resolved 市场的赢 claim 行 + resolve landed ⇒ convert; convert landed ∧ claim_txid 为空 ⇒ claim_draw; 各自已 landed / 已领取后不再出现
+[PASS] prepared 行(重启恢复, §9): 不论触发条件是否仍满足都排在 advances 最前并去重; landedChecks 只含 submitted 的批9 四步意图, 排除 withdraw / reclaim
+[PASS] 依赖(§4): seal 需触发条件(或已在途); close_commit 需 sealed ∧ winning_side ∧ seal landed; convert_to_claim 需 market resolved ∧ resolve landed(跨 subject_type); claim_draw 需 convert landed; 未知步骤 ⇒ not ok
+[PASS] markLanded(seal): betting → sealed(带前态谓词); 重复调用幂等(第二次 0 行); 非 betting 不动
+[PASS] markLanded(close_commit): sealed → resolved + 建 win claim 行(id = 64 位 hex, 过出口 S9)+ convert_to_claim 意图 pending; 重复调用幂等(仍一行 claim、一个意图)
+[PASS] markLanded(close_commit) 事务性: 派生失败(如无赢家下注)⇒ 整个事务回滚(市场状态不变、无 claim 行)
+[PASS] markLanded(convert_to_claim / claim_draw): convert ⇒ claim_draw 意图 pending(幂等); claim_draw ⇒ 记 claim_txid / vout(= builder 导出的输出下标)/ claimed_at 一次, 重复不覆盖; 缺 submitted_txid 抛错; 未知步骤抛错
+[PASS] 构造与 id: claimDrawClaimOutIndex 必填(无默认); newClaimId = randomBytes(32).toString(hex)(64 位小写 hex, 每次不同)
+[PASS] B1 seal 已 landed 但市场仍 betting ⇒ 进 effectsPending(此前: landedChecks 只取 submitted、seal 触发带 NOT EXISTS landed ⇒ 0 工作项); markLanded 后消失
+[PASS] B2 resolve 已 landed 但市场仍 sealed / 无 win claim / claim 无 convert_to_claim 意图 ⇒ 各自进 effectsPending; 全部应用后消失; claim_draw 已 landed 但 claim_txid 为空 ⇒ 进; convert 已 landed 但无 claim_draw 意图 ⇒ 进
+[PASS] B2b 已 resolved 却缺 win claim 行(人工改库 / 旧版本遗留)⇒ markLanded 用同一份赢家判定补建(不留永远挂起), 幂等
+[PASS] B3 端到端(真实 store + 真实核心): resolve 已 landed 但 deriveCloseCommitInputs 失败 ⇒ 每 tick 都报警(不是报一次就沉默), 市场保持 sealed; 数据修好后下一 tick 自愈(resolved + win claim(64 位 hex)+ convert 意图), 之后不再报警不再挂起
+
+proto-settlement-store.test: 19 passed, 0 failed

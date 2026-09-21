@@ -51,7 +51,7 @@ export function createSettlementStore({ db = sqlite, claimIdFn = newClaimId, ens
     for (const r of db.prepare(`
       SELECT m.id FROM proto_markets m
       WHERE m.status = 'sealed' AND m.winning_side IS NOT NULL
-        AND m.settlement_frozen_at IS NULL   -- 批 D D1 入口①: 冻结市场不进 close_commit 选行(已 prepared 的意图走上面 preparedRows, 不受冻结影响)
+        AND m.settlement_frozen_at IS NULL   -- 批 D D1 入口①: 冻结市场不进 close_commit 选行(已 prepared 的意图走上面 preparedRows 进 advanceStep, 但 resolvePrepared 对冻结市场的 close_commit 行 hold、不重播——F1, Codex MUST①; 此前本注释写"不受冻结影响"是设计假设, 已作废)
         AND NOT EXISTS (SELECT 1 FROM proto_settlement_intents s WHERE s.subject_type = 'market' AND s.subject_id = m.id AND s.step = 'resolve' AND s.status IN ('landed', 'ambiguous'))
       ORDER BY m.created_at ASC LIMIT ?`).all(limit)) advances.push({ step: 'close_commit', subjectId: r.id, marketId: r.id });
     for (const r of db.prepare(`

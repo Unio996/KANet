@@ -31,7 +31,7 @@ export function freezeMarket({ db, marketId, reason, pmt = null, wallMs = Date.n
 
 /**
  * 晚 seal 守卫(§4): seal landed 后由驱动调用。只对【有判定题】的市场生效(无判定题的 operator 市场——如主网首轮 a59c——不冻结, 走受控 write-once 路径)。
- * effective_upper = cutoff − 决策时刻 − MARGIN < GRACE_MIN ⇒ 冻结(reason=late_seal)。决策时刻取 pmt, pmt 无效退墙钟(保守)。
+ * effective_upper = cutoff − 决策时刻 − MARGIN < GRACE ⇒ 冻结(reason=late_seal; F2: 原判据 GRACE_MIN 已废, 宽限采冻结不压缩)。决策时刻取 pmt, pmt 无效退墙钟(保守)。
  * 永不抛(守卫失败不能阻塞 seal 的 landed 记账; promote 门自己也会在 promote 时再判一次晚 seal, 双覆盖)。
  */
 export async function applyLateSealGuard({ db, marketId, readPmt, cfg, wallMs = () => Date.now(), log = console }) {

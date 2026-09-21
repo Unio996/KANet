@@ -90,12 +90,15 @@ await t('F1 ▲ N5a 冻结写入不依赖 pmt 有效: pmt 有效写 pmt(clock=pm
 });
 
 // ══ L 系列: 晚 seal(§4 / N6) ═════════════════════════════════════════════════════════════════
-await t('L1 ▲ N6 晚 seal 边界: effective_upper = cutoff − 决策时刻 − MARGIN; upper = GRACE_MIN−1 ⇒ late; = GRACE_MIN ⇒ 不 late; 之间 / 之上不 late; 决策时刻越过 cutoff ⇒ upper 为负 ⇒ late', () => {
+await t('L1 ▲ N6 晚 seal 边界(F2: 判据 GRACE 不压缩): effective_upper = cutoff − 决策时刻 − MARGIN; upper = GRACE−1 ⇒ late; = GRACE ⇒ 不 late; 之上不 late; [GRACE_MIN, GRACE) 区间一律 late(原先被压缩放行); 决策时刻越过 cutoff ⇒ upper 为负 ⇒ late; GRACE_MIN 不再是运行时输入', () => {
   const at = (upper) => CUTOFF - cfg.closePipelineMarginMs - upper;      // 令 upper 恰为给定值的决策时刻
-  const r0 = evaluateLateSeal({ deadlineMs: D, decisionMs: at(cfg.graceMinMs - 1), cfg }); assert.equal(r0.late, true); assert.equal(r0.upperMs, cfg.graceMinMs - 1);
-  const r1 = evaluateLateSeal({ deadlineMs: D, decisionMs: at(cfg.graceMinMs), cfg }); assert.equal(r1.late, false); assert.equal(r1.upperMs, cfg.graceMinMs);
-  assert.equal(evaluateLateSeal({ deadlineMs: D, decisionMs: at(cfg.graceMinMs + 1), cfg }).late, false);
-  assert.equal(evaluateLateSeal({ deadlineMs: D, decisionMs: at(cfg.graceMs), cfg }).late, false);
+  const r0 = evaluateLateSeal({ deadlineMs: D, decisionMs: at(cfg.graceMs - 1), cfg }); assert.equal(r0.late, true); assert.equal(r0.upperMs, cfg.graceMs - 1);
+  const r1 = evaluateLateSeal({ deadlineMs: D, decisionMs: at(cfg.graceMs), cfg }); assert.equal(r1.late, false); assert.equal(r1.upperMs, cfg.graceMs);
+  assert.equal(evaluateLateSeal({ deadlineMs: D, decisionMs: at(cfg.graceMs + 1), cfg }).late, false);
+  // F2 回归: 原判据(upper ≥ GRACE_MIN 即放行、宽限被压缩)会放行的区间, 现在必须冻结
+  for (const upper of [cfg.graceMinMs, cfg.graceMinMs + 1, 1_000_000, cfg.graceMs - 1]) assert.equal(evaluateLateSeal({ deadlineMs: D, decisionMs: at(upper), cfg }).late, true, `upper=${upper} ∈ [GRACE_MIN, GRACE) 必须 late`);
+  // 弱注入臂: 只改 graceMinMs(其余不动)⇒ 结论不变——证明运行时判据读的是 graceMs, 不是 graceMinMs(否则"改判据"会是空改)
+  for (const gm of [1, cfg.graceMinMs, cfg.graceMs]) { const c2 = { ...cfg, graceMinMs: gm }; for (const upper of [cfg.graceMs - 1, cfg.graceMs]) assert.equal(evaluateLateSeal({ deadlineMs: D, decisionMs: at(upper), cfg: c2 }).late, upper < cfg.graceMs, `graceMinMs=${gm} 不得影响 upper=${upper} 的判定`); }
   assert.equal(evaluateLateSeal({ deadlineMs: D, decisionMs: CUTOFF + 1, cfg }).late, true);
   assert.equal(evaluateLateSeal({ deadlineMs: D, decisionMs: D - 10_000_000, cfg }).cutoffPmt, CUTOFF);
   assert.throws(() => evaluateLateSeal({ deadlineMs: D, decisionMs: 0, cfg }), RangeError);
@@ -213,25 +216,27 @@ await t('G12 ▲ M2 受理门取 max(墙钟, pmt): pmt = oe−140s ∧ 墙钟 = 
   assert.equal(intakeNeedsPmt(m, OE - 1), true); assert.equal(intakeNeedsPmt(m, OE), false, '墙钟已过 outcome_end ⇒ 不需要读 pmt'); assert.equal(intakeNeedsPmt(m), true, '不传墙钟 ⇒ 仍需要读 pmt');
   assert.equal(evaluateBetIntakeGate({ market: plain(), pmt: null, wallMs: OE + 10 }).accept, true, '无判定题仍豁免(墙钟再晚也收)');
 });
-await t('G7 ▲ N6 宽限窗边界: consistency_met_at + effective_grace ≤ pmt < cutoff; pmt = 该和 −1 ⇒ wait(in_grace); = 该和 ⇒ 通过; effective_upper = GRACE_MIN−1 ⇒ freeze(late_seal); = GRACE_MIN ⇒ 不冻(eg=GRACE_MIN); 之间 ⇒ eg=upper(< GRACE_MS 时被 upper 限住); 之上 ⇒ eg=GRACE_MS', () => {
+await t('G7 ▲ N6 宽限窗边界(F2: 不压缩): consistency_met_at + GRACE ≤ pmt < cutoff; pmt = 该和 −1 ⇒ wait(in_grace); = 该和 ⇒ 通过; effective_upper < GRACE ⇒ freeze(late_seal, 含 [GRACE_MIN, GRACE) 区间); = GRACE ⇒ 不冻(eg=GRACE); 之上 ⇒ eg=GRACE; GRACE_MIN 不再是运行时输入', () => {
   const at = (cma, extra = {}) => ({ verdicts: [V(1, 'extractor', 1, cma - 1), V(2, 'uma', 1, cma)], ...extra });
   // 之上: eg = GRACE_MS
   let r = gate({ ...at(CMA_OK), pmt: pm(CMA_OK + cfg.graceMs - 1) }); assert.deepEqual([r.action, r.reason, r.graceEndsAtPmt], ['wait', 'in_grace', CMA_OK + cfg.graceMs]);
   assert.equal(gate({ ...at(CMA_OK), pmt: pm(CMA_OK + cfg.graceMs) }).action, 'promote');
-  // 之间: upper = 1,000,000 < GRACE_MS ⇒ eg = 1,000,000
+  // F2: 之间(upper < GRACE_MS)不再压缩宽限——原先 upper = 1,000,000 ⇒ eg = 1,000,000 放行; 现在装不下完整宽限 ⇒ 一律 freeze(late_seal), 含 [GRACE_MIN, GRACE) 区间
   const cmaMid = CUTOFF - cfg.closePipelineMarginMs - 1_000_000;
-  r = gate({ ...at(cmaMid), pmt: pm(cmaMid + 1_000_000 - 1) }); assert.deepEqual([r.action, r.reason, r.effectiveGraceMs], ['wait', 'in_grace', 1_000_000]);
-  r = gate({ ...at(cmaMid), pmt: pm(cmaMid + 1_000_000) }); assert.deepEqual([r.action, r.effectiveGraceMs], ['promote', 1_000_000]);
-  // 上界 == GRACE_MIN: 不冻, eg = GRACE_MIN; 通过点 = cutoff − MARGIN(< cutoff)
-  const cmaEdge = CUTOFF - cfg.closePipelineMarginMs - cfg.graceMinMs;
-  r = gate({ ...at(cmaEdge), pmt: pm(cmaEdge + cfg.graceMinMs - 1) }); assert.deepEqual([r.action, r.reason], ['wait', 'in_grace']);
-  r = gate({ ...at(cmaEdge), pmt: pm(cmaEdge + cfg.graceMinMs) }); assert.deepEqual([r.action, r.effectiveGraceMs], ['promote', cfg.graceMinMs]); assert.ok(cmaEdge + cfg.graceMinMs < CUTOFF);
-  // 上界 == GRACE_MIN−1: 晚 seal 冻结(N6)
+  r = gate({ ...at(cmaMid), pmt: pm(cmaMid + 1) }); assert.deepEqual([r.action, r.reason, r.upperMs], ['freeze', 'late_seal', 1_000_000]);
+  r = gate({ ...at(cmaMid), pmt: pm(cmaMid + 1_000_000) }); assert.deepEqual([r.action, r.reason], ['freeze', 'late_seal'], '就算 pmt 已走完被压缩的旧宽限, 也不 promote');
+  // 上界 == GRACE(边界): 不冻, eg = GRACE(完整); 通过点 = cutoff − MARGIN(< cutoff)
+  const cmaEdge = CUTOFF - cfg.closePipelineMarginMs - cfg.graceMs;
+  r = gate({ ...at(cmaEdge), pmt: pm(cmaEdge + cfg.graceMs - 1) }); assert.deepEqual([r.action, r.reason, r.effectiveGraceMs], ['wait', 'in_grace', cfg.graceMs]);
+  r = gate({ ...at(cmaEdge), pmt: pm(cmaEdge + cfg.graceMs) }); assert.deepEqual([r.action, r.effectiveGraceMs], ['promote', cfg.graceMs]); assert.ok(cmaEdge + cfg.graceMs < CUTOFF);
+  // 上界 == GRACE−1: 晚 seal 冻结(N6)
   const cmaLate = cmaEdge + 1;
-  r = gate({ ...at(cmaLate), pmt: pm(cmaLate + 1) }); assert.deepEqual([r.action, r.reason, r.upperMs], ['freeze', 'late_seal', cfg.graceMinMs - 1]);
+  r = gate({ ...at(cmaLate), pmt: pm(cmaLate + 1) }); assert.deepEqual([r.action, r.reason, r.upperMs], ['freeze', 'late_seal', cfg.graceMs - 1]);
   assert.equal(gate({ ...at(cmaLate + 1_000), pmt: pm(cmaLate + 1_000) }).reason, 'late_seal');
-  // promote 永远严格早于 cutoff(SAFETY 的意义): 任何 promote 结果的 pmt < cutoff − MARGIN
-  for (const cma of [OE + 1, cmaMid, cmaEdge]) { const rr = gate({ ...at(cma), pmt: pm(cma + Math.min(cfg.graceMs, CUTOFF - cfg.closePipelineMarginMs - cma)) }); assert.equal(rr.action, 'promote'); }
+  // 弱注入臂: 只改 graceMinMs ⇒ 门结论不变(运行时不再读 GRACE_MIN)
+  for (const gm of [1, cfg.graceMs]) { const c2 = { ...cfg, graceMinMs: gm }; assert.equal(gate({ ...at(cmaMid), pmt: pm(cmaMid + 1), cfg: c2 }).reason, 'late_seal'); assert.equal(gate({ ...at(cmaEdge), pmt: pm(cmaEdge + cfg.graceMs), cfg: c2 }).action, 'promote'); }
+  // promote 永远严格早于 cutoff(SAFETY 的意义): 任何 promote 结果的 pmt < cutoff − MARGIN(F2 后宽限恒为完整 GRACE)
+  for (const cma of [OE + 1, cmaEdge]) { const rr = gate({ ...at(cma), pmt: pm(cma + cfg.graceMs) }); assert.equal(rr.action, 'promote'); assert.ok(cma + cfg.graceMs < CUTOFF - cfg.closePipelineMarginMs + 1); }
 });
 await t('G8 前置 6 R5 预检: 胜方侧确认注数 0 / ≥2 / pending 不计 / 奖池 ≤ 0 ⇒ freeze(r5_precheck_failed); 恰 1 且奖池 > 0 ⇒ 通过; 胜方按 verdict 的 outcome 定(side 匹配)', () => {
   const R = (bets) => gate({ bets });

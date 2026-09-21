@@ -1,0 +1,14 @@
+[PASS] S1 ▲ 合法输入 ⇒ ok, 规范化列: spec 串 / outcome_market_source=polymarket / condition id 小写 / relay ids 恒 [] / outcome_end_ms 整数; spec 也可传 JSON 串; outcomeEnd 可传数字串
+[PASS] S2 ▲ 半套判定题输入(缺任一 / 空串 / null)⇒ judged_input_incomplete(路由映射 400); 三个都缺由 hasJudgedInput=false ⇒ 走旧流程
+[PASS] S3 ▲ B6(a) 数据源白名单 / SSRF: 非 https / 未知 host / 内网 / loopback / 单标签 host / 空白 / 超长 / 非字符串 ⇒ 拒; 命中但非 ESPN(coingecko)⇒ data_source_not_deterministic(C2 缺确定性源只能创建时拒)
+[PASS] S4 spec 结构: 非对象 / 非 JSON / 未知字段(输入面白名单)/ 缺 5 必填任一 / 类型错 / 超长 / 超上限
+[PASS] S5 C2 resolution_predicate: 缺 / 非对象 / 结构非法 ⇒ 拒; 干跑(注入 judge)全 ABSTAIN ⇒ 拒, 有一组 YES/NO 即过; 干跑对合法 predicate 三类(winner / margin / total)都能出 YES/NO
+[PASS] S6 ▲ B3 side_map / 极性: 缺 / 非双射(同值 / 三键 / 值非 0-1 / 数组 / 字符串值)⇒ side_map_invalid; polymarket_outcome_side 缺或非 YES|NO ⇒ 拒(不静默默认); 两个合法排列 + 两种极性均过
+[PASS] S7 UMA 条件: 缺 / 格式非法(无 0x / 长度错 / 非 hex)⇒ 拒; 大小写混合过并规范为小写
+[PASS] S8 ▲ B6(c) 时间预算: deadline ≥ outcomeEnd + UMA 窗 + 宽限窗 + 余量 + 2×adapter tick 恰过, 少 1ms 拒; 各项都真的进预算(把任一项改大则边界同步移动); outcomeEnd 已过 / 非整数 / 非正 ⇒ 拒; UMA 窗不安全 ⇒ 拒
+[PASS] S9 ▲ 请求体不得含 relay 类字段(键名含 relay 不分大小写, 服务端定 outcome_oracle_relay_ids)
+[PASS] S9b ▲ SHOULD② 未识别的 resolution* / outcome* 形键(蛇形 / 大小写变体 / 其它)⇒ 命中; 已识别键与无关键 ⇒ 不命中
+[PASS] S10 ▲ C1 下注 side_label: 判定题下注必须带 side_label 且与 direction 按 side_map 一致; 缺 / 非 yes|no / 不一致 ⇒ 400; side_map 缺失或非法 ⇒ 500(拒受理); 两种 side_map 排列 × 两个 label 全表
+[PASS] S11 ▲ C1 公开读呈现: 判定题 ⇒ 附 judged{side_map, outcome_end_ms, data_source_canonical, polymarket_outcome_side, outcome_market_source, outcome_condition_id} 且内部列不外露; 非判定题 ⇒ 字节与今天完全相同(无新键、四个内部列被去掉后与原 SELECT 一致)
+
+proto-oracle-spec.test: 12 passed, 0 failed

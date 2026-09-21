@@ -34,6 +34,7 @@ export const SETTLEMENT_ALERTS = Object.freeze({
   settlement_intent_ambiguous_inputs_spent: 'error',
   settlement_intent_ambiguous_replay_txid_mismatch: 'error',
   settlement_intent_prepared_without_bytes: 'error',
+  settlement_intent_frozen_prepared_hold: 'error',      // F1: 冻结市场的 prepared close_commit 不重播(由 proto-settlement-intent 的 resolvePrepared 发)
   settlement_signing_key_mismatch: 'error',
   settlement_close_commit_args_not_from_db: 'error',
   settlement_chain_fact_drift: 'error',

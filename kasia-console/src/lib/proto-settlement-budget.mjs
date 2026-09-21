@@ -10,7 +10,7 @@ import { isJudgedMarket } from '../db/proto-judged.mjs';
 export const DEFAULTS = Object.freeze({
   PROMOTION_SAFETY_MS: 1_200_000,        // 20 min
   GRACE_MS: 1_800_000,                   // 30 min
-  GRACE_MIN_MS: 300_000,                 // 5 min
+  GRACE_MIN_MS: 300_000,                 // 5 min —— F2(Codex MUST②/Bettor 1614): 只作【配置校验】(须 ≤ GRACE), 运行时判据不再用它(宽限窗采冻结、不压缩)
   LAG_MAX_MS: 600_000,                   // 10 min: pmt 落后墙钟的可接受上限(实测稳态 133–149 s, 风险在未同步 / 落后 / 重启)
   CLOSE_PIPELINE_MARGIN_MS: 120_000,     // 2 min: close_commit 流水线余量(实测写值→landed ≈30 s, 这里按 2 tick + 深度保守取)
 });
@@ -122,12 +122,12 @@ export function frozenReasonText(reason, clock) {
 }
 
 // ── §4 晚 seal ──
-/** seal landed 时的晚 seal 判据: effective_upper = cutoff − 决策时刻 − MARGIN; < GRACE_MIN ⇒ late。决策时刻取 pmt, pmt 无效退墙钟(墙钟 ≥ pmt ⇒ 更早判 late, 方向保守)。 */
+/** seal landed 时的晚 seal 判据: effective_upper = cutoff − 决策时刻 − MARGIN; < GRACE ⇒ late(F2: 原为 < GRACE_MIN——宽限窗是 dissent 唯一时间, 压缩恰发生在最需要它的晚 seal 市场; 改为装不下完整宽限就冻结, 走既有安全终局 refund_flip)。决策时刻取 pmt, pmt 无效退墙钟(墙钟 ≥ pmt ⇒ 更早判 late, 方向保守)。 */
 export function evaluateLateSeal({ deadlineMs, decisionMs, cfg }) {
   const cutoff = promotionCutoffPmt(deadlineMs, cfg);
   if (!Number.isSafeInteger(decisionMs) || decisionMs <= 0) throw new RangeError('evaluateLateSeal: decisionMs 非法');
   const upperMs = cutoff - decisionMs - cfg.closePipelineMarginMs;
-  return { late: upperMs < cfg.graceMinMs, upperMs, cutoffPmt: cutoff };
+  return { late: upperMs < cfg.graceMs, upperMs, cutoffPmt: cutoff };
 }
 
 // ── §6 受理点 outcome_end 门(D6 + N3 + N4) ──
@@ -201,8 +201,8 @@ export function evaluatePromoteGate({ market, verdicts, bets, pmt, wallMs, cfg, 
   for (const v of eligible) { kinds.add(v.source_kind); if (kinds.size >= 2) { consistencyMetAt = v.pmt_at; metVerdict = v; break; } }   // N1: 行推, 不存列
   if (consistencyMetAt === null) return { action: 'wait', reason: 'awaiting_second_source' };
   const upperMs = cutoff - consistencyMetAt - cfg.closePipelineMarginMs;                           // N6
-  if (upperMs < cfg.graceMinMs) return { action: 'freeze', reason: 'late_seal', upperMs };
-  const effectiveGraceMs = Math.min(cfg.graceMs, upperMs);
+  if (upperMs < cfg.graceMs) return { action: 'freeze', reason: 'late_seal', upperMs };       // F2: 与 evaluateLateSeal 同判据(装不下完整宽限 ⇒ 冻结, 不压缩)
+  const effectiveGraceMs = cfg.graceMs;                                                        // F2: 过了上一行 ⇒ upperMs ≥ graceMs, 宽限恒为完整 graceMs(原 Math.min(graceMs, upperMs) 的压缩已删)
   if (now < consistencyMetAt + effectiveGraceMs) return { action: 'wait', reason: 'in_grace', graceEndsAtPmt: consistencyMetAt + effectiveGraceMs, effectiveGraceMs };
   // §1.6 R5 预检: 胜方侧恰 1 条已确认下注 ∧ 奖池 > 0
   const winningSide = eligible[0].outcome;

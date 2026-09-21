@@ -1,0 +1,40 @@
+[db] path=C:\Users\ADMIN\AppData\Local\Temp\_j2_proto_relay_ipc_26556.db source=DB_PATH
+[PASS] ①非白名单命令类型被拒(throw, 不发出任何 IPC)
+[PASS] ②payload 携带 relay_id 字段(即使值为 undefined)一律被拒, 不生效
+[PASS] ②b payload 携带 relayId(驼峰) 同样被拒
+[PASS] ②c(账本1442①) payload 携带 type 字段被拒——防止已过检查的 type 参数被 payload.type 覆盖
+[PASS] ②d(账本1442①) payload.type 即使是白名单内的另一条命令也一样被拒——不能靠"同样在白名单里"放行
+[PASS] ②e(账本1442②) origin 恒为 internal(五值fail-closed闸认可的值, 不是自造的proto)——用注入的假 sendCommandAsync 断言真正收到的第4个实参(不管调用方怎么传都不生效)
+[PASS] ②f(账本1442②) protoSendCmd 的 origin 参数即使传入非法值也不影响 sendProtoCommand 收到的 opts(protoSendCmd 根本不转发它)
+[PASS] ③驱动关闭(PROTO_DRIVER_ENABLED 未设)时: covenant_broadcast(write) 被拒, 四条 read 命令全部放行到发送这一步(用 fail 的 sendCommandAsync 探测——到达说明没被闸拦, 不是真的发出成功)
+[PASS] ④白名单里标 write 的命令恰好只有 covenant_broadcast 一条(源码级断言, 防未来加写命令漏加闸)
+[PASS] ⑤protoSendCmd 适配旧签名 sendCmd(relayId, cmd, timeoutMs, origin)——relayId 参数被忽略(不影响锁死行为), type/payload 正确拆分透传
+[PASS] ⑥(账本1444, NWT复核抓到)8个Object.prototype自带属性名当type一律被拒(原型链洞), mock sendCommandAsync从未被调用
+[PASS] ⑥b(账本1444卫生项) payload 是数组时被拒
+[PASS] 批9-0-a PROTO_COMMAND_ALLOWLIST 对基线表做差分: 恰多一项, 且该项是 get_past_median_time:read; 原有四项的读写标记一字未变; 表仍是冻结的
+[PASS] 批9-0-b 登记面枚举: 白名单里每一条命令在 relay 侧齐全登记(read 命令六处齐全, write 命令不得进 READONLY_ALLOWLIST); 新命令 get_past_median_time 六处齐全
+[PASS] 批9-0-b2【枚举器自证】枚举器不是空判据: 一个只登记了一半的假命令必被逐处指出缺口(去掉 ⑤ 就会漏报 arm 后被静默拒的那一类)
+[PASS] 批9-0-c get_past_median_time 是 read: PROTO_DRIVER_ENABLED 未设时不被驱动闸挡(越过闸卡在"没有真 relay"这个无关下游), 与另外三条 read 同待遇
+[PASS] 批9-0-d facts 形态的 get_address_utxos 走同一个出口: payload(facts/outpoints/minAmount/maxAmount)原样透传、type 恒为显式参数、origin 恒 internal(出口不改写, 也不因这几个新字段放宽任何检查)
+[PASS] 9-2a 三个拒绝串两两互不为子串(否则"两闸互换"的变异看不出); 也不含对方的名字
+[PASS] 9-2a A 类(合法 settle: 键, 16 条) × 4 格: 仅 PSDE=1 放行(与 PDE 无关); 其余拒 proto_settlement_driver_disabled
+[PASS] 9-2a B 类(settle: 开头但格式不合法, 37 条; 含批9排除的 withdraw/reclaim/ticket) × 4 格: 一律拒 proto_settlement_intent_key_invalid(不回落旧开关, 即使两开关全开)
+[PASS] 9-2a C 类(其它: 缺失 / genesis: / proto-bet: / xsettle: / Settle: / settle 无冒号 / 首部空白 …, 11 条) × 4 格: 仅 PDE=1 放行(与 PSDE 无关: PSDE=1 而 PDE=0 仍拒); 其余拒 proto_driver_disabled
+[PASS] 9-2a S9-b: 自有 intent_key 存在且不是原始 string(String 对象 / 数组 / 数字 / 对象 / null / true) ⇒ 4 格一律拒 proto_intent_key_not_string(不走旧开关)
+[PASS] 9-2a read 命令 × 4 格: 全放行, 不受任何一把 write 闸约束(即使带一个非法 settle: 键)
+[PASS] 9-2a 开关只认字面 '1': PSDE / PDE 取 'on' 'true' '0' ' 1' '' 都等于关
+[PASS] 9-2a 每次调用读 env: 同一进程内 PSDE 0→1→0 立即生效
+[PASS] 9-2a 快照(闸与发送同一份): 访问器 intent_key 每读换值 ⇒ 只被读 1 次, 闸判定的值 == 发出去的值(两个方向)
+[PASS] 9-2a 快照: Proxy payload(get 陷阱每读换值)同样只读 1 次、判定值 == 发送值
+[PASS] 9-2a 快照: 原型链上继承的 intent_key 不会被复制进快照 ⇒ 按"缺失"(C 类)判, 且发送里也没有它
+[PASS] 9-2a 源码结构: 快照恰一处 { ...payload, type }, 两处发送都用 out; 出口 import 仍只有 proto-relay-guard(零新 import)
+[PASS] 9-2a 漂移测试: 出口的 S9 与 proto-settlement-intent 的键生成器一致——批9 四个配对产出的键(含 #2 / #10)全部通过; withdraw / reclaim / ticket 产出的键被拒; 出口配对表恰是批9 四步
+[PASS] 9-2a 校验函数纯度: 非字符串输入 ⇒ false 不抛; 正则无状态(连续调用结果稳定)
+[PASS] 9-2a 生产者↔出口: 真实 settlementIntentKeyFor + 真实生成式 id(randomBytes(32).toString(hex), 与 api/proto.js 创建市场同式)产出的键, 四步 × attempt 1/2/10 全部是 A 类: PSDE=1 放行、PSDE=0 拒 proto_settlement_driver_disabled(不是 B)——手写串矩阵之外的对照
+[PASS] 9-2a S9-b 补: 带 toJSON() 返回 settle: 字面的对象 ——(a)确实是隐患: 序列化后变成原始 settle: 串; (b)出口按非字符串一律拒; undefined 值按缺失: 放行且发出的 out 序列化后该键不存在
+
+33 passed, 0 failed
+
+[test] ⑦(独立子进程) PROTO_RELAY_ID 未配置 ⇒ sendProtoCommand 一律 throw(fail-closed):
+[db] path=C:\Users\ADMIN\AppData\Local\Temp\_j2_proto_relay_ipc_unconfigured_32304.db source=DB_PATH
+PASS

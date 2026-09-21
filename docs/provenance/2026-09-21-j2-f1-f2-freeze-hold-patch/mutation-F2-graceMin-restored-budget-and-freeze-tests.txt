@@ -1,0 +1,39 @@
+[PASS] C1 默认值 = 设计 §2(SAFETY 20min / GRACE 30min / GRACE_MIN 5min / LAG_MAX 10min / MARGIN 2min); cutoff = deadline + 7,200,000 − SAFETY(= deadline + 100min)
+[PASS] C2 env 覆盖: 合法值生效; 非正整数 / 越区间 ⇒ 回默认 + LOUD warning(不静默)
+[PASS] C3 ▲ N2 SAFETY 边界: 区间 [15min, 60min] 两端各 ±1; 动态下界 SAFETY ≥ LAG_MAX + MARGIN + tick(恰等接受 / 差 1 拒); 违则回默认 + warning; 默认也过不了 ⇒ 抛(拒启动)
+[PASS] P1 pmt 有效 ⇔ isSynced===true ∧ |读取墙钟 − pmt| ≤ LAG_MAX ∧ 单调不减: 三个条件各自破坏; 边界 skew == LAG_MAX 有效 / +1 无效(落后与超前两个方向)
+[PASS] P2 readValidatedPmt: 缺 isSynced(旧 relay)⇒ is_synced_missing(fail-closed); relay 抛错 / ok:false ⇒ read_failed; 永不抛; 有效读数过校验器; 共享单例首次按 lagMax 建
+[PASS] F1 ▲ N5a 冻结写入不依赖 pmt 有效: pmt 有效写 pmt(clock=pmt); 无效 / null / 读失败 一律退墙钟(clock=wall); frozen_reason 恒非空且带 clock 标; 墙钟也非法才抛
+[FAIL] L1 ▲ N6 晚 seal 边界(F2: 判据 GRACE 不压缩): effective_upper = cutoff − 决策时刻 − MARGIN; upper = GRACE−1 ⇒ late; = GRACE ⇒ 不 late; 之上不 late; [GRACE_MIN, GRACE) 区间一律 late(原先被压缩放行); 决策时刻越过 cutoff ⇒ upper 为负 ⇒ late; GRACE_MIN 不再是运行时输入 :: AssertionError [ERR_ASSERTION]: Expected values to be strictly equal: |  | false !== true
+[PASS] I1 判定题定义唯一来源(N3): 四个判定题列任一非 NULL(含空串)即判定题; 全 NULL / 仅 outcome_end_ms 不算; 缺列 ⇒ 抛; SQL 谓词文本与 JS 判据一致
+[PASS] I2 ▲ 受理门矩阵: 无判定题 ⇒ 豁免(pmt 缺失也放行, 且 intakeNeedsPmt=false); 判定题 ∧ outcome_end 空 / NaN / 字符串 ⇒ 409 outcome_end_missing(不需要 pmt); 判定题 ∧ pmt 无效 / 缺失 ⇒ 503 fail-closed; pmt ≥ outcome_end ⇒ 409(恰等于也拒); pmt = outcome_end−1 ⇒ 受理
+[PASS] G1 快乐路径: 六前置全过 ⇒ promote{winningSide, source(extractor 优先), verdictId, consistencyMetAt, effectiveGraceMs=GRACE_MS}
+[PASS] G2 前置 1: 已冻 / 已判 / 无判定题 ⇒ stop; 非 sealed ⇒ wait; 各自优先于其余检查(冻结优先于已判)
+[PASS] G3 ▲ N3 outcome_end: 判定题 ∧ 空 / 非有限 / 非数字 ⇒ reject(拒 promote + 记因, 不冻结); deadline 非法 ⇒ reject
+[PASS] G4 ▲ 前置 3 cutoff 边界(N2): pmt = cutoff−1 ⇒ 仍可 promote; pmt = cutoff ⇒ freeze(past_cutoff); pmt > cutoff ⇒ freeze——且过 cutoff 优先于 结果未知 / 不一致 / 缺第二源(一律冻结, 方向安全)
+[PASS] G5 ▲ 前置 2 结果已知(N1): pmt < outcome_end ⇒ wait(outcome_not_known); pmt = outcome_end 起可继续; verdict.pmt_at < outcome_end / NULL / 非整数 ⇒ 不计入(既不构成一致, 也不触发不一致 / 弃权冻结)
+[PASS] G6 ▲ 前置 5 R2 一致: 单源 ⇒ wait; 同类型两条(extractor+extractor)不算独立来源 ⇒ wait; extractor+uma 一致 ⇒ 通过; 任一不一致 ⇒ freeze(inconsistent_verdicts); 任一 outcome NULL(弃权 / 异议)⇒ freeze(abstain_or_dispute); llm / human 不计入自动路径
+[PASS] G11 ▲ M1 冻结集 = 该市场所有 verdict(extractor / uma / human / llm; 不论 pmt_at 空否 / 早晚): 弃权 / 异议(outcome NULL)或与赞成集不一致 ⇒ freeze(不是被无视); 赞成集不变
+[PASS] G12 ▲ M2 受理门取 max(墙钟, pmt): pmt = oe−140s ∧ 墙钟 = oe+1ms ⇒ 必拒(旧逻辑会收); 墙钟恰 = oe 拒 / = oe−1 且 pmt 落后 ⇒ 收; pmt 超前墙钟(pmt ≥ oe ∧ 墙钟 < oe)仍拒; 墙钟已过 ⇒ 409 且不依赖 pmt 是否有效; 不传 / 非法墙钟 ⇒ fail-closed 拒(批 B 起)
+[FAIL] G7 ▲ N6 宽限窗边界(F2: 不压缩): consistency_met_at + GRACE ≤ pmt < cutoff; pmt = 该和 −1 ⇒ wait(in_grace); = 该和 ⇒ 通过; effective_upper < GRACE ⇒ freeze(late_seal, 含 [GRACE_MIN, GRACE) 区间); = GRACE ⇒ 不冻(eg=GRACE); 之上 ⇒ eg=GRACE; GRACE_MIN 不再是运行时输入 :: AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal: | + actual - expected | 
+[PASS] G8 前置 6 R5 预检: 胜方侧确认注数 0 / ≥2 / pending 不计 / 奖池 ≤ 0 ⇒ freeze(r5_precheck_failed); 恰 1 且奖池 > 0 ⇒ 通过; 胜方按 verdict 的 outcome 定(side 匹配)
+[PASS] G9 ▲ pmt 无效(D5): 未过 cutoff ⇒ wait(pmt_invalid, promote 推迟); 墙钟(≥ pmt)已过 cutoff ⇒ freeze(pmt_invalid_past_cutoff, 方向安全); 墙钟缺失按未过
+[PASS] G10 PROMOTE_UPDATE_SQL: 谓词同语句带 status=sealed ∧ winning_side IS NULL ∧ settlement_frozen_at IS NULL(D2); 六个占位符
+
+proto-settlement-budget.test: 19 passed, 2 failed
+[db] path=C:\Users\ADMIN\AppData\Local\Temp\_j2_pmv213_16956.db source=DB_PATH
+[PASS] Z1 结构: 3 个新列 + 7 个新触发器 + 重建的 verdict_ref 带 pmt_at 非空; 迁移幂等(同库再跑触发器数不变)
+[PASS] Z2 冻结列 INSERT 必 NULL(settlement_frozen_at / frozen_reason 各自非 NULL 都拒)
+[PASS] Z3 冻结时刻域: 0 / 负 / 小数 / 非数字文本 ⇒ 拒; 正整数 ⇒ 成功
+[PASS] Z4 ▲ 冻结单向不可撤: 改时刻 / 清空 / 改 reason / 清 reason ⇒ 拒; 同值重写与无关列更新放行; 冻结市场 status 照常推进
+[PASS] Z5 ▲ N5a frozen_reason 必非空(NULL / 空 / 纯空白 ⇒ 拒); reason 不能脱离冻结单独写
+[PASS] Z6 ▲ D2 冻结市场 winning_side 永不可写(operator / extractor / uma / human 全拒, 值不变); 同一条 UPDATE 顺带冻结 + 写值也拒; 冻结之前正常写; 写值之后仍可冻结(应急停 close_commit, 不撤已写值)
+[PASS] Z7 ▲ N1 verdicts.pmt_at: 域(正整数或 NULL); append-only 保写后不可改; NULL pmt_at 的 verdict 不可被引用(extractor / uma / human 三来源), 有 pmt_at 的可引用
+[PASS] Z8 freezeMarket: pmt 有效 ⇒ 写 pmt + reason 带 clock=pmt; pmt 无效 / null ⇒ 退墙钟 + clock=wall(N5a, 不因 pmt 无效而写不进); 二次冻结幂等不覆盖首次时刻与原因; reason 非法先抛; 市场不存在 ⇒ changes=0
+[PASS] Z9 promoteWinningSide(批 B 用, 本批不接调用方): 正常 ⇒ changes=1 且审计列齐; 已冻 / 非 sealed / 已判 ⇒ changes=0(谓词同语句带 sealed ∧ 未判 ∧ 未冻, 触发器双保险); 非 promote 决定 ⇒ 抛
+[FAIL] Z10 ▲ 晚 seal 守卫(§4): 只对判定题市场; upper < GRACE ⇒ 冻结(F2: 原 GRACE_MIN, 宽限不压缩)(late_seal, pmt 有效 clock=pmt / 无效 clock=wall / readPmt 抛 clock=wall); upper = GRACE ⇒ 不冻; 无判定题(如主网首轮 a59c 形)即使已过 cutoff 也不冻; 已冻 / 已判 / 市场缺失 ⇒ noop; 永不抛 :: Error: eq: 期望 true, 实际 false |     at eq (file:///D:/kanet-tn12/scratch/_j2_wt_f1f2/kasia-console/src/db/proto-settlement-freeze-v213.test.mjs:36:46) |     at file:///D:/kanet-tn12/scratch/_j2_wt_f1f2/kasia-console/src/db/proto-settlement-freeze-v213.test.mjs:144:49
+[PASS] Z11 ▲ N3 判定题单一来源: operator 禁写触发器里的判定题谓词文本 == db/proto-judged.mjs 生成的文本(批 A 与批 D 共用一份定义)
+[PASS] Z12 端到端(纯 DB): promote 门 → 写值 → 冻结互斥: 门给出 promote ⇒ promoteWinningSide 落值; 门给出 freeze ⇒ freezeMarket 落冻结, 之后 promote 谓词 0 行; 两者对同一市场互斥(先到先得, 不会既冻又判)
+[PASS] Z13 ▲ 晚 seal 守卫接线(服务层 makeMarkLanded): seal landed 后跑守卫并保 store.markLanded 结果; relay 读不到 pmt ⇒ 退墙钟仍能冻结(N5a); 非 seal 步 / 未配预算 / 无判定题 不冻; store.markLanded 抛错 ⇒ 原样上抛且不跑守卫
+
+proto-settlement-freeze-v213.test: 12 passed, 1 failed
