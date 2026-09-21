@@ -1,0 +1,195 @@
+[
+ {
+  "id": "I1",
+  "desc": "F1 gate disabled",
+  "killed": true,
+  "res": [
+   {
+    "test": "proto-settlement-intent.test.mjs",
+    "exit": 1,
+    "redCount": 13,
+    "groups": [
+     "[test] ⑨-a F1 first-send-after-prepare: ",
+     "[test] ⑨-b F1 crash-recovery replay: 上一进",
+     "[test] ⑨-f F1 fail-closed: 冻结状态读不到(该 sub",
+     "[test] ⑨-g F1b(first send 一半): relay 广播前"
+    ],
+    "sample": [
+     "❌ 冻结后再驱动 ⇒ HoldError(settlement_frozen)(实际 null): null",
+     "❌ 零广播: 未发出任何 covenant_broadcast(实际 1 条): false",
+     "❌ 不弃行不重建: 行仍是 prepared, txid 与字节原样: false"
+    ]
+   }
+  ]
+ },
+ {
+  "id": "I2",
+  "desc": "scope widened to all market steps",
+  "killed": true,
+  "res": [
+   {
+    "test": "proto-settlement-intent.test.mjs",
+    "exit": 1,
+    "redCount": 2,
+    "groups": [
+     "[test] ⑨-e F1 范围钉死: 只限 close_commit(mark",
+     "[test] ⑨-g F1b(first send 一半): relay 广播前"
+    ],
+    "sample": [
+     "❌ seal 不受冻结影响(实际 settlement intent settle:market:f1e:seal: market frozen — prepared close_commit not replayed (hold; exit = natural refund_flip)): nul",
+     "❌ 1 assertions failed"
+    ]
+   }
+  ]
+ },
+ {
+  "id": "I3",
+  "desc": "fail-open on freeze-read error",
+  "killed": true,
+  "res": [
+   {
+    "test": "proto-settlement-intent.test.mjs",
+    "exit": 1,
+    "redCount": 3,
+    "groups": [
+     "[test] ⑨-f F1 fail-closed: 冻结状态读不到(该 sub",
+     "[test] ⑨-g F1b(first send 一半): relay 广播前"
+    ],
+    "sample": [
+     "❌ 读不到冻结列 ⇒ HOLD(实际 null): null",
+     "❌ 零广播, 行仍 prepared: false",
+     "❌ 2 assertions failed"
+    ]
+   }
+  ]
+ },
+ {
+  "id": "I4",
+  "desc": "alert dedup removed",
+  "killed": true,
+  "res": [
+   {
+    "test": "proto-settlement-intent.test.mjs",
+    "exit": 1,
+    "redCount": 2,
+    "groups": [
+     "[test] ⑨-a F1 first-send-after-prepare: ",
+     "[test] ⑨-g F1b(first send 一半): relay 广播前"
+    ],
+    "sample": [
+     "❌ 不刷 events、不刷 updated_at(每 tick 回到这里也不制造噪声 / 不重置 prepared_stale 去重键): false",
+     "❌ 1 assertions failed"
+    ]
+   }
+  ]
+ },
+ {
+  "id": "I5",
+  "desc": "marker never written",
+  "killed": true,
+  "res": [
+   {
+    "test": "proto-settlement-intent.test.mjs",
+    "exit": 1,
+    "redCount": 3,
+    "groups": [
+     "[test] ⑨-a F1 first-send-after-prepare: ",
+     "[test] ⑨-g F1b(first send 一半): relay 广播前"
+    ],
+    "sample": [
+     "❌ 首次 HOLD 落标记 + 报警恰 1 条(events=1): false",
+     "❌ 不刷 events、不刷 updated_at(每 tick 回到这里也不制造噪声 / 不重置 prepared_stale 去重键): false",
+     "❌ 2 assertions failed"
+    ]
+   }
+  ]
+ },
+ {
+  "id": "I6",
+  "desc": "reads freeze by wrong id (over-block)",
+  "killed": true,
+  "res": [
+   {
+    "test": "proto-settlement-intent.test.mjs",
+    "exit": 1,
+    "redCount": 5,
+    "groups": [
+     "[test] ⑨-c F1 正对照(单字段差异): 同构 prepared 行 ",
+     "[test] ⑨-g F1b(first send 一半): relay 广播前"
+    ],
+    "sample": [
+     "❌ 未冻结: 重播发生(实际 settlement intent settle:market:f1c:resolve: market frozen — prepared close_commit not replayed (hold; exit = natural refund_flip)): nu",
+     "❌ 恰 1 条 covenant_broadcast(实际 0): false",
+     "❌ 行转 submitted: false"
+    ]
+   }
+  ]
+ },
+ {
+  "id": "I7",
+  "desc": "gate moved before mempool/landed checks",
+  "killed": true,
+  "res": [
+   {
+    "test": "proto-settlement-intent.test.mjs",
+    "exit": 1,
+    "redCount": 4,
+    "groups": [
+     "[test] ⑨-d F1 顺序: 冻结不否定已发生的事实——已在 mempoo",
+     "[test] ⑨-g F1b(first send 一半): relay 广播前"
+    ],
+    "sample": [
+     "❌ 冻结 ∧ 已在 mempool ⇒ submitted, 零广播(实际 settlement intent settle:market:f1d1:resolve: market frozen — prepared close_commit not replayed (hold; exit = n",
+     "❌ 冻结 ∧ 已落链 ⇒ submitted, 零广播(实际 settlement intent settle:market:f1d2:resolve: market frozen — prepared close_commit not replayed (hold; exit = natural ",
+     "❌ 这两条不触发 frozen hold 报警: false"
+    ]
+   }
+  ]
+ },
+ {
+  "id": "I8",
+  "desc": "hold does not throw (falls through to replay)",
+  "killed": true,
+  "res": [
+   {
+    "test": "proto-settlement-intent.test.mjs",
+    "exit": 1,
+    "redCount": 11,
+    "groups": [
+     "[test] ⑨-a F1 first-send-after-prepare: ",
+     "[test] ⑨-b F1 crash-recovery replay: 上一进",
+     "[test] ⑨-f F1 fail-closed: 冻结状态读不到(该 sub",
+     "[test] ⑨-g F1b(first send 一半): relay 广播前"
+    ],
+    "sample": [
+     "❌ 冻结后再驱动 ⇒ HoldError(settlement_frozen)(实际 null): null",
+     "❌ 零广播: 未发出任何 covenant_broadcast(实际 1 条): false",
+     "❌ 不弃行不重建: 行仍是 prepared, txid 与字节原样: false"
+    ]
+   }
+  ]
+ },
+ {
+  "id": "I9",
+  "desc": "hold code renamed",
+  "killed": true,
+  "res": [
+   {
+    "test": "proto-settlement-intent.test.mjs",
+    "exit": 1,
+    "redCount": 5,
+    "groups": [
+     "[test] ⑨-a F1 first-send-after-prepare: ",
+     "[test] ⑨-b F1 crash-recovery replay: 上一进",
+     "[test] ⑨-f F1 fail-closed: 冻结状态读不到(该 sub",
+     "[test] ⑨-g F1b(first send 一半): relay 广播前"
+    ],
+    "sample": [
+     "❌ 冻结后再驱动 ⇒ HoldError(settlement_frozen)(实际 prepared_without_bytes): false",
+     "❌ 第二次驱动同样 HOLD 且零广播: false",
+     "❌ 同一行走 driveSettlementIntent 的 prepared 分支同样 HOLD、零广播: false"
+    ]
+   }
+  ]
+ }
+]

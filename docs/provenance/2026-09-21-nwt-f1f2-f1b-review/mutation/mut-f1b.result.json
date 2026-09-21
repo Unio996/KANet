@@ -1,0 +1,266 @@
+[
+ {
+  "id": "V1",
+  "desc": "F1b read deleted",
+  "killed": true,
+  "res": [
+   {
+    "test": "ingest-settle-frozen-veto.test.mjs",
+    "exit": 1,
+    "redCount": 6,
+    "groups": [
+     "[test] ② F1b 回归(NWT 验收线): driver-core 读冻",
+     "[test] ③ relay 侧非 2xx 即 throw(现有行为用测试钉住,"
+    ],
+    "sample": [
+     "❌ 零广播: submitTransaction 调用 1 次(此前唯一挡不住的窗口): false",
+     "❌ core 视为广播失败(relay 回 prepared_ingest_failed; 实际 submitted: undefined): false",
+     "❌ console 行保持 pending、无 txid / 无字节(实际 submitted/FINAL_TXID_DEFAULT/[\"{\\\"inputs\\\":[{\\\"previousOutpoint\\\":{\\\"transactionId\\\":\\\"aaaaaaaaaaaaaaaaaaaaaaaaa"
+    ]
+   },
+   {
+    "test": "proto-settlement-intent.test.mjs",
+    "exit": 1,
+    "redCount": 5,
+    "groups": [
+     "[test] ⑨-g F1b(first send 一半): relay 广播前"
+    ],
+    "sample": [
+     "❌ 冻结市场的 prepared 回执被拒(实际 {\"ok\":true,\"intent\":{\"intent_key\":\"settle:market:f1bg1:resolve\",\"subject_type\":\"market\",\"subject_id\":\"f1bg1\",\"step\":\"resolve\"",
+     "❌ 行保持 pending、无 txid / 无字节(实际 prepared/b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1/[{\"id\":\"x\"}]): false",
+     "❌ 拒绝时报警恰 1 条(events=0): false"
+    ]
+   }
+  ]
+ },
+ {
+  "id": "V2",
+  "desc": "F1b catch fail-open",
+  "killed": true,
+  "res": [
+   {
+    "test": "ingest-settle-frozen-veto.test.mjs",
+    "exit": 0,
+    "redCount": 0,
+    "groups": [],
+    "sample": []
+   },
+   {
+    "test": "proto-settlement-intent.test.mjs",
+    "exit": 1,
+    "redCount": 2,
+    "groups": [
+     "[test] ⑨-g F1b(first send 一半): relay 广播前"
+    ],
+    "sample": [
+     "❌ 冻结列读不到 ⇒ 拒(fail-closed)(实际 {\"ok\":true,\"intent\":{\"intent_key\":\"settle:market:f1bg5-nomarket:resolve\",\"subject_type\":\"market\",\"subject_id\":\"f1bg5-noma",
+     "❌ 1 assertions failed"
+    ]
+   }
+  ]
+ },
+ {
+  "id": "V3",
+  "desc": "veto returns ok:true (no 409)",
+  "killed": true,
+  "res": [
+   {
+    "test": "ingest-settle-frozen-veto.test.mjs",
+    "exit": 1,
+    "redCount": 6,
+    "groups": [
+     "[test] ② F1b 回归(NWT 验收线): driver-core 读冻",
+     "[test] ③ relay 侧非 2xx 即 throw(现有行为用测试钉住,"
+    ],
+    "sample": [
+     "❌ 零广播: submitTransaction 调用 1 次(此前唯一挡不住的窗口): false",
+     "❌ core 视为广播失败(relay 回 prepared_ingest_failed; 实际 submitted: undefined): false",
+     "❌ console 行保持 pending、无 txid / 无字节(实际 submitted/FINAL_TXID_DEFAULT/null): false"
+    ]
+   },
+   {
+    "test": "proto-settlement-intent.test.mjs",
+    "exit": 1,
+    "redCount": 3,
+    "groups": [
+     "[test] ⑨-g F1b(first send 一半): relay 广播前"
+    ],
+    "sample": [
+     "❌ 冻结市场的 prepared 回执被拒(实际 {\"ok\":true,\"intent\":{\"intent_key\":\"settle:market:f1bg1:resolve\",\"subject_type\":\"market\",\"subject_id\":\"f1bg1\",\"step\":\"resolve\"",
+     "❌ 冻结列读不到 ⇒ 拒(fail-closed)(实际 {\"ok\":true,\"intent\":{\"intent_key\":\"settle:market:f1bg5-nomarket:resolve\",\"subject_type\":\"market\",\"subject_id\":\"f1bg5-noma",
+     "❌ 2 assertions failed"
+    ]
+   }
+  ]
+ },
+ {
+  "id": "V4",
+  "desc": "scope widened to all market steps",
+  "killed": true,
+  "res": [
+   {
+    "test": "ingest-settle-frozen-veto.test.mjs",
+    "exit": 0,
+    "redCount": 0,
+    "groups": [],
+    "sample": []
+   },
+   {
+    "test": "proto-settlement-intent.test.mjs",
+    "exit": 1,
+    "redCount": 2,
+    "groups": [
+     "[test] ⑨-g F1b(first send 一半): relay 广播前"
+    ],
+    "sample": [
+     "❌ seal 的 prepared 回执不受冻结影响(范围 = close_commit): false",
+     "❌ 1 assertions failed"
+    ]
+   }
+  ]
+ },
+ {
+  "id": "V5",
+  "desc": "status condition dropped",
+  "killed": false,
+  "res": [
+   {
+    "test": "ingest-settle-frozen-veto.test.mjs",
+    "exit": 0,
+    "redCount": 0,
+    "groups": [],
+    "sample": []
+   },
+   {
+    "test": "proto-settlement-intent.test.mjs",
+    "exit": 0,
+    "redCount": 0,
+    "groups": [],
+    "sample": []
+   }
+  ]
+ },
+ {
+  "id": "V6",
+  "desc": "alert removed from veto",
+  "killed": true,
+  "res": [
+   {
+    "test": "ingest-settle-frozen-veto.test.mjs",
+    "exit": 0,
+    "redCount": 0,
+    "groups": [],
+    "sample": []
+   },
+   {
+    "test": "proto-settlement-intent.test.mjs",
+    "exit": 1,
+    "redCount": 2,
+    "groups": [
+     "[test] ⑨-g F1b(first send 一半): relay 广播前"
+    ],
+    "sample": [
+     "❌ 拒绝时报警恰 1 条(events=0): false",
+     "❌ 1 assertions failed"
+    ]
+   }
+  ]
+ },
+ {
+  "id": "V7",
+  "desc": "reads freeze by wrong id (over-block)",
+  "killed": true,
+  "res": [
+   {
+    "test": "ingest-settle-frozen-veto.test.mjs",
+    "exit": 3221226505,
+    "redCount": 3,
+    "groups": [
+     "[test] ① 正对照(未冻结): 真 driver-core → 真 rel"
+    ],
+    "sample": [
+     "❌ advanceStep = submitted(实际 {\"outcome\":\"failed\",\"key\":\"settle:market:fv-ctrl:resolve\",\"class\":\"broadcast_failed\",\"code\":\"prepared_ingest_failed\",\"tra",
+     "❌ 广播恰 1 次(实际 0): false",
+     "❌ console 行 = submitted 且带 prepared 字节(实际 pending)——证明整条真链路(含 core / relay / HTTP / 鉴权 / 分派)是通的, 下面的\"零广播\"不是链路本身坏了: false"
+    ]
+   },
+   {
+    "test": "proto-settlement-intent.test.mjs",
+    "exit": 1,
+    "redCount": 18,
+    "groups": [
+     "[test] ⑨-a F1 first-send-after-prepare: ",
+     "[test] ⑨-b F1 crash-recovery replay: 上一进",
+     "[test] ⑨-c F1 正对照(单字段差异): 同构 prepared 行 ",
+     "[test] ⑨-d F1 顺序: 冻结不否定已发生的事实——已在 mempoo",
+     "[test] ⑨-g F1b(first send 一半): relay 广播前"
+    ],
+    "sample": [
+     "❌ 首发失败后行停在 prepared 且字节已落库(= F1 的危险窗口): false",
+     "❌ 冻结后再驱动 ⇒ HoldError(settlement_frozen)(实际 settlement intent settle:market:f1a:resolve exhausted 3 attempts: should-not-be-called: prepared 态不重建): fal",
+     "❌ 不弃行不重建: 行仍是 prepared, txid 与字节原样: false"
+    ]
+   }
+  ]
+ },
+ {
+  "id": "V8",
+  "desc": "write-before-refuse (row polluted then 409)",
+  "killed": true,
+  "res": [
+   {
+    "test": "ingest-settle-frozen-veto.test.mjs",
+    "exit": 1,
+    "redCount": 3,
+    "groups": [
+     "[test] ② F1b 回归(NWT 验收线): driver-core 读冻",
+     "[test] ③ relay 侧非 2xx 即 throw(现有行为用测试钉住,"
+    ],
+    "sample": [
+     "❌ console 行保持 pending、无 txid / 无字节(实际 prepared/FINAL_TXID_DEFAULT/[\"{\\\"inputs\\\":[{\\\"previousOutpoint\\\":{\\\"transactionId\\\":\\\"aaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "❌ 下一 tick 被入口③挡下(gated), 仍零广播(实际 held/settlement_frozen/广播 0): false",
+     "❌ 2 assertions failed"
+    ]
+   },
+   {
+    "test": "proto-settlement-intent.test.mjs",
+    "exit": 1,
+    "redCount": 3,
+    "groups": [
+     "[test] ⑨-g F1b(first send 一半): relay 广播前"
+    ],
+    "sample": [
+     "❌ 行保持 pending、无 txid / 无字节(实际 prepared/b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1/[{\"id\":\"x\"}]): false",
+     "❌ 冻结列读不到 ⇒ 拒(fail-closed)(实际 {\"ok\":false,\"code\":\"settlement_frozen\",\"error\":\"market f1bg5-nomarket is frozen — prepared close_commit not recorded, do ",
+     "❌ 2 assertions failed"
+    ]
+   }
+  ]
+ },
+ {
+  "id": "V9",
+  "desc": "submitted phase also vetoed on frozen",
+  "killed": true,
+  "res": [
+   {
+    "test": "ingest-settle-frozen-veto.test.mjs",
+    "exit": 0,
+    "redCount": 0,
+    "groups": [],
+    "sample": []
+   },
+   {
+    "test": "proto-settlement-intent.test.mjs",
+    "exit": 1,
+    "redCount": 2,
+    "groups": [
+     "[test] ⑨-g F1b(first send 一半): relay 广播前"
+    ],
+    "sample": [
+     "❌ 冻结后 submitted 回执仍被记录(已广播的事实, 实际 false/prepared): false",
+     "❌ 1 assertions failed"
+    ]
+   }
+  ]
+ }
+]
