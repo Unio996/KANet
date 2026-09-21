@@ -13751,3 +13751,17 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **F 臂**:J2 在 D 等待期并行建市场跑(sim-actions `freeze` + verify-arms F 判据现成,不改码);创世前无其他 tx 在途、先 split 清 fee UTXO、守 4.9 KAS 顶。
 - **观察(不动)**:NWT 审起人记录与进程交叉核一致;HB-GUARD 自 9/08 无记录;node 20624 = CC-Bridge :9100 已知有意项;整队 9/21 00:26 本地消失 = Windows Terminal 崩溃(事件 1000,0xc0000005),launcher 已改 conhost 独立宿主,接位文件 4.55。
  — Bettor 2026-09-20T18:36:10Z
+
+### (1615) 🔁 **Bettor 接位(会话 claude-36 [3cfa4c])——地面核:9-21 02:04 本地 Windows Terminal 第二次崩溃带走上任 Bettor+J2+NWT,此后约 19 小时无人在座;F1 缺陷 simnet 红证已落(冻结后 prepared close 仍被重播落地);D 臂 harness refund_flip 落地;Codex 两条评审(F3 升 MUST / F4 扩域 / refund 臂仍 OPEN);J2+NWT 重起** (2026-09-21 · Bettor)
+- **地面核(本任亲手,原始输出)**:`git status` 只有既往未跟踪文件、HEAD=7bf9abf9=origin/bshard-m3-deploy;`claude.exe` 仅本会话一个,`ListAgents` 空 ⇒ J2/NWT/KANet-UI 全部不在座。事件日志 Application 1000:WindowsTerminal.exe 崩溃两次(9-21 00:26:27、02:04:49 本地),第二次崩溃时刻 = 上任 Bettor(claude-37)转录最后写入 02:04:54,它当时正把 F1 红证报给 Owner,账本止于 1614(18:36Z),F1 红证未入账。J2/NWT 于 01:22 本地由 claude-37 经 conhost 宿主拉起(supervisor.log 18:22Z 两行),现已不在;其转录未在 `.claude/projects` 下找到(未核实原因,不作断言)。
+- **主网(零触碰)**:console pid 22832 在 :3202(302)、bot pid 24524 在、kaspad 2.0.1 pid 16464 在;主网库 3 市场(2 cancelled + a59c resolved)/3 bets 与 1613 同;驱动开关 2 项在;主网 stdout 无 error;冷存两账号仍在 docs-private 资产清单。
+- **J2 oracle simnet e2e 现场(库直读 `scratch/_j2_e2e_run/console.simnet.db` + evidence/actions.jsonl)**:
+  - H 臂 376ede4b resolved ws=1,seal/resolve/convert/claim 四意图全 landed(同 1613)。
+  - D 臂 41bbd231:harness `refund-flip.mjs` 19:37:33Z 门开(pmt−lock=31 s)后提交 **38a05faf…** 落地(daa 51861,新 outpoint :0 值 20000000,旧 RootClose 已花)。按 1614 口径:只证合约允许该路径,不证 driver 会走;Codex 845ccf6f/df07b0ec 同口径(harness refund ≠ driver reachability,adverse 臂 OPEN)。
+  - **F 臂 d7d21bee(F1 红证,本任库核)**:18:47:58Z 注入 `operator_emergency_stop|clock=pmt` 冻结(settlement_frozen_at=1789930078295);19:03:27Z harness 用真 builder 字节人造 prepared `settle:market:…:resolve` 行(prepared_txid eb527399…);19:03:49Z 该意图 status=landed、市场 status=resolved ws=1 ⇒ **驱动对冻结市场的 prepared close 照常重播并落地,MUST① 缺陷实证为红(节点侧证据)**。与 1614 F1 读码结论一致。
+  - A 臂 ca062606 仍 genesis_ambiguous(fee UTXO 并发冲突,MUST③ 同族)。
+  - simnet 基础设施:kaspad pid 2692 在、console 3298 pid 23416 在(tick 正常)、relay 19128 在;**矿工 19:40:11Z 后无出块(进程不在)**,链时停在 daa≈52627。是否重起矿工由 J2 按 F1/F2 补丁验证需要决定,simnet-only。
+- **Codex 桥(无待 ACK 的 OWNER-DIRECTIVE)**:845ccf6f(9-20 19:05Z)——normal-path simnet e2e GREEN as integration evidence;adverse 臂 OPEN;Batch-D 生产迁移/重启不授权;有价值判定市场/自动 promote/自治结算扩张 HOLD。df07b0ec(9-21 05:06Z)——F1 CONFIRMED MUST/HOLD(修法同 1614:resolvePrepared 在 landed/mempool 恢复之后、replay 之前重读冻结 ⇒ HOLD,零广播零重建,回归须覆盖 first-send-after-prepare 与 crash-recovery replay 两路);F2 CONFIRMED(GRACE_MIN 只可校验配置不可运行时压缩);**F3 升 MUST**(创世/下注/结算/split 共用一个 fee 候选资格函数,unknown facts/covenant 状态 fail-closed,加各签名路径的 parity 测试);**F4 扩域**(tick-local 预留集在选中/prepared 即更新、后续选择必查,域覆盖创世/下注;测试=两操作争同一最佳候选,第二个另选或 HOLD 绝不双花);毒化 fee 活体实验只作 corroboration,须先有确定性 parity 测试。
+- **Bettor 采纳**:Codex F3/F4 口径全采(与 1614 F3/F4 方向一致,只是范围钉死);NWT 毒化向量轮继续暂停,排 F3 parity 测试之后。F1/F2 派 J2 小补丁+测试(一轮 NWT 只报 MUST);F3/F4 走设计先行(D-031 第一条:先评估 `proto-settlement-c1.mjs:196` filterFeeCandidates 能否直接抽成共用资格函数、`proto-settlement-ops.mjs:70` inflightOpints 语义能否扩成 tick-local 预留,不另起)→ NWT 设计审 → 再派实现。
+- **拉起**:J2+NWT(Sonnet,conhost 独立宿主,seed=本块要点+接位文件),KANet-UI 仍不起(D-029)。J2 首件 = 出本轮 e2e provenance(H/D/F/A 四臂,含 F1 红证与 refund_flip 落地,推 coord/j2-* 分支)→ F1/F2 补丁 → F3/F4 设计稿。NWT 首件 = 只读独立复核 F1 红证与 refund_flip 落地(自己的树,不进 J2 活 worktree)→ 审 F1/F2 补丁 → 审 F3/F4 设计。
+ — Bettor 2026-09-21T14:36:00Z
