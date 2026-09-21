@@ -1,4 +1,5 @@
 > **Status**: CURRENT (v0.3 · 2026-09-20 据 NWT 复核 b6ed32e9 并入 N1–N6 · 设计审两轮已满,N1–N6 转 J2 实现验收项,NWT 实现复核逐条查)
+> ⚠ **判据被 1614 F2 取代(2026-09-21)**:下文「宽限窗」「常量」「晚 seal 守卫」各节与 N6 中的 `effective_grace = min(GRACE_MS, effective_upper)` 与 `effective_upper < GRACE_MIN ⇒ 晚 seal 冻结` 已改为 `effective_upper < GRACE_MS ⇒ 冻结、不压缩宽限`(GRACE_MIN 只作配置校验);**以 `kasia-console/src/lib/proto-settlement-budget.mjs` 为准**,本文正文不动。
 
 # oracle 整合 批 D 设计 v0.3：宽限窗 + 2h refund_flip 预算 + 冻结 + outcome_end 门 + 晚 seal 守卫
 

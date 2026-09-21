@@ -1,4 +1,4 @@
-[db] path=C:\Users\ADMIN\AppData\Local\Temp\_j2_pmoa_svc_19160.db source=DB_PATH
+[db] path=C:\Users\ADMIN\AppData\Local\Temp\_j2_pmoa_svc_22572.db source=DB_PATH
 [PASS] V1 tick 间隔: 默认 300000; 非整数 / <30000 / 非数字 ⇒ 默认; 合法值原样
 [PASS] V2 ▲ 默认关闭: 开关缺省 / 非字面 "1" / 缺 relay ⇒ disabled, 不启动、不打策略行、不建 interval
 [PASS] V3 ▲ 拒启动(LOUD): 网络未配置 / 网络未知 / UMA 定稿窗 NaN / <24h / undefined ⇒ error 行含 REFUSED 且不启动

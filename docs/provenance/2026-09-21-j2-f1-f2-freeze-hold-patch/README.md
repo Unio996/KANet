@@ -1,47 +1,52 @@
-# F1 + F2 补丁说明(J2 · 2026-09-21)——冻结后 prepared close_commit 不重播 / 宽限窗不压缩
+# F1 + F1b + F2 补丁说明(J2 · 2026-09-21)——冻结后 prepared close_commit 不重播不首发 / 宽限窗不压缩
 
-> 依据:账本 1614(Bettor 裁)、1615;Codex df07b0ec(F1 CONFIRMED MUST / F2 CONFIRMED)。
-> 红证:`docs/provenance/2026-09-21-j2-oracle-simnet-e2e-four-arms/`(commit 178f46ee)F 臂——冻结后 prepared resolve(eb527399…)被 driver `replayed same bytes → submitted` 并落地。
-> 范围:**只 resolvePrepared 冻结重读 HOLD + 晚 seal 判据 graceMinMs→graceMs 两处**(见下"范围说明"对 evaluatePromoteGate 的一处同判据说明)。未动主线、未碰主网、未部署。
+> 🔴 **首段后果(Bettor 1617 裁定要求单列,Owner 可否决)**:F2 使**主网默认晚 seal 冻结阈值由 5 分钟(GRACE_MIN)升到 30 分钟(GRACE)**——`seal` 须在 `deadline + 100min − MARGIN(2min) − 30min = deadline + 68min` 前落地,否则市场冻结(走既有安全终局 refund_flip),而不再靠"压缩宽限"放行。simnet(GRACE=2min/MIN=1min)阈值 1→2 分钟。**无配置迁移**(`PROTO_GRACE_MIN_MS` 仍被接受、仍须 ≤ GRACE,只是运行时不再读它)。**只合不部署**:下次主网 console 重启才生效。
+>
+> 依据:账本 1614(Bettor 裁)、1615、1616、1617(F1b GO);Codex df07b0ec(F1 CONFIRMED MUST / F2 CONFIRMED)。
+> 红证:`docs/provenance/2026-09-21-j2-oracle-simnet-e2e-four-arms/`(已入主线)F 臂——冻结后 prepared resolve(eb527399…)被 driver `replayed same bytes → submitted` 并落地。
+> 未动主线、未碰主网、未部署。
+
+## 0. 边界声明:冻结不回溯已落链 close
+冻结 = "该市场 **close_commit 三入口** fail-closed"(`proto-settlement-freeze.mjs` 头注),**不回溯已落链的 close**。close 已落链之后才冻结的市场,其 `convert_to_claim` / `claim_draw` 继续走是**正确**的(winning_side 已上链、赢家已有权益,拦它反而困住赢家资金)。simnet F 臂里"冻结后 convert/claim 也 landed"是 MUST① 的**同根因下游**(前提"close 已落链"是被 F1 缺陷造出来的),不是独立缺口;F1/F1b 修后,**冻结在 close 落地之前**的市场到不了 `resolved`,下游两步不会被触发。**日后若要加"运营应急冻结",须先定这条边界**(是否也要拦已落链 close 之后的 claim)——那是新决定,应另立票。补丁未改 claim 路径,测试 ⑨-e 钉死范围。
 
 ## 1. 改了什么(逐 hunk)
 
 | 文件 | 改动 |
 |---|---|
-| `kasia-console/src/lib/proto-settlement-intent.mjs` | ① `import { isMarketFrozen }`(复用既有 `proto-settlement-freeze.mjs`,不另造读冻结的函数);② `resolvePrepared` 在 mempool 检查、landed 检查**之后**、无字节检查与同字节重播**之前**,对 `subject_type=market ∧ step=resolve`(=close_commit)重读冻结列:`isMarketFrozen` 明确返回 `false` 才放行,`true`/抛错一律按冻结 ⇒ `SettlementIntentHoldError(code=settlement_frozen)`,**不重播、不重建、不弃行**(行仍 prepared,字节原样);③ 首次 HOLD 落 `last_error='settlement_frozen_prepared_hold'` + 发 `settlement_intent_frozen_prepared_hold`(error)一条,之后每 tick 静默 hold(不刷 events、不刷 `updated_at`,以免重置 `settlement_prepared_stale` 去重键)。 |
-| `proto-settlement-driver-core.mjs` | `SETTLEMENT_ALERTS` 登记 `settlement_intent_frozen_prepared_hold: 'error'`(闭集登记,1 行)。 |
-| `proto-settlement-store.mjs` | 仅注释:原"已 prepared 的意图…不受冻结影响"是设计假设、已作废(1614 明写),改为指向 F1。 |
-| `proto-settlement-budget.mjs` | F2:`evaluateLateSeal` 判据 `graceMinMs`→`graceMs`;**同判据在 `evaluatePromoteGate`**(`upperMs < graceMs ⇒ freeze late_seal`,`effectiveGraceMs = cfg.graceMs`,删 `Math.min(graceMs, upperMs)` 压缩);`GRACE_MIN_MS` 保留为**只校验配置**(仍须 ≤ GRACE,env `PROTO_GRACE_MIN_MS` 仍接受,不破配置)。 |
-| `proto-settlement-freeze.mjs` | 仅注释(晚 seal 判据措辞)。 |
-| 3 个测试文件 | `proto-settlement-intent.test.mjs`(新增 ⑨-a…⑨-f 六组 F1 回归)、`proto-settlement-budget.test.mjs`(L1/G7 改 graceMs 边界 + 弱注入臂)、`proto-settlement-freeze-v213.test.mjs`(Z10 改 graceMs 边界)。 |
+| `kasia-console/src/lib/proto-settlement-intent.mjs` | ① `import { isMarketFrozen }`(复用既有 `proto-settlement-freeze.mjs`,不另造读冻结的函数)。② **F1**:`resolvePrepared` 在 mempool、landed 检查**之后**、无字节检查与同字节重播**之前**,对 `market:resolve`(=close_commit)行重读冻结列:`isMarketFrozen` 明确 `false` 才放行,`true`/抛错一律按冻结 ⇒ `SettlementIntentHoldError(settlement_frozen)`,不重播、不重建、不弃行(行仍 prepared,字节原样);首次落 `last_error` 标记 + 报警一条,其后静默(不刷 events / `updated_at`)。③ **F1b**:`recordSettlementIntentPhase` 的 `prepared` 阶段对 `market:resolve` ∧ 行 `pending|prepared` 读一次冻结,冻结/读不到 ⇒ `{ok:false, code:'settlement_frozen'}`、**不落 prepared**(行保持 pending、无字节)+ 报警;`ingest.js` 既有的 `!r.ok → 409` ⇒ relay 既有的"prepared 落库失败即不广播"。**`submitted` 阶段永不否决**(已广播的事实必须记,NO TX NO STATE)。 |
+| `proto-settlement-driver-core.mjs` | `SETTLEMENT_ALERTS` 登记 `settlement_intent_frozen_prepared_hold: 'error'`(1 行;F1 与 F1b 共用该名,F1b 的 payload 带 `stage:'prepared_receipt_refused'`)。 |
+| `proto-settlement-store.mjs` / `proto-settlement-freeze.mjs` | 仅注释(作废"prepared 不受冻结影响"的设计假设 / 晚 seal 判据措辞)。 |
+| `proto-settlement-budget.mjs` | **F2**:`evaluateLateSeal` 判据 `graceMinMs`→`graceMs`;**同判据在 `evaluatePromoteGate`** 一并改(`upperMs < graceMs ⇒ freeze late_seal`,`effectiveGraceMs = cfg.graceMs`,删 `Math.min(graceMs, upperMs)` 压缩;Bettor 1617 裁"不算越界");`GRACE_MIN_MS` 只校验配置。 |
+| `docs/2026-09-20-bettor-oracle-batchD-…-design-v0.1.md` | 页首加一行"判据被 1614 F2 取代,以 proto-settlement-budget.mjs 为准",**正文不动**(NWT SHOULD)。 |
+| 测试 | `proto-settlement-intent.test.mjs`(⑨-a…⑨-g)、`ingest-settle-frozen-veto.test.mjs`(**新**,F1b 端到端)、`proto-settlement-budget.test.mjs` L1/G7、`proto-settlement-freeze-v213.test.mjs` Z10。 |
 
-## 2. 范围说明(请 Bettor/NWT 特别看这三点)
-1. **`evaluatePromoteGate` 的同判据一并改了**(budget.mjs `:204-205`)。1614 字面写"evaluateLateSeal 判据 graceMinMs→graceMs",但 promote 门里是**同一个判据的第二份拷贝**(freeze.mjs 头注也写"promote 门自己也会在 promote 时再判一次晚 seal, 双覆盖")并且带真正的压缩(`Math.min(graceMs, upperMs)`)。只改 evaluateLateSeal ⇒ seal 时不 late 的市场在 promote 时仍会被压缩宽限,F2 不成立(Codex:"GRACE_MIN 只可校验配置不可运行时压缩")。若 Bettor 认为越界,可只回退这两行,其余不受影响。
-2. **主网默认值影响**:晚 seal 冻结阈值由 5 min(GRACE_MIN)升到 30 min(GRACE,默认)——seal 须在 `deadline + 100min − MARGIN(2min) − 30min = deadline + 68min` 前落地,否则冻结。simnet(GRACE=2min/MIN=1min)阈值 1→2 min。**无配置迁移**。
-3. **新增一个报警名**(`settlement_intent_frozen_prepared_hold`)——"必须有告警"是 1614 的要求;该名只在 `SETTLEMENT_ALERTS` 闭集登记(intent 层直写 events,不经 core 的 makeAlerter,与 `settlement_intent_prepared_without_bytes` 同构)。
+## 2. 回归覆盖
+**F1(replay 路径,`resolvePrepared`)**——`proto-settlement-intent.test.mjs`:
+- ⑨-a:fresh 路径 prepared 已落库、**首发失败**后冻结到 → 下一次驱动 HOLD,零广播,行仍 prepared,重复驱动不刷 events/`updated_at`。⑨-b:上一进程留下的 prepared 行 + 已冻结 ⇒ `resumeStaleSettlementIntents`(`held=1`)与 `driveSettlementIntent` prepared 分支(=driver 每 tick 的 preparedRows)都不重播。⑨-c:正对照(仅 `settlement_frozen_at` 不同)未冻结会重播 1 条。⑨-d:冻结 ∧ 已在池/已落链 ⇒ 照常 submitted(冻结不否定已发生的事实)。⑨-e:范围钉死只限 close_commit(seal 照常)。⑨-f:冻结列读不到 ⇒ fail-closed HOLD。
+- ⚠ ⑨-a/⑨-b 与 crash-recovery 同走 `resolvePrepared`,**测不到首发 TOCTOU**——那是 F1b 的事(下)。
 
-## 3. 回归覆盖(Codex df07b0ec 要求"两路")
-- **⑨-a first-send-after-prepare**:fresh 路径 `buildAndBroadcast` 先落 prepared(字节入库)再首发失败(`driveSettlementIntent` 以 exhausted 收场,行停 prepared)→ **冻结后到** → 下一次驱动 ⇒ HOLD(`settlement_frozen`),`covenant_broadcast` 零条,行仍 prepared 且字节原样;重复驱动不刷 events / `updated_at`。
-- **⑨-b crash-recovery replay**:上一进程留下的 prepared 行 + 已冻结 ⇒ `resumeStaleSettlementIntents`(`held=1 resolved=0`)零广播;同一行走 `driveSettlementIntent` 的 prepared 分支(即 driver 每 tick 的 listWork preparedRows 路径)同样 HOLD 零广播。
-- **⑨-c 正对照(单字段差异)**:同构 prepared 行 + **未冻结** ⇒ 重播确实发生(1 条 `covenant_broadcast`,行转 submitted;resume 路径亦然)——证明 a/b 的"零广播"不是夹具本身发不出去。a/b 与 c 的唯一差别 = `proto_markets.settlement_frozen_at` 一列。
-- **⑨-d 顺序**:冻结 ∧ 已在 mempool / 已落链 ⇒ 照常记 submitted、零广播、**不** hold(冻结否定不了已发生的事实)。
-- **⑨-e 范围钉死**:只限 close_commit;seal 行在冻结市场上仍照常重播(冻结语义 = "close_commit 三入口")。
-- **⑨-f fail-closed**:冻结列读不到(该 subject 无市场行 ⇒ `isMarketFrozen` 抛)⇒ 按冻结 HOLD。
-- **突变验证**(`mutation-*.txt`):把 F1 闸禁用(`if (false && …)`)⇒ intent 测试 **12 项红**(正是 simnet 红证的形状:`covenant_broadcast` 1 条、行转 submitted);把 F2 判据还原为 graceMinMs(+`Math.min` 压缩)⇒ budget L1/G7 与 freeze Z10 **3 项红**。改回后全绿(`green-*.txt`,11 个套件 exit=0)。
-- 验证局限:以上是**离线向量**(真迁移临时库 + 脚本化 relay 桩,零链)。**未**在 simnet 真共识上重放 F 臂(矿工停、simnet `isSynced=false`;重起矿工与在补丁代码上重起 3298 console 需 Bettor 先点头)。这与 1614"F1 派小补丁+测试"的口径一致,活体复验是可选 corroboration。
+**F1b(first send,prepared 回执否决点)**:
+- ⑨-g(单元):冻结 ⇒ prepared 回执 `ok:false`、行仍 pending/无字节、报警 1 条;正对照未冻结正常落;冻结后 `submitted` 回执仍被记;seal 不受影响;读不到冻结列 ⇒ 拒。
+- `ingest-settle-frozen-veto.test.mjs`(**端到端,NWT 验收线的时序**):**真** driver-core(`advanceStep`,真入口③冻结闸)+ **真** relay `covenantBroadcastRelay`(fresh 路径)+ **真** relay ingest 客户端(真 `fetch` 打回环 HTTP)+ **真** console fastify 路由(PSK / relay_id 鉴权 / `settle:` 分派)+ 真迁移库;只有 kaspa-wasm/rpc 是拷自 relay 测试的最小假体。冻结动作挂在 `isSettlementFrozen` 端口**返回 false 之后**——即"driver-core 读冻结=false 之后、prepared 回执落库之前冻结落地":`rpc.submitTransaction` 调用 **0** 次,relay 回 `prepared_ingest_failed`(错误串带 `HTTP 409` + frozen 原因),console 行仍 pending/无字节,下一 tick 入口③ `gated`。正对照(同接线、不冻结)广播 1 次、行 submitted——证明"零广播"不是链路本身坏了。
+- **relay 侧"非 2xx 即 throw"用测试钉住**(不只靠读码):`ingestProtoBetIntentPhase` 对 409 reject、对 2xx resolve(该测试第 ③ 组);relay 既有 `FRESH-2`(prepared ingest 失败 ⇒ 不广播)未动。
 
-## 4. 附带观察的定性(Bettor 1615 追问)
-> 观察:F 臂冻结后,`convert_to_claim` / `claim_draw` 也 landed。
+**F2**:`proto-settlement-budget.test.mjs` L1/G7、`proto-settlement-freeze-v213.test.mjs` Z10 改 graceMs 边界,加 `[GRACE_MIN, GRACE)` 区间必冻结的回归与"只改 graceMinMs 结论不变"的弱注入臂。
 
-**结论:是 MUST① 同一根因的下游,不是独立缺口。**
-- 读码:`store.mjs listWork` 的 `convert_to_claim` 选行条件 = `c.side='win' ∧ m.status='resolved' ∧ EXISTS(resolve landed)`,**无冻结过滤**;`claim_draw` 同。这与冻结的既定语义一致——`proto-settlement-freeze.mjs` 头注:"冻结 = 该市场结算不再前进: **close_commit 三入口** fail-closed",冻结范围本来就只有 close_commit。
-- 因果链:prepared close 冻结后仍落地(F1)⇒ `markLanded` 使市场 `resolved` ⇒ 依赖链正常放行下游两步。F1 修复后,**冻结在 close 落地之前**的市场不会再到 `resolved`,下游两步不会被触发;**冻结在 close 落地之后**的市场(winning_side 已上链、赢家已有权益)继续 claim 是正确的,拦它反而会困住赢家资金。
-- 不扩补丁面:未改 claim 路径;测试 ⑨-e 钉死范围。若设计上要"冻结也拦 claim",那是新决定,应另立票。
+**突变(证明测试不空,`mutation-*.txt`)**:
+| 突变 | 结果 |
+|---|---|
+| F1 闸禁用(`resolvePrepared` 冻结重读 `if (false && …)`) | intent 测试 **12 项红**(形状 = simnet 红证:`covenant_broadcast` 1 条、行转 submitted) |
+| F2 判据还原为 graceMinMs(+`Math.min` 压缩) | budget L1/G7 + freeze Z10 **3 项红** |
+| **F1b 冻结读取删掉**(`recordSettlementIntentPhase` 的否决 `if (false && …)`) | intent ⑨-g 4 项红 + 端到端 **零广播断言红(`submitTransaction` 调用 1 次)**、core 视为 submitted、行转 submitted(`mutation-F1b-deleted.txt`) |
+| **F1b 冻结读取挪到写 prepared 之后**(先写 prepared 再读冻结,冻结则返回 `ok:false`) | 广播仍是 0(relay 仍拒),但**行被污染成 prepared/带字节**:⑨-g 3 项红 + 端到端行断言红、下一 tick 变 `held` 而非 `gated`(`mutation-F1b-moved-after-write.txt`)。为什么钉"不落行":prepared 行 = "字节已签、即将发送"的断言,relay 明明被拒却留下一条,操作员无法区分"真发过"与"被拒"——状态说谎。 |
+全部改回后各套件全绿(`green-*.txt`)。
 
-## 5. 未覆盖 / 需要 Bettor 决定(我没做,因为超出"两处")
-**F1b(可选、同根因的第三个点):fresh 路径首发的 TOCTOU 窗口。** driver-core 在 `:172-174` 读冻结(false)⇒ 构造 ⇒ IPC 到 relay ⇒ relay 先 `ingestPhase(prepared)`(`covenant-broadcast-relay.mjs:189`,**失败即不广播**,relay 侧对 console 返回非 2xx 会 throw ⇒ `prepared_ingest_failed`)再 `submitTransaction`(:197)。若冻结恰好落在 `:172` 读取之后、relay 落 prepared 之前,首发仍会广播。**堵法零新机制**:`recordSettlementIntentPhase`(console 侧 `/ingest/proto-bet-intent-phase` 的 `settle:` 分派,本就是"广播前落库"的既有否决点)对 `market:resolve` 的 `prepared` 阶段读一次 `isMarketFrozen`,冻结 ⇒ 返回 `{ok:false}` ⇒ 409 ⇒ relay 拒广播。这是 Codex 说的"最终 send 边界"里 **first send** 的那一半;本补丁覆盖的是 **replay** 那一半(及首发失败后的下一 tick 重播)。**未做,等 GO**;残余窗口 = 冻结落在 relay 落 prepared 与 submit 之间的毫秒级(relay 无 DB,不可再堵)。
+## 3. 残余窗口(口径:**收窄**,不写"堵死")
+F1b 把首发 TOCTOU 窗口从"driver 读冻结 → relay 写 prepared 之间的整段 build + IPC"**收窄到"console 处理 prepared 回执的那次读冻结 → relay 收到 ok 回执并 `submitTransaction`"这一次 IPC/HTTP 往返**。冻结若恰落在这一往返内,首发仍会广播——**跨进程,console 无法保证归零**(relay 无 DB,不可再堵)。该窗口内广播的那一笔,在效果上等价于"冻结在广播之后一瞬间落地":已广播的事实不可撤,其后按 §0"冻结不回溯已落链 close"处理。
 
-## 6. 证据文件
-- `green-*.txt`:补丁后 11 个套件全绿输出(intent / budget / freeze-v213 / driver-core / store / oracle-adapter-core / oracle-spec / ops / oracle-adapter / ingest-settle-dispatch / relay-ipc)。
-- `mutation-F1-guard-disabled-intent-test.txt`、`mutation-F2-graceMin-restored-budget-and-freeze-tests.txt`:突变红。
-- lint:`node scripts/lint-kanet.mjs <改动文件>` 0 error。
+## 4. 验证局限
+以上是**离线向量**(真迁移临时库 + 脚本化桩,含一条真 HTTP 端到端),零链;**未**在 simnet 真共识上重放 F 臂(矿工停、simnet `isSynced=false`;重起矿工与在补丁代码上重起 3298 console 需 Bettor 先点头)。活体复验是可选 corroboration。lint 0 error。
+
+## 5. 证据文件
+- `green-*.txt`:补丁后各相关套件全绿输出。
+- `mutation-F1-guard-disabled-intent-test.txt`、`mutation-F2-graceMin-restored-budget-and-freeze-tests.txt`、`mutation-F1b-deleted.txt`、`mutation-F1b-moved-after-write.txt`:突变红。

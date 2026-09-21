@@ -1,4 +1,4 @@
-[db] path=C:\Users\ADMIN\AppData\Local\Temp\_j2_pmoac_30240.db source=DB_PATH
+[db] path=C:\Users\ADMIN\AppData\Local\Temp\_j2_pmoac_21540.db source=DB_PATH
 [PASS] A1 ▲ happy path: 两源(extractor + uma)一致 ⇒ tick1 写两条带 pmt_at 的 verdict 后在宽限窗 wait, 宽限窗后 tick2 promote; 审计列 / 来源 / verdict_id 落库, 且引用 extractor 那条
 [PASS] A2 B3 side_map + UMA 极性: side_map {yes:0,no:1}, polymarket_outcome_side=NO ⇒ extractor YES→0; uma(Polymarket)NO ⇒ 反极性=YES→0, 两源同侧 ⇒ promote 胜方 0; 极性对照臂: 同数据但 outcome_side=YES ⇒ uma NO→1 与 extractor 冲突 ⇒ 冻结
 [PASS] A3 单源: 只有 extractor 出票、uma 暂态 ⇒ 写 extractor 一条, wait(awaiting_second_source), 永不 promote; 下 tick uma 才出票才继续(extractor 不重 derive)

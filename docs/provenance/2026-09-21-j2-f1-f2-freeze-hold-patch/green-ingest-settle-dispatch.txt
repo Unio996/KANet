@@ -1,12 +1,12 @@
-[db] path=C:\Users\ADMIN\AppData\Local\Temp\_j2_ingest_settle_dispatch_29856.db source=DB_PATH
+[db] path=C:\Users\ADMIN\AppData\Local\Temp\_j2_ingest_settle_dispatch_18156.db source=DB_PATH
 [test] ① settle: 前缀 prepared 回执 → 正确落进 proto_settlement_intents(不是 proto_bet_intents):
   ✅ HTTP 201(实际 201, body={"ok":true,"status":"prepared"})
   ✅ 响应体 status=prepared(实际 {"ok":true,"status":"prepared"})
-  ✅ proto_settlement_intents 真的落库(实际 {"intent_key":"settle:market:m1:seal","subject_type":"market","subject_id":"m1","step":"seal","depends_on":null,"status":"prepared","prepared_txid":"aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22","prepared_tx_json":"{\"id\":\"aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22\"}","submitted_txid":null,"landed_depth":null,"landed_at":null,"last_error":null,"created_at":"2026-09-21T14:51:35.704Z","updated_at":"2026-09-21T14:51:35.716Z"})
+  ✅ proto_settlement_intents 真的落库(实际 {"intent_key":"settle:market:m1:seal","subject_type":"market","subject_id":"m1","step":"seal","depends_on":null,"status":"prepared","prepared_txid":"aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22","prepared_tx_json":"{\"id\":\"aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22\"}","submitted_txid":null,"landed_depth":null,"landed_at":null,"last_error":null,"created_at":"2026-09-21T15:02:46.877Z","updated_at":"2026-09-21T15:02:46.973Z"})
   ✅ settle:前缀的行没有误落进 proto_bet_intents 表
 [test] ② settle: 前缀 submitted 回执 → 状态推进:
   ✅ HTTP 201(实际 201)
-  ✅ 状态推进到 submitted(实际 {"intent_key":"settle:market:m1:seal","subject_type":"market","subject_id":"m1","step":"seal","depends_on":null,"status":"submitted","prepared_txid":"aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22","prepared_tx_json":"{\"id\":\"aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22\"}","submitted_txid":"aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22","landed_depth":null,"landed_at":null,"last_error":null,"created_at":"2026-09-21T14:51:35.704Z","updated_at":"2026-09-21T14:51:35.718Z"})
+  ✅ 状态推进到 submitted(实际 {"intent_key":"settle:market:m1:seal","subject_type":"market","subject_id":"m1","step":"seal","depends_on":null,"status":"submitted","prepared_txid":"aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22","prepared_tx_json":"{\"id\":\"aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22\"}","submitted_txid":"aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22","landed_depth":null,"landed_at":null,"last_error":null,"created_at":"2026-09-21T15:02:46.877Z","updated_at":"2026-09-21T15:02:46.976Z"})
 [test] ③ 未知 intent_key(console 还没 ensureSettlementIntent 建过) → 409, 不静默建行:
   ✅ 未知intentKey返回409(实际 409)
 [test] ④ relay_id 不匹配 PROTO_RELAY_ID → 403(既有鉴权逻辑对settle:分支同样生效):

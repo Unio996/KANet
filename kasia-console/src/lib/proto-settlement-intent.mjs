@@ -115,6 +115,19 @@ export function recordSettlementIntentPhase({ intentKey, phase, txid, txJson = n
   if (!cur) return { ok: false, error: `unknown intent_key ${intentKey}` };
   if (!txid) return { ok: false, error: 'txid required' };
   if (phase === 'prepared') {
+    // F1b(Bettor GO 1617 / Codex "最终 send 边界"的 first-send 一半): relay 在广播【之前】把 prepared 回执打到这里, 且 relay 侧"prepared 落库失败即不广播"
+    //   (covenant-broadcast-relay.mjs prepared_ingest_failed; relay ingest 遇非 2xx 会 throw; ingest.js 把 !ok 映成 409)——所以这里是首发前唯一的、最靠近广播的 console 侧否决点。
+    //   driver-core 在构造之前读的那次冻结与这里之间有 build + IPC 的窗口, 冻结可能恰好落在窗口里: 此处再读一次, 冻结 ⇒ 不落 prepared(行保持 pending、无字节)⇒ 409 ⇒ relay 不广播。
+    //   只否决 prepared; submitted 回执永不否决(已广播的事实必须记, NO TX NO STATE)。范围同 F1: 只 close_commit(market:resolve); 只在行 pending/prepared 时(已 submitted/landed 的行是既成事实, 不动)。
+    if (cur.subject_type === 'market' && cur.step === 'resolve' && (cur.status === 'pending' || cur.status === 'prepared')) {
+      let frozen;
+      try { frozen = isMarketFrozen(sqlite, cur.subject_id); }
+      catch (e) { frozen = true; console.warn(`[proto-settlement-intent] ${intentKey} 冻结列读取失败(按冻结处理, fail-closed): ${e && e.message}`); }
+      if (frozen !== false) {
+        alertSettlementIntent('settlement_intent_frozen_prepared_hold', `settlement intent ${intentKey}: prepared receipt REFUSED on a FROZEN market (freeze landed between driver gate and relay persist) — relay must not broadcast`, { intent_key: intentKey, prepared_txid: txid, market_id: cur.subject_id, stage: 'prepared_receipt_refused' }, 'error');
+        return { ok: false, code: 'settlement_frozen', error: `market ${cur.subject_id} is frozen — prepared close_commit not recorded, do not broadcast` };
+      }
+    }
     const patch = { prepared_txid: txid };
     if (txJson) patch.prepared_tx_json = typeof txJson === 'string' ? txJson : JSON.stringify(txJson);
     if (cur.status === 'pending') patch.status = 'prepared';

@@ -353,6 +353,40 @@ console.log('[test] ⑨-f F1 fail-closed: 冻结状态读不到(该 subject 的�
   } finally { sqlite.pragma('foreign_keys = ON'); }
 }
 
+console.log('[test] ⑨-g F1b(first send 一半): relay 广播前的 prepared 回执在冻结市场上被拒(不落 prepared / 无字节), 正对照未冻结正常落; submitted 回执永不被否决:');
+{
+  const mkPending = (id, step = 'resolve') => { seedMarket(id); ensureSettlementIntent({ subjectType: 'market', subjectId: id, step }); return settlementIntentKeyFor('market', id, step); };
+  const tx = (seed) => seed.repeat(8);
+  // 冻结组
+  const kF = mkPending('f1bg1'); freezeIt('f1bg1');
+  const rF = recordSettlementIntentPhase({ intentKey: kF, phase: 'prepared', txid: tx('b1b1b1b1'), txJson: JSON.stringify([{ id: 'x' }]) });
+  const rowF = getSettlementIntent(kF);
+  ok(rF.ok === false && rF.code === 'settlement_frozen', `冻结市场的 prepared 回执被拒(实际 ${JSON.stringify(rF)})`);
+  ok(rowF.status === 'pending' && rowF.prepared_txid === null && rowF.prepared_tx_json === null, `行保持 pending、无 txid / 无字节(实际 ${rowF.status}/${rowF.prepared_txid}/${rowF.prepared_tx_json})`);
+  ok(eventCount(kF) === 1, `拒绝时报警恰 1 条(events=${eventCount(kF)})`);
+  // 正对照: 同一形状、未冻结 ⇒ 正常落 prepared(单字段差异)
+  const kC = mkPending('f1bg2');
+  const rC = recordSettlementIntentPhase({ intentKey: kC, phase: 'prepared', txid: tx('b2b2b2b2'), txJson: JSON.stringify([{ id: 'x' }]) });
+  ok(rC.ok === true && getSettlementIntent(kC).status === 'prepared' && !!getSettlementIntent(kC).prepared_tx_json, '未冻结: prepared 回执正常落库(正对照)');
+  // submitted 永不否决: 冻结前已 prepared 的行, 冻结后 relay 回 submitted(它已经广播了) ⇒ 必须记
+  const kS = mkPending('f1bg3');
+  recordSettlementIntentPhase({ intentKey: kS, phase: 'prepared', txid: tx('b3b3b3b3'), txJson: JSON.stringify([{ id: 'x' }]) });
+  freezeIt('f1bg3');
+  const rS = recordSettlementIntentPhase({ intentKey: kS, phase: 'submitted', txid: tx('b3b3b3b3') });
+  ok(rS.ok === true && getSettlementIntent(kS).status === 'submitted', `冻结后 submitted 回执仍被记录(已广播的事实, 实际 ${JSON.stringify(rS.ok)}/${getSettlementIntent(kS).status})`);
+  // 范围钉死: 只 close_commit; seal 的 prepared 回执在冻结市场上照常落
+  const kSeal = mkPending('f1bg4', 'seal'); freezeIt('f1bg4');
+  ok(recordSettlementIntentPhase({ intentKey: kSeal, phase: 'prepared', txid: tx('b4b4b4b4'), txJson: JSON.stringify([{ id: 'x' }]) }).ok === true, 'seal 的 prepared 回执不受冻结影响(范围 = close_commit)');
+  // fail-closed: 冻结列读不到(该 subject 无市场行)⇒ 拒
+  const kN = settlementIntentKeyFor('market', 'f1bg5-nomarket', 'resolve'); const now2 = new Date().toISOString();
+  sqlite.pragma('foreign_keys = OFF');
+  try {
+    sqlite.prepare(`INSERT INTO proto_settlement_intents (intent_key, subject_type, subject_id, step, depends_on, status, created_at, updated_at) VALUES (?, 'market', 'f1bg5-nomarket', 'resolve', NULL, 'pending', ?, ?)`).run(kN, now2, now2);
+    const rN = recordSettlementIntentPhase({ intentKey: kN, phase: 'prepared', txid: tx('b5b5b5b5'), txJson: JSON.stringify([{ id: 'x' }]) });
+    ok(rN.ok === false && rN.code === 'settlement_frozen' && getSettlementIntent(kN).status === 'pending', `冻结列读不到 ⇒ 拒(fail-closed)(实际 ${JSON.stringify(rN)})`);
+  } finally { sqlite.pragma('foreign_keys = ON'); }
+}
+
 console.log(fails === 0
   ? '\n✅✅ ALL PASS — proto-settlement-intent 六步状态机(幂等/单调/依赖/恢复/inputs_spent 歧义终态) 全绿'
   : `\n❌ ${fails} assertions failed`);

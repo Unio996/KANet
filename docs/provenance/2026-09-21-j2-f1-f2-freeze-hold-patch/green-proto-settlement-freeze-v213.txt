@@ -1,4 +1,4 @@
-[db] path=C:\Users\ADMIN\AppData\Local\Temp\_j2_pmv213_2676.db source=DB_PATH
+[db] path=C:\Users\ADMIN\AppData\Local\Temp\_j2_pmv213_27000.db source=DB_PATH
 [PASS] Z1 结构: 3 个新列 + 7 个新触发器 + 重建的 verdict_ref 带 pmt_at 非空; 迁移幂等(同库再跑触发器数不变)
 [PASS] Z2 冻结列 INSERT 必 NULL(settlement_frozen_at / frozen_reason 各自非 NULL 都拒)
 [PASS] Z3 冻结时刻域: 0 / 负 / 小数 / 非数字文本 ⇒ 拒; 正整数 ⇒ 成功

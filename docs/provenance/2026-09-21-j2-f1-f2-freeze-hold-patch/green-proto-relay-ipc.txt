@@ -1,4 +1,4 @@
-[db] path=C:\Users\ADMIN\AppData\Local\Temp\_j2_proto_relay_ipc_26556.db source=DB_PATH
+[db] path=C:\Users\ADMIN\AppData\Local\Temp\_j2_proto_relay_ipc_19800.db source=DB_PATH
 [PASS] ①非白名单命令类型被拒(throw, 不发出任何 IPC)
 [PASS] ②payload 携带 relay_id 字段(即使值为 undefined)一律被拒, 不生效
 [PASS] ②b payload 携带 relayId(驼峰) 同样被拒
@@ -36,5 +36,5 @@
 33 passed, 0 failed
 
 [test] ⑦(独立子进程) PROTO_RELAY_ID 未配置 ⇒ sendProtoCommand 一律 throw(fail-closed):
-[db] path=C:\Users\ADMIN\AppData\Local\Temp\_j2_proto_relay_ipc_unconfigured_32304.db source=DB_PATH
+[db] path=C:\Users\ADMIN\AppData\Local\Temp\_j2_proto_relay_ipc_unconfigured_27304.db source=DB_PATH
 PASS

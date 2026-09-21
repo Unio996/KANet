@@ -1,4 +1,4 @@
-[db] path=C:\Users\ADMIN\AppData\Local\Temp\_j2_settle_store_29700.db source=DB_PATH
+[db] path=C:\Users\ADMIN\AppData\Local\Temp\_j2_settle_store_26596.db source=DB_PATH
 [PASS] seal 触发: betting ∧ 已确认下注 == seal_count ∧ 无未确认下注 ∧ 无在途 append 意图 ∧ seal 意图未 landed ⇒ 出现在 advances; 每个条件单独破坏都不出现
 [PASS] 批 D D1 入口①: 冻结市场不进 listWork 的 close_commit 选行(同形未冻结市场照常出现); 冻结不影响 seal 触发 / 其它步的发现
 [PASS] 批 D D1 入口②: dependenciesLanded(close_commit) 重读冻结列 ⇒ {ok:false, reason:settlement_frozen}(即使 sealed ∧ winning_side 已写 ∧ seal landed); 未冻结同形 ⇒ ok
