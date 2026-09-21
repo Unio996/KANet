@@ -1,0 +1,192 @@
+{
+ "rows": [
+  {
+   "arm": "H",
+   "check": "是判定题市场(判定题列非空)",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "arm": "H",
+   "check": "winning_side ∈ {0,1}",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "arm": "H",
+   "check": "winning_side_source=extractor",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "arm": "H",
+   "check": "winning_side_set_at 有值",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "arm": "H",
+   "check": "verdict_id 指向本市场 extractor 行且 outcome=winning_side ∧ pmt_at≥oe",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "arm": "H",
+   "check": "恰 1 条 extractor + 1 条 uma 且都与 winning_side 一致 ∧ pmt_at≥oe",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "arm": "H",
+   "check": "未冻结",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "arm": "H",
+   "check": "[链] seal 意图 landed",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "arm": "H",
+   "check": "[链] close_commit(step=resolve)意图 landed",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "arm": "H",
+   "check": "[链] 市场 resolved",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "arm": "H",
+   "check": "[链] proto_claims 有 win 行且 claim_txid 非空",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "arm": "H",
+   "check": "[链] convert_to_claim / claim_draw 意图 landed",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "arm": "H",
+   "check": "uma evidence_ref 哈希 = sha256(场景原文)",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "arm": "D",
+   "check": "是判定题市场(判定题列非空)",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "arm": "D",
+   "check": "已冻结",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "arm": "D",
+   "check": "frozen_reason ~ /^inconsistent_verdicts\\|clock=(pmt|wall)$/",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "arm": "D",
+   "check": "winning_side 为空",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "arm": "D",
+   "check": "extractor 与 uma 各一条且 outcome 相反",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "arm": "D",
+   "check": "close_commit 意图=0(pmt-now 已越过 deadline+30s+5tick)",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "arm": "D",
+   "check": "uma evidence_ref 哈希 = sha256(场景原文)",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "arm": "F",
+   "check": "是判定题市场(判定题列非空)",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "arm": "F",
+   "check": "winning_side 已写(promote 成功)",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "arm": "F",
+   "check": "已冻结",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "arm": "F",
+   "check": "frozen_reason ~ /^[a-z0-9_]+\\|clock=(pmt|wall)$/",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "arm": "F",
+   "check": "冻结市场无 close 被广播/落地(意图侧: 无 submitted/landed/ambiguous 的 resolve 意图; pending/prepared 不判红)",
+   "status": "FAIL",
+   "detail": "resolve 意图状态=[\"landed\"]"
+  },
+  {
+   "arm": "F",
+   "check": "冻结市场 close eb5273995534… 节点侧无痕迹",
+   "status": "FAIL",
+   "detail": "节点侧痕迹=[\"unspent_out1\",\"spent_by_known_tx\"](=该 close 已被广播并被节点接受)"
+  },
+  {
+   "arm": "F",
+   "check": "uma evidence_ref 哈希 = sha256(场景原文)",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "arm": "*",
+   "check": "被 winning_side 引用的 verdict 都有 pmt_at≥oe",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "arm": "*",
+   "check": "无重复 (market, source_kind, evidence_ref)",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "arm": "*",
+   "check": "所有 verdict 的 evidence_ref 非空且带 #sha256:",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "arm": "*",
+   "check": "所有冻结行 frozen_reason 带 |clock=",
+   "status": "PASS",
+   "detail": ""
+  }
+ ],
+ "pmtNow": 1789932938047,
+ "chain": true
+}
