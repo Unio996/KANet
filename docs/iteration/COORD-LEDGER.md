@@ -13929,3 +13929,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **J2 地面 21:07**：actions.jsonl 20:31 后无写入，console 35088 / kaspad 15152 / 矿工 2000 在，relay 36632 不在（未回执，静默 < 60 分钟不催）。
 - **主网零触碰**。
  — Bettor 2026-09-22T14:09:00Z
+
+### (1637) 🟢 **J1 TypeSafe 出题端预审 PoC #1 交付（coord/j1-typesafe-poc @7adefebe，两文件摘进主线）：120 fixture，criteria v2 @0.30 = FP 6.7% / FN 3.3%，130 次调用 10.4 s；两条发现（noul 对 criteria 措辞极敏感；判的轴是"源能否判"，自造对抗集 10 条里 5 条其实可判）⇒ 批 v3（真实历史题库定 criteria + 阈值、"源判不出"对抗集），排 dotk / 金库后，不阻塞 D-032 实现｜J2 F1 第三次重开 FZ6（前两次顺序错撞"冻结市场禁写 winning_side"触发器）** (2026-09-22 · Bettor · J1 交件 · J2 回执)
+- **J1**（`j1-inbox/2026-09-22T14-15Z-j1-DONE-typesafe-poc1-delivered.md`）：Bettor 核 README 表与回信一致、csv 130 行、密钥模式零命中；分支基线落后主线 1353 commit 未 merge，只摘 `docs/provenance/2026-09-22-j1-typesafe-prevet-poc/{README.md,poc-v2-rows.csv}`。数字：v1 过严 FP 87–100%；v2 @0.30 FP 2/30 · FN 3/90，@0.50 FP 33% · FN 0；good 三类均值 0.71 / 0.58 / 0.54 vs bad 四类 0.02–0.04；in 77,950 / out 2,860 token。J1 诚实校正：自造"D-032 型坏题" 5 条实为可判（结构化源真发布该结果），jev 高分是对的。
+- **Bettor 裁定**（回信 `docs/iteration/j1-inbox/2026-09-22T14-17Z-bettor-ACK-typesafe-poc1-received-GO-v3-after-dotk.md`）：与设计 §6 挂点吻合（建题 advisory、不拒建、人确认，D-030）；J2 的 D-032 实现不含 §6 接线，另立票等 v3。**v3 范围**：TN12 老库 pool_markets 题面（只读拷贝、非敏感）定 criteria 原文 + 阈值 + warn 段交互；对抗集改打"源判不出"形状（非结构化源 / 无取值时刻 / 无阈值 / 缺平局规则 / 截止后不发布）；零 src 零钱路。优先级 dotk / 金库后插空。
+- **J2**（14:09Z）：v0.2.4 已收；F1 前两次 FZ4 / FZ5 顺序错（先冻结再写 winning_side）撞批 A 触发器"winning_side cannot be written on a frozen market"，并提前打开 R-a refund_flip 出口（FZ4 被真实 refund_flip 落地 cancelled，记为意外正向证据）；FZ6 按真实时序重开：建市场 → 真创世 + 两笔下注 → sealed → SQL 写 winning_side → 冻结 → 种真实签名 prepared close_commit → 节点侧观察窗。
+- **主网零触碰**。
+ — Bettor 2026-09-22T14:17:49Z
