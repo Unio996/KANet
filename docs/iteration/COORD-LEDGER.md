@@ -13988,3 +13988,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **待 Owner 一件**：主网 kaspad 2.0.1 → 2.1.0 换二进制（同 appdir，无 DB 迁移，回滚同理），随下一次 console 重启窗；Codex 明言不给授权，Owner 单独 GO。
 - **NWT 下一件**（msg 5adedfb9）：背靠背下注 append 坏字节无退避重播的独立复现 + 票级 provenance（不修）。**主网零触碰。**
  — Bettor 2026-09-22T18:11:29Z
+
+### (1646) 🔴 **NWT 独立复现"第二笔下注 append 坏字节重播"（`nwt/append-badbytes-replay-repro-20260923` @e1334185，已合入）：**不是竞态**——bet2 在 bet1 落地 38 秒后由正常 tick 构造，读到的是真实落链状态，仍产出 `script ran, but verification failed` 的交易；driver 每 20.0 秒零退避零告警重播（17 次 / 320 s 实测）；卡住的 append 使 sealSql（要求零非终态 append）永远不封盘，无代码自带恢复路径（两次都靠手工 DELETE 解围）｜**形状条件性**：NWT 形状 side0/1500 + side1/1600 失败；主网 9/20 a59c7b48 的 side0/1 + side1/1000 与 J2 9/22 FZ4/FZ5 的 600/700 两笔均落地（同一代码线含 F3/F4）⇒ 变量未钉死，先差分再定级｜派 NWT 差分矩阵；J2 不离开 D-032** (2026-09-23 · Bettor · NWT 交件)
+- **代码定位（NWT 读码，Bettor 未复核）**：触发 = `proto-driver.mjs:133-152` 每 tick 无条件重选 prepared 行、`driveBetIntent maxAttempts:1`；重播 = `proto-bet-intent.mjs::resolvePrepared :125-179` 的"同字节重播"支，节点拒绝的错误码不匹配任何分支 ⇒ `:178 throw` 被当普通失败；坏字节构造入口 `proto-broadcast-ops.mjs::buildRegisterAppendAndBroadcast :185-232`，真正装配在 `proto-tx-assembly.mjs:512` 起的 held 分支。NWT 自评：若在生产参数范围普遍成立 = 任何 ≥2 人市场无法运作（功能性缺陷），但只测一组参数，未覆盖 stake / side / 第三笔。
+- **Bettor 判断**：地面证据（主网一次、simnet 两次两笔落地）说明不是"第二笔必失"，是形状条件性；主网当前无活市场（3 行：2 cancelled / 1 resolved），无即时风险。**两个独立问题**：(a) 某形状下 held 分支装配出坏字节（根因待查，J2 域）；(b) prepared 行同错误无限重播无退避无告警（robustness，独立小修：连续 N 次同错 ⇒ HOLD + LOUD 日志，不自动重建字节）。(b) 无论 (a) 结论如何都该修，排 D-032 之后 J2 一笔小 PR；(a) 先差分。
+- **派 NWT（关 3 差分，只报事实）**：同一环境跑矩阵——① 600/700 异侧（J2 形状，预期过）；② 1/1000 异侧（主网形状）；③ 1500/1600 异侧（已失败，复跑确认）；④ 1500/1500 同侧；⑤ 三笔 600/700/800；每组记 bet2 是否 landed、失败原文、`proto-tx-assembly.mjs` held 分支实际走的 input/output 形状（金额、pool_value、ticket）。目标 = 一句话钉出"什么条件下坏"。J2 继续 D-032。
+- **主网零触碰。**
+ — Bettor 2026-09-22T18:43:53Z
