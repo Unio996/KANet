@@ -340,7 +340,7 @@ await t('9-2a 源码结构: 快照恰一处 { ...payload, type }, 两处发送�
   const imports = src.match(/^\s*import\s.*$/gm) || [];
   if (imports.length !== 1 || !/proto-relay-guard\.mjs/.test(imports[0]) || /await import\(/.test(src.replace("await import('../services/relay-manager.js')", ''))) throw new Error('import 变了: ' + JSON.stringify(imports));
 });
-await t('9-2a 漂移测试: 出口的 S9 与 proto-settlement-intent 的键生成器一致——批9 四个配对产出的键(含 #2 / #10)全部通过; withdraw / reclaim / ticket 产出的键被拒; 出口配对表恰是批9 四步', async () => {
+await t('9-2a 漂移测试: 出口的 S9 与 proto-settlement-intent 的键生成器一致——批9 四个配对产出的键(含 #2 / #10)全部通过; withdraw / reclaim / ticket / convert_to_refundclaim / refund_payout 产出的键被拒; 出口配对表恰是批9 四步 + R-a 的 refund_flip', async () => {
   const SI = await import('./proto-settlement-intent.mjs');
   const { randomBytes } = await import('node:crypto');
   const ok = [], bad = [];
@@ -350,12 +350,13 @@ await t('9-2a 漂移测试: 出口的 S9 与 proto-settlement-intent 的键生�
       (PROTO_SETTLEMENT_EXIT_STEP_SUBJECT[step] === subject ? ok : bad).push([key, subject, step]);
     }
   }
-  if (ok.length !== 12) throw new Error('批9 配对产出应 12 条(4 步 × 3 attempt), 实得 ' + ok.length);
+  if (ok.length !== 15) throw new Error('出口配对产出应 15 条(5 步 × 3 attempt: 批9 四步 + R-a refund_flip), 实得 ' + ok.length);
   for (const [key, subject, step] of ok) if (!isValidSettlementIntentKey(key)) throw new Error('批9 键应通过: ' + key);
   const badSteps = new Set(bad.map(([, , step]) => step));
-  if (JSON.stringify([...badSteps].sort()) !== JSON.stringify(['reclaim', 'withdraw'])) throw new Error('被排除的步骤应恰为 withdraw / reclaim, 实得 ' + JSON.stringify([...badSteps]));
+  if (JSON.stringify([...badSteps].sort()) !== JSON.stringify(['convert_to_refundclaim', 'reclaim', 'refund_payout', 'withdraw'])) throw new Error('被排除的步骤应恰为 withdraw / reclaim / convert_to_refundclaim / refund_payout(后两个 R-b/R-c 才放), 实得 ' + JSON.stringify([...badSteps]));
   for (const [key] of bad) if (isValidSettlementIntentKey(key)) throw new Error('排除步骤的键不该通过: ' + key);
-  if (JSON.stringify(Object.keys(PROTO_SETTLEMENT_EXIT_STEP_SUBJECT).sort()) !== JSON.stringify(['claim_draw', 'convert_to_claim', 'resolve', 'seal'])) throw new Error('出口配对表应恰是批9 四步');
+  if (JSON.stringify(Object.keys(PROTO_SETTLEMENT_EXIT_STEP_SUBJECT).sort()) !== JSON.stringify(['claim_draw', 'convert_to_claim', 'refund_flip', 'resolve', 'seal'])) throw new Error('出口配对表应恰是批9 四步 + R-a 的 refund_flip');
+  if (PROTO_SETTLEMENT_EXIT_STEP_SUBJECT.refund_flip !== 'market') throw new Error('refund_flip 的主体应是 market');
   if (!Object.isFrozen(PROTO_SETTLEMENT_EXIT_STEP_SUBJECT)) throw new Error('配对表应冻结');
 });
 await t('9-2a 校验函数纯度: 非字符串输入 ⇒ false 不抛; 正则无状态(连续调用结果稳定)', () => {

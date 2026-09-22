@@ -29,7 +29,7 @@ import {
 } from './proto-tx-assembly-settlement.mjs';
 
 const HEX64 = /^[0-9a-f]{64}$/;
-const STEPS = Object.freeze(['seal', 'close_commit', 'convert_to_claim', 'claim_draw']);
+const STEPS = Object.freeze(['seal', 'refund_flip', 'close_commit', 'convert_to_claim', 'claim_draw']);
 
 /** 指针失败: `.code` 取闭集(pointerCodes()); 另带 `.step` / `.role` / `.detail`。任何失败 ⇒ 该步不构造、不推进状态(NO TX NO STATE)。 */
 export class PointerError extends Error {
@@ -138,7 +138,7 @@ const landedSettlement = (db, marketId, step) => db.prepare(`
 
 /**
  * @param {object} o
- * @param {'seal'|'close_commit'|'convert_to_claim'|'claim_draw'} o.step
+ * @param {'seal'|'refund_flip'|'close_commit'|'convert_to_claim'|'claim_draw'} o.step
  * @param {string} o.marketId  32 字节 hex
  * @param {object} o.db  只读用途的 better-sqlite3 句柄(注入; 本模块不 import 它)
  * @param {object} o.kaspa  kaspa-wasm(注入; Transaction.deserializeFromSafeJSON / covenantId / TransactionOutput)
@@ -190,7 +190,7 @@ export function resolveStepPointers({ step, marketId, db, kaspa }) {
   const sealTok = outAt(S, MARKET_SEAL_TOKEN_OUT_INDEX, 'seal 意图·代币输出', ctx('held'));
   const cell3 = { outpoint: opOf(S.id, MARKET_SEAL_ROOTCLOSE_OUT_INDEX), expectedCovenantId: genesisCovenantId(sealRc, 'seal 输出[0](RootClose, genesis 组)', ctx('rootClose')), source: 'settlement', producedBy: { table: 'proto_settlement_intents', key: S.rowKey } };
   const cell5 = { outpoint: opOf(S.id, MARKET_SEAL_TOKEN_OUT_INDEX), expectedCovenantId: genesisCovenantId(sealTok, 'seal 输出[1](代币, genesis 组)', ctx('held')), source: 'settlement', producedBy: { table: 'proto_settlement_intents', key: S.rowKey } };
-  if (step === 'close_commit') return { roles: { rootClose: cell3 } };
+  if (step === 'close_commit' || step === 'refund_flip') return { roles: { rootClose: cell3 } };   // refund_flip(R-a): RootClose(closed:0)输入 = seal 输出 0, 与 close_commit 同一格 3
 
   // ── 格 4: close_commit(intent step='resolve')landed; 谱系 = 它的输入 0 花掉 seal 输出 0; covenantId 必须与格 3 相等(续约保持 id) ──
   const ccRow = landedSettlement(db, marketId, 'resolve');

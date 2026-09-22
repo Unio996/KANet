@@ -55,6 +55,10 @@
       "cap": "30000000",
       "_source": "2026-09-19 Bettor裁定按NWT照F3'推导: close_commit只有[RootClose,fee]两输入、两输出, simnet实付17,574,400 sompi(全链实测), cap取30,000,000(0.30 KAS)。🔴失效条件: 仅对该两输入两输出布局成立(委员5槽见证约20.4KB); fee规则一改必须重推; relay侧1.0 KAS硬顶不动。原借用的1.0 KAS cap已替换。"
     },
+    "refund_flip": {
+      "cap": "30000000",
+      "_source": "2026-09-21 R-a M7-R-a⑤ 实测(取代初值,Bettor 采): R 臂驱动全自动 tick(非手工构造)用 relay 真实 fee UTXO(来自 tx 57a9a2ad… 的 output[3],面值 36,934,975 sompi≈0.369 KAS——比预想 0.7–0.9 KAS 档更小,filterFeeCandidates 选的是够用的最小候选)广播 refund_flip,节点 getMempoolEntry 实付 fee=15,682,000 sompi,storageMass=mass=88,979,computeMass=35,031(plurality=storageMass,KIP-9 惯例)。cap 30,000,000 覆盖该实测(差 ~1.9x),暂不下调:close_commit 的 anchor 注记(20260919)记录 requiredFee 随 fee UTXO 面值 v 单调增,refund_flip 未独立在 0.7–0.9 KAS 档复测,继续沿用与 close_commit 相同的 cap 档更保守。🔴 失效条件同 close_commit(仅对 [RootClose,fee] 两输入两输出布局成立;fee 规则一改必须重推);relay 侧 SIGNED_INPUT_CEILING(1.0 KAS)硬顶不动。证据:docs/provenance/2026-09-21-j2-r-a-refund-flip/evidence/ra-mempool-entry-0593434a561f.json + ra-flip-watch.jsonl。"
+    },
     "convert_to_claim": {
       "cap": "52000000",
       "_source": "2026-09-19 Bettor裁定按NWT照F3'推导: convert_to_claim与market_seal同形状([RootClose/leaf,held,fee]三输入/三输出, 实付34,268,800 sompi), cap取52,000,000(0.52 KAS)。🔴失效条件: 仅对该三输入三输出布局成立; fee规则(computeRequiredFeeSompiOrThrow/本地wasm mass口径)一改必须重推; relay侧SIGNED_INPUT_CEILING_SOMPI(1.0 KAS)硬顶不动。原借用market_seal的1.0 KAS cap已替换。"

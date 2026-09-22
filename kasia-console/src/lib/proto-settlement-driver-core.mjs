@@ -8,13 +8,14 @@
 // 🔴 NO TX NO STATE: 广播失败 / 超时 / 进程死 ≠ 已发生——只有 landed 才推进 market 状态与后续意图; prepared 行只允许同字节重播(driveIntent 内部), 永不重建 / 重签。
 // 🔴 报警名收进闭集 SETTLEMENT_ALERTS(含 c1 的 fee_candidate_* 事件); 发未登记的名字直接抛错(否则拼错的名字会静默不报警)。
 import { classifyC1Error, createTransportAlertGrader, withFeeParent } from './proto-settlement-c1.mjs';
-import { evaluateCloseCommitTiming } from './proto-close-commit-gate.mjs';
+import { evaluateCloseCommitTiming, evaluateRefundFlipTiming } from './proto-close-commit-gate.mjs';
 
-export const SETTLEMENT_DRIVER_STEPS = Object.freeze(['seal', 'close_commit', 'convert_to_claim', 'claim_draw']);
+export const SETTLEMENT_DRIVER_STEPS = Object.freeze(['seal', 'close_commit', 'refund_flip', 'convert_to_claim', 'claim_draw']);
 /** 驱动步骤名 → 意图表里的 (subject_type, step)。close_commit 的意图 step 名是 'resolve'(§4)。 */
 export const STEP_INTENT = Object.freeze({
   seal: Object.freeze({ subjectType: 'market', intentStep: 'seal' }),
   close_commit: Object.freeze({ subjectType: 'market', intentStep: 'resolve' }),
+  refund_flip: Object.freeze({ subjectType: 'market', intentStep: 'refund_flip' }),   // R-a: 冻结市场的自然出口(设计 docs/2026-09-21-j2-driver-refund-path-design-v0.2.md)
   convert_to_claim: Object.freeze({ subjectType: 'claim', intentStep: 'convert_to_claim' }),
   claim_draw: Object.freeze({ subjectType: 'claim', intentStep: 'claim_draw' }),
 });
@@ -76,7 +77,7 @@ export function makeAlerter(rawAlert) {
  * 放行时产出 pmtEvidence = { pastMedianTimeMs, readAtMs(=relay 的 observedAtMs), source:'relay' }(S5: builder 只接受 source==='relay' 且 readAtMs 距今 ≤ 60 s 的证据)。
  * 不用本地墙钟判断能否提交(B4-2)。
  */
-export async function checkPmtGate({ sendCmd, relayId, deadlineMs, timeoutMs = 15000 }) {
+export async function checkPmtGate({ sendCmd, relayId, deadlineMs, timeoutMs = 15000, evaluate = evaluateCloseCommitTiming }) {
   let r;
   try { r = await sendCmd(relayId, { type: 'get_past_median_time' }, timeoutMs, 'internal'); }
   catch (e) { return { canSubmit: false, readFailed: true, reason: `get_past_median_time 抛错: ${e && e.message ? e.message : e}`, pmtEvidence: null, sla: 'ok' }; }
@@ -84,7 +85,7 @@ export async function checkPmtGate({ sendCmd, relayId, deadlineMs, timeoutMs = 1
   if (!(r && r.ok === true && Number.isFinite(pmt) && pmt > 0 && Number.isFinite(obs) && obs > 0)) {
     return { canSubmit: false, readFailed: true, reason: `get_past_median_time 回执不合法(ok=${r && r.ok})`, pmtEvidence: null, sla: 'ok' };
   }
-  const tm = evaluateCloseCommitTiming({ pastMedianTimeMs: pmt, deadlineMs });
+  const tm = evaluate({ pastMedianTimeMs: pmt, deadlineMs });
   return { ...tm, readFailed: false, pastMedianTimeMs: pmt, pmtEvidence: tm.canSubmit ? { pastMedianTimeMs: pmt, readAtMs: obs, source: 'relay' } : null };
 }
 
@@ -178,6 +179,16 @@ export function createSettlementDriver(deps, { ticksToError = 3 } = {}) {
               if (!gate.canSubmit) { const e = new Error(`close_commit_pmt_not_ready: ${gate.reason}`); e.code = 'close_commit_pmt_not_ready'; throw e; }
               pmtEvidence = gate.pmtEvidence;
             }
+            if (step === 'refund_flip') {
+              stage = 'gate';
+              // R-a: 只自动翻【已冻结】的市场(Bettor 裁定 ①)。与 close_commit 的冻结闸方向相反且同样严格 fail-closed: 只有端口明确返回 true 才放行(false / 非布尔 / 抛错 / 市场不存在一律拦)。
+              let frozen; try { frozen = await deps.isSettlementFrozen(marketId); } catch (fe) { frozen = false; log.log && log.log(`[settlement-driver] 冻结列读取失败(refund_flip 按未冻结处理, fail-closed): ${fe && fe.message}`); }
+              if (frozen !== true) { const e = new Error(`refund_flip_market_not_frozen: 市场 ${marketId} 未冻结(或冻结状态读不到)——v1 只自动翻冻结市场`); e.code = 'refund_flip_market_not_frozen'; throw e; }
+              const gate = await checkPmtGate({ sendCmd: deps.sendCmd, relayId: deps.relayId, deadlineMs: prep.deadlineMs, evaluate: evaluateRefundFlipTiming });
+              if (gate.readFailed) pmtSla(key, gate);
+              if (!gate.canSubmit) { const e = new Error(`refund_flip_pmt_not_ready: ${gate.reason}`); e.code = 'refund_flip_pmt_not_ready'; throw e; }
+              pmtEvidence = gate.pmtEvidence;
+            }
             stage = 'build';
             const built = await deps.build(step, { marketId, subjectId, prep, chainParents: v.chainParents, feeCandidates: v.fee && v.fee.candidates, withFeeParent, pmtEvidence });
             if (!built || typeof built.txJson !== 'string' || typeof built.expectedTxid !== 'string' || !Array.isArray(built.signInputIndices) || built.signInputIndices.length === 0) {
@@ -208,10 +219,18 @@ export function createSettlementDriver(deps, { ticksToError = 3 } = {}) {
       // fee 窗口类错误自带该发的事件(fee_candidate_* / fee_window_saturated 的明细)——先发它们, 再按分类发主报警
       if (Array.isArray(orig && orig.events)) for (const ev of orig.events) alert(ev.eventType, `${key}: ${ev.eventType}`, { intent_key: key, ...(ev.payload || {}) }, ev.level);
       // §8: close_commit 的 RootClose 输入已不在预期 outpoint ⇒ 探测是否已被 refund_flip(closed 0→2); 有 ⇒ 意图置 ambiguous(不重试不重建), 报警一次
-      if (step === 'close_commit' && at === 'inputs' && typeof deps.probeRefundFlip === 'function' && /^rootClose_(value|outpoint|spk)_drift$/.test(String(orig && orig.code))) {
-        let flipped = false;
-        try { flipped = (await deps.probeRefundFlip({ marketId })) === true; } catch (pe) { log.log && log.log(`[settlement-driver] refund_flip 探测失败(按未翻处理, 下一 tick 再探): ${pe && pe.message}`); }
+      if ((step === 'close_commit' || step === 'refund_flip') && at === 'inputs' && typeof deps.probeRefundFlip === 'function' && /^rootClose_(value|outpoint|spk)_drift$/.test(String(orig && orig.code))) {
+        let probe = null, flipped = false;
+        try { probe = await deps.probeRefundFlip({ marketId }); flipped = probe === true || (probe && probe.flipped === true); } catch (pe) { log.log && log.log(`[settlement-driver] refund_flip 探测失败(按未翻处理, 下一 tick 再探): ${pe && pe.message}`); }
         if (flipped) {
+          // R-a / M5: 观察到第三方翻牌 ⇒ 幂等记 refund_flip landed(txid = 探针 facts 读回的后继 outpoint 所在交易)+ 自动冻结(reason refund_flip_observed, 单向)——由 store.recordObservedRefundFlip 一个事务完成; 后效经 effectsPending 走 markLanded。
+          if (probe && probe.flipped === true && typeof deps.recordObservedRefundFlip === 'function') {
+            try { deps.recordObservedRefundFlip({ marketId, probe }); } catch (re) { log.log && log.log(`[settlement-driver] 记录观察到的 refund_flip 失败(下一 tick 重试): ${re && re.message}`); }
+          }
+          if (step === 'refund_flip') {
+            if (!flipAlerted.has(key)) { flipAlerted.add(key); alert('settlement_refund_flip_observed', `${key}: RootClose 已被(第三方)翻成 closed=2——已幂等记 refund_flip landed 并冻结市场(refund_flip_observed)`, { intent_key: key }, 'error'); }
+            return { outcome: 'held', key, reason: 'refund_flip_observed', message };
+          }
           deps.intents.mark(key, { status: 'ambiguous', last_error: 'refund_flip_observed' });
           if (!flipAlerted.has(key)) { flipAlerted.add(key); alert('settlement_refund_flip_observed', `${key}: RootClose 已被 refund_flip(closed=2)——close_commit 永不可入, 转人工`, { intent_key: key }, 'error'); }
           return { outcome: 'held', key, reason: 'refund_flip_observed', message };

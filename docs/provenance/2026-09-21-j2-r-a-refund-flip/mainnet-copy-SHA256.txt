@@ -1,0 +1,3 @@
+cfa7daf9c242c9d2ee250e2062e561497f98ff943548596342d007eaf85420c9 *console.mainnet.copy.db
+d492ab1f733ce1d0aad55e11837813832ca92232a356becddd3d0ac7f134125c *console.mainnet.copy.db-shm
+aaf687782c53c5d1e7039d9e1a40bccae426c74c4c4f73195e72f9fdb6aa1ecf *console.mainnet.copy.db-wal

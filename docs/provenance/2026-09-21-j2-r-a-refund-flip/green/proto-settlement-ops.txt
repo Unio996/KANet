@@ -1,0 +1,24 @@
+[db] path=C:\Users\ADMIN\AppData\Local\Temp\_j2_settle_ops_25916.db source=DB_PATH
+[diag:step] proc.silverc.compile.bshard-artifacts ms=73 cmd=silverc ok=1 at=2026-09-21T16:02:51.031Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=51 cmd=silverc ok=1 at=2026-09-21T16:02:51.088Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=29 cmd=silverc ok=1 at=2026-09-21T16:02:51.136Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=11 cmd=silverc ok=1 at=2026-09-21T16:02:51.153Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=48 cmd=silverc ok=1 at=2026-09-21T16:02:51.210Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=27 cmd=silverc ok=1 at=2026-09-21T16:02:51.246Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=13 cmd=silverc ok=1 at=2026-09-21T16:02:51.264Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=51 cmd=silverc ok=1 at=2026-09-21T16:02:51.325Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=72 cmd=silverc ok=1 at=2026-09-21T16:02:51.409Z
+[PASS] prepare(seal): 预期 spk(leaf / held)与链上 UTXO 一致; targetAddress 是 seal 输出0 的 RootClose(closed:0)地址; feeMinAmount = fee profile cap; 只读(不写任何表)
+[diag:step] proc.silverc.compile.bshard-artifacts ms=29 cmd=silverc ok=1 at=2026-09-21T16:02:51.495Z
+[PASS] E2E-1 seal: 一个 tick 真构造 + 广播(intent_key 过出口 S9); 下一 tick 对账 landed ⇒ 市场 betting → sealed; 无 error 报警
+[diag:step] proc.silverc.compile.bshard-artifacts ms=74 cmd=silverc ok=1 at=2026-09-21T16:02:51.610Z
+[PASS] E2E-2 close_commit: 操作员未写 winning_side ⇒ 不触发; 写入后 ⇒ pmt 门放行(读 relay 的 pmt)、真构造、广播; 对账后 sealed → resolved + win claim 行(64 位 hex, 过出口)+ convert_to_claim 意图
+[diag:step] proc.silverc.compile.bshard-artifacts ms=44 cmd=silverc ok=1 at=2026-09-21T16:02:51.726Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=29 cmd=silverc ok=1 at=2026-09-21T16:02:51.793Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=19 cmd=silverc ok=1 at=2026-09-21T16:02:51.850Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=28 cmd=silverc ok=1 at=2026-09-21T16:02:51.914Z
+[PASS] E2E-3 convert_to_claim → claim_draw: 真构造(ticket 由委员私钥信封签, 驱动层不碰私钥)、广播、对账; 终态: claim 行记 claim_txid / vout / claimed_at; 四步意图全 landed; 全程无 error 报警
+[PASS] 私钥卫生: 全部广播命令 / 事件 / 意图列里不含委员私钥信封明文之外的密钥材料——扫描 broadcasts、events、intents 全文不含 relay 私钥与委员信封原文
+[PASS] 结构: ops 不 bare-import relay-manager; 不含 withdraw / reclaim / allowUnlistedTestDestination / 私钥解密; 不写任何表(无 INSERT / UPDATE / DELETE)
+
+proto-settlement-ops.test: 6 passed, 0 failed

@@ -1,0 +1,12 @@
+import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
+const KC = 'D:/kanet-tn12/scratch/_j2_wt_ra/kasia-console';
+process.env.DB_PATH = 'D:/kanet-tn12/scratch/_j2_ra_mainnet_backup/console.mainnet.copy.db'; process.env.KASPA_NETWORK = 'mainnet';
+const Database = createRequire(KC + '/')('better-sqlite3');
+const { createSettlementStore } = await import(pathToFileURL(KC + '/src/lib/proto-settlement-store.mjs').href);
+const db = new Database(process.env.DB_PATH, { readonly: true });
+const store = createSettlementStore({ db, claimDrawClaimOutIndex: 1 });
+const w = store.listWork();
+console.log(JSON.stringify({ advances: w.advances, effectsPending: w.effectsPending.map((r) => [r.subject_id.slice(0, 8), r.step, r.status]), landedChecks: w.landedChecks.length, preparedRows: w.preparedRows.length }));
+for (const m of db.prepare('SELECT id, status FROM proto_markets').all()) console.log(m.id.slice(0, 8), m.status, JSON.stringify(store.dependenciesLanded('refund_flip', { subjectId: m.id, marketId: m.id })));
+process.exit(0);

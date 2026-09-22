@@ -27,6 +27,7 @@ export const EXPECTED_INPUT_VALUE_SOMPI = Object.freeze({
 export const STEP_INPUT_ROLES = Object.freeze({
   seal: ['leaf', 'held'],
   close_commit: ['rootClose'],
+  refund_flip: ['rootClose'],           // R-a: 输入 0 = RootClose(closed:0), 输入 1 = fee(与 close_commit 同布局, 无委员签名)
   convert_to_claim: ['rootClose', 'held'],
   claim_draw: ['rootClaim', 'ticket', 'held'],
   // withdraw(批7 已按真实输入布局复核并由 proto-claim-draw.test.mjs ⑲ 钉死): 输入0=KanetTokenClaim(claim), 输入1=其持有的代币(held), 输入2=fee(不在表内);

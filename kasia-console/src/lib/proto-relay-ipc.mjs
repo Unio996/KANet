@@ -32,12 +32,12 @@
 
 import { PROTO_RELAY_ID } from './proto-relay-guard.mjs';
 
-/** 批9 出口允许的结算步骤与其主体归属(withdraw/reclaim/ticket 不在其内——批9 排除, 在出口拒)。 */
-export const PROTO_SETTLEMENT_EXIT_STEP_SUBJECT = Object.freeze({ seal: 'market', resolve: 'market', convert_to_claim: 'claim', claim_draw: 'claim' });
+/** 批9 出口允许的结算步骤与其主体归属(withdraw/reclaim/ticket 不在其内——批9 排除, 在出口拒)。R-a(2026-09-21)加 refund_flip(冻结市场的自然出口; convert_to_refundclaim / refund_payout 仍不在内, R-b/R-c 才放)。 */
+export const PROTO_SETTLEMENT_EXIT_STEP_SUBJECT = Object.freeze({ seal: 'market', resolve: 'market', refund_flip: 'market', convert_to_claim: 'claim', claim_draw: 'claim' });
 // settle:<subject_type>:<64 位小写 hex>:<step>[#<n>], n ≥ 2 十进制无前导零。无 m/i 标志; JS 的 $ 不匹配末尾换行。
 // 🔴 subject_id 形状 = 64 位小写十六进制(不是 UUID): 市场 id 由 api/proto.js 的 randomBytes(32).toString('hex') 生成(主网 proto_markets 三行实测均 64 位 hex);
 //   claim 行 id 由驱动同式生成(Bettor 裁定, 设计 P4)。首版按设计 §3.8 的字面写成 UUID ⇒ 真实结算命令全落 B 类被拒(NWT MUST-1 抓到)。
-const SETTLE_KEY_RE = /^settle:(market|claim):([0-9a-f]{64}):(seal|resolve|convert_to_claim|claim_draw)(?:#([2-9]|[1-9][0-9]+))?$/;
+const SETTLE_KEY_RE = /^settle:(market|claim):([0-9a-f]{64}):(seal|resolve|refund_flip|convert_to_claim|claim_draw)(?:#([2-9]|[1-9][0-9]+))?$/;
 /** S9 严格格式校验: 格式合法 ∧ step 与 subject_type 按 PROTO_SETTLEMENT_EXIT_STEP_SUBJECT 配对。 */
 export function isValidSettlementIntentKey(key) {
   if (typeof key !== 'string') return false;

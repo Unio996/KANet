@@ -1,0 +1,38 @@
+[PASS] 步骤计划: 恰五步(seal / close_commit / refund_flip / convert_to_claim / claim_draw; R-a 加 refund_flip); close_commit 的意图 step 名是 resolve; 无 withdraw / reclaim / ticket / convert_to_refundclaim / refund_payout(R-b/R-c 才接线); STEP_OF_INTENT 是它的逆
+[PASS] 报警闭集: 未登记的名字直接抛错; c1 分类器可能产出的每个 eventType 与 c1 事件名都已登记(drift 守卫); 含 fee_candidate_out_of_range_skipped(9-2b 清单 #8)
+[PASS] deps 校验: 缺任何端口 / minDepth 非正整数 / intents 缺函数 ⇒ DriverDepsError(没有默认值); 构造驱动本身零副作用(不调 listWork / sendCmd)
+[PASS] 通用顺序: 建 pending 意图 → 依赖已 landed → 指针 → C1 取证 → (步骤专属闸) → builder → covenant_broadcast; 意图建立先于任何 IPC
+[PASS] 四步各自的 covenant_broadcast 载荷: intent_key = settle:<主体>:<64 位 hex id>:<step>(close_commit 用 resolve); 载荷含 tx_json / sign_input_indices / expected_txid; 可选下标只在 builder 给了才带; 键过出口 S9 正则(取自出口源码)
+[PASS] 依赖未 landed ⇒ waiting: 意图仍建(pending)、零 IPC、不指针 / 不取证 / 不构造 / 不广播
+[PASS] 意图状态: submitted / landed ⇒ in_flight(不重复构造); ambiguous ⇒ held(不重试不重建); prepared ⇒ 同字节重播(build / 指针 / 取证一次都不调, NO 重建)
+[PASS] 批 D D1 入口③: close_commit 广播前闸重读冻结列(在 pmt 门之前): 冻结 ⇒ gated(close_commit_settlement_frozen), 不读 pmt / 不建 / 不广播; 严格 fail-closed——只有端口明确返回 false 才放行(true / undefined / null / 0 / "false" / 1 / {} / 抛错 一律拦)
+[PASS] 批 D D1 入口③: 未冻结(端口返回 false)⇒ 冻结读发生在 pmt 门之前并放行; 冻结只管 close_commit(seal 即使端口返回 true 也照发, 且根本不读冻结列)
+[PASS] 批 D D1: 已 prepared 的 close_commit 意图(字节已落库)不受冻结影响——同字节重播, 不读冻结列(冻结必须早于该市场第一个进 close_commit 的 tick)
+[PASS] 批 D ⑤(c): 冻结只属于 close_commit——即使冻结端口恒返回 true, convert_to_claim / claim_draw / seal 照常 submitted 且【根本不读冻结端口】; 已 landed 的 close_commit 走 landed 检查 + markLanded 也不看冻结
+[PASS] C1 事实漂移 ⇒ failed + settlement_chain_fact_drift(error); 不构造、不广播; 意图仍 pending(NO TX NO STATE)
+[PASS] 传输类 C1 错(原始错误在 driveIntent 包装后仍被正确分类): 同一 key 连续【不同 tick】warn, warn, error; 成功一次清零; 另一个 key 互不影响
+[PASS] fee 窗口错自带的事件先发(fee_candidate_* 已登记), 再发主报警 settlement_fee_window_saturated; 未识别错误(TypeError)⇒ settlement_c1_programming_error(不是"照常重试")
+[PASS] c1 返回的 events(fee_candidate_* 等)被逐条报警; 未登记的事件名抛错而不是静默吞掉
+[PASS] builder 阶段的专名报警: signing_key_mismatch ⇒ settlement_signing_key_mismatch; close_commit 的 db_payout_root_drift ⇒ settlement_close_commit_args_not_from_db; 其它 builder 错 ⇒ 编程错误; 都不广播
+[PASS] 广播失败: 只记 last_error(意图不推进, NO TX NO STATE)、不报"编程错误"; relay 的 fee 天花板拒绝 ⇒ settlement_relay_fee_rejected; 成功回执无 txId 也算失败
+[PASS] NWT e4039235 MUST ①: 出口分闸的四种确定性拒绝(broadcast 阶段, sendCmd 抛错) ⇒ 当 tick 立即报 settlement_step_unexpected_error(error), transient:false; 意图仍 pending
+[PASS] 出口闸拒绝按 (intent_key, code) 去重(每 tick 重试会每 tick 撞同一个拒绝, 不能每 tick 刷 events): 同 key 同 code 连续 5 个 tick 只报 1 次; 换 code 再报; 换 key 再报; 成功清零后可再报
+[PASS] NWT e4039235 MUST ②: 其余广播失败(relay ok:false invalid_tx)按 (intent_key, code) 连续 3 个【不同 tick】后报警一次, 第 4 次不重复; 同一 tick 内重复不累计; code 变了重计; 成功清零后可再报; 两个 key 互不影响; 无 code 的 IPC 超时同样计数
+[PASS] pmt 门(纯函数): 读的是 relay 的 get_past_median_time; 回执不合法 / 抛错 ⇒ canSubmit=false 且 readFailed; pmt 未领先 deadline+30s ⇒ 不放行; 放行 ⇒ pmtEvidence={pastMedianTimeMs, readAtMs=observedAtMs, source:relay}
+[PASS] close_commit 走 pmt 门: pmt 未到 ⇒ gated(不构造不广播, 无报警); 放行 ⇒ builder 拿到 pmtEvidence(source=relay); 门判据不依赖 deps.now(恒为 0)
+[PASS] pmt 读失败连续 3 次 ⇒ settlement_pmt_read_failed 恰一次(第 3 次); 中途读成功清零重计
+[PASS] SLA(以 pmt 计): ≥ deadline+1h ⇒ settlement_close_commit_sla_warn; ≥ +2h ⇒ 再加 refund_flip_open; 同 (key, 级别) 幂等; 仍尽力提交(放行时照常构造广播)
+[PASS] refund_flip(§8): RootClose 输入 drift 且探测到 closed=2 ⇒ 意图置 ambiguous(last_error=refund_flip_observed)+ settlement_refund_flip_observed 一次; 再来一轮 ⇒ held 不重复报警; 探测为假 ⇒ 仍是普通 chain_fact_drift; 探测抛错 ⇒ 按未翻处理不崩
+[PASS] landed 检查: landed ⇒ markLanded 恰一次(带驱动步骤名); 未 landed ⇒ 不记账; minDepth = deps.minDepth; checkLanded 抛错 ⇒ settlement_step_unexpected_error 且不记账; 批9 排除的意图(withdraw / reclaim)忽略、零 IPC
+[PASS] prepared_stale(四步都扫): prepared 停留 ≥10 分钟 ⇒ 报警一次(同 updated_at 幂等; updated_at 变了再报); 不足 10 分钟 / 非 prepared 不报
+[PASS] 后效待应用: runTick 最先处理 effectsPending(占 cap, 排在 landed 检查与推进之前); markLanded 失败 ⇒ settlement_step_unexpected_error(error)逐 tick 报警不去重, 成功后停; 批 9 之外的意图忽略
+[PASS] runTick: 先 landed 检查再推进; cap 限制总动作数; 一个条目失败不拖垮后面的条目; 汇总计数正确; cap 非法 ⇒ RangeError
+[PASS] 结构: 核心只 import c1 与 pmt 门两个无 DB 模块; 不含 relay-manager / process.env / 私钥 / kaspa-wasm / withdraw / reclaim / buildWithdraw / buildTicketReclaim / allowUnlistedTestDestination(§11)
+[PASS] 结构: 无 DB_PATH 的子进程里核心可直接 import(证明它不拖 db/client; 将来谁拖进来这里立刻红)
+[PASS] R-a refund_flip 广播前闸①: 只翻【已冻结】市场——未冻结(false / undefined / null / 0 / "true" / 抛错)一律 gated(refund_flip_market_not_frozen), 不读 pmt / 不建 / 不广播(与 close_commit 的冻结闸方向相反且同样严格 fail-closed)
+[PASS] R-a refund_flip 广播前闸②: pmt 门用 evaluateRefundFlipTiming(deadline+2h+30s), 不是 close 的 30s 闸——deadline+60s 的读数(close 会放行)对 refund_flip 必须 gated; pmt 读不到 ⇒ gated; 都不建不广播
+[PASS] R-a refund_flip 放行路径: builder 收到 relay 来源的 pmtEvidence(readAtMs=relay 的 observedAtMs); 广播载荷带 continuation_output_indices; 意图 key = settle:market:<id>:refund_flip
+[PASS] R-a / M5: refund_flip 的 inputs 阶段 RootClose drift + 探针返回 {flipped:true,…} ⇒ 调 recordObservedRefundFlip({marketId, probe}) ⇒ held(refund_flip_observed), 报警一次; 探针 false / 抛错 / 旧式 true 的行为
+[PASS] R-a / M5: close_commit 的 RootClose drift + 探针 {flipped:true} ⇒ 既有行为(resolve 意图 ambiguous + 报警)之外, 还记 refund_flip landed + 冻结(recordObservedRefundFlip 被调)
+
+proto-settlement-driver-core.test: 36 passed, 0 failed
