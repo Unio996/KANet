@@ -24,6 +24,15 @@
 
 ## 🔴 当前有效的战略决策 (CURRENT)
 
+### D-033 团队唯一目标 = 把测试网已跑通的预测市场原样指向主网；冻结一切新功能开发，只接管线、只做 UI；proto-v0 作废（史上最失败）；关闭 J2 / NWT，上线 KANet-UI (2026-09-23 · Owner 本机终端原话「测试网那套预测市场——Polymarket 搜题、建盘、下注、委员判定、结算——已经完整跑通，主网要做的只是把它指向主网，十分钟的事。这个就是团队唯一目标。开发原则：冻结一切新功能开发，只接管线。只做 UI。关闭 J2 和 NWT。上线 UI」「现在直接把 proto-v0 全部删除，标注，史上最失败的东西」「所有东西，不能再新创任何，任何东西都不允许做」· Bettor 记账 · COORD-LEDGER 1651)
+
+1. **唯一目标**：测试网那套预测市场（Polymarket 搜题 `GET /api/predictions/polymarket/search`、建盘 `/api/pool/market/create*`、下注、委员判定（`polymarket_uma_mirror` / voter）、结算（settler / bshard）已完整跑通；主网工作 = 把它指向主网。**没有别的目标。**
+2. **唯一原则**：冻结一切新功能开发；只接管线；只做 UI。不设计、不新建、不另起。外审（Codex / NWT）的 MUST 若不在第 1 条里 = 记票不做。
+3. **proto-v0 作废**：2026-09-14 起的原型（`kasia-console/src/{api/proto.js, lib/proto-*, services/proto-*, db/proto-*, ui/proto-*}`，96 文件；index.js 三处注册；侧栏 / 建币页入口；`kasia-console/scripts/proto-v0-template-anchors.*`；`kanet.mainnet.env` 四个 `PROTO_*` 键；主网 `proto_*` 表）定性「史上最失败的东西」。删除按清单分步执行（与 lint 费用规则、relay covenant-broadcast、pool-template-artifact 有交叉引用，盲删会坏 pre-commit 与 relay），由 KANet-UI 在主线接通之后做；删除前任何人不得再改动、审、测它。
+4. **人员**：J2、NWT 会话关闭（进程终止）；在岗 Bettor + KANet-UI + J1（younio）。
+5. **取代**：D-032 全部、D-030（TypeSafe 采用冻结）、D-022 / D-020（proto-v0 结算与下注）、D-029 §1 中"批 9 接线"的 proto-v0 表述（目标句改为本条第 1 条）；D-024 / D-023 电报线随主网 console 接通再议。**D-019 §4 记录的三个 pool 生产调用点在旧 pin 下坏掉 = 接线第一坎**，由 KANet-UI 先核实现状。D-017（官方 v2.0.1 主网节点）、D-021（公开仓写作规矩）、D-026 / D-027（开关默认关）不变。
+6. **背景（Bettor 实名）**：proto-v0 九天全程是新造轮子，D-031 第一问从未答对；Bettor 2026-09-22 的 D-032 单口径设计把测试网现成的 Polymarket 取题 + UMA 镜像判定这条路砍掉，方向从第一步就错。
+
 ### D-032 判定题出题端必须逻辑闭环：一题一个确定性判定口径、可复算、无争议；冻结→退款只是基础设施故障兜底，不是设计出口 (2026-09-22 · Owner 本机终端原话「这个会不会输家输不起故意搞事？所以这个不能轻易触发，确实之前条件漏洞，不闭环（这个其实需要加强对象是在出题端，必须逻辑闭环，条件判定清晰无争议，而不是想着搞不清就退钱。）」· Bettor 记账 · COORD-LEDGER 1623)
 
 1. **决定**：判定题在**出题端**必须闭环——一道题只认一个确定性判定口径（结构化来源 + 明确取值时刻 + 明确阈值/比较方向 + 平局规则），任何人拿同一参数能复算出同一答案；达不到的题**不许上主网**（只能零价值/simnet）。「几个来源说法不一致 ⇒ 冻结 ⇒ 退款」不是正常出口，是缺陷信号。

@@ -14017,3 +14017,11 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - J2 顺带实测：fee UTXO 碎片化再实锤（修法 resplit，另票）；`PROTO_ORACLE_ADAPTER_INTERVAL_MS=20000` 低于 MIN 30000 未生效（配置疏忽）；pmt "永久冻结"更正为约 30 s 一步的阶梯推进（10 分钟采样），与 NWT 新链观察一致，转入该坑档案。refund_flip 未重证（9-21 D 臂已证，非单口径新增）。
 - 队列：NWT 审 → 合入（只合不部署）→ J2 append 两笔小修（API 达 seal_count 拒受理 / driver 有界 HOLD）→ D-022 §3 合约票 → R-b/R-c。**主网零触碰。**
  — Bettor 2026-09-22T20:41:31Z
+
+### (1651) 🔴🔴🔴 **Owner 定向（D-033）：团队唯一目标 = 把测试网已完整跑通的预测市场（Polymarket 搜题 / 建盘 / 下注 / 委员判定 / 结算）原样指向主网，十分钟的事；唯一原则 = 冻结一切新功能开发、只接管线、只做 UI；proto-v0 作废、定性「史上最失败的东西」、待删；关闭 J2 / NWT，上线 KANet-UI｜Bettor 实名：九天 proto-v0 全程新造轮子，2026-09-22 单口径设计砍掉了现成的 Polymarket 取题 + UMA 镜像路，方向从第一步错到底；今日 F1 五臂、append 三轮、v2.1.0、23 块账本全属主线外，浪费算 Bettor** (2026-09-23 · Owner 定向 · Bettor 记账)
+- 五份接位文件顶部已插入同文目标 + 原则块；DECISIONS D-033 已写，取代 D-032 / D-030 / D-022 / D-020 及 D-029 的 proto-v0 表述。
+- 接位文件复查结论（Owner 令）：五份都没写团队目标；J2 角色被写成"proto-v0 结算 builder 实现者"，Bettor 被写成"设计先行的架构师"，NWT 铁律无边界（主线外发现也当 MUST），J1 坐标仍是 TN12。角色句改写随下一笔。
+- proto-v0 删除：清单已拉（96 源码文件 / index.js 三处 / 侧栏与建币页入口 / 2 脚本 / 4 env 键），与 lint 费用规则、relay covenant-broadcast、pool-template-artifact 交叉引用 ⇒ 主线接通后由 KANet-UI 分步删。
+- 接线第一坎（既有事实）：D-019 §4——pool 建盘三个生产调用点（api/pool.js:180、bshard-close-transport.mjs:518、closezk-v2-mint.mjs:226）在旧编译器 pin 下坏；tg-bot 仍指向已下线 :3200；主网 pool_markets 0 行。
+- **主网零触碰。**
+ — Bettor 2026-09-22T21:32:30Z
