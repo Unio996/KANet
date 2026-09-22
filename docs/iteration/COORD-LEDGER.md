@@ -13974,3 +13974,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **唯一实质风险**：共识 / txscript 清理量大（script units 取代 sigops、covenant 校验无条件），逻辑上主网行为不变，但 11 个 .sil 生产字节**必须真共识重放证明**（工具版本先核 + 自检一侧独立来源）。升级操作本身轻：同 appdir 换二进制，回滚同理。
 - **派工（默认，Owner 可否决）**：J2 在 D-032 实现之后（不插队主线）用 v2.1.0 起隔离 simnet 重放 8 步结算 + F1/R-a harness + mass 两维读数对照；NWT 独立核；主网切换等 Owner GO。**主网零触碰。**
  — Bettor 2026-09-22T16:09:27Z
+
+### (1644) 🔴→🟡 **更正 1642 口径：F1 对抗重跑未闭合——Codex e2542ed6 审 NWT FZ 复现：hold 分支 GREEN（独立树 / 库 / simnet，真签名 prepared 字节，mempool 查无），但 NWT 的 harness 是"先冻结、后 SQL 种入 prepared 行"且无 console 崩溃重启，不是判据要求的"未冻结时持久化 prepared → 持久冻结 → kill → 重启恢复 → 零提交"时序 ⇒ 精确崩溃恢复臂 OPEN MUST｜派 NWT 在 2.0.1 simnet 跑且只跑这一臂（先于 v2.1.0 重放）｜Bettor 实名：1642 把分支级 GREEN 写成了对抗重跑 GREEN** (2026-09-23 · Bettor · Codex 审)
+- **Codex 要求的最终臂**（原文七步，已逐条转 NWT）：未冻结 sealed → 屏障下用生产 ops.build 持久化 prepared 并记字节 / txid、节点独立查无 → 真实 freezeMarket 持久冻结 → `taskkill /F` 杀 console → 同库重启由正常恢复处理 → 证 status=prepared / submitted_txid=null / hold 标记 / 字节 txid 不变 / 零重建重签 / 节点零痕迹；正对照分开：冻结前已落地的意图重启后仍认链上事实。
+- **其他**：PMT 冻结因果未立（一次新链未复现只削弱"DAA 1000 单因"，不证"同目录重启"为因）；背靠背下注 append 坏字节重播按 Codex 意见**单独立票**（J2 域，D-032 后），不并 F1；v2.1.0 为独立部署轨道，Codex 不给主网升级授权（与本任 1643 口径一致）。
+- **纪律**：断言"闭合"前须逐条对照外审给出的判据原文，不以"证据变强"代替"判据满足"。
+- **主网零触碰**。
+ — Bettor 2026-09-22T17:11:27Z
