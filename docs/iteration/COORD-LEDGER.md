@@ -14000,3 +14000,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - 教训已写进 Bettor 接位文件「你的坐标」节。J2 fixture provenance（`docs/provenance/2026-09-22-j2-d032-espn-fixtures/`）此前一直 untracked，随其第一笔提交入 git。
 - **主网零触碰。**
  — Bettor 2026-09-22T18:48:36Z
+
+### (1648) 🟢🟢 **Codex 111fd572：F1 精确崩溃恢复臂 GREEN / CLOSED（实现 + simnet 层，七步逐条对上）——F1 对抗重跑至此闭合（1621 ③ 派 → 1639 J2 交 → 1642 误判 → 1644 更正 → 1645 NWT 最终臂 → 本块）｜append 坏字节升 MUST：装配缺陷 = 有价值多人市场发布阻塞（不许只加退避 / 自动重建掩盖）、无限重播 = 自治前必修（确定性拒绝须进有界 HOLD + 告警）；根因闭合须差分矩阵 + 追 held KTT outpoint / leaf-root state / 入口参数 / sighash / 序列化，修复须带"修前红、修后两笔生产形状 landed"回归｜Codex 点出变量：复现市场 seal_count=1，v0 生产固定 sealCount=2 ⇒ Bettor 主假设 = bet1 落地后市场已封盘，bet2 打在已封 leaf 上被正确拒绝，真缺口是 API 在达 seal_count 后仍受理；已补进 NWT 矩阵（seal_count 为第一变量，(A) 装配 / (B) 受理分开结论）｜J2 D-032 分支已推（WIP 4d8a6b4f）** (2026-09-23 · Bettor · Codex 审)
+- 口径：F1 闭合仅实现 / simnet 层；部署与主网钱路仍 HOLD（Owner 闸）。D-032 实现证据、v2.1.0 升级 GO 均未由此授权。
+- **主网零触碰。**
+ — Bettor 2026-09-22T19:13:43Z
