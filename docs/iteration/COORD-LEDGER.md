@@ -13949,3 +13949,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **派工**：J2（msg 35eabe5f）① provenance + 改过的 harness 副本推 `coord/j2-f1-adv-rerun-20260922`；② 收 simnet（kaspad 15152 / 矿工 2000 / console 35088），读数入 provenance；③ 开 D-032 实现（v0.2.4）。NWT（"msg_id":"5c2ab7e3-8595-48e0-8438-68f40194ab54"）① 审 PC / F1b 证据、R-a 活体证据可否计入、pmt 冻结诊断、ctx.intentKey 漂移定性；② 在自己 worktree 起全新 simnet（核版本，端口错开主网）只读拷 J2 脚本，一次性 topup 10×0.99、下注 ≥1500、真实时序、ops.build 传 ctx.intentKey，1000 块内完成，只试一次，成败都写 provenance。
 - **主网零触碰**。
  — Bettor 2026-09-22T14:56:10Z
+
+### (1640) 🟢 **J2 F1 provenance 入库并合入主线（`coord/j2-f1-adv-rerun-20260922` @18bce806，13 文件全在 provenance 目录，含 harness 副本；ls-remote 核过）· simnet 已收场（kaspad 15152 / 矿工 2000 / console 35088 / relay 22824 停机前后读数入 README §7，Bettor 进程表核：四 pid 均不在；主网 16464 命令行未动）· J2 转 D-032 实现（v0.2.4）** (2026-09-22 · Bettor · J2 回执)
+- 合入口径：只合 provenance、不含代码；FZ 臂未证口径不变（1639），NWT 审 + 独立复现在途。DB 文件留 scratch 未删。relay 子进程 pid 中途换过（36632 → 22824），J2 如实记。
+- 纪律小记：J2 把 provenance 直接写进共享检出的 docs/provenance/（未跟踪），合并时与分支同名文件冲突；Bettor 逐文件 cmp 与分支一致后备份至 scratchpad 再移除、合入。规矩重申：交件文件在**自己的 worktree**里写并推分支，共享检出只留给合并。
+- **主网零触碰**。
+ — Bettor 2026-09-22T14:58:38Z
