@@ -1,0 +1,109 @@
+[db] path=D:\kanet-tn12\scratch\_nwt_v210_simnet_console.db source=DB_PATH
+connected to simnet RPC
+relay地址(持久化载入): kaspasim:qpfcagjxtsjgfwug9jkm3p8up83udt4gjkjgf5u6cay7a9uadj0850w4g3e3q
+genesis fee输入面值: 4000000000
+[diag:step] proc.silverc.compile.bshard-artifacts ms=38 cmd=silverc ok=1 at=2026-09-22T16:37:29.554Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=28 cmd=silverc ok=1 at=2026-09-22T16:37:29.588Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=77 cmd=silverc ok=1 at=2026-09-22T16:37:29.671Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=55 cmd=silverc ok=1 at=2026-09-22T16:37:29.733Z
+genesis built: expectedTxid= 101202ea0e69a1df4dbca00d64cb4410995bdb7a8dff9701de5aeac0ad7a21ae requiredFee= 20000100 netLoss= 20000100
+独立复算 implied fee(Σin-Σout): 20000100 与built.netLoss一致: true
+
+--- 提交 market_genesis: txid=101202ea0e69a1df4dbca00d64cb4410995bdb7a8dff9701de5aeac0ad7a21ae mass=200002 ---
+market_genesis submit result: {"transactionId":"101202ea0e69a1df4dbca00d64cb4410995bdb7a8dff9701de5aeac0ad7a21ae"}
+market_genesis 节点侧getMempoolEntry(去掉冗长sigScript, 只留元数据字段): {"fee":"20000100","is_orphan":false,"transactionMeta":{"version":1,"lockTime":"0","subnetworkId":"0000000000000000000000000000000000000000","gas":"0","payload":"","storageMass":"200002","mass":"200002","verboseData":{"transactionId":"101202ea0e69a1df4dbca00d64cb4410995bdb7a8dff9701de5aeac0ad7a21ae","hash":"4970348cbb555810f02df179c104be7ea564f328569e4925882432930726626f","computeMass":"8083","blockHash":"0000000000000000000000000000000000000000000000000000000000000000","blockTime":"0"}}}
+已挖1块确认 market_genesis
+
+=== 步骤1(market_genesis)完成 ===
+[diag:step] proc.silverc.compile.bshard-artifacts ms=32 cmd=silverc ok=1 at=2026-09-22T16:37:29.798Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=16 cmd=silverc ok=1 at=2026-09-22T16:37:29.819Z
+register_append#1(first_bet,无held) fee输入面值: 3959999900
+register_append#1(first_bet,无held) built: expectedTxid= 29898bf7caae789ed23ec9fdab3ae056042ad7c7d8b977ccaa1c7fa0122efb75 requiredFee= 44925100 netLoss= 44925100
+register_append#1(first_bet,无held) 独立复算 implied fee: 44925100 一致: true
+
+--- 提交 register_append#1(first_bet,无held): txid=29898bf7caae789ed23ec9fdab3ae056042ad7c7d8b977ccaa1c7fa0122efb75 mass=449254 ---
+register_append#1(first_bet,无held) submit result: {"transactionId":"29898bf7caae789ed23ec9fdab3ae056042ad7c7d8b977ccaa1c7fa0122efb75"}
+register_append#1(first_bet,无held) 节点侧getMempoolEntry(去掉冗长sigScript, 只留元数据字段): {"fee":"44925100","is_orphan":false,"transactionMeta":{"version":1,"lockTime":"0","subnetworkId":"0000000000000000000000000000000000000000","gas":"0","payload":"","storageMass":"447999","mass":"447999","verboseData":{"transactionId":"29898bf7caae789ed23ec9fdab3ae056042ad7c7d8b977ccaa1c7fa0122efb75","hash":"3c310c525510d45f456ee440e7e470aa6e7f75fed45e6cdb9dcb482126a5f18c","computeMass":"33927","blockHash":"0000000000000000000000000000000000000000000000000000000000000000","blockTime":"0"}}}
+已挖1块确认 register_append#1(first_bet,无held)
+
+=== 步骤2(register_append#1 first_bet)完成 ===
+[diag:step] proc.silverc.compile.bshard-artifacts ms=52 cmd=silverc ok=1 at=2026-09-22T16:37:29.889Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=28 cmd=silverc ok=1 at=2026-09-22T16:37:29.924Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=12 cmd=silverc ok=1 at=2026-09-22T16:37:29.941Z
+register_append#2(second_bet,held) fee输入面值: 3875074800
+register_append#2(second_bet,held) built: expectedTxid= c75162c682f8b01c1635df7219e4b1d7e00c9351f89eedb246a8cab9c59f3402 requiredFee= 44796100 netLoss= 44796100
+register_append#2(second_bet,held) 独立复算 implied fee: 44796100 一致: true
+
+--- 提交 register_append#2(second_bet,held): txid=c75162c682f8b01c1635df7219e4b1d7e00c9351f89eedb246a8cab9c59f3402 mass=447964 ---
+register_append#2(second_bet,held) submit result: {"transactionId":"c75162c682f8b01c1635df7219e4b1d7e00c9351f89eedb246a8cab9c59f3402"}
+register_append#2(second_bet,held) 节点侧getMempoolEntry(去掉冗长sigScript, 只留元数据字段): {"fee":"44796100","is_orphan":false,"transactionMeta":{"version":1,"lockTime":"0","subnetworkId":"0000000000000000000000000000000000000000","gas":"0","payload":"","storageMass":"443877","mass":"443877","verboseData":{"transactionId":"c75162c682f8b01c1635df7219e4b1d7e00c9351f89eedb246a8cab9c59f3402","hash":"13209e4988f170b3125995351dd98d08a1fb64253482a3c1b27b33c088a8fe96","computeMass":"44198","blockHash":"0000000000000000000000000000000000000000000000000000000000000000","blockTime":"0"}}}
+已挖1块确认 register_append#2(second_bet,held)
+
+=== 步骤3(register_append#2 second_bet,held)完成 ===
+[diag:step] proc.silverc.compile.bshard-artifacts ms=51 cmd=silverc ok=1 at=2026-09-22T16:37:30.005Z
+convert_to_rootclose fee输入面值: 3810278700
+[diag:step] proc.silverc.compile.bshard-artifacts ms=29 cmd=silverc ok=1 at=2026-09-22T16:37:30.046Z
+convert_to_rootclose built: expectedTxid= ddbef0db00eb45c7c7eb95d3f58afb46e1a866d67c3280edc7a1083f4bcff42a requiredFee= 39792500 netLoss= 39792500
+convert_to_rootclose 签名后txid: ddbef0db00eb45c7c7eb95d3f58afb46e1a866d67c3280edc7a1083f4bcff42a 与expectedTxid一致: true
+convert_to_rootclose 独立复算 implied fee: 39792500 一致: true
+
+--- 提交 convert_to_rootclose: txid=ddbef0db00eb45c7c7eb95d3f58afb46e1a866d67c3280edc7a1083f4bcff42a mass=397928 ---
+convert_to_rootclose submit result: {"transactionId":"ddbef0db00eb45c7c7eb95d3f58afb46e1a866d67c3280edc7a1083f4bcff42a"}
+convert_to_rootclose 节点侧getMempoolEntry(去掉冗长sigScript, 只留元数据字段): {"fee":"39792500","is_orphan":false,"transactionMeta":{"version":1,"lockTime":"0","subnetworkId":"0000000000000000000000000000000000000000","gas":"0","payload":"","storageMass":"393775","mass":"393775","verboseData":{"transactionId":"ddbef0db00eb45c7c7eb95d3f58afb46e1a866d67c3280edc7a1083f4bcff42a","hash":"fbef6f4abebbe61f50dd6fab4f547d821a9a66f95f79372a02f4169c96207b2d","computeMass":"60422","blockHash":"0000000000000000000000000000000000000000000000000000000000000000","blockTime":"0"}}}
+已挖1块确认 convert_to_rootclose
+
+=== 步骤4(convert_to_rootclose, 审计构造+真实simnet提交)完成 ===
+close_commit built: expectedTxid= 6ed5cd31821dd87cdd79c0409670b91719175ce31526b86b2a8a7e861056398b requiredFee= 19921100 netLoss= 19921100 lockTime= 1790073450503
+committee sig65 hex length: 130 (应为130)
+
+--- 提交 close_commit(决定性): txid=6ed5cd31821dd87cdd79c0409670b91719175ce31526b86b2a8a7e861056398b mass=199212 ---
+close_commit submit result(完整原文): {"transactionId":"6ed5cd31821dd87cdd79c0409670b91719175ce31526b86b2a8a7e861056398b"}
+close_commit 节点侧getMempoolEntry(去掉冗长sigScript, 只留元数据字段): {"fee":"19921100","is_orphan":false,"transactionMeta":{"version":1,"lockTime":"1790073450503","subnetworkId":"0000000000000000000000000000000000000000","gas":"0","payload":"","storageMass":"197893","mass":"197893","verboseData":{"transactionId":"6ed5cd31821dd87cdd79c0409670b91719175ce31526b86b2a8a7e861056398b","hash":"92f3ae9f246647da29db96ee200a301d504262a8a1388164f6dfdd773d9026a1","computeMass":"35560","blockHash":"0000000000000000000000000000000000000000000000000000000000000000","blockTime":"0"}}}
+✅ close_commit被真实simnet共识接受! 已挖块确认。
+
+=== 步骤5(close_commit, 决定性步骤)完成——结果已记录 ===
+[diag:step] proc.silverc.compile.bshard-artifacts ms=28 cmd=silverc ok=1 at=2026-09-22T16:37:30.101Z
+convert_to_claim built: expectedTxid= 74b18552d469aea54337a017aeb6810b2490b92043222e3e0c4ec8e50bec4331 requiredFee= 39789300 netLoss= 39789300
+convert_to_claim 独立复算 implied fee: 39789300 一致: true
+
+--- 提交 convert_to_claim: txid=74b18552d469aea54337a017aeb6810b2490b92043222e3e0c4ec8e50bec4331 mass=397896 ---
+convert_to_claim submit result: {"transactionId":"74b18552d469aea54337a017aeb6810b2490b92043222e3e0c4ec8e50bec4331"}
+convert_to_claim 节点侧getMempoolEntry(去掉冗长sigScript, 只留元数据字段): {"fee":"39789300","is_orphan":false,"transactionMeta":{"version":1,"lockTime":"0","subnetworkId":"0000000000000000000000000000000000000000","gas":"0","payload":"","storageMass":"393674","mass":"393674","verboseData":{"transactionId":"74b18552d469aea54337a017aeb6810b2490b92043222e3e0c4ec8e50bec4331","hash":"80c50a1272f8c2abae3b20d2705e1b7681ee308e342d708795b5dcb00a23cff2","computeMass":"48618","blockHash":"0000000000000000000000000000000000000000000000000000000000000000","blockTime":"0"}}}
+已挖1块确认 convert_to_claim
+
+=== 步骤6(convert_to_claim)完成 ===
+[diag:step] proc.silverc.compile.bshard-artifacts ms=30 cmd=silverc ok=1 at=2026-09-22T16:37:30.152Z
+claim_draw真实entry参数名(核对我的argsByName是否齐全): rootOutIdx,claimOutIdx,tokenInIdx,tokenOutIdx,remainTokenOutIdx,payout,merkle_index,tree_depth,siblings,ticketInIdx,ticket_prefix_len,ticket_suffix_len,tok_prefix,tok_suffix,claim_prefix,claim_suffix
+claim_draw built: expectedTxid= dd61722f59de11aeb963f3514dfbe364210c7c3a704a4447e8d192f430c39011 requiredFee= 39602800 netLoss= 39602800
+claim_draw 独立复算 implied fee: 39602800 一致: true
+
+--- 提交 claim_draw: txid=dd61722f59de11aeb963f3514dfbe364210c7c3a704a4447e8d192f430c39011 mass=396030 ---
+claim_draw submit result(完整原文): {"transactionId":"dd61722f59de11aeb963f3514dfbe364210c7c3a704a4447e8d192f430c39011"}
+claim_draw 节点侧getMempoolEntry(去掉冗长sigScript, 只留元数据字段): {"fee":"39602800","is_orphan":false,"transactionMeta":{"version":1,"lockTime":"0","subnetworkId":"0000000000000000000000000000000000000000","gas":"0","payload":"","storageMass":"390724","mass":"390724","verboseData":{"transactionId":"dd61722f59de11aeb963f3514dfbe364210c7c3a704a4447e8d192f430c39011","hash":"35f1ff78e9543d1169061957bae25f1ad980525774e871f9eba38c644cfb04bb","computeMass":"40407","blockHash":"0000000000000000000000000000000000000000000000000000000000000000","blockTime":"0"}}}
+✅ claim_draw被真实simnet共识接受! 已挖块确认。
+
+=== 步骤7(claim_draw)完成——结果已记录 ===
+[diag:step] proc.silverc.compile.bshard-artifacts ms=22 cmd=silverc ok=1 at=2026-09-22T16:37:30.186Z
+spend built: expectedTxid= 56d047edcecf4a4a6edcb4420966c2effbd74a22b35d9573b05a6b215ff04d2e requiredFee= 19785700 netLoss= 19785700
+spend: output[0]真实covenant_id(其UTXO自身身份)= 31742a89192821af28c4b028536c6d6b96bd51d78ccf930c6af9c8801ff0d302 (与owner字段值destCovIdHex= db7ee75435cebdb1c262bf65ef6c73cbf0127eb7cd4af089be28f6acb0052e20 是两个独立概念, 不必相等)
+spend 独立复算 implied fee: 19785700 一致: true
+
+--- 提交 spend(最后一步): txid=56d047edcecf4a4a6edcb4420966c2effbd74a22b35d9573b05a6b215ff04d2e mass=197858 ---
+spend submit result(完整原文): {"transactionId":"56d047edcecf4a4a6edcb4420966c2effbd74a22b35d9573b05a6b215ff04d2e"}
+spend 节点侧getMempoolEntry(去掉冗长sigScript, 只留元数据字段): {"fee":"19785700","is_orphan":false,"transactionMeta":{"version":1,"lockTime":"0","subnetworkId":"0000000000000000000000000000000000000000","gas":"0","payload":"","storageMass":"193570","mass":"193570","verboseData":{"transactionId":"56d047edcecf4a4a6edcb4420966c2effbd74a22b35d9573b05a6b215ff04d2e","hash":"36eeef2ab7fe1829635013008a42fbc9d1061c4f3fc6fdde904fcfa8f995e7cc","computeMass":"29914","blockHash":"0000000000000000000000000000000000000000000000000000000000000000","blockTime":"0"}}}
+✅ KanetTokenClaim.spend被真实simnet共识接受! 全链8步全部完成。
+
+=== 步骤8(spend, 全链最后一步)完成——结果已记录 ===
+
+输家ticket回收验证: 输家=side1(bettorPk=66b28b45fb087449...), 赢方=side0
+输家ticket回收 built: expectedTxid= e63902d09ae7f51f1ab240a46bb328cfda87e13a6c981ec7502860b91f2f1e91 output= 18000000 fixedFee= 2000000 (本地mass估算不可信, 见上方注释)
+输家ticket回收 独立复算 implied fee: 2000000
+
+--- 提交 输家ticket自我回收: txid=e63902d09ae7f51f1ab240a46bb328cfda87e13a6c981ec7502860b91f2f1e91 mass=5555 ---
+输家ticket回收 submit result(完整原文): {"transactionId":"e63902d09ae7f51f1ab240a46bb328cfda87e13a6c981ec7502860b91f2f1e91"}
+输家ticket回收 节点侧getMempoolEntry(去掉冗长sigScript, 只留元数据字段): {"fee":"2000000","is_orphan":false,"transactionMeta":{"version":1,"lockTime":"0","subnetworkId":"0000000000000000000000000000000000000000","gas":"0","payload":"","storageMass":"5555","mass":"5555","verboseData":{"transactionId":"e63902d09ae7f51f1ab240a46bb328cfda87e13a6c981ec7502860b91f2f1e91","hash":"be06fa681dcfcccb98e0c679f181dcc9665266a6592a8486c2c4e4653cd9d2f4","computeMass":"7750","blockHash":"0000000000000000000000000000000000000000000000000000000000000000","blockTime":"0"}}}
+✅ 输家ticket自我回收被真实simnet共识接受! 确认PoolSideTicket.sil无"永久锁死"约束——输家随时可authorize_spend取回0.2 KAS。
+
+=== 步骤9(输家ticket自我回收验证)完成——结果已记录 ===
+
+断开连接。

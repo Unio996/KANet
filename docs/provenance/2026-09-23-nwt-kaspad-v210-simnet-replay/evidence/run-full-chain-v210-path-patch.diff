@@ -1,0 +1,17 @@
+diff --git a/kasia-console/scripts/simnet/run-full-chain.mjs b/kasia-console/scripts/simnet/run-full-chain.mjs
+index 75771447..4bc04133 100644
+--- a/kasia-console/scripts/simnet/run-full-chain.mjs
++++ b/kasia-console/scripts/simnet/run-full-chain.mjs
+@@ -46,9 +46,9 @@ const DUST_MIN_SOMPI = 1000n; // RootClose.sil/RootClaim.sil DUST_MIN常量(somp
+ const WINNER_SIDE = 0;
+ 
+ const NETWORK = 'simnet';
+-const RPC_URL = 'ws://127.0.0.1:18510';
+-const STATE_PATH = 'D:/kanet-tn12/scratch/_nwt_simnet_state.json';
+-const CHAIN_PATH = 'D:/kanet-tn12/scratch/_nwt_simnet_chain.json';
++const RPC_URL = 'ws://127.0.0.1:28513';
++const STATE_PATH = 'D:/kanet-tn12/scratch/_nwt_v210_simnet_state.json';
++const CHAIN_PATH = 'D:/kanet-tn12/scratch/_nwt_v210_simnet_chain.json';
+ 
+ const rpc = new kaspa.RpcClient({ url: RPC_URL, networkId: NETWORK });
+ await rpc.connect();
