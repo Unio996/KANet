@@ -14012,3 +14012,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - 纪律与工具：NWT 分支起自含 master 同步历史的树（主线外 10 个老提交），闸拒推（队列 12 ≠ 3）⇒ 改摘文件提交不 merge；规矩：侧分支一律从 origin/bshard-m3-deploy 当前 HEAD 起。摘入时 pre-commit R-DOC-PATH 误扫 gitignored `docs-private/`（规则早于 D-021 的 docs-private 约定，`mdSkip` 缺该目录）⇒ 主线不收两个 .mjs 副本（见分支），lint 一行修（mdSkip 加 docs-private）派 J2 随 (c) 顺手。
 - **主网零触碰。**
  — Bettor 2026-09-22T20:15:19Z
+
+### (1650) 🟢 **J2 D-032 单口径实现三里程碑交齐（`coord/j2-d032-single-judge-20260923` @d4405fb8，7 提交干净起自 af327d49，40 文件 +1934/−372）——(a) §2.1/§2.2 单测绿；(b) §2.3–§2.7 + §7 单测 / 变异 / lint 绿；(c) simnet e2e：H 正臂七步全自动真落链（建题两步回签 → 700/600 → seal → mock ESPN extractor 票 → promote ws=1 → close_commit → convert_to_claim → claim_draw），R 故障臂 mock 永不 final 50+ 分钟零票零 promote、冻结用生产 freezeMarket（harness 加速，诚实标注）后 already_frozen + 触发器拒写 ws；Codex ddf67d6b MUST 已修（1ce55ee8，缺 / 重复 / 空 event 参数必核，负测两处、回退验证必红）；lint mdSkip 补 docs-private（0b46b88c）｜**Bettor 验落链**（读其 simnet 库）：347364a5 resolved / ws=1 / src=extractor / 1 extractor 票 / 两笔 confirmed / claim 1300 有 txid / spec 冻结 canonical_event 5101 + 渲染语句；92f9b003 sealed + frozen / 零票 / oms=kanet_native / cid=null——与报告一致｜派 NWT 实现审（关 3，排其矩阵最后一组后），Bettor 盯一点：urlEventParam"键不存在才跳过"的口子交 NWT 定级** (2026-09-23 · Bettor · J2 交件)
+- J2 顺带实测：fee UTXO 碎片化再实锤（修法 resplit，另票）；`PROTO_ORACLE_ADAPTER_INTERVAL_MS=20000` 低于 MIN 30000 未生效（配置疏忽）；pmt "永久冻结"更正为约 30 s 一步的阶梯推进（10 分钟采样），与 NWT 新链观察一致，转入该坑档案。refund_flip 未重证（9-21 D 臂已证，非单口径新增）。
+- 队列：NWT 审 → 合入（只合不部署）→ J2 append 两笔小修（API 达 seal_count 拒受理 / driver 有界 HOLD）→ D-022 §3 合约票 → R-b/R-c。**主网零触碰。**
+ — Bettor 2026-09-22T20:41:31Z
