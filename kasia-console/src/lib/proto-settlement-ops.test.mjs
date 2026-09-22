@@ -20,7 +20,8 @@ import { randomBytes } from 'node:crypto';
 const kaspa = await import('kaspa-wasm');
 const { sqlite } = await import('../db/client.js');
 const { buildMarketGenesisTxJson, buildRegisterAppendTxJson, scriptPublicKeyFromHex } = await import('./proto-tx-assembly.mjs');
-const { computeMarketGenesisArtifacts, computeShardLeafRedeemScript, computeKttGenesisArtifact, computeTicketGenesisArtifact, loadProtocolConstants, p2sh } = await import('./proto-covenant-builder.mjs');
+const { computeMarketGenesisArtifacts, computeShardLeafRedeemScript, computeKttGenesisArtifact, computeTicketGenesisArtifact, computeRootCloseGenesisArtifact, loadProtocolConstants, p2sh } = await import('./proto-covenant-builder.mjs');
+const { freezeMarket } = await import('./proto-settlement-freeze.mjs');
 const { compileSilV100, ctorBytes32V100, ctorIntV100 } = await import('./pool-bshard-artifacts.mjs');
 const { extractTemplateArtifactV100 } = await import('./pool-template-artifact.mjs');
 const SI = await import('./proto-settlement-intent.mjs');
@@ -71,9 +72,17 @@ const fakeSendCmd = async (relayId, cmd) => {
     return { ok: true, facts: true, factsVersion: 1, form: 'list', utxos, truncated: false };
   }
   if (cmd.type === 'covenant_broadcast') {
-    const tx = kaspa.Transaction.deserializeFromSafeJSON(cmd.tx_json); tx.finalize(); const id = String(tx.id).toLowerCase(); tx.free();
+    const tx = kaspa.Transaction.deserializeFromSafeJSON(cmd.tx_json); tx.finalize(); const id = String(tx.id).toLowerCase();
+    const inputKeys = tx.inputs.map((i) => `${String(i.previousOutpoint.transactionId).toLowerCase()}:${Number(i.previousOutpoint.index)}`);
+    tx.free();
     if (id !== cmd.expected_txid) return { ok: false, error: `expected_txid mismatch ${id} != ${cmd.expected_txid}`, code: 'txid_mismatch' };
     SI.recordSettlementIntentPhase({ intentKey: cmd.intent_key, phase: 'prepared', txid: id, txJson: JSON.stringify([cmd.tx_json]) });     // 真 relay 在广播前把 prepared 回执落 console(现有机制); 形状与 relay covenant-broadcast-relay.mjs ingestPhase 逐字一致: JSON.stringify([txJson])(9-4 simnet 实测: 此前这里存裸串, 与真写入方不一致 ⇒ 离线端到端没抓到 pointers 的形状 bug)
+    // F4 真实争用测试(账本1622)需要的最小真实性: 任一输入 outpoint 已不在虚拟 UTXO 集里(已被另一笔更早
+    // "落链"的交易花掉)⇒ 拒绝, 镜像真实 kaspad 的行为(missing/spent input, 不是"双花被节点接受")——这堵
+    // 拒绝墙本身才是 NO TX NO STATE 最终不丢钱的保证; F4 的两层预留是"减少撞上这堵墙的次数", 不是唯一防线,
+    // 此前这个假 relay 没有模拟这堵墙, 会让"两边都真实广播成功"这种在真节点上不可能发生的情形被静默放过。
+    const missing = inputKeys.filter((k) => !chain.has(k));
+    if (missing.length) return { ok: false, error: `missing/spent input(s): ${missing.join(',')}`, code: 'inputs_spent' };
     broadcasts.push({ intentKey: cmd.intent_key, txid: id, cmd });
     applyTx(cmd.tx_json);
     return { ok: true, txId: id };
@@ -192,6 +201,115 @@ await t('E2E-3 convert_to_claim → claim_draw: 真构造(ticket 由委员私钥
   assert.deepEqual(errEvents(), [], JSON.stringify(errEvents()));
   const idle = await driver.runTick({ cap: 5 }); assert.equal(idle.actioned, 0, '终态后无任何后续动作(不重复广播)'); assert.equal(broadcasts.length, 4);
 });
+
+// ══════════════ F4 真实争用: refund_flip 与创世/结算跨入口争同一最佳 fee UTXO(Bettor 裁定, 账本1622 追问) ══════════════
+// 不是单元测试用假 selectFeeUtxoByConstruction 模拟——三个真实生产函数(driver.advanceStep 跑真 ops.build,
+// buildMarketGenesisAndBroadcast 是创世的真实生产函数)用 Promise.all 真并发, 在同一个进程里共享
+// proto-fee-reservation.mjs 的模块级预留状态(两层都是单例, 不是每次注入新实例)。下注(register_append)与
+// 创世共用同一份 fetchFeeCandidates + selectAndReserveFeeUtxo 代码(proto-broadcast-ops.mjs 两个调用点结构
+// 相同, 已在 proto-broadcast-ops.test.mjs F3b-1/F3b-4 分别验证过), 本测试不重复起第四个下注场景, 用创世代表
+// 这一族(genesis/bet 在 F4 里是同一段代码, 不是两套独立实现)。
+{
+  const { buildMarketGenesisAndBroadcast } = await import('./proto-broadcast-ops.mjs');
+  const { ensureMarketPending } = await import('./proto-market-intent.mjs');
+  const NOW = Date.now();
+  const RF_GRACE_MS = 7_200_000 + 30_000;   // REFUND_FLIP_GRACE_MS(2h, proto-close-commit-gate.mjs)+ CLOSE_COMMIT_PMT_MARGIN_MS(30s)
+
+  // 通用: 真实建一个"创世+两笔下注都已落链"的市场(与文件顶部 MARKET_ID 的建法同构, 参数化), 复用模块级
+  // 的 KTT 模板产物(kttEntryAbi/kttStateFieldCount/tokPrefixHex/tokSuffixHex 与 marketId 无关)。
+  async function freshMarketWithAppends({ deadlineMs, stakes = [600, 700] }) {
+    const marketId = randomBytes(32).toString('hex');
+    const art = await computeMarketGenesisArtifacts({ marketId, minBet: MIN_BET, deadlineMs });
+    const gBuilt = buildMarketGenesisTxJson({ kaspa, network: NETWORK, feeUtxo: { txid: randomBytes(32).toString('hex'), vout: 0, value: 10_000_000_000n, scriptPublicKeyHex: relaySpkHex }, relayChangeScriptPublicKeyHex: relaySpkHex, shardLeafScriptPubKeyHex: art.shardLeafDirect.scriptPubKeyHex, absFeeCapSompi: 80_000_000n });
+    const covId = gBuilt.shardLeafCovId;
+    const sldCtor = (s) => [ctorBytes32V100(marketId), ctorBytes32V100(consts.ps_tmpl_hash), ctorBytes32V100(marketId), ctorIntV100(SEAL_COUNT), ctorIntV100(MIN_BET), ctorBytes32V100(art.rootCloseTmplHash), ctorBytes32V100('00'.repeat(32)), ctorBytes32V100(consts.token_tmpl_hash), ctorIntV100(s.local_yes), ctorIntV100(s.local_no), ctorIntV100(s.count), ctorIntV100(s.pool_value), ctorIntV100(art.shardLeafOwnRedeemLen)];
+    function doAppend({ side, stake, currentState, heldInput, leafOutpoint }) {
+      const newState = { local_yes: currentState.local_yes + (side === 0 ? stake : 0), local_no: currentState.local_no + (side === 1 ? stake : 0), count: currentState.count + 1, pool_value: currentState.pool_value + stake };
+      const leafRedeem = computeShardLeafRedeemScript({ marketId, minBet: MIN_BET, sealCount: SEAL_COUNT, rootcloseTmplHash: art.rootCloseTmplHash, state: currentState, ownRedeemLen: art.shardLeafOwnRedeemLen });
+      const registerAppendEntryAbi = compileSilV100(SLD_PATH, sldCtor(currentState), 'ShardLeaf_direct')._raw.contracts.ShardLeaf_direct.entries.register_append;
+      const merged = computeKttGenesisArtifact({ amount: newState.pool_value, ownerCovIdHex: covId });
+      const ticket = compileSilV100(TICKET_PATH, [{ kind: 'bytes', value: [...Buffer.from(art.committeePubkeyHex, 'hex')] }, { kind: 'int', value: side }, { kind: 'int', value: stake }, { kind: 'bytes', value: [...Buffer.from(marketId, 'hex')] }], 'PoolSideTicket');
+      const tt = extractTemplateArtifactV100(ticket);
+      const built = buildRegisterAppendTxJson({
+        kaspa, network: NETWORK, leafRedeemScript: leafRedeem.script, leafStateLayout: leafRedeem.stateLayout, leafOutpoint, leafCovId: covId, currentState, newState, heldInput,
+        feeUtxo: { txid: randomBytes(32).toString('hex'), vout: 0, value: 10_000_000_000n, scriptPublicKeyHex: relaySpkHex }, relayChangeScriptPublicKeyHex: relaySpkHex,
+        registerAppendEntryAbi, registerAppendArgs: { side, stake, bettorPk: art.committeePubkeyHex, psPrefix: '0x' + Buffer.from(tt.templatePrefix).toString('hex'), psSuffix: '0x' + Buffer.from(tt.templateSuffix).toString('hex'), tokPrefix: tokPrefixHex, tokSuffix: tokSuffixHex },
+        ticketScriptPubKeyHex: '0x' + p2sh(Buffer.from(ticket.script)), mergedKttScript: merged.script, absFeeCapSompi: 100_000_000n,
+      });
+      return { built, newState, merged };
+    }
+    const a1 = doAppend({ side: 0, stake: stakes[0], currentState: { local_yes: 0, local_no: 0, count: 0, pool_value: 0 }, heldInput: null, leafOutpoint: { txid: gBuilt.expectedTxid, vout: 0 } });
+    const a2 = doAppend({ side: 1, stake: stakes[1], currentState: a1.newState, leafOutpoint: { txid: a1.built.expectedTxid, vout: 0 },
+      heldInput: { txid: a1.built.expectedTxid, vout: 2, value: 20_000_000n, scriptPublicKeyHex: a1.merged.scriptPubKeyHex, redeemScript: a1.merged.script, entryAbi: kttEntryAbi, stateFieldCount: kttStateFieldCount } });
+    for (const tx of [gBuilt.txJson, a1.built.txJson, a2.built.txJson]) applyTx(tx);
+    sqlite.prepare(`INSERT INTO proto_markets (id, token_def_id, question, deadline_ms, min_bet, seal_count, committee_pubkeys_json, committee_privkey_enc, rootclose_tmpl_hash, shardleaf_txid, shardleaf_vout, shardleaf_cov_id, shardleaf_own_redeem_len, status, created_at, updated_at)
+      VALUES (?, 'tok1', 'q', ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 'betting', ?, ?)`).run(marketId, deadlineMs, MIN_BET, SEAL_COUNT, JSON.stringify([art.committeePubkeyHex]), art.committeePrivkeyEnvelope, art.rootCloseTmplHash, gBuilt.expectedTxid, covId, art.shardLeafOwnRedeemLen, T0, T0);
+    let n = 0;
+    for (const [b, side, stake] of [[a1, 0, stakes[0]], [a2, 1, stakes[1]]]) {
+      n++; const betId = randomBytes(32).toString('hex');
+      sqlite.prepare("INSERT INTO proto_bets (id, market_id, bettor_pk, side, stake, ticket_txid, ticket_vout, status, created_at, confirmed_at) VALUES (?,?,?,?,?,?,?, 'confirmed', ?, ?)").run(betId, marketId, art.committeePubkeyHex, side, stake, b.built.expectedTxid, 1, T0, `2026-09-22T00:00:0${n}.000Z`);
+      sqlite.prepare("INSERT INTO proto_bet_intents (intent_key, bet_id, step, status, prepared_txid, prepared_tx_json, submitted_txid, landed_at, created_at, updated_at) VALUES (?,?,'append','landed',?,?,?,?,?,?)")
+        .run(`proto-bet:${betId}:append`, betId, b.built.expectedTxid, JSON.stringify([b.built.txJson]), b.built.expectedTxid, `2026-09-22T00:00:0${n}.000Z`, T0, T0);
+    }
+    return marketId;
+  }
+
+  const X = await freshMarketWithAppends({ deadlineMs: NOW - 200_000 });          // 供 'seal'
+  const Y = await freshMarketWithAppends({ deadlineMs: NOW - RF_GRACE_MS - 60_000 }); // 供 'refund_flip'(已超 2h+30s grace)
+
+  await t('F4 前置: Y 真实推进到 sealed 并冻结(refund_flip 的两个前置条件: seal 意图 landed + 已冻结)', async () => {
+    await tickUntil(() => sqlite.prepare('SELECT status FROM proto_markets WHERE id=?').get(Y).status === 'sealed', 3);
+    freezeMarket({ db: sqlite, marketId: Y, reason: 'inconsistent_verdicts', pmt: null, wallMs: Date.now(), log: { log() {}, warn() {}, error() {} } });
+    assert.equal(intentStatus('market', Y, 'seal'), 'landed');
+  });
+
+  await t('F4 真实争用①(结算跨入口): X 的 seal 与 Y 的 refund_flip 用 Promise.all 真并发(driver.advanceStep, 真 ops.build, 真 selectAndReserveFeeUtxo), 候选池只留一枚"最佳"候选 ⇒ 它最多被一笔真实广播的交易花掉(绝不双花); 断言只钉这一个不变量, 不钉"哪一方赢"或"总共几笔广播成功"——构造成功一方若产生找零输出, 会给另一方腾出一枚全新候选, 双方都成功是合法结局, 唯一不合法的是同一个 outpoint 被两笔不同交易同时声称花掉', async () => {
+    for (const k of [...chain.keys()]) { const e = chain.get(k); if (e.scriptHex === relaySpkHex.slice(2).toLowerCase() && e.covenantId === null) chain.delete(k); }   // 清空其余 relay UTXO, 只留下面这一枚
+    const sharedTxid = randomBytes(32).toString('hex');
+    chain.set(`${sharedTxid}:0`, { amount: 97_000_000n, scriptHex: relaySpkHex.slice(2).toLowerCase(), covenantId: null });
+    const beforeCount = broadcasts.length;
+    const [rSeal, rRf] = await Promise.all([
+      driver.advanceStep({ step: 'seal', subjectId: X, marketId: X }),
+      driver.advanceStep({ step: 'refund_flip', subjectId: Y, marketId: Y }),
+    ]);
+    const newBroadcasts = broadcasts.slice(beforeCount);
+    // 核心不变量: 每笔真实广播的交易互不重叠花费同一个 outpoint(不止对 sharedTxid, 对全部 outpoint 都成立——
+    // 这正是 covenant_broadcast 的"missing/spent input"拒绝墙在赋能测试用假 relay 里也生效之后该有的样子)。
+    const allSpent = newBroadcasts.flatMap((b) => JSON.parse(b.cmd.tx_json).inputs.map((i) => i.transactionId));
+    const dup = allSpent.filter((v, i) => allSpent.indexOf(v) !== i);
+    assert.deepEqual(dup, [], `不该有任何 outpoint 被两笔广播同时花掉, 实际重复: ${JSON.stringify(dup)}; 全部广播=${JSON.stringify(newBroadcasts.map((b) => b.intentKey))}`);
+    const sharedSpentCount = allSpent.filter((t2) => t2 === sharedTxid).length;
+    assert.ok(sharedSpentCount <= 1, `共享候选(${sharedTxid.slice(0, 12)}…)最多只能被一笔真实交易花掉, 实际出现 ${sharedSpentCount} 次`);
+    assert.ok([rSeal.outcome, rRf.outcome].includes('submitted'), `至少一方成功(否则整个测试没测到任何真实构造), 实际 ${JSON.stringify([rSeal.outcome, rRf.outcome])}`);
+  });
+
+  const Z = randomBytes(32).toString('hex');
+  const zArt = await computeMarketGenesisArtifacts({ marketId: Z, minBet: MIN_BET, deadlineMs: NOW - 200_000 });
+  ensureMarketPending({ id: Z, token_def_id: 'tok1', question: 'q-Z', deadline_ms: NOW - 200_000, min_bet: MIN_BET, seal_count: SEAL_COUNT, committee_pubkeys_json: JSON.stringify([zArt.committeePubkeyHex]), committee_privkey_enc: zArt.committeePrivkeyEnvelope, rootclose_tmpl_hash: zArt.rootCloseTmplHash, shardleaf_own_redeem_len: zArt.shardLeafOwnRedeemLen });
+  const Y2 = await freshMarketWithAppends({ deadlineMs: NOW - RF_GRACE_MS - 60_000 });
+  await t('F4 前置②: Y2 同 Y 走到 sealed 并冻结(第二个 refund_flip 场景, 供创世争用测试用, 与①相互独立)', async () => {
+    await tickUntil(() => sqlite.prepare('SELECT status FROM proto_markets WHERE id=?').get(Y2).status === 'sealed', 3);
+    freezeMarket({ db: sqlite, marketId: Y2, reason: 'inconsistent_verdicts', pmt: null, wallMs: Date.now(), log: { log() {}, warn() {}, error() {} } });
+  });
+
+  await t('F4 真实争用②(创世跨入口——下注与创世在 F4 里是同一段代码 fetchFeeCandidates+selectAndReserveFeeUtxo, proto-broadcast-ops.test.mjs F3b-4 已单独验证下注侧, 这里不重复起第四个并发臂): Z 的创世(buildMarketGenesisAndBroadcast, 真实生产函数)与 Y2 的 refund_flip 用 Promise.all 真并发, 候选池只留一枚"最佳"候选 ⇒ 它最多被一笔真实广播花掉(同①, 不钉总成功数)', async () => {
+    for (const k of [...chain.keys()]) { const e = chain.get(k); if (e.scriptHex === relaySpkHex.slice(2).toLowerCase() && e.covenantId === null) chain.delete(k); }
+    const sharedTxid2 = randomBytes(32).toString('hex');
+    chain.set(`${sharedTxid2}:0`, { amount: 97_500_000n, scriptHex: relaySpkHex.slice(2).toLowerCase(), covenantId: null });
+    const beforeCount = broadcasts.length;   // genesis 的 covenant_broadcast 与 refund_flip 的 covenant_broadcast 走同一个 fakeSendCmd, 都记进同一个 broadcasts 数组——不需要另外拼装
+    const [rGenesis, rRf2] = await Promise.all([
+      buildMarketGenesisAndBroadcast({ kaspa, network: NETWORK, market: sqlite.prepare('SELECT * FROM proto_markets WHERE id=?').get(Z), sendCmd: fakeSendCmd, relayId: 'ops-test-relay', relayAddress: relayAddr }),
+      driver.advanceStep({ step: 'refund_flip', subjectId: Y2, marketId: Y2 }),
+    ]);
+    const newBroadcasts = broadcasts.slice(beforeCount);
+    const allSpent2 = newBroadcasts.flatMap((b) => JSON.parse(b.cmd.tx_json).inputs.map((i) => i.transactionId));
+    const dup2 = allSpent2.filter((v, i) => allSpent2.indexOf(v) !== i);
+    assert.deepEqual(dup2, [], `不该有任何 outpoint 被两笔广播同时花掉, 实际重复: ${JSON.stringify(dup2)}`);
+    const sharedSpentCount2 = allSpent2.filter((t2) => t2 === sharedTxid2).length;
+    assert.ok(sharedSpentCount2 <= 1, `共享候选(${sharedTxid2.slice(0, 12)}…)最多只能被一笔真实交易花掉, 实际出现 ${sharedSpentCount2} 次`);
+    assert.ok(!!rGenesis.txId || rRf2.outcome === 'submitted', `至少一方成功, 实际 genesis=${JSON.stringify(rGenesis)} refund_flip=${JSON.stringify(rRf2)}`);
+  });
+}
 await t('私钥卫生: 全部广播命令 / 事件 / 意图列里不含委员私钥信封明文之外的密钥材料——扫描 broadcasts、events、intents 全文不含 relay 私钥与委员信封原文', () => {
   const secrets = [relayPriv.toString(), sqlite.prepare('SELECT committee_privkey_enc AS e FROM proto_markets WHERE id = ?').get(MARKET_ID).e];
   const blob = JSON.stringify(broadcasts.map((b) => b.cmd)) + JSON.stringify(sqlite.prepare('SELECT * FROM events').all()) + JSON.stringify(sqlite.prepare('SELECT * FROM proto_settlement_intents').all());

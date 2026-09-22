@@ -24,14 +24,14 @@ import {
   CONTINUATION_OUTPUT_SOMPI, REGISTER_APPEND_TICKET_OUT_INDEX,
 } from './proto-tx-assembly.mjs';
 import { assertFactsResponse } from './proto-settlement-c1.mjs';
-import { selectAndReserveFeeUtxo, reservedFeeOutpoints, releaseReservationOnPrepared } from './proto-fee-reservation.mjs';
+import { selectAndReserveFeeUtxo, reservedFeeOutpoints, releaseReservationOnPrepared, deferReservationReconciliation } from './proto-fee-reservation.mjs';
 import {
   computeShardLeafRedeemScript, computeKttGenesisArtifact, computeTicketGenesisArtifact,
   loadFeeProfileCap, loadProtocolConstants,
 } from './proto-covenant-builder.mjs';
 import { compileSilV100, ctorBytes32V100, ctorIntV100 } from './pool-bshard-artifacts.mjs';
-import { marketIntentKeyFor, markMarketStatus } from './proto-market-intent.mjs';
-import { betIntentKeyFor } from './proto-bet-intent.mjs';
+import { marketIntentKeyFor, markMarketStatus, getMarketRow } from './proto-market-intent.mjs';
+import { betIntentKeyFor, getBetIntent } from './proto-bet-intent.mjs';
 import {
   deriveLeafState, deriveLeafOutpoint, deriveHeldKttOutpoint, assertNoInFlightAppend,
   assertLeafAndHeldConsistent, assertLeafStateMatchesChain, assertHeldKttOutpointMatchesChain,
@@ -120,11 +120,16 @@ export async function buildMarketGenesisAndBroadcast({ kaspa, network, market, s
   })); }
   catch (e) { return { error: e.message }; }
 
-  try {
-    // 🔴 账本1438②: 发 IPC 之前原子写入(单条 UPDATE), 不等 relay 回执。
-    markMarketStatus(market.id, { shardleaf_cov_id: built.shardLeafCovId });
+  // 🔴 账本1438②: 发 IPC 之前原子写入(单条 UPDATE), 不等 relay 回执。
+  markMarketStatus(market.id, { shardleaf_cov_id: built.shardLeafCovId });
 
-    const rep = await sendCmd(relayId, {
+  // F4(MUST-2, NWT 账本1623/1624): 释放时机按结果分两支, 同 driver-core.mjs 的结算路径——sendCmd 正常
+  // resolve(不论 ok true/false, relay 给出确定答复)⇒ 立即释放; sendCmd 本身抛错(IPC 超时/无响应, 结果
+  // 不确定)⇒ 不释放, 交 deferReservationReconciliation 到期查 DB(真实 relay 广播代码在 IPC 应答前就已经
+  // ingestPhase 回 console, "没等到回执"不等于"relay 什么也没做")。
+  let rep;
+  try {
+    rep = await sendCmd(relayId, {
       type: PROTO_COVENANT_BROADCAST_TYPE,
       intent_key: marketIntentKeyFor(market.id),
       tx_json: built.txJson,
@@ -133,12 +138,14 @@ export async function buildMarketGenesisAndBroadcast({ kaspa, network, market, s
       genesis_output_indices: built.genesisOutputIndices,
       continuation_output_indices: built.continuationOutputIndices,
     }, 30000, 'proto-driver');
-
-    if (rep?.ok && rep?.txId) return { txId: rep.txId };
-    return { error: rep?.error || `covenant_broadcast failed (code=${rep?.code || 'unknown'})` };
-  } finally {
-    releaseReservationOnPrepared(feeUtxo);
+  } catch (networkErr) {
+    // 不确定结果, 不释放——保持本函数一贯的"不 throw, 返回 {error}"契约(调用方 driveMarketGenesis 不接抛错)。
+    deferReservationReconciliation(feeUtxo, () => !!(getMarketRow(market.id) || {}).genesis_prepared_tx_json);
+    return { error: `covenant_broadcast transport error: ${networkErr && networkErr.message ? networkErr.message : String(networkErr)}` };
   }
+  releaseReservationOnPrepared(feeUtxo);
+  if (rep?.ok && rep?.txId) return { txId: rep.txId };
+  return { error: rep?.error || `covenant_broadcast failed (code=${rep?.code || 'unknown'})` };
 }
 
 /** market_genesis 落链判据用的地址(genesis ShardLeaf_direct 输出的 P2SH bech32 地址)——从 rootclose_tmpl_hash
@@ -285,8 +292,10 @@ export async function buildRegisterAppendAndBroadcast({ kaspa, network, market, 
   })); }
   catch (e) { return { error: e.message }; }
 
+  // F4(MUST-2, NWT 账本1623/1624): 释放时机按结果分两支, 同 market_genesis 一侧。
+  let rep;
   try {
-    const rep = await sendCmd(relayId, {
+    rep = await sendCmd(relayId, {
       type: PROTO_COVENANT_BROADCAST_TYPE,
       intent_key: betIntentKeyFor(bet.id, 'append'),
       tx_json: built.txJson,
@@ -295,12 +304,13 @@ export async function buildRegisterAppendAndBroadcast({ kaspa, network, market, 
       genesis_output_indices: built.genesisOutputIndices,
       continuation_output_indices: built.continuationOutputIndices,
     }, 30000, 'proto-driver');
-
-    if (rep?.ok && rep?.txId) return { txId: rep.txId };
-    return { error: rep?.error || `covenant_broadcast failed (code=${rep?.code || 'unknown'})` };
-  } finally {
-    releaseReservationOnPrepared(feeUtxo);
+  } catch (networkErr) {
+    deferReservationReconciliation(feeUtxo, () => !!(getBetIntent(betIntentKeyFor(bet.id, 'append')) || {}).prepared_tx_json);
+    return { error: `covenant_broadcast transport error: ${networkErr && networkErr.message ? networkErr.message : String(networkErr)}` };
   }
+  releaseReservationOnPrepared(feeUtxo);
+  if (rep?.ok && rep?.txId) return { txId: rep.txId };
+  return { error: rep?.error || `covenant_broadcast failed (code=${rep?.code || 'unknown'})` };
 }
 
 /** bet_mint 步骤B 落链判据用的地址——新 leaf 续约输出(REGISTER_APPEND_LEAF_CONT_OUT_INDEX)的 P2SH

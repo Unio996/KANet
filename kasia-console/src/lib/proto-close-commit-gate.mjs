@@ -7,10 +7,18 @@
 //
 // 纯函数 + 一个注入 rpc 的读取器; 本文件不接线(驱动接线是批9), 只提供可测的判据。
 
+import { REFUND_GRACE_SEC } from './pool-refund-grace.mjs';
+
 /** 节点 finality 是 lock_time < pmt(严格小于); 再留 30s 小余量。 */
 export const CLOSE_COMMIT_PMT_MARGIN_MS = 30_000;
-/** refund_flip 的合约常量: deadline_ms + 7,200,000(RootClose.sil refund_flip, NWT 批4 B4-3)。 */
-export const REFUND_FLIP_GRACE_MS = 7_200_000;
+/** refund_flip 的合约常量: deadline_ms + 7,200,000(RootClose.sil refund_flip, NWT 批4 B4-3)。
+ *  🔴 D-031 漏项(Owner 追问后核出, 账本1624): 老自动退款路(services/bettor-refund-claim-auto.mjs 等)
+ *  的 REFUND_GRACE_SEC(pool-refund-grace.mjs, PoolSpine/PoolSide 系 SS 用)同样是 7200 秒——不留两份
+ *  "2 小时"各自维护, 从那个单一真相源导入乘 1000(该常量本身是【秒】, RootClose.sil 侧要的是【毫秒】)。
+ *  两边合约家族不同(老 SS 用 REFUND_GRACE_SEC 直接乘 1000 做 tx.time 下界; RootClose.sil 的
+ *  refund_flip 走同款 pmt 门 + CLOSE_COMMIT_PMT_MARGIN_MS 余量), 数值上没有理由不同——若日后两者需要
+ *  分叉出不同的宽限期, 在这里显式拆开, 不要悄悄各自改各自的字面量。 */
+export const REFUND_FLIP_GRACE_MS = REFUND_GRACE_SEC * 1000;
 /** deadline+1h 起报警。 */
 export const CLOSE_COMMIT_SLA_WARN_MS = 3_600_000;
 

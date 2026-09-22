@@ -25,9 +25,9 @@
 [PASS] assertKaspadInputVersionRule: version=1 但某个input.sigOpCount!=0 ⇒ throw(这正是账本1465两次闸3中止的真实根因形状)
 [PASS] assertKaspadInputVersionRule: version=0 且全部input.computeBudget=0 ⇒ 通过
 [PASS] assertKaspadInputVersionRule: version=0 但某个input.computeBudget!=0 ⇒ throw
-[diag:step] proc.silverc.compile.bshard-artifacts ms=74 cmd=silverc ok=1 at=2026-09-22T07:29:33.489Z
-[diag:step] proc.silverc.compile.bshard-artifacts ms=54 cmd=silverc ok=1 at=2026-09-22T07:29:33.549Z
-[diag:step] proc.silverc.compile.bshard-artifacts ms=54 cmd=silverc ok=1 at=2026-09-22T07:29:33.609Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=76 cmd=silverc ok=1 at=2026-09-22T08:07:54.068Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=53 cmd=silverc ok=1 at=2026-09-22T08:07:54.128Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=55 cmd=silverc ok=1 at=2026-09-22T08:07:54.190Z
 [PASS] genesis-e2e-1 buildMarketGenesisTxJson 真实构造成功(真 mass 计算, 真实 per-kind cap 下选中带找零形状, 返回 shardLeafCovId)
 [PASS] genesis-e2e-1b(账本1465节点规则镜像) 真实构造的genesis交易反序列化后, 每个input的sigOpCount/computeBudget满足v2.0.1 RPC层规则(否则主网节点会拒收——这正是闸3两次中止的真实故障, 本地构造/签名/txid核对全过但真广播才被拒)
 [PASS] genesis-e2e-2 relay 侧真代码能反序列化 + extractTxShape + validateFixedValueOutputs 通过(未签名阶段), covenant_id 在序列化往返后不变(populateGenesisCovenants 声明真的被序列化保留, 不是本地对象独有的临时状态)

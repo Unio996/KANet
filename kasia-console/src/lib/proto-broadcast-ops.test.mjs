@@ -64,6 +64,34 @@ const market = ensureMarketPending({
   rootclose_tmpl_hash: artifacts.rootCloseTmplHash, shardleaf_own_redeem_len: artifacts.shardLeafOwnRedeemLen,
 });
 
+// F4 MUST-1(NWT 账本1623/1624 实测更正): 真实 relay 广播代码(kasia-relay/covenant-broadcast-relay.mjs:189)
+// 在真实广播【之前】无条件调用 ingestPhase({phase:'prepared',...}), 经 console 侧 api/ingest.js 按
+// intent_key 前缀分派落库(genesis: → recordMarketIntentPhase, 其余含 proto-bet: → recordBetIntentPhase)。
+// proto-fee-reservation.mjs 的 DB 派生层依赖这一步真的发生——下面每个 covenant_broadcast mock 在返回成功
+// 之前都要调这个, 否则测试环境比真实生产更"乐观"(没写 prepared 字节), 会把这个乐观差异悄悄带进结论
+// (此前正是这样撞出"这两张表永远触发 fail-closed"的错误判定, 已在 proto-fee-reservation.mjs 撤回更正)。
+async function simulateIngestPrepared(cmd) {
+  const { intent_key: intentKey, tx_json: txJson, expected_txid: txid } = cmd;
+  const { sqlite: db } = await import('../db/client.js');
+  if (intentKey.startsWith('genesis:')) {
+    const { recordMarketIntentPhase } = await import('./proto-market-intent.mjs');
+    const marketId = intentKey.slice('genesis:'.length);
+    recordMarketIntentPhase({ intentKey, phase: 'prepared', txid, txJson: JSON.stringify([txJson]) });
+    // 测试夹具捷径(不是模拟真实落链检查——那需要 check_utxo_landed 往返, 这个文件本来就没建那套):
+    // 这个文件在 F4 之前, 各测试用例互相独立地重用同一个固定 FEE_UTXO_TXID 常量当 fee 候选, 隐含假设是
+    // "每个用例的 relay UTXO 池互不影响"。F4 接上真实 DB 派生预留后, 这个假设不成立: 一个市场的创世
+    // prepared_tx_json 若永远停在 genesis_prepared/genesis_submitted(本 mock 从不真的推进到"落链"),
+    // 它花的 fee outpoint 会被 reservedFeeOutpoints 永久算进"非终态占用", 拖累后面【逻辑上完全独立】的
+    // 用例复用同一个 txid。直接把状态推到终态(betting)释放它——只影响 DB 派生层的可见性, 不影响任何
+    // 既有断言(本文件没有一处测试检查 proto_markets.status 的精确值)。
+    db.prepare("UPDATE proto_markets SET status = 'betting' WHERE id = ? AND status != 'betting'").run(marketId);
+  } else {
+    const { recordBetIntentPhase } = await import('./proto-bet-intent.mjs');
+    recordBetIntentPhase({ intentKey, phase: 'prepared', txid, txJson: JSON.stringify([txJson]) });
+    db.prepare("UPDATE proto_bet_intents SET status = 'landed', submitted_txid = COALESCE(submitted_txid, ?), landed_at = COALESCE(landed_at, datetime('now')) WHERE intent_key = ? AND status != 'landed'").run(txid, intentKey);
+  }
+}
+
 const FEE_UTXO_TXID = 'ab'.repeat(32);
 function makeSendCmd({ covenantBroadcastResult } = {}) {
   const calls = [];
@@ -75,6 +103,7 @@ function makeSendCmd({ covenantBroadcastResult } = {}) {
       return feeUtxosResponse([{ outpoint: { transactionId: FEE_UTXO_TXID, index: 0 }, amount: '50000000' }]);
     }
     if (cmd.type === 'covenant_broadcast') {
+      await simulateIngestPrepared(cmd);   // 真实 relay 在广播尝试之前(不论最终成功/拒绝)先 ingestPhase(prepared)
       return covenantBroadcastResult ? covenantBroadcastResult(cmd) : { ok: true, txId: cmd.expected_txid, intent_key: cmd.intent_key };
     }
     throw new Error(`unexpected cmd ${cmd.type}`);
@@ -185,7 +214,7 @@ await t('⑥covenant_broadcast 命令本身失败(relay 拒绝) ⇒ 返回 {erro
         if (cmd.address === relayAddr) return feeUtxosResponse([{ outpoint: { transactionId: FEE_UTXO_TXID, index: 0 }, amount: '95000000' }]);
         return { ok: true, utxos: [] };
       }
-      if (cmd.type === 'covenant_broadcast') return { ok: true, txId: cmd.expected_txid, intent_key: cmd.intent_key };
+      if (cmd.type === 'covenant_broadcast') { await simulateIngestPrepared(cmd); return { ok: true, txId: cmd.expected_txid, intent_key: cmd.intent_key }; }
       throw new Error(`unexpected cmd ${cmd.type} addr=${cmd.address}`);
     };
     return { sendCmd, calls };
@@ -242,8 +271,12 @@ await t('⑥covenant_broadcast 命令本身失败(relay 拒绝) ⇒ 返回 {erro
     const BET_ID3 = 'bet-stage3-003';
     sqlite.prepare(`INSERT INTO proto_bets (id, market_id, bettor_pk, side, stake, status, created_at) VALUES (?, ?, ?, 0, 5, 'pending', datetime('now'))`)
       .run(BET_ID3, MARKET_ID, 'dd'.repeat(32));
-    sqlite.prepare(`INSERT INTO proto_bet_intents (intent_key, bet_id, step, status, created_at, updated_at) VALUES (?, ?, 'append', 'prepared', datetime('now'), datetime('now'))`)
-      .run(betIntentKeyFor(bet2.id, 'append'), bet2.id); // bet2的append还在飞(prepared, 模拟还没landed)
+    // F4(MUST-1)接线后: 'prepared' 状态的行必须带 prepared_tx_json(真实 ingestPhase 回执一定带字节, 见
+    // simulateIngestPrepared 头注)——否则 reservedFeeOutpoints 会对这条【本该只是模拟"还在飞"的夹具行】
+    // fail-closed HOLD, 连累后面所有测试(它们都要扫这张表)。内容本身不重要(assertNoInFlightAppend 只看
+    // status), 用真实存储形状(JSON.stringify([txJsonString]))占位即可。
+    sqlite.prepare(`INSERT INTO proto_bet_intents (intent_key, bet_id, step, status, prepared_tx_json, created_at, updated_at) VALUES (?, ?, 'append', 'prepared', ?, datetime('now'), datetime('now'))`)
+      .run(betIntentKeyFor(bet2.id, 'append'), bet2.id, JSON.stringify([JSON.stringify({ inputs: [{ transactionId: 'ee'.repeat(32), index: 0 }], outputs: [] })])); // bet2的append还在飞(prepared, 模拟还没landed)
     const bet3 = sqlite.prepare('SELECT * FROM proto_bets WHERE id = ?').get(BET_ID3);
     const { sendCmd, calls } = makeStage3SendCmd();
     const res = await buildRegisterAppendAndBroadcast({ kaspa, network: 'mainnet', market: marketRow, bet: bet3, sendCmd, relayId: 'relay-A', relayAddress: relayAddr });
@@ -289,6 +322,7 @@ await t('⑥covenant_broadcast 命令本身失败(relay 拒绝) ⇒ 返回 {erro
         ]);
       }
       if (cmd.type === 'covenant_broadcast') {
+        await simulateIngestPrepared(cmd);
         genesisFeeValue = decodeInputAmounts(cmd.tx_json)[0];
         return { ok: true, txId: cmd.expected_txid, intent_key: cmd.intent_key };
       }
@@ -343,7 +377,7 @@ await t('⑥covenant_broadcast 命令本身失败(relay 拒绝) ⇒ 返回 {erro
         }
         return { ok: true, utxos: [] };
       }
-      if (cmd.type === 'covenant_broadcast') return { ok: true, txId: cmd.expected_txid, intent_key: cmd.intent_key, _tx_json: cmd.tx_json };
+      if (cmd.type === 'covenant_broadcast') { await simulateIngestPrepared(cmd); return { ok: true, txId: cmd.expected_txid, intent_key: cmd.intent_key, _tx_json: cmd.tx_json }; }
       throw new Error(`unexpected cmd ${cmd.type} addr=${cmd.address}`);
     };
     return { sendCmd, calls };
@@ -427,7 +461,7 @@ await t('⑥covenant_broadcast 命令本身失败(relay 拒绝) ⇒ 返回 {erro
           ],
         };
       }
-      if (cmd.type === 'covenant_broadcast') { bcTx = cmd.tx_json; return { ok: true, txId: cmd.expected_txid, intent_key: cmd.intent_key }; }
+      if (cmd.type === 'covenant_broadcast') { await simulateIngestPrepared(cmd); bcTx = cmd.tx_json; return { ok: true, txId: cmd.expected_txid, intent_key: cmd.intent_key }; }
       throw new Error(`unexpected cmd ${cmd.type}`);
     };
     const res = await buildMarketGenesisAndBroadcast({ kaspa, network: 'mainnet', market: market3, sendCmd, relayId: 'relay-C', relayAddress: relayAddr });
@@ -512,7 +546,7 @@ await t('⑥covenant_broadcast 命令本身失败(relay 拒绝) ⇒ 返回 {erro
         }
         return { ok: true, utxos: [] };
       }
-      if (cmd.type === 'covenant_broadcast') { bcTx3 = cmd.tx_json; return { ok: true, txId: cmd.expected_txid, intent_key: cmd.intent_key }; }
+      if (cmd.type === 'covenant_broadcast') { await simulateIngestPrepared(cmd); bcTx3 = cmd.tx_json; return { ok: true, txId: cmd.expected_txid, intent_key: cmd.intent_key }; }
       throw new Error(`unexpected cmd ${cmd.type} addr=${cmd.address}`);
     };
     const res = await buildRegisterAppendAndBroadcast({ kaspa, network: 'mainnet', market: marketRow3, bet: bet3, sendCmd: sendCmd3, relayId: 'relay-D', relayAddress: relayAddr });
@@ -520,6 +554,68 @@ await t('⑥covenant_broadcast 命令本身失败(relay 拒绝) ⇒ 返回 {erro
     const inputTxids3 = JSON.parse(bcTx3).inputs.map((i) => i.transactionId);
     if (inputTxids3.includes(POISONED_TXID2)) throw new Error(`register_append 真实构造的交易花了毒化 covenant UTXO(${POISONED_TXID2})作 fee 输入——下注侧 F3 没有生效!`);
     if (!inputTxids3.includes(CLEAN_TXID3)) throw new Error(`交易没有花干净候选(${CLEAN_TXID3}), inputs=${JSON.stringify(inputTxids3)}`);
+  });
+}
+
+// ══════════════ F4 MUST-2(NWT 账本1623/1624): 结果不确定(sendCmd 本身抛错)时不立即释放预留 ══════════════
+{
+  const { _snapshotInMemoryReserved, _resetInMemoryReserved } = await import('./proto-fee-reservation.mjs');
+  await t('F4 MUST-2(创世侧): covenant_broadcast 的 sendCmd 本身抛错(IPC 超时/无响应, 不是 relay 回了明确的 {ok:false})⇒ buildMarketGenesisAndBroadcast 仍返回 {error}(不 throw, 保持既有契约), 但选中的 fee outpoint 在函数返回的那一刻仍然【留在】进程内预留层——不是"结果不确定就立即释放"(那会在 relay 其实已经 ingestPhase 写了 prepared 字节、随时可能真落链的窗口里,让下一个选择方选中同一个 outpoint)', async () => {
+    const MARKET_ID_M2 = 'f6'.repeat(32);
+    const artM2 = await computeMarketGenesisArtifacts({ marketId: MARKET_ID_M2, minBet: 5, deadlineMs: 1700000000000 });
+    const marketM2 = ensureMarketPending({
+      id: MARKET_ID_M2, token_def_id: 't1', question: 'F4 MUST-2 market', deadline_ms: 1700000000000, min_bet: 5, seal_count: 2,
+      committee_pubkeys_json: JSON.stringify([artM2.committeePubkeyHex]), committee_privkey_enc: artM2.committeePrivkeyEnvelope,
+      rootclose_tmpl_hash: artM2.rootCloseTmplHash, shardleaf_own_redeem_len: artM2.shardLeafOwnRedeemLen,
+    });
+    const CAND_TXID = 'f0'.repeat(32);
+    _resetInMemoryReserved();
+    const sendCmdThrows = async (relayId, cmd) => {
+      if (cmd.type === 'get_address_utxos') return feeUtxosResponse([{ outpoint: { transactionId: CAND_TXID, index: 0 }, amount: '50000000' }]);
+      if (cmd.type === 'covenant_broadcast') throw new Error('simulated IPC timeout (no response from relay)');
+      throw new Error(`unexpected cmd ${cmd.type}`);
+    };
+    const res = await buildMarketGenesisAndBroadcast({ kaspa, network: 'mainnet', market: marketM2, sendCmd: sendCmdThrows, relayId: 'relay-M2', relayAddress: relayAddr });
+    if (res.txId) throw new Error(`不该成功(sendCmd 本身抛错), 实际 ${JSON.stringify(res)}`);
+    if (!res.error || !/transport error/.test(res.error)) throw new Error(`应该返回 {error} 且带 transport error 说明(不是 throw), 实际 ${JSON.stringify(res)}`);
+    const stillReserved = _snapshotInMemoryReserved();
+    if (!stillReserved.has(`${CAND_TXID}:0`)) throw new Error(`MUST-2: sendCmd 抛错(结果不确定)之后, 选中的候选(${CAND_TXID.slice(0, 12)}…)应该仍留在进程内预留层里(交给 deferReservationReconciliation 到期对账), 实际已经被释放了`);
+  });
+
+  await t('F4 MUST-2(下注侧, 同上一条的对称版): buildRegisterAppendAndBroadcast 遇 sendCmd 抛错同样不立即释放', async () => {
+    const { buildRegisterAppendAndBroadcast } = await import('./proto-broadcast-ops.mjs');
+    const { computeShardLeafRedeemScript: leafRedeemFn } = await import('./proto-covenant-builder.mjs');
+    const { scriptPublicKeyFromHex: spkFromHex2 } = await import('./proto-tx-assembly.mjs');
+    const { sqlite } = await import('../db/client.js');
+    const MARKET_ID_M3 = 'f9'.repeat(32);
+    const artM3 = await computeMarketGenesisArtifacts({ marketId: MARKET_ID_M3, minBet: 5, deadlineMs: 1700000000000 });
+    const marketM3 = ensureMarketPending({
+      id: MARKET_ID_M3, token_def_id: 't1', question: 'F4 MUST-2 bet market', deadline_ms: 1700000000000, min_bet: 5, seal_count: 2,
+      committee_pubkeys_json: JSON.stringify([artM3.committeePubkeyHex]), committee_privkey_enc: artM3.committeePrivkeyEnvelope,
+      rootclose_tmpl_hash: artM3.rootCloseTmplHash, shardleaf_own_redeem_len: artM3.shardLeafOwnRedeemLen,
+    });
+    const GENESIS_TXID_M3 = 'f7'.repeat(32);
+    sqlite.prepare('UPDATE proto_markets SET shardleaf_txid = ?, shardleaf_vout = 0, shardleaf_cov_id = ? WHERE id = ?').run(GENESIS_TXID_M3, 'aa'.repeat(32), MARKET_ID_M3);
+    const marketRowM3 = getMarketRow(MARKET_ID_M3);
+    sqlite.prepare(`INSERT INTO proto_bets (id, market_id, bettor_pk, side, stake, status, created_at) VALUES (?, ?, ?, 0, 20, 'pending', datetime('now'))`).run('bet-m2-001', MARKET_ID_M3, 'e6'.repeat(32));
+    const betM3 = sqlite.prepare('SELECT * FROM proto_bets WHERE id = ?').get('bet-m2-001');
+    const leafRedeemM3 = leafRedeemFn({ marketId: MARKET_ID_M3, minBet: marketRowM3.min_bet, sealCount: marketRowM3.seal_count, rootcloseTmplHash: marketRowM3.rootclose_tmpl_hash, state: { local_yes: 0, local_no: 0, count: 0, pool_value: 0 }, ownRedeemLen: marketRowM3.shardleaf_own_redeem_len });
+    const leafAddressM3 = kaspa.addressFromScriptPublicKey(spkFromHex2(kaspa, leafRedeemM3.scriptPubKeyHex), 'mainnet').toString();
+    const CAND_TXID2 = 'f8'.repeat(32);
+    _resetInMemoryReserved();
+    const sendCmdThrows2 = async (relayId, cmd) => {
+      if (cmd.type === 'get_address_utxos') {
+        if (cmd.address === leafAddressM3) return { ok: true, utxos: [{ outpoint: { transactionId: GENESIS_TXID_M3, index: 0 }, amount: '20000000' }] };
+        return feeUtxosResponse([{ outpoint: { transactionId: CAND_TXID2, index: 0 }, amount: '95000000' }]);
+      }
+      if (cmd.type === 'covenant_broadcast') throw new Error('simulated IPC timeout');
+      throw new Error(`unexpected cmd ${cmd.type}`);
+    };
+    const res = await buildRegisterAppendAndBroadcast({ kaspa, network: 'mainnet', market: marketRowM3, bet: betM3, sendCmd: sendCmdThrows2, relayId: 'relay-M3', relayAddress: relayAddr });
+    if (res.txId) throw new Error(`不该成功, 实际 ${JSON.stringify(res)}`);
+    if (!res.error || !/transport error/.test(res.error)) throw new Error(`应该返回 {error} 带 transport error, 实际 ${JSON.stringify(res)}`);
+    const stillReserved2 = _snapshotInMemoryReserved();
+    if (!stillReserved2.has(`${CAND_TXID2}:0`)) throw new Error(`MUST-2(下注侧): sendCmd 抛错后候选应仍留在预留层, 实际已释放`);
   });
 }
 

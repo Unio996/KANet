@@ -62,7 +62,12 @@ function mkWorld(o = {}) {
     pointers: (step, marketId) => { log.push('pointers:' + step); if (cfg.pointersThrow) throw cfg.pointersThrow; return { roles: { rootClose: { outpoint: { transactionId: 'aa'.repeat(32), index: 0 }, expectedCovenantId: 'cc'.repeat(32) } } }; },
     prepare: async (step, ctx) => { log.push(`prepare:${ctx.phase}`); if (cfg.prepareThrow && ctx.phase === 'inputs') throw cfg.prepareThrow; return { targetAddress: 'kaspatest:qtarget', expectedSpks: { rootClose: '00' }, feeMinAmount: 1n, deadlineMs: cfg.deadlineMs ?? NOW - 40_000 }; },
     verifyOnChain: async (o2) => { log.push('verifyOnChain'); if (cfg.verifyThrow) throw (typeof cfg.verifyThrow === 'function' ? cfg.verifyThrow() : cfg.verifyThrow); return { chainParents: { rootClose: { value: 1n, spkLen: 35, hasCovenant: true, outpoint: { txid: 'aa'.repeat(32), index: 0 } } }, fee: { candidates: [{ txid: 'ee'.repeat(32), vout: 0, value: 5n, spkLen: 34, covenantId: null }] }, events: cfg.verifyEvents || [] }; },
-    build: async (step, ctx) => { log.push('build:' + step); world.lastBuildCtx = ctx; if (cfg.buildThrow) throw cfg.buildThrow; return { txJson: '{"tx":1}', expectedTxid: 'ab'.repeat(32), signInputIndices: [2], genesisOutputIndices: cfg.genesis, continuationOutputIndices: cfg.cont }; },
+    build: async (step, ctx) => { log.push('build:' + step); world.lastBuildCtx = ctx; if (cfg.buildThrow) throw cfg.buildThrow; return { txJson: '{"tx":1}', expectedTxid: 'ab'.repeat(32), signInputIndices: [2], genesisOutputIndices: cfg.genesis, continuationOutputIndices: cfg.cont, feeUtxo: cfg.feeUtxo !== undefined ? cfg.feeUtxo : { txid: 'ee'.repeat(32), vout: 0 } }; },
+    // F4 MUST-2(NWT 账本1623/1624): 记录调用, 不实现真实逻辑(那是 proto-fee-reservation.mjs 的事, 已单独
+    // 测过)——这里只核对 driver-core.mjs 在两条分支上调用了正确的那一个端口。
+    releaseFeeReservation: (feeUtxo) => { log.push('releaseFeeReservation'); world.releaseFeeReservationCalls.push(feeUtxo); },
+    deferReservationReconciliation: (feeUtxo, checkPreparedInDb) => { log.push('deferReservationReconciliation'); world.deferReservationReconciliationCalls.push({ feeUtxo, checkPreparedInDb }); },
+    checkIntentPreparedInDb: (intentKey) => { log.push('checkIntentPreparedInDb'); return cfg.checkIntentPreparedInDbResult ?? false; },
     dependenciesLanded: async (step, ctx) => { log.push('dependenciesLanded'); return cfg.depOk === false ? { ok: false, reason: 'resolve_not_landed' } : { ok: true }; },
     checkLanded: async (a) => { log.push('checkLanded'); world.lastCheckLanded = a; if (cfg.checkThrow) throw cfg.checkThrow; return cfg.landed || { landed: false, depth: 3 }; },
     markLanded: async (info, row) => { log.push('markLanded:' + info); world.markLandedCalls.push([info, row && row.intent_key]); },
@@ -73,7 +78,7 @@ function mkWorld(o = {}) {
     recordObservedRefundFlip: cfg.recordObservedRefundFlip,
     log: { log: () => {} },
   };
-  const world = { log, rows, alerts, deps, cfg, markLandedCalls: [], lastBroadcast: null, lastBuildCtx: null, lastCheckLanded: null };
+  const world = { log, rows, alerts, deps, cfg, markLandedCalls: [], lastBroadcast: null, lastBuildCtx: null, lastCheckLanded: null, releaseFeeReservationCalls: [], deferReservationReconciliationCalls: [] };
   return world;
 }
 const ids = () => ({ marketId: hex64(), subjectId: hex64() });
@@ -468,6 +473,51 @@ await t('R-a / M5: close_commit 的 RootClose drift + 探针 {flipped:true} ⇒ 
   const r = await d.advanceStep({ step: 'close_commit', subjectId: i.subjectId, marketId: i.marketId, tickId: 1 });
   assert.equal(r.outcome, 'held'); assert.equal(w.rows.get(d._keyOf('close_commit', i.subjectId)).status, 'ambiguous');
   assert.deepEqual(recorded, [{ marketId: i.marketId, probe }]);
+});
+
+// ══ F4 MUST-2(NWT 账本1623/1624): 释放时机按结果分两支, 不是无条件 finally 释放 ══════════════════════════════════
+await t('F4 MUST-2: sendCmd(covenant_broadcast) 正常 resolve(成功)⇒ 立即调 releaseFeeReservation(built.feeUtxo), 不调 deferReservationReconciliation', async () => {
+  const feeUtxo = { txid: 'dd'.repeat(32), vout: 0 };
+  const w = mkWorld({ feeUtxo, broadcast: { ok: true, txId: 'ab'.repeat(32) } });
+  const r = await adv(w, 'seal');
+  assert.equal(r.outcome, 'submitted');
+  assert.deepEqual(w.releaseFeeReservationCalls, [feeUtxo], 'success ⇒ 恰调一次 release, 参数是 build() 返回的 feeUtxo');
+  assert.deepEqual(w.deferReservationReconciliationCalls, [], 'success 不该调 defer');
+});
+await t('F4 MUST-2: sendCmd(covenant_broadcast) 正常 resolve(relay 明确拒绝, ok:false)⇒ 同样立即调 releaseFeeReservation(确定结果, 不是"不确定"), 不调 defer', async () => {
+  const feeUtxo = { txid: 'd1'.repeat(32), vout: 0 };
+  const w = mkWorld({ feeUtxo, broadcast: { ok: false, code: 'net_loss_exceeded', error: 'too expensive' } });
+  const r = await adv(w, 'seal');
+  assert.equal(r.outcome, 'failed');
+  assert.deepEqual(w.releaseFeeReservationCalls, [feeUtxo], 'relay 明确拒绝(有回执, 只是 ok:false)⇒ 仍是"确定结果", 立即释放');
+  assert.deepEqual(w.deferReservationReconciliationCalls, [], '明确拒绝不是"不确定", 不该调 defer');
+});
+await t('F4 MUST-2: sendCmd(covenant_broadcast) 本身抛错(IPC 超时/无响应, 结果不确定)⇒ 调 deferReservationReconciliation(带正确的 feeUtxo + checkPreparedInDb), 不调 releaseFeeReservation(不提前释放)', async () => {
+  const feeUtxo = { txid: 'd2'.repeat(32), vout: 0 };
+  const w = mkWorld({ feeUtxo, broadcast: () => { throw new Error('simulated IPC timeout'); } });
+  const r = await adv(w, 'seal');
+  assert.equal(r.outcome, 'failed');
+  assert.deepEqual(w.releaseFeeReservationCalls, [], 'MUST-2 核心: 结果不确定时不该立即释放');
+  assert.equal(w.deferReservationReconciliationCalls.length, 1, '改调 defer, 恰一次');
+  assert.deepEqual(w.deferReservationReconciliationCalls[0].feeUtxo, feeUtxo, 'defer 的 feeUtxo 与 build() 选中的一致');
+  assert.equal(typeof w.deferReservationReconciliationCalls[0].checkPreparedInDb, 'function', 'defer 带了 checkPreparedInDb 判定函数(到期对账用)');
+});
+await t('F4 MUST-2: checkIntentPreparedInDb 端口——defer 传入的 checkPreparedInDb 调用时会经这个端口查该 intentKey(不是查别的 key), 端口返回值原样透传', async () => {
+  const feeUtxo = { txid: 'd3'.repeat(32), vout: 0 };
+  const w = mkWorld({ feeUtxo, broadcast: () => { throw new Error('timeout'); }, checkIntentPreparedInDbResult: true });
+  await adv(w, 'seal');
+  const { checkPreparedInDb } = w.deferReservationReconciliationCalls[0];
+  const before = w.log.filter((l) => l === 'checkIntentPreparedInDb').length;
+  const result = checkPreparedInDb();
+  assert.equal(result, true, 'checkIntentPreparedInDbResult=true 原样透传');
+  assert.equal(w.log.filter((l) => l === 'checkIntentPreparedInDb').length, before + 1, 'checkPreparedInDb() 真的调用了 deps.checkIntentPreparedInDb 端口(不是自己算的)');
+});
+await t('F4 MUST-2: deps.releaseFeeReservation/deferReservationReconciliation 缺失(未注入, typeof 检查)⇒ 不抛错, 只是跳过调用(可选端口, 不是必需依赖——不是每个测试都要装这两个 spy)', async () => {
+  const feeUtxo = { txid: 'd4'.repeat(32), vout: 0 };
+  const w = mkWorld({ feeUtxo, broadcast: { ok: true, txId: 'ab'.repeat(32) } });
+  delete w.deps.releaseFeeReservation; delete w.deps.deferReservationReconciliation;
+  const r = await adv(w, 'seal');
+  assert.equal(r.outcome, 'submitted', '端口缺失不该影响主流程结果');
 });
 
 console.log(`\nproto-settlement-driver-core.test: ${pass} passed, ${fail} failed`);

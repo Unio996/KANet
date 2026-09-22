@@ -1,8 +1,8 @@
-> **Status**: CURRENT(2026-09-22 · J2)
+> **Status**: SUPERSEDED(2026-09-22 · J2)——见文末"状态更新"。本文档原描述"refund_flip 不叠本批,留一笔接线 PR"的方案;账本1623/1624(NWT 实现审 ab624474)裁定"rebase 到含 R-a 的主线,争用测试在本批做掉",**已照办**——下面的坐标核实与"自动继承"结论依然成立(未改),但"接线 PR 只剩测试"这一步已经不是待办,是本批已交付的内容。
 
-# F3/F4 → refund_flip 接线清单(账本1621/1622 追问,Bettor 裁定三条)
+# F3/F4 → refund_flip 接线清单(账本1621/1622 追问,Bettor 裁定三条;账本1623/1624 更新)
 
-> 本批(F3/F4 实现,分支 `coord/j2-f3-f4-impl-20260922`)基线 = `bshard-m3-deploy` @ `3691b19b`(R-a **未**叠加,Bettor 裁定:"R-a 在审,可能有 MUST 改动,叠上去会互相牵连")。R-a(`refund_flip`)已于账本1622 合入主线(`97939a6f`→之后的 merge)。本文档钉住:F3/F4 合入后,`refund_flip` 的 fee 输入是否自动继承 F4 的两层预留,还是需要一笔额外接线 PR;以及接线 PR 的验收线是什么。
+> 本批(F3/F4 实现,分支 `coord/j2-f3-f4-impl-20260922`)**基线更新**:最初从 `bshard-m3-deploy` @ `3691b19b` 起(R-a **未**叠加,Bettor 早先裁定"R-a 在审,可能有 MUST 改动,叠上去会互相牵连")。R-a(`refund_flip`)于账本1622 合入主线(`97939a6f`);NWT 实现审(ab624474,账本1623/1624)裁定改为 **rebase 到含 R-a 的主线**,理由:R-a 已经过 NWT 增量核三点全过、批已闭合,不再是"可能变"的状态,继续隔离反而让"接线 PR 只剩测试"这句话一直是空头支票。本批已 rebase 到 `origin/bshard-m3-deploy`(含 R-a),`refund_flip` 现在真实存在于这个分支上。
 
 ## 结论(已核实,不是推断)
 
@@ -27,29 +27,25 @@ F4 本批把这唯一的 `tryEach` 换成 `selectAndReserveFeeUtxo`(见 §1),`in
 
 **⇒ R-a 合入 F4 之后的这条主线,`refund_flip` 的 fee 选择自动走 `selectAndReserveFeeUtxo`,不需要在 `refund_flip` 分支里加任何一行代码。**
 
-## 接线 PR 到底剩什么
+## 接线 PR 到底剩什么(已在本批完成,不再是"待办")
 
-代码接线是自动的(两个分支合并 = 直接生效,git merge 层面通常零冲突,因为 F4 改的是 `tryEach` 定义和 `build()` 的开头/结尾,R-a 改的是中间加一个 `else if` 分支——除非合并顺序导致 R-a 分支恰好在 F4 改动的那几行附近产生文本冲突,人工合一次即可,不是逻辑重新设计)。
+代码接线是自动的:rebase 到含 R-a 的主线后,`git rebase` 只在 `proto-settlement-ops.mjs`(import 段)和 `proto-settlement-driver.mjs`(deps 装配段)产生两处文本冲突,人工合并即可,不是逻辑重新设计——冲突详情见批提交 `87f1a467`(rebase 前)→本批最终 hash(rebase 后)的过程记录。
 
-**真正要做的是 §3.5 T-race 系列测试里唯一一条本批没能跑的**(因为本批基线不含 `refund_flip` 代码,测不了一个不存在的 step):
+**§3.5 T-race 系列里"refund_flip 跨入口真实争用"这一条已在本批真实跑通**(`proto-settlement-ops.test.mjs` 新增"F4 真实争用①/②"两个测试,`Promise.all` 真并发):
 
-> **接线 PR 的验收线(Bettor 裁定原话)= refund_flip 与创世/下注/结算跨入口争同一最佳 fee UTXO 的真实争用测试。**
+1. **争用①(结算内)**:`refund_flip`(Y 市场,冻结+过 grace)与 `seal`(X 市场)用 `driver.advanceStep` 真并发,候选池只留一枚"唯一最佳"候选 ⇒ 核心不变量(全部真实广播的交易互不重叠花费同一个 outpoint)成立;不钉"哪一方赢"(构造成功一方的找零输出会给另一方腾出新候选,双方都成功是合法结局)。
+2. **争用②(创世跨入口)**:`refund_flip`(Y2)与创世(`buildMarketGenesisAndBroadcast`,Z 市场,真实生产函数)真并发,同一不变量成立。下注侧因为与创世共用同一段 `fetchFeeCandidates`+`selectAndReserveFeeUtxo` 代码(已在 `proto-broadcast-ops.test.mjs` F3b-1/F3b-4 分别验证过安全属性),不重复起第四个并发臂——这是范围裁剪,不是遗漏。
+3. **回归**:M3 fail-closed 对 `refund_flip` 产生的 `prepared_tx_json`(同一张 `proto_settlement_intents` 表)同样成立,不需要新代码(已由既有 `proto-fee-reservation.test.mjs` 的通用 M3 测试覆盖,`refund_flip` 与其它 step 在这条路径上没有特殊性)。
 
-具体清单(合并后跑,`kasia-console/src/lib/proto-fee-reservation.test.mjs` 或新增一个 `proto-fee-reservation-refund-flip.test.mjs`):
-
-1. **T-race `refund_flip` × 结算(`close_commit`/`seal`)**:两个不同市场,一个走 `refund_flip`(冻结市场自然出口),一个走 `close_commit`,DB 里各自造一行 `prepared` 的 `proto_settlement_intents`(同 `reservedFeeOutpoints` 的 DB 派生层),两者的 `feeCandidates` 里含同一个 outpoint ⇒ 后到者必须另选或 `no_suitable_fee_utxo`,不得双花候选。
-2. **T-race `refund_flip` × 创世/下注**:`refund_flip` 走结算路径的进程内层(在 `driver-core.mjs` 的 `advanceStep` 里,`build()` 返回后到 `covenant_broadcast` 完成才释放,见本批 §2);创世/下注各自在 `proto-broadcast-ops.mjs` 里有自己的进程内预留(`buildMarketGenesisAndBroadcast`/`buildRegisterAppendAndBroadcast` 的 `selectAndReserveFeeUtxo` + `finally` 释放)。三者共用**同一个模块级 `_inMemoryReserved` Map**(`proto-fee-reservation.mjs` 是单例模块,进程内只有一份),所以这条测试要证的是:三条路径的 `intentKey` 不同、但选中同一个 outpoint 时互斥生效——用一个真实 Node 进程内、三个"伪装成不同调用方"的 `selectAndReserveFeeUtxo` 调用序列即可复现,不需要额外接线。
-3. **回归**:本批 §2(`proto-fee-reservation.test.mjs`)的 M3 fail-closed(非终态行缺字节/损坏 tx_json ⇒ 抛)在合入后对 `refund_flip` 产生的 `prepared_tx_json` 同样成立(它走同一张 `proto_settlement_intents` 表,同一个 DB 派生层查询,不需要新代码,但值得补一条真实 vector:一行 `step='refund_flip'` 的 `prepared` 记录,`prepared_tx_json` 损坏 ⇒ `reservedFeeOutpoints` 整体抛)。
-
-**接线 PR 范围声明**:只加上面几条测试(全部是真实集成测试,喂真实 `refund_flip` 意图行/真实 `tryBuild`),**不改生产代码**(除非测试跑出新问题——按 R-a/F3/F4 一路的纪律,撞到就如实记录,不是本清单能提前断言"零改动"的保证)。
+**本批范围声明**:除了两处 rebase 冲突合并(纯文本合并,无新逻辑)+ MUST-1/MUST-2 修复(见 provenance README §6),`refund_flip` 侧**零新增生产代码**——它确实是"自动继承"。
 
 ## 依赖前提(如果不成立,以上结论要重新核)
 
 - `proto-settlement-ops.mjs` 的 `build()` 继续保持"全部 step 共用一个 `tryEach`"这个结构不被拆分成每 step 各自选择——这是本清单结论成立的唯一前提。若日后有人把某个 step(含 `refund_flip`)的 fee 选择挪出这个共用闭包(比如给 `refund_flip` 单独加一条"不走预留、直接选"的快捷路径),必须同步更新本清单并给该 step 补 F4 接线。
-- `driver-core.mjs` 的 `advanceStep` 继续在 `build()` 返回后、`covenant_broadcast` 尝试结束的同一个 `try/finally` 里调 `deps.releaseFeeReservation(built.feeUtxo)`(本批新加,见 `proto-settlement-driver-core.mjs`)——这段没有按 step 区分,`refund_flip` 自动适用。
+- `driver-core.mjs` 的 `advanceStep` 继续在 `build()` 返回后、`covenant_broadcast` 尝试结束时调用释放端口(MUST-2 修复后按结果分两支:确定回执 ⇒ `deps.releaseFeeReservation`;`sendCmd` 本身抛错 ⇒ `deps.deferReservationReconciliation`,见 `proto-settlement-driver-core.mjs`)——这段没有按 step 区分,`refund_flip` 自动适用。
 
 ## 本批(F3/F4)已知限制,供接线 PR 参照
 
-- **创世 / 下注的 DB 派生层本批留空**(见 `proto-fee-reservation.mjs` `SOURCES` 头注的实测更正):`proto_markets.genesis_prepared_tx_json` / `proto_bet_intents.prepared_tx_json` 在当前生产路径下从未真正写入(`recordMarketIntentPhase`/`recordBetIntentPhase` 只在一条独立的 `ingest.js` 回调路径里被调,`driveMarketGenesis`/`driveBetIntent` 的真实生产流程不经过它们)。创世/下注的并发保护本批**只靠进程内层**(选中到广播尝试结束的窗口,已覆盖 A 臂原始死锁场景)。**结算路径(含 `refund_flip`)不受此限制**——`proto_settlement_intents` 的 `prepared_tx_json` 由 F1 设计本来就要求先于广播落库,DB 派生层对结算路径是真实生效的。
+- ~~创世/下注的 DB 派生层本批留空~~ ——**撤回(账本1623/1624,NWT 用真实探针复核后判定原结论错误)**:`proto_markets.genesis_prepared_tx_json` / `proto_bet_intents.prepared_tx_json` 在生产路径下**确实会被写入**(真实调用方在 `kasia-relay` 包,不在 `kasia-console/src`,此前 grep 范围本身就错了——细节见 provenance README §6 MUST-1)。三张表(含 `refund_flip` 所在的 `proto_settlement_intents`)现在**统一**在 `reservedFeeOutpoints` 的 DB 派生层里生效,不再区分"结算受保护/创世下注不受保护"。
 - **F3 的"拒后跳选"(`rejectedOutpoints` LRU)本批未做**——design v0.2.1 §3.1 item 5,Bettor 精简指令未包含,列后续观察票。
 - **relay 侧 split 的 covenant 排除(F3-c)本批未做**——design v0.2.1 §3.4 已注明单独审,不在本批范围。

@@ -1,4 +1,4 @@
-[PASS] 步骤计划: 恰四步(seal / close_commit / convert_to_claim / claim_draw); close_commit 的意图 step 名是 resolve; 无 withdraw / reclaim / ticket; STEP_OF_INTENT 是它的逆
+[PASS] 步骤计划: 恰五步(seal / close_commit / refund_flip / convert_to_claim / claim_draw; R-a 加 refund_flip); close_commit 的意图 step 名是 resolve; 无 withdraw / reclaim / ticket / convert_to_refundclaim / refund_payout(R-b/R-c 才接线); STEP_OF_INTENT 是它的逆
 [PASS] 报警闭集: 未登记的名字直接抛错; c1 分类器可能产出的每个 eventType 与 c1 事件名都已登记(drift 守卫); 含 fee_candidate_out_of_range_skipped(9-2b 清单 #8)
 [PASS] deps 校验: 缺任何端口 / minDepth 非正整数 / intents 缺函数 ⇒ DriverDepsError(没有默认值); 构造驱动本身零副作用(不调 listWork / sendCmd)
 [PASS] 通用顺序: 建 pending 意图 → 依赖已 landed → 指针 → C1 取证 → (步骤专属闸) → builder → covenant_broadcast; 意图建立先于任何 IPC
@@ -29,5 +29,15 @@
 [PASS] runTick: 先 landed 检查再推进; cap 限制总动作数; 一个条目失败不拖垮后面的条目; 汇总计数正确; cap 非法 ⇒ RangeError
 [PASS] 结构: 核心只 import c1 与 pmt 门两个无 DB 模块; 不含 relay-manager / process.env / 私钥 / kaspa-wasm / withdraw / reclaim / buildWithdraw / buildTicketReclaim / allowUnlistedTestDestination(§11)
 [PASS] 结构: 无 DB_PATH 的子进程里核心可直接 import(证明它不拖 db/client; 将来谁拖进来这里立刻红)
+[PASS] R-a refund_flip 广播前闸①: 只翻【已冻结】市场——未冻结(false / undefined / null / 0 / "true" / 抛错)一律 gated(refund_flip_market_not_frozen), 不读 pmt / 不建 / 不广播(与 close_commit 的冻结闸方向相反且同样严格 fail-closed)
+[PASS] R-a refund_flip 广播前闸②: pmt 门用 evaluateRefundFlipTiming(deadline+2h+30s), 不是 close 的 30s 闸——deadline+60s 的读数(close 会放行)对 refund_flip 必须 gated; pmt 读不到 ⇒ gated; 都不建不广播
+[PASS] R-a refund_flip 放行路径: builder 收到 relay 来源的 pmtEvidence(readAtMs=relay 的 observedAtMs); 广播载荷带 continuation_output_indices; 意图 key = settle:market:<id>:refund_flip
+[PASS] R-a / M5: refund_flip 的 inputs 阶段 RootClose drift + 探针返回 {flipped:true,…} ⇒ 调 recordObservedRefundFlip({marketId, probe}) ⇒ held(refund_flip_observed), 报警一次; 探针 false / 抛错 / 旧式 true 的行为
+[PASS] R-a / M5: close_commit 的 RootClose drift + 探针 {flipped:true} ⇒ 既有行为(resolve 意图 ambiguous + 报警)之外, 还记 refund_flip landed + 冻结(recordObservedRefundFlip 被调)
+[PASS] F4 MUST-2: sendCmd(covenant_broadcast) 正常 resolve(成功)⇒ 立即调 releaseFeeReservation(built.feeUtxo), 不调 deferReservationReconciliation
+[PASS] F4 MUST-2: sendCmd(covenant_broadcast) 正常 resolve(relay 明确拒绝, ok:false)⇒ 同样立即调 releaseFeeReservation(确定结果, 不是"不确定"), 不调 defer
+[PASS] F4 MUST-2: sendCmd(covenant_broadcast) 本身抛错(IPC 超时/无响应, 结果不确定)⇒ 调 deferReservationReconciliation(带正确的 feeUtxo + checkPreparedInDb), 不调 releaseFeeReservation(不提前释放)
+[PASS] F4 MUST-2: checkIntentPreparedInDb 端口——defer 传入的 checkPreparedInDb 调用时会经这个端口查该 intentKey(不是查别的 key), 端口返回值原样透传
+[PASS] F4 MUST-2: deps.releaseFeeReservation/deferReservationReconciliation 缺失(未注入, typeof 检查)⇒ 不抛错, 只是跳过调用(可选端口, 不是必需依赖——不是每个测试都要装这两个 spy)
 
-proto-settlement-driver-core.test: 31 passed, 0 failed
+proto-settlement-driver-core.test: 41 passed, 0 failed

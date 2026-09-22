@@ -19,7 +19,7 @@ const { sqlite } = await import('../db/client.js');
 const { createHash } = await import('node:crypto');
 const {
   reservedFeeOutpoints, selectAndReserveFeeUtxo, releaseReservationOnPrepared, releaseReservationOnFailure,
-  reconcileUncertainReservation, reservationLeakTelemetry, _snapshotInMemoryReserved, _resetInMemoryReserved,
+  reconcileUncertainReservation, deferReservationReconciliation, reservationLeakTelemetry, _snapshotInMemoryReserved, _resetInMemoryReserved,
   RESERVATION_UNCERTAIN_TIMEOUT_MS,
 } = await import('./proto-fee-reservation.mjs');
 const { ensureSettlementIntent, markSettlementIntent, settlementIntentKeyFor } = await import('./proto-settlement-intent.mjs');
@@ -28,7 +28,12 @@ let fails = 0;
 const ok = (cond, label) => { if (cond) console.log(`  ✅ ${label}`); else { console.error(`  ❌ ${label}: ${JSON.stringify(cond)}`); fails++; } };
 const hex = (seed) => createHash('sha256').update(seed).digest('hex');
 const mid = (s) => hex('market-fr-' + s);
-const txJsonWith = (outpoints) => JSON.stringify({ inputs: outpoints.map((o) => ({ transactionId: o.txid, index: o.vout })), outputs: [] });
+// 🔴 真实存储格式(2026-09-22 实测更正, 见 proto-fee-reservation.mjs extractInputOutpoints 头注): 生产写入方
+// (recordSettlementIntentPhase 等)存的是 JSON.stringify([txJsonString])——顶层数组包一层字符串, 不是 tx
+// 对象直接顶层。下面这个 helper 就用这个真实形状(不是"够用就行"的简化版), 防止这类测试再次跟生产写入方
+// 的真实存储格式脱节(此前正是这个脱节让"两张表永远 fail-closed"的误判混过了这批测试, 直到别的测试文件
+// 用真实 record*Phase 函数走一遍才暴露)。
+const txJsonWith = (outpoints) => JSON.stringify([JSON.stringify({ inputs: outpoints.map((o) => ({ transactionId: o.txid, index: o.vout })), outputs: [] })]);
 const cand = (txid, vout, value = 50_000_000n) => ({ txid, vout, value, scriptPublicKeyHex: '0x00' });
 
 console.log('[test] ① reservedFeeOutpoints(DB 派生层): 只认 proto_settlement_intents 非终态(prepared/submitted/ambiguous)行, pending/landed 不算; 解出全部输入 outpoint 的并集:');
@@ -168,6 +173,70 @@ console.log('[test] ⑥ reservationLeakTelemetry: 预留数 / 最老年龄:');
   ok(t1.count === 1 && t1.oldestAgeMs >= 5000, '有一条预留 ⇒ count=1, oldestAgeMs 反映经过的时间');
   releaseReservationOnPrepared(A);
   ok(reservationLeakTelemetry().count === 0, '释放后 ⇒ count 回 0');
+}
+
+console.log('[test] ⑦ extractInputOutpoints 存储格式兼容(2026-09-22 实测更正的回归锁定): 真实"数组包一层字符串"格式(生产实际存法) + 直接顶层对象格式(向后兼容) 都能正确解出 outpoint; 数组形状不对(长度≠1/元素非字符串)⇒ fail-closed:');
+{
+  const M = mid('fmt1'); const key = settlementIntentKeyFor('market', M, 'seal');
+  ensureSettlementIntent({ subjectType: 'market', subjectId: M, step: 'seal' });
+  markSettlementIntent(key, { status: 'prepared', prepared_tx_json: txJsonWith([{ txid: hex('wrapfmt'), vout: 0 }]) });   // txJsonWith 现在就是真实的"数组包字符串"格式
+  ok(reservedFeeOutpoints({ db: sqlite }).has(`${hex('wrapfmt')}:0`), '真实"[JSON字符串]"存储格式(生产实际写法)能正确解出 outpoint');
+  markSettlementIntent(key, { status: 'landed', landed_depth: 1, landed_at: new Date().toISOString() });
+
+  const M2 = mid('fmt2'); const key2 = settlementIntentKeyFor('market', M2, 'seal');
+  ensureSettlementIntent({ subjectType: 'market', subjectId: M2, step: 'seal' });
+  const directObjectFormat = JSON.stringify({ inputs: [{ transactionId: hex('directfmt'), index: 0 }], outputs: [] });   // 万一某写入方不做数组包装, 直接存顶层对象
+  markSettlementIntent(key2, { status: 'prepared', prepared_tx_json: directObjectFormat });
+  ok(reservedFeeOutpoints({ db: sqlite }).has(`${hex('directfmt')}:0`), '直接顶层对象格式(向后兼容, 非当前生产实际写法但不该拒绝)也能正确解出 outpoint');
+  markSettlementIntent(key2, { status: 'landed', landed_depth: 1, landed_at: new Date().toISOString() });
+
+  const M3 = mid('fmt3'); const key3 = settlementIntentKeyFor('market', M3, 'seal');
+  ensureSettlementIntent({ subjectType: 'market', subjectId: M3, step: 'seal' });
+  markSettlementIntent(key3, { status: 'prepared', prepared_tx_json: JSON.stringify(['a', 'b']) });   // 数组但长度≠1
+  let e1 = null; try { reservedFeeOutpoints({ db: sqlite }); } catch (x) { e1 = x; }
+  ok(!!e1 && /顶层数组形状不对/.test(e1.message), '数组长度≠1 ⇒ fail-closed(不猜哪个元素是对的)');
+  markSettlementIntent(key3, { status: 'landed', landed_depth: 1, landed_at: new Date().toISOString() });
+
+  const M4 = mid('fmt4'); const key4 = settlementIntentKeyFor('market', M4, 'seal');
+  ensureSettlementIntent({ subjectType: 'market', subjectId: M4, step: 'seal' });
+  markSettlementIntent(key4, { status: 'prepared', prepared_tx_json: JSON.stringify([{ not: 'a string' }]) });   // 数组长度1但元素不是字符串
+  let e2 = null; try { reservedFeeOutpoints({ db: sqlite }); } catch (x) { e2 = x; }
+  ok(!!e2 && /顶层数组形状不对/.test(e2.message), '数组元素不是字符串 ⇒ fail-closed');
+  markSettlementIntent(key4, { status: 'landed', landed_depth: 1, landed_at: new Date().toISOString() });
+}
+
+console.log('[test] ⑧ MUST-2(NWT 账本1623/1624): deferReservationReconciliation——不确定结果(IPC 超时/无响应)期间保持预留, 到期才对账释放/移交; 用假 scheduler 捕获回调手动触发(不真的等 30s):');
+{
+  _resetInMemoryReserved();
+  const fakeScheduler = (fn, ms) => { fakeScheduler.calls.push({ fn, ms }); return { fn, ms }; };
+  fakeScheduler.calls = [];
+
+  // 超时路径不释放: 选中后立即调 defer(模拟 sendCmd 抛错), 到期回调触发之前预留必须还在。
+  const A = cand(hex('d1'), 0);
+  selectAndReserveFeeUtxo({ candidates: [A], tryBuild: () => ({ ok: true }), readReserved: () => new Set(), intentKey: 'kd1', selectFeeUtxoByConstruction: (c, tb) => ({ feeUtxo: c[0], built: tb(c[0]) }) });
+  deferReservationReconciliation(A, () => false, 30_000, fakeScheduler);
+  ok(fakeScheduler.calls.length === 1 && fakeScheduler.calls[0].ms === 30_000, 'deferReservationReconciliation 调度了一次, 超时值原样透传给 scheduler');
+  ok(_snapshotInMemoryReserved().has(`${A.txid}:0`), 'MUST-2: 调用 defer 本身不释放——超时路径在到期回调真正触发之前必须保持预留(否则复现 A 臂窗口, 只是把窗口从"选择前"挪到"IPC 不确定期间")');
+
+  // 到期(手动触发回调)对账无痕迹 ⇒ 释放
+  fakeScheduler.calls[0].fn();
+  ok(!_snapshotInMemoryReserved().has(`${A.txid}:0`), 'MUST-2: 到期对账(checkPreparedInDb 返回 false, 无痕迹)⇒ 释放, 之后可被别的选择拿到');
+
+  // 到期对账 DB 已有字节 ⇒ 移交(同样从内存层移除, 但语义是"移交" 不是"没做过")
+  fakeScheduler.calls = [];
+  const B = cand(hex('d2'), 0);
+  selectAndReserveFeeUtxo({ candidates: [B], tryBuild: () => ({ ok: true }), readReserved: () => new Set(), intentKey: 'kd2', selectFeeUtxoByConstruction: (c, tb) => ({ feeUtxo: c[0], built: tb(c[0]) }) });
+  deferReservationReconciliation(B, () => true, 30_000, fakeScheduler);
+  ok(_snapshotInMemoryReserved().has(`${B.txid}:0`), '同样: defer 调用本身不释放');
+  fakeScheduler.calls[0].fn();
+  ok(!_snapshotInMemoryReserved().has(`${B.txid}:0`), 'MUST-2: 到期对账发现 DB 已有 prepared 字节 ⇒ 移交 DB 层(从内存层移除, 但不是"当没发生过")');
+
+  // 生产默认用真 setTimeout(不阻塞测试完成——只核对默认参数值, 不真的等)
+  let usedDefault = false;
+  const realSetTimeoutRef = globalThis.setTimeout;
+  globalThis.setTimeout = (fn, ms) => { usedDefault = (ms === RESERVATION_UNCERTAIN_TIMEOUT_MS); return realSetTimeoutRef(() => {}, 0); };
+  try { deferReservationReconciliation(cand(hex('d3'), 0), () => false); } finally { globalThis.setTimeout = realSetTimeoutRef; }
+  ok(usedDefault, '不传 scheduler/timeoutMs 时默认用 setTimeout + RESERVATION_UNCERTAIN_TIMEOUT_MS');
 }
 
 console.log(fails === 0 ? '\n✅✅ ALL PASS — proto-fee-reservation(DB 派生层 M1/M3 + 进程内层 T-race/释放/对账/遥测)' : `\n❌ ${fails} assertions failed`);

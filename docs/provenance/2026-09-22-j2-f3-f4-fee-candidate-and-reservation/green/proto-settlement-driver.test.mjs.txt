@@ -1,4 +1,4 @@
-[db] path=C:\Users\ADMIN\AppData\Local\Temp\_j2_settle_wiring_24708.db source=DB_PATH
+[db] path=C:\Users\ADMIN\AppData\Local\Temp\_j2_settle_wiring_16620.db source=DB_PATH
 [PASS] 开关 8 态(§3.1): 仅"结算开关=='1' ∧ relay 已配置"为真; PROTO_DRIVER_ENABLED 与之无关; 只认字面 '1'
 [PASS] 关闭态零副作用(§3.2 / §3.3): 只打恰一行 "[proto-settlement-driver] disabled"; 不启动 interval; 不装载 ops; 不发任何命令
 [PASS] 启动日志(§3.2): 形状 "started (tick …ms, cap …/tick, network=…)" 显式带 network; 非主网另打一行 NON-MAINNET; 重复 start 不重复启动; stop 后清 interval

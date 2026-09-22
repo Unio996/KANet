@@ -19,14 +19,23 @@
 
 const opKey = (txid, index) => `${String(txid).toLowerCase()}:${Number(index)}`;
 
-/** prepared_tx_json 是 buildXxxTxJson 系列函数产出的 txJson 字符串(kaspa-wasm safe JSON, 见
- *  proto-tx-assembly(-settlement).mjs), 顶层 { inputs: [{ transactionId, index, ... }], outputs: [...] }
- *  (真实探得的序列化形状, 见 docs/provenance/2026-09-22-j2-f3-f4-.../probe.txt)。全部输入 outpoint 都取
- *  (不止 fee 那一个)——被在途交易占用的角色输入(RootClose/leaf/held 等)同样不该被别的交易当 fee 候选选中,
- *  更保守也更简单: 不需要知道"第几个输入是 fee"这个布局细节。
+/** prepared_tx_json 的【真实存储格式】(2026-09-22 实测更正, 写这批测试时用真实 record*Phase 函数走一遍才
+ *  发现——真实 relay(covenant-broadcast-relay.mjs:189)与 F1b(recordSettlementIntentPhase)传的 txJson 参数
+ *  是 `JSON.stringify([txJsonString])`: 顶层是一个【只含一个元素的数组】, 元素本身【又是一层 JSON 字符串】
+ *  (buildXxxTxJson 产出的原始 txJson), 不是 tx 对象直接顶层就有 inputs 字段。JSON.parse(stored) 先得到
+ *  `[innerJsonString]`, 要再 JSON.parse 一次内层元素才拿到真正的 { inputs:[...], outputs:[...] }。
+ *  兼容双层写入方: 若顶层已经是"数组包一层字符串"这个真实形状, 拆开再解析一次; 若某个未来写入方改成直接存
+ *  顶层 tx 对象(不包数组), 也认——【不接受】顶层是数组但形状不对(长度≠1 或元素不是字符串), 一律 fail-closed,
+ *  不猜。全部输入 outpoint 都取(不止 fee 那一个)——被在途交易占用的角色输入(RootClose/leaf/held 等)同样
+ *  不该被别的交易当 fee 候选选中, 更保守也更简单: 不需要知道"第几个输入是 fee"这个布局细节。
  */
 function extractInputOutpoints(txJsonStr) {
-  const parsed = JSON.parse(txJsonStr);
+  let parsed;
+  try { parsed = JSON.parse(txJsonStr); } catch (e) { throw new Error(`extractInputOutpoints: 顶层 JSON 解析失败(${e.message})`); }
+  if (Array.isArray(parsed)) {
+    if (parsed.length !== 1 || typeof parsed[0] !== 'string') throw new Error(`extractInputOutpoints: 顶层数组形状不对(应为长度 1、元素是 tx_json 字符串, 实际长度=${parsed.length})`);
+    try { parsed = JSON.parse(parsed[0]); } catch (e) { throw new Error(`extractInputOutpoints: 内层 tx_json 解析失败(${e.message})`); }
+  }
   if (!parsed || !Array.isArray(parsed.inputs)) throw new Error('extractInputOutpoints: tx_json 顶层缺 inputs 数组');
   return parsed.inputs.map((inp, i) => {
     if (!inp || typeof inp.transactionId !== 'string' || !/^[0-9a-f]{64}$/i.test(inp.transactionId) || !Number.isInteger(inp.index)) {
@@ -40,34 +49,23 @@ function extractInputOutpoints(txJsonStr) {
 // proto-bet-intent.mjs / proto-market-intent.mjs 的 STATUS 常量)。ambiguous 在这里【统一按非终态处理】——
 // 即便某些状态机(bet-intent 的 ambiguous)把它当"驱动不再自动重试的终态", 那只影响【驱动怎么调度】, 不影响
 // 【这笔 outpoint 是否可能仍是一枚活的可花 UTXO】——ambiguous 恰恰就是"不确定是否已落链", 保守起见继续占位。
-// 🔴 实测更正(写这个模块时发现, 不是设计文档的假设——如实记录): 设计 v0.2.1 §1 表 E6 说
-// "proto_markets.genesis_prepared_tx_json(v207)"已经把创世的在途字节存进去了, 这是照该列【存在】
-// 推断的, 实测这一列在当前生产代码里【从未被写入过】——recordMarketIntentPhase(proto-market-intent.mjs)
-// 是唯一会写它的函数, 而全仓零生产调用点(只有一句"buildAndBroadcast 内部应当在广播前调"的注释, 从未
-// 真正接线; recordBetIntentPhase 有真实调用点 src/api/ingest.js:99, 是不同情况)。genesis 的状态机现状是
-// genesis_pending → (buildMarketGenesisAndBroadcast 内部构造+广播一步做完)→ genesis_submitted, 中途没有
-// 单独落一次"prepared 字节"的检查点。
-// 🔴 若把 proto_markets 加进 SOURCES 且 nonTerminal 含 genesis_submitted/genesis_ambiguous, 会导致【每一个
-// 广播成功过的市场】永远触发下面的 fail-closed(txCol 为 null)——这不是"防止安全层失效", 是把 DB 派生层
-// 对全部三路径的读取【全部拖死】(reservedFeeOutpoints 一处抛错, 创世/下注/结算的选择全部 HOLD)。已在本批
-// 离线测试里真实撞到(proto-broadcast-ops.test.mjs F3b-4、proto-driver.test.mjs ⑦), 不是猜测。
-// 🔴 同一个实测更正也适用于 proto_bet_intents(离线测试跑出来的真实结果, 不是从 markets 的情况类推猜的):
-// register_append 的真实生产路径(driveBetIntent → 本文件外的 buildRegisterAppendAndBroadcast)status 从
-// 'pending' 直接被 driveBetIntent 自己的 markBetIntent 调用推到 'submitted'(带 submitted_txid), 全程不经过
-// recordBetIntentPhase(该函数只在一个独立的 ingest.js:99 回调路径里被调, 与 driveBetIntent 是两条不同的
-// 写入路径, register_append 目前只走后者)——同样从不写 prepared_tx_json。proto-broadcast-ops.test.mjs
-// F3b-1/F3b-4、⑫号既有测试真实撞到 fail-closed HOLD(见 2026-09-22 provenance), 不是猜测。
-// ⇒ 本批 DB 派生层只接 proto_settlement_intents(结算, F1 设计本来就要求 prepared 字节先于广播落库, 31 项
-// driver-core 测试 + 6 项 settlement-ops 测试实测确认可靠)。创世 / 下注的并发保护在本批【只靠进程内
-// "已选未落库"层】(buildMarketGenesisAndBroadcast / buildRegisterAppendAndBroadcast 各自的
-// selectAndReserveFeeUtxo + finally 释放, 覆盖从选中到这次广播尝试结束的整个窗口——这正是 A 臂真实撞到的
-// 那种"同 tick 顺序两笔创世竞争同一 UTXO"的窗口, 已经覆盖; DB 层缺的是"跨重启"这一段, 留作后续补建
-// prepared 字节写入路径之后的工作)。
-// 若日后有人把 recordMarketIntentPhase/recordBetIntentPhase 接上各自的真实生产调用点(driveMarketGenesis/
-// driveBetIntent 在广播前调用, 而不是只有 ingest.js 的独立回调), 把对应条目加回这个数组即可, 不需要改
-// 其它任何代码——SOURCES 是本文件唯一需要改的地方。
+// 🔴🔴 撤回更正(NWT 用真实探针复核, 账本1623/1624, 原判定错误——如实记录, 不是悄悄改回去):
+// 本文件曾判定 proto_markets.genesis_prepared_tx_json / proto_bet_intents.prepared_tx_json 在生产路径下
+// 从未写入, 依据是 grep kasia-console/src 找不到 recordMarketIntentPhase/recordBetIntentPhase 的生产调用
+// 点——【这个 grep 范围本身就错了】: 真正的调用方在 kasia-relay 包(另一个代码库子目录), 不在
+// kasia-console/src。已直接读源码验证: kasia-relay/src/lib/covenant-broadcast-relay.mjs:189
+// `await ingestPhase({ intentKey: key, phase: 'prepared', txid, txJson: JSON.stringify([txJson]) })`——
+// 对【全部三种】intent_key 前缀(genesis:/proto-bet:/settle:)在真实广播【之前】无条件调用同一段代码(:58
+// `ingestPhase = ingestProtoBetIntentPhase` 默认值, 经 console 侧 HTTP 回调落库), console 侧
+// `src/api/ingest.js` 按前缀分派到 recordMarketIntentPhase(genesis:)/recordSettlementIntentPhase(settle:)/
+// recordBetIntentPhase(其余, 含 proto-bet:)——三条路径结构相同, 都会真实写入。此前
+// proto-broadcast-ops.test.mjs/proto-driver.test.mjs 撞到的 fail-closed HOLD, 根因是那些测试的假
+// sendCmd(手写 stub 直接 return {ok:true,...})【没有模拟这个 ingestPhase 回调】, 不是生产代码本身有缺口——
+// 测试少做了一步, 不是生产少做了一步(对应的测试 mock 已在同一批里补上这一步)。
 const SOURCES = Object.freeze([
   { table: 'proto_settlement_intents', statusCol: 'status', txCol: 'prepared_tx_json', nonTerminal: ['prepared', 'submitted', 'ambiguous'] },
+  { table: 'proto_markets', statusCol: 'status', txCol: 'genesis_prepared_tx_json', nonTerminal: ['genesis_prepared', 'genesis_submitted', 'genesis_ambiguous'] },
+  { table: 'proto_bet_intents', statusCol: 'status', txCol: 'prepared_tx_json', nonTerminal: ['prepared', 'submitted', 'ambiguous'] },
 ]);
 
 /**
@@ -159,7 +157,8 @@ export function releaseReservationOnFailure({ txid, vout }) { _inMemoryReserved.
  *   有 ⇒ 转由 DB 层持有, 从内存层移除(不是"续期", 是"移交");
  *   无 ⇒ 释放(relay 确实没收到 / 没处理, 后来者可以再选这个 UTXO)。
  * 调用时机: 由调用方在 IPC 超时之后、经过 RESERVATION_UNCERTAIN_TIMEOUT_MS 再核对(调用方负责计时, 本函数只做
- *   "现在核对一次"这一步的纯逻辑, 不自带定时器——避免本模块状态里再长出一份重复的计时器管理)。
+ *   "现在核对一次"这一步的纯逻辑, 不自带定时器——避免本模块状态里再长出一份重复的计时器管理; 生产接线走下面的
+ *   deferReservationReconciliation, 它才是真正持有定时器的那一方)。
  * @param {{txid:string, vout:number}} outpoint
  * @param {() => boolean} checkPreparedInDb  同步 or 已 resolve 的判定: 该 outpoint 对应的 intent 是否已在 DB 里有 prepared 字节
  */
@@ -169,6 +168,28 @@ export function reconcileUncertainReservation({ txid, vout }, checkPreparedInDb)
   const hasPreparedInDb = checkPreparedInDb();
   _inMemoryReserved.delete(key);   // 两种结局都从内存层移除: 有 ⇒ 移交 DB 层; 无 ⇒ 释放
   return { action: hasPreparedInDb ? 'handed_to_db_layer' : 'released', reason: hasPreparedInDb ? 'prepared_found_in_db' : 'no_trace_in_db' };
+}
+
+/**
+ * MUST-2(NWT 实现审, 账本1623/1624): 生产接线在"结果不确定"这一支要用的调度器——reconcileUncertainReservation
+ * 本身不带定时器(上面注释已说明), 调用方(driver-core.mjs / proto-broadcast-ops.mjs 的三个真实调用点)在
+ * sendCmd 这一层【本身抛错】(IPC 超时 / 连接失败 / 无响应——不是 relay 回了一个 {ok:false} 的明确拒绝, 那种
+ * 情况走 releaseReservationOnFailure 立即释放)时调用这个函数, 而不是无条件在 finally 里立即释放——因为
+ * relay 侧真实广播代码(covenant-broadcast-relay.mjs:189)在 IPC 应答之前就已经把 prepared 字节 ingestPhase
+ * 回 console 了, "console 这次 sendCmd 没等到回执"不等于"relay 什么也没做": 若真提前释放, 后来者会在
+ * relay 那笔仍可能落链的窗口里选中同一个 outpoint, 复现 A 臂的 inputs_spent 竞态, 只是把窗口从"选择前"
+ * 挪到了"IPC 不确定期间", 没有真的解决。
+ * @param {{txid:string, vout:number}} outpoint
+ * @param {() => boolean} checkPreparedInDb  与 reconcileUncertainReservation 同一个判定, 原样转交
+ * @param {number} [timeoutMs]  默认 RESERVATION_UNCERTAIN_TIMEOUT_MS, 测试可传更短的值
+ * @param {(fn:Function, ms:number) => *} [scheduler]  可注入(测试用假计时器/立即执行), 生产默认 setTimeout
+ */
+export function deferReservationReconciliation({ txid, vout }, checkPreparedInDb, timeoutMs = RESERVATION_UNCERTAIN_TIMEOUT_MS, scheduler = setTimeout) {
+  if (typeof checkPreparedInDb !== 'function') throw new TypeError('deferReservationReconciliation: checkPreparedInDb 必填(到期对账用)');
+  return scheduler(() => {
+    try { reconcileUncertainReservation({ txid, vout }, checkPreparedInDb); }
+    catch { /* 对账本身的判定函数不该抛, 但防御性地不让一次坏的对账把进程炸掉——预留最坏情况下留到下次人工/下次同 outpoint 的选择尝试时被 DB 层自然接管或超期遥测发现 */ }
+  }, timeoutMs);
 }
 
 /** 泄漏遥测(设计 §3.2 B.2 "泄漏遥测"): 预留数 / 最老预留年龄。诊断/报警用, 纯读。 */

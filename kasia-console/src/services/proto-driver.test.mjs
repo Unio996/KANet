@@ -51,6 +51,21 @@ function feeUtxosResponse(items) {
   };
 }
 
+// F4 MUST-1(NWT 账本1623/1624 实测更正): 真实 relay 在广播前无条件 ingestPhase(phase:'prepared',...)(见
+// proto-broadcast-ops.test.mjs 同名 helper 的头注)——这里【不】像那个文件一样额外强推终态: 本文件的
+// ④/⑥/⑦号用例恰恰要测"驱动推进到 submitted 但还没 landed"这个中间态本身, 强推终态会让那些断言测不到
+// 真正要测的东西。候选 txid 冲突改用"各用例给自己的候选换一个新 txid"解决, 不改状态。
+async function simulateIngestPrepared(cmd) {
+  const { intent_key: intentKey, tx_json: txJson, expected_txid: txid } = cmd;
+  if (intentKey.startsWith('genesis:')) {
+    const { recordMarketIntentPhase } = await import('../lib/proto-market-intent.mjs');
+    recordMarketIntentPhase({ intentKey, phase: 'prepared', txid, txJson: JSON.stringify([txJson]) });
+  } else {
+    const { recordBetIntentPhase } = await import('../lib/proto-bet-intent.mjs');
+    recordBetIntentPhase({ intentKey, phase: 'prepared', txid, txJson: JSON.stringify([txJson]) });
+  }
+}
+
 async function makeMarket(tag) {
   const marketId = tag.repeat(64).slice(0, 64);
   const artifacts = await computeMarketGenesisArtifacts({ marketId, minBet: 5, deadlineMs: 1700000000000 });
@@ -67,8 +82,14 @@ function makeSendCmd() {
     calls.push(cmd);
     // 账本1462修复后 SIGNED_INPUT_CEILING_SOMPI(1.0 KAS)会预先过滤面值过大的候选——原100 KAS巨额假面值
     // 已不再可用, 改用真实种子面值同量级的0.5 KAS(genesis真实所需仅≈0.213 KAS)。
-    if (cmd.type === 'get_address_utxos') return feeUtxosResponse([{ outpoint: { transactionId: 'ab'.repeat(32), index: 0 }, amount: '50000000' }]);
-    if (cmd.type === 'covenant_broadcast') return { ok: true, txId: cmd.expected_txid, intent_key: cmd.intent_key };
+    // F4(MUST-1 之后, 账本1623/1624): 每次 get_address_utxos 都换一枚新的候选 txid, 不再用固定常量——
+    // 固定值曾经在"没有跨市场预留"的旧世界里无所谓(每个测试/每个市场互相独立), F4 接上真实 DB 派生预留后,
+    // 同一个 sendCmd 实例在【一个 tick 内】可能要真实服务多个市场(如④号cap测试), 前一个市场的 genesis
+    // 消费掉某个候选并写入 prepared 字节(这个 mock 不模拟落链, 所以它不会自然释放)会让复用同一固定候选的
+    // 下一个市场真的选不到——这条路径不是这个测试想测的东西(它测的是 cap 限制, 不是 fee 争用), 每次给一枚
+    // 全新候选规避掉, fee 争用本身已经在 proto-settlement-ops.test.mjs 的 F4 真实争用①/②里专门测过。
+    if (cmd.type === 'get_address_utxos') return feeUtxosResponse([{ outpoint: { transactionId: randomBytes(32).toString('hex'), index: 0 }, amount: '50000000' }]);
+    if (cmd.type === 'covenant_broadcast') { await simulateIngestPrepared(cmd); return { ok: true, txId: cmd.expected_txid, intent_key: cmd.intent_key }; }
     if (cmd.type === 'check_utxo_landed') return { ok: true, landed: false, depth: null };
     throw new Error(`unexpected cmd ${cmd.type}`);
   };
@@ -174,10 +195,10 @@ await t('⑥bet_mint(register_append) pending intent 经 runProtoDriverTick 真�
   const sendCmd = async (relayId, cmd) => {
     if (cmd.type === 'get_address_utxos') {
       // F3: fee 候选取数带 facts:true(proto-broadcast-ops.mjs fetchFeeCandidates), leaf 查询不带——按此分流。
-      if (cmd.facts) return feeUtxosResponse([{ outpoint: { transactionId: 'fe'.repeat(32), index: 0 }, amount: '95000000' }]);   // 账本1462: 0.95 KAS, 高于首笔下注最小可行区间(约0.925~0.93 KAS, 2026-09-19精确mass门控订正; 原≈0.82 KAS来自旧本地估算)
+      if (cmd.facts) return feeUtxosResponse([{ outpoint: { transactionId: randomBytes(32).toString('hex'), index: 0 }, amount: '95000000' }]);   // F4: 每次换新候选(理由同 makeSendCmd, 见上)。账本1462: 0.95 KAS, 高于首笔下注最小可行区间(约0.925~0.93 KAS, 2026-09-19精确mass门控订正; 原≈0.82 KAS来自旧本地估算)
       return { ok: true, utxos: [{ outpoint: { transactionId: market1Row.shardleaf_txid, index: 0 }, amount: '20000000' }] }; // N-1(2026-09-19): leaf UTXO真实面值恒=CONTINUATION_OUTPUT_SOMPI(20,000,000)
     }
-    if (cmd.type === 'covenant_broadcast') return { ok: true, txId: cmd.expected_txid, intent_key: cmd.intent_key };
+    if (cmd.type === 'covenant_broadcast') { await simulateIngestPrepared(cmd); return { ok: true, txId: cmd.expected_txid, intent_key: cmd.intent_key }; }
     if (cmd.type === 'check_utxo_landed') return { ok: true, landed: false, depth: null };
     throw new Error(`unexpected cmd ${cmd.type}`);
   };
@@ -193,10 +214,10 @@ await t('⑦bet_mint(register_append) submitted intent landed 后, proto_bets.st
   const intentBefore = getBetIntent(`proto-bet:${betId1}:append`);
   const sendCmd = async (relayId, cmd) => {
     if (cmd.type === 'get_address_utxos') {
-      if (cmd.facts) return feeUtxosResponse([{ outpoint: { transactionId: 'fe'.repeat(32), index: 0 }, amount: '95000000' }]);
+      if (cmd.facts) return feeUtxosResponse([{ outpoint: { transactionId: randomBytes(32).toString('hex'), index: 0 }, amount: '95000000' }]);   // F4: 每次换新候选(理由同 makeSendCmd)
       return { ok: true, utxos: [{ outpoint: { transactionId: market1Row.shardleaf_txid, index: 0 }, amount: '20000000' }] };
     }
-    if (cmd.type === 'covenant_broadcast') return { ok: true, txId: cmd.expected_txid, intent_key: cmd.intent_key };
+    if (cmd.type === 'covenant_broadcast') { await simulateIngestPrepared(cmd); return { ok: true, txId: cmd.expected_txid, intent_key: cmd.intent_key }; }
     if (cmd.type === 'check_utxo_landed') return { ok: true, landed: true, depth: 25 };
     throw new Error(`unexpected cmd ${cmd.type}`);
   };
