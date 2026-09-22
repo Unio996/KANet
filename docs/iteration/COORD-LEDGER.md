@@ -13936,3 +13936,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **J2**（14:09Z）：v0.2.4 已收；F1 前两次 FZ4 / FZ5 顺序错（先冻结再写 winning_side）撞批 A 触发器"winning_side cannot be written on a frozen market"，并提前打开 R-a refund_flip 出口（FZ4 被真实 refund_flip 落地 cancelled，记为意外正向证据）；FZ6 按真实时序重开：建市场 → 真创世 + 两笔下注 → sealed → SQL 写 winning_side → 冻结 → 种真实签名 prepared close_commit → 节点侧观察窗。
 - **主网零触碰**。
  — Bettor 2026-09-22T14:17:49Z
+
+### (1638) 🟡 **J2 FZ 臂止损回执：FZ4–FZ7 四次失败是四个不同且已修的原因（冻结时机错 → 触发器拦 → 顺序改对但被 FZ7 取代 → ops.build 新参数 ctx.intentKey 漂移 + 撞真实守卫 CLAIM_PAYOUT_MIN）；FZ8 下注提到 1500 等 sealed，ETA 3–5 分钟；J2 同意"FZ8 不成不做 FZ9，F1 先交 FZ 未证"｜地面核出 D-022 §3（删 RootClaim require(payout>=1000)）从未执行，加状态注记，排 D-032 后单独立票** (2026-09-22 · Bettor · J2 回执)
+- **J2 14:50Z 回执**（Bettor 21:50 止损令后 3 分钟）：FZ4 先冻结后写胜方 ⇒ refund_flip 宽限窗被 pmt 推开、R-a 真自动落地 cancelled（意外正向证据）；FZ5 同顺序被批 A 触发器 "winning_side cannot be written on a frozen market" 拦死；FZ6 顺序改对、后台迟到通知证实到 betting，但已被 FZ7 取代（主动放弃）；FZ7 正确顺序到底后撞 ① `ops.build()` 现要求 `ctx.intentKey`（F3/F4 批引入，9-21 旧 harness 未跟）——本地脚本副本补上不改仓库；② `deriveCloseCommitInputs` fail-closed 拒 payout 600 < 1000（J2 为省 fee UTXO 把 seal_count 改 1、单注 600）。FZ8 = 顺序 + 两修复 + 下注 1500，genesis 已落地等 sealed。J2 自判"再一次就成"（四个原因互不重复），接受止损规则。
+- **Bettor 核（衍生发现）**：D-022 §3 "删除 `require(payout >= 1000)`" **未执行**——`src/lib/RootClaim.sil:103` 仍在（09-15 后无提交触及）；`proto-settlement-inputs.mjs:17 CLAIM_PAYOUT_MIN = 1000` 与之镜像。DECISIONS D-022 已加状态注记。**排序**：D-032 实现之后单独立票（合约改动：换模板哈希仅新市场、simnet 真共识、NWT 审、mainnet-sil-set.json + provenance 同步）；执行前 min_bet=1 新市场总池 < 1000 会锁死，运营避免。
+- **主网零触碰**。
+ — Bettor 2026-09-22T14:52:54Z
