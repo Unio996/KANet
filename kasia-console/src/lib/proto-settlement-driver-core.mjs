@@ -190,15 +190,34 @@ export function createSettlementDriver(deps, { ticksToError = 3 } = {}) {
               pmtEvidence = gate.pmtEvidence;
             }
             stage = 'build';
-            const built = await deps.build(step, { marketId, subjectId, prep, chainParents: v.chainParents, feeCandidates: v.fee && v.fee.candidates, withFeeParent, pmtEvidence });
+            const built = await deps.build(step, { marketId, subjectId, prep, chainParents: v.chainParents, feeCandidates: v.fee && v.fee.candidates, withFeeParent, pmtEvidence, intentKey: key });
             if (!built || typeof built.txJson !== 'string' || typeof built.expectedTxid !== 'string' || !Array.isArray(built.signInputIndices) || built.signInputIndices.length === 0) {
               throw new Error(`${key}: build 端口返回不完整(txJson / expectedTxid / 非空 signInputIndices)`);
             }
+            // F4(设计 v0.2.1 §3.2 B.2, MUST-2 修正 NWT 账本1623/1624): build() 内部已经【选中并记入】进程内
+            // 预留层(见 ops.build 的 selectAndReserveFeeUtxo)——build 只构造不广播, 真正的 IPC 广播在下面。
+            // 释放时机按结果分两支, 不是无条件 finally 释放:
+            //   ① 确定结果(sendCmd 正常 resolve, 不论 rep.ok 是 true 还是 false)⇒ relay 已经给出明确答复
+            //      (成功 / 明确拒绝), 立即释放。
+            //   ② 不确定结果(sendCmd 本身抛错: IPC 超时 / 连接失败 / 无响应)⇒ 【不释放】——真实 relay 广播
+            //      代码(covenant-broadcast-relay.mjs:189)在 IPC 应答之前就已经把 prepared 字节 ingestPhase
+            //      回 console 了, "这次 sendCmd 没等到回执"不等于"relay 什么也没做"; 提前释放会让后来者在
+            //      relay 那笔仍可能落链的窗口里选中同一个 outpoint, 复现 A 臂的 inputs_spent 竞态, 只是把
+            //      窗口从"选择前"挪到了"IPC 不确定期间"。交给 deferReservationReconciliation 到期(有界)
+            //      对账: 查 DB 是否已有 prepared 字节, 有 ⇒ 移交 DB 层, 无 ⇒ 释放。
             stage = 'broadcast';
             const cmd = { type: 'covenant_broadcast', intent_key: key, tx_json: built.txJson, sign_input_indices: built.signInputIndices, expected_txid: built.expectedTxid };
             if (built.genesisOutputIndices) cmd.genesis_output_indices = built.genesisOutputIndices;
             if (built.continuationOutputIndices) cmd.continuation_output_indices = built.continuationOutputIndices;
-            const rep = await deps.sendCmd(deps.relayId, cmd, 30000, 'internal');
+            let rep;
+            try { rep = await deps.sendCmd(deps.relayId, cmd, 30000, 'internal'); }
+            catch (networkErr) {
+              if (built.feeUtxo && typeof deps.deferReservationReconciliation === 'function') {
+                deps.deferReservationReconciliation(built.feeUtxo, () => (typeof deps.checkIntentPreparedInDb === 'function' ? deps.checkIntentPreparedInDb(key) : false));
+              }
+              throw networkErr;
+            }
+            if (built.feeUtxo && typeof deps.releaseFeeReservation === 'function') deps.releaseFeeReservation(built.feeUtxo);
             if (rep && rep.ok && rep.txId) return { txId: rep.txId, txJson: built.txJson };
             const code = rep && rep.code;
             if (RELAY_FEE_REJECT_CODES.includes(code)) alert('settlement_relay_fee_rejected', `${key}: relay 拒绝 fee(${code})`, { intent_key: key, code }, 'error');

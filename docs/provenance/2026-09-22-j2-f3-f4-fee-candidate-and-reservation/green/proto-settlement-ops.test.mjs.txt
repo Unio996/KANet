@@ -1,0 +1,70 @@
+[db] path=C:\Users\ADMIN\AppData\Local\Temp\_j2_settle_ops_33088.db source=DB_PATH
+[diag:step] proc.silverc.compile.bshard-artifacts ms=76 cmd=silverc ok=1 at=2026-09-22T08:07:57.412Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=52 cmd=silverc ok=1 at=2026-09-22T08:07:57.470Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=29 cmd=silverc ok=1 at=2026-09-22T08:07:57.521Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=13 cmd=silverc ok=1 at=2026-09-22T08:07:57.541Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=51 cmd=silverc ok=1 at=2026-09-22T08:07:57.600Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=30 cmd=silverc ok=1 at=2026-09-22T08:07:57.640Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=13 cmd=silverc ok=1 at=2026-09-22T08:07:57.659Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=51 cmd=silverc ok=1 at=2026-09-22T08:07:57.734Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=75 cmd=silverc ok=1 at=2026-09-22T08:07:57.822Z
+[PASS] prepare(seal): 预期 spk(leaf / held)与链上 UTXO 一致; targetAddress 是 seal 输出0 的 RootClose(closed:0)地址; feeMinAmount = fee profile cap; 只读(不写任何表)
+[diag:step] proc.silverc.compile.bshard-artifacts ms=30 cmd=silverc ok=1 at=2026-09-22T08:07:57.911Z
+[PASS] E2E-1 seal: 一个 tick 真构造 + 广播(intent_key 过出口 S9); 下一 tick 对账 landed ⇒ 市场 betting → sealed; 无 error 报警
+[diag:step] proc.silverc.compile.bshard-artifacts ms=75 cmd=silverc ok=1 at=2026-09-22T08:07:58.025Z
+[PASS] E2E-2 close_commit: 操作员未写 winning_side ⇒ 不触发; 写入后 ⇒ pmt 门放行(读 relay 的 pmt)、真构造、广播; 对账后 sealed → resolved + win claim 行(64 位 hex, 过出口)+ convert_to_claim 意图
+[diag:step] proc.silverc.compile.bshard-artifacts ms=32 cmd=silverc ok=1 at=2026-09-22T08:07:58.130Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=30 cmd=silverc ok=1 at=2026-09-22T08:07:58.207Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=19 cmd=silverc ok=1 at=2026-09-22T08:07:58.266Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=28 cmd=silverc ok=1 at=2026-09-22T08:07:58.335Z
+[PASS] E2E-3 convert_to_claim → claim_draw: 真构造(ticket 由委员私钥信封签, 驱动层不碰私钥)、广播、对账; 终态: claim 行记 claim_txid / vout / claimed_at; 四步意图全 landed; 全程无 error 报警
+[diag:step] proc.silverc.compile.bshard-artifacts ms=32 cmd=silverc ok=1 at=2026-09-22T08:07:58.393Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=26 cmd=silverc ok=1 at=2026-09-22T08:07:58.425Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=75 cmd=silverc ok=1 at=2026-09-22T08:07:58.506Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=52 cmd=silverc ok=1 at=2026-09-22T08:07:58.565Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=29 cmd=silverc ok=1 at=2026-09-22T08:07:58.606Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=14 cmd=silverc ok=1 at=2026-09-22T08:07:58.626Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=52 cmd=silverc ok=1 at=2026-09-22T08:07:58.683Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=30 cmd=silverc ok=1 at=2026-09-22T08:07:58.720Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=13 cmd=silverc ok=1 at=2026-09-22T08:07:58.739Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=36 cmd=silverc ok=1 at=2026-09-22T08:07:58.782Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=25 cmd=silverc ok=1 at=2026-09-22T08:07:58.813Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=76 cmd=silverc ok=1 at=2026-09-22T08:07:58.895Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=53 cmd=silverc ok=1 at=2026-09-22T08:07:58.955Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=29 cmd=silverc ok=1 at=2026-09-22T08:07:58.997Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=15 cmd=silverc ok=1 at=2026-09-22T08:07:59.018Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=54 cmd=silverc ok=1 at=2026-09-22T08:07:59.080Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=34 cmd=silverc ok=1 at=2026-09-22T08:07:59.123Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=13 cmd=silverc ok=1 at=2026-09-22T08:07:59.142Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=53 cmd=silverc ok=1 at=2026-09-22T08:07:59.204Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=75 cmd=silverc ok=1 at=2026-09-22T08:07:59.290Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=29 cmd=silverc ok=1 at=2026-09-22T08:07:59.349Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=64 cmd=silverc ok=1 at=2026-09-22T08:07:59.429Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=75 cmd=silverc ok=1 at=2026-09-22T08:07:59.516Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=30 cmd=silverc ok=1 at=2026-09-22T08:07:59.576Z
+[PASS] F4 前置: Y 真实推进到 sealed 并冻结(refund_flip 的两个前置条件: seal 意图 landed + 已冻结)
+[diag:step] proc.silverc.compile.bshard-artifacts ms=75 cmd=silverc ok=1 at=2026-09-22T08:07:59.695Z
+[PASS] F4 真实争用①(结算跨入口): X 的 seal 与 Y 的 refund_flip 用 Promise.all 真并发(driver.advanceStep, 真 ops.build, 真 selectAndReserveFeeUtxo), 候选池只留一枚"最佳"候选 ⇒ 它最多被一笔真实广播的交易花掉(绝不双花); 断言只钉这一个不变量, 不钉"哪一方赢"或"总共几笔广播成功"——构造成功一方若产生找零输出, 会给另一方腾出一枚全新候选, 双方都成功是合法结局, 唯一不合法的是同一个 outpoint 被两笔不同交易同时声称花掉
+[diag:step] proc.silverc.compile.bshard-artifacts ms=34 cmd=silverc ok=1 at=2026-09-22T08:07:59.771Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=25 cmd=silverc ok=1 at=2026-09-22T08:07:59.801Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=74 cmd=silverc ok=1 at=2026-09-22T08:07:59.881Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=53 cmd=silverc ok=1 at=2026-09-22T08:07:59.940Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=32 cmd=silverc ok=1 at=2026-09-22T08:07:59.981Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=25 cmd=silverc ok=1 at=2026-09-22T08:08:00.011Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=74 cmd=silverc ok=1 at=2026-09-22T08:08:00.091Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=51 cmd=silverc ok=1 at=2026-09-22T08:08:00.150Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=33 cmd=silverc ok=1 at=2026-09-22T08:08:00.192Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=13 cmd=silverc ok=1 at=2026-09-22T08:08:00.210Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=52 cmd=silverc ok=1 at=2026-09-22T08:08:00.267Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=29 cmd=silverc ok=1 at=2026-09-22T08:08:00.304Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=13 cmd=silverc ok=1 at=2026-09-22T08:08:00.323Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=50 cmd=silverc ok=1 at=2026-09-22T08:08:00.392Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=73 cmd=silverc ok=1 at=2026-09-22T08:08:00.477Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=28 cmd=silverc ok=1 at=2026-09-22T08:08:00.535Z
+[PASS] F4 前置②: Y2 同 Y 走到 sealed 并冻结(第二个 refund_flip 场景, 供创世争用测试用, 与①相互独立)
+[diag:step] proc.silverc.compile.bshard-artifacts ms=75 cmd=silverc ok=1 at=2026-09-22T08:08:00.648Z
+[PASS] F4 真实争用②(创世跨入口——下注与创世在 F4 里是同一段代码 fetchFeeCandidates+selectAndReserveFeeUtxo, proto-broadcast-ops.test.mjs F3b-4 已单独验证下注侧, 这里不重复起第四个并发臂): Z 的创世(buildMarketGenesisAndBroadcast, 真实生产函数)与 Y2 的 refund_flip 用 Promise.all 真并发, 候选池只留一枚"最佳"候选 ⇒ 它最多被一笔真实广播花掉(同①, 不钉总成功数)
+[PASS] 私钥卫生: 全部广播命令 / 事件 / 意图列里不含委员私钥信封明文之外的密钥材料——扫描 broadcasts、events、intents 全文不含 relay 私钥与委员信封原文
+[PASS] 结构: ops 不 bare-import relay-manager; 不含 withdraw / reclaim / allowUnlistedTestDestination / 私钥解密; 不写任何表(无 INSERT / UPDATE / DELETE)
+
+proto-settlement-ops.test: 10 passed, 0 failed
