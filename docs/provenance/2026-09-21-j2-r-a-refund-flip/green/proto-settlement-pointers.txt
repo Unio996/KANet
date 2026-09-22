@@ -1,0 +1,31 @@
+[db] path=C:\Users\ADMIN\AppData\Local\Temp\_j2_pointers_10044.db source=DB_PATH
+[PASS] P1/P2 seal 步(格 1 seal·leaf、格 2 seal·held): 取自最新 landed append(A2)的输出 0 / 2; leaf 的 covenantId = proto_markets.shardleaf_cov_id, held 的 = 该 append 输出[2] 的 genesis covenantId(每笔 append 都不同)
+[PASS] P1b 没有任何 landed 的 append: leaf 退回 genesis(proto_markets.shardleaf_txid/vout, source=genesis); 但 seal 步没有 held ⇒ pointer_dependency_not_landed
+[PASS] P1c 指针取的 append 与 proto-leaf-state.deriveLeafOutpoint / deriveHeldKttOutpoint 取的是同一笔(两处查询排序一致)
+[PASS] P3 close_commit 步(格 3): rootClose = seal 意图(landed)的输出 0, covenantId = 该输出的 genesis covenantId
+[PASS] P4/P5 convert_to_claim 步(格 4 rootClose、格 5 held): rootClose = close_commit(intent step=resolve)输出 0 且 covenantId 与格 3 相等(续约保持 id); held = seal 输出 1
+[PASS] P6/P7/P8 claim_draw 步(格 6 rootClaim、格 7 held、格 8 ticket): rootClaim / held = convert_to_claim 意图输出 0 / 1; ticket = 赢家那一条下注(bet2)的 landed append 意图输出 1, 无 covenant
+[PASS] P8b 赢家票 = winnerBetId 那一行(不是"最新的 append"): 胜方改成 side=0(bet1)⇒ 票取自 bet1 的 append(A1)输出 1
+[PASS] P9 ▲ 篡改 prepared_tx_json 的一个输出面值(JSON 里自带的 id 字段没动)⇒ pointer_txid_mismatch——deserializeFromSafeJSON 不重算 id, 只有 finalize() 才暴露(去掉 finalize / 改读原始 JSON 的变异必红)
+[PASS] P9b ▲ 篡改输出的 covenant id(被 txid 覆盖)⇒ 同码 pointer_txid_mismatch
+[PASS] P9c 篡改【不被 txid 覆盖】的字段(computeBudget / sigOpCount / signatureScript / utxo.amount)⇒ 四步的指针结果逐字段不变(证明模块没读它们); 对照: 篡改被覆盖的 sequence ⇒ 拒(证明篡改手段本身有效)
+[PASS] P9d prepared_tx_json 不是合法 JSON / 不是交易 ⇒ pointer_tx_malformed(与"列为空"分开)
+[PASS] P9f ▲ prepared_tx_json 形状(9-4 simnet 实测缺口): 真写入方形状 [ "<safe-JSON 串>" ] 与裸串给出【逐字段相同】的指针; 数组 0 元素 / 2 元素 / 元素非字符串 / 嵌套数组 ⇒ pointer_tx_malformed(不猜取哪一笔)——去掉解包的变异必红
+[PASS] P9e prepared_tx_json 为 NULL / 空串 / 纯空白 ⇒ pointer_tx_missing; landed 行的 submitted_txid 为空或非法 ⇒ pointer_txid_mismatch
+[PASS] P10 ▲ 谱系断开(只读 previousOutpoint): seal 的输入 0/1 没花掉最新 append 的输出(含"同 txid 另一 index")/ close_commit 的输入 0 没花掉 seal 输出 0 / convert_to_claim 的输入 0、1 没花掉 close_commit 输出 0、seal 输出 1 ⇒ pointer_lineage_mismatch; 且更早的步骤不受影响
+[PASS] P11 ▲ covenantId 不一致: close_commit 输出的 covenantId ≠ seal 输出 0 的(续约必须保持 id)⇒ 拒; append 输出 0 的 covenantId ≠ proto_markets.shardleaf_cov_id ⇒ 拒
+[PASS] P16 ▲ genesis 组输出的 covenantId 与 kaspa.covenantId(authorizing 输入 outpoint, [该输出]) 独立重算不等 ⇒ 拒(校验 builder 的 genesis 派生, 不是防 DB 篡改: 这些交易 txid 自洽); 期望 genesis 的输出没有 covenant 也拒
+[PASS] P17 输出下标越界 ⇒ pointer_output_missing(seal 只剩 1 个输出 / convert_to_claim 只剩 1 个输出)
+[PASS] P12 胜方已确认下注 ≠ 1(0 条 / 2 条 / winning_side 未写)⇒ pointer_winner_ambiguous(复用 deriveWinnerBet 的 fail-closed 语义, 不另写一份)
+[PASS] P13 前置意图不是 landed ⇒ pointer_dependency_not_landed(seal / resolve / convert_to_claim 各为 submitted 或缺行或 ambiguous; 赢家那笔 append 未 landed)
+[PASS] P14 append 的 landed_at 同毫秒平局 ⇒ 取 rowid 大者(append 严格串行 ⇒ 创建顺序 == 落链顺序); 指针模块与 proto-leaf-state 两处查询取同一笔
+[PASS] P15 ▲ 票三者不一致 ⇒ pointer_ticket_inconsistent(proto_bets.ticket_txid ≠ append 意图 submitted_txid / ticket_vout ≠ 1 / 输出 spk ≠ 现算 ticket spk / 输出带 covenant); 更早的步骤不受影响
+[PASS] 闭集: pointerCodes() = 设计 §19.2 的 9 个(冻结); 上面各用例见到的每个失败 code 都在其中, 且 9 个都至少被触发过一次(闭集里没有死码)
+[PASS] 调用方错误 ⇒ TypeError(未知步骤 / marketId 非 64 位小写 hex / 缺 db / 缺 kaspa)
+[PASS] D-1 ▲ wasm 对象释放有测试守着: 每次装载的 Transaction 恰好释放一次(成功路径四步: 装载 1/2/3/5 笔, 创建数 == 释放数), 每个 covenant 输出的独立重算用的 TransactionOutput 也显式释放
+[PASS] F3-1 ▲ covenantId 本身抛错的路径: probe TransactionOutput 仍被释放(创建数 == 释放数), 报 pointer_covenant_inconsistent(genesisId=null)——变异"probe.free() 挪出 finally、只在 covenantId 成功后释放"必红
+[PASS] D-1 ▲ 错误路径同样释放: finalize() 抛错 ⇒ pointer_tx_malformed 且已释放; id 不符(篡改)⇒ pointer_txid_mismatch 且已释放; 谱系断开 / covenant 不一致 / 输出缺失 / 票不一致(此前已装载的交易全部释放)
+[PASS] D-2 ▲ import 指针模块不再打开默认库(真 import 图证明, 不是只扫本文件的 import 行): 子进程在【无 DB_PATH】下真 import 指针 / C1 / chain-checks / builder / winner-bet / leaf-state-encode 全部成功; 对照臂: 带 DB 客户端的 proto-settlement-inputs / proto-leaf-state 在同样条件下必被 M0a 拒(证明这个探测手段本身有效)
+[PASS] 模块边界: 源码(去注释)不 import kaspa-wasm / relay 通道 / DB 客户端 / better-sqlite3, 不读 process.env; 不读不被 txid 覆盖的字段(utxo / signatureScript / computeBudget / sigOpCount); 只 import 既定的四个模块
+
+28 passed, 0 failed

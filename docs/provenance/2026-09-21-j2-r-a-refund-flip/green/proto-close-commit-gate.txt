@@ -1,0 +1,9 @@
+[PASS] 真实向量(被节点拒): pmt 远落后 deadline ⇒ canSubmit=false, reason 说明 NotFinalized/可重试无状态变更
+[PASS] 真实向量(被节点收): pmt 已超过 deadline(领先约 3,979,382ms≈66min) ⇒ canSubmit=true, sla=warn(≥1h 应报警)
+[PASS] 边界: pmt 恰好领先 margin-1ms ⇒ 不可提交; 恰好领先 margin ⇒ 可提交(节点是 lock_time < pmt 严格小于, 另留 30s 余量)
+[PASS] SLA 以 pmt 计: <1h ok / ≥1h warn / ≥2h(REFUND_FLIP_GRACE_MS=7,200,000) refund_flip_open(任何人可把 closed 0→2, close_commit 有被抢先风险)
+[PASS] 不用墙钟: 本机时钟(Date.now)与 pmt 差多大都不影响判断——同一 pmt 同一 deadline 结果恒定
+[PASS] readPastMedianTimeMs / checkCloseCommitTiming(注入 rpc): 正常读取; 读取失败或 pmt 非法 ⇒ canSubmit=false(fail-closed, 不因读不到就放行)
+[PASS] 非法入参(deadline/pmt 非正数)⇒ throw
+
+7 passed, 0 failed

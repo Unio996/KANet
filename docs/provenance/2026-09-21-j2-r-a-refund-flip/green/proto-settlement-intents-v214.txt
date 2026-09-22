@@ -1,0 +1,15 @@
+[test] ① 旧形库(v213 形: 旧 CHECK + 引用意图表的触发器 + 已有意图行)⇒ 朴素 v207 配方会失败(NWT 实测复现):
+  ✅ 旧形库里有引用意图表的触发器(trg_pm_ws_r1_delete_guard)
+  ✅ 旧形: CHECK 不含 refund_flip
+  ✅ 朴素配方失败: error in trigger trg_pm_ws_r1_delete_guard: no such table: main.proto_settlement_intents
+[test] ② v214 迁移: 旧形库 ⇒ 成功、行保真、触发器/索引按原文重建、接受退款路 step、integrity ok; 再跑一次 ⇒ 幂等:
+  ✅ 迁移输出: 重建 2 行保真(v214: proto_settlement_intents 重建(2 行保真, 1 个引用它的触发器 / 2 个索引按原文重建, step CHECK 加 refund_flip/convert_t)
+  ✅ 触发器集合(名+sql)、索引集合、行内容与重建前逐字一致
+  ✅ 新 CHECK 含 refund_flip
+  ✅ 退款路三个 step 均可插入(行数 2+3)
+  ✅ CHECK 仍然拒绝未知 step(没有被放成无约束)
+  ✅ integrity_check ok ∧ foreign_key_check 空
+  ✅ 重建后触发器仍生效(删除有意图行的市场被拒)
+  ✅ 再跑一次 ⇒ 幂等跳过
+
+✅✅ ALL PASS — v214 迁移(旧形库重建 / 行保真 / 触发器索引原文 / 幂等 / 朴素配方失败对照)

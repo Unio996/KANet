@@ -1,0 +1,101 @@
+## BEFORE takeover 2026-09-21T15:56:24Z  (只列 simnet 相关: 旧 console 3298 pid 23416 及其子进程 / simnet kaspad / 矿工; 主网进程一概不列不碰)
+
+
+ProcessId       : 2692
+ParentProcessId : 30064
+Name            : kaspad.exe
+CreationDate    : 20-Sep-26 23:36:27
+Cmd             : "D:\rusty-kaspa-v201\kaspad.exe" --simnet --appdir=D:\kanet-tn12\scratch\_j2_e2e_run\node-data 
+                  --utxoindex --enable-unsynced-mining --disable-upnp --listen=127.0.0.1:26510 
+                  --rpclisten=127.0.0.1:26610 
+
+ProcessId       : 23416
+ParentProcessId : 20276
+Name            : node.exe
+CreationDate    : 20-Sep-26 23:50:20
+Cmd             : "C:\Program Files\nodejs\node.exe" --import file:///D:/kanet-tn12/scratch/_j2_e2e/upstream-mock.mjs 
+                  src/index.js
+
+ProcessId       : 30924
+ParentProcessId : 27792
+Name            : nohup.exe
+CreationDate    : 21-Sep-26 22:30:25
+Cmd             : "C:\Program Files\Git\usr\bin\nohup.exe" node miner.mjs 1000 14400
+
+ProcessId       : 22484
+ParentProcessId : 30924
+Name            : node.exe
+CreationDate    : 21-Sep-26 22:30:25
+Cmd             : "C:\Program Files\nodejs\node.exe" miner.mjs 1000 14400
+
+ProcessId       : 22264
+ParentProcessId : 16220
+Name            : nohup.exe
+CreationDate    : 21-Sep-26 22:30:57
+Cmd             : "C:\Program Files\Git\usr\bin\nohup.exe" node miner.mjs 200 72000
+
+ProcessId       : 16924
+ParentProcessId : 22264
+Name            : node.exe
+CreationDate    : 21-Sep-26 22:30:57
+Cmd             : "C:\Program Files\nodejs\node.exe" miner.mjs 200 72000
+
+ProcessId       : 30424
+ParentProcessId : 23416
+Name            : node.exe
+CreationDate    : 21-Sep-26 22:43:16
+Cmd             : "C:\Program Files\nodejs\node.exe" --import file:///D:/kanet-tn12/scratch/_j2_e2e/upstream-mock.mjs 
+                  src/relay.mjs
+
+ProcessId       : 2592
+ParentProcessId : 16864
+Name            : bash.exe
+CreationDate    : 21-Sep-26 22:56:24
+Cmd             : "C:\Program Files\Git\bin\bash.exe" -c "source 
+                  /c/Users/ADMIN/.claude/shell-snapshots/snapshot-bash-1790001429980-peztao.sh 2>/dev/null || true && 
+                  export TEMP='C:\Users\ADMIN\AppData\Local\Temp' TMP='
+
+ProcessId       : 27664
+ParentProcessId : 2592
+Name            : bash.exe
+CreationDate    : 21-Sep-26 22:56:24
+Cmd             : "C:\Program Files\Git\bin\..\usr\bin\bash.exe" -c "source 
+                  /c/Users/ADMIN/.claude/shell-snapshots/snapshot-bash-1790001429980-peztao.sh 2>/dev/null || true && 
+                  export TEMP='C:\Users\ADMIN\AppData\Local\
+
+ProcessId       : 32460
+ParentProcessId : 27664
+Name            : bash.exe
+CreationDate    : 21-Sep-26 22:56:24
+Cmd             : "C:\Program Files\Git\bin\..\usr\bin\bash.exe" -c "source 
+                  /c/Users/ADMIN/.claude/shell-snapshots/snapshot-bash-1790001429980-peztao.sh 2>/dev/null || true && 
+                  export TEMP='C:\Users\ADMIN\AppData\Local\
+
+ProcessId       : 26268
+ParentProcessId : 32460
+Name            : powershell.exe
+CreationDate    : 21-Sep-26 22:56:24
+Cmd             : C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -Command "Get-CimInstance 
+                  Win32_Process | Where-Object { $_.ProcessId -eq 23416 -or $_.ParentProcessId -eq 23416 -or ($_.Name 
+                  -eq '
+
+
+
+--- netstat :3298 :28510
+  TCP    127.0.0.1:3298         0.0.0.0:0              LISTENING       23416
+  TCP    127.0.0.1:3298         127.0.0.1:49934        ESTABLISHED     23416
+  TCP    127.0.0.1:3298         127.0.0.1:63867        ESTABLISHED     23416
+  TCP    127.0.0.1:3298         127.0.0.1:63869        ESTABLISHED     23416
+  TCP    127.0.0.1:28510        0.0.0.0:0              LISTENING       2692
+  TCP    127.0.0.1:28510        127.0.0.1:57046        ESTABLISHED     2692
+  TCP    127.0.0.1:28510        127.0.0.1:63234        ESTABLISHED     2692
+  TCP    127.0.0.1:28510        127.0.0.1:63256        ESTABLISHED     2692
+  TCP    127.0.0.1:28510        127.0.0.1:63865        ESTABLISHED     2692
+  TCP    127.0.0.1:49934        127.0.0.1:3298         ESTABLISHED     30424
+  TCP    127.0.0.1:50102        127.0.0.1:28510        TIME_WAIT       0
+  TCP    127.0.0.1:57046        127.0.0.1:28510        ESTABLISHED     23416
+  TCP    127.0.0.1:63234        127.0.0.1:28510        ESTABLISHED     22484
+  TCP    127.0.0.1:63256        127.0.0.1:28510        ESTABLISHED     16924
+  TCP    127.0.0.1:63865        127.0.0.1:28510        ESTABLISHED     30424
+  TCP    127.0.0.1:63867        127.0.0.1:3298         ESTABLISHED     30424
+  TCP    127.0.0.1:63869        127.0.0.1:3298         ESTABLISHED     30424

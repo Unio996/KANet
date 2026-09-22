@@ -1,0 +1,16 @@
+[db] path=C:\Users\ADMIN\AppData\Local\Temp\_j2_pmv213_26360.db source=DB_PATH
+[PASS] Z1 结构: 3 个新列 + 7 个新触发器 + 重建的 verdict_ref 带 pmt_at 非空; 迁移幂等(同库再跑触发器数不变)
+[PASS] Z2 冻结列 INSERT 必 NULL(settlement_frozen_at / frozen_reason 各自非 NULL 都拒)
+[PASS] Z3 冻结时刻域: 0 / 负 / 小数 / 非数字文本 ⇒ 拒; 正整数 ⇒ 成功
+[PASS] Z4 ▲ 冻结单向不可撤: 改时刻 / 清空 / 改 reason / 清 reason ⇒ 拒; 同值重写与无关列更新放行; 冻结市场 status 照常推进
+[PASS] Z5 ▲ N5a frozen_reason 必非空(NULL / 空 / 纯空白 ⇒ 拒); reason 不能脱离冻结单独写
+[PASS] Z6 ▲ D2 冻结市场 winning_side 永不可写(operator / extractor / uma / human 全拒, 值不变); 同一条 UPDATE 顺带冻结 + 写值也拒; 冻结之前正常写; 写值之后仍可冻结(应急停 close_commit, 不撤已写值)
+[PASS] Z7 ▲ N1 verdicts.pmt_at: 域(正整数或 NULL); append-only 保写后不可改; NULL pmt_at 的 verdict 不可被引用(extractor / uma / human 三来源), 有 pmt_at 的可引用
+[PASS] Z8 freezeMarket: pmt 有效 ⇒ 写 pmt + reason 带 clock=pmt; pmt 无效 / null ⇒ 退墙钟 + clock=wall(N5a, 不因 pmt 无效而写不进); 二次冻结幂等不覆盖首次时刻与原因; reason 非法先抛; 市场不存在 ⇒ changes=0
+[PASS] Z9 promoteWinningSide(批 B 用, 本批不接调用方): 正常 ⇒ changes=1 且审计列齐; 已冻 / 非 sealed / 已判 ⇒ changes=0(谓词同语句带 sealed ∧ 未判 ∧ 未冻, 触发器双保险); 非 promote 决定 ⇒ 抛
+[PASS] Z10 ▲ 晚 seal 守卫(§4): 只对判定题市场; upper < GRACE ⇒ 冻结(F2: 原 GRACE_MIN, 宽限不压缩)(late_seal, pmt 有效 clock=pmt / 无效 clock=wall / readPmt 抛 clock=wall); upper = GRACE ⇒ 不冻; 无判定题(如主网首轮 a59c 形)即使已过 cutoff 也不冻; 已冻 / 已判 / 市场缺失 ⇒ noop; 永不抛
+[PASS] Z11 ▲ N3 判定题单一来源: operator 禁写触发器里的判定题谓词文本 == db/proto-judged.mjs 生成的文本(批 A 与批 D 共用一份定义)
+[PASS] Z12 端到端(纯 DB): promote 门 → 写值 → 冻结互斥: 门给出 promote ⇒ promoteWinningSide 落值; 门给出 freeze ⇒ freezeMarket 落冻结, 之后 promote 谓词 0 行; 两者对同一市场互斥(先到先得, 不会既冻又判)
+[PASS] Z13 ▲ 晚 seal 守卫接线(服务层 makeMarkLanded): seal landed 后跑守卫并保 store.markLanded 结果; relay 读不到 pmt ⇒ 退墙钟仍能冻结(N5a); 非 seal 步 / 未配预算 / 无判定题 不冻; store.markLanded 抛错 ⇒ 原样上抛且不跑守卫
+
+proto-settlement-freeze-v213.test: 13 passed, 0 failed

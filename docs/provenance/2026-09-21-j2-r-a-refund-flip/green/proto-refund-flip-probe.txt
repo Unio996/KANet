@@ -1,0 +1,28 @@
+[db] path=C:\Users\ADMIN\AppData\Local\Temp\_j2_refund_flip_probe_21984.db source=DB_PATH
+[test] ① 基线: 后继(covenantId ∧ spk ∧ 面值)∧ 旧 outpoint missing ⇒ flipped:
+  ✅ 三条件齐 ⇒ flipped, 后继 txid 取自 facts 读回的后继 outpoint.transactionId(NWT 落点 ①)
+  ✅ 被 50 个同面值 dust 包围仍找得到真后继(按 covenantId 认, 不按位置/数量)
+[test] ② 🔴 不得地址级: 只有 dust(无 covenant)在 closed=2 地址 ⇒ 未翻(攻击者撒 dust 不能把活市场打成"已翻"):
+  ✅ 只有无 covenant 的 dust ⇒ 未翻
+  ✅ 只有 dust ∧ 旧 outpoint 未花 ⇒ 未翻
+  ✅ 空窗口 ⇒ 未翻(no_matching_successor)
+  ✅ 窗口被截断且无匹配 ⇒ 未翻并标 truncated(假阴性可见, 不会假阳性)
+[test] ③ 弱注入臂: 基线上只改一个字段 ⇒ 必须翻成"未翻":
+  ✅ 只改「covenantId=null(无 covenant 的 dust)」⇒ 未翻(reason=no_matching_successor)
+  ✅ 只改「covenantId=别的 covenant」⇒ 未翻(reason=no_matching_successor)
+  ✅ 只改「spk version=1」⇒ 未翻(reason=no_matching_successor)
+  ✅ 只改「spk scriptHex 不同(closed=1 或别的 spk)」⇒ 未翻(reason=no_matching_successor)
+  ✅ 只改「面值不是 CONT(dust 面值)」⇒ 未翻(reason=no_matching_successor)
+  ✅ 只改「旧 outpoint 仍在(found 非空)」⇒ 未翻(reason=old_outpoint_still_unspent)
+  ✅ 只改「旧 outpoint 既不 found 也不 missing(响应不全)」⇒ 未翻(reason=old_outpoint_still_unspent)
+  ✅ 对照: 不改任何字段 ⇒ 仍是已翻(上面每条的"未翻"都来自那一个字段)
+[test] ④ evaluateRefundFlipTiming: 边界与"不复用 close 闸":
+  ✅ lock+30s−1ms ⇒ 不可提交
+  ✅ lock+30s ⇒ 可提交
+  ✅ deadline+60s: close 闸放行、refund_flip 闸拒(两个闸不可互换)
+  ✅ 返回 lockTimeMs = deadline+2h
+  ✅ 非法入参 {"pastMedianTimeMs":0,"deadlineMs":1790000000000} ⇒ 抛
+  ✅ 非法入参 {"pastMedianTimeMs":null,"deadlineMs":1790000000000} ⇒ 抛
+  ✅ 非法入参 {"pastMedianTimeMs":1,"deadlineMs":-1} ⇒ 抛
+
+✅✅ ALL PASS — refund_flip 探针纯决策(三缺一不可 + 弱注入臂)+ 时间闸边界

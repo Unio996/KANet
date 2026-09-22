@@ -1,0 +1,15 @@
+BEFORE: markets=[["357681df","cancelled"],["a0c4d628","cancelled"],["a59c7b48","resolved"]] intents=4 bets=3 claims=1 triggers=26 indexes=194 check_has_refund_flip=false
+migration output (v213/v214 lines):
+  [migrate] v80: broker_conversations.completed_at column added (Phase 2 profile sediment future-proof).
+  [migrate] v213: proto_markets.settlement_frozen_at/frozen_reason + proto_market_verdicts.pmt_at + 冻结/pmt_at 触发器 + verdict_ref 加 pmt_at 非空(oracle 整合批 D).
+  [migrate] v214: proto_settlement_intents 重建(4 行保真, 1 个引用它的触发器 / 2 个索引按原文重建, step CHECK 加 refund_flip/convert_to_refundclaim/refund_payout).
+  [migrate] DB migrations complete.
+  [run-migrations] ✅ standalone migration run complete (v170 pool_bettor_sides.side_lock_daa applied if it was missing).
+AFTER : markets=[["357681df","cancelled"],["a0c4d628","cancelled"],["a59c7b48","resolved"]] intents=4 bets=3 claims=1 triggers=26 indexes=194 check_has_refund_flip=true
+markets 逐行一致: true
+intents 行内容逐列一致: true
+触发器集合(名+sql)逐字一致: true
+索引集合(名+sql)逐字一致: true
+bets/claims 计数一致: true
+integrity_check: [{"integrity_check":"ok"}]  foreign_key_check rows: 0
+RESULT: PASS(v214 在主网库拷贝上通过: 行/触发器/索引保真, CHECK 已放宽)

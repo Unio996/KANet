@@ -1,0 +1,23 @@
+## AFTER takeover 2026-09-21T15:57:36Z
+
+
+ProcessId       : 11760
+ParentProcessId : 28628
+Name            : node.exe
+CreationDate    : 21-Sep-26 22:56:59
+Cmd             : "C:\Program Files\nodejs\node.exe" --import file:///D:/kanet-tn12/scratch/_j2_e2e/upstream-mock.mjs 
+                  src/index.js
+
+ProcessId       : 560
+ParentProcessId : 11760
+Name            : node.exe
+CreationDate    : 21-Sep-26 22:57:05
+Cmd             : "C:\Program Files\nodejs\node.exe" --import file:///D:/kanet-tn12/scratch/_j2_e2e/upstream-mock.mjs 
+                  src/relay.mjs
+
+
+
+--- netstat :3298 LISTEN
+  TCP    127.0.0.1:3298         0.0.0.0:0              LISTENING       11760
+--- old pids 23416/30424 alive?
+0

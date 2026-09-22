@@ -1,0 +1,110 @@
+[
+ {
+  "id": "M1a-listWork-drop-frozen-predicate",
+  "why": "去掉\"已冻结\"触发谓词 ⇒ 未冻结市场被翻",
+  "test": "src/lib/proto-refund-flip-store.test.mjs",
+  "exit": 1,
+  "redMarkers": 2,
+  "restored": true,
+  "result": "RED(检出)"
+ },
+ {
+  "id": "M1b-listWork-status-in-cancelled",
+  "why": "触发放宽到 cancelled(主网手置遗留形状被选中)",
+  "test": "src/lib/proto-refund-flip-store.test.mjs",
+  "exit": 1,
+  "redMarkers": 2,
+  "restored": true,
+  "result": "RED(检出)"
+ },
+ {
+  "id": "M1c-markLanded-drop-sealed-guard",
+  "why": "去掉前态 sealed 谓词 ⇒ 遗留 cancelled 市场被建 claim",
+  "test": "src/lib/proto-refund-flip-store.test.mjs",
+  "exit": 1,
+  "redMarkers": 2,
+  "restored": true,
+  "result": "RED(检出)"
+ },
+ {
+  "id": "M3-claim-id-random",
+  "why": "退款 claim id 改随机 ⇒ 重跑重复建行 / id 不可复算",
+  "test": "src/lib/proto-refund-flip-store.test.mjs",
+  "exit": 1,
+  "redMarkers": 3,
+  "restored": true,
+  "result": "RED(检出)"
+ },
+ {
+  "id": "M5a-probe-drop-covenantId",
+  "why": "探针不核 covenantId(地址级)⇒ dust 可伪造\"已翻\"",
+  "test": "src/lib/proto-refund-flip-probe.test.mjs",
+  "exit": 1,
+  "redMarkers": 5,
+  "restored": true,
+  "result": "RED(检出)"
+ },
+ {
+  "id": "M5b-probe-drop-old-outpoint",
+  "why": "探针不核旧 outpoint 已花",
+  "test": "src/lib/proto-refund-flip-probe.test.mjs",
+  "exit": 1,
+  "redMarkers": 3,
+  "restored": true,
+  "result": "RED(检出)"
+ },
+ {
+  "id": "M5c-observed-no-freeze",
+  "why": "观察到别人翻牌不自动冻结",
+  "test": "src/lib/proto-refund-flip-store.test.mjs",
+  "exit": 1,
+  "redMarkers": 3,
+  "restored": true,
+  "result": "RED(检出)"
+ },
+ {
+  "id": "GATE-a-core-uses-close-timing",
+  "why": "refund_flip 复用 close 的 30s 闸 ⇒ deadline+60s 就放行",
+  "test": "src/lib/proto-settlement-driver-core.test.mjs",
+  "exit": 1,
+  "redMarkers": 1,
+  "restored": true,
+  "result": "RED(检出)"
+ },
+ {
+  "id": "GATE-b-core-frozen-gate-off",
+  "why": "去掉\"只翻冻结市场\"闸",
+  "test": "src/lib/proto-settlement-driver-core.test.mjs",
+  "exit": 1,
+  "redMarkers": 1,
+  "restored": true,
+  "result": "RED(检出)"
+ },
+ {
+  "id": "BUILD-a-evidence-optional",
+  "why": "builder 不要求可信 pmtEvidence",
+  "test": "src/lib/proto-tx-assembly-settlement.test.mjs",
+  "exit": 1,
+  "redMarkers": 1,
+  "restored": true,
+  "result": "RED(检出)"
+ },
+ {
+  "id": "BUILD-b-locktime-wrong",
+  "why": "lockTime 用 deadline(close 的)而非 deadline+2h",
+  "test": "src/lib/proto-tx-assembly-settlement.test.mjs",
+  "exit": 1,
+  "redMarkers": 1,
+  "restored": true,
+  "result": "RED(检出)"
+ },
+ {
+  "id": "V214-a-no-drop-triggers",
+  "why": "迁移不先 DROP 引用触发器 ⇒ RENAME 失败(NWT 实测)",
+  "test": "src/db/proto-settlement-intents-v214.test.mjs",
+  "exit": 1,
+  "redMarkers": 0,
+  "restored": true,
+  "result": "RED(检出)"
+ }
+]
