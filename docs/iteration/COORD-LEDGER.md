@@ -13827,3 +13827,11 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **裁定**：D-032 写入 DECISIONS（Owner 原话）。派 NWT 红队题（F3/F4 verdict 交完即派）：用现有建题接口构造"会走到 inconsistent_verdicts / abstain_or_dispute 的题"，能出 = 缺口，逐条列；缺口优先收紧现有校验/来源名单（D-031），不另起设计。退款路 R-b/R-c 继续，口径改为"故障兜底"。
 - **主网零触碰**。
  — Bettor 2026-09-22T08:35:00Z
+
+### (1624) 🔴 **D-031 漏项实名记账：老系统自动退款路（pool-market-settler + bettor-refund-claim-auto，主网在跑）在退款路设计/设计审/裁定/能力清单四道闸全部漏查——Owner 追问「之前有自动退款模块，你们又新造轮子了？」后核出** (2026-09-22 · Owner 追问 · Bettor 核 · 实名)
+- **地面核（原始 grep）**：`services/bettor-refund-claim-auto.mjs`（5 分钟 cron 自动逐票领退款，index.js:737 默认开）、`pool-market-settler.js:432 legacyRefundBuilderTick`（index.js:718 起）、`api/pool.js:423 buildBettorRefundClaim`、`lib/refund-authorization.mjs`、`lib/pool-refund-grace.mjs REFUND_GRACE_SEC=7200`；主网 console 当前 stdout 有其 tick 日志 30 行。
+- **漏在四处（实名）**：① J2 退款路设计稿 v0.1/v0.2 §1「已有什么」只查两处点名 + proto-v0 自栈，未扫 services/；② NWT 设计审 78efc347 第一问只核点名两处 + KB；③ 上任 Bettor（1617）点名 `pool-seal-builder.mjs:93` 与 `proto.js:331` 时本身没点到这套；④ 能力清单 v0.1（D-031 权威对照物）0 命中。三道闸 + 对照物全漏。
+- **可复用性判断**：退款 tx 本体不可直接搬（PoolSpine/PoolSide 分片合约 vs proto-v0 RootClose→RefundClaim，表不同）——这点 NWT 当时核实成立；**但**守护模式（逐票自动领 / claim_txid 防重领 / 跨节点分担）= R-c 要做的形状、宽限常量、授权闸模式本该复用。R-a 已合入，其 `REFUND_FLIP_GRACE_MS=7,200,000` 与 `REFUND_GRACE_SEC` 重复定义。
+- **处置**：(a) 能力清单已补「补漏」节（本笔提交）；(b) R-a 重复常量改 import = SHOULD，J2 随下一笔顺手改，不单审；(c) **R-b/R-c 设计前置**：逐条对照老模块写「复用 / 参照 / 为何不能用」，缺此节不进 NWT 审；(d) 设计审第一问扩成「扫 services/ + index.js 启动注册 + 在跑日志」，写进 NWT/J2/Bettor 接位文件；(e) 本任 Bettor 同担：接位时未按 D-031 复核 R-a 的「已有什么」就派了 R-a。
+- **主网零触碰**。
+ — Bettor 2026-09-22T09:05:00Z

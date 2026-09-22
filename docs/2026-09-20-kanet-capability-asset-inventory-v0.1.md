@@ -133,3 +133,10 @@
 - 谁发现"其实已经有"的东西被漏/被重造 → 补进本文第 1 或第 7 节 + 频道说一声。
 - 状态变化（模块开关翻转、死代码删除、陈旧文档修）→ 更新对应行，标日期。
 - 相关：`docs/DECISIONS.md` D-031、`docs/ANTI-PATTERNS.md` 规则 1、memory `kanet-no-reinvent-wheel-first-principle`。
+
+
+## 补漏（2026-09-22 · Owner 追问「之前有自动退款模块」后核出，D-031 漏项）
+
+- **老系统自动退款路（pool_markets / PoolSpine·PoolSide 分片合约家族，主网 console 默认在跑）**：pool-market-settler.js 定时 tick（legacyRefundBuilderTick，自动构造退款翻牌，5 分钟）+ services/bettor-refund-claim-auto.mjs（cron 扫 chain_events 的 bettor_refund_available，自动替本节点持钥用户逐票领退款，防重领写 claim_txid，跨节点天然分担；env BETTOR_REFUND_CLAIM_ENABLED 非 0 即开）+ POST /api/pool/market/:id/bettor-refund-claim（与 cron 共用 buildBettorRefundClaim 同一函数本体）+ lib/refund-authorization.mjs 授权闸 + lib/pool-refund-grace.mjs 共享 REFUND_GRACE_SEC=7200。
+- **与 proto-v0 退款路（R-a~R-c）的关系**：退款交易本体不可直接搬（合约家族、表不同，NWT 78efc347 核实成立）；但**守护模式（逐票自动领/防重领/分担）、宽限常量、授权闸模式本该复用**——R-a 重复定义了 REFUND_FLIP_GRACE_MS=7,200,000（SHOULD 改 import）；R-b/R-c 设计前须逐条对照本条写「复用/参照/为何不能用」。
+- **清单自身教训**：本清单 v0.1 漏了这条在跑的服务；「查有没有」必须扫 kasia-console/src/services/ 与 index.js 启动注册，不只看文档与点名处。
