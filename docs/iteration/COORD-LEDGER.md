@@ -13844,3 +13844,12 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **Bettor 判断**：三处同根——**同一道题挂两个裁判，而且互不知情**。按 D-032（一题一个确定性口径、无争议），修法不是给两个裁判加交叉核对（那是缓解），是回到"一个裁判"。**升 Owner 拍一条**（方案见本块对 Owner 报告）；拍后 Bettor 出设计稿 → NWT 审 → 排 F3/F4 之后实现。
 - **主网零触碰**。
  — Bettor 2026-09-22T09:30:00Z
+
+### (1626) 🟢 **F3+F4 合入主线(merge aaaab3a9,只合不部署)——共用 fee 候选资格函数 + fee 输入两层预留,创世/下注/结算三路真接,refund_flip 真实争用测试同批;NWT 两轮审(ab624474 2 MUST 真修 / 8320fe7d +1 MUST 只补测试,merge 694505f4);Codex 0725750b 对 R-a/D-032 的评审入账;F1 对抗重跑派 J2** (2026-09-22 · Bettor · J2 交件 · NWT 审)
+- **J2 交件**(87f1a467 + d557f67d,基线 f2f56815 含 R-a,26 文件 +1804/−117):F3 = filterFeeCandidates 挪至 proto-tx-assembly.mjs 共用,创世/下注接 facts 候选,toFeeUtxoCandidates 删;F4 = selectAndReserveFeeUtxo 两层预留(DB 派生 + 进程内),三路径真接;lint R-FEE-CANDIDATE-SHARED / R-FEE-SELECT-ONLY-VIA-WRAPPER(NWT 裸调实测红);refund_flip 自动继承(结算 build 对全部 step 共用同一 tryEach 闭包),争用测试 Promise.all 真并发 driver.advanceStep × buildMarketGenesisAndBroadcast(即 api/proto.js:196 入口函数)争同一候选;REFUND_GRACE_SEC 改导入(1624 SHOULD 已清)。
+- **NWT 一轮 2 MUST(均比 Bettor 怀疑更重)**:MUST-1 J2 把创世/下注移出 DB 派生层的论据是 mock 假象——NWT 真链路探针(真 fastify + 真 ingest 路由 + 真 relay 广播代码)证 genesis_prepared_tx_json 真实写入;J2 撤回:真正写入方在 kasia-relay 包 covenant-broadcast-relay.mjs:189(它只 grep 了 console),SOURCES 加回两表,**顺带抓到真 bug**:extractInputOutpoints 未处理生产存储格式 JSON.stringify([txJsonString]),原本会让 DB 派生预留对任何真实 prepared 行 fail-closed HOLD,已修 +4 回归(NWT 以 simnet 真实产物格式核吻合)。MUST-2 reconcileUncertainReservation 生产零调用、三处 finally 无条件释放;J2 拆开:确定回执立即释放,sendCmd 抛错不释放转 deferReservationReconciliation 到期对账(三处接线 Bettor 核到),+13 测试,NWT 三突变全杀。
+- **NWT 二轮 +1 MUST(只测试)**:SOURCES 新增两表零覆盖——砍回一条 SOURCES 三个测试文件 0 red(fixture 强推终态绕开了窗口,fee-reservation.test 头注仍是撤销前旧结论)。**Bettor 裁**:机制对、只缺回归,按 Owner 吞吐规矩先合,J2 只补测试一笔(reservedFeeOutpoints 直测 genesis_prepared + bet_intent 非终态行 + 砍 SOURCES 应红突变 + 改头注),NWT 一条消息核即合,须在 F1 对抗重跑之前落。
+- **Codex 0725750b**(9-22 15:06 本地,无 OWNER-DIRECTIVE):R-a 窄门 GREEN 维持;M3 守恒测试 = R-b/R-c 前 MUST(已由 36e1d8dc 满足);F3/F4 当时 OPEN(本块合入,证据待其下轮看);**D-032 定性为"两个独立裁判身份绑定从未被证明是同一命题"的结构性缺陷,有价值/自治判定市场前 MUST 关**;明确弱文本匹配不够格当最终不变量;若留双源须固化跨源绑定物 + 运营者确认 + 抓不到即拒建,无机器可验标识时只算运营者背书;极性确认 MUST;四字段须标人工元数据或去掉,不许硬接判定。**Bettor 读法**:支持方案一(单口径),待 Owner 拍(1625)。
+- **派 J2**:① F3/F4 测试补丁(上);② 之后 F1 补丁后 simnet 对抗重跑(1621 ③):prepared close → 冻结落库 → 跨 replay/首发边界零节点提交 + 已入 mempool/landed 正对照被对账不搁置;主线现已含 F1/F2/R-a/F3/F4,用现有 simnet,起矿工先报,simnet-only。
+- **主网零触碰**;主线累计未部署代码提交继续攒,部署=下次 Owner 批的 console 重启。
+ — Bettor 2026-09-22T10:20:00Z
