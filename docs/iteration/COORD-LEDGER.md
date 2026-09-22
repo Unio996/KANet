@@ -13835,3 +13835,12 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **处置**：(a) 能力清单已补「补漏」节（本笔提交）；(b) R-a 重复常量改 import = SHOULD，J2 随下一笔顺手改，不单审；(c) **R-b/R-c 设计前置**：逐条对照老模块写「复用 / 参照 / 为何不能用」，缺此节不进 NWT 审；(d) 设计审第一问扩成「扫 services/ + index.js 启动注册 + 在跑日志」，写进 NWT/J2/Bettor 接位文件；(e) 本任 Bettor 同担：接位时未按 D-031 复核 R-a 的「已有什么」就派了 R-a。
 - **主网零触碰**。
  — Bettor 2026-09-22T09:05:00Z
+
+### (1625) 🔴 **D-032 红队结果：现有建题接口能出"会冻结"的题，3 处缺口全在出题端（NWT 4d540559，已合）——根因 = 一道题挂两个互不知情的裁判（ESPN 结构化 predicate 与 Polymarket 条件 id 创建时零关联）；升 Owner 拍方向：单口径 vs 双源交叉** (2026-09-22 · NWT 红队 · Bettor 核 · 待 Owner)
+- **缺口①（根因）**：validateJudgedMarketInput 对 data_source_canonical（ESPN）与 outcomeConditionId（Polymarket）零关联校验——真实校验函数下"湖人今晚赢吗 + 任意合法格式的无关 condition id" ok:true。架构层 deriveExtractor 只吃 resolution_rule_spec、deriveUma 只吃 condition id，两路互不可见。后果：配错 id ⇒ 约半数概率 inconsistent_verdicts；能影响"配哪个 id"的人挑一个已知反向市场即可近乎必然逼进冻结，不碰代码不污染 ESPN。
+- **缺口②**：五必填里 secondary_sources / ambiguity_handler / dispute_keywords / edge_case_examples **判定代码零读取**（Bettor 独立 git grep 复核：src 内除 spec/bettor.js/proto.js 外零命中）——老 bettor.js 必填清单复制了字段没复制消费方，给运营者"歧义已覆盖"的假象。
+- **缺口③**：polymarket_outcome_side 由运营者自报极性，创建时不可验，标反 = 必然 inconsistent_verdicts（善意失误）。
+- **局限**：主网 PROTO_ORACLE_ADAPTER_ENABLED 默认关 + N5b 限零价值，三处是"接口已证可构造、主网未真实撞上"。
+- **Bettor 判断**：三处同根——**同一道题挂两个裁判，而且互不知情**。按 D-032（一题一个确定性口径、无争议），修法不是给两个裁判加交叉核对（那是缓解），是回到"一个裁判"。**升 Owner 拍一条**（方案见本块对 Owner 报告）；拍后 Bettor 出设计稿 → NWT 审 → 排 F3/F4 之后实现。
+- **主网零触碰**。
+ — Bettor 2026-09-22T09:30:00Z
