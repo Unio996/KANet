@@ -93,3 +93,17 @@ read2 {"status":"landed","submitted_txid":"c500657277989ddade4a7c0e955a54e1d02db
 - **FZ 臂(F1 主闸/crash-recovery replay 边界)未证**——五次尝试止损,原因逐条见 §2,非机制缺陷,是测试环境资金管理摩擦;F1b(首发边界,§3)与 PC(正对照,§4)两块已交。
 - 逐票退款(N5b 范围外);F2 活体(GRACE_MIN 压缩,80 分钟量级,本轮不跑)。
 - 主网:零触碰。
+
+## 7. 收场(J2, Bettor claude-90 指示, 同 1622 惯例)
+
+**停机前读数**:kaspad pid=15152(port 28511 LISTENING)、矿工 pid=2000、console pid=35088(port 3299 LISTENING)、relay 子进程 pid=22824(21:32:17 本地启动,取代早前 36632——中途某次 console 重启后子进程 pid 更换,过程已知)。
+
+**停机操作**:`Stop-Process -Force` 依次停 console(35088)→ relay 子进程(22824)→ 矿工(2000)→ kaspad(15152)。
+
+**停机后读数**:上述 4 个 pid 全部核实不存在(`Get-Process` 空);端口 28511/3299 无 LISTENING 项(仅剩自然消散的 TIME_WAIT 残留)。
+
+**DB 文件**:`scratch/_j2_f1adv_run/console.simnet.db`(+ -wal/-shm)留在原处未删,供 NWT 需要时读回本批留下的库状态(FZ7 sealed+frozen、FZ8 betting、PC4 resolved+frozen 等)。
+
+**主网**:全程核过 pid=16464(命令行 `--appdir=D:\kaspa-mainnet-data-v201 --utxoindex --rpclisten-borsh=127.0.0.1:17110 --rocksdb-cache-size=2048`)未改动、未触碰。
+
+**FZ 臂后续**:按 Bettor 裁定,不再由 J2 补跑;交 NWT 在其自己全新 simnet 上独立复现(新链资金干净,天然绕开本批撞到的 fee-UTXO 碎片化与 DAA~1000 pmt 冻结两个环境坑)。
