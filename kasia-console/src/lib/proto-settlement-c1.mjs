@@ -13,7 +13,7 @@
 //   旧 relay 的 {ok:true, utxos:[...]}(无 facts 回声)当成功。
 
 import { STEP_INPUT_ROLES, SettlementChainCheckError, assertSettlementInputValuesOnChain } from './proto-settlement-chain-checks.mjs';
-import { SIGNED_INPUT_CEILING_SOMPI } from './proto-tx-assembly.mjs';
+import { SIGNED_INPUT_CEILING_SOMPI, filterFeeCandidates } from './proto-tx-assembly.mjs';
 
 // ── 与 9-0 relay 侧(kasia-relay/src/lib/utxo-facts.mjs)对应的常量镜像 ─────────────────────────────────────────────
 // console 不 import relay 包(跨进程边界); 镜像值由测试与 relay 源码逐项断言相等(C11 / M 组), 漂移即红。
@@ -183,42 +183,12 @@ export function assertFactsIpcTimeout(timeoutMs) {
 
 // ══ §19.3 步骤 6: fee 候选(形态 L) ════════════════════════════════════════════════════════════════════════════════
 
-/**
- * 形态 L 返回后由【消费方】过滤 fee 候选(纯函数)。
- *  - 跳过 covenantId !== null 或 spk ≠ relay P2PK spk 的候选("跳过不是中止, 也不回落到毒化候选": 毒化 fee 输入在含其它 covenant 输出的结算交易里的共识行为未测);
- *  - 再排除【我方在途(未 landed)意图产出】的输出(S91-4: 避免在浅确认的父输出上构造、遇 reorg 卡住);
- *  - maxAmount=SIGNED_INPUT_CEILING 是请求侧"排除超过 relay 签名输入上限的候选", 不是毒化过滤——这里不依赖它。
- *  - (F1, NWT C-1) spk 的身份是 (version, script), 我们的 builder 只造 version 0 ⇒ version !== 0 的候选按毒化跳过;
- *  - (F1, NWT C-4) 【消费方复核区间】feeMinAmount ≤ value ≤ SIGNED_INPUT_CEILING_SOMPI: relay 已按区间过滤, 但不信服务端过滤——越界者(行为异常的 relay 才会返回)跳过并计入 skippedOutOfRange 与事件。
- * status: 'ok'(有干净候选) | 'saturated'(无干净候选, 且有毒化/越界被跳过或窗口被截断) | 'none'(无干净候选, 且窗口里本来就没有——普通缺 fee)。
- * @returns {{status, candidates:Array<{txid,vout,value:bigint,scriptPublicKeyHex:string,spkLen:number,covenantId:null}>, skippedPoisoned:number, skippedOutOfRange:number, skippedInflight:number, truncated:boolean, events:Array}}
- */
-export function filterFeeCandidates({ utxos, truncated, relaySpkHex, feeMinAmount, inflightOutpoints = [] }) {
-  const relaySpk = normHex(relaySpkHex);
-  if (!HEX_EVEN.test(relaySpk)) throw new TypeError('filterFeeCandidates: relaySpkHex 必填且为 hex');
-  if (typeof feeMinAmount !== 'bigint' || feeMinAmount < 0n) throw new TypeError('filterFeeCandidates: feeMinAmount 必须是非负 bigint(没有默认值: 消费方复核区间, 不信 relay 的过滤)');
-  const inflight = new Set(inflightOutpoints.map((o) => opKey(String(o.transactionId).toLowerCase(), o.index)));
-  const candidates = [];
-  let skippedPoisoned = 0;
-  let skippedOutOfRange = 0;
-  let skippedInflight = 0;
-  for (const u of utxos) {
-    if (u.covenantId !== null || u.scriptPublicKey.version !== 0 || normHex(u.scriptPublicKey.scriptHex) !== relaySpk) { skippedPoisoned++; continue; }
-    if (u.amount < feeMinAmount || u.amount > SIGNED_INPUT_CEILING_SOMPI) { skippedOutOfRange++; continue; }
-    if (inflight.has(opKey(u.outpoint.transactionId, u.outpoint.index))) { skippedInflight++; continue; }
-    candidates.push({
-      txid: u.outpoint.transactionId, vout: u.outpoint.index, value: u.amount,
-      scriptPublicKeyHex: '0x' + u.scriptPublicKey.scriptHex,     // 与 proto-broadcast-ops toFeeUtxoCandidates 的形状一致
-      spkLen: u.scriptPublicKey.scriptHex.length / 2, covenantId: null,
-    });
-  }
-  const status = candidates.length > 0 ? 'ok' : (skippedPoisoned > 0 || skippedOutOfRange > 0 || truncated ? 'saturated' : 'none');
-  const events = [];
-  if (skippedPoisoned > 0) events.push({ eventType: 'fee_candidate_poisoned_skipped', level: 'warn', payload: { count: skippedPoisoned } });    // 让攻击【可见】
-  if (skippedOutOfRange > 0) events.push({ eventType: 'fee_candidate_out_of_range_skipped', level: 'warn', payload: { count: skippedOutOfRange } });   // relay 返回了区间外的候选 = relay 行为异常, 可见
-  if (status === 'saturated') events.push({ eventType: 'settlement_fee_window_saturated', level: 'error', payload: { skippedPoisoned, skippedOutOfRange, skippedInflight, truncated } });
-  return { status, candidates, skippedPoisoned, skippedOutOfRange, skippedInflight, truncated, events };
-}
+// 🔴 F3(设计 v0.2.1 §3.1,账本1614/1615/1616,D-031 第一原则——不新造):filterFeeCandidates 挪到
+// proto-tx-assembly.mjs(创世/下注/结算三路径共用的同一个纯函数,那边已经是 selectFeeUtxoByConstruction/
+// SIGNED_INPUT_CEILING_SOMPI 的定义处,无新依赖边)。这里 re-export(import+export,verifyCore 内部仍要用
+// 本地绑定,纯 `export {...} from` 不产生本地绑定),45 项既有测试与既有 import 路径
+// (`import { filterFeeCandidates } from './proto-settlement-c1.mjs'`)不必改。
+export { filterFeeCandidates };
 
 /**
  * 给 chainParents 补上 fee 角色项——来自【形态 L 条目的事实】(hasCovenant 由条目的 covenantId 得出), 不是常量(§19.4 B1)。

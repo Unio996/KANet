@@ -179,19 +179,28 @@ export function createSettlementDriver(deps, { ticksToError = 3 } = {}) {
               pmtEvidence = gate.pmtEvidence;
             }
             stage = 'build';
-            const built = await deps.build(step, { marketId, subjectId, prep, chainParents: v.chainParents, feeCandidates: v.fee && v.fee.candidates, withFeeParent, pmtEvidence });
+            const built = await deps.build(step, { marketId, subjectId, prep, chainParents: v.chainParents, feeCandidates: v.fee && v.fee.candidates, withFeeParent, pmtEvidence, intentKey: key });
             if (!built || typeof built.txJson !== 'string' || typeof built.expectedTxid !== 'string' || !Array.isArray(built.signInputIndices) || built.signInputIndices.length === 0) {
               throw new Error(`${key}: build 端口返回不完整(txJson / expectedTxid / 非空 signInputIndices)`);
             }
-            stage = 'broadcast';
-            const cmd = { type: 'covenant_broadcast', intent_key: key, tx_json: built.txJson, sign_input_indices: built.signInputIndices, expected_txid: built.expectedTxid };
-            if (built.genesisOutputIndices) cmd.genesis_output_indices = built.genesisOutputIndices;
-            if (built.continuationOutputIndices) cmd.continuation_output_indices = built.continuationOutputIndices;
-            const rep = await deps.sendCmd(deps.relayId, cmd, 30000, 'internal');
-            if (rep && rep.ok && rep.txId) return { txId: rep.txId, txJson: built.txJson };
-            const code = rep && rep.code;
-            if (RELAY_FEE_REJECT_CODES.includes(code)) alert('settlement_relay_fee_rejected', `${key}: relay 拒绝 fee(${code})`, { intent_key: key, code }, 'error');
-            const e = new Error((rep && rep.error) || `covenant_broadcast failed (code=${code || 'unknown'})`); e.code = code; throw e;
+            // F4(设计 v0.2.1 §3.2 B.2): build() 内部已经【选中并记入】进程内预留层(见 ops.build 的
+            // selectAndReserveFeeUtxo)——build 只构造不广播, 真正的 IPC 广播在下面; 预留必须撑到这次广播
+            // 尝试有了确定结果(成功/失败都算"有结果", 不确定超时也归入"失败"这一支, 简化自 v0.2.1 的"结果
+            // 不确定→有界期限对账"分支, 因为 sendCmd 这里本身已经是 await 到底、不会挂起不返回)才能释放——
+            // 否则 build 一返回就释放, 会在"选中之后、广播完成之前"这个真正的窄窗口里对别的并发选择方失效。
+            try {
+              stage = 'broadcast';
+              const cmd = { type: 'covenant_broadcast', intent_key: key, tx_json: built.txJson, sign_input_indices: built.signInputIndices, expected_txid: built.expectedTxid };
+              if (built.genesisOutputIndices) cmd.genesis_output_indices = built.genesisOutputIndices;
+              if (built.continuationOutputIndices) cmd.continuation_output_indices = built.continuationOutputIndices;
+              const rep = await deps.sendCmd(deps.relayId, cmd, 30000, 'internal');
+              if (rep && rep.ok && rep.txId) return { txId: rep.txId, txJson: built.txJson };
+              const code = rep && rep.code;
+              if (RELAY_FEE_REJECT_CODES.includes(code)) alert('settlement_relay_fee_rejected', `${key}: relay 拒绝 fee(${code})`, { intent_key: key, code }, 'error');
+              const e = new Error((rep && rep.error) || `covenant_broadcast failed (code=${code || 'unknown'})`); e.code = code; throw e;
+            } finally {
+              if (built.feeUtxo && typeof deps.releaseFeeReservation === 'function') deps.releaseFeeReservation(built.feeUtxo);
+            }
           } catch (e) { buildFail = { err: e, stage }; throw e; }
         },
       });

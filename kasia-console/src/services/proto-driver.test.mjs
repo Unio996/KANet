@@ -37,6 +37,20 @@ const relayAddr = priv.toPublicKey().toAddress('mainnet').toString();
 const RELAY_ID = 'proto-driver-test-relay';
 sqlite.prepare(`INSERT OR IGNORE INTO relay_nodes (id, name, address, network, created_at) VALUES (?, ?, ?, 'mainnet', datetime('now'))`).run(RELAY_ID, 'proto-driver-test', relayAddr);
 
+// F3(设计 v0.2.1 §3.1.2): fee 候选取数换成 facts 形态 L(proto-broadcast-ops.mjs 的 fetchFeeCandidates),
+// mock 对 facts:true 的 get_address_utxos 请求必须回 assertFactsResponse 认得的形状; leaf/held 的查询
+// (无 facts 字段)不受影响, 仍是旧的裸 {ok,utxos:[{outpoint,amount}]}。
+const relaySpkHexNoPrefix = kaspa.payToAddressScript(new kaspa.Address(relayAddr)).script;
+function feeUtxosResponse(items) {
+  return {
+    ok: true, facts: true, factsVersion: 1, form: 'list', truncated: false,
+    utxos: items.map((it) => ({
+      outpoint: it.outpoint, amount: String(it.amount), covenantId: null,
+      scriptPublicKey: { version: 0, scriptHex: relaySpkHexNoPrefix },
+    })),
+  };
+}
+
 async function makeMarket(tag) {
   const marketId = tag.repeat(64).slice(0, 64);
   const artifacts = await computeMarketGenesisArtifacts({ marketId, minBet: 5, deadlineMs: 1700000000000 });
@@ -53,7 +67,7 @@ function makeSendCmd() {
     calls.push(cmd);
     // 账本1462修复后 SIGNED_INPUT_CEILING_SOMPI(1.0 KAS)会预先过滤面值过大的候选——原100 KAS巨额假面值
     // 已不再可用, 改用真实种子面值同量级的0.5 KAS(genesis真实所需仅≈0.213 KAS)。
-    if (cmd.type === 'get_address_utxos') return { ok: true, utxos: [{ outpoint: { transactionId: 'ab'.repeat(32), index: 0 }, amount: '50000000' }] };
+    if (cmd.type === 'get_address_utxos') return feeUtxosResponse([{ outpoint: { transactionId: 'ab'.repeat(32), index: 0 }, amount: '50000000' }]);
     if (cmd.type === 'covenant_broadcast') return { ok: true, txId: cmd.expected_txid, intent_key: cmd.intent_key };
     if (cmd.type === 'check_utxo_landed') return { ok: true, landed: false, depth: null };
     throw new Error(`unexpected cmd ${cmd.type}`);
@@ -159,7 +173,9 @@ await t('⑥bet_mint(register_append) pending intent 经 runProtoDriverTick 真�
   ensureBetIntent({ betId: betId1, step: 'append' });
   const sendCmd = async (relayId, cmd) => {
     if (cmd.type === 'get_address_utxos') {
-      return { ok: true, utxos: [{ outpoint: { transactionId: market1Row.shardleaf_txid, index: 0 }, amount: '20000000' }, { outpoint: { transactionId: 'fe'.repeat(32), index: 0 }, amount: '95000000' }] }; // N-1(2026-09-19): leaf UTXO真实面值恒=CONTINUATION_OUTPUT_SOMPI(20,000,000), 与fee UTXO(0.95 KAS)分开mock——原先同一个outpoint既当leaf又当fee(95M)不真实, 也过不了leaf面值断言。账本1462: 0.95 KAS, 高于首笔下注最小可行区间(约0.925~0.93 KAS, 2026-09-19精确mass门控订正; 原≈0.82 KAS来自旧本地估算)(原100 KAS假面值已超SIGNED_INPUT_CEILING_SOMPI被过滤)
+      // F3: fee 候选取数带 facts:true(proto-broadcast-ops.mjs fetchFeeCandidates), leaf 查询不带——按此分流。
+      if (cmd.facts) return feeUtxosResponse([{ outpoint: { transactionId: 'fe'.repeat(32), index: 0 }, amount: '95000000' }]);   // 账本1462: 0.95 KAS, 高于首笔下注最小可行区间(约0.925~0.93 KAS, 2026-09-19精确mass门控订正; 原≈0.82 KAS来自旧本地估算)
+      return { ok: true, utxos: [{ outpoint: { transactionId: market1Row.shardleaf_txid, index: 0 }, amount: '20000000' }] }; // N-1(2026-09-19): leaf UTXO真实面值恒=CONTINUATION_OUTPUT_SOMPI(20,000,000)
     }
     if (cmd.type === 'covenant_broadcast') return { ok: true, txId: cmd.expected_txid, intent_key: cmd.intent_key };
     if (cmd.type === 'check_utxo_landed') return { ok: true, landed: false, depth: null };
@@ -176,7 +192,10 @@ await t('⑦bet_mint(register_append) submitted intent landed 后, proto_bets.st
   const { runProtoDriverTick } = await import('./proto-driver.mjs');
   const intentBefore = getBetIntent(`proto-bet:${betId1}:append`);
   const sendCmd = async (relayId, cmd) => {
-    if (cmd.type === 'get_address_utxos') return { ok: true, utxos: [{ outpoint: { transactionId: market1Row.shardleaf_txid, index: 0 }, amount: '20000000' }, { outpoint: { transactionId: 'fe'.repeat(32), index: 0 }, amount: '95000000' }] }; // N-1(2026-09-19): leaf UTXO真实面值恒=CONTINUATION_OUTPUT_SOMPI(20,000,000), 与fee UTXO(0.95 KAS)分开mock——原先同一个outpoint既当leaf又当fee(95M)不真实, 也过不了leaf面值断言。账本1462: 0.95 KAS, 高于首笔下注最小可行区间(约0.925~0.93 KAS, 2026-09-19精确mass门控订正; 原≈0.82 KAS来自旧本地估算)(原100 KAS假面值已超SIGNED_INPUT_CEILING_SOMPI被过滤)
+    if (cmd.type === 'get_address_utxos') {
+      if (cmd.facts) return feeUtxosResponse([{ outpoint: { transactionId: 'fe'.repeat(32), index: 0 }, amount: '95000000' }]);
+      return { ok: true, utxos: [{ outpoint: { transactionId: market1Row.shardleaf_txid, index: 0 }, amount: '20000000' }] };
+    }
     if (cmd.type === 'covenant_broadcast') return { ok: true, txId: cmd.expected_txid, intent_key: cmd.intent_key };
     if (cmd.type === 'check_utxo_landed') return { ok: true, landed: true, depth: 25 };
     throw new Error(`unexpected cmd ${cmd.type}`);

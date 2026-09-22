@@ -1426,6 +1426,60 @@ function checkR_FEERULES_CANON_BYPASS(fp, content) {
   }
 }
 
+// ── R-FEE-CANDIDATE-SHARED [ERROR] (F3, 设计 v0.2.1 §3.1/§3.3, 账本1614/1615/1616, 2026-09-22): fee 候选
+// 资格判定唯一家 = filterFeeCandidates(kasia-console/src/lib/proto-tx-assembly.mjs)。创世/下注/结算三路径
+// 在此之前各玩各的(创世/下注的 toFeeUtxoCandidates 对毒化 covenant UTXO / 缺字段的 unknown 条目零过滤,
+// proto-broadcast-ops.test.mjs F3b-1/F3b-2/F3b-4 是真实复现的安全回归)。这条规则防止两类复发:
+//   ① toFeeUtxoCandidates(裸映射、无任何过滤)的定义在仓库任何角落重新出现;
+//   ② filterFeeCandidates 在规范文件之外被第二次定义(分叉实现, 会让"三路径共用一个资格函数"这句话变假)。
+// ERROR 而非 WARN: 这不是风格问题, 是安全属性——分叉/绕过 = 重新打开创世/下注两条已经修过的洞。
+const _FEE_CANDIDATE_CANON_HOME = 'kasia-console/src/lib/proto-tx-assembly.mjs';
+function checkR_FEE_CANDIDATE_SHARED(fp, content) {
+  const rel = path.relative(ROOT, fp).replace(/\\/g, '/');
+  if (!/\.(mjs|js|cjs)$/.test(fp) || /\.test\.mjs$/.test(fp)) return;   // 测试文件豁免(向量表/回归测试本身会提到这些名字, 不是生产实现)
+  const lines = content.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/function\s+toFeeUtxoCandidates\s*\(/.test(line)) {
+      violate('R-FEE-CANDIDATE-SHARED',
+        `toFeeUtxoCandidates(get_address_utxos 裸映射, 无 covenant/spk/区间/unknown 过滤)重新出现——F3 已删除此路径(账本1614/1615/1616), 创世/下注必须走 fetchFeeCandidates(facts 形态 L)+ filterFeeCandidates(proto-tx-assembly.mjs), 不得绕过。`,
+        fp, i + 1);
+    }
+    if (rel !== _FEE_CANDIDATE_CANON_HOME && /(?:function\s+filterFeeCandidates\s*\(|(?:const|let|var)\s+filterFeeCandidates\s*=)/.test(line)) {
+      violate('R-FEE-CANDIDATE-SHARED',
+        `filterFeeCandidates 重定义——唯一家 = ${_FEE_CANDIDATE_CANON_HOME}(F3: 结算/创世/下注三路径共用同一个资格函数, 其它文件应 import 而不是分叉实现)。`,
+        fp, i + 1);
+    }
+  }
+}
+
+// ── R-FEE-SELECT-ONLY-VIA-WRAPPER [ERROR] (F4, 设计 v0.2.1 §3.2 A, 账本1614/1615/1616, 2026-09-22):
+// selectFeeUtxoByConstruction(proto-tx-assembly.mjs)只准被 selectAndReserveFeeUtxo(proto-fee-reservation.mjs)
+// 自己调用——生产代码里出现【第二处】直接调用, 意味着有一条路径绕开了 F4 的两层预留(DB 派生 + 进程内),
+// 复现 A 臂 genesis_ambiguous 死锁那类并发双选同一 fee UTXO 的窗口。裸调用点仍可以【引用】这个标识符
+// (import / 作为参数透传给 selectAndReserveFeeUtxo 的 selectFeeUtxoByConstruction 形参, 结算/创世/下注
+// 三路径现在都是这么接的)——只禁止【调用形态】`selectFeeUtxoByConstruction(`, 定义本身(function 声明)豁免。
+const _FEE_SELECT_WRAPPER_HOME = 'kasia-console/src/lib/proto-fee-reservation.mjs';
+// 豁免: 定义文件自身(doc comment 里提自己的名字合情理)+ lint-kanet.mjs 自己(本规则的错误信息/正则源码
+// 字面含 "selectFeeUtxoByConstruction(" 这串文本, 扫到自己的规则定义会自我匹配——同 R-FEE-CANDIDATE-SHARED
+// 没撞上是因为那条规则的正则要求前面紧跟字面 "function "/"const "等, 这条规则故意更宽(要抓"任何调用形态"),
+// 宽的代价是必须显式排除工具自身)。
+const _FEE_SELECT_WRAPPER_EXEMPT = new Set(['kasia-console/src/lib/proto-tx-assembly.mjs', 'scripts/lint-kanet.mjs']);
+function checkR_FEE_SELECT_ONLY_VIA_WRAPPER(fp, content) {
+  const rel = path.relative(ROOT, fp).replace(/\\/g, '/');
+  if (!/\.(mjs|js|cjs)$/.test(fp) || /\.test\.mjs$/.test(fp)) return;   // 测试文件豁免(T-race 等测试直接喂 selectFeeUtxoByConstruction 作注入的假实现, 合法)
+  if (rel === _FEE_SELECT_WRAPPER_HOME || _FEE_SELECT_WRAPPER_EXEMPT.has(rel)) return;
+  const lines = content.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/\bselectFeeUtxoByConstruction\s*\(/.test(line)) {
+      violate('R-FEE-SELECT-ONLY-VIA-WRAPPER',
+        `selectFeeUtxoByConstruction( 直接调用——唯一准调用方 = ${_FEE_SELECT_WRAPPER_HOME} 内的 selectAndReserveFeeUtxo(F4: 两层预留必须在选择前检查、选中后记入, 绕过它选择 = 重新打开 A 臂并发双选同一 UTXO 的死锁窗口)。生产代码请改传 selectFeeUtxoByConstruction 作为 selectAndReserveFeeUtxo 的形参(结算/创世/下注三路径现有接法), 不要直接调它。`,
+        fp, i + 1);
+    }
+  }
+}
+
 // R-PHANTOM-FIELD (2026-07-05, qzdh7nar/J1, following #48/#50/maker-P&L 三例同根): metadata fields written
 // ONLY by the legacy v0.6 settler (pool-market-settler.js) are read unconditionally elsewhere as if they're
 // always populated — but bshard(v0.7)/create-v07 markets never write them (deriveFeeLeaves/phase2_* writeback
@@ -1626,6 +1680,8 @@ for (const fp of targets) {
   checkR_SHARD_BLIND(fp, content);       // R-SHARD-BLIND [WARN] (线8 STEP2 2026-06-24): pool_bettor_sides 裸 logical market_id 查
   checkR_PHANTOM_FIELD(fp, content);     // R-PHANTOM-FIELD [WARN] (2026-07-05, qzdh7nar): v0.6-only phase2_* 字段无守卫读取 — 防第4例(#48/#50/maker-P&L 同根)
   checkR_FEERULES_CANON_BYPASS(fp, content);  // R-FEERULES-CANON-BYPASS [WARN] (B线落1 2026-07-12): feeRules canonicalize/hash 单源封旁路(spec v1.2-2)
+  checkR_FEE_CANDIDATE_SHARED(fp, content);   // R-FEE-CANDIDATE-SHARED [ERROR] (F3 设计v0.2.1 2026-09-22): toFeeUtxoCandidates 禁复发 + filterFeeCandidates 禁分叉实现
+  checkR_FEE_SELECT_ONLY_VIA_WRAPPER(fp, content);   // R-FEE-SELECT-ONLY-VIA-WRAPPER [ERROR] (F4 设计v0.2.1 §3.2A 2026-09-22): selectFeeUtxoByConstruction 只准被 selectAndReserveFeeUtxo 自己调用
   checkR_STATUS_GUARD_BLACKLIST(fp, content);  // R-STATUS-GUARD-BLACKLIST [WARN] (处置设计红队 2026-07-12): protocol_status UPDATE 安全闸黑名单启发式→建议白名单
   checkR_EXPLORER_URL_BYPASS(fp, content);     // R-EXPLORER-URL-BYPASS [ERROR] (死链收敛设计 §3 2026-07-12): explorer 域名字面量禁散装, 单源 explorer-url.mjs 外一律硬阻塞
   checkR_SELF_HTTP_FETCH(fp, content);         // R-SELF-HTTP-FETCH [WARN] (2026-07-14 legacy-refund 自锁死循环修复设计): console 禁 fetch 自己的端口

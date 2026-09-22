@@ -12,6 +12,7 @@ import {
 } from './proto-covenant-builder.mjs';
 import { compileSilV100, ctorBytes32V100, ctorIntV100 } from './pool-bshard-artifacts.mjs';
 import { selectFeeUtxoByConstruction, CONTINUATION_OUTPUT_SOMPI } from './proto-tx-assembly.mjs';
+import { selectAndReserveFeeUtxo, reservedFeeOutpoints } from './proto-fee-reservation.mjs';
 import { buildMarketSealTxJson, buildCloseCommitTxJson, buildConvertToClaimTxJson, buildClaimDrawTxJson } from './proto-tx-assembly-settlement.mjs';
 import { assertCloseCommitArgsFromDb } from './proto-settlement-inputs.mjs';
 import { payoutLeafHex } from './proto-payout-leaf.mjs';
@@ -127,7 +128,25 @@ export async function build(step, ctx) {
   const tokPrefixHex = '0x' + consts.token_prefix, tokSuffixHex = '0x' + consts.token_suffix;
   const cap = loadFeeProfileCap(FEE_PROFILE_KIND[step]);
   const base = { kaspa, network, marketId, absFeeCapSompi: cap, relayChangeScriptPublicKeyHex: relaySpkHex, tokPrefixHex, tokSuffixHex };
-  const tryEach = (make) => selectFeeUtxoByConstruction(feeCandidates, (u) => make(u, withFeeParent(chainParents, u)));
+  // F4(设计 v0.2.1 §3.2, 账本1614/1615/1616): 唯一的选择点(全部 step 共用这一个 tryEach 闭包)换成
+  // selectAndReserveFeeUtxo——检查两层预留集 ∧ 真实构造 ∧ 记入预留集在同一个同步段内完成。readReserved
+  // 现读 DB(同步段最前面, 不用调用方预先算好的快照, v0.2.1 NWT round2 M1)。intentKey 由调用方
+  // (driver-core.mjs, 已经算过一次 = keyOf(step, subjectId))传入而不是在这里重算——driver-step 名
+  // (close_commit)与 intent-step 名(resolve)不是同一套词汇(STEP_INTENT 映射只存在于 driver-core.mjs),
+  // 这里重算一次等于维护第二份可能漂移的映射, 直接吃调用方已经算好的那份更安全。
+  if (typeof ctx.intentKey !== 'string' || !ctx.intentKey) throw new Error('settlement ops: build 需要 ctx.intentKey(F4 预留记录用, 调用方已算过一次)');
+  let chosenFeeUtxo = null;
+  const tryEach = (make) => {
+    const result = selectAndReserveFeeUtxo({
+      candidates: feeCandidates,
+      tryBuild: (u) => make(u, withFeeParent(chainParents, u)),
+      readReserved: () => reservedFeeOutpoints({ db }),
+      intentKey: ctx.intentKey,
+      selectFeeUtxoByConstruction,
+    });
+    chosenFeeUtxo = result.feeUtxo;
+    return result;
+  };
   let built;
 
   if (step === 'seal') {
@@ -176,7 +195,7 @@ export async function build(step, ctx) {
       bet: { bettor_pk: lc(winner.bettor_pk), side: Number(winner.side), stake: Number(winner.stake) }, committeePrivkeyEnvelope: envelopeOf(db, marketId), payout: closed.pool_value, feeUtxo, chainParents: parents,
     })).built;
   }
-  const r = { txJson: built.txJson, expectedTxid: built.expectedTxid, signInputIndices: built.signInputIndices };
+  const r = { txJson: built.txJson, expectedTxid: built.expectedTxid, signInputIndices: built.signInputIndices, feeUtxo: chosenFeeUtxo };   // F4: feeUtxo 交给调用方(driver-core.mjs)在 broadcast 尝试结束后释放预留
   if (built.genesisOutputIndices) r.genesisOutputIndices = built.genesisOutputIndices;
   if (built.continuationOutputIndices) r.continuationOutputIndices = built.continuationOutputIndices;
   return r;

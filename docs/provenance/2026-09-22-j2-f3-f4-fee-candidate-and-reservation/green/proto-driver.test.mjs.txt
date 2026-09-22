@@ -1,0 +1,21 @@
+[db] path=C:\Users\ADMIN\AppData\Local\Temp\_j2_proto_driver_e2e_4524.db source=DB_PATH
+[PASS] ①a 未设 PROTO_DRIVER_ENABLED ⇒ isProtoDriverEnabled()=false
+[PASS] ①b PROTO_RELAY_ID 未配置(即使 PROTO_DRIVER_ENABLED=1) ⇒ startProtoDriver() 不启动(打印 disabled, _started 仍为 false)
+[diag:step] proc.silverc.compile.bshard-artifacts ms=75 cmd=silverc ok=1 at=2026-09-22T07:29:39.056Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=53 cmd=silverc ok=1 at=2026-09-22T07:29:39.115Z
+[PASS] ②genesis_pending 行经 runProtoDriverTick 真实推进到 genesis_submitted(真kaspa-wasm构造)
+[PASS] ③genesis_submitted 行经 runProtoDriverTick 做 landed-check(check_utxo_landed 未落地, 状态不变)
+[diag:step] proc.silverc.compile.bshard-artifacts ms=88 cmd=silverc ok=1 at=2026-09-22T07:29:39.233Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=53 cmd=silverc ok=1 at=2026-09-22T07:29:39.294Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=76 cmd=silverc ok=1 at=2026-09-22T07:29:39.380Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=52 cmd=silverc ok=1 at=2026-09-22T07:29:39.439Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=76 cmd=silverc ok=1 at=2026-09-22T07:29:39.527Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=52 cmd=silverc ok=1 at=2026-09-22T07:29:39.585Z
+[PASS] ④每 tick 上限生效: 3 个 pending 市场 + cap=2 ⇒ 只推进2个, 第3个下一轮才处理
+[PASS] ⑤重叠 tick 被跳过: 第一次 driveOnce 还在跑(慢 sendCmd 卡住)时并发调第二次 ⇒ 第二次立即返回 skipped
+[diag:step] proc.silverc.compile.bshard-artifacts ms=52 cmd=silverc ok=1 at=2026-09-22T07:29:39.731Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=29 cmd=silverc ok=1 at=2026-09-22T07:29:39.774Z
+[PASS] ⑥bet_mint(register_append) pending intent 经 runProtoDriverTick 真实推进到 submitted(真kaspa-wasm构造, 三项fail-closed核对全过)
+[PASS] ⑦bet_mint(register_append) submitted intent landed 后, proto_bets.status 直接 pending→confirmed 被真实写回(两张表之间的桥, D-020: 无中间态)
+
+8 passed, 0 failed
