@@ -1,0 +1,123 @@
+[
+ {
+  "id": "S1",
+  "desc": "extractInputOutpoints double-wrap unwrap removed (breaks real prepared_tx_json format)",
+  "killed": true,
+  "res": [
+   {
+    "test": "proto-fee-reservation.test.mjs",
+    "exit": 1,
+    "redCount": 0,
+    "groups": [],
+    "sample": []
+   },
+   {
+    "test": "proto-settlement-ops.test.mjs",
+    "exit": 0,
+    "redCount": 0,
+    "groups": [],
+    "sample": []
+   },
+   {
+    "test": "proto-broadcast-ops.test.mjs",
+    "exit": 1,
+    "redCount": 8,
+    "groups": [],
+    "sample": [
+     "[FAIL] ⑫账本1462 genesis: 真实种子三枚UTXO(0.5/0.5/0.95 KAS)候选 ⇒ 构造成功且选中0.5 KAS(不再被保守下界一刀切拒绝) :: 应该构造成功(0.5/0.5/0.95三枚候选里应有可行解), 实际: {\"error\":\"reservedFeeOutp",
+     "[FAIL] ⑬账本1462 首笔下注(无held)真实种子候选[0.5,0.95] KAS ⇒ 0.5太小构造不出可行找零形状(首笔最小可行落在约0.925~0.93 KAS区间, 2026-09-19精确mass门控订正; 原\"≈0.82 KAS\"来自旧本地估算), 逐个真实尝试后选中0.95且",
+     "[FAIL] ⑭账本1462 第二笔下注(有held)真实种子候选[0.5] KAS ⇒ 如实报告(Bettor要求): 你实算最小可行约0.56 KAS, 0.5低于此值, 应当构造失败并报错(不是意外成功) :: 预期失败原因是no_suitable_fee_utxo, 实际: {\"error\""
+    ]
+   }
+  ]
+ },
+ {
+  "id": "S2",
+  "desc": "SOURCES drop proto_markets + proto_bet_intents (revert MUST-1)",
+  "killed": false,
+  "res": [
+   {
+    "test": "proto-fee-reservation.test.mjs",
+    "exit": 0,
+    "redCount": 0,
+    "groups": [],
+    "sample": []
+   },
+   {
+    "test": "proto-settlement-ops.test.mjs",
+    "exit": 0,
+    "redCount": 0,
+    "groups": [],
+    "sample": []
+   },
+   {
+    "test": "proto-broadcast-ops.test.mjs",
+    "exit": 0,
+    "redCount": 0,
+    "groups": [],
+    "sample": []
+   }
+  ]
+ },
+ {
+  "id": "S3",
+  "desc": "broadcast-ops genesis: revert to unconditional finally release (reopen MUST-2 window)",
+  "killed": true,
+  "res": [
+   {
+    "test": "proto-broadcast-ops.test.mjs",
+    "exit": 1,
+    "redCount": 1,
+    "groups": [],
+    "sample": [
+     "[FAIL] F4 MUST-2(创世侧): covenant_broadcast 的 sendCmd 本身抛错(IPC 超时/无响应, 不是 relay 回了明确的 {ok:false})⇒ buildMarketGenesisAndBroadcast 仍返回 {error}(不 throw, 保"
+    ]
+   },
+   {
+    "test": "proto-fee-reservation.test.mjs",
+    "exit": 0,
+    "redCount": 0,
+    "groups": [],
+    "sample": []
+   }
+  ]
+ },
+ {
+  "id": "S4",
+  "desc": "driver-core settlement: revert to unconditional release on sendCmd throw",
+  "killed": true,
+  "res": [
+   {
+    "test": "proto-settlement-driver-core.test.mjs",
+    "exit": 1,
+    "redCount": 2,
+    "groups": [],
+    "sample": [
+     "[FAIL] F4 MUST-2: sendCmd(covenant_broadcast) 本身抛错(IPC 超时/无响应, 结果不确定)⇒ 调 deferReservationReconciliation(带正确的 feeUtxo + checkPreparedInDb), 不调 releaseF",
+     "[FAIL] F4 MUST-2: checkIntentPreparedInDb 端口——defer 传入的 checkPreparedInDb 调用时会经这个端口查该 intentKey(不是查别的 key), 端口返回值原样透传 :: TypeError: Cannot destructure"
+    ]
+   }
+  ]
+ },
+ {
+  "id": "S5",
+  "desc": "deferReservationReconciliation always releases regardless of DB check (break hand-to-db-layer branch)",
+  "killed": true,
+  "res": [
+   {
+    "test": "proto-fee-reservation.test.mjs",
+    "exit": 1,
+    "redCount": 3,
+    "groups": [
+     "[test] ⑤ reconcileUncertainReservation: ",
+     "[test] ⑧ MUST-2(NWT 账本1623/1624): deferR"
+    ],
+    "sample": [
+     "❌ DB 里已有 prepared 字节 ⇒ handed_to_db_layer: false",
+     "❌ 对没预留过的 outpoint 对账 ⇒ noop(不误建条目): false",
+     "❌ 2 assertions failed"
+    ]
+   }
+  ]
+ }
+]
