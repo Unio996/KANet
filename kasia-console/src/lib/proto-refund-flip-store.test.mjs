@@ -88,6 +88,18 @@ console.log('[test] ② M3 退款票身份 + 守恒: 确定性 id(hash 公式)�
   ok(!!e3 && /重复/.test(e3.message), '两张票 outpoint 重复 ⇒ 抛');
 }
 
+console.log('[test] ②b MUST-1(账本1620, NWT R-a 实现审): 守恒断言此前结构性不可测(Σ 与独立再算的 pool 同表同读, 永远相等, 两套突变集 0 red)——用 readPoolValue 注入点喂一个不同源的假值, 证明断言在真会失守的场景里确实会抛; 默认路径(不传该参)行为不变:');
+{
+  const M2 = mid('conservation'); seedMarket(M2); seedBet(M2, 0, { stake: 400 });
+  let e4 = null;
+  try { deriveRefundClaims({ db: sqlite, marketId: M2, readPoolValue: () => 999 }); } catch (x) { e4 = x; }
+  ok(!!e4 && /守恒断言失败/.test(e4.message) && /Σ\(退款 claim amount\)=400/.test(e4.message) && /pool_value=999/.test(e4.message), 'MUST-1: 注入不等的 pool_value(999, 与 claim 清单 Σ=400 不同源)⇒ 守恒断言真的抛; 突变对照——若生产代码把 `if (sum !== pool) throw` 删掉, 这条会从抛错变成不抛, 断言由此变红');
+  const csOk = deriveRefundClaims({ db: sqlite, marketId: M2, readPoolValue: () => 400 });
+  ok(csOk.length === 1 && csOk[0].amount === 400, 'MUST-1 对照: 注入相符的 pool_value(400) ⇒ 正常通过, 证明注入点本身不改判定逻辑');
+  const csDefault = deriveRefundClaims({ db: sqlite, marketId: M2 });
+  ok(csDefault.length === 1 && csDefault[0].amount === 400, 'MUST-1 对照: 不传 readPoolValue(生产默认路径)结果与显式传相符值一致——只加了注入点, 没改默认行为');
+}
+
 console.log('[test] ③ markLanded(refund_flip): 事务性 / 幂等 / M1 前态谓词 / close 意图标 ambiguous:');
 {
   const M = mid('ml'); seedMarket(M); seedBet(M, 0, { stake: 400 }); seedBet(M, 1, { stake: 600 }); sealLanded(M); freezeMarket({ db: sqlite, marketId: M, reason: 'x', pmt: null, wallMs: Date.now(), log: quiet });

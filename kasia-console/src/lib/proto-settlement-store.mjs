@@ -27,12 +27,24 @@ export function refundClaimIdFor({ marketId, ticketTxid, ticketVout }) {
   return createHash('sha256').update(`${marketId}${ticketTxid.toLowerCase()}${ticketVout}refund`).digest('hex');
 }
 
+/** deriveRefundClaims 默认的 pool_value 读法(与派生 claim 清单同一张表、同一过滤条件的独立再算)——
+ *  抽成具名函数只是为了给 §MUST-1 的测试一个可替换的注入点, 生产路径行为不变(不传 readPoolValue 时就是这个)。 */
+function readConfirmedPoolValue(db, marketId) {
+  return db.prepare("SELECT COALESCE(SUM(stake), 0) AS pool_value FROM proto_bets WHERE market_id = ? AND status = 'confirmed'").get(marketId).pool_value;
+}
+
 /**
  * R-a / M3: 从 confirmed 下注派生退款 claim 清单(纯读)。fail-closed(任一不满足 ⇒ 抛, 由 markLanded 事务整体回滚 ⇒ 后效每 tick 重跑 + 报警, 即 HOLD):
  *  无 confirmed 下注 / 任一票缺 ticket_txid|ticket_vout / 票 outpoint 重复 / stake 非正整数 / Σ stake != 该市场 pool_value(= Σ confirmed stake 的独立再算)。
  * 守恒口径: 链上 RootClose state 的 pool_value 经 spk 等值(C1 的 rootClose_spk_drift / probe 的 closed=2 spk 核对)与 DB 派生的 pool_value 绑定, 所以这里的 Σ 即链上口径。
+ * 🔴 NWT R-a 实现审 MUST-1(账本1620): 守恒断言此前【结构性不可测】——claim 清单的 Σ 与独立再算的 pool 出自
+ *   同一张表、同一过滤条件、背靠背同步读, 在当前实现下永远相等, 删掉这行断言任何测试都不会变红(两套突变集验证过,
+ *   0 red)。这不是断言没用, 是【它此刻测不出自己有没有用】——防的是将来有人重构换了任一边的数据源, 或在两次读
+ *   之间插了 await(不再是同一个原子快照), 守恒真的可能失效却没人知道。
+ * @param {(db, marketId) => number} [readPoolValue]  【测试注入点】pool_value 的读法(不传 = readConfirmedPoolValue,
+ *   生产行为不变); MUST-1 测试用它喂一个与 claim 清单不同源的假 pool 值, 让断言在测试里真的会被触发一次。
  */
-export function deriveRefundClaims({ db, marketId }) {
+export function deriveRefundClaims({ db, marketId, readPoolValue = readConfirmedPoolValue }) {
   const bets = db.prepare("SELECT id, bettor_pk, side, stake, ticket_txid, ticket_vout FROM proto_bets WHERE market_id = ? AND status = 'confirmed' ORDER BY created_at ASC, id ASC").all(marketId);
   if (bets.length === 0) throw new Error(`deriveRefundClaims: 市场 ${marketId.slice(0, 12)}… 没有 confirmed 下注 ⇒ 无可退款票(fail-closed)`);
   const seen = new Set(); let sum = 0;
@@ -44,7 +56,7 @@ export function deriveRefundClaims({ db, marketId }) {
     seen.add(key); sum += b.stake;
     return { id, bettorPk: String(b.bettor_pk).toLowerCase(), amount: b.stake, ticketTxid: String(b.ticket_txid).toLowerCase(), ticketVout: b.ticket_vout };
   });
-  const pool = db.prepare("SELECT COALESCE(SUM(stake), 0) AS pool_value FROM proto_bets WHERE market_id = ? AND status = 'confirmed'").get(marketId).pool_value;
+  const pool = readPoolValue(db, marketId);
   if (sum !== pool) throw new Error(`deriveRefundClaims: Σ(退款 claim amount)=${sum} != pool_value=${pool}(守恒断言失败, fail-closed)`);
   return out;
 }
