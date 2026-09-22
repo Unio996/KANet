@@ -3,6 +3,7 @@
 > **Status**: CURRENT · Bettor 2026-09-22 · Owner 本机终端「对齐没问题，D-032 按单口径出设计稿」· 依据 DECISIONS D-032 / D-031 / D-030 / D-021 · 账本 1623 / 1625 / 1629 / 1630 / 1631
 > v0.2（同日）：并入 Codex 桥 22b33bb2 的 OPEN MUST——"人看的题面 ↔ 唯一机器命题"无绑定（title 写 A 场、predicate 指 B 场仍可建）⇒ 新增 §2.6 命题身份绑定 + §3 / §4 / §7 对应行。v0.1 其余不变。
 > v0.2.1（同日）：Codex 159a4763 对 v0.2 判 SUPPORTED + 1 MUST——事件 id 不得只抄 URL 参数，须与取回载荷自报的事件身份相等 ⇒ §2.6-1 补"载荷身份核对"，§7 补负测 3。
+> v0.2.2（同日）：NWT 设计审（`origin/nwt/d032-v021-review-20260922` @6d113f28）方向通过 + 1 MUST——赛前变体没有"参赛方已确定"约束，预告页一侧占位符（待定）会被冻进 spec，对阵确定后 §2.6-6 回验必然 `event_identity_mismatch` 冻结 ⇒ §2.6-1 补"参赛方已定"fail-closed；两条 SHOULD（D-032 §2 枚举加状态注记；`assertUmaWindowSafe` 死代码与 proto.js:144 未用 import 落码顺手清）已记。另补 §2.7：`/resolve` 人工裁决占位不实现（D-029 9-3 由 D-032 取代，Owner 可否决）。
 > 待 NWT 设计审（红队：出题端）→ 派 J2 实现 → NWT 审 diff → 合入 → 随下次主网 console 重启生效（adapter 开关仍默认关，有价值判定题仍 N5b 限制 + Owner 单独批）。
 
 ## 0. 已有什么（D-031 第一问 · 扫 kasia-console/src/services 全目录 + index.js 启动注册 + 主网日志 + 能力清单 v0.1）
@@ -64,6 +65,7 @@
 **问题**：§2.1 之后仍能"title 写湖人、predicate 指另一场"——现有校验只证 predicate 可执行，不证它与人看到的题是同一件事。**原则**：以机器命题为权威，人看的判定语句由机器命题**生成**，运营者对生成语句**原样回签**；title 退为展示标签。
 1. **建题时取事件身份（fail-closed）**：`validateJudgedMarketInput` 通过后、`ensureMarketPending` 前，用 `data_source_canonical` 取一次 ESPN summary（15 s 超时，形状同 `predictPreMatch`），经 `oracle-evidence-extractors.mjs` 抽出的**赛前变体** `parseEspnParticipants(rawText)`（与 `parseEspnSummary` 共用同一段 competitors / home / away / league 定位代码，只去掉 final 要求）得到 `canonical_event = { event_id, league, home:{abbr,name}, away:{abbr,name}, start_ms（ESPN date）, fetched_at }`。取不到 / 结构异常 ⇒ 409 `source_unreachable_at_creation`，**不建**。
    **载荷身份核对（v0.2.1 · Codex 159a4763 MUST）**：`event_id` 取自**载荷自报**的 `header.id`（须与 `header.competitions[0].id` 相同），再与 URL 的 `event` 参数逐字相等；载荷缺 id / 两处不一致 / URL≠载荷 / 参赛方或开赛时间与该 id 不自洽 ⇒ 400 `event_identity_unverified`，不建。判定时（§2.6-6）的回验走**同一个**身份抽取函数（放在 `oracle-evidence-extractors.mjs`，与 `parseEspnParticipants` 同源），不另写第二份。J2 的 simnet 上游 mock 须补 `header.id` / `competitions[0].id` 字段（现 mock 无 id，见 `scratch/_j2_e2e/upstream-mock.mjs:23`）。
+   **参赛方已定（v0.2.2 · NWT MUST）**：两侧 competitor 都必须是已确定的真实球队才允许建题——每侧须有非空 `team.id` 与 `team.abbreviation`，且 abbreviation 经 `normalizeAbbr` 后不等于 `TIE_TOKEN`、不匹配占位符特征（`TBD` / `TBA` / 含"Winner of" / "胜者" 一类；具体 signal 由 J2 落码前用真实 ESPN 预告页响应核实并写进 provenance，抽成常量表放 `oracle-evidence-extractors.mjs` 与 `parseEspnParticipants` 同源）；两侧 `team.id` 相同 / 任一侧缺 ⇒ 409 `event_participants_not_determined`，走与 `source_unreachable_at_creation` 同一拒建通道。同时 `home.abbr ≠ away.abbr`（既有规则）。**理由**：季后赛系列赛下一轮 ESPN 先建预告页、一侧占位，占位符冻进 spec 后对阵确定 ⇒ §2.6-6 必然冻结，这是正常运营节奏下 100% 撞上的"非故障冻结"，违反 D-032 §2。
 2. **predicate 与事件对齐**：`normalizeAbbr(predicate.subject ?? predicate.operand)`（winner 用 operand，margin/score 用 subject）必须 ∈ `{home.abbr, away.abbr}`，否则 400 `predicate_team_not_in_event`。
 3. **服务端渲染判定语句**（纯函数 `renderResolutionStatement(canonical_event, predicate, side_map, outcome_end_ms)`，代码模板，运营者不可改）：例 `ESPN {league} event {event_id} · {away.name} @ {home.name} · {start ISO} · 判定：winner == {operand}（平局=NO）· 取值时刻 ≥ {outcome_end ISO} · yes→side {side_map.yes} / no→side {side_map.no}`。
 4. **回签**：请求须带 `attestStatement`；缺 ⇒ 409 `attest_required`，响应体回 `{ statement, canonical_event }` 让运营者第二次原样带回；不等 ⇒ 400 `attest_mismatch`。两步建题，不做模糊匹配。
@@ -72,6 +74,12 @@
 7. **公开视图**（§2.4 补）：`judge.statement` 与 `judge.canonical_event` 置于 `question` 之前返回；UI（KANet-UI 域，另票）展示语句为主、title 为辅。
 
 **不做**：不用语义 / 模糊文本匹配判断 title 与事件是否"像"（Codex 明确不接受作为不变量；§6 TypeSafe 预审仍只是参谋）。
+
+### 2.7 `/resolve` 人工裁决：占位不实现（v0.2.2 · Bettor 默认裁定 · Owner 可否决）
+- **地面事实**（2026-09-22 核）：`POST /api/proto-markets/:id/resolve`（`api/proto.js:311`）调的是模块级占位 `buildAndBroadcast`（`proto.js:38–40`，任何调用必抛）⇒ 501、不写库；全仓唯一写 `winning_side` 的生产代码是批 D 的 `PROMOTE_UPDATE_SQL`（`proto-settlement-budget.mjs:221`）。主网 a59c7b48 的 `winning_side=1` 而 source / set_at / verdict_id 全空 = 账本 1602 所记 Bettor 受控 write-once 手写，1602 已把"正式 /resolve 授权路径"列为未验。**D-029 的 9-3 从未实现。**
+- **裁定**：按 D-032（一题一个确定性口径；运营者没有裁决按钮；C2 判定题无人工 resolve 出口），**不实现人工 `/resolve`**。非判定题市场在主网没有结果路径，只能走冻结 → 退款，因此**主网新建市场必须是判定题**（创建入口按 `judgedMarketAllowedHere` 现有策略；非判定题只许 simnet / 零价值）。`/resolve` 端点保留 501 占位并在响应 detail 写明"按 D-032 不提供人工裁决"，或随本批删除——J2 落码时二选一，NWT 审。
+- **对 J2 F1 对抗重跑的影响**：simnet 上非判定题市场的 `winning_side` 只能 SQL 写（J2 12:17Z 回执已查证，与本节一致），provenance 如实注明即可。
+- **DECISIONS**：D-029 §1 "9-3 /resolve" 加状态注记指向本节（不改 Owner 原话）。
 
 ## 3. 冻结触发清单（改后 · 对照 D-032 §2）
 
