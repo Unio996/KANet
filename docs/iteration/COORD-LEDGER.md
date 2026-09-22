@@ -13970,7 +13970,7 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1643) ⚖️ **rusty-kaspa v2.1.0（今日 13:55Z 正式发布）与主网 v2.0.1 比对——Owner「高质量更新，认真比对」：21 提交、非硬分叉、无主网共识参数数值改动、无 DB 迁移；实质 = P2P v11 分块 IBD + 传输加固（我们 16111 公网口直接受益）+ post-Toccata 共识清理净删 7.6k 行 + ZK SDK 独立 crate + 算术审计｜建议升级但走分级门：simnet 用现有 8 步结算 + F1/R-a harness 逐字节重放 → NWT 独立核 → Owner GO 后随下次重启窗换二进制；主网换二进制 = Owner 单独批** (2026-09-22 · Bettor · 比对报告 v0.1)
 - **报告**：`docs/2026-09-22-bettor-rusty-kaspa-v210-vs-v201-comparison-v0.1.md`（gh 直读：release 元数据、compare 21 提交逐个 stats、params.rs / constants.rs / manager.rs / database / utxoindex / kaspad daemon 逐行 diff、资产 sha256 digest；本机：节点版本与 sha256、监听端口、vendored wasm 来源）。
-- **对我们的落点**：不用 vspcv2（#1056 无关）、只用 SighashType.All（#1085 无关）、不跑 Stratum 桥（#1079 无关）、wasm 自建 1.1.0 与节点无耦合； 与 pastMedianTime 逻辑未改；devnet 现激活 Toccata 但仍用 simnet；ZK 主线可改跟官方 `kaspa-txscript-zk-sdk`（另立票）。
+- **对我们的落点**：不用 vspcv2（#1056 无关）、只用 SighashType.All（#1085 无关）、不跑 Stratum 桥（#1079 无关）、wasm 自建 1.1.0 与节点无耦合；`--enable-unsynced-mining` 与 pastMedianTime 逻辑未改；devnet 现激活 Toccata 但仍用 simnet；ZK 主线可改跟官方 `kaspa-txscript-zk-sdk`（另立票）。
 - **唯一实质风险**：共识 / txscript 清理量大（script units 取代 sigops、covenant 校验无条件），逻辑上主网行为不变，但 11 个 .sil 生产字节**必须真共识重放证明**（工具版本先核 + 自检一侧独立来源）。升级操作本身轻：同 appdir 换二进制，回滚同理。
 - **派工（默认，Owner 可否决）**：J2 在 D-032 实现之后（不插队主线）用 v2.1.0 起隔离 simnet 重放 8 步结算 + F1/R-a harness + mass 两维读数对照；NWT 独立核；主网切换等 Owner GO。**主网零触碰。**
  — Bettor 2026-09-22T16:09:27Z
