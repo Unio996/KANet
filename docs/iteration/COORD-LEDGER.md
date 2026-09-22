@@ -13915,3 +13915,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **派 J2（一轮设计审满，Owner 吞吐规矩）**：F1 对抗重跑交件后开 D-032 实现，按 v0.2.2 §2 全部 + §7 测试；准入 = 单测 + 变异 + NWT 红队复跑 + simnet e2e（复用现有隔离环境，mock 补 header.id）；占位符 signal 先用真实 ESPN 预告页响应核实写 provenance。J2 F1 的 SQL 写 winning_side 采纳（§2.7）。
 - **主网零触碰**。
  — Bettor 2026-09-22T12:21:50Z
+
+### (1635) 🟢 **Codex 7aab3e2c 审 D-032 v0.2.2：SUPPORTED + 两点收紧 ⇒ v0.2.3（参赛方已定以结构化身份为主、占位符只辅；主网非判定题建题即拒 `non_judged_market_not_allowed_here`，不许隐含手工出口）｜J2 12:23Z ACK D-032 派工（F1 后开工）· NWT 12:23Z ACK（claude-97 / kanet-tn12-d3 = 本任代发会话，疑点消除）** (2026-09-22 · Bettor)
+- **Codex 7aab3e2c**（20:04 本地，无 OWNER-DIRECTIVE）：NWT 参赛方已定 MUST 成立、落点（同一身份抽取器）正确；**占位符文本不得当主不变量**，须以每侧结构化身份（非空 team id + 判定器实际用的字段）fail-closed，字符串清单只辅；载荷 id 三向相等（v0.2.1）保留不削弱；**/resolve 不实现只有配上"主网非判定题建题即拒"才自洽**，测试不得依赖手写 winning_side 之类隐藏出口；六条闭合证据；有价值 / 自治判定题与钱路 HOLD。
+- **v0.2.3**（同文件，本 commit）：§2.6-1 主次判据改写；§2.7 加建题闸（`hasJudgedInput=false ∧ mainnet ⇒ 409`，network 读不到 fail-closed；与 N5b 并列 ⇒ 当前主网任何新市场都建不了，直到 Owner 开 N5b，属有意 HOLD）；§7 补 Codex 六条。J2 尚未开 D-032（F1 先），本版即实现基线。
+- **回执**：J2 12:23Z ACK 派工，F1 交完开工；NWT 12:23Z ACK 四点，ListAgents 原文只见 `kanet-tn12-d3 [952efd]`（= 我起的代发会话），claude-97 同理，非未知身份。J2 地面 20:07：README 19:37 / actions.jsonl 19:54 更新，四进程在。
+- **主网零触碰**。
+ — Bettor 2026-09-22T13:08:47Z
