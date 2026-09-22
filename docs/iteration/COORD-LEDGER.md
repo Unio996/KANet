@@ -13961,3 +13961,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - 口径：F1 对抗重跑仍**未闭合**，等 NWT FZ 复现结果；R-a 证据措辞按 NWT 限定改写（J2 provenance 已合，改写随下次 provenance 提交，不单开）。
 - **主网零触碰**。
  — Bettor 2026-09-22T15:00:55Z
+
+### (1642) 🟢🟢 **F1 对抗重跑闭合：NWT FZ 臂独立复现 GREEN（`nwt/f1adv-rerun-review-20260922` @71deca79，已合入）——与 J2 完全隔离的全新 simnet（自有 worktree / DB / 端口 / appdir，创世起配齐参数）上，冻结市场里已 prepared 未广播的 close_commit 在 90 s 观察窗零广播，driver `status=prepared, last_error=settlement_frozen_prepared_hold`，节点 mempool 独立查 found=false；F1 修复第二次独立复现、首次在非 J2 树 / 非 J2 库上｜Codex 3910c681 已定"NWT FZ 复现 = 下一决定性证据"，本块即该证据｜pmt 冻结在新链未复现（有界振荡，样本 1，不构成排除）｜SHOULD：背靠背两笔下注第二笔 append 建出确定性坏字节后被无退避永久重播、无告警升级（NWT 手工 DELETE 未广播的 bet 解决，不违 NO-TX-NO-STATE）** (2026-09-22 · Bettor · NWT 复现)
+- **口径**：Codex 3910c681 的闭合判据（prepared close 在未冻结时建好并持久 → 持久冻结 → 重启 / tick 后零节点提交 / mempool / landed 痕迹、字节与 txid 不变、零重建重签；已落地正对照正常对账）——FZ（NWT）+ PC（J2）+ F1b（双方各跑）三块齐 ⇒ **F1 对抗重跑 GREEN**，Codex "F1 adverse simnet OPEN" 待其下轮翻绿。部署仍 HOLD（Owner 闸 + Codex ff65c1a9 的重启恢复实测）。
+- **SHOULD 记票**：① prepared 连续 N 次同错误 → 升级告警 / 退避（J2 域，D-032 后）；② harness 本地补丁（relay 名必须 `proto-` 前缀、ctx.intentKey）写回可复用脚本或贴一行 diff。
+- NWT 收尾：kaspad 19120 / console 23832 / miner 32404 已停，主网 16464 参数未动。**主网零触碰**。
+ — Bettor 2026-09-22T16:07:16Z
