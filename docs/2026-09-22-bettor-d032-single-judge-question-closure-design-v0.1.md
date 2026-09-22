@@ -1,6 +1,7 @@
-# D-032 出题端闭环设计 v0.1 —— 一题一个裁判（单口径）· 拆掉批 B 的"双裁判"
+# D-032 出题端闭环设计 v0.2 —— 一题一个裁判（单口径）· 拆掉批 B 的"双裁判" · 题面与机器命题绑定
 
-> **Status**: CURRENT · Bettor 2026-09-22 · Owner 本机终端「对齐没问题，D-032 按单口径出设计稿」· 依据 DECISIONS D-032 / D-031 / D-030 / D-021 · 账本 1623 / 1625 / 1629 / 1630
+> **Status**: CURRENT · Bettor 2026-09-22 · Owner 本机终端「对齐没问题，D-032 按单口径出设计稿」· 依据 DECISIONS D-032 / D-031 / D-030 / D-021 · 账本 1623 / 1625 / 1629 / 1630 / 1631
+> v0.2（同日）：并入 Codex 桥 22b33bb2 的 OPEN MUST——"人看的题面 ↔ 唯一机器命题"无绑定（title 写 A 场、predicate 指 B 场仍可建）⇒ 新增 §2.6 命题身份绑定 + §3 / §4 / §7 对应行。v0.1 其余不变。
 > 待 NWT 设计审（红队：出题端）→ 派 J2 实现 → NWT 审 diff → 合入 → 随下次主网 console 重启生效（adapter 开关仍默认关，有价值判定题仍 N5b 限制 + Owner 单独批）。
 
 ## 0. 已有什么（D-031 第一问 · 扫 kasia-console/src/services 全目录 + index.js 启动注册 + 主网日志 + 能力清单 v0.1）
@@ -17,6 +18,8 @@
 | 老系统 prevet 预审框架（`/api/pool/prevet`，120 fixture） | `scripts/prevet-fp-fn-*.mjs` | 参照：TypeSafe 建题预审 PoC（J1，账本 1629）跑在它的 fixture 上；本设计只留挂点（§6） |
 | 退款出口 refund_flip（R-a 已合） | `lib/proto-settlement-store.mjs` / driver | 复用：冻结市场的出口已存在 ⇒ 批 B "缺 UMA 条件 = 无出口"这一前提**不再成立**（§1） |
 | simnet 上游 mock（ESPN / Polymarket 拦截） | `scratch/_j2_e2e/upstream-mock.mjs`（J2 本轮在用） | 复用做 e2e（§7），不新造 |
+| ESPN summary 参赛方定位解析 `parseEspnSummary`（只认 final）+ `normalizeAbbr`（抽取侧与谓词侧共用一个规范化函数） | `lib/oracle-evidence-extractors.mjs:72–92, 38` | 复用：§2.6 建题时的事件身份取自同一段 competitors 定位逻辑（抽出赛前变体，不另写第二份解析） |
+| 老系统赛前取 ESPN 事件 `predictPreMatch`（fetch 15 s 超时 + competitors home/away） | `api/oracle-pool.js:571–596`（路由内嵌函数，做赔率预测） | 参照其 fetch / 超时 / fail-closed 形状；不复用其赔率逻辑 |
 | 主网现状 | `proto_markets` 3 行均非判定题；`proto_market_verdicts` 0 行 | 无存量双裁判市场 ⇒ **不需要迁移**，uma 路可直接删 |
 
 **为什么不能用现状**：批 B 把 ESPN 谓词与 Polymarket 条件 id 同时挂到一道题上（设计 §4 R2 "≥2 独立来源一致"），两路互不见对方输入（NWT 红队缺口①根因），配错 / 极性标反即 `inconsistent_verdicts` 冻结——这是"两个裁判在回答两道题"，不是数据源冗余。D-032 定：一题一个确定性口径；不一致不是冻结的正当理由。
@@ -56,6 +59,18 @@
 ### 2.5 lint（复用 `scripts/lint-kanet.mjs` 规则模式）
 - `R-SINGLE-JUDGE`：`src/lib/proto-*.mjs` / `src/services/proto-*.mjs` / `src/api/proto.js` 内出现 `derivePolymarketVote|outcomeConditionId|polymarket_outcome_side|UMA_FINALIZATION_WINDOW_MS` ⇒ 红。（老系统文件不在范围。）
 
+### 2.6 命题身份绑定（v0.2 · Codex 22b33bb2 OPEN MUST · 题面 ↔ 唯一机器命题）
+**问题**：§2.1 之后仍能"title 写湖人、predicate 指另一场"——现有校验只证 predicate 可执行，不证它与人看到的题是同一件事。**原则**：以机器命题为权威，人看的判定语句由机器命题**生成**，运营者对生成语句**原样回签**；title 退为展示标签。
+1. **建题时取事件身份（fail-closed）**：`validateJudgedMarketInput` 通过后、`ensureMarketPending` 前，用 `data_source_canonical` 取一次 ESPN summary（15 s 超时，形状同 `predictPreMatch`），经 `oracle-evidence-extractors.mjs` 抽出的**赛前变体** `parseEspnParticipants(rawText)`（与 `parseEspnSummary` 共用同一段 competitors / home / away / league 定位代码，只去掉 final 要求）得到 `canonical_event = { event_id（URL 的 event 参数）, league, home:{abbr,name}, away:{abbr,name}, start_ms（ESPN date）, fetched_at }`。取不到 / 结构异常 ⇒ 409 `source_unreachable_at_creation`，**不建**。
+2. **predicate 与事件对齐**：`normalizeAbbr(predicate.subject ?? predicate.operand)`（winner 用 operand，margin/score 用 subject）必须 ∈ `{home.abbr, away.abbr}`，否则 400 `predicate_team_not_in_event`。
+3. **服务端渲染判定语句**（纯函数 `renderResolutionStatement(canonical_event, predicate, side_map, outcome_end_ms)`，代码模板，运营者不可改）：例 `ESPN {league} event {event_id} · {away.name} @ {home.name} · {start ISO} · 判定：winner == {operand}（平局=NO）· 取值时刻 ≥ {outcome_end ISO} · yes→side {side_map.yes} / no→side {side_map.no}`。
+4. **回签**：请求须带 `attestStatement`；缺 ⇒ 409 `attest_required`，响应体回 `{ statement, canonical_event }` 让运营者第二次原样带回；不等 ⇒ 400 `attest_mismatch`。两步建题，不做模糊匹配。
+5. **冻结进 spec**：`canonical_event` 与 `resolution_statement` 写入 `resolution_rule_spec`（与 predicate 同一 JSON，随市场不可变；`ALLOWED_SPEC_KEYS` 加这两键，但**只允许服务端写入**——请求体出现即 400 `spec_unknown_field`，与 relay 键同一处理）。
+6. **判定时回验**：adapter 拿到 `extractEspnFields` 的 `home_team / away_team` 后，与 `canonical_event.home.abbr / away.abbr` 逐一相等才进 judgeLine；不等 ⇒ `permanentFreeze('event_identity_mismatch')`（源在建题后换了事件 = 基础设施故障，D-032 §2 允许）。这是"公开视图看到的 = 裁判实际用的"的往返闭合。
+7. **公开视图**（§2.4 补）：`judge.statement` 与 `judge.canonical_event` 置于 `question` 之前返回；UI（KANet-UI 域，另票）展示语句为主、title 为辅。
+
+**不做**：不用语义 / 模糊文本匹配判断 title 与事件是否"像"（Codex 明确不接受作为不变量；§6 TypeSafe 预审仍只是参谋）。
+
 ## 3. 冻结触发清单（改后 · 对照 D-032 §2）
 
 | reason | 触发 | 类别 | 处置 |
@@ -66,6 +81,7 @@
 | `late_seal` | 封盘太晚装不下宽限 | 封盘太晚 | 保留 |
 | `r5_precheck_failed` | 胜方侧非恰 1 笔 / 奖池 0 | 系统状态 | 保留 |
 | `unexpected_verdict_kind` | 出现非 extractor 票 | 系统故障（不该存在的裁判） | **新增** |
+| `event_identity_mismatch` | 判定时抽到的参赛方 ≠ 建题冻结的 canonical_event | 数据源在建题后指向了别的事件 | **新增（v0.2 §2.6-6）** |
 | `inconsistent_verdicts` | — | 单口径下**不可达** | 守卫保留，测试证明不可达 |
 
 ## 4. 出题端闭环四要素 → 现有落点（D-032 §1）
@@ -76,6 +92,7 @@
 | 取值时刻 | `outcome_end_ms`（结果可知时刻）+ ESPN `final` 标志（未 final ⇒ ABSTAIN） | 现有 |
 | 阈值 / 比较方向 | `resolution_predicate {metric∈winner/margin/total/score, op, operand, scale, subject}` + `validateResolutionPredicate` + 干跑 | 现有 |
 | 平局规则 | judgeLine：winner 平局=NO；数值 push=NO（代码常量，运营者不可改）；公开视图回显（§2.4） | 现有规则 + 新增回显 |
+| **命题身份**（人看的题 = 机器判的题） | §2.6：建题取事件身份 → predicate 队名 ∈ 参赛方 → 服务端渲染语句 → 运营者原样回签 → 冻结进 spec → 判定时回验 | **v0.2 新增** |
 
 ## 5. 四个"人工存档"字段（NWT 缺口② / Codex）
 - `secondary_sources` / `ambiguity_handler` / `dispute_keywords` / `edge_case_examples`：判定代码从不读取（Bettor 独立 grep 复核属实）。本版**不接判定、不删必填**（零行为变化），只在公开视图与 spec.mjs 顶注如实标"仅人工争议 / 审计参考，自动判定不读取"。
@@ -88,6 +105,7 @@
 ## 7. 测试与验收（J2 交付；NWT 审 MUST-only）
 - 单测（改既有文件，不新起套件）：创建拒 `outcomeConditionId` / `polymarket_outcome_side`；正常单口径创建 `outcome_market_source='kanet_native'`；adapter 单口径市场不因缺极性冻结；门：一条合格 extractor 票过宽限即 promote；ABSTAIN ⇒ `abstain_or_dispute`；注入 `llm` / `uma` 票 ⇒ `unexpected_verdict_kind`；`inconsistent_verdicts` 不可达（删该行所有测试仍绿 = 用突变证明不可达，写进 provenance）。
 - 变异：删 §2.3 新增守卫必红；把 `AUTO_KINDS` 加回 `'uma'` 必红；lint 规则对四个标识各一条红。
+- **§2.6 命题绑定（Codex 要求的证据）**：负测——title 写 A 场 + predicate / URL 指 B 场：无 `attestStatement` ⇒ 409 且响应语句写的是 B 场参赛方；带错语句 ⇒ 400；operand 不在参赛方 ⇒ 400；源不可达 ⇒ 409 不建。变异——删掉 §2.6-2 队名对齐或 §2.6-4 回签比对，负测必红。往返——公开视图 `judge.statement / canonical_event` 与 adapter 判定时实际比对 / 消费的 `home_team / away_team / predicate / side_map / outcome_end_ms` 逐字段相等（同一 fixture 走建题与判定两端）；篡改 mock ESPN 的参赛方 ⇒ `event_identity_mismatch` 冻结。
 - **NWT 红队复跑（关 3）**：用改后的建题接口重跑 1625 的三条题面——①无关 condition id ⇒ 400；③极性 ⇒ 400；②字段标注可见；再尝试构造任何"非故障却冻结"的题，能出即 MUST。
 - simnet e2e（复用 J2 现有隔离环境与 upstream-mock）：建单口径判定题 → 下注 → seal → mock ESPN final → adapter 判 → promote → close_commit → claim（正臂）；mock ESPN 不 final 直到 cutoff → 冻结 → refund_flip（故障臂）。simnet-only。
 - 验收口径：**机制证通（simnet）**，不 claim 主网；主网启用仍走 N5b + Owner 批。

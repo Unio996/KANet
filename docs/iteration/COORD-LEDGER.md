@@ -13887,3 +13887,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **管道归属**（上任转录 from 行计数）：cc-msg-b0df907d… = NWT，cc-msg-6d858c55… = J2。点名仍无回信；J2 地面在动，NWT pid 存活，不重起。
 - **主网零触碰**。
  — Bettor 2026-09-22T10:30:59Z
+
+### (1631) 🔴 **两条派工（15:50 点名、17:30 NWT 设计审）从未送达——根因 = 本任会话不是 bypassPermissions（转录记录 default/auto），J2/NWT 是 bypass ⇒ 消息被对方扣住等无人的批准；上任 claude-6c 是 bypass 故能收发。已请 Owner 切模式，切好前不算"已派"｜Codex 22b33bb2 审单口径稿：方向 SUPPORTED + 1 OPEN MUST（题面 ↔ 机器命题无绑定）⇒ 设计稿 v0.2 并入 §2.6 命题身份绑定** (2026-09-22 · Bettor 实名)
+- **消息未送达（地面证据）**：`~/.claude/projects/D--/d9160130….jsonl`（上任）permissionMode 68 条全 bypassPermissions；本任 72a3c3a7… 为 auto 29 / default 12，虽然 pid 8724 命令行带 `--dangerously-skip-permissions`（启动时未接受风险确认即静默退回）。跨会话规则：模式不同 ⇒ 接收方扣住等其用户批准，发送方只见 "queued there"。旁证：J2 16:12 报告只字未提点名；J2 / NWT 会话（file-history id 819478f7… / 17bf011f…）15:17 / 15:38 后无任何编辑；J1 走文件信箱 10 分钟即回。**纪律**：1628 / 1630 写的"已发点名 / 已派 NWT"按送达口径**不成立**，本块更正；bypass 自查命令已写进 Bettor 接位文件「你的坐标」节 + memory。处置：Owner 用 `claude --resume 72a3c3a7-810a-46b5-b38d-9bf8ec33c1a2 --dangerously-skip-permissions` 重起本任（或 Shift+Tab 切模式），切好后重发两条。
+- **Codex 22b33bb2**（18:04 本地，无 OWNER-DIRECTIVE）：单口径 SUPPORTED；旧双源身份 / 极性缺陷 REMOVED BY DESIGN（待实现测试）；**OPEN MUST**：人看的 title 与唯一机器命题（URL 事件 / 队名 / metric / 取值时刻 / 平局 / side_map）之间无绑定，title 写 A 场 + predicate 指 B 场仍能建成可自治结算的市场；不接受模糊文本匹配当不变量；要求负测 + 变异 + 公开视图往返一致；四字段人工标注、unexpected_verdict_kind 守卫均支持；有价值 / 自治判定题与主网钱路继续 HOLD。
+- **设计稿 v0.2**（同文件，同 commit）：§2.6 命题身份绑定——建题时取 ESPN 事件身份（复用 extractors 的 competitors 定位，抽赛前变体 parseEspnParticipants；fetch 形状同老系统 predictPreMatch）→ predicate 队名经 normalizeAbbr 必 ∈ 参赛方 → 服务端渲染判定语句 → 运营者 attestStatement 原样回签（两步建题，缺 ⇒ 409 回语句）→ canonical_event + resolution_statement 冻结进 spec（只许服务端写）→ 判定时抽到的参赛方必等于冻结值否则 event_identity_mismatch 永久冻结 → 公开视图先出语句与事件身份。§3 / §4 / §7 对应补行。
+- **队列**：Owner 切模式 → 重发点名 + NWT 设计审（v0.2） → J2 F1 对抗重跑收尾 → D-032 实现。**主网零触碰**。
+ — Bettor 2026-09-22T11:09:25Z
