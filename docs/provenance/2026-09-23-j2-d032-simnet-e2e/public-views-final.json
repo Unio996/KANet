@@ -1,0 +1,145 @@
+[db] path=D:\kanet-tn12\scratch\_j2_d032_e2e\console.simnet.db source=DB_PATH
+=== 347364a5 public view ===
+{
+ "id": "347364a5776393c8cca3fcf188fa5fc9786e1da2872cf573e428d4c8d5df9bc2",
+ "token_def_id": "9f8a114b-d176-4176-93ff-07fafbc73a12",
+ "question": "d032-e2e-H",
+ "deadline_ms": 1790107343959,
+ "min_bet": 1,
+ "seal_count": 2,
+ "committee_pubkeys_json": "[\"1cd9f2b0a005142c2296088be77c734a7b819a5cb522eb951b53cb0c8d173666\"]",
+ "rootclose_tmpl_hash": "40b4e33ddc36c97ea01fded7aadbb2745c07b2f2cf9f6cbe51a20df1d70dd177",
+ "shardleaf_txid": "e42166792b2365669472336b63c20b499911c06d45ad595f81150737c9e91909",
+ "shardleaf_vout": 0,
+ "rootclose_txid": null,
+ "rootclose_vout": null,
+ "status": "resolved",
+ "genesis_prepared_txid": "e42166792b2365669472336b63c20b499911c06d45ad595f81150737c9e91909",
+ "genesis_submitted_txid": "e42166792b2365669472336b63c20b499911c06d45ad595f81150737c9e91909",
+ "genesis_landed_depth": 63,
+ "genesis_landed_at": "2026-09-22T19:55:56.709Z",
+ "genesis_last_error": null,
+ "shardleaf_cov_id": "015f633d8f3138e73865ab77f5643dffbc4f434f81573b9b00523c636f278511",
+ "winning_side": 1,
+ "payout_root": null,
+ "created_at": "2026-09-22T19:55:24.319Z",
+ "updated_at": "2026-09-22T20:33:17.608Z",
+ "shardleaf_own_redeem_len": 14746,
+ "winning_side_source": "extractor",
+ "winning_side_set_at": "2026-09-22T20:32:56.548Z",
+ "winning_side_verdict_id": 1,
+ "settlement_frozen_at": null,
+ "frozen_reason": null,
+ "judged": {
+  "side_map": {
+   "yes": 1,
+   "no": 0
+  },
+  "outcome_end_ms": 1790106983959,
+  "data_source_canonical": "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/summary?event=5101",
+  "judge": {
+   "kind": "espn-judgeline",
+   "predicate": {
+    "metric": "winner",
+    "op": "==",
+    "operand": "LAL"
+   },
+   "tie_rule": "winner: 平局=NO; margin/total/score: 恰等于线(push)=NO",
+   "value_time": 1790106983959,
+   "statement": "ESPN NBA event 5101 · BOS @ LAL · 2026-10-01T00:00:00.000Z · 判定: winner == LAL(平局=NO) · 取值时刻 >= 2026-09-22T19:56:23.959Z · yes→side 1 / no→side 0",
+   "canonical_event": {
+    "event_id": "5101",
+    "league": "NBA",
+    "home": {
+     "abbr": "LAL",
+     "name": "LAL",
+     "team_id": "13"
+    },
+    "away": {
+     "abbr": "BOS",
+     "name": "BOS",
+     "team_id": "2"
+    },
+    "start_ms": 1790812800000
+   }
+  },
+  "human_metadata_only": {
+   "secondary_sources": [],
+   "ambiguity_handler": "abstain",
+   "dispute_keywords": [],
+   "edge_case_examples": []
+  }
+ }
+}
+=== 92f9b003 public view ===
+{
+ "id": "92f9b0033602ae76b5a9a74d107aa6831fad5683d318927f9470a80f5d32b84c",
+ "token_def_id": "9f8a114b-d176-4176-93ff-07fafbc73a12",
+ "question": "d032-e2e-R",
+ "deadline_ms": 1790107348338,
+ "min_bet": 1,
+ "seal_count": 2,
+ "committee_pubkeys_json": "[\"2120498dae16ab9557650804c599380441a392a0b3f63674ffef4f3ce4d39b71\"]",
+ "rootclose_tmpl_hash": "0ab1e47a8a01cf727dc4f531893ff902abd87bb86556e015487f341f7cbe81f8",
+ "shardleaf_txid": "884df035279a2c7d1d91d5073975980910ddc7e22ebc5776f4bc1b1f0e3df584",
+ "shardleaf_vout": 0,
+ "rootclose_txid": null,
+ "rootclose_vout": null,
+ "status": "sealed",
+ "genesis_prepared_txid": "884df035279a2c7d1d91d5073975980910ddc7e22ebc5776f4bc1b1f0e3df584",
+ "genesis_submitted_txid": "884df035279a2c7d1d91d5073975980910ddc7e22ebc5776f4bc1b1f0e3df584",
+ "genesis_landed_depth": 63,
+ "genesis_landed_at": "2026-09-22T19:55:56.715Z",
+ "genesis_last_error": null,
+ "shardleaf_cov_id": "4de265508459dc770a9dfb5472130ae55a2141678064a9e38f033f7cde64e848",
+ "winning_side": null,
+ "payout_root": null,
+ "created_at": "2026-09-22T19:55:28.701Z",
+ "updated_at": "2026-09-22T20:35:23.758Z",
+ "shardleaf_own_redeem_len": 14746,
+ "winning_side_source": null,
+ "winning_side_set_at": null,
+ "winning_side_verdict_id": null,
+ "settlement_frozen_at": 1790109323758,
+ "frozen_reason": "operator_emergency_stop|clock=wall",
+ "judged": {
+  "side_map": {
+   "yes": 1,
+   "no": 0
+  },
+  "outcome_end_ms": 1790106988338,
+  "data_source_canonical": "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/summary?event=5102",
+  "judge": {
+   "kind": "espn-judgeline",
+   "predicate": {
+    "metric": "winner",
+    "op": "==",
+    "operand": "LAL"
+   },
+   "tie_rule": "winner: 平局=NO; margin/total/score: 恰等于线(push)=NO",
+   "value_time": 1790106988338,
+   "statement": "ESPN NBA event 5102 · BOS @ LAL · 2026-10-01T00:00:00.000Z · 判定: winner == LAL(平局=NO) · 取值时刻 >= 2026-09-22T19:56:28.338Z · yes→side 1 / no→side 0",
+   "canonical_event": {
+    "event_id": "5102",
+    "league": "NBA",
+    "home": {
+     "abbr": "LAL",
+     "name": "LAL",
+     "team_id": "13"
+    },
+    "away": {
+     "abbr": "BOS",
+     "name": "BOS",
+     "team_id": "2"
+    },
+    "start_ms": 1790812800000
+   }
+  },
+  "human_metadata_only": {
+   "secondary_sources": [],
+   "ambiguity_handler": "abstain",
+   "dispute_keywords": [],
+   "edge_case_examples": []
+  }
+ }
+}

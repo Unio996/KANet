@@ -1,0 +1,31 @@
+[e2e-upstream-mock-d032] installed (espn summary+teams intercepted; scenario=D:/kanet-tn12/scratch/_j2_d032_e2e/scenario.json)
+[proto-oracle-adapter] started (tick 300000ms, network=simnet)
+[relay:proto-d032-e2e] [e2e-upstream-mock-d032] installed (espn summary+teams intercepted; scenario=D:/kanet-tn12/scratch/_j2_d032_e2e/scenario.json)
+[relay:proto-d032-e2e] 9/23/2026, 02:55:36 COVENANT_BROADCAST genesis:347364a5776393c8cca3fcf188fa5fc9786e1da2872cf573e428d4c8d5df9bc2 prepared txid e42166792b23 (bytes persisted at console) → broadcasting
+[relay:proto-d032-e2e] 9/23/2026, 02:55:36 COVENANT_BROADCAST(intent genesis:347364a5776393c8cca3fcf188fa5fc9786e1da2872cf573e428d4c8d5df9bc2) TX: e42166792b2365669472336b63c20b499911c06d45ad595f81150737c9e91909
+[relay:proto-d032-e2e] 9/23/2026, 02:55:36 COVENANT_BROADCAST genesis:92f9b0033602ae76b5a9a74d107aa6831fad5683d318927f9470a80f5d32b84c prepared txid 884df035279a (bytes persisted at console) → broadcasting
+[relay:proto-d032-e2e] 9/23/2026, 02:55:36 COVENANT_BROADCAST(intent genesis:92f9b0033602ae76b5a9a74d107aa6831fad5683d318927f9470a80f5d32b84c) TX: 884df035279a2c7d1d91d5073975980910ddc7e22ebc5776f4bc1b1f0e3df584
+[relay:proto-d032-e2e] 9/23/2026, 02:56:04 COVENANT_BROADCAST proto-bet:71d5e2db-afb9-48c8-8674-575a776c1fba:append prepared txid 168f50a96a7a (bytes persisted at console) → broadcasting
+[relay:proto-d032-e2e] 9/23/2026, 02:56:04 COVENANT_BROADCAST(intent proto-bet:71d5e2db-afb9-48c8-8674-575a776c1fba:append) TX: 168f50a96a7a8c9178798bebc634292ca79c03cf5b7f882447c2aff5ce1f83e9
+[relay:proto-d032-e2e] 9/23/2026, 02:56:13 COVENANT_BROADCAST proto-bet:fb29059d-4e21-49e3-a325-829edce039f8:append prepared txid 9dd40a178e64 (bytes persisted at console) → broadcasting
+[relay:proto-d032-e2e] 9/23/2026, 02:56:13 COVENANT_BROADCAST(intent proto-bet:fb29059d-4e21-49e3-a325-829edce039f8:append) TX: 9dd40a178e64e826d1de0fd4f3a3b8492c652c61e34441afc59e85503f5c4970
+[relay:proto-d032-e2e] 9/23/2026, 02:57:56 COVENANT_BROADCAST proto-bet:1b62b94a-08d3-4910-b568-de875aa58da4:append prepared txid 4cc709fb21a5 (bytes persisted at console) → broadcasting
+[relay:proto-d032-e2e] 9/23/2026, 02:57:56 COVENANT_BROADCAST(intent proto-bet:1b62b94a-08d3-4910-b568-de875aa58da4:append) TX: 4cc709fb21a5e2c2f244c3a9d6e4083c678ecefad7ad8dd3d89b62b957b3a3c0
+[relay:proto-d032-e2e] 9/23/2026, 02:57:56 COVENANT_BROADCAST proto-bet:b2f17303-d5d0-4b5e-9803-cf9bff4c0d08:append prepared txid 6d27b5f1b80e (bytes persisted at console) → broadcasting
+[relay:proto-d032-e2e] 9/23/2026, 02:57:56 COVENANT_BROADCAST(intent proto-bet:b2f17303-d5d0-4b5e-9803-cf9bff4c0d08:append) TX: 6d27b5f1b80e342c3b0eb9dc8241f17a79b2933558a9165c4edaebaa9372076e
+[relay:proto-d032-e2e] 9/23/2026, 03:22:37 COVENANT_BROADCAST settle:market:347364a5776393c8cca3fcf188fa5fc9786e1da2872cf573e428d4c8d5df9bc2:seal prepared txid 179bdf8bccfb (bytes persisted at console) → broadcasting
+[relay:proto-d032-e2e] 9/23/2026, 03:22:37 COVENANT_BROADCAST(intent settle:market:347364a5776393c8cca3fcf188fa5fc9786e1da2872cf573e428d4c8d5df9bc2:seal) TX: 179bdf8bccfb29fdf4a52fed8e1e20e3ad3e8e8387863467d5924c1b86559bcc
+[relay:proto-d032-e2e] 9/23/2026, 03:22:37 COVENANT_BROADCAST settle:market:92f9b0033602ae76b5a9a74d107aa6831fad5683d318927f9470a80f5d32b84c:seal prepared txid d3da30064665 (bytes persisted at console) → broadcasting
+[relay:proto-d032-e2e] 9/23/2026, 03:22:37 COVENANT_BROADCAST(intent settle:market:92f9b0033602ae76b5a9a74d107aa6831fad5683d318927f9470a80f5d32b84c:seal) TX: d3da300646651214f06f75c399c5f0be606fd6073002b7c4efe89c48f43bc589
+[e2e-upstream-mock-d032] site.api.espn.com key=5101 -> state=final LAL(id=13):110-BOS(id=2):100 homeWins=true
+[e2e-upstream-mock-d032] site.api.espn.com key=5102 -> state=in LAL(id=13):110-BOS(id=2):100 homeWins=false
+[proto-oracle-adapter] tick: {"scanned":2,"skipped":{},"verdictsWritten":1,"promoted":[],"frozen":[],"waited":2,"errors":0,"aborted":null}
+[proto-oracle-adapter] PROMOTED market=347364a57763 winning_side=1 source=extractor verdict=1
+[e2e-upstream-mock-d032] site.api.espn.com key=5102 -> state=in LAL(id=13):110-BOS(id=2):100 homeWins=false
+[proto-oracle-adapter] tick: {"scanned":2,"skipped":{},"verdictsWritten":0,"promoted":[{"id":"347364a5776393c8cca3fcf188fa5fc9786e1da2872cf573e428d4c8d5df9bc2","side":1,"source":"extractor","verdictId":1}],"frozen":[],"waited":1,"errors":0,"aborted":null}
+[relay:proto-d032-e2e] 9/23/2026, 03:32:57 COVENANT_BROADCAST settle:market:347364a5776393c8cca3fcf188fa5fc9786e1da2872cf573e428d4c8d5df9bc2:resolve prepared txid c2e0cafdd84b (bytes persisted at console) → broadcasting
+[relay:proto-d032-e2e] 9/23/2026, 03:32:57 COVENANT_BROADCAST(intent settle:market:347364a5776393c8cca3fcf188fa5fc9786e1da2872cf573e428d4c8d5df9bc2:resolve) TX: c2e0cafdd84bbd0efe651815887943d5582d665eea7ad72b624410a9ded6180c
+[relay:proto-d032-e2e] 9/23/2026, 03:33:37 COVENANT_BROADCAST settle:claim:cb1f1fb14904facc3766fd2711bd0b6b15739f09ab55e724a28340fa19757d55:convert_to_claim prepared txid 086d749e5d41 (bytes persisted at console) → broadcasting
+[relay:proto-d032-e2e] 9/23/2026, 03:33:37 COVENANT_BROADCAST(intent settle:claim:cb1f1fb14904facc3766fd2711bd0b6b15739f09ab55e724a28340fa19757d55:convert_to_claim) TX: 086d749e5d41e8a13494f3b51811ff61bb8f4369fd9452f403d74e51bafd3ef2
+[relay:proto-d032-e2e] 9/23/2026, 03:34:17 COVENANT_BROADCAST settle:claim:cb1f1fb14904facc3766fd2711bd0b6b15739f09ab55e724a28340fa19757d55:claim_draw prepared txid a87489d9ce2b (bytes persisted at console) → broadcasting
+[relay:proto-d032-e2e] 9/23/2026, 03:34:17 COVENANT_BROADCAST(intent settle:claim:cb1f1fb14904facc3766fd2711bd0b6b15739f09ab55e724a28340fa19757d55:claim_draw) TX: a87489d9ce2b01f9173495fdb59558431641d034bcf476d879d7e95f634a4287

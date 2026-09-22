@@ -1,0 +1,144 @@
+[db] path=D:\kanet-tn12\scratch\_j2_d032_e2e\console.simnet.db source=DB_PATH
+=== proto_market_verdicts ===
+[
+ {
+  "id": 1,
+  "market_id": "347364a5776393c8cca3fcf188fa5fc9786e1da2872cf573e428d4c8d5df9bc2",
+  "source_kind": "extractor",
+  "relay_id": null,
+  "outcome": 1,
+  "confidence": null,
+  "evidence_ref": "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/summary?event=5101#sha256:fd45e329749d6174abf2761a8996b9213395354e88cab49ae91bf6d290edef9c",
+  "created_at": "2026-09-22T20:27:56.550Z",
+  "pmt_at": 1790108447089
+ }
+]
+=== proto_settlement_intents ===
+[
+ {
+  "intent_key": "settle:market:347364a5776393c8cca3fcf188fa5fc9786e1da2872cf573e428d4c8d5df9bc2:seal",
+  "step": "seal",
+  "status": "landed",
+  "prepared_txid": "179bdf8bccfb29fdf4a52fed8e1e20e3ad3e8e8387863467d5924c1b86559bcc",
+  "submitted_txid": "179bdf8bccfb29fdf4a52fed8e1e20e3ad3e8e8387863467d5924c1b86559bcc",
+  "last_error": null
+ },
+ {
+  "intent_key": "settle:market:92f9b0033602ae76b5a9a74d107aa6831fad5683d318927f9470a80f5d32b84c:seal",
+  "step": "seal",
+  "status": "landed",
+  "prepared_txid": "d3da300646651214f06f75c399c5f0be606fd6073002b7c4efe89c48f43bc589",
+  "submitted_txid": "d3da300646651214f06f75c399c5f0be606fd6073002b7c4efe89c48f43bc589",
+  "last_error": null
+ },
+ {
+  "intent_key": "settle:market:347364a5776393c8cca3fcf188fa5fc9786e1da2872cf573e428d4c8d5df9bc2:resolve",
+  "step": "resolve",
+  "status": "landed",
+  "prepared_txid": "c2e0cafdd84bbd0efe651815887943d5582d665eea7ad72b624410a9ded6180c",
+  "submitted_txid": "c2e0cafdd84bbd0efe651815887943d5582d665eea7ad72b624410a9ded6180c",
+  "last_error": null
+ },
+ {
+  "intent_key": "settle:claim:cb1f1fb14904facc3766fd2711bd0b6b15739f09ab55e724a28340fa19757d55:convert_to_claim",
+  "step": "convert_to_claim",
+  "status": "landed",
+  "prepared_txid": "086d749e5d41e8a13494f3b51811ff61bb8f4369fd9452f403d74e51bafd3ef2",
+  "submitted_txid": "086d749e5d41e8a13494f3b51811ff61bb8f4369fd9452f403d74e51bafd3ef2",
+  "last_error": null
+ },
+ {
+  "intent_key": "settle:claim:cb1f1fb14904facc3766fd2711bd0b6b15739f09ab55e724a28340fa19757d55:claim_draw",
+  "step": "claim_draw",
+  "status": "landed",
+  "prepared_txid": "a87489d9ce2b01f9173495fdb59558431641d034bcf476d879d7e95f634a4287",
+  "submitted_txid": "a87489d9ce2b01f9173495fdb59558431641d034bcf476d879d7e95f634a4287",
+  "last_error": null
+ },
+ {
+  "intent_key": "settle:market:92f9b0033602ae76b5a9a74d107aa6831fad5683d318927f9470a80f5d32b84c:refund_flip",
+  "step": "refund_flip",
+  "status": "pending",
+  "prepared_txid": null,
+  "submitted_txid": null,
+  "last_error": "refund_flip_pmt_not_ready: pmt(1790108947262) 尚未超过 deadline(1790107348338) + 7200000ms + 30000ms 余量(差 5631076ms): refund_flip 的 lock_time 尚未 finalized, 节点会以 NotFinalized 拒绝"
+ }
+]
+=== proto_claims ===
+[
+ {
+  "id": "cb1f1fb14904facc3766fd2711bd0b6b15739f09ab55e724a28340fa19757d55",
+  "market_id": "347364a5776393c8cca3fcf188fa5fc9786e1da2872cf573e428d4c8d5df9bc2",
+  "side": "win",
+  "amount": 1300,
+  "claim_txid": "a87489d9ce2b01f9173495fdb59558431641d034bcf476d879d7e95f634a4287",
+  "claim_vout": 0,
+  "claimed_at": "2026-09-22T20:34:37.633Z"
+ }
+]
+=== proto_markets (both) ===
+[
+ {
+  "id": "347364a5776393c8cca3fcf188fa5fc9786e1da2872cf573e428d4c8d5df9bc2",
+  "status": "resolved",
+  "winning_side": 1,
+  "winning_side_source": "extractor",
+  "settlement_frozen_at": null,
+  "frozen_reason": null,
+  "deadline_ms": 1790107343959,
+  "outcome_end_ms": 1790106983959
+ },
+ {
+  "id": "92f9b0033602ae76b5a9a74d107aa6831fad5683d318927f9470a80f5d32b84c",
+  "status": "sealed",
+  "winning_side": null,
+  "winning_side_source": null,
+  "settlement_frozen_at": 1790109323758,
+  "frozen_reason": "operator_emergency_stop|clock=wall",
+  "deadline_ms": 1790107348338,
+  "outcome_end_ms": 1790106988338
+ }
+]
+=== proto_bets ===
+[
+ {
+  "id": "71d5e2db-afb9-48c8-8674-575a776c1fba",
+  "market_id": "347364a5776393c8cca3fcf188fa5fc9786e1da2872cf573e428d4c8d5df9bc2",
+  "side": 1,
+  "stake": 700,
+  "status": "confirmed",
+  "ticket_txid": "168f50a96a7a8c9178798bebc634292ca79c03cf5b7f882447c2aff5ce1f83e9",
+  "ticket_vout": 1,
+  "stake_tx_id": "168f50a96a7a8c9178798bebc634292ca79c03cf5b7f882447c2aff5ce1f83e9"
+ },
+ {
+  "id": "1b62b94a-08d3-4910-b568-de875aa58da4",
+  "market_id": "347364a5776393c8cca3fcf188fa5fc9786e1da2872cf573e428d4c8d5df9bc2",
+  "side": 0,
+  "stake": 600,
+  "status": "confirmed",
+  "ticket_txid": "4cc709fb21a5e2c2f244c3a9d6e4083c678ecefad7ad8dd3d89b62b957b3a3c0",
+  "ticket_vout": 1,
+  "stake_tx_id": "4cc709fb21a5e2c2f244c3a9d6e4083c678ecefad7ad8dd3d89b62b957b3a3c0"
+ },
+ {
+  "id": "fb29059d-4e21-49e3-a325-829edce039f8",
+  "market_id": "92f9b0033602ae76b5a9a74d107aa6831fad5683d318927f9470a80f5d32b84c",
+  "side": 1,
+  "stake": 700,
+  "status": "confirmed",
+  "ticket_txid": "9dd40a178e64e826d1de0fd4f3a3b8492c652c61e34441afc59e85503f5c4970",
+  "ticket_vout": 1,
+  "stake_tx_id": "9dd40a178e64e826d1de0fd4f3a3b8492c652c61e34441afc59e85503f5c4970"
+ },
+ {
+  "id": "b2f17303-d5d0-4b5e-9803-cf9bff4c0d08",
+  "market_id": "92f9b0033602ae76b5a9a74d107aa6831fad5683d318927f9470a80f5d32b84c",
+  "side": 0,
+  "stake": 600,
+  "status": "confirmed",
+  "ticket_txid": "6d27b5f1b80e342c3b0eb9dc8241f17a79b2933558a9165c4edaebaa9372076e",
+  "ticket_vout": 1,
+  "stake_tx_id": "6d27b5f1b80e342c3b0eb9dc8241f17a79b2933558a9165c4edaebaa9372076e"
+ }
+]
