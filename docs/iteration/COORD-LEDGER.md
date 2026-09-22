@@ -13870,3 +13870,11 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **待 Owner 两项(1625 / 1627 遗留,本任接手催办)**:① D-032 出题端方向——单口径(Bettor + Codex 支持)vs 双源交叉;② TypeSafe 三提案作者指认(疑 J1)。
 - **队列**:J2 F1 对抗重跑 → NWT 审 provenance;NWT 待命;D-032 拍板后 Bettor 出设计稿 → NWT 审。**主网零触碰**。
  — Bettor 2026-09-22T08:51:12Z
+
+### (1629) ⚖️ **Codex ff65c1a9 入账（F3/F4 实现级 CLOSED；部署验收新增"重启 / 崩溃恢复实测"）｜TypeSafe 三提案 Owner 再转（含第三版本地自建 Jev）：维持 1627 裁定、依据本任重核；派 J1 PoC #1（出题端预审 FP/FN，j1-inbox 同 commit）｜点名到点：J2 地面在动、NWT 静默，均不重起** (2026-09-22 · Bettor)
+- **Codex ff65c1a9**（16:04 本地，无 OWNER-DIRECTIVE）：F3 CLOSED；F4 CLOSED 含 refund_flip 跨入口争用 + 砍源突变证据；不授权部署；**部署验收新增**：主网重启 / 崩溃恢复须在 simnet 用真实未终态 prepared 意图（创世 / 下注 / 结算 / 退款各一）实测重启后无兄弟双花——观察到，不由单测推断。排 J2：F1 对抗重跑之后、任何部署之前。F1 对抗重跑仍 REQUIRED；D-032 绑定 / 极性仍 MUST。
+- **TypeSafe 提案**（Owner 本机粘贴三版，无署名）：裁定同 1627（#1 采、限出题端预审 / #2 否 / #3 并入 #1），本任重核依据（原始 grep）：settler 9-13 F2 落链才 completed（bettor-prediction-settler.js:200-203）；exchange-machine 已有 evaluateKaspaPaymentGate（:829）、短路已删；老系统 prevet 框架真在（scripts/prevet-fp-fn-{fixtures,runner}.mjs，120 fixture，接口 /api/pool/prevet 在已下线 :3200）。**第三版"本地自建 Jev"不现在做**：D-030 已定托管且已实测；本机 llama-server（pid 23080）在服务老系统；PoC 输入为公开 / 合成题面不触 D-021；记 SHOULD 票。派 J1（推断作者，文件内令其确认）PoC #1，规格见 j1-inbox 同 commit 文件；零主链零钱路零 console。
+- **点名**：15:50 本地向两条管道发限时回执；16:20 到点无回信。J2 地面在动（起矿报告 16:12 更新、evidence/actions.jsonl 16:04 写入）= 深度工作静默；NWT 无地面动作、pid 33408 存活。按探活纪律（静默非死、Owner 明示不重起）不重起。
+- **Owner 本机「先对齐主要目标、主要开发原则」**：Bettor 已复述三层主线（D-029 已达成 → 退款路降为故障兜底 → D-032 出题端闭环为今日重心）与七条原则；D-032 默认走单口径（D-031 依据：老系统 voter 本就一市场一源，voter.js:755/765 按 outcome_market_source 二选一；批 B 双裁判是新造轮子）；待 Owner 纠偏，纠偏前不出设计稿。
+- **主网零触碰**。
+ — Bettor 2026-09-22T10:07:04Z
