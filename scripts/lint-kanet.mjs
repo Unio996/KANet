@@ -1633,7 +1633,8 @@ function checkDocPath() {
   const datePrefix = /^\d{4}-\d{2}-\d{2}-/;
   // 不走嵌套副本目录 / 无关目录 (kanet-tn12 = 嵌套同名目录, 非本 repo 范围)
   const mdSkip = new Set(['node_modules', '.git', 'logs', 'dist', 'build', 'out', '.cache',
-    'scratch', 'tmp', '_archive_root_20260627', 'kasia-console-archive', 'kanet-tn12']);
+    'scratch', 'tmp', '_archive_root_20260627', 'kasia-console-archive', 'kanet-tn12',
+    'docs-private']);   // D-021(9-15): gitignored 私密记录目录, 与 docs/ 平级, 不受"设计文档必住 docs/"约束(它本来就不该进公开 docs/)
 
   const mdFiles = [];
   function walkMd(dir, depth) {

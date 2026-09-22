@@ -67,5 +67,26 @@ console.log('[test] R-SINGLE-JUDGE 正向对照(合法用法 / 范围外 ⇒ 干
   ok('lint-kanet.mjs 自身跑 lint ⇒ 0 error(R-SINGLE-JUDGE 的定义处不在 kasia-console/src/, 天然出规则自己的检查范围)', !/R-SINGLE-JUDGE/.test(self) && /0 errors/.test(self), self.slice(-300));
 }
 
-console.log(failed ? `\n❌ ${failed} 项失败(${passed} 项通过)` : `\n✅✅ ALL PASS(${passed} 项) — R-SINGLE-JUDGE 四标识符负向红 + 合法写法/范围外正向绿`);
+console.log('[test] R-DOC-PATH 顺手一行(Bettor 9-15, D-021 docs-private/ mdSkip 漏收):');
+{
+  // docs-private 与 docs/ 平级(repo 根), gitignored 私密记录目录(D-021), 不该被"设计文档必住 docs/"这条规则管
+  // ——它本来就不该进公开 docs/。checkDocPath() 不接受文件路径参数(每次 lint-kanet 调用都全仓扫), 所以只要
+  // 在仓库里真放一个 docs-private/<date-prefix>.md 夹具、跑一次 lint(任意目标文件都行), 看输出里有没有这个夹具
+  // 路径的 R-DOC-PATH 命中即可。
+  const relDir = 'docs-private'; const relFile = `${relDir}/2026-01-01-x.md`;
+  const abs = path.join(ROOT, relFile);
+  fs.mkdirSync(path.join(ROOT, relDir), { recursive: true });
+  fs.writeFileSync(abs, '# private test fixture\n');
+  try {
+    let out;
+    try { out = execFileSync(process.execPath, [path.join(ROOT, 'scripts', 'lint-kanet.mjs'), 'scripts/r-single-judge-lint.test.mjs'], { cwd: ROOT, encoding: 'utf8' }); }
+    catch (e) { out = (e.stdout || '') + (e.stderr || ''); }   // lint 非零退出时 execFileSync 抛错——命中就是这个测试要抓的负向结果, 不是脚本 bug
+    ok('docs-private/2026-01-01-x.md 存在时 R-DOC-PATH 零命中(mdSkip 已收 docs-private)', !out.includes('2026-01-01-x.md'), out.slice(0, 400));
+  } finally {
+    try { fs.unlinkSync(abs); } catch {}
+    try { fs.rmdirSync(path.join(ROOT, relDir)); } catch {}   // 只在这次测试建的空目录才删; 若 docs-private 本来就有真内容, rmdir 非空会自然失败, 不误删
+  }
+}
+
+console.log(failed ? `\n❌ ${failed} 项失败(${passed} 项通过)` : `\n✅✅ ALL PASS(${passed} 项) — R-SINGLE-JUDGE 四标识符负向红 + 合法写法/范围外正向绿 + R-DOC-PATH docs-private 豁免`);
 process.exit(failed ? 1 : 0);
