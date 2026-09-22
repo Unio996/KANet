@@ -14005,3 +14005,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - 口径：F1 闭合仅实现 / simnet 层；部署与主网钱路仍 HOLD（Owner 闸）。D-032 实现证据、v2.1.0 升级 GO 均未由此授权。
 - **主网零触碰。**
  — Bettor 2026-09-22T19:13:43Z
+
+### (1649) 🟢 **append "坏字节"定性更正（NWT 矩阵 `nwt/append-badbytes-matrix-20260923` @39e09bac，已合入）：(A) seal_count=2 生产形状（主网同款）第二笔干净落地、随后正常 seal ⇒ **无装配缺陷**，1646 / Codex 111fd572 的"多人市场无法运作"过度概括撤销；(B) seal_count=1 时 bet1 落地后 API 仍受理 bet2（进 pending、生成 append 意图）= **独立缺陷**；Codex / Bettor 的"已封 leaf"假设被节点查询推翻（leafOutpointStillUnspent=true、无 seal 意图）；真实触发 = append 使确认数**超过** seal_count ⇒ Bettor 核 `ShardLeaf_direct.sil:178 require(count < seal_count)`——**节点拒绝的是合约正确拒绝超额 append**，不是坏字节｜缺陷改定两条（J2 域，D-032 (c) 后一笔小 PR）：① API 在 confirmed + pending ≥ seal_count 时 409 拒受理；② driver 对同字节确定性拒绝有界 HOLD + LOUD；生产后果 = seal_count=2 市场若第 3 人在 seal 前下注，市场永久卡死（NWT 最后一组直接验证中）｜Codex ddf67d6b 审 J2 D-032 实现 4dff42d9：架构 / 注册表判据 SUPPORTED，1 MUST（URL 缺 event 参数时跳过 URL↔载荷比对 ⇒ 须 fail-closed + 负测 + 重复参数负测）已转 J2 并入里程碑 (c)** (2026-09-23 · Bettor · NWT 矩阵 · Codex 审)
+- Group C（seal_count=3）因 harness 资金 / `PROTO_MAX_BALANCE_KAS=5` 结构性不相容未取得数据，NWT 如实记空缺，不用于任何一边。
+- J2 D-032：里程碑 (b) 4dff42d9 在分支；(c) e2e 进行中（隔离节点 24872 / 矿工 7368，与 NWT 端口错开）；Bettor 改动清单核过：24 文件全在设计 §2 范围，零结算 / 钱路文件。
+- 纪律与工具：NWT 分支起自含 master 同步历史的树（主线外 10 个老提交），闸拒推（队列 12 ≠ 3）⇒ 改摘文件提交不 merge；规矩：侧分支一律从 origin/bshard-m3-deploy 当前 HEAD 起。摘入时 pre-commit R-DOC-PATH 误扫 gitignored `docs-private/`（规则早于 D-021 的 docs-private 约定，`mdSkip` 缺该目录）⇒ 主线不收两个 .mjs 副本（见分支），lint 一行修（mdSkip 加 docs-private）派 J2 随 (c) 顺手。
+- **主网零触碰。**
+ — Bettor 2026-09-22T20:15:19Z
