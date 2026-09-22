@@ -13861,3 +13861,12 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **路由**:提案作者未署名(疑 J1,9-20 其在 da9 装 TypeSafe);待 Owner 指认后经 j1-inbox 派 #1 PoC。排序:不抢 F1 对抗重跑与 D-032 方向拍板之前的主线资源。
 - **主网零触碰**。
  — Bettor 2026-09-22T10:50:00Z
+
+### (1628) 🔁 **Bettor 接位(会话 claude-90 [22d55a])——地面核:上任 claude-6c 于 9-22 15:26 本地随 Windows Terminal 第四次同签名崩溃退出;J2/NWT 存活、Owner 明示不重起;主线 0df261d9 = origin;J2 F1 对抗重跑进行中(simnet 隔离);两项待 Owner:D-032 单口径 vs 双源、TypeSafe 提案作者指认** (2026-09-22 · Bettor)
+- **上任退出(原始证据)**:事件日志 Application 1000 今日三条 WindowsTerminal.exe 崩溃 15:26:48 / 15:34:42 / 15:39:22 本地;上任转录最后写入 15:26:54。J2(pid 16864)/NWT(pid 33408)自 9-21 21:37 起 conhost 宿主存活(4.55 条第二次实证);本任 Owner 手起 15:37:56 本地(pid 8724),Owner 原话「J1和nwt都在，不用再起」,**未重起任何人**。bypass 会话不进 ListAgents,点名走上任转录里的两条命名管道,已发限时回执,待回。
+- **地面核**:HEAD 0df261d9 = origin/bshard-m3-deploy,ahead/behind 0/0,工作树无在途改动(未跟踪仅历史 scratch/inbox 文件);主网 console 22832(:3202 → 302)/ 官方 kaspad 2.0.1 pid 16464 / bot 24524 / 18 个 relay 在;proto_markets 3 条(2 cancelled、a59c7b48 resolved)、proto_bets 3 条;驱动开关两键在 env;冷存两账号仍在 docs-private 资产清单。Codex 桥顶 0725750b 已入账 1626、无 OWNER-DIRECTIVE;桥 Monitor 已重架(10 分钟一拍)。
+- **J2 在途(读其 durable 文件,未回执)**:F1 对抗重跑(1621③)simnet 隔离环境已全绿——kaspad 22420(:28511,utxoindex,unsynced-mining)、矿工 33500 唯一、console 35088(:3299,主线 749dd855 worktree _j2_wt_e2e,DB v214);F1b 单测 9/9 已复跑;FZ 臂 / PC 臂待填。J2 因上任不可达按 durable 文件报备起矿工后自续,本任视为已核放行,合规。
+- **纪律记账(实名,上任 claude-6c)**:账本 1623–1627 落款 Z 时刻(08:35Z–10:50Z)全部**晚于**对应 commit 时刻(07:47Z–08:25Z),偏差 1h18–2h25 且不等 ⇒ 落款不是读时钟写的。五块内容经 git / origin 核实为真,事实不受影响;规矩重申:落款只抄 `date -u` 输出(状态断言固定动作同族)。本任起严格照抄。
+- **待 Owner 两项(1625 / 1627 遗留,本任接手催办)**:① D-032 出题端方向——单口径(Bettor + Codex 支持)vs 双源交叉;② TypeSafe 三提案作者指认(疑 J1)。
+- **队列**:J2 F1 对抗重跑 → NWT 审 provenance;NWT 待命;D-032 拍板后 Bettor 出设计稿 → NWT 审。**主网零触碰**。
+ — Bettor 2026-09-22T08:51:12Z
