@@ -1,0 +1,39 @@
+{
+  "market": "2d3575b78c047affa9f1f65bafcc05e4f8a280e200366a477909528c5a4a3148",
+  "bets": [
+    {
+      "id": "0edb8133-4301-4b1e-978f-c17b497c5291",
+      "side": 0,
+      "stake": 1500,
+      "status": "confirmed"
+    },
+    {
+      "id": "eed43628-cedf-4a05-96de-a95caacfd9b5",
+      "side": 1,
+      "stake": 1600,
+      "status": "pending"
+    }
+  ],
+  "intents": [
+    {
+      "bet_id": "0edb8133-4301-4b1e-978f-c17b497c5291",
+      "step": "append",
+      "status": "landed",
+      "prepared_txid": "e4983b1787d4ac6a6b0d938f6cc91d2605fd65bed2cd5d760b77b1514b126987",
+      "submitted_txid": "e4983b1787d4ac6a6b0d938f6cc91d2605fd65bed2cd5d760b77b1514b126987",
+      "last_error": null,
+      "created_at": "2026-09-22T18:30:08.386Z",
+      "updated_at": "2026-09-22T18:31:18.556Z"
+    },
+    {
+      "bet_id": "eed43628-cedf-4a05-96de-a95caacfd9b5",
+      "step": "append",
+      "status": "prepared",
+      "prepared_txid": "30103fea584dda182bd280bfe911ce0bd4d53eeafdf0948479410d0a9dee5d2e",
+      "submitted_txid": null,
+      "last_error": "RPC Server (remote error) -> Rejected transaction 30103fea584dda182bd280bfe911ce0bd4d53eeafdf0948479410d0a9dee5d2e: failed to verify the signature script: script ran, but verification failed",
+      "created_at": "2026-09-22T18:30:27.664Z",
+      "updated_at": "2026-09-22T18:31:58.657Z"
+    }
+  ]
+}
