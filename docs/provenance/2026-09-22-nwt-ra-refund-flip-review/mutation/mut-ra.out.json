@@ -1,0 +1,233 @@
+[
+ {
+  "id": "R1",
+  "desc": "driver-core: freeze check inverted (frozen!==true check removed -> unfrozen markets could proceed)",
+  "killed": true,
+  "res": [
+   {
+    "test": "proto-settlement-driver-core.test.mjs",
+    "exit": 1,
+    "redCount": 1,
+    "groups": [],
+    "sample": [
+     "[FAIL] R-a refund_flip 广播前闸①: 只翻【已冻结】市场——未冻结(false / undefined / null / 0 / \"true\" / 抛错)一律 gated(refund_flip_market_not_frozen), 不读 pmt / 不建 / 不广播(与 c"
+    ]
+   }
+  ]
+ },
+ {
+  "id": "R2",
+  "desc": "driver-core: freeze-read error fail-open (frozen=true on error instead of false)",
+  "killed": true,
+  "res": [
+   {
+    "test": "proto-settlement-driver-core.test.mjs",
+    "exit": 1,
+    "redCount": 1,
+    "groups": [],
+    "sample": [
+     "[FAIL] R-a refund_flip 广播前闸①: 只翻【已冻结】市场——未冻结(false / undefined / null / 0 / \"true\" / 抛错)一律 gated(refund_flip_market_not_frozen), 不读 pmt / 不建 / 不广播(与 c"
+    ]
+   }
+  ]
+ },
+ {
+  "id": "R3",
+  "desc": "driver-core: reuse close_commit timing gate for refund_flip",
+  "killed": true,
+  "res": [
+   {
+    "test": "proto-settlement-driver-core.test.mjs",
+    "exit": 1,
+    "redCount": 1,
+    "groups": [],
+    "sample": [
+     "[FAIL] R-a refund_flip 广播前闸②: pmt 门用 evaluateRefundFlipTiming(deadline+2h+30s), 不是 close 的 30s 闸——deadline+60s 的读数(close 会放行)对 refund_flip 必须 gated; p"
+    ]
+   }
+  ]
+ },
+ {
+  "id": "R4",
+  "desc": "store: dependenciesLanded drops frozen requirement for refund_flip",
+  "killed": true,
+  "res": [
+   {
+    "test": "proto-settlement-store.test.mjs",
+    "exit": 0,
+    "redCount": 0,
+    "groups": [],
+    "sample": []
+   },
+   {
+    "test": "proto-refund-flip-store.test.mjs",
+    "exit": 1,
+    "redCount": 2,
+    "groups": [
+     "[test] ① M1 触发谓词: 只对【冻结 ∧ sealed ∧ seal ",
+     "[test] ④ M5 recordObservedRefundFlip: 幂等"
+    ],
+    "sample": [
+     "❌ dependenciesLanded: 未冻结 ⇒ market_not_frozen: false",
+     "❌ 1 assertions failed"
+    ]
+   }
+  ]
+ },
+ {
+  "id": "R5",
+  "desc": "store: listWork refund_flip trigger SQL drops frozen predicate",
+  "killed": true,
+  "res": [
+   {
+    "test": "proto-settlement-store.test.mjs",
+    "exit": 0,
+    "redCount": 0,
+    "groups": [],
+    "sample": []
+   },
+   {
+    "test": "proto-refund-flip-store.test.mjs",
+    "exit": 1,
+    "redCount": 2,
+    "groups": [
+     "[test] ① M1 触发谓词: 只对【冻结 ∧ sealed ∧ seal ",
+     "[test] ④ M5 recordObservedRefundFlip: 幂等"
+    ],
+    "sample": [
+     "❌ 未冻结 ⇒ 不选(v1 只自动翻冻结市场): false",
+     "❌ 1 assertions failed"
+    ]
+   }
+  ]
+ },
+ {
+  "id": "R6",
+  "desc": "store: markLanded(refund_flip) drops front-state predicate (touches cancelled rows too, not just sealed)",
+  "killed": true,
+  "res": [
+   {
+    "test": "proto-refund-flip-store.test.mjs",
+    "exit": 1,
+    "redCount": 2,
+    "groups": [
+     "[test] ③ markLanded(refund_flip): 事务性 / ",
+     "[test] ④ M5 recordObservedRefundFlip: 幂等"
+    ],
+    "sample": [
+     "❌ M1 前态谓词: 已 cancelled 的遗留市场 ⇒ 不写状态、不建 claim: false",
+     "❌ 1 assertions failed"
+    ]
+   }
+  ]
+ },
+ {
+  "id": "R7",
+  "desc": "store: refundClaimIdFor drops ticket_txid validation (allows null into hash)",
+  "killed": true,
+  "res": [
+   {
+    "test": "proto-refund-flip-store.test.mjs",
+    "exit": 1,
+    "redCount": 2,
+    "groups": [
+     "[test] ② M3 退款票身份 + 守恒: 确定性 id(hash 公式)、",
+     "[test] ④ M5 recordObservedRefundFlip: 幂等"
+    ],
+    "sample": [
+     "❌ refundClaimIdFor 缺/坏 ticket 字段 {\"ticketTxid\":\"zz\"} ⇒ 抛(不得空值入哈希): false",
+     "❌ 1 assertions failed"
+    ]
+   }
+  ]
+ },
+ {
+  "id": "R8",
+  "desc": "store: deriveRefundClaims drops conservation assertion (sum vs pool_value)",
+  "killed": false,
+  "res": [
+   {
+    "test": "proto-refund-flip-store.test.mjs",
+    "exit": 0,
+    "redCount": 0,
+    "groups": [],
+    "sample": []
+   }
+  ]
+ },
+ {
+  "id": "R9",
+  "desc": "ops probe: drop covenantId+spk+value match, degrade to address-level (any utxo present -> flipped)",
+  "killed": true,
+  "res": [
+   {
+    "test": "proto-refund-flip-probe.test.mjs",
+    "exit": 1,
+    "redCount": 8,
+    "groups": [
+     "[test] ② 🔴 不得地址级: 只有 dust(无 covenant)在 ",
+     "[test] ③ 弱注入臂: 基线上只改一个字段 ⇒ 必须翻成\"未翻\":",
+     "[test] ④ evaluateRefundFlipTiming: 边界与\"不"
+    ],
+    "sample": [
+     "❌ 只有无 covenant 的 dust ⇒ 未翻: false",
+     "❌ 窗口被截断且无匹配 ⇒ 未翻并标 truncated(假阴性可见, 不会假阳性): false",
+     "❌ 只改「covenantId=null(无 covenant 的 dust)」⇒ 未翻(reason=undefined): false"
+    ]
+   }
+  ]
+ },
+ {
+  "id": "R10",
+  "desc": "ops probe: drop old-outpoint-spent check",
+  "killed": true,
+  "res": [
+   {
+    "test": "proto-refund-flip-probe.test.mjs",
+    "exit": 1,
+    "redCount": 3,
+    "groups": [
+     "[test] ③ 弱注入臂: 基线上只改一个字段 ⇒ 必须翻成\"未翻\":",
+     "[test] ④ evaluateRefundFlipTiming: 边界与\"不"
+    ],
+    "sample": [
+     "❌ 只改「旧 outpoint 仍在(found 非空)」⇒ 未翻(reason=undefined): false",
+     "❌ 只改「旧 outpoint 既不 found 也不 missing(响应不全)」⇒ 未翻(reason=undefined): false",
+     "❌ 2 assertions failed"
+    ]
+   }
+  ]
+ },
+ {
+  "id": "R11",
+  "desc": "builder: pmtEvidence not required (trusted forced true)",
+  "killed": true,
+  "res": [
+   {
+    "test": "proto-tx-assembly-settlement.test.mjs",
+    "exit": 1,
+    "redCount": 1,
+    "groups": [],
+    "sample": [
+     "[FAIL] ⑥e fail-closed: pmtEvidence 缺 / 来源不明 / 过期 / 远未来 / 非数字 ⇒ 拒(refund_flip 不可逆, 不设墙钟退路)——deadline 早已过去也一样 :: throw了但报文不对: Cannot read properties of "
+    ]
+   }
+  ]
+ },
+ {
+  "id": "R12",
+  "desc": "builder: lockTime source changed to deadlineMs directly (drops 2h grace)",
+  "killed": true,
+  "res": [
+   {
+    "test": "proto-tx-assembly-settlement.test.mjs",
+    "exit": 1,
+    "redCount": 1,
+    "groups": [],
+    "sample": [
+     "[FAIL] ⑥b lockTime = deadline+7,200,000; 输入 sequence 均为 0(CLTV 规则: sequence < MAX) :: lockTime=1700000000000 != 1700007200000"
+    ]
+   }
+  ]
+ }
+]
