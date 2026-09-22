@@ -1,0 +1,29 @@
+{
+  "_fixture_note": "SYNTHETIC, schema-faithful reconstruction — see README.md for why a live TBD payload could not be captured at design time (2026-09-22, NFL/MLB both mid-regular-season, no active bracket exposing an undetermined slot via the site.api.espn.com summary endpoint). Shape mirrors espn-fixture-determined-raw.json exactly (same header/competitions/competitors nesting, same field names) with one side's team object holding a placeholder identity that must NOT resolve in espn-fixture-teams-registry-raw.json.",
+  "header": {
+    "id": "999999901",
+    "league": { "abbreviation": "NFL" },
+    "competitions": [
+      {
+        "id": "999999901",
+        "date": "2027-01-24T21:00Z",
+        "status": { "type": { "completed": false, "state": "pre" } },
+        "competitors": [
+          {
+            "id": "2",
+            "homeAway": "home",
+            "winner": false,
+            "team": { "id": "2", "abbreviation": "BUF", "displayName": "Buffalo Bills" }
+          },
+          {
+            "id": "-1",
+            "homeAway": "away",
+            "winner": false,
+            "team": { "id": "-1", "abbreviation": "TBD", "displayName": "AFC Championship Winner" }
+          }
+        ]
+      }
+    ]
+  },
+  "_negative_test_intent": "away-side team.id=-1 and abbreviation=TBD are both non-empty and distinct from the home side's id=2/BUF (satisfies the OLD, rejected 'non-empty + distinct' check from v0.2.3) — but id=-1 does not resolve in the real ESPN teams registry fixture, so the v0.2.4 registry-resolution predicate correctly fails-closed on this slot. This is the fixture the §7 negative test ('字段非空、id互异、但载荷标明未定') is built from."
+}
