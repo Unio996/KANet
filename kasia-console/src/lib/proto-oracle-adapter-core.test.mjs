@@ -217,5 +217,30 @@ await t('A22 ▲ M2 永久不可处理者冻结后不再占名额: 20 个 spec �
   const r2 = await tick({ derive: { ex: extractorVote('YES') }, limit: 20 }); assert.equal(r2.s.scanned, 1); assert.equal(V(good).length, 1);
 });
 
+// canonical_event 携带的 judgeline-deterministic 结果(§2.6-6 判定时回验的输入形状——真 deriveKanetNativeVote
+// 把 extractEspnFields 的 fields 嵌进 evidence_raw JSON, 见 bettor-prediction-voter.js:975-978)。
+const CANONICAL_EVENT = { event_id: '401872932', league: 'NFL', home: { abbr: 'BUF', name: 'Buffalo Bills', team_id: '2' }, away: { abbr: 'DET', name: 'Detroit Lions', team_id: '8' }, start_ms: 1_789_690_500_000 };
+const extractorVoteWithFields = (outcome, fields) => async () => ({
+  ok: true, outcome, extractor_kind_used: 'judgeline-deterministic', evidence_url: ESPN(1),
+  evidence_raw: JSON.stringify({ fields, predicate: { metric: 'winner', operand: 'BUF' }, verdict: outcome, engine: 'D-L1-judgeLine' }),
+});
+await t('A23 ▲ D-032 §2.6-6 判定时回验: 市场带 canonical_event 时, extractEspnFields 的 home_team/away_team 与 canonical_event.home/away.abbr 逐一相等才进票; 不等 ⇒ 不写票、直接 permanentFreeze(event_identity_mismatch), 同 tick 内立即生效, 不占用 unexpected_verdict_kind/abstain_or_dispute 这两条既有冻结理由; 一致 ⇒ 正常出票、走既有 promote 流程(不受影响); 没有 canonical_event(老市场/无 §2.6 绑定)⇒ 这条检查天然跳过, 行为与今天完全相同', async () => {
+  isolate();
+  const mismatchId = mk({ spec: specJson({ canonical_event: CANONICAL_EVENT }) });
+  const r1 = await tick({ derive: { ex: extractorVoteWithFields('YES', { home_team: 'BUF', away_team: 'WRONG_TEAM', home_score: 20, away_score: 10 }) } });
+  assert.equal(V(mismatchId).length, 0, '不写票'); assert.match(M(mismatchId).frozen_reason, /event_identity_mismatch/); assert.equal(r1.s.frozen.length, 1);
+  assert.notEqual(r1.s.frozen[0].reason, 'unexpected_verdict_kind'); assert.notEqual(r1.s.frozen[0].reason, 'abstain_or_dispute');
+
+  isolate();
+  const matchId = mk({ spec: specJson({ canonical_event: CANONICAL_EVENT, resolution_predicate: { metric: 'winner', operand: 'BUF' } }) });
+  const r2 = await tick({ derive: { ex: extractorVoteWithFields('YES', { home_team: 'BUF', away_team: 'DET', home_score: 20, away_score: 10 }) } });
+  assert.equal(V(matchId).length, 1, '一致 ⇒ 正常出票'); assert.equal(M(matchId).settlement_frozen_at, null); void r2;
+
+  isolate();
+  const noCanonicalId = mk();   // specJson() 默认不带 canonical_event(既有 fixture 惯例)
+  const r3 = await tick({ derive: { ex: extractorVoteWithFields('YES', { home_team: 'ANY', away_team: 'THING', home_score: 1, away_score: 0 }) } });
+  assert.equal(V(noCanonicalId).length, 1, '没有 canonical_event ⇒ 回验天然跳过, 照常出票(行为与 D-032 §2.6 之前完全相同)'); assert.equal(M(noCanonicalId).settlement_frozen_at, null); void r3;
+});
+
 console.log(`\nproto-oracle-adapter-core.test: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

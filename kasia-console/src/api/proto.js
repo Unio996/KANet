@@ -131,7 +131,17 @@ export async function registerProtoRoutes(fastify) {
       // SHOULD②: 未识别的 resolution* / outcome* 键(蛇形等)⇒ 400, 不静默丢弃后建成普通市场
       const strayKey = findUnrecognizedJudgedShapedKey(request.body);
       if (strayKey) return reply.code(400).send({ ok: false, error: 'unrecognized_judged_field', detail: `${strayKey} is not a recognized field (judged-market fields are camelCase: resolutionRuleSpec / outcomeEnd); refusing to silently drop it` });
-      if (hasJudgedInput(request.body)) {
+      const judgedInput = hasJudgedInput(request.body);
+      // D-032 §2.7(v0.2.3 Codex 7aab3e2c MUST): 非判定题在主网建题闸——没有 /resolve 出口(见下方 §2.7 占位),
+      // 不许隐含手工出口。放在 tokenId/title/deadline 校验之后、任何 DB 写之前; network 读不到同样 fail-closed 拒
+      // (与既有 N5b 判定题闸同一处理原则, 见下方 judgedMarketAllowedHere)。
+      if (!judgedInput) {
+        const { nonJudgedMarketAllowedHere } = await import('../lib/proto-oracle-policy.mjs');
+        let net0 = null; try { net0 = (await import('../../../shared/lib/kaspa-network.mjs')).configuredNetwork(); } catch { net0 = null; }
+        const gate = nonJudgedMarketAllowedHere({ network: net0 });
+        if (!gate.allowed) return reply.code(409).send({ ok: false, error: 'non_judged_market_not_allowed_here', detail: gate.reason });
+      }
+      if (judgedInput) {
         const relayKey = findRelayKeyInBody(request.body);
         if (relayKey) return reply.code(400).send({ ok: false, error: `${relayKey} must not be provided in the request body — outcome_oracle_relay_ids is decided server-side` });
         // B5 三处强制谓词之①: 主网 + 非零价值白名单代币 ⇒ 拒建判定题(N5b); network 未配 ⇒ fail-closed
@@ -150,6 +160,26 @@ export async function registerProtoRoutes(fastify) {
         const v = validateJudgedMarketInput({ title, deadlineMs, resolutionRuleSpec, outcomeEndMs, budgetCfg, adapterTickMs: oracleAdapterIntervalMs(process.env) });
         if (!v.ok) return reply.code(400).send({ ok: false, error: v.code, detail: v.error });
         judgedCols = v.normalized;
+
+        // D-032 §2.6(命题身份绑定, v0.2.4 定稿): 建题时抓一次真实 ESPN 数据核对身份 + 参赛方已定 + predicate 对齐
+        // → 渲染判定语句 → 两步回签; 通过后把 canonical_event/resolution_statement 冻结进 spec(SERVER_ONLY_SPEC_KEYS,
+        // 请求体自己带这两键会在上面 validateJudgedMarketInput 的 spec_unknown_field 检查处已被拒)。
+        const { bindCanonicalEventIdentity } = await import('../lib/proto-oracle-identity.mjs');
+        const { normalizeSideMap } = await import('../lib/proto-oracle-verdict.mjs');
+        const parsedSpec = JSON.parse(judgedCols.resolution_rule_spec);   // 已在 validateJudgedMarketInput 里验过合法 JSON + 通过全部校验
+        const bind = await bindCanonicalEventIdentity({
+          url: parsedSpec.data_source_canonical, predicate: parsedSpec.resolution_predicate, sideMap: normalizeSideMap(parsedSpec.side_map),
+          outcomeEndMs: judgedCols.outcome_end_ms, attestStatement: request.body?.attestStatement,
+        });
+        if (!bind.ok) {
+          return reply.code(bind.http).send({
+            ok: false, error: bind.code, detail: bind.detail,
+            ...(bind.statement !== undefined ? { statement: bind.statement, canonical_event: bind.canonical_event } : {}),
+          });
+        }
+        parsedSpec.canonical_event = bind.canonical_event;
+        parsedSpec.resolution_statement = bind.resolution_statement;
+        judgedCols.resolution_rule_spec = JSON.stringify(parsedSpec);
       }
     }
     const minBet = 1; // v0 不在创建表单上暴露，后端给个不挡门槛的默认值(设计稿 §2 最少字段清单)
@@ -323,7 +353,15 @@ export async function registerProtoRoutes(fastify) {
     try {
       await buildAndBroadcast('market_resolve', { market, winningSide: outcome });
     } catch (err) {
-      return notImplemented(reply, 'market_resolve', err);
+      // D-032 §2.7(v0.2.2 Bettor 裁定 · Owner 可否决): 不实现人工裁决——判定题唯一裁判是 ESPN judgeLine(自动),
+      // 没有运营者裁决按钮; 非判定题在主网建不了(见上方 §2.7 建题闸), 只能走冻结→退款。此占位端点保留但不会被实现,
+      // 不做"事后手写 winning_side"这类隐藏出口(唯一写 winning_side 的生产代码是批 D PROMOTE_UPDATE_SQL)。
+      return reply.code(501).send({
+        ok: false,
+        error: 'market_resolve 暂未实现',
+        detail: 'D-032: 判定题没有人工裁决出口(单口径, ESPN judgeLine 是唯一自动裁判); 此占位端点按设计保留但不会被实现。',
+        ref: 'docs/2026-09-22-bettor-d032-single-judge-question-closure-design-v0.1.md §2.7',
+      });
     }
   });
 

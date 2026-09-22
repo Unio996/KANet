@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { judgedMarketAllowedHere, parseValuelessTokenIds, resolveOraclePolicy, logOraclePolicy, ENV_ADAPTER_ENABLED, ENV_VALUELESS_TOKEN_IDS } from './proto-oracle-policy.mjs';
+import { judgedMarketAllowedHere, nonJudgedMarketAllowedHere, parseValuelessTokenIds, resolveOraclePolicy, logOraclePolicy, ENV_ADAPTER_ENABLED, ENV_VALUELESS_TOKEN_IDS } from './proto-oracle-policy.mjs';
 
 let pass = 0, fail = 0;
 const t = async (n, f) => { try { await f(); pass++; console.log('[PASS] ' + n); } catch (e) { fail++; console.log('[FAIL] ' + n + ' :: ' + (e.stack || e.message).split('\n').slice(0, 3).join(' | ')); } };
@@ -50,6 +50,18 @@ await t('P4 ▲ 三处强制同一谓词(源码钉): 创建路由 / 受理门装
 });
 await t('P5 三处的行为(不只是 import): 主网 + 非白名单 ⇒ 创建 403 / 受理 403 / adapter 跳过——各自在专属测试里断言(proto-oracle-create-route / proto-bet-intake / proto-oracle-adapter-core); 这里只钉它们都存在', () => {
   for (const f of ['lib/proto-oracle-adapter-core.test.mjs', 'api/proto-oracle-create-route.test.mjs', 'lib/proto-bet-intake.test.mjs']) assert.ok(fs.existsSync(path.join(SRC, f)), f + ' 应存在');
+});
+await t('P6 ▲ D-032 §2.7 唯一谓词 nonJudgedMarketAllowedHere: 非主网一律允许; 主网一律拒(没有白名单例外, 不同 judgedMarketAllowedHere——非判定题在主网没有任何出口); network 缺失/非字符串/大小写空白变体 ⇒ fail-closed 拒', () => {
+  for (const net of ['simnet', 'testnet-12', 'testnet-10', 'devnet']) assert.deepEqual(nonJudgedMarketAllowedHere({ network: net }), { allowed: true, reason: 'non_mainnet' }, net);
+  for (const net of ['mainnet', 'Mainnet', 'MAINNET', ' mainnet ', 'mainnet\n']) { const r = nonJudgedMarketAllowedHere({ network: net }); assert.equal(r.allowed, false, JSON.stringify(net)); assert.ok(r.reason.length > 0); }
+  for (const net of [undefined, null, '', '  ', 5, {}, []]) assert.deepEqual(nonJudgedMarketAllowedHere({ network: net }), { allowed: false, reason: 'network_unknown_fail_closed' }, String(net));
+  assert.deepEqual(nonJudgedMarketAllowedHere({}), { allowed: false, reason: 'network_unknown_fail_closed' }, '不传 network 同样 fail-closed(这个谓词没有 process.env 兜底——network 必须由调用方显式传入)');
+});
+await t('P7 ▲ D-032 §2.7 源码钉: 创建路由 import 并调用 nonJudgedMarketAllowedHere(仅非判定题分支); 全仓只有一份定义', () => {
+  const rd = (f) => fs.readFileSync(path.join(SRC, f), 'utf8').replace(/\/\/[^\n]*/g, '');
+  const s = rd('api/proto.js'); assert.ok(/nonJudgedMarketAllowedHere\(/.test(s), 'api/proto.js 应调用 nonJudgedMarketAllowedHere(');
+  const all = []; const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) { if (e.name !== 'node_modules') walk(p); } else if (/\.(m?js)$/.test(e.name) && !/\.test\.mjs$/.test(e.name)) all.push(p); } }; walk(SRC);
+  const defs = all.filter((p) => /function\s+nonJudgedMarketAllowedHere\b/.test(fs.readFileSync(p, 'utf8'))); assert.equal(defs.length, 1, '定义文件: ' + defs.join(','));
 });
 
 console.log(`\nproto-oracle-policy.test: ${pass} passed, ${fail} failed`);

@@ -12,7 +12,7 @@ import { parseStoredSpec } from './proto-oracle-spec.mjs';
 import { normalizeSideMap } from './proto-oracle-verdict.mjs';
 import { evaluatePromoteGate } from './proto-settlement-budget.mjs';
 import { freezeMarket, promoteWinningSide } from './proto-settlement-freeze.mjs';
-import { findExtractor } from './oracle-evidence-extractors.mjs';
+import { findExtractor, normalizeAbbr } from './oracle-evidence-extractors.mjs';
 
 const CANDIDATE_SQL = `
   SELECT m.id, m.token_def_id, m.status, m.winning_side, m.settlement_frozen_at, m.deadline_ms, m.outcome_end_ms,
@@ -69,9 +69,25 @@ export async function runOracleAdapterTick({ db, readPmt, deriveExtractor, cfg, 
       // B2: 每路成功判出结果后不再重复 derive(LLM 每市场只问一次: kanet 路已有 extractor / llm 行即不再调)
       const doExtractor = !kinds.has('extractor') && !kinds.has('llm');
       const items = [];
+      let identityMismatchDetail = null;
       const run = async (branch, fn) => {
         let result = null;
         try { result = await fn(); } catch (e) { result = { ok: false, reason: `derive_threw: ${e && e.message ? e.message : e}` }; }
+        // D-032 §2.6-6(命题身份判定时回验): 只有 judgeline-deterministic(证明拿到了 extractEspnFields 的
+        // home_team/away_team, 内嵌在 evidence_raw.fields)且市场带 canonical_event(§2.6-5 建题时冻结进 spec)
+        // 才需要比对——老市场 / 单测 fixture 没有 canonical_event 时这条检查天然跳过(没有可比对的基线, 不是放宽)。
+        // 不等 ⇒ 不当票处理(不进 items, 不写 verdict), 交外层 permanentFreeze('event_identity_mismatch')
+        // (基础设施故障: 数据源在建题后指向了别的事件, D-032 §2 允许——不是分歧也不是弃权)。
+        if (result?.extractor_kind_used === 'judgeline-deterministic' && spec.canonical_event) {
+          let fields = null;
+          try { fields = JSON.parse(result.evidence_raw || '{}')?.fields || null; } catch {}
+          const gotHome = fields ? normalizeAbbr(fields.home_team) : null;
+          const gotAway = fields ? normalizeAbbr(fields.away_team) : null;
+          if (!fields || gotHome !== spec.canonical_event.home?.abbr || gotAway !== spec.canonical_event.away?.abbr) {
+            identityMismatchDetail = `home=${gotHome}/away=${gotAway} vs canonical_event home=${spec.canonical_event.home?.abbr}/away=${spec.canonical_event.away?.abbr}`;
+            return;
+          }
+        }
         const c = classifyDerivation({ branch, result });
         const item = { branch, cls: c.cls, kind: c.kind, reason: c.reason, evidenceRef: evidenceRefOf({ result, cls: c.cls }), confidence: null };
         if (c.cls === 'vote') {
@@ -81,6 +97,11 @@ export async function runOracleAdapterTick({ db, readPmt, deriveExtractor, cfg, 
         items.push(item);
       };
       if (doExtractor) await run('extractor', () => deriveExtractor({ id: m.id, outcome_market_source: 'kanet_native', outcome_condition_id: null, outcome_token_id: null, outcome_side: null, resolution_rule_spec: m.resolution_rule_spec, outcome_oracle_relay_id: null }, spec));
+      if (identityMismatchDetail) {
+        log.error?.(`[proto-oracle-adapter] market=${String(m.id).slice(0, 12)} event_identity_mismatch: ${identityMismatchDetail}`);
+        permanentFreeze('event_identity_mismatch', m);
+        continue;
+      }
 
       const plan = planVerdictWrites({ items, existing, pmt, outcomeEndMs: m.outcome_end_ms });
       if (plan.writes.length) {

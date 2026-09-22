@@ -88,7 +88,7 @@ await t('S10 ▲ C1 下注 side_label: 判定题下注必须带 side_label 且�
   }
   for (const bad of [null, 'not-json', JSON.stringify(spec({ side_map: { yes: 1, no: 1 } })), JSON.stringify({ ...spec(), side_map: undefined })]) { const r = checkSideLabel({ specRaw: bad, direction: 0, sideLabel: 'yes' }); assert.deepEqual([r.ok, r.code, r.http], [false, 'side_map_invalid', 500]); }
 });
-await t('S11 ▲ C1 公开读呈现(D-032 §2.4 单口径改版): 判定题 ⇒ 附 judged{side_map, outcome_end_ms, data_source_canonical, judge:{kind,predicate,tie_rule,value_time}, human_metadata_only:{...}}(不再含 polymarket_outcome_side / outcome_market_source / outcome_condition_id)且内部列不外露; 非判定题 ⇒ 字节与今天完全相同', () => {
+await t('S11 ▲ C1 公开读呈现(D-032 §2.4/§2.6-7 单口径改版): 判定题 ⇒ 附 judged{side_map, outcome_end_ms, data_source_canonical, judge:{kind,predicate,tie_rule,value_time,statement,canonical_event}, human_metadata_only:{...}}(不再含 polymarket_outcome_side / outcome_market_source / outcome_condition_id)且内部列不外露; 非判定题 ⇒ 字节与今天完全相同', () => {
   const base = { id: 'm1', question: 'q?', status: 'betting', deadline_ms: 5, ticker: 'TST' };
   const nonJudged = { ...base, outcome_end_ms: null, resolution_rule_spec: null, outcome_market_source: null, outcome_condition_id: null, outcome_oracle_relay_ids: null };
   assert.equal(JSON.stringify(presentProtoMarket(nonJudged)), JSON.stringify(base), '非判定题: 逐字节同旧响应'); assert.ok(!('judged' in presentProtoMarket(nonJudged)));
@@ -96,13 +96,21 @@ await t('S11 ▲ C1 公开读呈现(D-032 §2.4 单口径改版): 判定题 ⇒ 
   const out = presentProtoMarket(j);
   assert.deepEqual(out.judged, {
     side_map: { yes: 1, no: 0 }, outcome_end_ms: OE, data_source_canonical: spec().data_source_canonical,
-    judge: { kind: 'espn-judgeline', predicate: spec().resolution_predicate, tie_rule: 'winner: 平局=NO; margin/total/score: 恰等于线(push)=NO', value_time: OE },
+    judge: { kind: 'espn-judgeline', predicate: spec().resolution_predicate, tie_rule: 'winner: 平局=NO; margin/total/score: 恰等于线(push)=NO', value_time: OE, statement: null, canonical_event: null },
     human_metadata_only: { secondary_sources: spec().secondary_sources, ambiguity_handler: spec().ambiguity_handler, dispute_keywords: spec().dispute_keywords, edge_case_examples: spec().edge_case_examples },
   });
   assert.ok(!('polymarket_outcome_side' in out.judged) && !('outcome_market_source' in out.judged) && !('outcome_condition_id' in out.judged), 'D-032: 三个第二裁判字段不再出现在公开视图');
   for (const c of ['resolution_rule_spec', 'outcome_market_source', 'outcome_condition_id', 'outcome_oracle_relay_ids', 'outcome_end_ms']) assert.ok(!(c in out), c + ' 不外露(只经 judged 块)');
   assert.throws(() => presentProtoMarket({ ...base, outcome_end_ms: null }), /缺列/, '漏 SELECT 判定题列 ⇒ 抛(不把判定题误当非判定题)'); assert.equal(presentProtoMarket(null), null);
   assert.ok(/outcome_end_ms/.test(JUDGED_PRESENTATION_COLS) && /resolution_rule_spec/.test(JUDGED_PRESENTATION_COLS));
+});
+await t('S12 ▲ §2.6-7: 走过 §2.6 绑定的市场(spec 带 canonical_event/resolution_statement, 服务端专写)⇒ judge.statement/judge.canonical_event 原样透出', () => {
+  const base = { id: 'm1', question: 'q?', status: 'betting', deadline_ms: 5, ticker: 'TST' };
+  const ce = { event_id: '401872932', league: 'NFL', home: { abbr: 'BUF', name: 'Buffalo Bills', team_id: '2' }, away: { abbr: 'DET', name: 'Detroit Lions', team_id: '8' }, start_ms: 1_789_690_500_000 };
+  const stmt = 'ESPN NFL event 401872932 · Detroit Lions @ Buffalo Bills · ... · yes→side 1 / no→side 0';
+  const j = { ...base, outcome_end_ms: OE, resolution_rule_spec: JSON.stringify(spec({ canonical_event: ce, resolution_statement: stmt })), outcome_market_source: 'kanet_native', outcome_condition_id: null, outcome_oracle_relay_ids: '[]' };
+  const out = presentProtoMarket(j);
+  assert.equal(out.judged.judge.statement, stmt); assert.deepEqual(out.judged.judge.canonical_event, ce);
 });
 
 console.log(`\nproto-oracle-spec.test: ${pass} passed, ${fail} failed`);

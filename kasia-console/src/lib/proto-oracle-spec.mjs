@@ -172,7 +172,12 @@ export function presentProtoMarket(row) {
       side_map: spec.side_map ?? null,
       outcome_end_ms: row.outcome_end_ms ?? null,
       data_source_canonical: spec.data_source_canonical ?? null,
-      judge: { kind: 'espn-judgeline', predicate: spec.resolution_predicate ?? null, tie_rule: JUDGE_TIE_RULE_TEXT, value_time: row.outcome_end_ms ?? null },
+      // §2.6-7: judge.statement / judge.canonical_event 置于(下方)question 之前——两者只由服务端 §2.6 建题
+      // 流程写入(SERVER_ONLY_SPEC_KEYS), 老市场 / 未走 §2.6 绑定流程的没有这两个字段时原样 null。
+      judge: {
+        kind: 'espn-judgeline', predicate: spec.resolution_predicate ?? null, tie_rule: JUDGE_TIE_RULE_TEXT, value_time: row.outcome_end_ms ?? null,
+        statement: spec.resolution_statement ?? null, canonical_event: spec.canonical_event ?? null,
+      },
       human_metadata_only: {
         secondary_sources: spec.secondary_sources ?? null, ambiguity_handler: spec.ambiguity_handler ?? null,
         dispute_keywords: spec.dispute_keywords ?? null, edge_case_examples: spec.edge_case_examples ?? null,

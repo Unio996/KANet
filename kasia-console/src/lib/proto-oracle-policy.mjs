@@ -43,6 +43,19 @@ export function judgedMarketAllowedHere({ network, tokenDefId, env = process.env
     : { allowed: false, reason: 'mainnet_token_not_valueless_whitelisted(N5b: refund 执行未接线, 有价值市场不得有判定题)' };
 }
 
+/**
+ * 【唯一谓词】非判定题市场能否在此网络建(D-032 §2.7, Codex 7aab3e2c MUST)——主网没有人工裁决出口
+ * (`/resolve` 占位不实现, 见 `api/proto.js:313`), 非判定题在主网建了也永远结不了(只能冻结→退款, 而 refund
+ * 执行按 N5b 同样未接线), 因此主网新建市场必须是判定题。simnet / testnet-* / devnet 不受限。
+ * network 缺失 / 非字符串 ⇒ fail-closed(按不允许)——与 judgedMarketAllowedHere 同一原则、同一大小写不敏感识别。
+ * @returns {{allowed: boolean, reason: string}}
+ */
+export function nonJudgedMarketAllowedHere({ network } = {}) {
+  if (typeof network !== 'string' || !network.trim()) return { allowed: false, reason: 'network_unknown_fail_closed' };
+  if (network.trim().toLowerCase() !== 'mainnet') return { allowed: true, reason: 'non_mainnet' };
+  return { allowed: false, reason: 'mainnet_requires_judged_market(D-032 §2.7: 主网没有 /resolve 人工裁决出口, 非判定题只许 simnet)' };
+}
+
 /** 启动 LOUD: 打印生效值(adapter 启动 + proto 路由注册各调一次)。 */
 export function logOraclePolicy(log, policy, extra = '') {
   const line = `[proto-oracle] judged-market policy: adapter=${policy.adapterEnabled ? 'ENABLED' : 'disabled(default)'} network=${policy.network} valueless_token_ids=[${policy.valuelessTokenIds.join(',')}]${extra ? ' ' + extra : ''}` + (policy.network === 'mainnet' ? ' — 主网: 仅白名单零价值币可建判定题(N5b)' : '');

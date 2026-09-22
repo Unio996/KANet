@@ -72,22 +72,113 @@ export function canonicalFieldHash(fields) {
 // 单源 parse (J2-tn wave1): ESPN summary JSON → { competitors, home, away, league } 或 null
 // (未 final / 结构异常)。NL 路(extractEspnEvidence) + 结构化路(extractEspnFields) 共用此 parse,
 // 防两路解析逻辑分叉 (fixture-mirror 铁律)。不做胜负/字段语义, 只定位 competitors/home/away。
-function parseEspnSummary(rawText) {
-  let data;
-  try { data = JSON.parse(rawText); } catch { return null; }
-  // ESPN summary structure: { header: { competitions: [{ competitors: [{...}], status: {...} }] } }
+// D-032 §2.6-1: 赛前变体(parseEspnParticipants)需要与本函数共用同一段 header/competitions/competitors
+// 定位代码(设计原话"共用同一段 competitors / home / away / league 定位代码, 只去掉 final 要求")——
+// 否则两条路各写一份 ESPN JSON 导航逻辑, 迟早在某个边界结构上分叉(同本文件顶注 fixture-mirror 铁律)。
+// 抽成 _locateEspnCore: 只做结构定位, 不判 final(final 判断留给 parseEspnSummary 自己)。
+function _locateEspnCore(data) {
+  // ESPN summary structure: { header: { id, league:{abbreviation}, competitions: [{ id, date, competitors: [{...}], status: {...} }] } }
   const comp = data?.header?.competitions?.[0];
   if (!comp) return null;
-  // Bettor 条件 (1) — 比赛未 final → null. ESPN: status.type.completed === true && state==='post'.
-  const status = comp.status;
-  if (status?.type?.completed !== true || status?.type?.state !== 'post') return null; // pre/in/postponed
   const competitors = comp.competitors || [];
   if (competitors.length !== 2) return null;
   const home = competitors.find(c => c.homeAway === 'home');
   const away = competitors.find(c => c.homeAway === 'away');
   if (!home || !away) return null;
   const league = data?.header?.league?.abbreviation || data?.leagues?.[0]?.abbreviation || '';
-  return { competitors, home, away, league };
+  return { header: data?.header, comp, competitors, home, away, league };
+}
+
+function parseEspnSummary(rawText) {
+  let data;
+  try { data = JSON.parse(rawText); } catch { return null; }
+  const core = _locateEspnCore(data);
+  if (!core) return null;
+  // Bettor 条件 (1) — 比赛未 final → null. ESPN: status.type.completed === true && state==='post'.
+  const status = core.comp.status;
+  if (status?.type?.completed !== true || status?.type?.state !== 'post') return null; // pre/in/postponed
+  return { competitors: core.competitors, home: core.home, away: core.away, league: core.league };
+}
+
+/**
+ * 赛前变体(D-032 §2.6-1, v0.2.4 Codex ab99d91e 定稿): 与 parseEspnSummary 共用 _locateEspnCore, 不要求 final。
+ * 额外做两件 parseEspnSummary 不做的事(判定题建题专用, 判定侧继续用 extractEspnFields, 不受影响):
+ *   ① 载荷身份核对(v0.2.1 Codex 159a4763 MUST): header.id 必须 === header.competitions[0].id, 再与调用方传入的
+ *      urlEventParam(取自 data_source_canonical 的 ?event= 参数)逐字相等 —— 三者不一致或缺失 ⇒ event_identity_unverified。
+ *   ② 参赛方已定(v0.2.2 NWT MUST, v0.2.3/v0.2.4 Codex 定主次): 主判据 = 结构化身份——两侧 team.id 都必须能在
+ *      调用方传入的 registryTeamIds(该联赛球队注册表, parseEspnTeamsRegistry 产出)里精确解析到。不靠"非空 id/
+ *      abbr"字符串清单兜底(那是被 v0.2.4 否决的旧谓词, 占位席位也可能有稳定合成 id)。
+ * @param {string} rawText  raw ESPN summary HTTP response
+ * @param {{urlEventParam?: string|null, registryTeamIds?: Set<string>}} [opts]
+ *   registryTeamIds 缺省/空集 ⇒ 参赛方已定判据必然失败(fail-closed: 没查过注册表, 不能当"已定"放行)。
+ * @returns {
+ *   {ok:true, canonical_event:{event_id:string, league:string|null, home:{abbr:string,name:string,team_id:string}, away:{abbr:string,name:string,team_id:string}, start_ms:number}} |
+ *   {ok:false, reason:'structure_invalid'|'event_identity_unverified'|'event_participants_not_determined', detail:string}
+ * }
+ */
+export function parseEspnParticipants(rawText, opts = {}) {
+  let data;
+  try { data = JSON.parse(rawText); } catch { return { ok: false, reason: 'structure_invalid', detail: 'raw response 不是合法 JSON' }; }
+  const core = _locateEspnCore(data);
+  if (!core) return { ok: false, reason: 'structure_invalid', detail: 'header.competitions[0] / 双方 competitor(homeAway=home/away)缺失' };
+  const { header, comp, home, away, league } = core;
+  const eventId = header?.id != null ? String(header.id) : null;
+  const compId = comp?.id != null ? String(comp.id) : null;
+  if (!eventId || !compId || eventId !== compId) {
+    return { ok: false, reason: 'event_identity_unverified', detail: `header.id(${JSON.stringify(eventId)}) 与 competitions[0].id(${JSON.stringify(compId)}) 缺失或不一致` };
+  }
+  if (opts.urlEventParam !== undefined && opts.urlEventParam !== null && String(opts.urlEventParam) !== eventId) {
+    return { ok: false, reason: 'event_identity_unverified', detail: `URL event 参数(${JSON.stringify(opts.urlEventParam)}) 与载荷 header.id(${eventId}) 不一致` };
+  }
+  const startMs = Date.parse(comp?.date || '');
+  if (!Number.isFinite(startMs)) return { ok: false, reason: 'structure_invalid', detail: 'competitions[0].date 缺失或不是合法日期' };
+
+  const resolved = {};
+  for (const [key, c] of [['home', home], ['away', away]]) {
+    const teamId = c?.team?.id != null ? String(c.team.id) : null;
+    const abbr = normalizeAbbr(c?.team?.abbreviation);
+    const name = c?.team?.displayName || c?.team?.shortDisplayName || null;
+    if (!teamId || !abbr || abbr === TIE_TOKEN || !name) {
+      return { ok: false, reason: 'event_participants_not_determined', detail: `${key} 侧结构化字段不全(team.id/abbreviation/displayName 缺至少一项)` };
+    }
+    resolved[key] = { abbr, name, team_id: teamId };
+  }
+  if (resolved.home.abbr === resolved.away.abbr) return { ok: false, reason: 'structure_invalid', detail: 'home/away abbr 相同' };
+
+  // D-032 §2.6-1(v0.2.4)主判据: 两侧 team.id 都必须能在球队注册表里解析到——占位符即使塞了非空、互异的
+  // id/abbr(v0.2.3 旧谓词会误判为已定), 只要它不是该联赛的真实球队之一, 这里必然失败。
+  const registry = opts.registryTeamIds;
+  if (!(registry instanceof Set) || registry.size === 0) {
+    return { ok: false, reason: 'event_participants_not_determined', detail: '缺球队注册表(registryTeamIds 空/未传), 无法核实参赛方已定, fail-closed 拒' };
+  }
+  for (const key of ['home', 'away']) {
+    if (!registry.has(resolved[key].team_id)) {
+      return { ok: false, reason: 'event_participants_not_determined', detail: `${key} 侧 team.id=${resolved[key].team_id} 未能在球队注册表里解析到(占位/未定席位)` };
+    }
+  }
+
+  return { ok: true, canonical_event: { event_id: eventId, league: league || null, home: resolved.home, away: resolved.away, start_ms: startMs } };
+}
+
+/**
+ * 解析 ESPN 球队注册表 JSON(site.api.espn.com/apis/site/v2/sports/<sport>/<league>/teams)→ 全部
+ * team.id 的集合。与 parseEspnParticipants 的"参赛方已定"结构化主判据同源(§2.6-1 v0.2.4), 不区分联赛
+ * 分层(调用方按 data_source_canonical 同域同联赛取的注册表, 天然只含该联赛的队)。
+ * @param {string} rawText
+ * @returns {Set<string>|null}  null = 结构异常/空, 调用方按"没查到注册表"处理(fail-closed)
+ */
+export function parseEspnTeamsRegistry(rawText) {
+  let data;
+  try { data = JSON.parse(rawText); } catch { return null; }
+  const ids = new Set();
+  for (const sport of Array.isArray(data?.sports) ? data.sports : []) {
+    for (const lg of Array.isArray(sport?.leagues) ? sport.leagues : []) {
+      for (const t of Array.isArray(lg?.teams) ? lg.teams : []) {
+        if (t?.team?.id != null) ids.add(String(t.team.id));
+      }
+    }
+  }
+  return ids.size ? ids : null;
 }
 
 export function extractEspnEvidence(rawText) {
