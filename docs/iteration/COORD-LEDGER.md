@@ -13878,3 +13878,12 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **Owner 本机「先对齐主要目标、主要开发原则」**：Bettor 已复述三层主线（D-029 已达成 → 退款路降为故障兜底 → D-032 出题端闭环为今日重心）与七条原则；D-032 默认走单口径（D-031 依据：老系统 voter 本就一市场一源，voter.js:755/765 按 outcome_market_source 二选一；批 B 双裁判是新造轮子）；待 Owner 纠偏，纠偏前不出设计稿。
 - **主网零触碰**。
  — Bettor 2026-09-22T10:07:04Z
+
+### (1630) ⚖️ **Owner 拍板：对齐无异议，D-032 按单口径（一题一个裁判）——Bettor 设计稿 v0.1 出稿（拆掉批 B 双裁判：创建拒 condition id / 极性，adapter 删 uma 路，promote 门赞成集改单裁判 + 新增 unexpected_verdict_kind 守卫，inconsistent_verdicts 不可达），派 NWT 设计审｜J1 ACK PoC #1 确认作者｜J2 / NWT 管道归属核定** (2026-09-22 · Owner 定向 · Bettor)
+- **Owner 原话**（本机终端）：「对齐没问题，D-032 按单口径出设计稿」。DECISIONS D-032 已加状态注记；批 B 设计 §4 / §5 / §7 加取代注记。
+- **设计稿**：`docs/2026-09-22-bettor-d032-single-judge-question-closure-design-v0.1.md`。D-031 第一问按 1624 扩的范围做（services 全目录 + index.js:955 注册 + 主网日志 + 能力清单）：单口径 = 回到老系统 voter 一市场一源模型（voter.js:748–784），复用 deriveKanetNativeVote / judgeLine / 创建校验 / 批 D 门 / refund_flip 出口 / J2 simnet upstream-mock，只删不加；主网 proto_markets 3 行均非判定题、verdicts 0 行、PROTO_ORACLE_ADAPTER_ENABLED 主网未设 ⇒ 无迁移。关键地面事实：ESPN 谓词路命中 judgeLine 或 ABSTAIN、永不回落 LLM（voter.js:970–985）；adapter L61 现要求 polymarket_outcome_side，不改则单口径市场第一 tick 即永久冻结（设计 §2.2 点名）。
+- **派 NWT**：设计审（红队出题端）：第一问"是不是已有"对照 §0 表；重点攻 §3 冻结清单是否仍有"非故障冻结"路、§2.3 守卫可达性、§2.1 是否漏掉任何第二裁判输入面。只报 MUST。
+- **J1**：10:17Z ACK（j1-inbox 文件，untracked）确认作者 = J1，接受裁定与 PoC #1 规格，先核 fixtures 与 key 再写 scratch 脚本。信箱 README 已补速查（1ad8d235）。
+- **管道归属**（上任转录 from 行计数）：cc-msg-b0df907d… = NWT，cc-msg-6d858c55… = J2。点名仍无回信；J2 地面在动，NWT pid 存活，不重起。
+- **主网零触碰**。
+ — Bettor 2026-09-22T10:30:59Z

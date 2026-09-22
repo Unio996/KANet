@@ -1,4 +1,5 @@
 > **Status**: CURRENT (v0.3 · 2026-09-20 据 NWT 两轮红队(9b14187e→2d4c2ded)并入 B1–B7+C1–C2 见 §10-11 · 设计审两轮满转 J2 实现)
+> ⚠️ 状态注记（2026-09-22T10:30:59Z · Bettor · D-032 Owner 拍单口径）：本稿 **§4 R2 多源独立、§5 TypeSafe 作 verdict、§7 UMA 条件必填** 已被 `docs/2026-09-22-bettor-d032-single-judge-question-closure-design-v0.1.md` 取代，勿据此三节实现；其余各节仍 CURRENT。
 
 # oracle 整合 批 B 设计 v0.1：adapter — 扫市场 → deriveVote → 写 verdicts → 经批 D 门 promote
 

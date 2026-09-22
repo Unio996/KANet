@@ -1,0 +1,100 @@
+# D-032 出题端闭环设计 v0.1 —— 一题一个裁判（单口径）· 拆掉批 B 的"双裁判"
+
+> **Status**: CURRENT · Bettor 2026-09-22 · Owner 本机终端「对齐没问题，D-032 按单口径出设计稿」· 依据 DECISIONS D-032 / D-031 / D-030 / D-021 · 账本 1623 / 1625 / 1629 / 1630
+> 待 NWT 设计审（红队：出题端）→ 派 J2 实现 → NWT 审 diff → 合入 → 随下次主网 console 重启生效（adapter 开关仍默认关，有价值判定题仍 N5b 限制 + Owner 单独批）。
+
+## 0. 已有什么（D-031 第一问 · 扫 kasia-console/src/services 全目录 + index.js 启动注册 + 主网日志 + 能力清单 v0.1）
+
+| 现有物 | 位置 | 本设计的处置 |
+|---|---|---|
+| 老系统 voter：**一市场一源**，`deriveVote` 按 `outcome_market_source` 二选一（polymarket 路 / kanet_native 路） | `services/bettor-prediction-voter.js:748–784` | **复用其模型**：单口径就是回到这一模型；引擎内核 `deriveKanetNativeVote` 不改 |
+| ESPN 确定性判定：`resolution_predicate` → `judgeLine`，命中即判、抽不到即 ABSTAIN、**永不回落 LLM**；平局 winner→NO、整数线 push→NO 已是确定性规则 | `voter.js:940–990`，`lib/judgeline.mjs:69–100,121–145` | 复用，作为唯一裁判；平局/push 规则写进公开视图（§4） |
+| 判定题创建校验（白名单源、predicate 结构 + 干跑、side_map、5 必填、deadline 预算） | `lib/proto-oracle-spec.mjs:73–120`，入口 `api/proto.js:148` | 迭代：去掉第二裁判的三项输入（§2.1） |
+| adapter tick（扫 sealed 判定题 → derive 两路 → 写 verdict → 批 D 门） | `lib/proto-oracle-adapter-core.mjs`，服务 `services/proto-oracle-adapter.mjs`（index.js:955 注册，`PROTO_ORACLE_ADAPTER_ENABLED` 默认关；主网 env 未设该键） | 迭代：删 uma 路（§2.2） |
+| 批 D promote 门（冻结集 / 赞成集 / 宽限 / late_seal / R5） | `lib/proto-settlement-budget.mjs:170–221` | 迭代：赞成集改单裁判（§2.3），冻结原因表见 §3 |
+| verdict 分类 / side 映射 | `lib/proto-oracle-verdict.mjs:34–92` | 迭代：删 uma 分支与极性翻转（§2.2） |
+| "有判定题"唯一定义（四列任一非 NULL） | `db/proto-judged.mjs` | **不改**（`resolution_rule_spec` 非 NULL 即判定题） |
+| 老系统 prevet 预审框架（`/api/pool/prevet`，120 fixture） | `scripts/prevet-fp-fn-*.mjs` | 参照：TypeSafe 建题预审 PoC（J1，账本 1629）跑在它的 fixture 上；本设计只留挂点（§6） |
+| 退款出口 refund_flip（R-a 已合） | `lib/proto-settlement-store.mjs` / driver | 复用：冻结市场的出口已存在 ⇒ 批 B "缺 UMA 条件 = 无出口"这一前提**不再成立**（§1） |
+| simnet 上游 mock（ESPN / Polymarket 拦截） | `scratch/_j2_e2e/upstream-mock.mjs`（J2 本轮在用） | 复用做 e2e（§7），不新造 |
+| 主网现状 | `proto_markets` 3 行均非判定题；`proto_market_verdicts` 0 行 | 无存量双裁判市场 ⇒ **不需要迁移**，uma 路可直接删 |
+
+**为什么不能用现状**：批 B 把 ESPN 谓词与 Polymarket 条件 id 同时挂到一道题上（设计 §4 R2 "≥2 独立来源一致"），两路互不见对方输入（NWT 红队缺口①根因），配错 / 极性标反即 `inconsistent_verdicts` 冻结——这是"两个裁判在回答两道题"，不是数据源冗余。D-032 定：一题一个确定性口径；不一致不是冻结的正当理由。
+
+## 1. 目标与不变量
+
+- **I-1 一题一裁判**：判定题的 `resolution_rule_spec` 只允许一个判定口径 = `data_source_canonical`（ESPN 白名单）+ `resolution_predicate`；不再接受、也不再运行第二个自动裁判。
+- **I-2 可复算**：任何人拿 `(data_source_canonical, resolution_predicate, outcome_end_ms)` 与 ESPN 当时的结构化字段能算出同一答案；`proto_market_verdicts.evidence_ref` 继续存 `fields + predicate + verdict` 的 hash（现状已如此）。
+- **I-3 冻结只因基础设施故障**（D-032 §2）：源不可达 / 未 final / spec 损坏 / 源不在注册表 / 过截止未判 / 封盘太晚 / R5 预检失败。**`inconsistent_verdicts` 在单口径下不可达**；保留其守卫作为"出现了不该存在的第二裁判"的 fail-safe（§3）。
+- **I-4 出口不变**：冻结 → refund_flip（R-a）→ R-b/R-c；本设计不动退款路。
+- **I-5 零主网触碰**：adapter 仍默认关；N5b 有价值判定题限制不变；打开 = Owner 单独批。
+- **I-6 无迁移**：主网无判定题行，不写 migration；`proto_judged.mjs` 定义不变。
+
+## 2. 变更清单（只列改动，行号按主线 1ad8d235）
+
+### 2.1 创建入口 `lib/proto-oracle-spec.mjs`（+ `api/proto.js:114/148` 只改解构/传参）
+- `JUDGED_BODY_KEYS` = `['resolutionRuleSpec','outcomeEnd']`；请求体出现 `outcomeConditionId`（及任何 `outcome*` / `polymarket*` 形状键）⇒ 400 `dual_judge_not_allowed`（复用 `findUnrecognizedJudgedShapedKey` 的模式，不静默丢）。
+- `ALLOWED_SPEC_KEYS` 去掉 `polymarket_outcome_side`；spec 出现该键 ⇒ 400 `spec_unknown_field`（既有错误码）。
+- `validateJudgedMarketInput`：删 `outcomeConditionId` / `umaWindowMs` 参数与 L77 / L106 / L108 / L113–114 四段；`minDeadlineMs = outcome_end + graceMs + closePipelineMarginMs + 2·adapterTickMs`（去掉 UMA 定稿窗）。
+- `normalized.outcome_market_source = 'kanet_native'`（migrate.js:3776 注释里既有的枚举值），`outcome_condition_id = null`。
+- 其余（白名单源 + `kind==='espn'`、predicate 结构 + 干跑、side_map 双射、5 必填、deadline 预算）**一字不改**。
+
+### 2.2 判定侧 `lib/proto-oracle-adapter-core.mjs` / `lib/proto-oracle-verdict.mjs`
+- adapter：删 `deriveUma` 注入、`doUma` 分支、`assertUmaWindowSafe` 拒 tick、`CONDITION_ID_RE` 引用；L61 spec 校验改为 `!spec || !sideMap ⇒ permanentFreeze('spec_invalid')`（**去掉对 `polymarket_outcome_side` 的要求，否则单口径市场会在第一 tick 被永久冻结**）。
+- verdict：`classifyDerivation` / `toSide` 删 `uma` 分支与极性翻转；`branch` 只剩 `'extractor'`。`planVerdictWrites` 不改。
+- 服务 `services/proto-oracle-adapter.mjs`：删 `derivePolymarketVote` 与 `UMA_FINALIZATION_WINDOW_MS` 的 import / 注入；其余（开关、单飞、LOUD 启动行）不改。
+- **不改** `deriveKanetNativeVote` 内核、`freezeMarket` / `promoteWinningSide`（批 D）、`proto_market_verdicts` 触发器。
+
+### 2.3 promote 门 `lib/proto-settlement-budget.mjs:170–221`
+- `AUTO_KINDS = ['extractor']`；赞成集 = `source_kind==='extractor' ∧ pmt_at ≥ outcome_end`，`consistencyMetAt` = 首条合格 extractor 票的 `pmt_at`；删"≥2 种 kind"循环与 `awaiting_second_source`，改 `wait: awaiting_canonical_verdict`。
+- 冻结集不变（全部 verdict）；**新增守卫**：存在 `source_kind ∉ {'extractor'}` 的 verdict ⇒ `freeze: unexpected_verdict_kind`（fail-safe：单口径下不该有别的裁判写票；D-030 AI 不进出口闸，llm 票既不能批也不该出现）。原 `abstain_or_dispute` / `inconsistent_verdicts` 两行保留在其后（可达性由测试证明为"仅 unexpected 路"）。
+- 宽限窗 / late_seal / R5 预检 / cutoff 逻辑**一字不改**（宽限缩短记 SHOULD 票，另议）。
+
+### 2.4 公开视图 `presentProtoMarket`
+- `judged` 去掉 `polymarket_outcome_side` / `outcome_market_source` / `outcome_condition_id`；新增 `judge: { kind:'espn-judgeline', predicate, tie_rule:'winner: 平局=NO; margin/total/score: 恰等于线(push)=NO', value_time: outcome_end_ms }`（文本由代码常量给出，不由运营者填）；新增 `human_metadata_only: ['secondary_sources','ambiguity_handler','dispute_keywords','edge_case_examples']`（§5）。
+
+### 2.5 lint（复用 `scripts/lint-kanet.mjs` 规则模式）
+- `R-SINGLE-JUDGE`：`src/lib/proto-*.mjs` / `src/services/proto-*.mjs` / `src/api/proto.js` 内出现 `derivePolymarketVote|outcomeConditionId|polymarket_outcome_side|UMA_FINALIZATION_WINDOW_MS` ⇒ 红。（老系统文件不在范围。）
+
+## 3. 冻结触发清单（改后 · 对照 D-032 §2）
+
+| reason | 触发 | 类别 | 处置 |
+|---|---|---|---|
+| `spec_invalid` / `source_not_registered` | spec 坏 / 源不在注册表（永久） | 规格损坏 | 保留 |
+| `abstain_or_dispute` | 唯一裁判 ABSTAIN（源未 final / 抽取失败 / 源异常） | 数据源不可达或未出结果 | 保留（这是"故障"，不是"分歧"） |
+| `pmt_invalid_past_cutoff` / `past_cutoff` | 过截止未判 | 过截止 | 保留 |
+| `late_seal` | 封盘太晚装不下宽限 | 封盘太晚 | 保留 |
+| `r5_precheck_failed` | 胜方侧非恰 1 笔 / 奖池 0 | 系统状态 | 保留 |
+| `unexpected_verdict_kind` | 出现非 extractor 票 | 系统故障（不该存在的裁判） | **新增** |
+| `inconsistent_verdicts` | — | 单口径下**不可达** | 守卫保留，测试证明不可达 |
+
+## 4. 出题端闭环四要素 → 现有落点（D-032 §1）
+
+| 要素 | 落点 | 状态 |
+|---|---|---|
+| 结构化来源 | `findExtractor(url).kind==='espn'`（白名单 + https + 拒私网） | 现有 |
+| 取值时刻 | `outcome_end_ms`（结果可知时刻）+ ESPN `final` 标志（未 final ⇒ ABSTAIN） | 现有 |
+| 阈值 / 比较方向 | `resolution_predicate {metric∈winner/margin/total/score, op, operand, scale, subject}` + `validateResolutionPredicate` + 干跑 | 现有 |
+| 平局规则 | judgeLine：winner 平局=NO；数值 push=NO（代码常量，运营者不可改）；公开视图回显（§2.4） | 现有规则 + 新增回显 |
+
+## 5. 四个"人工存档"字段（NWT 缺口② / Codex）
+- `secondary_sources` / `ambiguity_handler` / `dispute_keywords` / `edge_case_examples`：判定代码从不读取（Bettor 独立 grep 复核属实）。本版**不接判定、不删必填**（零行为变化），只在公开视图与 spec.mjs 顶注如实标"仅人工争议 / 审计参考，自动判定不读取"。
+- SHOULD 票：从判定题必填清单移除（老 bettor.js 遗产），另议。
+
+## 6. TypeSafe 建题预审挂点（D-030 · 仅参谋）
+- 挂点 = `api/proto.js` 在 `validateJudgedMarketInput` **通过之后**、`ensureMarketPending` 之前；输入只用题面（title / predicate / 源 URL / 截止）；输出 `advisory: { resolvable_noul, threshold }` 回显给运营者，**不改变创建结果**（v1 不拒建）。
+- 是否启用、阈值 = 等 J1 PoC #1 的 FP/FN 数字（账本 1629）；本设计只定挂点与数据边界（D-021：不发真实市场 / 余额 / 内网）。
+
+## 7. 测试与验收（J2 交付；NWT 审 MUST-only）
+- 单测（改既有文件，不新起套件）：创建拒 `outcomeConditionId` / `polymarket_outcome_side`；正常单口径创建 `outcome_market_source='kanet_native'`；adapter 单口径市场不因缺极性冻结；门：一条合格 extractor 票过宽限即 promote；ABSTAIN ⇒ `abstain_or_dispute`；注入 `llm` / `uma` 票 ⇒ `unexpected_verdict_kind`；`inconsistent_verdicts` 不可达（删该行所有测试仍绿 = 用突变证明不可达，写进 provenance）。
+- 变异：删 §2.3 新增守卫必红；把 `AUTO_KINDS` 加回 `'uma'` 必红；lint 规则对四个标识各一条红。
+- **NWT 红队复跑（关 3）**：用改后的建题接口重跑 1625 的三条题面——①无关 condition id ⇒ 400；③极性 ⇒ 400；②字段标注可见；再尝试构造任何"非故障却冻结"的题，能出即 MUST。
+- simnet e2e（复用 J2 现有隔离环境与 upstream-mock）：建单口径判定题 → 下注 → seal → mock ESPN final → adapter 判 → promote → close_commit → claim（正臂）；mock ESPN 不 final 直到 cutoff → 冻结 → refund_flip（故障臂）。simnet-only。
+- 验收口径：**机制证通（simnet）**，不 claim 主网；主网启用仍走 N5b + Owner 批。
+
+## 8. 后续票（不在本版）
+- Polymarket-only 单口径（UMA 定案作为唯一裁判）：需要"取回问题文本与结果标签、运营者确认极性并固化进 spec"的建题流程（Codex MUST），另出 v0.x。
+- 宽限窗按单口径重估；四字段移出必填；`docs/2026-09-20-bettor-oracle-batchB-*` §4 / §5 / §7 已加取代注记。
+
+## 9. 取代关系
+- 取代批 B 设计 §4（R2 多源独立）、§5（TypeSafe 作 verdict 可冻结 —— 与 D-030 / D-032 冲突）、§7 第二段之"UMA 条件必填"；批 A / D 其余不动。
