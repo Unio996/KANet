@@ -22,6 +22,7 @@ const {
   GENESIS_OUTPUT_SOMPI, CONTINUATION_OUTPUT_SOMPI, GLOBAL_ABS_FEE_CAP_SOMPI, SIGNED_INPUT_CEILING_SOMPI, PROTO_V0_COMPUTE_BUDGET,
   assertFixedOutputValue, assertKaspadInputVersionRule,
   computeRequiredFeeSompiOrThrow, selectFeeUtxo, selectFeeUtxoByConstruction, selectChangeShape, dynamicNetLossCeiling,
+  filterFeeCandidates,
 } = await import('./proto-tx-assembly.mjs');
 
 let pass = 0, fail = 0;
@@ -354,6 +355,62 @@ if (!process.env.CONSOLE_ENCRYPTION_KEY) process.env.CONSOLE_ENCRYPTION_KEY = '1
     if (fv.ok) throw new Error('relay 真代码本该拒绝差 1 sompi 的 genesis 输出, 却放行了');
   });
 }
+
+// ============ F3(设计 v0.2.1 §3.1): filterFeeCandidates 挪到本文件 + skippedUnknown(unknown facts fail-closed) ============
+// 既有 45 项行为覆盖(毒化/越界/在途/status三态/events)仍在 proto-settlement-c1.test.mjs(re-export 不改测试位置,
+// 见该文件头注)。这里只加 F3 新引入的部分: 条目形状不合法(缺字段/类型错)⇒ skippedUnknown, 与"确认毒化"分开计数。
+const RELAY_SPK = 'aa'.repeat(34);
+const TXID1 = '11'.repeat(32), TXID2 = '22'.repeat(32);
+const cleanUtxo = (txid = TXID1, amount = 50_000_000n) => ({
+  outpoint: { transactionId: txid, index: 0 }, amount, scriptPublicKey: { version: 0, scriptHex: RELAY_SPK }, covenantId: null,
+});
+t('F3-unknown-1 缺 covenantId 键(不是 null, 是键本身不存在)⇒ skippedUnknown, 不当毒化不当普通', () => {
+  const u = cleanUtxo(); delete u.covenantId;
+  const r = filterFeeCandidates({ utxos: [u], truncated: false, relaySpkHex: RELAY_SPK, feeMinAmount: 0n });
+  if (r.skippedUnknown !== 1 || r.skippedPoisoned !== 0 || r.status !== 'saturated') throw new Error('缺 covenantId 键应记 skippedUnknown=1 且 status=saturated, 实际 ' + JSON.stringify(r));
+});
+t('F3-unknown-2 covenantId 类型不对(数字而非 null/hex 字符串)⇒ skippedUnknown', () => {
+  const u = { ...cleanUtxo(), covenantId: 12345 };
+  const r = filterFeeCandidates({ utxos: [u], truncated: false, relaySpkHex: RELAY_SPK, feeMinAmount: 0n });
+  if (r.skippedUnknown !== 1) throw new Error('covenantId 类型错应记 skippedUnknown, 实际 ' + JSON.stringify(r));
+});
+t('F3-unknown-3 缺 scriptPublicKey.version ⇒ skippedUnknown', () => {
+  const u = cleanUtxo(); delete u.scriptPublicKey.version;
+  const r = filterFeeCandidates({ utxos: [u], truncated: false, relaySpkHex: RELAY_SPK, feeMinAmount: 0n });
+  if (r.skippedUnknown !== 1) throw new Error('缺 version 应记 skippedUnknown, 实际 ' + JSON.stringify(r));
+});
+t('F3-unknown-4 scriptHex 非法(奇数长度/非hex)⇒ skippedUnknown', () => {
+  const u1 = { ...cleanUtxo(), scriptPublicKey: { version: 0, scriptHex: 'abc' } };   // 奇数长度
+  const u2 = { ...cleanUtxo(TXID2), scriptPublicKey: { version: 0, scriptHex: 'zz'.repeat(34) } }; // 非 hex 字符
+  const r = filterFeeCandidates({ utxos: [u1, u2], truncated: false, relaySpkHex: RELAY_SPK, feeMinAmount: 0n });
+  if (r.skippedUnknown !== 2) throw new Error('两条非法 scriptHex 都应记 skippedUnknown, 实际 ' + JSON.stringify(r));
+});
+t('F3-unknown-5 amount 不是 bigint(如字符串/number)⇒ skippedUnknown, 不误入毒化/越界分支', () => {
+  const u = { ...cleanUtxo(), amount: '50000000' };
+  const r = filterFeeCandidates({ utxos: [u], truncated: false, relaySpkHex: RELAY_SPK, feeMinAmount: 0n });
+  if (r.skippedUnknown !== 1 || r.skippedOutOfRange !== 0) throw new Error('amount 非 bigint 应记 skippedUnknown 而非 skippedOutOfRange, 实际 ' + JSON.stringify(r));
+});
+t('F3-unknown-6 outpoint 缺失/txid 非法 ⇒ skippedUnknown', () => {
+  const u1 = cleanUtxo(); delete u1.outpoint;
+  const u2 = { ...cleanUtxo(TXID2), outpoint: { transactionId: 'not-hex', index: 0 } };
+  const r = filterFeeCandidates({ utxos: [u1, u2], truncated: false, relaySpkHex: RELAY_SPK, feeMinAmount: 0n });
+  if (r.skippedUnknown !== 2) throw new Error('两条都应记 skippedUnknown, 实际 ' + JSON.stringify(r));
+});
+t('F3-unknown-7 干净候选与非法条目混合 ⇒ 干净的照常入选(status=ok), 非法的单独计入 skippedUnknown, 事件 fee_candidate_unknown_skipped', () => {
+  const bad = cleanUtxo(TXID2); delete bad.covenantId;
+  const r = filterFeeCandidates({ utxos: [cleanUtxo(TXID1), bad], truncated: false, relaySpkHex: RELAY_SPK, feeMinAmount: 0n });
+  if (r.status !== 'ok' || r.candidates.length !== 1 || r.skippedUnknown !== 1) throw new Error('混合场景判定不对, 实际 ' + JSON.stringify({ status: r.status, n: r.candidates.length, skippedUnknown: r.skippedUnknown }));
+  const ev = r.events.find((e) => e.eventType === 'fee_candidate_unknown_skipped');
+  if (!ev || ev.payload.count !== 1) throw new Error('缺 fee_candidate_unknown_skipped 事件或 count 不对: ' + JSON.stringify(r.events));
+});
+t('F3-mutation 对照: 去掉 isFiniteCandidateShape 检查(把它当"永远合法")时, unknown 条目会被后续规则误判(缺 covenantId 的 u.covenantId 是 undefined, undefined !== null ⇒ 会被错误分类成 skippedPoisoned 而非 skippedUnknown)——用于人工核对本函数的检查顺序有意义, 非自动突变工具, 留作说明性断言', () => {
+  // 说明性: 手写一个"跳过 unknown 检查"的等价旧逻辑, 证明不加这层会把 unknown 误记成 poisoned(遥测失真, 混淆"被攻击"与"relay 版本不带 facts 字段")
+  const u = cleanUtxo(); delete u.covenantId;
+  const legacyWouldClassifyAsPoisoned = u.covenantId !== null; // undefined !== null ⇒ true, 旧逻辑会记 skippedPoisoned
+  if (!legacyWouldClassifyAsPoisoned) throw new Error('前提断言本身不成立, 测试设计有误');
+  const r = filterFeeCandidates({ utxos: [u], truncated: false, relaySpkHex: RELAY_SPK, feeMinAmount: 0n });
+  if (r.skippedPoisoned !== 0 || r.skippedUnknown !== 1) throw new Error('F3 应把 unknown 与 poisoned 分开, 实际 skippedPoisoned=' + r.skippedPoisoned + ' skippedUnknown=' + r.skippedUnknown);
+});
 
 console.log(`\n${pass} passed, ${fail} failed`);
 // 🔴 用 process.exitCode(不强制终止, 让事件循环自然收尾)而不是 process.exit(): 实测

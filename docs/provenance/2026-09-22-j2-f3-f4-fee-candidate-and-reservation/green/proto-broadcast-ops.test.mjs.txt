@@ -1,0 +1,38 @@
+[db] path=C:\Users\ADMIN\AppData\Local\Temp\_j2_broadcast_ops_e2e_26896.db source=DB_PATH
+[diag:step] proc.silverc.compile.bshard-artifacts ms=80 cmd=silverc ok=1 at=2026-09-22T07:29:31.976Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=52 cmd=silverc ok=1 at=2026-09-22T07:29:32.035Z
+[PASS] ①buildMarketGenesisAndBroadcast 真实构造成功(get_address_utxos→真kaspa-wasm构造→原子写shardleaf_cov_id→covenant_broadcast)
+[PASS] ②shardleaf_cov_id 在 covenant_broadcast 命令发出【之前】已经原子写入 proto_markets(账本1438②)
+[PASS] ③shardLeafTargetAddress 确定性重算(不调用 computeMarketGenesisArtifacts, 不依赖随机委员会密钥), 两次调用结果逐字节一致
+[PASS] ④get_address_utxos 失败(relay 没回 ok) ⇒ buildMarketGenesisAndBroadcast 返回 {error}, 不 throw, 不发 covenant_broadcast
+[PASS] ⑤没有任何单个 UTXO 够用(fee 面值太小) ⇒ 返回 {error}, 不 throw
+[PASS] ⑥covenant_broadcast 命令本身失败(relay 拒绝) ⇒ 返回 {error}, 不 throw
+[diag:step] proc.silverc.compile.bshard-artifacts ms=30 cmd=silverc ok=1 at=2026-09-22T07:29:32.109Z
+[PASS] ⑦(第一笔下注/无held) buildRegisterAppendAndBroadcast 真实构造成功(三项fail-closed核对全过)
+[diag:step] proc.silverc.compile.bshard-artifacts ms=53 cmd=silverc ok=1 at=2026-09-22T07:29:32.172Z
+[PASS] ⑧registerAppendTargetAddress 确定性重算(下注后的新state), 两次调用结果逐字节一致
+[PASS] ⑨markBetAppendLanded 把proto_bets推进到confirmed(stake_tx_id/ticket_txid写入), 幂等(WHERE status=pending, D-020: 无中间态)
+[diag:step] proc.silverc.compile.bshard-artifacts ms=29 cmd=silverc ok=1 at=2026-09-22T07:29:32.225Z
+[PASS] ⑩(第二笔下注/有held) buildRegisterAppendAndBroadcast 真实构造成功(held outpoint推算+链上核对全过)
+[PASS] ⑪(账本1429) 同一市场存在in-flight append intent时, 新的append被assertNoInFlightAppend拒绝
+[diag:step] proc.silverc.compile.bshard-artifacts ms=76 cmd=silverc ok=1 at=2026-09-22T07:29:32.320Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=54 cmd=silverc ok=1 at=2026-09-22T07:29:32.380Z
+[PASS] ⑫账本1462 genesis: 真实种子三枚UTXO(0.5/0.5/0.95 KAS)候选 ⇒ 构造成功且选中0.5 KAS(不再被保守下界一刀切拒绝)
+[diag:step] proc.silverc.compile.bshard-artifacts ms=30 cmd=silverc ok=1 at=2026-09-22T07:29:32.431Z
+[PASS] ⑬账本1462 首笔下注(无held)真实种子候选[0.5,0.95] KAS ⇒ 0.5太小构造不出可行找零形状(首笔最小可行落在约0.925~0.93 KAS区间, 2026-09-19精确mass门控订正; 原"≈0.82 KAS"来自旧本地估算), 逐个真实尝试后选中0.95且构造成功
+[diag:step] proc.silverc.compile.bshard-artifacts ms=66 cmd=silverc ok=1 at=2026-09-22T07:29:32.507Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=29 cmd=silverc ok=1 at=2026-09-22T07:29:32.554Z
+[PASS] ⑭账本1462 第二笔下注(有held)真实种子候选[0.5] KAS ⇒ 如实报告(Bettor要求): 你实算最小可行约0.56 KAS, 0.5低于此值, 应当构造失败并报错(不是意外成功)
+[PASS] ⑮账本1462 第二笔下注(有held)真实种子候选[0.95] KAS ⇒ 0.95远高于≈0.56 KAS最小可行值, 应当构造成功(确认0.95作为execution page保底值仍然可靠)
+[PASS] ⑯账本1462 全部候选面值 > SIGNED_INPUT_CEILING_SOMPI(1.0 KAS) ⇒ 全部被预先过滤, 报no_suitable_fee_utxo, 不浪费一次真实构造尝试
+[diag:step] proc.silverc.compile.bshard-artifacts ms=76 cmd=silverc ok=1 at=2026-09-22T07:29:32.667Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=54 cmd=silverc ok=1 at=2026-09-22T07:29:32.727Z
+[PASS] F3b-1(安全回归) 创世 fee 候选混入一个 covenantId != null 的毒化 UTXO(面值比干净候选更小, 按升序会被优先尝试)⇒ filterFeeCandidates 直接跳过, 真实构造从未碰它, 只用干净候选
+[diag:step] proc.silverc.compile.bshard-artifacts ms=76 cmd=silverc ok=1 at=2026-09-22T07:29:32.819Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=54 cmd=silverc ok=1 at=2026-09-22T07:29:32.878Z
+[PASS] F3b-2(unknown fail-closed, 真实行为核对) 创世 fee 候选混入一个缺 covenantId 键的条目 ⇒ 整个 get_address_utxos 回执在 assertFactsResponse 这层就被拒(facts_item_key_missing, 现有 9-0/9-1 既有行为, 逐条目而非整窗放行), 不会有任何候选(含干净的那个)被静默当普通使用
+[PASS] F3b-3(旧路径已删) toFeeUtxoCandidates 不再存在于模块导出面(源码扫描, 防"删了又被人加回来")
+[diag:step] proc.silverc.compile.bshard-artifacts ms=32 cmd=silverc ok=1 at=2026-09-22T07:29:32.928Z
+[PASS] F3b-4(安全回归, 下注侧) register_append 的 fee 候选混入一个 covenantId != null 的毒化 UTXO(面值更小, 按升序会被优先尝试)⇒ 同样在 filterFeeCandidates 被跳过, 真实构造只用干净候选(此前 toFeeUtxoCandidates 对创世/下注两条路径都零过滤, 这里补下注侧的回归)
+
+20 passed, 0 failed

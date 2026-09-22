@@ -116,6 +116,81 @@ export function selectFeeUtxo(candidates, minRequiredSompi) {
 // 会被 validateSignedInputCeiling 拒签——预先滤掉, 不浪费一次真实构造+relay round-trip 才发现拒签。
 export const SIGNED_INPUT_CEILING_SOMPI = 100_000_000n; // 1.0 KAS
 
+const _normHex = (h) => String(h ?? '').replace(/^0x/i, '').toLowerCase();
+const _opKey = (txid, index) => `${String(txid).toLowerCase()}:${index}`;
+const _HEX_EVEN = /^(?:[0-9a-f]{2})+$/;
+const _HEX64 = /^[0-9a-f]{64}$/;
+
+/**
+ * F3(设计 v0.2.1 §3.1, 账本1614/1615/1616、Codex df07b0ec)——**结算/创世/下注共用的唯一 fee 候选
+ * 资格函数**。原定义在 proto-settlement-c1.mjs(9-1, 只结算路径调用), F3 挪到这里(§3.1.1: 纯函数、
+ * 与 SIGNED_INPUT_CEILING_SOMPI/selectFeeUtxoByConstruction 同一个文件, 创世/下注/结算已 import
+ * 此文件, 无新依赖边); proto-settlement-c1.mjs 改为 re-export, 45 项既有测试与既有 import 路径不动。
+ *
+ * 规则(不变, 只加 unknown 分类):
+ *  - `covenantId !== null` 或 spk `version !== 0` 或 spk ≠ relay P2PK ⇒ 毒化跳过(skippedPoisoned);
+ *  - 面值越界 [feeMinAmount, SIGNED_INPUT_CEILING_SOMPI] ⇒ skippedOutOfRange(消费方复核, 不信 relay 的区间过滤);
+ *  - 在途(inflightOutpoints, 语义="我方在途意图产出的输出")⇒ skippedInflight;
+ *  - 🔴 新增(F3 MUST, 创世/下注此前走的 toFeeUtxoCandidates 无字段校验, unknown 被静默当普通candidate):
+ *    条目缺 `covenantId` 键 / 缺 `scriptPublicKey.version` 或非法 / 缺 `scriptPublicKey.scriptHex` 或非 hex
+ *    ⇒ **fail-closed 跳过**(skippedUnknown, 与 skippedPoisoned 分开计数——"被攻击"与"relay 版本不带 facts
+ *    字段"是两回事, 遥测要能分辨)。"缺键 ≠ 无 covenant"(9-0 的纪律, utxo-facts.mjs 头注 F14 延伸到消费方)。
+ * @param {object} o
+ * @param {Array<{covenantId:string|null,scriptPublicKey:{version:number,scriptHex:string},amount:bigint,outpoint:{transactionId:string,index:number}}>} o.utxos  形态 L 条目(assertFactsResponse 的 utxos, 或结构相同的已校验条目)
+ * @param {boolean} o.truncated  形态 L 的窗口截断标记
+ * @param {string} o.relaySpkHex  relay 自己的 P2PK spk(hex, 0x 前缀可选)
+ * @param {bigint} o.feeMinAmount  该路径声明的最低可行 fee 输入面值(结算传 feeProfile cap, 创世/下注传 0n——F3 取舍 A, 账本1462: cap 是异常上限不是预期值, 不得当预筛下界)
+ * @param {Array<{transactionId:string,index:number}>} [o.inflightOutpoints]  我方在途意图产出的输出(生产恒空, F4 前)
+ * @returns {{status:'ok'|'saturated'|'none', candidates:Array, skippedPoisoned:number, skippedOutOfRange:number, skippedInflight:number, skippedUnknown:number, truncated:boolean, events:Array}}
+ */
+export function filterFeeCandidates({ utxos, truncated, relaySpkHex, feeMinAmount, inflightOutpoints = [] }) {
+  const relaySpk = _normHex(relaySpkHex);
+  if (!_HEX_EVEN.test(relaySpk)) throw new TypeError('filterFeeCandidates: relaySpkHex 必填且为 hex');
+  if (typeof feeMinAmount !== 'bigint' || feeMinAmount < 0n) throw new TypeError('filterFeeCandidates: feeMinAmount 必须是非负 bigint(没有默认值: 消费方复核区间, 不信 relay 的过滤)');
+  const inflight = new Set(inflightOutpoints.map((o) => _opKey(String(o.transactionId).toLowerCase(), o.index)));
+  const candidates = [];
+  let skippedPoisoned = 0;
+  let skippedOutOfRange = 0;
+  let skippedInflight = 0;
+  let skippedUnknown = 0;
+  for (const u of utxos) {
+    if (!isFiniteCandidateShape(u)) { skippedUnknown++; continue; }   // F3: unknown facts fail-closed, 与"确认是毒化"分开计数
+    if (u.covenantId !== null || u.scriptPublicKey.version !== 0 || _normHex(u.scriptPublicKey.scriptHex) !== relaySpk) { skippedPoisoned++; continue; }
+    if (u.amount < feeMinAmount || u.amount > SIGNED_INPUT_CEILING_SOMPI) { skippedOutOfRange++; continue; }
+    if (inflight.has(_opKey(u.outpoint.transactionId, u.outpoint.index))) { skippedInflight++; continue; }
+    candidates.push({
+      txid: u.outpoint.transactionId, vout: u.outpoint.index, value: u.amount,
+      scriptPublicKeyHex: '0x' + u.scriptPublicKey.scriptHex,     // 与旧 proto-broadcast-ops toFeeUtxoCandidates 的形状一致(F3 前创世/下注也是这个形状——不改下游)
+      spkLen: u.scriptPublicKey.scriptHex.length / 2, covenantId: null,
+    });
+  }
+  const status = candidates.length > 0 ? 'ok' : (skippedPoisoned > 0 || skippedOutOfRange > 0 || skippedUnknown > 0 || truncated ? 'saturated' : 'none');
+  const events = [];
+  if (skippedPoisoned > 0) events.push({ eventType: 'fee_candidate_poisoned_skipped', level: 'warn', payload: { count: skippedPoisoned } });    // 让攻击【可见】
+  if (skippedOutOfRange > 0) events.push({ eventType: 'fee_candidate_out_of_range_skipped', level: 'warn', payload: { count: skippedOutOfRange } });   // relay 返回了区间外的候选 = relay 行为异常, 可见
+  if (skippedUnknown > 0) events.push({ eventType: 'fee_candidate_unknown_skipped', level: 'warn', payload: { count: skippedUnknown } });   // F3: 缺字段 fail-closed, 与"确认毒化"分开可见
+  if (status === 'saturated') events.push({ eventType: 'settlement_fee_window_saturated', level: 'error', payload: { skippedPoisoned, skippedOutOfRange, skippedInflight, skippedUnknown, truncated } });
+  return { status, candidates, skippedPoisoned, skippedOutOfRange, skippedInflight, skippedUnknown, truncated, events };
+}
+
+/** F3: 条目形状是否可判定资格(不合法 ⇒ unknown, fail-closed 跳过, 不当作"普通"或"毒化")。
+ *  与 assertFactsResponse 的 readItem(proto-settlement-c1.mjs)故意保持独立——本函数容忍"结构相同但未经 assertFactsResponse
+ *  校验"的调用方(如测试直接构造向量), 不强制走一遍 facts 协议校验; 生产路径的 utxos 已经过 assertFactsResponse, 这里
+ *  是【第二道】防线(纵深防御, 不是唯一防线)。 */
+function isFiniteCandidateShape(u) {
+  if (!u || typeof u !== 'object') return false;
+  if (!('covenantId' in u)) return false;
+  if (u.covenantId !== null && !(typeof u.covenantId === 'string' && _HEX64.test(u.covenantId))) return false;
+  const spk = u.scriptPublicKey;
+  if (!spk || typeof spk !== 'object') return false;
+  if (!Number.isInteger(spk.version) || spk.version < 0) return false;
+  if (typeof spk.scriptHex !== 'string' || !_HEX_EVEN.test(spk.scriptHex)) return false;
+  if (typeof u.amount !== 'bigint' || u.amount < 0n) return false;
+  const op = u.outpoint;
+  if (!op || typeof op !== 'object' || typeof op.transactionId !== 'string' || !_HEX64.test(op.transactionId) || !Number.isInteger(op.index) || op.index < 0) return false;
+  return true;
+}
+
 /**
  * §9.5 fee-UTXO 选择器 v2(账本1462修复, 取代 selectFeeUtxo 在 proto-broadcast-ops.mjs 里的用法):
  * 不再用"保守下界"公式猜一个门槛去过滤候选——公式本身(GENESIS_OUTPUT_SOMPI+cap 这类)天然比真实

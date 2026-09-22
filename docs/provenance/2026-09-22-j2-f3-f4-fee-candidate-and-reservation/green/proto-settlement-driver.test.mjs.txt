@@ -1,0 +1,14 @@
+[db] path=C:\Users\ADMIN\AppData\Local\Temp\_j2_settle_wiring_24708.db source=DB_PATH
+[PASS] 开关 8 态(§3.1): 仅"结算开关=='1' ∧ relay 已配置"为真; PROTO_DRIVER_ENABLED 与之无关; 只认字面 '1'
+[PASS] 关闭态零副作用(§3.2 / §3.3): 只打恰一行 "[proto-settlement-driver] disabled"; 不启动 interval; 不装载 ops; 不发任何命令
+[PASS] 启动日志(§3.2): 形状 "started (tick …ms, cap …/tick, network=…)" 显式带 network; 非主网另打一行 NON-MAINNET; 重复 start 不重复启动; stop 后清 interval
+[PASS] 拒绝启动(LOUD): KASPA_NETWORK 未设 / 未知 ⇒ 不启动; tick 间隔太短使每步预算 ≥ 间隔 ⇒ 不启动
+[PASS] 批 D N2 启动校验: 预算常量自相矛盾(tick 拉到 10 分钟, 默认 SAFETY 压不住 LAG_MAX+MARGIN+tick)⇒ REFUSED to start(不起 interval); 非法 env 值 ⇒ 回默认并 LOUD(error 级日志)仍启动; 无 env 覆盖 ⇒ 无预算日志
+[PASS] 每步预算(§19.3a): = tick 间隔的一半, 下限 15000, 且必须小于间隔(否则 RangeError); 间隔 / cap 取自 env 正整数, 否则默认 60000 / 3
+[PASS] 网络与 relay 地址前缀(S7): 整段前缀精确比较——kaspa↔mainnet, kaspasim↔simnet, kaspatest↔testnet-12; mainnet 配置遇 kaspasim: 地址必须拒(不是 startsWith)
+[PASS] 单 tick: relay 不健康 ⇒ 跳过整 tick、零装配零 IPC(§3.6); 网络前缀不符 ⇒ 跳过并 LOUD; 通过 ⇒ 装配并 runTick(cap 透传); 单飞: 并发第二个 tick 跳过; 报错后单飞标志复位
+[PASS] ops 不可用 ⇒ tick 体 LOUD 拒绝并自停(绝不带着半截端口跑钱路); 网络不符 ⇒ 自停; 二者都不发命令
+[PASS] 默认 ops 装载器: 四步端口模块(proto-settlement-ops)尚不存在时启动会 LOUD 拒绝(iii-2 落地前不会悄悄跑半截钱路)
+[PASS] 结构(§11): 接线文件不 bare-import relay-manager; 不含 withdraw / reclaim / allowUnlistedTestDestination / 私钥; network 只来自 configuredNetwork(env); index.js 恰一处调用 startProtoSettlementDriver() 且在 startProtoDriver() 之后
+
+proto-settlement-driver.test: 11 passed, 0 failed

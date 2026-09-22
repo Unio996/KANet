@@ -18,6 +18,7 @@ import { sqlite } from '../db/client.js';
 import { REORG_SAFE_MIN_DEPTH } from './proto-driver.mjs';
 import { resolveBudgetConfig, sharedPmtValidator, readValidatedPmt } from '../lib/proto-settlement-budget.mjs';
 import { applyLateSealGuard } from '../lib/proto-settlement-freeze.mjs';
+import { releaseReservationOnPrepared } from '../lib/proto-fee-reservation.mjs';
 
 const DEFAULT_INTERVAL_MS = 60_000;      // tick 间隔; 每步总预算 = 间隔的一半(§19.3a), 且 ≥ MIN_STEP_BUDGET_MS(15 s)、< 间隔
 const DEFAULT_TICK_CAP = 3;
@@ -108,6 +109,8 @@ export async function buildProductionDriver({ health, network, ops, kaspa, sendC
     // R-a / M5: 探针走 facts(covenantId ∧ spk ∧ 旧 outpoint 已花 ∧ 后继 landed 深度, 不得地址级), 与结算 C1 同一个 requestFacts 端口; 观察到别人翻牌 ⇒ store 一个事务记 landed + 冻结
     probeRefundFlip: ops.probeRefundFlip ? (a) => ops.probeRefundFlip({ ...a, kaspa, network, requestFacts, sendCmd, relayId, minDepth: REORG_SAFE_MIN_DEPTH }) : undefined,
     recordObservedRefundFlip: (a) => store.recordObservedRefundFlip({ ...a, log: console }),
+    // F4: build() 选中的 fee UTXO 在这次广播尝试(成功/失败, driver-core.mjs 的 finally)结束后释放进程内预留。
+    releaseFeeReservation: releaseReservationOnPrepared,
   });
 }
 
