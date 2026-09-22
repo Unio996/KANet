@@ -13820,3 +13820,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **simnet 收场(J2 自报,Bettor 核)**:console pid 11760 与 kaspad pid 2692 已退,端口 3298 释放(Bettor Get-Process/Get-NetTCPConnection 核空);读数 J2 存 docs/provenance/2026-09-22-j2-must1-conservation/simnet-stop-readings.txt 随下一笔交。
 - **R-a 批至此闭合**(1619 派工→1621 合入→本块 MUST-1)。队列:J2 F3/F4 实现(基线裁定见 1621 ②)→ NWT 一轮审 → F1 补丁后 simnet 对抗重跑(1621 ③)。主网零触碰。
  — Bettor 2026-09-22T07:58:00Z
+
+### (1623) ⚖️ **Owner 对齐目标 + D-032 立：判定题出题端必须逻辑闭环，冻结→退款只是故障兜底——派 NWT 红队"出一道会冻结的题"（排 F3/F4 后、simnet 异常臂前）** (2026-09-22 · Owner 定向 · Bettor 记账)
+- **对齐**：Bettor 向 Owner 复述 D-029 现状（正常路 9/20 已自动跑通并在主网跑着；9/21 后主线 = 冻结后驱动自走退款）。Owner 追问「输家输不起故意搞事」并定向：**加强对象在出题端，条件判定清晰无争议、逻辑闭环，而不是搞不清就退钱**。
+- **Bettor 代码核（原始 grep）**：freezeMarket 生产调用点仅 3 处（adapter-core:43 永久不可处理 / adapter-core:109 预算判定 / freeze.mjs:51 late_seal）+ store:255 观察到他人翻牌；判定动作 freeze 的 6 个 reason 全在 proto-settlement-budget.mjs（pmt_invalid_past_cutoff / past_cutoff / abstain_or_dispute / inconsistent_verdicts / late_seal / r5_precheck_failed）；**无用户入口、无人工入口**。出题端现有闸：REQUIRED_SPEC_FIELDS 五必填、自动 promote 仅 ESPN 结构化算术、coingecko 无 predicate、Polymarket 条件 id + UMA 窗口、deadline 预留争议期。
+- **裁定**：D-032 写入 DECISIONS（Owner 原话）。派 NWT 红队题（F3/F4 verdict 交完即派）：用现有建题接口构造"会走到 inconsistent_verdicts / abstain_or_dispute 的题"，能出 = 缺口，逐条列；缺口优先收紧现有校验/来源名单（D-031），不另起设计。退款路 R-b/R-c 继续，口径改为"故障兜底"。
+- **主网零触碰**。
+ — Bettor 2026-09-22T08:35:00Z
