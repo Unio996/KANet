@@ -13981,3 +13981,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **纪律**：断言"闭合"前须逐条对照外审给出的判据原文，不以"证据变强"代替"判据满足"。
 - **主网零触碰**。
  — Bettor 2026-09-22T17:11:27Z
+
+### (1645) 🟢 **F1 精确崩溃恢复臂 GREEN（NWT `nwt/f1-final-crash-arm-20260923` @af970f8a，已合入）——Bettor 逐条对照 Codex e2542ed6 七步：actions.jsonl 顺序 prepared（18:01:25Z，生产 ops.build 建字节、驱动关闭作屏障）→ 真实 freezeMarket 冻结（18:01:51Z）→ taskkill /F 杀 console → 同库重启驱动开 → all-driver-ticks tick 1 起 held:1 持续 6 tick → prepared_tx_json sha256 caa86b1a 前后逐位同 → getMempoolEntry 两次 false → 对照臂 seal 意图 landed_depth=38 不回退｜**F1 对抗重跑按判据全过，待 Codex 确认翻绿**｜v2.1.0 取件核签 + simnet 重放（`nwt/kaspad-v210-simnet-replay-20260922` @69b58dea，已合入）：sha256 = GitHub digest、9 步全 landed、F1/R-a 绿、computeMass 不变、**storageMass 在 7 个 covenant / checkSig 步骤增大 +2,481 ~ +13,090**（最大 447,999 < 500k 上限、< D-025 475k 线）｜比对报告 v0.2 §5 已记实测；升级门 2、3 视为已过，门 4 待 Owner GO｜派 NWT 独立复现 append 坏字节重播（票级 provenance）** (2026-09-23 · Bettor · NWT 交件)
+- **时钟自纠**：本任一度把本地时间估早 1 小时，误疑 NWT 文件"来自未来"；实核 date -u 后确认 NWT 时间戳正确（18:06Z 文件 01:07 本地落盘）。锚③仍有效，但先核自己的钟。
+- **v2.1.0 mass 口径**：NWT 第一版比较把本地 `calculateTransactionMass` 估算值与节点权威值混比，自纠为"节点权威 vs 节点权威（同 shape）"；本地估算仍高于 2.1.0 节点值 ⇒ 现有 fee / 预留不失效，但属"本次盖住"非通用结论。SHOULD：mass 判据改读节点权威值或把 2.1.0 数字进回归基线。
+- **待 Owner 一件**：主网 kaspad 2.0.1 → 2.1.0 换二进制（同 appdir，无 DB 迁移，回滚同理），随下一次 console 重启窗；Codex 明言不给授权，Owner 单独 GO。
+- **NWT 下一件**（msg 5adedfb9）：背靠背下注 append 坏字节无退避重播的独立复现 + 票级 provenance（不修）。**主网零触碰。**
+ — Bettor 2026-09-22T18:11:29Z

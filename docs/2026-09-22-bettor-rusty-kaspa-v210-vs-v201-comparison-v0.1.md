@@ -43,6 +43,14 @@
 4. **主网切换（Owner GO 后，随下一次 console 重启窗）**：停 kaspad 16464 → 同一 `--appdir=D:\kaspa-mainnet-data-v201` 用 v2.1.0 启动、参数不变 → 观察同步 / `isSynced` / utxoindex → console 健康检查通过（`proto-relay-guard` fail-closed 期间驱动自然 HOLD）。回滚：停 2.1.0，用 2.0.1 同目录重启。
 5. **文档**：D-017 加状态注记（主网二进制版本），`docs-private` 不涉及；能力清单更新节点版本行。
 
+## 5. 实测结果（v0.2 · NWT 2026-09-23 · 分支 `nwt/kaspad-v210-simnet-replay-20260922` @69b58dea，已合入）
+
+- **取件核签 PASS**：win64 zip sha256 = GitHub digest `fb25743a…ec0f`；`kaspad --version` = 2.1.0；`kaspad.exe` sha256 `16bd68241c79113858c873ee16c5267809d7b8df11e878bfdec9802e2a33a1da`；装在 `D:\rusty-kaspa-v210\`，主网目录未动。
+- **8 步结算链 PASS**：同一份未改动的生产脚本（`run-full-chain.mjs` @50019d4f，与 2.0.1 baseline 同版本）在全新 v2.1.0 simnet 从创世重放，9 步（8 + 输家 ticket 回收）全部真实广播、真共识确认、全部 landed。
+- **F1 / R-a harness GREEN**：冻结市场上 prepared 未广播的 close_commit 观察窗零广播、hold 标记、节点 mempool 查无；与 2.0.1 结论一致。
+- **mass 双维对照（节点权威 `getMempoolEntry` vs 节点权威，同一 shape）**：`computeMass` 9 步逐位不变；**`storageMass` 在 7 个含 covenant / checkSig 的步骤上全部增大**（register_append +2,481 / +7,908，convert_to_rootclose +8,365，close_commit +2,933，convert_to_claim +8,809，claim_draw +13,090，KTC.spend +9,307；genesis −11、ticket 回收 0）。最大值 register_append#1 447,999 < 500,000 上限，且 < D-025 设计线 475,000（余量约 27k，较 2.0.1 缩 2.5k）。本地 `kaspa.calculateTransactionMass` 估算值仍高于 2.1.0 节点权威值，故现有 fee / 预留逻辑不因升级失效——但这是"本次余量盖住"，不是"任意幅度安全"的通用结论。NWT 如实记录了第一版比较的口径错误（本地估算 vs 节点权威）并订正。
+- **对升级门的影响**：§3 第 2、3 步已由 NWT 一次完成（J2 无需再跑）；**门 4（主网换二进制）待 Owner GO**。SHOULD 票：结算 / fee 预留的 mass 判据改读节点权威值或把 2.1.0 数字写进回归基线，避免下次升级再靠"凑巧盖住"。
+
 ## 4. 不做 / 另立票
 
 - 不升级 `shared/vendor/kaspa-wasm`（自建 1.1.0，与本次节点无耦合；若要跟官方 SDK 2.1.0 另评估签名 / mass 差异）。
