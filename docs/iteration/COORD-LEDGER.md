@@ -13813,3 +13813,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **纪律记账(实名)**:NWT 报"已推 0634e66f"时 origin 仍在 ce7b216d——审中 `git checkout origin/<ref>` 进 detached,commit 落在 detached 上,`push -u` 推的是停在 ce7b216d 的本地分支;未看 push 原始输出即报 hash。已自纠(`branch -f` + 重推,ls-remote 贴回 Bettor 核过)。同族规矩:状态断言固定动作(本文件 2026-08-27 条)。
 - **主网零触碰**;合入后下次主网 console 重启才生效,重启不在本块授权内。
  — Bettor 2026-09-22T07:40:00Z
+
+### (1622) 🟢 **R-a MUST-1 合入(merge,只合不部署)——deriveRefundClaims 守恒断言加可注入 pool 读法(J2 36e1d8dc),NWT 增量核三点全过;simnet 现场已收** (2026-09-22 · Bettor)
+- **J2 36e1d8dc**(从 97939a6f 起):pool 读法抽成 readConfirmedPoolValue,deriveRefundClaims 加参数 readPoolValue 默认 = 原读法;唯一生产调用点(proto-settlement-store.mjs markLanded refund_flip 分支)不传参,零改动;测试 +12 行(注入 999 vs Σ400 真抛并核报文 / 注入 400 通过 / 默认路径与显式相符值一致)。
+- **NWT 一条消息核(采)**:① 删断言复跑 41→39 ok/2 bad,命中新加那条,还原恢复 41/0(= 其 R8 突变复跑);② 新函数 SQL 与被替换原行逐字节相同;③ 只两文件 +26/−2,lint 0。Bettor 自核 diff 与此一致。
+- **simnet 收场(J2 自报,Bettor 核)**:console pid 11760 与 kaspad pid 2692 已退,端口 3298 释放(Bettor Get-Process/Get-NetTCPConnection 核空);读数 J2 存 docs/provenance/2026-09-22-j2-must1-conservation/simnet-stop-readings.txt 随下一笔交。
+- **R-a 批至此闭合**(1619 派工→1621 合入→本块 MUST-1)。队列:J2 F3/F4 实现(基线裁定见 1621 ②)→ NWT 一轮审 → F1 补丁后 simnet 对抗重跑(1621 ③)。主网零触碰。
+ — Bettor 2026-09-22T07:58:00Z
