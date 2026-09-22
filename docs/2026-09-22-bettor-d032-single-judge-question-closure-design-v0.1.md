@@ -2,6 +2,7 @@
 
 > **Status**: CURRENT · Bettor 2026-09-22 · Owner 本机终端「对齐没问题，D-032 按单口径出设计稿」· 依据 DECISIONS D-032 / D-031 / D-030 / D-021 · 账本 1623 / 1625 / 1629 / 1630 / 1631
 > v0.2（同日）：并入 Codex 桥 22b33bb2 的 OPEN MUST——"人看的题面 ↔ 唯一机器命题"无绑定（title 写 A 场、predicate 指 B 场仍可建）⇒ 新增 §2.6 命题身份绑定 + §3 / §4 / §7 对应行。v0.1 其余不变。
+> v0.2.1（同日）：Codex 159a4763 对 v0.2 判 SUPPORTED + 1 MUST——事件 id 不得只抄 URL 参数，须与取回载荷自报的事件身份相等 ⇒ §2.6-1 补"载荷身份核对"，§7 补负测 3。
 > 待 NWT 设计审（红队：出题端）→ 派 J2 实现 → NWT 审 diff → 合入 → 随下次主网 console 重启生效（adapter 开关仍默认关，有价值判定题仍 N5b 限制 + Owner 单独批）。
 
 ## 0. 已有什么（D-031 第一问 · 扫 kasia-console/src/services 全目录 + index.js 启动注册 + 主网日志 + 能力清单 v0.1）
@@ -61,7 +62,8 @@
 
 ### 2.6 命题身份绑定（v0.2 · Codex 22b33bb2 OPEN MUST · 题面 ↔ 唯一机器命题）
 **问题**：§2.1 之后仍能"title 写湖人、predicate 指另一场"——现有校验只证 predicate 可执行，不证它与人看到的题是同一件事。**原则**：以机器命题为权威，人看的判定语句由机器命题**生成**，运营者对生成语句**原样回签**；title 退为展示标签。
-1. **建题时取事件身份（fail-closed）**：`validateJudgedMarketInput` 通过后、`ensureMarketPending` 前，用 `data_source_canonical` 取一次 ESPN summary（15 s 超时，形状同 `predictPreMatch`），经 `oracle-evidence-extractors.mjs` 抽出的**赛前变体** `parseEspnParticipants(rawText)`（与 `parseEspnSummary` 共用同一段 competitors / home / away / league 定位代码，只去掉 final 要求）得到 `canonical_event = { event_id（URL 的 event 参数）, league, home:{abbr,name}, away:{abbr,name}, start_ms（ESPN date）, fetched_at }`。取不到 / 结构异常 ⇒ 409 `source_unreachable_at_creation`，**不建**。
+1. **建题时取事件身份（fail-closed）**：`validateJudgedMarketInput` 通过后、`ensureMarketPending` 前，用 `data_source_canonical` 取一次 ESPN summary（15 s 超时，形状同 `predictPreMatch`），经 `oracle-evidence-extractors.mjs` 抽出的**赛前变体** `parseEspnParticipants(rawText)`（与 `parseEspnSummary` 共用同一段 competitors / home / away / league 定位代码，只去掉 final 要求）得到 `canonical_event = { event_id, league, home:{abbr,name}, away:{abbr,name}, start_ms（ESPN date）, fetched_at }`。取不到 / 结构异常 ⇒ 409 `source_unreachable_at_creation`，**不建**。
+   **载荷身份核对（v0.2.1 · Codex 159a4763 MUST）**：`event_id` 取自**载荷自报**的 `header.id`（须与 `header.competitions[0].id` 相同），再与 URL 的 `event` 参数逐字相等；载荷缺 id / 两处不一致 / URL≠载荷 / 参赛方或开赛时间与该 id 不自洽 ⇒ 400 `event_identity_unverified`，不建。判定时（§2.6-6）的回验走**同一个**身份抽取函数（放在 `oracle-evidence-extractors.mjs`，与 `parseEspnParticipants` 同源），不另写第二份。J2 的 simnet 上游 mock 须补 `header.id` / `competitions[0].id` 字段（现 mock 无 id，见 `scratch/_j2_e2e/upstream-mock.mjs:23`）。
 2. **predicate 与事件对齐**：`normalizeAbbr(predicate.subject ?? predicate.operand)`（winner 用 operand，margin/score 用 subject）必须 ∈ `{home.abbr, away.abbr}`，否则 400 `predicate_team_not_in_event`。
 3. **服务端渲染判定语句**（纯函数 `renderResolutionStatement(canonical_event, predicate, side_map, outcome_end_ms)`，代码模板，运营者不可改）：例 `ESPN {league} event {event_id} · {away.name} @ {home.name} · {start ISO} · 判定：winner == {operand}（平局=NO）· 取值时刻 ≥ {outcome_end ISO} · yes→side {side_map.yes} / no→side {side_map.no}`。
 4. **回签**：请求须带 `attestStatement`；缺 ⇒ 409 `attest_required`，响应体回 `{ statement, canonical_event }` 让运营者第二次原样带回；不等 ⇒ 400 `attest_mismatch`。两步建题，不做模糊匹配。
@@ -105,7 +107,7 @@
 ## 7. 测试与验收（J2 交付；NWT 审 MUST-only）
 - 单测（改既有文件，不新起套件）：创建拒 `outcomeConditionId` / `polymarket_outcome_side`；正常单口径创建 `outcome_market_source='kanet_native'`；adapter 单口径市场不因缺极性冻结；门：一条合格 extractor 票过宽限即 promote；ABSTAIN ⇒ `abstain_or_dispute`；注入 `llm` / `uma` 票 ⇒ `unexpected_verdict_kind`；`inconsistent_verdicts` 不可达（删该行所有测试仍绿 = 用突变证明不可达，写进 provenance）。
 - 变异：删 §2.3 新增守卫必红；把 `AUTO_KINDS` 加回 `'uma'` 必红；lint 规则对四个标识各一条红。
-- **§2.6 命题绑定（Codex 要求的证据）**：负测——title 写 A 场 + predicate / URL 指 B 场：无 `attestStatement` ⇒ 409 且响应语句写的是 B 场参赛方；带错语句 ⇒ 400；operand 不在参赛方 ⇒ 400；源不可达 ⇒ 409 不建。变异——删掉 §2.6-2 队名对齐或 §2.6-4 回签比对，负测必红。往返——公开视图 `judge.statement / canonical_event` 与 adapter 判定时实际比对 / 消费的 `home_team / away_team / predicate / side_map / outcome_end_ms` 逐字段相等（同一 fixture 走建题与判定两端）；篡改 mock ESPN 的参赛方 ⇒ `event_identity_mismatch` 冻结。
+- **§2.6 命题绑定（Codex 要求的证据）**：负测——title 写 A 场 + predicate / URL 指 B 场：无 `attestStatement` ⇒ 409 且响应语句写的是 B 场参赛方；带错语句 ⇒ 400；operand 不在参赛方 ⇒ 400；源不可达 ⇒ 409 不建；**URL 指 A 而载荷 `header.id` 为 B（参赛方可重叠 / 相似）⇒ 400 `event_identity_unverified`，删掉载荷 id 相等检查该测必红**。变异——删掉 §2.6-2 队名对齐或 §2.6-4 回签比对，负测必红。往返——公开视图 `judge.statement / canonical_event` 与 adapter 判定时实际比对 / 消费的 `home_team / away_team / predicate / side_map / outcome_end_ms` 逐字段相等（同一 fixture 走建题与判定两端）；篡改 mock ESPN 的参赛方 ⇒ `event_identity_mismatch` 冻结。
 - **NWT 红队复跑（关 3）**：用改后的建题接口重跑 1625 的三条题面——①无关 condition id ⇒ 400；③极性 ⇒ 400；②字段标注可见；再尝试构造任何"非故障却冻结"的题，能出即 MUST。
 - simnet e2e（复用 J2 现有隔离环境与 upstream-mock）：建单口径判定题 → 下注 → seal → mock ESPN final → adapter 判 → promote → close_commit → claim（正臂）；mock ESPN 不 final 直到 cutoff → 冻结 → refund_flip（故障臂）。simnet-only。
 - 验收口径：**机制证通（simnet）**，不 claim 主网；主网启用仍走 N5b + Owner 批。

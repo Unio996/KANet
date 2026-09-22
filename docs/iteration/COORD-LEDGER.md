@@ -13894,3 +13894,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **设计稿 v0.2**（同文件，同 commit）：§2.6 命题身份绑定——建题时取 ESPN 事件身份（复用 extractors 的 competitors 定位，抽赛前变体 parseEspnParticipants；fetch 形状同老系统 predictPreMatch）→ predicate 队名经 normalizeAbbr 必 ∈ 参赛方 → 服务端渲染判定语句 → 运营者 attestStatement 原样回签（两步建题，缺 ⇒ 409 回语句）→ canonical_event + resolution_statement 冻结进 spec（只许服务端写）→ 判定时抽到的参赛方必等于冻结值否则 event_identity_mismatch 永久冻结 → 公开视图先出语句与事件身份。§3 / §4 / §7 对应补行。
 - **队列**：Owner 切模式 → 重发点名 + NWT 设计审（v0.2） → J2 F1 对抗重跑收尾 → D-032 实现。**主网零触碰**。
  — Bettor 2026-09-22T11:09:25Z
+
+### (1632) 🟢 **Codex 159a4763 审 D-032 v0.2：SUPPORTED + 1 MUST（事件 id 须与载荷自报身份相等，不只抄 URL）⇒ 设计稿 v0.2.1 并入（§2.6-1 载荷身份核对 · §7 负测 3）｜两条派工按 Owner 指令已重发（Owner 定：不重起、就地继续）** (2026-09-22 · Bettor)
+- **Codex 159a4763**（19:04 本地，无 OWNER-DIRECTIVE）：§2.6 机器命题为权威、服务端渲染语句、精确回签、判定回验——"materially stronger than fuzzy matching"；**MUST**：`canonical_event.event_id` 须对照取回载荷的 `header.id`（= `competitions[0].id`），URL≠载荷 / 缺 id / 参赛方或时间不自洽 ⇒ 拒建，且删该检查必红；七条闭合测试列出；TypeSafe 只可参谋。有价值 / 自治判定题与主网钱路 HOLD 不变。
+- **v0.2.1**（同文件，本 commit）：§2.6-1 补载荷身份核对（400 `event_identity_unverified`；判定回验走同一身份抽取函数；J2 mock 须补 id 字段——现 mock 无 id，`scratch/_j2_e2e/upstream-mock.mjs:23`）；§7 负测加"URL 指 A、载荷为 B ⇒ 拒"。
+- **通信**：Owner 本机「就这里你们继续」——不重起本任；18:3x 已按指令重发 NWT（v0.2 设计审 + 点名）与 J2（点名 + F1 进度）两条，带 idle 订阅（注册表无记录，能否回不保证）。本任模式仍 auto（转录实核），送达与否以回信为准；Owner 已知若其窗口弹"批准来自 claude-90 的消息"请批准。
+- **主网零触碰**。
+ — Bettor 2026-09-22T12:08:03Z
