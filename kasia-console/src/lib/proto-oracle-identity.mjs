@@ -10,9 +10,19 @@ import { parseEspnParticipants, parseEspnTeamsRegistry, normalizeAbbr } from './
 
 const FETCH_TIMEOUT_MS = 15_000;
 
-/** data_source_canonical 的 ?event= 参数(ESPN summary URL 惯用形态)。取不到 ⇒ null(交给身份核对拒)。 */
+/**
+ * data_source_canonical 的 ?event= 参数(ESPN summary URL 惯用形态)。
+ * 🔴 D-032 §2.6-1 MUST(Codex ddf67d6b 审 4dff42d9): 缺失(0 个)与重复(≥2 个, URLSearchParams.get 会静默
+ * 取第一个, 那种"歧义"绝不能被当成"拿到了一个干净值")都返回 null——下游(parseEspnParticipants)必须把
+ * null 当"URL 侧三向核对拿不到可信输入"处理, fail-closed 拒, 不能因为拿不到就跳过整段身份核对(那正是
+ * 本 MUST 修的洞: 建题 URL 没写 ?event= 或写重了, 载荷自身 header.id===competitions[0].id 内部自洽也照样
+ * 建成——从未真的把 URL 与载荷绑在一起)。
+ */
 export function urlEventParam(url) {
-  try { return new URL(String(url)).searchParams.get('event'); } catch { return null; }
+  try {
+    const all = new URL(String(url)).searchParams.getAll('event');
+    return all.length === 1 ? all[0] : null;
+  } catch { return null; }
 }
 
 /** summary URL(.../sports/<sport>/<league>/summary?event=X) → 同域 teams 注册表 URL(.../teams)。路径形状不对 ⇒ null。 */

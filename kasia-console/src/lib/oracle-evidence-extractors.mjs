@@ -105,12 +105,18 @@ function parseEspnSummary(rawText) {
  * 额外做两件 parseEspnSummary 不做的事(判定题建题专用, 判定侧继续用 extractEspnFields, 不受影响):
  *   ① 载荷身份核对(v0.2.1 Codex 159a4763 MUST): header.id 必须 === header.competitions[0].id, 再与调用方传入的
  *      urlEventParam(取自 data_source_canonical 的 ?event= 参数)逐字相等 —— 三者不一致或缺失 ⇒ event_identity_unverified。
+ *      🔴 v0.2.4 补丁(Codex ddf67d6b 审 4dff42d9 MUST): `opts.urlEventParam` 传了这个键(哪怕值是 null)就【必须】
+ *      参与核对——null/空串/与 header.id 不同, 一律拒。只有调用方【完全不传这个键】(`urlEventParam` 键在 opts 里
+ *      是 undefined, 即结构级单测直接调用本函数、不途经真实 URL 的场景)才跳过——真实建题路径
+ *      (bindCanonicalEventIdentity)永远会传这个键, 所以生产路径上这条检查永不因"URL 没有 ?event= 参数/参数
+ *      重复(urlEventParam 因此返回 null)"而被静默跳过, 只会被拒。
  *   ② 参赛方已定(v0.2.2 NWT MUST, v0.2.3/v0.2.4 Codex 定主次): 主判据 = 结构化身份——两侧 team.id 都必须能在
  *      调用方传入的 registryTeamIds(该联赛球队注册表, parseEspnTeamsRegistry 产出)里精确解析到。不靠"非空 id/
  *      abbr"字符串清单兜底(那是被 v0.2.4 否决的旧谓词, 占位席位也可能有稳定合成 id)。
  * @param {string} rawText  raw ESPN summary HTTP response
  * @param {{urlEventParam?: string|null, registryTeamIds?: Set<string>}} [opts]
  *   registryTeamIds 缺省/空集 ⇒ 参赛方已定判据必然失败(fail-closed: 没查过注册表, 不能当"已定"放行)。
+ *   urlEventParam: 传了这个键(含 null/空串)就参与核对且未通过即拒; 完全不传(undefined)才跳过, 见上方①。
  * @returns {
  *   {ok:true, canonical_event:{event_id:string, league:string|null, home:{abbr:string,name:string,team_id:string}, away:{abbr:string,name:string,team_id:string}, start_ms:number}} |
  *   {ok:false, reason:'structure_invalid'|'event_identity_unverified'|'event_participants_not_determined', detail:string}
@@ -127,8 +133,14 @@ export function parseEspnParticipants(rawText, opts = {}) {
   if (!eventId || !compId || eventId !== compId) {
     return { ok: false, reason: 'event_identity_unverified', detail: `header.id(${JSON.stringify(eventId)}) 与 competitions[0].id(${JSON.stringify(compId)}) 缺失或不一致` };
   }
-  if (opts.urlEventParam !== undefined && opts.urlEventParam !== null && String(opts.urlEventParam) !== eventId) {
-    return { ok: false, reason: 'event_identity_unverified', detail: `URL event 参数(${JSON.stringify(opts.urlEventParam)}) 与载荷 header.id(${eventId}) 不一致` };
+  // 🔴 MUST 修复: 键存在(即便值是 null/空串)就必须核对且通过, 只有键完全不存在(undefined, 结构级单测直调)才跳过。
+  // 旧写法(`!== undefined && !== null`)把"URL 没有 ?event= 参数"(urlEventParam() 返回 null)也当"跳过", 而
+  // bindCanonicalEventIdentity 永远会传这个键——等于生产路径上这条核对形同虚设, 见 ddf67d6b 审 4dff42d9。
+  if ('urlEventParam' in opts) {
+    const p = opts.urlEventParam;
+    if (p === null || p === undefined || String(p) === '' || String(p) !== eventId) {
+      return { ok: false, reason: 'event_identity_unverified', detail: `URL event 参数(${JSON.stringify(p)}) 缺失/重复/为空/与载荷 header.id(${eventId}) 不一致` };
+    }
   }
   const startMs = Date.parse(comp?.date || '');
   if (!Number.isFinite(startMs)) return { ok: false, reason: 'structure_invalid', detail: 'competitions[0].date 缺失或不是合法日期' };

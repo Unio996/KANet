@@ -68,6 +68,14 @@ await t('P5 ▲ v0.2.4 负测(设计 §7 明确要求的那一条): team.id 非�
   const permissive = new Set([...REGISTRY, '-1']);
   assert.equal(parseEspnParticipants(JSON.stringify(placeholder), { registryTeamIds: permissive }).ok, true, '对照臂: 注册表若接受 -1, 则通过——证明拦截点就是注册表解析');
 });
+await t('P6 ▲ D-032 §2.6-1 MUST(Codex ddf67d6b 审 4dff42d9): opts 里出现 urlEventParam 键(哪怕值是 null/空串)就必须核对且通过, 不能被当"跳过"——只有这个键完全不存在(undefined)才跳过; 删掉这条判据(把 in 判断退回旧的 !==undefined&&!==null)本测必红', () => {
+  for (const bad of [null, '', 'wrong-id', '  ']) {
+    const r = parseEspnParticipants(JSON.stringify(DETERMINED), { urlEventParam: bad, registryTeamIds: REGISTRY });
+    assert.equal(r.reason, 'event_identity_unverified', 'urlEventParam=' + JSON.stringify(bad) + ' 必须拒, 不能被当跳过');
+  }
+  // 键存在且真等于 header.id 才放行(与 P1 快乐路径对照, 证明这不是"永远拒")
+  assert.equal(parseEspnParticipants(JSON.stringify(DETERMINED), { urlEventParam: '401872932', registryTeamIds: REGISTRY }).ok, true);
+});
 
 console.log(`\noracle-evidence-extractors.test: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

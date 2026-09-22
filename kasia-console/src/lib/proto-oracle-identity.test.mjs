@@ -31,11 +31,13 @@ function mkFetch({ summary = DETERMINED, registry = REGISTRY, summaryOk = true, 
 }
 
 // ══ 纯函数辅助 ═══════════════════════════════════════════════════════════════════════════════
-await t('H1 urlEventParam: 取 ?event= 参数; 缺 / 非法 URL ⇒ null', () => {
+await t('H1 urlEventParam: 取 ?event= 参数; 缺 / 非法 URL / 重复(≥2 个, MUST Codex ddf67d6b: 不许静默取第一个当"拿到了")⇒ null', () => {
   assert.equal(urlEventParam(SUMMARY_URL), '401872932');
-  assert.equal(urlEventParam('https://site.api.espn.com/apis/site/v2/sports/football/nfl/summary'), null);
+  assert.equal(urlEventParam('https://site.api.espn.com/apis/site/v2/sports/football/nfl/summary'), null, '缺 ?event=');
   assert.equal(urlEventParam('not a url'), null);
   assert.equal(urlEventParam(undefined), null);
+  assert.equal(urlEventParam('https://site.api.espn.com/apis/site/v2/sports/football/nfl/summary?event=401872932&event=999999'), null, '重复 event 参数(URLSearchParams.get 会静默取第一个)⇒ 视为拿不到干净值, 不是"401872932"');
+  assert.equal(urlEventParam('https://site.api.espn.com/apis/site/v2/sports/football/nfl/summary?event='), '', '空串本身是合法返回值(由 parseEspnParticipants 拒, 不是这里拒)');
 });
 await t('H2 deriveTeamsRegistryUrl: .../summary?event=X → .../teams(同域, 去 query); 路径不以 /summary 结尾 ⇒ null', () => {
   assert.equal(deriveTeamsRegistryUrl(SUMMARY_URL), REGISTRY_URL);
@@ -74,6 +76,14 @@ await t('B3 ▲ v0.2.4 核心: 未定席位(synthetic fixture, 字段非空/id �
 await t('B4 ▲ v0.2.1 载荷身份核对: URL event 参数与载荷 header.id 不一致 ⇒ event_identity_unverified(400), 不建', async () => {
   const r = await bindCanonicalEventIdentity({ url: 'https://site.api.espn.com/apis/site/v2/sports/football/nfl/summary?event=WRONG_ID', predicate: PREDICATE, sideMap: SIDE_MAP, outcomeEndMs: OE_MS, attestStatement: undefined, fetchImpl: mkFetch() });
   assert.deepEqual([r.ok, r.code, r.http], [false, 'event_identity_unverified', 400]);
+});
+await t('B4b ▲ D-032 §2.6-1 MUST(Codex ddf67d6b 审 4dff42d9, 真实生产路径): data_source_canonical 缺 ?event= / 重复 event 参数 / 空 event= ⇒ event_identity_unverified(400), 不因"URL 没写清楚"就悄悄跳过三向核对放行(载荷本身 header.id===competitions[0].id 内部自洽、参赛方也都在注册表里, 唯独 URL 没能验证——这条测试删掉 opts in 判据的话会变回 attest_required, 即误放行, 本测必红)', async () => {
+  const noEvent = await bindCanonicalEventIdentity({ url: 'https://site.api.espn.com/apis/site/v2/sports/football/nfl/summary', predicate: PREDICATE, sideMap: SIDE_MAP, outcomeEndMs: OE_MS, fetchImpl: mkFetch() });
+  assert.deepEqual([noEvent.ok, noEvent.code, noEvent.http], [false, 'event_identity_unverified', 400], '缺 ?event=');
+  const dup = await bindCanonicalEventIdentity({ url: 'https://site.api.espn.com/apis/site/v2/sports/football/nfl/summary?event=401872932&event=999999', predicate: PREDICATE, sideMap: SIDE_MAP, outcomeEndMs: OE_MS, fetchImpl: mkFetch() });
+  assert.deepEqual([dup.ok, dup.code, dup.http], [false, 'event_identity_unverified', 400], '重复 event 参数(即便第一个值恰好是真事件 id)');
+  const empty = await bindCanonicalEventIdentity({ url: 'https://site.api.espn.com/apis/site/v2/sports/football/nfl/summary?event=', predicate: PREDICATE, sideMap: SIDE_MAP, outcomeEndMs: OE_MS, fetchImpl: mkFetch() });
+  assert.deepEqual([empty.ok, empty.code, empty.http], [false, 'event_identity_unverified', 400], '空 event=');
 });
 await t('B5 §2.6-2 predicate 队名对齐: operand 不在参赛方(home/away abbr)之中 ⇒ predicate_team_not_in_event(400)', async () => {
   const r = await bindCanonicalEventIdentity({ url: SUMMARY_URL, predicate: { metric: 'winner', operand: 'ZZZ' }, sideMap: SIDE_MAP, outcomeEndMs: OE_MS, attestStatement: undefined, fetchImpl: mkFetch() });
