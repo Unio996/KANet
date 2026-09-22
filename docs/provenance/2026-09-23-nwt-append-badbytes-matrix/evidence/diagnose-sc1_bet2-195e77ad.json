@@ -1,0 +1,139 @@
+{
+  "label": "sc1_bet2",
+  "marketId": "068a6b684b407d50e229fd9cc6c8c1c311fbe25776f9925488d4cbdd20cc6dad",
+  "betId": "195e77ad-a5f7-4bec-9713-2cf1f83733cb",
+  "market": {
+    "id": "068a6b684b407d50e229fd9cc6c8c1c311fbe25776f9925488d4cbdd20cc6dad",
+    "status": "betting",
+    "seal_count": 1,
+    "shardleaf_cov_id": "fe1d4eb619ae9873d7d2bdc78237e4f1ee8b96a267e1f967d9c0306e2e29d0cd",
+    "shardleaf_txid": "4dfb0ca3c36fd3a7a2ae47789b515bab1b66020b8037202e15a1d0c66ac0d949",
+    "shardleaf_vout": 0,
+    "rootclose_txid": null,
+    "winning_side": null,
+    "min_bet": 1,
+    "rootclose_tmpl_hash": "1ada6da73df5f411f8d4b39f41751eae788fe593484965aadabf01d784d97219",
+    "shardleaf_own_redeem_len": 14746
+  },
+  "allBets": [
+    {
+      "id": "889611f9-408c-4de7-91a9-7dcfbf347226",
+      "side": 0,
+      "stake": 1500,
+      "status": "confirmed",
+      "created_at": "2026-09-22T19:36:23.371Z"
+    },
+    {
+      "id": "195e77ad-a5f7-4bec-9713-2cf1f83733cb",
+      "side": 1,
+      "stake": 1600,
+      "status": "pending",
+      "created_at": "2026-09-22T19:37:03.278Z"
+    }
+  ],
+  "targetBet": {
+    "id": "195e77ad-a5f7-4bec-9713-2cf1f83733cb",
+    "side": 1,
+    "stake": 1600,
+    "status": "pending"
+  },
+  "sealIntents": [],
+  "betIntent": {
+    "intent_key": "proto-bet:195e77ad-a5f7-4bec-9713-2cf1f83733cb:append",
+    "step": "append",
+    "status": "prepared",
+    "prepared_txid": "7ce4c2423822866e519bf991f613e40e2d4cecd5049c33be6a6474b8259354d6",
+    "submitted_txid": null,
+    "last_error": "RPC Server (remote error) -> Rejected transaction 7ce4c2423822866e519bf991f613e40e2d4cecd5049c33be6a6474b8259354d6: failed to verify the signature script: script ran, but verification failed",
+    "created_at": "2026-09-22T19:37:03.278Z",
+    "updated_at": "2026-09-22T19:37:03.684Z"
+  },
+  "currentStateAtBuildTime": {
+    "local_yes": 1500,
+    "local_no": 0,
+    "count": 1,
+    "pool_value": 1500
+  },
+  "leafOutpoint": {
+    "txid": "b4107883b36c8d1df687ab4053360e55c42f404bf4dc7223a2282ced558570aa",
+    "vout": 0
+  },
+  "heldOutpointRaw": {
+    "txid": "b4107883b36c8d1df687ab4053360e55c42f404bf4dc7223a2282ced558570aa",
+    "vout": 2
+  },
+  "leafStateErr": null,
+  "leafAddress": "kaspasim:pzh5rfeeyacwp9vxt2tzea5lnr5ng72c379efpnvs02e44xffr9sgnfuwzdgm",
+  "leafUtxoCount": 1,
+  "leafOutpointStillUnspent": true,
+  "heldAddress": "kaspasim:pq2ymqe6ukz4km8a0yvkgldhr0phn5hsldmxqfchhpmssn2h6ec46c33dw0qs",
+  "heldUtxoCount": 1,
+  "heldOutpointStillUnspent": true,
+  "entryAbiArgs": {
+    "seal_count": 1,
+    "min_bet": 1,
+    "local_yes": 1500,
+    "local_no": 0,
+    "count": 1,
+    "pool_value": 1500,
+    "own_redeem_len": 14746
+  },
+  "entryAbiEntryFound": true,
+  "txDump": {
+    "txid": "7ce4c2423822866e519bf991f613e40e2d4cecd5049c33be6a6474b8259354d6",
+    "inputs": [
+      {
+        "idx": 0,
+        "prevTxid": "b4107883b36c8d1df687ab4053360e55c42f404bf4dc7223a2282ced558570aa",
+        "prevIndex": 0,
+        "sigScriptLen": 17912,
+        "sigOpCount": 0
+      },
+      {
+        "idx": 1,
+        "prevTxid": "b4107883b36c8d1df687ab4053360e55c42f404bf4dc7223a2282ced558570aa",
+        "prevIndex": 2,
+        "sigScriptLen": 3215,
+        "sigOpCount": 0
+      },
+      {
+        "idx": 2,
+        "prevTxid": "eab06cc318fde364c479994d0d84534ace7690a89e383e82e8e6a5f8c9c99e59",
+        "prevIndex": 2,
+        "sigScriptLen": 66,
+        "sigOpCount": 0
+      }
+    ],
+    "outputs": [
+      {
+        "idx": 0,
+        "value": "20000000",
+        "spkLen": 35,
+        "hasCovenant": true,
+        "covenantId": "fe1d4eb619ae9873d7d2bdc78237e4f1ee8b96a267e1f967d9c0306e2e29d0cd"
+      },
+      {
+        "idx": 1,
+        "value": "20000000",
+        "spkLen": 35,
+        "hasCovenant": false,
+        "covenantId": null
+      },
+      {
+        "idx": 2,
+        "value": "20000000",
+        "spkLen": 35,
+        "hasCovenant": true,
+        "covenantId": "03b4fa83ccd215b68b18b88490712f0e0bd657d78016d3ae94b5647f9dea74be"
+      },
+      {
+        "idx": 3,
+        "value": "39208800",
+        "spkLen": 34,
+        "hasCovenant": false,
+        "covenantId": null
+      }
+    ],
+    "lockTime": "0"
+  }
+}
