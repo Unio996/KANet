@@ -1,0 +1,18 @@
+[db] path=C:\Users\ADMIN\AppData\Local\Temp\_j2_ingest_settle_frozen_veto_36072.db source=DB_PATH
+[test] ① 正对照(未冻结): 真 driver-core → 真 relay fresh 路径 → 真 HTTP → 真 console ⇒ prepared 落库 → 广播 1 次 → submitted:
+  ✅ driver-core 入口③ 读冻结 = false ⇒ 放行
+  ✅ advanceStep = submitted(实际 {"outcome":"submitted","key":"settle:market:fv-ctrl:resolve","txId":"FINAL_TXID_DEFAULT","reused":false,"replayed":false})
+  ✅ 广播恰 1 次(实际 1)
+  ✅ console 行 = submitted 且带 prepared 字节(实际 submitted)——证明整条真链路(含 core / relay / HTTP / 鉴权 / 分派)是通的, 下面的"零广播"不是链路本身坏了
+[test] ② F1b 回归(NWT 验收线): driver-core 读冻结返回 false【之后】冻结才落地, 在 prepared 回执落库之前 ⇒ 409 ⇒ relay prepared_ingest_failed ⇒ 零广播:
+  ✅ (T0)driver-core 入口③ 确实读到了 false(闸放行了构造)
+  ✅ (T1)此后冻结已落地(在 build / IPC 窗口内)
+  ✅ 零广播: submitTransaction 调用 0 次(此前唯一挡不住的窗口)
+  ✅ core 视为广播失败(relay 回 prepared_ingest_failed; 实际 failed: proto bet intent prepared not recorded by console: HTTP 409 {"ok":false,"error":"market fv-race is frozen — prepared close_commit not recorded, do not broadcast)
+  ✅ console 行保持 pending、无 txid / 无字节(实际 pending/null/null)
+  ✅ 下一 tick 被入口③挡下(gated), 仍零广播(实际 gated/close_commit_settlement_frozen/广播 0)
+[test] ③ relay 侧非 2xx 即 throw(现有行为用测试钉住, 不只靠读码): ingestProtoBetIntentPhase 对 409 reject、对 2xx resolve:
+  ✅ 冻结 ⇒ 409 ⇒ 客户端 throw(实际 proto bet intent prepared not recorded by console: HTTP 409 {"ok":false,"error":"market fv-ingest is frozen — prepared close_commit not recorded, do not broadcast"})
+  ✅ 未冻结 ⇒ 2xx ⇒ resolve(true)
+
+✅✅ ALL PASS — F1b: 冻结落在 driver 闸之后 / prepared 回执之前 ⇒ 零广播(真 driver-core + 真 relay + 真 HTTP + 真 console)
