@@ -1,0 +1,54 @@
+[db] path=C:\Users\ADMIN\AppData\Local\Temp\_j2_fee_reservation_33500.db source=DB_PATH
+[test] ① reservedFeeOutpoints(DB 派生层): 只认 proto_settlement_intents 非终态(prepared/submitted/ambiguous)行, pending/landed 不算; 解出全部输入 outpoint 的并集:
+  ✅ pending 行不贡献任何 outpoint(还没构造)
+  ✅ prepared 行: 两个输入 outpoint 都进集合
+  ✅ submitted 行同样贡献(未落链前仍占位)
+  ✅ landed(终态)⇒ 不再贡献(该行已落链, 输入已确定花掉/已确定失败, 不占位)
+  ✅ ambiguous(不确定是否已落链)⇒ 保守继续占位
+[test] ② M3 fail-closed: 非终态行 tx_json 缺失 / 损坏 ⇒ 整个 reservedFeeOutpoints 抛(不是跳过该行); 突变对照(手写等价"跳过"逻辑, 证明这条测试确实在守这个行为):
+  ✅ prepared 行缺字节 ⇒ 抛(HOLD), 不是当它不存在
+  ✅ JSON 损坏 ⇒ 抛
+  ✅ 缺 inputs 数组 ⇒ 抛
+  ✅ 一坏一好混在一起扫描 ⇒ 整体抛(不是"跳过坏的, 只返回好的那条"——若是"跳过", threw 会是 false)
+[test] ③ selectAndReserveFeeUtxo: T-race-sequential(DB 层已占的候选被排除)+ 进程内层(同一 tick 内先选中的候选, 第二次选择立即被排除, 不需要等 DB 写入)+ 选择失败无副作用:
+  ✅ 第一次选中 A(升序/首个可行)
+  ✅ 选中后立即记入进程内预留层(同步段内, 不需要等 DB 写入)
+  ✅ T-race-sequential: A 已被进程内层占, 第二次选择自动跳过 A 选 B(不需要等 DB, 这正是 A 臂 genesis_ambiguous 死锁要治的窗口)
+  ✅ DB 派生层已占的候选(readReserved 返回的集合)同样被排除; 全占满 ⇒ selectFeeUtxoByConstruction 报 no_suitable_fee_utxo
+  ✅ 释放两个 ⇒ 进程内层清空
+  ✅ 选择失败 ⇒ 原样向上抛
+  ✅ 选择失败(还没选中就抛)⇒ 不留任何预留残留(无副作用)
+[test] ④ readReserved 抛错(M3 fail-closed 的传导): selectAndReserveFeeUtxo 原样向上抛, 不吞不跳过, 不记入任何预留:
+  ✅ readReserved 抛 ⇒ selectAndReserveFeeUtxo 原样向上抛(不掩盖, 调用方据此判 HOLD)
+  ✅ 不记入任何预留
+[test] ⑤ reconcileUncertainReservation: 有 ⇒ 移交 DB 层(released 语义外); 无 ⇒ 释放; 两种结局都从内存层移除:
+  ✅ 前置: 已预留
+  ✅ DB 里已有 prepared 字节 ⇒ handed_to_db_layer
+  ✅ 移交后从内存层移除(不是"续期")
+  ✅ DB 里无痕迹 ⇒ released
+  ✅ 释放后从内存层移除, 之后可再被选中
+  ✅ 对没预留过的 outpoint 对账 ⇒ noop(不误建条目)
+  ✅ RESERVATION_UNCERTAIN_TIMEOUT_MS ≥ 30s(≥2× IPC 超时下界, 设计 §3.2 B.2)
+[test] ⑥ reservationLeakTelemetry: 预留数 / 最老年龄:
+  ✅ 空 ⇒ count 0
+  ✅ 有一条预留 ⇒ count=1, oldestAgeMs 反映经过的时间
+  ✅ 释放后 ⇒ count 回 0
+[test] ⑦ extractInputOutpoints 存储格式兼容(2026-09-22 实测更正的回归锁定): 真实"数组包一层字符串"格式(生产实际存法) + 直接顶层对象格式(向后兼容) 都能正确解出 outpoint; 数组形状不对(长度≠1/元素非字符串)⇒ fail-closed:
+  ✅ 真实"[JSON字符串]"存储格式(生产实际写法)能正确解出 outpoint
+  ✅ 直接顶层对象格式(向后兼容, 非当前生产实际写法但不该拒绝)也能正确解出 outpoint
+  ✅ 数组长度≠1 ⇒ fail-closed(不猜哪个元素是对的)
+  ✅ 数组元素不是字符串 ⇒ fail-closed
+[test] ⑧ MUST-2(NWT 账本1623/1624): deferReservationReconciliation——不确定结果(IPC 超时/无响应)期间保持预留, 到期才对账释放/移交; 用假 scheduler 捕获回调手动触发(不真的等 30s):
+  ✅ deferReservationReconciliation 调度了一次, 超时值原样透传给 scheduler
+  ✅ MUST-2: 调用 defer 本身不释放——超时路径在到期回调真正触发之前必须保持预留(否则复现 A 臂窗口, 只是把窗口从"选择前"挪到"IPC 不确定期间")
+  ✅ MUST-2: 到期对账(checkPreparedInDb 返回 false, 无痕迹)⇒ 释放, 之后可被别的选择拿到
+  ✅ 同样: defer 调用本身不释放
+  ✅ MUST-2: 到期对账发现 DB 已有 prepared 字节 ⇒ 移交 DB 层(从内存层移除, 但不是"当没发生过")
+  ✅ 不传 scheduler/timeoutMs 时默认用 setTimeout + RESERVATION_UNCERTAIN_TIMEOUT_MS
+[test] ⑨ MUST(账本1626, NWT 二轮指出的覆盖洞): 直接对 proto_markets(genesis)/proto_bet_intents(下注)各喂一行非终态行, 断言 reservedFeeOutpoints 返回集里真的含它们的 outpoint——不经 simulateIngestPrepared 这类"写完立刻强推终态"的高层 fixture(那类 fixture 从结构上就制造不出"非终态 genesis_prepared 行 + 另一次选择在跑"这个窗口, 把 SOURCES 砍回只剩 proto_settlement_intents 也测不红, 见下面的突变记录):
+  ✅ ⑨a: proto_markets 的 genesis_prepared 非终态行(genesis_prepared_tx_json 真实设过)⇒ 其 outpoint 出现在 reservedFeeOutpoints 的返回集里(直接验证, 不靠高层 fixture 侧面推断)
+  ✅ ⑨b: proto_bet_intents 的 prepared 非终态行(prepared_tx_json 真实设过)⇒ 其 outpoint 出现在 reservedFeeOutpoints 的返回集里
+  ✅ 突变记录: SOURCES 若被砍回只剩 proto_settlement_intents(手写等价查询模拟), 上面这个真实存在的 proto_markets 非终态行会被漏看——证明 ⑨a/⑨b 在"SOURCES 少一条"时确实会变红, 不是摆设
+  ✅ 对照: 真实 reservedFeeOutpoints(三张表完整)不漏看这一行
+
+✅✅ ALL PASS — proto-fee-reservation(DB 派生层 M1/M3 + 进程内层 T-race/释放/对账/遥测)

@@ -1,0 +1,22 @@
+真实突变(NWT 账本1626 要求, 不是手写等价查询的替代——两者都做了):
+把 kasia-console/src/lib/proto-fee-reservation.mjs 的 SOURCES 从三条砍回只剩
+proto_settlement_intents 那一条(用 node -e 原地替换文件内容), 跑
+kasia-console/src/lib/proto-fee-reservation.test.mjs, 核对新增的 ⑨a/⑨b 两条测试
+(直接对 proto_markets/proto_bet_intents 各喂一行非终态行, 断言其 outpoint 出现在
+reservedFeeOutpoints 返回集里)确实变红, 然后 cp 原文件恢复, diff 核对逐字节一致。
+
+BEFORE(全绿基线, 见 green/proto-fee-reservation.test.mjs.txt): 全部 PASS
+
+突变后(SOURCES 只剩一条):
+  ❌ ⑨a: proto_markets 的 genesis_prepared 非终态行(genesis_prepared_tx_json 真实设过)⇒ 其 outpoint 出现在 reservedFeeOutpoints 的返回集里(直接验证, 不靠高层 fixture 侧面推断): false
+  ❌ ⑨b: proto_bet_intents 的 prepared 非终态行(prepared_tx_json 真实设过)⇒ 其 outpoint 出现在 reservedFeeOutpoints 的返回集里: false
+  ✅ 突变记录: SOURCES 若被砍回只剩 proto_settlement_intents(手写等价查询模拟), 上面这个真实存在的 proto_markets 非终态行会被漏看——证明 ⑨a/⑨b 在"SOURCES 少一条"时确实会变红, 不是摆设
+  ❌ 对照: 真实 reservedFeeOutpoints(三张表完整)不漏看这一行: false
+❌ 3 assertions failed
+
+RESTORE: cp 原文件覆盖回去, diff 逐字节一致(IDENTICAL: restore confirmed byte-for-byte)。
+
+恢复后重跑: 全部 PASS(见 green/proto-fee-reservation.test.mjs.txt, 本批交付时的最终结果)。
+
+结论: 新增的 ⑨a/⑨b 两条测试对"SOURCES 砍回一条"这个突变真的会变红, 不是摆设,
+满足 NWT 账本1626 的要求。

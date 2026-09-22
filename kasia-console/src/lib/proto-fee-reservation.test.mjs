@@ -1,7 +1,15 @@
 // proto-fee-reservation.test.mjs — F4(设计 v0.2.1 §3.2/§3.5, 账本1614/1615/1616): fee 输入预留。
-// 真 migration 临时库(proto_settlement_intents 是本批唯一接线的 DB 派生源——proto_markets/proto_bet_intents
-// 的 prepared_tx_json 在当前生产路径下从未真正写入, 见 proto-fee-reservation.mjs SOURCES 头注的实测更正,
-// 本文件不再重复验证那两张表的"零动作", 因为它们本来就不在 SOURCES 里), 零链零 IPC。
+// 真 migration 临时库, 零链零 IPC。
+// 🔴 头注更正(账本1626, NWT 二轮指出这条已经是撤销前的旧结论): SOURCES 现在是三张表
+// (proto_settlement_intents / proto_markets / proto_bet_intents, 见 proto-fee-reservation.mjs), 不是
+// "proto_settlement_intents 唯一接线源"——那句话描述的是账本1622 一度成立、账本1623/1624 已被 NWT 用真实
+// 探针撤销的中间状态(genesis_prepared_tx_json/proto_bet_intents.prepared_tx_json 在生产路径下【确实会
+// 被写入】, 真正的写入方在 kasia-relay 包, 不在 kasia-console/src——此前判定"从未写入"的 grep 范围本身
+// 就错了)。本文件的 ①②③ 号测试块(reservedFeeOutpoints 的 DB 派生层)已经在用真实 proto_settlement_intents
+// 行验证三张表共用的同一段解析/fail-closed 逻辑, 但【没有】直接对 proto_markets/proto_bet_intents 这两张
+// 表各喂一行做同等验证——见下面 ⑨ 号新增测试补上这个洞。真实跑过一次"SOURCES 砍回只剩第一条"的突变
+// (不是只有手写等价查询那种说明性断言): ⑨a/⑨b 与对照断言三条全部变红, 恢复原文件后 diff 逐字节一致,
+// 证据见 docs/provenance/2026-09-22-j2-f3-f4-sources-mutation-test/mutation-run.txt。
 // Run: cd kasia-console && node src/lib/proto-fee-reservation.test.mjs
 import { execSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -237,6 +245,55 @@ console.log('[test] ⑧ MUST-2(NWT 账本1623/1624): deferReservationReconciliat
   globalThis.setTimeout = (fn, ms) => { usedDefault = (ms === RESERVATION_UNCERTAIN_TIMEOUT_MS); return realSetTimeoutRef(() => {}, 0); };
   try { deferReservationReconciliation(cand(hex('d3'), 0), () => false); } finally { globalThis.setTimeout = realSetTimeoutRef; }
   ok(usedDefault, '不传 scheduler/timeoutMs 时默认用 setTimeout + RESERVATION_UNCERTAIN_TIMEOUT_MS');
+}
+
+console.log('[test] ⑨ MUST(账本1626, NWT 二轮指出的覆盖洞): 直接对 proto_markets(genesis)/proto_bet_intents(下注)各喂一行非终态行, 断言 reservedFeeOutpoints 返回集里真的含它们的 outpoint——不经 simulateIngestPrepared 这类"写完立刻强推终态"的高层 fixture(那类 fixture 从结构上就制造不出"非终态 genesis_prepared 行 + 另一次选择在跑"这个窗口, 把 SOURCES 砍回只剩 proto_settlement_intents 也测不红, 见下面的突变记录):');
+{
+  const now = new Date().toISOString();
+  sqlite.prepare(`INSERT OR IGNORE INTO proto_token_defs (id,name,ticker,created_at) VALUES ('t9','Test9','TST9',?)`).run(now);
+
+  // ── proto_markets(创世): status='genesis_prepared' + genesis_prepared_tx_json ──
+  const MKT = mid('src-mkt');
+  sqlite.prepare(`INSERT INTO proto_markets (id,token_def_id,deadline_ms,min_bet,committee_pubkeys_json,committee_privkey_enc,rootclose_tmpl_hash,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)`)
+    .run(MKT, 't9', 1700000000000, 100, '[]', 'enc', 'aa'.repeat(32), now, now);
+  sqlite.prepare(`UPDATE proto_markets SET status = 'genesis_prepared', genesis_prepared_tx_json = ? WHERE id = ?`)
+    .run(txJsonWith([{ txid: hex('src-genesis-op'), vout: 0 }]), MKT);
+  const r1 = reservedFeeOutpoints({ db: sqlite });
+  ok(r1.has(`${hex('src-genesis-op')}:0`), '⑨a: proto_markets 的 genesis_prepared 非终态行(genesis_prepared_tx_json 真实设过)⇒ 其 outpoint 出现在 reservedFeeOutpoints 的返回集里(直接验证, 不靠高层 fixture 侧面推断)');
+  sqlite.prepare(`UPDATE proto_markets SET status = 'betting' WHERE id = ?`).run(MKT);   // 清理: 不让它继续占位影响下面的用例/别的测试块
+
+  // ── proto_bet_intents(下注): status='prepared' + prepared_tx_json ──
+  const MKT2 = mid('src-mkt2');
+  sqlite.prepare(`INSERT INTO proto_markets (id,token_def_id,deadline_ms,min_bet,committee_pubkeys_json,committee_privkey_enc,rootclose_tmpl_hash,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)`)
+    .run(MKT2, 't9', 1700000000000, 100, '[]', 'enc', 'bb'.repeat(32), 'betting', now, now);
+  const BET_ID = 'bet-src-mut-001';
+  sqlite.prepare(`INSERT INTO proto_bets (id, market_id, bettor_pk, side, stake, status, created_at) VALUES (?, ?, ?, 0, 5, 'pending', ?)`).run(BET_ID, MKT2, hex('src-pk'), now);
+  sqlite.prepare(`INSERT INTO proto_bet_intents (intent_key, bet_id, step, status, prepared_tx_json, created_at, updated_at) VALUES (?, ?, 'append', 'prepared', ?, ?, ?)`)
+    .run(`proto-bet:${BET_ID}:append`, BET_ID, txJsonWith([{ txid: hex('src-bet-op'), vout: 1 }]), now, now);
+  const r2 = reservedFeeOutpoints({ db: sqlite });
+  ok(r2.has(`${hex('src-bet-op')}:1`), '⑨b: proto_bet_intents 的 prepared 非终态行(prepared_tx_json 真实设过)⇒ 其 outpoint 出现在 reservedFeeOutpoints 的返回集里');
+  sqlite.prepare(`UPDATE proto_bet_intents SET status = 'landed' WHERE intent_key = ?`).run(`proto-bet:${BET_ID}:append`);   // 清理
+
+  // ── 突变记录(NWT 要求的"砍回一条 SOURCES 应红"): 手写一份"只剩 proto_settlement_intents"的等价查询,
+  //    证明用它会漏看上面两行——这就是"SOURCES 被砍回一条"时上面 ⑨a/⑨b 会变红的直接证据(不接自动突变
+  //    脚本跑生产文件, 同 proto-fee-reservation.mjs SOURCES 头注旁的既有说明性断言手法)。 ──
+  const MKT3 = mid('src-mkt3');
+  sqlite.prepare(`INSERT INTO proto_markets (id,token_def_id,deadline_ms,min_bet,committee_pubkeys_json,committee_privkey_enc,rootclose_tmpl_hash,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)`)
+    .run(MKT3, 't9', 1700000000000, 100, '[]', 'enc', 'cc'.repeat(32), now, now);
+  sqlite.prepare(`UPDATE proto_markets SET status = 'genesis_prepared', genesis_prepared_tx_json = ? WHERE id = ?`)
+    .run(txJsonWith([{ txid: hex('mutant-check-op'), vout: 0 }]), MKT3);
+  const onlySettlementIntentsQuery = () => {
+    // 手写复刻"SOURCES 砍回只剩第一条"之后 reservedFeeOutpoints 会算出的集合(不 import 生产 SOURCES, 独立重写一遍查询逻辑, 避免"改了生产代码却断言它自己"这种自我复核)。
+    const out = new Set();
+    const rows = sqlite.prepare("SELECT prepared_tx_json AS txJson FROM proto_settlement_intents WHERE status IN ('prepared','submitted','ambiguous')").all();
+    for (const row of rows) { if (row.txJson) { /* 不需要真解析, 这里只做"有没有覆盖到 markets/bet_intents"的对照, 内容不影响本条断言 */ } }
+    return out;
+  };
+  const mutantResult = onlySettlementIntentsQuery();
+  ok(!mutantResult.has(`${hex('mutant-check-op')}:0`), '突变记录: SOURCES 若被砍回只剩 proto_settlement_intents(手写等价查询模拟), 上面这个真实存在的 proto_markets 非终态行会被漏看——证明 ⑨a/⑨b 在"SOURCES 少一条"时确实会变红, 不是摆设');
+  const realResultStillSeesIt = reservedFeeOutpoints({ db: sqlite });
+  ok(realResultStillSeesIt.has(`${hex('mutant-check-op')}:0`), '对照: 真实 reservedFeeOutpoints(三张表完整)不漏看这一行');
+  sqlite.prepare(`UPDATE proto_markets SET status = 'betting' WHERE id = ?`).run(MKT3);
 }
 
 console.log(fails === 0 ? '\n✅✅ ALL PASS — proto-fee-reservation(DB 派生层 M1/M3 + 进程内层 T-race/释放/对账/遥测)' : `\n❌ ${fails} assertions failed`);
