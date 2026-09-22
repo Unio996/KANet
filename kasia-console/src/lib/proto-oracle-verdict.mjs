@@ -1,18 +1,12 @@
-// proto-oracle-verdict.mjs — oracle 整合批 B: derive 结果 → verdict 行的【纯逻辑】(B1 贴标 / B2·B4 写入决策表 / B3 side 映射 / 证据引用 / UMA 窗断言)。
-// 设计 docs/2026-09-20-bettor-oracle-batchB-adapter-verdict-promote-design-v0.1.md §2 / §10 B1–B4 / §11。无 DB / 无 IO / 无 process.env 直读。
-// 🔴 批 A / 批 D 全靠 source_kind 标签: 赞成集仅 extractor / uma, llm / human 只能触发冻结。所以贴标错 = LLM 结果以 extractor 进赞成集(门拦不住)——
-//    classifySourceKind 是全仓【唯一】贴标函数, 只有两条路能得到非 llm: ① kanet 路且 extractor_kind_used==='judgeline-deterministic' ⇒ extractor;
-//    ② polymarket 路且 ok:true(derivePolymarketVote 已过 UMA 定稿窗)⇒ uma。其余一切(含未知 / 新增的 extractor_kind_used)一律 llm。
+// proto-oracle-verdict.mjs — oracle 整合批 B: derive 结果 → verdict 行的【纯逻辑】(B1 贴标 / B2·B4 写入决策表 / B3 side 映射 / 证据引用)。
+// 设计 docs/2026-09-20-bettor-oracle-batchB-adapter-verdict-promote-design-v0.1.md §2 / §10 B1–B4 / §11;
+// D-032 v0.2.4 §2.2(单口径)删 uma 分支与极性翻转、UMA 窗断言(assertUmaWindowSafe/UMA_MIN_FINALIZATION_WINDOW_MS,
+// 只服务于已删的 polymarket 路,连同其在 proto-oracle-adapter-core.mjs/services/proto-oracle-adapter.mjs 的调用点一并清)。
+// 无 DB / 无 IO / 无 process.env 直读。
+// 🔴 批 A / 批 D 全靠 source_kind 标签: 赞成集仅 extractor, llm / human 只能触发冻结。所以贴标错 = LLM 结果以 extractor 进赞成集(门拦不住)——
+//    classifySourceKind 是全仓【唯一】贴标函数, 只有一条路能得到非 llm: kanet 路且 extractor_kind_used==='judgeline-deterministic' ⇒ extractor。
+//    其余一切(含未知 / 新增的 extractor_kind_used)一律 llm。
 import { createHash } from 'node:crypto';
-
-export const UMA_MIN_FINALIZATION_WINDOW_MS = 24 * 60 * 60 * 1000;   // proto 路径拒 <24h(B1)
-
-/** SHOULD①: UMA_FINALIZATION_WINDOW_MS(voter 导出的生效值)必须是有限数且 ≥ 24h——NaN 会让 voter 里 `> 0` 判定为假 = 定稿窗被静默关掉, 所以先断言 finite。 */
-export function assertUmaWindowSafe(windowMs) {
-  if (typeof windowMs !== 'number' || !Number.isFinite(windowMs)) return { ok: false, reason: `UMA_FINALIZATION_WINDOW_MS 生效值不是有限数(${String(windowMs)}): voter 的 \`> 0\` 判定为假 ⇒ 定稿窗被静默关闭` };
-  if (windowMs < UMA_MIN_FINALIZATION_WINDOW_MS) return { ok: false, reason: `UMA_FINALIZATION_WINDOW_MS=${windowMs} < 24h(${UMA_MIN_FINALIZATION_WINDOW_MS}): proto 路径拒绝(未定稿的 UMA 结果会被贴 uma)` };
-  return { ok: true };
-}
 
 // ── B2 extractor_kind_used → 暂态 / 实质(未知值按暂态) ──
 // 实质 = 源已 final 但判不出 / 明确弃权(写 NULL, 计入异议集 ⇒ 冻结); 暂态 = 还没法判(不写, 下 tick 重试到 cutoff)。
@@ -23,23 +17,17 @@ export const SUBSTANTIVE_ABSTAIN_KINDS = Object.freeze({
 });
 export const TRANSIENT_ABSTAIN_KINDS = Object.freeze(['known-source-not-final', 'extractor-exception', 'no-extractor-match']);
 
-const flip = (label) => (label === 'YES' ? 'NO' : label === 'NO' ? 'YES' : null);
 const isYesNo = (o) => o === 'YES' || o === 'NO';
 
 /**
  * 单一贴标 + 分类。
- * @param {{branch: 'extractor'|'uma', result: object|null}} o  branch = adapter 调的是哪一路(kanet 路 / polymarket 路), result = 该路 derive* 的返回
- * @returns {{cls: 'vote'|'substantive_abstain'|'transient', kind: 'extractor'|'uma'|'llm'|null, label?: 'YES'|'NO', reason: string}}
+ * @param {{branch: 'extractor', result: object|null}} o  branch = adapter 调的是哪一路(D-032 单口径下只剩 kanet 路), result = derive* 的返回
+ * @returns {{cls: 'vote'|'substantive_abstain'|'transient', kind: 'extractor'|'llm'|null, label?: 'YES'|'NO', reason: string}}
  */
 export function classifyDerivation({ branch, result }) {
-  if (branch !== 'extractor' && branch !== 'uma') throw new RangeError(`classifyDerivation: 未知 branch ${JSON.stringify(branch)}`);
+  if (branch !== 'extractor') throw new RangeError(`classifyDerivation: 未知 branch ${JSON.stringify(branch)}(D-032 单口径后只接受 'extractor')`);
   const r = result && typeof result === 'object' ? result : null;
   if (!r) return { cls: 'transient', kind: null, reason: 'no_result' };
-  if (branch === 'uma') {
-    // polymarket 路只有"过了定稿窗的 ok:true 明确 YES/NO"才是 uma 票; 其余(未 resolved / 定稿窗未到 / 取数失败 / 缺条件 …)全是暂态。
-    if (r.ok === true && isYesNo(r.outcome)) return { cls: 'vote', kind: 'uma', label: r.outcome, reason: 'uma_finalized' };
-    return { cls: 'transient', kind: null, reason: `uma_not_ready: ${String(r.reason || r.outcome || 'unknown').slice(0, 120)}` };
-  }
   // kanet 路
   if (r.ok === true) {
     if (isYesNo(r.outcome)) {
@@ -71,21 +59,17 @@ export function normalizeSideMap(sideMap) {
 }
 
 /**
- * 三源共用的 label → side(0/1)。UMA 走 polymarket 极性: polymarketOutcomeSide==='NO' ⇒ 反极性(Polymarket 的 YES 对应 KANet 的 no)。
+ * label → side(0/1)(D-032 单口径:不再有第二裁判的极性翻转,直接按 side_map 查)。
  * @param {'YES'|'NO'} label  derive* 返回的 outcome
- * @param {{sideMap: object, branch: 'extractor'|'uma', polymarketOutcomeSide?: 'YES'|'NO'}} ctx
+ * @param {{sideMap: object, branch: 'extractor'}} ctx
  * @returns {0|1}  非法输入抛错(不猜)
  */
-export function toSide(label, { sideMap, branch, polymarketOutcomeSide } = {}) {
+export function toSide(label, { sideMap, branch } = {}) {
   const sm = normalizeSideMap(sideMap);
   if (!sm) throw new TypeError('toSide: side_map 非法(须 label→side 双射 {yes,no}→{0,1})');
   if (!isYesNo(label)) throw new RangeError(`toSide: label 必须是 YES|NO: ${JSON.stringify(label)}`);
-  let eff = label;
-  if (branch === 'uma') {
-    if (polymarketOutcomeSide !== 'YES' && polymarketOutcomeSide !== 'NO') throw new RangeError('toSide: uma 路必须显式 polymarketOutcomeSide(YES|NO)');
-    if (polymarketOutcomeSide === 'NO') eff = flip(label);
-  } else if (branch !== 'extractor') throw new RangeError(`toSide: 未知 branch ${JSON.stringify(branch)}`);
-  return sm[eff.toLowerCase()];
+  if (branch !== 'extractor') throw new RangeError(`toSide: 未知 branch ${JSON.stringify(branch)}(D-032 单口径后只接受 'extractor')`);
+  return sm[label.toLowerCase()];
 }
 
 // ── 证据引用(evidence_ref 必填非空白; 同 (市场, source_kind, 证据哈希) 至多一条) ──

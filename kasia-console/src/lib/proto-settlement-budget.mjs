@@ -153,7 +153,7 @@ export function evaluateBetIntakeGate({ market, pmt = null, wallMs = null }) {
 }
 
 // ── §1 promote 门 ──
-const AUTO_KINDS = Object.freeze(['extractor', 'uma']);
+const AUTO_KINDS = Object.freeze(['extractor']);   // D-032 §2.3(单口径): 去 uma——赞成集只剩 ESPN 确定性裁判
 /**
  * promote(verdict → winning_side)的六前置(纯函数; 本批不接调用方——批 B 的 adapter 调它, 再用 PROMOTE_UPDATE_SQL 写值)。
  * @param {object} o
@@ -191,15 +191,19 @@ export function evaluatePromoteGate({ market, verdicts, bets, pmt, wallMs, cfg, 
   // M1(NWT 批 D 复核, Bettor 拍): 【冻结集】= 该市场所有 verdict——extractor / uma / human / llm, 不论 pmt_at 是否为 NULL、不论早晚(adapter 读 pmt 失败时写下的异议 pmt_at 为 NULL, 不能被无视 = fail-open)。
   //   冻结集里出现 outcome 非 0/1(NULL 弃权 / 异议)或彼此不一致(即与将要获批的胜方不同)⇒ freeze。AI(llm)能提异议冻结、不能批准(批准集不含 llm)——fail-safe。SHOULD 票: 监控 llm 噪声致虚假冻结率。
   const allVerdicts = verdicts || [];
+  // D-032 §2.3 新增守卫(单口径下不该存在的第二裁判/AI 裁判票——fail-safe: D-030 AI 不进出口闸, llm 票既不能批也不该出现在这张表里)。
+  // 放在 abstain_or_dispute / inconsistent_verdicts 之前: 单口径下每市场每路(extractor)只 derive 一次(B2),
+  // 正常运行永远只有 0 或 1 条 extractor verdict ⇒ 下面两行在没有 unexpected 票时不可达(测试证明,见 §7)。
+  if (allVerdicts.some((v) => !AUTO_KINDS.includes(v.source_kind))) return { action: 'freeze', reason: 'unexpected_verdict_kind' };
   if (allVerdicts.some((v) => v.outcome !== 0 && v.outcome !== 1)) return { action: 'freeze', reason: 'abstain_or_dispute' };
   if (new Set(allVerdicts.map((v) => v.outcome)).size > 1) return { action: 'freeze', reason: 'inconsistent_verdicts' };
-  // 赞成集(不变, N1): 仅 pmt_at 为安全整数且 ≥ outcome_end_ms 的 extractor / uma verdict 计入一致性与被引用
+  // 赞成集(D-032 单口径, N1 沿用): 仅 pmt_at 为安全整数且 ≥ outcome_end_ms 的 extractor verdict 计入一致性与被引用;
+  // consistencyMetAt = 首条(pmt_at 最早)合格 extractor 票的 pmt_at——不再需要"≥2 种 kind"才算一致(只剩一种 kind)。
   const eligible = allVerdicts.filter((v) => AUTO_KINDS.includes(v.source_kind) && Number.isSafeInteger(v.pmt_at) && v.pmt_at >= oe)
     .sort((a, b) => (a.pmt_at - b.pmt_at) || (a.id - b.id));
-  const kinds = new Set();
-  let consistencyMetAt = null, metVerdict = null;
-  for (const v of eligible) { kinds.add(v.source_kind); if (kinds.size >= 2) { consistencyMetAt = v.pmt_at; metVerdict = v; break; } }   // N1: 行推, 不存列
-  if (consistencyMetAt === null) return { action: 'wait', reason: 'awaiting_second_source' };
+  const metVerdict = eligible[0] || null;
+  const consistencyMetAt = metVerdict ? metVerdict.pmt_at : null;
+  if (consistencyMetAt === null) return { action: 'wait', reason: 'awaiting_canonical_verdict' };
   const upperMs = cutoff - consistencyMetAt - cfg.closePipelineMarginMs;                           // N6
   if (upperMs < cfg.graceMs) return { action: 'freeze', reason: 'late_seal', upperMs };       // F2: 与 evaluateLateSeal 同判据(装不下完整宽限 ⇒ 冻结, 不压缩)
   const effectiveGraceMs = cfg.graceMs;                                                        // F2: 过了上一行 ⇒ upperMs ≥ graceMs, 宽限恒为完整 graceMs(原 Math.min(graceMs, upperMs) 的压缩已删)

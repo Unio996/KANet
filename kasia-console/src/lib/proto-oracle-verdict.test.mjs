@@ -51,19 +51,10 @@ await t('B1 ▲ 真 Qwen 路(无 predicate ⇒ LLM 判)的有 outcome 结果 ⇒
   // 未知 / 新增的 extractor_kind_used(将来有人加了新路径)+ 有 outcome ⇒ 一律 llm
   for (const k of ['some-new-deterministic-kind', 'judgeline-deterministic-v2', '', null, undefined, 'JUDGELINE-DETERMINISTIC']) { const cc = V.classifyDerivation({ branch: 'extractor', result: { ok: true, outcome: 'NO', extractor_kind_used: k } }); assert.deepEqual([cc.cls, cc.kind], ['vote', 'llm'], String(k)); }
 });
-await t('B1 真 derivePolymarketVote: 过定稿窗的明确 YES/NO ⇒ uma; 定稿窗未到 / 未 resolved / 404 / HTTP 错 / 抛错 ⇒ 暂态(绝不贴 uma)', async () => {
-  const gamma = (mk) => { stub('https://gamma-api.polymarket.com/', async () => ok(JSON.stringify(mk()))); };
-  const old = new Date(Date.now() - 100 * 3600e3).toISOString(), recent = new Date(Date.now() - 3600e3).toISOString();
-  gamma(() => [{ outcomePrices: '["1","0"]', closed: true, closedTime: old }]); let r = await voter.derivePolymarketVote({ outcome_condition_id: '0x' + 'ab'.repeat(32) });
-  assert.equal(r.ok, true); let c = V.classifyDerivation({ branch: 'uma', result: r }); assert.deepEqual([c.cls, c.kind, c.label], ['vote', 'uma', 'YES']);
-  gamma(() => [{ outcomePrices: '["0","1"]', closed: true, closedTime: old }]); r = await voter.derivePolymarketVote({ outcome_condition_id: '0x' + 'ab'.repeat(32) }); c = V.classifyDerivation({ branch: 'uma', result: r }); assert.equal(c.label, 'NO');
-  gamma(() => [{ outcomePrices: '["1","0"]', closed: true, closedTime: recent }]); r = await voter.derivePolymarketVote({ outcome_condition_id: '0x' + 'ab'.repeat(32) });
-  assert.equal(r.ok, false); assert.equal(r.finalization_pending, true); c = V.classifyDerivation({ branch: 'uma', result: r }); assert.deepEqual([c.cls, c.kind], ['transient', null], 'UMA 未定稿(ok:false)⇒ 暂态, 不写 NULL、不贴 uma');
-  gamma(() => [{ outcomePrices: '["0.6","0.4"]', closed: true, closedTime: old }]); r = await voter.derivePolymarketVote({ outcome_condition_id: '0x' + 'ab'.repeat(32) }); assert.equal(V.classifyDerivation({ branch: 'uma', result: r }).cls, 'transient');
-  gamma(() => []); r = await voter.derivePolymarketVote({ outcome_condition_id: '0x' + 'ab'.repeat(32) }); assert.equal(V.classifyDerivation({ branch: 'uma', result: r }).cls, 'transient');
-  stub('https://gamma-api.polymarket.com/', async () => { throw new Error('boom'); }); r = await voter.derivePolymarketVote({ outcome_condition_id: '0x' + 'ab'.repeat(32) }); assert.equal(V.classifyDerivation({ branch: 'uma', result: r }).cls, 'transient');
-  // uma 路上即使有人伪造成 ok:true 但 outcome 非 YES/NO ⇒ 也不是票
-  assert.equal(V.classifyDerivation({ branch: 'uma', result: { ok: true, outcome: 'ABSTAIN' } }).cls, 'transient');
+await t('B1 ▲ D-032 §2.2: classifyDerivation 只认 branch=extractor, 传 uma(或任何其它值)⇒ 抛 RangeError(单口径下没有第二裁判分支)', () => {
+  assert.throws(() => V.classifyDerivation({ branch: 'uma', result: { ok: true, outcome: 'YES' } }), RangeError, /D-032/);
+  assert.throws(() => V.classifyDerivation({ branch: 'human', result: {} }), RangeError);
+  assert.throws(() => V.classifyDerivation({ branch: 'polymarket', result: { ok: true, outcome: 'YES' } }), RangeError);
 });
 await t('B1 分类矩阵: kanet 路各真实形态——已 final 的实质弃权 ⇒ substantive(NULL 行); 暂态 ⇒ 不写; LLM 低置信 ⇒ 实质; LLM 取数 / HTTP / 无 provider 失败 ⇒ 暂态; 未知 extractor_kind_used 的 ABSTAIN ⇒ 暂态', async () => {
   stub('https://site.api.espn.com/', async () => ok(espnJson({ homeWins: true })));
@@ -87,42 +78,21 @@ await t('B1 分类矩阵: kanet 路各真实形态——已 final 的实质弃�
   assert.throws(() => V.classifyDerivation({ branch: 'human', result: {} }), RangeError);
 });
 
-// ══ B1: UMA 窗断言 ═══════════════════════════════════════════════════════════════════════════════
-await t('B1/SHOULD① UMA 窗: voter 导出生效值(默认 48h); assertUmaWindowSafe: NaN / Infinity / 非数字 / 0 / 负 / <24h ⇒ 拒; = 24h / 48h ⇒ 过; NaN 场景(env 写成非数字)真的会让 voter 定稿窗静默关闭', async () => {
-  assert.equal(voter.UMA_FINALIZATION_WINDOW_MS, 48 * 3600e3); assert.equal(V.assertUmaWindowSafe(voter.UMA_FINALIZATION_WINDOW_MS).ok, true);
-  for (const bad of [NaN, Infinity, -Infinity, undefined, null, '172800000', 0, -1, 24 * 3600e3 - 1, 3600e3]) assert.equal(V.assertUmaWindowSafe(bad).ok, false, String(bad));
-  for (const good of [24 * 3600e3, 48 * 3600e3, 72 * 3600e3]) assert.equal(V.assertUmaWindowSafe(good).ok, true, String(good));
-  assert.equal(V.UMA_MIN_FINALIZATION_WINDOW_MS, 24 * 3600e3);
-  // 旁证: voter 里 NaN 使 `> 0` 为假 ⇒ 未定稿的 UMA 结果直接 ok:true(这正是 finite 断言存在的原因)
-  assert.equal(parseInt('abc', 10) > 0, false);
-});
+// D-032 §2.2: assertUmaWindowSafe / UMA_MIN_FINALIZATION_WINDOW_MS 已删(只服务已删的 polymarket 路), 不再有对应测试。
 
 // ══ B3: side 映射 ════════════════════════════════════════════════════════════════════════════════
-await t('B3 ▲ side_map 双射校验 + toSide 真值表: 两种 side_map × 三源(extractor / llm 同路 / uma)× UMA 两种极性 × YES/NO; 非法输入抛错(不猜)', () => {
+await t('B3 ▲ side_map 双射校验 + toSide 真值表(D-032 单口径: 只剩 extractor 一条 branch, 无极性翻转); 非法输入抛错(不猜)', () => {
   const normal = { yes: 0, no: 1 }, swapped = { yes: 1, no: 0 };
   assert.deepEqual(V.normalizeSideMap(normal), { yes: 0, no: 1 }); assert.deepEqual(V.normalizeSideMap(swapped), { yes: 1, no: 0 });
   for (const bad of [null, undefined, [], 'x', {}, { yes: 0 }, { yes: 0, no: 0 }, { yes: 1, no: 1 }, { yes: 0, no: 2 }, { yes: '0', no: '1' }, { yes: 0, no: 1, maybe: 2 }, { YES: 0, NO: 1 }, { yes: true, no: false }]) assert.equal(V.normalizeSideMap(bad), null, JSON.stringify(bad));
-  // extractor 路(极性不适用)
   assert.equal(V.toSide('YES', { sideMap: normal, branch: 'extractor' }), 0); assert.equal(V.toSide('NO', { sideMap: normal, branch: 'extractor' }), 1);
   assert.equal(V.toSide('YES', { sideMap: swapped, branch: 'extractor' }), 1); assert.equal(V.toSide('NO', { sideMap: swapped, branch: 'extractor' }), 0);
-  // uma 路: polymarket_outcome_side 'YES' = 同极性; 'NO' = 反极性(Polymarket YES ⇒ 本市场 no)
-  for (const [sm, pol, label, want] of [[normal, 'YES', 'YES', 0], [normal, 'YES', 'NO', 1], [normal, 'NO', 'YES', 1], [normal, 'NO', 'NO', 0], [swapped, 'YES', 'YES', 1], [swapped, 'YES', 'NO', 0], [swapped, 'NO', 'YES', 0], [swapped, 'NO', 'NO', 1]]) assert.equal(V.toSide(label, { sideMap: sm, branch: 'uma', polymarketOutcomeSide: pol }), want, `${JSON.stringify(sm)} pol=${pol} ${label}`);
-  assert.throws(() => V.toSide('YES', { sideMap: normal, branch: 'uma' }), RangeError, 'uma 不显式极性 ⇒ 抛'); assert.throws(() => V.toSide('YES', { sideMap: normal, branch: 'uma', polymarketOutcomeSide: 'MAYBE' }), RangeError);
+  assert.throws(() => V.toSide('YES', { sideMap: normal, branch: 'uma' }), RangeError, 'D-032: uma branch 已不再是合法值 ⇒ 抛');
   assert.throws(() => V.toSide('yes', { sideMap: normal, branch: 'extractor' }), RangeError, 'label 必须大写 YES|NO(引擎输出)'); assert.throws(() => V.toSide('ABSTAIN', { sideMap: normal, branch: 'extractor' }), RangeError);
   assert.throws(() => V.toSide('YES', { sideMap: { yes: 0, no: 0 }, branch: 'extractor' }), TypeError); assert.throws(() => V.toSide('YES', { sideMap: normal, branch: 'other' }), RangeError);
 });
-await t('B3 ▲ 端到端极性(真生产者): 同一场比赛 LAL 赢——extractor 路 YES→side、UMA 路(Polymarket 问的是 BOS 赢? polymarket_outcome_side=NO ⇒ Polymarket 报 NO)→ 同一 side; 极性反对照臂: 错标极性 ⇒ 两源反着投 ⇒ 不一致', async () => {
-  stub('https://site.api.espn.com/', async () => ok(espnJson({ homeWins: true })));
-  const ex = await kanet(espnSpec({ resolution_predicate: { metric: 'winner', op: '==', operand: 'LAL' } }));            // LAL 赢 ⇒ YES
-  const old = new Date(Date.now() - 100 * 3600e3).toISOString();
-  stub('https://gamma-api.polymarket.com/', async () => ok(JSON.stringify([{ outcomePrices: '["0","1"]', closed: true, closedTime: old }])));   // Polymarket 问"BOS 赢?" ⇒ NO
-  const um = await voter.derivePolymarketVote({ outcome_condition_id: '0x' + 'cd'.repeat(32) });
-  const sm = { yes: 0, no: 1 };
-  const sExtractor = V.toSide(V.classifyDerivation({ branch: 'extractor', result: ex }).label, { sideMap: sm, branch: 'extractor' });
-  const sUmaRight = V.toSide(V.classifyDerivation({ branch: 'uma', result: um }).label, { sideMap: sm, branch: 'uma', polymarketOutcomeSide: 'NO' });
-  const sUmaWrong = V.toSide(V.classifyDerivation({ branch: 'uma', result: um }).label, { sideMap: sm, branch: 'uma', polymarketOutcomeSide: 'YES' });
-  assert.equal(sExtractor, 0); assert.equal(sUmaRight, 0, '极性正确 ⇒ 与 extractor 同 side'); assert.equal(sUmaWrong, 1, '对照臂: 极性标反 ⇒ 反着投(测试手段有效)');
-});
+// D-032: 旧的"端到端极性"测试比对 extractor 路与 UMA 路是否同 side——这条测试的前提(存在第二个可交叉核对的判定源)
+// 随第二裁判一起被删除了, 单口径下没有"两路互相核对极性"这件事, 不再有对应测试(不是漏了, 是这个场景不存在了)。
 
 // ══ B2 / B4: 写入决策表 ═════════════════════════════════════════════════════════════════════════
 const it_ = (o) => ({ branch: 'extractor', cls: 'vote', kind: 'extractor', side: 0, evidenceRef: 'u#sha256:a', confidence: null, ...o });
@@ -157,9 +127,9 @@ await t('B2 去重: 同 (source_kind, evidence_ref) 已存在 ⇒ 不重写(skip
   for (const bad of [{ cls: 'vote', kind: 'extractor', side: 1, evidenceRef: '' }, { cls: 'vote', kind: 'extractor', side: 1, evidenceRef: '   ' }, { cls: 'vote', kind: null, side: 1, evidenceRef: 'x' }, { cls: 'vote', kind: 'extractor', side: undefined, evidenceRef: 'x' }, { cls: 'vote', kind: 'extractor', side: 2, evidenceRef: 'x' }]) assert.equal(V.planVerdictWrites({ outcomeEndMs: 1, items: [it_(bad)], existing: [], pmt: P(1) }).writes.length, 0, JSON.stringify(bad));
 });
 
-await t('B1c ▲ ok:false 且带 outcome(YES/NO)的结果不是票: uma 路 {ok:false,outcome:"YES"} ⇒ 暂态 / kanet 路同 ⇒ 暂态(不得因 outcome 字段存在就当 uma / extractor 票); 对照 ok:true 才是票', () => {
-  for (const branch of ['uma', 'extractor']) for (const out of ['YES', 'NO']) { const c = V.classifyDerivation({ branch, result: { ok: false, outcome: out, reason: 'gamma not finalized', extractor_kind_used: 'judgeline-deterministic' } }); assert.equal(c.cls, 'transient', branch + '/' + out); assert.equal(c.kind, null); }
-  assert.equal(V.classifyDerivation({ branch: 'uma', result: { ok: true, outcome: 'YES' } }).kind, 'uma');
+await t('B1c ▲ ok:false 且带 outcome(YES/NO)的结果不是票: extractor 路 {ok:false,outcome:"YES"} ⇒ 暂态(不得因 outcome 字段存在就当票); 对照 ok:true 才是票', () => {
+  for (const out of ['YES', 'NO']) { const c = V.classifyDerivation({ branch: 'extractor', result: { ok: false, outcome: out, reason: 'not finalized', extractor_kind_used: 'judgeline-deterministic' } }); assert.equal(c.cls, 'transient', out); assert.equal(c.kind, null); }
+  assert.equal(V.classifyDerivation({ branch: 'extractor', result: { ok: true, outcome: 'YES', extractor_kind_used: 'judgeline-deterministic' } }).kind, 'extractor');
 });
 await t('M1 ▲ 批准票只在 pmt 有效 ∧ pmt >= outcomeEndMs 才写: pmt = oe−1 ⇒ 推迟(approval_deferred_pmt_before_outcome_end); = oe ⇒ 写(pmt_at=oe); > oe ⇒ 写; 异议 / 实质 ABSTAIN / 冲突各方不受此限(pmt<oe 也写); outcomeEndMs 缺 / 非法 ⇒ 抛(不静默放宽)', () => {
   const OE1 = 1000;

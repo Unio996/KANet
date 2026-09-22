@@ -6,13 +6,19 @@
 // 🔴 v0 自动 promote 只支持 ESPN(唯一有结构化字段 + judgeLine 确定性算术的源; coingecko 命中 findExtractor 但无 predicate 路 ⇒ 创建时拒)。
 import { findExtractor } from './oracle-evidence-extractors.mjs';
 import { judgeLine, validateResolutionPredicate } from './judgeline.mjs';
-import { normalizeSideMap, assertUmaWindowSafe } from './proto-oracle-verdict.mjs';
+import { normalizeSideMap } from './proto-oracle-verdict.mjs';
 import { JUDGED_COLUMNS, isJudgedMarket } from '../db/proto-judged.mjs';
 
-export const REQUIRED_SPEC_FIELDS = Object.freeze(['data_source_canonical', 'secondary_sources', 'ambiguity_handler', 'dispute_keywords', 'edge_case_examples']);   // 同老系统 bettor.js 的 5 必填
-export const ALLOWED_SPEC_KEYS = Object.freeze([...REQUIRED_SPEC_FIELDS, 'resolution_predicate', 'side_map', 'polymarket_outcome_side', 'title', 'resolution_criteria']);
-export const CONDITION_ID_RE = /^0x[0-9a-fA-F]{64}$/;
-export const JUDGED_BODY_KEYS = Object.freeze(['resolutionRuleSpec', 'outcomeEnd', 'outcomeConditionId']);   // 任一出现即触发全套判定题校验
+// D-032 v0.2.4(单口径): 判定题只剩一个确定性裁判(ESPN judgeLine),不再接受 Polymarket/UMA 第二裁判输入。
+export const REQUIRED_SPEC_FIELDS = Object.freeze(['data_source_canonical', 'secondary_sources', 'ambiguity_handler', 'dispute_keywords', 'edge_case_examples']);   // 同老系统 bettor.js 的 5 必填(判定代码不读取,§5 仅人工存档)
+export const ALLOWED_SPEC_KEYS = Object.freeze([...REQUIRED_SPEC_FIELDS, 'resolution_predicate', 'side_map', 'title', 'resolution_criteria']);   // D-032 §2.1 去 polymarket_outcome_side
+// D-032 §2.6-5: canonical_event / resolution_statement 只由服务端(建题流程通过身份核对+回签后)写入最终存储的
+// spec——不在 ALLOWED_SPEC_KEYS 里,请求体带这两键会被既有 "spec_unknown_field" 通用检查原样拒绝(与 relay 键
+// "请求体出现即拒" 同一处理原则),不需要单独的白名单/例外分支。SERVER_ONLY_SPEC_KEYS 只用来给 §2.6 建题流程
+// 在校验通过后合并进最终存储 JSON 时确认没有拼错键名(见 attachCanonicalEventToSpec)。
+export const SERVER_ONLY_SPEC_KEYS = Object.freeze(['canonical_event', 'resolution_statement']);
+export const CONDITION_ID_RE = /^0x[0-9a-fA-F]{64}$/;   // 仍导出:老系统 bettor.js 与既有测试引用,D-032 不动老系统
+export const JUDGED_BODY_KEYS = Object.freeze(['resolutionRuleSpec', 'outcomeEnd']);   // D-032 §2.1: 去 outcomeConditionId——任一出现即触发全套判定题校验
 const MAX_URL = 500, MAX_TEXT = 500, MAX_LIST = 20;
 
 const isPlainObject = (x) => x && typeof x === 'object' && !Array.isArray(x);
@@ -28,10 +34,25 @@ export function findRelayKeyInBody(body) {
  * SHOULD②(NWT 复核): 请求体里任何以 resolution / outcome 开头(不分大小写, 含蛇形 resolution_rule_spec / outcome_end / outcomeMarketSource 等)却不是已识别键的字段 ⇒ 返回该键(路由 400)。
  * 否则这类键会被静默丢弃、建成普通市场(="接受却丢弃")。已识别 = 判定题三键 + 既有的 resolutionNote(既有占位字段, 接受但目前无处存, 见路由注释)。
  */
-export const RECOGNIZED_RESOLUTION_OUTCOME_KEYS = Object.freeze(['resolutionRuleSpec', 'outcomeEnd', 'outcomeConditionId', 'resolutionNote']);
+export const RECOGNIZED_RESOLUTION_OUTCOME_KEYS = Object.freeze(['resolutionRuleSpec', 'outcomeEnd', 'resolutionNote', 'attestStatement']);   // D-032: 去 outcomeConditionId(不再是"识别但丢弃",是"识别且拒绝",见 findDualJudgeKeyInBody);§2.6-4 加 attestStatement(回签)
 export function findUnrecognizedJudgedShapedKey(body) {
   if (!isPlainObject(body)) return null;
   for (const k of Object.keys(body)) if (/^(resolution|outcome)/i.test(k) && !RECOGNIZED_RESOLUTION_OUTCOME_KEYS.includes(k)) return k;
+  return null;
+}
+/**
+ * D-032 §2.1(单口径): 请求体出现 outcomeConditionId,或任何 polymarket 前缀形状的键 ⇒ 拒(dual_judge_not_allowed)。
+ * 与 findUnrecognizedJudgedShapedKey 的区别:那个函数处理"没见过的形状键"(拼写错/新字段试探),
+ * 这个函数专门标记"曾经合法、现在明确不再接受的第二裁判输入"——需要一个更明确的错误码告诉调用方
+ * "不是拼错了,是这条路已经不通了",不能被 findUnrecognizedJudgedShapedKey 的通用错误信息掩盖。
+ * @returns {string|null} 命中的键名,或 null(放行)
+ */
+export function findDualJudgeKeyInBody(body) {
+  if (!isPlainObject(body)) return null;
+  for (const k of Object.keys(body)) {
+    if (k === 'outcomeConditionId') return k;
+    if (/^polymarket/i.test(k)) return k;
+  }
   return null;
 }
 /** 创建请求是否带了任一判定题字段(半套 = 400, 全缺省 = 今天的旧流程)。 */
@@ -55,26 +76,23 @@ export function dryRunPredicate(predicate, judge = judgeLine) {
 }
 
 /**
- * 判定题创建输入校验。
+ * 判定题创建输入校验(D-032 v0.2.4: 单口径,不再接受 outcomeConditionId / polymarket 第二裁判输入)。
  * @param {object} o
  * @param {string} o.title
  * @param {number} o.deadlineMs                 covenant deadline(毫秒, 已校验为未来)
  * @param {*} o.resolutionRuleSpec              对象(或 JSON 串)
  * @param {*} o.outcomeEndMs                    毫秒整数(或可转数的串)
- * @param {*} o.outcomeConditionId              Polymarket condition id(0x + 64 hex)
  * @param {{graceMs:number, closePipelineMarginMs:number}} o.budgetCfg  批 D resolveBudgetConfig().config
- * @param {number} o.umaWindowMs                voter 导出的 UMA_FINALIZATION_WINDOW_MS 生效值
  * @param {number} [o.adapterTickMs=300000]
  * @param {number} [o.nowMs]
  * @param {(url:string)=>object|null} [o.finder]  测试注入; 默认 findExtractor
  * @param {(predicate:object, fields:object)=>string} [o.judge]  测试注入(干跑用); 默认 judgeLine——与 validateResolutionPredicate 同契约, 生产不传
- * @returns {{ok:true, normalized:{resolution_rule_spec:string, outcome_market_source:'polymarket', outcome_condition_id:string, outcome_oracle_relay_ids:'[]', outcome_end_ms:number, minDeadlineMs:number}}|{ok:false, code:string, error:string}}
+ * @returns {{ok:true, normalized:{resolution_rule_spec:string, outcome_market_source:'kanet_native', outcome_condition_id:null, outcome_oracle_relay_ids:'[]', outcome_end_ms:number, minDeadlineMs:number}}|{ok:false, code:string, error:string}}
  */
-export function validateJudgedMarketInput({ title, deadlineMs, resolutionRuleSpec, outcomeEndMs, outcomeConditionId, budgetCfg, umaWindowMs, adapterTickMs = 300_000, nowMs = Date.now(), finder = findExtractor, judge = judgeLine }) {
-  // 半套判定题输入 = 400(三个字段缺一不可)
-  if (resolutionRuleSpec === undefined || resolutionRuleSpec === null) return reject('judged_input_incomplete', '判定题必须同时提供 resolutionRuleSpec / outcomeEnd / outcomeConditionId(缺 resolutionRuleSpec)');
-  if (outcomeEndMs === undefined || outcomeEndMs === null || outcomeEndMs === '') return reject('judged_input_incomplete', '判定题必须同时提供 resolutionRuleSpec / outcomeEnd / outcomeConditionId(缺 outcomeEnd)');
-  if (outcomeConditionId === undefined || outcomeConditionId === null || outcomeConditionId === '') return reject('judged_input_incomplete', '判定题必须同时提供 resolutionRuleSpec / outcomeEnd / outcomeConditionId(缺 outcomeConditionId: C2 无 UMA 条件的判定题无出口, 只能创建时拒)');
+export function validateJudgedMarketInput({ title, deadlineMs, resolutionRuleSpec, outcomeEndMs, budgetCfg, adapterTickMs = 300_000, nowMs = Date.now(), finder = findExtractor, judge = judgeLine }) {
+  // 半套判定题输入 = 400(两个字段缺一不可)
+  if (resolutionRuleSpec === undefined || resolutionRuleSpec === null) return reject('judged_input_incomplete', '判定题必须同时提供 resolutionRuleSpec / outcomeEnd(缺 resolutionRuleSpec)');
+  if (outcomeEndMs === undefined || outcomeEndMs === null || outcomeEndMs === '') return reject('judged_input_incomplete', '判定题必须同时提供 resolutionRuleSpec / outcomeEnd(缺 outcomeEnd)');
   // spec 解析
   let spec = resolutionRuleSpec;
   if (typeof spec === 'string') { try { spec = JSON.parse(spec); } catch (e) { return reject('spec_json_invalid', `resolutionRuleSpec 不是合法 JSON: ${e.message}`); } }
@@ -100,23 +118,19 @@ export function validateJudgedMarketInput({ title, deadlineMs, resolutionRuleSpe
   if (!pv.valid) return reject('predicate_invalid', `resolution_predicate 非法: ${pv.reason}`);
   const dry = dryRunPredicate(spec.resolution_predicate, judge);
   if (!dry.ok) return reject('predicate_dry_run_abstain', dry.reason);
-  // B3: side_map(label→side 双射)+ UMA 极性(显式必填, 不静默默认)
+  // B3: side_map(label→side 双射)。D-032: 不再收 polymarket_outcome_side(已从 ALLOWED_SPEC_KEYS 去掉,
+  // 出现即在上面的"未知字段"检查处 spec_unknown_field 拒,这里不需要重复校验它)。
   const sm = normalizeSideMap(spec.side_map);
   if (!sm) return reject('side_map_invalid', 'side_map 必填且须为 {"yes":0|1,"no":1|0} 双射(label→side)');
-  if (spec.polymarket_outcome_side !== 'YES' && spec.polymarket_outcome_side !== 'NO') return reject('polymarket_outcome_side_invalid', 'polymarket_outcome_side 必填, 取 "YES" | "NO"("NO" = Polymarket 的 YES 对应本市场的 no, 反极性)');
-  // UMA 条件
-  if (typeof outcomeConditionId !== 'string' || !CONDITION_ID_RE.test(outcomeConditionId)) return reject('condition_id_invalid', 'outcomeConditionId 必须是 Polymarket condition id(0x + 64 位 hex)');
-  // outcome_end 与 deadline 的关系(§7 N3 + B6(c): UMA 默认 48h 定稿窗必须算进预算)
+  // outcome_end 与 deadline 的关系(D-032: 去 UMA 定稿窗,只剩宽限窗 + 余量 + 投票预算)
   const oe = Number(outcomeEndMs);
   if (!Number.isSafeInteger(oe) || oe <= 0) return reject('outcome_end_invalid', 'outcomeEnd 必须是正整数毫秒(或可解析为它的日期时间)');
   if (oe <= nowMs) return reject('outcome_end_in_past', 'outcomeEnd 必须晚于当前时刻');
-  const uma = assertUmaWindowSafe(umaWindowMs);
-  if (!uma.ok) return reject('uma_window_unsafe', uma.reason);
   if (!budgetCfg || !Number.isSafeInteger(budgetCfg.graceMs) || !Number.isSafeInteger(budgetCfg.closePipelineMarginMs)) throw new TypeError('validateJudgedMarketInput: budgetCfg 必填(批 D resolveBudgetConfig().config)');
   const voteBudget = 2 * adapterTickMs;                                            // 投票预算: 两个 adapter tick
-  const minDeadlineMs = oe + umaWindowMs + budgetCfg.graceMs + budgetCfg.closePipelineMarginMs + voteBudget;
-  if (!Number.isSafeInteger(deadlineMs) || deadlineMs < minDeadlineMs) return reject('deadline_too_early', `deadline(${deadlineMs}) < outcomeEnd + UMA 定稿窗(${umaWindowMs}) + 宽限窗(${budgetCfg.graceMs}) + 余量(${budgetCfg.closePipelineMarginMs}) + 投票预算(${voteBudget}) = ${minDeadlineMs}`);
-  return { ok: true, normalized: { resolution_rule_spec: JSON.stringify(spec), outcome_market_source: 'polymarket', outcome_condition_id: outcomeConditionId.toLowerCase(), outcome_oracle_relay_ids: '[]', outcome_end_ms: oe, minDeadlineMs } };
+  const minDeadlineMs = oe + budgetCfg.graceMs + budgetCfg.closePipelineMarginMs + voteBudget;
+  if (!Number.isSafeInteger(deadlineMs) || deadlineMs < minDeadlineMs) return reject('deadline_too_early', `deadline(${deadlineMs}) < outcomeEnd + 宽限窗(${budgetCfg.graceMs}) + 余量(${budgetCfg.closePipelineMarginMs}) + 投票预算(${voteBudget}) = ${minDeadlineMs}`);
+  return { ok: true, normalized: { resolution_rule_spec: JSON.stringify(spec), outcome_market_source: 'kanet_native', outcome_condition_id: null, outcome_oracle_relay_ids: '[]', outcome_end_ms: oe, minDeadlineMs } };
 }
 
 /**
@@ -137,9 +151,14 @@ export function checkSideLabel({ specRaw, direction, sideLabel }) {
 /** 从存储的 resolution_rule_spec(JSON 串)取判定题公开视图所需字段; 解析失败 ⇒ null(不抛)。 */
 export function parseStoredSpec(raw) { try { const o = JSON.parse(raw); return isPlainObject(o) ? o : null; } catch { return null; } }
 
+// D-032 §2.4: judgeLine 的平局/push 规则是代码常量(运营者不可改),公开视图原样回显,不由 spec 字段驱动。
+const JUDGE_TIE_RULE_TEXT = 'winner: 平局=NO; margin/total/score: 恰等于线(push)=NO';
+
 /**
- * 公开读呈现(C1): 行里带 outcome_end_ms / outcome_market_source / outcome_condition_id / resolution_rule_spec 这四个内部列; 这里
- *  ① 判定题 ⇒ 附 `judged: {side_map, outcome_end_ms, data_source_canonical, polymarket_outcome_side, outcome_market_source, outcome_condition_id}`
+ * 公开读呈现(C1,D-032 v0.2.4 改单口径): 行里带 outcome_end_ms / outcome_market_source / outcome_condition_id / resolution_rule_spec 这四个内部列; 这里
+ *  ① 判定题 ⇒ 附 `judged: {side_map, outcome_end_ms, data_source_canonical, judge:{kind,predicate,tie_rule,value_time}, human_metadata_only:{...}}`
+ *     (D-032 去 polymarket_outcome_side / outcome_market_source / outcome_condition_id——单口径下这三个字段不再是判定的一部分,
+ *     不放进对外视图误导"这题还有第二个来源可查"; §2.6 落码后这里再补 judge.statement / judge.canonical_event, 置于 question 之前)
  *  ② 无论是否判定题都把这四个内部列从输出里删掉 ⇒ 非判定题的响应字节与今天逐字节相同(不出现任何新键)。
  * 注意: 需要 SELECT 出四个判定题列(isJudgedMarket 缺列会抛)——调用方在 SELECT 里补全 JUDGED_COLUMNS。
  */
@@ -149,7 +168,16 @@ export function presentProtoMarket(row) {
   const out = { ...row };
   if (judged) {
     const spec = parseStoredSpec(row.resolution_rule_spec) || {};
-    out.judged = { side_map: spec.side_map ?? null, outcome_end_ms: row.outcome_end_ms ?? null, data_source_canonical: spec.data_source_canonical ?? null, polymarket_outcome_side: spec.polymarket_outcome_side ?? null, outcome_market_source: row.outcome_market_source ?? null, outcome_condition_id: row.outcome_condition_id ?? null };
+    out.judged = {
+      side_map: spec.side_map ?? null,
+      outcome_end_ms: row.outcome_end_ms ?? null,
+      data_source_canonical: spec.data_source_canonical ?? null,
+      judge: { kind: 'espn-judgeline', predicate: spec.resolution_predicate ?? null, tie_rule: JUDGE_TIE_RULE_TEXT, value_time: row.outcome_end_ms ?? null },
+      human_metadata_only: {
+        secondary_sources: spec.secondary_sources ?? null, ambiguity_handler: spec.ambiguity_handler ?? null,
+        dispute_keywords: spec.dispute_keywords ?? null, edge_case_examples: spec.edge_case_examples ?? null,
+      },
+    };
   }
   for (const c of JUDGED_COLUMNS) delete out[c];
   delete out.outcome_end_ms;

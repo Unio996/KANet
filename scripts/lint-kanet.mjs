@@ -1480,6 +1480,53 @@ function checkR_FEE_SELECT_ONLY_VIA_WRAPPER(fp, content) {
   }
 }
 
+// ── R-SINGLE-JUDGE [ERROR] (D-032 v0.2.4 §2.5, 2026-09-23, 单口径出题闭环): 判定题只剩一个确定性裁判
+// (ESPN judgeLine)。第二裁判(Polymarket/UMA)的四个标识符不得在 proto 模块家族里以【活代码】形式复发:
+//   derivePolymarketVote(函数)/ UMA_FINALIZATION_WINDOW_MS(常量) —— 不得被 import / 调用 / 引用;
+//   polymarket_outcome_side(spec 字段) —— 不得作为对象键(读或写, 含出现在白名单数组里)复发;
+//   outcomeConditionId(请求体字段) —— 不得作为裸标识符(解构 / 形参 / 属性访问)复发, 但允许作为【带引号
+//     的字符串字面量】出现(D-032 §2.1 的 findDualJudgeKeyInBody 正是拿它当字符串比较来拒绝这个字段,
+//     这条规则只禁止它"活"回来当一个真变量/参数, 不禁止"检查它是否出现"这件事本身)。
+// 范围: src/lib/proto-*.mjs, src/services/proto-*.mjs, src/api/proto.js(老系统文件如 bettor.js 不在范围)。
+const _SINGLE_JUDGE_SCOPE_RE = /^(?:kasia-console\/)?src\/(?:lib|services)\/proto-[^/]*\.mjs$|^(?:kasia-console\/)?src\/api\/proto\.js$/;
+// 复用既有符号轴预处理(v4 ④, TESTONLY 系列规则同款): 整行注释(// 或 JSDoc `*`/`/*` 开头)先跳过;
+// 剩下的真代码行再用 stripStringsAndTrailingComment 去掉行尾 // 注释——但【不】对 derivePolymarketVote /
+// UMA_FINALIZATION_WINDOW_MS / polymarket_outcome_side 去引号字符串(这三个哪怕以带引号形态复发也算真的
+// 复发, 比如把 'polymarket_outcome_side' 重新塞进某个白名单数组); 只有 outcomeConditionId 需要额外去引号
+// (它被允许以字符串字面量形态存在, 见规则说明)。
+function _stripTrailingLineComment(line) { return line.replace(/\/\/.*$/, ''); }
+// 🔴 没有复用既有 stripStringsAndTrailingComment(2124 行附近): 实测发现它的字符类 [^'\\n] 在正则字面量里
+// 是"排除引号/反斜杠/字母 n"(不是"排除换行符"——那需要写成从字符串构造的 \n, 正则字面量里 \\n = 转义反斜杠
+// + 字面量 n), 导致任何含字母 n 的带引号字符串(比如 'outcomeConditionId' 本身)都不会被正确剥掉。这是那个
+// 共用函数的既存 bug, 不在本批范围内改(会影响其它已经在用它的规则, 需要单独复核), 这里只写一个局部的、
+// 正确的最简版本, 只服务本规则。
+function _stripQuotedStringsCorrect(line) {
+  return line.replace(/'(?:[^'\\]|\\.)*'/g, "''").replace(/"(?:[^"\\]|\\.)*"/g, '""').replace(/`(?:[^`\\]|\\.)*`/g, '``');
+}
+function checkR_SINGLE_JUDGE(fp, content) {
+  const rel = path.relative(ROOT, fp).replace(/\\/g, '/');
+  if (!_SINGLE_JUDGE_SCOPE_RE.test(rel) || /\.test\.mjs$/.test(rel)) return;
+  const lines = content.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^\s*(?:\/\/|\*|\/\*)/.test(line)) continue;   // 整行注释放行(规则说明 / 解释性 JSDoc 提及不算复发)
+    const code = _stripTrailingLineComment(line);
+    if (/\bderivePolymarketVote\b/.test(code)) {
+      violate('R-SINGLE-JUDGE', `derivePolymarketVote 重新出现——D-032 单口径已删第二裁判(Polymarket/UMA)路, 判定题只剩 ESPN judgeLine。`, fp, i + 1);
+    }
+    if (/\bUMA_FINALIZATION_WINDOW_MS\b/.test(code)) {
+      violate('R-SINGLE-JUDGE', `UMA_FINALIZATION_WINDOW_MS 重新出现——D-032 单口径已删 UMA 定稿窗断言(assertUmaWindowSafe 连同它已清)。`, fp, i + 1);
+    }
+    if (/\bpolymarket_outcome_side\b/.test(code)) {
+      violate('R-SINGLE-JUDGE', `polymarket_outcome_side 重新出现——D-032 单口径已从 ALLOWED_SPEC_KEYS 去掉这个 spec 字段, 出现(哪怕带引号)即说明第二裁判的极性输入又被接回来了。`, fp, i + 1);
+    }
+    const codeNoStrings = _stripTrailingLineComment(_stripQuotedStringsCorrect(line));
+    if (/\boutcomeConditionId\b/.test(codeNoStrings)) {
+      violate('R-SINGLE-JUDGE', `outcomeConditionId 以裸标识符(非字符串字面量)形态出现——D-032 §2.1 只允许把它当字符串比较来拒绝(findDualJudgeKeyInBody 的写法), 不允许再把它当一个活的变量/参数解构出来使用。`, fp, i + 1);
+    }
+  }
+}
+
 // R-PHANTOM-FIELD (2026-07-05, qzdh7nar/J1, following #48/#50/maker-P&L 三例同根): metadata fields written
 // ONLY by the legacy v0.6 settler (pool-market-settler.js) are read unconditionally elsewhere as if they're
 // always populated — but bshard(v0.7)/create-v07 markets never write them (deriveFeeLeaves/phase2_* writeback
@@ -1682,6 +1729,7 @@ for (const fp of targets) {
   checkR_FEERULES_CANON_BYPASS(fp, content);  // R-FEERULES-CANON-BYPASS [WARN] (B线落1 2026-07-12): feeRules canonicalize/hash 单源封旁路(spec v1.2-2)
   checkR_FEE_CANDIDATE_SHARED(fp, content);   // R-FEE-CANDIDATE-SHARED [ERROR] (F3 设计v0.2.1 2026-09-22): toFeeUtxoCandidates 禁复发 + filterFeeCandidates 禁分叉实现
   checkR_FEE_SELECT_ONLY_VIA_WRAPPER(fp, content);   // R-FEE-SELECT-ONLY-VIA-WRAPPER [ERROR] (F4 设计v0.2.1 §3.2A 2026-09-22): selectFeeUtxoByConstruction 只准被 selectAndReserveFeeUtxo 自己调用
+  checkR_SINGLE_JUDGE(fp, content);      // R-SINGLE-JUDGE [ERROR] (D-032 v0.2.4 §2.5 2026-09-23): 第二裁判(Polymarket/UMA)四个标识符禁止复发,判定题只剩 ESPN judgeLine 单口径
   checkR_STATUS_GUARD_BLACKLIST(fp, content);  // R-STATUS-GUARD-BLACKLIST [WARN] (处置设计红队 2026-07-12): protocol_status UPDATE 安全闸黑名单启发式→建议白名单
   checkR_EXPLORER_URL_BYPASS(fp, content);     // R-EXPLORER-URL-BYPASS [ERROR] (死链收敛设计 §3 2026-07-12): explorer 域名字面量禁散装, 单源 explorer-url.mjs 外一律硬阻塞
   checkR_SELF_HTTP_FETCH(fp, content);         // R-SELF-HTTP-FETCH [WARN] (2026-07-14 legacy-refund 自锁死循环修复设计): console 禁 fetch 自己的端口

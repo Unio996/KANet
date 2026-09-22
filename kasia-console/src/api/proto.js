@@ -111,7 +111,7 @@ export async function registerProtoRoutes(fastify) {
     if (relayIdRejection) return reply.code(400).send({ ok: false, error: relayIdRejection });
     const externalIdentityRejection = rejectExternalMarketIdentityInBody(request.body);
     if (externalIdentityRejection) return reply.code(400).send({ ok: false, error: externalIdentityRejection });
-    const { tokenId, title, deadline, resolutionNote, resolutionRuleSpec, outcomeEnd, outcomeConditionId } = request.body || {};
+    const { tokenId, title, deadline, resolutionNote, resolutionRuleSpec, outcomeEnd } = request.body || {};
     if (!tokenId) return reply.code(400).send({ ok: false, error: 'tokenId required' });
     const tokenDef = sqlite.prepare(`SELECT ${PUBLIC_TOKEN_DEF_COLS} FROM proto_token_defs WHERE id = ?`).get(tokenId);
     if (!tokenDef) return reply.code(404).send({ ok: false, error: 'token definition not found' });
@@ -121,13 +121,16 @@ export async function registerProtoRoutes(fastify) {
     if (!Number.isFinite(deadlineMs) || deadlineMs <= Date.now()) {
       return reply.code(400).send({ ok: false, error: 'deadline must be a valid future datetime' });
     }
-    // ── 批 B B6/C2 判定题创建入口: 三个新字段全可选——【全缺省 = 今天的旧流程(逐字节不变)】; 任一出现 ⇒ 全套判定题校验(半套 400) ──
+    // ── D-032 单口径判定题创建入口: 两个新字段全可选——【全缺省 = 今天的旧流程(逐字节不变)】; 任一出现 ⇒ 全套判定题校验(半套 400) ──
     let judgedCols = null;
     {
-      const { hasJudgedInput, findRelayKeyInBody, validateJudgedMarketInput, findUnrecognizedJudgedShapedKey } = await import('../lib/proto-oracle-spec.mjs');
+      const { hasJudgedInput, findRelayKeyInBody, findDualJudgeKeyInBody, validateJudgedMarketInput, findUnrecognizedJudgedShapedKey } = await import('../lib/proto-oracle-spec.mjs');
+      // D-032 §2.1: outcomeConditionId / polymarket* 形状键 = 明确不再接受的第二裁判输入(比"未识别字段"更强的拒绝理由)
+      const dualJudgeKey = findDualJudgeKeyInBody(request.body);
+      if (dualJudgeKey) return reply.code(400).send({ ok: false, error: 'dual_judge_not_allowed', detail: `${dualJudgeKey} is no longer accepted (D-032: single judge per market — the ESPN judgeLine is the only automatic judge, Polymarket/UMA condition input has been removed)` });
       // SHOULD②: 未识别的 resolution* / outcome* 键(蛇形等)⇒ 400, 不静默丢弃后建成普通市场
       const strayKey = findUnrecognizedJudgedShapedKey(request.body);
-      if (strayKey) return reply.code(400).send({ ok: false, error: 'unrecognized_judged_field', detail: `${strayKey} is not a recognized field (judged-market fields are camelCase: resolutionRuleSpec / outcomeEnd / outcomeConditionId); refusing to silently drop it` });
+      if (strayKey) return reply.code(400).send({ ok: false, error: 'unrecognized_judged_field', detail: `${strayKey} is not a recognized field (judged-market fields are camelCase: resolutionRuleSpec / outcomeEnd); refusing to silently drop it` });
       if (hasJudgedInput(request.body)) {
         const relayKey = findRelayKeyInBody(request.body);
         if (relayKey) return reply.code(400).send({ ok: false, error: `${relayKey} must not be provided in the request body — outcome_oracle_relay_ids is decided server-side` });
@@ -141,11 +144,10 @@ export async function registerProtoRoutes(fastify) {
         const { resolveBudgetConfig } = await import('../lib/proto-settlement-budget.mjs');
         const { settlementIntervalMs } = await import('../services/proto-settlement-driver.mjs');
         const { oracleAdapterIntervalMs } = await import('../services/proto-oracle-adapter.mjs');
-        const { UMA_FINALIZATION_WINDOW_MS } = await import('../services/bettor-prediction-voter.js');
         let budgetCfg;
         try { budgetCfg = resolveBudgetConfig(process.env, { tickMs: settlementIntervalMs(process.env) }).config; }
         catch (e) { return reply.code(503).send({ ok: false, error: 'budget_config_invalid', detail: e.message }); }
-        const v = validateJudgedMarketInput({ title, deadlineMs, resolutionRuleSpec, outcomeEndMs, outcomeConditionId, budgetCfg, umaWindowMs: UMA_FINALIZATION_WINDOW_MS, adapterTickMs: oracleAdapterIntervalMs(process.env) });
+        const v = validateJudgedMarketInput({ title, deadlineMs, resolutionRuleSpec, outcomeEndMs, budgetCfg, adapterTickMs: oracleAdapterIntervalMs(process.env) });
         if (!v.ok) return reply.code(400).send({ ok: false, error: v.code, detail: v.error });
         judgedCols = v.normalized;
       }

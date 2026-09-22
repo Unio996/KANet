@@ -1,13 +1,12 @@
-// proto-oracle-adapter.mjs — oracle 整合批 B: adapter 的启动接线(开关 / 启动 LOUD / 单飞 / 生产端口装配)。设计 §10 B5 / §11。
+// proto-oracle-adapter.mjs — oracle 整合批 B: adapter 的启动接线(开关 / 启动 LOUD / 单飞 / 生产端口装配)。设计 §10 B5 / §11;
+// D-032 v0.2.4 §2.2(单口径)删 derivePolymarketVote 与 UMA_FINALIZATION_WINDOW_MS 的 import / 注入,其余(开关/单飞/LOUD 启动行)不改。
 // 🔴 默认关闭: 只有 PROTO_ORACLE_ADAPTER_ENABLED==='1' ∧ PROTO_RELAY_ID 已配置才启动(读 pmt 要走 relay); 翻开须 Owner(与 driver 开关同级)。
 // 🔴 N5b: 启动 LOUD 打印生效策略(网络 / 零价值代币白名单); 主网上只有白名单代币的判定题会被扫描 / promote(judgedMarketAllowedHere 三处强制之③在 core 里)。
-// 🔴 UMA 定稿窗断言: voter 导出的生效值必须有限且 ≥ 24h, 否则拒启动(SHOULD①; NaN 会让 voter 的 \`> 0\` 判定为假 = 窗被静默关闭)。
-// 独立 service(自己的 interval), 不塞进旧 voterTick——不碰旧 voter 的循环; 只复用 derive* 函数。
+// 独立 service(自己的 interval), 不塞进旧 voterTick——不碰旧 voter 的循环; 只复用 deriveKanetNativeVote。
 import { wrapTick } from '../lib/diag-step.mjs';
 import { PROTO_RELAY_ID } from '../lib/proto-relay-guard.mjs';
 import { configuredNetwork } from '../../../shared/lib/kaspa-network.mjs';
 import { resolveOraclePolicy, logOraclePolicy, ENV_ADAPTER_ENABLED } from '../lib/proto-oracle-policy.mjs';
-import { assertUmaWindowSafe } from '../lib/proto-oracle-verdict.mjs';
 import { runOracleAdapterTick } from '../lib/proto-oracle-adapter-core.mjs';
 import { resolveBudgetConfig, readValidatedPmt, sharedPmtValidator } from '../lib/proto-settlement-budget.mjs';
 import { settlementIntervalMs } from './proto-settlement-driver.mjs';
@@ -27,9 +26,9 @@ export async function oracleAdapterTickBody({ relayId, network, cfg, log = conso
     const voter = deps.voter || await import('./bettor-prediction-voter.js');
     const send = deps.sendCmd || (await import('../lib/proto-relay-ipc.mjs')).protoSendCmd;
     const s = await runOracleAdapterTick({
-      db: deps.db || sqlite, cfg, network, log, umaWindowMs: voter.UMA_FINALIZATION_WINDOW_MS,
+      db: deps.db || sqlite, cfg, network, log,
       readPmt: deps.readPmt || (() => readValidatedPmt({ sendCmd: send, relayId, validator: sharedPmtValidator(cfg.lagMaxMs) })),
-      deriveExtractor: deps.deriveExtractor || voter.deriveKanetNativeVote, deriveUma: deps.deriveUma || voter.derivePolymarketVote,
+      deriveExtractor: deps.deriveExtractor || voter.deriveKanetNativeVote,
     });
     if (s.scanned || s.aborted) log.log?.(`[proto-oracle-adapter] tick: ${JSON.stringify(s)}`);
     return s;
@@ -46,15 +45,13 @@ export async function startProtoOracleAdapter({ env = process.env, relayId = PRO
   try { const r = resolveBudgetConfig(env, { tickMs: settlementIntervalMs(env) }); for (const w of r.warnings) log.error(`[proto-oracle-adapter] BUDGET CONFIG (LOUD): ${w}`); cfg = r.config; }
   catch (e) { log.error(`[proto-oracle-adapter] REFUSED to start: ${e.message}`); return; }
   // SHOULD①(NWT 复核): voter 模块导入失败(依赖缺失 / 语法错 / 环境)不得拖垮 console 顶层启动 ⇒ LOUD 拒启动(adapter 不启动 = 默认关闭同态, 安全)
-  let voter;
-  try { voter = (deps && deps.voter) || await (deps && deps.importVoter ? deps.importVoter() : import('./bettor-prediction-voter.js')); }
-  catch (e) { log.error(`[proto-oracle-adapter] REFUSED to start: 无法导入 bettor-prediction-voter(UMA 定稿窗 / derive 引擎来源): ${e && e.message ? e.message : e}`); return; }
-  const uma = assertUmaWindowSafe(voter && voter.UMA_FINALIZATION_WINDOW_MS);
-  if (!uma.ok) { log.error(`[proto-oracle-adapter] REFUSED to start: ${uma.reason}`); return; }
+  // D-032: 不再断言 UMA 定稿窗(单口径下没有 polymarket 路),但导入检查本身仍保留——deriveKanetNativeVote 来自这个模块,导入失败同样必须拒启动。
+  try { (deps && deps.voter) || await (deps && deps.importVoter ? deps.importVoter() : import('./bettor-prediction-voter.js')); }
+  catch (e) { log.error(`[proto-oracle-adapter] REFUSED to start: 无法导入 bettor-prediction-voter(derive 引擎来源): ${e && e.message ? e.message : e}`); return; }
   const intervalMs = oracleAdapterIntervalMs(env);
   _started = true;
   _interval = setInterval(wrapTick('proto-oracle-adapter.tick', () => oracleAdapterTickBody({ relayId, network, cfg, log, deps }).catch((e) => log.error('[proto-oracle-adapter] tick error:', e.message))), intervalMs);
-  log.log(`[proto-oracle-adapter] started (tick ${intervalMs}ms, network=${network}, uma_window_ms=${voter.UMA_FINALIZATION_WINDOW_MS})`);
+  log.log(`[proto-oracle-adapter] started (tick ${intervalMs}ms, network=${network})`);
 }
 
 export function stopProtoOracleAdapter() { if (_interval) { clearInterval(_interval); _interval = null; } _started = false; }

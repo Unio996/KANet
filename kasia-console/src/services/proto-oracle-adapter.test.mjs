@@ -36,15 +36,15 @@ await t('V2 ▲ 默认关闭: 开关缺省 / 非字面 "1" / 缺 relay ⇒ disab
   }
   assert.equal(svc.isProtoOracleAdapterEnabled({ env: {}, relayId: 'r' }), false); assert.equal(svc.isProtoOracleAdapterEnabled({ env: ON, relayId: 'r' }), true); assert.equal(svc.isProtoOracleAdapterEnabled({ env: ON, relayId: '' }), false);
 });
-await t('V3 ▲ 拒启动(LOUD): 网络未配置 / 网络未知 / UMA 定稿窗 NaN / <24h / undefined ⇒ error 行含 REFUSED 且不启动', async () => {
-  const cases = [['网络缺失', { PROTO_ORACLE_ADAPTER_ENABLED: '1' }, voter(48 * H), /KASPA_NETWORK/], ['网络未知', { PROTO_ORACLE_ADAPTER_ENABLED: '1', KASPA_NETWORK: 'nope' }, voter(48 * H), /KASPA_NETWORK/], ['UMA NaN', ON, voter(NaN), /UMA_FINALIZATION_WINDOW_MS/], ['UMA 3h', ON, voter(3 * H), /24h/], ['UMA undefined', ON, voter(undefined), /UMA_FINALIZATION_WINDOW_MS/]];
+await t('V3 ▲ 拒启动(LOUD): 网络未配置 / 网络未知 ⇒ error 行含 REFUSED 且不启动(D-032: UMA 定稿窗断言已删, 不再是拒启动条件)', async () => {
+  const cases = [['网络缺失', { PROTO_ORACLE_ADAPTER_ENABLED: '1' }, voter(48 * H), /KASPA_NETWORK/], ['网络未知', { PROTO_ORACLE_ADAPTER_ENABLED: '1', KASPA_NETWORK: 'nope' }, voter(48 * H), /KASPA_NETWORK/]];
   for (const [name, env, v, re] of cases) { const log = mkLog(); await svc.startProtoOracleAdapter({ env, relayId: 'r1', log, deps: { voter: v } }); assert.equal(svc.oracleAdapterState().started, false, name); assert.ok(log.has('error', /REFUSED to start/) && log.lines.some(([, s]) => re.test(s)), name + ' ' + JSON.stringify(log.lines)); }
 });
-await t('V4 ▲ 合法启动: LOUD 打印策略生效值(adapter=ENABLED / network / 白名单)+ started 行(含 uma_window_ms); stop 复位; 重复 start 幂等; 主网另带 N5b 提示', async () => {
+await t('V4 ▲ 合法启动: LOUD 打印策略生效值(adapter=ENABLED / network / 白名单)+ started 行(D-032: 不再含 uma_window_ms); stop 复位; 重复 start 幂等; 主网另带 N5b 提示', async () => {
   const log = mkLog();
   try {
     await svc.startProtoOracleAdapter({ env: { ...ON, PROTO_ORACLE_ADAPTER_INTERVAL_MS: '60000' }, relayId: 'r1', log, deps: { voter: voter(48 * H) } });
-    assert.equal(svc.oracleAdapterState().started, true); assert.ok(log.has('warn', /judged-market policy: adapter=ENABLED network=simnet/), JSON.stringify(log.lines)); assert.ok(log.has('log', /started \(tick 60000ms, network=simnet, uma_window_ms=172800000\)/));
+    assert.equal(svc.oracleAdapterState().started, true); assert.ok(log.has('warn', /judged-market policy: adapter=ENABLED network=simnet/), JSON.stringify(log.lines)); assert.ok(log.has('log', /started \(tick 60000ms, network=simnet\)/));
     const n = log.lines.length; await svc.startProtoOracleAdapter({ env: ON, relayId: 'r1', log, deps: { voter: voter(48 * H) } }); assert.equal(log.lines.length, n, '重复 start 不重复打印 / 不再建 interval');
   } finally { svc.stopProtoOracleAdapter(); }
   assert.equal(svc.oracleAdapterState().started, false);
@@ -52,15 +52,14 @@ await t('V4 ▲ 合法启动: LOUD 打印策略生效值(adapter=ENABLED / netwo
   try { await svc.startProtoOracleAdapter({ env: { ...ON, KASPA_NETWORK: 'mainnet', PROTO_ORACLE_VALUELESS_TOKEN_IDS: 'tokA' }, relayId: 'r1', log: log2, deps: { voter: voter(48 * H) } }); assert.ok(log2.has('warn', /network=mainnet.*valueless_token_ids=\[tokA\].*N5b/), JSON.stringify(log2.lines)); }
   finally { svc.stopProtoOracleAdapter(); }
 });
-await t('V5 tick 本体: 单飞(在飞时第二次调用 ⇒ skipped in_flight, 不重入); 抛错后状态复位; UMA 窗不安全 ⇒ tick 中止(aborted)', async () => {
+await t('V5 tick 本体: 单飞(在飞时第二次调用 ⇒ skipped in_flight, 不重入); 抛错后状态复位(D-032: 不再有 deriveUma / UMA 窗中止, 只剩 deriveExtractor 一路)', async () => {
   const base = { relayId: 'r1', network: 'simnet', cfg, log: mkLog() };
-  const deps = { voter: voter(48 * H), db: emptyDb, readPmt: async () => ({ valid: true, pmtMs: 1 }), deriveExtractor: async () => ({}), deriveUma: async () => ({}) };
+  const deps = { voter: voter(48 * H), db: emptyDb, readPmt: async () => ({ valid: true, pmtMs: 1 }), deriveExtractor: async () => ({}) };
   const p1 = svc.oracleAdapterTickBody({ ...base, deps }); assert.equal(svc.oracleAdapterState().inFlight, true);
   const r2 = await svc.oracleAdapterTickBody({ ...base, deps }); assert.deepEqual(r2, { skipped: true, reason: 'in_flight' });
   const r1 = await p1; assert.equal(r1.scanned, 0); assert.equal(svc.oracleAdapterState().inFlight, false);
   await assert.rejects(() => svc.oracleAdapterTickBody({ ...base, deps: { ...deps, db: { prepare: () => { throw new Error('db down'); } } } }), /db down/); assert.equal(svc.oracleAdapterState().inFlight, false, '抛错后 inFlight 复位');
   const r3 = await svc.oracleAdapterTickBody({ ...base, deps }); assert.equal(r3.aborted, null);
-  const r4 = await svc.oracleAdapterTickBody({ ...base, deps: { ...deps, voter: voter(NaN) } }); assert.equal(r4.aborted, 'uma_window_unsafe');
 });
 await t('V3b ▲ SHOULD① voter 导入失败 ⇒ LOUD 拒启动(不抛、不启动、不建 interval): 顶层 await startProtoOracleAdapter 不会因此拖垮 console 启动', async () => {
   const log = mkLog(); await svc.startProtoOracleAdapter({ env: ON, relayId: 'r1', log, deps: { importVoter: async () => { throw new Error('Cannot find module x'); } } });
