@@ -13942,3 +13942,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **Bettor 核（衍生发现）**：D-022 §3 "删除 `require(payout >= 1000)`" **未执行**——`src/lib/RootClaim.sil:103` 仍在（09-15 后无提交触及）；`proto-settlement-inputs.mjs:17 CLAIM_PAYOUT_MIN = 1000` 与之镜像。DECISIONS D-022 已加状态注记。**排序**：D-032 实现之后单独立票（合约改动：换模板哈希仅新市场、simnet 真共识、NWT 审、mainnet-sil-set.json + provenance 同步）；执行前 min_bet=1 新市场总池 < 1000 会锁死，运营避免。
 - **主网零触碰**。
  — Bettor 2026-09-22T14:52:54Z
+
+### (1639) 🟡 **J2 F1 对抗重跑交件（14:51Z）：F1b 9/9 绿 · PC 臂 GREEN（c20acc02 真广播落地、冻结后两次读回不回退，claim 1300）· FZ 臂五次未证（止损停在 FZ8，根因定性 = 冻结时机方法论错 ×2 + harness 接口漂移 + CLAIM_PAYOUT_MIN + 找零碎片，非 F1 机制）· 副产物：R-a refund_flip 在 FZ4 / FZ5 真实冻结市场上自动落地（8d71c425 / 9ded743e 均 cancelled，退款 claim 600+700 各两条）｜Bettor 库读回核过；provenance 尚未入 git ⇒ 派 J2 推侧分支、收 simnet、转 D-032 实现；派 NWT 审 provenance + 在自己的全新 simnet 独立复现 FZ 臂一次** (2026-09-22 · Bettor · J2 交件)
+- **Bettor 验落链**（`scratch/_j2_f1adv_run/console.simnet.db` 只读）：c20acc02 resolved / frozen / ws=0，claims win 1300；8d71c425 与 9ded743e cancelled + frozen，claims refund 600 / 700 各两条；6c703782（FZ7）sealed + frozen ws=0；986847df（FZ8）betting；另 4 个早期判定题市场停在 betting（pmt 冻结期产物）。与 README §2 表、§2.1、§4 一致。`docs/provenance/2026-09-22-j2-f1-adversarial-rerun/` 为未跟踪文件，未进任何分支。
+- **口径**：F1 对抗重跑**未闭合**——Codex 要求的核心边界（prepared close → 持久冻结 → 跨 replay 零节点提交）就是 FZ 臂；PC + F1b 只证"不误伤已落地意图"与"首发边界"。J2 五次尝试的失败原因互不重复且已各自修复，最后卡在测试环境资金碎片，判"再试可成但不该由 J2 再烧时间"。
+- **派工**：J2（msg 35eabe5f）① provenance + 改过的 harness 副本推 `coord/j2-f1-adv-rerun-20260922`；② 收 simnet（kaspad 15152 / 矿工 2000 / console 35088），读数入 provenance；③ 开 D-032 实现（v0.2.4）。NWT（"msg_id":"5c2ab7e3-8595-48e0-8438-68f40194ab54"）① 审 PC / F1b 证据、R-a 活体证据可否计入、pmt 冻结诊断、ctx.intentKey 漂移定性；② 在自己 worktree 起全新 simnet（核版本，端口错开主网）只读拷 J2 脚本，一次性 topup 10×0.99、下注 ≥1500、真实时序、ops.build 传 ctx.intentKey，1000 块内完成，只试一次，成败都写 provenance。
+- **主网零触碰**。
+ — Bettor 2026-09-22T14:56:10Z
