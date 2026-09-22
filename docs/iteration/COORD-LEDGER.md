@@ -13853,3 +13853,11 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **派 J2**:① F3/F4 测试补丁(上);② 之后 F1 补丁后 simnet 对抗重跑(1621 ③):prepared close → 冻结落库 → 跨 replay/首发边界零节点提交 + 已入 mempool/landed 正对照被对账不搁置;主线现已含 F1/F2/R-a/F3/F4,用现有 simnet,起矿工先报,simnet-only。
 - **主网零触碰**;主线累计未部署代码提交继续攒,部署=下次 Owner 批的 console 重启。
  — Bettor 2026-09-22T10:20:00Z
+
+### (1627) 🟢 **F3/F4 测试 MUST 合入(J2 ce530931,NWT 独立复跑砍源突变 43→3 红→恢复 43 绿)——F3/F4 批闭合;J2 转 F1 对抗重跑 ｜ ⚖️ TypeSafe/Jev 三项提案评估(Owner 转):#1 采、限出题端预审(advisory + 人确认);#2 否(D-030 铁律:AI 不进 settle/钱路;引用的两条"裂缝"一条 9-13 已修一条属老系统、用确定性核实修);#3 并入 #1** (2026-09-22 · Bettor)
+- **测试 MUST**:⑨a/⑨b 直测 reservedFeeOutpoints 对 proto_markets(genesis_prepared)/proto_bet_intents(prepared) 非终态行;NWT 自己原地替换 SOURCES 复跑三条真红、sha256 恢复一致;零生产代码。**F3/F4 批闭合**(1619 设计→1626 合入→本块)。
+- **TypeSafe 提案评估(Bettor 核过的事实)**:① 引用的 `prevet-fp-fn` fixtures/runner 真在(`kasia-console/scripts/prevet-fp-fn-*.mjs`,6/8 LLM 预审框架);② "settler 拿 txid 即 completed 无落链核实"**已过时**——bettor-prediction-settler.js:202-203 注明 9-13 F2 已改为 submit-intent + check_utxo_landed 落链才 completed;③ "exchange-machine kaspa 支付短路"未核,且属老系统路径,与 proto-v0 无关。
+- **裁定**:**#1 采,但落点改在出题端**:把"该题能否从所选源可靠判定"做成 noul(0~1)预审闸,在**建题时**跑、低于阈值拒建或要求运营者改题,只作参谋、人确认(D-030);不在判定时用它触发 ABSTAIN→冻结→退款(D-032:出题端闭环,不是搞不清就退钱)。PoC = 接现有 prevet-fp-fn fixtures 跑一遍出 FP/FN 数字,零主链零钱路。**#2 否**:sign/submit 前放 AI choice = AI 进钱路,违 D-030;NO-TX-NO-STATE 靠确定性落链核实(proto-v0 已有 tx-landed-reconciler + F1b 否决点),不靠模型;老系统若仍有短路,开确定性修复票,不用 AI。**#3 并入 #1**:建题时对候选源排名+复检作为运营者选源的参谋展示,结论仍是"一题一确定性源"(1625 方案一方向),不做运行时多源自动筛。
+- **路由**:提案作者未署名(疑 J1,9-20 其在 da9 装 TypeSafe);待 Owner 指认后经 j1-inbox 派 #1 PoC。排序:不抢 F1 对抗重跑与 D-032 方向拍板之前的主线资源。
+- **主网零触碰**。
+ — Bettor 2026-09-22T10:50:00Z
