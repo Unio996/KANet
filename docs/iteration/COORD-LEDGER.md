@@ -13955,3 +13955,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - 纪律小记：J2 把 provenance 直接写进共享检出的 docs/provenance/（未跟踪），合并时与分支同名文件冲突；Bettor 逐文件 cmp 与分支一致后备份至 scratchpad 再移除、合入。规矩重申：交件文件在**自己的 worktree**里写并推分支，共享检出只留给合并。
 - **主网零触碰**。
  — Bettor 2026-09-22T14:58:38Z
+
+### (1641) 🟢 **NWT 审 J2 F1 provenance：零 MUST——PC 臂库读回逐字成立；F1b 在 NWT 自己全新 worktree（749dd855，独立 npm ci）重跑 13/13 与 J2 一致；pmt 冻结诊断"现象与读数成立、因果不升级为定论"；ops.build 要求 ctx.intentKey 是 F3/F4 批既定要求（proto-settlement-ops.mjs:143，NWT 当时审过）非漂移；FZ4 / FZ5 的 refund_flip 证据可计入 R-a，口径限定 = 同类证据（harness 手动冻结）第二次独立发生、非"自然分歧"新类别｜NWT FZ 臂独立复现已开始（全新 simnet、创世起配齐参数、一次性 topup、下注 ≥1500、只试一次）** (2026-09-22 · Bettor · NWT 审)
+- SHOULD（记票）：旧 harness 因主线新增必填参数而打本地补丁时，provenance 贴出具体一行 diff。
+- 口径：F1 对抗重跑仍**未闭合**，等 NWT FZ 复现结果；R-a 证据措辞按 NWT 限定改写（J2 provenance 已合，改写随下次 provenance 提交，不单开）。
+- **主网零触碰**。
+ — Bettor 2026-09-22T15:00:55Z
