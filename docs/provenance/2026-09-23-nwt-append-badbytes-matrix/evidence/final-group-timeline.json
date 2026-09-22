@@ -1,0 +1,1552 @@
+{
+  "marketId": "65c4ff5cf76b909fc0b872d200ac83c8f95a514d3184e6123c0606f958985522",
+  "bet1Id": "7fb0705f-990d-4ced-8c48-23ee3578e01f",
+  "bet2Id": "e8434362-2a48-4aa2-acb9-8a5229cba624",
+  "bet3Id": "1412a29e-cd59-4a86-a4d2-897925ea8dd8",
+  "timeline": [
+    {
+      "at": "2026-09-22T21:13:57.698Z",
+      "event": "pre_bet3_snapshot",
+      "preBet3Market": {
+        "id": "65c4ff5cf76b909fc0b872d200ac83c8f95a514d3184e6123c0606f958985522",
+        "status": "betting",
+        "seal_count": 2
+      },
+      "preBet3SealIntents": []
+    },
+    {
+      "at": "2026-09-22T21:13:58.104Z",
+      "event": "bet3_submitted",
+      "status": 202,
+      "res": {
+        "ok": true,
+        "id": "1412a29e-cd59-4a86-a4d2-897925ea8dd8",
+        "status": "pending"
+      },
+      "bet3Id": "1412a29e-cd59-4a86-a4d2-897925ea8dd8",
+      "apiLatencyMs": 406
+    },
+    {
+      "at": "2026-09-22T21:14:03.118Z",
+      "event": "observation",
+      "i": 0,
+      "atMs": 1790111643118,
+      "market": {
+        "id": "65c4ff5cf76b909fc0b872d200ac83c8f95a514d3184e6123c0606f958985522",
+        "status": "betting",
+        "seal_count": 2,
+        "winning_side": null
+      },
+      "bets": [
+        {
+          "id": "7fb0705f-990d-4ced-8c48-23ee3578e01f",
+          "side": 0,
+          "stake": 1500,
+          "status": "confirmed"
+        },
+        {
+          "id": "e8434362-2a48-4aa2-acb9-8a5229cba624",
+          "side": 1,
+          "stake": 1600,
+          "status": "confirmed"
+        },
+        {
+          "id": "1412a29e-cd59-4a86-a4d2-897925ea8dd8",
+          "side": 0,
+          "stake": 900,
+          "status": "pending"
+        }
+      ],
+      "bet3Intent": {
+        "step": "append",
+        "status": "prepared",
+        "last_error": "RPC Server (remote error) -> Rejected transaction 52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874: failed to verify the signature script: script ran, but verification failed",
+        "prepared_txid": "52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874"
+      },
+      "sealIntents": []
+    },
+    {
+      "at": "2026-09-22T21:14:08.131Z",
+      "event": "observation",
+      "i": 1,
+      "atMs": 1790111648131,
+      "market": {
+        "id": "65c4ff5cf76b909fc0b872d200ac83c8f95a514d3184e6123c0606f958985522",
+        "status": "betting",
+        "seal_count": 2,
+        "winning_side": null
+      },
+      "bets": [
+        {
+          "id": "7fb0705f-990d-4ced-8c48-23ee3578e01f",
+          "side": 0,
+          "stake": 1500,
+          "status": "confirmed"
+        },
+        {
+          "id": "e8434362-2a48-4aa2-acb9-8a5229cba624",
+          "side": 1,
+          "stake": 1600,
+          "status": "confirmed"
+        },
+        {
+          "id": "1412a29e-cd59-4a86-a4d2-897925ea8dd8",
+          "side": 0,
+          "stake": 900,
+          "status": "pending"
+        }
+      ],
+      "bet3Intent": {
+        "step": "append",
+        "status": "prepared",
+        "last_error": "RPC Server (remote error) -> Rejected transaction 52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874: failed to verify the signature script: script ran, but verification failed",
+        "prepared_txid": "52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874"
+      },
+      "sealIntents": []
+    },
+    {
+      "at": "2026-09-22T21:14:13.131Z",
+      "event": "observation",
+      "i": 2,
+      "atMs": 1790111653131,
+      "market": {
+        "id": "65c4ff5cf76b909fc0b872d200ac83c8f95a514d3184e6123c0606f958985522",
+        "status": "betting",
+        "seal_count": 2,
+        "winning_side": null
+      },
+      "bets": [
+        {
+          "id": "7fb0705f-990d-4ced-8c48-23ee3578e01f",
+          "side": 0,
+          "stake": 1500,
+          "status": "confirmed"
+        },
+        {
+          "id": "e8434362-2a48-4aa2-acb9-8a5229cba624",
+          "side": 1,
+          "stake": 1600,
+          "status": "confirmed"
+        },
+        {
+          "id": "1412a29e-cd59-4a86-a4d2-897925ea8dd8",
+          "side": 0,
+          "stake": 900,
+          "status": "pending"
+        }
+      ],
+      "bet3Intent": {
+        "step": "append",
+        "status": "prepared",
+        "last_error": "RPC Server (remote error) -> Rejected transaction 52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874: failed to verify the signature script: script ran, but verification failed",
+        "prepared_txid": "52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874"
+      },
+      "sealIntents": []
+    },
+    {
+      "at": "2026-09-22T21:14:18.132Z",
+      "event": "observation",
+      "i": 3,
+      "atMs": 1790111658132,
+      "market": {
+        "id": "65c4ff5cf76b909fc0b872d200ac83c8f95a514d3184e6123c0606f958985522",
+        "status": "betting",
+        "seal_count": 2,
+        "winning_side": null
+      },
+      "bets": [
+        {
+          "id": "7fb0705f-990d-4ced-8c48-23ee3578e01f",
+          "side": 0,
+          "stake": 1500,
+          "status": "confirmed"
+        },
+        {
+          "id": "e8434362-2a48-4aa2-acb9-8a5229cba624",
+          "side": 1,
+          "stake": 1600,
+          "status": "confirmed"
+        },
+        {
+          "id": "1412a29e-cd59-4a86-a4d2-897925ea8dd8",
+          "side": 0,
+          "stake": 900,
+          "status": "pending"
+        }
+      ],
+      "bet3Intent": {
+        "step": "append",
+        "status": "prepared",
+        "last_error": "RPC Server (remote error) -> Rejected transaction 52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874: failed to verify the signature script: script ran, but verification failed",
+        "prepared_txid": "52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874"
+      },
+      "sealIntents": []
+    },
+    {
+      "at": "2026-09-22T21:14:23.144Z",
+      "event": "observation",
+      "i": 4,
+      "atMs": 1790111663144,
+      "market": {
+        "id": "65c4ff5cf76b909fc0b872d200ac83c8f95a514d3184e6123c0606f958985522",
+        "status": "betting",
+        "seal_count": 2,
+        "winning_side": null
+      },
+      "bets": [
+        {
+          "id": "7fb0705f-990d-4ced-8c48-23ee3578e01f",
+          "side": 0,
+          "stake": 1500,
+          "status": "confirmed"
+        },
+        {
+          "id": "e8434362-2a48-4aa2-acb9-8a5229cba624",
+          "side": 1,
+          "stake": 1600,
+          "status": "confirmed"
+        },
+        {
+          "id": "1412a29e-cd59-4a86-a4d2-897925ea8dd8",
+          "side": 0,
+          "stake": 900,
+          "status": "pending"
+        }
+      ],
+      "bet3Intent": {
+        "step": "append",
+        "status": "prepared",
+        "last_error": "RPC Server (remote error) -> Rejected transaction 52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874: failed to verify the signature script: script ran, but verification failed",
+        "prepared_txid": "52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874"
+      },
+      "sealIntents": []
+    },
+    {
+      "at": "2026-09-22T21:14:28.152Z",
+      "event": "observation",
+      "i": 5,
+      "atMs": 1790111668152,
+      "market": {
+        "id": "65c4ff5cf76b909fc0b872d200ac83c8f95a514d3184e6123c0606f958985522",
+        "status": "betting",
+        "seal_count": 2,
+        "winning_side": null
+      },
+      "bets": [
+        {
+          "id": "7fb0705f-990d-4ced-8c48-23ee3578e01f",
+          "side": 0,
+          "stake": 1500,
+          "status": "confirmed"
+        },
+        {
+          "id": "e8434362-2a48-4aa2-acb9-8a5229cba624",
+          "side": 1,
+          "stake": 1600,
+          "status": "confirmed"
+        },
+        {
+          "id": "1412a29e-cd59-4a86-a4d2-897925ea8dd8",
+          "side": 0,
+          "stake": 900,
+          "status": "pending"
+        }
+      ],
+      "bet3Intent": {
+        "step": "append",
+        "status": "prepared",
+        "last_error": "RPC Server (remote error) -> Rejected transaction 52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874: failed to verify the signature script: script ran, but verification failed",
+        "prepared_txid": "52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874"
+      },
+      "sealIntents": []
+    },
+    {
+      "at": "2026-09-22T21:14:33.166Z",
+      "event": "observation",
+      "i": 6,
+      "atMs": 1790111673166,
+      "market": {
+        "id": "65c4ff5cf76b909fc0b872d200ac83c8f95a514d3184e6123c0606f958985522",
+        "status": "betting",
+        "seal_count": 2,
+        "winning_side": null
+      },
+      "bets": [
+        {
+          "id": "7fb0705f-990d-4ced-8c48-23ee3578e01f",
+          "side": 0,
+          "stake": 1500,
+          "status": "confirmed"
+        },
+        {
+          "id": "e8434362-2a48-4aa2-acb9-8a5229cba624",
+          "side": 1,
+          "stake": 1600,
+          "status": "confirmed"
+        },
+        {
+          "id": "1412a29e-cd59-4a86-a4d2-897925ea8dd8",
+          "side": 0,
+          "stake": 900,
+          "status": "pending"
+        }
+      ],
+      "bet3Intent": {
+        "step": "append",
+        "status": "prepared",
+        "last_error": "RPC Server (remote error) -> Rejected transaction 52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874: failed to verify the signature script: script ran, but verification failed",
+        "prepared_txid": "52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874"
+      },
+      "sealIntents": []
+    },
+    {
+      "at": "2026-09-22T21:14:38.172Z",
+      "event": "observation",
+      "i": 7,
+      "atMs": 1790111678172,
+      "market": {
+        "id": "65c4ff5cf76b909fc0b872d200ac83c8f95a514d3184e6123c0606f958985522",
+        "status": "betting",
+        "seal_count": 2,
+        "winning_side": null
+      },
+      "bets": [
+        {
+          "id": "7fb0705f-990d-4ced-8c48-23ee3578e01f",
+          "side": 0,
+          "stake": 1500,
+          "status": "confirmed"
+        },
+        {
+          "id": "e8434362-2a48-4aa2-acb9-8a5229cba624",
+          "side": 1,
+          "stake": 1600,
+          "status": "confirmed"
+        },
+        {
+          "id": "1412a29e-cd59-4a86-a4d2-897925ea8dd8",
+          "side": 0,
+          "stake": 900,
+          "status": "pending"
+        }
+      ],
+      "bet3Intent": {
+        "step": "append",
+        "status": "prepared",
+        "last_error": "RPC Server (remote error) -> Rejected transaction 52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874: failed to verify the signature script: script ran, but verification failed",
+        "prepared_txid": "52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874"
+      },
+      "sealIntents": []
+    },
+    {
+      "at": "2026-09-22T21:14:43.181Z",
+      "event": "observation",
+      "i": 8,
+      "atMs": 1790111683181,
+      "market": {
+        "id": "65c4ff5cf76b909fc0b872d200ac83c8f95a514d3184e6123c0606f958985522",
+        "status": "betting",
+        "seal_count": 2,
+        "winning_side": null
+      },
+      "bets": [
+        {
+          "id": "7fb0705f-990d-4ced-8c48-23ee3578e01f",
+          "side": 0,
+          "stake": 1500,
+          "status": "confirmed"
+        },
+        {
+          "id": "e8434362-2a48-4aa2-acb9-8a5229cba624",
+          "side": 1,
+          "stake": 1600,
+          "status": "confirmed"
+        },
+        {
+          "id": "1412a29e-cd59-4a86-a4d2-897925ea8dd8",
+          "side": 0,
+          "stake": 900,
+          "status": "pending"
+        }
+      ],
+      "bet3Intent": {
+        "step": "append",
+        "status": "prepared",
+        "last_error": "RPC Server (remote error) -> Rejected transaction 52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874: failed to verify the signature script: script ran, but verification failed",
+        "prepared_txid": "52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874"
+      },
+      "sealIntents": []
+    },
+    {
+      "at": "2026-09-22T21:14:48.188Z",
+      "event": "observation",
+      "i": 9,
+      "atMs": 1790111688188,
+      "market": {
+        "id": "65c4ff5cf76b909fc0b872d200ac83c8f95a514d3184e6123c0606f958985522",
+        "status": "betting",
+        "seal_count": 2,
+        "winning_side": null
+      },
+      "bets": [
+        {
+          "id": "7fb0705f-990d-4ced-8c48-23ee3578e01f",
+          "side": 0,
+          "stake": 1500,
+          "status": "confirmed"
+        },
+        {
+          "id": "e8434362-2a48-4aa2-acb9-8a5229cba624",
+          "side": 1,
+          "stake": 1600,
+          "status": "confirmed"
+        },
+        {
+          "id": "1412a29e-cd59-4a86-a4d2-897925ea8dd8",
+          "side": 0,
+          "stake": 900,
+          "status": "pending"
+        }
+      ],
+      "bet3Intent": {
+        "step": "append",
+        "status": "prepared",
+        "last_error": "RPC Server (remote error) -> Rejected transaction 52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874: failed to verify the signature script: script ran, but verification failed",
+        "prepared_txid": "52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874"
+      },
+      "sealIntents": []
+    },
+    {
+      "at": "2026-09-22T21:14:53.198Z",
+      "event": "observation",
+      "i": 10,
+      "atMs": 1790111693198,
+      "market": {
+        "id": "65c4ff5cf76b909fc0b872d200ac83c8f95a514d3184e6123c0606f958985522",
+        "status": "betting",
+        "seal_count": 2,
+        "winning_side": null
+      },
+      "bets": [
+        {
+          "id": "7fb0705f-990d-4ced-8c48-23ee3578e01f",
+          "side": 0,
+          "stake": 1500,
+          "status": "confirmed"
+        },
+        {
+          "id": "e8434362-2a48-4aa2-acb9-8a5229cba624",
+          "side": 1,
+          "stake": 1600,
+          "status": "confirmed"
+        },
+        {
+          "id": "1412a29e-cd59-4a86-a4d2-897925ea8dd8",
+          "side": 0,
+          "stake": 900,
+          "status": "pending"
+        }
+      ],
+      "bet3Intent": {
+        "step": "append",
+        "status": "prepared",
+        "last_error": "RPC Server (remote error) -> Rejected transaction 52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874: failed to verify the signature script: script ran, but verification failed",
+        "prepared_txid": "52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874"
+      },
+      "sealIntents": []
+    },
+    {
+      "at": "2026-09-22T21:14:58.216Z",
+      "event": "observation",
+      "i": 11,
+      "atMs": 1790111698216,
+      "market": {
+        "id": "65c4ff5cf76b909fc0b872d200ac83c8f95a514d3184e6123c0606f958985522",
+        "status": "betting",
+        "seal_count": 2,
+        "winning_side": null
+      },
+      "bets": [
+        {
+          "id": "7fb0705f-990d-4ced-8c48-23ee3578e01f",
+          "side": 0,
+          "stake": 1500,
+          "status": "confirmed"
+        },
+        {
+          "id": "e8434362-2a48-4aa2-acb9-8a5229cba624",
+          "side": 1,
+          "stake": 1600,
+          "status": "confirmed"
+        },
+        {
+          "id": "1412a29e-cd59-4a86-a4d2-897925ea8dd8",
+          "side": 0,
+          "stake": 900,
+          "status": "pending"
+        }
+      ],
+      "bet3Intent": {
+        "step": "append",
+        "status": "prepared",
+        "last_error": "RPC Server (remote error) -> Rejected transaction 52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874: failed to verify the signature script: script ran, but verification failed",
+        "prepared_txid": "52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874"
+      },
+      "sealIntents": []
+    },
+    {
+      "at": "2026-09-22T21:15:03.219Z",
+      "event": "observation",
+      "i": 12,
+      "atMs": 1790111703219,
+      "market": {
+        "id": "65c4ff5cf76b909fc0b872d200ac83c8f95a514d3184e6123c0606f958985522",
+        "status": "betting",
+        "seal_count": 2,
+        "winning_side": null
+      },
+      "bets": [
+        {
+          "id": "7fb0705f-990d-4ced-8c48-23ee3578e01f",
+          "side": 0,
+          "stake": 1500,
+          "status": "confirmed"
+        },
+        {
+          "id": "e8434362-2a48-4aa2-acb9-8a5229cba624",
+          "side": 1,
+          "stake": 1600,
+          "status": "confirmed"
+        },
+        {
+          "id": "1412a29e-cd59-4a86-a4d2-897925ea8dd8",
+          "side": 0,
+          "stake": 900,
+          "status": "pending"
+        }
+      ],
+      "bet3Intent": {
+        "step": "append",
+        "status": "prepared",
+        "last_error": "RPC Server (remote error) -> Rejected transaction 52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874: failed to verify the signature script: script ran, but verification failed",
+        "prepared_txid": "52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874"
+      },
+      "sealIntents": []
+    },
+    {
+      "at": "2026-09-22T21:15:08.221Z",
+      "event": "observation",
+      "i": 13,
+      "atMs": 1790111708221,
+      "market": {
+        "id": "65c4ff5cf76b909fc0b872d200ac83c8f95a514d3184e6123c0606f958985522",
+        "status": "betting",
+        "seal_count": 2,
+        "winning_side": null
+      },
+      "bets": [
+        {
+          "id": "7fb0705f-990d-4ced-8c48-23ee3578e01f",
+          "side": 0,
+          "stake": 1500,
+          "status": "confirmed"
+        },
+        {
+          "id": "e8434362-2a48-4aa2-acb9-8a5229cba624",
+          "side": 1,
+          "stake": 1600,
+          "status": "confirmed"
+        },
+        {
+          "id": "1412a29e-cd59-4a86-a4d2-897925ea8dd8",
+          "side": 0,
+          "stake": 900,
+          "status": "pending"
+        }
+      ],
+      "bet3Intent": {
+        "step": "append",
+        "status": "prepared",
+        "last_error": "RPC Server (remote error) -> Rejected transaction 52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874: failed to verify the signature script: script ran, but verification failed",
+        "prepared_txid": "52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874"
+      },
+      "sealIntents": []
+    },
+    {
+      "at": "2026-09-22T21:15:13.228Z",
+      "event": "observation",
+      "i": 14,
+      "atMs": 1790111713228,
+      "market": {
+        "id": "65c4ff5cf76b909fc0b872d200ac83c8f95a514d3184e6123c0606f958985522",
+        "status": "betting",
+        "seal_count": 2,
+        "winning_side": null
+      },
+      "bets": [
+        {
+          "id": "7fb0705f-990d-4ced-8c48-23ee3578e01f",
+          "side": 0,
+          "stake": 1500,
+          "status": "confirmed"
+        },
+        {
+          "id": "e8434362-2a48-4aa2-acb9-8a5229cba624",
+          "side": 1,
+          "stake": 1600,
+          "status": "confirmed"
+        },
+        {
+          "id": "1412a29e-cd59-4a86-a4d2-897925ea8dd8",
+          "side": 0,
+          "stake": 900,
+          "status": "pending"
+        }
+      ],
+      "bet3Intent": {
+        "step": "append",
+        "status": "prepared",
+        "last_error": "RPC Server (remote error) -> Rejected transaction 52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874: failed to verify the signature script: script ran, but verification failed",
+        "prepared_txid": "52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874"
+      },
+      "sealIntents": []
+    },
+    {
+      "at": "2026-09-22T21:15:18.240Z",
+      "event": "observation",
+      "i": 15,
+      "atMs": 1790111718240,
+      "market": {
+        "id": "65c4ff5cf76b909fc0b872d200ac83c8f95a514d3184e6123c0606f958985522",
+        "status": "betting",
+        "seal_count": 2,
+        "winning_side": null
+      },
+      "bets": [
+        {
+          "id": "7fb0705f-990d-4ced-8c48-23ee3578e01f",
+          "side": 0,
+          "stake": 1500,
+          "status": "confirmed"
+        },
+        {
+          "id": "e8434362-2a48-4aa2-acb9-8a5229cba624",
+          "side": 1,
+          "stake": 1600,
+          "status": "confirmed"
+        },
+        {
+          "id": "1412a29e-cd59-4a86-a4d2-897925ea8dd8",
+          "side": 0,
+          "stake": 900,
+          "status": "pending"
+        }
+      ],
+      "bet3Intent": {
+        "step": "append",
+        "status": "prepared",
+        "last_error": "RPC Server (remote error) -> Rejected transaction 52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874: failed to verify the signature script: script ran, but verification failed",
+        "prepared_txid": "52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874"
+      },
+      "sealIntents": []
+    },
+    {
+      "at": "2026-09-22T21:15:23.253Z",
+      "event": "observation",
+      "i": 16,
+      "atMs": 1790111723253,
+      "market": {
+        "id": "65c4ff5cf76b909fc0b872d200ac83c8f95a514d3184e6123c0606f958985522",
+        "status": "betting",
+        "seal_count": 2,
+        "winning_side": null
+      },
+      "bets": [
+        {
+          "id": "7fb0705f-990d-4ced-8c48-23ee3578e01f",
+          "side": 0,
+          "stake": 1500,
+          "status": "confirmed"
+        },
+        {
+          "id": "e8434362-2a48-4aa2-acb9-8a5229cba624",
+          "side": 1,
+          "stake": 1600,
+          "status": "confirmed"
+        },
+        {
+          "id": "1412a29e-cd59-4a86-a4d2-897925ea8dd8",
+          "side": 0,
+          "stake": 900,
+          "status": "pending"
+        }
+      ],
+      "bet3Intent": {
+        "step": "append",
+        "status": "prepared",
+        "last_error": "RPC Server (remote error) -> Rejected transaction 52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874: failed to verify the signature script: script ran, but verification failed",
+        "prepared_txid": "52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874"
+      },
+      "sealIntents": []
+    },
+    {
+      "at": "2026-09-22T21:15:28.258Z",
+      "event": "observation",
+      "i": 17,
+      "atMs": 1790111728258,
+      "market": {
+        "id": "65c4ff5cf76b909fc0b872d200ac83c8f95a514d3184e6123c0606f958985522",
+        "status": "betting",
+        "seal_count": 2,
+        "winning_side": null
+      },
+      "bets": [
+        {
+          "id": "7fb0705f-990d-4ced-8c48-23ee3578e01f",
+          "side": 0,
+          "stake": 1500,
+          "status": "confirmed"
+        },
+        {
+          "id": "e8434362-2a48-4aa2-acb9-8a5229cba624",
+          "side": 1,
+          "stake": 1600,
+          "status": "confirmed"
+        },
+        {
+          "id": "1412a29e-cd59-4a86-a4d2-897925ea8dd8",
+          "side": 0,
+          "stake": 900,
+          "status": "pending"
+        }
+      ],
+      "bet3Intent": {
+        "step": "append",
+        "status": "prepared",
+        "last_error": "RPC Server (remote error) -> Rejected transaction 52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874: failed to verify the signature script: script ran, but verification failed",
+        "prepared_txid": "52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874"
+      },
+      "sealIntents": []
+    },
+    {
+      "at": "2026-09-22T21:15:33.266Z",
+      "event": "observation",
+      "i": 18,
+      "atMs": 1790111733266,
+      "market": {
+        "id": "65c4ff5cf76b909fc0b872d200ac83c8f95a514d3184e6123c0606f958985522",
+        "status": "betting",
+        "seal_count": 2,
+        "winning_side": null
+      },
+      "bets": [
+        {
+          "id": "7fb0705f-990d-4ced-8c48-23ee3578e01f",
+          "side": 0,
+          "stake": 1500,
+          "status": "confirmed"
+        },
+        {
+          "id": "e8434362-2a48-4aa2-acb9-8a5229cba624",
+          "side": 1,
+          "stake": 1600,
+          "status": "confirmed"
+        },
+        {
+          "id": "1412a29e-cd59-4a86-a4d2-897925ea8dd8",
+          "side": 0,
+          "stake": 900,
+          "status": "pending"
+        }
+      ],
+      "bet3Intent": {
+        "step": "append",
+        "status": "prepared",
+        "last_error": "RPC Server (remote error) -> Rejected transaction 52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874: failed to verify the signature script: script ran, but verification failed",
+        "prepared_txid": "52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874"
+      },
+      "sealIntents": []
+    },
+    {
+      "at": "2026-09-22T21:15:38.282Z",
+      "event": "observation",
+      "i": 19,
+      "atMs": 1790111738282,
+      "market": {
+        "id": "65c4ff5cf76b909fc0b872d200ac83c8f95a514d3184e6123c0606f958985522",
+        "status": "betting",
+        "seal_count": 2,
+        "winning_side": null
+      },
+      "bets": [
+        {
+          "id": "7fb0705f-990d-4ced-8c48-23ee3578e01f",
+          "side": 0,
+          "stake": 1500,
+          "status": "confirmed"
+        },
+        {
+          "id": "e8434362-2a48-4aa2-acb9-8a5229cba624",
+          "side": 1,
+          "stake": 1600,
+          "status": "confirmed"
+        },
+        {
+          "id": "1412a29e-cd59-4a86-a4d2-897925ea8dd8",
+          "side": 0,
+          "stake": 900,
+          "status": "pending"
+        }
+      ],
+      "bet3Intent": {
+        "step": "append",
+        "status": "prepared",
+        "last_error": "RPC Server (remote error) -> Rejected transaction 52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874: failed to verify the signature script: script ran, but verification failed",
+        "prepared_txid": "52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874"
+      },
+      "sealIntents": []
+    }
+  ],
+  "observations": [
+    {
+      "i": 0,
+      "atMs": 1790111643118,
+      "market": {
+        "id": "65c4ff5cf76b909fc0b872d200ac83c8f95a514d3184e6123c0606f958985522",
+        "status": "betting",
+        "seal_count": 2,
+        "winning_side": null
+      },
+      "bets": [
+        {
+          "id": "7fb0705f-990d-4ced-8c48-23ee3578e01f",
+          "side": 0,
+          "stake": 1500,
+          "status": "confirmed"
+        },
+        {
+          "id": "e8434362-2a48-4aa2-acb9-8a5229cba624",
+          "side": 1,
+          "stake": 1600,
+          "status": "confirmed"
+        },
+        {
+          "id": "1412a29e-cd59-4a86-a4d2-897925ea8dd8",
+          "side": 0,
+          "stake": 900,
+          "status": "pending"
+        }
+      ],
+      "bet3Intent": {
+        "step": "append",
+        "status": "prepared",
+        "last_error": "RPC Server (remote error) -> Rejected transaction 52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874: failed to verify the signature script: script ran, but verification failed",
+        "prepared_txid": "52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874"
+      },
+      "sealIntents": []
+    },
+    {
+      "i": 1,
+      "atMs": 1790111648131,
+      "market": {
+        "id": "65c4ff5cf76b909fc0b872d200ac83c8f95a514d3184e6123c0606f958985522",
+        "status": "betting",
+        "seal_count": 2,
+        "winning_side": null
+      },
+      "bets": [
+        {
+          "id": "7fb0705f-990d-4ced-8c48-23ee3578e01f",
+          "side": 0,
+          "stake": 1500,
+          "status": "confirmed"
+        },
+        {
+          "id": "e8434362-2a48-4aa2-acb9-8a5229cba624",
+          "side": 1,
+          "stake": 1600,
+          "status": "confirmed"
+        },
+        {
+          "id": "1412a29e-cd59-4a86-a4d2-897925ea8dd8",
+          "side": 0,
+          "stake": 900,
+          "status": "pending"
+        }
+      ],
+      "bet3Intent": {
+        "step": "append",
+        "status": "prepared",
+        "last_error": "RPC Server (remote error) -> Rejected transaction 52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874: failed to verify the signature script: script ran, but verification failed",
+        "prepared_txid": "52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874"
+      },
+      "sealIntents": []
+    },
+    {
+      "i": 2,
+      "atMs": 1790111653131,
+      "market": {
+        "id": "65c4ff5cf76b909fc0b872d200ac83c8f95a514d3184e6123c0606f958985522",
+        "status": "betting",
+        "seal_count": 2,
+        "winning_side": null
+      },
+      "bets": [
+        {
+          "id": "7fb0705f-990d-4ced-8c48-23ee3578e01f",
+          "side": 0,
+          "stake": 1500,
+          "status": "confirmed"
+        },
+        {
+          "id": "e8434362-2a48-4aa2-acb9-8a5229cba624",
+          "side": 1,
+          "stake": 1600,
+          "status": "confirmed"
+        },
+        {
+          "id": "1412a29e-cd59-4a86-a4d2-897925ea8dd8",
+          "side": 0,
+          "stake": 900,
+          "status": "pending"
+        }
+      ],
+      "bet3Intent": {
+        "step": "append",
+        "status": "prepared",
+        "last_error": "RPC Server (remote error) -> Rejected transaction 52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874: failed to verify the signature script: script ran, but verification failed",
+        "prepared_txid": "52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874"
+      },
+      "sealIntents": []
+    },
+    {
+      "i": 3,
+      "atMs": 1790111658132,
+      "market": {
+        "id": "65c4ff5cf76b909fc0b872d200ac83c8f95a514d3184e6123c0606f958985522",
+        "status": "betting",
+        "seal_count": 2,
+        "winning_side": null
+      },
+      "bets": [
+        {
+          "id": "7fb0705f-990d-4ced-8c48-23ee3578e01f",
+          "side": 0,
+          "stake": 1500,
+          "status": "confirmed"
+        },
+        {
+          "id": "e8434362-2a48-4aa2-acb9-8a5229cba624",
+          "side": 1,
+          "stake": 1600,
+          "status": "confirmed"
+        },
+        {
+          "id": "1412a29e-cd59-4a86-a4d2-897925ea8dd8",
+          "side": 0,
+          "stake": 900,
+          "status": "pending"
+        }
+      ],
+      "bet3Intent": {
+        "step": "append",
+        "status": "prepared",
+        "last_error": "RPC Server (remote error) -> Rejected transaction 52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874: failed to verify the signature script: script ran, but verification failed",
+        "prepared_txid": "52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874"
+      },
+      "sealIntents": []
+    },
+    {
+      "i": 4,
+      "atMs": 1790111663144,
+      "market": {
+        "id": "65c4ff5cf76b909fc0b872d200ac83c8f95a514d3184e6123c0606f958985522",
+        "status": "betting",
+        "seal_count": 2,
+        "winning_side": null
+      },
+      "bets": [
+        {
+          "id": "7fb0705f-990d-4ced-8c48-23ee3578e01f",
+          "side": 0,
+          "stake": 1500,
+          "status": "confirmed"
+        },
+        {
+          "id": "e8434362-2a48-4aa2-acb9-8a5229cba624",
+          "side": 1,
+          "stake": 1600,
+          "status": "confirmed"
+        },
+        {
+          "id": "1412a29e-cd59-4a86-a4d2-897925ea8dd8",
+          "side": 0,
+          "stake": 900,
+          "status": "pending"
+        }
+      ],
+      "bet3Intent": {
+        "step": "append",
+        "status": "prepared",
+        "last_error": "RPC Server (remote error) -> Rejected transaction 52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874: failed to verify the signature script: script ran, but verification failed",
+        "prepared_txid": "52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874"
+      },
+      "sealIntents": []
+    },
+    {
+      "i": 5,
+      "atMs": 1790111668152,
+      "market": {
+        "id": "65c4ff5cf76b909fc0b872d200ac83c8f95a514d3184e6123c0606f958985522",
+        "status": "betting",
+        "seal_count": 2,
+        "winning_side": null
+      },
+      "bets": [
+        {
+          "id": "7fb0705f-990d-4ced-8c48-23ee3578e01f",
+          "side": 0,
+          "stake": 1500,
+          "status": "confirmed"
+        },
+        {
+          "id": "e8434362-2a48-4aa2-acb9-8a5229cba624",
+          "side": 1,
+          "stake": 1600,
+          "status": "confirmed"
+        },
+        {
+          "id": "1412a29e-cd59-4a86-a4d2-897925ea8dd8",
+          "side": 0,
+          "stake": 900,
+          "status": "pending"
+        }
+      ],
+      "bet3Intent": {
+        "step": "append",
+        "status": "prepared",
+        "last_error": "RPC Server (remote error) -> Rejected transaction 52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874: failed to verify the signature script: script ran, but verification failed",
+        "prepared_txid": "52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874"
+      },
+      "sealIntents": []
+    },
+    {
+      "i": 6,
+      "atMs": 1790111673166,
+      "market": {
+        "id": "65c4ff5cf76b909fc0b872d200ac83c8f95a514d3184e6123c0606f958985522",
+        "status": "betting",
+        "seal_count": 2,
+        "winning_side": null
+      },
+      "bets": [
+        {
+          "id": "7fb0705f-990d-4ced-8c48-23ee3578e01f",
+          "side": 0,
+          "stake": 1500,
+          "status": "confirmed"
+        },
+        {
+          "id": "e8434362-2a48-4aa2-acb9-8a5229cba624",
+          "side": 1,
+          "stake": 1600,
+          "status": "confirmed"
+        },
+        {
+          "id": "1412a29e-cd59-4a86-a4d2-897925ea8dd8",
+          "side": 0,
+          "stake": 900,
+          "status": "pending"
+        }
+      ],
+      "bet3Intent": {
+        "step": "append",
+        "status": "prepared",
+        "last_error": "RPC Server (remote error) -> Rejected transaction 52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874: failed to verify the signature script: script ran, but verification failed",
+        "prepared_txid": "52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874"
+      },
+      "sealIntents": []
+    },
+    {
+      "i": 7,
+      "atMs": 1790111678172,
+      "market": {
+        "id": "65c4ff5cf76b909fc0b872d200ac83c8f95a514d3184e6123c0606f958985522",
+        "status": "betting",
+        "seal_count": 2,
+        "winning_side": null
+      },
+      "bets": [
+        {
+          "id": "7fb0705f-990d-4ced-8c48-23ee3578e01f",
+          "side": 0,
+          "stake": 1500,
+          "status": "confirmed"
+        },
+        {
+          "id": "e8434362-2a48-4aa2-acb9-8a5229cba624",
+          "side": 1,
+          "stake": 1600,
+          "status": "confirmed"
+        },
+        {
+          "id": "1412a29e-cd59-4a86-a4d2-897925ea8dd8",
+          "side": 0,
+          "stake": 900,
+          "status": "pending"
+        }
+      ],
+      "bet3Intent": {
+        "step": "append",
+        "status": "prepared",
+        "last_error": "RPC Server (remote error) -> Rejected transaction 52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874: failed to verify the signature script: script ran, but verification failed",
+        "prepared_txid": "52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874"
+      },
+      "sealIntents": []
+    },
+    {
+      "i": 8,
+      "atMs": 1790111683181,
+      "market": {
+        "id": "65c4ff5cf76b909fc0b872d200ac83c8f95a514d3184e6123c0606f958985522",
+        "status": "betting",
+        "seal_count": 2,
+        "winning_side": null
+      },
+      "bets": [
+        {
+          "id": "7fb0705f-990d-4ced-8c48-23ee3578e01f",
+          "side": 0,
+          "stake": 1500,
+          "status": "confirmed"
+        },
+        {
+          "id": "e8434362-2a48-4aa2-acb9-8a5229cba624",
+          "side": 1,
+          "stake": 1600,
+          "status": "confirmed"
+        },
+        {
+          "id": "1412a29e-cd59-4a86-a4d2-897925ea8dd8",
+          "side": 0,
+          "stake": 900,
+          "status": "pending"
+        }
+      ],
+      "bet3Intent": {
+        "step": "append",
+        "status": "prepared",
+        "last_error": "RPC Server (remote error) -> Rejected transaction 52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874: failed to verify the signature script: script ran, but verification failed",
+        "prepared_txid": "52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874"
+      },
+      "sealIntents": []
+    },
+    {
+      "i": 9,
+      "atMs": 1790111688188,
+      "market": {
+        "id": "65c4ff5cf76b909fc0b872d200ac83c8f95a514d3184e6123c0606f958985522",
+        "status": "betting",
+        "seal_count": 2,
+        "winning_side": null
+      },
+      "bets": [
+        {
+          "id": "7fb0705f-990d-4ced-8c48-23ee3578e01f",
+          "side": 0,
+          "stake": 1500,
+          "status": "confirmed"
+        },
+        {
+          "id": "e8434362-2a48-4aa2-acb9-8a5229cba624",
+          "side": 1,
+          "stake": 1600,
+          "status": "confirmed"
+        },
+        {
+          "id": "1412a29e-cd59-4a86-a4d2-897925ea8dd8",
+          "side": 0,
+          "stake": 900,
+          "status": "pending"
+        }
+      ],
+      "bet3Intent": {
+        "step": "append",
+        "status": "prepared",
+        "last_error": "RPC Server (remote error) -> Rejected transaction 52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874: failed to verify the signature script: script ran, but verification failed",
+        "prepared_txid": "52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874"
+      },
+      "sealIntents": []
+    },
+    {
+      "i": 10,
+      "atMs": 1790111693198,
+      "market": {
+        "id": "65c4ff5cf76b909fc0b872d200ac83c8f95a514d3184e6123c0606f958985522",
+        "status": "betting",
+        "seal_count": 2,
+        "winning_side": null
+      },
+      "bets": [
+        {
+          "id": "7fb0705f-990d-4ced-8c48-23ee3578e01f",
+          "side": 0,
+          "stake": 1500,
+          "status": "confirmed"
+        },
+        {
+          "id": "e8434362-2a48-4aa2-acb9-8a5229cba624",
+          "side": 1,
+          "stake": 1600,
+          "status": "confirmed"
+        },
+        {
+          "id": "1412a29e-cd59-4a86-a4d2-897925ea8dd8",
+          "side": 0,
+          "stake": 900,
+          "status": "pending"
+        }
+      ],
+      "bet3Intent": {
+        "step": "append",
+        "status": "prepared",
+        "last_error": "RPC Server (remote error) -> Rejected transaction 52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874: failed to verify the signature script: script ran, but verification failed",
+        "prepared_txid": "52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874"
+      },
+      "sealIntents": []
+    },
+    {
+      "i": 11,
+      "atMs": 1790111698216,
+      "market": {
+        "id": "65c4ff5cf76b909fc0b872d200ac83c8f95a514d3184e6123c0606f958985522",
+        "status": "betting",
+        "seal_count": 2,
+        "winning_side": null
+      },
+      "bets": [
+        {
+          "id": "7fb0705f-990d-4ced-8c48-23ee3578e01f",
+          "side": 0,
+          "stake": 1500,
+          "status": "confirmed"
+        },
+        {
+          "id": "e8434362-2a48-4aa2-acb9-8a5229cba624",
+          "side": 1,
+          "stake": 1600,
+          "status": "confirmed"
+        },
+        {
+          "id": "1412a29e-cd59-4a86-a4d2-897925ea8dd8",
+          "side": 0,
+          "stake": 900,
+          "status": "pending"
+        }
+      ],
+      "bet3Intent": {
+        "step": "append",
+        "status": "prepared",
+        "last_error": "RPC Server (remote error) -> Rejected transaction 52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874: failed to verify the signature script: script ran, but verification failed",
+        "prepared_txid": "52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874"
+      },
+      "sealIntents": []
+    },
+    {
+      "i": 12,
+      "atMs": 1790111703219,
+      "market": {
+        "id": "65c4ff5cf76b909fc0b872d200ac83c8f95a514d3184e6123c0606f958985522",
+        "status": "betting",
+        "seal_count": 2,
+        "winning_side": null
+      },
+      "bets": [
+        {
+          "id": "7fb0705f-990d-4ced-8c48-23ee3578e01f",
+          "side": 0,
+          "stake": 1500,
+          "status": "confirmed"
+        },
+        {
+          "id": "e8434362-2a48-4aa2-acb9-8a5229cba624",
+          "side": 1,
+          "stake": 1600,
+          "status": "confirmed"
+        },
+        {
+          "id": "1412a29e-cd59-4a86-a4d2-897925ea8dd8",
+          "side": 0,
+          "stake": 900,
+          "status": "pending"
+        }
+      ],
+      "bet3Intent": {
+        "step": "append",
+        "status": "prepared",
+        "last_error": "RPC Server (remote error) -> Rejected transaction 52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874: failed to verify the signature script: script ran, but verification failed",
+        "prepared_txid": "52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874"
+      },
+      "sealIntents": []
+    },
+    {
+      "i": 13,
+      "atMs": 1790111708221,
+      "market": {
+        "id": "65c4ff5cf76b909fc0b872d200ac83c8f95a514d3184e6123c0606f958985522",
+        "status": "betting",
+        "seal_count": 2,
+        "winning_side": null
+      },
+      "bets": [
+        {
+          "id": "7fb0705f-990d-4ced-8c48-23ee3578e01f",
+          "side": 0,
+          "stake": 1500,
+          "status": "confirmed"
+        },
+        {
+          "id": "e8434362-2a48-4aa2-acb9-8a5229cba624",
+          "side": 1,
+          "stake": 1600,
+          "status": "confirmed"
+        },
+        {
+          "id": "1412a29e-cd59-4a86-a4d2-897925ea8dd8",
+          "side": 0,
+          "stake": 900,
+          "status": "pending"
+        }
+      ],
+      "bet3Intent": {
+        "step": "append",
+        "status": "prepared",
+        "last_error": "RPC Server (remote error) -> Rejected transaction 52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874: failed to verify the signature script: script ran, but verification failed",
+        "prepared_txid": "52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874"
+      },
+      "sealIntents": []
+    },
+    {
+      "i": 14,
+      "atMs": 1790111713228,
+      "market": {
+        "id": "65c4ff5cf76b909fc0b872d200ac83c8f95a514d3184e6123c0606f958985522",
+        "status": "betting",
+        "seal_count": 2,
+        "winning_side": null
+      },
+      "bets": [
+        {
+          "id": "7fb0705f-990d-4ced-8c48-23ee3578e01f",
+          "side": 0,
+          "stake": 1500,
+          "status": "confirmed"
+        },
+        {
+          "id": "e8434362-2a48-4aa2-acb9-8a5229cba624",
+          "side": 1,
+          "stake": 1600,
+          "status": "confirmed"
+        },
+        {
+          "id": "1412a29e-cd59-4a86-a4d2-897925ea8dd8",
+          "side": 0,
+          "stake": 900,
+          "status": "pending"
+        }
+      ],
+      "bet3Intent": {
+        "step": "append",
+        "status": "prepared",
+        "last_error": "RPC Server (remote error) -> Rejected transaction 52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874: failed to verify the signature script: script ran, but verification failed",
+        "prepared_txid": "52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874"
+      },
+      "sealIntents": []
+    },
+    {
+      "i": 15,
+      "atMs": 1790111718240,
+      "market": {
+        "id": "65c4ff5cf76b909fc0b872d200ac83c8f95a514d3184e6123c0606f958985522",
+        "status": "betting",
+        "seal_count": 2,
+        "winning_side": null
+      },
+      "bets": [
+        {
+          "id": "7fb0705f-990d-4ced-8c48-23ee3578e01f",
+          "side": 0,
+          "stake": 1500,
+          "status": "confirmed"
+        },
+        {
+          "id": "e8434362-2a48-4aa2-acb9-8a5229cba624",
+          "side": 1,
+          "stake": 1600,
+          "status": "confirmed"
+        },
+        {
+          "id": "1412a29e-cd59-4a86-a4d2-897925ea8dd8",
+          "side": 0,
+          "stake": 900,
+          "status": "pending"
+        }
+      ],
+      "bet3Intent": {
+        "step": "append",
+        "status": "prepared",
+        "last_error": "RPC Server (remote error) -> Rejected transaction 52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874: failed to verify the signature script: script ran, but verification failed",
+        "prepared_txid": "52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874"
+      },
+      "sealIntents": []
+    },
+    {
+      "i": 16,
+      "atMs": 1790111723253,
+      "market": {
+        "id": "65c4ff5cf76b909fc0b872d200ac83c8f95a514d3184e6123c0606f958985522",
+        "status": "betting",
+        "seal_count": 2,
+        "winning_side": null
+      },
+      "bets": [
+        {
+          "id": "7fb0705f-990d-4ced-8c48-23ee3578e01f",
+          "side": 0,
+          "stake": 1500,
+          "status": "confirmed"
+        },
+        {
+          "id": "e8434362-2a48-4aa2-acb9-8a5229cba624",
+          "side": 1,
+          "stake": 1600,
+          "status": "confirmed"
+        },
+        {
+          "id": "1412a29e-cd59-4a86-a4d2-897925ea8dd8",
+          "side": 0,
+          "stake": 900,
+          "status": "pending"
+        }
+      ],
+      "bet3Intent": {
+        "step": "append",
+        "status": "prepared",
+        "last_error": "RPC Server (remote error) -> Rejected transaction 52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874: failed to verify the signature script: script ran, but verification failed",
+        "prepared_txid": "52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874"
+      },
+      "sealIntents": []
+    },
+    {
+      "i": 17,
+      "atMs": 1790111728258,
+      "market": {
+        "id": "65c4ff5cf76b909fc0b872d200ac83c8f95a514d3184e6123c0606f958985522",
+        "status": "betting",
+        "seal_count": 2,
+        "winning_side": null
+      },
+      "bets": [
+        {
+          "id": "7fb0705f-990d-4ced-8c48-23ee3578e01f",
+          "side": 0,
+          "stake": 1500,
+          "status": "confirmed"
+        },
+        {
+          "id": "e8434362-2a48-4aa2-acb9-8a5229cba624",
+          "side": 1,
+          "stake": 1600,
+          "status": "confirmed"
+        },
+        {
+          "id": "1412a29e-cd59-4a86-a4d2-897925ea8dd8",
+          "side": 0,
+          "stake": 900,
+          "status": "pending"
+        }
+      ],
+      "bet3Intent": {
+        "step": "append",
+        "status": "prepared",
+        "last_error": "RPC Server (remote error) -> Rejected transaction 52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874: failed to verify the signature script: script ran, but verification failed",
+        "prepared_txid": "52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874"
+      },
+      "sealIntents": []
+    },
+    {
+      "i": 18,
+      "atMs": 1790111733266,
+      "market": {
+        "id": "65c4ff5cf76b909fc0b872d200ac83c8f95a514d3184e6123c0606f958985522",
+        "status": "betting",
+        "seal_count": 2,
+        "winning_side": null
+      },
+      "bets": [
+        {
+          "id": "7fb0705f-990d-4ced-8c48-23ee3578e01f",
+          "side": 0,
+          "stake": 1500,
+          "status": "confirmed"
+        },
+        {
+          "id": "e8434362-2a48-4aa2-acb9-8a5229cba624",
+          "side": 1,
+          "stake": 1600,
+          "status": "confirmed"
+        },
+        {
+          "id": "1412a29e-cd59-4a86-a4d2-897925ea8dd8",
+          "side": 0,
+          "stake": 900,
+          "status": "pending"
+        }
+      ],
+      "bet3Intent": {
+        "step": "append",
+        "status": "prepared",
+        "last_error": "RPC Server (remote error) -> Rejected transaction 52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874: failed to verify the signature script: script ran, but verification failed",
+        "prepared_txid": "52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874"
+      },
+      "sealIntents": []
+    },
+    {
+      "i": 19,
+      "atMs": 1790111738282,
+      "market": {
+        "id": "65c4ff5cf76b909fc0b872d200ac83c8f95a514d3184e6123c0606f958985522",
+        "status": "betting",
+        "seal_count": 2,
+        "winning_side": null
+      },
+      "bets": [
+        {
+          "id": "7fb0705f-990d-4ced-8c48-23ee3578e01f",
+          "side": 0,
+          "stake": 1500,
+          "status": "confirmed"
+        },
+        {
+          "id": "e8434362-2a48-4aa2-acb9-8a5229cba624",
+          "side": 1,
+          "stake": 1600,
+          "status": "confirmed"
+        },
+        {
+          "id": "1412a29e-cd59-4a86-a4d2-897925ea8dd8",
+          "side": 0,
+          "stake": 900,
+          "status": "pending"
+        }
+      ],
+      "bet3Intent": {
+        "step": "append",
+        "status": "prepared",
+        "last_error": "RPC Server (remote error) -> Rejected transaction 52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874: failed to verify the signature script: script ran, but verification failed",
+        "prepared_txid": "52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874"
+      },
+      "sealIntents": []
+    }
+  ]
+}

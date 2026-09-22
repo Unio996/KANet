@@ -1,0 +1,146 @@
+{
+  "label": "sc2b_bet3",
+  "marketId": "65c4ff5cf76b909fc0b872d200ac83c8f95a514d3184e6123c0606f958985522",
+  "betId": "1412a29e-cd59-4a86-a4d2-897925ea8dd8",
+  "market": {
+    "id": "65c4ff5cf76b909fc0b872d200ac83c8f95a514d3184e6123c0606f958985522",
+    "status": "betting",
+    "seal_count": 2,
+    "shardleaf_cov_id": "deea1b54f8e70fd844aee247555a8d018c9b83b908284dfbd5fa24329abb3e43",
+    "shardleaf_txid": "9e783103e8f88c1226ba6680b29b07b1a7f84661aa422d374bedcd1e3659ffe1",
+    "shardleaf_vout": 0,
+    "rootclose_txid": null,
+    "winning_side": null,
+    "min_bet": 1,
+    "rootclose_tmpl_hash": "e6cb27d5489aab03734b0b5c7c1fbe66e3a1924c0f604eea55858bae8a911325",
+    "shardleaf_own_redeem_len": 14746
+  },
+  "allBets": [
+    {
+      "id": "7fb0705f-990d-4ced-8c48-23ee3578e01f",
+      "side": 0,
+      "stake": 1500,
+      "status": "confirmed",
+      "created_at": "2026-09-22T20:32:50.478Z"
+    },
+    {
+      "id": "e8434362-2a48-4aa2-acb9-8a5229cba624",
+      "side": 1,
+      "stake": 1600,
+      "status": "confirmed",
+      "created_at": "2026-09-22T20:37:01.633Z"
+    },
+    {
+      "id": "1412a29e-cd59-4a86-a4d2-897925ea8dd8",
+      "side": 0,
+      "stake": 900,
+      "status": "pending",
+      "created_at": "2026-09-22T21:13:57.722Z"
+    }
+  ],
+  "targetBet": {
+    "id": "1412a29e-cd59-4a86-a4d2-897925ea8dd8",
+    "side": 0,
+    "stake": 900,
+    "status": "pending"
+  },
+  "sealIntents": [],
+  "betIntent": {
+    "intent_key": "proto-bet:1412a29e-cd59-4a86-a4d2-897925ea8dd8:append",
+    "step": "append",
+    "status": "prepared",
+    "prepared_txid": "52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874",
+    "submitted_txid": null,
+    "last_error": "RPC Server (remote error) -> Rejected transaction 52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874: failed to verify the signature script: script ran, but verification failed",
+    "created_at": "2026-09-22T21:13:57.722Z",
+    "updated_at": "2026-09-22T21:13:58.104Z"
+  },
+  "currentStateAtBuildTime": {
+    "local_yes": 1500,
+    "local_no": 1600,
+    "count": 2,
+    "pool_value": 3100
+  },
+  "leafOutpoint": {
+    "txid": "e3b2dfd4623f8f1028f9fea1e618c7f4b6e1524ea2b13f8012076de6289500ed",
+    "vout": 0
+  },
+  "heldOutpointRaw": {
+    "txid": "e3b2dfd4623f8f1028f9fea1e618c7f4b6e1524ea2b13f8012076de6289500ed",
+    "vout": 2
+  },
+  "leafStateErr": null,
+  "leafAddress": "kaspasim:prkl7pxf34jged3x89tmw6x3wf6l7h77gz96mx6sc2t7raqlnnvugd67nvek7",
+  "leafUtxoCount": 1,
+  "leafOutpointStillUnspent": true,
+  "heldAddress": "kaspasim:pqw0xf58n40j5365cd50u208hs84fs2zklk33m4eh27c9rhlp70kjarm77uu8",
+  "heldUtxoCount": 1,
+  "heldOutpointStillUnspent": true,
+  "entryAbiArgs": {
+    "seal_count": 2,
+    "min_bet": 1,
+    "local_yes": 1500,
+    "local_no": 1600,
+    "count": 2,
+    "pool_value": 3100,
+    "own_redeem_len": 14746
+  },
+  "entryAbiEntryFound": true,
+  "txDump": {
+    "txid": "52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874",
+    "inputs": [
+      {
+        "idx": 0,
+        "prevTxid": "e3b2dfd4623f8f1028f9fea1e618c7f4b6e1524ea2b13f8012076de6289500ed",
+        "prevIndex": 0,
+        "sigScriptLen": 17912,
+        "sigOpCount": 0
+      },
+      {
+        "idx": 1,
+        "prevTxid": "e3b2dfd4623f8f1028f9fea1e618c7f4b6e1524ea2b13f8012076de6289500ed",
+        "prevIndex": 2,
+        "sigScriptLen": 3215,
+        "sigOpCount": 0
+      },
+      {
+        "idx": 2,
+        "prevTxid": "1f7de23dbc48397e9218c72edc558e6ff7598c68950d028c3c7edfd1d5ce3068",
+        "prevIndex": 1,
+        "sigScriptLen": 66,
+        "sigOpCount": 0
+      }
+    ],
+    "outputs": [
+      {
+        "idx": 0,
+        "value": "20000000",
+        "spkLen": 35,
+        "hasCovenant": true,
+        "covenantId": "deea1b54f8e70fd844aee247555a8d018c9b83b908284dfbd5fa24329abb3e43"
+      },
+      {
+        "idx": 1,
+        "value": "20000000",
+        "spkLen": 35,
+        "hasCovenant": false,
+        "covenantId": null
+      },
+      {
+        "idx": 2,
+        "value": "20000000",
+        "spkLen": 35,
+        "hasCovenant": true,
+        "covenantId": "7f138f40259771a4213c18c4eafe1137b77fb50d12bd776c44d7960f590ea3f4"
+      },
+      {
+        "idx": 3,
+        "value": "8024350",
+        "spkLen": 34,
+        "hasCovenant": false,
+        "covenantId": null
+      }
+    ],
+    "lockTime": "0"
+  }
+}

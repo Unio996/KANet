@@ -1,0 +1,49 @@
+{
+  "market": {
+    "id": "65c4ff5cf76b909fc0b872d200ac83c8f95a514d3184e6123c0606f958985522",
+    "status": "betting",
+    "seal_count": 2,
+    "winning_side": null
+  },
+  "bets": [
+    {
+      "id": "7fb0705f-990d-4ced-8c48-23ee3578e01f",
+      "side": 0,
+      "stake": 1500,
+      "status": "confirmed"
+    },
+    {
+      "id": "e8434362-2a48-4aa2-acb9-8a5229cba624",
+      "side": 1,
+      "stake": 1600,
+      "status": "confirmed"
+    },
+    {
+      "id": "1412a29e-cd59-4a86-a4d2-897925ea8dd8",
+      "side": 0,
+      "stake": 900,
+      "status": "pending"
+    }
+  ],
+  "intents": [
+    {
+      "bet_id": "7fb0705f-990d-4ced-8c48-23ee3578e01f",
+      "step": "append",
+      "status": "landed",
+      "last_error": null
+    },
+    {
+      "bet_id": "e8434362-2a48-4aa2-acb9-8a5229cba624",
+      "step": "append",
+      "status": "landed",
+      "last_error": null
+    },
+    {
+      "bet_id": "1412a29e-cd59-4a86-a4d2-897925ea8dd8",
+      "step": "append",
+      "status": "prepared",
+      "last_error": "RPC Server (remote error) -> Rejected transaction 52f9a0f980f0cdd34e3178463b296a1b5e6a8bca5cc5c82c4ecdb81f5253b874: failed to verify the signature script: script ran, but verification failed"
+    }
+  ],
+  "seal": []
+}
