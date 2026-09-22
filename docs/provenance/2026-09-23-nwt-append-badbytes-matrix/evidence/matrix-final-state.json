@@ -1,0 +1,99 @@
+{
+  "groupA": {
+    "label": "sc1",
+    "marketId": "068a6b684b407d50e229fd9cc6c8c1c311fbe25776f9925488d4cbdd20cc6dad",
+    "market": {
+      "id": "068a6b684b407d50e229fd9cc6c8c1c311fbe25776f9925488d4cbdd20cc6dad",
+      "status": "betting",
+      "seal_count": 1,
+      "winning_side": null
+    },
+    "bets": [
+      {
+        "id": "889611f9-408c-4de7-91a9-7dcfbf347226",
+        "side": 0,
+        "stake": 1500,
+        "status": "confirmed"
+      },
+      {
+        "id": "195e77ad-a5f7-4bec-9713-2cf1f83733cb",
+        "side": 1,
+        "stake": 1600,
+        "status": "pending"
+      }
+    ],
+    "intents": [
+      {
+        "bet_id": "889611f9-408c-4de7-91a9-7dcfbf347226",
+        "status": "landed",
+        "last_error": null,
+        "landed_depth": 26
+      },
+      {
+        "bet_id": "195e77ad-a5f7-4bec-9713-2cf1f83733cb",
+        "status": "prepared",
+        "last_error": "RPC Server (remote error) -> Rejected transaction 7ce4c2423822866e519bf991f613e40e2d4cecd5049c33be6a6474b8259354d6: failed to verify the signature script: script ran, but verification failed",
+        "landed_depth": null
+      }
+    ],
+    "sealIntents": []
+  },
+  "groupB": {
+    "label": "sc2",
+    "marketId": "7ac93fd9834063f54614a6b11cfd80100b550c755c6a212afafecebf9d0cf619",
+    "market": {
+      "id": "7ac93fd9834063f54614a6b11cfd80100b550c755c6a212afafecebf9d0cf619",
+      "status": "sealed",
+      "seal_count": 2,
+      "winning_side": null
+    },
+    "bets": [
+      {
+        "id": "92e57cd3-cc9e-4bbd-bd7d-1385e3cf03a4",
+        "side": 0,
+        "stake": 1500,
+        "status": "confirmed"
+      },
+      {
+        "id": "fd7a2b8a-02a1-4515-b76d-7ba1c8db61a8",
+        "side": 1,
+        "stake": 1600,
+        "status": "confirmed"
+      }
+    ],
+    "intents": [
+      {
+        "bet_id": "92e57cd3-cc9e-4bbd-bd7d-1385e3cf03a4",
+        "status": "landed",
+        "last_error": null,
+        "landed_depth": 25
+      },
+      {
+        "bet_id": "fd7a2b8a-02a1-4515-b76d-7ba1c8db61a8",
+        "status": "landed",
+        "last_error": null,
+        "landed_depth": 39
+      }
+    ],
+    "sealIntents": [
+      {
+        "step": "seal",
+        "status": "landed",
+        "landed_depth": 38
+      }
+    ]
+  },
+  "groupC_blocked": {
+    "label": "sc3",
+    "marketId": "5510ee51ad297b50b2307642d25909214cc0fdf09c03e10869c47ee6aa657eb7",
+    "market": {
+      "id": "5510ee51ad297b50b2307642d25909214cc0fdf09c03e10869c47ee6aa657eb7",
+      "status": "genesis_pending",
+      "seal_count": 3,
+      "winning_side": null
+    },
+    "bets": [],
+    "intents": [],
+    "sealIntents": []
+  }
+}
