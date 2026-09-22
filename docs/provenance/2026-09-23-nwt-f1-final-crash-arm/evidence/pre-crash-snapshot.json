@@ -1,0 +1,27 @@
+{
+  "market": {
+    "id": "6c866df8344971158a14dcd53521d3afa6206aeb05b5665607a7a9145f33c789",
+    "status": "sealed",
+    "winning_side": 0,
+    "settlement_frozen_at": 1790098750106,
+    "frozen_reason": "operator_emergency_stop|clock=pmt"
+  },
+  "intents": [
+    {
+      "step": "resolve",
+      "status": "prepared",
+      "prepared_txid": "a5b718357ed9e3ee66263de390c4a4c0352bdf65e801cd3a329c6548f12faf70",
+      "submitted_txid": null,
+      "landed_depth": null,
+      "preparedTxJsonSha256": "caa86b1af7ea3cea18eee446e2a7900e86240006503f17aa5b9783a68460cf89"
+    },
+    {
+      "step": "seal",
+      "status": "landed",
+      "prepared_txid": "77e720e72dff00f6ac80c5dfd1f5fbbaf3b3f8d3681cda81a2008bdbab1b5643",
+      "submitted_txid": "77e720e72dff00f6ac80c5dfd1f5fbbaf3b3f8d3681cda81a2008bdbab1b5643",
+      "landed_depth": 38,
+      "preparedTxJsonSha256": "a4633300dd1ca879f0317ef84218bf5fc0c10739786745e856dd198e4c91eda8"
+    }
+  ]
+}
