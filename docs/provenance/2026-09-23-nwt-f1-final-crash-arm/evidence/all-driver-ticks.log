@@ -1,0 +1,19 @@
+[proto-settlement-driver] started (tick 20000ms, cap 3/tick, network=simnet)
+[proto-settlement-driver] started (tick 20000ms, cap 3/tick, network=simnet)
+[diag:step] proto-settlement-driver.tick ms=172 sync=0 ok=1 at=2026-09-22T17:31:50.873Z
+[proto-settlement-driver] tick 57: {"actioned":1,"landed":0,"submitted":1,"waiting":0,"gated":0,"held":0,"failed":0}
+[diag:step] proto-settlement-driver.tick ms=362 sync=0 ok=1 at=2026-09-22T17:33:31.093Z
+[proto-settlement-driver] tick 58: {"actioned":2,"landed":0,"submitted":0,"waiting":0,"gated":0,"held":0,"failed":0}
+[proto-settlement-driver] tick 59: {"actioned":2,"landed":1,"submitted":0,"waiting":0,"gated":0,"held":0,"failed":0}
+[proto-settlement-driver] started (tick 20000ms, cap 3/tick, network=simnet)
+[proto-settlement-driver] tick 1: {"actioned":2,"landed":0,"submitted":0,"waiting":0,"gated":1,"held":1,"failed":0}
+[diag:step] proto-settlement-driver.tick ms=276 sync=1 ok=1 at=2026-09-22T18:02:36.597Z
+[proto-settlement-driver] tick 2: {"actioned":2,"landed":0,"submitted":0,"waiting":0,"gated":1,"held":1,"failed":0}
+[diag:step] proto-settlement-driver.tick ms=53 sync=0 ok=1 at=2026-09-22T18:02:56.386Z
+[proto-settlement-driver] tick 3: {"actioned":2,"landed":0,"submitted":0,"waiting":0,"gated":1,"held":1,"failed":0}
+[diag:step] proto-settlement-driver.tick ms=53 sync=0 ok=1 at=2026-09-22T18:03:16.387Z
+[proto-settlement-driver] tick 4: {"actioned":2,"landed":0,"submitted":0,"waiting":0,"gated":1,"held":1,"failed":0}
+[diag:step] proto-settlement-driver.tick ms=52 sync=0 ok=1 at=2026-09-22T18:03:36.389Z
+[proto-settlement-driver] tick 5: {"actioned":2,"landed":0,"submitted":0,"waiting":0,"gated":1,"held":1,"failed":0}
+[proto-settlement-driver] tick 6: {"actioned":2,"landed":0,"submitted":0,"waiting":0,"gated":1,"held":1,"failed":0}
+[proto-settlement-driver] tick 7: {"actioned":2,"landed":0,"submitted":0,"waiting":0,"gated":1,"held":1,"failed":0}
