@@ -3,13 +3,13 @@
 // 内部构造出的 active_sigscript 逐字节完全一致。捕获手法同 proto-register-append-witness.test.mjs
 // (临时加一行 eprintln, 未改任何编码/执行逻辑, 验证后已还原, 见
 // docs/provenance/2026-09-15-j2-ktt-transfer-witness-abi-verification/)。
-// Run: cd kasia-console && node src/lib/proto-ktt-transfer-witness.test.mjs
+// Run: cd kasia-console && node src/lib/kcc20-token/ktt-transfer-witness.test.mjs
 
 import fs from 'node:fs';
 
 const kaspa = await import('kaspa-wasm');
-const { encodeKttTransferZeroOutAction, combineKttActionAndRedeem, buildKttTransferZeroOutSigScriptHex } = await import('./proto-ktt-transfer-witness.mjs');
-const { compileSilV100 } = await import('./pool-bshard-artifacts.mjs');
+const { encodeKttTransferZeroOutAction, combineKttActionAndRedeem, buildKttTransferZeroOutSigScriptHex } = await import('./ktt-transfer-witness.mjs');
+const { compileSilV100 } = await import('../pool-bshard-artifacts.mjs');
 
 let pass = 0, fail = 0;
 const t = (n, f) => { try { f(); pass++; console.log('[PASS] ' + n); } catch (e) { fail++; console.log('[FAIL] ' + n + ' :: ' + e.message); } };

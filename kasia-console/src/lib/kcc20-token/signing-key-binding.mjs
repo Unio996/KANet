@@ -14,7 +14,7 @@
 //
 // 错误信息不含私钥值、不含推导出的私钥材料(只含公钥/spk 的短前缀)。
 
-import { computeTicketGenesisArtifact, computeKanetTokenClaimGenesisArtifact } from './proto-covenant-builder.mjs';
+import { computeTicketGenesisArtifact, computeKanetTokenClaimGenesisArtifact } from '../proto-covenant-builder.mjs';
 
 const HEX64 = /^[0-9a-fA-F]{64}$/;
 const noPrefixLower = (h) => String(h).replace(/^0x/i, '').toLowerCase();

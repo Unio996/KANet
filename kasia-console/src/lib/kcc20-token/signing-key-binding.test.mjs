@@ -1,5 +1,5 @@
 // proto-signing-key-binding.test.mjs — Codex MUST-PROVE 签名前公钥断言(Bettor 前置①)的正反回归。
-// Run: cd kasia-console && node src/lib/proto-signing-key-binding.test.mjs
+// Run: cd kasia-console && node src/lib/kcc20-token/signing-key-binding.test.mjs
 // 真 kaspa-wasm + 真编译 PoolSideTicket; 期望的 ticket spk 由测试自己按 ctor 编译+P2SH 得到(不经 computeTicketGenesisArtifact),
 // 与被测的推导路径两侧不共用实现。
 
@@ -18,10 +18,10 @@ if (!process.env.CONSOLE_ENCRYPTION_KEY) process.env.CONSOLE_ENCRYPTION_KEY = '1
 
 const kaspa = await import('kaspa-wasm');
 const { randomBytes } = await import('node:crypto');
-const { normalizePubkeyHex, pubkeyHexOfPrivkey, deriveTicketBettorPk, assertSigningKeyMatchesBinding, assertTicketSigningKey, deriveClaimWinnerPk, assertClaimWinnerSigningKey } = await import('./proto-signing-key-binding.mjs');
-const { p2sh, computeMarketGenesisArtifacts, loadProtocolConstants } = await import('./proto-covenant-builder.mjs');
-const { compileSilV100 } = await import('./pool-bshard-artifacts.mjs');
-const { decryptCommitteePrivkey } = await import('./proto-committee-key.mjs');
+const { normalizePubkeyHex, pubkeyHexOfPrivkey, deriveTicketBettorPk, assertSigningKeyMatchesBinding, assertTicketSigningKey, deriveClaimWinnerPk, assertClaimWinnerSigningKey } = await import('./signing-key-binding.mjs');
+const { p2sh, computeMarketGenesisArtifacts, loadProtocolConstants } = await import('../proto-covenant-builder.mjs');
+const { compileSilV100 } = await import('../pool-bshard-artifacts.mjs');
+const { decryptCommitteePrivkey } = await import('../proto-committee-key.mjs');
 
 let pass = 0, fail = 0;
 const t = (n, f) => { try { f(); pass++; console.log('[PASS] ' + n); } catch (e) { fail++; console.log('[FAIL] ' + n + ' :: ' + e.message + '\n' + e.stack); } };
@@ -34,7 +34,7 @@ const throws = (fn, re, secrets = []) => {
 
 const MARKET_ID = 'cd'.repeat(32);
 const newKey = () => { const priv = randomBytes(32).toString('hex'); return { priv, pk: pubkeyHexOfPrivkey(kaspa, priv) }; };
-const TICKET_PATH = new URL('./sil-v1/PoolSideTicket.sil', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
+const TICKET_PATH = new URL('../sil-v1/PoolSideTicket.sil', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
 // 独立于被测代码: 测试自己编译 PoolSideTicket 并算 P2SH
 const ticketSpk = ({ pk, side, stake }) => '0x' + p2sh(Buffer.from(compileSilV100(TICKET_PATH, [{ kind: 'bytes', value: [...Buffer.from(pk, 'hex')] }, { kind: 'int', value: side }, { kind: 'int', value: stake }, { kind: 'bytes', value: [...Buffer.from(MARKET_ID, 'hex')] }], 'PoolSideTicket').script));
 
@@ -83,7 +83,7 @@ t('反向(生产路径 v0): 取了【另一个市场】的委员私钥 ⇒ signi
 });
 
 // ── 批7 withdraw: KanetTokenClaim winner_pk 推导 + 签名前断言(期望 spk 由测试自己按 ctor 直接编译+P2SH, 不经 computeKanetTokenClaimGenesisArtifact) ──
-const KTC_PATH = new URL('./KanetTokenClaim.sil', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
+const KTC_PATH = new URL('../KanetTokenClaim.sil', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
 const { token_tmpl_hash: TOKEN_TMPL_HASH } = loadProtocolConstants();
 const MARKET_COV = 'ef'.repeat(32);
 const ktcSpk = ({ pk, amount }) => '0x' + p2sh(Buffer.from(compileSilV100(KTC_PATH, [{ kind: 'bytes', value: [...Buffer.from(MARKET_COV, 'hex')] }, { kind: 'bytes', value: [...Buffer.from(pk, 'hex')] }, { kind: 'int', value: amount }, { kind: 'bytes', value: [...Buffer.from(TOKEN_TMPL_HASH, 'hex')] }], 'KanetTokenClaim').script));
