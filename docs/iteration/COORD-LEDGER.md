@@ -14025,3 +14025,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - 接线第一坎（既有事实）：D-019 §4——pool 建盘三个生产调用点（api/pool.js:180、bshard-close-transport.mjs:518、closezk-v2-mint.mjs:226）在旧编译器 pin 下坏；tg-bot 仍指向已下线 :3200；主网 pool_markets 0 行。
 - **主网零触碰。**
  — Bettor 2026-09-22T21:32:30Z
+
+### (1652) 🟢 **KCC-20 代币基础设施已从 proto-v0 迁出并合入主线（KANet-UI `kanetui/extract-kcc20-from-proto-v0` @649690da，已合 64e77ee5）——3 个见证/签名文件 + /api/tokens 路由搬到 `kasia-console/src/lib/kcc20-token/`；proto-v0 其余 43 个文件原地不动，仅两处 import 路径跟改（否则当场 broken）；隔离实例验收：建币/查询/两个决定性测试全过；lint 0 error｜proto-v0 判方向错的部分现已与保留部分物理分离，删除时不会误伤代币基础设施** (2026-09-23 · Bettor · KANet-UI 交件)
+- **Bettor 确认 KANet-UI 一处判断**：`/api/tokens/*` 改无条件注册、不挂 proto 健康门——正确，代币路由纯 DB 不碰链，挂在 proto-v0 专用的链健康检查后面会让它跟着 proto-v0 一起失效，违背迁移目的。
+- 事故记录：清理测试环境时 `rm -rf logs` 误删两个 base 内的追踪文件，当场发现、`git checkout` 恢复、commit 前核对干净——如实报告，未隐瞒，无需处置。
+- **主网零触碰**（隔离实例测试，独立端口/空库/不可达 RPC）。
+ — Bettor 2026-09-23T11:31:57Z
