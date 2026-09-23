@@ -82,26 +82,9 @@ export async function registerProtoRoutes(fastify) {
     let net = null; try { net = (await import('../../../shared/lib/kaspa-network.mjs')).configuredNetwork(); } catch { net = null; }
     logOraclePolicy(console, resolveOraclePolicy({ env: process.env, network: net }));
   }
-  // ══════════════════════════════════════════════════════════════════════
-  // 代币定义 —— 纯 DB, 不上链, 不产生任何可花费余额(Owner"代币属性配置需要界面互动"落这一层)。
-  // ══════════════════════════════════════════════════════════════════════
-  fastify.post('/api/tokens/create', async (request, reply) => {
-    const { name, ticker, faceValue, description } = request.body || {};
-    if (!name?.trim()) return reply.code(400).send({ ok: false, error: 'name required' });
-    if (!ticker?.trim()) return reply.code(400).send({ ok: false, error: 'ticker required' });
-    const id = randomUUID();
-    const ts = nowIso();
-    sqlite.prepare(`
-      INSERT INTO proto_token_defs (id, name, ticker, description, default_denomination, created_at)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(id, name.trim(), ticker.trim(), description || null, Number.isFinite(Number(faceValue)) ? Number(faceValue) : null, ts);
-    return reply.send({ ok: true, id, name: name.trim(), ticker: ticker.trim(), created_at: ts });
-  });
-
-  fastify.get('/api/tokens', async (request, reply) => {
-    const rows = sqlite.prepare(`SELECT ${PUBLIC_TOKEN_DEF_COLS} FROM proto_token_defs ORDER BY created_at DESC`).all();
-    return reply.send({ ok: true, tokens: rows });
-  });
+  // 🔴 代币定义 API(POST /api/tokens/create、GET /api/tokens)已搬到 api/tokens.js(Bettor
+  //   2026-09-23T06-53Z 派工，KCC-20 迁出 proto-v0，见 kcc20-token/ 目录)——本文件不再注册这两条路由；
+  //   下方 /api/proto-markets/create 仍用 PUBLIC_TOKEN_DEF_COLS 按 tokenId 查一条 token 定义，常量保留。
 
   // ══════════════════════════════════════════════════════════════════════
   // 建市场壳 —— ShardLeaf_direct genesis。校验/查询真实; 广播占位(§6/§9 未定案)。

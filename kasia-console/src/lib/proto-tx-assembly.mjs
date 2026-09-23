@@ -14,7 +14,7 @@
 // 而不是跨包 import relay 代码("Console 传导不碰链"角色分工铁律), 改动任一侧必须同步改另一侧。
 
 import { encodeRegisterAppendAction, combineActionAndRedeem as combineRegisterAppendActionAndRedeem } from './proto-register-append-witness.mjs';
-import { encodeKttTransferZeroOutAction, combineKttActionAndRedeem } from './proto-ktt-transfer-witness.mjs';
+import { encodeKttTransferZeroOutAction, combineKttActionAndRedeem } from './kcc20-token/ktt-transfer-witness.mjs';
 import { encodeLeafStateBytes } from './proto-leaf-state-encode.mjs';   // 9-1 F3: 原来 import proto-leaf-state.mjs(带 db/client.js)只为这一个纯函数
 import { assertMassWithinCeiling } from './proto-mass-ceiling.mjs';
 

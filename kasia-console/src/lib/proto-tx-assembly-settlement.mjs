@@ -22,10 +22,10 @@ import { encodeConvertToClaimAction } from './proto-convert-to-claim-witness.mjs
 import { encodeClaimDrawAction } from './proto-claim-draw-witness.mjs';
 import { encodeAuthorizeSpendAction } from './proto-ticket-authorize-witness.mjs';
 import { payoutLeafHex } from './proto-payout-leaf.mjs';
-import { assertTicketSigningKey, assertClaimWinnerSigningKey } from './proto-signing-key-binding.mjs';
-import { encodeKtcSpendAction } from './proto-ktt-claim-spend-witness.mjs';
+import { assertTicketSigningKey, assertClaimWinnerSigningKey } from './kcc20-token/signing-key-binding.mjs';
+import { encodeKtcSpendAction } from './kcc20-token/ktt-claim-spend-witness.mjs';
 import { evaluateCloseCommitTiming, evaluateRefundFlipTiming } from './proto-close-commit-gate.mjs';
-import { encodeKttTransferZeroOutAction, combineKttActionAndRedeem } from './proto-ktt-transfer-witness.mjs';
+import { encodeKttTransferZeroOutAction, combineKttActionAndRedeem } from './kcc20-token/ktt-transfer-witness.mjs';
 import { assertMassWithinCeiling } from './proto-mass-ceiling.mjs';
 import { decryptCommitteePrivkey } from './proto-committee-key.mjs';
 import { STEP_INPUT_ROLES, EXPECTED_INPUT_VALUE_SOMPI } from './proto-settlement-chain-checks.mjs';
