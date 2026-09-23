@@ -143,23 +143,64 @@ export function compilePayoutShardRedeem({ poolMerkleRoot, predicateCommit, cons
   return Buffer.from(compileSilV100(join(LIB, 'PayoutShard.sil'), ctor, 'PayoutShard').script).toString('hex');
 }
 
-/**
- * Compile a ShardLeaf redeem with the given (A) 4-field state baked (12-param ctor).
- * 🔴 D-019 迁移(ledger 1225-1227): 原 ctor 只填 11 个值(缺 T3 代币化新增的 token_tmpl_hash, 插在
- * deadline 之后、init_local_yes 之前, 当前 ShardLeaf.sil 实读 12 参数)——已改走 compileSilV100 + ctor
- * 补齐, tokenTmplHash 必须传真实值, 不接受占位符。
- * @returns {{ redeemHex, psTmplHashHex }}
- */
-export function compileShardLeafRedeem({ marketIdHash, psTmplHashHex, shardPoolId, sealCount, payoutCovId, deadline, localYes, localNo, count, poolValue, tokenTmplHash }) {
-  if (!/^[0-9a-fA-F]{64}$/.test(String(tokenTmplHash || ''))) throw new Error(`compileShardLeafRedeem: tokenTmplHash 必须是 32B hex，收到 ${JSON.stringify(tokenTmplHash)} — ctor-only 字面量，不接受占位符/缺省值`);
+function _shardLeafCtor({ marketIdHash, psTmplHashHex, shardPoolId, sealCount, payoutCovId, deadline, tokenTmplHash, localYes, localNo, count, poolValue, ownRedeemLen }) {
   // ★件1(J1): deadline 加在常量区(payoutCovId 后, init State 前) — State 区仍 offset 1/4×PUSH8 不变 (spliceLeafState byte-equal 保持)。
-  const ctor = [
+  return [
     ctorBytes32V100(marketIdHash), ctorBytes32V100(psTmplHashHex), ctorBytes32V100(shardPoolId),
     ctorIntV100(sealCount), ctorIntV100(MIN_BET), ctorBytes32V100(payoutCovId), ctorIntV100(deadline),
     ctorBytes32V100(tokenTmplHash),
     ctorIntV100(localYes), ctorIntV100(localNo), ctorIntV100(count), ctorIntV100(poolValue),
+    ctorIntV100(ownRedeemLen),
   ];
-  return Buffer.from(compileSilV100(join(LIB, 'ShardLeaf.sil'), ctor, 'ShardLeaf').script).toString('hex');
+}
+
+/**
+ * 🔴 D-020 移植配套(账本1468/1469 修复移植, 2026-09-23·Owner批·NWT审, 同 proto-covenant-builder.mjs
+ * convergeShardLeafOwnRedeemLen 的收敛逻辑，为 ShardLeaf.sil 的 13-参数 ctor 重新实现——own_redeem_len
+ * 本身的 minimal-push 编码宽度会影响编译产物总长度，是自引用的不动点问题：猜一次编一次，直到编译出的
+ * 真实长度等于猜测值为止。genesis 时(首次为某市场某 seal_count/min_bet 组合调用)才需要跑这个循环；
+ * register_append 重建时直接从 market_shards.shard_redeem_hex 的字节长度读回，不重新收敛(见
+ * compileShardLeafRedeem 的 fail-closed 校验)。
+ */
+export function convergeShardLeafOwnRedeemLen({ marketIdHash, psTmplHashHex, shardPoolId, sealCount, payoutCovId, deadline, tokenTmplHash, state = { local_yes: 0, local_no: 0, count: 0, pool_value: 0 }, initialGuess = 14225, maxRounds = 6 }) {
+  let guess = initialGuess;
+  for (let round = 1; round <= maxRounds; round++) {
+    const ctor = _shardLeafCtor({ marketIdHash, psTmplHashHex, shardPoolId, sealCount, payoutCovId, deadline, tokenTmplHash, localYes: state.local_yes, localNo: state.local_no, count: state.count, poolValue: state.pool_value, ownRedeemLen: guess });
+    const compiled = compileSilV100(join(LIB, 'ShardLeaf.sil'), ctor, 'ShardLeaf');
+    const actualLen = Buffer.from(compiled.script).length;
+    if (actualLen === guess) {
+      // fail-closed 双保险(同 proto 先例): 收敛循环已保证 actualLen===guess, 这里再断言一次不因为"循环写对了"就省略。
+      if (compiled.script.length !== guess) throw new Error(`convergeShardLeafOwnRedeemLen: fail-closed — 编译出的长度 ${compiled.script.length} != 收敛值 ${guess}`);
+      return { ownRedeemLen: guess, script: compiled.script, stateLayout: { start: compiled.state_layout.start, len: compiled.state_layout.len } };
+    }
+    guess = actualLen;
+  }
+  throw new Error(`convergeShardLeafOwnRedeemLen: own_redeem_len 不动点收敛失败(超过 ${maxRounds} 轮仍未稳定, 最后一次猜测=${guess})——拒绝, 不建出永远无法下注的市场`);
+}
+
+/**
+ * Compile a ShardLeaf redeem with the given (A) 4-field state baked (13-param ctor, D-019+D-020迁移)。
+ * 🔴 D-019 迁移(ledger 1225-1227): 原 ctor 只填 11 个值(缺 T3 代币化新增的 token_tmpl_hash, 插在
+ * deadline 之后、init_local_yes 之前, 当前 ShardLeaf.sil 实读 12 参数)——已改走 compileSilV100 + ctor
+ * 补齐, tokenTmplHash 必须传真实值, 不接受占位符。
+ * 🔴 D-020 移植配套(2026-09-23): 新增 ownRedeemLen(必填, genesis 时用 convergeShardLeafOwnRedeemLen 收敛
+ * 算出、烤入 market_shards.shard_redeem_hex 的字节长度)——fail-closed 校验编译出的真实长度与传入值一致，
+ * 不一致说明该市场的 seal_count/min_bet/state 与已存 ownRedeemLen 不自洽，拒绝返回(同 proto 先例
+ * computeShardLeafRedeemScript)。
+ * @returns {string} redeemHex
+ */
+export function compileShardLeafRedeem({ marketIdHash, psTmplHashHex, shardPoolId, sealCount, payoutCovId, deadline, localYes, localNo, count, poolValue, tokenTmplHash, ownRedeemLen }) {
+  if (!/^[0-9a-fA-F]{64}$/.test(String(tokenTmplHash || ''))) throw new Error(`compileShardLeafRedeem: tokenTmplHash 必须是 32B hex，收到 ${JSON.stringify(tokenTmplHash)} — ctor-only 字面量，不接受占位符/缺省值`);
+  if (!(Number.isInteger(ownRedeemLen) && ownRedeemLen > 0)) throw new Error(`compileShardLeafRedeem: ownRedeemLen 必须是正整数(读自 market_shards.shard_redeem_hex 字节长度, 或 genesis 时来自 convergeShardLeafOwnRedeemLen), 收到 ${JSON.stringify(ownRedeemLen)}`);
+  const ctor = _shardLeafCtor({ marketIdHash, psTmplHashHex, shardPoolId, sealCount, payoutCovId, deadline, tokenTmplHash, localYes, localNo, count, poolValue, ownRedeemLen });
+  const compiled = compileSilV100(join(LIB, 'ShardLeaf.sil'), ctor, 'ShardLeaf');
+  // fail-closed(账本1469 Bettor③要求，移植进 ShardLeaf.sil 一侧): 真实编译出的长度必须等于传入的
+  // ownRedeemLen——不等即拒绝返回(说明该市场的 seal_count/min_bet/state 与 ownRedeemLen 已经不自洽，
+  // 继续构造只会产出一笔链上必拒的交易，不如提前 fail-loud)。
+  if (compiled.script.length !== ownRedeemLen) {
+    throw new Error(`compileShardLeafRedeem: fail-closed — 编译出的 ShardLeaf 长度 ${compiled.script.length} != 传入的 ownRedeemLen ${ownRedeemLen}`);
+  }
+  return Buffer.from(compiled.script).toString('hex');
 }
 
 /**
@@ -538,7 +579,11 @@ async function _registerBettorOnShardInner(o) {
   // 🔴 事故修复(2026-07-07): 同上处理，强制 SILVERC_LEGACY，不依赖调用方传入的 silverc。
   const psArtifact = computePoolSideArtifact(join(LIB, 'PoolSide_v08_shard.sil'), [ctorBytes32(bettorPk), ctorInt(direction), ctorInt(stake), ctorBytes32(z32)], SILVERC_LEGACY);
   const genState = { local_yes: 0, local_no: 0, count: 0, pool_value: 0 };  // 空 maker seed (非 bettor; level2-A Σcount==loaded 排除它)
-  const genRedeem = compileShardLeafRedeem({ marketIdHash, psTmplHashHex: psArtifact.templateHashHex, shardPoolId, sealCount, payoutCovId, deadline, localYes: 0, localNo: 0, count: 0, poolValue: 0, tokenTmplHash });
+  // 🔴 D-020 移植配套(2026-09-23): genesis 时不动点收敛 own_redeem_len(每个市场自己的 seal_count/min_bet
+  // 组合各自收敛，不假设跨市场共用)——收敛出的值只在本次调用内使用，之后任何 register_append 重建都
+  // 从落库的 shard_redeem_hex 字节长度现算，不再重新收敛。
+  const { ownRedeemLen: genOwnRedeemLen } = convergeShardLeafOwnRedeemLen({ marketIdHash, psTmplHashHex: psArtifact.templateHashHex, shardPoolId, sealCount, payoutCovId, deadline, tokenTmplHash, state: genState });
+  const genRedeem = compileShardLeafRedeem({ marketIdHash, psTmplHashHex: psArtifact.templateHashHex, shardPoolId, sealCount, payoutCovId, deadline, localYes: 0, localNo: 0, count: 0, poolValue: 0, tokenTmplHash, ownRedeemLen: genOwnRedeemLen });
   const genAddr = p2sh(genRedeem);
   const genTx = await transfer(genAddr, SHARD_GENESIS_SEED);                // 空 genesis seed (dust, 非 bet stake)
   if (!await landed(genTx, genAddr)) throw new Error('ShardLeaf empty-genesis no land');

@@ -46,7 +46,12 @@ contract ShardLeaf(
     int      init_local_yes,
     int      init_local_no,
     int      init_count,
-    int      init_pool_value
+    int      init_pool_value,
+    // 🔴 D-020 移植配套(账本1468/1469 修复移植, 2026-09-23·Owner批·NWT审): 裸编译redeem脚本自身的字节
+    // 长度——不能是全局常量(会随seal_count/min_bet的magnitude变化, 见 ShardLeaf_direct.sil 同名字段
+    // 注释)。由JS侧genesis时按本市场自己的seal_count/min_bet做不动点收敛算出后烤入, register_append
+    // 重建时从 market_shards.shard_redeem_hex 现算(等于其字节长度)读回, 不重新猜。
+    int      own_redeem_len
 ) {
     int local_yes  = init_local_yes;
     int local_no   = init_local_no;
@@ -104,6 +109,11 @@ contract ShardLeaf(
 
     // —— entry 0: register_append (收注; 与原 PoolLeaf entry 0 语义一致 + v0.3 代币化) ——
     // ★ V-T-8 绕路(见上方 OWN_PREFIX_LEN/OWN_STATE_LEN 注释): leaf 自身续约手写编码, 不走 validateOutputState。
+    // 🔴 D-020 移植(2026-09-23·Owner批·NWT审, 原修复见 ShardLeaf_direct.sil 同名entry注释): stakeInIdx
+    // 参数与其锚定的 stake 筹码校验已删除(免费无限铸造的代币, 一枚筹码证明不了任何东西, 且该输入的
+    // zero-out owner 检查曾被 NWT 实证可被第三方连本带锁定的真实KAS一起偷走)——register_append 从
+    // "leaf+stake筹码[+held]+fee"收窄成"leaf[+held]+fee", 合并 KTT 输出改用 validateOutputStateWithTemplate
+    // 纯 witness/模板匹配, 不再需要消费一个额外的 stake 筹码输入来"证明"下注金额。
     entry register_append(
         int      side,
         int      stake,
@@ -112,7 +122,6 @@ contract ShardLeaf(
         byte[32] bettorPk,
         byte[]   ps_prefix,
         byte[]   ps_suffix,
-        int      stakeInIdx,        // v0.3: 新下注的真实代币输入(读 amount, 不信任 witness 单独喂的 stake 数)
         int      tok_out,           // v0.3: leaf 自身代币续约输出(amount=pool_value+stake, owner=自身)
         byte[]   tok_prefix, byte[] tok_suffix
     ) {
@@ -128,22 +137,16 @@ contract ShardLeaf(
             shardPoolId: shard_pool_id
         }, ps_prefix, ps_suffix, ps_tmpl_hash);
 
-        // ★ v0.3 输入侧(§2 表): 归己(本 leaf 既有持仓, 首次调用=0)代币全被处理——新下的注(stake)owner 尚未
-        //   变成本 leaf, 天然被 owner 过滤排除, 是"合法在场不计入"的正例(同 PayoutShard.absorb 的 shard_amount)。
         int owned_total = scanOwnedTokenInputs(tok_prefix, tok_suffix);
         require(owned_total == pool_value);
-        // ★ 新下注真实 amount(不信任 witness 单独喂的数, T3 迁移点)
-        TokenState stakeTk = readInputStateWithTemplate(stakeInIdx, tok_prefix.length, tok_suffix.length, token_tmpl_hash);
-        require(stakeTk.amount == stake);
-        // ★ v0.3 §4 输出侧派生绑定: leaf 自身续约代币 owner=自身(OpInputCovenantId 派生表达式, 不是裸 witness)
-        validateOutputStateWithInputTemplate(tok_out, TokenState {
+        validateOutputStateWithTemplate(tok_out, TokenState {
             amount:               pool_value + stake,
             owner:                OpInputCovenantId(this.activeInputIndex),
             owner_scheme:         TOKEN_SCHEME_COVENANT_ID,
             borrow_scheme:        TOKEN_BORROW_DISABLED,
             borrow_guard:         byte[32](0x0000000000000000000000000000000000000000000000000000000000000000),
             extension_commitment: byte[32](0x0000000000000000000000000000000000000000000000000000000000000000)
-        }, stakeInIdx, tok_prefix.length, tok_suffix.length, token_tmpl_hash);
+        }, tok_prefix, tok_suffix, token_tmpl_hash);
 
         // ★ V-T-8 绕路(AB11): 手写编码新 State(4 字段: local_yes/local_no/count/pool_value), 不走
         //   validateOutputState(同函数已有 readInputStateWithTemplate, 经 scanOwnedTokenInputs)。
@@ -153,8 +156,13 @@ contract ShardLeaf(
                           + byte[](8 as byte[1]) + byte[]((pool_value + stake) as byte[8]);
         byte[] ownSig = tx.inputs[this.activeInputIndex].sigScript;
         int ownLen = ownSig.length;
-        byte[] ownPrefix = ownSig.slice(0, OWN_PREFIX_LEN);
-        byte[] ownSuffix = ownSig.slice(OWN_PREFIX_LEN + OWN_STATE_LEN, ownLen);
+        // 🔴 账本1468/1469修复移植(2026-09-23·Owner批·NWT审): redeem 脚本在完整 sigScript(ownSig)里的
+        // 真实起点(不是字节0——ownSig = action witness 字节 ++ pushdata(redeem 字节), action witness
+        // 长度远大于0)。own_redeem_len 直接引用 ctor 字段, genesis 时已按本市场自己的 seal_count/min_bet
+        // 做过不动点收敛烤入, 这里只读用。
+        int ownRedeemStart = ownLen - own_redeem_len;
+        byte[] ownPrefix = ownSig.slice(ownRedeemStart, ownRedeemStart + OWN_PREFIX_LEN);
+        byte[] ownSuffix = ownSig.slice(ownRedeemStart + OWN_PREFIX_LEN + OWN_STATE_LEN, ownLen);
         byte[32] expectedHash = blake2b(ownPrefix + stateBytes + ownSuffix);
         byte[37] expectedSpk = new ScriptPubKeyP2SH(expectedHash);
         require(tx.outputs[leafOutIdx].scriptPubKey == byte[](expectedSpk));
