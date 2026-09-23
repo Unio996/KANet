@@ -1009,6 +1009,15 @@ if (process.send) {
           if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
           return;
         }
+        case 'bshard_genesis_mint_shardleaf': {
+          // 片创建铸空 ShardLeaf covenant (populateGenesisCovenants → cov_id). 返回 leafCovId 供 market_shards.leaf_cov_id
+          // 落库(D-020 移植配套, 2026-09-23·Owner批·NWT审)——register_append 铸/续续约代币(owner=leaf 自身 covenant id)需要。
+          const { unlockBshardGenesisMintShardLeaf } = await import('./lib/p2sh.mjs');
+          const wallet = getWallet();
+          const r = await unlockBshardGenesisMintShardLeaf({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
+          if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
+          return;
+        }
         case 'bshard_consolidate': {
           // 单片全额归集进真 PayoutShard (PS absorb OP_0 + SL consolidate_to_payout OP_1, cov_id-bind destination + CovenantBinding 续).
           const { unlockBshardConsolidate } = await import('./lib/p2sh.mjs');

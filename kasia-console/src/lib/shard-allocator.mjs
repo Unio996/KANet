@@ -106,15 +106,18 @@ export function allocateForRegister(db, logicalMarketId, nextStakeSompi) {
  * Throws on UNIQUE(logical_market_id, shard_index) — concurrent open_new losers catch this and re-run
  * allocateForRegister (which now sees the winner's open shard). This serializes shard opening across nodes/reqs.
  */
-export function registerShard(db, { logicalMarketId, shardIndex, shardMarketId, shardP2sh, currentLeafOutpoint = null, currentLeafState = null, shardRedeemHex = null, shardTokenTmplHash = null, nowSec = null }) {
+export function registerShard(db, { logicalMarketId, shardIndex, shardMarketId, shardP2sh, currentLeafOutpoint = null, currentLeafState = null, shardRedeemHex = null, shardTokenTmplHash = null, leafCovId = null, nowSec = null }) {
   // D-019 迁移(ledger 1225-1227): shardTokenTmplHash = ShardLeaf.sil T3 代币化 ctor-only 字面量, 创世时
   // 由调用方(registerBettorOnShard 'open_new' 分支)传入并存进 market_shards.shard_token_tmpl_hash 列
   // (v205 迁移新增), K-18"谁编译谁 declare"纪律的延伸——不在这里做格式校验(compileShardLeafRedeem 已经
   // fail-loud 校验过, 这里只是记账写入, 值到这里时已经真实用于编译过 genRedeem)。
+  // 🔴 D-020 移植配套(2026-09-23·Owner批·NWT审): leafCovId = ShardLeaf genesis 的 populateGenesisCovenants
+  // 算出的 covenant id(v215 迁移新增列)，genesis 之后对同一片 leaf 永远不变，register_append 铸/续续约
+  // 代币(owner=leaf 自身 covenant id)每次都要读它——同 payout_shards.payout_cov_id 对称处理。
   db.prepare(
-    `INSERT INTO market_shards (logical_market_id, shard_index, shard_market_id, shard_p2sh, current_leaf_outpoint, current_leaf_state, shard_redeem_hex, shard_token_tmpl_hash, status, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?)`
-  ).run(logicalMarketId, shardIndex, shardMarketId, shardP2sh, currentLeafOutpoint, currentLeafState ? JSON.stringify(currentLeafState) : null, shardRedeemHex, shardTokenTmplHash, nowSec);
+    `INSERT INTO market_shards (logical_market_id, shard_index, shard_market_id, shard_p2sh, current_leaf_outpoint, current_leaf_state, shard_redeem_hex, shard_token_tmpl_hash, leaf_cov_id, status, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?)`
+  ).run(logicalMarketId, shardIndex, shardMarketId, shardP2sh, currentLeafOutpoint, currentLeafState ? JSON.stringify(currentLeafState) : null, shardRedeemHex, shardTokenTmplHash, leafCovId, nowSec);
 }
 
 /** Mark the previous open shard sealed when a new shard supersedes it (atomic part of open_new). */

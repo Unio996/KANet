@@ -1895,6 +1895,49 @@ export async function unlockBshardGenesisMintPayout(args) {
 }
 
 /**
+ * unlockBshardGenesisMintShardLeaf — market/片创建铸【空 ShardLeaf covenant 实例】(cov_id≠0)。
+ * 🔴 D-020 移植配套(2026-09-23, Owner批·NWT审): ShardLeaf genesis 原来就是一笔普通 transfer(genAddr, seed)——
+ * relay 只是发钱，从没算过也没法算出 covenant id。register_append 铸/续续约代币(tok_out, owner=leaf 自身
+ * covenant id)需要 JS 侧提前知道这个值。手法与 unlockBshardGenesisMintPayout 逐字一致(同一份
+ * populateGenesisCovenants 机制，同一族 covenant-genesis-mint)，只是目标合约/输出参数不同——不是新发明。
+ * 输入: 普通 funding UTXO(relay wallet P2PK)。输出[0]: ShardLeaf genesis P2SH(空 4-field state)
+ *   带 CovenantBinding(genesis case, populateGenesisCovenants)→ consensus 重算赋 cov_id = covenant_id(funding.outpoint,[leafOut])。
+ * 返回 leafCovId 供 market_shards.leaf_cov_id 落库(同 payout_shards.payout_cov_id 对称处理)。
+ * v1 tx(TX_VERSION_TOCCATA, covenant output 必需)+ compute_budget(P2PK checksig 覆盖)。
+ */
+export async function unlockBshardGenesisMintShardLeaf(args) {
+  const { wallet, cmd, networkId, lockTime = 0n } = args;
+  const rpc = await connectRpc(networkId);
+  try {
+    const f = cmd.inputs.funding;
+    const fundUtxo = await _matchUtxo(rpc, f.address, f.outpointTxid, f.index);
+    const leafAddr = _addressFromRedeem(cmd.shardleaf.redeem_hex, networkId);   // ShardLeaf genesis P2SH = hash(redeem)
+    const leafSeed = BigInt(cmd.shardleaf.seedSompi);                           // genesis leaf UTXO 种子 value(dust; register_append 只要求 >=DUST_MIN)
+    const fee = _bshardFeeV1(1);
+    if (_utxoValue(fundUtxo) - leafSeed - fee < 0n) throw new Error(`genesis-mint insufficient: Σin ${_utxoValue(fundUtxo)} < seed ${leafSeed} + fee ${fee}`);
+    const change = _utxoValue(fundUtxo) - leafSeed - fee;
+    const outputs = [new TransactionOutput(leafSeed, payToAddressScript(new Address(leafAddr)))];
+    if (change >= 1000n && cmd.outputs?.change_address) outputs.push(new TransactionOutput(change, payToAddressScript(new Address(cmd.outputs.change_address))));
+    // populateGenesisCovenants: leaf output[0] 由 funding input[0] 授权创世 → consensus 重算验 cov_id。先于签名(v1 sighash 含 covenant)。
+    const mk = (ss) => {
+      const t = new Transaction({
+        version: 1,
+        inputs: [{ previousOutpoint: { transactionId: fundUtxo.outpoint.transactionId, index: fundUtxo.outpoint.index }, signatureScript: ss, sequence: 0n, sigOpCount: 0, computeBudget: _BSHARD_COMPUTE_BUDGET, ...(ss === '' ? { utxo: fundUtxo } : {}) }],
+        outputs, lockTime: BigInt(lockTime), gas: 0n, subnetworkId: '0000000000000000000000000000000000000000', payload: '',
+      });
+      t.populateGenesisCovenants([new GenesisCovenantGroup(0, [0])]);
+      return t;
+    };
+    const leafCovId = String(mk('').outputs[0].covenant.covenantId);
+    const sigHex = createInputSignature(mk(''), 0, wallet.getPrivateKey(), SighashType.All);
+    const signedTx = mk(sigHex);
+    _assertTxInvariants([fundUtxo], signedTx, 'unlockBshardGenesisMintShardLeaf', networkId);
+    const r = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
+    return { txId: r.transactionId, leafCovId, leafAddress: leafAddr, leafSeedSompi: leafSeed.toString() };
+  } finally { try { await rpc.disconnect(); } catch {} }
+}
+
+/**
  * unlockBshardConsolidate — 关池后单片全额归集进真 PayoutShard covenant (cov_id provenance destination-bind)。
  * tx: in=[PS@0(absorb OP_0), SL@1(consolidate_to_payout OP_1), fee@2] → out=[PS_continuation@0(cov_id 续), change]。
  *   • PS@0 absorb(selfOutIdx=0, shardInIdx=1): credit SL UTXO 真 value(register-welded pool_value)+ validateOutputState 续 cov_id。

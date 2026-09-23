@@ -6541,5 +6541,24 @@ export function runMigrations() {
     }
   }
 
+  // ── v215 (2026-09-23, J2 · ShardLeaf.sil D-020 移植配套, 设计 docs/2026-09-23-j2-shardleaf-sil-d020-port-design-v0.1.md,
+  //   NWT 攻击面审通过·Owner批): market_shards 加 leaf_cov_id 列——ShardLeaf genesis 从简单 transfer() 改成本地组装
+  //   带 populateGenesisCovenants 声明的交易(同 unlockBshardGenesisMintPayout 手法, kasia-relay/src/lib/p2sh.mjs 新增
+  //   unlockBshardGenesisMintShardLeaf), 算出 leaf 自己的 covenant id 后需要落库(同 payout_shards.payout_cov_id 对称
+  //   处理)——register_append 铸/续续约代币(tok_out, owner=leaf 自身 covenant id)需要这个值, 现在整条链路里不存在
+  //   任何地方产生过。genesis 之后对同一片 leaf 永远不变(covenant id 是 genesis 时刻的 funding outpoint 的纯函数,
+  //   续约不改变它), 一次写入、之后每次 register_append 直接读用, 不需要重算。
+  {
+    const msCols = sqlite.pragma('table_info(market_shards)').map(c => c.name);
+    if (msCols.includes('leaf_cov_id')) {
+      console.log('[migrate] v215: market_shards.leaf_cov_id 在, 记账通过');
+    } else {
+      try {
+        sqlite.exec(`ALTER TABLE market_shards ADD COLUMN leaf_cov_id TEXT`);
+        console.log('[migrate] v215: market_shards.leaf_cov_id 列已加(ShardLeaf genesis covenant id, populateGenesisCovenants 算出, register_append 铸续约代币需要).');
+      } catch (e) { if (!/duplicate column/i.test(e.message)) console.warn(`[migrate] v215 market_shards.leaf_cov_id fail: ${e.message}`); }
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }

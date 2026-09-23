@@ -651,7 +651,12 @@ created_at, sealed_at,
 **current_leaf_state** (v172, JSON `{count, local_yes, local_no, pool_value}` — `spliceLeafState` 重算续约 redeem，
 不存全 redeem_hex，J2 已验 byte-equal)，
 **shard_token_tmpl_hash** (v205, 2026-09-14, D-019 迁移——`ShardLeaf.sil` T3 代币化 ctor-only 常量，创世时
-由 T4 单源产物写入，允许 NULL；genesis-mint 时缺值须 fail-loud 拒绝，不猜值)。
+由 T4 单源产物写入，允许 NULL；genesis-mint 时缺值须 fail-loud 拒绝，不猜值)，
+**leaf_cov_id** (v215, 2026-09-23, D-020 移植配套——`ShardLeaf` genesis 从简单 `transfer()` 改成本地组装带
+`populateGenesisCovenants` 声明的交易再广播（`kasia-relay/src/lib/p2sh.mjs` `unlockBshardGenesisMintShardLeaf`，
+同 `ensurePayoutShard` 的 `bshard_genesis_mint_payout` 手法）算出的 leaf 自己的 covenant id，genesis 之后对
+同一片 leaf 永远不变；`register_append` 铸/续续约代币（`tok_out`，`owner`=leaf 自身 covenant id）每次都要读它，
+同 `payout_shards.payout_cov_id` 对称处理)。
 **UNIQUE(logical_market_id, shard_index)** = 注册竞态锁（并发开新片只一个 INSERT 赢，输者重试读已开片）；
 **UNIQUE(shard_market_id)** = 一物理片一行。索引 `idx_market_shards_open(logical_market_id, status)`。
 

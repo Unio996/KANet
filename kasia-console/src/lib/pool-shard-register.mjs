@@ -585,14 +585,21 @@ async function _registerBettorOnShardInner(o) {
   const { ownRedeemLen: genOwnRedeemLen } = convergeShardLeafOwnRedeemLen({ marketIdHash, psTmplHashHex: psArtifact.templateHashHex, shardPoolId, sealCount, payoutCovId, deadline, tokenTmplHash, state: genState });
   const genRedeem = compileShardLeafRedeem({ marketIdHash, psTmplHashHex: psArtifact.templateHashHex, shardPoolId, sealCount, payoutCovId, deadline, localYes: 0, localNo: 0, count: 0, poolValue: 0, tokenTmplHash, ownRedeemLen: genOwnRedeemLen });
   const genAddr = p2sh(genRedeem);
-  const genTx = await transfer(genAddr, SHARD_GENESIS_SEED);                // 空 genesis seed (dust, 非 bet stake)
+  // 🔴 D-020 移植配套(2026-09-23·Owner批·NWT审): genesis 从简单 transfer() 改成本地组装带
+  // populateGenesisCovenants 声明的交易再广播(同 ensurePayoutShard 的 bshard_genesis_mint_payout 手法，
+  // kasia-relay/src/lib/p2sh.mjs 新增 unlockBshardGenesisMintShardLeaf)——register_append 铸/续续约代币
+  // (tok_out, owner=leaf 自身 covenant id)需要 JS 侧提前知道这个值，之前的简单 transfer() 拿不到它。
+  const genFundTx = await transfer(relayAddr, SHARD_GENESIS_SEED + 100_000_000);   // seed + headroom to gateway
+  const genJ = await rc({ type: 'bshard_genesis_mint_shardleaf', shardleaf: { redeem_hex: genRedeem, seedSompi: String(SHARD_GENESIS_SEED) }, inputs: { funding: { address: relayAddr, outpointTxid: genFundTx, index: 0 } }, outputs: { change_address: relayAddr } });
+  const leafCovId = genJ.leafCovId, genTx = genJ.txId || genJ.txid;
+  if (!leafCovId || leafCovId === z32) throw new Error('ShardLeaf genesis-mint cov_id 0 — covenant provenance fail');
   if (!await landed(genTx, genAddr)) throw new Error('ShardLeaf empty-genesis no land');
 
   // pool_markets row for this physical shard (UNIQUE shard_market_id in registry) — caller maps shard→market row.
   const shardMarketId = createShardMarketRow ? await createShardMarketRow(shardIndex, genAddr) : `${logicalMarketId}#${shardIndex}`;
   try {
     if (alloc.sealPrevId) sealShard(db, alloc.sealPrevId, Math.floor(Date.now() / 1000));
-    registerShard(db, { logicalMarketId, shardIndex, shardMarketId, shardP2sh: genAddr, currentLeafOutpoint: `${genTx}:0`, currentLeafState: genState, shardRedeemHex: genRedeem, shardTokenTmplHash: tokenTmplHash, nowSec: Math.floor(Date.now() / 1000) });
+    registerShard(db, { logicalMarketId, shardIndex, shardMarketId, shardP2sh: genAddr, currentLeafOutpoint: `${genTx}:0`, currentLeafState: genState, shardRedeemHex: genRedeem, shardTokenTmplHash: tokenTmplHash, leafCovId, nowSec: Math.floor(Date.now() / 1000) });
   } catch (e) {
     // UNIQUE(logical_market_id, shard_index) race: another concurrent open_new won → retry the whole register.
     if (/UNIQUE/i.test(e.message)) { o._retry = (o._retry || 0) + 1; if (o._retry > 3) throw new Error('open_new race retry exhausted'); return registerBettorOnShard(o); }

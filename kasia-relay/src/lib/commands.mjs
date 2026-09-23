@@ -93,6 +93,7 @@ export const COMMAND_TYPES = Object.freeze({
   BSHARD_CONVERT_TO_FOLDNODE: 'bshard_convert_to_foldnode',   // convert-split: ShardLeaf convert_to_foldnode OP_1, leaf→FoldNode foreign-template 桥
   // ── bshard (A) self-contained cov_id-provenance (2026-06-20): genesis-mint covenant PayoutShard + 单向 DAG consolidation + 委员 close_attest + claim ──
   BSHARD_GENESIS_MINT_PAYOUT: 'bshard_genesis_mint_payout',   // market 创建铸空 PayoutShard covenant (populateGenesisCovenants→cov_id)
+  BSHARD_GENESIS_MINT_SHARDLEAF: 'bshard_genesis_mint_shardleaf',   // 片创建铸空 ShardLeaf covenant (populateGenesisCovenants→cov_id, D-020 移植配套 2026-09-23)
   BSHARD_CONSOLIDATE: 'bshard_consolidate',                   // PS absorb OP_0 + SL consolidate_to_payout OP_1, cov_id-bind 归集
   BSHARD_CLOSE_ATTEST: 'bshard_close_attest',                 // PayoutShard close_attest OP_1, 委员 pubkey-distinct 背书 payoutRoot
   BSHARD_PAYOUT_CLAIM: 'bshard_payout_claim',                 // PayoutShard claim OP_2, store-payout merkle+nullifier+recipient
@@ -176,6 +177,7 @@ export const COMMAND_PAYLOAD_SCHEMA = Object.freeze({
   [COMMAND_TYPES.BSHARD_CONVERT_TO_FOLDNODE]: ['witness', 'inputs', 'outputs'],   // J2 ②: multi-shard convert-split wiring (dispatch+handler 已在, 补 schema entry)
   // bshard (A) cov_id-provenance: genesis-mint {payoutshard,inputs,outputs}; consolidate {inputs,outputs}; close_attest/claim {witness,inputs,outputs}
   [COMMAND_TYPES.BSHARD_GENESIS_MINT_PAYOUT]: ['payoutshard', 'inputs', 'outputs'],
+  [COMMAND_TYPES.BSHARD_GENESIS_MINT_SHARDLEAF]: ['shardleaf', 'inputs', 'outputs'],
   [COMMAND_TYPES.BSHARD_CONSOLIDATE]: ['inputs', 'outputs'],
   [COMMAND_TYPES.BSHARD_CLOSE_ATTEST]: ['witness', 'inputs', 'outputs'],
   [COMMAND_TYPES.BSHARD_PAYOUT_CLAIM]: ['witness', 'inputs', 'outputs'],
@@ -258,6 +260,7 @@ export const COMMAND_FIELD_TYPES = Object.freeze({
   [COMMAND_TYPES.BSHARD_CONVERT_TO_FOLDNODE]: { witness: 'object', inputs: 'object', outputs: 'object' },   // J2 ②: multi-shard convert-split wiring
   // bshard (A) cov_id-provenance
   [COMMAND_TYPES.BSHARD_GENESIS_MINT_PAYOUT]: { payoutshard: 'object', inputs: 'object', outputs: 'object' },
+  [COMMAND_TYPES.BSHARD_GENESIS_MINT_SHARDLEAF]: { shardleaf: 'object', inputs: 'object', outputs: 'object' },
   [COMMAND_TYPES.BSHARD_CONSOLIDATE]: { inputs: 'object', outputs: 'object' },
   [COMMAND_TYPES.BSHARD_CLOSE_ATTEST]: { witness: 'object', inputs: 'object', outputs: 'object' },
   [COMMAND_TYPES.BSHARD_PAYOUT_CLAIM]: { witness: 'object', inputs: 'object', outputs: 'object' },
