@@ -130,12 +130,15 @@ export function sealShard(db, shardMarketId, nowSec = null) {
  * Called AFTER a bettor's side_lock (ShardLeaf register_append 续约) landed (NO TX NO STATE): bump count, recompute
  * projected mass from real on-chain stakes, record the NEW leaf renewal UTXO + state (buildRegisterCommand 下一笔
  * register 要这个), eager-seal if a cap is reached (so findOpenShard skips it next). Atomic transaction.
- * @param {object} [opts] { currentLeafOutpoint:'txid:idx', currentLeafState:{count,local_yes,local_no,pool_value}, nowSec }
+ * @param {object} [opts] { currentLeafOutpoint:'txid:idx', currentLeafState:{count,local_yes,local_no,pool_value},
+ *   currentTokenOutpoint:'txid:idx', nowSec }
  *   — (A) 模型续约: 本笔 register 产的续约 UTXO + state, 下一笔 spliceLeafState 重算 redeem (design (b)). null = 不更新该列.
+ *   currentTokenOutpoint(v216, D-020 移植配套): 本笔 register_append 铸/续产出的代币续约 UTXO 坐标——跟
+ *   currentLeafOutpoint 同一条 UPDATE 语句一起写(不分两次写，不存在中途不一致窗口)。首笔下注前为 NULL。
  * @returns {{ sealed:boolean, bettor_count:number, projected_settle_mass:number }}
  */
 export function onBettorRegistered(db, shardMarketId, opts = {}) {
-  const { currentLeafOutpoint = null, currentLeafState = null, nowSec = null } = (typeof opts === 'number' ? { nowSec: opts } : opts);   // back-compat: 旧 positional nowSec
+  const { currentLeafOutpoint = null, currentLeafState = null, currentTokenOutpoint = null, nowSec = null } = (typeof opts === 'number' ? { nowSec: opts } : opts);   // back-compat: 旧 positional nowSec
   const tx = db.transaction(() => {
     const s = db.prepare(`SELECT * FROM market_shards WHERE shard_market_id = ?`).get(shardMarketId);
     if (!s) throw new Error(`market_shards: no registry row for shard ${shardMarketId}`);
@@ -145,10 +148,11 @@ export function onBettorRegistered(db, shardMarketId, opts = {}) {
     const seal = (newCount >= SHARD_SEAL_COUNT) || (projMass > SHARD_MASS_CEILING);
     db.prepare(
       `UPDATE market_shards SET bettor_count = ?, projected_settle_mass = ?, status = ?, sealed_at = ?,
-         current_leaf_outpoint = COALESCE(?, current_leaf_outpoint), current_leaf_state = COALESCE(?, current_leaf_state)
+         current_leaf_outpoint = COALESCE(?, current_leaf_outpoint), current_leaf_state = COALESCE(?, current_leaf_state),
+         current_token_outpoint = COALESCE(?, current_token_outpoint)
        WHERE shard_market_id = ?`
     ).run(newCount, projMass, seal ? 'sealed' : s.status, seal ? nowSec : s.sealed_at,
-      currentLeafOutpoint, currentLeafState ? JSON.stringify(currentLeafState) : null, shardMarketId);
+      currentLeafOutpoint, currentLeafState ? JSON.stringify(currentLeafState) : null, currentTokenOutpoint, shardMarketId);
     return { sealed: seal, bettor_count: newCount, projected_settle_mass: projMass };
   });
   return tx();

@@ -656,7 +656,13 @@ created_at, sealed_at,
 `populateGenesisCovenants` 声明的交易再广播（`kasia-relay/src/lib/p2sh.mjs` `unlockBshardGenesisMintShardLeaf`，
 同 `ensurePayoutShard` 的 `bshard_genesis_mint_payout` 手法）算出的 leaf 自己的 covenant id，genesis 之后对
 同一片 leaf 永远不变；`register_append` 铸/续续约代币（`tok_out`，`owner`=leaf 自身 covenant id）每次都要读它，
-同 `payout_shards.payout_cov_id` 对称处理)。
+同 `payout_shards.payout_cov_id` 对称处理)，
+**current_token_outpoint** (v216, 2026-09-23, D-020 移植配套——`txid:idx`，当前 leaf 续约代币(KanetTestToken)
+UTXO 坐标；`register_append` 每次续约都要消费上一笔的代币输出、产出新的（第一笔下注例外，消费 0 笔，
+`scanOwnedTokenInputs` 天然扫到 0）；只存 outpoint 不存 amount/owner——amount 恒等于同一行
+`current_leaf_state.pool_value`、owner 恒等于同一行 `leaf_cov_id`（合约焊死同步，独立存会是新漂移风险源，
+见 `docs/2026-09-23-j2-kcc20-stake-port-note-v0.2.md` §"只需要新增1个列"）；genesis 后为 NULL，首笔下注
+落链后由 `onBettorRegistered()` 与 `current_leaf_outpoint` 同一条 UPDATE 语句一起写)。
 **UNIQUE(logical_market_id, shard_index)** = 注册竞态锁（并发开新片只一个 INSERT 赢，输者重试读已开片）；
 **UNIQUE(shard_market_id)** = 一物理片一行。索引 `idx_market_shards_open(logical_market_id, status)`。
 

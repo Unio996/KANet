@@ -19,7 +19,7 @@
 //   via the bettor→gateway transfer the caller performs before invoking (custody-bound, like publish). mainnet: bettor-direct
 //   funding input is a follow-up (TODO custody-hardening).
 
-import { compileSil, computePoolSideArtifact, ctorBytes32, ctorInt, compileSilV100, ctorBytes32V100, ctorIntV100 } from './pool-bshard-artifacts.mjs';
+import { compileSil, computePoolSideArtifact, ctorBytes32, ctorInt, compileSilV100, ctorBytes32V100, ctorIntV100, computeKttTokenArtifact } from './pool-bshard-artifacts.mjs';
 import { extractTemplateArtifact } from './pool-template-artifact.mjs';
 import { buildRegisterWitness, buildRegisterCommand } from './pool-register-builder.mjs';
 import { allocateForRegister, registerShard, sealShard, onBettorRegistered } from './shard-allocator.mjs';
@@ -84,6 +84,13 @@ const TICKET_DUST = 20_000_000;                           // 0.2 KAS PoolSide du
 const PS_SEED = 20_000_000;                               // PayoutShard genesis seed (0.2 KAS sink, matches (d))
 const SHARD_GENESIS_SEED = 20_000_000;                    // A(b): 空 ShardLeaf genesis seed (0.2 KAS, KIP-9 safe). 首注 register_append
                                                           //   spend 它+fund stake → output weld out==pool_value(0)+stake 过, seed 退 change (不进池, pool_value 起点=0)。
+// 🔴 D-020 移植配套(2026-09-23·Owner批·NWT审): 首笔下注(shard.current_token_outpoint 为 null, 还没有任何
+// 续约代币可消费/carry-forward)时, tok_continuation 输出的 KAS dust 面值需要外部资金——只在这一种情况下被
+// relay 使用(unlockBshardRegister: tokenUtxo 存在时改 carry-forward 该 UTXO 自己的真实面值, 不用这个常量)。
+const TOKEN_GENESIS_DUST = 20_000_000;
+// funding headroom: D-020 后不再需要"stake 存进 leaf"这么大一笔钱(leaf KAS 侧只剩 dust), 只需要覆盖
+// tok_continuation 首笔 dust(TOKEN_GENESIS_DUST) + 手续费余量。
+const REGISTER_FUNDING_HEADROOM = 100_000_000;
 
 // REORG_SAFE_MIN_DEPTH (NWT 2026-07-05 review, #33 设计整顿): checkUtxoLanded(kasia-relay/src/lib/p2sh.mjs)
 // 的 minDepth 参数, 2026-06-30 phantom-leaf 根治时为 register_append land-gate 校准(TN12 实测 reorg 深度恒定
@@ -189,6 +196,23 @@ export function convergeShardLeafOwnRedeemLen({ marketIdHash, psTmplHashHex, sha
  * computeShardLeafRedeemScript)。
  * @returns {string} redeemHex
  */
+// 🔴 D-020 移植配套(2026-09-23·Owner批·NWT审)：register_append entry 的 dispatch_tag 是合约【结构性】常量
+// (v1.0.0 codegen 按 entry 签名算出的选择器)，跟 ctor 具体取值无关——已实测确认(两组完全不同的 ctor 组合编译
+// 出同一个 dispatch_tag)。只需要编译一次、缓存，不用每次下注都重编一遍取这个值。
+let _shardLeafRegisterAppendDispatchTagCache = null;
+function _shardLeafRegisterAppendDispatchTag() {
+  if (_shardLeafRegisterAppendDispatchTagCache) return _shardLeafRegisterAppendDispatchTagCache;
+  const placeholderCtor = _shardLeafCtor({
+    marketIdHash: z32, psTmplHashHex: z32, shardPoolId: z32, sealCount: 1, payoutCovId: z32, deadline: 1,
+    tokenTmplHash: z32, localYes: 0, localNo: 0, count: 0, poolValue: 0, ownRedeemLen: 1,
+  });
+  const compiled = compileSilV100(join(LIB, 'ShardLeaf.sil'), placeholderCtor, 'ShardLeaf');
+  const tag = compiled._raw.contracts.ShardLeaf.entries.register_append.dispatch_tag;
+  if (!tag) throw new Error('_shardLeafRegisterAppendDispatchTag: 编译产物缺 entries.register_append.dispatch_tag — schema 漂移?');
+  _shardLeafRegisterAppendDispatchTagCache = tag;
+  return tag;
+}
+
 export function compileShardLeafRedeem({ marketIdHash, psTmplHashHex, shardPoolId, sealCount, payoutCovId, deadline, localYes, localNo, count, poolValue, tokenTmplHash, ownRedeemLen }) {
   if (!/^[0-9a-fA-F]{64}$/.test(String(tokenTmplHash || ''))) throw new Error(`compileShardLeafRedeem: tokenTmplHash 必须是 32B hex，收到 ${JSON.stringify(tokenTmplHash)} — ctor-only 字面量，不接受占位符/缺省值`);
   if (!(Number.isInteger(ownRedeemLen) && ownRedeemLen > 0)) throw new Error(`compileShardLeafRedeem: ownRedeemLen 必须是正整数(读自 market_shards.shard_redeem_hex 字节长度, 或 genesis 时来自 convergeShardLeafOwnRedeemLen), 收到 ${JSON.stringify(ownRedeemLen)}`);
@@ -511,18 +535,25 @@ async function _registerBettorOnShardInner(o) {
       throw new Error(`shard ${shard.shard_market_id} missing current_leaf_outpoint/state (v172) — cannot register_append`);
     }
     if (!shard.shard_redeem_hex) throw new Error(`shard ${shard.shard_market_id} missing shard_redeem_hex — genesis 应存; fail-closed 防 silverc-drift recompile (data-missing bug)`);
+    // 🔴 D-020 移植配套(2026-09-23·Owner批·NWT审): leaf_cov_id(v215) 是 register_append 铸/续续约代币
+    // (owner=leaf 自身 covenant id)的必需值——genesis 时由 unlockBshardGenesisMintShardLeaf 算出落库,
+    // 缺失说明这片 leaf 是 D-020 之前的旧数据或 genesis 出过问题, fail-closed 拒绝, 不猜值。
+    if (!shard.leaf_cov_id) throw new Error(`shard ${shard.shard_market_id} missing leaf_cov_id (v215) — cannot register_append (D-020 移植配套, genesis 应存)`);
     const shardPoolId = hex32(`${logicalMarketId}-shard-${shard.shard_index}`);
     // bettor-independent ps template (4 dust-ticket fields are State, spliced per register)
     // 🔴 事故修复(2026-07-07): 强制 SILVERC_LEGACY——这个 artifact 直接烤进 ShardLeaf ctor(psTmplHashHex)，
     // 属于 V1 家族续约链条一环，默认保守(同 compileShardLeafRedeem 那份理由)，不依赖调用方传入的 silverc。
     const psArtifact = computePoolSideArtifact(join(LIB, 'PoolSide_v08_shard.sil'), [ctorBytes32(bettorPk), ctorInt(direction), ctorInt(stake), ctorBytes32(z32)], SILVERC_LEGACY);
-    const fundTx = await transfer(relayAddr, stake + 100_000_000);         // gateway funds stake-into-leaf + fee headroom (built once, reused across retries below — independent of which leaf-state we're appending onto)
+    // D-020: 不再需要"stake 存进 leaf"这笔大钱——leaf KAS 侧只剩 dust, 真实价值转移体现在 tok_out。只 fund
+    // 一份 headroom(首笔下注的 token dust + 手续费余量)。
+    const fundTx = await transfer(relayAddr, REGISTER_FUNDING_HEADROOM);
+    const registerAppendDispatchTag = _shardLeafRegisterAppendDispatchTag();   // 合约结构性常量, 缓存, 不随 ctor/重试变
 
     // #tip-lag retry (2026-07-05, Bettor 拍板·公测流量下 race 更频繁): register_append 撞
     // "UTXO not found"(相当于打到一个刚被别的并发赢家抢先花掉的 stale outpoint)时, 不直接
     // throw 让用户看到失败——重新从 DB 读一次这个 shard 的【当前】current_leaf_outpoint/state
     // (若刚才是并发输家, 这次会读到赢家写完之后的新 tip), 用新 state 重建 witness/cmd 重试。
-    // 安全性: fundTx(付款进 gateway 的那笔转账)已经完成、金额只取决于 stake 不取决于具体
+    // 安全性: fundTx(付款进 gateway 的那笔转账)已经完成、金额只取决于 headroom 不取决于具体
     // outpoint, 不需要重来; "UTXO not found" 这个报错在 relay 侧(p2sh.mjs)是【构建阶段】
     // 检查不到要花的 UTXO 就直接 throw, 从没广播过 TX, retry 不会双花/双register。有界 3 次
     // (给两三个并发赢家轮流写完 DB 的时间), 每次之间不 sleep(重新读 DB 就是最新的, 不需要等)。
@@ -538,10 +569,25 @@ async function _registerBettorOnShardInner(o) {
       const curRedeem = spliceLeafState(shard.shard_redeem_hex, st);
       const newState = { local_yes: st.local_yes + (direction === 0 ? stake : 0), local_no: st.local_no + (direction === 1 ? stake : 0), count: st.count + 1, pool_value: st.pool_value + stake };
       const [leafTxid] = String(shard.current_leaf_outpoint).split(':');
-      const witness = buildRegisterWitness({ side: direction, stake: BigInt(stake), leafOutIdx: 0, psOutIdx: 1, bettorPk, psArtifact });
+
+      // 🔴 D-020 移植配套: 铸/续续约代币(tok_out, amount=newState.pool_value, owner=leaf自身covenant id)。
+      const tokArtifact = computeKttTokenArtifact({ amount: newState.pool_value, ownerCovIdHex: shard.leaf_cov_id });
+      const witness = buildRegisterWitness({ side: direction, stake: BigInt(stake), leafOutIdx: 0, psOutIdx: 1, tokOutIdx: 2, bettorPk, psArtifact, tokArtifact, dispatchTagHex: registerAppendDispatchTag });
+
+      // 消费上一笔续约产出的代币(第二笔起; 第一笔 shard.current_token_outpoint 为 null, scanOwnedTokenInputs
+      // 天然扫到 0 == genesis pool_value(0), 不需要任何代币输入)。amount 用 st.pool_value(续约前的值)重编出
+      // 上一笔的 redeem 字节——不用另存, 恒等于同一行 current_leaf_state.pool_value(见 v216 迁移注释推导)。
+      let tokenInput = null;
+      if (shard.current_token_outpoint) {
+        const [tokTxid, tokIdxStr] = String(shard.current_token_outpoint).split(':');
+        const prevTokArtifact = computeKttTokenArtifact({ amount: st.pool_value, ownerCovIdHex: shard.leaf_cov_id });
+        tokenInput = { outpointTxid: tokTxid, index: Number(tokIdxStr), redeem_hex: prevTokArtifact.script.toString('hex') };
+      }
+
       const cmd = buildRegisterCommand({
         witness, leafOutpointTxid: leafTxid, leafRedeemHex: curRedeem, currentLeafState: st,
-        bettorFunding: [{ outpointTxid: fundTx, address: relayAddr, index: 0 }], leafValueSompi: BigInt(st.pool_value),
+        bettorFunding: [{ outpointTxid: fundTx, address: relayAddr, index: 0 }],
+        tokenInput, tokContinuationRedeemHex: tokArtifact.script.toString('hex'), tokDustSompi: TOKEN_GENESIS_DUST,
         leafContinuationState: newState, ticketDustSompi: TICKET_DUST, shardPoolId, changeAddress: relayAddr,
       });
       try {
@@ -551,7 +597,7 @@ async function _registerBettorOnShardInner(o) {
         if (!regTx || !await landed(regTx, leafContAddr)) throw new Error(`register_append no land: ${JSON.stringify(rj).slice(0, 160)}`);
 
         if (recordBettor) await recordBettor({ shardMarketId: shard.shard_market_id, shardIndex: shard.shard_index, bettorPk, direction, stakeSompi: stake, leafTx: regTx });
-        onBettorRegistered(db, shard.shard_market_id, { currentLeafOutpoint: `${regTx}:0`, currentLeafState: newState, nowSec: Math.floor(Date.now() / 1000) });
+        onBettorRegistered(db, shard.shard_market_id, { currentLeafOutpoint: `${regTx}:0`, currentLeafState: newState, currentTokenOutpoint: `${regTx}:2`, nowSec: Math.floor(Date.now() / 1000) });
         await _maybeDefrag(rc);
         return { action: 'use', shardIndex: shard.shard_index, shardMarketId: shard.shard_market_id, shardP2sh: shard.shard_p2sh, leafTx: regTx, leafOutpoint: `${regTx}:0`, leafState: newState, payoutCovId };
       } catch (e) {

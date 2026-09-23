@@ -6560,5 +6560,29 @@ export function runMigrations() {
     }
   }
 
+  // ── v216 (2026-09-23, J2 · KCC-20 押注移植 §"use"分支接线, 设计 docs/2026-09-23-j2-kcc20-stake-port-note-v0.2.md,
+  //   NWT 复核零MUST): market_shards 加 current_token_outpoint 列——D-020 移植后 register_append 每次续约都
+  //   消费/产出一笔 KanetTestToken 输入/输出(第一笔下注例外, 消费 0 笔), 下一笔 register_append 的 builder 要
+  //   知道"上一次续约产出的代币 UTXO 落在哪个 outpoint"才能构造正确的消费 witness——这个数据现在哪张表都不存。
+  //   🔴 v0.2 设计文档当时规划这一步用"v215"，但那个号真实被 leaf_cov_id 迁移(见上方 v215 块)占用了——
+  //   NWT 审核 b25db32d 时已提醒（j1-inbox 2026-09-23T17-20Z 交接提醒）：接号必须看 migrate.js 当时的真实
+  //   尾号，不能照抄文档里写死的旧号，这里就是那次提醒的落地，接的是 v216 不是 v215。
+  //   只加 1 列不是 2 列(不额外存 amount/owner)：代币 amount 恒等于同一行 current_leaf_state.pool_value
+  //   (合约两处 require/weld 焊死同步，见设计文档 v0.2 §"只需要新增1个列"的推导 + NWT 独立复核确认)；
+  //   owner 恒等于同一行 leaf_cov_id(v215 新列，genesis 后不变)。genesis 时该列是 NULL(还没有任何代币被
+  //   铸出)，第一笔下注成功落链后由 onBettorRegistered() 第一次写入，跟 current_leaf_outpoint 同一条 UPDATE
+  //   语句一起写(不会出现两次分开写导致中途不一致的窗口)。
+  {
+    const msCols = sqlite.pragma('table_info(market_shards)').map(c => c.name);
+    if (msCols.includes('current_token_outpoint')) {
+      console.log('[migrate] v216: market_shards.current_token_outpoint 在, 记账通过');
+    } else {
+      try {
+        sqlite.exec(`ALTER TABLE market_shards ADD COLUMN current_token_outpoint TEXT`);
+        console.log('[migrate] v216: market_shards.current_token_outpoint 列已加(D-020 register_append 续约代币 UTXO 坐标, genesis 后首笔下注才首次写入).');
+      } catch (e) { if (!/duplicate column/i.test(e.message)) console.warn(`[migrate] v216 market_shards.current_token_outpoint fail: ${e.message}`); }
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }

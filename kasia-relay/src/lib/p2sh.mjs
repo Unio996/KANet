@@ -2824,10 +2824,59 @@ async function _matchUtxo(rpc, address, outpointTxid, outpointIndex = null) {
   return hits[0];
 }
 
+// 🔴 D-020 移植配套(2026-09-23·Owner批·NWT审) —— 照抄 kasia-console/src/lib/kcc20-token/ktt-transfer-witness.mjs
+// 的 encodeKttTransferZeroOutAction/combineKttActionAndRedeem(该文件零 import、纯函数，已用真实 cli-debugger
+// 逐字节验证过，账本1652 已从 proto-v0 摘出确认是共享生产基础设施）——relay 不能跨包 import kasia-console
+// (本仓无此先例，唯一先例是共享代码住 shared/lib/)，所以这里逐字照抄同一套编码逻辑，不是重新设计。
+// 用途：register_append 消费上一笔续约产出的 KanetTestToken 输入时，那个输入自己的 sigScript 必须独立
+// 满足 KanetTestToken.transfer 的 covenant 声明(next_states=[]零出，owner_input_idx 指向 leaf 在本笔交易
+// 里的 input 下标)——跟 leaf 自己的 register_append witness 是两回事，两个 input 各自的脚本独立执行。
+// 🔵 export 仅为可测性(同 :1707 _serializeRootStateHex 先例)——行为零改动，让测试能独立核对这两个
+// 编码函数跟已验证的参考实现(proto-register-append-witness.mjs/ktt-transfer-witness.mjs)逐字节一致。
+export function _encodeKttTransferZeroOutAction(dispatchTagHex, stateFieldCount, ownerInputIdx) {
+  const b = new ScriptBuilder({ flags: { covenantsEnabled: true } });
+  for (let i = 0; i < stateFieldCount; i++) b.addData(new Uint8Array(0));   // next_states=[]: 每个 State 字段一个空 push(OP_0)
+  b.addData(new Uint8Array(0));                                             // witness=[](空 bytes)
+  const idxBuf = Buffer.alloc(ownerInputIdx.length * 8);
+  ownerInputIdx.forEach((v, i) => idxBuf.writeBigInt64LE(BigInt(v), i * 8));
+  b.addData(idxBuf);                                                        // owner_input_idx: int[] 拼接 8 字节小端整体当一个 push
+  b.addData(new Uint8Array(Buffer.from(dispatchTagHex.replace(/^0x/, ''), 'hex')));
+  return b.drain();
+}
+// 🔵 export 仅为可测性——ShardLeaf.sil register_append(10参数, D-020 移植后) 的 v1.0.0 action 编码，逐字
+// 对照 kasia-console/src/lib/proto-register-append-witness.mjs 的 encodeRegisterAppendAction(已用真实
+// cli-debugger 逐字节验证过)。
+export function _encodeRegisterAppendAction(w) {
+  const b = new ScriptBuilder({ flags: { covenantsEnabled: true } });
+  b.addI64(BigInt(w.side));
+  b.addI64(BigInt(w.stake));
+  b.addI64(BigInt(w.leaf_out_idx));
+  b.addI64(BigInt(w.ps_out_idx));
+  b.addData(new Uint8Array(Buffer.from(w.bettor_pk.replace(/^0x/, ''), 'hex')));
+  b.addData(new Uint8Array(Buffer.from(w.ps_prefix_hex.replace(/^0x/, ''), 'hex')));
+  b.addData(new Uint8Array(Buffer.from(w.ps_suffix_hex.replace(/^0x/, ''), 'hex')));
+  b.addI64(BigInt(w.tok_out_idx));
+  b.addData(new Uint8Array(Buffer.from(w.tok_prefix_hex.replace(/^0x/, ''), 'hex')));
+  b.addData(new Uint8Array(Buffer.from(w.tok_suffix_hex.replace(/^0x/, ''), 'hex')));
+  b.addData(new Uint8Array(Buffer.from(w.dispatch_tag_hex.replace(/^0x/, ''), 'hex')));
+  return b.drain();
+}
+function _combineActionAndRedeem(actionHex, redeemHex) {
+  const b = ScriptBuilder.fromScript(actionHex, { flags: { covenantsEnabled: true } });
+  b.addData(new Uint8Array(Buffer.from(redeemHex.replace(/^0x/, ''), 'hex')));
+  return b.drain();
+}
+
 /**
- * unlockBshardRegister — bshard_register_bet (register_append entry OP_0).
- * Inputs: [0] leaf (P2SH register_append, no sig) + funding P2PK (wallet-signed).
- * Outputs: [leaf_out_idx] new leaf (per-state addr, value+=stake) + [ps_out_idx] dust ticket + change.
+ * unlockBshardRegister — bshard_register_bet (register_append entry, ShardLeaf.sil D-020 移植后 10 参数)。
+ * Inputs: [0] leaf (P2SH register_append, no sig) + [1]? token(上一笔续约代币, 可选, 第一笔下注无) + funding P2PK (wallet-signed)。
+ * Outputs: [leaf_out_idx] new leaf(per-state addr, 面值原样搬运不加算) + [tok_out_idx] 代币续约 + [ps_out_idx] dust ticket + change。
+ * 🔴 D-020 移植(2026-09-23·Owner批·NWT审)：leaf scriptSig 从旧编译器(pre-v1.0.0)的裸 opcode 选择器改成
+ * v1.0.0 codegen 要求的 ScriptBuilder addI64/addData + dispatch_tag PUSH-DATA 编码（照抄
+ * kasia-console/src/lib/proto-register-append-witness.mjs 的 encodeRegisterAppendAction 已验证过的编码
+ * 顺序，不 import——proto-v0 即将删除，relay 生产代码不应依赖它，这里是照抄同一套逻辑写死在本文件里）。
+ * 旧编码用裸 `'00'`(OP_0)当 entry 0 选择器，这对 v1.0.0 编译产物从一开始就是错的（v1.0.0 dispatch 靠 4 字节
+ * dispatch_tag 当 push-data 推，不是靠裸 opcode）——这个 bug 独立于 D-020 本身，是同一次改动窗口顺带修的。
  */
 export async function unlockBshardRegister(args) {
   const { wallet, cmd, networkId, lockTime = 0n } = args;
@@ -2835,25 +2884,37 @@ export async function unlockBshardRegister(args) {
   const rpc = await connectRpc(networkId);
   try {
     const leafUtxo = await _matchUtxo(rpc, _addressFromRedeem(cmd.inputs.leaf.redeem_hex, networkId), cmd.inputs.leaf.outpointTxid);   // P2SH 地址 = hash(redeem)
+    const tokenUtxo = cmd.inputs.token
+      ? await _matchUtxo(rpc, _addressFromRedeem(cmd.inputs.token.redeem_hex, networkId), cmd.inputs.token.outpointTxid, cmd.inputs.token.index)
+      : null;   // null = 第一笔下注，leaf 还没有任何续约代币可消费(scanOwnedTokenInputs 天然扫到 0)
     const fundUtxos = [];
     for (const f of (cmd.inputs.funding || [])) fundUtxos.push(await _matchUtxo(rpc, f.address, f.outpointTxid, f.index));
 
     // 输出地址 relay 自算 per-state (忽略 cmd.address)
     const newLeafAddr = _continuationAddress(cmd.inputs.leaf.redeem_hex, _serializeLeafStateHex(cmd.outputs.leaf_continuation.state), networkId);
     const ticketAddr = _ticketAddress(w.ps_prefix_hex, w.ps_suffix_hex, cmd.outputs.poolSide_ticket.state, networkId);
+    const tokContAddr = _addressFromRedeem(cmd.outputs.tok_continuation.redeem_hex, networkId);
 
-    // leaf scriptSig: register_append witness(声明序) + selector OP_0 + redeem reveal. (无 sig: covenant-accumulate)
-    const leafSig = _pushInt(w.side) + _pushInt(w.stake) + _pushInt(w.leaf_out_idx) + _pushInt(w.ps_out_idx)
-      + _pushBytes(w.bettor_pk) + _pushBytes(w.ps_prefix_hex) + _pushBytes(w.ps_suffix_hex)
-      + '00' + _encodePushDataHex(Buffer.from(cmd.inputs.leaf.redeem_hex, 'hex'));
+    // leaf scriptSig: register_append witness(v1.0.0 codegen: addI64/addData 声明序 + dispatch_tag push-data + redeem reveal)。
+    const leafSig = _combineActionAndRedeem(_encodeRegisterAppendAction(w), cmd.inputs.leaf.redeem_hex);
+
+    // token input(可选) 自己的 sigScript: 独立满足 KanetTestToken.transfer(next_states=[]零出全消费,
+    // owner_input_idx 指向 leaf 在本笔交易里的下标——leaf 永远是 input 0)。
+    const tokenSig = tokenUtxo
+      ? _combineActionAndRedeem(_encodeKttTransferZeroOutAction(w.token_transfer_dispatch_tag_hex, w.token_transfer_state_field_count, [w.token_owner_input_idx]), cmd.inputs.token.redeem_hex)
+      : null;
 
     const outputs = [];
-    outputs[w.leaf_out_idx] = new TransactionOutput(BigInt(cmd.outputs.leaf_continuation.amountSompi), payToAddressScript(new Address(newLeafAddr)));
+    outputs[w.leaf_out_idx] = new TransactionOutput(_utxoValue(leafUtxo), payToAddressScript(new Address(newLeafAddr)));   // 原样搬运当前面值, D-020: 不再 +=stake
+    // token 续约输出面值: 有上一笔代币输入(第二笔起)就原样搬运它的真实面值(同 leaf 的处理方式)——只有
+    // 第一笔下注(无 tokenUtxo, 没有代币可以搬运面值)才用 cmd 里外部资助的 dust 面值。
+    const tokOutValue = tokenUtxo ? _utxoValue(tokenUtxo) : BigInt(cmd.outputs.tok_continuation.amountSompi);
+    outputs[w.tok_out_idx] = new TransactionOutput(tokOutValue, payToAddressScript(new Address(tokContAddr)));
     outputs[w.ps_out_idx] = new TransactionOutput(BigInt(cmd.outputs.poolSide_ticket.amountSompi), payToAddressScript(new Address(ticketAddr)));
     const orderedOut = outputs.filter(o => o !== undefined);
-    const matched = [leafUtxo, ...fundUtxos];
+    const matched = [leafUtxo, ...(tokenUtxo ? [tokenUtxo] : []), ...fundUtxos];
     _appendChange(orderedOut, matched, cmd.outputs.change_address, _bshardFeeV1(matched.length));   // v1 budget-aware fee
-    // unsigned (funding inputs 留空待签; leaf 无 sig 直接置 scriptSig). v1: sigOpCount=0 + computeBudget(ComputeCommit).
+    // unsigned (funding inputs 留空待签; leaf/token 无 sig 直接置 scriptSig)。v1: sigOpCount=0 + computeBudget(ComputeCommit)。
     const unsigned = new Transaction({
       version: 1,
       inputs: matched.map((u) => ({
@@ -2863,8 +2924,9 @@ export async function unlockBshardRegister(args) {
       outputs: orderedOut, lockTime: BigInt(lockTime), gas: 0n,
       subnetworkId: '0000000000000000000000000000000000000000', payload: '',
     });
-    const sigScripts = [leafSig];
-    for (let i = 1; i < matched.length; i++) {
+    const covenantSigCount = tokenUtxo ? 2 : 1;   // [0]leaf [1]token?(no-sig covenant reveal) [其余]funding(wallet签)
+    const sigScripts = tokenUtxo ? [leafSig, tokenSig] : [leafSig];
+    for (let i = covenantSigCount; i < matched.length; i++) {
       sigScripts.push(createInputSignature(unsigned, i, wallet.getPrivateKey(), SighashType.All));
     }
     const signedTx = new Transaction({
