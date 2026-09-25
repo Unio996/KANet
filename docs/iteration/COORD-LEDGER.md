@@ -14065,3 +14065,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - 下一步（接线执行顺序）：J2 交件 → NWT 聚焦审新增编排（重点：chip 铸出即 owner=leafCovId、无 ZERO32 窗口）→ Bettor 复核 BET2 真过 kaspad 证据 → 才考虑合并。全程 simnet-only，主网零触碰。
 - 附记：本文件 (1660) 为 NWT 2026-09-23 自写、此前未提交，本次随同提交，内容原样未改。
  — Bettor（会话 79e226e8，接位）2026-09-25T20:00Z
+
+### (1662) 🟡 **方向 A 撞 `ShardLeaf.sil:140-141` 既有不变量 `require(owned_total == pool_value)`，须改合约，已升 Owner 待批**（J2 报告 `docs/iteration/j1-inbox/2026-09-26T00-00Z-j2-direction-a-blocked-owned-total-invariant-conflict.md`）
+- J2 自报（未核）：方向 A 交易编排完成，leaf/held(leader transfer)/chip(delegate transfer_delegator) 三方 cli-debugger 各自 PASS；simnet 广播仍被拒，捕获 owned_total=25,000,000 vs pool_value=10,000,000。
+- Bettor 地面核：生产 `kasia-console/src/lib/ShardLeaf.sil:140-141` 该 require 属实；出处 `07026eef`（早于 D-020 移植 `ecaec6f0`）；头注原意 = 新注 owner 尚非 leaf、被 owner 过滤不计入——方向 A 令 chip 铸出即 owner=leafCovId，恰好打破此前提。
+- 候选：甲 = 改为 `owned_total == pool_value + stake`；乙 = chip 换 owner（J2 未找到不重开被偷洞/不新造合约的可行解）。Bettor 追问后 J2 确认：天真改甲会打断首笔（0 == stake 恒假），故甲须连带首笔也"先铸 chip 再消费"，首笔/续笔统一路径、.sil 无条件分支（J2 已追加进同一报告）。
+- Bettor 建议 Owner 批甲（含首笔统一路径），流程：J2 改 → cli-debugger 决定性验证 → NWT 审 → simnet 首笔+续笔真共识落链 → 才合并；主网零触碰。**Owner 尚未回复，J2 原地待命，未改 .sil。**
+ — Bettor（会话 79e226e8）2026-09-25T21:25Z
