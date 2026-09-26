@@ -176,13 +176,46 @@ export function buildSplitTx(protocol, fundingUtxo) {
   return { tx, hasChange, changeSompi };
 }
 
+// 🔴🔴 根治(NWT diff 审第一轮 MUST，2026-09-27)：refund 是否"到期可退"必须以节点的
+// `virtual_past_median_time`(= getBlockDagInfo().pastMedianTime, 下称 PMT)为准，不是墙钟
+// Date.now()、也不是 tip 区块时间戳。
+//
+// 根源(rusty-kaspa 源码逐行核实，非猜测)：
+//   consensus/src/processes/transaction_validator/tx_validation_in_header_context.rs:72-93
+//   check_tx_is_finalized(tx, lock_time_arg) — lock_time_arg 对 Time 域 tx 就是 MedianTime(ctx_block_time)；
+//   consensus/src/pipeline/virtual_processor/processor.rs:1216/1319 两处调用点，
+//   传入的 ctx_block_time 逐字是 `virtual_past_median_time`/`virtual_state.past_median_time` ——
+//   与 mempool 验证、区块模板验证两条路径完全一致，都是 PMT，不是别的时间源。
+//   判据: `if tx.lock_time < block_time_or_daa_score { return Ok(()) }`(严格小于才算"已终结"，
+//   否则要求全部输入 sequence==MAX 才放行——本合约两入口 sequence 都不是 MAX，无法走这条后门)。
+//
+// 合约里的 `require(tx.time >= temporal(dl_ms))` 是完全独立的第二条检查：`tx.time` 这个特殊语法形式
+// 是对**交易自身 lockTime 字段**的静态断言(同 Bitcoin OP_CHECKLOCKTIMEVERIFY 语义——校验的是"你自己
+// 声称的 lockTime 是否满足门槛"，不读任何实时链上时间)。这条检查只要 tx.lockTime>=dl_ms 就过，
+// 从未构成本次故障的原因——`buildRefundTx` 一直把 lockTime 设成 protocol.deadlineMs，这条恒过。
+//
+// 真正会失败的是上面那条【消费层/共识层】"is not finalized"检查：tx.lockTime(=deadline_ms) 必须
+// 严格小于【交易真正被打包那一刻】的 PMT。deadline_ms 是订单创建时按墙钟(SDK 默认 now+72h)烤死的
+// ctor 常量，而 PMT 是否已经追上 deadline_ms 完全取决于链自己的时间推进节奏——**PMT 相对墙钟的滞后
+// 量没有一个协议保证的上限**，在健康、出块稳定的网络上滞后通常是"采样窗口一半"量级(见下方
+// PMT_LAG_GUIDANCE)，但在出块不规律/曾经长时间空闲又突击出块的网络上(本次 NWT 复现命中的真实场景：
+// 共享 simnet 自 09-24 起断续挖矿)，滞后可以达到数十分钟——这不是"选大一点的安全余量"能可靠盖住的
+// 结构性不确定性，唯一正确做法是【广播前用节点自己汇报的 PMT 现场核对】，而不是本地估算"该到期了"。
+export const PMT_LAG_GUIDANCE = 'PMT(节点 virtual_past_median_time)落后真实墙钟的量级 = 采样窗口跨度的一半左右(健康稳定出块网络)——主网这个量通常是秒到低个位数分钟级；出块不规律或长时间空闲后突击出块的网络(如本次 NWT 在共享 simnet 复现的场景)可以拉开到数十分钟甚至更多，没有协议保证的上限。SDK 默认 deadline=72h 相对这个量级仍有充分余量，但任何"到点就能退"的判断都必须现查 PMT，不能靠 Date.now() 推算。';
+
 /**
  * @param {ReturnType<typeof createSplitProtocol>} protocol
  * @param {{transactionId:string, index:number, amountSompi:bigint|string}} fundingUtxo
- * @param {number} nowMs 调用方提供当前时间用于本地早失败校验(设计 §7.2 对抗测试#12)
+ * @param {number} currentPmtMs 调用方现查的节点 `getBlockDagInfo().pastMedianTime`(毫秒)——
+ *   🔴 不接受传 Date.now() 或区块 tip 时间戳替代；这是本次 NWT diff 审 MUST 修复点，
+ *   两者与真正的共识终结判据(virtual_past_median_time)可以相差几十分钟(见上方大段注释)。
+ * @param {number} [safetyMarginMs=5000] PMT 必须超过 deadline_ms 的余量(不是越大越好——只要严格 >0
+ *   即可满足共识"严格小于"判据，因为 PMT 只增不减；默认 5s 只是防 RPC 往返/构造耗时期间的量测噪声)。
  */
-export function buildRefundTx(protocol, fundingUtxo, nowMs) {
-  if (nowMs < protocol.deadlineMs) throw new Error(`buildRefundTx: 未到 deadline_ms(now=${nowMs} < deadline=${protocol.deadlineMs})——本地早失败, 对抗测试#12`);
+export function buildRefundTx(protocol, fundingUtxo, currentPmtMs, safetyMarginMs = 5000) {
+  if (currentPmtMs < protocol.deadlineMs + safetyMarginMs) {
+    throw new Error(`buildRefundTx: 还没到期——节点当前 PMT=${currentPmtMs} 还没追上 deadline_ms=${protocol.deadlineMs}(+${safetyMarginMs}ms 余量), 还需等 PMT 前进 ${protocol.deadlineMs + safetyMarginMs - currentPmtMs}ms 才能构造合法退款交易(对抗测试#12; ${PMT_LAG_GUIDANCE})`);
+  }
   const inputAmt = BigInt(fundingUtxo.amountSompi);
   const maxRefundFee = BigInt(protocol.ctorParams[10].value);
   const smallRealFee = maxRefundFee < 1_100_000n ? maxRefundFee : 1_100_000n; // 触发者留一点真实矿工费(§4.5 实测 refund 形 compute mass≈8120 ⇒ 最低费812,000 sompi, 这里留余量), 远小于 max_refund_fee 上限即可(具体值不影响 require 正确性)
@@ -195,12 +228,8 @@ export function buildRefundTx(protocol, fundingUtxo, nowMs) {
     version: 1,
     inputs: [{ previousOutpoint: { transactionId: fundingUtxo.transactionId, index: fundingUtxo.index }, signatureScript: sigScriptHex, sequence: 0n, sigOpCount: 0, computeBudget: 70 }],
     outputs: outs,
-    // 🔴 temporal()/CLTV 语义要求 tx 自身 lockTime 落在同一域且 >= 阈值(墙钟 ms), 否则 kaspad 报
-    // "mismatched locktime types"(simnet 真实撞见过, 见 InstantSplit.sil 注释与交付报告)——不能留 0。
-    // 直接用 deadline_ms 本身(不用调用方传入的 nowMs), 因为 nowMs 来自 JS Date.now(), 可能比链上
-    // 即将确认这笔交易的那个区块时间戳更靠后(相对论式的"提交时刻"与"确认时刻"之间的漂移)导致
-    // "transaction input #0 is not finalized"(simnet 真实撞见过)——deadline_ms 已确定早于当下,
-    // 用它作 lockTime 既满足 >= deadline_ms 的合约要求, 又不会比链上即将确认它的区块时间戳更晚。
+    // lockTime = deadline_ms(合约 ctor 常量本身)——满足合约自身 require(tx.time>=temporal(dl_ms))
+    // (静态自检，见上方大段注释)。真正的"能不能广播"闸在上面 currentPmtMs 现查那一步，不在这里。
     lockTime: BigInt(protocol.deadlineMs),
     gas: 0n, subnetworkId: '0000000000000000000000000000000000000000', payload: '',
   });

@@ -192,6 +192,14 @@ Kaspa 的 mass 有两个独立维度,不能混为一谈：**compute mass**（`ma
 
 **SDK 默认值与理由**：`createSplitProtocol` 在调用方未显式指定 `deadline_ms` 时,默认 **`now + 72 小时`**。理由：① 覆盖典型"下单→服务交付→分账"业务窗口（数小时到 2-3 天）,不因为默认值过短而误伤正常订单；② 相对于费率发生"数量级跳变"通常需要的时间尺度（网络级参数调整、市场剧烈波动一般以天/周计,不是分钟级),72 小时是一个远小于该尺度、但仍留有实际操作余量的窗口；③ SDK 必须允许调用方覆盖为更短（如即时类服务可设 6-12 小时）,但**覆盖为明显更长（如以月计）时应打印告警**，提示这类订单的残余风险暴露窗口被主动拉长,不是 SDK 的错但调用方应当知情。本设计不设"最长允许值"的硬上限（那是策略判断，不是共识规则，留给运营层面按需收紧）。
 
+**追加（2026-09-27 NWT diff 审 MUST 修复，实现期间真实撞见并溯源到 rusty-kaspa 共识源码，非推测）**：`deadline_ms` 是否"已到期、可以退款"这件事的唯一权威判据是节点的 `virtual_past_median_time`（下称 PMT，即 `getBlockDagInfo().pastMedianTime`），**不是墙钟 `Date.now()`，也不是区块 tip 时间戳**。
+
+- **源码依据**：`consensus/src/processes/transaction_validator/tx_validation_in_header_context.rs:72-93` 的 `check_tx_is_finalized` 对时间域 `lockTime` 用的判据是 `tx.lock_time < ctx_block_time`（严格小于才算"已终结"，否则要求全部输入 `sequence==MAX` 才放行，本合约两入口都不满足）；调用方 `consensus/src/pipeline/virtual_processor/processor.rs:1216`（mempool 校验）与 `:1319`（区块模板校验）两处传入的 `ctx_block_time` 逐字都是 `virtual_past_median_time`/`virtual_state.past_median_time`——两条独立路径口径完全一致，都是 PMT。
+- **合约自身的 `require(tx.time >= temporal(dl_ms))` 是另一件独立的事**：这条是对交易自身 `lockTime` 字段的静态断言（同 Bitcoin `OP_CHECKLOCKTIMEVERIFY` 语义，校验"你声明的 lockTime 是否达到门槛"，不读任何实时链上时间），只要 `tx.lockTime>=dl_ms` 就过——不会因为 PMT 滞后而失败；**真正会因为 PMT 滞后而失败的是上面那条【消费层/共识层】"is not finalized"检查**，两条检查混在一次广播失败里容易被误判成同一回事。
+- **实测量级**：本次实现在共享 simnet（自 2026-09-24 起断续挖矿）上真实复现 PMT 落后 tip 约 17.7 分钟、落后墙钟约 21 分钟；在一个**全新、连续挖矿**的 simnet 上，PMT 落后墙钟仅约 1 秒；在同一全新 simnet 上间隔数分钟未挖矿后重新测量，落后拉开到约 170 秒。**结论**：PMT 落后墙钟的量级取决于最近一段采样窗口（`MEDIAN_TIME_SAMPLED_WINDOW_SIZE`，约 263 个原始区块、每 10 个取一次样、约 27 个样本取中位数——`consensus/core/src/config/constants.rs:23-30`）内区块时间戳的新旧分布：出块稳定连续的网络该窗口全是新时间戳，PMT 紧跟墙钟；出块不规律或曾长时间空闲后突击出块的网络，窗口内混有旧时间戳，PMT 可以落后墙钟数十分钟甚至更多——**没有协议保证的滞后上限**。
+- **SDK 修复**：`buildRefundTx` 的第三参数从"调用方传入的 `nowMs`"改为"调用方现查的 `currentPmtMs`"（`await rpc.getBlockDagInfo()` 读 `pastMedianTime`），并要求 `currentPmtMs >= deadline_ms + safetyMarginMs`（默认 5 秒余量，只是防量测噪声，不是因为需要更大余量——PMT 单调不减，一旦当前 PMT 严格超过 `deadline_ms`，后续只会更超过）；未到期时抛出的错误消息明确写"还需等 PMT 前进 N ms"，不再用墙钟推算"应该到期了"这种误导性提示。
+- **对主网默认 72h deadline 的影响**：主网 kaspad 在健康出块节奏下 PMT 落后墙钟的量级应当远小于 72 小时（采样窗口对应的实际时间跨度取决于出块速率，正常运行下是分钟级，不是小时级）——72 小时的默认窗口相对这个量级仍有巨大余量，本次发现的问题是**测试环境（共享 simnet 长期空闲后突击挖矿）特有的极端滞后**，不影响 72h 默认值本身的合理性，但确认了"到期判断必须现查 PMT、不能靠任何形式的本地时钟推算"这条工程纪律具有普适性，不是仅在异常测试环境下才该遵守的特例。
+
 ---
 
 ## ⑤ 对抗测试清单（新增 #16、#17，更新 #4/#5，标注 #10/#11）
