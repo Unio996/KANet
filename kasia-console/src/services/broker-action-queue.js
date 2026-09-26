@@ -18,6 +18,7 @@
 
 import { sqlite } from '../db/client.js';
 import { randomUUID } from 'crypto';
+import { classifyQueueFailure } from '../lib/broker-refund-classify.mjs';   // 2026-08-29: 歧义失败分类 (tx-producing kind 不重试)
 // R-NWT-2026-04-28 Layer 5 (Z21 root cause fix + future regression防): shared command enum.
 // Owner 88 KAS Bug-Z21 真因 = broker enqueue 'send_kas', relay only 'transfer'. Now broker
 // imports COMMAND_TYPES from relay's canonical source-of-truth.
@@ -183,13 +184,14 @@ export function enqueue({ kind, peer, payload, ttl_ms = TTL_DEFAULT_MS }) {
  */
 export function enqueueVerified({ kind, peer, payload, ttl_ms = TTL_DEFAULT_MS }) {
   return new Promise((resolve, reject) => {
+    // 2026-08-29: 歧义广播失败以 code='AMBIGUOUS_BROADCAST' 透传给 await 方 (见 pump catch 段)
     enqueue({
       kind, peer,
       payload: {
         ...(payload || {}),
-        on_done: ({ ok, result, error }) => {
+        on_done: ({ ok, result, error, code }) => {
           if (ok) resolve(result || {});
-          else reject(new Error(error || 'enqueue execute failed'));
+          else { const e = new Error(error || 'enqueue execute failed'); if (code) e.code = code; reject(e); }
         },
       },
       ttl_ms,
@@ -259,6 +261,20 @@ async function pump() {
           console.warn(`[broker-queue] ${item.kind} #${item.id.slice(0,8)} FAIL-FAST: ${err.message} (no retry)`);
           break;
         }
+        // 🔴 2026-08-29 (J2 broker-money-path 阶段 2, 双退款稿 §0 L-A, NWT GREEN): tx-producing kind 的【歧义】失败不得重试 ——
+        //   relay 超时 / 空回执 / 无 txId 都可能是"已广播但回执丢"(reference-relay-timeout-message-not-dead-can-deliver-late),
+        //   重试 = 在任何 dedup 之前二次广播 (87.9 KAS 先例同族)。只有 classifyQueueFailure 判"明确未广播"的拒因才重试。
+        //   歧义 ⇒ 停 + 标 AMBIGUOUS_BROADCAST (调用方 advanceToRefunded 据此【不回滚】订单到可重试态, 留 refunding 走 stuck 路)。
+        if (TX_PRODUCING_KINDS.has(item.kind)) {
+          const cls = classifyQueueFailure(err.message || '');
+          if (!cls.retry) {
+            const amb = new Error(`AMBIGUOUS_BROADCAST(${cls.reason}): ${err.message}`);
+            amb.code = 'AMBIGUOUS_BROADCAST'; amb.cause = err;
+            lastErr = amb;
+            console.warn(`[broker-queue] ${item.kind} #${item.id.slice(0,8)} AMBIGUOUS (${cls.reason}) — NO RETRY (may have broadcast): ${err.message}`);
+            break;
+          }
+        }
         if (item.attempts < RETRY_MAX) await new Promise(r => setTimeout(r, RETRY_BACKOFF_MS * item.attempts));
       }
     }
@@ -268,7 +284,7 @@ async function pump() {
     } else {
       console.log(`[broker-queue] ${item.kind} #${item.id.slice(0,8)} OK ${result?.txId?.slice(0,12) || '-'}`);
     }
-    try { item.payload?.on_done?.({ ok: !lastErr, result, error: lastErr?.message }); } catch {}
+    try { item.payload?.on_done?.({ ok: !lastErr, result, error: lastErr?.message, code: lastErr?.code }); } catch {}
   }
   _busy = false;
 }

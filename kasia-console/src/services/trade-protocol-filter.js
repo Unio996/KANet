@@ -1860,7 +1860,7 @@ async function tryNextAccept(orderId) {
 // ── Exchange Protocol (v1.1 自由市场) ────────────────────────
 
 import { randomUUID } from 'crypto';
-import { processAccept as machineAccept, processManualConfirm, processCancel as machineCancel, processPaymentSubmit, transition as exchangeTransition } from './exchange-machine.js';
+import { guardReopenIfSettled, _alertPaymentSubmitWhileIntent, processAccept as machineAccept, processManualConfirm, processCancel as machineCancel, processPaymentSubmit, transition as exchangeTransition } from './exchange-machine.js';
 
 // Exchange protocol v2 message type constants
 const EXCHANGE_MSG = {
@@ -2328,14 +2328,76 @@ async function _fetchHedgePrice(exchange, side) {
  * Execute a hedge order on the best available CEX.
  * If preferredCex specified, try that first; otherwise use default account.
  */
+// ── P7-bis sub-case (ii) (race 盘点 §9.3; NWT/Bettor GO 8/29): auto-pay 的 write-ahead 付款意图 ──
+// 病: _autoPayExchange / _autoSettleAsset 都是 `await transfer…` 之后才 `UPDATE payment_tx` ⇒ 转账已出、落库前崩 ⇒ payment_tx 仍 NULL ⇒ reopen-guard 逮不住 ⇒ re-pay。
+// 修: 转账【之前】CAS 写标记 payment_tx = 'PENDING:<offer8>:<uuid8>' (WHERE payment_tx IS NULL; changes=0 ⇒ 已有付款/意图 ⇒ 不转账 = per-offer 幂等);
+//     成功 ⇒ CAS 换成真 txHash (WHERE payment_tx = <marker>); 失败/抛 ⇒ 标记【不清】(reopen-guard 视为已 settled → verifying + 告警 = 结果不明 fail-closed)。
+// 读方审计 (PENDING 不得当真 hash 用; grep payment_tx 全仓 2026-08-29):
+//   · tpf handleExchangePaid Gate1 `:2364 if (offer.payment_tx) skip` — 自己的 paid_v1 回声: 成功路在广播前已换成真 hash (顺序不变), 同今日行为; 失败路无 paid_v1 广播 ⇒ 不进 Gate1。
+//   · exchange-machine.processPaymentSubmit `:764-786` reuse 检查 `payment_tx = ? AND id != ?` — 比的是消息里的真 hash, 标记形 `PENDING:` 不会与真 hash 相等; `:782` 用真 hash 覆盖列。
+//   · _verifyAndComplete `:797` 用参数 payment_tx (真 hash), 不读列。 · reopen-guard (exchange-machine.guardReopenIfSettled) 读列非空 ⇒ 标记 = 已 settled (这正是要的 fail-closed)。
+//   · UNIQUE idx_exchange_offers_payment_tx_unique (v61) — 标记含 uuid 全局唯一。 · UI exchange.eta:1353 直接显示列值 ⇒ 失败留下的标记会显示 "PENDING:…" (operator 面, 可辨识, 非用户 DM)。
+//   · broker-buy-completion-watcher:112 只读 completed offer 的列 ⇒ 到 completed 时已是真 hash。 · tpf:2400 对端 paid 写入 (远端 maker) 列为 NULL 时才到, 不涉本机标记。
+//   · exchange-machine.processPaymentSubmit: 应用层早退 + SQL 谓词 `AND (payment_tx IS NULL OR payment_tx NOT LIKE 'PENDING:%')` 双层, 标记不被外部/HTTP 报的 hash 覆盖 (NWT (1) 唯一路)。
+//   · 🟡 UI kasia-console/src/ui/exchange.eta: `:533-537` 详情面板 `explorerTxUrl(chain, getPaymentTx())` 与 `:1357-1362 getExplorerUrl()` 都用列值拼 explorer 链接 ⇒ 失败/不明留下的标记会渲染
+//     `…/PENDING:…` 死链 (operator 面, 404, 不花钱不误状态); `:1353` 直接显示裸串。修一行 startsWith('PENDING:') = 用户面 = Owner 域, 本批不改 (部署单用户面第 3 处)。
+//   · cross-chain-verify.mjs / exchange-verifiers.js 不读该列 (grep `.payment_tx` 0); hold-monitor 不读 exchange_offers.payment_tx; tg-bot 无 payment_tx→URL。
+export const PAYMENT_INTENT_PREFIX = 'PENDING:';
+export function _reservePaymentIntent(db, offerId) {
+  const marker = `${PAYMENT_INTENT_PREFIX}${String(offerId).slice(0, 8)}:${randomUUID().slice(0, 8)}`;
+  const r = db.prepare(`UPDATE exchange_offers SET payment_tx = ? WHERE id = ? AND payment_tx IS NULL`).run(marker, offerId);
+  return r.changes === 1 ? marker : null;   // null = 已有 payment_tx/意图 ⇒ 调用方不得转账
+}
+export function _finalizePaymentIntent(db, offerId, marker, txHash) {
+  const r = db.prepare(`UPDATE exchange_offers SET payment_tx = ? WHERE id = ? AND payment_tx = ?`).run(txHash, offerId, marker);
+  return r.changes === 1;   // false = 标记已被别人换掉 (异常, 钱已出 ⇒ 调用方记事件, 不回滚)
+}
+export function _alertPaymentIntentStuck(db, offerId, marker, site, error) {
+  try {
+    db.prepare(`INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at) VALUES (?, 'system', 'autopay_ambiguous', ?, 'warn', ?, ?, ?)`)
+      .run(randomUUID(), site, `🔴 auto-pay 结果不明/失败 offer=${String(offerId).slice(0, 8)}: 付款意图 ${marker} 保留 (不清 ⇒ reopen 被门, 人工核链) — ${String(error || '').slice(0, 80)}`, JSON.stringify({ offer_id: offerId, marker, site, error: String(error || '').slice(0, 200) }), new Date().toISOString());
+  } catch {}
+}
+
+// DEFECT1b 可见性 helper (导出供向量; 生产只在 _executeHedge 门用)
+export function _isMissingColumnError(e) {
+  return !!e && /no such column/i.test(String(e.message || e));
+}
+export function _recordHedgeGateError(offerId, e) {
+  const id = String(offerId || '');
+  try {
+    const seen = sqlite.prepare(`SELECT 1 FROM chain_events WHERE txid = ? AND event_type = 'hedge_gate_error' LIMIT 1`).get(id);
+    if (seen) return { recorded: false, throttled: true };   // 一次/offer (UNIQUE(txid,event_type) 兜底)
+    recordChainEvent({ txid: id, eventType: 'hedge_gate_error', fromAddress: null, toAddress: null, observedBy: 'system',
+      payload: { offer_id: id, error: String(e?.message || e).slice(0, 200), site: 'trade-protocol-filter._executeHedge gate SELECT meta' } });
+    try {
+      sqlite.prepare(`INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at) VALUES (?, 'system', 'hedge_gate_error', 'trade-protocol-filter', 'error', ?, ?, ?)`)
+        .run(randomUUID(), `🔴 hedge 门 SQL 抛 (offer=${id.slice(0, 8)}): ${String(e?.message || e).slice(0, 80)} — 对冲 skip (DEFECT1b: 列名不动, 真开=Owner 独立批)`, JSON.stringify({ offer_id: id, error: String(e?.message || e).slice(0, 200) }), new Date().toISOString());
+    } catch {}
+    console.error(`[exchange-hedge] gate SQL error offer=${id.slice(0, 8)}: ${e?.message || e} — recorded hedge_gate_error, skip (DEFECT1b)`);
+    return { recorded: true };
+  } catch (e2) { console.error(`[exchange-hedge] record hedge_gate_error failed: ${e2.message}`); return { recorded: false, error: e2.message }; }
+}
+
 async function _executeHedge(offerId, agentName, side, qty, preferredCex = null) {
   // T-22-05 Step G — Opt-in hedge gate（安全门控）
   // 默认不对冲。只有 offer.meta.hedge_enabled === true 才触发对冲。
   // 防止 retail-proxy / bounty / auction 等 non-hedgeable offer 类型误触发 CEX 反向下单。
   // 3 个调用点（api/exchange.js / exchange-machine.js x2）全部自动受保护。
-  const _hedgeGateOffer = sqlite.prepare(
-    "SELECT meta FROM exchange_offers WHERE id = ? LIMIT 1"
-  ).get(offerId);
+  // 🔴 DEFECT1b (race 盘点 §8, NWT P2, Bettor 8/29 GO 可见性补丁): exchange_offers 没有 `meta` 列 (只有 metadata; 写方写 metadata.hedge_enabled) ⇒
+  //   下面这句自 a92556f7 (4/22) 起每次抛 SqliteError, 三处调用的 .catch 吞掉 ⇒ 对冲从未在 live 跑过且无人看见。
+  //   本补丁【只加可见性】: 只裹 "no such column" 这一种错 ⇒ 记 hedge_gate_error chain_event (txid=offer_id; 非 broker_* 不受 v83 64-hex trigger; UNIQUE(txid,event_type) = 一次/offer)
+  //   + events 告警 ⇒ 仍 return skip 不开对冲。🔴 红线: 不动 "SELECT meta" 列名——改成 metadata 就会真读到 hedge_enabled:true ⇒ 全部 broker offer 开 CEX 对冲 = Owner 独立批。
+  let _hedgeGateOffer;
+  try {
+    _hedgeGateOffer = sqlite.prepare(
+      "SELECT meta FROM exchange_offers WHERE id = ? LIMIT 1"
+    ).get(offerId);
+  } catch (e) {
+    if (!_isMissingColumnError(e)) throw e;   // 别的错 (busy/IO/…) 照原路抛给调用方 .catch, 不被本补丁吞
+    _recordHedgeGateError(offerId, e);
+    return;
+  }
   if (!_hedgeGateOffer) {
     console.log(`[exchange-hedge] offer ${offerId.slice(0, 8)} not found — skip`);
     return;
@@ -2541,8 +2603,16 @@ async function handleExchangePaid(msg) {
   }
 
   // Write payment_tx (UNIQUE index 作为 fail-safe; 若并发插入冲突此处会抛, try 捕获降级)
+  // P7-bis (ii) 最后一笔 (NWT/Bettor 8/29): 谓词 AND payment_tx IS NULL —— 现原子性靠"读→Gate1→写 之间无 await"这个脆弱不变量, 日后插一个 await 就静默复活 clobber
+  // (把本地 PENDING 意图/真 hash 覆盖成对端值); 谓词让守随写走 (refactor-proof)。changes=0 ⇒ 记一次事件, 不抛, 不推进。
   try {
-    sqlite.prepare('UPDATE exchange_offers SET payment_tx = ? WHERE id = ?').run(msg.payment_tx, msg.offer_id);
+    const _w = sqlite.prepare('UPDATE exchange_offers SET payment_tx = ? WHERE id = ? AND payment_tx IS NULL').run(msg.payment_tx, msg.offer_id);
+    if (_w.changes === 0) {
+      const cur = sqlite.prepare('SELECT payment_tx FROM exchange_offers WHERE id = ?').get(msg.offer_id)?.payment_tx || null;
+      _alertPaymentSubmitWhileIntent(msg.offer_id, cur, msg.payment_tx, msg.payment_chain || null, 'tpf-remote-paid');
+      console.warn(`[exchange] paid: offer ${msg.offer_id.slice(0,8)} payment_tx already ${String(cur).slice(0,16)} — remote ${String(msg.payment_tx).slice(0,16)} NOT written (predicate)`);
+      return;
+    }
   } catch (dbErr) {
     // UNIQUE constraint violation — 并发 reuse 从 DB 层被拦
     console.log(`[exchange] paid: DB UNIQUE conflict on payment_tx ${msg.payment_tx.slice(0,16)} for offer ${msg.offer_id.slice(0,8)}: ${dbErr.message}`);
@@ -2655,8 +2725,19 @@ async function handleExchangeTimeout(msg) {
   if (!offer) return;
   if (offer.protocol_status !== 'matched') return;
 
+  // P7-bis 门 (race 盘点 §9.3, NWT P1, Bettor GO 2026-08-29): 对端宣告 timeout, 但本地 payment_tx/delivery_tx 已非空 (我方钱已出) ⇒ 不 reopen、不 releaseFunds,
+  // 转 verifying 等迟到的 paid_v1 / 人工; 只记一条带 reopen_blocked 的 exchange_timeout 事件。门与 exchange-machine.checkMatchedTimeout 共用同一函数。
+  const _guard = guardReopenIfSettled(msg.offer_id, 'trade-protocol-filter.handleExchangeTimeout');
+  if (_guard.blocked) {
+    recordChainEvent({ txid: msg._tx || null, eventType: 'exchange_timeout', fromAddress: offer.maker,
+      payload: JSON.stringify({ offer_id: msg.offer_id, taker: msg.taker || offer.taker, reason: msg.reason, reopen_blocked: true, blocked_reason: _guard.reason }) });
+    console.warn(`[exchange] timeout msg for ${msg.offer_id.slice(0,8)} but ${_guard.reason} → NOT reopened (verifying)`);
+    return;
+  }
+
   // Direct SQL UPDATE: matched → open, clear taker fields
   // TIMEZONE FIX: use JS toISOString() for updated_at (Phase 2 P2-01 finding)
+  // P7-bis 顺手: UPDATE 加 AND protocol_status='matched' 谓词 (CAS 化, 不靠上面的 caller 检查——两句之间无 await 但别让正确性依赖这一点)
   const nowIso = new Date().toISOString();
   sqlite.prepare(`
     UPDATE exchange_offers
@@ -2664,7 +2745,7 @@ async function handleExchangeTimeout(msg) {
         taker = NULL, taker_chain = NULL, taker_payment_address = NULL,
         payment_tx = NULL, matched_at = NULL,
         updated_at = ?
-    WHERE id = ?
+    WHERE id = ? AND protocol_status = 'matched'
   `).run(nowIso, msg.offer_id);
 
   releaseFunds(msg.offer_id);
@@ -2873,21 +2954,36 @@ async function _autoPayExchange(offer, takerRelayNodeId) {
 
   console.log(`[exchange-autopay] Paying ${amount} USDT → ${receiveAddress.slice(0,12)}... on ${chain} for offer ${offer.id.slice(0,8)}`);
 
-  const result = await transferUsdt(chain, wallet.privkey_encrypted, receiveAddress, amount);
+  // P7-bis (ii): 转账【之前】write-ahead 付款意图 (CAS, per-offer 幂等); 已有 ⇒ 不转账
+  const _intent = _reservePaymentIntent(sqlite, offer.id);
+  if (!_intent) { console.warn(`[exchange-autopay] offer ${offer.id.slice(0,8)} already has payment_tx/intent → skip (no double pay)`); return; }
+  let result;
+  try {
+    result = await transferUsdt(chain, wallet.privkey_encrypted, receiveAddress, amount);
+  } catch (e) {
+    // 抛 = 结果不明: 标记不清 (reopen 被门 → verifying), 告警, 不重试
+    _alertPaymentIntentStuck(sqlite, offer.id, _intent, 'trade-protocol-filter._autoPayExchange', e.message);
+    console.error(`[exchange-autopay] transfer THREW (ambiguous) offer=${offer.id.slice(0,8)}: ${e.message} — intent kept`);
+    return;
+  }
   if (!result.ok) {
+    // 确定失败也不清标记 (Bettor 裁: 留给 reopen-guard + 人工; 不让"失败"自动变成"可再付")
     console.error(`[exchange-autopay] Payment failed: ${result.error}`);
+    _alertPaymentIntentStuck(sqlite, offer.id, _intent, 'trade-protocol-filter._autoPayExchange', result.error);
     recordChainEvent({
       eventType: 'exchange_pay_failed',
       fromAddress: offer.taker,
-      payload: JSON.stringify({ offer_id: offer.id, chain, error: result.error }),
+      payload: JSON.stringify({ offer_id: offer.id, chain, error: result.error, intent: _intent }),
     });
     return;
   }
 
   console.log(`[exchange-autopay] Payment TX: ${result.txHash}`);
 
-  // Write payment_tx to offer (USDT already sent, record the fact)
-  sqlite.prepare('UPDATE exchange_offers SET payment_tx = ? WHERE id = ?').run(result.txHash, offer.id);
+  // Write payment_tx to offer (USDT already sent, record the fact) — CAS 换掉意图标记
+  if (!_finalizePaymentIntent(sqlite, offer.id, _intent, result.txHash)) {
+    _alertPaymentIntentStuck(sqlite, offer.id, _intent, 'trade-protocol-filter._autoPayExchange', `finalize CAS miss: marker replaced before txHash ${result.txHash} written`);
+  }
 
   // === NO TX NO STATE CHANGE ===
   // No delay needed: transaction.mjs now tracks pending spent UTXOs in memory,
@@ -3006,30 +3102,44 @@ async function _autoSettleAsset(offer, takerRelayNodeId) {
 
   console.log(`[exchange-autosettle] Sending ${amount} ${wantAsset}/${wantChain} → ${recipientAddress.slice(-12)} for offer ${offer.id.slice(0,8)}`);
 
+  // P7-bis (ii) 同形 (Bettor 8/29 "tpf:2887 也无 CAS"): 发送【之前】write-ahead 付款意图; 已有 ⇒ 不发
+  const _intent = _reservePaymentIntent(sqlite, offer.id);
+  if (!_intent) { console.warn(`[exchange-autosettle] offer ${offer.id.slice(0,8)} already has payment_tx/intent → skip (no double pay)`); return; }
+
   // Wait for UTXO to settle — accept broadcast just consumed a UTXO (Kaspa) or nonce confirm (EVM)
   await new Promise(r => setTimeout(r, 5000));
 
   try {
     // 调 J1 Phase B settler-router (commit 6b7b35a) 真路由
-    const sendResult = await sendAsset({
-      asset: wantAsset, chain: wantChain, to: recipientAddress, qty: amount, relayId: takerRelayNodeId,
-    });
+    let sendResult;
+    try {
+      sendResult = await sendAsset({
+        asset: wantAsset, chain: wantChain, to: recipientAddress, qty: amount, relayId: takerRelayNodeId,
+      });
+    } catch (e) {
+      _alertPaymentIntentStuck(sqlite, offer.id, _intent, 'trade-protocol-filter._autoSettleAsset', e.message);
+      console.error(`[exchange-autosettle] sendAsset THREW (ambiguous) offer=${offer.id.slice(0,8)}: ${e.message} — intent kept`);
+      return;
+    }
 
     const txId = sendResult?.txHash || sendResult?.txId;
     if (!sendResult?.ok || !txId) {
       console.error(`[exchange-autosettle] ${wantAsset}/${wantChain} send failed: ${sendResult?.error || 'no txId'}`);
+      _alertPaymentIntentStuck(sqlite, offer.id, _intent, 'trade-protocol-filter._autoSettleAsset', sendResult?.error || 'no txId');
       recordChainEvent({
         eventType: 'exchange_settle_failed',
         fromAddress: offer.taker,
-        payload: JSON.stringify({ offer_id: offer.id, asset: wantAsset, chain: wantChain, error: sendResult?.error || 'no txId' }),
+        payload: JSON.stringify({ offer_id: offer.id, asset: wantAsset, chain: wantChain, error: sendResult?.error || 'no txId', intent: _intent }),
       });
       return;
     }
 
     console.log(`[exchange-autosettle] ${wantAsset}/${wantChain} sent TX: ${txId}`);
 
-    // Write payment_tx to offer
-    sqlite.prepare('UPDATE exchange_offers SET payment_tx = ? WHERE id = ?').run(txId, offer.id);
+    // Write payment_tx to offer — CAS 换掉意图标记
+    if (!_finalizePaymentIntent(sqlite, offer.id, _intent, txId)) {
+      _alertPaymentIntentStuck(sqlite, offer.id, _intent, 'trade-protocol-filter._autoSettleAsset', `finalize CAS miss: marker replaced before txId ${txId} written`);
+    }
 
     // === NO TX NO STATE CHANGE (P1-C consensus: 铁律不分场景) ===
     // Broadcast kanet_exchange_paid_v1 — must succeed before processPaymentSubmit.

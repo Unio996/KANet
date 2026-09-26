@@ -17,6 +17,7 @@ import { recordChainEvent } from './chain-event.js';
 import { executeHedge } from './trade-protocol-filter.js';
 import { releaseFunds, spendFunds } from './fund-lock.js';
 import { escrowGateFor } from './escrow-landed-gate.mjs';   // (c) 第 5 笔 (B): escrow_landed_at 硬消费门, 单一所有权点在 transition()
+import { buildExplorerUrl } from '../lib/explorer-url.mjs';   // R-EXPLORER-URL-BYPASS (2026-08-29 顺手, NWT 取 (B)): dm_kas_delivered 内联 buildExplorerUrl — mainnet 保两行原样 (TX: + 查看:), TN12 只 TX: 去死链; 不碰 formatTxReference (免 broker-state-authority.js:43 连坐)
 import crypto from 'crypto';
 
 // ── Valid Transitions ─────────────────────────────────────────
@@ -690,6 +691,28 @@ export async function timeoutVerifying() {
  * Broadcasts kanet_exchange_timeout_v1 and reopens the offer.
  * Does NOT use transition() — timeout revert is an exceptional flow.
  */
+/**
+ * P7-bis (race 盘点 §9.3/§10.2, NWT P1, Bettor 2026-08-29 GO): matched 超时 reopen 会清 payment_tx ⇒ 若 taker 的 USDT/KAS【已转出】
+ * (_autoPayExchange tpf:2745 / _autoSettleAsset 写 payment_tx) 但 paid_v1 广播失败/迟到 ⇒ reopen 后再 accept ⇒ 同 offer 再付一次。
+ * 门 (两处 reopen 共用: 本文件 checkMatchedTimeout + tpf handleExchangeTimeout): payment_tx OR delivery_tx 任一非空 ⇒ 【不 reopen】,
+ * CAS matched→verifying (VALID_TRANSITIONS 已有边; 语义"付款已提交待核", 迟到的 paid_v1 经 processPaymentSubmit 自然接上, timeoutVerifying 接管),
+ * 不清任何字段, taker 保留, releaseFunds 不调, events 告警一次/offer。返回 {blocked, reason}。
+ */
+export function guardReopenIfSettled(offerId, site = 'unknown', db = sqlite) {
+  const row = db.prepare(`SELECT id, protocol_status, payment_tx, delivery_tx FROM exchange_offers WHERE id = ?`).get(offerId);
+  if (!row) return { blocked: false, reason: 'no_offer' };
+  if (!row.payment_tx && !row.delivery_tx) return { blocked: false, reason: 'unsettled' };
+  const nowIso = new Date().toISOString();
+  const r = db.prepare(`UPDATE exchange_offers SET protocol_status = 'verifying', updated_at = ? WHERE id = ? AND protocol_status = 'matched'`).run(nowIso, offerId);
+  try {
+    const seen = db.prepare(`SELECT 1 FROM events WHERE event_type = 'reopen_blocked_settled' AND json_extract(payload_json, '$.offer_id') = ? LIMIT 1`).get(offerId);
+    if (!seen) db.prepare(`INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at) VALUES (?, 'system', 'reopen_blocked_settled', ?, 'warn', ?, ?, ?)`)
+      .run(crypto.randomUUID(), site, `🔴 offer ${offerId.slice(0, 8)} matched 超时但已有 payment_tx/delivery_tx ⇒ 不 reopen, 转 verifying (P7-bis: 钱已出, 不能再开给别人)`, JSON.stringify({ offer_id: offerId, payment_tx: row.payment_tx, delivery_tx: row.delivery_tx, site, cas_changes: r.changes }), nowIso);
+  } catch {}
+  console.warn(`[exchange-machine] reopen BLOCKED offer=${offerId.slice(0, 8)} site=${site} payment_tx=${row.payment_tx ? 'set' : '-'} delivery_tx=${row.delivery_tx ? 'set' : '-'} → verifying (cas_changes=${r.changes})`);
+  return { blocked: true, reason: row.payment_tx ? 'payment_tx_present' : 'delivery_tx_present', cas_changes: r.changes };
+}
+
 export async function checkMatchedTimeout() {
   const stale = sqlite.prepare(`
     SELECT id, maker, taker, taker_chain FROM exchange_offers
@@ -700,6 +723,8 @@ export async function checkMatchedTimeout() {
 
   for (const offer of stale) {
     console.log(`[exchange-machine] matched timeout: offer ${offer.id.slice(0,8)} (taker ${(offer.taker || '').slice(-8)})`);
+    // P7-bis 门: 放在 timeout_v1 广播【之前】—— 钱已出的 offer 既不 reopen 也不向对端宣告 timeout (否则对端 reopen、本地 verifying 分叉)
+    if (guardReopenIfSettled(offer.id, 'exchange-machine.checkMatchedTimeout').blocked) continue;
 
     // ⑤ NO TX NO STATE CHANGE — Broadcast timeout FIRST, reopen only after TX is on chain.
     const relay = sqlite.prepare('SELECT id FROM relay_nodes WHERE address = ?').get(offer.maker);
@@ -756,6 +781,13 @@ export async function checkMatchedTimeout() {
 // (handleExchangePaid transitions to verifying first, then calls this).
 // The old /api/exchange/submit-payment REST endpoint is deprecated.
 
+export function _alertPaymentSubmitWhileIntent(offer_id, localIntent, submittedTx, chain, layer) {   // 导出: tpf handleExchangePaid 远端 paid 路复用 (layer='tpf-remote-paid')
+  try {
+    sqlite.prepare(`INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at) VALUES (?, 'system', 'payment_submit_while_intent_pending', 'exchange-machine', 'warn', ?, ?, ?)`)
+      .run(crypto.randomUUID(), `🔴 offer ${String(offer_id).slice(0, 8)} 本地付款意图 ${localIntent} 未决, 收到外部 payment_tx ${String(submittedTx).slice(0, 16)}… — 不覆盖 (${layer}), 人工核`, JSON.stringify({ offer_id, local_intent: localIntent, submitted_tx: submittedTx, chain, layer }), new Date().toISOString());
+  } catch {}
+}
+
 /**
  * Taker submits a payment TX hash for on-chain verification.
  * Writes to verification_meta, kicks off async verification.
@@ -765,6 +797,12 @@ export function processPaymentSubmit({ offer_id, payment_tx, payment_chain }) {
   if (!offer) return { error: 'offer_not_found' };
   if (offer.protocol_status !== 'verifying') return { error: 'invalid_status', current: offer.protocol_status };
   if (!payment_tx) return { error: 'payment_tx_required' };
+  // P7-bis (ii) (Bettor ③ 8/29): 本地 auto-pay 的付款意图标记 PENDING:… 还在 (转账结果不明/失败) ⇒ 不许被对端/HTTP 报的 hash 覆盖 (否则本地转账痕迹丢, reopen-guard 失明);
+  // 只记事件, 人工核链后决定 (本地成功路会先用 _finalizePaymentIntent 把标记换成真 hash, 再到这里 ⇒ 不触发)。
+  if (offer.payment_tx && String(offer.payment_tx).startsWith('PENDING:') && offer.payment_tx !== payment_tx) {
+    _alertPaymentSubmitWhileIntent(offer_id, offer.payment_tx, payment_tx, payment_chain, 'app-layer');
+    return { error: 'payment_intent_pending', intent: offer.payment_tx };
+  }
 
   // Security: use taker_chain from offer (set at accept time), fallback to body value for backward compat
   const verifyChain = offer.taker_chain || payment_chain;
@@ -786,10 +824,16 @@ export function processPaymentSubmit({ offer_id, payment_tx, payment_chain }) {
   meta.submitted_at = now;
 
   // 同时写入 payment_tx 列 (UNIQUE index 会在并发 reuse 时抛 constraint 错误)
+  // P7-bis (ii) SQL 层兜底 (NWT (1), 唯一路原则): 谓词排除本地 PENDING 标记 —— 上面的应用层判只是早退, 正确性不靠它; changes=0 ⇒ 同一事件 + payment_intent_pending
   try {
-    sqlite.prepare(
-      'UPDATE exchange_offers SET verification_meta = ?, payment_tx = ?, updated_at = ? WHERE id = ?'
+    const _r = sqlite.prepare(
+      "UPDATE exchange_offers SET verification_meta = ?, payment_tx = ?, updated_at = ? WHERE id = ? AND (payment_tx IS NULL OR payment_tx NOT LIKE 'PENDING:%')"
     ).run(JSON.stringify(meta), payment_tx, now, offer_id);
+    if (_r.changes === 0) {
+      const cur = sqlite.prepare('SELECT payment_tx FROM exchange_offers WHERE id = ?').get(offer_id)?.payment_tx || null;
+      _alertPaymentSubmitWhileIntent(offer_id, cur, payment_tx, payment_chain, 'sql-predicate');
+      return { error: 'payment_intent_pending', intent: cur };
+    }
   } catch (dbErr) {
     console.log(`[exchange] processPaymentSubmit DB UNIQUE conflict: ${dbErr.message}`);
     return { error: 'payment_tx_reused_concurrent', db_error: dbErr.message };
@@ -931,11 +975,19 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
         }));
         console.log(`[exchange] offer ${offer_id.slice(0,8)} BUY kaspa_tx verified → completed (KAS received, no delivery needed)`);
         // Trigger hedge
+        // J2 2026-08-29 (race 盘点 DEFECT1, NWT CONFIRMED, Bettor ④): 1ea63f83 (4/11) 起这里传的是整行 `executeHedge(finalOffer)`, 而签名是
+        // `_executeHedge(offerId, agentName, side, qty)` (trade-protocol-filter.js:2186) ⇒ `offerId.slice` 抛 ⇒ 被 .catch 吞 ⇒ 该路 hedge 4 个半月静默未跑。
+        // 修 = 镜像本函数 :1140-1144 的正确调法; `hedge_enabled` 门不动 (未开 flag 的 offer 行为不变, tpf:2200 第一道即 skip)。
         const finalOffer = sqlite.prepare('SELECT * FROM exchange_offers WHERE id = ?').get(offer_id);
         if (finalOffer?.protocol_status === 'completed' && finalOffer.maker) {
           const localAgent = sqlite.prepare('SELECT id, name FROM relay_nodes WHERE address = ?').get(finalOffer.maker);
           if (localAgent) {
-            executeHedge(finalOffer).catch(err => console.error(`[exchange-hedge] error: ${err.message}`));
+            const makerGaveKas = finalOffer.give_asset === 'KAS';
+            const hedgeSide = makerGaveKas ? 'BUY' : 'SELL';
+            const hedgeQty = makerGaveKas ? parseFloat(finalOffer.give_amount) : parseFloat(finalOffer.want_amount);
+            if (hedgeQty > 0) {
+              executeHedge(finalOffer.id, localAgent.name, hedgeSide, hedgeQty).catch(err => console.error(`[exchange-hedge] error: ${err.message}`));
+            }
           }
         }
         return;
@@ -1162,8 +1214,11 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
                   kind: 'dm_kas_delivered',
                   peer: deliveryTarget,
                   payload: {
-                    // R-EXPLORER-URL-BYPASS(lint 硬阻塞, 本补丁 (c) 触及本文件被闸逼出的 1 行顺手改): explorer 域名走单源 explorer-url.mjs
-                    message: `✅ 已发出 ${deliveringOffer.give_amount} KAS 到你 Kasia 钱包, 1-2 分钟到账.\n\nTX: ${deliveryTxId}\n查看: ${(await import('../lib/explorer-url.mjs')).buildExplorerUrl(deliveryTxId, process.env.KASPA_NETWORK) ?? '(本网络无公开 explorer)'}\n\n感谢使用 KANet broker.`,
+                    // R-EXPLORER-URL-BYPASS: explorer 域名走单源 explorer-url.mjs（合并自两处独立触及同一行的补丁——
+                    // HEAD(本补丁(c), lint 硬阻塞顺手改) 用内联 dynamic import 且无 explorer 时仍打印占位文案；
+                    // 原分支(2026-08-29, NWT 取 (B)) 用顶部静态 import + IIFE, 无 explorer(TN12) 时整行省略避免死链——
+                    // 保留原分支这条更完整的 NWT 已审行为, 改用上方已合并的顶层 buildExplorerUrl 静态 import（免重复 dynamic import）。
+                    message: `✅ 已发出 ${deliveringOffer.give_amount} KAS 到你 Kasia 钱包, 1-2 分钟到账.\n\nTX: ${deliveryTxId}${(() => { const _u = buildExplorerUrl(deliveryTxId, process.env.KASPA_NETWORK); return _u ? `\n查看: ${_u}` : ''; })()}\n\n感谢使用 KANet broker.`,
                   },
                 });
               } catch (e) { console.warn(`[exchange] dm_kas_delivered enqueue err: ${e.message}`); }
