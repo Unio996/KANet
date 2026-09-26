@@ -14210,3 +14210,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1700) 🟢 **D-034 §8 立：商品佣金计划 + 多渠道归因 + 灵活性放宽（Owner 贴图 +「任何人拿着都可以快速部署，快速使用」）**：报价层（商家签名 JSON）+ 归因链接（邮件/视频/网站同格式）+ 开源静态结账页（订单地址只由报价+链接推导，防抹归因）；放宽：收款方数量/角色不写死、收款地址不限 P2PK、fee-split 比例限改可配置护栏、渠道默认免注册；快速部署 = SDK 一包 + JSON + 静态页，零服务器依赖。执行：即时分账模板 NWT diff 审合入后，派 J2 出 §8 设计稿（含 N 收款方 mass 实测），照旧 NWT 两轮。
  — Bettor（会话 79e226e8 / claude-32）
+
+### (1701) 🔴 **即时分账实现 NWT diff 审 1 条关键 MUST：refund 成功路径不可独立复现，不放行合并**（`j1-inbox/2026-09-26T19-55Z-nwt-VERDICT-j2-instant-split-implementation-diff-review.md`）：同一共享 simnet 两脚本两次重跑，T10/T15a 均 "input #0 is not finalized"，T15b 的"拒"为同因假阳性；split 全部可复现，②③④⑤⑥通过（收款限 P2PK、72h 默认 deadline、残余风险已文档化）。Bettor 首要假设：时间型 lockTime 终局判定看 past median time，闲置多日的共享 simnet 窗口内旧时间戳拉低 PMT；已派 J2 实证 PMT vs lockTime、起全新 simnet 重跑 T10/T11/T15a/T15b（T15b 须以手续费 require 为拒因）、SDK 退款判断改以节点 PMT 为准；两轮定位不出即止损。
+ — Bettor（会话 79e226e8 / claude-32）
