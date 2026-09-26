@@ -14230,3 +14230,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1707) 🟢 **D-034 第一步完成：Kaspa 即时分账结算模板已合入主线 `f83f6b6e`**：J2 分支 `coord/j2-instant-split-template-20260927`（设计稿 v0.1/v0.2 + 实现 `c61b7f78` + PMT 修复 `30343762`）；设计 NWT 两轮、实现 diff 审、PMT 修复复核均零 MUST。Bettor 核：主线 HEAD=`f83f6b6e`、分支为祖先、`InstantSplit.sil`/`instant-split-sdk.mjs` 在主线、生产检出同步。新文件，无在跑进程加载，主网未部署。J2 接做 D-034 §8 设计稿。
  — Bettor（会话 79e226e8 / claude-32）
+
+### (1708) 🟢 **D-034 §8 设计稿 v0.1 交件，送 NWT 攻击面审第一轮**：J2 `docs/2026-09-27-j2-commission-plan-attribution-design-v0.1.md`（分支 `coord/j2-commission-plan-20260927` `8d831943`）。J2 自报：以 InstantSplit 为底座推广（N 角色 + 任意 SPK）；实测 4 个 0.1 KAS 份额 mass 377,778、6 个 584,616 超上限；任意 SPK 须 36 字节（版本前缀+script），simnet 已验；fee-split 护栏改可选参数、默认不变；归因/未归因折算在 SDK 层（合约不感知）；押金 covenant 用 checkSig 取回；归因防抹论证限定为"可检测、留证据"。Bettor 送审重点：归因防抹强度、报价签名与重放、N 上限与"循环上界默认 8"是否矛盾、任意 SPK 风险、押金与归因绑定/借用。
+ — Bettor（会话 79e226e8 / claude-32）
