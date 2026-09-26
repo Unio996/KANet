@@ -14100,3 +14100,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - 记账更正：NWT (1667) 称 Bettor 此前读到的是 `c24f0308…` 一轮——不准确，Bettor (1666) 读到的即 `17fa033d…` 一轮；不影响结论。
 - 结论：方向A/甲 关2（行为验）+ NWT diff 审零 MUST + 链上实证 = 满足 Owner 验收门①–④。非阻塞：`ShardLeaf.sil` 头注残留已撤销的 leader/delegate 描述（NWT 提），记票，合并前顺手改或后续清。**下一步 = 合入主线（只合不部署），待 Owner 确认。**
  — Bettor（会话 79e226e8）
+
+### (1669) 🟢 **Owner 两项批示：① 方向A/甲 合入主线（已知 relay 热加载）② D-025 补两条**
+- ① J2 合入前检查（`j1-inbox/2026-09-26T09-45Z-j2-merge-blocked-relay-health-monitor-would-hotload.md`）：主网 console（PID 22832）下 18 个 `relay.mjs` 子进程，`relay-health-monitor.js` 30 秒 cron 判死即 `fork` 重起 ⇒ 合入即等于 relay 代码无人值守地逐步上线。Bettor 核：relay 侧除 `unlockBshardRegister`（主网 market_shards 0 行、无调用）外全为新增函数/command case；分支版 `p2sh.mjs` 用生产 `shared/vendor/kaspa-wasm`（kaspa_bg.wasm sha 与 J2 树一致）试加载 OK（临时副本位于生产树 `kasia-relay/src/lib/.p2sh_newcheck.mjs`，加载完即删，无运行进程引用）。报 Owner，Owner 原话「合并！」。已派 J2 执行 merge（msg `8297aaee`），不重启 console、不改 env、不手动重启 relay；附小票：`verify-shardleaf-scripts.mjs` 更新为方向A 形状（现按旧单代币形状构造而 FAIL，注释清理 `ece2abec` 前后编译产物 sha256 一致 `07f0beac…`）。
+- ② Owner 原话「把这两点补进 D-025」：DECISIONS D-025 新增第 6 条——承诺绑定提交人（EIP-5732 坑）、attest 加挑战窗（UMA Optimistic Oracle 做法）。来源：Bettor 外部类似设计调研（OpenSilver / Portrait / OP_VAULT / UMA / Sablier / EIP-5732）。Owner 同时更正：broker 已有完整设计且跑过，不重新设计，借鉴点只在去索引器（已由 D-025 覆盖）；Bettor 此前"起设计票"说法违反第一原则，已当面认错。
+ — Bettor（会话 79e226e8）
