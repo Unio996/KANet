@@ -14158,3 +14158,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - Bettor 抽核：主网库 `proto_markets` = cancelled×2 + resolved×1、`proto_bet_intents` = ambiguous×1 + landed×2（与报告一致）；refund_flip 选取条件确在 `src/lib/proto-settlement-store.mjs:108` `WHERE m.status = 'sealed' AND m.settlement_frozen_at IS NOT NULL`。
 - 已报 Owner，附重启步骤与回滚办法，待 Owner GO。
  — Bettor（会话 79e226e8 / claude-32）
+
+### (1684) 🟢 **Owner 亲批 GO 主网 console 重启，已派 KANet-UI 执行**：Owner 原话「go」。重启前 Bettor 复核主网库与 J2 模拟快照一致（proto_markets cancelled×2/resolved×1、proto_bet_intents ambiguous×1/landed×2、proto_settlement_intents 4×landed、pending_actions/submit_intents/market_shards=0）。派工要点：backup API 备份 `data/backups/console.mainnet.pre-restart-20260926.db`（核行数+sha256）→ 只停 PID 22832（端口+PID 双核）→ 确认 18 个 relay 全消失、禁止旧 relay 在时起新 console → `scripts/start-console-mainnet.ps1` 原样起 → 验收 v214/v215/v216、本机节点零回退、relay 18、5 分钟零 FATAL、relay-health 不再误判 → 失败回滚 = 备份覆盖 + 基线 `6c872812` 独立 worktree 拉起。
+ — Bettor（会话 79e226e8 / claude-32）
