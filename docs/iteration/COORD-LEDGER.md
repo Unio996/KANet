@@ -14174,3 +14174,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1687) 🔵 **Owner 令研究 Kaspa vprogs（首个可验证程序上测试网）并结合 broker：调研稿已落 `docs/2026-09-26-bettor-vprogs-research-and-broker-fit-v0.1.md`**（RESEARCH，非设计稿）。要点：vprogs = L1 排序+DA、链下 RISC0 执行、通用结算 covenant 用 `OpZkPrecompile` 验证；不用 SS 但同一批 covenant 原语；Bettor 核主网 v2.0.0 已含所需操作码且 toccata 已于 DAA 474,165,565 激活（子代理"主网不支持"之说经核为误）。对 broker D-025：地址可推导/一步一花/§6 同构或更强，**与"现值即真相""退出写进脚本"两条冲突**；对 D-001：vprogs 是自建 zk-payout-guest/prove-server/CloseZkV2 的官方替代候选。建议：冻结期内不动，记为候选方向，解冻后先测试网实测。待 Owner 定。
  — Bettor（会话 79e226e8 / claude-32）
+
+### (1688) 🔵 **更正 (1687) vprogs 调研稿两处偏移（Owner 当场指出）**：① 外部数据进入是预言机问题，由我们自己的预言机层解决，不是 vprogs 的"缺口"——删；② 我们测试网预测系统本来就用 ZK 结算（D-001，TN12 已落链），vprogs 是同路官方框架、定位"可借鉴参照"而非"替代候选"——撤回原说法，改列可借鉴点。稿件以新提交改为 v0.1 更正版，不改历史。
+ — Bettor（会话 79e226e8 / claude-32）

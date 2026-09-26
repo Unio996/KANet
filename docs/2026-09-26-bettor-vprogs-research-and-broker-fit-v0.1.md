@@ -23,10 +23,10 @@
 3. 无需中心化排序者；L1 即 DA。
 4. 结算成本与笔数无关。
 
-## 5. 它没解决的
-1. **无外部数据/oracle 原语**：比分、播放量只能由指定私钥签名写入程序状态 ⇒ 我们的委员会 attest 仍必需，可作为 vprog 的"Resolve"输入方。
-2. **无单方强制退出**：用户退出须被某个 runner 打进下一个 bundle。
-3. **状态重建依赖历史**：新 runner 从 L1 回放；Kaspa 会剪枝 ⇒ 长期需要快照/归档。
+## 5. 边界（更正：外部数据不是 vprogs 的"缺口"）
+> 更正（Owner 2026-09-26）：外部数据如何可信进入是**预言机问题**，本就不属于执行/结算框架的职责，由我们自己的预言机层（委员会 attest，D-025 §6 挑战窗等）解决；v0.1 初稿把它列为 vprogs"没解决的痛点"是偏移，已删。
+1. **无单方强制退出**：用户退出须被某个 runner 打进下一个 bundle。
+2. **状态重建依赖历史**：新 runner 从 L1 回放；Kaspa 会剪枝 ⇒ 长期需要快照/归档。
 
 ## 6. 对 broker（长尾分成金库，D-025）的适配
 | D-025 不变量 | vprogs 现状 | 判断 |
@@ -40,9 +40,9 @@
 结论：vprogs 在"复杂分期规则、多金库不争用、挑战窗"上明显优于我们的 covenant 链设计；但与 D-025 的第 1、5 条冲突。若采用，需 Owner 决定是否放宽这两条，或等 vprogs 补上强制退出/状态可用性。
 
 ## 7. 对预测市场 / D-001 ZK 结算路线
-D-001 已定 ZK 为 committed 结算架构；我们自建：`zk-payout-guest/`（RISC0 guest）、`zk-prove-server.mjs`/`zk-prove-worker.mjs`、`CloseZkV2.sil`/`PayoutShard(V2).sil`（仅 TN12 落链过）。vprogs 是 Kaspa 官方把同一路线做成的通用框架，按第一原则（不造轮子）应视为这些自建件的首选替代候选。仓库此前唯一提及：`docs/trade-protocol-on-chain-design.md:646/674`（远期 HTLC）、`docs/2026-08-07-st00-claim-inventory-v0.1.md`（"未集成任何 vProg 组件"）。
+> 更正（Owner 2026-09-26）：我们测试网上跑通的预测系统**本来就在用 ZK 结算**（D-001；2026-07-06 TN12 首笔真实 ZK settle 落链；RISC0 guest `zk-payout-guest/`、证明服务 `zk-prove-server.mjs`/`zk-prove-worker.mjs`、验证 covenant `CloseZkV2.sil`/`PayoutShard(V2).sil`、委员会 attest 判定事实）。vprogs 是 Kaspa 官方在**同一条路**上的通用框架——定位是"可借鉴的参照物"，不是"替代我们"。v0.1 初稿"首选替代候选"的说法撤回。
+可借鉴点（对照我们已有件，逐项看要不要吸收）：L1 原生交易作输入 + mergeset 排序（去单 UTXO 争用）；tx→batch→bundle 递归聚合（结算成本与笔数无关）；`OpChainblockSeqCommit` 防回滚绑定；结算无许可竞争 + "认领竞争者结算"的 reorg 处理；退出 permission tree。仓库此前提及：`docs/trade-protocol-on-chain-design.md:646/674`、`docs/2026-08-07-st00-claim-inventory-v0.1.md`。
 
 ## 8. Bettor 建议（待 Owner 定）
-1. GOAL.md 冻结期内不改主线、不迁移。
-2. 记为候选决策：broker 金库与预测市场 ZK 结算，下一阶段优先评估基于 vprogs 实现，而非继续扩写自建 SS 合约与证明服务。
-3. 解冻后第一步只做低成本实测：在测试网跑通井字棋 + 实测 GPU 证明时长/成本，再决定取舍。
+1. GOAL.md 冻结期内不改主线。
+2. 记为参照：broker 金库与预测市场 ZK 结算后续迭代时，逐项对照 §7 可借鉴点，按第一原则只吸收能直接复用的机制。
