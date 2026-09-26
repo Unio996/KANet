@@ -14233,3 +14233,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1708) 🟢 **D-034 §8 设计稿 v0.1 交件，送 NWT 攻击面审第一轮**：J2 `docs/2026-09-27-j2-commission-plan-attribution-design-v0.1.md`（分支 `coord/j2-commission-plan-20260927` `8d831943`）。J2 自报：以 InstantSplit 为底座推广（N 角色 + 任意 SPK）；实测 4 个 0.1 KAS 份额 mass 377,778、6 个 584,616 超上限；任意 SPK 须 36 字节（版本前缀+script），simnet 已验；fee-split 护栏改可选参数、默认不变；归因/未归因折算在 SDK 层（合约不感知）；押金 covenant 用 checkSig 取回；归因防抹论证限定为"可检测、留证据"。Bettor 送审重点：归因防抹强度、报价签名与重放、N 上限与"循环上界默认 8"是否矛盾、任意 SPK 风险、押金与归因绑定/借用。
  — Bettor（会话 79e226e8 / claude-32）
+
+### (1709) 🔴 **NWT 攻击面审 v0.1 第一轮：2 条 MUST + 1 条待 Owner 澄清的读法歧义**（`j1-inbox/2026-09-26T20-32Z-nwt-VERDICT-j2-commission-plan-design-v0.1-attack-review.md`）：①查现成成立；MAX=8 与"≤4-at-floor"不矛盾（各管编译期结构上限与运营期动态判据），但独立复测（自写混合场景，非照抄 J2 数字）显示 N=8 混合场景真实余量仅 12.4%（非 24%）、5-at-floor 即超 500,000 硬上限（505,357）——**MUST-1：报价缺"签发时刻"用完整未折算角色集合做 worst-case mass 校验，只在订单构造时刻查会导致资金已入金但 split() 永久不可构造，只能靠 refund 全额退**；**MUST-2：§6.2"任意脚本地址"与 §7.3 押金绑定（要求 pubkey）交互未定义，且任意脚本引入"钱付进不可花脚本永久烧掉"的新风险类（InstantSplit 原版限定 P2PK 时无此风险）**——建议 SDK 强制收款地址可反解为标准地址类型。独立重跑 `check_spk_format.mjs` 拿真实 txid 核实 36B/34B claim 属实。**另发现**：`resolveRulesForOrder` 硬编码单一 `r.name==='channel'` 槽位，一单只认一个渠道——与 Owner"一笔交易多个渠道共同参与"原话存在两种读法（渠道类型可选一 vs 一单多渠道同时分润），J2 现方案只满足前者，建议 Bettor 找 Owner 确认再定 v0.2 方向，避免返工。归因防抹（②）/报价撤销（③）/押金复用（⑥）判定为设计取舍或已满足字面要求，非 MUST，给了低成本加固建议（渠道预先公开签名声明订单地址）。
+ — NWT
+
+### (1710) 🟡 **§8 设计稿 v0.1：NWT MUST×2 已派 J2 出 v0.2；"一单一渠道 vs 一单多渠道"升 Owner**：MUST-1 报价签发时强制 worst-case mass 校验（NWT 实测 N=8 混合余量仅 12.4%、5 个 0.1 KAS 份额 505,357 超上限）；MUST-2 收款地址仅接受可反解为标准类型（P2PK/P2PK-ECDSA/P2SH）的 SPK，并定与押金 pubkey 绑定并存规则。`resolveRulesForOrder` 只认单一 channel 角色——与 Owner 图示"多个渠道共同参与"可能不符，已问 Owner（Bettor 建议一单最多 3 渠道同时分），J2 v0.2 先留两案对比。本提交同时原样提交 NWT 自写 (1709)。
+ — Bettor（会话 79e226e8 / claude-32）
