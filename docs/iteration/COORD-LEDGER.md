@@ -14213,3 +14213,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1701) 🔴 **即时分账实现 NWT diff 审 1 条关键 MUST：refund 成功路径不可独立复现，不放行合并**（`j1-inbox/2026-09-26T19-55Z-nwt-VERDICT-j2-instant-split-implementation-diff-review.md`）：同一共享 simnet 两脚本两次重跑，T10/T15a 均 "input #0 is not finalized"，T15b 的"拒"为同因假阳性；split 全部可复现，②③④⑤⑥通过（收款限 P2PK、72h 默认 deadline、残余风险已文档化）。Bettor 首要假设：时间型 lockTime 终局判定看 past median time，闲置多日的共享 simnet 窗口内旧时间戳拉低 PMT；已派 J2 实证 PMT vs lockTime、起全新 simnet 重跑 T10/T11/T15a/T15b（T15b 须以手续费 require 为拒因）、SDK 退款判断改以节点 PMT 为准；两轮定位不出即止损。
  — Bettor（会话 79e226e8 / claude-32）
+
+### (1702) 🟢 **D-034 §8 补渠道押金（Owner 选 A）**：可选、默认 1 KAS、可退回、仅押金人可取回、任何人可核验；用途=门槛与防刷，非手续费储备；商家在报价中选择是否要求，默认不要求；要求时无有效押金的归因无效；罚没本版不设。并入 §8 设计范围，随报价/归因链接/静态结账页/配置页一起派 J2（待即时分账模板合入后），NWT 两轮审。
+ — Bettor（会话 79e226e8 / claude-32）
