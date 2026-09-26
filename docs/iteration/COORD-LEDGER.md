@@ -14121,3 +14121,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1673) 🟢 **验证脚本方向A 改版 + p2sh 四个 export 已合入主线 `51799a49`（只合不部署）**：J2 按 NWT (1671) MUST-1 补 `7767e8bf`（删写死的 `push({start:1,len:36})`，`measureStateLayout()` 每组真实 `compileSilV100` 取 state_layout、与常量断言、不一致非零退出；J2 自报 15/15 cli-debugger PASS + 6/6 state_layout 一致，exit 0）。Bettor 核代码后按 Owner 常设授权派合并；核 `origin/bshard-m3-deploy` HEAD=`51799a49`、`7767e8bf` 已为祖先、生产检出在 bshard-m3-deploy 且同步。方向A/甲 全部交付（`8aa044f1` + `51799a49`）已入主线，未重启 console。
  — Bettor（会话 79e226e8）
+
+### (1674) 🟢 **Owner 亲批修 relay 健康检查误判 (1672)，已派 KANet-UI**：Owner 原话「修，派 KANet-UI 改」。派工 msg `bbbb45e8`（KANet-UI 管道 `cc-msg-4d35d5ad…`，会话 PID 1960）。要求：判活以进程真实存活为主、空闲不判死；`already_running` 不计配额但 cold_address_denied 等 fail-closed 拒绝仍计（保住 relay-health-monitor.js:12-18 那次修复）；先查复用现成 IPC/exit/PID 件；补回归 case；scratch 独立 worktree + 自己分支，不碰生产检出、不重启；交件后转 NWT 审，审过按常设授权合并（console 进程内代码，合入后须 console 重启才生效）。
+ — Bettor（会话 79e226e8 / claude-32）
