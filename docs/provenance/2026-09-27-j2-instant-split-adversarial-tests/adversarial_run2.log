@@ -1,0 +1,55 @@
+[diag:step] proc.silverc.compile.bshard-artifacts ms=22 cmd=silverc ok=1 at=2026-09-26T19:43:05.971Z
+[PASS] T1_tamper_recipient_address :: expect=reject accepted=false :: RPC Server (remote error) -> Rejected transaction b126dfac5adfe48b63ed539b6474530922979aab49a4e5335f5188c3614bcf36: failed to verify the signature script: script ran, but verification failed
+[diag:step] proc.silverc.compile.bshard-artifacts ms=19 cmd=silverc ok=1 at=2026-09-26T19:43:06.029Z
+[PASS] T2_tamper_ratio_keep_sum :: expect=reject accepted=false :: RPC Server (remote error) -> Rejected transaction 3c7adffc2c16cecf96bead2f9ef652bdb4f227d10fa96dfb1bc696f6b4b64d81: failed to verify the signature script: script ran, but verification failed
+[diag:step] proc.silverc.compile.bshard-artifacts ms=21 cmd=silverc ok=1 at=2026-09-26T19:43:06.072Z
+[PASS] T3_underpay :: expect=reject accepted=false :: LOCAL_THROW: buildSplitTx: 资金不足(949000000 < recipientsTotal 950000000)——本地早失败, 对抗测试#3 少付情形
+[diag:step] proc.silverc.compile.bshard-artifacts ms=21 cmd=silverc ok=1 at=2026-09-26T19:43:06.113Z
+[PASS] T4_overpay_no_change_over_limit :: expect=reject accepted=false :: RPC Server (remote error) -> Rejected transaction 5fba1cb454b5c184725cac841821687bf9f4ba57da4b8be48c287dd125de4b5b: failed to verify the signature script: script ran, but verification failed
+[diag:step] proc.silverc.compile.bshard-artifacts ms=18 cmd=silverc ok=1 at=2026-09-26T19:43:06.152Z
+[PASS] T4b_overpay_with_change_legit :: expect=accept accepted=true :: e2d1c07edbf14a1077a996b1d91ef2e79ad8d56bf20e963dd0a8831c7559a7c8
+[diag:step] proc.silverc.compile.bshard-artifacts ms=18 cmd=silverc ok=1 at=2026-09-26T19:43:06.193Z
+[PASS] T5_change_diverted :: expect=reject accepted=false :: RPC Server (remote error) -> Rejected transaction 411bff116393a3eb3b860b52770be9877fe1fec051162df4f17d90a5851991a5: failed to verify the signature script: script ran, but verification failed
+[diag:step] proc.silverc.compile.bshard-artifacts ms=18 cmd=silverc ok=1 at=2026-09-26T19:43:06.230Z
+[PASS] T5b_extra_hidden_output :: expect=reject accepted=false :: RPC Server (remote error) -> Rejected transaction c2c3387e8b89775e256f07ab970f885ca21b913620bb7ea0e5d7e689d5078394: failed to verify the signature script: script ran, but verification failed
+[diag:step] proc.silverc.compile.bshard-artifacts ms=18 cmd=silverc ok=1 at=2026-09-26T19:43:06.269Z
+[PASS] T6_double_spend_same_utxo :: expect=reject accepted=false :: RPC Server (remote error) -> Rejected transaction 9bbfa378fce5ac8167e193235805fdbc40231b75fa925e04002c04ec94cd8cb2: transaction input #0 is not finalized
+[diag:step] proc.silverc.compile.bshard-artifacts ms=19 cmd=silverc ok=1 at=2026-09-26T19:43:06.312Z
+[PASS] T7_partial_outputs :: expect=reject accepted=false :: RPC Server (remote error) -> Rejected transaction eeb07565dff4fa44712c4a8f673ec46e505628afedeba2119609b509c2125264: failed to verify the signature script: transaction output 2 is out of bounds, should be non-negative below 1
+[diag:step] proc.silverc.compile.bshard-artifacts ms=19 cmd=silverc ok=1 at=2026-09-26T19:43:06.350Z
+[PASS] T8_reordered_outputs :: expect=reject accepted=false :: RPC Server (remote error) -> Rejected transaction 0daf690efbf654cd8a35892d373ea68be195b0d58e2bce5b1cfa2b3fb3a2ecf1: failed to verify the signature script: script ran, but verification failed
+[diag:step] proc.silverc.compile.bshard-artifacts ms=18 cmd=silverc ok=1 at=2026-09-26T19:43:06.388Z
+[PASS] T12_refund_before_deadline :: expect=reject accepted=false :: RPC Server (remote error) -> Rejected transaction aa4570e456be25505f6b503c9bd9e851f3bdeafaa594e4166ef54ad7a7d1b5ad: transaction input #0 is not finalized
+[diag:step] proc.silverc.compile.bshard-artifacts ms=20 cmd=silverc ok=1 at=2026-09-26T19:43:06.426Z
+[PASS] T13_dust_below_hard_threshold :: expect=reject accepted=false :: RPC Server (remote error) -> Rejected transaction 115be23e612bb5087bc693c61dfca12d072d1408be99f766e2cc967367273c60: transaction storage mass of 1005276 is larger than max allowed size of 500000
+[PASS] T14_dust_between_floor_and_hard_threshold :: expect=reject accepted=false :: LOCAL_THROW: createSplitProtocol: referrer 份额 5000000 < 运营下限 10000000——应并入 broker(设计稿§4.4 默认策略), 不是直接拒绝整单
+[diag:step] proc.silverc.compile.bshard-artifacts ms=17 cmd=silverc ok=1 at=2026-09-26T19:43:06.461Z
+  (follow-up) T17 independent spend of utxo#0 alone: {"transactionId":"a144e2fb16818275fd763abc4cc8739060a499b70691c958d785e114a60d7813"}
+[PASS] T17_multi_utxo_merge_reject :: expect=reject accepted=false :: RPC Server (remote error) -> Rejected transaction 9ce845544d9db9bb79749311ec4d3374cdca856c7827381b82c073c6b1964738: failed to verify the signature script: script ran, but verification failed
+[diag:step] proc.silverc.compile.bshard-artifacts ms=18 cmd=silverc ok=1 at=2026-09-26T19:43:06.511Z
+[PASS] T18a_boundary_e_eq_maxfee_hasChangeFalse :: expect=accept accepted=true :: 8294e8371ea912a8f289b181f6b1223383ebd1f691e81a853f40fffb3335ebb8
+[diag:step] proc.silverc.compile.bshard-artifacts ms=19 cmd=silverc ok=1 at=2026-09-26T19:43:06.562Z
+[PASS] T18b_boundary_e_eq_maxfee_hasChangeTrue_forced :: expect=reject accepted=false :: RPC Server (remote error) -> Rejected transaction beb9d369fcf6050e894972bd28eb527078f3b59b7edb32be14a32111afb25ed8: failed to verify the signature script: script ran, but verification failed
+[diag:step] proc.silverc.compile.bshard-artifacts ms=19 cmd=silverc ok=1 at=2026-09-26T19:43:06.598Z
+[PASS] T18c_boundary_e_eq_maxfeePlus1_hasChangeFalse_forced :: expect=reject accepted=false :: RPC Server (remote error) -> Rejected transaction 29d2ba4e16008e39e1c7cf65bfe1f1ca6d06ec9e66f4530e16d65d9543bdd76b: failed to verify the signature script: script ran, but verification failed
+
+=== SUMMARY ===
+PASS  T1_tamper_recipient_address  expect=reject accepted=false  RPC Server (remote error) -> Rejected transaction b126dfac5adfe48b63ed539b6474530922979aab49a4e5335f5188c3614bcf36: failed to verify the signature script: script ran, but verification failed
+PASS  T2_tamper_ratio_keep_sum  expect=reject accepted=false  RPC Server (remote error) -> Rejected transaction 3c7adffc2c16cecf96bead2f9ef652bdb4f227d10fa96dfb1bc696f6b4b64d81: failed to verify the signature script: script ran, but verification failed
+PASS  T3_underpay  expect=reject accepted=false  LOCAL_THROW: buildSplitTx: 资金不足(949000000 < recipientsTotal 950000000)——本地早失败, 对抗测试#3 少付情形
+PASS  T4_overpay_no_change_over_limit  expect=reject accepted=false  RPC Server (remote error) -> Rejected transaction 5fba1cb454b5c184725cac841821687bf9f4ba57da4b8be48c287dd125de4b5b: failed to verify the signature script: script ran, but verification failed
+PASS  T4b_overpay_with_change_legit  expect=accept accepted=true  e2d1c07edbf14a1077a996b1d91ef2e79ad8d56bf20e963dd0a8831c7559a7c8
+PASS  T5_change_diverted  expect=reject accepted=false  RPC Server (remote error) -> Rejected transaction 411bff116393a3eb3b860b52770be9877fe1fec051162df4f17d90a5851991a5: failed to verify the signature script: script ran, but verification failed
+PASS  T5b_extra_hidden_output  expect=reject accepted=false  RPC Server (remote error) -> Rejected transaction c2c3387e8b89775e256f07ab970f885ca21b913620bb7ea0e5d7e689d5078394: failed to verify the signature script: script ran, but verification failed
+PASS  T6_double_spend_same_utxo  expect=reject accepted=false  RPC Server (remote error) -> Rejected transaction 9bbfa378fce5ac8167e193235805fdbc40231b75fa925e04002c04ec94cd8cb2: transaction input #0 is not finalized
+PASS  T7_partial_outputs  expect=reject accepted=false  RPC Server (remote error) -> Rejected transaction eeb07565dff4fa44712c4a8f673ec46e505628afedeba2119609b509c2125264: failed to verify the signature script: transaction output 2 is out of bounds, should be non-negative below 1
+PASS  T8_reordered_outputs  expect=reject accepted=false  RPC Server (remote error) -> Rejected transaction 0daf690efbf654cd8a35892d373ea68be195b0d58e2bce5b1cfa2b3fb3a2ecf1: failed to verify the signature script: script ran, but verification failed
+PASS  T12_refund_before_deadline  expect=reject accepted=false  RPC Server (remote error) -> Rejected transaction aa4570e456be25505f6b503c9bd9e851f3bdeafaa594e4166ef54ad7a7d1b5ad: transaction input #0 is not finalized
+PASS  T13_dust_below_hard_threshold  expect=reject accepted=false  RPC Server (remote error) -> Rejected transaction 115be23e612bb5087bc693c61dfca12d072d1408be99f766e2cc967367273c60: transaction storage mass of 1005276 is larger than max allowed size of 500000
+PASS  T14_dust_between_floor_and_hard_threshold  expect=reject accepted=false  LOCAL_THROW: createSplitProtocol: referrer 份额 5000000 < 运营下限 10000000——应并入 broker(设计稿§4.4 默认策略), 不是直接拒绝整单
+PASS  T17_multi_utxo_merge_reject  expect=reject accepted=false  RPC Server (remote error) -> Rejected transaction 9ce845544d9db9bb79749311ec4d3374cdca856c7827381b82c073c6b1964738: failed to verify the signature script: script ran, but verification failed
+PASS  T18a_boundary_e_eq_maxfee_hasChangeFalse  expect=accept accepted=true  8294e8371ea912a8f289b181f6b1223383ebd1f691e81a853f40fffb3335ebb8
+PASS  T18b_boundary_e_eq_maxfee_hasChangeTrue_forced  expect=reject accepted=false  RPC Server (remote error) -> Rejected transaction beb9d369fcf6050e894972bd28eb527078f3b59b7edb32be14a32111afb25ed8: failed to verify the signature script: script ran, but verification failed
+PASS  T18c_boundary_e_eq_maxfeePlus1_hasChangeFalse_forced  expect=reject accepted=false  RPC Server (remote error) -> Rejected transaction 29d2ba4e16008e39e1c7cf65bfe1f1ca6d06ec9e66f4530e16d65d9543bdd76b: failed to verify the signature script: script ran, but verification failed
+
+17/17 PASS

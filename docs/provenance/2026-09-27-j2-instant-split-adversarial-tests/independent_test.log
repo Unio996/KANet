@@ -1,0 +1,14 @@
+[independent] connected, networkId= simnet
+[independent] compiling InstantSplit.sil independently via raw silverc CLI...
+[independent] bytecode length 552 entries {"refund":{"dispatch_tag":"777f5b11","params":[]},"split":{"dispatch_tag":"cc1c91af","params":[{"name":"hasChange","type":{"kind":"bool"}}]}}
+[independent] independently-derived order address: kaspasim:pqj9uuz2nnxp5ccswzuqu8ne4gf2z4ep2stfddsge0z36vlvsysuwj35zmh5n
+[independent] fund txid b7d966c577dbd6355e2d1b88ddcd81a32b5c8927b86b0e136610e479cff21948
+[independent] order utxo amt 955000000
+[T11 independent split] result: {"transactionId":"7eb3c2ce40ab63b7498257ee59130cf0a277f766d2868c0c8db4be1d924a096f"}
+[independent] second order address (for refund test) kaspasim:pzvpq7a78gvvcyw9qwdk88z9yggyayl87ra8nzpfpn8ay9jtrs2x2mr3hkzlz
+[independent] fund2 txid a9d8e77ace99099ee0eac115d61379072531c2aab5fdddf9f2cfcbca50148fa1
+[T10 independent refund] result: {"transactionId":"25775679c058b188ba5e180ad2d86841973dad57530f0aefe63d86dfd2d769dd"}
+
+=== INDEPENDENT THIRD-PARTY TEST SUMMARY ===
+T11 (independent split accept): PASS txid=7eb3c2ce40ab63b7498257ee59130cf0a277f766d2868c0c8db4be1d924a096f
+T10 (independent refund accept): PASS txid=25775679c058b188ba5e180ad2d86841973dad57530f0aefe63d86dfd2d769dd
