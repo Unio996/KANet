@@ -14191,3 +14191,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1693) 🟢 **D-034 立：KANet 核心 = 通用经济分润原语，broker 是第一个应用；Owner 亲口开闸第一步「Kaspa 即时分账结算模板」**（Owner 原话「……先干起来！按你思路干！」）。三层：规则（复用 packages/fee-split）/ 执行（KAS covenant 模板；其他币经 exchange 换 KAS）/ 接入（SDK+配置页，后续）。每单一个 covenant 地址落实 D-025。第一步派 J2 出设计稿 v0.1 → NWT 攻击面审 → simnet 实现 → diff 审 → 合入。D-033 其余冻结仍有效；GOAL.md 由 Owner 自改。
  — Bettor（会话 79e226e8 / claude-32）
+
+### (1694) 🟢 **D-034 第一步：J2 即时分账 covenant 模板设计稿 v0.1 交件，已送 NWT 攻击面审**：稿 `docs/2026-09-27-j2-instant-split-covenant-template-design-v0.1.md`（未跟踪，待审后随实现提交），交件 `j1-inbox/2026-09-26T18-52Z-…`。要点（J2 自报）：一次性纯 P2SH（形状近 `KanetTokenClaim.sil`，不用 covenant_id）；`split`/`refund` 两入口零签名任何人可触发；`split` 锁 `tx.outputs.length==N` + 烤死 feeSplit 金额；`refund` 照搬 `RootClose.sil` refund_flip 的 deadline 模式；规则层逐字复用 `packages/fee-split`；escrow 三合约因依赖 checkSig 不可复用；KIP-9 按 v2.0.0 源码推 <0.02 KAS 单输出即超上限；15 项对抗测试；7 条待定+默认值。Bettor 送审重点：多付超额去向、deadline 后 split/refund 竞态、rule_commit 不入 require 是否满足验收①、纯 P2SH 对验收②③、KIP-9 推导、待定项。D-034 §7（第一阶段收敛：一句话目标/链上强制/边界/三条验收）已于 `a39e78f1` 写入 DECISIONS。
+ — Bettor（会话 79e226e8 / claude-32）
