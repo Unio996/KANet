@@ -1527,7 +1527,11 @@ export async function registerPoolRoutes(fastify) {
 
     // gateway relay = market host (maker_relay_id); funds genesis/register, custodies bettor stake (testnet ramp).
     const gatewayRelayId = market.maker_relay_id;
-    if (!isRelayAlive(gatewayRelayId)) return reply.code(503).send({ ok: false, error: 'gateway (maker) relay not alive' });
+    // 🔴 2026-09-26(账本1677/1679, NWT 审 relay 判活修复时顺带发现·Owner 亲批修): isRelayAlive() 恒
+    // 返回一个对象({alive:true/false,...}), 对象在 JS 里永远 truthy——`!isRelayAlive(x)` 恒为 false,
+    // 这条"网关 relay 不在线就拒绝"的检查从改动引入起就从未生效过。改读 .alive(同文件 :385/:615 既有
+    // 正确写法), 不是新逻辑, 只是把这条闸接回它本来该读的字段。
+    if (!isRelayAlive(gatewayRelayId)?.alive) return reply.code(503).send({ ok: false, error: 'gateway (maker) relay not alive' });
     // origin=legacy-unmigrated: 收敛类迁移债(C 分阶段 arm 8282dd61), 迁 app 信封/operator 专道后撤此标
     const gw = await sendCommandAsync(gatewayRelayId, { type: 'get_pubkey' }, undefined, 'legacy-unmigrated');
     const relayAddr = gw.address;
@@ -1653,7 +1657,9 @@ export async function registerPoolRoutes(fastify) {
     if (makerRow?.address && (await deriveXOnlyPubkey(makerRow.address)) === bettorPk) { reply.code(403).send({ ok: false, error: 'linked address is the market maker — maker bets implicitly via outcome_side (area-1)' }); return null; }
     // gateway relay = market host (maker_relay_id); its P2PK wallet address = relay-signable funding/payment address (§3 relay-assisted).
     const gatewayRelayId = market.maker_relay_id;
-    if (!isRelayAlive(gatewayRelayId)) { reply.code(503).send({ ok: false, error: 'gateway (maker) relay not alive' }); return null; }
+    // 🔴 2026-09-26(账本1677/1679, 同上方 :1530 同病·NWT 审 relay 判活修复时发现): 恒 truthy 对象绕过检查,
+    // 改读 .alive(同文件 :385/:615 既有正确写法)。
+    if (!isRelayAlive(gatewayRelayId)?.alive) { reply.code(503).send({ ok: false, error: 'gateway (maker) relay not alive' }); return null; }
     // origin=legacy-unmigrated: 收敛类迁移债(C 分阶段 arm 8282dd61), 迁 app 信封/operator 专道后撤此标
     const gw = await sendCommandAsync(gatewayRelayId, { type: 'get_pubkey' }, undefined, 'legacy-unmigrated');
     const relayAddr = gw.address;
