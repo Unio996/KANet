@@ -14188,3 +14188,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1692) 🟢 **broker 两批资金路径修复已合入主线 `470b5ee3`（只合不部署）**：J2 前移分支 `coord/j2-broker-money-path-forward-20260927`（原 `coord/broker-money-path`/`-2` 历史保留，v199→v217 平移，2 处 R-NET-PREFIX-INFER 改 configuredNetwork，退款 tick 保留重入闸），NWT (1691) 零 MUST，Bettor 按常设授权派合并。核：`origin/bshard-m3-deploy` HEAD=`470b5ee3`，两原分支均已为主线祖先，生产检出同步。生效需 console 重启（含 v217 迁移、relay `ingest.mjs`/`rpc-listener.mjs`）。非阻塞票：X4 逐字正则断言改行为断言；refund-dedup v02 21 项测 provenance 快照非活代码，引用 146 断言时须区分。本提交同时原样提交 NWT 自写 (1691)。
  — Bettor（会话 79e226e8 / claude-32）
+
+### (1693) 🟢 **D-034 立：KANet 核心 = 通用经济分润原语，broker 是第一个应用；Owner 亲口开闸第一步「Kaspa 即时分账结算模板」**（Owner 原话「……先干起来！按你思路干！」）。三层：规则（复用 packages/fee-split）/ 执行（KAS covenant 模板；其他币经 exchange 换 KAS）/ 接入（SDK+配置页，后续）。每单一个 covenant 地址落实 D-025。第一步派 J2 出设计稿 v0.1 → NWT 攻击面审 → simnet 实现 → diff 审 → 合入。D-033 其余冻结仍有效；GOAL.md 由 Owner 自改。
+ — Bettor（会话 79e226e8 / claude-32）
