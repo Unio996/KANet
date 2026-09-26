@@ -1,34 +1,24 @@
-// verify-shardleaf-scripts.mjs — D-020 移植到 ShardLeaf.sil 的决定性验证（Owner 批准 · NWT 攻击面审
-// v0.1 通过 · MUST-1 量测缺口的落地）。
+// verify-shardleaf-scripts.mjs — 方向A形状决定性验证（2026-09-26 改版，取代 D-020 单代币旧形状）。
 //
-// 姊妹脚本 scripts/verify-shardleaf-direct-scripts.mjs 的同款方法论，改指向真正在生产路径上编译/使用的
-// ShardLeaf.sil（不是 ShardLeaf_direct.sil——见 docs/iteration/j1-inbox/2026-09-23T14-38Z-j2-URGENT-...md，
-// pool-shard-register.mjs 的 compileShardLeafRedeem 硬编码走 ShardLeaf.sil，两个文件是不同合约）。
+// 🔴 改版理由：方向A(Owner批·NWT审零MUST·账本1663-1668)落地后，register_append 的真实形状变成
+// "首笔=消费1个chip输入，续笔=消费[held,chip]2个输入"——旧版脚本经 proto-v0 的
+// buildRegisterAppendTxJson/heldInput 构造的是方向A之前的"首笔无输入/续笔1个held输入"旧形状，
+// 自 commit 7b12aa25(ShardLeaf.sil 的 owned_total 改成 pool_value+stake)起就已经跟当前合约逻辑
+// 不匹配（旧形状首笔 owned_total=0 但 pool_value+stake>0，必然 FAIL——这不是本次改版引入的新问题，
+// 是既有失效，见 ece2abec 那笔 commit message 的说明）。
 //
-// 为什么需要这个脚本（同姊妹脚本理由，不复述全文）：kaspa-wasm 不导出本地脚本执行引擎，JS 测试结构性地
-// 无法验证"这笔真实构造出的交易，喂给真实 silverscript VM 执行 register_append 这条 covenant 逻辑，到底
-// 会不会通过"——唯一能做到这件事、且跟节点 consensus 用同一份 kaspa-txscript 引擎的工具是 cli-debugger
-// （D-019 pin 同一个 commit 3ed9733）。
+// 本改版不再依赖 proto-v0 的交易组装原语（buildMarketGenesisTxJson/buildRegisterAppendTxJson）——
+// 直接复用生产 kasia-relay/src/lib/p2sh.mjs 的可测性导出(_encodeRegisterAppendAction/
+// _encodeKttTransferZeroOutAction/_serializeLeafStateHex/_continuationAddress/_addressFromRedeem)
+// 和生产 kasia-console/src/lib/pool-bshard-artifacts.mjs 的 computeKttTokenArtifact/
+// computePoolSideTicketArtifact，手写组装 cli-debugger 的 test.json 输入/输出（不经过完整
+// kaspa-wasm Transaction 对象——跟本仓这次方向A排障过程中反复验证过的手法一致：cli-debugger 的
+// covenant 内省需要测试作者显式声明每个 covenant 输入的 covenant_id，真实 consensus 用同一份
+// pure function(kaspa.covenantId)计算，不依赖是否调用过 populateGenesisCovenants）。
 //
-// 🔴 NWT MUST-1（docs/iteration/j1-inbox/2026-09-23T16-14Z-nwt-VERDICT-...md）：OWN_PREFIX_LEN(=1)/
-// OWN_STATE_LEN(=36) 两个常量必须按 ShardLeaf.sil *这份文件自己的* D-020 移植后编译产物重新量测，不能
-// 沿用文档里写的旧数字（哪怕结构性推理认为大概率不变）。本脚本用 compileSilV100 真实编译（非猜测）取
-// compiled.state_layout.{start,len}，打印实测值——与源码里手写的常量做交叉核对，不一致会在编译/执行阶段
-// 直接暴露（redeem 地址算不对）。
-//
-// 🔴 proto-v0 依赖说明（读者/审阅者请先读这条，2026-09-23）：本脚本 import 了 proto-tx-assembly.mjs 的
-// buildMarketGenesisTxJson/buildRegisterAppendTxJson 和 proto-covenant-builder.mjs 的
-// computeKttGenesisArtifact/computeTicketGenesisArtifact/loadProtocolConstants——这些函数本身是
-// **合约无关的通用交易组装/模板计算原语**（参数化接收 redeem 脚本/ABI/ctor，没有硬编码 ShardLeaf_direct
-// 专属业务逻辑），跟姊妹脚本 verify-shardleaf-direct-scripts.mjs 复用它们的方式完全一致（既有先例，非本
-// 脚本首创）。D-033 冻结的是"改动/审/测 proto-v0 本身"，不是禁止把它已验证过的通用工具函数当只读依赖用
-// 在验证别的合约上——但 proto-v0 迟早整体删除（D-033），这份依赖是**一次性验证脚本的已知技术债**，不是
-// 生产代码的依赖形状；生产代码（pool-shard-register.mjs/pool-register-builder.mjs/relay p2sh.mjs）不
-// import 任何 proto-* 文件，各自独立实现（照抄同一套已验证的编码/组装模式，不共享导入）。
-//
-// 用法同姊妹脚本：
+// 用法同旧版：
 //   node scripts/verify-shardleaf-scripts.mjs                          # 只生成 .test.json，不跑 debugger
-//   CLI_DEBUGGER_PATH=/d/silverscript/versioned-builds/cli-debugger-v100-3ed9733.exe \
+//   CLI_DEBUGGER_PATH=D:/silverscript/versioned-builds/cli-debugger-v100-3ed9733.exe \
 //     node scripts/verify-shardleaf-scripts.mjs                        # 生成 + 真跑 debugger，断言 PASS
 
 import { writeFileSync, mkdtempSync } from 'node:fs';
@@ -36,57 +26,55 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { blake2b } from '@noble/hashes/blake2b';
 
 if (!process.env.DB_PATH) process.env.DB_PATH = join(mkdtempSync(join(tmpdir(), 'j2-sl-verify-')), 'console.db');
 if (!process.env.CONSOLE_ENCRYPTION_KEY) process.env.CONSOLE_ENCRYPTION_KEY = '1'.repeat(64);
 
 const kaspa = await import('kaspa-wasm');
-// 通用交易组装原语（proto-v0，只读复用，见上方"proto-v0 依赖说明"）。
-const { buildMarketGenesisTxJson, buildRegisterAppendTxJson } = await import('../src/lib/proto-tx-assembly.mjs');
-const { computeKttGenesisArtifact, computeTicketGenesisArtifact, loadProtocolConstants } = await import('../src/lib/proto-covenant-builder.mjs');
-// ShardLeaf.sil 专属的 redeem/收敛逻辑——本仓自己实现（不 import proto-v0），见 pool-shard-register.mjs。
+const {
+  compileSilV100, ctorBytes32V100, ctorIntV100,
+  computeKttTokenArtifact, computePoolSideTicketArtifact, assertSilvercV100Pinned,
+} = await import('../src/lib/pool-bshard-artifacts.mjs');
 const { convergeShardLeafOwnRedeemLen, compileShardLeafRedeem } = await import('../src/lib/pool-shard-register.mjs');
-const { signOnlyDeclaredInputs } = await import('../../kasia-relay/src/lib/covenant-broadcast.mjs');
+const {
+  _encodeRegisterAppendAction, _encodeKttTransferZeroOutAction,
+  _serializeLeafStateHex, _continuationAddress, _addressFromRedeem,
+} = await import('../../kasia-relay/src/lib/p2sh.mjs');
 
 const SIL_PATH = new URL('../src/lib/ShardLeaf.sil', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
+const NETWORK = 'simnet';
 
 function asHex(v) { if (typeof v === 'string') return v.startsWith('0x') ? v : '0x' + v; return '0x' + Buffer.from(v).toString('hex'); }
-function txToDebuggerShape(tx, activeIdx, covenantIdHex) {
-  const inputs = [];
-  for (let i = 0; i < tx.inputs.length; i++) {
-    const inp = tx.inputs[i];
-    const entry = { utxo_value: Number(inp.utxo.amount), utxo_script_hex: asHex(inp.utxo.scriptPublicKey.script), signature_script_hex: asHex(inp.signatureScript) };
-    if (i === activeIdx && covenantIdHex) entry.covenant_id = '0x' + covenantIdHex;
-    inputs.push(entry);
-  }
-  const outputs = [];
-  for (let i = 0; i < tx.outputs.length; i++) {
-    const out = tx.outputs[i];
-    outputs.push({ value: Number(out.value), script_hex: asHex(out.scriptPublicKey.script) });
-  }
-  return { inputs, outputs };
+function combineActionAndRedeem(actionHex, redeemHex) {
+  const b = kaspa.ScriptBuilder.fromScript(actionHex, { flags: { covenantsEnabled: true } });
+  b.addData(new Uint8Array(Buffer.from(redeemHex.replace(/^0x/, ''), 'hex')));
+  return '0x' + b.drain().replace(/^0x/, '');
+}
+// covenant_id 是纯函数(funding_outpoint, [{index,output}]) → 32B hash，不依赖是否调用过
+// populateGenesisCovenants(那只是给 JS 侧提前算出/绑定这个值的手段，consensus 侧算法本身跟这个无关)——
+// 本脚本给每个"新铸"的 covenant 实例(leaf genesis/chip)各自现算一个真实、彼此不同的 covenant_id，
+// 用假的(但每次不同的)funding outpoint，真实反映"两个独立铸出的实例天然属于不同的 covenant_id 组"
+// 这件事(方向A 撤销 leader/delegate 分流的根据，见 ShardLeaf.sil 头注/p2sh.mjs 头注)。
+function fakeGenesisCovId(scriptPubKeyHex, valueSompi) {
+  const outpoint = { transactionId: randomBytes(32).toString('hex'), index: 0 };
+  const spk = new kaspa.ScriptPublicKey(0, scriptPubKeyHex.replace(/^0x/, ''));
+  const output = new kaspa.TransactionOutput(BigInt(valueSompi), spk);
+  return String(kaspa.covenantId(outpoint, [{ index: 0, output }]));
 }
 
-function runDebugger(testFile, testName) {
+function runDebugger(testFile, testName, silPath = SIL_PATH) {
   const debuggerPath = process.env.CLI_DEBUGGER_PATH;
   if (!debuggerPath) {
     console.log(`  [跳过真实执行] CLI_DEBUGGER_PATH 未设置, 只生成了 ${testFile} —— 如实说明: 本次未真正验证, 不假装通过。`);
     return null;
   }
   try {
-    const out = execFileSync(debuggerPath, [SIL_PATH, '--run', '--test-name', testName, '--test-file', testFile], { encoding: 'utf8', timeout: 30000 });
+    const out = execFileSync(debuggerPath, [silPath, '--run', '--test-name', testName, '--test-file', testFile], { encoding: 'utf8', timeout: 30000 });
     return { ok: /(^|\n)PASS/.test(out), out };
   } catch (e) {
     return { ok: false, out: (e.stdout || '') + (e.stderr || '') + e.message };
   }
 }
-
-const priv = new kaspa.PrivateKey(randomBytes(32).toString('hex'));
-const relayAddr = priv.toPublicKey().toAddress('mainnet');
-const relaySpk = kaspa.payToAddressScript(relayAddr);
-const relaySpkHex = '0x' + relaySpk.script;
-const { ps_tmpl_hash, token_tmpl_hash, ps_prefix, ps_suffix, token_prefix, token_suffix } = loadProtocolConstants();
 
 // 🔴 同姊妹脚本账本1469理由: 3 组 ctor 组合，覆盖 seal_count/min_bet 的不同 minimal-push 编码宽度门槛。
 const CTOR_CASES = [
@@ -95,145 +83,216 @@ const CTOR_CASES = [
   { label: 'sc2_mb2p40', sealCount: 2, minBet: 2 ** 40 },
 ];
 
-// debugger 的 ctor 参数顺序须与 ShardLeaf.sil 的 13-参数 ctor 逐一对应（本轮 D-020 移植新增 own_redeem_len
-// 在末位；payout_cov_id/deadline 在 min_bet 之后、token_tmpl_hash 之前——与 ShardLeaf_direct 的
-// rootclose_tmpl_hash/rootclose_init_payoutRoot 位置一致，语义不同）。
-function debuggerCtorArgsFor({ marketId, sealCount, minBet, payoutCovId, deadline, ownRedeemLen }, state0) {
-  return [
-    '0x' + marketId, '0x' + ps_tmpl_hash, '0x' + marketId,
-    sealCount, minBet, '0x' + payoutCovId, deadline,
-    '0x' + token_tmpl_hash, state0.local_yes, state0.local_no, state0.count, state0.pool_value,
-    ownRedeemLen,
+const FUNDING_VALUE = 200_000_000n;
+const LEAF_SEED = 20_000_000n;
+const TOK_DUST = 20_000_000n;
+const TICKET_DUST = 1_000_000n;
+
+// leaf 自己的 register_append dispatch_tag —— 编译期结构性常量(跟 ctor 值无关)，用任意合法占位 ctor 编译
+// ShardLeaf 一次取出即可(同 pool-shard-register.mjs 内 _shardLeafRegisterAppendDispatchTag 的做法，不
+// import 私有 helper——这是一行提取，不是会漂移的业务逻辑，跟着 .sil 变了会在 cli-debugger 阶段直接暴露)。
+function shardLeafRegisterAppendDispatchTag(tokenTmplHash) {
+  const zeroState = { local_yes: 0, local_no: 0, count: 0, pool_value: 0 };
+  const { ownRedeemLen } = convergeShardLeafOwnRedeemLen({
+    marketIdHash: '00'.repeat(32), psTmplHashHex: '11'.repeat(32), shardPoolId: '00'.repeat(32),
+    sealCount: 2, payoutCovId: '22'.repeat(32), deadline: Math.floor(Date.now() / 1000) + 1000,
+    tokenTmplHash, state: zeroState,
+  });
+  const ctor = [
+    ctorBytes32V100('00'.repeat(32)), ctorBytes32V100('11'.repeat(32)), ctorBytes32V100('00'.repeat(32)),
+    ctorIntV100(2), ctorIntV100(100000), ctorBytes32V100('22'.repeat(32)), ctorIntV100(Math.floor(Date.now() / 1000) + 1000),
+    ctorBytes32V100(tokenTmplHash),
+    ctorIntV100(0), ctorIntV100(0), ctorIntV100(0), ctorIntV100(0),
+    ctorIntV100(ownRedeemLen),
   ];
+  const compiled = compileSilV100(SIL_PATH, ctor, 'ShardLeaf');
+  const tag = compiled._raw.contracts.ShardLeaf.entries.register_append?.dispatch_tag;
+  if (!tag) throw new Error('shardLeafRegisterAppendDispatchTag: 编译产物缺 entries.register_append.dispatch_tag');
+  return tag;
 }
 
-async function buildAndVerifyBet({ ctorCase, label, leafOutpoint, leafCovId, currentState, side, stake, heldInput }) {
-  const { marketId, sealCount, minBet, payoutCovId, deadline, ownRedeemLen } = ctorCase;
+// 🔴 NWT MUST-1(2026-09-26, j1-inbox 2026-09-26T10-07Z-nwt-VERDICT-j2-4d85dd12): OWN_PREFIX_LEN/
+// OWN_STATE_LEN 必须按*这次真实调用的 ctor*现编现测(compiled.state_layout.{start,len})，不能拿写死的
+// {1,36} 顶替打印——那等于宣称一个没测过的结论。本函数真实编译一次(跟 compileShardLeafRedeem 内部做的
+// 事完全同源，只是这里额外把 state_layout 取出来供汇总断言用，不是另一条可能漂移的路径)。
+function measureStateLayout({ marketIdHash, psTmplHashHex, shardPoolId, sealCount, minBet, payoutCovId, deadline, tokenTmplHash, state, ownRedeemLen }) {
+  const ctor = [
+    ctorBytes32V100(marketIdHash), ctorBytes32V100(psTmplHashHex), ctorBytes32V100(shardPoolId),
+    ctorIntV100(sealCount), ctorIntV100(minBet), ctorBytes32V100(payoutCovId), ctorIntV100(deadline),
+    ctorBytes32V100(tokenTmplHash),
+    ctorIntV100(state.local_yes), ctorIntV100(state.local_no), ctorIntV100(state.count), ctorIntV100(state.pool_value),
+    ctorIntV100(ownRedeemLen),
+  ];
+  const compiled = compileSilV100(SIL_PATH, ctor, 'ShardLeaf');
+  if (!compiled.state_layout) throw new Error('measureStateLayout: 编译产物缺 state_layout');
+  return { start: compiled.state_layout.start, len: compiled.state_layout.len };
+}
+
+// 构造一笔 register_append 交易的 test.json 形状(leaf + [held]? + chip? + fee)，返回
+// { inputs, outputs, leafSig, tokenSig, chipSig } 供 cli-debugger 逐 active_input 验证。
+function buildRegisterAppendShape({
+  ctorCase, marketId, payoutCovId, deadline, ownRedeemLen, tokenTmplHash, psTmplHashHex,
+  leafRedeemHex, leafCovId, currentState, side, stake, heldArtifact, registerAppendDispatchTag,
+  shardPoolId, bettorPk,
+}) {
   const newState = {
     local_yes: currentState.local_yes + (side === 0 ? stake : 0),
     local_no: currentState.local_no + (side === 1 ? stake : 0),
     count: currentState.count + 1,
     pool_value: currentState.pool_value + stake,
   };
-  const leafRedeemHex = compileShardLeafRedeem({
-    marketIdHash: marketId, psTmplHashHex: ps_tmpl_hash, shardPoolId: marketId, sealCount, payoutCovId, deadline,
-    localYes: currentState.local_yes, localNo: currentState.local_no, count: currentState.count, poolValue: currentState.pool_value,
-    tokenTmplHash: token_tmpl_hash, ownRedeemLen,
-  });
-  const leafRedeem = Buffer.from(leafRedeemHex, 'hex');
-  // 真实取 entryAbi: 用同一 ctor 重编一次(与 compileShardLeafRedeem 内部编译共享 silverc 磁盘 cache, 无额外真实开销)。
-  const { compileSilV100, ctorBytes32V100, ctorIntV100 } = await import('../src/lib/pool-bshard-artifacts.mjs');
-  const fullCtor = [
-    ctorBytes32V100(marketId), ctorBytes32V100(ps_tmpl_hash), ctorBytes32V100(marketId),
-    ctorIntV100(sealCount), ctorIntV100(minBet), ctorBytes32V100(payoutCovId), ctorIntV100(deadline),
-    ctorBytes32V100(token_tmpl_hash),
-    ctorIntV100(currentState.local_yes), ctorIntV100(currentState.local_no), ctorIntV100(currentState.count), ctorIntV100(currentState.pool_value),
-    ctorIntV100(ownRedeemLen),
-  ];
-  const compiled = compileSilV100(SIL_PATH, fullCtor, 'ShardLeaf');
-  const registerAppendEntryAbi = compiled._raw.contracts.ShardLeaf.entries.register_append;
-  const leafStateLayout = { start: compiled.state_layout.start, len: compiled.state_layout.len };
-  const bettorPk = randomBytes(32).toString('hex');
-  const ticketArtifact = computeTicketGenesisArtifact({ bettorPk, direction: side, stake, shardPoolId: marketId });
-  const mergedKttArtifact = computeKttGenesisArtifact({ amount: newState.pool_value, ownerCovIdHex: leafCovId });
+  const psArtifact = computePoolSideTicketArtifact({ bettorPk, direction: side, stake, shardPoolId });
+  const chipArtifact = computeKttTokenArtifact({ amount: stake, ownerCovIdHex: leafCovId });
+  const tokContArtifact = computeKttTokenArtifact({ amount: newState.pool_value, ownerCovIdHex: leafCovId });
 
-  const built = buildRegisterAppendTxJson({
-    kaspa, network: 'mainnet',
-    leafRedeemScript: leafRedeem, leafStateLayout, leafOutpoint, leafCovId,
-    currentState, newState, heldInput,
-    feeUtxo: { txid: randomBytes(32).toString('hex'), vout: 0, value: 95_000_000n, scriptPublicKeyHex: relaySpkHex },
-    relayChangeScriptPublicKeyHex: relaySpkHex,
-    registerAppendEntryAbi,
-    registerAppendArgs: { side, stake, bettorPk: '0x' + bettorPk, psPrefix: '0x' + ps_prefix, psSuffix: '0x' + ps_suffix, tokPrefix: '0x' + token_prefix, tokSuffix: '0x' + token_suffix },
-    ticketScriptPubKeyHex: ticketArtifact.scriptPubKeyHex, mergedKttScript: mergedKttArtifact.script, absFeeCapSompi: 100_000_000n,
-  });
+  const leafOutIdx = 0, psOutIdx = 1, tokOutIdx = 2;
+  const witness = {
+    side, stake, leaf_out_idx: leafOutIdx, ps_out_idx: psOutIdx, bettor_pk: bettorPk,
+    ps_prefix_hex: psArtifact.templatePrefix.toString('hex'), ps_suffix_hex: psArtifact.templateSuffix.toString('hex'),
+    tok_out_idx: tokOutIdx, tok_prefix_hex: tokContArtifact.templatePrefix.toString('hex'), tok_suffix_hex: tokContArtifact.templateSuffix.toString('hex'),
+    dispatch_tag_hex: registerAppendDispatchTag,
+  };
+  const leafSig = combineActionAndRedeem(_encodeRegisterAppendAction(witness), leafRedeemHex);
+  const tokenSig = heldArtifact
+    ? combineActionAndRedeem(_encodeKttTransferZeroOutAction(heldArtifact.entryAbi.dispatch_tag, heldArtifact.stateFieldCount, [0]), heldArtifact.script.toString('hex'))
+    : null;
+  const chipSig = combineActionAndRedeem(_encodeKttTransferZeroOutAction(chipArtifact.entryAbi.dispatch_tag, chipArtifact.stateFieldCount, [0]), chipArtifact.script.toString('hex'));
 
-  const tx = kaspa.Transaction.deserializeFromSafeJSON(built.txJson);
-  signOnlyDeclaredInputs({ tx, signInputIndices: built.signInputIndices, privateKey: priv, kaspa });
-  tx.finalize();
-  const shape = txToDebuggerShape(tx, 0, leafCovId);
-  const tokOutIdx = 2;
-  const testName = `VERIFY_${label}`;
-  const test = { tests: [{
-    name: testName, function: 'register_append', constructor_args: debuggerCtorArgsFor(ctorCase, currentState),
-    args: [side, stake, 0, 1, '0x' + bettorPk, '0x' + ps_prefix, '0x' + ps_suffix, tokOutIdx, '0x' + token_prefix, '0x' + token_suffix],
-    expect: 'pass',
-    tx: { active_input_index: 0, inputs: shape.inputs, outputs: shape.outputs },
-  }] };
-  const testFile = join(mkdtempSync(join(tmpdir(), 'j2-sl-verify-testjson-')), `ShardLeaf.${label}.test.json`);
-  writeFileSync(testFile, JSON.stringify(test, null, 2));
-  console.log(`[${label}] own_redeem_len=${ownRedeemLen} state_span={start:${leafStateLayout.start},len:${leafStateLayout.len}} wrote ${testFile} (ninputs=${shape.inputs.length}, noutputs=${shape.outputs.length})`);
-  const result = runDebugger(testFile, testName);
-  if (result) {
-    console.log(result.ok ? `  ✅ [${label}] cli-debugger: PASS` : `  ❌ [${label}] cli-debugger: FAIL\n${result.out}`);
+  const leafCovIdHex = '0x' + leafCovId;
+  const chipCovId = fakeGenesisCovId(chipArtifact.scriptPubKeyHex, TOK_DUST);
+  const inputs = [];
+  inputs.push({ utxo_value: Number(LEAF_SEED), utxo_script_hex: '0x' + leafRedeemToSpkHex(leafRedeemHex), signature_script_hex: leafSig, covenant_id: leafCovIdHex });
+  if (heldArtifact) {
+    inputs.push({ utxo_value: Number(TOK_DUST), utxo_script_hex: heldArtifact.scriptPubKeyHex, signature_script_hex: tokenSig, covenant_id: '0x' + heldArtifact.covId });
   }
-  return { newState, built, result, leafStateLayout };
+  inputs.push({ utxo_value: Number(TOK_DUST), utxo_script_hex: chipArtifact.scriptPubKeyHex, signature_script_hex: chipSig, covenant_id: '0x' + chipCovId });
+  inputs.push({ utxo_value: Number(FUNDING_VALUE), utxo_script_hex: '0x' + '20' + '00'.repeat(32) + 'ac', signature_script_hex: '0x' }); // fee: 占位 P2PK, 非 active 不会被真执行
+
+  const newLeafAddr = _continuationAddress(leafRedeemHex, _serializeLeafStateHex(newState), NETWORK);
+  const ticketAddr = _addressFromRedeem(psArtifact.script.toString('hex'), NETWORK);
+  const tokContAddr = _addressFromRedeem(tokContArtifact.script.toString('hex'), NETWORK);
+  const tokOutValue = heldArtifact ? Number(TOK_DUST) * 2 : Number(TOK_DUST);
+  const outputs = [];
+  outputs[leafOutIdx] = { value: Number(LEAF_SEED), script_hex: '0x' + addrToSpkHex(newLeafAddr) };
+  outputs[psOutIdx] = { value: Number(TICKET_DUST), script_hex: '0x' + addrToSpkHex(ticketAddr) };
+  outputs[tokOutIdx] = { value: tokOutValue, script_hex: '0x' + addrToSpkHex(tokContAddr) };
+  outputs.push({ value: Number(FUNDING_VALUE) - Number(LEAF_SEED) - Number(TICKET_DUST) - tokOutValue - 15_000_000, script_hex: '0x' + '20' + '00'.repeat(32) + 'ac' });
+
+  return { inputs, outputs, newState, chipArtifact, tokContArtifact, psArtifact, leafOutIdx, psOutIdx, tokOutIdx };
 }
 
-console.log('=== ShardLeaf.sil genesis + register_append 真实生产构造(D-020移植后, 3组ctor × 首笔/次笔) → cli-debugger 真执行验证 ===');
-console.log(`silverc v1.0.0 pin: ${(await (await import('../src/lib/pool-bshard-artifacts.mjs')).assertSilvercV100Pinned(process.env.SILVERC_V100_PATH || 'D:/silverscript/versioned-builds/silverc-v100-3ed9733.exe')).sha256}`);
+function leafRedeemToSpkHex(redeemHex) { return addrToSpkHex(_addressFromRedeem(redeemHex, NETWORK)); }
+function addrToSpkHex(addrStr) {
+  const spk = kaspa.payToAddressScript(new kaspa.Address(addrStr));
+  return spk.script.replace(/^0x/, '');
+}
+
+console.log('=== ShardLeaf.sil 方向A形状真实生产构造(3组ctor × 首笔单chip/续笔[held,chip]) → cli-debugger 真执行验证 ===');
+console.log(`silverc v1.0.0 pin: ${(await assertSilvercV100Pinned(process.env.SILVERC_V100_PATH || 'D:/silverscript/versioned-builds/silverc-v100-3ed9733.exe')).sha256}`);
 console.log(`cli-debugger path: ${process.env.CLI_DEBUGGER_PATH || '(未设置, 只生成 test.json)'}`);
 
 const allResults = [];
 const allStateLayouts = [];
+const tokenTmplHashProbe = computeKttTokenArtifact({ amount: 1, ownerCovIdHex: '00'.repeat(32) }).templateHashHex;
+const registerAppendDispatchTag = shardLeafRegisterAppendDispatchTag(tokenTmplHashProbe);
+
 for (const c of CTOR_CASES) {
   const marketId = randomBytes(32).toString('hex');
   const payoutCovId = randomBytes(32).toString('hex');
   const deadline = 1700000000;
+  const bettorPk = randomBytes(32).toString('hex');
   const zeroState = { local_yes: 0, local_no: 0, count: 0, pool_value: 0 };
+  const psTmplHashProbe = computePoolSideTicketArtifact({ bettorPk: '00'.repeat(32), direction: 0, stake: 1, shardPoolId: '00'.repeat(32) }).templateHashHex;
+
   const { ownRedeemLen } = convergeShardLeafOwnRedeemLen({
-    marketIdHash: marketId, psTmplHashHex: ps_tmpl_hash, shardPoolId: marketId, sealCount: c.sealCount, minBet: c.minBet,
-    payoutCovId, deadline, tokenTmplHash: token_tmpl_hash, state: zeroState,
+    marketIdHash: marketId, psTmplHashHex: psTmplHashProbe, shardPoolId: marketId, sealCount: c.sealCount, minBet: c.minBet,
+    payoutCovId, deadline, tokenTmplHash: tokenTmplHashProbe, state: zeroState,
   });
-  const ctorCase = { ...c, marketId, payoutCovId, deadline, ownRedeemLen };
   console.log(`\n--- ctor组合 ${c.label}(seal_count=${c.sealCount}, min_bet=${c.minBet}) 收敛 own_redeem_len=${ownRedeemLen} ---`);
 
-  const leafRedeemGenesisHex = compileShardLeafRedeem({
-    marketIdHash: marketId, psTmplHashHex: ps_tmpl_hash, shardPoolId: marketId, sealCount: c.sealCount, payoutCovId, deadline,
-    localYes: 0, localNo: 0, count: 0, poolValue: 0, tokenTmplHash: token_tmpl_hash, ownRedeemLen,
+  const leafRedeemHex = compileShardLeafRedeem({
+    marketIdHash: marketId, psTmplHashHex: psTmplHashProbe, shardPoolId: marketId, sealCount: c.sealCount, payoutCovId, deadline,
+    localYes: 0, localNo: 0, count: 0, poolValue: 0, tokenTmplHash: tokenTmplHashProbe, ownRedeemLen,
   });
-  // P2SH scriptPubKey = OP_BLAKE2B(0xaa) PUSH32(0x20) <blake2b(redeem)> OP_EQUAL(0x87) — 同 proto-covenant-builder.mjs
-  // 本地 p2sh() 一字不差的公式（1 行 blake2b 组装，不值得为此再 import 一个 proto-v0 文件）。
-  const leafRedeemGenesisScriptPubKeyHex = '0x' + 'aa20' + Buffer.from(blake2b(Buffer.from(leafRedeemGenesisHex, 'hex'), { dkLen: 32 })).toString('hex') + '87';
-  const genesis = buildMarketGenesisTxJson({
-    kaspa, network: 'mainnet', feeUtxo: { txid: randomBytes(32).toString('hex'), vout: 0, value: 50_000_000n, scriptPublicKeyHex: relaySpkHex },
-    relayChangeScriptPublicKeyHex: relaySpkHex, shardLeafScriptPubKeyHex: leafRedeemGenesisScriptPubKeyHex, absFeeCapSompi: 80_000_000n,
-  });
-  const genesisTx = kaspa.Transaction.deserializeFromSafeJSON(genesis.txJson);
-  const leafOutpoint = { txid: genesisTx.id, vout: 0 };
-  const leafCovId = genesis.shardLeafCovId;
+  const leafSpkHex = leafRedeemToSpkHex(leafRedeemHex);
+  const leafCovId = fakeGenesisCovId('0x' + leafSpkHex, LEAF_SEED);
 
-  const first = await buildAndVerifyBet({
-    ctorCase, label: `${c.label}_first_bet_no_held`, leafOutpoint, leafCovId,
-    currentState: zeroState, side: 0, stake: c.minBet, heldInput: null,
-  });
-  allStateLayouts.push(first.leafStateLayout);
+  function verifyOne(label2, activeIdx, fn, silPath = SIL_PATH) {
+    const testName = `VERIFY_${label2}`;
+    const test = { tests: [{ name: testName, function: fn.name, constructor_args: fn.ctor, args: fn.args, expect: 'pass', tx: { active_input_index: activeIdx, inputs: fn.inputs, outputs: fn.outputs } }] };
+    const testFile = join(mkdtempSync(join(tmpdir(), 'j2-sl-verify-testjson-')), `${label2}.test.json`);
+    writeFileSync(testFile, JSON.stringify(test, null, 2));
+    const result = runDebugger(testFile, testName, silPath);
+    if (result) console.log(result.ok ? `  ✅ [${label2}] cli-debugger: PASS` : `  ❌ [${label2}] cli-debugger: FAIL\n${result.out}`);
+    else console.log(`  [${label2}] wrote ${testFile}`);
+    allResults.push(result);
+    return result;
+  }
 
-  const heldArtifact = computeKttGenesisArtifact({ amount: first.newState.pool_value, ownerCovIdHex: leafCovId });
-  const second = await buildAndVerifyBet({
-    ctorCase, label: `${c.label}_second_bet_with_held`, leafOutpoint, leafCovId,
-    currentState: first.newState, side: 1, stake: c.minBet, heldInput: {
-      txid: first.built.expectedTxid, vout: 2, value: 20_000_000n, scriptPublicKeyHex: heldArtifact.scriptPubKeyHex,
-      redeemScript: heldArtifact.script, entryAbi: heldArtifact.entryAbi, stateFieldCount: heldArtifact.stateFieldCount,
-    },
+  // ── 首笔(无 held, 只有 chip) ──
+  const first = buildRegisterAppendShape({
+    ctorCase: c, marketId, payoutCovId, deadline, ownRedeemLen, tokenTmplHash: tokenTmplHashProbe, psTmplHashHex: psTmplHashProbe,
+    leafRedeemHex, leafCovId, currentState: zeroState, side: 0, stake: c.minBet, heldArtifact: null, registerAppendDispatchTag,
+    shardPoolId: marketId, bettorPk,
   });
-  allStateLayouts.push(second.leafStateLayout);
+  const firstLayout = measureStateLayout({ marketIdHash: marketId, psTmplHashHex: psTmplHashProbe, shardPoolId: marketId, sealCount: c.sealCount, minBet: c.minBet, payoutCovId, deadline, tokenTmplHash: tokenTmplHashProbe, state: zeroState, ownRedeemLen });
+  console.log(`  [${c.label}_first] 真实编译实测 state_layout={start:${firstLayout.start},len:${firstLayout.len}}`);
+  allStateLayouts.push(firstLayout);
+  const registerCtorArgsFirst = debuggerRegisterCtor({ marketId, psTmplHashHex: psTmplHashProbe, sealCount: c.sealCount, minBet: c.minBet, payoutCovId, deadline, tokenTmplHash: tokenTmplHashProbe, state: zeroState, ownRedeemLen });
+  verifyOne(`${c.label}_first_leaf`, 0, { name: 'register_append', ctor: registerCtorArgsFirst, args: registerAppendArgsFor(0, c.minBet, bettorPk, first), inputs: first.inputs, outputs: first.outputs });
+  verifyOne(`${c.label}_first_chip`, 1, { name: 'transfer', ctor: kttCtorFor(c.minBet, leafCovId), args: [[], '0x', [0]], inputs: first.inputs, outputs: first.outputs }, kttSilPath());
 
-  allResults.push(first.result, second.result);
+  // ── 续笔(held=首笔的 tok_continuation + chip) ──
+  const heldArtifact2 = { ...computeKttTokenArtifact({ amount: first.newState.pool_value, ownerCovIdHex: leafCovId }), covId: fakeGenesisCovId(first.tokContArtifact.scriptPubKeyHex, TOK_DUST) };
+  const second = buildRegisterAppendShape({
+    ctorCase: c, marketId, payoutCovId, deadline, ownRedeemLen, tokenTmplHash: tokenTmplHashProbe, psTmplHashHex: psTmplHashProbe,
+    leafRedeemHex, leafCovId, currentState: first.newState, side: 1, stake: c.minBet, heldArtifact: heldArtifact2, registerAppendDispatchTag,
+    shardPoolId: marketId, bettorPk,
+  });
+  const secondLayout = measureStateLayout({ marketIdHash: marketId, psTmplHashHex: psTmplHashProbe, shardPoolId: marketId, sealCount: c.sealCount, minBet: c.minBet, payoutCovId, deadline, tokenTmplHash: tokenTmplHashProbe, state: first.newState, ownRedeemLen });
+  console.log(`  [${c.label}_second] 真实编译实测 state_layout={start:${secondLayout.start},len:${secondLayout.len}}`);
+  allStateLayouts.push(secondLayout);
+  const registerCtorArgsSecond = debuggerRegisterCtor({ marketId, psTmplHashHex: psTmplHashProbe, sealCount: c.sealCount, minBet: c.minBet, payoutCovId, deadline, tokenTmplHash: tokenTmplHashProbe, state: first.newState, ownRedeemLen });
+  verifyOne(`${c.label}_second_leaf`, 0, { name: 'register_append', ctor: registerCtorArgsSecond, args: registerAppendArgsFor(1, c.minBet, bettorPk, second), inputs: second.inputs, outputs: second.outputs });
+  verifyOne(`${c.label}_second_held`, 1, { name: 'transfer', ctor: kttCtorFor(first.newState.pool_value, leafCovId), args: [[], '0x', [0]], inputs: second.inputs, outputs: second.outputs }, kttSilPath());
+  verifyOne(`${c.label}_second_chip`, 2, { name: 'transfer', ctor: kttCtorFor(c.minBet, leafCovId), args: [[], '0x', [0]], inputs: second.inputs, outputs: second.outputs }, kttSilPath());
+}
+
+function kttSilPath() { return new URL('../src/lib/sil-v1/KanetTestToken.sil', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'); }
+function kttCtorFor(amount, ownerCovIdHex) {
+  const ZERO32 = '0x' + '00'.repeat(32);
+  return [amount, '0x' + ownerCovIdHex, 4, 0, ZERO32, ZERO32, 3, 3];
+}
+function registerAppendArgsFor(side, stake, bettorPk, shape) {
+  // register_append 的 args 顺序须与 entry 参数声明序一致: side,stake,leafOutIdx,psOutIdx,bettorPk,
+  // ps_prefix,ps_suffix,tok_out,tok_prefix,tok_suffix。
+  return [
+    side, Number(stake), shape.leafOutIdx, shape.psOutIdx, '0x' + bettorPk,
+    '0x' + shape.psArtifact.templatePrefix.toString('hex'), '0x' + shape.psArtifact.templateSuffix.toString('hex'),
+    shape.tokOutIdx, '0x' + shape.tokContArtifact.templatePrefix.toString('hex'), '0x' + shape.tokContArtifact.templateSuffix.toString('hex'),
+  ];
+}
+function debuggerRegisterCtor({ marketId, psTmplHashHex, sealCount, minBet, payoutCovId, deadline, tokenTmplHash, state, ownRedeemLen }) {
+  return ['0x' + marketId, '0x' + psTmplHashHex, '0x' + marketId, sealCount, minBet, '0x' + payoutCovId, deadline, '0x' + tokenTmplHash, state.local_yes, state.local_no, state.count, state.pool_value, ownRedeemLen];
 }
 
 console.log(`\n=== OWN_PREFIX_LEN/OWN_STATE_LEN 实测汇总(NWT MUST-1) ===`);
 for (const sl of allStateLayouts) console.log(`  state_span.start=${sl.start} state_span.len=${sl.len}`);
-const consistent = allStateLayouts.every(sl => sl.start === allStateLayouts[0].start && sl.len === allStateLayouts[0].len);
-console.log(consistent
-  ? `✅ 全部一致: OWN_PREFIX_LEN=${allStateLayouts[0].start}, OWN_STATE_LEN=${allStateLayouts[0].len} —— 与源码常量核对${allStateLayouts[0].start === 1 && allStateLayouts[0].len === 36 ? '一致(不用改)' : '不一致(必须改源码常量!)'}`
-  : `❌ 不一致——不同 ctor 组合量出不同值，源码常量不能是单一字面量，需要按 ctor 现算`);
+// 🔴 NWT MUST-1: 断言每一次真实编译测出的 state_layout 都跟源码常量 OWN_PREFIX_LEN=1/OWN_STATE_LEN=36
+// 一致——不一致就是源码常量该改了(或本脚本 ctor 构造错了)，必须非零退出，不能只打印不判断。
+const layoutMismatch = allStateLayouts.find(sl => sl.start !== 1 || sl.len !== 36);
+const layoutConsistent = allStateLayouts.length > 0 && !layoutMismatch;
+console.log(layoutConsistent
+  ? `✅ 全部一致(${allStateLayouts.length} 次真实编译实测): OWN_PREFIX_LEN=1, OWN_STATE_LEN=36 —— 与源码常量核对一致(不用改)`
+  : `❌ 不一致(${JSON.stringify(layoutMismatch)})——源码常量不能是单一字面量，需要按 ctor 现算，或本脚本构造有误`);
 
 const anyRan = allResults.some(r => r !== null);
 if (anyRan) {
-  const allPass = allResults.every(r => r === null || r.ok);
-  console.log(allPass ? '\n✅✅ ALL PASS(真实cli-debugger执行, 3组ctor × 首笔/次笔 共 6 次)' : '\n❌ 存在FAIL, 见上方输出');
+  const allPass = allResults.every(r => r === null || r.ok) && layoutConsistent;
+  console.log(allPass ? '\n✅✅ ALL PASS(真实cli-debugger执行, 3组ctor × 首笔/续笔 各3检查共 15 次 + state_layout 实测一致)' : '\n❌ 存在FAIL/state_layout不一致, 见上方输出');
   process.exit(allPass ? 0 : 1);
 } else {
-  console.log('\n(仅生成.test.json, 未设置CLI_DEBUGGER_PATH——未真实验证, 见上方各行"跳过真实执行"提示)');
+  console.log(layoutConsistent ? '' : '\n❌ state_layout 实测不一致, 见上方输出');
+  console.log('\n(仅生成.test.json, 未设置CLI_DEBUGGER_PATH——未真实验证cli-debugger部分, 见上方各行"跳过真实执行"提示; state_layout 断言已真实跑过)');
+  process.exit(layoutConsistent ? 0 : 1);
 }

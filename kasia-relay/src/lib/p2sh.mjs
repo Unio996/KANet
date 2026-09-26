@@ -1692,8 +1692,10 @@ function _pushBytes(hexOrBuf) {
   return _encodePushDataHex(buf);
 }
 
+// 🔵 export 仅为可测性(同 :2889/:2906 先例)——scripts/verify-shardleaf-scripts.mjs 方向A改版需要跟生产
+// 代码用同一份序列化/地址/费率/找零逻辑, 不重新实现一份可能漂移的副本。
 // 序列化 PoolLeaf 4-field State → 36B hex (固定 PUSH8, State 声明序 {local_yes,local_no,count,pool_value}).
-function _serializeLeafStateHex(s) {
+export function _serializeLeafStateHex(s) {
   return _encodePushDataHex(_i64LE(s.local_yes))
     + _encodePushDataHex(_i64LE(s.local_no))
     + _encodePushDataHex(_i64LE(s.count))
@@ -1818,7 +1820,7 @@ function _ticketAddress(psPrefixHex, psSuffixHex, ticket, networkId) {
 }
 
 // P2SH input 地址 = payToScriptHash(完整 redeem_hex)(redeem 含当前 state, 是 ground-truth; 无需 current_state/.address).
-function _addressFromRedeem(redeemHex, networkId) {
+export function _addressFromRedeem(redeemHex, networkId) {
   const spk = payToScriptHashScript(new Uint8Array(Buffer.from(redeemHex, 'hex')));
   return addressFromScriptPublicKey(spk, networkId).toString();
 }
@@ -1832,11 +1834,11 @@ const _BSHARD_COMPUTE_BUDGET = 70;    // flat (Bettor 批: 简单+headroom). 70=
 // budget-aware fee: aa4d1c10 实测 budget=60/1-input/fee 0.01KAS LAND → ~0.01KAS(1e6 sompi)/input headroom.
 // _assertTxInvariants mass-aware floor 兜底(fee 不足 pre-submit 拒, 非链上失败).
 const _BSHARD_FEE_PER_INPUT = 1_000_000n;   // 0.01 KAS/input, 覆盖 budget=50 的 compute mass floor
-function _bshardFeeV1(numInputs) { const f = BigInt(numInputs) * _BSHARD_FEE_PER_INPUT; return f > _BSHARD_MINER_FEE ? f : _BSHARD_MINER_FEE; }
+export function _bshardFeeV1(numInputs) { const f = BigInt(numInputs) * _BSHARD_FEE_PER_INPUT; return f > _BSHARD_MINER_FEE ? f : _BSHARD_MINER_FEE; }
 // v1 bshard tx: version=1, 所有 input sigOpCount=0(ComputeCommit 用 compute_budget 非 SigopCount), 每 input computeBudget=_BSHARD_COMPUTE_BUDGET.
 function _utxoValue(u) { return BigInt(u.amount ?? u.utxoEntry?.amount ?? u.entry?.amount ?? 0); }
 // relay 算 change(Bettor 裁: relay fetch UTXO 后才知真 Σinput+fee): change = Σin − Σ业务out − minerFee.
-function _appendChange(orderedOut, matched, changeAddress, fee = _BSHARD_MINER_FEE) {
+export function _appendChange(orderedOut, matched, changeAddress, fee = _BSHARD_MINER_FEE) {
   const sumIn = matched.reduce((a, u) => a + _utxoValue(u), 0n);
   const sumOut = orderedOut.reduce((a, o) => a + BigInt(o.value), 0n);
   const change = sumIn - sumOut - fee;
