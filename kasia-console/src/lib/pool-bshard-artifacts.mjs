@@ -382,6 +382,31 @@ export function computeMarketCreateArtifacts({ spineSilPath, poolSideSilPath, sp
 const KANET_TEST_TOKEN_SIL = join(dirname(fileURLToPath(import.meta.url)), 'sil-v1', 'KanetTestToken.sil');
 const _kttP2sh = (bc) => 'aa20' + Buffer.from(blake2b(Uint8Array.from(bc), { dkLen: 32 })).toString('hex') + '87';
 
+const POOL_SIDE_TICKET_SIL = join(dirname(fileURLToPath(import.meta.url)), 'sil-v1', 'PoolSideTicket.sil');
+
+/**
+ * PoolSideTicket(dust spent-once 票) genesis 实例 artifact——v1.0.0 版本，跟 ShardLeaf.sil 同一批(D-019)迁移
+ * 出来的合约(`sil-v1/PoolSideTicket.sil`)，取代已经过期的 `PoolSide_v08_shard.sil`(该文件的文件头原话：
+ * "原作 PoolSide_v08_shard.sil，本文件 = §7 v1.0.0 纯语法迁移，语义逐字不变"——**只是没人把
+ * `pool-shard-register.mjs` 跟着切过来**，是一个独立于 D-020 的、更早遗留的漂移，2026-09-23 simnet 端到端
+ * 首次真实广播 register_append 时才第一次暴露：`validateOutputStateWithTemplate` 在 v1.0.0 编译的 ShardLeaf.sil
+ * 里执行，跟旧 legacy 编译器编的 `PoolSide_v08_shard.sil` 模板/serialization 不是同一套，票输出核对不上，
+ * 链上 "script ran, but verification failed"。
+ * @param {object} o { bettorPk:hex, direction:0|1, stake:number, shardPoolId:hex }
+ * @returns {{ script:Buffer, scriptPubKeyHex:string, templateHashHex:string, templatePrefix:Buffer, templateSuffix:Buffer }}
+ */
+export function computePoolSideTicketArtifact({ bettorPk, direction, stake, shardPoolId }, silvercPath) {
+  if (!/^[0-9a-f]{64}$/.test(String(bettorPk || ''))) throw new Error(`computePoolSideTicketArtifact: bettorPk must be 32-byte hex, got ${bettorPk}`);
+  if (!/^[0-9a-f]{64}$/.test(String(shardPoolId || ''))) throw new Error(`computePoolSideTicketArtifact: shardPoolId must be 32-byte hex, got ${shardPoolId}`);
+  const ctor = [ctorBytes32V100(bettorPk), ctorIntV100(direction), ctorIntV100(stake), ctorBytes32V100(shardPoolId)];
+  const compiled = silvercPath ? compileSilV100(POOL_SIDE_TICKET_SIL, ctor, 'PoolSideTicket', silvercPath) : compileSilV100(POOL_SIDE_TICKET_SIL, ctor, 'PoolSideTicket');
+  const artifact = extractTemplateArtifactV100(compiled);
+  return {
+    script: Buffer.from(compiled.script), scriptPubKeyHex: '0x' + _kttP2sh(compiled.script), templateHashHex: artifact.templateHashHex,
+    templatePrefix: artifact.templatePrefix, templateSuffix: artifact.templateSuffix,
+  };
+}
+
 /**
  * KanetTestToken(KTT) genesis 实例 artifact——给定 (amount, owner covenant id) 现算出这枚代币输出的完整
  * redeem 字节 + scriptPubKeyHex + template hash(全局协议常量, 不随 amount/owner 变)。
@@ -419,6 +444,11 @@ export function computeKttTokenArtifact({ amount, ownerCovIdHex }, silvercPath) 
   // Buffer 是 register_append witness 的 tok_prefix/tok_suffix 字段, 调用方(pool-shard-register.mjs)每次
   // register_append 都要用同一份(重新编译一次也拿到同样的字节, 不是巧合, 是 extractTemplateArtifactV100 的
   // fail-closed 内部自验保证的)。
+  // 🔵 held/chip 的 leader/delegate 分流曾经短暂引入过又撤销了(2026-09-26)——当时以为两者未
+  // populateGenesisCovenants 就共享 ZERO32、需要 DECL.md 的 leader/delegate 分流；后来发现 covenant_id
+  // 是纯函数、不依赖是否调用 populateGenesisCovenants(不绑定 = 完全没有可内省的 covenant_id, 不是"退化成
+  // 共享 ZERO32"), held/chip 各自独立成组, 都走 leader 的 `transfer`, 不需要 delegate——`transfer_delegator`
+  // 的 entryAbi 不再需要在此暴露。
   return {
     script: Buffer.from(compiled.script), scriptPubKeyHex: '0x' + _kttP2sh(compiled.script), templateHashHex: artifact.templateHashHex,
     templatePrefix: artifact.templatePrefix, templateSuffix: artifact.templateSuffix,
