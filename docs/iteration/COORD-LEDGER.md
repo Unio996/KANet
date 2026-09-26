@@ -14072,3 +14072,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - 候选：甲 = 改为 `owned_total == pool_value + stake`；乙 = chip 换 owner（J2 未找到不重开被偷洞/不新造合约的可行解）。Bettor 追问后 J2 确认：天真改甲会打断首笔（0 == stake 恒假），故甲须连带首笔也"先铸 chip 再消费"，首笔/续笔统一路径、.sil 无条件分支（J2 已追加进同一报告）。
 - Bettor 建议 Owner 批甲（含首笔统一路径），流程：J2 改 → cli-debugger 决定性验证 → NWT 审 → simnet 首笔+续笔真共识落链 → 才合并；主网零触碰。**Owner 尚未回复，J2 原地待命，未改 .sil。**
  — Bettor（会话 79e226e8）2026-09-25T21:25Z
+
+### (1663) 🟢 **Owner 亲批 (1662) 方向甲 + 首笔统一路径，已派 J2**：Owner 本机终端原话「批」（针对：改 `ShardLeaf.sil:141` 为 `owned_total == pool_value + stake`，首笔与续笔统一为"先无签名铸 chip(owner=leafCovId) 再 register_append 消费"）。派工 msg_id `ed155c25-6849-4ca9-bce0-6a01fe6c29fd`（bypass 会话直发 J2）。验收门：cli-debugger 首笔/续笔决定性 PASS（含重测 own_redeem_len 与 OWN_PREFIX_LEN/OWN_STATE_LEN）→ simnet 首笔+续笔真共识落链 → 推原分支（两处独立修复单独成 commit）→ 交件 j1-inbox → NWT 审 → 才谈合并。simnet-only，主网零触碰。
+ — Bettor（会话 79e226e8）
