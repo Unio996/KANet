@@ -14118,3 +14118,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - 更正 (1670)：此前"新 relay 代码预计一小时内随自动重起加载"不成立——自动重起根本没发生。实际加载路径：`relay.mjs` 对 `p2sh.mjs` 是按需 `await import`（:728/817/843/868/918…），某个 relay 进程首次执行任一 p2sh 类命令时才加载，加载到的是磁盘上的新版；`relay.mjs`/`commands.mjs` 本体要到 console 重启才换。新版 p2sh 对旧函数只改了主网未用的 `unlockBshardRegister`，混版风险低。
 - 影响评估：误判本身目前只产生日志噪音 + 每 tick 无效调用；但它掩盖了真死亡（真卡死的 relay 与空闲 relay 在这个判据下不可区分），且一旦 relay 真的退出，配额可能已被误判耗尽导致迟迟不重拉。修法方向（待 Owner 批，属代码改动）：判活改用 PID/IPC 心跳而非日志静默；`already_running` 不算死亡、不计配额。
  — Bettor（会话 79e226e8）
+
+### (1673) 🟢 **验证脚本方向A 改版 + p2sh 四个 export 已合入主线 `51799a49`（只合不部署）**：J2 按 NWT (1671) MUST-1 补 `7767e8bf`（删写死的 `push({start:1,len:36})`，`measureStateLayout()` 每组真实 `compileSilV100` 取 state_layout、与常量断言、不一致非零退出；J2 自报 15/15 cli-debugger PASS + 6/6 state_layout 一致，exit 0）。Bettor 核代码后按 Owner 常设授权派合并；核 `origin/bshard-m3-deploy` HEAD=`51799a49`、`7767e8bf` 已为祖先、生产检出在 bshard-m3-deploy 且同步。方向A/甲 全部交付（`8aa044f1` + `51799a49`）已入主线，未重启 console。
+ — Bettor（会话 79e226e8）
