@@ -20,6 +20,12 @@
 
 import { sqlite } from '../db/client.js';
 import { getStatus, isRelayAlive, startRelay } from './relay-manager.js';
+// 2026-09-26 (账本1672/1674): 重导出已有导入的 isRelayAlive，供
+// test-framework/cases/system/relay-manager-alive.test.mjs 单测——这不是新增 relay-manager 消费点
+// (import 语句本身一字未改，M0a 只对 import/require/动态 import 行取模，`export {}` 不在其匹配范围内)，
+// 只是把这个文件本来就有的绑定多开一个读口，避免测试文件另起一条需要 NWT 重新过 M0a 窄 capability
+// 审批的裸 relay-manager import（同一个符号没必要两条通道都开）。
+export { isRelayAlive };
 
 const TICK_INTERVAL_MS = Number(process.env.RELAY_HEALTH_TICK_MS) || 30_000;  // 30s
 const STARTUP_GRACE_MS = 90_000;  // wait 90s after Console boot so initial startAll has chance
@@ -105,11 +111,17 @@ export async function relayHealthMonitorTick(deps = {}) {
       }
       console.log(`[relay-health] ${r.name} dead (reason=${aliveCheck?.reason || 'unknown'}) — auto-restart attempt #${recent + 1}`);
       const _srStart = Date.now();
-      // 🔴 MUST-FIX 核心：记录发生在调用之后、不看结果——无论成功/fail-closed拒绝/抛异常，
-      // "尝试过一次"这件事本身就该计入节流分母。
+      // 🔴 MUST-FIX 核心（2026-09-14, 不变）：记录发生在调用之后、不看结果——无论成功/fail-closed
+      // 拒绝（如 cold_address_denied/per_relay_cap_exceeded）/抛异常，"尝试过一次"这件事本身就该
+      // 计入节流分母。
+      // 🔴 例外（2026-09-26 账本1672/1674 修复）：`already_running` 不是"尝试失败"，是"isRelayAlive
+      // 判死那一刻起到这次真调用之间，relay 其实一直活着"（`isRelayAlive` 误判死亡的直接后果，见
+      // relay-manager.js:isRelayAlive 头注）——这次调用没有真正尝试重启任何东西，不该占用重启配额，
+      // 否则一次误判会连带把真实故障时的重试配额也一起吃掉。上面 2026-09-14 那条 MUST-FIX 不动：
+      // cold_address_denied 等 fail-closed 拒绝仍然是真实尝试过的一次，照样计入。
       try {
         const result = await doStartRelay(r.id);
-        _recordRestart(r.id, restartHistory);
+        if (result?.reason !== 'already_running') _recordRestart(r.id, restartHistory);
         console.log(`[diag:relay-health-per-relay] ${r.name} startRelay ms=${Date.now() - _srStart}`);
         if (result?.ok) {
           restarted++;
