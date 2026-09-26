@@ -83,6 +83,9 @@ function _findRefundableOffers(peerAddr) {
     } catch { return false; }
     // chain-truth dedup
     try {
+      // 2026-08-29 (J2 broker-money-path 阶段 2): dedup 改经 lib/broker-refund-classify (intent 已记即拦, 不 join kaspa_tx_log)。
+      //   本处是【预筛】(无 RPC 注入) —— 只用 alreadyRefunded (肯定/意图证据) 决定"不再呈现"; mustHold(UNKNOWN) 在这里不作排除,
+      //   真闸在 advanceToRefunded (带 RPC + coverage, UNKNOWN ⇒ hold+告警)。否则无 RPC 时预筛会把一切排除 = 用户永远不能取消。
       const dedup = isOfferAlreadyRefunded(o);
       if (dedup.alreadyRefunded) {
         console.warn(`[cancel-refund] DEDUP offer ${o.id.slice(0,8)} skip — kaspa 链已有 ${dedup.priorTxs.length} 笔真 refund TX (${dedup.priorTxs.map(t => t.tx_id.slice(0,12)).join(',')}). 拒重复退款防 broker 资产流失.`);
