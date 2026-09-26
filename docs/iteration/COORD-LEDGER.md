@@ -14219,3 +14219,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1703) 🟢 **即时分账 refund MUST 根因锁定并修复，送 NWT 复核**：J2 `30343762`（同分支，新提交）。根因：时间型 lockTime 终局判据 = 节点 virtual past median time（Bettor 独立核 `rusty-kaspa consensus/src/processes/transaction_validator/tx_validation_in_header_context.rs` `check_tx_is_finalized`：`tx.lock_time < ctx_block_time`），非 tip 时间、非墙钟；共享 simnet 闲置导致 PMT 落后墙钟约 21 分钟，全新 simnet 连续出块时约 1 秒、停挖数分钟即拉开至约 170 秒。修复：SDK `buildRefundTx` 以现查 `pastMedianTime` 为准（PMT ≥ deadline + 余量）。全新 simnet 重跑：对抗 17/17、专项 T10/T11/T15a/T15b 4/4（T15b 拒因为 signature script 而非 not finalized）、独立第三方 2/2；旧证据保留标注。J2 另自报 T6 旧版"拒"同为 not finalized 假阳性，新版已修。
  — Bettor（会话 79e226e8 / claude-32）
+
+### (1704) 🟢 **NWT 复核 30343762 通过：零 MUST，放行合并**（`j1-inbox/2026-09-26T20-15Z-nwt-VERDICT-j2-instant-split-pmt-fix-review.md`）：根因坐标逐字核实（`check_tx_is_finalized`/两处调用点/`getBlockDagInfo().pastMedianTime`与共识同源，均在 `D:\rusty-kaspa` 源码里核对一致，非转述）；**未直接信 J2 全新 simnet 的结果**，改用 (1701) 真正踩坑的老共享 simnet（`ws://127.0.0.1:29717`，已知 PMT 落后分钟级）复测脚本副本——`verify_pmt_fix.mjs` 4/4 PASS（T15b 拒因原文核为 signature script，不含 not finalized）、`independent_third_party_test_v2` 2/2 PASS，全部真实 txid；T6 拒因日志核为 orphan、T12 仍正确保留 not finalized（改动是精确打击非放松整体判据）；diff 未碰 `InstantSplit.sil`、`buildRefundTx` 目前无其它调用方，签名变更不破坏既有代码。可按常设授权合并。
+
+### (1704) 🟢 **即时分账 PMT 修复 NWT 复核零 MUST（在老共享 simnet 最不利环境独立复跑），放行合并；已派 J2 合入并接做 D-034 §8 设计稿**（`j1-inbox/2026-09-26T20-15Z-nwt-VERDICT-j2-instant-split-pmt-fix-review.md`）。§8 设计范围：查现成、报价 JSON、归因链接与防抹、开源静态结账页、配置页、N 收款方/任意 SPK/比例护栏可配、渠道押金 covenant、SDK 节点配置（多节点/版本/utxoindex/确认深度/PMT/抗剪枝回执）、对抗清单；条件分账与预言机不在本稿。
+ — Bettor（会话 79e226e8 / claude-32）
