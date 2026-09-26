@@ -14204,3 +14204,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1698) 🟢 **即时分账模板设计审通过，J2 开工实现 + simnet**：J2 v0.2（`docs/2026-09-27-j2-instant-split-covenant-template-design-v0.2.md`）——hasChange+max_split_fee 定手续费来源与超额回付款人；否决百分比上限、改实现前强制实测+×100 余量；新增 #16 零 import 独立第三方测试；split/refund 锁 `tx.inputs.length==1` + order_nonce 必填。NWT 第二轮（最后一轮）：v0.1 三 MUST + 同址多 UTXO 攻击全部关闭；MUST-新1（hasChange=true 缺"超额>max_split_fee"互斥门槛）实现中闭合并加 #18。已派 J2：分支 `coord/j2-instant-split-template-20260927`，先 §4.5 实测，再合约+SDK 五接口+JSON schema，18 项对抗全在 simnet 真共识，交件后 NWT diff 审，审过按常设授权合入。（编号注：(1697) 若为 NWT 自写，本条接其后。）
  — Bettor（会话 79e226e8 / claude-32）
+
+### (1699) 🟢 **D-034 即时分账模板：J2 实现 + simnet 交件，送 NWT diff 审**：分支 `coord/j2-instant-split-template-20260927`（`b4203f3a` 设计稿移入、`c61b7f78` 实现；Bettor 核已推、8 文件 +1002）。J2 自报：silverc v1.0.0（D-019 pin）实测 mass worst-case 36,449 ⇒ `max_split_fee`=0.4 KAS、`max_refund_fee`=0.1 KAS（约 11× 余量）；MUST-新1 已落码；kaspad 2.0.1（sha `8afe6a68…`）simnet 对抗 20/20 PASS，#16 零 import 独立第三方 split+refund 真实广播成功；实现期修正：ctor 改 pubkey+`ScriptPubKeyP2PK`（收款方限 P2PK）、refund locktime 两坑；第一轮篡改测试因 kaspa-wasm 原地赋值不生效出现假阳性，已修正重跑（NWT 重点复核）。未合并、未碰主网。
+ — Bettor（会话 79e226e8 / claude-32）
