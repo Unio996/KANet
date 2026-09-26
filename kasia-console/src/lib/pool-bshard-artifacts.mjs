@@ -21,7 +21,7 @@ import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { blake2b } from '@noble/hashes/blake2b';
-import { extractTemplateArtifact } from './pool-template-artifact.mjs';
+import { extractTemplateArtifact, extractTemplateArtifactV100 } from './pool-template-artifact.mjs';
 import { procStep } from './diag-step.mjs';   // M10 v2 observe-only (2026-09-05): 同步子进程站计时, 纯透传
 
 // 🔴 事故修复(2026-07-07，Bettor/NWT 裁定): 这个模块级默认被 bshard-settle-daemon.mjs/bshard-auto-settler.mjs
@@ -377,4 +377,82 @@ export function computeMarketCreateArtifacts({ spineSilPath, poolSideSilPath, sp
   const poolSideCtor = [...poolSideCtorBase, ctorBytes32(spine.templateHashHex)];
   const poolSide = computePoolSideArtifact(poolSideSilPath, poolSideCtor, silvercPath);
   return { spine, poolSide };
+}
+
+const KANET_TEST_TOKEN_SIL = join(dirname(fileURLToPath(import.meta.url)), 'sil-v1', 'KanetTestToken.sil');
+const _kttP2sh = (bc) => 'aa20' + Buffer.from(blake2b(Uint8Array.from(bc), { dkLen: 32 })).toString('hex') + '87';
+
+const POOL_SIDE_TICKET_SIL = join(dirname(fileURLToPath(import.meta.url)), 'sil-v1', 'PoolSideTicket.sil');
+
+/**
+ * PoolSideTicket(dust spent-once 票) genesis 实例 artifact——v1.0.0 版本，跟 ShardLeaf.sil 同一批(D-019)迁移
+ * 出来的合约(`sil-v1/PoolSideTicket.sil`)，取代已经过期的 `PoolSide_v08_shard.sil`(该文件的文件头原话：
+ * "原作 PoolSide_v08_shard.sil，本文件 = §7 v1.0.0 纯语法迁移，语义逐字不变"——**只是没人把
+ * `pool-shard-register.mjs` 跟着切过来**，是一个独立于 D-020 的、更早遗留的漂移，2026-09-23 simnet 端到端
+ * 首次真实广播 register_append 时才第一次暴露：`validateOutputStateWithTemplate` 在 v1.0.0 编译的 ShardLeaf.sil
+ * 里执行，跟旧 legacy 编译器编的 `PoolSide_v08_shard.sil` 模板/serialization 不是同一套，票输出核对不上，
+ * 链上 "script ran, but verification failed"。
+ * @param {object} o { bettorPk:hex, direction:0|1, stake:number, shardPoolId:hex }
+ * @returns {{ script:Buffer, scriptPubKeyHex:string, templateHashHex:string, templatePrefix:Buffer, templateSuffix:Buffer }}
+ */
+export function computePoolSideTicketArtifact({ bettorPk, direction, stake, shardPoolId }, silvercPath) {
+  if (!/^[0-9a-f]{64}$/.test(String(bettorPk || ''))) throw new Error(`computePoolSideTicketArtifact: bettorPk must be 32-byte hex, got ${bettorPk}`);
+  if (!/^[0-9a-f]{64}$/.test(String(shardPoolId || ''))) throw new Error(`computePoolSideTicketArtifact: shardPoolId must be 32-byte hex, got ${shardPoolId}`);
+  const ctor = [ctorBytes32V100(bettorPk), ctorIntV100(direction), ctorIntV100(stake), ctorBytes32V100(shardPoolId)];
+  const compiled = silvercPath ? compileSilV100(POOL_SIDE_TICKET_SIL, ctor, 'PoolSideTicket', silvercPath) : compileSilV100(POOL_SIDE_TICKET_SIL, ctor, 'PoolSideTicket');
+  const artifact = extractTemplateArtifactV100(compiled);
+  return {
+    script: Buffer.from(compiled.script), scriptPubKeyHex: '0x' + _kttP2sh(compiled.script), templateHashHex: artifact.templateHashHex,
+    templatePrefix: artifact.templatePrefix, templateSuffix: artifact.templateSuffix,
+  };
+}
+
+/**
+ * KanetTestToken(KTT) genesis 实例 artifact——给定 (amount, owner covenant id) 现算出这枚代币输出的完整
+ * redeem 字节 + scriptPubKeyHex + template hash(全局协议常量, 不随 amount/owner 变)。
+ * 🔴 D-020 移植配套(2026-09-23·Owner批·NWT审)：ShardLeaf.sil 的 register_append 铸/续续约代币
+ * (`tok_out`, TokenState{amount, owner=leaf自身covenant id, ...}) 需要这个函数——JS 侧要知道铸出来的
+ * 那笔代币输出具体长什么样(供 relay 组装 tok_out 输出用)。
+ * ctor 形状(8 参数, KanetTestToken.sil 顶部 contract 签名, sil-v1/KanetTestToken.sil:37-44)与合约不校验
+ * genesis(只校验花费)一致：owner_scheme=TOKEN_SCHEME_COVENANT_ID(0x04)/borrow_scheme=TOKEN_BORROW_DISABLED
+ * (0x00)/borrow_guard=ZERO32/extension_commitment=ZERO32/max_ins=max_outs=3——这组值与
+ * `loadProtocolConstants()` 里 `token_tmpl_hash`/`token_prefix`/`token_suffix` 锚定的是同一份协议常量
+ * 组合(仅 amount/owner 两个字段在 State 区随实例变化，State 区不进模板哈希，所以模板哈希本身跟这两个
+ * 字段无关；但一枚具体代币输出的完整字节/P2SH 地址仍然由具体 (amount, owner) 决定，必须每次真编译现算，
+ * 不能只查协议常量表)。
+ * @param {object} o { amount:number, ownerCovIdHex:string(32B hex, 无0x) }
+ * @param {string} [silvercPath] 默认 SILVERC_V100_PATH/D-019 pin 生产路径(同 compileSilV100 默认)
+ * @returns {{ script:Buffer, scriptPubKeyHex:string, templateHashHex:string, templatePrefix:Buffer,
+ *   templateSuffix:Buffer, entryAbi:object, stateFieldCount:number }}
+ *   entryAbi/stateFieldCount 是同一次编译产物的另外两个切面(KanetTestToken.transfer 入口 ABI 含
+ *   dispatch_tag + State 字段数)——花费/消费这枚代币输入(kcc20-token/ktt-transfer-witness.mjs
+ *   encodeKttTransferZeroOutAction)时要用, 不让调用方为此再重编一次(同 proto-covenant-builder.mjs
+ *   computeKttGenesisArtifact 的先例理由)。
+ */
+export function computeKttTokenArtifact({ amount, ownerCovIdHex }, silvercPath) {
+  if (!/^[0-9a-f]{64}$/.test(String(ownerCovIdHex || ''))) throw new Error(`computeKttTokenArtifact: ownerCovIdHex must be 32-byte hex, got ${ownerCovIdHex}`);
+  const ZERO32 = '00'.repeat(32);
+  const ctor = [
+    ctorIntV100(amount), ctorBytes32V100(ownerCovIdHex), { kind: 'byte', value: 4 }, { kind: 'byte', value: 0 },
+    ctorBytes32V100(ZERO32), ctorBytes32V100(ZERO32),
+    ctorIntV100(3), ctorIntV100(3),
+  ];
+  const compiled = silvercPath ? compileSilV100(KANET_TEST_TOKEN_SIL, ctor, 'KanetTestToken', silvercPath) : compileSilV100(KANET_TEST_TOKEN_SIL, ctor, 'KanetTestToken');
+  const artifact = extractTemplateArtifactV100(compiled);
+  // templatePrefix/templateSuffix (state-region-excluded bytes): 已实测(scratch smoke test, 2026-09-23) 跨
+  // 不同 amount/ownerCovIdHex 组合字节完全相同(state 区被排除在模板之外, 这正是模板机制的设计目的)——这两个
+  // Buffer 是 register_append witness 的 tok_prefix/tok_suffix 字段, 调用方(pool-shard-register.mjs)每次
+  // register_append 都要用同一份(重新编译一次也拿到同样的字节, 不是巧合, 是 extractTemplateArtifactV100 的
+  // fail-closed 内部自验保证的)。
+  // 🔵 held/chip 的 leader/delegate 分流曾经短暂引入过又撤销了(2026-09-26)——当时以为两者未
+  // populateGenesisCovenants 就共享 ZERO32、需要 DECL.md 的 leader/delegate 分流；后来发现 covenant_id
+  // 是纯函数、不依赖是否调用 populateGenesisCovenants(不绑定 = 完全没有可内省的 covenant_id, 不是"退化成
+  // 共享 ZERO32"), held/chip 各自独立成组, 都走 leader 的 `transfer`, 不需要 delegate——`transfer_delegator`
+  // 的 entryAbi 不再需要在此暴露。
+  return {
+    script: Buffer.from(compiled.script), scriptPubKeyHex: '0x' + _kttP2sh(compiled.script), templateHashHex: artifact.templateHashHex,
+    templatePrefix: artifact.templatePrefix, templateSuffix: artifact.templateSuffix,
+    entryAbi: compiled._raw.contracts.KanetTestToken.entries.transfer,
+    stateFieldCount: compiled._raw.contracts.KanetTestToken.runtime_state.fields.length,
+  };
 }
