@@ -21,7 +21,6 @@
 //     KanetTestToken template artifact（pool-bshard-artifacts.computeKttTokenArtifact，跨 amount/owner 不变，
 //     已实测确认）。
 
-import { blake2b } from '@noble/hashes/blake2b';
 import { blake3 } from '@noble/hashes/blake3';
 
 /**
@@ -43,21 +42,24 @@ export function buildRegisterWitness(o) {
   }
   if (!bettorPk || typeof bettorPk !== 'string') throw new Error('bettorPk (hex) required');
   if (!psArtifact || !Buffer.isBuffer(psArtifact.templatePrefix) || !Buffer.isBuffer(psArtifact.templateSuffix)) {
-    throw new Error('psArtifact {templatePrefix, templateSuffix, templateHashHex} required (pool-bshard-artifacts.computePoolSideArtifact)');
+    throw new Error('psArtifact {templatePrefix, templateSuffix, templateHashHex, script} required (pool-bshard-artifacts.computePoolSideTicketArtifact)');
   }
   if (!tokArtifact || !Buffer.isBuffer(tokArtifact.templatePrefix) || !Buffer.isBuffer(tokArtifact.templateSuffix)) {
     throw new Error('tokArtifact {templatePrefix, templateSuffix, templateHashHex} required (pool-bshard-artifacts.computeKttTokenArtifact)');
   }
-  // self-verify: blake2b(prefix‖suffix) == ps_tmpl_hash — 沿用既有 PoolSide 自验公式（legacy 编译器族）。
-  const psHash = Buffer.from(blake2b(Buffer.concat([psArtifact.templatePrefix, psArtifact.templateSuffix]), { dkLen: 32 })).toString('hex');
-  if (psHash !== psArtifact.templateHashHex) {
-    throw new Error(`register witness self-verify FAILED(ps): blake2b(prefix‖suffix) ${psHash.slice(0, 12)} != ps_tmpl_hash ${psArtifact.templateHashHex.slice(0, 12)}`);
-  }
-  // token 侧模板自验公式不同（v1.0.0 编译器族，blake3(len8LE+prefix+len8LE+suffix)，见 extractTemplateArtifactV100
-  // 内部已做过一次；这里对调用方传入的 templateHashHex 做一次独立核对，防止调用方传了跟 templatePrefix/Suffix
-  // 不匹配的 hash 进来）。
+  // 🔴 D-020 移植配套顺带修复(2026-09-23·simnet 端到端首次真实广播才暴露，独立于 D-020 本身)：ps 侧模板
+  // 自验公式改成 v1.0.0 编译器族的 blake3(len8LE+prefix+len8LE+suffix)——ShardLeaf.sil 是 v1.0.0 编译产物，
+  // `validateOutputStateWithTemplate` 在其内部执行时用的是 v1.0.0 的模板哈希公式，不是旧 legacy 编译器的
+  // blake2b(prefix‖suffix)。旧 `PoolSide_v08_shard.sil`(legacy 编译)从 D-019 迁移出了 v1.0.0 版本
+  // `sil-v1/PoolSideTicket.sil`(该文件头注明"语义逐字不变")，但 pool-shard-register.mjs 一直没有切过去——
+  // 这是比 D-020 更早遗留的漂移，market_shards 在主网/simnet 都是 0 行，从未被真实广播暴露过。
   const le8 = (n) => { const b = Buffer.alloc(8); b.writeBigUInt64LE(BigInt(n)); return b; };
-  const tokHash = Buffer.from(blake3(Buffer.concat([le8(tokArtifact.templatePrefix.length), tokArtifact.templatePrefix, le8(tokArtifact.templateSuffix.length), tokArtifact.templateSuffix]))).toString('hex');
+  const tmplHash3 = (prefix, suffix) => Buffer.from(blake3(Buffer.concat([le8(prefix.length), prefix, le8(suffix.length), suffix]))).toString('hex');
+  const psHash = tmplHash3(psArtifact.templatePrefix, psArtifact.templateSuffix);
+  if (psHash !== psArtifact.templateHashHex) {
+    throw new Error(`register witness self-verify FAILED(ps): blake3(...) ${psHash.slice(0, 12)} != ps_tmpl_hash ${psArtifact.templateHashHex.slice(0, 12)}`);
+  }
+  const tokHash = tmplHash3(tokArtifact.templatePrefix, tokArtifact.templateSuffix);
   if (tokHash !== tokArtifact.templateHashHex) {
     throw new Error(`register witness self-verify FAILED(token): blake3(...) ${tokHash.slice(0, 12)} != token_tmpl_hash ${tokArtifact.templateHashHex.slice(0, 12)}`);
   }
@@ -78,6 +80,10 @@ export function buildRegisterWitness(o) {
     token_transfer_dispatch_tag: tokArtifact.entryAbi.dispatch_tag,
     token_transfer_state_field_count: tokArtifact.stateFieldCount,
     token_owner_input_idx: 0,
+    // chip(这一笔差额, 见 pool-shard-register.mjs) 跟 held 对称——各自独立 covenant_id 组(见
+    // pool-bshard-artifacts.computeKttTokenArtifact 头注), 都走 leader 的 `transfer`, owner_input_idx
+    // 同样固定指向 leaf 自己(0)。复用同一份 token_transfer_dispatch_tag/state_field_count, 不需要另一套。
+    chip_owner_input_idx: 0,
   };
 }
 
@@ -99,11 +105,16 @@ export function buildRegisterWitness(o) {
  *   tokDustSompi, leafContinuationState, ticketDustSompi, shardPoolId, changeAddress }
  * @returns {object} relay command (action='bshard_register_bet')
  */
-export function buildRegisterCommand({ witness, leafOutpointTxid, leafRedeemHex, currentLeafState, bettorFunding, tokenInput = null, tokContinuationRedeemHex, tokDustSompi, leafContinuationState, ticketDustSompi, shardPoolId, changeAddress }) {
+export function buildRegisterCommand({ witness, leafOutpointTxid, leafRedeemHex, currentLeafState, bettorFunding, tokenInput = null, chipInput = null, tokContinuationRedeemHex, tokDustSompi, ticketRedeemHex, leafContinuationState, ticketDustSompi, shardPoolId, changeAddress }) {
   if (!leafOutpointTxid) throw new Error('leafOutpointTxid (current shard leaf UTXO txid) required');
   if (!currentLeafState) throw new Error('currentLeafState (current leaf 4-field state; relay computes current per-state leaf address from redeem+current_state) required');
   if (!tokContinuationRedeemHex) throw new Error('tokContinuationRedeemHex (pool-bshard-artifacts.computeKttTokenArtifact 的 script hex) required');
   if (tokDustSompi == null) throw new Error('tokDustSompi (代币续约输出的 KAS dust 面值, >= DUST_MIN) required');
+  // 🔴 D-020 移植配套顺带修复：ticket 输出改成跟 tok_continuation 一样的"JS 侧给完整 redeem 字节，relay 只
+  // 负责 hash 算地址"模式(_addressFromRedeem)，不再用旧的 _ticketAddress(prefix+手写serialize(state)+suffix)
+  // 手动重建——那套手写 serialize 是给 legacy 编译器族的 PoolSide_v08_shard.sil 写的，对 v1.0.0 编译的
+  // PoolSideTicket.sil 不适用(哪怕 blake3 hash 自验过了，字节布局仍可能不同)。
+  if (!ticketRedeemHex) throw new Error('ticketRedeemHex (pool-bshard-artifacts.computePoolSideTicketArtifact 的 script hex) required');
   const stake = BigInt(witness.stake);
   // route-split: PoolLeaf is 4-field {local_yes,local_no,count,pool_value} — NO outcome fields (closed/winningSide/
   // payoutRoot live in PoolRoot). leafContinuationState is the 4-field leaf state; no closed check (leaf has no closed).
@@ -121,10 +132,19 @@ export function buildRegisterCommand({ witness, leafOutpointTxid, leafRedeemHex,
       token_transfer_dispatch_tag_hex: witness.token_transfer_dispatch_tag,
       token_transfer_state_field_count: witness.token_transfer_state_field_count,
       token_owner_input_idx: witness.token_owner_input_idx,
+      // chip 跟 token 对称, 复用同一份 transfer dispatch_tag/state_field_count(见 buildRegisterWitness 头注),
+      // 只是 owner_input_idx 字段名分开(两者值目前都固定是 0, 各自指向自己 covenant_id 组里的 leaf)。
+      chip_owner_input_idx: witness.chip_owner_input_idx,
     },
     inputs: {
       leaf: { outpointTxid: leafOutpointTxid, redeem_hex: leafRedeemHex, current_state: currentLeafState },
       token: tokenInput, // null = 第一笔下注（scanOwnedTokenInputs 天然扫到 0，等于 genesis pool_value=0）
+      // 方向A(2026-09-26·Owner批): 续笔下注(token 非 null)时配对出现的【这一笔差额 stake chip】——已在
+      // register_append 这笔交易之前独立铸出并落链确认(populateGenesisCovenants, owner=leafCovId 直接烤入,
+      // 不经过无主中间态)。register_append 同时消费 [token(held), chip] 两个 KanetTestToken 输入产出一个
+      // merged 续约输出, sum_in(held.amount+chip.amount)==sum_out(merged.amount) 天然守恒——不再让 transfer
+      // 把一个输入的 amount 直接改写成更大的输出(那条路径会撞 KanetTestToken.sil:109 的 sum_in>=sum_out)。
+      chip: chipInput, // null = 第一笔下注（同 token，无需消费任何东西）
       funding: bettorFunding, // [{ outpointTxid, address }] P2PK wallet UTXOs (relay finds + wallet-签名)
     },
     // outputs: leaf_continuation（relay 原样搬运当前 leaf UTXO 真实面值，不加算）+ tok_continuation（新铸/续
@@ -132,7 +152,7 @@ export function buildRegisterCommand({ witness, leafOutpointTxid, leafRedeemHex,
     outputs: {
       leaf_continuation: { state: leafContinuationState || null },
       tok_continuation: { redeem_hex: tokContinuationRedeemHex, amountSompi: String(tokDustSompi) },
-      poolSide_ticket: { amountSompi: ticketDustSompi != null ? String(ticketDustSompi) : null, state: { bettorPk: witness.bettorPk, direction: witness.side, stake: stake.toString(), shardPoolId: shardPoolId || (leafContinuationState && leafContinuationState.shardPoolId) || null } },
+      poolSide_ticket: { redeem_hex: ticketRedeemHex, amountSompi: ticketDustSompi != null ? String(ticketDustSompi) : null },
       change_address: changeAddress,
     },
   };

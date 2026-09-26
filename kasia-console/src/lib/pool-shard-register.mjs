@@ -19,7 +19,7 @@
 //   via the bettor→gateway transfer the caller performs before invoking (custody-bound, like publish). mainnet: bettor-direct
 //   funding input is a follow-up (TODO custody-hardening).
 
-import { compileSil, computePoolSideArtifact, ctorBytes32, ctorInt, compileSilV100, ctorBytes32V100, ctorIntV100, computeKttTokenArtifact } from './pool-bshard-artifacts.mjs';
+import { compileSil, ctorInt, compileSilV100, ctorBytes32V100, ctorIntV100, computeKttTokenArtifact, computePoolSideTicketArtifact } from './pool-bshard-artifacts.mjs';
 import { extractTemplateArtifact } from './pool-template-artifact.mjs';
 import { buildRegisterWitness, buildRegisterCommand } from './pool-register-builder.mjs';
 import { allocateForRegister, registerShard, sealShard, onBettorRegistered } from './shard-allocator.mjs';
@@ -202,8 +202,11 @@ export function convergeShardLeafOwnRedeemLen({ marketIdHash, psTmplHashHex, sha
 let _shardLeafRegisterAppendDispatchTagCache = null;
 function _shardLeafRegisterAppendDispatchTag() {
   if (_shardLeafRegisterAppendDispatchTagCache) return _shardLeafRegisterAppendDispatchTagCache;
+  // 🔴 deadline 不能是随便一个小数字：编译期 consolidate_to_payout 的 temporal(deadline*1000) 会被
+  // silverc 校验 >= LOCK_TIME_THRESHOLD(500_000_000_000)，哪怕这次编译只是为了取 dispatch_tag、根本
+  // 不会真的调用这个 entry——用当前真实 Unix 秒(乘 1000 后天然远超阈值)当占位值。
   const placeholderCtor = _shardLeafCtor({
-    marketIdHash: z32, psTmplHashHex: z32, shardPoolId: z32, sealCount: 1, payoutCovId: z32, deadline: 1,
+    marketIdHash: z32, psTmplHashHex: z32, shardPoolId: z32, sealCount: 1, payoutCovId: z32, deadline: Math.floor(Date.now() / 1000),
     tokenTmplHash: z32, localYes: 0, localNo: 0, count: 0, poolValue: 0, ownRedeemLen: 1,
   });
   const compiled = compileSilV100(join(LIB, 'ShardLeaf.sil'), placeholderCtor, 'ShardLeaf');
@@ -540,14 +543,51 @@ async function _registerBettorOnShardInner(o) {
     // 缺失说明这片 leaf 是 D-020 之前的旧数据或 genesis 出过问题, fail-closed 拒绝, 不猜值。
     if (!shard.leaf_cov_id) throw new Error(`shard ${shard.shard_market_id} missing leaf_cov_id (v215) — cannot register_append (D-020 移植配套, genesis 应存)`);
     const shardPoolId = hex32(`${logicalMarketId}-shard-${shard.shard_index}`);
-    // bettor-independent ps template (4 dust-ticket fields are State, spliced per register)
-    // 🔴 事故修复(2026-07-07): 强制 SILVERC_LEGACY——这个 artifact 直接烤进 ShardLeaf ctor(psTmplHashHex)，
-    // 属于 V1 家族续约链条一环，默认保守(同 compileShardLeafRedeem 那份理由)，不依赖调用方传入的 silverc。
-    const psArtifact = computePoolSideArtifact(join(LIB, 'PoolSide_v08_shard.sil'), [ctorBytes32(bettorPk), ctorInt(direction), ctorInt(stake), ctorBytes32(z32)], SILVERC_LEGACY);
-    // D-020: 不再需要"stake 存进 leaf"这笔大钱——leaf KAS 侧只剩 dust, 真实价值转移体现在 tok_out。只 fund
-    // 一份 headroom(首笔下注的 token dust + 手续费余量)。
-    const fundTx = await transfer(relayAddr, REGISTER_FUNDING_HEADROOM);
+    // 🔴 D-020 移植配套顺带修复(2026-09-23·simnet 端到端首次真实广播才暴露)：改用 v1.0.0 编译的
+    // sil-v1/PoolSideTicket.sil(取代已过期的 legacy PoolSide_v08_shard.sil——见 pool-bshard-artifacts.mjs
+    // computePoolSideTicketArtifact 的详细注释)。用真实 bettorPk/direction/stake/shardPoolId(不再用 z32
+    // 占位)——这次要的是完整 redeem 字节(含真实 State)直接传给 relay 当 ticket 输出, 不是旧流程那种只要
+    // 模板 hash、State 由 relay 另外手写重建的用法。
+    const psArtifact = computePoolSideTicketArtifact({ bettorPk, direction, stake, shardPoolId });
     const registerAppendDispatchTag = _shardLeafRegisterAppendDispatchTag();   // 合约结构性常量, 缓存, 不随 ctor/重试变
+
+    // 🔴 方向A(2026-09-26·Owner批·Bettor派给J2执行): 续笔下注(有 held token)不能直接把 held 的 transfer 输出
+    // 改写成新累计值——KanetTestToken.sil:109 的 require(sum_in>=sum_out) 会把这当"凭空增发"真实拒绝
+    // (2026-09-24 simnet 端到端撞过, 见 docs/iteration/j1-inbox/2026-09-24T00-00Z-j2-bet1-success-bet2-
+    // blocked-conservation-law-finding.md)。方向A: 先用 populateGenesisCovenants 手法(照抄 D-020 配套已验证
+    // 过的 unlockBshardGenesisMintShardLeaf 那套)无签名铸出【这一笔的差额 stake chip】(owner 直接=leafCovId,
+    // 不经过 owner=ZERO32 的无主中间态——不复现 D-020 要防的被偷漏洞), 落链确认后 register_append 同时消费
+    // [held, chip] 两个代币输入产出一个 merged 续约输出, sum_in(held.amount+chip.amount)==sum_out(merged.amount)
+    // 天然守恒(chip.amount=stake, held.amount=st.pool_value, merged.amount=newState.pool_value=st.pool_value+stake
+    // ——三者关系不变, 只是多了一个真实同时存在的输入把守恒配平)。
+    // 🔴 首笔统一路径(2026-09-26·Owner批·方向甲配套): 原以为"只在续笔(有 held token)时需要 chip"——但
+    // ShardLeaf.sil:150 的 require(owned_total == pool_value + stake) 对**每一次**调用(含首笔)都要求
+    // owned_total 里包含这一注的量。首笔没有 held, 但仍然需要一个 amount=stake 的 chip(它是自己那个
+    // covenant_id 组里唯一成员, register_append 侧消费时天然是 leader, 不需要 delegate——见
+    // unlockBshardRegister 的 chipSig 分支)。首笔/续笔从此统一成同一条编排路径, 不分支: 都先铸 chip、
+    // 都消费它, 唯一差异是续笔多一个 held 输入一起 merge。
+    // chip 铸造只依赖 stake(本函数入参, 全程不变) + leaf_cov_id(genesis 时定, 不随 tip-retry 变)——在下面的
+    // tip-retry 循环之外铸一次即可; 循环内只需要重读会因并发下注而变的 held token 当前 outpoint(下方 tokenInput)。
+    // 🔴 顺序踩坑修复(2026-09-26·simnet 真实撞过): chip 铸造自己的 funding self-send(chipFundTx) 必须在
+    // register_append 自己的 funding self-send(fundTx)【之前】全部完成——两者都是 relayAddr→relayAddr 的
+    // self-send, wallet 侧 UTXO 自动选择不知道"fundTx 的输出是留给 register_append 用的", 若 fundTx 先做、
+    // chipFundTx 后做, chipFundTx 的自动选币可能把 fundTx 刚落链的那个输出当自己的输入吃掉——
+    // unlockBshardRegister 随后再按坐标去找 fundTx 的 UTXO 就会 "UTXO not found"(不是并发下注的 tip-lag,
+    // 是同一次调用自己两笔 self-send 的先后序问题, tip-retry 循环重试不会修好它, 因为 fundTx 坐标本身没变)。
+    // 修法: chip 铸造(含它自己的 funding)全部完成后, 再做 fundTx——之后不再有任何其它 self-send 插进来碰
+    // relayAddr 的 UTXO 集合, fundTx 落链到被 unlockBshardRegister 消费之间就是干净的。
+    const chipArtifact = computeKttTokenArtifact({ amount: stake, ownerCovIdHex: shard.leaf_cov_id });
+    const chipRedeemHex = chipArtifact.script.toString('hex');
+    const chipAddr = p2sh(chipRedeemHex);
+    const chipFundTx = await transfer(relayAddr, TOKEN_GENESIS_DUST + 100_000_000);
+    const chipJ = await rc({ type: 'bshard_genesis_mint_stake_chip', chip: { redeem_hex: chipRedeemHex, seedSompi: String(TOKEN_GENESIS_DUST) }, inputs: { funding: { address: relayAddr, outpointTxid: chipFundTx, index: 0 } }, outputs: { change_address: relayAddr } });
+    const chipTx = chipJ.txId || chipJ.txid;
+    if (!chipTx || !await landed(chipTx, chipAddr)) throw new Error(`stake-chip genesis-mint no land: ${JSON.stringify(chipJ).slice(0, 160)}`);
+    const chipInput = { outpointTxid: chipTx, index: 0, redeem_hex: chipRedeemHex };
+
+    // D-020: 不再需要"stake 存进 leaf"这笔大钱——leaf KAS 侧只剩 dust, 真实价值转移体现在 tok_out。只 fund
+    // 一份 headroom(首笔下注的 token dust + 手续费余量)。放在 chip 铸造之后(见上方顺序踩坑修复注释)。
+    const fundTx = await transfer(relayAddr, REGISTER_FUNDING_HEADROOM);
 
     // #tip-lag retry (2026-07-05, Bettor 拍板·公测流量下 race 更频繁): register_append 撞
     // "UTXO not found"(相当于打到一个刚被别的并发赢家抢先花掉的 stale outpoint)时, 不直接
@@ -584,14 +624,28 @@ async function _registerBettorOnShardInner(o) {
         tokenInput = { outpointTxid: tokTxid, index: Number(tokIdxStr), redeem_hex: prevTokArtifact.script.toString('hex') };
       }
 
+      if (process.env.J2_DEBUG_DUMP_CTOR) {
+        (await import('node:fs')).writeFileSync(process.env.J2_DEBUG_DUMP_CTOR, JSON.stringify({
+          marketIdHash, psTmplHashHex: psArtifact.templateHashHex, shardPoolId, sealCount, payoutCovId, deadline,
+          tokenTmplHash, ownRedeemLen: Buffer.from(shard.shard_redeem_hex, 'hex').length, st, newState, stake, direction,
+          leafCovId: shard.leaf_cov_id, registerAppendDispatchTag,
+          // J2 排障(2026-09-26): chip 真实 covenant_id(populateGenesisCovenants 算出) + 上一笔 held(若有)真实
+          // covenant_id(shard.current_token_cov_id, 若已落库——目前未落库, 留空手动核对)。
+          chipCovId: chipJ.chipCovId, prevTokCovId: shard.current_token_cov_id || null,
+        }, null, 2));
+        console.log('[J2_DEBUG] ctor dump written to', process.env.J2_DEBUG_DUMP_CTOR);
+      }
+
       const cmd = buildRegisterCommand({
         witness, leafOutpointTxid: leafTxid, leafRedeemHex: curRedeem, currentLeafState: st,
         bettorFunding: [{ outpointTxid: fundTx, address: relayAddr, index: 0 }],
-        tokenInput, tokContinuationRedeemHex: tokArtifact.script.toString('hex'), tokDustSompi: TOKEN_GENESIS_DUST,
+        tokenInput, chipInput, tokContinuationRedeemHex: tokArtifact.script.toString('hex'), tokDustSompi: TOKEN_GENESIS_DUST,
+        ticketRedeemHex: psArtifact.script.toString('hex'),
         leafContinuationState: newState, ticketDustSompi: TICKET_DUST, shardPoolId, changeAddress: relayAddr,
       });
       try {
         const rj = await rc(cmd);
+        if (process.env.J2_DEBUG_DUMP_CTOR) console.log('[J2_DEBUG] chipCovId=', chipJ.chipCovId, 'tokCovId(this call new merged/genesis tok_out)=', rj.tokCovId);
         const regTx = rj.txId || rj.txid;
         const leafContAddr = rj.leafContinuationAddress || p2sh(spliceLeafState(shard.shard_redeem_hex, newState));
         if (!regTx || !await landed(regTx, leafContAddr)) throw new Error(`register_append no land: ${JSON.stringify(rj).slice(0, 160)}`);
@@ -621,9 +675,10 @@ async function _registerBettorOnShardInner(o) {
   //     out==pool_value(0)+stake 过; genesis seed (0.2KAS) 是 relay input, _appendChange 退 change (不进池)。
   const shardIndex = alloc.nextIndex;
   const shardPoolId = hex32(`${logicalMarketId}-shard-${shardIndex}`);
-  // psArtifact = bettor-INDEPENDENT 模板 (4 dust-ticket 字段是 State, register 时 splice); ps_tmpl_hash 进 leaf ctor (bettorPk/dir/stake 只占位求模板, z32 占 shardPoolId 位)。
-  // 🔴 事故修复(2026-07-07): 同上处理，强制 SILVERC_LEGACY，不依赖调用方传入的 silverc。
-  const psArtifact = computePoolSideArtifact(join(LIB, 'PoolSide_v08_shard.sil'), [ctorBytes32(bettorPk), ctorInt(direction), ctorInt(stake), ctorBytes32(z32)], SILVERC_LEGACY);
+  // psArtifact = bettor-INDEPENDENT 模板(4 dust-ticket 字段是 State, register 时 splice); 这里只要
+  // templateHashHex 烤进 leaf ctor(ps_tmpl_hash)，genesis 本身不产出 ticket。
+  // 🔴 D-020 移植配套顺带修复(2026-09-23): 同 'use' 分支，改用 v1.0.0 编译的 PoolSideTicket.sil。
+  const psArtifact = computePoolSideTicketArtifact({ bettorPk, direction, stake, shardPoolId });
   const genState = { local_yes: 0, local_no: 0, count: 0, pool_value: 0 };  // 空 maker seed (非 bettor; level2-A Σcount==loaded 排除它)
   // 🔴 D-020 移植配套(2026-09-23): genesis 时不动点收敛 own_redeem_len(每个市场自己的 seal_count/min_bet
   // 组合各自收敛，不假设跨市场共用)——收敛出的值只在本次调用内使用，之后任何 register_append 重建都

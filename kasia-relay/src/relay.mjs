@@ -1018,6 +1018,16 @@ if (process.send) {
           if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
           return;
         }
+        case 'bshard_genesis_mint_stake_chip': {
+          // 方向A(2026-09-26·Owner批·Bettor派给J2): 续笔下注专用, 无签名铸出这一笔的差额 stake chip(owner=
+          // leafCovId, 不经无主中间态)。unlockBshardRegister 随后同时消费 [held token, 这个 chip] 产出一个
+          // merged 续约输出, sum_in==sum_out 天然守恒(见 p2sh.mjs 里 unlockBshardGenesisMintStakeChip 头注)。
+          const { unlockBshardGenesisMintStakeChip } = await import('./lib/p2sh.mjs');
+          const wallet = getWallet();
+          const r = await unlockBshardGenesisMintStakeChip({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
+          if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
+          return;
+        }
         case 'bshard_consolidate': {
           // 单片全额归集进真 PayoutShard (PS absorb OP_0 + SL consolidate_to_payout OP_1, cov_id-bind destination + CovenantBinding 续).
           const { unlockBshardConsolidate } = await import('./lib/p2sh.mjs');

@@ -18,11 +18,20 @@
 // 4-field 无 outcome = 结构上不可结算; 结算经 PayoutShard.close_attest(委员 attest payoutRoot)+ claim(store-payout)。
 //
 // ★ T3 v0.3 §2 全 23 入口 A/B 落位表代币化(ledger 1188 批次④第二处): 两入口均 A 类。
-//   register_append: RHS=pool_value(本 leaf 既有持仓, 首次调用=0), 合法在场不计入=是(bettor 新下的注 owner 尚未
-//     变成本 leaf, 天然被 owner 过滤排除, 同 PayoutShard.absorb 的 shard_amount 正例), 输出侧派生绑定 =
-//     tok_out owner=OpInputCovenantId(this.activeInputIndex)(自身)。V-T-8(readInputStateWithTemplate + 本合约
-//     self-continuation 同函数共存): 命中——leaf 自身 4-field State 续约改 AB11 手写编码(同 PayoutShard.absorb
-//     手法, 常量按本文件实际编译产物量测, 见 provenance measure 脚本)。
+//   register_append: RHS=pool_value+stake(本 leaf 续约后的新持仓)。
+//   🔴 方向A(2026-09-26·Owner批·D-020配套续修): 上面这条 RHS 曾是纯 pool_value(旧持仓, 首次调用=0)，
+//     "bettor 新下的这一注天然被 owner 过滤不计入 owned_total"——前提是新注的 owner 在 input 时【还不是】
+//     本 leaf。方向A为避免 D-020 要防的 owner=ZERO32 无主中间态被偷(见 unlockBshardGenesisMintStakeChip
+//     头注)，把这一注的差额筹码(chip)从铸出那一刻起 owner 就直接=leafCovId——这打破了旧前提: chip 从
+//     input 起就已经"是 leaf 的"，会被 scanOwnedTokenInputs 计入。RHS 因此改为 pool_value+stake，且首笔/
+//     续笔统一走同一条路径(不加"是不是首笔"的条件分支): 首笔=只消费 chip 一个 KTT 输入(它自己那个
+//     covenant_id 组里唯一成员, 天然是 leader); 续笔=消费 [held, chip] 两个(held/chip 均未
+//     populateGenesisCovenants 绑定, 天然同属 covenant_id=ZERO32 组, tx 下标较小的 held 是 leader、chip 是
+//     delegate, 见 KanetTestToken.sil transfer/transfer_delegator 与 DECL.md §N:M leader/delegate 生成模式)。
+//     输出侧派生绑定 = tok_out owner=OpInputCovenantId(this.activeInputIndex)(自身，不变)。V-T-8
+//     (readInputStateWithTemplate + 本合约 self-continuation 同函数共存): 命中——leaf 自身 4-field State
+//     续约改 AB11 手写编码(同 PayoutShard.absorb 手法, 常量按本文件实际编译产物量测, 见 provenance measure
+//     脚本；方向A改动后 own_redeem_len 需要重新收敛测量，不可沿用旧值)。
 //   consolidate_to_payout: RHS=pool_value(leaf 全部持仓, 整体转出), 合法在场不计入=否, 输出侧派生绑定 =
 //     tok_out owner=OpInputCovenantId(psInIdx)(真 PS 实例, 已核==payout_cov_id)。无续约(leaf 生命周期终点,
 //     不调用 validateOutputState 续自身)→ 不触发 V-T-8, 不需要 AB11(同 RootClose.convert_to_claim/
@@ -137,8 +146,11 @@ contract ShardLeaf(
             shardPoolId: shard_pool_id
         }, ps_prefix, ps_suffix, ps_tmpl_hash);
 
+        // 🔴 方向A(2026-09-26·Owner批, 见文件头注): RHS 从纯 pool_value 改成 pool_value+stake——这一注的
+        // 差额筹码(chip)铸出即 owner=leafCovId, 从 input 起就被 scanOwnedTokenInputs 计入(不再"合法在场不
+        // 计入"), 首笔/续笔统一同一条等式, 不分支。
         int owned_total = scanOwnedTokenInputs(tok_prefix, tok_suffix);
-        require(owned_total == pool_value);
+        require(owned_total == pool_value + stake);
         validateOutputStateWithTemplate(tok_out, TokenState {
             amount:               pool_value + stake,
             owner:                OpInputCovenantId(this.activeInputIndex),

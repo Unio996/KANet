@@ -1938,6 +1938,59 @@ export async function unlockBshardGenesisMintShardLeaf(args) {
 }
 
 /**
+ * unlockBshardGenesisMintStakeChip — 方向A(2026-09-26, Owner批·Bettor派给J2): 续笔下注(有 held token)专用,
+ * 无签名铸出【这一笔的差额 stake chip】(KanetTestToken 实例, owner 直接=leafCovId)。
+ * 起因: KanetTestToken.sil:109 的 require(sum_in>=sum_out) 是正确的资金安全底线(挡凭空增发)——续笔下注若
+ * 直接把 held token(amount=X) 的 transfer 输出改写成新累计值(amount=X+stake), 会被这条不变量真实拒绝
+ * (2026-09-24 simnet 真撞过, docs/iteration/j1-inbox/2026-09-24T00-00Z-j2-bet1-success-bet2-blocked-
+ * conservation-law-finding.md)。方向A: 先在独立一笔交易里铸出这一笔的差额(amount=stake, owner=leafCovId,
+ * 不经过 D-020 要防的 owner=ZERO32 无主中间态), register_append 那笔交易再同时消费 [held, chip] 两个输入
+ * 产出一个 merged 续约输出——sum_in(held+chip)==sum_out(merged) 天然守恒, 不改分片/代币合约任何校验逻辑。
+ * 不需要 populateGenesisCovenants/CovenantBinding(跟 unlockBshardRegister 里已经在跑、已验证过的
+ * tok_continuation 首笔genesis 输出一样——本 tx 内没有任何东西需要靠 OpInputCovenantId 内省这个新输出的
+ * covenant_id, 它只是一个普通 P2SH 输出; ShardLeaf/KanetTestToken 两边都只认模板哈希+ctor state, 不认
+ * covenant_id 是不是"新铸"还是"续约")。手法结构上镜像 unlockBshardGenesisMintPayout/ShardLeaf(同一族
+ * "relay funding→covenant genesis P2SH"), 但省掉那两个函数需要的 covenant-binding 步骤——不是漏做, 是这个
+ * 目标合约不需要。
+ */
+export async function unlockBshardGenesisMintStakeChip(args) {
+  const { wallet, cmd, networkId, lockTime = 0n } = args;
+  const rpc = await connectRpc(networkId);
+  try {
+    const f = cmd.inputs.funding;
+    const fundUtxo = await _matchUtxo(rpc, f.address, f.outpointTxid, f.index);
+    const chipAddr = _addressFromRedeem(cmd.chip.redeem_hex, networkId);   // KTT genesis P2SH = hash(redeem)
+    const chipSeed = BigInt(cmd.chip.seedSompi);                            // dust 面值(同 tok_continuation 首笔genesis用的 TOKEN_GENESIS_DUST)
+    const fee = _bshardFeeV1(1);
+    if (_utxoValue(fundUtxo) - chipSeed - fee < 0n) throw new Error(`stake-chip genesis-mint insufficient: Σin ${_utxoValue(fundUtxo)} < seed ${chipSeed} + fee ${fee}`);
+    const change = _utxoValue(fundUtxo) - chipSeed - fee;
+    const outputs = [new TransactionOutput(chipSeed, payToAddressScript(new Address(chipAddr)))];
+    if (change >= 1000n && cmd.outputs?.change_address) outputs.push(new TransactionOutput(change, payToAddressScript(new Address(cmd.outputs.change_address))));
+    // 🔴 2026-09-26 real-simnet 排障发现(方向甲落地过程中撞出, 独立于方向甲本身): chip genesis 输出若不调
+    // populateGenesisCovenants, 真实 kaspad 在后续 register_append 消费它时对 OpInputCovenantId 报
+    // "covenant id 0000...0000 input 0 is out of bounds"——之前"genesis 输出不需要 populateGenesisCovenants"
+    // 的判断只在"这笔输出从未被当作 binding=cov 覆盖组的一员去消费"时成立(tok_continuation 首笔那次只是被
+    // KanetTestToken 的 template/state 匹配读取, 不触发 group 内省)；chip 会被 KanetTestToken.transfer 的
+    // binding=cov 覆盖组机制内省, 需要跟 ShardLeaf/PayoutShard genesis 同样显式绑定。
+    const mk = (ss) => {
+      const t = new Transaction({
+        version: 1,
+        inputs: [{ previousOutpoint: { transactionId: fundUtxo.outpoint.transactionId, index: fundUtxo.outpoint.index }, signatureScript: ss, sequence: 0n, sigOpCount: 0, computeBudget: _BSHARD_COMPUTE_BUDGET, ...(ss === '' ? { utxo: fundUtxo } : {}) }],
+        outputs, lockTime: BigInt(lockTime), gas: 0n, subnetworkId: '0000000000000000000000000000000000000000', payload: '',
+      });
+      t.populateGenesisCovenants([new GenesisCovenantGroup(0, [0])]);
+      return t;
+    };
+    const chipCovId = String(mk('').outputs[0].covenant.covenantId);
+    const sigHex = createInputSignature(mk(''), 0, wallet.getPrivateKey(), SighashType.All);
+    const signedTx = mk(sigHex);
+    _assertTxInvariants([fundUtxo], signedTx, 'unlockBshardGenesisMintStakeChip', networkId);
+    const r = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
+    return { txId: r.transactionId, chipAddress: chipAddr, chipCovId, chipSeedSompi: chipSeed.toString() };
+  } finally { try { await rpc.disconnect(); } catch {} }
+}
+
+/**
  * unlockBshardConsolidate — 关池后单片全额归集进真 PayoutShard covenant (cov_id provenance destination-bind)。
  * tx: in=[PS@0(absorb OP_0), SL@1(consolidate_to_payout OP_1), fee@2] → out=[PS_continuation@0(cov_id 续), change]。
  *   • PS@0 absorb(selfOutIdx=0, shardInIdx=1): credit SL UTXO 真 value(register-welded pool_value)+ validateOutputState 续 cov_id。
@@ -2843,6 +2896,10 @@ export function _encodeKttTransferZeroOutAction(dispatchTagHex, stateFieldCount,
   b.addData(new Uint8Array(Buffer.from(dispatchTagHex.replace(/^0x/, ''), 'hex')));
   return b.drain();
 }
+// 🔵 held/chip 的 leader/delegate 分流曾经短暂引入过又撤销了(2026-09-26)——一度以为两者未
+// populateGenesisCovenants 就共享 ZERO32、需要 DECL.md 的 `__leader_f`/`__delegate_f` 分流；真实根因另有
+// 其事(见 unlockBshardRegister 头注: leaf 自续约漏 CovenantBinding, NWT 定位), held/chip 各自独立成组,
+// 都走 leader 的 `transfer`, 不需要 delegate——`_encodeKttTransferDelegatorAction` 已删除(不留死代码)。
 // 🔵 export 仅为可测性——ShardLeaf.sil register_append(10参数, D-020 移植后) 的 v1.0.0 action 编码，逐字
 // 对照 kasia-console/src/lib/proto-register-append-witness.mjs 的 encodeRegisterAppendAction(已用真实
 // cli-debugger 逐字节验证过)。
@@ -2869,14 +2926,23 @@ function _combineActionAndRedeem(actionHex, redeemHex) {
 
 /**
  * unlockBshardRegister — bshard_register_bet (register_append entry, ShardLeaf.sil D-020 移植后 10 参数)。
- * Inputs: [0] leaf (P2SH register_append, no sig) + [1]? token(上一笔续约代币, 可选, 第一笔下注无) + funding P2PK (wallet-signed)。
- * Outputs: [leaf_out_idx] new leaf(per-state addr, 面值原样搬运不加算) + [tok_out_idx] 代币续约 + [ps_out_idx] dust ticket + change。
+ * Inputs: [0] leaf (P2SH register_append, no sig) + [1]? token(上一笔续约代币, 可选, 第一笔下注无)
+ *   + [2]? chip(这一笔的差额 stake chip, 与 token 配对出现——方向A, 见下) + funding P2PK (wallet-signed)。
+ * Outputs: [leaf_out_idx] new leaf(per-state addr, 面值原样搬运不加算) + [tok_out_idx] 代币续约(token+chip
+ *   merge, 或首笔纯 genesis) + [ps_out_idx] dust ticket + change。
  * 🔴 D-020 移植(2026-09-23·Owner批·NWT审)：leaf scriptSig 从旧编译器(pre-v1.0.0)的裸 opcode 选择器改成
  * v1.0.0 codegen 要求的 ScriptBuilder addI64/addData + dispatch_tag PUSH-DATA 编码（照抄
  * kasia-console/src/lib/proto-register-append-witness.mjs 的 encodeRegisterAppendAction 已验证过的编码
  * 顺序，不 import——proto-v0 即将删除，relay 生产代码不应依赖它，这里是照抄同一套逻辑写死在本文件里）。
  * 旧编码用裸 `'00'`(OP_0)当 entry 0 选择器，这对 v1.0.0 编译产物从一开始就是错的（v1.0.0 dispatch 靠 4 字节
  * dispatch_tag 当 push-data 推，不是靠裸 opcode）——这个 bug 独立于 D-020 本身，是同一次改动窗口顺带修的。
+ * 🔴 方向A chip 消费(2026-09-26·Owner批·Bettor派给J2·simnet 真撞过守恒拒绝后的修法): 续笔下注(cmd.inputs.token
+ * 非空)时 cmd.inputs.chip 必配对非空(unlockBshardGenesisMintStakeChip 已独立铸出并落链确认过的差额 chip)。
+ * token/chip 两个 KTT 输入各自独立满足 KanetTestToken.transfer(owner_input_idx 都指向 leaf=input 0——两者
+ * owner 字段都是 leafCovId), 产出【一个】merged 续约输出。守恒: sum_in(token.amount+chip.amount) ==
+ * sum_out(merged.amount) —— tok_continuation 的 ctor amount(newState.pool_value, 由 console 侧算好传入)本来
+ * 就等于 token(st.pool_value)+chip(stake) 之和, 这次改动只是让"消费侧的真实 tx 输入"配上这个早就正确的和,
+ * 不改 ShardLeaf.sil/KanetTestToken.sil 一行校验逻辑。
  */
 export async function unlockBshardRegister(args) {
   const { wallet, cmd, networkId, lockTime = 0n } = args;
@@ -2884,36 +2950,92 @@ export async function unlockBshardRegister(args) {
   const rpc = await connectRpc(networkId);
   try {
     const leafUtxo = await _matchUtxo(rpc, _addressFromRedeem(cmd.inputs.leaf.redeem_hex, networkId), cmd.inputs.leaf.outpointTxid);   // P2SH 地址 = hash(redeem)
+    // 🔴 NWT 根因定位(2026-09-26, docs/iteration/j1-inbox/2026-09-26T08-39Z-nwt-ROOTCAUSE-...md): leaf 自续约
+    // 输出此前一直没声明 CovenantBinding(这个函数是全文件唯一一处漏了的自续约, PayoutShard 系 7+ 处
+    // (_psInputCovId + new CovenantBinding(0,...))全部做对)。没声明 ⇒ 落链后这个 UTXO 的 covenant_id 是
+    // None(rusty-kaspa covenants.rs: 没声明的输出直接跳过, 不进 shared_ctxs)——BET1 能成功是因为 BET1 的
+    // leaf 输入是 genesis UTXO(populateGenesisCovenants 正确绑定过), 根本没测到"续约 leaf 输入"这条路径；
+    // BET2 花的是 BET1 产的续约输出, OpInputCovenantId(0) 读到 ZERO_HASH 不是真实 leafCovId, 跟 held/chip
+    // ctor 里写死的真实 leafCovId 对不上, scanOwnedTokenInputs 算出 owned_total=0, require 必败。
+    // 零成本核实过(2026-09-26): 真实查询 BET1 产的 leaf 续约 UTXO, entry.covenantId === undefined，坐实。
+    // 修法照抄 _psInputCovId(:1850)的读法——从正在花的 leafUtxo 自己身上现读, 读不到 fail-loud, 不读/不信
+    // DB 的 market_shards.leaf_cov_id 列(那是 genesis 时写的缓存值, 不是 consensus 认可的真相源；且这样修
+    // 一次对每一笔续约都成立, 不用关心这是第几笔)。
+    const leafCovIdRaw = leafUtxo.entry?.covenantId ?? leafUtxo.covenant?.covenantId ?? leafUtxo.covenantId;
+    if (leafCovIdRaw == null) throw new Error('leaf input 无 cov_id(genesis 漏 populateGenesisCovenants, 或上一笔续约漏 CovenantBinding)');
+    const leafCovId = String(leafCovIdRaw);   // 同 _psInputCovId(:1850) 一样转 String——原生值是 wasm Hash 对象, new Hash(...) 要 hex 字符串不是对象
     const tokenUtxo = cmd.inputs.token
       ? await _matchUtxo(rpc, _addressFromRedeem(cmd.inputs.token.redeem_hex, networkId), cmd.inputs.token.outpointTxid, cmd.inputs.token.index)
       : null;   // null = 第一笔下注，leaf 还没有任何续约代币可消费(scanOwnedTokenInputs 天然扫到 0)
+    const chipUtxo = cmd.inputs.chip
+      ? await _matchUtxo(rpc, _addressFromRedeem(cmd.inputs.chip.redeem_hex, networkId), cmd.inputs.chip.outpointTxid, cmd.inputs.chip.index)
+      : null;   // null = 第一笔下注(同 token, 无需消费任何东西); 非空必与 tokenUtxo 配对(方向A)
     const fundUtxos = [];
     for (const f of (cmd.inputs.funding || [])) fundUtxos.push(await _matchUtxo(rpc, f.address, f.outpointTxid, f.index));
 
     // 输出地址 relay 自算 per-state (忽略 cmd.address)
     const newLeafAddr = _continuationAddress(cmd.inputs.leaf.redeem_hex, _serializeLeafStateHex(cmd.outputs.leaf_continuation.state), networkId);
-    const ticketAddr = _ticketAddress(w.ps_prefix_hex, w.ps_suffix_hex, cmd.outputs.poolSide_ticket.state, networkId);
+    // 🔴 D-020 移植配套顺带修复(2026-09-23·simnet 端到端首次真实广播才暴露): 改用 _addressFromRedeem(同
+    // leaf/token 的处理方式，JS 侧给完整 redeem 字节，relay 只管 hash)——旧 _ticketAddress(手写 prefix+
+    // serialize(state)+suffix 重建)是给 legacy 编译器族的 PoolSide_v08_shard.sil 写的，v1.0.0 编译的
+    // PoolSideTicket.sil(ShardLeaf.sil 的 Tk struct 实际比对的模板)不保证字节布局相同——这是比 D-020 更早
+    // 遗留的漂移(D-019 迁移时没人把 pool-shard-register.mjs 切过去)，market_shards 在主网/simnet 都是
+    // 0 行，从未被真实广播暴露过，这次 simnet e2e 才第一次撞上。
+    const ticketAddr = _addressFromRedeem(cmd.outputs.poolSide_ticket.redeem_hex, networkId);
     const tokContAddr = _addressFromRedeem(cmd.outputs.tok_continuation.redeem_hex, networkId);
 
     // leaf scriptSig: register_append witness(v1.0.0 codegen: addI64/addData 声明序 + dispatch_tag push-data + redeem reveal)。
     const leafSig = _combineActionAndRedeem(_encodeRegisterAppendAction(w), cmd.inputs.leaf.redeem_hex);
 
-    // token input(可选) 自己的 sigScript: 独立满足 KanetTestToken.transfer(next_states=[]零出全消费,
-    // owner_input_idx 指向 leaf 在本笔交易里的下标——leaf 永远是 input 0)。
+    // 🔴 leader/delegate 反复(2026-09-26): 最初以为 held/chip 都未 populateGenesisCovenants 绑定就共享
+    // ZERO32、需要 DECL.md 的 leader/delegate 分流——但真实 simnet 排障(见 unlockBshardGenesisMintStakeChip
+    // 头注 + 本函数 tok_out 的 populateGenesisCovenants 绑定, 均 2026-09-26 当天追加)确认: covenant_id 从来
+    // 不是"不绑定就退化成 ZERO32"，而是"不绑定 = 这个输出根本没有可内省的 covenant_id, OpInputCovenantId
+    // 在后续消费时直接报 out-of-bounds"——不是"退化成一个大家共享的特定值"。held(上笔 register_append 的
+    // tok_out)和 chip(unlockBshardGenesisMintStakeChip)现在都各自 populateGenesisCovenants 绑定了真实、
+    // 各不相同的 covenant_id, 两者天然各自独立成组(组大小=1)——都应该走 leader 的 `transfer`
+    // (owner_input_idx=[0]单元素), 不需要(也不应该)有 delegate。之前引入的
+    // _encodeKttTransferDelegatorAction/leader-delegate 分流是建立在"两者共享 ZERO32"这个错误前提上的,
+    // 现改回两者对称: 都用同一份 `_encodeKttTransferZeroOutAction(..., [w.token_owner_input_idx])`。
     const tokenSig = tokenUtxo
       ? _combineActionAndRedeem(_encodeKttTransferZeroOutAction(w.token_transfer_dispatch_tag_hex, w.token_transfer_state_field_count, [w.token_owner_input_idx]), cmd.inputs.token.redeem_hex)
       : null;
+    const chipSig = chipUtxo
+      ? _combineActionAndRedeem(_encodeKttTransferZeroOutAction(w.token_transfer_dispatch_tag_hex, w.token_transfer_state_field_count, [w.chip_owner_input_idx]), cmd.inputs.chip.redeem_hex)
+      : null;
 
     const outputs = [];
-    outputs[w.leaf_out_idx] = new TransactionOutput(_utxoValue(leafUtxo), payToAddressScript(new Address(newLeafAddr)));   // 原样搬运当前面值, D-020: 不再 +=stake
-    // token 续约输出面值: 有上一笔代币输入(第二笔起)就原样搬运它的真实面值(同 leaf 的处理方式)——只有
-    // 第一笔下注(无 tokenUtxo, 没有代币可以搬运面值)才用 cmd 里外部资助的 dust 面值。
-    const tokOutValue = tokenUtxo ? _utxoValue(tokenUtxo) : BigInt(cmd.outputs.tok_continuation.amountSompi);
+    // 🔴 NWT 根因修复(2026-09-26): 补上这个函数全文件唯一漏掉的 CovenantBinding——leaf 自续约(input 0 = leaf
+    // 自己, 续自己的 covenant_id), 同 PayoutShard 系 7+ 处 new CovenantBinding(0, new Hash(psCovId)) 一致手法。
+    outputs[w.leaf_out_idx] = new TransactionOutput(_utxoValue(leafUtxo), payToAddressScript(new Address(newLeafAddr)), new CovenantBinding(0, new Hash(leafCovId)));   // 原样搬运当前面值, D-020: 不再 +=stake
+    // token 续约输出面值(真实 KAS dust backing, 与 ctor 里的 amount 记账数字是两回事): 首笔下注(无 tokenUtxo/
+    // chipUtxo)用 cmd 里外部资助的 dust 面值; 续笔(方向A, token+chip 配对)原样搬运两者面值之和(同 leaf 的
+    // "原样搬运不加算"处理方式, 只是这里搬运的是两个输入的和而不是一个)。
+    // 首笔统一路径(2026-09-26): chipUtxo 恒真、tokenUtxo 只在续笔(第二笔起)才非空——不能無条件假设两者都在,
+    // 首笔只有 chip 一个输入, 面值就是 chip 自己的, 没有 token 可加。
+    const tokOutValue = chipUtxo
+      ? (tokenUtxo ? _utxoValue(tokenUtxo) + _utxoValue(chipUtxo) : _utxoValue(chipUtxo))
+      : (tokenUtxo ? _utxoValue(tokenUtxo) : BigInt(cmd.outputs.tok_continuation.amountSompi));
     outputs[w.tok_out_idx] = new TransactionOutput(tokOutValue, payToAddressScript(new Address(tokContAddr)));
     outputs[w.ps_out_idx] = new TransactionOutput(BigInt(cmd.outputs.poolSide_ticket.amountSompi), payToAddressScript(new Address(ticketAddr)));
     const orderedOut = outputs.filter(o => o !== undefined);
-    const matched = [leafUtxo, ...(tokenUtxo ? [tokenUtxo] : []), ...fundUtxos];
-    _appendChange(orderedOut, matched, cmd.outputs.change_address, _bshardFeeV1(matched.length));   // v1 budget-aware fee
+    const matched = [leafUtxo, ...(tokenUtxo ? [tokenUtxo] : []), ...(chipUtxo ? [chipUtxo] : []), ...fundUtxos];
+    // 🔴 D-020 移植配套顺带修复(2026-09-23·simnet 端到端首次真实广播才暴露): _bshardFeeV1 是给旧(2输出/
+    // 短witness)register_append 校准的每-input 费率，对 D-020 后这笔交易(3个输出+tok_suffix 这类模板
+    // witness 動輒上千字节，第二笔起还要揭示 token 输入自己~3KB 的 redeem)明显不够——simnet 真实广播被拒
+    // "fees which is under the required amount"(bet1 实测需要 ≥3,575,800 sompi，_bshardFeeV1(2)=2,000,000
+    // 不够)。改用固定较大值(留够第二笔更大交易的余量)，不是精算，是留够 headroom；真正的精算(按 mass
+    // 现算 fee)留给后续正式接入生产前再做。
+    const registerAppendFee = 15_000_000n;
+    _appendChange(orderedOut, matched, cmd.outputs.change_address, registerAppendFee);
+    const covenantSigCount = 1 + (tokenUtxo ? 1 : 0) + (chipUtxo ? 1 : 0);   // [0]leaf [1]token? [2]chip?(均 no-sig covenant reveal) [其余]funding(wallet签)
+    // 🔴 2026-09-26 real-simnet 排障发现(同 unlockBshardGenesisMintStakeChip 头注, 独立于方向甲本身): tok_out
+    // 是每次 register_append 都新铸/新合并的 KanetTestToken 实例(不是延续某个既有 covenant_id——held+chip
+    // 两条不同血统合并成一个新输出, 首笔也是全新一个)，下一次 register_append 会把它当 held 输入、经
+    // KanetTestToken.transfer 的 binding=cov 覆盖组内省——不显式 populateGenesisCovenants 绑定的话, 那次
+    // OpInputCovenantId 会跟 chip 之前撞的一样报 "out of bounds"。授权 input 用第一个 funding 输入(同旧
+    // (superseded) 两步铸设计里 merged 输出的授权输入选法, mk_and_run.mjs vector A/C 的 fee 输入先例)。
+    // v1 sighash 含 covenant, 必须先于签名 populateGenesisCovenants——同 ShardLeaf/Payout genesis 手法。
     // unsigned (funding inputs 留空待签; leaf/token 无 sig 直接置 scriptSig)。v1: sigOpCount=0 + computeBudget(ComputeCommit)。
     const unsigned = new Transaction({
       version: 1,
@@ -2924,8 +3046,8 @@ export async function unlockBshardRegister(args) {
       outputs: orderedOut, lockTime: BigInt(lockTime), gas: 0n,
       subnetworkId: '0000000000000000000000000000000000000000', payload: '',
     });
-    const covenantSigCount = tokenUtxo ? 2 : 1;   // [0]leaf [1]token?(no-sig covenant reveal) [其余]funding(wallet签)
-    const sigScripts = tokenUtxo ? [leafSig, tokenSig] : [leafSig];
+    unsigned.populateGenesisCovenants([new GenesisCovenantGroup(covenantSigCount, [w.tok_out_idx])]);
+    const sigScripts = [leafSig, ...(tokenUtxo ? [tokenSig] : []), ...(chipUtxo ? [chipSig] : [])];
     for (let i = covenantSigCount; i < matched.length; i++) {
       sigScripts.push(createInputSignature(unsigned, i, wallet.getPrivateKey(), SighashType.All));
     }
@@ -2938,9 +3060,23 @@ export async function unlockBshardRegister(args) {
       outputs: orderedOut, lockTime: BigInt(lockTime), gas: 0n,
       subnetworkId: '0000000000000000000000000000000000000000', payload: '',
     });
+    signedTx.populateGenesisCovenants([new GenesisCovenantGroup(covenantSigCount, [w.tok_out_idx])]);
     _assertTxInvariants(matched, signedTx, 'unlockBshardRegister', networkId);
+    // 🔵 临时调试(J2 排障用, env 门控, 不改变生产行为): 落一份 cli-debugger 可直接吃的 test.json，
+    // 方便在真实广播被拒时不用重跑整个 e2e 就能用 cli-debugger 定位具体哪个 require() 挂了。
+    if (process.env.J2_DEBUG_DUMP_REGISTER_TX) {
+      try {
+        const asHex = (v) => { if (typeof v === 'string') return v.startsWith('0x') ? v : '0x' + v; return '0x' + Buffer.from(v).toString('hex'); };
+        const dbgInputs = matched.map((u, i) => ({ utxo_value: Number(u.entry ? u.entry.amount : u.amount), utxo_script_hex: asHex(u.entry ? u.entry.scriptPublicKey.script : u.scriptPublicKey.script), signature_script_hex: asHex(sigScripts[i]) }));
+        const dbgOutputs = orderedOut.map((o) => ({ value: Number(o.value), script_hex: asHex(o.scriptPublicKey.script) }));
+        const { writeFileSync } = await import('node:fs');
+        writeFileSync(process.env.J2_DEBUG_DUMP_REGISTER_TX, JSON.stringify({ witness: w, cmd, inputs: dbgInputs, outputs: dbgOutputs, tokenPresent: !!tokenUtxo, chipPresent: !!chipUtxo }, null, 2));
+        console.log('[J2_DEBUG] register tx dump written to', process.env.J2_DEBUG_DUMP_REGISTER_TX);
+      } catch (e) { console.log('[J2_DEBUG] dump failed (non-fatal):', e.message); }
+    }
+    const tokCovId = String(signedTx.outputs[w.tok_out_idx].covenant.covenantId);
     const r = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
-    return { txId: r.transactionId };
+    return { txId: r.transactionId, tokCovId };
   } finally { try { await rpc.disconnect(); } catch {} }
 }
 
