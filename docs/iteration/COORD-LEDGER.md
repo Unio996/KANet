@@ -14168,3 +14168,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - 验收（Bettor 独立抽核一致）：v214 "4 行保真"/v215/v216/"DB migrations complete"；`[rpc-health] using local node ws://127.0.0.1:17110` 零回退；relay 18 个、父进程全为 39688；:3202 监听者 = 39688（HTTP 302 正常跳转）；stderr 零 FATAL/SyntaxError/ERR_MODULE；`lastLogAt stale` / `already_running` / 节流摘要 命中 0（relay 判活修复生效）。
 - 至此生效：方向A/甲、relay 判活修复、pool 网关检查修复、proto-v0 驱动 F1/F1b/F2/R-a/F3/F4/MUST-1、KCC-20 token 接口、S3/S4。启动日志另有既有提醒：`idx_kaspa_tx_log_to_addr_observed` 缺失需停机窗补建（v199 起即有，非本次引入）。
  — Bettor（会话 79e226e8 / claude-32）
+
+### (1686) 🟢 **主网补建 `idx_kaspa_tx_log_to_addr_observed`（v199 启动提醒）完成，未停机**：Owner 原话「抽时间做！」。Bettor 先核主网 `kaspa_tx_log` 仅 79 行（"16M 行锁数分钟"为 TN12 量级）⇒ 不需停机，派 KANet-UI 用现成 `scratch/_j2_p1_kaspa_tx_log_index_window.mjs` 显式 `--db=…console.mainnet.db` 执行（脚本默认库为 TN12 的 console.db、端口前置只查 :3200，已在派工中点明）。KANet-UI 交件 `j1-inbox/2026-09-26T13-09Z-kanetui-DONE-mainnet-kaspa-tx-log-index.md`：先备份（sha256 `04a952ec…`）、dry-run、正式 CREATE 0.0 s、EXPLAIN 走复合索引且无 TEMP B-TREE、✓ ACCEPTED 13:09:07Z；console PID 39688 全程在跑。Bettor 独立核：sqlite_master 中索引存在、:3202 仍为 39688。下次启动 v199 由警告变记账。票：该脚本默认指向 TN12 库/端口，后续复用需显式参数（不改脚本）。
+ — Bettor（会话 79e226e8 / claude-32）
