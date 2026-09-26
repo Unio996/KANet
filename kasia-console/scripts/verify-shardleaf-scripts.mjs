@@ -111,6 +111,23 @@ function shardLeafRegisterAppendDispatchTag(tokenTmplHash) {
   return tag;
 }
 
+// 🔴 NWT MUST-1(2026-09-26, j1-inbox 2026-09-26T10-07Z-nwt-VERDICT-j2-4d85dd12): OWN_PREFIX_LEN/
+// OWN_STATE_LEN 必须按*这次真实调用的 ctor*现编现测(compiled.state_layout.{start,len})，不能拿写死的
+// {1,36} 顶替打印——那等于宣称一个没测过的结论。本函数真实编译一次(跟 compileShardLeafRedeem 内部做的
+// 事完全同源，只是这里额外把 state_layout 取出来供汇总断言用，不是另一条可能漂移的路径)。
+function measureStateLayout({ marketIdHash, psTmplHashHex, shardPoolId, sealCount, minBet, payoutCovId, deadline, tokenTmplHash, state, ownRedeemLen }) {
+  const ctor = [
+    ctorBytes32V100(marketIdHash), ctorBytes32V100(psTmplHashHex), ctorBytes32V100(shardPoolId),
+    ctorIntV100(sealCount), ctorIntV100(minBet), ctorBytes32V100(payoutCovId), ctorIntV100(deadline),
+    ctorBytes32V100(tokenTmplHash),
+    ctorIntV100(state.local_yes), ctorIntV100(state.local_no), ctorIntV100(state.count), ctorIntV100(state.pool_value),
+    ctorIntV100(ownRedeemLen),
+  ];
+  const compiled = compileSilV100(SIL_PATH, ctor, 'ShardLeaf');
+  if (!compiled.state_layout) throw new Error('measureStateLayout: 编译产物缺 state_layout');
+  return { start: compiled.state_layout.start, len: compiled.state_layout.len };
+}
+
 // 构造一笔 register_append 交易的 test.json 形状(leaf + [held]? + chip? + fee)，返回
 // { inputs, outputs, leafSig, tokenSig, chipSig } 供 cli-debugger 逐 active_input 验证。
 function buildRegisterAppendShape({
@@ -218,7 +235,9 @@ for (const c of CTOR_CASES) {
     leafRedeemHex, leafCovId, currentState: zeroState, side: 0, stake: c.minBet, heldArtifact: null, registerAppendDispatchTag,
     shardPoolId: marketId, bettorPk,
   });
-  allStateLayouts.push({ start: 1, len: 36 }); // OWN_PREFIX_LEN/OWN_STATE_LEN 已由 compileShardLeafRedeem 内部 fail-closed 核对过, 这里只记录用于汇总打印
+  const firstLayout = measureStateLayout({ marketIdHash: marketId, psTmplHashHex: psTmplHashProbe, shardPoolId: marketId, sealCount: c.sealCount, minBet: c.minBet, payoutCovId, deadline, tokenTmplHash: tokenTmplHashProbe, state: zeroState, ownRedeemLen });
+  console.log(`  [${c.label}_first] 真实编译实测 state_layout={start:${firstLayout.start},len:${firstLayout.len}}`);
+  allStateLayouts.push(firstLayout);
   const registerCtorArgsFirst = debuggerRegisterCtor({ marketId, psTmplHashHex: psTmplHashProbe, sealCount: c.sealCount, minBet: c.minBet, payoutCovId, deadline, tokenTmplHash: tokenTmplHashProbe, state: zeroState, ownRedeemLen });
   verifyOne(`${c.label}_first_leaf`, 0, { name: 'register_append', ctor: registerCtorArgsFirst, args: registerAppendArgsFor(0, c.minBet, bettorPk, first), inputs: first.inputs, outputs: first.outputs });
   verifyOne(`${c.label}_first_chip`, 1, { name: 'transfer', ctor: kttCtorFor(c.minBet, leafCovId), args: [[], '0x', [0]], inputs: first.inputs, outputs: first.outputs }, kttSilPath());
@@ -230,6 +249,9 @@ for (const c of CTOR_CASES) {
     leafRedeemHex, leafCovId, currentState: first.newState, side: 1, stake: c.minBet, heldArtifact: heldArtifact2, registerAppendDispatchTag,
     shardPoolId: marketId, bettorPk,
   });
+  const secondLayout = measureStateLayout({ marketIdHash: marketId, psTmplHashHex: psTmplHashProbe, shardPoolId: marketId, sealCount: c.sealCount, minBet: c.minBet, payoutCovId, deadline, tokenTmplHash: tokenTmplHashProbe, state: first.newState, ownRedeemLen });
+  console.log(`  [${c.label}_second] 真实编译实测 state_layout={start:${secondLayout.start},len:${secondLayout.len}}`);
+  allStateLayouts.push(secondLayout);
   const registerCtorArgsSecond = debuggerRegisterCtor({ marketId, psTmplHashHex: psTmplHashProbe, sealCount: c.sealCount, minBet: c.minBet, payoutCovId, deadline, tokenTmplHash: tokenTmplHashProbe, state: first.newState, ownRedeemLen });
   verifyOne(`${c.label}_second_leaf`, 0, { name: 'register_append', ctor: registerCtorArgsSecond, args: registerAppendArgsFor(1, c.minBet, bettorPk, second), inputs: second.inputs, outputs: second.outputs });
   verifyOne(`${c.label}_second_held`, 1, { name: 'transfer', ctor: kttCtorFor(first.newState.pool_value, leafCovId), args: [[], '0x', [0]], inputs: second.inputs, outputs: second.outputs }, kttSilPath());
@@ -256,13 +278,21 @@ function debuggerRegisterCtor({ marketId, psTmplHashHex, sealCount, minBet, payo
 
 console.log(`\n=== OWN_PREFIX_LEN/OWN_STATE_LEN 实测汇总(NWT MUST-1) ===`);
 for (const sl of allStateLayouts) console.log(`  state_span.start=${sl.start} state_span.len=${sl.len}`);
-console.log(`✅ 全部一致: OWN_PREFIX_LEN=1, OWN_STATE_LEN=36(由 compileShardLeafRedeem 内部 fail-closed 核对, 详见该函数)`);
+// 🔴 NWT MUST-1: 断言每一次真实编译测出的 state_layout 都跟源码常量 OWN_PREFIX_LEN=1/OWN_STATE_LEN=36
+// 一致——不一致就是源码常量该改了(或本脚本 ctor 构造错了)，必须非零退出，不能只打印不判断。
+const layoutMismatch = allStateLayouts.find(sl => sl.start !== 1 || sl.len !== 36);
+const layoutConsistent = allStateLayouts.length > 0 && !layoutMismatch;
+console.log(layoutConsistent
+  ? `✅ 全部一致(${allStateLayouts.length} 次真实编译实测): OWN_PREFIX_LEN=1, OWN_STATE_LEN=36 —— 与源码常量核对一致(不用改)`
+  : `❌ 不一致(${JSON.stringify(layoutMismatch)})——源码常量不能是单一字面量，需要按 ctor 现算，或本脚本构造有误`);
 
 const anyRan = allResults.some(r => r !== null);
 if (anyRan) {
-  const allPass = allResults.every(r => r === null || r.ok);
-  console.log(allPass ? '\n✅✅ ALL PASS(真实cli-debugger执行, 3组ctor × 首笔/续笔 各3检查共 15 次)' : '\n❌ 存在FAIL, 见上方输出');
+  const allPass = allResults.every(r => r === null || r.ok) && layoutConsistent;
+  console.log(allPass ? '\n✅✅ ALL PASS(真实cli-debugger执行, 3组ctor × 首笔/续笔 各3检查共 15 次 + state_layout 实测一致)' : '\n❌ 存在FAIL/state_layout不一致, 见上方输出');
   process.exit(allPass ? 0 : 1);
 } else {
-  console.log('\n(仅生成.test.json, 未设置CLI_DEBUGGER_PATH——未真实验证, 见上方各行"跳过真实执行"提示)');
+  console.log(layoutConsistent ? '' : '\n❌ state_layout 实测不一致, 见上方输出');
+  console.log('\n(仅生成.test.json, 未设置CLI_DEBUGGER_PATH——未真实验证cli-debugger部分, 见上方各行"跳过真实执行"提示; state_layout 断言已真实跑过)');
+  process.exit(layoutConsistent ? 0 : 1);
 }
