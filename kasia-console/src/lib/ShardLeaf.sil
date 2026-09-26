@@ -24,10 +24,12 @@
 //     本 leaf。方向A为避免 D-020 要防的 owner=ZERO32 无主中间态被偷(见 unlockBshardGenesisMintStakeChip
 //     头注)，把这一注的差额筹码(chip)从铸出那一刻起 owner 就直接=leafCovId——这打破了旧前提: chip 从
 //     input 起就已经"是 leaf 的"，会被 scanOwnedTokenInputs 计入。RHS 因此改为 pool_value+stake，且首笔/
-//     续笔统一走同一条路径(不加"是不是首笔"的条件分支): 首笔=只消费 chip 一个 KTT 输入(它自己那个
-//     covenant_id 组里唯一成员, 天然是 leader); 续笔=消费 [held, chip] 两个(held/chip 均未
-//     populateGenesisCovenants 绑定, 天然同属 covenant_id=ZERO32 组, tx 下标较小的 held 是 leader、chip 是
-//     delegate, 见 KanetTestToken.sil transfer/transfer_delegator 与 DECL.md §N:M leader/delegate 生成模式)。
+//     续笔统一走同一条路径(不加"是不是首笔"的条件分支): 首笔=只消费 chip 一个 KTT 输入; 续笔=消费
+//     [held, chip] 两个。两者(以及首笔的 chip 单独)都各自独立绑定 covenant_id(unlockBshardGenesisMintStakeChip
+//     / unlockBshardRegister 的 tok_out 均调 populateGenesisCovenants——covenant_id 是纯函数、不依赖是否调用
+//     该 API, 但不调用 = consensus 侧完全没有可内省的 covenant_id, 不是"退化成共享的 ZERO32"), 各自独立成组
+//     (组大小恒=1), 都走 KanetTestToken.sil 的 leader 入口 `transfer`, 不涉及 `transfer_delegator`/DECL.md
+//     §N:M 的 leader/delegate 分流(2026-09-26 曾短暂误引入又撤销, 见 KanetTestToken.sil/p2sh.mjs 头注)。
 //     输出侧派生绑定 = tok_out owner=OpInputCovenantId(this.activeInputIndex)(自身，不变)。V-T-8
 //     (readInputStateWithTemplate + 本合约 self-continuation 同函数共存): 命中——leaf 自身 4-field State
 //     续约改 AB11 手写编码(同 PayoutShard.absorb 手法, 常量按本文件实际编译产物量测, 见 provenance measure
