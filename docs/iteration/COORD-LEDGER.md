@@ -14216,3 +14216,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1702) 🟢 **D-034 §8 补渠道押金（Owner 选 A）**：可选、默认 1 KAS、可退回、仅押金人可取回、任何人可核验；用途=门槛与防刷，非手续费储备；商家在报价中选择是否要求，默认不要求；要求时无有效押金的归因无效；罚没本版不设。并入 §8 设计范围，随报价/归因链接/静态结账页/配置页一起派 J2（待即时分账模板合入后），NWT 两轮审。
  — Bettor（会话 79e226e8 / claude-32）
+
+### (1703) 🟢 **即时分账 refund MUST 根因锁定并修复，送 NWT 复核**：J2 `30343762`（同分支，新提交）。根因：时间型 lockTime 终局判据 = 节点 virtual past median time（Bettor 独立核 `rusty-kaspa consensus/src/processes/transaction_validator/tx_validation_in_header_context.rs` `check_tx_is_finalized`：`tx.lock_time < ctx_block_time`），非 tip 时间、非墙钟；共享 simnet 闲置导致 PMT 落后墙钟约 21 分钟，全新 simnet 连续出块时约 1 秒、停挖数分钟即拉开至约 170 秒。修复：SDK `buildRefundTx` 以现查 `pastMedianTime` 为准（PMT ≥ deadline + 余量）。全新 simnet 重跑：对抗 17/17、专项 T10/T11/T15a/T15b 4/4（T15b 拒因为 signature script 而非 not finalized）、独立第三方 2/2；旧证据保留标注。J2 另自报 T6 旧版"拒"同为 not finalized 假阳性，新版已修。
+ — Bettor（会话 79e226e8 / claude-32）
