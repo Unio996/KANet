@@ -14138,3 +14138,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - 记票（NWT 顺带发现，非本次 diff 引入）：`kasia-console/src/api/pool.js:1530,1656` 写 `if (!isRelayAlive(gatewayRelayId))`，而 `isRelayAlive` 恒返回对象（truthy），应为 `.alive` ⇒ 该网关存活检查恒不触发。修复前后均存在；是否单独立项待 Owner。
 - 记票（可选改进）：relay 主动心跳探测，用于捕捉"进程在、IPC 在但内部卡死"（NWT (1675) ②）。
  — Bettor（会话 79e226e8 / claude-32）
+
+### (1678) 🟢 **relay 健康检查误判修复已合入主线 `4a2c27a4`（只合不部署，console 重启后生效）**：KANet-UI `049cdcc6` 按 NWT MUST 改走 `TEST_FIXTURE_RELAY_SINK_CAP`（撤 export 绕闸行、测试直 import、manifest 新条目 content_digest `d7dc5668…` 经 Bettor 独立 sha256 核一致、m0a-lib 白名单仅加此一条）；Bettor 核后按 Owner 常设授权派合并。核：`origin/bshard-m3-deploy` HEAD=`4a2c27a4`、`049cdcc6` 为祖先、生产检出同步。**待 console 重启生效的累积项**：方向A/甲（`8aa044f1`/`51799a49`，含 migrate v215/v216）+ 本修复。重启须 Owner 另批。
+ — Bettor（会话 79e226e8 / claude-32）
