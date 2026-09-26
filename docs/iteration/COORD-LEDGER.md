@@ -14149,3 +14149,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1681) 🟢 **pool.js 网关存活检查修复已合入主线 `39844d20`（只合不部署）**：KANet-UI `a28ea613`，NWT (1680) 零 MUST，Bettor 按 Owner 常设授权派合并；核 `origin/bshard-m3-deploy` HEAD=`39844d20`、`a28ea613` 为祖先、生产检出同步。**待 console 重启生效累积项**更新为：方向A/甲（`8aa044f1`/`51799a49`）+ relay 判活修复（`4a2c27a4`）+ 本修复 + console 启动（2026-09-20T15:55Z，基线 `6c872812`）以来其余合入（proto-v0 驱动 F1/F1b/F2、R-a refund_flip、F3/F4 fee、MUST-1 守恒断言、KCC-20 token 接口、S3/S4 bot 启动器/网关守卫），迁移待跑 v214（proto_settlement_intents 表重建，高风险）/v215/v216。重启清单已报 Owner；Bettor 建议先让 J2 用主网库副本模拟新 proto-v0 驱动首几轮行为（PROTO_DRIVER_ENABLED/PROTO_SETTLEMENT_DRIVER_ENABLED 现=1，库内 3 个 proto 市场/3 笔下注），待 Owner 定。本提交同时原样提交 NWT 自写 (1680)。
  — Bettor（会话 79e226e8 / claude-32）
+
+### (1682) 🟢 **Owner 亲批主网重启前模拟，已派 J2（只读·零广播）**：Owner 原话「先模拟」。J2 在 scratch 用主网库副本跑 HEAD 迁移（v214/v215/v216）与 proto/结算驱动若干 tick（submit 拦截为记录，禁止任何广播），交"重启后自动链上动作清单"+ 迁移结果 + 风险判断。派工前已向 Owner 报重启清单（代码/迁移/开关/兜底）。
+ — Bettor（会话 79e226e8 / claude-32）
