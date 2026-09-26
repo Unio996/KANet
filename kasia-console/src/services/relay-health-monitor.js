@@ -20,12 +20,6 @@
 
 import { sqlite } from '../db/client.js';
 import { getStatus, isRelayAlive, startRelay } from './relay-manager.js';
-// 2026-09-26 (账本1672/1674): 重导出已有导入的 isRelayAlive，供
-// test-framework/cases/system/relay-manager-alive.test.mjs 单测——这不是新增 relay-manager 消费点
-// (import 语句本身一字未改，M0a 只对 import/require/动态 import 行取模，`export {}` 不在其匹配范围内)，
-// 只是把这个文件本来就有的绑定多开一个读口，避免测试文件另起一条需要 NWT 重新过 M0a 窄 capability
-// 审批的裸 relay-manager import（同一个符号没必要两条通道都开）。
-export { isRelayAlive };
 
 const TICK_INTERVAL_MS = Number(process.env.RELAY_HEALTH_TICK_MS) || 30_000;  // 30s
 const STARTUP_GRACE_MS = 90_000;  // wait 90s after Console boot so initial startAll has chance

@@ -16,16 +16,19 @@
  * 用真实的 process.kill(pid, 0) 探测——用真进程自己的 pid（必然存在）测"活"，用一个真的已退出子
  * 进程的 pid（必然不存在）测"死"，不 mock process.kill 本身，让这条判活链路的最后一环也是真实的。
  *
- * 从 relay-health-monitor.js 取 isRelayAlive（它重导出自己本来就有的导入），不直接 import
- * relay-manager.js——M0a 裸 import 差分门对 relay-manager 族新增消费点要求窄 capability + NWT 审批
- * 才能过 lint，而这里只是复用一个已经合法存在的导入，没必要为同一个符号另开一条需要重新走 NWT 审批
- * 流程的通道（见 relay-health-monitor.js 里那行 export 的头注）。
+ * M0a 裸 relay-manager import 走 `m0c1-test-fixture-relay-sink` capability（scripts/
+ * m0a-exception-manifest.json，NWT 审 2026-09-26，见 docs/iteration/j1-inbox/
+ * 2026-09-26T10-31Z-nwt-VERDICT-kanetui-relay-health-false-dead-16364114-review.md）——同
+ * p5_positive_via_fake_relay_sink.test.mjs / precond4_handler_zero_sign_calls.test.mjs 两个先例
+ * 一样的"隔离测试 fixture"语义：只读注入假 `_relays` map 测纯逻辑分支，不 fork 真 relay、不碰真
+ * IPC、不碰热钱包。（此前一度改成从 relay-health-monitor.js 的重导出取这个符号以绕开本闸，NWT 判
+ * 定那是绕闸而非合规路径，改回直接 import + 走这条现成的正规口子。）
  */
 
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
 import { spawnSync } from 'node:child_process';
-import { isRelayAlive } from '../../../src/services/relay-health-monitor.js';
+import { isRelayAlive } from '../../../src/services/relay-manager.js';
 
 function fakeChild({ connected = true } = {}) {
   return { connected, exitCode: null, signalCode: null, killed: false };
