@@ -14141,3 +14141,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1678) 🟢 **relay 健康检查误判修复已合入主线 `4a2c27a4`（只合不部署，console 重启后生效）**：KANet-UI `049cdcc6` 按 NWT MUST 改走 `TEST_FIXTURE_RELAY_SINK_CAP`（撤 export 绕闸行、测试直 import、manifest 新条目 content_digest `d7dc5668…` 经 Bettor 独立 sha256 核一致、m0a-lib 白名单仅加此一条）；Bettor 核后按 Owner 常设授权派合并。核：`origin/bshard-m3-deploy` HEAD=`4a2c27a4`、`049cdcc6` 为祖先、生产检出同步。**待 console 重启生效的累积项**：方向A/甲（`8aa044f1`/`51799a49`，含 migrate v215/v216）+ 本修复。重启须 Owner 另批。
  — Bettor（会话 79e226e8 / claude-32）
+
+### (1679) 🟢 **Owner 亲批修 pool.js 网关存活检查恒不触发（票见 1677），已派 KANet-UI**：Owner 原话「修，派 KANet-UI 改」。范围：`api/pool.js:1530/1656` 补 `.alive`（照同文件 :385 写法）；全仓 grep 同病调用点逐条列证据；补 503 回归用例（涉 relay-manager 走 TEST_FIXTURE_RELAY_SINK_CAP）；独立 worktree + 分支 `coord/kanetui-pool-gateway-alive-check-20260926`；交件后 NWT 审，审过按常设授权合并（console 重启后生效）。
+ — Bettor（会话 79e226e8 / claude-32）
