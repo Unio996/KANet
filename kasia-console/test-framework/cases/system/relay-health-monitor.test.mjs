@@ -180,3 +180,62 @@ test('多个候选互不干扰：一个被节流不影响另一个正常重启',
 test('relayHealthMonitorTick 导出为异步函数', () => {
   assert.equal(typeof relayHealthMonitorTick, 'function');
 });
+
+// ── 2026-09-26 (账本1672/1674, Owner 亲批修 relay 健康检查误判) 追加 ──────────────────────────
+// 背景：isRelayAlive() 原来把"lastLogAt 距今>60s"当死亡信号，主网 18 个空闲(但活着)的 relay 全被
+// 判死，relay-health-monitor 每 30s 对着全部活 relay 调 startRelay()，结果全部落空 already_running
+// （relay-manager.js:159 一发现 `_relays[id]?.child` 已存在就直接拒绝）——零真实重启，但这次"尝试"
+// 之前会被无差别计入重启配额，跟 cold_address_denied 这类【真实、会一直失败】的拒绝混在一个桶里，
+// 配额被空耗，真故障发生时可能已经被误判攒满。这里只测 relay-health-monitor.js 这一半（配额记账不
+// 该数 already_running）；isRelayAlive() 本身的判活逻辑修复见 relay-manager-alive.test.mjs。
+
+test('already_running：连续调用多次不耗尽重启配额（不是真实尝试，不计节流分母）', async () => {
+  const { deps, startRelayCalls } = makeFixture({
+    relays: [{ id: 'r1', name: 'IdleButAlive' }],
+    startRelayResult: { ok: false, reason: 'already_running', pid: 12345 },
+  });
+
+  // 跑 6 次(远超 MAX_RESTART_PER_HOUR=3)——若 already_running 被错误计入配额，第4次起就该被节流；
+  // 修复后应该【每次都真的调用 doStartRelay】，因为节流分母从未真的涨过。
+  for (let i = 0; i < 6; i++) {
+    const t = await relayHealthMonitorTick(deps);
+    assert.equal(t.restart_stormed, 0, `第${i + 1}次不该被节流（already_running 不占配额）`);
+  }
+  assert.equal(startRelayCalls.length, 6, '6 次 tick 都该真的调用 startRelay，没有一次被节流拦下');
+});
+
+test('cold_address_denied 仍照旧耗配额（2026-09-14 那条 MUST-FIX 没被本次改动动到）', async () => {
+  const { deps, startRelayCalls } = makeFixture({
+    relays: [{ id: 'r1', name: 'ColdDenied' }],
+    startRelayResult: { ok: false, reason: 'cold_address_denied' },
+  });
+  await relayHealthMonitorTick(deps);
+  await relayHealthMonitorTick(deps);
+  await relayHealthMonitorTick(deps);
+  const t4 = await relayHealthMonitorTick(deps);
+  assert.equal(t4.restart_stormed, 1, 'cold_address_denied 第4次仍应被节流——回归旧行为，防止这次改动误伤');
+  assert.equal(startRelayCalls.length, 3, '节流后不应再继续真调用 startRelay');
+});
+
+test('already_running 与 cold_address_denied 混合场景：前者不占配额、后者占，互不干扰', async () => {
+  const startRelayCalls = [];
+  const doStartRelay = async (id) => {
+    startRelayCalls.push({ id, at: Date.now() });
+    if (id === 'idle') return { ok: false, reason: 'already_running', pid: 1 };
+    return { ok: false, reason: 'cold_address_denied' };
+  };
+  const deps = {
+    listEligible: () => [{ id: 'idle', name: 'Idle' }, { id: 'denied', name: 'Denied' }],
+    checkAlive: () => ({ alive: false, reason: 'no relay process (= not started)' }),
+    doStartRelay,
+    restartHistory: new Map(),
+    stormLogState: new Map(),
+  };
+
+  for (let i = 0; i < 5; i++) await relayHealthMonitorTick(deps);
+
+  const idleCalls = startRelayCalls.filter((c) => c.id === 'idle').length;
+  const deniedCalls = startRelayCalls.filter((c) => c.id === 'denied').length;
+  assert.equal(idleCalls, 5, 'already_running 一直不占配额，5次 tick 都真的调用了');
+  assert.equal(deniedCalls, 3, 'cold_address_denied 在第4次起被节流，停在3次（回归旧行为）');
+});

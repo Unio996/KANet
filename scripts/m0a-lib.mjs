@@ -138,6 +138,7 @@ export const TEST_FIXTURE_RELAY_SINK_CAP = 'm0c1-test-fixture-relay-sink';
 export const TEST_FIXTURE_RELAY_SINK_ALLOWLIST = new Set([
   'kasia-console/test-framework/cases/predictions/pool/p5_positive_via_fake_relay_sink.test.mjs', // ⑤(d) 阳性臂, 假 relay sink 隔离测试(J2, NWT 审 2026-08-08)
   'kasia-console/test-framework/cases/predictions/pool/precond4_handler_zero_sign_calls.test.mjs', // D-012 前置④, handler 七场景零签名调用测量(J2, NWT 审 2026-08-09, 与 p5 同机制不同命题故分文件锚)
+  'kasia-console/test-framework/cases/system/relay-manager-alive.test.mjs', // 账本1672/1674 relay 健康检查误判修复(isRelayAlive 判活逻辑)单测, 只读注入假 _relays map 测纯逻辑分支(KANet-UI, NWT 审 2026-09-26 · 账本 1675 · Owner 知情由 Bettor 记账)
 ]);
 
 // ── considered amendment #6(2026-09-14, Bettor 1144 裁定)：窄 capability m0c2-hotwallet-admission ──

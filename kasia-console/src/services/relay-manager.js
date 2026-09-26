@@ -376,18 +376,44 @@ export function getStatus() {
 }
 
 // r211 O-3 PB-A — oracle live check (= 防 ghost market: DB is_oracle=1 但 relay process dead).
-//   alive 条件: child 还 in _relays + pid set + lastLogAt 不超 freshnessMs (default 60s).
 //   bettor.js publish endpoint 调用 reject 死 oracle relay.
 // r216 bug fix: lastLog 是日志文本不是 timestamp, 改 lastLogAt (= Date.now() 当 stdout/stderr 来).
-//   首次 stdout/stderr 前 lastLogAt=0 → 用 startedAt fallback (= 刚 spawn 算 alive).
-export function isRelayAlive(relayNodeId, freshnessMs = 60_000) {
-  const state = _relays[relayNodeId];
+//   首次 stdout/stderr 前 lastLogAt=0 → 用 startedAt fallback (= 刚 spawn 算 alive)。
+//
+// 🔴 2026-09-26 修复(账本1672/1674, Owner 亲批「修，派 KANet-UI 改」)：原判据"lastLogAt 距今
+//   > freshnessMs(默认60s) ⇒ 死"把【空闲】(relay 没事可干就不会打日志, 完全正常)和【真死】混为一谈——
+//   主网 18 个 relay 全部一分钟不打日志就被判死, relay-health-monitor 的 30s cron 因此对着全部活
+//   relay 疯狂调 startRelay()(全部落空 already_running, 零真实重启), 只是在空耗 tick 与重启配额。
+//   改为以进程真实存活信号为主, 不再用"多久没打日志"判死——三个信号全部是【已有的东西】, 不新增任何
+//   心跳/ping 机制(relay 目前没有现成的 IPC ping, 没有就不造)：
+//     ① child 的 exit/signal/killed 状态——`startRelay()` 里 `child.on('exit'/'error')` 早就在真死
+//        时把 state 从 `_relays` 摘掉了(下面 `!state` 分支就是接的这个), 这里额外读 `exitCode`/
+//        `signalCode`/`killed` 是防"事件还没来得及处理完但对象已经能读到退出信息"这类极短窗口；
+//     ② `state.child.connected`——fork() 自带的 IPC 通道布尔状态, "IPC 断"直接读它, 不用发消息去试；
+//     ③ `process.kill(pid, 0)`——Node/libuv 自带的"只探测存在性, 不真发信号"原语, 本仓
+//        `tg-bot-manager.js:isBotAlive()` 已经在用同一个原语做同一件事(同一进程模型, 照抄而非新造)。
+//   `deps` 第二参用于测试注入(覆盖 `_relays` 这个模块私有 map, 不用真 fork 一个 relay 子进程就能测
+//   "空闲不判死"/"真退出判死"两种状态)——所有生产调用点(bettor.js/pool.js/pool-auto-better.js/
+//   pool-house-agent.js/pool-market-settler.js/bettor-refund-claim-auto.mjs)全部单参调用, 没有一处
+//   传过第二参数, 原先的 `freshnessMs` 默认值从未被任何生产调用覆盖过, 改签名不影响任何生产行为。
+export function isRelayAlive(relayNodeId, deps = {}) {
+  const { relays = _relays } = deps;
+  const state = relays[relayNodeId];
   if (!state) return { alive: false, reason: 'no relay process (= not started)' };
-  if (!state.child || !state.child.send) return { alive: false, reason: 'child IPC dead' };
+  if (!state.child) return { alive: false, reason: 'child missing' };
+  if (state.child.exitCode !== null || state.child.signalCode || state.child.killed) {
+    return { alive: false, reason: `child already exited (code=${state.child.exitCode}, signal=${state.child.signalCode})` };
+  }
+  if (state.child.connected === false) return { alive: false, reason: 'IPC channel disconnected' };
   if (!state.pid) return { alive: false, reason: 'no pid' };
+  try {
+    process.kill(state.pid, 0);   // 同 tg-bot-manager.js isBotAlive() 的既有存在性探测手法
+  } catch {
+    return { alive: false, reason: `pid ${state.pid} not found (process exited)` };
+  }
+  // 进程真实存活即为 alive——空闲(久无日志)不再是死亡信号, ageMs 只作为诊断信息随返回值带出。
   const lastMs = state.lastLogAt || (state.startedAt ? new Date(state.startedAt).getTime() : 0);
-  const ageMs = lastMs ? Date.now() - lastMs : Infinity;
-  if (ageMs > freshnessMs) return { alive: false, reason: `lastLogAt stale ${Math.round(ageMs/1000)}s (>${freshnessMs/1000}s)` };
+  const ageMs = lastMs ? Date.now() - lastMs : 0;
   return { alive: true, ageMs, pid: state.pid };
 }
 
