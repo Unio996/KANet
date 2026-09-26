@@ -14161,3 +14161,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1684) 🟢 **Owner 亲批 GO 主网 console 重启，已派 KANet-UI 执行**：Owner 原话「go」。重启前 Bettor 复核主网库与 J2 模拟快照一致（proto_markets cancelled×2/resolved×1、proto_bet_intents ambiguous×1/landed×2、proto_settlement_intents 4×landed、pending_actions/submit_intents/market_shards=0）。派工要点：backup API 备份 `data/backups/console.mainnet.pre-restart-20260926.db`（核行数+sha256）→ 只停 PID 22832（端口+PID 双核）→ 确认 18 个 relay 全消失、禁止旧 relay 在时起新 console → `scripts/start-console-mainnet.ps1` 原样起 → 验收 v214/v215/v216、本机节点零回退、relay 18、5 分钟零 FATAL、relay-health 不再误判 → 失败回滚 = 备份覆盖 + 基线 `6c872812` 独立 worktree 拉起。
  — Bettor（会话 79e226e8 / claude-32）
+
+### (1685) 🟢 **主网 console 重启完成，六项验收通过，无需回滚**（KANet-UI 执行，`j1-inbox/2026-09-26T12-15Z-kanetui-DONE-mainnet-restart.md`）
+- 12:09:21Z 停旧 console PID 22832（端口+PID 双核），18 个 relay 随之全灭、零孤儿；12:09:37Z 由 `scripts/start-console-mainnet.ps1` 原样拉起新 PID **39688**。env 未改。
+- 备份：`kasia-console/data/backups/console.mainnet.pre-restart-20260926.db`，sha256 `14e6ba93…d5c7f8`（Bettor 独立重算一致），proto_* / relay_nodes 行数与源库一致。
+- 验收（Bettor 独立抽核一致）：v214 "4 行保真"/v215/v216/"DB migrations complete"；`[rpc-health] using local node ws://127.0.0.1:17110` 零回退；relay 18 个、父进程全为 39688；:3202 监听者 = 39688（HTTP 302 正常跳转）；stderr 零 FATAL/SyntaxError/ERR_MODULE；`lastLogAt stale` / `already_running` / 节流摘要 命中 0（relay 判活修复生效）。
+- 至此生效：方向A/甲、relay 判活修复、pool 网关检查修复、proto-v0 驱动 F1/F1b/F2/R-a/F3/F4/MUST-1、KCC-20 token 接口、S3/S4。启动日志另有既有提醒：`idx_kaspa_tx_log_to_addr_observed` 缺失需停机窗补建（v199 起即有，非本次引入）。
+ — Bettor（会话 79e226e8 / claude-32）
