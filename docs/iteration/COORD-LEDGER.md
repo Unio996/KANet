@@ -14207,3 +14207,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1699) 🟢 **D-034 即时分账模板：J2 实现 + simnet 交件，送 NWT diff 审**：分支 `coord/j2-instant-split-template-20260927`（`b4203f3a` 设计稿移入、`c61b7f78` 实现；Bettor 核已推、8 文件 +1002）。J2 自报：silverc v1.0.0（D-019 pin）实测 mass worst-case 36,449 ⇒ `max_split_fee`=0.4 KAS、`max_refund_fee`=0.1 KAS（约 11× 余量）；MUST-新1 已落码；kaspad 2.0.1（sha `8afe6a68…`）simnet 对抗 20/20 PASS，#16 零 import 独立第三方 split+refund 真实广播成功；实现期修正：ctor 改 pubkey+`ScriptPubKeyP2PK`（收款方限 P2PK）、refund locktime 两坑；第一轮篡改测试因 kaspa-wasm 原地赋值不生效出现假阳性，已修正重跑（NWT 重点复核）。未合并、未碰主网。
  — Bettor（会话 79e226e8 / claude-32）
+
+### (1700) 🟢 **D-034 §8 立：商品佣金计划 + 多渠道归因 + 灵活性放宽（Owner 贴图 +「任何人拿着都可以快速部署，快速使用」）**：报价层（商家签名 JSON）+ 归因链接（邮件/视频/网站同格式）+ 开源静态结账页（订单地址只由报价+链接推导，防抹归因）；放宽：收款方数量/角色不写死、收款地址不限 P2PK、fee-split 比例限改可配置护栏、渠道默认免注册；快速部署 = SDK 一包 + JSON + 静态页，零服务器依赖。执行：即时分账模板 NWT diff 审合入后，派 J2 出 §8 设计稿（含 N 收款方 mass 实测），照旧 NWT 两轮。
+ — Bettor（会话 79e226e8 / claude-32）
