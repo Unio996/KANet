@@ -477,12 +477,25 @@ export async function registerConversationRoutes(fastify) {
         //     Trader-B is_dex_broker=1, 实际 fall 进 broker-v2/v1 LLM agent stop-gap 应付)
         //   - v3 throw err → log + fall broker-v2 安全网
         // broker-v3 跟 broker-v2 共存, 默认 broker-v3 优先 (route 路 A 优先尝试).
+        // J2 2026-08-29 (race 盘点 P11, 侧分支 coord/broker-money-path-2): 同 peer 的 broker 处理串行化 —— relay 侧三处 replyToMessage
+        // (rpc-listener catch-up 定时器 :528/:633 + 实时 DM :1110 + 付款 :1184) 互相无 per-peer 串行 ⇒ 同 peer 两条 DM 可并发到本路由 ⇒
+        // v2 withdraw 余额检查在两条里都过 (借记原在转账后) ⇒ 双提。锁 = 排队不丢, 等待超 30 s 告警一次 (不设硬超时: 硬超时=把并发放回来)。
+        const { withPeerLock } = await import('../lib/peer-serial-lock.mjs');
+        // rejectAfterMs (NWT (c) YES): 等锁超 X ⇒ 拒本条(不执行 ⇒ 不双花), 用户面回一句"系统繁忙"; X 默认 180 s > handler 正常最大耗时 (withdraw 120 s 上限 / LLM 60-120 s)。
+        // 🔴 拒回文案 = 用户面 = Owner 域: 逐字复用 tg-bot/i18n.mjs:428 service_busy, 不新造文案。
+        const PEER_LOCK_REJECT_MS = parseInt(process.env.BROKER_PEER_LOCK_REJECT_MS, 10) || 180_000;
+        const PEER_BUSY_REPLY = '⏳ 系统繁忙，请稍后再试。';
+        const _serial = (label, fn) => withPeerLock(peer, fn, {
+          warnAfterMs: 30_000, rejectAfterMs: PEER_LOCK_REJECT_MS,
+          onWait: ({ waitedMs }) => console.warn(`[api/agent/reply] peer-lock wait ${Math.round(waitedMs / 1000)}s peer=${peer.slice(-12)} at=${label} (前一条仍在处理; 排队不丢)`),
+          onReject: ({ waitedMs }) => console.error(`[api/agent/reply] peer-lock REJECT peer=${peer.slice(-12)} at=${label} waited=${Math.round(waitedMs / 1000)}s (前一条疑似挂死; 本条未执行)`),
+        }).catch((e) => { if (e && e.code === 'PEER_LOCK_REJECTED') return PEER_BUSY_REPLY; throw e; });
         const _v3Flag = process.env.BROKER_V3_ENABLED === '1';
         const _v3Peers = (process.env.BROKER_V3_ENABLED_PEERS || '').split(',').map(s => s.trim()).filter(Boolean);
         if (_v3Flag || _v3Peers.includes(peer)) {
           try {
             const { handleMessage: handleV3 } = await import('../services/broker-v3/index.js');
-            const v3Reply = await handleV3(peer, message, { relayNodeId: resolved });
+            const v3Reply = await _serial('broker-v3', () => handleV3(peer, message, { relayNodeId: resolved }));
             if (v3Reply !== null && v3Reply !== undefined) {
               console.log(`[api/agent/reply] broker-v3 routed peer=${peer.slice(-12)} (flag=${_v3Flag}, listed=${_v3Peers.includes(peer)})`);
               return reply.send({ reply: await _r19Guard(v3Reply, 'broker-v3.handleMessage') });
@@ -505,7 +518,7 @@ export async function registerConversationRoutes(fastify) {
         if (_v2Flag || _v2Peers.includes(peer)) {
           try {
             const { handleMessage } = await import('../services/broker-v2/router.js');
-            const v2Reply = await handleMessage(peer, message);
+            const v2Reply = await _serial('broker-v2', () => handleMessage(peer, message));
             console.log(`[api/agent/reply] broker-v2 routed peer=${peer.slice(-12)} (flag=${_v2Flag}, listed=${_v2Peers.includes(peer)})`);
             return reply.send({ reply: await _r19Guard(v2Reply || '我刚走神了, 你想买还是卖 KAS?', 'broker-v2.handleMessage') });
           } catch (err) {
@@ -516,14 +529,14 @@ export async function registerConversationRoutes(fastify) {
 
         try {
           const { handleBuyIntent } = await import('../services/broker-buy-handler.js');
-          const buyReply = await handleBuyIntent(peer, message);
+          const buyReply = await _serial('buy', () => handleBuyIntent(peer, message));
           if (buyReply !== null) return reply.send({ reply: await _r19Guard(buyReply, 'handleBuyIntent') });
         } catch (err) {
           console.warn(`[api/agent/reply] broker-buy-handler err for ${resolved?.slice(0,8)}: ${err.message}`);
         }
         try {
           const { handleSellIntent } = await import('../services/broker-sell-handler.js');
-          const sellReply = await handleSellIntent(peer, message);
+          const sellReply = await _serial('sell', () => handleSellIntent(peer, message));
           if (sellReply !== null) return reply.send({ reply: await _r19Guard(sellReply, 'handleSellIntent') });
         } catch (err) {
           console.warn(`[api/agent/reply] broker-sell-handler err for ${resolved?.slice(0,8)}: ${err.message}`);
@@ -531,7 +544,7 @@ export async function registerConversationRoutes(fastify) {
         // R6: handler null (regex 不命中) → fall to broker-llm-agent 销售客服 LLM
         try {
           const { handleLlmDialog } = await import('../services/broker-llm-agent.js');
-          const llmReply = await handleLlmDialog(peer, message);
+          const llmReply = await _serial('llm', () => handleLlmDialog(peer, message));
           return reply.send({ reply: await _r19Guard(llmReply || '我刚走神了, 你想买还是卖 KAS?', 'handleLlmDialog') });
         } catch (err) {
           console.warn(`[api/agent/reply] broker-llm-agent err for ${resolved?.slice(0,8)}: ${err.message}`);
