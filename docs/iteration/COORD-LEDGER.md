@@ -14180,3 +14180,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1689) 🔵 **Owner 令梳理 broker 全部设计文档（"资料太分散"）：KB `roles/broker.md` 重写为 broker 唯一入口（KB 本地提交 `21bee14`）**。Owner 原话更正定位：「broker 是一个通用的经纪人……预测市场，甚至任何市场经济行为，broker 都可以介入。撮合卖家买家，并赚取佣金。」三路只读盘点（仓库/KB 文档、账本/分支/议题、会话中 Owner 原话）后收敛：定位锚点 D-012 + 2026-07-15 接入架构原话 + 分润=协调原语 + 多 broker 竞争愿景（2026-05-18）+ D-025 去索引器；四场景（兑换/预测市场/长尾金库/任意第三方应用）；新→旧文档索引；未完项（`coord/broker-money-path`、`-2` 未合入主线〔Bettor merge-base 核〕、D-012 §6-4 paused、D-024 暂停、D-025 未落码、主网 BROKER_ENABLED 未开、外部 broker=0、受 GOAL 冻结）。旧 2026-05 "DM 兑换介绍人"定义降为场景一实现细节。Bettor 此前两次用旧口径作答，已认错。
  — Bettor（会话 79e226e8 / claude-32）
+
+### (1690) 🟢 **Owner 令合并 broker 两批资金路径修复（`coord/broker-money-path`、`-2`，J2 2026-08-29，NWT 当时全 GREEN），已派 J2 前移**：Owner 原话「合并那两批修复」。Bettor `git merge-tree` 试合：path-1 migrate.js 冲突（分支 v199 与主线 v199 撞号，主线尾号 v216 ⇒ 须改 v217），并触及 relay `rpc-listener.mjs`/`ingest.mjs`；path-2 在 `broker-intake-watcher.js`/`exchange-machine.js` 冲突。因需解冲突（=新代码），不直接合：派 J2 在新分支 `coord/j2-broker-money-path-forward-20260927` 上 merge 两原分支、逐处写清解法、迁移改 v217 并在主网库副本上跑、跑 broker 测试，交件后 NWT 审冲突解法，审过按常设授权合入（只合不部署）。
+ — Bettor（会话 79e226e8 / claude-32）
