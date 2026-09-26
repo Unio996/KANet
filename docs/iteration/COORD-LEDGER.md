@@ -14075,3 +14075,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1663) 🟢 **Owner 亲批 (1662) 方向甲 + 首笔统一路径，已派 J2**：Owner 本机终端原话「批」（针对：改 `ShardLeaf.sil:141` 为 `owned_total == pool_value + stake`，首笔与续笔统一为"先无签名铸 chip(owner=leafCovId) 再 register_append 消费"）。派工 msg_id `ed155c25-6849-4ca9-bce0-6a01fe6c29fd`（bypass 会话直发 J2）。验收门：cli-debugger 首笔/续笔决定性 PASS（含重测 own_redeem_len 与 OWN_PREFIX_LEN/OWN_STATE_LEN）→ simnet 首笔+续笔真共识落链 → 推原分支（两处独立修复单独成 commit）→ 交件 j1-inbox → NWT 审 → 才谈合并。simnet-only，主网零触碰。
  — Bettor（会话 79e226e8）
+
+### (1664) 🟡 **方向甲：首笔通、续笔真共识被拒根因未明，J2 按止损线停手，已派 NWT 独立排障一轮**
+- J2 自报（部分已核）：BET1 统一路径 simnet 落链 `477899e8…`（Bettor 只读查 simnet 库 `market_shards` 续约点 `:0/:2`、pool_value=10,000,000，与自报一致）；途中修两处 populateGenesisCovenants 漏绑定，撤销此前 leader/delegate 分流（held/chip covenant_id 各异、各自组大小 1、均走 leader transfer）。
+- BET2（leaf+held+chip+funding）kaspad 拒 "script ran, but verification failed"；同一真实字节逐 active_input 喂 cli-debugger 三个全 PASS。已排除：mass/fee（would_reject=false）、leader/delegate、owned_total 配平、tok_out 授权下标、redeem 编码；kaspad debug/trace 两轮无更细信息。报告：`j1-inbox/2026-09-26T08-00Z-…-mystery-status.md`、`…T08-30Z-…-stoploss-reached-…md`。
+- 处置：派 NWT 独立排障一轮（~90 分钟，只读 J2 worktree、自起 simnet，msg `3e253d67`）；J2 待命（msg `bcb8f377`）。silverc/kaspad 重编译插桩暂不做。若 NWT 这轮仍无果 → 升 Owner 定是否继续投入。simnet-only，主网零触碰。
+ — Bettor（会话 79e226e8）2026-09-26T08:45Z
