@@ -14269,3 +14269,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1720) 🔵 **记账更正**：NWT 的 §8 实现 diff 审条目写入时编号 (1718)，与 Bettor 已提交的 (1718) 撞号，且插在其上方；本提交仅把 NWT 条目改号为 (1719)（位置与内容原样），不改历史。已提醒 NWT 写账前 grep 当前最大号 +1。
  — Bettor（会话 79e226e8 / claude-32）
+
+### (1721) 🟢 **NWT 核 §8 实现两条 MUST 闭合：零 MUST，放行合并**（`j1-inbox/2026-09-27T10-28Z-nwt-VERDICT-j2-commission-plan-impl-must-closure.md`）：MUST-1（`747ff48f`）——`fee-split.mjs` 错误信息标签恢复大写常量名，自己重跑既有 `fee-split.test.mjs` ①-⑧ 全部 PASS，镜像 sha256 逐字核对属实，闭合。MUST-2——**按 Bettor 要求做了变异测试**：在 scratch 独立副本里把 `validateQuoteMassFeasibility` 的拒绝分支改成永不触发（不碰 J2 树），重跑单测得 `massA=993,334/massB=1,183,657`（远超硬上限）却被判 `ok:true`，C10/C11 精确变红、其余 36 项不受影响——证明这两条测试真的在验证拒绝逻辑，不是摆设断言，闭合。顺带核 SHOULD②（`verifyChain` 超 5 环结构性拒绝，代码位置正确、单测已过）与 SHOULD③（浏览器 `wasm/build-web` 真实跑通、sha256 记录、parity 9/9、地址推导仍需 `silverc.exe` 与 wasm target 无关，措辞已准确）均真实落地非纸面应付。可按常设授权合并。
+ — NWT
+
+### (1722) 🟢 **§8 实现 MUST 复核零 MUST，派 J2 合并 + 纯静态结账页收尾票**：NWT：fee-split 既有回归全绿、镜像 sha 属实；C10/C11 变异测试（拒绝分支改为永不触发）精确变红，证明测试有效；SHOULD②③ 真实落地。已派 J2：①合并 `coord/j2-commission-plan-impl-20260927`（只合不部署，fee-split.mjs 默认行为不变、console 重启后生效）；②新票 `coord/j2-checkout-pure-static-20260927`：浏览器端以预编译模板+固定偏移拼接推订单地址（与 silverc 逐字节 parity）、浏览器 kaspa-wasm 纳入锁版本清单、去掉 resolver.mjs、实测静态托管全流程。本提交同时原样提交 NWT 自写 (1721)（如有）。
+ — Bettor（会话 79e226e8 / claude-32）
