@@ -171,6 +171,16 @@
    "justification": "账本1672/1674(Owner亲批修relay健康检查误判)：isRelayAlive()原来把\"lastLogAt距今>60s\"当死亡信号，把健康空闲relay跟真死relay混为一谈，主网18个relay全被误判死，relay-health-monitor每30s对着全部活relay调startRelay()，全部落空already_running，零真实重启但仍空耗重启配额。修复改为读三个既有的进程真实存活信号(child.exitCode/signalCode/killed、child.connected、process.kill(pid,0))，不新增任何心跳/ping机制(查过relay.mjs全文，没有现成ping命令类型)。本文件是纯逻辑单测：用第二参deps.relays注入一个假的_relays map测isRelayAlive()的判活分支，不fork真relay子进程、不碰真IPC、不碰热钱包，跟白名单已有两条(p5_positive_via_fake_relay_sink.test.mjs/precond4_handler_zero_sign_calls.test.mjs)同一类\"隔离测试fixture\"语义。7个用例覆盖：空闲(lastLogAt陈旧)不判死/从未打过日志走startedAt兜底仍判活/_relays条目缺失(对应child.on('exit')既有清理效果)判死/真实已退出pid判死(即使lastLogAt新鲜也不救回)/child.exitCode已设置判死/child.connected===false判死/零参调用不破坏生产真实调用方式，全部PASS。文件在test-framework/路径下(本capability静态负面检查③满足)。此前一度改成让relay-health-monitor.js重导出isRelayAlive、测试文件从那里取以绕开M0a裸import闸——NWT审(docs/iteration/j1-inbox/2026-09-26T10-31Z-nwt-VERDICT-kanetui-relay-health-false-dead-16364114-review.md, review_ref 35b28950)判定那是绕闸而非合规路径(export语句本身不匹配M0a检测器正则，但relay-health-monitor.js从未对外导出过这个符号，加那一行唯一目的就是给测试开一条不经审批的路)，指出这条现成的m0c1-test-fixture-relay-sink capability正是为这类场景设计的口子，本条manifest条目按NWT给的合规路径补上，NWT本次审(即上述review文件)即满足该capability要求的\"NWT审\"这一步，Owner知情由Bettor按既有惯例记账。",
    "review_ref": "35b28950",
    "content_digest": "d7dc56680e1e2035b478ad4da9debd27df0175312910f5d88a043615eb573564"
+  },
+  {
+   "id": "MRC-ktt-v2-panel-tokens",
+   "family": "relay-manager",
+   "form": "import { sendCommandAsync } from relay-manager.js",
+   "path": "kasia-console/src/api/tokens.js",
+   "capability": "m0c-controlled-relay-endpoint",
+   "justification": "D-035 KTT 铸币/转账/查阅 API · NWT 审 · 账本 xxxx · Owner 知情（D-035 批）。三条路由(POST /api/ktt/mint, POST /api/ktt/transfer, GET /api/ktt/holdings)全部走 origin=app(sendCommandAsync 第4实参显式标注, R-SENDCMD-ORIGIN-REQUIRED 已过)+ relay_id 由调用方显式指定(经 relay_nodes 表解析地址, 非隐式默认)+ 命令类型硬编码为 ktt_v2_mint/ktt_v2_transfer/get_address_utxos 三个固定字符串(非透传调用方任意 type)——不是裸透传, 是受控 funnel。核心 KTT v2 钱路逻辑(合约 KanetTestTokenV2.sil/relay 侧 unlockKttV2Mint/unlockKttV2Transfer)已在同分支 commit 20066ed5 用 12 笔真实 simnet 广播 txid + 3 条对抗拒绝原文验证过(docs/provenance/2026-09-27-j2-ktt-v2-simnet/README.md), 本条只是给这条 API 层新增的 sendCommandAsync 裸 import 补 manifest 通道(M0a 门此前对 tokens.js 无 baseline)。",
+   "review_ref": "PENDING-NWT",
+   "content_digest": "5f2cffdeb97a42ba7ceafac378d8338a57ed2bc8e71bd7faee0f738867880e02"
   }
  ]
 }
