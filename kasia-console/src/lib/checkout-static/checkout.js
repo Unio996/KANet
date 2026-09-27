@@ -19,6 +19,10 @@ import * as verifyCore from './verify-core.js';
 import * as RB from './resolve-order-browser.js';
 import * as RW from './resolve-order-wasm.js';
 import * as feeSplitLib from './vendor/fee-split-browser.mjs';
+// D-034 §8 B段⑤(Bettor 派工, 2026-09-27): 收款页展示 QR 码, 让任何钱包扫码就能付——页面自己零依赖
+// 私钥, 只是把已经推导出来的收款地址/金额编码成 kaspa: URI 给用户扫。qrcode-generator(MIT, Kazuhiko
+// Arase) 是纯 JS、零依赖的小型编码器, vendor 进来(同 noble-hashes 惯例), 不需要 canvas/网络。
+import qrcodeFactory from './vendor/qrcode-generator/qrcode.mjs';
 
 // D-034 §8 后续票②(同 D-019 pin 纪律): 启动期核 wasm 二进制 sha256, 不符即拒绝初始化。
 // 🔴 这个值是从 scripts/kaspa-wasm-web-pin.json(仓库里的权威锚点)里抄来的常量, 不是从那个文件
@@ -72,6 +76,32 @@ async function fetchWithProgress(url, onProgress) {
   return out.buffer;
 }
 const fmtMB = (n) => (n / 1048576).toFixed(1);
+
+// sompi(BigInt) → KAS 十进制字符串, 整数算术不经浮点——1 sompi = 1e-8 KAS, Number()/toFixed() 那条路径
+// (既有 rolesHtml 那行用的) 在 amount 大到超过 2^53 以后会丢精度, 且扫码付款这个场景金额必须精确到
+// 最后一个 sompi(少付一点点买家自己承担, 多付找零由 covenant 逻辑处理, 但地址栏显示的数字不能就先错)。
+function sompiToKasString(sompiBigInt) {
+  const neg = sompiBigInt < 0n;
+  const abs = neg ? -sompiBigInt : sompiBigInt;
+  const whole = abs / 100000000n;
+  const frac = (abs % 100000000n).toString().padStart(8, '0').replace(/0+$/, '');
+  return (neg ? '-' : '') + whole.toString() + (frac ? '.' + frac : '');
+}
+
+// kaspa: 付款 URI(BIP21 同族惯例, Kaspa 生态钱包——Kaspium/KDX 等通用支持 amount 参数)——只编码
+// 地址+金额两个公开字段, 页面本身从不持有/传输任何私钥, 扫码方用自己的钱包自己签名广播。
+function buildKaspaPaymentUri(address, totalSompi) {
+  return `${address}?amount=${sompiToKasString(totalSompi)}`;
+}
+
+// 用 vendor 进来的 qrcode-generator(MIT)编 SVG——不用 canvas(避免污染画布权限模型这类边缘情况),
+// scalable:true 让 SVG 自适应容器宽度, 缩放不失真, 适合手机扫码时的各种屏幕尺寸。
+function renderQrSvg(text) {
+  const qr = qrcodeFactory(0, 'M'); // typeNumber=0 自动选版本, errorCorrectionLevel='M'(中等纠错, 常见二维码默认档位)
+  qr.addData(text);
+  qr.make();
+  return qr.createSvgTag({ scalable: true });
+}
 
 let kaspaWasm = null, blake2b = null, wasmLoadError = null, wasmPinStatus = null;
 try {
@@ -251,10 +281,26 @@ async function main() {
         // 真实 sha256, 与 order-template.js 记录的模板生成锚点不一致就在 RB 内部直接拒绝(见该函数头注)。
         : RB.deriveCommissionOrderAddress(kaspaWasm, orderCfg, commissionSplitSourceSha256);
       const rolesHtml = resolved.payoutLeaves.map(r => `<tr><td>${r.name}</td><td>${(Number(r.amountSompi) / 1e8).toFixed(4)} KAS</td></tr>`).join('');
+      const totalSompi = resolved.payoutLeaves.reduce((acc, r) => acc + r.amountSompi, 0n);
+      const totalKas = sompiToKasString(totalSompi);
+      const paymentUri = buildKaspaPaymentUri(order.address, totalSompi);
+      const qrSvg = renderQrSvg(paymentUri);
       renderBox('orderInfo', `<b>订单</b>(浏览器原生推导${usedWasmCompiler ? '·真 silverc 编译器' : '·固定偏移覆写降级路径'}, 零网络请求)<table>
         <tr><td>收款地址</td><td><code>${order.address}</code></td></tr>
+        <tr><td>应付总额</td><td><code>${totalKas} KAS</code></td></tr>
         <tr><td>截止时间</td><td>${new Date(order.deadlineMs).toISOString()}</td></tr>
-      </table><table><tr><th>角色</th><th>金额</th></tr>${rolesHtml}</table>`);
+      </table><table><tr><th>角色</th><th>金额</th></tr>${rolesHtml}</table>
+      <div style="margin-top:0.75rem">
+        <b>扫码付款</b>(任意 Kaspa 钱包扫描——本页从不持有/传输私钥, 只编码下面这个公开地址+金额)<br>
+        <div style="max-width:220px;margin:0.5rem 0">${qrSvg}</div>
+        <div style="font-size:0.8rem;color:#666">付款链接(不支持扫码的钱包可手动复制)：<br><code style="word-break:break-all">${paymentUri}</code>
+        <button type="button" id="copyPaymentUriBtn" style="margin-left:0.4rem">复制</button></div>
+      </div>`);
+      document.getElementById('copyPaymentUriBtn')?.addEventListener('click', async () => {
+        const btn = document.getElementById('copyPaymentUriBtn');
+        try { await navigator.clipboard.writeText(paymentUri); btn.textContent = '已复制'; setTimeout(() => { btn.textContent = '复制'; }, 1500); }
+        catch { btn.textContent = '复制失败(手动选中)'; }
+      });
     } catch (e) {
       renderBox('orderInfo', `<span class="bad">✗ 订单地址推导失败(${e.message})</span>`);
     }
