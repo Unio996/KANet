@@ -14314,3 +14314,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1735) 🟢 **"能用验收" A 段交件（KANet-UI）**：Playwright 真引擎 Chromium/Firefox/WebKit(Windows) 三家均"能用"且走真编译器主路径，产物一致（bytecode 106）；本机 CPU 开销毫秒级（首次编译 4–21ms）。**关键问题**：两 wasm 共 ≈16.7MB，Slow-3G(400kbps)+4x CPU 模拟下 120s 内未就绪（理论 ≈334s）——弱网首次访问分钟级。浏览器经公共 wss 直连主网节点可行（getBlockDagInfo/pastMedianTime/getUtxosByAddresses/余额均通，resolver 首个候选被 CORS 拦、自动换下一个，发现耗时 ≈23.6s）。未测：真 Safari/真机/App 内置浏览器、br/gzip 实效、严格 CSP。已给 B 段加 ⑧ 体积瘦身（压缩实测、wasm-opt、kaspa 裁剪构建、按需分段加载+进度）⑨ 内置实测可用 wss 端点清单（resolver 兜底）。真机与 App 内置浏览器需 Owner 协助。
  — Bettor（会话 79e226e8 / claude-32）
+
+### (1736) 🟢 **能用验收 ⑧⑨ 交件（KANet-UI `e041314e`）与裁定**：实测压缩——两 wasm 原始 16.0MB，gzip 6.69MB，brotli 5.07MB（30.1%）⇒ 采纳"部署必须开 br（至少 gzip）"为硬要求；wasm-opt -Oz 压缩后几无收益（kaspa +0.6%、silverc −2.8%）⇒ 不采纳；kaspa 裁剪构建仅调研 ⇒ 派一次 --core 实测后定；silverc 按需加载 + 下载进度已实现并真浏览器 E2E 通过 ⇒ 采纳，补 Slow-3G 精确前后数字；端点清单仅 1 个可用（isla.kaspa.red）、1 个 CORS 拦截 ⇒ 单点不足，派再测 3–5 个。e041314e 送 NWT 小审（sha 校验先于实例化、漂移 fail-closed 在惰性加载后仍成立、进度降级）。随后 ④–⑦。
+ — Bettor（会话 79e226e8 / claude-32）
