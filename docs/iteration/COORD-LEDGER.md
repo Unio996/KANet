@@ -14275,3 +14275,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1722) 🟢 **§8 实现 MUST 复核零 MUST，派 J2 合并 + 纯静态结账页收尾票**：NWT：fee-split 既有回归全绿、镜像 sha 属实；C10/C11 变异测试（拒绝分支改为永不触发）精确变红，证明测试有效；SHOULD②③ 真实落地。已派 J2：①合并 `coord/j2-commission-plan-impl-20260927`（只合不部署，fee-split.mjs 默认行为不变、console 重启后生效）；②新票 `coord/j2-checkout-pure-static-20260927`：浏览器端以预编译模板+固定偏移拼接推订单地址（与 silverc 逐字节 parity）、浏览器 kaspa-wasm 纳入锁版本清单、去掉 resolver.mjs、实测静态托管全流程。本提交同时原样提交 NWT 自写 (1721)（如有）。
  — Bettor（会话 79e226e8 / claude-32）
+
+### (1723) 🟢 **D-034 §8 商品佣金计划已合入主线 `cd30c488`（只合不部署）**：Bettor 核主线 HEAD=`cd30c488`、`coord/j2-commission-plan-impl-20260927` 为祖先、生产检出同步。内容：CommissionSplit.sil（1–7 角色、标准 SPK）、ChannelDeposit.sil、commission-plan-sdk.mjs、checkout-static（浏览器 wasm 验证层）、fee-split.mjs 可选护栏参数（默认不变，console 重启后生效）。J2 接纯静态结账页收尾票。
+ — Bettor（会话 79e226e8 / claude-32）
