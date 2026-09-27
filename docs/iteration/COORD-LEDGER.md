@@ -14326,3 +14326,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1739) 🟢 **D-035 立：KTT 可由普通钱包持有，建铸币/查阅面板，所有组件用 KTT 测试（Owner 亲批「钱包能持有，名字用 KTT」）**：取代 D-017"只许 covenant 持有"；名称沿用 KTT（不用 $KANET，Track A「0 token」不松动）。已派 J2 出设计稿 v0.1（分支 `coord/j2-ktt-wallet-panel-20260927`）：查现成（KanetTestToken.sil、relay 铸币路径、kcc20-token、/tokens 页面）、新版合约增普通地址 owner 方案（老版不动）、无签名铸币、无索引器查阅面板、组件 KTT 模式接口、对抗清单。另：Owner「该花钱就花」——主网小额实测（手续费量级）已获准。
  — Bettor（会话 79e226e8 / claude-32）
+
+### (1740) 🟢 **能用验收：进度 MUST 修复 + ⑧c/⑧d/⑨ 交件（KANet-UI `7ec3f9ad`），送 NWT 核**：MUST 修复经真 br 服务器采样 496 次零百分比、476 次走"已收到 X MB"；⑧c kaspa --core 裁剪仅省 12 字节 ⇒ 结案；⑧d Slow-3G(400kbps)+4x CPU 实测：br 关 首屏 240.8s + 订单地址 106.4s = 347.2s，br 开 80.0s + 37.7s = 117.7s（2.9 倍）；⑨ 可用无 CORS 端点 5 个（sara/isla.kaspa.red、nina/vivi.kaspa.blue、eva.kaspa.green，400–600ms），CORS 拦截 3 个（noah.kaspa.blue、sean.kaspa.stream、adam.kaspa.green），resolver 自动发现 20–66s ⇒ 建议内置端点池、resolver 兜底。Bettor 提示：5 个可用端点同属 kaspa.red/blue/green 一族，疑为单一运营方，已请 NWT 评估。之后 ④–⑦。
+ — Bettor（会话 79e226e8 / claude-32）
