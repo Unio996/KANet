@@ -456,3 +456,41 @@ export function computeKttTokenArtifact({ amount, ownerCovIdHex }, silvercPath) 
     stateFieldCount: compiled._raw.contracts.KanetTestToken.runtime_state.fields.length,
   };
 }
+
+const KANET_TEST_TOKEN_V2_SIL = join(dirname(fileURLToPath(import.meta.url)), 'sil-v1', 'KanetTestTokenV2.sil');
+
+export const KTT_V2_SCHEME_COVENANT_ID = 4;
+export const KTT_V2_SCHEME_PUBKEY = 0;
+
+/**
+ * KanetTestTokenV2(KTT v2) genesis 实例 artifact — D-035 §2(J2 设计 2026-09-27, NWT 审零 MUST,
+ * docs/iteration/j1-inbox/2026-09-27T13-09Z-nwt-VERDICT-d035-ktt-wallet-panel-design-v0.1-review.md)。
+ * 与 computeKttTokenArtifact(上方, v1 合约, D-020 register_append 专用, 本函数完全不碰它)的唯一
+ * 区别: 新合约文件(KanetTestTokenV2.sil, 独立 covenant-id 家族, 与 v1 互不感知)+ owner_scheme 可选
+ * 0x00(pubkey, KCC-0020 上游 IDENTIFIER_PUBKEY 命名)或 0x04(covenant-id, 与 v1 语义相同)。
+ * @param {object} o { amount:number, ownerScheme:0|4, ownerBytesHex:string(32B hex, 无0x——
+ *   0x04 时是 covenant-id, 0x00 时是 32 字节 x-only Schnorr pubkey) }
+ * @param {string} [silvercPath] 默认 SILVERC_V100_PATH/D-019 pin 生产路径(同 compileSilV100 默认)
+ * @returns {{ script:Buffer, scriptPubKeyHex:string, templateHashHex:string, templatePrefix:Buffer,
+ *   templateSuffix:Buffer, entryAbi:object, stateFieldCount:number }}
+ */
+export function computeKttV2TokenArtifact({ amount, ownerScheme, ownerBytesHex }, silvercPath) {
+  if (ownerScheme !== KTT_V2_SCHEME_COVENANT_ID && ownerScheme !== KTT_V2_SCHEME_PUBKEY) {
+    throw new Error(`computeKttV2TokenArtifact: ownerScheme must be 0(pubkey) or 4(covenant-id), got ${ownerScheme}`);
+  }
+  if (!/^[0-9a-f]{64}$/.test(String(ownerBytesHex || ''))) throw new Error(`computeKttV2TokenArtifact: ownerBytesHex must be 32-byte hex, got ${ownerBytesHex}`);
+  const ZERO32 = '00'.repeat(32);
+  const ctor = [
+    ctorIntV100(amount), ctorBytes32V100(ownerBytesHex), { kind: 'byte', value: ownerScheme }, { kind: 'byte', value: 0 },
+    ctorBytes32V100(ZERO32), ctorBytes32V100(ZERO32),
+    ctorIntV100(3), ctorIntV100(3),
+  ];
+  const compiled = silvercPath ? compileSilV100(KANET_TEST_TOKEN_V2_SIL, ctor, 'KanetTestTokenV2', silvercPath) : compileSilV100(KANET_TEST_TOKEN_V2_SIL, ctor, 'KanetTestTokenV2');
+  const artifact = extractTemplateArtifactV100(compiled);
+  return {
+    script: Buffer.from(compiled.script), scriptPubKeyHex: '0x' + _kttP2sh(compiled.script), templateHashHex: artifact.templateHashHex,
+    templatePrefix: artifact.templatePrefix, templateSuffix: artifact.templateSuffix,
+    entryAbi: compiled._raw.contracts.KanetTestTokenV2.entries.transfer,
+    stateFieldCount: compiled._raw.contracts.KanetTestTokenV2.runtime_state.fields.length,
+  };
+}

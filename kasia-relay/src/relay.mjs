@@ -1028,6 +1028,25 @@ if (process.send) {
           if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
           return;
         }
+        case 'ktt_v2_mint': {
+          // D-035(2026-09-27·Owner批·NWT审零MUST): KTT v2 铸币——任意数量铸到任意地址(owner_scheme
+          // 0x00 pubkey 或 0x04 covenant-id), 零校验零签名(genesis)。console 侧已算好 redeem_hex。
+          const { unlockKttV2Mint } = await import('./lib/p2sh.mjs');
+          const wallet = getWallet();
+          const r = await unlockKttV2Mint({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
+          if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
+          return;
+        }
+        case 'ktt_v2_transfer': {
+          // D-035(2026-09-27·Owner批·NWT审零MUST): 钱包持有(owner_scheme=0x00)的 KTT 转给另一地址 +
+          // 找零, relay 自己的钱包私钥签 checkSig。continuation 输出显式 CovenantBinding 延续源
+          // covenant_id(真实 simnet 撞出的坑, 见 unlockKttV2Transfer 头注)。
+          const { unlockKttV2Transfer } = await import('./lib/p2sh.mjs');
+          const wallet = getWallet();
+          const r = await unlockKttV2Transfer({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
+          if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
+          return;
+        }
         case 'bshard_consolidate': {
           // 单片全额归集进真 PayoutShard (PS absorb OP_0 + SL consolidate_to_payout OP_1, cov_id-bind destination + CovenantBinding 续).
           const { unlockBshardConsolidate } = await import('./lib/p2sh.mjs');

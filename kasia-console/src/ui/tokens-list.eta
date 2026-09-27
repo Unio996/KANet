@@ -52,6 +52,110 @@
       </tbody>
     </table>
   </div>
+
+  <!-- D-035(2026-09-27·Owner批·NWT审零MUST) §③④: KTT v2 铸币/查阅——真实链上代币, 与上面"代币定义"
+       (纯 DB 元数据、零链上语义)刻意分区展示, 不共用一张表, 避免用户把两者当成同一回事(设计稿④已
+       点出的认知风险: 详见 docs/2026-09-27-j2-ktt-wallet-mint-panel-design-v0.1.md)。 -->
+  <div class="mt-10 pt-8 border-t-2 border-warm-300" x-data="kttV2Panel()" x-init="init()">
+    <div class="mb-4">
+      <h2 class="text-xl font-display text-ink-800">KTT v2 · 真实链上代币</h2>
+      <p class="text-xs text-ink-400 mt-1">
+        与上面"代币定义"是两回事——这里铸出的是真实 Kaspa covenant UTXO, 任何人可铸任意数量到任意
+        地址(普通钱包 pubkey 或另一个 covenant-id)。零价值测试币, 花的只是转账手续费。
+      </p>
+    </div>
+
+    <!-- D-035 NWT MUST 闭合(2026-09-27 §⑥): 出手续费+签名的 relay 不再由这里手填——服务端固定读
+         env KTT_PANEL_RELAY_ID(单一专用 relay), 未配置时 mint/transfer 直接 403。此面板未开(env
+         KTT_PANEL_ENABLED 默认关)时铸币/转账会返回 403, 这是预期行为不是 bug。 -->
+
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mt-4">
+      <!-- 铸币 -->
+      <div class="card p-5">
+        <h3 class="font-semibold text-ink-700 mb-3">铸币</h3>
+        <label class="text-xs text-ink-400">目标类型</label>
+        <select x-model.number="mintForm.ownerScheme" class="w-full mt-1 mb-3 border border-warm-300 rounded-lg px-3 py-2 text-sm bg-warm-50">
+          <option :value="0">普通钱包(owner_scheme=0x00, 凭签名花费)</option>
+          <option :value="4">covenant(owner_scheme=0x04, 在场证明花费)</option>
+        </select>
+        <label class="text-xs text-ink-400">目标 32 字节 hex(pubkey 或 covenant-id)</label>
+        <input x-model="mintForm.ownerHex" type="text" placeholder="64 位 hex"
+          class="w-full mt-1 mb-3 border border-warm-300 rounded-lg px-3 py-2 text-xs font-mono bg-warm-50">
+        <button @click="mint()" :disabled="mintBusy || !canMint" class="btn btn-primary w-full text-sm" :class="(mintBusy || !canMint) ? 'opacity-50 cursor-not-allowed' : ''">
+          <span x-show="!mintBusy">铸币(面值 = relay 资金 UTXO 全额减手续费)</span>
+          <span x-show="mintBusy">广播中...</span>
+        </button>
+        <div x-show="mintError" class="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mt-2" x-text="mintError"></div>
+        <div x-show="mintResult" class="text-xs text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2 mt-2">
+          ✓ txid <span class="font-mono" x-text="mintResult && mintResult.txid"></span><br>
+          地址 <span class="font-mono break-all" x-text="mintResult && mintResult.p2sh_address"></span>
+        </div>
+      </div>
+
+      <!-- 查阅 -->
+      <div class="card p-5">
+        <h3 class="font-semibold text-ink-700 mb-3">查阅</h3>
+        <p class="text-[11px] text-ink-400 mb-2">
+          列出<b>本面板记录中</b>与该 owner 相关的持仓(铸币/转账回执 + 本地记录), <b>不是</b>该地址的
+          全部持仓——没有反查索引, 给定一个从未跟本面板交互过的地址无法完整列出(设计稿④已写明的局限,
+          不是 bug)。
+        </p>
+        <label class="text-xs text-ink-400">owner 32 字节 hex</label>
+        <input x-model="lookupOwnerHex" type="text" placeholder="64 位 hex"
+          class="w-full mt-1 mb-3 border border-warm-300 rounded-lg px-3 py-2 text-xs font-mono bg-warm-50">
+        <label class="text-xs text-ink-400">逐笔回链核实用 relay_id(可选, 只读 RPC 查询, 不受 KTT_PANEL_ENABLED 限制)</label>
+        <input x-model="verifyRelayId" type="text" placeholder="relay 节点 id(留空则跳过回链核实, 只看本地记录)"
+          class="w-full mt-1 mb-3 border border-warm-300 rounded-lg px-3 py-2 text-sm bg-warm-50">
+        <button @click="lookup(true)" :disabled="lookupBusy || !lookupOwnerHex" class="btn btn-secondary w-full text-sm">
+          <span x-show="!lookupBusy">查阅 + 逐笔回链核实</span>
+          <span x-show="lookupBusy">查询中...</span>
+        </button>
+        <div x-show="lookupError" class="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mt-2" x-text="lookupError"></div>
+        <table x-show="holdings.length" class="w-full text-xs mt-3">
+          <thead class="text-ink-500"><tr><th class="text-left py-1">地址</th><th class="text-right py-1">金额</th><th class="text-right py-1">状态</th></tr></thead>
+          <tbody>
+            <template x-for="h in holdings" :key="h.id">
+              <tr class="border-t border-warm-100">
+                <td class="py-1 font-mono break-all" x-text="h.p2sh_address"></td>
+                <td class="py-1 text-right tabular-nums" x-text="h.amount_sompi"></td>
+                <td class="py-1 text-right" x-text="h.spent_txid ? '已花' : (h.still_unspent === false ? '⚠链上未找到' : (h.still_unspent === true ? '未花(已核)' : '未核实'))"></td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- 转账(需先查阅拿到 ledger id) -->
+      <div class="card p-5 md:col-span-2">
+        <h3 class="font-semibold text-ink-700 mb-3">转账(钱包持有的 KTT, 凭签名花费 + 找零)</h3>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div>
+            <label class="text-xs text-ink-400">要转的记录 ledger_id(从上面"查阅"结果里复制)</label>
+            <input x-model="xferForm.ledgerId" type="text" class="w-full mt-1 border border-warm-300 rounded-lg px-3 py-2 text-xs font-mono bg-warm-50">
+          </div>
+          <div>
+            <label class="text-xs text-ink-400">目标类型</label>
+            <select x-model.number="xferForm.destOwnerScheme" class="w-full mt-1 border border-warm-300 rounded-lg px-3 py-2 text-sm bg-warm-50">
+              <option :value="0">普通钱包(0x00)</option>
+              <option :value="4">covenant(0x04)</option>
+            </select>
+          </div>
+          <div>
+            <label class="text-xs text-ink-400">目标 32 字节 hex</label>
+            <input x-model="xferForm.destOwnerHex" type="text" class="w-full mt-1 border border-warm-300 rounded-lg px-3 py-2 text-xs font-mono bg-warm-50">
+          </div>
+        </div>
+        <button @click="transfer()" :disabled="xferBusy || !canTransfer" class="btn btn-primary w-full text-sm mt-3" :class="(xferBusy || !canTransfer) ? 'opacity-50 cursor-not-allowed' : ''">
+          <span x-show="!xferBusy">转账</span>
+          <span x-show="xferBusy">广播中...</span>
+        </button>
+        <div x-show="xferError" class="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mt-2" x-text="xferError"></div>
+        <div x-show="xferResult" class="text-xs text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2 mt-2">
+          ✓ txid <span class="font-mono" x-text="xferResult && xferResult.txid"></span>
+        </div>
+      </div>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -70,6 +174,62 @@ function tokensListPage() {
         this.loadFailed = err.message;
       }
       this.loading = false;
+    },
+  };
+}
+
+function kttV2Panel() {
+  return {
+    // D-035 NWT MUST 闭合(2026-09-27 §⑥): mint/transfer 不再由前端传 relay_id——服务端固定读
+    // env KTT_PANEL_RELAY_ID。verifyRelayId 是完全独立的字段, 只用于"查阅"卡片里 holdings 的
+    // ?verify=1 只读 RPC 核实(那条路径不受 KTT_PANEL_ENABLED 限制, 见 tokens.js /api/ktt/holdings)。
+    verifyRelayId: '',
+    mintForm: { ownerScheme: 0, ownerHex: '' },
+    mintBusy: false, mintError: '', mintResult: null,
+    lookupOwnerHex: '', lookupBusy: false, lookupError: '', holdings: [],
+    xferForm: { ledgerId: '', destOwnerScheme: 0, destOwnerHex: '' },
+    xferBusy: false, xferError: '', xferResult: null,
+    init() {},
+    get canMint() { return /^[0-9a-fA-F]{64}$/.test(this.mintForm.ownerHex); },
+    get canTransfer() { return !!(this.xferForm.ledgerId && /^[0-9a-fA-F]{64}$/.test(this.xferForm.destOwnerHex)); },
+    async mint() {
+      if (!this.canMint || this.mintBusy) return;
+      this.mintBusy = true; this.mintError = ''; this.mintResult = null;
+      try {
+        const res = await fetch('/api/ktt/mint', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ owner_scheme: this.mintForm.ownerScheme, owner_hex: this.mintForm.ownerHex }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.ok) { this.mintError = data.error || ('HTTP ' + res.status); return; }
+        this.mintResult = data;
+      } catch (err) { this.mintError = err.message; } finally { this.mintBusy = false; }
+    },
+    async lookup(verify) {
+      if (!this.lookupOwnerHex || this.lookupBusy) return;
+      this.lookupBusy = true; this.lookupError = ''; this.holdings = [];
+      try {
+        const qs = new URLSearchParams({ owner_hex: this.lookupOwnerHex });
+        if (verify && this.verifyRelayId) { qs.set('relay_id', this.verifyRelayId); qs.set('verify', '1'); }
+        const res = await fetch('/api/ktt/holdings?' + qs.toString());
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.ok) { this.lookupError = data.error || ('HTTP ' + res.status); return; }
+        this.holdings = data.holdings || [];
+      } catch (err) { this.lookupError = err.message; } finally { this.lookupBusy = false; }
+    },
+    async transfer() {
+      if (!this.canTransfer || this.xferBusy) return;
+      this.xferBusy = true; this.xferError = ''; this.xferResult = null;
+      try {
+        const res = await fetch('/api/ktt/transfer', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ledger_id: this.xferForm.ledgerId, dest_owner_hex: this.xferForm.destOwnerHex, dest_owner_scheme: this.xferForm.destOwnerScheme }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.ok) { this.xferError = data.error || ('HTTP ' + res.status); return; }
+        this.xferResult = data;
+        if (this.lookupOwnerHex) this.lookup(false);
+      } catch (err) { this.xferError = err.message; } finally { this.xferBusy = false; }
     },
   };
 }

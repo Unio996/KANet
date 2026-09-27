@@ -53,6 +53,7 @@ export const CONTROLLED_RELAY_CAP = 'm0c-controlled-relay-endpoint';
 export const CONTROLLED_FUNNEL_ALLOWLIST = new Set([
   'kasia-console/src/api/operator-settle.js', // M0c-1 批B operator 结算专道(relay.js:1726 money-path 出口收敛)
   'kasia-console/src/api/capability.js', // 机制A HTTP 能力网关 custodial_transfer 受控 funnel(NWT G2 整体 diff GREEN·review_ref 3a58f2b4·MRC-capability-gateway-wallet-transfer)
+  'kasia-console/src/api/tokens.js', // D-035(2026-09-27·Owner批) KTT v2 铸币/转账/查阅三条 API·origin='app'+relay_id 服务端固定(KTT_PANEL_RELAY_ID, NWT MUST 闭合后不再由调用方传入)+manifest MRC-ktt-v2-panel-tokens
 ]);
 
 // ── considered amendment #2(2026-07-23, Bettor 快裁·blocker): 窄 capability m0c1-provision-writer ──

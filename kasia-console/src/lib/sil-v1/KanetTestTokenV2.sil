@@ -1,0 +1,104 @@
+pragma silverscript ^0.1.0;
+// KanetTestTokenV2 (KTT v2) — D-035 实现(J2, 2026-09-27)。设计: docs/2026-09-27-j2-ktt-wallet-mint-
+// panel-design-v0.1.md §2(NWT 审零 MUST, docs/iteration/j1-inbox/2026-09-27T13-09Z-nwt-VERDICT-...md)。
+//
+// 与 KanetTestToken.sil(v1)的关系: 新文件, 不改 v1 一个字节——v1 已在 D-020 register_append/主网集
+// (D-019)里跑通, 任何源码改动都会换 template_hash/covenant-id, 等价于发行新代币; v2 是独立的新代币族,
+// 与 v1 共存, 互不感知(设计稿②"新旧版本共存")。
+//
+// 唯一实质差异: owner_scheme 从只认 0x04(covenant-id, 在场证明)扩展为同时接受 0x00(KCC-0020 上游规范
+// IDENTIFIER_PUBKEY, D:\silverscript\docs\kcc20-book\src\kcc20-contract.md)——0x00 花费改用
+// checkSig(sig, pubkey(owner)), owner 字段直接是 32 字节 x-only Schnorr pubkey(与 KanetTokenClaim.sil:106
+// 已验证的 checkSig(s, pubkey(winner_pk))同一模式, 零 State 布局改动)。sig[]/sig 平行参数形状照抄上游
+// checkSigs(State[] prevStates, sig[] sigs, ...)(D:\silverscript\docs\DECL.md:59/66 证实 sig[] 合法)。
+// 同一笔 tx 内两种 owner_scheme 可混用(各分支独立验证, 不互相借用判定结果, NWT 对抗清单#4 已核)。
+//
+// v1 其余不变量原样保留: borrow_scheme 钉死 0x00(H3, KCC-0020 §5 borrowed-receive 路径整体拒绝);
+// next_states owner 非零守卫(NWT 1158 MUST-FIX 同款, owner=0 会让 covenant 分支的在场核对/pubkey 分支
+// 理论上都不该放行——pubkey 分支下 pubkey(全零)对应私钥几乎不可能被任何人持有, checkSig 会失败而非
+// "恒真", 但 owner 非零守卫本身对两条分支都无害地保留, 不因新增 pubkey 分支而放松); 守恒
+// sum_in>=sum_out(D-018); 稳定币三入口 mint_issuer/clawback 编译期常量恒拒(H2/P1)。
+contract KanetTestTokenV2(
+    int      init_amount,
+    byte[32] init_owner,
+    byte     init_owner_scheme,
+    byte     init_borrow_scheme,
+    byte[32] init_borrow_guard,
+    byte[32] init_extension_commitment,
+    int      max_ins, int max_outs
+) {
+    int      amount               = init_amount;
+    byte[32] owner                = init_owner;
+    byte     owner_scheme         = init_owner_scheme;
+    byte     borrow_scheme        = init_borrow_scheme;
+    byte[32] borrow_guard         = init_borrow_guard;
+    byte[32] extension_commitment = init_extension_commitment;
+
+    byte constant SCHEME_COVENANT_ID = 0x04;   // covenant-id/v1(与 v1 合约同值, 保留兼容判断)
+    byte constant SCHEME_PUBKEY      = 0x00;   // KCC-0020 IDENTIFIER_PUBKEY(新增)
+    byte constant BORROW_DISABLED    = 0x00;   // disabled/v1(H3)
+    bool constant MODE_TEST_COIN = true;
+    pubkey constant ISSUER_PK = pubkey(byte[32](0x0000000000000000000000000000000000000000000000000000000000000000));
+
+    function pauseGuardOk() : bool {
+        bool ok = MODE_TEST_COIN;
+        return ok;
+    }
+
+    byte[32] constant ZERO32 = byte[32](0x0000000000000000000000000000000000000000000000000000000000000000);
+
+    #[covenant(binding = cov, from = max_ins, to = max_outs, name = transfer, delegate_name = transfer_delegator)]
+    function transferPolicy(State[] prev_states, State[] next_states, byte[] witness, int[] owner_input_idx, sig[] sigs) {
+        require(pauseGuardOk());
+        require(witness.length == 0);   // H3: borrowed-receive 路径仍整体拒绝, 与 v1 一致
+        int sum_in = 0;
+        for (i, 0, prev_states.length, max_ins) {
+            require(prev_states[i].borrow_scheme == BORROW_DISABLED);
+            if (prev_states[i].owner_scheme == SCHEME_COVENANT_ID) {
+                require(OpInputCovenantId(owner_input_idx[i]) == prev_states[i].owner);
+            } else {
+                require(prev_states[i].owner_scheme == SCHEME_PUBKEY);
+                require(checkSig(sigs[i], pubkey(prev_states[i].owner)));
+            }
+            sum_in = sum_in + prev_states[i].amount;
+        }
+        int sum_out = 0;
+        for (j, 0, next_states.length, max_outs) {
+            require(next_states[j].amount > 0);
+            bool schemeOk = next_states[j].owner_scheme == SCHEME_COVENANT_ID;
+            if (!schemeOk) { schemeOk = next_states[j].owner_scheme == SCHEME_PUBKEY; }
+            require(schemeOk);
+            require(next_states[j].borrow_scheme == BORROW_DISABLED);
+            require(next_states[j].borrow_guard == ZERO32);
+            require(next_states[j].extension_commitment == ZERO32);
+            // owner 非零守卫(NWT 1158 同款, 两条分支均保留——见头注对 pubkey 分支必要性的说明)。
+            require(next_states[j].owner != ZERO32);
+            sum_out = sum_out + next_states[j].amount;
+        }
+        require(sum_in >= sum_out);
+    }
+    #[covenant.delegate]
+    function transfer_delegator(byte[] witness, int my_owner_input_idx, sig my_sig) {
+        require(witness.length == 0);
+        if (owner_scheme == SCHEME_COVENANT_ID) {
+            require(OpInputCovenantId(my_owner_input_idx) == owner);
+        } else {
+            require(owner_scheme == SCHEME_PUBKEY);
+            require(checkSig(my_sig, pubkey(owner)));
+        }
+    }
+
+    #[covenant.allow(rule = manual_entrypoint_in_leader_contract)]
+    entry mint_issuer(sig s) {
+        require(OpCovInputCount(OpInputCovenantId(this.activeInputIndex)) == 1);
+        require(!MODE_TEST_COIN);
+        require(checkSig(s, ISSUER_PK));
+    }
+    #[covenant.allow(rule = manual_entrypoint_in_leader_contract)]
+    entry clawback(sig s, int out_idx) {
+        require(OpCovInputCount(OpInputCovenantId(this.activeInputIndex)) == 1);
+        require(!MODE_TEST_COIN);
+        require(checkSig(s, ISSUER_PK));
+        require(tx.outputs[out_idx].value > 0);
+    }
+}

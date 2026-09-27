@@ -6643,5 +6643,55 @@ export function runMigrations() {
     `);
     console.log('[migrate] v217: kaspa_tx_log_coverage + broker_refund_intents + idx_spc_daa_ts 建表/建索引完成 (纯新增; 写入方待 wiring 阶段 2/3; 编号前移自原 coord/broker-money-path 分支的 v199, 见上方头注).');
   }
+
+  // ── v218 (2026-09-27, J2 · D-035 KTT v2 铸币/查阅面板, 设计
+  //   docs/2026-09-27-j2-ktt-wallet-mint-panel-design-v0.1.md §④, NWT 审零 MUST,
+  //   docs/iteration/j1-inbox/2026-09-27T13-09Z-nwt-VERDICT-d035-ktt-wallet-panel-design-v0.1-review.md) ──
+  //   ktt_holdings_ledger —— 设计稿④"本地记录表"落地。**只登记本面板自己处理过的铸币/转账操作产出**
+  //   (铸币/转账回执), 不是通用链上索引——kaspa_tx_log 的"覆盖面天生不足"教训(docs/DATABASE.md)不重蹈,
+  //   这张表范围小但完整(只记自己做过的事)。查阅时对 p2sh_address 逐笔回链核实是否仍未花(见④三层),
+  //   本表不单方面充当真相源。
+  //   owner_hex 列建索引: 查阅面板按"这个 owner 相关的记录"筛选(仍是"本面板记录中"的范围, 不是
+  //   "该 owner 的全部持仓"——设计稿④已写明这条边界, 不重复)。
+  {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS ktt_holdings_ledger (
+        id                    TEXT PRIMARY KEY,
+        txid                  TEXT NOT NULL,
+        output_index          INTEGER NOT NULL,
+        p2sh_address          TEXT NOT NULL,
+        amount_sompi          TEXT NOT NULL,
+        owner_hex             TEXT NOT NULL,
+        owner_scheme          INTEGER NOT NULL,
+        contract_version      TEXT NOT NULL,
+        minted_by             TEXT,
+        created_at            TEXT NOT NULL,
+        last_verified_at      TEXT,
+        spent_txid            TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_ktt_holdings_owner ON ktt_holdings_ledger(owner_hex);
+      CREATE INDEX IF NOT EXISTS idx_ktt_holdings_p2sh ON ktt_holdings_ledger(p2sh_address);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_ktt_holdings_txid_out ON ktt_holdings_ledger(txid, output_index);
+    `);
+    console.log('[migrate] v218: ktt_holdings_ledger 建表完成(D-035 §④ 查阅面板本地记录表, 纯新增).');
+  }
+
+  // ── v219 (2026-09-27, J2 · D-035 NWT diff 审 MUST 闭合, 见
+  //   docs/iteration/j1-inbox/2026-09-27T13-55Z-nwt-VERDICT-d035-ktt-v2-impl-diff-review.md §⑥) ──
+  //   ktt_panel_rate_limit_log —— tokens.js 的 /api/ktt/mint、/api/ktt/transfer 两条真花 relay 真实
+  //   KAS 手续费的路由的进程外(DB 持久化, 非内存计数器)限流账, 同本仓既有 pilot_rate_limit_log
+  //   (capability.js §2.4)同一套模式(count+insert 原子事务 + 自清理, keyed by action 而非 grant_id,
+  //   因为这条路由固定只服务一个 KTT_PANEL_RELAY_ID, 不需要按调用方区分)。
+  {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS ktt_panel_rate_limit_log (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        action       TEXT    NOT NULL,
+        requested_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_ktt_panel_rate_limit_action_time ON ktt_panel_rate_limit_log(action, requested_at);
+    `);
+    console.log('[migrate] v219: ktt_panel_rate_limit_log 建表完成(D-035 NWT MUST 闭合 §⑥, mint/transfer 进程外限流, 纯新增).');
+  }
   console.log('[migrate] DB migrations complete.');
 }
