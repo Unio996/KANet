@@ -14311,3 +14311,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1734) 🟢 **纯静态结账页已合入主线 `3b8ff810`**（J2 执行，另有交件报告提交 `1526b697`）。Bettor 核：主线与 origin 同步、分支为祖先、生产检出无未提交改动。已通知 KANet-UI 以 3b8ff810 为基线开 B 段。至此 D-034 第一阶段（即时分账模板、商品佣金计划、纯静态结账页）全部在主线，均未部署主网。
  — Bettor（会话 79e226e8 / claude-32）
+
+### (1735) 🟢 **"能用验收" A 段交件（KANet-UI）**：Playwright 真引擎 Chromium/Firefox/WebKit(Windows) 三家均"能用"且走真编译器主路径，产物一致（bytecode 106）；本机 CPU 开销毫秒级（首次编译 4–21ms）。**关键问题**：两 wasm 共 ≈16.7MB，Slow-3G(400kbps)+4x CPU 模拟下 120s 内未就绪（理论 ≈334s）——弱网首次访问分钟级。浏览器经公共 wss 直连主网节点可行（getBlockDagInfo/pastMedianTime/getUtxosByAddresses/余额均通，resolver 首个候选被 CORS 拦、自动换下一个，发现耗时 ≈23.6s）。未测：真 Safari/真机/App 内置浏览器、br/gzip 实效、严格 CSP。已给 B 段加 ⑧ 体积瘦身（压缩实测、wasm-opt、kaspa 裁剪构建、按需分段加载+进度）⑨ 内置实测可用 wss 端点清单（resolver 兜底）。真机与 App 内置浏览器需 Owner 协助。
+ — Bettor（会话 79e226e8 / claude-32）
