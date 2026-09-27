@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>KANet 商品佣金计划 · 无代码配置页(V1 参考实现)</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; color: #222; }
+  h1 { font-size: 1.2rem; }
+  label { display: block; margin-top: 0.75rem; font-size: 0.9rem; }
+  input, select { width: 100%; padding: 0.4rem; box-sizing: border-box; }
+  .row { display: flex; gap: 0.5rem; }
+  .row > div { flex: 1; }
+  button { padding: 0.6rem 1.2rem; margin-top: 1rem; }
+  .box { border: 1px solid #ccc; border-radius: 6px; padding: 1rem; margin: 1rem 0; }
+  .bad { color: #b30000; } .ok { color: #0a7a2e; } .warn { color: #b36b00; }
+  code { word-break: break-all; font-size: 0.85rem; }
+</style>
+</head>
+<body>
+  <h1>KANet 商品佣金计划 · 无代码配置页(V1 参考实现)</h1>
+  <p style="font-size:0.85rem;color:#666">
+    同 checkout.html: 签名这一步需要 kaspa-wasm, 委托给本机 resolver.mjs(<code>node resolver.mjs</code>)。
+    <b>私钥只在这个页面里用一次、只发给 127.0.0.1 的本机进程, 不出本机、不落盘</b>——但这仍然只是
+    参考实现, 真金测试前请自行审计。
+  </p>
+
+  <div class="box">
+    <label>商品价格(KAS)<input id="priceKas" type="number" value="10" step="0.00000001"></label>
+    <label>商家收款地址<input id="providerAddr" placeholder="kaspatest:..."></label>
+    <div class="row">
+      <div><label>渠道预算占比(%)<input id="channelBps" type="number" value="10"></label></div>
+      <div><label>最大渠道层数(1-5)<input id="maxChannels" type="number" value="5" min="1" max="5"></label></div>
+    </div>
+    <label>要求渠道押金<select id="requireDeposit"><option value="false" selected>否(默认, 拿来即用)</option><option value="true">是(押金门槛)</option></select></label>
+    <label>商家私钥(hex, 仅本机 resolver 使用一次)<input id="merchantPriv" type="password"></label>
+    <button id="genBtn">生成并签名报价</button>
+  </div>
+
+  <div id="minOrderHint" class="box"></div>
+  <div id="result" class="box"></div>
+
+  <script type="module" src="./config.js"></script>
+</body>
+</html>

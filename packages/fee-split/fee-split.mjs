@@ -1,4 +1,4 @@
-// ⚠ 自动生成 — 勿手改。源 = kasia-console/src/lib/fee-split.mjs (sha256:0e81a4bb65a2624f4bae6e4b6229c8abc439132f172192ae1bf2aa8873103781)
+// ⚠ 自动生成 — 勿手改。源 = kasia-console/src/lib/fee-split.mjs (sha256:7816d0dd444d007202c957af06d565c56faa88f6403a60c4f1e1f0901452087f)
 // 手改会被 lint-kanet R-FEE-SPLIT-PKG-DRIFT 拦下(commit 卡点, 非 WARN)。重新同步: node scripts/sync.mjs
 
 // fee-split.mjs — 模块化分润组件(B线, spec docs/2026-06-22-modular-fee-split-component-spec.md v1.3)。
@@ -78,8 +78,13 @@ export function buildPredictionV1InterimRules({ brokerPk, introducerPk = null })
  * 不合法 → throw(fail-loud, 防恶意预设上链)。版本不符 → err.code='FEE_RULES_SCHEMA_V_UNSUPPORTED'(可辨识,
  * spec v1.2-3: 非静默算错非裸 BUST——委员 re-derive 前先查版本支持集)。
  * @param {object} feeRules { schema_v, preset?, roles:[{name, bps, address?, derive?, optional?}] }
+ * @param {object} [opts] D-034 §8 商品佣金计划新增(可选, 不传时逐字等于旧行为, 现有 5 处调用点零改动):
+ *   opts.providerMinBps 覆盖 PROVIDER_MIN_BPS(默认 5000), opts.roleMaxBps 覆盖 ROLE_MAX_BPS(默认 5000)——
+ *   从硬编码常量改成可覆盖参数, 不改算法本身, 也不改任一现有默认值。
  */
-export function validateFeeRules(feeRules) {
+export function validateFeeRules(feeRules, opts = {}) {
+  const providerMinBps = Number.isInteger(opts.providerMinBps) ? opts.providerMinBps : PROVIDER_MIN_BPS;
+  const roleMaxBps = Number.isInteger(opts.roleMaxBps) ? opts.roleMaxBps : ROLE_MAX_BPS;
   if (!feeRules || typeof feeRules !== 'object' || Array.isArray(feeRules)) throw new Error('feeRules 必须是 object');
   // 🔴 strict whitelist(NWT 落1 红队 F1, CONFIRMED repro): 未知键必 fail-loud——canonicalize 只拾取已知键,
   //   未知键若放行会被静默剥除 → 两份语义不同的 feeRules 同 commit(链上 commit 验证被旁路)。白名单强制
@@ -111,9 +116,14 @@ export function validateFeeRules(feeRules) {
     if (r.name === 'provider') {
       providers++;
       if (r.address != null || r.derive != null) throw new Error('provider role 不带 address/derive(winners 集在 settle 时供给, 非规则配置)');
-      if (r.bps < PROVIDER_MIN_BPS) throw new Error(`provider.bps=${r.bps} < PROVIDER_MIN_BPS=${PROVIDER_MIN_BPS}(防 facilitator 抢光)`);
+      // 🔴 NWT diff 审 MUST(2026-09-27T10-11Z①): 错误信息标签恢复用大写常量名(不是运行时变量名)——
+      // 既有 fee-split.test.mjs:41 用正则 /PROVIDER_MIN_BPS|ROLE_MAX_BPS/ 死等这个大写字面量出现在
+      // 错误信息里, 之前改成小写变量名 providerMinBps/roleMaxBps 打破了这条回归测试。标签沿用常量名
+      // 字面量, 冒号后的【值】仍然是真实生效的运行时值(可能来自 opts 覆盖, 不是恒等于常量本身)——
+      // 两者不矛盾: "PROVIDER_MIN_BPS=" 是这条护栏的名字, 后面的数字是它这次实际生效的门槛。
+      if (r.bps < providerMinBps) throw new Error(`provider.bps=${r.bps} < PROVIDER_MIN_BPS=${providerMinBps}(防 facilitator 抢光)`);
     } else {
-      if (r.bps > ROLE_MAX_BPS) throw new Error(`role ${r.name}: bps=${r.bps} > ROLE_MAX_BPS=${ROLE_MAX_BPS}`);
+      if (r.bps > roleMaxBps) throw new Error(`role ${r.name}: bps=${r.bps} > ROLE_MAX_BPS=${roleMaxBps}`);
       if (r.derive != null) {
         if (r.derive !== 'committee') throw new Error(`role ${r.name}: derive 只支持 'committee', got ${r.derive}`);
         if (r.address != null) throw new Error(`role ${r.name}: derive 角色地址=委员集链派生, 禁 caller 供 address(命门④ provenance)`);
@@ -139,6 +149,13 @@ function _canonicalJson(v) {
   if (Array.isArray(v)) return '[' + v.map(_canonicalJson).join(',') + ']';
   return '{' + Object.keys(v).sort().map(k => JSON.stringify(k) + ':' + _canonicalJson(v[k])).join(',') + '}';
 }
+
+// canonicalJsonSorted — 对外导出的同一份 sorted-key canonical JSON 函数(D-034 §8 商品佣金计划设计稿
+// §2 原话"canonical 序列化复用 fee-split.mjs 内部 _canonicalJson 同一套排序键约定, 不新造第二种序列化
+// 规则")。只是把已有的私有函数 _canonicalJson 挂一个公开名字导出, 不改它的实现/行为——报价签名
+// (commission-plan-sdk.mjs signQuote/verifyQuoteSignature)与 canonicalizeFeeRules 因此共用同一套排序
+// 键约定, 不会出现"两处各自实现同一规范"的漂移(同本文件顶部"canonicalize 单源铁律")。
+export const canonicalJsonSorted = _canonicalJson;
 
 /**
  * canonicalizeFeeRules — feeRules 的唯一 canonical 序列化(spec v1.2-2 单一共享函数)。

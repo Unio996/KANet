@@ -1,0 +1,24 @@
+connected, networkId= simnet
+checking/mining for coinbase maturity (fundAddress self-heals if needed)...
+[diag:step] proc.silverc.compile.bshard-artifacts ms=36 cmd=silverc ok=1 at=2026-09-27T09:58:01.672Z
+[PASS] T1_3role_split_no_change_accept :: expect=accept accepted=true :: e88af592fd5dbf2001f3ff09b78df311386f058486a825c8ae4768db2fce998a
+[diag:step] proc.silverc.compile.bshard-artifacts ms=34 cmd=silverc ok=1 at=2026-09-27T09:58:01.742Z
+[PASS] T2_3role_split_with_change_accept :: expect=accept accepted=true :: f1dbabbb135b4fea529ef7838f71b7e82ce3725df7638557128b77df2eeedfdf
+[diag:step] proc.silverc.compile.bshard-artifacts ms=62 cmd=silverc ok=1 at=2026-09-27T09:58:01.822Z
+[PASS] T3_7role_max_split_accept :: expect=accept accepted=true :: 3afb8fedd57ccad99cd2ff84d4c81632fa0d1cb7d11736dc3f374f96e2927e8e
+[diag:step] proc.silverc.compile.bshard-artifacts ms=35 cmd=silverc ok=1 at=2026-09-27T09:58:01.875Z
+[PASS] T4_7role_tamper_channel_address_reject :: expect=reject accepted=false :: RPC Server (remote error) -> Rejected transaction 6863bdf6eb7956d963212fcf05d0d47e7765aff4340bfd86bb7f515df5c43987: failed to verify the signature script: script ran, but verification failed
+C26 real boundary (per-channel, hard cap 500,000): 12505628 mass at boundary: 499997
+C26 mass one sompi below boundary (should exceed 500,000): 500003
+[diag:step] proc.silverc.compile.bshard-artifacts ms=36 cmd=silverc ok=1 at=2026-09-27T09:58:01.934Z
+[PASS] C26_5channel_boundary_accept :: expect=accept accepted=true :: 3c04088cc97184c991ea62033c92cf017fceb40b6c8979c992a7d79cf90dc05e
+[diag:step] proc.silverc.compile.bshard-artifacts ms=34 cmd=silverc ok=1 at=2026-09-27T09:58:01.985Z
+[PASS] C26_5channel_below_boundary_reject :: expect=reject accepted=false :: RPC Server (remote error) -> Rejected transaction dbf4929b57a773862aed9649b09fa31ca09e4463dc6affe9574d5774126560fc: transaction storage mass of 500003 is larger than max allowed size of 500000
+[diag:step] proc.silverc.compile.bshard-artifacts ms=34 cmd=silverc ok=1 at=2026-09-27T09:58:02.037Z
+[PASS] T5_refund_after_pmt_accept :: expect=accept accepted=true :: a2032b68ae00367be38ddda9f12199acc13d66c6a5927f84335e9a4292258d7a
+[diag:step] proc.silverc.compile.bshard-artifacts ms=15 cmd=silverc ok=1 at=2026-09-27T09:58:02.070Z
+[PASS] T6_deposit_withdraw_correct_signer_accept :: expect=accept accepted=true :: b30477407d9e839156d07a5790882a223faac287ddd20e2d112d8f182d75db86
+[diag:step] proc.silverc.compile.bshard-artifacts ms=13 cmd=silverc ok=1 at=2026-09-27T09:58:02.101Z
+[PASS] T7_deposit_withdraw_wrong_signer_reject :: expect=reject accepted=false :: RPC Server (remote error) -> Rejected transaction aef6c59f64e83be464ef37857ca913d313771b6d85fc7263846c51672c4c6df8: failed to verify the signature script: script ran, but verification failed
+
+=== 9 / 9 PASS ===

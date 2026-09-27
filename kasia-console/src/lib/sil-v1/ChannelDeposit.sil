@@ -1,0 +1,32 @@
+pragma silverscript ^0.1.0;
+// ChannelDeposit.sil — 渠道押金 covenant (J2, 2026-09-27; D-034 §8 实现,
+// 设计稿 docs/2026-09-27-j2-commission-plan-attribution-design-v0.4.md §7)。
+//
+// 用途 = 加入门槛与防刷, 不是手续费储备(设计稿 §7.1 逐字对齐 D-034 §8 原话)。每个渠道/broker
+// 一个独立押金 covenant 地址, 默认 1 KAS(SDK 侧常量), 可退回, 只有押金人本人能取回, 任何人可
+// 核验其存在(标准 RPC 查询该地址余额, 不需要索引器)。
+//
+// V1 = 只可退回、无没收、无锁定期、无裁决方(设计稿 §2/§7.1 O3, Owner V1 边界补强③)——本合约
+// 因此不预留任何"仲裁/罚没"入口, 与 InstantSplit 的极简风格一致: 只有 checkSig 门禁, 没有
+// InstantSplit split/refund 那种"零签名+输出约束"机制(这里没有"任何人都该能触发"的业务需求,
+// 只有押金人自己有理由取回自己的钱)。
+//
+// V1 范围: depositor 身份 = 标准 Schnorr pubkey(收款输出用 new ScriptPubKeyP2PK 现场构造, 同
+// InstantSplit 既有验证过的原语)。设计稿 §6.2/§7.3 允许押金角色是 P2PK 或 P2PK-ECDSA(能取出
+// pubkey), 但 ECDSA 签名验证(checkSigFromStackECDSA)需要额外的摘要构造步骤, 本次实现范围内
+// 只落地 Schnorr 一种(与设计稿 §7.2 原始代码逐字一致, 未做推广)——如实标注为已知限制, 不是漏做,
+// 见交付报告"范围声明"。ECDSA depositor 支持留作后续独立小改动。
+
+contract ChannelDeposit(pubkey depositor_pk, int max_withdraw_fee) {
+    pubkey d_pk = depositor_pk;
+    int max_fee = max_withdraw_fee;
+
+    entry withdraw(sig s) {
+        require(checkSig(s, d_pk));
+        require(tx.inputs.length == 1);
+        byte[36] d_spk = new ScriptPubKeyP2PK(d_pk);
+        require(tx.outputs.length == 1);
+        require(tx.outputs[0].scriptPubKey == byte[](d_spk));
+        require(tx.outputs[0].value >= tx.inputs[this.activeInputIndex].value - max_fee);
+    }
+}

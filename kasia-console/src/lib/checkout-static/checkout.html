@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>KANet 商品佣金计划 · 结账页(V1 参考实现)</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; color: #222; }
+  h1 { font-size: 1.2rem; }
+  .box { border: 1px solid #ccc; border-radius: 6px; padding: 1rem; margin: 1rem 0; }
+  .ok { color: #0a7a2e; } .bad { color: #b30000; } .warn { color: #b36b00; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+  td, th { text-align: left; padding: 4px 8px; border-bottom: 1px solid #eee; }
+  button { padding: 0.5rem 1rem; }
+  code { word-break: break-all; }
+</style>
+</head>
+<body>
+  <h1>KANet 商品佣金计划 · 结账页(V1 参考实现)</h1>
+  <p style="font-size:0.85rem;color:#666">
+    本页是开源纯静态参考实现(D-034 §8)。页面本身零后端依赖; 签名/链验证/地址推导这几步需要
+    kaspa-wasm(本仓 node_modules 里只有 Node 版构建, 无浏览器版), 委托给本机常驻的小型解析服务
+    (<code>resolver.mjs</code>, 任何人可在自己机器上 <code>node resolver.mjs</code> 启动, 不是我们的服务器)——
+    这是本轮如实交付的范围边界, 浏览器原生 wasm 是后续独立工作。
+  </p>
+  <div id="resolverStatus" class="box"></div>
+  <div id="linkInfo" class="box"></div>
+  <div id="quoteInfo" class="box"></div>
+  <div id="chainInfo" class="box"></div>
+  <div id="orderInfo" class="box"></div>
+  <script type="module" src="./checkout.js"></script>
+</body>
+</html>

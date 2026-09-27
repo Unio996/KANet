@@ -1,0 +1,40 @@
+PASS signQuote produces signature_hex
+PASS verifyQuoteSignature true for valid quote
+PASS verifyQuoteSignature false for tampered quote
+PASS estimateOrderMassPrecheck 3-dim reports
+PASS 6-role normal amounts within limits
+PASS minOrderSompiForChannels O4 Owner example
+PASS N2 dedup: repeated addr becomes null slot
+PASS N2 dedup: 4 raw positions accepted (<=5)
+PASS N3: 6 raw positions rejected outright
+PASS N2: re-cased address is cleanly rejected by address parser (real kaspa-wasm behavior), not a silent dedup-bypass
+PASS link roundtrip quoteRef
+PASS link roundtrip channel addrs
+PASS signature chain happy path root->A->B->C verifies
+PASS verified channelSpks length matches chain length
+PASS C25 truncation root->A->B verifies fine (allowed policy)
+PASS C21 X replaces A content but reuses As sig -> position1 itself fails checkSig
+PASS C22 delete A -> B verify fails (digest mismatch)
+PASS C23 insert X before B, B reuses old sig at new position -> fails
+PASS C24 replay signature from different quote context fails
+PASS §3.3 order address claim verifies
+PASS §3.3 order address claim detects truncation/mismatch (different resolved order addr)
+PASS MUST: resolveRulesForOrder rejects non-verified channelAddrs by default
+PASS setup: 2-entry chain verifies
+PASS resolveRulesForOrder produces payoutLeaves
+PASS resolveRulesForOrder provider present with positive amount
+PASS resolveRulesForOrder channel_1/2 filled with real spks matching chain
+PASS resolveRulesForOrder channel_3..5 folded away (not present)
+PASS resolveRulesForOrder amounts sum to price
+PASS MUST demonstration: resolveRulesForOrder has NO independent ch= param to cross-check against — caller MUST only ever pass real verifyChain() output (API-level enforcement, documented)
+PASS O3 valid V1 deposit terms accepted
+PASS O3 forfeitable:true rejected (V1 only legal value is false)
+PASS C10 MUST-2: validateQuoteMassFeasibility rejects (ok:false) a genuinely mass-infeasible quote
+PASS C11 MUST-2: signQuote refuses to produce signature_hex for a mass-infeasible quote
+PASS C6: expired quote is detectable via valid_until_ms (SDK exposes the field; enforcement is caller-side per design §9 C6 — verify field is honest and comparable)
+PASS C12: garbage/invalid address string rejected by spkBytesFromAddress
+PASS C12: validateRoleAddressSpk rejects non-standard raw bytes
+PASS C13: ScriptHash address type is correctly identified as NOT deposit-bindable (P2SH lacks a single pubkey)
+PASS SHOULD②: 6-entry (all validly signed) chain is structurally rejected, not silently truncated to 5
+
+=== 38 PASS / 0 FAIL ===
