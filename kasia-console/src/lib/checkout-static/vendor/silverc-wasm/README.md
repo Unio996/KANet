@@ -18,8 +18,8 @@ D-034 §8 后续票①(b)(Bettor 派工 2026-09-27, coord/j2-checkout-pure-stati
 ## 构建命令(操作者自行重建)
 
 ```bash
-cd D:\silverscript\silverscript-lang   # 分支 j2-wasm-lib-v100-2026-09-27, 本地分支, 未推上游
-PATH="/c/Program Files/LLVM/bin:$PATH" CC=clang \
+cd <silverscript checkout>/silverscript-lang   # 分支 j2-wasm-lib-v100-2026-09-27, 本地分支, 未推上游
+CC=clang \
   cargo build --lib --target wasm32-unknown-unknown --release --features wasm
 
 wasm-bindgen target/wasm32-unknown-unknown/release/silverscript_lang.wasm \
@@ -44,11 +44,11 @@ parity 证据指针)。
 完全确定性构建, 重新构建可能产出不同 sha256——这不代表出错或被调包, 需要走 pin 文件的
 `goldenSample` + `parityEvidence` 两项同源判据复核, 而不是简单比对二进制 sha256 就拒绝。
 
-## 依赖 D:\silverscript 的说明(与 D-019 的关系)
+## 依赖 silverscript checkout 的说明(与 D-019 的关系)
 
 - `silverc-v100-3ed9733.exe`(D-019 pin 的 CLI 二进制)与这份 wasm 库来自**同一个提交**(`v1.0.0`
   tag), 但走**不同的构建/维护路径**——CLI 二进制是预先编译好、按 sha256 锚定的成品; 这份 wasm
-  是本轮新加的 `wasm.rs` 包装层(未改动任何编译逻辑本身), 操作者需要有 `D:\silverscript` 这份
+  是本轮新加的 `wasm.rs` 包装层(未改动任何编译逻辑本身), 操作者需要有一份 `silverscript`
   checkout 才能重新构建(与 D-019 pin 惯例一致: 二进制产物可以脱离源码仓单独分发/核验, 但重新
   构建需要源码)。
 - `silverscript-lang/src/wasm.rs` + `Cargo.toml`/`lib.rs` 的改动只在本地分支

@@ -5,9 +5,10 @@
 // 全局依赖, 与 Node 侧的 parity 测试共用同一份代码(见 docs/provenance/2026-09-27-j2-checkout-pure-static-r2/)。
 //
 // NWT diff 审 SHOULD③(2026-09-27T10-11Z)+ D-034 §8 后续票① 落地: 报价验签/签名链验证/渠道
-// 地址去重与上限/订单地址推导——全部直接用本仓 D:\rusty-kaspa\wasm\build-web --sdk 产出的浏览器版
-// kaspa-wasm(`./vendor/kaspa-web/`)+ D:\silverscript\silverscript-lang 编的浏览器版 silverc
-// (`./vendor/silverc-wasm/`)+ vendored blake2b/fee-split 在浏览器原生跑, **完全不依赖 resolver.mjs**
+// 地址去重与上限/订单地址推导——全部直接用 rusty-kaspa `wasm/build-web --sdk` 产出的浏览器版
+// kaspa-wasm(`./vendor/kaspa-web/`, 重建方法见该目录 README.md)+ silverscript-lang 编的浏览器版
+// silverc(`./vendor/silverc-wasm/`, 重建方法见该目录 README.md)+ vendored blake2b/fee-split 在浏览器
+// 原生跑, **完全不依赖 resolver.mjs**
 // (含订单地址推导这最后一步——①第一轮曾错误判定"不可安全达成"、第二轮用固定偏移覆写验证成功、
 // 第三轮改用真编译器编 wasm 作为主路径, 两条路径均以 630 组随机 ctor 向量对 D-019 锚定的 silverc
 // v1.0.0 CLI 逐字节 parity 验证过, 完整证据链见 order-template.js 与 resolve-order-wasm.js 头注)。
