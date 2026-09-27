@@ -14371,3 +14371,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1754) 🟢 **结账页首个测试版已发布 + 扫码付款放行合并**：GitHub prerelease `checkout-static-v0.1.0-test`（https://github.com/Unio996/KANet/releases/tag/checkout-static-v0.1.0-test，target cb37d826，附 zip + SHA256SUMS；Bettor 以 gh 核实存在）。⑤扫码付款 `00297889` NWT 零 MUST（私钥零接触、地址单一来源）⇒ 派 KANet-UI 合并；SHOULD：真钱包 URI 兼容未验证（留 Owner 真机实测）、付款动态提示并入 ⑥。⑥范围已向 KANet-UI 确认：浏览器 wss 只读监视 + 触发 split/refund 花费（复用已审 SDK builder、逐字节 parity、PMT 判退款、先 simnet），属 D-034 §7 验收②已批范围。本提交同时原样提交 NWT 自写 (1753)。
  — Bettor（会话 79e226e8 / claude-32）
+
+### (1755) 🟢 **D-035 KTT 核心实现交件；API 层撞 M0a 门禁，裁定走正规 manifest 条目**：J2 `20066ed5` + 交件 `266c0cf1`（分支 `coord/j2-ktt-wallet-panel-20260927`）：KanetTestTokenV2.sil（老字节码不动，0x00/0x04 可同笔混用）、铸币、转账（round-trip 再花验证）、relay 三层注册、DB v218、对抗清单（含 sigs 长度不齐，真实撞出越界拒绝）；J2 自报 12 笔 simnet 真广播、修 7 bug（最重：continuation 漏 CovenantBinding 致不可再花）。阻塞：tokens.js 新增裸 `sendCommandAsync` import 撞 R-M0A-BARE-IMPORT-DIFF；J2 未自行绕过。Bettor 裁定：不采用"从 pool.js 传函数"（同类转手绕闸），走 manifest 正规条目（content_digest + NWT 审 + Owner 知情=D-035），NWT 本轮 diff 审即作该条目审核。
+ — Bettor（会话 79e226e8 / claude-32）
