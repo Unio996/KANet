@@ -161,6 +161,28 @@ try {
 // 点两次按钮就下载两次)。失败不阻塞页面其余功能, 只让订单地址推导那一步自动降级到
 // order-template.js 固定偏移覆写路径(resolve-order-browser.js, 已验证的备选, 带 fail-closed
 // sha256 核对, 见上面 EXPECTED_SILVERC_WASM_SHA256 那段注释)。
+// D-034 §8 后续票⑦(Bettor 派工 2026-09-27): silverc-wasm(真编译器)加载失败时给清楚的原因+可行的
+// 替代方式——不是只说"降级了"就完事, 也不建议任何我们自己运营的服务(本页/本仓库的定位是协议基础
+// 设施, 不是产品, 见 docs/KANet-Positioning.md "只建地基不造房子")。三条选项按"最省事→最独立"排列。
+function compilerFailureAlternativesHtml(errMsg) {
+  return `<div class="box" style="border-color:#b36b00">
+    <b class="warn">⚠ silverc 编译器(真实合约编译器)加载失败</b>：<code>${errMsg}</code><br>
+    本页已自动降级到固定偏移覆写路径继续完成订单地址推导(该路径同样用 320+ 组随机向量独立验证过,
+    订单地址本身仍然有效)，但触发分账/退款需要真编译器，这个功能这次不可用。
+    <p style="margin-top:0.5rem">如果你想用主路径(真编译器 + 可触发分账/退款)，有这几个办法：</p>
+    <ol style="margin:0.3rem 0 0 1.2rem; padding:0">
+      <li>换一个支持 WebAssembly 的浏览器，或检查网络连接后刷新页面重试(最简单，多数情况下这样就够了)。</li>
+      <li>自己从这个项目的 GitHub Release 下载发布包(纯静态文件)，托管到任何你信得过的地方(自己的
+        服务器、对象存储、任意静态托管)——不需要依赖我们的服务器，这份发布包设计成整个文件夹拿去
+        随便放哪都能用。</li>
+      <li>在自己的电脑上运行这仓库自带的 <code>resolver.mjs</code>(走真实 silverc 命令行编译器，不
+        需要浏览器 WASM)——这条路径任何人都能自己跑，源码开放，不依赖我们运营任何东西。</li>
+    </ol>
+    <p style="font-size:0.8rem;color:#666;margin-top:0.4rem">这不是我们服务器出问题——本页本身零后端
+    依赖，"加载失败"通常是浏览器兼容性或网络问题，上面三条里换浏览器/重试网络通常最快解决。</p>
+  </div>`;
+}
+
 let silvercWasm = null, silvercWasmLoadError = null, _silvercLoadPromise = null;
 function loadSilvercWasm(onProgress) {
   if (_silvercLoadPromise) return _silvercLoadPromise; // 已经在下载/已经下载完, 不重复发请求
@@ -397,6 +419,7 @@ async function main() {
       const totalKas = sompiToKasString(totalSompi);
       const paymentUri = buildKaspaPaymentUri(order.address, totalSompi);
       const qrSvg = renderQrSvg(paymentUri);
+      const compilerFailureNotice = usedWasmCompiler ? '' : compilerFailureAlternativesHtml((silvercWasmLoadError || silSourceLoadError)?.message || '未知原因');
       renderBox('orderInfo', `<b>订单</b>(浏览器原生推导${usedWasmCompiler ? '·真 silverc 编译器' : '·固定偏移覆写降级路径'}, 零网络请求)<table>
         <tr><td>收款地址</td><td><code>${order.address}</code></td></tr>
         <tr><td>应付总额</td><td><code>${totalKas} KAS</code></td></tr>
@@ -407,7 +430,8 @@ async function main() {
         <div style="max-width:220px;margin:0.5rem 0">${qrSvg}</div>
         <div style="font-size:0.8rem;color:#666">付款链接(不支持扫码的钱包可手动复制)：<br><code style="word-break:break-all">${paymentUri}</code>
         <button type="button" id="copyPaymentUriBtn" style="margin-left:0.4rem">复制</button></div>
-      </div>`);
+      </div>
+      ${compilerFailureNotice}`);
       document.getElementById('copyPaymentUriBtn')?.addEventListener('click', async () => {
         const btn = document.getElementById('copyPaymentUriBtn');
         try { await navigator.clipboard.writeText(paymentUri); btn.textContent = '已复制'; setTimeout(() => { btn.textContent = '复制'; }, 1500); }
@@ -422,7 +446,7 @@ async function main() {
           renderBox('monitorInfo', `<b>订单状态监控</b><br><span class="bad">✗ 启动监控失败: ${e.message}</span>`);
         });
       } else {
-        renderBox('monitorInfo', '<b>订单状态监控</b><br><span class="warn">⚠ 此订单用固定偏移覆写降级路径推导——触发分账/退款需要真 silverc 编译器(降级路径没有 entries ABI), 请刷新页面重试或换一个支持 WebAssembly 的浏览器</span>');
+        renderBox('monitorInfo', `<b>订单状态监控</b><br><span class="warn">⚠ 此订单用固定偏移覆写降级路径推导——触发分账/退款需要真 silverc 编译器(降级路径没有 entries ABI), 这次不可用。详情与替代方式见上方订单信息里的说明。</span>`);
       }
     } catch (e) {
       renderBox('orderInfo', `<span class="bad">✗ 订单地址推导失败(${e.message})</span>`);
