@@ -1,0 +1,25 @@
+[owner-zero] EXPECTED REJECTION:
+  RPC Server (remote error) -> Rejected transaction 63401d8859cc64e3fe4bedc9d0dd040382d302e1e76da2ce5d3a346b9fc5bd96: failed to verify the signature script: script ran, but verification failed
+[wrong-signer] EXPECTED REJECTION:
+  RPC Server (remote error) -> Rejected transaction 74c83e0dfaeb947a7d1a0776a7501c906cb3b799dcc8c945afb866a905418e83: failed to verify the signature script: script ran, but verification failed
+[sigs-length-mismatch] EXPECTED REJECTION:
+  RPC Server (remote error) -> Rejected transaction 8494a05d649c63a336641419c8c209de2f7d05ea10ddf0aed1cbf78230c13110: failed to verify the signature script: substring [0:65] is out of bounds for string of length 0
+
+=== adversarial suite results ===
+[
+  {
+    "name": "owner-zero",
+    "outcome": "REJECTED",
+    "error": "RPC Server (remote error) -> Rejected transaction 63401d8859cc64e3fe4bedc9d0dd040382d302e1e76da2ce5d3a346b9fc5bd96: failed to verify the signature script: script ran, but verification failed"
+  },
+  {
+    "name": "wrong-signer",
+    "outcome": "REJECTED",
+    "error": "RPC Server (remote error) -> Rejected transaction 74c83e0dfaeb947a7d1a0776a7501c906cb3b799dcc8c945afb866a905418e83: failed to verify the signature script: script ran, but verification failed"
+  },
+  {
+    "name": "sigs-length-mismatch",
+    "outcome": "REJECTED",
+    "error": "RPC Server (remote error) -> Rejected transaction 8494a05d649c63a336641419c8c209de2f7d05ea10ddf0aed1cbf78230c13110: failed to verify the signature script: substring [0:65] is out of bounds for string of length 0"
+  }
+]

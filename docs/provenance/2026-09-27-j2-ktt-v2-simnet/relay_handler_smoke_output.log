@@ -1,0 +1,11 @@
+[mass-floor:observe] site=unlockKttV2Mint compute=7671 storage=600 transient=1204 mass_ub=7671 minFee=767100 actualFee=1200000 would_reject=false wasm=panic(undefined) source=7b1e18cc
+[unlockKttV2Mint invariant] Σin=5000000000 Σout=4998800000 fee=1200000 (mass_ub=7671 minFee=767100 ✓), 1 outputs all >= dust
+RELAY HANDLER mint result: {"txId":"469581a4a598bd5584de598830ba0cf43a03a805fd3fd8dac2e89a61fd2450c6","kttAddress":"kaspasim:pqc95vsnfm9k4wvh3zga0pl9tq9jqqtzxnfagt7lceqyzmgzz8acgks2kgqml","kttCovId":"62e3e667a9b0afd02effd13df873305fe398caf8520caa196d48b7b3320d27b2","seedSompi":"4998800000"}
+relay-handler-minted UTXO covenantId: 62e3e667a9b0afd02effd13df873305fe398caf8520caa196d48b7b3320d27b2
+[unlockKttV2Transfer invariant] Σin=9998800000 Σout=9992300000 fee=6500000 (mass=4870 minFee=487000 ✓), 2 outputs all >= dust
+RELAY HANDLER transfer result: {"txId":"0338612158905431a1ce4354bad0b741b443debaed1844042e0679d64bbf2ca3","destAddress":"kaspasim:pz7usm20u8d0lgeycdxdtydt3hlr55zyye6zxswm52w0fkk9w2zwvrt79txck","amountSompi":"4998800000"}
+Grace UTXO: 1 {
+  covId: '62e3e667a9b0afd02effd13df873305fe398caf8520caa196d48b7b3320d27b2',
+  amount: '4998800000'
+}
+RELAY HANDLER SMOKE TEST: PASS

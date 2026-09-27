@@ -95,6 +95,10 @@ export const COMMAND_TYPES = Object.freeze({
   BSHARD_GENESIS_MINT_PAYOUT: 'bshard_genesis_mint_payout',   // market 创建铸空 PayoutShard covenant (populateGenesisCovenants→cov_id)
   BSHARD_GENESIS_MINT_SHARDLEAF: 'bshard_genesis_mint_shardleaf',   // 片创建铸空 ShardLeaf covenant (populateGenesisCovenants→cov_id, D-020 移植配套 2026-09-23)
   BSHARD_GENESIS_MINT_STAKE_CHIP: 'bshard_genesis_mint_stake_chip',   // 方向A(2026-09-26·Owner批): 续笔下注专用, 无签名铸出这一笔的差额 stake chip(owner=leafCovId, 不经无主中间态)
+  // D-035(2026-09-27·Owner批): KTT v2 铸币/转账——console 侧算 artifact(compileSilV100), relay 只签名+广播,
+  // 同 bshard genesis-mint 系一贯分工(Console 传导不碰链, Relay 唯一链上出口)。
+  KTT_V2_MINT: 'ktt_v2_mint',       // 任意数量铸到任意地址(owner_scheme 0x00 pubkey 或 0x04 covenant-id), 零校验零签名(genesis)
+  KTT_V2_TRANSFER: 'ktt_v2_transfer',   // 钱包持有(owner_scheme=0x00)的 KTT 转给另一地址 + 找零, relay 自己的钱包私钥签 checkSig
   BSHARD_CONSOLIDATE: 'bshard_consolidate',                   // PS absorb OP_0 + SL consolidate_to_payout OP_1, cov_id-bind 归集
   BSHARD_CLOSE_ATTEST: 'bshard_close_attest',                 // PayoutShard close_attest OP_1, 委员 pubkey-distinct 背书 payoutRoot
   BSHARD_PAYOUT_CLAIM: 'bshard_payout_claim',                 // PayoutShard claim OP_2, store-payout merkle+nullifier+recipient
@@ -180,6 +184,8 @@ export const COMMAND_PAYLOAD_SCHEMA = Object.freeze({
   [COMMAND_TYPES.BSHARD_GENESIS_MINT_PAYOUT]: ['payoutshard', 'inputs', 'outputs'],
   [COMMAND_TYPES.BSHARD_GENESIS_MINT_SHARDLEAF]: ['shardleaf', 'inputs', 'outputs'],
   [COMMAND_TYPES.BSHARD_GENESIS_MINT_STAKE_CHIP]: ['chip', 'inputs', 'outputs'],
+  [COMMAND_TYPES.KTT_V2_MINT]: ['ktt', 'inputs'],
+  [COMMAND_TYPES.KTT_V2_TRANSFER]: ['ktt', 'inputs', 'outputs'],
   [COMMAND_TYPES.BSHARD_CONSOLIDATE]: ['inputs', 'outputs'],
   [COMMAND_TYPES.BSHARD_CLOSE_ATTEST]: ['witness', 'inputs', 'outputs'],
   [COMMAND_TYPES.BSHARD_PAYOUT_CLAIM]: ['witness', 'inputs', 'outputs'],
@@ -264,6 +270,8 @@ export const COMMAND_FIELD_TYPES = Object.freeze({
   [COMMAND_TYPES.BSHARD_GENESIS_MINT_PAYOUT]: { payoutshard: 'object', inputs: 'object', outputs: 'object' },
   [COMMAND_TYPES.BSHARD_GENESIS_MINT_SHARDLEAF]: { shardleaf: 'object', inputs: 'object', outputs: 'object' },
   [COMMAND_TYPES.BSHARD_GENESIS_MINT_STAKE_CHIP]: { chip: 'object', inputs: 'object', outputs: 'object' },
+  [COMMAND_TYPES.KTT_V2_MINT]: { ktt: 'object', inputs: 'object' },
+  [COMMAND_TYPES.KTT_V2_TRANSFER]: { ktt: 'object', inputs: 'object', outputs: 'object' },
   [COMMAND_TYPES.BSHARD_CONSOLIDATE]: { inputs: 'object', outputs: 'object' },
   [COMMAND_TYPES.BSHARD_CLOSE_ATTEST]: { witness: 'object', inputs: 'object', outputs: 'object' },
   [COMMAND_TYPES.BSHARD_PAYOUT_CLAIM]: { witness: 'object', inputs: 'object', outputs: 'object' },

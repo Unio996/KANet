@@ -2926,6 +2926,159 @@ function _combineActionAndRedeem(actionHex, redeemHex) {
   return b.drain();
 }
 
+// 🔴 D-035(2026-09-27·Owner批·NWT审零MUST) —— 照抄 kasia-console/src/lib/kcc20-token/ktt-v2-transfer-witness.mjs
+// 的 encodeKttV2TransferAction(逐字节对照 D-019 pin silverscript-abi/src/lib.rs push_struct_array_fields
+// 的 SoA 转置真实行为 + push_sig_arg 的 sig=65B 定长拼接), 同 :2882 已有的"relay 不能跨包 import
+// kasia-console"纪律——不新造判断, 抄同一套已用真实 simnet 广播验证过的编码逻辑(见
+// docs/provenance/2026-09-27-j2-ktt-v2-simnet/, 含 8 笔真实 txid: genesis/transfer/round-trip
+// re-spend/mixed-scheme-same-tx/3 条对抗拒绝全部真实广播核过)。
+// KanetTestTokenV2.transfer 的真实 dispatch_tag(合约字节码不变, 常量) = 'd9a2b797'。
+const KTT_V2_TRANSFER_DISPATCH_TAG = 'd9a2b797';
+const KTT_V2_STATE_FIELD_ORDER = ['amount', 'owner', 'owner_scheme', 'borrow_scheme', 'borrow_guard', 'extension_commitment']; // 真实编译产物 runtime_state.fields 顺序(schema drift 若改字段这里要跟着改, 见调用方自己的 schema 断言)
+
+/**
+ * @param {{amount:bigint|number, ownerHex:string(32B), ownerScheme:number, borrowScheme:number,
+ *   borrowGuardHex:string(32B), extensionCommitmentHex:string(32B)}[]} nextStates
+ * @param {number[]} ownerInputIdx
+ * @param {string[]} sigsHex 65 字节 hex, 与 ownerInputIdx 平行(covenant-owned 下标传任意 65B 占位值,
+ *   合约不读它——只有 owner_scheme==SCHEME_PUBKEY 那条分支才 checkSig)
+ */
+function _encodeKttV2TransferAction(nextStates, ownerInputIdx, sigsHex) {
+  if (sigsHex.length !== ownerInputIdx.length) throw new Error(`_encodeKttV2TransferAction: sigsHex.length(${sigsHex.length}) must equal ownerInputIdx.length(${ownerInputIdx.length})`);
+  const b = new ScriptBuilder({ flags: { covenantsEnabled: true } });
+  for (const fieldName of KTT_V2_STATE_FIELD_ORDER) {
+    const parts = nextStates.map((s) => {
+      const v = s[fieldName];
+      if (fieldName === 'amount') { const buf = Buffer.alloc(8); buf.writeBigInt64LE(BigInt(v)); return buf; }
+      if (fieldName === 'owner_scheme' || fieldName === 'borrow_scheme') return Buffer.from([Number(v)]);
+      // owner / borrow_guard / extension_commitment: 32B hex
+      const buf = Buffer.from(String(v).replace(/^0x/, ''), 'hex');
+      if (buf.length !== 32) throw new Error(`_encodeKttV2TransferAction: ${fieldName} must be 32 bytes, got ${buf.length}`);
+      return buf;
+    });
+    b.addData(Buffer.concat(parts));
+  }
+  b.addData(new Uint8Array(0)); // witness=[]
+  const idxBuf = Buffer.alloc(ownerInputIdx.length * 8);
+  ownerInputIdx.forEach((v, i) => idxBuf.writeBigInt64LE(BigInt(v), i * 8));
+  b.addData(idxBuf);
+  const sigBufs = sigsHex.map((s) => {
+    const buf = Buffer.from(s.replace(/^0x/, ''), 'hex');
+    if (buf.length !== 65) throw new Error(`_encodeKttV2TransferAction: each sig must be 65 bytes, got ${buf.length}`);
+    return buf;
+  });
+  b.addData(Buffer.concat(sigBufs));
+  b.addData(new Uint8Array(Buffer.from(KTT_V2_TRANSFER_DISPATCH_TAG, 'hex')));
+  return b.drain();
+}
+
+/** 66 字节 createInputSignature 原始输出(push-opcode 0x41 + 64B 签名 + 1B sighash 类型) -> ABI 要的 65 字节。 */
+function _toAbiSig65(rawSigHex) {
+  const noPrefix = rawSigHex.replace(/^0x/, '');
+  if (noPrefix.length !== 132) throw new Error(`_toAbiSig65: createInputSignature 输出长度异常, 期望 66 字节(132 hex), 实际 ${noPrefix.length / 2} 字节`);
+  return noPrefix.slice(2);
+}
+
+/**
+ * unlockKttV2Mint — bshard_ktt_v2_mint(D-035 §③): 任意数量铸到任意地址, genesis 零校验零签名。
+ * console 侧已用 compileSilV100 算好 cmd.ktt.redeem_hex(owner_scheme/owner 已烤进 State), relay 只管
+ * 广播——同 unlockBshardGenesisMintStakeChip 一模一样的骨架(照 KIP-9 storage mass 教训: 面值由
+ * console 侧定得接近 funding 全额, relay 不重新判断, 照 console 给的 seedSompi 原样用)。
+ * @param {{wallet, cmd:{ktt:{redeem_hex, seed_sompi}, inputs:{funding:{address,outpointTxid,index}}}, networkId, lockTime}} args
+ */
+export async function unlockKttV2Mint(args) {
+  const { wallet, cmd, networkId, lockTime = 0n } = args;
+  const rpc = await connectRpc(networkId);
+  try {
+    const f = cmd.inputs.funding;
+    const fundUtxo = await _matchUtxo(rpc, f.address, f.outpointTxid, f.index);
+    const kttAddr = _addressFromRedeem(cmd.ktt.redeem_hex, networkId);
+    const seed = BigInt(cmd.ktt.seed_sompi);
+    const fee = _bshardFeeV1(1);
+    if (_utxoValue(fundUtxo) - seed - fee < 0n) throw new Error(`ktt_v2 genesis-mint insufficient: Σin ${_utxoValue(fundUtxo)} < seed ${seed} + fee ${fee}`);
+    const outputs = [new TransactionOutput(seed, payToAddressScript(new Address(kttAddr)))];
+    const mk = (ss) => {
+      const t = new Transaction({
+        version: 1,
+        inputs: [{ previousOutpoint: { transactionId: fundUtxo.outpoint.transactionId, index: fundUtxo.outpoint.index }, signatureScript: ss, sequence: 0n, sigOpCount: 0, computeBudget: _BSHARD_COMPUTE_BUDGET, ...(ss === '' ? { utxo: fundUtxo } : {}) }],
+        outputs, lockTime: BigInt(lockTime), gas: 0n, subnetworkId: '0000000000000000000000000000000000000000', payload: '',
+      });
+      t.populateGenesisCovenants([new GenesisCovenantGroup(0, [0])]);
+      return t;
+    };
+    const kttCovId = String(mk('').outputs[0].covenant.covenantId);
+    const sigHex = createInputSignature(mk(''), 0, wallet.getPrivateKey(), SighashType.All);
+    const signedTx = mk(sigHex);
+    _assertTxInvariants([fundUtxo], signedTx, 'unlockKttV2Mint', networkId);
+    const r = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
+    return { txId: r.transactionId, kttAddress: kttAddr, kttCovId, seedSompi: seed.toString() };
+  } finally { try { await rpc.disconnect(); } catch {} }
+}
+
+/**
+ * unlockKttV2Transfer — bshard_ktt_v2_transfer(D-035 §④): 钱包持有(owner_scheme=0x00)的 KTT 转给
+ * 另一地址 + 找零。relay 自己的钱包私钥签 checkSig(D-035 设计前提: 普通钱包持有的 KTT 的 owner 就是
+ * 这个 relay 自己钱包的 x-only pubkey, 同这个 relay 已经在用的同一把密钥, 不引入新密钥管理)。
+ * 🔴 continuation 输出必须显式 CovenantBinding, 延续源 UTXO 自己的 covenant_id(真实 simnet 撞出的坑:
+ * 漏了这步会让产物永久不可再花, kaspad 报 "covenant id 0000...0000 input 0 is out of bounds"——
+ * 不是猜测, docs/provenance/2026-09-27-j2-ktt-v2-simnet/ 有对比证据: 漏绑定的那笔 txid 与修复后
+ * 那笔 txid 的 covenantId 一个 undefined 一个正常)。
+ * console 侧(compileSilV100 算 artifact)必须提供 source_redeem_hex(被消费的源实例, 用于 sigScript
+ * 末尾揭示)与 dest_redeem_hex(续约后新 State 的 redeem, 用于推导目标地址)两份——两者字节码相同
+ * (同一份合约), 只有 State 编码的 owner/owner_scheme 不同, relay 不重新编译, 照抄 console 给的两份。
+ * @param {object} args { wallet, cmd:{ ktt:{source_redeem_hex, dest_redeem_hex, dest_owner_hex, dest_owner_scheme},
+ *   inputs:{ktt:{address,outpointTxid,index}, fee:{address,outpointTxid,index}},
+ *   outputs:{fee_change_address} }, networkId, lockTime }
+ */
+export async function unlockKttV2Transfer(args) {
+  const { wallet, cmd, networkId, lockTime = 0n } = args;
+  const rpc = await connectRpc(networkId);
+  try {
+    const kttUtxo = await _matchUtxo(rpc, cmd.inputs.ktt.address, cmd.inputs.ktt.outpointTxid, cmd.inputs.ktt.index);
+    // 同 :1853 _psInputCovId 既有三路 fallback(entry.covenantId ?? covenant.covenantId ?? covenantId),
+    // 不新发明一套读法。
+    const kttCovIdRaw = kttUtxo.entry?.covenantId ?? kttUtxo.covenant?.covenantId ?? kttUtxo.covenantId;
+    const kttCovId = kttCovIdRaw != null ? String(kttCovIdRaw) : null;
+    if (!kttCovId || kttCovId === 'undefined') throw new Error('unlockKttV2Transfer: 源 KTT UTXO 无 covenant_id(未正确续约的实例, 永久不可花, 拒绝作为转账源)');
+    if (!cmd.inputs.fee) throw new Error('ktt_v2_transfer: fee input 必需(不动 KTT 本身面值)');
+    const feeUtxo = await _matchUtxo(rpc, cmd.inputs.fee.address, cmd.inputs.fee.outpointTxid, cmd.inputs.fee.index);
+    const kttAmount = _utxoValue(kttUtxo);
+    // 🔴 实测(真实 simnet 广播撞出): _bshardFeeV1(2)算出 2,000,000, 不够——checkSig 校验的 compute mass
+    // 比裸 genesis 贵得多(实测 ~51776, 需要 >=5,177,600), 不能沿用给"轻量 2 输入操作"校准的
+    // _BSHARD_FEE_PER_INPUT, 这里单独定一个够用的常量(留余量到 6,500,000)。
+    const fee = 6_500_000n;
+    const change = _utxoValue(feeUtxo) - fee;
+    if (change < 0n) throw new Error(`ktt_v2_transfer fee insufficient: Σin ${_utxoValue(feeUtxo)} < fee ${fee}`);
+    const destAddr = _addressFromRedeem(cmd.ktt.dest_redeem_hex, networkId);
+
+    const outputs = [
+      new TransactionOutput(kttAmount, payToAddressScript(new Address(destAddr)), new CovenantBinding(0, new Hash(kttCovId))),
+      new TransactionOutput(change, payToAddressScript(new Address(cmd.outputs.fee_change_address))),
+    ];
+    const mk = (sigScripts) => new Transaction({
+      version: 1,
+      inputs: [
+        { previousOutpoint: { transactionId: kttUtxo.outpoint.transactionId, index: kttUtxo.outpoint.index }, signatureScript: sigScripts[0], sequence: 0n, sigOpCount: 0, computeBudget: 400, utxo: kttUtxo },
+        { previousOutpoint: { transactionId: feeUtxo.outpoint.transactionId, index: feeUtxo.outpoint.index }, signatureScript: sigScripts[1], sequence: 0n, sigOpCount: 0, computeBudget: _BSHARD_COMPUTE_BUDGET, utxo: feeUtxo },
+      ],
+      outputs, lockTime: BigInt(lockTime), gas: 0n, subnetworkId: '0000000000000000000000000000000000000000', payload: '',
+    });
+    const unsignedTx = mk(['', '']);
+    const kttSigRaw = createInputSignature(unsignedTx, 0, wallet.getPrivateKey(), SighashType.All);
+    const feeSigHex = createInputSignature(unsignedTx, 1, wallet.getPrivateKey(), SighashType.All);
+    // 🔴 键名须与 _encodeKttV2TransferAction 内部的 KTT_V2_STATE_FIELD_ORDER(snake_case, State 字段本名)
+    // 逐字对齐——不是随便起名(第一次写漏了, 真实 simnet 调用当场报 "owner must be 32 bytes, got 0",
+    // 因为 s['owner'] 在传 'ownerHex' 这种驼峰键名时读不到值)。
+    const nextStates = [{ amount: kttAmount, owner: cmd.ktt.dest_owner_hex, owner_scheme: Number(cmd.ktt.dest_owner_scheme), borrow_scheme: 0, borrow_guard: '00'.repeat(32), extension_commitment: '00'.repeat(32) }];
+    const actionHex = _encodeKttV2TransferAction(nextStates, [0], [_toAbiSig65(kttSigRaw)]);
+    const sigScript0 = _combineActionAndRedeem(actionHex, cmd.ktt.source_redeem_hex);
+    const signedTx = mk([sigScript0, feeSigHex]);
+    _assertTxInvariants([kttUtxo, feeUtxo], signedTx, 'unlockKttV2Transfer', networkId);
+    const r = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
+    return { txId: r.transactionId, destAddress: destAddr, amountSompi: kttAmount.toString() };
+  } finally { try { await rpc.disconnect(); } catch {} }
+}
+
 /**
  * unlockBshardRegister — bshard_register_bet (register_append entry, ShardLeaf.sil D-020 移植后 10 参数)。
  * Inputs: [0] leaf (P2SH register_append, no sig) + [1]? token(上一笔续约代币, 可选, 第一笔下注无)
