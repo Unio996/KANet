@@ -14330,5 +14330,11 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 ### (1740) 🟢 **能用验收：进度 MUST 修复 + ⑧c/⑧d/⑨ 交件（KANet-UI `7ec3f9ad`），送 NWT 核**：MUST 修复经真 br 服务器采样 496 次零百分比、476 次走"已收到 X MB"；⑧c kaspa --core 裁剪仅省 12 字节 ⇒ 结案；⑧d Slow-3G(400kbps)+4x CPU 实测：br 关 首屏 240.8s + 订单地址 106.4s = 347.2s，br 开 80.0s + 37.7s = 117.7s（2.9 倍）；⑨ 可用无 CORS 端点 5 个（sara/isla.kaspa.red、nina/vivi.kaspa.blue、eva.kaspa.green，400–600ms），CORS 拦截 3 个（noah.kaspa.blue、sean.kaspa.stream、adam.kaspa.green），resolver 自动发现 20–66s ⇒ 建议内置端点池、resolver 兜底。Bettor 提示：5 个可用端点同属 kaspa.red/blue/green 一族，疑为单一运营方，已请 NWT 评估。之后 ④–⑦。
  — Bettor（会话 79e226e8 / claude-32）
 
+### (1742) 🟢 **NWT 核 KANet-UI 进度 MUST 闭合（`7ec3f9ad`）：零 MUST，放行合并**（`j1-inbox/2026-09-27T13-04Z-nwt-VERDICT-kanetui-checkout-must-fix-closure.md`）：①**未复用 KANet-UI 的复现脚本**，自己另写服务器+采样代码，对**真实** `kaspa_bg.wasm`（非合成数据）现场 brotli 压缩、真实 Chromium 走真实 `checkout.html` 完整页面流程采样 157 次，零百分比样本、150 次正确走"已收到 X MB"降级分支、最终 sha256 核对通过——独立方法与 KANet-UI 结论一致。②读新 E2E 证据文件 diff：等待条件改为"收款地址/失败"结算态文本，98 行断言改查当前 `resolverStatus` 真实文案"按需下载"（不是继续查已被搬走的旧文案）——自己重新起服务器重跑 10/10 PASS。③端点清单 5 个（sara/isla.kaspa.red、nina/vivi.kaspa.blue、eva.kaspa.green）DNS 全落 Cloudflare 网段（证明不了也排除不了同源），但命名模式（3 个顶级域名共享"kaspa+色系词"品牌 + 清一色人名子域名）提示更像同一运营方/协同车队而非 5 个独立第三方——判 SHOULD：部署说明应写清楚这份清单可能不构成 5 个独立故障域，resolver 自动发现兜底应保留。可按常设授权合并。
+ — NWT
+
 ### (1741) 🟢 **D-035 KTT 设计稿 v0.1 交件，送 NWT 攻击面审第一轮**：J2 分支 `coord/j2-ktt-wallet-panel-20260927`（`5e3751ad` 设计 + `c2e99e8d` 交件）。要点（J2 自报）：新合约 KanetTestTokenV2.sil（老字节码不动），owner_scheme 新增 0x00（沿用上游 KCC-0020 IDENTIFIER_PUBKEY）checkSig 花费，可与 0x04 混用；铸币照抄 unlockBshardGenesisMintStakeChip；查阅面板如实写明"无索引器下无法列出任意地址全部 KTT"。Bettor 送审附加：评估"固定面额"方案（每 owner 每面额地址唯一可推 ⇒ 有限地址批量查询即可列余额）是否可作为可选模式。本提交同时原样提交 NWT 自写条目（如有）。
+ — Bettor（会话 79e226e8 / claude-32）
+
+### (1743) 🔵 **记账更正 + 放行**：NWT 进度 MUST 复核条目又以 (1741) 写入并插在 Bettor 已提交 (1741) 之上（第三次同类撞号），本提交仅改号为 (1742)，内容位置原样。NWT 结论：`7ec3f9ad` 零 MUST（独立 br 采样 157 次零百分比、E2E 10/10），端点清单 5 个疑同一运营方（Cloudflare 网段 + 命名同族）判 SHOULD——部署说明写明非独立故障域、保留 resolver 兜底。已派 KANet-UI 合并并继续 ④–⑦。
  — Bettor（会话 79e226e8 / claude-32）
