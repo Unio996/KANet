@@ -1,4 +1,4 @@
-// ⚠ 自动生成 — 勿手改。源 = kasia-console/src/lib/fee-split.mjs (sha256:54d0e37789017f7d05abaeabe82db736c3beb04714c5152a6c9f9040ed3e1e6b)
+// ⚠ 自动生成 — 勿手改。源 = kasia-console/src/lib/fee-split.mjs (sha256:7816d0dd444d007202c957af06d565c56faa88f6403a60c4f1e1f0901452087f)
 // 手改会被 lint-kanet R-FEE-SPLIT-PKG-DRIFT 拦下(commit 卡点, 非 WARN)。重新同步: node scripts/sync.mjs
 
 // fee-split.mjs — 模块化分润组件(B线, spec docs/2026-06-22-modular-fee-split-component-spec.md v1.3)。
@@ -116,9 +116,14 @@ export function validateFeeRules(feeRules, opts = {}) {
     if (r.name === 'provider') {
       providers++;
       if (r.address != null || r.derive != null) throw new Error('provider role 不带 address/derive(winners 集在 settle 时供给, 非规则配置)');
-      if (r.bps < providerMinBps) throw new Error(`provider.bps=${r.bps} < providerMinBps=${providerMinBps}(防 facilitator 抢光)`);
+      // 🔴 NWT diff 审 MUST(2026-09-27T10-11Z①): 错误信息标签恢复用大写常量名(不是运行时变量名)——
+      // 既有 fee-split.test.mjs:41 用正则 /PROVIDER_MIN_BPS|ROLE_MAX_BPS/ 死等这个大写字面量出现在
+      // 错误信息里, 之前改成小写变量名 providerMinBps/roleMaxBps 打破了这条回归测试。标签沿用常量名
+      // 字面量, 冒号后的【值】仍然是真实生效的运行时值(可能来自 opts 覆盖, 不是恒等于常量本身)——
+      // 两者不矛盾: "PROVIDER_MIN_BPS=" 是这条护栏的名字, 后面的数字是它这次实际生效的门槛。
+      if (r.bps < providerMinBps) throw new Error(`provider.bps=${r.bps} < PROVIDER_MIN_BPS=${providerMinBps}(防 facilitator 抢光)`);
     } else {
-      if (r.bps > roleMaxBps) throw new Error(`role ${r.name}: bps=${r.bps} > roleMaxBps=${roleMaxBps}`);
+      if (r.bps > roleMaxBps) throw new Error(`role ${r.name}: bps=${r.bps} > ROLE_MAX_BPS=${roleMaxBps}`);
       if (r.derive != null) {
         if (r.derive !== 'committee') throw new Error(`role ${r.name}: derive 只支持 'committee', got ${r.derive}`);
         if (r.address != null) throw new Error(`role ${r.name}: derive 角色地址=委员集链派生, 禁 caller 供 address(命门④ provenance)`);

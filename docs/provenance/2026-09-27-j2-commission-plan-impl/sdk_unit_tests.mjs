@@ -225,5 +225,90 @@ try {
   check('O3 forfeitable:true rejected (V1 only legal value is false)', threw);
 } catch (e) { check('O3 deposit terms', false, e.message); }
 
+// ── MUST-2(NWT diff 审 2026-09-27T10-11Z②): C10/C11 拒绝路径反例 ──
+// 之前只测过"正常报价通过", 从没测过"真的会拒绝"——两轮 NWT MUST 追出来的核心安全承诺
+// ("报价一旦签发, split() 就一定构造得出来")的唯一执行点从未验证过反例, 现在补上。
+try {
+  // 构造一份明显 mass 超限的报价: 6 个具名渠道角色(超过 5, 但这里只测 validateQuoteMassFeasibility
+  // 本身的纯函数行为, 不经过链接层的 N3 拒绝——直接给 canonical_rules 塞 6 个 channel 角色, 每个都
+  // 卡在运营下限附近, worst-case mass 必然超过安全预算), 断言 validateQuoteMassFeasibility 真的
+  // ok:false, 且 signQuote 真的拒签(不产生 signature_hex)。
+  // provider>=PROVIDER_MIN_BPS(5000, 否则 validateFeeRules 会先因护栏拒绝, 不是我们要测的 mass 拒绝
+  // 原因) + 9 个渠道角色(canonical_rules 层面 fee-split.mjs 本身不限制角色数量, link 层的 N3 才限 5,
+  // 用来构造真实 mass 超限的 worst case)。价格与 bps 配平让每个渠道恰好落在运营下限(0.1 KAS)附近
+  // ——独立实测(scratch/_j2_commission_impl_research/find_infeasible.mjs)确认 10 个卡在下限的输出
+  // 已经 mass≈992,858(远超 400,000 安全预算/500,000 硬上限), 本测试的 11 个输出(provider+broker+9渠道)
+  // 结构上必然同样超限, 不是拍脑袋数字。
+  const overloadedRoles = [
+    { name: 'provider', bps: 5000, address: addr(merchantPriv) },
+    { name: 'broker', bps: 500, address: addr(brokerPriv) },
+    { name: 'channel_1', bps: 500, fold_to: 'provider' },
+    { name: 'channel_2', bps: 500, fold_to: 'provider' },
+    { name: 'channel_3', bps: 500, fold_to: 'provider' },
+    { name: 'channel_4', bps: 500, fold_to: 'provider' },
+    { name: 'channel_5', bps: 500, fold_to: 'provider' },
+    { name: 'channel_6', bps: 500, fold_to: 'provider' },
+    { name: 'channel_7', bps: 500, fold_to: 'provider' },
+    { name: 'channel_8', bps: 500, fold_to: 'provider' },
+    { name: 'channel_9', bps: 500, fold_to: 'provider' },
+  ];
+  const overloadedQuote = { ...quoteBase, price_sompi: '200000000', canonical_rules: { schema_v: 1, roles: overloadedRoles }, quote_id: 'overloaded-test' };
+  const feasibility = validateQuoteMassFeasibility(overloadedQuote);
+  check('C10 MUST-2: validateQuoteMassFeasibility rejects (ok:false) a genuinely mass-infeasible quote', feasibility.ok === false, JSON.stringify({ ok: feasibility.ok, massA: feasibility.massA?.toString(), massB: feasibility.massB?.toString() }));
+
+  let signThrew = false, signErrMsg = '';
+  try { signQuote(overloadedQuote, merchantPriv.toString()); } catch (e) { signThrew = true; signErrMsg = e.message; }
+  check('C11 MUST-2: signQuote refuses to produce signature_hex for a mass-infeasible quote', signThrew, signErrMsg);
+} catch (e) { check('MUST-2 C10/C11 reflex test', false, e.stack); }
+
+// ── SHOULD① C6: 报价过期后拒绝构造新订单 ──
+try {
+  const expiredQuote = signQuote({ ...quoteBase, quote_id: 'expired-test', valid_from_ms: Date.now() - 2000000, valid_until_ms: Date.now() - 1000000 }, merchantPriv.toString());
+  const isExpired = Date.now() > expiredQuote.valid_until_ms;
+  check('C6: expired quote is detectable via valid_until_ms (SDK exposes the field; enforcement is caller-side per design §9 C6 — verify field is honest and comparable)', isExpired && expiredQuote.valid_until_ms < Date.now());
+} catch (e) { check('C6 expired quote', false, e.message); }
+
+// ── SHOULD① C12: 裸字节地址(反解不出标准类型)应拒绝 ──
+try {
+  let threw = false;
+  try { spkBytesFromAddress('kaspatest:thisisnotarealvalidaddresschecksum1234567890'); } catch { threw = true; }
+  check('C12: garbage/invalid address string rejected by spkBytesFromAddress', threw);
+
+  // 也直接测 validateRoleAddressSpk 对一段格式合法但不是标准模板的裸字节的拒绝
+  const garbageSpk = Buffer.from('00'.repeat(37), 'hex'); // 全零, 不是任何标准脚本模板
+  let threw2 = false;
+  try { validateRoleAddressSpk(garbageSpk, 'testnet'); } catch { threw2 = true; }
+  check('C12: validateRoleAddressSpk rejects non-standard raw bytes', threw2);
+} catch (e) { check('C12 garbage address', false, e.message); }
+
+// ── SHOULD① C13: ScriptHash 收款 + 要求押金 组合应拒绝 ──
+try {
+  // §6.2/§7.3: 押金绑定要求角色地址反解为 P2PK/P2PK-ECDSA(能取出 pubkey); P2SH 收款 + 要求押金
+  // 本版明确不支持——用真实 P2SH 地址核验 validateRoleAddressSpk 反解结果不是 PubKey/PubKeyECDSA,
+  // 调用方(报价签名工具)应据此拒绝这个组合配置。
+  const redeemScriptDummy = Buffer.from('ac'.repeat(20), 'hex');
+  const p2shSpkObj = kaspa.payToScriptHashScript(new Uint8Array(redeemScriptDummy));
+  const p2shFullBytes = Buffer.concat([Buffer.from([p2shSpkObj.version & 0xff, (p2shSpkObj.version >> 8) & 0xff]), Buffer.from(p2shSpkObj.script, 'hex')]);
+  const addrType = validateRoleAddressSpk(p2shFullBytes, 'testnet');
+  const canBindDeposit = addrType === 'PubKey' || addrType === 'PubKeyECDSA';
+  check('C13: ScriptHash address type is correctly identified as NOT deposit-bindable (P2SH lacks a single pubkey)', addrType === 'ScriptHash' && !canBindDeposit, `addrType=${addrType}`);
+} catch (e) { check('C13 ScriptHash+deposit', false, e.message); }
+
+// ── SHOULD② 签名链超 5 环必须明确拒绝, 不静默截断 ──
+try {
+  const empty = verifyChain(signedQuote, [], 'testnet');
+  let d = empty.chainDigest;
+  const entries = [];
+  const privs = [ch1Priv, ch2Priv, ch3Priv, payerPriv, merchantPriv, brokerPriv]; // 6 个不同的私钥, 构造 6 环全部签名正确的合法链
+  for (let i = 0; i < 6; i++) {
+    const spk = spkBytesFromAddress(privs[i].toPublicKey().toAddress('testnet').toString());
+    const entry = signChainEntry(d, i + 1, spk, privs[i].toString());
+    entries.push(entry);
+    d = Buffer.from(blake2b(Buffer.concat([d, Buffer.from([i + 1]), spk, entry.signing_pubkey]), { dkLen: 32 }));
+  }
+  const v6 = verifyChain(signedQuote, entries, 'testnet');
+  check('SHOULD②: 6-entry (all validly signed) chain is structurally rejected, not silently truncated to 5', v6.ok === false, v6.reason);
+} catch (e) { check('SHOULD② 6-entry chain rejection', false, e.stack); }
+
 console.log(`\n=== ${pass} PASS / ${fail} FAIL ===`);
 process.exit(fail > 0 ? 1 : 0);

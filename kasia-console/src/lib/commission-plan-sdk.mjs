@@ -311,6 +311,14 @@ export function signChainEntry(prevDigest, position, addressSpk, signingPrivKeyH
  * @returns {{ok:boolean, chainDigest:Buffer, channelSpks:Buffer[], reason?:string}}
  */
 export function verifyChain(quote, entries, network) {
+  // 🔴 NWT diff 审 SHOULD(2026-09-27T10-11Z④, 一致性): 早期版本这里不限制 entries.length, 一条真实
+  // 6 环都签对的合法链会让 resolveRulesForOrder 的槽位填充循环(固定 0..MAX_CHANNELS-1)静默只读前
+  // 5 个、第 6 个被悄悄丢弃、不产生任何错误提示——这与 N3 对"原始 ch= 地址列表超 5 必须结构性拒绝,
+  // 不能静默截断"的纪律不一致(虽然这里不产生资金风险, 第 6 环的人只是没被用上、不会被错发给别人,
+  // 但既然一条路径定了"拒绝不截断", 平行路径也该同一个标准, 不是接受了却当没发生过)。
+  if (entries.length > MAX_CHANNELS) {
+    return { ok: false, chainDigest: Buffer.alloc(32, 0), channelSpks: [], reason: `verifyChain: 签名链长度 ${entries.length} > 上限 ${MAX_CHANNELS}, 结构性拒绝(同 N3 对原始 ch= 地址列表的纪律, 不静默截断)` };
+  }
   let d = chainDigest0(quote, network);
   for (let k = 1; k <= entries.length; k++) {
     const e = entries[k - 1];

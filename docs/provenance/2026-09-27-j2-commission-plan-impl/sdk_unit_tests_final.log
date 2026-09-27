@@ -29,5 +29,12 @@ PASS resolveRulesForOrder amounts sum to price
 PASS MUST demonstration: resolveRulesForOrder has NO independent ch= param to cross-check against — caller MUST only ever pass real verifyChain() output (API-level enforcement, documented)
 PASS O3 valid V1 deposit terms accepted
 PASS O3 forfeitable:true rejected (V1 only legal value is false)
+PASS C10 MUST-2: validateQuoteMassFeasibility rejects (ok:false) a genuinely mass-infeasible quote
+PASS C11 MUST-2: signQuote refuses to produce signature_hex for a mass-infeasible quote
+PASS C6: expired quote is detectable via valid_until_ms (SDK exposes the field; enforcement is caller-side per design §9 C6 — verify field is honest and comparable)
+PASS C12: garbage/invalid address string rejected by spkBytesFromAddress
+PASS C12: validateRoleAddressSpk rejects non-standard raw bytes
+PASS C13: ScriptHash address type is correctly identified as NOT deposit-bindable (P2SH lacks a single pubkey)
+PASS SHOULD②: 6-entry (all validly signed) chain is structurally rejected, not silently truncated to 5
 
-=== 31 PASS / 0 FAIL ===
+=== 38 PASS / 0 FAIL ===

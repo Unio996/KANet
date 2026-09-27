@@ -283,6 +283,32 @@ await record('T7_deposit_withdraw_wrong_signer_reject', 'reject', async () => {
   return rpc.submitTransaction({ transaction: tx, allowOrphan: false }).catch(e => ({ err: e.message }));
 });
 
+// ── C9(NWT SHOULD①, 2026-09-27T10-11Z): ChannelDeposit.withdraw 附加第二个输出应被拒
+// (require(tx.outputs.length==1), 共识层行为, 必须真实广播验证——同 T4 的模式)。 ──
+await record('C9_deposit_withdraw_extra_output_reject', 'reject', async () => {
+  const depositor = genAddr();
+  const protocol = createChannelDepositProtocol({ network: 'simnet', depositorPrivKeyHex: depositor.priv.toString(), maxWithdrawFeeSompi: 2_000_000n });
+  await fundAddress(protocol.address, 100_000_000n);
+  const utxo = await getUtxo(new Address(protocol.address));
+  const { unsignedTx } = buildChannelWithdrawTx(protocol, utxo);
+  // 附加第二个输出(分走一部分本该全额付给押金人的钱), 对这个"2 输出"形状重新签名(SighashType.All
+  // 承诺全部输出——必须对最终真实形状现签, 不能复用 1 输出形状的签名, 否则会撞另一种拒绝原因)。
+  const extra = genAddr();
+  const originalOut = unsignedTx.outputs[0];
+  const splitValue = originalOut.value / 2n;
+  const outs2 = [
+    new TransactionOutput(splitValue, originalOut.scriptPublicKey),
+    new TransactionOutput(originalOut.value - splitValue, new ScriptPublicKey(0, spkBytesFromAddress(extra.addr).subarray(2).toString('hex'))),
+  ];
+  const in0 = unsignedTx.inputs[0];
+  const twoOutTx = new Transaction({ version: unsignedTx.version, inputs: [{ previousOutpoint: in0.previousOutpoint, signatureScript: '', sequence: in0.sequence, sigOpCount: in0.sigOpCount, computeBudget: in0.computeBudget, utxo: in0.utxo }], outputs: outs2, lockTime: unsignedTx.lockTime, gas: unsignedTx.gas, subnetworkId: unsignedTx.subnetworkId, payload: unsignedTx.payload });
+  const raw = kaspa.createInputSignature(twoOutTx, 0, depositor.priv, kaspa.SighashType.All);
+  const rawNoPrefix = raw.startsWith('0x') ? raw.slice(2) : raw;
+  const sig65Hex = rawNoPrefix.slice(2);
+  const tx = finalizeChannelWithdrawTx(protocol, twoOutTx, sig65Hex);
+  return rpc.submitTransaction({ transaction: tx, allowOrphan: false }).catch(e => ({ err: e.message }));
+});
+
 console.log(`\n=== ${results.filter(r => r.pass).length} / ${results.length} PASS ===`);
 for (const r of results) if (!r.pass) console.log('FAILED:', JSON.stringify(r));
 process.exitCode = results.every(r => r.pass) ? 0 : 1;
