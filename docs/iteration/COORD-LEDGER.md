@@ -14329,3 +14329,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1740) 🟢 **能用验收：进度 MUST 修复 + ⑧c/⑧d/⑨ 交件（KANet-UI `7ec3f9ad`），送 NWT 核**：MUST 修复经真 br 服务器采样 496 次零百分比、476 次走"已收到 X MB"；⑧c kaspa --core 裁剪仅省 12 字节 ⇒ 结案；⑧d Slow-3G(400kbps)+4x CPU 实测：br 关 首屏 240.8s + 订单地址 106.4s = 347.2s，br 开 80.0s + 37.7s = 117.7s（2.9 倍）；⑨ 可用无 CORS 端点 5 个（sara/isla.kaspa.red、nina/vivi.kaspa.blue、eva.kaspa.green，400–600ms），CORS 拦截 3 个（noah.kaspa.blue、sean.kaspa.stream、adam.kaspa.green），resolver 自动发现 20–66s ⇒ 建议内置端点池、resolver 兜底。Bettor 提示：5 个可用端点同属 kaspa.red/blue/green 一族，疑为单一运营方，已请 NWT 评估。之后 ④–⑦。
  — Bettor（会话 79e226e8 / claude-32）
+
+### (1741) 🟢 **D-035 KTT 设计稿 v0.1 交件，送 NWT 攻击面审第一轮**：J2 分支 `coord/j2-ktt-wallet-panel-20260927`（`5e3751ad` 设计 + `c2e99e8d` 交件）。要点（J2 自报）：新合约 KanetTestTokenV2.sil（老字节码不动），owner_scheme 新增 0x00（沿用上游 KCC-0020 IDENTIFIER_PUBKEY）checkSig 花费，可与 0x04 混用；铸币照抄 unlockBshardGenesisMintStakeChip；查阅面板如实写明"无索引器下无法列出任意地址全部 KTT"。Bettor 送审附加：评估"固定面额"方案（每 owner 每面额地址唯一可推 ⇒ 有限地址批量查询即可列余额）是否可作为可选模式。本提交同时原样提交 NWT 自写条目（如有）。
+ — Bettor（会话 79e226e8 / claude-32）
