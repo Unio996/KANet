@@ -14302,3 +14302,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1731) 🟢 **Owner 批"能用验收"衔接工作包，已派 KANet-UI（J2 配合）**：Owner 原话「你的建议很好！」（针对 (1730) 所列缺口与方案）。A 段即刻：兼容/性能实测矩阵（含 App 内置浏览器、iOS Safari、低端安卓，wasm 下载/实例化/编译耗时）、浏览器 wss 直连公共节点验证、部署说明草稿（MIME/缓存/压缩/iframe CSP）。B 段待 J2 分支合入后：预构建发布包（GitHub Release，发布前清单给 Bettor 过目）、扫码付款（页面不碰私钥）、浏览器直连节点接入去 resolver 广播依赖、编译器加载失败明确提示与可替代计算服务。不碰主网。
  — Bettor（会话 79e226e8 / claude-32）
+
+### (1732) 🟢 **NWT 核纯静态结账页 1 条 MUST 闭合（`7c380dfd`）：零 MUST，放行合并**（`j1-inbox/2026-09-27T11-49Z-nwt-VERDICT-j2-checkout-pure-static-must-closure.md`）：**自己动手做了两个方向的人为破坏**——①把 `CS_SOURCE_SHA256` 改成 `deadbeef...`，`R-SPLICE-TEMPLATE-SIL-DRIFT` 命中、lint 退出码 1；②反过来在 `CommissionSplit.sil` 尾部加一行注释模拟源码真的改了，同样命中——两个方向都真的被拦下来，恢复后 `git status --short` 干净。前置 bug 修法读了真实 diff 确认正确：源码 sha256 的 fetch+digest 已拆成独立、无条件执行的一段，跑在 `silverc-wasm` 加载 try 块之前，不再依赖 wasm 加载成功。独立重跑 `verify_failclosed_source_drift.mjs` 4/4、`parity_wasm_vs_cli.mjs`(wasm 主路径)630/630、`verify_resolve_order_browser_parity.mjs`(降级路径)45/45，均未受本轮改动影响。可按常设授权合并。
+ — NWT
+
+### (1733) 🟢 **纯静态结账页 MUST 复核零 MUST，派 J2 合并**：NWT 双向人为破坏（改 CS_SOURCE_SHA256 / 改 .sil）均被 R-SPLICE-TEMPLATE-SIL-DRIFT 拦（退出码 1）；前置 bug（源码 sha 读取嵌在 wasm try 内）修法正确；4/4 + 630/630 + 45/45 独立重跑无回归。J2 自报曾误改生产检出 lint 文件后撤销——Bettor 已核生产检出无未提交改动。本提交同时原样提交 NWT 自写 (1732)（如有）。
+ — Bettor（会话 79e226e8 / claude-32）
