@@ -24,6 +24,11 @@ import * as feeSplitLib from './vendor/fee-split-browser.mjs';
 // 私钥, 只是把已经推导出来的收款地址/金额编码成 kaspa: URI 给用户扫。qrcode-generator(MIT, Kazuhiko
 // Arase) 是纯 JS、零依赖的小型编码器, vendor 进来(同 noble-hashes 惯例), 不需要 canvas/网络。
 import qrcodeFactory from './vendor/qrcode-generator/qrcode.mjs';
+// D-034 §8 B段⑥(Bettor 派工, 2026-09-27): 付款到账后, 浏览器直连节点触发分账/退款——两个入口零签名
+// (covenant 脚本本身就是判据, 不需要买家私钥), 广播前完整三维 mass 预检, 广播后回链核实落地。
+import { connectMonitorRpc, getOrderPaymentStatus, getCurrentPmtMs, REORG_SAFE_MIN_DEPTH } from './monitor.js';
+import { buildCommissionSplitTx, buildCommissionRefundTx } from './broadcast-commission.js';
+import { estimateMassUpperBound } from './vendor/tx-mass-ub-browser.mjs';
 
 // D-034 §8 后续票②(同 D-019 pin 纪律): 启动期核 wasm 二进制 sha256, 不符即拒绝初始化。
 // 🔴 这个值是从 scripts/kaspa-wasm-web-pin.json(仓库里的权威锚点)里抄来的常量, 不是从那个文件
@@ -89,8 +94,10 @@ function sompiToKasString(sompiBigInt) {
   return (neg ? '-' : '') + whole.toString() + (frac ? '.' + frac : '');
 }
 
-// kaspa: 付款 URI(BIP21 同族惯例, Kaspa 生态钱包——Kaspium/KDX 等通用支持 amount 参数)——只编码
-// 地址+金额两个公开字段, 页面本身从不持有/传输任何私钥, 扫码方用自己的钱包自己签名广播。
+// kaspa: 付款 URI(格式按 BIP21 同族惯例——Kaspa 生态里 Kaspium/KDX 等钱包的收款链接常用这个形状,
+// 但本页未拿真机逐一验证过每个钱包是否识别 amount 参数, 真机扫码兼容性待验证, 不冒充"通用支持"
+// 这个更强的断言)——只编码地址+金额两个公开字段, 页面本身从不持有/传输任何私钥, 扫码方用自己的
+// 钱包自己签名广播。
 function buildKaspaPaymentUri(address, totalSompi) {
   return `${address}?amount=${sompiToKasString(totalSompi)}`;
 }
@@ -188,6 +195,110 @@ function parseAttributionLink(url) {
     return { position: Number(pos), address_spk_b64: addrB64, signing_pubkey_b64: pkB64, sig_b64: sigB64 };
   }) : [];
   return { quoteRef, rawChannelAddrs, chainEntries };
+}
+
+// ── D-034 §8 B段⑥: 订单状态监控 + 触发分账/退款(仅真 silverc 编译器主路径可用——entries/redeemScriptHex
+// 等字段只有真编译才有, 降级路径 order-template.js 固定偏移覆写没有这些, 见 startOrderMonitor 调用点判断) ──
+let _monitorPollTimer = null;
+let _monitorBusy = false; // 广播进行中禁止并发触发(防重复点击造成竞态花费同一笔 UTXO)
+
+async function startOrderMonitor(order, totalSompi, network) {
+  if (_monitorPollTimer) clearInterval(_monitorPollTimer);
+  const rpcUrlOverride = new URLSearchParams(location.search).get('rpcUrl') || undefined; // simnet 测试用, 见 monitor.js connectMonitorRpc 头注
+  renderBox('monitorInfo', '<b>订单状态监控</b><br>连接节点中…');
+  let rpc, connectedUrl;
+  try {
+    ({ rpc, url: connectedUrl } = await connectMonitorRpc(kaspaWasm, { network, rpcUrl: rpcUrlOverride }));
+  } catch (e) {
+    renderBox('monitorInfo', `<b>订单状态监控</b><br><span class="bad">✗ 连接节点失败: ${e.message}</span>`);
+    return;
+  }
+
+  let alreadyFunded = false; // 用于区分"从没到过账"和"到过账后地址变空(=已被 split/refund 花掉)"
+
+  async function renderMonitorState() {
+    if (_monitorBusy) return; // 广播流程自己接管渲染, 轮询期间不要覆盖
+    let status;
+    try { status = await getOrderPaymentStatus(rpc, order.address, totalSompi); }
+    catch (e) { renderBox('monitorInfo', `<b>订单状态监控</b>(连 ${connectedUrl})<br><span class="bad">✗ 查询失败: ${e.message}</span>`); return; }
+
+    if (status.state === 'unfunded') {
+      if (alreadyFunded) {
+        renderBox('monitorInfo', `<b>订单状态监控</b>(连 ${connectedUrl})<br><span class="ok">✓ 订单已完成——收款地址资金已离开(分账或退款已被节点接受)</span>`);
+        clearInterval(_monitorPollTimer);
+        return;
+      }
+      renderBox('monitorInfo', `<b>订单状态监控</b>(连 ${connectedUrl})<br>状态: <span class="warn">未到账</span>——等待买家扫码付款`);
+      return;
+    }
+    alreadyFunded = true;
+
+    const receivedKas = sompiToKasString(status.totalSompi);
+    const expectedKas = sompiToKasString(totalSompi);
+    const depthText = status.depth == null ? '未知' : `${status.depth}(需要 ≥${REORG_SAFE_MIN_DEPTH} 才算深确认)`;
+    let stateHtml;
+    if (status.state === 'underfunded') stateHtml = `<span class="warn">⚠ 到账不足</span>——已收到 ${receivedKas} KAS, 应付 ${expectedKas} KAS`;
+    else if (status.state === 'overfunded') stateHtml = `<span class="warn">⚠ 超额到账</span>——已收到 ${receivedKas} KAS, 应付 ${expectedKas} KAS(多出部分会在触发分账时作为找零退给付款人)`;
+    else stateHtml = `<span class="ok">✓ 已到账</span>——${receivedKas} KAS`;
+
+    let currentPmtMs = null, pmtErr = null;
+    try { currentPmtMs = await getCurrentPmtMs(rpc); } catch (e) { pmtErr = e.message; }
+    const deadlineDate = new Date(order.deadlineMs).toISOString();
+    const pmtEligibleForRefund = currentPmtMs != null && currentPmtMs >= order.deadlineMs + 5000;
+    const depthOkForSplit = status.state !== 'unfunded' && status.depth != null && status.depth >= REORG_SAFE_MIN_DEPTH && status.state !== 'underfunded';
+
+    renderBox('monitorInfo', `<b>订单状态监控</b>(连 ${connectedUrl})<br>
+      状态: ${stateHtml}<br>确认深度: ${depthText}<br>
+      退款截止时间: ${deadlineDate}${pmtErr ? `(节点 PMT 查询失败: ${pmtErr})` : ` · 节点当前 PMT: ${currentPmtMs != null ? new Date(currentPmtMs).toISOString() : '?'}`}<br>
+      <div style="margin-top:0.5rem">
+        <button type="button" id="triggerSplitBtn" ${depthOkForSplit ? '' : 'disabled'}>触发分账${depthOkForSplit ? '' : '(需先到账+深确认)'}</button>
+        <button type="button" id="triggerRefundBtn" style="margin-left:0.5rem" ${pmtEligibleForRefund ? '' : 'disabled'}>触发退款${pmtEligibleForRefund ? '' : '(未到期)'}</button>
+      </div>
+      <p style="font-size:0.8rem;color:#666">两个入口零签名(covenant 脚本本身是判据, 触发者不需要买家私钥)——任何人(买家/商家/第三方)都能触发, 这是"资金出口自主"设计的直接体现: 服务全离线时任何人仍能完成分账/超时退款。</p>`);
+
+    document.getElementById('triggerSplitBtn')?.addEventListener('click', () => triggerBroadcast('split', rpc, order, status, connectedUrl, renderMonitorState));
+    document.getElementById('triggerRefundBtn')?.addEventListener('click', () => triggerBroadcast('refund', rpc, order, status, connectedUrl, renderMonitorState));
+  }
+
+  await renderMonitorState();
+  _monitorPollTimer = setInterval(renderMonitorState, 5000);
+}
+
+const MASS_LIMITS = { compute: 500_000n, storage: 500_000n, transient: 1_000_000n }; // 同 commission-plan-sdk.mjs estimateOrderMassPrecheck 既有阈值
+
+async function triggerBroadcast(kind, rpc, order, status, connectedUrl, onDone) {
+  if (_monitorBusy) return;
+  _monitorBusy = true;
+  const utxo = status.utxos[0]; // getOrderPaymentStatus 只按地址查, 通常单 UTXO(结账页只生成一笔资助); 多笔只取第一笔——协议约定订单地址应只被资助一次
+  try {
+    renderBox('monitorInfo', `<b>订单状态监控</b>(连 ${connectedUrl})<br>正在构造${kind === 'split' ? '分账' : '退款'}交易…`);
+    const fundingUtxo = { transactionId: utxo.outpoint.transactionId, index: utxo.outpoint.index, amountSompi: utxo.amountSompi };
+
+    let built;
+    if (kind === 'split') {
+      built = buildCommissionSplitTx(kaspaWasm, order, fundingUtxo);
+    } else {
+      const currentPmtMs = await getCurrentPmtMs(rpc);
+      built = buildCommissionRefundTx(kaspaWasm, order, fundingUtxo, currentPmtMs, 5000);
+    }
+
+    renderBox('monitorInfo', `<b>订单状态监控</b>(连 ${connectedUrl})<br>交易已构造, 做三维 mass 预检…`);
+    const massResult = estimateMassUpperBound(built.massShape);
+    const exceeds = massResult.compute > MASS_LIMITS.compute || massResult.storage > MASS_LIMITS.storage || massResult.transient > MASS_LIMITS.transient;
+    if (exceeds) {
+      throw new Error(`mass 预检未过: compute=${massResult.compute}(限 ${MASS_LIMITS.compute}) storage=${massResult.storage}(限 ${MASS_LIMITS.storage}) transient=${massResult.transient}(限 ${MASS_LIMITS.transient})——拒绝广播, 不是共识会不会接受的问题, 是本地预检主动挡下`);
+    }
+
+    renderBox('monitorInfo', `<b>订单状态监控</b>(连 ${connectedUrl})<br>mass 预检通过(compute=${massResult.compute} storage=${massResult.storage} transient=${massResult.transient}), 广播中…`);
+    const result = await rpc.submitTransaction({ transaction: built.tx, allowOrphan: false });
+    const txid = result.transactionId;
+    renderBox('monitorInfo', `<b>订单状态监控</b>(连 ${connectedUrl})<br><span class="ok">✓ 已广播</span> txid=<code>${txid}</code><br>等待链上核实落地(NO TX NO STATE CHANGE——广播成功不等于落地, mempool 可能丢/被双花竞争淘汰, 轮询确认收款地址资金真的离开)…`);
+  } catch (e) {
+    renderBox('monitorInfo', `<b>订单状态监控</b>(连 ${connectedUrl})<br><span class="bad">✗ ${kind === 'split' ? '分账' : '退款'}失败: ${e.message}</span>`);
+  } finally {
+    _monitorBusy = false;
+    setTimeout(onDone, 2000); // 广播后短暂延迟再恢复轮询渲染, 给节点一点时间把 tx 收进 mempool/UTXO 集变化能被下一次查询看到
+  }
 }
 
 async function main() {
@@ -302,6 +413,17 @@ async function main() {
         try { await navigator.clipboard.writeText(paymentUri); btn.textContent = '已复制'; setTimeout(() => { btn.textContent = '复制'; }, 1500); }
         catch { btn.textContent = '复制失败(手动选中)'; }
       });
+
+      // D-034 §8 B段⑥: 订单状态监控+触发分账/退款只在真 silverc 编译器主路径可用——order.entries/
+      // redeemScriptHex 等字段只有真编译才有(见 resolve-order-wasm.js 扩展), 降级路径(order-template.js
+      // 固定偏移覆写)没有这些字段, 不冒充能触发, 如实告知原因。
+      if (usedWasmCompiler) {
+        startOrderMonitor(order, totalSompi, network).catch(e => {
+          renderBox('monitorInfo', `<b>订单状态监控</b><br><span class="bad">✗ 启动监控失败: ${e.message}</span>`);
+        });
+      } else {
+        renderBox('monitorInfo', '<b>订单状态监控</b><br><span class="warn">⚠ 此订单用固定偏移覆写降级路径推导——触发分账/退款需要真 silverc 编译器(降级路径没有 entries ABI), 请刷新页面重试或换一个支持 WebAssembly 的浏览器</span>');
+      }
     } catch (e) {
       renderBox('orderInfo', `<span class="bad">✗ 订单地址推导失败(${e.message})</span>`);
     }
