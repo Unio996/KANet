@@ -44,13 +44,23 @@ function sha256(buf) { return createHash('sha256').update(buf).digest('hex'); }
 
 const CS = 'kasia-console/src/lib/checkout-static';
 // 运行时真正会被 checkout.html 加载到的文件集(依赖图核对方法: checkout.html 只 script 引 checkout.js;
-// checkout.js 静态 import verify-core/resolve-order-browser/resolve-order-wasm/vendor/fee-split-browser;
-// resolve-order-browser import order-template; fee-split-browser import noble-hashes/blake2b 一条链;
-// checkout.js fetch 取 vendor/sil-source/CommissionSplit.sil)。见本文件头注"维护提醒"。
+// checkout.js 静态 import verify-core/resolve-order-browser/resolve-order-wasm/vendor/fee-split-browser
+// /vendor/qrcode-generator/qrcode.mjs(⑤)/monitor.js(⑥)/broadcast-commission.js(⑥)/
+// vendor/tx-mass-ub-browser.mjs(⑥); resolve-order-browser import order-template; fee-split-browser
+// import noble-hashes/blake2b 一条链; broadcast-commission.js import
+// vendor/generic-entry-witness-browser.mjs(⑥); checkout.js fetch 取
+// vendor/sil-source/CommissionSplit.sil)。见本文件头注"维护提醒"。
+// 🔴 不含 vendor/*-parity.mjs(generic-entry-witness-browser-parity.mjs / tx-mass-ub-browser-parity.mjs)
+// ——同 wasm-pin-check.mjs/fee-split-browser-parity.mjs 既有排除理由: 纯 Node 侧开发期自检脚本, 裸
+// import kaspa-wasm + 相对路径指回仓库内 kasia-relay/kasia-console/scripts, 离开仓库目录结构就是
+// 死代码, 买家打开页面用不到。
 const RUNTIME_FILES = [
   'checkout.html', 'checkout.js', 'verify-core.js', 'resolve-order-browser.js',
-  'resolve-order-wasm.js', 'order-template.js',
+  'resolve-order-wasm.js', 'order-template.js', 'monitor.js', 'broadcast-commission.js',
   'vendor/fee-split-browser.mjs',
+  'vendor/generic-entry-witness-browser.mjs',
+  'vendor/tx-mass-ub-browser.mjs',
+  'vendor/qrcode-generator/qrcode.mjs', 'vendor/qrcode-generator/LICENSE',
   'vendor/noble-hashes/LICENSE', 'vendor/noble-hashes/blake2b.js', 'vendor/noble-hashes/blake2-internal.js',
   'vendor/noble-hashes/assert-internal.js', 'vendor/noble-hashes/crypto.js', 'vendor/noble-hashes/u64-internal.js',
   'vendor/noble-hashes/utils.js',
@@ -98,10 +108,38 @@ if (kaspaActual !== kaspaPin.sha256) { console.error(`[build] ✗ kaspa_bg.wasm 
 if (silvercActual !== silvercPin.sha256) { console.error(`[build] ✗ silverc_lang_bg.wasm sha256 不符 pin: 期望 ${silvercPin.sha256}, 实际 ${silvercActual}`); process.exit(1); }
 console.log(`[build] ✓ 两份 wasm sha256 均与该 commit 的 pin 文件一致`);
 
+// D-034 §8 v0.2.0-test 收尾(Bettor 2026-09-27 指出的可复现性缺口): kaspa.js/kaspa.d.ts/LICENSE +
+// silverc_lang.js/silverc_lang.d.ts/silverc_lang_bg.wasm.d.ts 这几个非 wasm 绑定文件之前没有单独
+// 锚定——现在也 fail-closed 逐个核对, 不匹配拒绝生成发布包(不是警告)。
+const BINDING_FILE_PIN_SOURCES = [
+  { pin: kaspaPin, prefix: 'checkout-static/vendor/kaspa-web/' },
+  { pin: silvercPin, prefix: 'checkout-static/vendor/silverc-wasm/' },
+];
+let bindingMismatch = false;
+for (const { pin, prefix } of BINDING_FILE_PIN_SOURCES) {
+  const bindingFiles = pin.bindingFiles?.files || {};
+  for (const [name, spec] of Object.entries(bindingFiles)) {
+    const f = files.find(x => x.path === `${prefix}${name}`);
+    if (!f) { console.error(`[build] ✗ 绑定文件 ${prefix}${name} 在待打包文件列表里找不到`); bindingMismatch = true; continue; }
+    const actual = sha256(f.buf);
+    if (actual !== spec.sha256) {
+      console.error(`[build] ✗ ${prefix}${name} sha256 不符 pin: 期望 ${spec.sha256}, 实际 ${actual}`);
+      bindingMismatch = true;
+    }
+  }
+}
+if (bindingMismatch) { console.error('[build] ✗ 绑定文件指纹核对未通过, 拒绝生成发布包'); process.exit(1); }
+console.log(`[build] ✓ 全部绑定文件(kaspa.js/kaspa.d.ts/LICENSE/silverc_lang.js/silverc_lang.d.ts/silverc_lang_bg.wasm.d.ts) sha256 均与该 commit 的 pin 文件一致`);
+
+const bindingFileRows = BINDING_FILE_PIN_SOURCES.flatMap(({ pin, prefix }) =>
+  Object.entries(pin.bindingFiles?.files || {}).map(([name, spec]) => `| \`${prefix}${name}\` | \`${spec.sha256}\` |`)
+).join('\n');
+
 const README = `# KANet 结账页（checkout-static）发布包
 
 纯静态、无服务器依赖的浏览器结账页：买家打开一个带签名报价的链接，页面在浏览器本地用真实
-kaspa-wasm + silverc-wasm 验签、推导订单地址、生成收款地址，不需要任何后端进程。
+kaspa-wasm + silverc-wasm 验签、推导订单地址、生成收款地址+扫码二维码，到账后可直连节点监视状态并
+触发分账/退款——不需要任何后端进程。
 
 **本包所有仓库内文件均取自 commit \`${commit}\`，用 \`git show <commit>:<path>\` 原样提取，与该 commit
 逐字节一致——不是手工编辑的临时副本。**
@@ -111,15 +149,20 @@ kaspa-wasm + silverc-wasm 验签、推导订单地址、生成收款地址，不
 \`\`\`
 checkout-static/
 ├── checkout.html              买家打开的页面
-├── checkout.js                页面胶水层（解析链接/展示进度/驱动收款流程）
+├── checkout.js                页面胶水层（解析链接/展示进度/驱动收款+监视+触发流程）
 ├── verify-core.js             验签/验证链逻辑
 ├── resolve-order-browser.js   订单地址推导（角色解析）
 ├── resolve-order-wasm.js      订单地址推导主路径（真 silverc 编译器）
 ├── order-template.js          订单地址推导备选路径（固定偏移覆写，silverc-wasm 加载失败时自动降级）
+├── monitor.js                 订单地址到账状态/确认深度/节点 PMT 只读监视（浏览器直连节点 wss）
+├── broadcast-commission.js    触发分账/退款交易组装（零签名，covenant 脚本本身是判据）
 └── vendor/
     ├── kaspa-web/              浏览器版 kaspa-wasm（sha256 见下）
     ├── silverc-wasm/           浏览器版 silverc 编译器（sha256 见下）
     ├── noble-hashes/           vendored blake2b（浏览器原生 ESM 需要，MIT 协议，见目录内 LICENSE）
+    ├── qrcode-generator/       扫码付款二维码编码器（MIT，Kazuhiko Arase，未改动上游代码）
+    ├── generic-entry-witness-browser.mjs  covenant 签名 witness ABI 编码器（触发分账/退款用）
+    ├── tx-mass-ub-browser.mjs  广播前三维 mass 预检
     ├── sil-source/             .sil 合约源码（订单地址推导需要读源码文本）
     └── fee-split-browser.mjs   分成计算逻辑（与仓库内 fee-split.mjs 逐字节同步）
 \`\`\`
@@ -130,8 +173,17 @@ checkout-static/
   可达，私钥仅内存中用一次不落盘）来对商家私钥签名，跟这个包"买家侧纯静态、零后端"的定位不同。
   商家如需生成报价链接，用仓库内 \`kasia-console/src/lib/checkout-static/config.html\` + 起
   \`resolver.mjs\` 的既有流程。（⑩：商家侧改成浏览器内 kaspa-wasm 本地签名后会并入下一版发布包。）
-- \`wasm-pin-check.mjs\`、\`fee-split-browser-parity.mjs\`——仓库内部的开发期自检脚本，买家打开页面时
-  用不到。
+- \`wasm-pin-check.mjs\`、\`fee-split-browser-parity.mjs\`、
+  \`vendor/generic-entry-witness-browser-parity.mjs\`、\`vendor/tx-mass-ub-browser-parity.mjs\`——
+  仓库内部的开发期自检脚本，买家打开页面时用不到（离开仓库目录结构就是死代码：裸 import
+  \`kaspa-wasm\` + 相对路径指回仓库内其他模块）。
+
+## 编译器加载失败时怎么办
+
+silverc-wasm 加载失败（网络/浏览器兼容性问题）时，页面会自动降级到固定偏移覆写路径继续完成订单
+地址推导（该路径独立验证过），并展示清楚的失败原因 + 三条替代方式（换浏览器重试 / 自行托管这份
+发布包 / 自行运行 \`resolver.mjs\`）——降级路径下触发分账/退款功能不可用（需要真编译器才有
+covenant entry ABI）。
 
 ## 产物指纹（部署前校验，\`checkout.js\` 运行时也会自己核对一次 sha256）
 
@@ -139,8 +191,11 @@ checkout-static/
 |---|---|
 | \`vendor/kaspa-web/kaspa_bg.wasm\` | \`${kaspaActual}\` |
 | \`vendor/silverc-wasm/silverc_lang_bg.wasm\` | \`${silvercActual}\` |
+${bindingFileRows}
 
-来源、构建命令、goldenSample 同源判据见各自 \`vendor/*/README.md\`。
+来源、构建命令、goldenSample 同源判据见各自 \`vendor/*/README.md\`。以上全部指纹(含绑定文件)锚定在
+仓库内 \`scripts/kaspa-wasm-web-pin.json\`/\`scripts/silverc-wasm-pin.json\`，本发布包由打包脚本
+fail-closed 逐个核对过，不匹配不会生成包。
 
 ## 部署要求（真实实测，非估算）
 
