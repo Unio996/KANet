@@ -39,7 +39,16 @@ const EXPECTED_SILVERC_WASM_SHA256 = '868e3f1b247a02b2a2eb39350dfcdd2fe03157c57d
 async function fetchWithProgress(url, onProgress) {
   const resp = await fetch(url);
   if (!resp.ok) throw new Error(`fetch ${url} failed: HTTP ${resp.status}`);
-  const totalStr = resp.headers.get('content-length');
+  // 🔴 NWT MUST(2026-09-27T12-23Z, 真机复现): fetch() 对 Content-Encoding: br/gzip 的响应体是浏览器
+  // 透明解压的——reader 吐出来的是【解压后】字节, 但 Content-Length 响应头描述的是【压缩前、实际过线】
+  // 的字节数, 两者不是同一个量纲, 拿"解压后累计接收量 / 压缩前总量"算百分比会在接近下载完时飙到远超
+  // 100%(真实 wasm 文件的压缩比推算会到 ~290%, 不是危言耸听的极端案例)。而这份交付自己在 ⑧a 建议
+  // "部署必须开 br"——即恰好是这个 bug 必然触发的配置, 不能只在未压缩场景测过就当通过。
+  // 修法: Content-Encoding 存在且不是 identity 时不信任 Content-Length 做分母, 退化到已有的
+  // "已收到 X.X MB"分支(那条分支本身没问题, 只是触发条件之前没把"压缩传输"这个情况算进去)。
+  const contentEncoding = (resp.headers.get('content-encoding') || 'identity').toLowerCase();
+  const isCompressed = contentEncoding !== 'identity';
+  const totalStr = isCompressed ? null : resp.headers.get('content-length');
   const total = totalStr ? Number(totalStr) : null;
   // transferSize===0 且 body 非空 = 命中 HTTP 缓存(浏览器没有真的发网络请求), Cache-Control 配对时
   // 第二次访问应该是这个情况——不是每个引擎的 resource timing 都保证在这个时间点已经落盘, 尽力而为。
