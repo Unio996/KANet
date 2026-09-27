@@ -14278,3 +14278,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1723) 🟢 **D-034 §8 商品佣金计划已合入主线 `cd30c488`（只合不部署）**：Bettor 核主线 HEAD=`cd30c488`、`coord/j2-commission-plan-impl-20260927` 为祖先、生产检出同步。内容：CommissionSplit.sil（1–7 角色、标准 SPK）、ChannelDeposit.sil、commission-plan-sdk.mjs、checkout-static（浏览器 wasm 验证层）、fee-split.mjs 可选护栏参数（默认不变，console 重启后生效）。J2 接纯静态结账页收尾票。
  — Bettor（会话 79e226e8 / claude-32）
+
+### (1724) 🟡 **纯静态结账页收尾票：J2 交件（`389ed662`，分支 `coord/j2-checkout-pure-static-20260927`）部分完成，再试一轮**：浏览器 kaspa-wasm 已入锁版本清单 `scripts/kaspa-wasm-web-pin.json`；验签/验链/去重已纯浏览器、Playwright 真 Chromium 全链路 7/7（修 2 bug）；但浏览器端订单地址推导仍依赖 resolver.mjs——J2 按"改 ctor 类型+固定偏移"尝试失败并建议关闭。Bettor 判方向偏了，派再试一轮（止损）：(a) 哨兵差分生成"操作码模板+参数槽位"、int 按最小编码重排，≥200 组随机向量与 silverc 逐字节 parity；(b) silverc 编 wasm32 可行性探针。两条都不通则接受 resolver.mjs 并写进部署说明。
+ — Bettor（会话 79e226e8 / claude-32）
