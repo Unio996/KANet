@@ -14317,3 +14317,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1736) 🟢 **能用验收 ⑧⑨ 交件（KANet-UI `e041314e`）与裁定**：实测压缩——两 wasm 原始 16.0MB，gzip 6.69MB，brotli 5.07MB（30.1%）⇒ 采纳"部署必须开 br（至少 gzip）"为硬要求；wasm-opt -Oz 压缩后几无收益（kaspa +0.6%、silverc −2.8%）⇒ 不采纳；kaspa 裁剪构建仅调研 ⇒ 派一次 --core 实测后定；silverc 按需加载 + 下载进度已实现并真浏览器 E2E 通过 ⇒ 采纳，补 Slow-3G 精确前后数字；端点清单仅 1 个可用（isla.kaspa.red）、1 个 CORS 拦截 ⇒ 单点不足，派再测 3–5 个。e041314e 送 NWT 小审（sha 校验先于实例化、漂移 fail-closed 在惰性加载后仍成立、进度降级）。随后 ④–⑦。
  — Bettor（会话 79e226e8 / claude-32）
+
+### (1737) 🔴 **NWT 小审：①②通过，③发现真机复现的 MUST——进度条在压缩传输下算出离谱百分比，恰是 (1736) 刚定的硬性部署要求（开 br/gzip）会必然触发的场景**（`j1-inbox/2026-09-27T12-23Z-nwt-VERDICT-kanetui-checkout-lazy-load-progress-review.md`）：①sha256 校验仍在 import/实例化前执行，未变。②`R-SPLICE-TEMPLATE-SIL-DRIFT` 依赖的源码 sha256 计算完全独立于本次改动、页面打开即无条件跑完，惰性加载只影响编译器本身，两者不耦合。③**自己起真实 HTTP 服务器（发 `Content-Encoding: br` + `Content-Length`=压缩后字节数）+ 真实 Chromium 复现**：`fetchWithProgress` 把解压后累计接收字节数除以压缩前总量算百分比，量纲不一致，真机验证得 `pct=14979657%`（极端可压缩测试数据放大了现象，真实 wasm 按 34.2% 压缩比推算约 292%，"超 100%"这个现象本身真实不夸大）——不影响最终 sha256/资金正确性（`fetchWithProgress` 返回的仍是完整正确解压字节），纯 UX 但会在 (1736) 刚拍板的"部署必须开压缩"这个推荐配置下必然触发。修法明确且小：读 `Content-Encoding` 非 `identity` 时不信任 `Content-Length` 分母，退化到已有的"已收到 X.X MB"分支。④自己重跑既有 E2E，复现 KANet-UI 已如实报告的"等待条件被新中间态提前满足"现象（非新发现），改用"结算态"等待条件后 9/10 PASS，golden path（真 silverc 编译器、零 resolver.mjs、零控制台错误）确认可用；剩 1 条 FAIL 是既有测试断言检查了被本次改动有意搬走的旧文案（`resolverStatus` 不再在页面打开时声称 silverc 状态），判 SHOULD 不阻塞。
+ — NWT
+
+### (1738) 🟡 **结账页按需加载 NWT 小审 1 MUST（压缩传输下进度超 100%），派 KANet-UI 修；手机实测待 Owner 批挂测试页**：NWT 真 HTTP+Chromium 复现 Content-Encoding: br 时 fetchWithProgress 进度荒谬（不影响 sha 校验与资金，纯 UX，但在"必须开 br"部署下必触发）；sha 校验时序与漂移 fail-closed 通过；E2E golden path 9/10（1 条过时断言，SHOULD）。Owner 问电报/WhatsApp/微信能否用、能否视频传播——Bettor 预判：电报/WhatsApp 内核支持应可用，微信内核支持但域名拦截是主要风险（需认可域名）；视频传播靠简介链接（YouTube 长视频可点、Shorts 不可点，抖音/TikTok/IG 多限主页链接，电报/推特最顺）；手机实测需 Owner 本人操作，已问是否批准把测试页（仅测试网、无真钱）挂到公网（GitHub Pages）。本提交同时原样提交 NWT 自写 (1737)（如有）。
+ — Bettor（会话 79e226e8 / claude-32）
