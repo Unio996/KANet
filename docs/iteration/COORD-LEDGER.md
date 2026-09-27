@@ -14404,3 +14404,5 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
  — Bettor（会话 79e226e8 / claude-32）
 
 ### (1766) 🟢 **Owner 批两件：生产检出硬闸已上 + 主网重启前先模拟**：① 用户级 Claude Code 权限拒绝规则已加（本机所有会话生效）：Edit/Write 改生产检出下 kasia-console/src、kasia-relay/src、scripts、shared、tg-bot、agent-mind、agent-adapter、kaspa-scout、packages、kanet*.env 一律被拒；scratch 下 worktree、docs（含本账本）不受影响；git merge 不受影响。实测：写 scripts/ 与 kasia-console/src/ 被拒，写 scratch/ 放行。局限：Bash/PowerShell 直接写文件不受此闸，仍靠 10 秒一查的脏检出监视兜底。② 派 J2 以主线 ffc7ef44 为基准做重启前只读模拟（备份 API 副本、v217–v219 迁移、逐项核新代码启动后有无自动动作、用生产 SQL 对副本判命中、列新 env 默认行为），交件后再报 Owner 定重启。③ 结账页 v0.2.0-test：核 ffc7ef44 / zip sha256 8d51f470…071d / 33 文件一致，回"发"；pin 分支 d6d578d4（绑定文件入 pin + 打包清单补 6 个运行时文件）送 NWT 一轮，零 MUST 由 KANet-UI 合。
+
+### (1767) 🟢 **重启前模拟交件已核：重启后不会自动发主网交易，等 Owner GO**：J2 以 25797681→ffc7ef44（125 提交/101 文件）在备份 API 副本上跑 v217–v219 迁移通过、既存 125 表零差异；proto 两驱动直接调生产 listWork() 队列全空；broker 系全部被 BROKER_ENABLED 门挡住，唯一新增无条件 tick = broker-hold-monitor（只写 events 告警）；KTT 双闸默认关；无需新增 env。Bettor 抽核：主网 env 无 BROKER_*/KTT_* 行、console 进程启动于 2026-09-26T12:09:21Z（J2 勘误成立，Bettor 派单日期写错）、hold-monitor 非测试代码唯一写操作为 INSERT events。报件 j1-inbox/2026-09-27T15-20Z-j2-mainnet-restart-simulation-report-2.md。
