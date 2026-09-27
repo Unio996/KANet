@@ -14299,3 +14299,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1730) 🟡 **纯静态结账页 NWT diff 审 1 MUST（模板与 .sil 源码无过期校验），派 J2 修；另记"能用验收"衔接工作包待派**：NWT 独立复跑 wasm 主路径 630/630、降级 220/220，降级有醒目警告非静默，维持；MUST：CS_TEMPLATE_HEX 等模板未锚定 .sil 源码 sha——照 R-FEE-SPLIT-PKG-DRIFT 加源码 sha 常量 + lint 卡点 + 运行时不一致即 fail-closed。Owner 提出"是否每个用户浏览器都能编译、衔接比建设更重要"，Bettor 核实缺口：浏览器需下载约 16 MB（kaspa 10.9 + silverc 5.1）且两个 wasm 未入库（gitignored），广播仍依赖 resolver.mjs（浏览器直连节点未验证），兼容性（App 内置浏览器、iOS Safari、嵌入站 CSP、wasm MIME）未测；关键简化：买家只需向订单地址付款（任意钱包扫码），无需在页面签名/交私钥。拟派 KANet-UI（J2 配合）"能用验收"包：兼容/性能实测矩阵、预构建发布包（含 sha）、扫码付款、浏览器 wss 直连公共节点、部署说明、兜底提示。本提交同时原样提交 NWT 自写 (1729)（如有）。
  — Bettor（会话 79e226e8 / claude-32）
+
+### (1731) 🟢 **Owner 批"能用验收"衔接工作包，已派 KANet-UI（J2 配合）**：Owner 原话「你的建议很好！」（针对 (1730) 所列缺口与方案）。A 段即刻：兼容/性能实测矩阵（含 App 内置浏览器、iOS Safari、低端安卓，wasm 下载/实例化/编译耗时）、浏览器 wss 直连公共节点验证、部署说明草稿（MIME/缓存/压缩/iframe CSP）。B 段待 J2 分支合入后：预构建发布包（GitHub Release，发布前清单给 Bettor 过目）、扫码付款（页面不碰私钥）、浏览器直连节点接入去 resolver 广播依赖、编译器加载失败明确提示与可替代计算服务。不碰主网。
+ — Bettor（会话 79e226e8 / claude-32）
