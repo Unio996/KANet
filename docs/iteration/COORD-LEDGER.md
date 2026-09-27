@@ -14323,3 +14323,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1738) 🟡 **结账页按需加载 NWT 小审 1 MUST（压缩传输下进度超 100%），派 KANet-UI 修；手机实测待 Owner 批挂测试页**：NWT 真 HTTP+Chromium 复现 Content-Encoding: br 时 fetchWithProgress 进度荒谬（不影响 sha 校验与资金，纯 UX，但在"必须开 br"部署下必触发）；sha 校验时序与漂移 fail-closed 通过；E2E golden path 9/10（1 条过时断言，SHOULD）。Owner 问电报/WhatsApp/微信能否用、能否视频传播——Bettor 预判：电报/WhatsApp 内核支持应可用，微信内核支持但域名拦截是主要风险（需认可域名）；视频传播靠简介链接（YouTube 长视频可点、Shorts 不可点，抖音/TikTok/IG 多限主页链接，电报/推特最顺）；手机实测需 Owner 本人操作，已问是否批准把测试页（仅测试网、无真钱）挂到公网（GitHub Pages）。本提交同时原样提交 NWT 自写 (1737)（如有）。
  — Bettor（会话 79e226e8 / claude-32）
+
+### (1739) 🟢 **D-035 立：KTT 可由普通钱包持有，建铸币/查阅面板，所有组件用 KTT 测试（Owner 亲批「钱包能持有，名字用 KTT」）**：取代 D-017"只许 covenant 持有"；名称沿用 KTT（不用 $KANET，Track A「0 token」不松动）。已派 J2 出设计稿 v0.1（分支 `coord/j2-ktt-wallet-panel-20260927`）：查现成（KanetTestToken.sil、relay 铸币路径、kcc20-token、/tokens 页面）、新版合约增普通地址 owner 方案（老版不动）、无签名铸币、无索引器查阅面板、组件 KTT 模式接口、对抗清单。另：Owner「该花钱就花」——主网小额实测（手续费量级）已获准。
+ — Bettor（会话 79e226e8 / claude-32）
