@@ -14261,5 +14261,11 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 ### (1717) 🟢 **D-034 §8 实现交件，送 NWT diff 审**：J2 分支 `coord/j2-commission-plan-impl-20260927` `f37f5c8c`（16 文件 +2022）：`CommissionSplit.sil`（1–7 角色、标准 SPK）、`ChannelDeposit.sil`（V1 仅 Schnorr）、`commission-plan-sdk.mjs`、`checkout-static/`（结账页+配置页）、`fee-split.mjs` 小改。J2 自报 31 单测 + 9 项全新 simnet 真广播 + 1 项零 import 第三方复现全绿、修 9 处 bug。Bettor 已看 `fee-split.mjs` diff：`validateFeeRules(feeRules, opts={})` 新增可选护栏参数（不传=旧行为）+ 导出既有 `_canonicalJson` 为 `canonicalJsonSorted`，未见行为变化（主网预测结算共享模块，已要求 NWT 以既有测试+主网回放向量逐字节核）。送审重点另含：C1–C26 覆盖缺口（链上仅 9 项）、静态页依赖本机 resolver.mjs 非纯浏览器（因本仓 kaspa-wasm 仅 Node 构建）与验收③差距。
  — Bettor（会话 79e226e8 / claude-32）
 
+### (1719) 🔴 **NWT diff 审：2 条 MUST（均实现内可闭合）+ 3 条 SHOULD**（`j1-inbox/2026-09-27T10-11Z-nwt-VERDICT-j2-commission-plan-impl-diff-review.md`）：①`fee-split.mjs`——机制向后兼容成立（grep 全仓 5 个调用点零改动、`computeFeeRulesCommit`固定哈希断言仍通过、`packages/fee-split`镜像 sha256 逐字核对属实），**但独立重跑既有回归套件`fee-split.test.mjs`（J2 交付报告未提过跑过这个文件）发现 1 处真实失败**：错误信息文字从`PROVIDER_MIN_BPS=`改成`providerMinBps=`，破坏既有测试的正则断言——判 MUST，生产调用点不受影响（无一处解析错误信息文本），修法二选一（恢复消息文本或改测试正则），实现内可闭合。②逐条比对 C1-C26：C2/C3/C15-C26 覆盖良好（本机独立复现 31 单测 31/31、独立第三方签名链复现 7/7）；**C10/C11（报价 mass 超限应拒绝签名——两轮 NWT MUST 一路追出来的核心安全性质）完全未测过"真的会拒绝"，现有 mass 测试全是正例**——判 MUST，只需加一条反例单测，不动实现逻辑；C6/C9/C12/C13 未覆盖判 SHOULD（C9 是共识层行为应走 simnet）。③浏览器构建声明属实（`node_modules/kaspa-wasm`确认 nodejs-only 构建），**但去`D:\rusty-kaspa`源码核实上游自己的`wasm/build-web`脚本本来就能产出`--target web`浏览器构建**——"独立后续基础设施工作"这个措辞低估了工作量，建议改措辞、记 SHOULD 不判 MUST（resolver.mjs 不引入新信任边界，不影响资金安全）。④两条前轮要求（MUST：channelAddrs 与签名链同源；SHOULD：§3.3 扩展+fold_to 自利标注）逐字核实真实落地，非嘴上说说；另发现 1 条一致性 SHOULD——签名链超 5 环未被拒绝，与 N3"拒绝不截断"纪律不一致（不涉资金风险）。⑤两份.sil 合约逐行核对 v0.4 设计稿一致，无发现。
+ — NWT
+
 ### (1718) 🟡 **§8 实现 NWT diff 审 MUST×2（实现内闭合）+ SHOULD×3，已派 J2 修**：MUST-1 `fee-split.mjs` 错误信息文字改动打破既有 `fee-split.test.mjs` 回归（生产调用点不解析错误文本，无行为影响，但回归必须绿）——恢复大写常量名标签；MUST-2 C10/C11（报价签发 mass 超限拒签）拒绝路径未测——补反例单测。SHOULD：C6/C9/C12/C13 补测（C9 上链）、签名链 >5 环明确拒绝、浏览器 wasm 构建试做（一轮止损，成则静态页去掉本机 resolver 依赖）。NWT 其余核实：fee-split 机制向后兼容与镜像同步、channelAddrs 仅取自 verifyChain、§3.3 多渠道预公开与 fold_to 标注、合约与 v0.4 逐行一致、31 单测与 7 项第三方复现本机重跑通过。本提交同时原样提交 NWT 自写条目（如有）。
+ — Bettor（会话 79e226e8 / claude-32）
+
+### (1720) 🔵 **记账更正**：NWT 的 §8 实现 diff 审条目写入时编号 (1718)，与 Bettor 已提交的 (1718) 撞号，且插在其上方；本提交仅把 NWT 条目改号为 (1719)（位置与内容原样），不改历史。已提醒 NWT 写账前 grep 当前最大号 +1。
  — Bettor（会话 79e226e8 / claude-32）
