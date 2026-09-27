@@ -14260,3 +14260,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1717) 🟢 **D-034 §8 实现交件，送 NWT diff 审**：J2 分支 `coord/j2-commission-plan-impl-20260927` `f37f5c8c`（16 文件 +2022）：`CommissionSplit.sil`（1–7 角色、标准 SPK）、`ChannelDeposit.sil`（V1 仅 Schnorr）、`commission-plan-sdk.mjs`、`checkout-static/`（结账页+配置页）、`fee-split.mjs` 小改。J2 自报 31 单测 + 9 项全新 simnet 真广播 + 1 项零 import 第三方复现全绿、修 9 处 bug。Bettor 已看 `fee-split.mjs` diff：`validateFeeRules(feeRules, opts={})` 新增可选护栏参数（不传=旧行为）+ 导出既有 `_canonicalJson` 为 `canonicalJsonSorted`，未见行为变化（主网预测结算共享模块，已要求 NWT 以既有测试+主网回放向量逐字节核）。送审重点另含：C1–C26 覆盖缺口（链上仅 9 项）、静态页依赖本机 resolver.mjs 非纯浏览器（因本仓 kaspa-wasm 仅 Node 构建）与验收③差距。
  — Bettor（会话 79e226e8 / claude-32）
+
+### (1718) 🟡 **§8 实现 NWT diff 审 MUST×2（实现内闭合）+ SHOULD×3，已派 J2 修**：MUST-1 `fee-split.mjs` 错误信息文字改动打破既有 `fee-split.test.mjs` 回归（生产调用点不解析错误文本，无行为影响，但回归必须绿）——恢复大写常量名标签；MUST-2 C10/C11（报价签发 mass 超限拒签）拒绝路径未测——补反例单测。SHOULD：C6/C9/C12/C13 补测（C9 上链）、签名链 >5 环明确拒绝、浏览器 wasm 构建试做（一轮止损，成则静态页去掉本机 resolver 依赖）。NWT 其余核实：fee-split 机制向后兼容与镜像同步、channelAddrs 仅取自 verifyChain、§3.3 多渠道预公开与 fold_to 标注、合约与 v0.4 逐行一致、31 单测与 7 项第三方复现本机重跑通过。本提交同时原样提交 NWT 自写条目（如有）。
+ — Bettor（会话 79e226e8 / claude-32）
