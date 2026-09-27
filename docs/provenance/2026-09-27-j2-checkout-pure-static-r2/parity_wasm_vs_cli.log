@@ -1,0 +1,6 @@
+=== parity results ===
+CommissionSplit: 210/210 pass
+ChannelDeposit: 210/210 pass
+InstantSplit: 210/210 pass
+
+ALL PASS — wasm compile() byte-identical to pinned silverc v1.0.0 CLI across 630 random ctor vectors.

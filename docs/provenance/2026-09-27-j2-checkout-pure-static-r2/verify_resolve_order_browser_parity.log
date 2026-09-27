@@ -1,0 +1,47 @@
+PASS trial 0: chain verifies (2 channels)
+PASS trial 0: resolveRulesForOrder output byte-equal (4 roles)
+PASS trial 0: browser-derived order address is well-formed
+PASS trial 1: chain verifies (4 channels)
+PASS trial 1: resolveRulesForOrder output byte-equal (6 roles)
+PASS trial 1: browser-derived order address is well-formed
+PASS trial 2: chain verifies (2 channels)
+PASS trial 2: resolveRulesForOrder output byte-equal (4 roles)
+PASS trial 2: browser-derived order address is well-formed
+PASS trial 3: chain verifies (2 channels)
+PASS trial 3: resolveRulesForOrder output byte-equal (4 roles)
+PASS trial 3: browser-derived order address is well-formed
+PASS trial 4: chain verifies (2 channels)
+PASS trial 4: resolveRulesForOrder output byte-equal (4 roles)
+PASS trial 4: browser-derived order address is well-formed
+PASS trial 5: chain verifies (3 channels)
+PASS trial 5: resolveRulesForOrder output byte-equal (5 roles)
+PASS trial 5: browser-derived order address is well-formed
+PASS trial 6: chain verifies (5 channels)
+PASS trial 6: resolveRulesForOrder output byte-equal (7 roles)
+PASS trial 6: browser-derived order address is well-formed
+PASS trial 7: chain verifies (5 channels)
+PASS trial 7: resolveRulesForOrder output byte-equal (7 roles)
+PASS trial 7: browser-derived order address is well-formed
+PASS trial 8: chain verifies (3 channels)
+PASS trial 8: resolveRulesForOrder output byte-equal (5 roles)
+PASS trial 8: browser-derived order address is well-formed
+PASS trial 9: chain verifies (4 channels)
+PASS trial 9: resolveRulesForOrder output byte-equal (6 roles)
+PASS trial 9: browser-derived order address is well-formed
+PASS trial 10: chain verifies (4 channels)
+PASS trial 10: resolveRulesForOrder output byte-equal (6 roles)
+PASS trial 10: browser-derived order address is well-formed
+PASS trial 11: chain verifies (2 channels)
+PASS trial 11: resolveRulesForOrder output byte-equal (4 roles)
+PASS trial 11: browser-derived order address is well-formed
+PASS trial 12: chain verifies (2 channels)
+PASS trial 12: resolveRulesForOrder output byte-equal (4 roles)
+PASS trial 12: browser-derived order address is well-formed
+PASS trial 13: chain verifies (3 channels)
+PASS trial 13: resolveRulesForOrder output byte-equal (5 roles)
+PASS trial 13: browser-derived order address is well-formed
+PASS trial 14: chain verifies (4 channels)
+PASS trial 14: resolveRulesForOrder output byte-equal (6 roles)
+PASS trial 14: browser-derived order address is well-formed
+
+=== resolve-order-browser.js <-> real SDK parity: 45 PASS / 0 FAIL ===

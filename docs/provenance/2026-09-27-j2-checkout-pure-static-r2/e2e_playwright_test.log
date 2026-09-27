@@ -1,0 +1,28 @@
+PASS config.html: quote signed successfully
+PASS config.html: produced a checkout link
+PASS checkout.html: browser-native kaspa-wasm loaded + sha256 verified
+PASS checkout.html: quote signature verified natively in-browser
+PASS checkout.html: channel address parsed (no signature chain, dedup-cap path)
+PASS checkout.html: order address resolved natively in-browser
+PASS checkout.html: order address used the REAL silverc-wasm compiler (primary path, not the splice fallback)
+PASS checkout.html: resolverStatus confirms silverc-wasm loaded as primary path
+PASS checkout.html: zero console/page errors during full flow
+PASS checkout.html: ZERO network calls to resolver.mjs (D-034 §8 后续票①第二轮)
+
+--- full page texts (for provenance) ---
+resolverStatus: ✓ 浏览器原生 kaspa-wasm 已加载, sha256 核对通过(732bdaa3ee8353c0…)——报价验签/签名链验证/渠道地址解析全部在本页运行, 全程不依赖 resolver.mjs; 订单地址推导用真 silverc 编译器(silverscript-lang 编 wasm32, 主路径)
+quoteInfo: 报价(浏览器原生验签, 无网络请求)
+    商家签名✓ 验证通过
+    价格20000000000 sompi
+    mass 校验(签发时刻)✓ 已过
+    要求渠道押金否
+  
+chainInfo: 渠道地址(无签名链背书, 浏览器原生解析)
+      解析结果⚠ 已解析, 但无签名链背书
+    
+orderInfo: 订单(浏览器原生推导·真 silverc 编译器, 零网络请求)
+        收款地址kaspasim:pz9kyqt6s4yu2m76s2x5u78nf2ea8yn0e6jm7xjzaj6hhjx5jl3k5p6aev0aa
+        截止时间2026-09-30T11:45:45.557Z
+      角色金额provider200.0000 KAS
+
+=== E2E (real Chromium via Playwright): 10 PASS / 0 FAIL ===

@@ -1,0 +1,35 @@
+{
+  "name": "silverc-wasm-lib",
+  "sourceRepo": "本机 checkout D:\\silverscript (独立仓, 非 kanet-tn12——silverscript-lang 是库, 不是 silverc CLI 那个二进制)",
+  "sourceBaseTag": "v1.0.0",
+  "sourceBaseCommit": "3ed973335b59269293564805cc2c58a14595ec03",
+  "sourceBaseCommitNote": "与 D-019 pin 的 silverc-v100-3ed9733.exe CLI 二进制是同一提交——parity 判据的锚点, 不是巧合选的版本。",
+  "wasmWrapperBranch": "j2-wasm-lib-v100-2026-09-27",
+  "wasmWrapperCommit": "d754cec",
+  "wasmWrapperCommitNote": "本地分支, 未推上游(同 j2-oppick-fix-2026-07-06 的既有惯例——见 CLAUDE.md 铁律 0.5 状态注记)。只加了 silverscript-lang/src/wasm.rs(新文件, wasm-bindgen 包一层 compile(source, ctor_json))+ lib.rs 的一行 feature-gated pub mod + Cargo.toml 的 wasm32-target-scoped 依赖/feature——不改任何编译逻辑本身, wasm.rs 逐字对照 src/bin/silverc.rs 的真实调用路径(Vec<ArtifactValue> ctor 解析 → compile_to_sil_abi_artifact → to_pretty_json), 这是 parity 成立的前提。",
+  "buildCommand": "cd D:\\silverscript\\silverscript-lang && PATH=\"C:\\Program Files\\LLVM\\bin:$PATH\" CC=clang cargo build --lib --target wasm32-unknown-unknown --release --features wasm && wasm-bindgen target/../target/wasm32-unknown-unknown/release/silverscript_lang.wasm --out-dir <out> --target web --out-name silverc_lang",
+  "buildCommandNote": "CC=clang 同 kaspa-wasm-web-pin.json 的既有原因(secp256k1-sys 等 C 依赖 crate 需要 clang, 装在 LLVM 目录但不在默认 PATH)。crate-type 需加 [\"cdylib\",\"rlib\"](Cargo.toml [lib] 段)——默认只产 rlib, wasm-bindgen 处理不了。wasm-bindgen-cli 版本必须与 Cargo.lock 里 wasm-bindgen 依赖版本一致(本次 0.2.100), 否则 wasm-bindgen 命令行工具会报版本不匹配。",
+  "artifactSchemaVersion": 1,
+  "wasmBindgenTarget": "web",
+  "sha256": "868e3f1b247a02b2a2eb39350dfcdd2fe03157c57d99b803b7e9ab2d7bfdc325",
+  "sha256Note": "这是 wasm-bindgen 处理后、实际发布到 vendor/silverc-wasm/silverc_lang_bg.wasm 的那份文件的 sha256(不是 cargo build 直接产出、wasm-bindgen 处理前的 target/.../silverscript_lang.wasm——那份中间产物 sha256 是 dc1072377bd34769e7f442e3b5b244b26afeb41c91429077bc52427c9ed356aa, 两者不同, 部署/核验一律对 silverc_lang_bg.wasm 这份成品)。同 kaspa-wasm-web-pin.json 的既有认识: wasm-opt/wasm-bindgen 不保证完全确定性构建, sha256 是防调包指纹(挡'换成另一个完全不同的东西'), 不是唯一同源判据——真正的同源判据是下方 goldenSample + parity 脚本。这是本轮实际构建产出的真实值, 未来重建出不同 sha256 不代表出错, 需走 goldenSample 复核。",
+  "decision": "D-034 §8 后续票(Bettor 派工 2026-09-27, coord/j2-checkout-pure-static-20260927 · item①(b))——是否/如何纳入正式 D-0XX pin 体系由 Bettor/Owner 决定, 本文件如实记录构建来源与产物指纹, 不代表已获得 pin 权威地位。",
+  "productionArtifactPath": "kasia-console/src/lib/checkout-static/vendor/silverc-wasm/(gitignored, 不入 git 历史, 操作者按同目录 README.md 自行构建部署)",
+  "envVarOverride": "SILVERC_WASM_SHA256(可选, 覆盖下方 sha256 做本机核验, 同 kaspa-wasm 惯例)",
+  "goldenSample": {
+    "purpose": "同 D-019 silverc goldenSample 与 kaspa-wasm-web-pin.json 的同一条纪律。",
+    "method": "用固定 ctor 编译 ChannelDeposit.sil(depositor_pk = 32 个 0x07 字节, max_withdraw_fee = 500), 取 contracts.ChannelDeposit.compiled.bytecode 的 sha256。",
+    "silSourcePath": "kasia-console/src/lib/sil-v1/ChannelDeposit.sil",
+    "ctorJson": "[{\"kind\":\"bytes\",\"value\":[7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7]},{\"kind\":\"int\",\"value\":500}]",
+    "expectedBytecodeLen": 106,
+    "expectedBytecodeSha256": "278180236d6bc26c8071c9b4a66ae84057242150cb578c0a2cf8c779cfdfac7c",
+    "expectedStateSpan": { "offset": 1, "len": 42 },
+    "note": "expectedBytecodeSha256 是从本机真实构建产物读出的真实值(scratch/_j2_commission_impl_research/smoke_test_wasm3.mjs 同一把 ctor 跑出), 不是编的示例数字——与本文件顶部 sha256 对应的同一份产物。"
+  },
+  "parityEvidence": {
+    "purpose": "goldenSample 只核一个固定点; 真正承重的证据是与 D-019 pin 的 silverc-v100-3ed9733.exe CLI 二进制做随机向量 parity, 覆盖 Bettor 要求的三份合约形状。",
+    "script": "docs/provenance/2026-09-27-j2-checkout-pure-static-r2/parity_wasm_vs_cli.mjs",
+    "result": "CommissionSplit 210/210 · ChannelDeposit 210/210 · InstantSplit 210/210 —— 630/630 组随机 ctor 向量, wasm compile() 与 CLI 输出 bytecode/state_span/template_hash 逐字节一致, 零不一致。",
+    "coverageNote": "CommissionSplit 覆盖 role_count 1-7 全遍历(iter%7 强制过一遍) + 随机 SPK 长度分布(22/25/34/35/36/37B) + 随机 amount(含 0、2^32 边界、2^53-1 上限); InstantSplit 覆盖 hasReferrer 真/假各半; ChannelDeposit 覆盖随机 32B pubkey + 全值域 int。"
+  }
+}

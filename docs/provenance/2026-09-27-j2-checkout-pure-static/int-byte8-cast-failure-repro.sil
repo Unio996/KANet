@@ -1,0 +1,7 @@
+pragma silverscript ^0.1.0;
+contract IsolateTest2(byte[8] role_count) {
+    int r_count = int(role_count);
+    entry split() {
+        require(r_count >= 1);
+    }
+}

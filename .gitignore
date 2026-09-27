@@ -20,6 +20,14 @@ kasia-console/src/lib/checkout-static/vendor/kaspa-web/kaspa_bg.wasm
 kasia-console/src/lib/checkout-static/vendor/kaspa-web/kaspa.d.ts
 kasia-console/src/lib/checkout-static/vendor/kaspa-web/LICENSE
 
+# checkout-static 浏览器版 silverc(silverscript-lang wasm32 库, D-034 §8 item①(b), 2026-09-27)构建
+# 产物——同上, 大二进制放仓外、按 sha256 核对, 见 checkout-static/vendor/silverc-wasm/README.md 的
+# 构建命令 + scripts/silverc-wasm-pin.json 的 sha256 锚点。
+kasia-console/src/lib/checkout-static/vendor/silverc-wasm/silverc_lang.js
+kasia-console/src/lib/checkout-static/vendor/silverc-wasm/silverc_lang_bg.wasm
+kasia-console/src/lib/checkout-static/vendor/silverc-wasm/silverc_lang.d.ts
+kasia-console/src/lib/checkout-static/vendor/silverc-wasm/silverc_lang_bg.wasm.d.ts
+
 # === 根目录敏感配置 ===
 kanet.env
 kanet.mainnet.env
