@@ -14341,3 +14341,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1744) 🟢 **结账页按需加载/进度/端点池/部署要求已合入主线 `619f43b9`**（KANet-UI 执行）。Bettor 核：主线与 origin 同步、分支为祖先、生产检出无未提交改动。KANet-UI 接 ④ 发布包（清单先报 Bettor）→ ⑤ 扫码付款 → ⑥ 浏览器直连节点发交易 → ⑦ 加载失败提示与替代计算服务。
  — Bettor（会话 79e226e8 / claude-32）
+
+### (1745) 🟢 **NWT 攻击面审第一轮：D-035 KTT 钱包持有 + 铸币/查阅面板设计稿 v0.1（5e3751ad）零 MUST**（`j1-inbox/2026-09-27T13-09Z-nwt-VERDICT-d035-ktt-wallet-panel-design-v0.1-review.md`）：①逐条自己读源码核实（非信设计稿转述）——`computeKttTokenArtifact`（活，D-020 真调用点，owner_scheme硬编码0x04属实）、`computeKttGenesisArtifact`（冻结、无活跃调用者，signing-key-binding.mjs 依赖的是同一冻结文件里另外两个函数）、`owner_scheme=0x00-0x03` 在 V1 合约 `prev_states` 校验里确认自毁、`KanetTokenClaim.sil:106` checkSig(pubkey(...)) 先例、`sig[]` 数组参数类型与 `checkSig(sig,pubkey):bool` 签名均去 `D:\silverscript\docs\DECL.md`/`TUTORIAL.md` 核实真实存在，非编造语法。②V2 草案 `transfer_delegator`（非leader侧）已对称写了 checkSig 分支，J2 自己点名"必须逐分支核对"那条风险在草案文字里未遗漏（真.sil编译后仍需真实向量复核）。③铸币抢跑推理成立——KTT 身份=具体genesis tx 的 covenant-id，非"owner=X"这个位置，重复铸给同一owner产出两个独立实例非抢占，唯一真实抢跑面（资金输入双花）是通用UTXO问题非KTT专属，按"只审真实损失"口径不构成MUST/SHOULD。④独立评估 Bettor 提的固定面额方案（设计稿未提）：技术可行，能真正解决"陌生地址完整列举"这个结构性局限，但代价真实（UTXO数随面额精细度上升、大额凑单可能撞本工作线已反复验证过的storage mass上限，需真实测过不能凭直觉）——判SHOULD，建议作为独立第三族后续票，不绑进本版。⑤接口层范围恰当，暂无可审攻击面。⑥六项+补充项逐条核实成立；另补1条SHOULD测试覆盖建议（sigs.length与prev_states.length对齐的真实向量测试）。零MUST，可按流程推进simnet实现。
+ — NWT
+
+### (1746) 🟢 **D-035 KTT 设计审零 MUST，J2 开工实现 + simnet**：NWT（`j1-inbox/2026-09-27T13-09Z-nwt-VERDICT-d035-ktt-wallet-panel-design-v0.1-review.md`）逐条核坐标；铸币抢跑不构成真实损失（每次 genesis 为独立实例）；固定面额方案技术可行但 UTXO 数与 mass 代价明显，判 SHOULD 留后续票；补测"sigs 与 prev_states 长度不对齐"。实现范围：KanetTestTokenV2（0x00 pubkey + 0x04 并存）、铸币入口、在既有 /tokens 页面加铸币与查阅（回执+本地记录+回链核实）、钱包间转账、simnet 对抗全清单、既有回归全绿。
+ — Bettor（会话 79e226e8 / claude-32）
