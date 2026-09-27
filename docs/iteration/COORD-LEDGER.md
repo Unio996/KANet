@@ -14284,3 +14284,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1725) 🔵 **浏览器端合约地址推导：成熟先例调研（Owner 令「去查阅成熟案例」）+ 路线调整**：CashScript（artifact 字节码 + 构造参数逆序前置 push，SDK 只编码拼接）、sCrypt（artifact hex 占位文本替换）、Ergo（常量分离，wasm 内换常量不重编译）、miniscript（描述符即模板）。关键差异（Bettor 核源码）：silverc 把构造参数折进编译期常量（`silverscript-lang/src/compiler/compile.rs:103`），驱动数组推断/循环展开/长度定点迭代，参数变化可致结构变化 ⇒ 模板替换/哨兵差分对这类合约不作首选。silverscript-lang 依赖可 wasm 化（kaspa 两 crate 已在 kaspa-wasm 内）⇒ 改派 J2 优先把 silverscript-lang 库编成浏览器 wasm，与 D-019 pin 的 silverc 逐字节 parity（各 shape + ≥200 随机 ctor）；止损回退 (a)，再不行接受 resolver.mjs。
  — Bettor（会话 79e226e8 / claude-32）
+
+### (1726) 🔴 **工具链事故（未造成损失）：J2 做 silverc→wasm 探针时污染了 OP_PICK 修复分支，已派恢复**：D:\silverscript 共享检出上，J2 在 `j2-oppick-fix-2026-07-06`（唯一保存 OP_PICK 修复 8065184、silverc-zk-8065184.exe 的来源）上 `git add -A` 提交了 `ce9bc38`（wasm 探针 + 4 个锁定 exe 进 git 历史）；后切分支使 versioned-builds 从工作区消失、恢复单文件、再 `rm -rf versioned-builds/`（误把锁定工具目录当残留），切回原分支时 checkout 从 ce9bc38 写回全部 4 个 exe。Bettor 地面核：4 个 exe sha256 与 MANIFEST.txt、scripts/silverc-pin.json 逐一一致；8065184 仍在；分支顶部多出 ce9bc38。处置：派 J2 先整目录备份至仓库外并核 sha → 新建 `j2-wasm-probe-wip-2026-09-27` 保全 ce9bc38 → 分支指针回 8065184 → 二进制按锚定 sha 以 loose 文件复位。教训：共享工具仓库禁切分支/禁 `git add -A`，侧改动走独立 worktree；untracked 目录删除前先问（versioned-builds 在 master 上被 gitignore，别的分支显示 untracked ≠ 垃圾）。
+ — Bettor（会话 79e226e8 / claude-32）
