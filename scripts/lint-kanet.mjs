@@ -1623,6 +1623,13 @@ function checkR_COMMINGLE_GUARD(filepath, content) {
 //   根因: 今晚 KANet-UI UX doc 误提 kasia-console/docs/ → grep 扫 docs/ 看不到 → 假阴性.
 //   同族: J1 stale-local 假阴性(代码同名但版本不同). 此 lint 堵"同名 doc 多路径"变体.
 //   Escape hatch: 不支持 (文档无理由散落多路径; 必归 docs/).
+// 🔴 修(ledger 1748, Bettor 2026-09-27 派工, KANet-UI): 原实现用 readdirSync 物理扫全仓, 连
+// .gitignore 排除的目录(如 D-021 敏感留存区 docs-private/)也扫得到——对 docs-private/ 里的文件报
+// "必 git mv 进 docs/", 照做就是把本该留在仓外的敏感内容送进公开仓库, 是规则实现范围写错, 不是
+// docs-private 这个惯例有问题。改用 git ls-files(同 trackedTargets() 既有先例, 2026-08-29 Bettor 裁
+// 同一条纪律: 只扫 git tracked 文件, 物理 walk 会把 gitignored 文件卷进"仓级不变量")——规则本意不变
+// (被跟踪的 date-prefix 文档仍必须住 docs/ 下), 只是不再把从未打算进仓库的文件当"文档放错位置"。
+// git 不可用/失败 ⇒ 回退物理 walk(LOUD warn), 不静默缩小检查范围。
 function checkDocPath() {
   const DOCS_ROOT = path.join(ROOT, 'docs');
   const datePrefix = /^\d{4}-\d{2}-\d{2}-/;
@@ -1630,8 +1637,7 @@ function checkDocPath() {
   const mdSkip = new Set(['node_modules', '.git', 'logs', 'dist', 'build', 'out', '.cache',
     'scratch', 'tmp', '_archive_root_20260627', 'kasia-console-archive', 'kanet-tn12']);
 
-  const mdFiles = [];
-  function walkMd(dir, depth) {
+  function walkMdPhysical(dir, depth, out) {
     if (depth > 7) return;
     let entries;
     try { entries = fs.readdirSync(dir); } catch { return; }
@@ -1640,11 +1646,22 @@ function checkDocPath() {
       const full = path.join(dir, name);
       let st;
       try { st = fs.statSync(full); } catch { continue; }
-      if (st.isDirectory()) walkMd(full, depth + 1);
-      else if (st.isFile() && name.endsWith('.md')) mdFiles.push(full);
+      if (st.isDirectory()) walkMdPhysical(full, depth + 1, out);
+      else if (st.isFile() && name.endsWith('.md')) out.push(full);
     }
   }
-  walkMd(ROOT, 0);
+
+  let mdFiles;
+  try {
+    const out = execFileSync('git', ['ls-files', '-z', '--', '*.md'], { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+    mdFiles = out.split('\0').filter(Boolean)
+      .filter((f) => !f.split('/').some((seg) => mdSkip.has(seg)))
+      .map((f) => path.join(ROOT, f));
+  } catch (e) {
+    console.warn(`[lint-kanet] 🔴 git ls-files 失败 (${e.message.slice(0, 80)}) — R-DOC-PATH 回退物理 walk (会含 gitignored 文件)`);
+    mdFiles = [];
+    walkMdPhysical(ROOT, 0, mdFiles);
+  }
 
   // Rule 1: date-prefixed design doc NOT under docs/ hierarchy → block
   // 允许 docs/ 任何子目录 (archived/plans/spec 等); 不允 kasia-console/docs/、根目录 等。
