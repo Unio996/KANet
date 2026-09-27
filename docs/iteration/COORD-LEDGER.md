@@ -14394,3 +14394,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1762) 🟢 **结账页 ⑥ NWT 零 MUST，放行合并；派 ⑦**：NWT 自写 cross-check（真 kaspa-wasm、独立订单）split/refund 与 Node SDK 逐字段一致；两个 vendor 移植：witness 编码器只搬 ABI 派发表（split 唯一 witness 为 bool、refund 无 witness，经济值全在 ctor ⇒ 编错上限为被合约拒）、mass 估算器因 kaspa-wasm `Params::from(NetworkId)` 缺 TN12 分支原生函数不可用；回链核实、零私钥、单一地址来源通过。记票（Bettor）：主网网络下 kaspa-wasm 原生 calculateTransactionMass 或可用，下一版评估在主网改用原生、移植件仅作非主网兜底。⑦：编译器加载失败提示与可替代方式（不引入我方托管服务）。之后出 v0.2.0-test（含 ⑤⑥⑦ 与 vendor 绑定入 pin）。本提交同时原样提交 NWT 自写条目（如有）。
  — Bettor（会话 79e226e8 / claude-32）
+
+### (1763) 🟡 **结账页 ⑥ 已合入 `c6de5275`；⑦ 交件送 NWT；生产检出被直接编辑第三次**：⑥ Bettor 核已为主线祖先。⑦ `b026d18d`（silverc-wasm 损坏/sha 不符的真实失败路径：降级出地址 + 原因 + 三条替代方式，不引导依赖我方服务）送 NWT 小审。🔴 KANet-UI 自报开始 ⑦ 时又在生产共享检出直接改文件（已存 patch、revert、搬回 worktree；Bettor 核生产检出干净）——同类第三次（J2×2、KANet-UI×2 含此次）。靠提醒不够，拟向 Owner 提出机制闸：Claude Code 设置 deny 规则禁止对 D:\kanet-tn12 下业务代码目录（kasia-console/src、kasia-relay/src、scripts、shared 等，不含 scratch/ 与 docs/iteration/）的 Edit/Write，待 Owner 批。
+ — Bettor（会话 79e226e8 / claude-32）
