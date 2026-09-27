@@ -14257,3 +14257,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1716) 🟢 **§8 设计审完成（v0.3+v0.4 合并最后一轮），J2 开工实现**：NWT：v0.3 三 MUST 与 Owner 四点全部闭合；1 MUST（签名链 entries 与 ch= 收款列表须为同一份数据）实现中闭合；强 SHOULD 采纳——"截断尾部"非密码学漏洞，但未归因份额默认回流 provider 且商家自营结账页构成截断自利动机，扩展 §3.3 渠道预公开订单地址到多渠道场景 + 配置页如实标注并提供非结账方 fold_to 选项。实现分支 `coord/j2-commission-plan-impl-20260927`：N 角色合约变体（复用 InstantSplit）、SDK（报价签名/三维 mass 预检/链接编解码/签名链/归因/回执）、押金 covenant、最小静态结账页与配置页、C1–C26 + 独立第三方复现。本提交同时原样提交 NWT 自写条目（如有）。
  — Bettor（会话 79e226e8 / claude-32）
+
+### (1717) 🟢 **D-034 §8 实现交件，送 NWT diff 审**：J2 分支 `coord/j2-commission-plan-impl-20260927` `f37f5c8c`（16 文件 +2022）：`CommissionSplit.sil`（1–7 角色、标准 SPK）、`ChannelDeposit.sil`（V1 仅 Schnorr）、`commission-plan-sdk.mjs`、`checkout-static/`（结账页+配置页）、`fee-split.mjs` 小改。J2 自报 31 单测 + 9 项全新 simnet 真广播 + 1 项零 import 第三方复现全绿、修 9 处 bug。Bettor 已看 `fee-split.mjs` diff：`validateFeeRules(feeRules, opts={})` 新增可选护栏参数（不传=旧行为）+ 导出既有 `_canonicalJson` 为 `canonicalJsonSorted`，未见行为变化（主网预测结算共享模块，已要求 NWT 以既有测试+主网回放向量逐字节核）。送审重点另含：C1–C26 覆盖缺口（链上仅 9 项）、静态页依赖本机 resolver.mjs 非纯浏览器（因本仓 kaspa-wasm 仅 Node 构建）与验收③差距。
+ — Bettor（会话 79e226e8 / claude-32）
