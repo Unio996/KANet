@@ -8,6 +8,16 @@
 // 体系(Bettor 派工原话)。与上面 proto_token_defs(纯元数据登记簿)是两回事, 不混表, 新路由/新表
 // (ktt_holdings_ledger, migrate.js v218)独立。设计: docs/2026-09-27-j2-ktt-wallet-mint-panel-design-v0.1.md。
 // 真实 simnet 广播证据: docs/provenance/2026-09-27-j2-ktt-v2-simnet/(8 笔真实 txid, 含 3 条对抗拒绝)。
+//
+// 🔴 D-035 NWT diff 审 MUST 闭合(2026-09-27, docs/iteration/j1-inbox/2026-09-27T13-55Z-nwt-VERDICT-
+// d035-ktt-v2-impl-diff-review.md §⑥): mint/transfer 两条会花 relay 真实 KAS 手续费的路由原先零鉴权
+// /无开关/无限流/relay_id 由调用方裸传可指向任意 relay。照本仓既有先例(MRC-capability-gateway-
+// wallet-transfer: capability.js 的 GATEWAY_ENABLED/CUSTODIAL_RELAY_ID/checkRateLimit 三件套)补齐:
+//   ① KTT_PANEL_ENABLED 默认关, 关时 mint/transfer 403(holdings 只读不受限)；
+//   ② relay_id 不再由调用方指定——服务端读 env KTT_PANEL_RELAY_ID(单一专用 relay), 未配置即拒；
+//   ③ 限流: 每分钟 + 每日两个窗口(env 可调, 默认保守 10/分、200/日), 超限 429；
+//   ④ relay 侧 ktt_v2_* 命令同样校验来源 relay 与开关(纵深, 见 p2sh.mjs unlockKttV2Mint/Transfer)。
+// Bettor 派工原话, 走①既有先例, 不新起设计。
 
 import { sqlite } from '../db/client.js';
 import { randomUUID } from 'node:crypto';
@@ -34,6 +44,82 @@ function resolveRelayAddress(relayId) {
   return row.address;
 }
 
+// ── D-035 NWT MUST §① 开关 + §② relay_id 收紧 ──────────────────────────────────────
+// 默认关(未设或非'1' → 关)。同 capability.js GATEWAY_ENABLED() 同款写法。
+const KTT_PANEL_ENABLED = () => process.env.KTT_PANEL_ENABLED === '1';
+// 🔴 不再接受调用方传入的 relay_id(mint/transfer 两条花钱路由)——服务端固定读这一个专用 relay,
+// 未配置时拒绝, 不 fallback 到"随便挑一个 relay_nodes 表里的行"(同 capability.js CUSTODIAL_RELAY_ID()
+// 的 Codex pre-activation C 项修正精神: 漏配 = 拒绝服务, 不是静默降级到任意身份)。
+const KTT_PANEL_RELAY_ID = () => process.env.KTT_PANEL_RELAY_ID || null;
+
+// ── D-035 NWT MUST §③ 限流: 双窗口(分钟+日), env 可调, 进程外持久化(ktt_panel_rate_limit_log,
+//   migrate.js v219)。keyed by action('mint'/'transfer')——不是 grant_id(本路由固定只服务一个
+//   KTT_PANEL_RELAY_ID, 无需按调用方区分), 模式照抄 capability.js checkRateLimit() 的 count+insert
+//   原子事务 + 自清理 + fail-closed, 同一套先例第二次复用。
+const KTT_PANEL_RATE_LIMIT_PER_MIN = () => {
+  const n = Number(process.env.KTT_PANEL_RATE_LIMIT_PER_MIN);
+  return Number.isFinite(n) && n > 0 ? n : 10;
+};
+const KTT_PANEL_RATE_LIMIT_PER_DAY = () => {
+  const n = Number(process.env.KTT_PANEL_RATE_LIMIT_PER_DAY);
+  return Number.isFinite(n) && n > 0 ? n : 200;
+};
+const KTT_PANEL_RATE_LIMIT_MIN_MS = 60 * 1000;
+const KTT_PANEL_RATE_LIMIT_DAY_MS = 24 * 60 * 60 * 1000;
+const KTT_PANEL_RATE_LIMIT_CLEANUP_MULTIPLE = 10; // 同 capability.js: 清理超过 10 倍最大窗口(日窗口)的旧行
+
+// count+insert 原子化(同 capability.js _rateLimitTxn 精神: better-sqlite3 .transaction() 单事务,
+// 杜绝两个并发请求都读到 count<limit 都插入的竞态)。一次事务同时检两个窗口, 任一超限即拒、不插入。
+const _kttRateLimitTxn = sqlite.transaction((action, now, minWindowStart, dayWindowStart, perMin, perDay) => {
+  const { cnt: minCnt } = sqlite.prepare('SELECT COUNT(*) AS cnt FROM ktt_panel_rate_limit_log WHERE action = ? AND requested_at >= ?').get(action, minWindowStart);
+  if (minCnt >= perMin) return { limited: true, window: 'minute', limit: perMin };
+  const { cnt: dayCnt } = sqlite.prepare('SELECT COUNT(*) AS cnt FROM ktt_panel_rate_limit_log WHERE action = ? AND requested_at >= ?').get(action, dayWindowStart);
+  if (dayCnt >= perDay) return { limited: true, window: 'day', limit: perDay };
+  sqlite.prepare('INSERT INTO ktt_panel_rate_limit_log (action, requested_at) VALUES (?, ?)').run(action, now);
+  return { limited: false };
+});
+
+/**
+ * 返回 { ok:true } 或 { ok:false, error }。fail-closed: DB 异常算拒绝, 不放行(同 capability.js
+ * checkRateLimit 的 catch 分支精神)。超限不记录本次尝试(不让被拒请求继续膨胀计数)。
+ */
+function checkKttPanelRateLimit(action) {
+  const now = Date.now();
+  try {
+    sqlite.prepare('DELETE FROM ktt_panel_rate_limit_log WHERE requested_at < ?').run(now - KTT_PANEL_RATE_LIMIT_DAY_MS * KTT_PANEL_RATE_LIMIT_CLEANUP_MULTIPLE);
+    const minWindowStart = now - KTT_PANEL_RATE_LIMIT_MIN_MS;
+    const dayWindowStart = now - KTT_PANEL_RATE_LIMIT_DAY_MS;
+    const perMin = KTT_PANEL_RATE_LIMIT_PER_MIN();
+    const perDay = KTT_PANEL_RATE_LIMIT_PER_DAY();
+    const { limited, window, limit } = _kttRateLimitTxn(action, now, minWindowStart, dayWindowStart, perMin, perDay);
+    if (limited) {
+      return { ok: false, error: `ktt panel 限流(${action}): 每${window === 'minute' ? '分钟' : '天'}至多 ${limit} 次请求` };
+    }
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: '限流检查异常(fail-closed 拒): ' + (e?.message || 'unknown') };
+  }
+}
+
+/**
+ * mint/transfer 两条花钱路由的共用前置闸: 开关 → relay_id 就绪 → 限流。三步任一失败即拒, 不执行
+ * 到后面的余额查询/合约构建。返回 { ok:true, relayId } 或 { ok:false, code, error }。
+ */
+function kttPanelGate(action) {
+  if (!KTT_PANEL_ENABLED()) {
+    return { ok: false, code: 403, error: 'KTT panel disabled (KTT_PANEL_ENABLED != 1)' };
+  }
+  const relayId = KTT_PANEL_RELAY_ID();
+  if (!relayId) {
+    return { ok: false, code: 403, error: 'KTT panel 未配置专用 relay(KTT_PANEL_RELAY_ID 未设, 拒绝 fallback 到其他 relay 身份)' };
+  }
+  const rl = checkKttPanelRateLimit(action);
+  if (!rl.ok) {
+    return { ok: false, code: 429, error: rl.error };
+  }
+  return { ok: true, relayId };
+}
+
 export async function registerTokenRoutes(fastify) {
   fastify.post('/api/tokens/create', async (request, reply) => {
     const { name, ticker, faceValue, description } = request.body || {};
@@ -55,8 +141,10 @@ export async function registerTokenRoutes(fastify) {
 
   // ── D-035 §③ 铸币: 任何人可铸任意数量到任意地址(owner_scheme 决定"地址"含义) ──
   fastify.post('/api/ktt/mint', async (request, reply) => {
-    const { relay_id, owner_scheme, owner_hex } = request.body || {};
-    if (!relay_id) return reply.code(400).send({ ok: false, error: 'relay_id required(哪个 relay 出手续费)' });
+    const gate = kttPanelGate('mint');
+    if (!gate.ok) return reply.code(gate.code).send({ ok: false, error: gate.error });
+    const relay_id = gate.relayId;
+    const { owner_scheme, owner_hex } = request.body || {};
     const scheme = Number(owner_scheme);
     if (scheme !== KTT_V2_SCHEME_PUBKEY && scheme !== KTT_V2_SCHEME_COVENANT_ID) {
       return reply.code(400).send({ ok: false, error: `owner_scheme must be ${KTT_V2_SCHEME_PUBKEY}(pubkey) or ${KTT_V2_SCHEME_COVENANT_ID}(covenant-id), got ${owner_scheme}` });
@@ -95,8 +183,10 @@ export async function registerTokenRoutes(fastify) {
 
   // ── D-035 §④ 转账: 钱包持有(owner_scheme=0x00)的 KTT 转给另一地址 + 找零 ──
   fastify.post('/api/ktt/transfer', async (request, reply) => {
-    const { relay_id, ledger_id, dest_owner_hex, dest_owner_scheme } = request.body || {};
-    if (!relay_id) return reply.code(400).send({ ok: false, error: 'relay_id required' });
+    const gate = kttPanelGate('transfer');
+    if (!gate.ok) return reply.code(gate.code).send({ ok: false, error: gate.error });
+    const relay_id = gate.relayId;
+    const { ledger_id, dest_owner_hex, dest_owner_scheme } = request.body || {};
     if (!ledger_id) return reply.code(400).send({ ok: false, error: 'ledger_id required(要转账的那笔 ktt_holdings_ledger 记录)' });
     const destScheme = Number(dest_owner_scheme);
     if (destScheme !== KTT_V2_SCHEME_PUBKEY && destScheme !== KTT_V2_SCHEME_COVENANT_ID) {

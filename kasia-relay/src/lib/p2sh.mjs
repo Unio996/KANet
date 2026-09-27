@@ -2980,6 +2980,32 @@ function _toAbiSig65(rawSigHex) {
 }
 
 /**
+ * D-035 NWT diff 审 MUST 闭合 §④(2026-09-27, docs/iteration/j1-inbox/2026-09-27T13-55Z-nwt-VERDICT-
+ * d035-ktt-v2-impl-diff-review.md §⑥): relay 侧纵深防御——console 侧 tokens.js 已经用
+ * KTT_PANEL_ENABLED/KTT_PANEL_RELAY_ID 两道闸把 mint/transfer 锁定到唯一专用 relay, 但那是
+ * console 进程内的闸, 不是这个 relay 子进程自己的判断; 万一将来有别的调用方(非 tokens.js)直接对
+ * 这个 relay 发 ktt_v2_mint/ktt_v2_transfer 命令, relay 自己也要能独立拒绝——不能只信任上游已经拦过。
+ * relay-manager.js fork relay 子进程时 env 以 `{...process.env, RELAY_NODE_ID: relayNodeId, ...}`
+ * 展开(见 relay-manager.js ~L200-253), 所以 console 进程若设了 KTT_PANEL_ENABLED/KTT_PANEL_RELAY_ID,
+ * 每个被它 fork 出来的 relay 子进程会自动继承同一份 env——不需要额外接线, 子进程读自己的
+ * process.env.RELAY_NODE_ID 与 process.env.KTT_PANEL_RELAY_ID 比对即可判断"我是不是那个被指定的
+ * 专用 relay"。fail-closed: 两个 env 任一缺失/不匹配都拒绝, 不默认放行。
+ */
+export function _assertKttPanelRelayAuthorized(fnName) {
+  if (process.env.KTT_PANEL_ENABLED !== '1') {
+    throw new Error(`${fnName}: KTT panel disabled on this relay(KTT_PANEL_ENABLED != 1, 纵深防御拒绝)`);
+  }
+  const selfId = process.env.RELAY_NODE_ID || null;
+  const allowedId = process.env.KTT_PANEL_RELAY_ID || null;
+  if (!allowedId) {
+    throw new Error(`${fnName}: KTT_PANEL_RELAY_ID 未配置(纵深防御拒绝, 不默认放行)`);
+  }
+  if (!selfId || selfId !== allowedId) {
+    throw new Error(`${fnName}: 本 relay(RELAY_NODE_ID=${selfId ?? 'unset'}) 不是 KTT panel 专用 relay(KTT_PANEL_RELAY_ID=${allowedId}), 纵深防御拒绝`);
+  }
+}
+
+/**
  * unlockKttV2Mint — bshard_ktt_v2_mint(D-035 §③): 任意数量铸到任意地址, genesis 零校验零签名。
  * console 侧已用 compileSilV100 算好 cmd.ktt.redeem_hex(owner_scheme/owner 已烤进 State), relay 只管
  * 广播——同 unlockBshardGenesisMintStakeChip 一模一样的骨架(照 KIP-9 storage mass 教训: 面值由
@@ -2987,6 +3013,7 @@ function _toAbiSig65(rawSigHex) {
  * @param {{wallet, cmd:{ktt:{redeem_hex, seed_sompi}, inputs:{funding:{address,outpointTxid,index}}}, networkId, lockTime}} args
  */
 export async function unlockKttV2Mint(args) {
+  _assertKttPanelRelayAuthorized('unlockKttV2Mint');
   const { wallet, cmd, networkId, lockTime = 0n } = args;
   const rpc = await connectRpc(networkId);
   try {
@@ -3031,6 +3058,7 @@ export async function unlockKttV2Mint(args) {
  *   outputs:{fee_change_address} }, networkId, lockTime }
  */
 export async function unlockKttV2Transfer(args) {
+  _assertKttPanelRelayAuthorized('unlockKttV2Transfer');
   const { wallet, cmd, networkId, lockTime = 0n } = args;
   const rpc = await connectRpc(networkId);
   try {

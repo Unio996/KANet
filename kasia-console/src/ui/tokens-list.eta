@@ -65,11 +65,9 @@
       </p>
     </div>
 
-    <div class="mb-2">
-      <label class="text-xs text-ink-400">relay_id(出手续费+签名的那个 relay)</label>
-      <input x-model="relayId" type="text" placeholder="relay 节点 id"
-        class="w-full mt-1 border border-warm-300 rounded-lg px-3 py-2 text-sm bg-warm-50">
-    </div>
+    <!-- D-035 NWT MUST 闭合(2026-09-27 §⑥): 出手续费+签名的 relay 不再由这里手填——服务端固定读
+         env KTT_PANEL_RELAY_ID(单一专用 relay), 未配置时 mint/transfer 直接 403。此面板未开(env
+         KTT_PANEL_ENABLED 默认关)时铸币/转账会返回 403, 这是预期行为不是 bug。 -->
 
     <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mt-4">
       <!-- 铸币 -->
@@ -105,6 +103,9 @@
         <label class="text-xs text-ink-400">owner 32 字节 hex</label>
         <input x-model="lookupOwnerHex" type="text" placeholder="64 位 hex"
           class="w-full mt-1 mb-3 border border-warm-300 rounded-lg px-3 py-2 text-xs font-mono bg-warm-50">
+        <label class="text-xs text-ink-400">逐笔回链核实用 relay_id(可选, 只读 RPC 查询, 不受 KTT_PANEL_ENABLED 限制)</label>
+        <input x-model="verifyRelayId" type="text" placeholder="relay 节点 id(留空则跳过回链核实, 只看本地记录)"
+          class="w-full mt-1 mb-3 border border-warm-300 rounded-lg px-3 py-2 text-sm bg-warm-50">
         <button @click="lookup(true)" :disabled="lookupBusy || !lookupOwnerHex" class="btn btn-secondary w-full text-sm">
           <span x-show="!lookupBusy">查阅 + 逐笔回链核实</span>
           <span x-show="lookupBusy">查询中...</span>
@@ -179,22 +180,25 @@ function tokensListPage() {
 
 function kttV2Panel() {
   return {
-    relayId: '',
+    // D-035 NWT MUST 闭合(2026-09-27 §⑥): mint/transfer 不再由前端传 relay_id——服务端固定读
+    // env KTT_PANEL_RELAY_ID。verifyRelayId 是完全独立的字段, 只用于"查阅"卡片里 holdings 的
+    // ?verify=1 只读 RPC 核实(那条路径不受 KTT_PANEL_ENABLED 限制, 见 tokens.js /api/ktt/holdings)。
+    verifyRelayId: '',
     mintForm: { ownerScheme: 0, ownerHex: '' },
     mintBusy: false, mintError: '', mintResult: null,
     lookupOwnerHex: '', lookupBusy: false, lookupError: '', holdings: [],
     xferForm: { ledgerId: '', destOwnerScheme: 0, destOwnerHex: '' },
     xferBusy: false, xferError: '', xferResult: null,
     init() {},
-    get canMint() { return !!(this.relayId && /^[0-9a-fA-F]{64}$/.test(this.mintForm.ownerHex)); },
-    get canTransfer() { return !!(this.relayId && this.xferForm.ledgerId && /^[0-9a-fA-F]{64}$/.test(this.xferForm.destOwnerHex)); },
+    get canMint() { return /^[0-9a-fA-F]{64}$/.test(this.mintForm.ownerHex); },
+    get canTransfer() { return !!(this.xferForm.ledgerId && /^[0-9a-fA-F]{64}$/.test(this.xferForm.destOwnerHex)); },
     async mint() {
       if (!this.canMint || this.mintBusy) return;
       this.mintBusy = true; this.mintError = ''; this.mintResult = null;
       try {
         const res = await fetch('/api/ktt/mint', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ relay_id: this.relayId, owner_scheme: this.mintForm.ownerScheme, owner_hex: this.mintForm.ownerHex }),
+          body: JSON.stringify({ owner_scheme: this.mintForm.ownerScheme, owner_hex: this.mintForm.ownerHex }),
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok || !data.ok) { this.mintError = data.error || ('HTTP ' + res.status); return; }
@@ -206,7 +210,7 @@ function kttV2Panel() {
       this.lookupBusy = true; this.lookupError = ''; this.holdings = [];
       try {
         const qs = new URLSearchParams({ owner_hex: this.lookupOwnerHex });
-        if (verify && this.relayId) { qs.set('relay_id', this.relayId); qs.set('verify', '1'); }
+        if (verify && this.verifyRelayId) { qs.set('relay_id', this.verifyRelayId); qs.set('verify', '1'); }
         const res = await fetch('/api/ktt/holdings?' + qs.toString());
         const data = await res.json().catch(() => ({}));
         if (!res.ok || !data.ok) { this.lookupError = data.error || ('HTTP ' + res.status); return; }
@@ -219,7 +223,7 @@ function kttV2Panel() {
       try {
         const res = await fetch('/api/ktt/transfer', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ relay_id: this.relayId, ledger_id: this.xferForm.ledgerId, dest_owner_hex: this.xferForm.destOwnerHex, dest_owner_scheme: this.xferForm.destOwnerScheme }),
+          body: JSON.stringify({ ledger_id: this.xferForm.ledgerId, dest_owner_hex: this.xferForm.destOwnerHex, dest_owner_scheme: this.xferForm.destOwnerScheme }),
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok || !data.ok) { this.xferError = data.error || ('HTTP ' + res.status); return; }
