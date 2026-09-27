@@ -81,5 +81,18 @@ export function deriveCommissionOrderAddress(kaspaWasm, silvercWasm, commissionS
   const spk = kaspaWasm.payToScriptHashScript(redeemScript);
   const address = kaspaWasm.addressFromScriptPublicKey(spk, cfg.network).toString();
 
-  return { address, deadlineMs, roles, redeemScript, orderNonceHex: bytesToHex(orderNonce) };
+  // D-034 §8 后续票⑥(Bettor 派工 2026-09-27): 触发分账/退款(broadcast-commission.js)需要 entries
+  // (split/refund 的 dispatch_tag+params ABI, compile() 产物里本来就有, 只是这里此前没往外传)+
+  // refundSpk/maxSplitFeeSompi/maxRefundFeeSompi/redeemScriptHex——都是这次编译已经算出来的值,
+  // 不是新计算; 加这几个字段是纯粹的"把已经算出来的东西也返回", 不是新的构造逻辑。
+  const entries = artifact?.contracts?.CommissionSplit?.entries;
+  if (!entries?.split || !entries?.refund) {
+    throw new Error(`deriveCommissionOrderAddress(wasm): 编译产物缺 contracts.CommissionSplit.entries.split/refund — schema 漂移? raw=${outJson.slice(0, 200)}`);
+  }
+
+  return {
+    address, deadlineMs, roles, redeemScript, orderNonceHex: bytesToHex(orderNonce),
+    entries, refundSpk, redeemScriptHex: bytesToHex(redeemScript),
+    maxSplitFeeSompi: BigInt(cfg.maxSplitFeeSompi), maxRefundFeeSompi: BigInt(cfg.maxRefundFeeSompi),
+  };
 }

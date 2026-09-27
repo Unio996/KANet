@@ -1,0 +1,30 @@
+=== ① split (无找零): PASS ===
+finalText=订单状态监控(连 ws://127.0.0.1:29935)✓ 订单已完成——收款地址资金已离开(分账或退款已被节点接受)
+providerBalance=70.5 KAS
+consoleErrors=0
+
+=== ② split (有找零): PASS ===
+finalText=订单状态监控(连 ws://127.0.0.1:29935)✓ 订单已完成——收款地址资金已离开(分账或退款已被节点接受)
+changeToRefundAddr=1.96 KAS(应 >1 KAS 找零)
+consoleErrors=0
+
+=== ③ refund(到期后退款): PASS ===
+doneText=订单状态监控(连 ws://127.0.0.1:29935)✓ 订单已完成——收款地址资金已离开(分账或退款已被节点接受)
+refundAddrBalance=4.99 KAS(应≈4.99)
+consoleErrors=0
+
+=== ④ premature-refund-rejected(未到期拒绝): PASS ===
+UI按钮disabled=true
+底层函数直调错误="buildCommissionRefundTx: 还没到期(currentPmtMs=1790519946928 < deadline+margin=1790523551928); PMT(节点 virtual_past_median_time)判据同 instant-split-sdk.mjs/commission-plan-sdk.mjs——buildCommissionRefundTx 要求调用方现查节点 PMT, 不接受 Date.now() 或 tip 时间戳(同一份推导, 不重复, 见 docs/2026-09-27-j2-instant-split-covenant-template-design-v0.2.md §4.6)。"
+
+=== ⑤ duplicate-trigger-rejected(重复触发): PASS ===
+第一次分账后地址状态=unfunded(应为 unfunded——UTXO 已被消耗, 结构上不存在"同一笔资金花两次"的可能)
+
+
+========== SUMMARY ==========
+✓ ① split (无找零)
+✓ ② split (有找零)
+✓ ③ refund(到期后退款)
+✓ ④ premature-refund-rejected(未到期拒绝)
+✓ ⑤ duplicate-trigger-rejected(重复触发)
+
