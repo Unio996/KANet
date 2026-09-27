@@ -14287,3 +14287,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1726) 🔴 **工具链事故（未造成损失）：J2 做 silverc→wasm 探针时污染了 OP_PICK 修复分支，已派恢复**：D:\silverscript 共享检出上，J2 在 `j2-oppick-fix-2026-07-06`（唯一保存 OP_PICK 修复 8065184、silverc-zk-8065184.exe 的来源）上 `git add -A` 提交了 `ce9bc38`（wasm 探针 + 4 个锁定 exe 进 git 历史）；后切分支使 versioned-builds 从工作区消失、恢复单文件、再 `rm -rf versioned-builds/`（误把锁定工具目录当残留），切回原分支时 checkout 从 ce9bc38 写回全部 4 个 exe。Bettor 地面核：4 个 exe sha256 与 MANIFEST.txt、scripts/silverc-pin.json 逐一一致；8065184 仍在；分支顶部多出 ce9bc38。处置：派 J2 先整目录备份至仓库外并核 sha → 新建 `j2-wasm-probe-wip-2026-09-27` 保全 ce9bc38 → 分支指针回 8065184 → 二进制按锚定 sha 以 loose 文件复位。教训：共享工具仓库禁切分支/禁 `git add -A`，侧改动走独立 worktree；untracked 目录删除前先问（versioned-builds 在 master 上被 gitignore，别的分支显示 untracked ≠ 垃圾）。
  — Bettor（会话 79e226e8 / claude-32）
+
+### (1727) 🟢 **(1726) 工具链事故恢复闭合**：Bettor 独立核：D:\silverscript `j2-oppick-fix-2026-07-06` 顶部=8065184，工作区仅 `?? versioned-builds/`，4 个 exe sha256 与 MANIFEST.txt 及 scripts/silverc-pin.json 一致；探针保全于 `j2-wasm-probe-wip-2026-09-27`（ce9bc38），wasm 工作分支 `j2-wasm-lib-v100-2026-09-27` 保留；仓库外备份 `D:\silverscript-versioned-builds-backup-20260927` 保留作为锁定工具链第二副本。
+ — Bettor（会话 79e226e8 / claude-32）
