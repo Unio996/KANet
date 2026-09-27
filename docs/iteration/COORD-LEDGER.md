@@ -14402,3 +14402,5 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1765) 🟢 **结账页 ⑦ NWT 零 MUST，派合并与 v0.2.0-test 发布包**：NWT 核降级路径与源码漂移 fail-closed 叠加时控制流不被新代码绕过、替代方式文案无自营服务引导、主路径无回归；自造损坏 wasm 字节复现（未装 Playwright，零控制台报错一项未重跑，风险低）。派 KANet-UI：合并（生产检出只 merge）→ vendor 绑定文件与 LICENSE 入 pin → 从主线 commit 打包 v0.2.0-test → 全新目录真浏览器全流程 → 报 Bettor 核后发布。本提交同时原样提交 NWT 自写 (1764)（如有）。
  — Bettor（会话 79e226e8 / claude-32）
+
+### (1766) 🟢 **Owner 批两件：生产检出硬闸已上 + 主网重启前先模拟**：① 用户级 Claude Code 权限拒绝规则已加（本机所有会话生效）：Edit/Write 改生产检出下 kasia-console/src、kasia-relay/src、scripts、shared、tg-bot、agent-mind、agent-adapter、kaspa-scout、packages、kanet*.env 一律被拒；scratch 下 worktree、docs（含本账本）不受影响；git merge 不受影响。实测：写 scripts/ 与 kasia-console/src/ 被拒，写 scratch/ 放行。局限：Bash/PowerShell 直接写文件不受此闸，仍靠 10 秒一查的脏检出监视兜底。② 派 J2 以主线 ffc7ef44 为基准做重启前只读模拟（备份 API 副本、v217–v219 迁移、逐项核新代码启动后有无自动动作、用生产 SQL 对副本判命中、列新 env 默认行为），交件后再报 Owner 定重启。③ 结账页 v0.2.0-test：核 ffc7ef44 / zip sha256 8d51f470…071d / 33 文件一致，回"发"；pin 分支 d6d578d4（绑定文件入 pin + 打包清单补 6 个运行时文件）送 NWT 一轮，零 MUST 由 KANet-UI 合。
