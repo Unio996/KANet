@@ -12,6 +12,14 @@ kasia-console/test-framework/data/
 kasia-relay/state/
 kaspa-scout/data/
 
+# checkout-static 浏览器版 kaspa-wasm 构建产物(11MB 二进制, 不入库——同 D-019 pin 的 silverc 二进制
+# 惯例, 大二进制放仓外、按 sha256 核对, 不进 git 历史。操作者自行用 D:\rusty-kaspa\wasm\build-web
+# --sdk 重建, 见 checkout-static/vendor/kaspa-web/README.md 的构建命令 + sha256 核对值)
+kasia-console/src/lib/checkout-static/vendor/kaspa-web/kaspa.js
+kasia-console/src/lib/checkout-static/vendor/kaspa-web/kaspa_bg.wasm
+kasia-console/src/lib/checkout-static/vendor/kaspa-web/kaspa.d.ts
+kasia-console/src/lib/checkout-static/vendor/kaspa-web/LICENSE
+
 # === 根目录敏感配置 ===
 kanet.env
 kanet.mainnet.env

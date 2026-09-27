@@ -1,0 +1,12 @@
+PASS canonicalQuoteBytes byte-equal (Node SDK vs verify-core)
+PASS verifyQuoteSignature agree on VALID quote
+PASS verifyQuoteSignature agree on TAMPERED quote
+PASS spkBytesFromAddress byte-equal
+PASS dedupAndCapChannelSpks agree (ok + null-slot pattern)
+PASS dedupAndCapChannelSpks spk bytes byte-equal for slot 0
+PASS verifyChain agree (SDK-signed chain, verified by both)
+PASS verifyChain chainDigest byte-equal
+PASS verifyChain agree on TAMPERED chain (both reject)
+
+=== verify-core.js <-> commission-plan-sdk.mjs parity: 9 PASS / 0 FAIL ===
+Assertion failed: !(handle->flags & UV_HANDLE_CLOSING), file src\win\async.c, line 76
