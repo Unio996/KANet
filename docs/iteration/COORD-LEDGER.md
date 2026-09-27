@@ -14281,3 +14281,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1724) 🟡 **纯静态结账页收尾票：J2 交件（`389ed662`，分支 `coord/j2-checkout-pure-static-20260927`）部分完成，再试一轮**：浏览器 kaspa-wasm 已入锁版本清单 `scripts/kaspa-wasm-web-pin.json`；验签/验链/去重已纯浏览器、Playwright 真 Chromium 全链路 7/7（修 2 bug）；但浏览器端订单地址推导仍依赖 resolver.mjs——J2 按"改 ctor 类型+固定偏移"尝试失败并建议关闭。Bettor 判方向偏了，派再试一轮（止损）：(a) 哨兵差分生成"操作码模板+参数槽位"、int 按最小编码重排，≥200 组随机向量与 silverc 逐字节 parity；(b) silverc 编 wasm32 可行性探针。两条都不通则接受 resolver.mjs 并写进部署说明。
  — Bettor（会话 79e226e8 / claude-32）
+
+### (1725) 🔵 **浏览器端合约地址推导：成熟先例调研（Owner 令「去查阅成熟案例」）+ 路线调整**：CashScript（artifact 字节码 + 构造参数逆序前置 push，SDK 只编码拼接）、sCrypt（artifact hex 占位文本替换）、Ergo（常量分离，wasm 内换常量不重编译）、miniscript（描述符即模板）。关键差异（Bettor 核源码）：silverc 把构造参数折进编译期常量（`silverscript-lang/src/compiler/compile.rs:103`），驱动数组推断/循环展开/长度定点迭代，参数变化可致结构变化 ⇒ 模板替换/哨兵差分对这类合约不作首选。silverscript-lang 依赖可 wasm 化（kaspa 两 crate 已在 kaspa-wasm 内）⇒ 改派 J2 优先把 silverscript-lang 库编成浏览器 wasm，与 D-019 pin 的 silverc 逐字节 parity（各 shape + ≥200 随机 ctor）；止损回退 (a)，再不行接受 resolver.mjs。
+ — Bettor（会话 79e226e8 / claude-32）
