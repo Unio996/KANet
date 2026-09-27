@@ -14347,3 +14347,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1746) 🟢 **D-035 KTT 设计审零 MUST，J2 开工实现 + simnet**：NWT（`j1-inbox/2026-09-27T13-09Z-nwt-VERDICT-d035-ktt-wallet-panel-design-v0.1-review.md`）逐条核坐标；铸币抢跑不构成真实损失（每次 genesis 为独立实例）；固定面额方案技术可行但 UTXO 数与 mass 代价明显，判 SHOULD 留后续票；补测"sigs 与 prev_states 长度不对齐"。实现范围：KanetTestTokenV2（0x00 pubkey + 0x04 并存）、铸币入口、在既有 /tokens 页面加铸币与查阅（回执+本地记录+回链核实）、钱包间转账、simnet 对抗全清单、既有回归全绿。
  — Bettor（会话 79e226e8 / claude-32）
+
+### (1747) 🟡 **结账页发布包清单 Bettor 过目：三处须改后才发布**：KANet-UI 包 `kanet-checkout-static-v1.zip`（27 文件，sha256 `f388744d…`，未发布）。Bettor 独立解包核：两 wasm 指纹与 pin 一致、文本无本机路径/密钥/内网地址。须改：①zip 条目用反斜杠分隔（unzip 警告，mac/Linux 可能解错）——正斜杠重建并验证；②包内 checkout.js 头注与仓库不一致——先在仓库提交同样注释修改，再由打包脚本从该 commit 原样生成，包与 tag 逐字节一致；③范围认可，另立 ⑩ 商家侧 config 页改为浏览器内本地签名（去 resolver.mjs）。发布：gh prerelease 到 Unio996/KANet，tag `checkout-static-v0.1.0-test`，标注实验性·未经审计·测试用；发布前报最终 sha 与 commit，Bettor 回"发"再执行。
+ — Bettor（会话 79e226e8 / claude-32）
