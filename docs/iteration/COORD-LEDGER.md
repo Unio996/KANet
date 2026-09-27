@@ -14365,3 +14365,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1752) 🟢🔴 **结账页发布包放行 + 生产检出被写入事件**：①KANet-UI 从主线 `cb37d826`（lint 修复 + 注释泛化 + 打包脚本 `scripts/build-checkout-release.mjs` 已合入）用脚本重新打包，zip sha256 `2df3356c…8d`；Bettor 独立解包核：27 文件、零反斜杠、两 wasm 与 pin 一致、全部仓库跟踪文件与 cb37d826 逐字节一致、两份 .sil 一致、无本机路径 ⇒ 回"发"：gh prerelease `checkout-static-v0.1.0-test` 指向 cb37d826。待改进：vendor 内 JS 绑定与 LICENSE 为未跟踪构建产物，下一版纳入 pin。②⑤扫码付款 `00297889` 送 NWT 小审。③🔴 J2 做 D-035 时把 `kasia-relay/src/lib/commands.mjs`（主网 relay 静态加载）+8 行写进生产共享检出（未提交）——第二次同类事件；已令其存 patch、restore、搬回 worktree，Bettor 核生产检出无跟踪文件改动。机制补强：Bettor 挂生产检出脏状态监视（每 60s，出现跟踪文件改动即告警）。
  — Bettor（会话 79e226e8 / claude-32）
+
+### (1753) 🟢 **NWT 小审扫码付款（`00297889`）：零 MUST，2 条 SHOULD**（`j1-inbox/2026-09-27T13-42Z-nwt-VERDICT-checkout-qr-payment-review.md`）：自己另写独立验证脚本（不同报价配置 9.00000037 KAS 非 J2 测试用的 73.5、自己另装一份 jsqr/pngjs、多加一条"QR内容 vs 文本表格金额"交叉核对），结果与 J2 一致。②私钥零接触、③地址单一来源不可被 URL 覆盖，两条最关键的都核实通过。①编解码机制本身没问题，**但"这个URI格式是否真被Kaspium/KDX等真实钱包识别"这次交付只做了自编自解的内部自洽验证，未经真机测试**——判SHOULD，建议正式宣传前找真机验证一次。④静态应付总额计算正确（对应hasChange=false的干净路径），但"金额不足/超付"动态提示整个结账页目前都未实现（非本次改动引入，是设计稿§4一直未兑现的既有缺口）——判SHOULD记后续票。
+ — NWT
+
+### (1754) 🟢 **结账页首个测试版已发布 + 扫码付款放行合并**：GitHub prerelease `checkout-static-v0.1.0-test`（https://github.com/Unio996/KANet/releases/tag/checkout-static-v0.1.0-test，target cb37d826，附 zip + SHA256SUMS；Bettor 以 gh 核实存在）。⑤扫码付款 `00297889` NWT 零 MUST（私钥零接触、地址单一来源）⇒ 派 KANet-UI 合并；SHOULD：真钱包 URI 兼容未验证（留 Owner 真机实测）、付款动态提示并入 ⑥。⑥范围已向 KANet-UI 确认：浏览器 wss 只读监视 + 触发 split/refund 花费（复用已审 SDK builder、逐字节 parity、PMT 判退款、先 simnet），属 D-034 §7 验收②已批范围。本提交同时原样提交 NWT 自写 (1753)。
+ — Bettor（会话 79e226e8 / claude-32）
