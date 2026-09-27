@@ -1,13 +1,21 @@
 #!/usr/bin/env node
-// resolver.mjs — 本地小型 HTTP 服务, 供开源纯静态结账页/配置页调用仍然需要 kaspa-wasm(Node 版)
-// 的少数操作(订单地址推导、构造/广播 split/refund tx、报价签名)。
+// resolver.mjs — 本地小型 HTTP 服务, 供**商家侧**(`config.html`, 建报价)与需要真实广播交易的场景
+// 调用仍然需要 Node 版 kaspa-wasm/silverc.exe 的操作(报价签名、构造/广播 split/refund tx)。
 //
-// 🔴 状态更新(D-034 §8 SHOULD③ 落地后, 2026-09-27): 报价验签/签名链验证/渠道地址去重上限三步
-// 已经**不再**经过本文件——`checkout.js` 直接用浏览器原生 wasm(`build-web --sdk` 产物, 见
-// vendor/kaspa-web/)在客户端完成, 见该目录 README。本文件现在唯一存在的理由是: 订单地址推导
-// (`createCommissionSplitProtocol`)依赖 `silverc.exe`(独立原生编译器, 与 kaspa-wasm 编译成什么
-// target 完全无关, 没有浏览器版本), 以及实际广播交易需要连节点 RPC。仍然不是"我们的服务器"
-// (任何人在自己机器上 `node resolver.mjs` 即可, 不需要问我们、不需要账号)。
+// 🔴 状态更新(D-034 §8 后续票①③ 全部落地后, 2026-09-27): **消费者侧**(`checkout.html`)已完全不
+// 依赖本文件——报价验签/签名链验证/渠道地址去重上限四步用浏览器原生 kaspa-wasm
+// (`build-web --sdk` 产物, 见 vendor/kaspa-web/); 订单地址推导优先用浏览器原生
+// silverscript-lang wasm32 编译器(见 vendor/silverc-wasm/, `resolve-order-wasm.js`), 失败时降级到
+// `order-template.js` 固定偏移覆写(`resolve-order-browser.js`)——两条路径都不需要本文件, 真实
+// Playwright E2E 已断言 checkout.html 全流程零调用 `127.0.0.1:8787`(见
+// `docs/provenance/2026-09-27-j2-checkout-pure-static-r2/`)。
+//
+// 本文件现在存在的理由收窄为两个, 都跟 checkout.html 本身无关: ① `config.html`(**商家**用来建
+// 报价的工具页, 不是消费者看到的结账页)的 `/sign-quote` 需要商家私钥签名, 走本机进程比浏览器
+// 暴露私钥更安全; ② 实际广播交易(`/build-and-broadcast-*`)需要连节点 RPC, 尚未验证过 kaspa-wasm
+// 的 RpcClient 在 web target 下能否浏览器原生 WebSocket 直连(如实标"待验证")。`/resolve-order`
+// 路由仍保留(向后兼容独立调用方), 但 checkout.js 不再调它。仍然不是"我们的服务器"(任何人在自己
+// 机器上 `node resolver.mjs` 即可, 不需要问我们、不需要账号)。
 //
 // 安全边界(如实标注, 不是默认关闭就等于没有风险): 只监听 127.0.0.1(不监听 0.0.0.0), 私钥只在
 // 内存里用一次即弃(不落盘/不打日志), 但任何本机上能访问 127.0.0.1 的其他进程原则上也能连——

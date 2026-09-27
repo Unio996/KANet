@@ -18,11 +18,14 @@
 <body>
   <h1>KANet 商品佣金计划 · 结账页(V1 参考实现)</h1>
   <p style="font-size:0.85rem;color:#666">
-    本页是开源纯静态参考实现(D-034 §8)。报价验签/签名链验证/渠道地址解析已改为浏览器原生
-    kaspa-wasm(<code>vendor/kaspa-web/</code>, 上游 <code>build-web --sdk</code> 产物)+ vendored blake2b
-    在本页直接运行。订单地址推导仍需要 <code>silverc.exe</code>(独立原生编译器, 与 kaspa-wasm
-    编译成什么 target 无关, 没有浏览器版本)——这一步委托给本机常驻的小型解析服务
-    (<code>resolver.mjs</code>, 任何人可在自己机器上 <code>node resolver.mjs</code> 启动, 不是我们的服务器)。
+    本页是开源纯静态参考实现(D-034 §8)。报价验签/签名链验证/渠道地址解析全部用浏览器原生
+    kaspa-wasm(<code>vendor/kaspa-web/</code>, 上游 <code>build-web --sdk</code> 产物)+ vendored
+    blake2b/fee-split 在本页直接运行; 订单地址推导优先用浏览器原生 SilverScript 编译器
+    (<code>vendor/silverc-wasm/</code>, <code>silverscript-lang</code> 编 wasm32, 与生成订单地址的
+    CLI 编译器同一提交、630 组随机向量逐字节 parity 验证过), 失败时自动降级到固定偏移覆写路径——
+    全程零网络请求, 完全不依赖任何本机常驻进程(resolver.mjs)——把这整个文件夹丢到任意静态托管就能用,
+    不需要任何本机常驻进程(本页面用 <code>fetch()</code> 加载 wasm 二进制, 需要 http(s):// 服务,
+    直接双击打开本地文件 <code>file://</code> 未经测试, 不保证可用)。
   </p>
   <div id="resolverStatus" class="box"></div>
   <div id="linkInfo" class="box"></div>
