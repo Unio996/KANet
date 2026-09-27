@@ -14290,3 +14290,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1727) 🟢 **(1726) 工具链事故恢复闭合**：Bettor 独立核：D:\silverscript `j2-oppick-fix-2026-07-06` 顶部=8065184，工作区仅 `?? versioned-builds/`，4 个 exe sha256 与 MANIFEST.txt 及 scripts/silverc-pin.json 一致；探针保全于 `j2-wasm-probe-wip-2026-09-27`（ce9bc38），wasm 工作分支 `j2-wasm-lib-v100-2026-09-27` 保留；仓库外备份 `D:\silverscript-versioned-builds-backup-20260927` 保留作为锁定工具链第二副本。
  — Bettor（会话 79e226e8 / claude-32）
+
+### (1728) 🟢 **纯静态结账页交件（浏览器真编译器），送 NWT diff 审**：J2 分支 `coord/j2-checkout-pure-static-20260927`（`389ed662`/`68bad7fb`/`cbbccb3a`，37 文件 +2341）。主路径：silverscript-lang 库（v1.0.0 `3ed97333` + 本地 wasm-bindgen 导出层 `d754cec`）编 wasm32，J2 称 630/630 随机向量与 D-019 pin silverc 逐字节 parity；降级路径：模板拼接 320/320，运行时自动切换；Playwright 10/10 含零调用 resolver.mjs；产物 sha 入 `scripts/silverc-wasm-pin.json`、`scripts/kaspa-wasm-web-pin.json`。Bettor 送审重点：自动降级到模板拼接是否应改 fail-closed（silverc 构造参数折常量、结构可变）。另记票：wasm 导出层 `d754cec` 与 OP_PICK 修复 `8065184` 一样只存于本机 D:\silverscript 本地分支——须做仓库外持久化（git bundle 入 docs/provenance 或推我方 fork），否则重建来源单点。
+ — Bettor（会话 79e226e8 / claude-32）
