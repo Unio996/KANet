@@ -56,9 +56,22 @@ try {
   blake2b = (await import('./vendor/noble-hashes/blake2b.js')).blake2b;
 } catch (e) { wasmLoadError = e; }
 
-// silverc-wasm(真编译器)——独立于上面的 kaspa-wasm 加载, 失败不阻塞页面其余功能, 只让订单地址推导
-// 那一步自动降级到 order-template.js 固定偏移覆写路径(resolve-order-browser.js, 已验证的备选)。
-let silvercWasm = null, commissionSplitSource = null, silvercWasmLoadError = null;
+// CommissionSplit.sil 源码 + 其真实 sha256——独立于下面 silverc-wasm 是否加载成功都要取到,
+// 理由(NWT MUST, 2026-09-27T11-37Z, 见 order-template.js 头注): 降级路径(order-template.js 固定
+// 字节模板)在 silverc-wasm 加载失败时才会被用到, 而恰恰是这个场景下最需要核对"随页面发布的源码"跟
+// "模板生成时用的源码"是不是同一份——如果这一步也塞进下面那个 try 块, silverc-wasm 一旦加载失败,
+// 这份 sha256 就永远拿不到, fail-closed 检查根本无法执行, MUST 就白修了。
+let commissionSplitSource = null, commissionSplitSourceSha256 = null, silSourceLoadError = null;
+try {
+  commissionSplitSource = await (await fetch('./vendor/sil-source/CommissionSplit.sil')).text();
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(commissionSplitSource));
+  commissionSplitSourceSha256 = Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
+} catch (e) { silSourceLoadError = e; }
+
+// silverc-wasm(真编译器)——独立于上面 kaspa-wasm 的加载, 失败不阻塞页面其余功能, 只让订单地址推导
+// 那一步自动降级到 order-template.js 固定偏移覆写路径(resolve-order-browser.js, 已验证的备选,
+// 现在带 fail-closed sha256 核对, 见上面那段注释)。
+let silvercWasm = null, silvercWasmLoadError = null;
 try {
   const wasmResp = await fetch('./vendor/silverc-wasm/silverc_lang_bg.wasm');
   const wasmBytes = await wasmResp.arrayBuffer();
@@ -71,7 +84,6 @@ try {
   const compiledModule = await WebAssembly.compile(wasmBytes); // 同上, 同一大小限制/同一份已核验字节
   await wasmMod.default({ module_or_path: compiledModule });
   silvercWasm = wasmMod;
-  commissionSplitSource = await (await fetch('./vendor/sil-source/CommissionSplit.sil')).text();
 } catch (e) { silvercWasmLoadError = e; }
 
 function el(id) { return document.getElementById(id); }
@@ -169,7 +181,9 @@ async function main() {
       const usedWasmCompiler = !!(silvercWasm && commissionSplitSource);
       const order = usedWasmCompiler
         ? RW.deriveCommissionOrderAddress(kaspaWasm, silvercWasm, commissionSplitSource, orderCfg)
-        : RB.deriveCommissionOrderAddress(kaspaWasm, orderCfg);
+        // 降级路径 fail-closed 检查(NWT MUST, 2026-09-27T11-37Z): 传入随页面发布的 CommissionSplit.sil
+        // 真实 sha256, 与 order-template.js 记录的模板生成锚点不一致就在 RB 内部直接拒绝(见该函数头注)。
+        : RB.deriveCommissionOrderAddress(kaspaWasm, orderCfg, commissionSplitSourceSha256);
       const rolesHtml = resolved.payoutLeaves.map(r => `<tr><td>${r.name}</td><td>${(Number(r.amountSompi) / 1e8).toFixed(4)} KAS</td></tr>`).join('');
       renderBox('orderInfo', `<b>订单</b>(浏览器原生推导${usedWasmCompiler ? '·真 silverc 编译器' : '·固定偏移覆写降级路径'}, 零网络请求)<table>
         <tr><td>收款地址</td><td><code>${order.address}</code></td></tr>

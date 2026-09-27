@@ -6,7 +6,7 @@
 //
 // 🔴 MUST 纪律照搬不变(同 commission-plan-sdk.mjs resolveRulesForOrder 头注, NWT 2026-09-27T09-22Z②):
 // channelAddrs 只能来自 verifyChain() 的验证结果, 本函数同样不接受一个独立的裸地址数组参数。
-import { spliceCommissionSplitScript, INT_DATA_LEN } from './order-template.js';
+import { spliceCommissionSplitScript, INT_DATA_LEN, CS_SOURCE_SHA256 } from './order-template.js';
 
 const MAX_CHANNELS = 5;
 const MAX_ROLES = 7;
@@ -88,9 +88,20 @@ function padSpk37(fullBytes) {
 
 /** deriveCommissionOrderAddress — 逐字对应 createCommissionSplitProtocol, 唯一区别: 用
  * spliceCommissionSplitScript(固定偏移覆写)代替 compileSilV100(silverc.exe), 不需要 resolver.mjs。
+ *
+ * 🔴 NWT MUST(diff 审 2026-09-27T11-37Z, 见 order-template.js 头注): 调用方必须传入
+ * `actualSourceSha256Hex`——随页面一起发布的 CommissionSplit.sil 源码的真实 sha256(checkout.js 已经
+ * 在 fetch 这份源码用于 wasm 主路径, 顺手算它的 sha256 零额外成本)。与 order-template.js 记录的
+ * CS_SOURCE_SHA256(生成 CS_TEMPLATE_HEX 那次编译所用源码的 sha256)不一致 = 这份固定字节模板可能已经
+ * 过期(源码改了但模板没跟着重新生成)——fail-closed: 拒绝拼接、抛出明确错误, 不是"凑合用一份可能
+ * 对不上的模板拼出一个订单地址"。
  * @param {object} cfg { network, finalRoles, payerRefundAddress, deadlineMs?, maxSplitFeeSompi, maxRefundFeeSompi, ruleCommitHex?, channelChainCommitmentHex? }
+ * @param {string} actualSourceSha256Hex 随页面发布的 CommissionSplit.sil 真实 sha256(hex)
  */
-export function deriveCommissionOrderAddress(kaspaWasm, cfg) {
+export function deriveCommissionOrderAddress(kaspaWasm, cfg, actualSourceSha256Hex) {
+  if (actualSourceSha256Hex !== CS_SOURCE_SHA256) {
+    throw new Error(`deriveCommissionOrderAddress(降级路径): 随页面发布的 CommissionSplit.sil 源码 sha256(${actualSourceSha256Hex || '(未提供)'})与固定字节模板记录的锚点 CS_SOURCE_SHA256(${CS_SOURCE_SHA256})不一致——模板可能已过期, 拒绝拼接订单地址(fail-closed)。这不是可以忽略继续的警告: 用过期模板拼出的地址可能与当前 CommissionSplit.sil 的真实语义不符。`);
+  }
   const roles = cfg.finalRoles;
   if (roles.length < 1 || roles.length > MAX_ROLES) throw new Error(`deriveCommissionOrderAddress: finalRoles.length=${roles.length} 必须在 1-${MAX_ROLES}`);
   const orderNonce = crypto.getRandomValues(new Uint8Array(16));

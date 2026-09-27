@@ -21,8 +21,8 @@ chainInfo: 渠道地址(无签名链背书, 浏览器原生解析)
       解析结果⚠ 已解析, 但无签名链背书
     
 orderInfo: 订单(浏览器原生推导·真 silverc 编译器, 零网络请求)
-        收款地址kaspasim:pqdr22my7544xkh5w99cn6npl6tx2zmj5rtvfdwlpa8enzj2altdg48hamwah
-        截止时间2026-09-30T11:26:00.155Z
+        收款地址kaspasim:pz9kyqt6s4yu2m76s2x5u78nf2ea8yn0e6jm7xjzaj6hhjx5jl3k5p6aev0aa
+        截止时间2026-09-30T11:45:45.557Z
       角色金额provider200.0000 KAS
 
 === E2E (real Chromium via Playwright): 10 PASS / 0 FAIL ===

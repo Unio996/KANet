@@ -7,6 +7,10 @@ const { PrivateKey } = kaspa;
 const SDK = await import('file:///D:/kanet-tn12/scratch/_j2_wt_checkout_static/kasia-console/src/lib/commission-plan-sdk.mjs');
 const feeSplitLib = await import('file:///D:/kanet-tn12/kasia-console/src/lib/fee-split.mjs');
 const RB = await import('file:///D:/kanet-tn12/scratch/_j2_wt_checkout_static/kasia-console/src/lib/checkout-static/resolve-order-browser.js');
+// NWT MUST(2026-09-27T11-37Z) 加了 fail-closed sha256 核对(见 resolve-order-browser.js 头注)——
+// 这里直接从 order-template.js 拿它自己记录的锚点传回去, 这个脚本要测的是 splice 逻辑本身, 不是
+// 去刻意触发 drift 拒绝(drift 拒绝路径由 lint-kanet.mjs 的 R-SPLICE-TEMPLATE-SIL-DRIFT 单独守)。
+const OT = await import('file:///D:/kanet-tn12/scratch/_j2_wt_checkout_static/kasia-console/src/lib/checkout-static/order-template.js');
 
 let pass = 0, fail = 0;
 function check(name, cond, extra = '') { if (cond) { pass++; console.log('PASS', name); } else { fail++; console.log('FAIL', name, extra); } }
@@ -80,7 +84,7 @@ for (let trial = 0; trial < 15; trial++) {
   const browserResult = RB.deriveCommissionOrderAddress(kaspa, {
     network: net, finalRoles: browserFinalRoles, payerRefundAddress: payerAddr,
     deadlineMs: 1234567890000, maxSplitFeeSompi: 40_000_000n, maxRefundFeeSompi: 10_000_000n,
-  });
+  }, OT.CS_SOURCE_SHA256);
   check(`trial ${trial}: browser-derived order address is well-formed`, browserResult.address.startsWith('kaspatest:'), browserResult.address);
 }
 

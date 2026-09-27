@@ -20,6 +20,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
 import { MONEY_PATH_MANIFESTS } from '../kasia-console/src/lib/money-path-manifests.mjs';
 import { runAllM0aChecks } from './m0a-lib.mjs';
 import { findCtorOnlyTripwireHits } from './r-ctor-only-assignment-tripwire-lib.mjs';
@@ -301,6 +302,47 @@ function checkR_FEE_SPLIT_PKG_DRIFT() {
       `packages/fee-split/fee-split.mjs 与源 kasia-console/src/lib/fee-split.mjs 不一致(drift)——第三方
 会拿到过期/错误的分润组件快照。重新同步: node packages/fee-split/scripts/sync.mjs, 然后 git add 两处一起提交。`,
       pkgFile, 0);
+  }
+}
+
+// ── R-SPLICE-TEMPLATE-SIL-DRIFT [ERROR, 硬阻塞]: checkout-static 降级路径的固定字节模板必与其
+// .sil 源码同步(NWT diff 审 2026-09-27T11-37Z MUST, 照 R-FEE-SPLIT-PKG-DRIFT 同一封闭式防护原则) ──
+// order-template.js 的 CS_TEMPLATE_HEX/CD_TEMPLATE_HEX 是从 CommissionSplit.sil/ChannelDeposit.sil
+// 某一次真实编译手工抽出来的固定字节模板, 此前没有任何机制核过"源码改了、模板是不是过期了"——两份
+// wasm pin(kaspa-wasm-web-pin.json/silverc-wasm-pin.json)只锚 wasm 二进制本身, 不覆盖这条链路
+// (降级路径根本不跑 wasm)。源码改了但没人手工重新编译+替换模板 = 浏览器端悄悄用一份过期模板拼出
+// 错误的订单地址, 属于钱路问题, 不是 WARN 能打发的。
+function checkR_SPLICE_TEMPLATE_SIL_DRIFT() {
+  const templateFile = file('kasia-console/src/lib/checkout-static/order-template.js');
+  const csSilFile = file('kasia-console/src/lib/sil-v1/CommissionSplit.sil');
+  const cdSilFile = file('kasia-console/src/lib/sil-v1/ChannelDeposit.sil');
+  if (!exists(templateFile) || !exists(csSilFile) || !exists(cdSilFile)) return; // 三者有一个不在, 不在本规则职责内(比如降级路径整个被删了)
+
+  const templateSrc = read(templateFile);
+  const sha256 = (buf) => createHash('sha256').update(buf).digest('hex');
+
+  const checks = [
+    { name: 'CS_SOURCE_SHA256', silFile: csSilFile, silLabel: 'CommissionSplit.sil' },
+    { name: 'CD_SOURCE_SHA256', silFile: cdSilFile, silLabel: 'ChannelDeposit.sil' },
+  ];
+  for (const { name, silFile, silLabel } of checks) {
+    const m = templateSrc.match(new RegExp(`export const ${name} = '([0-9a-f]{64})';`));
+    if (!m) {
+      violate('R-SPLICE-TEMPLATE-SIL-DRIFT',
+        `order-template.js 里没找到 export const ${name} = '<64位hex>' —— 记录的源码 sha256 锚点缺失或格式不对, 无法核验模板是否过期(见该常量旁注释)。`,
+        templateFile, 0);
+      continue;
+    }
+    const recordedSha = m[1];
+    const actualSha = sha256(fs.readFileSync(silFile));
+    if (recordedSha !== actualSha) {
+      violate('R-SPLICE-TEMPLATE-SIL-DRIFT',
+        `order-template.js 记录的 ${name}(${recordedSha.slice(0, 16)}…)与 ${silLabel} 当前真实 sha256(${actualSha.slice(0, 16)}…)不一致——
+源码改了但 CS_TEMPLATE_HEX/CD_TEMPLATE_HEX 固定字节模板没有跟着重新生成, 降级路径会拼出与当前源码不符的订单地址。
+必须重新走 docs/provenance/2026-09-27-j2-checkout-pure-static-r2/build_and_verify_template_splicer.mjs 那一套重新抽取
+模板+字段布局、重新跑 parity, 再更新这个 sha256 常量——不能只改 sha256 常量了事。`,
+        templateFile, 0);
+    }
   }
 }
 
@@ -1700,6 +1742,7 @@ checkR_COMMAND_REGISTRATION();  // R-COMMAND-REGISTRATION (#25, KI-49 防重复)
 checkR_FEE_LEAVES_BYPASS();     // R-FEE-LEAVES-BYPASS [WARN] (P4/D-008, 2026-07-09): ZK 线禁直调 deriveFeeLeaves/FEE_CONFIG
 checkScratchClutter();
 checkR_FEE_SPLIT_PKG_DRIFT();     // R-FEE-SPLIT-PKG-DRIFT [ERROR] (B线落3 2026-07-12): packages/fee-split/fee-split.mjs 必与源同步(硬阻塞非WARN)
+checkR_SPLICE_TEMPLATE_SIL_DRIFT(); // R-SPLICE-TEMPLATE-SIL-DRIFT [ERROR] (NWT diff审 2026-09-27T11-37Z MUST): checkout-static order-template.js 固定字节模板必与 CommissionSplit.sil/ChannelDeposit.sil 源码 sha256 同步
 checkR_MANIFEST_SCHEMA_COMPLETE();  // R-MANIFEST-SCHEMA-COMPLETE [ERROR] (件④ 2026-07-16): money-path manifest 十二字段齐全性
 checkR_MANIFEST_EXIT_REACHABLE();   // R-MANIFEST-EXIT-REACHABLE [ERROR] (件④ 2026-07-16): 三种exit全空=K-10直接违反
 checkR_MANIFEST_TEST_COVERAGE();    // R-MANIFEST-TEST-COVERAGE [WARN] (件④ 2026-07-16): required_tests 覆盖已声明exit

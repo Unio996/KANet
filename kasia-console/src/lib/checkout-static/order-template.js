@@ -31,6 +31,30 @@ export const CS_TEMPLATE_HEX = '6b0807000000000000002500000000000000000000000000
 
 export const CD_TEMPLATE_HEX = '6b2000000000000000000000000000000000000000000000000000000000000000000800000000000000006c760480344ff187637552798201419d7552795279ac69b3519c690300002052797e01ac7eb4519c6900c378876900c2b9be537994a2697575757551676a68';
 
+// ── NWT MUST(diff 审 2026-09-27T11-37Z, 一条 MUST 放行合并的条件): 上面两份 TEMPLATE_HEX 是从
+// CommissionSplit.sil/ChannelDeposit.sil 某一次真实编译"手工"抽出来的固定字节模板——但此前没有任何
+// 机制核过"如果源码后来改了, 这份模板是不是已经过期"。两份 wasm pin(kaspa-wasm-web-pin.json/
+// silverc-wasm-pin.json)只锚 wasm 二进制本身, 不覆盖这条链路(降级路径压根不跑 wasm, 不经过那两份
+// pin 的校验路径)——这是一条独立的、此前完全没被守住的过期风险。
+//
+// 处置(照本仓 R-FEE-SPLIT-PKG-DRIFT 同一封闭式防护原则——不是"信任模板还对", 是"每次都验证还对
+// 不对", 源码变了立刻在两处显形):
+//   ① 下面两个常量记录**生成上面两份 TEMPLATE_HEX 时**源码的 sha256(命令见常量旁注释, 可重放)。
+//   ② lint-kanet.mjs 的 R-SPLICE-TEMPLATE-SIL-DRIFT[ERROR]: 每次 commit 重算 CommissionSplit.sil/
+//      ChannelDeposit.sil 的真实 sha256, 与下面两个常量不一致就拒绝 commit——源码改了但没人手工
+//      重新编译+替换 TEMPLATE_HEX, 在你想提交那一刻就会被挡下来, 不是留到运行时才发现。
+//   ③ 运行时(resolve-order-browser.js 的 deriveCommissionOrderAddress): 调用方必须传入"随页面
+//      一起发布的 CommissionSplit.sil 源码"的 sha256(checkout.js 已经在 fetch 这份源码用于 wasm
+//      主路径, 顺手算它的 sha256 零额外成本)——跟下面的 CS_SOURCE_SHA256 不一致, 降级路径
+//      fail-closed(拒绝生成地址、明确报错), 不是"凑合用一份可能过期的模板"。
+//
+// 重新生成命令(源码改了、真要更新模板时用): sha256sum kasia-console/src/lib/sil-v1/CommissionSplit.sil
+// kasia-console/src/lib/sil-v1/ChannelDeposit.sil ——同时必须重新走 docs/provenance/
+// 2026-09-27-j2-checkout-pure-static-r2/ 里 build_and_verify_template_splicer.mjs 那一套重新抽取
+// TEMPLATE_HEX/CS_FIELDS/CD_FIELDS 并重新跑 parity, 不能只改这两个 sha256 常量了事。
+export const CS_SOURCE_SHA256 = '72bc6bf978ca240dcd6714c8c42acea88f8b04cc4026ba8ab3a8725ff49fe83a';
+export const CD_SOURCE_SHA256 = '7333a59c7a615b67faa7570c1d1f283145686e07437ca18d2452c4b12c954a78';
+
 // ── 字段布局(逐字节比对 real vs spliced 220/220 与 60/60 完全一致验证过, 见 verify-core.js 头注
 // 同一份"零 import 与生产 SDK 各自独立算, 靠 parity 测试守住不分叉"纪律) ──
 export const CS_FIELDS = [

@@ -1,0 +1,6 @@
+PASS undefined sha256 arg is rejected (fail-closed)
+PASS sanity: wrongSha really differs from CS_SOURCE_SHA256
+PASS wrong sha256 is rejected (fail-closed)
+PASS correct sha256 succeeds and returns a well-formed address
+
+=== fail-closed source-drift regression: 4 PASS / 0 FAIL ===
