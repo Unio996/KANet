@@ -18,15 +18,21 @@
 <body>
   <h1>KANet 商品佣金计划 · 结账页(V1 参考实现)</h1>
   <p style="font-size:0.85rem;color:#666">
-    本页是开源纯静态参考实现(D-034 §8)。页面本身零后端依赖; 签名/链验证/地址推导这几步需要
-    kaspa-wasm(本仓 node_modules 里只有 Node 版构建, 无浏览器版), 委托给本机常驻的小型解析服务
-    (<code>resolver.mjs</code>, 任何人可在自己机器上 <code>node resolver.mjs</code> 启动, 不是我们的服务器)——
-    这是本轮如实交付的范围边界, 浏览器原生 wasm 是后续独立工作。
+    本页是开源纯静态参考实现(D-034 §8)。报价验签/签名链验证/渠道地址解析已改为浏览器原生
+    kaspa-wasm(<code>vendor/kaspa-web/</code>, 上游 <code>build-web --sdk</code> 产物)+ vendored blake2b
+    在本页直接运行。订单地址推导仍需要 <code>silverc.exe</code>(独立原生编译器, 与 kaspa-wasm
+    编译成什么 target 无关, 没有浏览器版本)——这一步委托给本机常驻的小型解析服务
+    (<code>resolver.mjs</code>, 任何人可在自己机器上 <code>node resolver.mjs</code> 启动, 不是我们的服务器)。
   </p>
   <div id="resolverStatus" class="box"></div>
   <div id="linkInfo" class="box"></div>
   <div id="quoteInfo" class="box"></div>
   <div id="chainInfo" class="box"></div>
+  <div class="box">
+    <label>你的退款地址(超时未分账时资金退回这里, 构造订单地址前必填)<br>
+      <input id="refundAddr" style="width:100%;padding:0.4rem" placeholder="kaspatest:..."></label>
+    <button id="resolveOrderBtn" style="margin-top:0.5rem">确认并推导订单地址</button>
+  </div>
   <div id="orderInfo" class="box"></div>
   <script type="module" src="./checkout.js"></script>
 </body>

@@ -1,0 +1,2 @@
+[diag:step] proc.silverc.compile.bshard-artifacts ms=10 cmd=silverc ok=0 at=2026-09-27T10:46:55.249Z
+FAILED: silverc compile D:/kanet-tn12/scratch/_j2_commission_impl_research/isolate2.sil fail: compile error: unsupported feature: array literal element type mismatch

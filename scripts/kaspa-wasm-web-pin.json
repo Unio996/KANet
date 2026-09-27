@@ -1,0 +1,26 @@
+{
+  "name": "kaspa-wasm-web-sdk",
+  "sourceRepo": "https://github.com/kaspanet/rusty-kaspa (本机 checkout D:\\rusty-kaspa)",
+  "sourceCommit": "90dbf074275d60c1fe74a3491883196f110970c0",
+  "sourceCommitDate": "2026-06-05T14:55:30+03:00",
+  "sourceTreeNote": "构建时该 checkout 有 2 处与本构建无关的本地改动(bridge/src/kaspaapi.rs, bridge/src/stratum_server.rs——mining bridge/stratum 组件, 不在 wasm/ crate 的依赖图内, 不影响本产物)，如实记录不是隐瞒。",
+  "buildCommand": "cd D:\\rusty-kaspa\\wasm && PATH=\"C:\\Program Files\\LLVM\\bin:$PATH\" CC=clang bash build-web --sdk",
+  "buildCommandNote": "上游 build-web 脚本本身不需要 CC=clang——本机首次构建因缺 clang(secp256k1-sys 等带 C 依赖的 crate 需要)失败，clang.exe 装在 LLVM 目录只是不在 PATH，加这条环境变量即可，不是对上游脚本的修改。",
+  "artifactSchemaVersion": 1,
+  "wasmBindgenTarget": "web",
+  "cargoFeatures": "wasm32-sdk",
+  "sha256": "732bdaa3ee8353c026654e9c7dd729674eb1bd064e8a0b8927b4cfb7df859e51",
+  "sha256Note": "wasm-opt 优化步骤不是完全确定性构建——同一份源码重新构建，sha256 理论上可能变化（同 D-019 silverc 的 goldenSample 机制面对的同一类问题：Rust/wasm 工具链的非完全可复现构建）。本条目的 sha256 是本轮实际构建产出的真实值，不是猜测或估算；未来若重新构建出不同的 sha256，不代表出错或被调包，需要走下面 goldenSample 同源判据核实，而不是简单比对二进制 sha256 就拒绝。",
+  "decision": "D-034 §8 后续票（Bettor 派工 2026-09-27，coord/j2-checkout-pure-static-20260927），尚无正式 D-0XX 编号——是否/如何纳入正式 D-019 pin 体系由 Bettor/Owner 决定，本文件只是如实记录构建来源与产物指纹，不代表已获得 pin 权威地位。",
+  "productionArtifactPath": "kasia-console/src/lib/checkout-static/vendor/kaspa-web/（gitignored，不入 git 历史，操作者按同目录 README.md 自行构建部署）",
+  "envVarOverride": "KASPA_WASM_WEB_SHA256（可选，覆盖下方 sha256 做本机核验，供构建产物 sha 因非确定性构建而变化时使用，同 silverc pin 的 env 覆盖惯例）",
+  "goldenSample": {
+    "purpose": "同 D-019 silverc goldenSample 的同一条纪律：wasm 二进制 sha256 只是防调包指纹（挡'被换成另一个完全不同的东西'），不是唯一同源判据——真正的同源判据是用这份 wasm 对固定输入跑出固定输出，产物逐字节比对。",
+    "method": "用 initSync 加载 wasm 字节，对固定私钥 01x32(hex) 调用 PrivateKey.toPublicKey().toString() + toAddress('testnet').toString() + signMessage(固定消息)，三项输出逐字比对——这条同源判据独立于 wasm-opt 构建是否确定性，只要密码学逻辑本身没有被替换就会稳定复现同样的值。",
+    "fixedPrivateKeyHex": "0101010101010101010101010101010101010101010101010101010101010101",
+    "expectedPubkeyHex": "031b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f",
+    "expectedTestnetAddress": "kaspatest:qqdcf32k0vfxgsyet5ldt246q4jaw8scx3sysx0lnstlt6w4m5rc7tsx6em34",
+    "fixedMessageHex": "64656164626565666b6173706177617369676e6d7367",
+    "note": "expectedPubkeyHex 与 expectedTestnetAddress 两个值是从本机真实构建产物读出的真实值（scratch/_j2_commission_impl_research/spk_lengths.mjs 用同一把私钥 01x32 跑出的 Schnorr 地址逐字一致——与本文件顶部 sha256 对应的同一份产物，不是另外编的示例数字）；signMessage 因为带随机数(nonce)每次运行结果不同，goldenSample 校验只核 verifyMessage(用该次真实产出的签名自核)恒为 true，不核签名字节本身固定。"
+  }
+}
