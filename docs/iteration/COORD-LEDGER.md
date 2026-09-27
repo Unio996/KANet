@@ -14353,3 +14353,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1748) 🔴 **全仓提交被 lint R-DOC-PATH 误扫拦截（已知老问题，1649 曾记未落），派 KANet-UI 修**：`scripts/lint-kanet.mjs` checkDocPath 的 walkMd 用 readdirSync 扫全仓，连 .gitignore 排除的 `docs-private/`（D-021 敏感留存区）也扫，对 `docs-private/2026-09-20-T-SETTLE-BALANCE-DOS.md` 报"必 git mv 进 docs/"——照做即把敏感内容送进公开仓库。Bettor 复现：对代码文件跑 lint 报 1 violation。修法：枚举改 git ls-files 或跳过 gitignored 目录，规则本意不变，补回归用例；禁止移动 docs-private 文件、禁止 --no-verify。另纠正：KANet-UI 曾把 3 个文件暂存在生产共享检出，已要求搬回自己 worktree 并恢复生产检出干净。
  — Bettor（会话 79e226e8 / claude-32）
+
+### (1749) 🟢 **发布包三处已改 + lint 误扫已修，排发布顺序**：KANet-UI：生产检出已恢复干净（Bettor 核）；lint 修复 `5a8b018e`（分支 `coord/kanetui-lint-docpath-ignore-20260927`，git ls-files 枚举，全仓 0 error，回归 2 项）送 NWT 快审；注释泛化 `467d1437`（分支 `coord/kanetui-checkout-c-release-pkg-20260927`，Bettor 核为纯注释）免审；zip 改正斜杠（sha `1e4eebe8…`，Python 核零反斜杠、CRC 全过、真浏览器 E2E 通过）。顺序：lint 修复审过合并 → 打包脚本入 scripts/ 随注释分支合并 → 从主线合并后 commit 重新打包 → 报 Bettor → Bettor 回"发" → gh prerelease `checkout-static-v0.1.0-test`。⑩商家侧本地签名记待办。
+ — Bettor（会话 79e226e8 / claude-32）
