@@ -1,0 +1,229 @@
+pragma silverscript ^0.1.0;
+// CommissionSplit.sil — 商品佣金计划 · N 角色即时分账结算模板 (J2, 2026-09-27; D-034 §8 实现,
+// 设计稿 docs/2026-09-27-j2-commission-plan-attribution-design-v0.4.md, NWT 四轮攻击面审
+// 2026-09-27T09-22Z 合并审通过: 1 MUST(签名链与 channelAddrs 必须同源, 由 SDK resolveRulesForOrder
+// 强制实现, 见 commission-plan-sdk.mjs) + 1 强 SHOULD(§3.3 声明机制覆盖多渠道截断, 文档处理)。
+//
+// 🔴 本合约是 InstantSplit.sil(已合入 bshard-m3-deploy@f83f6b6e)的推广, 不是另起设计(D-031)——
+// 同一个一次性终态纯 P2SH 骨架(无 State/covenant 续约、tx.inputs.length==1 防合并销毁、hasChange
+// 两分支按真实超额互斥穷尽、refund 用 temporal()+现查节点 PMT)，唯一实质推广:
+//   ① 角色数从固定 3(商家/broker/可选引荐人) 推广为 1-7(provider 必选 + 最多 6 个可选角色
+//      = broker + 最多 5 个 channel_1..channel_5, 与设计稿 §6.1/§6.1b 的"provider+broker+5渠道+找零
+//      =8 输出"数字口径一致); role_count(ctor int, 1-7)决定实际启用几个角色, 只用 if/else 按
+//      literal 输出下标穷尽(同 InstantSplit 的 has_ref 两分支模式扩展, 不引入 ctor 数组/for 循环这类
+//      本仓未曾在"ctor 直接烤地址字节"场景验证过的新语言特性面——D-031"推广不重造"落到具体的
+//      语言特性选择上)。
+//   ② 收款人从"P2PK-only, ctor 烤 32 字节 pubkey, 合约内 new ScriptPubKeyP2PK 现场构造"推广为
+//      "任意标准地址类型(P2PK/P2PK-ECDSA/P2SH), ctor 直接烤完整序列化 scriptPubKey 字节"——这个
+//      改法已在 v0.2/v0.3/v0.4 设计稿 §6.2 用真实 simnet 广播验证过(34 字节裸 script 被拒/36 字节
+//      含版本前缀被接受), 本文件只是把已验证机制接到 N 角色场景。真实测量(scratch/_j2_commission_impl_research/
+//      spk_lengths.mjs, 三种地址类型各生成一个真实地址核实): P2PK scriptPubKey=36 字节,
+//      P2PK-ECDSA=37 字节, P2SH=37 字节——三种标准类型的完整序列化字节长度均 <=37, ctor 因此对
+//      每个角色的 spk 烤一个定长 byte[37](不足部分调用方补 0 尾填充) + 一个 int 记录真实长度,
+//      entry 内用 .slice(0,len) 截出真实字节再比较, 不改变 InstantSplit 已验证过的 byte[](spk)==
+//      scriptPubKey 比对方式本身。
+//   ③ 新增 channel_chain_commitment(byte[32]) 审计字段(设计稿 §3.4 O1, Owner V1 边界补强①)——
+//      跟已有的 rule_commit 完全同一种处理: 只在 ctor state 里声明与赋值, 不参与任何 require,
+//      订单地址会因它变化(是 ctor 输入之一)但合约本身"不感知归因/签名链", 归因链条的验证全部
+//      在链下(SDK verifyChain, 见 commission-plan-sdk.mjs)完成——同 InstantSplit rule_commit 的
+//      "纯审计冗余"定位(设计稿 §2.6), 不是新的信任假设。
+//
+// role1 恒为 provider(role_count>=1 恒真, 商家份额必选)。role2..role7 按设计稿 §6.4 的
+// canonical_rules.roles 数组顺序对应(通常 role2=broker, role3..role7=channel_1..channel_5,
+// 但合约本身不关心角色"名字", 只关心第几个槽位、多少钱、给谁——名字与折算逻辑完全是链下
+// resolveRulesForOrder 的职责, 同 InstantSplit"合约不感知归因"的既有原则)。
+//
+// max_split_fee/max_refund_fee/deadline_ms 语义与来源方式同 InstantSplit(设计稿 §4.5 六步法 +
+// §4.6 结构性残余风险注记, 不重复推导), 本文件同样不烤死具体数字, 由 SDK createCommissionSplitProtocol
+// 在 ctor 阶段传入。
+
+contract CommissionSplit(
+    int      role_count,       // 1-7, 实际启用的收款角色数(role1 必选=provider, role2..7 可选)
+
+    byte[37] role1_spk, int role1_spk_len, int role1_amount,
+    byte[37] role2_spk, int role2_spk_len, int role2_amount,
+    byte[37] role3_spk, int role3_spk_len, int role3_amount,
+    byte[37] role4_spk, int role4_spk_len, int role4_amount,
+    byte[37] role5_spk, int role5_spk_len, int role5_amount,
+    byte[37] role6_spk, int role6_spk_len, int role6_amount,
+    byte[37] role7_spk, int role7_spk_len, int role7_amount,
+
+    byte[37] payer_refund_spk, int payer_refund_spk_len,
+
+    int      deadline_ms,
+    int      max_split_fee,
+    int      max_refund_fee,
+    byte[32] rule_commit,                  // 纯审计冗余(同 InstantSplit), 不参与任何 require
+    byte[32] channel_chain_commitment,     // O1 新增: 签名链最终摘要, 纯审计冗余, 不参与任何 require
+    byte[16] order_nonce                   // 强制字段, 防地址碰撞, 不参与任何 require
+) {
+    int      r_count      = role_count;
+
+    byte[37] r1_spk = role1_spk; int r1_len = role1_spk_len; int r1_amt = role1_amount;
+    byte[37] r2_spk = role2_spk; int r2_len = role2_spk_len; int r2_amt = role2_amount;
+    byte[37] r3_spk = role3_spk; int r3_len = role3_spk_len; int r3_amt = role3_amount;
+    byte[37] r4_spk = role4_spk; int r4_len = role4_spk_len; int r4_amt = role4_amount;
+    byte[37] r5_spk = role5_spk; int r5_len = role5_spk_len; int r5_amt = role5_amount;
+    byte[37] r6_spk = role6_spk; int r6_len = role6_spk_len; int r6_amt = role6_amount;
+    byte[37] r7_spk = role7_spk; int r7_len = role7_spk_len; int r7_amt = role7_amount;
+
+    byte[37] refund_spk = payer_refund_spk;
+    int      refund_len  = payer_refund_spk_len;
+
+    int      dl_ms       = deadline_ms;
+    int      max_s_fee   = max_split_fee;
+    int      max_r_fee   = max_refund_fee;
+    byte[32] rcommit     = rule_commit;
+    byte[32] chain_commit = channel_chain_commitment;
+    byte[16] nonce       = order_nonce;
+
+    entry split(bool hasChange) {
+        require(tx.inputs.length == 1);
+        require(r_count >= 1);
+        require(r_count <= 7);
+
+        if (r_count == 1) {
+            require(tx.outputs[0].value == r1_amt);
+            require(tx.outputs[0].scriptPubKey == r1_spk.slice(0, r1_len));
+            int recipientsTotal = r1_amt;
+            if (hasChange) {
+                require(tx.inputs[this.activeInputIndex].value - recipientsTotal > max_s_fee);
+                require(tx.outputs.length == 2);
+                require(tx.outputs[1].scriptPubKey == refund_spk.slice(0, refund_len));
+                require(tx.outputs[1].value >= tx.inputs[this.activeInputIndex].value - recipientsTotal - max_s_fee);
+            } else {
+                require(tx.outputs.length == 1);
+                require(tx.inputs[this.activeInputIndex].value - recipientsTotal <= max_s_fee);
+            }
+        } else if (r_count == 2) {
+            require(tx.outputs[0].value == r1_amt);
+            require(tx.outputs[0].scriptPubKey == r1_spk.slice(0, r1_len));
+            require(tx.outputs[1].value == r2_amt);
+            require(tx.outputs[1].scriptPubKey == r2_spk.slice(0, r2_len));
+            int recipientsTotal = r1_amt + r2_amt;
+            if (hasChange) {
+                require(tx.inputs[this.activeInputIndex].value - recipientsTotal > max_s_fee);
+                require(tx.outputs.length == 3);
+                require(tx.outputs[2].scriptPubKey == refund_spk.slice(0, refund_len));
+                require(tx.outputs[2].value >= tx.inputs[this.activeInputIndex].value - recipientsTotal - max_s_fee);
+            } else {
+                require(tx.outputs.length == 2);
+                require(tx.inputs[this.activeInputIndex].value - recipientsTotal <= max_s_fee);
+            }
+        } else if (r_count == 3) {
+            require(tx.outputs[0].value == r1_amt);
+            require(tx.outputs[0].scriptPubKey == r1_spk.slice(0, r1_len));
+            require(tx.outputs[1].value == r2_amt);
+            require(tx.outputs[1].scriptPubKey == r2_spk.slice(0, r2_len));
+            require(tx.outputs[2].value == r3_amt);
+            require(tx.outputs[2].scriptPubKey == r3_spk.slice(0, r3_len));
+            int recipientsTotal = r1_amt + r2_amt + r3_amt;
+            if (hasChange) {
+                require(tx.inputs[this.activeInputIndex].value - recipientsTotal > max_s_fee);
+                require(tx.outputs.length == 4);
+                require(tx.outputs[3].scriptPubKey == refund_spk.slice(0, refund_len));
+                require(tx.outputs[3].value >= tx.inputs[this.activeInputIndex].value - recipientsTotal - max_s_fee);
+            } else {
+                require(tx.outputs.length == 3);
+                require(tx.inputs[this.activeInputIndex].value - recipientsTotal <= max_s_fee);
+            }
+        } else if (r_count == 4) {
+            require(tx.outputs[0].value == r1_amt);
+            require(tx.outputs[0].scriptPubKey == r1_spk.slice(0, r1_len));
+            require(tx.outputs[1].value == r2_amt);
+            require(tx.outputs[1].scriptPubKey == r2_spk.slice(0, r2_len));
+            require(tx.outputs[2].value == r3_amt);
+            require(tx.outputs[2].scriptPubKey == r3_spk.slice(0, r3_len));
+            require(tx.outputs[3].value == r4_amt);
+            require(tx.outputs[3].scriptPubKey == r4_spk.slice(0, r4_len));
+            int recipientsTotal = r1_amt + r2_amt + r3_amt + r4_amt;
+            if (hasChange) {
+                require(tx.inputs[this.activeInputIndex].value - recipientsTotal > max_s_fee);
+                require(tx.outputs.length == 5);
+                require(tx.outputs[4].scriptPubKey == refund_spk.slice(0, refund_len));
+                require(tx.outputs[4].value >= tx.inputs[this.activeInputIndex].value - recipientsTotal - max_s_fee);
+            } else {
+                require(tx.outputs.length == 4);
+                require(tx.inputs[this.activeInputIndex].value - recipientsTotal <= max_s_fee);
+            }
+        } else if (r_count == 5) {
+            require(tx.outputs[0].value == r1_amt);
+            require(tx.outputs[0].scriptPubKey == r1_spk.slice(0, r1_len));
+            require(tx.outputs[1].value == r2_amt);
+            require(tx.outputs[1].scriptPubKey == r2_spk.slice(0, r2_len));
+            require(tx.outputs[2].value == r3_amt);
+            require(tx.outputs[2].scriptPubKey == r3_spk.slice(0, r3_len));
+            require(tx.outputs[3].value == r4_amt);
+            require(tx.outputs[3].scriptPubKey == r4_spk.slice(0, r4_len));
+            require(tx.outputs[4].value == r5_amt);
+            require(tx.outputs[4].scriptPubKey == r5_spk.slice(0, r5_len));
+            int recipientsTotal = r1_amt + r2_amt + r3_amt + r4_amt + r5_amt;
+            if (hasChange) {
+                require(tx.inputs[this.activeInputIndex].value - recipientsTotal > max_s_fee);
+                require(tx.outputs.length == 6);
+                require(tx.outputs[5].scriptPubKey == refund_spk.slice(0, refund_len));
+                require(tx.outputs[5].value >= tx.inputs[this.activeInputIndex].value - recipientsTotal - max_s_fee);
+            } else {
+                require(tx.outputs.length == 5);
+                require(tx.inputs[this.activeInputIndex].value - recipientsTotal <= max_s_fee);
+            }
+        } else if (r_count == 6) {
+            require(tx.outputs[0].value == r1_amt);
+            require(tx.outputs[0].scriptPubKey == r1_spk.slice(0, r1_len));
+            require(tx.outputs[1].value == r2_amt);
+            require(tx.outputs[1].scriptPubKey == r2_spk.slice(0, r2_len));
+            require(tx.outputs[2].value == r3_amt);
+            require(tx.outputs[2].scriptPubKey == r3_spk.slice(0, r3_len));
+            require(tx.outputs[3].value == r4_amt);
+            require(tx.outputs[3].scriptPubKey == r4_spk.slice(0, r4_len));
+            require(tx.outputs[4].value == r5_amt);
+            require(tx.outputs[4].scriptPubKey == r5_spk.slice(0, r5_len));
+            require(tx.outputs[5].value == r6_amt);
+            require(tx.outputs[5].scriptPubKey == r6_spk.slice(0, r6_len));
+            int recipientsTotal = r1_amt + r2_amt + r3_amt + r4_amt + r5_amt + r6_amt;
+            if (hasChange) {
+                require(tx.inputs[this.activeInputIndex].value - recipientsTotal > max_s_fee);
+                require(tx.outputs.length == 7);
+                require(tx.outputs[6].scriptPubKey == refund_spk.slice(0, refund_len));
+                require(tx.outputs[6].value >= tx.inputs[this.activeInputIndex].value - recipientsTotal - max_s_fee);
+            } else {
+                require(tx.outputs.length == 6);
+                require(tx.inputs[this.activeInputIndex].value - recipientsTotal <= max_s_fee);
+            }
+        } else {
+            // r_count == 7 (provider + broker + 5 channels, 设计稿 §6.1/§6.1b 的 8 输出上限场景)
+            require(tx.outputs[0].value == r1_amt);
+            require(tx.outputs[0].scriptPubKey == r1_spk.slice(0, r1_len));
+            require(tx.outputs[1].value == r2_amt);
+            require(tx.outputs[1].scriptPubKey == r2_spk.slice(0, r2_len));
+            require(tx.outputs[2].value == r3_amt);
+            require(tx.outputs[2].scriptPubKey == r3_spk.slice(0, r3_len));
+            require(tx.outputs[3].value == r4_amt);
+            require(tx.outputs[3].scriptPubKey == r4_spk.slice(0, r4_len));
+            require(tx.outputs[4].value == r5_amt);
+            require(tx.outputs[4].scriptPubKey == r5_spk.slice(0, r5_len));
+            require(tx.outputs[5].value == r6_amt);
+            require(tx.outputs[5].scriptPubKey == r6_spk.slice(0, r6_len));
+            require(tx.outputs[6].value == r7_amt);
+            require(tx.outputs[6].scriptPubKey == r7_spk.slice(0, r7_len));
+            int recipientsTotal = r1_amt + r2_amt + r3_amt + r4_amt + r5_amt + r6_amt + r7_amt;
+            if (hasChange) {
+                require(tx.inputs[this.activeInputIndex].value - recipientsTotal > max_s_fee);
+                require(tx.outputs.length == 8);
+                require(tx.outputs[7].scriptPubKey == refund_spk.slice(0, refund_len));
+                require(tx.outputs[7].value >= tx.inputs[this.activeInputIndex].value - recipientsTotal - max_s_fee);
+            } else {
+                require(tx.outputs.length == 7);
+                require(tx.inputs[this.activeInputIndex].value - recipientsTotal <= max_s_fee);
+            }
+        }
+    }
+
+    entry refund() {
+        require(tx.inputs.length == 1);
+        require(tx.time >= temporal(dl_ms));
+        require(tx.outputs.length == 1);
+        require(tx.outputs[0].scriptPubKey == refund_spk.slice(0, refund_len));
+        require(tx.outputs[0].value >= tx.inputs[this.activeInputIndex].value - max_r_fee);
+    }
+}

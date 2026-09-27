@@ -75,8 +75,13 @@ export function buildPredictionV1InterimRules({ brokerPk, introducerPk = null })
  * 不合法 → throw(fail-loud, 防恶意预设上链)。版本不符 → err.code='FEE_RULES_SCHEMA_V_UNSUPPORTED'(可辨识,
  * spec v1.2-3: 非静默算错非裸 BUST——委员 re-derive 前先查版本支持集)。
  * @param {object} feeRules { schema_v, preset?, roles:[{name, bps, address?, derive?, optional?}] }
+ * @param {object} [opts] D-034 §8 商品佣金计划新增(可选, 不传时逐字等于旧行为, 现有 5 处调用点零改动):
+ *   opts.providerMinBps 覆盖 PROVIDER_MIN_BPS(默认 5000), opts.roleMaxBps 覆盖 ROLE_MAX_BPS(默认 5000)——
+ *   从硬编码常量改成可覆盖参数, 不改算法本身, 也不改任一现有默认值。
  */
-export function validateFeeRules(feeRules) {
+export function validateFeeRules(feeRules, opts = {}) {
+  const providerMinBps = Number.isInteger(opts.providerMinBps) ? opts.providerMinBps : PROVIDER_MIN_BPS;
+  const roleMaxBps = Number.isInteger(opts.roleMaxBps) ? opts.roleMaxBps : ROLE_MAX_BPS;
   if (!feeRules || typeof feeRules !== 'object' || Array.isArray(feeRules)) throw new Error('feeRules 必须是 object');
   // 🔴 strict whitelist(NWT 落1 红队 F1, CONFIRMED repro): 未知键必 fail-loud——canonicalize 只拾取已知键,
   //   未知键若放行会被静默剥除 → 两份语义不同的 feeRules 同 commit(链上 commit 验证被旁路)。白名单强制
@@ -108,9 +113,9 @@ export function validateFeeRules(feeRules) {
     if (r.name === 'provider') {
       providers++;
       if (r.address != null || r.derive != null) throw new Error('provider role 不带 address/derive(winners 集在 settle 时供给, 非规则配置)');
-      if (r.bps < PROVIDER_MIN_BPS) throw new Error(`provider.bps=${r.bps} < PROVIDER_MIN_BPS=${PROVIDER_MIN_BPS}(防 facilitator 抢光)`);
+      if (r.bps < providerMinBps) throw new Error(`provider.bps=${r.bps} < providerMinBps=${providerMinBps}(防 facilitator 抢光)`);
     } else {
-      if (r.bps > ROLE_MAX_BPS) throw new Error(`role ${r.name}: bps=${r.bps} > ROLE_MAX_BPS=${ROLE_MAX_BPS}`);
+      if (r.bps > roleMaxBps) throw new Error(`role ${r.name}: bps=${r.bps} > roleMaxBps=${roleMaxBps}`);
       if (r.derive != null) {
         if (r.derive !== 'committee') throw new Error(`role ${r.name}: derive 只支持 'committee', got ${r.derive}`);
         if (r.address != null) throw new Error(`role ${r.name}: derive 角色地址=委员集链派生, 禁 caller 供 address(命门④ provenance)`);
@@ -136,6 +141,13 @@ function _canonicalJson(v) {
   if (Array.isArray(v)) return '[' + v.map(_canonicalJson).join(',') + ']';
   return '{' + Object.keys(v).sort().map(k => JSON.stringify(k) + ':' + _canonicalJson(v[k])).join(',') + '}';
 }
+
+// canonicalJsonSorted — 对外导出的同一份 sorted-key canonical JSON 函数(D-034 §8 商品佣金计划设计稿
+// §2 原话"canonical 序列化复用 fee-split.mjs 内部 _canonicalJson 同一套排序键约定, 不新造第二种序列化
+// 规则")。只是把已有的私有函数 _canonicalJson 挂一个公开名字导出, 不改它的实现/行为——报价签名
+// (commission-plan-sdk.mjs signQuote/verifyQuoteSignature)与 canonicalizeFeeRules 因此共用同一套排序
+// 键约定, 不会出现"两处各自实现同一规范"的漂移(同本文件顶部"canonicalize 单源铁律")。
+export const canonicalJsonSorted = _canonicalJson;
 
 /**
  * canonicalizeFeeRules — feeRules 的唯一 canonical 序列化(spec v1.2-2 单一共享函数)。
