@@ -31,10 +31,57 @@ const EXPECTED_KASPA_WASM_SHA256 = '732bdaa3ee8353c026654e9c7dd729674eb1bd064e8a
 // scripts/silverc-wasm-pin.json 的权威锚点抄一份到这里, 理由同上(自包含可移植性)。
 const EXPECTED_SILVERC_WASM_SHA256 = '868e3f1b247a02b2a2eb39350dfcdd2fe03157c57d99b803b7e9ab2d7bfdc325';
 
+// D-034 §8 B段⑧d(Bettor 派工, 弱网首屏可交互): 带进度的 fetch——不是为了炫技, 是因为两个 wasm
+// 加起来 16.7MB, 弱网下用户会对着空白页面等好几分钟(见 A 段实测: 400kbps 模拟下 120s 还没下完),
+// 没有任何反馈时用户大概率以为页面卡死/关掉标签页。用 Content-Length + 流式读取报真实百分比;
+// 拿不到 Content-Length(极少数托管不带这个头)时退化成"已收到 X.X MB"(无法算百分比, 不假装有)。
+// 顺手报"是否命中浏览器缓存"(第二次打开同一页面理应秒开, 用户应该看到这个区别)。
+async function fetchWithProgress(url, onProgress) {
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(`fetch ${url} failed: HTTP ${resp.status}`);
+  // 🔴 NWT MUST(2026-09-27T12-23Z, 真机复现): fetch() 对 Content-Encoding: br/gzip 的响应体是浏览器
+  // 透明解压的——reader 吐出来的是【解压后】字节, 但 Content-Length 响应头描述的是【压缩前、实际过线】
+  // 的字节数, 两者不是同一个量纲, 拿"解压后累计接收量 / 压缩前总量"算百分比会在接近下载完时飙到远超
+  // 100%(真实 wasm 文件的压缩比推算会到 ~290%, 不是危言耸听的极端案例)。而这份交付自己在 ⑧a 建议
+  // "部署必须开 br"——即恰好是这个 bug 必然触发的配置, 不能只在未压缩场景测过就当通过。
+  // 修法: Content-Encoding 存在且不是 identity 时不信任 Content-Length 做分母, 退化到已有的
+  // "已收到 X.X MB"分支(那条分支本身没问题, 只是触发条件之前没把"压缩传输"这个情况算进去)。
+  const contentEncoding = (resp.headers.get('content-encoding') || 'identity').toLowerCase();
+  const isCompressed = contentEncoding !== 'identity';
+  const totalStr = isCompressed ? null : resp.headers.get('content-length');
+  const total = totalStr ? Number(totalStr) : null;
+  // transferSize===0 且 body 非空 = 命中 HTTP 缓存(浏览器没有真的发网络请求), Cache-Control 配对时
+  // 第二次访问应该是这个情况——不是每个引擎的 resource timing 都保证在这个时间点已经落盘, 尽力而为。
+  let fromCache = false;
+  try {
+    const entries = performance.getEntriesByType('resource').filter((r) => r.name.endsWith(url.replace('./', '/')));
+    const last = entries[entries.length - 1];
+    if (last && last.transferSize === 0 && last.decodedBodySize > 0) fromCache = true;
+  } catch {}
+  if (!resp.body || !resp.body.getReader) { const buf = await resp.arrayBuffer(); onProgress?.(buf.byteLength, total, fromCache); return buf; }
+  const reader = resp.body.getReader();
+  const chunks = []; let received = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value); received += value.byteLength;
+    onProgress?.(received, total, fromCache);
+  }
+  const out = new Uint8Array(received); let offset = 0;
+  for (const c of chunks) { out.set(c, offset); offset += c.byteLength; }
+  return out.buffer;
+}
+const fmtMB = (n) => (n / 1048576).toFixed(1);
+
 let kaspaWasm = null, blake2b = null, wasmLoadError = null, wasmPinStatus = null;
 try {
-  const wasmResp = await fetch('./vendor/kaspa-web/kaspa_bg.wasm');
-  const wasmBytes = await wasmResp.arrayBuffer();
+  const wasmBytes = await fetchWithProgress('./vendor/kaspa-web/kaspa_bg.wasm', (received, total, fromCache) => {
+    renderBox('resolverStatus', fromCache
+      ? `下载 kaspa-wasm…(浏览器缓存命中, 秒开)`
+      : total
+        ? `下载 kaspa-wasm… ${fmtMB(received)} / ${fmtMB(total)} MB (${((received / total) * 100).toFixed(0)}%)`
+        : `下载 kaspa-wasm… 已收到 ${fmtMB(received)} MB(服务器未带 Content-Length, 无法算百分比)`);
+  });
   const digest = await crypto.subtle.digest('SHA-256', wasmBytes);
   const actualSha256 = Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
   if (actualSha256 !== EXPECTED_KASPA_WASM_SHA256) {
@@ -68,23 +115,33 @@ try {
   commissionSplitSourceSha256 = Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
 } catch (e) { silSourceLoadError = e; }
 
-// silverc-wasm(真编译器)——独立于上面 kaspa-wasm 的加载, 失败不阻塞页面其余功能, 只让订单地址推导
-// 那一步自动降级到 order-template.js 固定偏移覆写路径(resolve-order-browser.js, 已验证的备选,
-// 现在带 fail-closed sha256 核对, 见上面那段注释)。
-let silvercWasm = null, silvercWasmLoadError = null;
-try {
-  const wasmResp = await fetch('./vendor/silverc-wasm/silverc_lang_bg.wasm');
-  const wasmBytes = await wasmResp.arrayBuffer();
-  const digest = await crypto.subtle.digest('SHA-256', wasmBytes);
-  const actualSha256 = Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
-  if (actualSha256 !== EXPECTED_SILVERC_WASM_SHA256) {
-    throw new Error(`silverc_lang_bg.wasm sha256 不符 pin(期望 ${EXPECTED_SILVERC_WASM_SHA256}, 实际 ${actualSha256}) — 拒绝使用, 降级到 order-template.js 路径`);
-  }
-  const wasmMod = await import('./vendor/silverc-wasm/silverc_lang.js');
-  const compiledModule = await WebAssembly.compile(wasmBytes); // 同上, 同一大小限制/同一份已核验字节
-  await wasmMod.default({ module_or_path: compiledModule });
-  silvercWasm = wasmMod;
-} catch (e) { silvercWasmLoadError = e; }
+// silverc-wasm(真编译器, 5.3MB)——D-034 §8 B段⑧d(Bettor 派工): 不再跟 kaspa-wasm 一起在页面
+// 打开时就下载。只有验签/验链这些"看报价"的功能需要的是 kaspa-wasm(11.4MB), silverc-wasm
+// 只在用户真的点了"确认并推导订单地址"之后才用得到——大部分只是打开链接看一眼报价的访问者,
+// 从没点过那个按钮, 让他们也扛这 5.3MB 完全是浪费(弱网下尤其明显, 见 A 段实测)。
+// 改成惰性加载: 第一次调用 loadSilvercWasm() 才真的 fetch, 之后的调用复用同一个 Promise(不会
+// 点两次按钮就下载两次)。失败不阻塞页面其余功能, 只让订单地址推导那一步自动降级到
+// order-template.js 固定偏移覆写路径(resolve-order-browser.js, 已验证的备选, 带 fail-closed
+// sha256 核对, 见上面 EXPECTED_SILVERC_WASM_SHA256 那段注释)。
+let silvercWasm = null, silvercWasmLoadError = null, _silvercLoadPromise = null;
+function loadSilvercWasm(onProgress) {
+  if (_silvercLoadPromise) return _silvercLoadPromise; // 已经在下载/已经下载完, 不重复发请求
+  _silvercLoadPromise = (async () => {
+    try {
+      const wasmBytes = await fetchWithProgress('./vendor/silverc-wasm/silverc_lang_bg.wasm', onProgress);
+      const digest = await crypto.subtle.digest('SHA-256', wasmBytes);
+      const actualSha256 = Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
+      if (actualSha256 !== EXPECTED_SILVERC_WASM_SHA256) {
+        throw new Error(`silverc_lang_bg.wasm sha256 不符 pin(期望 ${EXPECTED_SILVERC_WASM_SHA256}, 实际 ${actualSha256}) — 拒绝使用, 降级到 order-template.js 路径`);
+      }
+      const wasmMod = await import('./vendor/silverc-wasm/silverc_lang.js');
+      const compiledModule = await WebAssembly.compile(wasmBytes); // 同 kaspa-wasm 那段注释, 同一大小限制/同一份已核验字节
+      await wasmMod.default({ module_or_path: compiledModule });
+      silvercWasm = wasmMod;
+    } catch (e) { silvercWasmLoadError = e; }
+  })();
+  return _silvercLoadPromise;
+}
 
 function el(id) { return document.getElementById(id); }
 function renderBox(id, html) { el(id).innerHTML = html; }
@@ -110,10 +167,9 @@ async function main() {
     renderBox('resolverStatus', `<span class="bad">✗ 浏览器版 kaspa-wasm 未部署或未通过 sha256 核对(${wasmLoadError.message})——见 vendor/kaspa-web/README.md 的构建命令; 这不是静默降级, 缺失/不符时不做任何验证${pinNote}</span>`);
     return;
   }
-  const silvercNote = silvercWasm
-    ? `订单地址推导用<b>真 silverc 编译器</b>(silverscript-lang 编 wasm32, 主路径)`
-    : `<span class="warn">⚠ silverc-wasm 未加载(${silvercWasmLoadError?.message || '未知原因'})——订单地址推导降级用固定偏移覆写路径(order-template.js, 已验证备选, 见 resolve-order-browser.js 头注)</span>`;
-  renderBox('resolverStatus', `<span class="ok">✓ 浏览器原生 kaspa-wasm 已加载, sha256 核对通过(${wasmPinStatus.actualSha256.slice(0, 16)}…)——报价验签/签名链验证/渠道地址解析全部在本页运行, 全程不依赖 resolver.mjs; ${silvercNote}</span>`);
+  // silverc-wasm(5.3MB)不在这里报状态——它现在惰性加载, 点"确认并推导订单地址"才会真的下载(见
+  // loadSilvercWasm 头注), 这个时间点它还没开始下载, 不是"加载失败", 别混着说。
+  renderBox('resolverStatus', `<span class="ok">✓ 浏览器原生 kaspa-wasm 已加载, sha256 核对通过(${wasmPinStatus.actualSha256.slice(0, 16)}…)——报价验签/签名链验证/渠道地址解析全部在本页运行, 全程不依赖 resolver.mjs。订单地址推导用的 silverc 编译器(5.3MB)会在你点"确认并推导订单地址"时才按需下载, 不占这次页面打开的载荷。</span>`);
 
   const { quoteRef, rawChannelAddrs, chainEntries } = parseAttributionLink(location.href);
   renderBox('linkInfo', `<b>归因链接参数</b><table>
@@ -166,9 +222,18 @@ async function main() {
   // 🔴 退款地址输入框(第一轮 E2E 真实测试发现的真 bug, 不是设计文档里就想到的): CommissionSplit
   // ctor 结构上要求"付款人退款地址"这个字段, 而这个值只有消费者自己知道、报价里不可能预先填好——
   // 消费者填完之后再点按钮触发订单地址推导, 不是自动跑。
-  document.getElementById('resolveOrderBtn').addEventListener('click', () => {
+  document.getElementById('resolveOrderBtn').addEventListener('click', async () => {
     const refundAddr = document.getElementById('refundAddr').value.trim();
     if (!refundAddr) { renderBox('orderInfo', '<span class="bad">✗ 退款地址必填——订单地址的推导结构上依赖它(ctor 字段), 不是可选项</span>'); return; }
+    // D-034 §8 B段⑧d: 这里才真的去下载 silverc-wasm(惰性加载, 头一次点这个按钮才发请求, 之后复用)。
+    renderBox('orderInfo', '正在加载 silverc 编译器…');
+    await loadSilvercWasm((received, total, fromCache) => {
+      renderBox('orderInfo', fromCache
+        ? '加载 silverc 编译器…(浏览器缓存命中, 秒开)'
+        : total
+          ? `加载 silverc 编译器… ${fmtMB(received)} / ${fmtMB(total)} MB (${((received / total) * 100).toFixed(0)}%)`
+          : `加载 silverc 编译器… 已收到 ${fmtMB(received)} MB`);
+    });
     try {
       const resolved = RB.resolveRulesForOrder(kaspaWasm, feeSplitLib, quote, verifiedChain);
       const finalRoles = resolved.payoutLeaves.map(r => ({ amountSompi: r.amountSompi, spk: r.spk }));
@@ -177,7 +242,8 @@ async function main() {
         deadlineMs: Date.now() + Number(quote.deadline_offset_ms || 259200000),
         maxSplitFeeSompi: BigInt(quote.max_split_fee_sompi), maxRefundFeeSompi: BigInt(quote.max_refund_fee_sompi),
       };
-      // 主路径: 真 silverc 编译器(wasm32)。降级: order-template.js 固定偏移覆写(silverc-wasm 未加载时)。
+      // 主路径: 真 silverc 编译器(wasm32)。降级: order-template.js 固定偏移覆写(silverc-wasm 加载失败时,
+      // 见 silvercWasmLoadError——上面 loadSilvercWasm() 已经 await 过, 到这里加载已经有确定结果了)。
       const usedWasmCompiler = !!(silvercWasm && commissionSplitSource);
       const order = usedWasmCompiler
         ? RW.deriveCommissionOrderAddress(kaspaWasm, silvercWasm, commissionSplitSource, orderCfg)
