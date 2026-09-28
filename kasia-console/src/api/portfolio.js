@@ -121,6 +121,11 @@ async function _aggregateForRelay(relay, fastify) {
   const kaspa = walletData?.kaspa || { address: relay.address, balance: 0 };
   const chains = walletData?.chains || [];
 
+  // D-035 补缺口(2026-09-28, Bettor 批): KTT v2 持仓——起在最前面, 跟下面 Aave/HL/Aevo/Polymarket
+  // 的网络请求并行跑(在函数末尾才 await), 不额外拖长这条已经是"逐段 await"的既有链路(Bettor 补点①:
+  // 不得让整个 /api/portfolio/unified 变慢)。
+  const kttPromise = _getKttHoldings(relay.id, base);
+
   // 2a) Compute stable token total across all chains (USDT + USDC)
   let stableTotalUsd = 0;
   for (const c of chains) {
@@ -226,6 +231,9 @@ async function _aggregateForRelay(relay, fastify) {
     defiTotalUsd += polymarket.approxValueUsd;
   }
 
+  // 上面提前起的 kttPromise 在这里收(已经跟 Aave/HL/Aevo/Polymarket 的网络请求并行跑过了)。
+  const ktt = await kttPromise;
+
   return {
     kaspa,
     chains,
@@ -239,7 +247,33 @@ async function _aggregateForRelay(relay, fastify) {
     exchangeLocks,
     polymarket,
     openPositions,
+    ktt,
   };
+}
+
+// ── KTT v2 holdings(D-035 补缺口, 只读) ──
+async function _getKttHoldings(relayId, base) {
+  let pubkeyResp;
+  try {
+    pubkeyResp = await fetch(`${base}/api/relay/${relayId}/pubkey`, { signal: AbortSignal.timeout(5000) }).then(r => r.json());
+  } catch (e) {
+    return { error: `pubkey fetch failed: ${e.message}` };
+  }
+  if (!pubkeyResp?.ok || !pubkeyResp.x_only_pubkey) {
+    return { error: pubkeyResp?.error || 'pubkey derive failed' };
+  }
+  let holdingsResp;
+  try {
+    holdingsResp = await fetch(`${base}/api/ktt/holdings?owner_hex=${pubkeyResp.x_only_pubkey}`, { signal: AbortSignal.timeout(5000) }).then(r => r.json());
+  } catch (e) {
+    return { error: `holdings fetch failed: ${e.message}` };
+  }
+  if (!holdingsResp?.ok) {
+    return { error: holdingsResp?.error || 'holdings query failed' };
+  }
+  const all = holdingsResp.holdings || [];
+  const unspent = all.filter(h => !h.spent_txid);
+  return { ownerHex: pubkeyResp.x_only_pubkey, unspent, spentCount: all.length - unspent.length };
 }
 
 // ── KANet Exchange fund locks (display-only) ──
