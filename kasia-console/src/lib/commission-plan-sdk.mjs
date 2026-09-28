@@ -557,6 +557,144 @@ export function buildCommissionRefundTx(protocol, fundingUtxo, currentPmtMs, saf
 }
 
 // ──────────────────────────────────────────────────────────────────────────
+// D-034 §9 服务订单托管: createServiceEscrowProtocol(J2, 2026-09-28; Owner 2026-09-28 批 v0.2
+// 修订, 设计稿 docs/2026-09-28-j2-service-order-escrow-design-v0.2.md, Bettor 二次零 MUST 施工令)。
+//
+// v0.2 建议-3(不复制 CommissionSplit 的 N 角色 require): buyer_confirm 整笔转给一个【先单独用
+// createCommissionSplitProtocol() 算好的下游实例】——本函数第一步就是调它, `payer_refund_pk` 设成
+// 买家地址(Bettor 二次批复原话"两跳里 CommissionSplit 的 payer_refund_pk 设为买家"——万一下游那份
+// CommissionSplit 自己的角色表验证出问题, 它自己的 refund() 出口退的是买家, 不是卡死或退错人)。
+// ServiceEscrow 本体因此不再持有角色表, 只烤三个地址(下游 CommissionSplit 地址 / 买家退款地址 /
+// 服务方 timeout 直付地址)+ 到期分法 bps + 到期 DAA 分数(建议-4)。
+// ──────────────────────────────────────────────────────────────────────────
+
+export const SERVICE_ESCROW_CONTRACT_NAME = 'ServiceEscrow';
+export const SERVICE_ESCROW_SIL_PATH = new URL('./sil-v1/ServiceEscrow.sil', import.meta.url).pathname.replace(/^\/([A-Za-z]):/, '$1:');
+
+export const MAINNET_BPS = 10; // 主网目标出块率(Bettor 给的数字, 72h=259200s×10=2,592,000 DAA 已核对)
+export const SERVICE_ESCROW_DEFAULT_TIMEOUT_BUYER_BPS = 9900; // 默认买家 99%(设计稿 MUST-1)
+export const SERVICE_ESCROW_DEFAULT_DEADLINE_HOURS = 72; // 同 DEFAULT_DEADLINE_MS 的小时数, 改用 DAA 后仍是同一个默认值
+
+/** hoursToDaa — 建议-4: 报价写小时(人类可读), 换算成 DAA 分数增量(不是绝对分数, 调用方自己加上
+ * currentDaaScore)。命名常量 MAINNET_BPS, 不是魔法数字。 */
+export function hoursToDaa(hours) {
+  return Math.round(Number(hours) * 3600 * MAINNET_BPS);
+}
+
+// 🔴 MUST-2(设计稿): 最小托管订单额改按 KIP-9 storage mass 实测(simnet 接主网参数 v2.0.1 二分法),
+// 公式已作废(网络费公式对 storage mass 这个"跟金额倒数相关"的量是错的抽象层, 主网真实撞过"近清空
+// 找零被拒"的证据, 设计稿 v0.2 §MUST-2 原文)。实测方法+脚本见
+// kasia-console/scratch/_j2_service_escrow_simnet_test/storage_mass_binary_search.mjs(直接从矿工
+// 巨额 UTXO 出发广播目标形状的输出, 找零腿巨大、对 KIP-9 调和和贡献≈0, 只用来触发对候选值本身的
+// 拒收判定; 二分法收敛到 mempool 恰好由 OK 翻 FAIL 的那个 sompi 值)。
+//
+// 🔴 施工期真实发现(不是公式也不是一次性数字, 如实记录): 连续三次独立跑同一个二分法, buyer_confirm
+// 单输出的边界分别测到 ~10.08M / ~29.75M / <10M sompi——同一个拓扑、同一台节点, 边界会漂移。最合理
+// 的解释匹配 Bettor 原话"mempool 按 mempool_block_mass_limits.storage 拒"里的"block"字样: 这更像是
+// 对 mempool/出块当下已排队storage mass 的【聚合预算】判定, 不是每笔交易独立不变的硬阈值——跟当时
+// mempool 里还压着多少别的低价值交易有关(这次二分法自己密集广播几十笔候选值, 会互相干扰读数)。
+// ⇒ 不存在一个"精确到 sompi"的常量可以诚实地写死。下面两个值 = 三次实测里最差(最高)的读数再加安全
+// 余量(不是估计公式, 是"三次实测最高值 × ~1.7-2 倍余量"), 当【保守下限】用——真实生产环境不会有本次
+// 二分法自己制造的那种密集拥堵, 实际可用下限大概率更低, 但"登记为下限"要的是安全, 不是紧贴边缘。
+export const SERVICE_ESCROW_MIN_BUYER_CONFIRM_SOMPI = 50_000_000n; // 0.5 KAS(三次实测最高读数 ~29.75M sompi + 余量)
+export const SERVICE_ESCROW_MIN_TIMEOUT_DEFAULT_SOMPI = 2_000_000_000n; // 20 KAS(amountAfterFee 总额, 9900bps 下实测 ~1,010,591,000 sompi + 余量; bps 变了要重测, 这个数只对默认 9900bps 有效)
+
+/**
+ * MUST-2 下限校验(供控制台/结账页在真正建单前调用, 挡在"广播了才发现 storage mass 拒绝"前面)。
+ * @param {bigint|string} priceSompi 订单总价(即将充值进 escrow 的金额)
+ * @param {bigint|string} maxRefundFeeSompi 跟 createServiceEscrowProtocol 传的必须一致
+ * @param {number} [timeoutBuyerBps] 默认 9900——非默认值时 SERVICE_ESCROW_MIN_TIMEOUT_DEFAULT_SOMPI 这个
+ *   实测数字不保真(只在 9900bps 下测过), 会退化成"按总额比例粗略换算", 仅供参考不是真实测值
+ */
+export function validateServiceEscrowMinAmount(priceSompi, maxRefundFeeSompi, timeoutBuyerBps) {
+  const price = BigInt(priceSompi);
+  const maxRFee = BigInt(maxRefundFeeSompi);
+  const bps = timeoutBuyerBps != null ? Number(timeoutBuyerBps) : SERVICE_ESCROW_DEFAULT_TIMEOUT_BUYER_BPS;
+  const amountAfterFee = price - maxRFee;
+  if (amountAfterFee <= 0n) return { ok: false, reason: `订单总价(${price})不够扣 max_refund_fee(${maxRFee})` };
+  if (amountAfterFee < SERVICE_ESCROW_MIN_TIMEOUT_DEFAULT_SOMPI) {
+    return { ok: false, reason: `amountAfterFee=${amountAfterFee} 低于 timeout_default 实测下限 ${SERVICE_ESCROW_MIN_TIMEOUT_DEFAULT_SOMPI}(9900bps 口径${bps !== 9900 ? ', 当前 bps=' + bps + ' 非默认值, 该下限仅供参考' : ''})` };
+  }
+  return { ok: true };
+}
+
+// 建议-5: 1% 取整公式(合约/SDK/结账页三处同式, 这里是 SDK 侧的权威实现, 供预览/校验/测试断言共用,
+// 不是各处各写一份)。amountAfterFee 由调用方传入(= totalIn - max_r_fee, 先扣固定网络费上限)。
+export function computeTimeoutSplit(amountAfterFeeSompi, timeoutBuyerBps) {
+  const amt = BigInt(amountAfterFeeSompi);
+  const providerCut = amt * BigInt(10000 - Number(timeoutBuyerBps)) / 10000n;
+  const buyerAmt = amt - providerCut;
+  return { providerCut, buyerAmt };
+}
+
+/**
+ * @param {object} cfg
+ * @param {string} cfg.network
+ * @param {{amountSompi:bigint, spk:Buffer}[]} cfg.finalRoles 下游 CommissionSplit 的角色表(§8 现成产出, 原样转交)
+ * @param {string} cfg.buyerRefundAddress 买家地址——同时是(a)下游 CommissionSplit 的 payerRefundAddress(建议-3),
+ *   (b) ServiceEscrow 本体 provider_cancel/timeout_default 的买家收款地址
+ * @param {string} cfg.providerPayoutAddress 服务方直付地址(timeout_default 那份 1% 直接付, 不经下游 CommissionSplit)
+ * @param {number} cfg.currentDaaScore 现查节点 getBlockDagInfo().virtualDaaScore(建议-4, 不本地算)
+ * @param {number} [cfg.deadlineHours] 默认 72(SERVICE_ESCROW_DEFAULT_DEADLINE_HOURS)
+ * @param {number} [cfg.deadlineDaa] 显式指定绝对 DAA 分数(优先于 deadlineHours, 供测试用小到期窗口)
+ * @param {bigint|string} cfg.maxSplitFeeSompi
+ * @param {bigint|string} cfg.maxRefundFeeSompi
+ * @param {number} [cfg.timeoutBuyerBps] 默认 9900(设计稿 MUST-1)
+ * @param {string} cfg.buyerPubkeyHex 32B x-only pubkey hex(买家 relay 的, 同 D-035 /api/relay/:id/pubkey 派生方式)
+ * @param {string} cfg.providerPubkeyHex 32B x-only pubkey hex(服务方 relay 的, 同上)
+ */
+export function createServiceEscrowProtocol(cfg) {
+  if (!cfg.buyerPubkeyHex || !/^[0-9a-fA-F]{64}$/.test(cfg.buyerPubkeyHex)) throw new Error('createServiceEscrowProtocol: buyerPubkeyHex 必须是 32 字节 hex');
+  if (!cfg.providerPubkeyHex || !/^[0-9a-fA-F]{64}$/.test(cfg.providerPubkeyHex)) throw new Error('createServiceEscrowProtocol: providerPubkeyHex 必须是 32 字节 hex');
+  const timeoutBuyerBps = cfg.timeoutBuyerBps != null ? Number(cfg.timeoutBuyerBps) : SERVICE_ESCROW_DEFAULT_TIMEOUT_BUYER_BPS;
+  if (!(timeoutBuyerBps >= 0 && timeoutBuyerBps <= 10000)) throw new Error(`createServiceEscrowProtocol: timeoutBuyerBps=${timeoutBuyerBps} 必须在 0-10000`);
+  if (cfg.currentDaaScore == null) throw new Error('createServiceEscrowProtocol: currentDaaScore 必须现查节点传入(建议-4, 不接受本地算的近似值)');
+
+  // ① 下游 CommissionSplit 实例——角色分账全部交给它, payer_refund_pk = 买家(设计稿建议-3/Bettor 二次批复)
+  const commissionProtocol = createCommissionSplitProtocol({
+    network: cfg.network, finalRoles: cfg.finalRoles, payerRefundAddress: cfg.buyerRefundAddress,
+    maxSplitFeeSompi: cfg.maxSplitFeeSompi, maxRefundFeeSompi: cfg.maxRefundFeeSompi,
+    ruleCommitHex: cfg.ruleCommitHex, channelChainCommitmentHex: cfg.channelChainCommitmentHex,
+  });
+
+  const orderNonce = randomBytes(16);
+  const deadlineDaa = cfg.deadlineDaa != null ? Number(cfg.deadlineDaa) : (Number(cfg.currentDaaScore) + hoursToDaa(cfg.deadlineHours ?? SERVICE_ESCROW_DEFAULT_DEADLINE_HOURS));
+  const ruleCommit = cfg.ruleCommitHex ? Buffer.from(cfg.ruleCommitHex, 'hex') : Buffer.alloc(32, 0);
+  const chainCommit = cfg.channelChainCommitmentHex ? Buffer.from(cfg.channelChainCommitmentHex, 'hex') : Buffer.alloc(32, 0);
+  const commissionSpk = spkBytesFromAddress(commissionProtocol.address);
+  const buyerRefundSpk = spkBytesFromAddress(cfg.buyerRefundAddress);
+  const providerPayoutSpk = spkBytesFromAddress(cfg.providerPayoutAddress);
+
+  const ctorParams = [
+    ctorBytesN(padSpk37(commissionSpk)), ctorIntV100(commissionSpk.length),
+    ctorBytesN(padSpk37(buyerRefundSpk)), ctorIntV100(buyerRefundSpk.length),
+    ctorBytesN(padSpk37(providerPayoutSpk)), ctorIntV100(providerPayoutSpk.length),
+    ctorIntV100(BigInt(deadlineDaa)),
+    ctorIntV100(BigInt(cfg.maxSplitFeeSompi)),
+    ctorIntV100(BigInt(cfg.maxRefundFeeSompi)),
+    ctorIntV100(timeoutBuyerBps),
+    ctorBytesN(ruleCommit), ctorBytesN(chainCommit), ctorBytesN(orderNonce),
+    ctorBytesN(Buffer.from(cfg.buyerPubkeyHex, 'hex')), ctorBytesN(Buffer.from(cfg.providerPubkeyHex, 'hex')),
+  ];
+
+  const compiled = compileSilV100(SERVICE_ESCROW_SIL_PATH, ctorParams, SERVICE_ESCROW_CONTRACT_NAME);
+  const redeemScript = Buffer.from(compiled.script);
+  const spk = kaspa.payToScriptHashScript(new Uint8Array(redeemScript));
+  const address = addressFromScriptPublicKey(spk, cfg.network).toString();
+
+  return {
+    ctorParams, redeemScriptHex: redeemScript.toString('hex'), address, orderNonceHex: orderNonce.toString('hex'),
+    entries: compiled._raw.contracts[SERVICE_ESCROW_CONTRACT_NAME].entries,
+    deadlineDaa, timeoutBuyerBps,
+    commissionSplitProtocol: commissionProtocol, commissionSpk, buyerRefundSpk, providerPayoutSpk,
+    buyerPubkeyHex: cfg.buyerPubkeyHex, providerPubkeyHex: cfg.providerPubkeyHex,
+    maxSplitFeeSompi: BigInt(cfg.maxSplitFeeSompi), maxRefundFeeSompi: BigInt(cfg.maxRefundFeeSompi),
+  };
+}
+
+export function computeServiceEscrowOrderAddress(cfg) { return createServiceEscrowProtocol(cfg).address; }
+
+// ──────────────────────────────────────────────────────────────────────────
 // §7 渠道押金 covenant
 // ──────────────────────────────────────────────────────────────────────────
 
