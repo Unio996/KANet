@@ -581,23 +581,31 @@ export function hoursToDaa(hours) {
   return Math.round(Number(hours) * 3600 * MAINNET_BPS);
 }
 
-// 🔴 MUST-2(设计稿): 最小托管订单额改按 KIP-9 storage mass 实测(simnet 接主网参数 v2.0.1 二分法),
-// 公式已作废(网络费公式对 storage mass 这个"跟金额倒数相关"的量是错的抽象层, 主网真实撞过"近清空
-// 找零被拒"的证据, 设计稿 v0.2 §MUST-2 原文)。实测方法+脚本见
-// kasia-console/scratch/_j2_service_escrow_simnet_test/storage_mass_binary_search.mjs(直接从矿工
-// 巨额 UTXO 出发广播目标形状的输出, 找零腿巨大、对 KIP-9 调和和贡献≈0, 只用来触发对候选值本身的
-// 拒收判定; 二分法收敛到 mempool 恰好由 OK 翻 FAIL 的那个 sompi 值)。
-//
-// 🔴 施工期真实发现(不是公式也不是一次性数字, 如实记录): 连续三次独立跑同一个二分法, buyer_confirm
-// 单输出的边界分别测到 ~10.08M / ~29.75M / <10M sompi——同一个拓扑、同一台节点, 边界会漂移。最合理
-// 的解释匹配 Bettor 原话"mempool 按 mempool_block_mass_limits.storage 拒"里的"block"字样: 这更像是
-// 对 mempool/出块当下已排队storage mass 的【聚合预算】判定, 不是每笔交易独立不变的硬阈值——跟当时
-// mempool 里还压着多少别的低价值交易有关(这次二分法自己密集广播几十笔候选值, 会互相干扰读数)。
-// ⇒ 不存在一个"精确到 sompi"的常量可以诚实地写死。下面两个值 = 三次实测里最差(最高)的读数再加安全
-// 余量(不是估计公式, 是"三次实测最高值 × ~1.7-2 倍余量"), 当【保守下限】用——真实生产环境不会有本次
-// 二分法自己制造的那种密集拥堵, 实际可用下限大概率更低, 但"登记为下限"要的是安全, 不是紧贴边缘。
-export const SERVICE_ESCROW_MIN_BUYER_CONFIRM_SOMPI = 50_000_000n; // 0.5 KAS(三次实测最高读数 ~29.75M sompi + 余量)
-export const SERVICE_ESCROW_MIN_TIMEOUT_DEFAULT_SOMPI = 2_000_000_000n; // 20 KAS(amountAfterFee 总额, 9900bps 下实测 ~1,010,591,000 sompi + 余量; bps 变了要重测, 这个数只对默认 9900bps 有效)
+// 🔴 MUST-2(设计稿): 最小托管订单额按 KIP-9 storage mass 实测(simnet 接主网 v2.0.1 参数)。
+// 🔴 v1 版本(已作废, 如实记录): 第一次实测用了 kaspa-wasm 高层 Generator/PaymentOutput API 广播,
+// 三次独立跑同一个二分法测出 buyer_confirm 边界在 ~10M/~30M/<10M sompi 间漂移, 当时误判成"mempool
+// 聚合预算随拥堵波动"——Bettor 读 rusty-kaspa 源码指出真根因: Generator 内部(wallet/core/src/tx/
+// generator/generator.rs:973)用的是 wallet SDK 自己客户端本地的 MAXIMUM_STANDARD_TRANSACTION_MASS
+// =100_000(wallet/core/src/tx/mass.rs:25)当门槛, 比节点真实 prior_block_mass_limits.storage=
+// 500_000(consensus/core/src/config/params.rs:698)严 5 倍, 且 Generator 内部"要不要留找零/找零是否
+// 吸收进手续费"是启发式分支(同一 generator.rs:915-966), 同一候选值因矿工 UTXO 选取细节不同走不同
+// 内部分支——量的是钱包 SDK 自己会摇摆的本地上限, 不是链上真判据, "漂移"是假象。
+// v2(本次): 绕开 Generator, 手搓 Transaction 直接 rpc.submitTransaction(同 spendEntry 手法), storage
+// mass 公式复用 kasia-console/src/lib/proto-mass-ceiling.mjs 的 calcStorageMassExact/utxoPlurality
+// (rusty-kaspa consensus/core/src/mass/mod.rs 逐行移植, NWT 已核对节点 8/8 逐位吻合, D-031 不重造)。
+// 脚本: kasia-console/scratch/_j2_service_escrow_simnet_test/storage_mass_binary_search_v2.mjs——
+// 每个候选值先打印公式预测 storage mass, 再真实广播, 原样贴节点拒绝消息("transaction storage mass
+// of N is larger than max allowed size of 500000", 真实节点报文, 不是钱包 SDK 那句假话)。
+// 公式预测与节点实况【全程逐点吻合】(二分法收敛路径上每一步都核对过, 唯一"不吻合"是本脚本自己用严格
+// `<` 而节点实际是`>`拒绝的边界等号写法差异, 不是公式错——mass 恰好=500000 时节点放行)。
+// 实测(用巨额矿工 UTXO 当输入, 让 input 侧调和项趋近 0, 是【偏保守】的度量——真实 buyer_confirm 的
+// input≈output 量级接近, 调和差会进一步抵消, 真实 mass 只会更低, 不会更高):
+//   buyer_confirm 单输出下限 = 1,999,201 sompi(≈0.02 KAS, 与 Bettor 手算 C/500000≈2,000,000 几乎重合)
+//   timeout_default(9900bps) amountAfterFee 下限 = 201,939,100 sompi(≈2.02 KAS, 与 Bettor "≳2 KAS
+//   量级"手算重合)
+// 下面两个常量 = 实测值 + 安全余量(不再是"漂移读数硬凑", 是精确测出来再留余量):
+export const SERVICE_ESCROW_MIN_BUYER_CONFIRM_SOMPI = 2_500_000n; // 0.025 KAS(实测下限 1,999,201 + ~25% 余量)
+export const SERVICE_ESCROW_MIN_TIMEOUT_DEFAULT_SOMPI = 250_000_000n; // 2.5 KAS(amountAfterFee, 9900bps 下实测 201,939,100 + ~24% 余量)
 
 /**
  * MUST-2 下限校验(供控制台/结账页在真正建单前调用, 挡在"广播了才发现 storage mass 拒绝"前面)。
