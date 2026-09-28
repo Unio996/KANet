@@ -351,8 +351,9 @@
                       :title="(agent.kaspa?.hasMnemonic || agent.kaspa?.hasPrivateKey) ? '发送 KAS' : '此地址无密钥(助记词/私钥都没),无法发送'"
                       class="mt-2 w-full px-2 py-1 rounded text-[10px] bg-warm-100 hover:bg-warm-200 text-ink-600 hover:text-brand-600 border border-warm-200 disabled:opacity-40 disabled:cursor-not-allowed">发送 KAS</button>
 
-              <!-- D-035 补缺口(2026-09-28, Bettor 批): KTT v2 持仓——只读展示, 复用 /api/ktt/holdings
-                   的数据形状与 tokens-list.eta 现成的"已花/未核实"措辞, 不加转账按钮(转账走 /tokens)。 -->
+              <!-- D-035 补缺口(2026-09-28, Bettor 批·NWT 亲审): KTT v2 持仓——只读展示, 复用
+                   /api/ktt/holdings 的数据形状, 不加转账按钮(转账走 /tokens)。状态措辞按 Bettor 审后
+                   要求改: "未核实"读起来像出问题, 改"持有中"+title 说明是本地账未回链核实, 不是异常。 -->
               <div class="mt-3 pt-2 border-t border-warm-100" x-show="agent.ktt">
                 <div class="text-[9px] text-ink-400 uppercase tracking-wider mb-1">KTT v2</div>
                 <div x-show="agent.ktt?.error" class="text-[10px] text-orange-500">KTT 未能查询</div>
@@ -362,8 +363,10 @@
                     <template x-for="h in (agent.ktt?.unspent || [])" :key="h.id">
                       <div class="text-[10px] text-ink-600 flex items-center justify-between mt-0.5">
                         <span class="font-mono truncate" :title="h.p2sh_address" x-text="h.p2sh_address?.slice(0,10) + '...'"></span>
-                        <span class="tabular-nums ml-1" x-text="(Number(h.amount_sompi || 0) / 1e8).toFixed(4)"></span>
-                        <span class="ml-1" :class="h.spent_txid ? 'text-ink-300' : 'text-green-600'" x-text="h.spent_txid ? '已花' : '未核实'"></span>
+                        <span class="tabular-nums ml-1" x-text="(Number(h.amount_sompi || 0) / 1e8).toFixed(4) + ' KAS'"></span>
+                        <span class="ml-1" :class="h.spent_txid ? 'text-ink-300' : 'text-green-600'"
+                              :title="h.spent_txid ? '' : '按本地账记录, 未回链核实'"
+                              x-text="h.spent_txid ? '已花' : '持有中'"></span>
                       </div>
                     </template>
                   </div>
