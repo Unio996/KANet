@@ -13,6 +13,14 @@
   "wasmBindgenTarget": "web",
   "sha256": "868e3f1b247a02b2a2eb39350dfcdd2fe03157c57d99b803b7e9ab2d7bfdc325",
   "sha256Note": "这是 wasm-bindgen 处理后、实际发布到 vendor/silverc-wasm/silverc_lang_bg.wasm 的那份文件的 sha256(不是 cargo build 直接产出、wasm-bindgen 处理前的 target/.../silverscript_lang.wasm——那份中间产物 sha256 是 dc1072377bd34769e7f442e3b5b244b26afeb41c91429077bc52427c9ed356aa, 两者不同, 部署/核验一律对 silverc_lang_bg.wasm 这份成品)。同 kaspa-wasm-web-pin.json 的既有认识: wasm-opt/wasm-bindgen 不保证完全确定性构建, sha256 是防调包指纹(挡'换成另一个完全不同的东西'), 不是唯一同源判据——真正的同源判据是下方 goldenSample + parity 脚本。这是本轮实际构建产出的真实值, 未来重建出不同 sha256 不代表出错, 需走 goldenSample 复核。",
+  "bindingFiles": {
+    "note": "D-034 §8 v0.2.0-test 收尾(Bettor 2026-09-27 指出的可复现性缺口): 同一次 wasm-bindgen 构建还产出这几个非 wasm 绑定文件, 此前没有单独锚定——补上, 打包脚本发布前逐个核对(fail-closed)。silverc-wasm 没有独立 LICENSE 文件(库本身license 条款随 silverscript 仓库, 不是这次构建产物的一部分)。",
+    "files": {
+      "silverc_lang.js": { "sha256": "d67a0977cb97e74f9ed4f2808b29bb1182397aec7267c967528d6af0a535aaf1" },
+      "silverc_lang.d.ts": { "sha256": "f03750534beb4916cef57a070f3f77aee11786eb87042d8ae8fe2431bedfef05" },
+      "silverc_lang_bg.wasm.d.ts": { "sha256": "9cc7c87aff66a4a68bda5f1847bc532d75efc6ce4f10f096a63da318af7c53c1" }
+    }
+  },
   "decision": "D-034 §8 后续票(Bettor 派工 2026-09-27, coord/j2-checkout-pure-static-20260927 · item①(b))——是否/如何纳入正式 D-0XX pin 体系由 Bettor/Owner 决定, 本文件如实记录构建来源与产物指纹, 不代表已获得 pin 权威地位。",
   "productionArtifactPath": "kasia-console/src/lib/checkout-static/vendor/silverc-wasm/(gitignored, 不入 git 历史, 操作者按同目录 README.md 自行构建部署)",
   "envVarOverride": "SILVERC_WASM_SHA256(可选, 覆盖下方 sha256 做本机核验, 同 kaspa-wasm 惯例)",

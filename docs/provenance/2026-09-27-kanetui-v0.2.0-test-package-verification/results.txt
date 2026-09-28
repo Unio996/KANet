@@ -1,0 +1,21 @@
+=== ① 扫码付款(独立 jsqr 解码): PASS ===
+displayedUri=kaspasim:pzyw79mhq68r48mjnzcdesav7xj98z3trqrara5t5wes2j7pk2n5j0qf55zqx?amount=7.5
+decoded=kaspasim:pzyw79mhq68r48mjnzcdesav7xj98z3trqrara5t5wes2j7pk2n5j0qf55zqx?amount=7.5
+consoleErrors=0
+
+=== ② 到账监视 + split: PASS ===
+finalText=订单状态监控(连 ws://127.0.0.1:29940)✓ 订单已完成——收款地址资金已离开(分账或退款已被节点接受)
+consoleErrors=0
+
+=== ③ refund: PASS ===
+finalText=订单状态监控(连 ws://127.0.0.1:29940)✓ 订单已完成——收款地址资金已离开(分账或退款已被节点接受)
+refundAddrBalance=3.99 KAS
+consoleErrors=0
+
+
+========== SUMMARY ==========
+✓ ① 扫码付款(独立 jsqr 解码)
+✓ ② 到账监视 + split
+✓ ③ refund
+
+ALL PASS

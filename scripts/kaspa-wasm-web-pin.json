@@ -11,6 +11,14 @@
   "cargoFeatures": "wasm32-sdk",
   "sha256": "732bdaa3ee8353c026654e9c7dd729674eb1bd064e8a0b8927b4cfb7df859e51",
   "sha256Note": "wasm-opt 优化步骤不是完全确定性构建——同一份源码重新构建，sha256 理论上可能变化（同 D-019 silverc 的 goldenSample 机制面对的同一类问题：Rust/wasm 工具链的非完全可复现构建）。本条目的 sha256 是本轮实际构建产出的真实值，不是猜测或估算；未来若重新构建出不同的 sha256，不代表出错或被调包，需要走下面 goldenSample 同源判据核实，而不是简单比对二进制 sha256 就拒绝。",
+  "bindingFiles": {
+    "note": "D-034 §8 v0.2.0-test 收尾(Bettor 2026-09-27 指出的可复现性缺口)：kaspa_bg.wasm 之外, wasm-bindgen 同一次构建还产出这几个非 wasm 绑定文件, 发布包/checkout.js 都要用到, 此前没有单独锚定——补上, 打包脚本发布前逐个核对(fail-closed, 不匹配拒绝生成发布包)。这几个是 wasm-bindgen 生成的 JS/TS 胶水代码, 不像 .wasm 那样经过 wasm-opt 的非确定性优化, 理论上应当逐字节确定性可复现(同一版 wasm-bindgen + 同一份源码), 但仍走 sha256 锚定而非假设。",
+    "files": {
+      "kaspa.js": { "sha256": "d0f14833f2db9c2fb4145a40e68d6221862a667eef15512e1994c02a5e588b04" },
+      "kaspa.d.ts": { "sha256": "78628cf0abe112d4103e3c66499e49e12881be1cd24f0953076de55f021e1b5d" },
+      "LICENSE": { "sha256": "929edb70a6ba89ae05689d3ee33453fdd63717a9f592038bf3d9420e35b434e6" }
+    }
+  },
   "decision": "D-034 §8 后续票（Bettor 派工 2026-09-27，coord/j2-checkout-pure-static-20260927），尚无正式 D-0XX 编号——是否/如何纳入正式 D-019 pin 体系由 Bettor/Owner 决定，本文件只是如实记录构建来源与产物指纹，不代表已获得 pin 权威地位。",
   "productionArtifactPath": "kasia-console/src/lib/checkout-static/vendor/kaspa-web/（gitignored，不入 git 历史，操作者按同目录 README.md 自行构建部署）",
   "envVarOverride": "KASPA_WASM_WEB_SHA256（可选，覆盖下方 sha256 做本机核验，供构建产物 sha 因非确定性构建而变化时使用，同 silverc pin 的 env 覆盖惯例）",
