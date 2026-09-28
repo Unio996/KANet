@@ -1,4 +1,5 @@
-> **Status**: CURRENT
+> **Status**: SUPERSEDED — 见 `docs/2026-09-28-j2-service-order-escrow-design-v0.2.md`(Owner 2026-09-28
+> 追加 5 点 MUST/建议后的修订版, 结构不推翻, 本文件保留作对照)
 
 # D-034 §9 服务订单托管 — 设计稿 v0.1（只设计不写码）
 
