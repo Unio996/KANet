@@ -1047,6 +1047,25 @@ if (process.send) {
           if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
           return;
         }
+        case 'service_escrow_buyer_confirm':
+        case 'service_escrow_provider_cancel': {
+          // D-034 §9(2026-09-28·Bettor 派工): 两个入口结构相同(1 sig 参数 + 1 输出), 共用同一个 relay
+          // 处理函数——console 侧已经决定 dispatch_tag/输出目的地, relay 只管重新核对 UTXO、签名、广播。
+          const { unlockServiceEscrowSigEntry } = await import('./lib/p2sh.mjs');
+          const wallet = getWallet();
+          const r = await unlockServiceEscrowSigEntry({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
+          if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
+          return;
+        }
+        case 'service_escrow_timeout_default': {
+          // D-034 §9: 到期后任何人可触发, 零签名, 两输出精确金额。lockTime 固定用 cmd.escrow.deadline_daa
+          // (见 unlockServiceEscrowTimeoutDefault 头注, 不接受外部覆盖)。
+          const { unlockServiceEscrowTimeoutDefault } = await import('./lib/p2sh.mjs');
+          const wallet = getWallet();
+          const r = await unlockServiceEscrowTimeoutDefault({ wallet, cmd, networkId: wallet.getNetworkId() });
+          if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
+          return;
+        }
         case 'bshard_consolidate': {
           // 单片全额归集进真 PayoutShard (PS absorb OP_0 + SL consolidate_to_payout OP_1, cov_id-bind destination + CovenantBinding 续).
           const { unlockBshardConsolidate } = await import('./lib/p2sh.mjs');

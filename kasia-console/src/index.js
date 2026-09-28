@@ -106,6 +106,7 @@ import { registerBackupRoutes } from './api/backup.js';
 import { registerBudgetRoutes } from './api/budget.js';
 import { registerAdminRoutes } from './api/admin.js';
 import { registerEscrowRoutes } from './api/escrow.js';
+import { registerServiceEscrowRoutes } from './api/service-escrow.js'; // D-034 §9 ServiceEscrow 控制台签名路径(Bettor 2026-09-28 派工, 复用 D-035 IPC 路径, 不是 escrow.js 那个死的通用 escrow 原型——见 service-escrow.js 头注)
 import { parseLang, getT, isRtl, LANG_NAMES } from './i18n/index.js';
 import { autoStartIfEnabled } from './services/scanner.js';
 import { startAllAdapters, stopAllAdapters } from './services/adapter-launcher.js';
@@ -301,6 +302,7 @@ await registerBackupRoutes(fastify);
 await registerBudgetRoutes(fastify);
 await registerAdminRoutes(fastify);
 await registerEscrowRoutes(fastify);
+await registerServiceEscrowRoutes(fastify);
 
 // NWT-V3 / Qclaude monitor 系统 — route 必须在 fastify.listen 之前注册
 import { registerMonitorRoutes } from './api/monitor-dashboard.js';

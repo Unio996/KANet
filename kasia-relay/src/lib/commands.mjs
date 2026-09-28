@@ -99,6 +99,13 @@ export const COMMAND_TYPES = Object.freeze({
   // 同 bshard genesis-mint 系一贯分工(Console 传导不碰链, Relay 唯一链上出口)。
   KTT_V2_MINT: 'ktt_v2_mint',       // 任意数量铸到任意地址(owner_scheme 0x00 pubkey 或 0x04 covenant-id), 零校验零签名(genesis)
   KTT_V2_TRANSFER: 'ktt_v2_transfer',   // 钱包持有(owner_scheme=0x00)的 KTT 转给另一地址 + 找零, relay 自己的钱包私钥签 checkSig
+  // D-034 §9(2026-09-28·Bettor 派工·Owner"跑通最重要"): ServiceEscrow 控制台签名路径, 复用 D-035
+  // unlockKttV2Transfer 那条"relay 自己钱包私钥签"IPC 路径——console 算好 redeem_script_hex/dispatch_tag/
+  // outputs, relay 只重新核对 UTXO、签名(buyer_confirm/provider_cancel 需要)或不签(timeout_default 零签名)、
+  // 广播。三个入口结构简单(无 State/covenant, 普通 P2SH), 不套 KTT v2 那套 continuation 机制。
+  SERVICE_ESCROW_BUYER_CONFIRM: 'service_escrow_buyer_confirm',       // 买家签名, 单输出转下游 CommissionSplit 地址
+  SERVICE_ESCROW_PROVIDER_CANCEL: 'service_escrow_provider_cancel',   // 服务方签名, 单输出全额退买家
+  SERVICE_ESCROW_TIMEOUT_DEFAULT: 'service_escrow_timeout_default',   // 到期后任何人可触发, 零签名, 两输出精确分账
   BSHARD_CONSOLIDATE: 'bshard_consolidate',                   // PS absorb OP_0 + SL consolidate_to_payout OP_1, cov_id-bind 归集
   BSHARD_CLOSE_ATTEST: 'bshard_close_attest',                 // PayoutShard close_attest OP_1, 委员 pubkey-distinct 背书 payoutRoot
   BSHARD_PAYOUT_CLAIM: 'bshard_payout_claim',                 // PayoutShard claim OP_2, store-payout merkle+nullifier+recipient
@@ -186,6 +193,9 @@ export const COMMAND_PAYLOAD_SCHEMA = Object.freeze({
   [COMMAND_TYPES.BSHARD_GENESIS_MINT_STAKE_CHIP]: ['chip', 'inputs', 'outputs'],
   [COMMAND_TYPES.KTT_V2_MINT]: ['ktt', 'inputs'],
   [COMMAND_TYPES.KTT_V2_TRANSFER]: ['ktt', 'inputs', 'outputs'],
+  [COMMAND_TYPES.SERVICE_ESCROW_BUYER_CONFIRM]: ['escrow', 'outputs'],
+  [COMMAND_TYPES.SERVICE_ESCROW_PROVIDER_CANCEL]: ['escrow', 'outputs'],
+  [COMMAND_TYPES.SERVICE_ESCROW_TIMEOUT_DEFAULT]: ['escrow', 'outputs'],
   [COMMAND_TYPES.BSHARD_CONSOLIDATE]: ['inputs', 'outputs'],
   [COMMAND_TYPES.BSHARD_CLOSE_ATTEST]: ['witness', 'inputs', 'outputs'],
   [COMMAND_TYPES.BSHARD_PAYOUT_CLAIM]: ['witness', 'inputs', 'outputs'],
@@ -272,6 +282,9 @@ export const COMMAND_FIELD_TYPES = Object.freeze({
   [COMMAND_TYPES.BSHARD_GENESIS_MINT_STAKE_CHIP]: { chip: 'object', inputs: 'object', outputs: 'object' },
   [COMMAND_TYPES.KTT_V2_MINT]: { ktt: 'object', inputs: 'object' },
   [COMMAND_TYPES.KTT_V2_TRANSFER]: { ktt: 'object', inputs: 'object', outputs: 'object' },
+  [COMMAND_TYPES.SERVICE_ESCROW_BUYER_CONFIRM]: { escrow: 'object', outputs: 'array' },
+  [COMMAND_TYPES.SERVICE_ESCROW_PROVIDER_CANCEL]: { escrow: 'object', outputs: 'array' },
+  [COMMAND_TYPES.SERVICE_ESCROW_TIMEOUT_DEFAULT]: { escrow: 'object', outputs: 'array' },
   [COMMAND_TYPES.BSHARD_CONSOLIDATE]: { inputs: 'object', outputs: 'object' },
   [COMMAND_TYPES.BSHARD_CLOSE_ATTEST]: { witness: 'object', inputs: 'object', outputs: 'object' },
   [COMMAND_TYPES.BSHARD_PAYOUT_CLAIM]: { witness: 'object', inputs: 'object', outputs: 'object' },

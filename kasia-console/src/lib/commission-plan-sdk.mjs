@@ -460,7 +460,10 @@ const ctorBytesN = (buf) => ({ kind: 'bytes', value: [...(Buffer.isBuffer(buf) ?
 export function createCommissionSplitProtocol(cfg) {
   const roles = cfg.finalRoles;
   if (roles.length < 1 || roles.length > MAX_ROLES) throw new Error(`createCommissionSplitProtocol: finalRoles.length=${roles.length} 必须在 1-${MAX_ROLES}`);
-  const orderNonce = randomBytes(16);
+  // ServiceEscrow 控制台签名路径(施工期发现)重建下游 CommissionSplit 时要跟建单那一刻的地址完全对上,
+  // orderNonce/deadlineMs 若各自重新随机/取"现在"会算出不同地址——支持显式传入以便确定性重建。
+  const orderNonce = cfg.orderNonceHex ? Buffer.from(cfg.orderNonceHex, 'hex') : randomBytes(16);
+  if (cfg.orderNonceHex && orderNonce.length !== 16) throw new Error(`createCommissionSplitProtocol: orderNonceHex 必须是 16 字节 hex, 实际 ${orderNonce.length} 字节`);
   const deadlineMs = cfg.deadlineMs != null ? Number(cfg.deadlineMs) : (Date.now() + DEFAULT_DEADLINE_MS);
   const ruleCommit = cfg.ruleCommitHex ? Buffer.from(cfg.ruleCommitHex, 'hex') : Buffer.alloc(32, 0);
   const chainCommit = cfg.channelChainCommitmentHex ? Buffer.from(cfg.channelChainCommitmentHex, 'hex') : Buffer.alloc(32, 0);
@@ -656,16 +659,29 @@ export function createServiceEscrowProtocol(cfg) {
   if (!cfg.providerPubkeyHex || !/^[0-9a-fA-F]{64}$/.test(cfg.providerPubkeyHex)) throw new Error('createServiceEscrowProtocol: providerPubkeyHex 必须是 32 字节 hex');
   const timeoutBuyerBps = cfg.timeoutBuyerBps != null ? Number(cfg.timeoutBuyerBps) : SERVICE_ESCROW_DEFAULT_TIMEOUT_BUYER_BPS;
   if (!(timeoutBuyerBps >= 0 && timeoutBuyerBps <= 10000)) throw new Error(`createServiceEscrowProtocol: timeoutBuyerBps=${timeoutBuyerBps} 必须在 0-10000`);
-  if (cfg.currentDaaScore == null) throw new Error('createServiceEscrowProtocol: currentDaaScore 必须现查节点传入(建议-4, 不接受本地算的近似值)');
+  // currentDaaScore 只在需要"现在推算 deadlineDaa"时才必须现查节点传入(建议-4)——deadlineDaa 显式给出时
+  // (控制台签名路径重建已有订单的场景)不需要, 那个值早就定死了, 不该再依赖"现在几点"。
+  if (cfg.currentDaaScore == null && cfg.deadlineDaa == null) throw new Error('createServiceEscrowProtocol: currentDaaScore 必须现查节点传入(建议-4, 不接受本地算的近似值), 或者直接给 deadlineDaa');
+
+  // 控制台签名路径(施工期发现): buyer_confirm/provider_cancel/timeout_default 广播时要重新算出跟建单
+  // 那一刻完全相同的 redeemScriptHex/地址(否则签名对不上真实链上那笔合约)——但 orderNonce/下游
+  // CommissionSplit 自己的 orderNonce/deadlineMs 若每次都随机生成或取"现在", 同样的其余参数也会算出
+  // 不同地址。V1 无状态(不加新表, Owner"跑通最重要"派工), 调用方(控制台 API)必须把建单时返回的
+  // orderNonceHex/commissionDeadlineMs 原样传回来才能重建出同一份合约; 不传时保持原行为(随机/取现在,
+  // 建单场景)。两份 nonce 共用同一个随机源(同一个 16 字节), 不是各自独立随机——够用, 不是同一份合约
+  // 内部复用引发碰撞风险(两个是不同合约实例)。
+  const orderNonce = cfg.orderNonceHex ? Buffer.from(cfg.orderNonceHex, 'hex') : randomBytes(16);
+  if (cfg.orderNonceHex && orderNonce.length !== 16) throw new Error(`createServiceEscrowProtocol: orderNonceHex 必须是 16 字节 hex, 实际 ${orderNonce.length} 字节`);
+  const commissionDeadlineMs = cfg.commissionDeadlineMs != null ? Number(cfg.commissionDeadlineMs) : (Date.now() + DEFAULT_DEADLINE_MS);
 
   // ① 下游 CommissionSplit 实例——角色分账全部交给它, payer_refund_pk = 买家(设计稿建议-3/Bettor 二次批复)
   const commissionProtocol = createCommissionSplitProtocol({
     network: cfg.network, finalRoles: cfg.finalRoles, payerRefundAddress: cfg.buyerRefundAddress,
     maxSplitFeeSompi: cfg.maxSplitFeeSompi, maxRefundFeeSompi: cfg.maxRefundFeeSompi,
     ruleCommitHex: cfg.ruleCommitHex, channelChainCommitmentHex: cfg.channelChainCommitmentHex,
+    orderNonceHex: orderNonce.toString('hex'), deadlineMs: commissionDeadlineMs,
   });
 
-  const orderNonce = randomBytes(16);
   const deadlineDaa = cfg.deadlineDaa != null ? Number(cfg.deadlineDaa) : (Number(cfg.currentDaaScore) + hoursToDaa(cfg.deadlineHours ?? SERVICE_ESCROW_DEFAULT_DEADLINE_HOURS));
   const ruleCommit = cfg.ruleCommitHex ? Buffer.from(cfg.ruleCommitHex, 'hex') : Buffer.alloc(32, 0);
   const chainCommit = cfg.channelChainCommitmentHex ? Buffer.from(cfg.channelChainCommitmentHex, 'hex') : Buffer.alloc(32, 0);
@@ -692,6 +708,7 @@ export function createServiceEscrowProtocol(cfg) {
 
   return {
     ctorParams, redeemScriptHex: redeemScript.toString('hex'), address, orderNonceHex: orderNonce.toString('hex'),
+    commissionDeadlineMs, // 控制台签名路径重建订单必须原样带回这个 + orderNonceHex, 否则算出的地址对不上
     entries: compiled._raw.contracts[SERVICE_ESCROW_CONTRACT_NAME].entries,
     deadlineDaa, timeoutBuyerBps,
     commissionSplitProtocol: commissionProtocol, commissionSpk, buyerRefundSpk, providerPayoutSpk,

@@ -15,7 +15,7 @@ import { estimateMassUpperBound } from './tx-mass-ub.mjs';   // 红线 7 本地�
 
 const {
   RpcClient, Encoding, Address,
-  Transaction, TransactionOutput,
+  Transaction, TransactionOutput, ScriptPublicKey,
   ScriptBuilder, PaymentOutput, Generator,
   payToScriptHashScript, addressFromScriptPublicKey, payToAddressScript,
   createInputSignature, SighashType, kaspaToSompi,
@@ -3104,6 +3104,121 @@ export async function unlockKttV2Transfer(args) {
     _assertTxInvariants([kttUtxo, feeUtxo], signedTx, 'unlockKttV2Transfer', networkId);
     const r = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
     return { txId: r.transactionId, destAddress: destAddr, amountSompi: kttAmount.toString() };
+  } finally { try { await rpc.disconnect(); } catch {} }
+}
+
+// ── D-034 §9(2026-09-28·Bettor 派工·Owner"跑通最重要") ServiceEscrow 控制台签名路径 ──────────────
+// 复用 D-035 unlockKttV2Transfer 那条"relay 自己钱包私钥签"IPC 路径(design v0.2"签名默认"一节原话)。
+// 跟 KTT v2/bshard 的 continuation 合约不同: ServiceEscrow 三个入口(buyer_confirm/provider_cancel/
+// timeout_default)是普通 P2SH、无 State/无 covenant_id、ABI 只有一个 sig 参数或零参数——不需要
+// _encodeKttV2TransferAction 那套 State transpose/owner_input_idx 机制, 照 buyer_confirm/provider_cancel
+// 参数表逐字对齐即可(kasia-console/src/lib/sil-v1/ServiceEscrow.sil, 已 simnet 12/12 广播验证过合约本身)。
+//
+// 纵深防御闸(同 _assertKttPanelRelayAuthorized 一模一样的写法, 独立开关——不跟 KTT panel 共用同一对
+// env, 两个功能各自的"允许哪个 relay 动"必须能分别配置, 不能改一个连带影响另一个)。
+export function _assertServiceEscrowRelayAuthorized(fnName) {
+  if (process.env.SERVICE_ESCROW_ENABLED !== '1') {
+    throw new Error(`${fnName}: ServiceEscrow 控制台签名路径 disabled(SERVICE_ESCROW_ENABLED != 1, 纵深防御拒绝)`);
+  }
+  const selfId = process.env.RELAY_NODE_ID || null;
+  const allowedId = process.env.SERVICE_ESCROW_RELAY_ID || null;
+  if (!allowedId) {
+    throw new Error(`${fnName}: SERVICE_ESCROW_RELAY_ID 未配置(纵深防御拒绝, 不默认放行)`);
+  }
+  if (!selfId || selfId !== allowedId) {
+    throw new Error(`${fnName}: 本 relay(RELAY_NODE_ID=${selfId ?? 'unset'}) 不是 ServiceEscrow 专用 relay(SERVICE_ESCROW_RELAY_ID=${allowedId}), 纵深防御拒绝`);
+  }
+}
+
+/**
+ * ServiceEscrow 入口 action 编码——单个可选 sig 参数 + dispatch_tag, 逐字对照
+ * kasia-console/src/lib/sil-v1/ServiceEscrow.sil 的 buyer_confirm(sig buyerSig)/provider_cancel(sig
+ * providerSig)/timeout_default()三个 ABI(同 kasia-console/scripts/audit/generic-entry-witness.mjs 的
+ * encodeEntryActionGeneric 对这三个入口实际产出的字节序一致, 已用真实 simnet 广播验证过, 这里照抄
+ * 那套已验证的编码顺序写死成 relay 自己的小函数, 不 import kasia-console)。
+ * @param {string} dispatchTagHex 4 字节 hex(不带 0x)
+ * @param {string|null} sigHex65 65 字节 hex(buyer_confirm/provider_cancel 传; timeout_default 传 null)
+ */
+function _encodeServiceEscrowAction(dispatchTagHex, sigHex65) {
+  const b = new ScriptBuilder({ flags: { covenantsEnabled: true } });
+  if (sigHex65 != null) {
+    const buf = Buffer.from(sigHex65.replace(/^0x/, ''), 'hex');
+    if (buf.length !== 65) throw new Error(`_encodeServiceEscrowAction: sig 必须是 65 字节, 实际 ${buf.length}`);
+    b.addData(buf);
+  }
+  b.addData(new Uint8Array(Buffer.from(dispatchTagHex.replace(/^0x/, ''), 'hex')));
+  return b.drain();
+}
+
+/** 从 ServiceEscrow 输出规格(console 算好的 {value_sompi, spk_hex}, spk_hex = 2 字节 version + script,
+ * 同 commission-plan-sdk.mjs spkBytesFromAddress 的产出形状)构造 TransactionOutput。 */
+function _serviceEscrowOutput(spec) {
+  const spkFull = Buffer.from(String(spec.spk_hex).replace(/^0x/, ''), 'hex');
+  const version = spkFull[0] | (spkFull[1] << 8);
+  const scriptOnly = spkFull.subarray(2);
+  return new TransactionOutput(BigInt(spec.value_sompi), new ScriptPublicKey(version, scriptOnly.toString('hex')));
+}
+
+/**
+ * unlockServiceEscrowSigEntry — buyer_confirm/provider_cancel 共用(结构完全相同: 1 个 sig 参数, 1 个
+ * 输出, 只是 dispatch_tag/签名对象/输出目的地不同, console 侧已经决定好这些, relay 只管签名+广播)。
+ * @param {{wallet, cmd:{escrow:{redeem_script_hex, dispatch_tag_hex, outpointTxid, index}, outputs:[{value_sompi, spk_hex}]}, networkId, lockTime}} args
+ */
+export async function unlockServiceEscrowSigEntry(args) {
+  _assertServiceEscrowRelayAuthorized('unlockServiceEscrowSigEntry');
+  const { wallet, cmd, networkId, lockTime = 0n } = args;
+  if (!cmd.outputs || cmd.outputs.length !== 1) throw new Error('unlockServiceEscrowSigEntry: outputs 必须恰好 1 个(buyer_confirm/provider_cancel 合约本身要求 tx.outputs.length==1)');
+  const rpc = await connectRpc(networkId);
+  try {
+    const escrowAddr = _addressFromRedeem(cmd.escrow.redeem_script_hex, networkId);
+    const escrowUtxo = await _matchUtxo(rpc, escrowAddr, cmd.escrow.outpointTxid, cmd.escrow.index);
+    const outputs = cmd.outputs.map(_serviceEscrowOutput);
+    const mk = (sigScriptHex) => new Transaction({
+      version: 1,
+      inputs: [{ previousOutpoint: { transactionId: escrowUtxo.outpoint.transactionId, index: escrowUtxo.outpoint.index }, signatureScript: sigScriptHex, sequence: 0n, sigOpCount: 0, computeBudget: _BSHARD_COMPUTE_BUDGET, ...(sigScriptHex === '' ? { utxo: escrowUtxo } : {}) }],
+      outputs, lockTime: BigInt(lockTime), gas: 0n, subnetworkId: '0000000000000000000000000000000000000000', payload: '',
+    });
+    const unsignedTx = mk('');
+    const rawSig = createInputSignature(unsignedTx, 0, wallet.getPrivateKey(), SighashType.All);
+    const actionHex = _encodeServiceEscrowAction(cmd.escrow.dispatch_tag_hex, _toAbiSig65(rawSig));
+    const sigScript = _combineActionAndRedeem(actionHex, cmd.escrow.redeem_script_hex);
+    const signedTx = mk(sigScript);
+    _assertTxInvariants([escrowUtxo], signedTx, 'unlockServiceEscrowSigEntry', networkId);
+    const r = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
+    return { txId: r.transactionId };
+  } finally { try { await rpc.disconnect(); } catch {} }
+}
+
+/**
+ * unlockServiceEscrowTimeoutDefault — 到期后任何人可触发, 零签名, 两输出精确金额。
+ * 🔴 lockTime 必须是订单自己已经 ctor 烤死的 deadline_daa(不是现查的"当下 DAA")——施工期真实撞出的
+ * 教训(见 docs/2026-09-28-j2-service-order-escrow-design-v0.2.md 交付报告里的记录): 现查当下反而更容易
+ * 撞 check_tx_is_finalized 的"tx.lock_time < 校验时链尖DAA"严格小于判据边界竞态, 订单自己的 deadline
+ * 已经被 waitFor 保证越过、留有稳定余量。console 侧必须把 deadlineDaa 放进 cmd.escrow, relay 直接拿来
+ * 当 lockTime 用, 不接受 lockTime 参数覆盖(避免调用方传错值绕过这条纪律)。
+ * @param {{wallet, cmd:{escrow:{redeem_script_hex, dispatch_tag_hex, outpointTxid, index, deadline_daa}, outputs:[{value_sompi, spk_hex}, {value_sompi, spk_hex}]}, networkId}} args
+ */
+export async function unlockServiceEscrowTimeoutDefault(args) {
+  _assertServiceEscrowRelayAuthorized('unlockServiceEscrowTimeoutDefault');
+  const { wallet, cmd, networkId } = args;
+  if (!cmd.outputs || cmd.outputs.length !== 2) throw new Error('unlockServiceEscrowTimeoutDefault: outputs 必须恰好 2 个(合约要求 tx.outputs.length==2)');
+  if (cmd.escrow.deadline_daa == null) throw new Error('unlockServiceEscrowTimeoutDefault: cmd.escrow.deadline_daa 必须提供(不接受现查当下 DAA 当 lockTime, 见头注)');
+  const rpc = await connectRpc(networkId);
+  try {
+    const escrowAddr = _addressFromRedeem(cmd.escrow.redeem_script_hex, networkId);
+    const escrowUtxo = await _matchUtxo(rpc, escrowAddr, cmd.escrow.outpointTxid, cmd.escrow.index);
+    const outputs = cmd.outputs.map(_serviceEscrowOutput);
+    const mk = (sigScriptHex) => new Transaction({
+      version: 1,
+      inputs: [{ previousOutpoint: { transactionId: escrowUtxo.outpoint.transactionId, index: escrowUtxo.outpoint.index }, signatureScript: sigScriptHex, sequence: 0n, sigOpCount: 0, computeBudget: _BSHARD_COMPUTE_BUDGET, ...(sigScriptHex === '' ? { utxo: escrowUtxo } : {}) }],
+      outputs, lockTime: BigInt(cmd.escrow.deadline_daa), gas: 0n, subnetworkId: '0000000000000000000000000000000000000000', payload: '',
+    });
+    const actionHex = _encodeServiceEscrowAction(cmd.escrow.dispatch_tag_hex, null);
+    const sigScript = _combineActionAndRedeem(actionHex, cmd.escrow.redeem_script_hex);
+    const signedTx = mk(sigScript);
+    _assertTxInvariants([escrowUtxo], signedTx, 'unlockServiceEscrowTimeoutDefault', networkId);
+    const r = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
+    return { txId: r.transactionId };
   } finally { try { await rpc.disconnect(); } catch {} }
 }
 
