@@ -1,0 +1,112 @@
+pragma silverscript ^0.1.0;
+// ServiceEscrow.sil — D-034 §9 服务订单托管 v0.2(J2, 2026-09-28; Owner 2026-09-28 批 v0.2 修订,
+// 设计稿 docs/2026-09-28-j2-service-order-escrow-design-v0.2.md, Bettor 零 MUST 施工令)。
+//
+// 🔴 v0.2 相对 v0.1 的结构性改动(建议-3, Bettor 派工原话"组合不复制"): buyer_confirm 不再照抄
+// CommissionSplit.split() 的 N 角色 require 序列——改为整笔(减手续费上限)转给该订单对应的、已经
+// 单独用 createCommissionSplitProtocol() 算好的 CommissionSplit 地址, 分账逻辑完全交给下游那份
+// 已经审过、我上周刚修完主网 channelSpks 事故的合约。本合约因此收窄成三个近似单输出的入口, 不再
+// 包含任何角色表 ctor 字段。provider_cancel 仍照抄 CommissionSplit.refund() 的单输出校验(去掉到期
+// 检查, 加服务方签名门)。timeout_default 是唯一真正新写的输出形状(到期任何人可触发, 买家/服务方
+// 按 ctor 烤的 bps 精确二分, 见下)。
+//
+// 三条出口(设计稿 §① — 不能直接在 CommissionSplit.sil 上"加入口"的理由不变): CommissionSplit 的
+// split()/refund() 零签名、任何人任何时刻可触发——跟托管新入口共存会让资金一到账就能被旧入口立刻
+// 分掉, 买家确认形同虚设。本合约不含那两个零签名入口。
+//   ① buyer_confirm — 买家签名, 整笔(减手续费上限)转给下游 CommissionSplit 地址(两跳结算,
+//      设计稿建议-3 明确的代价: 多一跳手续费 + 中间态, 换来分账正确性完全不用在本合约重新证明)。
+//   ② provider_cancel — 服务方签名, 随时可触发(不用等到期), 全额退买家地址(仅扣网络手续费上限)。
+//   ③ timeout_default — 到期后任何人可触发, 零签名, 两个输出都是【精确金额】(Bettor 2026-09-28
+//      二次批复原话"两个输出都要 require 精确金额...差 1 sompi 被拒要进负向用例", 不是 `>=` 弹性
+//      风格——因为这里要把同一笔钱切给两个不同的人, 比例必须对给定输入唯一确定)。
+//
+// 🔴 建议-4(截止时间改 DAA 分数, 不用墙钟/PMT): `dl_daa` 是 DAA 分数。
+// 🔴 施工期订正(不是 Bettor 派工原话, 是拿 cli-debugger-v100-3ed9733 单步真跑撞出来的, 如实记录):
+// "temporal() 按数值量级自动分诊" 那句只对底层 kaspa 共识层 CLTV opcode 成立(`tx.lockTime <5e11`
+// =DAA 域/`>=5e11`=ms-epoch 域是节点验证 tx.lockTime 字段的规则)——SilverScript 源码层不是这样:
+// `tx.time`/`tx.daa` 是两个独立字段, 类型不同(`tx.time` 只收 `temporal` 阈值且编译器/生成字节码会
+// 插入 `阈值 >= LOCK_TIME_THRESHOLD(5×10^11)` 的域校验; `tx.daa` 只收裸 `int` 阈值, 不经 temporal()).
+// 最初照抄 CommissionSplit.refund() 的 `require(tx.time >= temporal(dl_ms))` 写成
+// `require(tx.time >= temporal(dl_daa))`——dl_daa 是 DAA 量级(远小于 5×10^11), 编译器插入的域校验
+// 恒失败, 跟到期时间早晚无关(哪怕 dl_daa 设成极端过去值仍失败, 已用 cli-debugger 单步复现确认)。
+// 正确写法: DAA 域用 `require(tx.daa >= dl_daa)`, 不套 temporal()。见 docs/DECL.md/TUTORIAL.md
+// "Time and DAA Locks" 一节 `tx.daa`/`tx.time`/`this.ageDaa` 三态定义。
+// 广播方(SDK/relay)现查节点 `getBlockDagInfo().virtualDaaScore` 设置 `tx.lockTime`, 不是本地算的。
+//
+// 🔴 建议-5(1% 取整公式, 合约/SDK/结账页三处同式): providerCut = floor(amountAfterFee *
+// (10000-timeout_buyer_bps) / 10000); buyerAmt = amountAfterFee - providerCut。
+// amountAfterFee = totalIn - max_r_fee(先扣固定网络费上限, 不是弹性费——这样给定 totalIn 时比例
+// 唯一确定, 才能让"精确金额"这条安全性质成立)。
+
+contract ServiceEscrow(
+    byte[37] commission_split_spk, int commission_split_spk_len,  // buyer_confirm 的转账目标(下游 CommissionSplit 地址, 唯一"两跳"的出口)
+    byte[37] payer_refund_spk, int payer_refund_spk_len,           // provider_cancel/timeout_default 的买家收款地址
+    byte[37] provider_payout_spk, int provider_payout_spk_len,     // 🔴 timeout_default 服务方那份的直付地址(服务方自己的钱包, 不经 CommissionSplit——
+                                                                     // 到期兜底路径没有理由再绕一跳分账, 直接给服务方; 与 buyer_confirm 走 cs_spk 是两条
+                                                                     // 不同性质的出口, 不能共用同一个 ctor 字段, 见交付报告 v0.2 施工订正)
+
+    int      deadline_daa,        // DAA 分数(建议-4), 不是墙钟毫秒
+    int      max_split_fee,
+    int      max_refund_fee,
+    int      timeout_buyer_bps,   // 0-10000, 到期默认买家份额(设计稿 MUST-1, 默认 9900=99%)
+
+    byte[32] rule_commit,                  // 纯审计冗余(指向下游 CommissionSplit 的分账规则承诺), 不参与任何 require
+    byte[32] channel_chain_commitment,     // 纯审计冗余(指向下游签名链摘要), 不参与任何 require
+    byte[16] order_nonce,                  // 强制字段, 防地址碰撞, 不参与任何 require
+
+    byte[32] buyer_pk,                     // buyer_confirm 的签名门
+    byte[32] provider_pk                   // provider_cancel 的签名门
+) {
+    byte[37] cs_spk = commission_split_spk; int cs_len = commission_split_spk_len;
+    byte[37] refund_spk = payer_refund_spk; int refund_len = payer_refund_spk_len;
+    byte[37] provider_spk = provider_payout_spk; int provider_len = provider_payout_spk_len;
+
+    int      dl_daa      = deadline_daa;
+    int      max_s_fee   = max_split_fee;
+    int      max_r_fee   = max_refund_fee;
+    int      buyer_bps   = timeout_buyer_bps;
+    byte[32] rcommit     = rule_commit;
+    byte[32] chain_commit = channel_chain_commitment;
+    byte[16] nonce       = order_nonce;
+
+    // ── ① buyer_confirm — 买家签名, 整笔转给下游 CommissionSplit 地址(建议-3) ──
+    // 🔴 施工期真实发现(不是 Bettor 派工原话, 是搭两跳结算真跑时撞出来的架构必然性, 如实记录):
+    // 这里用【精确】`==` 而不是 CommissionSplit.split()/refund() 那种 `>=`弹性费风格——原因: 下游
+    // CommissionSplit 实例的 role1_amount 是 ctor 阶段就烤死的常量(建这个 ServiceEscrow 订单时,
+    // 下游 CommissionSplit 地址已经用 createCommissionSplitProtocol() 单独算好并烤死), 如果这里
+    // 允许"付出去的钱少扣一点手续费"的弹性, 实际到账 cs_spk 的金额就会跟下游合约 ctor 烤的
+    // recipientsTotal 对不上——CommissionSplit.split() 的 hasChange=false 分支要求
+    // `tx.outputs[0].value == r1_amt`精确匹配, 弹性费会让两跳结算永远兑不上、资金卡死。改成
+    // 固定扣 max_s_fee(同 timeout_default 的扣费风格), 转出金额 = totalIn - max_s_fee 完全确定,
+    // 下游 CommissionSplit 建 ctor 时按这个确定值算角色表即可对上。
+    entry buyer_confirm(sig buyerSig) {
+        require(checkSig(buyerSig, pubkey(buyer_pk)));
+        require(tx.inputs.length == 1);
+        require(tx.outputs.length == 1);
+        require(tx.outputs[0].scriptPubKey == cs_spk.slice(0, cs_len));
+        require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value - max_s_fee);
+    }
+
+    // ── ② provider_cancel — 逐字复用 CommissionSplit.refund() 的单输出校验, 去掉到期检查, 加服务方签名门 ──
+    entry provider_cancel(sig providerSig) {
+        require(checkSig(providerSig, pubkey(provider_pk)));
+        require(tx.inputs.length == 1);
+        require(tx.outputs.length == 1);
+        require(tx.outputs[0].scriptPubKey == refund_spk.slice(0, refund_len));
+        require(tx.outputs[0].value >= tx.inputs[this.activeInputIndex].value - max_r_fee);
+    }
+
+    // ── ③ timeout_default — 唯一真正新写的输出形状: 到期任何人可触发, 两个输出精确金额(建议-5) ──
+    entry timeout_default() {
+        require(tx.daa >= dl_daa);
+        require(tx.inputs.length == 1);
+        require(tx.outputs.length == 2);
+        int amountAfterFee = tx.inputs[this.activeInputIndex].value - max_r_fee;
+        int providerCut = amountAfterFee * (10000 - buyer_bps) / 10000;
+        int buyerAmt = amountAfterFee - providerCut;
+        require(tx.outputs[0].scriptPubKey == provider_spk.slice(0, provider_len)); // 服务方直付地址(不经下游 CommissionSplit——到期兜底没理由再绕一跳)
+        require(tx.outputs[0].value == providerCut);
+        require(tx.outputs[1].scriptPubKey == refund_spk.slice(0, refund_len)); // 买家退款地址
+        require(tx.outputs[1].value == buyerAmt);
+    }
+}
