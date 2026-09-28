@@ -206,7 +206,10 @@ function loadSilvercWasm(onProgress) {
 function el(id) { return document.getElementById(id); }
 function renderBox(id, html) { el(id).innerHTML = html; }
 
-function parseAttributionLink(url) {
+// 导出供回归测试直接调用(同 buildVerifiedChain 的理由: 测试要走 checkout.js 的真实解析代码,
+// 不是自己重新手搓一份 chainEntries/rawChannelAddrs 的等价 shape——那样万一 checkout.js 这边的
+// 解析逻辑本身漂移了, 测试也发现不了)。
+export function parseAttributionLink(url) {
   const u = new URL(url);
   const quoteRef = u.searchParams.get('q');
   const chRaw = u.searchParams.get('ch');
@@ -323,6 +326,40 @@ async function triggerBroadcast(kind, rpc, order, status, connectedUrl, onDone) 
   }
 }
 
+/**
+ * buildVerifiedChain — 主网真实事故修复(2026-09-28, Bettor 核·账本待补): 从签名链条目或裸渠道
+ * 地址构造 verifiedChain, 喂给 resolve-order-browser.js 的 resolveRulesForOrder()。
+ * 🔴 这就是事故根源代码本身(不是事后仿写的一份平行逻辑)——原来的 bug: 这里写的字段名是
+ * `channelSpksHex`(值也真的 hex 编码过), 但 resolve-order-browser.js/commission-plan-sdk.mjs
+ * 两处消费者读的都是 `verifiedChain.channelSpks`(要求原始字节 Uint8Array, 不要 hex)。字段名不对
+ * ⇒ `verifiedChain.channelSpks` 恒 undefined ⇒ resolveRulesForOrder() 里 `channelSpks[i]` 恒 falsy
+ * ⇒ 所有 channel_N 角色全部静默 fold 给 fold_to 目标(通常是 provider)——页面不报错, 因为这条路径
+ * 在结构上就是"没有这个渠道"的正常分支, 不是异常。主网真实实证: txid 24f07ace…(80/10/10 报价,
+ * provider 收了全额 1.0 KAS)。
+ * 🔴 `channelSpksHex` 这个名字是从 resolver.mjs(旧服务端 HTTP JSON 协议, 那边确实需要 hex 是因为
+ * JSON 不能装 Uint8Array, 见该文件 `channelSpksHex`/`hexToBuf` 用法)误抄过来的——浏览器内存对象
+ * 之间传数据不经过 JSON 序列化, 根本不需要 hex 编码这一步, 从源头上这个字段就不该存在。
+ * 修法: 直接用 verifyChain()/dedupAndCapChannelSpks() 返回的 `channelSpks`(已经是 Uint8Array 数组),
+ * 不再转 hex、不再改名。
+ * 导出供回归测试直接调用(NWT/Bettor 要求"从 checkout.js 的真实入口, 不是直接调 resolver")——
+ * main() 本身也调用这同一个函数, 测试跑的就是生产实际执行的这段代码, 不是重新实现一份影子逻辑。
+ * @returns {{ok:boolean, mode:'chain'|'raw', reason?:string, channelSpks?:Uint8Array[], detail:object}}
+ *   detail = 原始 verifyChain()/dedupAndCapChannelSpks() 返回值(供调用方渲染用, 字段不变)。
+ */
+export function buildVerifiedChain(kaspaWasm, blake2b, quote, chainEntries, rawChannelAddrs, network) {
+  if (chainEntries.length) {
+    const entries = chainEntries.map(e => ({ position: e.position, address_spk: verifyCore.b64urlToBytes(e.address_spk_b64), signing_pubkey: verifyCore.b64urlToBytes(e.signing_pubkey_b64), sig: verifyCore.bytesToHex(verifyCore.b64urlToBytes(e.sig_b64)) }));
+    const vc = verifyCore.verifyChain(kaspaWasm, blake2b, quote, entries, network);
+    return vc.ok
+      ? { ok: true, mode: 'chain', channelSpks: vc.channelSpks, detail: vc }
+      : { ok: false, mode: 'chain', reason: vc.reason, detail: vc };
+  }
+  const dc = verifyCore.dedupAndCapChannelSpks(kaspaWasm, rawChannelAddrs);
+  return dc.ok
+    ? { ok: true, mode: 'raw', channelSpks: dc.spks, detail: dc }
+    : { ok: false, mode: 'raw', reason: dc.reason, detail: dc };
+}
+
 async function main() {
   if (wasmLoadError) {
     const pinNote = wasmPinStatus && wasmPinStatus.ok === false
@@ -362,24 +399,21 @@ async function main() {
   if (!quoteOk) return;
 
   const network = quote.network || 'simnet';
-  let verifiedChain;
-  if (chainEntries.length) {
-    const entries = chainEntries.map(e => ({ position: e.position, address_spk: verifyCore.b64urlToBytes(e.address_spk_b64), signing_pubkey: verifyCore.b64urlToBytes(e.signing_pubkey_b64), sig: verifyCore.bytesToHex(verifyCore.b64urlToBytes(e.sig_b64)) }));
-    const vc = verifyCore.verifyChain(kaspaWasm, blake2b, quote, entries, network);
+  const vr = buildVerifiedChain(kaspaWasm, blake2b, quote, chainEntries, rawChannelAddrs, network);
+  if (vr.mode === 'chain') {
+    const vc = vr.detail;
     renderBox('chainInfo', `<b>签名链</b>(浏览器原生验证)<table>
       <tr><td>验证结果</td><td>${vc.ok ? '<span class="ok">✓ 通过</span>' : `<span class="bad">✗ ${vc.reason}</span>`}</td></tr>
       <tr><td>已验证渠道数</td><td>${vc.channelSpks ? vc.channelSpks.length : 0}</td></tr>
     </table><p style="font-size:0.8rem;color:#666">§3.4.4: 一条真实链的前缀本身就是合法链(截断是允许的归因政策, 不是攻击)——如果这里显示的渠道数少于你预期, 可能是正常的截断, 也可能是恶意截断; 唯一能在付款前分辨的手段是核对渠道自己预先公开的地址声明(§3.3), 本参考实现不代为判断, 只如实展示验证结果。</p>`);
-    if (!vc.ok) return;
-    verifiedChain = { ok: true, channelSpksHex: vc.channelSpks.map(verifyCore.bytesToHex) };
   } else {
-    const dc = verifyCore.dedupAndCapChannelSpks(kaspaWasm, rawChannelAddrs);
+    const dc = vr.detail;
     renderBox('chainInfo', `<b>渠道地址(无签名链背书, 浏览器原生解析)</b><table>
       <tr><td>解析结果</td><td>${dc.ok ? '<span class="warn">⚠ 已解析, 但无签名链背书</span>' : `<span class="bad">✗ ${dc.reason}</span>`}</td></tr>
     </table>`);
-    if (!dc.ok) return;
-    verifiedChain = { ok: true, channelSpksHex: dc.spks.map(s => s ? verifyCore.bytesToHex(s) : null) };
   }
+  if (!vr.ok) return;
+  const verifiedChain = { ok: true, channelSpks: vr.channelSpks };
 
   // 订单地址推导现在浏览器原生完成(D-034 §8 后续票①第二轮, order-template.js 固定偏移覆写,
   // 不调用 silverc.exe/resolver.mjs)。
