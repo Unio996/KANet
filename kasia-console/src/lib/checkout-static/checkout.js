@@ -420,7 +420,12 @@ async function renderServiceEscrowOrder(quote, quoteRef) {
   const paymentUri = buildKaspaPaymentUri(se.address, totalSompi);
   const qrSvg = renderQrSvg(paymentUri);
 
-  renderBox('chainInfo', ''); // ServiceEscrow 订单没有多渠道归因/签名链这回事, 清空(避免留着上次渲染的残留)
+  // ServiceEscrow 订单没有多渠道归因/签名链这回事——之前只清空 innerHTML, 但 .box 的边框/内边距
+  // 还在, 报价卡片跟订单卡片之间会多出一个看起来像 bug 的空白框(Owner 批·Bettor 本机复核发现,
+  // 2026-09-29)。整个隐藏(display:none), 不只是清空内容。
+  renderBox('chainInfo', '');
+  const chainInfoEl = document.getElementById('chainInfo');
+  if (chainInfoEl) chainInfoEl.style.display = 'none';
   renderBox('orderInfo', `<b>订单</b>(服务端预算好, 未在本地重算——地址由上面的服务方签名担保)<table>
     <tr><td>收款(托管)地址</td><td><code>${se.address}</code></td></tr>
     <tr><td>应付总额</td><td><code>${totalKas} KAS</code></td></tr>
