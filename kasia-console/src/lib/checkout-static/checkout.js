@@ -379,12 +379,38 @@ function seHexToBytes(hex) {
 let _seMonitorPollTimer = null;
 let _seMonitorBusy = false;
 
-async function renderServiceEscrowOrder(quote) {
+async function renderServiceEscrowOrder(quote, quoteRef) {
+  // Owner 批·三处体验改动(2026-09-29, Bettor Playwright 核主线后发现, 只改展示层, 不动验签/地址/广播逻辑) ──
+  // ① 页头标题(服务订单托管跟即时分账是两回事, 别让买家以为走错了页面)。
+  document.title = 'KANet 服务订单托管 · 结账页(V1 参考实现)';
+  const titleEl = document.getElementById('pageTitle');
+  if (titleEl) titleEl.textContent = 'KANet 服务订单托管 · 结账页(V1 参考实现)';
+  // ② 即时分账专属的"退款地址填空+推导订单地址"输入块——服务订单的退款地址已经在报价里烤死(签名
+  // 担保), 不需要买家现场填、也没有"推导"这一步, 显示这块只会让人误以为还要操作。
+  const refundBox = document.getElementById('refundInputBox');
+  if (refundBox) refundBox.style.display = 'none';
+  // ③ 归因链接参数(那一大段 base64 原文)默认折叠, 点开才看; 报价表里醒目显示服务方签名公钥
+  // (merchant_pubkey_hex)+复制按钮, 旁注核对提示——这是买家唯一能在链接之外独立核实"这确实是
+  // 服务方发的"的手段(签名验证只证明"跟这个公钥配对", 不证明"这个公钥就是真正的服务方")。
+  renderBox('linkInfo', `<details><summary style="cursor:pointer;color:#666;font-size:0.85rem">归因链接参数(原文, 默认折叠——点击展开)</summary>
+    <table style="margin-top:0.5rem"><tr><td>quote 引用</td><td><code style="word-break:break-all">${quoteRef || '(缺失)'}</code></td></tr></table>
+  </details>`);
+
   const quoteOk = verifyCore.verifyQuoteSignature(kaspaWasm, quote);
+  const pubkeyHex = quote.merchant_pubkey_hex || '(缺失)';
   renderBox('quoteInfo', `<b>报价</b>(浏览器原生验签, 无网络请求)<table>
     <tr><td>订单类型</td><td>服务订单托管(ServiceEscrow, D-034 §9)</td></tr>
     <tr><td>服务方签名</td><td>${quoteOk ? '<span class="ok">✓ 验证通过</span>' : '<span class="bad">✗ 验证失败——拒绝展示收款地址</span>'}</td></tr>
-  </table>`);
+    <tr><td>签名者公钥</td><td><code id="seMerchantPubkey" style="word-break:break-all">${pubkeyHex}</code>
+      <button type="button" id="seCopyPubkeyBtn" style="margin-left:0.4rem">复制</button></td></tr>
+  </table>
+  <p style="font-size:0.8rem;color:#b36b00;margin-top:0.4rem">⚠ 请与服务方事先公开的公钥核对, 不一致勿付款——签名验证只证明"报价跟这个公钥配对",
+    不证明"这个公钥就是你要交易的那个服务方"。</p>`);
+  document.getElementById('seCopyPubkeyBtn')?.addEventListener('click', async () => {
+    const btn = document.getElementById('seCopyPubkeyBtn');
+    try { await navigator.clipboard.writeText(pubkeyHex); btn.textContent = '已复制'; setTimeout(() => { btn.textContent = '复制'; }, 1500); }
+    catch { btn.textContent = '复制失败(手动选中)'; }
+  });
   if (!quoteOk) { renderBox('orderInfo', '<span class="bad">✗ 报价签名验证失败, 出于安全考虑不展示收款地址(可能是链接被篡改)</span>'); return; }
 
   const se = quote.service_escrow;
@@ -541,7 +567,7 @@ async function main() {
   // (买家/服务方身份建单时已经定死, 不需要渠道归因/签名链/退款地址填空这一整套)——单独一条分支, 早
   // return, 不跟下面的 CommissionSplit 专属流程混在一起。
   if (quote.order_kind === 'service_escrow') {
-    await renderServiceEscrowOrder(quote);
+    await renderServiceEscrowOrder(quote, quoteRef);
     return;
   }
 
