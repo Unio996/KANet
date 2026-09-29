@@ -107,3 +107,11 @@ export async function getCurrentPmtMs(rpc) {
   const dag = await rpc.getBlockDagInfo();
   return Number(dag.pastMedianTime);
 }
+
+/** 节点当前 DAA 分数——ServiceEscrow.timeout_default 到期判据唯一正确时间源(D-034 §9 建议-4: 用
+ * tx.daa 不用 tx.time/PMT, 同 commission-plan-sdk.mjs createServiceEscrowProtocol 既有纪律: 现查
+ * 节点, 不接受本地算的近似值)。 */
+export async function getCurrentDaaScore(rpc) {
+  const dag = await rpc.getBlockDagInfo();
+  return Number(dag.virtualDaaScore);
+}

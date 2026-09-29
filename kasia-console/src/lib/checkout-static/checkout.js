@@ -26,8 +26,11 @@ import * as feeSplitLib from './vendor/fee-split-browser.mjs';
 import qrcodeFactory from './vendor/qrcode-generator/qrcode.mjs';
 // D-034 §8 B段⑥(Bettor 派工, 2026-09-27): 付款到账后, 浏览器直连节点触发分账/退款——两个入口零签名
 // (covenant 脚本本身就是判据, 不需要买家私钥), 广播前完整三维 mass 预检, 广播后回链核实落地。
-import { connectMonitorRpc, getOrderPaymentStatus, getCurrentPmtMs, REORG_SAFE_MIN_DEPTH } from './monitor.js';
+import { connectMonitorRpc, getOrderPaymentStatus, getCurrentPmtMs, getCurrentDaaScore, REORG_SAFE_MIN_DEPTH } from './monitor.js';
 import { buildCommissionSplitTx, buildCommissionRefundTx } from './broadcast-commission.js';
+// D-034 §9(2026-09-28, Bettor 派工): ServiceEscrow 订单的到期退款——零签名, 逐字复用
+// commission-plan-sdk.mjs::computeTimeoutSplit 的公式(见该文件头注)。
+import { buildServiceEscrowTimeoutDefaultTx } from './broadcast-service-escrow.js';
 import { estimateMassUpperBound } from './vendor/tx-mass-ub-browser.mjs';
 
 // D-034 §8 后续票②(同 D-019 pin 纪律): 启动期核 wasm 二进制 sha256, 不符即拒绝初始化。
@@ -360,6 +363,150 @@ export function buildVerifiedChain(kaspaWasm, blake2b, quote, chainEntries, rawC
     : { ok: false, mode: 'raw', reason: dc.reason, detail: dc };
 }
 
+// ── D-034 §9(2026-09-28/29, Bettor 派工+裁定): ServiceEscrow 订单展示 + 到期退款 ──────────────
+// 架构(跟 Bettor 确认过, 2026-09-29): 不复刻 CommissionSplit 那套"浏览器现场 silverc-wasm 编译推导
+// 地址"的路径(工作量大、非最小改动)——服务端(/api/service-escrow/quote)已经算好整份产物, 链接直接
+// 带完整数据, 页面不重算。安全性靠 Bettor 裁定的签名机制补: 报价必须经服务方(provider)签名
+// (verifyCore.verifyQuoteSignature, 跟 CommissionSplit 复用同一个通用验签函数, 不关心 quote 内部
+// 形状), 验签失败不展示任何收款地址——这是防"链接被篡改, 买家把钱付进攻击者地址"的唯一防线, 页面
+// 本身不在本地重算地址(如实告知, 不冒充"已核对")。
+function seHexToBytes(hex) {
+  const out = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < out.length; i++) out[i] = parseInt(hex.substr(i * 2, 2), 16);
+  return out;
+}
+
+let _seMonitorPollTimer = null;
+let _seMonitorBusy = false;
+
+async function renderServiceEscrowOrder(quote) {
+  const quoteOk = verifyCore.verifyQuoteSignature(kaspaWasm, quote);
+  renderBox('quoteInfo', `<b>报价</b>(浏览器原生验签, 无网络请求)<table>
+    <tr><td>订单类型</td><td>服务订单托管(ServiceEscrow, D-034 §9)</td></tr>
+    <tr><td>服务方签名</td><td>${quoteOk ? '<span class="ok">✓ 验证通过</span>' : '<span class="bad">✗ 验证失败——拒绝展示收款地址</span>'}</td></tr>
+  </table>`);
+  if (!quoteOk) { renderBox('orderInfo', '<span class="bad">✗ 报价签名验证失败, 出于安全考虑不展示收款地址(可能是链接被篡改)</span>'); return; }
+
+  const se = quote.service_escrow;
+  const network = quote.network || 'simnet';
+  const totalSompi = BigInt(se.expected_total_sompi);
+  const totalKas = sompiToKasString(totalSompi);
+  const paymentUri = buildKaspaPaymentUri(se.address, totalSompi);
+  const qrSvg = renderQrSvg(paymentUri);
+
+  renderBox('chainInfo', ''); // ServiceEscrow 订单没有多渠道归因/签名链这回事, 清空(避免留着上次渲染的残留)
+  renderBox('orderInfo', `<b>订单</b>(服务端预算好, 未在本地重算——地址由上面的服务方签名担保)<table>
+    <tr><td>收款(托管)地址</td><td><code>${se.address}</code></td></tr>
+    <tr><td>应付总额</td><td><code>${totalKas} KAS</code></td></tr>
+    <tr><td>到期 DAA 分数</td><td>${se.deadline_daa}</td></tr>
+    <tr><td>到期后服务方份额</td><td>${(10000 - se.timeout_buyer_bps) / 100}%</td></tr>
+  </table>
+  <div style="margin-top:0.75rem">
+    <b>扫码付款</b>(任意 Kaspa 钱包扫描——本页从不持有/传输私钥)<br>
+    <div style="max-width:220px;margin:0.5rem 0">${qrSvg}</div>
+    <div style="font-size:0.8rem;color:#666">付款链接：<br><code style="word-break:break-all">${paymentUri}</code>
+    <button type="button" id="seCopyPaymentUriBtn" style="margin-left:0.4rem">复制</button></div>
+  </div>
+  <p style="font-size:0.85rem;color:#b36b00;margin-top:0.6rem">⚠ 买家确认(buyer_confirm)/服务方取消(provider_cancel)需要签名, 页面本身不持有任何私钥——
+    <b>确认/取消请在 KANet 控制台操作</b>。到期后任何人可触发退款分账(零签名), 见下方"订单状态监控"。</p>`);
+  document.getElementById('seCopyPaymentUriBtn')?.addEventListener('click', async () => {
+    const btn = document.getElementById('seCopyPaymentUriBtn');
+    try { await navigator.clipboard.writeText(paymentUri); btn.textContent = '已复制'; setTimeout(() => { btn.textContent = '复制'; }, 1500); }
+    catch { btn.textContent = '复制失败(手动选中)'; }
+  });
+
+  await startServiceEscrowMonitor(se, totalSompi, network);
+}
+
+async function startServiceEscrowMonitor(se, totalSompi, network) {
+  if (_seMonitorPollTimer) clearInterval(_seMonitorPollTimer);
+  const rpcUrlOverride = new URLSearchParams(location.search).get('rpcUrl') || undefined;
+  renderBox('monitorInfo', '<b>订单状态监控</b><br>连接节点中…');
+  let rpc, connectedUrl;
+  try { ({ rpc, url: connectedUrl } = await connectMonitorRpc(kaspaWasm, { network, rpcUrl: rpcUrlOverride })); }
+  catch (e) { renderBox('monitorInfo', `<b>订单状态监控</b><br><span class="bad">✗ 连接节点失败: ${e.message}</span>`); return; }
+
+  let alreadyFunded = false;
+
+  async function renderMonitorState() {
+    if (_seMonitorBusy) return;
+    let status;
+    try { status = await getOrderPaymentStatus(rpc, se.address, totalSompi); }
+    catch (e) { renderBox('monitorInfo', `<b>订单状态监控</b>(连 ${connectedUrl})<br><span class="bad">✗ 查询失败: ${e.message}</span>`); return; }
+
+    if (status.state === 'unfunded') {
+      if (alreadyFunded) {
+        renderBox('monitorInfo', `<b>订单状态监控</b>(连 ${connectedUrl})<br><span class="ok">✓ 订单已完成——托管地址资金已离开(确认/取消/到期退款已被节点接受)</span>`);
+        clearInterval(_seMonitorPollTimer);
+        return;
+      }
+      renderBox('monitorInfo', `<b>订单状态监控</b>(连 ${connectedUrl})<br>状态: <span class="warn">未到账</span>——等待买家扫码付款`);
+      return;
+    }
+    alreadyFunded = true;
+
+    const receivedKas = sompiToKasString(status.totalSompi);
+    const expectedKas = sompiToKasString(totalSompi);
+    const depthText = status.depth == null ? '未知' : `${status.depth}`;
+    let stateHtml;
+    if (status.state === 'underfunded') stateHtml = `<span class="warn">⚠ 到账不足</span>——已收到 ${receivedKas} KAS, 应付 ${expectedKas} KAS`;
+    else if (status.state === 'overfunded') stateHtml = `<span class="warn">⚠ 超额到账</span>——已收到 ${receivedKas} KAS, 应付 ${expectedKas} KAS`;
+    else stateHtml = `<span class="ok">✓ 已到账</span>——${receivedKas} KAS`;
+
+    let currentDaaScore = null, daaErr = null;
+    try { currentDaaScore = await getCurrentDaaScore(rpc); } catch (e) { daaErr = e.message; }
+    const daaEligibleForTimeout = currentDaaScore != null && currentDaaScore >= se.deadline_daa;
+
+    renderBox('monitorInfo', `<b>订单状态监控</b>(连 ${connectedUrl})<br>
+      状态: ${stateHtml}<br>确认深度: ${depthText}<br>
+      到期 DAA: ${se.deadline_daa}${daaErr ? `(节点 DAA 查询失败: ${daaErr})` : ` · 节点当前 DAA: ${currentDaaScore}`}<br>
+      <div style="margin-top:0.5rem">
+        <button type="button" id="seTriggerTimeoutBtn" ${daaEligibleForTimeout ? '' : 'disabled'}>触发到期退款分账${daaEligibleForTimeout ? '' : '(未到期)'}</button>
+      </div>
+      <p style="font-size:0.8rem;color:#666">到期退款零签名(合约本身是判据, 触发者不需要买家/服务方私钥)——任何人都能触发。买家确认/服务方取消需要在 KANet 控制台操作(需要签名)。</p>`);
+
+    document.getElementById('seTriggerTimeoutBtn')?.addEventListener('click', () => triggerServiceEscrowTimeout(rpc, se, status, connectedUrl, renderMonitorState));
+  }
+
+  await renderMonitorState();
+  _seMonitorPollTimer = setInterval(renderMonitorState, 5000);
+}
+
+async function triggerServiceEscrowTimeout(rpc, se, status, connectedUrl, onDone) {
+  if (_seMonitorBusy) return;
+  _seMonitorBusy = true;
+  const utxo = status.utxos[0];
+  try {
+    renderBox('monitorInfo', `<b>订单状态监控</b>(连 ${connectedUrl})<br>正在构造到期退款分账交易…`);
+    const fundingUtxo = { transactionId: utxo.outpoint.transactionId, index: utxo.outpoint.index, amountSompi: utxo.amountSompi };
+    const currentDaaScore = await getCurrentDaaScore(rpc);
+    const order = {
+      redeemScriptHex: se.redeem_script_hex,
+      entries: se.entries,
+      deadlineDaa: se.deadline_daa,
+      timeoutBuyerBps: se.timeout_buyer_bps,
+      maxRefundFeeSompi: BigInt(se.max_refund_fee_sompi),
+      providerPayoutSpk: seHexToBytes(se.provider_payout_spk_hex),
+      buyerRefundSpk: seHexToBytes(se.buyer_refund_spk_hex),
+    };
+    const built = buildServiceEscrowTimeoutDefaultTx(kaspaWasm, order, fundingUtxo, currentDaaScore);
+
+    renderBox('monitorInfo', `<b>订单状态监控</b>(连 ${connectedUrl})<br>交易已构造, 做三维 mass 预检…`);
+    const massResult = estimateMassUpperBound(built.massShape);
+    const exceeds = massResult.compute > MASS_LIMITS.compute || massResult.storage > MASS_LIMITS.storage || massResult.transient > MASS_LIMITS.transient;
+    if (exceeds) throw new Error(`mass 预检未过: compute=${massResult.compute} storage=${massResult.storage} transient=${massResult.transient}——拒绝广播`);
+
+    renderBox('monitorInfo', `<b>订单状态监控</b>(连 ${connectedUrl})<br>mass 预检通过, 广播中…`);
+    const result = await rpc.submitTransaction({ transaction: built.tx, allowOrphan: false });
+    renderBox('monitorInfo', `<b>订单状态监控</b>(连 ${connectedUrl})<br><span class="ok">✓ 已广播</span> txid=<code>${result.transactionId}</code><br>等待链上核实落地(NO TX NO STATE CHANGE)…`);
+  } catch (e) {
+    renderBox('monitorInfo', `<b>订单状态监控</b>(连 ${connectedUrl})<br><span class="bad">✗ 到期退款失败: ${e.message}</span>`);
+  } finally {
+    _seMonitorBusy = false;
+    setTimeout(onDone, 2000);
+  }
+}
+
 async function main() {
   if (wasmLoadError) {
     const pinNote = wasmPinStatus && wasmPinStatus.ok === false
@@ -389,6 +536,15 @@ async function main() {
     renderBox('quoteInfo', `<span class="bad">✗ 无法解析报价(V1 参考实现只支持 q= 内联 base64 JSON)</span>`);
     return;
   }
+
+  // D-034 §9(2026-09-28/29, Bettor 派工+裁定): ServiceEscrow 订单跟 CommissionSplit 完全是两回事
+  // (买家/服务方身份建单时已经定死, 不需要渠道归因/签名链/退款地址填空这一整套)——单独一条分支, 早
+  // return, 不跟下面的 CommissionSplit 专属流程混在一起。
+  if (quote.order_kind === 'service_escrow') {
+    await renderServiceEscrowOrder(quote);
+    return;
+  }
+
   const quoteOk = verifyCore.verifyQuoteSignature(kaspaWasm, quote);
   renderBox('quoteInfo', `<b>报价</b>(浏览器原生验签, 无网络请求)<table>
     <tr><td>商家签名</td><td>${quoteOk ? '<span class="ok">✓ 验证通过</span>' : '<span class="bad">✗ 验证失败</span>'}</td></tr>

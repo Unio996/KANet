@@ -18,7 +18,11 @@ import { sendCommandAsync } from '../services/relay-manager.js';
 import {
   createServiceEscrowProtocol, computeTimeoutSplit, spkBytesFromAddress,
   SERVICE_ESCROW_DEFAULT_TIMEOUT_BUYER_BPS, validateServiceEscrowMinAmount,
+  canonicalQuoteBytes, verifyQuoteSignature,
 } from '../lib/commission-plan-sdk.mjs';
+import * as kaspa from 'kaspa-wasm';
+
+const { PrivateKey, signMessage } = kaspa;
 
 // ── 开关 + relay 收紧(同 tokens.js kttPanelGate, 独立一套 env, 不跟 KTT panel 共用) ──
 const SERVICE_ESCROW_ENABLED = () => process.env.SERVICE_ESCROW_ENABLED === '1';
@@ -71,8 +75,18 @@ async function fetchEscrowUtxo(rc, address) {
 
 const spkHex = (buf) => Buffer.from(buf).toString('hex');
 
+const spkHexOf = (buf) => Buffer.from(buf).toString('hex');
+
 export async function registerServiceEscrowRoutes(fastify) {
   // ── 建单报价(纯计算, 不碰链, 不需要闸——算出地址给调用方去充值) ──
+  // 🔴 结账页签名(2026-09-28 Bettor 裁定, 会话重启后追加): 结账链接内容可被篡改会让买家把钱付进
+  // 攻击者的托管地址, 是真实损失——照抄 D-034 §8 既有的 signQuote/verifyQuoteSignature 机制(不另起),
+  // 但不直接调用 signQuote 本体(那个函数内部强制跑 CommissionSplit 专属的 validateQuoteMassFeasibility/
+  // validateDepositTerms, 对 ServiceEscrow 的报价形状不适用)——复用它依赖的底层原语
+  // canonicalQuoteBytes(规范化 JSON 排序去掉 signature_hex)+ kaspa-wasm signMessage(schnorr, 同一套
+  // "message=hex(内容)"惯例), verifyQuoteSignature 本身是通用的(不关心 quote 内部形状), 结账页直接
+  // 复用不用改。调用方(建单脚本/后台工具)必须自己持有服务方(provider)私钥并显式传
+  // order.merchantPrivKeyHex 才会签(不传 = 返回未签名报价, 仅供内部/API 调用方使用, 不产出可分享链接)。
   fastify.post('/api/service-escrow/quote', async (request, reply) => {
     try {
       const order = request.body?.order;
@@ -88,7 +102,40 @@ export async function registerServiceEscrowRoutes(fastify) {
         buyerPubkeyHex: order.buyerPubkeyHex, providerPubkeyHex: order.providerPubkeyHex,
         ruleCommitHex: order.ruleCommitHex, channelChainCommitmentHex: order.channelChainCommitmentHex,
       });
-      const minCheck = validateServiceEscrowMinAmount(finalRoles.reduce((a, r) => a + r.amountSompi, 0n) + BigInt(order.maxSplitFeeSompi), BigInt(order.maxRefundFeeSompi), protocol.timeoutBuyerBps);
+      const expectedTotalSompi = finalRoles.reduce((a, r) => a + r.amountSompi, 0n) + protocol.maxSplitFeeSompi;
+      const minCheck = validateServiceEscrowMinAmount(expectedTotalSompi, BigInt(order.maxRefundFeeSompi), protocol.timeoutBuyerBps);
+
+      // 结账页(order_kind 分支)要用到的完整数据——字段集合按 Bettor 裁定"完整 quote(含 order_kind、
+      // 托管地址、timeout_buyer_bps、deadline、最终分润地址)"逐条列, 不多不少。
+      const quoteWithoutSig = {
+        order_kind: 'service_escrow',
+        network: order.network,
+        merchant_pubkey_hex: order.providerPubkeyHex, // 签名者 = 服务方(Bettor 裁定原话)
+        service_escrow: {
+          address: protocol.address,
+          redeem_script_hex: protocol.redeemScriptHex,
+          // 全量传 timeout_default 的 ABI(含 params:[], 不是只挑 dispatch_tag)——
+          // encodeEntryActionGeneric 内部 `for (const p of entryAbi.params)` 需要这个字段可迭代,
+          // 只传 dispatch_tag 会在浏览器端广播时炸 "entryAbi.params is not iterable"。
+          entries: { timeout_default: protocol.entries.timeout_default },
+          deadline_daa: protocol.deadlineDaa,
+          timeout_buyer_bps: protocol.timeoutBuyerBps,
+          max_refund_fee_sompi: protocol.maxRefundFeeSompi.toString(),
+          provider_payout_spk_hex: spkHexOf(protocol.providerPayoutSpk),
+          buyer_refund_spk_hex: spkHexOf(protocol.buyerRefundSpk),
+          expected_total_sompi: expectedTotalSompi.toString(),
+        },
+      };
+      let quote = quoteWithoutSig;
+      let checkoutQuery = null;
+      if (order.merchantPrivKeyHex) {
+        const msgHex = canonicalQuoteBytes(quoteWithoutSig).toString('hex');
+        const signature_hex = signMessage({ message: msgHex, privateKey: new PrivateKey(order.merchantPrivKeyHex) });
+        quote = { ...quoteWithoutSig, signature_hex };
+        if (!verifyQuoteSignature(quote)) throw new Error('内部错误: 刚签完的报价自验签未过(签名/公钥不匹配?)');
+        checkoutQuery = Buffer.from(JSON.stringify(quote), 'utf8').toString('base64');
+      }
+
       return reply.send({
         ok: true,
         address: protocol.address,
@@ -100,7 +147,10 @@ export async function registerServiceEscrowRoutes(fastify) {
         deadline_daa: protocol.deadlineDaa,
         timeout_buyer_bps: protocol.timeoutBuyerBps,
         entries: Object.fromEntries(Object.entries(protocol.entries).map(([k, v]) => [k, v.dispatch_tag])),
+        expected_total_sompi: expectedTotalSompi.toString(),
         min_amount_check: minCheck,
+        quote, // 未签名时 = quoteWithoutSig 原样(无 signature_hex); 签了则含 signature_hex, 可直接喂 verifyQuoteSignature
+        checkout_query: checkoutQuery, // 拼 `checkout.html?q=<这个值>` 即可分享; 未签名时为 null(不产出可分享链接)
       });
     } catch (e) {
       return reply.code(500).send({ ok: false, error: `service-escrow quote failed: ${e.message}` });
