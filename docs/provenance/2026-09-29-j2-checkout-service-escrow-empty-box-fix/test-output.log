@@ -1,0 +1,22 @@
+[diag:step] proc.silverc.compile.bshard-artifacts ms=35 cmd=silverc ok=1 at=2026-09-29T14:06:02.038Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=17 cmd=silverc ok=1 at=2026-09-29T14:06:02.061Z
+PASS ① 页头 <title> 改为"服务订单托管"
+PASS ① <h1> 页头文字同步改为"服务订单托管"
+PASS ② 服务订单页隐藏"退款地址/推导订单地址"输入块
+PASS ②b 服务订单页隐藏空白的 chainInfo 卡片框(不只是清空内容)
+PASS ③ 归因链接参数用 <details> 折叠(默认无 open 属性)
+PASS ③ <details> 确实默认收起(open=false)
+PASS ③ 报价表里显示了签名者公钥
+PASS ③ 显示了"请与服务方事先公开的公钥核对"提示
+PASS ③ 公钥复制按钮真实可点击(clipboard 或至少不报错)
+PASS 订单地址仍正确展示(改动没破坏原有功能)
+PASS 页面全程零 console/page 错误
+PASS 即时分账页标题保持"商品佣金计划"(未被服务订单改动污染)
+PASS 即时分账页 <h1> 保持"商品佣金计划"
+PASS 即时分账页"退款地址/推导订单地址"输入块仍正常显示(不回归)
+PASS 即时分账页归因链接参数仍是原来的展开表格(没有被误套上折叠)
+PASS 即时分账页 chainInfo 卡片仍正常显示(没有被服务订单那条隐藏逻辑误伤)
+PASS 即时分账页订单地址推导仍正常工作(不回归)
+PASS 即时分账页全程零 console/page 错误
+
+=== 结账页三处展示改动(服务订单页+即时分账页不回归): 18 PASS / 0 FAIL ===
