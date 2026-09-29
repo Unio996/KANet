@@ -46,10 +46,12 @@ const CS = 'kasia-console/src/lib/checkout-static';
 // 运行时真正会被 checkout.html 加载到的文件集(依赖图核对方法: checkout.html 只 script 引 checkout.js;
 // checkout.js 静态 import verify-core/resolve-order-browser/resolve-order-wasm/vendor/fee-split-browser
 // /vendor/qrcode-generator/qrcode.mjs(⑤)/monitor.js(⑥)/broadcast-commission.js(⑥)/
-// vendor/tx-mass-ub-browser.mjs(⑥); resolve-order-browser import order-template; fee-split-browser
-// import noble-hashes/blake2b 一条链; broadcast-commission.js import
-// vendor/generic-entry-witness-browser.mjs(⑥); checkout.js fetch 取
-// vendor/sil-source/CommissionSplit.sil)。见本文件头注"维护提醒"。
+// vendor/tx-mass-ub-browser.mjs(⑥)/broadcast-service-escrow.js(D-034 §9, 2026-09-29 补录——checkout.js
+// 已 import 但清单当时漏加, KANet-UI 打 v0.2.2-test 包时发现); resolve-order-browser import
+// order-template; fee-split-browser import noble-hashes/blake2b 一条链; broadcast-commission.js 与
+// broadcast-service-escrow.js 都 import vendor/generic-entry-witness-browser.mjs(⑥, 已在清单里,
+// 两处共用不用重复列); checkout.js fetch 取 vendor/sil-source/CommissionSplit.sil)。
+// 见本文件头注"维护提醒"。
 // 🔴 不含 vendor/*-parity.mjs(generic-entry-witness-browser-parity.mjs / tx-mass-ub-browser-parity.mjs)
 // ——同 wasm-pin-check.mjs/fee-split-browser-parity.mjs 既有排除理由: 纯 Node 侧开发期自检脚本, 裸
 // import kaspa-wasm + 相对路径指回仓库内 kasia-relay/kasia-console/scripts, 离开仓库目录结构就是
@@ -57,6 +59,7 @@ const CS = 'kasia-console/src/lib/checkout-static';
 const RUNTIME_FILES = [
   'checkout.html', 'checkout.js', 'verify-core.js', 'resolve-order-browser.js',
   'resolve-order-wasm.js', 'order-template.js', 'monitor.js', 'broadcast-commission.js',
+  'broadcast-service-escrow.js',
   'vendor/fee-split-browser.mjs',
   'vendor/generic-entry-witness-browser.mjs',
   'vendor/tx-mass-ub-browser.mjs',
