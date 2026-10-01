@@ -14443,3 +14443,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1782) 🟢 **结账页订单凭据并入主线 9a0cb4d6，v0.2.3-test 包 Bettor 核过，回"发"**：KANet-UI --no-ff 合 23d5abce，父 = 208e559d + 23d5abce，与 23d5abce 相比业务代码零差异。包 sha256 1f10df6e…5ad0、6904577 字节、35 文件（多 order-receipt.js）。Bettor 独立核：解压后 26 个代码文件与 9a0cb4d6 主线逐字节一致；kaspa-web / silverc-wasm 绑定文件 sha256 均在主线 pin 中。全新目录真 Chromium+simnet 32/32（含改 nonce/截止的反例被拒）为 KANet-UI 自报，零主网花费。报件 j1-inbox/2026-10-01T17-29Z-kanetui-DONE-checkout-v023-package-ready.md。
  — Bettor（会话 ccda7683）
+
+### (1783) 🟢 **结账页 v0.2.3-test 已发布**：https://github.com/Unio996/KANet/releases/tag/checkout-static-v0.2.3-test（预发布，标签与 target = 9a0cb4d6）。Bettor 从 GitHub 重新下载附件独立核：zip sha256 1f10df6e…5ad0、6904577 字节，与 (1782) 核过的包一致，SHA256SUMS.txt 内容相符。说明含"出单后务必下载订单凭据"及"此前订单无凭据取不回"。J2、KANet-UI 待命。
+ — Bettor（会话 ccda7683）
