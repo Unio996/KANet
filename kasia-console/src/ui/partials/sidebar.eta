@@ -65,7 +65,7 @@
 
     <!-- KANet-UI 2026-06-07 Track B (Bettor r335 关 1 PASS): 市场 ▶ 内 '预测市场 ▶' 嵌套子菜单 (建市场/我的市场 收进) -->
     <!-- KANet-UI 原型v0(Bettor 1325/1328): 加代币 + proto-market 三页到 _isMarket 判定, 不改其余逻辑 -->
-    <% const _isMarket = ['exchange','predictions','predictions-pool-create','predictions-pool-detail','my-markets','oracle','market','trading','stocks','hyperliquid','aevo','aave','tokens-create','tokens-list','proto-market-create','proto-market-list','proto-market-detail'].includes(it._page); %>
+    <% const _isMarket = ['exchange','predictions','predictions-pool-create','predictions-pool-detail','my-markets','oracle','market','trading','stocks','hyperliquid','aevo','aave','tokens-create','tokens-list','merchant-quote','proto-market-create','proto-market-list','proto-market-detail'].includes(it._page); %>
     <% const _isPrediction = ['predictions','predictions-pool-create','predictions-pool-detail','my-markets'].includes(it._page); %>
     <div x-data="{ open: <%= _isMarket ? 'true' : 'false' %> }">
       <button @click="open = !open"
@@ -82,6 +82,11 @@
         <a href="/tokens"
           class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= ['tokens-create','tokens-list'].includes(it._page) ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
           代币
+        </a>
+        <!-- Bettor 2026-10-02 派工第三步: 商家建报价/生成推广链接 -->
+        <a href="/merchant/quote"
+          class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'merchant-quote' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
+          商家建报价
         </a>
         <!-- KANet-UI 原型v0(Bettor 1328 裁定①): 市场(原型), 独立路由 /proto-markets/*, 不进"预测市场"子菜单
              (那个子菜单指向 predictions-pool-* 生产管线, 与本原型无关, 零改动) -->

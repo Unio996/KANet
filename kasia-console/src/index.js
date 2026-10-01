@@ -106,6 +106,7 @@ import { registerBackupRoutes } from './api/backup.js';
 import { registerBudgetRoutes } from './api/budget.js';
 import { registerAdminRoutes } from './api/admin.js';
 import { registerEscrowRoutes } from './api/escrow.js';
+import { registerMerchantQuoteRoutes } from './api/merchant-quote.js'; // 商家建报价/生成推广链接(Bettor 2026-10-02 派工第三步, 纯计算不碰链, 复用 signQuote 与 /api/service-escrow/quote)
 import { registerServiceEscrowRoutes } from './api/service-escrow.js'; // D-034 §9 ServiceEscrow 控制台签名路径(Bettor 2026-09-28 派工, 复用 D-035 IPC 路径, 不是 escrow.js 那个死的通用 escrow 原型——见 service-escrow.js 头注)
 import { parseLang, getT, isRtl, LANG_NAMES } from './i18n/index.js';
 import { autoStartIfEnabled } from './services/scanner.js';
@@ -303,6 +304,7 @@ await registerBudgetRoutes(fastify);
 await registerAdminRoutes(fastify);
 await registerEscrowRoutes(fastify);
 await registerServiceEscrowRoutes(fastify);
+await registerMerchantQuoteRoutes(fastify); // 必须在 registerServiceEscrowRoutes 之后: 服务订单报价内部调用 /api/service-escrow/quote
 
 // NWT-V3 / Qclaude monitor 系统 — route 必须在 fastify.listen 之前注册
 import { registerMonitorRoutes } from './api/monitor-dashboard.js';
@@ -488,6 +490,12 @@ fastify.get('/tokens/create', async (request, reply) => {
   const t = getT(lang);
   const relayNodes = _listRelayNodes();
   return reply.viewAsync('tokens-create', { lang, t, dir: isRtl(lang) ? 'rtl' : 'ltr', relayNodes, _page: 'tokens-create' });
+});
+
+fastify.get('/merchant/quote', async (request, reply) => {
+  const lang = parseLang(request.headers.cookie);
+  const t = getT(lang);
+  return reply.viewAsync('merchant-quote', { lang, t, dir: isRtl(lang) ? 'rtl' : 'ltr', _page: 'merchant-quote' });
 });
 
 fastify.get('/tokens', async (request, reply) => {
