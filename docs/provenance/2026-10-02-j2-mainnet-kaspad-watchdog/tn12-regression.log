@@ -1,0 +1,52 @@
+##### ORIGINAL (HEAD before this change)  (TN12 data dir substituted -> C:\Users\ADMIN\AppData\Local\Temp\wd-reg-old-20261002-051200\data; the real retired dir is not touched)
+### kaspad-watchdog-va.test.ps1
+PASS code2-Fail
+PASS code3-Fail
+PASS code4-Fail
+PASS code5-Fail
+PASS rule72-code6-Unknown-not-Fail
+PASS VA8b-stateReadFail-both-unchanged
+PASS VA8c-cdNull-samePid-fail-closed-brake-KEPT
+==== VA RESULT: pass=25 fail=0 ====
+### kaspad-watchdog-enable-va.test.ps1
+FAIL VA8e2e-spawned-dummy (restartAttempts>=1)
+FAIL VA8e2e-self-brake-KEPT (not reset to 0)
+==== enable-va RESULT: pass=6 fail=2 (kaspadBefore=3 kaspadAfter=3) ====
+### kaspad-rpc-probe.test.mjs
+PASS isAbsolute
+PASS has-separator
+PASS not-drive-relative
+PASS dirname-exists
+==== probe state-path VA: pass=4 fail=0 ====
+
+##### PATCHED (this branch)  (TN12 data dir substituted -> C:\Users\ADMIN\AppData\Local\Temp\wd-reg-new-20261002-051200\data; the real retired dir is not touched)
+### kaspad-watchdog-va.test.ps1
+PASS code2-Fail
+PASS code3-Fail
+PASS code4-Fail
+PASS code5-Fail
+PASS rule72-code6-Unknown-not-Fail
+PASS VA8b-stateReadFail-both-unchanged
+PASS VA8c-cdNull-samePid-fail-closed-brake-KEPT
+==== VA RESULT: pass=25 fail=0 ====
+### kaspad-watchdog-enable-va.test.ps1
+FAIL VA8e2e-spawned-dummy (restartAttempts>=1)
+FAIL VA8e2e-self-brake-KEPT (not reset to 0)
+==== enable-va RESULT: pass=6 fail=2 (kaspadBefore=3 kaspadAfter=3) ====
+### kaspad-rpc-probe.test.mjs
+PASS isAbsolute
+PASS has-separator
+PASS not-drive-relative
+PASS dirname-exists
+==== probe state-path VA: pass=4 fail=0 ====
+
+##### PATCHED re-run of enable-va with KASPAD_MIN_FREE_COMMIT_GB=0 (host free commit was 4GB < default 8GB gate)
+PASS VA8e2e-spawned-dummy (restartAttempts>=1)
+PASS VA8e2e-self-brake-KEPT (not reset to 0)
+PASS negvec-SPAWN-without-TESTMODE-resolves-real-kaspad
+PASS negvec-TESTMODE-false
+PASS VA5-external-brake-reset
+PASS VA-brakeN5-no-6th-spawn (restartAttempts stays MAX)
+PASS VA-brakeN5-no-new-dummy
+PASS constraint-no-real-kaspad-spawned (before==after)
+==== enable-va RESULT: pass=8 fail=0 (kaspadBefore=3 kaspadAfter=3) ====

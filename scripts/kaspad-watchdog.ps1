@@ -14,6 +14,12 @@
 # 用法: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\kaspad-watchdog.ps1
 #   (常驻循环, Ctrl+C 或关窗口停止; 不提供 stop 参数——只启不杀哲学下没有"watchdog杀节点"这回事)
 
+# === Profile (2026-10-02 J2, Bettor dispatch: mainnet watchdog) ===
+# 默认 tn12 = 原行为一字不变。-Profile mainnet (或 env KASPAD_WATCHDOG_PROFILE=mainnet) 切到主网配置, 见下方 "mainnet profile" 块。
+param([string]$Profile = '', [int]$MinFreeCommitGb = 0)
+$wdProfile = if ($Profile) { $Profile } elseif ($env:KASPAD_WATCHDOG_PROFILE) { $env:KASPAD_WATCHDOG_PROFILE } else { 'tn12' }
+if ($wdProfile -ne 'tn12' -and $wdProfile -ne 'mainnet') { throw "kaspad-watchdog: unknown profile '$wdProfile' (tn12|mainnet)" }
+$IS_MAINNET = ($wdProfile -eq 'mainnet')
 $kaspadExe = "D:\kaspad-live\db-4d0a9e30\kaspad.exe"   # D-b exe (sha256 2432C36B...361A95 · Owner 2026-09-05 07:45Z 切换 · 规则 ledger 863/875: 独立子目录分版本、文件名必须仍是 kaspad.exe(判活键 :144) · 回滚 D:\kaspad-live\da-1b3046fb\kaspad.exe sha B73F1415...D5534A 同参数 · P2 flag 见 :47)
 # 🔴 预置改动 (J1tn 2026-07-28, 节点域 owner 自拍; Bettor 频道明示"你那台你自己拍")
 #   borsh RPC 由 0.0.0.0 改绑回环。由来: kaspad 的 borsh RPC 无鉴权, 而 0.0.0.0 让它绑上
@@ -49,7 +55,87 @@ $wlog = "D:\kaspa-tn12-data\kaspad-watchdog.log"
 $stdoutLog = "D:\kaspa-tn12-data\kaspad-stdout.log"
 $stderrLog = "D:\kaspa-tn12-data\kaspad-stderr.log"
 
+# === mainnet profile (只在 -Profile mainnet 生效; tn12 路径不读这块的任何值) ===
+# 主网值 = 账本 (1065) 原命令: D:\rusty-kaspa-v201\kaspad.exe --appdir=D:\kaspa-mainnet-data-v201 --utxoindex
+#   --rpclisten-borsh=127.0.0.1:17110 --rocksdb-cache-size=2048 ; 日志 D:\kaspa-mainnet-data-v201-logs\ 。
+# 全部可由 env 覆盖(验收用 simnet 同款 2.0.1 二进制 + 独立 appdir/端口, 不碰主网节点)。
+$eventLog = $null; $mnAppdir = $null; $mnPort = 0; $mnNetwork = $null; $mnLogDir = $null
+function Get-Cfg($name, $default) { $v = [Environment]::GetEnvironmentVariable($name); if ($v) { return $v } else { return $default } }
+if ($IS_MAINNET) {
+  $mnAppdir  = Get-Cfg 'KASPAD_WATCHDOG_APPDIR'    'D:\kaspa-mainnet-data-v201'
+  $mnPort    = [int](Get-Cfg 'KASPAD_WATCHDOG_RPC_PORT' '17110')
+  $mnNetwork = Get-Cfg 'KASPAD_WATCHDOG_NETWORK'   'mainnet'
+  $mnLogDir  = Get-Cfg 'KASPAD_WATCHDOG_LOGDIR'    'D:\kaspa-mainnet-data-v201-logs'
+  $eventLog  = Get-Cfg 'KASPAD_WATCHDOG_EVENT_LOG' 'D:\kanet-tn12\logs\kaspad-mainnet-watchdog.log'
+  $kaspadExe = Get-Cfg 'KASPAD_WATCHDOG_EXE'       'D:\rusty-kaspa-v201\kaspad.exe'
+  $kaspadArgs = Get-Cfg 'KASPAD_WATCHDOG_ARGS'     "--appdir=$mnAppdir --utxoindex --rpclisten-borsh=127.0.0.1:$mnPort --rocksdb-cache-size=2048"
+  $wlog      = Join-Path $mnLogDir 'kaspad-watchdog.log'
+  $stdoutLog = Join-Path $mnLogDir 'kaspad-stdout.log'
+  $stderrLog = Join-Path $mnLogDir 'kaspad-stderr.log'
+  try { if (-not (Test-Path $mnLogDir)) { New-Item -ItemType Directory -Force -Path $mnLogDir | Out-Null } } catch {}
+  # probe(node 子进程)继承这些 env: 连主网口 + 校验网络身份 + 按 appdir 判"有无本节点进程"(不再按进程名 kaspad.exe)
+  $env:KASPAD_PROBE_URL     = "ws://127.0.0.1:$mnPort"
+  $env:KASPAD_PROBE_NETWORK = $mnNetwork
+  $env:KASPAD_PROBE_STATE   = Join-Path $mnLogDir 'kaspad-probe-state.json'
+  $env:KASPAD_PROBE_APPDIR  = $mnAppdir
+}
+
 function Log($m) { "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') $m" | Out-File $wlog -Append -Encoding UTF8 }
+# mainnet: 起停/拒起/刹车事件另写一行到 $eventLog (D:\kanet-tn12\logs\kaspad-mainnet-watchdog.log); tn12 不写(原行为)。
+function Log-Event($m) {
+  if (-not $IS_MAINNET -or -not $eventLog) { return }
+  try {
+    $d = Split-Path $eventLog
+    if ($d -and -not (Test-Path $d)) { New-Item -ItemType Directory -Force -Path $d | Out-Null }
+    "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') $m" | Out-File $eventLog -Append -Encoding UTF8
+  } catch {}
+}
+
+# === mainnet 判活/拒起 helper (只在 IS_MAINNET 路径调用) ===
+# 判活不按进程名: 本机常驻其它(测试)节点也叫 kaspad.exe。"本节点" = 监听 $mnPort 的 PID 且其 CommandLine 含 --appdir=$mnAppdir。
+function Test-AppdirMatch($cmd, $appdir) {
+  if (-not $cmd -or -not $appdir) { return $false }
+  $norm = ($appdir.TrimEnd('\', '/') -replace '/', '\')
+  $a = ([regex]::Escape($norm)) -replace '\\\\', '[\\/]'
+  return ($cmd -match ('(?i)--appdir[= ]["'']?' + $a + '["'']?(\s|$)'))
+}
+# 返回: PID(有监听) / $null(确认没人监听) / -1(查询本身失败, 未知)。
+# 🔴 查询失败不能当"没人监听": Get-NetTCPConnection/CIM 在本机偶发瞬时失败(验收中实测出现), 若当 $null 会让拒起守卫 fail-open => 口被占时误拉第二个节点。
+#   无匹配(ObjectNotFound)才算 $null; 其它异常重试 3 次仍失败 => -1(调用方按"未知"处理: 守卫拒起, 判活当没认出)。
+function Get-PortOwnerPid($port) {
+  for ($try = 1; $try -le 3; $try++) {
+    try {
+      $c = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction Stop | Select-Object -First 1
+      if ($c) { return [int]$c.OwningProcess }
+      return $null
+    } catch {
+      if ($_.CategoryInfo.Category -eq 'ObjectNotFound') { return $null }
+      if ($try -lt 3) { Start-Sleep -Milliseconds 500 }
+    }
+  }
+  return -1
+}
+function Get-MainnetNodeProc {
+  $own = Get-PortOwnerPid $mnPort
+  if (-not $own -or $own -lt 0) { return $null }
+  try { $p = Get-CimInstance Win32_Process -Filter "ProcessId=$own" -ErrorAction Stop } catch { return $null }
+  if ($p -and $p.Name -ieq 'kaspad.exe' -and (Test-AppdirMatch $p.CommandLine $mnAppdir)) { return $p }
+  return $null
+}
+# 启动前守卫: 返回拒起原因(string)或 $null(可起)。防双开踩库: 口已被占(无论谁) / 同 appdir 进程已在 => 拒起。
+function Get-MainnetStartGuard {
+  $own = Get-PortOwnerPid $mnPort
+  if ($own -and $own -lt 0) { return "guard-unreadable:port-query-failed (fail-closed, not starting)" }
+  if ($own) { return "port-busy:$mnPort owner-pid=$own" }
+  $same = $null
+  for ($try = 1; $try -le 3 -and $null -eq $same; $try++) {
+    try { $same = @(Get-CimInstance Win32_Process -Filter "Name='kaspad.exe'" -ErrorAction Stop | Where-Object { Test-AppdirMatch $_.CommandLine $mnAppdir }) }
+    catch { if ($try -lt 3) { Start-Sleep -Milliseconds 500 } }
+  }
+  if ($null -eq $same) { return "guard-unreadable:process-enum-failed (fail-closed, not starting)" }
+  if ($same.Count -gt 0) { return "same-appdir-running:pid=$($same[0].ProcessId)" }
+  return $null
+}
 
 # MUST-FIX①(NWT红队 live 实测坐实): -RedirectStandardOutput/-RedirectStandardError 同名文件是覆盖写
 # 不是追加写——若不archive, kaspad第二次死会把第一次死因的日志冲掉, 正好复现watchdog要解决的问题。
@@ -81,6 +167,7 @@ $MAX_RESTARTS       = if ($env:KASPAD_WATCHDOG_MAX_RESTARTS)       { [int]$env:K
 $RESTART_WINDOW_SEC = if ($env:KASPAD_WATCHDOG_RESTART_WINDOW_SEC) { [int]$env:KASPAD_WATCHDOG_RESTART_WINDOW_SEC } else { 300 }
 $COOLDOWN_SEC       = if ($env:KASPAD_WATCHDOG_COOLDOWN_SEC)       { [int]$env:KASPAD_WATCHDOG_COOLDOWN_SEC }       else { 1800 }
 $stateFile = if ($env:KASPAD_WATCHDOG_STATE) { $env:KASPAD_WATCHDOG_STATE } else { "D:\kaspa-tn12-data\kaspad-watchdog-state.json" }
+if ($IS_MAINNET -and -not $env:KASPAD_WATCHDOG_STATE) { $stateFile = Join-Path $mnLogDir 'kaspad-watchdog-state.json' }
 $restartAttempts = @()      # 独立于 failCount 的刹车计数 (MUST3): [ @{ ts=[datetime]; pid=[int] } ]
 $cooldownUntil = $null      # crash-loop 触发后的冷却截止
 $script:stateReadFailStreak = 0    # 连续状态读失败 (C: >=3 LOUD)
@@ -101,6 +188,7 @@ function In-Cooldown {
   return ($null -ne $script:cooldownUntil -and (Get-Date) -lt $script:cooldownUntil)
 }
 function Try-BroadcastChannel($msg) {
+  if ($IS_MAINNET) { return }   # mainnet: :3200 频道已随 TN12 退役失效, 只写 watchdog 日志 + 事件日志
   # crash-loop LOUD alert: 频道(console chat send)可用则发, 不可用吞掉不阻塞. relay id 从 env(可选).
   try {
     if ($env:KASPAD_WATCHDOG_ALERT_RELAY) {
@@ -236,7 +324,8 @@ function Invoke-WatchdogTick {
   try {
     # === §3c: L1 进程闸 + 自/外重启判别 (进 verdict 前) ===
     $cur = $null
-    try { $cur = Get-CimInstance Win32_Process -Filter "Name='$procName'" -ErrorAction Stop | Select-Object -First 1 } catch { $cur = $null }
+    if ($IS_MAINNET) { $cur = Get-MainnetNodeProc }
+    else { try { $cur = Get-CimInstance Win32_Process -Filter "Name='$procName'" -ErrorAction Stop | Select-Object -First 1 } catch { $cur = $null } }
     $st = Load-WatchdogState
     if ($null -eq $st) { $script:stateReadFailStreak++ } else { $script:stateReadFailStreak = 0 }
     # === §3c 自/外重启判别 (纯函数 Get-RestartDecision; 见 VA-5/8/8b/8c/8d) ===
@@ -258,10 +347,24 @@ function Invoke-WatchdogTick {
     Save-WatchdogState $newSt | Out-Null
     if ($script:stateReadFailStreak -ge 3) {
       $m = "!!!!! kaspad-watchdog STATE UNREADABLE ${stateReadFailStreak}x !!!!! brake has no memory -> chain-restart risk, OPERATOR: inspect/rm $stateFile"
-      Log $m; Write-Warning $m; Try-BroadcastChannel $m
+      Log $m; Log-Event $m; Write-Warning $m; Try-BroadcastChannel $m
     }
 
     $r = Get-ProbeResult
+    # mainnet: RPC 在答但答的不是"我们的进程"(口上是别人的 / CommandLine 对不上 appdir) => 不算活, 记 Fail(最终由拒起守卫拦住, 不会双开)
+    if ($IS_MAINNET -and $null -eq $cur -and $r.Verdict -in @('Alive', 'Syncing', 'Stalled')) {
+      # 例外: 口主人的 CommandLine 读不到(别的权限上下文起的进程, 本机已见 3 个常驻节点 CommandLine 长度=0) => 无法证明也无法证伪,
+      # 记 Unknown(failCount 不动, 不重启, LOUD 一行), 不冤判成 foreign。
+      $ownPid = Get-PortOwnerPid $mnPort
+      $ownCmd = $null
+      if ($ownPid -and $ownPid -lt 0) { $ownPid = $null }
+      try { if ($ownPid) { $ownCmd = (Get-CimInstance Win32_Process -Filter "ProcessId=$ownPid" -ErrorAction Stop).CommandLine } } catch {}
+      if ($ownPid -and [string]::IsNullOrEmpty($ownCmd)) {
+        $r = @{ Alive = $false; Verdict = 'Unknown'; Code = $r.Code; Reason = "owner-cmdline-unreadable: pid=$ownPid owns port $mnPort but CommandLine is empty/unreadable, identity unverifiable ($($r.Reason))" }
+      } else {
+        $r = @{ Alive = $false; Verdict = 'Fail'; Code = $r.Code; Reason = "foreign-listener: RPC answers on port $mnPort but no kaspad.exe with --appdir=$mnAppdir owns it ($($r.Reason))" }
+      }
+    }
     # NWT: CIM $cur=null 自身【永不】升 Dead; verdict 一律按 probe 退码 (code9=>Dead / code6=>Unknown 冻结 / code0=>Alive).
     # CIM-null 且 probe 非 code9 => WMI/CIM 分歧告警 (RPC 应答=进程在, CIM 是坏的那个), 不强制 Unknown/Dead.
     if ($null -eq $cur -and $r.Code -ne 9) {
@@ -293,10 +396,10 @@ function Invoke-WatchdogTick {
         if ($script:restartAttempts.Count -ge $MAX_RESTARTS -or (In-Cooldown)) {
           if (-not (In-Cooldown)) { $script:cooldownUntil = (Get-Date).AddSeconds($COOLDOWN_SEC) }
           $marker = "!!!!! kaspad CRASH-LOOP DETECTED !!!!! restarts >= $MAX_RESTARTS in ${RESTART_WINDOW_SEC}s (or cooldown) -> STALLED-escalate, NO Start-Process, OPERATOR ACTION NEEDED"
-          Log $marker; Write-Warning $marker; Try-BroadcastChannel $marker
+          Log $marker; Log-Event $marker; Write-Warning $marker; Try-BroadcastChannel $marker
         } else {
           # === memgate (v0.4 §0.5, 不动): 4x backoff 读 free commit, fail-closed skip ===
-          $minGb = if ($env:KASPAD_MIN_FREE_COMMIT_GB) { [int]$env:KASPAD_MIN_FREE_COMMIT_GB } else { 8 }
+          $minGb = if ($MinFreeCommitGb -gt 0) { $MinFreeCommitGb } elseif ($env:KASPAD_MIN_FREE_COMMIT_GB) { [int]$env:KASPAD_MIN_FREE_COMMIT_GB } else { 8 }
           $freeGb = $null
           foreach ($w in @(0,2,5,10)) {
             if ($w -gt 0) { Start-Sleep -Seconds $w }
@@ -307,7 +410,11 @@ function Invoke-WatchdogTick {
             Log "kaspad refuse-start:commit-unknown free=? (FreeVirtualMemory read failed, fail-closed skip, failCount kept)"
           } elseif ($freeGb -lt $minGb) {
             Log "kaspad refuse-start:low-commit free=${freeGb}GB < ${minGb}GB (memory gate skip, failCount kept)"
+          } elseif ($IS_MAINNET -and ($script:startGuardMsg = Get-MainnetStartGuard)) {
+            $gm = "kaspad refuse-start:$($script:startGuardMsg) (mainnet guard, NOT starting, failCount kept)"
+            Log $gm; Log-Event $gm
           } else {
+            Log-Event "kaspad DEAD (>=$FAIL_THRESHOLD fails, code=$($r.Code)) -> starting"
             Log "kaspad DEAD (>=$FAIL_THRESHOLD fails) -> memgate ok free=${freeGb}GB, brake ok ($($script:restartAttempts.Count)/$MAX_RESTARTS), archiving logs + starting canonical (--enable-unsynced-mining)"
             if (-not $TESTMODE) { Archive-IfExists $spawnStdout; Archive-IfExists $spawnStderr }
             $spArgs = @{ FilePath = $spawnExe; ArgumentList = $spawnArgs; WorkingDirectory = (Split-Path $spawnExe); WindowStyle = 'Hidden'; PassThru = $true }
@@ -322,6 +429,7 @@ function Invoke-WatchdogTick {
             $script:restartAttempts += @{ ts = (Get-Date); pid = $proc.Id }   # 记入刹车 (MUST3)
             Save-WatchdogState @{ lastSpawnPid = $proc.Id; lastSpawnCreationDate = $spawnedCd; lastSeenPid = $proc.Id; lastSeenCreated = $spawnedCd } | Out-Null
             Log "Start-Process dispatched, new PID=$($proc.Id) cd=$spawnedCd (brake now $($script:restartAttempts.Count)/$MAX_RESTARTS)"
+            Log-Event "kaspad START dispatched pid=$($proc.Id) (brake $($script:restartAttempts.Count)/$MAX_RESTARTS) exe=$spawnExe"
             Start-Sleep -Seconds $(if ($TESTMODE) { 1 } else { 8 })
             $c = Get-ProbeResult
             if ($c.Verdict -eq 'Alive' -or $c.Verdict -eq 'Syncing') { Log "post-start probe OK/SYNCING: $($c.Reason)" }
@@ -338,12 +446,19 @@ function Invoke-WatchdogTick {
 }
 
 if (-not $env:KASPAD_WATCHDOG_NOLOOP) {  # NOLOOP=1 让 VA harness dot-source 只取函数不进循环; TESTMODE loop 见 MAX_TICKS
+$tickSec = if ($IS_MAINNET -and $env:KASPAD_WATCHDOG_TICK_SEC) { [int]$env:KASPAD_WATCHDOG_TICK_SEC } else { 60 }
+  if ($IS_MAINNET) {
+    # 单实例: 开机+登录两个触发器可能各拉一份; 第二份直接退出(同名 Mutex)。
+    $script:wdMutex = New-Object System.Threading.Mutex($false, ("Global\KANet-Kaspad-Watchdog-mainnet-" + $mnPort))
+    if (-not $script:wdMutex.WaitOne(0)) { Log "another mainnet watchdog instance already running (mutex held) -- exiting"; exit 0 }
+    Log-Event "mainnet watchdog started (port=$mnPort appdir=$mnAppdir exe=$kaspadExe tick=${tickSec}s)"
+  }
 Log "kaspad watchdog started (RPC-liveness judge via kaspad-rpc-probe.mjs, --enable-unsynced-mining + log redirection non-optional, log-archive-on-restart, only-start-never-kill, try/catch loop)"
   $tickCount = 0
   while ($true) {
     Invoke-WatchdogTick
     $tickCount++
     if ($MAX_TICKS -gt 0 -and $tickCount -ge $MAX_TICKS) { Log "TESTMODE: reached MAX_TICKS=$MAX_TICKS, exiting loop"; break }
-    Start-Sleep -Seconds 60
+    Start-Sleep -Seconds $tickSec
   }
 }

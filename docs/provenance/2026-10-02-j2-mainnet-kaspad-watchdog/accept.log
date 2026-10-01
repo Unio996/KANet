@@ -1,0 +1,23 @@
+PASS decoy-kaspad-up (same image name, other appdir/port)
+PASS S1-started-within-180s (took 48s)
+PASS S1-node-commandline-has-appdir
+PASS S1-event-log-has-START
+PASS S1-window-hidden-and-logs-redirected
+PASS S1-decoy-untouched
+PASS S2-alive-not-restarted (same PID owns port)
+PASS S2-no-extra-START
+PASS S3-restarted-within-180s (took 54s)
+PASS S3-decoy-still-alive-and-not-mistaken-for-node
+PASS S3-event-log-DEAD-then-START
+PASS S3-cleanup-port-free
+PASS S4-blocker-is-the-listener-on-node-port
+PASS S4-refused-start-port-busy-logged
+PASS S4-no-kaspad-spawned-on-busy-port
+PASS S4-cleanup-port-free
+PASS S5-refused-start-same-appdir-running-logged
+PASS S5-no-kaspad-spawned
+PASS S5-cleanup-port-free
+PASS S6-crash-loop-brake-fired
+PASS S6-exactly-5-starts-then-brake (starts=5)
+PASS mainnet-port-17110-owner-unchanged-by-test
+==== kaspad-watchdog-mainnet accept: pass=22 fail=0 (workdir C:\Users\ADMIN\AppData\Local\Temp\wd-mn-accept-20261002-050041) ====
