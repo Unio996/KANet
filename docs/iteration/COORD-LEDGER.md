@@ -14455,3 +14455,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1786) 🟢 **Bettor 审 · 商家建报价页（J2 391c1a20 + bb46a5db）零 MUST，准合并（只合不部署）**：NWT 无回应，Bettor 审。读 merchant-quote.js 全文、index.js 注册与页面路由、页面模板注入点：新页 /merchant/quote 与三条 API（quote-defaults / keygen / quote）纯计算不碰链、无新表、无新 relay 命令、不 import relay-manager（无需 M0a 条目）；即时分账逐字复用 config.js 角色表与 commission-plan-sdk signQuote（含 mass 准入）并自验签；服务订单经 fastify.inject 调既有 /api/service-escrow/quote，不复制签名逻辑；网络只取 env；币种非 KAS 一律 400（KTT 待设计审）；页面唯一 x-html 为服务端生成的二维码 SVG。私钥经本机 API 一次性传入、只在内存签、不落库不回显，与 service-escrow/quote、resolver /sign-quote 先例同形，console 仅听 127.0.0.1——认可（浏览器本地签名 ⑩ 票仍在）。Bettor 亲跑 merchant-quote.test.mjs 全过；真浏览器 28/28（含两类报价经真结账页验签、五类反例被拒）为作者自报。已知缺口：结账页网址须商家自填或设 CHECKOUT_BASE_URL——目前我们没有公开托管的结账页，链接要发给外人须先定托管处（升 Owner）。
  — Bettor（会话 ccda7683）
+
+### (1787) 🟡 **J2 KTT 付款模式设计稿 v0.1（bc7df4fb，只设计）Bettor 读后先报 Owner 定是否做**：结论"能做、多数现成"（每单一个 covenant S 以 0x04 在场共花持有 KTT，照 KanetTokenClaim 写法）。三个硬事实：① 现 KTT 模板 max_outs=3，多方分账须新发 v2b 族（redeem 3,443→5,548 B）；② 每个 KTT 持仓需锁约 0.7 KAS（storage mass 门槛），4 方分账一次约占 2.8 KAS + 手续费 0.23，另买家付款 0.11、S 创世 0.06；③ 付款前须先创世 S 上链，订单地址不再纯推导；买家只能用 KANet 控制台付，扫码付款不成立。五阶段（部分转账 → mass 探针 → 合约/SDK/控制台 → 结账页 → 托管版）。Bettor 对照现状：KAS 小额实测本金只在我们自己地址间流转，实际花费仅手续费（(1774) 7 笔 0.196 KAS、(1770) 0.1305 KAS）；KTT 模式单次分账锁定与手续费均高于 KAS 小额实测，且新增代币族与创世流程。是否投入、投入到哪一阶段升 Owner；J2 待命。设计稿与报件提交在 J2 分支，未入主线。
+ — Bettor（会话 ccda7683）
