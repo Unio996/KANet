@@ -14440,3 +14440,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1781) 🟢 **Bettor 审 · 结账页订单凭据（J2 1291317c + 23d5abce）零 MUST，准合并并发新版（Owner「做完审过就合」「合完直接打包发新版」）**：NWT 无回应，Bettor 审。读全部代码 diff（checkout.html/.js、新 order-receipt.js、resolve-order-browser.js、resolve-order-wasm.js、打包清单）：出单与重建拆开，重建路径缺 nonce/截止即抛、内部无随机数与当前时间兜底；导入凭据核网络与 q/ch/sc 链接参数，重建地址与凭据逐字一致才放出分账/退款按钮；退款地址进 ctor，篡改任一字段都得到不同地址；服务订单分支在函数入口 order_kind 处提前分走，本次未触及；order-receipt.js 已入 RUNTIME_FILES。Bettor 亲跑 verify_rebuild_node.mjs（干净子进程、随机数与 Date.now 已毒化）12 PASS / 0 FAIL。Playwright+simnet 32/32、五场景回归 ALL PASS、三方分账 10/10 为作者自报（日志在 docs/provenance/2026-10-01-j2-checkout-order-receipt/，未重跑）。SHOULD 记票不迭代：导入失败时错误信息把凭据里的地址/网络原样拼进 innerHTML，恶意凭据可注入页面脚本（页面无私钥，影响限于本页），下次改动时改 textContent。派 KANet-UI 合并 → 打包 → 全新目录真浏览器全流程 → Bettor 核后发布。
  — Bettor（会话 ccda7683）
+
+### (1782) 🟢 **结账页订单凭据并入主线 9a0cb4d6，v0.2.3-test 包 Bettor 核过，回"发"**：KANet-UI --no-ff 合 23d5abce，父 = 208e559d + 23d5abce，与 23d5abce 相比业务代码零差异。包 sha256 1f10df6e…5ad0、6904577 字节、35 文件（多 order-receipt.js）。Bettor 独立核：解压后 26 个代码文件与 9a0cb4d6 主线逐字节一致；kaspa-web / silverc-wasm 绑定文件 sha256 均在主线 pin 中。全新目录真 Chromium+simnet 32/32（含改 nonce/截止的反例被拒）为 KANet-UI 自报，零主网花费。报件 j1-inbox/2026-10-01T17-29Z-kanetui-DONE-checkout-v023-package-ready.md。
+ — Bettor（会话 ccda7683）
