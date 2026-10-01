@@ -27,6 +27,7 @@ import qrcodeFactory from './vendor/qrcode-generator/qrcode.mjs';
 // D-034 §8 B段⑥(Bettor 派工, 2026-09-27): 付款到账后, 浏览器直连节点触发分账/退款——两个入口零签名
 // (covenant 脚本本身就是判据, 不需要买家私钥), 广播前完整三维 mass 预检, 广播后回链核实落地。
 import { connectMonitorRpc, getOrderPaymentStatus, getCurrentPmtMs, getCurrentDaaScore, REORG_SAFE_MIN_DEPTH } from './monitor.js';
+import { buildOrderReceipt, parseOrderReceipt, receiptLinkMismatch } from './order-receipt.js';
 import { buildCommissionSplitTx, buildCommissionRefundTx } from './broadcast-commission.js';
 // D-034 §9(2026-09-28, Bettor 派工): ServiceEscrow 订单的到期退款——零签名, 逐字复用
 // commission-plan-sdk.mjs::computeTimeoutSplit 的公式(见该文件头注)。
@@ -204,6 +205,31 @@ function loadSilvercWasm(onProgress) {
     } catch (e) { silvercWasmLoadError = e; }
   })();
   return _silvercLoadPromise;
+}
+
+// 订单凭据面板(Owner 2026-10-01 批): 出单时随机 nonce 只存在于本页内存, 不保存 = 地址无法重建 = 到期退款
+// 按钮出不来(订单#1 的 1.0 KAS 因此退不回)。所以出单后醒目展示 nonce/截止时间并提供下载。
+function receiptPanelHtml(r) {
+  return `<div id="receiptPanel" style="margin-top:0.75rem;border:2px solid #b30000;border-radius:6px;padding:0.75rem;background:#fff5f5">
+    <b class="bad">⚠ 请先下载订单凭据——不保存就无法退款!</b><br>
+    <span style="font-size:0.85rem">付款前请务必保存。关闭本页后, 只有凭据能重建这个订单地址; 丢失凭据且订单到期未分账, 资金将无法由本页取回。</span>
+    <table style="margin-top:0.5rem">
+      <tr><td>订单随机数(nonce)</td><td><code id="receiptNonce">${r.order_nonce_hex}</code></td></tr>
+      <tr><td>截止时间</td><td><code id="receiptDeadline">${r.deadline_iso}</code>(${r.deadline_ms} ms)</td></tr>
+      <tr><td>订单地址</td><td><code>${r.order_address}</code></td></tr>
+    </table>
+    <button type="button" id="downloadReceiptBtn" style="margin-top:0.5rem">下载订单凭据(JSON)</button>
+  </div>`;
+}
+function setupReceiptDownload(r) {
+  document.getElementById('downloadReceiptBtn')?.addEventListener('click', () => {
+    const blob = new Blob([JSON.stringify(r, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `kanet-order-receipt-${r.order_address.slice(-12)}.json`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  });
 }
 
 function el(id) { return document.getElementById(id); }
@@ -607,10 +633,10 @@ async function main() {
   // 🔴 退款地址输入框(第一轮 E2E 真实测试发现的真 bug, 不是设计文档里就想到的): CommissionSplit
   // ctor 结构上要求"付款人退款地址"这个字段, 而这个值只有消费者自己知道、报价里不可能预先填好——
   // 消费者填完之后再点按钮触发订单地址推导, 不是自动跑。
-  document.getElementById('resolveOrderBtn').addEventListener('click', async () => {
-    const refundAddr = document.getElementById('refundAddr').value.trim();
-    if (!refundAddr) { renderBox('orderInfo', '<span class="bad">✗ 退款地址必填——订单地址的推导结构上依赖它(ctor 字段), 不是可选项</span>'); return; }
-    // D-034 §8 B段⑧d: 这里才真的去下载 silverc-wasm(惰性加载, 头一次点这个按钮才发请求, 之后复用)。
+  // 出单(issue)与重建(rebuild)共用一套渲染, 区别只在 order 的来源: 出单 = 新 nonce+新 deadline, 并出
+  // 订单凭据; 重建 = 凭据里的 nonce+deadline, 且重建地址必须与凭据里的地址逐字一致才继续(见 order-receipt.js)。
+  async function loadCompilerWithProgress() {
+    // D-034 §8 B段⑧d: 这里才真的去下载 silverc-wasm(惰性加载, 头一次点按钮才发请求, 之后复用)。
     renderBox('orderInfo', '正在加载 silverc 编译器…');
     await loadSilvercWasm((received, total, fromCache) => {
       renderBox('orderInfo', fromCache
@@ -619,27 +645,69 @@ async function main() {
           ? `加载 silverc 编译器… ${fmtMB(received)} / ${fmtMB(total)} MB (${((received / total) * 100).toFixed(0)}%)`
           : `加载 silverc 编译器… 已收到 ${fmtMB(received)} MB`);
     });
+  }
+
+  document.getElementById('resolveOrderBtn').addEventListener('click', async () => {
+    const refundAddr = document.getElementById('refundAddr').value.trim();
+    if (!refundAddr) { renderBox('orderInfo', '<span class="bad">✗ 退款地址必填——订单地址的推导结构上依赖它(ctor 字段), 不是可选项</span>'); return; }
+    await loadCompilerWithProgress();
     try {
+      await showOrder({ refundAddr, receipt: null });
+    } catch (e) {
+      renderBox('orderInfo', `<span class="bad">✗ 订单地址推导失败(${e.message})</span>`);
+    }
+  });
+
+  document.getElementById('importReceiptBtn').addEventListener('click', async () => {
+    try {
+      const file = document.getElementById('receiptFile').files?.[0];
+      if (!file) throw new Error('请先选择订单凭据 JSON 文件');
+      const receipt = parseOrderReceipt(await file.text());
+      if (receipt.network !== network) throw new Error(`凭据网络(${receipt.network})与当前报价网络(${network})不符`);
+      const mism = receiptLinkMismatch(receipt, location.href);
+      if (mism) throw new Error(`凭据对应的归因链接与当前页面不是同一份(参数 ${mism} 不同)——请用凭据里 link 字段的链接打开本页再导入`);
+      await loadCompilerWithProgress();
+      await showOrder({ refundAddr: receipt.refund_address, receipt });
+    } catch (e) {
+      renderBox('orderInfo', `<span class="bad">✗ 凭据导入失败(${e.message})</span>`);
+    }
+  });
+
+  async function showOrder({ refundAddr, receipt }) {
+    {
       const resolved = RB.resolveRulesForOrder(kaspaWasm, feeSplitLib, quote, verifiedChain);
       const finalRoles = resolved.payoutLeaves.map(r => ({ amountSompi: r.amountSompi, spk: r.spk }));
       const orderCfg = {
         network, finalRoles, payerRefundAddress: refundAddr,
-        deadlineMs: Date.now() + Number(quote.deadline_offset_ms || 259200000),
         maxSplitFeeSompi: BigInt(quote.max_split_fee_sompi), maxRefundFeeSompi: BigInt(quote.max_refund_fee_sompi),
       };
       // 主路径: 真 silverc 编译器(wasm32)。降级: order-template.js 固定偏移覆写(silverc-wasm 加载失败时,
       // 见 silvercWasmLoadError——上面 loadSilvercWasm() 已经 await 过, 到这里加载已经有确定结果了)。
       const usedWasmCompiler = !!(silvercWasm && commissionSplitSource);
-      const order = usedWasmCompiler
-        ? RW.deriveCommissionOrderAddress(kaspaWasm, silvercWasm, commissionSplitSource, orderCfg)
-        // 降级路径 fail-closed 检查(NWT MUST, 2026-09-27T11-37Z): 传入随页面发布的 CommissionSplit.sil
-        // 真实 sha256, 与 order-template.js 记录的模板生成锚点不一致就在 RB 内部直接拒绝(见该函数头注)。
-        : RB.deriveCommissionOrderAddress(kaspaWasm, orderCfg, commissionSplitSourceSha256);
+      let order;
+      if (receipt) {
+        orderCfg.orderNonceHex = receipt.order_nonce_hex;
+        orderCfg.deadlineMs = receipt.deadline_ms;
+        order = usedWasmCompiler
+          ? RW.rebuildCommissionOrderAddress(kaspaWasm, silvercWasm, commissionSplitSource, orderCfg)
+          : RB.rebuildCommissionOrderAddress(kaspaWasm, orderCfg, commissionSplitSourceSha256);
+        if (order.address !== receipt.order_address) {
+          throw new Error(`重建出的订单地址(${order.address})与凭据里的地址(${receipt.order_address})不一致——凭据被改动、与当前报价/渠道链不匹配, 或退款地址不对。拒绝放出分账/退款按钮`);
+        }
+      } else {
+        orderCfg.deadlineMs = Date.now() + Number(quote.deadline_offset_ms || 259200000);
+        order = usedWasmCompiler
+          ? RW.deriveCommissionOrderAddress(kaspaWasm, silvercWasm, commissionSplitSource, orderCfg)
+          // 降级路径 fail-closed 检查(NWT MUST, 2026-09-27T11-37Z): 传入随页面发布的 CommissionSplit.sil
+          // 真实 sha256, 与 order-template.js 记录的模板生成锚点不一致就在 RB 内部直接拒绝(见该函数头注)。
+          : RB.deriveCommissionOrderAddress(kaspaWasm, orderCfg, commissionSplitSourceSha256);
+      }
       const rolesHtml = resolved.payoutLeaves.map(r => `<tr><td>${r.name}</td><td>${(Number(r.amountSompi) / 1e8).toFixed(4)} KAS</td></tr>`).join('');
       const totalSompi = resolved.payoutLeaves.reduce((acc, r) => acc + r.amountSompi, 0n);
       const totalKas = sompiToKasString(totalSompi);
       const paymentUri = buildKaspaPaymentUri(order.address, totalSompi);
       const qrSvg = renderQrSvg(paymentUri);
+      const orderReceipt = receipt ? null : buildOrderReceipt({ network, link: location.href, refundAddress: refundAddr, order, totalSompi });
       const compilerFailureNotice = usedWasmCompiler ? '' : compilerFailureAlternativesHtml((silvercWasmLoadError || silSourceLoadError)?.message || '未知原因');
       renderBox('orderInfo', `<b>订单</b>(浏览器原生推导${usedWasmCompiler ? '·真 silverc 编译器' : '·固定偏移覆写降级路径'}, 零网络请求)<table>
         <tr><td>收款地址</td><td><code>${order.address}</code></td></tr>
@@ -652,7 +720,9 @@ async function main() {
         <div style="font-size:0.8rem;color:#666">付款链接(不支持扫码的钱包可手动复制)：<br><code style="word-break:break-all">${paymentUri}</code>
         <button type="button" id="copyPaymentUriBtn" style="margin-left:0.4rem">复制</button></div>
       </div>
+      ${receipt ? '<p class="ok" style="margin-top:0.75rem">✓ 已按订单凭据重建, 地址与凭据逐字一致。</p>' : receiptPanelHtml(orderReceipt)}
       ${compilerFailureNotice}`);
+      if (!receipt) setupReceiptDownload(orderReceipt);
       document.getElementById('copyPaymentUriBtn')?.addEventListener('click', async () => {
         const btn = document.getElementById('copyPaymentUriBtn');
         try { await navigator.clipboard.writeText(paymentUri); btn.textContent = '已复制'; setTimeout(() => { btn.textContent = '复制'; }, 1500); }
@@ -669,10 +739,8 @@ async function main() {
       } else {
         renderBox('monitorInfo', `<b>订单状态监控</b><br><span class="warn">⚠ 此订单用固定偏移覆写降级路径推导——触发分账/退款需要真 silverc 编译器(降级路径没有 entries ABI), 这次不可用。详情与替代方式见上方订单信息里的说明。</span>`);
       }
-    } catch (e) {
-      renderBox('orderInfo', `<span class="bad">✗ 订单地址推导失败(${e.message})</span>`);
     }
-  });
+  }
 }
 
 main().catch(e => renderBox('orderInfo', `<span class="bad">✗ ${e.message}</span>`));

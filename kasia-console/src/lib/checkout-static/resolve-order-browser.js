@@ -99,13 +99,25 @@ function padSpk37(fullBytes) {
  * @param {string} actualSourceSha256Hex 随页面发布的 CommissionSplit.sil 真实 sha256(hex)
  */
 export function deriveCommissionOrderAddress(kaspaWasm, cfg, actualSourceSha256Hex) {
+  // 出单: nonce 随机、deadline 缺省取 Date.now()+默认窗口; 调用方必须存下 orderNonceHex+deadlineMs(订单凭据)。
+  const orderNonce = crypto.getRandomValues(new Uint8Array(16));
+  const deadlineMs = cfg.deadlineMs != null ? Number(cfg.deadlineMs) : (Date.now() + DEFAULT_DEADLINE_MS);
+  return buildCommissionOrderSplice(kaspaWasm, cfg, actualSourceSha256Hex, orderNonce, deadlineMs);
+}
+
+/** rebuildCommissionOrderAddress — 降级路径的重建: 不调随机数、不用 Date.now() 兜底; 缺 nonce/deadline 即抛。 */
+export function rebuildCommissionOrderAddress(kaspaWasm, cfg, actualSourceSha256Hex) {
+  if (typeof cfg.orderNonceHex !== 'string' || !/^[0-9a-f]{32}$/.test(cfg.orderNonceHex)) throw new Error('rebuildCommissionOrderAddress(降级路径): 缺少或非法的 orderNonceHex(需 32 位小写 hex, 来自出单时的订单凭据)');
+  if (!Number.isSafeInteger(cfg.deadlineMs) || cfg.deadlineMs <= 0) throw new Error('rebuildCommissionOrderAddress(降级路径): 缺少或非法的 deadlineMs(需正整数毫秒, 来自出单时的订单凭据)');
+  return buildCommissionOrderSplice(kaspaWasm, cfg, actualSourceSha256Hex, hexToBytes(cfg.orderNonceHex), cfg.deadlineMs);
+}
+
+function buildCommissionOrderSplice(kaspaWasm, cfg, actualSourceSha256Hex, orderNonce, deadlineMs) {
   if (actualSourceSha256Hex !== CS_SOURCE_SHA256) {
     throw new Error(`deriveCommissionOrderAddress(降级路径): 随页面发布的 CommissionSplit.sil 源码 sha256(${actualSourceSha256Hex || '(未提供)'})与固定字节模板记录的锚点 CS_SOURCE_SHA256(${CS_SOURCE_SHA256})不一致——模板可能已过期, 拒绝拼接订单地址(fail-closed)。这不是可以忽略继续的警告: 用过期模板拼出的地址可能与当前 CommissionSplit.sil 的真实语义不符。`);
   }
   const roles = cfg.finalRoles;
   if (roles.length < 1 || roles.length > MAX_ROLES) throw new Error(`deriveCommissionOrderAddress: finalRoles.length=${roles.length} 必须在 1-${MAX_ROLES}`);
-  const orderNonce = crypto.getRandomValues(new Uint8Array(16));
-  const deadlineMs = cfg.deadlineMs != null ? Number(cfg.deadlineMs) : (Date.now() + DEFAULT_DEADLINE_MS);
   const ruleCommit = cfg.ruleCommitHex ? hexToBytes(cfg.ruleCommitHex) : new Uint8Array(32);
   const chainCommit = cfg.channelChainCommitmentHex ? hexToBytes(cfg.channelChainCommitmentHex) : new Uint8Array(32);
   const refundSpk = spkBytesFromAddress(kaspaWasm, cfg.payerRefundAddress);

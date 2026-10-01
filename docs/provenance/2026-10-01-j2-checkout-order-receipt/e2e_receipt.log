@@ -1,0 +1,35 @@
+PASS 出单后醒目展示"不保存就无法退款"提示
+PASS 出单后展示 nonce(32 hex)
+PASS 出单后展示截止时间(ISO)
+PASS 凭据 JSON: nonce 与页面展示一致
+PASS 凭据 JSON: 地址与页面订单地址一致
+PASS 凭据 JSON: 含报价原文链接(q=)、退款地址、截止时间
+PASS 出单页零 console 错误
+orderAddress=kaspasim:pqjs3zn6aj3gamczn66j4v835cwhm4jaftzl2lq0gyq5tz8zk8ts7qvv4vqy8 nonce=a000f87ea3e3419959ad8f7750618c8c deadline=2026-10-01T16:55:36.382Z
+PASS 反例[nonce]: 被拒绝
+PASS 反例[nonce]: 不出现订单/退款按钮/监控
+PASS 反例[deadline]: 被拒绝
+PASS 反例[deadline]: 不出现订单/退款按钮/监控
+PASS 反例[address]: 被拒绝
+PASS 反例[address]: 不出现订单/退款按钮/监控
+PASS 反例[refund-addr]: 被拒绝
+PASS 反例[refund-addr]: 不出现订单/退款按钮/监控
+PASS 反例[missing-nonce]: 被拒绝
+PASS 反例[missing-nonce]: 不出现订单/退款按钮/监控
+PASS 反例[missing-deadline]: 被拒绝
+PASS 反例[missing-deadline]: 不出现订单/退款按钮/监控
+PASS 反例[wrong-link]: 被拒绝
+PASS 反例[wrong-link]: 不出现订单/退款按钮/监控
+PASS 反例[wrong-network]: 被拒绝
+PASS 反例[wrong-network]: 不出现订单/退款按钮/监控
+PASS 反例[bad-kind]: 被拒绝
+PASS 反例[bad-kind]: 不出现订单/退款按钮/监控
+PASS 新页导入: 重建出同一订单地址
+PASS 新页导入: 显示"地址与凭据逐字一致"
+PASS 新页导入: 到期退款按钮出现(监控已启动)
+PASS 到期后退款按钮变可点并点击
+PASS 页面显示订单已完成(链上核实)
+PASS 退款地址真实收到 ≈4.99 KAS
+PASS 新页零 console 错误
+
+=== 订单凭据 E2E(真浏览器+真 simnet): 32 PASS / 0 FAIL ===
