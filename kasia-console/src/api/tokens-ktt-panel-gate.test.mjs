@@ -35,7 +35,7 @@ const app = Fastify(); await registerTokenRoutes(app); await app.ready();
 const body = (r) => { try { return JSON.parse(r.body); } catch { return {}; } };
 
 const VALID_OWNER = 'a'.repeat(64);
-const mintPayload = () => ({ owner_scheme: 0, owner_hex: VALID_OWNER });
+const mintPayload = () => ({ owner_scheme: 0, owner_hex: VALID_OWNER, amount: '1000000' });
 const transferPayload = () => ({ ledger_id: 'nonexistent', dest_owner_hex: VALID_OWNER, dest_owner_scheme: 0 });
 const mint = (p = mintPayload()) => app.inject({ method: 'POST', url: '/api/ktt/mint', payload: p });
 const transfer = (p = transferPayload()) => app.inject({ method: 'POST', url: '/api/ktt/transfer', payload: p });

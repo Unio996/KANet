@@ -1,0 +1,38 @@
+### 1,000,000 KTT, lock 70,000,000 sompi, mint -> self-xfer -> xfer to other -> bad(+1)
+funder#4 UTXO 2244313330 sompi; lock=70000000 amount=1000003
+[mass-floor:observe] site=unlockKttV2Mint compute=8083 storage=57158 transient=1412 mass_ub=57158 minFee=5715800 actualFee=6287270 would_reject=false wasm=panic(undefined) source=7b1e18cc
+[unlockKttV2Mint invariant] Σin=2244313330 Σout=2238026060 fee=6287270 (mass_ub=57158 minFee=5715800 ✓), 2 outputs all >= dust
+MINT ok {"txId":"941fdf0e474a0a64196bacf22696edb9545386be2ca53a053c34a5c365ccf46e","kttAddress":"kaspasim:pqwdee34pcdvv0v3j5hp6j7ex45ysnmc2rwm9ctf6phdpue377kg26va5e7uh","kttCovId":"829e06c6767579f0c6f395f02d27fc96f3f538dabf6858649c375a8471dee565","seedSompi":"70000000","feeSompi":"6287270"}
+  代币 UTXO KAS 面值=70000000  代币数量(State.amount)=1000003  fee=6287270
+[unlockKttV2Transfer invariant] Σin=2238026060 Σout=2231526060 fee=6500000 (mass=53584 minFee=5358400 ✓), 2 outputs all >= dust
+XFER1(自己→自己, owner 不变地址换 State? 同 owner 同 amount 即同地址) ok txid=3d4bf3538202daa0df2090f87515fa75600a4ff4d4ad7995eff1c0508a50fc86 locked=70000000 tokens=1000003
+  目标 UTXO KAS 面值=70000000 covenantId=829e06c6767579f0c6f395f02d27fc96f3f538dabf6858649c375a8471dee565
+[unlockKttV2Transfer invariant] Σin=2231526060 Σout=2225026060 fee=6500000 (mass=53574 minFee=5357400 ✓), 2 outputs all >= dust
+XFER2(→他人) ok txid=eeb5347e2ad423d29a89924a00eed2663f96b3b54185296e8b2f07486bca4094 locked=70000000 tokens=1000003
+  目标 UTXO KAS 面值=70000000 covenantId=829e06c6767579f0c6f395f02d27fc96f3f538dabf6858649c375a8471dee565
+RESULT: PASS
+
+### 2^53-1 KTT (MAX_SAFE_INTEGER)
+funder#4 UTXO 2155026060 sompi; lock=70000000 amount=9007199254740991
+[mass-floor:observe] site=unlockKttV2Mint compute=8083 storage=57159 transient=1412 mass_ub=57159 minFee=5715900 actualFee=6287380 would_reject=false wasm=panic(undefined) source=7b1e18cc
+[unlockKttV2Mint invariant] Σin=2155026060 Σout=2148738680 fee=6287380 (mass_ub=57159 minFee=5715900 ✓), 2 outputs all >= dust
+MINT ok {"txId":"ffd6926a86b214d9ad374688cdc10fc9550e6e6e28688c7dc221ad7fa75dc053","kttAddress":"kaspasim:pz0dur2wqd0p6gapfqwer4n4hnvauaanpatmstqk2c0xeyqumcsey9gm8k3zm","kttCovId":"4ffc1fe14848b88054d14bb8b3ea17e31ed719c71ca9a1a3375f20d23f80e0bd","seedSompi":"70000000","feeSompi":"6287380"}
+  代币 UTXO KAS 面值=70000000  代币数量(State.amount)=9007199254740991  fee=6287380
+[unlockKttV2Transfer invariant] Σin=2148738680 Σout=2142238680 fee=6500000 (mass=53436 minFee=5343600 ✓), 2 outputs all >= dust
+XFER1(自己→自己, owner 不变地址换 State? 同 owner 同 amount 即同地址) ok txid=b800f7e0381bc4e23f96f37b215b604519d4abbf43e1c3b5c809a7692de65b4f locked=70000000 tokens=9007199254740991
+  目标 UTXO KAS 面值=70000000 covenantId=4ffc1fe14848b88054d14bb8b3ea17e31ed719c71ca9a1a3375f20d23f80e0bd
+[unlockKttV2Transfer invariant] Σin=2142238680 Σout=2135738680 fee=6500000 (mass=53426 minFee=5342600 ✓), 2 outputs all >= dust
+XFER2(→他人) ok txid=6de81b88e1bd9a3755080fe71eb4d2fbbf7f9ac4aa0a70df4cc633102b762d4c locked=70000000 tokens=9007199254740991
+  目标 UTXO KAS 面值=70000000 covenantId=4ffc1fe14848b88054d14bb8b3ea17e31ed719c71ca9a1a3375f20d23f80e0bd
+RESULT: PASS
+
+### conservation negative (+1 over source amount must be rejected by consensus)
+funder#4 UTXO 2065738680 sompi; lock=70000000 amount=1000004
+[mass-floor:observe] site=unlockKttV2Mint compute=8083 storage=57160 transient=1412 mass_ub=57160 minFee=5716000 actualFee=6287600 would_reject=false wasm=panic(undefined) source=7b1e18cc
+[unlockKttV2Mint invariant] Σin=2065738680 Σout=2059451080 fee=6287600 (mass_ub=57160 minFee=5716000 ✓), 2 outputs all >= dust
+MINT ok {"txId":"8670b6304354284fd22805e0be014978a3e9a8ff548e479975b919daa67f8c8f","kttAddress":"kaspasim:pze8frym6c32arz5qz3750hahqzxpk0ds8w6ux0n3dxxysef6urw5k6ulvrdy","kttCovId":"0c832e4d59e10c93fa8e28dc046351103574d692859cdec6acd559c416b361bd","seedSompi":"70000000","feeSompi":"6287600"}
+  代币 UTXO KAS 面值=70000000  代币数量(State.amount)=1000004  fee=6287600
+[unlockKttV2Transfer invariant] Σin=2059451080 Σout=2052951080 fee=6500000 (mass=53278 minFee=5327800 ✓), 2 outputs all >= dust
+XFER-BAD 被拒绝(符合预期): RPC Server (remote error) -> Rejected transaction 3a1ee12e97ecc053e3898b75e836a2f9071aa72f2dc11aae1e6bfd4cf731ed53: failed to verify the signature script: script ran, but verification failed
+RESULT: PASS
+Assertion failed: !(handle->flags & UV_HANDLE_CLOSING), file src\win\async.c, line 76
