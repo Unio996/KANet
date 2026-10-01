@@ -1,0 +1,174 @@
+<%~ include('partials/page-open', { _page: 'merchant-quote', pageTitle: '商家建报价', ...it }) %>
+
+<!-- Bettor 2026-10-02 派工第三步(Owner 批): 商家建报价 / 生成推广链接。后端 = /api/merchant/quote(复用 signQuote 与
+     既有 /api/service-escrow/quote, 见 api/merchant-quote.js 头注), 样式沿用 /tokens 页(card/btn/Alpine)。 -->
+<div class="p-6 max-w-5xl mx-auto" x-data="merchantQuotePage()" x-init="init()">
+  <div class="mb-5">
+    <h1 class="text-2xl font-display text-ink-800">商家建报价 · 生成推广链接</h1>
+    <p class="text-xs text-ink-400 mt-1">填几项就能出一张签名报价和一条结账链接(可复制、附二维码)。买家打开链接就能看到价格和各方分成并付款。</p>
+  </div>
+
+  <div x-show="defaultsError" class="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mb-4" x-text="defaultsError"></div>
+
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+    <div class="card p-5">
+      <h3 class="font-semibold text-ink-700 mb-3">① 订单类型与价格</h3>
+      <label class="text-xs text-ink-400">订单类型</label>
+      <select id="mq-kind" x-model="f.kind" class="w-full mt-1 mb-3 border border-warm-300 rounded-lg px-3 py-2 text-sm bg-warm-50">
+        <option value="instant_split">即时分账(买家付款后按比例自动分给各方)</option>
+        <option value="service_escrow">服务订单托管(先托管, 买家确认才放款)</option>
+      </select>
+
+      <label class="text-xs text-ink-400">支付币种</label>
+      <select id="mq-currency" x-model="f.currency" class="w-full mt-1 mb-3 border border-warm-300 rounded-lg px-3 py-2 text-sm bg-warm-50">
+        <option value="KAS">KAS</option>
+        <option value="KTT" disabled>KTT(即将支持)</option>
+      </select>
+
+      <label class="text-xs text-ink-400">价格(KAS)</label>
+      <input id="mq-price" x-model="f.price_kas" type="text" inputmode="decimal" placeholder="例如 10"
+        class="w-full mt-1 mb-3 border border-warm-300 rounded-lg px-3 py-2 text-sm bg-warm-50">
+
+      <label class="text-xs text-ink-400">你的收款地址(你自己的那份进这里)</label>
+      <input id="mq-provider" x-model="f.provider_address" type="text" placeholder="kaspa:..."
+        class="w-full mt-1 mb-3 border border-warm-300 rounded-lg px-3 py-2 text-xs font-mono bg-warm-50">
+
+      <div class="text-xs text-ink-400 mb-1">其他固定收款方(可选, 最多 <span x-text="limits.max_partners"></span> 个; 你自己占剩下的比例, 至少 <span x-text="limits.provider_min_percent"></span>%)</div>
+      <template x-for="(p, i) in f.partners" :key="i">
+        <div class="flex gap-2 mb-2 items-center">
+          <input x-model="p.label" type="text" placeholder="名称(备注)" class="w-24 border border-warm-300 rounded-lg px-2 py-1.5 text-xs bg-warm-50">
+          <input x-model="p.address" type="text" placeholder="地址" class="flex-1 border border-warm-300 rounded-lg px-2 py-1.5 text-xs font-mono bg-warm-50">
+          <input x-model="p.percent" type="text" inputmode="decimal" placeholder="%" class="w-16 border border-warm-300 rounded-lg px-2 py-1.5 text-xs bg-warm-50">
+          <button type="button" @click="f.partners.splice(i, 1)" class="text-xs text-red-500">删</button>
+        </div>
+      </template>
+      <button type="button" id="mq-add-partner" @click="addPartner()" x-show="f.partners.length < limits.max_partners" class="text-xs text-brand-600 mb-3">+ 添加收款方</button>
+    </div>
+
+    <div class="card p-5">
+      <h3 class="font-semibold text-ink-700 mb-3">② 渠道、期限与签名</h3>
+      <div x-show="f.kind === 'instant_split'">
+        <label class="text-xs text-ink-400">渠道(推广人)预算占比(%)——有人推广才分给推广人, 没人推广这部分并回你; 0 = 不开渠道</label>
+        <input id="mq-channel-pct" x-model="f.channel_percent" type="text" inputmode="decimal" class="w-full mt-1 mb-3 border border-warm-300 rounded-lg px-3 py-2 text-sm bg-warm-50">
+        <label class="text-xs text-ink-400">渠道层数(最多 <span x-text="limits.max_channels"></span>)</label>
+        <input id="mq-channels" x-model="f.max_channels" type="text" inputmode="numeric" class="w-full mt-1 mb-3 border border-warm-300 rounded-lg px-3 py-2 text-sm bg-warm-50">
+      </div>
+      <div x-show="f.kind === 'service_escrow'">
+        <label class="text-xs text-ink-400">买家退款地址(买家付款出问题时退回这里)</label>
+        <input id="mq-buyer-refund" x-model="f.buyer_refund_address" type="text" placeholder="kaspa:..."
+          class="w-full mt-1 mb-3 border border-warm-300 rounded-lg px-3 py-2 text-xs font-mono bg-warm-50">
+        <label class="text-xs text-ink-400">买家公钥(64 位十六进制; 留空 = 用控制台专用托管 relay 的公钥<span x-show="defaults && defaults.escrow_relay"> :<span class="font-mono" x-text="(defaults && defaults.escrow_relay) ? (defaults.escrow_relay.x_only_pubkey.slice(0,12) + '…') : ''"></span></span><span x-show="!(defaults && defaults.escrow_relay)">(当前未配置, 必须填)</span>)</label>
+        <input id="mq-buyer-pk" x-model="f.buyer_pubkey_hex" type="text" class="w-full mt-1 mb-3 border border-warm-300 rounded-lg px-3 py-2 text-xs font-mono bg-warm-50">
+      </div>
+
+      <label class="text-xs text-ink-400">报价有效期(天)</label>
+      <input id="mq-valid-days" x-model="f.valid_days" type="text" inputmode="numeric" class="w-full mt-1 mb-3 border border-warm-300 rounded-lg px-3 py-2 text-sm bg-warm-50">
+      <label class="text-xs text-ink-400"><span x-text="f.kind === 'service_escrow' ? '托管期限(小时, 到期后买家可自行退款)' : '付款后退款窗口(小时, 到期没分账可退款)'"></span></label>
+      <input id="mq-deadline-hours" x-model="f.deadline_hours" type="text" inputmode="numeric" class="w-full mt-1 mb-3 border border-warm-300 rounded-lg px-3 py-2 text-sm bg-warm-50">
+
+      <label class="text-xs text-ink-400">结账页网址(你部署的 checkout.html 的完整地址)</label>
+      <input id="mq-base" x-model="f.checkout_base_url" type="text" placeholder="https://你的域名/checkout.html"
+        class="w-full mt-1 mb-3 border border-warm-300 rounded-lg px-3 py-2 text-xs bg-warm-50">
+
+      <label class="text-xs text-ink-400">签名私钥(64 位十六进制)——只用于这一次签名, 控制台不保存、不记日志</label>
+      <input id="mq-key" x-model="f.signing_key_hex" type="password" autocomplete="off" class="w-full mt-1 mb-1 border border-warm-300 rounded-lg px-3 py-2 text-xs font-mono bg-warm-50">
+      <div class="text-[11px] text-ink-400 mb-3">建议专门为报价生成一把新钥匙, 不要用存着大额资金的钥匙。
+        <button type="button" id="mq-keygen" @click="keygen()" class="text-brand-600 underline">生成一把新钥匙</button>
+      </div>
+      <div x-show="keyInfo" class="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">
+        新钥匙已填入上面。<b>请立刻抄下来保存</b>(丢了找不回):<br>
+        私钥 <span class="font-mono break-all" x-text="keyInfo && keyInfo.private_key_hex"></span><br>
+        收款地址 <span class="font-mono break-all" x-text="keyInfo && keyInfo.address"></span>
+      </div>
+
+      <button id="mq-submit" @click="submit()" :disabled="busy" class="btn btn-primary w-full text-sm" :class="busy ? 'opacity-50 cursor-not-allowed' : ''">
+        <span x-show="!busy">生成签名报价与链接</span><span x-show="busy">生成中...</span>
+      </button>
+      <div id="mq-error" x-show="error" class="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mt-2" x-text="error"></div>
+    </div>
+  </div>
+
+  <div id="mq-result" x-show="result" class="card p-5 mt-6">
+    <h3 class="font-semibold text-ink-700 mb-2">✓ 报价已签名</h3>
+    <div class="text-sm text-ink-600 mb-3">
+      价格 <b id="mq-r-price" x-text="result && (Number(result.price_sompi) / 1e8) + ' KAS'"></b> ·
+      <span x-text="result && (result.kind === 'service_escrow' ? '服务订单托管' : '即时分账')"></span> ·
+      网络 <span x-text="result && result.network"></span>
+    </div>
+    <table class="w-full text-xs mb-3">
+      <thead class="text-ink-500"><tr><th class="text-left py-1">角色</th><th class="text-right py-1">比例</th><th class="text-right py-1">金额</th></tr></thead>
+      <tbody>
+        <template x-for="r in (result ? result.roles : [])" :key="r.name">
+          <tr class="border-t border-warm-100">
+            <td class="py-1"><span x-text="r.label"></span><div class="font-mono text-[10px] text-ink-400 break-all" x-text="r.address || ''"></div></td>
+            <td class="py-1 text-right tabular-nums" x-text="r.percent + '%'"></td>
+            <td class="py-1 text-right tabular-nums" x-text="r.amount_sompi ? (Number(r.amount_sompi) / 1e8).toFixed(4) + ' KAS' : '—'"></td>
+          </tr>
+        </template>
+      </tbody>
+    </table>
+    <div x-show="result && result.warning" class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3" x-text="result && result.warning"></div>
+    <div x-show="result && result.note" class="text-[11px] text-ink-400 mb-3" x-text="result && result.note"></div>
+
+    <div x-show="result && result.checkout_link">
+      <div class="text-xs text-ink-400 mb-1">结账链接(发给买家; 渠道推广时在后面追加 <code>&amp;ch=推广人地址</code>)</div>
+      <textarea id="mq-link" readonly rows="3" class="w-full border border-warm-300 rounded-lg px-3 py-2 text-[11px] font-mono bg-warm-50" x-text="result && result.checkout_link"></textarea>
+      <div class="flex gap-2 mt-2">
+        <button type="button" id="mq-copy" @click="copyLink()" class="btn btn-secondary text-xs" x-text="copied ? '已复制' : '复制链接'"></button>
+      </div>
+      <div class="mt-3 max-w-[220px]" id="mq-qr" x-html="result && result.qr_svg"></div>
+      <div x-show="result && result.qr_too_long" id="mq-qr-note" class="mt-2 text-[11px] text-ink-400">这条链接信息量太大, 超出二维码容量, 请直接复制链接发给买家(即时分账类报价较短, 会附二维码)。</div>
+    </div>
+    <div x-show="result && !result.checkout_link" class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+      没有填"结账页网址", 所以只生成了报价数据(下面的 q= 值); 把它拼到你的 checkout.html?q= 后面就是链接。
+      <textarea id="mq-query" readonly rows="3" class="w-full mt-2 border border-warm-300 rounded-lg px-3 py-2 text-[11px] font-mono bg-warm-50" x-text="result && result.checkout_query"></textarea>
+    </div>
+  </div>
+</div>
+
+<script>
+function merchantQuotePage() {
+  return {
+    defaults: null, defaultsError: '', limits: { max_channels: 5, max_partners: 5, provider_min_percent: 50 },
+    f: { kind: 'instant_split', currency: 'KAS', price_kas: '', provider_address: '', partners: [], channel_percent: '0', max_channels: '3',
+         buyer_refund_address: '', buyer_pubkey_hex: '', valid_days: '30', deadline_hours: '72', checkout_base_url: '', signing_key_hex: '' },
+    busy: false, error: '', result: null, copied: false, keyInfo: null,
+    async init() {
+      try {
+        const r = await fetch('/api/merchant/quote-defaults'); const d = await r.json();
+        if (!r.ok || !d.ok) { this.defaultsError = d.error || ('HTTP ' + r.status); return; }
+        this.defaults = d; this.limits = d.limits;
+        let saved = ''; try { saved = localStorage.getItem('mq_checkout_base') || ''; } catch {}
+        this.f.checkout_base_url = d.checkout_base_url || saved;
+      } catch (e) { this.defaultsError = e.message; }
+    },
+    addPartner() { this.f.partners.push({ label: '', address: '', percent: '' }); },
+    async keygen() {
+      try {
+        const r = await fetch('/api/merchant/keygen', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+        const d = await r.json();
+        if (!r.ok || !d.ok) { this.error = d.error || ('HTTP ' + r.status); return; }
+        this.keyInfo = d; this.f.signing_key_hex = d.private_key_hex;
+        if (!this.f.provider_address) this.f.provider_address = d.address;
+      } catch (e) { this.error = e.message; }
+    },
+    async submit() {
+      if (this.busy) return;
+      this.busy = true; this.error = ''; this.result = null; this.copied = false;
+      try {
+        try { localStorage.setItem('mq_checkout_base', this.f.checkout_base_url || ''); } catch {}
+        const res = await fetch('/api/merchant/quote', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(this.f) });
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok || !d.ok) { this.error = d.error || ('HTTP ' + res.status); return; }
+        this.result = d;
+      } catch (e) { this.error = e.message; } finally { this.busy = false; }
+    },
+    async copyLink() {
+      try { await navigator.clipboard.writeText(this.result.checkout_link); this.copied = true; setTimeout(() => { this.copied = false; }, 1500); }
+      catch { const t = document.getElementById('mq-link'); t.select(); }
+    },
+  };
+}
+</script>
+
+<%~ include('partials/page-close', it) %>
