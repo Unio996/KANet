@@ -363,7 +363,7 @@
                     <template x-for="h in (agent.ktt?.unspent || [])" :key="h.id">
                       <div class="text-[10px] text-ink-600 flex items-center justify-between mt-0.5">
                         <span class="font-mono truncate" :title="h.p2sh_address" x-text="h.p2sh_address?.slice(0,10) + '...'"></span>
-                        <span class="tabular-nums ml-1" x-text="(Number(h.amount_sompi || 0) / 1e8).toFixed(4) + ' KAS'"></span>
+                        <span class="tabular-nums ml-1" x-text="Number(h.amount_sompi || 0).toLocaleString('en-US') + ' KTT'" title="代币数量(整数), 不是 KAS 面值"></span>
                         <span class="ml-1" :class="h.spent_txid ? 'text-ink-300' : 'text-green-600'"
                               :title="h.spent_txid ? '' : '按本地账记录, 未回链核实'"
                               x-text="h.spent_txid ? '已花' : '持有中'"></span>

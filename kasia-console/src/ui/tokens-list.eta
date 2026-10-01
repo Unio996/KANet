@@ -61,7 +61,7 @@
       <h2 class="text-xl font-display text-ink-800">KTT v2 · 真实链上代币</h2>
       <p class="text-xs text-ink-400 mt-1">
         与上面"代币定义"是两回事——这里铸出的是真实 Kaspa covenant UTXO, 任何人可铸任意数量到任意
-        地址(普通钱包 pubkey 或另一个 covenant-id)。零价值测试币, 花的只是转账手续费。
+        地址(普通钱包 pubkey 或另一个 covenant-id)。零价值测试币: 数量任填, 每次铸币只固定锁约 0.7 KAS + 约 0.06 KAS 手续费, 与铸多少个无关。
       </p>
     </div>
 
@@ -81,14 +81,18 @@
         <label class="text-xs text-ink-400">目标 32 字节 hex(pubkey 或 covenant-id)</label>
         <input x-model="mintForm.ownerHex" type="text" placeholder="64 位 hex"
           class="w-full mt-1 mb-3 border border-warm-300 rounded-lg px-3 py-2 text-xs font-mono bg-warm-50">
+        <label class="text-xs text-ink-400">铸币数量(整数, 1 ~ 9007199254740991)</label>
+        <input x-model="mintForm.amount" type="text" inputmode="numeric" placeholder="例如 1000000"
+          class="w-full mt-1 mb-3 border border-warm-300 rounded-lg px-3 py-2 text-sm font-mono bg-warm-50">
         <button @click="mint()" :disabled="mintBusy || !canMint" class="btn btn-primary w-full text-sm" :class="(mintBusy || !canMint) ? 'opacity-50 cursor-not-allowed' : ''">
-          <span x-show="!mintBusy">铸币(面值 = relay 资金 UTXO 全额减手续费)</span>
+          <span x-show="!mintBusy">铸币(只锁约 0.7 KAS, 数量由上面填写)</span>
           <span x-show="mintBusy">广播中...</span>
         </button>
         <div x-show="mintError" class="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mt-2" x-text="mintError"></div>
         <div x-show="mintResult" class="text-xs text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2 mt-2">
           ✓ txid <span class="font-mono" x-text="mintResult && mintResult.txid"></span><br>
-          地址 <span class="font-mono break-all" x-text="mintResult && mintResult.p2sh_address"></span>
+          地址 <span class="font-mono break-all" x-text="mintResult && mintResult.p2sh_address"></span><br>
+          数量 <span class="font-mono" x-text="mintResult && mintResult.amount"></span> KTT
         </div>
       </div>
 
@@ -112,7 +116,7 @@
         </button>
         <div x-show="lookupError" class="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mt-2" x-text="lookupError"></div>
         <table x-show="holdings.length" class="w-full text-xs mt-3">
-          <thead class="text-ink-500"><tr><th class="text-left py-1">地址</th><th class="text-right py-1">金额</th><th class="text-right py-1">状态</th></tr></thead>
+          <thead class="text-ink-500"><tr><th class="text-left py-1">地址</th><th class="text-right py-1">数量(KTT)</th><th class="text-right py-1">状态</th></tr></thead>
           <tbody>
             <template x-for="h in holdings" :key="h.id">
               <tr class="border-t border-warm-100">
@@ -184,13 +188,13 @@ function kttV2Panel() {
     // env KTT_PANEL_RELAY_ID。verifyRelayId 是完全独立的字段, 只用于"查阅"卡片里 holdings 的
     // ?verify=1 只读 RPC 核实(那条路径不受 KTT_PANEL_ENABLED 限制, 见 tokens.js /api/ktt/holdings)。
     verifyRelayId: '',
-    mintForm: { ownerScheme: 0, ownerHex: '' },
+    mintForm: { ownerScheme: 0, ownerHex: '', amount: '' },
     mintBusy: false, mintError: '', mintResult: null,
     lookupOwnerHex: '', lookupBusy: false, lookupError: '', holdings: [],
     xferForm: { ledgerId: '', destOwnerScheme: 0, destOwnerHex: '' },
     xferBusy: false, xferError: '', xferResult: null,
     init() {},
-    get canMint() { return /^[0-9a-fA-F]{64}$/.test(this.mintForm.ownerHex); },
+    get canMint() { return /^[0-9a-fA-F]{64}$/.test(this.mintForm.ownerHex) && /^[1-9][0-9]*$/.test(String(this.mintForm.amount).trim()); },
     get canTransfer() { return !!(this.xferForm.ledgerId && /^[0-9a-fA-F]{64}$/.test(this.xferForm.destOwnerHex)); },
     async mint() {
       if (!this.canMint || this.mintBusy) return;
@@ -198,7 +202,7 @@ function kttV2Panel() {
       try {
         const res = await fetch('/api/ktt/mint', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ owner_scheme: this.mintForm.ownerScheme, owner_hex: this.mintForm.ownerHex }),
+          body: JSON.stringify({ owner_scheme: this.mintForm.ownerScheme, owner_hex: this.mintForm.ownerHex, amount: String(this.mintForm.amount).trim() }),
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok || !data.ok) { this.mintError = data.error || ('HTTP ' + res.status); return; }

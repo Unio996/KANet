@@ -3021,10 +3021,17 @@ export async function unlockKttV2Mint(args) {
     const fundUtxo = await _matchUtxo(rpc, f.address, f.outpointTxid, f.index);
     const kttAddr = _addressFromRedeem(cmd.ktt.redeem_hex, networkId);
     const seed = BigInt(cmd.ktt.seed_sompi);
-    const fee = _bshardFeeV1(1);
-    if (_utxoValue(fundUtxo) - seed - fee < 0n) throw new Error(`ktt_v2 genesis-mint insufficient: Σin ${_utxoValue(fundUtxo)} < seed ${seed} + fee ${fee}`);
-    const outputs = [new TransactionOutput(seed, payToAddressScript(new Address(kttAddr)))];
-    const mk = (ss) => {
+    // 指定数量铸币(Bettor 2026-10-02 派工): cmd.ktt.change_address 给了 ⇒ 代币 UTXO 只锁 seed(最小可接受 KAS,
+    // 与代币数量无关——数量在 redeem 的 State.amount 里), 其余扣掉 mass-aware 手续费后找零回该地址。
+    // 没给 ⇒ 旧行为(整个 funding UTXO 减固定手续费全锁进代币), 保持向后兼容。
+    const changeAddr = cmd.ktt.change_address || null;
+    const fundVal = _utxoValue(fundUtxo);
+    const mkOutputs = (fee) => {
+      const outs = [new TransactionOutput(seed, payToAddressScript(new Address(kttAddr)))];
+      if (changeAddr) outs.push(new TransactionOutput(fundVal - seed - fee, payToAddressScript(new Address(changeAddr))));
+      return outs;
+    };
+    const mk = (ss, outputs) => {
       const t = new Transaction({
         version: 1,
         inputs: [{ previousOutpoint: { transactionId: fundUtxo.outpoint.transactionId, index: fundUtxo.outpoint.index }, signatureScript: ss, sequence: 0n, sigOpCount: 0, computeBudget: _BSHARD_COMPUTE_BUDGET, ...(ss === '' ? { utxo: fundUtxo } : {}) }],
@@ -3033,12 +3040,24 @@ export async function unlockKttV2Mint(args) {
       t.populateGenesisCovenants([new GenesisCovenantGroup(0, [0])]);
       return t;
     };
-    const kttCovId = String(mk('').outputs[0].covenant.covenantId);
-    const sigHex = createInputSignature(mk(''), 0, wallet.getPrivateKey(), SighashType.All);
-    const signedTx = mk(sigHex);
+    let fee = _bshardFeeV1(1);
+    if (changeAddr) {
+      // 带找零时 storage mass 由"小额 covenant 输出(p=2)"主导(KIP-9 C·p²/v), 远高于固定 1,000,000 的手续费底线。
+      // 先用占位手续费拼一笔, 用本地 mass 上界估出真实需要的最低手续费(×100 sompi/克, 再加 10% 余量), 再按它重建。
+      const probe = mk('', mkOutputs(5_000_000n));
+      const ub = estimateMassUpperBound(probe, [fundUtxo]);
+      const needed = ub.mass * MIN_SOMPI_PER_MASS * 110n / 100n;
+      if (needed > fee) fee = needed;
+      if (fundVal - seed - fee < 1000n) throw new Error(`ktt_v2 mint(带找零)资金不足: funding ${fundVal} < seed ${seed} + fee ${fee}(mass_ub=${ub.mass})`);
+    }
+    if (fundVal - seed - fee < 0n) throw new Error(`ktt_v2 genesis-mint insufficient: Σin ${fundVal} < seed ${seed} + fee ${fee}`);
+    const outputs = mkOutputs(fee);
+    const kttCovId = String(mk('', outputs).outputs[0].covenant.covenantId);
+    const sigHex = createInputSignature(mk('', outputs), 0, wallet.getPrivateKey(), SighashType.All);
+    const signedTx = mk(sigHex, outputs);
     _assertTxInvariants([fundUtxo], signedTx, 'unlockKttV2Mint', networkId);
     const r = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
-    return { txId: r.transactionId, kttAddress: kttAddr, kttCovId, seedSompi: seed.toString() };
+    return { txId: r.transactionId, kttAddress: kttAddr, kttCovId, seedSompi: seed.toString(), feeSompi: fee.toString() };
   } finally { try { await rpc.disconnect(); } catch {} }
 }
 
@@ -3097,13 +3116,14 @@ export async function unlockKttV2Transfer(args) {
     // 🔴 键名须与 _encodeKttV2TransferAction 内部的 KTT_V2_STATE_FIELD_ORDER(snake_case, State 字段本名)
     // 逐字对齐——不是随便起名(第一次写漏了, 真实 simnet 调用当场报 "owner must be 32 bytes, got 0",
     // 因为 s['owner'] 在传 'ownerHex' 这种驼峰键名时读不到值)。
-    const nextStates = [{ amount: kttAmount, owner: cmd.ktt.dest_owner_hex, owner_scheme: Number(cmd.ktt.dest_owner_scheme), borrow_scheme: 0, borrow_guard: '00'.repeat(32), extension_commitment: '00'.repeat(32) }];
+    const tokenAmount = cmd.ktt.amount != null ? BigInt(cmd.ktt.amount) : kttAmount; // 新铸币: State.amount(代币数量)≠ UTXO 的 KAS 面值; 缺省(旧持仓)两者相等
+    const nextStates = [{ amount: tokenAmount, owner: cmd.ktt.dest_owner_hex, owner_scheme: Number(cmd.ktt.dest_owner_scheme), borrow_scheme: 0, borrow_guard: '00'.repeat(32), extension_commitment: '00'.repeat(32) }];
     const actionHex = _encodeKttV2TransferAction(nextStates, [0], [_toAbiSig65(kttSigRaw)]);
     const sigScript0 = _combineActionAndRedeem(actionHex, cmd.ktt.source_redeem_hex);
     const signedTx = mk([sigScript0, feeSigHex]);
     _assertTxInvariants([kttUtxo, feeUtxo], signedTx, 'unlockKttV2Transfer', networkId);
     const r = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
-    return { txId: r.transactionId, destAddress: destAddr, amountSompi: kttAmount.toString() };
+    return { txId: r.transactionId, destAddress: destAddr, amountSompi: tokenAmount.toString(), lockedSompi: kttAmount.toString() };
   } finally { try { await rpc.disconnect(); } catch {} }
 }
 

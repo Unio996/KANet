@@ -32,6 +32,34 @@ const PUBLIC_TOKEN_DEF_COLS = 'id, name, ticker, description, default_denominati
 
 const HEX32 = /^[0-9a-fA-F]{64}$/;
 
+// ── 指定数量铸币(Bettor 2026-10-02 派工, Owner 2026-10-02「测试币非常重要, 大大减小开发成本」) ──────────
+// 代币数量 = KanetTestTokenV2 的 State.amount(redeem 脚本里的整数状态字段), 与 UTXO 锁的 KAS 面值无关; 合约只要求
+// 输出 value>0。所以铸币时代币 UTXO 只需锁"最小可接受 KAS", 其余 funding 找零回 relay。
+// 🔴 最小锁量按节点真共识实测定(simnet, docs/provenance/2026-10-02-j2-ktt-mint-amount/README.md):
+//   covenant 输出(KIP-9 plurality p=2)的 storage mass ≈ C·p²/v = 4e12/v 克, 节点最低中继费 100 sompi/克。
+//   · 理论硬下限 v≥8,000,000 sompi(mass≤500,000 上限), 但那时 mint/transfer 手续费各要 ~0.5 KAS;
+//   · 转账 handler 的手续费是固定 6,500,000(本次不改), 要使它对任意大小的手续费 UTXO 都够付, 需
+//     4e12/v ≤ 65,000 ⇒ v ≥ 61.6M; 取 70,000,000 sompi(0.7 KAS)留余量: mint 手续费≈0.063 KAS、transfer
+//     手续费 0.065 KAS(均实测落链)。v=40,000,000 实测 transfer 被 pre-submit mass 闸拒(mass 96,507 → floor 9.65M>6.5M)。
+//   ⇒ 铸多少个 KTT 都只花 ≈0.7 KAS 锁量 + ≈0.06 KAS 手续费(原来: 整个 funding UTXO 全锁, 每 1 KTT=1 sompi)。
+export const KTT_V2_MIN_LOCK_SOMPI = 70_000_000n;
+// 找零不能太小: 找零输出(p=1)自己也有 storage mass C/chg; 要求 funding ≥ 锁量 + 0.5 KAS 余量(找零≥~0.43 KAS ⇒ ~2.3k 克)。
+const KTT_V2_MIN_FUNDING_HEADROOM_SOMPI = 50_000_000n;
+const KTT_V2_MAX_AMOUNT = BigInt(Number.MAX_SAFE_INTEGER); // 2^53-1: relay/ctor 经 JS Number 传整数, 超过会失精度(Codex R11 ②)
+
+/** 严格解析"整数字符串"数量(也接受 JS 安全整数 number); 非法/≤0/超 2^53-1 返回 { error }。全程 BigInt, 不经 Number 中转。 */
+export function parseKttAmount(raw) {
+  let s;
+  if (typeof raw === 'string') s = raw.trim();
+  else if (typeof raw === 'number' && Number.isSafeInteger(raw)) s = String(raw);
+  else return { error: 'amount 必须是整数字符串(例如 "1000000")' };
+  if (!/^[0-9]+$/.test(s)) return { error: 'amount 必须是正整数(只含数字, 无小数点/符号/科学计数法)' };
+  const n = BigInt(s);
+  if (n <= 0n) return { error: 'amount 必须 > 0' };
+  if (n > KTT_V2_MAX_AMOUNT) return { error: `amount 超过上限 ${KTT_V2_MAX_AMOUNT}(2^53-1, 超过会在 JS Number 链路上失精度)` };
+  return { amount: n };
+}
+
 function relayRc(relayId) {
   // origin='app'(五值之一, R-SENDCMD-ORIGIN-REQUIRED): 面板是用户在 UI 上点按钮触发的应用层动作,
   // 不是后台 daemon tick(那是 'internal')也不是运营者直接操作(那是 'operator')。
@@ -144,27 +172,29 @@ export async function registerTokenRoutes(fastify) {
     const gate = kttPanelGate('mint');
     if (!gate.ok) return reply.code(gate.code).send({ ok: false, error: gate.error });
     const relay_id = gate.relayId;
-    const { owner_scheme, owner_hex } = request.body || {};
+    const { owner_scheme, owner_hex, amount: amountRaw } = request.body || {};
     const scheme = Number(owner_scheme);
     if (scheme !== KTT_V2_SCHEME_PUBKEY && scheme !== KTT_V2_SCHEME_COVENANT_ID) {
       return reply.code(400).send({ ok: false, error: `owner_scheme must be ${KTT_V2_SCHEME_PUBKEY}(pubkey) or ${KTT_V2_SCHEME_COVENANT_ID}(covenant-id), got ${owner_scheme}` });
     }
     if (!HEX32.test(String(owner_hex || ''))) return reply.code(400).send({ ok: false, error: 'owner_hex must be 32-byte hex' });
+    const parsedAmount = parseKttAmount(amountRaw);
+    if (parsedAmount.error) return reply.code(400).send({ ok: false, error: parsedAmount.error });
+    const tokenAmount = parsedAmount.amount;
     try {
       const fundingAddress = resolveRelayAddress(relay_id);
       const rc = relayRc(relay_id);
       const utxoResp = await rc({ type: 'get_address_utxos', address: fundingAddress });
-      const utxos = (utxoResp?.utxos || utxoResp?.entries || []).filter(u => BigInt(u.amount ?? u.entry?.amount ?? 0) > 1_500_000n);
-      if (!utxos.length) return reply.code(409).send({ ok: false, error: `relay ${relay_id}(${fundingAddress})没有足够的资金 UTXO(需要 > 1,500,000 sompi 出手续费+铸币面值)` });
+      const needFunding = KTT_V2_MIN_LOCK_SOMPI + KTT_V2_MIN_FUNDING_HEADROOM_SOMPI;
+      const utxos = (utxoResp?.utxos || utxoResp?.entries || []).filter(u => BigInt(u.amount ?? u.entry?.amount ?? 0) >= needFunding);
+      if (!utxos.length) return reply.code(409).send({ ok: false, error: `relay ${relay_id}(${fundingAddress})没有足够的资金 UTXO(需要 >= ${needFunding} sompi: 代币 UTXO 锁 ${KTT_V2_MIN_LOCK_SOMPI} + 找零余量 + 手续费)` });
       const fundUtxo = utxos[0];
-      const fundAmt = BigInt(fundUtxo.amount ?? fundUtxo.entry?.amount ?? 0);
-      const feeSompi = 1_200_000n; // 留够 _bshardFeeV1(1)=1,000,000 的余量(relay 侧 unlockKttV2Mint 实际算的那个)
-      const seedSompi = fundAmt - feeSompi;
-      if (seedSompi <= 0n) return reply.code(409).send({ ok: false, error: `funding UTXO(${fundAmt})不够付手续费` });
-      const artifact = computeKttV2TokenArtifact({ amount: Number(seedSompi), ownerScheme: scheme, ownerBytesHex: owner_hex.toLowerCase() });
+      // 代币数量 = State.amount(烤进 redeem); 代币 UTXO 只锁最小 KAS, 余额由 relay 扣手续费后找零回 funding 地址。
+      const seedSompi = KTT_V2_MIN_LOCK_SOMPI;
+      const artifact = computeKttV2TokenArtifact({ amount: Number(tokenAmount), ownerScheme: scheme, ownerBytesHex: owner_hex.toLowerCase() });
       const mintCmd = {
         type: 'ktt_v2_mint',
-        ktt: { redeem_hex: Buffer.from(artifact.script).toString('hex'), seed_sompi: seedSompi.toString() },
+        ktt: { redeem_hex: Buffer.from(artifact.script).toString('hex'), seed_sompi: seedSompi.toString(), change_address: fundingAddress },
         inputs: { funding: { address: fundingAddress, outpointTxid: fundUtxo.outpoint?.transactionId ?? fundUtxo.transactionId, index: fundUtxo.outpoint?.index ?? fundUtxo.index } },
       };
       const result = await rc(mintCmd);
@@ -174,8 +204,9 @@ export async function registerTokenRoutes(fastify) {
       sqlite.prepare(`
         INSERT INTO ktt_holdings_ledger (id, txid, output_index, p2sh_address, amount_sompi, owner_hex, owner_scheme, contract_version, minted_by, created_at, last_verified_at)
         VALUES (?, ?, 0, ?, ?, ?, ?, 'v2', ?, ?, ?)
-      `).run(id, result.txId, result.kttAddress, seedSompi.toString(), owner_hex.toLowerCase(), scheme, relay_id, ts, ts);
-      return reply.send({ ok: true, id, txid: result.txId, p2sh_address: result.kttAddress, amount_sompi: seedSompi.toString(), owner_scheme: scheme, owner_hex: owner_hex.toLowerCase() });
+      `).run(id, result.txId, result.kttAddress, tokenAmount.toString(), owner_hex.toLowerCase(), scheme, relay_id, ts, ts);
+      // amount_sompi 列名是历史遗留: 它存的是【代币数量】(State.amount), 不是 KAS 面值(旧记录两者恰好相等)。
+      return reply.send({ ok: true, id, txid: result.txId, p2sh_address: result.kttAddress, amount_sompi: tokenAmount.toString(), amount: tokenAmount.toString(), locked_kas_sompi: seedSompi.toString(), fee_sompi: result.feeSompi ?? null, owner_scheme: scheme, owner_hex: owner_hex.toLowerCase() });
     } catch (e) {
       return reply.code(500).send({ ok: false, error: `ktt mint failed: ${e.message}` });
     }
@@ -215,6 +246,7 @@ export async function registerTokenRoutes(fastify) {
           dest_redeem_hex: Buffer.from(destArtifact.script).toString('hex'),
           dest_owner_hex: dest_owner_hex.toLowerCase(),
           dest_owner_scheme: destScheme,
+          amount: String(row.amount_sompi), // 代币数量(State.amount); 新铸币 UTXO 的 KAS 面值≠它, relay 不能再拿面值当数量
         },
         inputs: {
           ktt: { address: row.p2sh_address, outpointTxid: row.txid, index: row.output_index },
