@@ -1,0 +1,38 @@
+HTTP 404 http://127.0.0.1:18801/api/system/rpc-overview {"message":"Route GET:/api/system/rpc-overview not found","error":"Not Found","statusCode":404}
+HTTP 404 http://127.0.0.1:18801/api/system/canary-stats {"message":"Route GET:/api/system/canary-stats not found","error":"Not Found","statusCode":404}
+PASS 页面标题/表单渲染
+PASS 支付币种: KAS 可选, KTT 置灰(预留)
+PASS 生成钥匙自动填入私钥与收款地址(simnet 前缀)
+PASS 即时分账: 出结果且标明已签名
+PASS 即时分账: 角色表含 你(70.01% 保底)/推荐人 5%/渠道 25%
+PASS 即时分账: 生成结账链接(带 q=)
+PASS 即时分账: 二维码 SVG 出现
+PASS 即时分账: 复制按钮把链接放进剪贴板
+PASS 结账页: 商家签名验证通过
+PASS 结账页: 价格 = 1000000000 sompi(10 KAS)
+PASS 结账页: 订单地址推导成功
+PASS 结账页: 应付总额 10 KAS
+PASS 结账页: provider 9.5 KAS(70.01%+未推广渠道 25% 折回)
+PASS 结账页: partner_1 0.5 KAS(5%)
+PASS 结账页零 console 错误
+PASS 服务订单: 无报错
+PASS 服务订单: 链接过长无二维码时给出提示(不报错)
+PASS 服务订单: 结果标明服务订单托管 + 价格 2.5 KAS
+link2= http://127.0.0.1:18777/checkout.html?q=eyJvcmRlcl9raW5kIjoic errs= ["Failed to load resource: the server responded with a status of 404 (Not Found)","Failed to load resource: the server responded with a status of 404 (Not Found)","Failed to load resource: the server responded with a status of 404 (Not Found)"]
+PASS 服务订单结账页: 报价签名验证通过
+PASS 服务订单结账页: 展示托管地址
+PASS 服务订单结账页: 展示金额 2.53 KAS(2.5 + 0.03 max_split_fee)
+PASS 服务订单结账页零 console 错误
+HTTP 400 http://127.0.0.1:18801/api/merchant/quote {"ok":false,"error":"价格太低, 放不下当前的分账结构(收款方 2 个、渠道 5 层): 请提高价格, 或减少收款方/渠道层数。 满 5 层渠道的参考最低价约 3.16 KAS。"}
+PASS 反例: 价格太低 → 友好报错(不出签名)
+HTTP 400 http://127.0.0.1:18801/api/merchant/quote {"ok":false,"error":"你自己(收款方)至少要占 50%, 现在只有 35%——请降低其他收款方或渠道的比例"}
+PASS 反例: 渠道占比过高 → 拒绝
+HTTP 400 http://127.0.0.1:18801/api/merchant/quote {"ok":false,"error":"签名私钥不对(需要 64 位十六进制)"}
+PASS 反例: 缺签名私钥 → 拒绝
+PASS 反例: API 层 KTT 币种被拒(预留未开放)
+HTTP 400 http://127.0.0.1:18801/api/merchant/quote {"ok":false,"error":"目前只支持用 KAS 付款; KTT 付款模式待设计审过后开放"}
+PASS 反例: 地址网络前缀与控制台网络(simnet)不符 → 拒绝
+PASS 控制台页零 console 错误
+HTTP 400 http://127.0.0.1:18801/api/merchant/quote {"ok":false,"error":"收款方(你)地址不对: 不是合法的 Kaspa 地址"}
+
+=== 商家建报价页 E2E(真浏览器): 28 PASS / 0 FAIL ===
