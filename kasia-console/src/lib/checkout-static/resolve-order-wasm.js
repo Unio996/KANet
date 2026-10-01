@@ -53,10 +53,31 @@ const ctorInt = (n) => ({ kind: 'int', value: typeof n === 'bigint' ? Number(n) 
  * @param {object} cfg { network, finalRoles, payerRefundAddress, deadlineMs?, maxSplitFeeSompi, maxRefundFeeSompi, ruleCommitHex?, channelChainCommitmentHex? }
  */
 export function deriveCommissionOrderAddress(kaspaWasm, silvercWasm, commissionSplitSource, cfg) {
-  const roles = cfg.finalRoles;
-  if (roles.length < 1 || roles.length > MAX_ROLES) throw new Error(`deriveCommissionOrderAddress(wasm): finalRoles.length=${roles.length} 必须在 1-${MAX_ROLES}`);
+  // 出单: nonce 随机、deadline 缺省取 Date.now()+默认窗口。出单后调用方必须把 orderNonceHex+deadlineMs
+  // 存下来(订单凭据)——丢了就无法重建地址、无法触发到期退款(订单#1 事故)。
   const orderNonce = crypto.getRandomValues(new Uint8Array(16));
   const deadlineMs = cfg.deadlineMs != null ? Number(cfg.deadlineMs) : (Date.now() + DEFAULT_DEADLINE_MS);
+  return buildCommissionOrder(kaspaWasm, silvercWasm, commissionSplitSource, cfg, orderNonce, deadlineMs);
+}
+
+/**
+ * rebuildCommissionOrderAddress — 按已出单的 nonce+deadline 重建同一个订单地址。
+ * 内部不调随机数、不用 Date.now() 兜底; cfg.orderNonceHex(32 位小写 hex)与 cfg.deadlineMs(正整数毫秒)缺一即抛。
+ */
+export function rebuildCommissionOrderAddress(kaspaWasm, silvercWasm, commissionSplitSource, cfg) {
+  const { orderNonce, deadlineMs } = requireReceiptFields(cfg, 'rebuildCommissionOrderAddress(wasm)');
+  return buildCommissionOrder(kaspaWasm, silvercWasm, commissionSplitSource, cfg, orderNonce, deadlineMs);
+}
+
+function requireReceiptFields(cfg, who) {
+  if (typeof cfg.orderNonceHex !== 'string' || !/^[0-9a-f]{32}$/.test(cfg.orderNonceHex)) throw new Error(`${who}: 缺少或非法的 orderNonceHex(需 32 位小写 hex, 来自出单时的订单凭据)`);
+  if (!Number.isSafeInteger(cfg.deadlineMs) || cfg.deadlineMs <= 0) throw new Error(`${who}: 缺少或非法的 deadlineMs(需正整数毫秒, 来自出单时的订单凭据)`);
+  return { orderNonce: hexToBytes(cfg.orderNonceHex), deadlineMs: cfg.deadlineMs };
+}
+
+function buildCommissionOrder(kaspaWasm, silvercWasm, commissionSplitSource, cfg, orderNonce, deadlineMs) {
+  const roles = cfg.finalRoles;
+  if (roles.length < 1 || roles.length > MAX_ROLES) throw new Error(`deriveCommissionOrderAddress(wasm): finalRoles.length=${roles.length} 必须在 1-${MAX_ROLES}`);
   const ruleCommit = cfg.ruleCommitHex ? hexToBytes(cfg.ruleCommitHex) : new Uint8Array(32);
   const chainCommit = cfg.channelChainCommitmentHex ? hexToBytes(cfg.channelChainCommitmentHex) : new Uint8Array(32);
   const refundSpk = spkBytesFromAddress(kaspaWasm, cfg.payerRefundAddress);

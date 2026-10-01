@@ -59,7 +59,7 @@ const CS = 'kasia-console/src/lib/checkout-static';
 const RUNTIME_FILES = [
   'checkout.html', 'checkout.js', 'verify-core.js', 'resolve-order-browser.js',
   'resolve-order-wasm.js', 'order-template.js', 'monitor.js', 'broadcast-commission.js',
-  'broadcast-service-escrow.js',
+  'broadcast-service-escrow.js', 'order-receipt.js',
   'vendor/fee-split-browser.mjs',
   'vendor/generic-entry-witness-browser.mjs',
   'vendor/tx-mass-ub-browser.mjs',

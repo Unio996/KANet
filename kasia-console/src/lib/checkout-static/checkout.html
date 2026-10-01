@@ -37,6 +37,11 @@
       <input id="refundAddr" style="width:100%;padding:0.4rem" placeholder="kaspatest:..."></label>
     <button id="resolveOrderBtn" style="margin-top:0.5rem">确认并推导订单地址</button>
   </div>
+  <div id="receiptImportBox" class="box">
+    <b>已有订单凭据?</b>(之前下载的 JSON; 导入后在本页重建同一个订单地址, 与凭据里的地址逐字一致才会开放分账/到期退款按钮)<br>
+    <input id="receiptFile" type="file" accept=".json,application/json" style="margin-top:0.4rem">
+    <button id="importReceiptBtn" style="margin-top:0.5rem">导入凭据并重建订单</button>
+  </div>
   <div id="orderInfo" class="box"></div>
   <div id="monitorInfo" class="box"></div>
   <script type="module" src="./checkout.js"></script>

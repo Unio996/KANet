@@ -1,0 +1,45 @@
+providerAddr=kaspasim:qrts30wlzvca0u5flhfktlke9n5mz69s3f3xe5q3kegwj63de8enc9scztsya
+brokerAddr=kaspasim:qzgqcq60m2juf0qde04ek3p8kzkrghulek8lxaux0qka3ascmgzhju5wqeuws
+channel1Addr=kaspasim:qrghlcxx6fvdn7qws7wjutgttf46dfslpnhz848l7weqptvzsgagss835zr8c
+余额(分账前): provider=115.5 broker=0 channel_1=0
+quote minted (base64 len=1404)
+checkout URL: http://127.0.0.1:18777/checkout.html?q=eyJzY2hlbWFfdiI6MSwicXVvdGVfaWQiOiJxM3dheS0xNzkwODc1MjQyMjc5LTMzMjYyNSIsIm1lcmNoYW50X3B1YmtleV9oZXgiOiIwM2Q3MDh...
+PASS kaspa-wasm 加载+sha256核对通过
+PASS 渠道地址已解析(裸ch=路径, 无签名链背书——就是事故那条路径)
+PASS 订单地址推导成功
+PASS 订单角色表里真实列出 channel_1(不是被 fold 掉——事故的直接反面)
+PASS 订单角色表里真实列出 broker
+orderAddress=kaspasim:pr5wvrlgsz4d7hwazrq3f00sas94q8t3vmyg938a0qj2mswrjwzeujk869utc
+orderInfo 原文(供 provenance 存档):
+订单(浏览器原生推导·真 silverc 编译器, 零网络请求)
+        收款地址kaspasim:pr5wvrlgsz4d7hwazrq3f00sas94q8t3vmyg938a0qj2mswrjwzeujk869utc
+        应付总额10 KAS
+        截止时间2026-10-04T17:20:42.771Z
+      角色金额provider7.0000 KASbroker0.5000 KASchannel_12.5000 KAS
+      
+        扫码付款(任意 Kaspa 钱包扫描——本页从不持有/传输私钥, 只编码下面这个公开地址+金额)
+        
+        付款链接(不支持扫码的钱包可手动复制)：kaspasim:pr5wvrlgsz4d7hwazrq3f00sas94q8t3vmyg938a0qj2mswrjwzeujk869utc?amount=10
+        复制
+      
+      
+    ⚠ 请先下载订单凭据——不保存就无法退款!
+    付款前请务必保存。关闭本页后, 只有凭据能重建这个订单地址; 丢失凭据且订单到期未分账, 资金将无法由本页取回。
+    
+      订单随机数(nonce)f286e48cbeb0d50d7eed8321d1a8ebea
+      截止时间2026-10-04T17:20:42.771Z(1791134442771 ms)
+      订单地址kaspasim:pr5wvrlgsz4d7hwazrq3f00sas94q8t3vmyg938a0qj2mswrjwzeujk869utc
+    
+    下载订单凭据(JSON)
+  
+      
+monitorInfo 最终原文(供 provenance 存档):
+订单状态监控(连 ws://127.0.0.1:29935)✓ 订单已完成——收款地址资金已离开(分账或退款已被节点接受)
+PASS 浏览器分账广播完成("订单已完成")
+PASS 页面全程零 console/page 错误
+余额(分账后): provider=122.5 broker=0.5 channel_1=2.5
+PASS provider 到账 ≈7.0 KAS(70%)
+PASS broker 到账 ≈0.5 KAS(5%)——broker 是独立角色, 不是渠道, 一直都该收到
+PASS 🔴 channel_1 真实到账 ≈2.5 KAS(25%)——这就是主网事故里没发生、现在真实发生了的那件事
+
+=== 三方分账真实 simnet E2E(worktree=_j2_wt_order_receipt, 已修 channelSpks bug): 10 PASS / 0 FAIL ===

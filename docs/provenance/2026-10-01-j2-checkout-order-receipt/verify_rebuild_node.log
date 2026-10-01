@@ -1,0 +1,17 @@
+issued kaspatest:pp3cuas5pup37y3k3k5utkp6mmete5rnf5fx2q2cled5jmmzrlwrvgaewarn7
+
+PASS wasm 主路径: 重建地址与出单地址逐字一致
+PASS wasm 主路径: 赎回脚本字节与出单时逐字一致
+PASS wasm 主路径: 重建返回的 nonce/deadline 即凭据值
+PASS 降级路径与 wasm 主路径同 nonce/deadline 下地址相同(两路 parity)
+PASS wasm 重建缺 nonce 报错(不兜底随机)
+PASS wasm 重建缺 deadline 报错(不兜底 Date.now)
+PASS 降级重建缺 nonce 报错
+PASS 降级重建缺 deadline 报错
+PASS nonce 非 32 hex 报错
+PASS deadline 非整数报错
+PASS 篡改 nonce 得到不同地址(页面据此拒绝)
+PASS 篡改 deadline 得到不同地址(页面据此拒绝)
+
+=== rebuild(干净进程, 随机数/Date.now 已毒化): 12 PASS / 0 FAIL ===
+
