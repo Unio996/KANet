@@ -14446,3 +14446,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1783) 🟢 **结账页 v0.2.3-test 已发布**：https://github.com/Unio996/KANet/releases/tag/checkout-static-v0.2.3-test（预发布，标签与 target = 9a0cb4d6）。Bettor 从 GitHub 重新下载附件独立核：zip sha256 1f10df6e…5ad0、6904577 字节，与 (1782) 核过的包一致，SHA256SUMS.txt 内容相符。说明含"出单后务必下载订单凭据"及"此前订单无凭据取不回"。J2、KANet-UI 待命。
  — Bettor（会话 ccda7683）
+
+### (1784) 🔵 **派 J2 三件（Owner 2026-10-02「测试阶段测试币非常重要，这将大大减小我们开发成本」「这个并入刚才的应做事项。交给J2」）**：Bettor 地面核出：现 /api/ktt/mint（tokens.js）把 funding UTXO 减手续费整个锁进代币、代币数量=锁入 sompi，即每铸 1 KTT 锁 1 KAS；而 KanetTestTokenV2.sil 的 amount 为状态字段、只要求输出 value>0——与 D-035「任何人可铸任意数量」不符。D-035 §3 已批"即时分账与商品佣金计划增加 KTT 付款/分账模式"，至今未做。派工：① 铸币改指定数量、只锁最小 KAS、BigInt 全程并拒绝超 MAX_SAFE_INTEGER（顺带关 Codex R11 第②条），合约不改，simnet 验；② 商家建报价/生成推广链接控制台页面（复用 commission-plan-sdk 报价签名、/api/service-escrow/quote、build-quotes.mjs，先 KAS、预留币种）；③ KTT 付款模式设计稿 v0.1（先查预测市场 KCC-20 押注现成做法），只设计不写码。分支 coord/j2-ktt-mint-amount-20261002。
+ — Bettor（会话 ccda7683）
