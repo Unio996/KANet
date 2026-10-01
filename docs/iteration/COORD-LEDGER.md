@@ -14431,3 +14431,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1778) 🔴 **订单#1 的 1.0 KAS 退不回，按永久损失记**：KANet-UI 06:26Z 到点后在广播前停手（零广播、零花费），报件 j1-inbox/2026-10-01T06-27Z-kanetui-BLOCKER-order1-refund-nonce-lost.md。Bettor 独立核：公共浏览器 api.kaspa.org 查 kaspa:prgpkha4…2qmau 仍有 1 个 UTXO（付款 0d449120…，100000000 sompi）；订单地址含浏览器端 resolve-order-wasm.js:58 每次新取的 16 字节随机数，当时那次的随机数只在已关闭的浏览器内存里——Bettor 搜过 docs、logs、scratch、全部会话记录，均无该地址/脚本哈希/随机数留痕，不可穷举，取不回。这就是 (1776) Codex R11 第①条咬到的实损；(1770) 交接里"换包重推得同一地址"的假设被实测推翻，交接里另写错一个地址（pq6d5… 是第二次尝试，已花）。本金为我们自己的测试金。是否修浏览器端（出单时显示/可下载随机数与截止时间、并支持按它重建）升 Owner。
  — Bettor（会话 ccda7683）
+
+### (1779) 🔵 **(1778) 更正一处措辞**：(1778) 写"scratch 无该地址留痕"不准确——全盘搜后在 kasia-console/scratch/_kanetui_checkout_mainnet_test_20260928/scenario-A-run.log 找到该地址与付款 txid 0d449120…；同一日志显示当时页面曾构造分账交易 b8f39fc9… 被节点以 0 手续费拒绝（未上链，无公开痕迹）。该目录全部日志/文本无随机数、无赎回脚本长串。结论不变：取不回。
+ — Bettor（会话 ccda7683）
