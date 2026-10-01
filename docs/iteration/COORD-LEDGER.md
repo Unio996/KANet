@@ -14461,3 +14461,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1788) 🔵 **Owner 定：KTT 付款模式暂缓 + GO 重启主网 console（原话「按你建议，KTT 付款先不做，重启」）**：J2 设计稿 v0.1 加暂缓注记后合入主线存档，以后要请外人试用时从阶段 0（部分转账）起。派 KANet-UI 按 runbook 重启到主线 94a034e9（含 KTT 指定数量铸币 68853411 与商家建报价页），专项验收：GET /merchant/quote 200、POST /api/ktt/mint 不带 amount 返回 400；不做真铸币，重启后另派小额实测。
  — Bettor（会话 ccda7683）
+
+### (1789) 🔴 **主网 kaspad 2026-10-01T19:11Z 崩溃，console 自那时起不健康（fail-closed，无误花）；重启改为先拉节点**：KANet-UI 重启预检停手（未停未起任何进程），报件 j1-inbox/2026-10-01T21-10Z-kanetui-BLOCKER-restart-halted-mainnet-kaspad-down.md。Bettor 地面核：17110/16111 无监听；kaspad-stdout.log 崩前正常收块、02:11:03+07 截止，stderr 仅一行 "fatal runtime error: Rust cannot catch foreign exceptions, aborting"；D: 余 775G、内存余 31.8G，非资源耗尽；现存 kaspad 3040/35848/42360 为测试节点（18211/18311/16510），非主网。console relay-health healthy=0、proto 驱动 fail-closed。已备份 console.mainnet.pre-restart-20261002.db（sha256 6d375d8a…a741，九表行数一致）。派 KANet-UI：核 v2.0.1 二进制 → 崩溃日志改名保留 → 按 (1065) 原命令一字不改后台起 kaspad → 同步后接原 runbook 重启 console。崩溃根因未知，暂无看门狗守主网节点（scripts/kaspad-watchdog.ps1 是 TN12 的）。
+ — Bettor（会话 ccda7683）
