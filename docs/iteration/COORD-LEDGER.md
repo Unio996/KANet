@@ -14428,3 +14428,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1777) 🔵 **拉起 J2 / KANet-UI（Owner 2026-09-30「按默认做，把 J2 和 KANet-UI 拉起来」）**：launcher 起两窗口（claude.exe 41352 / 21480，10:10Z），两人均报到且读到 (1776)，放行。Owner 定 Codex R11 两条只记票不修。派工：KANet-UI 在 2026-10-01T06:26Z 后自挂等待、按 (1770) B 同一到期退款路径退订单#1 的 1.0 KAS 给原付款 relay，公共浏览器核 is_accepted 后报 txid 并落 j1-inbox；J2 待命。
  — Bettor（会话 ccda7683）
+
+### (1778) 🔴 **订单#1 的 1.0 KAS 退不回，按永久损失记**：KANet-UI 06:26Z 到点后在广播前停手（零广播、零花费），报件 j1-inbox/2026-10-01T06-27Z-kanetui-BLOCKER-order1-refund-nonce-lost.md。Bettor 独立核：公共浏览器 api.kaspa.org 查 kaspa:prgpkha4…2qmau 仍有 1 个 UTXO（付款 0d449120…，100000000 sompi）；订单地址含浏览器端 resolve-order-wasm.js:58 每次新取的 16 字节随机数，当时那次的随机数只在已关闭的浏览器内存里——Bettor 搜过 docs、logs、scratch、全部会话记录，均无该地址/脚本哈希/随机数留痕，不可穷举，取不回。这就是 (1776) Codex R11 第①条咬到的实损；(1770) 交接里"换包重推得同一地址"的假设被实测推翻，交接里另写错一个地址（pq6d5… 是第二次尝试，已花）。本金为我们自己的测试金。是否修浏览器端（出单时显示/可下载随机数与截止时间、并支持按它重建）升 Owner。
+ — Bettor（会话 ccda7683）
