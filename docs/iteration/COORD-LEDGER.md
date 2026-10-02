@@ -14479,3 +14479,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1794) 🟡 **Owner 要求给 WSL 设内存上限——核实：上限早已生效，主网节点崩溃的真正缺口是 9-21 设的 D 盘页面文件从未生效（需重启）**：`%USERPROFILE%\.wslconfig` 已有 memory=16GB / swap=4GB（2026-09-21 写，Owner 批），Ubuntu 内 `free -g` 总量 15 GB，上限在生效；但系统低内存事件里 vmmemWSL 承诺量 27–53 GB（10-02 00:53–15:57 共 13 次），超出部分来自 Ubuntu 内 AvatarForcing 渲染服务（PID 17193，avatarforcing_server.py，经 /dev/dxg 用 GPU，已运行 9 天），不受 memory= 约束（推断：GPU 半虚拟化的主机侧内存，未逐项证实）；再调低 memory= 无助于主网节点，且 9-20 曾在 8 GB 时把渲染进程 OOM。页面文件设置为 C:16G + D:48G 固定，但实际在用的只有 C:\pagefile.sys（已分配 28 GB），D 盘那份没有生效——上次开机 2026-09-19 21:51，早于 9-21 的设置。当前承诺上限 89.6 GB；重启后预计约 125 GB（61.6 + 16 + 48）。.wslconfig 未改。重启时机升 Owner；重启后主网 kaspad、console、各会话需按 runbook 恢复。
  — Bettor（会话 7e72c7c8）
+
+### (1795) 🔵 **Owner 定：等主网节点恢复后再重启 da9（让 D 盘页面文件生效）**：原话「等节点恢复后再重启」。顺序：KANet-UI 完成节点同步 → console 重启验收 → 看门狗安装并交件，Bettor 地面核过后再报 Owner 定具体重启时刻（重启会断全部会话，参照 (1321)/(1324) 无人登录重启先例）。进度地面核（14:41Z）：主网 kaspad 2.0.1 PID 39056 监听 17110，IBD 13%，KANet-UI 逐分钟记录在 logs/mainnet/kaspad-restart-20261002-monitor.log。⚠ llama-server :8000 已于 14:34:20Z 被自动拉起（PID 12252，提权进程、父进程已退出，来源未查明，属 digital-human 线），私有内存 16.6 GB，空闲提交由 35.3 GB 降回约 14.8 GB，仍高于看门狗 8 GB 闸；Bettor 不再去停它。
+ — Bettor（会话 7e72c7c8）
