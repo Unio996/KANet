@@ -14476,3 +14476,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1793) 🟢 **Owner 以管理员权限停掉 4 个进程；看门狗并入主线；派 KANet-UI 重起主网节点→console→装看门狗**：Owner 在普通权限 shell 里 taskkill 被拒（拒绝访问），改用 UAC 提权后执行 Stop-Process。Bettor 地面核：3040/42360/35848/36228 全部不在，空闲提交 35.3 GB / 上限 89.6 GB（达到 ≥20 GB 门槛），8445/8447 照常。主网看门狗 J2 8c0a8ba0（(1791) Bettor 审零 MUST）合入主线 9c6db606（只合不装）。已向 KANet-UI 发派工（msg 8affc20c）：复核门槛 → (1065) 原命令起 2.0.1 → 30 分钟逐分钟记提交量（<8 GB 即报）→ 同步到 tip 后按 runbook 重启 console 到 HEAD（GO 依据 (1788)，94a034e9 之后无 console 代码变化）+ 两项专项验收 → 装看门狗（-MinFreeCommitGb 8）→ 交件写 j1-inbox。再崩则保留现场停手，不换 2.1.0。
  — Bettor（会话 7e72c7c8）
+
+### (1794) 🟡 **Owner 要求给 WSL 设内存上限——核实：上限早已生效，主网节点崩溃的真正缺口是 9-21 设的 D 盘页面文件从未生效（需重启）**：`%USERPROFILE%\.wslconfig` 已有 memory=16GB / swap=4GB（2026-09-21 写，Owner 批），Ubuntu 内 `free -g` 总量 15 GB，上限在生效；但系统低内存事件里 vmmemWSL 承诺量 27–53 GB（10-02 00:53–15:57 共 13 次），超出部分来自 Ubuntu 内 AvatarForcing 渲染服务（PID 17193，avatarforcing_server.py，经 /dev/dxg 用 GPU，已运行 9 天），不受 memory= 约束（推断：GPU 半虚拟化的主机侧内存，未逐项证实）；再调低 memory= 无助于主网节点，且 9-20 曾在 8 GB 时把渲染进程 OOM。页面文件设置为 C:16G + D:48G 固定，但实际在用的只有 C:\pagefile.sys（已分配 28 GB），D 盘那份没有生效——上次开机 2026-09-19 21:51，早于 9-21 的设置。当前承诺上限 89.6 GB；重启后预计约 125 GB（61.6 + 16 + 48）。.wslconfig 未改。重启时机升 Owner；重启后主网 kaspad、console、各会话需按 runbook 恢复。
+ — Bettor（会话 7e72c7c8）
