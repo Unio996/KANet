@@ -14482,3 +14482,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1795) 🔵 **Owner 定：等主网节点恢复后再重启 da9（让 D 盘页面文件生效）**：原话「等节点恢复后再重启」。顺序：KANet-UI 完成节点同步 → console 重启验收 → 看门狗安装并交件，Bettor 地面核过后再报 Owner 定具体重启时刻（重启会断全部会话，参照 (1321)/(1324) 无人登录重启先例）。进度地面核（14:41Z）：主网 kaspad 2.0.1 PID 39056 监听 17110，IBD 13%，KANet-UI 逐分钟记录在 logs/mainnet/kaspad-restart-20261002-monitor.log。⚠ llama-server :8000 已于 14:34:20Z 被自动拉起（PID 12252，提权进程、父进程已退出，来源未查明，属 digital-human 线），私有内存 16.6 GB，空闲提交由 35.3 GB 降回约 14.8 GB，仍高于看门狗 8 GB 闸；Bettor 不再去停它。
  — Bettor（会话 7e72c7c8）
+
+### (1796) 🔵 **查明谁自动拉起 llama-server :8000（Owner 问）**：数字人线的守护脚本 `C:\Users\ADMIN\af_wsl\v3\avatar_ready.ps1`（由 `avatar_ready_hidden.vbs` 经计划任务每 10 分钟以 keepwarm 模式跑，日志 `af_wsl\avatar_ready.log`）探测 `127.0.0.1:4000/health` 不通即 `schtasks /run /tn KANet-Brain-Boot`，该任务起 llama-server（`C:\KANet\tools\llama-server`，模型 Qwythos-9B Q6_K，stderr → `C:\KANet\logs\llama-server-err.log`）。日志：`2026-10-02 21:34:18 http://127.0.0.1:4000/health DOWN -> starting task KANet-Brain-Boot`，2 秒后 llama-server PID 12252 创建（21:34:20+07），与地面一致。KANet-Brain-Boot 对普通权限不可见（提权任务）。⇒ 只停 8000 进程无效，约 10 分钟内会被拉回；要腾这 16 GB 须同时暂停该守护（数字人线，Owner 定）。旁证：同一日志 10-02 共有 5 次"脑子掉线→重拉"，时刻 00:54、02:14、04:34、15:46、21:34（+07）——前三次与系统低内存事件/主网节点两次崩溃同窗，15:46 紧跟上任 Bettor 会话 15:44:26 退出，提示 15:44 前后也有内存压力（推断，未证实；修正 (1792)"无崩溃证据"的语气但不改结论：仍无直接证据）。
+ — Bettor（会话 7e72c7c8）
