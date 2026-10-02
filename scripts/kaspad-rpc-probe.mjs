@@ -49,6 +49,18 @@ function kaspadProcessExists() {
   // win32 进程枚举供 code 9(no-process)。非 win32 或查失败 => null(未知, 不误判死)
   try {
     if (process.platform !== 'win32') return null;
+    const appdir = process.env.KASPAD_PROBE_APPDIR;
+    if (appdir) {
+      // mainnet profile(2026-10-02): 本机常驻其它(测试)节点也叫 kaspad.exe, 不能按进程名判"有无本节点进程"。
+      // 改为: 存在 CommandLine 含 --appdir=<appdir> 的 kaspad.exe 才算有。枚举失败 => null(未知, 不误判死)。
+      const norm = appdir.replace(/[\\/]+$/, '').replace(/\//g, '\\');
+      const esc = norm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\\\\/g, '[\\\\/]');
+      const rx = '(?i)--appdir[= ]["\']?' + esc + '["\']?(\\s|$)';
+      const ps = "@(Get-CimInstance Win32_Process -Filter \"Name='kaspad.exe'\" -ErrorAction Stop | Where-Object { $_.CommandLine -match '" + rx.replace(/'/g, "''") + "' }).Count";
+      const o = require('child_process').execFileSync('powershell', ['-NoProfile', '-Command', ps], { timeout: 15000, encoding: 'utf8' }).trim();
+      const n = parseInt(o, 10);
+      return Number.isFinite(n) ? n > 0 : null;
+    }
     const out = require('child_process').execSync('tasklist /FI "IMAGENAME eq kaspad.exe" /NH', { timeout: 5000, encoding: 'utf8' });
     return /kaspad\.exe/i.test(out);
   } catch { return null; }
