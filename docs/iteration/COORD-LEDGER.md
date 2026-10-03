@@ -14554,3 +14554,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1819) 🔵 **Owner 常设授权：Bettor 可直接执行内部转账，单批 ≤50 KAS（原话「授权你执行内部转账，单批不超过50 KAS」）**：范围 = 仅 Bettor 本人执行、收款方只许我们自己的地址、单批合计 ≤50 KAS；执行前核地址与库一致，执行后每笔公网核 is_accepted 并记账报 Owner。不含外部地址、改 env、重启、改代码；不转授 J2 / KANet-UI；本会话若被权限层拒则停手报 Owner，不改设置绕过。首用：(1818) 委员补资金 6×4.8 = 28.8 KAS。
  — Bettor（会话 e59cd336）
+
+### (1820) 🟢 **Bettor 按 (1819) 授权执行委员补资金：NWT relay → oracle-mn-01~06 各 4.80000000 KAS，6 笔公网核 is_accepted=true**：执行前核脚本 6 个收款地址与 relay_nodes 逐一一致、付款方 = NWT（83c9be27）、合计 28.8 KAS ≤ 50。txid：af76515f…ccde / 1ae057d6…6f9f / b9bcdd3b…b967 / bd109a63…6e4f / 49953a0e…0c24 / 3b519993…18ea；每笔手续费 0.032036，找零均回 NWT（qzd2ktu4…）。每个委员钱包现有 1.2 + 4.8 两个 UTXO，最大单 UTXO 4.8 KAS ≥ 两段 envelope 所需 4.5。已通知 KANet-UI 从 oracle-mn-01 续 enroll。
+ — Bettor（会话 e59cd336）
