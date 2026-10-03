@@ -14509,3 +14509,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1804) 🔵 **派 J2：主网小额实测 KTT 指定数量铸币 + 商家建报价页（Owner 2026-10-03「给 J2 派下一件活」；落实 (1788)「重启后另派小额实测」）**：依据 D-035「该花钱就花」与小额实测规矩。硬顶：单笔 ≤2 KAS、本批合计（手续费 + 随代币锁定 0.7 KAS）≤3 KAS，收款方只许我们自己的地址，不用 PROTO_RELAY_ID / broker relay，只走控制台现成接口，不碰私钥文件、不改 env/代码、不重启。内容：KTT 铸 1,000,003 → 自转 → 整笔转他址（3 笔，各核 api.kaspa.org is_accepted 与钱包页数量）；/merchant/quote 建 KAS 报价、生成推广链接、核结账页显示与签名验证（默认不付款）。异常即停手保留现场。交件 j1-inbox + 分支 coord/j2-mainnet-smoke-20261003。msg 660ee4e8。KANet-UI 待命。
  — Bettor（会话 e59cd336）
+
+### (1805) 🟡 **(1804) 卡点：KTT 铸币专用 relay 无 ≥1.2 KAS 单个 UTXO；解法 = 同地址自转合并（Bettor 定，不涉 env/重启）**：J2 停手报（零广播零花费，仅一次 POST /api/ktt/mint 返回 409）。Bettor 地面核：KTT_PANEL_RELAY_ID=0044cfbd（kaspa:qpf2f39d…r0tz9）公网 UTXO 0.98900000 / 0.48800000 / 0.11995586 KAS；tokens.js:188 needFunding = 锁 0.7 + 余量 0.5 = 1.2 KAS。派 J2 用现成 POST /api/relay/0044cfbd…/transfer 自转 1.25 KAS（找零约 0.23–0.35 KAS，避开碎找零存储质量上限），核 is_accepted 后继续 KTT 三笔；报价页（不花钱）并行做。预算不变 ≤3 KAS。msg e4bb73b5。
+ — Bettor（会话 e59cd336）
