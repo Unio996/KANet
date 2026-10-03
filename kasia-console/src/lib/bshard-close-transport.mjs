@@ -6,6 +6,7 @@
 
 import { sqlite } from '../db/client.js';
 import { persistPayoutShardState } from './payout-shard-persist.mjs';
+import { deriveCommitteeCheckOffsets } from './committee-offset-derive.mjs';
 import { assertAddressOnNetwork, configuredNetwork } from './kaspa-network.mjs';   // (b) 网络单一源 (设计 v0.2 §3): 前缀只对照 env KASPA_NETWORK, 不从地址推网络
 
 const QUORUM = 4;   // 4-of-5 committee (close_attest .sil require ≥4 distinct sig)
@@ -386,11 +387,12 @@ export async function buildProposeCloseRequestV2(marketId, judged) {
   if (pm.degenerate) throw new Error(`buildProposeCloseRequestV2: degenerate payout(${pm.reason})`);
   const claimedPayoutRoot = settlePayoutRoot(pm.payoutLeaves && pm.payoutLeaves.length ? pm.payoutLeaves : pm.winners);
 
-  // 命门①(既有脚本纪律): market_metadata_hash 必须 == genesis redeem[642] baked 值, 不吻合拒绝继续
-  const onChainCommitAtV2Offset = ps.payout_redeem_hex.slice(642 * 2, (642 + 32) * 2);
-  if (market.market_metadata_hash && String(market.market_metadata_hash).toLowerCase() !== onChainCommitAtV2Offset) {
-    throw new Error(`buildProposeCloseRequestV2: 命门①mismatch — market_metadata_hash ${market.market_metadata_hash} != genesis redeem[642] ${onChainCommitAtV2Offset}`);
-  }
+  // 命门①(既有脚本纪律): 市场的 predicate_commit 必须 == PS redeem 里 baked 的值, 不吻合拒绝继续。
+  //   🔴 账本1832 段2: 旧实现硬编码 redeem[642] 并拿 market_metadata_hash 比——两处都陈: ① 642 是 D-019/v1.0.0 编译之前的布局(现 V2 的 predicate_commit 在 ~16.5K 处);
+  //   ② B线落2(2026-07-12)后 genesis 烤的是 deriveMarketPredicateCommit(market)(含 fee_rules/predicate), 不再等于 market_metadata_hash。
+  //   ⇒ 对任何真实 V2 市场必 mismatch(此前卡在 consolidate 从未跑到这里)。改: 期望值 = 单源 deriveMarketPredicateCommit(完整市场行), 偏移 = committee-offset-derive 现算(同 close-enforce/K-18 两道闸一套)。
+  const { deriveMarketPredicateCommit } = await import('./pool-shard-settle.mjs');
+  assertPredicateCommitBakedInPsRedeem(deriveMarketPredicateCommit(sqlite.prepare('SELECT * FROM pool_markets WHERE id = ?').get(marketId)), ps.payout_redeem_hex);
 
   const relayAddr = (await rc({ type: 'get_pubkey' })).address;
   const z32 = '00'.repeat(32);
@@ -528,6 +530,16 @@ export function assertZkHandoffTmplCoherent(psRow, marketId, { tokenTmplHash, cl
 
 // 账本1832 段2: handoff 交易只需付网络费(代币是价值载体); 与 consolidate 的 30M 同量级(见 pool-shard-settle.mjs)。
 const HANDOFF_FEE_SOMPI = 30_000_000;
+
+// 账本1832 段2: 命门①的纯函数化(可单测)。predicate_commit 偏移 = deriveCommitteeCheckOffsets(V2).predicateCommitOffset(close_attest 内第一份 inline copy 的数据起点)。
+export function assertPredicateCommitBakedInPsRedeem(expectedCommitHex, psRedeemHex) {
+  if (!expectedCommitHex) return;   // 无可核值 ⇒ 同旧行为(不核)
+  const off = deriveCommitteeCheckOffsets({ isV2: true, pmrSentinelHex: '5a'.repeat(32), pcSentinelHex: '6b'.repeat(32) }).predicateCommitOffset;
+  const baked = String(psRedeemHex).slice(off * 2, (off + 32) * 2);
+  if (String(expectedCommitHex).toLowerCase() !== baked) {
+    throw new Error(`buildProposeCloseRequestV2: 命门①mismatch — 市场 predicate_commit ${expectedCommitHex} != PS redeem[${off}] baked ${baked}`);
+  }
+}
 
 export async function buildZkHandoffRequestV2(marketId, args) {
   // 🔴 NWT footgun catch(2026-07-08): 默认 dryRun=true(安全默认), 跟 admin endpoint 层的

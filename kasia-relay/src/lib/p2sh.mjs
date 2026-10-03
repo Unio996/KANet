@@ -2323,17 +2323,37 @@ export async function unlockBshardCloseAttestV2(args) {
     const outputs = [];
     outputs[w.self_out_idx] = new TransactionOutput(psOutValue, payToAddressScript(new Address(psContAddr)), new CovenantBinding(0, new Hash(psCovId)));
     const orderedOut = outputs.filter(o => o !== undefined);
-    _appendChange(orderedOut, matched, cmd.outputs?.change_address, _bshardFeeV1(matched.length));
+    // 🔴 账本1832 段2: 固定费 10M sompi(节点实测: 2M < 要求 6954600 @ normalized transient mass 69546 ⇒ 100 sompi/gram×69.5k, 留 ~44% 余量)。preimage 与 submit 共用本行 ⇒ 委员签的 outputs(含找零)与最终 tx 一致。
+    _appendChange(orderedOut, matched, cmd.outputs?.change_address, BigInt(cmd.fee_sompi ?? 10_000_000));
 
     // close_attest scriptSig — witness push 序必与 PayoutShardV2.sil close_attest 形参声明序一致:
     //   selfOutIdx, new_payoutRoot, new_attestedWinner, new_betsRoot, new_refundRoot, new_attestedAtMs,
     //   c0..c4Sig, committeePkHash, c0..c4Pk, c0..c4Idx, c0..c4 siblings(40) + OP_1 + redeem。
-    let sigPush = '', pkPush = '', idxPush = '', sibPush = '';
-    for (const m of members) { sigPush += m.sig; pkPush += _pushBytes(m.pk); idxPush += _pushInt(m.idx); for (const s of m.sibs) sibPush += _pushBytes(s); }
-    const psSig = _pushInt(w.self_out_idx) + _pushBytes(w.new_payout_root)
-      + _pushInt(w.new_attested_winner) + _pushBytes(w.new_bets_root) + _pushBytes(w.new_refund_root) + _pushInt(w.new_attested_at_ms)
-      + sigPush + _pushBytes(w.committee_pk_hash) + pkPush + idxPush + sibPush
-      + '51' + _encodePushDataHex(Buffer.from(cmd.inputs.payoutshard.redeem_hex, 'hex'));   // close_attest=OP_1='51'(同 PayoutShardV2.sil entry 1)
+    //   🔴 账本1832 段2: 旧版是 v1.0.0 之前的裸选择器('51'=OP_1) + 无 tok_prefix/tok_suffix——对 v1.0.0 编译的 PayoutShardV2 共识报 'script returned early'(simnet 官方 2.0.1 实测);
+    //   改 v1.0.0 形: 每个形参 addI64/addData + 末尾 tok_prefix/tok_suffix(noTokenInput 不在场证明用) + 4 字节 dispatch tag + redeem 揭示。
+    //   preimage 模式(委员签的那笔 un)不含 sigScript, 不受影响。
+    let psSig = null;
+    if (members.length) {
+      const hx = (h) => new Uint8Array(Buffer.from(String(h).replace(/^0x/, ''), 'hex'));
+      if (!w.tok_prefix_hex || !w.tok_suffix_hex || !w.close_attest_dispatch_tag_hex) throw new Error('close_attest_v2: witness.tok_prefix_hex/tok_suffix_hex/close_attest_dispatch_tag_hex 必需(v1.0.0 形, noTokenInput)');
+      const b = new ScriptBuilder({ flags: { covenantsEnabled: true } });
+      b.addI64(BigInt(w.self_out_idx)); b.addData(hx(w.new_payout_root));
+      b.addI64(BigInt(w.new_attested_winner)); b.addData(hx(w.new_bets_root)); b.addData(hx(w.new_refund_root)); b.addI64(BigInt(w.new_attested_at_ms));
+      for (const m of members) {   // sig 实参 = 65B(65 字节 sig+hashtype); 委员侧返回的是已带 0x41 长度前缀的 push, 剥掉前缀再 addData
+        const raw = Buffer.from(String(m.sig).replace(/^0x/, ''), 'hex');
+        // 未签的委员槽(4-of-5 法定人数, 第 5 位缺席)= 占位 '00' = 空 sig(OP_0): checkSig 返回 false 不计入 validSigs(合约要求 >=4), 与旧版 '00' 行为一致。
+        if (raw.length === 1 && raw[0] === 0x00) { b.addData(new Uint8Array(0)); continue; }
+        const sig65 = raw.length === 66 && raw[0] === 0x41 ? raw.subarray(1) : raw;
+        if (sig65.length !== 65) throw new Error(`close_attest_v2: 委员 sig 长度 ${sig65.length} != 65`);
+        b.addData(new Uint8Array(sig65));
+      }
+      b.addData(hx(w.committee_pk_hash));
+      for (const m of members) b.addData(hx(m.pk));
+      for (const m of members) b.addI64(BigInt(m.idx));
+      for (const m of members) for (const sb of m.sibs) b.addData(hx(sb));
+      b.addData(hx(w.tok_prefix_hex)); b.addData(hx(w.tok_suffix_hex)); b.addData(hx(w.close_attest_dispatch_tag_hex));
+      psSig = _combineActionAndRedeem(b.drain(), cmd.inputs.payoutshard.redeem_hex);
+    }
 
     const psAddrIn = _addressFromRedeem(cmd.inputs.payoutshard.redeem_hex, networkId);
     const un = new Transaction({ version: 1, inputs: matched.map(u => ({ previousOutpoint: { transactionId: u.outpoint.transactionId, index: u.outpoint.index }, signatureScript: '', sequence: 0n, sigOpCount: 0, computeBudget: _BSHARD_COMPUTE_BUDGET, utxo: u })), outputs: orderedOut, lockTime: BigInt(lockTime), gas: 0n, subnetworkId: '0000000000000000000000000000000000000000', payload: '' });
@@ -2351,7 +2371,7 @@ export async function unlockBshardCloseAttestV2(args) {
     // submit 模式(同 V1): 委员 sig 注入同一 canonical un + fee 签 + 广播。
     const feeSig = createInputSignature(un, 1, wallet.getPrivateKey(), SighashType.All);
     const signedTx = new Transaction({ version: 1, inputs: [
-      { previousOutpoint: { transactionId: psUtxo.outpoint.transactionId, index: psUtxo.outpoint.index }, signatureScript: psSig, sequence: 0n, sigOpCount: 0, computeBudget: _BSHARD_COMPUTE_BUDGET },
+      { previousOutpoint: { transactionId: psUtxo.outpoint.transactionId, index: psUtxo.outpoint.index }, signatureScript: psSig, sequence: 0n, sigOpCount: 0, computeBudget: 100 },
       { previousOutpoint: { transactionId: feeUtxo.outpoint.transactionId, index: feeUtxo.outpoint.index }, signatureScript: feeSig, sequence: 0n, sigOpCount: 0, computeBudget: _BSHARD_COMPUTE_BUDGET },
     ], outputs: orderedOut, lockTime: BigInt(lockTime), gas: 0n, subnetworkId: '0000000000000000000000000000000000000000', payload: '' });
     _assertTxInvariants(matched, signedTx, 'unlockBshardCloseAttestV2', networkId);
@@ -2478,11 +2498,12 @@ export async function unlockBshardZkHandoff(args) {
     // dryRun(J1tn 2026-07-08 门①): opt-in, 走完 UTXO 现读+组签名 tx+invariants, 只跳广播; 返回 shape 无 txId + broadcasted:false。
     //   段2 增补: 返回逐输入/输出真实字节供 cli-debugger/证据(同 unlockBshardConsolidateV2 的 dry_run)。
     if (dryRun) {
+      const hx0 = (v) => (typeof v === 'string' ? v : Buffer.from(v).toString('hex')).replace(/^0x/, '');
       return {
         broadcasted: false, closeZkAddress: closeZkAddr, closeZkRedeemHex: fullRedeem.toString('hex'), zkCovId, tokOutCovId: tokCovId,
         psSig, feeSig,
-        inputs: matched.map((u, i) => ({ utxo_value: String(_utxoValue(u)), signature_script_hex: [psSig, tokSig, feeSig][i] })),
-        outputs: orderedOut.map((o, k) => ({ value: String(o.value) })),
+        inputs: matched.map((u, i) => ({ prev_txid: u.outpoint.transactionId, prev_index: Number(u.outpoint.index), utxo_value: _utxoValue(u).toString(), utxo_script_hex: hx0((u.entry ?? u).scriptPublicKey?.script ?? ''), covenant_id: (() => { const c = (u.entry ?? u).covenantId ?? u.covenant?.covenantId; return c == null ? null : String(c); })(), signature_script_hex: [psSig, tokSig, feeSig][i] })),
+        outputs: signedTx.outputs.map((o) => ({ value: o.value.toString(), script_hex: hx0(o.scriptPublicKey.script), covenant_id: o.covenant ? String(o.covenant.covenantId) : null })),
       };
     }
     const r = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
