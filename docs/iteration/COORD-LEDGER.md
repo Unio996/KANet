@@ -14593,3 +14593,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1832) 🟡 **Owner 批默认：J2 改 PayoutShardV2 自续约切片（照抄 ShardLeaf (1469) 修法），Bettor 代审；段1 审完再报 Owner**：Owner 原话「好，等第1段审完再报我」。已派 J2：ctor 加 own_redeem_len（29→30 参），全部自续约入口改 ownLen - own_redeem_len 倒数截取；同查 CloseZkV2 / RootClaim 同写法；每入口 simnet 2.0.1 真共识正反例；JS ctor 读取方同步；说明三模板哈希是否变化。仅合并，不部署/不改 env/不重启/不动主网资金。主网该合约实例 0，无迁移。
  — Bettor（会话 e59cd336）
+
+### (1833) 🟢 **结算移植段1 审过合并：PayoutShardV2/CloseZkV2 自续约偏移修复 + consolidate/absorb 代币化**：J2 分支 coord/j2-pm-settle-tokenize-20261004 @0ac29950，Bettor 逐行审合约 diff（absorb/refund_claim/escape_claim/claim partial 四处改为 ownLen - own_redeem_len，与 ShardLeaf (1469) 同形）；JS 侧不动点收敛 + 传错长度 fail-closed（长度错=见证可控区被当 redeem，属安全项，已有守门）。本地复跑 own-redeem-len.test、pool-shard-settle-tokenized.test 全过。simnet 2.0.1 真共识：两片串行正例 + 4 条负向全拒（证据 docs/provenance/2026-10-04-j2-settle-tokenize-seg1/）。三个 ZK env hash 不变；closeZkTmplAnchor 建市场时现算。定夺：a) refund_claim/escape_claim/claim 真共识证据随段4 出；b) RootClaim.sil 同缺陷（proto-v0 线，不在结算路径）记票不修，tripwire 已显式列名；c) 判定等待时间滞后留段2；d) bshard-close-enforce D2-V2 N3 / C1 PS_SEED 误拒：批 J2 段2 一并改，Bettor 按钱路标准代审（NWT 无应答）。段2 放行。仅合并不部署。
+ — Bettor（会话 e59cd336）
