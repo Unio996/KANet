@@ -26,8 +26,8 @@ const PMR_S = 'aa'.repeat(32), PC_S = '77'.repeat(32);
 console.log('[test] P1: real derivation, PayoutShardV2 (V2) — matches manually-verified v0.2 appendix data:');
 {
   const r = deriveCommitteeCheckOffsets({ isV2: true, pmrSentinelHex: PMR_S, pcSentinelHex: PC_S });
-  ok(r.predicateCommitOffset === 16569, `predicateCommitOffset=16569 (got ${r.predicateCommitOffset})`);
-  ok(JSON.stringify(r.poolMerkleRootOffsets) === JSON.stringify([17089, 17385, 17681, 17977, 18273]), `poolMerkleRootOffsets matches appendix (got ${JSON.stringify(r.poolMerkleRootOffsets)})`);
+  ok(r.predicateCommitOffset === 16582, `predicateCommitOffset=16582 (got ${r.predicateCommitOffset})`);
+  ok(JSON.stringify(r.poolMerkleRootOffsets) === JSON.stringify([17102, 17398, 17694, 17990, 18286]), `poolMerkleRootOffsets matches appendix (got ${JSON.stringify(r.poolMerkleRootOffsets)})`);
   // T-REF-OFFSETS-REFRESH(ledger 1285): checked-in reference just got refreshed to match the current
   // .sil/compiler pin — flip-expect (this session's established discipline): a fresh derivation on the
   // CURRENT files should now agree with the reference, not disagree. If this goes RED again, it means
@@ -105,13 +105,13 @@ console.log('[test] N2: insufficient poolMerkleRoot copy count (real mutated Pay
 {
   const original = readFileSync(PAYOUT_SHARD_V2_SIL, 'utf8');
   const lines = original.split('\n');
-  // Line 312 (1-indexed) is `require(c4Cur == poolMerkleRoot);` — the 5th close_attest committee-check.
+  // Line 320 (1-indexed) is `require(c4Cur == poolMerkleRoot);` — the 5th close_attest committee-check.
   // Verified once via direct grep (docs/…committee-offset-live-derive-design-v0.1.md 附录/session notes);
   // re-verify defensively here so this test doesn't silently keep mutating the wrong line if the file
   // ever shifts — assert the line's content before removing it.
-  const targetLineIdx = 311; // 0-indexed
+  const targetLineIdx = 319; // 0-indexed
   if (!/require\(c4Cur == poolMerkleRoot\);/.test(lines[targetLineIdx])) {
-    throw new Error(`N2 fixture assumption broken: PayoutShardV2.sil line 312 is no longer 'require(c4Cur == poolMerkleRoot);' (got: ${lines[targetLineIdx]}) — re-locate the 5th close_attest committee-check line before re-running this test`);
+    throw new Error(`N2 fixture assumption broken: PayoutShardV2.sil line 320 is no longer 'require(c4Cur == poolMerkleRoot);' (got: ${lines[targetLineIdx]}) — re-locate the 5th close_attest committee-check line before re-running this test`);
   }
   lines.splice(targetLineIdx, 1);
   const mutatedSil = lines.join('\n');
@@ -186,6 +186,7 @@ console.log('[test] P4: ctor int/bytes32 value changes do not shift sentinel off
       ...w17Ctor(w17),
       ctorIntV100(attestedWinner), ctorIntV100(attestedAtMs), ctorBytes32V100(betsHex), ctorBytes32V100(refundHex),
       ctorBytes32V100(claimHex),
+      ctorIntV100(29300),   // 账本1832 own_redeem_len(同宽占位)
     ];
   }
   function analyze(silPath, name, ctor) {

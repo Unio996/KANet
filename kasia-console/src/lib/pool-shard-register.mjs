@@ -249,7 +249,7 @@ export function settleDispatchTags() {
   const leaf = compileSilV100(join(LIB, 'ShardLeaf.sil'), leafCtor, 'ShardLeaf');
   const psCtor = [
     ctorBytes32V100(z32), ctorBytes32V100(z32), ctorBytes32V100(z32), ctorBytes32V100(z32), ctorIntV100(0), ctorIntV100(0), ctorBytes32V100(z32),
-    ...W17V100(), ctorIntV100(-1), ctorIntV100(0), ctorBytes32V100(z32), ctorBytes32V100(z32), ctorBytes32V100(z32),
+    ...W17V100(), ctorIntV100(-1), ctorIntV100(0), ctorBytes32V100(z32), ctorBytes32V100(z32), ctorBytes32V100(z32), ctorIntV100(1),
   ];
   const ps = compileSilV100(join(LIB, 'PayoutShardV2.sil'), psCtor, 'PayoutShardV2');
   const consolidate = leaf._raw.contracts.ShardLeaf.entries.consolidate_to_payout?.dispatch_tag;
@@ -470,11 +470,8 @@ export function computeCloseZkTmplAnchor(closeZkSilPath, gateTmplHash, tokenTmpl
  * @param {object} o { poolMerkleRoot(hex), predicateCommit(hex), closeZkTmplAnchor(hex), consolidatedPool(int),
  *   tokenTmplHash(hex), claimTmplHash(hex) }
  */
-export function compilePayoutShardV2Redeem({ poolMerkleRoot, predicateCommit, closeZkTmplAnchor, consolidatedPool, tokenTmplHash, claimTmplHash }) {
-  for (const [label, v] of [['tokenTmplHash', tokenTmplHash], ['claimTmplHash', claimTmplHash]]) {
-    if (!/^[0-9a-fA-F]{64}$/.test(String(v || ''))) throw new Error(`compilePayoutShardV2Redeem: ${label} 必须是 32B hex，收到 ${JSON.stringify(v)} — ctor-only 字面量，不接受占位符/缺省值`);
-  }
-  const ctor = [
+function _payoutShardV2Ctor({ poolMerkleRoot, predicateCommit, closeZkTmplAnchor, consolidatedPool, tokenTmplHash, claimTmplHash, ownRedeemLen }) {
+  return [
     ctorBytes32V100(poolMerkleRoot), ctorBytes32V100(predicateCommit), ctorBytes32V100(closeZkTmplAnchor),
     ctorBytes32V100(tokenTmplHash),
     ctorIntV100(Number(consolidatedPool)), ctorIntV100(0), ctorBytes32V100(z32),
@@ -484,8 +481,42 @@ export function compilePayoutShardV2Redeem({ poolMerkleRoot, predicateCommit, cl
     ctorBytes32V100(z32),   // init_betsRootBaked: ZERO32=待attest
     ctorBytes32V100(z32),   // init_refundRootBaked: ZERO32=待attest
     ctorBytes32V100(claimTmplHash),
+    ctorIntV100(ownRedeemLen),   // 账本1832: own_redeem_len(ctor 尾字段, 30 参数)
   ];
-  return Buffer.from(compileSilV100(join(LIB, 'PayoutShardV2.sil'), ctor, 'PayoutShardV2').script).toString('hex');
+}
+
+/**
+ * 🔴 账本1832(Owner批, 账本1468/1469 同族修复): PayoutShardV2 的 own_redeem_len 不动点收敛(同
+ * convergeShardLeafOwnRedeemLen)。own_redeem_len 自身的 minimal-push 宽度会影响编译产物长度, 猜一次编一次直到
+ * 编译长度==猜测值。PS 的 state 区固定宽度(288B, 不随 consolidated_pool 等取值变), 所以只受 ctor 常量区
+ * (含 own_redeem_len 自己)宽度影响, 通常 1~2 轮即收敛。
+ */
+export function convergePayoutShardV2OwnRedeemLen({ poolMerkleRoot, predicateCommit, closeZkTmplAnchor, consolidatedPool = 0, tokenTmplHash, claimTmplHash, initialGuess = 29300, maxRounds = 6 }) {
+  let guess = initialGuess;
+  for (let round = 1; round <= maxRounds; round++) {
+    const compiled = compileSilV100(join(LIB, 'PayoutShardV2.sil'), _payoutShardV2Ctor({ poolMerkleRoot, predicateCommit, closeZkTmplAnchor, consolidatedPool, tokenTmplHash, claimTmplHash, ownRedeemLen: guess }), 'PayoutShardV2');
+    const actualLen = Buffer.from(compiled.script).length;
+    if (actualLen === guess) return { ownRedeemLen: guess, script: compiled.script };
+    guess = actualLen;
+  }
+  throw new Error(`convergePayoutShardV2OwnRedeemLen: own_redeem_len 不动点收敛失败(超过 ${maxRounds} 轮仍未稳定, 最后一次猜测=${guess})——拒绝, 不建出永远无法 absorb 的市场`);
+}
+
+/**
+ * 🔴 账本1832: ownRedeemLen 可选——不传 = 现场不动点收敛(genesis/测试); 传了 = fail-closed 校验编译长度==传入值
+ * (重建已存 PS redeem 时传 Buffer.from(payout_redeem_hex,'hex').length, 不一致即拒绝)。
+ */
+export function compilePayoutShardV2Redeem({ poolMerkleRoot, predicateCommit, closeZkTmplAnchor, consolidatedPool, tokenTmplHash, claimTmplHash, ownRedeemLen }) {
+  for (const [label, v] of [['tokenTmplHash', tokenTmplHash], ['claimTmplHash', claimTmplHash]]) {
+    if (!/^[0-9a-fA-F]{64}$/.test(String(v || ''))) throw new Error(`compilePayoutShardV2Redeem: ${label} 必须是 32B hex，收到 ${JSON.stringify(v)} — ctor-only 字面量，不接受占位符/缺省值`);
+  }
+  if (ownRedeemLen === undefined || ownRedeemLen === null) {
+    return Buffer.from(convergePayoutShardV2OwnRedeemLen({ poolMerkleRoot, predicateCommit, closeZkTmplAnchor, consolidatedPool, tokenTmplHash, claimTmplHash }).script).toString('hex');
+  }
+  if (!(Number.isInteger(ownRedeemLen) && ownRedeemLen > 0)) throw new Error(`compilePayoutShardV2Redeem: ownRedeemLen 必须是正整数, 收到 ${JSON.stringify(ownRedeemLen)}`);
+  const script = Buffer.from(compileSilV100(join(LIB, 'PayoutShardV2.sil'), _payoutShardV2Ctor({ poolMerkleRoot, predicateCommit, closeZkTmplAnchor, consolidatedPool, tokenTmplHash, claimTmplHash, ownRedeemLen }), 'PayoutShardV2').script);
+  if (script.length !== ownRedeemLen) throw new Error(`compilePayoutShardV2Redeem: fail-closed — 编译出的长度 ${script.length} != 传入的 ownRedeemLen ${ownRedeemLen}`);
+  return script.toString('hex');
 }
 
 /**
