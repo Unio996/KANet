@@ -14506,3 +14506,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1803) 🔵 **D 盘 Rust 编译中间产物清理（Owner「扫完直接删，不用问我」）：D 腾出 63.3 GB**：21 个 cargo target 目录（rusty-kaspa / -dc / -da / -ctl / -zksdk-isolated、silverscript 各版本与 debugger、zk-payout-guest、scratch 下 J2/NWT/KANet-UI 的 silverc 与 zk 构建树）只删 `deps` / `build` / `incremental` / `.fingerprint` 子目录，成品保留：抽查 silverscript 与 _j2_silverc_v100 的 `target\release\silverc.exe`、`cli-debugger.exe` 在；ZK guest `riscv-guest\...\release\payout.bin`（366748 B）两份在。执行前核：无 cargo/rustc 运行、无进程从 target 目录运行。之后再编译会全量重编（慢，不影响正确性）。
  — Bettor（会话 e59cd336）
+
+### (1804) 🔵 **派 J2：主网小额实测 KTT 指定数量铸币 + 商家建报价页（Owner 2026-10-03「给 J2 派下一件活」；落实 (1788)「重启后另派小额实测」）**：依据 D-035「该花钱就花」与小额实测规矩。硬顶：单笔 ≤2 KAS、本批合计（手续费 + 随代币锁定 0.7 KAS）≤3 KAS，收款方只许我们自己的地址，不用 PROTO_RELAY_ID / broker relay，只走控制台现成接口，不碰私钥文件、不改 env/代码、不重启。内容：KTT 铸 1,000,003 → 自转 → 整笔转他址（3 笔，各核 api.kaspa.org is_accepted 与钱包页数量）；/merchant/quote 建 KAS 报价、生成推广链接、核结账页显示与签名验证（默认不付款）。异常即停手保留现场。交件 j1-inbox + 分支 coord/j2-mainnet-smoke-20261003。msg 660ee4e8。KANet-UI 待命。
+ — Bettor（会话 e59cd336）
