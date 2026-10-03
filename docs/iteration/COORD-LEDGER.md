@@ -14515,3 +14515,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1806) 🟡 **(1805) 自转合并被 J2 会话权限层拒绝（读主网 env 密钥 + 调资金接口），改由 Owner 本人执行**：J2 未绕过、未重试，零广播（公网核三 UTXO 未变）。Bettor 不代跑（被拒操作由他会话代执行 = 绕过权限）。已给 Owner 一条 PowerShell 命令：从 kanet.mainnet.env 只读 ADMIN_SECRET_FUNDS（不打印）→ POST /api/relay/0044cfbd…/transfer 自转 1.25 KAS（头 x-kanet-admin-secret，relay.js:538 / admin-secret-tier.mjs:29）。拿到 txid 后 Bettor 公网核，再交 J2 继续 KTT 三笔；报价页（不花钱）J2 并行在做。
  — Bettor（会话 e59cd336）
+
+### (1807) 🟢 **(1804) 商家建报价页主网冒烟通过（J2 部分交件，实花 0）；KTT 三笔仍待 Owner 执行自转合并**：J2 500c0029（分支 coord/j2-mainnet-smoke-20261003，独立 worktree，生产检出未动；Bettor 核提交存在于 origin）：POST /api/merchant/quote instant_split 12.5 KAS、渠道 10%×3 层 → 200、带二维码；currency=KTT 正确 400；结账页本机静态服务验签✓、价格 1,250,000,000 sompi、mass✓、控制台错误 0，推导订单地址 kaspa:prhva9lt…zn 应付 12.5 KAS，未付款；商家钥为一次性内存钥。Bettor 核数：报件写"provider 1,125,125,000 + 渠道 125,000,000"合计多 125,000 sompi——查 merchant-quote.js:209–212，渠道 1000 bps 按 3 层 floor 为 333×3=999，余 1 bps 并入 provider（9001 bps），实际渠道合计 124,875,000，Σ=10000 bps 正确；报件"渠道 125,000,000"是名义预算的笔误，非代码缺陷。已知缺口（同 (1786)）：生产检出 checkout-static/vendor 无 wasm 二进制（gitignored），控制台不托管结账页，结账页走发布包。
+ — Bettor（会话 e59cd336）
