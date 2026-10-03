@@ -526,6 +526,9 @@ export function assertZkHandoffTmplCoherent(psRow, marketId, { tokenTmplHash, cl
   }
 }
 
+// 账本1832 段2: handoff 交易只需付网络费(代币是价值载体); 与 consolidate 的 30M 同量级(见 pool-shard-settle.mjs)。
+const HANDOFF_FEE_SOMPI = 30_000_000;
+
 export async function buildZkHandoffRequestV2(marketId, args) {
   // 🔴 NWT footgun catch(2026-07-08): 默认 dryRun=true(安全默认), 跟 admin endpoint 层的
   //   `dry_run !== false` 默认值方向对齐——本函数是 exported 的, 未来若有人绕过 endpoint 直接
@@ -588,12 +591,23 @@ export async function buildZkHandoffRequestV2(marketId, args) {
   const rc = (cmd, t = 90000) => sendCommandAsync(settlerRelayId, cmd, t, 'internal');
   const relayAddr = (await rc({ type: 'get_pubkey' })).address;
 
-  // fee input 必须精确 == consolidated_pool(unlockBshardZkHandoff 硬性要求, PS output 本身无余付空间) —
-  // 先转账精确这个数额到 relay 自己地址, 深确认(REORG_SAFE_MIN_DEPTH)落地后才喂进去(NO TX NO STATE)。
+  // 🔴 账本1832 段2(v0.3 代币化): 价值载体是 PS 名下的 KTT 代币(amount=consolidated_pool, owner=PS cov), PS 与 CloseZkV2 的 KAS 面值都只是 dust。
+  //   旧版「fee input 必须精确 == consolidated_pool(KAS)」整条作废——settler 现在只需付网络费(HANDOFF_FEE_SOMPI, 同 consolidate 的 30M 量级), 不再往 relay 转一笔「池数额」的 KAS。
+  //   PS 名下代币 UTXO 由确定性地址探(amount+owner 唯一确定地址, 同 consolidateAllShards resume 手法), 必须恰 1 笔, 否则 fail-closed。
   const { transferAndConfirm } = await import('../services/relay-manager.js');
-  const { REORG_SAFE_MIN_DEPTH } = await import('./pool-shard-register.mjs');
-  const feeSompi = state.consolidatedPool;
-  const feeTx = await transferAndConfirm(settlerRelayId, relayAddr, (Number(feeSompi) / 1e8).toFixed(8), { minDepth: REORG_SAFE_MIN_DEPTH, maxWaitMs: 90000, origin: 'internal' });
+  const { REORG_SAFE_MIN_DEPTH, settleDispatchTags } = await import('./pool-shard-register.mjs');
+  const { computeKttTokenArtifact } = await import('./pool-bshard-artifacts.mjs');
+  const kaspaForP2sh = await import('kaspa-wasm');
+  const p2shFn = (redeemHex) => kaspaForP2sh.addressFromScriptPublicKey(kaspaForP2sh.ScriptBuilder.fromScript(new Uint8Array(Buffer.from(redeemHex, 'hex'))).createPayToScriptHashScript(), assertAddressOnNetwork(relayAddr, { who: 'bshard-close-transport.mjs:handoff' })).toString();
+  const psRow2 = sqlite.prepare('SELECT payout_cov_id FROM payout_shards WHERE logical_market_id = ?').get(marketId);
+  if (!psRow2?.payout_cov_id) throw new Error('buildZkHandoffRequestV2: payout_cov_id 缺失 (fail-closed)');
+  const poolNum = Number(state.consolidatedPool);
+  const psTokArt = computeKttTokenArtifact({ amount: poolNum, ownerCovIdHex: psRow2.payout_cov_id });
+  const tokUtxos = (await rc({ type: 'get_address_utxos', address: p2shFn(psTokArt.script.toString('hex')) }, 15000))?.utxos || [];
+  if (tokUtxos.length !== 1) throw new Error(`buildZkHandoffRequestV2: PS 名下代币地址上有 ${tokUtxos.length} 笔 UTXO(期望恰 1; amount=${poolNum}, owner=PS cov) — 不猜 (fail-closed)`);
+  const psToken = { redeem_hex: psTokArt.script.toString('hex'), outpointTxid: tokUtxos[0].outpoint.transactionId, index: Number(tokUtxos[0].outpoint.index || 0) };
+  const feeTx = await transferAndConfirm(settlerRelayId, relayAddr, (HANDOFF_FEE_SOMPI / 1e8).toFixed(8), { minDepth: REORG_SAFE_MIN_DEPTH, maxWaitMs: 90000, origin: 'internal' });
+  const tags = settleDispatchTags();
 
   const [psTx, psIdxStr] = String(ps.payout_ps_outpoint).split(':');
   const cmd = {
@@ -604,15 +618,23 @@ export async function buildZkHandoffRequestV2(marketId, args) {
         redeem_hex: ps.payout_redeem_hex, outpointTxid: psTx, index: Number(psIdxStr),
         state: { consolidated_pool: state.consolidatedPool.toString(), attestedWinner: state.attestedWinner, attestedAtMs: state.attestedAtMs, betsRootBaked: state.betsRootHex, refundRootBaked: state.refundRootHex },
       },
+      ps_token: psToken,
       fee: { address: relayAddr, outpointTxid: feeTx.txId, index: 0 },
     },
     witness: {
-      self_out_idx: 0,
+      self_out_idx: 0, token_out_idx: 1,
       template_a_hex: templateA.toString('hex'), template_b_hex: templateB.toString('hex'),
       template_c_hex: templateC.toString('hex'), template_d_hex: templateD.toString('hex'),
+      handoff_dispatch_tag_hex: tags.zk_handoff, tok_prefix_hex: psTokArt.templatePrefix.toString('hex'), tok_suffix_hex: psTokArt.templateSuffix.toString('hex'),
+      token_transfer_dispatch_tag_hex: psTokArt.entryAbi.dispatch_tag, token_transfer_state_field_count: psTokArt.stateFieldCount,
     },
     outputs: { change_address: relayAddr },
   };
+  // 两步: ① probe(无 tok_out ⇒ relay 只现算新 CloseZkV2 的 covenant id, 不签不广播) ② 用 zkCovId 编 tok_out(KTT owner=zkCovId)回传, relay 核对 owner 后签发。
+  const probe = await rc({ ...cmd, dryRun: false }, 90000);
+  if (!probe?.probe || !probe.zkCovId) throw new Error(`buildZkHandoffRequestV2: probe 未返回 zkCovId: ${JSON.stringify(probe).slice(0, 200)}`);
+  const tokOutArt = computeKttTokenArtifact({ amount: poolNum, ownerCovIdHex: probe.zkCovId });
+  cmd.outputs = { change_address: relayAddr, tok_out: { redeem_hex: tokOutArt.script.toString('hex'), owner_cov_id_hex: probe.zkCovId } };
   const result = await rc(cmd, 90000);
   // 🔴 landed-gated 持久化(2026-07-09, J2·docs/2026-07-09-zk-autonomy-three-parts-design.md (a)): 原逻辑拿到
   //   relay 广播 ack(result.txId)就立即持久化, 是 RPC 提交成功 != 链上真落地(NO TX NO STATE 铁律)。改用

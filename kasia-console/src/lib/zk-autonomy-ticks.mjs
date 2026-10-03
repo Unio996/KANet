@@ -394,6 +394,19 @@ const JUDGE_PROPOSE_FINALITY_BUFFER = 60; // 同 V1 selectRipeMarkets 既有口�
 const JUDGE_PROPOSE_COOLDOWN_MS = Number(process.env.ZK_JUDGE_PROPOSE_TICK_COOLDOWN_MS || 300_000); // 同第五件 5min 量级
 const JUDGE_PROPOSE_STUCK_ALERT_HOURS = Number(process.env.ZK_JUDGE_PROPOSE_STUCK_ALERT_HOURS || 2); // Bettor n1
 
+// 🔴 账本1832 段2(Bettor 批 c): 「过去中位时间」滞后 tip 数分钟——ShardLeaf.consolidate_to_payout 对 partial 片要 tx.time >= deadline*1000, 节点按
+//   sampled past-median-time 判终局(check_tx_is_finalized: lock_time < pov_median_time, 否则 'input #0 is not finalized')。simnet 官方 2.0.1 实测:
+//   deadline 后 +100s 仍拒, +270s 才过(docs/provenance/2026-10-04-j2-settle-tokenize-seg1)。原门只等 deadline_daa+FINALITY_BUFFER(≈6s) ⇒ 首轮必败, 靠 5min 冷却重试(慢但自愈, 且每轮写 critical 噪音事件)。
+//   加一道【墙钟】缓冲(默认 300s, env 可调): deadline(秒)+LAG 之前不进候选。仍保留 DAA 门(两门同时满足)。
+const JUDGE_PROPOSE_MEDIAN_LAG_MS = Number(process.env.ZK_JUDGE_PROPOSE_MEDIAN_LAG_MS || 300_000);
+export function judgeProposeTimeGateOpen(deadlineUnixSeconds, nowMs, lagMs = JUDGE_PROPOSE_MEDIAN_LAG_MS) {
+  const d = Number(deadlineUnixSeconds);
+  if (!Number.isFinite(d) || d <= 0) return false;   // 无有效 deadline ⇒ 不放行(fail-closed)
+  return Number(nowMs) >= d * 1000 + lagMs;
+}
+// consolidate 因时间锁未终局被拒(预期的、自愈的): 不当错误事件, 静默等下一个冷却周期。
+export function isNotFinalizedError(msg) { return /not finalized/i.test(String(msg || '')); }
+
 function _scanJudgeProposeCandidates(currentDaa) {
   const rows = sqlite.prepare(`
     SELECT id, deadline, deadline_daa, metadata FROM pool_markets
@@ -410,6 +423,7 @@ function _scanJudgeProposeCandidates(currentDaa) {
     let rrs; try { rrs = JSON.parse(sqlite.prepare('SELECT resolution_rule_spec FROM pool_markets WHERE id = ?').get(row.id)?.resolution_rule_spec || '{}'); } catch { continue; }
     if (rrs.zk_native !== true) continue;
     if (meta.bshard_close_request_v2) continue; // 已经 propose 过, 不是本 tick 候选
+    if (!judgeProposeTimeGateOpen(row.deadline, Date.now())) continue;   // 账本1832: 过去中位时间滞后缓冲(见上)
     out.push({ marketId: row.id, deadline: row.deadline, deadlineDaa: row.deadline_daa, meta });
   }
   return out;
@@ -480,7 +494,10 @@ export async function zkJudgeProposeAutonomousTick(ctx) {
 
         try {
           await ctx.buildProposeCloseRequestV2({ marketId, winningDirection, endBlockHash: endBlockHashHex, settlerRelayId: ctx.settlerRelayId });
-        } catch (e) { errored++; _writeZkAutonomyErrorEvent('zkJudgeProposeTick_propose', marketId, e.message); _maybeWriteStuckAlert(marketId, deadline); continue; }
+        } catch (e) {
+          if (isNotFinalizedError(e.message)) { cooling++; log(`market=${marketId.slice(-8)} consolidate 时间锁尚未终局(过去中位时间滞后), 冷却后重试: ${String(e.message).slice(0, 120)}`); continue; }
+          errored++; _writeZkAutonomyErrorEvent('zkJudgeProposeTick_propose', marketId, e.message); _maybeWriteStuckAlert(marketId, deadline); continue;
+        }
 
         proposed++;
         log(`✅ market=${marketId.slice(-8)} judge+propose dispatched(winDir=${winningDirection}, endBlockHash=${endBlockHashHex.slice(0, 12)}...)`);

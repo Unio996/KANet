@@ -255,8 +255,9 @@ export function settleDispatchTags() {
   const ps = compileSilV100(join(LIB, 'PayoutShardV2.sil'), psCtor, 'PayoutShardV2');
   const consolidate = leaf._raw.contracts.ShardLeaf.entries.consolidate_to_payout?.dispatch_tag;
   const absorb = ps._raw.contracts.PayoutShardV2.entries.absorb?.dispatch_tag;
-  if (!consolidate || !absorb) throw new Error('settleDispatchTags: 编译产物缺 entries.consolidate_to_payout/absorb.dispatch_tag — schema 漂移?');
-  _settleDispatchTagsCache = { consolidate_to_payout: consolidate, absorb };
+  const zk_handoff = ps._raw.contracts.PayoutShardV2.entries.zk_handoff?.dispatch_tag;   // 账本1832 段2
+  if (!consolidate || !absorb || !zk_handoff) throw new Error('settleDispatchTags: 编译产物缺 entries.consolidate_to_payout/absorb/zk_handoff.dispatch_tag — schema 漂移?');
+  _settleDispatchTagsCache = { consolidate_to_payout: consolidate, absorb, zk_handoff };
   return _settleDispatchTagsCache;
 }
 

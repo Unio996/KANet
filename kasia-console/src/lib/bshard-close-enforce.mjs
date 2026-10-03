@@ -201,6 +201,9 @@ const _PSV2_BETSROOT_OFF = _PS_STATE_START + 222;        // + attestedAtMs(9) = 
 const _PSV2_REFUNDROOT_OFF = _PS_STATE_START + 255;      // + betsRoot(33) = 256
 const _PSV2_STATE_END_OFF = _PS_STATE_START + 288;       // + refundRoot(33) = 289
 
+// 账本1832: PayoutShardV2.sil DUST_MIN(链上同值), 见 verifyClosePayoutV2Binding N3。
+const _PSV2_DUST_MIN = 1000n;
+
 // test-only export (byte-exact diff 验收用, NWT/Bettor DoD): production 内部只经 verifyClosePayoutV2Binding 调用。
 export function _splicePayoutV2CloseRedeem(psv2RedeemHex, { newPayoutRootHex, newAttestedWinner, newBetsRootHex, newRefundRootHex, newAttestedAtMs }) {
   const redeem = Buffer.from(String(psv2RedeemHex), 'hex');
@@ -302,17 +305,15 @@ export function verifyClosePayoutV2Binding({ txSafeJson, psv2RedeemHex, reDerive
       return { ok: false, reason: `D2-V2 REJECT: 被签 tx continuation output commit 的值 != re-derive (payoutRoot/attestedWinner/betsRoot/refundRoot/attestedAtMs 任一漂) — settler 旁路标量伪装 (spk ${String(o.scriptPublicKey).slice(0, 24)}.. != expected ${expectedSpk.slice(0, 24)}..)`, expectedSpk };
     }
   }
-  // N3 · value 守恒 (PayoutShardV2.sil:180 close_attest 支: outputs[selfOutIdx].value == consolidated_pool)。
-  //    🔵 用同一支生产 reader; 已实测它对 v1_committee 与 v2_zk 两个 covenant_family 的 redeem 都读得出
-  //       (2026-08-11 各取样本, 均返回 consolidated_pool=20,000,000=PS_SEED) ⇒ 不是"我推它 V2 也适用"。
-  let expectedValue;
-  try { expectedValue = BigInt(readPsConsolidatedPool(psv2RedeemHex)); }
-  catch (e) { return { ok: false, reason: `D2-V2: 读 consolidated_pool 失败 (${e.message}) — 无法验 continuation value, fail-closed 弃签`, expectedSpk }; }
+  // N3 · 值下限 (PayoutShardV2.sil close_attest 支: require(outputs[selfOutIdx].value >= DUST_MIN))。
+  //    🔴 账本1832 段2(v0.3 代币化, Bettor/NWT 批 d): 旧版要求 value == consolidated_pool(KAS)——代币化后 consolidated_pool 是【代币记账数】、
+  //       PS 的 KAS 面值只是 dust(PS_SEED), 链上合约也已改成 >= DUST_MIN(KAS 侧不再承载价值; close_attest 本身 noTokenInput, 不动代币)。
+  //       旧 == 会让委员会对每一笔诚实 V2 close_attest 拒签。改为镜像链上规则 >= DUST_MIN(1000 sompi), 不更松不更紧; 其余防线(N1 基数/spk 重派生/version)不动。
   let gotValue;
   try { gotValue = BigInt(covOuts[0].value); }
   catch { return { ok: false, reason: `D2-V2 REJECT (N3 value): continuation output.value=${JSON.stringify(covOuts[0].value)} 非合法整数 (弃签)`, expectedSpk }; }
-  if (gotValue !== expectedValue) {
-    return { ok: false, reason: `D2-V2 REJECT (N3 value): continuation value ${gotValue} != consolidated_pool ${expectedValue} — 链上 weld PayoutShardV2.sil:180 要求值守恒 (弃签)`, expectedSpk };
+  if (gotValue < _PSV2_DUST_MIN) {
+    return { ok: false, reason: `D2-V2 REJECT (N3 value): continuation value ${gotValue} < DUST_MIN ${_PSV2_DUST_MIN} — 链上 PayoutShardV2.sil close_attest 要求 value >= DUST_MIN (弃签)`, expectedSpk };
   }
   return { ok: true, expectedSpk, matchedOutputs: covOuts.length };
 }
@@ -569,7 +570,10 @@ const _ATTESTED_AT_MS_CLOCK_TOLERANCE_MS = 10 * 60 * 1000;
  * @param {object} ctx 同 enforceCloseAttest ctx
  */
 export async function enforceCloseAttestV2(signRequest, ctx) {
-  const core = await _enforceCloseAttestCore(signRequest, ctx);
+  // 🔴 账本1832 段2(Bettor/NWT 批 d): V2(v0.3 代币化) PS 创世 consolidated_pool=0(不再有 PS_SEED 面值进 state), 池 = Σ stake(代币单位)。
+  //   C1 的 PS-pool 链锚(`psPool == seed + Σloaded`)对 V2 的 seed 因此是 0——由 V2 入口按【家族】强制, 不接受 ctx 覆盖(与 V1 口径 PS_SEED=20M 分开)。
+  //   锚的强度不变: 仍是「池 == Σ已加载 stake」(变体①漏/加/换仍被抓)。
+  const core = await _enforceCloseAttestCore(signRequest, { ...ctx, psSeed: 0 });
   if (core.skip || core.pass === false) return core;
   const { verdict, winningDirection, bettors, broker_pk, psConsolidatedPool } = core;
   const {

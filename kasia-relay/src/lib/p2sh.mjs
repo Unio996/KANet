@@ -2368,7 +2368,8 @@ export async function unlockBshardCloseAttestV2(args) {
  * 同 escape_claim last-claimant 分支手法,花过的 UTXO 直接消失,零 double-invoke 风险)。
  * @param {object} args.cmd.inputs.payoutshard { redeem_hex, outpointTxid, index,
  *   state: { consolidated_pool, attestedWinner, attestedAtMs, betsRootBaked, refundRootBaked } }
- * @param {object} args.cmd.inputs.fee — 必需(value==consolidated_pool 精确守恒,PS output 本身无余付 fee 空间)
+ * @param {object} args.cmd.inputs.ps_token { redeem_hex, outpointTxid, index } — PS 名下代币(owner=PS cov, amount=consolidated_pool)(账本1832 段2)
+ * @param {object} args.cmd.inputs.fee — 必需: 独立 P2PK, 只付网络费并授权两个 genesis 组(KAS 面值不再==consolidated_pool, 代币才是价值载体)
  * @param {object} args.cmd.witness { self_out_idx, template_a_hex, template_b_hex, template_c_hex, template_d_hex }
  *   四段固定模板 = computeCloseZkTmplAnchor()(pool-shard-register.mjs)的输出,per-image_id 固定,driver 算好传入。
  */
@@ -2377,23 +2378,31 @@ export async function unlockBshardZkHandoff(args) {
   const w = cmd.witness;
   const rpc = await connectRpc(networkId);
   try {
+    // 🔴 账本 1832 段2(v0.3 代币化重写, 取代旧 KAS 价值焊接版): 合约 PayoutShardV2.zk_handoff(zkOutIdx, tokenInIdx, tokenOutIdx,
+    //   tok_prefix, tok_suffix, templateA..D)。tx 形状:
+    //   inputs : [0 PS(zk_handoff, 无签) | 1 PS 名下代币(owner=PS cov, KTT.transfer zero-out, owner idx [0]) | 2 fee P2PK(钱包签; 同为两个 genesis 组的授权输入)]
+    //   outputs: [0 zkOut(新 CloseZkV2 genesis P2SH, 值=PS 面值(dust), genesis 组 A) | 1 tokOut(新 KTT 实例 amount=consolidated_pool, owner=zkCovId, genesis 组 B) | 2 找零]
+    //   zkCovId 由 populateGenesisCovenants 对组 A 现算; tokOut 的 redeem 烤着 owner=zkCovId ⇒ 先探一次(cmd.outputs.tok_out 缺省 ⇒ probe: 不签不广播, 只返回 zkCovId)
+    //   console 再用 zkCovId 编 tok_out 回传(带 owner_cov_id_hex 供本函数核对)。
+    //   复用: unlockBshardConsolidateV2 的 genesis 组/KTT zero-out/_combineActionAndRedeem/dispatch tag 编码; 旧版的 CloseZk genesis redeem 重构公式原样保留。
     const psUtxo = await _matchUtxo(rpc, _addressFromRedeem(cmd.inputs.payoutshard.redeem_hex, networkId), cmd.inputs.payoutshard.outpointTxid, cmd.inputs.payoutshard.index);
-    if (!cmd.inputs.fee) throw new Error('zk_handoff: fee input 必需(value==consolidated_pool 精确守恒,无余付fee)');
+    if (!cmd.inputs.ps_token) throw new Error('zk_handoff: ps_token 必需(PS 名下代币 UTXO; 代币量=consolidated_pool 才是价值载体)');
+    if (!cmd.inputs.fee) throw new Error('zk_handoff: fee input 必需(独立 P2PK, 付网络费并授权两个 genesis 组)');
+    const tokUtxo = await _matchUtxo(rpc, _addressFromRedeem(cmd.inputs.ps_token.redeem_hex, networkId), cmd.inputs.ps_token.outpointTxid, cmd.inputs.ps_token.index);
     const feeUtxo = await _matchUtxo(rpc, cmd.inputs.fee.address, cmd.inputs.fee.outpointTxid, cmd.inputs.fee.index);
-    const matched = [psUtxo, feeUtxo];
+    const matched = [psUtxo, tokUtxo, feeUtxo];
+    const FEE_IDX = 2;
 
     const ps = cmd.inputs.payoutshard.state;
     const consolidatedPool = BigInt(ps.consolidated_pool);
 
-    // ── 重构 CloseZkRepro4 genesis redeem,逐字节同构 PayoutShardV2.sil zk_handoff 的重构公式(364-396行) ──
+    // ── 重构 CloseZkV2 genesis redeem,逐字节同构 PayoutShardV2.sil zk_handoff 的重构公式 ──
     //   genesisMarker(1B=107) + stateBytes(213B) + templateA + betsRootBaked(32B) + templateB
     //   + atMsMarker(1B=6)+attestedAtMs(6B LE) + templateC + refundRootBaked(32B) + templateD
     const genesisMarker = Buffer.from([107]);
     const push8 = Buffer.from([8]), push32 = Buffer.from([32]);
-    // ⚠ i64 helper: attestedWinner(0/1)/closed(1)/consolidated_pool(>0)/w0-16(0) 全部非负——落在 NWT
-    // 的 _i64LE sign-magnitude landmine 范围*外*(two's-complement==sign-magnitude for n>=0)。若这条
-    // 路径未来需要编码负值,必须换成 pool-payout-root.mjs 的 serializeI64 同款算法,不能直接假设
-    // writeBigInt64LE 安全 —— 见 COORD-LEDGER 2026-07-07 landmine 记录。
+    // ⚠ i64 helper: attestedWinner(0/1)/closed(1)/consolidated_pool(>0)/w0-16(0) 全部非负——落在 NWT 的 _i64LE
+    // sign-magnitude landmine 范围*外*。若这条路径未来需要编码负值,必须换成 pool-payout-root.mjs 的 serializeI64。
     const i64 = (n) => { const b = Buffer.alloc(8); b.writeBigInt64LE(BigInt(n)); return b; };
     const zeroWord = Buffer.concat([push8, i64(0)]);
     const stateBytes = Buffer.concat([
@@ -2411,47 +2420,73 @@ export async function unlockBshardZkHandoff(args) {
     const betsRootBaked = Buffer.from(ps.betsRootBaked, 'hex');
     const refundRootBaked = Buffer.from(ps.refundRootBaked, 'hex');
     const fullRedeem = Buffer.concat([genesisMarker, stateBytes, templateA, betsRootBaked, templateB, atMsBytes, templateC, refundRootBaked, templateD]);
-    // payToScriptHashScript() 接收原始 redeem script、自己内部 hash(跟本文件 _continuationAddress/
-    // _continuationAddressV2 等既有调用一致,全传完整 redeem 字节,非预先手工 hash 过的值 —— 早期草稿
-    // 曾误对 fullRedeem 手工 blake2b 一遍再喂进去,双重 hash 会算出完全错误的 P2SH 地址,NWT 复核抓出前
-    // J1 自查已先修正,commit b34ce1ba)。
     const closeZkAddr = addressFromScriptPublicKey(payToScriptHashScript(new Uint8Array(fullRedeem)), networkId).toString();
 
-    // 无 CovenantBinding:这不是 cov_id 续约(同一份 covenant 身份延续),是异族 covenant 交接——目标是
-    // 全新的 CloseZkRepro4 genesis,靠 P2SH scriptPubKey byte-match 验真(跟 .sil 的
-    // require(...scriptPubKey==new ScriptPubKeyP2SH(expectedCloseZkRedeemHash)) 对齐,NWT 已确认
-    // _j2_closezk_repro4.sil 全文零 cov_id/covenant 机制)。
+    const ZK_OUT = Number(w.self_out_idx ?? 0), TOK_IN = 1, TOK_OUT = Number(w.token_out_idx ?? 1);
+    if (ZK_OUT === TOK_OUT) throw new Error('zk_handoff: zkOut 与 tokOut 输出位不能相同');
+    const zkOutValue = _utxoValue(psUtxo);
+    const tokOutValue = _utxoValue(tokUtxo);
+    const tokOutRedeemHex = cmd.outputs?.tok_out?.redeem_hex;
+    const tokOutAddr = tokOutRedeemHex ? _addressFromRedeem(tokOutRedeemHex, networkId) : closeZkAddr;   // probe 时 tokOut 占位(组 A 的 id 不依赖它)
     const outputs = [];
-    outputs[w.self_out_idx] = new TransactionOutput(consolidatedPool, payToAddressScript(new Address(closeZkAddr)));
-    const orderedOut = outputs.filter(o => o !== undefined);
-    _appendChange(orderedOut, matched, cmd.outputs?.change_address, _bshardFeeV1(matched.length));
+    outputs[ZK_OUT] = new TransactionOutput(zkOutValue, payToAddressScript(new Address(closeZkAddr)));
+    outputs[TOK_OUT] = new TransactionOutput(tokOutValue, payToAddressScript(new Address(tokOutAddr)));
+    const orderedOut = outputs.slice();
+    const fee = BigInt(cmd.fee_sompi ?? 30_000_000);
+    _appendChange(orderedOut, matched, cmd.outputs?.change_address, fee);
+    const groups = () => [new GenesisCovenantGroup(FEE_IDX, [ZK_OUT]), new GenesisCovenantGroup(FEE_IDX, [TOK_OUT])];
 
-    // scriptSig 声明序须与 PayoutShardV2.sil zk_handoff 形参声明序一致:
-    //   selfOutIdx, templateA, templateB, templateC, templateD + OP_4('54') + redeem
-    const psSig = _pushInt(w.self_out_idx)
-      + _pushBytes(w.template_a_hex) + _pushBytes(w.template_b_hex) + _pushBytes(w.template_c_hex) + _pushBytes(w.template_d_hex)
-      + '54' + _encodePushDataHex(Buffer.from(cmd.inputs.payoutshard.redeem_hex, 'hex'));
+    const CB = Number(cmd.compute_budget ?? 100);
+    const CB_PS = Number(cmd.compute_budget_ps ?? 200);
+    const mkTx = (ss) => new Transaction({
+      version: 1,
+      inputs: matched.map((u, i) => ({
+        previousOutpoint: { transactionId: u.outpoint.transactionId, index: u.outpoint.index },
+        signatureScript: ss ? ss[i] : '', sequence: 0n, sigOpCount: 0, computeBudget: i === 0 ? CB_PS : CB, ...(ss ? {} : { utxo: u }),
+      })),
+      outputs: orderedOut, lockTime: BigInt(lockTime), gas: 0n, subnetworkId: '0000000000000000000000000000000000000000', payload: '',
+    });
+    const unsigned = mkTx(null);
+    unsigned.populateGenesisCovenants(groups());
+    const zkCovId = String(unsigned.outputs[ZK_OUT].covenant.covenantId);
+    if (!tokOutRedeemHex) {
+      // probe: 只回 zkCovId + 新 CloseZkV2 genesis redeem(不签、不广播、不落盘)
+      return { probe: true, broadcasted: false, zkCovId, closeZkAddress: closeZkAddr, closeZkRedeemHex: fullRedeem.toString('hex') };
+    }
+    if (!cmd.outputs.tok_out.owner_cov_id_hex || String(cmd.outputs.tok_out.owner_cov_id_hex).toLowerCase() !== zkCovId.toLowerCase()) {
+      throw new Error(`zk_handoff: tok_out owner_cov_id_hex(${String(cmd.outputs.tok_out.owner_cov_id_hex).slice(0, 12)}) != 本 tx 新建 CloseZkV2 的 covenant id(${zkCovId.slice(0, 12)}) (fail-loud, 防把池代币铸给错的 owner)`);
+    }
 
-    const unsigned = new Transaction({ version: 1, inputs: matched.map(u => ({ previousOutpoint: { transactionId: u.outpoint.transactionId, index: u.outpoint.index }, signatureScript: '', sequence: 0n, sigOpCount: 0, computeBudget: _BSHARD_COMPUTE_BUDGET, utxo: u })), outputs: orderedOut, lockTime: BigInt(lockTime), gas: 0n, subnetworkId: '0000000000000000000000000000000000000000', payload: '' });
-    const feeSig = createInputSignature(unsigned, 1, wallet.getPrivateKey(), SighashType.All);
-    const signedTx = new Transaction({ version: 1, inputs: [
-      { previousOutpoint: { transactionId: psUtxo.outpoint.transactionId, index: psUtxo.outpoint.index }, signatureScript: psSig, sequence: 0n, sigOpCount: 0, computeBudget: _BSHARD_COMPUTE_BUDGET },
-      { previousOutpoint: { transactionId: feeUtxo.outpoint.transactionId, index: feeUtxo.outpoint.index }, signatureScript: feeSig, sequence: 0n, sigOpCount: 0, computeBudget: _BSHARD_COMPUTE_BUDGET },
-    ], outputs: orderedOut, lockTime: BigInt(lockTime), gas: 0n, subnetworkId: '0000000000000000000000000000000000000000', payload: '' });
+    // action 编码(v1.0.0: addI64/addData 逐参 + 4 字节 dispatch tag): zk_handoff(zkOutIdx, tokenInIdx, tokenOutIdx, tok_prefix, tok_suffix, templateA..D)
+    const hx = (h) => new Uint8Array(Buffer.from(String(h).replace(/^0x/, ''), 'hex'));
+    const handoffAction = (() => {
+      const b = new ScriptBuilder({ flags: { covenantsEnabled: true } });
+      b.addI64(BigInt(ZK_OUT)); b.addI64(BigInt(TOK_IN)); b.addI64(BigInt(TOK_OUT));
+      b.addData(hx(w.tok_prefix_hex)); b.addData(hx(w.tok_suffix_hex));
+      b.addData(new Uint8Array(templateA)); b.addData(new Uint8Array(templateB)); b.addData(new Uint8Array(templateC)); b.addData(new Uint8Array(templateD));
+      b.addData(hx(w.handoff_dispatch_tag_hex));
+      return b.drain();
+    })();
+    const psSig = _combineActionAndRedeem(handoffAction, cmd.inputs.payoutshard.redeem_hex);
+    const tokSig = _combineActionAndRedeem(_encodeKttTransferZeroOutAction(w.token_transfer_dispatch_tag_hex, w.token_transfer_state_field_count, [0]), cmd.inputs.ps_token.redeem_hex);
+    const feeSig = createInputSignature(unsigned, FEE_IDX, wallet.getPrivateKey(), SighashType.All);
+    const signedTx = mkTx([psSig, tokSig, feeSig]);
+    signedTx.populateGenesisCovenants(groups());
     _assertTxInvariants(matched, signedTx, 'unlockBshardZkHandoff', networkId);
-    // 🔴 dryRun 分支(J1tn, 2026-07-08 市场5彩排 §4缺件3 门①·Bettor #bk7kbx 六条件批文, NWT diff pure-additive 审):
-    //   opt-in(缺省 false, live 广播路径分毫不改, 唯一插入点=invariants 校验后/submitTransaction 前)。
-    //   仍走完 UTXO 现读+组签名 tx+invariants 校验全套(NWT: "彩排验的是生产代码本身"这条不打折扣), 只跳最后
-    //   广播这一步。返回 shape 显式区分(无 txId 字段+broadcasted:false marker), 防下游把 dry-run 结果误当
-    //   成实广播成功。签名产物(psSig/feeSig/signedTx)只在本次调用栈内存里, 本分支不写盘持久化(Bettor 条件)。
+    const tokCovId = String(signedTx.outputs[TOK_OUT].covenant.covenantId);
+    if (String(signedTx.outputs[ZK_OUT].covenant.covenantId) !== zkCovId) throw new Error('zk_handoff: 签名后 zkCovId 与 probe 不一致 (fail-loud)');
+    // dryRun(J1tn 2026-07-08 门①): opt-in, 走完 UTXO 现读+组签名 tx+invariants, 只跳广播; 返回 shape 无 txId + broadcasted:false。
+    //   段2 增补: 返回逐输入/输出真实字节供 cli-debugger/证据(同 unlockBshardConsolidateV2 的 dry_run)。
     if (dryRun) {
       return {
-        broadcasted: false, closeZkAddress: closeZkAddr, closeZkRedeemHex: fullRedeem.toString('hex'),
+        broadcasted: false, closeZkAddress: closeZkAddr, closeZkRedeemHex: fullRedeem.toString('hex'), zkCovId, tokOutCovId: tokCovId,
         psSig, feeSig,
+        inputs: matched.map((u, i) => ({ utxo_value: String(_utxoValue(u)), signature_script_hex: [psSig, tokSig, feeSig][i] })),
+        outputs: orderedOut.map((o, k) => ({ value: String(o.value) })),
       };
     }
     const r = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
-    return { txId: r.transactionId, closeZkAddress: closeZkAddr, closeZkRedeemHex: fullRedeem.toString('hex') };
+    return { txId: r.transactionId, closeZkAddress: closeZkAddr, closeZkRedeemHex: fullRedeem.toString('hex'), zkCovId, tokOutCovId: tokCovId, tokOutAddress: tokOutAddr };
   } finally { try { await rpc.disconnect(); } catch {} }
 }
 
