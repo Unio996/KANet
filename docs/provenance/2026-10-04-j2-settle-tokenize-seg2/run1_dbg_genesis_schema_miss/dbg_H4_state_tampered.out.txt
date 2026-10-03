@@ -1,0 +1,6 @@
+  RUN   H4_state_tampered
+  FAIL  H4_state_tampered
+        Error: WrongGenesisCovenantId(0, 9748563164e34c68b05278afd7505d9ffd4f33cf6a64ef698b8992d4ad097d2d)
+
+1 tests: 0 passed, 1 failed
+Error: "some tests failed"

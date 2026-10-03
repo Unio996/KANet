@@ -26,7 +26,8 @@ import { fileURLToPath } from 'node:url';
 import { createRelayChainReader } from './relay-chain-reader.mjs';
 import { fetchEndBlockHashCanonical, loadPoolSnapshot } from './pool-market-settler-v06.mjs';
 import { listShards } from '../lib/shard-allocator.mjs';
-import { compileSil, ctorBytes32, ctorInt } from '../lib/pool-bshard-artifacts.mjs';
+import { compileSil, ctorBytes32, ctorInt, computePoolSideTicketArtifact, computeKttTokenArtifact } from '../lib/pool-bshard-artifacts.mjs';
+import { settleDispatchTags } from '../lib/pool-shard-register.mjs';
 import { isCommingledSpine } from '../lib/pool-commingle-detect.mjs';
 import { collectCloseSigsV2, clearCloseRequest, markSubmittedV2, QUORUM } from '../lib/bshard-close-transport.mjs';
 import { _splicePayoutV2CloseRedeem, readPayoutShardV2AttestedState } from '../lib/bshard-close-enforce.mjs';
@@ -224,10 +225,11 @@ export function buildEnforceCtx(voter, voterPk, market) {
     //   == 链上 15 个 0.2KAS dust ticket UTXO, byte-equal 实证)。register 的 z32 第4 ctor 只为抽 state-excluded 模板;
     //   真 ticket State 第4 字段是 shardPoolId, compileSil 烤 shardPoolId 复现真地址 (silverc 同源 pin 前提)。
     //   喂 swap 过的 (dir/pk/stake) → 算出地址链上不存在 → check_utxo_landed false → BUST。
+    //   🔴 账本1832 段2(Bettor/NWT 批 d 的同族误拒): 上面那条 live-proved 路是 D-019 之前的——legacy PoolSide_v08_shard.sil + legacy 编译器。
+    //   现在【铸 ticket 的 register_append】用的是 v1.0.0 sil-v1/PoolSideTicket.sil(computePoolSideTicketArtifact, pool-shard-register.mjs 'use' 分支同款),
+    //   两套字节不同 ⇒ 对任何新市场「ticket 链上不存在」⇒ 5 位委员全部拒签 close_attest(simnet 官方 2.0.1 实测 refused=5)。改走同一个 artifact 函数(单源, 与 register 同码)。
     deriveTicketAddr: ({ bettorPk, direction, stake, shardPoolId }) => {
-      const redeem = Buffer.from(compileSil(POOLSIDE_SIL, [
-        ctorBytes32(String(bettorPk)), ctorInt(Number(direction)), ctorInt(Number(stake)), ctorBytes32(String(shardPoolId)),
-      ], SILVERC).script).toString('hex');
+      const redeem = computePoolSideTicketArtifact({ bettorPk: String(bettorPk), direction: Number(direction), stake: Number(stake), shardPoolId: String(shardPoolId) }).script.toString('hex');
       return p2shFromRedeemSync(redeem, network);
     },
   };
@@ -612,6 +614,15 @@ const SETTLER_RELAY_ID = process.env.BSHARD_SETTLER_RELAY_ID || null;   // 广�
  * @param {{relayId?:string, changeAddress:string}} opts
  * @returns {Promise<{ok:boolean, txId?:string, psContAddress?:string, reason?:string}>}
  */
+// KTT 模板 prefix/suffix 是协议常量(与 amount/owner 无关): 取任一 artifact 的模板段即可; 缓存。
+let _kttTmplCache = null;
+function _kttTemplateForCloseAttest() {
+  if (_kttTmplCache) return _kttTmplCache;
+  const a = computeKttTokenArtifact({ amount: 1, ownerCovIdHex: '00'.repeat(31) + '01' });
+  _kttTmplCache = { prefix: a.templatePrefix.toString('hex'), suffix: a.templateSuffix.toString('hex') };
+  return _kttTmplCache;
+}
+
 export async function submitCloseAttestV2(marketId, req, sigs, opts = {}) {
   const relayId = opts.relayId || SETTLER_RELAY_ID;
   if (!relayId) return { ok: false, reason: 'submitCloseAttestV2: no relayId (BSHARD_SETTLER_RELAY_ID unset)' };
@@ -628,6 +639,8 @@ export async function submitCloseAttestV2(marketId, req, sigs, opts = {}) {
         self_out_idx: 0, new_payout_root: req.claimedPayoutRoot, new_attested_winner: req.new_attestedWinner,
         new_bets_root: req.new_betsRoot, new_refund_root: req.new_refundRoot, new_attested_at_ms: req.new_attestedAtMs,
         committee: committeeWitness, committee_pk_hash: committeePkHash,
+        // 账本1832 段2: v1.0.0 形 close_attest 需要 KTT 模板 prefix/suffix(noTokenInput 不在场证明)+ 4 字节 dispatch tag(合约结构性常量, 与 ctor 无关)
+        tok_prefix_hex: _kttTemplateForCloseAttest().prefix, tok_suffix_hex: _kttTemplateForCloseAttest().suffix, close_attest_dispatch_tag_hex: settleDispatchTags().close_attest,
       },
       outputs: { change_address: opts.changeAddress },
     }, 90_000, 'internal');

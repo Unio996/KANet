@@ -1,0 +1,36 @@
+{
+ "52fbabf97665f2217cfc9fc5e27a4eed76f05dcffe37a8d4c576122002155f54": {
+  "blockHash": "e13a620c5e4db98a06a1ee29523e1b63974e94ff31e1c64c01773c32a9e30b51",
+  "daa": "32670",
+  "version": 1,
+  "inputs": [
+   {
+    "prev": "91cdf24281acfba87f9cccb44dee1bf3540c458cd4ec46c6559fdab07a5b30e6:0",
+    "sigScriptLen": 34366,
+    "computeBudget": 100
+   },
+   {
+    "prev": "ee311994815bf43f24b74ac068f993679a2279363623dd53f42afbe1acf16ab6:0",
+    "sigScriptLen": 66,
+    "computeBudget": 70
+   }
+  ],
+  "outputs": [
+   {
+    "idx": 0,
+    "value": "20000000",
+    "covenantId": "64a46bca0e35c776b9df9ff9af57046d1398e8ca3661d63b63fae4ceff0f295e",
+    "authInput": 0
+   },
+   {
+    "idx": 1,
+    "value": "40000000",
+    "covenantId": null,
+    "authInput": null
+   }
+  ]
+ },
+ "29dc2749c272c49dc8961315c842314ef2e562622b3c182d860d1337ba49486d": {
+  "error": "no kaspa_tx_log row (no change output to a watched address)"
+ }
+}

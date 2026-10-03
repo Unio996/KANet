@@ -1,0 +1,6 @@
+  RUN   H3_template_tampered
+  FAIL  H3_template_tampered
+        Error: WrongGenesisCovenantId(0, da9e7639874c489b6616ef5d5b8edc3c95d5eeca4ccb6f57d92bbccf4efe907e)
+
+1 tests: 0 passed, 1 failed
+Error: "some tests failed"
