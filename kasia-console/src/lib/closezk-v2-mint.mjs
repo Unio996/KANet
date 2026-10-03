@@ -145,7 +145,8 @@ export function writeZkContinuation(marketId, o) {
   meta.zk_continuation = {
     outpoint: { txid: o.outpointTxid, index: Number(o.outpointIndex) },
     redeemHex: o.redeemHex,
-    valueSompi: String(o.valueSompi),
+    valueSompi: String(o.valueSompi),   // 代币池(token 单位; 账本1832 段3 起语义固定, 非 KAS)
+    ...(o.utxoValueSompi != null ? { utxoValueSompi: String(o.utxoValueSompi) } : {}),   // 续约 UTXO 的 KAS 面值(dust)
     attestedWinner: Number(o.attestedWinner),
     attestedAtMs: Number(o.attestedAtMs),
     mintedAt: o.mintedAt || new Date().toISOString(),
@@ -194,6 +195,7 @@ export function advanceZkContinuationAfterSpend(marketId, o) {
     meta.zk_continuation.outpoint = { txid: o.outpointTxid, index: Number(o.outpointIndex) };
     meta.zk_continuation.redeemHex = o.redeemHex;
     meta.zk_continuation.valueSompi = String(o.valueSompi);
+    if (o.utxoValueSompi != null) meta.zk_continuation.utxoValueSompi = String(o.utxoValueSompi);
   } else {
     // 显式终态(Bettor #d7bjdn nit, 2026-07-09): exhausted=true 且 outpoint=null/redeemHex=null/valueSompi='0'
     // 一并写, 不留旧 outpoint/redeemHex 陈值——对账工具若只看这几个字段(不额外检查 exhausted)会误读成"还有活续约"。

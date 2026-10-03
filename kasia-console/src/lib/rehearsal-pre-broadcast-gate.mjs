@@ -168,7 +168,7 @@ export function gateZkClose(marketId, ctx, beforeState, amounts) {
 
   const testCase = buildZkCloseDebuggerCase({
     beforeState, witness, guestPayoutRootHex: proving.guestPayoutRootHex, selfOutIdx: 0,
-    closeZkUtxoValueSompi: zkCont.valueSompi, gateUtxoValueSompi: amounts.gateUtxoValueSompi, gateScriptHex,
+    closeZkUtxoValueSompi: zkCont.utxoValueSompi ?? zkCont.valueSompi,   // 账本1832 段3: 优先 KAS 面值(dust); 旧行回落 gateUtxoValueSompi: amounts.gateUtxoValueSompi, gateScriptHex,
   });
   const result = runCliDebugger(testCase);
   return { ok: result.pass, gate: result.pass ? 'pass' : 'fail', debugger: result };

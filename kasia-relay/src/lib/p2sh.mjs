@@ -2507,14 +2507,17 @@ export async function unlockBshardZkHandoff(args) {
       };
     }
     const r = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
-    return { txId: r.transactionId, closeZkAddress: closeZkAddr, closeZkRedeemHex: fullRedeem.toString('hex'), zkCovId, tokOutCovId: tokCovId, tokOutAddress: tokOutAddr };
+    return { txId: r.transactionId, closeZkAddress: closeZkAddr, closeZkRedeemHex: fullRedeem.toString('hex'), zkCovId, tokOutCovId: tokCovId, tokOutAddress: tokOutAddr, utxoValueSompi: zkOutValue.toString() };
   } finally { try { await rpc.disconnect(); } catch {} }
 }
 
 // v1 TOCCATA computeBudget for OpZkPrecompile groth16 verify(实测昨晚4ec9ddd1/bfd3d0e2 需 1500, 远超普通
 // covenant 的 _BSHARD_COMPUTE_BUDGET=70——groth16 密码学验证计算量级不同, 见 [[project-first-onchain-zk-precompile-landed-2026-07-06]]
 // computeBudget 教训)。只用在 gate input 上, CloseZkRepro4 侧仍走普通 _BSHARD_COMPUTE_BUDGET。
-const _ZK_GATE_COMPUTE_BUDGET = 1500;
+// 🔴 账本1832 段3: 1500 → 1560。依据(simnet 官方 kaspad 2.0.1 实测, 同 gate 真 RISC0 Groth16 receipt): 1500 被拒 (used=15502875 > limit=15009999);
+//   OpZkPrecompile Groth16 验证耗 15,502,875 script units, 预算 N 给 N×10000+9999 ⇒ N ≥ 1551(ceil(15502875−9999)/10000); 1552 实测过(provenance 2026-10-03-j2-pm-simnet-e2e)。
+//   取 1560(≈ +0.6% 余量; 预算只线性抬高 mass/费, 不影响共识通过性)。mass≈157k ⇒ gate-only 花费最低费 ≈0.157 KAS(100 sompi/gram)。
+const _ZK_GATE_COMPUTE_BUDGET = 1560;
 
 /**
  * unlockBshardZkClose — CloseZkRepro4 zk_close(OP_0='00')。2026-07-07 J2(NWT 双倍红队审, J1 domain 应急代写,
@@ -2540,24 +2543,38 @@ export async function unlockBshardZkClose(args) {
   const w = cmd.witness;
   const rpc = await connectRpc(networkId);
   try {
+    // 🔴 账本 1832 段3(v0.3 代币化重写, 取代旧 KAS 价值焊接版): CloseZkV2.zk_close(gateSuffix, guestPayoutRoot, selfOutIdx, tok_prefix, tok_suffix)。
+    //   旧版: 裸选择器 '00' + 无 tok 见证 + 输出值=consolidatedPool(KAS) + 无 CovenantBinding + 无找零(整枚 gate 面值烧作矿工费)——对 v1.0.0 合约全错。
+    //   新版 tx: inputs [0 CloseZkV2(zk_close, 无签) | 1 gate(真 Groth16 sigScript, 预算 _ZK_GATE_COMPUTE_BUDGET)]
+    //            outputs [0 CloseZkV2 续约(closed 1→2, payoutRootField=guestPayoutRoot; 面值原样搬运=dust; CovenantBinding(0, 本实例 cov id)) | 1 找零 = gate 面值 − 固定费]
+    //   zk_close 不动代币(noTokenInput): 池代币仍在 CloseZkV2 名下的那笔 KTT UTXO 里不动, 等 claim 消费。
+    //   verify-value-source: 当前状态从 redeem_hex 固定布局现读(同 unlockCloseZkV2Claim), 不信 caller 的 state。
     const czUtxo = await _matchUtxo(rpc, _addressFromRedeem(cmd.inputs.closezk.redeem_hex, networkId), cmd.inputs.closezk.outpointTxid, cmd.inputs.closezk.index);
     if (!cmd.inputs.gate) throw new Error('zk_close: gate input 必需(带真实 groth16 proof 的 P2SH, 自己 sigScript 触发 OpZkPrecompile)');
     const gateUtxo = await _matchUtxo(rpc, cmd.inputs.gate.address, cmd.inputs.gate.outpointTxid, cmd.inputs.gate.index);
     const matched = [czUtxo, gateUtxo];
+    const czCovId = _psInputCovId(czUtxo);
 
-    const cz = cmd.inputs.closezk.state;
-    const consolidatedPool = BigInt(cz.consolidated_pool);
+    const inputRedeem = Buffer.from(cmd.inputs.closezk.redeem_hex, 'hex');
+    const region = inputRedeem.slice(1, 1 + 213);
+    if (region.length !== 213) throw new Error(`zk_close: state region ${region.length}B != 213B(redeem 太短/布局漂移)`);
+    const rd = (off) => { if (region[off] !== 0x08) throw new Error(`zk_close: offset ${off} marker 0x${region[off]?.toString(16)} != 0x08(布局脱节)`); return region.readBigInt64LE(off + 1); };
+    const attestedWinner = rd(0);
+    const closed = Number(rd(9));
+    if (closed !== 1) throw new Error(`zk_close: closed=${closed} != 1(write-once 1→2; 当前活 redeem 不是待 close 态)`);
+    const consolidatedPool = rd(51);   // 代币记账数(D-017 语义), 仅用于 state 透传
+    if (cmd.inputs.closezk.state && cmd.inputs.closezk.state.consolidated_pool != null && BigInt(cmd.inputs.closezk.state.consolidated_pool) !== consolidatedPool) {
+      throw new Error(`zk_close: caller 给的 consolidated_pool(${cmd.inputs.closezk.state.consolidated_pool}) != 当前活 redeem 现读值(${consolidatedPool}) — 拒绝(防喂假 state)`);
+    }
 
     // ── continuation: splice stateBytes 区(closed 1→2, payoutRootField=guestPayoutRoot, 其余不变) ──
-    //   .sil zk_close 的 validateOutputState 语义 = 固定宽度 stateBytes(genesisMarker(1B)+stateBytes(213B))内部
-    //   splice, templateA-D(offset 214 起)不变——不需要重编译, 直接 splice 输入 redeem 的 [1:214) 区。
-    const inputRedeem = Buffer.from(cmd.inputs.closezk.redeem_hex, 'hex');
     const i64 = (n) => { const b = Buffer.alloc(8); b.writeBigInt64LE(BigInt(n)); return b; };
     const push8 = Buffer.from([8]), push32 = Buffer.from([32]);
     const guestPayoutRoot = Buffer.from(w.guest_payout_root_hex, 'hex');
+    if (guestPayoutRoot.length !== 32) throw new Error('zk_close: guest_payout_root 非 32B');
     const zeroWord = Buffer.concat([push8, i64(0)]);
     const newStateBytes = Buffer.concat([
-      push8, i64(cz.attestedWinner),
+      push8, i64(attestedWinner),
       push8, i64(2), // closed: 1→2 write-once(zk_close 完成)
       push32, guestPayoutRoot,
       push8, i64(consolidatedPool),
@@ -2567,25 +2584,38 @@ export async function unlockBshardZkClose(args) {
     const spliced = Buffer.concat([inputRedeem.slice(0, 1), newStateBytes, inputRedeem.slice(1 + 213)]);
     const closeZkContAddr = addressFromScriptPublicKey(payToScriptHashScript(new Uint8Array(spliced)), networkId).toString();
 
+    const czValue = _utxoValue(czUtxo);   // 面值原样搬运(dust; 合约只要求 >= DUST_MIN)
     const outputs = [];
-    outputs[w.self_out_idx] = new TransactionOutput(consolidatedPool, payToAddressScript(new Address(closeZkContAddr)));
+    outputs[w.self_out_idx] = new TransactionOutput(czValue, payToAddressScript(new Address(closeZkContAddr)), new CovenantBinding(0, new Hash(czCovId)));
     const orderedOut = outputs.filter(o => o !== undefined);
-    _appendChange(orderedOut, matched, cmd.outputs?.change_address, _bshardFeeV1(matched.length));
+    // 找零: gate 面值 − 固定费。gate-only 花费在 budget 1560 下 mass≈157k ⇒ 最低费 ≈ 0.157 KAS(100 sompi/gram); 默认 25M(0.25 KAS)留余量。cmd.fee_sompi 可覆盖。
+    _appendChange(orderedOut, matched, cmd.outputs?.change_address, BigInt(cmd.fee_sompi ?? 25_000_000));
 
-    // scriptSig 声明序须与 CloseZkRepro4.sil zk_close 形参声明序一致: gateSuffix, guestPayoutRoot, selfOutIdx + OP_0 + redeem
-    const czSig = _pushBytes(w.gate_suffix_hex) + _pushBytes(w.guest_payout_root_hex) + _pushInt(w.self_out_idx)
-      + '00' + _encodePushDataHex(Buffer.from(cmd.inputs.closezk.redeem_hex, 'hex'));
+    const hx = (h) => new Uint8Array(Buffer.from(String(h).replace(/^0x/, ''), 'hex'));
+    if (!w.tok_prefix_hex || !w.tok_suffix_hex || !w.zk_close_dispatch_tag_hex) throw new Error('zk_close: witness.tok_prefix_hex/tok_suffix_hex/zk_close_dispatch_tag_hex 必需(v1.0.0 形, noTokenInput)');
+    const closeAction = (() => {
+      const b = new ScriptBuilder({ flags: { covenantsEnabled: true } });
+      b.addData(hx(w.gate_suffix_hex)); b.addData(new Uint8Array(guestPayoutRoot)); b.addI64(BigInt(w.self_out_idx));
+      b.addData(hx(w.tok_prefix_hex)); b.addData(hx(w.tok_suffix_hex)); b.addData(hx(w.zk_close_dispatch_tag_hex));
+      return b.drain();
+    })();
+    const czSig = _combineActionAndRedeem(closeAction, cmd.inputs.closezk.redeem_hex);
 
+    const CB_CZ = Number(cmd.compute_budget_cz ?? 200);
     const signedTx = new Transaction({ version: 1, inputs: [
-      { previousOutpoint: { transactionId: czUtxo.outpoint.transactionId, index: czUtxo.outpoint.index }, signatureScript: czSig, sequence: 0n, sigOpCount: 0, computeBudget: _BSHARD_COMPUTE_BUDGET },
+      { previousOutpoint: { transactionId: czUtxo.outpoint.transactionId, index: czUtxo.outpoint.index }, signatureScript: czSig, sequence: 0n, sigOpCount: 0, computeBudget: CB_CZ },
       { previousOutpoint: { transactionId: gateUtxo.outpoint.transactionId, index: gateUtxo.outpoint.index }, signatureScript: cmd.inputs.gate.sig_script_hex, sequence: 0n, sigOpCount: 0, computeBudget: _ZK_GATE_COMPUTE_BUDGET },
     ], outputs: orderedOut, lockTime: BigInt(lockTime), gas: 0n, subnetworkId: '0000000000000000000000000000000000000000', payload: '' });
     _assertTxInvariants(matched, signedTx, 'unlockBshardZkClose', networkId);
+    if (cmd.dry_run) {
+      const hx0 = (v) => (typeof v === 'string' ? v : Buffer.from(v).toString('hex')).replace(/^0x/, '');
+      return { broadcasted: false, closeZkContinuationAddress: closeZkContAddr, closeZkContinuationRedeemHex: spliced.toString('hex'),
+        inputs: matched.map((u, i) => ({ prev_txid: u.outpoint.transactionId, prev_index: Number(u.outpoint.index), utxo_value: _utxoValue(u).toString(), utxo_script_hex: hx0((u.entry ?? u).scriptPublicKey?.script ?? ''), covenant_id: (() => { const c = (u.entry ?? u).covenantId ?? u.covenant?.covenantId; return c == null ? null : String(c); })(), signature_script_hex: i === 0 ? czSig : cmd.inputs.gate.sig_script_hex })),
+        outputs: signedTx.outputs.map((o) => ({ value: o.value.toString(), script_hex: hx0(o.scriptPublicKey.script), covenant_id: o.covenant ? String(o.covenant.covenantId) : null })) };
+    }
     const r = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
-    // 纯附加(2026-07-09, J2·docs/2026-07-09-zk-autonomy-three-parts-design.md (a)): 透传 spliced redeem hex,
-    // caller(console 侧 landed-gated 持久化)需要它写 zk_continuation.redeemHex, 不该在 console 侧重新 splice
-    // 算一遍(避免同一份 splice 逻辑出现两份独立实现)。零行为变化, 只多返回一个已经算好的本地变量。
-    return { txId: r.transactionId, closeZkContinuationAddress: closeZkContAddr, closeZkContinuationRedeemHex: spliced.toString('hex') };
+    // 透传 spliced redeem hex(caller landed-gated 持久化要用, 不在 console 侧重算第二份); 账本1832 段3: 另返回续约 UTXO 的 KAS 面值(dust), 供 console 把「KAS 面值」与「代币池」两个字段拆开持久化。
+    return { txId: r.transactionId, closeZkContinuationAddress: closeZkContAddr, closeZkContinuationRedeemHex: spliced.toString('hex'), utxoValueSompi: czValue.toString() };
   } finally { try { await rpc.disconnect(); } catch {} }
 }
 
