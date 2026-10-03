@@ -1,0 +1,62 @@
+== start 2026-10-04T01:13:49+07:00
+MemTotal:       16373432 kB
+MemAvailable:    7181404 kB
+docker server 29.6.1
+   Compiling methods v0.1.0 (/tmp/kanetui_g16/methods)
+   Compiling host v0.1.0 (/tmp/kanetui_g16/host)
+    Finished `release` profile [optimized + debuginfo] target(s) in 32.96s
+     Running `/tmp/kanetui_g16/target/release/host /tmp/kanetui_g16/inputs/3o6cs_input.json /mnt/d/kanet-tn12/scratch/_kanetui_groth16_out/sample`
+proving with ReceiptKind::Groth16 (this is much heavier than Composite — expect a long wait)...
+bets_root       = 9a92dcd14af0150b1c9abb9d181e998cbd10aed7efb3f82deaa42a793e39dffb
+attested_winner = 1
+payout_root     = 7674d6c29debbc19c4a734f49522f1dd920beb2b7c7b3ea516c23ddbcfe423d9
+
+image_id (PAYOUT_ID) = c9918501d90bf0aeaaf7970816078c81e8286c08293ccf388e87a7cab023ce30
+journal_digest       = 50c26d353773b2138a089773acdad680bc0fefe48d18f60e22df3e40868e2f86
+
+Groth16Receipt<ReceiptClaim> borsh bytes: 482 bytes -> /mnt/d/kanet-tn12/scratch/_kanetui_groth16_out/sample.borsh / /mnt/d/kanet-tn12/scratch/_kanetui_groth16_out/sample.hex
+summary -> /mnt/d/kanet-tn12/scratch/_kanetui_groth16_out/sample.summary.json
+	Command being timed: "cargo run --release -- /tmp/kanetui_g16/inputs/3o6cs_input.json /mnt/d/kanet-tn12/scratch/_kanetui_groth16_out/sample"
+	User time (seconds): 1192.60
+	System time (seconds): 9.55
+	Percent of CPU this job got: 1166%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 1:43.04
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 4809000
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 519
+	Minor (reclaiming a frame) page faults: 2608090
+	Voluntary context switches: 80598
+	Involuntary context switches: 45234
+	Swaps: 0
+	File system inputs: 223736
+	File system outputs: 287168
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0
+PROVE_EXIT=0 2026-10-04T01:16:13+07:00
+total 12
+drwxrwxrwx 1 root root 4096 Oct  4 01:16 .
+drwxrwxrwx 1 root root 4096 Oct  4 01:16 ..
+-rwxrwxrwx 1 root root    0 Oct  4 01:16 .done
+-rwxrwxrwx 1 root root 2611 Oct  4 01:16 mem.log
+-rwxrwxrwx 1 root root 2054 Oct  4 01:16 run.log
+-rwxrwxrwx 1 root root  482 Oct  4 01:16 sample.borsh
+-rwxrwxrwx 1 root root  964 Oct  4 01:16 sample.hex
+-rwxrwxrwx 1 root root  598 Oct  4 01:16 sample.summary.json
+{
+  "attested_winner": 1,
+  "bets_root_hex": "9a92dcd14af0150b1c9abb9d181e998cbd10aed7efb3f82deaa42a793e39dffb",
+  "demo_mode": false,
+  "image_id": "c9918501d90bf0aeaaf7970816078c81e8286c08293ccf388e87a7cab023ce30",
+  "journal_digest": "50c26d353773b2138a089773acdad680bc0fefe48d18f60e22df3e40868e2f86",
+  "payout_root_hex": "7674d6c29debbc19c4a734f49522f1dd920beb2b7c7b3ea516c23ddbcfe423d9",
+  "receipt_borsh_bytes_len": 482,
+  "receipt_borsh_path": "/mnt/d/kanet-tn12/scratch/_kanetui_groth16_out/sample.borsh",
+  "receipt_hex_path": "/mnt/d/kanet-tn12/scratch/_kanetui_groth16_out/sample.hex"
+}== done 2026-10-04T01:16:17+07:00
