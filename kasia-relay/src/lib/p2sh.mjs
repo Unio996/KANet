@@ -2121,13 +2121,16 @@ export async function unlockBshardConsolidateV2(args) {
     const psTokSig = psTokUtxo ? _combineActionAndRedeem(_encodeKttTransferZeroOutAction(w.token_transfer_dispatch_tag_hex, w.token_transfer_state_field_count, [0]), cmd.inputs.ps_token.redeem_hex) : null;
     const sigScripts = [psSig, slSig, shardTokSig, ...(psTokSig ? [psTokSig] : [])];
 
-    // 计算预算: register_append 的 70 对 absorb(29KB redeem 揭示+blake3 模板核)/consolidate 不够(simnet 实测 used=731959 > limit=709999 ⇒ 至少 74); 取 100 留余量, 可由 cmd.compute_budget 覆盖。
+    // 计算预算(每 input): 旧 70 对 consolidate 不够(simnet 实测 leaf 侧 used=731959>709999 ⇒ ≥74, 取 100)。
+    //   🔴 账本1832: 合约偏移修复后 PS.absorb 要对 ~29KB 自身 redeem 重建+blake2b+切片, simnet 2.0.1 真共识实测 used=1032394 > limit=1009999(budget 100) ⇒ ≥104; PS 输入取 130(~25% 余量)。
+    //   cmd.compute_budget 覆盖全部非 PS 输入, cmd.compute_budget_ps 覆盖 PS 输入。
     const CB = Number(cmd.compute_budget ?? 100);
+    const CB_PS = Number(cmd.compute_budget_ps ?? 130);
     const mkTx = (ss) => new Transaction({
       version: 1,
       inputs: matched.map((u, i) => ({
         previousOutpoint: { transactionId: u.outpoint.transactionId, index: u.outpoint.index },
-        signatureScript: ss ? ss[i] : '', sequence: 0n, sigOpCount: 0, computeBudget: CB, ...(ss ? {} : { utxo: u }),
+        signatureScript: ss ? ss[i] : '', sequence: 0n, sigOpCount: 0, computeBudget: i === 0 ? CB_PS : CB, ...(ss ? {} : { utxo: u }),
       })),
       outputs, lockTime: BigInt(lockTime), gas: 0n, subnetworkId: '0000000000000000000000000000000000000000', payload: '',
     });

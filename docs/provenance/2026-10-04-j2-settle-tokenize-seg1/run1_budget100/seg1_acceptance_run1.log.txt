@@ -1,0 +1,39 @@
+[db] path=D:\kanet-tn12\scratch\_j2_tok_sim\console.simnet.db source=DB_PATH
+22:29:44 deadline passed; shards: [{"shard_index":0,"status":"sealed","current_leaf_state":"{\"local_yes\":1000000000,\"local_no\":2000000000,\"count\":2,\"pool_value\":3000000000}","current_token_outpoint":"b8ad00f48d60f8783d0bf9cef8fceff9cda4abc4ebd3d1ee81e9a43cd6518fc5:2","leaf_cov_id":"bad8cd004ccdb4614ad9df4451cc3faa951a518e0f92ada6ae823fa66f3e1735"},{"shard_index":1,"status":"open","current_leaf_state":"{\"local_yes\":500000000,\"local_no\":0,\"count\":1,\"pool_value\":500000000}","current_token_outpoint":"6bbb44e2b706a0ae9eea5cba6abf1285a3614b0f9cdf28148ca0bfec48618253:2","leaf_cov_id":"fad87f292dd391dd4467eeb2b7a0360afcb2f0b882ef99e19398248e3293c660"}]
+[diag:step] proc.silverc.compile.bshard-artifacts ms=33 cmd=silverc ok=1 at=2026-10-03T22:29:44.895Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=55 cmd=silverc ok=1 at=2026-10-03T22:29:44.957Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=30 cmd=silverc ok=1 at=2026-10-03T22:29:45.318Z
+Error: "some tests failed"
+22:29:48 NEG N1_mint_one_extra: consensus=REJECTED ✓ | debugger={"pass":false,"lineNo":178,"reqLine":"require(countStrayNonOwnedTokenInputs(tok_prefix, tok_suffix, shardInIdx) == 0);"}
+22:29:48    node text: {"status":200,"ok":true,"error":"RPC Server (remote error) -> Rejected transaction 7216af833c1a506b9a9a3b7b08f761d863906c691dff8ae07b4d81ae0f832e52: failed to verify the signature script: script ran, but verification failed","phase":"execution"}
+Error: "some tests failed"
+22:29:51 NEG N2_wrong_owner: consensus=REJECTED ✓ | debugger={"pass":false,"lineNo":178,"reqLine":"require(countStrayNonOwnedTokenInputs(tok_prefix, tok_suffix, shardInIdx) == 0);"}
+22:29:51    node text: {"status":200,"ok":true,"error":"RPC Server (remote error) -> Rejected transaction 632ac9c9022898b315e9090e475f52409ac9558f34f951ca6d478e862f8e5594: failed to verify the signature script: script ran, but verification failed","phase":"execution"}
+Error: "some tests failed"
+22:29:54 NEG N3_tampered_self_output: consensus=REJECTED ✓ | debugger={"pass":false,"lineNo":224,"reqLine":"require(tx.outputs[selfOutIdx].scriptPubKey == byte[](expectedSpk));"}
+22:29:54    node text: {"status":200,"ok":true,"error":"RPC Server (remote error) -> Rejected transaction eb4eadee37c48c2051a7f51b30566fbecd593c00d8e9134687819377df4cf4e3: failed to verify the signature script: script ran, but verification failed","phase":"execution"}
+Error: "some tests failed"
+22:29:57 NEG N4_shard_amount_mismatch: consensus=REJECTED ✓ | debugger={"pass":false,"lineNo":173,"reqLine":"require(shardTk.amount == shard_amount);"}
+22:29:57    node text: {"status":200,"ok":true,"error":"RPC Server (remote error) -> Rejected transaction 9e70dc98da36ae4056046ed9318dffb777880fae148d1b7fc55e3d3f219ab129: failed to verify the signature script: script ran, but verification failed","phase":"execution"}
+22:29:57 shard0 leaf UTXO still present after negatives: true
+22:29:57 BEFORE PS UTXO(genesis addr): [{"outpoint":{"transactionId":"cc087ab726b007af2c72343634f71fb8359ae20ad5dac9ee9534c80d8ba3e9d9","index":0},"amount":"20000000","covenantId":null}]
+[diag:step] proc.silverc.compile.bshard-artifacts ms=31 cmd=silverc ok=1 at=2026-10-03T22:29:58.491Z
+22:29:58 P1 (crash after shard0): SIMULATED CRASH before shard1 consolidate
+file:///D:/kanet-tn12/scratch/_j2_wt_tokenize/docs/provenance/2026-10-04-j2-settle-tokenize-seg1/seg1_acceptance.mjs:26
+const sendRaw = async (cmd) => { const j = await http('POST', `/api/relay/${settler.id}/send-command`, cmd); if (j.ok === false || j.error) { const e = new Error(JSON.stringify(j).slice(0, 900)); e.raw = j; throw e; } return j; };
+                                                                                                                                                        ^
+
+Error: {"status":200,"ok":true,"error":"RPC Server (remote error) -> Rejected transaction 74f542edb126535c0721c8f8d35818ed0e116a08101905e058b1a35ab746af13: failed to verify the signature script: script units exceeded the amount committed in the input: used=1032394, limit=1009999","phase":"execution"}
+    at sendRaw (file:///D:/kanet-tn12/scratch/_j2_wt_tokenize/docs/provenance/2026-10-04-j2-settle-tokenize-seg1/seg1_acceptance.mjs:26:153)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async consolidateAllShards (file:///D:/kanet-tn12/scratch/_j2_wt_tokenize/kasia-console/src/lib/pool-shard-settle.mjs:463:12)
+    at async file:///D:/kanet-tn12/scratch/_j2_wt_tokenize/docs/provenance/2026-10-04-j2-settle-tokenize-seg1/seg1_acceptance.mjs:103:13 {
+  raw: {
+    status: 200,
+    ok: true,
+    error: 'RPC Server (remote error) -> Rejected transaction 74f542edb126535c0721c8f8d35818ed0e116a08101905e058b1a35ab746af13: failed to verify the signature script: script units exceeded the amount committed in the input: used=1032394, limit=1009999',
+    phase: 'execution'
+  }
+}
+
+Node.js v24.14.1

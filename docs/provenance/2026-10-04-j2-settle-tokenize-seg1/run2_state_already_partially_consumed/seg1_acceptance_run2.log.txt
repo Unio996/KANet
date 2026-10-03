@@ -1,0 +1,24 @@
+[db] path=D:\kanet-tn12\scratch\_j2_tok_sim\console.simnet.db source=DB_PATH
+22:31:09 deadline passed; shards: [{"shard_index":0,"status":"settling","current_leaf_state":"{\"local_yes\":1000000000,\"local_no\":2000000000,\"count\":2,\"pool_value\":3000000000}","current_token_outpoint":"b8ad00f48d60f8783d0bf9cef8fceff9cda4abc4ebd3d1ee81e9a43cd6518fc5:2","leaf_cov_id":"bad8cd004ccdb4614ad9df4451cc3faa951a518e0f92ada6ae823fa66f3e1735"},{"shard_index":1,"status":"open","current_leaf_state":"{\"local_yes\":500000000,\"local_no\":0,\"count\":1,\"pool_value\":500000000}","current_token_outpoint":"6bbb44e2b706a0ae9eea5cba6abf1285a3614b0f9cdf28148ca0bfec48618253:2","leaf_cov_id":"fad87f292dd391dd4467eeb2b7a0360afcb2f0b882ef99e19398248e3293c660"}]
+[diag:step] proc.silverc.compile.bshard-artifacts ms=52 cmd=silverc ok=1 at=2026-10-03T22:31:09.482Z
+Error: "some tests failed"
+22:31:12 NEG N1_mint_one_extra: consensus=REJECTED ✓ | debugger={"pass":false,"lineNo":171,"reqLine":"require(owned_total == consolidated_pool);"}
+22:31:12    node text: {"status":200,"ok":true,"error":"RPC Server (remote error) -> Rejected transaction 288f400f0b6a5bec4c6e176e11227b488e53a517dc35e0d40a8f5c03a653ea38: failed to verify the signature script: script ran, but verification failed","phase":"execution"}
+Error: "some tests failed"
+22:31:15 NEG N2_wrong_owner: consensus=REJECTED ✓ | debugger={"pass":false,"lineNo":171,"reqLine":"require(owned_total == consolidated_pool);"}
+22:31:15    node text: {"status":200,"ok":true,"error":"RPC Server (remote error) -> Rejected transaction 03885646f39778f4eb3cbae58904cb6c354be2f8100630edd71aed98af110d30: failed to verify the signature script: script ran, but verification failed","phase":"execution"}
+Error: "some tests failed"
+22:31:18 NEG N3_tampered_self_output: consensus=REJECTED ✓ | debugger={"pass":false,"lineNo":171,"reqLine":"require(owned_total == consolidated_pool);"}
+22:31:18    node text: {"status":200,"ok":true,"error":"RPC Server (remote error) -> Rejected transaction a7a14b9dc0663d2e9c9cdc3e6609513848961599c1545014a3ce4eee5558e0a4: failed to verify the signature script: script ran, but verification failed","phase":"execution"}
+Error: "some tests failed"
+22:31:21 NEG N4_shard_amount_mismatch: consensus=REJECTED ✓ | debugger={"pass":false,"lineNo":171,"reqLine":"require(owned_total == consolidated_pool);"}
+22:31:21    node text: {"status":200,"ok":true,"error":"RPC Server (remote error) -> Rejected transaction 3af88cfcdf7af7a27eb31ed7edb4887207b10b2b8982aeb7c6152fab0affa020: failed to verify the signature script: script ran, but verification failed","phase":"execution"}
+22:31:21 shard0 leaf UTXO still present after negatives: false
+22:31:21 BEFORE PS UTXO(genesis addr): []
+22:31:22 P1 (crash after shard0): undefined
+22:31:22 P2 resume result: {"psOutpoint":"aa59c365b0a23a2908ad1a59ea274e3555598f883e62c0b8c72c7bf259d4e9da:0","consolidatedPool":"3500000000","consolidatedShards":0,"redeemHex":"6b0800c39dd000000000080000000000000000200000000000000000000000000000000000000000000000000000000000000000080000000000000000080000000000000000080000000000000000080000000000000000080000000000000000080000000000000000080000000000000000080000000000000000080000000000000000080000000000000000080000000000000000080000000000000000080000000000000000080000000000000000080000000000000000080000000000000000080000000000000000080100000000000080080000000000000000200
+22:31:22 AFTER PS UTXO @final state addr: [{"outpoint":{"transactionId":"aa59c365b0a23a2908ad1a59ea274e3555598f883e62c0b8c72c7bf259d4e9da","index":0},"amount":"20000000","covenantId":null}]
+22:31:22 AFTER PS 名下代币 UTXO (amount=3500000000, owner=PS cov): [{"outpoint":{"transactionId":"aa59c365b0a23a2908ad1a59ea274e3555598f883e62c0b8c72c7bf259d4e9da","index":1},"amount":"60000000","covenantId":null}]
+22:31:22 shard0 leaf UTXOs=0 shard-token UTXOs=0
+22:31:22 shard1 leaf UTXOs=0 shard-token UTXOs=0
+22:31:22 SUMMARY {"finalPool":"3500000000","psUtxoCount":1,"psTokenUtxoCount":1,"shardsConsumed":true}

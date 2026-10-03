@@ -1,0 +1,56 @@
+{
+ "final": {
+  "txid": "df5a3d552597960d406b0426d7dda38ca56a6641d107b3a0a1e6f8ad271c4714",
+  "blockHash": "da41cb75f987ce9051c7d52d0fc8142c2f0646719c4b60a850f23d596e588f4e",
+  "daa": "13925",
+  "version": 1,
+  "inputs": [
+   {
+    "prev": "21cd7ef4eca45f4a32a84a2081fd4fa7f10525fa385bc31ac4a61dc7a8ec4311:0",
+    "sigScriptLen": 32413,
+    "computeBudget": 130
+   },
+   {
+    "prev": "bc1117964575c4bcf15dc4145233cffa0ed47be17321c7b48a196beb2ae7cd15:0",
+    "sigScriptLen": 17327,
+    "computeBudget": 100
+   },
+   {
+    "prev": "bc1117964575c4bcf15dc4145233cffa0ed47be17321c7b48a196beb2ae7cd15:2",
+    "sigScriptLen": 3215,
+    "computeBudget": 100
+   },
+   {
+    "prev": "21cd7ef4eca45f4a32a84a2081fd4fa7f10525fa385bc31ac4a61dc7a8ec4311:1",
+    "sigScriptLen": 3215,
+    "computeBudget": 100
+   },
+   {
+    "prev": "ccdab4c849726be55ffe6471069236381f362c19e0f2c92110faf9873484dc6d:0",
+    "sigScriptLen": 66,
+    "computeBudget": 100
+   }
+  ],
+  "outputs": [
+   {
+    "idx": 0,
+    "value": "20000000",
+    "covenantId": "8cd8a81775e5b673205ac5d71bb16bcf12c880a0067d40d682c69f6ede30f817",
+    "authInput": 0
+   },
+   {
+    "idx": 1,
+    "value": "60000000",
+    "covenantId": "11c83a0742f9e7d804bc9dd042c6ff43ca8867b8a55338dbfbeba10004d9ed88",
+    "authInput": 4
+   },
+   {
+    "idx": 2,
+    "value": "30000000",
+    "covenantId": null,
+    "authInput": null
+   }
+  ]
+ },
+ "shard0ConsolidateTxid": "21cd7ef4eca45f4a32a84a2081fd4fa7f10525fa385bc31ac4a61dc7a8ec4311"
+}
