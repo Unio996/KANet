@@ -64,11 +64,18 @@ const baseArgs = {
   tokenTmplHash: TTH, claimTmplHash: CTH, marketSuffixHash: MSH,
 };
 {
-  // 正向: 2^48-1 是编码上合法的值(虽然远超业务上任何合理时间戳)，真编译应该成功，不因为宽度断言被拦。
+  // 正向: 2^47-1 是 6 字节 minimal-push 的最大定宽值(业务门 [2^40,2^47) 的上沿内), 真编译应该成功, 不被任何闸拦。
   let threw = null, redeemHex = null;
-  try { redeemHex = compileCloseZkV2Redeem({ ...baseArgs, attestedAtMs: SIX_BYTE_MAX }); } catch (e) { threw = e; }
-  ok(threw === null, `attestedAtMs=2^48-1: 真编译成功, 不被宽度断言拦 (got: ${threw?.message})`);
+  try { redeemHex = compileCloseZkV2Redeem({ ...baseArgs, attestedAtMs: 2 ** 47 - 1 }); } catch (e) { threw = e; }
+  ok(threw === null, `attestedAtMs=2^47-1: 真编译成功, 不被宽度断言/长度 fail-closed 拦 (got: ${threw?.message})`);
   ok(typeof redeemHex === 'string' && redeemHex.length > 0, `真编译产出非空 redeem hex (len=${redeemHex?.length})`);
+}
+{
+  // 账本1832: 2^48-1 能过 assertSixByteEncodable(6 字节可写), 但 minimal-push 因符号位编成 7 字节 → redeem 比 own_redeem_len 长 1。
+  // 以前这种值会静默编出一份"长度≠烤入 own_redeem_len"的 redeem(自续约偏移错位); 现在由 compileCloseZkV2Redeem 的长度 fail-closed 拦下。
+  let threw = null;
+  try { compileCloseZkV2Redeem({ ...baseArgs, attestedAtMs: SIX_BYTE_MAX }); } catch (e) { threw = e; }
+  ok(threw && /fail-closed/.test(threw.message), `attestedAtMs=2^48-1: 被 own_redeem_len 长度 fail-closed 拦(got: ${threw?.message})`);
 }
 {
   // 负向: 2^48 编不进 6 字节, compileCloseZkV2Redeem 必须在真编译(silverc 子进程)之前就被 assertSixByteEncodable 拦下——

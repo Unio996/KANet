@@ -38,7 +38,8 @@ const PAYOUT_SHARD_V2_SIL = join(LIB, 'PayoutShardV2.sil');
 // 设计意图(留痕不拒签)，不是本次刷新要消灭的信号，本次只消灭"值从一开始就没对过"这种确定性噪音。
 const _REFERENCE_OFFSETS = {
   v1: { predicateCommitOffset: 16411, poolMerkleRootOffsets: [16931, 17227, 17523, 17819, 18115] },
-  v2: { predicateCommitOffset: 16569, poolMerkleRootOffsets: [17089, 17385, 17681, 17977, 18273] },
+  // 账本1832: own_redeem_len 加入 ctor(+absorb/refund_claim 内联 push)后 V2 偏移整体 +13(旧 16569/[17089,...])
+  v2: { predicateCommitOffset: 16582, poolMerkleRootOffsets: [17102, 17398, 17694, 17990, 18286] },
 };
 
 const W17V100 = () => Array.from({ length: 17 }, () => ctorIntV100(0));
@@ -59,7 +60,7 @@ function _ctorV1(pmrSentinel, pcSentinel) {
   ];
 }
 /**
- * 占位 ctor(V2, 29 参数——同上账本 1415/1458 修：market_suffix_hash 已删，对齐 PayoutShardV2.sil 当前真实签名:
+ * 占位 ctor(V2, 30 参数——同上账本 1415/1458 修：market_suffix_hash 已删，对齐 PayoutShardV2.sil 当前真实签名:
  * poolMerkleRoot/predicate_commit/closeZkTmplAnchor/token_tmpl_hash/init_consolidated_pool/init_closed/
  * init_payoutRoot/init_w0..init_w16(17)/init_attestedWinner/init_attestedAtMs/init_betsRootBaked/
  * init_refundRootBaked/claim_tmpl_hash)。
@@ -72,6 +73,9 @@ function _ctorV2(pmrSentinel, pcSentinel) {
     ...W17V100(),
     ctorIntV100(-1), ctorIntV100(0), ctorBytes32V100('ff'.repeat(32)), ctorBytes32V100('11'.repeat(32)),
     ctorBytes32V100('33'.repeat(32)),
+    // 账本1832: own_redeem_len(ctor 尾字段)。占位值必须与真实值同 minimal-push 宽度(真实≈29.3K → 2 字节数据, 与此处同档),
+    // 因为它被内联进 absorb/refund_claim, 宽度不同会平移其后 close_attest/cancel_attest 的偏移。
+    ctorIntV100(29300),
   ];
 }
 

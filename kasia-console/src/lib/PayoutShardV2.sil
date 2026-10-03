@@ -55,7 +55,11 @@ contract PayoutShardV2(
     //   RefundClaim.sil/CloseZkV2.sil/RootClaim.sil/PayoutShard.sil 家族, P13 witness+blake3 现场核。
     // 🔴 v0.3 方案C 同病同治(账本 1408/1409/1415, f7342a32): market_suffix_hash 一并删——纯透传镜像
     // KanetTokenClaim 已删除的同名字段, 不参与本文件任何 require, 删除不改变任何检查逻辑。
-    byte[32] claim_tmpl_hash
+    byte[32] claim_tmpl_hash,
+    // 🔴 账本1832(Owner批, 账本1468/1469 同族修复): 裸编译 redeem 脚本自身字节长度, 供 absorb/refund_claim 的
+    //   V-T-8 自续约在 sigScript(= action 见证 ++ push(redeem))里定位 redeem 起点。ctor-baked 尾字段(不进 state,
+    //   state 区仍 offset 1 / 288B 不变); 由 JS 侧按不动点收敛算出后烤入(同 ShardLeaf.sil own_redeem_len)。
+    int      own_redeem_len
 ) {
     int consolidated_pool = init_consolidated_pool;
     int closed            = init_closed;
@@ -208,8 +212,12 @@ contract PayoutShardV2(
                               + byte[](32 as byte[1]) + byte[](refundRootBaked);
         byte[] ownSig = tx.inputs[this.activeInputIndex].sigScript;
         int ownLen = ownSig.length;
-        byte[] ownPrefix = ownSig.slice(0, OWN_PREFIX_LEN);
-        byte[] ownSuffix = ownSig.slice(OWN_PREFIX_LEN + OWN_STATE_LEN, ownLen);
+        // 🔴 账本1468/1469 同族修复(账本1832 Owner批, J2 2026-10-04): ownSig = action 见证 ++ push(redeem),
+        // redeem 的真实起点是 ownLen - own_redeem_len, 不是字节 0(旧写法 slice(0,..) 落在见证内部,
+        // 任何诚实交易都过不了下面 expectedSpk 的 require)。own_redeem_len = ctor 烤入, 同 ShardLeaf.sil。
+        int ownRedeemStart = ownLen - own_redeem_len;
+        byte[] ownPrefix = ownSig.slice(ownRedeemStart, ownRedeemStart + OWN_PREFIX_LEN);
+        byte[] ownSuffix = ownSig.slice(ownRedeemStart + OWN_PREFIX_LEN + OWN_STATE_LEN, ownLen);
         byte[] expectedRedeem = ownPrefix + newStateBytes + ownSuffix;
         byte[32] expectedHash = blake2b(expectedRedeem);
         byte[37] expectedSpk = new ScriptPubKeyP2SH(expectedHash);
@@ -565,8 +573,10 @@ contract PayoutShardV2(
                                   + byte[](32 as byte[1]) + byte[](refundRootBaked);
             byte[] rfcOwnSig = tx.inputs[this.activeInputIndex].sigScript;
             int rfcOwnLen = rfcOwnSig.length;
-            byte[] rfcOwnPrefix = rfcOwnSig.slice(0, OWN_PREFIX_LEN);
-            byte[] rfcOwnSuffix = rfcOwnSig.slice(OWN_PREFIX_LEN + OWN_STATE_LEN, rfcOwnLen);
+            // 🔴 账本1832: 同 absorb——redeem 起点 = rfcOwnLen - own_redeem_len(不是字节 0)。
+            int rfcOwnRedeemStart = rfcOwnLen - own_redeem_len;
+            byte[] rfcOwnPrefix = rfcOwnSig.slice(rfcOwnRedeemStart, rfcOwnRedeemStart + OWN_PREFIX_LEN);
+            byte[] rfcOwnSuffix = rfcOwnSig.slice(rfcOwnRedeemStart + OWN_PREFIX_LEN + OWN_STATE_LEN, rfcOwnLen);
             byte[32] rfcExpectedHash = blake2b(rfcOwnPrefix + rfcStateBytes + rfcOwnSuffix);
             byte[37] rfcExpectedSpk = new ScriptPubKeyP2SH(rfcExpectedHash);
             require(tx.outputs[selfOutIdx].scriptPubKey == byte[](rfcExpectedSpk));

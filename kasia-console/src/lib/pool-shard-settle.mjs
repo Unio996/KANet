@@ -12,7 +12,8 @@
 // determinism: payoutRoot computed off-chain (BigInt, exact); committee attests it (committee-trust, same as v07).
 
 import { payoutRoot as buildPayoutRoot, merkleProof } from './pool-payout-root.mjs';
-import { spliceLeafState } from './pool-shard-register.mjs';
+import { spliceLeafState, settleDispatchTags, PS_SEED } from './pool-shard-register.mjs';
+import { computeKttTokenArtifact } from './pool-bshard-artifacts.mjs';
 import { blake2b } from '@noble/hashes/blake2b';
 import { deriveCommitteeSeed, selectCommittee } from '../services/pool-committee-sampler.mjs';
 import { deriveRoleFeeLeaves, FEE_RULES_SCHEMA_V, computeFeeRulesCommit } from './fee-split.mjs';
@@ -350,7 +351,9 @@ export async function verifyRedeemMatchesChainObservedOutput({ db, p2sh, candida
 //   之外再传一个 landed()/深度检查回调, 是签名级改动, 影响面更大, 留给后续批次单独议(不在这次隐式夹带)。
 function _utxoAmountBig(u) { try { return BigInt(u?.amount ?? 0); } catch { return -1n; } }
 
-export async function autoDetectConsolidateResume({ db, getUtxos, p2sh, logicalMarketId, payoutShard }) {
+export async function autoDetectConsolidateResume({ db, getUtxos, p2sh, logicalMarketId, payoutShard, tokenized = false }) {
+  // tokenized(账本 1829 段1): PS UTXO 的 KAS 面值恒为创世 dust(PS_SEED), 与 consolidated_pool(代币记账数)不再相等——金额校验改比 PS_SEED。
+  const _expectPsKas = (pool) => (tokenized ? BigInt(PS_SEED) : pool);
   const allShards = db.prepare(`SELECT * FROM market_shards WHERE logical_market_id = ? AND status != 'manual_recovery_refunded' ORDER BY shard_index ASC`).all(logicalMarketId);
   let psRedeem = Buffer.from(payoutShard.payout_redeem_hex, 'hex');
   let consolidatedPool = psRedeem.readBigInt64LE(2);
@@ -359,7 +362,7 @@ export async function autoDetectConsolidateResume({ db, getUtxos, p2sh, logicalM
   // 场景误判成"不需要 resume"), 只有恰好一笔且金额等于 genesis consolidatedPool 才算数。
   const genesisAddr = p2sh(psRedeem.toString('hex'));
   const genesisUtxos = await getUtxos(genesisAddr);
-  if (genesisUtxos.length === 1 && _utxoAmountBig(genesisUtxos[0]) === consolidatedPool) return null;   // genesis 完好未花, 从零开始正常走(不是这次要修的场景)
+  if (genesisUtxos.length === 1 && _utxoAmountBig(genesisUtxos[0]) === _expectPsKas(consolidatedPool)) return null;   // genesis 完好未花, 从零开始正常走(不是这次要修的场景)
 
   let found = null;
   for (const shard of allShards) {
@@ -371,7 +374,7 @@ export async function autoDetectConsolidateResume({ db, getUtxos, p2sh, logicalM
     const addr = p2sh(psRedeem.toString('hex'));
     const utxos = await getUtxos(addr);
     if (utxos.length !== 1) continue;      // 0 = 这一步还没到; >1 = 异常(dust-poisoning 等), 两种都不采信, 继续往后探
-    if (_utxoAmountBig(utxos[0]) !== consolidatedPool) continue;   // 金额跟理论值不符, 不是我们要找的那笔, 继续往后探
+    if (_utxoAmountBig(utxos[0]) !== _expectPsKas(consolidatedPool)) continue;   // 金额跟理论值不符, 不是我们要找的那笔, 继续往后探
     {
       const op = utxos[0].outpoint;
       // redeemHex(K-18 §3.4, 2026-07-21 J1 代笔 J2 域): 这里已经是 splice 出的真实字节(与
@@ -395,11 +398,11 @@ export async function autoDetectConsolidateResume({ db, getUtxos, p2sh, logicalM
  *   getUtxos(addr)→[{outpoint,amount}] (optional — enables DB-lag 自愈自动 resume, 见 autoDetectConsolidateResume) }
  * @returns {{ psOutpoint, consolidatedPool, consolidatedShards }}
  */
-export async function consolidateAllShards({ db, rc, landed, p2sh, logicalMarketId, payoutShard, relayAddr, transfer, deadline, resume = null, getUtxos = null }) {
+export async function consolidateAllShards({ db, rc, landed, p2sh, logicalMarketId, payoutShard, relayAddr, transfer, deadline, resume = null, getUtxos = null, tokenized = false }) {
   // DB-lag 自愈: 没传显式 resume 且调用方给了 getUtxos, 先探测一次"DB 记的 payout_ps_outpoint 是不是
   // 已经过期(链上真实进度比它超前)"——探到了自动用探测结果当 resume, 不用每次卡住都手动介入。
   if (!resume && getUtxos) {
-    resume = await autoDetectConsolidateResume({ db, getUtxos, p2sh, logicalMarketId, payoutShard });
+    resume = await autoDetectConsolidateResume({ db, getUtxos, p2sh, logicalMarketId, payoutShard, tokenized });
   }
   // 件1(J1 deadline-gate, J2 ms-unit fix b98e0112): partial 片(count<seal_count)consolidate 触发 ShardLeaf
   //   `require(tx.time >= deadline * 1000)` → consolidate tx 必须 set lockTime = deadline*1000(ms, ≥ Kaspa
@@ -423,26 +426,77 @@ export async function consolidateAllShards({ db, rc, landed, p2sh, logicalMarket
   let consolidatedPool = resume ? BigInt(resume.pool) : Buffer.from(payoutShard.payout_redeem_hex, 'hex').readBigInt64LE(2);
   let psRedeem = Buffer.from(payoutShard.payout_redeem_hex, 'hex'); psRedeem.writeBigInt64LE(consolidatedPool, 2); psRedeem = psRedeem.toString('hex');   // reflect 当前 consolidated_pool
   let count = 0;
+  let psTokOutpoint = null;   // tokenized: PS 名下代币的 outpoint(上一笔 consolidate 的 tok_out); resume 时为 null 由 getUtxos 探
   for (const shard of shards) {
     if (!shard.shard_redeem_hex || !shard.current_leaf_state) throw new Error(`shard ${shard.shard_market_id} missing redeem/state — cannot consolidate (fail-closed)`);
     const st = JSON.parse(shard.current_leaf_state);
     const leafRedeem = spliceLeafState(shard.shard_redeem_hex, st);
     const [leafTx, leafIdxStr] = String(shard.current_leaf_outpoint).split(':');
-    const fee = await transfer(relayAddr, 30_000_000);
-    const cj = await rc({
-      type: 'bshard_consolidate',
-      lock_time: consolidateLockTimeMs,                 // 件1: ms-epoch lockTime so ShardLeaf `tx.time >= deadline*1000` passes (partial 片闸); sealed 片跳闸无害
-      inputs: {
-        payoutshard: { redeem_hex: psRedeem, outpointTxid: psTx, index: psIdx, state: { consolidated_pool: consolidatedPool.toString(), closed: 0, payoutRoot: z32, w0: 0 }, state_start: 1 },
-        shardleaf: { redeem_hex: leafRedeem, outpointTxid: leafTx, index: Number(leafIdxStr || 0), pool_value: st.pool_value },
-        fee: { address: relayAddr, outpointTxid: fee, index: 0 },
-      },
-      outputs: { change_address: relayAddr },
-    });
+    let cj;
+    if (tokenized) {
+      // 账本 1829 段1: v0.3 代币化 zk_native(PayoutShardV2) 路径——价值载体是 KTT 代币, 不是 KAS 面值。
+      //   shard 代币 = market_shards.current_token_outpoint(register_append 的 tok_out, amount==pool_value, owner==leaf_cov_id);
+      //   PS 已持有代币(第 2 片起) = 上一笔 consolidate 的 tok_out(owner==payout_cov_id, amount==consolidatedPool)。
+      const poolValueBig = BigInt(st.pool_value);
+      if (poolValueBig === 0n) { console.warn(`[consolidate(tokenized)] shard ${shard.shard_index} pool_value=0 (空片, 无代币可 absorb) — 跳过`); continue; }
+      if (!shard.current_token_outpoint) throw new Error(`consolidate(tokenized) shard ${shard.shard_index}: pool_value=${st.pool_value} 但 market_shards.current_token_outpoint 为空 — 无代币可 absorb (fail-closed)`);
+      if (!shard.leaf_cov_id) throw new Error(`consolidate(tokenized) shard ${shard.shard_index}: leaf_cov_id 缺失 (fail-closed)`);
+      if (!payoutShard.payout_cov_id) throw new Error('consolidate(tokenized): payout_cov_id 缺失 (fail-closed)');
+      const [stTx, stIdx] = String(shard.current_token_outpoint).split(':');
+      const shardTokArt = computeKttTokenArtifact({ amount: Number(poolValueBig), ownerCovIdHex: shard.leaf_cov_id });
+      let psToken = null;
+      if (consolidatedPool > 0n) {
+        const psTokArt = computeKttTokenArtifact({ amount: Number(consolidatedPool), ownerCovIdHex: payoutShard.payout_cov_id });
+        let op = psTokOutpoint;
+        if (!op) {   // resume 场景: 按确定性地址探 PS 名下代币(地址由 amount+owner 唯一确定; 多于 1 笔 = 异常, 不猜)
+          if (!getUtxos) throw new Error('consolidate(tokenized) resume: 需要 getUtxos 探 PS 名下代币 outpoint (fail-closed)');
+          const us = await getUtxos(p2sh(psTokArt.script.toString('hex')));
+          if (us.length !== 1) throw new Error(`consolidate(tokenized) resume: PS 名下代币地址上有 ${us.length} 笔 UTXO(期望恰 1) — 不猜 (fail-closed)`);
+          op = `${us[0].outpoint.transactionId}:${Number(us[0].outpoint.index || 0)}`;
+        }
+        const [ptTx, ptIdx] = String(op).split(':');
+        psToken = { redeem_hex: psTokArt.script.toString('hex'), outpointTxid: ptTx, index: Number(ptIdx) };
+      }
+      const tokOutArt = computeKttTokenArtifact({ amount: Number(consolidatedPool + poolValueBig), ownerCovIdHex: payoutShard.payout_cov_id });
+      const tags = settleDispatchTags();
+      const fee = await transfer(relayAddr, 30_000_000);
+      cj = await rc({
+        type: 'bshard_consolidate_v2',
+        lock_time: consolidateLockTimeMs,
+        witness: {
+          absorb_dispatch_tag_hex: tags.absorb, consolidate_dispatch_tag_hex: tags.consolidate_to_payout,
+          tok_prefix_hex: shardTokArt.templatePrefix.toString('hex'), tok_suffix_hex: shardTokArt.templateSuffix.toString('hex'),
+          shard_amount: poolValueBig.toString(),
+          token_transfer_dispatch_tag_hex: shardTokArt.entryAbi.dispatch_tag, token_transfer_state_field_count: shardTokArt.stateFieldCount,
+        },
+        inputs: {
+          payoutshard: { redeem_hex: psRedeem, outpointTxid: psTx, index: psIdx,
+            state: { consolidated_pool: consolidatedPool.toString(), closed: 0, payoutRoot: z32, w0: 0, attestedWinner: -1, attestedAtMs: 0, betsRootBaked: z32, refundRootBaked: z32 }, state_start: 1 },
+          shardleaf: { redeem_hex: leafRedeem, outpointTxid: leafTx, index: Number(leafIdxStr || 0), pool_value: st.pool_value },
+          shard_token: { redeem_hex: shardTokArt.script.toString('hex'), outpointTxid: stTx, index: Number(stIdx) },
+          ...(psToken ? { ps_token: psToken } : {}),
+          fee: { address: relayAddr, outpointTxid: fee, index: 0 },
+        },
+        outputs: { tok_out: { redeem_hex: tokOutArt.script.toString('hex'), owner_cov_id_hex: payoutShard.payout_cov_id }, change_address: relayAddr },
+      });
+    } else {
+      const fee = await transfer(relayAddr, 30_000_000);
+      cj = await rc({
+        type: 'bshard_consolidate',
+        lock_time: consolidateLockTimeMs,                 // 件1: ms-epoch lockTime so ShardLeaf `tx.time >= deadline*1000` passes (partial 片闸); sealed 片跳闸无害
+        inputs: {
+          payoutshard: { redeem_hex: psRedeem, outpointTxid: psTx, index: psIdx, state: { consolidated_pool: consolidatedPool.toString(), closed: 0, payoutRoot: z32, w0: 0 }, state_start: 1 },
+          shardleaf: { redeem_hex: leafRedeem, outpointTxid: leafTx, index: Number(leafIdxStr || 0), pool_value: st.pool_value },
+          fee: { address: relayAddr, outpointTxid: fee, index: 0 },
+        },
+        outputs: { change_address: relayAddr },
+      });
+    }
     const conTx = cj.txId || cj.txid;
     if (!conTx || !await landed(conTx, cj.psContAddress)) throw new Error(`consolidate shard ${shard.shard_index} no land: ${JSON.stringify(cj).slice(0, 140)}`);
     consolidatedPool += BigInt(st.pool_value);
     psTx = conTx; psIdx = 0; count++;
+    if (tokenized) psTokOutpoint = `${conTx}:1`;   // tok_out 固定在 output 1(见 unlockBshardConsolidateV2)
     // 更新 psRedeem: 每 consolidate 后 PS 续约到新地址(consolidated_pool 增)→ 下一 consolidate 的 input redeem 须反映新 state.
     //   consolidate 只动 consolidated_pool(closed=0/payoutRoot=z32/w0..16=0 不变)→ 替换 state 区首字段 i64LE([1]=PUSH8, [2..9]=consolidated_pool).
     const rbuf = Buffer.from(psRedeem, 'hex'); rbuf.writeBigInt64LE(consolidatedPool, 2); psRedeem = rbuf.toString('hex');

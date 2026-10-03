@@ -301,6 +301,7 @@ export async function buildProposeCloseRequestV2(marketId, judged) {
         db: sqlite, rc, landed: landedFn, p2sh: p2shFn, logicalMarketId: marketId,
         payoutShard: { payout_redeem_hex: ps.payout_redeem_hex, payout_ps_outpoint: ps.payout_ps_outpoint, payout_cov_id: ps.payout_cov_id },
         relayAddr: relayAddrForConsolidate, transfer: transferFn, deadline: Number(market.deadline),
+        tokenized: true,   // 账本 1829 段1: zk_native(PayoutShardV2) 是 v0.3 代币化路径(bshard_consolidate_v2 新构造器); V1 committee 路径(consolidateAndBuildPsState)仍是旧 KAS 形, 本轮不做
         getUtxos: async (addr) => {
           const r = await sendCommandAsync(settlerRelayId, { type: 'get_address_utxos', address: addr }, 15000, 'internal');
           return r?.utxos || [];

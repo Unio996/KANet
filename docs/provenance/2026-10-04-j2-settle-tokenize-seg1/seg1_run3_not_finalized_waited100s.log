@@ -1,0 +1,26 @@
+[db] path=D:\kanet-tn12\scratch\_j2_tok_sim\console.simnet.db source=DB_PATH
+18:27:02 deadline passed; shards: [{"shard_index":0,"status":"sealed","current_leaf_state":"{\"local_yes\":1000000000,\"local_no\":2000000000,\"count\":2,\"pool_value\":3000000000}","current_token_outpoint":"bb1552286d6fdc88fa3dd10089b20d324a0e8fbb8e51f97bc8ae0792484ee3f6:2","leaf_cov_id":"447618b1989bdc585f6b1d419126cf002925133f94536b9fe58d339a9e9c4ab5"},{"shard_index":1,"status":"open","current_leaf_state":"{\"local_yes\":500000000,\"local_no\":0,\"count\":1,\"pool_value\":500000000}","current_token_outpoint":"d25012dd7d244e855c89581c4cb3b187de3afdad750061430b080bc46e4d3030:2","leaf_cov_id":"6a35171456198148af99845104642d5679c2c3d961893c9f4d8e6472c3cecb1a"}]
+[diag:step] proc.silverc.compile.bshard-artifacts ms=56 cmd=silverc ok=1 at=2026-10-03T18:27:02.285Z
+18:27:02 NEG N1_mint_one_extra: REJECTED ✓ {"status":200,"ok":true,"error":"RPC Server (remote error) -> Rejected transaction c93682ac883071f0c7029629f641458efb1800fa71abf99a1d10f74ebc007511: transaction input #0 is not finalized","phase":"execution"}
+18:27:02 NEG N2_wrong_owner: REJECTED ✓ {"status":200,"ok":true,"error":"RPC Server (remote error) -> Rejected transaction f7724a0b5d7a9dc17f231f2789dcf2d26c5c2b6cb9946d120426bc7523b8cdc0: transaction input #0 is not finalized","phase":"execution"}
+18:27:02 shard0 leaf UTXO still present after negatives: true [ 'bb1552286d' ]
+18:27:03 P1 (crash after shard0): {"status":200,"ok":true,"error":"RPC Server (remote error) -> Rejected transaction 65b700ae8be0e2a66bbd18c4f492a36a25fd3b35a22013f06083b2a3b3fd7236: transaction input #0 is not finalized","phase":"execution"}
+18:27:03 DB payout_ps_outpoint still genesis (stale)? true
+file:///D:/kanet-tn12/scratch/_j2_wt_tokenize/docs/provenance/2026-10-04-j2-settle-tokenize-seg1/seg1_consolidate.mjs:24
+const rcRaw = async (cmd) => { const j = await http('POST', `/api/relay/${settler.id}/send-command`, cmd); if (j.ok === false || j.error) { const e = new Error(JSON.stringify(j).slice(0, 700)); e.raw = j; throw e; } return j; };
+                                                                                                                                                      ^
+
+Error: {"status":200,"ok":true,"error":"RPC Server (remote error) -> Rejected transaction b1e8d79df6df771af7474e3cf08334f3857113b884b9b39089930d47a12fc61d: transaction input #0 is not finalized","phase":"execution"}
+    at rcRaw (file:///D:/kanet-tn12/scratch/_j2_wt_tokenize/docs/provenance/2026-10-04-j2-settle-tokenize-seg1/seg1_consolidate.mjs:24:151)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async consolidateAllShards (file:///D:/kanet-tn12/scratch/_j2_wt_tokenize/kasia-console/src/lib/pool-shard-settle.mjs:463:12)
+    at async file:///D:/kanet-tn12/scratch/_j2_wt_tokenize/docs/provenance/2026-10-04-j2-settle-tokenize-seg1/seg1_consolidate.mjs:70:13 {
+  raw: {
+    status: 200,
+    ok: true,
+    error: 'RPC Server (remote error) -> Rejected transaction b1e8d79df6df771af7474e3cf08334f3857113b884b9b39089930d47a12fc61d: transaction input #0 is not finalized',
+    phase: 'execution'
+  }
+}
+
+Node.js v24.14.1

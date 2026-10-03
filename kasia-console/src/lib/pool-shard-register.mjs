@@ -19,6 +19,7 @@
 //   via the bettor→gateway transfer the caller performs before invoking (custody-bound, like publish). mainnet: bettor-direct
 //   funding input is a follow-up (TODO custody-hardening).
 
+import { cachedFileSha256 } from './pool-bshard-artifacts.mjs';
 import { compileSil, ctorInt, compileSilV100, ctorBytes32V100, ctorIntV100, computeKttTokenArtifact, computePoolSideTicketArtifact } from './pool-bshard-artifacts.mjs';
 import { extractTemplateArtifact } from './pool-template-artifact.mjs';
 import { buildRegisterWitness, buildRegisterCommand } from './pool-register-builder.mjs';
@@ -102,7 +103,7 @@ const W17 = () => Array.from({ length: 17 }, () => ctorInt(0));
 const W17V100 = () => Array.from({ length: 17 }, () => ctorIntV100(0));   // D-019: v100 ctor 方言专用, 见 ctorBytes32V100/ctorIntV100 注释
 const MIN_BET = 100000;                                   // dust-ticket floor (sompi); matches (d)/helper
 const TICKET_DUST = 20_000_000;                           // 0.2 KAS PoolSide dust ticket (KIP-9 safe, matches helper)
-const PS_SEED = 20_000_000;                               // PayoutShard genesis seed (0.2 KAS sink, matches (d))
+export const PS_SEED = 20_000_000;                               // PayoutShard genesis seed (0.2 KAS sink, matches (d))
 const SHARD_GENESIS_SEED = 20_000_000;                    // A(b): 空 ShardLeaf genesis seed (0.2 KAS, KIP-9 safe). 首注 register_append
                                                           //   spend 它+fund stake → output weld out==pool_value(0)+stake 过, seed 退 change (不进池, pool_value 起点=0)。
 // 🔴 D-020 移植配套(2026-09-23·Owner批·NWT审): 首笔下注(shard.current_token_outpoint 为 null, 还没有任何
@@ -237,6 +238,28 @@ function _shardLeafRegisterAppendDispatchTag() {
   return tag;
 }
 
+// 账本 1829 段1: 结算侧 v1.0.0 dispatch_tag(合约结构性常量, 与 ctor 取值无关, 同上 _shardLeafRegisterAppendDispatchTag 的理由), 编译一次缓存。
+//   absorb 来自 PayoutShardV2.sil, consolidate_to_payout 来自 ShardLeaf.sil。
+let _settleDispatchTagsCache = null;
+export function settleDispatchTags() {
+  if (_settleDispatchTagsCache) return _settleDispatchTagsCache;
+  const leafCtor = _shardLeafCtor({
+    marketIdHash: z32, psTmplHashHex: z32, shardPoolId: z32, sealCount: 1, payoutCovId: z32, deadline: Math.floor(Date.now() / 1000),
+    tokenTmplHash: z32, localYes: 0, localNo: 0, count: 0, poolValue: 0, ownRedeemLen: 1,
+  });
+  const leaf = compileSilV100(join(LIB, 'ShardLeaf.sil'), leafCtor, 'ShardLeaf');
+  const psCtor = [
+    ctorBytes32V100(z32), ctorBytes32V100(z32), ctorBytes32V100(z32), ctorBytes32V100(z32), ctorIntV100(0), ctorIntV100(0), ctorBytes32V100(z32),
+    ...W17V100(), ctorIntV100(-1), ctorIntV100(0), ctorBytes32V100(z32), ctorBytes32V100(z32), ctorBytes32V100(z32), ctorIntV100(1),
+  ];
+  const ps = compileSilV100(join(LIB, 'PayoutShardV2.sil'), psCtor, 'PayoutShardV2');
+  const consolidate = leaf._raw.contracts.ShardLeaf.entries.consolidate_to_payout?.dispatch_tag;
+  const absorb = ps._raw.contracts.PayoutShardV2.entries.absorb?.dispatch_tag;
+  if (!consolidate || !absorb) throw new Error('settleDispatchTags: 编译产物缺 entries.consolidate_to_payout/absorb.dispatch_tag — schema 漂移?');
+  _settleDispatchTagsCache = { consolidate_to_payout: consolidate, absorb };
+  return _settleDispatchTagsCache;
+}
+
 export function compileShardLeafRedeem({ marketIdHash, psTmplHashHex, shardPoolId, sealCount, payoutCovId, deadline, localYes, localNo, count, poolValue, tokenTmplHash, ownRedeemLen }) {
   if (!/^[0-9a-fA-F]{64}$/.test(String(tokenTmplHash || ''))) throw new Error(`compileShardLeafRedeem: tokenTmplHash 必须是 32B hex，收到 ${JSON.stringify(tokenTmplHash)} — ctor-only 字面量，不接受占位符/缺省值`);
   if (!(Number.isInteger(ownRedeemLen) && ownRedeemLen > 0)) throw new Error(`compileShardLeafRedeem: ownRedeemLen 必须是正整数(读自 market_shards.shard_redeem_hex 字节长度, 或 genesis 时来自 convergeShardLeafOwnRedeemLen), 收到 ${JSON.stringify(ownRedeemLen)}`);
@@ -342,6 +365,37 @@ export function _sliceCloseZkTemplateSegments(fullBuf, templateSuffix, { betsRoo
   };
 }
 
+// 账本1832: CloseZkV2 的 dummy/真实 ctor 同形(30→含尾字段 own_redeem_len)。dummy 值只用于量长度/切模板: bets/refund 各 32B
+// 定宽, atMs 取 [2^40,2^47) 内同宽值——所以长度与真实市场恒等(整部署一个常数)。
+const _CLOSEZK_DUMMY = { bets: '11'.repeat(32), refund: '22'.repeat(32), atMs: 1783500000000 };
+function _closeZkDummyCtor({ gateTmplHash, tokenTmplHash, claimTmplHash, ownRedeemLen }) {
+  return [
+    ctorBytes32V100(gateTmplHash), ctorBytes32V100(_CLOSEZK_DUMMY.bets), ctorBytes32V100(_CLOSEZK_DUMMY.refund),
+    ctorIntV100(_CLOSEZK_DUMMY.atMs), ctorIntV100(0), ctorIntV100(1), ctorBytes32V100(z32), ctorIntV100(0),
+    ...W17V100(),
+    ctorBytes32V100(tokenTmplHash), ctorBytes32V100(claimTmplHash),
+    ctorIntV100(ownRedeemLen),
+  ];
+}
+const _closeZkOwnLenCache = new Map();
+/**
+ * 🔴 账本1832(Owner批, 账本1468/1469 同族修复): CloseZkV2 own_redeem_len 不动点收敛(同 convergeShardLeafOwnRedeemLen /
+ * convergePayoutShardV2OwnRedeemLen)。结果对整个部署恒定(取决于 sil 源 + gate/token/claim 三个 hash 之外无其它输入),
+ * 内存缓存。computeCloseZkTmplAnchor 与 compileCloseZkV2Redeem 必须用同一个值(模板里内联了它)。
+ */
+export function convergeCloseZkV2OwnRedeemLen(closeZkSilPath, gateTmplHash, tokenTmplHash, claimTmplHash, v100Path, { initialGuess = 4400, maxRounds = 6 } = {}) {
+  const key = [cachedFileSha256(closeZkSilPath), gateTmplHash, tokenTmplHash, claimTmplHash, v100Path || ''].join(':');
+  if (_closeZkOwnLenCache.has(key)) return _closeZkOwnLenCache.get(key);
+  let guess = initialGuess;
+  for (let round = 1; round <= maxRounds; round++) {
+    const compiled = compileSilV100(closeZkSilPath, _closeZkDummyCtor({ gateTmplHash, tokenTmplHash, claimTmplHash, ownRedeemLen: guess }), 'CloseZkV2', v100Path);
+    const actualLen = Buffer.from(compiled.script).length;
+    if (actualLen === guess) { _closeZkOwnLenCache.set(key, guess); return guess; }
+    guess = actualLen;
+  }
+  throw new Error(`convergeCloseZkV2OwnRedeemLen: own_redeem_len 不动点收敛失败(超过 ${maxRounds} 轮仍未稳定, 最后一次猜测=${guess})`);
+}
+
 /**
  * 计算 PayoutShardV2 ctor 需要的 closeZkTmplAnchor = blake2b(4 段固定模板拼接)。CloseZkV2.sil 零改动，
  * 编译一次(dummy ctor，模板跟 betsRoot/refundRoot/attestedWinner/consolidated_pool 具体值无关，只有
@@ -374,7 +428,7 @@ export function computeCloseZkTmplAnchor(closeZkSilPath, gateTmplHash, tokenTmpl
   }
   // dummyAtMs 必须落在 J2 实测的稳定值域 [2^40, 2^47) 内(同 PayoutShardV2.sil zk_handoff 的 bounds guard)，
   // 否则 minimal-push 变长编码会让模板切分点跟真实 market 用的值对不上。用一个具体真实量级(非边界值)。
-  const dummyAtMs = 1783500000000;
+  const dummyAtMs = _CLOSEZK_DUMMY.atMs;
   // ⚠ NWT 核实确认(2026-07-07): init_attestedWinner/init_closed/init_consolidated_pool 这三个值(下面写
   // 0/1/0)可以随便填、不影响算出的 anchor —— 它们全部落在 CloseZkV2 自己的 state_layout 区域内，
   // extractTemplateArtifact 会把整个 state 区域从 templateSuffix 里切掉(不进最终 hash)。之所以这里仍写
@@ -382,13 +436,9 @@ export function computeCloseZkTmplAnchor(closeZkSilPath, gateTmplHash, tokenTmpl
   // 🔴 distinct non-zero dummy markers (fix): z32 用于两个 dummy 槽会跟 ctor 里其它全零字段(init_payoutRoot
   // 等)碰撞, live findUnique 的"精确出现 1 次"断言会 fail-loud 拦下——这正是硬门该做的事(NWT 测试中用的
   // 0x2222.../0x3333... 同款手法, 避免任何看似合理的占位值意外撞见).
-  const dummyBetsRoot = '11'.repeat(32), dummyRefundRoot = '22'.repeat(32);
-  const ctor = [
-    ctorBytes32V100(gateTmplHash), ctorBytes32V100(dummyBetsRoot), ctorBytes32V100(dummyRefundRoot),
-    ctorIntV100(dummyAtMs), ctorIntV100(0), ctorIntV100(1), ctorBytes32V100(z32), ctorIntV100(0),
-    ...W17V100(),
-    ctorBytes32V100(tokenTmplHash), ctorBytes32V100(claimTmplHash),
-  ];
+  const dummyBetsRoot = _CLOSEZK_DUMMY.bets, dummyRefundRoot = _CLOSEZK_DUMMY.refund;
+  const closeZkOwnRedeemLen = convergeCloseZkV2OwnRedeemLen(closeZkSilPath, gateTmplHash, tokenTmplHash, claimTmplHash, v100Path);
+  const ctor = _closeZkDummyCtor({ gateTmplHash, tokenTmplHash, claimTmplHash, ownRedeemLen: closeZkOwnRedeemLen });
   const compiled = compileSilV100(closeZkSilPath, ctor, 'CloseZkV2', v100Path);
   const { templatePrefix, templateSuffix } = extractTemplateArtifact(compiled); // prefix=script[0:1], suffix=script[214:end]
   const fullBuf = Buffer.from(compiled.script);
@@ -426,6 +476,7 @@ export function computeCloseZkTmplAnchor(closeZkSilPath, gateTmplHash, tokenTmpl
     // betsRootBaked/refundRootBaked/attestedAtMs 进这 4 段固定模板之间, 补充导出(纯加字段, 唯一既有
     // 调用点 pool.js:1267 只解构 .anchorHex, 不受影响)。
     templateA, templateB, templateC, templateD,
+    closeZkOwnRedeemLen,   // 账本1832: 模板内联了它; compileCloseZkV2Redeem 须传同值
   };
 }
 
@@ -448,11 +499,8 @@ export function computeCloseZkTmplAnchor(closeZkSilPath, gateTmplHash, tokenTmpl
  * @param {object} o { poolMerkleRoot(hex), predicateCommit(hex), closeZkTmplAnchor(hex), consolidatedPool(int),
  *   tokenTmplHash(hex), claimTmplHash(hex) }
  */
-export function compilePayoutShardV2Redeem({ poolMerkleRoot, predicateCommit, closeZkTmplAnchor, consolidatedPool, tokenTmplHash, claimTmplHash }) {
-  for (const [label, v] of [['tokenTmplHash', tokenTmplHash], ['claimTmplHash', claimTmplHash]]) {
-    if (!/^[0-9a-fA-F]{64}$/.test(String(v || ''))) throw new Error(`compilePayoutShardV2Redeem: ${label} 必须是 32B hex，收到 ${JSON.stringify(v)} — ctor-only 字面量，不接受占位符/缺省值`);
-  }
-  const ctor = [
+function _payoutShardV2Ctor({ poolMerkleRoot, predicateCommit, closeZkTmplAnchor, consolidatedPool, tokenTmplHash, claimTmplHash, ownRedeemLen }) {
+  return [
     ctorBytes32V100(poolMerkleRoot), ctorBytes32V100(predicateCommit), ctorBytes32V100(closeZkTmplAnchor),
     ctorBytes32V100(tokenTmplHash),
     ctorIntV100(Number(consolidatedPool)), ctorIntV100(0), ctorBytes32V100(z32),
@@ -462,8 +510,42 @@ export function compilePayoutShardV2Redeem({ poolMerkleRoot, predicateCommit, cl
     ctorBytes32V100(z32),   // init_betsRootBaked: ZERO32=待attest
     ctorBytes32V100(z32),   // init_refundRootBaked: ZERO32=待attest
     ctorBytes32V100(claimTmplHash),
+    ctorIntV100(ownRedeemLen),   // 账本1832: own_redeem_len(ctor 尾字段, 30 参数)
   ];
-  return Buffer.from(compileSilV100(join(LIB, 'PayoutShardV2.sil'), ctor, 'PayoutShardV2').script).toString('hex');
+}
+
+/**
+ * 🔴 账本1832(Owner批, 账本1468/1469 同族修复): PayoutShardV2 的 own_redeem_len 不动点收敛(同
+ * convergeShardLeafOwnRedeemLen)。own_redeem_len 自身的 minimal-push 宽度会影响编译产物长度, 猜一次编一次直到
+ * 编译长度==猜测值。PS 的 state 区固定宽度(288B, 不随 consolidated_pool 等取值变), 所以只受 ctor 常量区
+ * (含 own_redeem_len 自己)宽度影响, 通常 1~2 轮即收敛。
+ */
+export function convergePayoutShardV2OwnRedeemLen({ poolMerkleRoot, predicateCommit, closeZkTmplAnchor, consolidatedPool = 0, tokenTmplHash, claimTmplHash, initialGuess = 29300, maxRounds = 6 }) {
+  let guess = initialGuess;
+  for (let round = 1; round <= maxRounds; round++) {
+    const compiled = compileSilV100(join(LIB, 'PayoutShardV2.sil'), _payoutShardV2Ctor({ poolMerkleRoot, predicateCommit, closeZkTmplAnchor, consolidatedPool, tokenTmplHash, claimTmplHash, ownRedeemLen: guess }), 'PayoutShardV2');
+    const actualLen = Buffer.from(compiled.script).length;
+    if (actualLen === guess) return { ownRedeemLen: guess, script: compiled.script };
+    guess = actualLen;
+  }
+  throw new Error(`convergePayoutShardV2OwnRedeemLen: own_redeem_len 不动点收敛失败(超过 ${maxRounds} 轮仍未稳定, 最后一次猜测=${guess})——拒绝, 不建出永远无法 absorb 的市场`);
+}
+
+/**
+ * 🔴 账本1832: ownRedeemLen 可选——不传 = 现场不动点收敛(genesis/测试); 传了 = fail-closed 校验编译长度==传入值
+ * (重建已存 PS redeem 时传 Buffer.from(payout_redeem_hex,'hex').length, 不一致即拒绝)。
+ */
+export function compilePayoutShardV2Redeem({ poolMerkleRoot, predicateCommit, closeZkTmplAnchor, consolidatedPool, tokenTmplHash, claimTmplHash, ownRedeemLen }) {
+  for (const [label, v] of [['tokenTmplHash', tokenTmplHash], ['claimTmplHash', claimTmplHash]]) {
+    if (!/^[0-9a-fA-F]{64}$/.test(String(v || ''))) throw new Error(`compilePayoutShardV2Redeem: ${label} 必须是 32B hex，收到 ${JSON.stringify(v)} — ctor-only 字面量，不接受占位符/缺省值`);
+  }
+  if (ownRedeemLen === undefined || ownRedeemLen === null) {
+    return Buffer.from(convergePayoutShardV2OwnRedeemLen({ poolMerkleRoot, predicateCommit, closeZkTmplAnchor, consolidatedPool, tokenTmplHash, claimTmplHash }).script).toString('hex');
+  }
+  if (!(Number.isInteger(ownRedeemLen) && ownRedeemLen > 0)) throw new Error(`compilePayoutShardV2Redeem: ownRedeemLen 必须是正整数, 收到 ${JSON.stringify(ownRedeemLen)}`);
+  const script = Buffer.from(compileSilV100(join(LIB, 'PayoutShardV2.sil'), _payoutShardV2Ctor({ poolMerkleRoot, predicateCommit, closeZkTmplAnchor, consolidatedPool, tokenTmplHash, claimTmplHash, ownRedeemLen }), 'PayoutShardV2').script);
+  if (script.length !== ownRedeemLen) throw new Error(`compilePayoutShardV2Redeem: fail-closed — 编译出的长度 ${script.length} != 传入的 ownRedeemLen ${ownRedeemLen}`);
+  return script.toString('hex');
 }
 
 /**
@@ -481,7 +563,9 @@ export async function ensurePayoutShardV2({ db, rc, transfer, landed, p2sh, logi
   // D-019 迁移(ledger 1216-1221): PayoutShardV2.sil 当前 ctor 实读 30 参数(T3 代币化新增 token_tmpl_hash/
   // claim_tmpl_hash/market_suffix_hash 三个尾部字段), 调用方必须显式提供真实值——不接受占位符(见
   // compilePayoutShardV2Redeem 内部的 hex 格式 fail-loud 校验)。
-  const redeem = compilePayoutShardV2Redeem({ poolMerkleRoot, predicateCommit, closeZkTmplAnchor, consolidatedPool: PS_SEED, tokenTmplHash, claimTmplHash, marketSuffixHash });
+  // 🔴 账本 1829 段1(v0.3 代币化): consolidated_pool 是【代币记账数】不是 KAS 面值。PayoutShardV2.absorb 要求 scanOwnedTokenInputs(PS 名下代币)==consolidated_pool,
+  //   创世时 PS 名下没有任何代币 ⇒ 初值必须是 0(旧值 PS_SEED=20,000,000 会让第一次 absorb 100% 必败)。PS_SEED 现在只是 PS UTXO 的 KAS dust 面值(seedSompi), 与 state 无关。
+  const redeem = compilePayoutShardV2Redeem({ poolMerkleRoot, predicateCommit, closeZkTmplAnchor, consolidatedPool: 0, tokenTmplHash, claimTmplHash, marketSuffixHash });
   const fundTx = await transfer(relayAddr, PS_SEED + 100_000_000);
   const gj = await rc({ type: 'bshard_genesis_mint_payout', payoutshard: { redeem_hex: redeem, seedSompi: String(PS_SEED) }, inputs: { funding: { address: relayAddr, outpointTxid: fundTx, index: 0 } }, outputs: { change_address: relayAddr } });
   const payoutCovId = gj.payoutCovId, psTx = gj.txId || gj.txid, psAddr = p2sh(redeem);
