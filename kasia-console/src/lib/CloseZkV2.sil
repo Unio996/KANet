@@ -28,7 +28,12 @@ contract CloseZkV2(
     // 🔴 v0.3 方案C 同病同治(账本 1408/1409/1415, f7342a32): market_suffix_hash 一并删——纯透传镜像
     // KanetTokenClaim 已删除的同名字段, 不参与本文件任何 require, 删除不改变任何检查逻辑。
     byte[32] token_tmpl_hash,
-    byte[32] claim_tmpl_hash
+    byte[32] claim_tmpl_hash,
+    // 🔴 账本1832(Owner批, 账本1468/1469 同族修复): 裸编译 redeem 脚本自身字节长度, 供 escape_claim/claim partial
+    //   分支的 V-T-8 自续约在 sigScript(= action 见证 ++ push(redeem))里定位 redeem 起点。ctor-baked 尾字段(不进
+    //   state; state 区仍 offset 1/213B)。CloseZkV2 长度对所有市场恒定(state 定宽、bets/refund 各 32B、atMs 6B 定宽),
+    //   故为单一部署常量, 由 JS 侧不动点收敛烤入(同 ShardLeaf.sil/PayoutShardV2.sil own_redeem_len)。
+    int      own_redeem_len
 ) {
     int attestedWinner = init_attestedWinner;
     int closed = init_closed;
@@ -250,8 +255,10 @@ contract CloseZkV2(
                                   + byte[](8 as byte[1]) + byte[](nw16 as byte[8]);
             byte[] escOwnSig = tx.inputs[this.activeInputIndex].sigScript;
             int escOwnLen = escOwnSig.length;
-            byte[] escOwnPrefix = escOwnSig.slice(0, OWN_PREFIX_LEN);
-            byte[] escOwnSuffix = escOwnSig.slice(OWN_PREFIX_LEN + OWN_STATE_LEN, escOwnLen);
+            // 🔴 账本1832: redeem 起点 = escOwnLen - own_redeem_len(不是字节 0; sigScript = 见证 ++ push(redeem))。
+            int escOwnRedeemStart = escOwnLen - own_redeem_len;
+            byte[] escOwnPrefix = escOwnSig.slice(escOwnRedeemStart, escOwnRedeemStart + OWN_PREFIX_LEN);
+            byte[] escOwnSuffix = escOwnSig.slice(escOwnRedeemStart + OWN_PREFIX_LEN + OWN_STATE_LEN, escOwnLen);
             byte[32] escExpectedHash = blake2b(escOwnPrefix + escStateBytes + escOwnSuffix);
             byte[37] escExpectedSpk = new ScriptPubKeyP2SH(escExpectedHash);
             require(tx.outputs[selfOutIdx].scriptPubKey == byte[](escExpectedSpk));
@@ -383,8 +390,10 @@ contract CloseZkV2(
                                   + byte[](8 as byte[1]) + byte[](nw16 as byte[8]);
             byte[] clmOwnSig = tx.inputs[this.activeInputIndex].sigScript;
             int clmOwnLen = clmOwnSig.length;
-            byte[] clmOwnPrefix = clmOwnSig.slice(0, OWN_PREFIX_LEN);
-            byte[] clmOwnSuffix = clmOwnSig.slice(OWN_PREFIX_LEN + OWN_STATE_LEN, clmOwnLen);
+            // 🔴 账本1832: 同 escape_claim——redeem 起点 = clmOwnLen - own_redeem_len。
+            int clmOwnRedeemStart = clmOwnLen - own_redeem_len;
+            byte[] clmOwnPrefix = clmOwnSig.slice(clmOwnRedeemStart, clmOwnRedeemStart + OWN_PREFIX_LEN);
+            byte[] clmOwnSuffix = clmOwnSig.slice(clmOwnRedeemStart + OWN_PREFIX_LEN + OWN_STATE_LEN, clmOwnLen);
             byte[32] clmExpectedHash = blake2b(clmOwnPrefix + clmStateBytes + clmOwnSuffix);
             byte[37] clmExpectedSpk = new ScriptPubKeyP2SH(clmExpectedHash);
             require(tx.outputs[selfOutIdx].scriptPubKey == byte[](clmExpectedSpk));

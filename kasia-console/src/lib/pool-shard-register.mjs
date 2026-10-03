@@ -19,6 +19,7 @@
 //   via the bettor→gateway transfer the caller performs before invoking (custody-bound, like publish). mainnet: bettor-direct
 //   funding input is a follow-up (TODO custody-hardening).
 
+import { cachedFileSha256 } from './pool-bshard-artifacts.mjs';
 import { compileSil, ctorInt, compileSilV100, ctorBytes32V100, ctorIntV100, computeKttTokenArtifact, computePoolSideTicketArtifact } from './pool-bshard-artifacts.mjs';
 import { extractTemplateArtifact } from './pool-template-artifact.mjs';
 import { buildRegisterWitness, buildRegisterCommand } from './pool-register-builder.mjs';
@@ -364,6 +365,37 @@ export function _sliceCloseZkTemplateSegments(fullBuf, templateSuffix, { betsRoo
   };
 }
 
+// 账本1832: CloseZkV2 的 dummy/真实 ctor 同形(30→含尾字段 own_redeem_len)。dummy 值只用于量长度/切模板: bets/refund 各 32B
+// 定宽, atMs 取 [2^40,2^47) 内同宽值——所以长度与真实市场恒等(整部署一个常数)。
+const _CLOSEZK_DUMMY = { bets: '11'.repeat(32), refund: '22'.repeat(32), atMs: 1783500000000 };
+function _closeZkDummyCtor({ gateTmplHash, tokenTmplHash, claimTmplHash, ownRedeemLen }) {
+  return [
+    ctorBytes32V100(gateTmplHash), ctorBytes32V100(_CLOSEZK_DUMMY.bets), ctorBytes32V100(_CLOSEZK_DUMMY.refund),
+    ctorIntV100(_CLOSEZK_DUMMY.atMs), ctorIntV100(0), ctorIntV100(1), ctorBytes32V100(z32), ctorIntV100(0),
+    ...W17V100(),
+    ctorBytes32V100(tokenTmplHash), ctorBytes32V100(claimTmplHash),
+    ctorIntV100(ownRedeemLen),
+  ];
+}
+const _closeZkOwnLenCache = new Map();
+/**
+ * 🔴 账本1832(Owner批, 账本1468/1469 同族修复): CloseZkV2 own_redeem_len 不动点收敛(同 convergeShardLeafOwnRedeemLen /
+ * convergePayoutShardV2OwnRedeemLen)。结果对整个部署恒定(取决于 sil 源 + gate/token/claim 三个 hash 之外无其它输入),
+ * 内存缓存。computeCloseZkTmplAnchor 与 compileCloseZkV2Redeem 必须用同一个值(模板里内联了它)。
+ */
+export function convergeCloseZkV2OwnRedeemLen(closeZkSilPath, gateTmplHash, tokenTmplHash, claimTmplHash, v100Path, { initialGuess = 4400, maxRounds = 6 } = {}) {
+  const key = [cachedFileSha256(closeZkSilPath), gateTmplHash, tokenTmplHash, claimTmplHash, v100Path || ''].join(':');
+  if (_closeZkOwnLenCache.has(key)) return _closeZkOwnLenCache.get(key);
+  let guess = initialGuess;
+  for (let round = 1; round <= maxRounds; round++) {
+    const compiled = compileSilV100(closeZkSilPath, _closeZkDummyCtor({ gateTmplHash, tokenTmplHash, claimTmplHash, ownRedeemLen: guess }), 'CloseZkV2', v100Path);
+    const actualLen = Buffer.from(compiled.script).length;
+    if (actualLen === guess) { _closeZkOwnLenCache.set(key, guess); return guess; }
+    guess = actualLen;
+  }
+  throw new Error(`convergeCloseZkV2OwnRedeemLen: own_redeem_len 不动点收敛失败(超过 ${maxRounds} 轮仍未稳定, 最后一次猜测=${guess})`);
+}
+
 /**
  * 计算 PayoutShardV2 ctor 需要的 closeZkTmplAnchor = blake2b(4 段固定模板拼接)。CloseZkV2.sil 零改动，
  * 编译一次(dummy ctor，模板跟 betsRoot/refundRoot/attestedWinner/consolidated_pool 具体值无关，只有
@@ -396,7 +428,7 @@ export function computeCloseZkTmplAnchor(closeZkSilPath, gateTmplHash, tokenTmpl
   }
   // dummyAtMs 必须落在 J2 实测的稳定值域 [2^40, 2^47) 内(同 PayoutShardV2.sil zk_handoff 的 bounds guard)，
   // 否则 minimal-push 变长编码会让模板切分点跟真实 market 用的值对不上。用一个具体真实量级(非边界值)。
-  const dummyAtMs = 1783500000000;
+  const dummyAtMs = _CLOSEZK_DUMMY.atMs;
   // ⚠ NWT 核实确认(2026-07-07): init_attestedWinner/init_closed/init_consolidated_pool 这三个值(下面写
   // 0/1/0)可以随便填、不影响算出的 anchor —— 它们全部落在 CloseZkV2 自己的 state_layout 区域内，
   // extractTemplateArtifact 会把整个 state 区域从 templateSuffix 里切掉(不进最终 hash)。之所以这里仍写
@@ -404,13 +436,9 @@ export function computeCloseZkTmplAnchor(closeZkSilPath, gateTmplHash, tokenTmpl
   // 🔴 distinct non-zero dummy markers (fix): z32 用于两个 dummy 槽会跟 ctor 里其它全零字段(init_payoutRoot
   // 等)碰撞, live findUnique 的"精确出现 1 次"断言会 fail-loud 拦下——这正是硬门该做的事(NWT 测试中用的
   // 0x2222.../0x3333... 同款手法, 避免任何看似合理的占位值意外撞见).
-  const dummyBetsRoot = '11'.repeat(32), dummyRefundRoot = '22'.repeat(32);
-  const ctor = [
-    ctorBytes32V100(gateTmplHash), ctorBytes32V100(dummyBetsRoot), ctorBytes32V100(dummyRefundRoot),
-    ctorIntV100(dummyAtMs), ctorIntV100(0), ctorIntV100(1), ctorBytes32V100(z32), ctorIntV100(0),
-    ...W17V100(),
-    ctorBytes32V100(tokenTmplHash), ctorBytes32V100(claimTmplHash),
-  ];
+  const dummyBetsRoot = _CLOSEZK_DUMMY.bets, dummyRefundRoot = _CLOSEZK_DUMMY.refund;
+  const closeZkOwnRedeemLen = convergeCloseZkV2OwnRedeemLen(closeZkSilPath, gateTmplHash, tokenTmplHash, claimTmplHash, v100Path);
+  const ctor = _closeZkDummyCtor({ gateTmplHash, tokenTmplHash, claimTmplHash, ownRedeemLen: closeZkOwnRedeemLen });
   const compiled = compileSilV100(closeZkSilPath, ctor, 'CloseZkV2', v100Path);
   const { templatePrefix, templateSuffix } = extractTemplateArtifact(compiled); // prefix=script[0:1], suffix=script[214:end]
   const fullBuf = Buffer.from(compiled.script);
@@ -448,6 +476,7 @@ export function computeCloseZkTmplAnchor(closeZkSilPath, gateTmplHash, tokenTmpl
     // betsRootBaked/refundRootBaked/attestedAtMs 进这 4 段固定模板之间, 补充导出(纯加字段, 唯一既有
     // 调用点 pool.js:1267 只解构 .anchorHex, 不受影响)。
     templateA, templateB, templateC, templateD,
+    closeZkOwnRedeemLen,   // 账本1832: 模板内联了它; compileCloseZkV2Redeem 须传同值
   };
 }
 

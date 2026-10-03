@@ -6,7 +6,7 @@
 
 import { sqlite } from '../db/client.js';
 import { compileSil, ctorBytes32, ctorInt, compileSilV100, ctorBytes32V100, ctorIntV100 } from './pool-bshard-artifacts.mjs';
-import { computeCloseZkTmplAnchor } from './pool-shard-register.mjs';
+import { computeCloseZkTmplAnchor, convergeCloseZkV2OwnRedeemLen } from './pool-shard-register.mjs';
 import { readPayoutShardV2AttestedState } from './bshard-close-enforce.mjs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -110,6 +110,7 @@ export function compileCloseZkV2Redeem({ gateTmplHash, betsRootBaked, refundRoot
   for (const [label, v] of [['tokenTmplHash', tokenTmplHash], ['claimTmplHash', claimTmplHash]]) {
     if (!/^[0-9a-fA-F]{64}$/.test(String(v || ''))) throw new Error(`compileCloseZkV2Redeem: ${label} 必须是 32B hex，收到 ${JSON.stringify(v)} — ctor-only 字面量，不接受占位符/缺省值`);
   }
+  const ownRedeemLen = convergeCloseZkV2OwnRedeemLen(CLOSEZK_V2_SIL, gateTmplHash, tokenTmplHash, claimTmplHash);
   const ctor = [
     ctorBytes32V100(gateTmplHash), ctorBytes32V100(betsRootBaked), ctorBytes32V100(refundRootBaked),
     ctorIntV100(Number(attestedAtMs)),      // §4 硬门②: 原值直接烤入, 调用方保证零转换
@@ -119,8 +120,11 @@ export function compileCloseZkV2Redeem({ gateTmplHash, betsRootBaked, refundRoot
     ctorIntV100(Number(consolidatedPool)),
     ...W17V100(),
     ctorBytes32V100(tokenTmplHash), ctorBytes32V100(claimTmplHash),
+    ctorIntV100(ownRedeemLen),   // 账本1832: own_redeem_len 尾字段(部署常量, 与 computeCloseZkTmplAnchor 同值)
   ];
-  return Buffer.from(compileSilV100(CLOSEZK_V2_SIL, ctor, 'CloseZkV2').script).toString('hex');
+  const script = Buffer.from(compileSilV100(CLOSEZK_V2_SIL, ctor, 'CloseZkV2').script);
+  if (script.length !== ownRedeemLen) throw new Error(`compileCloseZkV2Redeem: fail-closed — 编译出的长度 ${script.length} != own_redeem_len ${ownRedeemLen}`);
+  return script.toString('hex');
 }
 
 /**
