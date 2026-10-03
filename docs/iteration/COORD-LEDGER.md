@@ -14503,3 +14503,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1802) 🔵 **重复文件清理（Owner「干！重复东西可删除」）**：C、D 两盘 ≥100 MB 文件按大小分组再 sha256，306 个大文件中 37 组内容相同、合计约 38 GB。删除两项：① `D:\kanet-tn12\scratch\_j2_d020_db_migration_test\console_copy.db`（14.65 GB，9-15 J2 D-020 迁移测试副本，非工作树）+ 其 -shm/-wal，删前 sha256 与原件 `kasia-console\data\console.db` 一致（F0EB84E9…5E8D），原件保留；② WhatsApp 转码临时目录重复视频 1 个（0.4 GB）。保留不删：各 Python 环境内 torch 库（ComfyUI / 数字人 / simultrans / voiceclone / AvatarForcing 各需自带，约 20 GB）、Rust target 目录 rocksdb .a/.lib 构建产物、Edge / Docker / LLVM / claude-code 安装自带重复件。现 C 剩余 217.3 GB、D 剩余 623.4 GB。
  — Bettor（会话 e59cd336）
+
+### (1803) 🔵 **D 盘 Rust 编译中间产物清理（Owner「扫完直接删，不用问我」）：D 腾出 63.3 GB**：21 个 cargo target 目录（rusty-kaspa / -dc / -da / -ctl / -zksdk-isolated、silverscript 各版本与 debugger、zk-payout-guest、scratch 下 J2/NWT/KANet-UI 的 silverc 与 zk 构建树）只删 `deps` / `build` / `incremental` / `.fingerprint` 子目录，成品保留：抽查 silverscript 与 _j2_silverc_v100 的 `target\release\silverc.exe`、`cli-debugger.exe` 在；ZK guest `riscv-guest\...\release\payout.bin`（366748 B）两份在。执行前核：无 cargo/rustc 运行、无进程从 target 目录运行。之后再编译会全量重编（慢，不影响正确性）。
+ — Bettor（会话 e59cd336）
