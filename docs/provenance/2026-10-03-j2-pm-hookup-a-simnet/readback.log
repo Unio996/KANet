@@ -1,0 +1,22 @@
+e2e-v1committee-6939c98f645c | final leaf outpoint 9984e6a219a9f3604711d10347502823cdc5ea1844525e9b03f368896ff3a889:0 | not in mempool: RPC Server (remote error) -> Transaction 9984e6a219a9f3604711d10347502
+e2e-v2zk-9c52ed1953de | final leaf outpoint 251dc44aa6ed380d90fa0dd54e493eed38427d3553c45c71c638f27a8f0b6e35:0 | not in mempool: RPC Server (remote error) -> Transaction 251dc44aa6ed380d90fa0dd54e493
+[
+ {
+  "logical_market_id": "e2e-v1committee-6939c98f645c",
+  "covenant_family": "v1_committee",
+  "payout_ps_outpoint": "326461173d8cf611df7510c550b368a47c3dbf41c11bee4a0798f5c9525c7714:0",
+  "token_tmpl_hash": "225ebcdec51f5439326e6bc48e47c288ceacbd3bea07aea6771548eeed44d80e",
+  "claim_tmpl_hash": "395949e1b6079c79bc5c36565188fd67afca7b75fd37adf264bd44bdbefd21e1",
+  "market_suffix_hash": null
+ },
+ {
+  "logical_market_id": "e2e-v2zk-9c52ed1953de",
+  "covenant_family": "v2_zk",
+  "payout_ps_outpoint": "432056c4698850052591a1b5ecf6a7509f9b069360a8da2c530494ade9add89f:0",
+  "token_tmpl_hash": "225ebcdec51f5439326e6bc48e47c288ceacbd3bea07aea6771548eeed44d80e",
+  "claim_tmpl_hash": "395949e1b6079c79bc5c36565188fd67afca7b75fd37adf264bd44bdbefd21e1",
+  "market_suffix_hash": "0000000000000000000000000000000000000000000000000000000000000000"
+ }
+]
+daa 2161
+[{"market_id":"e2e-v1committee-6939c98f645c#0","direction":0,"stake_amount":10000000,"side_lock_tx":"4f3ba7f56b535b750323ef2baf057aa3370c673430456cbdf066a252c626b210"},{"market_id":"e2e-v1committee-6939c98f645c#0","direction":1,"stake_amount":1500000

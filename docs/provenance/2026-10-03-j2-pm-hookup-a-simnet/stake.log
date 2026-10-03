@@ -1,0 +1,26 @@
+[stake] legacy-compiled OracleStake_v1 p2sh = kaspasim:pr2h8lh6s74stvkcf625utf2p308lf6hvkj8n9a4eeqpgvr04kflg6pj3cmc0  redeemLen= 129
+[stake] fund tx (2 KAS -> stake p2sh) = 32190bc06433753f93457ac0f06b4079794d1c47d472d19d6bec00c892ad8857
+[stake] stake UTXO landed = true
+[stake] daa now = 2495n  lockUntilDaa = 2000
+[mass-floor:observe] site=unlockP2SH_SingleEntry compute=1755 storage=2 transient=1580 mass_ub=1755 minFee=175500 actualFee=100000 would_reject=true wasm=panic(undefined) source=7b1e18cc
+[unlockP2SH_SingleEntry invariant] Σin=200000000 Σout=199900000 fee=100000 (mass_ub=1755 minFee=175500 ⚠ would-reject(observe)), 1 outputs all >= dust
+[mass-floor:observe:auth] site=unlockP2SH_SingleEntry txid=d0d485537f6af30d16093b9b172db0c36aaacde2ab4352a7adfa647b63203cf1 source=reject authoritative_mass=null ub_ok=inconclusive mass_ub=1755 reason=reject text has no mass: RPC Server (remote error) -> Rejected transaction d0d485537f6af30d16093b9b172db0 inconclusive_total=1
+[stake] NEG lockTime=0 rejected as expected: RPC Server (remote error) -> Rejected transaction d0d485537f6af30d16093b9b172db0c36aaacde2ab4352a7adfa647b63203cf1: failed to verify the signature script: Unsat
+[mass-floor:observe] site=unlockP2SH_SingleEntry compute=1755 storage=2 transient=1580 mass_ub=1755 minFee=175500 actualFee=100000 would_reject=true wasm=panic(undefined) source=7b1e18cc
+[unlockP2SH_SingleEntry invariant] Σin=200000000 Σout=199900000 fee=100000 (mass_ub=1755 minFee=175500 ⚠ would-reject(observe)), 1 outputs all >= dust
+[mass-floor:observe:auth] site=unlockP2SH_SingleEntry txid=9320aa7bb7aed3c05a8e10fbf8180928009e9c24a8a3124f9df13e18cc70d9ec source=reject authoritative_mass=1755 mass_ub=1755 ub_ok=true minFee_auth=175500 actualFee=100000 local_minFee=175500 local_would_reject=true totals=ok:1/viol:0/inc:1/src:mempool=0,reject=1
+D:\kanet-tn12\scratch\_j2_wt_pm_a\kasia-relay\node_modules\kaspa-wasm\kaspa.js:15501
+    const ret = new Error(getStringFromWasm0(arg0, arg1));
+                ^
+
+Error: RPC Server (remote error) -> Rejected transaction 9320aa7bb7aed3c05a8e10fbf8180928009e9c24a8a3124f9df13e18cc70d9ec: transaction 9320aa7bb7aed3c05a8e10fbf8180928009e9c24a8a3124f9df13e18cc70d9ec is not standard: transaction has 100000 fees which is under the required amount of 175500 for compute mass 1755
+    at module.exports.__wbindgen_error_new (D:\kanet-tn12\scratch\_j2_wt_pm_a\kasia-relay\node_modules\kaspa-wasm\kaspa.js:15501:17)
+    at wasm://wasm/02cfe956:wasm-function[751]:0x332dc6
+    at wasm://wasm/02cfe956:wasm-function[3466]:0x673020
+    at wasm://wasm/02cfe956:wasm-function[9518]:0x8754d8
+    at wasm://wasm/02cfe956:wasm-function[9517]:0x8754ca
+    at __wbg_adapter_78 (D:\kanet-tn12\scratch\_j2_wt_pm_a\kasia-relay\node_modules\kaspa-wasm\kaspa.js:1453:10)
+    at real (D:\kanet-tn12\scratch\_j2_wt_pm_a\kasia-relay\node_modules\kaspa-wasm\kaspa.js:174:20)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+
+Node.js v24.14.1

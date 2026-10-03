@@ -72,6 +72,22 @@ console.log('[test] A1 路由: POST /api/pool/market/:id/bettor/register-v07 缺
   ok((src.match(/\.\.\._zkTmpl,|\.\.\.zkTmpl,/g) || []).length === 2, '两个 registerBettorOnShard 调用点都展开了三个模板值');
 }
 
+console.log('[test] A1 创世落库: ensurePayoutShard(V1)/ensurePayoutShardV2 把三值写入 payout_shards(zk_handoff 一致性门 / K-18 coherence 步骤(c) 的读取对象):');
+{
+  const { ensurePayoutShard, ensurePayoutShardV2 } = await import('../lib/pool-shard-register.mjs');
+  const { assertZkHandoffTmplCoherent } = await import('../lib/bshard-close-transport.mjs');
+  const T = { tokenTmplHash: H('a'), claimTmplHash: H('b'), marketSuffixHash: H('c') };
+  const stubs = { db: sqlite, rc: async () => ({ payoutCovId: H('7'), txId: H('8') }), transfer: async () => H('9'), landed: async () => true, p2sh: () => 'kaspa:stub', poolMerkleRoot: H('1'), predicateCommit: H('2'), relayAddr: 'kaspa:stub' };
+  await ensurePayoutShard({ ...stubs, logicalMarketId: 'mk-v1', ...T });
+  const r1 = sqlite.prepare('SELECT covenant_family, token_tmpl_hash, claim_tmpl_hash, market_suffix_hash FROM payout_shards WHERE logical_market_id = ?').get('mk-v1');
+  ok(r1.covenant_family === 'v1_committee' && r1.token_tmpl_hash === H('a') && r1.claim_tmpl_hash === H('b') && r1.market_suffix_hash === H('c'), 'V1: 三列都写入');
+  await ensurePayoutShardV2({ ...stubs, logicalMarketId: 'mk-v2', closeZkTmplAnchor: H('5'), ...T });
+  const r2 = sqlite.prepare('SELECT covenant_family, token_tmpl_hash, claim_tmpl_hash, market_suffix_hash FROM payout_shards WHERE logical_market_id = ?').get('mk-v2');
+  ok(r2.covenant_family === 'v2_zk' && r2.token_tmpl_hash === H('a') && r2.claim_tmpl_hash === H('b') && r2.market_suffix_hash === H('c'), 'V2: 三列都写入(此前 NULL)');
+  let thrown = null; try { assertZkHandoffTmplCoherent(r2, 'mk-v2', T); } catch (e) { thrown = e; }
+  ok(!thrown, 'V2 行经 assertZkHandoffTmplCoherent(与生产读取点同值)通过, 不再因 NULL 拒 handoff');
+}
+
 console.log('[test] A2 主网网络取值:');
 {
   ok(configuredNetwork() === 'mainnet', 'KASPA_NETWORK=mainnet ⇒ configuredNetwork()==="mainnet"');

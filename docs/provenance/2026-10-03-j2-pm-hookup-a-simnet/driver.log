@@ -1,0 +1,68 @@
+[driver] connected networkId=simnet
+[driver] relay addr = kaspasim:qpy3q7tqe87m6p6pp8ut0kmaghyjva6wj6rpxz8yzcfava78e933v5slek5kk
+[driver] mined 1 block to funder kaspasim:qpn7zmp0py3... waiting maturity
+[driver] fund attempt #20 (daa=1057): RPC Server (remote error) -> Rejected transaction 5be83da1a90df300229d41d0f289d9efca19d12fce9342d58651f29dd36ca254: one of the transaction inputs spends an imma
+[driver] fund attempt #40 (daa=1122): RPC Server (remote error) -> Rejected transaction 5be83da1a90df300229d41d0f289d9efca19d12fce9342d58651f29dd36ca254: one of the transaction inputs spends an imma
+[driver] fund attempt #60 (daa=1187): RPC Server (remote error) -> Rejected transaction 5be83da1a90df300229d41d0f289d9efca19d12fce9342d58651f29dd36ca254: one of the transaction inputs spends an imma
+[driver] fund attempt #80 (daa=1252): RPC Server (remote error) -> Rejected transaction 5be83da1a90df300229d41d0f289d9efca19d12fce9342d58651f29dd36ca254: one of the transaction inputs spends an imma
+[driver] fund attempt #100 (daa=1317): RPC Server (remote error) -> Rejected transaction 5be83da1a90df300229d41d0f289d9efca19d12fce9342d58651f29dd36ca254: one of the transaction inputs spends an imma
+[driver] fund attempt #120 (daa=1382): RPC Server (remote error) -> Rejected transaction 5be83da1a90df300229d41d0f289d9efca19d12fce9342d58651f29dd36ca254: one of the transaction inputs spends an imma
+[driver] fund attempt #140 (daa=1447): RPC Server (remote error) -> Rejected transaction 5be83da1a90df300229d41d0f289d9efca19d12fce9342d58651f29dd36ca254: one of the transaction inputs spends an imma
+[driver] fund attempt #160 (daa=1513): RPC Server (remote error) -> Rejected transaction 5be83da1a90df300229d41d0f289d9efca19d12fce9342d58651f29dd36ca254: one of the transaction inputs spends an imma
+[driver] fund attempt #180 (daa=1578): RPC Server (remote error) -> Rejected transaction 5be83da1a90df300229d41d0f289d9efca19d12fce9342d58651f29dd36ca254: one of the transaction inputs spends an imma
+[driver] fund attempt #200 (daa=1643): RPC Server (remote error) -> Rejected transaction 5be83da1a90df300229d41d0f289d9efca19d12fce9342d58651f29dd36ca254: one of the transaction inputs spends an imma
+[driver] fund attempt #220 (daa=1707): RPC Server (remote error) -> Rejected transaction 5be83da1a90df300229d41d0f289d9efca19d12fce9342d58651f29dd36ca254: one of the transaction inputs spends an imma
+[driver] fund attempt #240 (daa=1772): RPC Server (remote error) -> Rejected transaction 5be83da1a90df300229d41d0f289d9efca19d12fce9342d58651f29dd36ca254: one of the transaction inputs spends an imma
+[driver] fund attempt #260 (daa=1836): RPC Server (remote error) -> Rejected transaction 5be83da1a90df300229d41d0f289d9efca19d12fce9342d58651f29dd36ca254: one of the transaction inputs spends an imma
+[driver] fund attempt #280 (daa=1901): RPC Server (remote error) -> Rejected transaction 5be83da1a90df300229d41d0f289d9efca19d12fce9342d58651f29dd36ca254: one of the transaction inputs spends an imma
+[driver] fund attempt #300 (daa=1965): RPC Server (remote error) -> Rejected transaction 5be83da1a90df300229d41d0f289d9efca19d12fce9342d58651f29dd36ca254: one of the transaction inputs spends an imma
+[driver] funding tx = 5be83da1a90df300229d41d0f289d9efca19d12fce9342d58651f29dd36ca254
+[driver] relay balance = 30 KAS
+[driver] tmpl from production reader: {"ok":true,"tokenTmplHash":"225ebcdec51f5439326e6bc48e47c288ceacbd3bea07aea6771548eeed44d80e","claimTmplHash":"395949e1b6079c79bc5c36565188fd67afca7b75fd37adf264bd44bdbefd21e1","marketSuffixHash":"0000000000000000000000000000000000000000000000000000000000000000"}
+
+=== [v1committee] BET 1 (建盘后首注: PayoutShard 创世 + ShardLeaf 创世 + 首笔 register_append) ===
+[mass-floor:observe] site=unlockBshardGenesisMintPayout compute=8083 storage=201768 transient=1412 mass_ub=201768 minFee=20176800 actualFee=1000000 would_reject=true wasm=panic(undefined) source=7b1e18cc
+[unlockBshardGenesisMintPayout invariant] Σin=120000000 Σout=119000000 fee=1000000 (mass_ub=201768 minFee=20176800 ⚠ would-reject(observe)), 2 outputs all >= dust
+[mass-floor:observe] site=unlockBshardGenesisMintShardLeaf compute=8083 storage=201768 transient=1412 mass_ub=201768 minFee=20176800 actualFee=1000000 would_reject=true wasm=panic(undefined) source=7b1e18cc
+[unlockBshardGenesisMintShardLeaf invariant] Σin=120000000 Σout=119000000 fee=1000000 (mass_ub=201768 minFee=20176800 ⚠ would-reject(observe)), 2 outputs all >= dust
+[mass-floor:observe] site=unlockBshardGenesisMintStakeChip compute=8083 storage=201768 transient=1412 mass_ub=201768 minFee=20176800 actualFee=1000000 would_reject=true wasm=panic(undefined) source=7b1e18cc
+[unlockBshardGenesisMintStakeChip invariant] Σin=120000000 Σout=119000000 fee=1000000 (mass_ub=201768 minFee=20176800 ⚠ would-reject(observe)), 2 outputs all >= dust
+[mass-floor:observe] site=unlockBshardRegister compute=43690 storage=286814 transient=84880 mass_ub=286814 minFee=28681400 actualFee=15000000 would_reject=true wasm=panic(undefined) source=7b1e18cc
+[unlockBshardRegister invariant] Σin=140000000 Σout=125000000 fee=15000000 (mass_ub=286814 minFee=28681400 ⚠ would-reject(observe)), 4 outputs all >= dust
+[v1committee] bet1: {"action":"use","shardIndex":0,"shardMarketId":"e2e-v1committee-6939c98f645c#0","shardP2sh":"kaspasim:pqh3m95y788c8dhymq0hj5wtvnh0r8vy8ydh7r7evw627xrefs4lcv0th0ptz","leafTx":"4f3ba7f56b535b750323ef2baf057aa3370c673430456cbdf066a252c626b210","leafOutpoint":"4f3ba7f56b535b750323ef2baf057aa3370c673430456cbdf066a252c626b210:0","leafState":{"local_yes":10000000,"local_no":0,"count":1,"pool_value":10000000},"payoutCovId":"d8ba107cb5d1fb52cefb4fa696a142ed5ca6ed3363d8e83f6872c6e3c3c9e242"}
+
+=== [v1committee] BET 2 (第二注: 续笔 register_append) ===
+[mass-floor:observe] site=unlockBshardGenesisMintStakeChip compute=8083 storage=201768 transient=1412 mass_ub=201768 minFee=20176800 actualFee=1000000 would_reject=true wasm=panic(undefined) source=7b1e18cc
+[unlockBshardGenesisMintStakeChip invariant] Σin=120000000 Σout=119000000 fee=1000000 (mass_ub=201768 minFee=20176800 ⚠ would-reject(observe)), 2 outputs all >= dust
+[mass-floor:observe] site=unlockBshardRegister compute=53959 storage=59134 transient=97956 mass_ub=97956 minFee=9795600 actualFee=15000000 would_reject=false wasm=panic(undefined) source=7b1e18cc
+[unlockBshardRegister invariant] Σin=160000000 Σout=145000000 fee=15000000 (mass_ub=97956 minFee=9795600 ✓), 4 outputs all >= dust
+[v1committee] bet2: {"action":"use","shardIndex":0,"shardMarketId":"e2e-v1committee-6939c98f645c#0","shardP2sh":"kaspasim:pqh3m95y788c8dhymq0hj5wtvnh0r8vy8ydh7r7evw627xrefs4lcv0th0ptz","leafTx":"9984e6a219a9f3604711d10347502823cdc5ea1844525e9b03f368896ff3a889","leafOutpoint":"9984e6a219a9f3604711d10347502823cdc5ea1844525e9b03f368896ff3a889:0","leafState":{"local_yes":10000000,"local_no":15000000,"count":2,"pool_value":25000000},"payoutCovId":"d8ba107cb5d1fb52cefb4fa696a142ed5ca6ed3363d8e83f6872c6e3c3c9e242"}
+[v1committee] payout_shards row: {"covenant_family":"v1_committee","payout_ps_outpoint":"326461173d8cf611df7510c550b368a47c3dbf41c11bee4a0798f5c9525c7714:0","token_tmpl_hash":"225ebcdec51f5439326e6bc48e47c288ceacbd3bea07aea6771548eeed44d80e","claim_tmpl_hash":"395949e1b6079c79bc5c36565188fd67afca7b75fd37adf264bd44bdbefd21e1","market_suffix_hash":null,"payout_redeem_hex":"6b08002d31010000…(32697B)"}
+
+=== [v2zk] BET 1 (建盘后首注: PayoutShardV2 创世 + ShardLeaf 创世 + 首笔 register_append) ===
+[mass-floor:observe] site=unlockBshardGenesisMintPayout compute=8083 storage=201768 transient=1412 mass_ub=201768 minFee=20176800 actualFee=1000000 would_reject=true wasm=panic(undefined) source=7b1e18cc
+[unlockBshardGenesisMintPayout invariant] Σin=120000000 Σout=119000000 fee=1000000 (mass_ub=201768 minFee=20176800 ⚠ would-reject(observe)), 2 outputs all >= dust
+[mass-floor:observe] site=unlockBshardGenesisMintShardLeaf compute=8083 storage=201768 transient=1412 mass_ub=201768 minFee=20176800 actualFee=1000000 would_reject=true wasm=panic(undefined) source=7b1e18cc
+[unlockBshardGenesisMintShardLeaf invariant] Σin=120000000 Σout=119000000 fee=1000000 (mass_ub=201768 minFee=20176800 ⚠ would-reject(observe)), 2 outputs all >= dust
+[mass-floor:observe] site=unlockBshardGenesisMintStakeChip compute=8083 storage=201768 transient=1412 mass_ub=201768 minFee=20176800 actualFee=1000000 would_reject=true wasm=panic(undefined) source=7b1e18cc
+[unlockBshardGenesisMintStakeChip invariant] Σin=120000000 Σout=119000000 fee=1000000 (mass_ub=201768 minFee=20176800 ⚠ would-reject(observe)), 2 outputs all >= dust
+[mass-floor:observe] site=unlockBshardRegister compute=43690 storage=286814 transient=84880 mass_ub=286814 minFee=28681400 actualFee=15000000 would_reject=true wasm=panic(undefined) source=7b1e18cc
+[unlockBshardRegister invariant] Σin=140000000 Σout=125000000 fee=15000000 (mass_ub=286814 minFee=28681400 ⚠ would-reject(observe)), 4 outputs all >= dust
+[v2zk] bet1: {"action":"use","shardIndex":0,"shardMarketId":"e2e-v2zk-9c52ed1953de#0","shardP2sh":"kaspasim:pzhp54gvykl50j0c529pex44mcswj2ucvftmvq275kschppgncdpjma3zusz9","leafTx":"b0d6d38f9d0d9732c0089a5457278973805af3319787e9f875048e47d6df2cc1","leafOutpoint":"b0d6d38f9d0d9732c0089a5457278973805af3319787e9f875048e47d6df2cc1:0","leafState":{"local_yes":10000000,"local_no":0,"count":1,"pool_value":10000000},"payoutCovId":"735543880278e93d43582085c2a349fcfa4dbbb33564ed64139dc6d96c638ea4"}
+
+=== [v2zk] BET 2 (第二注: 续笔 register_append) ===
+[mass-floor:observe] site=unlockBshardGenesisMintStakeChip compute=8083 storage=201768 transient=1412 mass_ub=201768 minFee=20176800 actualFee=1000000 would_reject=true wasm=panic(undefined) source=7b1e18cc
+[unlockBshardGenesisMintStakeChip invariant] Σin=120000000 Σout=119000000 fee=1000000 (mass_ub=201768 minFee=20176800 ⚠ would-reject(observe)), 2 outputs all >= dust
+[mass-floor:observe] site=unlockBshardRegister compute=53959 storage=59134 transient=97956 mass_ub=97956 minFee=9795600 actualFee=15000000 would_reject=false wasm=panic(undefined) source=7b1e18cc
+[unlockBshardRegister invariant] Σin=160000000 Σout=145000000 fee=15000000 (mass_ub=97956 minFee=9795600 ✓), 4 outputs all >= dust
+[v2zk] bet2: {"action":"use","shardIndex":0,"shardMarketId":"e2e-v2zk-9c52ed1953de#0","shardP2sh":"kaspasim:pzhp54gvykl50j0c529pex44mcswj2ucvftmvq275kschppgncdpjma3zusz9","leafTx":"251dc44aa6ed380d90fa0dd54e493eed38427d3553c45c71c638f27a8f0b6e35","leafOutpoint":"251dc44aa6ed380d90fa0dd54e493eed38427d3553c45c71c638f27a8f0b6e35:0","leafState":{"local_yes":10000000,"local_no":15000000,"count":2,"pool_value":25000000},"payoutCovId":"735543880278e93d43582085c2a349fcfa4dbbb33564ed64139dc6d96c638ea4"}
+[v2zk] payout_shards row: {"covenant_family":"v2_zk","payout_ps_outpoint":"432056c4698850052591a1b5ecf6a7509f9b069360a8da2c530494ade9add89f:0","token_tmpl_hash":"225ebcdec51f5439326e6bc48e47c288ceacbd3bea07aea6771548eeed44d80e","claim_tmpl_hash":"395949e1b6079c79bc5c36565188fd67afca7b75fd37adf264bd44bdbefd21e1","market_suffix_hash":"0000000000000000000000000000000000000000000000000000000000000000","payout_redeem_hex":"6b08002d31010000…(29288B)"}
+[v2zk] assertZkHandoffTmplCoherent(payout_shards 行 vs 生产读取点 env 值) PASS — zk_handoff 的一致性门不会因 NULL 拒绝
+=== 节点读回 ===
+v1 bet1 leafTx 4f3ba7f56b535b750323ef2baf057aa3370c673430456cbdf066a252c626b210 | not-in-mempool(已出块或不存在): Kaspa RpcApi -> Error: missing field `transactionId`
+v1 bet2 leafTx 9984e6a219a9f3604711d10347502823cdc5ea1844525e9b03f368896ff3a889 | not-in-mempool(已出块或不存在): Kaspa RpcApi -> Error: missing field `transactionId`
+v2 bet1 leafTx b0d6d38f9d0d9732c0089a5457278973805af3319787e9f875048e47d6df2cc1 | not-in-mempool(已出块或不存在): Kaspa RpcApi -> Error: missing field `transactionId`
+v2 bet2 leafTx 251dc44aa6ed380d90fa0dd54e493eed38427d3553c45c71c638f27a8f0b6e35 | not-in-mempool(已出块或不存在): Kaspa RpcApi -> Error: missing field `transactionId`
+payout genesis txids: 326461173d8cf611df7510c550b368a47c3dbf41c11bee4a0798f5c9525c7714:0 432056c4698850052591a1b5ecf6a7509f9b069360a8da2c530494ade9add89f:0
+virtualDaaScore: 2035n networkId: simnet
+[driver] DONE
