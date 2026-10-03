@@ -77,6 +77,27 @@ const SILVERC_LEGACY = process.env.SILVERC_LEGACY_PATH || 'D:/silverscript/versi
 // 主网集 .sil 已结构性失效(解析都过不了), 不要想当然重新接上。
 const SILVERC_ZK = process.env.SILVERC_ZK_PATH || 'D:/silverscript/versioned-builds/silverc-zk-8065184.exe';
 const z32 = '00'.repeat(32);
+
+/**
+ * 三个 ZK/T3 代币化模板值(ZK_TOKEN_TMPL_HASH / ZK_CLAIM_TMPL_HASH / ZK_MARKET_SUFFIX_HASH)的【单一读取点】。
+ * 账本 1813 A1: 注册侧(api/pool.js 下注入口 → registerBettorOnShard)与结算侧(bshard-close-transport.mjs
+ * buildZkHandoffRequestV2)必须读同一份 env——此前注册侧根本没读, 每个市场首注创世都在 compilePayoutShardRedeem
+ * 抛"tokenTmplHash 必须是 32B hex"。不接受硬编码 fallback; 缺/格式坏返回 { ok:false, missing, malformed }, 由调用点决定怎么拒。
+ * @param {object} [env] 默认 process.env(注入便于单测)
+ * @returns {{ok:true, tokenTmplHash:string, claimTmplHash:string, marketSuffixHash:string} | {ok:false, missing:string[], malformed:string[]}}
+ */
+export const ZK_TEMPLATE_ENV_NAMES = Object.freeze({ tokenTmplHash: 'ZK_TOKEN_TMPL_HASH', claimTmplHash: 'ZK_CLAIM_TMPL_HASH', marketSuffixHash: 'ZK_MARKET_SUFFIX_HASH' });
+export function readZkTemplateHashes(env = process.env) {
+  const out = {}, missing = [], malformed = [];
+  for (const [field, name] of Object.entries(ZK_TEMPLATE_ENV_NAMES)) {
+    const v = env[name];
+    if (!v) { missing.push(name); continue; }
+    if (!/^[0-9a-fA-F]{64}$/.test(String(v))) { malformed.push(name); continue; }
+    out[field] = String(v).toLowerCase();
+  }
+  if (missing.length || malformed.length) return { ok: false, missing, malformed };
+  return { ok: true, ...out };
+}
 const W17 = () => Array.from({ length: 17 }, () => ctorInt(0));
 const W17V100 = () => Array.from({ length: 17 }, () => ctorIntV100(0));   // D-019: v100 ctor 方言专用, 见 ctorBytes32V100/ctorIntV100 注释
 const MIN_BET = 100000;                                   // dust-ticket floor (sompi); matches (d)/helper
@@ -467,8 +488,11 @@ export async function ensurePayoutShardV2({ db, rc, transfer, landed, p2sh, logi
 
   // K-18 §3.1(covenant_family 列, migrate v189, 落地取代了下面这条 2026-07-07 遗留注释描述的"无区分列"
   // 状态): 谁编译谁 declare — 这里走 compilePayoutShardV2Redeem(V2/ZK), 声明 'v2_zk'。
-  db.prepare(`INSERT INTO payout_shards (logical_market_id, payout_cov_id, payout_ps_addr, payout_ps_outpoint, payout_redeem_hex, pool_merkle_root, predicate_commit, created_at, covenant_family)
-    VALUES (?,?,?,?,?,?,?,?,?)`).run(logicalMarketId, payoutCovId, psAddr, `${psTx}:0`, redeem, poolMerkleRoot, predicateCommit, Math.floor(Date.now() / 1000), 'v2_zk');
+  // J2 2026-10-03(账本 1813 A1): 同时记下 genesis 时真实用过的三个模板值——zk_handoff 的
+  // assertZkHandoffTmplCoherent(bshard-close-transport.mjs)要拿这三列与 env 现值比对, 列为 NULL 一律拒绝 handoff。
+  // V2 ctor 吃 tokenTmplHash/claimTmplHash/marketSuffixHash 三个(compilePayoutShardV2Redeem), 谁编译谁 declare。
+  db.prepare(`INSERT INTO payout_shards (logical_market_id, payout_cov_id, payout_ps_addr, payout_ps_outpoint, payout_redeem_hex, pool_merkle_root, predicate_commit, created_at, covenant_family, token_tmpl_hash, claim_tmpl_hash, market_suffix_hash)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(logicalMarketId, payoutCovId, psAddr, `${psTx}:0`, redeem, poolMerkleRoot, predicateCommit, Math.floor(Date.now() / 1000), 'v2_zk', tokenTmplHash, claimTmplHash, marketSuffixHash);
   return { payoutCovId, psAddr, psOutpoint: `${psTx}:0`, psRedeemGenesis: redeem };
 }
 

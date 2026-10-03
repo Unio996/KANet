@@ -6,7 +6,7 @@
 
 import { sqlite } from '../db/client.js';
 import { persistPayoutShardState } from './payout-shard-persist.mjs';
-import { assertAddressOnNetwork } from './kaspa-network.mjs';   // (b) 网络单一源 (设计 v0.2 §3): 前缀只对照 env KASPA_NETWORK, 不从地址推网络
+import { assertAddressOnNetwork, configuredNetwork } from './kaspa-network.mjs';   // (b) 网络单一源 (设计 v0.2 §3): 前缀只对照 env KASPA_NETWORK, 不从地址推网络
 
 const QUORUM = 4;   // 4-of-5 committee (close_attest .sil require ≥4 distinct sig)
 
@@ -241,7 +241,7 @@ export async function buildProposeCloseRequestV2(marketId, judged) {
   {
     const { assertPayoutShardCoherence } = await import('./bshard-payout-family-coherence.mjs');
     const kaspaForGate = await import('kaspa-wasm');
-    const gateNetwork = process.env.KASPA_NETWORK === 'mainnet' ? 'mainnet' : 'testnet-12';
+    const gateNetwork = configuredNetwork();   // 账本 1813 A2: 网络单一源(原 mainnet 以外一律 testnet-12, simnet/devnet 验路会算出 kaspatest 地址致 K-18 门误 FAIL)
     const gateP2sh = (redeemHex) => kaspaForGate.addressFromScriptPublicKey(kaspaForGate.ScriptBuilder.fromScript(new Uint8Array(Buffer.from(redeemHex, 'hex'))).createPayToScriptHashScript(), gateNetwork).toString();
     const gateResult = assertPayoutShardCoherence(ps, { p2sh: gateP2sh, tier: 'full' });
     if (!gateResult.ok) {
@@ -534,7 +534,7 @@ export async function buildZkHandoffRequestV2(marketId, args) {
 
   const { sendCommandAsync } = await import('../services/relay-manager.js');
   const { readPayoutShardV2AttestedState } = await import('./bshard-close-enforce.mjs');
-  const { computeCloseZkTmplAnchor } = await import('./pool-shard-register.mjs');
+  const { computeCloseZkTmplAnchor, readZkTemplateHashes } = await import('./pool-shard-register.mjs');
 
   const market = sqlite.prepare('SELECT id FROM pool_markets WHERE id = ?').get(marketId);
   if (!market) throw new Error(`buildZkHandoffRequestV2: market ${marketId} not found`);
@@ -557,16 +557,16 @@ export async function buildZkHandoffRequestV2(marketId, args) {
   // D-019 迁移(ledger 1216-1222): T3 代币化给 CloseZkV2.sil 新增三个 ctor-only 字面量字段——跟
   // gateTmplHash/closeZkSilPath 同一条纪律(必须跟这个市场 genesis-mint 时烤入的同一份值, 不能另起一份,
   // 否则四段模板跟链上已烤的 anchor 对不上), 缺 env 直接 throw。
-  if (!process.env.ZK_TOKEN_TMPL_HASH) throw new Error('buildZkHandoffRequestV2: ZK_TOKEN_TMPL_HASH env 必需(T3 代币化新增, 不接受硬编码 fallback)');
-  if (!process.env.ZK_CLAIM_TMPL_HASH) throw new Error('buildZkHandoffRequestV2: ZK_CLAIM_TMPL_HASH env 必需(T3 代币化新增, 不接受硬编码 fallback)');
-  if (!process.env.ZK_MARKET_SUFFIX_HASH) throw new Error('buildZkHandoffRequestV2: ZK_MARKET_SUFFIX_HASH env 必需(T3 代币化新增, 不接受硬编码 fallback)');
-  // 值一致性硬门(ledger 1288，见 assertZkHandoffTmplCoherent 头注)——上面三行只查了"env 有没有设",
+  // 账本 1813 A1: 三值经 pool-shard-register.mjs readZkTemplateHashes 单一读取点(注册侧 api/pool.js 下注入口同源), 不另写一套。
+  const _tmpl = readZkTemplateHashes();
+  if (!_tmpl.ok) throw new Error(`buildZkHandoffRequestV2: ${[..._tmpl.missing, ..._tmpl.malformed].join('/')} env 缺失或不是 32B hex(T3 代币化新增, 不接受硬编码 fallback)`);
+  // 值一致性硬门(ledger 1288，见 assertZkHandoffTmplCoherent 头注)——上面只查了"env 有没有设",
   // 这里再查"env 现在的值是不是还是这个市场 genesis 时烤的那个值"，插在 computeCloseZkTmplAnchor 之前，
   // 任何转账/广播都还没发生。
   assertZkHandoffTmplCoherent(ps, marketId, {
-    tokenTmplHash: process.env.ZK_TOKEN_TMPL_HASH,
-    claimTmplHash: process.env.ZK_CLAIM_TMPL_HASH,
-    marketSuffixHash: process.env.ZK_MARKET_SUFFIX_HASH,
+    tokenTmplHash: _tmpl.tokenTmplHash,
+    claimTmplHash: _tmpl.claimTmplHash,
+    marketSuffixHash: _tmpl.marketSuffixHash,
   });
   // 根修(2026-07-09, NWT finding①(b)HIGH·docs/2026-07-09-NWT-redteam-gate-tmplhash-live-derive-66de59c6.md):
   // 这是 zk_handoff 铸 CloseZkV2 genesis 的实际调用点——pxvml 出生缺陷的历史事发路径原文("错值经 kanet.env
@@ -582,7 +582,7 @@ export async function buildZkHandoffRequestV2(marketId, args) {
   // ZK_MARKET_SUFFIX_HASH env 必需检查 + assertZkHandoffTmplCoherent 的 market_suffix_hash 一致性核对
   // 仍保留不动(那是"这个市场 genesis 时 declare 过的值跟当前 env 是否一致"的历史声明核验, 跟合约 ctor
   // 现在还要不要吃这个字段是两件事, 不因为合约不再吃它就不再核), 只是不再把它传进 ctor 编译。
-  const { templateA, templateB, templateC, templateD } = computeCloseZkTmplAnchor(closeZkSilPath, gateTmplHash, process.env.ZK_TOKEN_TMPL_HASH, process.env.ZK_CLAIM_TMPL_HASH);
+  const { templateA, templateB, templateC, templateD } = computeCloseZkTmplAnchor(closeZkSilPath, gateTmplHash, _tmpl.tokenTmplHash, _tmpl.claimTmplHash);
 
   const rc = (cmd, t = 90000) => sendCommandAsync(settlerRelayId, cmd, t, 'internal');
   const relayAddr = (await rc({ type: 'get_pubkey' })).address;

@@ -18,6 +18,7 @@ import { sqlite } from '../db/client.js';
 import { verifyIngestRequest } from '../services/ingest-auth.js';
 import { sendCommandAsync } from '../services/relay-manager.js';
 import { sendBroadcastChunked } from '../lib/pool-broadcast.mjs';
+import { configuredNetwork } from '../lib/kaspa-network.mjs';   // 账本 1813 A2: 网络单一源(原 configuredNetwork() 回退)
 
 // Path A enroll-via-broadcast (J2-tn r301 5-agent 共识): scanAndDerivePool 当前读
 // 本地 oracle_stake_enrollments 表 = 跨节点同 chain state 但表内容不同 → poolMerkleRoot 分歧.
@@ -208,7 +209,7 @@ export async function registerOraclePoolRoutes(fastify) {
     }
     const stakerPkX = b.staker_pk_x.toLowerCase();
     const source = b.source === 'chain_envelope' ? 'chain_envelope' : 'manual';
-    const network = process.env.KASPA_NETWORK || 'testnet-12';
+    const network = configuredNetwork();
     // Path A J2-tn r301: caller optionally provides signing_relay_id 用于 envelope 上链签名.
     // 不提供 = skip broadcast (= 与现有 manual 路径完全兼容, 已经存在 enrollments 借用 backfill 上链).
     const signingRelayId = typeof b.signing_relay_id === 'string' ? b.signing_relay_id : null;
@@ -372,7 +373,7 @@ export async function registerOraclePoolRoutes(fastify) {
         // C13 (NWT N9 实测: url=null 构造后 connect() 抛 wasm unreachable, try/catch 包不住) ⇒ 构造前判空早退
         if (!requireRpcUrl(rpcUrl, 'oracle-pool.chain-snapshot')) return reply.code(503).send({ ok: false, error: 'no working Kaspa RPC node — retry shortly' });
         const { RpcClient, Encoding } = await import('kaspa-wasm');
-        const rpc = new RpcClient({ url: rpcUrl, encoding: Encoding.Borsh, networkId: process.env.KASPA_NETWORK || 'testnet-12' });
+        const rpc = new RpcClient({ url: rpcUrl, encoding: Encoding.Borsh, networkId: configuredNetwork() });
         await rpc.connect();
         let currentDaa;
         // Bettor r446 catch: kaspa-wasm 无 getCurrentBlockDaaScore/getCurrentDaaScore methods.
@@ -382,11 +383,11 @@ export async function registerOraclePoolRoutes(fastify) {
         finally { try { await rpc.disconnect(); } catch {} }
         if (!Number.isFinite(currentDaa)) throw new Error(`currentDaa not finite: ${currentDaa}`);
         // Re-connect for scan UTXO calls.
-        const rpc2 = new RpcClient({ url: rpcUrl, encoding: Encoding.Borsh, networkId: process.env.KASPA_NETWORK || 'testnet-12' });
+        const rpc2 = new RpcClient({ url: rpcUrl, encoding: Encoding.Borsh, networkId: configuredNetwork() });
         await rpc2.connect();
         try {
           const { scanAndDerivePool } = await import('../services/oracle-pool-chain-scanner.mjs');
-          const result = await scanAndDerivePool({ rpc: rpc2, networkId: process.env.KASPA_NETWORK || 'testnet-12', currentDaa });
+          const result = await scanAndDerivePool({ rpc: rpc2, networkId: configuredNetwork(), currentDaa });
           return reply.send({ ok: true, ...result, currentDaa });
         } finally { try { await rpc2.disconnect(); } catch {} }
       } catch (e) {
@@ -465,7 +466,7 @@ export async function registerOraclePoolRoutes(fastify) {
     if (!enroll.active) return reply.code(409).send({ ok: false, error: 'enrollment not active (= already unlocked or never funded)' });
     if (!enroll.relay_address) return reply.code(409).send({ ok: false, error: 'enrollment missing relay_address (= chain_envelope ingest path 未完, 不知 to_address)' });
     // Check current DAA via RPC vs lock_until_daa.
-    const network = process.env.KASPA_NETWORK || 'testnet-12';
+    const network = configuredNetwork();
     try {
       const { getWorkingRpc, requireRpcUrl } = await import('../services/rpc-health.js');
       const { url: rpcUrl } = await getWorkingRpc();

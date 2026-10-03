@@ -85,9 +85,9 @@ console.log('[test] wiring: buildZkHandoffRequestV2 真的在 ZK_TOKEN_TMPL_HASH
 {
   const srcPath = fileURLToPath(new URL('./bshard-close-transport.mjs', import.meta.url));
   const src = readFileSync(srcPath, 'utf8');
-  const envCheckIdx = src.indexOf("ZK_MARKET_SUFFIX_HASH env 必需");
+  const envCheckIdx = src.indexOf("const _tmpl = readZkTemplateHashes()");   // 账本 1813 A1: 三值改走单一读取点
   const callIdx = src.indexOf('assertZkHandoffTmplCoherent(ps, marketId');
-  const computeIdx = src.indexOf('computeCloseZkTmplAnchor(closeZkSilPath, gateTmplHash, process.env.ZK_TOKEN_TMPL_HASH');
+  const computeIdx = src.indexOf("computeCloseZkTmplAnchor(closeZkSilPath, gateTmplHash, _tmpl.tokenTmplHash");
   ok(envCheckIdx >= 0 && callIdx >= 0 && computeIdx >= 0, `全部三个锚点都在源码里找到 (envCheckIdx=${envCheckIdx}, callIdx=${callIdx}, computeIdx=${computeIdx})`);
   ok(envCheckIdx < callIdx && callIdx < computeIdx, `顺序正确: env 检查 < assertZkHandoffTmplCoherent 调用 < computeCloseZkTmplAnchor 调用(在任何真实模板计算之前拦)`);
 }

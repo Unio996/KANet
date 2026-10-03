@@ -23,6 +23,7 @@ import { sqlite } from '../db/client.js';
 import { wrapTick, stepSync, logStep } from '../lib/diag-step.mjs';   // M10 v2 observe-only (2026-09-05): setInterval 回调计时(纯透传, 同步段/总墙钟 ≥50ms 才打); P2-6: unrecoverableCheck 哨兵 + recapture 墙钟
 import { seedMarkedMarketIds } from '../db/events-type-index-v201.mjs';   // P2-6 6b: "已标不可恢复"集合的播种查询单源(与 6a 索引同文件)
 import { randomUUID } from 'node:crypto';
+import { configuredNetwork } from '../lib/kaspa-network.mjs';   // 账本 1813 A2
 
 const TICK_MS = 60 * 1000; // 镜像 spc_daa_index 巡检节拍(已验证过的量级)
 // NWT 红队 MUST-FIX(docs/2026-07-18-NWT-redteam-k17-preprune-capture-worker-diff-verdict.md e91fcf51):
@@ -136,8 +137,9 @@ const GATE_RPC_TIMEOUT_MS = 4000;
 //   并核 getServerInfo().networkId === KASPA_NETWORK(实串, 缺/不等 ⇒ 'network-mismatch', fail-closed)。超时: 既有 GATE_RPC_TIMEOUT_MS=4000 包 connect/getServerInfo(设计 G2-6 核实为已存在)。
 export async function _readNodeSynced({ rpcFactory, env = process.env } = {}) {
   let rpc = null, owned = false;
-  const expectNet = env.KASPA_NETWORK || 'testnet-12';
+  let expectNet;
   try {
+    expectNet = configuredNetwork(env);   // 账本 1813 A2: 原 || 'testnet-12' 回退; 未设 ⇒ 落到下方 catch(rpc-fail, fail-closed), 不再默认当成 testnet
     if (rpcFactory) {
       rpc = await rpcFactory(); owned = true;   // 测试注入: 自建自断
       await _withTimeout(rpc.connect({}), GATE_RPC_TIMEOUT_MS, 'connect');

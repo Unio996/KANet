@@ -7,7 +7,7 @@ import { resolveExpired, isResolverRunning } from '../services/bettor-resolver.j
 import { snapshotOpenPositions, isTrackerRunning } from '../services/bettor-position-tracker.js';
 import { evaluatePositions, isReactorRunning } from '../services/bettor-reactor.js';
 import { isRelayAlive } from '../services/relay-manager.js';
-import { assertAddressOnNetwork, isAddressOnNetwork } from '../lib/kaspa-network.mjs';   // (b) 网络单一源 (设计 v0.2 §3): 前缀只对照 env KASPA_NETWORK, 不从地址推网络
+import { assertAddressOnNetwork, isAddressOnNetwork, configuredNetwork } from '../lib/kaspa-network.mjs';   // (b) 网络单一源 (设计 v0.2 §3): 前缀只对照 env KASPA_NETWORK, 不从地址推网络
 import { checkAdminSecretTier } from '../lib/admin-secret-tier.mjs';
 
 export async function registerBettorRoutes(fastify) {
@@ -2066,7 +2066,7 @@ export async function registerBettorRoutes(fastify) {
     `).all(...includeStates);
 
     // Enrich with oracle vote summary + explorer URL(单源 explorer-url.mjs; testnet 返 null——explorer-tn12 域名不存在, 死链收敛设计 §3)
-    const network = process.env.KASPA_NETWORK || 'testnet-12';
+    const network = configuredNetwork();   // 账本 1813 A2
     const { buildExplorerUrl, buildExplorerAddressUrl } = await import('../lib/explorer-url.mjs');
     const enriched = rows.map(o => {
       let voteSummary = null;
