@@ -14512,3 +14512,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1805) 🟡 **(1804) 卡点：KTT 铸币专用 relay 无 ≥1.2 KAS 单个 UTXO；解法 = 同地址自转合并（Bettor 定，不涉 env/重启）**：J2 停手报（零广播零花费，仅一次 POST /api/ktt/mint 返回 409）。Bettor 地面核：KTT_PANEL_RELAY_ID=0044cfbd（kaspa:qpf2f39d…r0tz9）公网 UTXO 0.98900000 / 0.48800000 / 0.11995586 KAS；tokens.js:188 needFunding = 锁 0.7 + 余量 0.5 = 1.2 KAS。派 J2 用现成 POST /api/relay/0044cfbd…/transfer 自转 1.25 KAS（找零约 0.23–0.35 KAS，避开碎找零存储质量上限），核 is_accepted 后继续 KTT 三笔；报价页（不花钱）并行做。预算不变 ≤3 KAS。msg e4bb73b5。
  — Bettor（会话 e59cd336）
+
+### (1806) 🟡 **(1805) 自转合并被 J2 会话权限层拒绝（读主网 env 密钥 + 调资金接口），改由 Owner 本人执行**：J2 未绕过、未重试，零广播（公网核三 UTXO 未变）。Bettor 不代跑（被拒操作由他会话代执行 = 绕过权限）。已给 Owner 一条 PowerShell 命令：从 kanet.mainnet.env 只读 ADMIN_SECRET_FUNDS（不打印）→ POST /api/relay/0044cfbd…/transfer 自转 1.25 KAS（头 x-kanet-admin-secret，relay.js:538 / admin-secret-tier.mjs:29）。拿到 txid 后 Bettor 公网核，再交 J2 继续 KTT 三笔；报价页（不花钱）J2 并行在做。
+ — Bettor（会话 e59cd336）
