@@ -102,7 +102,7 @@ const W17 = () => Array.from({ length: 17 }, () => ctorInt(0));
 const W17V100 = () => Array.from({ length: 17 }, () => ctorIntV100(0));   // D-019: v100 ctor 方言专用, 见 ctorBytes32V100/ctorIntV100 注释
 const MIN_BET = 100000;                                   // dust-ticket floor (sompi); matches (d)/helper
 const TICKET_DUST = 20_000_000;                           // 0.2 KAS PoolSide dust ticket (KIP-9 safe, matches helper)
-const PS_SEED = 20_000_000;                               // PayoutShard genesis seed (0.2 KAS sink, matches (d))
+export const PS_SEED = 20_000_000;                               // PayoutShard genesis seed (0.2 KAS sink, matches (d))
 const SHARD_GENESIS_SEED = 20_000_000;                    // A(b): 空 ShardLeaf genesis seed (0.2 KAS, KIP-9 safe). 首注 register_append
                                                           //   spend 它+fund stake → output weld out==pool_value(0)+stake 过, seed 退 change (不进池, pool_value 起点=0)。
 // 🔴 D-020 移植配套(2026-09-23·Owner批·NWT审): 首笔下注(shard.current_token_outpoint 为 null, 还没有任何
@@ -235,6 +235,28 @@ function _shardLeafRegisterAppendDispatchTag() {
   if (!tag) throw new Error('_shardLeafRegisterAppendDispatchTag: 编译产物缺 entries.register_append.dispatch_tag — schema 漂移?');
   _shardLeafRegisterAppendDispatchTagCache = tag;
   return tag;
+}
+
+// 账本 1829 段1: 结算侧 v1.0.0 dispatch_tag(合约结构性常量, 与 ctor 取值无关, 同上 _shardLeafRegisterAppendDispatchTag 的理由), 编译一次缓存。
+//   absorb 来自 PayoutShardV2.sil, consolidate_to_payout 来自 ShardLeaf.sil。
+let _settleDispatchTagsCache = null;
+export function settleDispatchTags() {
+  if (_settleDispatchTagsCache) return _settleDispatchTagsCache;
+  const leafCtor = _shardLeafCtor({
+    marketIdHash: z32, psTmplHashHex: z32, shardPoolId: z32, sealCount: 1, payoutCovId: z32, deadline: Math.floor(Date.now() / 1000),
+    tokenTmplHash: z32, localYes: 0, localNo: 0, count: 0, poolValue: 0, ownRedeemLen: 1,
+  });
+  const leaf = compileSilV100(join(LIB, 'ShardLeaf.sil'), leafCtor, 'ShardLeaf');
+  const psCtor = [
+    ctorBytes32V100(z32), ctorBytes32V100(z32), ctorBytes32V100(z32), ctorBytes32V100(z32), ctorIntV100(0), ctorIntV100(0), ctorBytes32V100(z32),
+    ...W17V100(), ctorIntV100(-1), ctorIntV100(0), ctorBytes32V100(z32), ctorBytes32V100(z32), ctorBytes32V100(z32),
+  ];
+  const ps = compileSilV100(join(LIB, 'PayoutShardV2.sil'), psCtor, 'PayoutShardV2');
+  const consolidate = leaf._raw.contracts.ShardLeaf.entries.consolidate_to_payout?.dispatch_tag;
+  const absorb = ps._raw.contracts.PayoutShardV2.entries.absorb?.dispatch_tag;
+  if (!consolidate || !absorb) throw new Error('settleDispatchTags: 编译产物缺 entries.consolidate_to_payout/absorb.dispatch_tag — schema 漂移?');
+  _settleDispatchTagsCache = { consolidate_to_payout: consolidate, absorb };
+  return _settleDispatchTagsCache;
 }
 
 export function compileShardLeafRedeem({ marketIdHash, psTmplHashHex, shardPoolId, sealCount, payoutCovId, deadline, localYes, localNo, count, poolValue, tokenTmplHash, ownRedeemLen }) {
@@ -481,7 +503,9 @@ export async function ensurePayoutShardV2({ db, rc, transfer, landed, p2sh, logi
   // D-019 迁移(ledger 1216-1221): PayoutShardV2.sil 当前 ctor 实读 30 参数(T3 代币化新增 token_tmpl_hash/
   // claim_tmpl_hash/market_suffix_hash 三个尾部字段), 调用方必须显式提供真实值——不接受占位符(见
   // compilePayoutShardV2Redeem 内部的 hex 格式 fail-loud 校验)。
-  const redeem = compilePayoutShardV2Redeem({ poolMerkleRoot, predicateCommit, closeZkTmplAnchor, consolidatedPool: PS_SEED, tokenTmplHash, claimTmplHash, marketSuffixHash });
+  // 🔴 账本 1829 段1(v0.3 代币化): consolidated_pool 是【代币记账数】不是 KAS 面值。PayoutShardV2.absorb 要求 scanOwnedTokenInputs(PS 名下代币)==consolidated_pool,
+  //   创世时 PS 名下没有任何代币 ⇒ 初值必须是 0(旧值 PS_SEED=20,000,000 会让第一次 absorb 100% 必败)。PS_SEED 现在只是 PS UTXO 的 KAS dust 面值(seedSompi), 与 state 无关。
+  const redeem = compilePayoutShardV2Redeem({ poolMerkleRoot, predicateCommit, closeZkTmplAnchor, consolidatedPool: 0, tokenTmplHash, claimTmplHash, marketSuffixHash });
   const fundTx = await transfer(relayAddr, PS_SEED + 100_000_000);
   const gj = await rc({ type: 'bshard_genesis_mint_payout', payoutshard: { redeem_hex: redeem, seedSompi: String(PS_SEED) }, inputs: { funding: { address: relayAddr, outpointTxid: fundTx, index: 0 } }, outputs: { change_address: relayAddr } });
   const payoutCovId = gj.payoutCovId, psTx = gj.txId || gj.txid, psAddr = p2sh(redeem);

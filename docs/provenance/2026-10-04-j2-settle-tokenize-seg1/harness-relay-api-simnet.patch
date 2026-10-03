@@ -1,0 +1,12 @@
+diff --git a/kasia-relay/src/lib/api.mjs b/kasia-relay/src/lib/api.mjs
+index 6c97594f..0f860dde 100644
+--- a/kasia-relay/src/lib/api.mjs
++++ b/kasia-relay/src/lib/api.mjs
+@@ -3,6 +3,7 @@ const API_ENDPOINTS = {
+   mainnet: 'https://api.kaspa.org',
+   'testnet-10': 'https://api-tn10.kaspa.org',
+   'testnet-11': 'https://api-tn11.kaspa.org',
++  simnet: 'http://127.0.0.1:1',  // HARNESS-ONLY (simnet rehearsal): getApi() result is never used in transaction.mjs; entry only avoids the ctor throw
+   'testnet-12': 'https://api-tn12.kaspa.org',  // Phase 3a SS testnet (Bettor r193 5/19, align 6/1 mainnet SS launch)
+ };
+ 

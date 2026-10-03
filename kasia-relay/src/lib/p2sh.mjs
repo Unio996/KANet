@@ -2040,51 +2040,113 @@ export async function unlockBshardConsolidate(args) {
 }
 
 /**
- * unlockBshardConsolidateV2 — PayoutShardV2(ZK-native) absorb OP_0 + SL consolidate_to_payout OP_1 (W2, J2 2026-07-07)。
- * ★ 镜像 unlockBshardConsolidate byte-identical 结构(PayoutShardV2.sil 头注释②: "absorb 逻辑一字不动, 仅
- *   validateOutputState 补齐新增4字段透传")——差异仅 state 用 _serializePayoutV2StateHex/_continuationAddressV2。
- *   ShardLeaf.sil 侧完全不碰(redeem hex 原样读取, 零 recompile, 跟 V1 一样的读法, D-005 隔离铁律遵守)。
- * ⚠ 不改 unlockBshardConsolidate 一字(single-author 分离, 同 close_attest V2 拆分哲学)。
+ * unlockBshardConsolidateV2 — PayoutShardV2(ZK-native) absorb + ShardLeaf consolidate_to_payout, **v0.3 代币化版**(J2 2026-10-04, 账本 1829 段1)。
+ * 取代旧 KAS-weld 版(旧版 witness 只有 2 个 int + 裸 OP_0/OP_1 选择器, 对 v1.0.0 编译的代币化合约既算错价值又推错 witness)。
+ * 合约为准(PayoutShardV2.sil absorb / ShardLeaf.sil consolidate_to_payout, 均不改):
+ *   absorb(selfOutIdx, shardInIdx, tok_out, shard_amount, tok_prefix, tok_suffix)
+ *   consolidate_to_payout(psInIdx, psOutIdx, tok_prefix, tok_suffix)
+ * tx: inputs=[0 PS(absorb, 无签), 1 SL(consolidate_to_payout, 无签), 2 shard 代币(owner=SL cov, KTT.transfer zero-out),
+ *             3? PS 已持有代币(owner=PS cov, KTT.transfer zero-out; 第一片无), 其后 fee P2PK(钱包签)]
+ *      outputs=[0 PS 续约(KAS 面值原样搬运, CovenantBinding=PS cov), 1 tok_out(新 KTT 实例 amount=consolidated_pool+shard_amount, owner=PS cov;
+ *               populateGenesisCovenants 授权=fee 输入——同 unlockBshardRegister 的 tok_out 手法), change]。
+ * 复用: unlockBshardRegister 的 tok_out genesis 绑定 / _encodeKttTransferZeroOutAction / _combineActionAndRedeem / v1.0.0 "addI64+addData+4字节 dispatch_tag" action 编码。
+ * 不能复用: 旧版的 KAS 价值焊接(psOutValue=in+poolValue)与裸选择器——叶子 KAS 侧只剩 dust, 价值载体是代币。
+ * @param {object} cmd.witness { absorb_dispatch_tag_hex, consolidate_dispatch_tag_hex, tok_prefix_hex, tok_suffix_hex, shard_amount,
+ *                               token_transfer_dispatch_tag_hex, token_transfer_state_field_count }
+ * @param {object} cmd.inputs { payoutshard{redeem_hex,outpointTxid,index,state}, shardleaf{redeem_hex,outpointTxid}, shard_token{redeem_hex,outpointTxid,index},
+ *                              ps_token?{redeem_hex,outpointTxid,index}, fee{address,outpointTxid,index} }
+ * @param {object} cmd.outputs { tok_out{redeem_hex, owner_cov_id_hex?}, change_address }
  */
 export async function unlockBshardConsolidateV2(args) {
   const { wallet, cmd, networkId, lockTime = 0n } = args;
+  const w = cmd.witness;
   const rpc = await connectRpc(networkId);
   try {
     const psUtxo = await _matchUtxo(rpc, _addressFromRedeem(cmd.inputs.payoutshard.redeem_hex, networkId), cmd.inputs.payoutshard.outpointTxid, cmd.inputs.payoutshard.index);
     const slUtxo = await _matchUtxo(rpc, _addressFromRedeem(cmd.inputs.shardleaf.redeem_hex, networkId), cmd.inputs.shardleaf.outpointTxid);
-    if (!cmd.inputs.fee) throw new Error('consolidate_v2: fee input 必需 (PS+SL value 全 weld 进 continuation 无余付 fee)');
+    const shardTokUtxo = await _matchUtxo(rpc, _addressFromRedeem(cmd.inputs.shard_token.redeem_hex, networkId), cmd.inputs.shard_token.outpointTxid, cmd.inputs.shard_token.index);
+    const psTokUtxo = cmd.inputs.ps_token
+      ? await _matchUtxo(rpc, _addressFromRedeem(cmd.inputs.ps_token.redeem_hex, networkId), cmd.inputs.ps_token.outpointTxid, cmd.inputs.ps_token.index)
+      : null;
+    if (!cmd.inputs.fee) throw new Error('consolidate_v2: fee input 必需(KAS 侧只剩 dust, 手续费由独立 P2PK fee 输入支付)');
     const feeUtxo = await _matchUtxo(rpc, cmd.inputs.fee.address, cmd.inputs.fee.outpointTxid, cmd.inputs.fee.index);
-    const matched = [psUtxo, slUtxo, feeUtxo];
+    const matched = [psUtxo, slUtxo, shardTokUtxo, ...(psTokUtxo ? [psTokUtxo] : []), feeUtxo];
+    const SHARD_TOK_IDX = 2;
+    const covenantSigCount = matched.length - 1;     // 其余全是无签 covenant 输入; fee 是最后一个(钱包签), 也是 tok_out genesis 的授权输入
     const psCovId = _psInputCovId(psUtxo);
+    if (cmd.outputs.tok_out.owner_cov_id_hex && String(cmd.outputs.tok_out.owner_cov_id_hex).toLowerCase() !== psCovId.toLowerCase()) {
+      throw new Error(`consolidate_v2: tok_out owner_cov_id_hex ${String(cmd.outputs.tok_out.owner_cov_id_hex).slice(0, 12)} != PS 输入真实 cov_id ${psCovId.slice(0, 12)} (fail-loud, 防把池代币铸给错的 owner)`);
+    }
 
-    const poolValue = BigInt(cmd.inputs.shardleaf.pool_value);
-    const ps = cmd.inputs.payoutshard.state;   // {consolidated_pool, closed, payoutRoot, w0..w16, attestedWinner, attestedAtMs, betsRootBaked, refundRootBaked}
+    const poolValue = BigInt(w.shard_amount);
+    const ps = cmd.inputs.payoutshard.state;
     const newConsolidated = BigInt(ps.consolidated_pool) + poolValue;
-    // absorb 逻辑一字不动: closed/payoutRoot/w0-w16/attestedWinner/attestedAtMs/betsRootBaked/refundRootBaked 全透传不变,
-    // 只有 consolidated_pool 变(+poolValue)。
+    // absorb 逻辑: 只有 consolidated_pool 变(+shard_amount), 其余 22 字段原样透传(与合约 newStateBytes 逐字段一致)。
     const newState = {
       consolidated_pool: newConsolidated.toString(), closed: ps.closed, payoutRoot: ps.payoutRoot, ..._nw17(ps),
       attestedWinner: ps.attestedWinner, attestedAtMs: ps.attestedAtMs, betsRootBaked: ps.betsRootBaked, refundRootBaked: ps.refundRootBaked,
     };
     const psContAddr = _continuationAddressV2(cmd.inputs.payoutshard.redeem_hex, _serializePayoutV2StateHex(newState), networkId, cmd.inputs.payoutshard.state_start ?? _POOL_STATE_START);
-    let psOutValue = _utxoValue(psUtxo) + poolValue;
-    if (cmd.forge_skim) { const skim = BigInt(cmd.forge_skim); psOutValue = psOutValue - skim; console.error(`[FORGE_SKIM] psOutValue 少付 ${skim} → 期望合约守恒 BUST`); }
+    const tokOutAddr = _addressFromRedeem(cmd.outputs.tok_out.redeem_hex, networkId);
 
-    const outputs = [new TransactionOutput(psOutValue, payToAddressScript(new Address(psContAddr)), new CovenantBinding(0, new Hash(psCovId)))];
-    _appendChange(outputs, matched, cmd.outputs?.change_address, _bshardFeeV1(matched.length));
+    // outputs: [0] PS 续约(面值原样搬运: 代币化后 KAS 侧只剩 dust, 与 consolidated_pool 不再相等) [1] tok_out(两个代币输入的面值之和, 同 register 的 merge 处理)
+    const tokOutValue = _utxoValue(shardTokUtxo) + (psTokUtxo ? _utxoValue(psTokUtxo) : 0n);
+    const outputs = [
+      new TransactionOutput(_utxoValue(psUtxo), payToAddressScript(new Address(psContAddr)), new CovenantBinding(0, new Hash(psCovId))),
+      new TransactionOutput(tokOutValue, payToAddressScript(new Address(tokOutAddr))),
+    ];
+    const fee = BigInt(cmd.fee_sompi ?? 20_000_000);   // 与 register_append 同量级的固定值(witness 内含 ~3KB KTT redeem reveal x2 + 29KB PS redeem); 精算(按 mass)留后续
+    _appendChange(outputs, matched, cmd.outputs?.change_address, fee);
 
-    // no-sig scriptSig — 同 V1: PS@0 absorb [selfOutIdx=0, shardInIdx=1] OP_0; SL@1 consolidate [psInIdx=0, psOutIdx=0] OP_1
-    //   (PayoutShardV2.sil absorb 形参跟 V1 一字不差: absorb(int selfOutIdx, int shardInIdx), ShardLeaf.sil 侧零改动)。
-    const psSig = _pushInt(0) + _pushInt(1) + '00' + _encodePushDataHex(Buffer.from(cmd.inputs.payoutshard.redeem_hex, 'hex'));
-    const slSig = _pushInt(0) + _pushInt(0) + '51' + _encodePushDataHex(Buffer.from(cmd.inputs.shardleaf.redeem_hex, 'hex'));
+    const tokPrefix = new Uint8Array(Buffer.from(w.tok_prefix_hex.replace(/^0x/, ''), 'hex'));
+    const tokSuffix = new Uint8Array(Buffer.from(w.tok_suffix_hex.replace(/^0x/, ''), 'hex'));
+    const tag = (h) => new Uint8Array(Buffer.from(h.replace(/^0x/, ''), 'hex'));
+    // absorb(selfOutIdx=0, shardInIdx=2, tok_out=1, shard_amount, tok_prefix, tok_suffix)
+    const absorbAction = (() => {
+      const b = new ScriptBuilder({ flags: { covenantsEnabled: true } });
+      b.addI64(0n); b.addI64(BigInt(SHARD_TOK_IDX)); b.addI64(1n); b.addI64(poolValue);
+      b.addData(tokPrefix); b.addData(tokSuffix); b.addData(tag(w.absorb_dispatch_tag_hex));
+      return b.drain();
+    })();
+    // consolidate_to_payout(psInIdx=0, psOutIdx=0, tok_prefix, tok_suffix)
+    const consolidateAction = (() => {
+      const b = new ScriptBuilder({ flags: { covenantsEnabled: true } });
+      b.addI64(0n); b.addI64(0n); b.addData(tokPrefix); b.addData(tokSuffix); b.addData(tag(w.consolidate_dispatch_tag_hex));
+      return b.drain();
+    })();
+    const psSig = _combineActionAndRedeem(absorbAction, cmd.inputs.payoutshard.redeem_hex);
+    const slSig = _combineActionAndRedeem(consolidateAction, cmd.inputs.shardleaf.redeem_hex);
+    // 两个 KTT 输入各自走 transfer zero-out(owner_input_idx 指向各自 owner 的 covenant 输入: shard 代币 owner=SL(input 1), PS 代币 owner=PS(input 0))
+    const shardTokSig = _combineActionAndRedeem(_encodeKttTransferZeroOutAction(w.token_transfer_dispatch_tag_hex, w.token_transfer_state_field_count, [1]), cmd.inputs.shard_token.redeem_hex);
+    const psTokSig = psTokUtxo ? _combineActionAndRedeem(_encodeKttTransferZeroOutAction(w.token_transfer_dispatch_tag_hex, w.token_transfer_state_field_count, [0]), cmd.inputs.ps_token.redeem_hex) : null;
+    const sigScripts = [psSig, slSig, shardTokSig, ...(psTokSig ? [psTokSig] : [])];
 
-    const baseIn = (ss) => matched.map((u, i) => ({ previousOutpoint: { transactionId: u.outpoint.transactionId, index: u.outpoint.index }, signatureScript: ss[i], sequence: 0n, sigOpCount: 0, computeBudget: _BSHARD_COMPUTE_BUDGET, ...(ss[i] === '' ? { utxo: u } : {}) }));
-    const unsigned = new Transaction({ version: 1, inputs: matched.map(u => ({ previousOutpoint: { transactionId: u.outpoint.transactionId, index: u.outpoint.index }, signatureScript: '', sequence: 0n, sigOpCount: 0, computeBudget: _BSHARD_COMPUTE_BUDGET, utxo: u })), outputs, lockTime: BigInt(lockTime), gas: 0n, subnetworkId: '0000000000000000000000000000000000000000', payload: '' });
-    const sigs = [psSig, slSig, createInputSignature(unsigned, 2, wallet.getPrivateKey(), SighashType.All)];
-    const signedTx = new Transaction({ version: 1, inputs: baseIn(sigs), outputs, lockTime: BigInt(lockTime), gas: 0n, subnetworkId: '0000000000000000000000000000000000000000', payload: '' });
+    // 计算预算: register_append 的 70 对 absorb(29KB redeem 揭示+blake3 模板核)/consolidate 不够(simnet 实测 used=731959 > limit=709999 ⇒ 至少 74); 取 100 留余量, 可由 cmd.compute_budget 覆盖。
+    const CB = Number(cmd.compute_budget ?? 100);
+    const mkTx = (ss) => new Transaction({
+      version: 1,
+      inputs: matched.map((u, i) => ({
+        previousOutpoint: { transactionId: u.outpoint.transactionId, index: u.outpoint.index },
+        signatureScript: ss ? ss[i] : '', sequence: 0n, sigOpCount: 0, computeBudget: CB, ...(ss ? {} : { utxo: u }),
+      })),
+      outputs, lockTime: BigInt(lockTime), gas: 0n, subnetworkId: '0000000000000000000000000000000000000000', payload: '',
+    });
+    const unsigned = mkTx(null);
+    unsigned.populateGenesisCovenants([new GenesisCovenantGroup(covenantSigCount, [1])]);   // tok_out(output 1)新 genesis 实例, 授权输入=fee(最后一个)
+    sigScripts.push(createInputSignature(unsigned, covenantSigCount, wallet.getPrivateKey(), SighashType.All));
+    const signedTx = mkTx(sigScripts);
+    signedTx.populateGenesisCovenants([new GenesisCovenantGroup(covenantSigCount, [1])]);
     _assertTxInvariants(matched, signedTx, 'unlockBshardConsolidateV2', networkId);
+    // dry_run(仅构造+自检, 不广播): 返回各输入真实 signatureScript / 输出 spk, 供 cli-debugger 逐输入复现(同 unlockBshardZkHandoff 的 dryRun 先例)。
+    if (cmd.dry_run) {
+      const hx = (v) => (typeof v === 'string' ? v : Buffer.from(v).toString('hex')).replace(/^0x/, '');
+      return { broadcasted: false,
+        inputs: matched.map((u, i) => ({ utxo_value: _utxoValue(u).toString(), utxo_script_hex: hx((u.entry ?? u).scriptPublicKey?.script ?? ''), covenant_id: (() => { const c = (u.entry ?? u).covenantId ?? u.covenant?.covenantId; return c == null ? null : String(c); })(), signature_script_hex: hx(signedTx.inputs[i].signatureScript) })),
+        outputs: signedTx.outputs.map((o) => ({ value: o.value.toString(), script_hex: hx(o.scriptPublicKey.script), covenant_id: o.covenant ? String(o.covenant.covenantId) : null })) };
+    }
+    const tokOutCovId = String(signedTx.outputs[1].covenant.covenantId);
     const r = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
-    return { txId: r.transactionId, psContAddress: psContAddr, newConsolidatedPool: newConsolidated.toString(), psSeedCovId: psCovId };
+    return { txId: r.transactionId, psContAddress: psContAddr, tokOutAddress: tokOutAddr, tokOutCovId, newConsolidatedPool: newConsolidated.toString(), psSeedCovId: psCovId };
   } finally { try { await rpc.disconnect(); } catch {} }
 }
 
