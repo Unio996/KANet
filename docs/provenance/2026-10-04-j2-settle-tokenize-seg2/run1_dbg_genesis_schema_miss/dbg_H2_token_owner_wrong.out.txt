@@ -1,0 +1,6 @@
+  RUN   H2_token_owner_wrong
+  FAIL  H2_token_owner_wrong
+        Error: WrongGenesisCovenantId(0, 8deb67182bdab87d38094ce7dbf0ebc1af3178d59706ae4728743e124e6b5350)
+
+1 tests: 0 passed, 1 failed
+Error: "some tests failed"

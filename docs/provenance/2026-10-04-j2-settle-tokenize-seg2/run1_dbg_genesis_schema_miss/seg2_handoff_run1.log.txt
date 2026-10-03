@@ -1,0 +1,62 @@
+[db] path=D:\kanet-tn12\scratch\_j2_tok_sim\console.simnet.db source=DB_PATH
+23:02:37 waiting close_attest landed (closed==1)… de2cb08d5a36
+23:03:37 waiting close_attest landed (closed==1)… de2cb08d5a36
+23:04:37 waiting close_attest landed (closed==1)… de2cb08d5a36
+23:05:37 waiting close_attest landed (closed==1)… de2cb08d5a36
+23:06:37 waiting close_attest landed (closed==1)… de2cb08d5a36
+23:07:37 waiting close_attest landed (closed==1)… de2cb08d5a36
+23:08:37 waiting close_attest landed (closed==1)… de2cb08d5a36
+23:09:37 waiting close_attest landed (closed==1)… de2cb08d5a36
+23:10:37 waiting close_attest landed (closed==1)… de2cb08d5a36
+23:11:37 waiting close_attest landed (closed==1)… de2cb08d5a36
+23:12:38 waiting close_attest landed (closed==1)… 15505330e7a5
+23:13:38 waiting close_attest landed (closed==1)… 15505330e7a5
+23:14:38 waiting close_attest landed (closed==1)… 15505330e7a5
+23:15:38 waiting close_attest landed (closed==1)… 15505330e7a5
+23:16:38 waiting close_attest landed (closed==1)… 15505330e7a5
+23:17:38 waiting close_attest landed (closed==1)… 15505330e7a5
+23:18:38 waiting close_attest landed (closed==1)… 15505330e7a5
+23:19:38 waiting close_attest landed (closed==1)… 15505330e7a5
+23:20:38 waiting close_attest landed (closed==1)… 15505330e7a5
+23:21:38 waiting close_attest landed (closed==1)… 15505330e7a5
+23:22:39 waiting close_attest landed (closed==1)… 15505330e7a5
+23:23:39 waiting close_attest landed (closed==1)… 15505330e7a5
+23:24:39 waiting close_attest landed (closed==1)… 15505330e7a5
+23:25:39 waiting close_attest landed (closed==1)… 15505330e7a5
+23:26:39 waiting close_attest landed (closed==1)… 15505330e7a5
+23:27:39 waiting close_attest landed (closed==1)… 15505330e7a5
+23:28:39 waiting close_attest landed (closed==1)… 15505330e7a5
+23:29:39 waiting close_attest landed (closed==1)… 15505330e7a5
+23:30:39 waiting close_attest landed (closed==1)… 15505330e7a5
+23:31:39 waiting close_attest landed (closed==1)… 15505330e7a5
+23:32:40 waiting close_attest landed (closed==1)… 15505330e7a5
+23:33:40 waiting close_attest landed (closed==1)… 15505330e7a5
+23:34:40 waiting close_attest landed (closed==1)… 15505330e7a5
+23:35:40 waiting close_attest landed (closed==1)… 15505330e7a5
+23:36:40 waiting close_attest landed (closed==1)… 15505330e7a5
+23:36:45 close_attest landed. PS outpoint d2885b8f9f1ad1dd0960c28cd900963abde9ee2fb13adf000e18c2acb50ce68f:0 pool 3500000000 winner 0
+23:36:45 BEFORE PS UTXO: [{"outpoint":{"transactionId":"d2885b8f9f1ad1dd0960c28cd900963abde9ee2fb13adf000e18c2acb50ce68f","index":0},"amount":"20000000","covenantId":null}] 
+BEFORE PS-held token UTXO: [{"outpoint":{"transactionId":"15505330e7a57e7972f5a2bd569840c278064607f1bceeadfbe11fd2f4cdbf7e","index":1},"amount":"60000000","covenantId":null}]
+[diag:step] proc.silverc.compile.bshard-artifacts ms=55 cmd=silverc ok=1 at=2026-10-03T23:36:45.624Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=30 cmd=silverc ok=1 at=2026-10-03T23:36:45.986Z
+Error: "some tests failed"
+23:36:48 NEG H1_token_amount_short: consensus=REJECTED ✓ | debugger={"pass":false,"lineNo":null,"reqLine":null}
+23:36:48    node text: {"status":200,"ok":true,"error":"RPC Server (remote error) -> Rejected transaction 0d79331f9dc5bbb88635e291df20e3d75db330953f019f3d93d463897c3877e1: failed to verify the signature script: script ran, but verification failed","phase":"execution"}
+Error: "some tests failed"
+23:36:51 NEG H2_token_owner_wrong: consensus=REJECTED ✓ | debugger={"pass":false,"lineNo":null,"reqLine":null}
+23:36:51    node text: {"status":200,"ok":true,"error":"RPC Server (remote error) -> Rejected transaction e7605466294d2ea194763b61cfaac06ee4c5777b9f6f9d6e2a77e844b6c64dff: failed to verify the signature script: script ran, but verification failed","phase":"execution"}
+[diag:step] proc.silverc.compile.bshard-artifacts ms=30 cmd=silverc ok=1 at=2026-10-03T23:36:52.026Z
+Error: "some tests failed"
+23:36:54 NEG H3_template_tampered: consensus=REJECTED ✓ | debugger={"pass":false,"lineNo":null,"reqLine":null}
+23:36:54    node text: {"status":200,"ok":true,"error":"RPC Server (remote error) -> Rejected transaction 39d7be61e15f0e16926eefbc099af69439afa79bcbf9e0628ae961288e1fac88: failed to verify the signature script: script ran, but verification failed","phase":"execution"}
+[diag:step] proc.silverc.compile.bshard-artifacts ms=28 cmd=silverc ok=1 at=2026-10-03T23:36:55.016Z
+Error: "some tests failed"
+23:36:57 NEG H4_state_tampered: consensus=REJECTED ✓ | debugger={"pass":false,"lineNo":null,"reqLine":null}
+23:36:57    node text: {"status":200,"ok":true,"error":"RPC Server (remote error) -> Rejected transaction 7ed75e8985dd1ca226277d9721c92705ae67c1f6fbe53df954f3d7a23a63a534: failed to verify the signature script: script ran, but verification failed","phase":"execution"}
+23:36:57 after negatives PS/PS-token untouched: true
+23:37:06 HONEST zk-handoff-v2 => {"status":200,"ok":true,"marketId":"ext-pool-v07-1791068481102-r522x","txId":"abd200b6f831b379d8e8aeafc73ef8971f034881ba321c7bff3a2a1597877835","closeZkAddress":"kaspasim:pq9m9vrccpgrrfkh49p8qrat87qn9s5cu8jgjd3lq8hfaheumyx5vzq56rrqd","closeZkRedeemHex":"6b0800000000000000000801000000000000002000000000000000000000000000000000000000000000000000000000000000000800c39dd0000000000800000000000000000800000000000000000800000000000000000800000000000000000800000000000000000800000000000000000800000000000000000800000000000000000800000000000000000800000000000000000800000000000000000800000000000000000800000000000000000800000000000000000800000000000000000800000000000000000800000000000000006c7604677c426a8763
+23:37:06 AFTER PS UTXO: [] | PS-held token: []
+23:37:06 AFTER CloseZkV2 UTXO: [{"outpoint":{"transactionId":"abd200b6f831b379d8e8aeafc73ef8971f034881ba321c7bff3a2a1597877835","index":0},"amount":"20000000","covenantId":null}]
+23:37:06 AFTER 新 KTT UTXO (amount=3500000000, owner=新 CloseZkV2 cov fd433a7799df…): [{"outpoint":{"transactionId":"abd200b6f831b379d8e8aeafc73ef8971f034881ba321c7bff3a2a1597877835","index":1},"amount":"60000000","covenantId":null}]
+23:37:06 DB zk_continuation: {"outpoint":{"txid":"abd200b6f831b379d8e8aeafc73ef8971f034881ba321c7bff3a2a1597877835","index":0},"redeemHex":"6b0800000000000000000801000000000000002000000000000000000000000000000000000000000000000000000000000000000800c39dd00000000008000000000000000008000000000000000008000000000000000008000000000000000008000000000000000008000000000000000008000000000000000008000000000000000008000000000000000008000
+23:37:06 SUMMARY {"psGone":true,"closeZk":1,"newToken":1,"zkCovBound":false}

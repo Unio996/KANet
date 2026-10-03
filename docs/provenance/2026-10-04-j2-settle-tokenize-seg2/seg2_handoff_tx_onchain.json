@@ -1,0 +1,37 @@
+{
+ "txid": "29dc2749c272c49dc8961315c842314ef2e562622b3c182d860d1337ba49486d",
+ "blockHash": "93455cd292960f8dfc0c77f1383cf115ed67d618eb96ee2a5004a699c8b2da0b",
+ "daa": "32880",
+ "version": 1,
+ "inputs": [
+  {
+   "prev": "52fbabf97665f2217cfc9fc5e27a4eed76f05dcffe37a8d4c576122002155f54:0",
+   "sigScriptLen": 45463,
+   "computeBudget": 200
+  },
+  {
+   "prev": "91cdf24281acfba87f9cccb44dee1bf3540c458cd4ec46c6559fdab07a5b30e6:1",
+   "sigScriptLen": 3215,
+   "computeBudget": 100
+  },
+  {
+   "prev": "c164c81b5dbd29036204023e3df1e7de99047850efa30884fffad35be8636ab1:0",
+   "sigScriptLen": 66,
+   "computeBudget": 100
+  }
+ ],
+ "outputs": [
+  {
+   "idx": 0,
+   "value": "20000000",
+   "covenantId": "298a61625100e452870c7e849c34c09012ec4a15b6f3de1449d698e79cfe0801",
+   "authInput": 2
+  },
+  {
+   "idx": 1,
+   "value": "60000000",
+   "covenantId": "01cb4745ea39bb0fe9d87cee9d30cd47fcdf10b2b975cde37fbabf4bbac30cd9",
+   "authInput": 2
+  }
+ ]
+}

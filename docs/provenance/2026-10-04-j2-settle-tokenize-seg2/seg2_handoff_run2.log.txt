@@ -1,0 +1,38 @@
+[db] path=D:\kanet-tn12\scratch\_j2_tok_sim\console.simnet.db source=DB_PATH
+23:40:48 waiting close_attest landed (closed==1)… d16233d2df57
+23:41:48 waiting close_attest landed (closed==1)… d16233d2df57
+23:42:48 waiting close_attest landed (closed==1)… d16233d2df57
+23:43:48 waiting close_attest landed (closed==1)… d16233d2df57
+23:44:48 waiting close_attest landed (closed==1)… d16233d2df57
+23:45:48 waiting close_attest landed (closed==1)… d16233d2df57
+23:46:48 waiting close_attest landed (closed==1)… d16233d2df57
+23:47:48 waiting close_attest landed (closed==1)… d16233d2df57
+23:48:48 waiting close_attest landed (closed==1)… d16233d2df57
+23:49:48 waiting close_attest landed (closed==1)… d16233d2df57
+23:50:48 waiting close_attest landed (closed==1)… 91cdf24281ac
+23:51:18 close_attest landed. PS outpoint 52fbabf97665f2217cfc9fc5e27a4eed76f05dcffe37a8d4c576122002155f54:0 pool 3500000000 winner 0
+23:51:19 BEFORE PS UTXO: [{"outpoint":{"transactionId":"52fbabf97665f2217cfc9fc5e27a4eed76f05dcffe37a8d4c576122002155f54","index":0},"amount":"20000000","covenantId":null}] 
+BEFORE PS-held token UTXO: [{"outpoint":{"transactionId":"91cdf24281acfba87f9cccb44dee1bf3540c458cd4ec46c6559fdab07a5b30e6","index":1},"amount":"60000000","covenantId":null}]
+[diag:step] proc.silverc.compile.bshard-artifacts ms=58 cmd=silverc ok=1 at=2026-10-03T23:51:19.075Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=31 cmd=silverc ok=1 at=2026-10-03T23:51:19.439Z
+Error: "some tests failed"
+23:51:22 NEG H1_token_amount_short: consensus=REJECTED ✓ | debugger={"pass":false,"lineNo":659,"reqLine":"validateOutputStateWithInputTemplate(tokenOutIdx, TokenState {"}
+23:51:22    node text: {"status":200,"ok":true,"error":"RPC Server (remote error) -> Rejected transaction 6300f3fc066efd54af4154f2b6e67593ca5ccfc56bc931ce9b8cf43648aadb14: failed to verify the signature script: script ran, but verification failed","phase":"execution"}
+Error: "some tests failed"
+23:51:25 NEG H2_token_owner_wrong: consensus=REJECTED ✓ | debugger={"pass":false,"lineNo":659,"reqLine":"validateOutputStateWithInputTemplate(tokenOutIdx, TokenState {"}
+23:51:25    node text: {"status":200,"ok":true,"error":"RPC Server (remote error) -> Rejected transaction e8d66714b0428e45fe2e3d4995198accae95f9083a658372453e7f47ff04796f: failed to verify the signature script: script ran, but verification failed","phase":"execution"}
+[diag:step] proc.silverc.compile.bshard-artifacts ms=28 cmd=silverc ok=1 at=2026-10-03T23:51:25.875Z
+Error: "some tests failed"
+23:51:28 NEG H3_template_tampered: consensus=REJECTED ✓ | debugger={"pass":false,"lineNo":625,"reqLine":"require(blake2b(templateA + templateB + templateC + templateD) == closeZkTmplAnchor);"}
+23:51:28    node text: {"status":200,"ok":true,"error":"RPC Server (remote error) -> Rejected transaction d25fa27622999db57b497f81fef79a989fa787908198c93bf29548f0dfcb23bc: failed to verify the signature script: script ran, but verification failed","phase":"execution"}
+[diag:step] proc.silverc.compile.bshard-artifacts ms=28 cmd=silverc ok=1 at=2026-10-03T23:51:29.095Z
+Error: "some tests failed"
+23:51:31 NEG H4_state_tampered: consensus=REJECTED ✓ | debugger={"pass":false,"lineNo":644,"reqLine":"require(tx.outputs[zkOutIdx].scriptPubKey == byte[](new ScriptPubKeyP2SH(expectedCloseZkRedeemHash)));"}
+23:51:31    node text: {"status":200,"ok":true,"error":"RPC Server (remote error) -> Rejected transaction 51d8797170afcb7e06a81faa8ae54bf457e7d741f80366608b3b0c92e91b3263: failed to verify the signature script: script ran, but verification failed","phase":"execution"}
+23:51:31 after negatives PS/PS-token untouched: true
+23:51:38 HONEST zk-handoff-v2 => {"status":200,"ok":true,"marketId":"ext-pool-v07-1791070773452-lxj1k","txId":"29dc2749c272c49dc8961315c842314ef2e562622b3c182d860d1337ba49486d","closeZkAddress":"kaspasim:pqnhcy3mpvjj3kz7zewhhyqqzwnhw5f3kqnaukhjwekgyu69uju4z4sj9e95p","closeZkRedeemHex":"6b0800000000000000000801000000000000002000000000000000000000000000000000000000000000000000000000000000000800c39dd0000000000800000000000000000800000000000000000800000000000000000800000000000000000800000000000000000800000000000000000800000000000000000800000000000000000800000000000000000800000000000000000800000000000000000800000000000000000800000000000000000800000000000000000800000000000000000800000000000000000800000000000000006c7604677c426a8763
+23:51:38 AFTER PS UTXO: [] | PS-held token: []
+23:51:38 AFTER CloseZkV2 UTXO: [{"outpoint":{"transactionId":"29dc2749c272c49dc8961315c842314ef2e562622b3c182d860d1337ba49486d","index":0},"amount":"20000000","covenantId":null}]
+23:51:38 AFTER 新 KTT UTXO (amount=3500000000, owner=新 CloseZkV2 cov 298a61625100…): [{"outpoint":{"transactionId":"29dc2749c272c49dc8961315c842314ef2e562622b3c182d860d1337ba49486d","index":1},"amount":"60000000","covenantId":null}]
+23:51:38 DB zk_continuation: {"outpoint":{"txid":"29dc2749c272c49dc8961315c842314ef2e562622b3c182d860d1337ba49486d","index":0},"redeemHex":"6b0800000000000000000801000000000000002000000000000000000000000000000000000000000000000000000000000000000800c39dd00000000008000000000000000008000000000000000008000000000000000008000000000000000008000000000000000008000000000000000008000000000000000008000000000000000008000000000000000008000
+23:51:38 SUMMARY {"psGone":true,"closeZk":1,"newToken":1,"zkCovBound":false}

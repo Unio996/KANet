@@ -1,0 +1,6 @@
+  RUN   H1_token_amount_short
+  FAIL  H1_token_amount_short
+        Error: WrongGenesisCovenantId(0, 5a05497f6eefd319235e172626f1c99e286b62f03aff9a62adbe528945a00461)
+
+1 tests: 0 passed, 1 failed
+Error: "some tests failed"
