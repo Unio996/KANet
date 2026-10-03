@@ -1,0 +1,73 @@
+[zk-prove-server] ZK_PROVE_SERVER_TOKEN not set — server NOT started (fail-closed, not fail-open).
+[zk-prove-worker] cron NOT started — ZK_PROVE_WORKER_ENABLED!=1 (真实 RISC0 proving + 真 KAS 注资, 默认不自动跑)
+[bshard-close-voter-v2] cron NOT started — BSHARD_CLOSE_VOTER_V2_ENABLED!=1 (默认不自动签, 设=1 供受控 live e2e)
+[bshard-close-submit-v2] cron NOT started — BSHARD_CLOSE_SUBMIT_V2_ENABLED!=1 (唯一新造 money-path tick, 默认不自动广播)
+[settle-daemon] 16:56:56 disabled (SETTLE_DAEMON_ENABLED!=1)·not starting
+[settle-daemon] 16:56:56 zkCloseTickV2 disabled (ZK_CLOSE_TICK_V2_ENABLED!=1)·not starting
+[settle-daemon] 16:56:56 claimAutonomousTick disabled (ZK_CLAIM_TICK_ENABLED!=1)·not starting
+[settle-daemon] 16:56:56 zkHandoffAutonomousTick disabled (ZK_HANDOFF_TICK_ENABLED!=1)·not starting
+[settle-daemon] 16:56:56 zkJudgeProposeAutonomousTick disabled (ZK_JUDGE_PROPOSE_TICK_ENABLED!=1)·not starting
+[zk-prove-job-stuck-alert] started — tick=300000ms, threshold=15min(占位待校准) (只读监控, 去重落 events 表非内存, 每tick含首个都全量检查不建baseline)
+[zk-prove-server] ZK_PROVE_SERVER_TOKEN not set — server NOT started (fail-closed, not fail-open).
+[zk-prove-worker] cron NOT started — ZK_PROVE_WORKER_ENABLED!=1 (真实 RISC0 proving + 真 KAS 注资, 默认不自动跑)
+[bshard-close-voter-v2] cron NOT started — BSHARD_CLOSE_VOTER_V2_ENABLED!=1 (默认不自动签, 设=1 供受控 live e2e)
+[bshard-close-submit-v2] cron NOT started — BSHARD_CLOSE_SUBMIT_V2_ENABLED!=1 (唯一新造 money-path tick, 默认不自动广播)
+[settle-daemon] 16:58:00 disabled (SETTLE_DAEMON_ENABLED!=1)·not starting
+[settle-daemon] 16:58:00 zkCloseTickV2 disabled (ZK_CLOSE_TICK_V2_ENABLED!=1)·not starting
+[settle-daemon] 16:58:00 claimAutonomousTick disabled (ZK_CLAIM_TICK_ENABLED!=1)·not starting
+[settle-daemon] 16:58:00 zkHandoffAutonomousTick disabled (ZK_HANDOFF_TICK_ENABLED!=1)·not starting
+[settle-daemon] 16:58:00 zkJudgeProposeAutonomousTick disabled (ZK_JUDGE_PROPOSE_TICK_ENABLED!=1)·not starting
+[zk-prove-job-stuck-alert] started — tick=300000ms, threshold=15min(占位待校准) (只读监控, 去重落 events 表非内存, 每tick含首个都全量检查不建baseline)
+[zk-prove-server] ZK_PROVE_SERVER_TOKEN not set — server NOT started (fail-closed, not fail-open).
+[zk-prove-worker] cron NOT started — ZK_PROVE_WORKER_ENABLED!=1 (真实 RISC0 proving + 真 KAS 注资, 默认不自动跑)
+[bshard-close-voter-v2] cron NOT started — BSHARD_CLOSE_VOTER_V2_ENABLED!=1 (默认不自动签, 设=1 供受控 live e2e)
+[bshard-close-submit-v2] cron NOT started — BSHARD_CLOSE_SUBMIT_V2_ENABLED!=1 (唯一新造 money-path tick, 默认不自动广播)
+[settle-daemon] 16:59:13 disabled (SETTLE_DAEMON_ENABLED!=1)·not starting
+[settle-daemon] 16:59:13 zkCloseTickV2 disabled (ZK_CLOSE_TICK_V2_ENABLED!=1)·not starting
+[settle-daemon] 16:59:13 claimAutonomousTick disabled (ZK_CLAIM_TICK_ENABLED!=1)·not starting
+[settle-daemon] 16:59:13 zkHandoffAutonomousTick disabled (ZK_HANDOFF_TICK_ENABLED!=1)·not starting
+[settle-daemon] 16:59:13 zkJudgeProposeAutonomousTick disabled (ZK_JUDGE_PROPOSE_TICK_ENABLED!=1)·not starting
+[zk-prove-job-stuck-alert] started — tick=300000ms, threshold=15min(占位待校准) (只读监控, 去重落 events 表非内存, 每tick含首个都全量检查不建baseline)
+[zk-prove-server] ZK_PROVE_SERVER_TOKEN not set — server NOT started (fail-closed, not fail-open).
+[zk-prove-worker] cron started (30s tick) — ZK_PROVE_WORKER_ENABLED=1
+[bshard-close-voter-v2] cron started (30s tick) — BSHARD_CLOSE_VOTER_V2_ENABLED=1 (受控 live e2e 模式)
+[bshard-close-submit-v2] cron started (30s tick) — BSHARD_CLOSE_SUBMIT_V2_ENABLED=1 (受控 live e2e 模式)
+[settle-daemon] 17:02:20 disabled (SETTLE_DAEMON_ENABLED!=1)·not starting
+[settle-daemon] 17:02:20 zkCloseTickV2 starting·tick=10000ms
+[settle-daemon] 17:02:20 claimAutonomousTick starting·tick=10000ms
+[settle-daemon] 17:02:20 zkHandoffAutonomousTick starting·tick=10000ms
+[settle-daemon] 17:02:20 zkJudgeProposeAutonomousTick starting·tick=10000ms
+[zk-prove-job-stuck-alert] started — tick=300000ms, threshold=15min(占位待校准) (只读监控, 去重落 events 表非内存, 每tick含首个都全量检查不建baseline)
+[bshard-close-voter-v2] tick: 0 pending | signed=0 refused=0 skipped=0 errored=0
+[bshard-close-voter-v2] tick: 0 pending | signed=0 refused=0 skipped=0 errored=0
+[bshard-close-voter-v2] tick: 0 pending | signed=0 refused=0 skipped=0 errored=0
+[bshard-close-voter-v2] tick: 0 pending | signed=0 refused=0 skipped=0 errored=0
+[bshard-close-voter-v2] tick: 0 pending | signed=0 refused=0 skipped=0 errored=0
+[bshard-close-voter-v2] tick: 0 pending | signed=0 refused=0 skipped=0 errored=0
+[bshard-close-voter-v2] tick: 0 pending | signed=0 refused=0 skipped=0 errored=0
+[zk-autonomy] 17:05:34 tick: 1 candidate(s) | proposed=0 cooling=0 skipped=0 errored=1
+[bshard-close-voter-v2] tick: 0 pending | signed=0 refused=0 skipped=0 errored=0
+[bshard-close-voter-v2] tick: 0 pending | signed=0 refused=0 skipped=0 errored=0
+[bshard-close-voter-v2] tick: 0 pending | signed=0 refused=0 skipped=0 errored=0
+[bshard-close-voter-v2] tick: 0 pending | signed=0 refused=0 skipped=0 errored=0
+[bshard-close-voter-v2] tick: 0 pending | signed=0 refused=0 skipped=0 errored=0
+[bshard-close-voter-v2] tick: 0 pending | signed=0 refused=0 skipped=0 errored=0
+[bshard-close-voter-v2] tick: 0 pending | signed=0 refused=0 skipped=0 errored=0
+[bshard-close-voter-v2] tick: 0 pending | signed=0 refused=0 skipped=0 errored=0
+[bshard-close-voter-v2] tick: 0 pending | signed=0 refused=0 skipped=0 errored=0
+[bshard-close-voter-v2] tick: 0 pending | signed=0 refused=0 skipped=0 errored=0
+[zk-autonomy] 17:10:34 tick: 1 candidate(s) | proposed=0 cooling=0 skipped=0 errored=1
+[bshard-close-voter-v2] tick: 0 pending | signed=0 refused=0 skipped=0 errored=0
+[bshard-close-voter-v2] tick: 0 pending | signed=0 refused=0 skipped=0 errored=0
+[bshard-close-voter-v2] tick: 0 pending | signed=0 refused=0 skipped=0 errored=0
+[bshard-close-voter-v2] tick: 0 pending | signed=0 refused=0 skipped=0 errored=0
+[bshard-close-voter-v2] tick: 0 pending | signed=0 refused=0 skipped=0 errored=0
+[bshard-close-voter-v2] tick: 0 pending | signed=0 refused=0 skipped=0 errored=0
+[bshard-close-voter-v2] tick: 0 pending | signed=0 refused=0 skipped=0 errored=0
+[bshard-close-voter-v2] tick: 0 pending | signed=0 refused=0 skipped=0 errored=0
+[bshard-close-voter-v2] tick: 0 pending | signed=0 refused=0 skipped=0 errored=0
+[bshard-close-voter-v2] tick: 0 pending | signed=0 refused=0 skipped=0 errored=0
+[zk-autonomy] 17:15:37 tick: 1 candidate(s) | proposed=0 cooling=0 skipped=0 errored=1
+[bshard-close-voter-v2] tick: 0 pending | signed=0 refused=0 skipped=0 errored=0
+[bshard-close-voter-v2] tick: 0 pending | signed=0 refused=0 skipped=0 errored=0
+[bshard-close-voter-v2] tick: 0 pending | signed=0 refused=0 skipped=0 errored=0

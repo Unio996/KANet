@@ -1,0 +1,7 @@
+pool(6): oracle-6,oracle-5,oracle-4,oracle-2,oracle-1,oracle-3 | maker_pk in pool? false | bettors: 2
+A 真实盘(maker=broker, 2 注者均不在池): exclude=[maker,broker,...bettors]: OK committee=oracle-6,oracle-3,oracle-1,oracle-2,oracle-4
+B maker 恰在池内(1 个被排除 → 剩 5): OK committee=oracle-1,oracle-5,oracle-3,oracle-4,oracle-2
+C maker 与 broker 是池内两个不同委员(2 个被排除 → 剩 4): THROW pool must have >= 5 members after excludePks filter (got 4, excluded 4)
+D maker 在池内 + 1 个注者也在池内(2 个被排除 → 剩 4): THROW pool must have >= 5 members after excludePks filter (got 4, excluded 2)
+500 次抽样每委员入选次数(排除 0): {"oracle-4":407,"oracle-5":413,"oracle-1":422,"oracle-2":412,"oracle-3":420,"oracle-6":426} → 6 选 5 ⇒ 每次必有 1 人落选, 期望入选率≈83%
+本机 is_oracle=1 的 relay: e2e-oracle-1,e2e-oracle-2,e2e-oracle-3,e2e-oracle-4,e2e-oracle-5,e2e-oracle-6 | 池成员全部在本机 is_oracle 集合内? true

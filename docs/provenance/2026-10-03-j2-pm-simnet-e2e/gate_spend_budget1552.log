@@ -1,0 +1,8 @@
+17:11:35 gate addr kaspasim:ppmjtdyc7hdxqdrsmuh357askdm44gku7ue54c3ct092grsgr97g2c5y26jv5 redeem bytes 833 sigScript bytes 966
+17:11:35 fund tx 23824a0dca1dc376a790d574e08ee827f0491283e0a48c5e42a198af2d1898c6
+17:11:35 gate utxo value sompi 100000000
+17:11:35 fee 1000 rejected (node raw): RPC Server (remote error) -> Rejected transaction 3060def301e5bfcdcf01de92d4e846f6a91e4da1fa836c3b9f11f4297b78050f: transaction 3060def301e5bfcdcf01de92d4e846f6a91e4da1fa836c3b9f11f4297b78050f is not standard: transaction has 1000 fees which is under the required amount of 15672600 for compute mass 
+17:11:35 fee 100000 rejected (node raw): RPC Server (remote error) -> Rejected transaction 3506dfe694aee2c817ad394fe69c6480b391b7ddbfbf4c05ff3e1f32ca72e1fb: transaction 3506dfe694aee2c817ad394fe69c6480b391b7ddbfbf4c05ff3e1f32ca72e1fb is not standard: transaction has 100000 fees which is under the required amount of 15672600 for compute mas
+17:11:35 node-required fee (sompi) = 15672600
+17:11:35 ACCEPTED spend of ZK gate: txid cd89a0db4f9b6a3f7393929eac8643f4f2e6919a44488aa4af8a7338e7f7e1cc fee paid sompi 16456230 (0.1645623 KAS) | gate value 100000000
+17:11:38 output landed on bank? true

@@ -1,0 +1,21 @@
+17:11:19 gate addr kaspasim:ppmjtdyc7hdxqdrsmuh357askdm44gku7ue54c3ct092grsgr97g2c5y26jv5 redeem bytes 833 sigScript bytes 966
+17:11:20 fund tx 0a52b6cc0f9b7853d563f6a4d893287b56192ecaf4324e9cae45d3ac406b3fb5
+17:11:20 gate utxo value sompi 100000000
+17:11:20 fee 1000 rejected (node raw): RPC Server (remote error) -> Rejected transaction f43690f13cb8edcf6edf5e907bd2936cb61709842640b0ef9e51c0d5cdca1ff7: transaction f43690f13cb8edcf6edf5e907bd2936cb61709842640b0ef9e51c0d5cdca1ff7 is not standard: transaction has 1000 fees which is under the required amount of 15752600 for compute mass 
+17:11:20 fee 100000 rejected (node raw): RPC Server (remote error) -> Rejected transaction d654bc6d090d18c0d3d35970ac3405d3a429be0b1c62ce1bf5ae7d84118b6786: transaction d654bc6d090d18c0d3d35970ac3405d3a429be0b1c62ce1bf5ae7d84118b6786 is not standard: transaction has 100000 fees which is under the required amount of 15752600 for compute mas
+17:11:20 node-required fee (sompi) = undefined
+D:\kanet-tn12\scratch\_j2_wt_pm_e2e\kasia-relay\node_modules\kaspa-wasm\kaspa.js:15501
+    const ret = new Error(getStringFromWasm0(arg0, arg1));
+                ^
+
+Error: RPC Server (remote error) -> Rejected transaction 479bea181a8cef7a1c15c3ee07a7b502d29a93e4fe45d5b23e91d9710e2a1d61: transaction 479bea181a8cef7a1c15c3ee07a7b502d29a93e4fe45d5b23e91d9710e2a1d61 is not standard: transaction has 5000000 fees which is under the required amount of 15752600 for compute mass 157526
+    at module.exports.__wbindgen_error_new (D:\kanet-tn12\scratch\_j2_wt_pm_e2e\kasia-relay\node_modules\kaspa-wasm\kaspa.js:15501:17)
+    at wasm://wasm/02cfe956:wasm-function[751]:0x332dc6
+    at wasm://wasm/02cfe956:wasm-function[3466]:0x673020
+    at wasm://wasm/02cfe956:wasm-function[9518]:0x8754d8
+    at wasm://wasm/02cfe956:wasm-function[9517]:0x8754ca
+    at __wbg_adapter_78 (D:\kanet-tn12\scratch\_j2_wt_pm_e2e\kasia-relay\node_modules\kaspa-wasm\kaspa.js:1453:10)
+    at real (D:\kanet-tn12\scratch\_j2_wt_pm_e2e\kasia-relay\node_modules\kaspa-wasm\kaspa.js:174:20)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+
+Node.js v24.14.1

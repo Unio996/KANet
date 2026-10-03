@@ -1,0 +1,19 @@
+16:59:44 oracle-1 enroll {"ok":true,"status":"enrolled","p2sh":"kaspasim:pqn259v3u59lx6exgpee7elxc8gct9fhtdkswjn06flthsl950pzgjq4tet0v","broadcast":{"ok":true,"txId":"79578b54c1f70179584acb21e70f1df8353169fc85b65db7f575760d447473bc,b22dc76d48a20617107644a97599c1e3ce8518a530fd32f3b8e93292c2cbd686"}}
+16:59:46 oracle-1 stake transfer {"status":200,"ok":true,"txId":"ca1227ec5ba422cac357bbca70a0a588baccbfd53b2711d87052eaae98349a01","fee":"0.032047"}
+16:59:47 oracle-1 node UTXO @stake p2sh: {"txid":"ca1227ec5ba422cac357bbca70a0a588baccbfd53b2711d87052eaae98349a01","index":0,"amount":"105000000","daa":"2872"}
+16:59:48 oracle-2 enroll {"ok":true,"status":"enrolled","p2sh":"kaspasim:pzqtdy9pxqr5amudkvdqrzvpvdcg3rldcxscjp38ewlethzeyg0dcldetna2f","broadcast":{"ok":true,"txId":"57d0fb333e92f4484d1965509685c4c80cbf2a61400d23aede70f8e13c2f7ed1,976423090a588f0aa91579eb989937d651f598d162ad334052936cbfe87ca40d"}}
+16:59:51 oracle-2 stake transfer {"status":200,"ok":true,"txId":"e2801a5958983beb84adf619a324544cf7eb8fd462d87ce9a1a02bad80382390","fee":"0.032047"}
+16:59:51 oracle-2 node UTXO @stake p2sh: {"txid":"e2801a5958983beb84adf619a324544cf7eb8fd462d87ce9a1a02bad80382390","index":0,"amount":"105000000","daa":"2883"}
+16:59:53 oracle-3 enroll {"ok":true,"status":"enrolled","p2sh":"kaspasim:prqxem0rz4wx2z0pagnjwcjtad0945v27phezezw9r67sc4peye76mtwe6tm3","broadcast":{"ok":true,"txId":"45d1b9fe463ebfb65d2c952c47dbaf60cbe6c9d8c60dbdd8ee6be0a411622e71,5908c189eaf04d1f9b420a495437c9c0e3a8dbce784450d1c6f4f6673c9f8122"}}
+16:59:55 oracle-3 stake transfer {"status":200,"ok":true,"txId":"8968abfb0ddf9066c45f484775be41e9d024bba685fdd9a3523ca80c3050ee7e","fee":"0.032047"}
+16:59:56 oracle-3 node UTXO @stake p2sh: {"txid":"8968abfb0ddf9066c45f484775be41e9d024bba685fdd9a3523ca80c3050ee7e","index":0,"amount":"105000000","daa":"2894"}
+16:59:57 oracle-4 enroll {"ok":true,"status":"enrolled","p2sh":"kaspasim:pqq5g8fmkgn8ma0fcq8ghzztxh8p0kg55dw5fr6x4dtrlh36pl0juwz0ag7d6","broadcast":{"ok":true,"txId":"6041e554d5f275ebc51d54883f51453d2badd4c13eb6cfdc9976cc15c1907830,0ad4c7e89ad7de552e18e351fe40d3d85221e787a10d69fbf11d95ddf917f9ec"}}
+17:00:00 oracle-4 stake transfer {"status":200,"ok":true,"txId":"28574391a7d83663b4790a5da4162a06ddb24b2484570a634630e27728863c58","fee":"0.032047"}
+17:00:00 oracle-4 node UTXO @stake p2sh: {"txid":"28574391a7d83663b4790a5da4162a06ddb24b2484570a634630e27728863c58","index":0,"amount":"105000000","daa":"2905"}
+17:00:02 oracle-5 enroll {"ok":true,"status":"enrolled","p2sh":"kaspasim:prazlvqn0zwe06hj4sdus9rva4hkygvhxunydgjeqnwmwp5qczt46gxt8wjcu","broadcast":{"ok":true,"txId":"cb611087f72c3866ff32e259aec1ec04b670fca4abeda92c137341b392b9cf5d,a930b91be1c80f8b7482280f46762ff4169d1b2642a0c566d91833631eb8310a"}}
+17:00:04 oracle-5 stake transfer {"status":200,"ok":true,"txId":"75a69e15e520dede3862436c2a56c06ce422665e44f7dff12be071de44da3128","fee":"0.032047"}
+17:00:05 oracle-5 node UTXO @stake p2sh: {"txid":"75a69e15e520dede3862436c2a56c06ce422665e44f7dff12be071de44da3128","index":0,"amount":"105000000","daa":"2916"}
+17:00:06 oracle-6 enroll {"ok":true,"status":"enrolled","p2sh":"kaspasim:pqk6ey0jkvfphpwh98xy89qsx7latguq7cyyehph8rjw64pjcnhj55xslck0u","broadcast":{"ok":true,"txId":"7d19262a3240d73f8d12ae4fd7dfbb2c4b15dcc2f9518e4a2a524a6ac3c584d5,f147a2d2baff65d64c068287ed5932e48e00faea2acd5f40d93e61ac0e9fee11"}}
+17:00:09 oracle-6 stake transfer {"status":200,"ok":true,"txId":"c666b164a331fae4969dc0a2113ffafaa09be83cc89047c9ac111e777fc8ccea","fee":"0.032047"}
+17:00:09 oracle-6 node UTXO @stake p2sh: {"txid":"c666b164a331fae4969dc0a2113ffafaa09be83cc89047c9ac111e777fc8ccea","index":0,"amount":"105000000","daa":"2927"}
+17:00:11 chain-snapshot {"ok":true,"poolSize":6,"scanned":6,"valid":6,"rejected":0,"snapshotDaa":2330,"currentDaa":2930,"merkleRoot":"b87ed192d87ea152f4931c397600e31ca055dd0d1285c19ff34815b6d04704fc"}

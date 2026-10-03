@@ -1,0 +1,21 @@
+17:11:13 gate addr kaspasim:ppmjtdyc7hdxqdrsmuh357askdm44gku7ue54c3ct092grsgr97g2c5y26jv5 redeem bytes 833 sigScript bytes 966
+17:11:13 fund tx 209f4c43dd8f0960aece03e492c066b61e66663583e9d7cec51d5e8f94d8ed54
+17:11:14 gate utxo value sompi 100000000
+17:11:14 fee 1000 rejected (node raw): RPC Server (remote error) -> Rejected transaction 674ae49528180bbda0080570bebd295a17d98b5433476e5609b1225f5406fc09: failed to verify the signature script: ZK Integrity: Kaspa txscript error: script units exceeded the amount committed in the input: used=15502875, limit=15009999
+17:11:14 fee 100000 rejected (node raw): RPC Server (remote error) -> Rejected transaction 1b743217e3748e481e4cf2f2ec45fd51efb6a96f6f74415bc651fad731dcf19f: failed to verify the signature script: ZK Integrity: Kaspa txscript error: script units exceeded the amount committed in the input: used=15502875, limit=15009999
+17:11:14 node-required fee (sompi) = undefined
+D:\kanet-tn12\scratch\_j2_wt_pm_e2e\kasia-relay\node_modules\kaspa-wasm\kaspa.js:15501
+    const ret = new Error(getStringFromWasm0(arg0, arg1));
+                ^
+
+Error: RPC Server (remote error) -> Rejected transaction 8851eb06972f3dc28a5f760bf09b52d8207eba80605e56bc365dc647e89b27c7: failed to verify the signature script: ZK Integrity: Kaspa txscript error: script units exceeded the amount committed in the input: used=15502875, limit=15009999
+    at module.exports.__wbindgen_error_new (D:\kanet-tn12\scratch\_j2_wt_pm_e2e\kasia-relay\node_modules\kaspa-wasm\kaspa.js:15501:17)
+    at wasm://wasm/02cfe956:wasm-function[751]:0x332dc6
+    at wasm://wasm/02cfe956:wasm-function[3466]:0x673020
+    at wasm://wasm/02cfe956:wasm-function[9518]:0x8754d8
+    at wasm://wasm/02cfe956:wasm-function[9517]:0x8754ca
+    at __wbg_adapter_78 (D:\kanet-tn12\scratch\_j2_wt_pm_e2e\kasia-relay\node_modules\kaspa-wasm\kaspa.js:1453:10)
+    at real (D:\kanet-tn12\scratch\_j2_wt_pm_e2e\kasia-relay\node_modules\kaspa-wasm\kaspa.js:174:20)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+
+Node.js v24.14.1

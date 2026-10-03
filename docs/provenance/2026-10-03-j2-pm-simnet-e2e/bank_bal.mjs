@@ -1,0 +1,14 @@
+import { createRequire } from 'node:module';
+import { readFileSync } from 'node:fs';
+const require = createRequire('D:/kanet-tn12/scratch/_j2_wt_pm_e2e/kasia-relay/');
+const { RpcClient, Encoding, PrivateKey } = require('kaspa-wasm');
+const rpc = new RpcClient({ url: 'ws://127.0.0.1:29717', encoding: Encoding.Borsh, networkId: 'simnet' });
+await rpc.connect({});
+const priv = new PrivateKey(readFileSync('D:/kanet-tn12/scratch/_j2_pm_e2e_sim/bank.key', 'utf8').trim());
+const addr = priv.toPublicKey().toAddress('simnet').toString();
+const b = await rpc.getBalanceByAddress({ address: addr });
+const d = await rpc.getBlockDagInfo();
+console.log(addr, 'balance KAS', Number(b.balance) / 1e8, 'daa', d.virtualDaaScore);
+const { entries } = await rpc.getUtxosByAddresses([addr]);
+console.log('utxos', entries.length, entries[0] && Number(entries[0].amount ?? entries[0].utxoEntry?.amount) / 1e8);
+await rpc.disconnect(); process.exit(0);

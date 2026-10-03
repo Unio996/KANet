@@ -1,0 +1,203 @@
+{
+ "note": "simnet 彩排证据快照(无私钥; simnet 币无价值)",
+ "relays_public": {
+  "maker": {
+   "id": "822e7998-4e5f-4387-8ca0-f2eb976ad95a",
+   "address": "kaspasim:qz4cq5lwvklr766xc34gkhvt2wghqa8wpaf0tz4s4rsuyg9e8xepvqcpnukdq",
+   "xonly": "ab8053ee65be3f6b46c46a8b5d8b53917074ee0f52f58ab0a8e1c220b939b216"
+  },
+  "settler": {
+   "id": "ca9be2ca-b2b2-4058-aba9-2547296db21b",
+   "address": "kaspasim:qzvac6t4smc0psjg73npk4gauvnre60lckzmwga3k6vxrhnpkdsskk23d05gy",
+   "xonly": "99dc697586f0f0c248f4661b551de3263ce9ffc585b723b1b69861de61b3610b"
+  },
+  "fee": {
+   "id": "76d32887-5316-41ea-9273-af103455fe86",
+   "address": "kaspasim:qzqtdugfef4nxm7r37ndxr3p4qw6wr9a3usg7gpwvc3qh4zrta3fgmq72573g",
+   "xonly": "80b6f109ca6b336fc38fa6d30e21a81da70cbd8f208f202e66220bd4435f6294"
+  },
+  "bettorA": {
+   "id": "f0b78b53-a96e-4f70-801c-92ef4c54680f",
+   "address": "kaspasim:qq9fq6q30a4pzmc5vfc2vgh0zvwuh889gshgedlgt8pscy5uy03z54jyf29z5",
+   "xonly": "0a9068117f6a116f146270a622ef131dcb9ce5442e8cb7e859c30c129c23e22a"
+  },
+  "bettorB": {
+   "id": "bc4a4325-5c23-428b-847c-0433143b96c9",
+   "address": "kaspasim:qzwj0w8zh60cpwhypq4pjwzh8dqckk5hlj3w6p2ywx8ntxestualuegqe2qey",
+   "xonly": "9d27b8e2be9f80bae4082a1938573b418b5a97fca2ed0544718f359b305f3bfe"
+  },
+  "oracle-1": {
+   "id": "9de2bec7-9049-4cf7-966a-60d05ea81b90",
+   "address": "kaspasim:qrt5lnyhfuq8fm8a9ea7agm8v5zfg3s65997453z7rf0kwx3kt6evnv6pms07",
+   "xonly": "d74fcc974f0074ecfd2e7beea367650494461aa14bead222f0d2fb38d1b2f596"
+  },
+  "oracle-2": {
+   "id": "5e91bcc7-094e-4a80-b6c5-40bbde8e5708",
+   "address": "kaspasim:qzcpcudsa78wqtp6t9p3umu5ug8h7zgaa5yt3xrpe4sddqvy4rxdujzztsvmw",
+   "xonly": "b01c71b0ef8ee02c3a59431e6f94e20f7f091ded08b89861cd60d68184a8ccde"
+  },
+  "oracle-3": {
+   "id": "49f7e841-caad-4fc0-91ac-bbc207d69e9a",
+   "address": "kaspasim:qrup69kk6x5e3d54f09kjsk9veluweqjjk7y5tjlhljw0fv6k4w95lwaljfg3",
+   "xonly": "f81d16d6d1a998b6954bcb6942c5667fc7641295bc4a2e5fbfe4e7a59ab55c5a"
+  },
+  "oracle-4": {
+   "id": "8b6b5d75-9fe1-482e-9883-62a7a922b5eb",
+   "address": "kaspasim:qz3p0dgqg34dh426kq75gu6epan2sg0vaw3ct3yvzuh8wcpy8na3khc0a4aa6",
+   "xonly": "a217b500446adbd55ab03d4473590f66a821eceba385c48c172e7760243cfb1b"
+  },
+  "oracle-5": {
+   "id": "483d0b68-b1b6-4e48-b4af-d6517fe3cfbb",
+   "address": "kaspasim:qzpjkl4048xq0w2lz60m48066wshr93mzc54wpt4p3cwh06man2wyfg5w3c64",
+   "xonly": "832b7eafa9cc07b95f169fba9dfad3a171963b16295705750c70ebbf5becd4e2"
+  },
+  "oracle-6": {
+   "id": "277f1156-009e-46a6-98c1-3281afecba29",
+   "address": "kaspasim:qp5ylg9g0cwt5j2tltgxd7depuu5n0j2jr85jhfyfpnf96fydr24v6968vunf",
+   "xonly": "684fa0a87e1cba494bfad066f9b90f3949be4a90cf495d24486692e92468d556"
+  }
+ },
+ "market": {
+  "id": "ext-pool-v07-1791046984583-04gyh",
+  "protocol_status": "verifying",
+  "deadline": 1791047114,
+  "deadline_daa": 5402,
+  "pool_merkle_root": "b87ed192d87ea152f4931c397600e31ca055dd0d1285c19ff34815b6d04704fc",
+  "spine_p2sh": "kaspasim:pzmuvf99qqtpzm2x8j4zg5vyc4y99huv76t2al5q3se8sj43zcjujmwj20dux",
+  "spine_lock_tx": "51ba655c6abf025ce8eb1d7bc449817312ddc85d98a12b1f98419dd6b20ae6c1",
+  "maker_pk": "ab8053ee65be3f6b46c46a8b5d8b53917074ee0f52f58ab0a8e1c220b939b216",
+  "broker_pk": "ab8053ee65be3f6b46c46a8b5d8b53917074ee0f52f58ab0a8e1c220b939b216",
+  "resolution_rule_spec": "{\"title\":\"simnet e2e parity market 1791046984567\",\"resolution_criteria\":\"blockhash at DAA 5463: last byte even => YES, odd => NO\",\"data_source_canonical\":\"kaspa-simnet:blockhash_parity@5463\",\"judge_type\":\"blockhash_parity\",\"target_daa\":5463,\"zk_native\":true}",
+  "metadata_head": "{\"spine_redeem_script_hex\":\"6b6c76009c637500013d79013679ac637651937768013c79013579ac637651937768013b79013479ac637651937768013a79013379ac637651937768013979013279ac6376519377687654a269013779009c013879519c9b690135790135797e0134797e0133797e0132797eaa013979876901307900a2690130790200019f69013579aa0131795297009c6376012a797eaa7767012979787eaa776801317952965297009c63760129797eaa7767012879787eaa776801317954"
+ },
+ "market_shards": [
+  {
+   "shard_market_id": "ext-pool-v07-1791046984583-04gyh-s0",
+   "shard_index": 0,
+   "status": "open",
+   "current_leaf_outpoint": "858083e04c2ccedd5bbe604dbfa930050086a13d17d38bdc32921b5d30952f7b:0",
+   "current_leaf_state": "{\"local_yes\":1000000000,\"local_no\":2000000000,\"count\":2,\"pool_value\":3000000000}",
+   "current_token_outpoint": "858083e04c2ccedd5bbe604dbfa930050086a13d17d38bdc32921b5d30952f7b:2"
+  }
+ ],
+ "payout_shards": [
+  {
+   "logical_market_id": "ext-pool-v07-1791046984583-04gyh",
+   "covenant_family": "v2_zk",
+   "payout_ps_outpoint": "d191a4e0130a108deeeb76d3c35ca336738db014a73905a30bdab2c6a7fe6c8c:0",
+   "payout_cov_id": "8234a2c470ddd18e0b41951f5de9bbce48b597c75ca8e8f123c65c832c695117",
+   "token_tmpl_hash": "225ebcdec51f5439326e6bc48e47c288ceacbd3bea07aea6771548eeed44d80e",
+   "claim_tmpl_hash": "395949e1b6079c79bc5c36565188fd67afca7b75fd37adf264bd44bdbefd21e1",
+   "market_suffix_hash": "0000000000000000000000000000000000000000000000000000000000000000"
+  }
+ ],
+ "bettor_sides": [
+  {
+   "market_id": "ext-pool-v07-1791046984583-04gyh-s0",
+   "bettor_pk": "0a9068117f6a116f146270a622ef131dcb9ce5442e8cb7e859c30c129c23e22a",
+   "direction": 0,
+   "stake_amount": 1000000000,
+   "side_lock_tx": "6da731493c779b45110b4a853fef9cbe3ad87d491416d5eba63a0177563366ce"
+  },
+  {
+   "market_id": "ext-pool-v07-1791046984583-04gyh-s0",
+   "bettor_pk": "9d27b8e2be9f80bae4082a1938573b418b5a97fca2ed0544718f359b305f3bfe",
+   "direction": 1,
+   "stake_amount": 2000000000,
+   "side_lock_tx": "858083e04c2ccedd5bbe604dbfa930050086a13d17d38bdc32921b5d30952f7b"
+  }
+ ],
+ "pool_chain_view": [
+  {
+   "snapshot_daa": 8368,
+   "pool_size": 6,
+   "merkle_root": "b87ed192d87ea152f4931c397600e31ca055dd0d1285c19ff34815b6d04704fc",
+   "derived_at": "2026-10-03 17:12:20"
+  },
+  {
+   "snapshot_daa": 5884,
+   "pool_size": 6,
+   "merkle_root": "b87ed192d87ea152f4931c397600e31ca055dd0d1285c19ff34815b6d04704fc",
+   "derived_at": "2026-10-03 17:07:20"
+  },
+  {
+   "snapshot_daa": 3632,
+   "pool_size": 6,
+   "merkle_root": "b87ed192d87ea152f4931c397600e31ca055dd0d1285c19ff34815b6d04704fc",
+   "derived_at": "2026-10-03 17:03:20"
+  }
+ ],
+ "zk_events": [
+  {
+   "event_type": "zkJudgeProposeTick_propose_error",
+   "summary": "zkJudgeProposeTick_propose market=83-04gyh: consolidate shard 0 no land: {\"error\":\"bshard insufficient input: Σin 70000000 < Σout 3020000000 + fee 3000000\",\"phase\":\"execution\"}",
+   "created_at": "2026-10-03 17:05:34"
+  },
+  {
+   "event_type": "zkJudgeProposeTick_propose_error",
+   "summary": "zkJudgeProposeTick_propose market=83-04gyh: consolidate shard 0 no land: {\"error\":\"bshard insufficient input: Σin 70000000 < Σout 3020000000 + fee 3000000\",\"phase\":\"execution\"}",
+   "created_at": "2026-10-03 17:10:34"
+  },
+  {
+   "event_type": "zkJudgeProposeTick_propose_error",
+   "summary": "zkJudgeProposeTick_propose market=83-04gyh: consolidate shard 0 no land: {\"error\":\"bshard insufficient input: Σin 70000000 < Σout 3020000000 + fee 3000000\",\"phase\":\"execution\"}",
+   "created_at": "2026-10-03 17:15:37"
+  }
+ ],
+ "oracle_enrollments": [
+  {
+   "staker_pk_x": "d74fcc974f0074ecfd2e7beea367650494461aa14bead222f0d2fb38d1b2f596",
+   "lock_until_daa": 5002865,
+   "p2sh_addr": "kaspasim:pqn259v3u59lx6exgpee7elxc8gct9fhtdkswjn06flthsl950pzgjq4tet0v",
+   "source": "chain_envelope",
+   "active": 1,
+   "outpoint_txid": "ca1227ec5ba422cac357bbca70a0a588baccbfd53b2711d87052eaae98349a01",
+   "amount_sompi": "105000000"
+  },
+  {
+   "staker_pk_x": "b01c71b0ef8ee02c3a59431e6f94e20f7f091ded08b89861cd60d68184a8ccde",
+   "lock_until_daa": 5002865,
+   "p2sh_addr": "kaspasim:pzqtdy9pxqr5amudkvdqrzvpvdcg3rldcxscjp38ewlethzeyg0dcldetna2f",
+   "source": "chain_envelope",
+   "active": 1,
+   "outpoint_txid": "e2801a5958983beb84adf619a324544cf7eb8fd462d87ce9a1a02bad80382390",
+   "amount_sompi": "105000000"
+  },
+  {
+   "staker_pk_x": "f81d16d6d1a998b6954bcb6942c5667fc7641295bc4a2e5fbfe4e7a59ab55c5a",
+   "lock_until_daa": 5002865,
+   "p2sh_addr": "kaspasim:prqxem0rz4wx2z0pagnjwcjtad0945v27phezezw9r67sc4peye76mtwe6tm3",
+   "source": "chain_envelope",
+   "active": 1,
+   "outpoint_txid": "8968abfb0ddf9066c45f484775be41e9d024bba685fdd9a3523ca80c3050ee7e",
+   "amount_sompi": "105000000"
+  },
+  {
+   "staker_pk_x": "a217b500446adbd55ab03d4473590f66a821eceba385c48c172e7760243cfb1b",
+   "lock_until_daa": 5002865,
+   "p2sh_addr": "kaspasim:pqq5g8fmkgn8ma0fcq8ghzztxh8p0kg55dw5fr6x4dtrlh36pl0juwz0ag7d6",
+   "source": "chain_envelope",
+   "active": 1,
+   "outpoint_txid": "28574391a7d83663b4790a5da4162a06ddb24b2484570a634630e27728863c58",
+   "amount_sompi": "105000000"
+  },
+  {
+   "staker_pk_x": "832b7eafa9cc07b95f169fba9dfad3a171963b16295705750c70ebbf5becd4e2",
+   "lock_until_daa": 5002865,
+   "p2sh_addr": "kaspasim:prazlvqn0zwe06hj4sdus9rva4hkygvhxunydgjeqnwmwp5qczt46gxt8wjcu",
+   "source": "chain_envelope",
+   "active": 1,
+   "outpoint_txid": "75a69e15e520dede3862436c2a56c06ce422665e44f7dff12be071de44da3128",
+   "amount_sompi": "105000000"
+  },
+  {
+   "staker_pk_x": "684fa0a87e1cba494bfad066f9b90f3949be4a90cf495d24486692e92468d556",
+   "lock_until_daa": 5002865,
+   "p2sh_addr": "kaspasim:pqk6ey0jkvfphpwh98xy89qsx7latguq7cyyehph8rjw64pjcnhj55xslck0u",
+   "source": "chain_envelope",
+   "active": 1,
+   "outpoint_txid": "c666b164a331fae4969dc0a2113ffafaa09be83cc89047c9ac111e777fc8ccea",
+   "amount_sompi": "105000000"
+  }
+ ]
+}

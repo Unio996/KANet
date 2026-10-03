@@ -1,0 +1,94 @@
+   Compiling serde_core v1.0.228
+   Compiling num-traits v0.2.19
+   Compiling num-integer v0.1.46
+   Compiling serde v1.0.228
+   Compiling bytes v1.12.0
+   Compiling ark-std v0.5.0
+   Compproving with ReceiptKind::Groth16 (this is much heavier than Composite — expect a long wait)...
+PROVE_EXIT=101 2026-10-04T00:16:18+07:00
+cu_properties_data v2.2.0
+   Compiling ark-ff v0.5.0
+   Compiling http v1.4.2
+   Compiling risc0-zkp v3.0.4
+   Compiling http-body v1.0.1
+   Compiling semver v1.0.28
+   Compiling httparse v1.10.1
+   Compiling icu_normalizer v2.2.0
+   Compiling icu_properties v2.2.0
+   Compiling postcard v1.1.3
+   Compiling idna_adapter v1.2.2
+   Compiling ruint v1.19.0
+   Compiling ark-poly v0.5.0
+   Compiling hyper v1.10.1
+   Compiling risc0-binfmt v3.0.4
+   Compiling ark-relations v0.5.1
+   Compiling serde_json v1.0.150
+   Compiling ark-ec v0.5.0
+   Compiling idna v1.1.0
+   Compiling toml_datetime v0.6.11
+   Compiling serde_spanned v0.6.9
+   Compiling num-iter v0.1.45
+   Compiling hyper-util v0.1.20
+   Compiling num-bigint-dig v0.8.6
+   Compiling toml_edit v0.22.27
+   Compiling tower v0.5.3
+   Compiling url v2.5.8
+   Compiling tokio-rustls v0.26.4
+   Compiling ark-snark v0.5.1
+   Compiling serde_urlencoded v0.7.1
+   Compiling ark-crypto-primitives v0.5.0
+   Compiling rsa v0.9.10
+   Compiling camino v1.2.4
+   Compiling hyper-rustls v0.27.9
+   Compiling toml v0.8.23
+   Compiling tower-http v0.6.11
+   Compiling http-body-util v0.1.3
+   Compiling tokio-util v0.7.18
+   Compiling serde_with v3.21.0
+   Compiling cargo-platform v0.1.9
+   Compiling risc0-circuit-keccak v4.0.5
+   Compiling cargo_metadata v0.19.2
+   Compiling rzup v0.5.1
+   Compiling reqwest v0.12.28
+   Compiling risc0-circuit-recursion v4.0.4
+   Compiling ark-groth16 v0.5.0
+   Compiling ark-bn254 v0.5.0
+   Compiling risc0-circuit-rv32im v4.0.4
+   Compiling risc0-build v3.0.5
+   Compiling bonsai-sdk v1.4.2
+   Compiling risc0-groth16 v3.0.4
+   Compiling prost v0.13.5
+   Compiling methods v0.1.0 (/mnt/d/kanet-tn12/scratch/_j2_wt_pm_e2e/zk-payout-guest/methods)
+   Compiling bincode v1.3.3
+   Compiling risc0-zkvm v3.0.5
+   Compiling host v0.1.0 (/mnt/d/kanet-tn12/scratch/_j2_wt_pm_e2e/zk-payout-guest/host)
+    Finished `release` profile [optimized + debuginfo] target(s) in 1m 21s
+     Running `/mnt/d/kanet-tn12/scratch/_j2_wt_pm_e2e/zk-payout-guest/target/release/host /mnt/d/kanet-tn12/scratch/_j2_wt_pm_e2e/zk-payout-guest/inputs/3o6cs_input.json /mnt/d/kanet-tn12/scratch/_j2_wt_pm_e2e/docs/provenance/2026-10-03-j2-pm-simnet-e2e/zk_proof_out/rehearsal`
+
+thread 'main' (29454) panicked at host/src/main.rs:82:69:
+called `Result::unwrap()` on an `Err` value: Please install docker first.
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+Command exited with non-zero status 101
+	Command being timed: "cargo run --release -- /mnt/d/kanet-tn12/scratch/_j2_wt_pm_e2e/zk-payout-guest/inputs/3o6cs_input.json /mnt/d/kanet-tn12/scratch/_j2_wt_pm_e2e/docs/provenance/2026-10-03-j2-pm-simnet-e2e/zk_proof_out/rehearsal"
+	User time (seconds): 88.57
+	System time (seconds): 12.51
+	Percent of CPU this job got: 73%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 2:17.49
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 1661020
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 26312
+	Minor (reclaiming a frame) page faults: 3043560
+	Voluntary context switches: 282307
+	Involuntary context switches: 3260
+	Swaps: 0
+	File system inputs: 7639
+	File system outputs: 97024
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 101

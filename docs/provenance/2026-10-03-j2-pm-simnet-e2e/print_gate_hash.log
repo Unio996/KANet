@@ -1,0 +1,8 @@
+{
+ "imageId": "c9918501d90bf0aeaaf7970816078c81e8286c08293ccf388e87a7cab023ce30",
+ "TOOLCHAIN_lock_canonical": "c9918501d90bf0aeaaf7970816078c81e8286c08293ccf388e87a7cab023ce30",
+ "sample_image_id": "c9918501d90bf0aeaaf7970816078c81e8286c08293ccf388e87a7cab023ce30",
+ "computed_gate_tmpl_hash": "4ec7ca3d46db552d87f90636ebefe681f9995249423d52ac30b8c7f258043ac7",
+ "ZK_GATE_const": "4ec7ca3d46db552d87f90636ebefe681f9995249423d52ac30b8c7f258043ac7",
+ "equal": true
+}
