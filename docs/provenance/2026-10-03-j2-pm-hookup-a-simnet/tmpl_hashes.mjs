@@ -1,0 +1,18 @@
+import { pathToFileURL } from 'node:url';
+const W='D:/kanet-tn12/scratch/_j2_wt_pm_a/kasia-console/src/lib/';
+const imp=(p)=>import(pathToFileURL(W+p).href);
+process.env.KASPA_NETWORK='mainnet'; process.env.DB_PATH=process.env.DB_PATH||'D:/kanet-tn12/scratch/_j2_pm_a_simnet/tmpl.db';
+const A=await imp('pool-bshard-artifacts.mjs'); const T=await imp('pool-template-artifact.mjs');
+const z=(c)=>c.repeat(64);
+const claimCompiled=A.compileSilV100(W+'KanetTokenClaim.sil',[A.ctorBytes32V100(z('1')),A.ctorBytes32V100(z('2')),A.ctorIntV100(5),A.ctorBytes32V100(z('3'))],'KanetTokenClaim');
+const claimA=T.extractTemplateArtifactV100(claimCompiled);
+const claimB=T.extractTemplateArtifactV100(A.compileSilV100(W+'KanetTokenClaim.sil',[A.ctorBytes32V100(z('9')),A.ctorBytes32V100(z('8')),A.ctorIntV100(77),A.ctorBytes32V100(z('7'))],'KanetTokenClaim'));
+console.log('claim_tmpl_hash (dummy ctor A) =',claimA.templateHashHex);
+console.log('claim_tmpl_hash (dummy ctor B) =',claimB.templateHashHex,' same=',claimA.templateHashHex===claimB.templateHashHex);
+const t1=A.computeKttTokenArtifact({amount:0,ownerCovIdHex:'00'.repeat(32)}); const t1b=A.computeKttTokenArtifact({amount:99,ownerCovIdHex:'11'.repeat(32)});
+console.log('KTT v1 token_tmpl_hash =',t1.templateHashHex,' invariant=',t1.templateHashHex===t1b.templateHashHex);
+const t2=A.computeKttV2TokenArtifact({amount:0,ownerScheme:0,ownerBytesHex:'00'.repeat(32)});
+console.log('KTT v2 token_tmpl_hash =',t2.templateHashHex);
+const anchors=JSON.parse((await import('node:fs')).readFileSync('D:/kanet-tn12/scratch/_j2_wt_pm_a/kasia-console/scripts/proto-v0-template-anchors.json','utf8'));
+console.log('anchors.json contracts:',Object.entries(anchors.contracts).map(([k,v])=>k+':'+(v.templateHashHex||v.token_tmpl_hash||'?')).join(' | '));
+console.log('anchors extra keys:',JSON.stringify(Object.keys(anchors.contracts)));

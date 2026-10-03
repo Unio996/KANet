@@ -1,0 +1,4 @@
+[stake2] stake p2sh = kaspasim:pr7z3vxr9z0mr867hz3vxuz3s99vn3svr4walq0r9xqq58wtw3amg0v6qla35
+[stake2] fund tx = d753d9f024a0f00b0798909c8c12493a65d0d5781e665164db250e4a7dae22d9
+[stake2] POS timeout_unlock (fee 300000) ACCEPTED txId = 5fda2912f8e0f2196ee5165462c7d6dfac6740a2d98b54fd8080c660ee76f166
+[stake2] unlock output landed at staker = true

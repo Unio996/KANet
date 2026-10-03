@@ -18,12 +18,12 @@ import { assertNotCommingled } from '../lib/pool-commingle-detect.mjs';
 import { getSidesByLogicalMarket } from '../lib/pool-bettor-sides-query.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 import { verifyIngestRequest } from '../services/ingest-auth.js';  // P1 fix (NWT): broker-fee-dm PII 端点 auth
-import { REORG_SAFE_MIN_DEPTH } from '../lib/pool-shard-register.mjs';  // #33 整顿(NWT review): 单一具名常量取代多处硬编码 20
+import { REORG_SAFE_MIN_DEPTH, readZkTemplateHashes } from '../lib/pool-shard-register.mjs';  // #33 整顿(NWT review): 单一具名常量取代多处硬编码 20
 import { ZK_GATE } from '../lib/zk-close-builder.mjs';
 import { ensureGateTmplHashFresh } from '../lib/gate-tmpl-hash.mjs';
 import { kaspaZk } from '../services/zk-prove-worker.mjs';
 import { checkAdminSecretTier } from '../lib/admin-secret-tier.mjs';
-import { assertAddressOnNetwork } from '../lib/kaspa-network.mjs';   // (b) 网络单一源 (设计 v0.2 §3): 前缀只对照 env KASPA_NETWORK, 不从地址推网络
+import { assertAddressOnNetwork, configuredNetwork } from '../lib/kaspa-network.mjs';   // (b) 网络单一源 (设计 v0.2 §3): 前缀只对照 env KASPA_NETWORK, 不从地址推网络
 
 // 件⑤步骤2 疑似死端点命中计数(2026-07-16, KANet-UI, Owner终裁+Bettor #nig8da 派工): observe-only,
 // 零业务逻辑影响, 持久化(跨重启存活)——4个疑似死端点各挂一次调用, 7天观察窗到期零命中才走删除决策,
@@ -124,7 +124,10 @@ const SOURCE_KIND_DERIVERS = {
   'kaspa-onchain': (p) => {
     const tx = p?.tx_hash;
     if (!tx || typeof tx !== 'string' || !/^[0-9a-fA-F]{64}$/.test(tx)) throw new Error('kaspa-onchain 需 tx_hash (64 hex)');
-    return `https://api-tn12.kaspa.org/transactions/${tx}`;
+    // 账本 1813 A2: 原写死 api-tn12(主网市场的证据 URL 会指向不存在的链)。网络单一源; 表同 kasia-relay/src/lib/api.mjs API_ENDPOINTS。
+    const _apiBase = { 'mainnet': 'https://api.kaspa.org', 'testnet-12': 'https://api-tn12.kaspa.org' }[configuredNetwork()];
+    if (!_apiBase) throw new Error(`kaspa-onchain 源在网络 ${configuredNetwork()} 上没有公网 API`);
+    return `${_apiBase}/transactions/${tx}`;
   },
 };
 
@@ -160,6 +163,20 @@ function deriveXOnlyPubkey(address) {
 // 🔴 单一真值(2026-07-08, Bettor #bo75z6): 曾经两处调用点(monolithic /register-v07 + /register-v07/confirm)
 // 各自独立读取这段逻辑, 后者漏抄导致 cswib 首证撞见的 zk_native=true 市场静默铸成 V1 PayoutShard 事故——
 // 抽成这一个共享函数, 两处调用同一份, 不再各自维护各自的副本(今晚已两次撞"两套并行实现同族病"教训)。
+// 账本 1813 A1: 下注注册入口的三个模板值——与结算侧 bshard-close-transport.mjs buildZkHandoffRequestV2 同一个读取函数
+// (pool-shard-register.mjs readZkTemplateHashes)。缺/坏 ⇒ 在【任何转账/广播之前】给清晰 400, 不让它在创世编译深处才 throw。
+// 返回 { tokenTmplHash, claimTmplHash, marketSuffixHash } 或 null(已回 400)。
+function _zkTemplateHashesOrReject(reply) {
+  const t = readZkTemplateHashes();
+  if (t.ok) return { tokenTmplHash: t.tokenTmplHash, claimTmplHash: t.claimTmplHash, marketSuffixHash: t.marketSuffixHash };
+  reply.code(400).send({
+    ok: false, error: 'zk_template_env_missing',
+    message: `服务端缺少代币化模板配置, 暂不能创建市场的首注创世: ${[...t.missing.map((n) => n + ' 未设'), ...t.malformed.map((n) => n + ' 不是 32 字节十六进制')].join('; ')}`,
+    missing: t.missing, malformed: t.malformed,
+  });
+  return null;
+}
+
 function _resolveZkNativeCtorExtras(market, computeCloseZkTmplAnchor) {
   let zkNative = false, closeZkTmplAnchor = null;
   try { zkNative = JSON.parse(market.resolution_rule_spec || '{}')?.zk_native === true; } catch {}
@@ -1138,7 +1155,7 @@ export async function registerPoolRoutes(fastify) {
         const { url: rpcUrl } = await getWorkingRpc();
         if (!requireRpcUrl(rpcUrl, 'pool.publish.auto-root')) return reply.code(503).send({ ok: false, error: 'no working Kaspa RPC node — retry shortly' });   // C13
         const { RpcClient, Encoding } = await import('kaspa-wasm');
-        const network = process.env.KASPA_NETWORK || 'testnet-12';
+        const network = configuredNetwork();   // 账本 1813 A2: 原为 env 缺省回退到 testnet-12
         const FINALITY_N = parseInt(process.env.ORACLE_POOL_FINALITY_N, 10) || 600;
         const rpc = new RpcClient({ url: rpcUrl, encoding: Encoding.Borsh, networkId: network });
         await rpc.connect();
@@ -1486,6 +1503,8 @@ export async function registerPoolRoutes(fastify) {
     if (market.protocol_version !== 'v0.7') return reply.code(409).send({ ok: false, error: `register-v07 requires protocol_version v0.7, got ${market.protocol_version}` });
     if (market.protocol_status !== 'pending_bettors') return reply.code(409).send({ ok: false, error: `market status=${market.protocol_status}, registration closed` });
     if (!market.pool_merkle_root) return reply.code(409).send({ ok: false, error: 'v0.7 market missing pool_merkle_root (committee)' });
+    const _zkTmpl = _zkTemplateHashesOrReject(reply);
+    if (!_zkTmpl) return;
 
     // FINDING-2 (NWT) ③ 入口闸 — 单源守卫 (commit1 此处内联, 现迁 shared assertNotCommingled = call-site 单源).
     //   commingled spine_p2sh 被 >1 v0.7 市场共享 → 跨市场替换风险. entry-block ≠ status-cancel (J1 decoupling):
@@ -1516,7 +1535,7 @@ export async function registerPoolRoutes(fastify) {
     if (freshBettor) {
       if (!/^[0-9a-f]{64}$/i.test(b.bettor_pk)) return reply.code(400).send({ ok: false, error: 'bettor_pk must be 64-hex x-only pubkey' });
       bettorPk = b.bettor_pk.toLowerCase();
-      network = 'testnet-12';
+      network = configuredNetwork();   // 账本 1813 A2: 原写死 'testnet-12'(主网会算出 kaspatest 地址)
     } else {
       if (oracleIds.includes(b.bettor_relay_id)) return reply.code(403).send({ ok: false, error: 'bettor is in market oracle set (area-1 exclusivity)' });
       const bettorRow = sqlite.prepare('SELECT id, address FROM relay_nodes WHERE id = ?').get(b.bettor_relay_id);
@@ -1605,6 +1624,7 @@ export async function registerPoolRoutes(fastify) {
         poolMerkleRoot: market.pool_merkle_root, predicateCommit,
         bettorPk, direction, stakeSompi, relayAddr, silverc, sealCount: 32, deadline: market.deadline,
         createShardMarketRow, recordBettor,
+        ..._zkTmpl,   // 账本 1813 A1: tokenTmplHash/claimTmplHash/marketSuffixHash
         zkNative: _zkNative, closeZkTmplAnchor: _closeZkTmplAnchor,   // 非 zkNative 市场: false/null，等价于不传，行为不变
       });
       return reply.send({ ok: true, logical_market_id: logicalMarketId, bettor_pk: bettorPk, ...result });
@@ -1646,6 +1666,8 @@ export async function registerPoolRoutes(fastify) {
     if (!market.pool_merkle_root) { reply.code(409).send({ ok: false, error: 'v0.7 market missing pool_merkle_root (committee)' }); return null; }
     // 件1 (J1 deadline-gate): ShardLeaf bakes deadline as the partial-shard sweep gate. fail-closed if missing.
     if (!Number.isFinite(Number(market.deadline)) || Number(market.deadline) <= 0) { reply.code(409).send({ ok: false, error: 'v0.7 market missing deadline (partial-shard sweep gate, 件1)' }); return null; }
+    const zkTmpl = _zkTemplateHashesOrReject(reply);   // 账本 1813 A1: 付款/转账之前就拒(prep 与 confirm 共用本 prelude)
+    if (!zkTmpl) return null;
     // NOTE: FINDING-2 ③ commingled guard is enforced INLINE in each register* handler (R-COMMINGLE-GUARD convention —
     //   the guard must be visible in the handler body, not hidden in a helper; see prep/confirm below).
     let bettorPk;
@@ -1693,7 +1715,7 @@ export async function registerPoolRoutes(fastify) {
           stake_kas=excluded.stake_kas, created_at=excluded.created_at
       `).run(logicalMarketId, bettorPk, v.direction, String(b.bet_id || ''), payAddr, payAmountSompi, v.stakeAmount / 1e8, Math.floor(Date.now() / 1000));
     } catch (e) { console.warn(`[pool.js#19] pool_bet_preps持久化失败(不阻断prep/confirm主流程): ${e.message}`); }
-    return { v, market, bettorPk, gatewayRelayId, payAddr, perBetRedeem: perBet.redeem_hex, relayAddr, network, payAmountSompi, logicalMarketId };
+    return { v, market, bettorPk, gatewayRelayId, payAddr, perBetRedeem: perBet.redeem_hex, relayAddr, network, payAmountSompi, logicalMarketId, zkTmpl };
   }
 
   // POST /api/pool/market/:id/bettor/register-v07/prep — B step 1: compute pay address + exact pay amount (NO TX, no state change).
@@ -1741,7 +1763,7 @@ export async function registerPoolRoutes(fastify) {
     const p = await _v07PrepConfirmPrelude(logicalMarketId, request.body || {}, reply);
     if (!p) return;
     logicalMarketId = p.logicalMarketId;   // #28-followup: prelude resolved a shard id → its logical parent (re-bet routing)
-    const { v, market, bettorPk, gatewayRelayId, payAddr, perBetRedeem, network, payAmountSompi } = p;
+    const { v, market, bettorPk, gatewayRelayId, payAddr, perBetRedeem, network, payAmountSompi, zkTmpl } = p;
     // FINDING-2 ③ commingled guard (单源·inline per R-COMMINGLE-GUARD convention).
     if (assertNotCommingled(market, reply, sqlite)) return;
 
@@ -1866,6 +1888,7 @@ export async function registerPoolRoutes(fastify) {
         poolMerkleRoot: market.pool_merkle_root, predicateCommit,
         bettorPk, direction: v.direction, stakeSompi: v.stakeAmount, relayAddr, silverc, sealCount: 32, deadline: market.deadline,
         createShardMarketRow, recordBettor,
+        ...zkTmpl,   // 账本 1813 A1: tokenTmplHash/claimTmplHash/marketSuffixHash
         zkNative: _zkNative, closeZkTmplAnchor: _closeZkTmplAnchor,   // 非 zkNative 市场: false/null，等价于不传，行为不变
       });
       // 🔴 #28 (B) wire-3/3 报销: bet 已注册 → sweep per-bet P2SH 付款回 gateway(补偿 gateway 垫的 stake)。

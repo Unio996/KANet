@@ -14,6 +14,7 @@ import { join } from 'node:path';
 
 // db/client.js 非 console 入口无 DB_PATH 即 throw(规则 74 根治); 给它一个临时空库, 本用例不读不写任何表。
 process.env.DB_PATH = join(mkdtempSync(join(tmpdir(), 'ppg-gate-')), 'empty.db');
+process.env.KASPA_NETWORK = 'testnet-12';   // 账本 1813 A2: 被测门不再默认 testnet-12(configuredNetwork 未设即 fail-closed); 本测夹具 networkId 全是 testnet-12, 显式设置
 const { _tick, _readNodeSynced } = await import('./preprune-capture-worker.mjs');
 
 let fails = 0;

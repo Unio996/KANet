@@ -23,6 +23,7 @@ import { wrapTick } from '../lib/diag-step.mjs';   // M10 v2 observe-only (2026-
 import { writeFileSync, readFileSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { configuredNetwork } from '../lib/kaspa-network.mjs';   // 账本 1813 A2: 网络单一源, 未设即 throw
 import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { sqlite } from '../db/client.js';
@@ -69,7 +70,8 @@ export function spawnCargoProve(inputJsonPath, outputBasename) {
     const wslOutputBase = toWslPath(outputBasename);
     // 不用 shell:true(Node DEP0190 警告 + 非必要注入面)——wsl.exe 本身的 args 数组已经安全传递,
     // -lc 后面那一整条命令字符串是唯一必须拼接的地方, 全部值来自本函数自己构造的路径(非外部输入)。
-    const child = spawn('wsl.exe', ['-e', 'bash', '-lc', `cd '${wslCwd}' && cargo run --release -- '${wslInput}' '${wslOutputBase}'`]);
+    // 账本 1813 A3: 显式指定发行版(RISC0 工具链装在 Ubuntu-24.04; 不指定会落到 WSL 默认发行版, 主网机上是 docker-desktop)。env ZK_PROVE_WSL_DISTRO 可覆盖。
+    const child = spawn('wsl.exe', ['-d', process.env.ZK_PROVE_WSL_DISTRO || 'Ubuntu-24.04', '-e', 'bash', '-lc', `cd '${wslCwd}' && cargo run --release -- '${wslInput}' '${wslOutputBase}'`]);
     let stderr = '';
     const timer = setTimeout(() => { child.kill('SIGKILL'); reject(new Error(`spawnCargoProve: timeout after ${PROVE_TIMEOUT_MS}ms, killed`)); }, PROVE_TIMEOUT_MS);
     child.stderr.on('data', (d) => { stderr += d.toString(); });
@@ -97,7 +99,7 @@ export async function buildAndFundGate(imageIdHex, journalDigestHex, receiptHex,
   const finalized = builder.finalizeWithGroth16FixedJournalProof(receiptHex);
   const { sigScript, redeemScript } = finalized;
   const spk = kaspa.payToScriptHashScript(new Uint8Array(Buffer.from(redeemScript, 'hex')));
-  const gateAddr = kaspa.addressFromScriptPublicKey(spk, 'testnet-12').toString();
+  const gateAddr = kaspa.addressFromScriptPublicKey(spk, configuredNetwork()).toString();   // 账本 1813 A2: 原写死 'testnet-12' ⇒ 主网会把 gate 资金转向 kaspatest 地址
 
   const kasAmount = GATE_FUND_SOMPI / 1e8;
   const tr = await sendCommandAsync(relayId, { type: 'transfer', target: gateAddr, amount: Number(kasAmount.toFixed(8)) }, 90_000, 'internal');
