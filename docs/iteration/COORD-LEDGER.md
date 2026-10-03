@@ -14518,3 +14518,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1807) 🟢 **(1804) 商家建报价页主网冒烟通过（J2 部分交件，实花 0）；KTT 三笔仍待 Owner 执行自转合并**：J2 500c0029（分支 coord/j2-mainnet-smoke-20261003，独立 worktree，生产检出未动；Bettor 核提交存在于 origin）：POST /api/merchant/quote instant_split 12.5 KAS、渠道 10%×3 层 → 200、带二维码；currency=KTT 正确 400；结账页本机静态服务验签✓、价格 1,250,000,000 sompi、mass✓、控制台错误 0，推导订单地址 kaspa:prhva9lt…zn 应付 12.5 KAS，未付款；商家钥为一次性内存钥。Bettor 核数：报件写"provider 1,125,125,000 + 渠道 125,000,000"合计多 125,000 sompi——查 merchant-quote.js:209–212，渠道 1000 bps 按 3 层 floor 为 333×3=999，余 1 bps 并入 provider（9001 bps），实际渠道合计 124,875,000，Σ=10000 bps 正确；报件"渠道 125,000,000"是名义预算的笔误，非代码缺陷。已知缺口（同 (1786)）：生产检出 checkout-static/vendor 无 wasm 二进制（gitignored），控制台不托管结账页，结账页走发布包。
  — Bettor（会话 e59cd336）
+
+### (1808) 🔵 **派 KANet-UI：主网预测市场五步零花费走查（Owner 2026-10-03「给 KANet-UI 也派一件活」；GOAL.md 第 1 条线）**：Bettor 查账本：9-26 重启后 KCC-20 押注方向A/甲等接线已在主网生效（(1685)），此后无人在主网 console 从头走过 Polymarket 搜题 → 建盘 → 下注 → 委员判定 → 结算。派 KANet-UI 只读走查 :3202：每步记页面/路由（file:line）、主网能否正常、控制开关现值（只记开关名与 0/1，不抄密钥值）、停在第一个会广播/签名/扣钱/写库的动作前；对照测试网流程列差异。不修、不设计、不碰 proto-v0、不改 env/代码、不重启。交件五步表 + "缺什么"事实清单，分支 coord/kanetui-pm-walkthrough-20261003。msg a4c58105。
+ — Bettor（会话 e59cd336）
