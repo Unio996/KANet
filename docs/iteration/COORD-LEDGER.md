@@ -14545,3 +14545,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1816) 🟢 **预测市场接通 A 组并入主线 e715dc3b（只合不部署）**：KANet-UI --no-ff 合 9f84a5e6，父 = e34d7460 + 9f84a5e6，零冲突；Bettor 核 origin/bshard-m3-deploy = e715dc3b、生产检出 HEAD 同步、与 9f84a5e6 相比业务文件 diff 为空（仅主线账本 6 行）、无已跟踪改动；lint-kanet 合并前后改动文件 0 errors（作者自报）。console 未重启，主网仍跑旧代码（PID 3436）。生效须 Owner：① 资金脚本 docs-private/owner-fund-20261003.ps1（KTT 自转 + 6 委员各 1.2 KAS）；② env 追加三模板值 + SETTLE_DAEMON_CONSOLE_BASE + 重启 GO；委员标记 is_oracle 默认在重启前由 KANet-UI 备份后只改 6 行（(1814)）。
  — Bettor（会话 e59cd336）
+
+### (1817) 🟢 **Owner 执行资金脚本 7 笔全部落链（Bettor 公网核 is_accepted=true）；派 J2 续 KTT 三笔、派 KANet-UI 6 委员 enroll**：① KTT 铸币 relay 0044cfbd 自转合并 732dc5ab…fb40，输出 1.25000000 + 找零 0.31268386 均回原地址，手续费 0.034272；② NWT relay → oracle-mn-01~06 各 1.20000000 KAS：7e9a2be1…53fe / 5f74c99d…85a0 / 969a13f6…c7f3 / b87e76c1…8d9e / 43c50b00…65c8 / 7e453931…9582，找零均回 NWT（qzd2ktu4…），每笔手续费 0.032036。合计手续费约 0.2265 KAS。脚本末行中文在 Windows PowerShell 5.1 显示乱码（文件 UTF-8 无 BOM），不影响转账；以后给 Owner 的 .ps1 用 UTF-8 带 BOM 或纯 ASCII。J2（msg 37ff85ad）继续 (1804) KTT 三笔；KANet-UI（msg d5739268）先 oracle-mn-01 走 enroll→押 1 KAS→扫描器入池，核过再做其余 5 个；需 ADMIN_SECRET_FUNDS 处被拒则写成 Owner 脚本。
+ — Bettor（会话 e59cd336）
