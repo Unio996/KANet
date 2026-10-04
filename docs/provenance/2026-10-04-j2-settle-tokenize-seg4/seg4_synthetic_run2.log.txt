@@ -1,0 +1,80 @@
+01:12:01 ── refund_claim: 合成 PS(closed=2, payoutRoot=refund 树根, pool=3500000000) ──
+[diag:step] proc.silverc.compile.bshard-artifacts ms=32 cmd=silverc ok=1 at=2026-10-04T01:12:02.008Z
+01:12:02 PS genesis ce0e82429ba2eb9c2c89ef2e82f2a72afde23c9e160e637ec1515ba5d436823c cov 8081131d1686 tokens genesis 8731b67fa6959ff263cddc59bfbb7b317f1831b2799f8ec2dfa4abe0c06f938d
+[diag:step] proc.silverc.compile.bshard-artifacts ms=53 cmd=silverc ok=1 at=2026-10-04T01:12:03.323Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=19 cmd=silverc ok=1 at=2026-10-04T01:12:03.359Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=31 cmd=silverc ok=1 at=2026-10-04T01:12:03.398Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=29 cmd=silverc ok=1 at=2026-10-04T01:12:03.432Z
+Error: "some tests failed"
+[diag:step] proc.silverc.compile.bshard-artifacts ms=28 cmd=silverc ok=1 at=2026-10-04T01:12:06.704Z
+01:12:06 NEG refund/NA_amount_tampered: REJECTED ✓ | debugger={"pass":false,"lineNo":476,"reqLine":"require(cur == payoutRoot);"}
+01:12:06    text: {"status":200,"ok":true,"error":"RPC Server (remote error) -> Rejected transaction b7ecdafff3a57805f005c2b9152bc07a52f66d063a3d1742410b82cc2496b1f4: failed to verify the signature script: script ran, but verification failed","phase":"execution"}
+[diag:step] proc.silverc.compile.bshard-artifacts ms=30 cmd=silverc ok=1 at=2026-10-04T01:12:07.184Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=29 cmd=silverc ok=1 at=2026-10-04T01:12:07.220Z
+Error: "some tests failed"
+[diag:step] proc.silverc.compile.bshard-artifacts ms=28 cmd=silverc ok=1 at=2026-10-04T01:12:10.475Z
+01:12:10 NEG refund/NB_token_owner_wrong: REJECTED ✓ | debugger={"pass":false,"lineNo":525,"reqLine":"validateOutputStateWithInputTemplate(tokenOutIdx, TokenState {"}
+01:12:10    text: {"status":200,"ok":true,"error":"RPC Server (remote error) -> Rejected transaction 37523c9e69e9ba392bb41394c03289c39f6cf9948acc47d351b39266f10e1e24: failed to verify the signature script: script ran, but verification failed","phase":"execution"}
+[diag:step] proc.silverc.compile.bshard-artifacts ms=28 cmd=silverc ok=1 at=2026-10-04T01:12:10.944Z
+Error: "some tests failed"
+01:12:13 NEG refund/NC_self_continuation_tampered: REJECTED ✓ | debugger={"pass":false,"lineNo":582,"reqLine":"require(tx.outputs[selfOutIdx].scriptPubKey == byte[](rfcExpectedSpk));"}
+01:12:13    text: RPC Server (remote error) -> Rejected transaction 5d13e74b40ad8c8e69a0a9256811da7cdfc434e8d641763fd2fb5bef7b39baca: failed to verify the signature script: script ran, but verification failed
+01:12:13 refund: after negatives self UTXO count = 1
+[diag:step] proc.silverc.compile.bshard-artifacts ms=19 cmd=silverc ok=1 at=2026-10-04T01:12:14.228Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=28 cmd=silverc ok=1 at=2026-10-04T01:12:14.264Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=29 cmd=silverc ok=1 at=2026-10-04T01:12:14.297Z
+01:12:14 refund HONEST claim leaf 2 amount=500000000 isLast=false txId=8ef5132b23aebfb24c8c5d2457ff363a174ea00f2a29fd6458063a6297211ed0 newPool=3000000000
+01:12:15 refund ND double-claim: REJECTED ✓ {"status":200,"ok":true,"error":"bshard_refund_claim_v2: nullifier bit 已置位(merkle_index 2 已领过)","phase":"execution"}
+[diag:step] proc.silverc.compile.bshard-artifacts ms=31 cmd=silverc ok=1 at=2026-10-04T01:12:15.598Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=29 cmd=silverc ok=1 at=2026-10-04T01:12:15.632Z
+Error: "some tests failed"
+01:12:18 refund ND(VM, cli-debugger): {"pass":false,"lineNo":483,"reqLine":"if (word_idx == 0)       { require((w0 / mask) % 2 == 0); nw0 = w0 + mask; }"}
+[diag:step] proc.silverc.compile.bshard-artifacts ms=28 cmd=silverc ok=1 at=2026-10-04T01:12:18.912Z
+01:12:19 refund HONEST claim leaf 0 amount=1000000000 isLast=false txId=c687bf9cb2cec936ca4dd4e30cd4366299662c067e23fb04c872f50a3c992298 newPool=2000000000
+[diag:step] proc.silverc.compile.bshard-artifacts ms=21 cmd=silverc ok=1 at=2026-10-04T01:12:19.777Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=30 cmd=silverc ok=1 at=2026-10-04T01:12:19.816Z
+01:12:20 refund HONEST claim leaf 1 amount=2000000000 isLast=true txId=598c5677bc5a6a4454ab47a0374e57a00e8e225853fd0d00ab84c220edaddac7 newPool=0
+01:12:20 refund: 最后一位领完后 self(续约)UTXO = 0 (最后一笔无续约, 该地址上应为 0 笔——cur 指向倒数第二笔续约)
+01:12:20 ── escape: 合成 PS(closed=1, attestedAtMs=now−7h=1791051140239, refundRootBaked=refund 树根) → 生产 zk_handoff → escape_trigger → escape_claim ──
+[diag:step] proc.silverc.compile.bshard-artifacts ms=371 cmd=silverc ok=1 at=2026-10-04T01:12:20.618Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=371 cmd=silverc ok=1 at=2026-10-04T01:12:20.994Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=29 cmd=silverc ok=1 at=2026-10-04T01:12:21.857Z
+01:12:22 PS genesis f426e817d03534b08375ed72d67d0f0f47e8c397ac1e3e2e5f68109b36c652cb cov 29710a31fd1c
+[diag:step] proc.silverc.compile.bshard-artifacts ms=31 cmd=silverc ok=1 at=2026-10-04T01:12:23.153Z
+01:12:23 zk_handoff tx 7e3025898881061e01563b1492b99ab406f4e2abff34583c30718a9d2c931bd8 CloseZkV2 cov 774d14ed8c50
+Error: "some tests failed"
+01:12:25 NEG escape_trigger/early(lock_time=threshold−1): REJECTED ✓ {"status":200,"ok":true,"error":"RPC Server (remote error) -> Rejected transaction 49931ae017d3242c2324cc0c31e37f0b55f0f93fe9bc02f1b9440ae4cbf84824: failed to verify the signature script: Unsatisfied lock time: locktime requirement not satisfied -- locktime is greater than the transaction locktime:  | debugger= {"pass":false,"lineNo":126,"reqLine":"require(tx.time >= temporal(attestedAtMs + 21600000));           // ESCAPE_GRACE_MS=21600000(6h, 仍是占位数, 设计文档§4③要求团队另行签字确认时长)。v1.0.0: tx.time 只收 temporal, int 须显式 temporal(...) 转型(语义不变, 纯类型迁移)"}
+01:12:26 HONEST escape_trigger tx 3fac2853a88bfd0acb65b39c2051978b8764da983f2c7e2709c5051593ff9724 (closed 1→3)
+[diag:step] proc.silverc.compile.bshard-artifacts ms=19 cmd=silverc ok=1 at=2026-10-04T01:12:27.051Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=31 cmd=silverc ok=1 at=2026-10-04T01:12:27.091Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=30 cmd=silverc ok=1 at=2026-10-04T01:12:27.125Z
+Error: "some tests failed"
+[diag:step] proc.silverc.compile.bshard-artifacts ms=29 cmd=silverc ok=1 at=2026-10-04T01:12:28.938Z
+01:12:28 NEG escape/NA_amount_tampered: REJECTED ✓ | debugger={"pass":false,"lineNo":164,"reqLine":"require(cur == refundRootBaked);                                  // ★ 验对象是 refundRootBaked"}
+01:12:28    text: {"status":200,"ok":true,"error":"RPC Server (remote error) -> Rejected transaction 6b7c235fcadef2fcd4207f73b1880761ec33efd3e9b7d3484cc5f5973f7ae97a: failed to verify the signature script: script ran, but verification failed","phase":"execution"}
+[diag:step] proc.silverc.compile.bshard-artifacts ms=29 cmd=silverc ok=1 at=2026-10-04T01:12:29.417Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=28 cmd=silverc ok=1 at=2026-10-04T01:12:29.451Z
+Error: "some tests failed"
+[diag:step] proc.silverc.compile.bshard-artifacts ms=28 cmd=silverc ok=1 at=2026-10-04T01:12:31.265Z
+01:12:31 NEG escape/NB_token_owner_wrong: REJECTED ✓ | debugger={"pass":false,"lineNo":212,"reqLine":"validateOutputStateWithInputTemplate(tokenOutIdx, TokenState {"}
+01:12:31    text: {"status":200,"ok":true,"error":"RPC Server (remote error) -> Rejected transaction b4c71f406d3f6150602ede1706e2356d4654b5df6f0e2be490e7abdaf2ed6b31: failed to verify the signature script: script ran, but verification failed","phase":"execution"}
+[diag:step] proc.silverc.compile.bshard-artifacts ms=29 cmd=silverc ok=1 at=2026-10-04T01:12:31.731Z
+Error: "some tests failed"
+01:12:33 NEG escape/NC_self_continuation_tampered: REJECTED ✓ | debugger={"pass":false,"lineNo":264,"reqLine":"require(tx.outputs[selfOutIdx].scriptPubKey == byte[](escExpectedSpk));"}
+01:12:33    text: RPC Server (remote error) -> Rejected transaction e0c5775b566c7f54094d6a04fc58c07c528f3fb742d32e7496dc6c3151d4da13: failed to verify the signature script: script ran, but verification failed
+01:12:33 escape: after negatives self UTXO count = 1
+[diag:step] proc.silverc.compile.bshard-artifacts ms=19 cmd=silverc ok=1 at=2026-10-04T01:12:33.549Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=29 cmd=silverc ok=1 at=2026-10-04T01:12:33.587Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=30 cmd=silverc ok=1 at=2026-10-04T01:12:33.621Z
+01:12:34 escape HONEST claim leaf 2 amount=500000000 isLast=false txId=7785ae48e93d5a16e58c1940715b372ae17518cc5ae541745262f35b18140d1d newPool=3000000000
+01:12:34 escape ND double-claim: REJECTED ✓ {"status":200,"ok":true,"error":"closezk_v2_escape_claim: nullifier bit 已置位(merkle_index 2 已领过)","phase":"execution"}
+[diag:step] proc.silverc.compile.bshard-artifacts ms=31 cmd=silverc ok=1 at=2026-10-04T01:12:34.936Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=29 cmd=silverc ok=1 at=2026-10-04T01:12:34.970Z
+Error: "some tests failed"
+01:12:36 escape ND(VM, cli-debugger): {"pass":false,"lineNo":171,"reqLine":"if (word_idx == 0)       { require((w0 / mask) % 2 == 0); nw0 = w0 + mask; }"}
+[diag:step] proc.silverc.compile.bshard-artifacts ms=30 cmd=silverc ok=1 at=2026-10-04T01:12:36.782Z
+01:12:37 escape HONEST claim leaf 0 amount=1000000000 isLast=false txId=b860322d04ab9daaaaf860e1dc0208d8f7f3ec19ef22b5908cfb0156057af31b newPool=2000000000
+[diag:step] proc.silverc.compile.bshard-artifacts ms=20 cmd=silverc ok=1 at=2026-10-04T01:12:37.652Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=31 cmd=silverc ok=1 at=2026-10-04T01:12:37.690Z
+01:12:38 escape HONEST claim leaf 1 amount=2000000000 isLast=true txId=c762cad257ae2078542358f40b69c13ce1489bd65a148a3db0ddd8c32a99ecaf newPool=0
+01:12:38 escape: 最后一位领完后 self(续约)UTXO = 0 (最后一笔无续约, 该地址上应为 0 笔——cur 指向倒数第二笔续约)

@@ -1,0 +1,58 @@
+{
+ "market": "ext-pool-v07-1791072305023-vl1wf",
+ "status": "attested_v2",
+ "deadline": 1791072635,
+ "makerStake": "13000000000",
+ "negatives": {
+  "premature_lock_time": {
+   "rejected": true,
+   "text": "{\"status\":200,\"ok\":true,\"error\":\"RPC Server (remote error) -> Rejected transaction 909b94575e30adafb0b838208e76c8378142c5e9bf00bf0bd3d291d75a9b513c: failed to verify the signature script: Unsatisfied lock time: locktime requirement not satisfied -- locktime is greater than the transaction locktime: 1791079835000 > 1791079834000\",\"phase\":\"execution\"}"
+  },
+  "output_to_non_maker": {
+   "rejected": true,
+   "text": "{\"status\":200,\"ok\":true,\"error\":\"RPC Server (remote error) -> Rejected transaction 86f176d2162a894a91ef93a0d0d4b1061d2f389b054e093c78f76da423a042b2: failed to verify the signature script: script ran, but verification failed\",\"phase\":\"execution\"}"
+  },
+  "fee_below_min": {
+   "rejected": true,
+   "text": "{\"status\":200,\"ok\":true,\"error\":\"RPC Server (remote error) -> Rejected transaction 73374540f70cbc9933cc63d7b43aa94d092052c08b845bf60eebfdbd7e1387f9: failed to verify the signature script: script ran, but verification failed\",\"phase\":\"execution\"}"
+  },
+  "fee_above_max": {
+   "rejected": true,
+   "text": "{\"status\":200,\"ok\":true,\"error\":\"RPC Server (remote error) -> Rejected transaction 8dadf433c943f7f0e836ffc65896446404459603d2131a232fdd90295b0e1cfa: failed to verify the signature script: script ran, but verification failed\",\"phase\":\"execution\"}"
+  }
+ },
+ "reclaimOrchestration": [
+  {
+   "id": "ext-pool-v07-1791072305023-vl1wf",
+   "ok": false,
+   "reason": "容器②完成证据未通过(hasVerifiedContainer2Evidence=false)——bettor 侧未确认终态前不放 maker bond"
+  }
+ ],
+ "negativesLeftSpineUntouched": true,
+ "before": {
+  "spine": [
+   "518c0ab174e13773fab4b25f58f6ce89efceae2237a7935f765bfedae5ba6fae:0=13000000000"
+  ],
+  "maker": [
+   "f09bd9b883f0854d21d02cf0e90ada917071609b2d4d14ea58b77fd694ea9d6f:1=99000000",
+   "51dd40faef07da984f63c4043719ac0fa4e964b580c8d4d5bbbd7f22ad7ce997:1=500778400",
+   "23b0e21eecfb6148858c0231094d8772566188fe81e1cd59af410ab7185f8128:3=65000000",
+   "0c44994d2e74f05a206de7ca928e0ed9e85d71e7904c9382ad65ef36239d859c:0=2200000000",
+   "3a761f581ef413a4cc7143ffb2be8bb41d55e8a76226a61a0fd9b201425d81c2:0=7290977700",
+   "862604be7f7d2ed25e9d174191645f9cd126fd8b28f37915d9dcce2fa1537733:1=99000000",
+   "3a761f581ef413a4cc7143ffb2be8bb41d55e8a76226a61a0fd9b201425d81c2:1=149691400",
+   "90aee09b7bd774fb4f794556c6e8bcf4a8864ebba4542a8876919f870a1d9ae8:1=99000000",
+   "366997435189af6e332f57cfa8da2772a265ee5c812b6e82f65c53e99102823c:1=99000000",
+   "d5291f6fae8105c30cbd6a0732f6cb9e312c1f346b188d2b2a37d43c2996cb0d:3=65000000"
+  ]
+ },
+ "honest": {
+  "txId": "7e96294b931033f9d208f0edd6aeb10c1bd648b6be229573258fa35cf4d13d88",
+  "after": {
+   "spine": [],
+   "maker": [
+    "7e96294b931033f9d208f0edd6aeb10c1bd648b6be229573258fa35cf4d13d88:0=12999000000"
+   ]
+  }
+ }
+}

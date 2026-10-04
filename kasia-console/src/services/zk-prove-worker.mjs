@@ -17,7 +17,9 @@
 //
 // kill switch 默认 OFF(照搬 BSHARD_CLOSE_SUBMIT_V2_ENABLED 等今晚同款模式)。
 
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import { existsSync, statSync, readdirSync } from 'node:fs';
+import { parseMemAvailableMb, memGateDecision, retryDecision, hostBinaryStatus, newestMtimeMs, PRECOMPILE_HINT, MIN_FREE_MB_DEFAULT, MAX_ATTEMPTS_DEFAULT, BACKOFF_BASE_SEC_DEFAULT } from '../lib/zk-prove-guards.mjs';   // 账本1832 段4: 内存门/自动重试/host 预编译
 import { ibdGateSkip } from '../lib/ibd-tick-gate.mjs';   // M2 (2026-09-05, Owner 全批 ledger 880): IBD 期(isSynced===false 确认)跳过读链/广播 tick, 门在入口任何 DB 扫描之前
 import { wrapTick } from '../lib/diag-step.mjs';   // M10 v2 observe-only (2026-09-05): setInterval 回调计时(纯透传, 同步段/总墙钟 ≥50ms 才打)
 import { writeFileSync, readFileSync, mkdirSync } from 'node:fs';
@@ -39,6 +41,13 @@ const ZKSDK_WASM_PATH = process.env.ZKSDK_WASM_PATH || 'D:/rusty-kaspa-zksdk-iso
 const SCRATCH_DIR = process.env.ZK_PROVE_WORKER_SCRATCH_DIR || join(HERE, '..', '..', 'scratch', 'zk-prove-worker');
 const SETTLER_RELAY_ID = process.env.BSHARD_SETTLER_RELAY_ID || null;   // 同 bshard-close-voter.js 复用同一个显式配置, 非猜测
 const GATE_FUND_SOMPI = Number(process.env.ZK_GATE_FUND_SOMPI || 100_000_000);   // 1 KAS, dust 量级注资
+// 🔴 账本1832 段4(主网阻断项, ledger 1835): 三道防线的配置(全部 env 可调, 不改阈值只改配置)。
+const MIN_FREE_MB = Number(process.env.ZK_PROVE_MIN_FREE_MB || MIN_FREE_MB_DEFAULT);          // 出证前 WSL MemAvailable 下限
+const MEM_GATE = process.env.ZK_PROVE_MEM_GATE === 'off' ? 'off' : 'on';                      // 仅调试可关
+const MAX_ATTEMPTS = Number(process.env.ZK_PROVE_MAX_ATTEMPTS || MAX_ATTEMPTS_DEFAULT);        // 出证失败自动重试上限(含首次)
+const BACKOFF_BASE_SEC = Number(process.env.ZK_PROVE_BACKOFF_BASE_SEC || BACKOFF_BASE_SEC_DEFAULT);
+const HOST_MODE = process.env.ZK_PROVE_HOST_MODE === 'cargo' ? 'cargo' : 'binary';             // 默认跑预编译二进制; 'cargo' 仅开发机显式选
+const HOST_BIN = join(GUEST_HOST_DIR, '..', 'target', 'release', 'host');
 const PROVE_TIMEOUT_MS = Number(process.env.ZK_PROVE_TIMEOUT_MS || 15 * 60_000);   // 真实 proving ~4min, 留 15min 上限防挂死
 
 let _kaspaZk = null;
@@ -63,6 +72,19 @@ function toWslPath(winPath) {
   if (!m) throw new Error(`toWslPath: 非绝对 Windows 路径 (${winPath})`);
   return `/mnt/${m[1].toLowerCase()}/${m[2].replace(/\\/g, '/')}`;
 }
+/** 预编译 host 状态(缺失/过期/ok)。 */
+export function checkHostBinary() {
+  const binExists = existsSync(HOST_BIN);
+  const srcPaths = [join(GUEST_HOST_DIR, 'src'), join(GUEST_HOST_DIR, 'Cargo.toml'), join(GUEST_HOST_DIR, '..', 'methods'), join(GUEST_HOST_DIR, '..', 'Cargo.toml'), join(GUEST_HOST_DIR, '..', 'Cargo.lock')];
+  return hostBinaryStatus({ binExists, binMtimeMs: binExists ? statSync(HOST_BIN).mtimeMs : null, newestSrcMtimeMs: binExists ? newestMtimeMs(srcPaths, { statSync, readdirSync }) : null });
+}
+/** WSL 里的 MemAvailable(MB); 读不到 ⇒ null。同步短调用(~100ms), 只在 tick 开头做一次。 */
+export function readWslMemAvailableMb() {
+  try {
+    const r = spawnSync('wsl.exe', ['-d', process.env.ZK_PROVE_WSL_DISTRO || 'Ubuntu-24.04', '-e', 'cat', '/proc/meminfo'], { encoding: 'utf8', timeout: 15000 });
+    return parseMemAvailableMb(r.stdout);
+  } catch { return null; }
+}
 export function spawnCargoProve(inputJsonPath, outputBasename) {
   return new Promise((resolve, reject) => {
     const wslCwd = toWslPath(GUEST_HOST_DIR);
@@ -71,7 +93,9 @@ export function spawnCargoProve(inputJsonPath, outputBasename) {
     // 不用 shell:true(Node DEP0190 警告 + 非必要注入面)——wsl.exe 本身的 args 数组已经安全传递,
     // -lc 后面那一整条命令字符串是唯一必须拼接的地方, 全部值来自本函数自己构造的路径(非外部输入)。
     // 账本 1813 A3: 显式指定发行版(RISC0 工具链装在 Ubuntu-24.04; 不指定会落到 WSL 默认发行版, 主网机上是 docker-desktop)。env ZK_PROVE_WSL_DISTRO 可覆盖。
-    const child = spawn('wsl.exe', ['-d', process.env.ZK_PROVE_WSL_DISTRO || 'Ubuntu-24.04', '-e', 'bash', '-lc', `cd '${wslCwd}' && cargo run --release -- '${wslInput}' '${wslOutputBase}'`]);
+    // 账本1832 段4: 默认直接跑预编译二进制(不经 cargo, 主网不现场编译依赖); HOST_MODE=cargo 才走旧的 cargo run(开发机)。
+    const runCmd = HOST_MODE === 'cargo' ? `cargo run --release -- '${wslInput}' '${wslOutputBase}'` : `'${toWslPath(HOST_BIN)}' '${wslInput}' '${wslOutputBase}'`;
+    const child = spawn('wsl.exe', ['-d', process.env.ZK_PROVE_WSL_DISTRO || 'Ubuntu-24.04', '-e', 'bash', '-lc', `cd '${wslCwd}' && ${runCmd}`]);
     let stderr = '';
     const timer = setTimeout(() => { child.kill('SIGKILL'); reject(new Error(`spawnCargoProve: timeout after ${PROVE_TIMEOUT_MS}ms, killed`)); }, PROVE_TIMEOUT_MS);
     child.stderr.on('data', (d) => { stderr += d.toString(); });
@@ -125,7 +149,8 @@ export function startZkProveWorkerCron() {
   if (!ENABLED) { console.log('[zk-prove-worker] cron NOT started — ZK_PROVE_WORKER_ENABLED!=1 (真实 RISC0 proving + 真 KAS 注资, 默认不自动跑)'); return; }
   setTimeout(() => { zkProveWorkerTick().catch((e) => console.error('[zk-prove-worker] startup tick:', e.message)); }, 5_000);
   timer = setInterval(wrapTick('zk-prove-worker.tick', () => zkProveWorkerTick().catch((e) => console.error('[zk-prove-worker] tick:', e.message))), TICK_MS);   // M10 v2 observe-only: wrapTick 只计时, 回调体不变
-  console.log(`[zk-prove-worker] cron started (${TICK_MS / 1000}s tick) — ZK_PROVE_WORKER_ENABLED=1`);
+  console.log(`[zk-prove-worker] cron started (${TICK_MS / 1000}s tick) — ZK_PROVE_WORKER_ENABLED=1 | memGate=${MEM_GATE} min=${MIN_FREE_MB}MB maxAttempts=${MAX_ATTEMPTS} hostMode=${HOST_MODE}`);
+  if (HOST_MODE === 'binary') { const hs = checkHostBinary(); if (!hs.ok) console.error(`[zk-prove-worker] 🔴 host 预编译二进制 ${hs.status}: ${hs.reason} (${HOST_BIN}) — 出证将被拒绝直到预编译。${PRECOMPILE_HINT}`); }
 }
 export function stopZkProveWorkerCron() { if (timer) { clearInterval(timer); timer = null; } }
 
@@ -134,9 +159,18 @@ export async function zkProveWorkerTick() {
   if (running) return { skipped: true };   // NWT pre-review①: proving ~4min, running mutex 防 tick overlap
   running = true;
   try {
+    // 账本1832 段4: 先看有没有到点的 pending job(退避中的不算), 有才做内存门/host 检查——没活不读 WSL。
+    const due = sqlite.prepare("SELECT 1 FROM zk_prove_jobs WHERE status = 'pending' AND (next_attempt_at IS NULL OR julianday(next_attempt_at) <= julianday('now')) LIMIT 1").get();
+    if (!due) return { ok: true, pending: 0 };
+    if (HOST_MODE === 'binary') {
+      const hs = checkHostBinary();
+      if (!hs.ok) { _hostWarn(`host 预编译二进制 ${hs.status}: ${hs.reason}。${PRECOMPILE_HINT}`); return { ok: false, deferred: 'host_binary_' + hs.status }; }
+    }
+    const memDecision = memGateDecision({ availMb: MEM_GATE === 'off' ? null : readWslMemAvailableMb(), minMb: MIN_FREE_MB, gate: MEM_GATE });
+    if (!memDecision.ok) { _hostWarn(memDecision.reason); return { ok: true, deferred: 'memory' }; }
     // 原子 claim: 同 zk-prove-server.mjs /zk-prove/poll 同款 transaction 内 SELECT+UPDATE, 防并发轮询取到同一行。
     const job = sqlite.transaction(() => {
-      const row = sqlite.prepare("SELECT * FROM zk_prove_jobs WHERE status = 'pending' ORDER BY created_at ASC LIMIT 1").get();
+      const row = sqlite.prepare("SELECT * FROM zk_prove_jobs WHERE status = 'pending' AND (next_attempt_at IS NULL OR julianday(next_attempt_at) <= julianday('now')) ORDER BY created_at ASC LIMIT 1").get();
       if (!row) return null;
       sqlite.prepare("UPDATE zk_prove_jobs SET status = 'in_progress', updated_at = datetime('now') WHERE id = ? AND status = 'pending'").run(row.id);
       return sqlite.prepare('SELECT * FROM zk_prove_jobs WHERE id = ?').get(row.id);
@@ -199,7 +233,7 @@ export async function zkProveWorkerTick() {
     let summary, receiptHex;
     try {
       ({ summary, receiptHex } = await spawnCargoProve(inputPath, outputBase));
-    } catch (e) { _fail(job, `RISC0 proving fail: ${e.message}`); return { ok: false }; }
+    } catch (e) { _retryOrFail(job, `RISC0 proving fail: ${e.message}`); return { ok: false }; }   // 账本1832 段4: 出证失败先自动重试(上限+退避), 超限才 failed
 
     // verify-value-source: 独立重算 journalHash, 不只信 rust 侧吐的 journal_digest(NWT 认可这条是本方案自己想到的)。
     const recomputedJournalHash = computeJournalHash(summary.bets_root_hex, summary.payout_root_hex, summary.attested_winner);
@@ -238,6 +272,27 @@ export async function zkProveWorkerTick() {
     console.log(`[zk-prove-worker] ✅ job=${job.id} market=${job.market_id.slice(-8)} proving.status=ready gate=${gate.gateAddr.slice(0, 20)}`);
     return { ok: true, jobId: job.id, marketId: job.market_id };
   } finally { running = false; }
+}
+
+// 推迟/拒绝类日志节流(每 5 分钟最多一条, 免得 30s tick 刷屏)
+let _lastHostWarnAt = 0;
+function _hostWarn(msg) { const now = Date.now(); if (now - _lastHostWarnAt < 300_000) return; _lastHostWarnAt = now; console.warn(`[zk-prove-worker] ⏸ ${msg}`); }
+
+/**
+ * 出证失败的自动重试(账本1832 段4): attempts+1; 未达上限 ⇒ 回 pending + next_attempt_at=now+退避(job 与 zk_continuation.proving 不标 failed, 保留 error 供查);
+ * 达上限 ⇒ _fail(原行为)。只用于【出证本身失败】(被杀/超时/host 退出非 0); 校验类/注资类失败不重试(重试不会改变结果, 或会重复花钱)。
+ */
+export function _retryOrFail(job, reason, db = sqlite) {
+  const attempts = Number(job.attempts || 0) + 1;
+  const d = retryDecision({ attempts, maxAttempts: MAX_ATTEMPTS, base: BACKOFF_BASE_SEC });
+  if (d.action === 'fail') { db.prepare("UPDATE zk_prove_jobs SET attempts = ? WHERE id = ?").run(attempts, job.id); _fail({ ...job, attempts }, `${reason} (已尝试 ${attempts}/${MAX_ATTEMPTS} 次, 放弃)`); return 'failed'; }
+  db.prepare("UPDATE zk_prove_jobs SET status = 'pending', attempts = ?, next_attempt_at = datetime('now', ?), error = ?, updated_at = datetime('now') WHERE id = ?").run(attempts, `+${d.delaySec} seconds`, `[retry ${attempts}/${MAX_ATTEMPTS}] ${reason}`, job.id);
+  console.warn(`[zk-prove-worker] 🔁 job=${job.id} 出证失败(第 ${attempts}/${MAX_ATTEMPTS} 次), ${d.delaySec}s 后自动重试: ${String(reason).slice(0, 160)}`);
+  try {
+    db.prepare(`INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at) VALUES (?, 'system', 'zk_prove_worker_retry', 'zk-prove-worker', 'warn', ?, ?, datetime('now'))`)
+      .run(randomUUID(), `zk-prove-worker job=${job.id} 出证失败, ${d.delaySec}s 后重试(${attempts}/${MAX_ATTEMPTS}): ${String(reason).slice(0, 200)}`, JSON.stringify({ jobId: job.id, attempts, delaySec: d.delaySec }));
+  } catch { /* non-fatal */ }
+  return 'retry';
 }
 
 function _fail(job, reason) {

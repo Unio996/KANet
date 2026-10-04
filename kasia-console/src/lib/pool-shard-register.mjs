@@ -259,9 +259,11 @@ export function settleDispatchTags() {
   const close_attest = ps._raw.contracts.PayoutShardV2.entries.close_attest?.dispatch_tag;
   // 账本1832 段3: CloseZkV2.zk_close 的 dispatch tag(合约结构性常量, 与 ctor 取值无关; 占位 ctor 只为编译)
   const czc = compileSilV100(join(LIB, 'CloseZkV2.sil'), _closeZkDummyCtor({ gateTmplHash: z32, tokenTmplHash: z32, claimTmplHash: z32, ownRedeemLen: 1 }), 'CloseZkV2');
-  const zk_close = czc._raw.contracts.CloseZkV2.entries.zk_close?.dispatch_tag;   // 账本1832 段2(close_attest V2 submit 端口 v1.0.0)
-  if (!consolidate || !absorb || !zk_handoff || !close_attest || !zk_close) throw new Error('settleDispatchTags: 编译产物缺 entries.consolidate_to_payout/absorb/zk_handoff/close_attest/zk_close.dispatch_tag — schema 漂移?');
-  _settleDispatchTagsCache = { consolidate_to_payout: consolidate, absorb, zk_handoff, close_attest, zk_close };
+  const zk_close = czc._raw.contracts.CloseZkV2.entries.zk_close?.dispatch_tag;
+  const closezk_claim = czc._raw.contracts.CloseZkV2.entries.claim?.dispatch_tag, closezk_escape_claim = czc._raw.contracts.CloseZkV2.entries.escape_claim?.dispatch_tag, closezk_escape_trigger = czc._raw.contracts.CloseZkV2.entries.escape_trigger?.dispatch_tag;   // 段4
+  const ps_refund_claim = ps._raw.contracts.PayoutShardV2.entries.refund_claim?.dispatch_tag;   // 账本1832 段2(close_attest V2 submit 端口 v1.0.0)
+  if (!consolidate || !absorb || !zk_handoff || !close_attest || !zk_close || !closezk_claim || !closezk_escape_claim || !closezk_escape_trigger || !ps_refund_claim) throw new Error('settleDispatchTags: 编译产物缺 entries.consolidate_to_payout/absorb/zk_handoff/close_attest/zk_close.dispatch_tag — schema 漂移?');
+  _settleDispatchTagsCache = { consolidate_to_payout: consolidate, absorb, zk_handoff, close_attest, zk_close, closezk_claim, closezk_escape_claim, closezk_escape_trigger, ps_refund_claim };
   return _settleDispatchTagsCache;
 }
 

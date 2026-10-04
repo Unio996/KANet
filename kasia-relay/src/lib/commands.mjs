@@ -110,6 +110,7 @@ export const COMMAND_TYPES = Object.freeze({
   BSHARD_CLOSE_ATTEST: 'bshard_close_attest',                 // PayoutShard close_attest OP_1, 委员 pubkey-distinct 背书 payoutRoot
   BSHARD_PAYOUT_CLAIM: 'bshard_payout_claim',                 // PayoutShard claim OP_2, store-payout merkle+nullifier+recipient
   BSHARD_CANCEL_ATTEST: 'bshard_cancel_attest',               // PayoutShard cancel_attest OP_3, 委员 pubkey-distinct 背书 refundRoot, closed 0→2 (market-cancel)
+  BSHARD_REFUND_CLAIM_V2: 'bshard_refund_claim_v2',            // 账本1832 段4: PayoutShardV2 refund_claim 代币化(v1.0.0 形, claim 家族共用构造器); 老 bshard_refund_claim 仍是 V1 PayoutShard
   BSHARD_REFUND_CLAIM: 'bshard_refund_claim',                 // PayoutShard refund_claim OP_4, store-refund merkle+nullifier+recipient (closed==2)
   // ── W2 (2026-07-07): PayoutShardV2 / ZK-native close_attest (4 新字段, 委员 pubkey-distinct 背书 + zk_handoff 前置) ──
   BSHARD_CLOSE_ATTEST_V2: 'bshard_close_attest_v2',           // PayoutShardV2 close_attest OP_1, 同 BSHARD_CLOSE_ATTEST + attestedWinner/betsRoot/refundRoot/attestedAtMs
@@ -201,13 +202,14 @@ export const COMMAND_PAYLOAD_SCHEMA = Object.freeze({
   [COMMAND_TYPES.BSHARD_PAYOUT_CLAIM]: ['witness', 'inputs', 'outputs'],
   [COMMAND_TYPES.BSHARD_CANCEL_ATTEST]: ['witness', 'inputs', 'outputs'],
   [COMMAND_TYPES.BSHARD_REFUND_CLAIM]: ['witness', 'inputs', 'outputs'],
+  [COMMAND_TYPES.BSHARD_REFUND_CLAIM_V2]: ['witness', 'inputs', 'outputs'],
   [COMMAND_TYPES.BSHARD_CLOSE_ATTEST_V2]: ['witness', 'inputs', 'outputs'],
   [COMMAND_TYPES.BSHARD_CONSOLIDATE_V2]: ['witness', 'inputs', 'outputs'],
   [COMMAND_TYPES.BSHARD_ZK_HANDOFF]: ['witness', 'inputs', 'outputs'],
   [COMMAND_TYPES.BSHARD_ZK_CLOSE]: ['witness', 'inputs'],
   [COMMAND_TYPES.CLOSEZK_V2_CLAIM]: ['witness', 'inputs', 'outputs'],
-  [COMMAND_TYPES.CLOSEZK_V2_ESCAPE_TRIGGER]: ['witness', 'inputs'],
-  [COMMAND_TYPES.CLOSEZK_V2_ESCAPE_CLAIM]: ['witness', 'inputs'],
+  [COMMAND_TYPES.CLOSEZK_V2_ESCAPE_TRIGGER]: ['witness', 'inputs', 'outputs'],
+  [COMMAND_TYPES.CLOSEZK_V2_ESCAPE_CLAIM]: ['witness', 'inputs', 'outputs'],
   // 只有 intent_key 是两条路径(fresh/replay)共通的最小契约(同 TRANSFER 模式); tx_json/
   // sign_input_indices/expected_txid(fresh) 与 replay_tx_json/prepared_txid(replay) 互斥可选,
   // 由 covenant-broadcast-relay.mjs 运行时判断到底走哪条, 不在这里强制其中一组必填。
@@ -290,13 +292,14 @@ export const COMMAND_FIELD_TYPES = Object.freeze({
   [COMMAND_TYPES.BSHARD_PAYOUT_CLAIM]: { witness: 'object', inputs: 'object', outputs: 'object' },
   [COMMAND_TYPES.BSHARD_CANCEL_ATTEST]: { witness: 'object', inputs: 'object', outputs: 'object' },
   [COMMAND_TYPES.BSHARD_REFUND_CLAIM]: { witness: 'object', inputs: 'object', outputs: 'object' },
+  [COMMAND_TYPES.BSHARD_REFUND_CLAIM_V2]: { witness: 'object', inputs: 'object', outputs: 'object' },
   [COMMAND_TYPES.BSHARD_CLOSE_ATTEST_V2]: { witness: 'object', inputs: 'object', outputs: 'object' },
   [COMMAND_TYPES.BSHARD_CONSOLIDATE_V2]: { witness: 'object', inputs: 'object', outputs: 'object' },
   [COMMAND_TYPES.BSHARD_ZK_HANDOFF]: { witness: 'object', inputs: 'object', outputs: 'object' },
   [COMMAND_TYPES.BSHARD_ZK_CLOSE]: { witness: 'object', inputs: 'object' },
   [COMMAND_TYPES.CLOSEZK_V2_CLAIM]: { witness: 'object', inputs: 'object', outputs: 'object' },
-  [COMMAND_TYPES.CLOSEZK_V2_ESCAPE_TRIGGER]: { witness: 'object', inputs: 'object' },
-  [COMMAND_TYPES.CLOSEZK_V2_ESCAPE_CLAIM]: { witness: 'object', inputs: 'object' },
+  [COMMAND_TYPES.CLOSEZK_V2_ESCAPE_TRIGGER]: { witness: 'object', inputs: 'object', outputs: 'object' },
+  [COMMAND_TYPES.CLOSEZK_V2_ESCAPE_CLAIM]: { witness: 'object', inputs: 'object', outputs: 'object' },
 });
 
 export function validateCommandPayload(cmd) {

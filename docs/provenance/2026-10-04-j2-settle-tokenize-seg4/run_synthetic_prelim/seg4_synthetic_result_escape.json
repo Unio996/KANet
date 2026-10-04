@@ -1,0 +1,80 @@
+{
+ "refund": {
+  "negatives": {},
+  "claims": []
+ },
+ "escape": {
+  "negatives": {
+   "trigger_early": {
+    "rejected": true,
+    "text": "{\"status\":200,\"ok\":true,\"error\":\"RPC Server (remote error) -> Rejected transaction 947ed5d28dbef2e689db0877914e04cebb3fda20c4cb9724cf1d35f147a6e5af: failed to verify the signature script: Unsatisfied lock time: locktime requirement not satisfied -- locktime is greater than the transaction locktime: 1791072682800 > 1791072682799\",\"phase\":\"execution\"}",
+    "debugger": {
+     "pass": false,
+     "lineNo": 126,
+     "reqLine": "require(tx.time >= temporal(attestedAtMs + 21600000));           // ESCAPE_GRACE_MS=21600000(6h, 仍是占位数, 设计文档§4③要求团队另行签字确认时长)。v1.0.0: tx.time 只收 temporal, int 须显式 temporal(...) 转型(语义不变, 纯类型迁移)"
+    }
+   },
+   "NA_amount_tampered": {
+    "rejected": true,
+    "text": "{\"status\":200,\"ok\":true,\"error\":\"RPC Server (remote error) -> Rejected transaction 42e47d22958ea045550c080d5be7798e2b827ecae3368b307638fd4cd35f041b: failed to verify the signature script: script ran, but verification failed\",\"phase\":\"execution\"}",
+    "debugger": {
+     "pass": false,
+     "lineNo": 164,
+     "reqLine": "require(cur == refundRootBaked);                                  // ★ 验对象是 refundRootBaked"
+    }
+   },
+   "NB_token_owner_wrong": {
+    "rejected": true,
+    "text": "{\"status\":200,\"ok\":true,\"error\":\"RPC Server (remote error) -> Rejected transaction d794a1973eece2a0686c2312785258aab9030a1b4213d5cb72f566ef684ca7ad: failed to verify the signature script: script ran, but verification failed\",\"phase\":\"execution\"}",
+    "debugger": {
+     "pass": false,
+     "lineNo": 212,
+     "reqLine": "validateOutputStateWithInputTemplate(tokenOutIdx, TokenState {"
+    }
+   },
+   "NC_self_continuation_tampered": {
+    "rejected": true,
+    "text": "RPC Server (remote error) -> Rejected transaction 30568610319f09ea5cbc53140dbaa2d1e519d880bf33a315505ee339627fd490: failed to verify the signature script: script ran, but verification failed",
+    "debugger": {
+     "pass": false,
+     "lineNo": 264,
+     "reqLine": "require(tx.outputs[selfOutIdx].scriptPubKey == byte[](escExpectedSpk));"
+    }
+   },
+   "ND_double_claim": {
+    "rejected": true,
+    "text": "{\"status\":200,\"ok\":true,\"error\":\"closezk_v2_escape_claim: nullifier bit 已置位(merkle_index 2 已领过)\",\"phase\":\"execution\"}",
+    "note": "relay 预检(nullifier bit)拦在广播前"
+   }
+  },
+  "claims": [
+   {
+    "leaf": 2,
+    "amount": "500000000",
+    "txId": "12db53c2a0c72608b81a2abe4c46681d42cc07969ff5c4bd4f47089051719cf2",
+    "isLast": false,
+    "newPool": "3000000000",
+    "claimCovId": "6a76665238811dc62d61055410668e07eb640871011e8f8a9997ca7c7f1eb7a2"
+   },
+   {
+    "leaf": 0,
+    "amount": "1000000000",
+    "txId": "2cad5c8a3248ce6ebdd055ed0c7ee085bfbe7c38acf84d7dd849aa6421849035",
+    "isLast": false,
+    "newPool": "2000000000",
+    "claimCovId": "ab8acae1221785441d4a4468db7530070b6e969441209878dc99739757c253f3"
+   },
+   {
+    "leaf": 1,
+    "amount": "2000000000",
+    "txId": "71feb32f5edc10df3f54f283dec0ad4f3b7354c8554e26d811c8cda4a3eb451e",
+    "isLast": true,
+    "newPool": "0",
+    "claimCovId": "d6cf27e10bd56225887622525288be40f361f429d4d0d3ff844d6d333b112033"
+   }
+  ],
+  "handoffTx": "8a5101d646832f4d70e2db22e88ca1c4a490b6154b3b0122d08d8d6d8020ed0e",
+  "triggerTx": "2e313db547b34baf5e3f5c3dc8249cabba46700c71d47c8f6f45c45271cf0be8",
+  "finalSelfUtxos": 0
+ }
+}

@@ -1,0 +1,10 @@
+{
+ "honest": {
+  "gate": "pass",
+  "out": "  RUN   rehearsal_zk_close\n  PASS  rehearsal_zk_close\n\n1 tests: 1 passed, 0 failed\n"
+ },
+ "tampered": {
+  "gate": "fail",
+  "out": "x76, 0xcf, 0x58, 0x79, 0x87, 0x69, 0x78, 0x82, 0x7c, 0x75, 0x51, 0x96, 0x00, 0x9c, 0x69, 0x75, 0x75, 0x75, 0x75, 0x75, 0x75, 0x75, 0x75, 0x75, 0x75, 0x75, 0x51, 0x67, 0x6a, 0x68, 0x68, 0x68, 0x68], token_tmpl_hash = 0x225ebcdec51f5439326e6bc48e47c288ceacbd3bea07aea6771548eeed44d80e, w0 = 0, w1 = 0, w10 = 0, w11 = 0, w12 = 0, w13 = 0, w14 = 0, w15 = 0, w16 = 0, w2 = 0, w3 = 0, w4 = 0, w5 = 0, w6 = 0, w7 = 0, w8 = 0, w9 = 0\n            |\n        \n        Error: \"FAIL\"\n\n1 tests: 0 passed, 1 failed\n"
+ }
+}

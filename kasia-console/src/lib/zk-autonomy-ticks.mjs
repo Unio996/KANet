@@ -19,6 +19,7 @@ import {
   spliceClaimContinuationRedeem, isNullifierBitSet,
 } from './closezk-v2-claim-builder.mjs';
 import { computePariMutuelPayout } from './pool-shard-settle.mjs';
+import { readZkTemplateHashes } from './pool-shard-register.mjs';   // 账本1832 段4: claim 编排需要 token/claim 模板 hash(同 handoff 单一读取点)
 import { advanceZkContinuationAfterSpend, writeZkContinuation } from './closezk-v2-mint.mjs';
 import { readPayoutShardV2AttestedState } from './bshard-close-enforce.mjs';
 import { getMarketBets } from './pool-bettor-sides-query.mjs';
@@ -142,7 +143,7 @@ export async function zkCloseTickV2(ctx) {
  * _claimOneMarket — 单市场单次 claim 尝试(每个 tick 每个市场最多 claim 一个 leaf, 镜像既有 canary 节奏
  * MAX_PER_TICK 哲学——多个 winner 靠后续多轮 tick 逐个领走, 不在一次 tick 调用里连环 claim N 笔)。
  */
-async function _claimOneMarket(marketId, ctx) {
+export async function _claimOneMarket(marketId, ctx) {   // 账本1832 段4: 导出供 simnet 验收驱动单步调用(生产 claim tick 同一函数)
   const row = sqlite.prepare('SELECT metadata FROM pool_markets WHERE id = ?').get(marketId);
   let meta; try { meta = JSON.parse(row?.metadata || '{}'); } catch (e) { _writeZkAutonomyErrorEvent('claimAutonomousTick_parse', marketId, e.message); return { errored: true, claimed: 0 }; }
   const zc = meta.zk_continuation;
@@ -183,27 +184,26 @@ async function _claimOneMarket(marketId, ctx) {
   // 只做纯字节拼接, 不重新决定谁该拿多少钱(权限边界: tick 只执行, 不判断"谁该收钱")。
   const splice = spliceClaimContinuationRedeem(zc.redeemHex, targetIdx, witness.payout, currentState);
 
-  const bettorAddress = await ctx.p2pkAddr(target.pk);
-  const feeUtxo = await ctx.mintFeeUtxo();
-
-  const cmd = buildClaimCommand({
-    witness, closezkOutpointTxid: zc.outpoint.txid, closezkRedeemHex: zc.redeemHex, currentState,
-    feeOutpointTxid: feeUtxo.outpointTxid, feeAddress: feeUtxo.address,
-    selfOutIdx: 0, payoutOutIdx: splice.isLast ? 0 : 1,
-    bettorAddress, changeAddress: feeUtxo.address,
-  });
-  cmd.inputs.fee.index = feeUtxo.index;
-
+  // 🔴 账本1832 段4: claim 代币化——派彩不再是裸 P2PK 输出, 而是 KanetTokenClaim 实例 + 代币转移(三阶段编排见 zk-token-claim-orchestrator.mjs)。
+  const { runTokenClaim, claimFeeInputSompi } = await import('./zk-token-claim-orchestrator.mjs');
+  const feeUtxo = await ctx.mintFeeUtxo(claimFeeInputSompi() / 1e8);
+  const tmplEnv = readZkTemplateHashes();
+  if (!tmplEnv.ok) { _writeZkAutonomyErrorEvent('claimAutonomousTick_tmpl_env', marketId, `ZK 模板 env 缺失/非法: ${[...tmplEnv.missing, ...tmplEnv.malformed].join('/')}`); return { errored: true, claimed: 0 }; }
   let sj;
-  try { sj = await ctx.relayCall(cmd); } catch (e) { _writeZkAutonomyErrorEvent('claimAutonomousTick_broadcast', marketId, e.message); return { errored: true, claimed: 0 }; }
+  try {
+    sj = await runTokenClaim({
+      kind: 'claim', self: { redeemHex: zc.redeemHex, txid: zc.outpoint.txid, index: zc.outpoint.index }, pool: currentState.consolidated_pool,
+      bettorPk: target.pk, amount: witness.payout, merkleIndex: targetIdx, siblingsHex: witness.siblings.map((x) => (Buffer.isBuffer(x) ? x.toString('hex') : String(x))),
+      fee: { address: feeUtxo.address, txid: feeUtxo.outpointTxid, index: feeUtxo.index ?? 0 },
+      relayCall: ctx.relayCall, p2sh: (hex) => ctx.p2shAddr(hex), tokenTmplHash: tmplEnv.tokenTmplHash, claimTmplHash: tmplEnv.claimTmplHash,
+    });
+  } catch (e) { _writeZkAutonomyErrorEvent('claimAutonomousTick_broadcast', marketId, e.message); return { errored: true, claimed: 0 }; }
   const txid = sj?.txId || sj?.txid;
   if (!txid) { _writeZkAutonomyErrorEvent('claimAutonomousTick_broadcast', marketId, `no txId in relay response: ${JSON.stringify(sj).slice(0, 200)}`); return { errored: true, claimed: 0 }; }
 
-  // (a) landed-gated 持久化: check_utxo_landed 过了才 advanceZkContinuationAfterSpend——广播成功 ≠ 落链
-  // (NO TX NO STATE CHANGE)。isLast 场景没有 continuation output 可核对地址, 直接用 bettorAddress 作为
-  // landed-check 目标(payout 那笔本身就是这个 tx 的证明, 同驱动脚本isLast 分支的处理)。
-  const contAddr = splice.isLast ? null : await ctx.p2shAddr(splice.redeemHex);
-  const landAddr = sj.closeZkContinuationAddress || contAddr || bettorAddress;
+  // (a) landed-gated 持久化: check_utxo_landed 过了才 advanceZkContinuationAfterSpend——广播成功 ≠ 落链(NO TX NO STATE CHANGE)。
+  //   isLast 没有 self 续约输出可核, 用新建 KanetTokenClaim 的地址当 landed 目标(它本身就是这笔 tx 的产物)。
+  const landAddr = splice.isLast ? sj.claimOutAddress : sj.selfContAddress;
   const landedOk = await ctx.checkLanded(landAddr, txid, 20);
   if (!landedOk) {
     _writeZkAutonomyErrorEvent('claimAutonomousTick_landed_timeout', marketId, `广播 OK(txId=${txid}) 但 landed 确认超时 — 零持久化, 需人工核实链上实况`);
@@ -213,7 +213,9 @@ async function _claimOneMarket(marketId, ctx) {
   if (splice.isLast) {
     advanceZkContinuationAfterSpend(marketId, { outpointTxid: null, redeemHex: null, valueSompi: 0, spentEntry: 'claim', spentTxid: txid });
   } else {
-    advanceZkContinuationAfterSpend(marketId, { outpointTxid: txid, outpointIndex: 0, redeemHex: splice.redeemHex, valueSompi: splice.newPool.toString(), spentEntry: 'claim', spentTxid: txid });
+    // valueSompi = 代币池(剩余); utxoValueSompi = 续约 UTXO KAS 面值(dust, relay 回传); 续约 redeem 取 relay 实际拼出的(与 splice 应逐字节一致)
+    if (sj.selfContRedeemHex !== splice.redeemHex) { _writeZkAutonomyErrorEvent('claimAutonomousTick_splice_mismatch', marketId, 'relay 拼出的续约 redeem 与 console splice 不一致(两套独立实现互证失败) — 零持久化'); return { errored: true, claimed: 0 }; }
+    advanceZkContinuationAfterSpend(marketId, { outpointTxid: txid, outpointIndex: 0, redeemHex: sj.selfContRedeemHex, valueSompi: splice.newPool.toString(), utxoValueSompi: sj.utxoValueSompi, spentEntry: 'claim', spentTxid: txid });
   }
   log(`✅ market=${marketId.slice(-8)} claim idx=${targetIdx} pk=${target.pk.slice(0, 12)} payout=${witness.payout} txId=${txid}${splice.isLast ? ' (last, exhausted)' : ''}`);
   return { errored: false, claimed: 1 };

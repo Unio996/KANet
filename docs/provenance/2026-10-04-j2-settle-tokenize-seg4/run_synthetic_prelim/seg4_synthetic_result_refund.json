@@ -1,0 +1,69 @@
+{
+ "refund": {
+  "negatives": {
+   "NA_amount_tampered": {
+    "rejected": true,
+    "text": "{\"status\":200,\"ok\":true,\"error\":\"RPC Server (remote error) -> Rejected transaction 3779e1b78176b109ca4c3bafa11b9b5622378cae9d15e2da351ef13fbbf71426: failed to verify the signature script: script ran, but verification failed\",\"phase\":\"execution\"}",
+    "debugger": {
+     "pass": false,
+     "lineNo": 476,
+     "reqLine": "require(cur == payoutRoot);"
+    }
+   },
+   "NB_token_owner_wrong": {
+    "rejected": true,
+    "text": "{\"status\":200,\"ok\":true,\"error\":\"RPC Server (remote error) -> Rejected transaction ae9e12efff0bdd90ed6c5eac3679c87ff44557b8f614d6757de396d8fe8a14e8: failed to verify the signature script: script ran, but verification failed\",\"phase\":\"execution\"}",
+    "debugger": {
+     "pass": false,
+     "lineNo": 525,
+     "reqLine": "validateOutputStateWithInputTemplate(tokenOutIdx, TokenState {"
+    }
+   },
+   "NC_self_continuation_tampered": {
+    "rejected": true,
+    "text": "RPC Server (remote error) -> Rejected transaction 6cb878344042a444122d0f12eddc67238184c6b44eb687c09c3ea0fa85b0db27: failed to verify the signature script: script ran, but verification failed",
+    "debugger": {
+     "pass": false,
+     "lineNo": 582,
+     "reqLine": "require(tx.outputs[selfOutIdx].scriptPubKey == byte[](rfcExpectedSpk));"
+    }
+   },
+   "ND_double_claim": {
+    "rejected": true,
+    "text": "{\"status\":200,\"ok\":true,\"error\":\"bshard_refund_claim_v2: nullifier bit 已置位(merkle_index 2 已领过)\",\"phase\":\"execution\"}",
+    "note": "relay 预检(nullifier bit)拦在广播前"
+   }
+  },
+  "claims": [
+   {
+    "leaf": 2,
+    "amount": "500000000",
+    "txId": "291f8046d22eb9e59106e10b160d7a6ad6cfe2aa7df7ffa6e4dcfe8ca70011fe",
+    "isLast": false,
+    "newPool": "3000000000",
+    "claimCovId": "0ba1fa0c4142cb7d6937dadbec91606827bcf436863ae5dd997f34ef7a0ff690"
+   },
+   {
+    "leaf": 0,
+    "amount": "1000000000",
+    "txId": "4e66f40aca68535483309b58289f5237e10079eb09783d6df0b74fc3a9fcd672",
+    "isLast": false,
+    "newPool": "2000000000",
+    "claimCovId": "6c8403e8c8c299ca7b8d2f6ba7e77010276cc30dbe0e60df670095c1df861d4b"
+   },
+   {
+    "leaf": 1,
+    "amount": "2000000000",
+    "txId": "1ffd0ccb93ac067d8424e2009731627bbd66dd7c588d0d448db8c13e254cd2f0",
+    "isLast": true,
+    "newPool": "0",
+    "claimCovId": "44c7ce28a75dde2cf8c8a7bdd841c4ec4162f7dae8c09c96b764ef34805e3f66"
+   }
+  ],
+  "finalSelfUtxos": 0
+ },
+ "escape": {
+  "negatives": {},
+  "claims": []
+ }
+}

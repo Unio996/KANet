@@ -1,0 +1,10 @@
+{
+ "honest": {
+  "gate": "pass",
+  "stdout": "  RUN   rehearsal_escape_claim\n  PASS  rehearsal_escape_claim\n\n1 tests: 1 passed, 0 failed\n"
+ },
+ "tampered": {
+  "gate": "fail",
+  "stdout": " = 0, init_w11 = 0, init_w12 = 0, init_w13 = 0, init_w14 = 0, init_w15 = 0, init_w16 = 0, init_w2 = 0, init_w3 = 0, init_w4 = 0, init_w5 = 0, init_w6 = 0, init_w7 = 0, init_w8 = 0, init_w9 = 0, own_redeem_len = 13328, payoutRootField = 0x, refundRootBaked = 0x4f5c83b98160bbca889efcc4391b22e98523ea46a99e013edcaa9204d0423bc2, selfOutIdx = 1, tok_prefix = [0x02], tok_suffix = [0x03], token_tmpl_hash = 0x225ebcdec51f5439326e6bc48e47c288ceacbd3bea07aea6771548eeed44d80e, w11 = 107, w13 = 1, w14 = 3, w16 = 3500000000, w9 = 107\n            |\n        \n        Error: \"FAIL\"\n\n1 tests: 0 passed, 1 failed\n"
+ }
+}

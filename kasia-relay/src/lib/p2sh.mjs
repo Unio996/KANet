@@ -2623,120 +2623,150 @@ export async function unlockBshardZkClose(args) {
   } finally { try { await rpc.disconnect(); } catch {} }
 }
 
-/**
- * unlockCloseZkV2Claim — CloseZkV2 claim(缺件1, J2 2026-07-08。设计文档
- * docs/2026-07-08-closezkv2-claim-driver-design.md, NWT GREEN-with-conditions + Bettor 终GO)。
- * 结构 = unlockBshardZkClose 的 splice 续约模式(state-in-address, 213B 固定状态区, 不重编译)+
- * unlockBshardPayoutClaim 的 nullifier bit-set/dust 边界/fee-input 逻辑(word_idx=merkle_index/63)的合体。
- * ⚠ verify-value-source(Bettor #bjucwr 直接指令, 落码条件之一): 不信任 cmd.inputs.closezk.state(即使
- *   caller 传了)——本函数自己对当前活 UTXO 的 redeem_hex 重新 parse 当前状态(纵深防御第二道; console 侧
- *   closezk-v2-claim-builder.mjs 的 parseCloseZkV2State 已经现读现验过一次, 这里独立再验, 两处 offset 表
- *   互相独立实现, 靠 round-trip 测试互证正确性, 不是"共享一份代码"意义上的单源, 而是"两次独立验证都必须过"
- *   意义上的纵深防御)。
- * ✅ OP_3 selector(T0.3 实测确认, 2026-07-08 J2): 双重坐实——①源码级: silverc `compile.rs:259-262`
- *   逐 entry `builder.add_i64(entrypoint_index)` + `OpNumEqual` if/else 链, entrypoint_index 按 .sil 声明序
- *   0-based(CloseZkV2 声明序 0:zk_close/1:escape_trigger/2:escape_claim/3:claim), `add_i64(3)` 编码为标准
- *   script-number push OP_3='53'。②实测级: `cli-debugger --run-all` 对 `CloseZkV2.test.json` 8/8 通过, 含
- *   claim 3 个负向用例(wrong-merkle-proof/closed==3 应拒绝[证不会误路由到 escape_claim]/double-claim),
- *   证 claim 分支正确路由且与相邻 entry 不串。OP_3='53' 已确认, 非设计推导。
- * @param {object} args.cmd.inputs.closezk { redeem_hex, outpointTxid, index } — 当前活 CloseZkV2 UTXO(不接受
- *   caller 传 state, handler 自己 parse redeem_hex 拿现读值)。
- * @param {object} args.cmd.inputs.fee { address, outpointTxid, index } — 必需(claim 的 consolidated_pool
- *   精确分给 payout+continuation, 无 slack 付 fee, 同 unlockBshardPayoutClaim:1840 纪律)。
- * @param {object} args.cmd.witness { self_out_idx, payout_out_idx, bettor_pk, payout, merkle_index, siblings_hex }
- *   siblings_hex 必须 pad 到 10 个(depth-10 固定展开步数, 同 escape_claim/claim .sil 逻辑)。
- */
-export async function unlockCloseZkV2Claim(args) {
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// 🔴 账本 1832 段4(v0.3 代币化重写): claim 家族三入口共用构造器 —— CloseZkV2.claim / CloseZkV2.escape_claim / PayoutShardV2.refund_claim。
+//   合约三者同形(.sil 逐字同构): (selfOutIdx, claimOutIdx, tokenInIdx, tokenOutIdx, remainTokenOutIdx, bettorPk, amount, merkle_index, s0..s9,
+//   tok_prefix, tok_suffix, claim_prefix, claim_suffix)。派彩/退款目的地不再是裸 P2PK/KAS 输出, 而是【新建一个 KanetTokenClaim 实例 + 把 amount 的代币
+//   转成 owner=该 claim covenant 的新 KTT 实例】; 剩余代币(partial)转回 owner=self 的新 KTT 实例; self 续约(partial)手写 AB11 编码(own_redeem_len 已由合约修好)。
+//   旧版(KAS 价值焊接 + 裸选择器 OP_3/OP_2/OP_4 + 无 CovenantBinding + 无 own_redeem_len)对 v1.0.0 合约全错。
+//   tx 形状(partial): inputs [0 self(entry, 无签) | 1 池代币(owner=self cov, KTT.transfer zero-out, owner idx [0]) | 2 fee P2PK(签名; 同为三个 genesis 组的授权输入)]
+//                     outputs [0 self 续约(CovenantBinding, 面值原样) | 1 claimOut(KanetTokenClaim, genesis 组A) | 2 tokOut(KTT amount, owner=claimCov, 组B) | 3 remainTok(KTT pool-amount, owner=selfCov, 组C) | 4 找零]
+//   最后一位(pool==amount): 无 self 续约/无 remain: outputs [0 claimOut | 1 tokOut | 2 找零]。
+//   claimCovId 由组A genesis 现算, tokOut redeem 烤 owner=claimCovId ⇒ 三阶段(与 zk_handoff 的 probe 同法):
+//     阶段A(无 outputs.claim_out): 返回 selfCovId; 阶段B(有 claim_out 无 tok_out): 返回 claimCovId; 阶段C(全给): 核对 owner 后签发。
+//   复用: unlockBshardZkHandoff 的 genesis 组/zero-out/_combineActionAndRedeem/dispatch tag 编码; 状态区 splice 公式沿用旧 claim 的固定布局偏移。
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+const _CLAIM_FAMILY_LAYOUTS = {
+  // CloseZkV2: [attestedWinner(9) closed(9) payoutRootField(33) consolidated_pool(9) w0..w16(17×9)] = 213B
+  closezk: { len: 213, poolOff: 51, closedOff: 9, wOff: 60 },
+  // PayoutShardV2: [consolidated_pool(9) closed(9) payoutRoot(33) w0..w16(153) attestedWinner(9) attestedAtMs(9) betsRoot(33) refundRoot(33)] = 288B
+  ps: { len: 288, poolOff: 0, closedOff: 9, wOff: 51 },
+};
+async function _unlockClaimFamily(args, spec) {
   const { wallet, cmd, networkId, lockTime = 0n } = args;
   const w = cmd.witness;
   const rpc = await connectRpc(networkId);
   try {
-    const czUtxo = await _matchUtxo(rpc, _addressFromRedeem(cmd.inputs.closezk.redeem_hex, networkId), cmd.inputs.closezk.outpointTxid, cmd.inputs.closezk.index);
-    if (!cmd.inputs.fee) throw new Error('closezk_v2_claim: fee input 必需(consolidated_pool 精确分给 payout+continuation, 无 slack 付 fee)');
+    const L = _CLAIM_FAMILY_LAYOUTS[spec.layout];
+    const selfUtxo = await _matchUtxo(rpc, _addressFromRedeem(cmd.inputs.self.redeem_hex, networkId), cmd.inputs.self.outpointTxid, cmd.inputs.self.index);
+    const selfCovId = _psInputCovId(selfUtxo);
+    if (!cmd.outputs?.claim_out?.redeem_hex && !cmd.inputs.self_token) return { probe: 'A', broadcasted: false, selfCovId };   // 阶段A: 只需 self UTXO(console 据此 cov id 算池代币地址)
+    if (!cmd.inputs.self_token) throw new Error(`${spec.name}: self_token 必需(池代币 UTXO, owner=self cov, amount=consolidated_pool)`);
+    if (!cmd.inputs.fee) throw new Error(`${spec.name}: fee input 必需(独立 P2PK: 付网络费 + 授权 genesis 组)`);
+    const tokUtxo = await _matchUtxo(rpc, _addressFromRedeem(cmd.inputs.self_token.redeem_hex, networkId), cmd.inputs.self_token.outpointTxid, cmd.inputs.self_token.index);
     const feeUtxo = await _matchUtxo(rpc, cmd.inputs.fee.address, cmd.inputs.fee.outpointTxid, cmd.inputs.fee.index);
-    const matched = [czUtxo, feeUtxo];
+    const matched = [selfUtxo, tokUtxo, feeUtxo];
+    const FEE_IDX = 2, TOK_IN = 1;
+    if (!cmd.outputs?.claim_out?.redeem_hex) throw new Error(`${spec.name}: outputs.claim_out.redeem_hex 必需(KanetTokenClaim 实例; 阶段B/C)`);
 
-    // ── verify-value-source 纵深防御第二道: 不信 cmd.inputs.closezk.state, 自己对当前 redeem_hex 现 parse ──
-    const inputRedeem = Buffer.from(cmd.inputs.closezk.redeem_hex, 'hex');
-    const _STATE_START = 1, _STATE_LEN = 213, _NW = 17;
-    const region = inputRedeem.slice(_STATE_START, _STATE_START + _STATE_LEN);
-    if (region.length !== _STATE_LEN) throw new Error(`closezk_v2_claim: state region ${region.length}B != ${_STATE_LEN}B(redeem 太短/offset 表脱节)`);
-    const readI64 = (off, marker) => {
-      if (region[off] !== marker) throw new Error(`closezk_v2_claim: offset ${off} marker 0x${region[off]?.toString(16)} != 期望 0x${marker.toString(16)}(offset 表跟实际 redeem 布局脱节, 拒绝往下读)`);
-      return region.readBigInt64LE(off + 1);
-    };
-    const attestedWinner = readI64(0, 0x08);
-    const closed = Number(readI64(9, 0x08));
-    if (closed !== 2) throw new Error(`closezk_v2_claim: closed=${closed} != 2 — 不是 claim 该处理的状态(escape_claim 是 closed==3, 走独立命令)`);
-    if (region[18] !== 0x20) throw new Error(`closezk_v2_claim: offset 18 marker 0x${region[18]?.toString(16)} != 0x20(push32)`);
-    const payoutRootField = region.slice(19, 51);
-    const consolidatedPool = readI64(51, 0x08);
-    const wWords = []; for (let i = 0; i < _NW; i++) wWords.push(readI64(60 + 9 * i, 0x08));
-
-    const payout = BigInt(w.payout);
-    const idx = Number(w.merkle_index);
-    if (idx < 0 || idx >= 1024) throw new Error(`closezk_v2_claim: merkle_index ${idx} out of [0,1024)`);
-    if (payout < 1n || payout > consolidatedPool) throw new Error(`closezk_v2_claim: payout ${payout} 不在 [1, ${consolidatedPool}]`);
+    // ── verify-value-source: 当前状态从活 redeem 固定布局现读(不信 caller) ──
+    const inputRedeem = Buffer.from(cmd.inputs.self.redeem_hex, 'hex');
+    const region = Buffer.from(inputRedeem.slice(1, 1 + L.len));
+    if (region.length !== L.len) throw new Error(`${spec.name}: state region ${region.length}B != ${L.len}B(布局漂移/redeem 太短)`);
+    const rdAt = (off) => { if (region[off] !== 0x08) throw new Error(`${spec.name}: offset ${off} marker 0x${region[off]?.toString(16)} != 0x08(布局脱节)`); return region.readBigInt64LE(off + 1); };
+    const closed = Number(rdAt(L.closedOff));
+    if (closed !== spec.expectClosed) throw new Error(`${spec.name}: closed=${closed} != ${spec.expectClosed}(状态机互斥: 本入口只服务 closed==${spec.expectClosed})`);
+    const pool = rdAt(L.poolOff);
+    const amount = BigInt(w.amount), idx = Number(w.merkle_index);
+    if (idx < 0 || idx >= 1024) throw new Error(`${spec.name}: merkle_index ${idx} out of [0,1024)`);
+    if (amount < 1n || amount > pool) throw new Error(`${spec.name}: amount ${amount} 不在 [1, ${pool}]`);
+    if (!Array.isArray(w.siblings_hex) || w.siblings_hex.length !== 10) throw new Error(`${spec.name}: siblings_hex 必须恰 10 个(depth-10)`);
     const wordIdx = Math.floor(idx / 63), bitIn = idx % 63;
-    if (wordIdx >= _NW) throw new Error(`closezk_v2_claim: word_idx ${wordIdx} 越界(cap ${_NW} words)`);
-    if (((wWords[wordIdx] >> BigInt(bitIn)) & 1n) === 1n) throw new Error(`closezk_v2_claim: nullifier bit 已置位(merkle_index ${idx} 已 claim 过)`);
-    wWords[wordIdx] = wWords[wordIdx] + (1n << BigInt(bitIn));
-
-    const newPool = consolidatedPool - payout;
-    const isLast = newPool === 0n;   // 最后一个 claimant: 精确清零, 不留 continuation(同 escape_claim/claim .sil dust 分支)
-
+    if (wordIdx >= 17) throw new Error(`${spec.name}: word_idx ${wordIdx} 越界(cap 17)`);
+    const wOffAt = L.wOff + 9 * wordIdx;
+    const wVal = rdAt(wOffAt);
+    if (((wVal >> BigInt(bitIn)) & 1n) === 1n) throw new Error(`${spec.name}: nullifier bit 已置位(merkle_index ${idx} 已领过)`);
+    const newPool = pool - amount;
+    const isLast = newPool === 0n;
+    // 池代币 UTXO 的 KAS 面值只做 Σin 记账; 新输出面值固定(见下), 差额进找零。
+    const OUT_V = BigInt(cmd.out_value_sompi ?? 20_000_000);
     const i64 = (n) => { const b = Buffer.alloc(8); b.writeBigInt64LE(BigInt(n)); return b; };
-    const push8 = Buffer.from([8]), push32 = Buffer.from([32]);
-    let closeZkContAddr = null;
+
+    // ── 输出布局 ──
+    const SELF_OUT = isLast ? 0 : 0, CLAIM_OUT = isLast ? 0 : 1, TOK_OUT = isLast ? 1 : 2, REMAIN_OUT = isLast ? 0 : 3;
+    let selfContRedeem = null, selfContAddr = null;
     if (!isLast) {
-      const newStateBytes = Buffer.concat([
-        push8, i64(attestedWinner),
-        push8, i64(2),   // closed 不变: 靠这个值 stay 住让下一个 winner 还能调, 不靠 closed 变化分辨"谁领过"
-        push32, payoutRootField,
-        push8, i64(newPool),
-        ...wWords.map(v => Buffer.concat([push8, i64(v)])),
-      ]);
-      if (newStateBytes.length !== 213) throw new Error(`closezk_v2_claim: newStateBytes ${newStateBytes.length}B != 213B(布局漂移?)`);
-      const spliced = Buffer.concat([inputRedeem.slice(0, 1), newStateBytes, inputRedeem.slice(1 + 213)]);
-      closeZkContAddr = addressFromScriptPublicKey(payToScriptHashScript(new Uint8Array(spliced)), networkId).toString();
+      const ns = Buffer.from(region);
+      i64(newPool).copy(ns, L.poolOff + 1);
+      i64(wVal + (1n << BigInt(bitIn))).copy(ns, wOffAt + 1);
+      selfContRedeem = Buffer.concat([inputRedeem.slice(0, 1), ns, inputRedeem.slice(1 + L.len)]);
+      selfContAddr = addressFromScriptPublicKey(payToScriptHashScript(new Uint8Array(selfContRedeem)), networkId).toString();
+    }
+    const claimAddr = _addressFromRedeem(cmd.outputs.claim_out.redeem_hex, networkId);
+    const tokOutRedeemHex = cmd.outputs.tok_out?.redeem_hex;
+    const tokOutAddr = tokOutRedeemHex ? _addressFromRedeem(tokOutRedeemHex, networkId) : claimAddr;   // 阶段B 占位(组A 的 id 不依赖它)
+    const remainRedeemHex = cmd.outputs.remain_tok_out?.redeem_hex;
+    const remainAddr = remainRedeemHex ? _addressFromRedeem(remainRedeemHex, networkId) : claimAddr;
+    const outputs = [];
+    if (!isLast) outputs[SELF_OUT] = new TransactionOutput(_utxoValue(selfUtxo), payToAddressScript(new Address(selfContAddr)), new CovenantBinding(0, new Hash(selfCovId)));
+    outputs[CLAIM_OUT] = new TransactionOutput(OUT_V, payToAddressScript(new Address(claimAddr)));
+    outputs[TOK_OUT] = new TransactionOutput(OUT_V, payToAddressScript(new Address(tokOutAddr)));
+    if (!isLast) outputs[REMAIN_OUT] = new TransactionOutput(OUT_V, payToAddressScript(new Address(remainAddr)));
+    const orderedOut = outputs.slice();
+    const changeAddr = cmd.outputs?.change_address || wallet.getAddress();
+    if (!changeAddr) throw new Error(`${spec.name}: 无找零地址 — 拒绝(防止 fee 输入余额被烧)`);
+    _appendChange(orderedOut, matched, changeAddr, BigInt(cmd.fee_sompi ?? 15_000_000));
+    const groupIdxs = isLast ? [CLAIM_OUT, TOK_OUT] : [CLAIM_OUT, TOK_OUT, REMAIN_OUT];
+    const groups = () => groupIdxs.map((i) => new GenesisCovenantGroup(FEE_IDX, [i]));
+
+    const CB = Number(cmd.compute_budget ?? 100), CB_SELF = Number(cmd.compute_budget_self ?? 300);
+    const mkTx = (ss) => new Transaction({
+      version: 1,
+      inputs: matched.map((u, i) => ({ previousOutpoint: { transactionId: u.outpoint.transactionId, index: u.outpoint.index }, signatureScript: ss ? ss[i] : '', sequence: 0n, sigOpCount: 0, computeBudget: i === 0 ? CB_SELF : CB, ...(ss ? {} : { utxo: u }) })),
+      outputs: orderedOut, lockTime: BigInt(lockTime), gas: 0n, subnetworkId: '0000000000000000000000000000000000000000', payload: '',
+    });
+    const unsigned = mkTx(null);
+    unsigned.populateGenesisCovenants(groups());
+    const claimCovId = String(unsigned.outputs[CLAIM_OUT].covenant.covenantId);
+    if (!tokOutRedeemHex) return { probe: 'B', broadcasted: false, selfCovId, claimCovId, claimOutAddress: claimAddr };   // 阶段B
+    if (String(cmd.outputs.tok_out.owner_cov_id_hex || '').toLowerCase() !== claimCovId.toLowerCase()) {
+      throw new Error(`${spec.name}: tok_out owner_cov_id_hex(${String(cmd.outputs.tok_out.owner_cov_id_hex).slice(0, 12)}) != 本 tx 新建 KanetTokenClaim 的 covenant id(${claimCovId.slice(0, 12)}) (fail-loud)`);
+    }
+    if (!isLast) {
+      if (!remainRedeemHex) throw new Error(`${spec.name}: partial 需要 outputs.remain_tok_out.redeem_hex(剩余代币, owner=self cov)`);
+      if (String(cmd.outputs.remain_tok_out.owner_cov_id_hex || '').toLowerCase() !== selfCovId.toLowerCase()) throw new Error(`${spec.name}: remain_tok_out owner_cov_id_hex != self cov id (fail-loud)`);
     }
 
-    const outputs = [];
-    outputs[w.payout_out_idx] = new TransactionOutput(payout, payToAddressScript(new Address(cmd.outputs.payout.address)));
-    if (!isLast) outputs[w.self_out_idx] = new TransactionOutput(newPool, payToAddressScript(new Address(closeZkContAddr)));
-    const orderedOut = outputs.filter(o => o !== undefined);
-    _appendChange(orderedOut, matched, cmd.outputs?.change_address, _bshardFeeV1(matched.length));
-
-    // scriptSig 声明序(claim 形参): selfOutIdx, payoutOutIdx, bettorPk, payout, merkle_index, s0..s9 + OP_3 + redeem(no-sig)
-    let sibPush = '';
-    for (const s of w.siblings_hex) sibPush += _pushBytes(s);   // s0..s9 forward 序(individual byte[32], caller 必 pad 到 10)
-    const czSig = _pushInt(w.self_out_idx) + _pushInt(w.payout_out_idx) + _pushBytes(w.bettor_pk)
-      + _pushInt(w.payout) + _pushInt(w.merkle_index) + sibPush
-      + '53' + _encodePushDataHex(Buffer.from(cmd.inputs.closezk.redeem_hex, 'hex'));   // claim=OP_3='53'(entry idx 3, 待 T0.3 实测)
-
-    const unsigned = new Transaction({ version: 1, inputs: matched.map(u => ({ previousOutpoint: { transactionId: u.outpoint.transactionId, index: u.outpoint.index }, signatureScript: '', sequence: 0n, sigOpCount: 0, computeBudget: _BSHARD_COMPUTE_BUDGET, utxo: u })), outputs: orderedOut, lockTime: BigInt(lockTime), gas: 0n, subnetworkId: '0000000000000000000000000000000000000000', payload: '' });
-    const feeSig = createInputSignature(unsigned, 1, wallet.getPrivateKey(), SighashType.All);
-    const signedTx = new Transaction({ version: 1, inputs: [
-      { previousOutpoint: { transactionId: czUtxo.outpoint.transactionId, index: czUtxo.outpoint.index }, signatureScript: czSig, sequence: 0n, sigOpCount: 0, computeBudget: _BSHARD_COMPUTE_BUDGET },
-      { previousOutpoint: { transactionId: feeUtxo.outpoint.transactionId, index: feeUtxo.outpoint.index }, signatureScript: feeSig, sequence: 0n, sigOpCount: 0, computeBudget: _BSHARD_COMPUTE_BUDGET },
-    ], outputs: orderedOut, lockTime: BigInt(lockTime), gas: 0n, subnetworkId: '0000000000000000000000000000000000000000', payload: '' });
-    _assertTxInvariants(matched, signedTx, 'unlockCloseZkV2Claim', networkId);
+    const hx = (h) => new Uint8Array(Buffer.from(String(h).replace(/^0x/, ''), 'hex'));
+    const action = (() => {
+      const b = new ScriptBuilder({ flags: { covenantsEnabled: true } });
+      b.addI64(BigInt(SELF_OUT)); b.addI64(BigInt(CLAIM_OUT)); b.addI64(BigInt(TOK_IN)); b.addI64(BigInt(TOK_OUT)); b.addI64(BigInt(REMAIN_OUT));
+      b.addData(hx(w.bettor_pk)); b.addI64(amount); b.addI64(BigInt(idx));
+      for (const sb of w.siblings_hex) b.addData(hx(sb));
+      b.addData(hx(w.tok_prefix_hex)); b.addData(hx(w.tok_suffix_hex)); b.addData(hx(w.claim_prefix_hex)); b.addData(hx(w.claim_suffix_hex));
+      b.addData(hx(w.dispatch_tag_hex));
+      return b.drain();
+    })();
+    const selfSig = _combineActionAndRedeem(action, cmd.inputs.self.redeem_hex);
+    const tokSig = _combineActionAndRedeem(_encodeKttTransferZeroOutAction(w.token_transfer_dispatch_tag_hex, w.token_transfer_state_field_count, [0]), cmd.inputs.self_token.redeem_hex);
+    const feeSig = createInputSignature(unsigned, FEE_IDX, wallet.getPrivateKey(), SighashType.All);
+    const signedTx = mkTx([selfSig, tokSig, feeSig]);
+    signedTx.populateGenesisCovenants(groups());
+    _assertTxInvariants(matched, signedTx, spec.name, networkId);
+    const tokCov = String(signedTx.outputs[TOK_OUT].covenant.covenantId);
+    const remainCov = isLast ? null : String(signedTx.outputs[REMAIN_OUT].covenant.covenantId);
+    if (String(signedTx.outputs[CLAIM_OUT].covenant.covenantId) !== claimCovId) throw new Error(`${spec.name}: 签名后 claimCovId 与 probe 不一致 (fail-loud)`);
+    const summary = { claimCovId, tokOutCovId: tokCov, remainTokCovId: remainCov, isLast, selfContAddress: selfContAddr, selfContRedeemHex: selfContRedeem ? selfContRedeem.toString('hex') : null,
+      claimOutAddress: claimAddr, tokOutAddress: tokOutAddr, utxoValueSompi: isLast ? null : _utxoValue(selfUtxo).toString(), newPool: newPool.toString(), claimOutIdx: CLAIM_OUT, tokOutIdx: TOK_OUT, remainOutIdx: isLast ? null : REMAIN_OUT };
+    if (cmd.dry_run) {
+      const hx0 = (v) => (typeof v === 'string' ? v : Buffer.from(v).toString('hex')).replace(/^0x/, '');
+      return { broadcasted: false, ...summary,
+        inputs: matched.map((u, i) => ({ prev_txid: u.outpoint.transactionId, prev_index: Number(u.outpoint.index), utxo_value: _utxoValue(u).toString(), utxo_script_hex: hx0((u.entry ?? u).scriptPublicKey?.script ?? ''), covenant_id: (() => { const c = (u.entry ?? u).covenantId ?? u.covenant?.covenantId; return c == null ? null : String(c); })(), signature_script_hex: [selfSig, tokSig, feeSig][i] })),
+        outputs: signedTx.outputs.map((o, k) => ({ value: o.value.toString(), script_hex: hx0(o.scriptPublicKey.script), covenant_id: o.covenant ? String(o.covenant.covenantId) : null, authorizing_input: o.covenant ? o.covenant.authorizingInput : null })) };
+    }
     const r = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
-    return { txId: r.transactionId, closeZkContinuationAddress: closeZkContAddr, payoutSompi: payout.toString(), isLastClaimant: isLast };
+    return { txId: r.transactionId, ...summary };
   } finally { try { await rpc.disconnect(); } catch {} }
 }
 
+export function unlockCloseZkV2Claim(args) { return _unlockClaimFamily(args, { name: 'closezk_v2_claim', layout: 'closezk', expectClosed: 2 }); }
+export function unlockCloseZkV2EscapeClaim(args) { return _unlockClaimFamily(args, { name: 'closezk_v2_escape_claim', layout: 'closezk', expectClosed: 3 }); }
+export function unlockBshardRefundClaimV2(args) { return _unlockClaimFamily(args, { name: 'bshard_refund_claim_v2', layout: 'ps', expectClosed: 2 }); }
+
 /**
- * unlockCloseZkV2EscapeTrigger — CloseZkV2 escape_trigger(P2 pxvml 退款, J2 2026-07-09。设计文档
- * docs/2026-07-09-pxvml-escape-refund-execution-design.md, Bettor GREEN-with-notes + NWT GREEN-with-conditions)。
- * permissionless flag-flip: closed 1→3 write-once, 不动资金(out[self].value == consolidated_pool 守恒)。
- * .sil 前置: require(closed==1) + require(tx.time >= attestedAtMs + 21600000)(纯 ms 域, V2 已修单位)。
- * lockTime: caller 可传 cmd.lock_time; 不传时本函数取 Date.now()(ms epoch)——阈值本体由 covenant 链上机械
- *   裁决(attestedAtMs 是 ctor 烤死常量, 不在 213B state 区, handler 不假装能读它; 阈值未到=链拒, fail-closed)。
- * selector OP_1='51'(entry idx 1, 声明序 0:zk_close/1:escape_trigger/2:escape_claim/3:claim, 同 T0.3 双坐实法)。
- * @param {object} args.cmd.inputs.closezk { redeem_hex, outpointTxid, index } — 当前活 CloseZkV2 UTXO。
- * @param {object} args.cmd.inputs.fee { address, outpointTxid, index } — 必需(trigger 守恒不动池, 无 slack 付 fee)。
- * @param {object} args.cmd.witness { self_out_idx }
+ * 🔴 账本 1832 段4: CloseZkV2.escape_trigger(selfOutIdx, tok_prefix, tok_suffix) —— permissionless 旗标翻转 closed 1→3, 不动代币(noTokenInput)。
+ *   前置 tx.time >= temporal(attestedAtMs + 21600000): lock_time 须为 ms-epoch 且 ≥ 阈值(cmd.lock_time 由 caller 给, 节点按 past-median-time 判终局)。
+ *   tx: inputs [0 CloseZkV2(无签) | 1 fee P2PK(签)], outputs [0 续约(CovenantBinding, 面值原样, 状态区 closed=3) | 1 找零]。
  */
 export async function unlockCloseZkV2EscapeTrigger(args) {
   const { wallet, cmd, networkId, lockTime = 0n } = args;
@@ -2744,160 +2774,42 @@ export async function unlockCloseZkV2EscapeTrigger(args) {
   const rpc = await connectRpc(networkId);
   try {
     const czUtxo = await _matchUtxo(rpc, _addressFromRedeem(cmd.inputs.closezk.redeem_hex, networkId), cmd.inputs.closezk.outpointTxid, cmd.inputs.closezk.index);
-    if (!cmd.inputs.fee) throw new Error('closezk_v2_escape_trigger: fee input 必需(trigger 守恒不动池, 无 slack 付 fee)');
+    if (!cmd.inputs.fee) throw new Error('escape_trigger: fee input 必需');
     const feeUtxo = await _matchUtxo(rpc, cmd.inputs.fee.address, cmd.inputs.fee.outpointTxid, cmd.inputs.fee.index);
     const matched = [czUtxo, feeUtxo];
-
-    // ── verify-value-source: 自己对当前 redeem_hex 现 parse(同 unlockCloseZkV2Claim 第二道纵深防御) ──
+    const czCovId = _psInputCovId(czUtxo);
     const inputRedeem = Buffer.from(cmd.inputs.closezk.redeem_hex, 'hex');
-    const _STATE_START = 1, _STATE_LEN = 213, _NW = 17;
-    const region = inputRedeem.slice(_STATE_START, _STATE_START + _STATE_LEN);
-    if (region.length !== _STATE_LEN) throw new Error(`closezk_v2_escape_trigger: state region ${region.length}B != ${_STATE_LEN}B(redeem 太短/offset 表脱节)`);
-    const readI64 = (off, marker) => {
-      if (region[off] !== marker) throw new Error(`closezk_v2_escape_trigger: offset ${off} marker 0x${region[off]?.toString(16)} != 期望 0x${marker.toString(16)}(offset 表跟实际 redeem 布局脱节, 拒绝往下读)`);
-      return region.readBigInt64LE(off + 1);
-    };
-    const attestedWinner = readI64(0, 0x08);
-    const closed = Number(readI64(9, 0x08));
-    if (closed !== 1) throw new Error(`closezk_v2_escape_trigger: closed=${closed} != 1 — escape_trigger 只从已 attest 待 close 态触发(1→3 write-once, 与 zk_close 1→2 互斥)`);
-    if (region[18] !== 0x20) throw new Error(`closezk_v2_escape_trigger: offset 18 marker 0x${region[18]?.toString(16)} != 0x20(push32)`);
-    const payoutRootField = region.slice(19, 51);
-    const consolidatedPool = readI64(51, 0x08);
-    const wWords = []; for (let i = 0; i < _NW; i++) wWords.push(readI64(60 + 9 * i, 0x08));
-
-    // ── splice 续约: 仅 closed 1→3, 其余 state 原字节不动(attestedWinner/payoutRootField/pool/w0-16 透传) ──
+    const region = Buffer.from(inputRedeem.slice(1, 1 + 213));
+    if (region.length !== 213) throw new Error('escape_trigger: state region != 213B');
+    if (region[9] !== 0x08) throw new Error('escape_trigger: closed marker 脱节');
+    const closed = Number(region.readBigInt64LE(10));
+    if (closed !== 1) throw new Error(`escape_trigger: closed=${closed} != 1(write-once 1→3)`);
     const i64 = (n) => { const b = Buffer.alloc(8); b.writeBigInt64LE(BigInt(n)); return b; };
-    const push8 = Buffer.from([8]), push32 = Buffer.from([32]);
-    const newStateBytes = Buffer.concat([
-      push8, i64(attestedWinner),
-      push8, i64(3),   // closed 1→3
-      push32, payoutRootField,
-      push8, i64(consolidatedPool),
-      ...wWords.map(v => Buffer.concat([push8, i64(v)])),
-    ]);
-    if (newStateBytes.length !== 213) throw new Error(`closezk_v2_escape_trigger: newStateBytes ${newStateBytes.length}B != 213B(布局漂移?)`);
-    const spliced = Buffer.concat([inputRedeem.slice(0, 1), newStateBytes, inputRedeem.slice(1 + 213)]);
-    const closeZkContAddr = addressFromScriptPublicKey(payToScriptHashScript(new Uint8Array(spliced)), networkId).toString();
-
-    const outputs = [];
-    outputs[w.self_out_idx] = new TransactionOutput(consolidatedPool, payToAddressScript(new Address(closeZkContAddr)));
-    const orderedOut = outputs.filter(o => o !== undefined);
-    _appendChange(orderedOut, matched, cmd.outputs?.change_address, _bshardFeeV1(matched.length));
-
-    // tx.time = lockTime(ms epoch)。阈值由 covenant 机械裁决; handler 不喂 caller 标量以外的假设值。
-    const effLockTime = BigInt(lockTime) > 0n ? BigInt(lockTime) : BigInt(Date.now());
-
-    // scriptSig 声明序(escape_trigger 形参): selfOutIdx + OP_1 + redeem(no-sig)
-    const czSig = _pushInt(w.self_out_idx)
-      + '51' + _encodePushDataHex(Buffer.from(cmd.inputs.closezk.redeem_hex, 'hex'));   // escape_trigger=OP_1='51'(entry idx 1)
-
-    const unsigned = new Transaction({ version: 1, inputs: matched.map(u => ({ previousOutpoint: { transactionId: u.outpoint.transactionId, index: u.outpoint.index }, signatureScript: '', sequence: 0n, sigOpCount: 0, computeBudget: _BSHARD_COMPUTE_BUDGET, utxo: u })), outputs: orderedOut, lockTime: effLockTime, gas: 0n, subnetworkId: '0000000000000000000000000000000000000000', payload: '' });
-    const feeSig = createInputSignature(unsigned, 1, wallet.getPrivateKey(), SighashType.All);
-    const signedTx = new Transaction({ version: 1, inputs: [
-      { previousOutpoint: { transactionId: czUtxo.outpoint.transactionId, index: czUtxo.outpoint.index }, signatureScript: czSig, sequence: 0n, sigOpCount: 0, computeBudget: _BSHARD_COMPUTE_BUDGET },
-      { previousOutpoint: { transactionId: feeUtxo.outpoint.transactionId, index: feeUtxo.outpoint.index }, signatureScript: feeSig, sequence: 0n, sigOpCount: 0, computeBudget: _BSHARD_COMPUTE_BUDGET },
-    ], outputs: orderedOut, lockTime: effLockTime, gas: 0n, subnetworkId: '0000000000000000000000000000000000000000', payload: '' });
+    i64(3).copy(region, 10);
+    const spliced = Buffer.concat([inputRedeem.slice(0, 1), region, inputRedeem.slice(1 + 213)]);
+    const contAddr = addressFromScriptPublicKey(payToScriptHashScript(new Uint8Array(spliced)), networkId).toString();
+    const outputs = [new TransactionOutput(_utxoValue(czUtxo), payToAddressScript(new Address(contAddr)), new CovenantBinding(0, new Hash(czCovId)))];
+    const changeAddr = cmd.outputs?.change_address || wallet.getAddress();
+    if (!changeAddr) throw new Error('escape_trigger: 无找零地址');
+    _appendChange(outputs, matched, changeAddr, BigInt(cmd.fee_sompi ?? 15_000_000));
+    const hx = (h) => new Uint8Array(Buffer.from(String(h).replace(/^0x/, ''), 'hex'));
+    const b = new ScriptBuilder({ flags: { covenantsEnabled: true } });
+    b.addI64(0n); b.addData(hx(w.tok_prefix_hex)); b.addData(hx(w.tok_suffix_hex)); b.addData(hx(w.dispatch_tag_hex));
+    const czSig = _combineActionAndRedeem(b.drain(), cmd.inputs.closezk.redeem_hex);
+    const CB_CZ = Number(cmd.compute_budget_cz ?? 200);
+    const mkTx = (ss) => new Transaction({ version: 1, inputs: matched.map((u, i) => ({ previousOutpoint: { transactionId: u.outpoint.transactionId, index: u.outpoint.index }, signatureScript: ss ? ss[i] : '', sequence: 0n, sigOpCount: 0, computeBudget: i === 0 ? CB_CZ : 100, ...(ss ? {} : { utxo: u }) })), outputs, lockTime: BigInt(lockTime), gas: 0n, subnetworkId: '0000000000000000000000000000000000000000', payload: '' });
+    const un = mkTx(null);
+    const feeSig = createInputSignature(un, 1, wallet.getPrivateKey(), SighashType.All);
+    const signedTx = mkTx([czSig, feeSig]);
     _assertTxInvariants(matched, signedTx, 'unlockCloseZkV2EscapeTrigger', networkId);
-    const r = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
-    return { txId: r.transactionId, closeZkContinuationAddress: closeZkContAddr, consolidatedPoolSompi: consolidatedPool.toString(), lockTimeMs: effLockTime.toString() };
-  } finally { try { await rpc.disconnect(); } catch {} }
-}
-
-/**
- * unlockCloseZkV2EscapeClaim — CloseZkV2 escape_claim(P2 pxvml 退款, J2 2026-07-09。设计文档同上)。
- * 镜像 unlockCloseZkV2Claim 全套(splice 续约/verify-value-source 现读/nullifier bit-set/dust 边界/fee input),
- * 差异仅四处: ①closed==3 前置(非 2) ②验对象 refundRootBaked——ctor 烤死常量不在 213B state 区, handler 不
- * 硬编码 offset 深挖(offset-staleness 同族雷); merkle 授权由 covenant 链上机械裁决, console 侧 builder 已对
- * 委员 4 签共识 refundRoot 预验(设计文档 §1) ③退款输出 = stake 原额, 地址由 handler 从 bettor_pk 自推
- * P2PK(caller 不喂地址标量; cmd.outputs.refund.address 若传必须与推导值一致否则 fail-loud) ④selector OP_2='52'。
- * @param {object} args.cmd.inputs.closezk { redeem_hex, outpointTxid, index }
- * @param {object} args.cmd.inputs.fee { address, outpointTxid, index } — 必需(pool 精确分给 refund+continuation)。
- * @param {object} args.cmd.witness { self_out_idx, refund_out_idx, bettor_pk, stake, merkle_index, siblings_hex }
- *   siblings_hex 必 pad 到 10 个(depth-10 固定展开, 同 .sil escape_claim)。
- */
-export async function unlockCloseZkV2EscapeClaim(args) {
-  const { wallet, cmd, networkId, lockTime = 0n } = args;
-  const w = cmd.witness;
-  const rpc = await connectRpc(networkId);
-  try {
-    const czUtxo = await _matchUtxo(rpc, _addressFromRedeem(cmd.inputs.closezk.redeem_hex, networkId), cmd.inputs.closezk.outpointTxid, cmd.inputs.closezk.index);
-    if (!cmd.inputs.fee) throw new Error('closezk_v2_escape_claim: fee input 必需(consolidated_pool 精确分给 refund+continuation, 无 slack 付 fee)');
-    const feeUtxo = await _matchUtxo(rpc, cmd.inputs.fee.address, cmd.inputs.fee.outpointTxid, cmd.inputs.fee.index);
-    const matched = [czUtxo, feeUtxo];
-
-    // ── verify-value-source: 现读 redeem state(同 unlockCloseZkV2Claim) ──
-    const inputRedeem = Buffer.from(cmd.inputs.closezk.redeem_hex, 'hex');
-    const _STATE_START = 1, _STATE_LEN = 213, _NW = 17;
-    const region = inputRedeem.slice(_STATE_START, _STATE_START + _STATE_LEN);
-    if (region.length !== _STATE_LEN) throw new Error(`closezk_v2_escape_claim: state region ${region.length}B != ${_STATE_LEN}B(redeem 太短/offset 表脱节)`);
-    const readI64 = (off, marker) => {
-      if (region[off] !== marker) throw new Error(`closezk_v2_escape_claim: offset ${off} marker 0x${region[off]?.toString(16)} != 期望 0x${marker.toString(16)}(offset 表跟实际 redeem 布局脱节, 拒绝往下读)`);
-      return region.readBigInt64LE(off + 1);
-    };
-    const attestedWinner = readI64(0, 0x08);
-    const closed = Number(readI64(9, 0x08));
-    if (closed !== 3) throw new Error(`closezk_v2_escape_claim: closed=${closed} != 3 — 不是 escape_claim 该处理的状态(claim 是 closed==2 走 closezk_v2_claim; closed==1 先走 closezk_v2_escape_trigger)`);
-    if (region[18] !== 0x20) throw new Error(`closezk_v2_escape_claim: offset 18 marker 0x${region[18]?.toString(16)} != 0x20(push32)`);
-    const payoutRootField = region.slice(19, 51);
-    const consolidatedPool = readI64(51, 0x08);
-    const wWords = []; for (let i = 0; i < _NW; i++) wWords.push(readI64(60 + 9 * i, 0x08));
-
-    const stake = BigInt(w.stake);
-    const idx = Number(w.merkle_index);
-    if (idx < 0 || idx >= 1024) throw new Error(`closezk_v2_escape_claim: merkle_index ${idx} out of [0,1024)`);
-    if (stake < 1n || stake > consolidatedPool) throw new Error(`closezk_v2_escape_claim: stake ${stake} 不在 [1, ${consolidatedPool}]`);
-    const wordIdx = Math.floor(idx / 63), bitIn = idx % 63;
-    if (wordIdx >= _NW) throw new Error(`closezk_v2_escape_claim: word_idx ${wordIdx} 越界(cap ${_NW} words)`);
-    if (((wWords[wordIdx] >> BigInt(bitIn)) & 1n) === 1n) throw new Error(`closezk_v2_escape_claim: nullifier bit 已置位(merkle_index ${idx} 已退款过)`);
-    wWords[wordIdx] = wWords[wordIdx] + (1n << BigInt(bitIn));
-
-    const newPool = consolidatedPool - stake;
-    const isLast = newPool === 0n;   // 最后一个 claimant: 精确清零不留 continuation(.sil dust 分支; pxvml 序 T3 后余 seed 20M 走不到此臂)
-
-    // ── 退款地址: handler 从 bettor_pk 自推 P2PK(verify-value-source, 不信 caller 地址标量) ──
-    const refundAddr = new kaspa.XOnlyPublicKey(w.bettor_pk).toAddress(networkId).toString();
-    if (cmd.outputs?.refund?.address && cmd.outputs.refund.address !== refundAddr) {
-      throw new Error(`closezk_v2_escape_claim: caller 传的 refund 地址 ${cmd.outputs.refund.address.slice(0, 24)}… != bettor_pk 推导 ${refundAddr.slice(0, 24)}…(driver 配错 pk/地址对, fail-loud)`);
+    if (cmd.dry_run) {
+      const hx0 = (v) => (typeof v === 'string' ? v : Buffer.from(v).toString('hex')).replace(/^0x/, '');
+      return { broadcasted: false, selfContAddress: contAddr, selfContRedeemHex: spliced.toString('hex'),
+        inputs: matched.map((u, i) => ({ prev_txid: u.outpoint.transactionId, prev_index: Number(u.outpoint.index), utxo_value: _utxoValue(u).toString(), utxo_script_hex: hx0((u.entry ?? u).scriptPublicKey?.script ?? ''), covenant_id: (() => { const c = (u.entry ?? u).covenantId ?? u.covenant?.covenantId; return c == null ? null : String(c); })(), signature_script_hex: [czSig, feeSig][i] })),
+        outputs: signedTx.outputs.map((o) => ({ value: o.value.toString(), script_hex: hx0(o.scriptPublicKey.script), covenant_id: o.covenant ? String(o.covenant.covenantId) : null })) };
     }
-
-    const i64 = (n) => { const b = Buffer.alloc(8); b.writeBigInt64LE(BigInt(n)); return b; };
-    const push8 = Buffer.from([8]), push32 = Buffer.from([32]);
-    let closeZkContAddr = null;
-    if (!isLast) {
-      const newStateBytes = Buffer.concat([
-        push8, i64(attestedWinner),
-        push8, i64(3),   // closed 不变: 靠这个值 stay 住让下一个 bettor 还能调(.sil L133 同款)
-        push32, payoutRootField,
-        push8, i64(newPool),
-        ...wWords.map(v => Buffer.concat([push8, i64(v)])),
-      ]);
-      if (newStateBytes.length !== 213) throw new Error(`closezk_v2_escape_claim: newStateBytes ${newStateBytes.length}B != 213B(布局漂移?)`);
-      const spliced = Buffer.concat([inputRedeem.slice(0, 1), newStateBytes, inputRedeem.slice(1 + 213)]);
-      closeZkContAddr = addressFromScriptPublicKey(payToScriptHashScript(new Uint8Array(spliced)), networkId).toString();
-    }
-
-    const outputs = [];
-    outputs[w.refund_out_idx] = new TransactionOutput(stake, payToAddressScript(new Address(refundAddr)));
-    if (!isLast) outputs[w.self_out_idx] = new TransactionOutput(newPool, payToAddressScript(new Address(closeZkContAddr)));
-    const orderedOut = outputs.filter(o => o !== undefined);
-    _appendChange(orderedOut, matched, cmd.outputs?.change_address, _bshardFeeV1(matched.length));
-
-    // scriptSig 声明序(escape_claim 形参): selfOutIdx, refundOutIdx, bettorPk, stake, merkle_index, s0..s9 + OP_2 + redeem(no-sig)
-    let sibPush = '';
-    for (const s of w.siblings_hex) sibPush += _pushBytes(s);   // s0..s9 forward 序(caller 必 pad 到 10)
-    const czSig = _pushInt(w.self_out_idx) + _pushInt(w.refund_out_idx) + _pushBytes(w.bettor_pk)
-      + _pushInt(w.stake) + _pushInt(w.merkle_index) + sibPush
-      + '52' + _encodePushDataHex(Buffer.from(cmd.inputs.closezk.redeem_hex, 'hex'));   // escape_claim=OP_2='52'(entry idx 2)
-
-    const unsigned = new Transaction({ version: 1, inputs: matched.map(u => ({ previousOutpoint: { transactionId: u.outpoint.transactionId, index: u.outpoint.index }, signatureScript: '', sequence: 0n, sigOpCount: 0, computeBudget: _BSHARD_COMPUTE_BUDGET, utxo: u })), outputs: orderedOut, lockTime: BigInt(lockTime), gas: 0n, subnetworkId: '0000000000000000000000000000000000000000', payload: '' });
-    const feeSig = createInputSignature(unsigned, 1, wallet.getPrivateKey(), SighashType.All);
-    const signedTx = new Transaction({ version: 1, inputs: [
-      { previousOutpoint: { transactionId: czUtxo.outpoint.transactionId, index: czUtxo.outpoint.index }, signatureScript: czSig, sequence: 0n, sigOpCount: 0, computeBudget: _BSHARD_COMPUTE_BUDGET },
-      { previousOutpoint: { transactionId: feeUtxo.outpoint.transactionId, index: feeUtxo.outpoint.index }, signatureScript: feeSig, sequence: 0n, sigOpCount: 0, computeBudget: _BSHARD_COMPUTE_BUDGET },
-    ], outputs: orderedOut, lockTime: BigInt(lockTime), gas: 0n, subnetworkId: '0000000000000000000000000000000000000000', payload: '' });
-    _assertTxInvariants(matched, signedTx, 'unlockCloseZkV2EscapeClaim', networkId);
     const r = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
-    return { txId: r.transactionId, closeZkContinuationAddress: closeZkContAddr, refundAddress: refundAddr, stakeSompi: stake.toString(), isLastClaimant: isLast };
+    return { txId: r.transactionId, selfContAddress: contAddr, selfContRedeemHex: spliced.toString('hex'), utxoValueSompi: _utxoValue(czUtxo).toString() };
   } finally { try { await rpc.disconnect(); } catch {} }
 }
 
