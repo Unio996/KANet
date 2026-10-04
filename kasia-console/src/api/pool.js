@@ -24,7 +24,7 @@ import { ensureGateTmplHashFresh } from '../lib/gate-tmpl-hash.mjs';
 import { kaspaZk } from '../services/zk-prove-worker.mjs';
 import { checkAdminSecretTier } from '../lib/admin-secret-tier.mjs';
 import { assertAddressOnNetwork, configuredNetwork } from '../lib/kaspa-network.mjs';   // (b) 网络单一源 (设计 v0.2 §3): 前缀只对照 env KASPA_NETWORK, 不从地址推网络
-import { assertNoKasStakeOnMainnet, assertNoKasStakeUnlessReopened, noKasStakeModeOn, mainnetCreateV07Branch, parseStakeKtt, sponsorMarketGuard, findUnfinishedZkNativeMarket } from '../lib/mainnet-no-kas-stake-gate.mjs';
+import { assertNoKasStakeOnMainnet, assertNoKasStakeUnlessReopened, noKasStakeModeOn, mainnetCreateV07Branch, parseStakeKtt, sponsorMarketGuard, findUnfinishedZkNativeMarket, liveMarketCapReached } from '../lib/mainnet-no-kas-stake-gate.mjs';
 import { resolveSinkConfig, assertDeadlineWithinTicketAge } from '../lib/zk-sink-config.mjs';   // 账本1850 严格零方案   // 账本1845 S0: 主网不收 KAS 硬闸(见该文件头)
 
 // 件⑤步骤2 疑似死端点命中计数(2026-07-16, KANet-UI, Owner终裁+Bettor #nig8da 派工): observe-only,
@@ -1102,9 +1102,9 @@ export async function registerPoolRoutes(fastify) {
     for (const k of required) {
       if (b[k] === undefined || b[k] === null || b[k] === '') return reply.code(400).send({ ok: false, error: `missing ${k}` });
     }
-    if (_noKasMode) {   // 账本1850: 一次只许一个在跑的 ZK 原生盘(并发盘抢 close 提交费 UTXO, S3 btduw 实证)
-      const _blocking = findUnfinishedZkNativeMarket(sqlite);
-      if (_blocking) return reply.code(409).send({ ok: false, error: `不收 KAS 模式一次只许一个在跑的 ZK 原生盘: 盘 ${_blocking.id}(${_blocking.protocol_status}) 尚未完结`, code: 'another_zk_market_unfinished', blocking_market_id: _blocking.id });
+    if (_noKasMode) {   // 账本1850/1855: 在跑的 ZK 原生盘数上限(ZK_MAX_LIVE_MARKETS, 默认 1; 并发盘靠 relay 侧 fee UTXO 钉住)。此处只是早失败; 权威检查在 INSERT 前同步段内(下文 _capAtInsert)
+      const _cap = liveMarketCapReached(sqlite);
+      if (_cap) return reply.code(409).send({ ok: false, error: `不收 KAS 模式在跑的 ZK 原生盘已达上限 ${_cap.live}/${_cap.cap}(ZK_MAX_LIVE_MARKETS)`, code: 'live_market_cap_reached', live: _cap.live, cap: _cap.cap, blocking_market_id: _cap.ids[0] });
     }
     // 🔴 #27 层A (Owner 钦定 2026-06-30 "大胆修·测试网无妨"): pre-broadcast conditionId 去重闸 — 止重复盘。
     //   根因(六层查实): 重复盘今天密集成簇产生(0xf161×5/32秒)·seeder 早有 dedup(L92)但 check-then-act RACE
@@ -1444,6 +1444,10 @@ export async function registerPoolRoutes(fastify) {
       return reply.code(503).send({ ok: false, error: `maker stake lock failed: ${err.message} (spine_p2sh=${spineResult.p2shAddr})` });
     }
 
+    if (_noKasMode) {   // 账本1855: 权威上限检查——与下面的 INSERT 之间【无 await】(better-sqlite3 同步 ⇒ 并发 create 在此串行化: 上限-1 时两个并发恰一个成功)。no-KAS 模式此前无任何链上动作(无 spine 锁), 回 409 不留残余。
+      const _capAtInsert = liveMarketCapReached(sqlite);
+      if (_capAtInsert) return reply.code(409).send({ ok: false, error: `不收 KAS 模式在跑的 ZK 原生盘已达上限 ${_capAtInsert.live}/${_capAtInsert.cap}(ZK_MAX_LIVE_MARKETS)`, code: 'live_market_cap_reached', live: _capAtInsert.live, cap: _capAtInsert.cap, blocking_market_id: _capAtInsert.ids[0] });
+    }
     try {
       const initialMetadata = JSON.stringify({
         ...(spineResult ? { spine_redeem_script_hex: spineResult.redeemScript } : { no_spine: true, no_kas_stake: true }),

@@ -111,7 +111,18 @@ async function mintFeeUtxo(kas = 0.3) {   // 账本1832 段4: claim 家族(3 个
   const tr = await apiTransfer(addr, kas);
   const txId = tr.txId || tr.tx_id; if (!txId) throw new Error(`mintFeeUtxo fail: ${JSON.stringify(tr).slice(0, 120)}`);
   for (let i = 0; i < 30; i++) { const es = await getUtxos(addr); if (es.some(e => (norm(e).entry?.outpoint || norm(e).outpoint)?.transactionId === txId)) break; await sleep(2000); }
+  // 账本1855 A: fee UTXO 铸好到真正被花之间(另一盘的 tick 可能在同 relay 上取"最小够用 UTXO")钉住; 钉在持有该钱包的全部 relay 进程(去重)。pin 只排除, 失败只 LOUD。
+  await _pinFee({ txid: txId, index: 0 }, 'mint-fee');
   return { address: addr, outpointTxid: txId, index: 0 };
+}
+function _feePinRelayIds() { return [...new Set([FEE_RELAY_ID, ZK_SETTLER_RELAY_ID].filter(Boolean))]; }
+async function _pinFee(o, tag) {
+  const { pinFeeUtxo, CLAIM_FEE_PIN_TTL_MS } = await import('../lib/fee-pins.mjs');
+  for (const rid of _feePinRelayIds()) await pinFeeUtxo((c) => relayPost(rid, c), o, { ttlMs: CLAIM_FEE_PIN_TTL_MS, tag: tag + ' relay=' + String(rid).slice(0, 8) });
+}
+async function unpinMintedFee(o) {
+  const { unpinFeeUtxo } = await import('../lib/fee-pins.mjs');
+  for (const rid of _feePinRelayIds()) await unpinFeeUtxo((c) => relayPost(rid, c), { txid: o.outpointTxid, index: o.index ?? 0 }, { tag: 'mint-fee' });
 }
 let _pkMap = null;
 async function buildPkMap() {
@@ -1092,6 +1103,7 @@ function _claimAutonomousCtx() {
     relayCall: (cmd) => relayPost(ZK_SETTLER_RELAY_ID, cmd),
     checkLanded: _checkLandedViaRelay,
     mintFeeUtxo,
+    unpinMintedFee,
     p2shAddr,
     p2pkAddr,
   };

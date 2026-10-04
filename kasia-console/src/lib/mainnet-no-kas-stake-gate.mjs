@@ -113,7 +113,7 @@ export function sponsorMarketGuard(market, routeName = 'register-v07') {
 }
 
 /**
- * 一次只许一个在跑的 ZK 原生盘(Bettor 账本1850/1848 主网规则): 不收 KAS 模式下, create-v07 在已有 zk_native 盘【未完结】时回 409。
+ * 在跑(未完结)的 ZK 原生盘清单/上限(账本1850 一次一盘 → 账本1855 可配 ZK_MAX_LIVE_MARKETS, 默认 1): 不收 KAS 模式下, create-v07 在达上限时回 409。
  * 理由: 并发盘会抢 close 提交费 UTXO(bshard-close-transport 的 0.5 KAS 自转账, 被别的 tx/整理吃掉 ⇒ "UTXO not found" 卡死; S3 run1 btduw 实证)。
  * 未完结 = 非 shard_internal 行 ∧ resolution_rule_spec.zk_native===true ∧ protocol_status 不在终态集 ∧ zk_continuation.exhausted≠true。
  * (ZK 原生盘走完 close 后 protocol_status 停在 'attested_v2', 真正的"领完"标记是 metadata.zk_continuation.exhausted=true, 故两者都认。)
@@ -121,13 +121,34 @@ export function sponsorMarketGuard(market, routeName = 'register-v07') {
  * @returns {null | {id:string, protocol_status:string}} 第一个未完结盘; 无 ⇒ null
  */
 export const FINISHED_PROTOCOL_STATUSES = Object.freeze(['completed', 'refunded', 'cancelled', 'expired', 'shard_internal']);
-export function findUnfinishedZkNativeMarket(db) {
+export function listUnfinishedZkNativeMarkets(db) {
   const ph = FINISHED_PROTOCOL_STATUSES.map(() => '?').join(',');
   const rows = db.prepare(`SELECT id, protocol_status, metadata FROM pool_markets WHERE protocol_status NOT IN (${ph}) AND json_valid(resolution_rule_spec) AND json_extract(resolution_rule_spec, '$.zk_native') = 1 ORDER BY created_at ASC`).all(...FINISHED_PROTOCOL_STATUSES);
+  const out = [];
   for (const r of rows) {
     let exhausted = false;
     try { exhausted = JSON.parse(r.metadata || '{}')?.zk_continuation?.exhausted === true; } catch { /* 坏 metadata ⇒ 按未完结(fail-closed) */ }
-    if (!exhausted) return { id: r.id, protocol_status: r.protocol_status };
+    if (!exhausted) out.push({ id: r.id, protocol_status: r.protocol_status });
   }
-  return null;
+  return out;
+}
+export function findUnfinishedZkNativeMarket(db) {
+  return listUnfinishedZkNativeMarkets(db)[0] || null;
+}
+
+/**
+ * 账本1855 A: 一次一盘 ⇒ 可配上限。env ZK_MAX_LIVE_MARKETS = 同时在跑(未完结)的 ZK 原生盘数上限; 未设/非法/<1 ⇒ 1(即原"一次一盘"行为, fail-closed); 上限 100。
+ * 并发盘靠 relay 侧 fee UTXO 钉住(pin_utxo, fee-pins.mjs)才安全, 故默认不放开——由部署方显式设值。
+ */
+export function resolveMaxLiveMarkets(env = process.env) {
+  const raw = env.ZK_MAX_LIVE_MARKETS;
+  if (raw === undefined || raw === null || String(raw).trim() === '') return 1;
+  const n = Number(raw);
+  return Number.isInteger(n) && n >= 1 && n <= 100 ? n : 1;
+}
+/** @returns {null | {cap:number, live:number, ids:string[]}} 已达/超上限 ⇒ 详情; 未满 ⇒ null。同步无 await: 调用方在 INSERT 前同一同步段内调用即与插入原子(better-sqlite3)。 */
+export function liveMarketCapReached(db, env = process.env) {
+  const cap = resolveMaxLiveMarkets(env);
+  const live = listUnfinishedZkNativeMarkets(db);
+  return live.length >= cap ? { cap, live: live.length, ids: live.map((m) => m.id) } : null;
 }

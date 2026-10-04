@@ -411,6 +411,8 @@ export async function buildProposeCloseRequestV2(marketId, judged) {
     payoutshard: { redeem_hex: ps.payout_redeem_hex, outpointTxid: psTx, index: Number(psIdxStr), state: currentState, state_start: 1 },
     fee: { address: relayAddr, outpointTxid: feeTx, index: feeUtxo?.index ?? 0 },
   };
+  // 账本1855 A: close 提交费 UTXO 要等到 submit(委员签名后)才花——期间钉住, 防并发盘/rebalance 吃掉(btduw)。pin 失败只 LOUD 不挡(submit tick 每轮 resync 重试)。
+  { const { pinFeeUtxo } = await import('./fee-pins.mjs'); await pinFeeUtxo((c) => rc(c, 15000), { txid: feeTx, index: feeUtxo?.index ?? 0 }, { tag: `close-fee market=${String(marketId).slice(-8)}` }); }
 
   const { Transaction, TransactionOutput, payToAddressScript, Address, CovenantBinding, Hash } = await import('kaspa-wasm');
   const pre = await rc({
@@ -619,6 +621,7 @@ export async function buildZkHandoffRequestV2(marketId, args) {
   if (tokUtxos.length !== 1) throw new Error(`buildZkHandoffRequestV2: PS 名下代币地址上有 ${tokUtxos.length} 笔 UTXO(期望恰 1; amount=${poolNum}, owner=PS cov) — 不猜 (fail-closed)`);
   const psToken = { redeem_hex: psTokArt.script.toString('hex'), outpointTxid: tokUtxos[0].outpoint.transactionId, index: Number(tokUtxos[0].outpoint.index || 0) };
   const feeTx = await transferAndConfirm(settlerRelayId, relayAddr, (HANDOFF_FEE_SOMPI / 1e8).toFixed(8), { minDepth: REORG_SAFE_MIN_DEPTH, maxWaitMs: 90000, origin: 'internal' });
+  { const { pinFeeUtxo, CLAIM_FEE_PIN_TTL_MS } = await import('./fee-pins.mjs'); await pinFeeUtxo((c) => rc(c, 15000), { txid: feeTx.txId, index: 0 }, { ttlMs: CLAIM_FEE_PIN_TTL_MS, tag: `handoff-fee market=${String(marketId).slice(-8)}` }); }   // 账本1855 A: 同上, 窗口短(秒级), TTL 兜底
   const tags = settleDispatchTags();
 
   const [psTx, psIdxStr] = String(ps.payout_ps_outpoint).split(':');

@@ -35,6 +35,7 @@ import { deriveSettlementFeeLeaves } from '../lib/pool-shard-settle.mjs';
 import { enqueueZkProveJob } from '../lib/zk-prove-enqueue.mjs';
 import { persistPayoutShardState } from '../lib/payout-shard-persist.mjs';
 import { assertAddressOnNetwork } from '../lib/kaspa-network.mjs';   // (b) 网络单一源 (设计 v0.2 §3): 前缀只对照 env KASPA_NETWORK, 不从地址推网络
+import { resyncClosePins, unpinFeeUtxo } from '../lib/fee-pins.mjs';   // 账本1855 A: close 提交费 UTXO 钉住(并发盘 btduw)
 
 const TICK_MS = 30_000;   // 30s tick (close_attest 时效性 > 普通 vote; settler 等 quorum)
 let timer = null, running = false;
@@ -731,6 +732,12 @@ function _tryEnqueueZkProve(market, req) {
   }
 }
 
+// 账本1855 A: 落链后 fee 已被花掉, 解钉只为清洁(relay 侧 TTL 兜底), 失败无害。
+function _unpinCloseFee(req) {
+  const f = req?.closeInputs?.fee; if (!f?.outpointTxid || !SETTLER_RELAY_ID) return;
+  unpinFeeUtxo((c) => sendCommandAsync(SETTLER_RELAY_ID, c, 15_000, 'internal'), { txid: String(f.outpointTxid).toLowerCase(), index: Number(f.index ?? 0) }, { tag: 'close-fee' }).catch(() => {});
+}
+
 async function _pollLanded(address, txid, attempts = 15, intervalMs = 2_000) {
   for (let i = 0; i < attempts; i++) {
     try {
@@ -747,6 +754,11 @@ export async function bshardCloseSubmitV2Tick() {
   if (submitRunning) return { skipped: true };
   submitRunning = true;
   try {
+    // 账本1855 A: 每轮把"尚在签名窗口的 close 提交费 outpoint"重新钉给 settler relay(幂等续期; relay/console 重启后自动恢复)。单盘派生失败只 HOLD 该盘。
+    if (SETTLER_RELAY_ID) {
+      try { await resyncClosePins({ db: sqlite, send: (c) => sendCommandAsync(SETTLER_RELAY_ID, c, 15_000, 'internal'), onHold: (mid, why) => console.error(`[bshard-close-submit-v2] 🔴 market=${String(mid).slice(-8)} fee pin HOLD: ${why}`) }); }
+      catch (e) { console.error(`[bshard-close-submit-v2] 🔴 resyncClosePins 异常(不挡 submit): ${e.message}`); }
+    }
     const pending = sqlite.prepare(`
       SELECT id, metadata FROM pool_markets
       WHERE protocol_version = 'v0.7' AND protocol_status = 'collecting_sigs' AND metadata LIKE '%bshard_close_request_v2%'
@@ -765,6 +777,7 @@ export async function bshardCloseSubmitV2Tick() {
         if (landedNow) {
           await _persistAttestedPsState(market.id, req, pendingTx.txid, pendingTx.psContAddress);
           clearCloseRequest(market.id, 'attested_v2');
+          _unpinCloseFee(req);
           _tryEnqueueZkProve(market, req);
           submitted++;
           console.log(`[bshard-close-submit-v2] ✅ (resumed) market=${market.id.slice(-8)} close_attest_v2 LANDED txId=${pendingTx.txid}`);
@@ -793,6 +806,7 @@ export async function bshardCloseSubmitV2Tick() {
       if (!landedOk) { failed++; console.warn(`[bshard-close-submit-v2] market=${market.id.slice(-8)} txId=${r.txId} broadcast OK 但等待窗口内未确认 landed — txId 已持久化(bshard_close_submit_v2_pending_txid), 下轮 tick 只查这一笔, 不重复 broadcast`); continue; }
       await _persistAttestedPsState(market.id, req, r.txId, r.psContAddress);
       clearCloseRequest(market.id, 'attested_v2');   // 独立 status 值, 跟 V1 completed/refunding 区分——后续链条(zk_handoff)接手。
+      _unpinCloseFee(req);
       _tryEnqueueZkProve(market, req);
       submitted++;
       console.log(`[bshard-close-submit-v2] ✅ market=${market.id.slice(-8)} close_attest_v2 LANDED txId=${r.txId}`);
