@@ -272,4 +272,4 @@ console.log('[test] 6. 结构: 重开路由第一条语句');
 
 await app.close();
 console.log(fails ? `\n${fails} FAIL` : '\nALL PASS');
-process.exit(fails ? 1 : 0);
+process.exitCode = fails ? 1 : 0;   // 不 process.exit: 在途的 fetch/句柄还在关闭时 Windows libuv 会断言 UV_HANDLE_CLOSING(exit 1), 让事件循环自然排空

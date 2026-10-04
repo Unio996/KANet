@@ -17,7 +17,7 @@ function freshDb() {
   const db = new Database(':memory:');
   db.exec(`
     CREATE TABLE market_shards (logical_market_id TEXT, shard_market_id TEXT, shard_index INTEGER);
-    CREATE TABLE pool_bettor_sides (market_id TEXT, bettor_pk TEXT, stake_amount TEXT, direction INTEGER, side_lock_daa INTEGER, side_lock_tx TEXT);
+    CREATE TABLE pool_bettor_sides (id INTEGER PRIMARY KEY, market_id TEXT, bettor_pk TEXT, stake_amount TEXT, direction INTEGER, side_lock_daa INTEGER, side_lock_tx TEXT);
     CREATE TABLE zk_prove_jobs (
       id INTEGER PRIMARY KEY AUTOINCREMENT, market_id TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
       ordered_bets_json TEXT NOT NULL, bets_root_hex TEXT, attested_winner INTEGER, receipt_hex TEXT,
