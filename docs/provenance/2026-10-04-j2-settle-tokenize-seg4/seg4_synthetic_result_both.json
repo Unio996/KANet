@@ -1,0 +1,149 @@
+{
+ "refund": {
+  "negatives": {
+   "NA_amount_tampered": {
+    "rejected": true,
+    "text": "{\"status\":200,\"ok\":true,\"error\":\"RPC Server (remote error) -> Rejected transaction b7ecdafff3a57805f005c2b9152bc07a52f66d063a3d1742410b82cc2496b1f4: failed to verify the signature script: script ran, but verification failed\",\"phase\":\"execution\"}",
+    "debugger": {
+     "pass": false,
+     "lineNo": 476,
+     "reqLine": "require(cur == payoutRoot);"
+    }
+   },
+   "NB_token_owner_wrong": {
+    "rejected": true,
+    "text": "{\"status\":200,\"ok\":true,\"error\":\"RPC Server (remote error) -> Rejected transaction 37523c9e69e9ba392bb41394c03289c39f6cf9948acc47d351b39266f10e1e24: failed to verify the signature script: script ran, but verification failed\",\"phase\":\"execution\"}",
+    "debugger": {
+     "pass": false,
+     "lineNo": 525,
+     "reqLine": "validateOutputStateWithInputTemplate(tokenOutIdx, TokenState {"
+    }
+   },
+   "NC_self_continuation_tampered": {
+    "rejected": true,
+    "text": "RPC Server (remote error) -> Rejected transaction 5d13e74b40ad8c8e69a0a9256811da7cdfc434e8d641763fd2fb5bef7b39baca: failed to verify the signature script: script ran, but verification failed",
+    "debugger": {
+     "pass": false,
+     "lineNo": 582,
+     "reqLine": "require(tx.outputs[selfOutIdx].scriptPubKey == byte[](rfcExpectedSpk));"
+    }
+   },
+   "ND_double_claim": {
+    "rejected": true,
+    "text": "{\"status\":200,\"ok\":true,\"error\":\"bshard_refund_claim_v2: nullifier bit 已置位(merkle_index 2 已领过)\",\"phase\":\"execution\"}",
+    "note": "relay 预检(nullifier bit)拦在广播前",
+    "vmDebugger": {
+     "pass": false,
+     "lineNo": 483,
+     "reqLine": "if (word_idx == 0)       { require((w0 / mask) % 2 == 0); nw0 = w0 + mask; }"
+    }
+   }
+  },
+  "claims": [
+   {
+    "leaf": 2,
+    "amount": "500000000",
+    "txId": "8ef5132b23aebfb24c8c5d2457ff363a174ea00f2a29fd6458063a6297211ed0",
+    "isLast": false,
+    "newPool": "3000000000",
+    "claimCovId": "d472111c62de3f33c4dc5ab6e58a91072c7954f15207bc88267c89b1942d962f"
+   },
+   {
+    "leaf": 0,
+    "amount": "1000000000",
+    "txId": "c687bf9cb2cec936ca4dd4e30cd4366299662c067e23fb04c872f50a3c992298",
+    "isLast": false,
+    "newPool": "2000000000",
+    "claimCovId": "627efbed41e2949c553ed710750293c00dfc91500d0c447a23bca410b707f879"
+   },
+   {
+    "leaf": 1,
+    "amount": "2000000000",
+    "txId": "598c5677bc5a6a4454ab47a0374e57a00e8e225853fd0d00ab84c220edaddac7",
+    "isLast": true,
+    "newPool": "0",
+    "claimCovId": "17b70033b066db0838f32c752a94ac4fdc0339d49bd118ce83395b620edabbc1"
+   }
+  ],
+  "finalSelfUtxos": 0
+ },
+ "escape": {
+  "negatives": {
+   "trigger_early": {
+    "rejected": true,
+    "text": "{\"status\":200,\"ok\":true,\"error\":\"RPC Server (remote error) -> Rejected transaction 49931ae017d3242c2324cc0c31e37f0b55f0f93fe9bc02f1b9440ae4cbf84824: failed to verify the signature script: Unsatisfied lock time: locktime requirement not satisfied -- locktime is greater than the transaction locktime: 1791072740239 > 1791072740238\",\"phase\":\"execution\"}",
+    "debugger": {
+     "pass": false,
+     "lineNo": 126,
+     "reqLine": "require(tx.time >= temporal(attestedAtMs + 21600000));           // ESCAPE_GRACE_MS=21600000(6h, 仍是占位数, 设计文档§4③要求团队另行签字确认时长)。v1.0.0: tx.time 只收 temporal, int 须显式 temporal(...) 转型(语义不变, 纯类型迁移)"
+    }
+   },
+   "NA_amount_tampered": {
+    "rejected": true,
+    "text": "{\"status\":200,\"ok\":true,\"error\":\"RPC Server (remote error) -> Rejected transaction 6b7c235fcadef2fcd4207f73b1880761ec33efd3e9b7d3484cc5f5973f7ae97a: failed to verify the signature script: script ran, but verification failed\",\"phase\":\"execution\"}",
+    "debugger": {
+     "pass": false,
+     "lineNo": 164,
+     "reqLine": "require(cur == refundRootBaked);                                  // ★ 验对象是 refundRootBaked"
+    }
+   },
+   "NB_token_owner_wrong": {
+    "rejected": true,
+    "text": "{\"status\":200,\"ok\":true,\"error\":\"RPC Server (remote error) -> Rejected transaction b4c71f406d3f6150602ede1706e2356d4654b5df6f0e2be490e7abdaf2ed6b31: failed to verify the signature script: script ran, but verification failed\",\"phase\":\"execution\"}",
+    "debugger": {
+     "pass": false,
+     "lineNo": 212,
+     "reqLine": "validateOutputStateWithInputTemplate(tokenOutIdx, TokenState {"
+    }
+   },
+   "NC_self_continuation_tampered": {
+    "rejected": true,
+    "text": "RPC Server (remote error) -> Rejected transaction e0c5775b566c7f54094d6a04fc58c07c528f3fb742d32e7496dc6c3151d4da13: failed to verify the signature script: script ran, but verification failed",
+    "debugger": {
+     "pass": false,
+     "lineNo": 264,
+     "reqLine": "require(tx.outputs[selfOutIdx].scriptPubKey == byte[](escExpectedSpk));"
+    }
+   },
+   "ND_double_claim": {
+    "rejected": true,
+    "text": "{\"status\":200,\"ok\":true,\"error\":\"closezk_v2_escape_claim: nullifier bit 已置位(merkle_index 2 已领过)\",\"phase\":\"execution\"}",
+    "note": "relay 预检(nullifier bit)拦在广播前",
+    "vmDebugger": {
+     "pass": false,
+     "lineNo": 171,
+     "reqLine": "if (word_idx == 0)       { require((w0 / mask) % 2 == 0); nw0 = w0 + mask; }"
+    }
+   }
+  },
+  "claims": [
+   {
+    "leaf": 2,
+    "amount": "500000000",
+    "txId": "7785ae48e93d5a16e58c1940715b372ae17518cc5ae541745262f35b18140d1d",
+    "isLast": false,
+    "newPool": "3000000000",
+    "claimCovId": "e30121b79a23dd6434d1f8a041d96cd21981a014a1cfdafaa6763ad4abaa4ec7"
+   },
+   {
+    "leaf": 0,
+    "amount": "1000000000",
+    "txId": "b860322d04ab9daaaaf860e1dc0208d8f7f3ec19ef22b5908cfb0156057af31b",
+    "isLast": false,
+    "newPool": "2000000000",
+    "claimCovId": "a5a29b03c5160a3b8bc5e46dbb3e62230eb2977b691480deb8dd8030bc0e215e"
+   },
+   {
+    "leaf": 1,
+    "amount": "2000000000",
+    "txId": "c762cad257ae2078542358f40b69c13ce1489bd65a148a3db0ddd8c32a99ecaf",
+    "isLast": true,
+    "newPool": "0",
+    "claimCovId": "fa3a44b8c1009bfc8633fc3235cd19fbe3b5c4e3844107f20ab166052dfdf151"
+   }
+  ],
+  "handoffTx": "7e3025898881061e01563b1492b99ab406f4e2abff34583c30718a9d2c931bd8",
+  "triggerTx": "3fac2853a88bfd0acb65b39c2051978b8764da983f2c7e2709c5051593ff9724",
+  "finalSelfUtxos": 0
+ }
+}

@@ -1,0 +1,10 @@
+[db] path=D:\kanet-tn12\scratch\_j2_tok_sim\console.simnet.db source=DB_PATH
+02:18:17 market ext-pool-v07-1791072305023-vl1wf status attested_v2 maker stake 13000000000 spine kaspasim:pqaalccxvqgvqg7glqprxm8kcv30lhpf9egq9vv52yj40qnpscwh53wyyy7le
+02:18:17 ① reclaimBshardMakerBond(dryRun) => [{"id":"ext-pool-v07-1791072305023-vl1wf","ok":false,"reason":"容器②完成证据未通过(hasVerifiedContainer2Evidence=false)——bettor 侧未确认终态前不放 maker bond"}]
+02:18:17 BEFORE spine UTXO: ["518c0ab174e13773fab4b25f58f6ce89efceae2237a7935f765bfedae5ba6fae:0=13000000000"]
+02:18:17 NEG premature_lock_time: REJECTED ✓ {"status":200,"ok":true,"error":"RPC Server (remote error) -> Rejected transaction 909b94575e30adafb0b838208e76c8378142c5e9bf00bf0bd3d291d75a9b513c: failed to verify the signature script: Unsatisfied lock time: locktime requirement not satisfied -- locktime is greater than the transaction locktime: 
+02:18:17 NEG output_to_non_maker: REJECTED ✓ {"status":200,"ok":true,"error":"RPC Server (remote error) -> Rejected transaction 86f176d2162a894a91ef93a0d0d4b1061d2f389b054e093c78f76da423a042b2: failed to verify the signature script: script ran, but verification failed","phase":"execution"}
+02:18:17 NEG fee_below_min: REJECTED ✓ {"status":200,"ok":true,"error":"RPC Server (remote error) -> Rejected transaction 73374540f70cbc9933cc63d7b43aa94d092052c08b845bf60eebfdbd7e1387f9: failed to verify the signature script: script ran, but verification failed","phase":"execution"}
+02:18:17 NEG fee_above_max: REJECTED ✓ {"status":200,"ok":true,"error":"RPC Server (remote error) -> Rejected transaction 8dadf433c943f7f0e836ffc65896446404459603d2131a232fdd90295b0e1cfa: failed to verify the signature script: script ran, but verification failed","phase":"execution"}
+02:18:17 HONEST refund_maker_unjoined => txId 7e96294b931033f9d208f0edd6aeb10c1bd648b6be229573258fa35cf4d13d88
+02:18:21 AFTER spine UTXO: [] | maker 收到: ["7e96294b931033f9d208f0edd6aeb10c1bd648b6be229573258fa35cf4d13d88:0=12999000000"]

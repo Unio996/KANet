@@ -1,0 +1,19 @@
+[db] path=D:\kanet-tn12\scratch\_j2_tok_sim\console.simnet.db source=DB_PATH
+02:18:12 market ext-pool-v07-1791072305023-vl1wf status attested_v2 maker stake 13000000000 spine kaspasim:pqaalccxvqgvqg7glqprxm8kcv30lhpf9egq9vv52yj40qnpscwh53wyyy7le
+02:18:12 ① reclaimBshardMakerBond(dryRun) => [{"id":"ext-pool-v07-1791072305023-vl1wf","ok":false,"reason":"容器②完成证据未通过(hasVerifiedContainer2Evidence=false)——bettor 侧未确认终态前不放 maker bond"}]
+02:18:12 BEFORE spine UTXO: ["518c0ab174e13773fab4b25f58f6ce89efceae2237a7935f765bfedae5ba6fae:0=13000000000"]
+02:18:12 NEG premature_lock_time: REJECTED ✓ {"status":200,"ok":true,"error":"RPC Server (remote error) -> Rejected transaction 72293289042e2a1fe9c8cfcdfdfcb3c05d1deb4958c0d1a5a14d311627204b6f: failed to verify the signature script: Unsatisfied lock time: locktime requirement not satisfied -- locktime is greater than the transaction locktime: 
+02:18:12 NEG output_to_non_maker: REJECTED ✓ {"status":200,"ok":true,"error":"RPC Server (remote error) -> Rejected transaction 126c46aa49a6ba8f50c9ac9e758d89d83fa7b7995122207047bd6d479eec2e63: failed to verify the signature script: script ran, but verification failed","phase":"execution"}
+02:18:12 NEG fee_below_min: REJECTED ✓ {"status":200,"ok":true,"error":"RPC Server (remote error) -> Rejected transaction 73374540f70cbc9933cc63d7b43aa94d092052c08b845bf60eebfdbd7e1387f9: failed to verify the signature script: script ran, but verification failed","phase":"execution"}
+02:18:12 NEG fee_above_max: REJECTED ✓ {"status":200,"ok":true,"error":"RPC Server (remote error) -> Rejected transaction 8dadf433c943f7f0e836ffc65896446404459603d2131a232fdd90295b0e1cfa: failed to verify the signature script: script ran, but verification failed","phase":"execution"}
+file:///D:/kanet-tn12/scratch/_j2_wt_tokenize/docs/provenance/2026-10-04-j2-settle-tokenize-seg4/seg4_maker_exit.mjs:32
+const send = async (extra) => { const j = await http('POST', `/api/relay/${makerRelay.id}/send-command`, { type: 'pool_refund_maker_unjoined_tx', spine_p2sh_address: row.spine_p2sh, spine_redeem_script_hex: meta.spine_redeem_script_hex, required_input_outpoint: { outpointTxid: row.spine_lock_tx }, output: { address: makerRelay.address, amountSompi: (stake - 100000n).toString() }, lock_time: threshold, ...extra }); if (j.ok === false || j.error) { const e = new Error(JSON.stringify(j).slice(0, 500)); throw e; } return j; };
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                             ^
+
+Error: {"status":200,"ok":true,"error":"RPC Server (remote error) -> Rejected transaction 3e196eaa71e260af98ea6515c4de7410c7ee61d67c05dbdf79c00a891a563a4a: transaction 3e196eaa71e260af98ea6515c4de7410c7ee61d67c05dbdf79c00a891a563a4a is not standard: transaction has 100000 fees which is under the required amount of 474200 for normalized transient mass 4742 (proportional to transaction byte size)","phase":"execution"}
+    at send (file:///D:/kanet-tn12/scratch/_j2_wt_tokenize/docs/provenance/2026-10-04-j2-settle-tokenize-seg4/seg4_maker_exit.mjs:32:462)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async file:///D:/kanet-tn12/scratch/_j2_wt_tokenize/docs/provenance/2026-10-04-j2-settle-tokenize-seg4/seg4_maker_exit.mjs:43:11
+
+Node.js v24.14.1
+Assertion failed: !(handle->flags & UV_HANDLE_CLOSING), file src\win\async.c, line 76

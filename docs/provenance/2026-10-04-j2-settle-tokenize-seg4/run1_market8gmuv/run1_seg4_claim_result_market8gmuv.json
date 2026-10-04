@@ -1,0 +1,73 @@
+{
+ "leaves": [
+  {
+   "pk": "060b0264800672da79c533ae1534310f7925beeac945363bd2cd0d2b7402dc79",
+   "amount": "2943000000"
+  },
+  {
+   "pk": "1187ac7eb6fdec62d82c2ef7ca5e6588311a92a34fb51fb221078fe9b7ab46cf",
+   "amount": "57000000"
+  }
+ ],
+ "negatives": {
+  "NA_amount_tampered": {
+   "rejected": true,
+   "text": "{\"status\":200,\"ok\":true,\"error\":\"RPC Server (remote error) -> Rejected transaction 9e626819c6375106646da2ccee1e8728fd5f923c71dbf9394b1a45ac83d2750b: failed to verify the signature script: script ran, but verification failed\",\"phase\":\"execution\"}",
+   "debugger": {
+    "pass": false,
+    "lineNo": 298,
+    "reqLine": "require(cur == payoutRootField);                                   // ★ NWT checklist③: 验对象是 payoutRootField"
+   }
+  },
+  "NB_token_owner_wrong": {
+   "rejected": true,
+   "text": "{\"status\":200,\"ok\":true,\"error\":\"RPC Server (remote error) -> Rejected transaction 59f302a9d6c4ec66a450f2fb0a62fec694ec3aac75f4b168682858971add521d: failed to verify the signature script: script ran, but verification failed\",\"phase\":\"execution\"}",
+   "debugger": {
+    "pass": false,
+    "lineNo": 347,
+    "reqLine": "validateOutputStateWithInputTemplate(tokenOutIdx, TokenState {"
+   }
+  },
+  "NC_self_continuation_tampered": {
+   "rejected": true,
+   "text": "RPC Server (remote error) -> Rejected transaction 5a6737097480941f5090f86ceb43cb5a934ab10819605a983e5cb04eebf08c86: failed to verify the signature script: script ran, but verification failed",
+   "debugger": {
+    "pass": false,
+    "lineNo": 399,
+    "reqLine": "require(tx.outputs[selfOutIdx].scriptPubKey == byte[](clmExpectedSpk));"
+   }
+  },
+  "ND_double_claim": {
+   "rejected": true,
+   "text": "runTokenClaim: amount 2943000000 不在 [1, pool=57000000]",
+   "note": "relay 预检(nullifier bit 已置位)拦在广播前; 共识层同一 require 见 CloseZkV2.sil claim 的 (w/mask)%2==0"
+  }
+ },
+ "claims": [
+  {
+   "n": 0,
+   "errored": false,
+   "poolBefore": "3000000000",
+   "exhaustedAfter": false,
+   "outpointAfter": {
+    "txid": "1f47da9827c302195b8cff5819a3e3f0e54e5b29f086f103a79cfb77910b2141",
+    "index": 0
+   },
+   "poolAfter": "57000000"
+  },
+  {
+   "n": 1,
+   "errored": false,
+   "poolBefore": "57000000",
+   "exhaustedAfter": true,
+   "outpointAfter": null,
+   "poolAfter": "0"
+  }
+ ],
+ "negativesLeftStateUntouched": true,
+ "final": {
+  "exhausted": true,
+  "claimedSum": "3000000000",
+  "pool": "3000000000"
+ }
+}

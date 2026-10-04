@@ -1,0 +1,21 @@
+[broker-reconcile] cron started, interval=15min, startup_grace=1h
+[zk-autonomy] 01:35:50 ✅ market=29-bnwnx judge+propose dispatched(winDir=0, endBlockHash=bde3ca99a46e...)
+[zk-autonomy] 01:35:50 tick: 1 candidate(s) | proposed=1 cooling=0 skipped=0 errored=0
+[bshard-close-submit-v2] ✅ market=29-bnwnx payout_shards 状态持久化(closed=1, outpoint=783d834582794c5b18ac2f4833a627fabb884d19e23ee7dc3c6d9e28cc7fce2d:0)
+[bshard-close-submit-v2] ✅ market=29-bnwnx zk_prove_jobs enqueued jobId=3
+[bshard-close-submit-v2] ✅ market=29-bnwnx close_attest_v2 LANDED txId=783d834582794c5b18ac2f4833a627fabb884d19e23ee7dc3c6d9e28cc7fce2d
+[bshard-close-submit-v2] tick: 1 pending | submitted=1 notReady=0 failed=0 errored=0 resumed=0
+[zk-prove-worker] ❌ job=3 market=29-bnwnx: market ext-pool-v07-1791076886129-bnwnx 还没有 zk_continuation(zk_handoff 还没成功广播过)— 拒绝在花 4 分钟 proving+1KAS gate 注资之前跑一个下游必炸的 job
+[zk-prove-worker] updateProvingFailed also failed: updateProvingFailed: market ext-pool-v07-1791076886129-bnwnx 没有 zk_continuation
+[zk-autonomy] 01:37:18 ✅ market=29-bnwnx zk_handoff dispatched+landed txId=71bbe52dca41e8b547f40a32cc059a3b784a3b6d17e7f385ec8617de8b23426d
+[zk-autonomy] 01:37:18 tick: 1 candidate(s) | dispatched=1 recovered=0 cooling=0 skipped=0 errored=0
+[zk-prove-worker] job=3 market=29-bnwnx proving started (~4min)...
+[zk-prove-worker] ✅ job=3 market=29-bnwnx proving.status=ready gate=kaspasim:ppxqv8vezah
+[zk-autonomy] 01:39:12 ✅ market=29-bnwnx zk_close dispatched+landed txId=59a59cf992b82cbf8a48cf7a2becdf69d5bc1c633b9f83706c7c62a0e24ddc95
+[zk-autonomy] 01:39:12 tick: 1 candidate(s) | dispatched=1 notMine=0 skipped=0 errored=0
+[relay:e2e-settler] [closezk_v2_claim invariant] Σin=420000000 Σout=380000000 fee=40000000 (mass_ub=277146 minFee=27714600 ✓), 5 outputs all >= dust
+[zk-autonomy] 01:39:44 ✅ market=29-bnwnx claim idx=0 pk=060b02648006 payout=2943000000 txId=55424c65c95277b77e02557734f7f408e24c6b7a01c43161960d739d94bcdfeb
+[zk-autonomy] 01:39:44 tick: 1 candidate(s) | claimed=1 notMine=0 skipped=0 errored=0
+[relay:e2e-settler] [closezk_v2_claim invariant] Σin=480000000 Σout=440000000 fee=40000000 (mass_ub=87196 minFee=8719600 ✓), 3 outputs all >= dust
+[zk-autonomy] 01:40:14 ✅ market=29-bnwnx claim idx=1 pk=1187ac7eb6fd payout=57000000 txId=c9d90e0c2bb692522ec12d3ccf82ec313f1e573f819f0ef39dae49124631519e (last, exhausted)
+[zk-autonomy] 01:40:14 tick: 1 candidate(s) | claimed=1 notMine=0 skipped=0 errored=0

@@ -1,0 +1,69 @@
+{
+ "leaves": [
+  {
+   "pk": "060b0264800672da79c533ae1534310f7925beeac945363bd2cd0d2b7402dc79",
+   "amount": "2943000000"
+  },
+  {
+   "pk": "1187ac7eb6fdec62d82c2ef7ca5e6588311a92a34fb51fb221078fe9b7ab46cf",
+   "amount": "57000000"
+  }
+ ],
+ "negatives": {
+  "NA_amount_tampered": {
+   "rejected": true,
+   "text": "{\"status\":200,\"ok\":true,\"error\":\"RPC Server (remote error) -> Rejected transaction d393bdd60b1c623f8b1ff5aa6fea6007b8ee5ddf4f5b69d6bd6fcbb243d004c4: failed to verify the signature script: script ran, but verification failed\",\"phase\":\"execution\"}",
+   "debugger": {
+    "pass": false,
+    "lineNo": 298,
+    "reqLine": "require(cur == payoutRootField);                                   // ★ NWT checklist③: 验对象是 payoutRootField"
+   }
+  },
+  "NB_token_owner_wrong": {
+   "rejected": true,
+   "text": "{\"status\":200,\"ok\":true,\"error\":\"RPC Server (remote error) -> Rejected transaction 9cdc838c2e9b36c90f7cd905448c2c76a288103e7c078138c2c805f4baffa734: failed to verify the signature script: script ran, but verification failed\",\"phase\":\"execution\"}",
+   "debugger": {
+    "pass": false,
+    "lineNo": 347,
+    "reqLine": "validateOutputStateWithInputTemplate(tokenOutIdx, TokenState {"
+   }
+  },
+  "NC_self_continuation_tampered": {
+   "rejected": true,
+   "text": "RPC Server (remote error) -> Rejected transaction 3cba670fc3b3ec832da56a4b229d05b1fd702693524a882cf80c6ddcbe90bd19: failed to verify the signature script: script ran, but verification failed",
+   "debugger": {
+    "pass": false,
+    "lineNo": 399,
+    "reqLine": "require(tx.outputs[selfOutIdx].scriptPubKey == byte[](clmExpectedSpk));"
+   }
+  },
+  "ND_double_claim": {
+   "rejected": true,
+   "text": "{\"status\":200,\"ok\":true,\"error\":\"closezk_v2_claim: nullifier bit 已置位(merkle_index 1 已领过)\",\"phase\":\"execution\"}",
+   "note": "relay 预检(nullifier bit 已置位)拦在广播前; 共识层同一 require 见 CloseZkV2.sil claim 的 (w/mask)%2==0"
+  }
+ },
+ "claims": [
+  {
+   "n": "first-partial-last-leaf",
+   "txId": "f4aac8bb5bd12f080320624f2161ba460476fb8c4af4aebe6604f76a72e94812",
+   "leafIdx": 1,
+   "amount": "57000000",
+   "poolAfter": "2943000000"
+  },
+  {
+   "n": 0,
+   "errored": false,
+   "poolBefore": "2943000000",
+   "exhaustedAfter": true,
+   "outpointAfter": null,
+   "poolAfter": "0"
+  }
+ ],
+ "negativesLeftStateUntouched": true,
+ "final": {
+  "exhausted": true,
+  "claimedSum": "2943000000",
+  "pool": "3000000000"
+ }
+}

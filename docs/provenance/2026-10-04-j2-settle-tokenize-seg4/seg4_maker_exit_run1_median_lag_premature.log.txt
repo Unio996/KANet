@@ -1,0 +1,75 @@
+[db] path=D:\kanet-tn12\scratch\_j2_tok_sim\console.simnet.db source=DB_PATH
+01:20:06 market ext-pool-v07-1791072305023-vl1wf status attested_v2 maker stake 13000000000 spine kaspasim:pqaalccxvqgvqg7glqprxm8kcv30lhpf9egq9vv52yj40qnpscwh53wyyy7le
+01:20:06 ① reclaimBshardMakerBond(dryRun) => [{"id":"ext-pool-v07-1791072305023-vl1wf","ok":false,"reason":"容器②完成证据未通过(hasVerifiedContainer2Evidence=false)——bettor 侧未确认终态前不放 maker bond"}]
+01:21:01 waiting refund_maker_unjoined 时间锁… 还差 3304 s
+01:22:01 waiting refund_maker_unjoined 时间锁… 还差 3244 s
+01:23:01 waiting refund_maker_unjoined 时间锁… 还差 3184 s
+01:24:01 waiting refund_maker_unjoined 时间锁… 还差 3124 s
+01:25:01 waiting refund_maker_unjoined 时间锁… 还差 3063 s
+01:26:01 waiting refund_maker_unjoined 时间锁… 还差 3003 s
+01:27:01 waiting refund_maker_unjoined 时间锁… 还差 2943 s
+01:28:01 waiting refund_maker_unjoined 时间锁… 还差 2883 s
+01:29:01 waiting refund_maker_unjoined 时间锁… 还差 2823 s
+01:30:02 waiting refund_maker_unjoined 时间锁… 还差 2763 s
+01:31:02 waiting refund_maker_unjoined 时间锁… 还差 2703 s
+01:32:02 waiting refund_maker_unjoined 时间锁… 还差 2643 s
+01:33:02 waiting refund_maker_unjoined 时间锁… 还差 2583 s
+01:34:02 waiting refund_maker_unjoined 时间锁… 还差 2523 s
+01:35:02 waiting refund_maker_unjoined 时间锁… 还差 2462 s
+01:36:02 waiting refund_maker_unjoined 时间锁… 还差 2402 s
+01:37:02 waiting refund_maker_unjoined 时间锁… 还差 2342 s
+01:38:02 waiting refund_maker_unjoined 时间锁… 还差 2282 s
+01:39:02 waiting refund_maker_unjoined 时间锁… 还差 2222 s
+01:40:02 waiting refund_maker_unjoined 时间锁… 还差 2162 s
+01:41:03 waiting refund_maker_unjoined 时间锁… 还差 2102 s
+01:42:03 waiting refund_maker_unjoined 时间锁… 还差 2042 s
+01:43:03 waiting refund_maker_unjoined 时间锁… 还差 1982 s
+01:44:03 waiting refund_maker_unjoined 时间锁… 还差 1922 s
+01:45:03 waiting refund_maker_unjoined 时间锁… 还差 1862 s
+01:46:03 waiting refund_maker_unjoined 时间锁… 还差 1801 s
+01:47:03 waiting refund_maker_unjoined 时间锁… 还差 1741 s
+01:48:03 waiting refund_maker_unjoined 时间锁… 还差 1681 s
+01:49:03 waiting refund_maker_unjoined 时间锁… 还差 1621 s
+01:50:03 waiting refund_maker_unjoined 时间锁… 还差 1561 s
+01:51:04 waiting refund_maker_unjoined 时间锁… 还差 1501 s
+01:52:04 waiting refund_maker_unjoined 时间锁… 还差 1441 s
+01:53:04 waiting refund_maker_unjoined 时间锁… 还差 1381 s
+01:54:04 waiting refund_maker_unjoined 时间锁… 还差 1321 s
+01:55:04 waiting refund_maker_unjoined 时间锁… 还差 1261 s
+01:56:04 waiting refund_maker_unjoined 时间锁… 还差 1200 s
+01:57:04 waiting refund_maker_unjoined 时间锁… 还差 1140 s
+01:58:04 waiting refund_maker_unjoined 时间锁… 还差 1080 s
+01:59:04 waiting refund_maker_unjoined 时间锁… 还差 1020 s
+02:00:04 waiting refund_maker_unjoined 时间锁… 还差 960 s
+02:01:04 waiting refund_maker_unjoined 时间锁… 还差 900 s
+02:02:00 waiting refund_maker_unjoined 时间锁… 还差 845 s
+02:03:00 waiting refund_maker_unjoined 时间锁… 还差 785 s
+02:04:00 waiting refund_maker_unjoined 时间锁… 还差 725 s
+02:05:00 waiting refund_maker_unjoined 时间锁… 还差 665 s
+02:06:00 waiting refund_maker_unjoined 时间锁… 还差 605 s
+02:07:00 waiting refund_maker_unjoined 时间锁… 还差 544 s
+02:08:00 waiting refund_maker_unjoined 时间锁… 还差 484 s
+02:09:00 waiting refund_maker_unjoined 时间锁… 还差 424 s
+02:10:00 waiting refund_maker_unjoined 时间锁… 还差 364 s
+02:11:00 waiting refund_maker_unjoined 时间锁… 还差 304 s
+02:12:00 waiting refund_maker_unjoined 时间锁… 还差 244 s
+02:13:01 waiting refund_maker_unjoined 时间锁… 还差 184 s
+02:14:01 waiting refund_maker_unjoined 时间锁… 还差 124 s
+02:15:01 waiting refund_maker_unjoined 时间锁… 还差 64 s
+02:16:01 waiting refund_maker_unjoined 时间锁… 还差 4 s
+02:16:06 BEFORE spine UTXO: ["518c0ab174e13773fab4b25f58f6ce89efceae2237a7935f765bfedae5ba6fae:0=13000000000"]
+02:16:06 NEG premature_lock_time: REJECTED ✓ {"status":200,"ok":true,"error":"RPC Server (remote error) -> Rejected transaction 72293289042e2a1fe9c8cfcdfdfcb3c05d1deb4958c0d1a5a14d311627204b6f: transaction input #0 is not finalized","phase":"execution"}
+02:16:06 NEG output_to_non_maker: REJECTED ✓ {"status":200,"ok":true,"error":"RPC Server (remote error) -> Rejected transaction 126c46aa49a6ba8f50c9ac9e758d89d83fa7b7995122207047bd6d479eec2e63: transaction input #0 is not finalized","phase":"execution"}
+02:16:06 NEG fee_below_min: REJECTED ✓ {"status":200,"ok":true,"error":"RPC Server (remote error) -> Rejected transaction 73374540f70cbc9933cc63d7b43aa94d092052c08b845bf60eebfdbd7e1387f9: transaction input #0 is not finalized","phase":"execution"}
+02:16:06 NEG fee_above_max: REJECTED ✓ {"status":200,"ok":true,"error":"RPC Server (remote error) -> Rejected transaction 8dadf433c943f7f0e836ffc65896446404459603d2131a232fdd90295b0e1cfa: transaction input #0 is not finalized","phase":"execution"}
+file:///D:/kanet-tn12/scratch/_j2_wt_tokenize/docs/provenance/2026-10-04-j2-settle-tokenize-seg4/seg4_maker_exit.mjs:32
+const send = async (extra) => { const j = await http('POST', `/api/relay/${makerRelay.id}/send-command`, { type: 'pool_refund_maker_unjoined_tx', spine_p2sh_address: row.spine_p2sh, spine_redeem_script_hex: meta.spine_redeem_script_hex, required_input_outpoint: { outpointTxid: row.spine_lock_tx }, output: { address: makerRelay.address, amountSompi: (stake - 100000n).toString() }, lock_time: threshold, ...extra }); if (j.ok === false || j.error) { const e = new Error(JSON.stringify(j).slice(0, 500)); throw e; } return j; };
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                             ^
+
+Error: {"status":200,"ok":true,"error":"RPC Server (remote error) -> Rejected transaction 3e196eaa71e260af98ea6515c4de7410c7ee61d67c05dbdf79c00a891a563a4a: transaction input #0 is not finalized","phase":"execution"}
+    at send (file:///D:/kanet-tn12/scratch/_j2_wt_tokenize/docs/provenance/2026-10-04-j2-settle-tokenize-seg4/seg4_maker_exit.mjs:32:462)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async file:///D:/kanet-tn12/scratch/_j2_wt_tokenize/docs/provenance/2026-10-04-j2-settle-tokenize-seg4/seg4_maker_exit.mjs:43:11
+
+Node.js v24.14.1
+Assertion failed: !(handle->flags & UV_HANDLE_CLOSING), file src\win\async.c, line 76
