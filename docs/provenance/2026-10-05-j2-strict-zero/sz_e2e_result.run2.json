@@ -1,0 +1,835 @@
+{
+ "startedAt": "2026-10-04T18:22:17.439Z",
+ "asserts": [
+  {
+   "ok": true,
+   "label": "一次一盘闸: 另有未完结 zk_native 盘 ⇒ 409 another_zk_market_unfinished(blocking=btduw)"
+  },
+  {
+   "ok": true,
+   "label": "把那个卡死的 simnet 盘在 scratch 副本里标 cancelled(仅 simnet 副本), 再开新盘"
+  },
+  {
+   "ok": true,
+   "label": "create-v07 200 + no_kas_stake=true"
+  },
+  {
+   "ok": true,
+   "label": "响应: spine_p2sh/spine_lock_tx=null, maker_stake_locked_kas=0"
+  },
+  {
+   "ok": true,
+   "label": "建盘后(未下注): 网关/下注人钱包余额逐 sompi 不变 = 建盘没有任何链上转账"
+  },
+  {
+   "ok": true,
+   "label": "bettorA register-v07 stake_ktt=1000000000 ⇒ 200 no_kas_stake"
+  },
+  {
+   "ok": true,
+   "label": "bettorA 钱包余额下注后逐 sompi 不变(26390389200 == 26390389200)"
+  },
+  {
+   "ok": true,
+   "label": "bettorB register-v07 stake_ktt=2000000000 ⇒ 200 no_kas_stake"
+  },
+  {
+   "ok": true,
+   "label": "bettorB 钱包余额下注后逐 sompi 不变(23390389200 == 23390389200)"
+  },
+  {
+   "ok": true,
+   "label": "不收 KAS 模式 stake_kas ⇒ 400 stake_ktt_required(不读老字段)"
+  },
+  {
+   "ok": true,
+   "label": "register-v07/prep ⇒ 403"
+  },
+  {
+   "ok": true,
+   "label": "自治链走到最后一个 claim(exhausted)(1918s)"
+  },
+  {
+   "ok": true,
+   "label": "A. bettorA 余额逐 sompi 相同(26390389200 → 26390389200)"
+  },
+  {
+   "ok": true,
+   "label": "A. bettorB 余额逐 sompi 相同(23390389200 → 23390389200)"
+  },
+  {
+   "ok": true,
+   "label": "B. 窗口内所有被接受交易的输入面值都能溯源(未知输入 0)"
+  },
+  {
+   "ok": true,
+   "label": "A. 窗口内没有任何被接受的交易触碰下注人钱包(输入/输出)(0)"
+  },
+  {
+   "ok": true,
+   "label": "B. maker: 逐笔交易重算 Δ(-147221600) == 余额差(-147221600) sompi"
+  },
+  {
+   "ok": true,
+   "label": "B. maker: Δ == −(手续费 53221600 + 净锁进 covenant 94000000) 逐 sompi 成立"
+  },
+  {
+   "ok": true,
+   "label": "B. maker: 落到第三方 P2PK 地址的输出 = 0(须为 0)"
+  },
+  {
+   "ok": true,
+   "label": "B. settler: 逐笔交易重算 Δ(-304222700) == 余额差(-304222700) sompi"
+  },
+  {
+   "ok": true,
+   "label": "B. settler: Δ == −(手续费 184222700 + 净锁进 covenant 120000000) 逐 sompi 成立"
+  },
+  {
+   "ok": true,
+   "label": "B. settler: 落到第三方 P2PK 地址的输出 = 0(须为 0)"
+  },
+  {
+   "ok": true,
+   "label": "B. fee: 逐笔交易重算 Δ(0) == 余额差(0) sompi"
+  },
+  {
+   "ok": true,
+   "label": "B. fee: Δ == −(手续费 0 + 净锁进 covenant 0) 逐 sompi 成立"
+  },
+  {
+   "ok": true,
+   "label": "B. fee: 落到第三方 P2PK 地址的输出 = 0(须为 0)"
+  },
+  {
+   "ok": true,
+   "label": "C. claim idx=0 → bettorA 的 claim_out 地址 == KanetTokenClaim(市场 cov, 赢家 pk, 2943000000) 重算地址, tok_out 地址 == KTT(2943000000, owner=该 claim cov) 重算地址"
+  },
+  {
+   "ok": true,
+   "label": "C. claim idx=0: claim_out 与 tok_out 仍是链上未花 UTXO(代币在 covenant 里, 没有任何钱包地址拿到)"
+  },
+  {
+   "ok": true,
+   "label": "C. claim idx=0: 没有任何输出落到赢家/下注人/开盘人钱包地址(只有 covenant 与系统找零)"
+  },
+  {
+   "ok": true,
+   "label": "C. claim idx=1 → maker 的 claim_out 地址 == KanetTokenClaim(市场 cov, 赢家 pk, 57000000) 重算地址, tok_out 地址 == KTT(57000000, owner=该 claim cov) 重算地址"
+  },
+  {
+   "ok": true,
+   "label": "C. claim idx=1: claim_out 与 tok_out 仍是链上未花 UTXO(代币在 covenant 里, 没有任何钱包地址拿到)"
+  },
+  {
+   "ok": true,
+   "label": "C. claim idx=1: 没有任何输出落到赢家/下注人/开盘人钱包地址(只有 covenant 与系统找零)"
+  },
+  {
+   "ok": true,
+   "label": "C. 全部 claim 的 KTT 总量 == 池总额 3000000000(= 1e9 + 2e9 下注筹码): 3000000000"
+  },
+  {
+   "ok": true,
+   "label": "C. 至少一个下注人是 KTT 受益人(bettorA,maker)"
+  },
+  {
+   "ok": true,
+   "label": "D. env ZK_SYSTEM_SINK_PK == 我方 sink 私钥的公钥"
+  },
+  {
+   "ok": true,
+   "label": "D. bettorA 的 ticket 地址 == 新模板(sweep-only)重算地址 且 ≠ 旧模板(bettor 签名可花)地址"
+  },
+  {
+   "ok": true,
+   "label": "D. bettorA 的 ticket 仍在链上(未被任何人花), 面值 7000000 sompi(= 0.07 KAS)"
+  },
+  {
+   "ok": true,
+   "label": "D. bettorB 的 ticket 地址 == 新模板(sweep-only)重算地址 且 ≠ 旧模板(bettor 签名可花)地址"
+  },
+  {
+   "ok": true,
+   "label": "D. bettorB 的 ticket 仍在链上(未被任何人花), 面值 7000000 sompi(= 0.07 KAS)"
+  },
+  {
+   "ok": true,
+   "label": "D. 两张 ticket 都核到"
+  },
+  {
+   "ok": true,
+   "label": "D. claim idx=0: age=349 < RETIRE_DAA(400) 时 retire 被拒(38268db9de1428a5b7: one of the transaction sequence locks conditions was not met)"
+  },
+  {
+   "ok": true,
+   "label": "D. claim idx=0: retire 输出给赢家钱包 bettorA 被拒(87f6c8b4: one of the transaction sequence locks conditions was not met)"
+  },
+  {
+   "ok": true,
+   "label": "D. claim idx=1: age=167 < RETIRE_DAA(400) 时 retire 被拒(4b9a3915fb87f75eae: one of the transaction sequence locks conditions was not met)"
+  },
+  {
+   "ok": true,
+   "label": "D. claim idx=1: retire 输出给赢家钱包 maker 被拒(a6ceb87a: one of the transaction sequence locks conditions was not met)"
+  },
+  {
+   "ok": true,
+   "label": "D. claim idx=0: 满龄但 sequence=0 被拒"
+  },
+  {
+   "ok": true,
+   "label": "D. claim idx=0 (bettorA, 2943000000 KTT): 满龄 retire → sink 被接受 fff458f8b4ccca63199c4f1535b110b18a6e57541c637838268db9de1428a5b7"
+  },
+  {
+   "ok": true,
+   "label": "D. claim idx=1: 满龄但 sequence=0 被拒"
+  },
+  {
+   "ok": true,
+   "label": "D. claim idx=1 (maker, 57000000 KTT): 满龄 retire → sink 被接受 c4382de4df6efe6a9281ac2efa29cbb21a410d39b426af4b9a3915fb87f75eae"
+  },
+  {
+   "ok": true,
+   "label": "D. sink 余额增量 == Σ(claim_out+tok_out − 费) = 196000000 sompi(实 196000000)"
+  },
+  {
+   "ok": true,
+   "label": "D. 全部 2/2 对 claim_out+tok_out 已被花掉(代币销毁, KAS 进 sink)"
+  },
+  {
+   "ok": true,
+   "label": "D. 窗口内落在下注人/赢家 P2PK 钱包地址的未花 KAS = 0(须为 0)"
+  }
+ ],
+ "txs": [
+  {
+   "txid": "a1cb24a2c0d5aae46082fae858e56c0e8792ac3d73faa9af231fc199b13a9ba1",
+   "label": null,
+   "funders": [
+    "maker"
+   ],
+   "owner": "maker",
+   "fee": "3203600",
+   "covIn": "0",
+   "covOut": "0",
+   "toWallets": {
+    "maker": "6958163300"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "11d44ce0059d72b89f7fc7b2c573b974a885dd76259b1738604a2a2721c31695",
+   "label": null,
+   "funders": [
+    "maker"
+   ],
+   "owner": "maker",
+   "fee": "1000000",
+   "covIn": "0",
+   "covOut": "20000000",
+   "toWallets": {
+    "maker": "99000000"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "3d61e2a6c6e420c29499356ca8fb084b9e817edea4c5a4cc8de30a0f9299453b",
+   "label": null,
+   "funders": [
+    "maker"
+   ],
+   "owner": "maker",
+   "fee": "3203600",
+   "covIn": "0",
+   "covOut": "0",
+   "toWallets": {
+    "maker": "6834959700"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "0290181fe46843896d8cf1c2ddbd694ef913baa09a88245ea49ec573e6e2305b",
+   "label": null,
+   "funders": [
+    "maker"
+   ],
+   "owner": "maker",
+   "fee": "1000000",
+   "covIn": "0",
+   "covOut": "20000000",
+   "toWallets": {
+    "maker": "99000000"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "62e2e7274880f20bee7015861b736764610c4fdd7baac08e86c8b17d2eacaf65",
+   "label": null,
+   "funders": [
+    "maker"
+   ],
+   "owner": "maker",
+   "fee": "3203600",
+   "covIn": "0",
+   "covOut": "0",
+   "toWallets": {
+    "maker": "6711756100"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "8472bf24c401c7aeb74541f64dfacad076e5b089bc8754a6ae82b3b88fc4b810",
+   "label": null,
+   "funders": [
+    "maker"
+   ],
+   "owner": "maker",
+   "fee": "1000000",
+   "covIn": "0",
+   "covOut": "20000000",
+   "toWallets": {
+    "maker": "99000000"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "9219a7c99945c95fe4aa8a916feae9faee9331b92474de2b8491783145ce37ed",
+   "label": null,
+   "funders": [
+    "maker"
+   ],
+   "owner": "maker",
+   "fee": "3203600",
+   "covIn": "0",
+   "covOut": "0",
+   "toWallets": {
+    "maker": "6588552500"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "5f242fc9d664760a2c38dfb7820323648d09cf938bff8494583a6b6d4e58659f",
+   "label": null,
+   "funders": [
+    "maker"
+   ],
+   "owner": "maker",
+   "fee": "15000000",
+   "covIn": "40000000",
+   "covOut": "47000000",
+   "toWallets": {
+    "maker": "78000000"
+   },
+   "toOther": "0",
+   "nOut": 4
+  },
+  {
+   "txid": "3f2252eb4779f0c6d74f7c7a3b3bea549ca53c0bb2e935297685b23ca618a8cb",
+   "label": null,
+   "funders": [
+    "maker"
+   ],
+   "owner": "maker",
+   "fee": "3203600",
+   "covIn": "0",
+   "covOut": "0",
+   "toWallets": {
+    "maker": "6485348900"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "0758c68ddc0082dd84c6f7a3b6f4d20f30bfc2b3fed2994db1788010821d42a2",
+   "label": null,
+   "funders": [
+    "maker"
+   ],
+   "owner": "maker",
+   "fee": "1000000",
+   "covIn": "0",
+   "covOut": "20000000",
+   "toWallets": {
+    "maker": "99000000"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "a3334759262b26b782635ec99187ae35c324e0040c720b851fdb80f634c2b62d",
+   "label": null,
+   "funders": [
+    "maker"
+   ],
+   "owner": "maker",
+   "fee": "3203600",
+   "covIn": "0",
+   "covOut": "0",
+   "toWallets": {
+    "maker": "6362145300"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "846502b18812f48b455143964914f90d2af00ad688afdf69e43b241dd4332a14",
+   "label": null,
+   "funders": [
+    "maker"
+   ],
+   "owner": "maker",
+   "fee": "15000000",
+   "covIn": "60000000",
+   "covOut": "67000000",
+   "toWallets": {
+    "maker": "78000000"
+   },
+   "toOther": "0",
+   "nOut": 4
+  },
+  {
+   "txid": "edee7070a32e3eb33d86c03069326a38393f831a74f4ea7eabc6674cb53cddfc",
+   "label": null,
+   "funders": [
+    "settler"
+   ],
+   "owner": "settler",
+   "fee": "3203600",
+   "covIn": "0",
+   "covOut": "0",
+   "toWallets": {
+    "settler": "56796400"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "c3e53ba35a1084becad01ae49ec695c52f762876a0465c06fd5f0842c42405fb",
+   "label": null,
+   "funders": [
+    "settler"
+   ],
+   "owner": "settler",
+   "fee": "20000000",
+   "covIn": "80000000",
+   "covOut": "60000000",
+   "toWallets": {
+    "settler": "30000000"
+   },
+   "toOther": "0",
+   "nOut": 3
+  },
+  {
+   "txid": "578ba90d4e6ff556f4db2860ee289d48305bb6e302817e66588cfdcd5f4ed3ab",
+   "label": null,
+   "funders": [
+    "settler"
+   ],
+   "owner": "settler",
+   "fee": "3203600",
+   "covIn": "0",
+   "covOut": "0",
+   "toWallets": {
+    "settler": "116796400"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "cee01a4d7a550897daf91f4bf6c3bc481ab10d77614186754d2bb9eecd89ab78",
+   "label": "bshard-close-submit-v2] ✅ market=18-lorc6 close_attest_v2 LANDED",
+   "funders": [
+    "settler"
+   ],
+   "owner": "settler",
+   "fee": "10000000",
+   "covIn": "20000000",
+   "covOut": "20000000",
+   "toWallets": {
+    "settler": "40000000"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "14c0cebdd54b27b6234d945d446d4cfcbf3acd1813c2b2682b8a1d97921be769",
+   "label": null,
+   "funders": [
+    "settler"
+   ],
+   "owner": "settler",
+   "fee": "3203600",
+   "covIn": "0",
+   "covOut": "0",
+   "toWallets": {
+    "settler": "63592800"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "79d27b9411c9cb97b5a1cf9162443dbe6a035697da3421d682ec494607264295",
+   "label": "zk-autonomy] 18:53:15 ✅ market=18-lorc6 zk_handoff dispatched+",
+   "funders": [
+    "settler"
+   ],
+   "owner": "settler",
+   "fee": "30000000",
+   "covIn": "60000000",
+   "covOut": "60000000",
+   "toWallets": {},
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "f5d41a1a27e697d5d445ddd3d5d298fd2b6e85313ded25a03115528bb3fbee5d",
+   "label": null,
+   "funders": [
+    "settler"
+   ],
+   "owner": "settler",
+   "fee": "3204700",
+   "covIn": "0",
+   "covOut": "100000000",
+   "toWallets": {
+    "settler": "136795300"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "ad3a0229d05eea879d53c557faac02eb4b9d55401583c6f18af7ccbfaf39aa6d",
+   "label": "zk-autonomy] 18:55:09 ✅ market=18-lorc6 zk_close dispatched+",
+   "funders": [],
+   "owner": "settler",
+   "fee": "25000000",
+   "covIn": "120000000",
+   "covOut": "20000000",
+   "toWallets": {
+    "settler": "75000000"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "0f814fcca7389367089539ed1ebb357f2d955f350aaa57e20f42652935167b6b",
+   "label": null,
+   "funders": [
+    "settler"
+   ],
+   "owner": "settler",
+   "fee": "3203600",
+   "covIn": "0",
+   "covOut": "0",
+   "toWallets": {
+    "settler": "346796400"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "0323ce2a6170c4236986d6392173a699d8d284ab4a69a1bf91001cc8925fab38",
+   "label": ":55:41 ✅ market=18-lorc6 claim idx=0 pk=060b02648006 payout=2943000000",
+   "funders": [
+    "settler"
+   ],
+   "owner": "settler",
+   "fee": "40000000",
+   "covIn": "60000000",
+   "covOut": "170000000",
+   "toWallets": {
+    "settler": "60000000"
+   },
+   "toOther": "0",
+   "nOut": 5
+  },
+  {
+   "txid": "908979846dfa1be256c23a562c3ab64dc38372f4afcb2f7486d99457cb3ef31d",
+   "label": null,
+   "funders": [
+    "settler"
+   ],
+   "owner": "settler",
+   "fee": "3203600",
+   "covIn": "0",
+   "covOut": "0",
+   "toWallets": {
+    "settler": "346796400"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "d4aa03078057ae856a6ee2ae37463f0f5a0a16f776bea63e801a22221e8d0d36",
+   "label": "18:56:11 ✅ market=18-lorc6 claim idx=1 pk=1187ac7eb6fd payout=57000000",
+   "funders": [
+    "settler"
+   ],
+   "owner": "settler",
+   "fee": "40000000",
+   "covIn": "70000000",
+   "covOut": "100000000",
+   "toWallets": {
+    "settler": "140000000"
+   },
+   "toOther": "0",
+   "nOut": 3
+  }
+ ],
+ "notes": [],
+ "startHash": "f2b1ad92031cb0692bf8aecc27056075d9c8f60743c28d919c0b1d807494a7d0",
+ "bal0": {
+  "maker": "22973561100",
+  "settler": "33551968600",
+  "fee": "30000000000",
+  "bettorA": "26390389200",
+  "bettorB": "23390389200"
+ },
+ "marketId": "ext-pool-v07-1791138137518-lorc6",
+ "createResponse": {
+  "status": "pending_bettors",
+  "ok": true,
+  "market_id": "ext-pool-v07-1791138137518-lorc6",
+  "protocol_version": "v0.7",
+  "spine_p2sh": null,
+  "spine_lock_tx": null,
+  "no_kas_stake": true,
+  "pool_merkle_root": "46fa6978ef43158da20d34fe60fbafc16ea543543be5933b9f2455bcfb0d10c8",
+  "maker_stake_locked_kas": 0,
+  "miner_fee_sompi": 5000000,
+  "broker_fee_pct_bps": 190,
+  "shard_id": 0,
+  "shard_count": 1,
+  "market_id_hash": "e60a39f77eaec0793975c6385a5a9adfc5276f73d20ba244838cd034836407bd",
+  "cross_node_publish_tx": null,
+  "category": "crypto",
+  "next_step": "bettors register directly via POST /api/pool/market/ext-pool-v07-1791138137518-lorc6/bettor/register-v07/{prep,confirm} (TODO 批3) OR reuse register-v06 endpoint for single-shard wire (= same flow, just different protocol_version branch in handler)."
+ },
+ "bets": [
+  {
+   "who": "bettorA",
+   "dir": 0,
+   "units": 1000000000,
+   "status": 200,
+   "resp": {
+    "status": 200,
+    "ok": true,
+    "logical_market_id": "ext-pool-v07-1791138137518-lorc6",
+    "bettor_pk": "060b0264800672da79c533ae1534310f7925beeac945363bd2cd0d2b7402dc79",
+    "no_kas_stake": true,
+    "stake_ktt": 1000000000,
+    "action": "use",
+    "shardIndex": 0,
+    "shardMarketId": "ext-pool-v07-1791138137518-lorc6-s0",
+    "shardP2sh": "kaspasim:pzuzncfm0mnxezva65z0p5l44ezx9np9jffw2vh6xu62kmyq0e3rzjrvx4lfy",
+    "leafTx": "5f242fc9d664760a2c38dfb7820323648d09cf938bff8494583a6b6d4e58659f",
+    "leafOutpoint": "5f242fc9d664760a2c38dfb7820323648d09cf938bff8494583a6b6d4e58659f:0",
+    "leafState": {
+     "local_yes": 1000000000,
+     "local_no": 0,
+     "count": 1,
+     "pool_value": 1000000000
+    },
+    "payoutCovId": "0bf77ee1fd3f5a3b4d2ff3d160b76127f705675ba01fb5c27978d490d782df67"
+   }
+  },
+  {
+   "who": "bettorB",
+   "dir": 1,
+   "units": 2000000000,
+   "status": 200,
+   "resp": {
+    "status": 200,
+    "ok": true,
+    "logical_market_id": "ext-pool-v07-1791138137518-lorc6",
+    "bettor_pk": "b8fd583b660dea6c94bc0962a2f4921e763578bdeb375575fdd7feddf48dfd27",
+    "no_kas_stake": true,
+    "stake_ktt": 2000000000,
+    "action": "use",
+    "shardIndex": 0,
+    "shardMarketId": "ext-pool-v07-1791138137518-lorc6-s0",
+    "shardP2sh": "kaspasim:pzuzncfm0mnxezva65z0p5l44ezx9np9jffw2vh6xu62kmyq0e3rzjrvx4lfy",
+    "leafTx": "846502b18812f48b455143964914f90d2af00ad688afdf69e43b241dd4332a14",
+    "leafOutpoint": "846502b18812f48b455143964914f90d2af00ad688afdf69e43b241dd4332a14:0",
+    "leafState": {
+     "local_yes": 1000000000,
+     "local_no": 2000000000,
+     "count": 2,
+     "pool_value": 3000000000
+    },
+    "payoutCovId": "0bf77ee1fd3f5a3b4d2ff3d160b76127f705675ba01fb5c27978d490d782df67"
+   }
+  }
+ ],
+ "consoleLines": [
+  "[zk-autonomy] 18:51:40 ✅ market=18-lorc6 judge+propose dispatched(winDir=0, endBlockHash=25f9f3ccdeeb...)",
+  "[bshard-close-voter-v2] ✅ e2e-oracle-1 自治 enforce PASS (verdict=YES) → 签 close_attest_v2 market=18-lorc6",
+  "[bshard-close-voter-v2] ✅ e2e-oracle-2 自治 enforce PASS (verdict=YES) → 签 close_attest_v2 market=18-lorc6",
+  "[bshard-close-voter-v2] ✅ e2e-oracle-3 自治 enforce PASS (verdict=YES) → 签 close_attest_v2 market=18-lorc6",
+  "[bshard-close-voter-v2] ✅ e2e-oracle-4 自治 enforce PASS (verdict=YES) → 签 close_attest_v2 market=18-lorc6",
+  "[bshard-close-voter-v2] ✅ e2e-oracle-6 自治 enforce PASS (verdict=YES) → 签 close_attest_v2 market=18-lorc6",
+  "[bshard-close-submit-v2] ✅ market=18-lorc6 payout_shards 状态持久化(closed=1, outpoint=cee01a4d7a550897daf91f4bf6c3bc481ab10d77614186754d2bb9eecd89ab78:0)",
+  "[bshard-close-submit-v2] ✅ market=18-lorc6 zk_prove_jobs enqueued jobId=7",
+  "[bshard-close-submit-v2] ✅ market=18-lorc6 close_attest_v2 LANDED txId=cee01a4d7a550897daf91f4bf6c3bc481ab10d77614186754d2bb9eecd89ab78",
+  "[zk-prove-worker] ❌ job=7 market=18-lorc6: market ext-pool-v07-1791138137518-lorc6 还没有 zk_continuation(zk_handoff 还没成功广播过)— 拒绝在花 4 分钟 proving+1KAS gate 注资之前跑一个下游必炸的 job",
+  "[zk-prove-worker] updateProvingFailed also failed: updateProvingFailed: market ext-pool-v07-1791138137518-lorc6 没有 zk_continuation",
+  "[diag:step] zk-prove-worker.tick ms=79 sync=0 ok=1 at=2026-10-04T18:53:03.569Z",
+  "[buildProposeCloseRequestV2/handoff] ✅ market=18-lorc6 zk_prove_jobs id=7 因 handoff-landed 重置回 pending",
+  "[zk-autonomy] 18:53:15 ✅ market=18-lorc6 zk_handoff dispatched+landed txId=79d27b9411c9cb97b5a1cf9162443dbe6a035697da3421d682ec494607264295",
+  "[zk-prove-worker] job=7 market=18-lorc6 proving started (~4min)...",
+  "[zk-prove-worker] ✅ job=7 market=18-lorc6 proving.status=ready gate=kaspasim:ppxqv8vezah",
+  "[diag:step] zk-prove-worker.tick ms=71977 sync=0 ok=1 at=2026-10-04T18:54:45.471Z",
+  "[zk-autonomy] 18:55:09 ✅ market=18-lorc6 zk_close dispatched+landed txId=ad3a0229d05eea879d53c557faac02eb4b9d55401583c6f18af7ccbfaf39aa6d",
+  "[zk-autonomy] 18:55:41 ✅ market=18-lorc6 claim idx=0 pk=060b02648006 payout=2943000000 txId=0323ce2a6170c4236986d6392173a699d8d284ab4a69a1bf91001cc8925fab38",
+  "[zk-autonomy] 18:56:11 ✅ market=18-lorc6 claim idx=1 pk=1187ac7eb6fd payout=57000000 txId=d4aa03078057ae856a6ee2ae37463f0f5a0a16f776bea63e801a22221e8d0d36 (last, exhausted)"
+ ],
+ "bal1": {
+  "maker": "22826339500",
+  "settler": "33247745900",
+  "fee": "30000000000",
+  "bettorA": "26390389200",
+  "bettorB": "23390389200"
+ },
+ "wallet_maker": {
+  "deltaSompi": "-147221600",
+  "feeSompi": "53221600",
+  "covLockedSompi": "194000000",
+  "covReleasedSompi": "100000000",
+  "netCovLockedSompi": "94000000",
+  "nTxs": 12
+ },
+ "wallet_settler": {
+  "deltaSompi": "-304222700",
+  "feeSompi": "184222700",
+  "covLockedSompi": "530000000",
+  "covReleasedSompi": "410000000",
+  "netCovLockedSompi": "120000000",
+  "nTxs": 12
+ },
+ "wallet_fee": {
+  "deltaSompi": "0",
+  "feeSompi": "0",
+  "covLockedSompi": "0",
+  "covReleasedSompi": "0",
+  "netCovLockedSompi": "0",
+  "nTxs": 0
+ },
+ "liveCovenantUtxos": [
+  {
+   "outpoint": "5f242fc9d664760a2c38dfb7820323648d09cf938bff8494583a6b6d4e58659f:1",
+   "value": "7000000",
+   "addr": "kaspasim:ppa09ezzzu3qle6rj7hgwkv9pt663guhdhn76j5qq8lgcjc5nfv2zclsy0nxt",
+   "cov": null
+  },
+  {
+   "outpoint": "846502b18812f48b455143964914f90d2af00ad688afdf69e43b241dd4332a14:1",
+   "value": "7000000",
+   "addr": "kaspasim:pqlh9qqztv8ar8jmr5gzcsqyx6vl6k8c9xtp54zvj2lhg3gq8zrckp0p95mp5",
+   "cov": null
+  },
+  {
+   "outpoint": "0323ce2a6170c4236986d6392173a699d8d284ab4a69a1bf91001cc8925fab38:1",
+   "value": "50000000",
+   "addr": "kaspasim:pq5z7u2789y7ednwvuaw65tqysmtczgfreknqfd58fjw7ywvt75exf262h70j",
+   "cov": "edb801c17ba8f4301b25ae37d2807e248bb288068987da1e00d8cabbdf2879a4"
+  },
+  {
+   "outpoint": "0323ce2a6170c4236986d6392173a699d8d284ab4a69a1bf91001cc8925fab38:2",
+   "value": "50000000",
+   "addr": "kaspasim:pr33gapnrdsemxqpzuhrd9y86da7qth4qy76umze7kwqahatxtrhyv7mk6rfy",
+   "cov": "eef9b47592960afb5c9524a9a3503f722e764aad57160550235309a211d96429"
+  },
+  {
+   "outpoint": "d4aa03078057ae856a6ee2ae37463f0f5a0a16f776bea63e801a22221e8d0d36:0",
+   "value": "50000000",
+   "addr": "kaspasim:pqwre6nmg8nq4ng76g7w9hlefuwg37ls4tauxqx5dejqzypvyk6zqgzhcgjqc",
+   "cov": "601ea22c6700225fce1494cdaec952e958cd76f3be35af2682167929faa88907"
+  },
+  {
+   "outpoint": "d4aa03078057ae856a6ee2ae37463f0f5a0a16f776bea63e801a22221e8d0d36:1",
+   "value": "50000000",
+   "addr": "kaspasim:pzgf5fnypjrzjtflp3e6z4us8gk7x823r6le3fu3t07v9tyzm9ak2v0mzxmhf",
+   "cov": "4a222abf787720d115a41f861d05b5f73f0c9f45f4bf16b302f8c0c94d2649f2"
+  }
+ ],
+ "liveCovenantTotalSompi": "214000000",
+ "claims": [
+  {
+   "idx": 0,
+   "winner": "bettorA",
+   "payoutUnits": "2943000000",
+   "txid": "0323ce2a6170c4236986d6392173a699d8d284ab4a69a1bf91001cc8925fab38",
+   "claimOutAddr": "kaspasim:pq5z7u2789y7ednwvuaw65tqysmtczgfreknqfd58fjw7ywvt75exf262h70j",
+   "tokOutAddr": "kaspasim:pr33gapnrdsemxqpzuhrd9y86da7qth4qy76umze7kwqahatxtrhyv7mk6rfy",
+   "claimLive": true,
+   "tokLive": true,
+   "outValuesSompi": [
+    "20000000",
+    "50000000",
+    "50000000",
+    "50000000",
+    "60000000"
+   ]
+  },
+  {
+   "idx": 1,
+   "winner": "maker",
+   "payoutUnits": "57000000",
+   "txid": "d4aa03078057ae856a6ee2ae37463f0f5a0a16f776bea63e801a22221e8d0d36",
+   "claimOutAddr": "kaspasim:pqwre6nmg8nq4ng76g7w9hlefuwg37ls4tauxqx5dejqzypvyk6zqgzhcgjqc",
+   "tokOutAddr": "kaspasim:pzgf5fnypjrzjtflp3e6z4us8gk7x823r6le3fu3t07v9tyzm9ak2v0mzxmhf",
+   "claimLive": true,
+   "tokLive": true,
+   "outValuesSompi": [
+    "50000000",
+    "50000000",
+    "140000000"
+   ]
+  }
+ ],
+ "tickets": [
+  {
+   "who": "bettorA",
+   "outpoint": "5f242fc9d664760a2c38dfb7820323648d09cf938bff8494583a6b6d4e58659f:1",
+   "addr": "kaspasim:ppa09ezzzu3qle6rj7hgwkv9pt663guhdhn76j5qq8lgcjc5nfv2zclsy0nxt",
+   "valueSompi": "7000000"
+  },
+  {
+   "who": "bettorB",
+   "outpoint": "846502b18812f48b455143964914f90d2af00ad688afdf69e43b241dd4332a14:1",
+   "addr": "kaspasim:pqlh9qqztv8ar8jmr5gzcsqyx6vl6k8c9xtp54zvj2lhg3gq8zrckp0p95mp5",
+   "valueSompi": "7000000"
+  }
+ ],
+ "retire": [
+  {
+   "idx": 0,
+   "earlyAge": 349,
+   "earlyRejected": true,
+   "winnerPayRejected": true,
+   "txid": "fff458f8b4ccca63199c4f1535b110b18a6e57541c637838268db9de1428a5b7",
+   "valueToSink": "98000000"
+  },
+  {
+   "idx": 1,
+   "earlyAge": 167,
+   "earlyRejected": true,
+   "winnerPayRejected": true,
+   "txid": "c4382de4df6efe6a9281ac2efa29cbb21a410d39b426af4b9a3915fb87f75eae",
+   "valueToSink": "98000000"
+  }
+ ],
+ "keyReachableSompi": "0",
+ "sinkReceivedSompi": "196000000",
+ "ticketsLockedSompi": "14000000",
+ "finishedAt": "2026-10-04T18:57:19.430Z",
+ "failures": 0
+}

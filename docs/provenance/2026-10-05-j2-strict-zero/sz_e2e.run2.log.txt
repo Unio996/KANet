@@ -1,0 +1,98 @@
+18:22:17 balances before (KAS): {
+  maker: 229.735611,
+  settler: 335.519686,
+  fee: 300,
+  bettorA: 263.903892,
+  bettorB: 233.903892
+}
+18:22:17 create-v07 with unfinished market ⇒ {"status":409,"ok":false,"error":"不收 KAS 模式一次只许一个在跑的 ZK 原生盘: 盘 ext-pool-v07-1791120870824-btduw(collecting_sigs) 尚未完结","code":"another_zk_market_unfinished","blocking_market_id":"ext-pool-v07-1791120870824-btduw"}
+18:22:17   ✅ 一次一盘闸: 另有未完结 zk_native 盘 ⇒ 409 another_zk_market_unfinished(blocking=btduw)
+18:22:17   ✅ 把那个卡死的 simnet 盘在 scratch 副本里标 cancelled(仅 simnet 副本), 再开新盘
+18:22:17 create-v07 (no maker_stake_kas) curDaa 102650 targetDaa 104010
+18:22:17 create-v07 => {"status":"pending_bettors","ok":true,"market_id":"ext-pool-v07-1791138137518-lorc6","protocol_version":"v0.7","spine_p2sh":null,"spine_lock_tx":null,"no_kas_stake":true,"pool_merkle_root":"46fa6978ef43158da20d34fe60fbafc16ea543543be5933b9f2455bcfb0d10c8","maker_stake_locked_kas":0,"miner_fee_sompi":5000000,"broker_fee_pct_bps":190,"shard_id":0,"shard_count":1,"market_id_hash":"e60a39f77eaec0793975c6385a5a9adfc5276f73d20ba244838cd034836407bd","cross_node_publish_tx":null,"category":"crypto","next_step":"bettors register directly via POST /api/pool/market/ext-pool-v07-1791138137518-lorc6/bettor/register-v07/{prep,confirm} (TODO 批3) OR reuse register-v06 endpoint for single-shard wire (= same 
+18:22:17   ✅ create-v07 200 + no_kas_stake=true
+18:22:17   ✅ 响应: spine_p2sh/spine_lock_tx=null, maker_stake_locked_kas=0
+18:22:22   ✅ 建盘后(未下注): 网关/下注人钱包余额逐 sompi 不变 = 建盘没有任何链上转账
+18:23:39 bettorA dir=0 stake_ktt=1000000000 (77401ms) => {"status":200,"ok":true,"logical_market_id":"ext-pool-v07-1791138137518-lorc6","bettor_pk":"060b0264800672da79c533ae1534310f7925beeac945363bd2cd0d2b7402dc79","no_kas_stake":true,"stake_ktt":1000000000,"action":"use","shardIndex":0,"shardMarketId":"ext-pool-v07-1791138137518-lorc6-s0","shardP2sh":"kaspasim:pzuzncfm0mnxezva65z0p5l44ezx9np9jffw2vh6xu62kmyq0e3rzjrvx4lfy","leafTx":"5f242fc9d664760a2c38dfb7820323648d09cf938bff8494583a6b6d4e58659f","leafOutpoint":"5f242fc9d664760a2c38dfb7820323648d09cf
+18:23:39   ✅ bettorA register-v07 stake_ktt=1000000000 ⇒ 200 no_kas_stake
+18:23:39   ✅ bettorA 钱包余额下注后逐 sompi 不变(26390389200 == 26390389200)
+18:24:18 bettorB dir=1 stake_ktt=2000000000 (38264ms) => {"status":200,"ok":true,"logical_market_id":"ext-pool-v07-1791138137518-lorc6","bettor_pk":"b8fd583b660dea6c94bc0962a2f4921e763578bdeb375575fdd7feddf48dfd27","no_kas_stake":true,"stake_ktt":2000000000,"action":"use","shardIndex":0,"shardMarketId":"ext-pool-v07-1791138137518-lorc6-s0","shardP2sh":"kaspasim:pzuzncfm0mnxezva65z0p5l44ezx9np9jffw2vh6xu62kmyq0e3rzjrvx4lfy","leafTx":"846502b18812f48b455143964914f90d2af00ad688afdf69e43b241dd4332a14","leafOutpoint":"846502b18812f48b455143964914f90d2af00a
+18:24:18   ✅ bettorB register-v07 stake_ktt=2000000000 ⇒ 200 no_kas_stake
+18:24:18   ✅ bettorB 钱包余额下注后逐 sompi 不变(23390389200 == 23390389200)
+18:24:18   ✅ 不收 KAS 模式 stake_kas ⇒ 400 stake_ktt_required(不读老字段)
+18:24:18   ✅ register-v07/prep ⇒ 403
+18:24:18 waiting ticks… 0s  daa=102947  claims=0 []
+18:25:48 waiting ticks… 90s  daa=103168  claims=0 []
+18:27:18 waiting ticks… 180s  daa=103390  claims=0 []
+18:28:48 waiting ticks… 270s  daa=103612  claims=0 []
+18:30:18 waiting ticks… 361s  daa=103833  claims=0 []
+18:31:48 waiting ticks… 451s  daa=104054  claims=0 []
+18:33:19 waiting ticks… 541s  daa=104275  claims=0 []
+18:34:49 waiting ticks… 631s  daa=104496  claims=0 []
+18:36:19 waiting ticks… 721s  daa=104718  claims=0 []
+18:37:49 waiting ticks… 811s  daa=104939  claims=0 []
+18:39:19 waiting ticks… 902s  daa=105160  claims=0 []
+18:40:49 waiting ticks… 992s  daa=105381  claims=0 []
+18:42:20 waiting ticks… 1082s  daa=105603  claims=0 []
+18:43:50 waiting ticks… 1172s  daa=105823  claims=0 []
+18:45:20 waiting ticks… 1262s  daa=106044  claims=0 []
+18:46:50 waiting ticks… 1352s  daa=106580  claims=0 []
+18:48:20 waiting ticks… 1443s  daa=107132  claims=0 []
+18:49:50 waiting ticks… 1533s  daa=107955  claims=0 []
+18:51:21 waiting ticks… 1623s  daa=108834  claims=0 []
+18:52:51 waiting ticks… 1713s  daa=109564  claims=0 ["[bshard-close-voter-v2] ✅ e2e-oracle-6 自治 enforce PASS (verdict=YES) → 签 close_attest_v2 market=18-lorc6","[bshard-close-submit-v2] ✅ market=18-lorc6 payout_shards 状态持久化(closed=1, outpoint=cee01a4d7a550897daf91f4bf6c3bc481ab10d77614186754d2bb9eecd89ab78:0)","[bshard-close-submit-v2] ✅ market=18-lorc6 zk_prove_jobs enqueued jobId=7","[bshard-close-submit-v2] ✅ market=18-lorc6 close_attest_v2 LAND
+18:54:21 waiting ticks… 1803s  daa=110112  claims=0 ["[diag:step] zk-prove-worker.tick ms=79 sync=0 ok=1 at=2026-10-04T18:53:03.569Z","[buildProposeCloseRequestV2/handoff] ✅ market=18-lorc6 zk_prove_jobs id=7 因 handoff-landed 重置回 pending","[zk-autonomy] 18:53:15 ✅ market=18-lorc6 zk_handoff dispatched+landed txId=79d27b9411c9cb97b5a1cf9162443dbe6a035697da3421d682ec494607264295","[zk-prove-worker] job=7 market=18-lorc6 proving started (~4min)..."]
+18:55:51 waiting ticks… 1893s  daa=110665  claims=1 ["[zk-prove-worker] ✅ job=7 market=18-lorc6 proving.status=ready gate=kaspasim:ppxqv8vezah","[diag:step] zk-prove-worker.tick ms=71977 sync=0 ok=1 at=2026-10-04T18:54:45.471Z","[zk-autonomy] 18:55:09 ✅ market=18-lorc6 zk_close dispatched+landed txId=ad3a0229d05eea879d53c557faac02eb4b9d55401583c6f18af7ccbfaf39aa6d","[zk-autonomy] 18:55:41 ✅ market=18-lorc6 claim idx=0 pk=060b02648006 payout=2943000
+18:56:16   ✅ 自治链走到最后一个 claim(exhausted)(1918s)
+18:56:31 balances after (KAS): {
+  maker: 228.263395,
+  settler: 332.477459,
+  fee: 300,
+  bettorA: 263.903892,
+  bettorB: 233.903892
+}
+18:56:31   ✅ A. bettorA 余额逐 sompi 相同(26390389200 → 26390389200)
+18:56:31   ✅ A. bettorB 余额逐 sompi 相同(23390389200 → 23390389200)
+18:56:32 scanned accepted txs in window: 8282 of accepted ids 8282
+18:56:33   ✅ B. 窗口内所有被接受交易的输入面值都能溯源(未知输入 0)
+18:56:33   ✅ A. 窗口内没有任何被接受的交易触碰下注人钱包(输入/输出)(0)
+18:56:33   ✅ B. maker: 逐笔交易重算 Δ(-147221600) == 余额差(-147221600) sompi
+18:56:33   ✅ B. maker: Δ == −(手续费 53221600 + 净锁进 covenant 94000000) 逐 sompi 成立
+18:56:33   ✅ B. maker: 落到第三方 P2PK 地址的输出 = 0(须为 0)
+18:56:33   ✅ B. settler: 逐笔交易重算 Δ(-304222700) == 余额差(-304222700) sompi
+18:56:33   ✅ B. settler: Δ == −(手续费 184222700 + 净锁进 covenant 120000000) 逐 sompi 成立
+18:56:33   ✅ B. settler: 落到第三方 P2PK 地址的输出 = 0(须为 0)
+18:56:33   ✅ B. fee: 逐笔交易重算 Δ(0) == 余额差(0) sompi
+18:56:33   ✅ B. fee: Δ == −(手续费 0 + 净锁进 covenant 0) 逐 sompi 成立
+18:56:33   ✅ B. fee: 落到第三方 P2PK 地址的输出 = 0(须为 0)
+18:56:33 窗口末仍锁在 covenant 的 KAS(系统资金): 2.14 KAS in 6 UTXO
+18:56:33   ✅ C. claim idx=0 → bettorA 的 claim_out 地址 == KanetTokenClaim(市场 cov, 赢家 pk, 2943000000) 重算地址, tok_out 地址 == KTT(2943000000, owner=该 claim cov) 重算地址
+18:56:33   ✅ C. claim idx=0: claim_out 与 tok_out 仍是链上未花 UTXO(代币在 covenant 里, 没有任何钱包地址拿到)
+18:56:33   ✅ C. claim idx=0: 没有任何输出落到赢家/下注人/开盘人钱包地址(只有 covenant 与系统找零)
+18:56:33   ✅ C. claim idx=1 → maker 的 claim_out 地址 == KanetTokenClaim(市场 cov, 赢家 pk, 57000000) 重算地址, tok_out 地址 == KTT(57000000, owner=该 claim cov) 重算地址
+18:56:33   ✅ C. claim idx=1: claim_out 与 tok_out 仍是链上未花 UTXO(代币在 covenant 里, 没有任何钱包地址拿到)
+18:56:33   ✅ C. claim idx=1: 没有任何输出落到赢家/下注人/开盘人钱包地址(只有 covenant 与系统找零)
+18:56:33   ✅ C. 全部 claim 的 KTT 总量 == 池总额 3000000000(= 1e9 + 2e9 下注筹码): 3000000000
+18:56:33   ✅ C. 至少一个下注人是 KTT 受益人(bettorA,maker)
+18:56:33 — D. 严格零 —
+18:56:33   ✅ D. env ZK_SYSTEM_SINK_PK == 我方 sink 私钥的公钥
+[diag:step] proc.silverc.compile.bshard-artifacts ms=15 cmd=silverc ok=1 at=2026-10-04T18:56:33.185Z
+18:56:33   ✅ D. bettorA 的 ticket 地址 == 新模板(sweep-only)重算地址 且 ≠ 旧模板(bettor 签名可花)地址
+18:56:33   ✅ D. bettorA 的 ticket 仍在链上(未被任何人花), 面值 7000000 sompi(= 0.07 KAS)
+[diag:step] proc.silverc.compile.bshard-artifacts ms=13 cmd=silverc ok=1 at=2026-10-04T18:56:33.205Z
+18:56:33   ✅ D. bettorB 的 ticket 地址 == 新模板(sweep-only)重算地址 且 ≠ 旧模板(bettor 签名可花)地址
+18:56:33   ✅ D. bettorB 的 ticket 仍在链上(未被任何人花), 面值 7000000 sompi(= 0.07 KAS)
+18:56:33   ✅ D. 两张 ticket 都核到
+18:56:33   ✅ D. claim idx=0: age=349 < RETIRE_DAA(400) 时 retire 被拒(38268db9de1428a5b7: one of the transaction sequence locks conditions was not met)
+18:56:33   ✅ D. claim idx=0: retire 输出给赢家钱包 bettorA 被拒(87f6c8b4: one of the transaction sequence locks conditions was not met)
+18:56:33   ✅ D. claim idx=1: age=167 < RETIRE_DAA(400) 时 retire 被拒(4b9a3915fb87f75eae: one of the transaction sequence locks conditions was not met)
+18:56:33   ✅ D. claim idx=1: retire 输出给赢家钱包 maker 被拒(a6ceb87a: one of the transaction sequence locks conditions was not met)
+18:57:13   ✅ D. claim idx=0: 满龄但 sequence=0 被拒
+18:57:13   ✅ D. claim idx=0 (bettorA, 2943000000 KTT): 满龄 retire → sink 被接受 fff458f8b4ccca63199c4f1535b110b18a6e57541c637838268db9de1428a5b7
+18:57:13   ✅ D. claim idx=1: 满龄但 sequence=0 被拒
+18:57:13   ✅ D. claim idx=1 (maker, 57000000 KTT): 满龄 retire → sink 被接受 c4382de4df6efe6a9281ac2efa29cbb21a410d39b426af4b9a3915fb87f75eae
+18:57:19   ✅ D. sink 余额增量 == Σ(claim_out+tok_out − 费) = 196000000 sompi(实 196000000)
+18:57:19   ✅ D. 全部 2/2 对 claim_out+tok_out 已被花掉(代币销毁, KAS 进 sink)
+18:57:19   ✅ D. 窗口内落在下注人/赢家 P2PK 钱包地址的未花 KAS = 0(须为 0)
+18:57:19 
+ALL PASS
