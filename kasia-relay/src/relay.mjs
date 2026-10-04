@@ -1144,6 +1144,14 @@ if (process.send) {
           if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
           return;
         }
+        case 'bshard_refund_claim_v2': {
+          // 账本1832 段4: PayoutShardV2 refund_claim(closed==2) 代币化——claim 家族共用构造器(KanetTokenClaim 目的地 + KTT 转移 + AB11 自续约)。
+          const { unlockBshardRefundClaimV2 } = await import('./lib/p2sh.mjs');
+          const wallet = getWallet();
+          const r = await unlockBshardRefundClaimV2({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
+          if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
+          return;
+        }
         case 'closezk_v2_claim': {
           // 缺件1 (J2 2026-07-08, NWT GREEN-with-conditions + Bettor 终GO): CloseZkV2 claim — payoutRootField
           // merkle climb + 17-word nullifier + P2PK payout + splice 续约(state-in-address, 213B 状态区), closed==2 前置.

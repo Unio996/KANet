@@ -494,3 +494,20 @@ export function computeKttV2TokenArtifact({ amount, ownerScheme, ownerBytesHex }
     stateFieldCount: compiled._raw.contracts.KanetTestTokenV2.runtime_state.fields.length,
   };
 }
+
+/**
+ * 🔴 账本1832 段4: KanetTokenClaim 实例 artifact(claim 家族三入口 claimOut 的完整 redeem + 模板前后缀)。
+ * 合约 ctor 四参数即其全部状态(market_cov_id / winner_pk / amount / token_tmpl_hash), 模板(prefix/suffix, state 区排除)对所有实例恒定;
+ * 其 hash 必须等于 env ZK_CLAIM_TMPL_HASH / payout_shards.claim_tmpl_hash(调用方核对, 本函数不读 env)。
+ * @param {{marketCovIdHex:string, winnerPkHex:string, amount:number|bigint|string, tokenTmplHashHex:string}} o
+ */
+const KANET_TOKEN_CLAIM_SIL = new URL('./KanetTokenClaim.sil', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
+export function computeKanetTokenClaimArtifact({ marketCovIdHex, winnerPkHex, amount, tokenTmplHashHex }, silvercPath) {
+  for (const [l, v] of [['marketCovIdHex', marketCovIdHex], ['winnerPkHex', winnerPkHex], ['tokenTmplHashHex', tokenTmplHashHex]]) {
+    if (!/^[0-9a-f]{64}$/.test(String(v || ''))) throw new Error(`computeKanetTokenClaimArtifact: ${l} must be 32-byte hex, got ${v}`);
+  }
+  const ctor = [ctorBytes32V100(marketCovIdHex), ctorBytes32V100(winnerPkHex), ctorIntV100(Number(amount)), ctorBytes32V100(tokenTmplHashHex)];
+  const compiled = silvercPath ? compileSilV100(KANET_TOKEN_CLAIM_SIL, ctor, 'KanetTokenClaim', silvercPath) : compileSilV100(KANET_TOKEN_CLAIM_SIL, ctor, 'KanetTokenClaim');
+  const artifact = extractTemplateArtifactV100(compiled);
+  return { script: Buffer.from(compiled.script), templateHashHex: artifact.templateHashHex, templatePrefix: artifact.templatePrefix, templateSuffix: artifact.templateSuffix };
+}

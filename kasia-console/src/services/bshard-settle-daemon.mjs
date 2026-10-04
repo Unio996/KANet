@@ -106,9 +106,9 @@ async function p2shAddr(redeemHex) { const k = await kaspa(); return k.addressFr
 async function p2pkAddr(pkHex) { const k = await kaspa(); return new k.PublicKey(pkHex).toAddress(configuredNetwork()).toString(); }   // 账本1832 段3: 网络单一源(原硬编码 Testnet ⇒ 主网/simnet 地址前缀错)
 async function p2pkSpk(addr) { const k = await kaspa(); const s = k.payToAddressScript(new k.Address(addr)); return (s.script ?? s).toString(); }
 function feeRelayAddr() { return sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(FEE_RELAY_ID)?.address; }
-async function mintFeeUtxo() {
+async function mintFeeUtxo(kas = 0.3) {   // 账本1832 段4: claim 家族(3 个新 genesis 输出各 0.2 KAS + 网络费)需要 ~1 KAS 的 fee 输入, 其余调用方仍默认 0.3
   const addr = feeRelayAddr();
-  const tr = await apiTransfer(addr, 0.3);
+  const tr = await apiTransfer(addr, kas);
   const txId = tr.txId || tr.tx_id; if (!txId) throw new Error(`mintFeeUtxo fail: ${JSON.stringify(tr).slice(0, 120)}`);
   for (let i = 0; i < 30; i++) { const es = await getUtxos(addr); if (es.some(e => (norm(e).entry?.outpoint || norm(e).outpoint)?.transactionId === txId)) break; await sleep(2000); }
   return { address: addr, outpointTxid: txId, index: 0 };
