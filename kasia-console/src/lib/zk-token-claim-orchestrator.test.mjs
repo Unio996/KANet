@@ -3,6 +3,9 @@
 import { join } from 'node:path';
 process.env.DB_PATH ||= join(process.env.TEMP || '/tmp', `claim-orch-${process.pid}.db`);
 process.env.CONSOLE_ENCRYPTION_KEY ||= '2'.repeat(64);
+process.env.KASPA_NETWORK ||= 'simnet';
+process.env.ZK_SYSTEM_SINK_PK ||= 'ab'.repeat(32);   // 账本1850: ctor 常量 sink/retire 无默认, 测试自己给(同 DB_PATH 的写法)
+process.env.ZK_CLAIM_RETIRE_DAA ||= '25920000';
 process.env.SILVERC_V100_PATH ||= 'D:/silverscript/versioned-builds/silverc-v100-3ed9733.exe';
 let fails = 0;
 const ok = (c, l) => { if (c) console.log(`  ✅ ${l}`); else { console.error(`  ❌ ${l}`); fails++; } };
