@@ -1,4 +1,6 @@
 <%~ include('partials/page-open', { _page: 'predictions-pool-create', pageTitle: '发起预测', ...it }) %>
+<% if (it.noKasMode) { %><div class="p-6 max-w-2xl mx-auto"><div class="card p-6 text-center"><div class="text-3xl mb-3">🪧</div><div class="text-sm font-medium text-ink-700">盘口由系统同步</div><p class="text-xs text-ink-500 mt-2">主网不开放用户自建盘口，市场由系统统一同步。你可以直接去市场列表押注。</p><a href="/predictions" class="text-brand-500 hover:text-brand-700 text-sm mt-3 inline-block">去看市场 →</a></div></div>
+<% } else { %>
 
 <!-- KANet-UI A.1 maker create market — V2 Editorial Dashboard 双栏
      spec: docs/b2-pool-ui-spec-v0.1.md Section 1 A.1
@@ -986,4 +988,4 @@ function createPoolPage() {
 }
 </script>
 
-<%~ include('partials/page-close', it) %>
+<% } %><%~ include('partials/page-close', it) %>

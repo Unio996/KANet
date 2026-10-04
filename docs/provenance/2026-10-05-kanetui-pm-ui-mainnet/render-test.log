@@ -1,0 +1,14 @@
+✔ no-KAS mode: list page has no KAS stake wording and no 403-route reference (21.0336ms)
+✔ no-KAS mode: detail page has no KAS stake wording and no 403-route reference (5.5866ms)
+✔ no-KAS mode: create page has no KAS stake wording and no 403-route reference (3.2487ms)
+✔ no-KAS mode: detail bets via register-v07 with stake_ktt and has 我的押注 block, no external-wallet flow (4.0977ms)
+✔ no-KAS mode: list has 我的押注, hides create entry; create page shows 盘口由系统同步 notice only (5.1855ms)
+✔ non-mainnet (noKasMode=false): legacy KAS UI untouched, no new block, no flag script (9.4742ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 185.3158

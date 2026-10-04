@@ -1,0 +1,116 @@
+<%
+// 账本1857 (Owner 批「加我的押注」): 只读「我的押注」块, 仅 noKasMode(主网)下被 include。
+// 数据源 = 现成 GET /api/pool/my-positions?linked_addr=… (不新增后端)。单位: 该接口的 stake_kas / actual_payout_kas 是 单位/1e8,
+// 而 1 筹码 = 1e8 单位, 所以这些数值本身已是筹码数, 前端不做换算 (账本1857 决定 b)。
+// 没有任何领奖/退款/提现按钮: 赢到的是链上凭证, 没有花费路径; bettor-refund-claim 对这类盘是 409。
+const _mid = (typeof it.marketId === 'string') ? it.marketId : '';
+%><div class="<%= _mid ? 'mb-4' : 'p-6 max-w-6xl mx-auto' %>" x-data="pmMyPositions('<%= _mid %>')" x-init="init()">
+  <div class="card p-4">
+    <div class="flex items-center justify-between flex-wrap gap-2 mb-3">
+      <div>
+        <div class="text-sm font-medium text-ink-700">我的押注<%= _mid ? ' · 本盘' : '' %></div>
+        <div class="text-[11px] text-ink-400 mt-0.5">只读。筹码是测试代币，零经济价值；赢到的筹码是链上凭证。</div>
+      </div>
+      <div class="flex items-center gap-2 text-xs">
+        <label class="text-ink-500">钱包</label>
+        <select x-model="addr" @change="pick()" class="px-2 py-1 rounded border border-warm-300 bg-white text-xs">
+          <option value="">选一个钱包</option>
+          <template x-for="w in wallets" :key="w.id">
+            <option :value="w.address" x-text="w.name"></option>
+          </template>
+        </select>
+      </div>
+    </div>
+
+    <div x-show="loading" class="text-xs text-ink-400 py-3">加载中…</div>
+    <div x-show="error" class="bg-red-50 text-red-700 rounded p-3 text-xs mb-2" x-text="error"></div>
+    <div x-show="!loading && !error && addr && rows.length === 0" class="text-xs text-ink-400 py-3">这个钱包<span x-text="marketId ? '在本盘' : ''"></span>还没有押注。</div>
+    <div x-show="!addr && !loading" class="text-xs text-ink-400 py-3">选一个钱包看它的押注。</div>
+
+    <div x-show="rows.length > 0" class="space-y-1">
+      <div class="hidden md:flex items-center gap-2 px-3 text-[10px] text-ink-400">
+        <span class="flex-1">盘口</span><span class="w-10 text-center">方向</span><span class="w-24 text-right">押注（筹码）</span><span class="w-16 text-center">盘口状态</span><span class="w-36 text-right">结果</span>
+      </div>
+      <template x-for="p in rows" :key="p.side_p2sh || (p.market_id + ':' + p.locked_at)">
+        <div class="bg-warm-50 rounded px-3 py-2 text-xs flex items-center gap-2 flex-wrap md:flex-nowrap">
+          <a :href="'/predictions/pool/' + encodeURIComponent(p.logical_market_id || p.market_id)" class="flex-1 min-w-0 text-ink-700 font-medium truncate hover:underline" x-text="titleOf(p)"></a>
+          <span class="w-10 text-center px-1.5 py-0.5 rounded font-medium text-[10px]"
+                :class="p.my_direction === 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'"
+                x-text="p.my_side"></span>
+          <span class="w-24 text-right text-ink-600" x-text="chips(p.stake_kas)"></span>
+          <span class="w-16 text-center px-1.5 py-0.5 rounded text-[10px]" :class="statusBadge(p)" x-text="statusLabel(p)"></span>
+          <span class="w-36 text-right font-medium" :class="resultCls(p)" x-text="resultText(p)"></span>
+        </div>
+      </template>
+    </div>
+  </div>
+</div>
+
+<script>
+function pmMyPositions(marketId) {
+  return {
+    marketId: marketId || '',
+    wallets: [],
+    addr: '',
+    rows: [],
+    loading: false,
+    error: '',
+    async init() {
+      try {
+        const agResp = await fetch('/api/agent/profile').then(r => r.json()).catch(() => ({}));
+        const all = Array.isArray(agResp) ? agResp : (agResp.agents || []);
+        this.wallets = all.filter(a => !a.is_dex_broker && a.address);
+        let saved = '';
+        try { saved = localStorage.getItem('kanet_pm_wallet') || ''; } catch {}
+        const hit = this.wallets.find(w => w.address === saved);
+        this.addr = hit ? hit.address : '';
+      } catch (e) { this.error = String(e.message || e); }
+      if (this.addr) await this.load();
+    },
+    async pick() {
+      try { localStorage.setItem('kanet_pm_wallet', this.addr || ''); } catch {}
+      await this.load();
+    },
+    async load() {
+      this.rows = []; this.error = '';
+      if (!this.addr) return;
+      this.loading = true;
+      try {
+        const j = await fetch('/api/pool/my-positions?linked_addr=' + encodeURIComponent(this.addr)).then(r => r.json());
+        if (!j.ok) throw new Error(j.error || '加载失败');
+        // 本盘过滤: 押注行的 market_id 在分片盘上是分片 id; 后端若给出 logical_market_id 则两者都认
+        this.rows = (j.positions || []).filter(p => !this.marketId || p.market_id === this.marketId || p.logical_market_id === this.marketId);
+      } catch (e) { this.error = String(e.message || e); }
+      this.loading = false;
+    },
+    titleOf(p) {
+      try { const o = JSON.parse(p.question || ''); if (o && o.title) return o.title; } catch {}
+      return String(p.market_id || '').slice(0, 20);
+    },
+    // stake_kas / actual_payout_kas = 单位/1e8 = 筹码数 (1 筹码 = 1e8 单位)
+    chips(n) { const v = Number(n); return Number.isFinite(v) ? v.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '?'; },
+    kind(p) {
+      const s = p.status;
+      if (s === 'completed') return 'settled';
+      if (s === 'collecting_sigs' || s === 'verifying') return 'awaiting';
+      if (s === 'cancelled' || s === 'refunded') return 'closed';
+      return 'open';
+    },
+    statusLabel(p) { return ({ open: '押注中', awaiting: '等开奖', settled: '已结算', closed: '已取消' })[this.kind(p)]; },
+    statusBadge(p) {
+      return ({ open: 'bg-emerald-100 text-emerald-700', awaiting: 'bg-amber-100 text-amber-700', settled: 'bg-brand-100 text-brand-700', closed: 'bg-warm-200 text-ink-500' })[this.kind(p)];
+    },
+    resultText(p) {
+      if (this.kind(p) === 'closed') return '已取消';
+      if (p.did_win === true) return p.actual_payout_kas != null ? ('赢 · 到账 ' + this.chips(p.actual_payout_kas) + ' 筹码') : '赢 · 待发放';
+      if (p.did_win === false) return '输';
+      return this.kind(p) === 'settled' ? '已结算 · 结果待同步' : '待结算';
+    },
+    resultCls(p) {
+      if (p.did_win === true) return 'text-emerald-700';
+      if (p.did_win === false) return 'text-red-600';
+      return 'text-ink-500';
+    },
+  };
+}
+</script>

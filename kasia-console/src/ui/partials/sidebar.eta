@@ -90,10 +90,11 @@
         </a>
         <!-- KANet-UI 原型v0(Bettor 1328 裁定①): 市场(原型), 独立路由 /proto-markets/*, 不进"预测市场"子菜单
              (那个子菜单指向 predictions-pool-* 生产管线, 与本原型无关, 零改动) -->
-        <a href="/proto-markets"
+        <% if (it.noKasMode) { %><% } else { %><a href="/proto-markets"
           class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= ['proto-market-create','proto-market-list','proto-market-detail'].includes(it._page) ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
           市场（原型）
-        </a>
+        </a><% } %>
+
         <!-- 预测市场 ▶ 嵌套
              Owner+Bettor 2026-07-04 决定: "看市场"(/predictions)+"建市场"(/predictions/pool/create)
              是旧的"工具化接入 Polymarket 交易 API"遗留(pUSD/USDC.e/SS trustless escrow 等), 跟现在
@@ -165,7 +166,15 @@
   <% } %>
 
   <!-- Bettor ③ 2026-06-23 — 小范围 invited testnet 披露文案 (满披露铁律) -->
-  <div class="px-3 pb-2 border-t border-warm-200 pt-2">
+  <% if (it.noKasMode) { %><div class="px-3 pb-2 border-t border-warm-200 pt-2">
+    <div class="bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-2 text-[10px] text-amber-700 leading-relaxed space-y-0.5">
+      <div class="font-semibold text-amber-800">⚠ 主网 · 测试筹码</div>
+      <div>• 押注用免费测试筹码，不收 KAS，筹码无经济价值</div>
+      <div>• 盘口由系统同步，用户不能自建盘</div>
+      <div>• 托管钱包：节点持 key，真钱请用自己的非托管钱包</div>
+      <div>• 结算 enforce driver-side，非 production-trustless</div>
+    </div>
+  </div><% } else { %><div class="px-3 pb-2 border-t border-warm-200 pt-2">
     <div class="bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-2 text-[10px] text-amber-700 leading-relaxed space-y-0.5">
       <div class="font-semibold text-amber-800">⚠ 测试网 · 小范围邀请制</div>
       <div>• 测试网，非主网</div>
@@ -173,8 +182,11 @@
       <div>• 约半数市场会 refund 而非结算（结算率 &lt;80%）</div>
       <div>• 结算 enforce driver-side，非 production-trustless</div>
     </div>
-  </div>
+  </div><% } %>
+
   <div class="px-4 py-2 text-[10px] text-ink-300">
     KANet v0.1
   </div>
 </aside>
+<% if (it.noKasMode) { %><script>window.KANET_NO_KAS = true;</script>
+<% } %>
