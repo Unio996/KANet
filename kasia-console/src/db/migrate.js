@@ -6693,5 +6693,16 @@ export function runMigrations() {
     `);
     console.log('[migrate] v219: ktt_panel_rate_limit_log 建表完成(D-035 NWT MUST 闭合 §⑥, mint/transfer 进程外限流, 纯新增).');
   }
+  // ── v220 (2026-10-04, J2 · 账本1832 段4 / ledger 1835 主网阻断项: zk-prove-worker 自动重试+退避) ──
+  //   zk_prove_jobs 加两列(纯新增, 可 NULL/有默认, 老行零影响): attempts(已尝试次数, 默认 0) / next_attempt_at(退避到点时间, NULL=立即可跑)。
+  //   写入/读取方: services/zk-prove-worker.mjs(_retryOrFail 写; tick 选 pending 时按 next_attempt_at<=now 过滤)。
+  {
+    const cols = sqlite.prepare("PRAGMA table_info(zk_prove_jobs)").all().map((c) => c.name);
+    if (cols.length) {
+      if (!cols.includes('attempts')) sqlite.exec("ALTER TABLE zk_prove_jobs ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0");
+      if (!cols.includes('next_attempt_at')) sqlite.exec("ALTER TABLE zk_prove_jobs ADD COLUMN next_attempt_at TEXT");
+      console.log('[migrate] v220: zk_prove_jobs.attempts/next_attempt_at 列已就绪(出证失败自动重试+退避, 纯新增).');
+    }
+  }
   console.log('[migrate] DB migrations complete.');
 }
