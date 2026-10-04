@@ -75,6 +75,13 @@ const got = await quiet(() => pickGammaMarkets(5));
 ok(got.length === 1 && got[0].conditionId.startsWith('0xd1'), `deadline 320d 被滤, 290d 保留(实 ${got.map((g) => g.conditionId.slice(0, 5)).join()})`);
 delete process.env.POOL_SEED_MAX_DAY;
 
+console.log('[test] POOL_SEED_MIN_LEAD_MIN 仅测试缩短提前量, 默认 60 分钟不变');
+reset(); gamma = gammaRows(1, 0.01, '0xe0'); gamma[0].endDate = new Date(Date.now() + 10 * 60_000).toISOString();
+ok((await quiet(() => pickGammaMarkets(5))).length === 0, '默认: 10 分钟后到期的盘被 1h 提前量滤掉');
+process.env.POOL_SEED_MIN_LEAD_MIN = '3';
+ok((await quiet(() => pickGammaMarkets(5))).length === 1, 'POOL_SEED_MIN_LEAD_MIN=3: 同一盘放行');
+delete process.env.POOL_SEED_MIN_LEAD_MIN;
+
 console.log('[test] 非无 KAS 模式: 旧行为不变(网关默认 id 保留)');
 delete process.env.KANET_NO_KAS_STAKE_MODE; reset(); process.env.POOL_SEED_TARGET = '1';
 await quiet(() => tick());

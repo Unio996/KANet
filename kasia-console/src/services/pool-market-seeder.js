@@ -69,7 +69,9 @@ export async function pickGammaMarkets(limit = 1) {
   if (!r.ok) throw new Error(`gamma ${r.status}`);
   const markets = await r.json();
   const now = Date.now();
-  const minMs = now + 60 * 60_000;          // ≥1h lead so oracles + bettors have time
+  // POOL_SEED_MIN_LEAD_MIN: 【仅测试】simnet 彩排缩短最小提前量(默认 60 分钟不变)。
+  const minLeadMin = parseFloat(process.env.POOL_SEED_MIN_LEAD_MIN) > 0 ? parseFloat(process.env.POOL_SEED_MIN_LEAD_MIN) : 60;
+  const minMs = now + minLeadMin * 60_000;  // ≥1h lead so oracles + bettors have time
   // Bettor 06-03 raise: r246 30day cap raised → POOL_SEED_MAX_DAY env (= seeder-specific).
   // 默认 30 兼容; testnet demo 凑 100 markets + World Cup 2026 远 deadline 调 90 钦定.
   let maxDay = parseInt(process.env.POOL_SEED_MAX_DAY, 10) || 30;
