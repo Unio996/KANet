@@ -1,0 +1,103 @@
+[db] path=D:\kanet-tn12\scratch\_j2_restart_sim\console.mainnet.copy.db source=DB_PATH
+[phase2-shadow] PHASE2_SHADOW_EVERY=0 (raw=<unset>; 0=关; 影子窗内 ≥100; 对 P2-1/P2-3 只在不一致时打, P2-2/P2-4 每次比对打 equal/mismatch)
+[bshard-close-voter-v2] tick: 0 pending | signed=0 refused=0 skipped=0 errored=0
+
+=====SIM-RESULT=====
+{
+ "1 ZK_JUDGE_PROPOSE (zkJudgeProposeAutonomousTick)": {
+  "result": {
+   "ok": true,
+   "candidates": 0,
+   "proposed": 0,
+   "cooling": 0,
+   "skipped": 0,
+   "errored": 0
+  },
+  "sideEffectAttempts": []
+ },
+ "2 VOTER_V2 (bshardCloseVoterV2Tick)": {
+  "result": {
+   "ok": true,
+   "pending": 0,
+   "signed": 0,
+   "refused": 0,
+   "skipped": 0,
+   "errored": 0
+  },
+  "sideEffectAttempts": []
+ },
+ "3 SUBMIT_V2 (bshardCloseSubmitV2Tick)": {
+  "result": {
+   "ok": true,
+   "pending": 0,
+   "submitted": 0,
+   "notReady": 0,
+   "failed": 0,
+   "errored": 0,
+   "resumed": 0
+  },
+  "sideEffectAttempts": []
+ },
+ "4 HANDOFF (zkHandoffAutonomousTick)": {
+  "result": {
+   "ok": true,
+   "candidates": 0,
+   "dispatched": 0,
+   "recovered": 0,
+   "cooling": 0,
+   "skipped": 0,
+   "errored": 0
+  },
+  "sideEffectAttempts": []
+ },
+ "5 PROVE_WORKER (zkProveWorkerTick)": {
+  "result": {
+   "ok": true,
+   "pending": 0
+  },
+  "sideEffectAttempts": []
+ },
+ "6 CLOSE_TICK_V2 (zkCloseTickV2)": {
+  "result": {
+   "ok": true,
+   "candidates": 0,
+   "dispatched": 0,
+   "notMine": 0,
+   "skipped": 0,
+   "errored": 0
+  },
+  "sideEffectAttempts": []
+ },
+ "7 CLAIM (claimAutonomousTick)": {
+  "result": {
+   "ok": true,
+   "candidates": 0,
+   "claimed": 0,
+   "notMine": 0,
+   "skipped": 0,
+   "errored": 0
+  },
+  "sideEffectAttempts": []
+ },
+ "rowsThatAnyTickWouldPick": {
+  "pool_markets_total": 0,
+  "payout_shards_total": 0,
+  "zk_prove_jobs_total": 0,
+  "collecting_sigs_markets": 0,
+  "is_oracle_relays": 6,
+  "events_written_by_sim": [
+   {
+    "event_type": "health_peer_alert",
+    "n": 48
+   },
+   {
+    "event_type": "health_red",
+    "n": 408
+   },
+   {
+    "event_type": "whale_alert",
+    "n": 124
+   }
+  ]
+ }
+}

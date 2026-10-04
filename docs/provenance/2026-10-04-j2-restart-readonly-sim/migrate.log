@@ -1,0 +1,57 @@
+[db] path=D:\kanet-tn12\scratch\_j2_restart_sim\console.mainnet.copy.db source=DB_PATH
+[migrate] v9: interaction_records table created.
+[migrate] v10: migrated 3 scout-discovered identities to account_relations.
+[migrate] v10: account_relations table created, migrated 0 conversations.
+[migrate] v13: account_relations status migrated to three-state model (connected/incoming/outgoing).
+[migrate] v46: account_relations dropped.
+[migrate] v47: interaction_records dropped.
+[migrate] v68: retail_dex_orders table created.
+[migrate] v70: no orphan relation_states to backfill
+[migrate] v77: idx_offers_open_expires partial index created (expire watcher acceleration).
+[migrate] v79: broker_conversations table created (per-peer broker state, J1 #31 ship).
+[migrate] v80: broker_conversations.completed_at column added (Phase 2 profile sediment future-proof).
+[migrate] v81: broker_conversations dropped (Owner 抓错药戳穿 — 复用 retail_dex_orders + retail_dex_user_memory + relation_states 现有 pipeline).
+[migrate] v95: role backfill — broker=0, trader=0, predictor=0, dev=3.
+[migrate] v96: role 'dev' → 'general' rename — 3 rows.
+[migrate] v162: oracle_stake_enrollments + oracle_pool_chain_view tables created (DoD §2.2 chain-derived pool).
+[migrate] v167: broker_recommendations table (DoD 问1 prevet-gate + 排序).
+[migrate] v171: market_shards table created (rolling-shard registry for unlimited betting — bshard B + self-claim C).
+[migrate] v172: payout_shards table (per-market (A) PayoutShard covenant sink — cov_id provenance + settle redeem).
+[migrate] v173: broker_onboarding table (玩家→轻路 broker 自助 onboarding, 地址制, bot_token 加密, 审批复用 identities.trust).
+[migrate] v174: tg_custodial_wallets table (电报 DM 托管钱包, 助记词 aes-256-gcm 加密 fail-loud, display-once 无明文回取, Owner 钦定).
+[migrate] v175: escrow_states table (Silverscript P2SH escrow — buyer/seller/arbiter 三方合约, lock/execute via relay IPC).
+[migrate] v176: oracle_shadow_ledger table (影子判定台账 — 我们 oracle vs 权威 命中率历史, 纯记录不碰结算, Owner 自我进化 #26).
+[migrate] v181: zk_prove_jobs 补 fee_leaves_json/pool_total_sompi(§4硬门⑤禁bps-fallback, guest需要完整fee_leaves).
+[migrate] v192: pilot_rate_limit_log 建表 (M0c-1 Path B pilot 围栏 §2.4, gateway 限流 keyed by grant_id).
+[migrate] v195: u1_domain_assignment 建表完成 (u1 隔离施工的域→relay 映射记录; 纯记录表, 不参与签名判定).
+[migrate] v196: u1_identity_registration 建表完成 (A2 同源判定登记表; N3 锁1/N4 mnemonic 型已落成 UNIQUE+CHECK 结构约束; 今日无写入方).
+[migrate] v197: u1_identity_challenge 建表完成 (A2 一次性挑战; challenge PK 走 CAS, used_at NULL=未消费, expires_at NOT NULL; 部分索引仅巡检不参与正确性; 今日无写入方).
+[migrate] v198: u1_relay_identity 建表完成 (§10 跨节点 pubkey 身份, register-only; PK=relay_pubkey_xonly 小写64hex CHECK; network 闭枚举 CHECK; 无 local_relay_id 列/无 relay_id 回退索引(活算 fromAddress); epoch UNIQUE; 写入方 = u1-registration.mjs 事务内).
+[migrate] v199: idx_kaspa_tx_log_to_addr_observed 在(停机窗已建), 记账通过
+[migrate] v200: idx_pool_sides_bettor_created 在, 记账通过
+[migrate] v200: idx_pool_markets_zk_ready 在, 记账通过
+[migrate] v201: idx_events_type_created 在, 记账通过
+[migrate] v202: submit_intents 表(+2 索引) + tx_records 加 target_address/landed_at/landed_depth/landed_checked_at + idx_tx_records_direction_landed ((c) NO-TX F2/F4, 幂等 IF NOT EXISTS/pragma 守卫).
+[migrate] v203: exchange_offers 加 escrow_landed_at/escrow_landed_depth/taker_escrow_landed_at/taker_escrow_landed_depth ((c) 第 5 笔 escrow 硬消费门, pragma 守卫幂等).
+[migrate] v205: payout_shards.token_tmpl_hash 在, 记账通过
+[migrate] v205: payout_shards.claim_tmpl_hash 在, 记账通过
+[migrate] v205: payout_shards.market_suffix_hash 在, 记账通过
+[migrate] v205: market_shards.shard_token_tmpl_hash 在, 记账通过
+[migrate] v206: proto_token_defs/proto_markets/proto_bets/proto_bet_intents/proto_claims 建表(原型 v0 隔离命名空间, pragma 守卫幂等).
+[migrate] v207: proto_markets already has genesis intent columns/CHECK states (idempotent skip).
+[migrate] v208: proto_bets already collapsed to single-step schema (idempotent skip).
+[migrate] v208: proto_bet_intents already collapsed to single-step schema (idempotent skip).
+[migrate] v209: proto_markets.shardleaf_own_redeem_len 在, 记账通过
+[migrate] v210: proto_settlement_intents 建表(六个结算builder的意图状态机, pragma守卫幂等).
+[migrate] v211: watch_accounts 建表(只读/冷存账户注册表, 无密钥列, CHECK custody=cold_no_key; D-028).
+[migrate] v212: proto_market_verdicts 追加表 + proto_markets 审计列/判定题列 + winning_side 写一次触发器(R1) + 题面不可改触发器(R4); 纯 schema, 不含 adapter(oracle 整合批 A).
+[migrate] v213: proto_markets.settlement_frozen_at/frozen_reason + proto_market_verdicts.pmt_at + 冻结/pmt_at 触发器 + verdict_ref 加 pmt_at 非空(oracle 整合批 D).
+[migrate] v214: proto_settlement_intents step CHECK 已含 refund_flip(或表不存在)(idempotent skip).
+[migrate] v215: market_shards.leaf_cov_id 在, 记账通过
+[migrate] v216: market_shards.current_token_outpoint 在, 记账通过
+[migrate] v217: kaspa_tx_log_coverage + broker_refund_intents + idx_spc_daa_ts 建表/建索引完成 (纯新增; 写入方待 wiring 阶段 2/3; 编号前移自原 coord/broker-money-path 分支的 v199, 见上方头注).
+[migrate] v218: ktt_holdings_ledger 建表完成(D-035 §④ 查阅面板本地记录表, 纯新增).
+[migrate] v219: ktt_panel_rate_limit_log 建表完成(D-035 NWT MUST 闭合 §⑥, mint/transfer 进程外限流, 纯新增).
+[migrate] v220: zk_prove_jobs.attempts/next_attempt_at 列已就绪(出证失败自动重试+退避, 纯新增).
+[migrate] DB migrations complete.
+MIGRATE-DONE
