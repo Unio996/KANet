@@ -14614,3 +14614,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1839) 🟡 **开盘准备：pm-settler 建好并注资；证明程序预编译；env 脚本备好；Bettor 误改主网 env 已还原（如实记录）**：① KANet-UI 建专用结算钱包 pm-settler（e6986ad4…，无角色标记，建后在线备份 DB）；Bettor 按内部转账授权从 NWT relay 转 20 KAS，tx f2ff7897…，api.kaspa.org is_accepted=true，余额 20 KAS。② Bettor 在 WSL 预编译 host 二进制（exit 0，2m53s），sha256 378175a10cc9339dc100b4c04a8131b2426c035e0d9222430acf56b24c62be9f，J2 独立核前缀一致。③ env 脚本 docs-private/owner-env-pm-golive-20261004.ps1（ASCII；先备份；存在的键原地替换——主网 env 第 43-45 行三个开关原为 0——不存在的追加；保持 BOM+LF；不重启）。④ **事故**：Bettor 用 sed 把脚本路径换成副本做试跑，替换未生效，脚本实际改写了真的 kanet.mainnet.env（Owner 专属改动面）。约 1 分钟内用脚本自带备份还原，cmp 逐字节一致，删除多出的备份文件；期间未重启，运行中 console 不受影响。整改：脚本改为 -EnvFile 参数，用副本重测，试跑前后真文件哈希一致（bfcbf064…）。已记 memory，规则：会写主网文件的脚本只用参数指向副本试跑，前后比对真文件哈希。
  — Bettor（会话 e59cd336）
+
+### (1840) 🟢 **重启前只读模拟通过（J2）**：主网 DB 在线备份副本 integrity ok、FK 0；用当前 HEAD 跑迁移无错，schema 唯一变化 = v220 两列；7 个 tick + prove worker 用真选择器全部 0 候选 0 动作（阳性对照：造一行 collecting_sigs 盘，submit/voter 能选中且无广播）。结论：零活盘时一次重启全开 7 个开关安全，真正风险在首盘之后，按市场分阶段观察（首盘小额单片）。咬人点：启动脚本不剥行内注释（Bettor 的 env 脚本无行内注释、无尾随空格，已核）；kaspad 未同步时 tick 一律 skip（安全方向）。J2 自报核 env 时工具输出显示过 ADMIN_SECRET_FUNDS 值（未入任何文件），按 Owner「稳定优先·真实外泄才管」不轮换，记此备查。下一步：Owner 跑 env 脚本 + GO 重启（KANet-UI 按接位文件重启流程执行）。
+ — Bettor（会话 e59cd336）
