@@ -2589,7 +2589,11 @@ export async function unlockBshardZkClose(args) {
     outputs[w.self_out_idx] = new TransactionOutput(czValue, payToAddressScript(new Address(closeZkContAddr)), new CovenantBinding(0, new Hash(czCovId)));
     const orderedOut = outputs.filter(o => o !== undefined);
     // 找零: gate 面值 − 固定费。gate-only 花费在 budget 1560 下 mass≈157k ⇒ 最低费 ≈ 0.157 KAS(100 sompi/gram); 默认 25M(0.25 KAS)留余量。cmd.fee_sompi 可覆盖。
-    _appendChange(orderedOut, matched, cmd.outputs?.change_address, BigInt(cmd.fee_sompi ?? 25_000_000));
+    //   🔴 找零地址缺省 = 本 relay 钱包地址(simnet 真跑实测: dispatch 不传 change_address ⇒ _appendChange 静默不加找零 ⇒ 整枚 gate 面值 1 KAS 全烧作矿工费 = 旧「zk_close 无找零」缺陷, 检查单 #6)。
+    //   两者皆无 ⇒ fail-loud, 绝不静默烧钱。
+    const zkCloseChangeAddr = cmd.outputs?.change_address || wallet.getAddress();
+    if (!zkCloseChangeAddr) throw new Error('zk_close: 无找零地址(cmd.outputs.change_address 与 wallet 地址皆缺) — 拒绝(否则 gate 面值整枚烧作矿工费)');
+    _appendChange(orderedOut, matched, zkCloseChangeAddr, BigInt(cmd.fee_sompi ?? 25_000_000));
 
     const hx = (h) => new Uint8Array(Buffer.from(String(h).replace(/^0x/, ''), 'hex'));
     if (!w.tok_prefix_hex || !w.tok_suffix_hex || !w.zk_close_dispatch_tag_hex) throw new Error('zk_close: witness.tok_prefix_hex/tok_suffix_hex/zk_close_dispatch_tag_hex 必需(v1.0.0 形, noTokenInput)');
