@@ -24,7 +24,7 @@ import { ensureGateTmplHashFresh } from '../lib/gate-tmpl-hash.mjs';
 import { kaspaZk } from '../services/zk-prove-worker.mjs';
 import { checkAdminSecretTier } from '../lib/admin-secret-tier.mjs';
 import { assertAddressOnNetwork, configuredNetwork } from '../lib/kaspa-network.mjs';   // (b) 网络单一源 (设计 v0.2 §3): 前缀只对照 env KASPA_NETWORK, 不从地址推网络
-import { assertNoKasStakeOnMainnet, assertNoKasStakeUnlessReopened, noKasStakeModeOn, mainnetCreateV07Branch, parseStakeKtt } from '../lib/mainnet-no-kas-stake-gate.mjs';   // 账本1845 S0: 主网不收 KAS 硬闸(见该文件头)
+import { assertNoKasStakeOnMainnet, assertNoKasStakeUnlessReopened, noKasStakeModeOn, mainnetCreateV07Branch, parseStakeKtt, sponsorMarketGuard } from '../lib/mainnet-no-kas-stake-gate.mjs';   // 账本1845 S0: 主网不收 KAS 硬闸(见该文件头)
 
 // 件⑤步骤2 疑似死端点命中计数(2026-07-16, KANet-UI, Owner终裁+Bettor #nig8da 派工): observe-only,
 // 零业务逻辑影响, 持久化(跨重启存活)——4个疑似死端点各挂一次调用, 7天观察窗到期零命中才走删除决策,
@@ -1514,6 +1514,7 @@ export async function registerPoolRoutes(fastify) {
     if (market.protocol_version !== 'v0.7') return reply.code(409).send({ ok: false, error: `register-v07 requires protocol_version v0.7, got ${market.protocol_version}` });
     if (market.protocol_status !== 'pending_bettors') return reply.code(409).send({ ok: false, error: `market status=${market.protocol_status}, registration closed` });
     if (!market.pool_merkle_root) return reply.code(409).send({ ok: false, error: 'v0.7 market missing pool_merkle_root (committee)' });
+    if (_noKasMode) { const _sg = sponsorMarketGuard(market); if (_sg) return reply.code(_sg.http).send(_sg.body); }   // S1 评审加固(账本1846): 网关代付只许 ZK 原生且无 spine 的盘
     const _zkTmpl = _zkTemplateHashesOrReject(reply);
     if (!_zkTmpl) return;
 

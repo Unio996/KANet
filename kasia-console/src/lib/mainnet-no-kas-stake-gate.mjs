@@ -97,3 +97,17 @@ function deny(routeName, net, extra) {
 
 /** 仅测试用: 清日志去重集。 */
 export function _resetNoKasStakeLogForTest() { _logged.clear(); }
+
+/**
+ * register-v07 重开分支(S1)的目标盘检查(Bettor 账本1846 评审 SHOULD): 不收 KAS 模式下, 网关代付分支只许喂【ZK 原生且无 spine】的盘——
+ * 旧 V1 盘(zk_native≠true)或带 spine 的盘(旧 KAS 模型)一律 403, 保证 legacy 行永远进不了代付分支。spec 非法 JSON ⇒ 403(fail-closed)。
+ * @param {{spine_p2sh?:string|null, resolution_rule_spec?:string}} market  pool_markets 行
+ * @returns {null | {http:403, body:object}}
+ */
+export function sponsorMarketGuard(market, routeName = 'register-v07') {
+  let spec; try { spec = JSON.parse(market?.resolution_rule_spec || '{}'); } catch { spec = null; }
+  if (!spec || typeof spec !== 'object') return deny(routeName + ':market-spec', 'no-kas-mode', '(目标盘 resolution_rule_spec 非法 JSON, fail-closed)');
+  if (spec.zk_native !== true) return deny(routeName + ':market-not-zk', 'no-kas-mode', '(不收 KAS 模式: 网关代付只许 ZK 原生盘, 目标盘 zk_native≠true)');
+  if (market.spine_p2sh) return deny(routeName + ':market-has-spine', 'no-kas-mode', '(不收 KAS 模式: 目标盘带 spine, 属旧 KAS 模型, 不进网关代付分支)');
+  return null;
+}

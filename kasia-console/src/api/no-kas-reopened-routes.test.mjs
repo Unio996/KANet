@@ -21,6 +21,7 @@ if (!process.env.CONSOLE_ENCRYPTION_KEY) process.env.CONSOLE_ENCRYPTION_KEY = '1
 process.env.KASPA_RPC_URL = 'ws://127.0.0.1:1';
 process.env.KASPA_NETWORK = 'mainnet';
 delete process.env.KANET_NO_KAS_STAKE_MODE; delete process.env.KANET_TESTNET_NO_LIMITS; delete process.env.PROTO_DRIVER_ENABLED; delete process.env.PROTO_RELAY_ID;
+process.env.ZK_GATE_TMPL_HASH = 'd4'.repeat(32); process.env.ZK_CLOSEZK_SIL_PATH = 'D:/none/CloseZkV2.sil';   // zk_native 目标盘走 _resolveZkNativeCtorExtras(只查 env 存在; 重活 ensureGateTmplHashFresh 在下面打桩)
 process.env.ZK_TOKEN_TMPL_HASH = 'a1'.repeat(32); process.env.ZK_CLAIM_TMPL_HASH = 'b2'.repeat(32); process.env.ZK_MARKET_SUFFIX_HASH = 'c3'.repeat(32);
 
 import { mock } from 'node:test';
@@ -53,6 +54,11 @@ const { default: realPsrDefault, ...realPsrNamed } = realPsr;
 const stubRegister = (o) => { calls.reg.push(o); return Promise.resolve({ action: 'use', shardIndex: 0, shardMarketId: o.logicalMarketId + '-s0', leafTx: 'ff'.repeat(32) }); };
 mock.module(psrUrl, { namedExports: { ...realPsrNamed, registerBettorOnShard: stubRegister, computeCloseZkTmplAnchor: () => ({ anchorHex: '00'.repeat(32) }) }, ...(realPsrDefault !== undefined ? { defaultExport: realPsrDefault } : {}) });
 
+const gthUrl = new URL('../lib/gate-tmpl-hash.mjs', import.meta.url).href;
+const realGth = await import(gthUrl);
+const { default: realGthDefault, ...realGthNamed } = realGth;
+mock.module(gthUrl, { namedExports: { ...realGthNamed, ensureGateTmplHashFresh: () => {} }, ...(realGthDefault !== undefined ? { defaultExport: realGthDefault } : {}) });
+
 const { sqlite } = await import('../db/client.js');
 const { registerPoolRoutes } = await import('./pool.js');
 const { REOPENED_ROUTES, noKasStakeModeOn, assertNoKasStakeUnlessReopened, mainnetCreateV07Branch, parseStakeKtt, NO_KAS_STAKE_CODE } = await import('../lib/mainnet-no-kas-stake-gate.mjs');
@@ -65,7 +71,7 @@ const addRelay = (id, addr, isOracle = 0) => { const row = { id, name: id, addre
 const putAddrs = (net) => { addRelay('maker-r', net === 'mainnet' ? MAKER.addrMain : MAKER.addrSim); addRelay('bettor-r', net === 'mainnet' ? BETTOR.addrMain : BETTOR.addrSim); addRelay('oracle-r', net === 'mainnet' ? ORACLE.addrMain : ORACLE.addrSim, 1); };
 sqlite.prepare("INSERT INTO oracle_pool_chain_view (snapshot_daa, leaves_json, merkle_root, pool_size, derived_at) VALUES (1,'[]',?,6,'x')").run('ab'.repeat(32));
 const minfo = sqlite.pragma('table_info(pool_markets)').filter((c) => c.notnull === 1 && c.dflt_value == null && c.name !== 'id');
-const seedMarket = (id, over = {}) => { const row = { id, maker_relay_id: 'maker-r', protocol_version: 'v0.7', protocol_status: 'pending_bettors', spine_p2sh: null, spine_lock_tx: null, maker_stake_amount: 0, deadline: Math.floor(Date.now() / 1000) + 7200, pool_merkle_root: 'ab'.repeat(32), oracle_relay_ids: '[]', resolution_rule_spec: JSON.stringify({ title: 't', resolution_criteria: 'c', data_source_canonical: 'u' }), metadata: '{}', market_metadata_hash: 'cd'.repeat(32), maker_pk: MAKER.xonly, broker_pk: MAKER.xonly, ...over }; for (const c of minfo) if (!(c.name in row)) row[c.name] = /INT/i.test(c.type) ? 1 : 'x'; sqlite.prepare(`INSERT OR REPLACE INTO pool_markets (${Object.keys(row).join(',')}) VALUES (${Object.keys(row).map(() => '?').join(',')})`).run(...Object.values(row)); };
+const seedMarket = (id, over = {}) => { const row = { id, maker_relay_id: 'maker-r', protocol_version: 'v0.7', protocol_status: 'pending_bettors', spine_p2sh: null, spine_lock_tx: null, maker_stake_amount: 0, deadline: Math.floor(Date.now() / 1000) + 7200, pool_merkle_root: 'ab'.repeat(32), oracle_relay_ids: '[]', resolution_rule_spec: JSON.stringify({ title: 't', resolution_criteria: 'c', data_source_canonical: 'u', zk_native: true }), metadata: '{}', market_metadata_hash: 'cd'.repeat(32), maker_pk: MAKER.xonly, broker_pk: MAKER.xonly, ...over }; for (const c of minfo) if (!(c.name in row)) row[c.name] = /INT/i.test(c.type) ? 1 : 'x'; sqlite.prepare(`INSERT OR REPLACE INTO pool_markets (${Object.keys(row).join(',')}) VALUES (${Object.keys(row).map(() => '?').join(',')})`).run(...Object.values(row)); };
 const app = Fastify(); await registerPoolRoutes(app); await app.ready();
 const post = (url, payload) => Promise.race([app.inject({ method: 'POST', url, payload }), new Promise((_, rej) => setTimeout(() => rej(new Error('inject timeout')), 30000))]);
 const J = (res) => { try { return JSON.parse(res.body); } catch { return {}; } };
@@ -138,6 +144,17 @@ reset();
   const r3 = await post('/api/pool/market/m-reg-o/bettor/register-v07', { bettor_relay_id: 'bettor-r', direction: 0, stake_ktt: 150000000 });
   ok(r3.statusCode === 403, '委员不能下注(area-1 互斥)仍有效');
   ok(calls.transfer.length === 0 && calls.reg.length === 0, '三次被拒: 零转账、零 register');
+}
+reset();
+{
+  seedMarket('m-legacy', { resolution_rule_spec: JSON.stringify({ title: 't', resolution_criteria: 'c', data_source_canonical: 'u' }) });   // 旧 V1 盘: zk_native 缺省
+  seedMarket('m-spine', { spine_p2sh: MAKER.addrMain, spine_lock_tx: 'ee'.repeat(32) });                                                    // 带 spine 的旧 KAS 模型盘
+  seedMarket('m-badspec', { resolution_rule_spec: 'not json' });
+  for (const id of ['m-legacy', 'm-spine', 'm-badspec']) {
+    const r = await post(`/api/pool/market/${id}/bettor/register-v07`, { bettor_relay_id: 'bettor-r', direction: 0, stake_ktt: 150000000 });
+    ok(r.statusCode === 403 && J(r).code === NO_KAS_STAKE_CODE, `主网 register-v07 目标盘 ${id} ⇒ 403(legacy 行进不了网关代付分支)`);
+  }
+  ok(calls.transfer.length === 0 && calls.reg.length === 0 && calls.send.length === 0, '三个被拒的目标盘: 零转账、零 register、零 relay 命令(守卫在 get_pubkey 之前)');
 }
 reset();
 for (const path of ['register-v07/prep', 'register-v07/confirm', 'register', 'register-external/prep', 'register-external/confirm', 'register-v06/prep', 'register-v06/confirm']) {
