@@ -1,0 +1,66 @@
+14:31:55 balances before (KAS): {
+  maker: 231.467827,
+  settler: 340.561913,
+  fee: 300,
+  bettorA: 263.903892,
+  bettorB: 233.903892
+}
+14:31:55 create-v07 (no maker_stake_kas) curDaa 87707 targetDaa 89067
+14:31:55 create-v07 => {"status":"pending_bettors","ok":true,"market_id":"ext-pool-v07-1791124315416-fvyvm","protocol_version":"v0.7","spine_p2sh":null,"spine_lock_tx":null,"no_kas_stake":true,"pool_merkle_root":"46fa6978ef43158da20d34fe60fbafc16ea543543be5933b9f2455bcfb0d10c8","maker_stake_locked_kas":0,"miner_fee_sompi":5000000,"broker_fee_pct_bps":190,"shard_id":0,"shard_count":1,"market_id_hash":"94a6bd7e09cbd65fc6a07b7c183bda858997dce018d9833dab75bf178a40d6d9","cross_node_publish_tx":null,"category":"crypto","next_step":"bettors register directly via POST /api/pool/market/ext-pool-v07-1791124315416-fvyvm/bettor/register-v07/{prep,confirm} (TODO 批3) OR reuse register-v06 endpoint for single-shard wire (= same 
+14:31:55   ✅ create-v07 200 + no_kas_stake=true
+14:31:55   ✅ 响应: spine_p2sh/spine_lock_tx=null, maker_stake_locked_kas=0
+14:32:00   ✅ 建盘后(未下注): 网关/下注人钱包余额逐 sompi 不变 = 建盘没有任何链上转账
+14:32:27 bettorA dir=0 stake_ktt=1000000000 (27043ms) => {"status":200,"ok":true,"logical_market_id":"ext-pool-v07-1791124315416-fvyvm","bettor_pk":"060b0264800672da79c533ae1534310f7925beeac945363bd2cd0d2b7402dc79","no_kas_stake":true,"stake_ktt":1000000000,"action":"use","shardIndex":0,"shardMarketId":"ext-pool-v07-1791124315416-fvyvm-s0","shardP2sh":"kaspasim:pqde7kgfrprlmyvggum64vru2f9ypwgwwffgth2f26uh7fq84jqqvazne9lyk","leafTx":"414f16ce42d70ed0677d704724edb47c43c0ffa877c616b9a6690006e5f75f87","leafOutpoint":"414f16ce42d70ed0677d704724edb47c43c0ff
+14:32:27   ✅ bettorA register-v07 stake_ktt=1000000000 ⇒ 200 no_kas_stake
+14:32:27   ✅ bettorA 钱包余额下注后逐 sompi 不变(26390389200 == 26390389200)
+14:32:41 bettorB dir=1 stake_ktt=2000000000 (14179ms) => {"status":200,"ok":true,"logical_market_id":"ext-pool-v07-1791124315416-fvyvm","bettor_pk":"b8fd583b660dea6c94bc0962a2f4921e763578bdeb375575fdd7feddf48dfd27","no_kas_stake":true,"stake_ktt":2000000000,"action":"use","shardIndex":0,"shardMarketId":"ext-pool-v07-1791124315416-fvyvm-s0","shardP2sh":"kaspasim:pqde7kgfrprlmyvggum64vru2f9ypwgwwffgth2f26uh7fq84jqqvazne9lyk","leafTx":"bb4c91f1ae3f5b59b90a9da7f673458ec67288aec2a466443683e1ea57af1cba","leafOutpoint":"bb4c91f1ae3f5b59b90a9da7f673458ec67288
+14:32:41   ✅ bettorB register-v07 stake_ktt=2000000000 ⇒ 200 no_kas_stake
+14:32:41   ✅ bettorB 钱包余额下注后逐 sompi 不变(23390389200 == 23390389200)
+14:32:41   ✅ 不收 KAS 模式 stake_kas ⇒ 400 stake_ktt_required(不读老字段)
+14:32:41   ✅ register-v07/prep ⇒ 403
+14:32:41 waiting ticks… 0s  daa=88144  claims=0 []
+14:34:11 waiting ticks… 90s  daa=89184  claims=0 []
+14:35:41 waiting ticks… 180s  daa=89958  claims=0 []
+14:37:12 waiting ticks… 270s  daa=90608  claims=0 []
+14:38:42 waiting ticks… 361s  daa=91188  claims=0 []
+14:40:12 waiting ticks… 451s  daa=92050  claims=0 []
+14:41:42 waiting ticks… 541s  daa=92866  claims=0 []
+14:43:12 waiting ticks… 631s  daa=93617  claims=0 []
+14:44:42 waiting ticks… 721s  daa=94565  claims=0 []
+14:46:12 waiting ticks… 811s  daa=95246  claims=0 []
+14:47:43 waiting ticks… 901s  daa=96029  claims=0 ["[zk-autonomy] 14:47:30 ✅ market=16-fvyvm judge+propose dispatched(winDir=0, endBlockHash=59d814aa42bd...)"]
+14:49:13 waiting ticks… 992s  daa=96965  claims=0 ["[zk-prove-worker] updateProvingFailed also failed: updateProvingFailed: market ext-pool-v07-1791124315416-fvyvm 没有 zk_continuation","[diag:step] zk-prove-worker.tick ms=76 sync=0 ok=1 at=2026-10-04T14:48:48.257Z","[buildProposeCloseRequestV2/handoff] ✅ market=16-fvyvm zk_prove_jobs id=6 因 handoff-landed 重置回 pending","[zk-autonomy] 14:48:54 ✅ market=16-fvyvm zk_handoff dispatched+landed txId=3fbd
+14:50:43 waiting ticks… 1082s  daa=98028  claims=0 ["[zk-autonomy] 14:48:54 ✅ market=16-fvyvm zk_handoff dispatched+landed txId=3fbd6e80a320232e9abd4320626ca89a399220a948e004100db5900291dea66c","[zk-prove-worker] job=6 market=16-fvyvm proving started (~4min)...","[zk-prove-worker] ✅ job=6 market=16-fvyvm proving.status=ready gate=kaspasim:ppxqv8vezah","[diag:step] zk-prove-worker.tick ms=66962 sync=0 ok=1 at=2026-10-04T14:50:25.146Z"]
+14:51:53   ✅ 自治链走到最后一个 claim(exhausted)(1152s)
+14:52:08 balances after (KAS): {
+  maker: 229.735611,
+  settler: 335.519686,
+  fee: 300,
+  bettorA: 263.903892,
+  bettorB: 233.903892
+}
+14:52:08   ✅ A. bettorA 余额逐 sompi 相同(26390389200 → 26390389200)
+14:52:08   ✅ A. bettorB 余额逐 sompi 相同(23390389200 → 23390389200)
+14:52:09 scanned accepted txs in window: 11201 of accepted ids 11201
+14:52:10   ✅ B. 窗口内所有被接受交易的输入面值都能溯源(未知输入 0)
+14:52:10   ✅ A. 窗口内没有任何被接受的交易触碰下注人钱包(输入/输出)(0)
+14:52:10   ✅ B. maker: 逐笔交易重算 Δ(-173221600) == 余额差(-173221600) sompi
+14:52:10   ✅ B. maker: Δ == −(手续费 53221600 + 净锁进 covenant 120000000) 逐 sompi 成立
+14:52:10   ✅ B. maker: 落到第三方 P2PK 地址的输出 = 0(须为 0)
+14:52:10   ✅ B. settler: 逐笔交易重算 Δ(-504222700) == 余额差(-504222700) sompi
+14:52:10   ✅ B. settler: Δ == −(手续费 184222700 + 净锁进 covenant 320000000) 逐 sompi 成立
+14:52:10   ✅ B. settler: 落到第三方 P2PK 地址的输出 = 0(须为 0)
+14:52:10   ✅ B. fee: 逐笔交易重算 Δ(0) == 余额差(0) sompi
+14:52:10   ✅ B. fee: Δ == −(手续费 0 + 净锁进 covenant 0) 逐 sompi 成立
+14:52:10   ✅ B. fee: 落到第三方 P2PK 地址的输出 = 0(须为 0)
+14:52:10 窗口末仍锁在 covenant 的 KAS(系统资金): 4.4 KAS in 6 UTXO
+14:52:10   ✅ C. claim idx=0 → bettorA 的 claim_out 地址 == KanetTokenClaim(市场 cov, 赢家 pk, 2943000000) 重算地址, tok_out 地址 == KTT(2943000000, owner=该 claim cov) 重算地址
+14:52:10   ✅ C. claim idx=0: claim_out 与 tok_out 仍是链上未花 UTXO(代币在 covenant 里, 没有任何钱包地址拿到)
+14:52:10   ✅ C. claim idx=0: 没有任何输出落到赢家/下注人/开盘人钱包地址(只有 covenant 与系统找零)
+14:52:10   ✅ C. claim idx=1 → maker 的 claim_out 地址 == KanetTokenClaim(市场 cov, 赢家 pk, 57000000) 重算地址, tok_out 地址 == KTT(57000000, owner=该 claim cov) 重算地址
+14:52:10   ✅ C. claim idx=1: claim_out 与 tok_out 仍是链上未花 UTXO(代币在 covenant 里, 没有任何钱包地址拿到)
+14:52:10   ✅ C. claim idx=1: 没有任何输出落到赢家/下注人/开盘人钱包地址(只有 covenant 与系统找零)
+14:52:10   ✅ C. 全部 claim 的 KTT 总量 == 池总额 3000000000(= 1e9 + 2e9 下注筹码): 3000000000
+14:52:10   ✅ C. 至少一个下注人是 KTT 受益人(bettorA,maker)
+14:52:10 
+ALL PASS

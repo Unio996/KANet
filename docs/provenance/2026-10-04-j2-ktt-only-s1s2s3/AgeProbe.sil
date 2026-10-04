@@ -1,0 +1,6 @@
+pragma silverscript ^0.1.0;
+contract AgeProbe() {
+    entry go() {
+        require(this.ageDaa >= 150);
+    }
+}

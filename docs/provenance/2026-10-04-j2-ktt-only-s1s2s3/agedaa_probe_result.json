@@ -1,0 +1,29 @@
+{
+ "AGE": 150,
+ "p2shAddr": "kaspasim:pqd9yxpp48agzr7mcylx49e3v8urtetens4tt5amclltz540tm94v02et64wc",
+ "fundTx": "2c172a08467951d65a5367f9d3930ad15f6488732786a8dd1fad885c05aaf81b",
+ "daaAt": 56032,
+ "res": {
+  "t1_age_not_reached": {
+   "accepted": false,
+   "err": "RPC Server (remote error) -> Rejected transaction d5f9b5c4e56fefdfdd9662772d1580668f691f02d83f729ae2d47047897b0fb0: one of the transaction sequence locks conditions was not met",
+   "age": 1
+  },
+  "t2_seq_zero": {
+   "accepted": false,
+   "err": "RPC Server (remote error) -> Rejected transaction a9898be816da7a1ebd54a7acfd3d74bb578ae86bb58d5ddb01e33abda7f2bb31: failed to verify the signature script: Unsatisfied lock time: locktime requirement not satisfied -- locktime is greater than the transaction locktime: 150 > 0",
+   "age": 196
+  },
+  "t3_seq_below": {
+   "accepted": false,
+   "err": "RPC Server (remote error) -> Rejected transaction 0aa2f2048a70015f532c800d46e362247ad295d17dbc564ee9ec6a01b4b1837b: failed to verify the signature script: Unsatisfied lock time: locktime requirement not satisfied -- locktime is greater than the transaction locktime: 150 > 149",
+   "age": 197
+  },
+  "t4_honest": {
+   "accepted": true,
+   "txid": "d5f9b5c4e56fefdfdd9662772d1580668f691f02d83f729ae2d47047897b0fb0",
+   "age": 197
+  }
+ },
+ "verdict": true
+}
