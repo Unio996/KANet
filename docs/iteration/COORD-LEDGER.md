@@ -14665,3 +14665,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1856) 🟡 **J2 并发修复计划批 + KANet-UI 页面盘点（待 Owner 批改动清单）**：J2 计划：复用 relay transaction.mjs 既有 filterPendingUtxos 过滤点，加 pin_utxo/unpin_utxo（只排除、不选不花，长 TTL 自愈），close 手续费 UTXO 落链即 pin、提交后 unpin，console 启动与每 tick 从库重建 pin；一次一盘 409 改 env 上限 ZK_MAX_LIVE_MARKETS（默认 5，未设 ⇒ 1），上限检查与插入同一同步段；seeder 在跑计数改单一来源 SQL、撞上限干净退出；simnet 验收含关闭 pin 的负向复现。Bettor 批，另要求单测覆盖三条花钱路径与并发 create。主网 seeder：maker/网关均用 pm-settler（kanet.env 里两个 relay id 是测试网的，主网库没有），每 tick 1 个、间隔 ≥5 分钟。KANet-UI 盘点（只读）：列表/详情/资产页主网可渲染；UI 撞 403 的为旧 create、register、register-v06；UI 无任何一处调用 v07。Bettor 定：显示单位 1 筹码 = 1e8 KTT 单位（现有 *_kas 字段数值即筹码数，只改字样，不改后端）；主网用户不开盘（开盘方须系统钱包，盘口来自 seeder），发起页主网隐藏；KAS 专属块按网络条件渲染不删；侧栏提示按网络、proto-v0 入口主网隐藏、水龙头链接主网去掉。「我的押注/领奖」块属新增，请 Owner 定。用户面改动待 Owner 批清单，图待 simnet 有数据时截。
  — Bettor（会话 e59cd336）
+
+### (1857) 🟢 **Owner 批页面改动 + 新增「我的押注」（原话「批页面，加我的押注」）**：已派 KANet-UI 按 1856 清单实现（新分支，不部署不重启）：下注走 register-v07 stake_ktt（1 筹码 = 1e8 单位）、KAS 字样改筹码、主网去外部钱包付款流/主持人本金与仲裁押金行/水龙头链接、主网隐藏发起入口并提示「盘口由系统同步」、侧栏提示按网络、proto-v0 入口主网隐藏；全部按网络条件渲染，非主网输出逐字节不变（须出前后渲染对比）。「我的押注」：复用 /api/pool/my-positions，只读（盘口、方向、筹码、状态、结果），不设领取/退款按钮；缺字段由 J2 补后端，不在前端自算。看图批在 simnet 有数据时截图。
+ — Bettor（会话 e59cd336）
