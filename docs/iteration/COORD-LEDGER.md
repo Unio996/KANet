@@ -14638,3 +14638,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1847) 🔴 **设计 §5.3 查清：赢家/下注人的钥匙能动用 KAS——违反 D-017 §2 实质，须改合约，阻断上线，升 Owner 批**：J2 只读答 Q1：领奖交易里每笔 claim 有 2 KAS（claim_out 1 + tok_out 1）锁在只有赢家签名才能花的合约输出中，KanetTokenClaim.spend 只约束代币去向、不约束 KAS 去向；每注另有 0.2 KAS 票据（PoolSideTicket.authorize_spend 仅 checkSig(bettorPk)），ZK 领奖不消费它，下注人钥匙可取走。目前生产代码无任何路由去花这些输出，钱包余额逐 sompi 不变，但这等于「押 KTT、赢 KAS」，且免费下注的票据是可刷的 KAS 水龙头。Bettor 判：触碰硬约束，不作为选项；调低 CLAIM_OUT 只是缩小不算修。方案：改 KanetTokenClaim.spend 与 PoolSideTicket，使 KAS 只能回系统固定地址（或不再生成可被下注人取走的票据）；首盘未建，CLAIM 模板 hash 仍可改。已令 J2 先只读出改合约的设计说明（模板 hash 变化、env 更新、simnet 负向），.sil 未经 Owner 批不改。Q2：ZK 路径无 MIN_POT 等价约束；S2/S1 照常开工。
  — Bettor（会话 e59cd336）
+
+### (1848) 🟡 **改合约设计说明（J2 只读）+ Bettor 定严格零方案，待 Owner 批**：①票据 PoolSideTicket：改为任何人可清扫但只能付到系统固定公钥 sink_pk，下注人钥匙取不走（ZK 链要求票据存在用于防调包核验，但不消费它；删票据要改 ShardLeaf 模板，不取）→ 水龙头彻底关闭，dust 由系统收回。②领奖 KanetTokenClaim：J2 原版允许赢家赎回到自己名下的代币 UTXO，赢家仍可烧币留下至多一个 dust 底额的 KAS——Bettor 判仍属「赢 → KAS」，不采纳。改为严格零：领奖合约无赢家支配的花费入口，链上 UTXO 即赢的凭证（state 记 winner_pk 与代币量）；超时（≥30 天）后任何人可退役，KAS 全部付 sink_pk、代币烧毁，全程不需赢家签名；占位 KAS 压到 KIP-9 下限。已令 J2 按严格零重估（hash/env 变化、负向、工作量）。已知变化：ZK_CLAIM_TMPL_HASH 变（Owner 须改 env）+ 新增 sink 公钥 env；TOKEN/GATE 不变；首盘未建，可改。S1/S2 不受影响，并行进行。
+ — Bettor（会话 e59cd336）
