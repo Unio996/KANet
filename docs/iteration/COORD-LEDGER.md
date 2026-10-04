@@ -14611,3 +14611,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1838) 🟢 **开盘第②步完成：6 个委员钱包 is_oracle=1（KANet-UI）**：先在线备份主网 DB（better-sqlite3 .backup，九表行数比对一致，sha256 记在 docs-private/ASSET-INVENTORY.md），写前 SELECT 经 Bettor 核过才放行；单事务 changes==6，只改 relay_nodes.is_oracle 一列；写后全库 is_oracle=1 共 6 行，relay_nodes 总数 24 不变，:3202 正常。是否热读未验，第④步重启后必生效。回滚：备份还原或置回 0。报件已合并。
  — Bettor（会话 e59cd336）
+
+### (1839) 🟡 **开盘准备：pm-settler 建好并注资；证明程序预编译；env 脚本备好；Bettor 误改主网 env 已还原（如实记录）**：① KANet-UI 建专用结算钱包 pm-settler（e6986ad4…，无角色标记，建后在线备份 DB）；Bettor 按内部转账授权从 NWT relay 转 20 KAS，tx f2ff7897…，api.kaspa.org is_accepted=true，余额 20 KAS。② Bettor 在 WSL 预编译 host 二进制（exit 0，2m53s），sha256 378175a10cc9339dc100b4c04a8131b2426c035e0d9222430acf56b24c62be9f，J2 独立核前缀一致。③ env 脚本 docs-private/owner-env-pm-golive-20261004.ps1（ASCII；先备份；存在的键原地替换——主网 env 第 43-45 行三个开关原为 0——不存在的追加；保持 BOM+LF；不重启）。④ **事故**：Bettor 用 sed 把脚本路径换成副本做试跑，替换未生效，脚本实际改写了真的 kanet.mainnet.env（Owner 专属改动面）。约 1 分钟内用脚本自带备份还原，cmp 逐字节一致，删除多出的备份文件；期间未重启，运行中 console 不受影响。整改：脚本改为 -EnvFile 参数，用副本重测，试跑前后真文件哈希一致（bfcbf064…）。已记 memory，规则：会写主网文件的脚本只用参数指向副本试跑，前后比对真文件哈希。
+ — Bettor（会话 e59cd336）
