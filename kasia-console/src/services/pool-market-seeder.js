@@ -30,10 +30,13 @@
 import { sqlite } from '../db/client.js';
 import { wrapTick } from '../lib/diag-step.mjs';   // M10 v2 observe-only (2026-09-05): setInterval 回调计时(纯透传, 同步段/总墙钟 ≥50ms 才打)
 import { categorizeMarket } from '../lib/market-category.js';
+import { noKasStakeModeOn, listUnfinishedZkNativeMarkets, resolveMaxLiveMarkets } from '../lib/mainnet-no-kas-stake-gate.mjs';   // 账本1855: 无 KAS 模式下 live 计数/上限与 create-v07 同源
 
 const PORT = parseInt(process.env.PORT || '3100');
 const BASE = `http://127.0.0.1:${PORT}`;
-const GAMMA_URL = 'https://gamma-api.polymarket.com/markets?active=true&closed=false&limit=200&order=volume24hr&ascending=false';
+// POOL_SEED_GAMMA_URL: 【仅测试】覆盖 gamma 源(simnet 彩排用本地桩); 生产不设, 默认值不变。
+const GAMMA_URL = process.env.POOL_SEED_GAMMA_URL || 'https://gamma-api.polymarket.com/markets?active=true&closed=false&limit=200&order=volume24hr&ascending=false';
+const NO_KAS_MAX_DAY = 300;   // 票龄 365d - 结算余量 60d = 305d(create-v07 deadline 闸); 种子端同界, 免得整批被 400
 
 let _timer = null;
 
@@ -69,7 +72,8 @@ export async function pickGammaMarkets(limit = 1) {
   const minMs = now + 60 * 60_000;          // ≥1h lead so oracles + bettors have time
   // Bettor 06-03 raise: r246 30day cap raised → POOL_SEED_MAX_DAY env (= seeder-specific).
   // 默认 30 兼容; testnet demo 凑 100 markets + World Cup 2026 远 deadline 调 90 钦定.
-  const maxDay = parseInt(process.env.POOL_SEED_MAX_DAY, 10) || 30;
+  let maxDay = parseInt(process.env.POOL_SEED_MAX_DAY, 10) || 30;
+  if (noKasStakeModeOn() && maxDay > NO_KAS_MAX_DAY) maxDay = NO_KAS_MAX_DAY;   // 账本1855: 不收 KAS 模式 deadline ≤ 票龄-余量
   const maxMs = now + maxDay * 86400_000;
   const minVol = parseFloat(process.env.POOL_SEED_MIN_VOL24H) || 0;
   // Bettor 2026-06-03 钦定: 走 KANet 现有干净 JSON 格式 (= kanet_v07 markets 同 schema):
@@ -137,12 +141,17 @@ export async function pickGammaMarket() {
 // Exported for deterministic testing (invoke one create+deposit cycle without waiting for the cron).
 export async function tick() {
   const maker = process.env.POOL_SEEDER_MAKER_RELAY;
-  const target = parseInt(process.env.POOL_SEED_TARGET, 10) || 5;
+  const noKas = noKasStakeModeOn();
+  let target = parseInt(process.env.POOL_SEED_TARGET, 10) || 5;
+  if (noKas) target = Math.min(target, resolveMaxLiveMarkets());   // 账本1855: 目标不超 ZK_MAX_LIVE_MARKETS(create-v07 同一上限, 否则必撞 409)
   // J2-tn 2026-06-14e (Owner 12:03 钦定: 定时上单子不能老手动 + 量上不来): top-up to target,
   // 不再 1/tick。每 tick 建 min(target-live, MAX_PER_TICK) 个 (MAX_PER_TICK 安全帽防单 tick 灌爆
   // maker stake 资金/节点; 逐 tick 爬到 target). 即时 burst 由一次性 build agent 灌, 本 cron 长效维持。
   const maxPerTick = parseInt(process.env.POOL_SEED_MAX_PER_TICK, 10) || 10;
-  const live = sqlite.prepare("SELECT COUNT(*) c FROM pool_markets WHERE protocol_status = 'pending_bettors'").get().c;
+  // 账本1855: 无 KAS 模式的"在跑"= 未完结的 ZK 原生盘(与 create-v07 上限同一 SQL; 旧口径只数 pending_bettors, 过 deadline/已 attested 的盘不再计数 ⇒ 会越过上限)。
+  const live = noKas
+    ? listUnfinishedZkNativeMarkets(sqlite).length
+    : sqlite.prepare("SELECT COUNT(*) c FROM pool_markets WHERE protocol_status = 'pending_bettors'").get().c;
   if (live >= target) return;  // maintain target, no spam
 
   const need = Math.min(target - live, maxPerTick);
@@ -158,7 +167,8 @@ export async function tick() {
         maker_relay_id: maker,
         // S2 broker-fee wiring (Bettor r615 per-path): user-facing 市场设 gateway 为 broker (不塌 maker).
         // gateway relay env-可配 (默认 broker-1 15593e10, P2PK 过 create-v07 chokepoint, is_oracle=0 过互斥).
-        broker_relay_id: process.env.GATEWAY_RELAY_ID || '15593e10-fe63-4806-a7b5-cae062699de8',
+        // 账本1855: 无 KAS 模式(主网)下 15593e10 是测试网 id、主网库里不存在 ⇒ 未配 GATEWAY_RELAY_ID 时不传(create-v07 把 broker 塌到 maker), 不拿死 id 去撞 400。
+        broker_relay_id: process.env.GATEWAY_RELAY_ID || (noKas ? undefined : '15593e10-fe63-4806-a7b5-cae062699de8'),
         // Lane③ r654: 省略 broker_fee_pct → create-v07 读 gateway default_broker_fee_pct (gateway /broker 自设 fee 生效).
         // env GATEWAY_FEE_PCT 显式覆盖; 否则 undefined → JSON.stringify 省略 → 走 gateway 默认.
         broker_fee_pct: process.env.GATEWAY_FEE_PCT ? parseInt(process.env.GATEWAY_FEE_PCT, 10) : undefined,
@@ -173,6 +183,10 @@ export async function tick() {
       }),
     });
     let createdJ; try { createdJ = await createRes.json(); } catch { createdJ = { ok: false, error: `HTTP ${createRes.status}` }; }
+    if (!createdJ.ok && createdJ.code === 'live_market_cap_reached') {   // 账本1855: 达上限不是故障——干净退出本 tick(不计 consecFail、不再逐个重试)
+      console.log(`[pool-seeder] 在跑盘已达上限 ${createdJ.live}/${createdJ.cap}(ZK_MAX_LIVE_MARKETS) — 本 tick 停止补盘`);
+      break;
+    }
     if (!createdJ.ok) {
       console.warn(`[pool-seeder] create-v07 fail: ${createdJ.error}`);
       // 连续失败 (≥3) = 系统性 (资金耗尽/节点/create 路) → 本 tick 退避, 下 tick 重试 (防灌满 maxPerTick 次噪音)。
