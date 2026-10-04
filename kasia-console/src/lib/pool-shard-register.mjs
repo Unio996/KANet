@@ -102,7 +102,9 @@ export function readZkTemplateHashes(env = process.env) {
 const W17 = () => Array.from({ length: 17 }, () => ctorInt(0));
 const W17V100 = () => Array.from({ length: 17 }, () => ctorIntV100(0));   // D-019: v100 ctor 方言专用, 见 ctorBytes32V100/ctorIntV100 注释
 const MIN_BET = 100000;                                   // dust-ticket floor (sompi); matches (d)/helper
-const TICKET_DUST = 20_000_000;                           // 0.2 KAS PoolSide dust ticket (KIP-9 safe, matches helper)
+// 🔴 账本1850 严格零方案: 票面值 0.2 → 0.07 KAS(ticket 只可扫给 sink, 面值越低网关净锁越少)。KIP-9 精确公式对首注 register 交易: 0.05 ⇒ 433,194, 0.07 ⇒ 376,335(留 25% 余量, 采用),
+//   0.03 ⇒ 566,257 超 500k 上限(硬下限≈0.04); 0.2 ⇒ 285,715(旧值, 与链上实测 286,814 一致)。证据: docs/provenance/2026-10-05-j2-strict-zero/floor_calc.mjs。sweep 费≈0.011 KAS(compute mass 10,750), 远小于面值。
+const TICKET_DUST = 7_000_000;                            // 0.07 KAS PoolSide dust ticket
 export const PS_SEED = 20_000_000;                               // PayoutShard genesis seed (0.2 KAS sink, matches (d))
 const SHARD_GENESIS_SEED = 20_000_000;                    // A(b): 空 ShardLeaf genesis seed (0.2 KAS, KIP-9 safe). 首注 register_append
                                                           //   spend 它+fund stake → output weld out==pool_value(0)+stake 过, seed 退 change (不进池, pool_value 起点=0)。
@@ -605,6 +607,19 @@ function _withMarketLock(marketId, fn) {
 }
 
 /**
+ * 🔴 账本1850 严格零方案·条件1(Bettor): 新铸的 PoolSideTicket 只有 sweep(→sink)一条花路, 不再有 bettor 密钥 co-spend 入口,
+ * 而旧 RootClaim.claim_draw / RefundClaim.refund_payout 正是靠 co-spend 票来领取/退款。⇒ 仍走那两条路的 legacy 市场(非 ZK 原生,
+ * 或带 spine)一旦铸到新票就会静默搁浅(票花不出去 → 领/退不出)。铸票处 fail-closed: 任何网络(含 testnet/simnet)都只许
+ * zkNative===true 且 spineP2sh 明确为 null/'' 的市场; spineP2sh 未传(undefined)也拒(调用方必须明说"我核过它没有 spine")。
+ * 链上已有的旧票不受影响(模板只管新铸)。
+ */
+export function assertTicketMintAllowed({ zkNative, spineP2sh, logicalMarketId } = {}) {
+  if (zkNative !== true) throw new Error(`registerBettorOnShard: 拒绝铸票(账本1850): 市场 ${logicalMarketId} 非 ZK 原生(zkNative≠true)——新票只有 sweep→sink 一条花路, legacy 市场(RootClaim/RefundClaim 要 co-spend 票)会搁浅`);
+  if (spineP2sh === undefined) throw new Error(`registerBettorOnShard: 拒绝铸票(账本1850): 市场 ${logicalMarketId} 未声明 spineP2sh(调用方须显式传 null 表示已核过无 spine)`);
+  if (spineP2sh !== null && spineP2sh !== '') throw new Error(`registerBettorOnShard: 拒绝铸票(账本1850): 市场 ${logicalMarketId} 带 spine(旧 KAS 模型, 走 co-spend 票的领取/退款), 不铸 sweep-only 票`);
+}
+
+/**
  * Register one bettor's bet into the (A)-model rolling-shard set. Core (a) orchestration.
  * @param {object} o {
  *   db, rc(cmd)→Promise, transfer(addr,sompi)→txid, landed(txid,addr)→bool, p2sh(redeemHex)→addr,
@@ -625,7 +640,7 @@ async function _registerBettorOnShardInner(o) {
   const {
     db, rc, transfer, landed, p2sh, logicalMarketId, poolMerkleRoot, predicateCommit,
     bettorPk, direction, stakeSompi, relayAddr, sealCount, deadline, createShardMarketRow, recordBettor,
-    zkNative = false, closeZkTmplAnchor,   // 2026-07-07 新增: ZK-native 市场显式开关。默认 false——
+    zkNative = false, closeZkTmplAnchor, spineP2sh,   // 2026-07-07 新增: ZK-native 市场显式开关。默认 false——
     // 不传这两个字段的既有 committee-sig 调用方行为一字不变(走原 ensurePayoutShard)。这是显式参数，
     // 不是本函数内部推断——上层市场创建流程必须自己知道"这是 ZK-native 市场"才传 zkNative:true，
     // ShardLeaf/register 主体逻辑本身不感知/不判断市场类型(NWT W3 审核重点②)。
@@ -637,6 +652,7 @@ async function _registerBettorOnShardInner(o) {
   if (direction !== 0 && direction !== 1) throw new Error(`direction must be 0|1, got ${direction}`);
   if (!(BigInt(stakeSompi) > 0n)) throw new Error(`stakeSompi must be > 0`);
   if (zkNative && !closeZkTmplAnchor) throw new Error('registerBettorOnShard: zkNative=true requires closeZkTmplAnchor (fail-closed, no silent placeholder)');
+  assertTicketMintAllowed({ zkNative, spineP2sh, logicalMarketId });   // 账本1850 条件1: 仅 ZK 原生且无 spine 的市场才许铸新(sweep-only)票
   const stake = Number(stakeSompi);
   const marketIdHash = hex32(logicalMarketId);
 

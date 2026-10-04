@@ -1,0 +1,18 @@
+18:19:33 balances before (KAS): {
+  maker: 229.735611,
+  settler: 335.519686,
+  fee: 300,
+  bettorA: 263.903892,
+  bettorB: 233.903892
+}
+18:19:33 create-v07 with unfinished market ⇒ {"status":409,"ok":false,"error":"不收 KAS 模式一次只许一个在跑的 ZK 原生盘: 盘 ext-pool-v07-1791120870824-btduw(collecting_sigs) 尚未完结","code":"another_zk_market_unfinished","blocking_market_id":"ext-pool-v07-1791120870824-btduw"}
+18:19:33   ✅ 一次一盘闸: 另有未完结 zk_native 盘 ⇒ 409 another_zk_market_unfinished(blocking=btduw)
+18:19:33   ✅ 把那个卡死的 simnet 盘在 scratch 副本里标 cancelled(仅 simnet 副本), 再开新盘
+18:19:33 create-v07 (no maker_stake_kas) curDaa 102246 targetDaa 103606
+18:19:33 create-v07 => {"status":"pending_bettors","ok":true,"market_id":"ext-pool-v07-1791137973412-ej48v","protocol_version":"v0.7","spine_p2sh":null,"spine_lock_tx":null,"no_kas_stake":true,"pool_merkle_root":"46fa6978ef43158da20d34fe60fbafc16ea543543be5933b9f2455bcfb0d10c8","maker_stake_locked_kas":0,"miner_fee_sompi":5000000,"broker_fee_pct_bps":190,"shard_id":0,"shard_count":1,"market_id_hash":"b809daa053e8d5886a7caac4ac6558a909f291ee886214a81578033b68d61000","cross_node_publish_tx":null,"category":"crypto","next_step":"bettors register directly via POST /api/pool/market/ext-pool-v07-1791137973412-ej48v/bettor/register-v07/{prep,confirm} (TODO 批3) OR reuse register-v06 endpoint for single-shard wire (= same 
+18:19:33   ✅ create-v07 200 + no_kas_stake=true
+18:19:33   ✅ 响应: spine_p2sh/spine_lock_tx=null, maker_stake_locked_kas=0
+18:19:38   ✅ 建盘后(未下注): 网关/下注人钱包余额逐 sompi 不变 = 建盘没有任何链上转账
+18:19:39 bettorA dir=0 stake_ktt=1000000000 (1164ms) => {"status":500,"ok":false,"error":"register-v07 failed: transfer failed: Unknown network \"simnet\". Supported: mainnet, testnet-10, testnet-11, testnet-12"}
+18:19:39   ❌ bettorA register-v07 stake_ktt=1000000000 ⇒ 200 no_kas_stake
+18:19:39   ✅ bettorA 钱包余额下注后逐 sompi 不变(26390389200 == 26390389200)

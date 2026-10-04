@@ -33,32 +33,16 @@ pragma silverscript ^0.1.0;
 //       是谁的地方; 全新输出的 owner 就是 witness 明确指定的那个值, 调用方=赢家自己选, 赢家自己负责——
 //       这条不对称是本文件的设计判断, 见 README 完整论证, 请 NWT 复核是否需要同等力度)。
 // 花后不续约(终态, §2.1"领取 UTXO 一次性")——本文件没有任何 validateOutputState/State 自续约调用, 不受 V-T-8 影响。
-//
-// 🔴🔴 严格零方案 Fix 2(账本 1850, Owner 2026-10-05「批改合约」): 本合约【删除 spend 入口】——赢家没有任何花费路径
-//   (原 spend 入口含 checkSig(winner_pk), 赢家密钥可把 claim_out 里的 KAS 花走, 也可经 to_market_input/新建输出转手代币)。
-//   唯一入口 = retire(): 条件 this.ageDaa >= retire_daa(相对 DAA 年龄, OpCheckSequenceVerify, 2.0.1 simnet 已实证),
-//   无需任何签名; 效果 = claim_out + 与其同花的代币 UTXO 的全部 KAS 进 sink_pk(P2PK, ctor 烤死), 代币被销毁(D-018 允许销毁:
-//   next_states 为空, 代币侧 sum_in>=sum_out 守恒降级)。
-//   防偷: 必须恰好 2 个输入(本 claim + 真代币 UTXO, 模板核验+owner==本 claim cov id+amount 对得上)、恰好 1 个输出(= sink P2PK),
-//   所以代币无法在 retire 同笔被重新铸给别人(代币转移的任何 next_state 都要有输出, 而输出只有 sink 那一个且无 covenant 绑定)。
-//   sink_pk / retire_daa 是 ctor 常量(不在 State 区, 随模板): CLAIM_TMPL_HASH 随 ZK_SYSTEM_SINK_PK / ZK_CLAIM_RETIRE_DAA 变,
-//   State 四字段不变; TOKEN/GATE 模板不受影响。主网模式: 这两个 env 缺失 ⇒ fail-closed(见 pool-bshard-artifacts.mjs)。
-//   winner_pk / amount 保留为 State 记账字段(链上可核"这枚 claim 属于谁、多少"), 不再有任何授权作用。
-//   以上旧 spend 的设计叙述(下方 v0.3 注记等)仅作历史保留, 已不对应任何入口。
 contract KanetTokenClaim(
     byte[32] init_market_cov_id,
     byte[32] init_winner_pk,
     int      init_amount,
-    byte[32] init_token_tmpl_hash,
-    byte[32] sink_pk,        // ctor 常量, 非 State
-    int      retire_daa      // ctor 常量, 非 State
+    byte[32] init_token_tmpl_hash
 ) {
     byte[32] market_cov_id      = init_market_cov_id;
     byte[32] winner_pk          = init_winner_pk;
     int      amount             = init_amount;
     byte[32] token_tmpl_hash    = init_token_tmpl_hash;
-
-    int constant RETIRE_MAX_FEE = 5000000;   // 0.05 KAS 上限(费从两枚 UTXO 的 KAS 里出, 余额全进 sink)
 
     struct TokenState {
         int      amount;
@@ -69,19 +53,56 @@ contract KanetTokenClaim(
         byte[32] extension_commitment;
     }
 
-    entry retire(int tok_in_idx, byte[] tok_prefix, byte[] tok_suffix) {
-        require(this.ageDaa >= retire_daa);
-
+    entry spend(
+        sig      s,
+        int      tok_in_idx,
+        int      tok_out_idx,
+        bool     to_market_input,
+        int      dest_idx,
+        byte[]   tok_prefix,
+        byte[]   tok_suffix
+    ) {
+        // §3.3 形: witness 供代币模板前后缀字节, 现场核状态里的 token_tmpl_hash(不烤 ctor, 避免环)。
         require(blake3((tok_prefix.length as byte[8]) + tok_prefix + (tok_suffix.length as byte[8]) + tok_suffix) == token_tmpl_hash);
+
+        // ★ H1 在场纪律最后一步也要适用(Owner 1147 角②): 被消费的代币真实归属本 claim, 不是随手指一个
+        //   在场的、跟本 claim 无关的代币实例("偷"一个恰好同笔存在的别人的代币)。
         TokenState tk = readInputStateWithTemplate(tok_in_idx, tok_prefix.length, tok_suffix.length, token_tmpl_hash);
         require(tk.owner == OpInputCovenantId(this.activeInputIndex));
         require(tk.amount == amount);
 
-        require(tx.inputs.length == 2);
-        require(tok_in_idx != this.activeInputIndex);
-        require(tx.outputs.length == 1);
-        byte[36] sink_spk = new ScriptPubKeyP2PK(pubkey(sink_pk));
-        require(tx.outputs[0].scriptPubKey == byte[](sink_spk));
-        require(tx.outputs[0].value >= tx.inputs[this.activeInputIndex].value + tx.inputs[tok_in_idx].value - RETIRE_MAX_FEE);
+        byte[32] target_owner = byte[32](0x0000000000000000000000000000000000000000000000000000000000000000);
+        if (to_market_input) {
+            // v0.3 方案C: 不再核"dest_idx 是不是真市场"——target_owner 直接取该输入的 covenant_id,
+            // 是不是"市场"由接收方自己的合约逻辑负责(比如 ShardLeaf_direct 自己的 scanOwnedTokenInputs),
+            // 本合约只管 owner 非零(见下 ZERO32 守卫), 不越俎代庖。
+            target_owner = OpInputCovenantId(dest_idx);
+            // ★ ZERO32 目的地守卫(NWT 1176 MUST-FIX): sigScript 尾匹配核的是脚本字节, covenant_id 是完全
+            //   独立的字段(同 1173 的教训: 模板/尾匹配 ≠ covenant 绑定)——尾匹配过了不能证明 target_owner
+            //   非零。dest_idx 那个输入可以尾字节对得上、同时压根没声明 covenant_id, OpInputCovenantId 照样
+            //   回退 ZERO_HASH。两条检查各自独立承重, 不能让一条替另一条背书。
+            require(target_owner != byte[32](0x0000000000000000000000000000000000000000000000000000000000000000));
+        } else {
+            target_owner = OpOutputCovenantId(dest_idx);
+            // ★ ZERO32 目的地守卫(NWT 1158 系统性扫查·唯一缺口): OpOutputCovenantId 对未声明 covenant_id 的
+            //   "裸"输出回退 ZERO_HASH(rusty-kaspa opcodes/mod.rs unwrap_or(ZERO_HASH))。这条路径(ii)没有像
+            //   路径(i)那样的独立验证(market_suffix_hash 尾匹配), 若不挡, dest_idx 随手指一个裸输出就能把
+            //   target_owner 写成全零——后果不是"转移失败", 而是代币变成任何在场检查对全零恒真的攻击者都能花。
+            require(target_owner != byte[32](0x0000000000000000000000000000000000000000000000000000000000000000));
+        }
+
+        validateOutputStateWithInputTemplate(tok_out_idx, TokenState {
+            amount:               amount,
+            owner:                target_owner,
+            owner_scheme:         0x04,
+            borrow_scheme:        0x00,
+            borrow_guard:         byte[32](0x0000000000000000000000000000000000000000000000000000000000000000),
+            extension_commitment: byte[32](0x0000000000000000000000000000000000000000000000000000000000000000)
+        }, tok_in_idx, tok_prefix.length, tok_suffix.length, token_tmpl_hash);
+
+        // H4: 只有赢家能动——放在末尾纯粹是可测试性考量(require 顺序不影响最终判定, 全部条件都要满足才算
+        // 通过; 放最后能让离线向量在没有真实私钥的情况下, 仍然逐条独立验证上面每一条结构性检查各自成立,
+        // 不会被"没有真签名"这一件事整体掩盖——同项目里 close_attest/cancel_attest 委员签名向量已有先例)。
+        require(checkSig(s, pubkey(winner_pk)));
     }
 }

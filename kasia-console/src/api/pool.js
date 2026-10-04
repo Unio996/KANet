@@ -24,7 +24,8 @@ import { ensureGateTmplHashFresh } from '../lib/gate-tmpl-hash.mjs';
 import { kaspaZk } from '../services/zk-prove-worker.mjs';
 import { checkAdminSecretTier } from '../lib/admin-secret-tier.mjs';
 import { assertAddressOnNetwork, configuredNetwork } from '../lib/kaspa-network.mjs';   // (b) 网络单一源 (设计 v0.2 §3): 前缀只对照 env KASPA_NETWORK, 不从地址推网络
-import { assertNoKasStakeOnMainnet, assertNoKasStakeUnlessReopened, noKasStakeModeOn, mainnetCreateV07Branch, parseStakeKtt, sponsorMarketGuard } from '../lib/mainnet-no-kas-stake-gate.mjs';   // 账本1845 S0: 主网不收 KAS 硬闸(见该文件头)
+import { assertNoKasStakeOnMainnet, assertNoKasStakeUnlessReopened, noKasStakeModeOn, mainnetCreateV07Branch, parseStakeKtt, sponsorMarketGuard, findUnfinishedZkNativeMarket } from '../lib/mainnet-no-kas-stake-gate.mjs';
+import { resolveSinkConfig, assertDeadlineWithinTicketAge } from '../lib/zk-sink-config.mjs';   // 账本1850 严格零方案   // 账本1845 S0: 主网不收 KAS 硬闸(见该文件头)
 
 // 件⑤步骤2 疑似死端点命中计数(2026-07-16, KANet-UI, Owner终裁+Bettor #nig8da 派工): observe-only,
 // 零业务逻辑影响, 持久化(跨重启存活)——4个疑似死端点各挂一次调用, 7天观察窗到期零命中才走删除决策,
@@ -1101,6 +1102,10 @@ export async function registerPoolRoutes(fastify) {
     for (const k of required) {
       if (b[k] === undefined || b[k] === null || b[k] === '') return reply.code(400).send({ ok: false, error: `missing ${k}` });
     }
+    if (_noKasMode) {   // 账本1850: 一次只许一个在跑的 ZK 原生盘(并发盘抢 close 提交费 UTXO, S3 btduw 实证)
+      const _blocking = findUnfinishedZkNativeMarket(sqlite);
+      if (_blocking) return reply.code(409).send({ ok: false, error: `不收 KAS 模式一次只许一个在跑的 ZK 原生盘: 盘 ${_blocking.id}(${_blocking.protocol_status}) 尚未完结`, code: 'another_zk_market_unfinished', blocking_market_id: _blocking.id });
+    }
     // 🔴 #27 层A (Owner 钦定 2026-06-30 "大胆修·测试网无妨"): pre-broadcast conditionId 去重闸 — 止重复盘。
     //   根因(六层查实): 重复盘今天密集成簇产生(0xf161×5/32秒)·seeder 早有 dedup(L92)但 check-then-act RACE
     //   (DB查在前·create-v07 异步锁链落库在后·burst-builder/多实例发得比落库快→同 conditionId 重复 create)。
@@ -1273,6 +1278,11 @@ export async function registerPoolRoutes(fastify) {
       return reply.code(400).send({ ok: false, error: `outcome_end_date must be <= now + ${maxDeadlineDay} days` });
     }
     const deadline = Math.floor(outcomeEndMs / 1000);
+    if (_noKasMode) {   // 账本1850: 市场不得比它的 dust 票活得久(票龄 ZK_TICKET_SWEEP_DAA - 60 天结算余量); env 缺失 ⇒ resolveSinkConfig fail-closed 抛错 ⇒ 500, 不放行
+      let _cfg; try { _cfg = resolveSinkConfig(); } catch (e) { return reply.code(500).send({ ok: false, error: `不收 KAS 模式: ZK 严格零配置不全(fail-closed): ${e.message}` }); }
+      const _age = assertDeadlineWithinTicketAge({ deadlineSec: deadline, nowSec: Math.floor(Date.now() / 1000), sweepDaa: _cfg.sweepDaa, daaPerSecond: Number(process.env.KANET_DAA_PER_SECOND) || undefined });
+      if (_age) return reply.code(400).send({ ok: false, error: _age, code: 'deadline_exceeds_ticket_age' });
+    }
 
     // #35/G1 pre-flight gate (J2, 2026-07-04, Bettor 决策·opt-in 非全局强制): 只在 caller 显式传
     // b.preflight_check 时才跑三项核对(镜像源逻辑等价/deadline充足/judge时机)——create-v07 是全体
@@ -1645,6 +1655,7 @@ export async function registerPoolRoutes(fastify) {
         createShardMarketRow, recordBettor,
         ..._zkTmpl,   // 账本 1813 A1: tokenTmplHash/claimTmplHash/marketSuffixHash
         zkNative: _zkNative, closeZkTmplAnchor: _closeZkTmplAnchor,   // 非 zkNative 市场: false/null，等价于不传，行为不变
+        spineP2sh: market.spine_p2sh ?? null,   // 账本1850 条件1: 铸新(sweep-only)票前核『无 spine』, 见 pool-shard-register.assertTicketMintAllowed
       });
       return reply.send({ ok: true, logical_market_id: logicalMarketId, bettor_pk: bettorPk, no_kas_stake: _noKasMode, stake_ktt: _noKasMode ? stakeSompi : undefined, ...result });
     } catch (e) {
@@ -1911,6 +1922,7 @@ export async function registerPoolRoutes(fastify) {
         createShardMarketRow, recordBettor,
         ...zkTmpl,   // 账本 1813 A1: tokenTmplHash/claimTmplHash/marketSuffixHash
         zkNative: _zkNative, closeZkTmplAnchor: _closeZkTmplAnchor,   // 非 zkNative 市场: false/null，等价于不传，行为不变
+        spineP2sh: market.spine_p2sh ?? null,   // 账本1850 条件1: 铸新(sweep-only)票前核『无 spine』, 见 pool-shard-register.assertTicketMintAllowed
       });
       // 🔴 #28 (B) wire-3/3 报销: bet 已注册 → sweep per-bet P2SH 付款回 gateway(补偿 gateway 垫的 stake)。
       //   **fire-and-forget·best-effort**: 不 await(不阻 success 返回)·sweep 失败【绝不 strand bet】(bet 已注册·gateway

@@ -104,7 +104,7 @@ const genesisFee = { txid: 'ee'.repeat(32), vout: 0, value: 10_000_000_000n, scr
 const genesisBuilt = buildMarketGenesisTxJson({ kaspa, network: NETWORK, feeUtxo: genesisFee, relayChangeScriptPublicKeyHex: relaySpkHex, shardLeafScriptPubKeyHex: genesis.shardLeafDirect.scriptPubKeyHex, absFeeCapSompi: 80_000_000n });
 const leafCovId = genesisBuilt.shardLeafCovId;
 const SLD_PATH = new URL('./ShardLeaf_direct.sil', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
-const TICKET_PATH = new URL('./sil-v1/PoolSideTicket.sil', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
+const TICKET_PATH = new URL('./legacy-proto/PoolSideTicket.sil', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
 const KTT_PATH = new URL('./sil-v1/KanetTestToken.sil', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
 const sldCtorFor = (s) => [ctorBytes32V100(MARKET_ID), ctorBytes32V100(consts.ps_tmpl_hash), ctorBytes32V100(MARKET_ID), ctorIntV100(SEAL_COUNT), ctorIntV100(MIN_BET), ctorBytes32V100(genesis.rootCloseTmplHash), ctorBytes32V100('00'.repeat(32)), ctorBytes32V100(consts.token_tmpl_hash), ctorIntV100(s.local_yes), ctorIntV100(s.local_no), ctorIntV100(s.count), ctorIntV100(s.pool_value), ctorIntV100(genesis.shardLeafOwnRedeemLen)];
 const kttCtorForAbi = [{ kind: 'int', value: 1 }, { kind: 'bytes', value: [...Buffer.alloc(32)] }, { kind: 'byte', value: 4 }, { kind: 'byte', value: 0 }, { kind: 'bytes', value: [...Buffer.alloc(32)] }, { kind: 'bytes', value: [...Buffer.alloc(32)] }, { kind: 'int', value: 3 }, { kind: 'int', value: 3 }];

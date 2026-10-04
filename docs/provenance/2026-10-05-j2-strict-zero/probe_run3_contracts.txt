@@ -1,0 +1,39 @@
+[diag:step] proc.silverc.compile.bshard-artifacts ms=29 cmd=silverc ok=1 at=2026-10-04T18:04:56.018Z
+18:04:56 KTT template hash (TOKEN): 225ebcdec51f5439326e6bc48e47c288ceacbd3bea07aea6771548eeed44d80e
+[diag:step] proc.silverc.compile.bshard-artifacts ms=16 cmd=silverc ok=1 at=2026-10-04T18:04:56.041Z
+18:04:56 claim template hash: c2e9aa611ebca2578d833d661283ab17d32a51a8b8d9adadb879e1026ad3c74b redeem bytes 955
+[diag:step] proc.silverc.compile.bshard-artifacts ms=13 cmd=silverc ok=1 at=2026-10-04T18:04:56.206Z
+18:04:56 ticket template hash: 5e962f0a3d641617f4aa1c9d97579b71d6a335712ad84bc29b777dfae4eb6adc
+[diag:step] proc.silverc.compile.bshard-artifacts ms=29 cmd=silverc ok=1 at=2026-10-04T18:04:56.242Z
+18:04:56 setup tx 669bb97c005af533607057942d39beb6d9c1b8ff6b69505c6488206f4fd9e0a2 claimCov 71613b253d88
+18:04:56 born daa 100089 now 100089
+18:04:56   ✅ ticket sweep→sink 但 age<RD(早扫, 卡市场向量) expect=rejected got=rejected | RPC Server (remote error) -> Rejected transaction 53c945d2b86e41eee4d80a6339f583ad3a3612ab38054bb81e0f6c1ca2debf46: one of the transaction sequence locks conditions was not met
+18:04:56 — retire 负向量 —
+18:04:56   ✅ retire@age<RD (正确形状但太早) expect=rejected got=rejected | RPC Server (remote error) -> Rejected transaction bdd3d866b79c1a6a80b429fe1f43b478c6ca45ffd7b803d456af0a14225b6376: one of the transaction sequence locks conditions was not met
+18:06:27 age now 223
+18:06:27   ✅ retire@age>=RD 但 sequence=0 expect=rejected got=rejected | RPC Server (remote error) -> Rejected transaction 8242deb9ac9e34aa4394a86e1f965796206a2871230daf1ff846d7421e267d04: failed to verify the signature script: Unsatisfied lock time: locktime requirement n
+18:06:27   ✅ retire 输出到 attacker 而非 sink expect=rejected got=rejected | RPC Server (remote error) -> Rejected transaction c998eddc2117350121d5aa40486eb109c9df8445a657a70e63c04e6fcc66a511: failed to verify the signature script: script ran, but verification failed
+18:06:27   ✅ retire 输出到 winner(赢家密钥) expect=rejected got=rejected | RPC Server (remote error) -> Rejected transaction 4e3bf598d8b05201d43d4d300eedafa3991ff3c4de02374a40ce06f74794c661: failed to verify the signature script: script ran, but verification failed
+18:06:27   ✅ retire 输出值 < Σin - MAX_FEE(少给 sink) expect=rejected got=rejected | RPC Server (remote error) -> Rejected transaction e82056a18d5c5ee7b3bece97e11b0583f7992df0d245bdc4b5f6082267e384ad: failed to verify the signature script: script ran, but verification failed
+18:06:27   ✅ retire 多一个输出(截走 KAS) expect=rejected got=rejected | RPC Server (remote error) -> Rejected transaction cdf9ff0e05b3b3d4836ec0f1406075e35cd20c06afb09a4ff74f0de7c93e4a9c: failed to verify the signature script: script ran, but verification failed
+[diag:step] proc.silverc.compile.bshard-artifacts ms=31 cmd=silverc ok=1 at=2026-10-04T18:06:27.169Z
+18:06:27   ✅ retire 同笔把代币重铸给他人(token re-output) expect=rejected got=rejected | RPC Server (remote error) -> Rejected transaction 48afcd6ab40f50933a1ba41651241975630d8483c312d95e934698c7309d21d7: failed to verify the signature script: script ran, but verification failed
+18:06:27   ✅ retire 只花 claim 不带代币 UTXO expect=rejected got=rejected | RPC Server (remote error) -> Rejected transaction 70657d6e7a8c126e84c449640205ede25c95df2abb42b8f14bbfbe7ec329fa23: failed to verify the signature script: transaction input 1 is out of bounds, should 
+18:06:27   ✅ retire tok_in_idx 指向自己(0) expect=rejected got=rejected | RPC Server (remote error) -> Rejected transaction bdd3d866b79c1a6a80b429fe1f43b478c6ca45ffd7b803d456af0a14225b6376: failed to verify the signature script: script ran, but verification failed
+18:06:27   ✅ winner 密钥尝试直接花 claim_out(无 spend 入口, 伪 dispatch) expect=rejected got=rejected | RPC Server (remote error) -> Rejected transaction e4c52a7bf3a45d2bb68610609802b1031b07e9edc24f86c65303483bb10ad603: failed to verify the signature script: script returned early
+18:06:27   ✅ winner 单独花 tok_out(无 claim 输入在场) expect=rejected got=rejected | RPC Server (remote error) -> Rejected transaction 5f7c1a6bee4ad8994b1e434baee3576375186d73eeb332c2dbbe240d48f60ac8: failed to verify the signature script: script ran, but verification failed
+18:06:27 — retire 正向量 —
+18:06:27 retire budgets min [ 60, 20 ] use 70 30
+18:06:27   ✅ retire@age>=RD + sequence=RD + 输出=sink 全额 + 无代币输出(销毁) expect=accepted got=accepted | bdd3d866b79c1a6a80b429fe1f43b478c6ca45ffd7b803d456af0a14225b6376
+18:06:27   ✅ sink 收到 Σin-fee expect=198000000 got=198000000 
+18:06:27   ✅ claim_out 与 tok_out 均已被花(代币 UTXO 销毁) expect=true got=true 
+18:06:27 — ticket sweep —
+18:06:27   ✅ ticket sweep: sequence=0 expect=rejected got=rejected | RPC Server (remote error) -> Rejected transaction c1928ea086c139fb0d03d6ae995ede772e9f303c385a07b6c720202b9e9fb15e: failed to verify the signature script: Unsatisfied lock time: locktime requirement n
+18:06:27   ✅ ticket: bettor 密钥把票扫到自己地址 expect=rejected got=rejected | RPC Server (remote error) -> Rejected transaction 40627e3a252ef013e0049977f2b6b54d7f31e525a3e1be6532d5e9d16a0fb839: failed to verify the signature script: script ran, but verification failed
+18:06:27   ✅ ticket: 扫到任意非 sink 地址 expect=rejected got=rejected | RPC Server (remote error) -> Rejected transaction f60b25c14ede542bfa662e4577115314f05491c3e42d29093c0b80a40bc24e36: failed to verify the signature script: script ran, but verification failed
+18:06:27   ✅ ticket: 输出值 < 输入 - MAX_FEE expect=rejected got=rejected | RPC Server (remote error) -> Rejected transaction a6e49556a6b36a0cb336ced937bb70037465b30f01cc54042c54b7e944e73a51: failed to verify the signature script: script ran, but verification failed
+18:06:27   ✅ ticket: 多一个输出 expect=rejected got=rejected | RPC Server (remote error) -> Rejected transaction 68d79fa6261fb1572d4b79e2f9bfa0224ec50ecd3b2642b06368d16ab4f73b45: failed to verify the signature script: script ran, but verification failed
+18:06:27   ✅ ticket: 旧 authorize_spend(bettorSig) 形状 expect=rejected got=rejected | RPC Server (remote error) -> Rejected transaction e0ddcf27950a8c0559d195941fc00fb9081dd6520230e95cae38150d82629c35: failed to verify the signature script: script returned early
+18:06:27 ticket budget min 20
+18:06:27   ✅ ticket sweep→sink(age≥RD, seq=RD, 单输出, 值足) expect=accepted got=accepted | 53c945d2b86e41eee4d80a6339f583ad3a3612ab38054bb81e0f6c1ca2debf46
+18:06:27 RESULT: 全部符合预期

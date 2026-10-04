@@ -1,0 +1,20 @@
+// 生成 simnet 严格零 e2e 的 env + 汇出新 CLAIM hash(只 simnet)。sink 私钥只存 scratch(仅 simnet 用, 非机密但不入库)。
+import { readFileSync, writeFileSync, existsSync, copyFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+const require = createRequire('D:/kanet-tn12/scratch/_j2_wt_sz/kasia-relay/');
+const kaspa = require('kaspa-wasm');
+const OUT = 'D:/kanet-tn12/scratch/_j2_sz';
+if (!existsSync(`${OUT}/sink.key`)) writeFileSync(`${OUT}/sink.key`, Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('hex'));
+const sinkPriv = new kaspa.PrivateKey(readFileSync(`${OUT}/sink.key`, 'utf8').trim());
+const sinkPk = Buffer.from(kaspa.payToAddressScript(sinkPriv.toPublicKey().toAddress('mainnet')).script, 'hex').subarray(1, 33).toString('hex');
+const RD = 400;
+let env = readFileSync('D:/kanet-tn12/scratch/_j2_s3/env.s3.simnet', 'utf8');
+env = env.replace(/_j2_wt_s12/g, '_j2_wt_sz').replace('console.s3.db', 'console.sz.db').replace(/D:\/kanet-tn12\/scratch\/_j2_s3\/console/, 'D:/kanet-tn12/scratch/_j2_sz/console');
+process.env.KASPA_NETWORK = 'simnet'; process.env.ZK_SYSTEM_SINK_PK = sinkPk; process.env.ZK_CLAIM_RETIRE_DAA = String(RD); process.env.DB_PATH = `${OUT}/_artifacts_probe.db`;
+const A = await import('file:///D:/kanet-tn12/scratch/_j2_wt_sz/kasia-console/src/lib/pool-bshard-artifacts.mjs');
+const tokH = (env.match(/^ZK_TOKEN_TMPL_HASH=(.*)$/m) || [])[1];
+const claimNew = A.computeKanetTokenClaimArtifact({ marketCovIdHex: '11'.repeat(32), winnerPkHex: '22'.repeat(32), amount: 5, tokenTmplHashHex: tokH }).templateHashHex;
+env = env.replace(/^ZK_CLAIM_TMPL_HASH=.*$/m, `ZK_CLAIM_TMPL_HASH=${claimNew}`);
+env += `\n# --- 账本1850 严格零(simnet e2e)\nZK_SYSTEM_SINK_PK=${sinkPk}\nZK_CLAIM_RETIRE_DAA=${RD}\n`;
+writeFileSync(`${OUT}/env.sz.simnet`, env);
+console.log(JSON.stringify({ sinkPk, RD, tokenTmplHash: tokH, claimTmplHashNew: claimNew, claimTmplHashOld: '395949e1b6079c79bc5c36565188fd67afca7b75fd37adf264bd44bdbefd21e1' }, null, 1));

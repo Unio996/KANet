@@ -112,7 +112,7 @@ const leafRedeem = computeShardLeafRedeemScript({ marketId: MARKET_ID, minBet: M
 const registerAppendAbi = compileSilV100(localPath('./ShardLeaf_direct.sil'), sldCtor, 'ShardLeaf_direct')._raw.contracts.ShardLeaf_direct.entries.register_append;
 const merged = computeKttGenesisArtifact({ amount: newState.pool_value, ownerCovIdHex: leafCovId });
 const bettorPk = Buffer.alloc(32, 0x66).toString('hex');
-const ticketC = compileSilV100(localPath('./sil-v1/PoolSideTicket.sil'), [{ kind: 'bytes', value: [...Buffer.from(bettorPk, 'hex')] }, { kind: 'int', value: 0 }, { kind: 'int', value: STAKE }, { kind: 'bytes', value: [...Buffer.from(MARKET_ID, 'hex')] }], 'PoolSideTicket');
+const ticketC = compileSilV100(localPath('./legacy-proto/PoolSideTicket.sil'), [{ kind: 'bytes', value: [...Buffer.from(bettorPk, 'hex')] }, { kind: 'int', value: 0 }, { kind: 'int', value: STAKE }, { kind: 'bytes', value: [...Buffer.from(MARKET_ID, 'hex')] }], 'PoolSideTicket');
 const ticketTpl = extractTemplateArtifactV100(ticketC);
 const buildBet1 = (feeValue) => buildRegisterAppendTxJson({
   kaspa, network: 'mainnet', leafRedeemScript: leafRedeem.script, leafStateLayout: leafRedeem.stateLayout, leafOutpoint, leafCovId,

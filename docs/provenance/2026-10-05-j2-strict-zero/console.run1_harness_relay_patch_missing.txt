@@ -1,0 +1,438 @@
+[db] path=D:\kanet-tn12\scratch\_j2_sz\console.sz.db source=DB_PATH
+[phase2-shadow] PHASE2_SHADOW_EVERY=0 (raw=<unset>; 0=关; 影子窗内 ≥100; 对 P2-1/P2-3 只在不一致时打, P2-2/P2-4 每次比对打 equal/mismatch)
+[console] CONSOLE_ENCRYPTION_KEY fingerprint: 9f72ea0c
+[migrate] v9: interaction_records table created.
+[migrate] v10: account_relations table created, migrated 0 conversations.
+[migrate] v46: account_relations dropped.
+[migrate] v47: interaction_records dropped.
+[migrate] v68: retail_dex_orders table created.
+[migrate] v70: no orphan relation_states to backfill
+[migrate] v77: idx_offers_open_expires partial index created (expire watcher acceleration).
+[migrate] v79: broker_conversations table created (per-peer broker state, J1 #31 ship).
+[migrate] v80: broker_conversations.completed_at column added (Phase 2 profile sediment future-proof).
+[migrate] v81: broker_conversations dropped (Owner 抓错药戳穿 — 复用 retail_dex_orders + retail_dex_user_memory + relation_states 现有 pipeline).
+[migrate] v162: oracle_stake_enrollments + oracle_pool_chain_view tables created (DoD §2.2 chain-derived pool).
+[migrate] v167: broker_recommendations table (DoD 问1 prevet-gate + 排序).
+[migrate] v171: market_shards table created (rolling-shard registry for unlimited betting — bshard B + self-claim C).
+[migrate] v172: payout_shards table (per-market (A) PayoutShard covenant sink — cov_id provenance + settle redeem).
+[migrate] v173: broker_onboarding table (玩家→轻路 broker 自助 onboarding, 地址制, bot_token 加密, 审批复用 identities.trust).
+[migrate] v174: tg_custodial_wallets table (电报 DM 托管钱包, 助记词 aes-256-gcm 加密 fail-loud, display-once 无明文回取, Owner 钦定).
+[migrate] v175: escrow_states table (Silverscript P2SH escrow — buyer/seller/arbiter 三方合约, lock/execute via relay IPC).
+[migrate] v176: oracle_shadow_ledger table (影子判定台账 — 我们 oracle vs 权威 命中率历史, 纯记录不碰结算, Owner 自我进化 #26).
+[migrate] v181: zk_prove_jobs 补 fee_leaves_json/pool_total_sompi(§4硬门⑤禁bps-fallback, guest需要完整fee_leaves).
+[migrate] v192: pilot_rate_limit_log 建表 (M0c-1 Path B pilot 围栏 §2.4, gateway 限流 keyed by grant_id).
+[migrate] v195: u1_domain_assignment 建表完成 (u1 隔离施工的域→relay 映射记录; 纯记录表, 不参与签名判定).
+[migrate] v196: u1_identity_registration 建表完成 (A2 同源判定登记表; N3 锁1/N4 mnemonic 型已落成 UNIQUE+CHECK 结构约束; 今日无写入方).
+[migrate] v197: u1_identity_challenge 建表完成 (A2 一次性挑战; challenge PK 走 CAS, used_at NULL=未消费, expires_at NOT NULL; 部分索引仅巡检不参与正确性; 今日无写入方).
+[migrate] v198: u1_relay_identity 建表完成 (§10 跨节点 pubkey 身份, register-only; PK=relay_pubkey_xonly 小写64hex CHECK; network 闭枚举 CHECK; 无 local_relay_id 列/无 relay_id 回退索引(活算 fromAddress); epoch UNIQUE; 写入方 = u1-registration.mjs 事务内).
+[migrate] v199: 🔴 idx_kaspa_tx_log_to_addr_observed 缺失 — 不在 boot 自建(kaspa_tx_log ~16M 行, 分钟级持写锁); 请在停机窗跑 kasia-console/scratch/_j2_p1_kaspa_tx_log_index_window.mjs, 或 KANET_MIGRATE_BUILD_HEAVY_INDEX=1 明确要求在此建(🔴 永不进 kanet.env; 只允许 supervisor/hb_guard 已停时手动单跑 migrate, 否则 boot-age 判活会把建到一半的进程杀掉 ⇒ 回滚 ⇒ 重启风暴)。正路始终是停机窗脚本。broker-intake 的 60 s SELECT 在此之前仍是 4–30 s 同步阻塞。
+[migrate] v200: idx_pool_sides_bettor_created 在, 记账通过
+[migrate] v200: idx_pool_markets_zk_ready 在, 记账通过
+[migrate] v201: idx_events_type_created 在, 记账通过
+[migrate] v202: submit_intents 表(+2 索引) + tx_records 加 target_address/landed_at/landed_depth/landed_checked_at + idx_tx_records_direction_landed ((c) NO-TX F2/F4, 幂等 IF NOT EXISTS/pragma 守卫).
+[migrate] v203: exchange_offers 加 escrow_landed_at/escrow_landed_depth/taker_escrow_landed_at/taker_escrow_landed_depth ((c) 第 5 笔 escrow 硬消费门, pragma 守卫幂等).
+[migrate] v205: payout_shards.token_tmpl_hash 在, 记账通过
+[migrate] v205: payout_shards.claim_tmpl_hash 在, 记账通过
+[migrate] v205: payout_shards.market_suffix_hash 在, 记账通过
+[migrate] v205: market_shards.shard_token_tmpl_hash 在, 记账通过
+[migrate] v206: proto_token_defs/proto_markets/proto_bets/proto_bet_intents/proto_claims 建表(原型 v0 隔离命名空间, pragma 守卫幂等).
+[migrate] v207: proto_markets already has genesis intent columns/CHECK states (idempotent skip).
+[migrate] v208: proto_bets already collapsed to single-step schema (idempotent skip).
+[migrate] v208: proto_bet_intents already collapsed to single-step schema (idempotent skip).
+[migrate] v209: proto_markets.shardleaf_own_redeem_len 在, 记账通过
+[migrate] v210: proto_settlement_intents 建表(六个结算builder的意图状态机, pragma守卫幂等).
+[migrate] v211: watch_accounts 建表(只读/冷存账户注册表, 无密钥列, CHECK custody=cold_no_key; D-028).
+[migrate] v212: proto_market_verdicts 追加表 + proto_markets 审计列/判定题列 + winning_side 写一次触发器(R1) + 题面不可改触发器(R4); 纯 schema, 不含 adapter(oracle 整合批 A).
+[migrate] v213: proto_markets.settlement_frozen_at/frozen_reason + proto_market_verdicts.pmt_at + 冻结/pmt_at 触发器 + verdict_ref 加 pmt_at 非空(oracle 整合批 D).
+[migrate] v214: proto_settlement_intents step CHECK 已含 refund_flip(或表不存在)(idempotent skip).
+[migrate] v215: market_shards.leaf_cov_id 在, 记账通过
+[migrate] v216: market_shards.current_token_outpoint 在, 记账通过
+[migrate] v217: kaspa_tx_log_coverage + broker_refund_intents + idx_spc_daa_ts 建表/建索引完成 (纯新增; 写入方待 wiring 阶段 2/3; 编号前移自原 coord/broker-money-path 分支的 v199, 见上方头注).
+[migrate] v218: ktt_holdings_ledger 建表完成(D-035 §④ 查阅面板本地记录表, 纯新增).
+[migrate] v219: ktt_panel_rate_limit_log 建表完成(D-035 NWT MUST 闭合 §⑥, mint/transfer 进程外限流, 纯新增).
+[migrate] v220: zk_prove_jobs.attempts/next_attempt_at 列已就绪(出证失败自动重试+退避, 纯新增).
+[migrate] DB migrations complete.
+[silverc-pin] PASS sha256=4378ba65... golden=RootClaim ok
+🔴 [proto] PROTO_RELAY_ID health check failed, proto routes NOT registered (fail-closed): PROTO_RELAY_ID not configured — proto v0 money path refuses to start (fail-closed: unconfigured means no relay is authorized, not "any relay is allowed")
+[kasia-console] running at http://localhost:3298
+[zk-prove-server] ZK_PROVE_SERVER_TOKEN not set — server NOT started (fail-closed, not fail-open).
+[zk-prove-worker] cron started (30s tick) — ZK_PROVE_WORKER_ENABLED=1 | memGate=on min=6144MB maxAttempts=3 hostMode=binary
+2026-10-04T18:18:50.020Z [adapter-launcher] 0/0 adapters started
+[bettor-bisect] MINDS disabled
+[relay-manager] Started e2e-maker relay (PID 37580)
+[relay-manager] Started e2e-settler relay (PID 16944)
+[relay-manager] Started e2e-fee relay (PID 30984)
+[relay-manager] Started e2e-bettorA relay (PID 33632)
+[relay-manager] Started e2e-bettorB relay (PID 29496)
+[relay-manager] Started e2e-oracle-1 relay (PID 38088)
+[relay-manager] Started e2e-oracle-2 relay (PID 9760)
+[relay-manager] Started e2e-oracle-3 relay (PID 29412)
+[relay-manager] Started e2e-oracle-4 relay (PID 29648)
+[relay-manager] Started e2e-oracle-5 relay (PID 13448)
+[relay-manager] Started e2e-oracle-6 relay (PID 28200)
+[relay-manager] 11/11 relays started
+[tg-bot-manager] TELEGRAM_BOT_TOKEN not set (config or env) — bot not auto-started (configure + start from Settings)
+[broker-bot-mgr] boot reconcile: {"ok":true,"approved":0,"started":0,"already_up":0,"skipped_bad_token":0,"running":0}
+[scavenger] startup catchup: last scan 11.8h ago > 1h threshold, fire immediate
+[scavenger] cron registered: every 6h
+[bettor-resolver] cron registered: every 1h (boot tick 15s before tracker/reactor)
+[bettor-tracker] cron registered: every 1h
+[bettor-tracker] urgent cron registered: every 15min (positions <24h to expiry)
+[bettor-reactor] cron registered: every 1h (Phase 3e-6 Kelly delta 模型)
+[auto-valve] started (1h cron, 4 valves: A redeem / B sim resolved / C -30%pnl 12h / D 90d zombie)
+[position-protector] started (1 min cron, Phase 1 skeleton — detect new positions + INSERT pending_owner_ack rules, NO firing)
+[position-protector] startup catchup: last audit 29852298.8min ago > 1h threshold, fire immediate
+[position-watcher] started (30 min cron, alert-only — no auto-fire)
+[position-watcher] startup catchup: last audit 29852298.8min ago > 30min, fire immediate
+[fossa-stable-scanner] started (1h cron, due-diligence enforced, no auto-fire)
+[fossa-stable-scanner] startup catchup: last scan 707min ago > 60min, fire in 30s
+[prediction-settler] started — 5min cron, settle expired prediction_outcome_share offers (Phase 2c detect+mark+log, payout 真链 Phase 2b)
+[prediction-voter] started — 5min cron, scan is_oracle=1 relays + vote offers (Phase 3a r211 v3)
+[bshard-close-voter] cron NOT started — BSHARD_CLOSE_VOTER_ENABLED!=1 (Track B 待 live e2e 实证 + D4 relay-gate 未闭, 默认不自动签; 设=1 供受控 live e2e)
+[bshard-close-voter-v2] cron started (30s tick) — BSHARD_CLOSE_VOTER_V2_ENABLED=1 (受控 live e2e 模式)
+[bshard-close-submit-v2] cron started (30s tick) — BSHARD_CLOSE_SUBMIT_V2_ENABLED=1 (受控 live e2e 模式)
+[pool-settler] started — 5min cron, aggregate 3 oracle votes + consensus check, silent_timeout=30min (Sub 2d Phase 1)
+[pool-settler] WARN: ORACLE_SILENT_TIMEOUT_MIN=30 < 1440 (= mainnet 24h 钢线 per v0.5 spec section 4.3). Set ORACLE_SILENT_TIMEOUT_MIN=1440 for mainnet.
+[diag:eventloop-lag] heartbeat started (expected=1000ms, alert_threshold=1000ms, heap_sample_every=60s)
+[utxo-fetch-probe] installed (patches RpcClient.prototype.getUtxosByAddresses, all call sites covered)
+[claimAuto] disabled via BETTOR_REFUND_CLAIM_ENABLED=0 (J1 CPU-hog gate)
+[bettor-bisect] AutoBetter disabled
+[bettor-bisect] HouseAgent disabled
+[bettor-bisect] BotAutofund disabled
+[bettor-bisect] RelayHealth disabled
+[relay-hotwallet-monitor] RELAY_HOTWALLET_PER_RELAY_MAX_KAS / RELAY_HOTWALLET_TOTAL_MAX_KAS 均未设置 — 不启用该项检查（同 startRelay() 准入门"未设env=不启用"的既有原则），tick 不会启动。
+[oracle-voter-health] started — tick=120000ms grace=120000ms stale=10min
+[oracle-pool-scanner-cron] started — 5min cron, scan + derive chain_view (Bettor r449 活化质押池).
+[oracle-renewal] started — 1h cron, auto-renew expiring oracle enrollments (threshold=3M DAA ≈3.5d, new_lock=10M DAA ≈11.5d). Transfer → UTXO-landed gate → DB update (NO-TX-NO-STATE).
+[settle-daemon] 18:18:50 disabled (SETTLE_DAEMON_ENABLED!=1)·not starting
+[settle-daemon] 18:18:50 zkCloseTickV2 starting·tick=30000ms
+[settle-daemon] 18:18:50 claimAutonomousTick starting·tick=30000ms
+[settle-daemon] 18:18:50 zkHandoffAutonomousTick starting·tick=30000ms
+[settle-daemon] 18:18:50 zkJudgeProposeAutonomousTick starting·tick=30000ms
+[broadcaster-utxo] disabled (BROADCASTER_UTXO_MAINTAIN!=1, raw=undefined)
+[mining-consolidate] MINING_CONSOLIDATE_ENABLED=false — cron not started (kill-switch, see TREASURY-UTXO-UNREADABLE card)
+[faucet-health] FAUCET_RELAY_ID not set — cron not started
+[settle-failed-alert] started — tick=60000ms (只读监控, 不改daemon逻辑, 新增settle_failed立刻写events表+发dev-coord-testnet频道)
+[disk-space-alert] started — tick=300000ms drives=C,D lowThresholdGB=15 (只读监控, 不做任何清理动作)
+[rpc-health-degradation-alert] started — tick=60000ms, window=3min, threshold=5, selfRestart=OFF (写events+播dev-coord-testnet频道)
+[zk-prove-job-stuck-alert] started — tick=300000ms, threshold=15min(占位待校准) (只读监控, 去重落 events 表非内存, 每tick含首个都全量检查不建baseline)
+[variant-expander] started (30 min cron, Phase 1 skeleton — 3-tier variant expansion stub, real algorithm Phase 2)
+[variant-expander] startup catchup: last variant 29852298.8min ago > 1h threshold, fire immediate
+[worldcup-schedule] disabled (WORLDCUP_SCHEDULE_ENABLED!=1)
+[utxo-splitter] disabled (UTXO_AUTOSPLIT_ON_START!=1, raw=undefined)
+[scanner:watchdog] started — liveness via scout_checkpoint freshness (check 45s, stall 120s)
+[connection-manager] Refresh worker started (60s interval)
+[bettor-bisect] MarketSeeder create-loop disabled
+[seeder] seeder deposit watcher started (30s interval)
+[seeder] seeder refund worker started (30s interval)
+[bettor-bisect] PoolMarketSeeder disabled
+[broker] disabled (BROKER_ENABLED!=1)
+[broker-reconcile] cron started, interval=15min, startup_grace=1h
+[state-reconciler] start, tick=300000ms
+[broker-fee-emit] cron start, tick=300000ms
+[tx-landed-reconciler] started (tick 5 min, detect+alert only, landed columns backfill)
+[proto-driver] disabled
+[proto-settlement-driver] disabled
+[proto-oracle-adapter] disabled
+[spc-daa-index-monitor] cron start, tick=300000ms
+[bshard-coherence-observability-monitor] cron start, tick=3600000ms, window=24h
+[preprune-capture-worker] cron start, tick=60000ms (K-17)
+[preprune-capture-monitor] cron start, tick=300000ms
+[external-gateway] 未配置 KANET_EXTERNAL_GATEWAY_HOST / _PORT ⇒ 不启动(fail-closed)。 🔴 这不是错误: 没有配置就没有对外口。
+[relay:e2e-maker] 10/5/2026, 01:18:50 Kasia Relay started (RPC mode — local node subscription).
+[relay:e2e-settler] 10/5/2026, 01:18:50 Kasia Relay started (RPC mode — local node subscription).
+[relay:e2e-bettorA] 10/5/2026, 01:18:50 Kasia Relay started (RPC mode — local node subscription).
+[relay:e2e-maker] 2026-10-04T18:18:50.166Z [rpc] connecting to ws://127.0.0.1:29717
+[relay:e2e-fee] 10/5/2026, 01:18:50 Kasia Relay started (RPC mode — local node subscription).
+[relay:e2e-oracle-1] 10/5/2026, 01:18:50 Kasia Relay started (RPC mode — local node subscription).
+[relay:e2e-bettorB] 10/5/2026, 01:18:50 Kasia Relay started (RPC mode — local node subscription).
+[relay:e2e-settler] 2026-10-04T18:18:50.171Z [rpc] connecting to ws://127.0.0.1:29717
+[relay:e2e-oracle-2] 10/5/2026, 01:18:50 Kasia Relay started (RPC mode — local node subscription).
+[relay:e2e-oracle-3] 10/5/2026, 01:18:50 Kasia Relay started (RPC mode — local node subscription).
+[relay:e2e-bettorA] 2026-10-04T18:18:50.175Z [rpc] connecting to ws://127.0.0.1:29717
+[relay:e2e-oracle-4] 10/5/2026, 01:18:50 Kasia Relay started (RPC mode — local node subscription).
+[relay:e2e-oracle-6] 10/5/2026, 01:18:50 Kasia Relay started (RPC mode — local node subscription).
+[relay:e2e-fee] 2026-10-04T18:18:50.184Z [rpc] connecting to ws://127.0.0.1:29717
+[relay:e2e-bettorB] 2026-10-04T18:18:50.186Z [rpc] connecting to ws://127.0.0.1:29717
+[relay:e2e-oracle-5] 10/5/2026, 01:18:50 Kasia Relay started (RPC mode — local node subscription).
+[relay:e2e-oracle-1] 2026-10-04T18:18:50.187Z [rpc] connecting to ws://127.0.0.1:29717
+[relay:e2e-oracle-3] 2026-10-04T18:18:50.186Z [rpc] connecting to ws://127.0.0.1:29717
+[relay:e2e-oracle-2] 2026-10-04T18:18:50.191Z [rpc] connecting to ws://127.0.0.1:29717
+[relay:e2e-maker] 2026-10-04T18:18:50.191Z [rpc] node is synced
+[relay:e2e-oracle-4] 2026-10-04T18:18:50.192Z [rpc] connecting to ws://127.0.0.1:29717
+[relay:e2e-maker] 2026-10-04T18:18:50.193Z [rpc] subscribed to new blocks
+[relay:e2e-maker] 2026-10-04T18:18:50.193Z [rpc] watching address: kaspasim:qqgc0tr7km7...94aplec3
+[relay:e2e-maker] 2026-10-04T18:18:50.193Z [rpc] protocol support: handshake, comm, payment
+[relay:e2e-oracle-6] 2026-10-04T18:18:50.195Z [rpc] connecting to ws://127.0.0.1:29717
+[relay:e2e-settler] 2026-10-04T18:18:50.198Z [rpc] node is synced
+[relay:e2e-settler] 2026-10-04T18:18:50.199Z [rpc] subscribed to new blocks
+[relay:e2e-settler] 2026-10-04T18:18:50.199Z [rpc] watching address: kaspasim:qzeq427yqha...v9kveur9
+[relay:e2e-settler] 2026-10-04T18:18:50.199Z [rpc] protocol support: handshake, comm, payment
+[relay:e2e-bettorA] 2026-10-04T18:18:50.200Z [rpc] node is synced
+[relay:e2e-bettorA] 2026-10-04T18:18:50.201Z [rpc] subscribed to new blocks
+[relay:e2e-bettorA] 2026-10-04T18:18:50.201Z [rpc] watching address: kaspasim:qqrqkqnysqr...shgw8dkk
+[relay:e2e-bettorA] 2026-10-04T18:18:50.201Z [rpc] protocol support: handshake, comm, payment
+[relay:e2e-oracle-5] 2026-10-04T18:18:50.203Z [rpc] connecting to ws://127.0.0.1:29717
+[relay:e2e-oracle-3] 2026-10-04T18:18:50.207Z [rpc] node is synced
+[relay:e2e-oracle-3] 2026-10-04T18:18:50.208Z [rpc] subscribed to new blocks
+[relay:e2e-oracle-3] 2026-10-04T18:18:50.208Z [rpc] watching address: kaspasim:qruaq7vwzmq...hz0elull
+[relay:e2e-oracle-3] 2026-10-04T18:18:50.208Z [rpc] protocol support: handshake, comm, payment
+[relay:e2e-oracle-1] 2026-10-04T18:18:50.207Z [rpc] node is synced
+[relay:e2e-oracle-1] 2026-10-04T18:18:50.208Z [rpc] subscribed to new blocks
+[relay:e2e-oracle-1] 2026-10-04T18:18:50.208Z [rpc] watching address: kaspasim:qr2dxzy7q4z...6mv0j0ym
+[relay:e2e-oracle-1] 2026-10-04T18:18:50.208Z [rpc] protocol support: handshake, comm, payment
+[relay:e2e-bettorB] 2026-10-04T18:18:50.209Z [rpc] node is synced
+[relay:e2e-bettorB] 2026-10-04T18:18:50.210Z [rpc] subscribed to new blocks
+[relay:e2e-bettorB] 2026-10-04T18:18:50.210Z [rpc] watching address: kaspasim:qzu06kpmvcx...hxg70n2v
+[relay:e2e-bettorB] 2026-10-04T18:18:50.210Z [rpc] protocol support: handshake, comm, payment
+[relay:e2e-fee] 2026-10-04T18:18:50.209Z [rpc] node is synced
+[relay:e2e-fee] 2026-10-04T18:18:50.210Z [rpc] subscribed to new blocks
+[relay:e2e-fee] 2026-10-04T18:18:50.210Z [rpc] watching address: kaspasim:qpklxz9e0rt...95fuch70
+[relay:e2e-fee] 2026-10-04T18:18:50.210Z [rpc] protocol support: handshake, comm, payment
+[relay:e2e-oracle-2] 2026-10-04T18:18:50.214Z [rpc] node is synced
+[relay:e2e-oracle-2] 2026-10-04T18:18:50.215Z [rpc] subscribed to new blocks
+[relay:e2e-oracle-2] 2026-10-04T18:18:50.215Z [rpc] watching address: kaspasim:qzhgz45pgk5...5jc278te
+[relay:e2e-oracle-2] 2026-10-04T18:18:50.215Z [rpc] protocol support: handshake, comm, payment
+[relay:e2e-maker] 2026-10-04T18:18:50.216Z [rpc] indexer: watching 11 addresses
+[relay:e2e-maker] 2026-10-04T18:18:50.217Z [rpc] listening...
+[relay:e2e-maker] 2026-10-04T18:18:50.217Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-4] 2026-10-04T18:18:50.217Z [rpc] node is synced
+[relay:e2e-oracle-4] 2026-10-04T18:18:50.219Z [rpc] subscribed to new blocks
+[relay:e2e-oracle-4] 2026-10-04T18:18:50.219Z [rpc] watching address: kaspasim:qzafr5qez58...276wpval
+[relay:e2e-oracle-4] 2026-10-04T18:18:50.219Z [rpc] protocol support: handshake, comm, payment
+[relay:e2e-oracle-6] 2026-10-04T18:18:50.219Z [rpc] node is synced
+[relay:e2e-settler] 2026-10-04T18:18:50.220Z [rpc] indexer: watching 11 addresses
+[relay:e2e-bettorA] 2026-10-04T18:18:50.221Z [rpc] indexer: watching 11 addresses
+[relay:e2e-settler] 2026-10-04T18:18:50.221Z [rpc] listening...
+[relay:e2e-oracle-6] 2026-10-04T18:18:50.221Z [rpc] subscribed to new blocks
+[relay:e2e-oracle-6] 2026-10-04T18:18:50.221Z [rpc] watching address: kaspasim:qpjam6rchtt...mklnycs8
+[relay:e2e-oracle-6] 2026-10-04T18:18:50.221Z [rpc] protocol support: handshake, comm, payment
+[relay:e2e-settler] 2026-10-04T18:18:50.221Z [rpc] catching up from Console DB...
+[relay:e2e-maker] 2026-10-04T18:18:50.221Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-bettorA] 2026-10-04T18:18:50.221Z [rpc] listening...
+[relay:e2e-maker] 2026-10-04T18:18:50.221Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-bettorA] 2026-10-04T18:18:50.222Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-5] 2026-10-04T18:18:50.224Z [rpc] node is synced
+[relay:e2e-oracle-5] 2026-10-04T18:18:50.225Z [rpc] subscribed to new blocks
+[relay:e2e-oracle-5] 2026-10-04T18:18:50.225Z [rpc] watching address: kaspasim:qpgu738w60n...l3qq2xaa
+[relay:e2e-oracle-5] 2026-10-04T18:18:50.225Z [rpc] protocol support: handshake, comm, payment
+[relay:e2e-bettorA] 2026-10-04T18:18:50.225Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-bettorA] 2026-10-04T18:18:50.225Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-settler] 2026-10-04T18:18:50.225Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-settler] 2026-10-04T18:18:50.225Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-1] 2026-10-04T18:18:50.229Z [rpc] indexer: watching 11 addresses
+[relay:e2e-oracle-3] 2026-10-04T18:18:50.229Z [rpc] indexer: watching 11 addresses
+[relay:e2e-oracle-1] 2026-10-04T18:18:50.229Z [rpc] listening...
+[relay:e2e-oracle-1] 2026-10-04T18:18:50.230Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-3] 2026-10-04T18:18:50.229Z [rpc] listening...
+[relay:e2e-oracle-3] 2026-10-04T18:18:50.230Z [rpc] catching up from Console DB...
+[relay:e2e-fee] 2026-10-04T18:18:50.231Z [rpc] indexer: watching 11 addresses
+[relay:e2e-fee] 2026-10-04T18:18:50.232Z [rpc] listening...
+[relay:e2e-bettorB] 2026-10-04T18:18:50.233Z [rpc] indexer: watching 11 addresses
+[relay:e2e-fee] 2026-10-04T18:18:50.233Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-1] 2026-10-04T18:18:50.233Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-1] 2026-10-04T18:18:50.233Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-3] 2026-10-04T18:18:50.233Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-3] 2026-10-04T18:18:50.233Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-bettorB] 2026-10-04T18:18:50.234Z [rpc] listening...
+[relay:e2e-oracle-2] 2026-10-04T18:18:50.234Z [rpc] indexer: watching 11 addresses
+[relay:e2e-bettorB] 2026-10-04T18:18:50.234Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-2] 2026-10-04T18:18:50.235Z [rpc] listening...
+[relay:e2e-oracle-2] 2026-10-04T18:18:50.235Z [rpc] catching up from Console DB...
+[relay:e2e-fee] 2026-10-04T18:18:50.236Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-fee] 2026-10-04T18:18:50.236Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-bettorB] 2026-10-04T18:18:50.237Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-bettorB] 2026-10-04T18:18:50.237Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-2] 2026-10-04T18:18:50.238Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-2] 2026-10-04T18:18:50.238Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-4] 2026-10-04T18:18:50.242Z [rpc] indexer: watching 11 addresses
+[relay:e2e-oracle-4] 2026-10-04T18:18:50.243Z [rpc] listening...
+[relay:e2e-oracle-6] 2026-10-04T18:18:50.243Z [rpc] indexer: watching 11 addresses
+[relay:e2e-oracle-4] 2026-10-04T18:18:50.243Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-6] 2026-10-04T18:18:50.243Z [rpc] listening...
+[relay:e2e-oracle-6] 2026-10-04T18:18:50.244Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-5] 2026-10-04T18:18:50.245Z [rpc] indexer: watching 11 addresses
+[relay:e2e-oracle-5] 2026-10-04T18:18:50.246Z [rpc] listening...
+[relay:e2e-oracle-5] 2026-10-04T18:18:50.246Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-4] 2026-10-04T18:18:50.246Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-4] 2026-10-04T18:18:50.246Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-6] 2026-10-04T18:18:50.247Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-6] 2026-10-04T18:18:50.247Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-5] 2026-10-04T18:18:50.249Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-5] 2026-10-04T18:18:50.249Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-2] 2026-10-04T18:18:50.353Z [rpc] block #1 (attempted: 0)
+[relay:e2e-oracle-4] 2026-10-04T18:18:50.353Z [rpc] block #1 (attempted: 0)
+[relay:e2e-oracle-3] 2026-10-04T18:18:50.353Z [rpc] block #1 (attempted: 0)
+[relay:e2e-oracle-5] 2026-10-04T18:18:50.354Z [rpc] block #1 (attempted: 0)
+[relay:e2e-bettorB] 2026-10-04T18:18:50.354Z [rpc] block #1 (attempted: 0)
+[relay:e2e-bettorA] 2026-10-04T18:18:50.354Z [rpc] block #1 (attempted: 0)
+[relay:e2e-oracle-6] 2026-10-04T18:18:50.354Z [rpc] block #1 (attempted: 0)
+[relay:e2e-maker] 2026-10-04T18:18:50.354Z [rpc] block #1 (attempted: 0)
+[relay:e2e-fee] 2026-10-04T18:18:50.354Z [rpc] block #1 (attempted: 0)
+[relay:e2e-oracle-1] 2026-10-04T18:18:50.354Z [rpc] block #1 (attempted: 0)
+[relay:e2e-settler] 2026-10-04T18:18:50.354Z [rpc] block #1 (attempted: 0)
+[relay:e2e-fee] 2026-10-04T18:18:50.769Z [rpc] block #2 (attempted: 0)
+[relay:e2e-oracle-6] 2026-10-04T18:18:50.768Z [rpc] block #2 (attempted: 0)
+[relay:e2e-oracle-5] 2026-10-04T18:18:50.769Z [rpc] block #2 (attempted: 0)
+[relay:e2e-settler] 2026-10-04T18:18:50.769Z [rpc] block #2 (attempted: 0)
+[relay:e2e-bettorA] 2026-10-04T18:18:50.769Z [rpc] block #2 (attempted: 0)
+[relay:e2e-oracle-4] 2026-10-04T18:18:50.769Z [rpc] block #2 (attempted: 0)
+[relay:e2e-oracle-3] 2026-10-04T18:18:50.769Z [rpc] block #2 (attempted: 0)
+[relay:e2e-oracle-1] 2026-10-04T18:18:50.769Z [rpc] block #2 (attempted: 0)
+[relay:e2e-oracle-2] 2026-10-04T18:18:50.769Z [rpc] block #2 (attempted: 0)
+[relay:e2e-bettorB] 2026-10-04T18:18:50.769Z [rpc] block #2 (attempted: 0)
+[relay:e2e-maker] 2026-10-04T18:18:50.769Z [rpc] block #2 (attempted: 0)
+[relay:e2e-oracle-2] 2026-10-04T18:18:51.185Z [rpc] block #3 (attempted: 0)
+[relay:e2e-oracle-5] 2026-10-04T18:18:51.185Z [rpc] block #3 (attempted: 0)
+[relay:e2e-oracle-3] 2026-10-04T18:18:51.185Z [rpc] block #3 (attempted: 0)
+[relay:e2e-oracle-1] 2026-10-04T18:18:51.185Z [rpc] block #3 (attempted: 0)
+[relay:e2e-maker] 2026-10-04T18:18:51.185Z [rpc] block #3 (attempted: 0)
+[relay:e2e-bettorB] 2026-10-04T18:18:51.186Z [rpc] block #3 (attempted: 0)
+[relay:e2e-fee] 2026-10-04T18:18:51.185Z [rpc] block #3 (attempted: 0)
+[relay:e2e-oracle-6] 2026-10-04T18:18:51.185Z [rpc] block #3 (attempted: 0)
+[relay:e2e-settler] 2026-10-04T18:18:51.185Z [rpc] block #3 (attempted: 0)
+[relay:e2e-bettorA] 2026-10-04T18:18:51.185Z [rpc] block #3 (attempted: 0)
+[relay:e2e-oracle-4] 2026-10-04T18:18:51.185Z [rpc] block #3 (attempted: 0)
+[broker-fee-emit] market=ext-pool-v07 (zk-native) 全部 claim tx 已 index 但无 broker output (addr=kaspasim:qqgc0tr) → 标记跳过
+[broker-fee-emit] tick: backfillSuppressed=0 scanned=1 emitted=0 pendingIndex=0 noBrokerOutput=1 packageFallback=0
+[rpc-shared] build ws://127.0.0.1:29717|simnet (pool size 1) — one instance per key, never per-call
+[diag:step] proc.silverc.compile.bshard-artifacts ms=48 cmd=silverc ok=1 at=2026-10-04T18:18:55.137Z
+[relay:e2e-settler] 10/5/2026, 01:18:55 command bshard_close_attest_v2 failed: UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0
+[bshard-close-submit-v2] market=24-btduw submit fail: no txId in relay response: {"error":"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0","phase":"execution"}
+[bshard-close-submit-v2] tick: 1 pending | submitted=0 notReady=0 failed=1 errored=0 resumed=0
+[bshard-close-voter-v2] tick: 1 pending | signed=0 refused=0 skipped=6 errored=0
+[diag:step] pair.scanAndIngestPairs ms=0 since_rowid=0 max_rowid=0 hits=0 at=2026-10-04T18:19:20.010Z
+[diag:step] zk.closeTickV2 ms=1 at=2026-10-04T18:19:20.077Z
+[diag:step] zk.claimAutonomousTick ms=0 at=2026-10-04T18:19:20.077Z
+[diag:step] zk.handoffAutonomousTick ms=1 at=2026-10-04T18:19:20.078Z
+[bshard-close-voter-v2] tick: 1 pending | signed=0 refused=0 skipped=6 errored=0
+[diag:step] zk.judgeProposeAutonomousTick ms=17 at=2026-10-04T18:19:20.095Z
+[relay:e2e-settler] 10/5/2026, 01:19:20 command bshard_close_attest_v2 failed: UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0
+[bshard-close-submit-v2] market=24-btduw submit fail: no txId in relay response: {"error":"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0","phase":"execution"}
+[bshard-close-submit-v2] tick: 1 pending | submitted=0 notReady=0 failed=1 errored=0 resumed=0
+[mainnet-no-kas-stake] 403 route=create-v07 network=simnet 主网押注与开盘不收 KAS（D-017 §2）
+[rpc-health] using local node: ws://127.0.0.1:29717
+[utxo-fetch-probe] #1 at=2026-10-04T18:19:33.396Z ms=2 addrCount=1 entries=1 roughBytesEst=0MB
+[utxo-fetch-probe] #2 at=2026-10-04T18:19:33.398Z ms=1 addrCount=1 entries=1 roughBytesEst=0MB
+[utxo-fetch-probe] #3 at=2026-10-04T18:19:33.399Z ms=0 addrCount=1 entries=1 roughBytesEst=0MB
+[utxo-fetch-probe] #4 at=2026-10-04T18:19:33.399Z ms=1 addrCount=1 entries=1 roughBytesEst=0MB
+[utxo-fetch-probe] #5 at=2026-10-04T18:19:33.400Z ms=0 addrCount=1 entries=1 roughBytesEst=0MB
+[utxo-fetch-probe] #6 at=2026-10-04T18:19:33.401Z ms=0 addrCount=1 entries=1 roughBytesEst=0MB
+[pool/create-v07] auto-derived pool_merkle_root=46fa6978ef43.. snapshotDaa=101646 pool_size=6 source=chain_view deadline_daa=108245 (= currentDaa 102246 + 5999 未来 DAA)
+[pool/auto-recommend] market=ext-pool-v07 broker=61f72c5b → skip: prevet warn (score 6/10) — 推单 reject, 0.01K bond 没收
+[prediction-voter] tick: 6 voter relays, 1V1 voted=0 skipped=0 errored=0 | pool voted=0 skipped=0 errored=0
+[prediction-voter] parallel: A.recorded=0 B.scored=0 disagree=0 | audit: checked=0 dev=0 frozen=0
+[mainnet-no-kas-stake] 403 route=register-v07 network=simnet 主网押注与开盘不收 KAS（D-017 §2）
+[diag:step] proc.silverc.compile.bshard-artifacts ms=192 cmd=silverc ok=1 at=2026-10-04T18:19:38.648Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=195 cmd=silverc ok=1 at=2026-10-04T18:19:38.850Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=356 cmd=silverc ok=1 at=2026-10-04T18:19:39.214Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=357 cmd=silverc ok=1 at=2026-10-04T18:19:39.577Z
+[diag:eventloop-lag] gap=2052ms expected=1000ms lag=1052ms at=2026-10-04T18:19:39.581Z heapUsed=54MB heapTotal=59MB rss=165MB external=12MB arrayBuffers=0MB wasmBytes=3.9MB utxoFetchCalls=6
+[relay:e2e-maker] 10/5/2026, 01:19:39 command transfer failed: Unknown network "simnet". Supported: mainnet, testnet-10, testnet-11, testnet-12
+[pool/register-v07] ext-pool-v07-1791137973412-ej48v fail: transfer failed: Unknown network "simnet". Supported: mainnet, testnet-10, testnet-11, testnet-12
+[diag:step] http.slow route=/api/pool/market/:id/bettor/register-v07 method=POST bytes=143 status=500 ms=1162 ip=127.0.0.1 ua=node q=- at=2026-10-04T18:19:39.583Z
+[diag:step] pair.scanAndIngestPairs ms=0 since_rowid=0 max_rowid=0 hits=0 at=2026-10-04T18:19:50.016Z
+[auto-valve] tick: 0 open positions to evaluate
+[auto-valve] tick done in 0ms: A=0 B=0 C=0 D=0
+[diag:step] pool.selectMarkets.all ms=1 rows=0 at=2026-10-04T18:19:50.065Z
+[diag:tick-duration] poolSettlerTick ms=1
+[diag:step] pool.tick.phases ms=1 pre=0 dw=0 select=1 post=0 rows=0 t0=2026-10-04T18:19:50.064Z at=2026-10-04T18:19:50.065Z
+[utxo-fetch-probe] #7 at=2026-10-04T18:19:50.066Z ms=0 addrCount=1 entries=1 roughBytesEst=0MB
+[utxo-fetch-probe] #8 at=2026-10-04T18:19:50.066Z ms=0 addrCount=1 entries=1 roughBytesEst=0MB
+[utxo-fetch-probe] #9 at=2026-10-04T18:19:50.067Z ms=0 addrCount=1 entries=1 roughBytesEst=0MB
+[utxo-fetch-probe] #10 at=2026-10-04T18:19:50.067Z ms=0 addrCount=1 entries=1 roughBytesEst=0MB
+[utxo-fetch-probe] #11 at=2026-10-04T18:19:50.067Z ms=1 addrCount=1 entries=1 roughBytesEst=0MB
+[utxo-fetch-probe] #12 at=2026-10-04T18:19:50.068Z ms=0 addrCount=1 entries=1 roughBytesEst=0MB
+[oracle-pool-scanner-cron] tick: snapshotDaa=101688 poolSize=6 merkleRoot=46fa6978ef43 (scanned=6/valid=6/rejected=0)
+[bshard-close-voter-v2] tick: 0 pending | signed=0 refused=0 skipped=0 errored=0
+[diag:step] zk.closeTickV2 ms=0 at=2026-10-04T18:19:50.078Z
+[diag:step] zk.claimAutonomousTick ms=0 at=2026-10-04T18:19:50.079Z
+[diag:step] zk.handoffAutonomousTick ms=0 at=2026-10-04T18:19:50.079Z
+[diag:step] zk.judgeProposeAutonomousTick ms=2 at=2026-10-04T18:19:50.081Z
+[relay:e2e-maker] 2026-10-04T18:19:50.221Z [rpc] catching up from Console DB...
+[relay:e2e-maker] 2026-10-04T18:19:50.223Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-maker] 2026-10-04T18:19:50.223Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-3] 2026-10-04T18:19:50.237Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-1] 2026-10-04T18:19:50.237Z [rpc] catching up from Console DB...
+[relay:e2e-bettorA] 2026-10-04T18:19:50.238Z [rpc] catching up from Console DB...
+[relay:e2e-settler] 2026-10-04T18:19:50.238Z [rpc] catching up from Console DB...
+[relay:e2e-bettorB] 2026-10-04T18:19:50.238Z [rpc] catching up from Console DB...
+[relay:e2e-fee] 2026-10-04T18:19:50.238Z [rpc] catching up from Console DB...
+[relay:e2e-bettorB] 2026-10-04T18:19:50.240Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-bettorB] 2026-10-04T18:19:50.240Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-fee] 2026-10-04T18:19:50.241Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-fee] 2026-10-04T18:19:50.241Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-3] 2026-10-04T18:19:50.243Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-3] 2026-10-04T18:19:50.243Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-bettorA] 2026-10-04T18:19:50.244Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-bettorA] 2026-10-04T18:19:50.244Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-settler] 2026-10-04T18:19:50.244Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-settler] 2026-10-04T18:19:50.244Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-1] 2026-10-04T18:19:50.244Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-1] 2026-10-04T18:19:50.244Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-5] 2026-10-04T18:19:50.252Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-6] 2026-10-04T18:19:50.252Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-2] 2026-10-04T18:19:50.252Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-4] 2026-10-04T18:19:50.252Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-6] 2026-10-04T18:19:50.256Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-6] 2026-10-04T18:19:50.257Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-2] 2026-10-04T18:19:50.257Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-2] 2026-10-04T18:19:50.257Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-4] 2026-10-04T18:19:50.257Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-4] 2026-10-04T18:19:50.257Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-5] 2026-10-04T18:19:50.258Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-5] 2026-10-04T18:19:50.258Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[diag:heap-sample] at=2026-10-04T18:19:51.693Z heapUsed=52MB heapTotal=56MB rss=164MB external=12MB arrayBuffers=0MB wasmBytes=3.9MB utxoFetchCalls=12
+[diag:step] pair.scanAndIngestPairs ms=0 since_rowid=0 max_rowid=0 hits=0 at=2026-10-04T18:20:20.030Z
+[bshard-close-voter-v2] tick: 0 pending | signed=0 refused=0 skipped=0 errored=0
+[diag:step] zk.closeTickV2 ms=0 at=2026-10-04T18:20:20.091Z
+[diag:step] zk.claimAutonomousTick ms=0 at=2026-10-04T18:20:20.091Z
+[diag:step] zk.handoffAutonomousTick ms=0 at=2026-10-04T18:20:20.091Z
+[diag:step] zk.judgeProposeAutonomousTick ms=3 at=2026-10-04T18:20:20.094Z
+[diag:step] pair.scanAndIngestPairs ms=0 since_rowid=0 max_rowid=0 hits=0 at=2026-10-04T18:20:50.040Z
+[oracle-renewal] tick: currentDaa=102435 no renewals needed (closest_expiry_in=4900514 DAA)
+[bshard-close-voter-v2] tick: 0 pending | signed=0 refused=0 skipped=0 errored=0
+[diag:step] zk.closeTickV2 ms=0 at=2026-10-04T18:20:50.103Z
+[diag:step] zk.claimAutonomousTick ms=0 at=2026-10-04T18:20:50.103Z
+[diag:step] zk.handoffAutonomousTick ms=0 at=2026-10-04T18:20:50.104Z
+[diag:step] zk.judgeProposeAutonomousTick ms=3 at=2026-10-04T18:20:50.107Z
+[relay:e2e-maker] 2026-10-04T18:20:50.227Z [rpc] catching up from Console DB...
+[relay:e2e-maker] 2026-10-04T18:20:50.229Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-maker] 2026-10-04T18:20:50.229Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-fee] 2026-10-04T18:20:50.243Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-3] 2026-10-04T18:20:50.243Z [rpc] catching up from Console DB...
+[relay:e2e-bettorB] 2026-10-04T18:20:50.243Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-1] 2026-10-04T18:20:50.243Z [rpc] catching up from Console DB...
+[relay:e2e-settler] 2026-10-04T18:20:50.243Z [rpc] catching up from Console DB...
+[relay:e2e-bettorA] 2026-10-04T18:20:50.243Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-3] 2026-10-04T18:20:50.247Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-3] 2026-10-04T18:20:50.247Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-settler] 2026-10-04T18:20:50.247Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-settler] 2026-10-04T18:20:50.248Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-1] 2026-10-04T18:20:50.248Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-1] 2026-10-04T18:20:50.248Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-bettorA] 2026-10-04T18:20:50.248Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-bettorA] 2026-10-04T18:20:50.248Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-fee] 2026-10-04T18:20:50.248Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-fee] 2026-10-04T18:20:50.249Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-bettorB] 2026-10-04T18:20:50.249Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-bettorB] 2026-10-04T18:20:50.249Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-4] 2026-10-04T18:20:50.258Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-6] 2026-10-04T18:20:50.258Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-5] 2026-10-04T18:20:50.258Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-2] 2026-10-04T18:20:50.258Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-4] 2026-10-04T18:20:50.261Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-4] 2026-10-04T18:20:50.261Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-5] 2026-10-04T18:20:50.262Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-5] 2026-10-04T18:20:50.262Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-6] 2026-10-04T18:20:50.262Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-6] 2026-10-04T18:20:50.262Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-2] 2026-10-04T18:20:50.262Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-2] 2026-10-04T18:20:50.262Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[diag:heap-sample] at=2026-10-04T18:20:52.261Z heapUsed=53MB heapTotal=56MB rss=164MB external=12MB arrayBuffers=0MB wasmBytes=4MB utxoFetchCalls=12
+[diag:step] pair.scanAndIngestPairs ms=0 since_rowid=0 max_rowid=0 hits=0 at=2026-10-04T18:21:20.051Z
+[bshard-close-voter-v2] tick: 0 pending | signed=0 refused=0 skipped=0 errored=0
+[diag:step] zk.closeTickV2 ms=0 at=2026-10-04T18:21:20.112Z
+[diag:step] zk.claimAutonomousTick ms=0 at=2026-10-04T18:21:20.112Z
+[diag:step] zk.handoffAutonomousTick ms=1 at=2026-10-04T18:21:20.113Z
+[diag:step] zk.judgeProposeAutonomousTick ms=3 at=2026-10-04T18:21:20.116Z

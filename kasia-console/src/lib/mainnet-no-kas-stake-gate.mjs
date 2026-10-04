@@ -111,3 +111,23 @@ export function sponsorMarketGuard(market, routeName = 'register-v07') {
   if (market.spine_p2sh) return deny(routeName + ':market-has-spine', 'no-kas-mode', '(不收 KAS 模式: 目标盘带 spine, 属旧 KAS 模型, 不进网关代付分支)');
   return null;
 }
+
+/**
+ * 一次只许一个在跑的 ZK 原生盘(Bettor 账本1850/1848 主网规则): 不收 KAS 模式下, create-v07 在已有 zk_native 盘【未完结】时回 409。
+ * 理由: 并发盘会抢 close 提交费 UTXO(bshard-close-transport 的 0.5 KAS 自转账, 被别的 tx/整理吃掉 ⇒ "UTXO not found" 卡死; S3 run1 btduw 实证)。
+ * 未完结 = 非 shard_internal 行 ∧ resolution_rule_spec.zk_native===true ∧ protocol_status 不在终态集 ∧ zk_continuation.exhausted≠true。
+ * (ZK 原生盘走完 close 后 protocol_status 停在 'attested_v2', 真正的"领完"标记是 metadata.zk_continuation.exhausted=true, 故两者都认。)
+ * @param {{prepare:Function}} db  better-sqlite3 句柄(调用方注入, 本文件不 import DB 客户端)
+ * @returns {null | {id:string, protocol_status:string}} 第一个未完结盘; 无 ⇒ null
+ */
+export const FINISHED_PROTOCOL_STATUSES = Object.freeze(['completed', 'refunded', 'cancelled', 'expired', 'shard_internal']);
+export function findUnfinishedZkNativeMarket(db) {
+  const ph = FINISHED_PROTOCOL_STATUSES.map(() => '?').join(',');
+  const rows = db.prepare(`SELECT id, protocol_status, metadata FROM pool_markets WHERE protocol_status NOT IN (${ph}) AND json_valid(resolution_rule_spec) AND json_extract(resolution_rule_spec, '$.zk_native') = 1 ORDER BY created_at ASC`).all(...FINISHED_PROTOCOL_STATUSES);
+  for (const r of rows) {
+    let exhausted = false;
+    try { exhausted = JSON.parse(r.metadata || '{}')?.zk_continuation?.exhausted === true; } catch { /* 坏 metadata ⇒ 按未完结(fail-closed) */ }
+    if (!exhausted) return { id: r.id, protocol_status: r.protocol_status };
+  }
+  return null;
+}

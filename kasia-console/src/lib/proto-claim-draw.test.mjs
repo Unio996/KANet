@@ -61,7 +61,7 @@ const genesis = buildMarketGenesisTxJson({ kaspa, network: 'mainnet', feeUtxo: b
 const leafCovId = genesis.shardLeafCovId;
 const { ps_tmpl_hash, token_tmpl_hash } = loadProtocolConstants();
 const libPath = (rel) => new URL(rel, import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
-const SLD_PATH = libPath('./ShardLeaf_direct.sil'), TICKET_PATH = libPath('./sil-v1/PoolSideTicket.sil'), KTT_PATH = libPath('./sil-v1/KanetTestToken.sil');
+const SLD_PATH = libPath('./ShardLeaf_direct.sil'), TICKET_PATH = libPath('./legacy-proto/PoolSideTicket.sil'), KTT_PATH = libPath('./sil-v1/KanetTestToken.sil');
 const sldCtor = () => [ctorBytes32V100(MARKET_ID), ctorBytes32V100(ps_tmpl_hash), ctorBytes32V100(MARKET_ID), ctorIntV100(SEAL_COUNT), ctorIntV100(MIN_BET), ctorBytes32V100(ga.rootCloseTmplHash), ctorBytes32V100('00'.repeat(32)), ctorBytes32V100(token_tmpl_hash), ctorIntV100(0), ctorIntV100(0), ctorIntV100(0), ctorIntV100(0), ctorIntV100(ga.shardLeafOwnRedeemLen)];
 const kttCompiled = compileSilV100(KTT_PATH, [{ kind: 'int', value: 1 }, { kind: 'bytes', value: [...Buffer.alloc(32)] }, { kind: 'byte', value: 4 }, { kind: 'byte', value: 0 }, { kind: 'bytes', value: [...Buffer.alloc(32)] }, { kind: 'bytes', value: [...Buffer.alloc(32)] }, { kind: 'int', value: 3 }, { kind: 'int', value: 3 }], 'KanetTestToken');
 const kttEntryAbi = kttCompiled._raw.contracts.KanetTestToken.entries.transfer, kttStateFieldCount = kttCompiled._raw.contracts.KanetTestToken.runtime_state.fields.length;
@@ -196,7 +196,7 @@ t('④c 换 fee 面值(不同找零候选)各自重签: 每个最终tx的 ticket
 
 // 自检两侧独立: KanetTokenClaim 输出 spk 用"全0探针 + 手工 splice + 自算 P2SH"
 t('⑤ KanetTokenClaim 输出 spk 与独立"探针+手工splice+自算P2SH"逐字节一致(state: market_cov_id/winner_pk/amount/token_tmpl_hash)', () => {
-  const probe = compileSilV100(libPath('./KanetTokenClaim.sil'), [ctorBytes32V100('00'.repeat(32)), ctorBytes32V100('00'.repeat(32)), ctorIntV100(0), ctorBytes32V100(token_tmpl_hash)], 'KanetTokenClaim');
+  const probe = compileSilV100(libPath('./legacy-proto/KanetTokenClaim.sil'), [ctorBytes32V100('00'.repeat(32)), ctorBytes32V100('00'.repeat(32)), ctorIntV100(0), ctorBytes32V100(token_tmpl_hash)], 'KanetTokenClaim');
   const ps = Buffer.from(probe.script); const { start, len } = probe.state_layout;
   const fInt = (n) => { const b = Buffer.alloc(8); b.writeBigInt64LE(BigInt(n)); return Buffer.concat([Buffer.from([8]), b]); };
   const fB32 = (h) => Buffer.concat([Buffer.from([32]), Buffer.from(h, 'hex')]);
