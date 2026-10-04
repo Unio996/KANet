@@ -60,7 +60,7 @@
       <option value="pool">押注池最大</option>
       <option value="bettors">押注人最多</option>
     </select>
-    <span class="text-[10px] text-ink-400" title="排序限当前加载页 (testnet 范围)">📌 排序限当前加载</span>
+    <span class="text-[10px] text-ink-400" title="排序限当前加载页 (<%= it.noKasMode ? '当前范围' : 'testnet 范围' %>)">📌 排序限当前加载</span>
   </div>
 
   <div x-show="loading" class="text-center py-16 text-ink-400">载入中...</div>

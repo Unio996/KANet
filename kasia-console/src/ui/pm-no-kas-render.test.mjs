@@ -60,3 +60,23 @@ test('non-mainnet (noKasMode=false): legacy KAS UI untouched, no new block, no f
   const create = await render(false, 'predictions-pool-create');
   assert.ok(create.includes('maker_stake_kas') && !create.includes('盘口由系统同步'));
 });
+
+// 账本1857 follow-up (Bettor review e668ce6b)
+const markup = (html) => html.replace(/<script[\s\S]*?<\/script>/g, ' ').replace(/<!--[\s\S]*?-->/g, ' ');
+for (const page of ['predictions-list', 'predictions-pool-detail', 'predictions-pool-create']) {
+  test('no-KAS mode: ' + page + ' markup has no testnet wording', async () => {
+    const html = markup(await render(true, page));
+    assert.deepEqual(html.match(/.{0,20}(testnet|测试网|kaspatest).{0,20}/gi) || [], []);
+  });
+}
+test('no-KAS mode: sidebar links to /predictions and hides 我的市场; non-mainnet unchanged', async () => {
+  const on = await render(true, 'predictions-list');
+  assert.ok(on.includes('href="/predictions"') && markup(on).includes('看市场') && !on.includes('href="/my-markets"'));
+  const off = await render(false, 'predictions-list');
+  assert.ok(off.includes('href="/my-markets"') && !markup(off).includes('看市场'));
+});
+test('no-KAS mode: stake_ktt is built with BigInt (no float precision loss)', async () => {
+  const html = await render(true, 'predictions-pool-detail');
+  assert.ok(html.includes('BigInt(_n) * 100000000n'));
+  assert.ok(!html.includes('Math.round(Number(this.bet.stakeKas)) * 100000000'));
+});

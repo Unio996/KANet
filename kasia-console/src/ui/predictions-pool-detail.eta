@@ -131,7 +131,7 @@
           <strong class="text-ink-600">信任分两层（诚实口径，不声称整体 trustless）：</strong><br>
           · <strong class="text-amber-700">结果（谁赢）= trust-minimized</strong>：由去中心预言机委员判定，链外赛果永远需要信任数据源（ZK 也无法消除——预言机问题数学不可约）。<br>
           · <strong class="text-emerald-700">分账算术（payout）= covenant 链上校验</strong>（改 fee 地址/比例 → 机制重算对不上 → BUST）；路线图升级为 <strong>optimistic-trustless</strong>（结算方押 bond + 任何人可提确定性 fraud-proof 链上证伪 → slash + 冻结坏 root + 奖挑战者）。<br>
-          当前 testnet 诚信运营演示；委员自治-enforce daemon 为下一块硬化（把「信 4/5 不作恶」升级成「4/5 作恶面临可验证损失」）。
+          <%= it.noKasMode ? '当前为测试筹码诚信运营演示；' : '当前 testnet 诚信运营演示；' %>委员自治-enforce daemon 为下一块硬化（把「信 4/5 不作恶」升级成「4/5 作恶面临可验证损失」）。
         </div>
       </div>
 
@@ -688,12 +688,17 @@ function poolDetailPage(marketId) {
       this.bet.txResult = null;
       try {
         // 账本1857: 主网下注 = register-v07 + stake_ktt (1 筹码 = 1e8 单位); 下注人钱包不付 KAS, 链上费用网关代付
+        // stake_ktt 用 BigInt 拼, 避免 >2^53 丢精度; 非整数 / <=0 / 超过服务端 safe-integer 上限(9007199 万筹码)在客户端先拒, 与服务端 parseStakeKtt 一致
+        const _n = Number(this.bet.stakeKas);
+        if (!Number.isInteger(_n) || _n <= 0) throw new Error('筹码数必须是正整数');
+        const stakeKtt = (BigInt(_n) * 100000000n).toString();
+        if (BigInt(stakeKtt) > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error('筹码数超过上限');
         const r = await fetch(`/api/pool/market/${encodeURIComponent(this.marketId)}/bettor/register-v07`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             bettor_relay_id: this.bet.bettorRelayId,
             direction: this.bet.direction,
-            stake_ktt: String(Math.round(Number(this.bet.stakeKas)) * 100000000),
+            stake_ktt: stakeKtt,
           }),
         });
         const j = await r.json();

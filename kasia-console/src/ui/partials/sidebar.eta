@@ -108,10 +108,14 @@
             <span class="text-[9px] transition-transform" :class="pred ? 'rotate-90' : ''">›</span>
           </button>
           <div x-show="pred" x-transition class="mt-0.5 space-y-0.5">
-            <a href="/my-markets"
+            <% if (it.noKasMode) { %><a href="/predictions"
+              class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-8 <%= ['predictions','predictions-pool-detail','predictions-pool-create'].includes(it._page) ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
+              看市场
+            </a><% } else { %><a href="/my-markets"
               class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-8 <%= it._page === 'my-markets' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
               我的市场
-            </a>
+            </a><% } %>
+
           </div>
         </div>
       </div>
