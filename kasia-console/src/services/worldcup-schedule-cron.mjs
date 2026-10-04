@@ -147,8 +147,11 @@ export async function worldcupScheduleTick() {
 }
 
 let _timer = null;
+/** 账本1845 S0: 开关, 默认关(只有字面 '1' 才开, 同 ZK_*_TICK_ENABLED / PROTO_DRIVER_ENABLED 的写法)。此前该 cron 无任何开关, 主网靠"碰巧缺钱包"才没建盘。 */
+export function worldcupScheduleEnabled(env = process.env) { return env.WORLDCUP_SCHEDULE_ENABLED === '1'; }
 export function startWorldcupScheduleCron() {
   if (_timer) return;
+  if (!worldcupScheduleEnabled()) { console.log('[worldcup-schedule] disabled (WORLDCUP_SCHEDULE_ENABLED!=1)'); return; }
   console.log(`[worldcup-schedule] starting·tick=${TICK_MS}ms·maker=${MAKER_RELAY_ID.slice(0, 8)}`);
   _timer = setInterval(wrapTick('worldcup-schedule.tick', () => worldcupScheduleTick().catch((e) => console.log(`[worldcup-schedule] tick uncaught: ${e.message}`))), TICK_MS);   // M10 v2 observe-only: wrapTick 只计时, 回调体不变
   worldcupScheduleTick().catch((e) => console.log(`[worldcup-schedule] startup tick: ${e.message}`)); // immediate first tick

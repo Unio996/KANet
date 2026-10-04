@@ -24,6 +24,7 @@
 import { sqlite } from '../db/client.js';
 import { randomUUID } from 'node:crypto';
 import { rejectRelayIdInBody } from '../lib/proto-relay-guard.mjs';
+import { assertNoKasStakeOnMainnet } from '../lib/mainnet-no-kas-stake-gate.mjs';   // 账本1845 S0: 主网 proto 写路由同挂硬闸(D-033 作废待删, 删除前先堵)
 import { rejectExternalMarketIdentityInBody, logProtoSingleOperatorMode } from '../lib/proto-single-operator-guard.mjs';
 
 const nowIso = () => new Date().toISOString();
@@ -90,6 +91,7 @@ export async function registerProtoRoutes(fastify) {
   // 建市场壳 —— ShardLeaf_direct genesis。校验/查询真实; 广播占位(§6/§9 未定案)。
   // ══════════════════════════════════════════════════════════════════════
   fastify.post('/api/proto-markets/create', async (request, reply) => {
+    const _noKas = assertNoKasStakeOnMainnet('proto-markets/create'); if (_noKas) return reply.code(_noKas.http).send(_noKas.body);   // 账本1845 S0: 主网不收 KAS(D-017 §2), 第一条语句, 先于任何查库/relay/转账
     const relayIdRejection = rejectRelayIdInBody(request.body);
     if (relayIdRejection) return reply.code(400).send({ ok: false, error: relayIdRejection });
     const externalIdentityRejection = rejectExternalMarketIdentityInBody(request.body);
@@ -214,6 +216,7 @@ export async function registerProtoRoutes(fastify) {
   // proto_bet_intents 只有一个 step='append'。
   // ══════════════════════════════════════════════════════════════════════
   fastify.post('/api/proto-markets/:id/bet', async (request, reply) => {
+    const _noKas = assertNoKasStakeOnMainnet('proto-markets/bet'); if (_noKas) return reply.code(_noKas.http).send(_noKas.body);   // 账本1845 S0: 主网不收 KAS(D-017 §2), 第一条语句, 先于任何查库/relay/转账
     const relayIdRejection = rejectRelayIdInBody(request.body);
     if (relayIdRejection) return reply.code(400).send({ ok: false, error: relayIdRejection });
     const externalIdentityRejection = rejectExternalMarketIdentityInBody(request.body);
@@ -292,6 +295,7 @@ export async function registerProtoRoutes(fastify) {
   // 委员宣布结果 —— RootClose.close_commit(v0: §5 单 keypair 模拟 5 委员)。
   // ══════════════════════════════════════════════════════════════════════
   fastify.post('/api/proto-markets/:id/resolve', async (request, reply) => {
+    const _noKas = assertNoKasStakeOnMainnet('proto-markets/resolve'); if (_noKas) return reply.code(_noKas.http).send(_noKas.body);   // 账本1845 S0: 主网不收 KAS(D-017 §2), 第一条语句, 先于任何查库/relay/转账
     const relayIdRejection = rejectRelayIdInBody(request.body);
     if (relayIdRejection) return reply.code(400).send({ ok: false, error: relayIdRejection });
     const externalIdentityRejection = rejectExternalMarketIdentityInBody(request.body);
@@ -317,6 +321,7 @@ export async function registerProtoRoutes(fastify) {
   // 挑第一个, 那样会在假设被打破的那一刻悄悄 claim 错人)。
   // ══════════════════════════════════════════════════════════════════════
   fastify.post('/api/proto-markets/:id/claim', async (request, reply) => {
+    const _noKas = assertNoKasStakeOnMainnet('proto-markets/claim'); if (_noKas) return reply.code(_noKas.http).send(_noKas.body);   // 账本1845 S0: 主网不收 KAS(D-017 §2), 第一条语句, 先于任何查库/relay/转账
     const relayIdRejection = rejectRelayIdInBody(request.body);
     if (relayIdRejection) return reply.code(400).send({ ok: false, error: relayIdRejection });
     const externalIdentityRejection = rejectExternalMarketIdentityInBody(request.body);
@@ -349,6 +354,7 @@ export async function registerProtoRoutes(fastify) {
   // 适用: v0 单操作员场景接受)。
   // ══════════════════════════════════════════════════════════════════════
   fastify.post('/api/proto-markets/:id/withdraw', async (request, reply) => {
+    const _noKas = assertNoKasStakeOnMainnet('proto-markets/withdraw'); if (_noKas) return reply.code(_noKas.http).send(_noKas.body);   // 账本1845 S0: 主网不收 KAS(D-017 §2), 第一条语句, 先于任何查库/relay/转账
     const relayIdRejection = rejectRelayIdInBody(request.body);
     if (relayIdRejection) return reply.code(400).send({ ok: false, error: relayIdRejection });
     const externalIdentityRejection = rejectExternalMarketIdentityInBody(request.body);

@@ -24,6 +24,7 @@ import { ensureGateTmplHashFresh } from '../lib/gate-tmpl-hash.mjs';
 import { kaspaZk } from '../services/zk-prove-worker.mjs';
 import { checkAdminSecretTier } from '../lib/admin-secret-tier.mjs';
 import { assertAddressOnNetwork, configuredNetwork } from '../lib/kaspa-network.mjs';   // (b) 网络单一源 (设计 v0.2 §3): 前缀只对照 env KASPA_NETWORK, 不从地址推网络
+import { assertNoKasStakeOnMainnet } from '../lib/mainnet-no-kas-stake-gate.mjs';   // 账本1845 S0: 主网不收 KAS 硬闸(见该文件头)
 
 // 件⑤步骤2 疑似死端点命中计数(2026-07-16, KANet-UI, Owner终裁+Bettor #nig8da 派工): observe-only,
 // 零业务逻辑影响, 持久化(跨重启存活)——4个疑似死端点各挂一次调用, 7天观察窗到期零命中才走删除决策,
@@ -593,6 +594,7 @@ export async function registerPoolRoutes(fastify) {
   //   D3: oracle_bond_kas omitted → 1 KAS (v0.5 hardcoded per Area 1.3)
   //   D4: broker_fee_pct omitted → 0; broker_relay_id omitted → maker_relay_id (maker == broker thesis)
   fastify.post('/api/pool/market/create', async (request, reply) => {
+    const _noKas = assertNoKasStakeOnMainnet('create'); if (_noKas) return reply.code(_noKas.http).send(_noKas.body);   // 账本1845 S0: 主网不收 KAS(D-017 §2), 第一条语句, 先于任何查库/relay/转账
     const b = request.body || {};
     // Truly required: only the irreducible per-market choices the maker must make.
     const required = ['maker_relay_id', 'outcome_side', 'outcome_end_date', 'resolution_rule_spec', 'maker_stake_kas'];
@@ -867,6 +869,7 @@ export async function registerPoolRoutes(fastify) {
   //   - Status goes directly to 'pending_bettors' (no on-market oracle-deposit phase — committee bonds
   //     live at the pool-layer contract, not per-market).
   fastify.post('/api/pool/market/create-v06', async (request, reply) => {
+    const _noKas = assertNoKasStakeOnMainnet('create-v06'); if (_noKas) return reply.code(_noKas.http).send(_noKas.body);   // 账本1845 S0: 主网不收 KAS(D-017 §2), 第一条语句, 先于任何查库/relay/转账
     _recordEndpointHit('market/create-v06');  // 件⑤步骤2 疑似死端点观察窗
     // 503 guard removed: path A LOCKED + shipped (Bettor r19, 5/30). Contracts now use 5
     // individual committee sigs (4-of-5 threshold) + committee ∈ poolMerkleRoot binding.
@@ -1088,6 +1091,7 @@ export async function registerPoolRoutes(fastify) {
   //
   // Body params identical to create-v06 + optional shard_id/shard_count (default 0/1 single-shard).
   fastify.post('/api/pool/market/create-v07', async (request, reply) => {
+    const _noKas = assertNoKasStakeOnMainnet('create-v07'); if (_noKas) return reply.code(_noKas.http).send(_noKas.body);   // 账本1845 S0: 主网不收 KAS(D-017 §2), 第一条语句, 先于任何查库/relay/转账
     const b = request.body || {};
     const required = ['maker_relay_id', 'outcome_side', 'outcome_end_date', 'resolution_rule_spec', 'maker_stake_kas'];
     for (const k of required) {
@@ -1493,6 +1497,7 @@ export async function registerPoolRoutes(fastify) {
   //   register_append (splice, drift-safe), NO-TX accounting (market_shards). Gateway-custody (testnet): bettor relay funds the
   //   gateway (maker), the gateway builds the register. Wraps pool-shard-register orchestrator (allocator + pool-register-builder).
   fastify.post('/api/pool/market/:id/bettor/register-v07', async (request, reply) => {
+    const _noKas = assertNoKasStakeOnMainnet('register-v07'); if (_noKas) return reply.code(_noKas.http).send(_noKas.body);   // 账本1845 S0: 主网不收 KAS(D-017 §2), 第一条语句, 先于任何查库/relay/转账
     const logicalMarketId = request.params.id;
     const b = request.body || {};
     if ((!b.bettor_relay_id && !b.bettor_pk) || b.direction === undefined || !b.stake_kas) {
@@ -1720,6 +1725,7 @@ export async function registerPoolRoutes(fastify) {
 
   // POST /api/pool/market/:id/bettor/register-v07/prep — B step 1: compute pay address + exact pay amount (NO TX, no state change).
   fastify.post('/api/pool/market/:id/bettor/register-v07/prep', async (request, reply) => {
+    const _noKas = assertNoKasStakeOnMainnet('register-v07/prep'); if (_noKas) return reply.code(_noKas.http).send(_noKas.body);   // 账本1845 S0: 主网不收 KAS(D-017 §2), 第一条语句, 先于任何查库/relay/转账
     let logicalMarketId = request.params.id;
     const p = await _v07PrepConfirmPrelude(logicalMarketId, request.body || {}, reply);
     if (!p) return;   // prelude already sent the error reply
@@ -1759,6 +1765,7 @@ export async function registerPoolRoutes(fastify) {
 
   // POST /api/pool/market/:id/bettor/register-v07/confirm — B step 2: detect payment → registerBettorOnShard splice (NO TX NO STATE).
   fastify.post('/api/pool/market/:id/bettor/register-v07/confirm', async (request, reply) => {
+    const _noKas = assertNoKasStakeOnMainnet('register-v07/confirm'); if (_noKas) return reply.code(_noKas.http).send(_noKas.body);   // 账本1845 S0: 主网不收 KAS(D-017 §2), 第一条语句, 先于任何查库/relay/转账
     let logicalMarketId = request.params.id;
     const p = await _v07PrepConfirmPrelude(logicalMarketId, request.body || {}, reply);
     if (!p) return;
@@ -2171,6 +2178,7 @@ export async function registerPoolRoutes(fastify) {
   // T-LOOPBACK-AUTHZ 热修(2026-09-14, NWT v1.0 必入清单#3): oracle_relay_id 由调用方指定,
   // 零鉴权 = 本机任意进程可代任意 relay 真实转账锁 bond。接 ADMIN_SECRET_FUNDS tier。
   fastify.post('/api/pool/market/:id/oracle/deposit', async (request, reply) => {
+    const _noKas = assertNoKasStakeOnMainnet('oracle/deposit'); if (_noKas) return reply.code(_noKas.http).send(_noKas.body);   // 账本1845 S0: 主网不收 KAS(D-017 §2), 第一条语句, 先于任何查库/relay/转账
     const auth = checkAdminSecretTier(request, 'ADMIN_SECRET_FUNDS');
     if (!auth.ok) return reply.code(auth.code).send({ error: auth.error });
     const marketId = request.params.id;
@@ -2238,6 +2246,7 @@ export async function registerPoolRoutes(fastify) {
   // register-v07 资金语义相反, 别搞混)——bettor_relay_id 由调用方指定, 零鉴权 = 本机任意进程可
   // 代任意 relay 真实转账下注。接 ADMIN_SECRET_FUNDS tier。
   fastify.post('/api/pool/market/:id/bettor/register', async (request, reply) => {
+    const _noKas = assertNoKasStakeOnMainnet('register'); if (_noKas) return reply.code(_noKas.http).send(_noKas.body);   // 账本1845 S0: 主网不收 KAS(D-017 §2), 第一条语句, 先于任何查库/relay/转账
     const auth = checkAdminSecretTier(request, 'ADMIN_SECRET_FUNDS');
     if (!auth.ok) return reply.code(auth.code).send({ error: auth.error });
     _recordEndpointHit('bettor/register');  // 件⑤步骤2 疑似死端点观察窗
@@ -2442,6 +2451,7 @@ export async function registerPoolRoutes(fastify) {
 
   // POST /api/pool/market/:id/bettor/register-external/prep — step 1: compute the side P2SH + canonical exact stake.
   fastify.post('/api/pool/market/:id/bettor/register-external/prep', async (request, reply) => {
+    const _noKas = assertNoKasStakeOnMainnet('register-external/prep'); if (_noKas) return reply.code(_noKas.http).send(_noKas.body);   // 账本1845 S0: 主网不收 KAS(D-017 §2), 第一条语句, 先于任何查库/relay/转账
     _recordEndpointHit('bettor/register-external/prep');  // 件⑤步骤2 疑似死端点观察窗
     const marketId = request.params.id;
     const b = request.body || {};
@@ -2488,6 +2498,7 @@ export async function registerPoolRoutes(fastify) {
   // dest==side_p2sh + amount==exact_sompi + idempotent UNIQUE tx. (sender NOT checked — deterministic
   // address binds, J2 r86 ③.) Parity w/ relay bettor/register (insert pool_bettor_sides + Merkle).
   fastify.post('/api/pool/market/:id/bettor/register-external/confirm', async (request, reply) => {
+    const _noKas = assertNoKasStakeOnMainnet('register-external/confirm'); if (_noKas) return reply.code(_noKas.http).send(_noKas.body);   // 账本1845 S0: 主网不收 KAS(D-017 §2), 第一条语句, 先于任何查库/relay/转账
     _recordEndpointHit('bettor/register-external/confirm');  // 件⑤步骤2 疑似死端点观察窗
     const marketId = request.params.id;
     const b = request.body || {};
@@ -2652,6 +2663,7 @@ export async function registerPoolRoutes(fastify) {
   // POST /api/pool/market/:id/bettor/register-v06/prep — v0.6+v0.7 step 1: compute side P2SH + exact stake.
   // DoD #1.3: dual-handles v0.6 and v0.7 markets (PoolSide ctor identical, helper switches by version).
   fastify.post('/api/pool/market/:id/bettor/register-v06/prep', async (request, reply) => {
+    const _noKas = assertNoKasStakeOnMainnet('register-v06/prep'); if (_noKas) return reply.code(_noKas.http).send(_noKas.body);   // 账本1845 S0: 主网不收 KAS(D-017 §2), 第一条语句, 先于任何查库/relay/转账
     const marketId = request.params.id;
     const b = request.body || {};
     const v = _extStakeValidate(b);
@@ -2689,6 +2701,7 @@ export async function registerPoolRoutes(fastify) {
 
   // POST /api/pool/market/:id/bettor/register-v06/confirm — v0.6 step 2: detect/verify payment → register.
   fastify.post('/api/pool/market/:id/bettor/register-v06/confirm', async (request, reply) => {
+    const _noKas = assertNoKasStakeOnMainnet('register-v06/confirm'); if (_noKas) return reply.code(_noKas.http).send(_noKas.body);   // 账本1845 S0: 主网不收 KAS(D-017 §2), 第一条语句, 先于任何查库/relay/转账
     const marketId = request.params.id;
     const b = request.body || {};
     const v = _extStakeValidate(b);
