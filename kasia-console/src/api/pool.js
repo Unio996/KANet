@@ -3471,6 +3471,7 @@ export async function registerPoolRoutes(fastify) {
       let didWin = null;
       let actualPayoutKas = null, actualPayoutChainVerified = false;
       let bshardClaimTxid = null;
+      let zkNativeInfo = null;   // 账本1857: ZK 原生盘附加字段(筹码单位)
       try {
         const meta = JSON.parse(p.metadata || '{}');
         // #48 (NWT/J2 2026-07-04): bshard(v0.7) 盘从没写 phase2_winner(v0.6 专属字段) — 结算后所有
@@ -3514,6 +3515,34 @@ export async function registerPoolRoutes(fastify) {
             }
           }
           // ev 存在但 win_direction 缺失(老结构/尚在写入中) → outcomeWinner/didWin 留 null(继续显示"待结算", 不误判)。
+        } else if (p.protocol_version === 'v0.7' && meta.zk_continuation && (meta.zk_continuation.attestedWinner === 0 || meta.zk_continuation.attestedWinner === 1)) {
+          // 账本1857: ZK 原生盘不写 settle_evidence。赢向/叶子/到账全部取 claim tick 用的同一组函数与持久化字段(见 lib/zk-native-position-result.mjs), 无并行计算。
+          const logicalId = p.logical_market_id || p.market_id;
+          const { getMarketBets } = await import('../lib/pool-bettor-sides-query.mjs');
+          const { deriveCloseFeeLeaves } = await import('../services/bshard-close-voter.js');
+          const { computePariMutuelPayout } = await import('../lib/pool-shard-settle.mjs');
+          const { deriveZkNativeResult, sumMyLeaves } = await import('../lib/zk-native-position-result.mjs');
+          const zr = deriveZkNativeResult({ meta, bettorPk, marketId: logicalId, db: sqlite, deps: { getMarketBets, deriveCloseFeeLeaves, computePariMutuelPayout } });
+          outcomeWinner = zr.winDirection;
+          didWin = (myDirection === zr.winDirection);
+          zkNativeInfo = { zk_native: true, claims_landed: zr.claimedCount, pool_known: zr.poolKnown, actual_payout_units: null, payout_pending_units: null };
+          if (didWin && zr.leaves) {
+            const mine = sumMyLeaves(zr);
+            const groupRows = sqlite.prepare(`
+              SELECT s.id, s.stake_amount FROM pool_bettor_sides s
+              LEFT JOIN market_shards ms ON ms.shard_market_id = s.market_id
+              WHERE s.bettor_pk = ? AND s.direction = ? AND COALESCE(ms.logical_market_id, s.market_id) = ?
+            `).all(bettorPk, myDirection, logicalId);
+            const share = (tot) => (tot > 0n && groupRows.length ? splitWinnerAmountByStake(tot, groupRows, p.side_id) : tot);
+            const landedShare = share(mine.landed), pendingShare = share(mine.pending);
+            zkNativeInfo.payout_pending_units = pendingShare.toString();
+            if (mine.landed > 0n) {
+              zkNativeInfo.actual_payout_units = landedShare.toString();
+              actualPayoutKas = Number(landedShare) / 1e8;   // 与现有字段同口径(筹码单位 /1e8, 同 stake_kas 的显示换算)
+              actualPayoutChainVerified = true;              // claim 落链确认后才写 zk_escape_audit(landed-gated)
+              bshardClaimTxid = mine.txids[0] || null;
+            }
+          }
         } else if (meta.phase2_winner === 0 || meta.phase2_winner === 1) {
           outcomeWinner = meta.phase2_winner;
           didWin = (myDirection === outcomeWinner);
@@ -3560,6 +3589,8 @@ export async function registerPoolRoutes(fastify) {
       } catch {}
       out.push({
         market_id: p.market_id,
+        logical_market_id: p.logical_market_id || p.market_id,   // 账本1857: 详情页按"本盘"过滤分片行
+        ...(zkNativeInfo || {}),
         question: p.resolution_rule_spec,
         category: p.category,
         my_direction: myDirection,
