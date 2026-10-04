@@ -54,10 +54,10 @@ console.log('[test] A1 路由: POST /api/pool/market/:id/bettor/register-v07 缺
   await app.ready();
   const mid = randomUUID().slice(0, 12);
   sqlite.prepare(`
-    INSERT INTO pool_markets (id, maker_relay_id, spine_p2sh, market_metadata_hash, deadline, protocol_version, protocol_status, pool_merkle_root, created_at, updated_at, metadata)
-    VALUES (?, 'test-relay', 'kaspa:testp2sh', 'testhash', 9999999999, 'v0.7', 'pending_bettors', ?, datetime('now'), datetime('now'), '{}')
+    INSERT INTO pool_markets (id, maker_relay_id, spine_p2sh, market_metadata_hash, deadline, protocol_version, protocol_status, pool_merkle_root, created_at, updated_at, metadata, resolution_rule_spec)
+    VALUES (?, 'test-relay', NULL, 'testhash', 9999999999, 'v0.7', 'pending_bettors', ?, datetime('now'), datetime('now'), '{}', '{"zk_native":true}')
   `).run(mid, H('d'));
-  const body = { bettor_pk: H('e'), direction: 0, stake_kas: '1' };
+  const body = { bettor_pk: H('e'), direction: 0, stake_ktt: 150000000 };   // 账本1846 S1: 主网是 ZK 原生无 spine 盘 + stake_ktt(旧夹具是带 spine 的 stake_kas 盘, 被 S1 加固守卫先 403 了)
   const r1 = await app.inject({ method: 'POST', url: `/api/pool/market/${mid}/bettor/register-v07`, payload: body });
   const j1 = JSON.parse(r1.body);
   ok(r1.statusCode === 400 && j1.error === 'zk_template_env_missing' && j1.missing.length === 3, `缺 env ⇒ 400 zk_template_env_missing (got ${r1.statusCode} ${j1.error})`);

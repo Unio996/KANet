@@ -396,12 +396,12 @@ const POOL_SIDE_TICKET_SIL = join(dirname(fileURLToPath(import.meta.url)), 'sil-
  * @param {object} o { bettorPk:hex, direction:0|1, stake:number, shardPoolId:hex }
  * @returns {{ script:Buffer, scriptPubKeyHex:string, templateHashHex:string, templatePrefix:Buffer, templateSuffix:Buffer }}
  */
-export function computePoolSideTicketArtifact({ bettorPk, direction, stake, shardPoolId, sinkPkHex, retireDaa }, silvercPath) {
+export function computePoolSideTicketArtifact({ bettorPk, direction, stake, shardPoolId, sinkPkHex, sweepDaa }, silvercPath) {
   if (!/^[0-9a-f]{64}$/.test(String(bettorPk || ''))) throw new Error(`computePoolSideTicketArtifact: bettorPk must be 32-byte hex, got ${bettorPk}`);
   if (!/^[0-9a-f]{64}$/.test(String(shardPoolId || ''))) throw new Error(`computePoolSideTicketArtifact: shardPoolId must be 32-byte hex, got ${shardPoolId}`);
   // 🔴 账本1850 严格零方案: 票的 ctor 追加 sink_pk / sweep_daa 两个常量(非 State), 来自 zk-sink-config(env 缺失 fail-closed)
-  const sk = resolveSinkConfig({ sinkPkHex, retireDaa });
-  const ctor = [ctorBytes32V100(bettorPk), ctorIntV100(direction), ctorIntV100(stake), ctorBytes32V100(shardPoolId), ctorBytes32V100(sk.sinkPkHex), ctorIntV100(sk.retireDaa)];
+  const sk = resolveSinkConfig({ sinkPkHex, sweepDaa });
+  const ctor = [ctorBytes32V100(bettorPk), ctorIntV100(direction), ctorIntV100(stake), ctorBytes32V100(shardPoolId), ctorBytes32V100(sk.sinkPkHex), ctorIntV100(sk.sweepDaa)];
   const compiled = silvercPath ? compileSilV100(POOL_SIDE_TICKET_SIL, ctor, 'PoolSideTicket', silvercPath) : compileSilV100(POOL_SIDE_TICKET_SIL, ctor, 'PoolSideTicket');
   const artifact = extractTemplateArtifactV100(compiled);
   return {

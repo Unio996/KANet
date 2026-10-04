@@ -8,7 +8,10 @@ import { settleDispatchTags } from './pool-shard-register.mjs';
 
 // 🔴 KIP-9 存储质量: 5 个输出各 0.2 KAS 时节点实测 storage mass 659134 > 上限 500000(simnet 官方 2.0.1)——新建输出面值必须抬高(质量≈C/面值 逐输出累加)。
 // 每个新建输出(claimOut/tokOut/remainTok)取 CLAIM_OUT_VALUE_SOMPI; fee 输入需覆盖 3×该值 + 网络费 − (self+池代币 UTXO 面值), 由 claimFeeInputSompi() 给出。
-export const CLAIM_OUT_VALUE_SOMPI = Number(process.env.ZK_CLAIM_OUT_VALUE_SOMPI || 100_000_000);
+// 🔴 账本1850 严格零方案: 默认 1.0 → 0.5 KAS。KIP-9 精确公式(rusty-kaspa mass/mod.rs calc_storage_mass; C=1e12, 覆盖 UTXO plurality=2)对 claim 家族非末位交易:
+//   0.30 KAS ⇒ 497,620(硬下限, 卡 500k 共识上限); 0.45 ⇒ 385,295; 0.50 ⇒ 364,076(留 27% 余量, 采用); 1.00 ⇒ 277,146(旧值, 与链上实测一致)。证据: docs/provenance/2026-10-05-j2-strict-zero/floor_calc.mjs。
+// 这些 KAS 永久进 sink(retire 或 claim 之后无人能取回), 面值越低网关净锁越少。
+export const CLAIM_OUT_VALUE_SOMPI = Number(process.env.ZK_CLAIM_OUT_VALUE_SOMPI || 50_000_000);
 export const CLAIM_NET_FEE_SOMPI = 40_000_000;
 export function claimFeeInputSompi() { return 3 * CLAIM_OUT_VALUE_SOMPI + CLAIM_NET_FEE_SOMPI + 20_000_000; }   // +20M 余量(self/池代币 UTXO 面值另计入 Σin, 此为保守上界)
 

@@ -102,7 +102,9 @@ export function readZkTemplateHashes(env = process.env) {
 const W17 = () => Array.from({ length: 17 }, () => ctorInt(0));
 const W17V100 = () => Array.from({ length: 17 }, () => ctorIntV100(0));   // D-019: v100 ctor 方言专用, 见 ctorBytes32V100/ctorIntV100 注释
 const MIN_BET = 100000;                                   // dust-ticket floor (sompi); matches (d)/helper
-const TICKET_DUST = 20_000_000;                           // 0.2 KAS PoolSide dust ticket (KIP-9 safe, matches helper)
+// 🔴 账本1850 严格零方案: 票面值 0.2 → 0.07 KAS(ticket 只可扫给 sink, 面值越低网关净锁越少)。KIP-9 精确公式对首注 register 交易: 0.05 ⇒ 433,194, 0.07 ⇒ 376,335(留 25% 余量, 采用),
+//   0.03 ⇒ 566,257 超 500k 上限(硬下限≈0.04); 0.2 ⇒ 285,715(旧值, 与链上实测 286,814 一致)。证据: docs/provenance/2026-10-05-j2-strict-zero/floor_calc.mjs。sweep 费≈0.011 KAS(compute mass 10,750), 远小于面值。
+const TICKET_DUST = 7_000_000;                            // 0.07 KAS PoolSide dust ticket
 export const PS_SEED = 20_000_000;                               // PayoutShard genesis seed (0.2 KAS sink, matches (d))
 const SHARD_GENESIS_SEED = 20_000_000;                    // A(b): 空 ShardLeaf genesis seed (0.2 KAS, KIP-9 safe). 首注 register_append
                                                           //   spend 它+fund stake → output weld out==pool_value(0)+stake 过, seed 退 change (不进池, pool_value 起点=0)。

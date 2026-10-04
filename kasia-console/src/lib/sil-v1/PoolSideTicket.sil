@@ -29,9 +29,9 @@ pragma silverscript ^0.1.0;
 //   ⇒ 旧 RootClaim.claim_draw / RefundClaim.refund_payout 的票 co-spend 对【新铸】票不再可用; 铸票处(pool-shard-register.mjs)
 //   fail-closed 守卫保证 legacy(非 ZK 原生 / 有 spine)市场永远拿不到新票。链上已存在的旧票不受影响(模板只管新铸)。
 //   sink_pk 是 ctor 常量(不在 State 区, 随模板): 模板 hash 随 ZK_SYSTEM_SINK_PK 变, State 4 字段布局不变。
-//   🔴 J2 偏离提示(须 Bettor 知): sweep 带【票龄门】this.ageDaa >= sweep_daa(与 claim retire 同值 ZK_CLAIM_RETIRE_DAA)。原因: 委员级2-B
+//   🔴 J2 偏离提示(须 Bettor 知): sweep 带【票龄门】this.ageDaa >= sweep_daa(env ZK_TICKET_SWEEP_DAA, 默认 365 天; 与 claim 的 RETIRE_DAA 分离)。原因: 委员级2-B
 //   (bshard-close-enforce/voter)用 relay check_utxo_landed 读【当前 UTXO 集】核每张票在场, 若任何人可立刻扫票, 则无成本(费从票里出)
-//   即可卡死任一市场的 close_attest。运维前提: 市场须在首注后 sweep_daa 内结算完。
+//   即可卡死任一市场的 close_attest。create-v07 守: 市场 deadline ≤ 票龄 - 60 天, 市场活不过票。
 //   sweep 约束: 票龄 ≥ sweep_daa、单输入、单输出、输出 0 = P2PK(sink_pk)、输出值 ≥ 输入值 - SWEEP_MAX_FEE(防被当矿工费白烧, 非安全要件)。
 
 contract PoolSideTicket(
@@ -40,7 +40,7 @@ contract PoolSideTicket(
     int      init_stake,            // 本注额
     byte[32] init_shardPoolId,      // 本 shard pool 身份 (= 所属市场的 shard_pool_id)
     byte[32] sink_pk,               // 系统 sink 公钥(ZK_SYSTEM_SINK_PK, ctor 常量, 非 State)
-    int      sweep_daa              // 票龄门槛(= ZK_CLAIM_RETIRE_DAA, ctor 常量, 非 State)
+    int      sweep_daa              // 票龄门槛(= ZK_TICKET_SWEEP_DAA, ctor 常量, 非 State)
 ) {
     // —— 显式 State (4 字段, 与改前逐字一致; 市场合约 validateOutputStateWithTemplate/readInputStateWithTemplate 绑此布局) ——
     byte[32] bettorPk = init_bettorPk;

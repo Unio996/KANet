@@ -22,6 +22,7 @@ process.env.KASPA_RPC_URL = 'ws://127.0.0.1:1';
 process.env.KASPA_NETWORK = 'mainnet';
 delete process.env.KANET_NO_KAS_STAKE_MODE; delete process.env.KANET_TESTNET_NO_LIMITS; delete process.env.PROTO_DRIVER_ENABLED; delete process.env.PROTO_RELAY_ID;
 process.env.ZK_GATE_TMPL_HASH = 'd4'.repeat(32); process.env.ZK_CLOSEZK_SIL_PATH = 'D:/none/CloseZkV2.sil';   // zk_native 目标盘走 _resolveZkNativeCtorExtras(只查 env 存在; 重活 ensureGateTmplHashFresh 在下面打桩)
+process.env.ZK_SYSTEM_SINK_PK = 'ab'.repeat(32); process.env.ZK_CLAIM_RETIRE_DAA = '25920000';   // 账本1850: 主网 fail-closed 配置(缺则 create-v07 500)
 process.env.ZK_TOKEN_TMPL_HASH = 'a1'.repeat(32); process.env.ZK_CLAIM_TMPL_HASH = 'b2'.repeat(32); process.env.ZK_MARKET_SUFFIX_HASH = 'c3'.repeat(32);
 
 import { mock } from 'node:test';
@@ -207,6 +208,54 @@ process.env.KANET_NO_KAS_STAKE_MODE = '1'; reset();
   ok(r2.statusCode === 403, 'prep ⇒ 403');
 }
 delete process.env.KANET_NO_KAS_STAKE_MODE;
+
+// ═══ 5b. 账本1850 严格零: create-v07 的两道闸(一次一盘 409 / 市场不得比票活得久 400 / 配置缺失 fail-closed) ═══
+console.log('[test] 5b. create-v07 严格零闸');
+process.env.KASPA_NETWORK = 'mainnet'; putAddrs('mainnet'); reset();
+{
+  const finish = () => sqlite.prepare("UPDATE pool_markets SET protocol_status = 'cancelled'").run();
+  finish();
+  const before = sqlite.prepare('SELECT COUNT(*) c FROM pool_markets').get().c;
+  // (a) 已有一个未完结的 zk_native 盘(protocol_status 非终态, metadata 无 exhausted) ⇒ 409, 一行不新增、零转账
+  seedMarket('m-zk-live', { resolution_rule_spec: spec({ zk_native: true }), protocol_status: 'attested_v2', metadata: JSON.stringify({ zk_continuation: { exhausted: false } }) });
+  const n1 = sqlite.prepare('SELECT COUNT(*) c FROM pool_markets').get().c;
+  const r1 = await post('/api/pool/market/create-v07', createBody());
+  ok(r1.statusCode === 409 && J(r1).code === 'another_zk_market_unfinished' && J(r1).blocking_market_id === 'm-zk-live', `另一 zk_native 盘未完结(attested_v2 + exhausted≠true) ⇒ 409 带 blocking_market_id(实 ${r1.statusCode} ${String(r1.body).slice(0, 140)})`);
+  ok(sqlite.prepare('SELECT COUNT(*) c FROM pool_markets').get().c === n1 && calls.transfer.length === 0 && calls.send.length === 0, '409: 无新行、零转账、零 relay 命令(闸先于 get_pubkey)');
+  // (b) 同一盘 exhausted=true ⇒ 视为完结, 放行
+  sqlite.prepare("UPDATE pool_markets SET metadata = ? WHERE id = 'm-zk-live'").run(JSON.stringify({ zk_continuation: { exhausted: true } }));
+  // (c) 终态 completed/refunded/cancelled/expired ⇒ 完结; 非 zk_native 盘/shard_internal 行不挡
+  seedMarket('m-legacy-live', { resolution_rule_spec: JSON.stringify({ title: 't', resolution_criteria: 'c', data_source_canonical: 'u' }), protocol_status: 'pending_bettors' });
+  seedMarket('m-shard-row', { resolution_rule_spec: spec({ zk_native: true }), protocol_status: 'shard_internal' });
+  // (d) 配置缺失 ⇒ fail-closed 500(不放行)
+  const savedSink = process.env.ZK_SYSTEM_SINK_PK; delete process.env.ZK_SYSTEM_SINK_PK; reset();
+  const r2 = await post('/api/pool/market/create-v07', createBody());
+  ok(r2.statusCode === 500 && /ZK_SYSTEM_SINK_PK/.test(r2.body) && calls.transfer.length === 0, `主网缺 ZK_SYSTEM_SINK_PK ⇒ 500 fail-closed(实 ${r2.statusCode})`);
+  process.env.ZK_SYSTEM_SINK_PK = savedSink;
+  const savedDaa = process.env.ZK_CLAIM_RETIRE_DAA; delete process.env.ZK_CLAIM_RETIRE_DAA;
+  const r2b = await post('/api/pool/market/create-v07', createBody());
+  ok(r2b.statusCode === 500 && /ZK_CLAIM_RETIRE_DAA/.test(r2b.body), '主网缺 ZK_CLAIM_RETIRE_DAA ⇒ 500 fail-closed');
+  process.env.ZK_CLAIM_RETIRE_DAA = savedDaa;
+  // (e) deadline 晚于 票龄-60天 ⇒ 400; 之内 ⇒ 过闸(此处只断言没被这道闸拦: 状态码 ≠ 400 deadline_exceeds_ticket_age)
+  process.env.POOL_DEADLINE_MAX_DAY = '4000'; process.env.ZK_TICKET_SWEEP_DAA = '315360000'; reset();   // 365 天 - 60 天 = 最晚 305 天
+  const far = await post('/api/pool/market/create-v07', createBody({ outcome_end_date: new Date(Date.now() + 340 * 86400e3).toISOString() }));
+  ok(far.statusCode === 400 && J(far).code === 'deadline_exceeds_ticket_age', `deadline=now+340d > 365d-60d ⇒ 400 deadline_exceeds_ticket_age(实 ${far.statusCode} ${String(far.body).slice(0, 140)})`);
+  const near = await post('/api/pool/market/create-v07', createBody({ outcome_end_date: new Date(Date.now() + 300 * 86400e3).toISOString() }));
+  ok(near.statusCode !== 400 || J(near).code !== 'deadline_exceeds_ticket_age', `deadline=now+300d ≤ 305d ⇒ 不被票龄闸拦(实 ${near.statusCode})`);
+  finish();
+  process.env.ZK_TICKET_SWEEP_DAA = '864000'; reset();   // 票龄 1 天 ⇒ 任何 deadline 都晚于 1d-60d
+  const tiny = await post('/api/pool/market/create-v07', createBody());
+  ok(tiny.statusCode === 400 && J(tiny).code === 'deadline_exceeds_ticket_age', '票龄 < 结算余量 ⇒ 任何 deadline 都 400');
+  delete process.env.ZK_TICKET_SWEEP_DAA; delete process.env.POOL_DEADLINE_MAX_DAY;
+  // (f) 全部完结后放行(回到 S2 的 200 路径)
+  finish(); reset();
+  const r3 = await post('/api/pool/market/create-v07', createBody());
+  ok(r3.statusCode === 200 && J(r3).ok === true && J(r3).no_kas_stake === true, `全部完结后 create-v07 ⇒ 200(实 ${r3.statusCode} ${String(r3.body).slice(0, 120)})`);
+  // (g) 非不收 KAS 模式(simnet 无 flag)完全不受影响: 不查"一次一盘"
+  process.env.KASPA_NETWORK = 'simnet'; putAddrs('simnet'); reset();
+  const r4 = await post('/api/pool/market/create-v07', createBody());
+  ok(r4.statusCode === 400 && /missing maker_stake_kas/.test(r4.body), 'simnet(无模式位)仍是老行为, 不触发一次一盘闸');
+}
 
 // ═══ 6. 结构闸: 重开路由第一条语句 ═══
 console.log('[test] 6. 结构: 重开路由第一条语句');
