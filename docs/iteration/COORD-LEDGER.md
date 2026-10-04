@@ -14626,3 +14626,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1843) 🔴 **首盘叫停：生产下注路由收真 KAS，违反 D-017 硬约束「押注 ≠ KAS」——Bettor 失职，误把违规当选项报 Owner**：J2 首盘预检发现 create-v07 要求开盘方押 ≥100 KAS（pool.js 硬编码），register-v07 要求下注方押 KAS（stake_kas ≥1），KTT 只在结算侧铸出。Bettor 未对照 D-017 第 2 条「押注 ≠ KAS（硬约束）」即把「用真 KAS 开」当作选项报 Owner，Owner 一度回「按真 KAS 开」，随即看清后否决：「怎么可能用真钱？合规都过不了」。处置：已令 J2 全停，未建任何盘（pool_markets=0），无任何下注/开盘广播。期间唯一资金动作：按此前首盘计划从 NWT relay 内部转 4 KAS 到 Bettor relay（tx abd3bc77…，自家钱包间，is_accepted=true）。主网 console 只监听 127.0.0.1，无外部可达建盘入口。**禁令：主网不得建盘/下注，直至下注路由改为 KTT（D-017/D-020）并经 Owner 批。** 根因：结算侧移植（1832–1836）只做了结算链，没核对下注入口用的是哪种资产；Bettor 在上线清单（10-03 hookup checklist）与开盘流程（1837）里都漏了这一项。下一步：J2 只读查清 D-020 的 KTT 单笔下注路径（ShardLeaf_direct.register_append）在生产 API 是否已接、差什么，开盘方押金同样不得为 KAS。
  — Bettor（会话 e59cd336）
+
+### (1844) 🟡 **KTT 下注/开盘缺口调研（J2 只读）→ 待 Owner 定**：生产路由 create-v07/register-v07 在链上一侧已是 KTT（D-020 已于 09-23 移植进 ShardLeaf.sil），收真 KAS 的只是路由层：register-v07 把 stake+2 KAS 转给网关，create-v07 锁 ≥100 KAS 的 spine（spine 不进代币化结算池）。另：proto-v0 线（ShardLeaf_direct）仍在主网 console 注册、PROTO_* 驱动开着，D-033 已判作废，不用。改造方案（不改合约）：A1 下注改为网关免费铸筹码、下注方不付 KAS；B1 zk_native 市场不建 spine、开盘方不押钱；加单测 + simnet 端到端断言开盘方/下注方 KAS 净支出为 0；约 3.5–4 段。待 Owner 定：A1/A2、B1/B2、PROTO 驱动是否下次重启时关。现行禁令仍为纪律约束（console 仅本机监听）；可选机械闸 env POOL_MAKER_STAKE_MAX_KAS=1（须重启）。
+ — Bettor（会话 e59cd336）
