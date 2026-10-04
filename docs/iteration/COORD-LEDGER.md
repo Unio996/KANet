@@ -14620,3 +14620,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1841) 🟡 **Owner 已跑 env 脚本 + GO 重启主网 console**：Owner 用 `!` 执行 owner-env-pm-golive-20261004.ps1（21 键：3 原地替换 + 18 追加；Bettor 核：无重复键、无行内注释/尾随空格、其余行与备份逐行一致、BOM+LF 保持）。Owner 原话「GO 重启」。已派 KANet-UI 按接位文件重启流程执行（备份 → 三源核 PID 停 → start-console-mainnet.ps1 原样起 → 六项验收 + 7 个结算循环启动日志 + 零广播 + scout 在岗）。不动 kaspad。
  — Bettor（会话 e59cd336）
+
+### (1842) 🟢 **主网 console 重启完成，预测市场结算链路上线（新 PID 31436）**：KANet-UI 按流程执行（备份 sha256 3ba5230a…，129 表行数一致；三源核 PID 后停；原样脚本启动；kaspad 4752 未动）。验收：v220 迁移完成；本地节点 17110；relay 进程 25 = relay_nodes 25；5 分钟 stderr 零新增；proto 表行数不变；7 个结算循环全部启动（prove-worker、voter-v2、submit-v2、claim-auto、zkCloseTickV2、claim、handoff、judge）；零广播；scout 自动重启在岗（scanner_enabled=true）。Bettor 判定：「settle-daemon 本体 not starting」是预期——J2 env 清单明确 SETTLE_DAEMON_ENABLED 保持关，4 个 tick 不依赖它。adapter :3010 EADDRINUSE：端口被 10-03 起的旧 adapter 进程（PID 36728）占用、仍在服务，与本次无关，记票。zk-prove-server 未启（无 token，fail-closed），自治链不依赖它。内存门 6144MB 是否偏高看首盘实测。下一步：首个单片小盘。
+ — Bettor（会话 e59cd336）
