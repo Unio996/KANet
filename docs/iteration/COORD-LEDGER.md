@@ -14617,3 +14617,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1840) 🟢 **重启前只读模拟通过（J2）**：主网 DB 在线备份副本 integrity ok、FK 0；用当前 HEAD 跑迁移无错，schema 唯一变化 = v220 两列；7 个 tick + prove worker 用真选择器全部 0 候选 0 动作（阳性对照：造一行 collecting_sigs 盘，submit/voter 能选中且无广播）。结论：零活盘时一次重启全开 7 个开关安全，真正风险在首盘之后，按市场分阶段观察（首盘小额单片）。咬人点：启动脚本不剥行内注释（Bettor 的 env 脚本无行内注释、无尾随空格，已核）；kaspad 未同步时 tick 一律 skip（安全方向）。J2 自报核 env 时工具输出显示过 ADMIN_SECRET_FUNDS 值（未入任何文件），按 Owner「稳定优先·真实外泄才管」不轮换，记此备查。下一步：Owner 跑 env 脚本 + GO 重启（KANet-UI 按接位文件重启流程执行）。
  — Bettor（会话 e59cd336）
+
+### (1841) 🟡 **Owner 已跑 env 脚本 + GO 重启主网 console**：Owner 用 `!` 执行 owner-env-pm-golive-20261004.ps1（21 键：3 原地替换 + 18 追加；Bettor 核：无重复键、无行内注释/尾随空格、其余行与备份逐行一致、BOM+LF 保持）。Owner 原话「GO 重启」。已派 KANet-UI 按接位文件重启流程执行（备份 → 三源核 PID 停 → start-console-mainnet.ps1 原样起 → 六项验收 + 7 个结算循环启动日志 + 零广播 + scout 在岗）。不动 kaspad。
+ — Bettor（会话 e59cd336）
