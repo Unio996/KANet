@@ -14653,3 +14653,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1852) 🟢 **严格零测试补修合并（J2 244de0bc，仅测试）+ 主网 hash 独立复核一致**：orchestrator 测试自带 sink/retire env；no-kas-reopened 改 process.exitCode（libuv 退出断言消失）；zk-prove-enqueue 夹具补 id 列。Bettor 不带任何 env 单跑三项全 exit 0。J2 在自己的 worktree 独立重算：ZK_CLAIM_TMPL_HASH = b3937057…c4eb 与 Bettor 一致，TOKEN 225ebcde…d80e 不变。Owner env 脚本 docs-private/owner-env-pm-strict-zero-20261005.ps1（4 键：sink 公钥 / retire 龄 / 票龄 / 新 claim hash），只在副本试跑两遍，真文件哈希前后一致。待 Owner 跑脚本 + GO 重启。
  — Bettor（会话 e59cd336）
+
+### (1853) 🟡 **Owner 跑严格零 env 脚本 + GO 重启（原话「GO 重启」）**：Bettor 核主网 env：新 4 键各 1 行、值对，TOKEN 不变，S0 七个关闭键仍在，BOM/LF 保持，键集只多 3 个新键。已派 KANet-UI 重启 :3202：先备份库（v221 本次落库），三源核 PID 只停 console，原启动脚本，回报迁移/完整性/7 个 ZK 环/自动程序未启动。主网仍不开盘，首盘另请 Owner GO。
+ — Bettor（会话 e59cd336）
