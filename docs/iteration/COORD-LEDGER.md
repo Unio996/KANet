@@ -14605,3 +14605,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1836) 🟢 **结算移植段4 审过合并——结算侧代币化 4 段全部完成**：J2 @27b51146。claim/refund_claim/escape_claim/escape_trigger 代币化 relay 构造器 + console 三阶段编排 + claim tick 接线；simnet 2.0.1 开 tick 全自治 e2e（建盘→真 Groth16→zk_close→claim tick 自动领 partial+last 两笔上链）；refund/escape 诚实 + 负向（起点为合成状态，已如实标注）；双领仅 relay 预检+VM 级证据。maker 退出 refund_maker_unjoined 真共识诚实过 + 4 负向全拒。出证三防线：内存门（ZK_PROVE_MIN_FREE_MB，默认 6144，读不到即推迟）、失败自动重试（3 次指数退避，v220 迁移纯新增两列）、默认跑预编译 host 二进制（scripts/zk-precompile-host.sh）。Bettor 审迁移/内存门/重试逻辑；本地 8 组单测复跑全过（zk-close-dispatch.test 须带临时 DB_PATH 跑）。余项（记票，不阻断首个小盘）：refund/escape 未接 tick（首盘可走 admin 端点）；cancel_attest 无自治路径；WSL 侧 1200MB 看门狗配置化；合约 MIN_FEE 低于节点中继下限、诚实费按 mass 估；claim 需约 3.5 KAS 手续费周转；内存门默认 6144 可能偏高（实测出证前可用约 6GB），主网按实测设。下一步：Owner 批主网上线清单（env 追加、委员 is_oracle、预编译、console 重启、首个小盘）。
  — Bettor（会话 e59cd336）
+
+### (1837) 🟡 **Owner 批主网开盘默认流程（原话「按默认办！」）**：顺序 ① Bettor 备 env 追加脚本，Owner 用 `!` 执行（J2 先出权威 env 清单：各守护开关、SUFFIX 取值核对、settler/fee relay、首盘最小余额）② KANet-UI 在线备份主网 DB 后给 6 个委员钱包置 is_oracle=1（恰 6 行，事务内校验）③ Bettor 在 WSL 预编译 host 二进制并留 sha256 ④ Owner GO 后重启 console（v220 迁移纯新增两列）⑤ 首个单片小盘最小额走完 下注→结算→领奖，通过后再放开。3 个模板值随首盘冻结。
+ — Bettor（会话 e59cd336）
