@@ -61,8 +61,6 @@ console.log('[test] 1. assertNoKasStakeOnMainnet 网络矩阵');
 const GATED = [
   ['/api/pool/market/create', 'create'],
   ['/api/pool/market/create-v06', 'create-v06'],
-  ['/api/pool/market/create-v07', 'create-v07'],
-  ['/api/pool/market/m1/bettor/register-v07', 'register-v07'],
   ['/api/pool/market/m1/bettor/register-v07/prep', 'register-v07/prep'],
   ['/api/pool/market/m1/bettor/register-v07/confirm', 'register-v07/confirm'],
   ['/api/pool/market/m1/oracle/deposit', 'oracle/deposit'],
@@ -77,6 +75,8 @@ const GATED = [
   ['/api/proto-markets/m1/claim', 'proto-markets/claim'],
   ['/api/proto-markets/m1/withdraw', 'proto-markets/withdraw'],
 ];
+// 账本1846 S1/S2 起这两条是【显式重开】路由(主网只放行无 KAS 分支, 专测见 no-kas-reopened-routes.test.mjs); 这里只在"测试网过闸"与结构闸里带上它们。
+const REOPENED = [['/api/pool/market/create-v07', 'create-v07'], ['/api/pool/market/m1/bettor/register-v07', 'register-v07']];
 const app = Fastify(); await registerPoolRoutes(app); await registerProtoRoutes(app); await app.ready();
 const tables = ['pool_markets', 'pool_bettor_sides', 'market_shards', 'pool_bet_preps', 'proto_markets', 'proto_bets', 'proto_bet_intents', 'proto_settlement_intents', 'events'];
 const counts = () => Object.fromEntries(tables.map((t) => { try { return [t, sqlite.prepare(`SELECT COUNT(*) c FROM ${t}`).get().c]; } catch { return [t, -1]; } }));
@@ -105,7 +105,7 @@ for (const [url, name] of GATED) {
 console.log('[test] 3. 测试网 / simnet ⇒ 过闸(不返 mainnet_no_kas_stake 403), 行为不变');
 for (const net of ['testnet-12', 'simnet']) {
   process.env.KASPA_NETWORK = net;
-  for (const [url, name] of GATED) {
+  for (const [url, name] of [...GATED, ...REOPENED]) {
     let res; try { res = await post(url, {}); } catch (e) { res = { statusCode: -1, body: e.message }; }
     const j = (() => { try { return JSON.parse(res.body); } catch { return {}; } })();
     ok(j.code !== NO_KAS_STAKE_CODE && res.statusCode !== -1, `${name} @${net} 过闸(status=${res.statusCode}, 空体由原有校验接手)`);
@@ -115,6 +115,7 @@ for (const net of ['testnet-12', 'simnet']) {
 // ── 4. 结构闸 ──
 console.log('[test] 4. 结构: 第一条语句 + 无漏闸 POST 路由');
 const here = fileURLToPath(new URL('.', import.meta.url));
+const { REOPENED_ROUTES } = await import('../lib/mainnet-no-kas-stake-gate.mjs');
 const NOT_COLLECTING = new Set([   // 不向任何人收 KAS 的 POST 路由(显式白名单; 新增路由必须在此登记或加闸)
   '/api/pool/market/:id/settle', '/api/pool/market/:id/oracle/vote', '/api/pool/market/:id/bettor-refund-claim', '/api/pool/prevet-extract', '/api/pool/prevet',
   // 结算侧 admin 路由(admin secret + ADMIN_*_ENABLED env 双闸, 只付结算手续费/出证 gate 注资, 不向开盘人/下注人/委员收 KAS)与 broker 推荐(只读判断):
@@ -127,6 +128,12 @@ for (const file of ['pool.js', 'proto.js']) {
     if (!m) { if (/fastify\.post\(/.test(src[i])) ok(false, `${file}:${i + 1} 非标准形态的 POST 路由声明, 结构闸无法判定: ${src[i].trim().slice(0, 80)}`); continue; }
     const route = m[1];
     const next = (src[i + 1] || '').trim();
+    const reopened = /^const _noKas = assertNoKasStakeUnlessReopened\('([^']+)', '([^']+)'\); if \(_noKas\) return reply\.code\(_noKas\.http\)\.send\(_noKas\.body\);/.exec(next);
+    if (reopened) {
+      const exp = REOPENED.find(([u]) => u.replace(/\/m1\//, '/:id/') === route);
+      ok(!!exp && exp[1] === reopened[1] && REOPENED_ROUTES[reopened[1]] === reopened[2], `${file}:${i + 2} ${route} 重开路由: 第一条语句 = assertNoKasStakeUnlessReopened('${reopened[1]}', '${reopened[2]}') 且 id 与 REOPENED_ROUTES 一致`);
+      continue;
+    }
     const gated = /^const _noKas = assertNoKasStakeOnMainnet\('([^']+)'\); if \(_noKas\) return reply\.code\(_noKas\.http\)\.send\(_noKas\.body\);/.exec(next);
     if (gated) {
       const exp = GATED.find(([u]) => u.replace(/\/m1\//, '/:id/') === route);
@@ -136,7 +143,7 @@ for (const file of ['pool.js', 'proto.js']) {
     }
   }
 }
-ok(GATED.length === 17, `受闸路由 17 条(pool 12 + proto 5), 实 ${GATED.length}`);
+ok(GATED.length === 15 && REOPENED.length === 2, `受闸路由 15 条 + 显式重开 2 条 = 17(pool 12 + proto 5), 实 ${GATED.length}+${REOPENED.length}`);
 
 // ── 5. worldcup-schedule 开关 ──
 console.log('[test] 5. WORLDCUP_SCHEDULE_ENABLED 默认关');

@@ -24,7 +24,7 @@ import { ensureGateTmplHashFresh } from '../lib/gate-tmpl-hash.mjs';
 import { kaspaZk } from '../services/zk-prove-worker.mjs';
 import { checkAdminSecretTier } from '../lib/admin-secret-tier.mjs';
 import { assertAddressOnNetwork, configuredNetwork } from '../lib/kaspa-network.mjs';   // (b) 网络单一源 (设计 v0.2 §3): 前缀只对照 env KASPA_NETWORK, 不从地址推网络
-import { assertNoKasStakeOnMainnet } from '../lib/mainnet-no-kas-stake-gate.mjs';   // 账本1845 S0: 主网不收 KAS 硬闸(见该文件头)
+import { assertNoKasStakeOnMainnet, assertNoKasStakeUnlessReopened, noKasStakeModeOn, mainnetCreateV07Branch, parseStakeKtt } from '../lib/mainnet-no-kas-stake-gate.mjs';   // 账本1845 S0: 主网不收 KAS 硬闸(见该文件头)
 
 // 件⑤步骤2 疑似死端点命中计数(2026-07-16, KANet-UI, Owner终裁+Bettor #nig8da 派工): observe-only,
 // 零业务逻辑影响, 持久化(跨重启存活)——4个疑似死端点各挂一次调用, 7天观察窗到期零命中才走删除决策,
@@ -449,6 +449,8 @@ export async function buildBettorRefundClaim(marketId, { bettorPk: bettorPkRaw, 
     FROM pool_markets WHERE id = ?
   `).get(marketId);
   if (!market) return { ok: false, httpStatus: 404, error: 'market not found' };
+  // 账本1846 S2: 无 spine 的盘(ZK 原生·不收 KAS)没有 legacy 退款腿(退款走 PayoutShardV2.refund_claim 自治 tick), 此处直接 409, 不让 assertAddressOnNetwork(null) 抛 500。
+  if (!market.spine_p2sh) return { ok: false, httpStatus: 409, error: 'no_spine_market: 本盘无 spine(ZK 原生/不收 KAS), 退款走自治 refund_claim tick' };
 
   // ── P1 授权闸(共享验证器本体, 单一实现) ────────────────────────────────────────
   //  这是 bettor 退款【两个真实 IPC 调用点】之一(另一个在 bettor-refund-claim-auto.mjs),
@@ -1091,9 +1093,11 @@ export async function registerPoolRoutes(fastify) {
   //
   // Body params identical to create-v06 + optional shard_id/shard_count (default 0/1 single-shard).
   fastify.post('/api/pool/market/create-v07', async (request, reply) => {
-    const _noKas = assertNoKasStakeOnMainnet('create-v07'); if (_noKas) return reply.code(_noKas.http).send(_noKas.body);   // 账本1845 S0: 主网不收 KAS(D-017 §2), 第一条语句, 先于任何查库/relay/转账
+    const _noKas = assertNoKasStakeUnlessReopened('create-v07', 'S2-zk-native-no-spine'); if (_noKas) return reply.code(_noKas.http).send(_noKas.body);   // 账本1846 S2: 显式重开(见 mainnet-no-kas-stake-gate.mjs REOPENED_ROUTES)——只重开"ZK 原生盘·不建 spine·不收 KAS"这一条分支, 第一条语句, 先于任何查库/relay/转账
+    const _noKasMode = noKasStakeModeOn();   // 主网(或 simnet 彩排显式 KANET_NO_KAS_STAKE_MODE=1): 本路由走无 KAS 分支; 其它网络老行为逐字节不变
     const b = request.body || {};
-    const required = ['maker_relay_id', 'outcome_side', 'outcome_end_date', 'resolution_rule_spec', 'maker_stake_kas'];
+    if (_noKasMode) { const _br = mainnetCreateV07Branch(b.resolution_rule_spec); if (_br) return reply.code(_br.http).send(_br.body); }   // S2: 无 KAS 模式只开 ZK 原生盘(zk_native=false / spec 非法 JSON ⇒ 403)
+    const required = _noKasMode ? ['maker_relay_id', 'outcome_side', 'outcome_end_date', 'resolution_rule_spec'] : ['maker_relay_id', 'outcome_side', 'outcome_end_date', 'resolution_rule_spec', 'maker_stake_kas'];   // 无 KAS 模式: 开盘人不押任何东西, maker_stake_kas 不要求(传了也忽略)
     for (const k of required) {
       if (b[k] === undefined || b[k] === null || b[k] === '') return reply.code(400).send({ ok: false, error: `missing ${k}` });
     }
@@ -1311,16 +1315,16 @@ export async function registerPoolRoutes(fastify) {
     const SS_MIN_SPENDABLE_FLOOR_KAS_V07 = 5;
     const dynamicMinKas = oracleFeePct > 0 ? Math.ceil(12500 / oracleFeePct) : 0;
     const minSpendableKas = Math.max(SS_MIN_SPENDABLE_FLOOR_KAS_V07, dynamicMinKas);
-    if (process.env.KANET_TESTNET_NO_LIMITS !== '1' && parseFloat(b.maker_stake_kas) < minSpendableKas) {
+    if (!_noKasMode && process.env.KANET_TESTNET_NO_LIMITS !== '1' && parseFloat(b.maker_stake_kas) < minSpendableKas) {   // S2: 无 KAS 模式没有 5 KAS 可花费下限(无 spine)
       return reply.code(400).send({ ok: false, error: `maker_stake_kas ${b.maker_stake_kas} < min spendable ${minSpendableKas} KAS` });
     }
-    const makerStakeKas = parseFloat(b.maker_stake_kas);
+    const makerStakeKas = _noKasMode ? 0 : parseFloat(b.maker_stake_kas);   // S2: 无 KAS 模式 maker_stake 恒 0
     const oracleBondKas = parseFloat(b.oracle_bond_kas);
-    if (!Number.isFinite(makerStakeKas) || makerStakeKas <= 0) return reply.code(400).send({ ok: false, error: 'maker_stake_kas must be positive' });
+    if (!_noKasMode && (!Number.isFinite(makerStakeKas) || makerStakeKas <= 0)) return reply.code(400).send({ ok: false, error: 'maker_stake_kas must be positive' });
     // J2-tn #28: committeeMode bond=0 合法 (pool-funded 委员奖, 非实 collateral) → 允许 0, 仅拒负值/NaN。
     if (!Number.isFinite(oracleBondKas) || oracleBondKas < 0) return reply.code(400).send({ ok: false, error: 'oracle_bond_kas must be >= 0 (v0.6/v0.7 committeeMode: 0 = no pool-funded committee bond, oracle paid via fee only)' });
     // 100 KAS Owner 钦定 demo 实质押 — 移出 NO_LIMITS 守卫 (r544 v2 Bettor APPROVE).
-    if (makerStakeKas < POOL_MAKER_STAKE_MIN_KAS) return reply.code(400).send({ ok: false, error: `maker_stake_kas must be >= ${POOL_MAKER_STAKE_MIN_KAS} KAS (Owner 钦定 demo 实质押 skin-in-game, 单一源 L33)` });
+    if (!_noKasMode && makerStakeKas < POOL_MAKER_STAKE_MIN_KAS) return reply.code(400).send({ ok: false, error: `maker_stake_kas must be >= ${POOL_MAKER_STAKE_MIN_KAS} KAS (Owner 钦定 demo 实质押 skin-in-game, 单一源 L33)` });
     // KANet-UI 2026-06-06 (Bettor ③ APPROVE r546): 创建端 spec 结构化强制 (= 配 bot 入口 filter 双层堵).
     try { _maybeDeriveSpecFromSourceKind(b); } catch (e) { return reply.code(400).send({ ok: false, error: `source_kind derive fail: ${e.message}` }); }
     // 🔴 Owner "ZK走到底"钦定(2026-07-10, Bettor #f9ckoz DoD·D-001 committed架构): create-v07 新盘默认
@@ -1337,7 +1341,7 @@ export async function registerPoolRoutes(fastify) {
     if (!isStructuredSpec(b.resolution_rule_spec)) return reply.code(400).send({ ok: false, error: 'resolution_rule_spec must be JSON with non-empty title + resolution_criteria + data_source_canonical (= 可填可信源下拉 source_kind 自动 derive, 或自填 canonical URL)' });
     // SEAM fix (NWT FINDING-1): 建市 chokepoint — spec 带 resolution_predicate 必过 validateResolutionPredicate (shape+护栏6 半线单源)。整数线/畸形 → 400, 不依赖 caller 走 buildSportsCard。
     { const _pv = assertSpecPredicateValid(b.resolution_rule_spec); if (!_pv.valid) return reply.code(400).send({ ok: false, error: `resolution_predicate 非法 (建市拒, 防 un-settleable): ${_pv.reason}` }); }
-    if (process.env.KANET_TESTNET_NO_LIMITS !== '1') {
+    if (!_noKasMode && process.env.KANET_TESTNET_NO_LIMITS !== '1') {
       if (makerStakeKas > MAKER_STAKE_MAX_KAS) return reply.code(400).send({ ok: false, error: `maker_stake_kas must be <= ${MAKER_STAKE_MAX_KAS} KAS` });
     }
     const makerStakeAmount = Math.round(makerStakeKas * 1e8);
@@ -1402,8 +1406,8 @@ export async function registerPoolRoutes(fastify) {
     const { computeSpineP2SH_v07, deriveMarketIdHash } = await import('../lib/pool-p2sh-v07.mjs');
     const market_id_hash = deriveMarketIdHash(marketId);
 
-    let spineResult;
-    try {
+    let spineResult = null;   // S2: 无 KAS 模式 ⇒ 不建 spine(PoolSpine*.sil 不在主网合约集), 没有任何转账
+    if (!_noKasMode) try {
       spineResult = await computeSpineP2SH_v07({
         makerPk, brokerPk, poolMerkleRoot,
         deadline, minerFee, brokerFeePct, oracleFeePct,
@@ -1417,7 +1421,7 @@ export async function registerPoolRoutes(fastify) {
     }
 
     let spineTxId = null;
-    try {
+    if (!_noKasMode) try {
       // 事故硬化(2026-07-08, yxllc spine 100KAS 追踪战役): 落库(下面 INSERT INTO pool_markets)前的
       // landed 确认必须是深确认(minDepth=REORG_SAFE_MIN_DEPTH), 不能停在浅/mempool-accepted 级——
       // block 是 blue 不代表这笔 tx 本身赢了 acceptance(同一源 UTXO 可能被 gateway 自己另一笔并发 tx
@@ -1432,7 +1436,7 @@ export async function registerPoolRoutes(fastify) {
 
     try {
       const initialMetadata = JSON.stringify({
-        spine_redeem_script_hex: spineResult.redeemScript,
+        ...(spineResult ? { spine_redeem_script_hex: spineResult.redeemScript } : { no_spine: true, no_kas_stake: true }),
         v07_pool_merkle_root: poolMerkleRoot,
         v07_shard_id: shard_id,
         v07_shard_count: shard_count,
@@ -1447,7 +1451,7 @@ export async function registerPoolRoutes(fastify) {
         protocol_status, sides_merkle_root, oracle_relay_ids, broker_relay_id, metadata, category,
         protocol_version, pool_merkle_root, deadline_daa, fee_rules
       ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-        marketId, b.maker_relay_id, maker_relay_pk, spineResult.p2shAddr, spineTxId, marketMetadataHash,
+        marketId, b.maker_relay_id, maker_relay_pk, spineResult ? spineResult.p2shAddr : null, spineTxId, marketMetadataHash,
         null, null, null, brokerPk,
         deadline, minerFee, brokerFeePct, oracleBondAmount, makerStakeAmount,
         b.outcome_market_source, b.outcome_condition_id, b.outcome_token_id, b.outcome_side, b.resolution_rule_spec,
@@ -1471,17 +1475,18 @@ export async function registerPoolRoutes(fastify) {
 
     const _mrowV07 = sqlite.prepare('SELECT * FROM pool_markets WHERE id = ?').get(marketId);
     let _bcastV07 = null;
-    if (_mrowV07) _bcastV07 = await _broadcastMarketPublished(_mrowV07, b.maker_relay_id);
+    if (_mrowV07 && _mrowV07.spine_p2sh) _bcastV07 = await _broadcastMarketPublished(_mrowV07, b.maker_relay_id);   // S2: 无 spine 的盘不发跨节点 publish(载荷以 spine 为锚, TN12 已退役)
     _autoRecommendBrokeredMarket(marketId, b.broker_relay_id);  // J2-tn task#13 通电 broker_recommendations (fire-and-forget)
 
     return reply.send({
       ok: true,
       market_id: marketId,
       protocol_version: 'v0.7',
-      spine_p2sh: spineResult.p2shAddr,
+      spine_p2sh: spineResult ? spineResult.p2shAddr : null,
       spine_lock_tx: spineTxId,
+      no_kas_stake: _noKasMode,
       pool_merkle_root: poolMerkleRoot,
-      maker_stake_locked_kas: makerStakeAmount / 1e8,
+      maker_stake_locked_kas: makerStakeAmount / 1e8,   // 无 KAS 模式 = 0
       miner_fee_sompi: minerFee,
       broker_fee_pct_bps: brokerFeePct,
       shard_id, shard_count, market_id_hash,
@@ -1497,10 +1502,11 @@ export async function registerPoolRoutes(fastify) {
   //   register_append (splice, drift-safe), NO-TX accounting (market_shards). Gateway-custody (testnet): bettor relay funds the
   //   gateway (maker), the gateway builds the register. Wraps pool-shard-register orchestrator (allocator + pool-register-builder).
   fastify.post('/api/pool/market/:id/bettor/register-v07', async (request, reply) => {
-    const _noKas = assertNoKasStakeOnMainnet('register-v07'); if (_noKas) return reply.code(_noKas.http).send(_noKas.body);   // 账本1845 S0: 主网不收 KAS(D-017 §2), 第一条语句, 先于任何查库/relay/转账
+    const _noKas = assertNoKasStakeUnlessReopened('register-v07', 'S1-gateway-sponsor'); if (_noKas) return reply.code(_noKas.http).send(_noKas.body);   // 账本1846 S1: 显式重开(见 mainnet-no-kas-stake-gate.mjs REOPENED_ROUTES)——只重开"网关代付·下注人不转账"这一条分支, 第一条语句, 先于任何查库/relay/转账
+    const _noKasMode = noKasStakeModeOn();   // 主网(或 simnet 彩排显式 KANET_NO_KAS_STAKE_MODE=1): 走网关代付, 不收下注人 KAS; 其它网络老行为逐字节不变
     const logicalMarketId = request.params.id;
     const b = request.body || {};
-    if ((!b.bettor_relay_id && !b.bettor_pk) || b.direction === undefined || !b.stake_kas) {
+    if ((!b.bettor_relay_id && !b.bettor_pk) || b.direction === undefined || (!_noKasMode && !b.stake_kas)) {   // 无 KAS 模式: 下注量字段是 stake_ktt(下面 parseStakeKtt), stake_kas 不读
       return reply.code(400).send({ ok: false, error: 'bettor_relay_id OR bettor_pk (fresh keypair, cross-node fixture), direction, stake_kas required' });
     }
     const market = sqlite.prepare('SELECT * FROM pool_markets WHERE id = ?').get(logicalMarketId);
@@ -1527,8 +1533,15 @@ export async function registerPoolRoutes(fastify) {
 
     const direction = parseInt(b.direction, 10);
     if (direction !== 0 && direction !== 1) return reply.code(400).send({ ok: false, error: 'direction must be 0 (YES) or 1 (NO)' });
-    const stakeSompi = Math.round(parseFloat(b.stake_kas) * 1e8);
-    if (!Number.isFinite(stakeSompi) || stakeSompi < BETTOR_MIN_STAKE_POLICY) return reply.code(400).send({ ok: false, error: `stake_kas must be >= ${BETTOR_MIN_STAKE_POLICY / 1e8} KAS` });
+    let stakeSompi;   // 老路径: KAS sompi; 无 KAS 模式: 筹码(KTT)代币单位整数(链上 stake 字段本来就是这个数, 见 registerBettorOnShard 铸 chip)
+    if (_noKasMode) {
+      const _st = parseStakeKtt(b, BETTOR_MIN_STAKE_POLICY);   // 下限数值沿用 BETTOR_MIN_STAKE_POLICY(只是数, 不再是 KAS)
+      if (!_st.ok) return reply.code(_st.http).send(_st.body);
+      stakeSompi = _st.stakeUnits;
+    } else {
+      stakeSompi = Math.round(parseFloat(b.stake_kas) * 1e8);
+      if (!Number.isFinite(stakeSompi) || stakeSompi < BETTOR_MIN_STAKE_POLICY) return reply.code(400).send({ ok: false, error: `stake_kas must be >= ${BETTOR_MIN_STAKE_POLICY / 1e8} KAS` });
+    }
 
     // oracle/bettor exclusivity (area-1 invariant) — same as /bettor/register.
     let oracleIds = [];
@@ -1563,7 +1576,7 @@ export async function registerPoolRoutes(fastify) {
 
     // bettor funds the gateway (custody-bound, like publish): stake + register/genesis fee headroom.
     //   fresh keypair bettor: gateway sponsors stake from its own balance (testnet fixture, no bettor relay to transfer from).
-    if (!freshBettor) {
+    if (!freshBettor && !_noKasMode) {   // S1: 无 KAS 模式 = 与 freshBettor 同款"网关代付": 下注人钱包零转账, 网关用自己的 KAS 付 dust+手续费; bettor_pk 仍由下注人地址推出(输赢归属不变)
       try { await transferAndConfirm(b.bettor_relay_id, relayAddr, ((stakeSompi + 200_000_000) / 1e8).toFixed(8), { origin: 'legacy-unmigrated' }); }
       catch (e) { return reply.code(503).send({ ok: false, error: `bettor→gateway funding failed: ${e.message}` }); }
     }
@@ -1632,7 +1645,7 @@ export async function registerPoolRoutes(fastify) {
         ..._zkTmpl,   // 账本 1813 A1: tokenTmplHash/claimTmplHash/marketSuffixHash
         zkNative: _zkNative, closeZkTmplAnchor: _closeZkTmplAnchor,   // 非 zkNative 市场: false/null，等价于不传，行为不变
       });
-      return reply.send({ ok: true, logical_market_id: logicalMarketId, bettor_pk: bettorPk, ...result });
+      return reply.send({ ok: true, logical_market_id: logicalMarketId, bettor_pk: bettorPk, no_kas_stake: _noKasMode, stake_ktt: _noKasMode ? stakeSompi : undefined, ...result });
     } catch (e) {
       console.error(`[pool/register-v07] ${logicalMarketId} fail: ${e.message}`);
       return reply.code(500).send({ ok: false, error: `register-v07 failed: ${e.message}` });
@@ -3998,6 +4011,8 @@ export async function registerPoolRoutes(fastify) {
     const marketId = request.params.id;
     const market = sqlite.prepare('SELECT * FROM pool_markets WHERE id = ?').get(marketId);
     if (!market) return reply.code(404).send({ ok: false, error: 'market not found' });
+    // 账本1846 S2: 无 spine 的盘由自治 ZK tick 结算; 手动把它翻到 verifying 会把它交给 legacy 结算器(那边按 spine 建 tx)——直接 409。
+    if (!market.spine_p2sh) return reply.code(409).send({ ok: false, error: 'no_spine_market: 本盘无 spine(ZK 原生/不收 KAS), 由自治 ZK tick 结算, 不接受手动 settle' });
     if (market.protocol_status !== 'pending_bettors') {
       return reply.code(409).send({ ok: false, error: `market status=${market.protocol_status}, not settle-ready` });
     }
