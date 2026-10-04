@@ -1454,6 +1454,9 @@ async function handlePoolBetRegistered(msg) {
     return;
   }
 
+  // 账本1846 S2: 无 spine 的盘(ZK 原生·不收 KAS)的押注只走 register-v07 网关代付, 没有跨节点 side_lock 注册这条路 ⇒ 显式丢弃(旧代码会走到 createHash(null).update 抛错)。
+  if (!market.spine_p2sh) { console.log(`[trade-filter:bet-reg] skip: market ${msg.market_id.slice(0, 12)} 无 spine(ZK 原生/不收 KAS), 不适用跨节点 side_lock 注册`); return; }
+
   // (b) 网络单一源: 本机 market 行的 spine_p2sh 必须在配置网络上(D-017 过渡态存量 kaspatest 行在主网进程里由此丢弃); 入站路径不抛, 限频记录。
   const _bnc = _inboundNetCheck(market.spine_p2sh, 'trade-filter:bet-reg');
   if (!_bnc.ok) return;

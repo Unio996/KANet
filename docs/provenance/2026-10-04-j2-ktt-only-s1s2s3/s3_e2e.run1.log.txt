@@ -1,0 +1,21 @@
+13:34:30 balances before (KAS): {
+  maker: 236.664475,
+  settler: 350.710439,
+  fee: 300,
+  bettorA: 263.903892,
+  bettorB: 233.903892
+}
+13:34:30 create-v07 (no maker_stake_kas) curDaa 55371 targetDaa 56731
+13:34:30 create-v07 => {"status":"pending_bettors","ok":true,"market_id":"ext-pool-v07-1791120870824-btduw","protocol_version":"v0.7","spine_p2sh":null,"spine_lock_tx":null,"no_kas_stake":true,"pool_merkle_root":"46fa6978ef43158da20d34fe60fbafc16ea543543be5933b9f2455bcfb0d10c8","maker_stake_locked_kas":0,"miner_fee_sompi":5000000,"broker_fee_pct_bps":190,"shard_id":0,"shard_count":1,"market_id_hash":"a44945dfc21b3f57a7ce59ec949c10d40c82bca4178c19b467c1aae24db0d976","cross_node_publish_tx":null,"category":"crypto","next_step":"bettors register directly via POST /api/pool/market/ext-pool-v07-1791120870824-btduw/bettor/register-v07/{prep,confirm} (TODO 批3) OR reuse register-v06 endpoint for single-shard wire (= same 
+13:34:30   ❌ create-v07 200 + no_kas_stake=true
+13:34:30   ✅ 响应: spine_p2sh/spine_lock_tx=null, maker_stake_locked_kas=0
+13:34:35   ✅ 建盘后(未下注): 网关/下注人钱包余额逐 sompi 不变 = 建盘没有任何链上转账
+13:35:47 bettorA dir=0 stake_ktt=1000000000 (72017ms) => {"status":200,"ok":true,"logical_market_id":"ext-pool-v07-1791120870824-btduw","bettor_pk":"060b0264800672da79c533ae1534310f7925beeac945363bd2cd0d2b7402dc79","no_kas_stake":true,"stake_ktt":1000000000,"action":"use","shardIndex":0,"shardMarketId":"ext-pool-v07-1791120870824-btduw-s0","shardP2sh":"kaspasim:pzhmupr0gdlvgq9yu26mzrs2vw8nt0fa52l2e27nh9g73yanvtdvcwdxd8d4f","leafTx":"831554b227e9a12117b4800f98220e6354a203db6ff0723c518346d25509e747","leafOutpoint":"831554b227e9a12117b4800f98220e6354a203
+13:35:47   ✅ bettorA register-v07 stake_ktt=1000000000 ⇒ 200 no_kas_stake
+13:35:47   ✅ bettorA 钱包余额下注后逐 sompi 不变(26390389200 == 26390389200)
+13:36:21 bettorB dir=1 stake_ktt=2000000000 (33358ms) => {"status":200,"ok":true,"logical_market_id":"ext-pool-v07-1791120870824-btduw","bettor_pk":"b8fd583b660dea6c94bc0962a2f4921e763578bdeb375575fdd7feddf48dfd27","no_kas_stake":true,"stake_ktt":2000000000,"action":"use","shardIndex":0,"shardMarketId":"ext-pool-v07-1791120870824-btduw-s0","shardP2sh":"kaspasim:pzhmupr0gdlvgq9yu26mzrs2vw8nt0fa52l2e27nh9g73yanvtdvcwdxd8d4f","leafTx":"335fc99224c8d73a306f06add71444eb156498a3e7f27def35af6e2d4eb2b541","leafOutpoint":"335fc99224c8d73a306f06add71444eb156498
+13:36:21   ✅ bettorB register-v07 stake_ktt=2000000000 ⇒ 200 no_kas_stake
+13:36:21   ✅ bettorB 钱包余额下注后逐 sompi 不变(23390389200 == 23390389200)
+13:36:21   ✅ 不收 KAS 模式 stake_kas ⇒ 400 stake_ktt_required(不读老字段)
+13:36:21   ✅ register-v07/prep ⇒ 403
+13:36:21 waiting ticks… 0s  daa=55688  claims=0 []

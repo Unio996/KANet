@@ -1,0 +1,1320 @@
+[utxo-fetch-probe] #105 at=2026-10-04T14:31:55.412Z ms=1 addrCount=1 entries=1 roughBytesEst=0MB
+[utxo-fetch-probe] #106 at=2026-10-04T14:31:55.413Z ms=0 addrCount=1 entries=1 roughBytesEst=0MB
+[utxo-fetch-probe] #107 at=2026-10-04T14:31:55.413Z ms=0 addrCount=1 entries=1 roughBytesEst=0MB
+[utxo-fetch-probe] #108 at=2026-10-04T14:31:55.413Z ms=0 addrCount=1 entries=1 roughBytesEst=0MB
+[utxo-fetch-probe] #109 at=2026-10-04T14:31:55.413Z ms=1 addrCount=1 entries=1 roughBytesEst=0MB
+[utxo-fetch-probe] #110 at=2026-10-04T14:31:55.414Z ms=0 addrCount=1 entries=1 roughBytesEst=0MB
+[pool/create-v07] auto-derived pool_merkle_root=46fa6978ef43.. snapshotDaa=87107 pool_size=6 source=chain_view deadline_daa=93706 (= currentDaa 87707 + 5999 未来 DAA)
+[pool/auto-recommend] market=ext-pool-v07 broker=61f72c5b → skip: prevet warn (score 6/10) — 推单 reject, 0.01K bond 没收
+[relay:e2e-oracle-3] 2026-10-04T14:32:00.366Z [rpc] block #33000 (attempted: 0)
+[relay:e2e-settler] 2026-10-04T14:32:00.366Z [rpc] block #33000 (attempted: 0)
+[relay:e2e-maker] 2026-10-04T14:32:00.366Z [rpc] block #33000 (attempted: 0)
+[relay:e2e-oracle-2] 2026-10-04T14:32:00.366Z [rpc] block #33000 (attempted: 0)
+[relay:e2e-bettorB] 2026-10-04T14:32:00.366Z [rpc] block #33000 (attempted: 0)
+[relay:e2e-bettorA] 2026-10-04T14:32:00.366Z [rpc] block #33000 (attempted: 0)
+[relay:e2e-oracle-5] 2026-10-04T14:32:00.366Z [rpc] block #33000 (attempted: 0)
+[relay:e2e-fee] 2026-10-04T14:32:00.366Z [rpc] block #33000 (attempted: 0)
+[relay:e2e-oracle-6] 2026-10-04T14:32:00.366Z [rpc] block #33000 (attempted: 0)
+[relay:e2e-oracle-1] 2026-10-04T14:32:00.366Z [rpc] block #33000 (attempted: 0)
+[relay:e2e-oracle-4] 2026-10-04T14:32:00.366Z [rpc] block #33000 (attempted: 0)
+[diag:step] proc.silverc.compile.bshard-artifacts ms=355 cmd=silverc ok=1 at=2026-10-04T14:32:00.790Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=345 cmd=silverc ok=1 at=2026-10-04T14:32:01.141Z
+[relay:e2e-maker] 10/4/2026, 21:32:01 TRANSFER 1.20000000 → drv794aplec3 TX: 03fead59d5798578de88c020ac2c7d2b12f17af03b9e5b8fc93e196fd29b26c8 fee: 0.032036
+[relay:e2e-maker] [mass-floor:observe] site=unlockBshardGenesisMintPayout compute=8083 storage=201768 transient=1412 mass_ub=201768 minFee=20176800 actualFee=1000000 would_reject=true wasm=panic(undefined) source=7b1e18cc
+[relay:e2e-maker] [unlockBshardGenesisMintPayout invariant] Σin=120000000 Σout=119000000 fee=1000000 (mass_ub=201768 minFee=20176800 ⚠ would-reject(observe)), 2 outputs all >= dust
+[diag:step] proc.silverc.compile.bshard-artifacts ms=15 cmd=silverc ok=1 at=2026-10-04T14:32:06.183Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=51 cmd=silverc ok=1 at=2026-10-04T14:32:06.239Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=52 cmd=silverc ok=1 at=2026-10-04T14:32:06.297Z
+[relay:e2e-maker] 10/4/2026, 21:32:06 TRANSFER 1.20000000 → drv794aplec3 TX: d6ff1c367150151ac7aa53849cc68d25ab951b117475cbf429846fca7107b489 fee: 0.032036
+[relay:e2e-maker] [mass-floor:observe] site=unlockBshardGenesisMintShardLeaf compute=8083 storage=201768 transient=1412 mass_ub=201768 minFee=20176800 actualFee=1000000 would_reject=true wasm=panic(undefined) source=7b1e18cc
+[relay:e2e-maker] [unlockBshardGenesisMintShardLeaf invariant] Σin=120000000 Σout=119000000 fee=1000000 (mass_ub=201768 minFee=20176800 ⚠ would-reject(observe)), 2 outputs all >= dust
+[diag:step] proc.silverc.compile.bshard-artifacts ms=33 cmd=silverc ok=1 at=2026-10-04T14:32:13.368Z
+[relay:e2e-maker] 10/4/2026, 21:32:13 TRANSFER 1.20000000 → drv794aplec3 TX: a4abe5b6e1ac8ad9c3ebecda9fc2cdb3a7822058808d632fb29620207067e7de fee: 0.032036
+[relay:e2e-maker] [mass-floor:observe] site=unlockBshardGenesisMintStakeChip compute=8083 storage=201768 transient=1412 mass_ub=201768 minFee=20176800 actualFee=1000000 would_reject=true wasm=panic(undefined) source=7b1e18cc
+[relay:e2e-maker] [unlockBshardGenesisMintStakeChip invariant] Σin=120000000 Σout=119000000 fee=1000000 (mass_ub=201768 minFee=20176800 ⚠ would-reject(observe)), 2 outputs all >= dust
+[relay:e2e-bettorA] 2026-10-04T14:32:17.690Z [rpc] catching up from Console DB...
+[relay:e2e-bettorB] 2026-10-04T14:32:17.690Z [rpc] catching up from Console DB...
+[relay:e2e-maker] 2026-10-04T14:32:17.690Z [rpc] catching up from Console DB...
+[relay:e2e-settler] 2026-10-04T14:32:17.691Z [rpc] catching up from Console DB...
+[relay:e2e-fee] 2026-10-04T14:32:17.690Z [rpc] catching up from Console DB...
+[relay:e2e-bettorA] 2026-10-04T14:32:17.693Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-bettorA] 2026-10-04T14:32:17.693Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-bettorB] 2026-10-04T14:32:17.693Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-bettorB] 2026-10-04T14:32:17.693Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-maker] 2026-10-04T14:32:17.694Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-maker] 2026-10-04T14:32:17.694Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-settler] 2026-10-04T14:32:17.694Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-settler] 2026-10-04T14:32:17.694Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-fee] 2026-10-04T14:32:17.693Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-fee] 2026-10-04T14:32:17.693Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-3] 2026-10-04T14:32:17.735Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-6] 2026-10-04T14:32:17.735Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-1] 2026-10-04T14:32:17.735Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-2] 2026-10-04T14:32:17.735Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-4] 2026-10-04T14:32:17.735Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-5] 2026-10-04T14:32:17.735Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-3] 2026-10-04T14:32:17.740Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-3] 2026-10-04T14:32:17.740Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-6] 2026-10-04T14:32:17.740Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-6] 2026-10-04T14:32:17.740Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-1] 2026-10-04T14:32:17.740Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-1] 2026-10-04T14:32:17.740Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-2] 2026-10-04T14:32:17.741Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-2] 2026-10-04T14:32:17.741Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-5] 2026-10-04T14:32:17.741Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-5] 2026-10-04T14:32:17.741Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-4] 2026-10-04T14:32:17.741Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-4] 2026-10-04T14:32:17.741Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[diag:step] pair.scanAndIngestPairs ms=1 since_rowid=0 max_rowid=0 hits=0 at=2026-10-04T14:32:18.015Z
+[diag:step] zk.closeTickV2 ms=0 at=2026-10-04T14:32:18.046Z
+[diag:step] zk.claimAutonomousTick ms=0 at=2026-10-04T14:32:18.046Z
+[diag:step] zk.handoffAutonomousTick ms=0 at=2026-10-04T14:32:18.046Z
+[bshard-close-voter-v2] tick: 1 pending | signed=0 refused=0 skipped=6 errored=0
+[diag:step] zk.judgeProposeAutonomousTick ms=3 at=2026-10-04T14:32:18.049Z
+[relay:e2e-settler] 10/4/2026, 21:32:18 command bshard_close_attest_v2 failed: UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0
+[bshard-close-submit-v2] market=24-btduw submit fail: no txId in relay response: {"error":"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0","phase":"execution"}
+[bshard-close-submit-v2] tick: 1 pending | submitted=0 notReady=0 failed=1 errored=0 resumed=0
+[relay:e2e-maker] 10/4/2026, 21:32:20 TRANSFER 1.00000000 → drv794aplec3 TX: 046860072b4157f20b40c9f31575febb58ff825c802395cd9059aa1bbc14f612 fee: 0.032036
+[relay:e2e-maker] [mass-floor:observe] site=unlockBshardRegister compute=43688 storage=286814 transient=84872 mass_ub=286814 minFee=28681400 actualFee=15000000 would_reject=true wasm=panic(undefined) source=7b1e18cc
+[relay:e2e-maker] [unlockBshardRegister invariant] Σin=140000000 Σout=125000000 fee=15000000 (mass_ub=286814 minFee=28681400 ⚠ would-reject(observe)), 4 outputs all >= dust
+[diag:step] http.slow route=/api/pool/market/:id/bettor/register-v07 method=POST bytes=682 status=200 ms=27041 ip=127.0.0.1 ua=node q=- at=2026-10-04T14:32:27.471Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=16 cmd=silverc ok=1 at=2026-10-04T14:32:27.496Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=30 cmd=silverc ok=1 at=2026-10-04T14:32:27.531Z
+[relay:e2e-maker] 10/4/2026, 21:32:27 TRANSFER 1.20000000 → drv794aplec3 TX: b852ed6d085c75a6dead1713e31a5fd076eb1db0178b8980a2e945a2521ff395 fee: 0.032036
+[relay:e2e-maker] [mass-floor:observe] site=unlockBshardGenesisMintStakeChip compute=8083 storage=201768 transient=1412 mass_ub=201768 minFee=20176800 actualFee=1000000 would_reject=true wasm=panic(undefined) source=7b1e18cc
+[relay:e2e-maker] [unlockBshardGenesisMintStakeChip invariant] Σin=120000000 Σout=119000000 fee=1000000 (mass_ub=201768 minFee=20176800 ⚠ would-reject(observe)), 2 outputs all >= dust
+[relay:e2e-maker] 10/4/2026, 21:32:34 TRANSFER 1.00000000 → drv794aplec3 TX: 7306da4efe559cd970d6d7bd7f05ca9b59cfeb0507f42bb8c0a26527d333c625 fee: 0.032036
+[diag:step] proc.silverc.compile.bshard-artifacts ms=32 cmd=silverc ok=1 at=2026-10-04T14:32:37.630Z
+[relay:e2e-maker] [mass-floor:observe] site=unlockBshardRegister compute=53957 storage=59134 transient=97948 mass_ub=97948 minFee=9794800 actualFee=15000000 would_reject=false wasm=panic(undefined) source=7b1e18cc
+[relay:e2e-maker] [unlockBshardRegister invariant] Σin=160000000 Σout=145000000 fee=15000000 (mass_ub=97948 minFee=9794800 ✓), 4 outputs all >= dust
+[diag:step] http.slow route=/api/pool/market/:id/bettor/register-v07 method=POST bytes=691 status=200 ms=14177 ip=127.0.0.1 ua=node q=- at=2026-10-04T14:32:41.651Z
+[diag:step] pair.scanAndIngestPairs ms=0 since_rowid=0 max_rowid=0 hits=0 at=2026-10-04T14:32:48.016Z
+[diag:step] zk.closeTickV2 ms=0 at=2026-10-04T14:32:48.047Z
+[diag:step] zk.claimAutonomousTick ms=0 at=2026-10-04T14:32:48.047Z
+[diag:step] zk.handoffAutonomousTick ms=1 at=2026-10-04T14:32:48.048Z
+[bshard-close-voter-v2] tick: 1 pending | signed=0 refused=0 skipped=6 errored=0
+[diag:step] zk.judgeProposeAutonomousTick ms=3 at=2026-10-04T14:32:48.051Z
+[relay:e2e-settler] 10/4/2026, 21:32:48 command bshard_close_attest_v2 failed: UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0
+[bshard-close-submit-v2] market=24-btduw submit fail: no txId in relay response: {"error":"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0","phase":"execution"}
+[bshard-close-submit-v2] tick: 1 pending | submitted=0 notReady=0 failed=1 errored=0 resumed=0
+[diag:heap-sample] at=2026-10-04T14:32:50.668Z heapUsed=56MB heapTotal=60MB rss=180MB external=13MB arrayBuffers=0MB wasmBytes=4.4MB utxoFetchCalls=110
+[preprune-capture-worker] tick: scanned=1 logical market(s) shards=1 w/ NULL side_lock_daa, recaptured=2 reasons={ok:2} anchors={tx-log:2}
+[relay:e2e-maker] 2026-10-04T14:33:17.690Z [rpc] catching up from Console DB...
+[relay:e2e-settler] 2026-10-04T14:33:17.690Z [rpc] catching up from Console DB...
+[relay:e2e-bettorB] 2026-10-04T14:33:17.690Z [rpc] catching up from Console DB...
+[relay:e2e-bettorA] 2026-10-04T14:33:17.691Z [rpc] catching up from Console DB...
+[relay:e2e-fee] 2026-10-04T14:33:17.693Z [rpc] catching up from Console DB...
+[relay:e2e-bettorA] 2026-10-04T14:33:17.693Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-bettorA] 2026-10-04T14:33:17.693Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-settler] 2026-10-04T14:33:17.694Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-settler] 2026-10-04T14:33:17.694Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-bettorB] 2026-10-04T14:33:17.693Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-bettorB] 2026-10-04T14:33:17.693Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-fee] 2026-10-04T14:33:17.694Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-fee] 2026-10-04T14:33:17.694Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-maker] 2026-10-04T14:33:17.694Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-maker] 2026-10-04T14:33:17.694Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-1] 2026-10-04T14:33:17.736Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-5] 2026-10-04T14:33:17.737Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-3] 2026-10-04T14:33:17.737Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-6] 2026-10-04T14:33:17.737Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-2] 2026-10-04T14:33:17.736Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-4] 2026-10-04T14:33:17.736Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-1] 2026-10-04T14:33:17.741Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-1] 2026-10-04T14:33:17.741Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-3] 2026-10-04T14:33:17.741Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-3] 2026-10-04T14:33:17.741Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-5] 2026-10-04T14:33:17.741Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-5] 2026-10-04T14:33:17.741Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-2] 2026-10-04T14:33:17.741Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-2] 2026-10-04T14:33:17.741Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-6] 2026-10-04T14:33:17.741Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-6] 2026-10-04T14:33:17.741Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-4] 2026-10-04T14:33:17.741Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-4] 2026-10-04T14:33:17.742Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[diag:step] pair.scanAndIngestPairs ms=0 since_rowid=0 max_rowid=0 hits=0 at=2026-10-04T14:33:18.029Z
+[diag:step] zk.closeTickV2 ms=0 at=2026-10-04T14:33:18.061Z
+[diag:step] zk.claimAutonomousTick ms=0 at=2026-10-04T14:33:18.061Z
+[diag:step] zk.handoffAutonomousTick ms=0 at=2026-10-04T14:33:18.061Z
+[bshard-close-voter-v2] tick: 1 pending | signed=0 refused=0 skipped=6 errored=0
+[diag:step] zk.judgeProposeAutonomousTick ms=4 at=2026-10-04T14:33:18.065Z
+[relay:e2e-settler] 10/4/2026, 21:33:18 command bshard_close_attest_v2 failed: UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0
+[bshard-close-submit-v2] market=24-btduw submit fail: no txId in relay response: {"error":"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0","phase":"execution"}
+[bshard-close-submit-v2] tick: 1 pending | submitted=0 notReady=0 failed=1 errored=0 resumed=0
+[relay:e2e-bettorB] 2026-10-04T14:33:34.572Z [rpc] block #34000 (attempted: 0)
+[relay:e2e-oracle-1] 2026-10-04T14:33:34.572Z [rpc] block #34000 (attempted: 0)
+[relay:e2e-oracle-5] 2026-10-04T14:33:34.572Z [rpc] block #34000 (attempted: 0)
+[relay:e2e-oracle-3] 2026-10-04T14:33:34.572Z [rpc] block #34000 (attempted: 0)
+[relay:e2e-settler] 2026-10-04T14:33:34.572Z [rpc] block #34000 (attempted: 0)
+[relay:e2e-maker] 2026-10-04T14:33:34.573Z [rpc] block #34000 (attempted: 0)
+[relay:e2e-oracle-4] 2026-10-04T14:33:34.572Z [rpc] block #34000 (attempted: 0)
+[relay:e2e-oracle-2] 2026-10-04T14:33:34.572Z [rpc] block #34000 (attempted: 0)
+[relay:e2e-fee] 2026-10-04T14:33:34.573Z [rpc] block #34000 (attempted: 0)
+[relay:e2e-bettorA] 2026-10-04T14:33:34.573Z [rpc] block #34000 (attempted: 0)
+[relay:e2e-oracle-6] 2026-10-04T14:33:34.573Z [rpc] block #34000 (attempted: 0)
+[diag:step] pair.scanAndIngestPairs ms=0 since_rowid=0 max_rowid=0 hits=0 at=2026-10-04T14:33:48.029Z
+[diag:step] zk.closeTickV2 ms=0 at=2026-10-04T14:33:48.076Z
+[diag:step] zk.claimAutonomousTick ms=0 at=2026-10-04T14:33:48.076Z
+[diag:step] zk.handoffAutonomousTick ms=0 at=2026-10-04T14:33:48.076Z
+[diag:step] zk.judgeProposeAutonomousTick ms=3 at=2026-10-04T14:33:48.079Z
+[bshard-close-voter-v2] tick: 1 pending | signed=0 refused=0 skipped=6 errored=0
+[relay:e2e-settler] 10/4/2026, 21:33:48 command bshard_close_attest_v2 failed: UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0
+[bshard-close-submit-v2] market=24-btduw submit fail: no txId in relay response: {"error":"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0","phase":"execution"}
+[bshard-close-submit-v2] tick: 1 pending | submitted=0 notReady=0 failed=1 errored=0 resumed=0
+[diag:heap-sample] at=2026-10-04T14:33:51.210Z heapUsed=56MB heapTotal=61MB rss=181MB external=13MB arrayBuffers=0MB wasmBytes=4.4MB utxoFetchCalls=110
+[relay:e2e-maker] 2026-10-04T14:34:17.690Z [rpc] catching up from Console DB...
+[relay:e2e-bettorB] 2026-10-04T14:34:17.691Z [rpc] catching up from Console DB...
+[relay:e2e-bettorA] 2026-10-04T14:34:17.691Z [rpc] catching up from Console DB...
+[relay:e2e-settler] 2026-10-04T14:34:17.692Z [rpc] catching up from Console DB...
+[relay:e2e-fee] 2026-10-04T14:34:17.693Z [rpc] catching up from Console DB...
+[relay:e2e-maker] 2026-10-04T14:34:17.693Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-maker] 2026-10-04T14:34:17.693Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-bettorB] 2026-10-04T14:34:17.693Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-bettorB] 2026-10-04T14:34:17.693Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-bettorA] 2026-10-04T14:34:17.693Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-bettorA] 2026-10-04T14:34:17.693Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-settler] 2026-10-04T14:34:17.694Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-settler] 2026-10-04T14:34:17.694Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-fee] 2026-10-04T14:34:17.694Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-fee] 2026-10-04T14:34:17.694Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-4] 2026-10-04T14:34:17.737Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-3] 2026-10-04T14:34:17.737Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-5] 2026-10-04T14:34:17.737Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-6] 2026-10-04T14:34:17.737Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-1] 2026-10-04T14:34:17.737Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-2] 2026-10-04T14:34:17.737Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-4] 2026-10-04T14:34:17.740Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-4] 2026-10-04T14:34:17.740Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-3] 2026-10-04T14:34:17.740Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-3] 2026-10-04T14:34:17.740Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-5] 2026-10-04T14:34:17.740Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-5] 2026-10-04T14:34:17.741Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-2] 2026-10-04T14:34:17.741Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-2] 2026-10-04T14:34:17.741Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-6] 2026-10-04T14:34:17.741Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-6] 2026-10-04T14:34:17.741Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-1] 2026-10-04T14:34:17.741Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-1] 2026-10-04T14:34:17.741Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[diag:step] pair.scanAndIngestPairs ms=0 since_rowid=0 max_rowid=0 hits=0 at=2026-10-04T14:34:18.032Z
+[diag:step] zk.closeTickV2 ms=0 at=2026-10-04T14:34:18.079Z
+[diag:step] zk.claimAutonomousTick ms=0 at=2026-10-04T14:34:18.079Z
+[diag:step] zk.handoffAutonomousTick ms=1 at=2026-10-04T14:34:18.080Z
+[bshard-close-voter-v2] tick: 1 pending | signed=0 refused=0 skipped=6 errored=0
+[diag:step] zk.judgeProposeAutonomousTick ms=3 at=2026-10-04T14:34:18.083Z
+[relay:e2e-settler] 10/4/2026, 21:34:18 command bshard_close_attest_v2 failed: UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0
+[bshard-close-submit-v2] market=24-btduw submit fail: no txId in relay response: {"error":"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0","phase":"execution"}
+[bshard-close-submit-v2] tick: 1 pending | submitted=0 notReady=0 failed=1 errored=0 resumed=0
+[diag:step] pair.scanAndIngestPairs ms=1 since_rowid=0 max_rowid=0 hits=0 at=2026-10-04T14:34:48.040Z
+[diag:step] zk.closeTickV2 ms=0 at=2026-10-04T14:34:48.087Z
+[diag:step] zk.claimAutonomousTick ms=0 at=2026-10-04T14:34:48.087Z
+[diag:step] zk.handoffAutonomousTick ms=0 at=2026-10-04T14:34:48.087Z
+[diag:step] zk.judgeProposeAutonomousTick ms=3 at=2026-10-04T14:34:48.090Z
+[bshard-close-voter-v2] tick: 1 pending | signed=0 refused=0 skipped=6 errored=0
+[relay:e2e-settler] 10/4/2026, 21:34:48 command bshard_close_attest_v2 failed: UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0
+[bshard-close-submit-v2] market=24-btduw submit fail: no txId in relay response: {"error":"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0","phase":"execution"}
+[bshard-close-submit-v2] tick: 1 pending | submitted=0 notReady=0 failed=1 errored=0 resumed=0
+[diag:heap-sample] at=2026-10-04T14:34:51.752Z heapUsed=57MB heapTotal=62MB rss=182MB external=13MB arrayBuffers=0MB wasmBytes=4.4MB utxoFetchCalls=110
+[relay:e2e-bettorA] 2026-10-04T14:35:14.404Z [rpc] block #35000 (attempted: 0)
+[relay:e2e-oracle-3] 2026-10-04T14:35:14.404Z [rpc] block #35000 (attempted: 0)
+[relay:e2e-oracle-6] 2026-10-04T14:35:14.404Z [rpc] block #35000 (attempted: 0)
+[relay:e2e-oracle-2] 2026-10-04T14:35:14.404Z [rpc] block #35000 (attempted: 0)
+[relay:e2e-oracle-4] 2026-10-04T14:35:14.404Z [rpc] block #35000 (attempted: 0)
+[relay:e2e-fee] 2026-10-04T14:35:14.404Z [rpc] block #35000 (attempted: 0)
+[relay:e2e-oracle-1] 2026-10-04T14:35:14.404Z [rpc] block #35000 (attempted: 0)
+[relay:e2e-maker] 2026-10-04T14:35:14.404Z [rpc] block #35000 (attempted: 0)
+[relay:e2e-bettorB] 2026-10-04T14:35:14.404Z [rpc] block #35000 (attempted: 0)
+[relay:e2e-oracle-5] 2026-10-04T14:35:14.404Z [rpc] block #35000 (attempted: 0)
+[relay:e2e-settler] 2026-10-04T14:35:14.404Z [rpc] block #35000 (attempted: 0)
+[relay:e2e-settler] 2026-10-04T14:35:17.702Z [rpc] catching up from Console DB...
+[relay:e2e-maker] 2026-10-04T14:35:17.702Z [rpc] catching up from Console DB...
+[relay:e2e-bettorB] 2026-10-04T14:35:17.702Z [rpc] catching up from Console DB...
+[relay:e2e-bettorA] 2026-10-04T14:35:17.702Z [rpc] catching up from Console DB...
+[relay:e2e-fee] 2026-10-04T14:35:17.702Z [rpc] catching up from Console DB...
+[relay:e2e-maker] 2026-10-04T14:35:17.705Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-maker] 2026-10-04T14:35:17.705Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-settler] 2026-10-04T14:35:17.705Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-settler] 2026-10-04T14:35:17.705Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-bettorA] 2026-10-04T14:35:17.705Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-bettorA] 2026-10-04T14:35:17.705Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-fee] 2026-10-04T14:35:17.705Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-fee] 2026-10-04T14:35:17.705Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-bettorB] 2026-10-04T14:35:17.706Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-bettorB] 2026-10-04T14:35:17.706Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-3] 2026-10-04T14:35:17.750Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-5] 2026-10-04T14:35:17.750Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-1] 2026-10-04T14:35:17.750Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-6] 2026-10-04T14:35:17.750Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-2] 2026-10-04T14:35:17.750Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-4] 2026-10-04T14:35:17.750Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-3] 2026-10-04T14:35:17.754Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-3] 2026-10-04T14:35:17.754Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-5] 2026-10-04T14:35:17.754Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-5] 2026-10-04T14:35:17.754Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-1] 2026-10-04T14:35:17.754Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-1] 2026-10-04T14:35:17.754Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-6] 2026-10-04T14:35:17.754Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-6] 2026-10-04T14:35:17.754Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-2] 2026-10-04T14:35:17.754Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-2] 2026-10-04T14:35:17.754Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-4] 2026-10-04T14:35:17.755Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-4] 2026-10-04T14:35:17.755Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[diag:step] pair.scanAndIngestPairs ms=0 since_rowid=0 max_rowid=0 hits=0 at=2026-10-04T14:35:18.045Z
+[diag:step] zk.closeTickV2 ms=0 at=2026-10-04T14:35:18.093Z
+[diag:step] zk.claimAutonomousTick ms=0 at=2026-10-04T14:35:18.093Z
+[diag:step] zk.handoffAutonomousTick ms=0 at=2026-10-04T14:35:18.093Z
+[bshard-close-voter-v2] tick: 1 pending | signed=0 refused=0 skipped=6 errored=0
+[diag:step] zk.judgeProposeAutonomousTick ms=3 at=2026-10-04T14:35:18.096Z
+[relay:e2e-settler] 10/4/2026, 21:35:18 command bshard_close_attest_v2 failed: UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0
+[bshard-close-submit-v2] market=24-btduw submit fail: no txId in relay response: {"error":"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0","phase":"execution"}
+[bshard-close-submit-v2] tick: 1 pending | submitted=0 notReady=0 failed=1 errored=0 resumed=0
+[diag:step] pair.scanAndIngestPairs ms=0 since_rowid=0 max_rowid=0 hits=0 at=2026-10-04T14:35:48.050Z
+[diag:step] zk.closeTickV2 ms=0 at=2026-10-04T14:35:48.098Z
+[diag:step] zk.claimAutonomousTick ms=0 at=2026-10-04T14:35:48.098Z
+[diag:step] zk.handoffAutonomousTick ms=1 at=2026-10-04T14:35:48.099Z
+[diag:step] zk.judgeProposeAutonomousTick ms=2 at=2026-10-04T14:35:48.101Z
+[bshard-close-voter-v2] tick: 1 pending | signed=0 refused=0 skipped=6 errored=0
+[relay:e2e-settler] 10/4/2026, 21:35:48 command bshard_close_attest_v2 failed: UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0
+[bshard-close-submit-v2] market=24-btduw submit fail: no txId in relay response: {"error":"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0","phase":"execution"}
+[bshard-close-submit-v2] tick: 1 pending | submitted=0 notReady=0 failed=1 errored=0 resumed=0
+[diag:heap-sample] at=2026-10-04T14:35:52.305Z heapUsed=58MB heapTotal=61MB rss=182MB external=13MB arrayBuffers=0MB wasmBytes=4.4MB utxoFetchCalls=110
+[prediction-voter] tick: 6 voter relays, 1V1 voted=0 skipped=0 errored=0 | pool voted=0 skipped=0 errored=0
+[prediction-voter] parallel: A.recorded=0 B.scored=0 disagree=0 | audit: checked=0 dev=0 frozen=0
+[diag:step] pool.selectMarkets.all ms=1 rows=1 at=2026-10-04T14:36:17.245Z
+[pool-settler] tick: 1 verifying markets, consensus=0 refund=0 dispute=0 pending=0 doomed=0 errored=0 sampledCommittee=0 bshardSkipped=1 commingledRefund=0
+[pool-settler:P1-authz] 授权闸拦下 0 个 bettor side / 0 个市场 / 0.0 KAS 未领 · 冻结态(unresolved_needs_authorization)市场 0 个 · 旧状态但事实卡住(disputed 未 dispatch)市场 0 个 — 这三个数长期为 0 与长期很大都需要人看: 前者说明闸没通, 后者说明验证侧有系统性故障
+[diag:tick-duration] poolSettlerTick ms=1
+[diag:step] pool.tick.phases ms=1 pre=0 dw=0 select=1 post=0 rows=1 t0=2026-10-04T14:36:17.244Z at=2026-10-04T14:36:17.245Z
+[rpc-health] using local node: ws://127.0.0.1:29717
+[rpc-health] using local node: ws://127.0.0.1:29717
+[utxo-fetch-probe] #111 at=2026-10-04T14:36:17.251Z ms=0 addrCount=1 entries=1 roughBytesEst=0MB
+[utxo-fetch-probe] #112 at=2026-10-04T14:36:17.251Z ms=0 addrCount=1 entries=1 roughBytesEst=0MB
+[utxo-fetch-probe] #113 at=2026-10-04T14:36:17.251Z ms=1 addrCount=1 entries=1 roughBytesEst=0MB
+[utxo-fetch-probe] #114 at=2026-10-04T14:36:17.252Z ms=0 addrCount=1 entries=1 roughBytesEst=0MB
+[utxo-fetch-probe] #115 at=2026-10-04T14:36:17.252Z ms=0 addrCount=1 entries=1 roughBytesEst=0MB
+[utxo-fetch-probe] #116 at=2026-10-04T14:36:17.252Z ms=0 addrCount=1 entries=1 roughBytesEst=0MB
+[oracle-pool-scanner-cron] tick: snapshotDaa=89617 poolSize=6 merkleRoot=46fa6978ef43 (scanned=6/valid=6/rejected=0)
+[relay:e2e-bettorA] 2026-10-04T14:36:17.709Z [rpc] catching up from Console DB...
+[relay:e2e-settler] 2026-10-04T14:36:17.709Z [rpc] catching up from Console DB...
+[relay:e2e-fee] 2026-10-04T14:36:17.709Z [rpc] catching up from Console DB...
+[relay:e2e-maker] 2026-10-04T14:36:17.709Z [rpc] catching up from Console DB...
+[relay:e2e-bettorB] 2026-10-04T14:36:17.709Z [rpc] catching up from Console DB...
+[relay:e2e-bettorA] 2026-10-04T14:36:17.712Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-bettorA] 2026-10-04T14:36:17.712Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-settler] 2026-10-04T14:36:17.712Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-settler] 2026-10-04T14:36:17.712Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-fee] 2026-10-04T14:36:17.712Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-fee] 2026-10-04T14:36:17.712Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-bettorB] 2026-10-04T14:36:17.712Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-bettorB] 2026-10-04T14:36:17.713Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-maker] 2026-10-04T14:36:17.713Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-maker] 2026-10-04T14:36:17.713Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-1] 2026-10-04T14:36:17.755Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-3] 2026-10-04T14:36:17.755Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-6] 2026-10-04T14:36:17.755Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-4] 2026-10-04T14:36:17.755Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-5] 2026-10-04T14:36:17.755Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-2] 2026-10-04T14:36:17.755Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-1] 2026-10-04T14:36:17.758Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-1] 2026-10-04T14:36:17.758Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-3] 2026-10-04T14:36:17.758Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-3] 2026-10-04T14:36:17.758Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-6] 2026-10-04T14:36:17.758Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-6] 2026-10-04T14:36:17.758Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-4] 2026-10-04T14:36:17.758Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-4] 2026-10-04T14:36:17.758Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-5] 2026-10-04T14:36:17.759Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-5] 2026-10-04T14:36:17.759Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-2] 2026-10-04T14:36:17.759Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-2] 2026-10-04T14:36:17.759Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[diag:step] pair.scanAndIngestPairs ms=0 since_rowid=0 max_rowid=0 hits=0 at=2026-10-04T14:36:18.050Z
+[diag:step] zk.closeTickV2 ms=0 at=2026-10-04T14:36:18.113Z
+[diag:step] zk.claimAutonomousTick ms=0 at=2026-10-04T14:36:18.113Z
+[diag:step] zk.handoffAutonomousTick ms=1 at=2026-10-04T14:36:18.114Z
+[bshard-close-voter-v2] tick: 1 pending | signed=0 refused=0 skipped=6 errored=0
+[diag:step] zk.judgeProposeAutonomousTick ms=3 at=2026-10-04T14:36:18.117Z
+[relay:e2e-settler] 10/4/2026, 21:36:18 command bshard_close_attest_v2 failed: UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0
+[bshard-close-submit-v2] market=24-btduw submit fail: no txId in relay response: {"error":"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0","phase":"execution"}
+[bshard-close-submit-v2] tick: 1 pending | submitted=0 notReady=0 failed=1 errored=0 resumed=0
+[diag:step] pair.scanAndIngestPairs ms=0 since_rowid=0 max_rowid=0 hits=0 at=2026-10-04T14:36:48.063Z
+[diag:step] zk.closeTickV2 ms=0 at=2026-10-04T14:36:48.125Z
+[diag:step] zk.claimAutonomousTick ms=0 at=2026-10-04T14:36:48.125Z
+[diag:step] zk.handoffAutonomousTick ms=1 at=2026-10-04T14:36:48.126Z
+[bshard-close-voter-v2] tick: 1 pending | signed=0 refused=0 skipped=6 errored=0
+[diag:step] zk.judgeProposeAutonomousTick ms=3 at=2026-10-04T14:36:48.129Z
+[relay:e2e-settler] 10/4/2026, 21:36:48 command bshard_close_attest_v2 failed: UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0
+[bshard-close-submit-v2] market=24-btduw submit fail: no txId in relay response: {"error":"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0","phase":"execution"}
+[bshard-close-submit-v2] tick: 1 pending | submitted=0 notReady=0 failed=1 errored=0 resumed=0
+[diag:heap-sample] at=2026-10-04T14:36:52.895Z heapUsed=59MB heapTotal=62MB rss=183MB external=13MB arrayBuffers=0MB wasmBytes=4.4MB utxoFetchCalls=116
+[relay:e2e-fee] 2026-10-04T14:37:17.722Z [rpc] catching up from Console DB...
+[relay:e2e-settler] 2026-10-04T14:37:17.722Z [rpc] catching up from Console DB...
+[relay:e2e-bettorA] 2026-10-04T14:37:17.722Z [rpc] catching up from Console DB...
+[relay:e2e-maker] 2026-10-04T14:37:17.722Z [rpc] catching up from Console DB...
+[relay:e2e-bettorB] 2026-10-04T14:37:17.722Z [rpc] catching up from Console DB...
+[relay:e2e-fee] 2026-10-04T14:37:17.725Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-fee] 2026-10-04T14:37:17.725Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-settler] 2026-10-04T14:37:17.726Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-settler] 2026-10-04T14:37:17.726Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-bettorA] 2026-10-04T14:37:17.726Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-bettorA] 2026-10-04T14:37:17.726Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-maker] 2026-10-04T14:37:17.726Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-maker] 2026-10-04T14:37:17.726Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-bettorB] 2026-10-04T14:37:17.726Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-bettorB] 2026-10-04T14:37:17.726Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-6] 2026-10-04T14:37:17.769Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-1] 2026-10-04T14:37:17.769Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-5] 2026-10-04T14:37:17.769Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-4] 2026-10-04T14:37:17.769Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-3] 2026-10-04T14:37:17.769Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-2] 2026-10-04T14:37:17.769Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-6] 2026-10-04T14:37:17.772Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-6] 2026-10-04T14:37:17.772Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-4] 2026-10-04T14:37:17.772Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-4] 2026-10-04T14:37:17.773Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-1] 2026-10-04T14:37:17.773Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-1] 2026-10-04T14:37:17.773Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-5] 2026-10-04T14:37:17.773Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-5] 2026-10-04T14:37:17.773Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-2] 2026-10-04T14:37:17.773Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-2] 2026-10-04T14:37:17.773Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-3] 2026-10-04T14:37:17.773Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-3] 2026-10-04T14:37:17.773Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[diag:step] pair.scanAndIngestPairs ms=0 since_rowid=0 max_rowid=0 hits=0 at=2026-10-04T14:37:18.076Z
+[diag:step] zk.closeTickV2 ms=0 at=2026-10-04T14:37:18.139Z
+[diag:step] zk.claimAutonomousTick ms=0 at=2026-10-04T14:37:18.140Z
+[diag:step] zk.handoffAutonomousTick ms=0 at=2026-10-04T14:37:18.140Z
+[bshard-close-voter-v2] tick: 1 pending | signed=0 refused=0 skipped=6 errored=0
+[diag:step] zk.judgeProposeAutonomousTick ms=4 at=2026-10-04T14:37:18.144Z
+[relay:e2e-settler] 10/4/2026, 21:37:18 command bshard_close_attest_v2 failed: UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0
+[bshard-close-submit-v2] market=24-btduw submit fail: no txId in relay response: {"error":"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0","phase":"execution"}
+[bshard-close-submit-v2] tick: 1 pending | submitted=0 notReady=0 failed=1 errored=0 resumed=0
+[relay:e2e-bettorA] 2026-10-04T14:37:35.311Z [rpc] block #36000 (attempted: 0)
+[relay:e2e-oracle-5] 2026-10-04T14:37:35.311Z [rpc] block #36000 (attempted: 0)
+[relay:e2e-fee] 2026-10-04T14:37:35.311Z [rpc] block #36000 (attempted: 0)
+[relay:e2e-maker] 2026-10-04T14:37:35.311Z [rpc] block #36000 (attempted: 0)
+[relay:e2e-oracle-2] 2026-10-04T14:37:35.310Z [rpc] block #36000 (attempted: 0)
+[relay:e2e-bettorB] 2026-10-04T14:37:35.311Z [rpc] block #36000 (attempted: 0)
+[relay:e2e-oracle-3] 2026-10-04T14:37:35.310Z [rpc] block #36000 (attempted: 0)
+[relay:e2e-oracle-6] 2026-10-04T14:37:35.311Z [rpc] block #36000 (attempted: 0)
+[relay:e2e-settler] 2026-10-04T14:37:35.311Z [rpc] block #36000 (attempted: 0)
+[relay:e2e-oracle-4] 2026-10-04T14:37:35.311Z [rpc] block #36000 (attempted: 0)
+[relay:e2e-oracle-1] 2026-10-04T14:37:35.311Z [rpc] block #36000 (attempted: 0)
+[diag:step] pair.scanAndIngestPairs ms=1 since_rowid=0 max_rowid=0 hits=0 at=2026-10-04T14:37:48.084Z
+[diag:step] zk.closeTickV2 ms=0 at=2026-10-04T14:37:48.146Z
+[diag:step] zk.claimAutonomousTick ms=0 at=2026-10-04T14:37:48.147Z
+[diag:step] zk.handoffAutonomousTick ms=0 at=2026-10-04T14:37:48.147Z
+[bshard-close-voter-v2] tick: 1 pending | signed=0 refused=0 skipped=6 errored=0
+[diag:step] zk.judgeProposeAutonomousTick ms=3 at=2026-10-04T14:37:48.150Z
+[relay:e2e-settler] 10/4/2026, 21:37:48 command bshard_close_attest_v2 failed: UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0
+[bshard-close-submit-v2] market=24-btduw submit fail: no txId in relay response: {"error":"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0","phase":"execution"}
+[bshard-close-submit-v2] tick: 1 pending | submitted=0 notReady=0 failed=1 errored=0 resumed=0
+[diag:heap-sample] at=2026-10-04T14:37:53.432Z heapUsed=54MB heapTotal=62MB rss=178MB external=12MB arrayBuffers=0MB wasmBytes=4.4MB utxoFetchCalls=116
+[relay:e2e-bettorA] 2026-10-04T14:38:17.731Z [rpc] catching up from Console DB...
+[relay:e2e-fee] 2026-10-04T14:38:17.731Z [rpc] catching up from Console DB...
+[relay:e2e-settler] 2026-10-04T14:38:17.731Z [rpc] catching up from Console DB...
+[relay:e2e-bettorB] 2026-10-04T14:38:17.731Z [rpc] catching up from Console DB...
+[relay:e2e-maker] 2026-10-04T14:38:17.732Z [rpc] catching up from Console DB...
+[relay:e2e-bettorA] 2026-10-04T14:38:17.735Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-bettorA] 2026-10-04T14:38:17.735Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-fee] 2026-10-04T14:38:17.735Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-fee] 2026-10-04T14:38:17.735Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-settler] 2026-10-04T14:38:17.736Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-settler] 2026-10-04T14:38:17.736Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-bettorB] 2026-10-04T14:38:17.736Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-bettorB] 2026-10-04T14:38:17.736Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-maker] 2026-10-04T14:38:17.736Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-maker] 2026-10-04T14:38:17.736Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-4] 2026-10-04T14:38:17.778Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-3] 2026-10-04T14:38:17.778Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-1] 2026-10-04T14:38:17.778Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-2] 2026-10-04T14:38:17.778Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-6] 2026-10-04T14:38:17.778Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-5] 2026-10-04T14:38:17.778Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-4] 2026-10-04T14:38:17.782Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-4] 2026-10-04T14:38:17.782Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-3] 2026-10-04T14:38:17.782Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-3] 2026-10-04T14:38:17.782Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-1] 2026-10-04T14:38:17.782Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-1] 2026-10-04T14:38:17.782Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-2] 2026-10-04T14:38:17.782Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-2] 2026-10-04T14:38:17.782Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-5] 2026-10-04T14:38:17.782Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-5] 2026-10-04T14:38:17.782Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-6] 2026-10-04T14:38:17.783Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-6] 2026-10-04T14:38:17.783Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[diag:step] pair.scanAndIngestPairs ms=0 since_rowid=0 max_rowid=0 hits=0 at=2026-10-04T14:38:18.089Z
+[diag:step] zk.closeTickV2 ms=0 at=2026-10-04T14:38:18.151Z
+[diag:step] zk.claimAutonomousTick ms=0 at=2026-10-04T14:38:18.151Z
+[diag:step] zk.handoffAutonomousTick ms=1 at=2026-10-04T14:38:18.152Z
+[bshard-close-voter-v2] tick: 1 pending | signed=0 refused=0 skipped=6 errored=0
+[diag:step] zk.judgeProposeAutonomousTick ms=2 at=2026-10-04T14:38:18.154Z
+[relay:e2e-settler] 10/4/2026, 21:38:18 command bshard_close_attest_v2 failed: UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0
+[bshard-close-submit-v2] market=24-btduw submit fail: no txId in relay response: {"error":"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0","phase":"execution"}
+[bshard-close-submit-v2] tick: 1 pending | submitted=0 notReady=0 failed=1 errored=0 resumed=0
+[diag:step] pair.scanAndIngestPairs ms=1 since_rowid=0 max_rowid=0 hits=0 at=2026-10-04T14:38:48.092Z
+[diag:step] zk.closeTickV2 ms=0 at=2026-10-04T14:38:48.154Z
+[diag:step] zk.claimAutonomousTick ms=0 at=2026-10-04T14:38:48.154Z
+[diag:step] zk.handoffAutonomousTick ms=1 at=2026-10-04T14:38:48.155Z
+[diag:step] zk.judgeProposeAutonomousTick ms=3 at=2026-10-04T14:38:48.158Z
+[bshard-close-voter-v2] tick: 1 pending | signed=0 refused=0 skipped=6 errored=0
+[relay:e2e-settler] 10/4/2026, 21:38:48 command bshard_close_attest_v2 failed: UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0
+[bshard-close-submit-v2] market=24-btduw submit fail: no txId in relay response: {"error":"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0","phase":"execution"}
+[bshard-close-submit-v2] tick: 1 pending | submitted=0 notReady=0 failed=1 errored=0 resumed=0
+[diag:heap-sample] at=2026-10-04T14:38:53.978Z heapUsed=53MB heapTotal=59MB rss=179MB external=12MB arrayBuffers=0MB wasmBytes=4.4MB utxoFetchCalls=116
+[relay:e2e-bettorB] 2026-10-04T14:39:17.743Z [rpc] catching up from Console DB...
+[relay:e2e-fee] 2026-10-04T14:39:17.743Z [rpc] catching up from Console DB...
+[relay:e2e-bettorA] 2026-10-04T14:39:17.743Z [rpc] catching up from Console DB...
+[relay:e2e-maker] 2026-10-04T14:39:17.743Z [rpc] catching up from Console DB...
+[relay:e2e-settler] 2026-10-04T14:39:17.743Z [rpc] catching up from Console DB...
+[relay:e2e-bettorB] 2026-10-04T14:39:17.747Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-bettorB] 2026-10-04T14:39:17.747Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-fee] 2026-10-04T14:39:17.747Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-fee] 2026-10-04T14:39:17.747Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-bettorA] 2026-10-04T14:39:17.747Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-bettorA] 2026-10-04T14:39:17.747Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-maker] 2026-10-04T14:39:17.748Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-maker] 2026-10-04T14:39:17.748Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-settler] 2026-10-04T14:39:17.748Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-settler] 2026-10-04T14:39:17.748Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-2] 2026-10-04T14:39:17.789Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-5] 2026-10-04T14:39:17.789Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-3] 2026-10-04T14:39:17.789Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-1] 2026-10-04T14:39:17.789Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-6] 2026-10-04T14:39:17.789Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-4] 2026-10-04T14:39:17.789Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-2] 2026-10-04T14:39:17.793Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-2] 2026-10-04T14:39:17.793Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-5] 2026-10-04T14:39:17.793Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-5] 2026-10-04T14:39:17.793Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-3] 2026-10-04T14:39:17.793Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-3] 2026-10-04T14:39:17.793Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-1] 2026-10-04T14:39:17.793Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-1] 2026-10-04T14:39:17.793Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-4] 2026-10-04T14:39:17.793Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-4] 2026-10-04T14:39:17.793Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-6] 2026-10-04T14:39:17.794Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-6] 2026-10-04T14:39:17.794Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[diag:step] pair.scanAndIngestPairs ms=0 since_rowid=0 max_rowid=0 hits=0 at=2026-10-04T14:39:18.099Z
+[diag:step] zk.closeTickV2 ms=1 at=2026-10-04T14:39:18.163Z
+[diag:step] zk.claimAutonomousTick ms=0 at=2026-10-04T14:39:18.163Z
+[diag:step] zk.handoffAutonomousTick ms=0 at=2026-10-04T14:39:18.163Z
+[bshard-close-voter-v2] tick: 1 pending | signed=0 refused=0 skipped=6 errored=0
+[diag:step] zk.judgeProposeAutonomousTick ms=3 at=2026-10-04T14:39:18.166Z
+[relay:e2e-settler] 10/4/2026, 21:39:18 command bshard_close_attest_v2 failed: UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0
+[bshard-close-submit-v2] market=24-btduw submit fail: no txId in relay response: {"error":"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0","phase":"execution"}
+[bshard-close-submit-v2] tick: 1 pending | submitted=0 notReady=0 failed=1 errored=0 resumed=0
+[relay:e2e-oracle-1] 2026-10-04T14:39:38.568Z [rpc] block #37000 (attempted: 0)
+[relay:e2e-oracle-5] 2026-10-04T14:39:38.568Z [rpc] block #37000 (attempted: 0)
+[relay:e2e-oracle-3] 2026-10-04T14:39:38.568Z [rpc] block #37000 (attempted: 0)
+[relay:e2e-fee] 2026-10-04T14:39:38.568Z [rpc] block #37000 (attempted: 0)
+[relay:e2e-oracle-4] 2026-10-04T14:39:38.568Z [rpc] block #37000 (attempted: 0)
+[relay:e2e-maker] 2026-10-04T14:39:38.568Z [rpc] block #37000 (attempted: 0)
+[relay:e2e-oracle-2] 2026-10-04T14:39:38.568Z [rpc] block #37000 (attempted: 0)
+[relay:e2e-bettorA] 2026-10-04T14:39:38.568Z [rpc] block #37000 (attempted: 0)
+[relay:e2e-bettorB] 2026-10-04T14:39:38.568Z [rpc] block #37000 (attempted: 0)
+[relay:e2e-oracle-6] 2026-10-04T14:39:38.568Z [rpc] block #37000 (attempted: 0)
+[relay:e2e-settler] 2026-10-04T14:39:38.568Z [rpc] block #37000 (attempted: 0)
+[diag:step] pair.scanAndIngestPairs ms=1 since_rowid=0 max_rowid=0 hits=0 at=2026-10-04T14:39:48.112Z
+[diag:step] zk.closeTickV2 ms=0 at=2026-10-04T14:39:48.176Z
+[diag:step] zk.claimAutonomousTick ms=0 at=2026-10-04T14:39:48.176Z
+[diag:step] zk.handoffAutonomousTick ms=0 at=2026-10-04T14:39:48.176Z
+[bshard-close-voter-v2] tick: 1 pending | signed=0 refused=0 skipped=6 errored=0
+[diag:step] zk.judgeProposeAutonomousTick ms=4 at=2026-10-04T14:39:48.180Z
+[relay:e2e-settler] 10/4/2026, 21:39:48 command bshard_close_attest_v2 failed: UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0
+[bshard-close-submit-v2] market=24-btduw submit fail: no txId in relay response: {"error":"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0","phase":"execution"}
+[bshard-close-submit-v2] tick: 1 pending | submitted=0 notReady=0 failed=1 errored=0 resumed=0
+[diag:heap-sample] at=2026-10-04T14:39:54.490Z heapUsed=54MB heapTotal=60MB rss=179MB external=12MB arrayBuffers=0MB wasmBytes=4.4MB utxoFetchCalls=116
+[relay:e2e-settler] 2026-10-04T14:40:17.757Z [rpc] catching up from Console DB...
+[relay:e2e-fee] 2026-10-04T14:40:17.757Z [rpc] catching up from Console DB...
+[relay:e2e-bettorB] 2026-10-04T14:40:17.757Z [rpc] catching up from Console DB...
+[relay:e2e-maker] 2026-10-04T14:40:17.757Z [rpc] catching up from Console DB...
+[relay:e2e-bettorA] 2026-10-04T14:40:17.757Z [rpc] catching up from Console DB...
+[relay:e2e-fee] 2026-10-04T14:40:17.761Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-fee] 2026-10-04T14:40:17.761Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-settler] 2026-10-04T14:40:17.761Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-settler] 2026-10-04T14:40:17.761Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-bettorB] 2026-10-04T14:40:17.761Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-bettorB] 2026-10-04T14:40:17.761Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-maker] 2026-10-04T14:40:17.761Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-maker] 2026-10-04T14:40:17.761Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-bettorA] 2026-10-04T14:40:17.762Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-bettorA] 2026-10-04T14:40:17.762Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-5] 2026-10-04T14:40:17.803Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-2] 2026-10-04T14:40:17.803Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-3] 2026-10-04T14:40:17.803Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-6] 2026-10-04T14:40:17.803Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-4] 2026-10-04T14:40:17.803Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-1] 2026-10-04T14:40:17.803Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-2] 2026-10-04T14:40:17.807Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-2] 2026-10-04T14:40:17.807Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-5] 2026-10-04T14:40:17.808Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-5] 2026-10-04T14:40:17.808Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-3] 2026-10-04T14:40:17.808Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-3] 2026-10-04T14:40:17.808Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-6] 2026-10-04T14:40:17.808Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-6] 2026-10-04T14:40:17.808Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-1] 2026-10-04T14:40:17.808Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-1] 2026-10-04T14:40:17.808Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-4] 2026-10-04T14:40:17.808Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-4] 2026-10-04T14:40:17.808Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[diag:step] pair.scanAndIngestPairs ms=0 since_rowid=0 max_rowid=0 hits=0 at=2026-10-04T14:40:18.114Z
+[diag:step] zk.closeTickV2 ms=0 at=2026-10-04T14:40:18.177Z
+[diag:step] zk.claimAutonomousTick ms=0 at=2026-10-04T14:40:18.177Z
+[diag:step] zk.handoffAutonomousTick ms=1 at=2026-10-04T14:40:18.178Z
+[bshard-close-voter-v2] tick: 1 pending | signed=0 refused=0 skipped=6 errored=0
+[diag:step] zk.judgeProposeAutonomousTick ms=3 at=2026-10-04T14:40:18.181Z
+[relay:e2e-settler] 10/4/2026, 21:40:18 command bshard_close_attest_v2 failed: UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0
+[bshard-close-submit-v2] market=24-btduw submit fail: no txId in relay response: {"error":"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0","phase":"execution"}
+[bshard-close-submit-v2] tick: 1 pending | submitted=0 notReady=0 failed=1 errored=0 resumed=0
+[diag:step] pair.scanAndIngestPairs ms=0 since_rowid=0 max_rowid=0 hits=0 at=2026-10-04T14:40:48.124Z
+[diag:step] zk.closeTickV2 ms=0 at=2026-10-04T14:40:48.188Z
+[diag:step] zk.claimAutonomousTick ms=0 at=2026-10-04T14:40:48.188Z
+[diag:step] zk.handoffAutonomousTick ms=0 at=2026-10-04T14:40:48.188Z
+[bshard-close-voter-v2] tick: 1 pending | signed=0 refused=0 skipped=6 errored=0
+[diag:step] zk.judgeProposeAutonomousTick ms=4 at=2026-10-04T14:40:48.192Z
+[relay:e2e-settler] 10/4/2026, 21:40:48 command bshard_close_attest_v2 failed: UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0
+[bshard-close-submit-v2] market=24-btduw submit fail: no txId in relay response: {"error":"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0","phase":"execution"}
+[bshard-close-submit-v2] tick: 1 pending | submitted=0 notReady=0 failed=1 errored=0 resumed=0
+[diag:heap-sample] at=2026-10-04T14:40:55.038Z heapUsed=54MB heapTotal=61MB rss=180MB external=12MB arrayBuffers=0MB wasmBytes=4.4MB utxoFetchCalls=116
+[prediction-voter] tick: 6 voter relays, 1V1 voted=0 skipped=0 errored=0 | pool voted=0 skipped=0 errored=0
+[prediction-voter] parallel: A.recorded=0 B.scored=0 disagree=0 | audit: checked=0 dev=0 frozen=0
+[diag:step] pool.selectMarkets.all ms=0 rows=1 at=2026-10-04T14:41:17.257Z
+[pool-settler] tick: 1 verifying markets, consensus=0 refund=0 dispute=0 pending=0 doomed=0 errored=0 sampledCommittee=0 bshardSkipped=1 commingledRefund=0
+[diag:tick-duration] poolSettlerTick ms=2
+[diag:step] pool.tick.phases ms=2 pre=1 dw=0 select=0 post=1 rows=1 t0=2026-10-04T14:41:17.256Z at=2026-10-04T14:41:17.258Z
+[rpc-health] using local node: ws://127.0.0.1:29717
+[rpc-health] using local node: ws://127.0.0.1:29717
+[utxo-fetch-probe] #117 at=2026-10-04T14:41:17.263Z ms=0 addrCount=1 entries=1 roughBytesEst=0MB
+[utxo-fetch-probe] #118 at=2026-10-04T14:41:17.263Z ms=1 addrCount=1 entries=1 roughBytesEst=0MB
+[utxo-fetch-probe] #119 at=2026-10-04T14:41:17.264Z ms=0 addrCount=1 entries=1 roughBytesEst=0MB
+[utxo-fetch-probe] #120 at=2026-10-04T14:41:17.264Z ms=1 addrCount=1 entries=1 roughBytesEst=0MB
+[utxo-fetch-probe] #121 at=2026-10-04T14:41:17.265Z ms=0 addrCount=1 entries=1 roughBytesEst=0MB
+[utxo-fetch-probe] #122 at=2026-10-04T14:41:17.265Z ms=1 addrCount=1 entries=1 roughBytesEst=0MB
+[tx-landed-reconciler] tick 14: tx_records scanned=6 landed=6 mempool=0 not_landed=0 no_target=0 · intents submitted=0 landed=0 not_landed=0 prepared_stale=0
+[oracle-pool-scanner-cron] tick: snapshotDaa=92009 poolSize=6 merkleRoot=46fa6978ef43 (scanned=6/valid=6/rejected=0)
+[relay:e2e-maker] 2026-10-04T14:41:17.771Z [rpc] catching up from Console DB...
+[relay:e2e-settler] 2026-10-04T14:41:17.771Z [rpc] catching up from Console DB...
+[relay:e2e-bettorA] 2026-10-04T14:41:17.771Z [rpc] catching up from Console DB...
+[relay:e2e-fee] 2026-10-04T14:41:17.771Z [rpc] catching up from Console DB...
+[relay:e2e-bettorB] 2026-10-04T14:41:17.771Z [rpc] catching up from Console DB...
+[relay:e2e-maker] 2026-10-04T14:41:17.774Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-maker] 2026-10-04T14:41:17.774Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-settler] 2026-10-04T14:41:17.774Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-settler] 2026-10-04T14:41:17.774Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-fee] 2026-10-04T14:41:17.774Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-fee] 2026-10-04T14:41:17.774Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-bettorA] 2026-10-04T14:41:17.774Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-bettorA] 2026-10-04T14:41:17.774Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-bettorB] 2026-10-04T14:41:17.774Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-bettorB] 2026-10-04T14:41:17.774Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-2] 2026-10-04T14:41:17.803Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-2] 2026-10-04T14:41:17.804Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-2] 2026-10-04T14:41:17.804Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-5] 2026-10-04T14:41:17.818Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-6] 2026-10-04T14:41:17.818Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-3] 2026-10-04T14:41:17.818Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-4] 2026-10-04T14:41:17.818Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-1] 2026-10-04T14:41:17.818Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-5] 2026-10-04T14:41:17.821Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-5] 2026-10-04T14:41:17.821Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-6] 2026-10-04T14:41:17.821Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-6] 2026-10-04T14:41:17.821Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-4] 2026-10-04T14:41:17.821Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-4] 2026-10-04T14:41:17.821Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-3] 2026-10-04T14:41:17.821Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-3] 2026-10-04T14:41:17.821Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-1] 2026-10-04T14:41:17.821Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-1] 2026-10-04T14:41:17.821Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[diag:step] pair.scanAndIngestPairs ms=0 since_rowid=0 max_rowid=0 hits=0 at=2026-10-04T14:41:18.129Z
+[diag:step] zk.closeTickV2 ms=0 at=2026-10-04T14:41:18.191Z
+[diag:step] zk.claimAutonomousTick ms=0 at=2026-10-04T14:41:18.191Z
+[diag:step] zk.handoffAutonomousTick ms=0 at=2026-10-04T14:41:18.191Z
+[bshard-close-voter-v2] tick: 1 pending | signed=0 refused=0 skipped=6 errored=0
+[diag:step] zk.judgeProposeAutonomousTick ms=4 at=2026-10-04T14:41:18.195Z
+[relay:e2e-settler] 10/4/2026, 21:41:18 command bshard_close_attest_v2 failed: UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0
+[bshard-close-submit-v2] market=24-btduw submit fail: no txId in relay response: {"error":"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0","phase":"execution"}
+[bshard-close-submit-v2] tick: 1 pending | submitted=0 notReady=0 failed=1 errored=0 resumed=0
+[relay:e2e-bettorA] 2026-10-04T14:41:32.531Z [rpc] block #38000 (attempted: 0)
+[relay:e2e-oracle-5] 2026-10-04T14:41:32.531Z [rpc] block #38000 (attempted: 0)
+[relay:e2e-maker] 2026-10-04T14:41:32.531Z [rpc] block #38000 (attempted: 0)
+[relay:e2e-oracle-4] 2026-10-04T14:41:32.531Z [rpc] block #38000 (attempted: 0)
+[relay:e2e-bettorB] 2026-10-04T14:41:32.531Z [rpc] block #38000 (attempted: 0)
+[relay:e2e-oracle-3] 2026-10-04T14:41:32.531Z [rpc] block #38000 (attempted: 0)
+[relay:e2e-oracle-2] 2026-10-04T14:41:32.531Z [rpc] block #38000 (attempted: 0)
+[relay:e2e-oracle-6] 2026-10-04T14:41:32.531Z [rpc] block #38000 (attempted: 0)
+[relay:e2e-settler] 2026-10-04T14:41:32.531Z [rpc] block #38000 (attempted: 0)
+[relay:e2e-fee] 2026-10-04T14:41:32.531Z [rpc] block #38000 (attempted: 0)
+[relay:e2e-oracle-1] 2026-10-04T14:41:32.531Z [rpc] block #38000 (attempted: 0)
+[diag:step] pair.scanAndIngestPairs ms=0 since_rowid=0 max_rowid=0 hits=0 at=2026-10-04T14:41:48.135Z
+[diag:step] zk.closeTickV2 ms=0 at=2026-10-04T14:41:48.198Z
+[diag:step] zk.claimAutonomousTick ms=1 at=2026-10-04T14:41:48.199Z
+[diag:step] zk.handoffAutonomousTick ms=0 at=2026-10-04T14:41:48.199Z
+[bshard-close-voter-v2] tick: 1 pending | signed=0 refused=0 skipped=6 errored=0
+[diag:step] zk.judgeProposeAutonomousTick ms=3 at=2026-10-04T14:41:48.202Z
+[relay:e2e-settler] 10/4/2026, 21:41:48 command bshard_close_attest_v2 failed: UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0
+[bshard-close-submit-v2] market=24-btduw submit fail: no txId in relay response: {"error":"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0","phase":"execution"}
+[bshard-close-submit-v2] tick: 1 pending | submitted=0 notReady=0 failed=1 errored=0 resumed=0
+[diag:heap-sample] at=2026-10-04T14:41:55.545Z heapUsed=56MB heapTotal=61MB rss=180MB external=12MB arrayBuffers=0MB wasmBytes=4.4MB utxoFetchCalls=122
+[relay:e2e-bettorA] 2026-10-04T14:42:17.770Z [rpc] catching up from Console DB...
+[relay:e2e-bettorA] 2026-10-04T14:42:17.771Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-bettorA] 2026-10-04T14:42:17.772Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-fee] 2026-10-04T14:42:17.785Z [rpc] catching up from Console DB...
+[relay:e2e-bettorB] 2026-10-04T14:42:17.785Z [rpc] catching up from Console DB...
+[relay:e2e-maker] 2026-10-04T14:42:17.785Z [rpc] catching up from Console DB...
+[relay:e2e-settler] 2026-10-04T14:42:17.785Z [rpc] catching up from Console DB...
+[relay:e2e-fee] 2026-10-04T14:42:17.787Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-fee] 2026-10-04T14:42:17.787Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-bettorB] 2026-10-04T14:42:17.787Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-bettorB] 2026-10-04T14:42:17.787Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-maker] 2026-10-04T14:42:17.788Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-maker] 2026-10-04T14:42:17.788Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-settler] 2026-10-04T14:42:17.788Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-settler] 2026-10-04T14:42:17.788Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-2] 2026-10-04T14:42:17.816Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-2] 2026-10-04T14:42:17.819Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-2] 2026-10-04T14:42:17.819Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-5] 2026-10-04T14:42:17.832Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-4] 2026-10-04T14:42:17.832Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-3] 2026-10-04T14:42:17.832Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-6] 2026-10-04T14:42:17.832Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-1] 2026-10-04T14:42:17.832Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-5] 2026-10-04T14:42:17.834Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-5] 2026-10-04T14:42:17.834Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-3] 2026-10-04T14:42:17.834Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-3] 2026-10-04T14:42:17.834Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-4] 2026-10-04T14:42:17.835Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-4] 2026-10-04T14:42:17.835Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-6] 2026-10-04T14:42:17.835Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-6] 2026-10-04T14:42:17.835Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-1] 2026-10-04T14:42:17.835Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-1] 2026-10-04T14:42:17.835Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[diag:step] pair.scanAndIngestPairs ms=0 since_rowid=0 max_rowid=0 hits=0 at=2026-10-04T14:42:18.140Z
+[diag:step] zk.closeTickV2 ms=0 at=2026-10-04T14:42:18.203Z
+[diag:step] zk.claimAutonomousTick ms=0 at=2026-10-04T14:42:18.203Z
+[diag:step] zk.handoffAutonomousTick ms=0 at=2026-10-04T14:42:18.203Z
+[diag:step] zk.judgeProposeAutonomousTick ms=3 at=2026-10-04T14:42:18.206Z
+[bshard-close-voter-v2] tick: 1 pending | signed=0 refused=0 skipped=6 errored=0
+[relay:e2e-settler] 10/4/2026, 21:42:18 command bshard_close_attest_v2 failed: UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0
+[bshard-close-submit-v2] market=24-btduw submit fail: no txId in relay response: {"error":"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0","phase":"execution"}
+[bshard-close-submit-v2] tick: 1 pending | submitted=0 notReady=0 failed=1 errored=0 resumed=0
+[diag:step] pair.scanAndIngestPairs ms=0 since_rowid=0 max_rowid=0 hits=0 at=2026-10-04T14:42:48.153Z
+[diag:step] zk.closeTickV2 ms=0 at=2026-10-04T14:42:48.216Z
+[diag:step] zk.claimAutonomousTick ms=0 at=2026-10-04T14:42:48.216Z
+[diag:step] zk.handoffAutonomousTick ms=0 at=2026-10-04T14:42:48.216Z
+[bshard-close-voter-v2] tick: 1 pending | signed=0 refused=0 skipped=6 errored=0
+[diag:step] zk.judgeProposeAutonomousTick ms=3 at=2026-10-04T14:42:48.219Z
+[relay:e2e-settler] 10/4/2026, 21:42:48 command bshard_close_attest_v2 failed: UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0
+[bshard-close-submit-v2] market=24-btduw submit fail: no txId in relay response: {"error":"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0","phase":"execution"}
+[bshard-close-submit-v2] tick: 1 pending | submitted=0 notReady=0 failed=1 errored=0 resumed=0
+[diag:heap-sample] at=2026-10-04T14:42:56.106Z heapUsed=55MB heapTotal=61MB rss=181MB external=12MB arrayBuffers=0MB wasmBytes=4.4MB utxoFetchCalls=122
+[relay:e2e-bettorA] 2026-10-04T14:43:17.775Z [rpc] catching up from Console DB...
+[relay:e2e-bettorA] 2026-10-04T14:43:17.778Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-bettorA] 2026-10-04T14:43:17.778Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-maker] 2026-10-04T14:43:17.791Z [rpc] catching up from Console DB...
+[relay:e2e-settler] 2026-10-04T14:43:17.791Z [rpc] catching up from Console DB...
+[relay:e2e-bettorB] 2026-10-04T14:43:17.791Z [rpc] catching up from Console DB...
+[relay:e2e-fee] 2026-10-04T14:43:17.791Z [rpc] catching up from Console DB...
+[relay:e2e-maker] 2026-10-04T14:43:17.793Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-maker] 2026-10-04T14:43:17.793Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-bettorB] 2026-10-04T14:43:17.794Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-bettorB] 2026-10-04T14:43:17.794Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-settler] 2026-10-04T14:43:17.794Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-settler] 2026-10-04T14:43:17.794Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-fee] 2026-10-04T14:43:17.794Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-fee] 2026-10-04T14:43:17.794Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-2] 2026-10-04T14:43:17.823Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-2] 2026-10-04T14:43:17.824Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-2] 2026-10-04T14:43:17.824Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-5] 2026-10-04T14:43:17.838Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-3] 2026-10-04T14:43:17.838Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-1] 2026-10-04T14:43:17.838Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-4] 2026-10-04T14:43:17.838Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-6] 2026-10-04T14:43:17.838Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-1] 2026-10-04T14:43:17.842Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-1] 2026-10-04T14:43:17.842Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-5] 2026-10-04T14:43:17.842Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-5] 2026-10-04T14:43:17.842Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-3] 2026-10-04T14:43:17.842Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-3] 2026-10-04T14:43:17.842Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-4] 2026-10-04T14:43:17.842Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-4] 2026-10-04T14:43:17.842Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-6] 2026-10-04T14:43:17.842Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-6] 2026-10-04T14:43:17.842Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[diag:step] pair.scanAndIngestPairs ms=0 since_rowid=0 max_rowid=0 hits=0 at=2026-10-04T14:43:18.163Z
+[diag:step] zk.closeTickV2 ms=0 at=2026-10-04T14:43:18.226Z
+[diag:step] zk.claimAutonomousTick ms=0 at=2026-10-04T14:43:18.226Z
+[diag:step] zk.handoffAutonomousTick ms=1 at=2026-10-04T14:43:18.227Z
+[bshard-close-voter-v2] tick: 1 pending | signed=0 refused=0 skipped=6 errored=0
+[diag:step] zk.judgeProposeAutonomousTick ms=3 at=2026-10-04T14:43:18.230Z
+[relay:e2e-settler] 10/4/2026, 21:43:18 command bshard_close_attest_v2 failed: UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0
+[bshard-close-submit-v2] market=24-btduw submit fail: no txId in relay response: {"error":"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0","phase":"execution"}
+[bshard-close-submit-v2] tick: 1 pending | submitted=0 notReady=0 failed=1 errored=0 resumed=0
+[relay:e2e-oracle-6] 2026-10-04T14:43:24.752Z [rpc] block #39000 (attempted: 0)
+[relay:e2e-maker] 2026-10-04T14:43:24.752Z [rpc] block #39000 (attempted: 0)
+[relay:e2e-oracle-2] 2026-10-04T14:43:24.752Z [rpc] block #39000 (attempted: 0)
+[relay:e2e-oracle-3] 2026-10-04T14:43:24.752Z [rpc] block #39000 (attempted: 0)
+[relay:e2e-oracle-1] 2026-10-04T14:43:24.752Z [rpc] block #39000 (attempted: 0)
+[relay:e2e-oracle-4] 2026-10-04T14:43:24.752Z [rpc] block #39000 (attempted: 0)
+[relay:e2e-bettorB] 2026-10-04T14:43:24.752Z [rpc] block #39000 (attempted: 0)
+[relay:e2e-bettorA] 2026-10-04T14:43:24.751Z [rpc] block #39000 (attempted: 0)
+[relay:e2e-settler] 2026-10-04T14:43:24.752Z [rpc] block #39000 (attempted: 0)
+[relay:e2e-oracle-5] 2026-10-04T14:43:24.752Z [rpc] block #39000 (attempted: 0)
+[relay:e2e-fee] 2026-10-04T14:43:24.752Z [rpc] block #39000 (attempted: 0)
+[diag:step] pair.scanAndIngestPairs ms=0 since_rowid=0 max_rowid=0 hits=0 at=2026-10-04T14:43:48.178Z
+[diag:step] zk.closeTickV2 ms=0 at=2026-10-04T14:43:48.226Z
+[diag:step] zk.claimAutonomousTick ms=0 at=2026-10-04T14:43:48.226Z
+[diag:step] zk.handoffAutonomousTick ms=0 at=2026-10-04T14:43:48.228Z
+[bshard-close-voter-v2] tick: 1 pending | signed=0 refused=0 skipped=6 errored=0
+[relay:e2e-settler] 10/4/2026, 21:43:48 command bshard_close_attest_v2 failed: UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0
+[bshard-close-submit-v2] market=24-btduw submit fail: no txId in relay response: {"error":"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0","phase":"execution"}
+[bshard-close-submit-v2] tick: 1 pending | submitted=0 notReady=0 failed=1 errored=0 resumed=0
+[diag:step] zk.judgeProposeAutonomousTick ms=2 at=2026-10-04T14:43:48.230Z
+[diag:heap-sample] at=2026-10-04T14:43:56.609Z heapUsed=56MB heapTotal=63MB rss=182MB external=12MB arrayBuffers=0MB wasmBytes=4.4MB utxoFetchCalls=122
+[relay:e2e-bettorA] 2026-10-04T14:44:17.782Z [rpc] catching up from Console DB...
+[relay:e2e-bettorA] 2026-10-04T14:44:17.784Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-bettorA] 2026-10-04T14:44:17.784Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-settler] 2026-10-04T14:44:17.798Z [rpc] catching up from Console DB...
+[relay:e2e-bettorB] 2026-10-04T14:44:17.798Z [rpc] catching up from Console DB...
+[relay:e2e-fee] 2026-10-04T14:44:17.798Z [rpc] catching up from Console DB...
+[relay:e2e-maker] 2026-10-04T14:44:17.799Z [rpc] catching up from Console DB...
+[relay:e2e-settler] 2026-10-04T14:44:17.801Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-settler] 2026-10-04T14:44:17.801Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-bettorB] 2026-10-04T14:44:17.801Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-bettorB] 2026-10-04T14:44:17.801Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-maker] 2026-10-04T14:44:17.801Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-maker] 2026-10-04T14:44:17.801Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-fee] 2026-10-04T14:44:17.801Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-fee] 2026-10-04T14:44:17.801Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-2] 2026-10-04T14:44:17.829Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-2] 2026-10-04T14:44:17.831Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-2] 2026-10-04T14:44:17.831Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-4] 2026-10-04T14:44:17.845Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-3] 2026-10-04T14:44:17.845Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-6] 2026-10-04T14:44:17.845Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-1] 2026-10-04T14:44:17.846Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-5] 2026-10-04T14:44:17.846Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-4] 2026-10-04T14:44:17.849Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-4] 2026-10-04T14:44:17.849Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-3] 2026-10-04T14:44:17.849Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-3] 2026-10-04T14:44:17.849Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-6] 2026-10-04T14:44:17.849Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-6] 2026-10-04T14:44:17.849Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-5] 2026-10-04T14:44:17.849Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-5] 2026-10-04T14:44:17.849Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-1] 2026-10-04T14:44:17.850Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-1] 2026-10-04T14:44:17.850Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[diag:step] pair.scanAndIngestPairs ms=0 since_rowid=0 max_rowid=0 hits=0 at=2026-10-04T14:44:18.183Z
+[diag:step] zk.closeTickV2 ms=0 at=2026-10-04T14:44:18.231Z
+[diag:step] zk.claimAutonomousTick ms=1 at=2026-10-04T14:44:18.232Z
+[diag:step] zk.handoffAutonomousTick ms=0 at=2026-10-04T14:44:18.232Z
+[bshard-close-voter-v2] tick: 1 pending | signed=0 refused=0 skipped=6 errored=0
+[diag:step] zk.judgeProposeAutonomousTick ms=3 at=2026-10-04T14:44:18.235Z
+[relay:e2e-settler] 10/4/2026, 21:44:18 command bshard_close_attest_v2 failed: UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0
+[bshard-close-submit-v2] market=24-btduw submit fail: no txId in relay response: {"error":"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0","phase":"execution"}
+[bshard-close-submit-v2] tick: 1 pending | submitted=0 notReady=0 failed=1 errored=0 resumed=0
+[diag:step] pair.scanAndIngestPairs ms=0 since_rowid=0 max_rowid=0 hits=0 at=2026-10-04T14:44:48.184Z
+[diag:step] zk.closeTickV2 ms=0 at=2026-10-04T14:44:48.232Z
+[diag:step] zk.claimAutonomousTick ms=0 at=2026-10-04T14:44:48.232Z
+[diag:step] zk.handoffAutonomousTick ms=1 at=2026-10-04T14:44:48.233Z
+[diag:step] zk.judgeProposeAutonomousTick ms=2 at=2026-10-04T14:44:48.235Z
+[bshard-close-voter-v2] tick: 1 pending | signed=0 refused=0 skipped=6 errored=0
+[relay:e2e-settler] 10/4/2026, 21:44:48 command bshard_close_attest_v2 failed: UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0
+[bshard-close-submit-v2] market=24-btduw submit fail: no txId in relay response: {"error":"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0","phase":"execution"}
+[bshard-close-submit-v2] tick: 1 pending | submitted=0 notReady=0 failed=1 errored=0 resumed=0
+[diag:heap-sample] at=2026-10-04T14:44:57.092Z heapUsed=57MB heapTotal=63MB rss=182MB external=12MB arrayBuffers=0MB wasmBytes=4.4MB utxoFetchCalls=122
+[relay:e2e-oracle-1] 2026-10-04T14:45:05.946Z [rpc] block #40000 (attempted: 0)
+[relay:e2e-bettorB] 2026-10-04T14:45:05.946Z [rpc] block #40000 (attempted: 0)
+[relay:e2e-fee] 2026-10-04T14:45:05.946Z [rpc] block #40000 (attempted: 0)
+[relay:e2e-maker] 2026-10-04T14:45:05.946Z [rpc] block #40000 (attempted: 0)
+[relay:e2e-bettorA] 2026-10-04T14:45:05.946Z [rpc] block #40000 (attempted: 0)
+[relay:e2e-oracle-2] 2026-10-04T14:45:05.946Z [rpc] block #40000 (attempted: 0)
+[relay:e2e-oracle-4] 2026-10-04T14:45:05.946Z [rpc] block #40000 (attempted: 0)
+[relay:e2e-oracle-3] 2026-10-04T14:45:05.946Z [rpc] block #40000 (attempted: 0)
+[relay:e2e-oracle-5] 2026-10-04T14:45:05.946Z [rpc] block #40000 (attempted: 0)
+[relay:e2e-oracle-6] 2026-10-04T14:45:05.946Z [rpc] block #40000 (attempted: 0)
+[relay:e2e-settler] 2026-10-04T14:45:05.947Z [rpc] block #40000 (attempted: 0)
+[relay:e2e-bettorA] 2026-10-04T14:45:17.788Z [rpc] catching up from Console DB...
+[relay:e2e-bettorA] 2026-10-04T14:45:17.790Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-bettorA] 2026-10-04T14:45:17.790Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-settler] 2026-10-04T14:45:17.804Z [rpc] catching up from Console DB...
+[relay:e2e-bettorB] 2026-10-04T14:45:17.804Z [rpc] catching up from Console DB...
+[relay:e2e-fee] 2026-10-04T14:45:17.804Z [rpc] catching up from Console DB...
+[relay:e2e-maker] 2026-10-04T14:45:17.804Z [rpc] catching up from Console DB...
+[relay:e2e-bettorB] 2026-10-04T14:45:17.807Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-bettorB] 2026-10-04T14:45:17.807Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-settler] 2026-10-04T14:45:17.807Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-settler] 2026-10-04T14:45:17.807Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-fee] 2026-10-04T14:45:17.807Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-fee] 2026-10-04T14:45:17.807Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-maker] 2026-10-04T14:45:17.807Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-maker] 2026-10-04T14:45:17.807Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-2] 2026-10-04T14:45:17.836Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-2] 2026-10-04T14:45:17.837Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-2] 2026-10-04T14:45:17.837Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-3] 2026-10-04T14:45:17.851Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-1] 2026-10-04T14:45:17.851Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-4] 2026-10-04T14:45:17.851Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-6] 2026-10-04T14:45:17.851Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-5] 2026-10-04T14:45:17.851Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-3] 2026-10-04T14:45:17.854Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-3] 2026-10-04T14:45:17.854Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-1] 2026-10-04T14:45:17.854Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-1] 2026-10-04T14:45:17.854Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-6] 2026-10-04T14:45:17.855Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-6] 2026-10-04T14:45:17.855Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-4] 2026-10-04T14:45:17.855Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-4] 2026-10-04T14:45:17.855Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-5] 2026-10-04T14:45:17.855Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-5] 2026-10-04T14:45:17.855Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[diag:step] pair.scanAndIngestPairs ms=0 since_rowid=0 max_rowid=0 hits=0 at=2026-10-04T14:45:18.194Z
+[diag:step] zk.closeTickV2 ms=0 at=2026-10-04T14:45:18.243Z
+[diag:step] zk.claimAutonomousTick ms=0 at=2026-10-04T14:45:18.243Z
+[diag:step] zk.handoffAutonomousTick ms=1 at=2026-10-04T14:45:18.244Z
+[bshard-close-voter-v2] tick: 1 pending | signed=0 refused=0 skipped=6 errored=0
+[diag:step] zk.judgeProposeAutonomousTick ms=3 at=2026-10-04T14:45:18.247Z
+[relay:e2e-settler] 10/4/2026, 21:45:18 command bshard_close_attest_v2 failed: UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0
+[bshard-close-submit-v2] market=24-btduw submit fail: no txId in relay response: {"error":"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0","phase":"execution"}
+[bshard-close-submit-v2] tick: 1 pending | submitted=0 notReady=0 failed=1 errored=0 resumed=0
+[diag:step] pair.scanAndIngestPairs ms=0 since_rowid=0 max_rowid=0 hits=0 at=2026-10-04T14:45:48.205Z
+[diag:step] zk.closeTickV2 ms=0 at=2026-10-04T14:45:48.252Z
+[diag:step] zk.claimAutonomousTick ms=0 at=2026-10-04T14:45:48.252Z
+[diag:step] zk.handoffAutonomousTick ms=0 at=2026-10-04T14:45:48.252Z
+[bshard-close-voter-v2] tick: 1 pending | signed=0 refused=0 skipped=6 errored=0
+[diag:step] zk.judgeProposeAutonomousTick ms=4 at=2026-10-04T14:45:48.256Z
+[relay:e2e-settler] 10/4/2026, 21:45:48 command bshard_close_attest_v2 failed: UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0
+[bshard-close-submit-v2] market=24-btduw submit fail: no txId in relay response: {"error":"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0","phase":"execution"}
+[bshard-close-submit-v2] tick: 1 pending | submitted=0 notReady=0 failed=1 errored=0 resumed=0
+[diag:heap-sample] at=2026-10-04T14:45:57.606Z heapUsed=57MB heapTotal=63MB rss=183MB external=12MB arrayBuffers=0MB wasmBytes=4.4MB utxoFetchCalls=122
+[prediction-voter] tick: 6 voter relays, 1V1 voted=0 skipped=0 errored=0 | pool voted=0 skipped=0 errored=0
+[prediction-voter] parallel: A.recorded=0 B.scored=0 disagree=0 | audit: checked=0 dev=0 frozen=0
+[pool-settler] deadline-watcher: advanced 1 pending_bettors → verifying (deadline passed): fvyvm
+[diag:step] pool.selectMarkets.all ms=1 rows=2 at=2026-10-04T14:46:17.269Z
+[pool-settler] tick: 2 verifying markets, consensus=0 refund=0 dispute=0 pending=0 doomed=0 errored=0 sampledCommittee=0 bshardSkipped=2 commingledRefund=0
+[pool-settler:P1-authz] 授权闸拦下 0 个 bettor side / 0 个市场 / 0.0 KAS 未领 · 冻结态(unresolved_needs_authorization)市场 0 个 · 旧状态但事实卡住(disputed 未 dispatch)市场 0 个 — 这三个数长期为 0 与长期很大都需要人看: 前者说明闸没通, 后者说明验证侧有系统性故障
+[diag:tick-duration] poolSettlerTick ms=1
+[diag:step] pool.tick.phases ms=1 pre=0 dw=0 select=1 post=0 rows=2 t0=2026-10-04T14:46:17.268Z at=2026-10-04T14:46:17.269Z
+[rpc-health] using local node: ws://127.0.0.1:29717
+[rpc-health] using local node: ws://127.0.0.1:29717
+[utxo-fetch-probe] #123 at=2026-10-04T14:46:17.274Z ms=0 addrCount=1 entries=1 roughBytesEst=0MB
+[utxo-fetch-probe] #124 at=2026-10-04T14:46:17.275Z ms=0 addrCount=1 entries=1 roughBytesEst=0MB
+[utxo-fetch-probe] #125 at=2026-10-04T14:46:17.275Z ms=0 addrCount=1 entries=1 roughBytesEst=0MB
+[utxo-fetch-probe] #126 at=2026-10-04T14:46:17.275Z ms=1 addrCount=1 entries=1 roughBytesEst=0MB
+[utxo-fetch-probe] #127 at=2026-10-04T14:46:17.276Z ms=1 addrCount=1 entries=1 roughBytesEst=0MB
+[utxo-fetch-probe] #128 at=2026-10-04T14:46:17.277Z ms=0 addrCount=1 entries=1 roughBytesEst=0MB
+[oracle-pool-scanner-cron] tick: snapshotDaa=94681 poolSize=6 merkleRoot=46fa6978ef43 (scanned=6/valid=6/rejected=0)
+[tx-landed-reconciler] tick 15: tx_records scanned=6 landed=6 mempool=0 not_landed=0 no_target=0 · intents submitted=0 landed=0 not_landed=0 prepared_stale=0
+[relay:e2e-bettorA] 2026-10-04T14:46:17.798Z [rpc] catching up from Console DB...
+[relay:e2e-bettorA] 2026-10-04T14:46:17.800Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-bettorA] 2026-10-04T14:46:17.800Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-fee] 2026-10-04T14:46:17.813Z [rpc] catching up from Console DB...
+[relay:e2e-settler] 2026-10-04T14:46:17.813Z [rpc] catching up from Console DB...
+[relay:e2e-maker] 2026-10-04T14:46:17.813Z [rpc] catching up from Console DB...
+[relay:e2e-bettorB] 2026-10-04T14:46:17.813Z [rpc] catching up from Console DB...
+[relay:e2e-fee] 2026-10-04T14:46:17.816Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-fee] 2026-10-04T14:46:17.816Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-settler] 2026-10-04T14:46:17.816Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-settler] 2026-10-04T14:46:17.816Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-bettorB] 2026-10-04T14:46:17.816Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-bettorB] 2026-10-04T14:46:17.816Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-maker] 2026-10-04T14:46:17.816Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-maker] 2026-10-04T14:46:17.816Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-2] 2026-10-04T14:46:17.844Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-2] 2026-10-04T14:46:17.845Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-2] 2026-10-04T14:46:17.845Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-3] 2026-10-04T14:46:17.859Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-5] 2026-10-04T14:46:17.859Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-6] 2026-10-04T14:46:17.859Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-1] 2026-10-04T14:46:17.859Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-4] 2026-10-04T14:46:17.859Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-3] 2026-10-04T14:46:17.862Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-3] 2026-10-04T14:46:17.862Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-5] 2026-10-04T14:46:17.863Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-5] 2026-10-04T14:46:17.863Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-6] 2026-10-04T14:46:17.863Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-6] 2026-10-04T14:46:17.863Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-4] 2026-10-04T14:46:17.863Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-4] 2026-10-04T14:46:17.863Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-1] 2026-10-04T14:46:17.864Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-1] 2026-10-04T14:46:17.864Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[diag:step] pair.scanAndIngestPairs ms=1 since_rowid=0 max_rowid=0 hits=0 at=2026-10-04T14:46:18.214Z
+[diag:step] zk.closeTickV2 ms=1 at=2026-10-04T14:46:18.262Z
+[diag:step] zk.claimAutonomousTick ms=0 at=2026-10-04T14:46:18.262Z
+[diag:step] zk.handoffAutonomousTick ms=0 at=2026-10-04T14:46:18.262Z
+[bshard-close-voter-v2] tick: 1 pending | signed=0 refused=0 skipped=6 errored=0
+[diag:step] zk.judgeProposeAutonomousTick ms=3 at=2026-10-04T14:46:18.265Z
+[relay:e2e-settler] 10/4/2026, 21:46:18 command bshard_close_attest_v2 failed: UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0
+[bshard-close-submit-v2] market=24-btduw submit fail: no txId in relay response: {"error":"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0","phase":"execution"}
+[bshard-close-submit-v2] tick: 1 pending | submitted=0 notReady=0 failed=1 errored=0 resumed=0
+[diag:step] pair.scanAndIngestPairs ms=0 since_rowid=0 max_rowid=0 hits=0 at=2026-10-04T14:46:48.220Z
+[diag:step] zk.closeTickV2 ms=0 at=2026-10-04T14:46:48.268Z
+[diag:step] zk.claimAutonomousTick ms=0 at=2026-10-04T14:46:48.268Z
+[diag:step] zk.handoffAutonomousTick ms=0 at=2026-10-04T14:46:48.268Z
+[bshard-close-voter-v2] tick: 1 pending | signed=0 refused=0 skipped=6 errored=0
+[diag:step] zk.judgeProposeAutonomousTick ms=4 at=2026-10-04T14:46:48.272Z
+[relay:e2e-settler] 10/4/2026, 21:46:48 command bshard_close_attest_v2 failed: UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0
+[bshard-close-submit-v2] market=24-btduw submit fail: no txId in relay response: {"error":"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0","phase":"execution"}
+[bshard-close-submit-v2] tick: 1 pending | submitted=0 notReady=0 failed=1 errored=0 resumed=0
+[diag:heap-sample] at=2026-10-04T14:46:58.153Z heapUsed=58MB heapTotal=64MB rss=184MB external=12MB arrayBuffers=0MB wasmBytes=4.4MB utxoFetchCalls=128
+[relay:e2e-oracle-1] 2026-10-04T14:47:05.761Z [rpc] block #41000 (attempted: 0)
+[relay:e2e-bettorA] 2026-10-04T14:47:05.761Z [rpc] block #41000 (attempted: 0)
+[relay:e2e-bettorB] 2026-10-04T14:47:05.761Z [rpc] block #41000 (attempted: 0)
+[relay:e2e-oracle-5] 2026-10-04T14:47:05.761Z [rpc] block #41000 (attempted: 0)
+[relay:e2e-fee] 2026-10-04T14:47:05.761Z [rpc] block #41000 (attempted: 0)
+[relay:e2e-oracle-6] 2026-10-04T14:47:05.761Z [rpc] block #41000 (attempted: 0)
+[relay:e2e-oracle-4] 2026-10-04T14:47:05.761Z [rpc] block #41000 (attempted: 0)
+[relay:e2e-maker] 2026-10-04T14:47:05.761Z [rpc] block #41000 (attempted: 0)
+[relay:e2e-oracle-2] 2026-10-04T14:47:05.761Z [rpc] block #41000 (attempted: 0)
+[relay:e2e-oracle-3] 2026-10-04T14:47:05.761Z [rpc] block #41000 (attempted: 0)
+[relay:e2e-settler] 2026-10-04T14:47:05.761Z [rpc] block #41000 (attempted: 0)
+[relay:e2e-bettorA] 2026-10-04T14:47:17.803Z [rpc] catching up from Console DB...
+[relay:e2e-bettorA] 2026-10-04T14:47:17.804Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-bettorA] 2026-10-04T14:47:17.804Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-maker] 2026-10-04T14:47:17.819Z [rpc] catching up from Console DB...
+[relay:e2e-settler] 2026-10-04T14:47:17.819Z [rpc] catching up from Console DB...
+[relay:e2e-bettorB] 2026-10-04T14:47:17.819Z [rpc] catching up from Console DB...
+[relay:e2e-fee] 2026-10-04T14:47:17.819Z [rpc] catching up from Console DB...
+[relay:e2e-maker] 2026-10-04T14:47:17.822Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-maker] 2026-10-04T14:47:17.822Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-settler] 2026-10-04T14:47:17.822Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-settler] 2026-10-04T14:47:17.822Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-fee] 2026-10-04T14:47:17.822Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-fee] 2026-10-04T14:47:17.822Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-bettorB] 2026-10-04T14:47:17.822Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-bettorB] 2026-10-04T14:47:17.822Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-2] 2026-10-04T14:47:17.850Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-2] 2026-10-04T14:47:17.851Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-2] 2026-10-04T14:47:17.851Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-1] 2026-10-04T14:47:17.865Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-3] 2026-10-04T14:47:17.865Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-5] 2026-10-04T14:47:17.865Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-4] 2026-10-04T14:47:17.865Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-6] 2026-10-04T14:47:17.866Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-3] 2026-10-04T14:47:17.869Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-3] 2026-10-04T14:47:17.869Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-1] 2026-10-04T14:47:17.869Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-1] 2026-10-04T14:47:17.869Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-4] 2026-10-04T14:47:17.869Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-4] 2026-10-04T14:47:17.869Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-5] 2026-10-04T14:47:17.869Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-6] 2026-10-04T14:47:17.869Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-5] 2026-10-04T14:47:17.869Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-6] 2026-10-04T14:47:17.869Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[diag:step] pair.scanAndIngestPairs ms=1 since_rowid=0 max_rowid=0 hits=0 at=2026-10-04T14:47:18.225Z
+[diag:step] zk.closeTickV2 ms=0 at=2026-10-04T14:47:18.272Z
+[diag:step] zk.claimAutonomousTick ms=0 at=2026-10-04T14:47:18.272Z
+[diag:step] zk.handoffAutonomousTick ms=1 at=2026-10-04T14:47:18.273Z
+[bshard-close-voter-v2] tick: 1 pending | signed=0 refused=0 skipped=6 errored=0
+[relay:e2e-settler] 10/4/2026, 21:47:18 command bshard_close_attest_v2 failed: UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0
+[bshard-close-submit-v2] market=24-btduw submit fail: no txId in relay response: {"error":"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0","phase":"execution"}
+[bshard-close-submit-v2] tick: 1 pending | submitted=0 notReady=0 failed=1 errored=0 resumed=0
+[diag:step] proc.silverc.compile.bshard-artifacts ms=33 cmd=silverc ok=1 at=2026-10-04T14:47:18.369Z
+[relay:e2e-settler] 10/4/2026, 21:47:18 TRANSFER 0.30000000 → 32y5v9kveur9 TX: 60af909c33ac3f396141b5f8ef1e46e1becd328f01acc7d7667610600fd72c47 fee: 0.032036
+[relay:e2e-settler] [mass-floor:observe] site=unlockBshardConsolidateV2 compute=97658 storage=0 transient=214232 mass_ub=214232 minFee=21423200 actualFee=20000000 would_reject=true wasm=panic(undefined) source=7b1e18cc
+[relay:e2e-settler] [unlockBshardConsolidateV2 invariant] Σin=110000000 Σout=90000000 fee=20000000 (mass_ub=214232 minFee=21423200 ⚠ would-reject(observe)), 3 outputs all >= dust
+[relay:e2e-settler] 10/4/2026, 21:47:28 TRANSFER 0.5 → 32y5v9kveur9 TX: 040538c3b18d16bb556c179aa38c4cec3628458a7fc8aea640aa3a4ea360dfc4 fee: 0.032036
+[zk-autonomy] 14:47:30 ✅ market=16-fvyvm judge+propose dispatched(winDir=0, endBlockHash=59d814aa42bd...)
+[zk-autonomy] 14:47:30 tick: 1 candidate(s) | proposed=1 cooling=0 skipped=0 errored=0
+[diag:step] zk.judgeProposeAutonomousTick ms=12206 at=2026-10-04T14:47:30.479Z
+[diag:step] pair.scanAndIngestPairs ms=0 since_rowid=0 max_rowid=0 hits=0 at=2026-10-04T14:47:48.233Z
+[diag:step] zk.closeTickV2 ms=0 at=2026-10-04T14:47:48.280Z
+[diag:step] zk.claimAutonomousTick ms=0 at=2026-10-04T14:47:48.280Z
+[diag:step] zk.handoffAutonomousTick ms=1 at=2026-10-04T14:47:48.281Z
+[diag:step] zk.judgeProposeAutonomousTick ms=4 at=2026-10-04T14:47:48.285Z
+[relay:e2e-settler] 10/4/2026, 21:47:48 command bshard_close_attest_v2 failed: UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0
+[bshard-close-submit-v2] market=24-btduw submit fail: no txId in relay response: {"error":"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0","phase":"execution"}
+[bshard-close-submit-v2] tick: 2 pending | submitted=0 notReady=1 failed=1 errored=0 resumed=0
+[bshard-close-voter-v2] ✅ e2e-oracle-1 自治 enforce PASS (verdict=YES) → 签 close_attest_v2 market=16-fvyvm
+[bshard-close-voter-v2] ✅ e2e-oracle-2 自治 enforce PASS (verdict=YES) → 签 close_attest_v2 market=16-fvyvm
+[bshard-close-voter-v2] ✅ e2e-oracle-3 自治 enforce PASS (verdict=YES) → 签 close_attest_v2 market=16-fvyvm
+[bshard-close-voter-v2] ✅ e2e-oracle-5 自治 enforce PASS (verdict=YES) → 签 close_attest_v2 market=16-fvyvm
+[bshard-close-voter-v2] ✅ e2e-oracle-6 自治 enforce PASS (verdict=YES) → 签 close_attest_v2 market=16-fvyvm
+[bshard-close-voter-v2] tick: 2 pending | signed=5 refused=0 skipped=7 errored=0
+[diag:step] bshard-close-voter.v2Tick ms=298 sync=0 ok=1 at=2026-10-04T14:47:48.577Z
+[diag:heap-sample] at=2026-10-04T14:47:58.717Z heapUsed=53MB heapTotal=60MB rss=180MB external=13MB arrayBuffers=1MB wasmBytes=4.4MB utxoFetchCalls=128
+[relay:e2e-bettorA] 2026-10-04T14:48:17.806Z [rpc] catching up from Console DB...
+[relay:e2e-bettorA] 2026-10-04T14:48:17.807Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-bettorA] 2026-10-04T14:48:17.807Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-fee] 2026-10-04T14:48:17.822Z [rpc] catching up from Console DB...
+[relay:e2e-bettorB] 2026-10-04T14:48:17.822Z [rpc] catching up from Console DB...
+[relay:e2e-settler] 2026-10-04T14:48:17.822Z [rpc] catching up from Console DB...
+[relay:e2e-maker] 2026-10-04T14:48:17.822Z [rpc] catching up from Console DB...
+[relay:e2e-fee] 2026-10-04T14:48:17.824Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-fee] 2026-10-04T14:48:17.824Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-bettorB] 2026-10-04T14:48:17.824Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-bettorB] 2026-10-04T14:48:17.824Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-settler] 2026-10-04T14:48:17.824Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-settler] 2026-10-04T14:48:17.824Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-maker] 2026-10-04T14:48:17.824Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-maker] 2026-10-04T14:48:17.824Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-2] 2026-10-04T14:48:17.852Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-2] 2026-10-04T14:48:17.854Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-2] 2026-10-04T14:48:17.854Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-3] 2026-10-04T14:48:17.868Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-1] 2026-10-04T14:48:17.868Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-5] 2026-10-04T14:48:17.868Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-6] 2026-10-04T14:48:17.868Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-4] 2026-10-04T14:48:17.868Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-3] 2026-10-04T14:48:17.871Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-3] 2026-10-04T14:48:17.871Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-1] 2026-10-04T14:48:17.872Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-1] 2026-10-04T14:48:17.872Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-6] 2026-10-04T14:48:17.872Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-6] 2026-10-04T14:48:17.872Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-5] 2026-10-04T14:48:17.872Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-5] 2026-10-04T14:48:17.872Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-4] 2026-10-04T14:48:17.872Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-4] 2026-10-04T14:48:17.872Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[diag:step] pair.scanAndIngestPairs ms=1 since_rowid=0 max_rowid=0 hits=0 at=2026-10-04T14:48:18.237Z
+[diag:step] zk.closeTickV2 ms=1 at=2026-10-04T14:48:18.284Z
+[diag:step] zk.claimAutonomousTick ms=0 at=2026-10-04T14:48:18.284Z
+[diag:step] zk.handoffAutonomousTick ms=0 at=2026-10-04T14:48:18.284Z
+[diag:step] zk.judgeProposeAutonomousTick ms=3 at=2026-10-04T14:48:18.287Z
+[relay:e2e-settler] 10/4/2026, 21:48:18 command bshard_close_attest_v2 failed: UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0
+[bshard-close-submit-v2] market=24-btduw submit fail: no txId in relay response: {"error":"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0","phase":"execution"}
+[bshard-close-voter-v2] tick: 2 pending | signed=0 refused=0 skipped=12 errored=0
+[relay:e2e-settler] [mass-floor:observe] site=unlockBshardCloseAttestV2 compute=52503 storage=96429 transient=139092 mass_ub=139092 minFee=13909200 actualFee=10000000 would_reject=true wasm=panic(undefined) source=7b1e18cc
+[relay:e2e-settler] [unlockBshardCloseAttestV2 invariant] Σin=70000000 Σout=60000000 fee=10000000 (mass_ub=139092 minFee=13909200 ⚠ would-reject(observe)), 2 outputs all >= dust
+[relay:e2e-settler] [mass-floor:observe:auth] site=unlockBshardCloseAttestV2 txid=dd5d8c8ba167b0688f011ee41b8ba18edb4aa5e5a2e758a6a6319e40c06c3a48 authoritative_mass=null ub_ok=inconclusive mass_ub=139092 reason=mempool entry has no mass inconclusive_total=5
+[bshard-close-submit-v2] ✅ market=16-fvyvm payout_shards 状态持久化(closed=1, outpoint=dd5d8c8ba167b0688f011ee41b8ba18edb4aa5e5a2e758a6a6319e40c06c3a48:0)
+[bshard-close-submit-v2] ✅ market=16-fvyvm zk_prove_jobs enqueued jobId=6
+[bshard-close-submit-v2] ✅ market=16-fvyvm close_attest_v2 LANDED txId=dd5d8c8ba167b0688f011ee41b8ba18edb4aa5e5a2e758a6a6319e40c06c3a48
+[bshard-close-submit-v2] tick: 2 pending | submitted=1 notReady=0 failed=1 errored=0 resumed=0
+[diag:step] bshard-close-voter.submitV2Tick ms=2024 sync=0 ok=1 at=2026-10-04T14:48:20.307Z
+[zk-prove-worker] ❌ job=6 market=16-fvyvm: market ext-pool-v07-1791124315416-fvyvm 还没有 zk_continuation(zk_handoff 还没成功广播过)— 拒绝在花 4 分钟 proving+1KAS gate 注资之前跑一个下游必炸的 job
+[zk-prove-worker] updateProvingFailed also failed: updateProvingFailed: market ext-pool-v07-1791124315416-fvyvm 没有 zk_continuation
+[diag:step] zk-prove-worker.tick ms=76 sync=0 ok=1 at=2026-10-04T14:48:48.257Z
+[diag:step] pair.scanAndIngestPairs ms=0 since_rowid=0 max_rowid=0 hits=0 at=2026-10-04T14:48:48.257Z
+[diag:step] zk.closeTickV2 ms=0 at=2026-10-04T14:48:48.290Z
+[diag:step] zk.claimAutonomousTick ms=0 at=2026-10-04T14:48:48.290Z
+[relay:e2e-settler] 10/4/2026, 21:48:48 command bshard_close_attest_v2 failed: UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0
+[diag:step] zk.judgeProposeAutonomousTick ms=4 at=2026-10-04T14:48:48.298Z
+[bshard-close-submit-v2] market=24-btduw submit fail: no txId in relay response: {"error":"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0","phase":"execution"}
+[bshard-close-submit-v2] tick: 1 pending | submitted=0 notReady=0 failed=1 errored=0 resumed=0
+[bshard-close-voter-v2] tick: 1 pending | signed=0 refused=0 skipped=6 errored=0
+[relay:e2e-settler] 10/4/2026, 21:48:48 TRANSFER 0.30000000 → 32y5v9kveur9 TX: 8dbf5dbc0a27b5201544c4c2423c232a705b5794c0fb7ca09a78e111f48ee9a4 fee: 0.032036
+[diag:step] proc.silverc.compile.bshard-artifacts ms=33 cmd=silverc ok=1 at=2026-10-04T14:48:51.382Z
+[relay:e2e-settler] [mass-floor:observe] site=unlockBshardZkHandoff compute=89914 storage=22225 transient=196696 mass_ub=196696 minFee=19669600 actualFee=30000000 would_reject=false wasm=panic(undefined) source=7b1e18cc
+[relay:e2e-settler] [unlockBshardZkHandoff invariant] Σin=90000000 Σout=60000000 fee=30000000 (mass_ub=196696 minFee=19669600 ✓), 2 outputs all >= dust
+[relay:e2e-bettorA] 2026-10-04T14:48:52.574Z [rpc] block #42000 (attempted: 0)
+[relay:e2e-maker] 2026-10-04T14:48:52.574Z [rpc] block #42000 (attempted: 0)
+[relay:e2e-oracle-3] 2026-10-04T14:48:52.574Z [rpc] block #42000 (attempted: 0)
+[relay:e2e-oracle-4] 2026-10-04T14:48:52.574Z [rpc] block #42000 (attempted: 0)
+[relay:e2e-oracle-2] 2026-10-04T14:48:52.573Z [rpc] block #42000 (attempted: 0)
+[relay:e2e-bettorB] 2026-10-04T14:48:52.574Z [rpc] block #42000 (attempted: 0)
+[relay:e2e-fee] 2026-10-04T14:48:52.574Z [rpc] block #42000 (attempted: 0)
+[relay:e2e-oracle-6] 2026-10-04T14:48:52.574Z [rpc] block #42000 (attempted: 0)
+[relay:e2e-oracle-5] 2026-10-04T14:48:52.574Z [rpc] block #42000 (attempted: 0)
+[relay:e2e-settler] 2026-10-04T14:48:52.574Z [rpc] block #42000 (attempted: 0)
+[relay:e2e-oracle-1] 2026-10-04T14:48:52.574Z [rpc] block #42000 (attempted: 0)
+[buildProposeCloseRequestV2/handoff] ✅ market=16-fvyvm zk_prove_jobs id=6 因 handoff-landed 重置回 pending
+[zk-autonomy] 14:48:54 ✅ market=16-fvyvm zk_handoff dispatched+landed txId=3fbd6e80a320232e9abd4320626ca89a399220a948e004100db5900291dea66c
+[zk-autonomy] 14:48:54 tick: 1 candidate(s) | dispatched=1 recovered=0 cooling=0 skipped=0 errored=0
+[diag:step] zk.handoffAutonomousTick ms=6108 at=2026-10-04T14:48:54.398Z
+[diag:heap-sample] at=2026-10-04T14:48:59.260Z heapUsed=54MB heapTotal=58MB rss=181MB external=13MB arrayBuffers=0MB wasmBytes=4.4MB utxoFetchCalls=128
+[relay:e2e-bettorA] 2026-10-04T14:49:17.812Z [rpc] catching up from Console DB...
+[relay:e2e-bettorA] 2026-10-04T14:49:17.813Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-bettorA] 2026-10-04T14:49:17.813Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-maker] 2026-10-04T14:49:17.827Z [rpc] catching up from Console DB...
+[relay:e2e-bettorB] 2026-10-04T14:49:17.827Z [rpc] catching up from Console DB...
+[relay:e2e-fee] 2026-10-04T14:49:17.827Z [rpc] catching up from Console DB...
+[relay:e2e-settler] 2026-10-04T14:49:17.827Z [rpc] catching up from Console DB...
+[relay:e2e-bettorB] 2026-10-04T14:49:17.830Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-bettorB] 2026-10-04T14:49:17.830Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-maker] 2026-10-04T14:49:17.830Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-maker] 2026-10-04T14:49:17.830Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-fee] 2026-10-04T14:49:17.830Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-fee] 2026-10-04T14:49:17.831Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-settler] 2026-10-04T14:49:17.831Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-settler] 2026-10-04T14:49:17.831Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-2] 2026-10-04T14:49:17.859Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-2] 2026-10-04T14:49:17.860Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-2] 2026-10-04T14:49:17.860Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-1] 2026-10-04T14:49:17.874Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-3] 2026-10-04T14:49:17.874Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-6] 2026-10-04T14:49:17.874Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-5] 2026-10-04T14:49:17.874Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-4] 2026-10-04T14:49:17.874Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-1] 2026-10-04T14:49:17.877Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-1] 2026-10-04T14:49:17.877Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-3] 2026-10-04T14:49:17.877Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-3] 2026-10-04T14:49:17.877Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-6] 2026-10-04T14:49:17.877Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-6] 2026-10-04T14:49:17.877Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-4] 2026-10-04T14:49:17.878Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-4] 2026-10-04T14:49:17.878Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-5] 2026-10-04T14:49:17.878Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-5] 2026-10-04T14:49:17.878Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[zk-prove-worker] job=6 market=16-fvyvm proving started (~4min)...
+[diag:step] pair.scanAndIngestPairs ms=0 since_rowid=0 max_rowid=0 hits=0 at=2026-10-04T14:49:18.260Z
+[diag:step] zk.closeTickV2 ms=0 at=2026-10-04T14:49:18.292Z
+[diag:step] zk.claimAutonomousTick ms=0 at=2026-10-04T14:49:18.292Z
+[diag:step] zk.handoffAutonomousTick ms=0 at=2026-10-04T14:49:18.293Z
+[bshard-close-voter-v2] tick: 1 pending | signed=0 refused=0 skipped=6 errored=0
+[diag:step] zk.judgeProposeAutonomousTick ms=3 at=2026-10-04T14:49:18.296Z
+[relay:e2e-settler] 10/4/2026, 21:49:18 command bshard_close_attest_v2 failed: UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0
+[bshard-close-submit-v2] market=24-btduw submit fail: no txId in relay response: {"error":"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0","phase":"execution"}
+[bshard-close-submit-v2] tick: 1 pending | submitted=0 notReady=0 failed=1 errored=0 resumed=0
+[diag:step] pair.scanAndIngestPairs ms=0 since_rowid=0 max_rowid=0 hits=0 at=2026-10-04T14:49:48.267Z
+[diag:step] zk.closeTickV2 ms=0 at=2026-10-04T14:49:48.298Z
+[diag:step] zk.claimAutonomousTick ms=0 at=2026-10-04T14:49:48.298Z
+[diag:step] zk.handoffAutonomousTick ms=0 at=2026-10-04T14:49:48.299Z
+[diag:step] zk.judgeProposeAutonomousTick ms=5 at=2026-10-04T14:49:48.304Z
+[bshard-close-voter-v2] tick: 1 pending | signed=0 refused=0 skipped=6 errored=0
+[relay:e2e-settler] 10/4/2026, 21:49:48 command bshard_close_attest_v2 failed: UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0
+[bshard-close-submit-v2] market=24-btduw submit fail: no txId in relay response: {"error":"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0","phase":"execution"}
+[bshard-close-submit-v2] tick: 1 pending | submitted=0 notReady=0 failed=1 errored=0 resumed=0
+[diag:heap-sample] at=2026-10-04T14:49:59.676Z heapUsed=55MB heapTotal=59MB rss=182MB external=12MB arrayBuffers=0MB wasmBytes=4.4MB utxoFetchCalls=128
+[relay:e2e-bettorA] 2026-10-04T14:50:17.454Z [rpc] block #43000 (attempted: 0)
+[relay:e2e-oracle-1] 2026-10-04T14:50:17.454Z [rpc] block #43000 (attempted: 0)
+[relay:e2e-oracle-2] 2026-10-04T14:50:17.453Z [rpc] block #43000 (attempted: 0)
+[relay:e2e-oracle-3] 2026-10-04T14:50:17.454Z [rpc] block #43000 (attempted: 0)
+[relay:e2e-bettorB] 2026-10-04T14:50:17.454Z [rpc] block #43000 (attempted: 0)
+[relay:e2e-oracle-4] 2026-10-04T14:50:17.453Z [rpc] block #43000 (attempted: 0)
+[relay:e2e-oracle-5] 2026-10-04T14:50:17.454Z [rpc] block #43000 (attempted: 0)
+[relay:e2e-fee] 2026-10-04T14:50:17.454Z [rpc] block #43000 (attempted: 0)
+[relay:e2e-settler] 2026-10-04T14:50:17.454Z [rpc] block #43000 (attempted: 0)
+[relay:e2e-maker] 2026-10-04T14:50:17.454Z [rpc] block #43000 (attempted: 0)
+[relay:e2e-oracle-6] 2026-10-04T14:50:17.454Z [rpc] block #43000 (attempted: 0)
+[relay:e2e-bettorA] 2026-10-04T14:50:17.814Z [rpc] catching up from Console DB...
+[relay:e2e-bettorA] 2026-10-04T14:50:17.815Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-bettorA] 2026-10-04T14:50:17.815Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-maker] 2026-10-04T14:50:17.829Z [rpc] catching up from Console DB...
+[relay:e2e-bettorB] 2026-10-04T14:50:17.829Z [rpc] catching up from Console DB...
+[relay:e2e-fee] 2026-10-04T14:50:17.829Z [rpc] catching up from Console DB...
+[relay:e2e-settler] 2026-10-04T14:50:17.829Z [rpc] catching up from Console DB...
+[relay:e2e-fee] 2026-10-04T14:50:17.831Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-fee] 2026-10-04T14:50:17.831Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-maker] 2026-10-04T14:50:17.831Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-maker] 2026-10-04T14:50:17.831Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-settler] 2026-10-04T14:50:17.832Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-settler] 2026-10-04T14:50:17.832Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-bettorB] 2026-10-04T14:50:17.832Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-bettorB] 2026-10-04T14:50:17.832Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-2] 2026-10-04T14:50:17.860Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-2] 2026-10-04T14:50:17.861Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-2] 2026-10-04T14:50:17.861Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-1] 2026-10-04T14:50:17.876Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-3] 2026-10-04T14:50:17.876Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-5] 2026-10-04T14:50:17.876Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-4] 2026-10-04T14:50:17.876Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-6] 2026-10-04T14:50:17.876Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-1] 2026-10-04T14:50:17.878Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-1] 2026-10-04T14:50:17.878Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-3] 2026-10-04T14:50:17.878Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-3] 2026-10-04T14:50:17.878Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-5] 2026-10-04T14:50:17.878Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-5] 2026-10-04T14:50:17.878Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-4] 2026-10-04T14:50:17.879Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-4] 2026-10-04T14:50:17.879Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-6] 2026-10-04T14:50:17.879Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-6] 2026-10-04T14:50:17.879Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[diag:step] pair.scanAndIngestPairs ms=1 since_rowid=0 max_rowid=0 hits=0 at=2026-10-04T14:50:18.267Z
+[diag:step] zk.closeTickV2 ms=0 at=2026-10-04T14:50:18.299Z
+[diag:step] zk.claimAutonomousTick ms=1 at=2026-10-04T14:50:18.300Z
+[diag:step] zk.handoffAutonomousTick ms=0 at=2026-10-04T14:50:18.300Z
+[diag:step] zk.judgeProposeAutonomousTick ms=2 at=2026-10-04T14:50:18.302Z
+[bshard-close-voter-v2] tick: 1 pending | signed=0 refused=0 skipped=6 errored=0
+[relay:e2e-settler] 10/4/2026, 21:50:18 command bshard_close_attest_v2 failed: UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0
+[bshard-close-submit-v2] market=24-btduw submit fail: no txId in relay response: {"error":"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0","phase":"execution"}
+[bshard-close-submit-v2] tick: 1 pending | submitted=0 notReady=0 failed=1 errored=0 resumed=0
+[relay:e2e-settler] 10/4/2026, 21:50:23 TRANSFER 1 → mk3g4kqxyxzr TX: c5976495a96560ff273c2c1b96227fad914010905a40035ecb5cde51aa070eff fee: 0.032047
+[zk-prove-worker] ✅ job=6 market=16-fvyvm proving.status=ready gate=kaspasim:ppxqv8vezah
+[diag:step] zk-prove-worker.tick ms=66962 sync=0 ok=1 at=2026-10-04T14:50:25.146Z
+[diag:step] pair.scanAndIngestPairs ms=0 since_rowid=0 max_rowid=0 hits=0 at=2026-10-04T14:50:48.268Z
+[diag:step] zk.claimAutonomousTick ms=0 at=2026-10-04T14:50:48.306Z
+[diag:step] zk.handoffAutonomousTick ms=0 at=2026-10-04T14:50:48.306Z
+[bshard-close-voter-v2] tick: 1 pending | signed=0 refused=0 skipped=6 errored=0
+[diag:step] zk.judgeProposeAutonomousTick ms=5 at=2026-10-04T14:50:48.311Z
+[relay:e2e-settler] 10/4/2026, 21:50:48 command bshard_close_attest_v2 failed: UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0
+[bshard-close-submit-v2] market=24-btduw submit fail: no txId in relay response: {"error":"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0","phase":"execution"}
+[bshard-close-submit-v2] tick: 1 pending | submitted=0 notReady=0 failed=1 errored=0 resumed=0
+[relay:e2e-settler] [mass-floor:observe] site=unlockBshardZkClose compute=195293 storage=138333 transient=74252 mass_ub=195293 minFee=19529300 actualFee=25000000 would_reject=false wasm=panic(undefined) source=7b1e18cc
+[relay:e2e-settler] [unlockBshardZkClose invariant] Σin=120000000 Σout=95000000 fee=25000000 (mass_ub=195293 minFee=19529300 ✓), 2 outputs all >= dust
+[relay:e2e-settler] [mass-floor:observe:auth] site=unlockBshardZkClose txid=4e4ee142f94a0db23092e7d0896af08bb6b05f70e76d5fe2f37a7a2cef045984 authoritative_mass=null ub_ok=inconclusive mass_ub=195293 reason=mempool entry has no mass inconclusive_total=6
+[zk-autonomy] 14:50:51 ✅ market=16-fvyvm zk_close dispatched+landed txId=4e4ee142f94a0db23092e7d0896af08bb6b05f70e76d5fe2f37a7a2cef045984
+[zk-autonomy] 14:50:51 tick: 1 candidate(s) | dispatched=1 notMine=0 skipped=0 errored=0
+[diag:step] zk.closeTickV2 ms=3029 at=2026-10-04T14:50:51.330Z
+[diag:heap-sample] at=2026-10-04T14:51:00.228Z heapUsed=57MB heapTotal=61MB rss=182MB external=13MB arrayBuffers=0MB wasmBytes=4.4MB utxoFetchCalls=128
+[prediction-voter] tick: 6 voter relays, 1V1 voted=0 skipped=0 errored=0 | pool voted=0 skipped=0 errored=0
+[prediction-voter] parallel: A.recorded=0 B.scored=0 disagree=0 | audit: checked=0 dev=0 frozen=0
+[diag:step] pool.selectMarkets.all ms=0 rows=1 at=2026-10-04T14:51:17.271Z
+[pool-settler] tick: 1 verifying markets, consensus=0 refund=0 dispute=0 pending=0 doomed=0 errored=0 sampledCommittee=0 bshardSkipped=1 commingledRefund=0
+[diag:tick-duration] poolSettlerTick ms=2
+[diag:step] pool.tick.phases ms=2 pre=1 dw=0 select=0 post=1 rows=1 t0=2026-10-04T14:51:17.270Z at=2026-10-04T14:51:17.272Z
+[utxo-fetch-probe] #129 at=2026-10-04T14:51:17.275Z ms=1 addrCount=1 entries=1 roughBytesEst=0MB
+[utxo-fetch-probe] #130 at=2026-10-04T14:51:17.276Z ms=1 addrCount=1 entries=1 roughBytesEst=0MB
+[rpc-health] using local node: ws://127.0.0.1:29717
+[utxo-fetch-probe] #131 at=2026-10-04T14:51:17.277Z ms=0 addrCount=1 entries=1 roughBytesEst=0MB
+[utxo-fetch-probe] #132 at=2026-10-04T14:51:17.277Z ms=0 addrCount=1 entries=1 roughBytesEst=0MB
+[utxo-fetch-probe] #133 at=2026-10-04T14:51:17.277Z ms=1 addrCount=1 entries=1 roughBytesEst=0MB
+[utxo-fetch-probe] #134 at=2026-10-04T14:51:17.278Z ms=0 addrCount=1 entries=1 roughBytesEst=0MB
+[oracle-pool-scanner-cron] tick: snapshotDaa=97785 poolSize=6 merkleRoot=46fa6978ef43 (scanned=6/valid=6/rejected=0)
+[relay:e2e-bettorA] 2026-10-04T14:51:17.818Z [rpc] catching up from Console DB...
+[relay:e2e-bettorA] 2026-10-04T14:51:17.820Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-bettorA] 2026-10-04T14:51:17.820Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-bettorB] 2026-10-04T14:51:17.834Z [rpc] catching up from Console DB...
+[relay:e2e-maker] 2026-10-04T14:51:17.834Z [rpc] catching up from Console DB...
+[relay:e2e-fee] 2026-10-04T14:51:17.834Z [rpc] catching up from Console DB...
+[relay:e2e-settler] 2026-10-04T14:51:17.834Z [rpc] catching up from Console DB...
+[relay:e2e-maker] 2026-10-04T14:51:17.837Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-maker] 2026-10-04T14:51:17.837Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-fee] 2026-10-04T14:51:17.837Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-fee] 2026-10-04T14:51:17.837Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-bettorB] 2026-10-04T14:51:17.837Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-bettorB] 2026-10-04T14:51:17.837Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-settler] 2026-10-04T14:51:17.837Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-settler] 2026-10-04T14:51:17.837Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-2] 2026-10-04T14:51:17.866Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-2] 2026-10-04T14:51:17.867Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-2] 2026-10-04T14:51:17.867Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-1] 2026-10-04T14:51:17.881Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-5] 2026-10-04T14:51:17.881Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-3] 2026-10-04T14:51:17.881Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-6] 2026-10-04T14:51:17.881Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-4] 2026-10-04T14:51:17.881Z [rpc] catching up from Console DB...
+[relay:e2e-oracle-1] 2026-10-04T14:51:17.883Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-1] 2026-10-04T14:51:17.883Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-3] 2026-10-04T14:51:17.883Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-3] 2026-10-04T14:51:17.883Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-5] 2026-10-04T14:51:17.884Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-5] 2026-10-04T14:51:17.884Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-6] 2026-10-04T14:51:17.884Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-6] 2026-10-04T14:51:17.884Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[relay:e2e-oracle-4] 2026-10-04T14:51:17.884Z [rpc] catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed
+[relay:e2e-oracle-4] 2026-10-04T14:51:17.884Z [rpc] catch-up done: 0 handshakes accepted, 0 messages replied, DISABLED historical comms
+[diag:step] pair.scanAndIngestPairs ms=0 since_rowid=0 max_rowid=0 hits=0 at=2026-10-04T14:51:18.269Z
+[diag:step] zk.closeTickV2 ms=0 at=2026-10-04T14:51:18.301Z
+[bshard-close-voter-v2] tick: 1 pending | signed=0 refused=0 skipped=6 errored=0
+[relay:e2e-settler] 10/4/2026, 21:51:18 command bshard_close_attest_v2 failed: UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0
+[bshard-close-submit-v2] market=24-btduw submit fail: no txId in relay response: {"error":"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0","phase":"execution"}
+[bshard-close-submit-v2] tick: 1 pending | submitted=0 notReady=0 failed=1 errored=0 resumed=0
+[diag:step] zk.handoffAutonomousTick ms=1 at=2026-10-04T14:51:18.323Z
+[diag:step] zk.judgeProposeAutonomousTick ms=1 at=2026-10-04T14:51:18.324Z
+[relay:e2e-settler] 10/4/2026, 21:51:18 TRANSFER 3.60000000 → 32y5v9kveur9 TX: 9e95f2c05a979febc8ff1389364eab5cb669f2d0e83a4b319b3499e9dbe23707 fee: 0.032036
+[utxo-fetch-probe] #135 at=2026-10-04T14:51:18.326Z ms=0 addrCount=1 entries=113 roughBytesEst=0MB
+[utxo-fetch-probe] #136 at=2026-10-04T14:51:20.338Z ms=1 addrCount=1 entries=114 roughBytesEst=0MB
+[diag:step] proc.silverc.compile.bshard-artifacts ms=22 cmd=silverc ok=1 at=2026-10-04T14:51:20.371Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=29 cmd=silverc ok=1 at=2026-10-04T14:51:20.409Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=30 cmd=silverc ok=1 at=2026-10-04T14:51:20.444Z
+[relay:e2e-settler] [mass-floor:observe] site=closezk_v2_claim compute=73814 storage=277146 transient=87896 mass_ub=277146 minFee=27714600 actualFee=40000000 would_reject=false wasm=panic(undefined) source=7b1e18cc
+[relay:e2e-settler] [closezk_v2_claim invariant] Σin=420000000 Σout=380000000 fee=40000000 (mass_ub=277146 minFee=27714600 ✓), 5 outputs all >= dust
+[zk-autonomy] 14:51:23 ✅ market=16-fvyvm claim idx=0 pk=060b02648006 payout=2943000000 txId=53da93476073cbf3aa8079570374b38f36f85b1dcff6e1b14a02da47f82ec99c
+[zk-autonomy] 14:51:23 tick: 1 candidate(s) | claimed=1 notMine=0 skipped=0 errored=0
+[diag:step] zk.claimAutonomousTick ms=5155 at=2026-10-04T14:51:23.470Z
+[diag:step] pair.scanAndIngestPairs ms=0 since_rowid=0 max_rowid=0 hits=0 at=2026-10-04T14:51:48.276Z
+[diag:step] zk.closeTickV2 ms=0 at=2026-10-04T14:51:48.310Z
+[bshard-close-voter-v2] tick: 1 pending | signed=0 refused=0 skipped=6 errored=0
+[relay:e2e-settler] 10/4/2026, 21:51:48 command bshard_close_attest_v2 failed: UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0
+[bshard-close-submit-v2] market=24-btduw submit fail: no txId in relay response: {"error":"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx b02c046834099699e824a04e4f6e090c38679bba0633250c14c19f8ebf3f9baa:0","phase":"execution"}
+[bshard-close-submit-v2] tick: 1 pending | submitted=0 notReady=0 failed=1 errored=0 resumed=0
+[diag:step] zk.handoffAutonomousTick ms=0 at=2026-10-04T14:51:48.332Z
+[diag:step] zk.judgeProposeAutonomousTick ms=2 at=2026-10-04T14:51:48.334Z
+[relay:e2e-settler] 10/4/2026, 21:51:48 TRANSFER 3.60000000 → 32y5v9kveur9 TX: e22f6aced9379120d9ea726b6a53230d5ac4c3545c0688c96fbd778d73f0193a fee: 0.032036
+[utxo-fetch-probe] #137 at=2026-10-04T14:51:48.335Z ms=1 addrCount=1 entries=114 roughBytesEst=0MB
+[utxo-fetch-probe] #138 at=2026-10-04T14:51:50.344Z ms=1 addrCount=1 entries=115 roughBytesEst=0MB
+[diag:step] proc.silverc.compile.bshard-artifacts ms=21 cmd=silverc ok=1 at=2026-10-04T14:51:50.378Z
+[diag:step] proc.silverc.compile.bshard-artifacts ms=33 cmd=silverc ok=1 at=2026-10-04T14:51:50.422Z
+[relay:e2e-settler] [mass-floor:observe] site=closezk_v2_claim compute=72899 storage=32086 transient=87196 mass_ub=87196 minFee=8719600 actualFee=40000000 would_reject=false wasm=panic(undefined) source=7b1e18cc
+[relay:e2e-settler] [closezk_v2_claim invariant] Σin=480000000 Σout=440000000 fee=40000000 (mass_ub=87196 minFee=8719600 ✓), 3 outputs all >= dust
+[zk-autonomy] 14:51:53 ✅ market=16-fvyvm claim idx=1 pk=1187ac7eb6fd payout=57000000 txId=80aba768513e0240c4cc2b9d32c16e456e7c0d0a902575e8310ae95c2aefe16b (last, exhausted)
+[zk-autonomy] 14:51:53 tick: 1 candidate(s) | claimed=1 notMine=0 skipped=0 errored=0
+[diag:step] zk.claimAutonomousTick ms=5121 at=2026-10-04T14:51:53.446Z

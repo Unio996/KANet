@@ -1,0 +1,24 @@
+# v221 on a COPY of the mainnet DB (console.mainnet.pre-migrate.db from the 2026-10-04 restart simulation; never the live file)
+--- before
+spine_p2sh line: "          spine_p2sh TEXT NOT NULL,"
+integrity: [{"integrity_check":"ok"}]
+fk_check rows: 0
+schema objs on pool_markets: index:idx_pool_markets_category | index:idx_pool_markets_deadline | index:idx_pool_markets_status | index:idx_pool_markets_zk_ready | index:sqlite_autoindex_pool_markets_1 | table:pool_markets | trigger:trg_pool_markets_fee_rules_write_once
+--- run migrations (S1/S2 branch code)
+[db] path=D:\kanet-tn12\scratch\_j2_mainnet_m1\v221_test.db source=DB_PATH
+[migrate] v80: broker_conversations.completed_at column added (Phase 2 profile sediment future-proof).
+[migrate] v174: tg_custodial_wallets table (电报 DM 托管钱包, 助记词 aes-256-gcm 加密 fail-loud, display-once 无明文回取, Owner 钦定).
+[migrate] v221: pool_markets.spine_p2sh 已去 NOT NULL(ZK 原生盘无 spine; writable_schema 单行改写, integrity_check/foreign_key_check 通过).
+[migrate] DB migrations complete.
+[run-migrations] ✅ standalone migration run complete (v170 pool_bettor_sides.side_lock_daa applied if it was missing).
+--- after
+spine_p2sh line: "          spine_p2sh TEXT,"
+integrity: [{"integrity_check":"ok"}]
+fk_check rows: 0
+schema objs on pool_markets: index:idx_pool_markets_category | index:idx_pool_markets_deadline | index:idx_pool_markets_status | index:idx_pool_markets_zk_ready | index:sqlite_autoindex_pool_markets_1 | table:pool_markets | trigger:trg_pool_markets_fee_rules_write_once
+table_info spine_p2sh notnull = 0
+rows 0 market_shards 0
+NULL spine insert: OK
+user_version/schema_version { schema_version: 70 }
+--- rerun (idempotent; count of v221 log lines)
+0

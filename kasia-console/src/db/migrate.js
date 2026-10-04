@@ -6704,5 +6704,41 @@ export function runMigrations() {
       console.log('[migrate] v220: zk_prove_jobs.attempts/next_attempt_at 列已就绪(出证失败自动重试+退避, 纯新增).');
     }
   }
+  // ── v221 (2026-10-04, J2 · 账本1846 S2: ZK 原生盘不建 spine, pool_markets.spine_p2sh 去 NOT NULL) ──
+  //   设计 docs/2026-10-04-bettor-pm-ktt-only-bet-create-design-v0.1.md §3.3: 主网不收 KAS ⇒ ZK 原生盘没有 spine ⇒ spine_p2sh/spine_lock_tx 为 NULL
+  //   (不用占位串: 旧代码会把占位当真地址去查链)。spine_lock_tx 本来就可空, 只需改 spine_p2sh。
+  //   做法 = SQLite 官方文档 ALTER TABLE 一节「去掉 NOT NULL」的 writable_schema 单行改写(不改任何磁盘行内容): pool_markets 有表达式索引
+  //   (idx_pool_markets_zk_ready)、触发器(trg_pool_markets_fee_rules_write_once)、两个 FK 子表(market_shards/pool_bettor_sides), 12 步重建会白白冒险。
+  //   顺序按官方文档: BEGIN → 读 schema_version → writable_schema=ON → UPDATE sqlite_master.sql → schema_version+1 → writable_schema=OFF
+  //   → integrity_check(不是 ok 就 ROLLBACK 并抛) → COMMIT → foreign_key_check(有违例就抛)。幂等: 已无 NOT NULL 则零操作。
+  {
+    const row = sqlite.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='pool_markets'").get();
+    const re = /(\n[ \t]*spine_p2sh[ \t]+TEXT)[ \t]+NOT[ \t]+NULL([ \t]*,)/;
+    if (row && re.test(row.sql)) {
+      const newSql = row.sql.replace(re, '$1$2');
+      // better-sqlite3 默认开 SQLITE_DBCONFIG_DEFENSIVE(UPDATE sqlite_master 报 "table sqlite_master may not be modified"); 官方 API db.unsafeMode(true) 只在本块内临时关, finally 一定恢复。
+      sqlite.unsafeMode(true);
+      sqlite.exec('BEGIN');
+      try {
+        const ver = sqlite.prepare('PRAGMA schema_version').get().schema_version;
+        sqlite.exec('PRAGMA writable_schema=ON');
+        sqlite.prepare("UPDATE sqlite_master SET sql = ? WHERE type='table' AND name='pool_markets'").run(newSql);
+        sqlite.exec(`PRAGMA schema_version=${ver + 1}`);
+        sqlite.exec('PRAGMA writable_schema=OFF');
+        const ic = sqlite.prepare('PRAGMA integrity_check').all();
+        if (!(ic.length === 1 && ic[0].integrity_check === 'ok')) throw new Error(`v221 integrity_check 未过: ${JSON.stringify(ic).slice(0, 300)}`);
+        sqlite.exec('COMMIT');
+      } catch (e) {
+        try { sqlite.exec('PRAGMA writable_schema=OFF'); } catch {}
+        try { sqlite.exec('ROLLBACK'); } catch {}
+        throw e;
+      } finally {
+        sqlite.unsafeMode(false);
+      }
+      const fk = sqlite.prepare('PRAGMA foreign_key_check').all();
+      if (fk.length) throw new Error(`v221 foreign_key_check 有 ${fk.length} 条违例: ${JSON.stringify(fk.slice(0, 3))}`);
+      console.log('[migrate] v221: pool_markets.spine_p2sh 已去 NOT NULL(ZK 原生盘无 spine; writable_schema 单行改写, integrity_check/foreign_key_check 通过).');
+    }
+  }
   console.log('[migrate] DB migrations complete.');
 }

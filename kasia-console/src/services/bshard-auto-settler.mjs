@@ -945,6 +945,8 @@ export async function reclaimBshardMakerBond(marketId, ctx) {
   const { db } = ctx;
   const market = db.prepare('SELECT * FROM pool_markets WHERE id = ?').get(marketId);
   if (!market) return { ok: false, reason: 'market 不存在' };
+  // 账本1846 S2: 无 spine(ZK 原生·不收 KAS)的盘没有 maker bond 可收口——不是错误, 干净跳过(不去 check_utxo_landed(null))。
+  if (!market.spine_p2sh || !market.spine_lock_tx) return { ok: false, noSpine: true, reason: '无 spine(ZK 原生/不收 KAS 盘)——没有 maker bond 可收口' };
 
   // 闸①: isBshard
   const isBshard = !!db.prepare('SELECT 1 FROM market_shards WHERE logical_market_id = ? LIMIT 1').get(marketId);

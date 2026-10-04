@@ -1,0 +1,22 @@
+{
+ "shortId": "z0g04",
+ "claims": [
+  {
+   "idx": 0,
+   "winner": "bettorA",
+   "payoutUnits": "2943000000",
+   "txid": "f472f0514a60cfbceb3b9d2ceafa238a846c9119f4122e0ebc8840618f887838",
+   "claimOutAddr": "kaspasim:pr3rczpp2jwjnvzqma90e358uatz4x5hpykqupnx4kn7x79hxcgwumtsg7v7h",
+   "tokOutAddr": "kaspasim:pzmhgr95tc63fuw0p7ehzketjtk9jxuktlureca7lclhxfx8e8nr5sjm0wlsj"
+  },
+  {
+   "idx": 1,
+   "winner": "maker",
+   "payoutUnits": "57000000",
+   "txid": "8e431eb235ba9ab0c0fd7f057fab6532e3620fc32a65b661e5a6c2f2e99f54ee",
+   "claimOutAddr": "kaspasim:pz6zkffn52a8u29lw7pzf4sfe7avq53xrzxj7ngt5f2v629l58u32nmdynqgf",
+   "tokOutAddr": "kaspasim:prjvzc2p7cf4mrqpaueemh2fpyvkqxkp30ec5t6v59k4mwjzx6p9cjawg6n00"
+  }
+ ],
+ "fails": 0
+}
