@@ -2075,7 +2075,7 @@ export async function registerPoolRoutes(fastify) {
         const { advanceZkContinuationAfterSpend } = await import('../lib/closezk-v2-mint.mjs');
         advanceZkContinuationAfterSpend(market_id, {
           outpointTxid: result.txid, outpointIndex: 0, redeemHex: result.closeZkContinuationRedeemHex,
-          valueSompi: zkCont.valueSompi, spentEntry: 'zk_close', spentTxid: result.txid,
+          valueSompi: zkCont.valueSompi, utxoValueSompi: result.utxoValueSompi ?? zkCont.utxoValueSompi, spentEntry: 'zk_close', spentTxid: result.txid,   // 账本1832 段3: valueSompi=代币池, utxoValueSompi=KAS 面值
         });
       } catch (e) {
         console.error(`[admin/zk-close-v2] ${market_id} landed 但持久化 FAILED(资金已安全, 链上是真相源): ${e.message}`);

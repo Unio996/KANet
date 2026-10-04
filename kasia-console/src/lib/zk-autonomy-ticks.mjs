@@ -125,7 +125,7 @@ export async function zkCloseTickV2(ctx) {
         }
         advanceZkContinuationAfterSpend(marketId, {
           outpointTxid: r.txid, outpointIndex: 0, redeemHex: r.closeZkContinuationRedeemHex,
-          valueSompi: freshZc.valueSompi, spentEntry: 'zk_close', spentTxid: r.txid,
+          valueSompi: freshZc.valueSompi, utxoValueSompi: r.utxoValueSompi ?? freshZc.utxoValueSompi, spentEntry: 'zk_close', spentTxid: r.txid,   // 账本1832 段3: valueSompi=代币池, utxoValueSompi=续约 UTXO 的 KAS 面值(dust)
         });
         dispatched++;
         log(`✅ market=${marketId.slice(-8)} zk_close dispatched+landed txId=${r.txid}`);
@@ -339,7 +339,7 @@ export async function zkHandoffAutonomousTick(ctx) {
             const [psTx] = String(row.payout_ps_outpoint).split(':');
             writeZkContinuation(marketId, {
               outpointTxid: pending.txId, outpointIndex: 0, redeemHex: pending.closeZkRedeemHex,
-              valueSompi: state.consolidatedPool, attestedWinner: state.attestedWinner, attestedAtMs: state.attestedAtMs,
+              valueSompi: state.consolidatedPool, utxoValueSompi: result.utxoValueSompi, attestedWinner: state.attestedWinner, attestedAtMs: state.attestedAtMs,
               sourceCloseAttestTxid: psTx, sourceZkHandoffTxid: pending.txId,
             });
             _clearHandoffPending(marketId);

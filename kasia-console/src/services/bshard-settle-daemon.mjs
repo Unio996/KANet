@@ -99,11 +99,11 @@ async function relayPost(relayId, cmd) {
 }
 async function apiTransfer(toAddr, kas) {
   const amt = Number(kas).toFixed(8);   // KI-30: Kaspa wallet 8-decimal max·防 JS 浮点 17-dec reject
-  const r = await fetch(`${CONSOLE}/api/relay/${FEE_RELAY_ID}/transfer`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ to: toAddr, amount: amt }), signal: AbortSignal.timeout(180000) });
+  const r = await fetch(`${CONSOLE}/api/relay/${FEE_RELAY_ID}/transfer`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(process.env.ADMIN_SECRET_FUNDS ? { 'x-kanet-admin-secret': process.env.ADMIN_SECRET_FUNDS } : {}) }, body: JSON.stringify({ to: toAddr, amount: amt }), signal: AbortSignal.timeout(180000) });
   return r.json();
 }
 async function p2shAddr(redeemHex) { const k = await kaspa(); return k.addressFromScriptPublicKey(k.ScriptBuilder.fromScript(new Uint8Array(Buffer.from(redeemHex, 'hex'))).createPayToScriptHashScript(), NETWORK).toString(); }
-async function p2pkAddr(pkHex) { const k = await kaspa(); return new k.PublicKey(pkHex).toAddress(k.NetworkType.Testnet).toString(); }
+async function p2pkAddr(pkHex) { const k = await kaspa(); return new k.PublicKey(pkHex).toAddress(configuredNetwork()).toString(); }   // 账本1832 段3: 网络单一源(原硬编码 Testnet ⇒ 主网/simnet 地址前缀错)
 async function p2pkSpk(addr) { const k = await kaspa(); const s = k.payToAddressScript(new k.Address(addr)); return (s.script ?? s).toString(); }
 function feeRelayAddr() { return sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(FEE_RELAY_ID)?.address; }
 async function mintFeeUtxo() {
@@ -384,7 +384,7 @@ function buildCtx() {
 // kaspa-wasm p2sh/p2pk are sync after module load; pre-warm in tick. computeSettlePlan/settleMarketLive call them sync.
 let _k = null;
 function _p2shCache(redeemHex) { return _k.addressFromScriptPublicKey(_k.ScriptBuilder.fromScript(new Uint8Array(Buffer.from(redeemHex, 'hex'))).createPayToScriptHashScript(), NETWORK).toString(); }
-function _p2pkAddrSync(pkHex) { return new _k.PublicKey(pkHex).toAddress(_k.NetworkType.Testnet).toString(); }
+function _p2pkAddrSync(pkHex) { return new _k.PublicKey(pkHex).toAddress(configuredNetwork()).toString(); }   // 账本1832 段3: 同 p2pkAddr
 function _p2pkSpkSync(addr) { const s = _k.payToAddressScript(new _k.Address(addr)); return (s.script ?? s).toString(); }
 
 // #49 模块② (2026-07-04, docs/2026-07-04-daemon-error-handling-modular-design.md v2 §3.2):

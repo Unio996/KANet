@@ -95,17 +95,22 @@ export async function dispatchUnlockZkClose({ marketId, continuationOutpoint, at
   if (!witness.ok) return { ok: false, error: witness.error };
   const { sigScript, gateSuffixHex } = witness;
 
+  // 账本1832 段3: v1.0.0 形 zk_close 需要 KTT 模板 prefix/suffix(noTokenInput) + 4 字节 dispatch tag。
+  const { computeKttTokenArtifact } = await import('./pool-bshard-artifacts.mjs');
+  const { settleDispatchTags } = await import('./pool-shard-register.mjs');
+  const kttTmpl = computeKttTokenArtifact({ amount: 1, ownerCovIdHex: '00'.repeat(31) + '01' });
   const cmd = {
     type: 'bshard_zk_close',
     inputs: {
       closezk: {
         redeem_hex: zkCont.redeemHex,
         outpointTxid: continuationOutpoint.txid, index: continuationOutpoint.index,
-        state: { attestedWinner, consolidated_pool: zkCont.valueSompi },
+        state: { attestedWinner, consolidated_pool: zkCont.valueSompi },   // valueSompi = 代币池(token 单位, 账本1832 段3: KAS 面值另存 utxoValueSompi); relay 以活 redeem 现读为准并交叉核对
       },
       gate: { address: proving.gate.address, outpointTxid: proving.gate.outpointTxid, index: proving.gate.index, sig_script_hex: sigScript },
     },
-    witness: { self_out_idx: 0, gate_suffix_hex: gateSuffixHex, guest_payout_root_hex: proving.guestPayoutRootHex },
+    witness: { self_out_idx: 0, gate_suffix_hex: gateSuffixHex, guest_payout_root_hex: proving.guestPayoutRootHex,
+      tok_prefix_hex: kttTmpl.templatePrefix.toString('hex'), tok_suffix_hex: kttTmpl.templateSuffix.toString('hex'), zk_close_dispatch_tag_hex: settleDispatchTags().zk_close },
     outputs: {},
   };
   let sj;
@@ -115,5 +120,5 @@ export async function dispatchUnlockZkClose({ marketId, continuationOutpoint, at
   // P4 收尾(2026-07-09, J2·docs/2026-07-09-zk-autonomy-three-parts-design.md (a)): 透传 relay 已算好的
   // continuation 地址(unlockBshardZkClose 返回值原有字段, 之前被本函数丢弃)——caller 做 landed-gated 持久化
   // 时需要这个值核对/写入 zk_continuation, 不该让 caller 自己重新 splice 算一遍(同一份计算不要有第二份实现)。
-  return { ok: true, txid, closeZkContinuationAddress: sj.closeZkContinuationAddress, closeZkContinuationRedeemHex: sj.closeZkContinuationRedeemHex };
+  return { ok: true, txid, closeZkContinuationAddress: sj.closeZkContinuationAddress, closeZkContinuationRedeemHex: sj.closeZkContinuationRedeemHex, utxoValueSompi: sj.utxoValueSompi };
 }

@@ -20,6 +20,6 @@ threw = null; try { assertPredicateCommitBakedInPsRedeem('cd'.repeat(32), redeem
 ok(threw && /命门①mismatch/.test(threw.message), '负向: 期望值 != 烤入值(换了市场/规则) ⇒ 拒');
 ok((() => { try { assertPredicateCommitBakedInPsRedeem(null, redeem); return true; } catch { return false; } })(), '无期望值 ⇒ 不核(同旧行为)');
 const tags = reg.settleDispatchTags();
-ok(['consolidate_to_payout', 'absorb', 'zk_handoff', 'close_attest'].every((k) => /^[0-9a-f]{8}$/.test(tags[k])) && new Set(Object.values(tags)).size === 4, 'settleDispatchTags: 4 个入口各有互异的 4 字节 dispatch tag');
+ok(['consolidate_to_payout', 'absorb', 'zk_handoff', 'close_attest'].every((k) => /^[0-9a-f]{8}$/.test(tags[k])) && new Set(Object.values(tags)).size === 5 && /^[0-9a-f]{8}$/.test(tags.zk_close), 'settleDispatchTags: 5 个入口(含 zk_close)各有互异的 4 字节 dispatch tag');
 console.log(fails === 0 ? '\n✅✅ ALL PASS' : `\n❌ ${fails} assertions failed`);
 process.exit(fails === 0 ? 0 : 1);

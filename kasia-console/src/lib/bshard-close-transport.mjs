@@ -667,7 +667,7 @@ export async function buildZkHandoffRequestV2(marketId, args) {
     const { writeZkContinuation } = await import('./closezk-v2-mint.mjs');
     writeZkContinuation(marketId, {
       outpointTxid: result.txId, outpointIndex: 0, redeemHex: result.closeZkRedeemHex,
-      valueSompi: state.consolidatedPool, attestedWinner: state.attestedWinner, attestedAtMs: state.attestedAtMs,
+      valueSompi: state.consolidatedPool, utxoValueSompi: result.utxoValueSompi, attestedWinner: state.attestedWinner, attestedAtMs: state.attestedAtMs,   // valueSompi=代币池, utxoValueSompi=CloseZkV2 UTXO 的 KAS 面值(dust)
       sourceCloseAttestTxid: psTx, sourceZkHandoffTxid: result.txId,
     });
     // 缺件④(2026-07-11, docs/2026-07-11-zk-autonomy-fourth-piece-handoff-enqueue-retry-design.md):
