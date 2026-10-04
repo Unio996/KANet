@@ -29,6 +29,7 @@ import { findExtractor, extractStructuredFields } from './oracle-evidence-extrac
 import { listShards } from './shard-allocator.mjs';                                          // C1 cross-shard iteration (单源, register/consolidate 同表)
 import { canonicalBetOrder, computeBetsRoot, payoutRoot as computeMerkleRoot } from './pool-payout-root.mjs';   // W2: committee 独立重算 betsRoot/refundRoot
 import { deriveCommitteeCheckOffsets } from './committee-offset-derive.mjs';
+import { sharedUmaCtfReader } from './uma-ctf-reader.mjs';   // 账本1855 A: polymarket 判定分支(与 settle-daemon judgeWinDir 同一 reader)
 // 🔴 D-019 迁移(ledger 1224/1226/1233/1237/1239): 原本这里是 4 个硬编码绝对偏移常量
 // (_PREDICATE_COMMIT_REDEEM_OFFSET(_V2)=518/642、_PMR_COMMITTEE_CHECK_OFFSETS(_V2)=[1002,...]/
 // [1126,...])——实测证实这类常量会随 .sil 改动/编译器版本漂移而不报错地过期(D-019 迁移期间两族全部漂移，
@@ -328,6 +329,26 @@ export function verifyClosePayoutV2Binding({ txSafeJson, psv2RedeemHex, reDerive
  *
  * @returns {Promise<{pass:true, verdict, winningDirection, committee, bettors, reDerivedRoot}|{pass:false, reason}|{skip:true, reason}>}
  */
+
+/**
+ * judgePolymarketVerdict — 账本1855 A: 委员侧 Polymarket/UMA 判定(单函数, 便于单测)。镜像 settle-daemon judgeWinDir 的 polymarket 分支, 同一个 sharedUmaCtfReader。
+ * 输入只来自 ctx(委员本地 market 行: outcomeConditionId; 可注入 ctx.ctfReader 供测试), 绝不接触 signRequest。
+ * @returns {Promise<{ok:true, winningDirection:0|1, verdict:'YES'|'NO'}|{ok:false, reason:string}>}
+ */
+export async function judgePolymarketVerdict(ctx) {
+  const cond = ctx.outcomeConditionId;
+  if (typeof cond !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(cond)) {
+    return { ok: false, reason: 'polymarket: 本地市场行 outcome_condition_id 缺失/格式非法 (弃签)' };
+  }
+  let res;
+  try { res = await (ctx.ctfReader || sharedUmaCtfReader()).readResolution(cond); }
+  catch (err) { return { ok: false, reason: `polymarket: CTF 读取异常 (${err.message}) — 弃签 (fail-closed)` }; }
+  if (!res || (res.final !== 'YES' && res.final !== 'NO')) {
+    return { ok: false, reason: `polymarket: UMA/CTF ${res?.final ?? 'ABSTAIN'} (未 final / 多源分歧 / 源不足 / 非 YES|NO) — 弃签 (fail-closed)` };
+  }
+  return { ok: true, winningDirection: res.final === 'YES' ? 0 : 1, verdict: res.final };
+}
+
 // test-only export (blockhash_parity 分支单测用, NWT/Bettor DoD): production 内部只经 enforceCloseAttest/V2 调用。
 export async function _enforceCloseAttestCore(signRequest, ctx) {
   const {
@@ -405,7 +426,15 @@ export async function _enforceCloseAttestCore(signRequest, ctx) {
   //   本次只是把它接进【自治委员验证链】(V1 从设计起从未覆盖这个 judge_type, 3o6cs 是第一个走到这里的市场)。
   let verdict, winningDirection;
   const judgeType = ctx.resolutionRuleSpec?.judge_type;
-  if (judgeType === 'blockhash_parity') {
+  if (ctx.outcomeMarketSource === 'polymarket') {
+    // 账本1855 A: Polymarket/UMA 判定(镜像 bshard-settle-daemon judgeWinDir 的 polymarket 分支, 同一个 sharedUmaCtfReader)。
+    //   🔴 conditionId/来源只从 ctx(= 委员本地 pool_markets 行, buildEnforceCtx 注入)读, 绝不读 signRequest/proposal(settler 可控)——同 target_daa 钉①。
+    //   fail-closed: id 格式非法 / RPC 异常 / 未 final(payoutDenominator==0) / <2 源 / 源分歧 / [1,1] 等 ⇒ ABSTAIN ⇒ 拒签。YES→0, NO→1。
+    const pj = await judgePolymarketVerdict(ctx);
+    if (!pj.ok) return { pass: false, reason: pj.reason };
+    winningDirection = pj.winningDirection;
+    verdict = pj.verdict;
+  } else if (judgeType === 'blockhash_parity') {
     // 纯链上区块哈希奇偶——委员各自读自己链, 零外部信任面(比 HTTP evidence 路径更干净的 verify-value-source)。
     // 🔴 钉①(Bettor 2026-07-07): target_daa 只从 ctx.resolutionRuleSpec 读(daemon 自己本地 market 行, 非 signRequest/
     //   proposal 字段)——否则 settler 换 target_daa 就能换判定结果, 3o6cs 的 predicate 本身是 null(resolution_predicate

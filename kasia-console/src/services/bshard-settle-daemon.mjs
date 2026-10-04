@@ -24,7 +24,7 @@ import { compilePayoutShardRedeem } from '../lib/pool-shard-register.mjs';
 import { fetchEndBlockHashCanonical, recaptureSideLockDaaForMarket } from './pool-market-settler-v06.mjs';
 import { judgeLine } from '../lib/judgeline.mjs';
 import { extractStructuredFields } from '../lib/oracle-evidence-extractors.mjs';
-import { makeCtfReader } from '../lib/uma-ctf-reader.mjs';   // #20 UMA: polymarket 盘读链上 CTF 判定 (P1 binding-verified 30/30·Bettor)
+import { sharedUmaCtfReader } from '../lib/uma-ctf-reader.mjs';   // #20 UMA: polymarket 盘读链上 CTF 判定 (P1 binding-verified 30/30·Bettor)
 import { recordShadowJudgment, registerDomainJudge } from '../lib/oracle-shadow-ledger.mjs';   // #26 自我进化: 影子台账(我们 oracle vs 权威·纯记录·永不碰结算·Owner 2026-06-30)
 import { espnSportsJudge } from '../lib/nwt-espn-sports-judge.mjs';   // NWT域判v1: polymarket体育盘ESPN独立判
 import { classifyFailure, shouldKeepStatus } from '../lib/bshard-failure-classifier.mjs';   // #49 模块①
@@ -68,9 +68,8 @@ const ENABLED = process.env.SETTLE_DAEMON_ENABLED === '1';
 const ZK_CLOSE_TICK_ENABLED = process.env.ZK_CLOSE_TICK_ENABLED === '1';
 // #20 UMA judge: polymarket 盘 winDir 读链上 Polymarket CTF (payoutNumerators/payoutDenominator by conditionId).
 // multi-RPC cross-check (RPC-trust·≥2 源同值才认)·finality (payoutDenominator>0 才 resolved·否则 ABSTAIN fail-closed)。
-const UMA_POLYGON_RPCS = (process.env.UMA_POLYGON_RPCS || 'https://polygon-bor-rpc.publicnode.com,https://polygon.drpc.org,https://1rpc.io/matic').split(',').map((s) => s.trim()).filter(Boolean);
-let _ctfReader = null;
-function ctfReader() { if (!_ctfReader) _ctfReader = makeCtfReader({ rpcs: UMA_POLYGON_RPCS }); return _ctfReader; }
+// (RPC 列表/reader 构造已收口到 lib/uma-ctf-reader.mjs sharedUmaCtfReader — 与委员 enforce 同一处, 账本1855 A)
+function ctfReader() { return sharedUmaCtfReader(); }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const log = (...a) => console.log('[settle-daemon]', new Date().toISOString().slice(11, 19), ...a);
 

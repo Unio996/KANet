@@ -162,6 +162,9 @@ export function buildEnforceCtx(voter, voterPk, market) {
     resolutionRuleSpec,
     marketMetadataHash,
     marketBrokerFeePct,
+    // 账本1855 A: polymarket 判定分支的两个输入同 deadlineDaa/resolutionRuleSpec 信任级别: 只读本地 market 行, 绝不从 signRequest 读。
+    outcomeMarketSource: market.outcome_market_source ?? null,
+    outcomeConditionId: market.outcome_condition_id ?? null,
     db: sqlite,
     // lib passes the result straight into deriveCommitteeSeed(marketId, endBlockHash, root) → must return the HASH STRING.
     fetchEndBlockHashCanonical: async (reader, daa) => {
@@ -419,7 +422,7 @@ export async function bshardCloseVoterV2Tick() {
   let signed = 0, skipped = 0, refused = 0, errored = 0;
   // pending V2 close-request: zk_native 市场(跟 V1 pending 查询互斥, 反向 filter) + collecting_sigs + metadata 带 bshard_close_request_v2。
   const pending = sqlite.prepare(`
-    SELECT id, metadata, pool_merkle_root, broker_pk, broker_fee_pct, deadline_daa, resolution_rule_spec, spine_p2sh, market_metadata_hash
+    SELECT id, metadata, pool_merkle_root, broker_pk, broker_fee_pct, deadline_daa, resolution_rule_spec, spine_p2sh, market_metadata_hash, outcome_market_source, outcome_condition_id
     FROM pool_markets
     WHERE protocol_version = 'v0.7' AND protocol_status = 'collecting_sigs' AND metadata LIKE '%bshard_close_request_v2%'
       AND json_valid(resolution_rule_spec) = 1 AND json_extract(resolution_rule_spec, '$.zk_native') IS 1
