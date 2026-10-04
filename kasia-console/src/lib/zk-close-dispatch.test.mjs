@@ -6,6 +6,8 @@
 // Run: cd kasia-console && node src/lib/zk-close-dispatch.test.mjs
 
 import { dispatchUnlockZkClose } from './zk-close-dispatch.mjs';
+import { _markVerifiedForTest } from './gate-tmpl-hash.mjs';
+_markVerifiedForTest();   // 账本1832 段4: mock kaspaZk 无法现算真实 gate hash(该派生另有 gate-tmpl-hash.selftest 专测), 本测只验 cmd 装配
 
 let fails = 0;
 const ok = (cond, label) => { if (cond) console.log(`  ✅ ${label}`); else { console.error(`  ❌ ${label}`); fails++; } };

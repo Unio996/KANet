@@ -14,10 +14,12 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { rebuildZkCloseGateWitness } from './zk-close-dispatch.mjs';
-import { parseCloseZkV2State, buildClaimWitness, buildClaimCommand } from './closezk-v2-claim-builder.mjs';
+import { computeKttTokenArtifact } from './pool-bshard-artifacts.mjs';
+import { readZkTemplateHashes, convergeCloseZkV2OwnRedeemLen } from './pool-shard-register.mjs';
 import { procStep } from './diag-step.mjs';   // M10 v2 observe-only (2026-09-05): 同步子进程站计时, 纯透传
 
-const CLI_DEBUGGER = process.env.SILVERSCRIPT_CLI_DEBUGGER_PATH || 'D:/silverscript/target/release/cli-debugger.exe';
+// 🔴 账本1832 段4: 默认改指 D-019 pin 的 cli-debugger(原默认 target/release 是未 pin 的开发构建, 与 v1.0.0 pin 编译器可能不同源)。
+const CLI_DEBUGGER = process.env.SILVERSCRIPT_CLI_DEBUGGER_PATH || 'D:/silverscript/versioned-builds/cli-debugger-v100-3ed9733.exe';
 const CLOSEZK_V2_SIL = join(new URL('.', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'), 'CloseZkV2.sil');
 const SCRATCH_DIR = process.env.REHEARSAL_SCRATCH_DIR || 'scratch/rehearsal-gate';
 const ZERO32 = '00'.repeat(32);
@@ -38,6 +40,8 @@ function closeZkV2CtorArray(s) {
     Number(s.attestedAtMs), Number(s.attestedWinner), Number(s.closed),
     s.payoutRootHex, Number(s.consolidatedPool),
     ...(s.wWords ? s.wWords.map(Number) : W17_ZERO()),
+    // 账本1832: 当前 CloseZkV2 ctor 共 28 参(T3 代币化 + own_redeem_len 尾字段); 此前只拼 25 个(T3 之前的形状)
+    s.tokenTmplHash, s.claimTmplHash, Number(s.ownRedeemLen),
   ];
 }
 
@@ -81,6 +85,8 @@ function setNullifierBit(currentState, merkleIndex) {
  */
 export function buildZkCloseDebuggerCase(o) {
   const { beforeState, witness, guestPayoutRootHex, selfOutIdx = 0, closeZkUtxoValueSompi, gateUtxoValueSompi, gateScriptHex } = o;
+  if (!o.tokPrefixHex || !o.tokSuffixHex) throw new Error('buildZkCloseDebuggerCase: tokPrefixHex/tokSuffixHex 必需(v1.0.0 zk_close 的 noTokenInput 见证)');
+  for (const k of ['tokenTmplHash', 'claimTmplHash', 'ownRedeemLen']) if (beforeState[k] == null) throw new Error(`buildZkCloseDebuggerCase: beforeState.${k} 必需(CloseZkV2 当前 28 参 ctor)`);
   if (Number(beforeState.closed) !== 1) throw new Error(`buildZkCloseDebuggerCase: beforeState.closed=${beforeState.closed} != 1 — zk_close 只能花费已 handoff(closed==1)的 genesis, 拒绝拼一个假前提的 test-case`);
   const beforeCtor = closeZkV2CtorArray(beforeState);
   const afterCtor = closeZkV2CtorArray({ ...beforeState, closed: 2, payoutRootHex: guestPayoutRootHex });
@@ -90,7 +96,7 @@ export function buildZkCloseDebuggerCase(o) {
       name: 'rehearsal_zk_close',
       function: 'zk_close',
       constructor_args: beforeCtor,
-      args: [witness.gateSuffixHex, guestPayoutRootHex, selfOutIdx],
+      args: [witness.gateSuffixHex, guestPayoutRootHex, selfOutIdx, o.tokPrefixHex, o.tokSuffixHex],   // 账本1832: noTokenInput 需要 tok_prefix/tok_suffix
       expect: 'pass',
       tx: {
         active_input_index: 0,
@@ -166,97 +172,56 @@ export function gateZkClose(marketId, ctx, beforeState, amounts) {
   const kaspa = ctx.kaspaZk();
   const gateScriptHex = kaspa.payToScriptHashScript(new Uint8Array(Buffer.from(witness.redeemScript, 'hex'))).script;
 
+  // 账本1832: 补齐 28 参 ctor 的尾部三项(env 模板 hash + 部署常量 own_redeem_len) + zk_close 的 KTT 模板见证
+  const _t = readZkTemplateHashes();
+  if (!_t.ok) return { ok: false, gate: 'error', error: `ZK 模板 env 缺失/非法: ${[..._t.missing, ..._t.malformed].join('/')}` };
+  const _ktt = computeKttTokenArtifact({ amount: 1, ownerCovIdHex: '00'.repeat(31) + '01' });
+  beforeState = { ...beforeState, tokenTmplHash: _t.tokenTmplHash, claimTmplHash: _t.claimTmplHash, ownRedeemLen: convergeCloseZkV2OwnRedeemLen(CLOSEZK_V2_SIL, beforeState.gateTmplHash, _t.tokenTmplHash, _t.claimTmplHash) };
   const testCase = buildZkCloseDebuggerCase({
+    tokPrefixHex: _ktt.templatePrefix.toString('hex'), tokSuffixHex: _ktt.templateSuffix.toString('hex'),
     beforeState, witness, guestPayoutRootHex: proving.guestPayoutRootHex, selfOutIdx: 0,
-    closeZkUtxoValueSompi: zkCont.utxoValueSompi ?? zkCont.valueSompi,   // 账本1832 段3: 优先 KAS 面值(dust); 旧行回落 gateUtxoValueSompi: amounts.gateUtxoValueSompi, gateScriptHex,
+    closeZkUtxoValueSompi: zkCont.utxoValueSompi ?? zkCont.valueSompi,   // 账本1832 段3: 优先 KAS 面值(dust); 旧行回落
+    gateUtxoValueSompi: amounts.gateUtxoValueSompi, gateScriptHex,
   });
   const result = runCliDebugger(testCase);
   return { ok: result.pass, gate: result.pass ? 'pass' : 'fail', debugger: result };
 }
 
 /**
- * buildZkClaimDebuggerCase — 拼 cli-debugger test-case(function: "claim")。字段顺序照抄
- * closezk-v2-claim-builder.mjs 的 buildClaimCommand witness 字段序(J2 docstring:
- * selfOutIdx/payoutOutIdx/bettorPk/payout/merkle_index/s0..s9), args = 那五项+10 siblings 原样铺开。
- * ⚠ 诚实边界(跟门②不同): claim 全链从未真实触发过, 没有真实落链数据可比对——本函数结构照抄
- * CloseZkV2.test.json 里 NWT/J2 昨晚编写、已用 cli-debugger --run-all 跑绿的"claim_normal_first_winner"/
- * "claim_dust_boundary_final_winner"两条回归用例(合成哨兵值, 非真实链上数据, 但结构已被 debugger 验证
- * 接受)。selftest 是对这两条已知结构的字段级复现校验, 不是对真实落链数据的 byte-exact 核实(门②那种)。
- * @param {object} o {
- *   beforeState(closed 必须=2), currentState(parseCloseZkV2State 产物, w0-16 是"claim 前"值),
- *   witness(buildClaimWitness 产物: bettorPk/payout(BigInt)/merkle_index/siblings(Buffer[10])),
- *   selfOutIdx(continuation output 下标), payoutOutIdx(payout output 下标),
- *   closeZkUtxoValueSompi(=beforeState.consolidatedPool, 花费的那笔 UTXO 值),
- * }
+ * 🔴 账本1832 段4: claim 门(③)按【当前合约/当前 ctor】重写——旧 buildZkClaimDebuggerCase/gateClaim 拼的是 T3 之前的 25 参 ctor + 裸 P2PK 派彩 tx,
+ *   对当前 CloseZkV2.claim(代币化: 新建 KanetTokenClaim + KTT 转移 + own_redeem_len 自续约)根本不是同一个合约形状。
+ *   新做法(反 vacuous): 不手搓 tx——走【生产三阶段编排 runTokenClaim 的 dry_run】拿 relay 构造器吐出的逐输入/输出真实字节(含 sigScript/covenant 绑定),
+ *   原样喂 cli-debugger。kind: 'claim'(closed==2) | 'escape_claim'(closed==3)(CloseZkV2 两个入口; PayoutShardV2.refund_claim 同构, 见 seg4 provenance 的驱动)。
+ * @param {object} o { kind, beforeState(28 参 ctor 所需: gateTmplHash/betsRootBaked/refundRootBaked/attestedAtMs/attestedWinner/closed/payoutRootHex/consolidatedPool/wWords/tokenTmplHash/claimTmplHash/ownRedeemLen),
+ *   dump(runTokenClaim dryRun 返回), witness(dryRun 返回的 witnessUsed) }
  */
-export function buildZkClaimDebuggerCase(o) {
-  const { beforeState, currentState, witness, selfOutIdx, payoutOutIdx, closeZkUtxoValueSompi } = o;
-  if (Number(beforeState.closed) !== 2) throw new Error(`buildZkClaimDebuggerCase: beforeState.closed=${beforeState.closed} != 2 — claim 只服务 zk_close 已完成(closed==2)的窗口, 拒绝拼一个假前提的 test-case`);
-  const beforeCtor = closeZkV2CtorArray(beforeState);
-  const siblingsHex = witness.siblings.map(s => Buffer.isBuffer(s) ? s.toString('hex') : String(s));
-  if (siblingsHex.length !== 10) throw new Error(`buildZkClaimDebuggerCase: siblings 长度=${siblingsHex.length} != 10(depth-10 固定, NWT 已核实 merkleProof 恒定 10 个, 不该出现别的长度)`);
-
-  const remaining = BigInt(beforeState.consolidatedPool) - witness.payout;
-  if (remaining < 0n) throw new Error(`buildZkClaimDebuggerCase: payout(${witness.payout}) > consolidatedPool(${beforeState.consolidatedPool}) — 不该发生, buildClaimWitness 应已挡下`);
-  const isLastClaimant = remaining === 0n;
-
-  const outputs = isLastClaimant
-    ? [{ value: Number(witness.payout), p2pk_pubkey: witness.bettorPk }]
-    : [
-        { value: Number(remaining), constructor_args: closeZkV2CtorArray({ ...beforeState, consolidatedPool: remaining, wWords: setNullifierBit(currentState, witness.merkle_index) }) },
-        { value: Number(witness.payout), p2pk_pubkey: witness.bettorPk },
-      ];
-
-  return {
-    tests: [{
-      name: 'rehearsal_claim',
-      function: 'claim',
-      constructor_args: beforeCtor,
-      args: [selfOutIdx, payoutOutIdx, witness.bettorPk, Number(witness.payout), witness.merkle_index, ...siblingsHex],
-      expect: 'pass',
-      tx: {
-        version: 1, lock_time: 0, active_input_index: 0,
-        inputs: [{
-          prev_txid: 'aa'.repeat(32), prev_index: 0, sequence: 0, sig_op_count: 0,
-          utxo_value: Number(closeZkUtxoValueSompi),
-        }],
-        outputs,
-      },
-    }],
-  };
+export function buildTokenClaimDebuggerCase(o) {
+  const { kind, beforeState, dump, witness } = o;
+  if (!['claim', 'escape_claim'].includes(kind)) throw new Error(`buildTokenClaimDebuggerCase: kind=${kind} 不支持(仅 CloseZkV2 的 claim/escape_claim)`);
+  const want = kind === 'claim' ? 2 : 3;
+  if (Number(beforeState.closed) !== want) throw new Error(`buildTokenClaimDebuggerCase: beforeState.closed=${beforeState.closed} != ${want}`);
+  const H = (x) => '0x' + String(x).replace(/^0x/, '');
+  const tx = { active_input_index: 0,
+    inputs: dump.inputs.map((i) => ({ prev_txid: i.prev_txid, prev_index: i.prev_index, sequence: 0, sig_op_count: 0, utxo_value: Number(i.utxo_value), ...(i.covenant_id ? { covenant_id: H(i.covenant_id) } : {}), ...(i.utxo_script_hex ? { utxo_script_hex: H(i.utxo_script_hex) } : {}), signature_script_hex: H(i.signature_script_hex) })),
+    outputs: dump.outputs.map((x) => ({ value: Number(x.value), script_hex: H(x.script_hex), ...(x.covenant_id ? { covenant_id: H(x.covenant_id), authorizing_input: x.authorizing_input ?? 0 } : {}) })) };
+  const args = [dump.selfOutIdx ?? 0, dump.claimOutIdx, 1, dump.tokOutIdx, dump.remainOutIdx ?? 0, H(witness.bettor_pk), Number(witness.amount), witness.merkle_index, ...witness.siblings_hex.map(H),
+    H(witness.tok_prefix_hex), H(witness.tok_suffix_hex), H(witness.claim_prefix_hex), H(witness.claim_suffix_hex)];
+  return { tests: [{ name: `rehearsal_${kind}`, function: kind, constructor_args: closeZkV2CtorArray(beforeState), args, expect: 'pass', tx }] };
 }
 
 /**
- * gateClaim — 门③编排入口: 用 J2 缺件1 的生产 builder(parseCloseZkV2State 现读+buildClaimWitness 独立
- * 重算+双锁自验)组装 witness, 零自造拼装(§1.2 铁律), 拼 debugger test-case, 只读不广播。
- * @param {object} o {
- *   redeemHex(当前活 CloseZkV2 UTXO 的 redeem_hex, 链上现读非 DB 缓存——parseCloseZkV2State 的输入),
- *   winnerPkHex, merkleIndex, bettors, feeLeaves, poolTotalAtZkCloseSompi(zk_close 落链那一刻的值, 非当前剩余池),
- *   immutableCtor: {gateTmplHash, betsRootBaked, refundRootBaked, attestedAtMs}(门①②同源, 原样传入,
- *     CloseZkV2 状态区之外的四个 genesis-时烤死字段, parseCloseZkV2State 不解这四个),
- *   selfOutIdx(默认 0), payoutOutIdx(默认 1),
- * }
- * @returns {{ok:boolean, gate:'pass'|'fail'|'error', debugger?:object, error?:string}}
+ * gateTokenClaim — 门③编排入口(现行): runTokenClaim(dryRun) → buildTokenClaimDebuggerCase → cli-debugger。只读不广播(dry_run 不提交)。
+ * @param {object} o { kind, closeZk:{redeemHex,txid,index}, pool, bettorPk, amount, merkleIndex, siblingsHex, fee:{address,txid,index}, relayCall, p2sh, beforeState, tokenTmplHash, claimTmplHash }
  */
-export function gateClaim(o) {
-  const { redeemHex, winnerPkHex, merkleIndex, bettors, feeLeaves, poolTotalAtZkCloseSompi, immutableCtor, selfOutIdx = 0, payoutOutIdx = 1 } = o;
-  let currentState;
-  try { currentState = parseCloseZkV2State(redeemHex); } catch (e) { return { ok: false, gate: 'error', error: `parseCloseZkV2State: ${e.message}` }; }
-
-  let witness;
-  try { witness = buildClaimWitness(winnerPkHex, merkleIndex, currentState, { bettors, feeLeaves, poolTotalAtZkCloseSompi }); }
-  catch (e) { return { ok: false, gate: 'error', error: `buildClaimWitness: ${e.message}` }; }
-
-  const beforeState = {
-    ...immutableCtor,
-    attestedWinner: currentState.attestedWinner, closed: currentState.closed,
-    payoutRootHex: currentState.payoutRootField, consolidatedPool: currentState.consolidated_pool,
-    wWords: Array.from({ length: 17 }, (_, i) => currentState['w' + i]),
-  };
-
-  const testCase = buildZkClaimDebuggerCase({
-    beforeState, currentState, witness, selfOutIdx, payoutOutIdx, closeZkUtxoValueSompi: currentState.consolidated_pool,
-  });
+export async function gateTokenClaim(o) {
+  const { runTokenClaim } = await import('./zk-token-claim-orchestrator.mjs');
+  let dump;
+  try {
+    dump = await runTokenClaim({ kind: o.kind, self: o.closeZk, pool: o.pool, bettorPk: o.bettorPk, amount: o.amount, merkleIndex: o.merkleIndex, siblingsHex: o.siblingsHex, fee: o.fee, relayCall: o.relayCall, p2sh: o.p2sh, tokenTmplHash: o.tokenTmplHash, claimTmplHash: o.claimTmplHash, dryRun: true });
+  } catch (e) { return { ok: false, gate: 'error', error: `runTokenClaim(dry_run): ${e.message}` }; }
+  if (!dump?.inputs || !dump?.witnessUsed) return { ok: false, gate: 'error', error: 'dry_run 响应缺 inputs/witnessUsed' };
+  let testCase;
+  try { testCase = buildTokenClaimDebuggerCase({ kind: o.kind, beforeState: o.beforeState, dump, witness: dump.witnessUsed }); } catch (e) { return { ok: false, gate: 'error', error: e.message }; }
   const result = runCliDebugger(testCase);
   return { ok: result.pass, gate: result.pass ? 'pass' : 'fail', debugger: result };
 }

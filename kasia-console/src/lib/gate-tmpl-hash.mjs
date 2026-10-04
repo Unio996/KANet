@@ -92,3 +92,5 @@ export function ensureGateTmplHashFresh(ZK_GATE, kaspaZk, opts = {}) {
 
 // 仅测试/诊断用: 重置 memo,不导出进正常业务路径。
 export function _resetVerifiedForTest() { _zkGateVerified = false; }
+// 仅测试用(账本1832 段4): 装配类测试(zk-close-dispatch.test.mjs)用 mock kaspaZk、无真实 WASM, 现算 hash 必不等于烤死值; 这类测试验的是 cmd 装配不是 hash 派生(派生有 gate-tmpl-hash.selftest.mjs 专测), 显式标记已验。
+export function _markVerifiedForTest() { _zkGateVerified = true; }

@@ -92,5 +92,5 @@ export async function runTokenClaim(o) {
   if (o.dryRun) final.dry_run = true;
   if (o.mutateFinal) o.mutateFinal(final);
   const r = await rc(final);
-  return { ...r, selfCovId, poolTokenOutpoint: `${selfToken.outpointTxid}:${selfToken.index}`, claimTemplateHash: claimArt.templateHashHex };
+  return { ...r, witnessUsed: final.witness, selfCovId, poolTokenOutpoint: `${selfToken.outpointTxid}:${selfToken.index}`, claimTemplateHash: claimArt.templateHashHex };
 }
