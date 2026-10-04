@@ -34,7 +34,7 @@ const throws = (fn, re, secrets = []) => {
 
 const MARKET_ID = 'cd'.repeat(32);
 const newKey = () => { const priv = randomBytes(32).toString('hex'); return { priv, pk: pubkeyHexOfPrivkey(kaspa, priv) }; };
-const TICKET_PATH = new URL('../sil-v1/PoolSideTicket.sil', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
+const TICKET_PATH = new URL('../legacy-proto/PoolSideTicket.sil', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
 // 独立于被测代码: 测试自己编译 PoolSideTicket 并算 P2SH
 const ticketSpk = ({ pk, side, stake }) => '0x' + p2sh(Buffer.from(compileSilV100(TICKET_PATH, [{ kind: 'bytes', value: [...Buffer.from(pk, 'hex')] }, { kind: 'int', value: side }, { kind: 'int', value: stake }, { kind: 'bytes', value: [...Buffer.from(MARKET_ID, 'hex')] }], 'PoolSideTicket').script));
 
@@ -83,7 +83,7 @@ t('反向(生产路径 v0): 取了【另一个市场】的委员私钥 ⇒ signi
 });
 
 // ── 批7 withdraw: KanetTokenClaim winner_pk 推导 + 签名前断言(期望 spk 由测试自己按 ctor 直接编译+P2SH, 不经 computeKanetTokenClaimGenesisArtifact) ──
-const KTC_PATH = new URL('../KanetTokenClaim.sil', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
+const KTC_PATH = new URL('../legacy-proto/KanetTokenClaim.sil', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
 const { token_tmpl_hash: TOKEN_TMPL_HASH } = loadProtocolConstants();
 const MARKET_COV = 'ef'.repeat(32);
 const ktcSpk = ({ pk, amount }) => '0x' + p2sh(Buffer.from(compileSilV100(KTC_PATH, [{ kind: 'bytes', value: [...Buffer.from(MARKET_COV, 'hex')] }, { kind: 'bytes', value: [...Buffer.from(pk, 'hex')] }, { kind: 'int', value: amount }, { kind: 'bytes', value: [...Buffer.from(TOKEN_TMPL_HASH, 'hex')] }], 'KanetTokenClaim').script));

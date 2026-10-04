@@ -1645,6 +1645,7 @@ export async function registerPoolRoutes(fastify) {
         createShardMarketRow, recordBettor,
         ..._zkTmpl,   // 账本 1813 A1: tokenTmplHash/claimTmplHash/marketSuffixHash
         zkNative: _zkNative, closeZkTmplAnchor: _closeZkTmplAnchor,   // 非 zkNative 市场: false/null，等价于不传，行为不变
+        spineP2sh: market.spine_p2sh ?? null,   // 账本1850 条件1: 铸新(sweep-only)票前核『无 spine』, 见 pool-shard-register.assertTicketMintAllowed
       });
       return reply.send({ ok: true, logical_market_id: logicalMarketId, bettor_pk: bettorPk, no_kas_stake: _noKasMode, stake_ktt: _noKasMode ? stakeSompi : undefined, ...result });
     } catch (e) {
@@ -1911,6 +1912,7 @@ export async function registerPoolRoutes(fastify) {
         createShardMarketRow, recordBettor,
         ...zkTmpl,   // 账本 1813 A1: tokenTmplHash/claimTmplHash/marketSuffixHash
         zkNative: _zkNative, closeZkTmplAnchor: _closeZkTmplAnchor,   // 非 zkNative 市场: false/null，等价于不传，行为不变
+        spineP2sh: market.spine_p2sh ?? null,   // 账本1850 条件1: 铸新(sweep-only)票前核『无 spine』, 见 pool-shard-register.assertTicketMintAllowed
       });
       // 🔴 #28 (B) wire-3/3 报销: bet 已注册 → sweep per-bet P2SH 付款回 gateway(补偿 gateway 垫的 stake)。
       //   **fire-and-forget·best-effort**: 不 await(不阻 success 返回)·sweep 失败【绝不 strand bet】(bet 已注册·gateway

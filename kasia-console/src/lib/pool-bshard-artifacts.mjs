@@ -22,6 +22,7 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { blake2b } from '@noble/hashes/blake2b';
 import { extractTemplateArtifact, extractTemplateArtifactV100 } from './pool-template-artifact.mjs';
+import { resolveSinkConfig } from './zk-sink-config.mjs';
 import { procStep } from './diag-step.mjs';   // M10 v2 observe-only (2026-09-05): 同步子进程站计时, 纯透传
 
 // 🔴 事故修复(2026-07-07，Bettor/NWT 裁定): 这个模块级默认被 bshard-settle-daemon.mjs/bshard-auto-settler.mjs
@@ -395,10 +396,12 @@ const POOL_SIDE_TICKET_SIL = join(dirname(fileURLToPath(import.meta.url)), 'sil-
  * @param {object} o { bettorPk:hex, direction:0|1, stake:number, shardPoolId:hex }
  * @returns {{ script:Buffer, scriptPubKeyHex:string, templateHashHex:string, templatePrefix:Buffer, templateSuffix:Buffer }}
  */
-export function computePoolSideTicketArtifact({ bettorPk, direction, stake, shardPoolId }, silvercPath) {
+export function computePoolSideTicketArtifact({ bettorPk, direction, stake, shardPoolId, sinkPkHex, retireDaa }, silvercPath) {
   if (!/^[0-9a-f]{64}$/.test(String(bettorPk || ''))) throw new Error(`computePoolSideTicketArtifact: bettorPk must be 32-byte hex, got ${bettorPk}`);
   if (!/^[0-9a-f]{64}$/.test(String(shardPoolId || ''))) throw new Error(`computePoolSideTicketArtifact: shardPoolId must be 32-byte hex, got ${shardPoolId}`);
-  const ctor = [ctorBytes32V100(bettorPk), ctorIntV100(direction), ctorIntV100(stake), ctorBytes32V100(shardPoolId)];
+  // 🔴 账本1850 严格零方案: 票的 ctor 追加 sink_pk / sweep_daa 两个常量(非 State), 来自 zk-sink-config(env 缺失 fail-closed)
+  const sk = resolveSinkConfig({ sinkPkHex, retireDaa });
+  const ctor = [ctorBytes32V100(bettorPk), ctorIntV100(direction), ctorIntV100(stake), ctorBytes32V100(shardPoolId), ctorBytes32V100(sk.sinkPkHex), ctorIntV100(sk.retireDaa)];
   const compiled = silvercPath ? compileSilV100(POOL_SIDE_TICKET_SIL, ctor, 'PoolSideTicket', silvercPath) : compileSilV100(POOL_SIDE_TICKET_SIL, ctor, 'PoolSideTicket');
   const artifact = extractTemplateArtifactV100(compiled);
   return {
@@ -497,16 +500,18 @@ export function computeKttV2TokenArtifact({ amount, ownerScheme, ownerBytesHex }
 
 /**
  * 🔴 账本1832 段4: KanetTokenClaim 实例 artifact(claim 家族三入口 claimOut 的完整 redeem + 模板前后缀)。
- * 合约 ctor 四参数即其全部状态(market_cov_id / winner_pk / amount / token_tmpl_hash), 模板(prefix/suffix, state 区排除)对所有实例恒定;
+ * 合约 ctor 前四参数是 State(market_cov_id / winner_pk / amount / token_tmpl_hash), 后两个(sink_pk / retire_daa, 账本1850)是模板常量; 模板(prefix/suffix, state 区排除)对同一 sink/retire 配置的所有实例恒定;
  * 其 hash 必须等于 env ZK_CLAIM_TMPL_HASH / payout_shards.claim_tmpl_hash(调用方核对, 本函数不读 env)。
  * @param {{marketCovIdHex:string, winnerPkHex:string, amount:number|bigint|string, tokenTmplHashHex:string}} o
  */
 const KANET_TOKEN_CLAIM_SIL = new URL('./KanetTokenClaim.sil', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
-export function computeKanetTokenClaimArtifact({ marketCovIdHex, winnerPkHex, amount, tokenTmplHashHex }, silvercPath) {
+export function computeKanetTokenClaimArtifact({ marketCovIdHex, winnerPkHex, amount, tokenTmplHashHex, sinkPkHex, retireDaa }, silvercPath) {
   for (const [l, v] of [['marketCovIdHex', marketCovIdHex], ['winnerPkHex', winnerPkHex], ['tokenTmplHashHex', tokenTmplHashHex]]) {
     if (!/^[0-9a-f]{64}$/.test(String(v || ''))) throw new Error(`computeKanetTokenClaimArtifact: ${l} must be 32-byte hex, got ${v}`);
   }
-  const ctor = [ctorBytes32V100(marketCovIdHex), ctorBytes32V100(winnerPkHex), ctorIntV100(Number(amount)), ctorBytes32V100(tokenTmplHashHex)];
+  // 🔴 账本1850 严格零方案: claim 的 ctor 追加 sink_pk / retire_daa 两个常量(非 State)——模板随这两个 env 变, CLAIM_TMPL_HASH 须重算
+  const sk = resolveSinkConfig({ sinkPkHex, retireDaa });
+  const ctor = [ctorBytes32V100(marketCovIdHex), ctorBytes32V100(winnerPkHex), ctorIntV100(Number(amount)), ctorBytes32V100(tokenTmplHashHex), ctorBytes32V100(sk.sinkPkHex), ctorIntV100(sk.retireDaa)];
   const compiled = silvercPath ? compileSilV100(KANET_TOKEN_CLAIM_SIL, ctor, 'KanetTokenClaim', silvercPath) : compileSilV100(KANET_TOKEN_CLAIM_SIL, ctor, 'KanetTokenClaim');
   const artifact = extractTemplateArtifactV100(compiled);
   return { script: Buffer.from(compiled.script), templateHashHex: artifact.templateHashHex, templatePrefix: artifact.templatePrefix, templateSuffix: artifact.templateSuffix };

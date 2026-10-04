@@ -56,7 +56,7 @@ function compileEntryAbi(silPath, ctor, contractName) {
 }
 
 const SLD_PATH = new URL('./ShardLeaf_direct.sil', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
-const TICKET_PATH = new URL('./sil-v1/PoolSideTicket.sil', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
+const TICKET_PATH = new URL('./legacy-proto/PoolSideTicket.sil', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
 const KTT_PATH = new URL('./sil-v1/KanetTestToken.sil', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
 
 // D-020(账本1446/1448): 唯一编一次 KTT(纯为了拿 entries.transfer 的 entryAbi + runtime_state 字段数,

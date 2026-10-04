@@ -57,7 +57,7 @@ const leafOutpoint = { txid: genesisBuilt.expectedTxid, vout: 0 };
 const { ps_tmpl_hash, token_tmpl_hash } = loadProtocolConstants();
 
 const SLD_PATH = new URL('./ShardLeaf_direct.sil', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
-const TICKET_PATH = new URL('./sil-v1/PoolSideTicket.sil', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
+const TICKET_PATH = new URL('./legacy-proto/PoolSideTicket.sil', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
 const KTT_PATH = new URL('./sil-v1/KanetTestToken.sil', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
 const ROOT_CLOSE_PATH = new URL('./RootClose.sil', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
 
