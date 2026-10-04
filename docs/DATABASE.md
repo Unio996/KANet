@@ -697,6 +697,8 @@ allocateForRegister 顺序填。
 
 **字段（节选，完整见 `migrate.js` v62 建表 + 后续 `ALTER TABLE`）**：id (PK，市场标识，形如 `ext-pool-v07-<ts>-<slug>` 或分片 id `<logical>-s<N>`), maker_relay_id, spine_p2sh/spine_lock_tx（PoolSpine covenant 锚点）, deadline/deadline_daa, protocol_version（v0.5/v0.6/v0.7）, protocol_status（pending_bettors → collecting_sigs → verifying → settling/refunding → completed/refunded/shard_internal 等，见各服务的状态机)，maker_stake_amount/broker_fee_pct/oracle_bond_amount/miner_fee, outcome_*（预言机源绑定), settle_txid/refund_txid, metadata（JSON，`settle_evidence`/`phase2_outputs`/`fee_rules` 等结算期写回都堆在这一列——见下方陷阱), sides_merkle_root/pool_merkle_root, fee_rules（v184, write-once trigger）。
 
+**🔴 v221（2026-10-04，账本 1846 S2）**：`spine_p2sh` 去掉 `NOT NULL`（`spine_lock_tx` 本来就可空）。**ZK 原生·不收 KAS 的盘没有 spine**（主网 `create-v07` 的 zk_native 分支不建 spine、不转账、`maker_stake_amount=0`，`metadata.no_spine=true`），这两列为 NULL，**不是占位串**。所有读 `spine_p2sh` 的旧路径遇到 NULL 要跳过而不是报错：`pool-commingle-detect`（NULL 恒不算 commingled）、`pool-card-groups`、`broker-fee-emit`（无 spine 时用配置网络单源）、`reclaimBshardMakerBond`（`noSpine`）、`pbs8-2-signreq-anchors`（`NO_SPINE_MARKET` 拒签）、`/settle` 与 `bettor-refund-claim`（409 `no_spine_market`）、`trade-protocol-filter` 入站 bet-reg（显式丢弃）。迁移用 SQLite 官方「去 NOT NULL」的 `writable_schema` 单行改写（不重建表：本表有表达式索引、触发器和两个 FK 子表），自带 integrity_check/foreign_key_check，幂等。测试：`kasia-console/src/lib/spine-null-readers.test.mjs`。
+
 **写入方**：`pool.js` create-v07/v06（建市场）→ `pool-market-settler.js`/`bshard-settle-daemon.mjs`（结算写回 `protocol_status`+`metadata.settle_evidence`）→ voter/oracle 服务（委员投票中间态）。
 **读取方**：`/api/pool/my-positions`（用户仓位+赔付展示）/ `/api/pool/markets`（列表）/ settler/voter 每 tick 扫描 / prediction-menu.mjs（TG bot 展示）。
 

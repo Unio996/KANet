@@ -51,6 +51,11 @@ export function evaluateSignReqAnchors(input) {
   if (!market) {
     return rej('MISSING_LOAD_BEARING_COLUMN', 'PB-S8-2 弃权: 没有 market 行 ⇒ 本机无判断资格, 不签');
   }
+  //  账本1846 S2: spine_p2sh 与 spine_lock_tx 都为空 = 无 spine 的盘(ZK 原生·不收 KAS), 本闸守的是 spine UTXO 被替换这条旧 phase2 路, 对它没有可锚的东西 ⇒ 专用码 NO_SPINE_MARKET 拒签(fail-closed, 不是放行)。
+  //  只有一个为空仍走下面 MISSING_LOAD_BEARING_COLUMN(数据残缺, 弃权)。
+  if (!market.spine_p2sh && !market.spine_lock_tx) {
+    return rej('NO_SPINE_MARKET', `PB-S8-2 拒签: market 没有 spine(ZK 原生/不收 KAS 盘), 旧 phase2 spine 结算路不适用 ⇒ 不签 market=${mid}`);
+  }
   for (const col of ['spine_p2sh', 'spine_lock_tx', 'maker_relay_id']) {
     if (!market[col]) {
       return rej('MISSING_LOAD_BEARING_COLUMN',
