@@ -35,6 +35,8 @@ export const COMMAND_TYPES = Object.freeze({
   // Phase 4a SS trustless escrow (Sub 6+8+9) — oracle / maker IPC for prediction market settle TX flow.
   ECDSA_SIGN: 'ecdsa_sign',
   GET_PUBKEY: 'get_pubkey',
+  PIN_UTXO: 'pin_utxo',       // 账本1855 A: 仅把 outpoint 加入排除名单(只排除不选择不花费), 防 close 提交费 UTXO 被并发盘/rebalance 吃掉
+  UNPIN_UTXO: 'unpin_utxo',
   SIGN_INPUT_FOR_SETTLE: 'sign_input_for_settle',
   GET_PER_BET_ADDRESS: 'get_per_bet_address',   // #28 (B) wire: 派生 per-bet 独立 P2SH 收款址 (relay.mjs handler·三层 KI-49)
   SWEEP_PER_BET: 'sweep_per_bet',                // #28 (B) wire: sweep per-bet P2SH 扫回 gateway 报销 (relay.mjs handler·三层 KI-49)
@@ -152,6 +154,8 @@ export const COMMAND_PAYLOAD_SCHEMA = Object.freeze({
   // Phase 4a SS trustless escrow
   [COMMAND_TYPES.ECDSA_SIGN]: ['message'],
   [COMMAND_TYPES.GET_PUBKEY]: [],
+  [COMMAND_TYPES.PIN_UTXO]: ['txid', 'index'],
+  [COMMAND_TYPES.UNPIN_UTXO]: ['txid', 'index'],
   [COMMAND_TYPES.SIGN_INPUT_FOR_SETTLE]: ['tx_hex', 'input_index'],
   [COMMAND_TYPES.GET_PER_BET_ADDRESS]: ['marketId', 'bettorPk', 'direction', 'payAmountSompi', 'betId'],  // #28 (B) per-bet 唯一性必传
   [COMMAND_TYPES.SWEEP_PER_BET]: ['per_bet_address', 'redeem_hex'],  // #28 (B) sweep 必传
@@ -247,6 +251,8 @@ export const COMMAND_FIELD_TYPES = Object.freeze({
   // Phase 4a SS trustless escrow
   [COMMAND_TYPES.ECDSA_SIGN]: { message: 'string' },
   [COMMAND_TYPES.GET_PUBKEY]: {},
+  [COMMAND_TYPES.PIN_UTXO]: { txid: 'string', index: 'number', ttl_ms: 'number' },
+  [COMMAND_TYPES.UNPIN_UTXO]: { txid: 'string', index: 'number' },
   [COMMAND_TYPES.SIGN_INPUT_FOR_SETTLE]: { tx_hex: 'string', input_index: 'number' },
   [COMMAND_TYPES.GET_PER_BET_ADDRESS]: { marketId: 'string', bettorPk: 'string', direction: 'number', payAmountSompi: 'string', betId: 'string' },  // #28 (B)
   [COMMAND_TYPES.SWEEP_PER_BET]: { per_bet_address: 'string', redeem_hex: 'string' },  // #28 (B)
