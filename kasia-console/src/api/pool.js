@@ -1521,7 +1521,7 @@ export async function registerPoolRoutes(fastify) {
     const logicalMarketId = request.params.id;
     const b = request.body || {};
     if ((!b.bettor_relay_id && !b.bettor_pk) || b.direction === undefined || (!_noKasMode && !b.stake_kas)) {   // 无 KAS 模式: 下注量字段是 stake_ktt(下面 parseStakeKtt), stake_kas 不读
-      return reply.code(400).send({ ok: false, error: 'bettor_relay_id OR bettor_pk (fresh keypair, cross-node fixture), direction, stake_kas required' });
+      return reply.code(400).send({ ok: false, error: _noKasMode ? 'bettor_relay_id OR bettor_pk (fresh keypair, cross-node fixture), direction, stake_ktt required (不收 KAS 模式: 下注量字段是 stake_ktt, 不是 stake_kas)' : 'bettor_relay_id OR bettor_pk (fresh keypair, cross-node fixture), direction, stake_kas required' });
     }
     const market = sqlite.prepare('SELECT * FROM pool_markets WHERE id = ?').get(logicalMarketId);
     if (!market) return reply.code(404).send({ ok: false, error: 'market not found' });

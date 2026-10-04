@@ -207,6 +207,8 @@ process.env.KANET_NO_KAS_STAKE_MODE = '1'; reset();
   ok(r1.statusCode === 200 && calls.transfer.length === 0 && calls.reg.length === 1, 'register-v07 stake_ktt ⇒ 200 且零转账');
   const r2 = await post('/api/pool/market/m-reg/bettor/register-v07/prep', {});
   ok(r2.statusCode === 403, 'prep ⇒ 403');
+  const r1b = await post('/api/pool/market/m-reg/bettor/register-v07', { bettor_relay_id: 'bettor-r' });   // 缺 direction
+  ok(r1b.statusCode === 400 && /stake_ktt/.test(r1b.body) && !/stake_kas required/.test(r1b.body), `无 KAS 模式缺参错误文案提 stake_ktt(实 ${r1b.statusCode} ${String(r1b.body).slice(0, 120)})`);
 }
 delete process.env.KANET_NO_KAS_STAKE_MODE;
 
