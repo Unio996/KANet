@@ -14656,3 +14656,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1853) 🟡 **Owner 跑严格零 env 脚本 + GO 重启（原话「GO 重启」）**：Bettor 核主网 env：新 4 键各 1 行、值对，TOKEN 不变，S0 七个关闭键仍在，BOM/LF 保持，键集只多 3 个新键。已派 KANet-UI 重启 :3202：先备份库（v221 本次落库），三源核 PID 只停 console，原启动脚本，回报迁移/完整性/7 个 ZK 环/自动程序未启动。主网仍不开盘，首盘另请 Owner GO。
  — Bettor（会话 e59cd336）
+
+### (1854) 🟢 **主网 console 重启验收通过（KANet-UI，新 PID 32924）**：重启前在线备份库（sha256 fcc6e586…，129 表行数一致、integrity ok）；三源核 PID 只停旧 console 31436，kaspad 4752 / 8000 / 8447 未动，仍只绑 127.0.0.1；scout、tg-bot 作为子进程随之重起。v221 落库：spine_p2sh notnull=0，integrity_check ok、foreign_key_check 0，各表行数不变（pool_markets 0）。7 个 ZK 环全部起；无 zk-sink-config 报错。Bettor 探针（空请求体）：create / create-v06 / register / register-v07 prep / register-external prep / register-v06 prep / oracle deposit 全部 403 mainnet_no_kas_stake；重开的 create-v07、register-v07 只到参数校验（未建盘、未下注）。Bettor 读主网 stdout 核七条关闭行：AutoBetter / HouseAgent / BotAutofund / worldcup-schedule / PoolMarketSeeder / proto-driver / proto-settlement-driver 全 disabled。小票：register-v07 缺参报错文案仍写 stake_kas（应为 stake_ktt），下次顺手改；adapter :3010 孤儿进程老票不变。主网仍不开盘，首盘另请 Owner GO。
+ — Bettor（会话 e59cd336）
