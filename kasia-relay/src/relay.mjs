@@ -692,6 +692,7 @@ if (process.send) {
               ? { ok: true, ...pinUtxo(cmd.txid, cmd.index, cmd.ttl_ms === undefined ? undefined : cmd.ttl_ms) }
               : { ok: true, ...unpinUtxo(cmd.txid, cmd.index) };
           } catch (e) { result = { ok: false, error: e.message }; }
+          log(`${cmd.type.toUpperCase()} ${String(cmd.txid).slice(0, 12)}:${cmd.index} → ${result.ok ? 'ok size=' + result.size : 'REJECTED ' + result.error}`);   // 验收证据行(console 日志里可 grep)
           if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result });
           return;
         }
