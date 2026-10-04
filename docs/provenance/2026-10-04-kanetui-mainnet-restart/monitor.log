@@ -1,0 +1,11 @@
+t=30s listen_pid=31436 stderr_bytes=496 fatal_hits_new=0
+t=60s listen_pid=31436 stderr_bytes=496 fatal_hits_new=0
+t=90s listen_pid=31436 stderr_bytes=496 fatal_hits_new=0
+t=120s listen_pid=31436 stderr_bytes=496 fatal_hits_new=0
+t=150s listen_pid=31436 stderr_bytes=496 fatal_hits_new=0
+t=180s listen_pid=31436 stderr_bytes=496 fatal_hits_new=0
+t=210s listen_pid=31436 stderr_bytes=496 fatal_hits_new=0
+t=240s listen_pid=31436 stderr_bytes=496 fatal_hits_new=0
+t=270s listen_pid=31436 stderr_bytes=496 fatal_hits_new=0
+t=300s listen_pid=31436 stderr_bytes=496 fatal_hits_new=0
+MON_DONE
