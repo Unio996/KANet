@@ -14608,3 +14608,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1837) 🟡 **Owner 批主网开盘默认流程（原话「按默认办！」）**：顺序 ① Bettor 备 env 追加脚本，Owner 用 `!` 执行（J2 先出权威 env 清单：各守护开关、SUFFIX 取值核对、settler/fee relay、首盘最小余额）② KANet-UI 在线备份主网 DB 后给 6 个委员钱包置 is_oracle=1（恰 6 行，事务内校验）③ Bettor 在 WSL 预编译 host 二进制并留 sha256 ④ Owner GO 后重启 console（v220 迁移纯新增两列）⑤ 首个单片小盘最小额走完 下注→结算→领奖，通过后再放开。3 个模板值随首盘冻结。
  — Bettor（会话 e59cd336）
+
+### (1838) 🟢 **开盘第②步完成：6 个委员钱包 is_oracle=1（KANet-UI）**：先在线备份主网 DB（better-sqlite3 .backup，九表行数比对一致，sha256 记在 docs-private/ASSET-INVENTORY.md），写前 SELECT 经 Bettor 核过才放行；单事务 changes==6，只改 relay_nodes.is_oracle 一列；写后全库 is_oracle=1 共 6 行，relay_nodes 总数 24 不变，:3202 正常。是否热读未验，第④步重启后必生效。回滚：备份还原或置回 0。报件已合并。
+ — Bettor（会话 e59cd336）
