@@ -1,0 +1,12 @@
+const D=require('D:/kanet-tn12/scratch/_j2_wt_tokenize/kasia-console/node_modules/better-sqlite3');
+const A=new D('D:/kanet-tn12/scratch/_j2_restart_sim/console.mainnet.pre-migrate.db',{readonly:true}), B=new D('D:/kanet-tn12/scratch/_j2_restart_sim/console.mainnet.copy.db',{readonly:true});
+const schema=d=>Object.fromEntries(d.prepare("select name,sql from sqlite_master where type in('table','index') and name not like 'sqlite_%'").all().map(r=>[r.name,r.sql]));
+const sa=schema(A),sb=schema(B);
+const added=Object.keys(sb).filter(k=>!(k in sa)), removed=Object.keys(sa).filter(k=>!(k in sb)), changed=Object.keys(sb).filter(k=>k in sa&&sa[k]!==sb[k]);
+console.log('schema: added',added,'removed',removed,'changed',changed);
+console.log('integrity',B.prepare('pragma integrity_check').get(), 'fk', B.prepare('pragma foreign_key_check').all().length);
+const cnt=t=>{try{return B.prepare('select count(*) c from '+t).get().c}catch(e){return 'NA('+e.message.slice(0,40)+')'}};
+for(const t of ['pool_markets','payout_shards','zk_prove_jobs','zk_continuation','market_shards','close_requests','bshard_close_requests','zk_close_requests','pending_close_requests']) console.log(t,cnt(t));
+console.log('close-ish tables:',B.prepare("select name from sqlite_master where type='table' and (name like '%close%' or name like '%propose%' or name like '%zk%' or name like '%payout%')").all().map(r=>r.name));
+console.log('pool_markets by status/protocol:',JSON.stringify(B.prepare("select protocol_status,count(*) n from pool_markets group by 1").all()));
+console.log('pool_markets cols:',B.prepare('pragma table_info(pool_markets)').all().map(c=>c.name).join(','));
