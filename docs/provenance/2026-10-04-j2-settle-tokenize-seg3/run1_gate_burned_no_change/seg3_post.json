@@ -1,0 +1,71 @@
+{
+ "handoff": {
+  "blockHash": "b950f7f70c2eea5a9d29bfab3313d076ff7fa12a34523be3a61bf67f4b49dd55",
+  "daa": "10771",
+  "version": 1,
+  "inputs": [
+   {
+    "prev": "db0cf50850df763765916aecb9ef3f36dfeb9f97adeee7b911d3c9f36e5066cf:0",
+    "sigScriptLen": 45463,
+    "computeBudget": 200
+   },
+   {
+    "prev": "2a919b930cc97c42c2a50621ac91aa855876598a78e2f0f518c02c20e03ea79c:1",
+    "sigScriptLen": 3215,
+    "computeBudget": 100
+   },
+   {
+    "prev": "5f5f4c7adc1fc21b2332d59423e20c4136007659d9a6c9ff94b9df4fb3b0dfc8:0",
+    "sigScriptLen": 66,
+    "computeBudget": 100
+   }
+  ],
+  "outputs": [
+   {
+    "idx": 0,
+    "value": "20000000",
+    "covenantId": "71021110ad81c643577d7b43cca9c2e6b78967f3c52c9bc7f0317e53cb24c3e8",
+    "authInput": 2
+   },
+   {
+    "idx": 1,
+    "value": "40000000",
+    "covenantId": "1616410e8e21040e7c452d584673bfb20e70515a979ca62747b73c826386de9e",
+    "authInput": 2
+   }
+  ]
+ },
+ "close": {
+  "blockHash": "52b9fd5f8769ea4e104958129a562c45c07818639bcfe36742d135e729422086",
+  "daa": "17090",
+  "version": 1,
+  "inputs": [
+   {
+    "prev": "66f0a3472a74d73e5eae55d97f32c3b2d4f4052a0c4c5bdfa25544fcd59de0b6:0",
+    "sigScriptLen": 17256,
+    "computeBudget": 200
+   },
+   {
+    "prev": "a3f989a32882968b87a2b8917086e7a98a47d7bde713ba5bf827652ea461b958:0",
+    "sigScriptLen": 966,
+    "computeBudget": 1560
+   }
+  ],
+  "outputs": [
+   {
+    "idx": 0,
+    "value": "20000000",
+    "covenantId": "71021110ad81c643577d7b43cca9c2e6b78967f3c52c9bc7f0317e53cb24c3e8",
+    "authInput": 0
+   }
+  ]
+ },
+ "tokenUtxos": [
+  {
+   "outpoint": "66f0a3472a74d73e5eae55d97f32c3b2d4f4052a0c4c5bdfa25544fcd59de0b6:1",
+   "amount": "40000000"
+  }
+ ],
+ "zkCovId": "71021110ad81c643577d7b43cca9c2e6b78967f3c52c9bc7f0317e53cb24c3e8",
+ "closeContinuationCovId": "71021110ad81c643577d7b43cca9c2e6b78967f3c52c9bc7f0317e53cb24c3e8"
+}

@@ -1,0 +1,44 @@
+[db] path=D:\kanet-tn12\scratch\_j2_tok_sim\console.simnet.db source=DB_PATH
+00:06:05 waiting proving ready… {"handoff":false}
+00:07:05 waiting proving ready… {"handoff":false}
+00:08:05 waiting proving ready… {"handoff":false}
+00:09:05 waiting proving ready… {"handoff":false}
+00:10:05 waiting proving ready… {"handoff":false}
+00:11:05 waiting proving ready… {"handoff":false}
+00:12:05 waiting proving ready… {"handoff":false}
+00:13:05 waiting proving ready… {"handoff":false}
+00:14:05 waiting proving ready… {"handoff":false}
+00:15:05 waiting proving ready… {"handoff":false}
+00:16:06 waiting proving ready… {"handoff":false}
+00:17:06 waiting proving ready… {"handoff":false,"job":{"id":1,"status":"pending"}}
+00:18:06 waiting proving ready… {"handoff":true,"proving":"pending","job":{"id":1,"status":"in_progress"}}
+00:19:06 waiting proving ready… {"handoff":true,"proving":"pending","job":{"id":1,"status":"in_progress"}}
+00:20:06 waiting proving ready… {"handoff":true,"proving":"failed","job":{"id":1,"status":"failed"}}
+00:21:06 waiting proving ready… {"handoff":true,"proving":"failed","job":{"id":1,"status":"failed"}}
+00:22:06 waiting proving ready… {"handoff":true,"proving":"failed","job":{"id":1,"status":"failed"}}
+00:23:06 waiting proving ready… {"handoff":true,"proving":"failed","job":{"id":1,"status":"failed"}}
+00:24:06 waiting proving ready… {"handoff":true,"proving":"failed","job":{"id":1,"status":"failed"}}
+00:25:06 waiting proving ready… {"handoff":true,"proving":"failed","job":{"id":1,"status":"failed"}}
+00:26:06 waiting proving ready… {"handoff":true,"proving":"failed","job":{"id":1,"status":"failed"}}
+00:27:07 waiting proving ready… {"handoff":true,"proving":"failed","job":{"id":1,"status":"in_progress"}}
+00:28:07 waiting proving ready… {"handoff":true,"proving":"failed","job":{"id":1,"status":"in_progress"}}
+00:28:42 proving ready. continuation 66f0a3472a74 pool(token) 3000000000 utxoValue(KAS) 20000000 gate {"address":"kaspasim:ppxqv8vezahl05sa2u2lg80e33we2jnwghnfpnmu3rh7xhtzpmk3g4kqxyxzr","outpointTxid":"a3f989a32882968b87a2b8917086e7a98a47d7bde713ba5bf827652ea461b958","index":0,"fundedAtMs":1791073719393}
+00:28:42 BEFORE CloseZkV2 UTXO: [{"outpoint":{"transactionId":"66f0a3472a74d73e5eae55d97f32c3b2d4f4052a0c4c5bdfa25544fcd59de0b6","index":0},"amount":"20000000","covenantId":null}] | gate UTXO: [{"outpoint":{"transactionId":"a3f989a32882968b87a2b8917086e7a98a47d7bde713ba5bf827652ea461b958","index":0},"amount":"100000000","covenantId":null}]
+00:28:42 BEFORE 池代币 UTXO(owner=CloseZkV2 cov): null
+[diag:step] proc.silverc.compile.bshard-artifacts ms=55 cmd=silverc ok=1 at=2026-10-04T00:28:42.387Z
+Error: "some tests failed"
+00:28:43 NEG Z1_guest_payout_root_tampered: consensus=REJECTED ✓ | debugger={"pass":false,"lineNo":109,"reqLine":"require(tx.inputs[1].scriptPubKey == byte[](new ScriptPubKeyP2SH(gateRedeemHash)));"}
+00:28:43    node text: relay dispatch fail: {"status":200,"ok":true,"error":"RPC Server (remote error) -> Rejected transaction d2840fde14379f042dfb2583fc4710356e5ca5eb0efbcda4dd3112aebe565435: failed to verify the signature script: script ran, but verification failed","phase":"execution"}
+Error: "some tests failed"
+00:28:45 NEG Z2_gate_suffix_tampered: consensus=REJECTED ✓ | debugger={"pass":false,"lineNo":106,"reqLine":"require(blake2b(gatePrefix + gateSuffix) == gateTmplHash);"}
+00:28:45    node text: relay dispatch fail: {"status":200,"ok":true,"error":"RPC Server (remote error) -> Rejected transaction 713e12d8f133d610d479245dd54a9213d92966b6057809db6a5c2793b3bd155b: failed to verify the signature script: script ran, but verification failed","phase":"execution"}
+00:28:45 NEG Z3_proof_corrupted: consensus=REJECTED ✓ | debugger=null
+00:28:45    node text: relay dispatch fail: {"status":200,"ok":true,"error":"RPC Server (remote error) -> Rejected transaction 713e12d8f133d610d479245dd54a9213d92966b6057809db6a5c2793b3bd155b: failed to verify the signature script: false stack entry at end of script execution","phase":"execution"}
+00:28:45 after negatives CloseZk/gate untouched: true
+00:28:51 HONEST zk-close-v2 => {"status":200,"ok":true,"marketId":"ext-pool-v07-1791072305023-vl1wf","broadcasted":true,"txId":"713e12d8f133d610d479245dd54a9213d92966b6057809db6a5c2793b3bd155b","persisted":true}
+00:28:51 AFTER 旧 CloseZkV2(closed=1) UTXO: [] | gate UTXO: []
+00:28:51 AFTER 新 CloseZkV2(closed=2) UTXO: [{"outpoint":{"transactionId":"713e12d8f133d610d479245dd54a9213d92966b6057809db6a5c2793b3bd155b","index":0},"amount":"20000000","covenantId":null}]
+00:28:51 AFTER 池代币 UTXO(应原封不动): null
+00:28:51 AFTER 续约 state: closed= 2 payoutRootField= b8dec685ffd9ec39ba7775e31edbe294fa306698ce259bb39af1d7c27a9e849d | proving.guestPayoutRoot= b8dec685ffd9ec39ba7775e31edbe294fa306698ce259bb39af1d7c27a9e849d
+00:28:51 DB zk_continuation(after): {"valueSompi":"3000000000","utxoValueSompi":"20000000","poolAtZkCloseSompi":"3000000000","outpoint":{"txid":"713e12d8f133d610d479245dd54a9213d92966b6057809db6a5c2793b3bd155b","index":0}}
+00:28:51 SUMMARY {"oldGone":true,"gateConsumed":true,"newCloseZk":1,"tokenIntact":true}
