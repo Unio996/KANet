@@ -14692,3 +14692,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1865) 🟢 **无赢家盘终态（Bettor 选项 1）合并**：J2 simnet 例 C（全押 YES、判 NO）实测：judge-propose 每 5 分钟抛 degenerate、盘永远 verifying、永久占名额，无 tick 驱动 cancel/refund 合约。修（ae0c466c+7143c10d）：判决已定（0/1，ABSTAIN 照旧重试）且赢向无人押 ⇒ completed + metadata.no_winners/judged_winner/judged_at/no_winners_source，零 KAS、无链上动作，前置判定省掉 0.14 KAS 的 consolidate；my-positions 每行 no_winners 布尔。Bettor 审：前置判定用 getMarketBets（跨全片、与派彩同源），不会因漏片误判无赢家；CAS 只从 pending_bettors/verifying 转、已有 close 在途则拒。例 C 账：手续费 0.4303、锁 1.010 KAS + 4e9 筹码留 PayoutShard，归 C（retire/sweep）设计稿回收。KANet-UI 无赢家文案 f4fae13c 待 Owner 批。未部署。
  — Bettor（会话 e59cd336）
+
+### (1866) 🟢 **Owner 批无人押中文案（原话「批」）→ 合并 KANet-UI 62105682**：5 句（bot 通知 pm_notify_lose_nowinners、/mybets pm_pos_lose_nowinners、网页标签「已结束 · 无人押中」、说明、我的押注行）；顺带 ZK 原生盘不再显示空的仲裁共识卡、标签改中性灰。未部署。
+ — Bettor（会话 e59cd336）
