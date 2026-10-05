@@ -1,0 +1,2762 @@
+{
+ "tag": "fee2",
+ "startedAt": "2026-10-05T14:42:16.569Z",
+ "asserts": [
+  {
+   "ok": true,
+   "label": "前置: 库里没有未完结的 zk_native 盘(live=0)"
+  },
+  {
+   "ok": true,
+   "label": "种子器建出 3 个盘(3, 用时 117s)"
+  },
+  {
+   "ok": true,
+   "label": "同时在跑(未完结)的 ZK 原生盘峰值 = 3(≥3)"
+  },
+  {
+   "ok": true,
+   "label": "盘 76-1l6ot: zk_native=true, 无 spine, polymarket 镜像(cond 0x90909090…), broker 塌到 maker(未配 GATEWAY_RELAY_ID)"
+  },
+  {
+   "ok": true,
+   "label": "盘 59-svrok: zk_native=true, 无 spine, polymarket 镜像(cond 0x91919191…), broker 塌到 maker(未配 GATEWAY_RELAY_ID)"
+  },
+  {
+   "ok": true,
+   "label": "盘 54-ctov6: zk_native=true, 无 spine, polymarket 镜像(cond 0x92929292…), broker 塌到 maker(未配 GATEWAY_RELAY_ID)"
+  },
+  {
+   "ok": true,
+   "label": "建 3 个盘后: maker/下注人钱包余额逐 sompi 不变(建盘不转账)"
+  },
+  {
+   "ok": true,
+   "label": "3/3 在跑时再 create-v07 ⇒ 409 live_market_cap_reached(live=3, cap=3)"
+  },
+  {
+   "ok": true,
+   "label": "76-1l6ot bettorA register-v07 stake_ktt=1000000000 ⇒ 200 no_kas_stake"
+  },
+  {
+   "ok": true,
+   "label": "76-1l6ot bettorA 钱包余额逐 sompi 不变"
+  },
+  {
+   "ok": true,
+   "label": "76-1l6ot bettorB register-v07 stake_ktt=2000000000 ⇒ 200 no_kas_stake"
+  },
+  {
+   "ok": true,
+   "label": "76-1l6ot bettorB 钱包余额逐 sompi 不变"
+  },
+  {
+   "ok": true,
+   "label": "59-svrok bettorA register-v07 stake_ktt=1000000000 ⇒ 200 no_kas_stake"
+  },
+  {
+   "ok": true,
+   "label": "59-svrok bettorA 钱包余额逐 sompi 不变"
+  },
+  {
+   "ok": true,
+   "label": "59-svrok bettorB register-v07 stake_ktt=2000000000 ⇒ 200 no_kas_stake"
+  },
+  {
+   "ok": true,
+   "label": "59-svrok bettorB 钱包余额逐 sompi 不变"
+  },
+  {
+   "ok": true,
+   "label": "54-ctov6 bettorA register-v07 stake_ktt=1000000000 ⇒ 200 no_kas_stake"
+  },
+  {
+   "ok": true,
+   "label": "54-ctov6 bettorA 钱包余额逐 sompi 不变"
+  },
+  {
+   "ok": true,
+   "label": "54-ctov6 bettorB register-v07 stake_ktt=2000000000 ⇒ 200 no_kas_stake"
+  },
+  {
+   "ok": true,
+   "label": "54-ctov6 bettorB 钱包余额逐 sompi 不变"
+  },
+  {
+   "ok": true,
+   "label": "干扰转账已上链提交(txid e0ba3badad1f48f87e4ed9715c267b45ee314e255fc49f43010123d518494de7)"
+  },
+  {
+   "ok": true,
+   "label": "3 个盘全部走到最后一个 claim(exhausted)(1463s)"
+  },
+  {
+   "ok": true,
+   "label": "pin 证据: relay 日志 PIN_UTXO 18 行 / UNPIN_UTXO 9 行(≥3 / ≥3: 每盘 close 费钉住 + 落链后解钉)"
+  },
+  {
+   "ok": true,
+   "label": "A. bettorA 余额逐 sompi 相同(26390389200 → 26390389200)"
+  },
+  {
+   "ok": true,
+   "label": "A. bettorB 余额逐 sompi 相同(23390389200 → 23390389200)"
+  },
+  {
+   "ok": true,
+   "label": "B. 窗口内所有被接受交易的输入面值都能溯源(未知输入 0)"
+  },
+  {
+   "ok": true,
+   "label": "A. 窗口内没有任何被接受的交易触碰下注人钱包(0)"
+  },
+  {
+   "ok": true,
+   "label": "B. maker: 逐笔重算 Δ(-342064800) == 余额差(-342064800) sompi"
+  },
+  {
+   "ok": true,
+   "label": "B. maker: Δ == −(手续费 60064800 + 净锁进 covenant 282000000) 逐 sompi 成立"
+  },
+  {
+   "ok": true,
+   "label": "B. maker: 落到第三方 P2PK 地址的输出 = 0(须为 0)"
+  },
+  {
+   "ok": true,
+   "label": "B. settler: 逐笔重算 Δ(-618971700) == 余额差(-618971700) sompi"
+  },
+  {
+   "ok": true,
+   "label": "B. settler: Δ == −(手续费 258971700 + 净锁进 covenant 360000000) 逐 sompi 成立"
+  },
+  {
+   "ok": true,
+   "label": "B. settler: 落到第三方 P2PK 地址的输出 = 0(须为 0)"
+  },
+  {
+   "ok": true,
+   "label": "B. fee: 逐笔重算 Δ(0) == 余额差(0) sompi"
+  },
+  {
+   "ok": true,
+   "label": "B. fee: Δ == −(手续费 0 + 净锁进 covenant 0) 逐 sompi 成立"
+  },
+  {
+   "ok": true,
+   "label": "B. fee: 落到第三方 P2PK 地址的输出 = 0(须为 0)"
+  },
+  {
+   "ok": true,
+   "label": "B. 系统钱包合计 Δ(-961036500) == −(手续费 319036500 + 净锁 covenant 642000000)"
+  },
+  {
+   "ok": true,
+   "label": "C. 76-1l6ot claim idx=0 → bettorA: claim_out/tok_out 地址 == 重算的 KanetTokenClaim/KTT 地址, 仍是链上未花 UTXO, 无输出落到赢家/下注人钱包"
+  },
+  {
+   "ok": true,
+   "label": "C. 76-1l6ot claim idx=1 → maker: claim_out/tok_out 地址 == 重算的 KanetTokenClaim/KTT 地址, 仍是链上未花 UTXO, 无输出落到赢家/下注人钱包"
+  },
+  {
+   "ok": true,
+   "label": "C. 76-1l6ot: 全部 claim 的 KTT 总量 == 池总额 3000000000(实 3000000000)"
+  },
+  {
+   "ok": true,
+   "label": "C. 76-1l6ot: UMA 桩判 YES ⇒ 赢家 bettorA 收到 KTT claim(受益人 bettorA,maker)"
+  },
+  {
+   "ok": true,
+   "label": "C. 59-svrok claim idx=0 → bettorB: claim_out/tok_out 地址 == 重算的 KanetTokenClaim/KTT 地址, 仍是链上未花 UTXO, 无输出落到赢家/下注人钱包"
+  },
+  {
+   "ok": true,
+   "label": "C. 59-svrok claim idx=1 → maker: claim_out/tok_out 地址 == 重算的 KanetTokenClaim/KTT 地址, 仍是链上未花 UTXO, 无输出落到赢家/下注人钱包"
+  },
+  {
+   "ok": true,
+   "label": "C. 59-svrok: 全部 claim 的 KTT 总量 == 池总额 3000000000(实 3000000000)"
+  },
+  {
+   "ok": true,
+   "label": "C. 59-svrok: UMA 桩判 NO ⇒ 赢家 bettorB 收到 KTT claim(受益人 bettorB,maker)"
+  },
+  {
+   "ok": true,
+   "label": "C. 54-ctov6 claim idx=0 → bettorA: claim_out/tok_out 地址 == 重算的 KanetTokenClaim/KTT 地址, 仍是链上未花 UTXO, 无输出落到赢家/下注人钱包"
+  },
+  {
+   "ok": true,
+   "label": "C. 54-ctov6 claim idx=1 → maker: claim_out/tok_out 地址 == 重算的 KanetTokenClaim/KTT 地址, 仍是链上未花 UTXO, 无输出落到赢家/下注人钱包"
+  },
+  {
+   "ok": true,
+   "label": "C. 54-ctov6: 全部 claim 的 KTT 总量 == 池总额 3000000000(实 3000000000)"
+  },
+  {
+   "ok": true,
+   "label": "C. 54-ctov6: UMA 桩判 YES ⇒ 赢家 bettorA 收到 KTT claim(受益人 bettorA,maker)"
+  },
+  {
+   "ok": true,
+   "label": "my-positions(bettorA) 200"
+  },
+  {
+   "ok": true,
+   "label": "my-positions bettorA @76-1l6ot: 赢 2943000000 筹码(== 链上 claim 合计 2943000000), chain_verified"
+  },
+  {
+   "ok": true,
+   "label": "my-positions bettorA @59-svrok: 输(did_win=false)"
+  },
+  {
+   "ok": true,
+   "label": "my-positions bettorA @54-ctov6: 赢 2943000000 筹码(== 链上 claim 合计 2943000000), chain_verified"
+  },
+  {
+   "ok": true,
+   "label": "my-positions(bettorB) 200"
+  },
+  {
+   "ok": true,
+   "label": "my-positions bettorB @76-1l6ot: 输(did_win=false)"
+  },
+  {
+   "ok": true,
+   "label": "my-positions bettorB @59-svrok: 赢 2943000000 筹码(== 链上 claim 合计 2943000000), chain_verified"
+  },
+  {
+   "ok": true,
+   "label": "my-positions bettorB @54-ctov6: 输(did_win=false)"
+  }
+ ],
+ "txs": [
+  {
+   "txid": "c7c629b8c483b9b11537d4df3edc83e36d13492124c1defbcb89e07b8579e9a1",
+   "funders": [
+    "maker"
+   ],
+   "owner": "maker",
+   "fee": "303600",
+   "covIn": "0",
+   "covOut": "0",
+   "toWallets": {
+    "maker": "4486426400"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "659a162cd610770fed44cc1b905c2f5ce4b4289988a55f2c9079150ee1fc42a7",
+   "funders": [
+    "maker"
+   ],
+   "owner": "maker",
+   "fee": "1000000",
+   "covIn": "0",
+   "covOut": "20000000",
+   "toWallets": {
+    "maker": "99000000"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "8ddec3ab5c636adc8af52bd267c1b7ddeecc7bd95991104dbf0b0fcabf0a9b20",
+   "funders": [
+    "maker"
+   ],
+   "owner": "maker",
+   "fee": "303600",
+   "covIn": "0",
+   "covOut": "0",
+   "toWallets": {
+    "maker": "4366122800"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "33a00dfa7947c719fab347639a7a086ab625a355e528c932bd5b1d0b54d16e08",
+   "funders": [
+    "maker"
+   ],
+   "owner": "maker",
+   "fee": "1000000",
+   "covIn": "0",
+   "covOut": "20000000",
+   "toWallets": {
+    "maker": "99000000"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "d1cb5f543cbd1634f66e6f7bc1f55c5a60168b45bf66103bd54fdebed6ac6a87",
+   "funders": [
+    "maker"
+   ],
+   "owner": "maker",
+   "fee": "303600",
+   "covIn": "0",
+   "covOut": "0",
+   "toWallets": {
+    "maker": "4245819200"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "60441aa0bf6d7c4c3871b17a6bb25b5c949c01aab9181c32a10da7b943e66ae7",
+   "funders": [
+    "maker"
+   ],
+   "owner": "maker",
+   "fee": "1000000",
+   "covIn": "0",
+   "covOut": "20000000",
+   "toWallets": {
+    "maker": "99000000"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "df2a4b62f8a1fc38e01c8410d518cc677b33fc83b09fe757b67bef3b106013bc",
+   "funders": [
+    "maker"
+   ],
+   "owner": "maker",
+   "fee": "303600",
+   "covIn": "0",
+   "covOut": "0",
+   "toWallets": {
+    "maker": "4125515600"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "c9127261e2798520facc297d650b9120e0e87e1a3494bf18b53a31ea72b7d6b1",
+   "funders": [
+    "maker"
+   ],
+   "owner": "maker",
+   "fee": "7100000",
+   "covIn": "40000000",
+   "covOut": "47000000",
+   "toWallets": {
+    "maker": "85900000"
+   },
+   "toOther": "0",
+   "nOut": 4
+  },
+  {
+   "txid": "544f86f3008f38ba26fbd9e32f818e5c77b2b654e2bee37bdeb2fcdf84d77593",
+   "funders": [
+    "maker"
+   ],
+   "owner": "maker",
+   "fee": "303600",
+   "covIn": "0",
+   "covOut": "0",
+   "toWallets": {
+    "maker": "4025212000"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "2312a948de3c827c0c186278f288f62b542505a5638b1085d877fdceed124e63",
+   "funders": [
+    "maker"
+   ],
+   "owner": "maker",
+   "fee": "1000000",
+   "covIn": "0",
+   "covOut": "20000000",
+   "toWallets": {
+    "maker": "99000000"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "3a01256379ab0c9e66b195dfcc8d42b8b3ab82a2a6ce467718de9182fdefa395",
+   "funders": [
+    "maker"
+   ],
+   "owner": "maker",
+   "fee": "303600",
+   "covIn": "0",
+   "covOut": "0",
+   "toWallets": {
+    "maker": "3904908400"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "272530b7b02b8b550351d17da2d54f58be1379bef4767aca7dfc7bc865835150",
+   "funders": [
+    "maker"
+   ],
+   "owner": "maker",
+   "fee": "7100000",
+   "covIn": "60000000",
+   "covOut": "67000000",
+   "toWallets": {
+    "maker": "85900000"
+   },
+   "toOther": "0",
+   "nOut": 4
+  },
+  {
+   "txid": "4f71640d20c9a2f37da59fda57e335323a9362d5f47f53d62c88ddf40ff22155",
+   "funders": [
+    "maker"
+   ],
+   "owner": "maker",
+   "fee": "303600",
+   "covIn": "0",
+   "covOut": "0",
+   "toWallets": {
+    "maker": "3804604800"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "5bea07807a316f04ee24f750499422c08340213dc4d387ffc7c54c0e92690278",
+   "funders": [
+    "maker"
+   ],
+   "owner": "maker",
+   "fee": "1000000",
+   "covIn": "0",
+   "covOut": "20000000",
+   "toWallets": {
+    "maker": "99000000"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "8c171706fe7bae34ab1b84f7b0891be28a68f3366a3a010bfa42b38fe77a6dea",
+   "funders": [
+    "maker"
+   ],
+   "owner": "maker",
+   "fee": "303600",
+   "covIn": "0",
+   "covOut": "0",
+   "toWallets": {
+    "maker": "3684301200"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "75ec0e4bb6e2f1541e4951363c87c818b5633c31beb37ddb28a8a0b65b2f396b",
+   "funders": [
+    "maker"
+   ],
+   "owner": "maker",
+   "fee": "1000000",
+   "covIn": "0",
+   "covOut": "20000000",
+   "toWallets": {
+    "maker": "99000000"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "280dae5751fd719125f2ef080d0b915d7d6abd92ec244c7be2f070b3586b5090",
+   "funders": [
+    "maker"
+   ],
+   "owner": "maker",
+   "fee": "303600",
+   "covIn": "0",
+   "covOut": "0",
+   "toWallets": {
+    "maker": "3563997600"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "7790e9b54d81d7f18768824aedf40028c9c98ea06e3dc1d6aaf9ba6a425f0ebd",
+   "funders": [
+    "maker"
+   ],
+   "owner": "maker",
+   "fee": "1000000",
+   "covIn": "0",
+   "covOut": "20000000",
+   "toWallets": {
+    "maker": "99000000"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "296d20095299367e2bfc909038212cf120b2e4ade50c5426a24c23f0b84de2ab",
+   "funders": [
+    "maker"
+   ],
+   "owner": "maker",
+   "fee": "303600",
+   "covIn": "0",
+   "covOut": "0",
+   "toWallets": {
+    "maker": "3443694000"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "3a045733d7651eaa870ab7888dab0d231efec14bf17cf86dd666251a02d248e5",
+   "funders": [
+    "maker"
+   ],
+   "owner": "maker",
+   "fee": "7100000",
+   "covIn": "40000000",
+   "covOut": "47000000",
+   "toWallets": {
+    "maker": "85900000"
+   },
+   "toOther": "0",
+   "nOut": 4
+  },
+  {
+   "txid": "fd9dc442090953cd5c37fd9e75cf8ea7a453c629b759b8e6d70757ffd47f365f",
+   "funders": [
+    "maker"
+   ],
+   "owner": "maker",
+   "fee": "303600",
+   "covIn": "0",
+   "covOut": "0",
+   "toWallets": {
+    "maker": "3343390400"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "89b8254c10e414ad3b2753b26744d7eede6b6f422bf3d1a99bec47e10c4da06a",
+   "funders": [
+    "maker"
+   ],
+   "owner": "maker",
+   "fee": "1000000",
+   "covIn": "0",
+   "covOut": "20000000",
+   "toWallets": {
+    "maker": "99000000"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "82cdc7f865d390ec35a6e4938d7559d4369a5ed3e45c8b4bf46b639c8ee69490",
+   "funders": [
+    "maker"
+   ],
+   "owner": "maker",
+   "fee": "303600",
+   "covIn": "0",
+   "covOut": "0",
+   "toWallets": {
+    "maker": "3223086800"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "4b7625a2a3658dba43628797f44c7c69c9809e44d1509d1a42a802389d53a1fa",
+   "funders": [
+    "maker"
+   ],
+   "owner": "maker",
+   "fee": "7100000",
+   "covIn": "60000000",
+   "covOut": "67000000",
+   "toWallets": {
+    "maker": "85900000"
+   },
+   "toOther": "0",
+   "nOut": 4
+  },
+  {
+   "txid": "109b6e32c8f273e149cf280768225068c846d43c8c7e866047459fb67a468d24",
+   "funders": [
+    "maker"
+   ],
+   "owner": "maker",
+   "fee": "303600",
+   "covIn": "0",
+   "covOut": "0",
+   "toWallets": {
+    "maker": "3122783200"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "34d6813b02ff15c30afb1d7d2dcf6a97707cade5809bb1be4657550344472bdb",
+   "funders": [
+    "maker"
+   ],
+   "owner": "maker",
+   "fee": "1000000",
+   "covIn": "0",
+   "covOut": "20000000",
+   "toWallets": {
+    "maker": "99000000"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "0627ea45c7ff44b06ce249c697fdab9e4d065aff10d502b04252e6e030ffee66",
+   "funders": [
+    "maker"
+   ],
+   "owner": "maker",
+   "fee": "303600",
+   "covIn": "0",
+   "covOut": "0",
+   "toWallets": {
+    "maker": "3002479600"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "62f3a7a8d1a8345813b13d9b776fcd69f2eacd55171bf1bb0be02b47f9acb30c",
+   "funders": [
+    "maker"
+   ],
+   "owner": "maker",
+   "fee": "1000000",
+   "covIn": "0",
+   "covOut": "20000000",
+   "toWallets": {
+    "maker": "99000000"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "9413fe126e1850e529dd729617c6b7c04241d6832806be2ae278076868aedf0c",
+   "funders": [
+    "maker"
+   ],
+   "owner": "maker",
+   "fee": "303600",
+   "covIn": "0",
+   "covOut": "0",
+   "toWallets": {
+    "maker": "2882176000"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "f32c73cf7b73e8ba9b80679f8e52d1d85806b1d48753d9f83a9d0d78003b8c24",
+   "funders": [
+    "maker"
+   ],
+   "owner": "maker",
+   "fee": "1000000",
+   "covIn": "0",
+   "covOut": "20000000",
+   "toWallets": {
+    "maker": "99000000"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "4af5b16584781c2a8f75a1f7f5d8462da561df2469def8d1ac4d154442c6d98e",
+   "funders": [
+    "maker"
+   ],
+   "owner": "maker",
+   "fee": "303600",
+   "covIn": "0",
+   "covOut": "0",
+   "toWallets": {
+    "maker": "2761872400"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "b1ac5c28cb90e9a1a7069151a65873ac4c9c52e3630444b184fd3906a890043c",
+   "funders": [
+    "maker"
+   ],
+   "owner": "maker",
+   "fee": "7100000",
+   "covIn": "40000000",
+   "covOut": "47000000",
+   "toWallets": {
+    "maker": "85900000"
+   },
+   "toOther": "0",
+   "nOut": 4
+  },
+  {
+   "txid": "b72ee5e97ede62bc280866d4011b4b372d7eaeb6994b6947d285928a614a59dc",
+   "funders": [
+    "maker"
+   ],
+   "owner": "maker",
+   "fee": "303600",
+   "covIn": "0",
+   "covOut": "0",
+   "toWallets": {
+    "maker": "2661568800"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "eecebb7f5eb35158151988cb51cddf04220a72a7c2bcced2fc236c0409af5c03",
+   "funders": [
+    "maker"
+   ],
+   "owner": "maker",
+   "fee": "1000000",
+   "covIn": "0",
+   "covOut": "20000000",
+   "toWallets": {
+    "maker": "99000000"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "8a4703011d01edbe91c648eba0a136029b83c5edd4f4e8ada763cfea710cf010",
+   "funders": [
+    "maker"
+   ],
+   "owner": "maker",
+   "fee": "303600",
+   "covIn": "0",
+   "covOut": "0",
+   "toWallets": {
+    "maker": "2541265200"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "472a6da695b6e5f16e149b8a7f8ea60973c0074942e7c250507591d67d58b6a6",
+   "funders": [
+    "maker"
+   ],
+   "owner": "maker",
+   "fee": "7100000",
+   "covIn": "60000000",
+   "covOut": "67000000",
+   "toWallets": {
+    "maker": "85900000"
+   },
+   "toOther": "0",
+   "nOut": 4
+  },
+  {
+   "txid": "488c34ac15f7ec3ac67f500d3b311c2015a277be7a9faf0c423fdf24c5b4008e",
+   "funders": [
+    "settler"
+   ],
+   "owner": "settler",
+   "fee": "303600",
+   "covIn": "0",
+   "covOut": "0",
+   "toWallets": {
+    "settler": "49696400"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "89ef0e524bb46866f23dd3c960b826e7aa0857320573828b3559bfd7154807c2",
+   "funders": [
+    "settler"
+   ],
+   "owner": "settler",
+   "fee": "14000000",
+   "covIn": "80000000",
+   "covOut": "60000000",
+   "toWallets": {
+    "settler": "36000000"
+   },
+   "toOther": "0",
+   "nOut": 3
+  },
+  {
+   "txid": "1f15af1b295ceab3b02990f7689e97d06ce358ad87f9b2b8dad6701521e94471",
+   "funders": [
+    "settler"
+   ],
+   "owner": "settler",
+   "fee": "303600",
+   "covIn": "0",
+   "covOut": "0",
+   "toWallets": {
+    "settler": "92354200"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "baeaa4c277527a7651e23cd9bd129104fa23929ee90cbb3389625f144c6aeaae",
+   "funders": [
+    "settler"
+   ],
+   "owner": "settler",
+   "fee": "303600",
+   "covIn": "0",
+   "covOut": "0",
+   "toWallets": {
+    "settler": "49696400"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "4bbdeb6c1583cf350b43dbb92b617c1dac0af86f9f28179fd73fcbdd087ab9fd",
+   "funders": [
+    "settler"
+   ],
+   "owner": "settler",
+   "fee": "14000000",
+   "covIn": "80000000",
+   "covOut": "60000000",
+   "toWallets": {
+    "settler": "36000000"
+   },
+   "toOther": "0",
+   "nOut": 3
+  },
+  {
+   "txid": "e0ba3badad1f48f87e4ed9715c267b45ee314e255fc49f43010123d518494de7",
+   "funders": [
+    "settler"
+   ],
+   "owner": "settler",
+   "fee": "303600",
+   "covIn": "0",
+   "covOut": "0",
+   "toWallets": {
+    "settler": "69241000"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "c833be82e616d53a903c881572bbe40c5d67f89605e5673026994350f6ccfa33",
+   "funders": [
+    "settler"
+   ],
+   "owner": "settler",
+   "fee": "303600",
+   "covIn": "0",
+   "covOut": "0",
+   "toWallets": {
+    "settler": "92354200"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "08dc1756885a0e1c7075c9079f4eb34a5f8c37f9b8e56c08c2dcae0553b8dbcd",
+   "funders": [
+    "settler"
+   ],
+   "owner": "settler",
+   "fee": "303600",
+   "covIn": "0",
+   "covOut": "0",
+   "toWallets": {
+    "settler": "69241000"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "996d66a243f3b92b2f4374e552a196cd4b1d0b66e7373a526d02f1d5cd93650b",
+   "funders": [
+    "settler"
+   ],
+   "owner": "settler",
+   "fee": "14000000",
+   "covIn": "80000000",
+   "covOut": "60000000",
+   "toWallets": {
+    "settler": "36000000"
+   },
+   "toOther": "0",
+   "nOut": 3
+  },
+  {
+   "txid": "b09d481a25026b8edd52cc72ec1318f4084264de9128d394385dcb87e5725115",
+   "funders": [
+    "settler"
+   ],
+   "owner": "settler",
+   "fee": "303600",
+   "covIn": "0",
+   "covOut": "0",
+   "toWallets": {
+    "settler": "92354200"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "0d5bd1e161a2001b63fa235faa6c4b1149cee602afd047dcdefd509d75b75f68",
+   "funders": [
+    "settler"
+   ],
+   "owner": "settler",
+   "fee": "10000000",
+   "covIn": "20000000",
+   "covOut": "20000000",
+   "toWallets": {
+    "settler": "40000000"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "d4a4261c9f0ac8e272ca4cdb28cd48adadab86cd38d22763acea9c04191c23df",
+   "funders": [
+    "settler"
+   ],
+   "owner": "settler",
+   "fee": "10000000",
+   "covIn": "20000000",
+   "covOut": "20000000",
+   "toWallets": {
+    "settler": "40000000"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "afe8d9d08414ecc77515aed1981ffdefc399f66c0ba96050596bed4e79f14865",
+   "funders": [
+    "settler"
+   ],
+   "owner": "settler",
+   "fee": "10000000",
+   "covIn": "20000000",
+   "covOut": "20000000",
+   "toWallets": {
+    "settler": "40000000"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "a3130888ae50c50dd511fbf311bfa340f1c2ed035f00090c43b9e0e52a724128",
+   "funders": [
+    "settler"
+   ],
+   "owner": "settler",
+   "fee": "303600",
+   "covIn": "0",
+   "covOut": "0",
+   "toWallets": {
+    "settler": "80167100"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "a46716ec19fb0afa7383a77c42fc3e2389dc53f3d822f4c2c3de5e200adf4708",
+   "funders": [
+    "settler"
+   ],
+   "owner": "settler",
+   "fee": "12900000",
+   "covIn": "60000000",
+   "covOut": "60000000",
+   "toWallets": {
+    "settler": "17100000"
+   },
+   "toOther": "0",
+   "nOut": 3
+  },
+  {
+   "txid": "13fa5621bfce867f30d43f8fa57990c594a42f7fbd525fb850d684c4e0048de4",
+   "funders": [
+    "settler"
+   ],
+   "owner": "settler",
+   "fee": "303600",
+   "covIn": "0",
+   "covOut": "0",
+   "toWallets": {
+    "settler": "49863500"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "af92737c425818de7cf3c15d9cc0cc4da4ed85c7f7e58e989599ea5563eb0ada",
+   "funders": [
+    "settler"
+   ],
+   "owner": "settler",
+   "fee": "12900000",
+   "covIn": "60000000",
+   "covOut": "60000000",
+   "toWallets": {
+    "settler": "17100000"
+   },
+   "toOther": "0",
+   "nOut": 3
+  },
+  {
+   "txid": "576e7cfc2c3a1e60a5747ac43bce747d0f3dbfa7b29abd420d86a0bc18d284b0",
+   "funders": [
+    "settler"
+   ],
+   "owner": "settler",
+   "fee": "303600",
+   "covIn": "0",
+   "covOut": "0",
+   "toWallets": {
+    "settler": "80167100"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "3a5bc438ded7f6574e94a73b3acc95fff8176409c7567ae26b9ecb5e1b6cceee",
+   "funders": [
+    "settler"
+   ],
+   "owner": "settler",
+   "fee": "12900000",
+   "covIn": "60000000",
+   "covOut": "60000000",
+   "toWallets": {
+    "settler": "17100000"
+   },
+   "toOther": "0",
+   "nOut": 3
+  },
+  {
+   "txid": "c4d47b85c8bf3abfa71a4bd0ed206dbc25bf206f8e35018a24f91c3ba3db4f6e",
+   "funders": [
+    "settler"
+   ],
+   "owner": "settler",
+   "fee": "3204700",
+   "covIn": "0",
+   "covOut": "100000000",
+   "toWallets": {
+    "settler": "69544600"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "8267383fcac53037ec57930f85ae5910035b8254e4c89fde44c5c1936dd55ed6",
+   "funders": [],
+   "owner": "settler",
+   "fee": "25400000",
+   "covIn": "120000000",
+   "covOut": "20000000",
+   "toWallets": {
+    "settler": "74600000"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "fa01bd0ca8478a0a47429d2aafcb5696c9b199ba4f707bdbf871ed54e113fb0c",
+   "funders": [
+    "settler"
+   ],
+   "owner": "settler",
+   "fee": "303600",
+   "covIn": "0",
+   "covOut": "0",
+   "toWallets": {
+    "settler": "359696400"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "2464cf38cefc7863cbbd056b7874c0f085844cecb5ef38d5d0beb9ea45616729",
+   "funders": [
+    "settler"
+   ],
+   "owner": "settler",
+   "fee": "9600000",
+   "covIn": "60000000",
+   "covOut": "170000000",
+   "toWallets": {
+    "settler": "60000000"
+   },
+   "toOther": "0",
+   "nOut": 5
+  },
+  {
+   "txid": "404fea7450462f8e8c3fc63c21492a15823caf8734849a9d5af2c37fd1faf3ad",
+   "funders": [
+    "settler"
+   ],
+   "owner": "settler",
+   "fee": "303600",
+   "covIn": "0",
+   "covOut": "0",
+   "toWallets": {
+    "settler": "359696400"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "b7a677440b0bb198523a91c57b12fff59bfd0b8b220897387e90f3e82df63f0e",
+   "funders": [
+    "settler"
+   ],
+   "owner": "settler",
+   "fee": "9600000",
+   "covIn": "70000000",
+   "covOut": "100000000",
+   "toWallets": {
+    "settler": "140000000"
+   },
+   "toOther": "0",
+   "nOut": 3
+  },
+  {
+   "txid": "72d364c2526455916610dfe3831da007ac22810ada42b044c6c32a592da3fb99",
+   "funders": [
+    "settler"
+   ],
+   "owner": "settler",
+   "fee": "3204700",
+   "covIn": "0",
+   "covOut": "100000000",
+   "toWallets": {
+    "settler": "76891700"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "ea46726f71da05e42d0539a239ffb052b7a1c762a3a2112e9b83c789e46898a4",
+   "funders": [],
+   "owner": "settler",
+   "fee": "25400000",
+   "covIn": "120000000",
+   "covOut": "20000000",
+   "toWallets": {
+    "settler": "74600000"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "9fabaf19a50e66431016867a208403e84066506bcbb9e6ac3f19e0a58bb9c5d4",
+   "funders": [
+    "settler"
+   ],
+   "owner": "settler",
+   "fee": "303600",
+   "covIn": "0",
+   "covOut": "0",
+   "toWallets": {
+    "settler": "359696400"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "62083ecfa42943f1210d6e0250ac99524a09d70fe3a50d216a2f044056ec08a6",
+   "funders": [
+    "settler"
+   ],
+   "owner": "settler",
+   "fee": "9600000",
+   "covIn": "60000000",
+   "covOut": "170000000",
+   "toWallets": {
+    "settler": "60000000"
+   },
+   "toOther": "0",
+   "nOut": 5
+  },
+  {
+   "txid": "48b4a941bc1f40f3907daba027a1ed977e4aed0a5a91d0bb67fb0d4ba72f81d8",
+   "funders": [
+    "settler"
+   ],
+   "owner": "settler",
+   "fee": "303600",
+   "covIn": "0",
+   "covOut": "0",
+   "toWallets": {
+    "settler": "359696400"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "b5346a5428c6bd4d20ccf3ddc0a593b7c2765f6fbeff858cc11d8a2cac95c990",
+   "funders": [
+    "settler"
+   ],
+   "owner": "settler",
+   "fee": "9600000",
+   "covIn": "70000000",
+   "covOut": "100000000",
+   "toWallets": {
+    "settler": "140000000"
+   },
+   "toOther": "0",
+   "nOut": 3
+  },
+  {
+   "txid": "50ef53e03dd256533bb38504d1e33090e1ff76224d180f7ebde4528464a74afa",
+   "funders": [
+    "settler"
+   ],
+   "owner": "settler",
+   "fee": "3204700",
+   "covIn": "0",
+   "covOut": "100000000",
+   "toWallets": {
+    "settler": "76891700"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "888e3f52596b3c3314ea903930682e4355ce6bccfcecfa7a70b4bf1bf7e67b21",
+   "funders": [],
+   "owner": "settler",
+   "fee": "25400000",
+   "covIn": "120000000",
+   "covOut": "20000000",
+   "toWallets": {
+    "settler": "74600000"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "a302fa2c63e38a19718e5cb0b49485ff5e4c583f0d66c6c27ed127d5ed57162e",
+   "funders": [
+    "settler"
+   ],
+   "owner": "settler",
+   "fee": "303600",
+   "covIn": "0",
+   "covOut": "0",
+   "toWallets": {
+    "settler": "359696400"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "4507df300f4c99685682d98c9728ef2e9fb0108502e2d1c76257e97c376c65dd",
+   "funders": [
+    "settler"
+   ],
+   "owner": "settler",
+   "fee": "9600000",
+   "covIn": "60000000",
+   "covOut": "170000000",
+   "toWallets": {
+    "settler": "60000000"
+   },
+   "toOther": "0",
+   "nOut": 5
+  },
+  {
+   "txid": "0eada3b31b20f4384aa69502a2c103c0cf71b91f772063127d6ac1541893900b",
+   "funders": [
+    "settler"
+   ],
+   "owner": "settler",
+   "fee": "303600",
+   "covIn": "0",
+   "covOut": "0",
+   "toWallets": {
+    "settler": "359696400"
+   },
+   "toOther": "0",
+   "nOut": 2
+  },
+  {
+   "txid": "e87a9994dc9d0a4de008c2dab60f811e94cdf97d6a9c2c9569eea34a0ccc0b2c",
+   "funders": [
+    "settler"
+   ],
+   "owner": "settler",
+   "fee": "9600000",
+   "covIn": "70000000",
+   "covOut": "100000000",
+   "toWallets": {
+    "settler": "140000000"
+   },
+   "toOther": "0",
+   "nOut": 3
+  }
+ ],
+ "notes": [],
+ "markets": {
+  "ext-pool-v07-1791211340976-1l6ot": {
+   "short": "76-1l6ot",
+   "cond": "0x9090909090909090909090909090909090909090909090909090909090909090",
+   "createdAt": "2026-10-05 14:42:20",
+   "claims": [
+    {
+     "idx": 0,
+     "who": "bettorA",
+     "payout": "2943000000",
+     "txid": "2464cf38cefc7863cbbd056b7874c0f085844cecb5ef38d5d0beb9ea45616729"
+    },
+    {
+     "idx": 1,
+     "who": "maker",
+     "payout": "57000000",
+     "txid": "b7a677440b0bb198523a91c57b12fff59bfd0b8b220897387e90f3e82df63f0e"
+    }
+   ]
+  },
+  "ext-pool-v07-1791211392959-svrok": {
+   "short": "59-svrok",
+   "cond": "0x9191919191919191919191919191919191919191919191919191919191919191",
+   "createdAt": "2026-10-05 14:43:12",
+   "claims": [
+    {
+     "idx": 0,
+     "who": "bettorB",
+     "payout": "2943000000",
+     "txid": "62083ecfa42943f1210d6e0250ac99524a09d70fe3a50d216a2f044056ec08a6"
+    },
+    {
+     "idx": 1,
+     "who": "maker",
+     "payout": "57000000",
+     "txid": "b5346a5428c6bd4d20ccf3ddc0a593b7c2765f6fbeff858cc11d8a2cac95c990"
+    }
+   ]
+  },
+  "ext-pool-v07-1791211452954-ctov6": {
+   "short": "54-ctov6",
+   "cond": "0x9292929292929292929292929292929292929292929292929292929292929292",
+   "createdAt": "2026-10-05 14:44:12",
+   "claims": [
+    {
+     "idx": 0,
+     "who": "bettorA",
+     "payout": "2943000000",
+     "txid": "4507df300f4c99685682d98c9728ef2e9fb0108502e2d1c76257e97c376c65dd"
+    },
+    {
+     "idx": 1,
+     "who": "maker",
+     "payout": "57000000",
+     "txid": "e87a9994dc9d0a4de008c2dab60f811e94cdf97d6a9c2c9569eea34a0ccc0b2c"
+    }
+   ]
+  }
+ },
+ "startHash": "6f79da7572dab1943949a50e8bd5bc5bfd6a28da15ccd981ac6d2a5cdcf3f480",
+ "bal0": {
+  "maker": "20074100700",
+  "settler": "30496118300",
+  "fee": "30000000000",
+  "bettorA": "26390389200",
+  "bettorB": "23390389200"
+ },
+ "bets": [
+  {
+   "market": "ext-pool-v07-1791211340976-1l6ot",
+   "who": "bettorA",
+   "dir": 0,
+   "units": 1000000000,
+   "status": 200,
+   "ms": 35227,
+   "ok": true
+  },
+  {
+   "market": "ext-pool-v07-1791211340976-1l6ot",
+   "who": "bettorB",
+   "dir": 1,
+   "units": 2000000000,
+   "status": 200,
+   "ms": 14197,
+   "ok": true
+  },
+  {
+   "market": "ext-pool-v07-1791211392959-svrok",
+   "who": "bettorA",
+   "dir": 0,
+   "units": 1000000000,
+   "status": 200,
+   "ms": 29116,
+   "ok": true
+  },
+  {
+   "market": "ext-pool-v07-1791211392959-svrok",
+   "who": "bettorB",
+   "dir": 1,
+   "units": 2000000000,
+   "status": 200,
+   "ms": 14182,
+   "ok": true
+  },
+  {
+   "market": "ext-pool-v07-1791211452954-ctov6",
+   "who": "bettorA",
+   "dir": 0,
+   "units": 1000000000,
+   "status": 200,
+   "ms": 29044,
+   "ok": true
+  },
+  {
+   "market": "ext-pool-v07-1791211452954-ctov6",
+   "who": "bettorB",
+   "dir": 1,
+   "units": 2000000000,
+   "status": 200,
+   "ms": 14186,
+   "ok": true
+  }
+ ],
+ "chaos": {
+  "atMs": 1014354,
+  "collecting": [
+   "76-1l6ot"
+  ],
+  "feeOutpoints": [
+   {
+    "market": "76-1l6ot",
+    "txid": "1f15af1b295ceab3b02990f7689e97d06ce358ad87f9b2b8dad6701521e94471",
+    "index": 0
+   }
+  ],
+  "settlerUtxosNear0_5KAS": [
+   "40000000",
+   "40000000",
+   "40000000",
+   "40000000",
+   "40000000",
+   "40000000",
+   "40000000",
+   "40000000",
+   "40000000",
+   "40000000",
+   "40000000",
+   "40000000",
+   "40000000",
+   "40000000",
+   "40000000",
+   "40000000",
+   "40000000",
+   "41796400",
+   "41796400",
+   "41796400",
+   "41796400",
+   "41796400",
+   "41796400",
+   "42354200",
+   "42796400",
+   "42796400",
+   "42796400",
+   "42796400",
+   "43185600",
+   "44796400",
+   "44796400",
+   "44796400",
+   "45446600",
+   "45796400",
+   "45796400",
+   "45796400",
+   "46185600",
+   "46185600",
+   "46796400",
+   "46796400",
+   "46796400",
+   "46796400",
+   "46796400",
+   "46796400",
+   "46796400",
+   "46796400",
+   "50000000"
+  ],
+  "resp": {
+   "status": 200,
+   "ok": true,
+   "txId": "e0ba3badad1f48f87e4ed9715c267b45ee314e255fc49f43010123d518494de7",
+   "fee": "0.003036",
+   "phase": "execution"
+  },
+  "txId": "e0ba3badad1f48f87e4ed9715c267b45ee314e255fc49f43010123d518494de7"
+ },
+ "consoleLines": [
+  "[pool-seeder] created ext-pool-v07-1791211340976-1l6ot [other] vol=100000 \"MM rehearsal market #0: will event 0 happen?\" end=2026-10-05T14:58:12.000Z (1/3)",
+  "[pool-seeder] tick: +1 market(s), live 0→1/3",
+  "[pool-seeder] created ext-pool-v07-1791211392959-svrok [other] vol=99000 \"MM rehearsal market #1: will event 1 happen?\" end=2026-10-05T14:58:12.000Z (2/3)",
+  "[pool-seeder] tick: +1 market(s), live 1→2/3",
+  "[pool-seeder] created ext-pool-v07-1791211452954-ctov6 [other] vol=98000 \"MM rehearsal market #2: will event 2 happen?\" end=2026-10-05T14:58:12.000Z (3/3)",
+  "[pool-seeder] tick: +1 market(s), live 2→3/3",
+  "[relay:e2e-settler] 10/5/2026, 22:03:20 PIN_UTXO 1f15af1b295c:0 → ok size=1",
+  "[zk-autonomy] 15:03:20 ✅ market=76-1l6ot judge+propose dispatched(winDir=0, endBlockHash=6e526c61116b...)",
+  "[relay:e2e-settler] 10/5/2026, 22:03:27 PIN_UTXO c833be82e616:0 → ok size=2",
+  "[zk-autonomy] 15:03:27 ✅ market=59-svrok judge+propose dispatched(winDir=1, endBlockHash=ec164f50ba70...)",
+  "[relay:e2e-settler] 10/5/2026, 22:03:35 PIN_UTXO b09d481a2502:0 → ok size=3",
+  "[zk-autonomy] 15:03:35 ✅ market=54-ctov6 judge+propose dispatched(winDir=0, endBlockHash=f768136ef803...)",
+  "[relay:e2e-settler] 10/5/2026, 22:03:43 PIN_UTXO 1f15af1b295c:0 → ok size=3",
+  "[relay:e2e-settler] 10/5/2026, 22:03:43 PIN_UTXO c833be82e616:0 → ok size=3",
+  "[relay:e2e-settler] 10/5/2026, 22:03:43 PIN_UTXO b09d481a2502:0 → ok size=3",
+  "[bshard-close-voter-v2] ✅ e2e-oracle-1 自治 enforce PASS (verdict=YES) → 签 close_attest_v2 market=76-1l6ot",
+  "[bshard-close-voter-v2] ✅ e2e-oracle-2 自治 enforce PASS (verdict=YES) → 签 close_attest_v2 market=76-1l6ot",
+  "[bshard-close-voter-v2] ✅ e2e-oracle-4 自治 enforce PASS (verdict=YES) → 签 close_attest_v2 market=76-1l6ot",
+  "[bshard-close-voter-v2] ✅ e2e-oracle-5 自治 enforce PASS (verdict=YES) → 签 close_attest_v2 market=76-1l6ot",
+  "[bshard-close-voter-v2] ✅ e2e-oracle-6 自治 enforce PASS (verdict=YES) → 签 close_attest_v2 market=76-1l6ot",
+  "[bshard-close-voter-v2] ✅ e2e-oracle-1 自治 enforce PASS (verdict=NO) → 签 close_attest_v2 market=59-svrok",
+  "[bshard-close-voter-v2] ✅ e2e-oracle-2 自治 enforce PASS (verdict=NO) → 签 close_attest_v2 market=59-svrok",
+  "[bshard-close-voter-v2] ✅ e2e-oracle-4 自治 enforce PASS (verdict=NO) → 签 close_attest_v2 market=59-svrok",
+  "[bshard-close-voter-v2] ✅ e2e-oracle-5 自治 enforce PASS (verdict=NO) → 签 close_attest_v2 market=59-svrok",
+  "[bshard-close-voter-v2] ✅ e2e-oracle-6 自治 enforce PASS (verdict=NO) → 签 close_attest_v2 market=59-svrok",
+  "[bshard-close-voter-v2] ✅ e2e-oracle-2 自治 enforce PASS (verdict=YES) → 签 close_attest_v2 market=54-ctov6",
+  "[bshard-close-voter-v2] ✅ e2e-oracle-3 自治 enforce PASS (verdict=YES) → 签 close_attest_v2 market=54-ctov6",
+  "[bshard-close-voter-v2] ✅ e2e-oracle-4 自治 enforce PASS (verdict=YES) → 签 close_attest_v2 market=54-ctov6",
+  "[bshard-close-voter-v2] ✅ e2e-oracle-5 自治 enforce PASS (verdict=YES) → 签 close_attest_v2 market=54-ctov6",
+  "[bshard-close-voter-v2] ✅ e2e-oracle-6 自治 enforce PASS (verdict=YES) → 签 close_attest_v2 market=54-ctov6",
+  "[relay:e2e-settler] 10/5/2026, 22:04:13 PIN_UTXO 1f15af1b295c:0 → ok size=3",
+  "[relay:e2e-settler] 10/5/2026, 22:04:13 PIN_UTXO c833be82e616:0 → ok size=3",
+  "[relay:e2e-settler] 10/5/2026, 22:04:13 PIN_UTXO b09d481a2502:0 → ok size=3",
+  "[bshard-close-submit-v2] ✅ market=76-1l6ot payout_shards 状态持久化(closed=1, outpoint=0d5bd1e161a2001b63fa235faa6c4b1149cee602afd047dcdefd509d75b75f68:0)",
+  "[bshard-close-submit-v2] ✅ market=76-1l6ot zk_prove_jobs enqueued jobId=14",
+  "[bshard-close-submit-v2] ✅ market=76-1l6ot close_attest_v2 LANDED txId=0d5bd1e161a2001b63fa235faa6c4b1149cee602afd047dcdefd509d75b75f68",
+  "[relay:e2e-settler] 10/5/2026, 22:04:15 UNPIN_UTXO 1f15af1b295c:0 → ok size=2",
+  "[bshard-close-submit-v2] ✅ market=59-svrok payout_shards 状态持久化(closed=1, outpoint=d4a4261c9f0ac8e272ca4cdb28cd48adadab86cd38d22763acea9c04191c23df:0)",
+  "[bshard-close-submit-v2] ✅ market=59-svrok zk_prove_jobs enqueued jobId=15",
+  "[bshard-close-submit-v2] ✅ market=59-svrok close_attest_v2 LANDED txId=d4a4261c9f0ac8e272ca4cdb28cd48adadab86cd38d22763acea9c04191c23df",
+  "[relay:e2e-settler] 10/5/2026, 22:04:17 UNPIN_UTXO c833be82e616:0 → ok size=1",
+  "[bshard-close-submit-v2] ✅ market=54-ctov6 payout_shards 状态持久化(closed=1, outpoint=afe8d9d08414ecc77515aed1981ffdefc399f66c0ba96050596bed4e79f14865:0)",
+  "[bshard-close-submit-v2] ✅ market=54-ctov6 zk_prove_jobs enqueued jobId=16",
+  "[bshard-close-submit-v2] ✅ market=54-ctov6 close_attest_v2 LANDED txId=afe8d9d08414ecc77515aed1981ffdefc399f66c0ba96050596bed4e79f14865",
+  "[relay:e2e-settler] 10/5/2026, 22:04:19 UNPIN_UTXO b09d481a2502:0 → ok size=0",
+  "[zk-prove-worker] ❌ job=14 market=76-1l6ot: market ext-pool-v07-1791211340976-1l6ot 还没有 zk_continuation(zk_handoff 还没成功广播过)— 拒绝在花 4 分钟 proving+1KAS gate 注资之前跑一个下游必炸的 job",
+  "[zk-prove-worker] updateProvingFailed also failed: updateProvingFailed: market ext-pool-v07-1791211340976-1l6ot 没有 zk_continuation",
+  "[relay:e2e-settler] 10/5/2026, 22:04:46 PIN_UTXO a3130888ae50:0 → ok size=1",
+  "[buildProposeCloseRequestV2/handoff] ✅ market=76-1l6ot zk_prove_jobs id=14 因 handoff-landed 重置回 pending",
+  "[zk-autonomy] 15:04:49 ✅ market=76-1l6ot zk_handoff dispatched+landed txId=a46716ec19fb0afa7383a77c42fc3e2389dc53f3d822f4c2c3de5e200adf4708",
+  "[relay:e2e-settler] 10/5/2026, 22:04:52 PIN_UTXO 13fa5621bfce:0 → ok size=2",
+  "[zk-autonomy] 15:04:55 ✅ market=59-svrok zk_handoff dispatched+landed txId=af92737c425818de7cf3c15d9cc0cc4da4ed85c7f7e58e989599ea5563eb0ada",
+  "[relay:e2e-settler] 10/5/2026, 22:04:58 PIN_UTXO 576e7cfc2c3a:0 → ok size=3",
+  "[zk-autonomy] 15:05:01 ✅ market=54-ctov6 zk_handoff dispatched+landed txId=3a5bc438ded7f6574e94a73b3acc95fff8176409c7567ae26b9ecb5e1b6cceee",
+  "[zk-prove-worker] job=14 market=76-1l6ot proving started (~4min)...",
+  "[zk-prove-worker] ✅ job=14 market=76-1l6ot proving.status=ready gate=kaspasim:ppxqv8vezah",
+  "[zk-prove-worker] job=15 market=59-svrok proving started (~4min)...",
+  "[zk-autonomy] 15:06:52 ✅ market=76-1l6ot zk_close dispatched+landed txId=8267383fcac53037ec57930f85ae5910035b8254e4c89fde44c5c1936dd55ed6",
+  "[relay:e2e-settler] 10/5/2026, 22:07:15 PIN_UTXO fa01bd0ca847:0 → ok size=4",
+  "[relay:e2e-settler] 10/5/2026, 22:07:15 UNPIN_UTXO fa01bd0ca847:0 → ok size=3",
+  "[zk-autonomy] 15:07:21 ✅ market=76-1l6ot claim idx=0 pk=060b02648006 payout=2943000000 txId=2464cf38cefc7863cbbd056b7874c0f085844cecb5ef38d5d0beb9ea45616729",
+  "[relay:e2e-settler] 10/5/2026, 22:07:45 PIN_UTXO 404fea745046:0 → ok size=4",
+  "[relay:e2e-settler] 10/5/2026, 22:07:45 UNPIN_UTXO 404fea745046:0 → ok size=3",
+  "[zk-autonomy] 15:07:54 ✅ market=76-1l6ot claim idx=1 pk=1187ac7eb6fd payout=57000000 txId=b7a677440b0bb198523a91c57b12fff59bfd0b8b220897387e90f3e82df63f0e (last, exhausted)",
+  "[zk-prove-worker] ✅ job=15 market=59-svrok proving.status=ready gate=kaspasim:pqpkk2nvhwg",
+  "[pool-seeder] no eligible gamma market this tick",
+  "[zk-prove-worker] job=16 market=54-ctov6 proving started (~4min)...",
+  "[zk-autonomy] 15:08:22 ✅ market=59-svrok zk_close dispatched+landed txId=ea46726f71da05e42d0539a239ffb052b7a1c762a3a2112e9b83c789e46898a4",
+  "[relay:e2e-settler] 10/5/2026, 22:08:45 PIN_UTXO 9fabaf19a50e:0 → ok size=4",
+  "[relay:e2e-settler] 10/5/2026, 22:08:45 UNPIN_UTXO 9fabaf19a50e:0 → ok size=3",
+  "[zk-autonomy] 15:08:54 ✅ market=59-svrok claim idx=0 pk=b8fd583b660d payout=2943000000 txId=62083ecfa42943f1210d6e0250ac99524a09d70fe3a50d216a2f044056ec08a6",
+  "[pool-seeder] no eligible gamma market this tick",
+  "[relay:e2e-settler] 10/5/2026, 22:09:15 PIN_UTXO 48b4a941bc1f:0 → ok size=4",
+  "[relay:e2e-settler] 10/5/2026, 22:09:15 UNPIN_UTXO 48b4a941bc1f:0 → ok size=3",
+  "[zk-autonomy] 15:09:24 ✅ market=59-svrok claim idx=1 pk=1187ac7eb6fd payout=57000000 txId=b5346a5428c6bd4d20ccf3ddc0a593b7c2765f6fbeff858cc11d8a2cac95c990 (last, exhausted)",
+  "[zk-prove-worker] ✅ job=16 market=54-ctov6 proving.status=ready gate=kaspasim:ppxqv8vezah",
+  "[zk-autonomy] 15:09:52 ✅ market=54-ctov6 zk_close dispatched+landed txId=888e3f52596b3c3314ea903930682e4355ce6bccfcecfa7a70b4bf1bf7e67b21",
+  "[pool-seeder] no eligible gamma market this tick",
+  "[relay:e2e-settler] 10/5/2026, 22:10:15 PIN_UTXO a302fa2c63e3:0 → ok size=4",
+  "[relay:e2e-settler] 10/5/2026, 22:10:15 UNPIN_UTXO a302fa2c63e3:0 → ok size=3",
+  "[zk-autonomy] 15:10:21 ✅ market=54-ctov6 claim idx=0 pk=060b02648006 payout=2943000000 txId=4507df300f4c99685682d98c9728ef2e9fb0108502e2d1c76257e97c376c65dd",
+  "[relay:e2e-settler] 10/5/2026, 22:10:45 PIN_UTXO 0eada3b31b20:0 → ok size=4",
+  "[relay:e2e-settler] 10/5/2026, 22:10:45 UNPIN_UTXO 0eada3b31b20:0 → ok size=3",
+  "[zk-autonomy] 15:10:51 ✅ market=54-ctov6 claim idx=1 pk=1187ac7eb6fd payout=57000000 txId=e87a9994dc9d0a4de008c2dab60f811e94cdf97d6a9c2c9569eea34a0ccc0b2c (last, exhausted)"
+ ],
+ "pinLineCount": 18,
+ "unpinLineCount": 9,
+ "bal1": {
+  "maker": "19732035900",
+  "settler": "29877146600",
+  "fee": "30000000000",
+  "bettorA": "26390389200",
+  "bettorB": "23390389200"
+ },
+ "wallet_maker": {
+  "deltaSompi": "-342064800",
+  "feeSompi": "60064800",
+  "netCovLockedSompi": "282000000",
+  "nTxs": 36
+ },
+ "wallet_settler": {
+  "deltaSompi": "-618971700",
+  "feeSompi": "258971700",
+  "netCovLockedSompi": "360000000",
+  "nTxs": 37
+ },
+ "wallet_fee": {
+  "deltaSompi": "0",
+  "feeSompi": "0",
+  "netCovLockedSompi": "0",
+  "nTxs": 0
+ },
+ "cost": {
+  "totalFeesSompi": "319036500",
+  "chaosTxFeeSompi": "303600",
+  "netLockedSompi": "642000000",
+  "liveCovenantSompi": "642000000",
+  "perMarketFeesSompi": "106244300",
+  "perMarketNetLockedSompi": "214000000",
+  "perMarketTotalSompi": "320244300",
+  "markets": 3
+ },
+ "myPositions": {
+  "bettorA": [
+   {
+    "market_id": "ext-pool-v07-1791211452954-ctov6-s0",
+    "logical_market_id": "ext-pool-v07-1791211452954-ctov6",
+    "zk_native": true,
+    "claims_landed": 2,
+    "pool_known": true,
+    "actual_payout_units": "2943000000",
+    "payout_pending_units": "0",
+    "question": "{\"title\":\"MM rehearsal market #2: will event 2 happen?\",\"data_source_canonical\":\"polymarket:0x9292929292929292929292929292929292929292929292929292929292929292\",\"source\":\"polymarket\",\"resolution_criteria\":\"mirror of a Polymarket market #2 (simnet rehearsal stub)\",\"uma_question_id\":\"0x0000000000000000000000000000000000000000000000000000000000000002\",\"neg_risk\":false,\"event_id\":\"902\",\"event_title\":\"MM event 2\",\"event_slug\":\"mm-event-2\",\"zk_native\":true}",
+    "category": "other",
+    "my_direction": 0,
+    "my_side": "YES",
+    "stake_kas": 10,
+    "deadline": 1791212292,
+    "status": "attested_v2",
+    "yes_pool_kas": 10,
+    "no_pool_kas": 20,
+    "yes_implied_prob": 0.3333333333333333,
+    "payout_if_win_kas": 29.57,
+    "side_p2sh": "kaspasim:pp7w6atxnm6k4c3qfz6st6pny45353ka5xhykyt02jmugtmpttcc2sxg27als",
+    "side_lock_tx": "b1ac5c28cb90e9a1a7069151a65873ac4c9c52e3630444b184fd3906a890043c",
+    "locked_at": "2026-10-05 14:46:15",
+    "deadline_unix": 1791212292,
+    "claim_txid": null,
+    "settle_txid": null,
+    "refund_txid": null,
+    "bshard_claim_txid": "4507df300f4c99685682d98c9728ef2e9fb0108502e2d1c76257e97c376c65dd",
+    "outcome_winner": 0,
+    "outcome_side": "YES",
+    "did_win": true,
+    "actual_payout_kas": 29.43,
+    "actual_payout_chain_verified": true
+   },
+   {
+    "market_id": "ext-pool-v07-1791211392959-svrok-s0",
+    "logical_market_id": "ext-pool-v07-1791211392959-svrok",
+    "zk_native": true,
+    "claims_landed": 2,
+    "pool_known": true,
+    "actual_payout_units": null,
+    "payout_pending_units": null,
+    "question": "{\"title\":\"MM rehearsal market #1: will event 1 happen?\",\"data_source_canonical\":\"polymarket:0x9191919191919191919191919191919191919191919191919191919191919191\",\"source\":\"polymarket\",\"resolution_criteria\":\"mirror of a Polymarket market #1 (simnet rehearsal stub)\",\"uma_question_id\":\"0x0000000000000000000000000000000000000000000000000000000000000001\",\"neg_risk\":false,\"event_id\":\"901\",\"event_title\":\"MM event 1\",\"event_slug\":\"mm-event-1\",\"zk_native\":true}",
+    "category": "other",
+    "my_direction": 0,
+    "my_side": "YES",
+    "stake_kas": 10,
+    "deadline": 1791212292,
+    "status": "attested_v2",
+    "yes_pool_kas": 10,
+    "no_pool_kas": 20,
+    "yes_implied_prob": 0.3333333333333333,
+    "payout_if_win_kas": 29.57,
+    "side_p2sh": "kaspasim:pqgy9md4q5eukhj532ze4dlfs0aqalpjcjegxktpcu2w0a3944ye2tca3t5l9",
+    "side_lock_tx": "3a045733d7651eaa870ab7888dab0d231efec14bf17cf86dd666251a02d248e5",
+    "locked_at": "2026-10-05 14:45:32",
+    "deadline_unix": 1791212292,
+    "claim_txid": null,
+    "settle_txid": null,
+    "refund_txid": null,
+    "bshard_claim_txid": null,
+    "outcome_winner": 1,
+    "outcome_side": "NO",
+    "did_win": false,
+    "actual_payout_kas": null,
+    "actual_payout_chain_verified": false
+   },
+   {
+    "market_id": "ext-pool-v07-1791211340976-1l6ot-s0",
+    "logical_market_id": "ext-pool-v07-1791211340976-1l6ot",
+    "zk_native": true,
+    "claims_landed": 2,
+    "pool_known": true,
+    "actual_payout_units": "2943000000",
+    "payout_pending_units": "0",
+    "question": "{\"title\":\"MM rehearsal market #0: will event 0 happen?\",\"data_source_canonical\":\"polymarket:0x9090909090909090909090909090909090909090909090909090909090909090\",\"source\":\"polymarket\",\"resolution_criteria\":\"mirror of a Polymarket market #0 (simnet rehearsal stub)\",\"uma_question_id\":\"0x0000000000000000000000000000000000000000000000000000000000000000\",\"neg_risk\":false,\"event_id\":\"900\",\"event_title\":\"MM event 0\",\"event_slug\":\"mm-event-0\",\"zk_native\":true}",
+    "category": "other",
+    "my_direction": 0,
+    "my_side": "YES",
+    "stake_kas": 10,
+    "deadline": 1791212292,
+    "status": "attested_v2",
+    "yes_pool_kas": 10,
+    "no_pool_kas": 20,
+    "yes_implied_prob": 0.3333333333333333,
+    "payout_if_win_kas": 29.57,
+    "side_p2sh": "kaspasim:pzdrmm0qlgs8nykp747xk9lfcsqp0xzfqnfmkmn6wskye9m2nymkcv7apwzm5",
+    "side_lock_tx": "c9127261e2798520facc297d650b9120e0e87e1a3494bf18b53a31ea72b7d6b1",
+    "locked_at": "2026-10-05 14:44:49",
+    "deadline_unix": 1791212292,
+    "claim_txid": null,
+    "settle_txid": null,
+    "refund_txid": null,
+    "bshard_claim_txid": "2464cf38cefc7863cbbd056b7874c0f085844cecb5ef38d5d0beb9ea45616729",
+    "outcome_winner": 0,
+    "outcome_side": "YES",
+    "did_win": true,
+    "actual_payout_kas": 29.43,
+    "actual_payout_chain_verified": true
+   },
+   {
+    "market_id": "ext-pool-v07-1791164916217-c96q2-s0",
+    "logical_market_id": "ext-pool-v07-1791164916217-c96q2",
+    "zk_native": true,
+    "claims_landed": 2,
+    "pool_known": true,
+    "actual_payout_units": "2943000000",
+    "payout_pending_units": "0",
+    "question": "{\"title\":\"MM rehearsal market #2: will event 2 happen?\",\"data_source_canonical\":\"polymarket:0x3232323232323232323232323232323232323232323232323232323232323232\",\"source\":\"polymarket\",\"resolution_criteria\":\"mirror of a Polymarket market #2 (simnet rehearsal stub)\",\"uma_question_id\":\"0x0000000000000000000000000000000000000000000000000000000000000002\",\"neg_risk\":false,\"event_id\":\"902\",\"event_title\":\"MM event 2\",\"event_slug\":\"mm-event-2\",\"zk_native\":true}",
+    "category": "other",
+    "my_direction": 0,
+    "my_side": "YES",
+    "stake_kas": 10,
+    "deadline": 1791166353,
+    "status": "attested_v2",
+    "yes_pool_kas": 10,
+    "no_pool_kas": 20,
+    "yes_implied_prob": 0.3333333333333333,
+    "payout_if_win_kas": 29.57,
+    "side_p2sh": "kaspasim:prnhg35ulqudvavsgy7356ktn8k9ww4kewj4azkmpl6g6pcnh3kesv0m6pvd7",
+    "side_lock_tx": "f4a549de4234b9261141eb3538e61c6bf2136dbd7d4930b504160f86ad65cfbe",
+    "locked_at": "2026-10-05 01:50:20",
+    "deadline_unix": 1791166353,
+    "claim_txid": null,
+    "settle_txid": null,
+    "refund_txid": null,
+    "bshard_claim_txid": "5a42edfd7b99797a4ae73b808d7887daa54ced8dfe0458635d85981ccfc0490a",
+    "outcome_winner": 0,
+    "outcome_side": "YES",
+    "did_win": true,
+    "actual_payout_kas": 29.43,
+    "actual_payout_chain_verified": true
+   },
+   {
+    "market_id": "ext-pool-v07-1791164856221-9b5oy-s0",
+    "logical_market_id": "ext-pool-v07-1791164856221-9b5oy",
+    "zk_native": true,
+    "claims_landed": 2,
+    "pool_known": true,
+    "actual_payout_units": null,
+    "payout_pending_units": null,
+    "question": "{\"title\":\"MM rehearsal market #1: will event 1 happen?\",\"data_source_canonical\":\"polymarket:0x3131313131313131313131313131313131313131313131313131313131313131\",\"source\":\"polymarket\",\"resolution_criteria\":\"mirror of a Polymarket market #1 (simnet rehearsal stub)\",\"uma_question_id\":\"0x0000000000000000000000000000000000000000000000000000000000000001\",\"neg_risk\":false,\"event_id\":\"901\",\"event_title\":\"MM event 1\",\"event_slug\":\"mm-event-1\",\"zk_native\":true}",
+    "category": "other",
+    "my_direction": 0,
+    "my_side": "YES",
+    "stake_kas": 10,
+    "deadline": 1791166353,
+    "status": "attested_v2",
+    "yes_pool_kas": 10,
+    "no_pool_kas": 20,
+    "yes_implied_prob": 0.3333333333333333,
+    "payout_if_win_kas": 29.57,
+    "side_p2sh": "kaspasim:pqw0z4zgs6yzyrumw80fqedjparwt5u93h8xq9cwzjdqfxxcm7sl7vg9xw7z3",
+    "side_lock_tx": "d68b2b76b2d036b77039c7f2f58fd5b3931055bd55dc091faa3ae50659e21f1d",
+    "locked_at": "2026-10-05 01:49:49",
+    "deadline_unix": 1791166353,
+    "claim_txid": null,
+    "settle_txid": null,
+    "refund_txid": null,
+    "bshard_claim_txid": null,
+    "outcome_winner": 1,
+    "outcome_side": "NO",
+    "did_win": false,
+    "actual_payout_kas": null,
+    "actual_payout_chain_verified": false
+   },
+   {
+    "market_id": "ext-pool-v07-1791164796238-4yvzs-s0",
+    "logical_market_id": "ext-pool-v07-1791164796238-4yvzs",
+    "zk_native": true,
+    "claims_landed": 2,
+    "pool_known": true,
+    "actual_payout_units": "2943000000",
+    "payout_pending_units": "0",
+    "question": "{\"title\":\"MM rehearsal market #0: will event 0 happen?\",\"data_source_canonical\":\"polymarket:0x3030303030303030303030303030303030303030303030303030303030303030\",\"source\":\"polymarket\",\"resolution_criteria\":\"mirror of a Polymarket market #0 (simnet rehearsal stub)\",\"uma_question_id\":\"0x0000000000000000000000000000000000000000000000000000000000000000\",\"neg_risk\":false,\"event_id\":\"900\",\"event_title\":\"MM event 0\",\"event_slug\":\"mm-event-0\",\"zk_native\":true}",
+    "category": "other",
+    "my_direction": 0,
+    "my_side": "YES",
+    "stake_kas": 10,
+    "deadline": 1791166353,
+    "status": "attested_v2",
+    "yes_pool_kas": 10,
+    "no_pool_kas": 20,
+    "yes_implied_prob": 0.3333333333333333,
+    "payout_if_win_kas": 29.57,
+    "side_p2sh": "kaspasim:prrce6v09e7jl7vvkm62v6tpy5a4w9lcpcmsfy64h5ghld848ssgxa98v8glv",
+    "side_lock_tx": "2e41eed7ff0ec0ed8da03ca4054f9f609428affe511ac0fc9b4e0f1d00731d26",
+    "locked_at": "2026-10-05 01:49:08",
+    "deadline_unix": 1791166353,
+    "claim_txid": null,
+    "settle_txid": null,
+    "refund_txid": null,
+    "bshard_claim_txid": "b891320257b77cdf96b17a06bde1844267504a95ed8eff1f52cb8d5173565aea",
+    "outcome_winner": 0,
+    "outcome_side": "YES",
+    "did_win": true,
+    "actual_payout_kas": 29.43,
+    "actual_payout_chain_verified": true
+   },
+   {
+    "market_id": "ext-pool-v07-1791155679385-dzxvd-s0",
+    "logical_market_id": "ext-pool-v07-1791155679385-dzxvd",
+    "zk_native": true,
+    "claims_landed": 2,
+    "pool_known": true,
+    "actual_payout_units": "2943000000",
+    "payout_pending_units": "0",
+    "question": "{\"title\":\"MM rehearsal market #2: will event 2 happen?\",\"data_source_canonical\":\"polymarket:0x0202020202020202020202020202020202020202020202020202020202020202\",\"source\":\"polymarket\",\"resolution_criteria\":\"mirror of a Polymarket market #2 (simnet rehearsal stub)\",\"uma_question_id\":\"0x0000000000000000000000000000000000000000000000000000000000000002\",\"neg_risk\":false,\"event_id\":\"902\",\"event_title\":\"MM event 2\",\"event_slug\":\"mm-event-2\",\"zk_native\":true}",
+    "category": "other",
+    "my_direction": 0,
+    "my_side": "YES",
+    "stake_kas": 10,
+    "deadline": 1791157111,
+    "status": "attested_v2",
+    "yes_pool_kas": 10,
+    "no_pool_kas": 20,
+    "yes_implied_prob": 0.3333333333333333,
+    "payout_if_win_kas": 29.57,
+    "side_p2sh": "kaspasim:pphcprm3pd08c0lvd48xa6rls5hea94gfv6av900cnf4hdns3mwgktqnyjtc7",
+    "side_lock_tx": "771f776580b67638b3e2a8aac908f31a5b54b9aab7f578c03d223388fc4fe74c",
+    "locked_at": "2026-10-04 23:16:06",
+    "deadline_unix": 1791157111,
+    "claim_txid": null,
+    "settle_txid": null,
+    "refund_txid": null,
+    "bshard_claim_txid": "5ad95137386d8d49b985dc0e981ce3c040a16a1e6fcbba224f49d7b3602e2746",
+    "outcome_winner": 0,
+    "outcome_side": "YES",
+    "did_win": true,
+    "actual_payout_kas": 29.43,
+    "actual_payout_chain_verified": true
+   },
+   {
+    "market_id": "ext-pool-v07-1791155619382-o8svl-s0",
+    "logical_market_id": "ext-pool-v07-1791155619382-o8svl",
+    "zk_native": true,
+    "claims_landed": 2,
+    "pool_known": true,
+    "actual_payout_units": null,
+    "payout_pending_units": null,
+    "question": "{\"title\":\"MM rehearsal market #1: will event 1 happen?\",\"data_source_canonical\":\"polymarket:0x0101010101010101010101010101010101010101010101010101010101010101\",\"source\":\"polymarket\",\"resolution_criteria\":\"mirror of a Polymarket market #1 (simnet rehearsal stub)\",\"uma_question_id\":\"0x0000000000000000000000000000000000000000000000000000000000000001\",\"neg_risk\":false,\"event_id\":\"901\",\"event_title\":\"MM event 1\",\"event_slug\":\"mm-event-1\",\"zk_native\":true}",
+    "category": "other",
+    "my_direction": 0,
+    "my_side": "YES",
+    "stake_kas": 10,
+    "deadline": 1791157111,
+    "status": "attested_v2",
+    "yes_pool_kas": 10,
+    "no_pool_kas": 20,
+    "yes_implied_prob": 0.3333333333333333,
+    "payout_if_win_kas": 29.57,
+    "side_p2sh": "kaspasim:pp587wvxhfl0690xjxrwfzl5tcjhj23pq7gfua2y0khrsd6weyrku6aaaf276",
+    "side_lock_tx": "b7a390c4ae1a7066c6ff9a59b87f2a14881025a26d749e730f4d5ea4e5b8b25a",
+    "locked_at": "2026-10-04 23:15:35",
+    "deadline_unix": 1791157111,
+    "claim_txid": null,
+    "settle_txid": null,
+    "refund_txid": null,
+    "bshard_claim_txid": null,
+    "outcome_winner": 1,
+    "outcome_side": "NO",
+    "did_win": false,
+    "actual_payout_kas": null,
+    "actual_payout_chain_verified": false
+   },
+   {
+    "market_id": "ext-pool-v07-1791155559395-6f1b5-s0",
+    "logical_market_id": "ext-pool-v07-1791155559395-6f1b5",
+    "zk_native": true,
+    "claims_landed": 2,
+    "pool_known": true,
+    "actual_payout_units": "2943000000",
+    "payout_pending_units": "0",
+    "question": "{\"title\":\"MM rehearsal market #0: will event 0 happen?\",\"data_source_canonical\":\"polymarket:0x0000000000000000000000000000000000000000000000000000000000000000\",\"source\":\"polymarket\",\"resolution_criteria\":\"mirror of a Polymarket market #0 (simnet rehearsal stub)\",\"uma_question_id\":\"0x0000000000000000000000000000000000000000000000000000000000000000\",\"neg_risk\":false,\"event_id\":\"900\",\"event_title\":\"MM event 0\",\"event_slug\":\"mm-event-0\",\"zk_native\":true}",
+    "category": "other",
+    "my_direction": 0,
+    "my_side": "YES",
+    "stake_kas": 10,
+    "deadline": 1791157111,
+    "status": "attested_v2",
+    "yes_pool_kas": 10,
+    "no_pool_kas": 20,
+    "yes_implied_prob": 0.3333333333333333,
+    "payout_if_win_kas": 29.57,
+    "side_p2sh": "kaspasim:pr00lekdya2yjjt6n27dunu2ucy056dkdvfxt0erzxgqvx622e7nvguufvxln",
+    "side_lock_tx": "9dfd437004af3fde7e17eac40148a518840ccc063a3c2d0a041c30cb39d3a70e",
+    "locked_at": "2026-10-04 23:15:04",
+    "deadline_unix": 1791157111,
+    "claim_txid": null,
+    "settle_txid": null,
+    "refund_txid": null,
+    "bshard_claim_txid": "e3fe26021bb4ec7b9c01988a88c0d44312de7aaff4b8cd6c23009feaef319265",
+    "outcome_winner": 0,
+    "outcome_side": "YES",
+    "did_win": true,
+    "actual_payout_kas": 29.43,
+    "actual_payout_chain_verified": true
+   },
+   {
+    "market_id": "ext-pool-v07-1791138137518-lorc6-s0",
+    "logical_market_id": "ext-pool-v07-1791138137518-lorc6",
+    "zk_native": true,
+    "claims_landed": 2,
+    "pool_known": true,
+    "actual_payout_units": "2943000000",
+    "payout_pending_units": "0",
+    "question": "{\"title\":\"SZ strict-zero parity market 1791138137495\",\"resolution_criteria\":\"blockhash at DAA 104010: last byte even => YES, odd => NO\",\"data_source_canonical\":\"kaspa-simnet:blockhash_parity@104010\",\"judge_type\":\"blockhash_parity\",\"target_daa\":104010,\"zk_native\":true}",
+    "category": "crypto",
+    "my_direction": 0,
+    "my_side": "YES",
+    "stake_kas": 10,
+    "deadline": 1791138737,
+    "status": "attested_v2",
+    "yes_pool_kas": 10,
+    "no_pool_kas": 20,
+    "yes_implied_prob": 0.3333333333333333,
+    "payout_if_win_kas": 29.57,
+    "side_p2sh": "kaspasim:pzuzncfm0mnxezva65z0p5l44ezx9np9jffw2vh6xu62kmyq0e3rzjrvx4lfy",
+    "side_lock_tx": "5f242fc9d664760a2c38dfb7820323648d09cf938bff8494583a6b6d4e58659f",
+    "locked_at": "2026-10-04 18:23:39",
+    "deadline_unix": 1791138737,
+    "claim_txid": null,
+    "settle_txid": null,
+    "refund_txid": null,
+    "bshard_claim_txid": "0323ce2a6170c4236986d6392173a699d8d284ab4a69a1bf91001cc8925fab38",
+    "outcome_winner": 0,
+    "outcome_side": "YES",
+    "did_win": true,
+    "actual_payout_kas": 29.43,
+    "actual_payout_chain_verified": true
+   },
+   {
+    "market_id": "ext-pool-v07-1791124315416-fvyvm-s0",
+    "logical_market_id": "ext-pool-v07-1791124315416-fvyvm",
+    "zk_native": true,
+    "claims_landed": 2,
+    "pool_known": true,
+    "actual_payout_units": "2943000000",
+    "payout_pending_units": "0",
+    "question": "{\"title\":\"S3 no-KAS parity market 1791124315407\",\"resolution_criteria\":\"blockhash at DAA 89067: last byte even => YES, odd => NO\",\"data_source_canonical\":\"kaspa-simnet:blockhash_parity@89067\",\"judge_type\":\"blockhash_parity\",\"target_daa\":89067,\"zk_native\":true}",
+    "category": "crypto",
+    "my_direction": 0,
+    "my_side": "YES",
+    "stake_kas": 10,
+    "deadline": 1791124915,
+    "status": "attested_v2",
+    "yes_pool_kas": 10,
+    "no_pool_kas": 20,
+    "yes_implied_prob": 0.3333333333333333,
+    "payout_if_win_kas": 29.57,
+    "side_p2sh": "kaspasim:pqde7kgfrprlmyvggum64vru2f9ypwgwwffgth2f26uh7fq84jqqvazne9lyk",
+    "side_lock_tx": "414f16ce42d70ed0677d704724edb47c43c0ffa877c616b9a6690006e5f75f87",
+    "locked_at": "2026-10-04 14:32:27",
+    "deadline_unix": 1791124915,
+    "claim_txid": null,
+    "settle_txid": null,
+    "refund_txid": null,
+    "bshard_claim_txid": "53da93476073cbf3aa8079570374b38f36f85b1dcff6e1b14a02da47f82ec99c",
+    "outcome_winner": 0,
+    "outcome_side": "YES",
+    "did_win": true,
+    "actual_payout_kas": 29.43,
+    "actual_payout_chain_verified": true
+   },
+   {
+    "market_id": "ext-pool-v07-1791123064240-umrvw-s0",
+    "logical_market_id": "ext-pool-v07-1791123064240-umrvw",
+    "zk_native": true,
+    "claims_landed": 2,
+    "pool_known": true,
+    "actual_payout_units": null,
+    "payout_pending_units": null,
+    "question": "{\"title\":\"S3 no-KAS parity market 1791123064229\",\"resolution_criteria\":\"blockhash at DAA 73915: last byte even => YES, odd => NO\",\"data_source_canonical\":\"kaspa-simnet:blockhash_parity@73915\",\"judge_type\":\"blockhash_parity\",\"target_daa\":73915,\"zk_native\":true}",
+    "category": "crypto",
+    "my_direction": 0,
+    "my_side": "YES",
+    "stake_kas": 10,
+    "deadline": 1791123664,
+    "status": "attested_v2",
+    "yes_pool_kas": 10,
+    "no_pool_kas": 20,
+    "yes_implied_prob": 0.3333333333333333,
+    "payout_if_win_kas": 29.57,
+    "side_p2sh": "kaspasim:pp8dktesgslm863hqcmxdxwtyezatjj9r3nlv3jhf8lslxxrpt06q899gydqa",
+    "side_lock_tx": "139d0675fc205bcfc5106c6d98b48ffe4dbe89bd6ede40e9a13efe0dda313995",
+    "locked_at": "2026-10-04 14:11:30",
+    "deadline_unix": 1791123664,
+    "claim_txid": null,
+    "settle_txid": null,
+    "refund_txid": null,
+    "bshard_claim_txid": null,
+    "outcome_winner": 1,
+    "outcome_side": "NO",
+    "did_win": false,
+    "actual_payout_kas": null,
+    "actual_payout_chain_verified": false
+   },
+   {
+    "market_id": "ext-pool-v07-1791120940107-z0g04-s0",
+    "logical_market_id": "ext-pool-v07-1791120940107-z0g04",
+    "zk_native": true,
+    "claims_landed": 2,
+    "pool_known": true,
+    "actual_payout_units": "2943000000",
+    "payout_pending_units": "0",
+    "question": "{\"title\":\"S3 no-KAS parity market 1791120940095\",\"resolution_criteria\":\"blockhash at DAA 56930: last byte even => YES, odd => NO\",\"data_source_canonical\":\"kaspa-simnet:blockhash_parity@56930\",\"judge_type\":\"blockhash_parity\",\"target_daa\":56930,\"zk_native\":true}",
+    "category": "crypto",
+    "my_direction": 0,
+    "my_side": "YES",
+    "stake_kas": 10,
+    "deadline": 1791121540,
+    "status": "attested_v2",
+    "yes_pool_kas": 10,
+    "no_pool_kas": 20,
+    "yes_implied_prob": 0.3333333333333333,
+    "payout_if_win_kas": 29.57,
+    "side_p2sh": "kaspasim:ppykmksjvw58nxjturtkcl4r4fazm5cxx6srfjwjsff4806uutt4668d0yy4y",
+    "side_lock_tx": "717f6deef1dac4ea6e0b7b6965dc98c50900c694b759a8157a5895bee57b9351",
+    "locked_at": "2026-10-04 13:36:43",
+    "deadline_unix": 1791121540,
+    "claim_txid": null,
+    "settle_txid": null,
+    "refund_txid": null,
+    "bshard_claim_txid": "f472f0514a60cfbceb3b9d2ceafa238a846c9119f4122e0ebc8840618f887838",
+    "outcome_winner": 0,
+    "outcome_side": "YES",
+    "did_win": true,
+    "actual_payout_kas": 29.43,
+    "actual_payout_chain_verified": true
+   },
+   {
+    "market_id": "ext-pool-v07-1791120870824-btduw-s0",
+    "logical_market_id": "ext-pool-v07-1791120870824-btduw",
+    "question": "{\"title\":\"S3 no-KAS parity market 1791120870802\",\"resolution_criteria\":\"blockhash at DAA 56731: last byte even => YES, odd => NO\",\"data_source_canonical\":\"kaspa-simnet:blockhash_parity@56731\",\"judge_type\":\"blockhash_parity\",\"target_daa\":56731,\"zk_native\":true}",
+    "category": "crypto",
+    "my_direction": 0,
+    "my_side": "YES",
+    "stake_kas": 10,
+    "deadline": 1791121470,
+    "status": "cancelled",
+    "yes_pool_kas": 10,
+    "no_pool_kas": 20,
+    "yes_implied_prob": 0.3333333333333333,
+    "payout_if_win_kas": 29.57,
+    "side_p2sh": "kaspasim:pzhmupr0gdlvgq9yu26mzrs2vw8nt0fa52l2e27nh9g73yanvtdvcwdxd8d4f",
+    "side_lock_tx": "831554b227e9a12117b4800f98220e6354a203db6ff0723c518346d25509e747",
+    "locked_at": "2026-10-04 13:35:47",
+    "deadline_unix": 1791121470,
+    "claim_txid": null,
+    "settle_txid": null,
+    "refund_txid": null,
+    "bshard_claim_txid": null,
+    "outcome_winner": null,
+    "outcome_side": null,
+    "did_win": null,
+    "actual_payout_kas": null,
+    "actual_payout_chain_verified": false
+   },
+   {
+    "market_id": "ext-pool-v07-1791076886129-bnwnx-s0",
+    "logical_market_id": "ext-pool-v07-1791076886129-bnwnx",
+    "zk_native": true,
+    "claims_landed": 2,
+    "pool_known": true,
+    "actual_payout_units": "2943000000",
+    "payout_pending_units": "0",
+    "question": "{\"title\":\"simnet e2e parity market 1791076886096\",\"resolution_criteria\":\"blockhash at DAA 38682: last byte even => YES, odd => NO\",\"data_source_canonical\":\"kaspa-simnet:blockhash_parity@38682\",\"judge_type\":\"blockhash_parity\",\"target_daa\":38682,\"zk_native\":true}",
+    "category": "crypto",
+    "my_direction": 0,
+    "my_side": "YES",
+    "stake_kas": 10,
+    "deadline": 1791077216,
+    "status": "attested_v2",
+    "yes_pool_kas": 140,
+    "no_pool_kas": 20,
+    "yes_implied_prob": 0.875,
+    "payout_if_win_kas": 11.39785714,
+    "side_p2sh": "kaspasim:ppc5wld6jdde39252rmv78nyxmjsuppgn5h2pm7u7f9rv055zchs6wqutk8sj",
+    "side_lock_tx": "23b0e21eecfb6148858c0231094d8772566188fe81e1cd59af410ab7185f8128",
+    "locked_at": "2026-10-04 01:22:24",
+    "deadline_unix": 1791077216,
+    "claim_txid": null,
+    "settle_txid": null,
+    "refund_txid": null,
+    "bshard_claim_txid": "55424c65c95277b77e02557734f7f408e24c6b7a01c43161960d739d94bcdfeb",
+    "outcome_winner": 0,
+    "outcome_side": "YES",
+    "did_win": true,
+    "actual_payout_kas": 29.43,
+    "actual_payout_chain_verified": true
+   },
+   {
+    "market_id": "ext-pool-v07-1791073817312-8gmuv-s0",
+    "logical_market_id": "ext-pool-v07-1791073817312-8gmuv",
+    "zk_native": true,
+    "claims_landed": 2,
+    "pool_known": true,
+    "actual_payout_units": "2943000000",
+    "payout_pending_units": "0",
+    "question": "{\"title\":\"simnet e2e parity market 1791073817281\",\"resolution_criteria\":\"blockhash at DAA 19223: last byte even => YES, odd => NO\",\"data_source_canonical\":\"kaspa-simnet:blockhash_parity@19223\",\"judge_type\":\"blockhash_parity\",\"target_daa\":19223,\"zk_native\":true}",
+    "category": "crypto",
+    "my_direction": 0,
+    "my_side": "YES",
+    "stake_kas": 10,
+    "deadline": 1791074147,
+    "status": "attested_v2",
+    "yes_pool_kas": 140,
+    "no_pool_kas": 20,
+    "yes_implied_prob": 0.875,
+    "payout_if_win_kas": 11.39785714,
+    "side_p2sh": "kaspasim:prh9maruel59qay7dsu8vnnk7wclfmzp5navsa2k26842tkmsk2lsf4sp738t",
+    "side_lock_tx": "4b6748563a695c6d67edac9cb0f3f837f25c770ccddd7d0108d34246fed75195",
+    "locked_at": "2026-10-04 00:30:59",
+    "deadline_unix": 1791074147,
+    "claim_txid": null,
+    "settle_txid": null,
+    "refund_txid": null,
+    "bshard_claim_txid": "1f47da9827c302195b8cff5819a3e3f0e54e5b29f086f103a79cfb77910b2141",
+    "outcome_winner": 0,
+    "outcome_side": "YES",
+    "did_win": true,
+    "actual_payout_kas": 29.43,
+    "actual_payout_chain_verified": true
+   },
+   {
+    "market_id": "ext-pool-v07-1791072305023-vl1wf-s0",
+    "logical_market_id": "ext-pool-v07-1791072305023-vl1wf",
+    "zk_native": true,
+    "claims_landed": 2,
+    "pool_known": true,
+    "actual_payout_units": "2943000000",
+    "payout_pending_units": "0",
+    "question": "{\"title\":\"simnet e2e parity market 1791072305006\",\"resolution_criteria\":\"blockhash at DAA 4660: last byte even => YES, odd => NO\",\"data_source_canonical\":\"kaspa-simnet:blockhash_parity@4660\",\"judge_type\":\"blockhash_parity\",\"target_daa\":4660,\"zk_native\":true}",
+    "category": "crypto",
+    "my_direction": 0,
+    "my_side": "YES",
+    "stake_kas": 10,
+    "deadline": 1791072635,
+    "status": "attested_v2",
+    "yes_pool_kas": 140,
+    "no_pool_kas": 20,
+    "yes_implied_prob": 0.875,
+    "payout_if_win_kas": 11.39785714,
+    "side_p2sh": "kaspasim:prq3hnt9xajlxk5lasm2duaq7h283aexk2gwyvawq95nrd8klnyqwu7rel2ct",
+    "side_lock_tx": "ddd4b18f0337213694d19a66b5818a2d8c705372dabffd8048a29c9f4564c06e",
+    "locked_at": "2026-10-04 00:05:51",
+    "deadline_unix": 1791072635,
+    "claim_txid": null,
+    "settle_txid": null,
+    "refund_txid": null,
+    "bshard_claim_txid": "f4aac8bb5bd12f080320624f2161ba460476fb8c4af4aebe6604f76a72e94812",
+    "outcome_winner": 0,
+    "outcome_side": "YES",
+    "did_win": true,
+    "actual_payout_kas": 29.43,
+    "actual_payout_chain_verified": true
+   }
+  ],
+  "bettorB": [
+   {
+    "market_id": "ext-pool-v07-1791211452954-ctov6-s0",
+    "logical_market_id": "ext-pool-v07-1791211452954-ctov6",
+    "zk_native": true,
+    "claims_landed": 2,
+    "pool_known": true,
+    "actual_payout_units": null,
+    "payout_pending_units": null,
+    "question": "{\"title\":\"MM rehearsal market #2: will event 2 happen?\",\"data_source_canonical\":\"polymarket:0x9292929292929292929292929292929292929292929292929292929292929292\",\"source\":\"polymarket\",\"resolution_criteria\":\"mirror of a Polymarket market #2 (simnet rehearsal stub)\",\"uma_question_id\":\"0x0000000000000000000000000000000000000000000000000000000000000002\",\"neg_risk\":false,\"event_id\":\"902\",\"event_title\":\"MM event 2\",\"event_slug\":\"mm-event-2\",\"zk_native\":true}",
+    "category": "other",
+    "my_direction": 1,
+    "my_side": "NO",
+    "stake_kas": 20,
+    "deadline": 1791212292,
+    "status": "attested_v2",
+    "yes_pool_kas": 10,
+    "no_pool_kas": 20,
+    "yes_implied_prob": 0.3333333333333333,
+    "payout_if_win_kas": 29.76,
+    "side_p2sh": "kaspasim:pp7w6atxnm6k4c3qfz6st6pny45353ka5xhykyt02jmugtmpttcc2sxg27als",
+    "side_lock_tx": "472a6da695b6e5f16e149b8a7f8ea60973c0074942e7c250507591d67d58b6a6",
+    "locked_at": "2026-10-05 14:46:29",
+    "deadline_unix": 1791212292,
+    "claim_txid": null,
+    "settle_txid": null,
+    "refund_txid": null,
+    "bshard_claim_txid": null,
+    "outcome_winner": 0,
+    "outcome_side": "YES",
+    "did_win": false,
+    "actual_payout_kas": null,
+    "actual_payout_chain_verified": false
+   },
+   {
+    "market_id": "ext-pool-v07-1791211392959-svrok-s0",
+    "logical_market_id": "ext-pool-v07-1791211392959-svrok",
+    "zk_native": true,
+    "claims_landed": 2,
+    "pool_known": true,
+    "actual_payout_units": "2943000000",
+    "payout_pending_units": "0",
+    "question": "{\"title\":\"MM rehearsal market #1: will event 1 happen?\",\"data_source_canonical\":\"polymarket:0x9191919191919191919191919191919191919191919191919191919191919191\",\"source\":\"polymarket\",\"resolution_criteria\":\"mirror of a Polymarket market #1 (simnet rehearsal stub)\",\"uma_question_id\":\"0x0000000000000000000000000000000000000000000000000000000000000001\",\"neg_risk\":false,\"event_id\":\"901\",\"event_title\":\"MM event 1\",\"event_slug\":\"mm-event-1\",\"zk_native\":true}",
+    "category": "other",
+    "my_direction": 1,
+    "my_side": "NO",
+    "stake_kas": 20,
+    "deadline": 1791212292,
+    "status": "attested_v2",
+    "yes_pool_kas": 10,
+    "no_pool_kas": 20,
+    "yes_implied_prob": 0.3333333333333333,
+    "payout_if_win_kas": 29.76,
+    "side_p2sh": "kaspasim:pqgy9md4q5eukhj532ze4dlfs0aqalpjcjegxktpcu2w0a3944ye2tca3t5l9",
+    "side_lock_tx": "4b7625a2a3658dba43628797f44c7c69c9809e44d1509d1a42a802389d53a1fa",
+    "locked_at": "2026-10-05 14:45:46",
+    "deadline_unix": 1791212292,
+    "claim_txid": null,
+    "settle_txid": null,
+    "refund_txid": null,
+    "bshard_claim_txid": "62083ecfa42943f1210d6e0250ac99524a09d70fe3a50d216a2f044056ec08a6",
+    "outcome_winner": 1,
+    "outcome_side": "NO",
+    "did_win": true,
+    "actual_payout_kas": 29.43,
+    "actual_payout_chain_verified": true
+   },
+   {
+    "market_id": "ext-pool-v07-1791211340976-1l6ot-s0",
+    "logical_market_id": "ext-pool-v07-1791211340976-1l6ot",
+    "zk_native": true,
+    "claims_landed": 2,
+    "pool_known": true,
+    "actual_payout_units": null,
+    "payout_pending_units": null,
+    "question": "{\"title\":\"MM rehearsal market #0: will event 0 happen?\",\"data_source_canonical\":\"polymarket:0x9090909090909090909090909090909090909090909090909090909090909090\",\"source\":\"polymarket\",\"resolution_criteria\":\"mirror of a Polymarket market #0 (simnet rehearsal stub)\",\"uma_question_id\":\"0x0000000000000000000000000000000000000000000000000000000000000000\",\"neg_risk\":false,\"event_id\":\"900\",\"event_title\":\"MM event 0\",\"event_slug\":\"mm-event-0\",\"zk_native\":true}",
+    "category": "other",
+    "my_direction": 1,
+    "my_side": "NO",
+    "stake_kas": 20,
+    "deadline": 1791212292,
+    "status": "attested_v2",
+    "yes_pool_kas": 10,
+    "no_pool_kas": 20,
+    "yes_implied_prob": 0.3333333333333333,
+    "payout_if_win_kas": 29.76,
+    "side_p2sh": "kaspasim:pzdrmm0qlgs8nykp747xk9lfcsqp0xzfqnfmkmn6wskye9m2nymkcv7apwzm5",
+    "side_lock_tx": "272530b7b02b8b550351d17da2d54f58be1379bef4767aca7dfc7bc865835150",
+    "locked_at": "2026-10-05 14:45:03",
+    "deadline_unix": 1791212292,
+    "claim_txid": null,
+    "settle_txid": null,
+    "refund_txid": null,
+    "bshard_claim_txid": null,
+    "outcome_winner": 0,
+    "outcome_side": "YES",
+    "did_win": false,
+    "actual_payout_kas": null,
+    "actual_payout_chain_verified": false
+   },
+   {
+    "market_id": "ext-pool-v07-1791164916217-c96q2-s0",
+    "logical_market_id": "ext-pool-v07-1791164916217-c96q2",
+    "zk_native": true,
+    "claims_landed": 2,
+    "pool_known": true,
+    "actual_payout_units": null,
+    "payout_pending_units": null,
+    "question": "{\"title\":\"MM rehearsal market #2: will event 2 happen?\",\"data_source_canonical\":\"polymarket:0x3232323232323232323232323232323232323232323232323232323232323232\",\"source\":\"polymarket\",\"resolution_criteria\":\"mirror of a Polymarket market #2 (simnet rehearsal stub)\",\"uma_question_id\":\"0x0000000000000000000000000000000000000000000000000000000000000002\",\"neg_risk\":false,\"event_id\":\"902\",\"event_title\":\"MM event 2\",\"event_slug\":\"mm-event-2\",\"zk_native\":true}",
+    "category": "other",
+    "my_direction": 1,
+    "my_side": "NO",
+    "stake_kas": 20,
+    "deadline": 1791166353,
+    "status": "attested_v2",
+    "yes_pool_kas": 10,
+    "no_pool_kas": 20,
+    "yes_implied_prob": 0.3333333333333333,
+    "payout_if_win_kas": 29.76,
+    "side_p2sh": "kaspasim:prnhg35ulqudvavsgy7356ktn8k9ww4kewj4azkmpl6g6pcnh3kesv0m6pvd7",
+    "side_lock_tx": "399f73b3c4902d376710b30e1177ce3761161eb787420b48267b5d0a1f9a28e4",
+    "locked_at": "2026-10-05 01:50:30",
+    "deadline_unix": 1791166353,
+    "claim_txid": null,
+    "settle_txid": null,
+    "refund_txid": null,
+    "bshard_claim_txid": null,
+    "outcome_winner": 0,
+    "outcome_side": "YES",
+    "did_win": false,
+    "actual_payout_kas": null,
+    "actual_payout_chain_verified": false
+   },
+   {
+    "market_id": "ext-pool-v07-1791164856221-9b5oy-s0",
+    "logical_market_id": "ext-pool-v07-1791164856221-9b5oy",
+    "zk_native": true,
+    "claims_landed": 2,
+    "pool_known": true,
+    "actual_payout_units": "2943000000",
+    "payout_pending_units": "0",
+    "question": "{\"title\":\"MM rehearsal market #1: will event 1 happen?\",\"data_source_canonical\":\"polymarket:0x3131313131313131313131313131313131313131313131313131313131313131\",\"source\":\"polymarket\",\"resolution_criteria\":\"mirror of a Polymarket market #1 (simnet rehearsal stub)\",\"uma_question_id\":\"0x0000000000000000000000000000000000000000000000000000000000000001\",\"neg_risk\":false,\"event_id\":\"901\",\"event_title\":\"MM event 1\",\"event_slug\":\"mm-event-1\",\"zk_native\":true}",
+    "category": "other",
+    "my_direction": 1,
+    "my_side": "NO",
+    "stake_kas": 20,
+    "deadline": 1791166353,
+    "status": "attested_v2",
+    "yes_pool_kas": 10,
+    "no_pool_kas": 20,
+    "yes_implied_prob": 0.3333333333333333,
+    "payout_if_win_kas": 29.76,
+    "side_p2sh": "kaspasim:pqw0z4zgs6yzyrumw80fqedjparwt5u93h8xq9cwzjdqfxxcm7sl7vg9xw7z3",
+    "side_lock_tx": "d679f7a4dd10641f693590d6e29edcfa1229589091d323fef2de744f6509950e",
+    "locked_at": "2026-10-05 01:49:59",
+    "deadline_unix": 1791166353,
+    "claim_txid": null,
+    "settle_txid": null,
+    "refund_txid": null,
+    "bshard_claim_txid": "7dd6a5ed4fdf2034ac48e46b7f1b33767fa18d83a7c799de569088559d36a8f6",
+    "outcome_winner": 1,
+    "outcome_side": "NO",
+    "did_win": true,
+    "actual_payout_kas": 29.43,
+    "actual_payout_chain_verified": true
+   },
+   {
+    "market_id": "ext-pool-v07-1791164796238-4yvzs-s0",
+    "logical_market_id": "ext-pool-v07-1791164796238-4yvzs",
+    "zk_native": true,
+    "claims_landed": 2,
+    "pool_known": true,
+    "actual_payout_units": null,
+    "payout_pending_units": null,
+    "question": "{\"title\":\"MM rehearsal market #0: will event 0 happen?\",\"data_source_canonical\":\"polymarket:0x3030303030303030303030303030303030303030303030303030303030303030\",\"source\":\"polymarket\",\"resolution_criteria\":\"mirror of a Polymarket market #0 (simnet rehearsal stub)\",\"uma_question_id\":\"0x0000000000000000000000000000000000000000000000000000000000000000\",\"neg_risk\":false,\"event_id\":\"900\",\"event_title\":\"MM event 0\",\"event_slug\":\"mm-event-0\",\"zk_native\":true}",
+    "category": "other",
+    "my_direction": 1,
+    "my_side": "NO",
+    "stake_kas": 20,
+    "deadline": 1791166353,
+    "status": "attested_v2",
+    "yes_pool_kas": 10,
+    "no_pool_kas": 20,
+    "yes_implied_prob": 0.3333333333333333,
+    "payout_if_win_kas": 29.76,
+    "side_p2sh": "kaspasim:prrce6v09e7jl7vvkm62v6tpy5a4w9lcpcmsfy64h5ghld848ssgxa98v8glv",
+    "side_lock_tx": "42bc712f7258d0e6b774d9c1a86dda9bfb74af73ac9c789faa6568a9c6789816",
+    "locked_at": "2026-10-05 01:49:22",
+    "deadline_unix": 1791166353,
+    "claim_txid": null,
+    "settle_txid": null,
+    "refund_txid": null,
+    "bshard_claim_txid": null,
+    "outcome_winner": 0,
+    "outcome_side": "YES",
+    "did_win": false,
+    "actual_payout_kas": null,
+    "actual_payout_chain_verified": false
+   },
+   {
+    "market_id": "ext-pool-v07-1791155679385-dzxvd-s0",
+    "logical_market_id": "ext-pool-v07-1791155679385-dzxvd",
+    "zk_native": true,
+    "claims_landed": 2,
+    "pool_known": true,
+    "actual_payout_units": null,
+    "payout_pending_units": null,
+    "question": "{\"title\":\"MM rehearsal market #2: will event 2 happen?\",\"data_source_canonical\":\"polymarket:0x0202020202020202020202020202020202020202020202020202020202020202\",\"source\":\"polymarket\",\"resolution_criteria\":\"mirror of a Polymarket market #2 (simnet rehearsal stub)\",\"uma_question_id\":\"0x0000000000000000000000000000000000000000000000000000000000000002\",\"neg_risk\":false,\"event_id\":\"902\",\"event_title\":\"MM event 2\",\"event_slug\":\"mm-event-2\",\"zk_native\":true}",
+    "category": "other",
+    "my_direction": 1,
+    "my_side": "NO",
+    "stake_kas": 20,
+    "deadline": 1791157111,
+    "status": "attested_v2",
+    "yes_pool_kas": 10,
+    "no_pool_kas": 20,
+    "yes_implied_prob": 0.3333333333333333,
+    "payout_if_win_kas": 29.76,
+    "side_p2sh": "kaspasim:pphcprm3pd08c0lvd48xa6rls5hea94gfv6av900cnf4hdns3mwgktqnyjtc7",
+    "side_lock_tx": "4dd3297a641deeb914a02559effd283c848ac0f19a9a3488a06dc93f3e2fcd00",
+    "locked_at": "2026-10-04 23:16:18",
+    "deadline_unix": 1791157111,
+    "claim_txid": null,
+    "settle_txid": null,
+    "refund_txid": null,
+    "bshard_claim_txid": null,
+    "outcome_winner": 0,
+    "outcome_side": "YES",
+    "did_win": false,
+    "actual_payout_kas": null,
+    "actual_payout_chain_verified": false
+   },
+   {
+    "market_id": "ext-pool-v07-1791155619382-o8svl-s0",
+    "logical_market_id": "ext-pool-v07-1791155619382-o8svl",
+    "zk_native": true,
+    "claims_landed": 2,
+    "pool_known": true,
+    "actual_payout_units": "2943000000",
+    "payout_pending_units": "0",
+    "question": "{\"title\":\"MM rehearsal market #1: will event 1 happen?\",\"data_source_canonical\":\"polymarket:0x0101010101010101010101010101010101010101010101010101010101010101\",\"source\":\"polymarket\",\"resolution_criteria\":\"mirror of a Polymarket market #1 (simnet rehearsal stub)\",\"uma_question_id\":\"0x0000000000000000000000000000000000000000000000000000000000000001\",\"neg_risk\":false,\"event_id\":\"901\",\"event_title\":\"MM event 1\",\"event_slug\":\"mm-event-1\",\"zk_native\":true}",
+    "category": "other",
+    "my_direction": 1,
+    "my_side": "NO",
+    "stake_kas": 20,
+    "deadline": 1791157111,
+    "status": "attested_v2",
+    "yes_pool_kas": 10,
+    "no_pool_kas": 20,
+    "yes_implied_prob": 0.3333333333333333,
+    "payout_if_win_kas": 29.76,
+    "side_p2sh": "kaspasim:pp587wvxhfl0690xjxrwfzl5tcjhj23pq7gfua2y0khrsd6weyrku6aaaf276",
+    "side_lock_tx": "0ee8d6cc0bb0e09824f0e8920272f2d3480c29884b88a14d4072d1cf9857c407",
+    "locked_at": "2026-10-04 23:15:45",
+    "deadline_unix": 1791157111,
+    "claim_txid": null,
+    "settle_txid": null,
+    "refund_txid": null,
+    "bshard_claim_txid": "78212b0d91965205cf37556311d5ec04c8f54bba1bc7e47f25b4101c1f6ad2c3",
+    "outcome_winner": 1,
+    "outcome_side": "NO",
+    "did_win": true,
+    "actual_payout_kas": 29.43,
+    "actual_payout_chain_verified": true
+   },
+   {
+    "market_id": "ext-pool-v07-1791155559395-6f1b5-s0",
+    "logical_market_id": "ext-pool-v07-1791155559395-6f1b5",
+    "zk_native": true,
+    "claims_landed": 2,
+    "pool_known": true,
+    "actual_payout_units": null,
+    "payout_pending_units": null,
+    "question": "{\"title\":\"MM rehearsal market #0: will event 0 happen?\",\"data_source_canonical\":\"polymarket:0x0000000000000000000000000000000000000000000000000000000000000000\",\"source\":\"polymarket\",\"resolution_criteria\":\"mirror of a Polymarket market #0 (simnet rehearsal stub)\",\"uma_question_id\":\"0x0000000000000000000000000000000000000000000000000000000000000000\",\"neg_risk\":false,\"event_id\":\"900\",\"event_title\":\"MM event 0\",\"event_slug\":\"mm-event-0\",\"zk_native\":true}",
+    "category": "other",
+    "my_direction": 1,
+    "my_side": "NO",
+    "stake_kas": 20,
+    "deadline": 1791157111,
+    "status": "attested_v2",
+    "yes_pool_kas": 10,
+    "no_pool_kas": 20,
+    "yes_implied_prob": 0.3333333333333333,
+    "payout_if_win_kas": 29.76,
+    "side_p2sh": "kaspasim:pr00lekdya2yjjt6n27dunu2ucy056dkdvfxt0erzxgqvx622e7nvguufvxln",
+    "side_lock_tx": "08f47037bf1f43ed6dbb3ccbe0a28b1cec24c72e848a0a6a3c4061fb00654295",
+    "locked_at": "2026-10-04 23:15:14",
+    "deadline_unix": 1791157111,
+    "claim_txid": null,
+    "settle_txid": null,
+    "refund_txid": null,
+    "bshard_claim_txid": null,
+    "outcome_winner": 0,
+    "outcome_side": "YES",
+    "did_win": false,
+    "actual_payout_kas": null,
+    "actual_payout_chain_verified": false
+   },
+   {
+    "market_id": "ext-pool-v07-1791138137518-lorc6-s0",
+    "logical_market_id": "ext-pool-v07-1791138137518-lorc6",
+    "zk_native": true,
+    "claims_landed": 2,
+    "pool_known": true,
+    "actual_payout_units": null,
+    "payout_pending_units": null,
+    "question": "{\"title\":\"SZ strict-zero parity market 1791138137495\",\"resolution_criteria\":\"blockhash at DAA 104010: last byte even => YES, odd => NO\",\"data_source_canonical\":\"kaspa-simnet:blockhash_parity@104010\",\"judge_type\":\"blockhash_parity\",\"target_daa\":104010,\"zk_native\":true}",
+    "category": "crypto",
+    "my_direction": 1,
+    "my_side": "NO",
+    "stake_kas": 20,
+    "deadline": 1791138737,
+    "status": "attested_v2",
+    "yes_pool_kas": 10,
+    "no_pool_kas": 20,
+    "yes_implied_prob": 0.3333333333333333,
+    "payout_if_win_kas": 29.76,
+    "side_p2sh": "kaspasim:pzuzncfm0mnxezva65z0p5l44ezx9np9jffw2vh6xu62kmyq0e3rzjrvx4lfy",
+    "side_lock_tx": "846502b18812f48b455143964914f90d2af00ad688afdf69e43b241dd4332a14",
+    "locked_at": "2026-10-04 18:24:18",
+    "deadline_unix": 1791138737,
+    "claim_txid": null,
+    "settle_txid": null,
+    "refund_txid": null,
+    "bshard_claim_txid": null,
+    "outcome_winner": 0,
+    "outcome_side": "YES",
+    "did_win": false,
+    "actual_payout_kas": null,
+    "actual_payout_chain_verified": false
+   },
+   {
+    "market_id": "ext-pool-v07-1791124315416-fvyvm-s0",
+    "logical_market_id": "ext-pool-v07-1791124315416-fvyvm",
+    "zk_native": true,
+    "claims_landed": 2,
+    "pool_known": true,
+    "actual_payout_units": null,
+    "payout_pending_units": null,
+    "question": "{\"title\":\"S3 no-KAS parity market 1791124315407\",\"resolution_criteria\":\"blockhash at DAA 89067: last byte even => YES, odd => NO\",\"data_source_canonical\":\"kaspa-simnet:blockhash_parity@89067\",\"judge_type\":\"blockhash_parity\",\"target_daa\":89067,\"zk_native\":true}",
+    "category": "crypto",
+    "my_direction": 1,
+    "my_side": "NO",
+    "stake_kas": 20,
+    "deadline": 1791124915,
+    "status": "attested_v2",
+    "yes_pool_kas": 10,
+    "no_pool_kas": 20,
+    "yes_implied_prob": 0.3333333333333333,
+    "payout_if_win_kas": 29.76,
+    "side_p2sh": "kaspasim:pqde7kgfrprlmyvggum64vru2f9ypwgwwffgth2f26uh7fq84jqqvazne9lyk",
+    "side_lock_tx": "bb4c91f1ae3f5b59b90a9da7f673458ec67288aec2a466443683e1ea57af1cba",
+    "locked_at": "2026-10-04 14:32:41",
+    "deadline_unix": 1791124915,
+    "claim_txid": null,
+    "settle_txid": null,
+    "refund_txid": null,
+    "bshard_claim_txid": null,
+    "outcome_winner": 0,
+    "outcome_side": "YES",
+    "did_win": false,
+    "actual_payout_kas": null,
+    "actual_payout_chain_verified": false
+   },
+   {
+    "market_id": "ext-pool-v07-1791123064240-umrvw-s0",
+    "logical_market_id": "ext-pool-v07-1791123064240-umrvw",
+    "zk_native": true,
+    "claims_landed": 2,
+    "pool_known": true,
+    "actual_payout_units": "2943000000",
+    "payout_pending_units": "0",
+    "question": "{\"title\":\"S3 no-KAS parity market 1791123064229\",\"resolution_criteria\":\"blockhash at DAA 73915: last byte even => YES, odd => NO\",\"data_source_canonical\":\"kaspa-simnet:blockhash_parity@73915\",\"judge_type\":\"blockhash_parity\",\"target_daa\":73915,\"zk_native\":true}",
+    "category": "crypto",
+    "my_direction": 1,
+    "my_side": "NO",
+    "stake_kas": 20,
+    "deadline": 1791123664,
+    "status": "attested_v2",
+    "yes_pool_kas": 10,
+    "no_pool_kas": 20,
+    "yes_implied_prob": 0.3333333333333333,
+    "payout_if_win_kas": 29.76,
+    "side_p2sh": "kaspasim:pp8dktesgslm863hqcmxdxwtyezatjj9r3nlv3jhf8lslxxrpt06q899gydqa",
+    "side_lock_tx": "435084b31da49ca19b559b74856bccbf2c38f02aa03db39cc6342aa6dbe33f23",
+    "locked_at": "2026-10-04 14:11:40",
+    "deadline_unix": 1791123664,
+    "claim_txid": null,
+    "settle_txid": null,
+    "refund_txid": null,
+    "bshard_claim_txid": "66ba47bae582bc61989a301ff3b0440f71275bcd8c1a6700dbb3558f0714ec34",
+    "outcome_winner": 1,
+    "outcome_side": "NO",
+    "did_win": true,
+    "actual_payout_kas": 29.43,
+    "actual_payout_chain_verified": true
+   },
+   {
+    "market_id": "ext-pool-v07-1791120940107-z0g04-s0",
+    "logical_market_id": "ext-pool-v07-1791120940107-z0g04",
+    "zk_native": true,
+    "claims_landed": 2,
+    "pool_known": true,
+    "actual_payout_units": null,
+    "payout_pending_units": null,
+    "question": "{\"title\":\"S3 no-KAS parity market 1791120940095\",\"resolution_criteria\":\"blockhash at DAA 56930: last byte even => YES, odd => NO\",\"data_source_canonical\":\"kaspa-simnet:blockhash_parity@56930\",\"judge_type\":\"blockhash_parity\",\"target_daa\":56930,\"zk_native\":true}",
+    "category": "crypto",
+    "my_direction": 1,
+    "my_side": "NO",
+    "stake_kas": 20,
+    "deadline": 1791121540,
+    "status": "attested_v2",
+    "yes_pool_kas": 10,
+    "no_pool_kas": 20,
+    "yes_implied_prob": 0.3333333333333333,
+    "payout_if_win_kas": 29.76,
+    "side_p2sh": "kaspasim:ppykmksjvw58nxjturtkcl4r4fazm5cxx6srfjwjsff4806uutt4668d0yy4y",
+    "side_lock_tx": "3563f47ab69c0b90200a4125e774f831d13c4ed8875a5378b16528020b841e9d",
+    "locked_at": "2026-10-04 13:37:19",
+    "deadline_unix": 1791121540,
+    "claim_txid": null,
+    "settle_txid": null,
+    "refund_txid": null,
+    "bshard_claim_txid": null,
+    "outcome_winner": 0,
+    "outcome_side": "YES",
+    "did_win": false,
+    "actual_payout_kas": null,
+    "actual_payout_chain_verified": false
+   },
+   {
+    "market_id": "ext-pool-v07-1791120870824-btduw-s0",
+    "logical_market_id": "ext-pool-v07-1791120870824-btduw",
+    "question": "{\"title\":\"S3 no-KAS parity market 1791120870802\",\"resolution_criteria\":\"blockhash at DAA 56731: last byte even => YES, odd => NO\",\"data_source_canonical\":\"kaspa-simnet:blockhash_parity@56731\",\"judge_type\":\"blockhash_parity\",\"target_daa\":56731,\"zk_native\":true}",
+    "category": "crypto",
+    "my_direction": 1,
+    "my_side": "NO",
+    "stake_kas": 20,
+    "deadline": 1791121470,
+    "status": "cancelled",
+    "yes_pool_kas": 10,
+    "no_pool_kas": 20,
+    "yes_implied_prob": 0.3333333333333333,
+    "payout_if_win_kas": 29.76,
+    "side_p2sh": "kaspasim:pzhmupr0gdlvgq9yu26mzrs2vw8nt0fa52l2e27nh9g73yanvtdvcwdxd8d4f",
+    "side_lock_tx": "335fc99224c8d73a306f06add71444eb156498a3e7f27def35af6e2d4eb2b541",
+    "locked_at": "2026-10-04 13:36:21",
+    "deadline_unix": 1791121470,
+    "claim_txid": null,
+    "settle_txid": null,
+    "refund_txid": null,
+    "bshard_claim_txid": null,
+    "outcome_winner": null,
+    "outcome_side": null,
+    "did_win": null,
+    "actual_payout_kas": null,
+    "actual_payout_chain_verified": false
+   },
+   {
+    "market_id": "ext-pool-v07-1791076886129-bnwnx-s0",
+    "logical_market_id": "ext-pool-v07-1791076886129-bnwnx",
+    "zk_native": true,
+    "claims_landed": 2,
+    "pool_known": true,
+    "actual_payout_units": null,
+    "payout_pending_units": null,
+    "question": "{\"title\":\"simnet e2e parity market 1791076886096\",\"resolution_criteria\":\"blockhash at DAA 38682: last byte even => YES, odd => NO\",\"data_source_canonical\":\"kaspa-simnet:blockhash_parity@38682\",\"judge_type\":\"blockhash_parity\",\"target_daa\":38682,\"zk_native\":true}",
+    "category": "crypto",
+    "my_direction": 1,
+    "my_side": "NO",
+    "stake_kas": 20,
+    "deadline": 1791077216,
+    "status": "attested_v2",
+    "yes_pool_kas": 140,
+    "no_pool_kas": 20,
+    "yes_implied_prob": 0.875,
+    "payout_if_win_kas": 157.29,
+    "side_p2sh": "kaspasim:ppc5wld6jdde39252rmv78nyxmjsuppgn5h2pm7u7f9rv055zchs6wqutk8sj",
+    "side_lock_tx": "d5291f6fae8105c30cbd6a0732f6cb9e312c1f346b188d2b2a37d43c2996cb0d",
+    "locked_at": "2026-10-04 01:22:52",
+    "deadline_unix": 1791077216,
+    "claim_txid": null,
+    "settle_txid": null,
+    "refund_txid": null,
+    "bshard_claim_txid": null,
+    "outcome_winner": 0,
+    "outcome_side": "YES",
+    "did_win": false,
+    "actual_payout_kas": null,
+    "actual_payout_chain_verified": false
+   },
+   {
+    "market_id": "ext-pool-v07-1791073817312-8gmuv-s0",
+    "logical_market_id": "ext-pool-v07-1791073817312-8gmuv",
+    "zk_native": true,
+    "claims_landed": 2,
+    "pool_known": true,
+    "actual_payout_units": null,
+    "payout_pending_units": null,
+    "question": "{\"title\":\"simnet e2e parity market 1791073817281\",\"resolution_criteria\":\"blockhash at DAA 19223: last byte even => YES, odd => NO\",\"data_source_canonical\":\"kaspa-simnet:blockhash_parity@19223\",\"judge_type\":\"blockhash_parity\",\"target_daa\":19223,\"zk_native\":true}",
+    "category": "crypto",
+    "my_direction": 1,
+    "my_side": "NO",
+    "stake_kas": 20,
+    "deadline": 1791074147,
+    "status": "attested_v2",
+    "yes_pool_kas": 140,
+    "no_pool_kas": 20,
+    "yes_implied_prob": 0.875,
+    "payout_if_win_kas": 157.29,
+    "side_p2sh": "kaspasim:prh9maruel59qay7dsu8vnnk7wclfmzp5navsa2k26842tkmsk2lsf4sp738t",
+    "side_lock_tx": "05ba112d5bae64a34f19ec34c95dacf63f659b5858fcce9f33ac5e6216dd84ac",
+    "locked_at": "2026-10-04 00:31:15",
+    "deadline_unix": 1791074147,
+    "claim_txid": null,
+    "settle_txid": null,
+    "refund_txid": null,
+    "bshard_claim_txid": null,
+    "outcome_winner": 0,
+    "outcome_side": "YES",
+    "did_win": false,
+    "actual_payout_kas": null,
+    "actual_payout_chain_verified": false
+   },
+   {
+    "market_id": "ext-pool-v07-1791072305023-vl1wf-s0",
+    "logical_market_id": "ext-pool-v07-1791072305023-vl1wf",
+    "zk_native": true,
+    "claims_landed": 2,
+    "pool_known": true,
+    "actual_payout_units": null,
+    "payout_pending_units": null,
+    "question": "{\"title\":\"simnet e2e parity market 1791072305006\",\"resolution_criteria\":\"blockhash at DAA 4660: last byte even => YES, odd => NO\",\"data_source_canonical\":\"kaspa-simnet:blockhash_parity@4660\",\"judge_type\":\"blockhash_parity\",\"target_daa\":4660,\"zk_native\":true}",
+    "category": "crypto",
+    "my_direction": 1,
+    "my_side": "NO",
+    "stake_kas": 20,
+    "deadline": 1791072635,
+    "status": "attested_v2",
+    "yes_pool_kas": 140,
+    "no_pool_kas": 20,
+    "yes_implied_prob": 0.875,
+    "payout_if_win_kas": 157.29,
+    "side_p2sh": "kaspasim:prq3hnt9xajlxk5lasm2duaq7h283aexk2gwyvawq95nrd8klnyqwu7rel2ct",
+    "side_lock_tx": "50f0722b9b1d8c3ecaa4b48ecb0d686d8d956c09d22f9e7786bc039c2af11242",
+    "locked_at": "2026-10-04 00:06:04",
+    "deadline_unix": 1791072635,
+    "claim_txid": null,
+    "settle_txid": null,
+    "refund_txid": null,
+    "bshard_claim_txid": null,
+    "outcome_winner": 0,
+    "outcome_side": "YES",
+    "did_win": false,
+    "actual_payout_kas": null,
+    "actual_payout_chain_verified": false
+   }
+  ]
+ },
+ "finishedAt": "2026-10-05T15:11:10.325Z",
+ "failures": 0
+}

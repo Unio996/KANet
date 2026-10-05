@@ -1,0 +1,89 @@
+14:42:16 balances before (KAS): {
+  maker: 200.741007,
+  settler: 304.961183,
+  fee: 300,
+  bettorA: 263.903892,
+  bettorB: 233.903892
+}
+14:42:16   ✅ 前置: 库里没有未完结的 zk_native 盘(live=0)
+14:42:16 gamma stub armed; waiting for seeder to create 3 markets (cap ZK_MAX_LIVE_MARKETS=3)…
+14:44:13   ✅ 种子器建出 3 个盘(3, 用时 117s)
+14:44:13   ✅ 同时在跑(未完结)的 ZK 原生盘峰值 = 3(≥3)
+14:44:13   ✅ 盘 76-1l6ot: zk_native=true, 无 spine, polymarket 镜像(cond 0x90909090…), broker 塌到 maker(未配 GATEWAY_RELAY_ID)
+14:44:13   ✅ 盘 59-svrok: zk_native=true, 无 spine, polymarket 镜像(cond 0x91919191…), broker 塌到 maker(未配 GATEWAY_RELAY_ID)
+14:44:13   ✅ 盘 54-ctov6: zk_native=true, 无 spine, polymarket 镜像(cond 0x92929292…), broker 塌到 maker(未配 GATEWAY_RELAY_ID)
+14:44:14   ✅ 建 3 个盘后: maker/下注人钱包余额逐 sompi 不变(建盘不转账)
+14:44:14   ✅ 3/3 在跑时再 create-v07 ⇒ 409 live_market_cap_reached(live=3, cap=3)
+14:44:49 76-1l6ot bettorA dir=0 stake_ktt=1000000000 (35226ms) => {"status":200,"ok":true,"logical_market_id":"ext-pool-v07-1791211340976-1l6ot","bettor_pk":"060b0264800672da79c533ae1534310f7925beeac945363bd2cd0d2b7402dc79","no_kas_stake":true,"stake_ktt":1000000000,"action":"use","sha
+14:44:49   ✅ 76-1l6ot bettorA register-v07 stake_ktt=1000000000 ⇒ 200 no_kas_stake
+14:44:49   ✅ 76-1l6ot bettorA 钱包余额逐 sompi 不变
+14:45:03 76-1l6ot bettorB dir=1 stake_ktt=2000000000 (14197ms) => {"status":200,"ok":true,"logical_market_id":"ext-pool-v07-1791211340976-1l6ot","bettor_pk":"b8fd583b660dea6c94bc0962a2f4921e763578bdeb375575fdd7feddf48dfd27","no_kas_stake":true,"stake_ktt":2000000000,"action":"use","sha
+14:45:03   ✅ 76-1l6ot bettorB register-v07 stake_ktt=2000000000 ⇒ 200 no_kas_stake
+14:45:03   ✅ 76-1l6ot bettorB 钱包余额逐 sompi 不变
+14:45:32 59-svrok bettorA dir=0 stake_ktt=1000000000 (29116ms) => {"status":200,"ok":true,"logical_market_id":"ext-pool-v07-1791211392959-svrok","bettor_pk":"060b0264800672da79c533ae1534310f7925beeac945363bd2cd0d2b7402dc79","no_kas_stake":true,"stake_ktt":1000000000,"action":"use","sha
+14:45:32   ✅ 59-svrok bettorA register-v07 stake_ktt=1000000000 ⇒ 200 no_kas_stake
+14:45:32   ✅ 59-svrok bettorA 钱包余额逐 sompi 不变
+14:45:46 59-svrok bettorB dir=1 stake_ktt=2000000000 (14182ms) => {"status":200,"ok":true,"logical_market_id":"ext-pool-v07-1791211392959-svrok","bettor_pk":"b8fd583b660dea6c94bc0962a2f4921e763578bdeb375575fdd7feddf48dfd27","no_kas_stake":true,"stake_ktt":2000000000,"action":"use","sha
+14:45:46   ✅ 59-svrok bettorB register-v07 stake_ktt=2000000000 ⇒ 200 no_kas_stake
+14:45:46   ✅ 59-svrok bettorB 钱包余额逐 sompi 不变
+14:46:15 54-ctov6 bettorA dir=0 stake_ktt=1000000000 (29044ms) => {"status":200,"ok":true,"logical_market_id":"ext-pool-v07-1791211452954-ctov6","bettor_pk":"060b0264800672da79c533ae1534310f7925beeac945363bd2cd0d2b7402dc79","no_kas_stake":true,"stake_ktt":1000000000,"action":"use","sha
+14:46:15   ✅ 54-ctov6 bettorA register-v07 stake_ktt=1000000000 ⇒ 200 no_kas_stake
+14:46:15   ✅ 54-ctov6 bettorA 钱包余额逐 sompi 不变
+14:46:29 54-ctov6 bettorB dir=1 stake_ktt=2000000000 (14185ms) => {"status":200,"ok":true,"logical_market_id":"ext-pool-v07-1791211452954-ctov6","bettor_pk":"b8fd583b660dea6c94bc0962a2f4921e763578bdeb375575fdd7feddf48dfd27","no_kas_stake":true,"stake_ktt":2000000000,"action":"use","sha
+14:46:29   ✅ 54-ctov6 bettorB register-v07 stake_ktt=2000000000 ⇒ 200 no_kas_stake
+14:46:29   ✅ 54-ctov6 bettorB 钱包余额逐 sompi 不变
+14:46:29 waiting… 0s daa=861288 claims/market=0/0/0 exhausted=0 status=pending_bettors,pending_bettors,pending_bettors
+14:48:30 waiting… 120s daa=862320 claims/market=0/0/0 exhausted=0 status=pending_bettors,pending_bettors,pending_bettors
+14:50:30 waiting… 241s daa=863643 claims/market=0/0/0 exhausted=0 status=pending_bettors,pending_bettors,pending_bettors
+14:52:30 waiting… 361s daa=864596 claims/market=0/0/0 exhausted=0 status=pending_bettors,pending_bettors,pending_bettors
+14:54:31 waiting… 481s daa=865484 claims/market=0/0/0 exhausted=0 status=pending_bettors,pending_bettors,pending_bettors
+14:56:31 waiting… 601s daa=866525 claims/market=0/0/0 exhausted=0 status=pending_bettors,pending_bettors,pending_bettors
+14:58:31 waiting… 722s daa=867815 claims/market=0/0/0 exhausted=0 status=pending_bettors,pending_bettors,pending_bettors
+15:00:31 waiting… 842s daa=868833 claims/market=0/0/0 exhausted=0 status=pending_bettors,pending_bettors,pending_bettors
+15:02:32 waiting… 962s daa=869909 claims/market=0/0/0 exhausted=0 status=verifying,verifying,verifying
+15:03:24 CHAOS transfer injected while 76-1l6ot collecting_sigs => {"status":200,"ok":true,"txId":"e0ba3badad1f48f87e4ed9715c267b45ee314e255fc49f43010123d518494de7","fee":"0.003036","phase":"execution"} fee outpoints [{"market":"76-1l6ot","txid":"1f15af1b295ceab3b02990f7689e97d06ce358ad87f9b2b8dad6701521e94471","index":0}]
+15:04:32 waiting… 1083s daa=871138 claims/market=0/0/0 exhausted=0 status=attested_v2,attested_v2,attested_v2
+15:06:32 waiting… 1203s daa=871881 claims/market=0/0/0 exhausted=0 status=attested_v2,attested_v2,attested_v2
+15:08:33 waiting… 1323s daa=872315 claims/market=2/0/0 exhausted=1 status=attested_v2,attested_v2,attested_v2
+15:10:33 waiting… 1443s daa=872789 claims/market=2/2/1 exhausted=2 status=attested_v2,attested_v2,attested_v2
+15:10:53   ✅ 干扰转账已上链提交(txid e0ba3badad1f48f87e4ed9715c267b45ee314e255fc49f43010123d518494de7)
+15:10:53   ✅ 3 个盘全部走到最后一个 claim(exhausted)(1463s)
+15:10:53   ✅ pin 证据: relay 日志 PIN_UTXO 18 行 / UNPIN_UTXO 9 行(≥3 / ≥3: 每盘 close 费钉住 + 落链后解钉)
+15:11:08   ✅ A. bettorA 余额逐 sompi 相同(26390389200 → 26390389200)
+15:11:08   ✅ A. bettorB 余额逐 sompi 相同(23390389200 → 23390389200)
+15:11:10 scanned accepted txs in window: 13729 of accepted ids 13729
+15:11:10   ✅ B. 窗口内所有被接受交易的输入面值都能溯源(未知输入 0)
+15:11:10   ✅ A. 窗口内没有任何被接受的交易触碰下注人钱包(0)
+15:11:10   ✅ B. maker: 逐笔重算 Δ(-342064800) == 余额差(-342064800) sompi
+15:11:10   ✅ B. maker: Δ == −(手续费 60064800 + 净锁进 covenant 282000000) 逐 sompi 成立
+15:11:10   ✅ B. maker: 落到第三方 P2PK 地址的输出 = 0(须为 0)
+15:11:10   ✅ B. settler: 逐笔重算 Δ(-618971700) == 余额差(-618971700) sompi
+15:11:10   ✅ B. settler: Δ == −(手续费 258971700 + 净锁进 covenant 360000000) 逐 sompi 成立
+15:11:10   ✅ B. settler: 落到第三方 P2PK 地址的输出 = 0(须为 0)
+15:11:10   ✅ B. fee: 逐笔重算 Δ(0) == 余额差(0) sompi
+15:11:10   ✅ B. fee: Δ == −(手续费 0 + 净锁进 covenant 0) 逐 sompi 成立
+15:11:10   ✅ B. fee: 落到第三方 P2PK 地址的输出 = 0(须为 0)
+15:11:10   ✅ B. 系统钱包合计 Δ(-961036500) == −(手续费 319036500 + 净锁 covenant 642000000)
+15:11:10 per-market cost (fees + locked): fees 1.062443 KAS + locked 2.14 KAS =  3.202443 KAS (干扰转账费 0.003036 KAS 已剔除)
+15:11:10   ✅ C. 76-1l6ot claim idx=0 → bettorA: claim_out/tok_out 地址 == 重算的 KanetTokenClaim/KTT 地址, 仍是链上未花 UTXO, 无输出落到赢家/下注人钱包
+15:11:10   ✅ C. 76-1l6ot claim idx=1 → maker: claim_out/tok_out 地址 == 重算的 KanetTokenClaim/KTT 地址, 仍是链上未花 UTXO, 无输出落到赢家/下注人钱包
+15:11:10   ✅ C. 76-1l6ot: 全部 claim 的 KTT 总量 == 池总额 3000000000(实 3000000000)
+15:11:10   ✅ C. 76-1l6ot: UMA 桩判 YES ⇒ 赢家 bettorA 收到 KTT claim(受益人 bettorA,maker)
+15:11:10   ✅ C. 59-svrok claim idx=0 → bettorB: claim_out/tok_out 地址 == 重算的 KanetTokenClaim/KTT 地址, 仍是链上未花 UTXO, 无输出落到赢家/下注人钱包
+15:11:10   ✅ C. 59-svrok claim idx=1 → maker: claim_out/tok_out 地址 == 重算的 KanetTokenClaim/KTT 地址, 仍是链上未花 UTXO, 无输出落到赢家/下注人钱包
+15:11:10   ✅ C. 59-svrok: 全部 claim 的 KTT 总量 == 池总额 3000000000(实 3000000000)
+15:11:10   ✅ C. 59-svrok: UMA 桩判 NO ⇒ 赢家 bettorB 收到 KTT claim(受益人 bettorB,maker)
+15:11:10   ✅ C. 54-ctov6 claim idx=0 → bettorA: claim_out/tok_out 地址 == 重算的 KanetTokenClaim/KTT 地址, 仍是链上未花 UTXO, 无输出落到赢家/下注人钱包
+15:11:10   ✅ C. 54-ctov6 claim idx=1 → maker: claim_out/tok_out 地址 == 重算的 KanetTokenClaim/KTT 地址, 仍是链上未花 UTXO, 无输出落到赢家/下注人钱包
+15:11:10   ✅ C. 54-ctov6: 全部 claim 的 KTT 总量 == 池总额 3000000000(实 3000000000)
+15:11:10   ✅ C. 54-ctov6: UMA 桩判 YES ⇒ 赢家 bettorA 收到 KTT claim(受益人 bettorA,maker)
+15:11:10   ✅ my-positions(bettorA) 200
+15:11:10   ✅ my-positions bettorA @76-1l6ot: 赢 2943000000 筹码(== 链上 claim 合计 2943000000), chain_verified
+15:11:10   ✅ my-positions bettorA @59-svrok: 输(did_win=false)
+15:11:10   ✅ my-positions bettorA @54-ctov6: 赢 2943000000 筹码(== 链上 claim 合计 2943000000), chain_verified
+15:11:10   ✅ my-positions(bettorB) 200
+15:11:10   ✅ my-positions bettorB @76-1l6ot: 输(did_win=false)
+15:11:10   ✅ my-positions bettorB @59-svrok: 赢 2943000000 筹码(== 链上 claim 合计 2943000000), chain_verified
+15:11:10   ✅ my-positions bettorB @54-ctov6: 输(did_win=false)
+15:11:10 
+ALL PASS
