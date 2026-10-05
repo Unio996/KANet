@@ -177,6 +177,15 @@ await T('17 /mybets: 拉 my-positions(linked 地址), 按盘分组渲染; 未绑
   assert.ok(o.replies[0].text.includes('29.43') && o.replies[0].text.includes('lost'));
   assert.ok((await makeEnv({ linkedAddr: null }).cmd('record')).replies[0].text.includes('/link'));
 });
+await T('18 文案事实口径(Bettor 核 KanetTokenClaim.sil): 赢到的筹码是链上记账凭证, 不是发到用户地址的余额——pm_*/ro_* 不得出现 到账/发到/待领/arrive/paid out; ro_help 说明保留 30 天且不再提 /support', async () => {
+  const { LANGS } = await import('./i18n.mjs');
+  for (const l of ['en', 'zh']) for (const [k, v] of Object.entries(LANGS[l])) {
+    if (!/^(pm_|ro_)/.test(k)) continue;
+    assert.ok(!/到账|发到|待领|发放|arrive|paid out|payout in/i.test(v), `${l}:${k} ${v}`);
+  }
+  assert.ok(/30 天/.test(LANGS.zh.ro_help) && /30 days/.test(LANGS.en.ro_help));
+  assert.ok(!/\/support/.test(LANGS.zh.ro_help) && !/\/support/.test(LANGS.en.ro_help));
+});
 
 console.log(`\n${n - fail} PASS / ${fail} FAIL`);
 process.exit(fail ? 1 : 0);

@@ -10,7 +10,7 @@ import {
 import { prefixForNetwork } from '../shared/lib/kaspa-network.mjs';
 
 /** 主网期隐藏的命令(Owner 已批: /wallet /send /faucet; /swap 无兑换; /broker_apply 建议隐藏, Owner 待定——改这一处即可)。 */
-export const RO_HIDDEN_COMMANDS = ['wallet', 'balance', 'receive', 'send', 'confirm', 'cancel', 'faucet', 'swap', 'broker_apply'];
+export const RO_HIDDEN_COMMANDS = ['wallet', 'balance', 'receive', 'send', 'confirm', 'cancel', 'faucet', 'swap', 'broker_apply', 'broker', 'earnings', 'support', 'verify'];
 
 export function registerReadonlyShell(bot, { api, PM, CONFIG, linked, t, getLang, initLang, now = Date.now, log = console }) {
   // F2(NWT 审后修): 启动清理——丢弃地址前缀≠主网的旧绑定(TN12 时代 kaspatest)+清空残留下注会话, 让 /start 那句"旧的绑定与会话已重置"名副其实; 同时堵住
