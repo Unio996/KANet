@@ -202,6 +202,53 @@ console.log('[test] 8. 结构');
   ok(!/await /.test(between.split('\n').slice(0, 6).join('\n').replace(/\/\/.*$/gm, '')), '预留到 try 之间没有 await');
 }
 
+// ═══ 9. linked_addr(账本1861 电报接线): 服务端用既有 deriveXOnlyPubkey 推 bettor_pk; 成本闸按【推出的】pk 计数 ═══
+console.log('[test] 9. register-v07 linked_addr');
+process.env.ZK_BET_MAX_PER_PK_DAY = '1'; delete process.env.ZK_BET_MAX_GLOBAL_DAY; wipe(); regDelay = 0;
+{
+  const lbet = (extra) => post('/api/pool/market/m-cap/bettor/register-v07', { direction: 0, stake_ktt: 150000000, ...extra });
+  const testnetAddr = new kaspa.PrivateKey('02'.repeat(32)).toPublicKey().toAddress('testnet-10').toString();
+  const p2sh = kaspa.addressFromScriptPublicKey(kaspa.ScriptBuilder.fromScript(new Uint8Array([0x51])).createPayToScriptHashScript(), 'mainnet').toString();
+  const regN = () => calls.reg.length;
+
+  // my-positions 推出的 pk(同一个 deriveXOnlyPubkey)
+  const mp = await app.inject({ method: 'GET', url: `/api/pool/my-positions?linked_addr=${encodeURIComponent(BETTOR.addrMain)}` });
+  const mpPk = J(mp).bettor_pk;
+  ok(mp.statusCode === 200 && mpPk === BETTOR.xonly, `my-positions 对该地址推出 bettor_pk(实 ${String(mpPk).slice(0, 12)})`);
+
+  const n0 = regN();
+  const bad1 = await lbet({ linked_addr: testnetAddr });
+  ok(bad1.statusCode === 400 && /网络|前缀/.test(J(bad1).error || ''), `testnet 前缀 ⇒ 400(实 ${bad1.statusCode} ${String(J(bad1).error).slice(0, 80)})`);
+  const bad2 = await lbet({ linked_addr: p2sh });
+  ok(bad2.statusCode === 400 && /P2PK/.test(J(bad2).error || ''), `P2SH 地址 ⇒ 400 且信息清楚(实 ${bad2.statusCode} ${String(J(bad2).error).slice(0, 80)})`);
+  const bad3 = await lbet({ linked_addr: BETTOR.addrMain, bettor_pk: PKS[0] });
+  ok(bad3.statusCode === 400 && /不一致/.test(J(bad3).error || '') && J(bad3).derived_bettor_pk === BETTOR.xonly, `linked_addr 与 bettor_pk 不一致 ⇒ 400(实 ${bad3.statusCode})`);
+  const bad4 = await lbet({ linked_addr: BETTOR.addrMain, bettor_relay_id: 'bettor-r' });
+  ok(bad4.statusCode === 400, `linked_addr + bettor_relay_id ⇒ 400(实 ${bad4.statusCode})`);
+  const bad5 = await lbet({ linked_addr: 'not-an-address' });
+  ok(bad5.statusCode === 400, `乱码地址 ⇒ 400(实 ${bad5.statusCode})`);
+  const miss = await post('/api/pool/market/m-cap/bettor/register-v07', { direction: 0, stake_ktt: 150000000 });
+  ok(miss.statusCode === 400 && /linked_addr/.test(J(miss).error || ''), `缺身份参数的错误文本提到 linked_addr(实 ${String(J(miss).error).slice(0, 90)})`);
+  ok(regN() === n0 && calls.transfer.length === 0, '以上全部 400: 没进 registerBettorOnShard、零转账');
+  ok(Object.keys(_inflightSnapshotForTest()).length === 0, '400 路径没占预留');
+
+  const good = await lbet({ linked_addr: BETTOR.addrMain });
+  ok(good.statusCode === 200 && J(good).bettor_pk === BETTOR.xonly && calls.reg.at(-1)?.bettorPk === BETTOR.xonly, `有效主网 P2PK 地址 ⇒ 200, bettor_pk = 推出值 = my-positions 推出值(实 ${good.statusCode})`);
+  ok(calls.reg.at(-1)?.bettorPk === mpPk, '与 my-positions 推出的 pk 逐字节相同');
+  ok(calls.reg.at(-1)?.relayAddr === MAKER.addrMain && calls.transfer.length === 0, '仍是网关代付: 付费方=网关, 下注人零转账');
+  // 成本闸按推出的 pk 计数: 同一 pk 的第二笔(无论用 linked_addr 还是 bettor_pk 十六进制)都 429 bet_cap_pk_day
+  const cap1 = await lbet({ linked_addr: BETTOR.addrMain });
+  const cap2 = await lbet({ bettor_pk: BETTOR.xonly.toUpperCase() });
+  ok(cap1.statusCode === 429 && J(cap1).code === BET_CAP_PK_CODE && J(cap1).used === 1, `cap=1: 同地址第二笔(linked_addr) ⇒ 429 ${BET_CAP_PK_CODE}(实 ${cap1.statusCode})`);
+  ok(cap2.statusCode === 429 && J(cap2).code === BET_CAP_PK_CODE, `同 pk 改用 bettor_pk 十六进制(大写) 也 ⇒ 429(按推出的 pk 计数, 两种入口共用额度)(实 ${cap2.statusCode})`);
+  const other = await lbet({ linked_addr: MAKER.addrMain });
+  ok(other.statusCode === 200 || other.statusCode === 403, `另一个地址不受该 pk 额度影响(实 ${other.statusCode})`);
+  // 一致时可同给
+  wipe();
+  const both = await lbet({ linked_addr: BETTOR.addrMain, bettor_pk: BETTOR.xonly.toUpperCase() });
+  ok(both.statusCode === 200, `linked_addr 与 bettor_pk 一致(大小写不敏感) 可同给 ⇒ 200(实 ${both.statusCode})`);
+}
+
 await app.close();
 console.log(fails ? `\n${fails} FAIL` : '\nALL PASS');
 process.exitCode = fails ? 1 : 0;
