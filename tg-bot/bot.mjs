@@ -630,6 +630,7 @@ export async function pollSettleResultsMainnet() {
       for (const n of notes) {
         if (!fresh.has(n.key)) continue;
         const msg = n.kind === 'win' ? t(uLang, 'pm_notify_win', { q: n.title, side: n.side })
+          : n.kind === 'lose_nowinners' ? t(uLang, 'pm_notify_lose_nowinners', { q: n.title, side: n.side })
           : n.kind === 'lose' ? t(uLang, 'pm_notify_lose', { q: n.title, side: n.side })
           : t(uLang, 'pm_notify_paid', { q: n.title, payout: n.payoutChips });
         try { await bot.api.sendMessage(u.tgUser, msg); } catch {}

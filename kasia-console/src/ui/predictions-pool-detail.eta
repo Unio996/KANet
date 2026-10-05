@@ -874,7 +874,8 @@ function poolDetailPage(marketId) {
       const voted = this.votedCount?.() ?? 0;
       const sigs = this.sigsCollected || 0;
       if (!st) return '加载中...';
-      // KANet-UI 2026-06-07 P1-#5 (Bettor r325): '委员' → '仲裁人' 贯穿
+<% if (it.noKasMode) { %>      if (this.noWinners()) return '本场无人押中，市场已结束，没有派奖。';
+<% } %>      // KANet-UI 2026-06-07 P1-#5 (Bettor r325): '委员' → '仲裁人' 贯穿
       if (st === 'pending_oracle_deposits') return '等仲裁人接单 (= 仲裁人押 bond 接单).';
       if (st === 'pending_oracle_sampling' || st === 'pending_oracle_sample') return '抽仲裁人中 (约 10 秒).';
       if (st === 'pending_bettors') return '等用户押注 (= 截止前任何人可押 YES/NO).';
@@ -1016,7 +1017,8 @@ function poolDetailPage(marketId) {
       // chain-truth reconcile: show 已结算 when chain settle evidence exists, even if DB says refunded.
       if (this.chainSettled()) return '已结算 (链上)';
       if (!this.market) return '';
-      // 查漏补缺(2026-07-04): 之前裸显 protocol_status 原始枚举(pending_bettors/collecting_sigs 等)
+<% if (it.noKasMode) { %>      if (this.noWinners()) return '已结束 · 无人押中';
+<% } %>      // 查漏补缺(2026-07-04): 之前裸显 protocol_status 原始枚举(pending_bettors/collecting_sigs 等)
       // 给用户看——同一套翻译 my-markets.eta/predictions-list.eta/oracle-home.eta 早就有, 这里没复用。
       var m = {
         pending_oracle_deposits: '等仲裁人接单',
@@ -1054,6 +1056,8 @@ function poolDetailPage(marketId) {
       try { return !!JSON.parse(m.resolution_rule_spec || '{}').zk_native; } catch (e) { return false; }
     },
     // 取消原因(metadata.cancel_reason): no_bets(J2 新增) / 旧口径 min_pot_undersize 且池为 0 ⇒ "无人下注"; 其它取消不编原因。主网无退款, 不说"已退款"。
+    // "无人押中": 全部押注都在输的一边(判定已终局)。metadata.no_winners===true 为准, 不依赖终态状态名。0 KAS、不派奖、占的名额已释放。
+    noWinners() { return !!(this.market && this.market.metadata && this.market.metadata.no_winners === true); },
     cancelHint() {
       const md = (this.market && this.market.metadata) || {};
       const noBets = md.cancel_reason === 'no_bets' || (md.cancel_reason === 'min_pot_undersize' && String(md.cancel_pool_sompi) === '0');

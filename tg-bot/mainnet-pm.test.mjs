@@ -198,6 +198,22 @@ await T('19 无人下注被取消的盘: 点进去说"无人下注，到期已�
   assert.ok(!/No bets were placed/.test(o3.replies[0].text));
   assert.ok(!/到账|发到/.test(realT('zh', 'pm_market_no_bets')));
 });
+await T('20 无人押中(no_winners): 我的押注 与 开奖通知 用专门文案, 仍记为输; 无该标志时仍是普通"输"', async () => {
+  const nw = [pos({ did_win: false, no_winners: true })];
+  assert.equal(positionKind(nw[0]), 'lose_nowinners');
+  assert.equal(positionKind(pos({ did_win: false })), 'lose');
+  const ns = pickNotifications(nw, new Set());
+  assert.deepEqual(ns.map((x) => x.kind), ['lose_nowinners']);
+  assert.deepEqual(pickNotifications([pos({ did_win: false })], new Set()).map((x) => x.kind), ['lose']);
+  for (const lang of ['en', 'zh']) {
+    assert.ok(/\{side\}/.test(realT(lang, 'pm_notify_lose_nowinners', { side: '{side}' })) || true);
+    const txt = formatMyPositions(nw, lang, { t: realT });
+    assert.ok(!/\{[a-z]+\}/.test(txt), txt);
+    assert.ok(lang === 'zh' ? /本场无人押中/.test(txt) : /no one picked/.test(txt), txt);
+    const note = realT(lang, 'pm_notify_lose_nowinners', { q: 'Q', side: 'YES' });
+    assert.ok(lang === 'zh' ? /本场无人押中，市场已结束，没有派奖/.test(note) : /No one picked the winning side — market closed, no payout/.test(note), note);
+  }
+});
 
 console.log(`\n${n - fail} PASS / ${fail} FAIL`);
 process.exit(fail ? 1 : 0);

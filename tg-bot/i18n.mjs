@@ -449,6 +449,7 @@ export const LANGS = {
     pm_pos_open: "{side} · {stake} chips · open for bets",
     pm_pos_awaiting: "{side} · {stake} chips · waiting for the result",
     pm_pos_lose: "{side} · {stake} chips · lost",
+    pm_pos_lose_nowinners: "{side} · {stake} chips · lost (no one picked the winning side — no payout)",
     pm_pos_win_paid: "{side} · {stake} chips · won · {payout} chips recorded on-chain under your address ✅",
     pm_pos_win_pending: "{side} · {stake} chips · won · {pending} chips waiting to be recorded",
     pm_pos_win_pending_generic: "{side} · {stake} chips · won · being recorded",
@@ -456,6 +457,7 @@ export const LANGS = {
     pm_pos_cancelled: "{side} · {stake} chips · cancelled",
     pm_notify_win: "🎉 Decided: {q}\nYour {side} bet won! Your chips will be recorded on-chain under your linked address.",
     pm_notify_lose: "Decided: {q}\nYour {side} bet did not win this time.",
+    pm_notify_lose_nowinners: "Decided: {q}\nNo one picked the winning side — market closed, no payout. Your {side} bet counts as a loss.",
     pm_notify_paid: "✅ Recorded: {q}\n{payout} chips are now recorded on-chain under your linked address.",
   },
 
@@ -900,6 +902,7 @@ export const LANGS = {
     pm_pos_open: "{side} · {stake} 筹码 · 押注中",
     pm_pos_awaiting: "{side} · {stake} 筹码 · 等开奖",
     pm_pos_lose: "{side} · {stake} 筹码 · 输",
+    pm_pos_lose_nowinners: "{side} · {stake} 筹码 · 输（本场无人押中，没有派奖）",
     pm_pos_win_paid: "{side} · {stake} 筹码 · 赢 · 已记账 {payout} 筹码（链上凭证，记在你的地址名下）✅",
     pm_pos_win_pending: "{side} · {stake} 筹码 · 赢 · 待记账 {pending} 筹码",
     pm_pos_win_pending_generic: "{side} · {stake} 筹码 · 赢 · 记账中",
@@ -907,6 +910,7 @@ export const LANGS = {
     pm_pos_cancelled: "{side} · {stake} 筹码 · 已取消",
     pm_notify_win: "🎉 已开奖：{q}\n你押的 {side} 赢了！赢到的筹码会记在你绑定的地址名下（链上凭证）。",
     pm_notify_lose: "已开奖：{q}\n你押的 {side} 这次没赢。",
+    pm_notify_lose_nowinners: "已开奖：{q}\n本场无人押中，市场已结束，没有派奖。你押的 {side} 记为输。",
     pm_notify_paid: "✅ 已记账：{q}\n{payout} 筹码已记在你绑定的地址名下（链上凭证）。",
   },
 };
