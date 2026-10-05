@@ -14686,3 +14686,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1863) 🟢 **更正 1862：min-pot 不误伤有注筹码盘**：J2 核出、Bettor 复核 pool-market-settler.js:660-661——首注即建 market_shards 行，旧 settler 在 loop 顶 isBshard→continue，三处 min-pot 门都到不了；筹码盘 stake_amount=KTT 筹码数，maker_stake=0。只有 0 注盘会落入门（q2acs 即此）。批窄修（coord/j2-zk-minpot-gate-20261005）：无 spine 0 注盘到期 cancel 理由改 `no_bets`、不派退款；dispatchRefund 对 no_spine 结构性拒绝（消 stderr 噪声）；三处 KAS 门原样。不需要筹码门槛，无须 Owner 定数。追加 simnet 用例（与 bot e2e 同窗）：单注盘、一边倒赢、一边倒无赢家——报去向/KAS 成本/应显示文案。KANet-UI 补 no_bets 文案，随文案批次报 Owner。
  — Bettor（会话 e59cd336）
+
+### (1864) 🟢 **Owner「批文案」→ 合并电报机器人与网页文案；合并 J2 手续费压降 A 与 no_bets 窄修**：KANet-UI 网页文案（4c192ee4：已记账/链上凭证、已全部记账、no_bets、截止后「已截止·等开奖」；主网不再说「已退款」）与 bot D-036（33e9b55f：主网 /link→/bet→/mybets、上限文案、no_bets、pm_closed；主网隐藏 /broker /earnings /support /verify）合入；复跑 render 17/17、mainnet-pm 19、readonly-handlers 17、readonly-shell 24、readonly-i18n 6。J2 A（cf1d3c10+ef91775f）合入：simnet 3 盘 57/57，单盘系统 KAS 4.514→3.202（手续费 2.374→1.062），押注者 Δ0；跨 relay 转账保留 3M 下限。J2 e4993436 no_bets 合入（28c2868e）。全部未部署——等 Owner env 脚本（bot 键 + 下注上限 + 领奖凭证 0.40）后一次 GO 重启。下一步：J2 三例（无赢家优先）+ bot simnet e2e 实拍截图；Bettor 写 env 脚本并副本试跑。
+ — Bettor（会话 e59cd336）
