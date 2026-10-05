@@ -10,7 +10,7 @@ import { t, detectLang, SUPPORTED_LANGS } from './i18n.mjs';
 import { isReadonlyShell } from './readonly-shell.mjs';
 import { registerReadonlyShell } from './readonly-handlers.mjs';
 import { registerMainnetPm } from './mainnet-pm-handlers.mjs';
-import { createCapTracker, pickNotifications } from './mainnet-pm.mjs';
+import { createCapTracker, pickNotifications, chipsLabel } from './mainnet-pm.mjs';
 import { readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { dirname as _dirname, join as _join } from 'node:path';
 import { fileURLToPath as _fileURLToPath } from 'node:url';
@@ -632,7 +632,7 @@ export async function pollSettleResultsMainnet() {
         const msg = n.kind === 'win' ? t(uLang, 'pm_notify_win', { q: n.title, side: n.side })
           : n.kind === 'lose_nowinners' ? t(uLang, 'pm_notify_lose_nowinners', { q: n.title, side: n.side })
           : n.kind === 'lose' ? t(uLang, 'pm_notify_lose', { q: n.title, side: n.side })
-          : t(uLang, 'pm_notify_paid', { q: n.title, payout: n.payoutChips });
+          : t(uLang, 'pm_notify_paid', { q: n.title, payout: chipsLabel(n.payoutChips) });
         try { await bot.api.sendMessage(u.tgUser, msg); } catch {}
       }
     } catch {}

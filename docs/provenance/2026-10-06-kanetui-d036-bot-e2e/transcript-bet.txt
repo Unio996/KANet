@@ -1,0 +1,81 @@
+[A] SAY /bet
+    ← 📊 可以押注的市场 — 点下方按钮看详情：
+      
+      1. MM rehearsal market #3: will event 3 happen? · 押注中 · 还剩 12 分钟
+      2. MM rehearsal market #2: will event 2 happen? · 押注中 · 还剩 12 分钟
+      3. MM rehearsal market #1: will event 1 happen? · 押注中 · 还剩 12 分钟
+      4. MM rehearsal market #0: will event 0 happen? · 押注中 · 还剩 12 分钟
+      
+      押注用的是零价值测试筹码，不是真钱，也不花 KAS。
+[A] TAP pm:m:ext-pool-v07-1791219069216-9ajim
+    ← 📌 MM rehearsal market #0: will event 0 happen?
+      状态：押注中
+      截止：还剩 12 分钟
+      当前池：YES 0 筹码 · NO 0 筹码
+      最少押 1 筹码（零价值测试筹码，不需要 KAS）
+[A] TAP pm:b:ext-pool-v07-1791219069216-9ajim:0
+    ← 📌 MM rehearsal market #0: will event 0 happen?
+      你选了 YES。请回复要押多少筹码（整数，至少 1）。筹码是零价值测试代币，不花 KAS。
+[A] SAY 1
+    ← 正在提交你的押注，最多要一分钟左右，请稍等…
+    ← ✅ 押注成功：MM rehearsal market #0: will event 0 happen?
+      YES · 1 筹码。开奖后会通知你。/mybets 可以看你所有的押注。
+[A] TAP pm:b:ext-pool-v07-1791219129229-jsj47:0
+    ← 📌 MM rehearsal market #1: will event 1 happen?
+      你选了 YES。请回复要押多少筹码（整数，至少 1）。筹码是零价值测试代币，不花 KAS。
+[A] SAY 2
+    ← 正在提交你的押注，最多要一分钟左右，请稍等…
+    ← ✅ 押注成功：MM rehearsal market #1: will event 1 happen?
+      YES · 2 筹码。开奖后会通知你。/mybets 可以看你所有的押注。
+[B] TAP pm:b:ext-pool-v07-1791219129229-jsj47:0
+    ← 📌 MM rehearsal market #1: will event 1 happen?
+      你选了 YES。请回复要押多少筹码（整数，至少 1）。筹码是零价值测试代币，不花 KAS。
+[B] SAY 3
+    ← 正在提交你的押注，最多要一分钟左右，请稍等…
+    ← ✅ 押注成功：MM rehearsal market #1: will event 1 happen?
+      YES · 3 筹码。开奖后会通知你。/mybets 可以看你所有的押注。
+[A] TAP pm:b:ext-pool-v07-1791219189231-j22es:0
+    ← 📌 MM rehearsal market #2: will event 2 happen?
+      你选了 YES。请回复要押多少筹码（整数，至少 1）。筹码是零价值测试代币，不花 KAS。
+[A] SAY 2
+    ← 正在提交你的押注，最多要一分钟左右，请稍等…
+    ← ✅ 押注成功：MM rehearsal market #2: will event 2 happen?
+      YES · 2 筹码。开奖后会通知你。/mybets 可以看你所有的押注。
+[B] TAP pm:b:ext-pool-v07-1791219189231-j22es:1
+    ← 📌 MM rehearsal market #2: will event 2 happen?
+      你选了 NO。请回复要押多少筹码（整数，至少 1）。筹码是零价值测试代币，不花 KAS。
+[B] SAY 4
+    ← 正在提交你的押注，最多要一分钟左右，请稍等…
+    ← ✅ 押注成功：MM rehearsal market #2: will event 2 happen?
+      NO · 4 筹码。开奖后会通知你。/mybets 可以看你所有的押注。
+[B] TAP pm:b:ext-pool-v07-1791219249242-ny2cr:1
+    ← 📌 MM rehearsal market #3: will event 3 happen?
+      你选了 NO。请回复要押多少筹码（整数，至少 1）。筹码是零价值测试代币，不花 KAS。
+[B] SAY 2
+    ← 正在提交你的押注，最多要一分钟左右，请稍等…
+    ← ✅ 押注成功：MM rehearsal market #3: will event 3 happen?
+      NO · 2 筹码。开奖后会通知你。/mybets 可以看你所有的押注。
+[A] TAP pm:b:ext-pool-v07-1791219249242-ny2cr:1
+    ← 📌 MM rehearsal market #3: will event 3 happen?
+      你选了 NO。请回复要押多少筹码（整数，至少 1）。筹码是零价值测试代币，不花 KAS。
+[A] SAY 1
+    ← 正在提交你的押注，最多要一分钟左右，请稍等…
+    ← 今天的押注名额已满，明天再来吧（2026-10-06 00:00 UTC 重置）。这次没有花任何东西。
+[A] SAY /mybets
+    ← 📒 你的押注（共 3 个市场）
+      
+      1. MM rehearsal market #2: will event 2 happen?
+         YES · 2 筹码 · 押注中
+      2. MM rehearsal market #1: will event 1 happen?
+         YES · 2 筹码 · 押注中
+      3. MM rehearsal market #0: will event 0 happen?
+         YES · 1 筹码 · 押注中
+[B] SAY /mybets
+    ← 📒 你的押注（共 3 个市场）
+      
+      1. MM rehearsal market #3: will event 3 happen?
+         NO · 2 筹码 · 押注中
+      2. MM rehearsal market #2: will event 2 happen?
+         NO · 4 筹码 · 押注中
+      3. MM rehearsal market #1: will event 1 happen?
+         YES · 3 筹码 · 押注中

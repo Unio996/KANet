@@ -90,6 +90,8 @@ if (PHASE === 'bet') {
 
 if (PHASE === 'notify') {
   const plan = JSON.parse(readFileSync(planFile, 'utf8'));
+  // harness-only: 启动清理会丢掉 kaspasim: 前缀的绑定(只读壳只保留 kaspa:), 重新预置绑定后 seen_settled 被清空 ⇒ 补回 bet 阶段末已落盘的"已播种"标记(生产里主网地址的绑定与 seen_settled 都会持久保留)
+  PM.pickFreshSettlements(String(U.A), ['__seeded__']); PM.pickFreshSettlements(String(U.B), ['__seeded__']);
   const n0 = sent.length; await botmod.pollSettleResultsMainnet();
   const got = sent.slice(n0); got.forEach((m) => { transcript.push(`[poller → ${m.chat === String(U.A) ? 'A' : 'B'}] ${m.text.replace(/\n/g, '\n      ')}`); console.log(`    [通知→${m.chat === String(U.A) ? 'A' : 'B'}] ${m.text.replace(/\n/g, ' ⏎ ')}`); });
   const toA = got.filter((m) => m.chat === String(U.A)).map((m) => m.text), toB = got.filter((m) => m.chat === String(U.B)).map((m) => m.text);
