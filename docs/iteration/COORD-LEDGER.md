@@ -14674,3 +14674,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1859) 🟢 **Owner 批图（原话「批图」）→ 页面分支合并；pm-settler 补资**：① 合并 KANet-UI 预测市场主网页面 + 我的押注（coord/kanetui-pm-ui-mainnet-20261005 至 9991adac：主网状态中文化、隐藏 TG 押注框/未映射 UMA/仲裁人投票卡、委员已签名真实计数、我的押注最近 20 条；非主网渲染字节不变），合并后渲染测试 14/14；同时合入 J2 验收证据补件（28067c35、cbdeded1）。截图在 docs/provenance/2026-10-05-kanetui-pm-ui-mainnet-shots/（未入库），收盘中详情页一张缺失（误覆盖，已删，已如实告知 Owner）。② 内部转账（授权 1819）：NWT relay → pm-settler 3 笔各 10 KAS（分三笔以得多个 UTXO 供并发收盘费），三笔 api.kaspa.org is_accepted=true；pm-settler 现 4 个 UTXO。③ 下一步：Owner 跑 docs-private/owner-env-pm-seeder-20261005.ps1（Bettor 已在副本试跑，真文件哈希不变）→ Owner GO 重启 → 主网验收（seeder 开盘、委员签名、领奖，押注方 KAS 余额不变）。
  — Bettor（会话 e59cd336）
+
+### (1860) 🟢 **主网 console 重启（Owner「go 重启！」）+ seeder 上线 + 小票合并**：KANet-UI 执行：在线备份（sha256 dde9e8cc…，129 表一致、integrity ok），三源核 PID 只停 32924，kaspad 4752 未动；新 PID 38532；ZK 循环全起、旧路由 403、[pool-seeder] started maker=e6986ad4 target=3。首 tick 建 1 个 zk_native Polymarket 盘（ext-pool-v07-…q2acs，CS 比赛，截止 15:00Z），25 个钱包 UTXO 前后一致、pm-settler 50 KAS 未动。J2 小票（重开路由放行误打 403 日志）7410cec5 审过合并（6f4d59b4），下次重启生效。Owner 重申「主网测试为合规为成本一律用 KCC-20 测试币」→ 派 J2 只读核每盘 KAS 成本压降方案。
+ — Bettor（会话 e59cd336）
+
+### (1861) 🟢 **Owner 批恢复电报接线（原话「批，恢复电报接线」）→ D-036 取代 D-024**：依 KANet-UI 差距报告（8e1c1ced）。派工：J2 = register-v07 服务端成本闸（每下注公钥/日 + 全系统/日注数上限，env 可配、保守默认，测试 + 变异）；KANet-UI = bot 改造（列盘读 pool zk_native、一步 register-v07 stake_ktt、主网我的押注、ZK 原生结算通知、bot 侧每用户每日上限、/link 主网地址即身份）+ 中英文案清单交 Owner 批 + simnet 跑通；Owner env 脚本由 Bettor 备、副本试跑。不动主网 env / bot / console。
+ — Bettor（会话 e59cd336）
