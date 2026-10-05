@@ -71,14 +71,48 @@ export function markUtxoSpentByOutpoint(txid, index) {
   const key = `${txid}:${index ?? 0}`;
   _pendingSpentUtxos.set(key, Date.now() + _PENDING_UTXO_TTL_MS);
 }
+// 账本1855 A(J2 2026-10-05): 长 TTL 的【排除】名单(pin)——只用来把某枚 UTXO 从 filterPendingUtxos 的候选里拿掉, 绝不选择/花费任何东西。
+// 场景: close 提交费 UTXO 在 propose 阶段创建、submit 阶段(委员签名等待, 分钟级)才花; 期间同 relay 的别的 tx / rebalance 会把它当普通候选吃掉
+// (60s 的 _pendingSpentUtxos 盖不住)。key 形与 _pendingSpentUtxos 一致 "txid:index"; 值 = 到期时间(自愈: 泄漏的 pin 最迟 ttl 后消失)。
+const _pinnedUtxos = new Map();
+export const PIN_DEFAULT_TTL_MS = 6 * 3600_000;
+export const PIN_MAX_TTL_MS = 24 * 3600_000;
+export const PIN_MIN_TTL_MS = 1000;
+export const PIN_MAX_ENTRIES = 512;   // 上限: 防命令被滥用成"把全部 UTXO 钉死"的 DoS(超限拒新 pin, 已有不动)
+function _pinKey(txid, index) {
+  if (typeof txid !== 'string' || !/^[0-9a-f]{64}$/.test(txid)) throw new Error('pin: txid 必须是 64 位小写 hex');
+  if (!Number.isInteger(index) || index < 0 || index > 0xffffffff) throw new Error('pin: index 必须是 0..2^32-1 整数');
+  return `${txid}:${index}`;
+}
+export function pinUtxo(txid, index, ttlMs = PIN_DEFAULT_TTL_MS) {
+  const key = _pinKey(txid, index);   // 非法 ⇒ throw, 不改任何状态
+  if (!Number.isInteger(ttlMs) || ttlMs < PIN_MIN_TTL_MS || ttlMs > PIN_MAX_TTL_MS) throw new Error(`pin: ttlMs 必须是 ${PIN_MIN_TTL_MS}..${PIN_MAX_TTL_MS} 整数`);
+  const now = Date.now();
+  for (const [k, exp] of _pinnedUtxos) { if (exp < now) _pinnedUtxos.delete(k); }
+  if (!_pinnedUtxos.has(key) && _pinnedUtxos.size >= PIN_MAX_ENTRIES) throw new Error(`pin: 已达上限 ${PIN_MAX_ENTRIES}`);
+  _pinnedUtxos.set(key, now + ttlMs);
+  return { pinned: true, key, expiresAtMs: now + ttlMs, size: _pinnedUtxos.size };
+}
+export function unpinUtxo(txid, index) {
+  const key = _pinKey(txid, index);
+  const had = _pinnedUtxos.delete(key);
+  return { unpinned: had, key, size: _pinnedUtxos.size };
+}
+export function pinnedUtxoKeys() {
+  const now = Date.now();
+  for (const [k, exp] of _pinnedUtxos) { if (exp < now) _pinnedUtxos.delete(k); }
+  return [..._pinnedUtxos.keys()];
+}
+export function _clearPinsForTest() { _pinnedUtxos.clear(); }
 export function filterPendingUtxos(entries) {
   const now = Date.now();
   // Clean expired entries
   for (const [k, exp] of _pendingSpentUtxos) { if (exp < now) _pendingSpentUtxos.delete(k); }
-  if (_pendingSpentUtxos.size === 0) return entries;
+  for (const [k, exp] of _pinnedUtxos) { if (exp < now) _pinnedUtxos.delete(k); }
+  if (_pendingSpentUtxos.size === 0 && _pinnedUtxos.size === 0) return entries;
   return entries.filter(e => {
     const key = `${e.entry?.outpoint?.transactionId || e.outpoint?.transactionId || ''}:${e.entry?.outpoint?.index ?? e.outpoint?.index ?? 0}`;
-    return !_pendingSpentUtxos.has(key);
+    return !_pendingSpentUtxos.has(key) && !_pinnedUtxos.has(key);
   });
 }
 // design-v2 (B) risk#4 (Bettor r486): exported so the broadcaster-UTXO rebalance (splitUtxosRelay force)

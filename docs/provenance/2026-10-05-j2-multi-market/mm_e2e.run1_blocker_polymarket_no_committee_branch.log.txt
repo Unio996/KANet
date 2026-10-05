@@ -1,0 +1,79 @@
+21:35:31 balances before (KAS): {
+  maker: 228.263395,
+  settler: 332.477459,
+  fee: 300,
+  bettorA: 263.903892,
+  bettorB: 233.903892
+}
+21:35:31   ✅ 前置: 库里没有未完结的 zk_native 盘(live=0)
+21:35:31 gamma stub armed; waiting for seeder to create 3 markets (cap ZK_MAX_LIVE_MARKETS=3)…
+21:38:05   ✅ 种子器建出 3 个盘(3, 用时 153s)
+21:38:05   ✅ 同时在跑(未完结)的 ZK 原生盘峰值 = 3(≥3)
+21:38:05   ✅ 盘 51-g5p08: zk_native=true, 无 spine, polymarket 镜像(cond 0x00000000…), broker 塌到 maker(未配 GATEWAY_RELAY_ID)
+21:38:05   ✅ 盘 43-j5sf3: zk_native=true, 无 spine, polymarket 镜像(cond 0x01010101…), broker 塌到 maker(未配 GATEWAY_RELAY_ID)
+21:38:05   ✅ 盘 50-hvbrw: zk_native=true, 无 spine, polymarket 镜像(cond 0x02020202…), broker 塌到 maker(未配 GATEWAY_RELAY_ID)
+21:38:05   ✅ 建 3 个盘后: maker/下注人钱包余额逐 sompi 不变(建盘不转账)
+21:38:05   ✅ 3/3 在跑时再 create-v07 ⇒ 409 live_market_cap_reached(live=3, cap=3)
+21:39:14 51-g5p08 bettorA dir=0 stake_ktt=1000000000 (69385ms) => {"status":200,"ok":true,"logical_market_id":"ext-pool-v07-1791149763151-g5p08","bettor_pk":"060b0264800672da79c533ae1534310f7925beeac945363bd2cd0d2b7402dc79","no_kas_stake":true,"stake_ktt":1000000000,"action":"use","sha
+21:39:14   ✅ 51-g5p08 bettorA register-v07 stake_ktt=1000000000 ⇒ 200 no_kas_stake
+21:39:14   ✅ 51-g5p08 bettorA 钱包余额逐 sompi 不变
+21:39:48 51-g5p08 bettorB dir=1 stake_ktt=2000000000 (34234ms) => {"status":200,"ok":true,"logical_market_id":"ext-pool-v07-1791149763151-g5p08","bettor_pk":"b8fd583b660dea6c94bc0962a2f4921e763578bdeb375575fdd7feddf48dfd27","no_kas_stake":true,"stake_ktt":2000000000,"action":"use","sha
+21:39:48   ✅ 51-g5p08 bettorB register-v07 stake_ktt=2000000000 ⇒ 200 no_kas_stake
+21:39:48   ✅ 51-g5p08 bettorB 钱包余额逐 sompi 不变
+21:40:57 43-j5sf3 bettorA dir=0 stake_ktt=1000000000 (69172ms) => {"status":200,"ok":true,"logical_market_id":"ext-pool-v07-1791149823143-j5sf3","bettor_pk":"060b0264800672da79c533ae1534310f7925beeac945363bd2cd0d2b7402dc79","no_kas_stake":true,"stake_ktt":1000000000,"action":"use","sha
+21:40:57   ✅ 43-j5sf3 bettorA register-v07 stake_ktt=1000000000 ⇒ 200 no_kas_stake
+21:40:57   ✅ 43-j5sf3 bettorA 钱包余额逐 sompi 不变
+21:41:32 43-j5sf3 bettorB dir=1 stake_ktt=2000000000 (34270ms) => {"status":200,"ok":true,"logical_market_id":"ext-pool-v07-1791149823143-j5sf3","bettor_pk":"b8fd583b660dea6c94bc0962a2f4921e763578bdeb375575fdd7feddf48dfd27","no_kas_stake":true,"stake_ktt":2000000000,"action":"use","sha
+21:41:32   ✅ 43-j5sf3 bettorB register-v07 stake_ktt=2000000000 ⇒ 200 no_kas_stake
+21:41:32   ✅ 43-j5sf3 bettorB 钱包余额逐 sompi 不变
+21:42:41 50-hvbrw bettorA dir=0 stake_ktt=1000000000 (69231ms) => {"status":200,"ok":true,"logical_market_id":"ext-pool-v07-1791149883150-hvbrw","bettor_pk":"060b0264800672da79c533ae1534310f7925beeac945363bd2cd0d2b7402dc79","no_kas_stake":true,"stake_ktt":1000000000,"action":"use","sha
+21:42:41   ✅ 50-hvbrw bettorA register-v07 stake_ktt=1000000000 ⇒ 200 no_kas_stake
+21:42:41   ✅ 50-hvbrw bettorA 钱包余额逐 sompi 不变
+21:43:15 50-hvbrw bettorB dir=1 stake_ktt=2000000000 (34262ms) => {"status":200,"ok":true,"logical_market_id":"ext-pool-v07-1791149883150-hvbrw","bettor_pk":"b8fd583b660dea6c94bc0962a2f4921e763578bdeb375575fdd7feddf48dfd27","no_kas_stake":true,"stake_ktt":2000000000,"action":"use","sha
+21:43:15   ✅ 50-hvbrw bettorB register-v07 stake_ktt=2000000000 ⇒ 200 no_kas_stake
+21:43:15   ✅ 50-hvbrw bettorB 钱包余额逐 sompi 不变
+21:43:15 waiting… 0s daa=113968 claims/market=0/0/0 exhausted=0 status=pending_bettors,pending_bettors,pending_bettors
+21:45:15 waiting… 120s daa=114355 claims/market=0/0/0 exhausted=0 status=pending_bettors,pending_bettors,pending_bettors
+21:47:16 waiting… 241s daa=114743 claims/market=0/0/0 exhausted=0 status=pending_bettors,pending_bettors,pending_bettors
+21:49:16 waiting… 361s daa=115130 claims/market=0/0/0 exhausted=0 status=pending_bettors,pending_bettors,pending_bettors
+21:51:16 waiting… 481s daa=115518 claims/market=0/0/0 exhausted=0 status=pending_bettors,pending_bettors,pending_bettors
+21:53:16 waiting… 601s daa=115905 claims/market=0/0/0 exhausted=0 status=pending_bettors,pending_bettors,pending_bettors
+21:55:17 waiting… 722s daa=116292 claims/market=0/0/0 exhausted=0 status=pending_bettors,pending_bettors,pending_bettors
+21:57:17 waiting… 842s daa=116679 claims/market=0/0/0 exhausted=0 status=pending_bettors,pending_bettors,pending_bettors
+21:59:17 waiting… 962s daa=117066 claims/market=0/0/0 exhausted=0 status=pending_bettors,pending_bettors,pending_bettors
+22:01:17 waiting… 1082s daa=117454 claims/market=0/0/0 exhausted=0 status=pending_bettors,pending_bettors,pending_bettors
+22:03:18 waiting… 1203s daa=117841 claims/market=0/0/0 exhausted=0 status=pending_bettors,pending_bettors,pending_bettors
+22:05:18 waiting… 1323s daa=118228 claims/market=0/0/0 exhausted=0 status=verifying,verifying,verifying
+22:07:18 waiting… 1443s daa=118615 claims/market=0/0/0 exhausted=0 status=verifying,verifying,verifying
+22:09:18 waiting… 1563s daa=119002 claims/market=0/0/0 exhausted=0 status=verifying,verifying,verifying
+22:11:19 waiting… 1684s daa=119390 claims/market=0/0/0 exhausted=0 status=verifying,verifying,verifying
+22:13:19 waiting… 1804s daa=119777 claims/market=0/0/0 exhausted=0 status=verifying,verifying,verifying
+22:15:19 waiting… 1924s daa=120165 claims/market=0/0/0 exhausted=0 status=verifying,verifying,verifying
+22:17:20 waiting… 2045s daa=120552 claims/market=0/0/0 exhausted=0 status=verifying,verifying,verifying
+22:19:20 waiting… 2165s daa=120939 claims/market=0/0/0 exhausted=0 status=verifying,verifying,verifying
+22:21:20 waiting… 2285s daa=121327 claims/market=0/0/0 exhausted=0 status=verifying,verifying,verifying
+22:23:20 waiting… 2405s daa=121857 claims/market=0/0/0 exhausted=0 status=verifying,verifying,verifying
+22:25:21 waiting… 2526s daa=122270 claims/market=0/0/0 exhausted=0 status=verifying,verifying,verifying
+22:27:21 waiting… 2646s daa=122657 claims/market=0/0/0 exhausted=0 status=verifying,verifying,verifying
+22:29:21 waiting… 2766s daa=123045 claims/market=0/0/0 exhausted=0 status=verifying,verifying,verifying
+22:31:21 waiting… 2886s daa=123432 claims/market=0/0/0 exhausted=0 status=verifying,verifying,verifying
+22:33:22 waiting… 3007s daa=123819 claims/market=0/0/0 exhausted=0 status=verifying,verifying,verifying
+22:35:22 waiting… 3127s daa=124206 claims/market=0/0/0 exhausted=0 status=verifying,verifying,verifying
+22:37:22 waiting… 3247s daa=125074 claims/market=0/0/0 exhausted=0 status=verifying,verifying,verifying
+22:39:23 waiting… 3367s daa=126211 claims/market=0/0/0 exhausted=0 status=verifying,verifying,verifying
+22:40:47 CHAOS transfer injected while 50-hvbrw collecting_sigs => {"status":200,"ok":true,"txId":"990771d32140e90529e949811b70580c8b4bc9995dbedd66b901970f18f4b5da","fee":"0.032036","phase":"execution"} fee outpoints [{"market":"50-hvbrw","txid":"f61a9087dc4fb018f022c4de92abea5aacc46d493192b4058e585048df96a368","index":0}]
+22:41:23 waiting… 3488s daa=127415 claims/market=0/0/0 exhausted=0 status=verifying,collecting_sigs,collecting_sigs
+22:43:23 waiting… 3608s daa=128499 claims/market=0/0/0 exhausted=0 status=collecting_sigs,collecting_sigs,collecting_sigs
+22:45:23 waiting… 3728s daa=129663 claims/market=0/0/0 exhausted=0 status=collecting_sigs,collecting_sigs,collecting_sigs
+22:47:24 waiting… 3849s daa=130894 claims/market=0/0/0 exhausted=0 status=collecting_sigs,collecting_sigs,collecting_sigs
+22:49:24 waiting… 3969s daa=131881 claims/market=0/0/0 exhausted=0 status=collecting_sigs,collecting_sigs,collecting_sigs
+22:51:24 waiting… 4089s daa=133533 claims/market=0/0/0 exhausted=0 status=collecting_sigs,collecting_sigs,collecting_sigs
+22:53:25 waiting… 4209s daa=134696 claims/market=0/0/0 exhausted=0 status=collecting_sigs,collecting_sigs,collecting_sigs
+22:55:25 waiting… 4330s daa=135859 claims/market=0/0/0 exhausted=0 status=collecting_sigs,collecting_sigs,collecting_sigs
+22:57:25 waiting… 4450s daa=137021 claims/market=0/0/0 exhausted=0 status=collecting_sigs,collecting_sigs,collecting_sigs
+22:59:25 waiting… 4570s daa=138184 claims/market=0/0/0 exhausted=0 status=collecting_sigs,collecting_sigs,collecting_sigs
+23:01:26 waiting… 4691s daa=139347 claims/market=0/0/0 exhausted=0 status=collecting_sigs,collecting_sigs,collecting_sigs
+23:03:26 waiting… 4811s daa=140368 claims/market=0/0/0 exhausted=0 status=collecting_sigs,collecting_sigs,collecting_sigs
+23:05:26 waiting… 4931s daa=141485 claims/market=0/0/0 exhausted=0 status=collecting_sigs,collecting_sigs,collecting_sigs
+23:07:26 waiting… 5051s daa=142646 claims/market=0/0/0 exhausted=0 status=collecting_sigs,collecting_sigs,collecting_sigs
+23:09:27 waiting… 5172s daa=143807 claims/market=0/0/0 exhausted=0 status=collecting_sigs,collecting_sigs,collecting_sigs

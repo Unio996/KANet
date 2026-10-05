@@ -1,0 +1,3 @@
+      1 [pool-seeder] created ext-pool-v07-1791159529692-16vcv [other] vol=97000 "MM rehearsal market #3: will event 3 happen?" end=2026-10-05T00:44:46.766Z (1/3)
+     26 [pool-seeder] no eligible gamma market this tick
+      1 [pool-seeder] started — maker=61f72c5b target=3 interval=1min

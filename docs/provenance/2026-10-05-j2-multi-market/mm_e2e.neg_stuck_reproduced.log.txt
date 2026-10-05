@@ -1,0 +1,62 @@
+00:44:24 balances before (KAS): {
+  maker: 219.430099,
+  settler: 323.09449,
+  fee: 300,
+  bettorA: 263.903892,
+  bettorB: 233.903892
+}
+00:44:24   ✅ 前置: 库里没有未完结的 zk_native 盘(live=0)
+00:44:24 gamma stub armed; waiting for seeder to create 3 markets (cap ZK_MAX_LIVE_MARKETS=3)…
+00:47:10   ✅ 种子器建出 3 个盘(3, 用时 165s)
+00:47:10   ✅ 同时在跑(未完结)的 ZK 原生盘峰值 = 3(≥3)
+00:47:10   ✅ 盘 65-5svw3: zk_native=true, 无 spine, polymarket 镜像(cond 0x10101010…), broker 塌到 maker(未配 GATEWAY_RELAY_ID)
+00:47:10   ✅ 盘 48-0psz7: zk_native=true, 无 spine, polymarket 镜像(cond 0x11111111…), broker 塌到 maker(未配 GATEWAY_RELAY_ID)
+00:47:10   ✅ 盘 46-2uzqy: zk_native=true, 无 spine, polymarket 镜像(cond 0x12121212…), broker 塌到 maker(未配 GATEWAY_RELAY_ID)
+00:47:10   ✅ 建 3 个盘后: maker/下注人钱包余额逐 sompi 不变(建盘不转账)
+00:47:10   ✅ 3/3 在跑时再 create-v07 ⇒ 409 live_market_cap_reached(live=3, cap=3)
+00:47:31 65-5svw3 bettorA dir=0 stake_ktt=1000000000 (21162ms) => {"status":200,"ok":true,"logical_market_id":"ext-pool-v07-1791161109365-5svw3","bettor_pk":"060b0264800672da79c533ae1534310f7925beeac945363bd2cd0d2b7402dc79","no_kas_stake":true,"stake_ktt":1000000000,"action":"use","sha
+00:47:31   ✅ 65-5svw3 bettorA register-v07 stake_ktt=1000000000 ⇒ 200 no_kas_stake
+00:47:31   ✅ 65-5svw3 bettorA 钱包余额逐 sompi 不变
+00:47:41 65-5svw3 bettorB dir=1 stake_ktt=2000000000 (10159ms) => {"status":200,"ok":true,"logical_market_id":"ext-pool-v07-1791161109365-5svw3","bettor_pk":"b8fd583b660dea6c94bc0962a2f4921e763578bdeb375575fdd7feddf48dfd27","no_kas_stake":true,"stake_ktt":2000000000,"action":"use","sha
+00:47:41   ✅ 65-5svw3 bettorB register-v07 stake_ktt=2000000000 ⇒ 200 no_kas_stake
+00:47:41   ✅ 65-5svw3 bettorB 钱包余额逐 sompi 不变
+00:48:02 48-0psz7 bettorA dir=0 stake_ktt=1000000000 (21027ms) => {"status":200,"ok":true,"logical_market_id":"ext-pool-v07-1791161169348-0psz7","bettor_pk":"060b0264800672da79c533ae1534310f7925beeac945363bd2cd0d2b7402dc79","no_kas_stake":true,"stake_ktt":1000000000,"action":"use","sha
+00:48:02   ✅ 48-0psz7 bettorA register-v07 stake_ktt=1000000000 ⇒ 200 no_kas_stake
+00:48:02   ✅ 48-0psz7 bettorA 钱包余额逐 sompi 不变
+00:48:12 48-0psz7 bettorB dir=1 stake_ktt=2000000000 (10166ms) => {"status":200,"ok":true,"logical_market_id":"ext-pool-v07-1791161169348-0psz7","bettor_pk":"b8fd583b660dea6c94bc0962a2f4921e763578bdeb375575fdd7feddf48dfd27","no_kas_stake":true,"stake_ktt":2000000000,"action":"use","sha
+00:48:12   ✅ 48-0psz7 bettorB register-v07 stake_ktt=2000000000 ⇒ 200 no_kas_stake
+00:48:12   ✅ 48-0psz7 bettorB 钱包余额逐 sompi 不变
+00:48:33 46-2uzqy bettorA dir=0 stake_ktt=1000000000 (21010ms) => {"status":200,"ok":true,"logical_market_id":"ext-pool-v07-1791161229346-2uzqy","bettor_pk":"060b0264800672da79c533ae1534310f7925beeac945363bd2cd0d2b7402dc79","no_kas_stake":true,"stake_ktt":1000000000,"action":"use","sha
+00:48:33   ✅ 46-2uzqy bettorA register-v07 stake_ktt=1000000000 ⇒ 200 no_kas_stake
+00:48:33   ✅ 46-2uzqy bettorA 钱包余额逐 sompi 不变
+00:48:43 46-2uzqy bettorB dir=1 stake_ktt=2000000000 (10148ms) => {"status":200,"ok":true,"logical_market_id":"ext-pool-v07-1791161229346-2uzqy","bettor_pk":"b8fd583b660dea6c94bc0962a2f4921e763578bdeb375575fdd7feddf48dfd27","no_kas_stake":true,"stake_ktt":2000000000,"action":"use","sha
+00:48:43   ✅ 46-2uzqy bettorB register-v07 stake_ktt=2000000000 ⇒ 200 no_kas_stake
+00:48:43   ✅ 46-2uzqy bettorB 钱包余额逐 sompi 不变
+00:48:43 waiting… 0s daa=230137 claims/market=0/0/0 exhausted=0 status=pending_bettors,pending_bettors,pending_bettors
+00:50:44 waiting… 120s daa=231427 claims/market=0/0/0 exhausted=0 status=pending_bettors,pending_bettors,pending_bettors
+00:52:44 waiting… 241s daa=232591 claims/market=0/0/0 exhausted=0 status=pending_bettors,pending_bettors,pending_bettors
+00:54:44 waiting… 361s daa=233754 claims/market=0/0/0 exhausted=0 status=pending_bettors,pending_bettors,pending_bettors
+00:56:45 waiting… 481s daa=234916 claims/market=0/0/0 exhausted=0 status=pending_bettors,pending_bettors,pending_bettors
+00:58:45 waiting… 601s daa=236014 claims/market=0/0/0 exhausted=0 status=pending_bettors,pending_bettors,pending_bettors
+01:00:45 waiting… 722s daa=237566 claims/market=0/0/0 exhausted=0 status=pending_bettors,pending_bettors,pending_bettors
+01:02:45 waiting… 842s daa=239116 claims/market=0/0/0 exhausted=0 status=pending_bettors,pending_bettors,pending_bettors
+01:04:46 waiting… 962s daa=240907 claims/market=0/0/0 exhausted=0 status=pending_bettors,pending_bettors,pending_bettors
+01:06:46 waiting… 1082s daa=242829 claims/market=0/0/0 exhausted=0 status=pending_bettors,pending_bettors,pending_bettors
+01:08:46 waiting… 1203s daa=244761 claims/market=0/0/0 exhausted=0 status=pending_bettors,pending_bettors,pending_bettors
+01:10:46 waiting… 1323s daa=246627 claims/market=0/0/0 exhausted=0 status=pending_bettors,pending_bettors,pending_bettors
+01:12:47 waiting… 1443s daa=248563 claims/market=0/0/0 exhausted=0 status=pending_bettors,pending_bettors,pending_bettors
+01:14:47 waiting… 1564s daa=250497 claims/market=0/0/0 exhausted=0 status=verifying,verifying,verifying
+01:16:25 CHAOS transfer injected while 65-5svw3 collecting_sigs => {"status":200,"ok":true,"txId":"5d1bff390c5e07ae4ca00ee2a93abc1c2b32c6e9451d8c1f16585755ccea8391","fee":"0.032036","phase":"execution"} fee outpoints [{"market":"65-5svw3","txid":"e1e77272ccda54accb61dcc574169aa91ca4541ebd6cbb1ab876b86147907dff","index":0}]
+01:16:49 waiting… 1686s daa=252058 claims/market=0/0/0 exhausted=0 status=collecting_sigs,collecting_sigs,collecting_sigs
+01:18:50 waiting… 1806s daa=253371 claims/market=0/0/0 exhausted=0 status=collecting_sigs,collecting_sigs,attested_v2
+01:20:46   ✅ 干扰转账已上链提交(txid 5d1bff390c5e07ae4ca00ee2a93abc1c2b32c6e9451d8c1f16585755ccea8391)
+01:20:46   ✅ neg: pin 关闭 ⇒ relay 日志里没有 PIN_UTXO 行(0)
+01:20:46   ✅ neg: 复现卡死的 close — 盘 65-5svw3,48-0psz7 停在 collecting_sigs 且 submit 反复失败
+01:20:46   · [bshard-close-submit-v2] market=65-5svw3 submit fail: no txId in relay response: {"error":"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx e1e77272ccda54accb61dcc574169aa91ca4541ebd6cbb1ab876b86147907dff:0","phas
+01:20:46   · [bshard-close-submit-v2] market=48-0psz7 submit fail: no txId in relay response: {"error":"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx 071ac53c72f2597dd18bef53815d0d8d45469488c1e209b6b06062c1dfe8356e:0","phas
+01:20:46   · [bshard-close-submit-v2] market=65-5svw3 submit fail: no txId in relay response: {"error":"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx e1e77272ccda54accb61dcc574169aa91ca4541ebd6cbb1ab876b86147907dff:0","phas
+01:20:46   · [bshard-close-submit-v2] market=48-0psz7 submit fail: no txId in relay response: {"error":"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx 071ac53c72f2597dd18bef53815d0d8d45469488c1e209b6b06062c1dfe8356e:0","phas
+01:20:46   · [bshard-close-submit-v2] market=65-5svw3 submit fail: no txId in relay response: {"error":"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx e1e77272ccda54accb61dcc574169aa91ca4541ebd6cbb1ab876b86147907dff:0","phas
+01:20:46   · [bshard-close-submit-v2] market=48-0psz7 submit fail: no txId in relay response: {"error":"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx 071ac53c72f2597dd18bef53815d0d8d45469488c1e209b6b06062c1dfe8356e:0","phas
+01:20:46 
+ALL PASS(neg: 卡死已复现)
