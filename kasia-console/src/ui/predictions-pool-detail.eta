@@ -345,7 +345,7 @@
     </div>
 
     <!-- ===== piece 2: settle 结果透明 (已结算) ===== -->
-    <div x-show="isSettled()" class="card p-4 mb-4">
+    <div x-show="isSettled()<%~ it.noKasMode ? ' && !zkNative()' : '' %>" class="card p-4 mb-4">
       <div class="text-sm font-medium text-ink-700 mb-3">结算结果</div>
       <!-- winner -->
       <div class="bg-emerald-50 rounded-lg p-3 mb-4 text-center">
@@ -1044,7 +1044,8 @@ function poolDetailPage(marketId) {
     },
     statusBadgeClass() {
       if (this.chainSettled()) return 'bg-emerald-100 text-emerald-700';
-      var s = this.market ? this.market.protocol_status : '';
+<% if (it.noKasMode) { %>      if (this.noWinners()) return 'bg-warm-200 text-ink-600';
+<% } %>      var s = this.market ? this.market.protocol_status : '';
       if (s === 'completed') return 'bg-emerald-100 text-emerald-700';
 <% if (it.noKasMode) { %>      if (s === 'attested_v2') return 'bg-emerald-100 text-emerald-700';
 <% } %>      if (s === 'collecting_sigs' || s === 'verifying') return 'bg-amber-100 text-amber-700';

@@ -127,3 +127,12 @@ test('no-KAS mode: no-winners market copy (hint / badge / my-positions row); non
   const off = await render(false, 'predictions-pool-detail');
   assert.ok(!off.includes('noWinners') && !off.includes('无人押中'));
 });
+test('no-KAS mode: completed no-winners market never shows 已全部记账 / settled-result card; neutral badge; non-mainnet unchanged', async () => {
+  const on = await render(true, 'predictions-pool-detail');
+  assert.ok(on.includes("isSettled() && !zkNative()") && on.includes("if (this.noWinners()) return 'bg-warm-200 text-ink-600'"));
+  // noWinners() 判断先于 completed/已记账 相关分支: 状态标签与阶段提示里它都排在前面
+  assert.ok(on.indexOf("if (this.noWinners()) return '已结束 · 无人押中'") < on.indexOf('completed: '));
+  assert.ok(on.indexOf("if (this.noWinners()) return '本场无人押中") < on.indexOf("if (st === 'completed') return"));
+  const off = await render(false, 'predictions-pool-detail');
+  assert.ok(!off.includes('&& !zkNative()'));
+});

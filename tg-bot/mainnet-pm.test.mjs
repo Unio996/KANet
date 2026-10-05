@@ -199,6 +199,10 @@ await T('19 无人下注被取消的盘: 点进去说"无人下注，到期已�
   assert.ok(!/到账|发到/.test(realT('zh', 'pm_market_no_bets')));
 });
 await T('20 无人押中(no_winners): 我的押注 与 开奖通知 用专门文案, 仍记为输; 无该标志时仍是普通"输"', async () => {
+  // J2 的真实形状(12533c90): status=completed + 每行 did_win=false, outcome_winner=judged_winner, payout 字段 null, no_winners=true —— completed 不得被读成"有人赢/已记账"
+  const real = [pos({ status: 'completed', did_win: false, outcome_winner: 1, no_winners: true, actual_payout_kas: null, payout_pending_units: null, zk_native: true }), pos({ status: 'completed', did_win: false, outcome_winner: 1, no_winners: true, my_direction: 0, actual_payout_kas: null, zk_native: true, locked_at: 2 })];
+  assert.deepEqual(real.map(positionKind), ['lose_nowinners', 'lose_nowinners']);
+  assert.deepEqual(pickNotifications(real, new Set()).map((x) => x.kind), ['lose_nowinners']);   // 按盘汇总只通知一次, 没有 win/paid
   const nw = [pos({ did_win: false, no_winners: true })];
   assert.equal(positionKind(nw[0]), 'lose_nowinners');
   assert.equal(positionKind(pos({ did_win: false })), 'lose');
