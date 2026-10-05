@@ -1,0 +1,63 @@
+{
+ "asserts": [
+  {
+   "ok": true,
+   "label": "造出 0.5 KAS 的 close 费形状 UTXO F 87243fd27141db18"
+  },
+  {
+   "ok": true,
+   "label": "pin_utxo F ⇒ {\"status\":200,\"ok\":true,\"pinned\":true,\"key\":\"87243fd27141db183e95a03b83c57c48653"
+  },
+  {
+   "ok": true,
+   "label": "pin 期间连发 6 笔干扰转账后, F 仍未花(被排除出选币候选)"
+  },
+  {
+   "ok": true,
+   "label": "unpin_utxo F ⇒ {\"status\":200,\"ok\":true,\"unpinned\":true,\"key\":\"87243fd27141db183e95a03b83c57c486"
+  },
+  {
+   "ok": true,
+   "label": "解钉后继续干扰转账, F 被选币器吃掉(= 没有 pin 时 close 费 UTXO 的下场, S3 btduw 机制)"
+  }
+ ],
+ "rounds": [
+  {
+   "phase": "pinned",
+   "i": 0,
+   "txId": "5d2f7c084e85eb0314baedfa55cab03fe31650159a97e4b980b3fd4cdcf3c90a"
+  },
+  {
+   "phase": "pinned",
+   "i": 1,
+   "txId": "c12b77f485423cbc91704277c125d4995b190f43397ebd0f9be2f5ddc9520c9a"
+  },
+  {
+   "phase": "pinned",
+   "i": 2,
+   "txId": "17e03a8c80b4d5513bd8752f8a62add38d06a1b7f0c412606c51190ce08ae6a6"
+  },
+  {
+   "phase": "pinned",
+   "i": 3,
+   "txId": "271643cc67fb70de4c89bfde80a25156088a68e1a82482f5d0dca04f731d9356"
+  },
+  {
+   "phase": "pinned",
+   "i": 4,
+   "txId": "62175d689338baacd4340f672c36ec34863ad952bd0d2bdb4e1fcb07f8d6ab47"
+  },
+  {
+   "phase": "pinned",
+   "i": 5,
+   "txId": "f0af3cec2e01eec3f35d2892315e9a3aefa2d457bfee47561c45834336ef2b8d"
+  },
+  {
+   "phase": "unpinned",
+   "i": 0,
+   "txId": "8f19f8254ad6baf9fbee89a4752254d108fb91773a3b207083f81e020eb52f17"
+  }
+ ],
+ "F": "87243fd27141db183e95a03b83c57c48653d97ec276c414d4ced74cb8d8ec41b:0",
+ "failures": 0
+}
