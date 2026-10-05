@@ -119,7 +119,7 @@ function pmMyPositions(marketId) {
         }
         return '赢 · 记账中';
       }
-      if (p.did_win === false) return '输';
+      if (p.did_win === false) return p.no_winners === true ? '输 · 本场无人押中，没有派奖' : '输';
       return this.kind(p) === 'settled' ? '已结算 · 结果待同步' : '待结算';
     },
     resultCls(p) {

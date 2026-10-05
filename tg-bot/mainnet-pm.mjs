@@ -99,7 +99,7 @@ export function mapRegisterFailure(r) {
 export function positionKind(p) {
   const s = p.status;
   if (s === 'cancelled' || s === 'refunded') return 'cancelled';
-  if (p.did_win === false) return 'lose';
+  if (p.did_win === false) return p.no_winners === true ? 'lose_nowinners' : 'lose';   // no_winners: my-positions 行上的标志(J2 提供): 本场无人押中, 没有派奖
   if (p.did_win === true) {
     if (p.actual_payout_kas != null) return 'win_paid';
     if (p.zk_native) {
@@ -155,7 +155,8 @@ export function pickNotifications(positions, seen = new Set()) {
     const won = decided.some((p) => p.did_win === true);
     const title = titleOf(rows[0]);
     const rk = `${g.id}:result`;
-    if (!seen.has(rk)) out.push({ key: rk, kind: won ? 'win' : 'lose', marketId: g.id, title, side: rows[0].my_side, stake: rows.reduce((s, p) => s + (Number(p.stake_kas) || 0), 0), pendingChips: rows.reduce((s, p) => s + (unitsToChips(p.payout_pending_units) || 0), 0) });
+    const noWin = !won && rows.some((p) => p.no_winners === true);
+    if (!seen.has(rk)) out.push({ key: rk, kind: won ? 'win' : (noWin ? 'lose_nowinners' : 'lose'), marketId: g.id, title, side: rows[0].my_side, stake: rows.reduce((s, p) => s + (Number(p.stake_kas) || 0), 0), pendingChips: rows.reduce((s, p) => s + (unitsToChips(p.payout_pending_units) || 0), 0) });
     if (won) {
       const paid = rows.filter((p) => p.did_win === true && p.actual_payout_kas != null);
       const pk = `${g.id}:paid`;
