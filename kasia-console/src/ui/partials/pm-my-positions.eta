@@ -9,7 +9,7 @@ const _mid = (typeof it.marketId === 'string') ? it.marketId : '';
     <div class="flex items-center justify-between flex-wrap gap-2 mb-3">
       <div>
         <div class="text-sm font-medium text-ink-700">我的押注<%= _mid ? ' · 本盘' : '' %></div>
-        <div class="text-[11px] text-ink-400 mt-0.5">只读。筹码是测试代币，零经济价值；赢到的筹码是链上凭证。</div>
+        <div class="text-[11px] text-ink-400 mt-0.5">只读。筹码是测试代币，零经济价值；赢到的筹码是链上记账凭证（记在你的地址名下，保留 30 天）。</div>
       </div>
       <div class="flex items-center gap-2 text-xs">
         <label class="text-ink-500">钱包</label>
@@ -111,13 +111,13 @@ function pmMyPositions(marketId) {
     resultText(p) {
       if (this.kind(p) === 'closed') return '已取消';
       if (p.did_win === true) {
-        if (p.actual_payout_kas != null) return '赢 · 到账 ' + this.chips(p.actual_payout_kas) + ' 筹码';
+        if (p.actual_payout_kas != null) return '赢 · 已记账 ' + this.chips(p.actual_payout_kas) + ' 筹码（链上凭证）';
         if (p.zk_native) {
           const pend = this.unitsToChips(p.payout_pending_units);
-          if (pend != null && pend > 0) return '赢 · 待领 ' + this.chips(pend) + ' 筹码';
+          if (pend != null && pend > 0) return '赢 · 待记账 ' + this.chips(pend) + ' 筹码';
           if (p.pool_known === false) return '赢 · 金额待定';
         }
-        return '赢 · 待发放';
+        return '赢 · 记账中';
       }
       if (p.did_win === false) return '输';
       return this.kind(p) === 'settled' ? '已结算 · 结果待同步' : '待结算';

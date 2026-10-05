@@ -891,7 +891,7 @@ function poolDetailPage(marketId) {
       if (st === 'collecting_sigs') return `等仲裁人签名 (${sigs}/${total} 已签).`;
       if (st === 'completed') return '已结算. 链上 TX 见上面 🔗.';
       if (st === 'refunded' || st === 'cancelled') return '已退款.';
-<% if (it.noKasMode) { %>      if (st === 'attested_v2') return this.zkExhausted() ? '已领完. 所有赢家的筹码已到账.' : '已开奖. 赢家的筹码按比例发放中.';
+<% if (it.noKasMode) { %>      if (st === 'attested_v2') return this.zkExhausted() ? '已全部记账. 所有赢家的筹码已记在各自地址名下（链上凭证）.' : '已开奖. 赢家的筹码按比例记账中（链上凭证）.';
 <% } %>      <% if (it.noKasMode) { %>return this.statusLabel();<% } else { %>return st;<% } %>
 
     },
@@ -1029,7 +1029,7 @@ function poolDetailPage(marketId) {
         settle_failed: '结算重试中',
         needs_manual_attribution: '结算核对中',
         settled_partial_claims: '已结算·部分待领',
-<% if (it.noKasMode) { %>        attested_v2: this.zkExhausted() ? '已领完' : '已开奖',
+<% if (it.noKasMode) { %>        attested_v2: this.zkExhausted() ? '已全部记账' : '已开奖',
         zk_closed: '收盘中',
         zk_closing: '收盘中',
 <% } %>        shard_internal: '押注中',
