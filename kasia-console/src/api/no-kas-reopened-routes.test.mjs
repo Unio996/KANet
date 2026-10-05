@@ -106,6 +106,8 @@ let marketId;
   const md = (() => { try { return JSON.parse(row.metadata); } catch { return {}; } })();
   ok(row.spine_p2sh === null && row.spine_lock_tx === null && Number(row.maker_stake_amount) === 0 && row.protocol_status === 'pending_bettors' && row.protocol_version === 'v0.7', 'DB 行: spine 两列 NULL, maker_stake_amount=0, pending_bettors, v0.7');
   ok(md.no_spine === true && !md.spine_redeem_script_hex, 'metadata.no_spine=true 且没有 spine_redeem_script_hex');
+  // 账本1861 C §8: 铸造时回收参数写进盘 metadata(枚举器优先用它; env 日后改了也不漏回收)
+  ok(md.zk_recovery_params && md.zk_recovery_params.sink_pk === 'ab'.repeat(32) && md.zk_recovery_params.retire_daa === 25920000 && md.zk_recovery_params.sweep_daa === 315360000 && md.zk_recovery_params.claim_out_value_sompi === 50000000 && typeof md.zk_recovery_params.stamped_at === 'string', `metadata.zk_recovery_params = {sink_pk, retire_daa, sweep_daa, claim_out_value_sompi, stamped_at}(实 ${JSON.stringify(md.zk_recovery_params)})`);
   ok(JSON.parse(row.resolution_rule_spec).zk_native === true, 'spec.zk_native 默认补 true(既有行为)');
   ok(calls.transfer.length === 0, `transferAndConfirm 零调用(实 ${calls.transfer.length})`);
   const types = [...new Set(calls.send.map((c) => c.type))];
