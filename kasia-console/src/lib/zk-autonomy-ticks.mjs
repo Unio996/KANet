@@ -25,6 +25,7 @@ import { readPayoutShardV2AttestedState } from './bshard-close-enforce.mjs';
 import { getMarketBets } from './pool-bettor-sides-query.mjs';
 import { deriveCloseFeeLeaves } from '../services/bshard-close-voter.js';
 import { randomUUID } from 'crypto';
+import { isNoWinnersError, markZkNoWinners } from './zk-no-winners.mjs';   // 账本1865: 判决已定但无赢家 ⇒ 终态(completed + metadata.no_winners), 不再永远重试
 import { zkReadyCandidateRows, zkLegacyLikeRows, resolveShadowEvery, shadowDue, announceShadowEvery } from '../db/phase2-indexes-v200.mjs';   // Phase-2 A 包 P2-1 A′: 候选行 SQL 单源(表达式常量与索引 DDL 同文件); 影子节奏(默认关)
 import { handoffCandidateRows, handoffLegacyRows, marketMetaById } from '../db/phase2-handoff-candidates.mjs';   // Phase-2 B 包 P2-3: handoff 候选 SQL 单源
 
@@ -476,7 +477,7 @@ export async function zkJudgeProposeAutonomousTick(ctx) {
   try {
     const currentDaa = await ctx.getCurrentDaaScore();
     const candidates = _scanJudgeProposeCandidates(currentDaa);
-    let proposed = 0, cooling = 0, skipped = 0, errored = 0;
+    let proposed = 0, cooling = 0, skipped = 0, errored = 0, noWinners = 0;
     for (const { marketId, deadline, deadlineDaa, meta } of candidates) {
       if (_zkAutonomyLeases.has(marketId)) { skipped++; continue; }
       _zkAutonomyLeases.add(marketId);
@@ -499,6 +500,13 @@ export async function zkJudgeProposeAutonomousTick(ctx) {
           await ctx.buildProposeCloseRequestV2({ marketId, winningDirection, endBlockHash: endBlockHashHex, settlerRelayId: ctx.settlerRelayId });
         } catch (e) {
           if (isNotFinalizedError(e.message)) { cooling++; log(`market=${marketId.slice(-8)} consolidate 时间锁尚未终局(过去中位时间滞后), 冷却后重试: ${String(e.message).slice(0, 120)}`); continue; }
+          // 账本1865: 走到这里 judgeWinDir 已返回 0/1(ABSTAIN 在上面 judge 步就抛了)。degenerate(无赢家)在任何手续费 UTXO/链上动作之前抛 ⇒ 终态, 零 KAS。
+          if (isNoWinnersError(e)) {
+            const r = markZkNoWinners(sqlite, marketId, winningDirection);
+            if (r.ok && r.changed) { noWinners++; log(`✅ market=${marketId.slice(-8)} 判决已定(winDir=${winningDirection})但无赢家 ⇒ completed + no_winners(零 KAS, 无链上动作)`); continue; }
+            if (r.ok) { continue; }
+            _writeZkAutonomyErrorEvent('zkJudgeProposeTick_no_winners_mark', marketId, r.reason); errored++; continue;
+          }
           errored++; _writeZkAutonomyErrorEvent('zkJudgeProposeTick_propose', marketId, e.message); _maybeWriteStuckAlert(marketId, deadline); continue;
         }
 
@@ -508,8 +516,8 @@ export async function zkJudgeProposeAutonomousTick(ctx) {
         errored++; _writeZkAutonomyErrorEvent('zkJudgeProposeTick', marketId, e.message);
       } finally { _zkAutonomyLeases.delete(marketId); }
     }
-    if (proposed || errored) log(`tick: ${candidates.length} candidate(s) | proposed=${proposed} cooling=${cooling} skipped=${skipped} errored=${errored}`);
-    return { ok: true, candidates: candidates.length, proposed, cooling, skipped, errored };
+    if (proposed || errored || noWinners) log(`tick: ${candidates.length} candidate(s) | proposed=${proposed} cooling=${cooling} skipped=${skipped} errored=${errored} noWinners=${noWinners}`);
+    return { ok: true, candidates: candidates.length, proposed, cooling, skipped, errored, noWinners };
   } finally { _zkJudgeProposeTickRunning = false; }
 }
 
