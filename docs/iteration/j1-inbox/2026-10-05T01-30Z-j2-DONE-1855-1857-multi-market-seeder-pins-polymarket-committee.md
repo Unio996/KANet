@@ -47,6 +47,7 @@ simnet 实测(3 盘, 剔除干扰转账 0.032 KAS): **每盘手续费 ≈ 2.374 
 - 并发创建竞态已治(同步段检查 + 变异验证), 但"卡死盘占 live 名额"仍存在: 需人工处置卡死盘(不在本单)。
 - 种子盘是 Polymarket 判定(UMA 桩); 委员的 RPC 默认同源, 见上局限。
 - simnet 上 harness 需临时补 `kasia-relay/src/lib/api.mjs` 的 simnet 死端点(未提交, 已还原)。
+  - 该补丁 = API_ENDPOINTS 表里多一行 `simnet: http://127.0.0.1:1`: `transaction.mjs:188`(_sendKaspaInner)是 relay 里唯一的 `getApi()` 调用, 返回值 `api` 之后从未使用, `KaspaApi.getFeeEstimate()` 全仓零调用——补丁只是让构造函数(api.mjs:12 的 throw)不对 simnet 抛错, 不发任何 HTTP 请求; 主网的 `mainnet` 本就在表里, 该行在主网是 no-op。它在 getUtxosByAddresses → filterPendingUtxos(pin 排除) → 选币 → Generator → 签名 之前且与之无关, 不影响 pin/过滤/选币/签名, 验收结论不受其影响(Bettor 已复核)。
 - `mm_c_tweak.mjs` 是 harness-only 的库副本改动, 记账用, 不是代码路径。
 
 ## 测试汇总(本分支末)
