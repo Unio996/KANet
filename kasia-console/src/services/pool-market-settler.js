@@ -195,6 +195,30 @@ function getBettorSumSompi(marketId) {
   return BigInt(r?.s || 0);
 }
 
+// ── 账本1862: ZK 筹码盘(无 spine · 不收 KAS · maker_stake=0)不归本旧 settler 的 KAS 逻辑管 ─────────────────────────────
+//  MIN_POT(1e10)是 KAS sompi 口径, 守的是 spine 结算的 storage mass 与 maker 的 KAS 押金; 筹码盘两样都没有(stake_amount 是 KTT 筹码数, 派彩是 ZK 证过的 KTT leaf)。
+//  有 ≥1 注的筹码盘早被 loop-top 的 isBshard(market_shards 行)整体跳过、由 bshard-settle-daemon 走 ZK close; 只有【0 注】的盘没有 shard 行, 会漏进下面三处 KAS min-pot 闸,
+//  被贴上 "min_pot_undersize(<100 KAS)" 并去 dispatchRefund→buildMakerRefundPreimage(无 spine 必报错)。0 注盘链上什么都没有, 取消是对的, 但标签与退款尝试是错的。
+//  ⇒ 本函数在 loop 顶把筹码盘接走: 有注 ⇒ 不碰(留给 ZK close); 0 注且过 deadline+宽限 ⇒ 仅记 cancelled/no_bets, 不 dispatchRefund。
+const NO_BETS_CANCEL_GRACE_S = 300;   // 在途下注(预留→链上→写行 ≈15–45s)留足时间; deadline 当刻 register-v07 已拒新注
+export function isNoSpineChipMarket(market) {
+  let m; try { m = JSON.parse(market?.metadata || '{}'); } catch { return false; }
+  return m && m.no_spine === true && !market?.spine_p2sh;
+}
+export function handleNoSpineChipMarket(market, db = sqlite, nowSec = Math.floor(Date.now() / 1000)) {
+  if (!isNoSpineChipMarket(market)) return { skip: false };
+  if (market.protocol_status !== 'verifying' && market.protocol_status !== 'collecting_sigs') return { skip: true, action: 'left_to_zk_path' };
+  const hasShard = !!db.prepare('SELECT 1 FROM market_shards WHERE logical_market_id = ? LIMIT 1').get(market.id);
+  const bets = db.prepare('SELECT COUNT(*) c FROM pool_bettor_sides WHERE market_id = ? OR market_id IN (SELECT shard_market_id FROM market_shards WHERE logical_market_id = ?)').get(market.id, market.id).c;
+  if (hasShard || bets > 0) return { skip: true, action: 'left_to_zk_path' };
+  if (!(Number(market.deadline) + NO_BETS_CANCEL_GRACE_S <= nowSec)) return { skip: true, action: 'grace' };
+  let meta = {}; try { meta = JSON.parse(market.metadata || '{}'); } catch {}
+  meta.cancel_reason = 'no_bets'; meta.cancel_pool_sompi = '0'; meta.cancelled_at = new Date().toISOString();
+  const r = db.prepare("UPDATE pool_markets SET protocol_status = 'cancelled', metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND protocol_status IN ('verifying','collecting_sigs')").run(JSON.stringify(meta), market.id);
+  if (r.changes) console.log(`[pool-settler] no-spine chip market=${String(market.id).slice(0, 12)} 0 bets at deadline+${NO_BETS_CANCEL_GRACE_S}s → cancelled(no_bets); nothing on chain, no refund dispatch`);
+  return { skip: true, action: r.changes ? 'cancelled_no_bets' : 'left_to_zk_path' };
+}
+
 export function startPoolMarketSettlerCron() {
   if (timer) return;
   console.log(`[pool-settler] started — 5min cron, aggregate 3 oracle votes + consensus check, silent_timeout=${ORACLE_SILENT_TIMEOUT_MIN}min (Sub 2d Phase 1)`);
@@ -659,6 +683,8 @@ export async function poolSettlerTick() {
       // 不回归(v0.6 是真实用户路)。判据 = canary 证 logical_market_id==pool_markets.id。
       const isBshard = !!sqlite.prepare('SELECT 1 FROM market_shards WHERE logical_market_id = ? LIMIT 1').get(market.id);
       if (isBshard) { bshardSkipped++; continue; }
+      // 账本1862: ZK 筹码盘(无 spine)不进下面任何 KAS 逻辑(min-pot / refund / phase2); 0 注盘在此记 cancelled(no_bets)。
+      if (handleNoSpineChipMarket(market).skip) continue;
 
       // FINDING-2 (NWT) 主 settler 闸 (J1+NWT+Bettor co-design/co-verify, 2026-06-28): commingled-spine 盘禁委员结算.
       //   根因: pre-fix v0.7 spine redeem 没烤 market_id → spine_p2sh 被 >1 市场共享 → close_attest payoutRoot 未绑
@@ -2742,6 +2768,12 @@ export async function dispatchRefund(market, decision) {
     if (isBshard) {
       console.error(`[pool-settler] dispatchRefund REFUSED market=${market.id.slice(0,12)} — bshard market has no legacy refund path (market_shards rows exist), use reclaimBshardMakerBond instead`);
       return { ok: false, reason: 'bshard market — legacy refund path structurally invalid' };
+    }
+
+    // 账本1862: 无 spine 的 ZK 筹码盘没有 maker 押金/spine UTXO 在链上 ⇒ 没有可退的 KAS; 不进 buildMakerRefundPreimage(那条路要 spine, 必报错)。结构性失败, 调用方不会重试。
+    if (isNoSpineChipMarket(market)) {
+      console.warn(`[pool-settler] dispatchRefund skipped market=${market.id.slice(0,12)} — no-spine chip market has no maker/spine funds on chain (nothing to refund)`);
+      return { ok: false, reason: 'no-spine chip market — nothing to refund (no spine, maker stake 0)', structural: true };
     }
 
     // ── P1「验不成 ≠ 可以退款」: 授权在【唯一咽喉】处强制, 不散在各调用点 ──────────────
