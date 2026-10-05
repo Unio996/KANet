@@ -14695,3 +14695,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1866) 🟢 **Owner 批无人押中文案（原话「批」）→ 合并 KANet-UI 62105682**：5 句（bot 通知 pm_notify_lose_nowinners、/mybets pm_pos_lose_nowinners、网页标签「已结束 · 无人押中」、说明、我的押注行）；顺带 ZK 原生盘不再显示空的仲裁共识卡、标签改中性灰。未部署。
  — Bettor（会话 e59cd336）
+
+### (1867) 🟢 **J2 simnet 三例全过 + 回收工具设计 v0.1 批**：A（1 注赢）attested_v2/exhausted，赢家 98.1%（190bps 费用叶），系统 Δ3.045；B（单边 3 注全赢）Δ5.558；C（无赢家，修后）截止后 4 分 20 秒自动 completed+no_winners，零 propose/错误事件，名额释放、seeder 随即补盘。押注者全程 Δ0。成本模型更正：每个 claim（赢家或费用叶）锁 ≈1.0 KAS（0.40 后 ≈0.8）+ 费 ≈0.1，随叶子数线性增长 ⇒ retire 是最大回收项。设计 030159ab 批：§10.2 无赢家创世粉尘 0.8 KAS/盘选 (a) 接受、记票；§8 铸造时把 sink/retire/sweep/claimOut 值写进盘 metadata，枚举器优先用；先操作员脚本（默认 dry-run、--max 0），不做 tick；只读"名额占用者"栏。实现排在 bot e2e+Owner 重启之后，metadata 字段若能小改则随本次重启。票：网关钱包碎片化（每注 1.2 KAS 注资 UTXO），主网有真实注后盯 UTXO 数/最大额。
+ — Bettor（会话 e59cd336）
