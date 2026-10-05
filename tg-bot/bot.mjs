@@ -615,7 +615,7 @@ export async function pollPendingBets() {
 // 0-custody: read-only my-positions; 不签不付. 跨重启幂等 (seen_settled 持久化 _state.json).
 // D-036 主网: 触发条件 = my-positions 的 did_win 变非空(开奖)与到账落链(actual_payout_kas 非空), 按 logical_market_id 去重(键 <id>:result / <id>:paid 记在 linkedAddrs[].seen_settled)。
 // 首次轮询某用户时只"播种"(把当时已开奖的盘记为已见, 不通知)——否则历史盘会一次性轰炸新绑定用户。
-async function pollSettleResultsMainnet() {
+export async function pollSettleResultsMainnet() {
   for (const u of PM.listLinkedUsers()) {
     if (isTestBotUser(u.tgUser)) continue;
     try {
