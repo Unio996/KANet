@@ -23,6 +23,7 @@ export const REOPENED_ROUTES = Object.freeze({
   'register-v07': 'S1-gateway-sponsor',
 });
 
+const _loggedReopened = new Set();   // 重开放行日志同样每路由只打一次
 const _logged = new Set();   // 每个路由名只打一次日志(自动程序每个 tick 都会撞, 不刷屏)
 
 /**
@@ -58,8 +59,12 @@ export function noKasStakeModeOn(env = process.env) {
  */
 export function assertNoKasStakeUnlessReopened(routeName, reopenId, env = process.env) {
   if (REOPENED_ROUTES[routeName] !== reopenId) return deny(routeName, 'reopen-id-mismatch', `(重开 id 不匹配: ${reopenId})`);
-  const g = assertNoKasStakeOnMainnet(routeName, env);   // 网络未配 ⇒ 403(fail-closed); 其余情况(含模式开)走下面
-  if (g && g.body.network === 'unconfigured') return g;
+  // 不再经 assertNoKasStakeOnMainnet(它的 deny() 会对"放行"也打 "403" 日志, grep 403 的人被误导)。网络未配/未知 ⇒ 仍 fail-closed 403(此时才是真 403, 才打日志)。
+  try { configuredNetwork(env); } catch (e) { return deny(routeName, 'unconfigured', `(网络未配置/未知, fail-closed: ${e.message})`); }
+  if (noKasStakeModeOn(env) && !_loggedReopened.has(routeName)) {
+    _loggedReopened.add(routeName);
+    console.log(`[mainnet-no-kas-stake] reopened, allowed route=${routeName} reopen=${reopenId} (进入分支守卫; 非 403)`);
+  }
   return null;
 }
 
@@ -96,7 +101,7 @@ function deny(routeName, net, extra) {
 }
 
 /** 仅测试用: 清日志去重集。 */
-export function _resetNoKasStakeLogForTest() { _logged.clear(); }
+export function _resetNoKasStakeLogForTest() { _logged.clear(); _loggedReopened.clear(); }
 
 /**
  * register-v07 重开分支(S1)的目标盘检查(Bettor 账本1846 评审 SHOULD): 不收 KAS 模式下, 网关代付分支只许喂【ZK 原生且无 spine】的盘——
