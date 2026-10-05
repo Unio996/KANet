@@ -878,7 +878,8 @@ function poolDetailPage(marketId) {
       if (st === 'pending_oracle_deposits') return '等仲裁人接单 (= 仲裁人押 bond 接单).';
       if (st === 'pending_oracle_sampling' || st === 'pending_oracle_sample') return '抽仲裁人中 (约 10 秒).';
       if (st === 'pending_bettors') return '等用户押注 (= 截止前任何人可押 YES/NO).';
-      if (st === 'verifying') {
+<% if (it.noKasMode) { %>      if (st === 'verifying' && this.zkNative()) return '已截止，等待开奖结果。';   // ZK 原生盘没有"仲裁人投票"(0 判定/需 4 同向对它是误导); 0 注的盘会在截止后约 5 分钟被取消
+<% } %>      if (st === 'verifying') {
         const judged = this.judgedCount?.() ?? 0;
         const abstain = this.abstainCount?.() ?? 0;
         const silent = this.silentCount?.() ?? 0;
@@ -890,8 +891,9 @@ function poolDetailPage(marketId) {
       }
       if (st === 'collecting_sigs') return `等仲裁人签名 (${sigs}/${total} 已签).`;
       if (st === 'completed') return '已结算. 链上 TX 见上面 🔗.';
-      if (st === 'refunded' || st === 'cancelled') return '已退款.';
-<% if (it.noKasMode) { %>      if (st === 'attested_v2') return this.zkExhausted() ? '已领完. 所有赢家的筹码已到账.' : '已开奖. 赢家的筹码按比例发放中.';
+<% if (it.noKasMode) { %>      if (st === 'cancelled') return this.cancelHint();
+<% } %>      if (st === 'refunded' || st === 'cancelled') return '已退款.';
+<% if (it.noKasMode) { %>      if (st === 'attested_v2') return this.zkExhausted() ? '已全部记账. 所有赢家的筹码已记在各自地址名下（链上凭证）.' : '已开奖. 赢家的筹码按比例记账中（链上凭证）.';
 <% } %>      <% if (it.noKasMode) { %>return this.statusLabel();<% } else { %>return st;<% } %>
 
     },
@@ -1029,7 +1031,8 @@ function poolDetailPage(marketId) {
         settle_failed: '结算重试中',
         needs_manual_attribution: '结算核对中',
         settled_partial_claims: '已结算·部分待领',
-<% if (it.noKasMode) { %>        attested_v2: this.zkExhausted() ? '已领完' : '已开奖',
+<% if (it.noKasMode) { %>        verifying: this.zkNative() ? '已截止 · 等开奖' : '等仲裁人投票',
+        attested_v2: this.zkExhausted() ? '已全部记账' : '已开奖',
         zk_closed: '收盘中',
         zk_closing: '收盘中',
 <% } %>        shard_internal: '押注中',
@@ -1049,6 +1052,12 @@ function poolDetailPage(marketId) {
       const m = this.market || {};
       if (m.metadata && (m.metadata.zk_continuation || m.metadata.no_spine)) return true;
       try { return !!JSON.parse(m.resolution_rule_spec || '{}').zk_native; } catch (e) { return false; }
+    },
+    // 取消原因(metadata.cancel_reason): no_bets(J2 新增) / 旧口径 min_pot_undersize 且池为 0 ⇒ "无人下注"; 其它取消不编原因。主网无退款, 不说"已退款"。
+    cancelHint() {
+      const md = (this.market && this.market.metadata) || {};
+      const noBets = md.cancel_reason === 'no_bets' || (md.cancel_reason === 'min_pot_undersize' && String(md.cancel_pool_sompi) === '0');
+      return noBets ? '该市场无人下注，到期已取消。' : '该市场已取消。';
     },
     zkExhausted() {
       const zc = this.market && this.market.metadata && this.market.metadata.zk_continuation;

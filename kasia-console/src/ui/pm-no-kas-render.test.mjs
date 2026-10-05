@@ -82,13 +82,13 @@ test('no-KAS mode: stake_ktt is built with BigInt (no float precision loss)', as
 });
 test('no-KAS mode: my-positions block reads ZK-native fields (pending / landed / pool_known)', async () => {
   const html = await render(true, 'predictions-pool-detail');
-  for (const k of ['zk_native', 'payout_pending_units', 'pool_known', '赢 · 待领', '赢 · 金额待定']) assert.ok(html.includes(k), k);
+  for (const k of ['zk_native', 'payout_pending_units', 'pool_known', '赢 · 待记账', '赢 · 金额待定']) assert.ok(html.includes(k), k);
 });
 test('no-KAS mode: detail hides TG box + UMA mapping badge, maps attested_v2, lights timeline, real sig count; non-mainnet keeps old', async () => {
   const on = await render(true, 'predictions-pool-detail');
   assert.ok(!on.includes('去 TG 押注 →') && !on.includes('立即押注'));
   assert.ok(!on.includes('x-text="mappingBadge().label"'));
-  assert.ok(on.includes("attested_v2: this.zkExhausted() ? '已领完' : '已开奖'"));
+  assert.ok(on.includes("attested_v2: this.zkExhausted() ? '已全部记账' : '已开奖'"));
   assert.ok(on.includes("attested_v2: 'completed'") && on.includes('sigCountReal()') && on.includes("startsWith('pending_')"));
   const off = await render(false, 'predictions-pool-detail');
   assert.ok(off.includes('去 TG 押注 →') && off.includes('x-text="mappingBadge().label"') && off.includes('已签人数') && !off.includes('zkExhausted') && !off.includes('sigCountReal'));
@@ -96,7 +96,28 @@ test('no-KAS mode: detail hides TG box + UMA mapping badge, maps attested_v2, li
 test('no-KAS mode: 链上进度 raw strings mapped, vote card hidden on ZK-native; non-mainnet keeps old', async () => {
   const on = await render(true, 'predictions-pool-detail');
   assert.ok(on.includes("' && !zkNative()'") === false && on.includes('!isSettled() && !zkNative()'));
-  assert.ok(on.includes('return this.statusLabel();') && on.includes("bshard_close_sig_v2: '委员签名（收盘）'") && on.includes('已领完. 所有赢家的筹码已到账.'));
+  assert.ok(on.includes('return this.statusLabel();') && on.includes("bshard_close_sig_v2: '委员签名（收盘）'") && on.includes('已全部记账. 所有赢家的筹码已记在各自地址名下'));
   const off = await render(false, 'predictions-pool-detail');
   assert.ok(!off.includes('zkNative') && !off.includes('this.statusLabel();') && off.includes('return st;'));
+});
+test('no-KAS mode: wording says chips are RECORDED on-chain (not paid/arrived at an address); non-mainnet detail has none of the new words', async () => {
+  for (const page of ['predictions-list', 'predictions-pool-detail']) {
+    const on = await render(true, page);
+    assert.ok(on.includes('已记账') && on.includes('待记账') && on.includes('记账中'), page);
+    assert.ok(!/赢 · 到账|赢 · 待领|赢 · 待发放|筹码已到账|已领完/.test(on), page);
+  }
+  const off = await render(false, 'predictions-pool-detail');
+  assert.ok(!off.includes('已记账') && !off.includes('已全部记账'));
+});
+test('no-KAS mode: cancelled market hint says no-bets (not refunded); non-mainnet unchanged', async () => {
+  const on = await render(true, 'predictions-pool-detail');
+  assert.ok(on.includes("this.cancelHint()") && on.includes('该市场无人下注，到期已取消。') && on.includes("md.cancel_reason === 'no_bets'"));
+  const off = await render(false, 'predictions-pool-detail');
+  assert.ok(!off.includes('cancelHint') && off.includes("return '已退款.'"));
+});
+test('no-KAS mode: verifying ZK market says 已截止·等开奖 (no oracle-vote wording); non-mainnet unchanged', async () => {
+  const on = await render(true, 'predictions-pool-detail');
+  assert.ok(on.includes("verifying: this.zkNative() ? '已截止 · 等开奖'") && on.includes("st === 'verifying' && this.zkNative()") && on.includes('已截止，等待开奖结果。'));
+  const off = await render(false, 'predictions-pool-detail');
+  assert.ok(!off.includes('已截止') && off.includes("verifying: '等仲裁人投票'"));
 });
