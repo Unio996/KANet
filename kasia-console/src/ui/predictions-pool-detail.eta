@@ -890,7 +890,8 @@ function poolDetailPage(marketId) {
       }
       if (st === 'collecting_sigs') return `等仲裁人签名 (${sigs}/${total} 已签).`;
       if (st === 'completed') return '已结算. 链上 TX 见上面 🔗.';
-      if (st === 'refunded' || st === 'cancelled') return '已退款.';
+<% if (it.noKasMode) { %>      if (st === 'cancelled') return this.cancelHint();
+<% } %>      if (st === 'refunded' || st === 'cancelled') return '已退款.';
 <% if (it.noKasMode) { %>      if (st === 'attested_v2') return this.zkExhausted() ? '已全部记账. 所有赢家的筹码已记在各自地址名下（链上凭证）.' : '已开奖. 赢家的筹码按比例记账中（链上凭证）.';
 <% } %>      <% if (it.noKasMode) { %>return this.statusLabel();<% } else { %>return st;<% } %>
 
@@ -1049,6 +1050,12 @@ function poolDetailPage(marketId) {
       const m = this.market || {};
       if (m.metadata && (m.metadata.zk_continuation || m.metadata.no_spine)) return true;
       try { return !!JSON.parse(m.resolution_rule_spec || '{}').zk_native; } catch (e) { return false; }
+    },
+    // 取消原因(metadata.cancel_reason): no_bets(J2 新增) / 旧口径 min_pot_undersize 且池为 0 ⇒ "无人下注"; 其它取消不编原因。主网无退款, 不说"已退款"。
+    cancelHint() {
+      const md = (this.market && this.market.metadata) || {};
+      const noBets = md.cancel_reason === 'no_bets' || (md.cancel_reason === 'min_pot_undersize' && String(md.cancel_pool_sompi) === '0');
+      return noBets ? '该市场无人下注，到期已取消。' : '该市场已取消。';
     },
     zkExhausted() {
       const zc = this.market && this.market.metadata && this.market.metadata.zk_continuation;

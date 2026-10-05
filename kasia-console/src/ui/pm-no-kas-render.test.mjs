@@ -109,3 +109,9 @@ test('no-KAS mode: wording says chips are RECORDED on-chain (not paid/arrived at
   const off = await render(false, 'predictions-pool-detail');
   assert.ok(!off.includes('已记账') && !off.includes('已全部记账'));
 });
+test('no-KAS mode: cancelled market hint says no-bets (not refunded); non-mainnet unchanged', async () => {
+  const on = await render(true, 'predictions-pool-detail');
+  assert.ok(on.includes("this.cancelHint()") && on.includes('该市场无人下注，到期已取消。') && on.includes("md.cancel_reason === 'no_bets'"));
+  const off = await render(false, 'predictions-pool-detail');
+  assert.ok(!off.includes('cancelHint') && off.includes("return '已退款.'"));
+});
