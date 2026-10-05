@@ -7,12 +7,12 @@ import { CONFIG } from './config.mjs';
 function headers() {
   return { 'Content-Type': 'application/json', 'x-ingest-secret': CONFIG.ingestSecret };
 }
-async function req(method, path, body) {
+async function req(method, path, body, timeoutMs = 10000) {
   try {
     const res = await fetch(`${CONFIG.consoleUrl}${path}`, {
       method, headers: headers(),
       body: body ? JSON.stringify(body) : undefined,
-      signal: AbortSignal.timeout(10000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     const json = await res.json().catch(() => ({}));
     return { ok: res.ok, status: res.status, json };
@@ -134,7 +134,7 @@ export function poolRegisterConfirm(marketId, { linkedAddr, direction, stakeKas,
 // D-036(主网 pool v0.7 不收 KAS): 一步下注——网关代付, 用户不付 KAS。body: linked_addr(服务端用 my-positions 同一个 deriveXOnlyPubkey 推公钥)、direction(0=YES/1=NO)、
 // stake_ktt(筹码×1e8 的整数字符串)。成功 {ok:true, no_kas_stake:true,...}; 429 = 服务端每日上限(code bet_cap_pk_day|bet_cap_global_day, body 带 resets_at); 无链上动作时回 4xx。
 export function poolRegisterV07Gateway(marketId, { linkedAddr, direction, stakeKtt }) {
-  return req('POST', `/api/pool/market/${encodeURIComponent(marketId)}/bettor/register-v07`, { linked_addr: linkedAddr, direction, stake_ktt: stakeKtt });
+  return req('POST', `/api/pool/market/${encodeURIComponent(marketId)}/bettor/register-v07`, { linked_addr: linkedAddr, direction, stake_ktt: stakeKtt }, 120000);   // 网关代付注册要 15–40 秒(simnet 实测), 默认 10 秒会误报"系统繁忙"而服务端其实已受理
 }
 
 // Bettor r70 B (Owner P0): /mybets data source. Returns positions[] with

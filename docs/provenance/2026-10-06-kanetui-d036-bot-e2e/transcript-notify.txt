@@ -1,0 +1,40 @@
+[poller → A] 🎉 已开奖：MM rehearsal market #2: will event 2 happen?
+      你押的 YES 赢了！赢到的筹码会记在你绑定的地址名下（链上凭证）。
+[poller → A] ✅ 已记账：MM rehearsal market #2: will event 2 happen?
+      5.886 筹码已记在你绑定的地址名下（链上凭证）。
+[poller → A] 🎉 已开奖：MM rehearsal market #1: will event 1 happen?
+      你押的 YES 赢了！赢到的筹码会记在你绑定的地址名下（链上凭证）。
+[poller → A] ✅ 已记账：MM rehearsal market #1: will event 1 happen?
+      1.962 筹码已记在你绑定的地址名下（链上凭证）。
+[poller → A] 🎉 已开奖：MM rehearsal market #0: will event 0 happen?
+      你押的 YES 赢了！赢到的筹码会记在你绑定的地址名下（链上凭证）。
+[poller → A] ✅ 已记账：MM rehearsal market #0: will event 0 happen?
+      0.981 筹码已记在你绑定的地址名下（链上凭证）。
+[poller → B] 已开奖：MM rehearsal market #3: will event 3 happen?
+      本场无人押中，市场已结束，没有派奖。你押的 NO 记为输。
+[poller → B] 已开奖：MM rehearsal market #2: will event 2 happen?
+      你押的 NO 这次没赢。
+[poller → B] 🎉 已开奖：MM rehearsal market #1: will event 1 happen?
+      你押的 YES 赢了！赢到的筹码会记在你绑定的地址名下（链上凭证）。
+[poller → B] ✅ 已记账：MM rehearsal market #1: will event 1 happen?
+      2.943 筹码已记在你绑定的地址名下（链上凭证）。
+[A] SAY /mybets
+    ← 📒 你的押注（共 3 个市场）
+      
+      1. MM rehearsal market #2: will event 2 happen?
+         YES · 2 筹码 · 赢 · 已记账 5.89 筹码（链上凭证，记在你的地址名下）✅
+      2. MM rehearsal market #1: will event 1 happen?
+         YES · 2 筹码 · 赢 · 已记账 1.96 筹码（链上凭证，记在你的地址名下）✅
+      3. MM rehearsal market #0: will event 0 happen?
+         YES · 1 筹码 · 赢 · 已记账 0.98 筹码（链上凭证，记在你的地址名下）✅
+[B] SAY /mybets
+    ← 📒 你的押注（共 3 个市场）
+      
+      1. MM rehearsal market #3: will event 3 happen?
+         NO · 2 筹码 · 输（本场无人押中，没有派奖）
+      2. MM rehearsal market #2: will event 2 happen?
+         NO · 4 筹码 · 输
+      3. MM rehearsal market #1: will event 1 happen?
+         YES · 3 筹码 · 赢 · 已记账 2.94 筹码（链上凭证，记在你的地址名下）✅
+[B] TAP pm:m:ext-pool-v07-1791219249242-ny2cr
+    ← 这个市场已经不收押注了。

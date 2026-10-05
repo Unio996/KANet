@@ -137,7 +137,8 @@ await T('12 押注全流程: 点 YES → 回 5 → POST register-v07 {linked_add
   const reg = e.calls.filter((c) => c[0] === 'register');
   assert.equal(reg.length, 1); assert.equal(reg[0][1], ID);
   assert.deepEqual(reg[0][2], { linkedAddr: 'kaspa:qqlinked', direction: 0, stakeKtt: '500000000' });
-  assert.ok(o.replies[0].text.includes('5') && /Bet placed/.test(o.replies[0].text));
+  assert.ok(o.replies[o.replies.length - 1].text.includes('5') && /Bet placed/.test(o.replies[o.replies.length - 1].text));
+  assert.equal(o.replies.length, 2); assert.ok(/Submitting your bet/.test(o.replies[0].text));   // 先回执, 再结果(注册要几十秒)
   assert.equal(e.cap.used('42'), 1);
   const again = await e.text('5');                  // 会话已用掉 ⇒ 不再下注, 交还 next()
   assert.equal(again.nexted, 1); assert.equal(e.calls.filter((c) => c[0] === 'register').length, 1);
@@ -163,7 +164,7 @@ await T('15 服务端 429: 同一礼貌文案带重置时间, 不计入 bot 侧�
   const e = makeEnv({ registerResp: { ok: false, status: 429, json: { ok: false, code: 'bet_cap_global_day', resets_at: '2026-10-06T00:00:00.000Z' } } });
   await e.cb(`pm:b:${ID}:0`);
   const o = await e.text('3');
-  assert.ok(/tomorrow/.test(o.replies[0].text) && /2026-10-06 00:00 UTC/.test(o.replies[0].text) && /Nothing was spent/.test(o.replies[0].text));
+  assert.ok(/tomorrow/.test(o.replies[o.replies.length - 1].text) && /2026-10-06 00:00 UTC/.test(o.replies[o.replies.length - 1].text) && /Nothing was spent/.test(o.replies[o.replies.length - 1].text));
   assert.equal(e.cap.used('42'), 0);
 });
 await T('16 未绑定用户点押注 ⇒ 先 /link; 无会话的文本 ⇒ next()(交还只读壳); /命令 ⇒ next()', async () => {
