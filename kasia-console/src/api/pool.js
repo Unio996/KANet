@@ -25,6 +25,7 @@ import { kaspaZk } from '../services/zk-prove-worker.mjs';
 import { checkAdminSecretTier } from '../lib/admin-secret-tier.mjs';
 import { assertAddressOnNetwork, configuredNetwork } from '../lib/kaspa-network.mjs';   // (b) 网络单一源 (设计 v0.2 §3): 前缀只对照 env KASPA_NETWORK, 不从地址推网络
 import { assertNoKasStakeOnMainnet, assertNoKasStakeUnlessReopened, noKasStakeModeOn, mainnetCreateV07Branch, parseStakeKtt, sponsorMarketGuard, findUnfinishedZkNativeMarket, liveMarketCapReached } from '../lib/mainnet-no-kas-stake-gate.mjs';
+import { reserveBetSlot } from '../lib/zk-bet-cost-gate.mjs';   // 账本1861/D-036: 不收 KAS 模式下 register-v07 的按日下注上限(服务端成本闸)
 import { resolveSinkConfig, assertDeadlineWithinTicketAge } from '../lib/zk-sink-config.mjs';   // 账本1850 严格零方案   // 账本1845 S0: 主网不收 KAS 硬闸(见该文件头)
 
 // 件⑤步骤2 疑似死端点命中计数(2026-07-16, KANet-UI, Owner终裁+Bettor #nig8da 派工): observe-only,
@@ -1520,8 +1521,25 @@ export async function registerPoolRoutes(fastify) {
     const _noKasMode = noKasStakeModeOn();   // 主网(或 simnet 彩排显式 KANET_NO_KAS_STAKE_MODE=1): 走网关代付, 不收下注人 KAS; 其它网络老行为逐字节不变
     const logicalMarketId = request.params.id;
     const b = request.body || {};
-    if ((!b.bettor_relay_id && !b.bettor_pk) || b.direction === undefined || (!_noKasMode && !b.stake_kas)) {   // 无 KAS 模式: 下注量字段是 stake_ktt(下面 parseStakeKtt), stake_kas 不读
-      return reply.code(400).send({ ok: false, error: _noKasMode ? 'bettor_relay_id OR bettor_pk (fresh keypair, cross-node fixture), direction, stake_ktt required (不收 KAS 模式: 下注量字段是 stake_ktt, 不是 stake_kas)' : 'bettor_relay_id OR bettor_pk (fresh keypair, cross-node fixture), direction, stake_kas required' });
+    if ((!b.bettor_relay_id && !b.bettor_pk && !(_noKasMode && b.linked_addr)) || b.direction === undefined || (!_noKasMode && !b.stake_kas)) {   // 无 KAS 模式: 下注量字段是 stake_ktt(下面 parseStakeKtt), stake_kas 不读
+      return reply.code(400).send({ ok: false, error: _noKasMode ? 'bettor_relay_id OR bettor_pk (fresh keypair, cross-node fixture) OR linked_addr (P2PK 地址, 服务端推 bettor_pk), direction, stake_ktt required (不收 KAS 模式: 下注量字段是 stake_ktt, 不是 stake_kas)' : 'bettor_relay_id OR bettor_pk (fresh keypair, cross-node fixture), direction, stake_kas required' });
+    }
+    // 账本1861 / 电报接线: 不收 KAS 模式可传 linked_addr(代替 bettor_pk / bettor_relay_id)——服务端用既有 deriveXOnlyPubkey(与 my-positions 同一个函数)推 bettor_pk, bot 不再自己推第二份。
+    //   必须: 主网前缀(assertAddressOnNetwork) + P2PK(Schnorr)地址; 与 bettor_pk 同给则必须一致; 与 bettor_relay_id 同给 ⇒ 400。其后与 bettor_pk 路径逐字节同(含成本闸按【推出的】pk 计数)。
+    let _linkedPk = null, _linkedNet = null;
+    if (b.linked_addr !== undefined && b.linked_addr !== null && String(b.linked_addr).trim() !== '') {
+      if (!_noKasMode) return reply.code(400).send({ ok: false, error: 'linked_addr 仅在不收 KAS 模式(主网)下可用于 register-v07' });
+      if (b.bettor_relay_id) return reply.code(400).send({ ok: false, error: 'linked_addr 与 bettor_relay_id 不能同时给(请只给其一)' });
+      const _la = String(b.linked_addr).trim();
+      try { _linkedNet = assertAddressOnNetwork(_la, { who: 'pool.js:register-v07-linked_addr' }); }
+      catch (e) { return reply.code(400).send({ ok: false, error: `linked_addr 网络/前缀不符: ${e.message}` }); }
+      try {
+        const _kw = await import('kaspa-wasm');
+        const _ver = new _kw.Address(_la).version;
+        if (_ver !== 'PubKey') return reply.code(400).send({ ok: false, error: `linked_addr 必须是 P2PK(Schnorr) 地址(收到 ${_ver}): 无法推出 bettor_pk` });
+        _linkedPk = String(await deriveXOnlyPubkey(_la)).toLowerCase();
+      } catch (e) { return reply.code(400).send({ ok: false, error: `linked_addr → pubkey 失败: ${e.message}` }); }
+      if (b.bettor_pk && String(b.bettor_pk).toLowerCase() !== _linkedPk) return reply.code(400).send({ ok: false, error: 'linked_addr 与 bettor_pk 不一致', derived_bettor_pk: _linkedPk });
     }
     const market = sqlite.prepare('SELECT * FROM pool_markets WHERE id = ?').get(logicalMarketId);
     if (!market) return reply.code(404).send({ ok: false, error: 'market not found' });
@@ -1563,12 +1581,15 @@ export async function registerPoolRoutes(fastify) {
     try { oracleIds = JSON.parse(market.oracle_relay_ids || '[]'); } catch {}
     // fresh keypair bettor (cross-node 命门③ fixture, NWT 干净地址要求 — 解 (c) gateway-as-bettor 派彩淹没 fixture 教训):
     //   b.bettor_pk 直传(64-hex x-only), gateway-sponsored 资助(testnet test, 无 bettor relay). 非 fresh 走 relay custody 模型.
-    const freshBettor = !!(b.bettor_pk && !b.bettor_relay_id);
+    const freshBettor = !!((b.bettor_pk || _linkedPk) && !b.bettor_relay_id);
     let bettorPk, network;
     if (freshBettor) {
+      if (_linkedPk) { bettorPk = _linkedPk; network = _linkedNet; }   // linked_addr 路径: pk 由服务端推出(上面已校验)
+      else {
       if (!/^[0-9a-f]{64}$/i.test(b.bettor_pk)) return reply.code(400).send({ ok: false, error: 'bettor_pk must be 64-hex x-only pubkey' });
       bettorPk = b.bettor_pk.toLowerCase();
       network = configuredNetwork();   // 账本 1813 A2: 原写死 'testnet-12'(主网会算出 kaspatest 地址)
+      }
     } else {
       if (oracleIds.includes(b.bettor_relay_id)) return reply.code(403).send({ ok: false, error: 'bettor is in market oracle set (area-1 exclusivity)' });
       const bettorRow = sqlite.prepare('SELECT id, address FROM relay_nodes WHERE id = ?').get(b.bettor_relay_id);
@@ -1633,6 +1654,9 @@ export async function registerPoolRoutes(fastify) {
     };
     const shardP2sh_of = (smid) => (sqlite.prepare('SELECT shard_p2sh FROM market_shards WHERE shard_market_id = ?').get(smid)?.shard_p2sh) || '';
 
+    // 账本1861 成本闸(仅不收 KAS 模式): 同步【查数+预留】, 其后到 try 之间无 await; 在任何链上动作(铸票/上 leaf)之前, 被拒 ⇒ 429 零 KAS。finally 里释放。
+    let _betSlot = null;
+    if (_noKasMode) { const _g = reserveBetSlot(sqlite, bettorPk); if (!_g.ok) { reply.header('Retry-After', String(_g.retryAfterSec)); return reply.code(_g.http).send(_g.body); } _betSlot = _g; }
     try {
       const { registerBettorOnShard, computeCloseZkTmplAnchor } = await import('../lib/pool-shard-register.mjs');
       // 事故硬化(2026-07-08 backlog 调查, Bettor④指令): 这两处曾各自独立声明危险默认(target/release/
@@ -1665,7 +1689,7 @@ export async function registerPoolRoutes(fastify) {
     } catch (e) {
       console.error(`[pool/register-v07] ${logicalMarketId} fail: ${e.message}`);
       return reply.code(500).send({ ok: false, error: `register-v07 failed: ${e.message}` });
-    }
+    } finally { if (_betSlot) _betSlot.release(); }
   });
 
   // ── B (无限滚动分片押注) 0-custody 两步流: register-v07/prep + register-v07/confirm (J2 2026-06-30, Owner 钦定 fresh 实现) ──
