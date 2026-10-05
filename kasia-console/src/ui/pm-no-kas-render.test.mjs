@@ -115,3 +115,9 @@ test('no-KAS mode: cancelled market hint says no-bets (not refunded); non-mainne
   const off = await render(false, 'predictions-pool-detail');
   assert.ok(!off.includes('cancelHint') && off.includes("return '已退款.'"));
 });
+test('no-KAS mode: verifying ZK market says 已截止·等开奖 (no oracle-vote wording); non-mainnet unchanged', async () => {
+  const on = await render(true, 'predictions-pool-detail');
+  assert.ok(on.includes("verifying: this.zkNative() ? '已截止 · 等开奖'") && on.includes("st === 'verifying' && this.zkNative()") && on.includes('已截止，等待开奖结果。'));
+  const off = await render(false, 'predictions-pool-detail');
+  assert.ok(!off.includes('已截止') && off.includes("verifying: '等仲裁人投票'"));
+});
