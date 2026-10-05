@@ -25,7 +25,8 @@ import { readPayoutShardV2AttestedState } from './bshard-close-enforce.mjs';
 import { getMarketBets } from './pool-bettor-sides-query.mjs';
 import { deriveCloseFeeLeaves } from '../services/bshard-close-voter.js';
 import { randomUUID } from 'crypto';
-import { isNoWinnersError, markZkNoWinners, hasWinningSideBettor } from './zk-no-winners.mjs';   // 账本1865: 判决已定但无赢家 ⇒ 终态(completed + metadata.no_winners), 不再永远重试
+import { isNoWinnersError, markZkNoWinners, hasWinningSideBettor } from './zk-no-winners.mjs';
+import { checkRecoveryParamsDrift } from './zk-recovery-params.mjs';   // 账本1861 C §8   // 账本1865: 判决已定但无赢家 ⇒ 终态(completed + metadata.no_winners), 不再永远重试
 import { zkReadyCandidateRows, zkLegacyLikeRows, resolveShadowEvery, shadowDue, announceShadowEvery } from '../db/phase2-indexes-v200.mjs';   // Phase-2 A 包 P2-1 A′: 候选行 SQL 单源(表达式常量与索引 DDL 同文件); 影子节奏(默认关)
 import { handoffCandidateRows, handoffLegacyRows, marketMetaById } from '../db/phase2-handoff-candidates.mjs';   // Phase-2 B 包 P2-3: handoff 候选 SQL 单源
 
@@ -187,6 +188,7 @@ export async function _claimOneMarket(marketId, ctx) {   // 账本1832 段4: 导
 
   // 🔴 账本1832 段4: claim 代币化——派彩不再是裸 P2PK 输出, 而是 KanetTokenClaim 实例 + 代币转移(三阶段编排见 zk-token-claim-orchestrator.mjs)。
   const { runTokenClaim, claimFeeInputSompi } = await import('./zk-token-claim-orchestrator.mjs');
+  checkRecoveryParamsDrift(sqlite, marketId, 'claim');   // 账本1861 C §8: claim 铸造前比对盘上回收参数与当前 env(LOUD, 不阻断)
   const feeUtxo = await ctx.mintFeeUtxo(claimFeeInputSompi() / 1e8);
   const tmplEnv = readZkTemplateHashes();
   if (!tmplEnv.ok) { _writeZkAutonomyErrorEvent('claimAutonomousTick_tmpl_env', marketId, `ZK 模板 env 缺失/非法: ${[...tmplEnv.missing, ...tmplEnv.malformed].join('/')}`); return { errored: true, claimed: 0 }; }

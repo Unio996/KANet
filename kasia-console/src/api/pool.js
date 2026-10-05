@@ -25,7 +25,8 @@ import { kaspaZk } from '../services/zk-prove-worker.mjs';
 import { checkAdminSecretTier } from '../lib/admin-secret-tier.mjs';
 import { assertAddressOnNetwork, configuredNetwork } from '../lib/kaspa-network.mjs';   // (b) 网络单一源 (设计 v0.2 §3): 前缀只对照 env KASPA_NETWORK, 不从地址推网络
 import { assertNoKasStakeOnMainnet, assertNoKasStakeUnlessReopened, noKasStakeModeOn, mainnetCreateV07Branch, parseStakeKtt, sponsorMarketGuard, findUnfinishedZkNativeMarket, liveMarketCapReached } from '../lib/mainnet-no-kas-stake-gate.mjs';
-import { reserveBetSlot } from '../lib/zk-bet-cost-gate.mjs';   // 账本1861/D-036: 不收 KAS 模式下 register-v07 的按日下注上限(服务端成本闸)
+import { reserveBetSlot } from '../lib/zk-bet-cost-gate.mjs';
+import { withRecoveryParams, checkRecoveryParamsDrift } from '../lib/zk-recovery-params.mjs';   // 账本1861 C §8: 铸造时回收参数写进盘 metadata(zk_recovery_params), 漂移 LOUD   // 账本1861/D-036: 不收 KAS 模式下 register-v07 的按日下注上限(服务端成本闸)
 import { resolveSinkConfig, assertDeadlineWithinTicketAge } from '../lib/zk-sink-config.mjs';   // 账本1850 严格零方案   // 账本1845 S0: 主网不收 KAS 硬闸(见该文件头)
 
 // 件⑤步骤2 疑似死端点命中计数(2026-07-16, KANet-UI, Owner终裁+Bettor #nig8da 派工): observe-only,
@@ -1450,14 +1451,14 @@ export async function registerPoolRoutes(fastify) {
       if (_capAtInsert) return reply.code(409).send({ ok: false, error: `不收 KAS 模式在跑的 ZK 原生盘已达上限 ${_capAtInsert.live}/${_capAtInsert.cap}(ZK_MAX_LIVE_MARKETS)`, code: 'live_market_cap_reached', live: _capAtInsert.live, cap: _capAtInsert.cap, blocking_market_id: _capAtInsert.ids[0] });
     }
     try {
-      const initialMetadata = JSON.stringify({
+      const initialMetadata = JSON.stringify((_noKasMode ? withRecoveryParams : (m) => m)({   // 不收 KAS 模式: 补 zk_recovery_params(sink_pk/retire_daa/sweep_daa/claim_out_value_sompi, 首写为准)
         ...(spineResult ? { spine_redeem_script_hex: spineResult.redeemScript } : { no_spine: true, no_kas_stake: true }),
         v07_pool_merkle_root: poolMerkleRoot,
         v07_shard_id: shard_id,
         v07_shard_count: shard_count,
         v07_market_id_hash: market_id_hash,
         ...(b._preflightGateResult ? { preflight: b._preflightGateResult } : {}),
-      });
+      }));
       sqlite.prepare(`INSERT INTO pool_markets (
         id, maker_relay_id, maker_pk, spine_p2sh, spine_lock_tx, market_metadata_hash,
         oracle1_pk, oracle2_pk, oracle3_pk, broker_pk,
@@ -1655,6 +1656,7 @@ export async function registerPoolRoutes(fastify) {
     const shardP2sh_of = (smid) => (sqlite.prepare('SELECT shard_p2sh FROM market_shards WHERE shard_market_id = ?').get(smid)?.shard_p2sh) || '';
 
     // 账本1861 成本闸(仅不收 KAS 模式): 同步【查数+预留】, 其后到 try 之间无 await; 在任何链上动作(铸票/上 leaf)之前, 被拒 ⇒ 429 零 KAS。finally 里释放。
+    if (_noKasMode) checkRecoveryParamsDrift(sqlite, logicalMarketId, 'register-v07');   // 账本1861 C §8: ticket 铸造前比对盘上记录与当前 env(不一致 LOUD + 记 drift, 不阻断)
     let _betSlot = null;
     if (_noKasMode) { const _g = reserveBetSlot(sqlite, bettorPk); if (!_g.ok) { reply.header('Retry-After', String(_g.retryAfterSec)); return reply.code(_g.http).send(_g.body); } _betSlot = _g; }
     try {
