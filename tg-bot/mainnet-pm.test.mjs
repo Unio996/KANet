@@ -93,13 +93,14 @@ await T('9 结算通知: did_win 变非空通知一次(按盘汇总, 多笔不�
 });
 
 // ── 接线(假 bot + 假 api; 任何 prep/confirm/proto 调用都让测试失败) ──
-function makeEnv({ rows = [row()], linkedAddr = 'kaspa:qqlinked', registerResp, positions = [], capMax = 5 } = {}) {
+function makeEnv({ rows = [row()], linkedAddr = 'kaspa:qqlinked', registerResp, positions = [], capMax = 5, marketDetail = null } = {}) {
   const commands = new Map(), callbacks = [], textHandlers = [], calls = [];
   const bot = { command: (name, fn) => { if (!commands.has(name)) commands.set(name, fn); }, callbackQuery: (pat, fn) => callbacks.push({ pat, fn }), on: (f, fn) => { if (f === 'message:text') textHandlers.push(fn); } };
   const real = {
     isTransportFailure: (r) => r.status === 0,
     poolMarkets: async (q) => { calls.push(['poolMarkets', q]); return { ok: true, status: 200, json: { ok: true, markets: rows } }; },
     poolRegisterV07Gateway: async (id, b) => { calls.push(['register', id, b]); return registerResp || { ok: true, status: 200, json: { ok: true, no_kas_stake: true } }; },
+    poolMarket: async (id) => { calls.push(['poolMarket', id]); return { ok: true, status: 200, json: { ok: true, market: marketDetail } }; },
     myPositions: async (a) => { calls.push(['myPositions', a]); return { ok: true, status: 200, json: { ok: true, positions } }; },
   };
   const api = new Proxy(real, { get: (o, k) => (k in o ? o[k] : (() => { throw new Error(`forbidden api call ${String(k)}`); })) });
@@ -185,6 +186,17 @@ await T('18 文案事实口径(Bettor 核 KanetTokenClaim.sil): 赢到的筹码�
   }
   assert.ok(/30 天/.test(LANGS.zh.ro_help) && /30 days/.test(LANGS.en.ro_help));
   assert.ok(!/\/support/.test(LANGS.zh.ro_help) && !/\/support/.test(LANGS.en.ro_help));
+});
+await T('19 无人下注被取消的盘: 点进去说"无人下注，到期已取消"(no_bets 与旧 min_pot 池为 0 同义); 其它不可押盘仍是"没找到"', async () => {
+  for (const md of [{ cancel_reason: 'no_bets' }, { cancel_reason: 'min_pot_undersize', cancel_pool_sompi: '0' }]) {
+    const o = await makeEnv({ rows: [], marketDetail: { id: ID, protocol_status: 'cancelled', metadata: md } }).cb(`pm:m:${ID}`);
+    assert.ok(/No bets were placed/.test(o.replies[0].text), JSON.stringify(md));
+  }
+  const o2 = await makeEnv({ rows: [], marketDetail: { id: ID, protocol_status: 'cancelled', metadata: { cancel_reason: 'min_pot_undersize', cancel_pool_sompi: '500000000' } } }).cb(`pm:m:${ID}`);
+  assert.ok(!/No bets were placed/.test(o2.replies[0].text));
+  const o3 = await makeEnv({ rows: [], marketDetail: null }).cb(`pm:m:${ID}`);
+  assert.ok(!/No bets were placed/.test(o3.replies[0].text));
+  assert.ok(!/到账|发到/.test(realT('zh', 'pm_market_no_bets')));
 });
 
 console.log(`\n${n - fail} PASS / ${fail} FAIL`);

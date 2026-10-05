@@ -2,7 +2,7 @@
 // 只在 isReadonlyShell(CONFIG)(=mainnet)时被 bot.mjs 调用, 且在 registerReadonlyShell【之前】注册(grammY 先注册者先处理): 这里接管 bet/hot/mybets/record 与相关回调,
 // 其余(隐藏入口/ link / help / start)仍由只读壳处理; 文本消息无押注会话时 next() 交还只读壳。TN12 老 handler 一个字节没动。
 // 依赖全部注入(api/PM/CONFIG/t/cap), 便于假 bot 测试。0 密钥: 下注靠服务端网关代付, bot 只送 {linked_addr, direction, stake_ktt}。
-import { visiblePoolMarkets, cbData, chipsLabel, parseChips, chipsToStakeKtt, mapRegisterFailure, formatMyPositions } from './mainnet-pm.mjs';
+import { visiblePoolMarkets, isNoBetsCancel, cbData, chipsLabel, parseChips, chipsToStakeKtt, mapRegisterFailure, formatMyPositions } from './mainnet-pm.mjs';
 
 const SESSION_TTL_MS = 10 * 60 * 1000;
 const fmtResets = (iso) => (iso ? String(iso).replace('T', ' ').slice(0, 16) + ' UTC' : 'UTC 00:00');
@@ -45,7 +45,11 @@ export function registerMainnetPm(bot, { api, PM, t, getLang, initLang, cap, now
     if (got.busy) return ctx.reply(t(lang, 'service_busy'));
     if (got.fail) return ctx.reply(t(lang, 'hot_fail'));
     const m = visiblePoolMarkets(got.rows, { limit: 50, nowMs: now() }).find((x) => x.id === marketId);
-    if (!m) return ctx.reply(t(lang, 'ro_detail_not_found'));
+    if (!m) {
+      const one = await api.poolMarket(marketId);   // 不在可押清单: 可能是已取消的无人盘, 查一次说清楚
+      const mk = one.json?.market;
+      return ctx.reply(t(lang, isNoBetsCancel(mk) ? 'pm_market_no_bets' : 'ro_detail_not_found'));
+    }
     const linkedAddr = PM.getLinkedAddr(String(ctx.from.id));
     const lines = [t(lang, 'ro_detail_title', { q: m.title }), t(lang, 'pm_detail_status'), t(lang, 'ro_detail_deadline', { when: whenText(lang, m.deadlineSec) || '?' }),
       t(lang, 'pm_detail_pool', { yes: chipsLabel(m.yesChips), no: chipsLabel(m.noChips) }), t(lang, 'pm_detail_min')];

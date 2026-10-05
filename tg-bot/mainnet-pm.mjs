@@ -38,6 +38,13 @@ export function visiblePoolMarkets(rows, { limit = 8, nowMs = Date.now() } = {})
   return ms.slice(0, Math.max(0, limit));
 }
 
+/** 该盘是否"无人下注、到期被取消"(metadata.cancel_reason=no_bets; 旧口径 min_pot_undersize 且池为 0 同义)。 */
+export function isNoBetsCancel(mk) {
+  if (!mk || mk.protocol_status !== 'cancelled') return false;
+  const md = (mk.metadata && typeof mk.metadata === 'object') ? mk.metadata : {};
+  return md.cancel_reason === 'no_bets' || (md.cancel_reason === 'min_pot_undersize' && String(md.cancel_pool_sompi) === '0');
+}
+
 /** 回调数据 ≤64 字节(Telegram 限制): 'pm:b:' + id + ':0'。超长 id 的盘不进列表(返回 null)。 */
 export function cbData(kind, id, extra = '') {
   const s = `pm:${kind}:${id}${extra ? ':' + extra : ''}`;
