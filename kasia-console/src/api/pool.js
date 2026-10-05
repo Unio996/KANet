@@ -3496,6 +3496,7 @@ export async function registerPoolRoutes(fastify) {
       let actualPayoutKas = null, actualPayoutChainVerified = false;
       let bshardClaimTxid = null;
       let zkNativeInfo = null;   // 账本1857: ZK 原生盘附加字段(筹码单位)
+      let noWinnersFlag = false;   // 账本1865: 本行所属盘 metadata.no_winners===true(判决已定但无赢家) — 每行一个布尔, bot/我的押注页读
       try {
         const meta = JSON.parse(p.metadata || '{}');
         // #48 (NWT/J2 2026-07-04): bshard(v0.7) 盘从没写 phase2_winner(v0.6 专属字段) — 结算后所有
@@ -3539,6 +3540,13 @@ export async function registerPoolRoutes(fastify) {
             }
           }
           // ev 存在但 win_direction 缺失(老结构/尚在写入中) → outcomeWinner/didWin 留 null(继续显示"待结算", 不误判)。
+        } else if (p.protocol_version === 'v0.7' && (await import('../lib/zk-native-position-result.mjs')).noWinnersInfo(meta)) {
+          // 账本1865: 判决已定但无赢家(completed + metadata.no_winners): 每个持仓都是输, 没有 claim/叶子。
+          const _nw = (await import('../lib/zk-native-position-result.mjs')).noWinnersInfo(meta);
+          outcomeWinner = _nw.winDirection;
+          didWin = false;
+          noWinnersFlag = true;
+          zkNativeInfo = { zk_native: true, no_winners: true, claims_landed: 0, pool_known: false, actual_payout_units: null, payout_pending_units: null };
         } else if (p.protocol_version === 'v0.7' && meta.zk_continuation && (meta.zk_continuation.attestedWinner === 0 || meta.zk_continuation.attestedWinner === 1)) {
           // 账本1857: ZK 原生盘不写 settle_evidence。赢向/叶子/到账全部取 claim tick 用的同一组函数与持久化字段(见 lib/zk-native-position-result.mjs), 无并行计算。
           const logicalId = p.logical_market_id || p.market_id;
@@ -3615,6 +3623,7 @@ export async function registerPoolRoutes(fastify) {
         market_id: p.market_id,
         logical_market_id: p.logical_market_id || p.market_id,   // 账本1857: 详情页按"本盘"过滤分片行
         ...(zkNativeInfo || {}),
+        no_winners: noWinnersFlag,   // 账本1865: 恒有此键(true/false), 同源 metadata.no_winners
         question: p.resolution_rule_spec,
         category: p.category,
         my_direction: myDirection,

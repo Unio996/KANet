@@ -96,5 +96,22 @@ setMeta({ zk_continuation: { ...zcBase, poolAtZkCloseSompi: POOL } });   // zk_c
   const a = await get(A.addr);
   ok(a.did_win === true && a.zk_native === undefined && Math.abs(a.actual_payout_kas - 777 / 1e8) < 1e-18, '回归: settle_evidence 路径照旧(无 zk_native 字段)');
 }
-console.log(fails ? `\n${fails} FAIL` : '\nALL PASS');
+// 账本1865: 判决已定但无赢家(completed + metadata.no_winners): 每个持仓都是输, 每行带 no_winners:true; 其它盘的行 no_winners:false
+console.log('[test] 无赢家盘(账本1865)');
+{
+  const a0 = await get(A.addr);
+  ok(a0.no_winners === false, '回归: 普通盘的行 no_winners===false(键恒在)');
+  sqlite.prepare('UPDATE pool_bettor_sides SET direction = 0 WHERE bettor_pk = ?').run(B.pk);   // 全体押 YES(方向 0)
+  sqlite.prepare("UPDATE pool_markets SET protocol_status = 'completed' WHERE id = ?").run(logicalId);
+  setMeta({ no_winners: true, judged_winner: 1, judged_at: '2026-10-05T15:00:00.000Z', no_winners_source: { type: 'polymarket', condition_id: '0x' + 'ab'.repeat(32) } });
+  const a = await get(A.addr), b = await get(B.addr);
+  ok(a.no_winners === true && b.no_winners === true, '无赢家盘: 每行 no_winners===true');
+  ok(a.did_win === false && b.did_win === false && a.outcome_winner === 1 && b.outcome_winner === 1, '每个持仓都是输(did_win=false), outcome_winner=judged_winner(NO)');
+  ok(a.zk_native === true && a.claims_landed === 0 && a.actual_payout_kas === null && a.payout_pending_units === null, '无 claim、无金额、无待领');
+  // judged_winner 缺失 ⇒ 不进该分支(不乱判)
+  setMeta({ no_winners: true });
+  const c = await get(A.addr);
+  ok(c.no_winners === false && c.did_win !== true, 'no_winners 但 judged_winner 缺失 ⇒ 不进该分支(no_winners 键 false, 不猜)');
+}
+console.log(fails ?`\n${fails} FAIL` : '\nALL PASS');
 process.exitCode = fails ? 1 : 0;
