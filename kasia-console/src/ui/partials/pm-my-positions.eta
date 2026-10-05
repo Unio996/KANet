@@ -31,7 +31,7 @@ const _mid = (typeof it.marketId === 'string') ? it.marketId : '';
       <div class="hidden md:flex items-center gap-2 px-3 text-[10px] text-ink-400">
         <span class="flex-1">盘口</span><span class="w-10 text-center">方向</span><span class="w-24 text-right">押注（筹码）</span><span class="w-16 text-center">盘口状态</span><span class="w-36 text-right">结果</span>
       </div>
-      <template x-for="p in rows" :key="p.side_p2sh || (p.market_id + ':' + p.locked_at)">
+      <template x-for="p in shown" :key="p.side_p2sh || (p.market_id + ':' + p.locked_at)">
         <div class="bg-warm-50 rounded px-3 py-2 text-xs flex items-center gap-2 flex-wrap md:flex-nowrap">
           <a :href="'/predictions/pool/' + encodeURIComponent(p.logical_market_id || p.market_id)" class="flex-1 min-w-0 text-ink-700 font-medium truncate hover:underline" x-text="titleOf(p)"></a>
           <span class="w-10 text-center px-1.5 py-0.5 rounded font-medium text-[10px]"
@@ -42,6 +42,7 @@ const _mid = (typeof it.marketId === 'string') ? it.marketId : '';
           <span class="w-36 text-right font-medium" :class="resultCls(p)" x-text="resultText(p)"></span>
         </div>
       </template>
+      <div x-show="!showAll && rows.length > LIMIT" class="pt-1 text-center"><button type="button" @click="showAll = true" class="text-xs text-brand-500 hover:underline" x-text="'更多（还有 ' + (rows.length - LIMIT) + ' 条）'"></button></div>
     </div>
   </div>
 </div>
@@ -53,6 +54,9 @@ function pmMyPositions(marketId) {
     wallets: [],
     addr: '',
     rows: [],
+    showAll: false,
+    LIMIT: 20,
+    get shown() { return this.showAll ? this.rows : this.rows.slice(0, this.LIMIT); },
     loading: false,
     error: '',
     async init() {
@@ -79,7 +83,8 @@ function pmMyPositions(marketId) {
         const j = await fetch('/api/pool/my-positions?linked_addr=' + encodeURIComponent(this.addr)).then(r => r.json());
         if (!j.ok) throw new Error(j.error || '加载失败');
         // 本盘过滤: 押注行的 market_id 在分片盘上是分片 id; 后端若给出 logical_market_id 则两者都认
-        this.rows = (j.positions || []).filter(p => !this.marketId || p.market_id === this.marketId || p.logical_market_id === this.marketId);
+        this.showAll = false;
+        this.rows = (j.positions || []).slice().sort((a, b) => (b.locked_at || 0) - (a.locked_at || 0)).filter(p => !this.marketId || p.market_id === this.marketId || p.logical_market_id === this.marketId);
       } catch (e) { this.error = String(e.message || e); }
       this.loading = false;
     },

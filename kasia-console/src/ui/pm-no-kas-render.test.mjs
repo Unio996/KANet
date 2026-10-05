@@ -84,3 +84,12 @@ test('no-KAS mode: my-positions block reads ZK-native fields (pending / landed /
   const html = await render(true, 'predictions-pool-detail');
   for (const k of ['zk_native', 'payout_pending_units', 'pool_known', '赢 · 待领', '赢 · 金额待定']) assert.ok(html.includes(k), k);
 });
+test('no-KAS mode: detail hides TG box + UMA mapping badge, maps attested_v2, lights timeline, real sig count; non-mainnet keeps old', async () => {
+  const on = await render(true, 'predictions-pool-detail');
+  assert.ok(!on.includes('去 TG 押注 →') && !on.includes('立即押注'));
+  assert.ok(!on.includes('x-text="mappingBadge().label"'));
+  assert.ok(on.includes("attested_v2: this.zkExhausted() ? '已领完' : '已开奖'"));
+  assert.ok(on.includes("attested_v2: 'completed'") && on.includes('sigCountReal()') && on.includes("startsWith('pending_')"));
+  const off = await render(false, 'predictions-pool-detail');
+  assert.ok(off.includes('去 TG 押注 →') && off.includes('x-text="mappingBadge().label"') && off.includes('已签人数') && !off.includes('zkExhausted') && !off.includes('sigCountReal'));
+});

@@ -31,12 +31,13 @@
       <div class="text-[11px] text-ink-400 font-mono mt-1" x-text="marketId"></div>
       <div class="mt-2 flex flex-wrap items-center gap-2">
         <span class="text-[11px] px-2 py-0.5 rounded font-medium" :class="statusBadgeClass()" x-text="statusLabel()"></span>
-        <span class="text-[11px] px-2 py-0.5 rounded font-medium" :class="mappingBadge().cls" x-text="mappingBadge().label"></span>
+        <% if (it.noKasMode) { %><% } else { %><span class="text-[11px] px-2 py-0.5 rounded font-medium" :class="mappingBadge().cls" x-text="mappingBadge().label"></span><% } %>
+
         <span class="text-[11px] text-ink-400" x-text="'deadline ' + (market?.deadline || '?')"></span>
       </div>
     </div>
 
-    <!-- 去 TG 押注主 CTA (Owner UX 主线·用户看懂市场后的就地下单入口·仅未结算+有深链时显) -->
+<% if (!it.noKasMode) { %>    <!-- 去 TG 押注主 CTA (Owner UX 主线·用户看懂市场后的就地下单入口·仅未结算+有深链时显) -->
     <div x-show="!isSettled() && tgBetLink" class="mb-4 rounded-lg px-4 py-3 bg-brand-500 text-white flex items-center justify-between gap-3">
       <div>
         <div class="text-sm font-medium">去 TG 押注 →</div>
@@ -47,6 +48,7 @@
         立即押注
       </a>
     </div>
+<% } %>
 
     <!-- KANet-UI 2026-06-22 值分成收口 chain-truth reconcile 横幅: v0.7 bshard 池经链上 close+claim 已结算,
          但 DB 因 settler 把 bshard 押注误读成 0-bet → 退了 maker 本金 → protocol_status='refunded'.
@@ -510,7 +512,8 @@
       <div class="flex justify-between"><span>仲裁人押金 (每位)</span><span x-text="(market?.oracle_bond_amount != null ? market.oracle_bond_amount / 1e8 : '?') + ' KAS'"></span></div><% } %>
 
       <div class="flex justify-between"><span>押注人数</span><span x-text="bettorCount"></span></div>
-      <div class="flex justify-between"><span>已签人数</span><span x-text="sigsCollected"></span></div>
+      <% if (it.noKasMode) { %><div class="flex justify-between" x-show="sigCountReal() > 0"><span>委员已签名</span><span x-text="sigCountReal()"></span></div><% } else { %><div class="flex justify-between"><span>已签人数</span><span x-text="sigsCollected"></span></div><% } %>
+
     </div>
   </div>
 
@@ -990,7 +993,8 @@ function poolDetailPage(marketId) {
         return { label: '✅ UMA 已最终化 · 验证已通过', cls: 'bg-emerald-50 border-emerald-200 text-emerald-700' };
       }
       if (['refunded'].includes(s)) return null;
-      return { label: '⏳ 待验证 · 验证时校验 UMA 48h 最终化', cls: 'bg-amber-50 border-amber-200 text-amber-700' };
+<% if (it.noKasMode) { %>      if (!String(s || '').startsWith('pending_')) return null;   // 主网: 已不收押注的盘不显「待验证」横幅
+<% } %>      return { label: '⏳ 待验证 · 验证时校验 UMA 48h 最终化', cls: 'bg-amber-50 border-amber-200 text-amber-700' };
     },
     // Owner 2026-07-04 (杜绝内部 source 字段泄漏给用户, 如 'polymarket'): 之前直接拼
     // outcome_market_source(内部溯源, 非用户面文案) + condition_id 当页面主标题——改显清洁的
@@ -1022,7 +1026,10 @@ function poolDetailPage(marketId) {
         settle_failed: '结算重试中',
         needs_manual_attribution: '结算核对中',
         settled_partial_claims: '已结算·部分待领',
-        shard_internal: '押注中',
+<% if (it.noKasMode) { %>        attested_v2: this.zkExhausted() ? '已领完' : '已开奖',
+        zk_closed: '收盘中',
+        zk_closing: '收盘中',
+<% } %>        shard_internal: '押注中',
       };
       var s = this.market.protocol_status;
       return m[s] || s || 'unknown';
@@ -1031,14 +1038,26 @@ function poolDetailPage(marketId) {
       if (this.chainSettled()) return 'bg-emerald-100 text-emerald-700';
       var s = this.market ? this.market.protocol_status : '';
       if (s === 'completed') return 'bg-emerald-100 text-emerald-700';
-      if (s === 'collecting_sigs' || s === 'verifying') return 'bg-amber-100 text-amber-700';
+<% if (it.noKasMode) { %>      if (s === 'attested_v2') return 'bg-emerald-100 text-emerald-700';
+<% } %>      if (s === 'collecting_sigs' || s === 'verifying') return 'bg-amber-100 text-amber-700';
       return 'bg-warm-200 text-ink-600';
     },
-    stateReached(key) {
+<% if (it.noKasMode) { %>    zkExhausted() {
+      const zc = this.market && this.market.metadata && this.market.metadata.zk_continuation;
+      return !!(zc && zc.exhausted === true);
+    },
+    // 真实委员签名数: API 的 sigs_collected(旧路径) 或 events 里去重的 bshard_close_sig_v2 委员数(ZK 路径)
+    sigCountReal() {
+      if (this.sigsCollected > 0) return this.sigsCollected;
+      const set = new Set();
+      for (const e of (this.events || [])) { if (e && e.event_type === 'bshard_close_sig_v2') set.add((e.payload && e.payload.committee_pk) || e.observed_by || e.txid); }
+      return set.size;
+    },
+<% } %>    stateReached(key) {
       var order = ['pending_oracle_deposits', 'pending_bettors', 'verifying', 'collecting_sigs', 'completed'];
       var cur = this.market ? this.market.protocol_status : '';
       // map aliases / terminal variants to the canonical viz step
-      var aliasMap = { matched: 'verifying', settled: 'completed', refunded: 'completed', disputed: 'collecting_sigs', active: 'pending_bettors' };
+      var aliasMap = { matched: 'verifying', settled: 'completed', refunded: 'completed', disputed: 'collecting_sigs', active: 'pending_bettors'<%~ it.noKasMode ? ", attested_v2: 'completed'" : '' %> };
       if (aliasMap[cur]) cur = aliasMap[cur];
       var curIdx = order.indexOf(cur);
       var keyIdx = order.indexOf(key);
