@@ -25,7 +25,7 @@ import { readPayoutShardV2AttestedState } from './bshard-close-enforce.mjs';
 import { getMarketBets } from './pool-bettor-sides-query.mjs';
 import { deriveCloseFeeLeaves } from '../services/bshard-close-voter.js';
 import { randomUUID } from 'crypto';
-import { isNoWinnersError, markZkNoWinners } from './zk-no-winners.mjs';   // 账本1865: 判决已定但无赢家 ⇒ 终态(completed + metadata.no_winners), 不再永远重试
+import { isNoWinnersError, markZkNoWinners, hasWinningSideBettor } from './zk-no-winners.mjs';   // 账本1865: 判决已定但无赢家 ⇒ 终态(completed + metadata.no_winners), 不再永远重试
 import { zkReadyCandidateRows, zkLegacyLikeRows, resolveShadowEvery, shadowDue, announceShadowEvery } from '../db/phase2-indexes-v200.mjs';   // Phase-2 A 包 P2-1 A′: 候选行 SQL 单源(表达式常量与索引 DDL 同文件); 影子节奏(默认关)
 import { handoffCandidateRows, handoffLegacyRows, marketMetaById } from '../db/phase2-handoff-candidates.mjs';   // Phase-2 B 包 P2-3: handoff 候选 SQL 单源
 
@@ -496,6 +496,16 @@ export async function zkJudgeProposeAutonomousTick(ctx) {
         try { endBlockHashHex = await ctx.endBlockHash(deadlineDaa); }
         catch (e) { errored++; _writeZkAutonomyErrorEvent('zkJudgeProposeTick_endblockhash', marketId, e.message); _maybeWriteStuckAlert(marketId, deadline); continue; }
 
+        // 账本1865: 前置判定——propose 内部先 consolidate(链上花 ≈0.14 KAS)才算赔付; 赢向一侧没人押 ⇒ 必 degenerate, 先判可省这笔且不留半途状态。
+        try {
+          const _bets = getMarketBets(marketId, sqlite).bets;
+          if (_bets.length > 0 && !hasWinningSideBettor(_bets, winningDirection)) {
+            const r = markZkNoWinners(sqlite, marketId, winningDirection);
+            if (r.ok && r.changed) { noWinners++; log(`✅ market=${marketId.slice(-8)} 判决已定(winDir=${winningDirection})且赢向一侧无人押 ⇒ completed + no_winners(未 propose, 零链上动作)`); continue; }
+            if (r.ok) { continue; }
+            _writeZkAutonomyErrorEvent('zkJudgeProposeTick_no_winners_mark', marketId, r.reason); errored++; continue;
+          }
+        } catch (e) { /* 前置判定失败不阻断: 落回下面 propose 的 degenerate 兜底 */ }
         try {
           await ctx.buildProposeCloseRequestV2({ marketId, winningDirection, endBlockHash: endBlockHashHex, settlerRelayId: ctx.settlerRelayId });
         } catch (e) {

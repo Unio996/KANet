@@ -96,7 +96,25 @@ console.log('[test] 4. judge-propose tick: degenerate ⇒ 终态; ABSTAIN/其它
   ok(r4.errored === 1 && r4.noWinners === 0 && row('m-rpc').s === 'verifying', '非 degenerate 的 propose 错误 ⇒ 照旧重试, 状态不动');
 }
 
+console.log('[test] 4b. 前置判定: 赢向一侧没人押 ⇒ 不 propose(省掉 consolidate 的链上花费)');
+{
+  ok(NW.hasWinningSideBettor([{ direction: 0, stake: '5' }], 0) === true && NW.hasWinningSideBettor([{ direction: 0, stake: 5 }], 1) === false && NW.hasWinningSideBettor([{ direction: 1, stake: 0 }], 1) === false && NW.hasWinningSideBettor([], 1) === false, 'hasWinningSideBettor: 同向有注 ⇒ true; 反向/零注/空 ⇒ false');
+  const addBets = (logical, dirs) => { sqlite.prepare("INSERT OR REPLACE INTO pool_markets (id, maker_relay_id, protocol_version, protocol_status, deadline, market_metadata_hash, created_at, updated_at) VALUES (?, 'r', 'v0.7', 'shard_internal', 1, 'h', datetime('now'), datetime('now'))").run(logical + '-s0'); sqlite.prepare("INSERT INTO market_shards (logical_market_id, shard_index, shard_market_id, shard_p2sh, status, created_at) VALUES (?, 0, ?, 'kaspasim:x', 'open', datetime('now'))").run(logical, logical + '-s0'); dirs.forEach((d, i) => sqlite.prepare("INSERT INTO pool_bettor_sides (market_id, bettor_pk, direction, stake_amount, side_p2sh, side_lock_tx, created_at) VALUES (?, ?, ?, ?, 'p', ?, datetime('now'))").run(logical + '-s0', String(i + 1).repeat(64).slice(0, 64), d, 1000, `tx-${logical}-${i}`)); };
+  const mk2 = () => { const calls = { build: 0 }; return { calls, ctx: { getCurrentDaaScore: async () => 10_000_000, judgeWinDir: async () => 1, endBlockHash: async () => 'ab'.repeat(32), buildProposeCloseRequestV2: async () => { calls.build++; return {}; }, settlerRelayId: 's' } }; };
+  // 全押 YES(0), 判 NO(1) ⇒ 前置判定终态, build 一次都没调
+  market('m-pre'); addBets('m-pre', [0, 0, 0]);
+  const a = mk2(); quiet(); const ra = await T.zkJudgeProposeAutonomousTick(a.ctx); loud();
+  ok(ra.noWinners === 1 && a.calls.build === 0 && row('m-pre').s === 'completed' && JSON.parse(row('m-pre').m).judged_winner === 1, `赢向无人押 ⇒ 终态且 propose 调用 0 次(tick ${JSON.stringify(ra)})`);
+  // 有人押赢向 ⇒ 照常 propose
+  sqlite.prepare('DELETE FROM pool_markets').run(); sqlite.prepare('DELETE FROM market_shards').run(); sqlite.prepare('DELETE FROM pool_bettor_sides').run();
+  market('m-win'); addBets('m-win', [0, 1]);
+  const b = mk2(); quiet(); const rb = await T.zkJudgeProposeAutonomousTick(b.ctx); loud();
+  ok(rb.noWinners === 0 && b.calls.build === 1 && row('m-win').s === 'verifying', '赢向有人押 ⇒ 照常调 propose(前置判定不拦)');
+  sqlite.prepare('DELETE FROM pool_markets').run(); sqlite.prepare('DELETE FROM market_shards').run(); sqlite.prepare('DELETE FROM pool_bettor_sides').run();
+}
+
 console.log('[test] 5. 其它 tick / 路径不再碰终态盘');
+{ sqlite.prepare('DELETE FROM pool_markets').run(); market('m-tick'); NW.markZkNoWinners(sqlite, 'm-tick', 1); }
 {
   const meta = JSON.parse(row('m-tick').m);
   ok(!zkReadyCandidateRows(sqlite).some((r) => r.id === 'm-tick'), 'close/claim/handoff 的候选 SQL 不含它(无 zk_continuation.proving.ready)');

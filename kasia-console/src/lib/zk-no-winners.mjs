@@ -14,6 +14,14 @@ export const NO_WINNERS_ERROR_RE = /degenerate payout\(no winning-side bettors/;
 export function isNoWinnersError(e) { return NO_WINNERS_ERROR_RE.test(String((e && e.message) || e || '')); }
 
 /**
+ * 前置判定(纯函数): 赢向一侧有没有人押(stake>0)。无 ⇒ computePariMutuelPayout 必 degenerate。
+ * 放在 propose 之前用: propose 内部先 consolidate(链上花 ≈0.14 KAS)才算 pm, 先判可省掉这笔并避免半途状态。
+ */
+export function hasWinningSideBettor(bets, winningDirection) {
+  return (bets || []).some((b) => Number(b.direction) === Number(winningDirection) && BigInt(b.stake ?? 0) > 0n);
+}
+
+/**
  * 把"判决已定、无赢家"的盘写成终态(CAS: 只从 pending_bettors/verifying 转, 幂等)。
  * @param {{prepare:Function}} db
  * @returns {{ok:boolean, changed:boolean, reason?:string}}
