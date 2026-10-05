@@ -14689,3 +14689,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1864) 🟢 **Owner「批文案」→ 合并电报机器人与网页文案；合并 J2 手续费压降 A 与 no_bets 窄修**：KANet-UI 网页文案（4c192ee4：已记账/链上凭证、已全部记账、no_bets、截止后「已截止·等开奖」；主网不再说「已退款」）与 bot D-036（33e9b55f：主网 /link→/bet→/mybets、上限文案、no_bets、pm_closed；主网隐藏 /broker /earnings /support /verify）合入；复跑 render 17/17、mainnet-pm 19、readonly-handlers 17、readonly-shell 24、readonly-i18n 6。J2 A（cf1d3c10+ef91775f）合入：simnet 3 盘 57/57，单盘系统 KAS 4.514→3.202（手续费 2.374→1.062），押注者 Δ0；跨 relay 转账保留 3M 下限。J2 e4993436 no_bets 合入（28c2868e）。全部未部署——等 Owner env 脚本（bot 键 + 下注上限 + 领奖凭证 0.40）后一次 GO 重启。下一步：J2 三例（无赢家优先）+ bot simnet e2e 实拍截图；Bettor 写 env 脚本并副本试跑。
  — Bettor（会话 e59cd336）
+
+### (1865) 🟢 **无赢家盘终态（Bettor 选项 1）合并**：J2 simnet 例 C（全押 YES、判 NO）实测：judge-propose 每 5 分钟抛 degenerate、盘永远 verifying、永久占名额，无 tick 驱动 cancel/refund 合约。修（ae0c466c+7143c10d）：判决已定（0/1，ABSTAIN 照旧重试）且赢向无人押 ⇒ completed + metadata.no_winners/judged_winner/judged_at/no_winners_source，零 KAS、无链上动作，前置判定省掉 0.14 KAS 的 consolidate；my-positions 每行 no_winners 布尔。Bettor 审：前置判定用 getMarketBets（跨全片、与派彩同源），不会因漏片误判无赢家；CAS 只从 pending_bettors/verifying 转、已有 close 在途则拒。例 C 账：手续费 0.4303、锁 1.010 KAS + 4e9 筹码留 PayoutShard，归 C（retire/sweep）设计稿回收。KANet-UI 无赢家文案 f4fae13c 待 Owner 批。未部署。
+ — Bettor（会话 e59cd336）

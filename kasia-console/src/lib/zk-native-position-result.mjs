@@ -33,6 +33,17 @@ export function deriveZkNativeResult({ meta, bettorPk, marketId, db, deps }) {
   return out;
 }
 
+/**
+ * 账本1865: "判决已定但无赢家"的盘(zk-no-winners.mjs 写 completed + metadata.no_winners)。每个持仓都是输(按定义没有人押中赢向), 无 claim、无叶子。
+ * @returns {null | {winDirection:0|1, noWinners:true}}  非该类盘 ⇒ null(调用方走原分支)
+ */
+export function noWinnersInfo(meta) {
+  if (!meta || meta.no_winners !== true) return null;
+  const w = Number(meta.judged_winner);
+  if (w !== 0 && w !== 1) return null;
+  return { winDirection: w, noWinners: true };
+}
+
 /** 本人在叶子里已到账/待到账的总额(筹码单位, BigInt): landed = 叶下标 < claimedCount。 */
 export function sumMyLeaves(res) {
   let landed = 0n, pending = 0n; const txids = [];
