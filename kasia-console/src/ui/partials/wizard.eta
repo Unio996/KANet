@@ -34,9 +34,12 @@
       <div x-show="step === 1">
         <div class="text-2xl mb-3">🤖</div>
         <h3 class="text-base font-medium text-ink-700 mb-2">1. 建一个 Agent</h3>
-        <p class="text-sm text-ink-500 leading-relaxed mb-4">
+        <% if (it.noKasMode) { %><p class="text-sm text-ink-500 leading-relaxed mb-4">
+          Agent = 你在 KANet 上的代理人, 代你押注. 多个 Agent 可分担角色.
+        </p><% } else { %><p class="text-sm text-ink-500 leading-relaxed mb-4">
           Agent = 你在 KANet 上的代理人, 持有 testnet KAS, 代你建市 / 押注 / 仲裁. 多个 Agent 可分担角色.
-        </p>
+        </p><% } %>
+
         <div class="text-xs text-ink-400 mb-4">
           去 <a href="/agent" class="text-brand-500 hover:underline">Agent 页</a> 建一个 (顶部 '+ 建 Agent' 按钮).
         </div>
@@ -44,26 +47,41 @@
 
       <!-- Step 2: 领 KAS -->
       <div x-show="step === 2">
-        <div class="text-2xl mb-3">🚰</div>
+        <% if (it.noKasMode) { %><div class="text-2xl mb-3">🎟</div>
+        <h3 class="text-base font-medium text-ink-700 mb-2">2. 不需要 KAS</h3>
+        <p class="text-sm text-ink-500 leading-relaxed mb-4">
+          主网押注用免费测试筹码, 不花 KAS, 链上费用由系统代付. 筹码零经济价值, 用于走通流程.
+        </p>
+        <div class="text-xs text-ink-400 mb-4">
+          去 <a href="/predictions" class="text-brand-500 hover:underline">预测市场</a> 选一个盘就能押.
+        </div><% } else { %><div class="text-2xl mb-3">🚰</div>
         <h3 class="text-base font-medium text-ink-700 mb-2">2. 领测试 KAS</h3>
         <p class="text-sm text-ink-500 leading-relaxed mb-4">
           testnet 币零经济价值, 用于走通流程. 同 wallet 永久 1 次, 同 IP 24h 3 次.
         </p>
         <div class="text-xs text-ink-400 mb-4">
           去 <a href="/agent" class="text-brand-500 hover:underline">Agent 页</a> 点 '🚰 领测试币' 按钮.
-        </div>
+        </div><% } %>
+
       </div>
 
       <!-- Step 3: 建市/押注 -->
       <div x-show="step === 3">
         <div class="text-2xl mb-3">🎯</div>
-        <h3 class="text-base font-medium text-ink-700 mb-2">3. 建市或押注</h3>
+        <% if (it.noKasMode) { %><h3 class="text-base font-medium text-ink-700 mb-2">3. 押注</h3>
+        <p class="text-sm text-ink-500 leading-relaxed mb-4">
+          选一个市场, 用 Agent 钱包押 YES / NO, 输入筹码数即可. 仲裁人自动判, 结果链上结算. 主网盘口由系统同步, 不开放自建.
+        </p>
+        <div class="text-xs text-ink-400 mb-4">
+          押注前看每题易裁度.
+        </div><% } else { %><h3 class="text-base font-medium text-ink-700 mb-2">3. 建市或押注</h3>
         <p class="text-sm text-ink-500 leading-relaxed mb-4">
           有 Agent + KAS 就能建市出题、押注下单——全在 Telegram bot 里操作(/bet /hot 等命令), 也可在 <a href="/my-markets" class="text-brand-500 hover:underline">我的市场</a> 看自己建的盘. 仲裁人自动判, 钱链上结算到 Agent.
         </p>
         <div class="text-xs text-ink-400 mb-4">
           建市需过预审 (估算题目可裁性). 押注前看每题易裁度.
-        </div>
+        </div><% } %>
+
       </div>
 
       <!-- 步骤导航 -->

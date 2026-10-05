@@ -1,0 +1,97 @@
+{
+ "mode": "no-KAS(mainnet)",
+ "posted": {
+  "url": "/api/pool/market/MKT-A/bettor/register-v07",
+  "body": {
+   "bettor_relay_id": "w1",
+   "direction": 0,
+   "stake_ktt": "500000000"
+  }
+ },
+ "jsErrors": [
+  "console Failed to load resource: the server responded with a status of 404 (Not Found)",
+  "console Failed to load resource: the server responded with a status of 404 (Not Found)",
+  "console Failed to load resource: the server responded with a status of 404 (Not Found)",
+  "console Failed to load resource: the server responded with a status of 404 (Not Found)",
+  "console Failed to load resource: the server responded with a status of 404 (Not Found)",
+  "console Failed to load resource: the server responded with a status of 404 (Not Found)",
+  "console Failed to load resource: the server responded with a status of 404 (Not Found)",
+  "pageerror Cannot read properties of null (reading 'maker_stake_refund')",
+  "pageerror Cannot read properties of null (reading 'winnersBps')",
+  "pageerror Cannot read properties of null (reading 'oracleBps')",
+  "pageerror Cannot read properties of null (reading 'brokerBps')",
+  "pageerror Cannot read properties of null (reading 'introBps')",
+  "pageerror Cannot read properties of null (reading 'winner_claim')",
+  "pageerror Cannot read properties of null (reading 'close_explorer_url')",
+  "pageerror Cannot read properties of null (reading 'close_txid')",
+  "pageerror Cannot read properties of null (reading 'payout_root')",
+  "pageerror Cannot read properties of null (reading 'settle_explorer_url')",
+  "pageerror Cannot read properties of null (reading 'settle_explorer_url')",
+  "pageerror Cannot read properties of null (reading 'settle_txid')",
+  "pageerror Cannot read properties of null (reading 'settle_explorer_url')",
+  "pageerror Cannot read properties of null (reading 'settle_txid')",
+  "pageerror Cannot read properties of null (reading 'maker_stake_refund')",
+  "pageerror Cannot read properties of null (reading 'winner_claim')",
+  "pageerror Cannot read properties of null (reading 'close_explorer_url')",
+  "pageerror Cannot read properties of null (reading 'close_txid')",
+  "pageerror Cannot read properties of null (reading 'payout_root')",
+  "pageerror Cannot read properties of null (reading 'maker_stake_refund')",
+  "pageerror Cannot read properties of null (reading 'winner_claim')",
+  "pageerror Cannot read properties of null (reading 'close_explorer_url')",
+  "pageerror Cannot read properties of null (reading 'close_txid')",
+  "pageerror Cannot read properties of null (reading 'payout_root')",
+  "console Failed to load resource: the server responded with a status of 404 (Not Found)",
+  "console Failed to load resource: the server responded with a status of 404 (Not Found)",
+  "console Failed to load resource: the server responded with a status of 404 (Not Found)",
+  "console Failed to load resource: the server responded with a status of 404 (Not Found)"
+ ],
+ "apiCalls": [
+  "GET /api/system/rpc-overview",
+  "404 GET /api/system/rpc-overview",
+  "GET /api/system/canary-stats",
+  "404 GET /api/system/canary-stats",
+  "GET /api/agent/profile",
+  "GET /api/pool/markets",
+  "404 GET /favicon.ico",
+  "GET /api/pool/my-positions",
+  "GET /api/pool/market/MKT-A",
+  "GET /api/oracle/markets/MKT-A/audit",
+  "GET /api/pool/market/MKT-A/settle-audit",
+  "GET /api/pool/market/MKT-A/events",
+  "GET /api/pool/fee-config",
+  "GET /api/tg-bot/status",
+  "POST /api/pool/market/MKT-A/bettor/register-v07"
+ ],
+ "listHasMyBets": true,
+ "listRows": [
+  [
+   "赢 · 到账 7.5 筹码",
+   true
+  ],
+  [
+   "输",
+   true
+  ],
+  [
+   "赢 · 待发放",
+   true
+  ],
+  [
+   "待结算",
+   true
+  ]
+ ],
+ "kasList": [
+  "• 押注用免费测试筹码，不收 KAS，筹码无经济价值",
+  "① 不需要 KAS",
+  "押注用免费测试筹码，不花你的 KAS，链上费用由系统代付。筹码零价值，纯"
+ ],
+ "kasDetail": [
+  "• 押注用免费测试筹码，不收 KAS，筹码无经济价值",
+  "筹码 · 测试筹码零经济价值，不花 KAS"
+ ],
+ "createText": "起预测 no data undefined% 👋 新用户? 看 3 步 onboarding 了解怎么用 KANet 开始 ✕ 🪧 盘口由系统同步 主网不开放用户自建盘口，市场由系统统一同步。你可以直接去市场列表押注。 去看市场 →",
+ "protoInNav": false,
+ "faucet": false,
+ "btn": "用 wallet-one 押 5 筹码 YES"
+}

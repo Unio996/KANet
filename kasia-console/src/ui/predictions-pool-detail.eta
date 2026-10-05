@@ -31,12 +31,13 @@
       <div class="text-[11px] text-ink-400 font-mono mt-1" x-text="marketId"></div>
       <div class="mt-2 flex flex-wrap items-center gap-2">
         <span class="text-[11px] px-2 py-0.5 rounded font-medium" :class="statusBadgeClass()" x-text="statusLabel()"></span>
-        <span class="text-[11px] px-2 py-0.5 rounded font-medium" :class="mappingBadge().cls" x-text="mappingBadge().label"></span>
+        <% if (it.noKasMode) { %><% } else { %><span class="text-[11px] px-2 py-0.5 rounded font-medium" :class="mappingBadge().cls" x-text="mappingBadge().label"></span><% } %>
+
         <span class="text-[11px] text-ink-400" x-text="'deadline ' + (market?.deadline || '?')"></span>
       </div>
     </div>
 
-    <!-- 去 TG 押注主 CTA (Owner UX 主线·用户看懂市场后的就地下单入口·仅未结算+有深链时显) -->
+<% if (!it.noKasMode) { %>    <!-- 去 TG 押注主 CTA (Owner UX 主线·用户看懂市场后的就地下单入口·仅未结算+有深链时显) -->
     <div x-show="!isSettled() && tgBetLink" class="mb-4 rounded-lg px-4 py-3 bg-brand-500 text-white flex items-center justify-between gap-3">
       <div>
         <div class="text-sm font-medium">去 TG 押注 →</div>
@@ -47,6 +48,7 @@
         立即押注
       </a>
     </div>
+<% } %>
 
     <!-- KANet-UI 2026-06-22 值分成收口 chain-truth reconcile 横幅: v0.7 bshard 池经链上 close+claim 已结算,
          但 DB 因 settler 把 bshard 押注误读成 0-bet → 退了 maker 本金 → protocol_status='refunded'.
@@ -131,22 +133,23 @@
           <strong class="text-ink-600">信任分两层（诚实口径，不声称整体 trustless）：</strong><br>
           · <strong class="text-amber-700">结果（谁赢）= trust-minimized</strong>：由去中心预言机委员判定，链外赛果永远需要信任数据源（ZK 也无法消除——预言机问题数学不可约）。<br>
           · <strong class="text-emerald-700">分账算术（payout）= covenant 链上校验</strong>（改 fee 地址/比例 → 机制重算对不上 → BUST）；路线图升级为 <strong>optimistic-trustless</strong>（结算方押 bond + 任何人可提确定性 fraud-proof 链上证伪 → slash + 冻结坏 root + 奖挑战者）。<br>
-          当前 testnet 诚信运营演示；委员自治-enforce daemon 为下一块硬化（把「信 4/5 不作恶」升级成「4/5 作恶面临可验证损失」）。
+          <%= it.noKasMode ? '当前为测试筹码诚信运营演示；' : '当前 testnet 诚信运营演示；' %>委员自治-enforce daemon 为下一块硬化（把「信 4/5 不作恶」升级成「4/5 作恶面临可验证损失」）。
         </div>
       </div>
 
       <div x-show="bet.open" x-transition class="mt-4 space-y-3">
         <!-- KANet-UI GAP-2 (Bettor r494/r496): 模式切换 — 外部钱包(大众默认) vs Console agent(内部) -->
-        <div class="grid grid-cols-2 gap-1 p-1 bg-warm-100 rounded-lg text-xs">
+        <% if (it.noKasMode) { %><% } else { %><div class="grid grid-cols-2 gap-1 p-1 bg-warm-100 rounded-lg text-xs">
           <button @click="bet.mode = 'external'"
                   class="py-1.5 rounded font-medium transition"
                   :class="bet.mode === 'external' ? 'bg-white text-ink-800 shadow-sm' : 'text-ink-400'">用我的钱包付</button>
           <button @click="bet.mode = 'agent'"
                   class="py-1.5 rounded font-medium transition"
                   :class="bet.mode === 'agent' ? 'bg-white text-ink-800 shadow-sm' : 'text-ink-400'">用 Console agent</button>
-        </div>
+        </div><% } %>
 
-        <!-- ===== 外部钱包押注流 (GAP-2): prep → 付款地址/URI → 轮询 confirm ===== -->
+
+        <% if (it.noKasMode) { %><% } else { %><!-- ===== 外部钱包押注流 (GAP-2): prep → 付款地址/URI → 轮询 confirm ===== -->
         <div x-show="bet.mode === 'external'" class="space-y-3">
           <!-- step 1: 还没 prep — 填地址/方向/金额 -->
           <div x-show="!ext.prep" class="space-y-3">
@@ -228,7 +231,8 @@
                class="font-mono text-[10px] text-ink-500 break-all" x-text="ext.registered?.side_lock_tx"></span>
             <button @click="extReset()" class="mt-2 text-[11px] text-ink-500 underline">再押一笔</button>
           </div>
-        </div>
+        </div><% } %>
+
 
         <!-- ===== Console agent 押注流 (内部, 保留原路) ===== -->
         <div x-show="bet.mode === 'agent'" class="space-y-3">
@@ -257,25 +261,33 @@
           </div>
         </div>
 
-        <!-- stake KAS -->
+        <% if (it.noKasMode) { %><!-- 押注量: 筹码 (bet.stakeKas 是沿用的内部变量名, 单位已是筹码; 提交时 ×1e8 成 stake_ktt) -->
+        <div>
+          <label class="block text-[11px] text-ink-500 mb-1">押多少筹码</label>
+          <input type="number" x-model.number="bet.stakeKas" min="1" step="1"
+                 placeholder="例: 10"
+                 class="w-full px-3 py-2 rounded border border-warm-300 text-sm" />
+          <div class="text-[10px] text-ink-400 mt-1">最低 1 筹码 · 测试筹码零经济价值，不花 KAS</div>
+        </div><% } else { %><!-- stake KAS -->
         <div>
           <label class="block text-[11px] text-ink-500 mb-1">押多少 KAS</label>
           <input type="number" x-model.number="bet.stakeKas" min="1" step="0.1"
                  placeholder="例: 100"
                  class="w-full px-3 py-2 rounded border border-warm-300 text-sm" />
           <div class="text-[10px] text-ink-400 mt-1">最低 1 KAS · testnet 币零经济价值</div>
-        </div>
+        </div><% } %>
+
 
         <!-- 提交 -->
         <button @click="submitBet()" :disabled="!canSubmitBet() || bet.submitting"
                 class="w-full py-2.5 rounded font-medium text-sm transition"
                 :class="canSubmitBet() && !bet.submitting ? 'bg-brand-500 hover:bg-brand-600 text-white' : 'bg-warm-200 text-ink-400 cursor-not-allowed'">
-          <span x-text="bet.submitting ? '锁押金中...' : lockButtonLabel()"></span>
+          <span x-text="bet.submitting ? '<%= it.noKasMode ? '提交中...' : '锁押金中...' %>' : lockButtonLabel()"></span>
         </button>
 
         <!-- 成功 -->
         <div x-show="bet.txResult" class="bg-emerald-50 rounded p-3 text-xs">
-          <div class="font-medium text-emerald-700">✓ 已锁 <span x-text="bet.stakeKas"></span> KAS 押 <span x-text="bet.direction === 0 ? 'YES' : 'NO'"></span></div>
+          <div class="font-medium text-emerald-700">✓ <%= it.noKasMode ? '已押' : '已锁' %> <span x-text="bet.stakeKas"></span> <%= it.noKasMode ? '筹码' : 'KAS' %> 押 <span x-text="bet.direction === 0 ? 'YES' : 'NO'"></span></div>
           <div class="mt-1 text-ink-500">side_lock TX:</div>
           <a x-show="explorerTxUrl(bet.txResult?.side_lock_tx)" :href="explorerTxUrl(bet.txResult?.side_lock_tx)" target="_blank"
              class="font-mono text-[10px] text-brand-500 hover:underline break-all" x-text="bet.txResult?.side_lock_tx"></a>
@@ -294,7 +306,7 @@
          :class="umaFinalizationStatus()?.cls" x-text="umaFinalizationStatus()?.label"></div>
 
     <!-- ===== piece 1: live 投票进度 (未结算) ===== -->
-    <div x-show="!isSettled()" class="card p-4 mb-4">
+    <div x-show="!isSettled()<%~ it.noKasMode ? ' && !zkNative()' : '' %>" class="card p-4 mb-4">
       <div class="flex items-center justify-between mb-3">
         <span class="text-sm font-medium text-ink-700">仲裁人投票进度</span>
         <!-- KANet-UI 2026-06-08 P0-B 三桶 (Bettor r414 + spec §7.2): 判定 / 弃权 / 未响应 -->
@@ -378,13 +390,13 @@
         <span class="text-sm font-medium text-ink-700">💎 价值分成 · 已分发</span>
         <span class="text-[10px] px-2 py-0.5 rounded font-medium bg-emerald-100 text-emerald-700">链上已分发</span>
       </div>
-      <div class="text-[11px] text-ink-400 mb-3">押注池 <strong x-text="(settleEvidence()?.pool_kas ?? '?') + ' KAS'"></strong> 已按价值分成分到每一方, 每笔都是链上真 TX, 点 🔗 验。</div>
+      <div class="text-[11px] text-ink-400 mb-3">押注池 <strong x-text="(settleEvidence()?.pool_kas ?? '?') + ' <%= it.noKasMode ? '筹码' : 'KAS' %>'"></strong> 已按价值分成分到每一方, 每笔都是链上真 TX, 点 🔗 验。</div>
 
       <!-- winner -->
       <div x-show="settleEvidence()?.winner_claim" class="bg-emerald-50 rounded px-3 py-2 text-xs flex items-center gap-2 mb-1.5">
         <span class="px-1.5 py-0.5 rounded font-medium text-[10px] bg-emerald-100 text-emerald-700 flex-shrink-0">🏆 赢家</span>
         <span class="text-ink-400 font-mono text-[10px] truncate flex-1" x-text="(settleEvidence()?.winner_claim?.to_address || '').slice(0, 20) + '…'"></span>
-        <span class="text-ink-700 font-medium" x-text="(settleEvidence()?.winner_claim?.amount_kas ?? '?') + ' KAS'"></span>
+        <span class="text-ink-700 font-medium" x-text="(settleEvidence()?.winner_claim?.amount_kas ?? '?') + ' <%= it.noKasMode ? '筹码' : 'KAS' %>'"></span>
         <a x-show="settleEvidence()?.winner_claim?.explorer_url" :href="settleEvidence().winner_claim.explorer_url" target="_blank" class="text-emerald-600" title="领奖 TX">🔗</a>
       </div>
 
@@ -395,7 +407,7 @@
                 :class="f.role === 'broker' ? 'bg-sky-100 text-sky-700' : 'bg-warm-200 text-ink-600'"
                 x-text="f.role === 'broker' ? '🤝 broker' : '🛡 仲裁委员'"></span>
           <span class="text-ink-400 font-mono text-[10px] truncate flex-1" x-text="(f.to_address || '').slice(0, 20) + '…'"></span>
-          <span class="text-ink-600" x-text="(f.amount_kas ?? '?') + ' KAS'"></span>
+          <span class="text-ink-600" x-text="(f.amount_kas ?? '?') + ' <%= it.noKasMode ? '筹码' : 'KAS' %>'"></span>
           <a x-show="f.explorer_url" :href="f.explorer_url" target="_blank" class="text-brand-500" title="分账 TX"><span x-text="f.secondary_output ? '🔗*' : '🔗'"></span></a>
         </div>
       </template>
@@ -429,7 +441,7 @@
       <div class="text-[11px] text-ink-400 mb-3">每段都是链上真 TX, 点 🔗 看 explorer 验。</div>
 
       <!-- maker 发市场 (KANet-UI 2026-06-07 r308: 加 maker_name 主显, address 退次) -->
-      <div x-show="audit?.maker" class="mb-3">
+      <% if (it.noKasMode) { %><% } else { %><div x-show="audit?.maker" class="mb-3">
         <div class="text-[11px] text-ink-500 mb-1">① 主持人 (出市场+赌池本金)</div>
         <div class="bg-warm-50 rounded px-3 py-2 text-xs flex items-center gap-2">
           <span class="text-ink-700 font-medium flex-shrink-0" x-text="makerLabel()"></span>
@@ -437,7 +449,8 @@
           <span class="text-ink-600" x-text="(audit.maker?.stake_kas || 0) + ' KAS'"></span>
           <a x-show="audit.maker?.explorer_url" :href="audit.maker.explorer_url" target="_blank" class="text-brand-500">🔗</a>
         </div>
-      </div>
+      </div><% } %>
+
 
       <!-- bettor sides -->
       <div x-show="(audit?.bettor_sides||[]).length" class="mb-3">
@@ -449,7 +462,7 @@
                     :class="b.direction === 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'"
                     x-text="b.direction === 0 ? 'YES' : 'NO'"></span>
               <span class="text-ink-500 font-mono truncate flex-1" x-text="(b.bettor_pk || '').slice(0, 16) + '…'"></span>
-              <span class="text-ink-600" x-text="(b.stake_kas || 0) + ' KAS'"></span>
+              <span class="text-ink-600" x-text="(b.stake_kas || 0) + ' <%= it.noKasMode ? '筹码' : 'KAS' %>'"></span>
               <a x-show="b.side_lock_explorer_url" :href="b.side_lock_explorer_url" target="_blank" class="text-brand-500" title="锁仓 TX">🔗</a>
               <a x-show="b.claim_explorer_url" :href="b.claim_explorer_url" target="_blank" class="text-emerald-600" title="领奖 TX">🏆</a>
             </div>
@@ -490,14 +503,17 @@
       </div>
     </div>
 
-    <!-- market meta -->
+<% if (it.noKasMode) { %><%~ include('partials/pm-my-positions', { marketId: it.marketId, ...it }) %>
+<% } %>    <!-- market meta -->
     <div class="card p-4 text-[11px] text-ink-500 space-y-1">
       <!-- KANet-UI 2026-06-07 P2 (Bettor r330 关 1 PASS): market meta jargon → 中文 -->
       <!-- KANet-UI 2026-06-11 (Bettor r588 P0): maker_stake_amount/oracle_bond_amount 是 sompi, 显示须 /1e8 转 KAS (Owner 实测 10000000000/100000000 天文数字 = sompi-as-KAS) -->
-      <div class="flex justify-between"><span>主持人本金</span><span x-text="(market?.maker_stake_amount != null ? market.maker_stake_amount / 1e8 : '?') + ' KAS'"></span></div>
-      <div class="flex justify-between"><span>仲裁人押金 (每位)</span><span x-text="(market?.oracle_bond_amount != null ? market.oracle_bond_amount / 1e8 : '?') + ' KAS'"></span></div>
+      <% if (it.noKasMode) { %><% } else { %><div class="flex justify-between"><span>主持人本金</span><span x-text="(market?.maker_stake_amount != null ? market.maker_stake_amount / 1e8 : '?') + ' KAS'"></span></div>
+      <div class="flex justify-between"><span>仲裁人押金 (每位)</span><span x-text="(market?.oracle_bond_amount != null ? market.oracle_bond_amount / 1e8 : '?') + ' KAS'"></span></div><% } %>
+
       <div class="flex justify-between"><span>押注人数</span><span x-text="bettorCount"></span></div>
-      <div class="flex justify-between"><span>已签人数</span><span x-text="sigsCollected"></span></div>
+      <% if (it.noKasMode) { %><div class="flex justify-between" x-show="sigCountReal() > 0"><span>委员已签名</span><span x-text="sigCountReal()"></span></div><% } else { %><div class="flex justify-between"><span>已签人数</span><span x-text="sigsCollected"></span></div><% } %>
+
     </div>
   </div>
 
@@ -518,7 +534,7 @@ function poolDetailPage(marketId) {
     // KANet-UI 2026-06-07 P0-#2 (Bettor r319 关 1 PASS): web 押注 panel state
     bet: {
       open: false,
-      mode: 'external',     // GAP-2 (Bettor r494/r496): external 钱包(大众默认) | agent(内部)
+      mode: '<%= it.noKasMode ? 'agent' : 'external' %>',     // GAP-2 (Bettor r494/r496): external 钱包(大众默认) | agent(内部)
       agents: [],
       bettorRelayId: '',
       direction: null,      // 0=YES, 1=NO
@@ -654,7 +670,50 @@ function poolDetailPage(marketId) {
     isMakerAgent(agentId) {
       return this.market?.maker_relay_id === agentId;
     },
-    canSubmitBet() {
+    <% if (it.noKasMode) { %>canSubmitBet() {
+      return this.bet.bettorRelayId
+        && this.bet.direction !== null
+        && Number.isInteger(Number(this.bet.stakeKas)) && Number(this.bet.stakeKas) >= 1
+        && !this.isOracleAgent(this.bet.bettorRelayId)
+        && !this.isMakerAgent(this.bet.bettorRelayId);
+    },
+    lockButtonLabel() {
+      if (!this.canSubmitBet()) return '押注';
+      const a = (this.bet.agents || []).find(x => x.id === this.bet.bettorRelayId);
+      const name = a?.name || '?';
+      const side = this.bet.direction === 0 ? 'YES' : 'NO';
+      return `用 ${name} 押 ${this.bet.stakeKas} 筹码 ${side}`;
+    },
+    async submitBet() {
+      if (!this.canSubmitBet()) return;
+      this.bet.submitting = true;
+      this.bet.error = '';
+      this.bet.txResult = null;
+      try {
+        // 账本1857: 主网下注 = register-v07 + stake_ktt (1 筹码 = 1e8 单位); 下注人钱包不付 KAS, 链上费用网关代付
+        // stake_ktt 用 BigInt 拼, 避免 >2^53 丢精度; 非整数 / <=0 / 超过服务端 safe-integer 上限(9007199 万筹码)在客户端先拒, 与服务端 parseStakeKtt 一致
+        const _n = Number(this.bet.stakeKas);
+        if (!Number.isInteger(_n) || _n <= 0) throw new Error('筹码数必须是正整数');
+        const stakeKtt = (BigInt(_n) * 100000000n).toString();
+        if (BigInt(stakeKtt) > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error('筹码数超过上限');
+        const r = await fetch(`/api/pool/market/${encodeURIComponent(this.marketId)}/bettor/register-v07`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            bettor_relay_id: this.bet.bettorRelayId,
+            direction: this.bet.direction,
+            stake_ktt: stakeKtt,
+          }),
+        });
+        const j = await r.json();
+        if (!j.ok) throw new Error(j.error || `HTTP ${r.status}`);
+        this.bet.txResult = j;
+        setTimeout(() => this.load(), 1500);
+      } catch (e) {
+        this.bet.error = String(e.message || e);
+      }
+      this.bet.submitting = false;
+    },
+<% } else { %>canSubmitBet() {
       return this.bet.bettorRelayId
         && this.bet.direction !== null
         && Number(this.bet.stakeKas) >= 1
@@ -693,7 +752,8 @@ function poolDetailPage(marketId) {
       }
       this.bet.submitting = false;
     },
-    // ===== KANet-UI GAP-2 (Bettor r494/r496): 外部钱包押注流 =====
+<% } %>
+    <% if (it.noKasMode) { %><% } else { %>// ===== KANet-UI GAP-2 (Bettor r494/r496): 外部钱包押注流 =====
     canExtPrep() {
       return /^kaspa(test)?:[a-z0-9]{20,}$/i.test((this.ext.addr || '').trim())
         && this.ext.direction !== null
@@ -772,7 +832,8 @@ function poolDetailPage(marketId) {
       this.ext.registered = null;
       this.ext.statusNote = '';
       this.ext.error = '';
-    },
+    },<% } %>
+
     // KANet-UI 2026-06-07 r308: maker_name 主持人显. 跨节点 fallback 短 id.
     makerLabel() {
       if (this.market?.maker_name) return this.market.maker_name;
@@ -796,7 +857,8 @@ function poolDetailPage(marketId) {
         pool_settle_silent_detected: '侦测静默仲裁人',
         pool_refund_request: '申请退款',
         pool_market_published: '市场上链',
-      };
+<% if (it.noKasMode) { %>        bshard_close_sig_v2: '委员签名（收盘）',
+<% } %>      };
       return map[t] || t || '?';
     },
     formatEventTime(ts) {
@@ -829,7 +891,9 @@ function poolDetailPage(marketId) {
       if (st === 'collecting_sigs') return `等仲裁人签名 (${sigs}/${total} 已签).`;
       if (st === 'completed') return '已结算. 链上 TX 见上面 🔗.';
       if (st === 'refunded' || st === 'cancelled') return '已退款.';
-      return st;
+<% if (it.noKasMode) { %>      if (st === 'attested_v2') return this.zkExhausted() ? '已领完. 所有赢家的筹码已到账.' : '已开奖. 赢家的筹码按比例发放中.';
+<% } %>      <% if (it.noKasMode) { %>return this.statusLabel();<% } else { %>return st;<% } %>
+
     },
 
     // condition_id_mapping lookup (J2 Sub1 endpoint) — 404 = 未映射 (graceful)
@@ -932,7 +996,8 @@ function poolDetailPage(marketId) {
         return { label: '✅ UMA 已最终化 · 验证已通过', cls: 'bg-emerald-50 border-emerald-200 text-emerald-700' };
       }
       if (['refunded'].includes(s)) return null;
-      return { label: '⏳ 待验证 · 验证时校验 UMA 48h 最终化', cls: 'bg-amber-50 border-amber-200 text-amber-700' };
+<% if (it.noKasMode) { %>      if (!String(s || '').startsWith('pending_')) return null;   // 主网: 已不收押注的盘不显「待验证」横幅
+<% } %>      return { label: '⏳ 待验证 · 验证时校验 UMA 48h 最终化', cls: 'bg-amber-50 border-amber-200 text-amber-700' };
     },
     // Owner 2026-07-04 (杜绝内部 source 字段泄漏给用户, 如 'polymarket'): 之前直接拼
     // outcome_market_source(内部溯源, 非用户面文案) + condition_id 当页面主标题——改显清洁的
@@ -964,7 +1029,10 @@ function poolDetailPage(marketId) {
         settle_failed: '结算重试中',
         needs_manual_attribution: '结算核对中',
         settled_partial_claims: '已结算·部分待领',
-        shard_internal: '押注中',
+<% if (it.noKasMode) { %>        attested_v2: this.zkExhausted() ? '已领完' : '已开奖',
+        zk_closed: '收盘中',
+        zk_closing: '收盘中',
+<% } %>        shard_internal: '押注中',
       };
       var s = this.market.protocol_status;
       return m[s] || s || 'unknown';
@@ -973,14 +1041,31 @@ function poolDetailPage(marketId) {
       if (this.chainSettled()) return 'bg-emerald-100 text-emerald-700';
       var s = this.market ? this.market.protocol_status : '';
       if (s === 'completed') return 'bg-emerald-100 text-emerald-700';
-      if (s === 'collecting_sigs' || s === 'verifying') return 'bg-amber-100 text-amber-700';
+<% if (it.noKasMode) { %>      if (s === 'attested_v2') return 'bg-emerald-100 text-emerald-700';
+<% } %>      if (s === 'collecting_sigs' || s === 'verifying') return 'bg-amber-100 text-amber-700';
       return 'bg-warm-200 text-ink-600';
     },
-    stateReached(key) {
+<% if (it.noKasMode) { %>    zkNative() {
+      const m = this.market || {};
+      if (m.metadata && (m.metadata.zk_continuation || m.metadata.no_spine)) return true;
+      try { return !!JSON.parse(m.resolution_rule_spec || '{}').zk_native; } catch (e) { return false; }
+    },
+    zkExhausted() {
+      const zc = this.market && this.market.metadata && this.market.metadata.zk_continuation;
+      return !!(zc && zc.exhausted === true);
+    },
+    // 真实委员签名数: API 的 sigs_collected(旧路径) 或 events 里去重的 bshard_close_sig_v2 委员数(ZK 路径)
+    sigCountReal() {
+      if (this.sigsCollected > 0) return this.sigsCollected;
+      const set = new Set();
+      for (const e of (this.events || [])) { if (e && e.event_type === 'bshard_close_sig_v2') set.add((e.payload && e.payload.committee_pk) || e.observed_by || e.txid); }
+      return set.size;
+    },
+<% } %>    stateReached(key) {
       var order = ['pending_oracle_deposits', 'pending_bettors', 'verifying', 'collecting_sigs', 'completed'];
       var cur = this.market ? this.market.protocol_status : '';
       // map aliases / terminal variants to the canonical viz step
-      var aliasMap = { matched: 'verifying', settled: 'completed', refunded: 'completed', disputed: 'collecting_sigs', active: 'pending_bettors' };
+      var aliasMap = { matched: 'verifying', settled: 'completed', refunded: 'completed', disputed: 'collecting_sigs', active: 'pending_bettors'<%~ it.noKasMode ? ", attested_v2: 'completed'" : '' %> };
       if (aliasMap[cur]) cur = aliasMap[cur];
       var curIdx = order.indexOf(cur);
       var keyIdx = order.indexOf(key);

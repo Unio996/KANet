@@ -9,8 +9,9 @@
       <p class="text-xs text-ink-400 mt-1">看现在能押什么. 押对的人均分输家池子.</p>
     </div>
     <div class="flex items-center gap-2">
-      <a href="/my-markets" class="btn btn-secondary btn-sm">看我建的</a>
-      <a href="/predictions/pool/create" class="btn btn-primary btn-sm">+ 发起预测</a>
+      <% if (it.noKasMode) { %><% } else { %><a href="/my-markets" class="btn btn-secondary btn-sm">看我建的</a>
+      <a href="/predictions/pool/create" class="btn btn-primary btn-sm">+ 发起预测</a><% } %>
+
     </div>
   </div>
 
@@ -21,19 +22,25 @@
       <button @click="dismissRetailHint()" class="text-xs text-emerald-500 hover:text-emerald-700">知道了</button>
     </div>
     <div class="px-5 py-4 grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
-      <div class="bg-warm-50 rounded-lg p-3">
+      <% if (it.noKasMode) { %><div class="bg-warm-50 rounded-lg p-3">
+        <div class="font-medium text-ink-700 mb-1">① 不需要 KAS</div>
+        <p class="text-ink-500 mb-2">押注用免费测试筹码，不花你的 KAS，链上费用由系统代付。筹码零价值，纯试玩。</p>
+      </div><% } else { %><div class="bg-warm-50 rounded-lg p-3">
         <div class="font-medium text-ink-700 mb-1">① 领测试 KAS</div>
         <p class="text-ink-500 mb-2">没有 testnet KAS？输地址领一点（够押注 + 链上 fee）。币零价值，纯试玩。</p>
         <a href="/faucet" class="inline-block px-2.5 py-1 rounded bg-emerald-500 text-white hover:bg-emerald-600">去领 KAS →</a>
-      </div>
+      </div><% } %>
+
       <div class="bg-warm-50 rounded-lg p-3">
         <div class="font-medium text-ink-700 mb-1">② 找一个能押的市场</div>
         <p class="text-ink-500 mb-2">点下方 <strong>“进行中”</strong> 只看还在收押注的市场，挑个你有看法的。</p>
         <button @click="filterMode = 'open'" class="inline-block px-2.5 py-1 rounded bg-emerald-500 text-white hover:bg-emerald-600">只看进行中 →</button>
       </div>
       <div class="bg-warm-50 rounded-lg p-3">
-        <div class="font-medium text-ink-700 mb-1">③ 用钱包押注</div>
-        <p class="text-ink-500">点市场的 <strong>“押 →”</strong>，选 <strong>“用我的钱包付”</strong>，按提示用你钱包付到生成的地址。押对均分输家池。</p>
+        <% if (it.noKasMode) { %><div class="font-medium text-ink-700 mb-1">③ 用筹码押注</div>
+        <p class="text-ink-500">点市场的 <strong>“押 →”</strong>，选你的钱包和 YES / NO，输入筹码数即可。押对均分输家池。</p><% } else { %><div class="font-medium text-ink-700 mb-1">③ 用钱包押注</div>
+        <p class="text-ink-500">点市场的 <strong>“押 →”</strong>，选 <strong>“用我的钱包付”</strong>，按提示用你钱包付到生成的地址。押对均分输家池。</p><% } %>
+
       </div>
     </div>
   </div>
@@ -53,7 +60,7 @@
       <option value="pool">押注池最大</option>
       <option value="bettors">押注人最多</option>
     </select>
-    <span class="text-[10px] text-ink-400" title="排序限当前加载页 (testnet 范围)">📌 排序限当前加载</span>
+    <span class="text-[10px] text-ink-400" title="排序限当前加载页 (<%= it.noKasMode ? '当前范围' : 'testnet 范围' %>)">📌 排序限当前加载</span>
   </div>
 
   <div x-show="loading" class="text-center py-16 text-ink-400">载入中...</div>
@@ -61,7 +68,8 @@
   <div x-show="!loading && filtered().length === 0" class="text-center py-16 bg-warm-50 rounded-lg">
     <div class="text-3xl mb-3">🪧</div>
     <p class="text-ink-500" x-text="filterMode === 'open' ? '现在没有进行中的市场.' : (filterMode === 'settled' ? '还没有已结算的市场.' : '还没有市场.')"></p>
-    <a href="/predictions/pool/create" class="text-brand-500 hover:text-brand-700 text-sm mt-2 inline-block">发起第一个 →</a>
+    <% if (it.noKasMode) { %><span class="text-ink-400 text-sm mt-2 inline-block">盘口由系统同步</span><% } else { %><a href="/predictions/pool/create" class="text-brand-500 hover:text-brand-700 text-sm mt-2 inline-block">发起第一个 →</a><% } %>
+
   </div>
 
   <div x-show="!loading && filtered().length > 0" class="space-y-2">
@@ -84,10 +92,12 @@
           <div class="text-right text-xs text-ink-500 shrink-0 min-w-[180px]">
             <!-- KANet-UI 2026-06-07 P1-#2 (Bettor r327 关 1 PASS): 隐含概率 + 赔率 tooltip
                  注: pre-fee 毛值 (= 没扣 broker 3% 等), 当估算非保证 -->
-            <div :title="oddsTooltip(m, 'YES')">YES <span class="font-medium text-ink-700" x-text="m.yes_pool_kas?.toFixed(2) ?? '?'"></span> KAS
+            <div :title="oddsTooltip(m, 'YES')"><% /* 筹码: yes_pool_kas/no_pool_kas 是 单位/1e8, 而 1 筹码 = 1e8 单位, 所以数值已经是筹码数 (账本1857 决定 b) */ %>YES <span class="font-medium text-ink-700" x-text="m.yes_pool_kas?.toFixed(2) ?? '?'"></span> <%= it.noKasMode ? '筹码' : 'KAS' %>
+
               <span x-show="m.yes_implied_prob != null" class="text-ink-400" x-text="'(' + (m.yes_implied_prob * 100).toFixed(1) + '%)'"></span>
             </div>
-            <div :title="oddsTooltip(m, 'NO')">NO <span class="font-medium text-ink-700" x-text="m.no_pool_kas?.toFixed(2) ?? '?'"></span> KAS
+            <div :title="oddsTooltip(m, 'NO')">NO <span class="font-medium text-ink-700" x-text="m.no_pool_kas?.toFixed(2) ?? '?'"></span> <%= it.noKasMode ? '筹码' : 'KAS' %>
+
               <span x-show="m.no_implied_prob != null" class="text-ink-400" x-text="'(' + (m.no_implied_prob * 100).toFixed(1) + '%)'"></span>
             </div>
             <div x-show="m.yes_implied_prob != null" class="text-[10px] text-ink-400 mt-0.5">赔率 估算 (扣费前)</div>
@@ -100,7 +110,8 @@
   </div>
 </div>
 
-<script>
+<% if (it.noKasMode) { %><%~ include('partials/pm-my-positions', { marketId: '', ...it }) %>
+<% } %><script>
 function predictionsListPage() {
   return {
     loading: true,

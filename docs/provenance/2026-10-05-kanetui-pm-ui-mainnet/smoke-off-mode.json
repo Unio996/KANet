@@ -1,0 +1,111 @@
+{
+ "mode": "off",
+ "posted": null,
+ "jsErrors": [
+  "console Failed to load resource: the server responded with a status of 404 (Not Found)",
+  "console Failed to load resource: the server responded with a status of 404 (Not Found)",
+  "console Failed to load resource: the server responded with a status of 404 (Not Found)",
+  "console Failed to load resource: the server responded with a status of 404 (Not Found)",
+  "console Failed to load resource: the server responded with a status of 404 (Not Found)",
+  "console Failed to load resource: the server responded with a status of 404 (Not Found)",
+  "console Failed to load resource: the server responded with a status of 404 (Not Found)",
+  "pageerror Cannot read properties of null (reading 'maker_stake_refund')",
+  "pageerror Cannot read properties of null (reading 'winnersBps')",
+  "pageerror Cannot read properties of null (reading 'oracleBps')",
+  "pageerror Cannot read properties of null (reading 'brokerBps')",
+  "pageerror Cannot read properties of null (reading 'introBps')",
+  "pageerror Cannot read properties of null (reading 'winner_claim')",
+  "pageerror Cannot read properties of null (reading 'close_explorer_url')",
+  "pageerror Cannot read properties of null (reading 'close_txid')",
+  "pageerror Cannot read properties of null (reading 'payout_root')",
+  "pageerror Cannot read properties of null (reading 'maker')",
+  "pageerror Cannot read properties of null (reading 'maker')",
+  "pageerror Cannot read properties of null (reading 'maker')",
+  "pageerror Cannot read properties of null (reading 'maker')",
+  "pageerror Cannot read properties of null (reading 'settle_explorer_url')",
+  "pageerror Cannot read properties of null (reading 'settle_explorer_url')",
+  "pageerror Cannot read properties of null (reading 'settle_txid')",
+  "pageerror Cannot read properties of null (reading 'settle_explorer_url')",
+  "pageerror Cannot read properties of null (reading 'settle_txid')",
+  "pageerror Cannot read properties of null (reading 'maker_stake_refund')",
+  "pageerror Cannot read properties of null (reading 'winner_claim')",
+  "pageerror Cannot read properties of null (reading 'close_explorer_url')",
+  "pageerror Cannot read properties of null (reading 'close_txid')",
+  "pageerror Cannot read properties of null (reading 'payout_root')",
+  "pageerror Cannot read properties of undefined (reading 'explorer_url')",
+  "pageerror Cannot read properties of null (reading 'maker_stake_refund')",
+  "pageerror Cannot read properties of null (reading 'winner_claim')",
+  "pageerror Cannot read properties of null (reading 'close_explorer_url')",
+  "pageerror Cannot read properties of null (reading 'close_txid')",
+  "pageerror Cannot read properties of null (reading 'payout_root')",
+  "pageerror Cannot read properties of undefined (reading 'explorer_url')",
+  "console Failed to load resource: the server responded with a status of 404 (Not Found)",
+  "console Failed to load resource: the server responded with a status of 404 (Not Found)",
+  "console Failed to load resource: the server responded with a status of 404 (Not Found)",
+  "console Failed to load resource: the server responded with a status of 404 (Not Found)",
+  "console Failed to load resource: the server responded with a status of 404 (Not Found)",
+  "console Failed to load resource: the server responded with a status of 404 (Not Found)",
+  "console Failed to load resource: the server responded with a status of 404 (Not Found)",
+  "console Failed to load resource: the server responded with a status of 404 (Not Found)",
+  "console Failed to load resource: the server responded with a status of 404 (Not Found)",
+  "console Failed to load resource: the server responded with a status of 404 (Not Found)"
+ ],
+ "apiCalls": [
+  "GET /api/system/rpc-overview",
+  "404 GET /api/system/rpc-overview",
+  "GET /api/system/canary-stats",
+  "404 GET /api/system/canary-stats",
+  "GET /api/agent/profile",
+  "GET /api/pool/markets",
+  "404 GET /favicon.ico",
+  "GET /api/pool/market/MKT-A",
+  "GET /api/oracle/markets/MKT-A/audit",
+  "GET /api/pool/market/MKT-A/settle-audit",
+  "GET /api/pool/market/MKT-A/events",
+  "GET /api/pool/fee-config",
+  "GET /api/tg-bot/status",
+  "GET /api/pool/config",
+  "404 GET /api/pool/config",
+  "GET /api/relay/w1",
+  "404 GET /api/relay/w1",
+  "GET /api/relay/w1/balance",
+  "404 GET /api/relay/w1/balance",
+  "GET /api/oracle/registry",
+  "404 GET /api/oracle/registry"
+ ],
+ "listHasMyBets": false,
+ "listRows": [
+  [
+   "赢 · 到账 7.5 筹码",
+   false
+  ],
+  [
+   "输",
+   true
+  ],
+  [
+   "赢 · 待发放",
+   false
+  ],
+  [
+   "待结算",
+   false
+  ]
+ ],
+ "kasList": [
+  "① 领测试 KAS",
+  "没有 testnet KAS？输地址领一点（够押注 + 链上 f",
+  "去领 KAS →",
+  "YES 12.00 KAS (80.0%)",
+  "NO 3.00 KAS (20.0%)"
+ ],
+ "kasDetail": [
+  "押多少 KAS",
+  "最低 1 KAS · testnet 币零经济价值",
+  "0 KAS",
+  "0 KAS"
+ ],
+ "createText": " 💰 分账: 主持费 1.0% / 仲裁费 1.0% / 中介费 1.0% ⚖ 最大费: 同 3% (= 无争议) 调整三方分账比例 → 我准备签名锁押金 发起预测 → 还差: 议题 · 押方向 · 判定规则 · 数据来源 · 勾签名确认",
+ "protoInNav": true,
+ "faucet": true
+}

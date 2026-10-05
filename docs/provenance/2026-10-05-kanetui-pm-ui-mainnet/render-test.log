@@ -1,0 +1,19 @@
+✔ no-KAS mode: list page has no KAS stake wording and no 403-route reference (21.6978ms)
+✔ no-KAS mode: detail page has no KAS stake wording and no 403-route reference (5.8343ms)
+✔ no-KAS mode: create page has no KAS stake wording and no 403-route reference (3.446ms)
+✔ no-KAS mode: detail bets via register-v07 with stake_ktt and has 我的押注 block, no external-wallet flow (4.2251ms)
+✔ no-KAS mode: list has 我的押注, hides create entry; create page shows 盘口由系统同步 notice only (6.1862ms)
+✔ non-mainnet (noKasMode=false): legacy KAS UI untouched, no new block, no flag script (9.8073ms)
+✔ no-KAS mode: predictions-list markup has no testnet wording (4.488ms)
+✔ no-KAS mode: predictions-pool-detail markup has no testnet wording (5.622ms)
+✔ no-KAS mode: predictions-pool-create markup has no testnet wording (3.8757ms)
+✔ no-KAS mode: sidebar links to /predictions and hides 我的市场; non-mainnet unchanged (5.5801ms)
+✔ no-KAS mode: stake_ktt is built with BigInt (no float precision loss) (3.468ms)
+ℹ tests 11
+ℹ suites 0
+ℹ pass 11
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 207.7962

@@ -82,6 +82,7 @@ import { registerChainDataRoutes } from './api/chain-data.js';
 import { registerStockRoutes } from './api/stocks.js';
 import { registerBettorRoutes } from './api/bettor.js';
 import { registerPoolRoutes } from './api/pool.js';
+import { noKasStakeModeOn } from './lib/mainnet-no-kas-stake-gate.mjs';
 import { registerProtoRoutes } from './api/proto.js'; // 原型v0代币/市场(2026-09-14, 设计docs/2026-09-14-j2-proto-v0-backend-api-design-v0.1.md), 链上端点§6/§9未定案前501占位
 import { registerTokenRoutes } from './api/tokens.js'; // KCC-20 代币定义(D-017 授权机制的一部分, 已主网真实结算过·市场a59c7b48)——从 proto.js 迁出(Bettor 2026-09-23T06-53Z 派工), 纯 DB 不上链, 独立于 proto-v0 存续
 import { registerAdminDedupRoutes, registerBshardBondReclaimRoutes, registerZ20CircuitRoutes } from './api/admin-dedup.js'; // #27 dedup 存量清理 admin endpoint + 2026-07-13 bshard maker bond reclaim + 2026-07-14 Z20 熔断挂账清单
@@ -187,7 +188,7 @@ await fastify.register(import('@fastify/view'), {
   engine: { eta: new (await import('eta')).Eta() },
   root: join(__dirname, 'ui'),
   viewExt: 'eta',
-  defaultContext: { appName: 'Kasia Console' },
+  defaultContext: { appName: 'Kasia Console', noKasMode: noKasStakeModeOn() },   // 账本1857: 主网(或 KANET_NO_KAS_STAKE_MODE=1)模板走"筹码/不收 KAS"分支, 其余网络输出逐字节不变
   options: { useWith: true },
 });
 
