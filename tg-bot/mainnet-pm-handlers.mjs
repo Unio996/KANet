@@ -48,7 +48,7 @@ export function registerMainnetPm(bot, { api, PM, t, getLang, initLang, cap, now
     if (!m) {
       const one = await api.poolMarket(marketId);   // 不在可押清单: 可能是已取消的无人盘, 查一次说清楚
       const mk = one.json?.market;
-      return ctx.reply(t(lang, isNoBetsCancel(mk) ? 'pm_market_no_bets' : 'ro_detail_not_found'));
+      return ctx.reply(t(lang, isNoBetsCancel(mk) ? 'pm_market_no_bets' : (mk ? 'pm_closed' : 'ro_detail_not_found')));   // 存在但不可押(已截止/等开奖/已开奖…) ⇒ "不再收押注", 不是"没找到"
     }
     const linkedAddr = PM.getLinkedAddr(String(ctx.from.id));
     const lines = [t(lang, 'ro_detail_title', { q: m.title }), t(lang, 'pm_detail_status'), t(lang, 'ro_detail_deadline', { when: whenText(lang, m.deadlineSec) || '?' }),
