@@ -25,6 +25,7 @@ import { kaspaZk } from '../services/zk-prove-worker.mjs';
 import { checkAdminSecretTier } from '../lib/admin-secret-tier.mjs';
 import { assertAddressOnNetwork, configuredNetwork } from '../lib/kaspa-network.mjs';   // (b) 网络单一源 (设计 v0.2 §3): 前缀只对照 env KASPA_NETWORK, 不从地址推网络
 import { assertNoKasStakeOnMainnet, assertNoKasStakeUnlessReopened, noKasStakeModeOn, mainnetCreateV07Branch, parseStakeKtt, sponsorMarketGuard, findUnfinishedZkNativeMarket, liveMarketCapReached } from '../lib/mainnet-no-kas-stake-gate.mjs';
+import { reserveBetSlot } from '../lib/zk-bet-cost-gate.mjs';   // 账本1861/D-036: 不收 KAS 模式下 register-v07 的按日下注上限(服务端成本闸)
 import { resolveSinkConfig, assertDeadlineWithinTicketAge } from '../lib/zk-sink-config.mjs';   // 账本1850 严格零方案   // 账本1845 S0: 主网不收 KAS 硬闸(见该文件头)
 
 // 件⑤步骤2 疑似死端点命中计数(2026-07-16, KANet-UI, Owner终裁+Bettor #nig8da 派工): observe-only,
@@ -1633,6 +1634,9 @@ export async function registerPoolRoutes(fastify) {
     };
     const shardP2sh_of = (smid) => (sqlite.prepare('SELECT shard_p2sh FROM market_shards WHERE shard_market_id = ?').get(smid)?.shard_p2sh) || '';
 
+    // 账本1861 成本闸(仅不收 KAS 模式): 同步【查数+预留】, 其后到 try 之间无 await; 在任何链上动作(铸票/上 leaf)之前, 被拒 ⇒ 429 零 KAS。finally 里释放。
+    let _betSlot = null;
+    if (_noKasMode) { const _g = reserveBetSlot(sqlite, bettorPk); if (!_g.ok) { reply.header('Retry-After', String(_g.retryAfterSec)); return reply.code(_g.http).send(_g.body); } _betSlot = _g; }
     try {
       const { registerBettorOnShard, computeCloseZkTmplAnchor } = await import('../lib/pool-shard-register.mjs');
       // 事故硬化(2026-07-08 backlog 调查, Bettor④指令): 这两处曾各自独立声明危险默认(target/release/
@@ -1665,7 +1669,7 @@ export async function registerPoolRoutes(fastify) {
     } catch (e) {
       console.error(`[pool/register-v07] ${logicalMarketId} fail: ${e.message}`);
       return reply.code(500).send({ ok: false, error: `register-v07 failed: ${e.message}` });
-    }
+    } finally { if (_betSlot) _betSlot.release(); }
   });
 
   // ── B (无限滚动分片押注) 0-custody 两步流: register-v07/prep + register-v07/confirm (J2 2026-06-30, Owner 钦定 fresh 实现) ──
