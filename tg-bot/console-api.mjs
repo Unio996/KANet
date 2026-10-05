@@ -131,6 +131,12 @@ export function poolRegisterConfirm(marketId, { linkedAddr, direction, stakeKas,
     { linked_addr: linkedAddr, direction, stake_kas: stakeKas, ...(v07 ? { bet_id: betId } : {}) });
 }
 
+// D-036(主网 pool v0.7 不收 KAS): 一步下注——网关代付, 用户不付 KAS。body: linked_addr(服务端用 my-positions 同一个 deriveXOnlyPubkey 推公钥)、direction(0=YES/1=NO)、
+// stake_ktt(筹码×1e8 的整数字符串)。成功 {ok:true, no_kas_stake:true,...}; 429 = 服务端每日上限(code bet_cap_pk_day|bet_cap_global_day, body 带 resets_at); 无链上动作时回 4xx。
+export function poolRegisterV07Gateway(marketId, { linkedAddr, direction, stakeKtt }) {
+  return req('POST', `/api/pool/market/${encodeURIComponent(marketId)}/bettor/register-v07`, { linked_addr: linkedAddr, direction, stake_ktt: stakeKtt });
+}
+
 // Bettor r70 B (Owner P0): /mybets data source. Returns positions[] with
 // payout-if-win + pool distribution + on-chain TX status (settle/refund).
 export function myPositions(linkedAddr) {

@@ -30,7 +30,9 @@ T('5 只读壳文案里不出现 KAS / faucet / testnet 提示(除"这是测试�
   for (const k of used) for (const l of ['en', 'zh']) {
     const s = LANGS[l][k];
     if (k === 'ro_link_wrong_network') continue;   // 明确告诉用户"给的是测试网地址"
-    assert.ok(!/\bKAS\b|faucet|领水|领币/i.test(s), `${l}:${k} 含 KAS/faucet`);
+    // D-036: 只允许【否定句】里出现 KAS("no KAS is needed" / "不需要 KAS" / "不花 KAS"), 其余 KAS/faucet 一律不许
+    const noNeg = s.replace(/(no KAS( is needed)?|costs? no KAS|without KAS|不需要 ?KAS|不花 ?KAS)/gi, ' ');
+    assert.ok(!/\bKAS\b|faucet|领水|领币/i.test(noNeg), `${l}:${k} 含 KAS/faucet`);
     assert.ok(!/testnet|测试网/i.test(s.replace(/(the old testnet|和之前测试网不同|Unlike the old testnet)/gi, '')), `${l}:${k} 含 testnet`);
   }
 });

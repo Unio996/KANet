@@ -9,6 +9,11 @@ import * as PM from './prediction-menu.mjs';
 import { t, detectLang, SUPPORTED_LANGS } from './i18n.mjs';
 import { isReadonlyShell } from './readonly-shell.mjs';
 import { registerReadonlyShell } from './readonly-handlers.mjs';
+import { registerMainnetPm } from './mainnet-pm-handlers.mjs';
+import { createCapTracker, pickNotifications } from './mainnet-pm.mjs';
+import { readFileSync, writeFileSync, renameSync } from 'node:fs';
+import { dirname as _dirname, join as _join } from 'node:path';
+import { fileURLToPath as _fileURLToPath } from 'node:url';
 
 const missing = missingConfig();
 if (missing.length) { console.error('[tg-bot] missing env:', missing.join(', ')); process.exit(1); }
@@ -96,6 +101,15 @@ async function _fetchHomeMarketData() {
 // T1 (2026-06-27): 解析 ctx.match payload — t.me/<bot>?start=<market_id> 深链直跳市场详情。
 // 主网只读壳(变更说明 docs/2026-09-20-kanetui-tg-bot-mainnet-relaunch-and-proto-v0-repoint-change-note-v0.1.md): 仅 KASPA_NETWORK=mainnet 时启用, 且在下面原有 handler 之前注册——
 // 它接管的命令/回调不会走到原 handler(原 handler 一个字节没动, TN12 行为原样保留)。只读: 看主网 proto 市场与结果 + /link 绑主网地址, 无下注/钱包/转账/领水入口。
+// D-036(取代 D-024, Owner 2026-10-05 "批，恢复电报接线"): 主网在只读壳【之前】先注册预测市场接线(接管 bet/hot/mybets/record 与押注回调); 无押注会话的文本 next() 交还只读壳。
+// 每个 Telegram 用户每日押注上限: env TG_BET_MAX_PER_USER_DAY(默认 5, 按 UTC 日), 计数落盘 _bet_cap.json(env TG_BOT_BET_CAP_FILE; gitignored, 抗 bot 重启)。
+const _capFile = process.env.TG_BOT_BET_CAP_FILE || _join(_dirname(_fileURLToPath(import.meta.url)), '_bet_cap.json');
+const betCap = createCapTracker({
+  max: Math.max(1, parseInt(process.env.TG_BET_MAX_PER_USER_DAY || '5', 10) || 5),
+  load: () => { try { return JSON.parse(readFileSync(_capFile, 'utf8')); } catch { return null; } },
+  save: (st) => { try { const tmp = _capFile + '.tmp'; writeFileSync(tmp, JSON.stringify(st)); renameSync(tmp, _capFile); } catch (e) { console.warn('[bet-cap] persist fail:', e.message); } },
+});
+if (isReadonlyShell(CONFIG)) registerMainnetPm(bot, { api, PM, t, getLang, initLang, cap: betCap });
 if (isReadonlyShell(CONFIG)) registerReadonlyShell(bot, { api, PM, CONFIG, linked, t, getLang, initLang });
 
 bot.command('start', async (ctx) => {
@@ -599,7 +613,33 @@ export async function pollPendingBets() {
 
 // Bettor r71 ① — settle-result poller: 每 link'd 用户的所有 positions, 检测结算/退款后通知.
 // 0-custody: read-only my-positions; 不签不付. 跨重启幂等 (seen_settled 持久化 _state.json).
+// D-036 主网: 触发条件 = my-positions 的 did_win 变非空(开奖)与到账落链(actual_payout_kas 非空), 按 logical_market_id 去重(键 <id>:result / <id>:paid 记在 linkedAddrs[].seen_settled)。
+// 首次轮询某用户时只"播种"(把当时已开奖的盘记为已见, 不通知)——否则历史盘会一次性轰炸新绑定用户。
+export async function pollSettleResultsMainnet() {
+  for (const u of PM.listLinkedUsers()) {
+    if (isTestBotUser(u.tgUser)) continue;
+    try {
+      const r = await api.myPositions(u.address);
+      if (!r.ok || !r.json?.ok) continue;
+      const notes = pickNotifications(r.json.positions || [], new Set(u.seen_settled || []));
+      const seeded = (u.seen_settled || []).includes('__seeded__');
+      if (!seeded) { PM.pickFreshSettlements(u.tgUser, ['__seeded__', ...notes.map((n) => n.key)]); continue; }   // 首轮只播种(哪怕当下没有任何已开奖盘, 也要落 __seeded__ 标记)
+      if (!notes.length) continue;
+      const fresh = new Set(PM.pickFreshSettlements(u.tgUser, notes.map((n) => n.key)));
+      const uLang = PM.getUserLang(u.tgUser);
+      for (const n of notes) {
+        if (!fresh.has(n.key)) continue;
+        const msg = n.kind === 'win' ? t(uLang, 'pm_notify_win', { q: n.title, side: n.side })
+          : n.kind === 'lose' ? t(uLang, 'pm_notify_lose', { q: n.title, side: n.side })
+          : t(uLang, 'pm_notify_paid', { q: n.title, payout: n.payoutChips });
+        try { await bot.api.sendMessage(u.tgUser, msg); } catch {}
+      }
+    } catch {}
+  }
+}
+
 async function pollSettleResults() {
+  if (isReadonlyShell(CONFIG)) return pollSettleResultsMainnet();
   for (const u of PM.listLinkedUsers()) {
     if (isTestBotUser(u.tgUser)) continue;   // Phase-1 ④: 测试机器人地址(4,641/1,694 side ⇒ 10 MB my-positions)不轮询, 见 config.mjs testBotUsers
     try {

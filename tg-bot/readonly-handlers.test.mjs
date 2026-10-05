@@ -47,7 +47,7 @@ await T('1 注册覆盖: 命令与回调齐全(含全部隐藏入口与残留旧
   for (const c of ['start', 'help', 'link', 'bet', 'hot', 'mybets', 'record', 'discover', 'champions', ...RO_HIDDEN_COMMANDS]) assert.ok(e.commands.has(c), c);
   for (const need of ['lang:toggle', 'nav:hot', 'nav:mybets', 'nav:faucet', 'ro:m:' + '0123456789abcdef', 'bet:market:xyz', 'bet:side:1', 'bet:side:2', 'mybet:addmore:xyz']) assert.ok(e.cb(need), need);
   // 字面量(不引用被测常量本身, 否则删掉一项测试也跟着变): Owner 已批 /wallet /send /faucet 隐藏(+其从属流程 balance/receive/confirm/cancel, /swap 无兑换), /broker_apply Owner 2026-09-20 定"藏"
-  assert.deepEqual([...RO_HIDDEN_COMMANDS].sort(), ['balance', 'broker_apply', 'cancel', 'confirm', 'faucet', 'receive', 'send', 'swap', 'wallet']);
+  assert.deepEqual([...RO_HIDDEN_COMMANDS].sort(), ['balance', 'broker', 'broker_apply', 'cancel', 'confirm', 'earnings', 'faucet', 'receive', 'send', 'support', 'swap', 'verify', 'wallet']);
   // 回调形状钉死: ro:m: 后必须恰好 16 位小写 hex(过短/过长/大写都不接管)
   for (const bad of ['ro:m:abcd', 'ro:m:' + 'a'.repeat(15), 'ro:m:' + 'a'.repeat(17), 'ro:m:' + 'A'.repeat(16), 'ro:m:']) assert.equal(e.cb(bad), null, bad);
 });
@@ -173,7 +173,7 @@ await T('16 F2 启动清理: 注册时调用一次 PM.pruneForReadonlyShell(主�
 await T('17 自由文本(NWT#4): 非命令文本 ⇒ ro_unavailable, 不调任何 api(不转反馈 agent、不落工单、不进旧下注会话); 命令文本交还 next()', async () => {
   const e = makeEnv();
   for (const txt of ['hello', '1', '我要下注', 'kaspa:qqabc', ' /start', '']) { const o = await e.text(txt); assert.ok(o.replies[0]?.text.startsWith('ro_unavailable'), JSON.stringify(txt)); assert.equal(o.nexted, 0, JSON.stringify(txt)); }
-  for (const txt of ['/broker', '/earnings', '/lang zh', '/support', '/verify', '/somethingelse']) { const o = await e.text(txt); assert.equal(o.replies.length, 0, txt); assert.equal(o.nexted, 1, txt); }
+  for (const txt of ['/lang zh', '/somethingelse']) { const o = await e.text(txt); assert.equal(o.replies.length, 0, txt); assert.equal(o.nexted, 1, txt); }
   const o2 = await e.text(undefined, { message: {} }); assert.ok(o2.replies[0].text.startsWith('ro_unavailable'));
   assert.equal(e.textHandlers.length, 1); assert.deepEqual(e.apiCalls, []);
 });
