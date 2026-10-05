@@ -1,0 +1,311 @@
+{
+ "tag": "neg",
+ "startedAt": "2026-10-05T00:44:24.691Z",
+ "asserts": [
+  {
+   "ok": true,
+   "label": "前置: 库里没有未完结的 zk_native 盘(live=0)"
+  },
+  {
+   "ok": true,
+   "label": "种子器建出 3 个盘(3, 用时 165s)"
+  },
+  {
+   "ok": true,
+   "label": "同时在跑(未完结)的 ZK 原生盘峰值 = 3(≥3)"
+  },
+  {
+   "ok": true,
+   "label": "盘 65-5svw3: zk_native=true, 无 spine, polymarket 镜像(cond 0x10101010…), broker 塌到 maker(未配 GATEWAY_RELAY_ID)"
+  },
+  {
+   "ok": true,
+   "label": "盘 48-0psz7: zk_native=true, 无 spine, polymarket 镜像(cond 0x11111111…), broker 塌到 maker(未配 GATEWAY_RELAY_ID)"
+  },
+  {
+   "ok": true,
+   "label": "盘 46-2uzqy: zk_native=true, 无 spine, polymarket 镜像(cond 0x12121212…), broker 塌到 maker(未配 GATEWAY_RELAY_ID)"
+  },
+  {
+   "ok": true,
+   "label": "建 3 个盘后: maker/下注人钱包余额逐 sompi 不变(建盘不转账)"
+  },
+  {
+   "ok": true,
+   "label": "3/3 在跑时再 create-v07 ⇒ 409 live_market_cap_reached(live=3, cap=3)"
+  },
+  {
+   "ok": true,
+   "label": "65-5svw3 bettorA register-v07 stake_ktt=1000000000 ⇒ 200 no_kas_stake"
+  },
+  {
+   "ok": true,
+   "label": "65-5svw3 bettorA 钱包余额逐 sompi 不变"
+  },
+  {
+   "ok": true,
+   "label": "65-5svw3 bettorB register-v07 stake_ktt=2000000000 ⇒ 200 no_kas_stake"
+  },
+  {
+   "ok": true,
+   "label": "65-5svw3 bettorB 钱包余额逐 sompi 不变"
+  },
+  {
+   "ok": true,
+   "label": "48-0psz7 bettorA register-v07 stake_ktt=1000000000 ⇒ 200 no_kas_stake"
+  },
+  {
+   "ok": true,
+   "label": "48-0psz7 bettorA 钱包余额逐 sompi 不变"
+  },
+  {
+   "ok": true,
+   "label": "48-0psz7 bettorB register-v07 stake_ktt=2000000000 ⇒ 200 no_kas_stake"
+  },
+  {
+   "ok": true,
+   "label": "48-0psz7 bettorB 钱包余额逐 sompi 不变"
+  },
+  {
+   "ok": true,
+   "label": "46-2uzqy bettorA register-v07 stake_ktt=1000000000 ⇒ 200 no_kas_stake"
+  },
+  {
+   "ok": true,
+   "label": "46-2uzqy bettorA 钱包余额逐 sompi 不变"
+  },
+  {
+   "ok": true,
+   "label": "46-2uzqy bettorB register-v07 stake_ktt=2000000000 ⇒ 200 no_kas_stake"
+  },
+  {
+   "ok": true,
+   "label": "46-2uzqy bettorB 钱包余额逐 sompi 不变"
+  },
+  {
+   "ok": true,
+   "label": "干扰转账已上链提交(txid 5d1bff390c5e07ae4ca00ee2a93abc1c2b32c6e9451d8c1f16585755ccea8391)"
+  },
+  {
+   "ok": true,
+   "label": "neg: pin 关闭 ⇒ relay 日志里没有 PIN_UTXO 行(0)"
+  },
+  {
+   "ok": true,
+   "label": "neg: 复现卡死的 close — 盘 65-5svw3,48-0psz7 停在 collecting_sigs 且 submit 反复失败"
+  }
+ ],
+ "txs": [],
+ "notes": [],
+ "markets": {
+  "ext-pool-v07-1791161109365-5svw3": {
+   "short": "65-5svw3",
+   "cond": "0x1010101010101010101010101010101010101010101010101010101010101010",
+   "createdAt": "2026-10-05 00:45:09"
+  },
+  "ext-pool-v07-1791161169348-0psz7": {
+   "short": "48-0psz7",
+   "cond": "0x1111111111111111111111111111111111111111111111111111111111111111",
+   "createdAt": "2026-10-05 00:46:09"
+  },
+  "ext-pool-v07-1791161229346-2uzqy": {
+   "short": "46-2uzqy",
+   "cond": "0x1212121212121212121212121212121212121212121212121212121212121212",
+   "createdAt": "2026-10-05 00:47:09"
+  }
+ },
+ "startHash": "252f579c231dbe10b247ce078602fadfb47a73deec84a3588f4ae6a1d4d52f1a",
+ "bal0": {
+  "maker": "21943009900",
+  "settler": "32309449000",
+  "fee": "30000000000",
+  "bettorA": "26390389200",
+  "bettorB": "23390389200"
+ },
+ "bets": [
+  {
+   "market": "ext-pool-v07-1791161109365-5svw3",
+   "who": "bettorA",
+   "dir": 0,
+   "units": 1000000000,
+   "status": 200,
+   "ms": 21162,
+   "ok": true
+  },
+  {
+   "market": "ext-pool-v07-1791161109365-5svw3",
+   "who": "bettorB",
+   "dir": 1,
+   "units": 2000000000,
+   "status": 200,
+   "ms": 10159,
+   "ok": true
+  },
+  {
+   "market": "ext-pool-v07-1791161169348-0psz7",
+   "who": "bettorA",
+   "dir": 0,
+   "units": 1000000000,
+   "status": 200,
+   "ms": 21027,
+   "ok": true
+  },
+  {
+   "market": "ext-pool-v07-1791161169348-0psz7",
+   "who": "bettorB",
+   "dir": 1,
+   "units": 2000000000,
+   "status": 200,
+   "ms": 10166,
+   "ok": true
+  },
+  {
+   "market": "ext-pool-v07-1791161229346-2uzqy",
+   "who": "bettorA",
+   "dir": 0,
+   "units": 1000000000,
+   "status": 200,
+   "ms": 21010,
+   "ok": true
+  },
+  {
+   "market": "ext-pool-v07-1791161229346-2uzqy",
+   "who": "bettorB",
+   "dir": 1,
+   "units": 2000000000,
+   "status": 200,
+   "ms": 10148,
+   "ok": true
+  }
+ ],
+ "chaos": {
+  "atMs": 1655857,
+  "collecting": [
+   "65-5svw3"
+  ],
+  "feeOutpoints": [
+   {
+    "market": "65-5svw3",
+    "txid": "e1e77272ccda54accb61dcc574169aa91ca4541ebd6cbb1ab876b86147907dff",
+    "index": 0
+   }
+  ],
+  "settlerUtxosNear0_5KAS": [
+   "40000000",
+   "40000000",
+   "40000000",
+   "40000000",
+   "40000000",
+   "40000000",
+   "40000000",
+   "40000000",
+   "40000000",
+   "40000000",
+   "41796400",
+   "41796400",
+   "41796400",
+   "41796400",
+   "41796400",
+   "41796400",
+   "45446600",
+   "46796400",
+   "46796400",
+   "46796400",
+   "46796400",
+   "46796400",
+   "46796400",
+   "60000000",
+   "60000000"
+  ],
+  "resp": {
+   "status": 200,
+   "ok": true,
+   "txId": "5d1bff390c5e07ae4ca00ee2a93abc1c2b32c6e9451d8c1f16585755ccea8391",
+   "fee": "0.032036",
+   "phase": "execution"
+  },
+  "txId": "5d1bff390c5e07ae4ca00ee2a93abc1c2b32c6e9451d8c1f16585755ccea8391",
+  "rounds": [
+   {
+    "txId": "5d1bff390c5e07ae4ca00ee2a93abc1c2b32c6e9451d8c1f16585755ccea8391"
+   }
+  ],
+  "feeEaten": [
+   {
+    "market": "65-5svw3",
+    "txid": "e1e77272ccda54accb61dcc574169aa91ca4541ebd6cbb1ab876b86147907dff",
+    "index": 0
+   }
+  ]
+ },
+ "stuck": [
+  "65-5svw3",
+  "48-0psz7"
+ ],
+ "consoleLines": [
+  "[pool-seeder] created ext-pool-v07-1791161109365-5svw3 [other] vol=100000 \"MM rehearsal market #0: will event 0 happen?\" end=2026-10-05T01:11:06.352Z (1/3)",
+  "[pool-seeder] tick: +1 market(s), live 0→1/3",
+  "[pool-seeder] created ext-pool-v07-1791161169348-0psz7 [other] vol=99000 \"MM rehearsal market #1: will event 1 happen?\" end=2026-10-05T01:11:06.352Z (2/3)",
+  "[pool-seeder] tick: +1 market(s), live 1→2/3",
+  "[pool-seeder] created ext-pool-v07-1791161229346-2uzqy [other] vol=98000 \"MM rehearsal market #2: will event 2 happen?\" end=2026-10-05T01:11:06.352Z (3/3)",
+  "[pool-seeder] tick: +1 market(s), live 2→3/3",
+  "[zk-autonomy] 01:16:19 ✅ market=65-5svw3 judge+propose dispatched(winDir=0, endBlockHash=4faa048ab688...)",
+  "[zk-autonomy] 01:16:28 ✅ market=48-0psz7 judge+propose dispatched(winDir=1, endBlockHash=8aa4cb20bf84...)",
+  "[zk-autonomy] 01:16:37 ✅ market=46-2uzqy judge+propose dispatched(winDir=0, endBlockHash=3de43cf0ee5c...)",
+  "[bshard-close-voter-v2] ✅ e2e-oracle-1 自治 enforce PASS (verdict=YES) → 签 close_attest_v2 market=65-5svw3",
+  "[bshard-close-voter-v2] ✅ e2e-oracle-2 自治 enforce PASS (verdict=YES) → 签 close_attest_v2 market=65-5svw3",
+  "[bshard-close-voter-v2] ✅ e2e-oracle-4 自治 enforce PASS (verdict=YES) → 签 close_attest_v2 market=65-5svw3",
+  "[bshard-close-voter-v2] ✅ e2e-oracle-5 自治 enforce PASS (verdict=YES) → 签 close_attest_v2 market=65-5svw3",
+  "[bshard-close-voter-v2] ✅ e2e-oracle-6 自治 enforce PASS (verdict=YES) → 签 close_attest_v2 market=65-5svw3",
+  "[bshard-close-voter-v2] ✅ e2e-oracle-1 自治 enforce PASS (verdict=NO) → 签 close_attest_v2 market=48-0psz7",
+  "[bshard-close-voter-v2] ✅ e2e-oracle-2 自治 enforce PASS (verdict=NO) → 签 close_attest_v2 market=48-0psz7",
+  "[bshard-close-voter-v2] ✅ e2e-oracle-3 自治 enforce PASS (verdict=NO) → 签 close_attest_v2 market=48-0psz7",
+  "[bshard-close-voter-v2] ✅ e2e-oracle-4 自治 enforce PASS (verdict=NO) → 签 close_attest_v2 market=48-0psz7",
+  "[bshard-close-voter-v2] ✅ e2e-oracle-5 自治 enforce PASS (verdict=NO) → 签 close_attest_v2 market=48-0psz7",
+  "[bshard-close-voter-v2] ✅ e2e-oracle-1 自治 enforce PASS (verdict=YES) → 签 close_attest_v2 market=46-2uzqy",
+  "[bshard-close-voter-v2] ✅ e2e-oracle-3 自治 enforce PASS (verdict=YES) → 签 close_attest_v2 market=46-2uzqy",
+  "[bshard-close-voter-v2] ✅ e2e-oracle-4 自治 enforce PASS (verdict=YES) → 签 close_attest_v2 market=46-2uzqy",
+  "[bshard-close-voter-v2] ✅ e2e-oracle-5 自治 enforce PASS (verdict=YES) → 签 close_attest_v2 market=46-2uzqy",
+  "[bshard-close-voter-v2] ✅ e2e-oracle-6 自治 enforce PASS (verdict=YES) → 签 close_attest_v2 market=46-2uzqy",
+  "[bshard-close-submit-v2] market=65-5svw3 submit fail: no txId in relay response: {\"error\":\"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx e1e77272ccda54accb61dcc574169aa91ca4541ebd6cbb1ab876b86147907dff:0\",\"phase\":\"execution\"}",
+  "[bshard-close-submit-v2] market=48-0psz7 submit fail: no txId in relay response: {\"error\":\"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx 071ac53c72f2597dd18bef53815d0d8d45469488c1e209b6b06062c1dfe8356e:0\",\"phase\":\"execution\"}",
+  "[bshard-close-submit-v2] ✅ market=46-2uzqy payout_shards 状态持久化(closed=1, outpoint=8385e234d9e92e75e920b43699953b829b2d037a4eac851da8c628efe2d5afd5:0)",
+  "[bshard-close-submit-v2] ✅ market=46-2uzqy zk_prove_jobs enqueued jobId=11",
+  "[bshard-close-submit-v2] ✅ market=46-2uzqy close_attest_v2 LANDED txId=8385e234d9e92e75e920b43699953b829b2d037a4eac851da8c628efe2d5afd5",
+  "[zk-prove-worker] ❌ job=11 market=46-2uzqy: market ext-pool-v07-1791161229346-2uzqy 还没有 zk_continuation(zk_handoff 还没成功广播过)— 拒绝在花 4 分钟 proving+1KAS gate 注资之前跑一个下游必炸的 job",
+  "[zk-prove-worker] updateProvingFailed also failed: updateProvingFailed: market ext-pool-v07-1791161229346-2uzqy 没有 zk_continuation",
+  "[bshard-close-submit-v2] market=65-5svw3 submit fail: no txId in relay response: {\"error\":\"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx e1e77272ccda54accb61dcc574169aa91ca4541ebd6cbb1ab876b86147907dff:0\",\"phase\":\"execution\"}",
+  "[bshard-close-submit-v2] market=48-0psz7 submit fail: no txId in relay response: {\"error\":\"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx 071ac53c72f2597dd18bef53815d0d8d45469488c1e209b6b06062c1dfe8356e:0\",\"phase\":\"execution\"}",
+  "[buildProposeCloseRequestV2/handoff] ✅ market=46-2uzqy zk_prove_jobs id=11 因 handoff-landed 重置回 pending",
+  "[zk-autonomy] 01:17:45 ✅ market=46-2uzqy zk_handoff dispatched+landed txId=ec7485bf1830fd848a3ccb4ae0c9c1cbf5f064e42589665226e9dc01d92aa539",
+  "[zk-prove-worker] job=11 market=46-2uzqy proving started (~4min)...",
+  "[bshard-close-submit-v2] market=65-5svw3 submit fail: no txId in relay response: {\"error\":\"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx e1e77272ccda54accb61dcc574169aa91ca4541ebd6cbb1ab876b86147907dff:0\",\"phase\":\"execution\"}",
+  "[bshard-close-submit-v2] market=48-0psz7 submit fail: no txId in relay response: {\"error\":\"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx 071ac53c72f2597dd18bef53815d0d8d45469488c1e209b6b06062c1dfe8356e:0\",\"phase\":\"execution\"}",
+  "[bshard-close-submit-v2] market=65-5svw3 submit fail: no txId in relay response: {\"error\":\"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx e1e77272ccda54accb61dcc574169aa91ca4541ebd6cbb1ab876b86147907dff:0\",\"phase\":\"execution\"}",
+  "[bshard-close-submit-v2] market=48-0psz7 submit fail: no txId in relay response: {\"error\":\"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx 071ac53c72f2597dd18bef53815d0d8d45469488c1e209b6b06062c1dfe8356e:0\",\"phase\":\"execution\"}",
+  "[bshard-close-submit-v2] market=65-5svw3 submit fail: no txId in relay response: {\"error\":\"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx e1e77272ccda54accb61dcc574169aa91ca4541ebd6cbb1ab876b86147907dff:0\",\"phase\":\"execution\"}",
+  "[bshard-close-submit-v2] market=48-0psz7 submit fail: no txId in relay response: {\"error\":\"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx 071ac53c72f2597dd18bef53815d0d8d45469488c1e209b6b06062c1dfe8356e:0\",\"phase\":\"execution\"}",
+  "[zk-prove-worker] ✅ job=11 market=46-2uzqy proving.status=ready gate=kaspasim:ppxqv8vezah",
+  "[bshard-close-submit-v2] market=65-5svw3 submit fail: no txId in relay response: {\"error\":\"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx e1e77272ccda54accb61dcc574169aa91ca4541ebd6cbb1ab876b86147907dff:0\",\"phase\":\"execution\"}",
+  "[bshard-close-submit-v2] market=48-0psz7 submit fail: no txId in relay response: {\"error\":\"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx 071ac53c72f2597dd18bef53815d0d8d45469488c1e209b6b06062c1dfe8356e:0\",\"phase\":\"execution\"}",
+  "[zk-autonomy] 01:19:42 ✅ market=46-2uzqy zk_close dispatched+landed txId=d4757fcb449524b2a64f29914eb0d517352efe2e0673fb5e9d657b69a3053f9b",
+  "[bshard-close-submit-v2] market=65-5svw3 submit fail: no txId in relay response: {\"error\":\"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx e1e77272ccda54accb61dcc574169aa91ca4541ebd6cbb1ab876b86147907dff:0\",\"phase\":\"execution\"}",
+  "[bshard-close-submit-v2] market=48-0psz7 submit fail: no txId in relay response: {\"error\":\"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx 071ac53c72f2597dd18bef53815d0d8d45469488c1e209b6b06062c1dfe8356e:0\",\"phase\":\"execution\"}",
+  "[zk-autonomy] 01:20:14 ✅ market=46-2uzqy claim idx=0 pk=060b02648006 payout=2943000000 txId=94839544395af5687c95027e8825a2b9ea5ed3ceb39f2fdd44c8405cc4146d34",
+  "[bshard-close-submit-v2] market=65-5svw3 submit fail: no txId in relay response: {\"error\":\"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx e1e77272ccda54accb61dcc574169aa91ca4541ebd6cbb1ab876b86147907dff:0\",\"phase\":\"execution\"}",
+  "[bshard-close-submit-v2] market=48-0psz7 submit fail: no txId in relay response: {\"error\":\"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx 071ac53c72f2597dd18bef53815d0d8d45469488c1e209b6b06062c1dfe8356e:0\",\"phase\":\"execution\"}",
+  "[zk-autonomy] 01:20:44 ✅ market=46-2uzqy claim idx=1 pk=1187ac7eb6fd payout=57000000 txId=3036bb60be85a32387bc6c355090fcf75fc7418e5c48d04db78659d37c3134d0 (last, exhausted)"
+ ],
+ "pinLineCount": 0,
+ "unpinLineCount": 0,
+ "stuckEvidence": [
+  "[bshard-close-submit-v2] market=65-5svw3 submit fail: no txId in relay response: {\"error\":\"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx e1e77272ccda54accb61dcc574169aa91ca4541ebd6cbb1ab876b86147907dff:0\",\"phase\":\"execution\"}",
+  "[bshard-close-submit-v2] market=48-0psz7 submit fail: no txId in relay response: {\"error\":\"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx 071ac53c72f2597dd18bef53815d0d8d45469488c1e209b6b06062c1dfe8356e:0\",\"phase\":\"execution\"}",
+  "[bshard-close-submit-v2] market=65-5svw3 submit fail: no txId in relay response: {\"error\":\"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx e1e77272ccda54accb61dcc574169aa91ca4541ebd6cbb1ab876b86147907dff:0\",\"phase\":\"execution\"}",
+  "[bshard-close-submit-v2] market=48-0psz7 submit fail: no txId in relay response: {\"error\":\"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx 071ac53c72f2597dd18bef53815d0d8d45469488c1e209b6b06062c1dfe8356e:0\",\"phase\":\"execution\"}",
+  "[bshard-close-submit-v2] market=65-5svw3 submit fail: no txId in relay response: {\"error\":\"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx e1e77272ccda54accb61dcc574169aa91ca4541ebd6cbb1ab876b86147907dff:0\",\"phase\":\"execution\"}",
+  "[bshard-close-submit-v2] market=48-0psz7 submit fail: no txId in relay response: {\"error\":\"UTXO not found at kaspasim:qzeq427yqhaz68k5vfvv78remkl5xwvksvhhcvymm58jvjggx32y5v9kveur9 for tx 071ac53c72f2597dd18bef53815d0d8d45469488c1e209b6b06062c1dfe8356e:0\",\"phase\":\"execution\"}"
+ ],
+ "finishedAt": "2026-10-05T01:20:46.478Z",
+ "failures": 0
+}

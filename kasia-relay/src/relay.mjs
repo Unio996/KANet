@@ -682,6 +682,21 @@ if (process.send) {
           return;
         }
 
+        case 'pin_utxo':
+        case 'unpin_utxo': {
+          // 账本1855 A: 只维护【排除】名单(transaction.mjs _pinnedUtxos), 不碰钥匙/不选币/不广播。非法入参 ⇒ 报错且状态不变。
+          let result;
+          try {
+            const { pinUtxo, unpinUtxo } = await import('./lib/transaction.mjs');
+            result = cmd.type === 'pin_utxo'
+              ? { ok: true, ...pinUtxo(cmd.txid, cmd.index, cmd.ttl_ms === undefined ? undefined : cmd.ttl_ms) }
+              : { ok: true, ...unpinUtxo(cmd.txid, cmd.index) };
+          } catch (e) { result = { ok: false, error: e.message }; }
+          log(`${cmd.type.toUpperCase()} ${String(cmd.txid).slice(0, 12)}:${cmd.index} → ${result.ok ? 'ok size=' + result.size : 'REJECTED ' + result.error}`);   // 验收证据行(console 日志里可 grep)
+          if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result });
+          return;
+        }
+
         case 'get_pubkey': {
           // Phase 4a Sub 6 — return relay x-only pubkey (= SS contract oracle ctor param).
           // Read-only, derives from wallet without exposing privkey.

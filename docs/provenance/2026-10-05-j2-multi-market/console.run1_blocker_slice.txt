@@ -1,0 +1,136 @@
+[settle-daemon] 21:35:03 zkJudgeProposeAutonomousTick starting·tick=30000ms
+[pool-seeder] started — maker=61f72c5b target=3 interval=1min
+[pool-seeder] no eligible gamma market this tick
+[pool-seeder] created ext-pool-v07-1791149763151-g5p08 [other] vol=100000 "MM rehearsal market #0: will event 0 happen?" end=2026-10-04T22:01:00.252Z (1/3)
+[pool-seeder] tick: +1 market(s), live 0→1/3
+[pool-seeder] created ext-pool-v07-1791149823143-j5sf3 [other] vol=99000 "MM rehearsal market #1: will event 1 happen?" end=2026-10-04T22:01:00.252Z (2/3)
+[pool-seeder] tick: +1 market(s), live 1→2/3
+[pool-seeder] created ext-pool-v07-1791149883150-hvbrw [other] vol=98000 "MM rehearsal market #2: will event 2 happen?" end=2026-10-04T22:01:00.252Z (3/3)
+[pool-seeder] tick: +1 market(s), live 2→3/3
+[bshard-close-voter-v2] tick: 0 pending | signed=0 refused=0 skipped=0 errored=0
+[bshard-close-voter-v2] tick: 0 pending | signed=0 refused=0 skipped=0 errored=0
+[bshard-close-voter-v2] tick: 0 pending | signed=0 refused=0 skipped=0 errored=0
+[bshard-close-voter-v2] tick: 0 pending | signed=0 refused=0 skipped=0 errored=0
+[bshard-close-voter-v2] tick: 0 pending | signed=0 refused=0 skipped=0 errored=0
+[bshard-close-voter-v2] tick: 0 pending | signed=0 refused=0 skipped=0 errored=0
+[bshard-close-voter-v2] tick: 0 pending | signed=0 refused=0 skipped=0 errored=0
+[bshard-close-voter-v2] tick: 0 pending | signed=0 refused=0 skipped=0 errored=0
+[bshard-close-voter-v2] tick: 0 pending | signed=0 refused=0 skipped=0 errored=0
+[bshard-close-voter-v2] tick: 0 pending | signed=0 refused=0 skipped=0 errored=0
+[bshard-close-voter-v2] tick: 0 pending | signed=0 refused=0 skipped=0 errored=0
+[bshard-close-voter-v2] tick: 0 pending | signed=0 refused=0 skipped=0 errored=0
+[bshard-close-voter-v2] tick: 0 pending | signed=0 refused=0 skipped=0 errored=0
+[relay:e2e-settler] 10/5/2026, 05:40:43 PIN_UTXO f61a9087dc4f:0 → ok size=1
+[relay:e2e-settler] 10/5/2026, 05:41:03 PIN_UTXO f61a9087dc4f:0 → ok size=1
+[relay:e2e-settler] 10/5/2026, 05:41:13 PIN_UTXO 07668a8ea0f4:0 → ok size=2
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-4 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-1 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-1 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-1 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-2 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-2 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-4 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-3 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-5 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-4 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-6 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-6 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-1 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[bshard-close-voter-v2] tick: 3 pending | signed=0 refused=15 skipped=3 errored=0
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-2 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[relay:e2e-settler] 10/5/2026, 05:45:34 PIN_UTXO 546a8fdc5bcf:0 → ok size=3
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-3 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[relay:e2e-settler] 10/5/2026, 05:46:04 PIN_UTXO 07668a8ea0f4:0 → ok size=3
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-4 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[relay:e2e-settler] 10/5/2026, 05:46:34 PIN_UTXO f61a9087dc4f:0 → ok size=3
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-6 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-1 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-1 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-2 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-2 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-4 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-3 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-5 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-4 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-6 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-6 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-1 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[bshard-close-voter-v2] tick: 3 pending | signed=0 refused=15 skipped=3 errored=0
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-2 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[relay:e2e-settler] 10/5/2026, 05:50:34 PIN_UTXO 546a8fdc5bcf:0 → ok size=3
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-3 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[relay:e2e-settler] 10/5/2026, 05:51:04 PIN_UTXO 07668a8ea0f4:0 → ok size=3
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-4 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[relay:e2e-settler] 10/5/2026, 05:51:34 PIN_UTXO f61a9087dc4f:0 → ok size=3
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-6 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-1 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-1 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-2 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-2 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-4 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-3 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-5 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-4 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-6 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-6 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-1 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[bshard-close-voter-v2] tick: 3 pending | signed=0 refused=15 skipped=3 errored=0
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-2 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[relay:e2e-settler] 10/5/2026, 05:55:34 PIN_UTXO 546a8fdc5bcf:0 → ok size=3
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-3 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[relay:e2e-settler] 10/5/2026, 05:56:04 PIN_UTXO 07668a8ea0f4:0 → ok size=3
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-4 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[relay:e2e-settler] 10/5/2026, 05:56:34 PIN_UTXO f61a9087dc4f:0 → ok size=3
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-6 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-1 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-1 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-2 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-2 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-4 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-3 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-5 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-4 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-6 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-6 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-1 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[bshard-close-voter-v2] tick: 3 pending | signed=0 refused=15 skipped=3 errored=0
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-2 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[relay:e2e-settler] 10/5/2026, 06:00:34 PIN_UTXO 546a8fdc5bcf:0 → ok size=3
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-3 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[relay:e2e-settler] 10/5/2026, 06:01:04 PIN_UTXO 07668a8ea0f4:0 → ok size=3
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-4 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[relay:e2e-settler] 10/5/2026, 06:01:34 PIN_UTXO f61a9087dc4f:0 → ok size=3
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-6 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-1 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-1 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-2 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-2 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-4 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-3 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-5 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-4 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-6 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-6 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-1 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[bshard-close-voter-v2] tick: 3 pending | signed=0 refused=15 skipped=3 errored=0
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-2 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[relay:e2e-settler] 10/5/2026, 06:05:34 PIN_UTXO 546a8fdc5bcf:0 → ok size=3
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-3 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[relay:e2e-settler] 10/5/2026, 06:06:04 PIN_UTXO 07668a8ea0f4:0 → ok size=3
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-4 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[relay:e2e-settler] 10/5/2026, 06:06:34 PIN_UTXO f61a9087dc4f:0 → ok size=3
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-6 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-1 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-1 REFUSED: frozen_evidence: canonical fetch fail (predicate.data_source_canonical 缺失 — 无 canonical 源 (弃签不猜)) — 弃签 (不猜)
+[relay:e2e-settler] 10/5/2026, 06:08:04 PIN_UTXO 07668a8ea0f4:0 → ok size=3
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-4 REFUSED: W2: new_attestedAtMs 跟委员自己 wall-clock 偏差 1613902ms > 容差 600000ms (driver 可能喂了远离真实 attest 时刻的值, escapeRefund GRACE 锚点被扭曲风险, 弃签)
+[relay:e2e-settler] 10/5/2026, 06:08:34 PIN_UTXO f61a9087dc4f:0 → ok size=3
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-6 REFUSED: W2: new_attestedAtMs 跟委员自己 wall-clock 偏差 1643911ms > 容差 600000ms (driver 可能喂了远离真实 attest 时刻的值, escapeRefund GRACE 锚点被扭曲风险, 弃签)
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-1 REFUSED: W2: new_attestedAtMs 跟委员自己 wall-clock 偏差 1613205ms > 容差 600000ms (driver 可能喂了远离真实 attest 时刻的值, escapeRefund GRACE 锚点被扭曲风险, 弃签)
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-1 REFUSED: W2: new_attestedAtMs 跟委员自己 wall-clock 偏差 1703840ms > 容差 600000ms (driver 可能喂了远离真实 attest 时刻的值, escapeRefund GRACE 锚点被扭曲风险, 弃签)
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-2 REFUSED: W2: new_attestedAtMs 跟委员自己 wall-clock 偏差 1643287ms > 容差 600000ms (driver 可能喂了远离真实 attest 时刻的值, escapeRefund GRACE 锚点被扭曲风险, 弃签)
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-2 REFUSED: W2: new_attestedAtMs 跟委员自己 wall-clock 偏差 1733908ms > 容差 600000ms (driver 可能喂了远离真实 attest 时刻的值, escapeRefund GRACE 锚点被扭曲风险, 弃签)
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-4 REFUSED: W2: new_attestedAtMs 跟委员自己 wall-clock 偏差 1673365ms > 容差 600000ms (driver 可能喂了远离真实 attest 时刻的值, escapeRefund GRACE 锚点被扭曲风险, 弃签)
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-3 REFUSED: W2: new_attestedAtMs 跟委员自己 wall-clock 偏差 1763961ms > 容差 600000ms (driver 可能喂了远离真实 attest 时刻的值, escapeRefund GRACE 锚点被扭曲风险, 弃签)
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-5 REFUSED: W2: new_attestedAtMs 跟委员自己 wall-clock 偏差 1703446ms > 容差 600000ms (driver 可能喂了远离真实 attest 时刻的值, escapeRefund GRACE 锚点被扭曲风险, 弃签)
+[bshard-close-voter-v2]   market=ext-pool-v07 voter=e2e-oracle-4 REFUSED: W2: new_attestedAtMs 跟委员自己 wall-clock 偏差 1794069ms > 容差 600000ms (driver 可能喂了远离真实 attest 时刻的值, escapeRefund GRACE 锚点被扭曲风险, 弃签)

@@ -43,6 +43,7 @@ const realRm = await import(rmUrl);
 const { default: realRmDefault, ...realRmNamed } = realRm;
 const stubSend = (relayId, cmd) => {
   calls.send.push({ relayId, type: cmd?.type });
+  if (cmd?.type === 'get_pubkey' && globalThis.__STUB_SEND_DELAY_MS) return new Promise((r) => setTimeout(r, globalThis.__STUB_SEND_DELAY_MS)).then(() => ({ x_only_pubkey: MAKER.xonly, address: currentNet() === 'mainnet' ? MAKER.addrMain : MAKER.addrSim }));   // 5c 并发测试: 制造真实 await 间隙, 让两个 create 都先过早失败检查
   if (cmd?.type === 'get_pubkey') return Promise.resolve({ x_only_pubkey: MAKER.xonly, address: currentNet() === 'mainnet' ? MAKER.addrMain : MAKER.addrSim });
   if (cmd?.type === 'send_broadcast') return Promise.resolve({ txId: 'bcast' });
   return Promise.reject(new Error('stubbed relay command ' + cmd?.type));
@@ -206,6 +207,8 @@ process.env.KANET_NO_KAS_STAKE_MODE = '1'; reset();
   ok(r1.statusCode === 200 && calls.transfer.length === 0 && calls.reg.length === 1, 'register-v07 stake_ktt ⇒ 200 且零转账');
   const r2 = await post('/api/pool/market/m-reg/bettor/register-v07/prep', {});
   ok(r2.statusCode === 403, 'prep ⇒ 403');
+  const r1b = await post('/api/pool/market/m-reg/bettor/register-v07', { bettor_relay_id: 'bettor-r' });   // 缺 direction
+  ok(r1b.statusCode === 400 && /stake_ktt/.test(r1b.body) && !/stake_kas required/.test(r1b.body), `无 KAS 模式缺参错误文案提 stake_ktt(实 ${r1b.statusCode} ${String(r1b.body).slice(0, 120)})`);
 }
 delete process.env.KANET_NO_KAS_STAKE_MODE;
 
@@ -220,7 +223,7 @@ process.env.KASPA_NETWORK = 'mainnet'; putAddrs('mainnet'); reset();
   seedMarket('m-zk-live', { resolution_rule_spec: spec({ zk_native: true }), protocol_status: 'attested_v2', metadata: JSON.stringify({ zk_continuation: { exhausted: false } }) });
   const n1 = sqlite.prepare('SELECT COUNT(*) c FROM pool_markets').get().c;
   const r1 = await post('/api/pool/market/create-v07', createBody());
-  ok(r1.statusCode === 409 && J(r1).code === 'another_zk_market_unfinished' && J(r1).blocking_market_id === 'm-zk-live', `另一 zk_native 盘未完结(attested_v2 + exhausted≠true) ⇒ 409 带 blocking_market_id(实 ${r1.statusCode} ${String(r1.body).slice(0, 140)})`);
+  ok(r1.statusCode === 409 && J(r1).code === 'live_market_cap_reached' && J(r1).blocking_market_id === 'm-zk-live', `另一 zk_native 盘未完结(attested_v2 + exhausted≠true) ⇒ 409 带 blocking_market_id(实 ${r1.statusCode} ${String(r1.body).slice(0, 140)})`);
   ok(sqlite.prepare('SELECT COUNT(*) c FROM pool_markets').get().c === n1 && calls.transfer.length === 0 && calls.send.length === 0, '409: 无新行、零转账、零 relay 命令(闸先于 get_pubkey)');
   // (b) 同一盘 exhausted=true ⇒ 视为完结, 放行
   sqlite.prepare("UPDATE pool_markets SET metadata = ? WHERE id = 'm-zk-live'").run(JSON.stringify({ zk_continuation: { exhausted: true } }));
@@ -255,6 +258,45 @@ process.env.KASPA_NETWORK = 'mainnet'; putAddrs('mainnet'); reset();
   process.env.KASPA_NETWORK = 'simnet'; putAddrs('simnet'); reset();
   const r4 = await post('/api/pool/market/create-v07', createBody());
   ok(r4.statusCode === 400 && /missing maker_stake_kas/.test(r4.body), 'simnet(无模式位)仍是老行为, 不触发一次一盘闸');
+}
+
+// ═══ 5c. 账本1855 A: 一次一盘 → 可配上限 ZK_MAX_LIVE_MARKETS(默认 1); 上限-1 时两个并发 create 恰一个成功 ═══
+console.log('[test] 5c. ZK_MAX_LIVE_MARKETS 上限 + 并发 create 原子性');
+process.env.KASPA_NETWORK = 'mainnet'; putAddrs('mainnet'); reset();
+{
+  const finish = () => sqlite.prepare("UPDATE pool_markets SET protocol_status = 'cancelled'").run();
+  const live = () => sqlite.prepare("SELECT COUNT(*) c FROM pool_markets WHERE protocol_status NOT IN ('cancelled','shard_internal')").get().c;
+  finish();
+  // (a) 未设/非法 ⇒ 上限 1(与 1850 行为一致)
+  for (const bad of [undefined, '', '0', '-2', 'abc', '1.5', '101']) {
+    if (bad === undefined) delete process.env.ZK_MAX_LIVE_MARKETS; else process.env.ZK_MAX_LIVE_MARKETS = bad;
+    finish(); seedMarket('m-cap-a' + String(bad), { resolution_rule_spec: spec({ zk_native: true }), protocol_status: 'attested_v2', metadata: '{}' });
+    const r = await post('/api/pool/market/create-v07', createBody());
+    ok(r.statusCode === 409 && J(r).cap === 1, `ZK_MAX_LIVE_MARKETS=${bad === undefined ? '(unset)' : JSON.stringify(bad)} ⇒ 上限 1, 已有 1 个 ⇒ 409(实 ${r.statusCode} ${String(r.body).slice(0, 90)})`);
+  }
+  // (b) 上限 3, 已有 2 ⇒ 过; 满 3 ⇒ 409 且 live/cap 如实
+  process.env.ZK_MAX_LIVE_MARKETS = '3'; finish(); reset();
+  seedMarket('m-cap-1', { resolution_rule_spec: spec({ zk_native: true }), protocol_status: 'pending_bettors', metadata: '{}' });
+  seedMarket('m-cap-2', { resolution_rule_spec: spec({ zk_native: true }), protocol_status: 'pending_bettors', metadata: '{}' });
+  const rOk = await post('/api/pool/market/create-v07', createBody({ outcome_condition_id: '0x' + 'a1'.repeat(32) }));
+  ok(rOk.statusCode === 200 && live() === 3, `上限 3, 已有 2 ⇒ 第 3 个放行(实 ${rOk.statusCode} ${String(rOk.body).slice(0, 100)})`);
+  const rFull = await post('/api/pool/market/create-v07', createBody({ outcome_condition_id: '0x' + 'a2'.repeat(32) }));
+  ok(rFull.statusCode === 409 && J(rFull).code === 'live_market_cap_reached' && J(rFull).live === 3 && J(rFull).cap === 3 && live() === 3, '满 3/3 ⇒ 409 live_market_cap_reached(live=3, cap=3), 不新增行');
+  // (c) 并发: 上限 3, 已有 2 ⇒ 同时发 2 个 create ⇒ 恰一个 200, 一个 409, 终态恰 3 个在跑
+  finish(); reset();
+  seedMarket('m-race-1', { resolution_rule_spec: spec({ zk_native: true }), protocol_status: 'pending_bettors', metadata: '{}' });
+  seedMarket('m-race-2', { resolution_rule_spec: spec({ zk_native: true }), protocol_status: 'pending_bettors', metadata: '{}' });
+  globalThis.__STUB_SEND_DELAY_MS = 40;
+  const [ra, rb] = await Promise.all([
+    post('/api/pool/market/create-v07', createBody({ outcome_condition_id: '0x' + 'b1'.repeat(32) })),
+    post('/api/pool/market/create-v07', createBody({ outcome_condition_id: '0x' + 'b2'.repeat(32) })),
+  ]);
+  globalThis.__STUB_SEND_DELAY_MS = 0;
+  const codes = [ra.statusCode, rb.statusCode].sort();
+  ok(codes[0] === 200 && codes[1] === 409 && live() === 3, `cap-1 并发 2 个 create ⇒ 恰一个 200 一个 409, 在跑恰 3(实 ${codes.join('/')} live=${live()})`);
+  const loser = ra.statusCode === 409 ? ra : rb;
+  ok(J(loser).code === 'live_market_cap_reached', '败者回 live_market_cap_reached');
+  delete process.env.ZK_MAX_LIVE_MARKETS; finish(); reset();
 }
 
 // ═══ 6. 结构闸: 重开路由第一条语句 ═══

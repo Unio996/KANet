@@ -81,3 +81,11 @@ export function makeCtfReader({ rpcs, ctfAddress = _CTF_POLYGON } = {}) {
     },
   };
 }
+
+// 账本1855 A: 守护进程(judgeWinDir)与委员 enforce(enforceCloseAttestV2 polymarket 分支)共用【同一处】RPC 列表与 reader 构造, 防漂移。
+// UMA_POLYGON_RPCS 逗号分隔, ≥2 源(makeCtfReader 强制); 默认 3 个公共 RPC(已知局限: 各委员默认同一组, 独立性有限 — 另票: 每委员各自配置)。
+export const DEFAULT_UMA_POLYGON_RPCS = 'https://polygon-bor-rpc.publicnode.com,https://polygon.drpc.org,https://1rpc.io/matic';
+export function umaPolygonRpcs(env = process.env) { return String(env.UMA_POLYGON_RPCS || DEFAULT_UMA_POLYGON_RPCS).split(',').map((s) => s.trim()).filter(Boolean); }
+let _sharedReader = null;
+export function sharedUmaCtfReader() { if (!_sharedReader) _sharedReader = makeCtfReader({ rpcs: umaPolygonRpcs() }); return _sharedReader; }
+export function _resetSharedUmaCtfReaderForTest() { _sharedReader = null; }

@@ -198,6 +198,7 @@ export async function _claimOneMarket(marketId, ctx) {   // 账本1832 段4: 导
       relayCall: ctx.relayCall, p2sh: (hex) => ctx.p2shAddr(hex), tokenTmplHash: tmplEnv.tokenTmplHash, claimTmplHash: tmplEnv.claimTmplHash,
     });
   } catch (e) { _writeZkAutonomyErrorEvent('claimAutonomousTick_broadcast', marketId, e.message); return { errored: true, claimed: 0 }; }
+  finally { try { await ctx.unpinMintedFee?.(feeUtxo); } catch { /* 解钉仅为清洁, relay TTL 兜底 */ } }   // 账本1855 A
   const txid = sj?.txId || sj?.txid;
   if (!txid) { _writeZkAutonomyErrorEvent('claimAutonomousTick_broadcast', marketId, `no txId in relay response: ${JSON.stringify(sj).slice(0, 200)}`); return { errored: true, claimed: 0 }; }
 
