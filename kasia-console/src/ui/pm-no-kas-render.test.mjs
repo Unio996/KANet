@@ -93,3 +93,10 @@ test('no-KAS mode: detail hides TG box + UMA mapping badge, maps attested_v2, li
   const off = await render(false, 'predictions-pool-detail');
   assert.ok(off.includes('去 TG 押注 →') && off.includes('x-text="mappingBadge().label"') && off.includes('已签人数') && !off.includes('zkExhausted') && !off.includes('sigCountReal'));
 });
+test('no-KAS mode: 链上进度 raw strings mapped, vote card hidden on ZK-native; non-mainnet keeps old', async () => {
+  const on = await render(true, 'predictions-pool-detail');
+  assert.ok(on.includes("' && !zkNative()'") === false && on.includes('!isSettled() && !zkNative()'));
+  assert.ok(on.includes('return this.statusLabel();') && on.includes("bshard_close_sig_v2: '委员签名（收盘）'") && on.includes('已领完. 所有赢家的筹码已到账.'));
+  const off = await render(false, 'predictions-pool-detail');
+  assert.ok(!off.includes('zkNative') && !off.includes('this.statusLabel();') && off.includes('return st;'));
+});

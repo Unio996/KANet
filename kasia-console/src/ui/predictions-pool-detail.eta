@@ -306,7 +306,7 @@
          :class="umaFinalizationStatus()?.cls" x-text="umaFinalizationStatus()?.label"></div>
 
     <!-- ===== piece 1: live 投票进度 (未结算) ===== -->
-    <div x-show="!isSettled()" class="card p-4 mb-4">
+    <div x-show="!isSettled()<%~ it.noKasMode ? ' && !zkNative()' : '' %>" class="card p-4 mb-4">
       <div class="flex items-center justify-between mb-3">
         <span class="text-sm font-medium text-ink-700">仲裁人投票进度</span>
         <!-- KANet-UI 2026-06-08 P0-B 三桶 (Bettor r414 + spec §7.2): 判定 / 弃权 / 未响应 -->
@@ -857,7 +857,8 @@ function poolDetailPage(marketId) {
         pool_settle_silent_detected: '侦测静默仲裁人',
         pool_refund_request: '申请退款',
         pool_market_published: '市场上链',
-      };
+<% if (it.noKasMode) { %>        bshard_close_sig_v2: '委员签名（收盘）',
+<% } %>      };
       return map[t] || t || '?';
     },
     formatEventTime(ts) {
@@ -890,7 +891,9 @@ function poolDetailPage(marketId) {
       if (st === 'collecting_sigs') return `等仲裁人签名 (${sigs}/${total} 已签).`;
       if (st === 'completed') return '已结算. 链上 TX 见上面 🔗.';
       if (st === 'refunded' || st === 'cancelled') return '已退款.';
-      return st;
+<% if (it.noKasMode) { %>      if (st === 'attested_v2') return this.zkExhausted() ? '已领完. 所有赢家的筹码已到账.' : '已开奖. 赢家的筹码按比例发放中.';
+<% } %>      <% if (it.noKasMode) { %>return this.statusLabel();<% } else { %>return st;<% } %>
+
     },
 
     // condition_id_mapping lookup (J2 Sub1 endpoint) — 404 = 未映射 (graceful)
@@ -1042,7 +1045,12 @@ function poolDetailPage(marketId) {
 <% } %>      if (s === 'collecting_sigs' || s === 'verifying') return 'bg-amber-100 text-amber-700';
       return 'bg-warm-200 text-ink-600';
     },
-<% if (it.noKasMode) { %>    zkExhausted() {
+<% if (it.noKasMode) { %>    zkNative() {
+      const m = this.market || {};
+      if (m.metadata && (m.metadata.zk_continuation || m.metadata.no_spine)) return true;
+      try { return !!JSON.parse(m.resolution_rule_spec || '{}').zk_native; } catch (e) { return false; }
+    },
+    zkExhausted() {
       const zc = this.market && this.market.metadata && this.market.metadata.zk_continuation;
       return !!(zc && zc.exhausted === true);
     },
