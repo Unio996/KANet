@@ -80,3 +80,7 @@ test('no-KAS mode: stake_ktt is built with BigInt (no float precision loss)', as
   assert.ok(html.includes('BigInt(_n) * 100000000n'));
   assert.ok(!html.includes('Math.round(Number(this.bet.stakeKas)) * 100000000'));
 });
+test('no-KAS mode: my-positions block reads ZK-native fields (pending / landed / pool_known)', async () => {
+  const html = await render(true, 'predictions-pool-detail');
+  for (const k of ['zk_native', 'payout_pending_units', 'pool_known', '赢 · 待领', '赢 · 金额待定']) assert.ok(html.includes(k), k);
+});

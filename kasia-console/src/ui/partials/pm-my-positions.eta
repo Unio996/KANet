@@ -89,20 +89,31 @@ function pmMyPositions(marketId) {
     },
     // stake_kas / actual_payout_kas = 单位/1e8 = 筹码数 (1 筹码 = 1e8 单位)
     chips(n) { const v = Number(n); return Number.isFinite(v) ? v.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '?'; },
+    // ZK 原生盘: 后端给 zk_native / claims_landed / pool_known / actual_payout_units / payout_pending_units (单位=1e-8 筹码, 字符串)
+    unitsToChips(u) { return (u == null || u === '') ? null : Number(u) / 1e8; },
     kind(p) {
       const s = p.status;
       if (s === 'completed') return 'settled';
-      if (s === 'collecting_sigs' || s === 'verifying') return 'awaiting';
       if (s === 'cancelled' || s === 'refunded') return 'closed';
+      if (p.zk_native && (p.did_win === true || p.did_win === false)) return 'settled';
+      if (s === 'collecting_sigs' || s === 'verifying') return 'awaiting';
       return 'open';
     },
-    statusLabel(p) { return ({ open: '押注中', awaiting: '等开奖', settled: '已结算', closed: '已取消' })[this.kind(p)]; },
+    statusLabel(p) { return ({ open: '押注中', awaiting: '等开奖', settled: p.zk_native ? '已开奖' : '已结算', closed: '已取消' })[this.kind(p)]; },
     statusBadge(p) {
       return ({ open: 'bg-emerald-100 text-emerald-700', awaiting: 'bg-amber-100 text-amber-700', settled: 'bg-brand-100 text-brand-700', closed: 'bg-warm-200 text-ink-500' })[this.kind(p)];
     },
     resultText(p) {
       if (this.kind(p) === 'closed') return '已取消';
-      if (p.did_win === true) return p.actual_payout_kas != null ? ('赢 · 到账 ' + this.chips(p.actual_payout_kas) + ' 筹码') : '赢 · 待发放';
+      if (p.did_win === true) {
+        if (p.actual_payout_kas != null) return '赢 · 到账 ' + this.chips(p.actual_payout_kas) + ' 筹码';
+        if (p.zk_native) {
+          const pend = this.unitsToChips(p.payout_pending_units);
+          if (pend != null && pend > 0) return '赢 · 待领 ' + this.chips(pend) + ' 筹码';
+          if (p.pool_known === false) return '赢 · 金额待定';
+        }
+        return '赢 · 待发放';
+      }
       if (p.did_win === false) return '输';
       return this.kind(p) === 'settled' ? '已结算 · 结果待同步' : '待结算';
     },
