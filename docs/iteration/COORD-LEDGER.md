@@ -14680,3 +14680,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1861) 🟢 **Owner 批恢复电报接线（原话「批，恢复电报接线」）→ D-036 取代 D-024**：依 KANet-UI 差距报告（8e1c1ced）。派工：J2 = register-v07 服务端成本闸（每下注公钥/日 + 全系统/日注数上限，env 可配、保守默认，测试 + 变异）；KANet-UI = bot 改造（列盘读 pool zk_native、一步 register-v07 stake_ktt、主网我的押注、ZK 原生结算通知、bot 侧每用户每日上限、/link 主网地址即身份）+ 中英文案清单交 Owner 批 + simnet 跑通；Owner env 脚本由 Bettor 备、副本试跑。不动主网 env / bot / console。
  — Bettor（会话 e59cd336）
+
+### (1862) 🟡 **主网首盘 q2acs 15:00Z 截止·0 注·被旧 settler min-pot 规则取消·系统钱包零支出**：KANet-UI 报：deadline-watcher 推 verifying → 旧 pool-settler「pool < 100KAS → cancel」→ cancelled；0 事件（无预言机投票/委员会签名/UMA 未调用）。pm-settler 4 UTXO 原样（12:38–15:01Z 六次核）。另两盘未动。**Bettor 审出缺口（派 J2，阻塞 bot e2e）**：pool-market-settler.js:725-743 的 MIN_POT_PRE 门对所有 v0.6/v0.7 生效，不区分 zk_native/KTT 筹码盘；阈值 1e10 按 KAS sompi 写死，用 Σ pool_bettor_sides.stake_amount 比较——若筹码盘单位/规模达不到，有注的盘也会在 ZK 收盘路之前被旧 settler 取消。要求：核 stake_amount 在筹码盘的单位；旧 settler 的 min-pot / maker-refund 路对 ZK 筹码盘应跳过（交 ZK close 路），或按筹码另设门槛（须报 Owner）；同时修 stderr「buildMakerRefundPreimage … missing spine_redeem_script_hex」（无 spine 盘不该走 maker refund）。simnet e2e 加用例：小额筹码有注盘到期必须走 ZK 收盘而非 min-pot 取消。
+ — Bettor（会话 e59cd336）
+
+### (1863) 🟢 **更正 1862：min-pot 不误伤有注筹码盘**：J2 核出、Bettor 复核 pool-market-settler.js:660-661——首注即建 market_shards 行，旧 settler 在 loop 顶 isBshard→continue，三处 min-pot 门都到不了；筹码盘 stake_amount=KTT 筹码数，maker_stake=0。只有 0 注盘会落入门（q2acs 即此）。批窄修（coord/j2-zk-minpot-gate-20261005）：无 spine 0 注盘到期 cancel 理由改 `no_bets`、不派退款；dispatchRefund 对 no_spine 结构性拒绝（消 stderr 噪声）；三处 KAS 门原样。不需要筹码门槛，无须 Owner 定数。追加 simnet 用例（与 bot e2e 同窗）：单注盘、一边倒赢、一边倒无赢家——报去向/KAS 成本/应显示文案。KANet-UI 补 no_bets 文案，随文案批次报 Owner。
+ — Bettor（会话 e59cd336）
