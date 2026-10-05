@@ -1834,6 +1834,17 @@ const _BSHARD_COMPUTE_BUDGET = 70;    // flat (Bettor 批: 简单+headroom). 70=
 // budget-aware fee: aa4d1c10 实测 budget=60/1-input/fee 0.01KAS LAND → ~0.01KAS(1e6 sompi)/input headroom.
 // _assertTxInvariants mass-aware floor 兜底(fee 不足 pre-submit 拒, 非链上失败).
 const _BSHARD_FEE_PER_INPUT = 1_000_000n;   // 0.01 KAS/input, 覆盖 budget=50 的 compute mass floor
+// 账本1861 A(Bettor 批): 各 bshard 站点手续费(sompi)。依据 = simnet 官方 v2.0.1 对 fee=1 的拒绝文本给出的【节点实测下限】
+//   (docs/provenance/2026-10-05-j2-fee-floor/measured_floors.json; 主网同一二进制, 最低中继费 100 sompi/克), 取 ceil(1.3×实测下限)。
+//   单测 bshard-fee-floors.test.mjs 守住"每站点 ≥ 1.25× 实测下限"——防被无意改低; 改常量必须先重测。
+//   未变: genesisMint(_BSHARD_FEE_PER_INPUT, 1.24×, 模板字节确定)与 closeAttestV2(1.44×; 委员会签名覆盖 fee, 改动须全体成员 relay 同版本同时上线, 收益仅 0.009 KAS ⇒ 不动)。
+export const BSHARD_SITE_FEE_SOMPI = Object.freeze({
+  consolidateV2: 14_000_000n,   // 实测 10,711,600 (transient mass 107,116)
+  closeAttestV2: 10_000_000n,   // 实测  6,954,600 (transient mass  69,546) — 不变
+  zkHandoff:     12_900_000n,   // 实测  9,845,200 (transient mass  98,452)
+  zkClose:       25_400_000n,   // 实测 19,529,300 (compute   mass 195,293)
+  registerAppend: 7_100_000n,   // 实测  5,402,600 (compute   mass  54,026; 首注 4,375,700; 第 2~12 注恒 5,402,600)
+});
 export function _bshardFeeV1(numInputs) { const f = BigInt(numInputs) * _BSHARD_FEE_PER_INPUT; return f > _BSHARD_MINER_FEE ? f : _BSHARD_MINER_FEE; }
 // v1 bshard tx: version=1, 所有 input sigOpCount=0(ComputeCommit 用 compute_budget 非 SigopCount), 每 input computeBudget=_BSHARD_COMPUTE_BUDGET.
 function _utxoValue(u) { return BigInt(u.amount ?? u.utxoEntry?.amount ?? u.entry?.amount ?? 0); }
@@ -2095,7 +2106,7 @@ export async function unlockBshardConsolidateV2(args) {
       new TransactionOutput(_utxoValue(psUtxo), payToAddressScript(new Address(psContAddr)), new CovenantBinding(0, new Hash(psCovId))),
       new TransactionOutput(tokOutValue, payToAddressScript(new Address(tokOutAddr))),
     ];
-    const fee = BigInt(cmd.fee_sompi ?? 20_000_000);   // 与 register_append 同量级的固定值(witness 内含 ~3KB KTT redeem reveal x2 + 29KB PS redeem); 精算(按 mass)留后续
+    const fee = BigInt(cmd.fee_sompi ?? BSHARD_SITE_FEE_SOMPI.consolidateV2);   // 账本1861 A: 实测下限 10,711,600 ×1.3(原固定 20,000,000)
     _appendChange(outputs, matched, cmd.outputs?.change_address, fee);
 
     const tokPrefix = new Uint8Array(Buffer.from(w.tok_prefix_hex.replace(/^0x/, ''), 'hex'));
@@ -2324,7 +2335,7 @@ export async function unlockBshardCloseAttestV2(args) {
     outputs[w.self_out_idx] = new TransactionOutput(psOutValue, payToAddressScript(new Address(psContAddr)), new CovenantBinding(0, new Hash(psCovId)));
     const orderedOut = outputs.filter(o => o !== undefined);
     // 🔴 账本1832 段2: 固定费 10M sompi(节点实测: 2M < 要求 6954600 @ normalized transient mass 69546 ⇒ 100 sompi/gram×69.5k, 留 ~44% 余量)。preimage 与 submit 共用本行 ⇒ 委员签的 outputs(含找零)与最终 tx 一致。
-    _appendChange(orderedOut, matched, cmd.outputs?.change_address, BigInt(cmd.fee_sompi ?? 10_000_000));
+    _appendChange(orderedOut, matched, cmd.outputs?.change_address, BigInt(cmd.fee_sompi ?? BSHARD_SITE_FEE_SOMPI.closeAttestV2));
 
     // close_attest scriptSig — witness push 序必与 PayoutShardV2.sil close_attest 形参声明序一致:
     //   selfOutIdx, new_payoutRoot, new_attestedWinner, new_betsRoot, new_refundRoot, new_attestedAtMs,
@@ -2452,7 +2463,7 @@ export async function unlockBshardZkHandoff(args) {
     outputs[ZK_OUT] = new TransactionOutput(zkOutValue, payToAddressScript(new Address(closeZkAddr)));
     outputs[TOK_OUT] = new TransactionOutput(tokOutValue, payToAddressScript(new Address(tokOutAddr)));
     const orderedOut = outputs.slice();
-    const fee = BigInt(cmd.fee_sompi ?? 30_000_000);
+    const fee = BigInt(cmd.fee_sompi ?? BSHARD_SITE_FEE_SOMPI.zkHandoff);   // 账本1861 A: 实测下限 9,845,200 ×1.3(原 30,000,000)
     _appendChange(orderedOut, matched, cmd.outputs?.change_address, fee);
     const groups = () => [new GenesisCovenantGroup(FEE_IDX, [ZK_OUT]), new GenesisCovenantGroup(FEE_IDX, [TOK_OUT])];
 
@@ -2593,7 +2604,7 @@ export async function unlockBshardZkClose(args) {
     //   两者皆无 ⇒ fail-loud, 绝不静默烧钱。
     const zkCloseChangeAddr = cmd.outputs?.change_address || wallet.getAddress();
     if (!zkCloseChangeAddr) throw new Error('zk_close: 无找零地址(cmd.outputs.change_address 与 wallet 地址皆缺) — 拒绝(否则 gate 面值整枚烧作矿工费)');
-    _appendChange(orderedOut, matched, zkCloseChangeAddr, BigInt(cmd.fee_sompi ?? 25_000_000));
+    _appendChange(orderedOut, matched, zkCloseChangeAddr, BigInt(cmd.fee_sompi ?? BSHARD_SITE_FEE_SOMPI.zkClose));   // 账本1861 A: 实测下限 19,529,300 ×1.3(原 25,000,000 仅 1.28×)
 
     const hx = (h) => new Uint8Array(Buffer.from(String(h).replace(/^0x/, ''), 'hex'));
     if (!w.tok_prefix_hex || !w.tok_suffix_hex || !w.zk_close_dispatch_tag_hex) throw new Error('zk_close: witness.tok_prefix_hex/tok_suffix_hex/zk_close_dispatch_tag_hex 必需(v1.0.0 形, noTokenInput)');
@@ -3411,7 +3422,7 @@ export async function unlockBshardRegister(args) {
     // "fees which is under the required amount"(bet1 实测需要 ≥3,575,800 sompi，_bshardFeeV1(2)=2,000,000
     // 不够)。改用固定较大值(留够第二笔更大交易的余量)，不是精算，是留够 headroom；真正的精算(按 mass
     // 现算 fee)留给后续正式接入生产前再做。
-    const registerAppendFee = 15_000_000n;
+    const registerAppendFee = BSHARD_SITE_FEE_SOMPI.registerAppend;   // 账本1861 A: 实测下限 5,402,600 ×1.3(原 15,000,000)
     _appendChange(orderedOut, matched, cmd.outputs.change_address, registerAppendFee);
     const covenantSigCount = 1 + (tokenUtxo ? 1 : 0) + (chipUtxo ? 1 : 0);   // [0]leaf [1]token? [2]chip?(均 no-sig covenant reveal) [其余]funding(wallet签)
     // 🔴 2026-09-26 real-simnet 排障发现(同 unlockBshardGenesisMintStakeChip 头注, 独立于方向甲本身): tok_out

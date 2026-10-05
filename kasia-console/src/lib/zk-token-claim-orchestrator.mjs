@@ -12,7 +12,8 @@ import { settleDispatchTags } from './pool-shard-register.mjs';
 //   0.30 KAS ⇒ 497,620(硬下限, 卡 500k 共识上限); 0.45 ⇒ 385,295; 0.50 ⇒ 364,076(留 27% 余量, 采用); 1.00 ⇒ 277,146(旧值, 与链上实测一致)。证据: docs/provenance/2026-10-05-j2-strict-zero/floor_calc.mjs。
 // 这些 KAS 永久进 sink(retire 或 claim 之后无人能取回), 面值越低网关净锁越少。
 export const CLAIM_OUT_VALUE_SOMPI = Number(process.env.ZK_CLAIM_OUT_VALUE_SOMPI || 50_000_000);
-export const CLAIM_NET_FEE_SOMPI = 40_000_000;
+// 账本1861 A: 节点实测 claim 下限 7,250,700 / 7,342,200(compute mass 72,507 / 73,422; simnet 官方 2.0.1, docs/provenance/2026-10-05-j2-fee-floor), ×1.3 ⇒ 9,600,000(原 40,000,000)。
+export const CLAIM_NET_FEE_SOMPI = 9_600_000;
 export function claimFeeInputSompi() { return 3 * CLAIM_OUT_VALUE_SOMPI + CLAIM_NET_FEE_SOMPI + 20_000_000; }   // +20M 余量(self/池代币 UTXO 面值另计入 Σin, 此为保守上界)
 
 export const CLAIM_FAMILY = {

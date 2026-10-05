@@ -1,0 +1,15 @@
+{
+  "_doc": "节点实测手续费下限(sompi): simnet 官方 kaspad v2.0.1(与主网同一二进制; 最低中继费 100 sompi/克)。方法=每个站点先以 fee_sompi=1 提交, 读节点拒绝文本 'required amount of N for <mass kind> mass M', 再以恰好 N 重提交并被接受(见 feeprobe_lines.log.txt)。附: fee-probe.mjs.txt / probe_harness.diff.txt(仅 scratch 用, 不入生产)。",
+  "node": "kaspad v2.0.1 simnet",
+  "min_relay_fee_sompi_per_gram": 100,
+  "sites": {
+    "genesisMint":    { "floor": 808300,   "mass": 8083,   "kind": "compute",   "paid_before": 1000000,  "paid_after": 1000000 },
+    "registerAppend": { "floor": 5402600,  "mass": 54026,  "kind": "compute",   "paid_before": 15000000, "paid_after": 7100000, "note": "首注 4375700; 第 2~12 注恒 5402600(deep-bets 12 注)" },
+    "consolidateV2":  { "floor": 10711600, "mass": 107116, "kind": "transient", "paid_before": 20000000, "paid_after": 14000000 },
+    "closeAttestV2":  { "floor": 6954600,  "mass": 69546,  "kind": "transient", "paid_before": 10000000, "paid_after": 10000000, "note": "委员会签名覆盖 fee; 仅测下限, 不改" },
+    "zkHandoff":      { "floor": 9845200,  "mass": 98452,  "kind": "transient", "paid_before": 30000000, "paid_after": 12900000 },
+    "zkClose":        { "floor": 19529300, "mass": 195293, "kind": "compute",   "paid_before": 25000000, "paid_after": 25400000 },
+    "claim":          { "floor": 7342200,  "mass": 73422,  "kind": "compute",   "paid_before": 40000000, "paid_after": 9600000, "note": "两种形态 7250700(mass 72507) / 7342200(mass 73422), 取大" },
+    "selfTransfer":   { "floor": 203600,   "mass": 2036,   "kind": "compute",   "paid_before": 3203600,  "paid_after": 303600, "note": "relay 自转(手续费 UTXO/创世注资)以 priorityFee=0 即 203600 被节点接受(≥60 笔); 发给别人地址的转账仍 3M 下限" }
+  }
+}

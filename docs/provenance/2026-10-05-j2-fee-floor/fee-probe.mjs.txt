@@ -1,0 +1,24 @@
+// SCRATCH ONLY (never commit): simnet fee-floor probe. FEE_PROBE=1 ⇒ every bshard unlock first tries fee_sompi=1, reads the node's
+// "required amount of N for compute mass M" rejection, logs [FEEPROBE], and retries at exactly N.
+export const probeOn = () => process.env.FEE_PROBE === '1';
+const st = { site: null, fee: null };
+export function currentProbeFee(dflt) { return probeOn() && st.fee != null ? st.fee : dflt; }
+export async function probeRetry(site, args, fn) {
+  if (!probeOn()) return fn(args);
+  if (site === 'unlockBshardCloseAttestV2') return fn(args);   // committee-signed fixed fee: floor already measured from the first rejection; overriding would break the quorum signatures
+  const base = args.cmd || {};
+  const prev = { ...st };
+  try {
+    st.site = site; st.fee = 1n;
+    try { return await fn({ ...args, cmd: { ...base, fee_sompi: '1' } }); }
+    catch (e) {
+      const m = /required amount of (\d+) for (?:normalized transient|compute|storage) mass (\d+)/.exec(String(e?.message || e));
+      if (!m) throw e;
+      console.log(`[FEEPROBE] site=${site} required=${m[1]} mass=${m[2]} (${/transient/.test(String(e?.message))?"transient":"compute"}) (fee=1 rejected)`);
+      st.fee = BigInt(m[1]);
+      const r = await fn({ ...args, cmd: { ...base, fee_sompi: m[1] } });
+      console.log(`[FEEPROBE] site=${site} ACCEPTED at exactly required=${m[1]}`);
+      return r;
+    }
+  } finally { st.site = prev.site; st.fee = prev.fee; }
+}

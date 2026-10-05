@@ -179,6 +179,15 @@ export function sendKaspa(...args) {
 // opts.beforeSubmit ((c) F2 两阶段, J2 2026-09-13): 所有交易签好但【一笔都没广播】时回调一次, 参数 [{ txid, txJson }](txJson = serializeToSafeJSON,
 //   txid = 确定性 id, 签名前后/序列化往返不变—serialize-roundtrip.test.mjs 实证)。回调 throw ⇒ 不广播任何一笔(fail-closed)。
 //   不传 = 原行为(逐笔 sign→submit)完全不变。
+export const SELF_ADDR_TRANSFER_FLOOR_SOMPI = 100_000n;   // 自转(手续费 UTXO/创世注资)下限: 实测节点要求 203,600(mass 2,036), 此值给 1.49× 余量
+export const REGULAR_TRANSFER_FLOOR_SOMPI = 3_000_000n;   // 其它普通转账(含 SS escrow→P2SH, mass~25K)下限, 不动
+/** 账本1861 A: 抽成纯函数以便单测。self-send(amount=0 且发给自己)原样用调用方 priorityFee(已折进 outputAmount)。 */
+export function transferPriorityFee({ amountSompi, to, senderAddress, priorityFee }) {
+  const own = to === senderAddress;
+  if (amountSompi === 0n && own) return priorityFee;
+  const floor = (amountSompi > 0n && own) ? SELF_ADDR_TRANSFER_FLOOR_SOMPI : REGULAR_TRANSFER_FLOOR_SOMPI;
+  return priorityFee > floor ? priorityFee : floor;
+}
 async function _sendKaspaInner(to, amountSompi, priorityFee = 0n, payload, _isRetry = false, walletOverride = null, opts = {}) {
   // KANet-UI 2026-06-23 (Path C, Bettor 拍): walletOverride = TG 托管钱包的 ad-hoc KaspaWallet
   //   (KaspaWallet.fromPrivateKey)。signs/广播/KIP-9/change/ledger 全 100% 复用此函数, 只换 key+from-addr。
@@ -251,9 +260,9 @@ async function _sendKaspaInner(to, amountSompi, priorityFee = 0n, payload, _isRe
     // mass ~22000 due to large output set + payload, requiring ~2,200,000 sompi at 100 sompi/mass.
     // Bump floor 500_000n → 3_000_000n (= 0.03 KAS) to cover SS escrow + room for future tx-type
     // growth without per-call override. Affects only the transfer-floor branch; self-send unchanged.
-    const effectivePriorityFee = (amountSompi === 0n && to === senderAddress)
-      ? priorityFee  // self-send (broadcast/comm) — already factored into outputAmount = best.amount - feeReserve
-      : (priorityFee > 3_000_000n ? priorityFee : 3_000_000n);  // regular transfer — floor 3M sompi (covers SS escrow mass ~25K)
+    // 账本1861 A: 【只】对"发给自己地址的普通转账"(console 的手续费 UTXO / 创世注资自转, P2PK→P2PK, compute mass≈2,036)把下限从 3M 降到 100k;
+    //   实测(simnet 官方 2.0.1)该类转账节点要求 203,600 sompi(mass 2,036 ×100), 全程以 priorityFee=0 即 203,600 被接受。发给别人地址的转账(含 SS escrow→P2SH, mass~25K)仍按 3M 下限, 不动。
+    const effectivePriorityFee = transferPriorityFee({ amountSompi, to, senderAddress, priorityFee });
     const generator = new Generator({
       entries: selectedEntries,
       outputs: [new PaymentOutput(new Address(to), outputAmount)],

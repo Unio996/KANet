@@ -1,0 +1,153 @@
+[FEEPROBE] site=unlockBshardGenesisMintPayout required=808300 computeMass=8083 (fee=1 rejected)
+[FEEPROBE] site=unlockBshardGenesisMintPayout ACCEPTED at exactly required=808300
+[FEEPROBE] site=unlockBshardGenesisMintShardLeaf required=808300 computeMass=8083 (fee=1 rejected)
+[FEEPROBE] site=unlockBshardGenesisMintShardLeaf ACCEPTED at exactly required=808300
+[FEEPROBE] site=unlockBshardGenesisMintStakeChip required=808300 computeMass=8083 (fee=1 rejected)
+[FEEPROBE] site=unlockBshardGenesisMintStakeChip ACCEPTED at exactly required=808300
+[FEEPROBE] site=unlockBshardRegister required=4375700 computeMass=43757 (fee=1 rejected)
+[FEEPROBE] site=unlockBshardRegister ACCEPTED at exactly required=4375700
+[FEEPROBE] site=unlockBshardGenesisMintStakeChip required=808300 computeMass=8083 (fee=1 rejected)
+[FEEPROBE] site=unlockBshardGenesisMintStakeChip ACCEPTED at exactly required=808300
+[FEEPROBE] site=unlockBshardRegister required=5402600 computeMass=54026 (fee=1 rejected)
+[FEEPROBE] site=unlockBshardRegister ACCEPTED at exactly required=5402600
+[FEEPROBE] site=unlockBshardGenesisMintPayout required=808300 computeMass=8083 (fee=1 rejected)
+[FEEPROBE] site=unlockBshardGenesisMintPayout ACCEPTED at exactly required=808300
+[FEEPROBE] site=unlockBshardGenesisMintShardLeaf required=808300 computeMass=8083 (fee=1 rejected)
+[FEEPROBE] site=unlockBshardGenesisMintShardLeaf ACCEPTED at exactly required=808300
+[FEEPROBE] site=unlockBshardGenesisMintStakeChip required=808300 computeMass=8083 (fee=1 rejected)
+[FEEPROBE] site=unlockBshardGenesisMintStakeChip ACCEPTED at exactly required=808300
+[FEEPROBE] site=unlockBshardRegister required=4375700 computeMass=43757 (fee=1 rejected)
+[FEEPROBE] site=unlockBshardRegister ACCEPTED at exactly required=4375700
+[FEEPROBE] site=unlockBshardGenesisMintStakeChip required=808300 computeMass=8083 (fee=1 rejected)
+[FEEPROBE] site=unlockBshardGenesisMintStakeChip ACCEPTED at exactly required=808300
+[FEEPROBE] site=unlockBshardRegister required=5402600 computeMass=54026 (fee=1 rejected)
+[FEEPROBE] site=unlockBshardRegister ACCEPTED at exactly required=5402600
+[FEEPROBE] site=unlockBshardConsolidateV2 required=10711600 mass=107116 (transient) (fee=1 rejected)
+[FEEPROBE] site=unlockBshardConsolidateV2 ACCEPTED at exactly required=10711600
+[FEEPROBE] site=unlockBshardConsolidateV2 required=10711600 mass=107116 (transient) (fee=1 rejected)
+[FEEPROBE] site=unlockBshardConsolidateV2 ACCEPTED at exactly required=10711600
+[FEEPROBE] site=unlockBshardCloseAttestV2 required=6954600 mass=69546 (transient) (fee=1 rejected)
+[FEEPROBE] site=unlockBshardCloseAttestV2 required=6954600 mass=69546 (transient) (fee=1 rejected)
+[FEEPROBE] site=unlockBshardCloseAttestV2 required=6954600 mass=69546 (transient) (fee=1 rejected)
+[FEEPROBE] site=unlockBshardCloseAttestV2 required=6954600 mass=69546 (transient) (fee=1 rejected)
+[FEEPROBE] site=unlockBshardCloseAttestV2 required=6954600 mass=69546 (transient) (fee=1 rejected)
+[FEEPROBE] site=unlockBshardCloseAttestV2 required=6954600 mass=69546 (transient) (fee=1 rejected)
+[FEEPROBE] site=unlockBshardCloseAttestV2 required=6954600 mass=69546 (transient) (fee=1 rejected)
+[FEEPROBE] site=unlockBshardGenesisMintPayout required=808300 mass=8083 (compute) (fee=1 rejected)
+[FEEPROBE] site=unlockBshardGenesisMintPayout ACCEPTED at exactly required=808300
+[FEEPROBE] site=unlockBshardGenesisMintShardLeaf required=808300 mass=8083 (compute) (fee=1 rejected)
+[FEEPROBE] site=unlockBshardGenesisMintShardLeaf ACCEPTED at exactly required=808300
+[FEEPROBE] site=unlockBshardGenesisMintStakeChip required=808300 mass=8083 (compute) (fee=1 rejected)
+[FEEPROBE] site=unlockBshardGenesisMintStakeChip ACCEPTED at exactly required=808300
+[FEEPROBE] site=unlockBshardRegister required=4375700 mass=43757 (compute) (fee=1 rejected)
+[FEEPROBE] site=unlockBshardRegister ACCEPTED at exactly required=4375700
+[FEEPROBE] site=unlockBshardGenesisMintStakeChip required=808300 mass=8083 (compute) (fee=1 rejected)
+[FEEPROBE] site=unlockBshardGenesisMintStakeChip ACCEPTED at exactly required=808300
+[FEEPROBE] site=unlockBshardRegister required=5402600 mass=54026 (compute) (fee=1 rejected)
+[FEEPROBE] site=unlockBshardRegister ACCEPTED at exactly required=5402600
+[FEEPROBE] site=unlockBshardGenesisMintPayout required=808300 mass=8083 (compute) (fee=1 rejected)
+[FEEPROBE] site=unlockBshardGenesisMintPayout ACCEPTED at exactly required=808300
+[FEEPROBE] site=unlockBshardGenesisMintShardLeaf required=808300 mass=8083 (compute) (fee=1 rejected)
+[FEEPROBE] site=unlockBshardGenesisMintShardLeaf ACCEPTED at exactly required=808300
+[FEEPROBE] site=unlockBshardGenesisMintStakeChip required=808300 mass=8083 (compute) (fee=1 rejected)
+[FEEPROBE] site=unlockBshardGenesisMintStakeChip ACCEPTED at exactly required=808300
+[FEEPROBE] site=unlockBshardRegister required=4375700 mass=43757 (compute) (fee=1 rejected)
+[FEEPROBE] site=unlockBshardRegister ACCEPTED at exactly required=4375700
+[FEEPROBE] site=unlockBshardGenesisMintStakeChip required=808300 mass=8083 (compute) (fee=1 rejected)
+[FEEPROBE] site=unlockBshardGenesisMintStakeChip ACCEPTED at exactly required=808300
+[FEEPROBE] site=unlockBshardRegister required=5402600 mass=54026 (compute) (fee=1 rejected)
+[FEEPROBE] site=unlockBshardRegister ACCEPTED at exactly required=5402600
+[FEEPROBE] site=unlockBshardGenesisMintPayout required=808300 mass=8083 (compute) (fee=1 rejected)
+[FEEPROBE] site=unlockBshardGenesisMintPayout ACCEPTED at exactly required=808300
+[FEEPROBE] site=unlockBshardGenesisMintShardLeaf required=808300 mass=8083 (compute) (fee=1 rejected)
+[FEEPROBE] site=unlockBshardGenesisMintShardLeaf ACCEPTED at exactly required=808300
+[FEEPROBE] site=unlockBshardGenesisMintStakeChip required=808300 mass=8083 (compute) (fee=1 rejected)
+[FEEPROBE] site=unlockBshardGenesisMintStakeChip ACCEPTED at exactly required=808300
+[FEEPROBE] site=unlockBshardRegister required=4375700 mass=43757 (compute) (fee=1 rejected)
+[FEEPROBE] site=unlockBshardRegister ACCEPTED at exactly required=4375700
+[FEEPROBE] site=unlockBshardGenesisMintStakeChip required=808300 mass=8083 (compute) (fee=1 rejected)
+[FEEPROBE] site=unlockBshardGenesisMintStakeChip ACCEPTED at exactly required=808300
+[FEEPROBE] site=unlockBshardRegister required=5402600 mass=54026 (compute) (fee=1 rejected)
+[FEEPROBE] site=unlockBshardRegister ACCEPTED at exactly required=5402600
+[FEEPROBE] site=unlockBshardConsolidateV2 required=10711600 mass=107116 (transient) (fee=1 rejected)
+[FEEPROBE] site=unlockBshardConsolidateV2 ACCEPTED at exactly required=10711600
+[FEEPROBE] site=unlockBshardConsolidateV2 required=10711600 mass=107116 (transient) (fee=1 rejected)
+[FEEPROBE] site=unlockBshardConsolidateV2 ACCEPTED at exactly required=10711600
+[FEEPROBE] site=unlockBshardConsolidateV2 required=10711600 mass=107116 (transient) (fee=1 rejected)
+[FEEPROBE] site=unlockBshardConsolidateV2 ACCEPTED at exactly required=10711600
+[FEEPROBE] site=unlockBshardZkHandoff required=9845200 mass=98452 (transient) (fee=1 rejected)
+[FEEPROBE] site=unlockBshardZkHandoff ACCEPTED at exactly required=9845200
+[FEEPROBE] site=unlockBshardZkHandoff required=9845200 mass=98452 (transient) (fee=1 rejected)
+[FEEPROBE] site=unlockBshardZkHandoff ACCEPTED at exactly required=9845200
+[FEEPROBE] site=unlockBshardZkHandoff required=9845200 mass=98452 (transient) (fee=1 rejected)
+[FEEPROBE] site=unlockBshardZkHandoff ACCEPTED at exactly required=9845200
+[FEEPROBE] site=unlockBshardZkClose required=19529300 mass=195293 (compute) (fee=1 rejected)
+[FEEPROBE] site=unlockBshardZkClose ACCEPTED at exactly required=19529300
+[FEEPROBE] site=unlockCloseZkV2Claim required=7342200 mass=73422 (compute) (fee=1 rejected)
+[FEEPROBE] site=unlockCloseZkV2Claim ACCEPTED at exactly required=7342200
+[FEEPROBE] site=unlockCloseZkV2Claim required=7250700 mass=72507 (compute) (fee=1 rejected)
+[FEEPROBE] site=unlockCloseZkV2Claim ACCEPTED at exactly required=7250700
+[FEEPROBE] site=unlockBshardZkClose required=19529300 mass=195293 (compute) (fee=1 rejected)
+[FEEPROBE] site=unlockBshardZkClose ACCEPTED at exactly required=19529300
+[FEEPROBE] site=unlockCloseZkV2Claim required=7342200 mass=73422 (compute) (fee=1 rejected)
+[FEEPROBE] site=unlockCloseZkV2Claim ACCEPTED at exactly required=7342200
+[FEEPROBE] site=unlockCloseZkV2Claim required=7250700 mass=72507 (compute) (fee=1 rejected)
+[FEEPROBE] site=unlockCloseZkV2Claim ACCEPTED at exactly required=7250700
+[FEEPROBE] site=unlockBshardZkClose required=19529300 mass=195293 (compute) (fee=1 rejected)
+[FEEPROBE] site=unlockBshardZkClose ACCEPTED at exactly required=19529300
+[FEEPROBE] site=unlockCloseZkV2Claim required=7342200 mass=73422 (compute) (fee=1 rejected)
+[FEEPROBE] site=unlockCloseZkV2Claim ACCEPTED at exactly required=7342200
+[FEEPROBE] site=unlockCloseZkV2Claim required=7250700 mass=72507 (compute) (fee=1 rejected)
+[FEEPROBE] site=unlockCloseZkV2Claim ACCEPTED at exactly required=7250700
+[FEEPROBE] site=unlockBshardGenesisMintPayout required=808300 mass=8083 (compute) (fee=1 rejected)
+[FEEPROBE] site=unlockBshardGenesisMintPayout ACCEPTED at exactly required=808300
+[FEEPROBE] site=unlockBshardGenesisMintShardLeaf required=808300 mass=8083 (compute) (fee=1 rejected)
+[FEEPROBE] site=unlockBshardGenesisMintShardLeaf ACCEPTED at exactly required=808300
+[FEEPROBE] site=unlockBshardGenesisMintStakeChip required=808300 mass=8083 (compute) (fee=1 rejected)
+[FEEPROBE] site=unlockBshardGenesisMintStakeChip ACCEPTED at exactly required=808300
+[FEEPROBE] site=unlockBshardRegister required=4375700 mass=43757 (compute) (fee=1 rejected)
+[FEEPROBE] site=unlockBshardRegister ACCEPTED at exactly required=4375700
+[FEEPROBE] site=unlockBshardGenesisMintStakeChip required=808300 mass=8083 (compute) (fee=1 rejected)
+[FEEPROBE] site=unlockBshardGenesisMintStakeChip ACCEPTED at exactly required=808300
+[FEEPROBE] site=unlockBshardRegister required=5402600 mass=54026 (compute) (fee=1 rejected)
+[FEEPROBE] site=unlockBshardRegister ACCEPTED at exactly required=5402600
+[FEEPROBE] site=unlockBshardGenesisMintStakeChip required=808300 mass=8083 (compute) (fee=1 rejected)
+[FEEPROBE] site=unlockBshardGenesisMintStakeChip ACCEPTED at exactly required=808300
+[FEEPROBE] site=unlockBshardRegister required=5402600 mass=54026 (compute) (fee=1 rejected)
+[FEEPROBE] site=unlockBshardRegister ACCEPTED at exactly required=5402600
+[FEEPROBE] site=unlockBshardGenesisMintStakeChip required=808300 mass=8083 (compute) (fee=1 rejected)
+[FEEPROBE] site=unlockBshardGenesisMintStakeChip ACCEPTED at exactly required=808300
+[FEEPROBE] site=unlockBshardRegister required=5402600 mass=54026 (compute) (fee=1 rejected)
+[FEEPROBE] site=unlockBshardRegister ACCEPTED at exactly required=5402600
+[FEEPROBE] site=unlockBshardGenesisMintStakeChip required=808300 mass=8083 (compute) (fee=1 rejected)
+[FEEPROBE] site=unlockBshardGenesisMintStakeChip ACCEPTED at exactly required=808300
+[FEEPROBE] site=unlockBshardRegister required=5402600 mass=54026 (compute) (fee=1 rejected)
+[FEEPROBE] site=unlockBshardRegister ACCEPTED at exactly required=5402600
+[FEEPROBE] site=unlockBshardGenesisMintStakeChip required=808300 mass=8083 (compute) (fee=1 rejected)
+[FEEPROBE] site=unlockBshardGenesisMintStakeChip ACCEPTED at exactly required=808300
+[FEEPROBE] site=unlockBshardRegister required=5402600 mass=54026 (compute) (fee=1 rejected)
+[FEEPROBE] site=unlockBshardRegister ACCEPTED at exactly required=5402600
+[FEEPROBE] site=unlockBshardGenesisMintStakeChip required=808300 mass=8083 (compute) (fee=1 rejected)
+[FEEPROBE] site=unlockBshardGenesisMintStakeChip ACCEPTED at exactly required=808300
+[FEEPROBE] site=unlockBshardRegister required=5402600 mass=54026 (compute) (fee=1 rejected)
+[FEEPROBE] site=unlockBshardRegister ACCEPTED at exactly required=5402600
+[FEEPROBE] site=unlockBshardGenesisMintStakeChip required=808300 mass=8083 (compute) (fee=1 rejected)
+[FEEPROBE] site=unlockBshardGenesisMintStakeChip ACCEPTED at exactly required=808300
+[FEEPROBE] site=unlockBshardRegister required=5402600 mass=54026 (compute) (fee=1 rejected)
+[FEEPROBE] site=unlockBshardRegister ACCEPTED at exactly required=5402600
+[FEEPROBE] site=unlockBshardGenesisMintStakeChip required=808300 mass=8083 (compute) (fee=1 rejected)
+[FEEPROBE] site=unlockBshardGenesisMintStakeChip ACCEPTED at exactly required=808300
+[FEEPROBE] site=unlockBshardRegister required=5402600 mass=54026 (compute) (fee=1 rejected)
+[FEEPROBE] site=unlockBshardRegister ACCEPTED at exactly required=5402600
+[FEEPROBE] site=unlockBshardGenesisMintStakeChip required=808300 mass=8083 (compute) (fee=1 rejected)
+[FEEPROBE] site=unlockBshardGenesisMintStakeChip ACCEPTED at exactly required=808300
+[FEEPROBE] site=unlockBshardRegister required=5402600 mass=54026 (compute) (fee=1 rejected)
+[FEEPROBE] site=unlockBshardRegister ACCEPTED at exactly required=5402600
+[FEEPROBE] site=unlockBshardGenesisMintStakeChip required=808300 mass=8083 (compute) (fee=1 rejected)
+[FEEPROBE] site=unlockBshardGenesisMintStakeChip ACCEPTED at exactly required=808300
+[FEEPROBE] site=unlockBshardRegister required=5402600 mass=54026 (compute) (fee=1 rejected)
+[FEEPROBE] site=unlockBshardRegister ACCEPTED at exactly required=5402600
+[FEEPROBE] site=unlockBshardGenesisMintStakeChip required=808300 mass=8083 (compute) (fee=1 rejected)
+[FEEPROBE] site=unlockBshardGenesisMintStakeChip ACCEPTED at exactly required=808300
+[FEEPROBE] site=unlockBshardRegister required=5402600 mass=54026 (compute) (fee=1 rejected)
+[FEEPROBE] site=unlockBshardRegister ACCEPTED at exactly required=5402600

@@ -1,0 +1,264 @@
+diff --git a/kasia-relay/src/lib/api.mjs b/kasia-relay/src/lib/api.mjs
+index 6c97594f..7810a185 100644
+--- a/kasia-relay/src/lib/api.mjs
++++ b/kasia-relay/src/lib/api.mjs
+@@ -1,5 +1,6 @@
+ // REST API client for Kaspa (https://api.kaspa.org)
+ const API_ENDPOINTS = {
++  simnet: 'http://127.0.0.1:1',
+   mainnet: 'https://api.kaspa.org',
+   'testnet-10': 'https://api-tn10.kaspa.org',
+   'testnet-11': 'https://api-tn11.kaspa.org',
+diff --git a/kasia-relay/src/lib/p2sh.mjs b/kasia-relay/src/lib/p2sh.mjs
+index de43ae88..29e2e932 100644
+--- a/kasia-relay/src/lib/p2sh.mjs
++++ b/kasia-relay/src/lib/p2sh.mjs
+@@ -1834,7 +1834,8 @@ const _BSHARD_COMPUTE_BUDGET = 70;    // flat (Bettor 批: 简单+headroom). 70=
+ // budget-aware fee: aa4d1c10 实测 budget=60/1-input/fee 0.01KAS LAND → ~0.01KAS(1e6 sompi)/input headroom.
+ // _assertTxInvariants mass-aware floor 兜底(fee 不足 pre-submit 拒, 非链上失败).
+ const _BSHARD_FEE_PER_INPUT = 1_000_000n;   // 0.01 KAS/input, 覆盖 budget=50 的 compute mass floor
+-export function _bshardFeeV1(numInputs) { const f = BigInt(numInputs) * _BSHARD_FEE_PER_INPUT; return f > _BSHARD_MINER_FEE ? f : _BSHARD_MINER_FEE; }
++import { currentProbeFee as __pf } from './fee-probe.mjs';
++export function _bshardFeeV1(numInputs) { if (__pf(null) != null) return __pf(null); const f = BigInt(numInputs) * _BSHARD_FEE_PER_INPUT; return f > _BSHARD_MINER_FEE ? f : _BSHARD_MINER_FEE; }
+ // v1 bshard tx: version=1, 所有 input sigOpCount=0(ComputeCommit 用 compute_budget 非 SigopCount), 每 input computeBudget=_BSHARD_COMPUTE_BUDGET.
+ function _utxoValue(u) { return BigInt(u.amount ?? u.utxoEntry?.amount ?? u.entry?.amount ?? 0); }
+ // relay 算 change(Bettor 裁: relay fetch UTXO 后才知真 Σinput+fee): change = Σin − Σ业务out − minerFee.
+@@ -3411,7 +3412,7 @@ export async function unlockBshardRegister(args) {
+     // "fees which is under the required amount"(bet1 实测需要 ≥3,575,800 sompi，_bshardFeeV1(2)=2,000,000
+     // 不够)。改用固定较大值(留够第二笔更大交易的余量)，不是精算，是留够 headroom；真正的精算(按 mass
+     // 现算 fee)留给后续正式接入生产前再做。
+-    const registerAppendFee = 15_000_000n;
++    const registerAppendFee = __pf(15_000_000n);
+     _appendChange(orderedOut, matched, cmd.outputs.change_address, registerAppendFee);
+     const covenantSigCount = 1 + (tokenUtxo ? 1 : 0) + (chipUtxo ? 1 : 0);   // [0]leaf [1]token? [2]chip?(均 no-sig covenant reveal) [其余]funding(wallet签)
+     // 🔴 2026-09-26 real-simnet 排障发现(同 unlockBshardGenesisMintStakeChip 头注, 独立于方向甲本身): tok_out
+diff --git a/kasia-relay/src/lib/transaction.mjs b/kasia-relay/src/lib/transaction.mjs
+index 970c163a..e3fdf9cf 100644
+--- a/kasia-relay/src/lib/transaction.mjs
++++ b/kasia-relay/src/lib/transaction.mjs
+@@ -253,7 +253,7 @@ async function _sendKaspaInner(to, amountSompi, priorityFee = 0n, payload, _isRe
+     // growth without per-call override. Affects only the transfer-floor branch; self-send unchanged.
+     const effectivePriorityFee = (amountSompi === 0n && to === senderAddress)
+       ? priorityFee  // self-send (broadcast/comm) — already factored into outputAmount = best.amount - feeReserve
+-      : (priorityFee > 3_000_000n ? priorityFee : 3_000_000n);  // regular transfer — floor 3M sompi (covers SS escrow mass ~25K)
++      : (process.env.FEE_PROBE_TRANSFER === '1' && to === senderAddress ? priorityFee : (priorityFee > 3_000_000n ? priorityFee : 3_000_000n));  // regular transfer — floor 3M sompi (covers SS escrow mass ~25K)
+     const generator = new Generator({
+       entries: selectedEntries,
+       outputs: [new PaymentOutput(new Address(to), outputAmount)],
+diff --git a/kasia-relay/src/relay.mjs b/kasia-relay/src/relay.mjs
+index 7b563a2b..b0c84b6b 100644
+--- a/kasia-relay/src/relay.mjs
++++ b/kasia-relay/src/relay.mjs
+@@ -1,4 +1,5 @@
+ import { loadSeen, saveSeen } from "./state.mjs";
++import { probeRetry as __probeRetry } from './lib/fee-probe.mjs';
+ import { routeMessage } from "./router.mjs";
+ import { getAIReply } from "./ai.mjs";
+ import { getConversations, getMessages, sendMessage, acceptHandshake, sendKaspa, custodialSendKaspa } from "./chain.mjs";
+@@ -955,7 +956,7 @@ if (process.send) {
+           // bshard M3 (J1 2026-06-15): register_append OP_0. leaf P2SH(no sig)+funding P2PK. relay 自算 per-state 续约地址.
+           const { unlockBshardRegister } = await import('./lib/p2sh.mjs');
+           const wallet = getWallet();
+-          const r = await unlockBshardRegister({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
++          const r = await __probeRetry('unlockBshardRegister', { wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) }, unlockBshardRegister);
+           if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, txId: r.txId } });
+           return;
+         }
+@@ -964,7 +965,7 @@ if (process.send) {
+           // bshard M3 route-split: PoolRoot claim_draw OP_1. root P2SH(no sig)+ticket(bettorSig)+fee. winner draw-down from root.
+           const { unlockBshardClaim } = await import('./lib/p2sh.mjs');
+           const wallet = getWallet();
+-          const r = await unlockBshardClaim({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
++          const r = await __probeRetry('unlockBshardClaim', { wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) }, unlockBshardClaim);
+           if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, txId: r.txId } });
+           return;
+         }
+@@ -973,7 +974,7 @@ if (process.send) {
+           // bshard M3 route-split: PoolRoot refund_draw OP_2. pool P2SH(no sig)+ticket(bettorSig). 退本金 + closed flip 0→2.
+           const { unlockBshardRefund } = await import('./lib/p2sh.mjs');
+           const wallet = getWallet();
+-          const r = await unlockBshardRefund({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
++          const r = await __probeRetry('unlockBshardRefund', { wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) }, unlockBshardRefund);
+           if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, txId: r.txId } });
+           return;
+         }
+@@ -982,7 +983,7 @@ if (process.send) {
+           // bshard M3: fold covenant __leader_fold OP_1 / __delegate_fold OP_2, k children → 1 parent.
+           const { unlockBshardFold } = await import('./lib/p2sh.mjs');
+           const wallet = getWallet();
+-          const r = await unlockBshardFold({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
++          const r = await __probeRetry('unlockBshardFold', { wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) }, unlockBshardFold);
+           if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, txId: r.txId } });
+           return;
+         }
+@@ -991,7 +992,7 @@ if (process.send) {
+           // bshard M3 route-split: PoolRoot close_commit OP_0, committee 4-of-5. root P2SH + fee. closed 0→1 + outcome 写入.
+           const { unlockBshardClose } = await import('./lib/p2sh.mjs');
+           const wallet = getWallet();
+-          const r = await unlockBshardClose({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
++          const r = await __probeRetry('unlockBshardClose', { wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) }, unlockBshardClose);
+           if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, txId: r.txId } });
+           return;
+         }
+@@ -1001,7 +1002,7 @@ if (process.send) {
+           // leaf→FoldNode foreign-template 桥 (4-field carry, no outcome). relay 自算 FoldNode 续约地址.
+           const { unlockBshardConvert } = await import('./lib/p2sh.mjs');
+           const wallet = getWallet();
+-          const r = await unlockBshardConvert({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
++          const r = await __probeRetry('unlockBshardConvert', { wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) }, unlockBshardConvert);
+           if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, txId: r.txId } });
+           return;
+         }
+@@ -1010,7 +1011,7 @@ if (process.send) {
+           // bshard M3 route-split: PoolLeaf seal_to_root OP_3, leaf→root foreign-template 桥. leaf P2SH(no sig)+funding. 全池 KAS → PoolRoot.
+           const { unlockBshardSeal } = await import('./lib/p2sh.mjs');
+           const wallet = getWallet();
+-          const r = await unlockBshardSeal({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
++          const r = await __probeRetry('unlockBshardSeal', { wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) }, unlockBshardSeal);
+           if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, txId: r.txId } });
+           return;
+         }
+@@ -1020,7 +1021,7 @@ if (process.send) {
+           // market 创建铸空 PayoutShard covenant (populateGenesisCovenants → cov_id). 返回 payoutCovId 供 ShardLeaf ctor bake.
+           const { unlockBshardGenesisMintPayout } = await import('./lib/p2sh.mjs');
+           const wallet = getWallet();
+-          const r = await unlockBshardGenesisMintPayout({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
++          const r = await __probeRetry('unlockBshardGenesisMintPayout', { wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) }, unlockBshardGenesisMintPayout);
+           if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
+           return;
+         }
+@@ -1029,7 +1030,7 @@ if (process.send) {
+           // 落库(D-020 移植配套, 2026-09-23·Owner批·NWT审)——register_append 铸/续续约代币(owner=leaf 自身 covenant id)需要。
+           const { unlockBshardGenesisMintShardLeaf } = await import('./lib/p2sh.mjs');
+           const wallet = getWallet();
+-          const r = await unlockBshardGenesisMintShardLeaf({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
++          const r = await __probeRetry('unlockBshardGenesisMintShardLeaf', { wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) }, unlockBshardGenesisMintShardLeaf);
+           if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
+           return;
+         }
+@@ -1039,7 +1040,7 @@ if (process.send) {
+           // merged 续约输出, sum_in==sum_out 天然守恒(见 p2sh.mjs 里 unlockBshardGenesisMintStakeChip 头注)。
+           const { unlockBshardGenesisMintStakeChip } = await import('./lib/p2sh.mjs');
+           const wallet = getWallet();
+-          const r = await unlockBshardGenesisMintStakeChip({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
++          const r = await __probeRetry('unlockBshardGenesisMintStakeChip', { wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) }, unlockBshardGenesisMintStakeChip);
+           if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
+           return;
+         }
+@@ -1085,7 +1086,7 @@ if (process.send) {
+           // 单片全额归集进真 PayoutShard (PS absorb OP_0 + SL consolidate_to_payout OP_1, cov_id-bind destination + CovenantBinding 续).
+           const { unlockBshardConsolidate } = await import('./lib/p2sh.mjs');
+           const wallet = getWallet();
+-          const r = await unlockBshardConsolidate({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
++          const r = await __probeRetry('unlockBshardConsolidate', { wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) }, unlockBshardConsolidate);
+           if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
+           return;
+         }
+@@ -1094,7 +1095,7 @@ if (process.send) {
+           // ShardLeaf.sil 侧零改动, 只有 PS 侧 state 序列化换成 V2(288B, 多 4 字段透传)。
+           const { unlockBshardConsolidateV2 } = await import('./lib/p2sh.mjs');
+           const wallet = getWallet();
+-          const r = await unlockBshardConsolidateV2({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
++          const r = await __probeRetry('unlockBshardConsolidateV2', { wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) }, unlockBshardConsolidateV2);
+           if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
+           return;
+         }
+@@ -1102,7 +1103,7 @@ if (process.send) {
+           // 委员 4-of-5 (pubkey-distinct, b0e35141) 背书 payoutRoot, closed 0→1 write-once + cov_id 续.
+           const { unlockBshardCloseAttest } = await import('./lib/p2sh.mjs');
+           const wallet = getWallet();
+-          const r = await unlockBshardCloseAttest({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
++          const r = await __probeRetry('unlockBshardCloseAttest', { wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) }, unlockBshardCloseAttest);
+           if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
+           return;
+         }
+@@ -1111,7 +1112,7 @@ if (process.send) {
+           // betsRoot/refundRoot/attestedAtMs, closed 0→1 write-once + cov_id 续. 镜像 bshard_close_attest 一字不动的调用形状。
+           const { unlockBshardCloseAttestV2 } = await import('./lib/p2sh.mjs');
+           const wallet = getWallet();
+-          const r = await unlockBshardCloseAttestV2({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
++          const r = await __probeRetry('unlockBshardCloseAttestV2', { wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) }, unlockBshardCloseAttestV2);
+           if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
+           return;
+         }
+@@ -1122,7 +1123,7 @@ if (process.send) {
+           // 缺省/falsy 走原 live 广播路径分毫不变(cmd.dryRun 是 console 侧新加的可选字段, 老 caller 不传=无感知)。
+           const { unlockBshardZkHandoff } = await import('./lib/p2sh.mjs');
+           const wallet = getWallet();
+-          const r = await unlockBshardZkHandoff({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0), dryRun: cmd.dryRun === true });
++          const r = await __probeRetry('unlockBshardZkHandoff', { wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0), dryRun: cmd.dryRun === true }, unlockBshardZkHandoff);
+           if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
+           return;
+         }
+@@ -1131,7 +1132,7 @@ if (process.send) {
+           // 写入 continuation state, 2-input(CloseZkRepro4 + 真实 groth16 proof gate)。
+           const { unlockBshardZkClose } = await import('./lib/p2sh.mjs');
+           const wallet = getWallet();
+-          const r = await unlockBshardZkClose({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
++          const r = await __probeRetry('unlockBshardZkClose', { wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) }, unlockBshardZkClose);
+           if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
+           return;
+         }
+@@ -1139,7 +1140,7 @@ if (process.send) {
+           // winner store-payout 派彩 (merkle climb + multi-word nullifier + recipient P2PK + cov_id 续, OP_2).
+           const { unlockBshardPayoutClaim } = await import('./lib/p2sh.mjs');
+           const wallet = getWallet();
+-          const r = await unlockBshardPayoutClaim({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
++          const r = await __probeRetry('unlockBshardPayoutClaim', { wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) }, unlockBshardPayoutClaim);
+           if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
+           return;
+         }
+@@ -1147,7 +1148,7 @@ if (process.send) {
+           // 委员 4-of-5 (pubkey-distinct) 背书 refundRoot, closed 0→2 write-once + cov_id 续 (cancel_attest OP_3, 镜像 close_attest).
+           const { unlockBshardCancelAttest } = await import('./lib/p2sh.mjs');
+           const wallet = getWallet();
+-          const r = await unlockBshardCancelAttest({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
++          const r = await __probeRetry('unlockBshardCancelAttest', { wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) }, unlockBshardCancelAttest);
+           if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
+           return;
+         }
+@@ -1155,7 +1156,7 @@ if (process.send) {
+           // bettor store-refund 退款 (merkle climb + multi-word nullifier + recipient P2PK + cov_id 续, closed==2, refund_claim OP_4, 镜像 claim).
+           const { unlockBshardRefundClaim } = await import('./lib/p2sh.mjs');
+           const wallet = getWallet();
+-          const r = await unlockBshardRefundClaim({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
++          const r = await __probeRetry('unlockBshardRefundClaim', { wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) }, unlockBshardRefundClaim);
+           if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
+           return;
+         }
+@@ -1163,7 +1164,7 @@ if (process.send) {
+           // 账本1832 段4: PayoutShardV2 refund_claim(closed==2) 代币化——claim 家族共用构造器(KanetTokenClaim 目的地 + KTT 转移 + AB11 自续约)。
+           const { unlockBshardRefundClaimV2 } = await import('./lib/p2sh.mjs');
+           const wallet = getWallet();
+-          const r = await unlockBshardRefundClaimV2({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
++          const r = await __probeRetry('unlockBshardRefundClaimV2', { wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) }, unlockBshardRefundClaimV2);
+           if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
+           return;
+         }
+@@ -1172,7 +1173,7 @@ if (process.send) {
+           // merkle climb + 17-word nullifier + P2PK payout + splice 续约(state-in-address, 213B 状态区), closed==2 前置.
+           const { unlockCloseZkV2Claim } = await import('./lib/p2sh.mjs');
+           const wallet = getWallet();
+-          const r = await unlockCloseZkV2Claim({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
++          const r = await __probeRetry('unlockCloseZkV2Claim', { wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) }, unlockCloseZkV2Claim);
+           if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
+           return;
+         }
+@@ -1181,7 +1182,7 @@ if (process.send) {
+           // escape_trigger OP_1 — closed 1→3 write-once flag-flip, 守恒不动钱, tx.time 阈值链上机械裁决.
+           const { unlockCloseZkV2EscapeTrigger } = await import('./lib/p2sh.mjs');
+           const wallet = getWallet();
+-          const r = await unlockCloseZkV2EscapeTrigger({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
++          const r = await __probeRetry('unlockCloseZkV2EscapeTrigger', { wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) }, unlockCloseZkV2EscapeTrigger);
+           if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
+           return;
+         }
+@@ -1190,7 +1191,7 @@ if (process.send) {
+           // + P2PK(bettorPk) 原额退款(地址 handler 自推, 不信 caller 标量) + splice 续约, closed==3 前置.
+           const { unlockCloseZkV2EscapeClaim } = await import('./lib/p2sh.mjs');
+           const wallet = getWallet();
+-          const r = await unlockCloseZkV2EscapeClaim({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
++          const r = await __probeRetry('unlockCloseZkV2EscapeClaim', { wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) }, unlockCloseZkV2EscapeClaim);
+           if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
+           return;
+         }

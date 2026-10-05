@@ -1,0 +1,88 @@
+14:06:53 balances before (KAS): {
+  maker: 208.432141,
+  settler: 310.63027,
+  fee: 300,
+  bettorA: 263.903892,
+  bettorB: 233.903892
+}
+14:06:53   ✅ 前置: 库里没有未完结的 zk_native 盘(live=0)
+14:06:53 gamma stub armed; waiting for seeder to create 3 markets (cap ZK_MAX_LIVE_MARKETS=3)…
+14:09:09   ✅ 种子器建出 3 个盘(3, 用时 135s)
+14:09:09   ✅ 同时在跑(未完结)的 ZK 原生盘峰值 = 3(≥3)
+14:09:09   ✅ 盘 62-gawtx: zk_native=true, 无 spine, polymarket 镜像(cond 0x70707070…), broker 塌到 maker(未配 GATEWAY_RELAY_ID)
+14:09:09   ✅ 盘 64-nkp73: zk_native=true, 无 spine, polymarket 镜像(cond 0x71717171…), broker 塌到 maker(未配 GATEWAY_RELAY_ID)
+14:09:09   ✅ 盘 71-7sm8f: zk_native=true, 无 spine, polymarket 镜像(cond 0x72727272…), broker 塌到 maker(未配 GATEWAY_RELAY_ID)
+14:09:09   ✅ 建 3 个盘后: maker/下注人钱包余额逐 sompi 不变(建盘不转账)
+14:09:09   ✅ 3/3 在跑时再 create-v07 ⇒ 409 live_market_cap_reached(live=3, cap=3)
+14:09:30 62-gawtx bettorA dir=0 stake_ktt=1000000000 (21199ms) => {"status":200,"ok":true,"logical_market_id":"ext-pool-v07-1791209228362-gawtx","bettor_pk":"060b0264800672da79c533ae1534310f7925beeac945363bd2cd0d2b7402dc79","no_kas_stake":true,"stake_ktt":1000000000,"action":"use","sha
+14:09:30   ✅ 62-gawtx bettorA register-v07 stake_ktt=1000000000 ⇒ 200 no_kas_stake
+14:09:30   ✅ 62-gawtx bettorA 钱包余额逐 sompi 不变
+14:09:40 62-gawtx bettorB dir=1 stake_ktt=2000000000 (10166ms) => {"status":200,"ok":true,"logical_market_id":"ext-pool-v07-1791209228362-gawtx","bettor_pk":"b8fd583b660dea6c94bc0962a2f4921e763578bdeb375575fdd7feddf48dfd27","no_kas_stake":true,"stake_ktt":2000000000,"action":"use","sha
+14:09:40   ✅ 62-gawtx bettorB register-v07 stake_ktt=2000000000 ⇒ 200 no_kas_stake
+14:09:40   ✅ 62-gawtx bettorB 钱包余额逐 sompi 不变
+14:10:01 64-nkp73 bettorA dir=0 stake_ktt=1000000000 (21068ms) => {"status":200,"ok":true,"logical_market_id":"ext-pool-v07-1791209288364-nkp73","bettor_pk":"060b0264800672da79c533ae1534310f7925beeac945363bd2cd0d2b7402dc79","no_kas_stake":true,"stake_ktt":1000000000,"action":"use","sha
+14:10:01   ✅ 64-nkp73 bettorA register-v07 stake_ktt=1000000000 ⇒ 200 no_kas_stake
+14:10:01   ✅ 64-nkp73 bettorA 钱包余额逐 sompi 不变
+14:10:11 64-nkp73 bettorB dir=1 stake_ktt=2000000000 (10186ms) => {"status":200,"ok":true,"logical_market_id":"ext-pool-v07-1791209288364-nkp73","bettor_pk":"b8fd583b660dea6c94bc0962a2f4921e763578bdeb375575fdd7feddf48dfd27","no_kas_stake":true,"stake_ktt":2000000000,"action":"use","sha
+14:10:11   ✅ 64-nkp73 bettorB register-v07 stake_ktt=2000000000 ⇒ 200 no_kas_stake
+14:10:11   ✅ 64-nkp73 bettorB 钱包余额逐 sompi 不变
+14:10:38 71-7sm8f bettorA dir=0 stake_ktt=1000000000 (27046ms) => {"status":200,"ok":true,"logical_market_id":"ext-pool-v07-1791209348371-7sm8f","bettor_pk":"060b0264800672da79c533ae1534310f7925beeac945363bd2cd0d2b7402dc79","no_kas_stake":true,"stake_ktt":1000000000,"action":"use","sha
+14:10:38   ✅ 71-7sm8f bettorA register-v07 stake_ktt=1000000000 ⇒ 200 no_kas_stake
+14:10:38   ✅ 71-7sm8f bettorA 钱包余额逐 sompi 不变
+14:10:53 71-7sm8f bettorB dir=1 stake_ktt=2000000000 (14196ms) => {"status":200,"ok":true,"logical_market_id":"ext-pool-v07-1791209348371-7sm8f","bettor_pk":"b8fd583b660dea6c94bc0962a2f4921e763578bdeb375575fdd7feddf48dfd27","no_kas_stake":true,"stake_ktt":2000000000,"action":"use","sha
+14:10:53   ✅ 71-7sm8f bettorB register-v07 stake_ktt=2000000000 ⇒ 200 no_kas_stake
+14:10:53   ✅ 71-7sm8f bettorB 钱包余额逐 sompi 不变
+14:10:53 waiting… 0s daa=840135 claims/market=0/0/0 exhausted=0 status=pending_bettors,pending_bettors,pending_bettors
+14:12:53 waiting… 120s daa=841294 claims/market=0/0/0 exhausted=0 status=pending_bettors,pending_bettors,pending_bettors
+14:14:53 waiting… 241s daa=842640 claims/market=0/0/0 exhausted=0 status=pending_bettors,pending_bettors,pending_bettors
+14:16:53 waiting… 361s daa=844080 claims/market=0/0/0 exhausted=0 status=pending_bettors,pending_bettors,pending_bettors
+14:18:54 waiting… 481s daa=845481 claims/market=0/0/0 exhausted=0 status=pending_bettors,pending_bettors,pending_bettors
+14:20:54 waiting… 601s daa=846852 claims/market=0/0/0 exhausted=0 status=pending_bettors,pending_bettors,pending_bettors
+14:22:54 waiting… 721s daa=848552 claims/market=0/0/0 exhausted=0 status=pending_bettors,pending_bettors,pending_bettors
+14:24:54 waiting… 842s daa=850573 claims/market=0/0/0 exhausted=0 status=pending_bettors,pending_bettors,pending_bettors
+14:26:47 CHAOS transfer injected while 62-gawtx collecting_sigs => {"status":200,"ok":true,"txId":"8df41378b6ee087f605561d9eed5ba7e627d04d2f8ffb855b1260aa5e6309edc","fee":"0.002036","phase":"execution"} fee outpoints [{"market":"62-gawtx","txid":"4da3eeeefc2efaeec47b41e39afea4bdc149beb90099f6f48510b328737f4b67","index":0}]
+14:26:55 waiting… 962s daa=852596 claims/market=0/0/0 exhausted=0 status=collecting_sigs,collecting_sigs,verifying
+14:28:55 waiting… 1082s daa=854803 claims/market=0/0/0 exhausted=0 status=attested_v2,attested_v2,attested_v2
+14:30:55 waiting… 1203s daa=855665 claims/market=1/0/0 exhausted=0 status=attested_v2,attested_v2,attested_v2
+14:32:55 waiting… 1323s daa=856137 claims/market=2/2/0 exhausted=2 status=attested_v2,attested_v2,attested_v2
+14:34:24   ✅ 干扰转账已上链提交(txid 8df41378b6ee087f605561d9eed5ba7e627d04d2f8ffb855b1260aa5e6309edc)
+14:34:24   ✅ 3 个盘全部走到最后一个 claim(exhausted)(1411s)
+14:34:24   ✅ pin 证据: relay 日志 PIN_UTXO 18 行 / UNPIN_UTXO 9 行(≥3 / ≥3: 每盘 close 费钉住 + 落链后解钉)
+14:34:39   ✅ A. bettorA 余额逐 sompi 相同(26390389200 → 26390389200)
+14:34:39   ✅ A. bettorB 余额逐 sompi 相同(23390389200 → 23390389200)
+14:34:41 scanned accepted txs in window: 18828 of accepted ids 18828
+14:34:41   ✅ B. 窗口内所有被接受交易的输入面值都能溯源(未知输入 0)
+14:34:41   ✅ A. 窗口内没有任何被接受的交易触碰下注人钱包(0)
+14:34:41   ✅ B. maker: 逐笔重算 Δ(-324699300) == 余额差(-324699300) sompi
+14:34:41   ✅ B. maker: Δ == −(手续费 42699300 + 净锁进 covenant 282000000) 逐 sompi 成立
+14:34:41   ✅ B. maker: 落到第三方 P2PK 地址的输出 = 0(须为 0)
+14:34:41   ✅ B. settler: 逐笔重算 Δ(-566908700) == 余额差(-566908700) sompi
+14:34:41   ✅ B. settler: Δ == −(手续费 206908700 + 净锁进 covenant 360000000) 逐 sompi 成立
+14:34:41   ✅ B. settler: 落到第三方 P2PK 地址的输出 = 0(须为 0)
+14:34:41   ✅ B. fee: 逐笔重算 Δ(0) == 余额差(0) sompi
+14:34:41   ✅ B. fee: Δ == −(手续费 0 + 净锁进 covenant 0) 逐 sompi 成立
+14:34:41   ✅ B. fee: 落到第三方 P2PK 地址的输出 = 0(须为 0)
+14:34:41   ✅ B. 系统钱包合计 Δ(-891608000) == −(手续费 249608000 + 净锁 covenant 642000000)
+14:34:41 per-market cost (fees + locked): fees 0.831348 KAS + locked 2.14 KAS =  2.971348 KAS (干扰转账费 0.002036 KAS 已剔除)
+14:34:41   ✅ C. 62-gawtx claim idx=0 → bettorA: claim_out/tok_out 地址 == 重算的 KanetTokenClaim/KTT 地址, 仍是链上未花 UTXO, 无输出落到赢家/下注人钱包
+14:34:41   ✅ C. 62-gawtx claim idx=1 → maker: claim_out/tok_out 地址 == 重算的 KanetTokenClaim/KTT 地址, 仍是链上未花 UTXO, 无输出落到赢家/下注人钱包
+14:34:41   ✅ C. 62-gawtx: 全部 claim 的 KTT 总量 == 池总额 3000000000(实 3000000000)
+14:34:41   ✅ C. 62-gawtx: UMA 桩判 YES ⇒ 赢家 bettorA 收到 KTT claim(受益人 bettorA,maker)
+14:34:41   ✅ C. 64-nkp73 claim idx=0 → bettorB: claim_out/tok_out 地址 == 重算的 KanetTokenClaim/KTT 地址, 仍是链上未花 UTXO, 无输出落到赢家/下注人钱包
+14:34:41   ✅ C. 64-nkp73 claim idx=1 → maker: claim_out/tok_out 地址 == 重算的 KanetTokenClaim/KTT 地址, 仍是链上未花 UTXO, 无输出落到赢家/下注人钱包
+14:34:41   ✅ C. 64-nkp73: 全部 claim 的 KTT 总量 == 池总额 3000000000(实 3000000000)
+14:34:41   ✅ C. 64-nkp73: UMA 桩判 NO ⇒ 赢家 bettorB 收到 KTT claim(受益人 bettorB,maker)
+14:34:41   ✅ C. 71-7sm8f claim idx=0 → bettorA: claim_out/tok_out 地址 == 重算的 KanetTokenClaim/KTT 地址, 仍是链上未花 UTXO, 无输出落到赢家/下注人钱包
+14:34:41   ✅ C. 71-7sm8f claim idx=1 → maker: claim_out/tok_out 地址 == 重算的 KanetTokenClaim/KTT 地址, 仍是链上未花 UTXO, 无输出落到赢家/下注人钱包
+14:34:41   ✅ C. 71-7sm8f: 全部 claim 的 KTT 总量 == 池总额 3000000000(实 3000000000)
+14:34:41   ✅ C. 71-7sm8f: UMA 桩判 YES ⇒ 赢家 bettorA 收到 KTT claim(受益人 bettorA,maker)
+14:34:41   ✅ my-positions(bettorA) 200
+14:34:41   ✅ my-positions bettorA @62-gawtx: 赢 2943000000 筹码(== 链上 claim 合计 2943000000), chain_verified
+14:34:41   ✅ my-positions bettorA @64-nkp73: 输(did_win=false)
+14:34:41   ✅ my-positions bettorA @71-7sm8f: 赢 2943000000 筹码(== 链上 claim 合计 2943000000), chain_verified
+14:34:41   ✅ my-positions(bettorB) 200
+14:34:41   ✅ my-positions bettorB @62-gawtx: 输(did_win=false)
+14:34:41   ✅ my-positions bettorB @64-nkp73: 赢 2943000000 筹码(== 链上 claim 合计 2943000000), chain_verified
+14:34:41   ✅ my-positions bettorB @71-7sm8f: 输(did_win=false)
+14:34:41 
+ALL PASS
