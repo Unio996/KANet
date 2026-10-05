@@ -94,6 +94,7 @@ export function registerMainnetPm(bot, { api, PM, t, getLang, initLang, cap, now
     if (!linkedAddr) { sessions.delete(tg); return ctx.reply(t(lang, 'pm_need_link')); }
     if (!cap.allowed(tg)) { sessions.delete(tg); return ctx.reply(t(lang, 'pm_cap_bot', { max: cap.max, resets: fmtResets(cap.resetsAt()) })); }
     s.busy = true;
+    await ctx.reply(t(lang, 'pm_submitting'));   // 注册要几十秒, 先给个回执
     let r;
     try { r = await api.poolRegisterV07Gateway(s.marketId, { linkedAddr, direction: s.direction, stakeKtt: chipsToStakeKtt(p.chips) }); }
     finally { s.busy = false; }

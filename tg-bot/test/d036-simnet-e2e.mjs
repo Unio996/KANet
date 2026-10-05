@@ -79,7 +79,7 @@ if (PHASE === 'bet') {
   check('m3 B NO 4 筹码 成功', ok(await placeBet('B', m3, 1, 4)));
   check('m4 B NO 2 筹码 成功(全押输方 ⇒ 无人押中)', ok(await placeBet('B', m4, 1, 2)));
   // 触顶: A 第 4 笔 ⇒ 服务端 429
-  await tap(U.A, `pm:b:${m4}:0`);
+  await tap(U.A, `pm:b:${m4}:1`);   // 押输方(NO): 即使意外被接受也仍是无人押中
   const hit = await say(U.A, '1');
   check('A 第 4 笔触服务端每日上限 ⇒ 礼貌文案 + 重置时间, 且没花东西', hit.some((m) => /明天再来/.test(m.text) && /UTC/.test(m.text) && /没有花任何东西/.test(m.text)), hit.map((m) => m.text));
   for (const w of ['A', 'B']) { const o = await say(U[w], '/mybets'); check(`${w} /mybets 列出押注中`, o.some((m) => /押注中|等开奖/.test(m.text)), o.map((m) => m.text)); }
