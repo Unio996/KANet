@@ -29,7 +29,7 @@ const _mid = (typeof it.marketId === 'string') ? it.marketId : '';
 
     <div x-show="rows.length > 0" class="space-y-1">
       <div class="hidden md:flex items-center gap-2 px-3 text-[10px] text-ink-400">
-        <span class="flex-1">盘口</span><span class="w-10 text-center">方向</span><span class="w-24 text-right">押注（筹码）</span><span class="w-16 text-center">盘口状态</span><span class="w-36 text-right">结果</span>
+        <span class="flex-1">盘口</span><span class="w-10 text-center">方向</span><span class="w-24 text-right">押注（筹码）</span><span class="w-16 text-center">盘口状态</span><span class="w-60 text-right">结果</span>
       </div>
       <template x-for="p in shown" :key="p.side_p2sh || (p.market_id + ':' + p.locked_at)">
         <div class="bg-warm-50 rounded px-3 py-2 text-xs flex items-center gap-2 flex-wrap md:flex-nowrap">
@@ -39,7 +39,7 @@ const _mid = (typeof it.marketId === 'string') ? it.marketId : '';
                 x-text="p.my_side"></span>
           <span class="w-24 text-right text-ink-600" x-text="chips(p.stake_kas)"></span>
           <span class="w-16 text-center px-1.5 py-0.5 rounded text-[10px]" :class="statusBadge(p)" x-text="statusLabel(p)"></span>
-          <span class="w-36 text-right font-medium" :class="resultCls(p)" x-text="resultText(p)"></span>
+          <span class="w-60 text-right font-medium" :class="resultCls(p)" x-text="resultText(p)"></span>
         </div>
       </template>
       <div x-show="!showAll && rows.length > LIMIT" class="pt-1 text-center"><button type="button" @click="showAll = true" class="text-xs text-brand-500 hover:underline" x-text="'更多（还有 ' + (rows.length - LIMIT) + ' 条）'"></button></div>
