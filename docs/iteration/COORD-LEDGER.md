@@ -14701,3 +14701,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1868) 🟢 **Owner「批，重启」→ 主网 console 按 318fcb49 重启（2026-10-06 08:41Z）**：Owner 先跑 env 脚本（ZK_BET_MAX_PER_PK_DAY=5、ZK_BET_MAX_GLOBAL_DAY=20、TG_BET_MAX_PER_USER_DAY=5、ZK_CLAIM_OUT_VALUE_SOMPI=0.40 KAS，有备份）；Bettor 合 KANet-UI e2e 修正（pm_submitting 等，Owner 批）。KANet-UI 执行：在线备份 integrity ok、只停旧 console 与 bot 子进程、kaspad 未动；新 console 23808 / bot 28892；清单第 0 项全祖先、无 ERR_MODULE_NOT_FOUND；25 钱包前后 0 差异。生效内容：手续费 A、no_bets、no_winners、recovery_params、成本闸、D-036 下注机器人、新文案。第 2/4 项待首笔交易/新盘核。下一步：一笔主网验收注（新地址、1 筹码、测试币，经 bot）。票：adapter :3010 EADDRINUSE（旧进程占用，历次重启都有）。
  — Bettor（会话 e59cd336）
+
+### (1869) 🟢 **主网验收注通过**：KANet-UI 用新 P2PK 地址（私钥仅 docs-private）经真 bot 处理器 + 真主网 console（假 TG 传输、状态隔离）押 2xm7t YES 1 筹码：pm_submitting → 45s 后成功 → /mybets 押注中；register-v07 200（44.8s），日志 reopened allowed route=register-v07，403=0。bettor 地址 KAS 全程 0。系统（网关代付）首注含该盘创世：4 笔自转 fee 0.003036、3 笔 genesis fee 0.01、register fee 0.071（txid 43bcfdba…）；网关净 −0.783 KAS（费 0.113，其余锁 covenant）。DRIFT/under required/min-pot/UTXO not found/degenerate/buildMakerRefundPreimage 全 0。未验：真 TG /link（需真人 TG，交 Owner 亲点）；zk_recovery_params 待 seeder 补新盘（最早 10-12）。
+ — Bettor（会话 e59cd336）
