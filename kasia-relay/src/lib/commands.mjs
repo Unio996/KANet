@@ -131,6 +131,7 @@ export const COMMAND_TYPES = Object.freeze({
   ZK_TICKET_SWEEP: 'zk_ticket_sweep',                         // PoolSideTicket.sweep: 票 UTXO → sink P2PK(age ≥ ZK_TICKET_SWEEP_DAA)
   // ── 账本1877 步2(数字商品交付): 链上信箱窄转账 — 小额 + KDL1 交付密文信封 + P2PK 目标; 校验在 lib/delivery-mailbox.mjs, 不是通用 payload 转账 ──
   DELIVERY_MAILBOX_SEND: 'delivery_mailbox_send',
+  DELIVERY_SPLIT_SUBMIT: 'delivery_split_submit',             // 账本1877 步3: 零签名 CommissionSplit.split 的窄广播(输出须由订单 ctor 重建; lib/delivery-split-submit.mjs), 不是通用 submit
   // ── 原型 v0 covenant_broadcast (2026-09-14, J2 接线笔①, 设计 §9, Owner §6=B′ 拍板): relay 侧
   // 广播"调用方已构造好的任意签名交易", 只签 sign_input_indices 声明的索引, 执行权限限定于
   // PROTO_RELAY_ID(covenant-broadcast-relay.mjs)。三层注册必齐(同上 KI-49 防坑纪律)。
@@ -222,6 +223,7 @@ export const COMMAND_PAYLOAD_SCHEMA = Object.freeze({
   [COMMAND_TYPES.ZK_CLAIM_RETIRE]: ['witness', 'inputs', 'sink_pk_hex', 'retire_daa'],
   [COMMAND_TYPES.ZK_TICKET_SWEEP]: ['witness', 'inputs', 'sink_pk_hex', 'sweep_daa'],
   [COMMAND_TYPES.DELIVERY_MAILBOX_SEND]: ['target', 'amount', 'payload_hex'],
+  [COMMAND_TYPES.DELIVERY_SPLIT_SUBMIT]: ['input', 'sig_script_hex', 'outputs', 'redeem_hex', 'expected_txid'],
   // 只有 intent_key 是两条路径(fresh/replay)共通的最小契约(同 TRANSFER 模式); tx_json/
   // sign_input_indices/expected_txid(fresh) 与 replay_tx_json/prepared_txid(replay) 互斥可选,
   // 由 covenant-broadcast-relay.mjs 运行时判断到底走哪条, 不在这里强制其中一组必填。
@@ -317,6 +319,7 @@ export const COMMAND_FIELD_TYPES = Object.freeze({
   [COMMAND_TYPES.ZK_CLAIM_RETIRE]: { witness: 'object', inputs: 'object', sink_pk_hex: 'string', retire_daa: 'number', age_margin_daa: 'number', fee_sompi: ['number', 'string'], dry_run: 'boolean' },
   [COMMAND_TYPES.ZK_TICKET_SWEEP]: { witness: 'object', inputs: 'object', sink_pk_hex: 'string', sweep_daa: 'number', age_margin_daa: 'number', fee_sompi: ['number', 'string'], dry_run: 'boolean' },
   [COMMAND_TYPES.DELIVERY_MAILBOX_SEND]: { target: 'string', amount: ['string', 'number'], payload_hex: 'string' },
+  [COMMAND_TYPES.DELIVERY_SPLIT_SUBMIT]: { input: 'object', sig_script_hex: 'string', outputs: 'array', redeem_hex: 'string', expected_txid: 'string' },
 });
 
 export function validateCommandPayload(cmd) {

@@ -14,7 +14,7 @@ export const encodeQuoteParam = (quote) => Buffer.from(JSON.stringify(quote)).to
  * @param {{quote:object, orderNonceHex:string, deadlineMs:number, expectNetwork?:string}} o
  * @returns {Promise<{network:string, orderAddress:string, refundAddress:string, totalSompi:string, merchantAddress:string, merchantAmountSompi:string, protocol:object, finalRoles:object[]}>}
  */
-export async function deriveInvoiceOrder({ quote, orderNonceHex, deadlineMs, expectNetwork }) {
+export async function deriveInvoiceOrder({ quote, orderNonceHex, deadlineMs, expectNetwork, skipValidity = false }) {
   if (!quote || typeof quote !== 'object') throw new Error('deriveInvoiceOrder: quote 必填');
   if (quote.order_kind && quote.order_kind !== 'commission_split') throw new Error('deriveInvoiceOrder: 只支持 CommissionSplit 报价(order_kind)');
   if (!SDK.verifyQuoteSignature(quote)) throw new Error('deriveInvoiceOrder: 报价验签失败');
@@ -22,10 +22,11 @@ export async function deriveInvoiceOrder({ quote, orderNonceHex, deadlineMs, exp
   if (!network || typeof network !== 'string') throw new Error('deriveInvoiceOrder: 报价缺 network');
   if (expectNetwork && network !== expectNetwork) throw new Error(`deriveInvoiceOrder: 报价网络 ${network} ≠ 本机网络 ${expectNetwork}`);
   const now = Date.now();
-  if (Number.isFinite(quote.valid_from_ms) && now < quote.valid_from_ms) throw new Error('deriveInvoiceOrder: 报价尚未生效');
-  if (Number.isFinite(quote.valid_until_ms) && now > quote.valid_until_ms) throw new Error('deriveInvoiceOrder: 报价已过期');
+  // skipValidity: 只给【已存在订单】的重建(watcher 触发 split)用——报价有效期管的是"能不能开新单", 不能让已付款的老单因报价过期而无法分账。建单路径永不传。
+  if (!skipValidity && Number.isFinite(quote.valid_from_ms) && now < quote.valid_from_ms) throw new Error('deriveInvoiceOrder: 报价尚未生效');
+  if (!skipValidity && Number.isFinite(quote.valid_until_ms) && now > quote.valid_until_ms) throw new Error('deriveInvoiceOrder: 报价已过期');
   if (quote.require_channel_deposit) throw new Error('deriveInvoiceOrder: 发票模式 V1 不支持要求渠道押金的报价');
-  if (!Number.isSafeInteger(deadlineMs) || deadlineMs <= now) throw new Error('deriveInvoiceOrder: deadlineMs 必须是未来的毫秒时间戳');
+  if (!Number.isSafeInteger(deadlineMs) || (!skipValidity && deadlineMs <= now)) throw new Error('deriveInvoiceOrder: deadlineMs 必须是未来的毫秒时间戳');
   const resolved = SDK.resolveRulesForOrder(quote, { ok: true, channelSpks: [] });   // 发票模式无渠道归因: 渠道位按报价规则并回 fold_to
   const finalRoles = resolved.payoutLeaves.map((r) => ({ name: r.name, amountSompi: r.amountSompi, spk: r.spk }));
   const provider = resolved.payoutLeaves[0];
