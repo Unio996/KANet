@@ -26,7 +26,7 @@ import { getMarketBets } from './pool-bettor-sides-query.mjs';
 import { deriveCloseFeeLeaves } from '../services/bshard-close-voter.js';
 import { randomUUID } from 'crypto';
 import { isNoWinnersError, markZkNoWinners, hasWinningSideBettor } from './zk-no-winners.mjs';
-import { checkRecoveryParamsDrift } from './zk-recovery-params.mjs';   // 账本1861 C §8   // 账本1865: 判决已定但无赢家 ⇒ 终态(completed + metadata.no_winners), 不再永远重试
+import { checkRecoveryParamsDrift, stampSelfCovId } from './zk-recovery-params.mjs';   // 账本1861 C §8   // 账本1865: 判决已定但无赢家 ⇒ 终态(completed + metadata.no_winners), 不再永远重试
 import { zkReadyCandidateRows, zkLegacyLikeRows, resolveShadowEvery, shadowDue, announceShadowEvery } from '../db/phase2-indexes-v200.mjs';   // Phase-2 A 包 P2-1 A′: 候选行 SQL 单源(表达式常量与索引 DDL 同文件); 影子节奏(默认关)
 import { handoffCandidateRows, handoffLegacyRows, marketMetaById } from '../db/phase2-handoff-candidates.mjs';   // Phase-2 B 包 P2-3: handoff 候选 SQL 单源
 
@@ -221,6 +221,7 @@ export async function _claimOneMarket(marketId, ctx) {   // 账本1832 段4: 导
     if (sj.selfContRedeemHex !== splice.redeemHex) { _writeZkAutonomyErrorEvent('claimAutonomousTick_splice_mismatch', marketId, 'relay 拼出的续约 redeem 与 console splice 不一致(两套独立实现互证失败) — 零持久化'); return { errored: true, claimed: 0 }; }
     advanceZkContinuationAfterSpend(marketId, { outpointTxid: txid, outpointIndex: 0, redeemHex: sj.selfContRedeemHex, valueSompi: splice.newPool.toString(), utxoValueSompi: sj.utxoValueSompi, spentEntry: 'claim', spentTxid: txid });
   }
+  stampSelfCovId(sqlite, marketId, sj.selfCovId);   // 账本1867: 续约耗尽后链上再无带该 id 的 UTXO, 回收枚举器要靠它重算 claim redeem(首写为准, 永不抛)
   log(`✅ market=${marketId.slice(-8)} claim idx=${targetIdx} pk=${target.pk.slice(0, 12)} payout=${witness.payout} txId=${txid}${splice.isLast ? ' (last, exhausted)' : ''}`);
   return { errored: false, claimed: 1 };
 }

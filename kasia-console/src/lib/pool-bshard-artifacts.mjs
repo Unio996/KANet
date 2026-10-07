@@ -407,6 +407,7 @@ export function computePoolSideTicketArtifact({ bettorPk, direction, stake, shar
   return {
     script: Buffer.from(compiled.script), scriptPubKeyHex: '0x' + _kttP2sh(compiled.script), templateHashHex: artifact.templateHashHex,
     templatePrefix: artifact.templatePrefix, templateSuffix: artifact.templateSuffix,
+    entryAbi: compiled._raw?.contracts?.PoolSideTicket?.entries?.sweep,   // 账本1867: 回收工具要 sweep 的 dispatch_tag(additive)
   };
 }
 
@@ -514,5 +515,6 @@ export function computeKanetTokenClaimArtifact({ marketCovIdHex, winnerPkHex, am
   const ctor = [ctorBytes32V100(marketCovIdHex), ctorBytes32V100(winnerPkHex), ctorIntV100(Number(amount)), ctorBytes32V100(tokenTmplHashHex), ctorBytes32V100(sk.sinkPkHex), ctorIntV100(sk.retireDaa)];
   const compiled = silvercPath ? compileSilV100(KANET_TOKEN_CLAIM_SIL, ctor, 'KanetTokenClaim', silvercPath) : compileSilV100(KANET_TOKEN_CLAIM_SIL, ctor, 'KanetTokenClaim');
   const artifact = extractTemplateArtifactV100(compiled);
-  return { script: Buffer.from(compiled.script), templateHashHex: artifact.templateHashHex, templatePrefix: artifact.templatePrefix, templateSuffix: artifact.templateSuffix };
+  return { script: Buffer.from(compiled.script), templateHashHex: artifact.templateHashHex, templatePrefix: artifact.templatePrefix, templateSuffix: artifact.templateSuffix,
+    entryAbi: compiled._raw?.contracts?.KanetTokenClaim?.entries?.retire };   // 账本1867: 回收工具要 retire 的 dispatch_tag(additive, 老调用方不读)
 }

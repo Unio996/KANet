@@ -1,0 +1,24 @@
+[db] path=D:\kanet-tn12\scratch\_j2_mm\console.mm.rs1.db source=DB_PATH
+[mass-floor:observe] site=zk_claim_retire compute=47876 storage=0 transient=30064 mass_ub=47876 minFee=4787600 actualFee=5000000 would_reject=false wasm=panic(undefined) source=7b1e18cc
+[zk_claim_retire invariant] Σin=100000000 Σout=95000000 fee=5000000 (mass_ub=47876 minFee=4787600 ✓), 1 outputs all >= dust
+[mass-floor:observe] site=zk_claim_retire compute=47876 storage=0 transient=30064 mass_ub=47876 minFee=4787600 actualFee=5000000 would_reject=false wasm=panic(undefined) source=7b1e18cc
+[zk_claim_retire invariant] Σin=100000000 Σout=95000000 fee=5000000 (mass_ub=47876 minFee=4787600 ✓), 1 outputs all >= dust
+[mass-floor:observe] site=zk_ticket_sweep compute=10750 storage=357143 transient=1560 mass_ub=357143 minFee=35714300 actualFee=5000000 would_reject=true wasm=panic(undefined) source=7b1e18cc
+[zk_ticket_sweep invariant] Σin=7000000 Σout=2000000 fee=5000000 (mass_ub=357143 minFee=35714300 ⚠ would-reject(observe)), 1 outputs all >= dust
+06:58:47 发现 claim: 98-uiw41 age {"ageDaa":1299,"requiredDaa":400} eligible true
+[mass-floor:observe] site=zk_claim_retire compute=47876 storage=0 transient=30064 mass_ub=47876 minFee=4787600 actualFee=5000000 would_reject=false wasm=panic(undefined) source=7b1e18cc
+[zk_claim_retire invariant] Σin=100000000 Σout=95000000 fee=5000000 (mass_ub=47876 minFee=4787600 ✓), 1 outputs all >= dust
+[mass-floor:observe] site=zk_claim_retire compute=47876 storage=0 transient=30064 mass_ub=47876 minFee=4787600 actualFee=5000000 would_reject=false wasm=panic(undefined) source=7b1e18cc
+[zk_claim_retire invariant] Σin=100000000 Σout=95000000 fee=5000000 (mass_ub=47876 minFee=4787600 ✓), 1 outputs all >= dust
+[mass-floor:observe] site=zk_ticket_sweep compute=10750 storage=357143 transient=1560 mass_ub=357143 minFee=35714300 actualFee=5000000 would_reject=true wasm=panic(undefined) source=7b1e18cc
+[zk_ticket_sweep invariant] Σin=7000000 Σout=2000000 fee=5000000 (mass_ub=357143 minFee=35714300 ⚠ would-reject(observe)), 1 outputs all >= dust
+06:58:48 到龄清单: retirable 2 sweepable 1
+[mass-floor:observe] site=zk_claim_retire compute=47876 storage=0 transient=30064 mass_ub=47876 minFee=4787600 actualFee=1 would_reject=true wasm=panic(undefined) source=7b1e18cc
+[zk_claim_retire invariant] Σin=100000000 Σout=99999999 fee=1 (mass_ub=47876 minFee=4787600 ⚠ would-reject(observe)), 1 outputs all >= dust
+[mass-floor:observe:auth] site=zk_claim_retire txid=918f643b454c76f99be1155574a6fa26d260070888c6638a7508ab528e9f56d0 source=reject authoritative_mass=47876 mass_ub=47876 ub_ok=true minFee_auth=4787600 actualFee=1 local_minFee=4787600 local_would_reject=true totals=ok:1/viol:0/inc:0/src:mempool=0,reject=1
+06:58:48 F claim retire: {"ok":false,"error":"RPC Server (remote error) -> Rejected transaction 918f643b454c76f99be1155574a6fa26d260070888c6638a7508ab528e9f56d0: transaction 918f643b454c76f99be1155574a6fa26d260070888c6638a7508ab528e9f56d0 is not standard: transaction has 1 fees which is under the required amount of 4787600 
+[mass-floor:observe] site=zk_ticket_sweep compute=10750 storage=0 transient=1560 mass_ub=10750 minFee=1075000 actualFee=1 would_reject=true wasm=panic(undefined) source=7b1e18cc
+[zk_ticket_sweep invariant] Σin=7000000 Σout=6999999 fee=1 (mass_ub=10750 minFee=1075000 ⚠ would-reject(observe)), 1 outputs all >= dust
+[mass-floor:observe:auth] site=zk_ticket_sweep txid=451ffca143599a9883bbd6fc3af2d05a88ce9aff662a0735bb815b39769335e1 source=reject authoritative_mass=10750 mass_ub=10750 ub_ok=true minFee_auth=1075000 actualFee=1 local_minFee=1075000 local_would_reject=true totals=ok:2/viol:0/inc:0/src:mempool=0,reject=2
+06:58:48 F ticket sweep: {"ok":false,"error":"RPC Server (remote error) -> Rejected transaction 451ffca143599a9883bbd6fc3af2d05a88ce9aff662a0735bb815b39769335e1: transaction 451ffca143599a9883bbd6fc3af2d05a88ce9aff662a0735bb815b39769335e1 is not standard: transaction has 1 fees which is under the required amount of 1075000 
+06:58:48 完成探测阶段(fee 探测不广播成功交易)。真花阶段请跑 zk-recover.mjs --max 1。

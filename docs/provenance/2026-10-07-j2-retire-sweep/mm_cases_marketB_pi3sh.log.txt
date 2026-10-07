@@ -1,0 +1,17 @@
+07:58:25 
+===== case B 单边赢: 3 注全 YES, YES 赢 =====
+07:58:41 market ext-pool-v07-1791359921349-pi3sh cond=0xf6f6f6f6f6… 预期赢家方向=0 (期望 0) deadline=2026-10-07T08:05:27.000Z
+07:59:35   bet A dir=0 units=1000000000 ⇒ 200 (53167ms)
+08:00:09   bet B dir=0 units=2000000000 ⇒ 200 (34268ms)
+08:00:36   bet X dir=0 units=1000000000 ⇒ 200 (27188ms)
+08:00:36   08:00:36 pending_bettors claims=0
+08:09:46   08:09:46 verifying claims=0
+08:19:37   08:19:37 collecting_sigs claims=0
+08:20:17   08:20:17 attested_v2 claims=0
+08:23:27   08:23:27 attested_v2 claims=1
+08:23:57   08:23:57 attested_v2 claims=2
+08:24:27   08:24:27 attested_v2 claims=3
+08:24:57   08:24:57 attested_v2/exhausted claims=4
+08:25:12   FINAL attested_v2  system wallets Δ = 5.560941 KAS  bettors Δ0=true
+08:25:12 
+ALL CASES DONE

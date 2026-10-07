@@ -1,0 +1,10 @@
+{
+  "source": "simnet 官方 kaspad 2.0.1, 节点对 fee=1 的拒绝文本 'under the required amount of N for compute mass M' (100 sompi/克)",
+  "budget_default": { "claim": 40, "token": 40, "ticket": 20 },
+  "budget_min_working_simnet": { "claim": 10, "token": 10, "ticket": 5, "note": "更低未试; 失败的尝试被拒不花钱, 成功即真花一笔" },
+  "at_budget_300_100_claim": { "claimRetire_floor_sompi": 4787600, "mass": 47876, "note": "旧默认(沿用 claim 家族 300/100): 距合约上限 5,000,000 只剩 4.4% 余量, 故下调预算" },
+  "at_budget_300_100_ticket_100": { "ticketSweep_floor_sompi": 1075000, "mass": 10750 },
+  "at_default_budgets": { "claimRetire_floor_sompi": 1587600, "mass": 15876, "ticketSweep_floor_sompi": 275000, "mass_ticket": 2750 },
+  "constants": { "claimRetire": 2100000, "ticketSweep": 360000, "ratio_claim": 1.32, "ratio_ticket": 1.31, "contract_cap": 5000000 },
+  "note": "本地 mass 上界估算(observe 日志 mass_ub)对回收交易偏保守(claim 30,064 vs 实测 15,876), 仅 warn 不拒; 以节点拒绝文本为准。"
+}

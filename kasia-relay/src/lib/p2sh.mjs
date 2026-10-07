@@ -3851,3 +3851,165 @@ export async function unlockBshardSeal(args) {
     return { txId: r.transactionId };
   } finally { try { await rpc.disconnect(); } catch {} }
 }
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// 🔴 账本 1867(Bettor 派工, 设计 docs/2026-10-05-j2-retire-sweep-tool-design-v0.1.md): 回收构造器 —— KanetTokenClaim.retire / PoolSideTicket.sweep。
+//   两个入口【无需签名、无钱包输入】: 费从输入里出(合约上限 0.05 KAS), 唯一去向 = ctor 烤死的 sink_pk(P2PK)。relay 在这里只是构造+广播者。
+//   🔒 安全面(设计 §6): ① 输出 spk 只由 sink_pk 派生, 无 to/change_address 参数; sink_pk 须能在 claim/ticket redeem 字节里找到(= ctor 常量真烤在模板里),
+//   否则拒绝(防调用方喂别人的 pk); ② fee ≤ RECOVERY_MAX_FEE_SOMPI(= 合约 *_MAX_FEE); ③ 构造前读链上 UTXO 的 blockDaaScore vs 虚拟 DAA, 年龄 < 门槛 + 余量 ⇒ 不广播
+//   (dry_run 回 {eligible:false}, live 抛错); 合约 `this.ageDaa`(OpCheckSequenceVerify) 才是最终权威 ⇒ input.sequence 必须 = 门槛 DAA(2.0.1 simnet 已实证 agedaa_probe)。
+//   复用: _matchUtxo / _addressFromRedeem / _combineActionAndRedeem / _encodeKttTransferZeroOutAction / _assertTxInvariants / connectRpc(同 _unlockClaimFamily 骨架)。
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+export const RECOVERY_MAX_FEE_SOMPI = 5_000_000n;   // = KanetTokenClaim.RETIRE_MAX_FEE = PoolSideTicket.SWEEP_MAX_FEE
+// 实测下限(节点拒绝文本, 预算 claim40/token40/ticket20): claim retire 1,587,600(compute mass 15,876) / ticket sweep 275,000(2,750); ×1.3 向上取整到 10k ⇒ 2,100,000 / 360,000(远低于合约上限 5,000,000)。证据 docs/provenance/2026-10-07-j2-retire-sweep/
+export const RECOVERY_SITE_FEE_SOMPI = Object.freeze({ claimRetire: 2_100_000n, ticketSweep: 360_000n });   // 实测下限 ×1.3 填入(见 docs/provenance/2026-10-07-j2-retire-sweep)
+// 计算预算(越小 compute mass 越小 ⇒ 手续费下限越低): simnet 实测最小可行 claim=10/token=10/ticket=5, 默认取 4× 余量; 见 docs/provenance/2026-10-07-j2-retire-sweep/
+export const RECOVERY_COMPUTE_BUDGET = Object.freeze({ claim: 40, token: 40, ticket: 20 });
+export const RECOVERY_AGE_MARGIN_DAA = 50;           // builder 额外要求的年龄余量(节点 tip 与我们读到的虚拟 DAA 有漂移; 合约门本身不含余量)
+
+/** 纯函数(可测): 校验 sink_pk 并返回 P2PK spk(version 0, 0x20 <32B> 0xac)。pk 必须出现在 redeem 字节里。 */
+export function _recoverySinkSpk(sinkPkHex, redeemHex, label) {
+  const pk = String(sinkPkHex || '').replace(/^0x/, '').toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(pk) || /^0+$/.test(pk)) throw new Error(`${label}: sink_pk_hex 必须是 64 位非全零 hex`);
+  const redeem = Buffer.from(String(redeemHex || '').replace(/^0x/, ''), 'hex');
+  if (redeem.indexOf(Buffer.from(pk, 'hex')) < 0) throw new Error(`${label}: sink_pk 不在该 redeem 字节里(ctor 常量未烤入此 pk) — 拒绝(防止把钱导向合约之外的 pk)`);
+  return new ScriptPublicKey(0, '20' + pk + 'ac');
+}
+
+/** 纯函数(可测): 回收 fee 的唯一解析点。无 cmd.fee_sompi ⇒ 站点默认; 任何值 ≤0 或 > 合约上限 ⇒ 抛。 */
+export function _recoveryFee(cmdFee, siteDefault, label) {
+  const fee = BigInt(cmdFee ?? siteDefault);
+  if (fee <= 0n) throw new Error(`${label}: fee ${fee} ≤ 0(RECOVERY_SITE_FEE_SOMPI 未填实测值?)`);
+  if (fee > RECOVERY_MAX_FEE_SOMPI) throw new Error(`${label}: fee ${fee} > 合约上限 ${RECOVERY_MAX_FEE_SOMPI}(0.05 KAS) — 拒绝广播`);
+  return fee;
+}
+
+/** 纯函数(可测): 年龄判定。age = virtualDaa − blockDaa; eligible = age ≥ requiredDaa + marginDaa。 */
+export function _recoveryAge({ virtualDaa, blockDaa, requiredDaa, marginDaa = RECOVERY_AGE_MARGIN_DAA }) {
+  const age = Number(virtualDaa) - Number(blockDaa);
+  const req = Number(requiredDaa);
+  if (!Number.isSafeInteger(req) || req < 1 || req > 0xFFFFFFFF) throw new Error(`recovery: required_daa 非法: ${requiredDaa}`);
+  return { ageDaa: age, requiredDaa: req, marginDaa: Number(marginDaa), eligible: Number.isFinite(age) && age >= req + Number(marginDaa) };
+}
+
+async function _recoveryReadAge(rpc, utxo, requiredDaa, marginDaa) {
+  const bds = utxo.blockDaaScore ?? utxo.utxoEntry?.blockDaaScore ?? utxo.entry?.blockDaaScore;
+  if (bds == null) throw new Error('recovery: UTXO 无 blockDaaScore(fail-closed)');
+  const dag = await rpc.getBlockDagInfo();
+  return _recoveryAge({ virtualDaa: dag.virtualDaaScore, blockDaa: bds, requiredDaa, marginDaa });
+}
+
+const _hx0 = (v) => (typeof v === 'string' ? v : Buffer.from(v).toString('hex')).replace(/^0x/, '');
+const _dryInputs = (matched, sigs) => matched.map((u, i) => ({ prev_txid: u.outpoint.transactionId, prev_index: Number(u.outpoint.index), utxo_value: _utxoValue(u).toString(), signature_script_hex: sigs[i] }));
+const _dryOutputs = (tx) => tx.outputs.map((o) => ({ value: o.value.toString(), script_hex: _hx0(o.scriptPublicKey.script) }));
+
+/**
+ * KanetTokenClaim.retire —— 2 输入(claim UTXO + 其持有的 KTT 代币 UTXO) → 1 输出(sink P2PK)。
+ *   cmd: { inputs:{claim:{redeem_hex,outpointTxid,index}, token:{redeem_hex,outpointTxid,index}},
+ *          witness:{retire_dispatch_tag_hex, tok_prefix_hex, tok_suffix_hex, token_transfer_dispatch_tag_hex, token_transfer_state_field_count},
+ *          sink_pk_hex, retire_daa, age_margin_daa?, fee_sompi?, compute_budget_claim?, compute_budget_token?, dry_run? }
+ *   inputs 顺序固定 [0 claim | 1 token]; tok_in_idx=1; 代币侧 KTT.transfer zero-out(owner_input_idx=[0] = claim 的输入下标)。
+ */
+export async function unlockClaimRetire(args) {
+  const { cmd, networkId } = args;
+  const w = cmd.witness || {};
+  const label = 'zk_claim_retire';
+  if (!cmd.inputs?.claim?.redeem_hex || !cmd.inputs?.token?.redeem_hex) throw new Error(`${label}: inputs.claim / inputs.token(redeem_hex + outpoint) 必需`);
+  for (const k of ['retire_dispatch_tag_hex', 'tok_prefix_hex', 'tok_suffix_hex', 'token_transfer_dispatch_tag_hex']) if (!w[k]) throw new Error(`${label}: witness.${k} 必需`);
+  if (!Number.isInteger(Number(w.token_transfer_state_field_count)) || Number(w.token_transfer_state_field_count) < 1) throw new Error(`${label}: witness.token_transfer_state_field_count 必需`);
+  const sinkSpk = _recoverySinkSpk(cmd.sink_pk_hex, cmd.inputs.claim.redeem_hex, label);
+  const fee = _recoveryFee(cmd.fee_sompi, RECOVERY_SITE_FEE_SOMPI.claimRetire, label);
+  const retireDaa = Number(cmd.retire_daa);
+  const rpc = await connectRpc(networkId);
+  try {
+    const claimUtxo = await _matchUtxo(rpc, _addressFromRedeem(cmd.inputs.claim.redeem_hex, networkId), cmd.inputs.claim.outpointTxid, cmd.inputs.claim.index);
+    const age = await _recoveryReadAge(rpc, claimUtxo, retireDaa, cmd.age_margin_daa ?? RECOVERY_AGE_MARGIN_DAA);
+    if (!age.eligible && !cmd.dry_run) throw new Error(`${label}: 年龄未到 age=${age.ageDaa} < retire_daa ${age.requiredDaa} + 余量 ${age.marginDaa} — 拒绝广播(绝不早于年龄)`);
+    const tokUtxo = await _matchUtxo(rpc, _addressFromRedeem(cmd.inputs.token.redeem_hex, networkId), cmd.inputs.token.outpointTxid, cmd.inputs.token.index);
+    const claimCov = (claimUtxo.entry?.covenantId ?? claimUtxo.covenantId); const tokCov = (tokUtxo.entry?.covenantId ?? tokUtxo.covenantId);
+    if (claimCov == null || tokCov == null) throw new Error(`${label}: claim / token UTXO 缺 covenantId(非 covenant UTXO?) — 拒绝`);
+    const matched = [claimUtxo, tokUtxo];
+    const sumIn = matched.reduce((a, u) => a + _utxoValue(u), 0n);
+    const outValue = sumIn - fee;
+    if (outValue < 1000n) throw new Error(`${label}: Σin ${sumIn} 扣费后不足 dust`);
+    const orderedOut = [new TransactionOutput(outValue, sinkSpk)];
+
+    const hx = (h) => new Uint8Array(Buffer.from(String(h).replace(/^0x/, ''), 'hex'));
+    const claimAction = (() => {
+      const b = new ScriptBuilder({ flags: { covenantsEnabled: true } });
+      b.addI64(1n); b.addData(hx(w.tok_prefix_hex)); b.addData(hx(w.tok_suffix_hex)); b.addData(hx(w.retire_dispatch_tag_hex));
+      return b.drain();
+    })();
+    const claimSig = _combineActionAndRedeem(claimAction, cmd.inputs.claim.redeem_hex);
+    const tokSig = _combineActionAndRedeem(_encodeKttTransferZeroOutAction(w.token_transfer_dispatch_tag_hex, Number(w.token_transfer_state_field_count), [0]), cmd.inputs.token.redeem_hex);
+    const CB_CLAIM = Number(cmd.compute_budget_claim ?? RECOVERY_COMPUTE_BUDGET.claim), CB_TOK = Number(cmd.compute_budget_token ?? RECOVERY_COMPUTE_BUDGET.token);
+    const signedTx = new Transaction({
+      version: 1,
+      inputs: [
+        { previousOutpoint: { transactionId: claimUtxo.outpoint.transactionId, index: claimUtxo.outpoint.index }, signatureScript: claimSig, sequence: BigInt(retireDaa), sigOpCount: 0, computeBudget: CB_CLAIM },   // sequence = 年龄门槛(OpCheckSequenceVerify)
+        { previousOutpoint: { transactionId: tokUtxo.outpoint.transactionId, index: tokUtxo.outpoint.index }, signatureScript: tokSig, sequence: 0n, sigOpCount: 0, computeBudget: CB_TOK },
+      ],
+      outputs: orderedOut, lockTime: 0n, gas: 0n, subnetworkId: '0000000000000000000000000000000000000000', payload: '',
+    });
+    _assertTxInvariants(matched, signedTx, label, networkId);
+    const summary = { ageDaa: age.ageDaa, requiredDaa: age.requiredDaa, eligible: age.eligible, claimCovId: String(claimCov), tokenCovId: String(tokCov), sinkValueSompi: outValue.toString(), feeSompi: fee.toString(), sumInSompi: sumIn.toString() };
+    if (cmd.dry_run) return { broadcasted: false, ...summary, inputs: _dryInputs(matched, [claimSig, tokSig]), outputs: _dryOutputs(signedTx) };
+    const r = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
+    return { txId: r.transactionId, ...summary };
+  } finally { try { await rpc.disconnect(); } catch {} }
+}
+
+/**
+ * PoolSideTicket.sweep —— 1 输入(票 UTXO) → 1 输出(sink P2PK)。
+ *   cmd: { inputs:{ticket:{redeem_hex,outpointTxid,index}}, witness:{sweep_dispatch_tag_hex}, sink_pk_hex, sweep_daa, age_margin_daa?, fee_sompi?, compute_budget?, dry_run? }
+ */
+export async function unlockTicketSweep(args) {
+  const { cmd, networkId } = args;
+  const w = cmd.witness || {};
+  const label = 'zk_ticket_sweep';
+  if (!cmd.inputs?.ticket?.redeem_hex) throw new Error(`${label}: inputs.ticket(redeem_hex + outpoint) 必需`);
+  if (!w.sweep_dispatch_tag_hex) throw new Error(`${label}: witness.sweep_dispatch_tag_hex 必需`);
+  const sinkSpk = _recoverySinkSpk(cmd.sink_pk_hex, cmd.inputs.ticket.redeem_hex, label);
+  const fee = _recoveryFee(cmd.fee_sompi, RECOVERY_SITE_FEE_SOMPI.ticketSweep, label);
+  const sweepDaa = Number(cmd.sweep_daa);
+  const rpc = await connectRpc(networkId);
+  try {
+    const tUtxo = await _matchUtxo(rpc, _addressFromRedeem(cmd.inputs.ticket.redeem_hex, networkId), cmd.inputs.ticket.outpointTxid, cmd.inputs.ticket.index);
+    const age = await _recoveryReadAge(rpc, tUtxo, sweepDaa, cmd.age_margin_daa ?? RECOVERY_AGE_MARGIN_DAA);
+    if (!age.eligible && !cmd.dry_run) throw new Error(`${label}: 年龄未到 age=${age.ageDaa} < sweep_daa ${age.requiredDaa} + 余量 ${age.marginDaa} — 拒绝广播(绝不早于年龄)`);
+    const matched = [tUtxo];
+    const sumIn = _utxoValue(tUtxo);
+    const outValue = sumIn - fee;
+    if (outValue < 1000n) throw new Error(`${label}: Σin ${sumIn} 扣费后不足 dust`);
+    const hx = (h) => new Uint8Array(Buffer.from(String(h).replace(/^0x/, ''), 'hex'));
+    const action = (() => { const b = new ScriptBuilder({ flags: { covenantsEnabled: true } }); b.addData(hx(w.sweep_dispatch_tag_hex)); return b.drain(); })();
+    const sig = _combineActionAndRedeem(action, cmd.inputs.ticket.redeem_hex);
+    const signedTx = new Transaction({
+      version: 1,
+      inputs: [{ previousOutpoint: { transactionId: tUtxo.outpoint.transactionId, index: tUtxo.outpoint.index }, signatureScript: sig, sequence: BigInt(sweepDaa), sigOpCount: 0, computeBudget: Number(cmd.compute_budget ?? RECOVERY_COMPUTE_BUDGET.ticket) }],
+      outputs: [new TransactionOutput(outValue, sinkSpk)], lockTime: 0n, gas: 0n, subnetworkId: '0000000000000000000000000000000000000000', payload: '',
+    });
+    _assertTxInvariants(matched, signedTx, label, networkId);
+    const summary = { ageDaa: age.ageDaa, requiredDaa: age.requiredDaa, eligible: age.eligible, sinkValueSompi: outValue.toString(), feeSompi: fee.toString(), sumInSompi: sumIn.toString() };
+    if (cmd.dry_run) return { broadcasted: false, ...summary, inputs: _dryInputs(matched, [sig]), outputs: _dryOutputs(signedTx) };
+    const r = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
+    return { txId: r.transactionId, ...summary };
+  } finally { try { await rpc.disconnect(); } catch {} }
+}
+
+// ── 回收脚本用的两个只读/纯辅助(账本1867): 脚本不起 relay 子进程, 直接调上面的 builder; 这里补它需要的"带 covenantId 的 UTXO 列表"与"sink P2PK 地址"。 ──
+import { parseFactsRequest as _rcvParseFacts, buildFactsResponse as _rcvBuildFacts } from './utxo-facts.mjs';
+/** 地址上的活 UTXO(facts 形态: outpoint/amount/spk/covenantId)。与 relay get_address_utxos facts:true 同一个 buildFactsResponse(单源)。 */
+export async function recoveryGetFacts(address, networkId) {
+  const rpc = await connectRpc(networkId);
+  try {
+    const { entries } = await rpc.getUtxosByAddresses([address]);
+    return _rcvBuildFacts(_rcvParseFacts({ facts: true }), entries || []);
+  } finally { try { await rpc.disconnect(); } catch {} }
+}
+/** sink x-only pk → P2PK 地址(落链核对用)。 */
+export function recoverySinkAddress(sinkPkHex, networkId) {
+  const pk = String(sinkPkHex).replace(/^0x/, '').toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(pk)) throw new Error('recoverySinkAddress: 非法 pk');
+  return addressFromScriptPublicKey(new ScriptPublicKey(0, '20' + pk + 'ac'), networkId).toString();
+}

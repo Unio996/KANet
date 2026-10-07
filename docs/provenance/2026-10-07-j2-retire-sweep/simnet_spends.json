@@ -1,0 +1,23 @@
+{
+  "note": "simnet 真广播并落到 sink P2PK 的 10 笔回收(全部已用 getUtxosByAddresses 在 sink 地址核到, 面值如下)。前 5 笔经预算探索(费 5,000,000 / 1,500,000), 后 5 笔为最终常量(claim 费 2,100,000 / 票费 360,000)。",
+  "claim_retire": [
+    { "txid": "0815c6a8423a416c699747d472d5a4a3043ed2c5fdbb7c9802f50e927553d07a", "sink_sompi": 95000000, "fee": 5000000, "budget": "300/100", "via": "zk-recover.mjs --max 1(审计已落库)" },
+    { "txid_prefix": "90e52dc7", "sink_sompi": 95000000, "fee": 5000000, "budget": "100/100", "via": "budget_search" },
+    { "txid_prefix": "cc0d3193", "sink_sompi": 95000000, "fee": 5000000, "budget": "10/100", "via": "budget_search" },
+    { "txid_prefix": "28ce11a6", "sink_sompi": 95000000, "fee": 5000000, "budget": "30/10", "via": "budget_search" },
+    { "txid_prefix": "2e373da1", "sink_sompi": 97900000, "fee": 2100000, "budget": "40/40", "via": "zk-recover.mjs(审计已落库)" },
+    { "txid_prefix": "a4e8250e", "sink_sompi": 97900000, "fee": 2100000, "budget": "40/40", "via": "zk-recover.mjs(审计已落库)" }
+  ],
+  "ticket_sweep": [
+    { "txid_prefix": "76127de6", "sink_sompi": 5500000, "fee": 1500000, "budget": 5, "via": "budget_search" },
+    { "txid_prefix": "baca72a2", "sink_sompi": 6640000, "fee": 360000, "budget": 20, "via": "zk-recover.mjs" },
+    { "txid_prefix": "d04c5b38", "sink_sompi": 6640000, "fee": 360000, "budget": 20, "via": "zk-recover.mjs" },
+    { "txid_prefix": "62bf13e8", "sink_sompi": 6640000, "fee": 360000, "budget": 20, "via": "zk-recover.mjs" }
+  ],
+  "negatives": [
+    { "case": "N1 builder 硬门", "result": "zk_claim_retire: 年龄未到 age=53 < retire_daa 400 + 余量 50 — 拒绝广播" },
+    { "case": "N2 绕过 builder 门(age_margin_daa=-1e9)直接广播", "result": "节点拒: one of the transaction sequence locks conditions was not met (txid 候选 d22e2e42…, 未入链)" }
+  ],
+  "idempotence": "回收后重跑 zk-recover --max 0: 可 retire / 可 sweep / 未到龄 均为 0, 全部 skipped(gone)",
+  "stamp": "claim tick 落链后写入 metadata.zk_self_cov_id(simnet 盘 uiw41/pi3sh 均有值), 耗尽后的盘靠它重算 claim redeem"
+}

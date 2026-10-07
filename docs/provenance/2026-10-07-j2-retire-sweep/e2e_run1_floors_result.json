@@ -1,0 +1,139 @@
+{
+ "started": "2026-10-07T06:58:47.773Z",
+ "network": "simnet",
+ "steps": {
+  "P1_first_list": {
+   "retirable": 2,
+   "notYet": 0,
+   "sweepable": 1,
+   "skipped": [
+    "claim:need_cov_id(2 个已领叶, 盘上无 zk_self_cov_id 且续约已耗尽; 用 --cov-id 23-vl1wf=<64hex> 手填)",
+    "ticket:gone(票 UTXO 已不存在)",
+    "ticket:gone(票 UTXO 已不存在)",
+    "claim:need_cov_id(2 个已领叶, 盘上无 zk_self_cov_id 且续约已耗尽; 用 --cov-id 12-8gmuv=<64hex> 手填)",
+    "ticket:gone(票 UTXO 已不存在)",
+    "ticket:gone(票 UTXO 已不存在)",
+    "claim:need_cov_id(2 个已领叶, 盘上无 zk_self_cov_id 且续约已耗尽; 用 --cov-id 29-bnwnx=<64hex> 手填)",
+    "ticket:gone(票 UTXO 已不存在)",
+    "ticket:gone(票 UTXO 已不存在)",
+    "ticket:gone(票 UTXO 已不存在)",
+    "ticket:gone(票 UTXO 已不存在)",
+    "claim:need_cov_id(2 个已领叶, 盘上无 zk_self_cov_id 且续约已耗尽; 用 --cov-id 07-z0g04=<64hex> 手填)",
+    "ticket:gone(票 UTXO 已不存在)",
+    "ticket:gone(票 UTXO 已不存在)",
+    "claim:need_cov_id(2 个已领叶, 盘上无 zk_self_cov_id 且续约已耗尽; 用 --cov-id 40-umrvw=<64hex> 手填)",
+    "ticket:gone(票 UTXO 已不存在)",
+    "ticket:gone(票 UTXO 已不存在)",
+    "claim:need_cov_id(2 个已领叶, 盘上无 zk_self_cov_id 且续约已耗尽; 用 --cov-id 16-fvyvm=<64hex> 手填)",
+    "ticket:gone(票 UTXO 已不存在)",
+    "ticket:gone(票 UTXO 已不存在)",
+    "claim:need_cov_id(2 个已领叶, 盘上无 zk_self_cov_id 且续约已耗尽; 用 --cov-id 18-lorc6=<64hex> 手填)",
+    "ticket:gone(票 UTXO 已不存在)",
+    "ticket:gone(票 UTXO 已不存在)",
+    "claim:need_cov_id(2 个已领叶, 盘上无 zk_self_cov_id 且续约已耗尽; 用 --cov-id 95-6f1b5=<64hex> 手填)",
+    "ticket:gone(票 UTXO 已不存在)",
+    "ticket:gone(票 UTXO 已不存在)",
+    "claim:need_cov_id(2 个已领叶, 盘上无 zk_self_cov_id 且续约已耗尽; 用 --cov-id 82-o8svl=<64hex> 手填)",
+    "ticket:gone(票 UTXO 已不存在)",
+    "ticket:gone(票 UTXO 已不存在)",
+    "claim:need_cov_id(2 个已领叶, 盘上无 zk_self_cov_id 且续约已耗尽; 用 --cov-id 85-dzxvd=<64hex> 手填)",
+    "ticket:gone(票 UTXO 已不存在)",
+    "ticket:gone(票 UTXO 已不存在)",
+    "claim:need_cov_id(2 个已领叶, 盘上无 zk_self_cov_id 且续约已耗尽; 用 --cov-id 38-4yvzs=<64hex> 手填)",
+    "ticket:gone(票 UTXO 已不存在)",
+    "ticket:gone(票 UTXO 已不存在)",
+    "claim:need_cov_id(2 个已领叶, 盘上无 zk_self_cov_id 且续约已耗尽; 用 --cov-id 21-9b5oy=<64hex> 手填)",
+    "ticket:gone(票 UTXO 已不存在)",
+    "ticket:gone(票 UTXO 已不存在)",
+    "claim:need_cov_id(2 个已领叶, 盘上无 zk_self_cov_id 且续约已耗尽; 用 --cov-id 17-c96q2=<64hex> 手填)",
+    "ticket:gone(票 UTXO 已不存在)",
+    "ticket:gone(票 UTXO 已不存在)",
+    "claim:need_cov_id(2 个已领叶, 盘上无 zk_self_cov_id 且续约已耗尽; 用 --cov-id 76-1l6ot=<64hex> 手填)",
+    "ticket:gone(票 UTXO 已不存在)",
+    "ticket:gone(票 UTXO 已不存在)",
+    "claim:need_cov_id(2 个已领叶, 盘上无 zk_self_cov_id 且续约已耗尽; 用 --cov-id 59-svrok=<64hex> 手填)",
+    "ticket:gone(票 UTXO 已不存在)",
+    "ticket:gone(票 UTXO 已不存在)",
+    "claim:need_cov_id(2 个已领叶, 盘上无 zk_self_cov_id 且续约已耗尽; 用 --cov-id 54-ctov6=<64hex> 手填)",
+    "ticket:gone(票 UTXO 已不存在)",
+    "ticket:gone(票 UTXO 已不存在)",
+    "ticket:gone(票 UTXO 已不存在)",
+    "ticket:gone(票 UTXO 已不存在)",
+    "ticket:gone(票 UTXO 已不存在)",
+    "claim:need_cov_id(2 个已领叶, 盘上无 zk_self_cov_id 且续约已耗尽; 用 --cov-id 25-q2cbr=<64hex> 手填)",
+    "ticket:gone(票 UTXO 已不存在)",
+    "claim:need_cov_id(4 个已领叶, 盘上无 zk_self_cov_id 且续约已耗尽; 用 --cov-id 52-gc9i1=<64hex> 手填)",
+    "ticket:gone(票 UTXO 已不存在)",
+    "ticket:gone(票 UTXO 已不存在)",
+    "ticket:gone(票 UTXO 已不存在)",
+    "ticket:gone(票 UTXO 已不存在)",
+    "ticket:gone(票 UTXO 已不存在)",
+    "ticket:gone(票 UTXO 已不存在)",
+    "claim:need_cov_id(2 个已领叶, 盘上无 zk_self_cov_id 且续约已耗尽; 用 --cov-id 16-9ajim=<64hex> 手填)",
+    "ticket:gone(票 UTXO 已不存在)",
+    "claim:need_cov_id(3 个已领叶, 盘上无 zk_self_cov_id 且续约已耗尽; 用 --cov-id 29-jsj47=<64hex> 手填)",
+    "ticket:gone(票 UTXO 已不存在)",
+    "ticket:gone(票 UTXO 已不存在)",
+    "claim:need_cov_id(2 个已领叶, 盘上无 zk_self_cov_id 且续约已耗尽; 用 --cov-id 31-j22es=<64hex> 手填)",
+    "ticket:gone(票 UTXO 已不存在)",
+    "ticket:gone(票 UTXO 已不存在)",
+    "ticket:gone(票 UTXO 已不存在)"
+   ],
+   "firstClaimAge": {
+    "ageDaa": 1299,
+    "requiredDaa": 400
+   },
+   "firstClaimEligible": true
+  },
+  "N1_N2": "skipped_because_already_old",
+  "P1_eligible_list": {
+   "retirable": [
+    {
+     "market": "98-uiw41",
+     "leaf": 0,
+     "age": {
+      "ageDaa": 1300,
+      "requiredDaa": 400
+     },
+     "sum_in": "100000000"
+    },
+    {
+     "market": "98-uiw41",
+     "leaf": 1,
+     "age": {
+      "ageDaa": 946,
+      "requiredDaa": 400
+     },
+     "sum_in": "100000000"
+    }
+   ],
+   "notYet": 0,
+   "sweepable": [
+    {
+     "market": "98-uiw41",
+     "age": {
+      "ageDaa": 7834,
+      "requiredDaa": 6000
+     }
+    }
+   ],
+   "liveSlots": 0
+  },
+  "F_claim_retire": {
+   "ok": false,
+   "error": "RPC Server (remote error) -> Rejected transaction 918f643b454c76f99be1155574a6fa26d260070888c6638a7508ab528e9f56d0: transaction 918f643b454c76f99be1155574a6fa26d260070888c6638a7508ab528e9f56d0 is not standard: transaction has 1 fees which is under the required amount of 4787600 for compute mass 47876",
+   "floor": {
+    "floor": 4787600,
+    "mass": 47876
+   }
+  },
+  "F_ticket_sweep": {
+   "ok": false,
+   "error": "RPC Server (remote error) -> Rejected transaction 451ffca143599a9883bbd6fc3af2d05a88ce9aff662a0735bb815b39769335e1: transaction 451ffca143599a9883bbd6fc3af2d05a88ce9aff662a0735bb815b39769335e1 is not standard: transaction has 1 fees which is under the required amount of 1075000 for compute mass 10750",
+   "floor": {
+    "floor": 1075000,
+    "mass": 10750
+   }
+  }
+ }
+}

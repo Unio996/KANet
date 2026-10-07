@@ -1,0 +1,14 @@
+===== case A 只有 1 注: YES, YES 赢 =====
+06:40:41 market ext-pool-v07-1791355240798-uiw41 cond=0xa8a8a8a8a8… 预期赢家方向=0 (期望 0) deadline=2026-10-07T06:47:17.000Z
+06:41:10   bet A dir=0 units=1000000000 ⇒ 200 (29267ms)
+06:41:10   06:41:10 pending_bettors claims=0
+06:49:40   06:49:40 verifying claims=0
+06:52:51   06:52:51 collecting_sigs claims=0
+06:53:51   06:53:51 attested_v2 claims=0
+06:56:51   06:56:51 attested_v2 claims=1
+06:57:21   06:57:21 attested_v2/exhausted claims=2
+06:57:36   FINAL attested_v2  system wallets Δ = 3.045371 KAS  bettors Δ0=true
+06:57:36 
+===== case B 单边赢: 3 注全 YES, YES 赢 =====
+07:03:41 
+ALL CASES DONE
