@@ -46,7 +46,7 @@ await t('超时: fetch 挂起 ⇒ 到 timeoutMs 抛(AbortController)', async () 
   await assert.rejects(makeKaspaApiReader({ fetchImpl: hang, timeoutMs: 30 }).listAddressTxs(ADDR), /aborted/);
 });
 await t('静态: 只发 GET(无 method/body/自定义头 ⇒ 浏览器 simple request, 无预检); 无 console.* ', async () => {
-  const { readFileSync } = await import('node:fs'); const src = readFileSync(new URL('./delivery-read-kaspa-api.mjs', import.meta.url), 'utf8').replace(/\/\/.*$/gm, '');
+  const { readFileSync } = await import('node:fs'); const src = readFileSync(new URL('./checkout-static/delivery-read.js', import.meta.url), 'utf8').replace(/\/\/.*$/gm, '');
   assert.ok(!/method\s*:|body\s*:|headers\s*:|console\./.test(src));
 });
 console.log(`\n${pass} pass, ${fail} fail`); process.exitCode = fail ? 1 : 0;

@@ -139,6 +139,17 @@ await t('入口错误: 无 #n / 无 ?q / 报价被改 / 无 deadline / 网络 �
   await assert.rejects(go({ ...mkLocation(), hash: '#n=' + NONCE }), /截止时间/);
   assert.strictEqual(w.urls.length, 0);
 });
+await t('凭据文件(含秘密)不可能被现有"凭据救援退款"流程当订单凭据吞进去: kind 不同 ⇒ order-receipt.parseOrderReceipt 拒; 且结账页源码对 receipt 无任何网络发送', async () => {
+  const { parseOrderReceipt } = await import('./checkout-static/order-receipt.js');
+  const flow = await start(mkWorld({ mailbox: MAILBOX }));
+  assert.throws(() => parseOrderReceipt(flow.credentialJson()), /凭据类型不符/);
+  const cj = JSON.parse(flow.credentialJson()); assert.strictEqual(cj.kind, 'kanet-delivery-credential'); assert.strictEqual(cj.n, NONCE);
+  const co = fs.readFileSync(new URL('./checkout-static/checkout.js', import.meta.url), 'utf8').replace(/\/\/.*$/gm, '');
+  const recLines = co.split('\n').filter((l) => /receipt|Receipt/.test(l));
+  assert.ok(recLines.length > 0 && !recLines.some((l) => /\bfetch\s*\(|XMLHttpRequest|WebSocket|sendBeacon|navigator\.send/.test(l)), '结账页的凭据处理行里不应有任何网络发送');
+  const pg = fs.readFileSync(new URL('./checkout-static/delivery-page.js', import.meta.url), 'utf8').replace(/\/\/.*$/gm, '');
+  assert.ok(!/credentialJson\(\)[^;]*(fetch|post|send)/i.test(pg), '买家页只把凭据交给 Blob 下载, 不发送');
+});
 await t('静态: 买家核心 / 加密 模块无 fetch/XMLHttpRequest/WebSocket/console(副作用全注入); nonce 不与 URL 构造同表达式(lint R-DELIVERY-NONCE-IN-QUERY 同口径)', () => {
   for (const f of ['./checkout-static/delivery-buyer.js', './checkout-static/delivery-crypto.js']) {
     const src = fs.readFileSync(new URL(f, import.meta.url), 'utf8').replace(/\/\/.*$/gm, '');

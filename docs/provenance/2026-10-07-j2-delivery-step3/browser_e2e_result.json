@@ -1,0 +1,49 @@
+{
+ "checks": [
+  {
+   "name": "页面自动取到交付物(读链 + 本地解密)",
+   "pass": true
+  },
+  {
+   "name": "页面显示的订单地址 = 商家 console 推出的订单地址",
+   "pass": true
+  },
+  {
+   "name": "读片段后地址栏片段已被抹掉(location.hash 为空, URL 不含 nonce)",
+   "pass": true
+  },
+  {
+   "name": "页面文本里没有秘密",
+   "pass": true
+  },
+  {
+   "name": "断言 b(真实浏览器): 页面发出的每个请求(含 Referer/POST 体)都不含秘密的任何 8 位窗口",
+   "pass": true
+  },
+  {
+   "name": "外网请求只有读后端 api.kaspa.org",
+   "pass": true
+  },
+  {
+   "name": "读后端请求只含地址/链高度路径",
+   "pass": true
+  },
+  {
+   "name": "页面无 JS 报错",
+   "pass": true
+  },
+  {
+   "name": "粘贴路径: 改过的密文被拒、正确密文解出交付物",
+   "pass": true
+  },
+  {
+   "name": "粘贴场景同样零秘密外泄(所有请求)",
+   "pass": true
+  },
+  {
+   "name": "缺少 #n 的链接: 提示订单凭据缺失且不发任何外网请求",
+   "pass": true
+  }
+ ],
+ "verdict": "PASS"
+}
