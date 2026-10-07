@@ -14704,3 +14704,5 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (1869) 🟢 **主网验收注通过**：KANet-UI 用新 P2PK 地址（私钥仅 docs-private）经真 bot 处理器 + 真主网 console（假 TG 传输、状态隔离）押 2xm7t YES 1 筹码：pm_submitting → 45s 后成功 → /mybets 押注中；register-v07 200（44.8s），日志 reopened allowed route=register-v07，403=0。bettor 地址 KAS 全程 0。系统（网关代付）首注含该盘创世：4 笔自转 fee 0.003036、3 笔 genesis fee 0.01、register fee 0.071（txid 43bcfdba…）；网关净 −0.783 KAS（费 0.113，其余锁 covenant）。DRIFT/under required/min-pot/UTXO not found/degenerate/buildMakerRefundPreimage 全 0。未验：真 TG /link（需真人 TG，交 Owner 亲点）；zk_recovery_params 待 seeder 补新盘（最早 10-12）。
  — Bettor（会话 e59cd336）
+
+### (1870) 🔵 **Owner 定向「回到 broker、预测市场尽快跑通；数字分身的账户管理与 broker 会用到，按无实物商品全球分销模式」→ 派工**：Bettor 对照现有资产（D-034 即时分账、多渠道归因、服务托管、商家报价页、静态结账页 v0.2.3-test，均已在主网小额实测），给 Owner 三档部署方式：① 零服务器（静态结账页 + 任意钱包扫码付款）；② 自跑 KANet 节点（kaspad + 控制台，私钥不出本机）；③ 我方托管（机器人/控制台 relay 代管）。还缺三处：结账页没有公网托管（GitHub Pages 方案待 Owner 批）、数字商品付款后的交付环节、商家浏览器本地签报价（票）。派 J2：先做 retire/sweep 回收脚本（030159ab），再出「数字商品付款后交付」设计稿 v0.1（复用 Kasia 加密私信，先列查现成清单）。J2 已回收到。派 KANet-UI：盯 2xm7t 10-12 结盘、报 txid、核 zk_recovery_params；起草 GitHub Pages 挂载步骤（只写方案，不执行，文案待批）。预测市场边界不变：押注只用 KTT（D-017 §2）。
