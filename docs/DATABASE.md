@@ -891,8 +891,9 @@ Dex-Agent 的状态机数据源。每笔 DM 下的订单从 `aligning` 开始，
 | stock_id | INTEGER | 已分配库存项 |
 | mailbox_address / mailbox_payload_hex | TEXT | 信箱地址与已发密文（密文本就公开；商家可导出 hex 给买家做"粘贴密文"解密） |
 | mailbox_sent_at / delivered_at / created_at / updated_at | TEXT | 时间戳 |
+| quote_json | TEXT | **v223** 发票模式的公开签名报价 JSON（重建订单协议/split 用；本就公开，不含秘密；老行 NULL） |
 
-**写入方**：`lib/delivery-store.mjs`（唯一写入口）、`lib/delivery-watcher.mjs`（状态推进，CAS）。**读取方**：`api/delivery.js`（运营者回环路由，响应永不含 nonce）。
+**写入方**：`lib/delivery-store.mjs`（唯一写入口；`createOrder` 手填金额 / `createInvoiceOrder` 发票模式带报价与订单地址）、`lib/delivery-watcher.mjs`（状态推进，CAS）。**读取方**：`api/delivery.js`（运营者回环路由，响应永不含 nonce）。
 **陷阱**：① 不要给本表加任何明文 nonce 列/日志；② `delivered` 只能在信箱交易落链确认后写；③ 同一订单可能因崩溃重发信箱交易（iv 不同的重复密文），买家取第一条解得开的——这是设计，不是脏数据。
 
 ### delivery_stock
@@ -1016,7 +1017,7 @@ M0c-1 app provision grant registry（2026-07-23, 设计 `docs/2026-07-23-m0c-1-a
 3. 改字段：SQLite 不支持直接改，需建新表→迁移→删旧表
 4. 新表：migrate.js 新版本，加 `IF NOT EXISTS` 保护
 
-**当前最新版本：v222（2026-10-07 数字商品交付 delivery_orders / delivery_stock · 账本1877 步2）**
+**当前最新版本：v223（2026-10-07 delivery_orders.quote_json · 账本1877 步3）**
 （v199-v204 本文件changelog未逐条回填，见上方既有说明"以 migrate.js 实际为准"——本行只保证指向 migrate.js
 真实末尾版本号，不代表 v199-v204 都已在下方逐条记录。）
 
@@ -1028,6 +1029,8 @@ M0c-1 app provision grant registry（2026-07-23, 设计 `docs/2026-07-23-m0c-1-a
 > 注：v125–v156 尚未在本表逐条回填（r281 scope 外）；新增 migration 接 v157 之后。v176-v183、v185-v186 未逐条回填（各自设计稿/COORD-LEDGER 有账），本行版本号以 migrate.js 实际为准。
 
 ## 版本历史（近期）
+
+- **v223 (2026-10-07, J2 · 账本1877 步3)**: `delivery_orders` 加 `quote_json` 列（发票模式公开报价；纯新增，可 NULL）。
 
 - **v222 (2026-10-07, J2 · 账本1877 步2 数字商品付款后交付)**: 新表 `delivery_orders` + `delivery_stock`（见上「数字商品交付层」）。纯新增 CREATE TABLE IF NOT EXISTS；orderNonce 只以加密信封存。
 
