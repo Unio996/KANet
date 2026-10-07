@@ -50,7 +50,7 @@ await t('推导: 确定性(同输入同地址); 换 nonce/deadline ⇒ 地址变
   assert.notStrictEqual((await I.deriveInvoiceOrder({ quote, orderNonceHex: NONCE, deadlineMs: DL + 1 })).orderAddress, a.orderAddress);
   const rk = (await X.deriveRefundKey({ orderNonceHex: NONCE, network: 'simnet' })).refundPrivHex;
   assert.strictEqual(a.refundAddress, new kaspa.PrivateKey(rk).toPublicKey().toAddress('simnet').toString());
-  assert.strictEqual(a.totalSompi, '300000000'); assert.strictEqual(a.merchantAddress, PROVIDER); assert.strictEqual(BigInt(a.merchantAmountSompi) > 0n, true);
+  assert.strictEqual(a.rolesTotalSompi, '300000000'); assert.strictEqual(a.totalSompi, '340000000', '应付 = 角色合计 + max_split_fee'); assert.strictEqual(a.merchantAddress, PROVIDER); assert.strictEqual(BigInt(a.merchantAmountSompi) > 0n, true);
   assert.ok(BigInt(a.merchantAmountSompi) <= BigInt(a.totalSompi));
 });
 await t('与结账页浏览器路径对拍: resolveRulesForOrder + rebuildCommissionOrderAddress(固定偏移覆写, 买家页用的同一套)得到【同一个】订单地址', async () => {
@@ -92,7 +92,7 @@ await t('路由发票模式: 建单即 watching; 链接 nonce 与 dl 只在片�
   const f = await mkApp();
   const r = await f.inject({ method: 'POST', url: '/api/delivery/orders', headers: H, payload: { sku_id: 'sku-inv', deadline_ms: DL, base_url: 'https://example.github.io/checkout/delivery.html', quote } });
   assert.strictEqual(r.statusCode, 200, r.body); const j = r.json();
-  assert.strictEqual(j.state, 'watching'); assert.ok(j.order_address.startsWith('kaspasim:p')); assert.strictEqual(j.total_sompi, '300000000');
+  assert.strictEqual(j.state, 'watching'); assert.ok(j.order_address.startsWith('kaspasim:p')); assert.strictEqual(j.total_sompi, '340000000');
   const u = new URL(j.invoice_link); const nonce = /n=([0-9a-f]{32})/.exec(u.hash)[1];
   assert.ok(u.hash.includes('&dl=' + DL)); assert.ok(!C_leaks(u.search + u.pathname, nonce));
   assert.deepStrictEqual(JSON.parse(Buffer.from(u.searchParams.get('q'), 'base64').toString('utf8')), quote);

@@ -46,7 +46,9 @@ export async function deriveBuyerOrder({ kaspa, RB, feeSplitLib, sourceSha256Hex
   const redeemScriptHex = typeof order.redeemScript === 'string' ? order.redeemScript : hexOf(order.redeemScript);
   return {
     network, orderAddress: order.address, redeemScriptHex, refundAddress, refundPrivHex, mailboxAddress: mailboxAddress(kaspa, mailboxPrivHex, network), mailboxPrivHex,
-    totalSompi: resolved.payoutLeaves.reduce((a, r) => a + r.amountSompi, 0n), deadlineMs,
+    // 应付 = 角色合计 + max_split_fee(单输入零签名 split 的差额全部作矿工费; 只付角色合计会被 mempool 以 0 手续费拒绝)
+    rolesTotalSompi: resolved.payoutLeaves.reduce((a, r) => a + r.amountSompi, 0n),
+    totalSompi: resolved.payoutLeaves.reduce((a, r) => a + r.amountSompi, 0n) + BigInt(quote.max_split_fee_sompi), deadlineMs,
     refundProtocol: { redeemScriptHex, entries: COMMISSION_ENTRIES, refundSpk, maxRefundFeeSompi: BigInt(quote.max_refund_fee_sompi), deadlineMs },
   };
 }

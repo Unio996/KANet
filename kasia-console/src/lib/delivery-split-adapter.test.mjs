@@ -94,7 +94,7 @@ await t('拒绝: sigScript 不是对该 redeem 的 push(换 redeem) / expected_t
   let r = await submit(tx, { redeem: otherRedeem }); assert.strictEqual(r.ok, false); assert.match(r.error, /sigScript|redeem/);
   r = await submit(mkTx(total), { txid: '00'.repeat(32) }); assert.match(r.error, /expected_txid/);
   r = await submit(mkTx(total), { noUtxo: true }); assert.match(r.error, /UTXO 不在/);
-  r = await submit(mkTx(total), { amount: total - 1n }); assert.strictEqual(r.ok, false);
+  r = await submit(mkTx(total), { amount: BigInt(d.rolesTotalSompi) - 1n }); assert.strictEqual(r.ok, false);
   const big = total + 300_000_000n; const tx2 = mkTx(big); tx2.outputs = tx2.outputs.map((o, i, a) => (i === a.length - 1 ? new kaspa.TransactionOutput(BigInt(o.value) - 50_000_000n, o.scriptPublicKey) : o));
   r = await submit(tx2, { amount: big }); assert.strictEqual(r.ok, false); assert.match(r.error, /找零/);
   const mal = await SS.submitSplit({ cmd: { ...toCmd(mkTx(total)), outputs: 'x' }, kaspa, rpc: mkRpc(total), networkId: 'simnet' }); assert.strictEqual(mal.ok, false);

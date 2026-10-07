@@ -12,7 +12,8 @@ export const encodeQuoteParam = (quote) => Buffer.from(JSON.stringify(quote)).to
 
 /**
  * @param {{quote:object, orderNonceHex:string, deadlineMs:number, expectNetwork?:string}} o
- * @returns {Promise<{network:string, orderAddress:string, refundAddress:string, totalSompi:string, merchantAddress:string, merchantAmountSompi:string, protocol:object, finalRoles:object[]}>}
+  * 应付 totalSompi = 角色合计 rolesTotalSompi + max_split_fee
+ * @returns {Promise<{network:string, orderAddress:string, refundAddress:string, totalSompi:string, rolesTotalSompi:string, merchantAddress:string, merchantAmountSompi:string, protocol:object, finalRoles:object[]}>}
  */
 export async function deriveInvoiceOrder({ quote, orderNonceHex, deadlineMs, expectNetwork, skipValidity = false }) {
   if (!quote || typeof quote !== 'object') throw new Error('deriveInvoiceOrder: quote 必填');
@@ -39,10 +40,12 @@ export async function deriveInvoiceOrder({ quote, orderNonceHex, deadlineMs, exp
     network, finalRoles: finalRoles.map((r) => ({ amountSompi: r.amountSompi, spk: r.spk })), payerRefundAddress: refundAddress, deadlineMs,
     maxSplitFeeSompi: BigInt(quote.max_split_fee_sompi), maxRefundFeeSompi: BigInt(quote.max_refund_fee_sompi), orderNonceHex: contractNonceHex,
   });
-  const totalSompi = resolved.payoutLeaves.reduce((a, r) => a + r.amountSompi, 0n);
+  // 🔴 充值口径(CommissionSplit/InstantSplit 设计 v0.2 §2.3): 应付 = 角色合计 + max_split_fee。split 是单输入零签名, 差额全部作矿工费(受 max_split_fee 上限约束); 只付角色合计 ⇒ fee=0 被 mempool 拒(simnet 实测: "0 fees … required 972800")。
+  const rolesTotalSompi = resolved.payoutLeaves.reduce((a, r) => a + r.amountSompi, 0n);
+  const totalSompi = rolesTotalSompi + BigInt(quote.max_split_fee_sompi);
   const providerRole = quote.canonical_rules.roles.find((r) => r.name === 'provider');
   return {
-    network, orderAddress: protocol.address, refundAddress, totalSompi: String(totalSompi), merchantAddress: providerRole.address,
+    network, orderAddress: protocol.address, refundAddress, totalSompi: String(totalSompi), rolesTotalSompi: String(rolesTotalSompi), merchantAddress: providerRole.address,
     merchantAmountSompi: String(provider.amountSompi), protocol, finalRoles,
   };
 }
