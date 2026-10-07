@@ -81,16 +81,17 @@ function claimedLeaves(marketId, meta, db) {
  * @param {Record<string,string>} [o.covIdOverrides] marketId → 64hex(运维手填)
  * @param {boolean} [o.dryRunProbe=true] 对每个候选让 relay builder dry_run 取年龄(false ⇒ 只列清单不判年龄)
  * @param {string[]} [o.onlyMarkets]
+ * @param {number} [o.marginDaa] 软余量(默认 RECOVER_AGE_MARGIN_DAA=1000): age < 门槛 + 余量 ⇒ notYet
  */
 export async function enumerateRecovery(o) {
-  const { db, rc, p2sh, tmpl, env = process.env, covIdOverrides = {}, dryRunProbe = true, onlyMarkets = null } = o;
-  const res = { retirable: [], sweepable: [], notYet: [], skipped: [], liveSlotHolders: [], cap: resolveMaxLiveMarkets(env) };
+  const { db, rc, p2sh, tmpl, env = process.env, covIdOverrides = {}, dryRunProbe = true, onlyMarkets = null, marginDaa = RECOVER_AGE_MARGIN_DAA } = o;
+  const res = { retirable: [], sweepable: [], notYet: [], skipped: [], liveSlotHolders: [], cap: resolveMaxLiveMarkets(env), marginDaa };
   const skip = (marketId, kind, reason, extra = {}) => res.skipped.push({ market_id: marketId, kind, reason, ...extra });
   try { res.liveSlotHolders = listUnfinishedZkNativeMarkets(db).map((m) => ({ id: m.id, protocol_status: m.protocol_status })); } catch (e) { res.liveSlotError = e.message; }
 
   const rows = db.prepare(`SELECT id, protocol_status, metadata, created_at FROM pool_markets WHERE json_valid(resolution_rule_spec) AND json_extract(resolution_rule_spec, '$.zk_native') = 1 AND protocol_status != 'shard_internal'`).all();
   const bump = (item, probe) => {
-    if (probe) { item.age = { ageDaa: probe.ageDaa, requiredDaa: probe.requiredDaa }; item.eligible = probe.eligible && probe.ageDaa >= probe.requiredDaa + RECOVER_AGE_MARGIN_DAA; }
+    if (probe) { item.age = { ageDaa: probe.ageDaa, requiredDaa: probe.requiredDaa }; item.eligible = probe.eligible && probe.ageDaa >= probe.requiredDaa + marginDaa; }
     return item;
   };
 

@@ -8,7 +8,7 @@
 // 用法:
 //   DB_PATH=<console 库绝对路径> KASPA_RPC_URL=ws://... KASPA_NETWORK=<simnet|mainnet> \
 //   ZK_TOKEN_TMPL_HASH=... ZK_CLAIM_TMPL_HASH=... (同 console env) \
-//     node scripts/zk-recover.mjs [--max N] [--kind claim|ticket|all] [--market <id 或末段>] [--cov-id <末8位>=<64hex>] [--json] [--mainnet-ok]
+//     node scripts/zk-recover.mjs [--max N] [--kind claim|ticket|all] [--market <id 或末段>] [--cov-id <末8位>=<64hex>] [--margin <DAA, 默认 1000>] [--json] [--mainnet-ok]
 //   主网: 必须带 --mainnet-ok(防误跑); 强烈建议 DB_PATH 指向库的拷贝做 dry-run。
 // 只读栏「live 名额占用者」= listUnfinishedZkNativeMarkets(与 create-v07 的 ZK_MAX_LIVE_MARKETS 闸同源): 卡死的盘会一直占名额。
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -52,7 +52,7 @@ const rc = async (cmd) => {
 };
 const p2sh = (redeemHex) => relay._addressFromRedeem(redeemHex, network);
 
-const res = await enumerateRecovery({ db: sqlite, rc, p2sh, tmpl, env: process.env, covIdOverrides, onlyMarkets: opt('--market') ? [opt('--market')] : null });
+const res = await enumerateRecovery({ db: sqlite, rc, p2sh, tmpl, env: process.env, covIdOverrides, onlyMarkets: opt('--market') ? [opt('--market')] : null, ...(opt('--margin') !== null ? { marginDaa: Number(opt('--margin')) } : {}) });
 const wantClaim = kind !== 'ticket', wantTicket = kind !== 'claim';
 const retirable = wantClaim ? res.retirable : [], sweepable = wantTicket ? res.sweepable : [];
 const sompi = (s) => (Number(BigInt(s)) / 1e8).toFixed(8);
@@ -68,7 +68,7 @@ else {
   console.log(`\n== 可 sweep 的票 (${sweepable.length}) ==`);
   for (const it of sweepable) console.log(`  market=…${short(it.market_id)} shard=${it.shard_index} pk=${it.bettor_pk.slice(0, 10)}… Σin=${sompi(it.sum_in_sompi)} KAS age=${it.age?.ageDaa}/${it.age?.requiredDaa} params=${it.params_source}`);
   console.log(`\n== 未到龄 (${res.notYet.length}) ==`);
-  for (const it of res.notYet) console.log(`  ${it.kind} market=…${short(it.market_id)} age=${it.age?.ageDaa}/${it.age?.requiredDaa}(+余量 ${1000}) 还差 ${Math.max(0, it.age.requiredDaa + 1000 - it.age.ageDaa)} DAA`);
+  for (const it of res.notYet) console.log(`  ${it.kind} market=…${short(it.market_id)} age=${it.age?.ageDaa}/${it.age?.requiredDaa}(+余量 ${res.marginDaa}) 还差 ${Math.max(0, it.age.requiredDaa + res.marginDaa - it.age.ageDaa)} DAA`);
   console.log(`\n== skipped (${res.skipped.length}) ==`);
   for (const s of res.skipped) console.log(`  ${s.kind} market=…${short(s.market_id)} ${s.reason}`);
 }
