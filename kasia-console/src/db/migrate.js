@@ -6740,5 +6740,49 @@ export function runMigrations() {
       console.log('[migrate] v221: pool_markets.spine_p2sh 已去 NOT NULL(ZK 原生盘无 spine; writable_schema 单行改写, integrity_check/foreign_key_check 通过).');
     }
   }
+  // ── v222 (2026-10-07, J2 · 账本1877 步2: 数字商品「付款后交付」两张新表) ──
+  //   设计 docs/2026-10-07-j2-digital-goods-delivery-design-v0.1/0.2/0.3.md §4。纯新增(CREATE TABLE IF NOT EXISTS), 不改任何既有表。
+  //   delivery_orders: 卖家侧每单一行(状态机 created→watching→paid→split_done→mailbox_sent→delivered; 另 expired/manual_review)。
+  //     🔴 orderNonce 只以 services/crypto.js 信封加密存(nonce_encrypted), 永不明文落库/落日志(v0.3 §3 MUST); 对外视图不含它。
+  //     pay_txid / split_txid / mailbox_txid = 地址+TX 双锚点(铁律), 仅在对应交易落链确认后才写进"已确认"状态。
+  //   delivery_stock: 交付物库存(payload_encrypted 同机制加密); assigned_order UNIQUE ⇒ 一码一单(单条 UPDATE…WHERE assigned_order IS NULL 原子分配)。
+  //   写入/读取方: lib/delivery-store.mjs(唯一写入口)、lib/delivery-watcher.mjs(状态推进)、api/delivery.js(运营者回环路由)。
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS delivery_orders (
+      id TEXT PRIMARY KEY,
+      network TEXT NOT NULL,
+      sku_id TEXT NOT NULL,
+      order_address TEXT UNIQUE,
+      nonce_encrypted TEXT NOT NULL,
+      total_sompi TEXT NOT NULL,
+      merchant_address TEXT NOT NULL,
+      merchant_amount_sompi TEXT NOT NULL,
+      deadline_ms INTEGER NOT NULL,
+      state TEXT NOT NULL DEFAULT 'created' CHECK (state IN ('created','watching','paid','split_done','mailbox_sent','delivered','expired','manual_review')),
+      manual_reason TEXT,
+      pay_txid TEXT,
+      split_txid TEXT,
+      split_attempts INTEGER NOT NULL DEFAULT 0,
+      stock_id INTEGER,
+      mailbox_address TEXT,
+      mailbox_txid TEXT,
+      mailbox_payload_hex TEXT,
+      mailbox_attempts INTEGER NOT NULL DEFAULT 0,
+      mailbox_sent_at TEXT,
+      delivered_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_delivery_orders_state ON delivery_orders(state);
+    CREATE TABLE IF NOT EXISTS delivery_stock (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      sku_id TEXT NOT NULL,
+      payload_encrypted TEXT NOT NULL,
+      assigned_order TEXT UNIQUE,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_delivery_stock_sku ON delivery_stock(sku_id, assigned_order);
+  `);
+  console.log('[migrate] v222: delivery_orders / delivery_stock 已就绪(数字商品付款后交付, 纯新增).');
   console.log('[migrate] DB migrations complete.');
 }

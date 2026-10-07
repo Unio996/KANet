@@ -74,6 +74,7 @@ import { registerSettingsRoutes } from './api/settings.js';
 import { registerIdentityRoutes } from './api/identities.js';
 import { registerSkillRoutes } from './api/skills.js';
 import { registerDiscoveryRoutes } from './api/discovery.js';
+import { registerDeliveryRoutes } from './api/delivery.js';   // 账本1877 步2: 数字商品交付运营者回环路由(ADMIN_SECRET_DELIVERY 未设 ⇒ 503)
 import { registerChatRoutes } from './api/chat.js';
 import { registerDevChannelV1Routes } from './api/dev-channel-v1.js';
 import { registerPeerCoordRoutes } from './api/peer-coord.js';
@@ -255,6 +256,7 @@ await registerSettingsRoutes(fastify);
 await registerIdentityRoutes(fastify);
 await registerSkillRoutes(fastify);
 await registerDiscoveryRoutes(fastify);
+await registerDeliveryRoutes(fastify);
 await registerChatRoutes(fastify);
 registerDevChannelV1Routes(fastify);
 registerPeerCoordRoutes(fastify);

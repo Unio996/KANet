@@ -129,6 +129,8 @@ export const COMMAND_TYPES = Object.freeze({
   // ── 账本1867(Bettor 派工, 回收工具): 无签名/无钱包输入, 唯一去向 = 烤死的 sink_pk; 年龄门由合约 ageDaa(OpCheckSequenceVerify)最终裁决 ──
   ZK_CLAIM_RETIRE: 'zk_claim_retire',                         // KanetTokenClaim.retire: claim UTXO + 其代币 UTXO → sink P2PK(age ≥ ZK_CLAIM_RETIRE_DAA)
   ZK_TICKET_SWEEP: 'zk_ticket_sweep',                         // PoolSideTicket.sweep: 票 UTXO → sink P2PK(age ≥ ZK_TICKET_SWEEP_DAA)
+  // ── 账本1877 步2(数字商品交付): 链上信箱窄转账 — 小额 + KDL1 交付密文信封 + P2PK 目标; 校验在 lib/delivery-mailbox.mjs, 不是通用 payload 转账 ──
+  DELIVERY_MAILBOX_SEND: 'delivery_mailbox_send',
   // ── 原型 v0 covenant_broadcast (2026-09-14, J2 接线笔①, 设计 §9, Owner §6=B′ 拍板): relay 侧
   // 广播"调用方已构造好的任意签名交易", 只签 sign_input_indices 声明的索引, 执行权限限定于
   // PROTO_RELAY_ID(covenant-broadcast-relay.mjs)。三层注册必齐(同上 KI-49 防坑纪律)。
@@ -219,6 +221,7 @@ export const COMMAND_PAYLOAD_SCHEMA = Object.freeze({
   [COMMAND_TYPES.CLOSEZK_V2_ESCAPE_CLAIM]: ['witness', 'inputs', 'outputs'],
   [COMMAND_TYPES.ZK_CLAIM_RETIRE]: ['witness', 'inputs', 'sink_pk_hex', 'retire_daa'],
   [COMMAND_TYPES.ZK_TICKET_SWEEP]: ['witness', 'inputs', 'sink_pk_hex', 'sweep_daa'],
+  [COMMAND_TYPES.DELIVERY_MAILBOX_SEND]: ['target', 'amount', 'payload_hex'],
   // 只有 intent_key 是两条路径(fresh/replay)共通的最小契约(同 TRANSFER 模式); tx_json/
   // sign_input_indices/expected_txid(fresh) 与 replay_tx_json/prepared_txid(replay) 互斥可选,
   // 由 covenant-broadcast-relay.mjs 运行时判断到底走哪条, 不在这里强制其中一组必填。
@@ -313,6 +316,7 @@ export const COMMAND_FIELD_TYPES = Object.freeze({
   [COMMAND_TYPES.CLOSEZK_V2_ESCAPE_CLAIM]: { witness: 'object', inputs: 'object', outputs: 'object' },
   [COMMAND_TYPES.ZK_CLAIM_RETIRE]: { witness: 'object', inputs: 'object', sink_pk_hex: 'string', retire_daa: 'number', age_margin_daa: 'number', fee_sompi: ['number', 'string'], dry_run: 'boolean' },
   [COMMAND_TYPES.ZK_TICKET_SWEEP]: { witness: 'object', inputs: 'object', sink_pk_hex: 'string', sweep_daa: 'number', age_margin_daa: 'number', fee_sompi: ['number', 'string'], dry_run: 'boolean' },
+  [COMMAND_TYPES.DELIVERY_MAILBOX_SEND]: { target: 'string', amount: ['string', 'number'], payload_hex: 'string' },
 });
 
 export function validateCommandPayload(cmd) {

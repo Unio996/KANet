@@ -869,6 +869,37 @@ Dex-Agent 的状态机数据源。每笔 DM 下的订单从 `aligning` 开始，
 
 ---
 
+## 数字商品交付层（v222, 账本1877 步2）
+
+设计 `docs/2026-10-07-j2-digital-goods-delivery-design-v0.1.md` / `v0.2` / `v0.3`。卖家（运营者）侧：即时分账订单付款并分账完成后，把加密交付物写进链上"信箱"，买家凭订单凭据取货。**纯新增两张表，不改任何既有表。**
+
+### delivery_orders
+**卖家侧每单一行**；状态机 `created → watching → paid → split_done → mailbox_sent → delivered`，另 `expired` / `manual_review`（`state` 有 CHECK）。
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| id | TEXT PK | UUID |
+| network | TEXT NOT NULL | mainnet / simnet … |
+| sku_id | TEXT NOT NULL | 商品标识（库存按它分配） |
+| order_address | TEXT UNIQUE | 订单 covenant 地址；`created` 时为 NULL，登记后进 `watching` |
+| nonce_encrypted | TEXT NOT NULL | 🔴 orderNonce（128 位）的 `services/crypto.js` 信封加密；**永不明文落库/落日志**；对外视图不含它（v0.3 §3 MUST） |
+| total_sompi / merchant_address / merchant_amount_sompi | TEXT NOT NULL | 应付总额与商家应得额（买家抢先 split 的"金额精确吻合"判据用） |
+| deadline_ms | INTEGER NOT NULL | 订单退款截止（毫秒） |
+| manual_reason | TEXT | 转人工原因 |
+| pay_txid / split_txid / mailbox_txid | TEXT | 地址+TX 双锚点；仅在对应交易落链确认后才推进状态 |
+| split_attempts / mailbox_attempts | INTEGER | 重试计数（超限转人工） |
+| stock_id | INTEGER | 已分配库存项 |
+| mailbox_address / mailbox_payload_hex | TEXT | 信箱地址与已发密文（密文本就公开；商家可导出 hex 给买家做"粘贴密文"解密） |
+| mailbox_sent_at / delivered_at / created_at / updated_at | TEXT | 时间戳 |
+
+**写入方**：`lib/delivery-store.mjs`（唯一写入口）、`lib/delivery-watcher.mjs`（状态推进，CAS）。**读取方**：`api/delivery.js`（运营者回环路由，响应永不含 nonce）。
+**陷阱**：① 不要给本表加任何明文 nonce 列/日志；② `delivered` 只能在信箱交易落链确认后写；③ 同一订单可能因崩溃重发信箱交易（iv 不同的重复密文），买家取第一条解得开的——这是设计，不是脏数据。
+
+### delivery_stock
+**交付物库存**。`payload_encrypted`（同机制加密）；`assigned_order` **UNIQUE** ⇒ 一码一单；分配 = 单条 `UPDATE … WHERE assigned_order IS NULL`（原子）。**写入方**：`lib/delivery-store.mjs`。明文交付物不进仓库/日志/事件表。
+
+---
+
 ## 技术债（待清理）
 
 ### account_relations — 已删除（v46）
@@ -985,7 +1016,7 @@ M0c-1 app provision grant registry（2026-07-23, 设计 `docs/2026-07-23-m0c-1-a
 3. 改字段：SQLite 不支持直接改，需建新表→迁移→删旧表
 4. 新表：migrate.js 新版本，加 `IF NOT EXISTS` 保护
 
-**当前最新版本：v205（2026-09-14 D-019 迁移第 5a 笔 · payout_shards/market_shards 代币化 ctor-only 列）**
+**当前最新版本：v222（2026-10-07 数字商品交付 delivery_orders / delivery_stock · 账本1877 步2）**
 （v199-v204 本文件changelog未逐条回填，见上方既有说明"以 migrate.js 实际为准"——本行只保证指向 migrate.js
 真实末尾版本号，不代表 v199-v204 都已在下方逐条记录。）
 
@@ -997,6 +1028,8 @@ M0c-1 app provision grant registry（2026-07-23, 设计 `docs/2026-07-23-m0c-1-a
 > 注：v125–v156 尚未在本表逐条回填（r281 scope 外）；新增 migration 接 v157 之后。v176-v183、v185-v186 未逐条回填（各自设计稿/COORD-LEDGER 有账），本行版本号以 migrate.js 实际为准。
 
 ## 版本历史（近期）
+
+- **v222 (2026-10-07, J2 · 账本1877 步2 数字商品付款后交付)**: 新表 `delivery_orders` + `delivery_stock`（见上「数字商品交付层」）。纯新增 CREATE TABLE IF NOT EXISTS；orderNonce 只以加密信封存。
 
 - **v213 (2026-09-20, J2 · oracle 整合批 D)**: `proto_markets` 加 `settlement_frozen_at` / `frozen_reason`，`proto_market_verdicts` 加 `pmt_at`；冻结单向 / D2（冻结禁写 winning_side）/ pmt_at 域 触发器 7 个 + 重建 verdict_ref（加 pmt_at 非空）。纯 schema + 冻结三入口 + 受理点门，无 promote 调用方（批 B）。
 
