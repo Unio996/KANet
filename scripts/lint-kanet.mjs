@@ -283,6 +283,29 @@ family-coherence.mjs coherence gate 单源 / migrate.js backfill / K-18 诊断�
   }
 }
 
+// ── R-DELIVERY-NONCE-IN-QUERY [ERROR, 硬阻塞]: checkout-static 下 orderNonce 不得出现在 URL 查询串/请求 URL 的构造表达式里 ──
+// (账本1877 数字商品交付 v0.3 §3 断言 d; Bettor MUST「orderNonce 只许走 URL 片段 # 或页面内, 绝不进查询串或任何服务端日志」)
+// 理由: 交付物密文永久公开在链上, 机密性 = nonce 保密; 查询串会进静态托管访问日志/聊天链接预览/Referer/转发链, 一漏货就被取走。
+// 检出: 同一行里既有 nonce(orderNonce/order_nonce/nonce, 大小写不敏感) 又有 searchParams.set/append、encodeURIComponent、URLSearchParams、'?'+ 拼接、模板串 ?…${…nonce}、fetch(、new URL(、WebSocket(、XMLHttpRequest。
+// 豁免: 行内标记 `lint-allow: R-DELIVERY-NONCE-IN-QUERY`(只给"检测并拒绝"nonce 进查询串的守卫行用, 如 buildInvoiceLink)。
+// 这是启发式(逐行), 不是数据流分析; 拦手滑与最常见写法, 行为级断言见 delivery-crypto.test.mjs 与买家页请求拦截测试。
+function checkR_DELIVERY_NONCE_IN_QUERY(fp, content) {
+  const norm = fp.replace(/\\/g, '/');
+  if (!/kasia-console\/src\/lib\/checkout-static\/[^/]+\.(js|mjs)$/.test(norm)) return;
+  if (/\.test\.mjs$/.test(norm)) return;
+  const lines = content.split('\n');
+  const URLISH = /(searchParams\.(set|append)|encodeURIComponent|URLSearchParams|\?\s*['"`]?\s*\+|['"`][^'"`]*\?[^'"`]*\$\{[^}]*nonce|\bfetch\s*\(|new\s+URL\s*\(|WebSocket\s*\(|XMLHttpRequest)/i;
+  for (let i = 0; i < lines.length; i++) {
+    const ln = lines[i];
+    if (/^\s*(\/\/|\*)/.test(ln)) continue;
+    if (/lint-allow:\s*R-DELIVERY-NONCE-IN-QUERY/.test(ln)) continue;
+    if (!/nonce/i.test(ln) || !URLISH.test(ln)) continue;
+    violate('R-DELIVERY-NONCE-IN-QUERY',
+      'checkout-static 里 nonce 与 URL/请求构造出现在同一表达式——orderNonce 只许走 URL 片段(#n=)或页面内, 绝不进查询串/请求 URL(交付物密文永久公开, nonce 一漏货就被取走; 设计 v0.3 §3)。用 buildInvoiceLink / takeNonceFromLocation; 若确为"检测并拒绝"的守卫行, 行内加 // lint-allow: R-DELIVERY-NONCE-IN-QUERY。',
+      fp, i + 1);
+  }
+}
+
 // ── R-FEE-SPLIT-PKG-DRIFT [ERROR, 硬阻塞]: packages/fee-split/fee-split.mjs 必与源同步 ──
 // (B线落3, NWT G1 修法②, 2026-07-12): packages/fee-split/fee-split.mjs 是
 // kasia-console/src/lib/fee-split.mjs 的构建产物(packages/fee-split/scripts/sync.mjs 生成, 逐字节复制
@@ -1745,6 +1768,7 @@ for (const fp of targets) {
   checkR_EXPLORER_URL_BYPASS(fp, content);     // R-EXPLORER-URL-BYPASS [ERROR] (死链收敛设计 §3 2026-07-12): explorer 域名字面量禁散装, 单源 explorer-url.mjs 外一律硬阻塞
   checkR_SELF_HTTP_FETCH(fp, content);         // R-SELF-HTTP-FETCH [WARN] (2026-07-14 legacy-refund 自锁死循环修复设计): console 禁 fetch 自己的端口
   checkR_FETCH_NO_TIMEOUT(fp, content);        // R-FETCH-NO-TIMEOUT [WARN] (同上设计 修法C): fetch() 建议带 AbortSignal.timeout
+  checkR_DELIVERY_NONCE_IN_QUERY(fp, content);  // R-DELIVERY-NONCE-IN-QUERY [ERROR] (账本1877 v0.3 §3 d)
   checkR_PS_FAMILY_DISPATCH(fp, content);      // R-PS-FAMILY-DISPATCH [ERROR] (K-18 §3.4 2026-07-21): compilePayoutShardRedeem/V2Redeem 调用点白名单, 防绕过 coherence gate
   checkR_SCA_ALIAS_ORIGIN(fp, content);        // R-SCA-ALIAS-ORIGIN [ERROR] (M0c-1 批C 2026-07-23): sendCommandAsync 别名 call 缺 origin/裸值传参检测, 防 armed 后漏标断路
   checkR_SENDCMD_ORIGIN_REQUIRED(fp, content); // R-SENDCMD-ORIGIN-REQUIRED [WARN→ERROR] (第三断路族根治 2026-07-23): 直调缺 origin 检测, 57 处补标驱动器
