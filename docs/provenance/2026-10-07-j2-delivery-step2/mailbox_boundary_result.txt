@@ -1,0 +1,4 @@
+{"amount_kas":"0.11","ok":false,"error":"Storage mass exceeds maximum"}
+{"amount_kas":"0.12","ok":false,"error":"Storage mass exceeds maximum"}
+{"amount_kas":"0.13","ok":false,"error":"Storage mass exceeds maximum"}
+{"amount_kas":"0.14","ok":false,"error":"Storage mass exceeds maximum"}

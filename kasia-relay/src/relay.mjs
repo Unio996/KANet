@@ -1167,6 +1167,23 @@ if (process.send) {
           if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
           return;
         }
+        case 'delivery_mailbox_send': {
+          // 账本1877 步2: 交付信箱转账(窄入口)。校验(P2PK 目标/面值区间/KDL1 信封/长度)在 lib/delivery-mailbox.mjs; 转账走既有 sendKaspa(同 Kasia 私信的 payload 通路)。
+          const { validateMailboxSend } = await import('./lib/delivery-mailbox.mjs');
+          const netPrefix = String(localAddress || '').split(':')[0] || null;   // 前缀取自本 relay 钱包地址, 不信调用方
+          const v = validateMailboxSend(cmd, netPrefix);
+          if (!v.ok) { if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: false, error: v.error, phase: 'validation' } }); break; }
+          try {
+            const sent = await sendKaspa({ to: cmd.target, amount: v.amountKas, payload: cmd.payload_hex });
+            ingestTx({ traceId: sent?.txId, txid: sent?.txId, direction: 'outbound', amount: v.amountKas, fee: sent?.fee, localAddress, targetAddress: cmd.target });
+            log(`DELIVERY_MAILBOX ${v.amountKas} KAS payload=${v.payloadBytes}B → ${cmd.target?.slice(-12)} TX: ${sent?.txId}`);
+            if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, txId: sent?.txId, fee: sent?.fee, amount: v.amountKas, payloadBytes: v.payloadBytes } });
+          } catch (err) {
+            log(`DELIVERY_MAILBOX FAIL: ${err?.message || err}`);
+            if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: false, error: err?.message || String(err), phase: 'execution' } });
+          }
+          break;
+        }
         case 'zk_claim_retire': {
           // 账本1867: KanetTokenClaim.retire 回收(无签名, 去向=烤死 sink_pk, 构造器内重验年龄/fee 上限)。cmd.dry_run===true 只构造不广播。
           const { unlockClaimRetire } = await import('./lib/p2sh.mjs');

@@ -1,0 +1,142 @@
+{
+ "network": "simnet",
+ "sender_balance_sompi": "24306318700",
+ "cases": [
+  {
+   "payload_bytes": 44,
+   "amount_kas": "0.0001",
+   "ok": false,
+   "error": "Storage mass exceeds maximum"
+  },
+  {
+   "payload_bytes": 44,
+   "amount_kas": "0.001",
+   "ok": false,
+   "error": "Storage mass exceeds maximum"
+  },
+  {
+   "payload_bytes": 44,
+   "amount_kas": "0.005",
+   "ok": false,
+   "error": "Storage mass exceeds maximum"
+  },
+  {
+   "payload_bytes": 44,
+   "amount_kas": "0.01",
+   "ok": false,
+   "error": "Storage mass exceeds maximum"
+  },
+  {
+   "payload_bytes": 44,
+   "amount_kas": "0.02",
+   "ok": false,
+   "error": "Storage mass exceeds maximum"
+  },
+  {
+   "payload_bytes": 44,
+   "amount_kas": "0.03",
+   "ok": false,
+   "error": "Storage mass exceeds maximum"
+  },
+  {
+   "payload_bytes": 44,
+   "amount_kas": "0.05",
+   "ok": false,
+   "error": "Storage mass exceeds maximum"
+  },
+  {
+   "payload_bytes": 44,
+   "amount_kas": "0.08",
+   "ok": false,
+   "error": "Storage mass exceeds maximum"
+  },
+  {
+   "payload_bytes": 44,
+   "amount_kas": "0.1",
+   "ok": false,
+   "error": "Storage mass exceeds maximum"
+  },
+  {
+   "payload_bytes": 44,
+   "amount_kas": "0.15",
+   "ok": true,
+   "txId": "0b1689c2e624bea59a9aed0f7501b2b7f902c838e8ccd3d04ee1b062030fb7d9",
+   "fee_kas": "0.032124"
+  },
+  {
+   "payload_bytes": 44,
+   "amount_kas": "0.2",
+   "ok": true,
+   "txId": "4b62779b14b4286c6536b342d3554a92c99abc3e8ce08d2d70022f44436c7928",
+   "fee_kas": "0.032124"
+  },
+  {
+   "payload_bytes": 1056,
+   "amount_kas": "0.0001",
+   "ok": false,
+   "error": "Storage mass exceeds maximum"
+  },
+  {
+   "payload_bytes": 1056,
+   "amount_kas": "0.001",
+   "ok": false,
+   "error": "Storage mass exceeds maximum"
+  },
+  {
+   "payload_bytes": 1056,
+   "amount_kas": "0.005",
+   "ok": false,
+   "error": "Storage mass exceeds maximum"
+  },
+  {
+   "payload_bytes": 1056,
+   "amount_kas": "0.01",
+   "ok": false,
+   "error": "Storage mass exceeds maximum"
+  },
+  {
+   "payload_bytes": 1056,
+   "amount_kas": "0.02",
+   "ok": false,
+   "error": "Storage mass exceeds maximum"
+  },
+  {
+   "payload_bytes": 1056,
+   "amount_kas": "0.03",
+   "ok": false,
+   "error": "Storage mass exceeds maximum"
+  },
+  {
+   "payload_bytes": 1056,
+   "amount_kas": "0.05",
+   "ok": false,
+   "error": "Storage mass exceeds maximum"
+  },
+  {
+   "payload_bytes": 1056,
+   "amount_kas": "0.08",
+   "ok": false,
+   "error": "Storage mass exceeds maximum"
+  },
+  {
+   "payload_bytes": 1056,
+   "amount_kas": "0.1",
+   "ok": false,
+   "error": "Storage mass exceeds maximum"
+  },
+  {
+   "payload_bytes": 1056,
+   "amount_kas": "0.15",
+   "ok": true,
+   "txId": "fc9daa5985545cc7a499876ec861209a52054ba4311b30be1a391af42c23b70f",
+   "fee_kas": "0.034148"
+  },
+  {
+   "payload_bytes": 1056,
+   "amount_kas": "0.2",
+   "ok": true,
+   "txId": "f9b45b74c9170ef7d58acb46f188e392b3f761e1dc23d397fa755ad99659d4a4",
+   "fee_kas": "0.034148"
+  }
+ ]
+}
