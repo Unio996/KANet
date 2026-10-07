@@ -6784,5 +6784,12 @@ export function runMigrations() {
     CREATE INDEX IF NOT EXISTS idx_delivery_stock_sku ON delivery_stock(sku_id, assigned_order);
   `);
   console.log('[migrate] v222: delivery_orders / delivery_stock 已就绪(数字商品付款后交付, 纯新增).');
+  // ── v223 (2026-10-07, J2 · 账本1877 步3): delivery_orders 加 quote_json(发票模式: 重建订单协议/split 需要的【公开】签名报价 JSON; 可 NULL, 老行零影响) ──
+  //   写入方: lib/delivery-store.mjs createInvoiceOrder; 读取方: lib/delivery-split-adapter.mjs(重算订单协议并核对订单地址)。报价本就公开(链接 ?q=), 不含任何秘密。
+  {
+    const cols = sqlite.prepare("PRAGMA table_info(delivery_orders)").all().map((c) => c.name);
+    if (cols.length && !cols.includes('quote_json')) sqlite.exec("ALTER TABLE delivery_orders ADD COLUMN quote_json TEXT");
+    console.log('[migrate] v223: delivery_orders.quote_json 列已就绪(发票模式公开报价, 纯新增).');
+  }
   console.log('[migrate] DB migrations complete.');
 }

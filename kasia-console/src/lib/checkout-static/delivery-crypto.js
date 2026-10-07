@@ -54,6 +54,34 @@ export async function deriveMailboxKey({ orderNonceHex, orderAddress }) {
   return { mailboxPrivHex: privHex, counter };
 }
 
+// 🔴🔴 命名说明(步3 实测发现): 本文件里叫 orderNonceHex 的参数 = 【交付秘密】(发票链接片段 #n= 里的 128 位值), 它【不是】订单合约 ctor 里的 order_nonce。
+//   订单合约的 order_nonce 烤在 redeem 里, 订单 UTXO 被花(split/退款)时 redeem 就公开在链上; 若合约 nonce 就是秘密本身, 则 split 之后任何人都能派生密钥、解开信箱里的交付物、清扫信箱与退款。
+//   ⇒ 合约 nonce = deriveOrderNonce(秘密)(单向派生, 公开后不泄漏秘密); 所有密钥(AEAD/信箱/退款)只从秘密派生。冻结的 KDL1/aead/mailbox/refund 派生函数不变, 只是 ikm 语义明确为"秘密"。
+const INFO_ORDER_NONCE = 'kanet-delivery-v1/order-nonce';
+/** 订单合约 ctor 的 order_nonce(16 字节 hex) = HKDF(秘密, 固定盐, info "kanet-delivery-v1/order-nonce"); 单向: 看到合约 nonce(链上公开)推不出秘密。 */
+export async function deriveOrderNonce({ orderNonceHex }) {
+  if (typeof orderNonceHex !== 'string' || !HEX32_RE.test(orderNonceHex)) throw new Error('delivery-crypto: 交付秘密必须是 32 位小写 hex(128 位)');
+  const s = subtle();
+  const ikm = await s.importKey('raw', hexToBytes(orderNonceHex), 'HKDF', false, ['deriveBits']);
+  const bits = await s.deriveBits({ name: 'HKDF', hash: 'SHA-256', salt: enc.encode('kanet-delivery-v1|order-nonce'), info: enc.encode(INFO_ORDER_NONCE) }, ikm, 128);
+  return bytesToHex(new Uint8Array(bits));
+}
+const INFO_REFUND = 'kanet-delivery-v1/refund/';
+const NETWORK_RE = /^[a-z0-9-]{3,20}$/;
+/**
+ * 退款私钥(账本1879 Bettor 裁定: 发票模式下订单的 payer_refund_spk = 由 nonce 派生的 P2PK; info "kanet-delivery-v1/refund/<ctr>", 同样拒绝采样)。
+ * 🔴 salt 不能含订单地址: 订单地址由退款地址烤进合约 ctor 推出, 若退款密钥再依赖订单地址就循环。故 salt = utf8("kanet-delivery-v1|refund|" + network)。
+ * 持 nonce 者(商家与持凭据的买家)都能得到该私钥 ⇒ 买家凭凭据清扫退款(与清扫信箱同一工具), 退款不会落到交易所充值地址。
+ * 已冻结的 KDL1 线格式与既有两个 info(…/aead、…/mailbox/<ctr>)不受影响。
+ */
+export async function deriveRefundKey({ orderNonceHex, network }) {
+  if (typeof orderNonceHex !== 'string' || !HEX32_RE.test(orderNonceHex)) throw new Error('delivery-crypto: orderNonceHex 必须是 32 位小写 hex(128 位)');
+  if (typeof network !== 'string' || !NETWORK_RE.test(network)) throw new Error('delivery-crypto: network 非法');
+  const salt = 'kanet-delivery-v1|refund|' + network;
+  const { privHex, counter } = await pickScalar((ctr) => hkdf32(orderNonceHex, salt, INFO_REFUND + ctr));
+  return { refundPrivHex: privHex, counter };
+}
+
 /** 信箱 P2PK 地址。kaspa 由调用方注入(kaspa-wasm 模块, 需 PrivateKey)。 */
 export function mailboxAddress(kaspa, mailboxPrivHex, network) {
   return new kaspa.PrivateKey(mailboxPrivHex).toPublicKey().toAddress(network).toString();
@@ -115,7 +143,7 @@ export async function pickDeliverable({ orderNonceHex, orderAddress, txs, curren
  * 商家发票链接。publicParams(q/ch/sc 等公开的报价/渠道参数)走查询串; orderNonceHex 只进 #n=。
  * 任何把 nonce 放进查询串的企图(publicParams 里出现 nonce 的 ≥8 位 hex 子串)一律抛——防调用方手滑。
  */
-export function buildInvoiceLink({ baseUrl, publicParams = {}, orderNonceHex }) {
+export function buildInvoiceLink({ baseUrl, publicParams = {}, orderNonceHex, deadlineMs }) {
   if (!HEX32_RE.test(orderNonceHex || '')) throw new Error('buildInvoiceLink: orderNonceHex 非法');
   const u = new URL(baseUrl);
   if (u.hash) throw new Error('buildInvoiceLink: baseUrl 不得自带片段');
@@ -125,7 +153,8 @@ export function buildInvoiceLink({ baseUrl, publicParams = {}, orderNonceHex }) 
     u.searchParams.set(k, String(v));
   }
   if (leaksNonce(u.search, orderNonceHex) || leaksNonce(u.pathname, orderNonceHex)) throw new Error('buildInvoiceLink: baseUrl 路径/查询含 nonce 片段');
-  u.hash = `n=${orderNonceHex}`;
+  if (deadlineMs !== undefined && !(Number.isSafeInteger(deadlineMs) && deadlineMs > 0)) throw new Error('buildInvoiceLink: deadlineMs 非法');
+  u.hash = deadlineMs !== undefined ? `n=${orderNonceHex}&dl=${deadlineMs}` : `n=${orderNonceHex}`;
   return u.toString();
 }
 /** s 里是否含 nonce 的任何连续 ≥8 位 hex 子串(大小写不敏感)。 */
@@ -144,4 +173,19 @@ export function takeNonceFromLocation(location, history, documentTitle = '') {
   const n = readNonceFromHash(location.hash);
   if (n) history.replaceState(null, documentTitle, location.pathname + location.search);   // 不带 hash
   return n;
+}
+
+/** 从 location.hash 读发票参数: { nonce, deadlineMs? }; nonce 缺失/非法 ⇒ null。deadline 非法(非正整数)⇒ 视为缺失。只读片段。 */
+export function readInvoiceFromHash(hash) {
+  const nonce = readNonceFromHash(hash);
+  if (!nonce) return null;
+  const m = /(?:^#?|&)dl=([0-9]{1,15})(?:&|$)/.exec(String(hash));
+  const dl = m ? Number(m[1]) : undefined;
+  return { nonce, deadlineMs: Number.isSafeInteger(dl) && dl > 0 ? dl : undefined };
+}
+/** 读取后立即抹掉片段(replaceState)。返回 { nonce, deadlineMs? } 或 null。 */
+export function takeInvoiceFromLocation(location, history, documentTitle = '') {
+  const inv = readInvoiceFromHash(location.hash);
+  if (inv) history.replaceState(null, documentTitle, location.pathname + location.search);
+  return inv;
 }

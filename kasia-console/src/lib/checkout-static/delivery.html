@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>取货页(占位)</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; color: #222; }
+  .box { border: 1px solid #ccc; border-radius: 6px; padding: 1rem; margin: 1rem 0; }
+  .ok { color: #0a7a2e; } .bad { color: #b30000; } .warn { color: #b36b00; }
+  code { word-break: break-all; } input[type=text], textarea { width: 100%; box-sizing: border-box; padding: .4rem; } button { padding: .5rem 1rem; margin-top: .4rem; }
+</style>
+</head>
+<body>
+  <h1 id="pageTitle"></h1>
+  <div id="statusBox" class="box"></div>
+  <div id="orderBox" class="box" hidden></div>
+  <div id="credentialBox" class="box" hidden></div>
+  <div id="deliveryBox" class="box" hidden></div>
+  <div id="pasteBox" class="box" hidden></div>
+  <div id="refundBox" class="box" hidden></div>
+  <div id="sweepBox" class="box" hidden></div>
+  <script type="module" src="./delivery-page.js"></script>
+</body>
+</html>

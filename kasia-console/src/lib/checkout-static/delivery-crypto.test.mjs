@@ -156,5 +156,42 @@ await t('静态: 本模块的 URL/请求构造点不读 location.search 里的 n
   assert.ok(!/\bfetch\s*\(|XMLHttpRequest|WebSocket|sendBeacon/.test(src));
   assert.ok(!/location\.search/.test(src.replace(/location\.pathname \+ location\.search/g, '')), '不得从 search 取 nonce');
 });
+// ───────── 步 3: 退款私钥(Bettor 账本1879) + 发票片段里的 deadline ─────────
+const KAT_REFUND = '4e0f0ce8e199b782c4f3ecdc72dcabee09e8bc763922c01839c6f41775182d9e';
+await t('退款私钥: 冻结值 + 与独立 HKDF(salt=退款盐, 不含订单地址)一致; 与信箱/AEAD 派生域分离', async () => {
+  const r = await C.deriveRefundKey({ orderNonceHex: NONCE, network: 'simnet' });
+  assert.strictEqual(r.refundPrivHex, KAT_REFUND); assert.strictEqual(r.counter, 0);
+  assert.strictEqual(r.refundPrivHex, Buffer.from(hkdfSync('sha256', Buffer.from(NONCE, 'hex'), Buffer.from('kanet-delivery-v1|refund|simnet'), Buffer.from('kanet-delivery-v1/refund/0'), 32)).toString('hex'));
+  assert.notStrictEqual(r.refundPrivHex, (await C.deriveMailboxKey(O)).mailboxPrivHex);
+  assert.notStrictEqual(r.refundPrivHex, refKey(NONCE, ADDR, 'kanet-delivery-v1/refund/0').toString('hex'), '盐里不含订单地址(否则与订单地址循环依赖)');
+});
+await t('退款私钥: 换 network / 换 nonce 任一位 ⇒ 全变; 非法输入 ⇒ 抛', async () => {
+  const base = (await C.deriveRefundKey({ orderNonceHex: NONCE, network: 'simnet' })).refundPrivHex;
+  assert.notStrictEqual((await C.deriveRefundKey({ orderNonceHex: NONCE, network: 'mainnet' })).refundPrivHex, base);
+  for (let i = 0; i < NONCE.length; i += 7) assert.notStrictEqual((await C.deriveRefundKey({ orderNonceHex: flipHex(NONCE, i), network: 'simnet' })).refundPrivHex, base);
+  await assert.rejects(C.deriveRefundKey({ orderNonceHex: 'zz', network: 'simnet' }), /32 位/);
+  for (const bad of ['', 'A', 'a b', 'x'.repeat(30), undefined]) await assert.rejects(C.deriveRefundKey({ orderNonceHex: NONCE, network: bad }), /network/);
+});
+await t('退款私钥 → kaspa-wasm 真派生 P2PK 地址(确定性, 与信箱同一函数 mailboxAddress)', async () => {
+  const kaspa = createRequire(import.meta.url)('../../../../kasia-relay/node_modules/kaspa-wasm');
+  const k = (await C.deriveRefundKey({ orderNonceHex: NONCE, network: 'simnet' })).refundPrivHex;
+  const a = C.mailboxAddress(kaspa, k, 'simnet'); assert.strictEqual(a, C.mailboxAddress(kaspa, k, 'simnet')); assert.ok(a.startsWith('kaspasim:q'));
+});
+await t('发票链接带 deadline: 仍只在片段; readInvoiceFromHash 解析 {nonce, deadlineMs}; 非法 deadline 视为缺失; 查询串里的 dl/n 不被认', () => {
+  const dl = 1790000000000;
+  const link = C.buildInvoiceLink({ baseUrl: 'https://example.github.io/o.html', publicParams: { q: 'Q' }, orderNonceHex: NONCE, deadlineMs: dl });
+  const u = new URL(link); assert.strictEqual(u.hash, `#n=${NONCE}&dl=${dl}`); assert.ok(!C.leaksNonce(u.search + u.pathname, NONCE));
+  assert.deepStrictEqual(C.readInvoiceFromHash(u.hash), { nonce: NONCE, deadlineMs: dl });
+  assert.deepStrictEqual(C.readInvoiceFromHash('#n=' + NONCE), { nonce: NONCE, deadlineMs: undefined });
+  for (const bad of ['#n=' + NONCE + '&dl=0', '#n=' + NONCE + '&dl=abc', '#n=' + NONCE + '&dl=1234567890123456']) assert.strictEqual(C.readInvoiceFromHash(bad).deadlineMs, undefined, bad);
+  assert.strictEqual(C.readInvoiceFromHash('?n=' + NONCE + '&dl=5'), null); assert.strictEqual(C.readInvoiceFromHash(''), null);
+  assert.throws(() => C.buildInvoiceLink({ baseUrl: 'https://x.test/o.html', orderNonceHex: NONCE, deadlineMs: -1 }), /deadlineMs/);
+});
+await t('takeInvoiceFromLocation: 读后立刻 replaceState 抹片段(含 dl); 无发票不动', () => {
+  const calls = []; const history = { replaceState: (...a) => calls.push(a) };
+  const inv = C.takeInvoiceFromLocation({ hash: `#n=${NONCE}&dl=1790000000000`, pathname: '/o.html', search: '?q=Q' }, history);
+  assert.deepStrictEqual(inv, { nonce: NONCE, deadlineMs: 1790000000000 }); assert.strictEqual(calls.length, 1); assert.strictEqual(calls[0][2], '/o.html?q=Q');
+  assert.strictEqual(C.takeInvoiceFromLocation({ hash: '', pathname: '/o.html', search: '' }, history), null); assert.strictEqual(calls.length, 1);
+});
 console.log(`\n${pass} pass, ${fail} fail`);
 process.exitCode = fail ? 1 : 0;

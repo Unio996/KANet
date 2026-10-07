@@ -26,7 +26,7 @@ const depthOf = (tx, cur) => (tx && tx.isAccepted && Number.isFinite(tx.acceptin
 
 /**
  * @typedef {object} Ctx
- * @property {(address:string)=>Promise<{txs:Array<{txid:string,isAccepted:boolean,acceptingBlueScore:number,blockTimeMs:number,outputs:Array<{index:number,valueSompi:string,address:string}>,spentOutpoints:Array<{txid:string,index:number}>}>,currentBlueScore:number}>} readHistory
+ * @property {(address:string, order?:object)=>Promise<{txs:Array<{txid:string,isAccepted:boolean,acceptingBlueScore:number,blockTimeMs:number,outputs:Array<{index:number,valueSompi:string,address:string}>,spentOutpoints:Array<{txid:string,index:number}>}>,currentBlueScore:number}>} readHistory
  * @property {(address:string)=>Promise<Array<{txid:string,index:number,amountSompi:string}>>} getUtxos
  * @property {(order:object, utxo:object)=>Promise<{txid:string}>} triggerSplit
  * @property {(a:{target:string,amountKas:string,payloadHex:string})=>Promise<{txid:string}>} sendMailbox
@@ -50,7 +50,7 @@ function findSpender(txs, fundTxid, fundIndex) {
 const paysMerchantExactly = (tx, order) => (tx.outputs || []).some((o) => o.address === order.merchant_address && String(o.valueSompi) === String(order.merchant_amount_sompi));
 
 async function stepWatching(db, order, ctx) {
-  const { txs, currentBlueScore } = await ctx.readHistory(order.order_address);
+  const { txs, currentBlueScore } = await ctx.readHistory(order.order_address, order);
   const utxos = await ctx.getUtxos(order.order_address);
   const funding = txs.find((t) => (t.outputs || []).some((o) => o.address === order.order_address && BigInt(o.valueSompi) >= BigInt(order.total_sompi)));
   const fundOut = funding && funding.outputs.find((o) => o.address === order.order_address && BigInt(o.valueSompi) >= BigInt(order.total_sompi));
@@ -76,7 +76,7 @@ async function stepWatching(db, order, ctx) {
 }
 
 async function stepPaid(db, order, ctx) {
-  const { txs, currentBlueScore } = await ctx.readHistory(order.order_address);
+  const { txs, currentBlueScore } = await ctx.readHistory(order.order_address, order);
   const utxos = await ctx.getUtxos(order.order_address);
   if (utxos.length === 0) {                                                   // 订单 UTXO 没了: 自己的 split 或抢先者
     const fundTxid = order.pay_txid;

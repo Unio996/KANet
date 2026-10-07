@@ -116,3 +116,28 @@ export function recordSplitBroadcast(db, id, txid) {
 export function recordMailboxResend(db, id, txid) {
   return db.prepare("UPDATE delivery_orders SET mailbox_txid = ?, mailbox_attempts = mailbox_attempts + 1, mailbox_sent_at = datetime('now'), updated_at = datetime('now') WHERE id = ? AND state = 'mailbox_sent'").run(txid, id).changes === 1;
 }
+
+// ── 发票模式(账本1877 步3): 订单地址由 nonce + 报价 + deadline + nonce 派生的退款地址完全决定, 建单即可登记, 无需买家回话 ──
+/**
+ * 创建订单并同时登记订单地址(状态直接 watching)。nonce 由调用方生成(订单地址依赖它), 加密落库, 返回值不含 nonce。
+ * quoteJson = 公开签名报价 JSON(重建协议/split 用)。
+ */
+export function createInvoiceOrder(db, { network, skuId, totalSompi, merchantAddress, merchantAmountSompi, deadlineMs, nonceHex, orderAddress, quoteJson }) {
+  if (!/^[0-9a-f]{32}$/.test(String(nonceHex || ''))) throw new Error('createInvoiceOrder: nonceHex 必须是 32 位小写 hex');
+  if (!orderAddress || typeof orderAddress !== 'string' || orderAddress.length < 10) throw new Error('createInvoiceOrder: orderAddress 非法');
+  if (typeof quoteJson !== 'string' || !quoteJson.length || quoteJson.length > 20000) throw new Error('createInvoiceOrder: quoteJson 必填(≤20KB)');
+  if (!network || typeof network !== 'string') throw new Error('createInvoiceOrder: network 必填');
+  if (!skuId || typeof skuId !== 'string' || skuId.length > 100) throw new Error('createInvoiceOrder: skuId 必填(≤100 字符)');
+  for (const [k, v] of [['totalSompi', totalSompi], ['merchantAmountSompi', merchantAmountSompi]]) if (!SOMPI_RE.test(String(v))) throw new Error(`createInvoiceOrder: ${k} 必须是正整数 sompi 字符串`);
+  if (BigInt(merchantAmountSompi) > BigInt(totalSompi)) throw new Error('createInvoiceOrder: merchantAmountSompi > totalSompi');
+  if (!merchantAddress) throw new Error('createInvoiceOrder: merchantAddress 必填');
+  if (!Number.isSafeInteger(deadlineMs) || deadlineMs <= Date.now()) throw new Error('createInvoiceOrder: deadlineMs 必须是未来的毫秒时间戳');
+  const id = randomUUID();
+  db.prepare(`INSERT INTO delivery_orders (id, network, sku_id, order_address, state, nonce_encrypted, total_sompi, merchant_address, merchant_amount_sompi, deadline_ms, quote_json) VALUES (?,?,?,?, 'watching', ?,?,?,?,?,?)`)
+    .run(id, network, skuId, orderAddress, encrypt(nonceHex), String(totalSompi), merchantAddress, String(merchantAmountSompi), deadlineMs, quoteJson);
+  return { id };
+}
+export function getQuoteJson(db, id) {
+  const r = db.prepare('SELECT quote_json FROM delivery_orders WHERE id = ?').get(id);
+  return r ? r.quote_json : null;
+}

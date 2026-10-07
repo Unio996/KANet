@@ -868,6 +868,11 @@ if (process.env.BROKER_HOLD_MONITOR_ENABLED !== '0') {
 import { startDiskSpaceAlertCron } from './lib/disk-space-alert.mjs';
 startDiskSpaceAlertCron();
 
+// 账本1877 步3: 数字商品「付款后交付」watcher — DELIVERY_WATCHER_ENABLED=1 才跑(默认关), 另需 DELIVERY_RELAY_ID; 开关属配置变更(重启窗+ledger+双签)。
+// 🔴 M0a 门: 新钱路模块不裸 import relay-manager; sendCommandAsync 的注入点(本文件对它的一次 import)需经审 manifest 条目(Bettor/NWT), 未注入时该服务拒绝启动 ⇒ 当前接线对运行时零影响。
+import { startDeliveryWatcherCron } from './services/delivery-watcher-service.mjs';
+startDeliveryWatcherCron(process.env, {});
+
 // 查漏补缺(2026-07-21, RpcClient状态劣化今天复发两次07:35Z/14:48Z, 第二次冻结settle-daemon
 // tick 44分钟才被人肉巡检发现)。跟settle-failed-alert同款edge-trigger模式: 只读监控+告警,不做
 // 自动重启(Bettor #utf9ze①: 告警先行, 自动化动作等告警本身跑稳再议, 防误杀短暂网络抖动)。

@@ -7,6 +7,8 @@ import { checkAdminSecretTier } from '../lib/admin-secret-tier.mjs';
 import { configuredNetwork } from '../lib/kaspa-network.mjs';
 import * as S from '../lib/delivery-store.mjs';
 import { buildInvoiceLink } from '../lib/checkout-static/delivery-crypto.js';
+import { deriveInvoiceOrder, encodeQuoteParam } from '../lib/delivery-invoice.mjs';
+import { randomBytes } from 'node:crypto';
 
 export const DELIVERY_TIER_ENV = 'ADMIN_SECRET_DELIVERY';
 const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
@@ -27,6 +29,18 @@ export async function registerDeliveryRoutes(fastify, deps = {}) {
     const b = request.body || {};
     let net;
     try { net = configuredNetwork(env); } catch (e) { return reply.code(500).send({ ok: false, error: `网络未配置: ${e.message}` }); }
+    // 发票模式(账本1879): body.quote(已签名报价对象)⇒ 订单地址由 nonce + 报价 + deadline + nonce 派生的退款地址完全算出, 建单即 watching, 买家无需回话。
+    if (b.quote) {
+      try {
+        const quote = typeof b.quote === 'string' ? JSON.parse(Buffer.from(b.quote, 'base64').toString('utf8')) : b.quote;
+        const deadlineMs = Number(b.deadline_ms);
+        const nonceHex = randomBytes(16).toString('hex');
+        const d = await deriveInvoiceOrder({ quote, orderNonceHex: nonceHex, deadlineMs, expectNetwork: net });
+        const c = S.createInvoiceOrder(db, { network: d.network, skuId: b.sku_id, totalSompi: d.totalSompi, merchantAddress: d.merchantAddress, merchantAmountSompi: d.merchantAmountSompi, deadlineMs, nonceHex, orderAddress: d.orderAddress, quoteJson: JSON.stringify(quote) });
+        const link = buildInvoiceLink({ baseUrl: String(b.base_url || ''), publicParams: { ...(b.public_params && typeof b.public_params === 'object' ? b.public_params : {}), q: encodeQuoteParam(quote) }, orderNonceHex: nonceHex, deadlineMs });
+        return { ok: true, id: c.id, state: 'watching', order_address: d.orderAddress, refund_address: d.refundAddress, total_sompi: d.totalSompi, invoice_link: link, note: '发票链接里的 #n= 是订单 nonce(也是退款/信箱私钥的来源), 只出现这一次; 请经你自己的渠道发给买家, 不要贴进任何公开处' };
+      } catch (e) { return reply.code(400).send({ ok: false, error: String(e.message).slice(0, 200) }); }
+    }
     try {
       const c = S.createOrder(db, { network: net, skuId: b.sku_id, totalSompi: b.total_sompi, merchantAddress: b.merchant_address, merchantAmountSompi: b.merchant_amount_sompi, deadlineMs: Number(b.deadline_ms) });
       const link = buildInvoiceLink({ baseUrl: String(b.base_url || ''), publicParams: b.public_params && typeof b.public_params === 'object' ? b.public_params : {}, orderNonceHex: c.orderNonceHex });

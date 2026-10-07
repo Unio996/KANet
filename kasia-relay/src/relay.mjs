@@ -1167,6 +1167,19 @@ if (process.send) {
           if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
           return;
         }
+        case 'delivery_split_submit': {
+          // 账本1877 步3: 零签名 split 的窄广播。tx 形状/输出由订单 ctor 重建/输入 UTXO 链上核对全在 lib/delivery-split-submit.mjs; 不持私钥不签名。
+          const { submitSplit } = await import('./lib/delivery-split-submit.mjs');
+          const kaspaMod = await import('kaspa-wasm');
+          const { waitForRpc } = await import('./rpc-listener.mjs');
+          let res;
+          try { res = await submitSplit({ cmd, kaspa: kaspaMod, rpc: await waitForRpc(), networkId: getWallet().getNetworkId() }); }
+          catch (err) { res = { ok: false, error: err?.message || String(err) }; }
+          if (res.ok && res.txId) ingestTx({ traceId: res.txId, txid: res.txId, direction: 'outbound', amount: '0', fee: null, localAddress });
+          log(`DELIVERY_SPLIT_SUBMIT ${res.ok ? 'TX: ' + res.txId : 'FAIL: ' + String(res.error).slice(0, 160)}`);
+          if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ...res, phase: res.ok ? 'execution' : 'validation' } });
+          return;
+        }
         case 'delivery_mailbox_send': {
           // 账本1877 步2: 交付信箱转账(窄入口)。校验(P2PK 目标/面值区间/KDL1 信封/长度)在 lib/delivery-mailbox.mjs; 转账走既有 sendKaspa(同 Kasia 私信的 payload 通路)。
           const { validateMailboxSend } = await import('./lib/delivery-mailbox.mjs');
