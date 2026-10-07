@@ -1,0 +1,34 @@
+{
+ "network": "mainnet",
+ "at": "2026-10-07T10:09:08.814Z",
+ "create": {
+  "order_address_matches_buyer_page": true,
+  "refund_matches": true,
+  "total_sompi": "61400000",
+  "roles_total_sompi": "60000000",
+  "order_address": "kaspa:pzhze9jxrw7w8xdjlsmgnfn00ek4j0gre0ehhnje9qk0v3yuhvy2caf4wfurq",
+  "refund_address": "kaspa:qqc92vp63n9rz4cqvhnaavau2vp575hnhhq9ngt3m8rpvqvcn7lkqkajruqw9",
+  "prefix_mainnet": true
+ },
+ "read_real_api": {
+  "status": "none"
+ },
+ "node": {
+  "isSynced": true,
+  "networkId": "mainnet"
+ },
+ "chain_empty": {
+  "order_utxos": 0,
+  "refund_utxos": 0
+ },
+ "funds": {
+  "funded": false,
+  "spent": false
+ },
+ "merchant_view": {
+  "state": "watching",
+  "has_nonce_field": false,
+  "leaks_secret": false
+ },
+ "verdict": "PASS"
+}
