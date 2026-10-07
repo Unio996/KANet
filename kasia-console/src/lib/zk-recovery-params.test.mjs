@@ -69,6 +69,29 @@ console.log('[test] 3. 接线(结构): create 写、ticket 前查、claim 前查
   const tk = fs.readFileSync(new URL('./zk-autonomy-ticks.mjs', import.meta.url), 'utf8');
   ok(tk.indexOf("checkRecoveryParamsDrift(sqlite, marketId, 'claim')") > 0 && tk.indexOf("checkRecoveryParamsDrift(sqlite, marketId, 'claim')") < tk.indexOf('const feeUtxo = await ctx.mintFeeUtxo(claimFeeInputSompi()'), 'claim tick: mintFeeUtxo/runTokenClaim 之前比对');
 }
+
+console.log('[test] 4. stampSelfCovId(账本1867): 只追加字段 / 首写为准 / 任何异常不外抛');
+{
+  const COV = 'ee'.repeat(32);
+  ins('m-stamp', { no_spine: true, keep: 1, zk_continuation: { exhausted: true } });
+  const before = meta('m-stamp');
+  ok(P.stampSelfCovId(sqlite, 'm-stamp', COV).stamped === true, '首次写入 ⇒ stamped');
+  const after = meta('m-stamp');
+  ok(after.zk_self_cov_id === COV && after.keep === 1 && JSON.stringify(after.zk_continuation) === JSON.stringify(before.zk_continuation) && Object.keys(after).length === Object.keys(before).length + 1, '只追加 zk_self_cov_id 一个字段, 其余 metadata 逐字不动');
+  warns.length = 0;
+  ok(P.stampSelfCovId(sqlite, 'm-stamp', 'dd'.repeat(32)).reason === 'already_set' && meta('m-stamp').zk_self_cov_id === COV && warns.some((w) => w.includes('不覆盖')), '首写为准: 不同值不覆盖, LOUD 警告');
+  ok(P.stampSelfCovId(sqlite, 'm-stamp', COV).reason === 'already_set', '同值重复 ⇒ already_set(幂等)');
+  ok(P.stampSelfCovId(sqlite, 'm-stamp', 'zz').reason === 'bad_cov_id' && P.stampSelfCovId(sqlite, 'm-stamp', undefined).reason === 'bad_cov_id', '非法 cov id ⇒ 不写');
+  ok(P.stampSelfCovId(sqlite, 'nope', COV).reason === 'no_market', '盘不存在 ⇒ 不抛');
+  ok(P.stampSelfCovId({ prepare() { throw new Error('db down'); } }, 'x', COV).stamped === false, 'DB 抛错 ⇒ 吞掉返回 stamped:false, 不外抛');
+  ok(P.stampSelfCovId({ prepare() { return { get() { return { metadata: '{}' }; }, run() { throw new Error('disk full'); } }; } }, 'x', COV).stamped === false, 'UPDATE 抛错 ⇒ 吞掉');
+  ins('m-badjson', {}); sqlite.prepare('UPDATE pool_markets SET metadata = ? WHERE id = ?').run('{not json', 'm-badjson');
+  ok(P.stampSelfCovId(sqlite, 'm-badjson', COV).reason === 'bad_metadata', 'metadata 坏 JSON ⇒ 不覆盖不抛');
+  const tk = fs.readFileSync(new URL('./zk-autonomy-ticks.mjs', import.meta.url), 'utf8');
+  const iAdv = tk.indexOf("advanceZkContinuationAfterSpend(marketId, { outpointTxid: txid, outpointIndex: 0"), iSt = tk.indexOf('stampSelfCovId(sqlite, marketId, sj.selfCovId)'), iRet = tk.indexOf("return { errored: false, claimed: 1 };", iSt);
+  ok(iAdv > 0 && iSt > iAdv && iRet > iSt, 'claim tick: stamp 在 landed 确认与 advanceZkContinuationAfterSpend 之后(NO TX NO STATE CHANGE), 且在成功返回之前');
+  ok(!/try\s*\{[^}]*stampSelfCovId/.test(tk) && /^\s*stampSelfCovId\(sqlite, marketId, sj\.selfCovId\);/m.test(tk),'调用点是裸语句(函数自身永不抛, 不靠外层 try 兜底也不会打断 claim 返回)');
+}
 console.warn = w0;
 console.log(fails ? `\n${fails} FAIL` : '\nALL PASS');
 process.exitCode = fails ? 1 : 0;
