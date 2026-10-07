@@ -1,0 +1,7 @@
+explorer.kaspa.org /txs/{id} => 403 acao= null 157ms ctype= text/html; charset=UTF-8 nonjson <!DOCTYPE html><html lang="en-US"><head><title>Just a moment...</title><meta htt
+explorer.kaspa.org /api/transactions/{id} => 403 acao= null 111ms ctype= text/html; charset=UTF-8 nonjson <!DOCTYPE html><html lang="en-US"><head><title>Just a moment...</title><meta htt
+indexer.kasia.fyi / => 503 acao= null 590ms ctype= text/plain; charset=utf-8 nonjson no available server 
+indexer.kasia.fyi /health => 503 acao= null 607ms ctype= text/plain; charset=utf-8 nonjson no available server 
+api.kaspa.org POST /transactions/search => 200 acao= * 338ms ctype= application/json json keys=subnetwork_id,transaction_id,hash,mass,payload,block_hash,block_time,version,is_accepted,accepting_block_hash,accepting_block_blue_score,accepting_block_time hasPayload=true
+kas.fyi => 525 acao= null 310ms ctype= text/html; charset=UTF-8 nonjson <!DOCTYPE html> <!--[if lt IE 7]> <html class="no-js ie6 oldie" lang="en-US"> <!
+kaspa.stream => ERR ENOTFOUND
