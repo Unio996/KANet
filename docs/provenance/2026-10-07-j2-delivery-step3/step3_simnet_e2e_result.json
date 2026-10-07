@@ -1,0 +1,64 @@
+{
+ "network": "simnet",
+ "phases": {
+  "A_create": {
+   "order_address_matches_buyer_page": true,
+   "refund_matches": true,
+   "state": "watching"
+  },
+  "A_pay": {
+   "status": 200,
+   "txid": "bd3b6b79573815efe943cbff7ce2df854cef19ecf26634a497abd307936f6b68"
+  },
+  "A_watcher": {
+   "final_state": "delivered",
+   "transitions": [
+    "watching",
+    "paid",
+    "split_done",
+    "mailbox_sent",
+    "delivered"
+   ],
+   "pay_txid": "bd3b6b79573815efe943cbff7ce2df854cef19ecf26634a497abd307936f6b68",
+   "split_txid": "3618ee3f90d350be2919376c26372b596421e7f1657aabeafa50e7f5c8d67178",
+   "mailbox_txid": "836c11a839b9142f2b26b0155063ff69b6ec355d2cb13cfab2a9bd6e980d1697",
+   "manual_reason": null
+  },
+  "A_onchain": {
+   "split_tx_found": true,
+   "sigscript_len": 3512,
+   "sigscript_contains_secret": false,
+   "sigscript_contains_contract_nonce": true,
+   "split_outputs": [
+    "0vynhfx5:285000000",
+    "q4h0aadm:15000000"
+   ]
+  },
+  "A_buyer": {
+   "status": "delivered",
+   "plaintext_matches": true,
+   "txid_matches": true
+  },
+  "A_sweep": {
+   "status": "sent",
+   "count": 1,
+   "buyer_gain_sompi": "19837600"
+  },
+  "A_export": {
+   "has_payload": true,
+   "pasted_ok": true
+  },
+  "B_refund": {
+   "early_attempt_rejected": "订单地址上有 0 笔 UTXO(期望恰 1)",
+   "refund_tx": "912ed100040584f8af507c4cacaa5bee348a6b10c0301825fae630ce6fcacd1a",
+   "last_wait_error": "buildCommissionRefundTx: 还没到期(currentPmtMs=1791366749644 < deadline+margin=1791366778185); PMT(节点 virtual_past_median_ti",
+   "tries": 62,
+   "refund_address_balance_sompi": "301900000",
+   "order_spent": true,
+   "sweep_status": "sent",
+   "buyer_gain_sompi": "301737600",
+   "total_sompi": "303000000"
+  }
+ },
+ "verdict": "PASS"
+}

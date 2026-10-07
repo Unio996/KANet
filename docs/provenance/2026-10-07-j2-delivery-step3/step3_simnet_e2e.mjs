@@ -16,6 +16,7 @@ const S = await imp('kasia-console/src/lib/delivery-store.mjs'); const W = await
 const B = await imp('kasia-console/src/lib/checkout-static/delivery-buyer.js'); const Inv = await imp('kasia-console/src/lib/delivery-invoice.mjs'); const SDK = await imp('kasia-console/src/lib/commission-plan-sdk.mjs');
 const Svc = await imp('kasia-console/src/services/delivery-watcher-service.mjs'); const RB = await imp('kasia-console/src/lib/checkout-static/resolve-order-browser.js'); const FS = await imp('kasia-console/src/lib/fee-split.mjs');
 const OUT = process.argv[2] || 'step3_e2e_result.json'; const SECRET_HDR = process.env.ADMIN_SECRET_DELIVERY || 'simnet-delivery-test-secret';
+const RUN = Date.now().toString(36); const SKU_A = 'e2e3-a-' + RUN, SKU_B = 'e2e3-b-' + RUN;
 const R = { network: 'simnet', phases: {} }; const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 const rpc = await rpcConnect();
 const addrOf = (hex) => new kaspa.PrivateKey(hex).toPublicKey().toAddress('simnet').toString();
@@ -50,7 +51,7 @@ const ctx = Svc.buildDeliveryCtx({ db: sqlite, relayCall, readerFor: () => simne
 const mkQuote = (id) => SDK.signQuote({ schema_v: 1, quote_id: id, network: 'simnet', merchant_pubkey_hex: new kaspa.PrivateKey('21'.repeat(32)).toPublicKey().toString(), price_sompi: '300000000',
   canonical_rules: { schema_v: 1, roles: [{ name: 'provider', bps: 7000, address: addrOf('31'.repeat(32)) }, { name: 'broker', bps: 500, address: addrOf('32'.repeat(32)) }, { name: 'channel_1', bps: 2500, fold_to: 'provider' }] },
   unfilled_channel_slot_fold_to: 'provider', valid_from_ms: Date.now() - 1000, valid_until_ms: Date.now() + 86400000, channel_whitelist: null, require_channel_deposit: false,
-  min_deposit_sompi: '100000000', max_split_fee_sompi: '40000000', max_refund_fee_sompi: '10000000', deadline_offset_ms: 259200000 }, '21'.repeat(32));
+  min_deposit_sompi: '100000000', max_split_fee_sompi: '3000000', max_refund_fee_sompi: '3000000', deadline_offset_ms: 259200000 }, '21'.repeat(32));
 const bal = async (a) => BigInt((await rpc.getBalanceByAddress({ address: a })).balance);
 const BUYER = addrOf('55'.repeat(32));   // 买家自己的收款地址(清扫目标)
 
@@ -64,8 +65,8 @@ const flowOf = (o) => B.startBuyerFlow({ location: { hash: o.u.hash, search: o.u
 
 // ═════ Phase A: 付款 → watcher(真 split + 真信箱)→ 买家读链取货 → 清扫信箱 ═════
 const PLAINTEXT = 'https://example.test/dl/STEP3-E2E-ACTIVATION-' + Date.now();
-await api('POST', '/api/delivery/stock', { sku_id: 'e2e3-a', items: [PLAINTEXT] });
-const A = await mkOrder('e2e3-a', Date.now() + 3600_000);
+await api('POST', '/api/delivery/stock', { sku_id: SKU_A, items: [PLAINTEXT] });
+const A = await mkOrder(SKU_A, Date.now() + 3600_000);
 const flowA = await flowOf(A);
 R.phases.A_create = { order_address_matches_buyer_page: flowA.derived.orderAddress === A.orderAddress, refund_matches: flowA.derived.refundAddress === A.refundAddress, state: S.getOrderPublic(sqlite, A.id).state };
 log('A: 建单', A.id.slice(-8), JSON.stringify(R.phases.A_create));
@@ -94,18 +95,20 @@ R.phases.A_sweep = { status: sw.status, count: sw.count, buyer_gain_sompi: Strin
 const exp = await api('GET', `/api/delivery/orders/${A.id}/ciphertext`); R.phases.A_export = { has_payload: !!exp.payload_hex, pasted_ok: (await flowA.paste(exp.payload_hex)) === PLAINTEXT };
 
 // ═════ Phase B: 到期退款路径(不跑 watcher): 付款 → 到期 → 买家页触发零签名 refund → 退款 P2PK → 买家清扫 ═════
-const dlB = Date.now() + 150_000;
-const Bo = await mkOrder('e2e3-b', dlB); const flowB = await flowOf(Bo);
+const dlB = Date.now() + 30_000;   // simnet 的 pastMedianTime 落后墙钟 ≈7 分钟(矿工节奏), 退款以 PMT 为准 ⇒ 下面轮询最久 ~14 分钟
+const Bo = await mkOrder(SKU_B, dlB); const flowB = await flowOf(Bo);
+// 退款路径要的是"没人替买家拆分": 把 B 单停在 manual_review(仅 simnet 测试库; 真实退款场景 = 商家 watcher 没动它)
+sqlite.prepare("UPDATE delivery_orders SET state='manual_review' WHERE id=?").run(Bo.id);
 const payB = await transfer('bettorA', Bo.orderAddress, Number(Bo.total) / 1e8); log('B: 付款', payB.status);
 const sleepUntil = async (ms) => { while (Date.now() < ms) await sleep(3000); };
 let early = null; try { await flowB.refund(rpc); } catch (e) { early = String(e.message).slice(0, 80); }
 await sleepUntil(dlB + 20_000);
 let refundRes = null, tries = 0;
-while (tries++ < 40) { try { refundRes = await flowB.refund(rpc); break; } catch (e) { if (!/还没到期/.test(String(e.message))) { refundRes = { error: String(e.message).slice(0, 160) }; break; } await sleep(5000); } }
+let lastErr = null; while (tries++ < 170) { try { refundRes = await flowB.refund(rpc); break; } catch (e) { lastErr = String(e.message).slice(0, 120); if (!/还没到期|未到期|尚未到期/.test(String(e.message))) { refundRes = { error: String(e.message).slice(0, 160) }; break; } await sleep(5000); } }
 await sleep(8000);
 const refundBal = await bal(Bo.refundAddress); const funds = await flowB.funds();
 const bb0 = await bal(BUYER); const sw2 = await flowB.sweepRefund(rpc, BUYER); await sleep(8000); const bb1 = await bal(BUYER);
-R.phases.B_refund = { early_attempt_rejected: early, refund_tx: refundRes?.txId, refund_error: refundRes?.error, refund_address_balance_sompi: String(refundBal), order_spent: funds.spent, sweep_status: sw2.status, buyer_gain_sompi: String(bb1 - bb0), total_sompi: String(Bo.total) };
+R.phases.B_refund = { early_attempt_rejected: early, refund_tx: refundRes?.txId, refund_error: refundRes?.error, last_wait_error: lastErr, tries, refund_address_balance_sompi: String(refundBal), order_spent: funds.spent, sweep_status: sw2.status, buyer_gain_sompi: String(bb1 - bb0), total_sompi: String(Bo.total) };
 log('B: 退款', JSON.stringify(R.phases.B_refund));
 
 // ═════ 判定 ═════
