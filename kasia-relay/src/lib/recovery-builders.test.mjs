@@ -38,9 +38,25 @@ await t('_recoveryFee: ≤ 合约上限 5,000,000; 超限 / ≤0 ⇒ 抛', () =>
   assert.throws(() => P._recoveryFee(undefined, 0n, 'x'), /≤ 0/);   // 站点默认未填实测值 ⇒ 不允许静默 0 费
   assert.strictEqual(P._recoveryFee(undefined, 777n, 'x'), 777n);
 });
-await t('RECOVERY_SITE_FEE_SOMPI: 已冻结、两项均已填入 (0, 上限] 内的实测值', () => {
+const floors = JSON.parse(readFileSync(join(here, '../../../docs/provenance/2026-10-07-j2-retire-sweep/measured_floors.json'), 'utf8'));
+await t('RECOVERY_SITE_FEE_SOMPI: 冻结; ≥ 1.25× 节点实测下限(默认预算下) 且 ≤ 合约上限', () => {
   assert.ok(Object.isFrozen(P.RECOVERY_SITE_FEE_SOMPI));
-  for (const k of ['claimRetire', 'ticketSweep']) { const v = P.RECOVERY_SITE_FEE_SOMPI[k]; assert.ok(v > 0n && v <= P.RECOVERY_MAX_FEE_SOMPI, `${k}=${v}`); }
+  const F = P.RECOVERY_SITE_FEE_SOMPI, d = floors.at_default_budgets;
+  assert.ok(F.claimRetire * 100n >= BigInt(d.claimRetire_floor_sompi) * 125n, 'claimRetire < 1.25×实测');
+  assert.ok(F.ticketSweep * 100n >= BigInt(d.ticketSweep_floor_sompi) * 125n, 'ticketSweep < 1.25×实测');
+  for (const k of ['claimRetire', 'ticketSweep']) assert.ok(F[k] > 0n && F[k] <= P.RECOVERY_MAX_FEE_SOMPI, k);
+  assert.strictEqual(F.claimRetire, BigInt(floors.constants.claimRetire));
+  assert.strictEqual(F.ticketSweep, BigInt(floors.constants.ticketSweep));
+});
+await t('RECOVERY_COMPUTE_BUDGET: 冻结; 默认预算 ≥ 2× simnet 实测最小可行, 且手续费证据是在这组预算下测的', () => {
+  const B = P.RECOVERY_COMPUTE_BUDGET, m = floors.budget_min_working_simnet;
+  assert.ok(Object.isFrozen(B));
+  assert.ok(B.claim >= 2 * m.claim && B.token >= 2 * m.token && B.ticket >= 2 * m.ticket);
+  assert.deepStrictEqual({ ...B }, floors.budget_default);
+});
+await t('旧预算(300/100)下的 retire 下限 4,787,600 距合约上限不足 5% ⇒ 默认不得回到 300', () => {
+  assert.ok(P.RECOVERY_COMPUTE_BUDGET.claim < 300);
+  assert.ok(BigInt(floors.at_budget_300_100_claim.claimRetire_floor_sompi) * 100n > P.RECOVERY_MAX_FEE_SOMPI * 95n);
 });
 await t('_recoveryAge: 门槛 − 1 / 门槛 / 门槛 + 余量 − 1 / 门槛 + 余量 的边界两侧', () => {
   const a = (age, margin = 50) => P._recoveryAge({ virtualDaa: 1000 + age, blockDaa: 1000, requiredDaa: 400, marginDaa: margin });

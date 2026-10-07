@@ -3861,7 +3861,10 @@ export async function unlockBshardSeal(args) {
 //   复用: _matchUtxo / _addressFromRedeem / _combineActionAndRedeem / _encodeKttTransferZeroOutAction / _assertTxInvariants / connectRpc(同 _unlockClaimFamily 骨架)。
 // ════════════════════════════════════════════════════════════════════════════════════════════════
 export const RECOVERY_MAX_FEE_SOMPI = 5_000_000n;   // = KanetTokenClaim.RETIRE_MAX_FEE = PoolSideTicket.SWEEP_MAX_FEE
-export const RECOVERY_SITE_FEE_SOMPI = Object.freeze({ claimRetire: 0n, ticketSweep: 0n });   // 实测下限 ×1.3 填入(见 docs/provenance/2026-10-07-j2-retire-sweep)
+// 实测下限(节点拒绝文本, 预算 claim40/token40/ticket20): claim retire 1,587,600(compute mass 15,876) / ticket sweep 275,000(2,750); ×1.3 向上取整到 10k ⇒ 2,100,000 / 360,000(远低于合约上限 5,000,000)。证据 docs/provenance/2026-10-07-j2-retire-sweep/
+export const RECOVERY_SITE_FEE_SOMPI = Object.freeze({ claimRetire: 2_100_000n, ticketSweep: 360_000n });   // 实测下限 ×1.3 填入(见 docs/provenance/2026-10-07-j2-retire-sweep)
+// 计算预算(越小 compute mass 越小 ⇒ 手续费下限越低): simnet 实测最小可行 claim=10/token=10/ticket=5, 默认取 4× 余量; 见 docs/provenance/2026-10-07-j2-retire-sweep/
+export const RECOVERY_COMPUTE_BUDGET = Object.freeze({ claim: 40, token: 40, ticket: 20 });
 export const RECOVERY_AGE_MARGIN_DAA = 50;           // builder 额外要求的年龄余量(节点 tip 与我们读到的虚拟 DAA 有漂移; 合约门本身不含余量)
 
 /** 纯函数(可测): 校验 sink_pk 并返回 P2PK spk(version 0, 0x20 <32B> 0xac)。pk 必须出现在 redeem 字节里。 */
@@ -3939,7 +3942,7 @@ export async function unlockClaimRetire(args) {
     })();
     const claimSig = _combineActionAndRedeem(claimAction, cmd.inputs.claim.redeem_hex);
     const tokSig = _combineActionAndRedeem(_encodeKttTransferZeroOutAction(w.token_transfer_dispatch_tag_hex, Number(w.token_transfer_state_field_count), [0]), cmd.inputs.token.redeem_hex);
-    const CB_CLAIM = Number(cmd.compute_budget_claim ?? 300), CB_TOK = Number(cmd.compute_budget_token ?? 100);
+    const CB_CLAIM = Number(cmd.compute_budget_claim ?? RECOVERY_COMPUTE_BUDGET.claim), CB_TOK = Number(cmd.compute_budget_token ?? RECOVERY_COMPUTE_BUDGET.token);
     const signedTx = new Transaction({
       version: 1,
       inputs: [
@@ -3983,7 +3986,7 @@ export async function unlockTicketSweep(args) {
     const sig = _combineActionAndRedeem(action, cmd.inputs.ticket.redeem_hex);
     const signedTx = new Transaction({
       version: 1,
-      inputs: [{ previousOutpoint: { transactionId: tUtxo.outpoint.transactionId, index: tUtxo.outpoint.index }, signatureScript: sig, sequence: BigInt(sweepDaa), sigOpCount: 0, computeBudget: Number(cmd.compute_budget ?? 100) }],
+      inputs: [{ previousOutpoint: { transactionId: tUtxo.outpoint.transactionId, index: tUtxo.outpoint.index }, signatureScript: sig, sequence: BigInt(sweepDaa), sigOpCount: 0, computeBudget: Number(cmd.compute_budget ?? RECOVERY_COMPUTE_BUDGET.ticket) }],
       outputs: [new TransactionOutput(outValue, sinkSpk)], lockTime: 0n, gas: 0n, subnetworkId: '0000000000000000000000000000000000000000', payload: '',
     });
     _assertTxInvariants(matched, signedTx, label, networkId);

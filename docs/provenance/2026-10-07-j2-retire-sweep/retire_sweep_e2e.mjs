@@ -30,7 +30,7 @@ const rc = async (cmd) => {
   } catch (e) { return { ok: false, error: e.message }; }
 };
 const p2sh = (h) => relay._addressFromRedeem(h, network);
-const enumerate = () => enumerateRecovery({ db: sqlite, rc, p2sh, tmpl, env: process.env, marginDaa: MARGIN });
+const enumerate = () => enumerateRecovery({ db: sqlite, rc, p2sh, tmpl, env: process.env, marginDaa: MARGIN, onlyMarkets: process.env.ONLY ? [process.env.ONLY] : null });
 const R = { started: new Date().toISOString(), network, steps: {} };
 const save = () => writeFileSync(OUT, JSON.stringify(R, null, 1));
 const floorOf = (msg) => { const m = /required amount of (\d+) for (?:compute|normalized transient) mass (\d+)/.exec(msg || '') || /mempool floor (\d+) \(mass=(\d+)/.exec(msg || ''); return m ? { floor: Number(m[1]), mass: Number(m[2]) } : null; };

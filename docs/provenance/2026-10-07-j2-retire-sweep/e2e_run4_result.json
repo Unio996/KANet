@@ -1,0 +1,68 @@
+{
+ "started": "2026-10-07T08:25:23.056Z",
+ "network": "simnet",
+ "steps": {
+  "P1_first_list": {
+   "retirable": 0,
+   "notYet": 4,
+   "sweepable": 1,
+   "skipped": [
+    "claim:gone(该叶的 claim UTXO 已不存在: 已回收或从未铸出)",
+    "claim:gone(该叶的 claim UTXO 已不存在: 已回收或从未铸出)"
+   ],
+   "firstClaimAge": {
+    "ageDaa": 383,
+    "requiredDaa": 400
+   },
+   "firstClaimEligible": false
+  },
+  "N1_builder_gate": {
+   "ok": false,
+   "error": "zk_claim_retire: 年龄未到 age=383 < retire_daa 400 + 余量 50 — 拒绝广播(绝不早于年龄)"
+  },
+  "N2_node_gate": {
+   "ok": false,
+   "error": "RPC Server (remote error) -> Rejected transaction d6ec18188be75c5e002aa82ab9bcb2d02ab64a613fa802ce9edb90f072439ec8: one of the transaction sequence locks conditions was not met"
+  },
+  "P1_eligible_list": {
+   "retirable": [
+    {
+     "market": "49-pi3sh",
+     "leaf": 2,
+     "age": {
+      "ageDaa": 467,
+      "requiredDaa": 400
+     },
+     "sum_in": "100000000"
+    }
+   ],
+   "notYet": 3,
+   "sweepable": [
+    {
+     "market": "49-pi3sh",
+     "age": {
+      "ageDaa": 6140,
+      "requiredDaa": 6000
+     }
+    }
+   ],
+   "liveSlots": 0
+  },
+  "F_claim_retire": {
+   "ok": false,
+   "error": "RPC Server (remote error) -> Rejected transaction d3dbc2615d0c9661aa03de94f765e1dd94db77d27b3231bffd713dc1e1371857: transaction d3dbc2615d0c9661aa03de94f765e1dd94db77d27b3231bffd713dc1e1371857 is not standard: transaction has 1 fees which is under the required amount of 1587600 for compute mass 15876",
+   "floor": {
+    "floor": 1587600,
+    "mass": 15876
+   }
+  },
+  "F_ticket_sweep": {
+   "ok": false,
+   "error": "RPC Server (remote error) -> Rejected transaction c3d3af9c35da57ea6c8f2004c117c9b9ffdc7718de8b22d222abf449e53763f3: transaction c3d3af9c35da57ea6c8f2004c117c9b9ffdc7718de8b22d222abf449e53763f3 is not standard: transaction has 1 fees which is under the required amount of 275000 for compute mass 2750",
+   "floor": {
+    "floor": 275000,
+    "mass": 2750
+   }
+  }
+ }
+}

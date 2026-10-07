@@ -1,0 +1,75 @@
+[db] path=D:\kanet-tn12\scratch\_j2_mm\console.mm.rs1.db source=DB_PATH
+[mass-floor:observe] site=zk_claim_retire compute=47876 storage=0 transient=30064 mass_ub=47876 minFee=4787600 actualFee=5000000 would_reject=false wasm=panic(undefined) source=7b1e18cc
+[zk_claim_retire invariant] Σin=100000000 Σout=95000000 fee=5000000 (mass_ub=47876 minFee=4787600 ✓), 1 outputs all >= dust
+08:23:24 发现 claim: 49-pi3sh age {"ageDaa":53,"requiredDaa":400} eligible false
+08:23:24 N1 builder 门: ✅ zk_claim_retire: 年龄未到 age=53 < retire_daa 400 + 余量 50 — 拒绝广播(绝不早于年龄)
+[mass-floor:observe] site=zk_claim_retire compute=47876 storage=0 transient=30064 mass_ub=47876 minFee=4787600 actualFee=2000000 would_reject=true wasm=panic(undefined) source=7b1e18cc
+[zk_claim_retire invariant] Σin=100000000 Σout=98000000 fee=2000000 (mass_ub=47876 minFee=4787600 ⚠ would-reject(observe)), 1 outputs all >= dust
+[mass-floor:observe:auth] site=zk_claim_retire txid=d22e2e428f83260fae61dcb4ff82379972018549995bb870389a6043c9a86132 source=reject authoritative_mass=null ub_ok=inconclusive mass_ub=47876 reason=reject text has no mass: RPC Server (remote error) -> Rejected transaction d22e2e428f83260fae61dcb4ff8237 inconclusive_total=1
+08:23:24 N2 绕过 builder 门广播: ✅ 节点拒: RPC Server (remote error) -> Rejected transaction d22e2e428f83260fae61dcb4ff82379972018549995bb870389a6043c9a86132: one of the transaction sequence locks conditions was not met
+[mass-floor:observe] site=zk_claim_retire compute=47876 storage=0 transient=30064 mass_ub=47876 minFee=4787600 actualFee=5000000 would_reject=false wasm=panic(undefined) source=7b1e18cc
+[zk_claim_retire invariant] Σin=100000000 Σout=95000000 fee=5000000 (mass_ub=47876 minFee=4787600 ✓), 1 outputs all >= dust
+[mass-floor:observe] site=zk_claim_retire compute=47876 storage=0 transient=30064 mass_ub=47876 minFee=4787600 actualFee=5000000 would_reject=false wasm=panic(undefined) source=7b1e18cc
+[zk_claim_retire invariant] Σin=100000000 Σout=95000000 fee=5000000 (mass_ub=47876 minFee=4787600 ✓), 1 outputs all >= dust
+[mass-floor:observe] site=zk_claim_retire compute=47876 storage=0 transient=30064 mass_ub=47876 minFee=4787600 actualFee=5000000 would_reject=false wasm=panic(undefined) source=7b1e18cc
+[zk_claim_retire invariant] Σin=100000000 Σout=95000000 fee=5000000 (mass_ub=47876 minFee=4787600 ✓), 1 outputs all >= dust
+[mass-floor:observe] site=zk_claim_retire compute=47876 storage=0 transient=30064 mass_ub=47876 minFee=4787600 actualFee=5000000 would_reject=false wasm=panic(undefined) source=7b1e18cc
+[zk_claim_retire invariant] Σin=100000000 Σout=95000000 fee=5000000 (mass_ub=47876 minFee=4787600 ✓), 1 outputs all >= dust
+[mass-floor:observe] site=zk_claim_retire compute=47876 storage=0 transient=30064 mass_ub=47876 minFee=4787600 actualFee=5000000 would_reject=false wasm=panic(undefined) source=7b1e18cc
+[zk_claim_retire invariant] Σin=100000000 Σout=95000000 fee=5000000 (mass_ub=47876 minFee=4787600 ✓), 1 outputs all >= dust
+[mass-floor:observe] site=zk_claim_retire compute=47876 storage=0 transient=30064 mass_ub=47876 minFee=4787600 actualFee=5000000 would_reject=false wasm=panic(undefined) source=7b1e18cc
+[zk_claim_retire invariant] Σin=100000000 Σout=95000000 fee=5000000 (mass_ub=47876 minFee=4787600 ✓), 1 outputs all >= dust
+[mass-floor:observe] site=zk_claim_retire compute=47876 storage=0 transient=30064 mass_ub=47876 minFee=4787600 actualFee=5000000 would_reject=false wasm=panic(undefined) source=7b1e18cc
+[zk_claim_retire invariant] Σin=100000000 Σout=95000000 fee=5000000 (mass_ub=47876 minFee=4787600 ✓), 1 outputs all >= dust
+[mass-floor:observe] site=zk_claim_retire compute=47876 storage=0 transient=30064 mass_ub=47876 minFee=4787600 actualFee=5000000 would_reject=false wasm=panic(undefined) source=7b1e18cc
+[zk_claim_retire invariant] Σin=100000000 Σout=95000000 fee=5000000 (mass_ub=47876 minFee=4787600 ✓), 1 outputs all >= dust
+[mass-floor:observe] site=zk_claim_retire compute=47876 storage=0 transient=30064 mass_ub=47876 minFee=4787600 actualFee=5000000 would_reject=false wasm=panic(undefined) source=7b1e18cc
+[zk_claim_retire invariant] Σin=100000000 Σout=95000000 fee=5000000 (mass_ub=47876 minFee=4787600 ✓), 1 outputs all >= dust
+[mass-floor:observe] site=zk_claim_retire compute=47876 storage=0 transient=30064 mass_ub=47876 minFee=4787600 actualFee=5000000 would_reject=false wasm=panic(undefined) source=7b1e18cc
+[zk_claim_retire invariant] Σin=100000000 Σout=95000000 fee=5000000 (mass_ub=47876 minFee=4787600 ✓), 1 outputs all >= dust
+[mass-floor:observe] site=zk_claim_retire compute=47876 storage=0 transient=30064 mass_ub=47876 minFee=4787600 actualFee=5000000 would_reject=false wasm=panic(undefined) source=7b1e18cc
+[zk_claim_retire invariant] Σin=100000000 Σout=95000000 fee=5000000 (mass_ub=47876 minFee=4787600 ✓), 1 outputs all >= dust
+[mass-floor:observe] site=zk_claim_retire compute=47876 storage=0 transient=30064 mass_ub=47876 minFee=4787600 actualFee=5000000 would_reject=false wasm=panic(undefined) source=7b1e18cc
+[zk_claim_retire invariant] Σin=100000000 Σout=95000000 fee=5000000 (mass_ub=47876 minFee=4787600 ✓), 1 outputs all >= dust
+[mass-floor:observe] site=zk_claim_retire compute=47876 storage=0 transient=30064 mass_ub=47876 minFee=4787600 actualFee=5000000 would_reject=false wasm=panic(undefined) source=7b1e18cc
+[zk_claim_retire invariant] Σin=100000000 Σout=95000000 fee=5000000 (mass_ub=47876 minFee=4787600 ✓), 1 outputs all >= dust
+[mass-floor:observe] site=zk_claim_retire compute=47876 storage=0 transient=30064 mass_ub=47876 minFee=4787600 actualFee=5000000 would_reject=false wasm=panic(undefined) source=7b1e18cc
+[zk_claim_retire invariant] Σin=100000000 Σout=95000000 fee=5000000 (mass_ub=47876 minFee=4787600 ✓), 1 outputs all >= dust
+[mass-floor:observe] site=zk_claim_retire compute=47876 storage=0 transient=30064 mass_ub=47876 minFee=4787600 actualFee=5000000 would_reject=false wasm=panic(undefined) source=7b1e18cc
+[zk_claim_retire invariant] Σin=100000000 Σout=95000000 fee=5000000 (mass_ub=47876 minFee=4787600 ✓), 1 outputs all >= dust
+[mass-floor:observe] site=zk_claim_retire compute=47876 storage=0 transient=30064 mass_ub=47876 minFee=4787600 actualFee=5000000 would_reject=false wasm=panic(undefined) source=7b1e18cc
+[zk_claim_retire invariant] Σin=100000000 Σout=95000000 fee=5000000 (mass_ub=47876 minFee=4787600 ✓), 1 outputs all >= dust
+[mass-floor:observe] site=zk_claim_retire compute=47876 storage=0 transient=30064 mass_ub=47876 minFee=4787600 actualFee=5000000 would_reject=false wasm=panic(undefined) source=7b1e18cc
+[zk_claim_retire invariant] Σin=100000000 Σout=95000000 fee=5000000 (mass_ub=47876 minFee=4787600 ✓), 1 outputs all >= dust
+[mass-floor:observe] site=zk_claim_retire compute=47876 storage=0 transient=30064 mass_ub=47876 minFee=4787600 actualFee=5000000 would_reject=false wasm=panic(undefined) source=7b1e18cc
+[zk_claim_retire invariant] Σin=100000000 Σout=95000000 fee=5000000 (mass_ub=47876 minFee=4787600 ✓), 1 outputs all >= dust
+[mass-floor:observe] site=zk_claim_retire compute=47876 storage=0 transient=30064 mass_ub=47876 minFee=4787600 actualFee=5000000 would_reject=false wasm=panic(undefined) source=7b1e18cc
+[zk_claim_retire invariant] Σin=100000000 Σout=95000000 fee=5000000 (mass_ub=47876 minFee=4787600 ✓), 1 outputs all >= dust
+[mass-floor:observe] site=zk_claim_retire compute=47876 storage=0 transient=30064 mass_ub=47876 minFee=4787600 actualFee=5000000 would_reject=false wasm=panic(undefined) source=7b1e18cc
+[zk_claim_retire invariant] Σin=100000000 Σout=95000000 fee=5000000 (mass_ub=47876 minFee=4787600 ✓), 1 outputs all >= dust
+[mass-floor:observe] site=zk_claim_retire compute=47876 storage=0 transient=30064 mass_ub=47876 minFee=4787600 actualFee=5000000 would_reject=false wasm=panic(undefined) source=7b1e18cc
+[zk_claim_retire invariant] Σin=100000000 Σout=95000000 fee=5000000 (mass_ub=47876 minFee=4787600 ✓), 1 outputs all >= dust
+[mass-floor:observe] site=zk_claim_retire compute=47876 storage=0 transient=30064 mass_ub=47876 minFee=4787600 actualFee=5000000 would_reject=false wasm=panic(undefined) source=7b1e18cc
+[zk_claim_retire invariant] Σin=100000000 Σout=95000000 fee=5000000 (mass_ub=47876 minFee=4787600 ✓), 1 outputs all >= dust
+[mass-floor:observe] site=zk_claim_retire compute=47876 storage=0 transient=30064 mass_ub=47876 minFee=4787600 actualFee=5000000 would_reject=false wasm=panic(undefined) source=7b1e18cc
+[zk_claim_retire invariant] Σin=100000000 Σout=95000000 fee=5000000 (mass_ub=47876 minFee=4787600 ✓), 1 outputs all >= dust
+[mass-floor:observe] site=zk_claim_retire compute=47876 storage=0 transient=30064 mass_ub=47876 minFee=4787600 actualFee=5000000 would_reject=false wasm=panic(undefined) source=7b1e18cc
+[zk_claim_retire invariant] Σin=100000000 Σout=95000000 fee=5000000 (mass_ub=47876 minFee=4787600 ✓), 1 outputs all >= dust
+[mass-floor:observe] site=zk_claim_retire compute=47876 storage=0 transient=30064 mass_ub=47876 minFee=4787600 actualFee=5000000 would_reject=false wasm=panic(undefined) source=7b1e18cc
+[zk_claim_retire invariant] Σin=100000000 Σout=95000000 fee=5000000 (mass_ub=47876 minFee=4787600 ✓), 1 outputs all >= dust
+[mass-floor:observe] site=zk_claim_retire compute=47876 storage=0 transient=30064 mass_ub=47876 minFee=4787600 actualFee=5000000 would_reject=false wasm=panic(undefined) source=7b1e18cc
+[zk_claim_retire invariant] Σin=100000000 Σout=95000000 fee=5000000 (mass_ub=47876 minFee=4787600 ✓), 1 outputs all >= dust
+[mass-floor:observe] site=zk_claim_retire compute=47876 storage=0 transient=30064 mass_ub=47876 minFee=4787600 actualFee=5000000 would_reject=false wasm=panic(undefined) source=7b1e18cc
+[zk_claim_retire invariant] Σin=100000000 Σout=95000000 fee=5000000 (mass_ub=47876 minFee=4787600 ✓), 1 outputs all >= dust
+[mass-floor:observe] site=zk_claim_retire compute=47876 storage=0 transient=30064 mass_ub=47876 minFee=4787600 actualFee=5000000 would_reject=false wasm=panic(undefined) source=7b1e18cc
+[zk_claim_retire invariant] Σin=100000000 Σout=95000000 fee=5000000 (mass_ub=47876 minFee=4787600 ✓), 1 outputs all >= dust
+[mass-floor:observe] site=zk_claim_retire compute=47876 storage=0 transient=30064 mass_ub=47876 minFee=4787600 actualFee=5000000 would_reject=false wasm=panic(undefined) source=7b1e18cc
+[zk_claim_retire invariant] Σin=100000000 Σout=95000000 fee=5000000 (mass_ub=47876 minFee=4787600 ✓), 1 outputs all >= dust
+[mass-floor:observe] site=zk_claim_retire compute=47876 storage=0 transient=30064 mass_ub=47876 minFee=4787600 actualFee=5000000 would_reject=false wasm=panic(undefined) source=7b1e18cc
+[zk_claim_retire invariant] Σin=100000000 Σout=95000000 fee=5000000 (mass_ub=47876 minFee=4787600 ✓), 1 outputs all >= dust
+08:24:39 到龄清单: retirable 1 sweepable 0
+[mass-floor:observe] site=zk_claim_retire compute=47876 storage=0 transient=30064 mass_ub=47876 minFee=4787600 actualFee=1 would_reject=true wasm=panic(undefined) source=7b1e18cc
+[zk_claim_retire invariant] Σin=100000000 Σout=99999999 fee=1 (mass_ub=47876 minFee=4787600 ⚠ would-reject(observe)), 1 outputs all >= dust
+[mass-floor:observe:auth] site=zk_claim_retire txid=fa25d84ba1e12abaaf0e311783c22c0cd738cb8cd1a499709aac9caaf6554156 source=reject authoritative_mass=47876 mass_ub=47876 ub_ok=true minFee_auth=4787600 actualFee=1 local_minFee=4787600 local_would_reject=true totals=ok:1/viol:0/inc:1/src:mempool=0,reject=1
+08:24:39 F claim retire: {"ok":false,"error":"RPC Server (remote error) -> Rejected transaction fa25d84ba1e12abaaf0e311783c22c0cd738cb8cd1a499709aac9caaf6554156: transaction fa25d84ba1e12abaaf0e311783c22c0cd738cb8cd1a499709aac9caaf6554156 is not standard: transaction has 1 fees which is under the required amount of 4787600 
+08:24:39 完成探测阶段(fee 探测不广播成功交易)。真花阶段请跑 zk-recover.mjs --max 1。
