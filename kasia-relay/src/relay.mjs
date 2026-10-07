@@ -1167,6 +1167,20 @@ if (process.send) {
           if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
           return;
         }
+        case 'zk_claim_retire': {
+          // 账本1867: KanetTokenClaim.retire 回收(无签名, 去向=烤死 sink_pk, 构造器内重验年龄/fee 上限)。cmd.dry_run===true 只构造不广播。
+          const { unlockClaimRetire } = await import('./lib/p2sh.mjs');
+          const r = await unlockClaimRetire({ cmd, networkId: getWallet().getNetworkId() });
+          if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
+          return;
+        }
+        case 'zk_ticket_sweep': {
+          // 账本1867: PoolSideTicket.sweep 回收(同上)。
+          const { unlockTicketSweep } = await import('./lib/p2sh.mjs');
+          const r = await unlockTicketSweep({ cmd, networkId: getWallet().getNetworkId() });
+          if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
+          return;
+        }
         case 'closezk_v2_claim': {
           // 缺件1 (J2 2026-07-08, NWT GREEN-with-conditions + Bettor 终GO): CloseZkV2 claim — payoutRootField
           // merkle climb + 17-word nullifier + P2PK payout + splice 续约(state-in-address, 213B 状态区), closed==2 前置.

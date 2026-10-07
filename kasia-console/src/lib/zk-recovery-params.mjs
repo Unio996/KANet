@@ -55,3 +55,29 @@ export function checkRecoveryParamsDrift(db, marketId, site, env = process.env, 
     return { drift: false };
   }
 }
+
+/**
+ * 账本1867: 把 CloseZkV2 续约链的 covenant id(claim 编排 stage-A 回执的 selfCovId)写进盘 metadata.zk_self_cov_id(首写为准)。
+ * 为什么: KanetTokenClaim 的 State 第一字段 market_cov_id = 该 id; 续约耗尽(exhausted)后链上不再有任何 UTXO 带它, 回收枚举器无处再读 ⇒ 必须趁 claim 落链时记下。
+ * 只在 claim 已 landed 之后调用(NO TX NO STATE CHANGE); 永不抛(记账失败不得影响 claim 主流程)。
+ * @returns {{stamped:boolean, reason?:string}}
+ */
+export function stampSelfCovId(db, marketId, covIdHex) {
+  try {
+    const id = String(covIdHex || '').toLowerCase();
+    if (!/^[0-9a-f]{64}$/.test(id)) return { stamped: false, reason: 'bad_cov_id' };
+    const row = db.prepare('SELECT metadata FROM pool_markets WHERE id = ?').get(marketId);
+    if (!row) return { stamped: false, reason: 'no_market' };
+    let meta; try { meta = JSON.parse(row.metadata || '{}'); } catch { return { stamped: false, reason: 'bad_metadata' }; }
+    if (meta.zk_self_cov_id) {
+      if (String(meta.zk_self_cov_id).toLowerCase() !== id) console.warn(`[zk-recovery-params] 🔴 market=${String(marketId).slice(-8)} zk_self_cov_id 已有值 ≠ 本次 claim 回执(${String(meta.zk_self_cov_id).slice(0, 12)}… vs ${id.slice(0, 12)}…) — 不覆盖, 请人工核`);
+      return { stamped: false, reason: 'already_set' };
+    }
+    meta.zk_self_cov_id = id;
+    db.prepare('UPDATE pool_markets SET metadata = ? WHERE id = ?').run(JSON.stringify(meta), marketId);
+    return { stamped: true };
+  } catch (e) {
+    console.warn(`[zk-recovery-params] stampSelfCovId failed(ignored): ${e.message}`);
+    return { stamped: false, reason: 'error' };
+  }
+}
