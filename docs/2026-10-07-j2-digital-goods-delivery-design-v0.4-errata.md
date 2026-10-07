@@ -57,3 +57,8 @@
 1. watcher 的 `sendCommandAsync` 注入点：M0a 门要求新钱路模块不裸 import relay-manager；`index.js` 里对 `sendCommandAsync` 的那一次 import 需要经审 manifest 条目（`review_ref` 须为真实审核引用，J2 不能自编）。当前 `index.js` 只调 `startDeliveryWatcherCron(process.env, {})`，未注入则服务拒绝启动 ⇒ 零运行时影响。
 2. 买家页文案（占位在 `delivery-copy.js`）→ Bettor → Owner 批；批准前只用占位。
 3. 主网小额测试（步 4）的首笔花费：Bettor 单点 GO。
+
+## 6. 商家须知（Bettor 账本1881 ②·V1 裁定，如实披露）
+- **每单成本**：链上网络费合计约 **0.032 KAS**（信箱交易）+ split 的矿工费（= 报价里 `max_split_fee_sompi` 内实际烧掉的部分；买家多付的部分全部作矿工费，见 E3）。
+- **信箱面值 0.2 KAS 可能归买家**：信箱是由秘密派生的 P2PK，持有秘密的一方（买家）能签名清扫；商家侧（watcher）发送后不再持有它的签名路径。**V1 接受"双方凭同一秘密都能清扫"，不加卖家侧签名路径**。所以商家应把"每单约 0.032 网络费 + 0.2 可能被买家清扫走"计入定价。
+- 商家文案/面板里不得写"信箱面值会退回商家"。
