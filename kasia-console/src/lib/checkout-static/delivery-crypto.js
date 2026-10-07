@@ -54,6 +54,18 @@ export async function deriveMailboxKey({ orderNonceHex, orderAddress }) {
   return { mailboxPrivHex: privHex, counter };
 }
 
+// 🔴🔴 命名说明(步3 实测发现): 本文件里叫 orderNonceHex 的参数 = 【交付秘密】(发票链接片段 #n= 里的 128 位值), 它【不是】订单合约 ctor 里的 order_nonce。
+//   订单合约的 order_nonce 烤在 redeem 里, 订单 UTXO 被花(split/退款)时 redeem 就公开在链上; 若合约 nonce 就是秘密本身, 则 split 之后任何人都能派生密钥、解开信箱里的交付物、清扫信箱与退款。
+//   ⇒ 合约 nonce = deriveOrderNonce(秘密)(单向派生, 公开后不泄漏秘密); 所有密钥(AEAD/信箱/退款)只从秘密派生。冻结的 KDL1/aead/mailbox/refund 派生函数不变, 只是 ikm 语义明确为"秘密"。
+const INFO_ORDER_NONCE = 'kanet-delivery-v1/order-nonce';
+/** 订单合约 ctor 的 order_nonce(16 字节 hex) = HKDF(秘密, 固定盐, info "kanet-delivery-v1/order-nonce"); 单向: 看到合约 nonce(链上公开)推不出秘密。 */
+export async function deriveOrderNonce({ orderNonceHex }) {
+  if (typeof orderNonceHex !== 'string' || !HEX32_RE.test(orderNonceHex)) throw new Error('delivery-crypto: 交付秘密必须是 32 位小写 hex(128 位)');
+  const s = subtle();
+  const ikm = await s.importKey('raw', hexToBytes(orderNonceHex), 'HKDF', false, ['deriveBits']);
+  const bits = await s.deriveBits({ name: 'HKDF', hash: 'SHA-256', salt: enc.encode('kanet-delivery-v1|order-nonce'), info: enc.encode(INFO_ORDER_NONCE) }, ikm, 128);
+  return bytesToHex(new Uint8Array(bits));
+}
 const INFO_REFUND = 'kanet-delivery-v1/refund/';
 const NETWORK_RE = /^[a-z0-9-]{3,20}$/;
 /**

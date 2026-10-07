@@ -61,8 +61,16 @@ await t('与结账页浏览器路径对拍: resolveRulesForOrder + rebuildCommis
   const resolved = RB.resolveRulesForOrder(kaspa, FS, quote, { ok: true, channelSpks: [] });
   const finalRoles = resolved.payoutLeaves.map((r) => ({ amountSompi: r.amountSompi, spk: new Uint8Array(r.spk) }));
   const refundAddress = d.refundAddress;
-  const buyer = RB.rebuildCommissionOrderAddress(kaspa, { network: 'simnet', finalRoles, payerRefundAddress: refundAddress, maxSplitFeeSompi: BigInt(quote.max_split_fee_sompi), maxRefundFeeSompi: BigInt(quote.max_refund_fee_sompi), orderNonceHex: NONCE, deadlineMs: DL }, sha);
+  const buyer = RB.rebuildCommissionOrderAddress(kaspa, { network: 'simnet', finalRoles, payerRefundAddress: refundAddress, maxSplitFeeSompi: BigInt(quote.max_split_fee_sompi), maxRefundFeeSompi: BigInt(quote.max_refund_fee_sompi), orderNonceHex: await X.deriveOrderNonce({ orderNonceHex: NONCE }), deadlineMs: DL }, sha);
   assert.strictEqual(buyer.address, d.orderAddress, '买家页推出的订单地址 ≠ 商家 console 推出的 ⇒ 付款会打到买家看不到的地址');
+});
+await t('🔴 合约 order_nonce 是交付秘密的单向派生: redeem(split/退款花费时公开上链)里没有秘密的任何 8 位窗口, 但有派生出的合约 nonce', async () => {
+  const d = await I.deriveInvoiceOrder({ quote, orderNonceHex: NONCE, deadlineMs: DL });
+  const cn = await X.deriveOrderNonce({ orderNonceHex: NONCE });
+  assert.notStrictEqual(cn, NONCE); assert.match(cn, /^[0-9a-f]{32}$/);
+  assert.ok(!X.leaksNonce(d.protocol.redeemScriptHex, NONCE), '订单 redeem(花费时公开)泄漏了交付秘密 ⇒ split 之后任何人能解密交付物/清扫');
+  assert.ok(d.protocol.redeemScriptHex.includes(cn), 'redeem 里烤的是派生出的合约 nonce');
+  assert.strictEqual(d.protocol.orderNonceHex, cn);
 });
 await t('拒绝: 验签失败 / 过期 / 未生效 / 网络不符 / 要求押金 / deadline 已过 / 缺 network', async () => {
   const rej = (q, o = {}) => assert.rejects(I.deriveInvoiceOrder({ quote: q, orderNonceHex: NONCE, deadlineMs: DL, ...o }));

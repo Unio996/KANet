@@ -5,7 +5,7 @@
 //   buyer 页用 resolve-order-browser.js 的 rebuildCommissionOrderAddress(固定偏移覆写)推导同一地址——两条路径的 parity 由本模块测试对拍。
 import * as kaspa from 'kaspa-wasm';
 import * as SDK from './commission-plan-sdk.mjs';
-import { deriveRefundKey } from './checkout-static/delivery-crypto.js';
+import { deriveRefundKey, deriveOrderNonce } from './checkout-static/delivery-crypto.js';
 
 /** 报价 → 编码进发票链接 ?q= 的串(同 mint-quote 脚本与结账页解码的 base64(JSON))。 */
 export const encodeQuoteParam = (quote) => Buffer.from(JSON.stringify(quote)).toString('base64');
@@ -31,11 +31,13 @@ export async function deriveInvoiceOrder({ quote, orderNonceHex, deadlineMs, exp
   const finalRoles = resolved.payoutLeaves.map((r) => ({ name: r.name, amountSompi: r.amountSompi, spk: r.spk }));
   const provider = resolved.payoutLeaves[0];
   if (!provider || provider.name !== 'provider') throw new Error('deriveInvoiceOrder: 第一个收款角色必须是 provider');
+  // orderNonceHex 在本模块 = 交付秘密(发票片段里的值)。合约 ctor 的 order_nonce 是它的单向派生(redeem 一旦随花费上链就公开, 不能让它等于秘密)。
+  const contractNonceHex = await deriveOrderNonce({ orderNonceHex });
   const { refundPrivHex } = await deriveRefundKey({ orderNonceHex, network });
   const refundAddress = new kaspa.PrivateKey(refundPrivHex).toPublicKey().toAddress(network).toString();
   const protocol = SDK.createCommissionSplitProtocol({
     network, finalRoles: finalRoles.map((r) => ({ amountSompi: r.amountSompi, spk: r.spk })), payerRefundAddress: refundAddress, deadlineMs,
-    maxSplitFeeSompi: BigInt(quote.max_split_fee_sompi), maxRefundFeeSompi: BigInt(quote.max_refund_fee_sompi), orderNonceHex,
+    maxSplitFeeSompi: BigInt(quote.max_split_fee_sompi), maxRefundFeeSompi: BigInt(quote.max_refund_fee_sompi), orderNonceHex: contractNonceHex,
   });
   const totalSompi = resolved.payoutLeaves.reduce((a, r) => a + r.amountSompi, 0n);
   const providerRole = quote.canonical_rules.roles.find((r) => r.name === 'provider');
