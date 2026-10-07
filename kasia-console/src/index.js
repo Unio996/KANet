@@ -869,7 +869,7 @@ import { startDiskSpaceAlertCron } from './lib/disk-space-alert.mjs';
 startDiskSpaceAlertCron();
 
 // 账本1877 步3: 数字商品「付款后交付」watcher — DELIVERY_WATCHER_ENABLED=1 才跑(默认关), 另需 DELIVERY_RELAY_ID; 开关属配置变更(重启窗+ledger+双签)。
-// 🔴 M0a 门: 新钱路模块不裸 import relay-manager; sendCommandAsync 的注入点(本文件对它的一次 import)需经审 manifest 条目(Bettor/NWT), 未注入时该服务拒绝启动 ⇒ 当前接线对运行时零影响。
+// 🔴 M0a 门: 新钱路模块不裸 import relay-manager; 出链走 services/delivery-relay-funnel.mjs(经审 manifest, 命令白名单); 本文件不新增 relay-manager import。开关默认关。
 import { startDeliveryWatcherCron } from './services/delivery-watcher-service.mjs';
 startDeliveryWatcherCron(process.env, {});
 

@@ -7,6 +7,7 @@ import { sqlite } from '../db/client.js';
 import { makeKaspaApiReaderBrowser } from '../lib/checkout-static/delivery-read.js';
 import { makeTriggerSplit } from '../lib/delivery-split-adapter.mjs';
 import { deliveryTick, MIN_DEPTH } from '../lib/delivery-watcher.mjs';
+import { makeDeliveryRelayCall } from './delivery-relay-funnel.mjs';
 
 export const DELIVERY_TICK_MS_DEFAULT = 30_000;
 
@@ -44,10 +45,8 @@ export function startDeliveryWatcherCron(env = process.env, deps = {}) {
   const relayId = env.DELIVERY_RELAY_ID;
   if (!relayId) { console.error('[delivery-watcher] 🔴 DELIVERY_WATCHER_ENABLED=1 但未配置 DELIVERY_RELAY_ID — 拒绝启动(不回落任何默认 relay)'); return false; }
   if (_timer) return true;
-  // M0a: 本新钱路模块【不裸 import relay-manager】, sendCommandAsync 由 index.js 注入(deps.sendCommandAsync)。
-  const send = deps.sendCommandAsync;
-  const relayCall = deps.relayCall || (typeof send === 'function' ? (cmd) => send(relayId, cmd, 30000, 'internal') : null);
-  if (!relayCall) { console.error('[delivery-watcher] 🔴 未注入 sendCommandAsync/relayCall — 拒绝启动'); return false; }
+  // M0a: 本模块【不裸 import relay-manager】; 出链走受控 funnel(delivery-relay-funnel.mjs: 命令白名单 + relay_id 固定 + origin 硬编码, 经审 manifest MRC-delivery-relay-funnel)。deps.relayCall 仅测试注入。
+  const relayCall = deps.relayCall || makeDeliveryRelayCall(relayId);
   const ctx = buildDeliveryCtx({ db: deps.db || sqlite, relayCall, readerFor: deps.readerFor || ((net) => makeKaspaApiReaderBrowser(net || 'mainnet')), kaspaMod: kaspa, log: (m) => console.log(m) });
   const tickMs = Number(env.DELIVERY_TICK_MS) >= 5000 ? Number(env.DELIVERY_TICK_MS) : DELIVERY_TICK_MS_DEFAULT;
   const tick = async function deliveryWatcherTick() {
