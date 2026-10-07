@@ -1,0 +1,6 @@
+A /transactions/{id}: 200 acao= * 348ms keys= subnetwork_id,transaction_id,hash,mass,payload,block_hash,block_time,version,is_accepted,accepting_block_hash,accepting_block_blue_score,accepting_block_time,inputs,outputs payload? string 886 accepted= true 557396827
+  out0 addr present: true
+B /addresses/{a}/full-transactions: 200 acao= * 319ms n=5 payloadKeyInFirst=true firstPayloadLen=886
+C /addresses/{a}/utxos: 200 n=1
+D 12 sequential GETs statuses: 200,200,200,200,200,200,200,200,200,200,200,200
+E unknown txid: 404 {"detail":"Transaction not found"}
