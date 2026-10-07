@@ -6,9 +6,9 @@
 export const MAILBOX_MAGIC_HEX = '4b444c31';                 // "KDL1"
 export const MAILBOX_MIN_PAYLOAD_BYTES = 4 + 12 + 16 + 1;     // 魔数 + iv + tag + ≥1 字节密文
 export const MAILBOX_MAX_PAYLOAD_BYTES = 4 + 12 + 1024 + 16;  // 与 MAX_PLAINTEXT_BYTES=1024 对应
-// 信箱输出面值上下限(KAS, 十进制字符串): 下限受 KIP-9 存储质量约束(simnet 实测定稿, 见 docs/provenance/2026-10-07-j2-delivery-step2/), 上限防"带 payload 的任意转账"被滥用。
-export const MAILBOX_MIN_KAS = '0.03';
-export const MAILBOX_MAX_KAS = '0.10';
+// 信箱输出面值上下限(KAS, 十进制字符串): 下限 = simnet 实测(relay sendKaspa/Generator 通路): 0.14 KAS 仍报 "Storage mass exceeds maximum", 0.15 过(见 docs/provenance/2026-10-07-j2-delivery-step2/mailbox_probe_result.json); 上限防"带 payload 的任意转账"被滥用。
+export const MAILBOX_MIN_KAS = '0.15';
+export const MAILBOX_MAX_KAS = '0.30';
 const P2PK_ADDR_RE = /^(kaspa|kaspatest|kaspasim|kaspadev):q[a-z0-9]{50,80}$/;   // Schnorr P2PK(以 q 开头); P2SH(p)/ECDSA(q… 之外) 一律拒
 const KAS_RE = /^(0|[1-9][0-9]*)(\.[0-9]{1,8})?$/;
 const toSompi = (s) => { const [i, f = ''] = String(s).split('.'); return BigInt(i) * 100000000n + BigInt((f + '00000000').slice(0, 8)); };

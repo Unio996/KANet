@@ -1,0 +1,49 @@
+{
+ "network": "simnet",
+ "simulated": [
+  "split(订单置 split_done, 不做真 split — 步 3)"
+ ],
+ "steps": {
+  "create": {
+   "status": "ok",
+   "nonce_only_in_fragment": true,
+   "state": "created"
+  },
+  "stock": {
+   "added": 1
+  },
+  "register": {
+   "state": "watching"
+  },
+  "mailbox_send": {
+   "state_after": "mailbox_sent",
+   "relay_fee_kas": "0.032226"
+  },
+  "delivered": {
+   "state": "delivered",
+   "order": {
+    "id": "ea20c049",
+    "state": "delivered",
+    "mailbox_address": "kaspasim:qrxd9pk2qhat7aj2r9gg4jvw6s2au39swm3vey9mthfhkcxthkfry3yxkule8",
+    "mailbox_txid": "7a579ae35fbc4d2a6820621beb9cc9c8613e6c7d37d12fbebad40734678c1c9d",
+    "delivered_at": "2026-10-07 08:59:56"
+   }
+  },
+  "buyer_read": {
+   "mailbox_matches_seller": true,
+   "txs_found": 1,
+   "status": "delivered",
+   "plaintext_matches_stock": true,
+   "txid_matches": true
+  },
+  "paste_path": {
+   "decrypted_ok": true,
+   "wrong_nonce_rejected": true
+  },
+  "onchain_payload": {
+   "equals_db_payload": true,
+   "contains_plaintext": false
+  }
+ },
+ "verdict": "PASS"
+}

@@ -18,7 +18,7 @@ export const MAX_SPLIT_ATTEMPTS = 5;
 export const MAX_MAILBOX_ATTEMPTS = 3;
 export const SPLIT_RETRY_AFTER_MS = 5 * 60 * 1000;       // 已广播 split 后, 这么久还没落链才允许再试
 export const MAILBOX_RESEND_AFTER_MS = 15 * 60 * 1000;   // 信箱交易这么久没落链才重发
-export const MAILBOX_AMOUNT_KAS = '0.03';               // 与 relay MAILBOX_MIN_KAS 对齐; 步 2 simnet 实测后定稿
+export const MAILBOX_AMOUNT_KAS = '0.2';                // = KASIA_MIN_AMOUNT 先例; relay 下限 simnet 实测 0.15(0.14 报 Storage mass exceeds maximum, 见 delivery-mailbox.mjs), 留余量
 
 const tag = (o) => String(o.id).slice(-8);
 const sqliteMs = (s) => Date.parse(String(s).replace(' ', 'T') + 'Z');
