@@ -26,7 +26,7 @@ import * as feeSplitLib from './vendor/fee-split-browser.mjs';
 import qrcodeFactory from './vendor/qrcode-generator/qrcode.mjs';
 // D-034 §8 B段⑥(Bettor 派工, 2026-09-27): 付款到账后, 浏览器直连节点触发分账/退款——两个入口零签名
 // (covenant 脚本本身就是判据, 不需要买家私钥), 广播前完整三维 mass 预检, 广播后回链核实落地。
-import { connectMonitorRpc, getOrderPaymentStatus, getCurrentPmtMs, getCurrentDaaScore, REORG_SAFE_MIN_DEPTH } from './monitor.js';
+import { connectMonitorRpc, resolveRpcUrlOverride, getOrderPaymentStatus, getCurrentPmtMs, getCurrentDaaScore, REORG_SAFE_MIN_DEPTH } from './monitor.js';
 import { buildOrderReceipt, parseOrderReceipt, receiptLinkMismatch } from './order-receipt.js';
 import { buildCommissionSplitTx, buildCommissionRefundTx } from './broadcast-commission.js';
 // D-034 §9(2026-09-28, Bettor 派工): ServiceEscrow 订单的到期退款——零签名, 逐字复用
@@ -253,12 +253,16 @@ export function parseAttributionLink(url) {
 
 // ── D-034 §8 B段⑥: 订单状态监控 + 触发分账/退款(仅真 silverc 编译器主路径可用——entries/redeemScriptHex
 // 等字段只有真编译才有, 降级路径 order-template.js 固定偏移覆写没有这些, 见 startOrderMonitor 调用点判断) ──
+// 链接里的 ?rpcUrl= 只对非主网生效(v0.2.4-test), 两处监视入口共用这一个函数。
+function rpcUrlOverrideFor(network) {
+  return resolveRpcUrlOverride(network, new URLSearchParams(location.search).get('rpcUrl'));
+}
 let _monitorPollTimer = null;
 let _monitorBusy = false; // 广播进行中禁止并发触发(防重复点击造成竞态花费同一笔 UTXO)
 
 async function startOrderMonitor(order, totalSompi, network) {
   if (_monitorPollTimer) clearInterval(_monitorPollTimer);
-  const rpcUrlOverride = new URLSearchParams(location.search).get('rpcUrl') || undefined; // simnet 测试用, 见 monitor.js connectMonitorRpc 头注
+  const rpcUrlOverride = rpcUrlOverrideFor(network); // simnet/testnet 测试用, 主网忽略, 见 monitor.js resolveRpcUrlOverride
   renderBox('monitorInfo', '<b>订单状态监控</b><br>连接节点中…');
   let rpc, connectedUrl;
   try {
@@ -477,7 +481,7 @@ async function renderServiceEscrowOrder(quote, quoteRef) {
 
 async function startServiceEscrowMonitor(se, totalSompi, network) {
   if (_seMonitorPollTimer) clearInterval(_seMonitorPollTimer);
-  const rpcUrlOverride = new URLSearchParams(location.search).get('rpcUrl') || undefined;
+  const rpcUrlOverride = rpcUrlOverrideFor(network);
   renderBox('monitorInfo', '<b>订单状态监控</b><br>连接节点中…');
   let rpc, connectedUrl;
   try { ({ rpc, url: connectedUrl } = await connectMonitorRpc(kaspaWasm, { network, rpcUrl: rpcUrlOverride })); }
