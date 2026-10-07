@@ -25,8 +25,22 @@ export const REORG_SAFE_MIN_DEPTH = 20; // 同 kasia-console/src/lib/pool-shard-
  * @param {{network:string, rpcUrl?:string}} opts
  * @returns {Promise<{rpc:object, url:string}>}
  */
+/**
+ * v0.2.4-test: 订单链接里的 ?rpcUrl= 只在非主网生效(simnet/testnet 本机测试用)。主网一律忽略——
+ * 公开页面上一条被人构造的主网链接若能指定节点, 就能让页面连到攻击者节点并显示假的"已到账"。
+ * 主网只走上面⑨的公共池(及 Resolver 兜底)。唯一决定点, checkout.js 与 connectMonitorRpc 都经过它。
+ * @param {string} network
+ * @param {string|null|undefined} requested  链接里请求的 rpcUrl
+ * @returns {string|undefined}
+ */
+export function resolveRpcUrlOverride(network, requested) {
+  if (network === 'mainnet') return undefined;
+  return requested || undefined;
+}
+
 export async function connectMonitorRpc(kaspaWasm, opts) {
-  const { network, rpcUrl } = opts;
+  const { network } = opts;
+  const rpcUrl = resolveRpcUrlOverride(network, opts.rpcUrl);   // 纵深防御: 即使调用方直接传了 rpcUrl, 主网也不用
   if (rpcUrl) {
     const rpc = new kaspaWasm.RpcClient({ url: rpcUrl, networkId: network });
     await rpc.connect();
