@@ -27,7 +27,7 @@
 
 ## simnet 验证(官方 2.0.1, 全 simnet)
 - **负例 N1**: 年龄不够 ⇒ builder 抛"年龄未到", 不广播。**负例 N2**: 绕过 builder 门(`age_margin_daa=-1e9`)直接广播 ⇒ 节点拒 `one of the transaction sequence locks conditions was not met`。(`e2e_run3/4.log.txt`)
-- **真花 10 笔**(6 笔 claim retire + 4 笔票 sweep), 全部在 sink 地址核到落链面值: claim 对(0.5+0.5=1.0 KAS)→ sink +0.979(最终费 0.021); 票 0.07 → +0.0664(费 0.0036)。清单见 `simnet_spends.json`。其中 3 笔经 `zk-recover.mjs --max N` 落审计。
+- **真花 10 笔**(6 笔 claim retire + 4 笔票 sweep), 全部在 sink 地址核到落链面值: claim 对(0.5+0.5=1.0 KAS)→ sink +0.979(最终费 0.021); 票 0.07 → +0.0664(费 0.0036)。清单见 `simnet_spends.json`。其中 6 笔(3 claim + 3 票)经 `zk-recover.mjs --max N` 落审计 `zk_recovery_audit`, 其余 4 笔为预算探索直调 builder(不落审计)。
 - 清单行为: 到龄前 `未到龄`(显示 age/门槛), 到龄后 `可 retire/sweep`; 回收后重跑 ⇒ 全部 skipped(gone), 可回收为 0(幂等)。
 - 例 A(1 注, 2 claim+1 票)、例 B(3 注, 4 claim+3 票)均回收清空。
 
