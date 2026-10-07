@@ -1,0 +1,42 @@
+{
+ "network": "mainnet",
+ "at": "2026-10-07T10:11:29.258Z",
+ "order": {
+  "id": "3a42a957-c18f-4a86-b870-c77840901f4f",
+  "order_address": "kaspa:pp3s4qqln8n44hh4pxa2ana6yeawzaf2vjqm4nx35slxr9e5yn00ufafrxucy",
+  "refund_address": "kaspa:qrfs793l6vfxh2xujs8ysyvxhe4qwjpg3ng0fs76rwacpwvwt0daqerfd5yag",
+  "total_sompi": "61400000"
+ },
+ "pay": {
+  "status": 200,
+  "ok": true,
+  "txId": "7291e7f165604818c94db3c89645fb20d85675c6de7d83383acf4ea6ef0823cd",
+  "fee": "0.032047"
+ },
+ "watcher": {
+  "final": "delivered",
+  "transitions": [
+   "watching",
+   "paid",
+   "split_done",
+   "mailbox_sent",
+   "delivered"
+  ],
+  "pay_txid": "7291e7f165604818c94db3c89645fb20d85675c6de7d83383acf4ea6ef0823cd",
+  "split_txid": "a0ef06cb030aa3697824e1a57c178f3352be16a755db97e11028498d4ee103cd",
+  "mailbox_txid": "882a84319dff6a5d47e5a0ad0314efed98dba4b66c3be511b16cdb344a014e3f",
+  "manual_reason": null
+ },
+ "buyer": {
+  "status": "delivered",
+  "plaintext_matches": true,
+  "txid_matches": true
+ },
+ "sweep_mailbox": {
+  "status": "sent",
+  "count": 1,
+  "txids": [
+   "3de22fcd2b69497644f2372a74d1e09b96a08d0fddf9e8b1c8f4ed42418fd8da"
+  ]
+ }
+}

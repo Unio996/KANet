@@ -1,0 +1,42 @@
+{
+ "network": "mainnet",
+ "at": "2026-10-07T10:14:18.762Z",
+ "order": {
+  "id": "238732c2-690c-4187-9e04-45f7cdba9386",
+  "order_address": "kaspa:prtp3ugaehwsyg9ut5cgg020n94qg0euxpkgnkvms823w5w0rhde7nyj7jpyl",
+  "refund_address": "kaspa:qr5z9pes32999jh3n72g5xlwjdnkux7d6csxjgd9qwt98vqcdg0ts4thph4r7",
+  "total_sompi": "61400000",
+  "deadline_ms": 1791368208762
+ },
+ "pay": {
+  "status": 200,
+  "ok": true,
+  "txId": "ae2dad15ca3c4e7c34d007f2f7d2e10ad7a39d6781aa29a6cfd74c9737c6ba15",
+  "fee": "0.033165"
+ },
+ "funds_before": {
+  "funded": true,
+  "spent": false,
+  "fundingTxid": "ae2dad15ca3c4e7c34d007f2f7d2e10ad7a39d6781aa29a6cfd74c9737c6ba15"
+ },
+ "refund": {
+  "tx": "491e30fe865c5c8ab4bad91c0b5f971d3418c8b9ecbce642184ce2ab0a479931",
+  "tries": 30,
+  "last_wait_error": "buildCommissionRefundTx: 还没到期(currentPmtMs=1791368204532 < deadline+margin=1791368213762); PMT(节点 virtual_past_median_time)判据同 instant-split"
+ },
+ "after_refund": {
+  "funds": {
+   "funded": true,
+   "spent": true,
+   "fundingTxid": "ae2dad15ca3c4e7c34d007f2f7d2e10ad7a39d6781aa29a6cfd74c9737c6ba15",
+   "spenderTxid": "491e30fe865c5c8ab4bad91c0b5f971d3418c8b9ecbce642184ce2ab0a479931"
+  }
+ },
+ "sweep_refund": {
+  "status": "sent",
+  "txids": [
+   "35245c021486f4bb95e7d5b2a03e62f784f07c0c6e3b04015c3c7067de636434"
+  ],
+  "count": 1
+ }
+}
