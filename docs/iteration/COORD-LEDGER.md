@@ -14744,3 +14744,5 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 ### (1888) 🟡 **Pages 弱网首次加载实测（KANet-UI）**：真 Chrome 冷启动，CDP 限速 400ms / 约 360kbps / CPU 4x，在线上 Pages 主网页面走完整流程约 159 秒（load 9.1 秒；wasm 加载并验签 108.8 秒；推导到监控出现 50.2 秒），累计传输 7.04MB。外连仍只有 github.io 和 sara.kaspa.red。对照包内数字（br 117.7 秒 / 不压缩 347.2 秒），gzip 落在两者之间，比 br 慢约 35%。局限：只测 1 次，脚本不同，属近似对照；没测二次访问。结论：README 里"br 是硬性要求"对 Pages 不成立。拟改为"推荐 br"并附三档实测数字，属对外文案，报 Owner 批后由 KANet-UI 在 kanet-checkout 新开一个提交改 README。
 
 ### (1889) 🟢 **取货页去占位完成 + README br 改写派工 + v0.2.5-test 准备**：J2 c0b1bbb9 只改了 delivery.html:5，标题改为"数字商品取货"（Owner 授权 J2 改这一行）。checkout-static/delivery.* 里已无"占位"二字，e2e 11/11 通过，已合 e9d1094c。Owner 批 README 改写（"README 按你建议的改"），派 KANet-UI 在 kanet-checkout 新开一个提交，只改 README。打 v0.2.5-test 前查出 build-checkout-release.mjs 的 RUNTIME_FILES 里没有取货页的 6 个文件。派 J2 补上，核 import 闭包，并试打一次包。另外取货页会外连 api.kaspa.org（delivery-read.js:5），页面不用本地存储；对外 README 的隐私披露须补这一条，报 Owner 批。
+
+### (1890) 🟢 **kanet-checkout README 的 br 改写已上线（KANet-UI，5676ab1）**：只改了 README，第 2 条换成 Owner 批准的原文，并在"版本与来源"注明改写。Bettor 独立核：提交 5676ab1 里的 README 和 Pages 上的 README，sha 都是 e635f323…，新句子在，"硬性部署要求"已经没有了（raw.githubusercontent 有几分钟缓存，最初读到的是旧版）。KANet-UI 重跑全量核对，其余 34 个文件 ALL OK。
