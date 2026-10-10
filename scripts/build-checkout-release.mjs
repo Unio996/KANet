@@ -69,6 +69,8 @@ const RUNTIME_FILES = [
   'vendor/noble-hashes/utils.js',
   'vendor/sil-source/ChannelDeposit.sil', 'vendor/sil-source/CommissionSplit.sil',
   'vendor/kaspa-web/README.md', 'vendor/silverc-wasm/README.md',
+  // 数字商品取货页(delivery.html): import 闭包 = delivery-page → copy/buyer/read/resolve-order-browser/fee-split/monitor; buyer → crypto/broadcast-commission/verify-core; 其余均已在上面。不含 delivery-crypto.test.mjs(开发期测试, 裸 import node 模块)。
+  'delivery.html', 'delivery-page.js', 'delivery-buyer.js', 'delivery-crypto.js', 'delivery-read.js', 'delivery-copy.js',
 ];
 
 const kaspaPin = JSON.parse(showFile('scripts/kaspa-wasm-web-pin.json').toString('utf8'));
@@ -159,6 +161,12 @@ checkout-static/
 ├── order-template.js          订单地址推导备选路径（固定偏移覆写，silverc-wasm 加载失败时自动降级）
 ├── monitor.js                 订单地址到账状态/确认深度/节点 PMT 只读监视（浏览器直连节点 wss）
 ├── broadcast-commission.js    触发分账/退款交易组装（零签名，covenant 脚本本身是判据）
+├── delivery.html              数字商品取货页（买家凭发票链接取货/退款）
+├── delivery-page.js           取货页胶水层（读链接、展示订单、轮询状态、粘贴密文、退款与清扫入口）
+├── delivery-buyer.js          取货页买家流程（推导订单地址与派生密钥、读链解密、到期退款、清扫）
+├── delivery-crypto.js         取货页密码学（链接片段解析、HKDF 派生、AES-GCM 解密，零依赖）
+├── delivery-read.js           取货页读链适配器（api.kaspa.org 只读）
+├── delivery-copy.js           取货页全部用户可见文案（单表）
 └── vendor/
     ├── kaspa-web/              浏览器版 kaspa-wasm（sha256 见下）
     ├── silverc-wasm/           浏览器版 silverc 编译器（sha256 见下）
@@ -180,6 +188,10 @@ checkout-static/
   \`vendor/generic-entry-witness-browser-parity.mjs\`、\`vendor/tx-mass-ub-browser-parity.mjs\`——
   仓库内部的开发期自检脚本，买家打开页面时用不到（离开仓库目录结构就是死代码：裸 import
   \`kaspa-wasm\` + 相对路径指回仓库内其他模块）。
+
+## 取货页（delivery.html）的外部连接
+
+取货页从 \`https://api.kaspa.org\`（REST，只读）读取订单地址的链上交易，用来找到加密信箱里的交付物；该服务当前对跨域请求放行（响应 CORS 头为 \`*\`，开发期实测）。读到的只是链上公开数据，请求路径只含地址与链高度，不含任何订单秘密。到期退款、清扫的广播仍走浏览器直连公共节点 wRPC（同 checkout.html）。api.kaspa.org 是单点依赖：不可达时页面提示稍后自动重试，买家也可把商家给的密文粘贴进页面在本机解密。
 
 ## 编译器加载失败时怎么办
 
