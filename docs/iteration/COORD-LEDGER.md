@@ -14758,3 +14758,20 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 ### (1895) 🟢 **合并 J2 1894 两张小票（cd943f09）**：① zk-recover 的 --cov-id 可以传完整盘 id，也可以传末段；匹配不上、多重匹配或值冲突时，在做任何事之前就以 exit 2 显式退出。② stampSelfCovId 改成单条 json_set（IS NULL 条件，语义不变，永不抛）；新增 appendRecoveryAudit，用 json_insert [#] 追加，替换 zk-recover 落链后整串读-改-写的那段。Bettor 审了 diff，并在 kasia-console 原位跑 zk-recovery-params、zk-recovery-enumerate、zk-self-cov-backfill，三套全部 ALL PASS。stampSelfCovId 在 claim tick 里调用，这次改动随下次重启生效，并入重启清单第 4 项。审计追加路径只有单测覆盖，主网还没跑过。
 
 ### (1896) 🟢 **Owner「批，重启」→ 主网 console 按 361b9b81 重启，KANet-UI 执行**：生效内容如下。① 迁移 v222/v223，交付两张表。② 交付路由，ADMIN_SECRET_DELIVERY 未设，返回 503。③ delivery watcher 默认关。④ relay 新增 delivery_split_submit、delivery_mailbox_send 两条命令。⑤ 回收工具（p2sh unlockClaimRetire/unlockTicketSweep、enumerate、zk-recover），claim tick 里的 stampSelfCovId（单条 json_set，1895）。主网 env 不改，kaspad 不动。执行单：前置闸（无有注盘处在截止后、终态前；钱包基线）→ 在线备份并做 integrity_check → 只停 console 和 bot，再起 → 核对 a–g（祖先、迁移、watcher 关且路由 503、relay/tick、bot /mybets、钱包 0 差、红线计数）。重启后由 Bettor 执行 2xm7t 的 zk_self_cov_id 补写（1894）。
+
+### (1897) 🟢 **主网 console 重启完成（KANet-UI 报告 714b176b），2xm7t zk_self_cov_id 已补写**：10-12 16:55:04Z 停旧进程，16:55:08Z 起新进程，console PID 35720，bot PID 34684。代码为 361b9b81（HEAD cfce552b，只多两行账本）。a–g 全部通过：
+- ERR_MODULE_NOT_FOUND 为 0。
+- v222/v223 迁移已上，第二张表实名是 delivery_stock，执行单误写成 delivery_inventory，以实名为准。
+- watcher 为 disabled，/api/delivery/orders 返回 503。
+- 25 个 relay、RpcClient、4 个 zk tick、settler、seeder 都在跑。
+- bot /mybets 能读到 2xm7t 赢 0.98 筹码。
+- 25 个钱包余额前后 JSON 逐字节一致，pm-settler 前后都是 4,735,462,900（Bettor 用 api.kaspa.org 独立核）。
+- 红线计数为 0，已知项 adapter :3010 EADDRINUSE。
+- 备份 console.mainnet.db.pre-restart-361b9b81-20261012T1653Z，sha256 ba7fb912…，integrity_check ok。
+- 停机用 taskkill /T 杀整棵进程树，因为 relay 不监听父进程退出，只杀 console 会留下孤儿 relay。另记一张票：relay 应在父进程退出时自退。
+
+Bettor 补写 2xm7t：先在线上库 dry-run，结果 would_write；再 --apply，结果 written；同值重跑为 noop already_set_same。zk-recover 主网 dry-run（--mainnet-ok --max 0，只从 env 读 ZK 模板与 sink 键，不打印值）列出 2xm7t 的 2 条 claim 未到龄，还差约 25.71M DAA（约 2026-11-11）；ticket 还差约 309.9M DAA。skipped 为 0，未广播。
+
+另记两点：
+- zk-recover 不读 ZK_MAX_LIVE_MARKETS，显示"3/1"，只影响显示。
+- 退出时有 libuv 断言 async.c:76，发生在 dry-run 完成之后，不影响结果，记 SHOULD。
