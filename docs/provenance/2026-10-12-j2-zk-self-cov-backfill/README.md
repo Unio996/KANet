@@ -73,4 +73,4 @@ DB_PATH=<线上库> node scripts/zk-backfill-self-cov-id.mjs --market ext-pool-v
 
 1. `zk-recover.mjs` 头注/报错写 `--cov-id <盘id末段>=<64hex>`，但枚举器 `resolveSelfCovId` 用 `covIdOverrides[marketId]` **精确匹配完整盘 id**，用末段会静默不生效（我第一次就踩了）。实际要传完整盘 id。未改（不在本票范围），待你定。
 2. 现有 `stampSelfCovId`（zk-recovery-params.mjs）是读-改-写整串 metadata，对运行中的 console 有丢更新窗口；与早先记的 SHOULD（元数据写入改 json_set）同族。本票的补写脚本没用它。
-3. 另一条（顺带）：6 张 ticket 之外，2xm7t 目前只有 1 张票待回收；`liveSlotHolders` 3/3 被另外 3 个 pending_bettors 盘占满（与本票无关，仅报告）。
+3. 2xm7t 目前只有 1 张票待回收；`liveSlotHolders` 3/3 被另外 3 个 pending_bettors 盘占满（与本票无关，仅报告）。
