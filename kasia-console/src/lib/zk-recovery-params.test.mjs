@@ -92,6 +92,24 @@ console.log('[test] 4. stampSelfCovId(账本1867): 只追加字段 / 首写为�
   ok(iAdv > 0 && iSt > iAdv && iRet > iSt, 'claim tick: stamp 在 landed 确认与 advanceZkContinuationAfterSpend 之后(NO TX NO STATE CHANGE), 且在成功返回之前');
   ok(!/try\s*\{[^}]*stampSelfCovId/.test(tk) && /^\s*stampSelfCovId\(sqlite, marketId, sj\.selfCovId\);/m.test(tk),'调用点是裸语句(函数自身永不抛, 不靠外层 try 兜底也不会打断 claim 返回)');
 }
+console.log('[test] 5. 账本1894: stampSelfCovId 单条 json_set / appendRecoveryAudit 追加');
+{
+  const src = fs.readFileSync(new URL('./zk-recovery-params.mjs', import.meta.url), 'utf8');
+  const stampSrc = src.slice(src.indexOf('export function stampSelfCovId'), src.indexOf('export function appendRecoveryAudit'));
+  ok(/json_set\(metadata, '\$\.zk_self_cov_id', \?\)/.test(stampSrc) && !/SET metadata = \?/.test(stampSrc), 'stampSelfCovId: 写入是单条 json_set, 无整串回写');
+  const COV2 = 'ab'.repeat(32);
+  ins('m-race', { zk_continuation: { exhausted: true } });
+  const racer = { prepare: (sql) => (/^SELECT/.test(sql) ? sqlite.prepare(sql) : { run: (...a) => { sqlite.prepare("UPDATE pool_markets SET metadata = json_set(metadata,'$.zk_self_cov_id','" + 'ee'.repeat(32) + "') WHERE id='m-race'").run(); return sqlite.prepare(sql).run(...a); } }) };
+  ok(P.stampSelfCovId(racer, 'm-race', COV2).reason === 'already_set' && meta('m-race').zk_self_cov_id === 'ee'.repeat(32), '竞态: 读后被别处先写 ⇒ IS NULL 条件保证不覆盖');
+  ins('m-aud', { keep: 1, other: { a: [1] } });
+  ok(P.appendRecoveryAudit(sqlite, 'm-aud', { kind: 'claim', txid: 't1' }) === true && Array.isArray(meta('m-aud').zk_recovery_audit) && meta('m-aud').zk_recovery_audit.length === 1, 'audit: 无数组 ⇒ 建单元素数组');
+  P.appendRecoveryAudit(sqlite, 'm-aud', { kind: 'ticket', txid: 't2' });
+  const am = meta('m-aud'); ok(am.zk_recovery_audit.length === 2 && am.zk_recovery_audit[0].txid === 't1' && am.zk_recovery_audit[1].txid === 't2' && am.keep === 1 && JSON.stringify(am.other) === '{"a":[1]}', 'audit: 已有数组 ⇒ 只追加(旧条目不动, 其它键原样)');
+  ins('m-aud-bad', {}); sqlite.prepare('UPDATE pool_markets SET metadata = ? WHERE id = ?').run('{not json', 'm-aud-bad');
+  ok(P.appendRecoveryAudit(sqlite, 'm-aud-bad', { kind: 'claim' }) === false && sqlite.prepare('SELECT metadata m FROM pool_markets WHERE id = ?').get('m-aud-bad').m === '{not json', 'audit: 坏 JSON ⇒ 不写');
+  const zr = fs.readFileSync(new URL('../../scripts/zk-recover.mjs', import.meta.url), 'utf8');
+  ok(/appendRecoveryAudit\(sqlite, it\.market_id, auditEntry\)/.test(zr) && !/UPDATE pool_markets SET metadata = \?/.test(zr), 'zk-recover.mjs: 审计追加走 appendRecoveryAudit, 无整串回写');
+}
 console.warn = w0;
 console.log(fails ? `\n${fails} FAIL` : '\nALL PASS');
 process.exitCode = fails ? 1 : 0;

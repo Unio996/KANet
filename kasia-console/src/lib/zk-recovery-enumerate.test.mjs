@@ -155,6 +155,24 @@ console.log('[test] 3. claim: need_cov_id / 叶重算 / token 个数 / 命令形
   ok(r.skipped.some((s) => /token_utxo_count=0/.test(s.reason)) && r.retirable.length === pm.payoutLeaves.length - 1, 'token UTXO 缺 ⇒ 该叶 skipped, 其余不受影响');
 }
 
+console.log('[test] 3b. 账本1894: --cov-id 键 = 完整盘 id 或 盘 id 末段; 匹配不上/多重匹配 ⇒ 显式抛错');
+{
+  const COV3 = 'ee'.repeat(32);
+  const ids = ['ext-pool-v07-111-2xm7t', 'ext-pool-v07-222-abcde', 'mk-claim'];
+  ok(JSON.stringify(E.resolveCovIdOverrides({ '2xm7t': COV3 }, ids)) === JSON.stringify({ 'ext-pool-v07-111-2xm7t': COV3 }), '末段 ⇒ 解析成完整盘 id');
+  ok(E.resolveCovIdOverrides({ 'ext-pool-v07-222-abcde': COV3 }, ids)['ext-pool-v07-222-abcde'] === COV3 && E.resolveCovIdOverrides({ 'mk-claim': COV3 }, ids)['mk-claim'] === COV3, '完整盘 id(含无连字符前缀的)仍可用');
+  let e1 = null; try { E.resolveCovIdOverrides({ nope: COV3 }, ids); } catch (e) { e1 = e; }
+  ok(e1 && /匹配不上/.test(e1.message), '键匹配不上任何盘 ⇒ 抛错(不再静默不生效)');
+  let e2 = null; try { E.resolveCovIdOverrides({ '2xm7t': COV3 }, ['a-x-2xm7t', 'b-y-2xm7t']); } catch (e) { e2 = e; }
+  ok(e2 && /匹配了 2 个盘/.test(e2.message), '末段匹配多个盘 ⇒ 抛错, 要求完整盘 id');
+  let e3 = null; try { E.resolveCovIdOverrides({ '2xm7t': COV3, 'ext-pool-v07-111-2xm7t': 'dd'.repeat(32) }, ids); } catch (e) { e3 = e; }
+  ok(e3 && /两个不同的值/.test(e3.message), '同一盘用末段与全 id 给了不同值 ⇒ 抛错');
+  let e4 = null; try { await run({ onlyMarkets: ['mk-claim'], covIdOverrides: { 'no-such-market': COV3 } }); } catch (e) { e4 = e; }
+  ok(e4 && /匹配不上/.test(e4.message), 'enumerateRecovery: 键写错 ⇒ 在做任何事之前抛');
+  const r3 = await run({ onlyMarkets: ['mk-claim'], covIdOverrides: { 'claim': COV3 } });
+  ok(!r3.skipped.some((s) => /need_cov_id/.test(s.reason)), 'enumerateRecovery: 用末段 "claim" 与用完整 id 等效(不再 need_cov_id)');
+}
+
 console.log('[test] 4. live 名额占用者栏(只读, 与 create-v07 同源)');
 {
   insMarket('mk-stuck', 'verifying', {});

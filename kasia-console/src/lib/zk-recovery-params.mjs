@@ -57,9 +57,9 @@ export function checkRecoveryParamsDrift(db, marketId, site, env = process.env, 
 }
 
 /**
- * 账本1867: 把 CloseZkV2 续约链的 covenant id(claim 编排 stage-A 回执的 selfCovId)写进盘 metadata.zk_self_cov_id(首写为准)。
- * 为什么: KanetTokenClaim 的 State 第一字段 market_cov_id = 该 id; 续约耗尽(exhausted)后链上不再有任何 UTXO 带它, 回收枚举器无处再读 ⇒ 必须趁 claim 落链时记下。
- * 只在 claim 已 landed 之后调用(NO TX NO STATE CHANGE); 永不抛(记账失败不得影响 claim 主流程)。
+ * 账本1894 ①(SHOULD): stampSelfCovId 改成【单条 json_set】——判空与写入同一条语句(原子), 只碰 $.zk_self_cov_id 这一个键;
+ * 不再读-改-写整串 metadata(运行中的 console 同时改 metadata 时不会丢更新)。语义不变: 首写为准、已有值不覆盖(不同值 LOUD)、永不抛。
+ * 先读一次只是为了给出 reason / LOUD 警告; 真正的"别覆盖"由 UPDATE 的 IS NULL 条件保证。
  * @returns {{stamped:boolean, reason?:string}}
  */
 export function stampSelfCovId(db, marketId, covIdHex) {
@@ -70,14 +70,24 @@ export function stampSelfCovId(db, marketId, covIdHex) {
     if (!row) return { stamped: false, reason: 'no_market' };
     let meta; try { meta = JSON.parse(row.metadata || '{}'); } catch { return { stamped: false, reason: 'bad_metadata' }; }
     if (meta.zk_self_cov_id) {
-      if (String(meta.zk_self_cov_id).toLowerCase() !== id) console.warn(`[zk-recovery-params] 🔴 market=${String(marketId).slice(-8)} zk_self_cov_id 已有值 ≠ 本次 claim 回执(${String(meta.zk_self_cov_id).slice(0, 12)}… vs ${id.slice(0, 12)}…) — 不覆盖, 请人工核`);
+      if (String(meta.zk_self_cov_id).toLowerCase() !== id) console.warn(`[zk-recovery-params] 🔴 market=${String(marketId).slice(-8)} zk_self_cov_id 已有值 ≠ 本次 claim 回执(${String(meta.zk_self_cov_id).slice(0, 12)}… vs ${id.slice(0, 12)}…) — 不覆盖, 请人工核对`);
       return { stamped: false, reason: 'already_set' };
     }
-    meta.zk_self_cov_id = id;
-    db.prepare('UPDATE pool_markets SET metadata = ? WHERE id = ?').run(JSON.stringify(meta), marketId);
-    return { stamped: true };
+    const r = db.prepare("UPDATE pool_markets SET metadata = json_set(metadata, '$.zk_self_cov_id', ?) WHERE id = ? AND json_valid(metadata) AND json_extract(metadata, '$.zk_self_cov_id') IS NULL").run(id, marketId);
+    return r.changes === 1 ? { stamped: true } : { stamped: false, reason: 'already_set' };
   } catch (e) {
     console.warn(`[zk-recovery-params] stampSelfCovId failed(ignored): ${e.message}`);
     return { stamped: false, reason: 'error' };
   }
+}
+
+/**
+ * 账本1894 ②(SHOULD): 回收审计记录追加(zk-recover 真执行落链确认后调用)。单条 SQL, append-only:
+ * 已有数组 ⇒ json_insert '[#]' 追加; 没有 ⇒ json_set 建一个单元素数组。不读-改-写整串 metadata, 不碰其它键。metadata 坏 JSON ⇒ 不写、返回 false。
+ * @returns {boolean} 是否写入
+ */
+export function appendRecoveryAudit(db, marketId, entry) {
+  const j = JSON.stringify(entry);
+  const r = db.prepare("UPDATE pool_markets SET metadata = CASE WHEN json_type(metadata, '$.zk_recovery_audit') = 'array' THEN json_insert(metadata, '$.zk_recovery_audit[#]', json(?)) ELSE json_set(metadata, '$.zk_recovery_audit', json_array(json(?))) END WHERE id = ? AND json_valid(metadata)").run(j, j, marketId);
+  return r.changes === 1;
 }
