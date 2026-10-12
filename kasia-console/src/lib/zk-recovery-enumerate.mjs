@@ -55,6 +55,22 @@ async function resolveSelfCovId({ meta, marketId, rc, p2sh, covIdOverrides }) {
   return null;
 }
 
+/**
+ * 账本1894 ①: --cov-id 的键可以是【完整盘 id】或【盘 id 末段】; 解析成完整盘 id。匹配不上 / 匹配多个 ⇒ 显式抛错(不再静默不生效)。
+ * 末段 = 盘 id 以它结尾(整段相等或前面是 '-')。
+ */
+export function resolveCovIdOverrides(overrides, marketIds) {
+  const out = {};
+  for (const [k, v] of Object.entries(overrides || {})) {
+    const hits = marketIds.filter((id) => id === k || id.endsWith('-' + k));
+    if (hits.length === 0) throw new Error(`--cov-id 键 "${k}" 匹配不上任何 ZK 原生盘(用完整盘 id, 或盘 id 末段, 如 2xm7t)`);
+    if (hits.length > 1) throw new Error(`--cov-id 键 "${k}" 匹配了 ${hits.length} 个盘(${hits.slice(0, 3).join(', ')}…) — 请用完整盘 id`);
+    if (out[hits[0]] && out[hits[0]] !== v) throw new Error(`--cov-id 对盘 ${hits[0]} 给了两个不同的值`);
+    out[hits[0]] = v;
+  }
+  return out;
+}
+
 /** 已被领走的叶子(= 存在 claim/token UTXO 的候选): exhausted ⇒ 全部; 否则 nullifier 位已置位者。 */
 function claimedLeaves(marketId, meta, db) {
   const zc = meta.zk_continuation;
@@ -90,6 +106,7 @@ export async function enumerateRecovery(o) {
   try { res.liveSlotHolders = listUnfinishedZkNativeMarkets(db).map((m) => ({ id: m.id, protocol_status: m.protocol_status })); } catch (e) { res.liveSlotError = e.message; }
 
   const rows = db.prepare(`SELECT id, protocol_status, metadata, created_at FROM pool_markets WHERE json_valid(resolution_rule_spec) AND json_extract(resolution_rule_spec, '$.zk_native') = 1 AND protocol_status != 'shard_internal'`).all();
+  const covOverrides = resolveCovIdOverrides(covIdOverrides, rows.map((r) => r.id));   // 键写错 ⇒ 在做任何事之前就抛
   const bump = (item, probe) => {
     if (probe) { item.age = { ageDaa: probe.ageDaa, requiredDaa: probe.requiredDaa }; item.eligible = probe.eligible && probe.ageDaa >= probe.requiredDaa + marginDaa; }
     return item;
@@ -112,7 +129,7 @@ export async function enumerateRecovery(o) {
           if (cl.error) skip(row.id, 'claim', cl.error);
           else if (!cl.leaves.length) { /* 还没人领: 无 claim UTXO */ }
           else {
-            const sc = await resolveSelfCovId({ meta, marketId: row.id, rc, p2sh, covIdOverrides });
+            const sc = await resolveSelfCovId({ meta, marketId: row.id, rc, p2sh, covIdOverrides: covOverrides });
             if (!sc) skip(row.id, 'claim', `need_cov_id(${cl.leaves.length} 个已领叶, 盘上无 zk_self_cov_id 且续约已耗尽; 用 --cov-id ${row.id.slice(-8)}=<64hex> 手填)`);
             else {
               for (const leaf of cl.leaves) {

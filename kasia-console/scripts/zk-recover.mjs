@@ -8,7 +8,7 @@
 // 用法:
 //   DB_PATH=<console 库绝对路径> KASPA_RPC_URL=ws://... KASPA_NETWORK=<simnet|mainnet> \
 //   ZK_TOKEN_TMPL_HASH=... ZK_CLAIM_TMPL_HASH=... (同 console env) \
-//     node scripts/zk-recover.mjs [--max N] [--kind claim|ticket|all] [--market <id 或末段>] [--cov-id <末8位>=<64hex>] [--margin <DAA, 默认 1000>] [--json] [--mainnet-ok]
+//     node scripts/zk-recover.mjs [--max N] [--kind claim|ticket|all] [--market <id 或末段>] [--cov-id <完整盘id 或 盘id末段>=<64hex>] [--margin <DAA, 默认 1000>] [--json] [--mainnet-ok]
 //   主网: 必须带 --mainnet-ok(防误跑); 强烈建议 DB_PATH 指向库的拷贝做 dry-run。
 // 只读栏「live 名额占用者」= listUnfinishedZkNativeMarkets(与 create-v07 的 ZK_MAX_LIVE_MARKETS 闸同源): 卡死的盘会一直占名额。
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -31,11 +31,12 @@ if (!process.env.DB_PATH) { console.error('[zk-recover] 需要 DB_PATH(显式指
 if (!process.env.KASPA_RPC_URL) { console.error('[zk-recover] 需要 KASPA_RPC_URL'); process.exit(2); }
 
 const covIdOverrides = {};
-for (const kv of optAll('--cov-id')) { const m = /^([^=]+)=([0-9a-f]{64})$/.exec(kv); if (!m) { console.error(`[zk-recover] --cov-id 格式: <盘id末段>=<64hex>, got ${kv}`); process.exit(2); } covIdOverrides[m[1]] = m[2]; }
+for (const kv of optAll('--cov-id')) { const m = /^([^=]+)=([0-9a-f]{64})$/.exec(kv); if (!m) { console.error(`[zk-recover] --cov-id 格式: <完整盘id 或 盘id末段>=<64hex>, got ${kv}`); process.exit(2); } covIdOverrides[m[1]] = m[2]; }
 
 const relay = await import(pathToFileURL(resolve(HERE, '../../kasia-relay/src/lib/p2sh.mjs')).href);
 const { sqlite } = await import('../src/db/client.js');
 const { readZkTemplateHashes } = await import('../src/lib/pool-shard-register.mjs');
+const { appendRecoveryAudit } = await import('../src/lib/zk-recovery-params.mjs');
 const { enumerateRecovery, buildRetireCommand, buildSweepCommand } = await import('../src/lib/zk-recovery-enumerate.mjs');
 
 const tmpl = readZkTemplateHashes();
@@ -52,7 +53,7 @@ const rc = async (cmd) => {
 };
 const p2sh = (redeemHex) => relay._addressFromRedeem(redeemHex, network);
 
-const res = await enumerateRecovery({ db: sqlite, rc, p2sh, tmpl, env: process.env, covIdOverrides, onlyMarkets: opt('--market') ? [opt('--market')] : null, ...(opt('--margin') !== null ? { marginDaa: Number(opt('--margin')) } : {}) });
+let res; try { res = await enumerateRecovery({ db: sqlite, rc, p2sh, tmpl, env: process.env, covIdOverrides, onlyMarkets: opt('--market') ? [opt('--market')] : null, ...(opt('--margin') !== null ? { marginDaa: Number(opt('--margin')) } : {}) }); } catch (e) { console.error(`[zk-recover] ${e.message}`); process.exit(2); }
 const wantClaim = kind !== 'ticket', wantTicket = kind !== 'claim';
 const retirable = wantClaim ? res.retirable : [], sweepable = wantTicket ? res.sweepable : [];
 const sompi = (s) => (Number(BigInt(s)) / 1e8).toFixed(8);
@@ -85,11 +86,9 @@ for (const { it, cmd } of queue) {
   let landed = false;
   for (let i = 0; i < 20 && !landed; i++) { try { landed = (await relay.checkUtxoLanded(sinkAddr, r.txId, network, 3))?.landed === true; } catch { /* 重试 */ } if (!landed) await new Promise((res2) => setTimeout(res2, 1500)); }
   if (!landed) { failed++; console.error(`  ⚠️ ${it.kind} txid=${r.txId} 广播 OK 但落链确认超时 — 零记账, 请人工核链`); continue; }
-  const row = sqlite.prepare('SELECT metadata FROM pool_markets WHERE id = ?').get(it.market_id);
-  let meta; try { meta = JSON.parse(row.metadata || '{}'); } catch { meta = {}; }
-  if (!Array.isArray(meta.zk_recovery_audit)) meta.zk_recovery_audit = [];
-  meta.zk_recovery_audit.push({ kind: it.kind, txid: r.txId, at: new Date().toISOString(), sink_pk: it.sink_pk_hex, sum_in_sompi: it.sum_in_sompi, sink_value_sompi: r.sinkValueSompi, fee_sompi: r.feeSompi, ...(it.kind === 'claim' ? { leaf_index: it.leaf_index, bettor_pk: it.bettor_pk } : { shard_index: it.shard_index, bettor_pk: it.bettor_pk }) });
-  sqlite.prepare('UPDATE pool_markets SET metadata = ? WHERE id = ?').run(JSON.stringify(meta), it.market_id);
+  // 账本1894 ②(SHOULD): 追加审计记录用【单条 SQL】(json_insert/json_set), 不再读-改-写整串 metadata(运行中的 console 同时改 metadata 不会被覆盖)。
+  const auditEntry = ({ kind: it.kind, txid: r.txId, at: new Date().toISOString(), sink_pk: it.sink_pk_hex, sum_in_sompi: it.sum_in_sompi, sink_value_sompi: r.sinkValueSompi, fee_sompi: r.feeSompi, ...(it.kind === 'claim' ? { leaf_index: it.leaf_index, bettor_pk: it.bettor_pk } : { shard_index: it.shard_index, bettor_pk: it.bettor_pk }) });
+  appendRecoveryAudit(sqlite, it.market_id, auditEntry);
   done++;
   console.log(`  ✅ ${it.kind} market=…${String(it.market_id).slice(-8)} txid=${r.txId} sink +${sompi(r.sinkValueSompi)} KAS(费 ${sompi(r.feeSompi)})`);
 }
