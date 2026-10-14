@@ -14775,3 +14775,9 @@ Bettor 补写 2xm7t：先在线上库 dry-run，结果 would_write；再 --apply
 另记两点：
 - zk-recover 不读 ZK_MAX_LIVE_MARKETS，显示"3/1"，只影响显示。
 - 退出时有 libuv 断言 async.c:76，发生在 dry-run 完成之后，不影响结果，记 SHOULD。
+
+### (1898) 🟢 **Owner 10-14「批 README 那两段文字」→ 结账页+取货页 v0.2.5-test 已发布到 Pages（KANet-UI 报告 0c005cf2）**：批准的是第 3 点「只连公共服务」与隐私段两段原文，Bettor 转达 KANet-UI 执行。kanet-checkout 叠两个新提交，未改历史：05e70f7 追加取货页 6 个文件（原样来自已核的包），fa2f757 只换 README。主仓 tag checkout-static-v0.2.5-test → d758bdb1，zip 用存档那份（6ad92207…），未重打包。
+
+KANet-UI 线上核对：41 个路径逐个 GET，40/40 sha256 与字节数对 manifest；README 用 gh api contents 核，sha256 e4591a5b…。真 Chrome 只读检查：取货页无凭据提示正常，带订单可渲染，#n= 加载后抹掉，外连只有 api.kaspa.org，恶意参数无效；结账页 ?rpcUrl= 仍被忽略；cookie 和 localStorage 都为空。本机 NordVPN Threat Protection 会注入请求，只影响本机读数，与页面无关。
+
+Bettor 独立抽查：Pages 上 checkout-static/delivery.html、delivery-page.js、delivery-copy.js、checkout.html 的 sha256 与本地源一致，标题为「数字商品取货」；README sha256 e4591a5b… 一致。未做：没有建 Release；真实取货、到期退款、清扫三条会广播的路径还没在浏览器里点过。
